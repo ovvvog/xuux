@@ -1,1 +1,8 @@
-{"name":"digital-state-root-of-trust","private":true,"type":"module","scripts":{"test":"node --test tests/root-of-trust/*.test.mjs"}}
+{
+  "name": "digital-state-root-of-trust",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*/*.test.mjs"
+  }
+}
