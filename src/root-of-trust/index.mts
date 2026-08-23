@@ -11,4 +11,5 @@ export * from './key-store.mjs';
 export * from './key-provider.mjs';
 export * from './key-provider-local.mjs';
 export * from './key-provider-remote.mjs';
+export * from './king-key.mjs';
 export * from './command-ledger.mjs';

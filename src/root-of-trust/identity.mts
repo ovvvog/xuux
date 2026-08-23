@@ -44,13 +44,26 @@ export function fingerprint(publicKey: KeyObject): string {
     .digest('hex');
 }
 
+/** زوج مفاتيح جاهز يُمرَّر إلى هوية الملك بدل التوليد. */
+export interface KingKeyPair {
+  privateKey: KeyObject;
+  publicKey: KeyObject;
+}
+
 export class KingIdentity {
   id: string;
   privateKey: KeyObject;
   publicKey: KeyObject;
 
-  constructor() {
-    const keys = generateKeyPairSync('ed25519');
+  /**
+   * أُضيف المعامل الاختياري في M2.03 ليصير مفتاح الملك قابلاً للإحضار من مخزن
+   * خارجي بدل التوليد في كل إقلاع (الفجوة G1). وهو **اختياري** قصداً: حذفه
+   * يُبقي السلوك القديم حرفياً — توليد زوج جديد — فلم يتغير مستدعٍ واحد.
+   * والاشتقاق نفسه لم يُمسّ: المعرّف يبقى بصمة المفتاح العام، فنفس المادة
+   * تُنتج نفس المعرّف، وهذا عين ما يُثبت أن الربط ربطٌ لا إعادة توليد.
+   * @param keys - زوج مفاتيح محضَر؛ إن غاب وُلّد زوج جديد في الذاكرة
+   */
+  constructor(keys: KingKeyPair = generateKeyPairSync('ed25519')) {
     this.id = 'king:' + fingerprint(keys.publicKey).slice(0, 24);
     this.privateKey = keys.privateKey;
     this.publicKey = keys.publicKey;
