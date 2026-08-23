@@ -1,0 +1,84 @@
+# التكامل المستمر — المسار M0.05
+#
+# القاعدة: لا يُدمج شيء في main إلا وهذا المسار أخضر.
+# المرجع: docs/roadmap/03-roadmap-to-100.md — البوابة G0
+# المادة 2 من القاعدة الحاكمة: لا إنجاز بلا دليل قابل للتشغيل؛ وهذا هو الدليل الآلي.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: فحص الجودة الكامل
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: جلب المستودع
+        uses: actions/checkout@v4
+
+      - name: تهيئة Node.js من .nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: تثبيت التبعيات من القفل
+        run: npm ci
+
+      - name: التحقق من مطابقة الإصدار بين package.json و version.json
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          VER=$(node -p "require('./version.json').version")
+          echo "package.json=$PKG  version.json=$VER"
+          if [ "$PKG" != "$VER" ]; then
+            echo "::error::تعارض إصدار: package.json=$PKG لكن version.json=$VER"
+            exit 1
+          fi
+
+      - name: فحص الأسلوب (ESLint)
+        run: npm run lint
+
+      - name: فحص التنسيق (Prettier)
+        run: npm run format:check
+
+      - name: فحص الأنواع (TypeScript)
+        run: npm run typecheck
+
+      - name: فحص الأسرار
+        run: npm run scan:secrets
+
+      - name: الاختبارات
+        run: npm test
+
+      - name: التحقق من اكتمال شجرة المجالات
+        run: python3 scripts/validate-tree.py
+
+  gate-report:
+    name: تقرير البوابة G0
+    runs-on: ubuntu-latest
+    needs: validate
+    if: always()
+    steps:
+      - name: خلاصة النتيجة
+        run: |
+          if [ "${{ needs.validate.result }}" = "success" ]; then
+            echo "### ✅ البوابة G0 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ⛔ البوابة G0 — فشل الفحص: ${{ needs.validate.result }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "لا يجوز الدمج. راجع docs/roadmap/04-execution-playbook.md §4.5" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
