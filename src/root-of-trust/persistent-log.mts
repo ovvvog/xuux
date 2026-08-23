@@ -128,6 +128,12 @@ export interface EventLogInspection {
   reason?: ChainBreakReason;
   head: LogHead | null;
   headAgrees: boolean;
+  /**
+   * الأحداث المقروءة كما هي على القرص. أُضيفت في M2.06 كي تُطابَق بالتثبيتات
+   * الموقَّعة **بلا قفل وبلا كتابة**؛ ولولاها لكان التدقيق يحتاج فتح السجل
+   * للكتابة، فيصير الفحصُ نفسه تغييراً للمفحوص.
+   */
+  events: readonly EventRecord[];
   problem?: PersistentLogErrorCode;
 }
 
@@ -214,6 +220,7 @@ export function inspectEventLog(file: string): EventLogInspection {
       chainOk: true,
       head,
       headAgrees: head === null,
+      events: [],
     };
     return problem === undefined ? base : { ...base, problem };
   }
@@ -256,6 +263,7 @@ export function inspectEventLog(file: string): EventLogInspection {
     chainOk: chain.ok,
     head,
     headAgrees,
+    events,
   };
   if (chain.brokenAt !== undefined) inspection.brokenAt = chain.brokenAt;
   else if (badAt !== null) inspection.brokenAt = badAt;

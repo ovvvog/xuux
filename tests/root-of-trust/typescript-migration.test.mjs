@@ -33,6 +33,7 @@ const REQUIRED_MODULES = [
   'crown',
   'policy',
   'persistent-log',
+  'anchor',
   'key-store',
   'key-provider',
   'king-key',
@@ -150,6 +151,15 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
     'hashEventBody',
     'inspectEventLog',
     'PersistentLogError',
+    'createAnchor',
+    'hashAnchorBody',
+    'verifyAnchorChain',
+    'verifyAnchoredLog',
+    'nearestAnchorFor',
+    'signingKeyVersion',
+    'FileAnchorStore',
+    'LogAnchorer',
+    'AnchorError',
   ]) {
     assert.equal(typeof exported[symbol], 'function', `الرمز ${symbol} مفقود من الوحدة المصرَّفة`);
   }
