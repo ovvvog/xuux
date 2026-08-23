@@ -15,17 +15,36 @@ import { dirname, join } from 'node:path';
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const trustDir = join(repoRoot, 'src', 'root-of-trust');
 
-/** وحدات جذر الثقة كلها؛ لا تُستثنى وحدة من النقل. */
-const MODULES = [
+// الوحدات تُشتق من ملفات .mts على القرص لا من قائمة مكتوبة بيد. السبب: القائمة
+// اليدوية تُنسى عند إضافة وحدة — وقد حدث ذلك فعلاً في M2.02 حين أُضيفت ثلاث
+// وحدات — فتمرّ وحدة جديدة بلا حراسة. والاشتقاق من القرص لا من Git بقصد: قياس
+// حالة Git هنا كان يُفشل الاختبار على وحدة كُتبت ولم تُدرَج بعد، وهو إزعاج بلا
+// فائدة. وحراسة Git تبقى في موضعها الصحيح: منع التزام أي .mjs في هذا المجلد.
+// والاشتقاق ليس دورانياً، لأن قائمة النواة الإلزامية أدناه تحرس الاشتقاق نفسه.
+const MODULES = readdirSync(trustDir)
+  .filter((f) => f.endsWith('.mts') && !f.endsWith('.d.mts'))
+  .map((f) => f.replace(/\.mts$/, ''))
+  .sort();
+
+/** نواة لا يجوز أن تغيب بحال؛ حراسة على الاشتقاق نفسه. */
+const REQUIRED_MODULES = [
   'identity',
   'event-log',
   'crown',
   'policy',
   'persistent-log',
   'key-store',
+  'key-provider',
   'command-ledger',
   'index',
 ];
+
+test('اشتقاق وحدات الجذر سليم: النواة الإلزامية كلها حاضرة', () => {
+  assert.ok(MODULES.length >= REQUIRED_MODULES.length, 'اشتقاق الوحدات أرجع قائمة ناقصة');
+  for (const name of REQUIRED_MODULES) {
+    assert.ok(MODULES.includes(name), `الوحدة الإلزامية ${name} غائبة عن جذر الثقة`);
+  }
+});
 
 test('كل وحدة في جذر الثقة مصدرها TypeScript', () => {
   for (const name of MODULES) {
@@ -116,6 +135,8 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
     'PolicyEngine',
     'EncryptedKeyStore',
     'CommandLedger',
+    'LocalEncryptedKeyProvider',
+    'RemoteSecretStoreKeyProvider',
   ]) {
     assert.equal(typeof exported[symbol], 'function', `الرمز ${symbol} مفقود من الوحدة المصرَّفة`);
   }
