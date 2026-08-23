@@ -1,3 +1,124 @@
 # قائمة استثناءات حاجز القوالب — M1.08
 # كل سطر مسار نسبي مسموح له أن يُصنّف template مع سبب معلن.
 # الأصل: لا استثناءات. أي إضافة هنا قرار موثّق لا خيار افتراضي.
+#
+# ── الاستثناء الوحيد المُقرّ: العينة المرجعية (M1.05–M1.07) ──
+# قرار المالك بتاريخ 2026-08-23: يُحذف 33,271 ملفاً قالبياً وتُبقى عينة
+# واحدة من كل مستوى بنيوي، لتبقى صورة الهيكل الأصلي مرئية للمراجع البشري:
+#   • مجال واحد كامل بطبقاته الست  → civilization/001-domain/            (68 ملفاً)
+#   • عقدة إقليم واحد               → federation/.../الإقليم-الفدرالي-001/ (11)
+#   • عقدة ولاية واحدة              → federation/.../ولاية-001-01/          (8)
+#   • عقدة بلدية واحدة              → federation/.../municipalities/001/   (11)
+#   • مؤسسة واحدة                   → institutions/001-الديوان-الملكي/     (11)
+# المجموع: 109 ملفات. هذه العينة ليست مصدر حقيقة — مصدر الحقيقة seed/.
+# متى تُحذف: عند M3 حين يُبنى المولّد الذي ينشئ العُقد من البذرة، فتصبح
+# العينة زائدة عن الحاجة. يُحدَّث هذا الملف مع سجل WL في حينه.
+civilization/001-domain/README.md
+civilization/001-domain/domain-name-ar.txt
+civilization/001-domain/education/README.md
+civilization/001-domain/education/charter.md
+civilization/001-domain/education/curriculum.md
+civilization/001-domain/education/events.ts
+civilization/001-domain/education/metrics.ts
+civilization/001-domain/education/policy.yaml
+civilization/001-domain/education/registry.ts
+civilization/001-domain/education/research-agenda.md
+civilization/001-domain/education/safety.md
+civilization/001-domain/education/service.ts
+civilization/001-domain/education/test.spec.ts
+civilization/001-domain/governance/README.md
+civilization/001-domain/governance/charter.md
+civilization/001-domain/governance/curriculum.md
+civilization/001-domain/governance/events.ts
+civilization/001-domain/governance/metrics.ts
+civilization/001-domain/governance/policy.yaml
+civilization/001-domain/governance/registry.ts
+civilization/001-domain/governance/research-agenda.md
+civilization/001-domain/governance/safety.md
+civilization/001-domain/governance/service.ts
+civilization/001-domain/governance/test.spec.ts
+civilization/001-domain/operations/README.md
+civilization/001-domain/operations/charter.md
+civilization/001-domain/operations/curriculum.md
+civilization/001-domain/operations/events.ts
+civilization/001-domain/operations/metrics.ts
+civilization/001-domain/operations/policy.yaml
+civilization/001-domain/operations/registry.ts
+civilization/001-domain/operations/research-agenda.md
+civilization/001-domain/operations/safety.md
+civilization/001-domain/operations/service.ts
+civilization/001-domain/operations/test.spec.ts
+civilization/001-domain/registry/README.md
+civilization/001-domain/registry/charter.md
+civilization/001-domain/registry/curriculum.md
+civilization/001-domain/registry/events.ts
+civilization/001-domain/registry/metrics.ts
+civilization/001-domain/registry/policy.yaml
+civilization/001-domain/registry/registry.ts
+civilization/001-domain/registry/research-agenda.md
+civilization/001-domain/registry/safety.md
+civilization/001-domain/registry/service.ts
+civilization/001-domain/registry/test.spec.ts
+civilization/001-domain/research/README.md
+civilization/001-domain/research/charter.md
+civilization/001-domain/research/curriculum.md
+civilization/001-domain/research/events.ts
+civilization/001-domain/research/metrics.ts
+civilization/001-domain/research/policy.yaml
+civilization/001-domain/research/registry.ts
+civilization/001-domain/research/research-agenda.md
+civilization/001-domain/research/safety.md
+civilization/001-domain/research/service.ts
+civilization/001-domain/research/test.spec.ts
+civilization/001-domain/safety/README.md
+civilization/001-domain/safety/charter.md
+civilization/001-domain/safety/curriculum.md
+civilization/001-domain/safety/events.ts
+civilization/001-domain/safety/metrics.ts
+civilization/001-domain/safety/policy.yaml
+civilization/001-domain/safety/registry.ts
+civilization/001-domain/safety/research-agenda.md
+civilization/001-domain/safety/safety.md
+civilization/001-domain/safety/service.ts
+civilization/001-domain/safety/test.spec.ts
+federation/regions/001/provinces/001-01/municipalities/001/README.md
+federation/regions/001/provinces/001-01/municipalities/001/audit.md
+federation/regions/001/provinces/001-01/municipalities/001/budget.yaml
+federation/regions/001/provinces/001-01/municipalities/001/charter.md
+federation/regions/001/provinces/001-01/municipalities/001/communications.yaml
+federation/regions/001/provinces/001-01/municipalities/001/council.yaml
+federation/regions/001/provinces/001-01/municipalities/001/facilities.yaml
+federation/regions/001/provinces/001-01/municipalities/001/population.yaml
+federation/regions/001/provinces/001-01/municipalities/001/security.md
+federation/regions/001/provinces/001-01/municipalities/001/services.yaml
+federation/regions/001/provinces/001-01/municipalities/001/test.spec.ts
+federation/regions/001/provinces/ولاية-001-01/README.md
+federation/regions/001/provinces/ولاية-001-01/audit.md
+federation/regions/001/provinces/ولاية-001-01/budget.yaml
+federation/regions/001/provinces/ولاية-001-01/charter.md
+federation/regions/001/provinces/ولاية-001-01/governor.md
+federation/regions/001/provinces/ولاية-001-01/municipalities.yaml
+federation/regions/001/provinces/ولاية-001-01/services.yaml
+federation/regions/001/provinces/ولاية-001-01/test.spec.ts
+federation/regions/001/الإقليم-الفدرالي-001/README.md
+federation/regions/001/الإقليم-الفدرالي-001/audit.md
+federation/regions/001/الإقليم-الفدرالي-001/budget.yaml
+federation/regions/001/الإقليم-الفدرالي-001/charter.md
+federation/regions/001/الإقليم-الفدرالي-001/council.md
+federation/regions/001/الإقليم-الفدرالي-001/governor.md
+federation/regions/001/الإقليم-الفدرالي-001/ministries.yaml
+federation/regions/001/الإقليم-الفدرالي-001/population.yaml
+federation/regions/001/الإقليم-الفدرالي-001/resources.yaml
+federation/regions/001/الإقليم-الفدرالي-001/security.md
+federation/regions/001/الإقليم-الفدرالي-001/test.spec.ts
+institutions/001-الديوان-الملكي/README.md
+institutions/001-الديوان-الملكي/audit.md
+institutions/001-الديوان-الملكي/charter.md
+institutions/001-الديوان-الملكي/facilities.yaml
+institutions/001-الديوان-الملكي/metrics.yaml
+institutions/001-الديوان-الملكي/organization.md
+institutions/001-الديوان-الملكي/resource-registry.yaml
+institutions/001-الديوان-الملكي/safety.md
+institutions/001-الديوان-الملكي/staffing.yaml
+institutions/001-الديوان-الملكي/test.spec.ts
+institutions/001-الديوان-الملكي/workflows.md
