@@ -36,6 +36,7 @@ const REQUIRED_MODULES = [
   'key-store',
   'key-provider',
   'king-key',
+  'king-key-rotation',
   'command-ledger',
   'index',
 ];
@@ -144,6 +145,7 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
     'kingIdentityFromMaterial',
     'describeKingKeyBinding',
     'kingKeyProviderFromEnv',
+    'assertKingKeyProviderFit',
   ]) {
     assert.equal(typeof exported[symbol], 'function', `الرمز ${symbol} مفقود من الوحدة المصرَّفة`);
   }

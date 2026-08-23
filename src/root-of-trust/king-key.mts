@@ -82,10 +82,15 @@ export interface KingKeyBinding {
 
 /**
  * يتحقق من صلاحية المخزن لحمل مفتاح الملك قبل أي عملية عليه.
+ * صُدِّر في M2.04 ليستعمله التدوير بلا نسخ منطق القيد؛ ونسخُه كان سيسمح
+ * بتفارق القيدين فيصير مخزنٌ مرفوضاً للتزويد مقبولاً للتدوير.
  * @param provider - المخزن المرشَّح
  * @param options - قيود الربط
  */
-function assertProviderFit(provider: KeyProvider, options: KingKeyOptions = {}): void {
+export function assertKingKeyProviderFit(
+  provider: KeyProvider,
+  options: KingKeyOptions = {},
+): void {
   const description = provider.describe();
   const requireProduction = options.requireProductionReady ?? process.env.NODE_ENV === 'production';
   if (requireProduction && !description.productionReady) {
@@ -129,7 +134,7 @@ export async function provisionKingKey(
   provider: KeyProvider,
   options: KingKeyOptions = {},
 ): Promise<KingKeyProvisionResult> {
-  assertProviderFit(provider, options);
+  assertKingKeyProviderFit(provider, options);
   if (await provider.has(KING_KEY_NAME)) {
     throw new KingKeyError('KING_KEY_ALREADY_PROVISIONED');
   }
@@ -156,7 +161,7 @@ export async function loadKingIdentity(
   provider: KeyProvider,
   options: KingKeyOptions = {},
 ): Promise<KingIdentity> {
-  assertProviderFit(provider, options);
+  assertKingKeyProviderFit(provider, options);
   if (!(await provider.has(KING_KEY_NAME))) {
     throw new KingKeyError('KING_KEY_NOT_PROVISIONED');
   }
