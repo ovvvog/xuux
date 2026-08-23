@@ -1,8 +1,31 @@
 {
   "name": "digital-state-root-of-trust",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "الدولة الملكية الفدرالية الرقمية — جذر الثقة والنواة السيادية",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20 <21",
+    "npm": ">=10"
+  },
   "scripts": {
-    "test": "node --test tests/*/*.test.mjs"
+    "test": "node --test tests/*/*.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "scan:secrets": "node scripts/scan-secrets.mjs --path .",
+    "validate:tree": "python3 scripts/validate-tree.py",
+    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run scan:secrets && npm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "20.19.43",
+    "eslint": "10.9.0",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.67.0"
   }
 }
