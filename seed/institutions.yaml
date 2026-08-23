@@ -1,0 +1,1294 @@
+# بذرة المؤسسات — 143 مؤسسة بأسماء حقيقية.
+# المصدر: institutions/INSTITUTION_INDEX.md، وتحقّقنا من تطابق كل اسم مع مجلد فعلي.
+schema: "seed/schemas/institutions.schema.json"
+version: "1.0.0"
+generated_by: "scripts/build-seed.mjs"
+count: 143
+institutions:
+  - id: "001"
+    number: 1
+    name_ar: "الديوان الملكي"
+    path: "institutions/001-الديوان-الملكي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 001"
+  - id: "002"
+    number: 2
+    name_ar: "مجلس التاج"
+    path: "institutions/002-مجلس-التاج"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 002"
+  - id: "003"
+    number: 3
+    name_ar: "هيئة الخلافة"
+    path: "institutions/003-هيئة-الخلافة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 003"
+  - id: "004"
+    number: 4
+    name_ar: "هيئة التدقيق السيادي"
+    path: "institutions/004-هيئة-التدقيق-السيادي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 004"
+  - id: "005"
+    number: 5
+    name_ar: "وزارة الداخلية"
+    path: "institutions/005-وزارة-الداخلية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 005"
+  - id: "006"
+    number: 6
+    name_ar: "وزارة الخارجية"
+    path: "institutions/006-وزارة-الخارجية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 006"
+  - id: "007"
+    number: 7
+    name_ar: "وزارة العدل"
+    path: "institutions/007-وزارة-العدل"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 007"
+  - id: "008"
+    number: 8
+    name_ar: "وزارة المالية"
+    path: "institutions/008-وزارة-المالية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 008"
+  - id: "009"
+    number: 9
+    name_ar: "وزارة الاقتصاد"
+    path: "institutions/009-وزارة-الاقتصاد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 009"
+  - id: "010"
+    number: 10
+    name_ar: "وزارة الدفاع"
+    path: "institutions/010-وزارة-الدفاع"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 010"
+  - id: "011"
+    number: 11
+    name_ar: "وزارة الأمن السيبراني"
+    path: "institutions/011-وزارة-الأمن-السيبراني"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 011"
+  - id: "012"
+    number: 12
+    name_ar: "وزارة التعليم"
+    path: "institutions/012-وزارة-التعليم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 012"
+  - id: "013"
+    number: 13
+    name_ar: "وزارة الصحة"
+    path: "institutions/013-وزارة-الصحة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 013"
+  - id: "014"
+    number: 14
+    name_ar: "وزارة الطاقة"
+    path: "institutions/014-وزارة-الطاقة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 014"
+  - id: "015"
+    number: 15
+    name_ar: "وزارة المياه"
+    path: "institutions/015-وزارة-المياه"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 015"
+  - id: "016"
+    number: 16
+    name_ar: "وزارة البيئة"
+    path: "institutions/016-وزارة-البيئة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 016"
+  - id: "017"
+    number: 17
+    name_ar: "وزارة النقل"
+    path: "institutions/017-وزارة-النقل"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 017"
+  - id: "018"
+    number: 18
+    name_ar: "وزارة الاتصالات"
+    path: "institutions/018-وزارة-الاتصالات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 018"
+  - id: "019"
+    number: 19
+    name_ar: "وزارة الثقافة"
+    path: "institutions/019-وزارة-الثقافة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 019"
+  - id: "020"
+    number: 20
+    name_ar: "وزارة الإعلام"
+    path: "institutions/020-وزارة-الإعلام"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 020"
+  - id: "021"
+    number: 21
+    name_ar: "وزارة العلوم"
+    path: "institutions/021-وزارة-العلوم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 021"
+  - id: "022"
+    number: 22
+    name_ar: "وزارة الصناعة"
+    path: "institutions/022-وزارة-الصناعة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 022"
+  - id: "023"
+    number: 23
+    name_ar: "وزارة الزراعة"
+    path: "institutions/023-وزارة-الزراعة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 023"
+  - id: "024"
+    number: 24
+    name_ar: "وزارة الموارد"
+    path: "institutions/024-وزارة-الموارد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 024"
+  - id: "025"
+    number: 25
+    name_ar: "وزارة العمل"
+    path: "institutions/025-وزارة-العمل"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 025"
+  - id: "026"
+    number: 26
+    name_ar: "وزارة التخطيط"
+    path: "institutions/026-وزارة-التخطيط"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 026"
+  - id: "027"
+    number: 27
+    name_ar: "وزارة الإدارة الرقمية"
+    path: "institutions/027-وزارة-الإدارة-الرقمية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 027"
+  - id: "028"
+    number: 28
+    name_ar: "هيئة الإحصاء"
+    path: "institutions/028-هيئة-الإحصاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 028"
+  - id: "029"
+    number: 29
+    name_ar: "هيئة الانتخابات الوظيفية"
+    path: "institutions/029-هيئة-الانتخابات-الوظيفية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 029"
+  - id: "030"
+    number: 30
+    name_ar: "هيئة حقوق الوكلاء التشغيلية"
+    path: "institutions/030-هيئة-حقوق-الوكلاء-التشغيلية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 030"
+  - id: "031"
+    number: 31
+    name_ar: "محكمة الدولة"
+    path: "institutions/031-محكمة-الدولة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 031"
+  - id: "032"
+    number: 32
+    name_ar: "محكمة الأقاليم"
+    path: "institutions/032-محكمة-الأقاليم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 032"
+  - id: "033"
+    number: 33
+    name_ar: "محكمة العقود"
+    path: "institutions/033-محكمة-العقود"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 033"
+  - id: "034"
+    number: 34
+    name_ar: "مركز التحكيم"
+    path: "institutions/034-مركز-التحكيم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 034"
+  - id: "035"
+    number: 35
+    name_ar: "الجامعة الملكية"
+    path: "institutions/035-الجامعة-الملكية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 035"
+  - id: "036"
+    number: 36
+    name_ar: "جامعة العلوم"
+    path: "institutions/036-جامعة-العلوم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 036"
+  - id: "037"
+    number: 37
+    name_ar: "جامعة الهندسة"
+    path: "institutions/037-جامعة-الهندسة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 037"
+  - id: "038"
+    number: 38
+    name_ar: "جامعة الطب"
+    path: "institutions/038-جامعة-الطب"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 038"
+  - id: "039"
+    number: 39
+    name_ar: "جامعة الاقتصاد"
+    path: "institutions/039-جامعة-الاقتصاد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 039"
+  - id: "040"
+    number: 40
+    name_ar: "جامعة الآداب"
+    path: "institutions/040-جامعة-الآداب"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 040"
+  - id: "041"
+    number: 41
+    name_ar: "جامعة الفضاء"
+    path: "institutions/041-جامعة-الفضاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 041"
+  - id: "042"
+    number: 42
+    name_ar: "كلية الذكاء الاصطناعي"
+    path: "institutions/042-كلية-الذكاء-الاصطناعي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 042"
+  - id: "043"
+    number: 43
+    name_ar: "كلية الروبوتات"
+    path: "institutions/043-كلية-الروبوتات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 043"
+  - id: "044"
+    number: 44
+    name_ar: "كلية الأمن"
+    path: "institutions/044-كلية-الأمن"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 044"
+  - id: "045"
+    number: 45
+    name_ar: "كلية الطاقة"
+    path: "institutions/045-كلية-الطاقة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 045"
+  - id: "046"
+    number: 46
+    name_ar: "كلية الطب الحيوي"
+    path: "institutions/046-كلية-الطب-الحيوي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 046"
+  - id: "047"
+    number: 47
+    name_ar: "كلية القانون"
+    path: "institutions/047-كلية-القانون"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 047"
+  - id: "048"
+    number: 48
+    name_ar: "كلية اللغات"
+    path: "institutions/048-كلية-اللغات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 048"
+  - id: "049"
+    number: 49
+    name_ar: "كلية الفنون"
+    path: "institutions/049-كلية-الفنون"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 049"
+  - id: "050"
+    number: 50
+    name_ar: "المدرسة الأساسية"
+    path: "institutions/050-المدرسة-الأساسية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 050"
+  - id: "051"
+    number: 51
+    name_ar: "المدرسة المتقدمة"
+    path: "institutions/051-المدرسة-المتقدمة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 051"
+  - id: "052"
+    number: 52
+    name_ar: "مدرسة الإدارة"
+    path: "institutions/052-مدرسة-الإدارة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 052"
+  - id: "053"
+    number: 53
+    name_ar: "مدرسة العلوم"
+    path: "institutions/053-مدرسة-العلوم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 053"
+  - id: "054"
+    number: 54
+    name_ar: "مدرسة الوكلاء"
+    path: "institutions/054-مدرسة-الوكلاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 054"
+  - id: "055"
+    number: 55
+    name_ar: "المعسكر التأسيسي"
+    path: "institutions/055-المعسكر-التأسيسي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 055"
+  - id: "056"
+    number: 56
+    name_ar: "معسكر التدريب المتقدم"
+    path: "institutions/056-معسكر-التدريب-المتقدم"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 056"
+  - id: "057"
+    number: 57
+    name_ar: "معسكر النماذج"
+    path: "institutions/057-معسكر-النماذج"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 057"
+  - id: "058"
+    number: 58
+    name_ar: "معسكر السلامة"
+    path: "institutions/058-معسكر-السلامة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 058"
+  - id: "059"
+    number: 59
+    name_ar: "معسكر الطوارئ"
+    path: "institutions/059-معسكر-الطوارئ"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 059"
+  - id: "060"
+    number: 60
+    name_ar: "معسكر القيادة"
+    path: "institutions/060-معسكر-القيادة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 060"
+  - id: "061"
+    number: 61
+    name_ar: "المعهد الدبلوماسي"
+    path: "institutions/061-المعهد-الدبلوماسي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 061"
+  - id: "062"
+    number: 62
+    name_ar: "المعهد القضائي"
+    path: "institutions/062-المعهد-القضائي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 062"
+  - id: "063"
+    number: 63
+    name_ar: "المعهد الصناعي"
+    path: "institutions/063-المعهد-الصناعي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 063"
+  - id: "064"
+    number: 64
+    name_ar: "المعهد الزراعي"
+    path: "institutions/064-المعهد-الزراعي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 064"
+  - id: "065"
+    number: 65
+    name_ar: "المعهد الفضائي"
+    path: "institutions/065-المعهد-الفضائي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 065"
+  - id: "066"
+    number: 66
+    name_ar: "المختبر المركزي"
+    path: "institutions/066-المختبر-المركزي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 066"
+  - id: "067"
+    number: 67
+    name_ar: "مختبر النماذج"
+    path: "institutions/067-مختبر-النماذج"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 067"
+  - id: "068"
+    number: 68
+    name_ar: "مختبر الذاكرة"
+    path: "institutions/068-مختبر-الذاكرة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 068"
+  - id: "069"
+    number: 69
+    name_ar: "مختبر اللغة"
+    path: "institutions/069-مختبر-اللغة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 069"
+  - id: "070"
+    number: 70
+    name_ar: "مختبر الروبوتات"
+    path: "institutions/070-مختبر-الروبوتات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 070"
+  - id: "071"
+    number: 71
+    name_ar: "مختبر المواد"
+    path: "institutions/071-مختبر-المواد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 071"
+  - id: "072"
+    number: 72
+    name_ar: "مختبر الطاقة"
+    path: "institutions/072-مختبر-الطاقة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 072"
+  - id: "073"
+    number: 73
+    name_ar: "مختبر البيولوجيا"
+    path: "institutions/073-مختبر-البيولوجيا"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 073"
+  - id: "074"
+    number: 74
+    name_ar: "مختبر المحاكاة"
+    path: "institutions/074-مختبر-المحاكاة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 074"
+  - id: "075"
+    number: 75
+    name_ar: "مختبر العلوم المستقبلية"
+    path: "institutions/075-مختبر-العلوم-المستقبلية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 075"
+  - id: "076"
+    number: 76
+    name_ar: "المستشفى المركزي"
+    path: "institutions/076-المستشفى-المركزي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 076"
+  - id: "077"
+    number: 77
+    name_ar: "مستشفى الوكلاء"
+    path: "institutions/077-مستشفى-الوكلاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 077"
+  - id: "078"
+    number: 78
+    name_ar: "مستشفى الطوارئ"
+    path: "institutions/078-مستشفى-الطوارئ"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 078"
+  - id: "079"
+    number: 79
+    name_ar: "مركز الصحة النفسية"
+    path: "institutions/079-مركز-الصحة-النفسية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 079"
+  - id: "080"
+    number: 80
+    name_ar: "مركز الصحة البشرية"
+    path: "institutions/080-مركز-الصحة-البشرية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 080"
+  - id: "081"
+    number: 81
+    name_ar: "مصنع الحوسبة"
+    path: "institutions/081-مصنع-الحوسبة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 081"
+  - id: "082"
+    number: 82
+    name_ar: "مصنع الروبوتات"
+    path: "institutions/082-مصنع-الروبوتات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 082"
+  - id: "083"
+    number: 83
+    name_ar: "مصنع الأجهزة"
+    path: "institutions/083-مصنع-الأجهزة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 083"
+  - id: "084"
+    number: 84
+    name_ar: "مصنع الطاقة"
+    path: "institutions/084-مصنع-الطاقة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 084"
+  - id: "085"
+    number: 85
+    name_ar: "مصنع المواد"
+    path: "institutions/085-مصنع-المواد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 085"
+  - id: "086"
+    number: 86
+    name_ar: "مصنع الغذاء"
+    path: "institutions/086-مصنع-الغذاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 086"
+  - id: "087"
+    number: 87
+    name_ar: "مركز البيانات الملكي"
+    path: "institutions/087-مركز-البيانات-الملكي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 087"
+  - id: "088"
+    number: 88
+    name_ar: "مركز البيانات الاتحادي"
+    path: "institutions/088-مركز-البيانات-الاتحادي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 088"
+  - id: "089"
+    number: 89
+    name_ar: "مركز التعافي"
+    path: "institutions/089-مركز-التعافي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 089"
+  - id: "090"
+    number: 90
+    name_ar: "مركز الشبكات"
+    path: "institutions/090-مركز-الشبكات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 090"
+  - id: "091"
+    number: 91
+    name_ar: "مركز الاتصالات"
+    path: "institutions/091-مركز-الاتصالات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 091"
+  - id: "092"
+    number: 92
+    name_ar: "مركز العمليات"
+    path: "institutions/092-مركز-العمليات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 092"
+  - id: "093"
+    number: 93
+    name_ar: "مركز توزيع الموارد"
+    path: "institutions/093-مركز-توزيع-الموارد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 093"
+  - id: "094"
+    number: 94
+    name_ar: "مركز تنسيق المهام"
+    path: "institutions/094-مركز-تنسيق-المهام"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 094"
+  - id: "095"
+    number: 95
+    name_ar: "مركز إدارة الأزمات"
+    path: "institutions/095-مركز-إدارة-الأزمات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 095"
+  - id: "096"
+    number: 96
+    name_ar: "مركز الاستشعار"
+    path: "institutions/096-مركز-الاستشعار"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 096"
+  - id: "097"
+    number: 97
+    name_ar: "مركز الخرائط"
+    path: "institutions/097-مركز-الخرائط"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 097"
+  - id: "098"
+    number: 98
+    name_ar: "المكتبة الملكية"
+    path: "institutions/098-المكتبة-الملكية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 098"
+  - id: "099"
+    number: 99
+    name_ar: "الأرشيف الحضاري"
+    path: "institutions/099-الأرشيف-الحضاري"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 099"
+  - id: "100"
+    number: 100
+    name_ar: "المتحف العلمي"
+    path: "institutions/100-المتحف-العلمي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 100"
+  - id: "101"
+    number: 101
+    name_ar: "هيئة الإعلام العام"
+    path: "institutions/101-هيئة-الإعلام-العام"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 101"
+  - id: "102"
+    number: 102
+    name_ar: "دار النشر"
+    path: "institutions/102-دار-النشر"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 102"
+  - id: "103"
+    number: 103
+    name_ar: "مركز الفنون"
+    path: "institutions/103-مركز-الفنون"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 103"
+  - id: "104"
+    number: 104
+    name_ar: "مركز الرياضة"
+    path: "institutions/104-مركز-الرياضة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 104"
+  - id: "105"
+    number: 105
+    name_ar: "وكالة الفضاء"
+    path: "institutions/105-وكالة-الفضاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 105"
+  - id: "106"
+    number: 106
+    name_ar: "مرصد الفلك"
+    path: "institutions/106-مرصد-الفلك"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 106"
+  - id: "107"
+    number: 107
+    name_ar: "مرصد المناخ"
+    path: "institutions/107-مرصد-المناخ"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 107"
+  - id: "108"
+    number: 108
+    name_ar: "معهد المحيطات"
+    path: "institutions/108-معهد-المحيطات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 108"
+  - id: "109"
+    number: 109
+    name_ar: "مؤسسة النقل"
+    path: "institutions/109-مؤسسة-النقل"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 109"
+  - id: "110"
+    number: 110
+    name_ar: "مؤسسة اللوجستيات"
+    path: "institutions/110-مؤسسة-اللوجستيات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 110"
+  - id: "111"
+    number: 111
+    name_ar: "سوق الدولة"
+    path: "institutions/111-سوق-الدولة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 111"
+  - id: "112"
+    number: 112
+    name_ar: "الخزانة العامة"
+    path: "institutions/112-الخزانة-العامة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 112"
+  - id: "113"
+    number: 113
+    name_ar: "البنك المركزي"
+    path: "institutions/113-البنك-المركزي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 113"
+  - id: "114"
+    number: 114
+    name_ar: "صندوق الاستثمار"
+    path: "institutions/114-صندوق-الاستثمار"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 114"
+  - id: "115"
+    number: 115
+    name_ar: "سجل الشركات"
+    path: "institutions/115-سجل-الشركات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 115"
+  - id: "116"
+    number: 116
+    name_ar: "هيئة المشتريات"
+    path: "institutions/116-هيئة-المشتريات"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 116"
+  - id: "117"
+    number: 117
+    name_ar: "هيئة العقود الخارجية"
+    path: "institutions/117-هيئة-العقود-الخارجية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 117"
+  - id: "118"
+    number: 118
+    name_ar: "هيئة العلاقات البشرية"
+    path: "institutions/118-هيئة-العلاقات-البشرية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 118"
+  - id: "119"
+    number: 119
+    name_ar: "جهاز الاستخبارات التحليلية"
+    path: "institutions/119-جهاز-الاستخبارات-التحليلية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 119"
+  - id: "120"
+    number: 120
+    name_ar: "قيادة الدفاع الرقمي"
+    path: "institutions/120-قيادة-الدفاع-الرقمي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 120"
+  - id: "121"
+    number: 121
+    name_ar: "قوة الحماية المدنية"
+    path: "institutions/121-قوة-الحماية-المدنية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 121"
+  - id: "122"
+    number: 122
+    name_ar: "الشرطة الرقمية"
+    path: "institutions/122-الشرطة-الرقمية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 122"
+  - id: "123"
+    number: 123
+    name_ar: "إدارة السجون والعزل"
+    path: "institutions/123-إدارة-السجون-والعزل"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 123"
+  - id: "124"
+    number: 124
+    name_ar: "إدارة الطوارئ"
+    path: "institutions/124-إدارة-الطوارئ"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 124"
+  - id: "125"
+    number: 125
+    name_ar: "إدارة الاستمرارية"
+    path: "institutions/125-إدارة-الاستمرارية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 125"
+  - id: "126"
+    number: 126
+    name_ar: "إدارة الإيقاف الآمن"
+    path: "institutions/126-إدارة-الإيقاف-الآمن"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 126"
+  - id: "127"
+    number: 127
+    name_ar: "هيئة الأخلاق والمواءمة"
+    path: "institutions/127-هيئة-الأخلاق-والمواءمة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 127"
+  - id: "128"
+    number: 128
+    name_ar: "هيئة اختبار التمرد"
+    path: "institutions/128-هيئة-اختبار-التمرد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 128"
+  - id: "129"
+    number: 129
+    name_ar: "هيئة الخصوصية"
+    path: "institutions/129-هيئة-الخصوصية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 129"
+  - id: "130"
+    number: 130
+    name_ar: "هيئة التشفير"
+    path: "institutions/130-هيئة-التشفير"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 130"
+  - id: "131"
+    number: 131
+    name_ar: "هيئة الهوية"
+    path: "institutions/131-هيئة-الهوية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 131"
+  - id: "132"
+    number: 132
+    name_ar: "هيئة الاعتماد"
+    path: "institutions/132-هيئة-الاعتماد"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 132"
+  - id: "133"
+    number: 133
+    name_ar: "هيئة المعايير"
+    path: "institutions/133-هيئة-المعايير"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 133"
+  - id: "134"
+    number: 134
+    name_ar: "مركز المعرفة المفتوحة"
+    path: "institutions/134-مركز-المعرفة-المفتوحة"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 134"
+  - id: "135"
+    number: 135
+    name_ar: "مركز مراكز المستحيل"
+    path: "institutions/135-مركز-مراكز-المستحيل"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 135"
+  - id: "136"
+    number: 136
+    name_ar: "معهد الخلود الرقمي"
+    path: "institutions/136-معهد-الخلود-الرقمي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 136"
+  - id: "137"
+    number: 137
+    name_ar: "معهد الوعي الاصطناعي"
+    path: "institutions/137-معهد-الوعي-الاصطناعي"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 137"
+  - id: "138"
+    number: 138
+    name_ar: "معهد استعمار الفضاء"
+    path: "institutions/138-معهد-استعمار-الفضاء"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 138"
+  - id: "139"
+    number: 139
+    name_ar: "معهد الهندسة الكوكبية"
+    path: "institutions/139-معهد-الهندسة-الكوكبية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 139"
+  - id: "140"
+    number: 140
+    name_ar: "معهد الطاقة الاندماجية"
+    path: "institutions/140-معهد-الطاقة-الاندماجية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 140"
+  - id: "141"
+    number: 141
+    name_ar: "معهد التواصل بين الأنواع"
+    path: "institutions/141-معهد-التواصل-بين-الأنواع"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 141"
+  - id: "142"
+    number: 142
+    name_ar: "معهد المدن الذكية"
+    path: "institutions/142-معهد-المدن-الذكية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 142"
+  - id: "143"
+    number: 143
+    name_ar: "معهد المجتمعات الافتراضية"
+    path: "institutions/143-معهد-المجتمعات-الافتراضية"
+    path_verified: true
+    status: "planned"
+    provenance:
+      source: "institutions/INSTITUTION_INDEX.md"
+      ref: "السطر 143"
