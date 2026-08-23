@@ -1,0 +1,881 @@
+# بذرة الفدرالية — الأرقام مستخلصة من الشجرة الفعلية لا من الأرقام المعلنة.
+# عيب بنيوي مسجّل: كل عقدة إقليم/ولاية موزّعة على مجلدين، رقمي يحمل الأبناء
+# واسمي يحمل ملفات العقدة نفسها. لذلك لا يوجد مسار قانوني واحد لأي عقدة.
+# البذرة تثبّت المسار القانوني (canonical_path) وتسجّل المسار الاسمي كـ legacy.
+schema: "seed/schemas/federation.schema.json"
+version: "1.0.0"
+generated_by: "scripts/build-seed.mjs"
+counts:
+  regions: 16
+  provinces: 128
+  municipalities: 1536
+  provinces_per_region: 8
+  municipalities_per_province: 12
+defects:
+  split_identity_provinces: 128
+  split_identity_regions: 16
+regions:
+  - id: "R001"
+    number: 1
+    name_ar: "الإقليم الفدرالي 001"
+    canonical_path: "federation/regions/001"
+    legacy_data_path: "federation/regions/001/الإقليم-الفدرالي-001"
+    provinces:
+      - id: "P001-01"
+        name_ar: "ولاية 001-01"
+        canonical_path: "federation/regions/001/provinces/001-01"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-02"
+        name_ar: "ولاية 001-02"
+        canonical_path: "federation/regions/001/provinces/001-02"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-03"
+        name_ar: "ولاية 001-03"
+        canonical_path: "federation/regions/001/provinces/001-03"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-04"
+        name_ar: "ولاية 001-04"
+        canonical_path: "federation/regions/001/provinces/001-04"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-05"
+        name_ar: "ولاية 001-05"
+        canonical_path: "federation/regions/001/provinces/001-05"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-06"
+        name_ar: "ولاية 001-06"
+        canonical_path: "federation/regions/001/provinces/001-06"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-07"
+        name_ar: "ولاية 001-07"
+        canonical_path: "federation/regions/001/provinces/001-07"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P001-08"
+        name_ar: "ولاية 001-08"
+        canonical_path: "federation/regions/001/provinces/001-08"
+        legacy_data_path: "federation/regions/001/provinces/ولاية-001-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R002"
+    number: 2
+    name_ar: "الإقليم الفدرالي 002"
+    canonical_path: "federation/regions/002"
+    legacy_data_path: "federation/regions/002/الإقليم-الفدرالي-002"
+    provinces:
+      - id: "P002-01"
+        name_ar: "ولاية 002-01"
+        canonical_path: "federation/regions/002/provinces/002-01"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-02"
+        name_ar: "ولاية 002-02"
+        canonical_path: "federation/regions/002/provinces/002-02"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-03"
+        name_ar: "ولاية 002-03"
+        canonical_path: "federation/regions/002/provinces/002-03"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-04"
+        name_ar: "ولاية 002-04"
+        canonical_path: "federation/regions/002/provinces/002-04"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-05"
+        name_ar: "ولاية 002-05"
+        canonical_path: "federation/regions/002/provinces/002-05"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-06"
+        name_ar: "ولاية 002-06"
+        canonical_path: "federation/regions/002/provinces/002-06"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-07"
+        name_ar: "ولاية 002-07"
+        canonical_path: "federation/regions/002/provinces/002-07"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P002-08"
+        name_ar: "ولاية 002-08"
+        canonical_path: "federation/regions/002/provinces/002-08"
+        legacy_data_path: "federation/regions/002/provinces/ولاية-002-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R003"
+    number: 3
+    name_ar: "الإقليم الفدرالي 003"
+    canonical_path: "federation/regions/003"
+    legacy_data_path: "federation/regions/003/الإقليم-الفدرالي-003"
+    provinces:
+      - id: "P003-01"
+        name_ar: "ولاية 003-01"
+        canonical_path: "federation/regions/003/provinces/003-01"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-02"
+        name_ar: "ولاية 003-02"
+        canonical_path: "federation/regions/003/provinces/003-02"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-03"
+        name_ar: "ولاية 003-03"
+        canonical_path: "federation/regions/003/provinces/003-03"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-04"
+        name_ar: "ولاية 003-04"
+        canonical_path: "federation/regions/003/provinces/003-04"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-05"
+        name_ar: "ولاية 003-05"
+        canonical_path: "federation/regions/003/provinces/003-05"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-06"
+        name_ar: "ولاية 003-06"
+        canonical_path: "federation/regions/003/provinces/003-06"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-07"
+        name_ar: "ولاية 003-07"
+        canonical_path: "federation/regions/003/provinces/003-07"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P003-08"
+        name_ar: "ولاية 003-08"
+        canonical_path: "federation/regions/003/provinces/003-08"
+        legacy_data_path: "federation/regions/003/provinces/ولاية-003-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R004"
+    number: 4
+    name_ar: "الإقليم الفدرالي 004"
+    canonical_path: "federation/regions/004"
+    legacy_data_path: "federation/regions/004/الإقليم-الفدرالي-004"
+    provinces:
+      - id: "P004-01"
+        name_ar: "ولاية 004-01"
+        canonical_path: "federation/regions/004/provinces/004-01"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-02"
+        name_ar: "ولاية 004-02"
+        canonical_path: "federation/regions/004/provinces/004-02"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-03"
+        name_ar: "ولاية 004-03"
+        canonical_path: "federation/regions/004/provinces/004-03"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-04"
+        name_ar: "ولاية 004-04"
+        canonical_path: "federation/regions/004/provinces/004-04"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-05"
+        name_ar: "ولاية 004-05"
+        canonical_path: "federation/regions/004/provinces/004-05"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-06"
+        name_ar: "ولاية 004-06"
+        canonical_path: "federation/regions/004/provinces/004-06"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-07"
+        name_ar: "ولاية 004-07"
+        canonical_path: "federation/regions/004/provinces/004-07"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P004-08"
+        name_ar: "ولاية 004-08"
+        canonical_path: "federation/regions/004/provinces/004-08"
+        legacy_data_path: "federation/regions/004/provinces/ولاية-004-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R005"
+    number: 5
+    name_ar: "الإقليم الفدرالي 005"
+    canonical_path: "federation/regions/005"
+    legacy_data_path: "federation/regions/005/الإقليم-الفدرالي-005"
+    provinces:
+      - id: "P005-01"
+        name_ar: "ولاية 005-01"
+        canonical_path: "federation/regions/005/provinces/005-01"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-02"
+        name_ar: "ولاية 005-02"
+        canonical_path: "federation/regions/005/provinces/005-02"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-03"
+        name_ar: "ولاية 005-03"
+        canonical_path: "federation/regions/005/provinces/005-03"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-04"
+        name_ar: "ولاية 005-04"
+        canonical_path: "federation/regions/005/provinces/005-04"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-05"
+        name_ar: "ولاية 005-05"
+        canonical_path: "federation/regions/005/provinces/005-05"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-06"
+        name_ar: "ولاية 005-06"
+        canonical_path: "federation/regions/005/provinces/005-06"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-07"
+        name_ar: "ولاية 005-07"
+        canonical_path: "federation/regions/005/provinces/005-07"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P005-08"
+        name_ar: "ولاية 005-08"
+        canonical_path: "federation/regions/005/provinces/005-08"
+        legacy_data_path: "federation/regions/005/provinces/ولاية-005-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R006"
+    number: 6
+    name_ar: "الإقليم الفدرالي 006"
+    canonical_path: "federation/regions/006"
+    legacy_data_path: "federation/regions/006/الإقليم-الفدرالي-006"
+    provinces:
+      - id: "P006-01"
+        name_ar: "ولاية 006-01"
+        canonical_path: "federation/regions/006/provinces/006-01"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-02"
+        name_ar: "ولاية 006-02"
+        canonical_path: "federation/regions/006/provinces/006-02"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-03"
+        name_ar: "ولاية 006-03"
+        canonical_path: "federation/regions/006/provinces/006-03"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-04"
+        name_ar: "ولاية 006-04"
+        canonical_path: "federation/regions/006/provinces/006-04"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-05"
+        name_ar: "ولاية 006-05"
+        canonical_path: "federation/regions/006/provinces/006-05"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-06"
+        name_ar: "ولاية 006-06"
+        canonical_path: "federation/regions/006/provinces/006-06"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-07"
+        name_ar: "ولاية 006-07"
+        canonical_path: "federation/regions/006/provinces/006-07"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P006-08"
+        name_ar: "ولاية 006-08"
+        canonical_path: "federation/regions/006/provinces/006-08"
+        legacy_data_path: "federation/regions/006/provinces/ولاية-006-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R007"
+    number: 7
+    name_ar: "الإقليم الفدرالي 007"
+    canonical_path: "federation/regions/007"
+    legacy_data_path: "federation/regions/007/الإقليم-الفدرالي-007"
+    provinces:
+      - id: "P007-01"
+        name_ar: "ولاية 007-01"
+        canonical_path: "federation/regions/007/provinces/007-01"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-02"
+        name_ar: "ولاية 007-02"
+        canonical_path: "federation/regions/007/provinces/007-02"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-03"
+        name_ar: "ولاية 007-03"
+        canonical_path: "federation/regions/007/provinces/007-03"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-04"
+        name_ar: "ولاية 007-04"
+        canonical_path: "federation/regions/007/provinces/007-04"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-05"
+        name_ar: "ولاية 007-05"
+        canonical_path: "federation/regions/007/provinces/007-05"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-06"
+        name_ar: "ولاية 007-06"
+        canonical_path: "federation/regions/007/provinces/007-06"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-07"
+        name_ar: "ولاية 007-07"
+        canonical_path: "federation/regions/007/provinces/007-07"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P007-08"
+        name_ar: "ولاية 007-08"
+        canonical_path: "federation/regions/007/provinces/007-08"
+        legacy_data_path: "federation/regions/007/provinces/ولاية-007-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R008"
+    number: 8
+    name_ar: "الإقليم الفدرالي 008"
+    canonical_path: "federation/regions/008"
+    legacy_data_path: "federation/regions/008/الإقليم-الفدرالي-008"
+    provinces:
+      - id: "P008-01"
+        name_ar: "ولاية 008-01"
+        canonical_path: "federation/regions/008/provinces/008-01"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-02"
+        name_ar: "ولاية 008-02"
+        canonical_path: "federation/regions/008/provinces/008-02"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-03"
+        name_ar: "ولاية 008-03"
+        canonical_path: "federation/regions/008/provinces/008-03"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-04"
+        name_ar: "ولاية 008-04"
+        canonical_path: "federation/regions/008/provinces/008-04"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-05"
+        name_ar: "ولاية 008-05"
+        canonical_path: "federation/regions/008/provinces/008-05"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-06"
+        name_ar: "ولاية 008-06"
+        canonical_path: "federation/regions/008/provinces/008-06"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-07"
+        name_ar: "ولاية 008-07"
+        canonical_path: "federation/regions/008/provinces/008-07"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P008-08"
+        name_ar: "ولاية 008-08"
+        canonical_path: "federation/regions/008/provinces/008-08"
+        legacy_data_path: "federation/regions/008/provinces/ولاية-008-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R009"
+    number: 9
+    name_ar: "الإقليم الفدرالي 009"
+    canonical_path: "federation/regions/009"
+    legacy_data_path: "federation/regions/009/الإقليم-الفدرالي-009"
+    provinces:
+      - id: "P009-01"
+        name_ar: "ولاية 009-01"
+        canonical_path: "federation/regions/009/provinces/009-01"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-02"
+        name_ar: "ولاية 009-02"
+        canonical_path: "federation/regions/009/provinces/009-02"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-03"
+        name_ar: "ولاية 009-03"
+        canonical_path: "federation/regions/009/provinces/009-03"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-04"
+        name_ar: "ولاية 009-04"
+        canonical_path: "federation/regions/009/provinces/009-04"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-05"
+        name_ar: "ولاية 009-05"
+        canonical_path: "federation/regions/009/provinces/009-05"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-06"
+        name_ar: "ولاية 009-06"
+        canonical_path: "federation/regions/009/provinces/009-06"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-07"
+        name_ar: "ولاية 009-07"
+        canonical_path: "federation/regions/009/provinces/009-07"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P009-08"
+        name_ar: "ولاية 009-08"
+        canonical_path: "federation/regions/009/provinces/009-08"
+        legacy_data_path: "federation/regions/009/provinces/ولاية-009-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R010"
+    number: 10
+    name_ar: "الإقليم الفدرالي 010"
+    canonical_path: "federation/regions/010"
+    legacy_data_path: "federation/regions/010/الإقليم-الفدرالي-010"
+    provinces:
+      - id: "P010-01"
+        name_ar: "ولاية 010-01"
+        canonical_path: "federation/regions/010/provinces/010-01"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-02"
+        name_ar: "ولاية 010-02"
+        canonical_path: "federation/regions/010/provinces/010-02"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-03"
+        name_ar: "ولاية 010-03"
+        canonical_path: "federation/regions/010/provinces/010-03"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-04"
+        name_ar: "ولاية 010-04"
+        canonical_path: "federation/regions/010/provinces/010-04"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-05"
+        name_ar: "ولاية 010-05"
+        canonical_path: "federation/regions/010/provinces/010-05"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-06"
+        name_ar: "ولاية 010-06"
+        canonical_path: "federation/regions/010/provinces/010-06"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-07"
+        name_ar: "ولاية 010-07"
+        canonical_path: "federation/regions/010/provinces/010-07"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P010-08"
+        name_ar: "ولاية 010-08"
+        canonical_path: "federation/regions/010/provinces/010-08"
+        legacy_data_path: "federation/regions/010/provinces/ولاية-010-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R011"
+    number: 11
+    name_ar: "الإقليم الفدرالي 011"
+    canonical_path: "federation/regions/011"
+    legacy_data_path: "federation/regions/011/الإقليم-الفدرالي-011"
+    provinces:
+      - id: "P011-01"
+        name_ar: "ولاية 011-01"
+        canonical_path: "federation/regions/011/provinces/011-01"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-02"
+        name_ar: "ولاية 011-02"
+        canonical_path: "federation/regions/011/provinces/011-02"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-03"
+        name_ar: "ولاية 011-03"
+        canonical_path: "federation/regions/011/provinces/011-03"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-04"
+        name_ar: "ولاية 011-04"
+        canonical_path: "federation/regions/011/provinces/011-04"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-05"
+        name_ar: "ولاية 011-05"
+        canonical_path: "federation/regions/011/provinces/011-05"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-06"
+        name_ar: "ولاية 011-06"
+        canonical_path: "federation/regions/011/provinces/011-06"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-07"
+        name_ar: "ولاية 011-07"
+        canonical_path: "federation/regions/011/provinces/011-07"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P011-08"
+        name_ar: "ولاية 011-08"
+        canonical_path: "federation/regions/011/provinces/011-08"
+        legacy_data_path: "federation/regions/011/provinces/ولاية-011-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R012"
+    number: 12
+    name_ar: "الإقليم الفدرالي 012"
+    canonical_path: "federation/regions/012"
+    legacy_data_path: "federation/regions/012/الإقليم-الفدرالي-012"
+    provinces:
+      - id: "P012-01"
+        name_ar: "ولاية 012-01"
+        canonical_path: "federation/regions/012/provinces/012-01"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-02"
+        name_ar: "ولاية 012-02"
+        canonical_path: "federation/regions/012/provinces/012-02"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-03"
+        name_ar: "ولاية 012-03"
+        canonical_path: "federation/regions/012/provinces/012-03"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-04"
+        name_ar: "ولاية 012-04"
+        canonical_path: "federation/regions/012/provinces/012-04"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-05"
+        name_ar: "ولاية 012-05"
+        canonical_path: "federation/regions/012/provinces/012-05"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-06"
+        name_ar: "ولاية 012-06"
+        canonical_path: "federation/regions/012/provinces/012-06"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-07"
+        name_ar: "ولاية 012-07"
+        canonical_path: "federation/regions/012/provinces/012-07"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P012-08"
+        name_ar: "ولاية 012-08"
+        canonical_path: "federation/regions/012/provinces/012-08"
+        legacy_data_path: "federation/regions/012/provinces/ولاية-012-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R013"
+    number: 13
+    name_ar: "الإقليم الفدرالي 013"
+    canonical_path: "federation/regions/013"
+    legacy_data_path: "federation/regions/013/الإقليم-الفدرالي-013"
+    provinces:
+      - id: "P013-01"
+        name_ar: "ولاية 013-01"
+        canonical_path: "federation/regions/013/provinces/013-01"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-02"
+        name_ar: "ولاية 013-02"
+        canonical_path: "federation/regions/013/provinces/013-02"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-03"
+        name_ar: "ولاية 013-03"
+        canonical_path: "federation/regions/013/provinces/013-03"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-04"
+        name_ar: "ولاية 013-04"
+        canonical_path: "federation/regions/013/provinces/013-04"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-05"
+        name_ar: "ولاية 013-05"
+        canonical_path: "federation/regions/013/provinces/013-05"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-06"
+        name_ar: "ولاية 013-06"
+        canonical_path: "federation/regions/013/provinces/013-06"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-07"
+        name_ar: "ولاية 013-07"
+        canonical_path: "federation/regions/013/provinces/013-07"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P013-08"
+        name_ar: "ولاية 013-08"
+        canonical_path: "federation/regions/013/provinces/013-08"
+        legacy_data_path: "federation/regions/013/provinces/ولاية-013-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R014"
+    number: 14
+    name_ar: "الإقليم الفدرالي 014"
+    canonical_path: "federation/regions/014"
+    legacy_data_path: "federation/regions/014/الإقليم-الفدرالي-014"
+    provinces:
+      - id: "P014-01"
+        name_ar: "ولاية 014-01"
+        canonical_path: "federation/regions/014/provinces/014-01"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-02"
+        name_ar: "ولاية 014-02"
+        canonical_path: "federation/regions/014/provinces/014-02"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-03"
+        name_ar: "ولاية 014-03"
+        canonical_path: "federation/regions/014/provinces/014-03"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-04"
+        name_ar: "ولاية 014-04"
+        canonical_path: "federation/regions/014/provinces/014-04"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-05"
+        name_ar: "ولاية 014-05"
+        canonical_path: "federation/regions/014/provinces/014-05"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-06"
+        name_ar: "ولاية 014-06"
+        canonical_path: "federation/regions/014/provinces/014-06"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-07"
+        name_ar: "ولاية 014-07"
+        canonical_path: "federation/regions/014/provinces/014-07"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P014-08"
+        name_ar: "ولاية 014-08"
+        canonical_path: "federation/regions/014/provinces/014-08"
+        legacy_data_path: "federation/regions/014/provinces/ولاية-014-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R015"
+    number: 15
+    name_ar: "الإقليم الفدرالي 015"
+    canonical_path: "federation/regions/015"
+    legacy_data_path: "federation/regions/015/الإقليم-الفدرالي-015"
+    provinces:
+      - id: "P015-01"
+        name_ar: "ولاية 015-01"
+        canonical_path: "federation/regions/015/provinces/015-01"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-02"
+        name_ar: "ولاية 015-02"
+        canonical_path: "federation/regions/015/provinces/015-02"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-03"
+        name_ar: "ولاية 015-03"
+        canonical_path: "federation/regions/015/provinces/015-03"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-04"
+        name_ar: "ولاية 015-04"
+        canonical_path: "federation/regions/015/provinces/015-04"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-05"
+        name_ar: "ولاية 015-05"
+        canonical_path: "federation/regions/015/provinces/015-05"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-06"
+        name_ar: "ولاية 015-06"
+        canonical_path: "federation/regions/015/provinces/015-06"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-07"
+        name_ar: "ولاية 015-07"
+        canonical_path: "federation/regions/015/provinces/015-07"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P015-08"
+        name_ar: "ولاية 015-08"
+        canonical_path: "federation/regions/015/provinces/015-08"
+        legacy_data_path: "federation/regions/015/provinces/ولاية-015-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+  - id: "R016"
+    number: 16
+    name_ar: "الإقليم الفدرالي 016"
+    canonical_path: "federation/regions/016"
+    legacy_data_path: "federation/regions/016/الإقليم-الفدرالي-016"
+    provinces:
+      - id: "P016-01"
+        name_ar: "ولاية 016-01"
+        canonical_path: "federation/regions/016/provinces/016-01"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-01"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-02"
+        name_ar: "ولاية 016-02"
+        canonical_path: "federation/regions/016/provinces/016-02"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-02"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-03"
+        name_ar: "ولاية 016-03"
+        canonical_path: "federation/regions/016/provinces/016-03"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-03"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-04"
+        name_ar: "ولاية 016-04"
+        canonical_path: "federation/regions/016/provinces/016-04"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-04"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-05"
+        name_ar: "ولاية 016-05"
+        canonical_path: "federation/regions/016/provinces/016-05"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-05"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-06"
+        name_ar: "ولاية 016-06"
+        canonical_path: "federation/regions/016/provinces/016-06"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-06"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-07"
+        name_ar: "ولاية 016-07"
+        canonical_path: "federation/regions/016/provinces/016-07"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-07"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
+      - id: "P016-08"
+        name_ar: "ولاية 016-08"
+        canonical_path: "federation/regions/016/provinces/016-08"
+        legacy_data_path: "federation/regions/016/provinces/ولاية-016-08"
+        municipality_count: 12
+        municipality_ids: ["001", "002", "003", "004", "005", "006", "007", "008", "009", "010", "011", "012"]
