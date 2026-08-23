@@ -17,14 +17,15 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "scan:secrets": "node scripts/scan-secrets.mjs --path .",
-    "validate:tree": "python3 scripts/validate-tree.py",
     "validate:seed": "node scripts/validate-seed.mjs",
     "build:seed": "node scripts/build-seed.mjs",
     "gen:registries": "node scripts/generate-registries.mjs",
     "check:registries": "node scripts/generate-registries.mjs --check",
     "audit:inventory": "node scripts/inventory.mjs",
     "guard:templates": "node scripts/guard-templates.mjs",
-    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run scan:secrets && npm run validate:seed && npm run check:registries && npm test"
+    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run scan:secrets && npm run validate:seed && npm run check:registries && npm run guard:templates && npm run guard:filecount && npm test",
+    "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
+    "guard:filecount": "node scripts/guard-filecount.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
