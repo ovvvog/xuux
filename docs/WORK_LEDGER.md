@@ -41,3 +41,10 @@
 ## معيار كل commit لاحق
 
 يجب أن يذكر commit المجال المنجز، ويضيف اختبارًا أو يشرح سبب تأجيله، ويحدث `PROJECT_STATUS.md` و`docs/REMAINING_WORK.md` إذا تغيرت الحالة.
+
+## المرحلة 002 — نواة التشغيل السيادي
+- الحالة: **منجزة كنواة محلية**.
+- التنفيذ: `src/core/execution-kernel.mjs`.
+- الاختبار: `tests/core/execution-kernel.test.mjs`.
+- التوثيق: `docs/stages/002-execution-kernel.md`.
+- المتبقي: طوابير دائمة، عمال موزعون، حصص، إلغاء، واستعادة إنتاجية.
