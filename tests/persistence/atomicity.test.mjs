@@ -1,0 +1,202 @@
+// ذرّية العمليات المركّبة — الخطوة `M3.06`.
+//
+// الدعوى المُختبَرة: العملية التي تكتب في أكثر من جدول إمّا أن تتم كلها أو لا
+// يبقى منها أثر. وإثباتُها لا يكون بمسار سعيد، بل بإخفاقٍ **بين** الكتابتين ثم
+// فحصٍ للقاعدة من وصلةٍ أخرى: أي صفٍّ باقٍ من عملية أخفقت هو دليل نقض.
+//
+// وفيه أيضاً اختبار «الفرق»: نفس العملية بلا معاملة تُبقي أثراً جزئياً. وُضع
+// لأن اختباراً يمرّ في الحالتين لا يُثبت شيئاً عن المعاملة.
+//
+// التشغيل: DATABASE_URL=... node --test tests/persistence/atomicity.test.mjs
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { CertificateAuthority, EventLog, KingIdentity } from '../../src/root-of-trust/index.mjs';
+import { ModelState } from '../../src/models/model-registry.mjs';
+import {
+  createPostgresRegistries,
+  createPostgresRepositories,
+  createRegistries,
+} from '../../src/persistence/composition.mjs';
+import { withUnitOfWork } from '../../src/persistence/unit-of-work.mjs';
+import { up } from '../../src/persistence/migrator.mjs';
+import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+
+/**
+ * @param {import('pg').Pool} pool
+ * @param {string} table
+ * @returns {Promise<number>}
+ */
+async function countRows(pool, table) {
+  const result = await pool.query(`SELECT count(*)::int AS n FROM state.${table}`);
+  return Number(result.rows[0]?.n ?? -1);
+}
+
+/** @returns {CertificateAuthority} */
+function authority() {
+  return new CertificateAuthority(new KingIdentity());
+}
+
+test(
+  'إخفاق في منتصف «تذكّر» لا يُبقي عقد بيانات يتيماً',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const created = await createIsolatedDatabase('atomic');
+    try {
+      await up(created.pool);
+      const registries = createPostgresRegistries({
+        pool: created.pool,
+        ca: authority(),
+        log: new EventLog(),
+      });
+      const agent = await registries.agents.register({ name: 'وكيل-ذرّي', role: 'auditor' });
+
+      // نوع ذاكرة خارج القيم المُعلنة: يُرفض عند كتابة **الذاكرة** أي بعد كتابة
+      // عقد البيانات. فهذا إخفاق واقع بين الكتابتين لا محاكاةً مصطنعة له.
+      await assert.rejects(
+        () =>
+          registries.memory.remember(
+            agent.id,
+            { note: 'لا ينبغي أن يبقى' },
+            {
+              kind: /** @type {'episodic'} */ (/** @type {unknown} */ ('نوع-غير-معلن')),
+            },
+          ),
+        /REPOSITORY_INVALID_RECORD|FIELD_ENUM/,
+      );
+
+      assert.equal(await countRows(created.pool, 'memories'), 0, 'ذاكرة كُتبت رغم الإخفاق');
+      assert.equal(
+        await countRows(created.pool, 'data_assets'),
+        0,
+        'عقد بيانات يتيم بقي بعد إخفاق «تذكّر»',
+      );
+    } finally {
+      await created.drop();
+    }
+  },
+);
+
+test(
+  'بلا معاملة يبقى الأثر الجزئي — الفرق الذي تصنعه وحدة العمل',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const created = await createIsolatedDatabase('nonatomic');
+    try {
+      await up(created.pool);
+      // نفس المستودعات، بلا مُشغّل معاملة: هذا هو ما كان عليه الحال قبل `M3.06`.
+      const registries = createRegistries({
+        ca: authority(),
+        log: new EventLog(),
+        repositories: createPostgresRepositories(created.pool),
+      });
+      const agent = await registries.agents.register({ name: 'وكيل-غير-ذرّي', role: 'auditor' });
+      await assert.rejects(() =>
+        registries.memory.remember(
+          agent.id,
+          { note: 'أثر جزئي' },
+          {
+            kind: /** @type {'episodic'} */ (/** @type {unknown} */ ('نوع-غير-معلن')),
+          },
+        ),
+      );
+      assert.equal(await countRows(created.pool, 'memories'), 0);
+      assert.equal(
+        await countRows(created.pool, 'data_assets'),
+        1,
+        'لو صار هذا صفراً فالاختبار السابق لم يُثبت شيئاً عن المعاملة',
+      );
+    } finally {
+      await created.drop();
+    }
+  },
+);
+
+test(
+  'إخفاق بعد إسقاط النشط السابق لا يترك الغرض بلا نشط',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const created = await createIsolatedDatabase('activate');
+    try {
+      await up(created.pool);
+      const ca = authority();
+      const log = new EventLog();
+      const registries = createPostgresRegistries({ pool: created.pool, ca, log });
+
+      /**
+       * @param {string} name
+       * @param {string} version
+       * @param {string} weights
+       */
+      const approved = async (name, version, weights) => {
+        const model = await registries.models.register({
+          name,
+          modelVersion: version,
+          purpose: 'audit',
+          provider: 'internal',
+          weights,
+        });
+        await registries.models.transition(model.id, ModelState.SANDBOXED, 'اختبار معزول');
+        await registries.models.transition(model.id, ModelState.APPROVED, 'اعتماد');
+        return model;
+      };
+
+      const first = await approved('أول', '1.0.0', 'w-1');
+      const second = await approved('ثانٍ', '2.0.0', 'w-2');
+      await registries.models.activate(first.id);
+      assert.equal((await registries.models.getActive('audit'))?.id, first.id);
+
+      // إخفاقٌ مُقحَم **بين** الكتابتين: أُسقط النشط السابق ثم يُرفع خطأ قبل رفع
+      // الجديد. بلا معاملة يبقى الغرض بلا نشط؛ ومعها يعود الأول نشطاً كما كان.
+      await assert.rejects(
+        () =>
+          withUnitOfWork(created.pool, async (repositories) => {
+            const inner = createRegistries({ ca, log, repositories });
+            const previous = await inner.models.getActive('audit');
+            assert.ok(previous);
+            await repositories.models.update(previous.id, previous.version, { isActive: false });
+            throw new Error('انقطاع مُقحَم بين الكتابتين');
+          }),
+        /انقطاع مُقحَم/,
+      );
+
+      const stillActive = await registries.models.getActive('audit');
+      assert.equal(stillActive?.id, first.id, 'الغرض بقي بلا نشط بعد إخفاق التفعيل');
+      assert.ok(second.id, 'النموذج الثاني مسجَّل ولم يُفعَّل');
+    } finally {
+      await created.drop();
+    }
+  },
+);
+
+test(
+  'وحدة العمل تشمل أكثر من سجل: تراجعٌ واحد لكل ما كُتب فيها',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const created = await createIsolatedDatabase('uow');
+    try {
+      await up(created.pool);
+      const ca = authority();
+      const log = new EventLog();
+      await assert.rejects(
+        () =>
+          withUnitOfWork(created.pool, async (repositories) => {
+            const inner = createRegistries({ ca, log, repositories });
+            await inner.agents.register({ name: 'وكيل-داخل-معاملة', role: 'observer' });
+            await inner.laws.propose({
+              title: 'قانون داخل معاملة',
+              text: 'لا يبقى إن تراجعت',
+              scope: 'operations',
+              proposer: 'council',
+            });
+            throw new Error('إخفاق بعد كتابتين في سجلّين');
+          }),
+        /إخفاق بعد كتابتين/,
+      );
+      assert.equal(await countRows(created.pool, 'agents'), 0, 'وكيل بقي بعد تراجع المعاملة');
+      assert.equal(await countRows(created.pool, 'laws'), 0, 'قانون بقي بعد تراجع المعاملة');
+    } finally {
+      await created.drop();
+    }
+  },
+);
