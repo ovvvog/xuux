@@ -3,6 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { CommandLedger } from './command-ledger.mjs';
+import type { HaltGuard } from './halt-switch.mjs';
 import type { EventLog } from './event-log.mjs';
 import type { Certificate, CertificateAuthority, KingIdentity } from './identity.mjs';
 import type { PolicyEngine } from './policy.mjs';
@@ -26,6 +27,12 @@ export interface AcceptedRoyalCommand extends RoyalCommand {
 export interface CrownGatewayOptions {
   policy?: PolicyEngine | null;
   commandLedger?: CommandLedger | null;
+  /**
+   * مفتاح الإيقاف الشامل (M2.08). اختياري ومطفأ افتراضياً كي لا يتغير سلوك أي
+   * مستهلك قائم؛ فإن وُصل صار كل أمرٍ يُقرأ قبله التوجيه من القرص، فيسري إيقاف
+   * عمليةٍ واحدة على هذه البوابة كذلك.
+   */
+  haltSwitch?: HaltGuard | null;
   maxCommandAgeMs?: number;
   clockSkewMs?: number;
 }
@@ -61,6 +68,7 @@ export class CrownGateway {
   log: EventLog;
   policy: PolicyEngine | null;
   commandLedger: CommandLedger | null;
+  haltSwitch: HaltGuard | null;
   veto: Veto;
   stopped: boolean;
   heartbeatAt: number;
@@ -85,6 +93,7 @@ export class CrownGateway {
     this.log = log;
     this.policy = options.policy ?? null;
     this.commandLedger = options.commandLedger ?? null;
+    this.haltSwitch = options.haltSwitch ?? null;
     this.veto = new Veto();
     this.stopped = false;
     this.heartbeatAt = Date.now();
@@ -95,6 +104,9 @@ export class CrownGateway {
 
   /** يثبت نبض التاج في السجل ما دامت البوابة غير موقوفة. */
   heartbeat(): void {
+    // الإيقاف الشامل يُفحص قبل الإيقاف المحلي: الأول قرارٌ سيادي دائم يعلو على
+    // حالة هذا الكائن، والنبض فعلٌ كذلك فلا يُثبت في دولةٍ موقوفة.
+    this.haltSwitch?.assertOperational();
     if (this.stopped) throw new Error('CROWN_STOPPED');
     this.heartbeatAt = Date.now();
     this.log.append('crown.heartbeat', this.king.id, {});
@@ -107,6 +119,10 @@ export class CrownGateway {
    * @returns الأمر بعد ختم القبول
    */
   command(command: RoyalCommand, signature: string): AcceptedRoyalCommand {
+    // أول فحصٍ على الإطلاق، وقبل التوقيع والمنع: أمرٌ يصل والدولة موقوفة يُرفض
+    // ولا يُسجَّل في الدفتر ولا يُستهلك معرّفه، كي يبقى قابلاً للإصدار بعد
+    // الاستئناف بلا اصطدام بمنع الإعادة.
+    this.haltSwitch?.assertOperational();
     if (this.stopped) throw new Error('CROWN_STOPPED');
     this.veto.assertOpen();
     if (!this.king.verify(command, signature)) throw new Error('INVALID_ROYAL_SIGNATURE');

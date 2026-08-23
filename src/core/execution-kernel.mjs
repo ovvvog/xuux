@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 /** @typedef {import('../root-of-trust/crown.mjs').AcceptedRoyalCommand} AcceptedRoyalCommand */
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
 /** @typedef {import('../root-of-trust/policy.mjs').PolicyEngine} PolicyEngine */
+/** @typedef {import('../root-of-trust/halt-switch.mjs').HaltGuard} HaltGuard */
 
 /**
  * حالات المهمة الخمس. النوع مشتق من الكائن المُجمَّد نفسه، فلا يمكن أن تنحرف
@@ -65,13 +66,16 @@ export class ExecutionKernel {
    * ويردّ عليه بخطأ مُسمّى `KERNEL_DEPENDENCY_MISSING`. جعلها إلزامية في النوع
    * كان سيحوّل ذلك الخطأ المقروء إلى انهيار تفكيك غامض — أي تغييراً في السلوك.
    * والتحقّق في أول سطر هو ما يضيّق النوع بعده إلى وجود مؤكد.
-   * @param {{ crown?: CrownGateway, log?: EventLog, policy?: PolicyEngine | null }} [deps]
+   * `haltSwitch` اختياري ومطفأ افتراضياً (M2.08): إن وُصل صار الإيقاف الشامل
+   * الدائم يُقرأ من القرص قبل كل مهمة، فلا يبقى الإيقاف حبيس ذاكرة هذه العملية.
+   * @param {{ crown?: CrownGateway, log?: EventLog, policy?: PolicyEngine | null, haltSwitch?: HaltGuard | null }} [deps]
    */
-  constructor({ crown, log, policy = null } = {}) {
+  constructor({ crown, log, policy = null, haltSwitch = null } = {}) {
     if (!crown || !log) throw new Error('KERNEL_DEPENDENCY_MISSING');
     this.crown = crown;
     this.log = log;
     this.policy = policy;
+    this.haltSwitch = haltSwitch;
     this.safeMode = new SafeMode();
     /** @type {Map<string, Task>} */
     this.tasks = new Map();
@@ -85,6 +89,8 @@ export class ExecutionKernel {
    * @returns {Readonly<Task>} صورة مُجمَّدة من المهمة بعد نجاحها
    */
   submit(command, signature, handler) {
+    // الإيقاف الشامل أولاً: قرارٌ سيادي دائم يعلو على الوضع الآمن المحلي.
+    if (this.haltSwitch) this.haltSwitch.assertOperational();
     this.safeMode.assertOperational();
     if (typeof handler !== 'function') throw new Error('TASK_HANDLER_REQUIRED');
     const accepted = this.crown.command(command, signature);
@@ -101,6 +107,10 @@ export class ExecutionKernel {
       action: accepted.action,
     });
     try {
+      // فحصٌ ثانٍ قبل تشغيل المُعالِج مباشرة: بين قبول التاج وبدء الفعل نافذةٌ
+      // زمنية قد يصدر فيها إيقاف، وضيقُها لا يعني انعدامها. والفعل هو المُعالِج
+      // لا الإدراج في الطابور، فمنعُه هنا هو المقصود بـ«صفر تنفيذ بعد الإيقاف».
+      if (this.haltSwitch) this.haltSwitch.assertOperational();
       task.state = TaskState.RUNNING;
       task.startedAt = new Date().toISOString();
       this.log.append('kernel.task.started', accepted.target, { taskId: task.id });

@@ -1,0 +1,169 @@
+#!/usr/bin/env node
+// مفتاح الإيقاف الشامل — أداة التشغيل، الخطوة M2.08
+//
+// الغرض:      إصدار الإيقاف السيادي واستئنافه من سطر الأوامر، وإظهار من أقرّ
+//             بالتوقف ومن بقي حياً لم يُقرّ — لأن إيقافاً لا يُرى لا يُوثق به.
+// المدخلات:   status | halt | resume | confirm | verify   [--json] [--reason "…"]
+//             الإعداد من البيئة لا من الأمر:
+//               HALT_SWITCH_FILE       ملف التوجيه الدائم (إلزامي)
+//               HALT_NODE_ID           معرّف العقدة، إلزامي لأمر confirm
+//               HALT_PUBLIC_KEY_FILE   مفتاح الملك العام: وضع قراءة وإقرار فقط
+//               ومخزن المفاتيح كما في rotate-king-key.mjs، لأمر halt/resume
+// المخرجات:   تقرير نصي أو JSON بـ‏`--json`. لا تُطبع مادة مفتاح خاص أبداً.
+// التشغيل:    HALT_SWITCH_FILE=… node scripts/halt-switch.mjs halt --reason "سبب"
+// الاختبار:   node --test tests/tooling/halt-switch-cli.test.mjs
+// الصلاحيات:  قراءة وكتابة ملف التوجيه ومجلداته، وقراءة مخزن المفاتيح عند
+//             الإصدار. لا تمرّ ببوابة التاج — فهي التي تُوقفها.
+// المالك:     مسؤول جذر الثقة.
+//
+// لماذا وضع «القراءة والإقرار» بمفتاح عام: العقدة في التشغيل تُقرّ بتوقفها ولا
+// يجوز أن تملك ما تستأنف به الدولة. فمن يشغّل الأداة على عقدة يعطيها المفتاح
+// العام وحده، فتُقرّ ويُرفض عليها الإصدار برمز `HALT_SIGNER_REQUIRED`.
+
+import { readFileSync } from 'node:fs';
+import {
+  HaltSwitch,
+  kingKeyProviderFromEnv,
+  loadKingKeySet,
+  royalVerifierFromPublicKey,
+} from '../src/root-of-trust/index.mjs';
+
+/** الاستعمال المطبوع عند الخطأ أو عند `--help`. */
+const USAGE = `الاستعمال:
+  node scripts/halt-switch.mjs status  [--json]
+  node scripts/halt-switch.mjs halt    [--reason "سبب"] [--json]
+  node scripts/halt-switch.mjs resume  [--reason "سبب"] [--json]
+  node scripts/halt-switch.mjs confirm [--json]
+  node scripts/halt-switch.mjs verify  [--json]
+
+البيئة:
+  HALT_SWITCH_FILE      ملف التوجيه الدائم (إلزامي)
+  HALT_NODE_ID          معرّف العقدة (إلزامي لأمر confirm)
+  HALT_PUBLIC_KEY_FILE  مفتاح الملك العام: قراءة وإقرار بلا قدرة إصدار
+  مخزن المفاتيح:        KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER`;
+
+/**
+ * يفكّ وسائط سطر الأوامر إلى أمرٍ وخيارات.
+ * @param {string[]} argv - الوسائط بعد اسم السكربت
+ * @returns {{ command: string, json: boolean, reason: string | null }} الأمر وخياراته
+ */
+export function parseArgs(argv) {
+  /** @type {{ command: string, json: boolean, reason: string | null }} */
+  const parsed = { command: argv[0] ?? 'status', json: false, reason: null };
+  for (let index = 1; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--json') parsed.json = true;
+    else if (argument === '--reason') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('--reason بلا قيمة');
+      parsed.reason = value;
+      index += 1;
+    } else throw new Error(`وسيط غير معروف: ${argument}`);
+  }
+  return parsed;
+}
+
+/**
+ * يقرأ الإعداد من البيئة ويرفض ما ينقص، فلا يُخترع مسار افتراضي لزرّ إيقاف.
+ * @param {NodeJS.ProcessEnv} env - البيئة
+ * @returns {{ file: string, nodeId: string | null, publicKeyFile: string | null }} الإعداد
+ */
+export function readConfig(env) {
+  const file = env['HALT_SWITCH_FILE'];
+  if (!file) throw new Error('HALT_SWITCH_FILE غير معلَن');
+  return {
+    file,
+    nodeId: env['HALT_NODE_ID'] ?? null,
+    publicKeyFile: env['HALT_PUBLIC_KEY_FILE'] ?? null,
+  };
+}
+
+/**
+ * يصوغ الخلاصة نصاً مقروءاً.
+ * @param {import('../src/root-of-trust/halt-switch.mjs').HaltDescription} description - الخلاصة
+ * @returns {string} التقرير
+ */
+export function formatDescription(description) {
+  const lines = [
+    description.state === 'halted' ? '⛔ الدولة موقوفة' : '✅ الدولة تعمل',
+    `العهد: ${description.epoch}`,
+    `السبب: ${description.reason}`,
+    `الوقت: ${description.at ?? '—'}`,
+    `عقد مسجَّلة: ${description.nodes.length}`,
+    `أقرّت بالتوقف: ${description.confirmed.join('، ') || '—'}`,
+    `لم تُقرّ: ${description.pending.map((node) => `${node.nodeId}${node.alive ? ' (حيّة)' : ' (ميتة)'}`).join('، ') || '—'}`,
+    `التحقق تام: ${description.fullyConfirmed ? 'نعم' : 'لا'}`,
+  ];
+  if (description.problem) lines.push(`العطب (فشل مغلق): ${description.problem}`);
+  return lines.join('\n');
+}
+
+/**
+ * ينفّذ الأمر ويرجع ما يُطبع، بلا مسّ `process`، كي يُختبر نداءً لا عملية.
+ * @param {string[]} argv - الوسائط
+ * @param {NodeJS.ProcessEnv} env - البيئة
+ * @returns {Promise<string>} المخرج المطبوع
+ */
+export async function run(argv, env) {
+  const args = parseArgs(argv);
+  if (args.command === '--help' || args.command === 'help') return USAGE;
+  const config = readConfig(env);
+  const king = config.publicKeyFile
+    ? royalVerifierFromPublicKey(readFileSync(config.publicKeyFile, 'utf8'))
+    : await loadKingKeySet(kingKeyProviderFromEnv(env));
+  const halt = new HaltSwitch(config.file, king);
+
+  if (args.command === 'status') {
+    const description = halt.describe();
+    return args.json ? JSON.stringify(description, null, 2) : formatDescription(description);
+  }
+
+  if (args.command === 'halt') {
+    const directive = halt.halt(args.reason ?? 'royal sovereign halt');
+    return args.json
+      ? JSON.stringify({ halted: true, directive }, null, 2)
+      : `⛔ صدر الإيقاف في العهد ${directive.epoch} بإصدار المفتاح ${directive.keyVersion}\nالسبب: ${directive.reason}\nالتجزئة: ${directive.hash}`;
+  }
+
+  if (args.command === 'resume') {
+    const directive = halt.resume(args.reason ?? 'royal resume');
+    return args.json
+      ? JSON.stringify({ resumed: true, directive }, null, 2)
+      : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;
+  }
+
+  if (args.command === 'confirm') {
+    if (!config.nodeId) throw new Error('HALT_NODE_ID غير معلَن');
+    halt.registerNode(config.nodeId);
+    const confirmation = halt.confirmHalt(config.nodeId, 'إقرار من أداة التشغيل');
+    return args.json
+      ? JSON.stringify({ confirmed: true, confirmation }, null, 2)
+      : `✅ أقرّت العقدة ${confirmation.nodeId} بالتوقف في العهد ${confirmation.epoch}`;
+  }
+
+  if (args.command === 'verify') {
+    const result = halt.verifyHistory();
+    if (args.json) return JSON.stringify(result, null, 2);
+    const lines = [
+      result.ok ? '✅ سلسلة التوجيهات متصلة وموقَّعة' : '❌ سلسلة التوجيهات منكسرة',
+      `توجيهات: ${result.directives}`,
+    ];
+    if (result.problem)
+      lines.push(`العطب: ${result.problem}${result.problemAt ? ` عند ${result.problemAt}` : ''}`);
+    return lines.join('\n');
+  }
+
+  throw new Error(`أمر غير معروف: ${args.command}\n\n${USAGE}`);
+}
+
+// التشغيل المباشر فقط؛ الاستيراد للاختبار لا يُنفّذ شيئاً.
+if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+  run(process.argv.slice(2), process.env)
+    .then((output) => {
+      process.stdout.write(output + '\n');
+    })
+    .catch((error) => {
+      process.stderr.write(`خطأ: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    });
+}

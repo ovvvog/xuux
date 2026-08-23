@@ -15,3 +15,4 @@ export * from './key-provider-remote.mjs';
 export * from './king-key.mjs';
 export * from './king-key-rotation.mjs';
 export * from './command-ledger.mjs';
+export * from './halt-switch.mjs';
