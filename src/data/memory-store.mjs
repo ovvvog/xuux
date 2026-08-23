@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { snapshot } from '../lib/snapshot.mjs';
 
 // الأنواع المستوردة تُكتب بصيغة `import(...)` مباشرة في مواضعها ولا تُسمّى بأسماء
 // محلية: هذه الوحدة تُعاد تصديرها مع فهرس البيانات في src/data/index.mjs، وتسمية
@@ -53,12 +54,15 @@ export class AgentMemoryStore {
       id,
       agentId,
       datasetId: dataset.id,
-      content,
+      // صورةٌ من المحتوى وقت التسليم لا مرجعٌ إليه: الذاكرة تُقيّد ما سُلِّم حين
+      // سُلِّم، ومرجعٌ محفوظ يجعل المستدعي قادراً على تبديل ذاكرةٍ مسجَّلة بعد
+      // تسجيلها فيُفسد كل استدعاءٍ لاحق ولا يترك أثراً في السجل.
+      content: snapshot(content),
       createdAt: new Date().toISOString(),
     };
     this.entries.set(id, e);
     this.log.append('memory.created', agentId, { id, datasetId: dataset.id });
-    return Object.freeze({ ...e });
+    return snapshot(e);
   }
 
   /**
@@ -72,7 +76,7 @@ export class AgentMemoryStore {
     const e = this.entries.get(id);
     if (!e || e.agentId !== agentId) throw new Error('MEMORY_NOT_FOUND');
     this.catalog.canRead(e.datasetId, agentId, clearance);
-    return Object.freeze({ ...e });
+    return snapshot(e);
   }
 
   /**

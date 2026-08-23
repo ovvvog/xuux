@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { snapshot } from '../lib/snapshot.mjs';
 
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
 
@@ -98,7 +99,7 @@ export class LawRegistry {
     };
     this.laws.set(id, l);
     this.log.append('law.proposed', proposer, { id, title, scope });
-    return Object.freeze({ ...l });
+    return snapshot(l);
   }
   /**
    * ينقل قانوناً إلى حالة أخرى. الإنفاذ حصر على التاج، والملغى لا يُعاد فتحه.
@@ -117,7 +118,7 @@ export class LawRegistry {
     l.version++;
     l.changedAt = new Date().toISOString();
     this.log.append(`law.${state}`, actor, { id, version: l.version });
-    return Object.freeze({ ...l });
+    return snapshot(l);
   }
   /**
    * القوانين المُنفَّذة السارية على نطاق معيّن، بما فيها ما نطاقه 'all'.
@@ -127,7 +128,7 @@ export class LawRegistry {
   active(scope) {
     return [...this.laws.values()]
       .filter((x) => x.state === LawState.ENACTED && (x.scope === scope || x.scope === 'all'))
-      .map((x) => Object.freeze({ ...x }));
+      .map((x) => snapshot(x));
   }
 }
 export class Court {
@@ -163,7 +164,7 @@ export class Court {
     };
     this.cases.set(id, c);
     this.log.append('court.case.opened', 'court', { id, claimant, respondent });
-    return Object.freeze({ ...c });
+    return snapshot(c);
   }
   /**
    * ينظر في قضية مفتوحة فينقلها إلى حالة «منظورة».
@@ -178,7 +179,7 @@ export class Court {
     c.state = CaseState.HEARD;
     c.heardBy = actor;
     this.log.append('court.case.heard', actor, { id });
-    return Object.freeze({ ...c });
+    return snapshot(c);
   }
   /**
    * يصدر حكماً في قضية منظورة. الحكم يشترط نتيجة وسبباً معلَنين.
@@ -195,7 +196,7 @@ export class Court {
     c.state = CaseState.DECIDED;
     c.judgment = { outcome, reason, actor, at: new Date().toISOString() };
     this.log.append('court.case.decided', actor, { id, outcome });
-    return Object.freeze({ ...c });
+    return snapshot(c);
   }
   /**
    * يستأنف حكماً صادراً. غير المحكوم فيها لا تُستأنف.
@@ -210,6 +211,6 @@ export class Court {
     c.state = CaseState.APPEALED;
     c.appeal = { reason, actor, at: new Date().toISOString() };
     this.log.append('court.case.appealed', actor, { id });
-    return Object.freeze({ ...c });
+    return snapshot(c);
   }
 }

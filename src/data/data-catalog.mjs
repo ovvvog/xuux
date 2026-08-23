@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { snapshot } from '../lib/snapshot.mjs';
 
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
 
@@ -106,7 +107,7 @@ export class DataCatalog {
     };
     this.records.set(id, r);
     this.log.append('data.registered', owner, { id, name, classification });
-    return Object.freeze({ ...r });
+    return snapshot(r);
   }
 
   /**
@@ -123,7 +124,7 @@ export class DataCatalog {
     }
     r.quality = quality;
     this.log.append('data.quality.changed', r.owner, { id, quality });
-    return Object.freeze({ ...r });
+    return snapshot(r);
   }
 
   /**
@@ -149,6 +150,6 @@ export class DataCatalog {
    */
   get(id) {
     const r = this.records.get(id);
-    return r ? Object.freeze({ ...r }) : null;
+    return r ? snapshot(r) : null;
   }
 }

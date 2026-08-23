@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { snapshot } from '../lib/snapshot.mjs';
 
 /** @typedef {import('../root-of-trust/crown.mjs').CrownGateway} CrownGateway */
 /** @typedef {import('../root-of-trust/crown.mjs').RoyalCommand} RoyalCommand */
@@ -119,7 +120,7 @@ export class ExecutionKernel {
       task.result = result;
       task.finishedAt = new Date().toISOString();
       this.log.append('kernel.task.succeeded', accepted.target, { taskId: task.id });
-      return Object.freeze({ ...task });
+      return snapshot(task);
     } catch (error) {
       task.state = TaskState.FAILED;
       task.error = error instanceof Error ? error.message : String(error);
@@ -150,6 +151,6 @@ export class ExecutionKernel {
    */
   getTask(id) {
     const task = this.tasks.get(id);
-    return task ? Object.freeze({ ...task }) : null;
+    return task ? snapshot(task) : null;
   }
 }

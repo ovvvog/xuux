@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { snapshot } from '../lib/snapshot.mjs';
 
 /**
  * حالة الوكيل، مشتقة من الكائن المُجمَّد فلا تنحرف عنه.
@@ -68,7 +69,7 @@ export class AgentRegistry {
     };
     this.agents.set(id, record);
     this.log.append('agent.registered', owner, { id, role, capabilities });
-    return Object.freeze({ ...record });
+    return snapshot(record);
   }
   /**
    * ينقل الوكيل إلى حالة أخرى. الملغى لا يُعاد تفعيله، وإلغاء الوكيل يُلغي
@@ -89,7 +90,7 @@ export class AgentRegistry {
     a.stateChangedAt = new Date().toISOString();
     if (state === AgentState.REVOKED) this.ca.revoke(a.certificate.id, reason || 'agent revoked');
     this.log.append(`agent.${state}`, 'crown', { id, reason });
-    return Object.freeze({ ...a });
+    return snapshot(a);
   }
   /**
    * @param {string} id
@@ -97,7 +98,7 @@ export class AgentRegistry {
    */
   get(id) {
     const a = this.agents.get(id);
-    return a ? Object.freeze({ ...a }) : null;
+    return a ? snapshot(a) : null;
   }
   /**
    * @param {AgentStateValue} [state] - إن غابت أُرجع كل الوكلاء
@@ -106,6 +107,6 @@ export class AgentRegistry {
   list(state) {
     return [...this.agents.values()]
       .filter((x) => !state || x.state === state)
-      .map((x) => Object.freeze({ ...x }));
+      .map((x) => snapshot(x));
   }
 }

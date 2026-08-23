@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { snapshot } from '../lib/snapshot.mjs';
 
 /**
  * حالة النموذج، مشتقة من الكائن المُجمَّد فلا تنحرف عنه.
@@ -95,7 +96,7 @@ export class ModelRegistry {
     };
     this.models.set(id, record);
     this.log.append('model.registered', 'crown', { id, name, version, digest });
-    return Object.freeze({ ...record });
+    return snapshot(record);
   }
   /**
    * ينقل النموذج إلى حالة أخرى. المُرجَع عنه لا يُعاد تفعيله.
@@ -111,10 +112,21 @@ export class ModelRegistry {
     if (m.state === ModelState.ROLLED_BACK && state !== ModelState.ROLLED_BACK)
       throw new Error('ROLLED_BACK_MODEL_IMMUTABLE');
     m.state = state;
-    m.reason = reason;
+    // سببٌ غائب لا يُكتب فوق سببٍ معلن: `m.reason = undefined` كان يمحو سبب
+    // الانتقال السابق فيبدو أن انتقالاً وقع بلا سبب قطّ. الحقل يبقى، ووقتُ
+    // التغيير هو ما يتقدّم، والحدث يحمل السبب كما ورد أو غيابه.
+    if (reason !== undefined) m.reason = reason;
     m.changedAt = new Date().toISOString();
     this.log.append(`model.${state}`, 'crown', { id, reason });
-    return Object.freeze({ ...m });
+    // العيب `D3`: مؤشّر «النشط لهذا الغرض» لم يكن يُنظَّف، فنموذجٌ عُلِّق أو
+    // أُرجع عنه يبقى **هو النشط** لغرضه — تجاوزٌ للبوابة لا يحتاج مستدعياً
+    // سيّئاً، يكفي أن يُعلَّق نموذج ثم يُسأل السجل. والعودة إلى الخدمة قرارٌ
+    // يُعلن بـ`activate` لا أثرٌ جانبي لانتقال حالة.
+    if (state !== ModelState.APPROVED && this.activeByPurpose.get(m.purpose) === id) {
+      this.activeByPurpose.delete(m.purpose);
+      this.log.append('model.deactivated', 'crown', { id, purpose: m.purpose, state, reason });
+    }
+    return snapshot(m);
   }
   /**
    * يجعل نموذجاً معتمداً هو النشط لغرضه. غير المعتمد لا يُفعَّل.
@@ -127,19 +139,31 @@ export class ModelRegistry {
     const previous = this.activeByPurpose.get(m.purpose);
     this.activeByPurpose.set(m.purpose, id);
     this.log.append('model.activated', 'crown', { id, purpose: m.purpose, previous });
-    return Object.freeze({ ...m });
+    return snapshot(m);
   }
   /**
-   * النموذج النشط لغرض معيّن.
+   * النموذج النشط لغرض معيّن، **صورةً عميقة مُجمَّدة**.
+   *
+   * كانت هذه الدالة تُرجع المرجع الداخلي غير مُجمَّد (العيب `D4`)، فمن نادى
+   * `getActive` قدر أن يُغيّر حالة النموذج بيده متجاوزاً `transition` كلها —
+   * بوابةٌ تُحرَس من الأمام وبابها الخلفي مفتوح. وكانت تخلط `null` بـ`undefined`
+   * فلا يفرّق المستدعي بين **فراغ** (لا نشط لهذا الغرض) وبين **فساد حالة**
+   * (مؤشّرٌ يشير إلى معرّف غير موجود) — والفساد الذي يُقرأ فراغاً يُبنى عليه.
+   * فصار الفراغ `null` صريحة، والفساد خطأً مُسمّى يفشل مُغلقاً.
    * @param {string} purpose
-   * @returns {ModelRecord | null | undefined} `null` إن لم يُفعَّل شيء لهذا الغرض،
-   *   و`undefined` إن كانت الخريطة تشير إلى معرّف غير موجود في السجل. الفرق
-   *   بين القيمتين مقصود في التوصيف لأنه واقع الدالة الحالي، وهو خلل مسجَّل
-   *   للمعالجة في M2.01 لا يُصلَح هنا لأن إصلاحه تغيير سلوك لا توصيف نوع.
+   * @returns {Readonly<ModelRecord> | null} `null` إن لم يُفعَّل شيء لهذا الغرض
+   * @throws {Error} `MODEL_ACTIVE_POINTER_DANGLING` إن أشار المؤشّر إلى معرّف غير
+   *   موجود، و`MODEL_ACTIVE_NOT_APPROVED` إن كان المشار إليه غير معتمد
    */
   getActive(purpose) {
     const id = this.activeByPurpose.get(purpose);
-    return id ? this.models.get(id) : null;
+    if (id === undefined) return null;
+    const m = this.models.get(id);
+    if (!m) throw new Error('MODEL_ACTIVE_POINTER_DANGLING');
+    // حرسُ ثباتٍ لا يقع في المسار العادي بعد إصلاح `D3`؛ وموضعه هنا لأن الفشل
+    // المُغلق لا يُبنى على ثقةٍ بأن المسار العادي هو المسار الوحيد.
+    if (m.state !== ModelState.APPROVED) throw new Error('MODEL_ACTIVE_NOT_APPROVED');
+    return snapshot(m);
   }
   /**
    * يقارن بصمة أوزان مُقدَّمة ببصمة وقت التسجيل.
