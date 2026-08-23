@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "seed/schemas/institutions.schema.json",
+  "title": "بذرة المؤسسات",
+  "type": "object",
+  "required": ["schema", "version", "generated_by", "count", "institutions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "seed/schemas/institutions.schema.json" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "generated_by": { "type": "string", "minLength": 1 },
+    "count": { "type": "integer", "minimum": 1 },
+    "institutions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "number", "name_ar", "path", "path_verified", "status", "provenance"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^\\d{3}$" },
+          "number": { "type": "integer", "minimum": 1 },
+          "name_ar": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 80,
+            "not": { "pattern": "^(#|الغرض:|الحالة:|الوظيفة:)" }
+          },
+          "path": { "type": "string", "pattern": "^institutions/\\d{3}-.+$" },
+          "path_verified": { "const": true },
+          "status": { "enum": ["planned", "in_progress", "active", "retired"] },
+          "provenance": {
+            "type": "object",
+            "required": ["source", "ref"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "minLength": 3 },
+              "ref": { "type": "string", "minLength": 3 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
