@@ -1,0 +1,22 @@
+# ملّاك المراجعة — كل مسار له مسؤول عن صحته.
+# القاعدة: مسارات جذر الثقة والحوكمة والأمن لا تُدمج بلا مراجعة مالكها.
+# استبدل @soaav-svg بمعرّفات الملّاك الفعليين عند تعيينهم.
+
+# الافتراضي
+*                       @soaav-svg
+
+# جذر الثقة — أعلى حساسية في المستودع، لا يُمسّ بلا مراجعة
+/src/root-of-trust/     @soaav-svg
+/src/crown/             @soaav-svg
+/src/identity/          @soaav-svg
+/src/security/          @soaav-svg
+
+# المرجعية التوثيقية الملزمة
+/GOVERNANCE_RULE.md     @soaav-svg
+/docs/roadmap/          @soaav-svg
+
+# بنية البناء والتكامل المستمر
+/.github/               @soaav-svg
+/package.json           @soaav-svg
+/package-lock.json      @soaav-svg
+/tsconfig.json          @soaav-svg
