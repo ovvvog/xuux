@@ -48,3 +48,10 @@
 - الاختبار: `tests/core/execution-kernel.test.mjs`.
 - التوثيق: `docs/stages/002-execution-kernel.md`.
 - المتبقي: طوابير دائمة، عمال موزعون، حصص، إلغاء، واستعادة إنتاجية.
+
+## المرحلة 003 — هوية الوكلاء وسجل السكان التشغيلي
+- الحالة: **منجزة كنواة محلية**.
+- التنفيذ: `src/identity/agent-registry.mjs`.
+- الاختبار: `tests/identity/agent-registry.test.mjs`.
+- التوثيق: `docs/stages/003-agent-identity.md`.
+- المتبقي: سجل موزع، إثبات الجهاز، تفويض زمني، ومزامنة إلغاء إنتاجية.
