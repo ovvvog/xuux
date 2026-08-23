@@ -1,6 +1,18 @@
 {
-  "description": "وحدة version ضمن منظومة الدولة الرقمية",
-  "status": "placeholder",
-  "contract": "يستبدل بالمخطط أو الإعداد المعتمد قبل التشغيل",
-  "audit": "كل تغيير موثق ومراجع"
+  "version": "0.1.0",
+  "name": "الدولة الملكية الفدرالية الرقمية",
+  "stage": "M0 — البنية الهندسية الأساسية",
+  "completion": {
+    "percent": 4,
+    "basis": "docs/roadmap/02-baseline-audit.md §2.9",
+    "gate": "G0"
+  },
+  "versioning": {
+    "scheme": "semver",
+    "major": "خرق توافق في عقد سيادي أو واجهة عامة",
+    "minor": "قدرة جديدة مُختبرة أو إغلاق بوابة",
+    "patch": "إصلاح أو توثيق بلا تغيير عقد",
+    "reference": "docs/roadmap/04-execution-playbook.md"
+  },
+  "rule": "لا يُرفع هذا الإصدار إلا بعمل مُختبر ومُدخلة في docs/roadmap/05-work-log.md"
 }
