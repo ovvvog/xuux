@@ -50,3 +50,6 @@ tmp/
 
 # جرد الملفات الكامل: 4.5MB قابل للتوليد بأمر audit:inventory — لا يُلتزم
 docs/audit/file-inventory.csv
+
+# نسخ احتياطية محلية (M3.07) — أرشيفات قاعدة لا تُلتزم في Git
+backups/
