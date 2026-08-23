@@ -12,15 +12,50 @@ import YAML from 'yaml';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.resolve(HERE, '..', '..');
 
+/**
+ * المجال كما تظهر خصائصه الأساسية في السجل المحمّل.
+ * @typedef {Readonly<{id: string, number: number, name_ar: string, path: string, layers: readonly string[], status: string, needs_ratification: boolean, provenance: Readonly<{source: string, ref: string}>}>} RegistryDomain
+ */
+/**
+ * المؤسسة المحمّلة؛ تبقى الحقول الإضافية من البذرة محفوظة كما وردت.
+ * @typedef {Readonly<{id: string, name_ar: string, path: string} & Record<string, unknown>>} RegistryInstitution
+ */
+/** @typedef {Readonly<{id: string, number: number, name_ar: string, canonical_path: string, legacy_data_path: string | null, province_ids: readonly string[]}>} RegistryRegion */
+/** @typedef {Readonly<{id: string, name_ar: string, region_id: string, canonical_path: string, legacy_data_path: string | null, municipality_ids: readonly string[]}>} RegistryProvince */
+/** @typedef {Readonly<{id: string, local_id: string, province_id: string, region_id: string, canonical_path: string}>} RegistryMunicipality */
+/** @typedef {Readonly<{domains: number, institutions: number, regions: number, provinces: number, municipalities: number}>} RegistryCounts */
+/**
+ * السجل الناتج بعد بناء العلاقات المرجعية بين البذور.
+ * @typedef {Readonly<{domains: Map<string, RegistryDomain>, institutions: Map<string, RegistryInstitution>, regions: Map<string, RegistryRegion>, provinces: Map<string, RegistryProvince>, municipalities: Map<string, RegistryMunicipality>, danglingRefs: readonly string[], violations: readonly string[], counts: RegistryCounts, defects: Readonly<Record<string, unknown>>, domainsNeedingRatification: readonly string[]}>} Registry
+ */
+/** @typedef {{id: string, number: number, name_ar: string, path: string, layers: string[], status: string, needs_ratification: boolean, provenance: {source: string, ref: string}}} DomainSeed */
+/** @typedef {{id: string, name_ar: string, path: string} & Record<string, unknown>} InstitutionSeed */
+/** @typedef {{id: string, name_ar: string, canonical_path: string, legacy_data_path?: string | null, municipality_ids?: string[], municipality_count: number}} ProvinceSeed */
+/** @typedef {{id: string, number: number, name_ar: string, canonical_path: string, legacy_data_path?: string | null, provinces?: ProvinceSeed[]}} RegionSeed */
+/** @typedef {{domains?: DomainSeed[], count: number}} DomainsSeed */
+/** @typedef {{institutions?: InstitutionSeed[], count: number}} InstitutionsSeed */
+/** @typedef {{counts: {regions: number, provinces: number, municipalities: number}, regions?: RegionSeed[], defects: Record<string, unknown>}} FederationSeed */
+/** @typedef {{seedDir?: string, strict?: boolean}} RegistryLoadOptions */
+
 /** خطأ ترابط مرجعي في البذرة. */
 export class RegistryIntegrityError extends Error {
+  /**
+   * @param {string[]} violations - المخالفات التي اكتشفت أثناء البناء
+   */
   constructor(violations) {
     super(`فشل الترابط المرجعي بـ ${violations.length} مخالفة`);
     this.name = 'RegistryIntegrityError';
+    /** @type {string[]} */
     this.violations = violations;
   }
 }
 
+/**
+ * يقرأ ملف بذرة واحدًا ويترك التحقق البنيوي لمسار بناء السجل.
+ * @param {string} seedDir - المجلد الذي يحتوي ملفات البذرة
+ * @param {string} file - اسم ملف البذرة المطلوب
+ * @returns {unknown} محتوى YAML قبل تثبيت شكله المتوقع
+ */
 function readSeed(seedDir, file) {
   const abs = path.join(seedDir, file);
   if (!fs.existsSync(abs)) throw new Error(`ملف بذرة مفقود: ${file}`);
@@ -29,22 +64,25 @@ function readSeed(seedDir, file) {
 
 /**
  * يبني السجل في الذاكرة من البذرة.
- * @param {object} [opts]
- * @param {string} [opts.seedDir] مجلد البذرة (الافتراضي: <الجذر>/seed)
- * @param {boolean} [opts.strict=true] يرفع استثناءً عند أي مخالفة ترابط
+ * @param {RegistryLoadOptions} [opts={}] خيارات موقع البذرة وصرامة الترابط
+ * @returns {Registry} السجل المكتمل والعلاقات التي استخلصت منه
  */
 export function loadRegistry(opts = {}) {
   const seedDir = opts.seedDir ?? path.join(REPO_ROOT, 'seed');
   const strict = opts.strict ?? true;
+  /** @type {string[]} */
   const violations = [];
+  /** @param {string} m - وصف المخالفة المكتشفة */
   const v = (m) => violations.push(m);
 
-  const rawDomains = readSeed(seedDir, 'domains.yaml');
-  const rawInsts = readSeed(seedDir, 'institutions.yaml');
-  const rawFed = readSeed(seedDir, 'federation.yaml');
+  const rawDomains = /** @type {DomainsSeed} */ (readSeed(seedDir, 'domains.yaml'));
+  const rawInsts = /** @type {InstitutionsSeed} */ (readSeed(seedDir, 'institutions.yaml'));
+  const rawFed = /** @type {FederationSeed} */ (readSeed(seedDir, 'federation.yaml'));
 
   // ── المجالات ──
+  /** @type {Map<string, RegistryDomain>} */
   const domains = new Map();
+  /** @type {Set<string>} */
   const domainPaths = new Set();
   for (const d of rawDomains.domains ?? []) {
     if (domains.has(d.id)) v(`مجال مكرر: ${d.id}`);
@@ -57,7 +95,9 @@ export function loadRegistry(opts = {}) {
   }
 
   // ── المؤسسات ──
+  /** @type {Map<string, RegistryInstitution>} */
   const institutions = new Map();
+  /** @type {Set<string>} */
   const instPaths = new Set();
   for (const it of rawInsts.institutions ?? []) {
     if (institutions.has(it.id)) v(`مؤسسة مكررة: ${it.id}`);
@@ -70,8 +110,11 @@ export function loadRegistry(opts = {}) {
   }
 
   // ── الفدرالية ──
+  /** @type {Map<string, RegistryRegion>} */
   const regions = new Map();
+  /** @type {Map<string, RegistryProvince>} */
   const provinces = new Map();
+  /** @type {Map<string, RegistryMunicipality>} */
   const municipalities = new Map();
 
   for (const r of rawFed.regions ?? []) {
@@ -139,6 +182,7 @@ export function loadRegistry(opts = {}) {
   }
 
   // ── مراجع معلّقة: كل أب مذكور في الأبناء موجود فعلاً ──
+  /** @type {string[]} */
   const dangling = [];
   for (const p of provinces.values()) {
     if (!regions.has(p.region_id))
@@ -175,7 +219,11 @@ export function loadRegistry(opts = {}) {
   return registry;
 }
 
-/** يعيد ملخّصاً نصياً للسجل. */
+/**
+ * يعيد ملخّصاً نصياً للسجل.
+ * @param {Registry} registry - السجل المراد تلخيص أعداده
+ * @returns {string} ملخص الأعداد والمراجع المعلقة
+ */
 export function summarize(registry) {
   const c = registry.counts;
   return [

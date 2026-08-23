@@ -13,13 +13,26 @@ import path from 'node:path';
 import { classify, substantiveLines, SKIP_DIRS } from './lib/classify.mjs';
 
 const args = process.argv.slice(2);
+/**
+ * يقرأ وسيط سطر أوامر بصيغة `--name value`، ويسقط إلى قيمة افتراضية.
+ * @param {string} name - اسم الوسيط كما يُكتب في السطر، مع الشرطتين
+ * @param {string} fallback - القيمة المستخدمة إن غاب الوسيط أو جاء بلا قيمة بعده
+ * @returns {string}
+ */
 const getArg = (name, fallback) => {
   const i = args.indexOf(name);
-  return i !== -1 && args[i + 1] ? args[i + 1] : fallback;
+  const value = args[i + 1];
+  return i !== -1 && value ? value : fallback;
 };
 const ROOT = path.resolve(getArg('--root', '.'));
 const OUT = path.resolve(getArg('--out', 'docs/audit/file-inventory.csv'));
 
+/**
+ * يمشي الشجرة مشياً عميقاً ويجمع مسارات الملفات فقط، متجاوزاً مجلدات البنية التحتية.
+ * @param {string} dir - المجلد المراد فحصه
+ * @param {string[]} [acc=[]] - مُجمِّع تُدفع إليه النتائج عبر الاستدعاءات المتداخلة
+ * @returns {string[]} مسارات مطلقة لكل ملف تحت `dir`
+ */
 function walk(dir, acc = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
@@ -32,14 +45,44 @@ function walk(dir, acc = []) {
   return acc;
 }
 
+/**
+ * يُهرّب خلية CSV: يُحيط بعلامتي تنصيص ويُضاعف التنصيص الداخلي عند وجود فاصلة أو سطر جديد.
+ * @param {string | number} v - القيمة الخام
+ * @returns {string}
+ */
 const csvCell = (v) => {
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
+/**
+ * فئات التصنيف الأربع، مستوردة من مصدر الحقيقة الواحد في منطق التصنيف.
+ * @typedef {import('./lib/classify.mjs').FileCategory} FileCategory
+ */
+
+/**
+ * عدّاد لكل فئة، يُستخدم للإجمالي وللتوزيع حسب الامتداد وحسب المجلد الجذري.
+ * @typedef {{ real: number, data: number, doc: number, template: number }} CategoryCounts
+ */
+
+/**
+ * عدّاد فئات مع مجموع، للتوزيعات الفرعية.
+ * @typedef {CategoryCounts & { total: number }} CountsWithTotal
+ */
+
+/**
+ * صف الجرد كصفّ ثابت الترتيب — هو نفسه ترتيب أعمدة CSV المعلَن في `header`.
+ * إعلانه كصفّ ثابت (لا كمصفوفة فضفاضة) هو ما يجعل الفاحص يعرف أن العمود 0 نصّ
+ * والعمود 5 فئة تصنيف، فلا تُقرأ الأعمدة بأنواع خاطئة عند بناء الملخّص.
+ * @typedef {[string, string, number, number, number, FileCategory, string]} InventoryRow
+ */
+
 const files = walk(ROOT).sort();
+/** @type {InventoryRow[]} */
 const rows = [];
+/** @type {CategoryCounts} */
 const counts = { real: 0, data: 0, doc: 0, template: 0 };
+/** @type {Map<string, CountsWithTotal>} */
 const byExt = new Map();
 
 for (const abs of files) {
@@ -56,7 +99,10 @@ for (const abs of files) {
   const { category, reason } = classify(rel, text);
   counts[category] += 1;
   if (!byExt.has(ext)) byExt.set(ext, { real: 0, data: 0, doc: 0, template: 0, total: 0 });
+  // الغياب مستحيل: السطر السابق يضمن وجود المفتاح، والفحص الصريح هنا هو ما
+  // يُثبت ذلك للفاحص بلا افتراض.
   const e = byExt.get(ext);
+  if (e === undefined) throw new Error(`EXT_COUNTER_MISSING: ${ext}`);
   e[category] += 1;
   e.total += 1;
   rows.push([
@@ -115,14 +161,19 @@ console.log(`\nملف الجرد: ${OUT}`);
 // ═══ ملخّص markdown يُلتزم في المستودع (CSV الكامل يُعاد توليده بالأمر) ═══
 const SUMMARY = getArg('--summary', '');
 if (SUMMARY) {
+  /** @type {Map<string, CountsWithTotal>} */
   const byRoot = new Map();
-  for (const r of rows) {
-    const root = r[0].includes('/') ? r[0].split('/')[0] : '(الجذر)';
+  for (const row of rows) {
+    const rel = row[0];
+    // المجلد الجذري هو ما قبل أول شرطة مائلة؛ وإن لم توجد فالملف في جذر المستودع.
+    const root = rel.includes('/') ? (rel.split('/')[0] ?? '(الجذر)') : '(الجذر)';
     if (!byRoot.has(root)) byRoot.set(root, { real: 0, data: 0, doc: 0, template: 0, total: 0 });
     const e = byRoot.get(root);
-    e[r[5]] += 1;
+    if (e === undefined) throw new Error(`ROOT_COUNTER_MISSING: ${root}`);
+    e[row[5]] += 1;
     e.total += 1;
   }
+  /** @type {string[]} */
   const M = [];
   M.push('# جرد ملفات المستودع');
   M.push('');
@@ -134,7 +185,11 @@ if (SUMMARY) {
   M.push('');
   M.push('| الفئة | العدد | النسبة |');
   M.push('| --- | --- | --- |');
-  for (const k of ['real', 'data', 'doc', 'template']) {
+  // النوع معلَن صراحةً حتى تكون قراءة العدّاد بمفتاح من الفئات الأربع فقط،
+  // فلا يمكن قراءته بمفتاح نصي فضفاض لا وجود له.
+  /** @type {import('./lib/classify.mjs').FileCategory[]} */
+  const categories = ['real', 'data', 'doc', 'template'];
+  for (const k of categories) {
     M.push(`| \`${k}\` | ${counts[k]} | ${((counts[k] / total) * 100).toFixed(2)}% |`);
   }
   M.push(`| **المجموع** | **${total}** | 100% |`);

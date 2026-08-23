@@ -9,7 +9,11 @@ import { join } from 'node:path';
 
 import { scanText, scanRepository, redact, PATTERNS } from '../../scripts/scan-secrets.mjs';
 
-/** يبني مستودعًا مؤقتًا للفحص. */
+/**
+ * يبني مستودعًا مؤقتًا للفحص.
+ * @param {Record<string, string>} files - مسار نسبي ← محتوى الملف
+ * @returns {string} مسار جذر المستودع المؤقت
+ */
 function makeRepo(files) {
   const root = mkdtempSync(join(tmpdir(), 'secret-scan-'));
   for (const [rel, content] of Object.entries(files)) {
@@ -39,6 +43,7 @@ test('يكشف توكن GitHub المزروع ويفشل', () => {
   try {
     const findings = scanRepository(root);
     assert.equal(findings.length, 1);
+    assert.ok(findings[0], 'يجب أن توجد مخالفة أولى');
     assert.equal(findings[0].id, 'GITHUB_PAT_CLASSIC');
     assert.equal(findings[0].file, '.env.local');
     assert.equal(findings[0].line, 1);
@@ -50,6 +55,7 @@ test('يكشف توكن GitHub المزروع ويفشل', () => {
 test('يكشف كتلة مفتاح خاص — أخطر حالة على جذر الثقة', () => {
   const findings = scanText('-----BEGIN OPENSSH PRIVATE KEY-----', 'keys.txt');
   assert.equal(findings.length, 1);
+  assert.ok(findings[0], 'يجب أن توجد مخالفة أولى');
   assert.equal(findings[0].id, 'PRIVATE_KEY_BLOCK');
 });
 
@@ -65,6 +71,7 @@ test('يرفض ملفات مواد المفاتيح بامتدادها وحده'
 });
 
 test('يكشف مفاتيح AWS و Slack و JWT وسلاسل الاتصال', () => {
+  /** @type {Array<[string, string]>} كل حالة: نص العيّنة ← معرّف النمط المتوقع */
   const cases = [
     ['AKIAIOSFODNN7EXAMPLE', 'AWS_ACCESS_KEY_ID'],
     ['xoxb-123456789012-abcdefghijklmnop', 'SLACK_TOKEN'],
@@ -79,6 +86,7 @@ test('يكشف مفاتيح AWS و Slack و JWT وسلاسل الاتصال', ()
 
 test('يكشف إسناد سر بقيمة حرفية طويلة', () => {
   const findings = scanText("const api_key = 'abcdefghijklmnopqrstuvwxyz012345';", 'x.mjs');
+  assert.ok(findings[0], 'يجب أن توجد مخالفة أولى');
   assert.equal(findings[0].id, 'GENERIC_SECRET_ASSIGNMENT');
 });
 
@@ -89,7 +97,9 @@ test('يتجاوز السطر المُعلَّم صراحةً كمثال توث�
 
 test('يحجب السر في التقرير ولا يطبعه كاملًا', () => {
   const planted = `ghp_${'A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8'}`;
-  const excerpt = scanText(`TOKEN=${planted}`, 'x')[0].excerpt;
+  const first = scanText(`TOKEN=${planted}`, 'x')[0];
+  assert.ok(first, 'يجب أن توجد مخالفة أولى');
+  const excerpt = first.excerpt;
   assert.ok(!excerpt.includes(planted), 'يجب ألا يظهر السر كاملًا في التقرير');
   assert.ok(excerpt.includes('*'), 'يجب أن يكون المقتطف محجوبًا');
   assert.equal(redact('abc'), '***');

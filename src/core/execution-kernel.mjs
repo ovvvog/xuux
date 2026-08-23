@@ -1,5 +1,32 @@
 import { randomUUID } from 'node:crypto';
 
+/** @typedef {import('../root-of-trust/crown.mjs').CrownGateway} CrownGateway */
+/** @typedef {import('../root-of-trust/crown.mjs').RoyalCommand} RoyalCommand */
+/** @typedef {import('../root-of-trust/crown.mjs').AcceptedRoyalCommand} AcceptedRoyalCommand */
+/** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
+/** @typedef {import('../root-of-trust/policy.mjs').PolicyEngine} PolicyEngine */
+
+/**
+ * حالات المهمة الخمس. النوع مشتق من الكائن المُجمَّد نفسه، فلا يمكن أن تنحرف
+ * قائمة الحالات عن النوع الذي يفحصها.
+ * @typedef {(typeof TaskState)[keyof typeof TaskState]} TaskStateValue
+ */
+
+/**
+ * مهمة داخل النواة. الحقول التي تُضاف بعد البدء (البدء والنتيجة والخطأ والانتهاء)
+ * اختيارية لأنها لا توجد لحظة الإدراج في الطابور، وإعلانها هنا هو ما يسمح
+ * بإسنادها لاحقاً بلا خرق للنوع.
+ * @typedef {object} Task
+ * @property {string} id
+ * @property {AcceptedRoyalCommand} command - الأمر بعد قبول التاج له
+ * @property {TaskStateValue} state
+ * @property {string} createdAt
+ * @property {string} [startedAt]
+ * @property {string} [finishedAt]
+ * @property {unknown} [result] - ناتج المُعالِج، شكله يحدّده المُعالِج لا النواة
+ * @property {string} [error] - رسالة الفشل إن فشلت المهمة
+ */
+
 export const TaskState = Object.freeze({
   QUEUED: 'queued',
   RUNNING: 'running',
@@ -11,8 +38,14 @@ export const TaskState = Object.freeze({
 export class SafeMode {
   constructor() {
     this.active = false;
+    /** @type {string | null} */
     this.reason = null;
   }
+  /**
+   * يُدخل النظام في الوضع الآمن فيمنع أي تنفيذ جديد.
+   * @param {string} reason - سبب الدخول، يُسجَّل ويُعاد في رسالة الرفض
+   * @returns {void}
+   */
   enter(reason) {
     this.active = true;
     this.reason = reason;
@@ -27,18 +60,35 @@ export class SafeMode {
 }
 
 export class ExecutionKernel {
+  /**
+   * الاعتماديات موصوفة كاختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط
+   * ويردّ عليه بخطأ مُسمّى `KERNEL_DEPENDENCY_MISSING`. جعلها إلزامية في النوع
+   * كان سيحوّل ذلك الخطأ المقروء إلى انهيار تفكيك غامض — أي تغييراً في السلوك.
+   * والتحقّق في أول سطر هو ما يضيّق النوع بعده إلى وجود مؤكد.
+   * @param {{ crown?: CrownGateway, log?: EventLog, policy?: PolicyEngine | null }} [deps]
+   */
   constructor({ crown, log, policy = null } = {}) {
     if (!crown || !log) throw new Error('KERNEL_DEPENDENCY_MISSING');
     this.crown = crown;
     this.log = log;
     this.policy = policy;
     this.safeMode = new SafeMode();
+    /** @type {Map<string, Task>} */
     this.tasks = new Map();
   }
+  /**
+   * يُقدّم أمراً موقّعاً للتنفيذ: يُجيزه التاج أولاً، ثم يُنفَّذ المُعالِج تحت
+   * سجل أحداث كامل من الطابور إلى النتيجة.
+   * @param {RoyalCommand} command - الأمر الملكي المطلوب تنفيذه
+   * @param {string} signature - توقيع الأمر، يتحقّق منه التاج لا النواة
+   * @param {(command: AcceptedRoyalCommand) => unknown} handler - المُنفِّذ الفعلي
+   * @returns {Readonly<Task>} صورة مُجمَّدة من المهمة بعد نجاحها
+   */
   submit(command, signature, handler) {
     this.safeMode.assertOperational();
     if (typeof handler !== 'function') throw new Error('TASK_HANDLER_REQUIRED');
     const accepted = this.crown.command(command, signature);
+    /** @type {Task} */
     const task = {
       id: randomUUID(),
       command: accepted,
@@ -71,6 +121,11 @@ export class ExecutionKernel {
       throw error;
     }
   }
+  /**
+   * إيقاف طارئ: يُدخل الوضع الآمن ويُسجّل السبب.
+   * @param {string} [reason='kernel emergency stop']
+   * @returns {void}
+   */
   stop(reason = 'kernel emergency stop') {
     this.safeMode.enter(reason);
     this.log.append('kernel.safe-mode.entered', 'crown', { reason });
@@ -79,6 +134,10 @@ export class ExecutionKernel {
     this.safeMode.leave();
     this.log.append('kernel.safe-mode.left', 'crown', {});
   }
+  /**
+   * @param {string} id - معرّف المهمة
+   * @returns {Readonly<Task> | null} صورة مُجمَّدة، أو null إن لم توجد المهمة
+   */
   getTask(id) {
     const task = this.tasks.get(id);
     return task ? Object.freeze({ ...task }) : null;

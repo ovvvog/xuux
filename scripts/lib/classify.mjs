@@ -29,7 +29,23 @@ export const TEMPLATE_LINE_RE = /^الحالة:\s/m;
 export const TEMPLATE_TITLE_RE = /^#\s*تعريف\s/m;
 export const TEMPLATE_LEAK_RE = /domain name ar/;
 
-/** إزالة التعليقات والأسطر الفارغة، وإرجاع الأسطر الجوهرية. */
+/**
+ * فئات التصنيف الأربع الحصرية. تُستخدم كنوع للمفتاح في كل عدّاد يعتمد على التصنيف،
+ * فلا يقرأ أحد عدّاداً بمفتاح نصي فضفاض قد لا يوجد.
+ * @typedef {'real' | 'data' | 'doc' | 'template'} FileCategory
+ */
+
+/**
+ * نتيجة تصنيف ملف واحد: الفئة، وسبب مقروء يُطبع في التقارير، وعدد الأسطر الجوهرية.
+ * @typedef {{ category: FileCategory, reason: string, substantive: number }} Classification
+ */
+
+/**
+ * إزالة التعليقات والأسطر الفارغة، وإرجاع الأسطر الجوهرية.
+ * @param {string} text - محتوى الملف كاملاً
+ * @param {string} ext - الامتداد بحروف صغيرة، يحدّد شكل التعليق المعتمد
+ * @returns {string[]} الأسطر الجوهرية بعد التنظيف
+ */
 export function substantiveLines(text, ext) {
   const lineComment =
     ext === '.sql' ? ['--'] : ext === '.py' || ext === '.sh' ? ['#'] : ['//', '#'];
@@ -39,20 +55,26 @@ export function substantiveLines(text, ext) {
   }
   return body
     .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .filter((l) => !lineComment.some((c) => l.startsWith(c)))
-    .filter((l) => l !== '---' && l !== '...');
+    .map((/** @type {string} */ l) => l.trim())
+    .filter((/** @type {string} */ l) => l.length > 0)
+    .filter((/** @type {string} */ l) => !lineComment.some((c) => l.startsWith(c)))
+    .filter((/** @type {string} */ l) => l !== '---' && l !== '...');
 }
 
-/** هل النص يحمل بصمة قالب مولّد؟ */
+/**
+ * هل النص يحمل بصمة قالب مولّد؟
+ * @param {string} text - محتوى الملف كاملاً
+ * @returns {boolean}
+ */
 export function hasTemplateSignature(text) {
   return TEMPLATE_LINE_RE.test(text) || TEMPLATE_TITLE_RE.test(text) || TEMPLATE_LEAK_RE.test(text);
 }
 
 /**
  * يصنّف ملفاً إلى إحدى أربع فئات حصرية: real | data | doc | template
- * @returns {{category:'real'|'data'|'doc'|'template', reason:string, substantive:number}}
+ * @param {string} relPath - المسار النسبي من جذر المستودع
+ * @param {string} text - محتوى الملف كاملاً
+ * @returns {Classification}
  */
 export function classify(relPath, text) {
   const base = path.basename(relPath);

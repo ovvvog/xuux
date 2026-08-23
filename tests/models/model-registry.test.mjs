@@ -34,7 +34,13 @@ test('rejects unsafe model capabilities and missing manifest', () => {
       }),
     /FORBIDDEN_MODEL_CAPABILITY/,
   );
-  assert.throws(() => r.register({ name: 'x' }), /MODEL_MANIFEST_REQUIRED/);
+  assert.throws(
+    () =>
+      // @ts-expect-error استدعاء ناقص الحقول مقصود: يثبت أن البيان الناقص يُرفض
+      // زمن التشغيل بخطأ مُسمّى، لا أن يُمرَّر بصمت. رفض المدقّق له متوقَّع ومطلوب.
+      r.register({ name: 'x' }),
+    /MODEL_MANIFEST_REQUIRED/,
+  );
 });
 test('requires approval before activation and supports sandbox', () => {
   const r = new ModelRegistry({ log: new EventLog() }),
@@ -48,7 +54,9 @@ test('requires approval before activation and supports sandbox', () => {
   assert.throws(() => r.activate(m.id), /MODEL_NOT_APPROVED/);
   r.transition(m.id, ModelState.SANDBOXED, 'evaluation');
   const s = new ModelSandbox();
-  assert.equal(s.run(r.getActive('inspect') ?? r.models.get(m.id), { x: 1 }).network, 'disabled');
+  const sandboxed = r.getActive('inspect') ?? r.models.get(m.id);
+  assert.ok(sandboxed, 'النموذج المعزول يجب أن يكون موجوداً في السجل');
+  assert.equal(s.run(sandboxed, { x: 1 }).network, 'disabled');
   r.transition(m.id, ModelState.APPROVED, 'passed');
   assert.equal(r.activate(m.id).id, m.id);
 });

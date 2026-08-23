@@ -20,7 +20,10 @@ test('kernel executes only through crown and records lifecycle', () => {
   const c = createRoyalCommand('inspect', 'agent:one');
   const result = k.submit(c, king.sign(c), () => ({ ok: true }));
   assert.equal(result.state, TaskState.SUCCEEDED);
-  assert.equal(k.getTask(result.id).result.ok, true);
+  const stored = k.getTask(result.id);
+  assert.ok(stored, 'المهمة الناجحة يجب أن تكون محفوظة في النواة');
+  // توكيد أقوى من الأصل: يثبت الناتج بحرفه لا حقلاً واحداً منه.
+  assert.deepEqual(stored.result, { ok: true });
   assert.equal(log.events.filter((x) => x.type.startsWith('kernel.task')).length, 3);
 });
 test('kernel records failures and propagates them', () => {
@@ -34,7 +37,9 @@ test('kernel records failures and propagates them', () => {
       }),
     /controlled failure/,
   );
-  assert.equal([...k.tasks.values()][0].state, TaskState.FAILED);
+  const [failed] = [...k.tasks.values()];
+  assert.ok(failed, 'المهمة الفاشلة يجب أن تكون محفوظة في النواة');
+  assert.equal(failed.state, TaskState.FAILED);
 });
 test('safe mode blocks new tasks until resumed', () => {
   const { king, log, crown } = setup();

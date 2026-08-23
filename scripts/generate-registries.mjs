@@ -13,12 +13,70 @@ import YAML from 'yaml';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK = process.argv.includes('--check');
+
+// أنواع البذرة تُستورد من المُحمِّل: هو مالك عقد البذرة، فلا يُعاد وصف الشكل هنا
+// حتى لا ينحرف وصفان لنفس الملف. `YAML.parse` يُرجع any، والتصريح بالنوع عند
+// القراءة هو ما يجعل بقية الملف مفحوصاً فعلياً.
+/**
+ * @typedef {import('../src/registry/loader.mjs').DomainsSeed} DomainsSeedBase
+ * @typedef {import('../src/registry/loader.mjs').InstitutionsSeed} InstitutionsSeedBase
+ * @typedef {import('../src/registry/loader.mjs').FederationSeed} FederationSeedBase
+ * @typedef {import('../src/registry/loader.mjs').DomainSeed} DomainSeed
+ * @typedef {import('../src/registry/loader.mjs').InstitutionSeed} InstitutionSeed
+ * @typedef {import('../src/registry/loader.mjs').RegionSeed} RegionSeed
+ * @typedef {import('../src/registry/loader.mjs').ProvinceSeed} ProvinceSeed
+ */
+
+// المُحمِّل يصف القوائم كاختيارية لأنه مُصمَّم ليتحمّل بذرة ناقصة ويشتكي منها.
+// أما هذا المولّد فالبذرة الكاملة شرط مسبق لعمله: يشغّله CI بعد validate:seed،
+// فالقوائم موجودة بحكم المخطَّط. لذلك تُشتقّ هنا أنواع «كاملة» صريحة بدل نشر
+// `?? []` في كل سطر، وهو ما كان سيُخفي بذرة ناقصة بصمت في مخرَج ناقص.
+/** @typedef {DomainsSeedBase & { version: string, domains: DomainSeed[] }} DomainsSeedFull */
+/** @typedef {InstitutionsSeedBase & { institutions: InstitutionSeed[] }} InstitutionsSeedFull */
+/** @typedef {FederationSeedBase & { regions: Array<RegionSeed & { provinces: ProvinceSeed[] }> }} FederationSeedFull */
+
+/**
+ * يتحقّق أن القوائم الجوهرية موجودة في البذرة قبل التوليد، ويفشل بخطأ مُسمّى
+ * لا بانهيار غامض عند أول قراءة. البديل — التسامح الصامت — يُنتج سجلات ناقصة
+ * تمرّ في CI وهي كاذبة.
+ * @param {unknown} value
+ * @param {string} label
+ * @returns {void}
+ */
+function assertSeedList(value, label) {
+  if (!Array.isArray(value) || value.length === 0) {
+    console.error(`❌ بذرة ناقصة: القائمة \`${label}\` غائبة أو فارغة.`);
+    console.error('   العلاج: شغّل node scripts/build-seed.mjs ثم npm run validate:seed');
+    process.exit(1);
+  }
+}
+
+/**
+ * يقرأ ملف بذرة YAML من مجلد seed ويُحلّله.
+ * @param {string} f - اسم الملف داخل seed/
+ * @returns {unknown} ناتج التحليل الخام، يُصرَّح بنوعه عند نقطة الاستخدام
+ */
 const load = (f) => YAML.parse(fs.readFileSync(path.join(ROOT, 'seed', f), 'utf8'));
 
-const domains = load('domains.yaml');
-const insts = load('institutions.yaml');
-const fed = load('federation.yaml');
+const domainsRaw = /** @type {DomainsSeedFull} */ (load('domains.yaml'));
+const instsRaw = /** @type {InstitutionsSeedFull} */ (load('institutions.yaml'));
+const fedRaw = /** @type {FederationSeedFull} */ (load('federation.yaml'));
 
+assertSeedList(domainsRaw.domains, 'domains');
+assertSeedList(instsRaw.institutions, 'institutions');
+assertSeedList(fedRaw.regions, 'regions');
+for (const region of fedRaw.regions)
+  assertSeedList(region.provinces, `regions/${region.id}/provinces`);
+
+const domains = domainsRaw;
+const insts = instsRaw;
+const fed = fedRaw;
+
+/**
+ * يُحوّل قيمة إلى نصّ YAML مُقتبَس، مع تهريب الشرطة المائلة العكسية والتنصيص.
+ * @param {unknown} s
+ * @returns {string}
+ */
 const q = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 const STAMP = [
   '# ⚠️ ملف مولّد آلياً. لا تحرّره يدوياً.',
@@ -84,7 +142,10 @@ function stateTreeCatalog() {
   L.push('| الإقليم | الاسم | عدد الولايات | عدد البلديات |');
   L.push('| --- | --- | --- | --- |');
   for (const r of fed.regions) {
-    const mun = r.provinces.reduce((a, p) => a + p.municipality_count, 0);
+    const mun = r.provinces.reduce(
+      (/** @type {number} */ a, /** @type {ProvinceSeed} */ p) => a + p.municipality_count,
+      0,
+    );
     L.push(`| \`${r.id}\` | ${r.name_ar} | ${r.provinces.length} | ${mun} |`);
   }
   L.push('');
@@ -111,6 +172,9 @@ function institutionIndex() {
   return L.join('\n');
 }
 
+// الأهداف كصفوف ثابتة الطول: [المسار النسبي، المحتوى المولّد]. الإعلان الصريح
+// هو ما يضمن أن التفكيك في الحلقة يُنتج نصّين مؤكدين لا احتمالين.
+/** @type {Array<[string, string]>} */
 const targets = [
   ['docs/DOMAIN_REGISTRY.yaml', domainRegistry()],
   ['docs/STATE_TREE_CATALOG.md', stateTreeCatalog()],
@@ -119,6 +183,7 @@ const targets = [
 
 // ═══ فحص خلوّ الأسماء من نص قالبي ═══
 const TEMPLATE_PATTERNS = [/^#/m, /^الحالة:/m, /^الغرض:/m, /domain name ar/, /هيكل تأسيسي/];
+/** @type {string[]} */
 const nameLeaks = [];
 for (const d of domains.domains) {
   for (const p of TEMPLATE_PATTERNS) if (p.test(d.name_ar)) nameLeaks.push(`${d.id}: ${p}`);

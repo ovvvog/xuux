@@ -117,12 +117,20 @@ const FORBIDDEN_EXT = new Set(['.pem', '.key', '.p12', '.pfx', '.keystore', '.jk
 const MAX_BYTES = 2 * 1024 * 1024; // الوثائق الكبيرة تُفحص حتى هذا الحد
 
 /**
+ * مخالفة واحدة: الملف والسطر ومعرّف النمط وسببه ومقتطف محجوب.
+ * يُسمّى النوع مرة واحدة هنا لأنه عقد مشترك بين الفحص النصي وفحص المستودع
+ * والاختبارات، فلا يُعاد وصف شكله في كل موضع.
+ * @typedef {{ file: string, line: number, id: string, reason: string, excerpt: string }} Finding
+ */
+
+/**
  * يفحص نصًا واحدًا ويعيد قائمة المخالفات.
- * @param {string} text
- * @param {string} label
- * @returns {Array<{file: string, line: number, id: string, reason: string, excerpt: string}>}
+ * @param {string} text - النص المفحوص
+ * @param {string} [label='<نص>'] - اسم يُنسب إليه الاكتشاف في التقرير
+ * @returns {Finding[]}
  */
 export function scanText(text, label = '<نص>') {
+  /** @type {Finding[]} */
   const findings = [];
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
@@ -145,14 +153,23 @@ export function scanText(text, label = '<نص>') {
   return findings;
 }
 
-/** يحجب وسط المطابقة حتى لا يُطبع السر في السجلات. */
+/**
+ * يحجب وسط المطابقة حتى لا يُطبع السر في السجلات.
+ * @param {string} value - النص المطابِق كما وُجد في الملف
+ * @returns {string} نصّ محجوب يُظهر أربعة أحرف من كل طرف فقط
+ */
 export function redact(value) {
   if (value.length <= 10) return '*'.repeat(value.length);
   return `${value.slice(0, 4)}${'*'.repeat(Math.min(24, value.length - 8))}${value.slice(-4)}`;
 }
 
-/** يجمع الملفات القابلة للفحص تحت جذر معيّن. */
+/**
+ * يجمع الملفات القابلة للفحص تحت جذر معيّن.
+ * @param {string} root - الجذر المراد فحصه
+ * @returns {string[]} مسارات مطلقة لكل ملف قابل للفحص
+ */
 export function collectFiles(root) {
+  /** @type {string[]} */
   const out = [];
   /** @param {string} dir */
   const walk = (dir) => {
@@ -176,8 +193,13 @@ export function collectFiles(root) {
   return out;
 }
 
-/** الفحص الكامل لمستودع. */
+/**
+ * الفحص الكامل لمستودع.
+ * @param {string} root - جذر المستودع
+ * @returns {Finding[]} كل المطابقات المشتبهة بعد استثناء ما أُعلن تجاوزه
+ */
 export function scanRepository(root) {
+  /** @type {Finding[]} */
   const findings = [];
   for (const file of collectFiles(root)) {
     const rel = relative(root, file);

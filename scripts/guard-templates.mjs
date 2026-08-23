@@ -18,7 +18,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const args = process.argv.slice(2);
 const i = args.indexOf('--path');
-const TARGET = path.resolve(i !== -1 && args[i + 1] ? args[i + 1] : ROOT);
+// تُقرأ القيمة في متغيّر أولاً: القراءة بمؤشّر قد تُرجع undefined، والفحص الصريح
+// هنا هو ما يضمن أن ما يُمرَّر إلى path.resolve نصّ مؤكد لا احتمال.
+const pathArg = args[i + 1];
+const TARGET = path.resolve(i !== -1 && pathArg ? pathArg : ROOT);
 
 const ALLOWLIST_FILE = path.join(ROOT, 'docs/audit/template-allowlist.txt');
 const ESCAPE_MARKER = 'template-guard:allow';
@@ -29,11 +32,17 @@ function readAllowlist() {
     fs
       .readFileSync(ALLOWLIST_FILE, 'utf8')
       .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0 && !l.startsWith('#')),
+      .map((/** @type {string} */ l) => l.trim())
+      .filter((/** @type {string} */ l) => l.length > 0 && !l.startsWith('#')),
   );
 }
 
+/**
+ * يمشي الشجرة مشياً عميقاً ويجمع مسارات الملفات فقط، متجاوزاً مجلدات البنية التحتية.
+ * @param {string} dir - المجلد المراد فحصه
+ * @param {string[]} [acc=[]] - مُجمِّع تُدفع إليه النتائج عبر الاستدعاءات المتداخلة
+ * @returns {string[]} مسارات مطلقة لكل ملف تحت `dir`
+ */
 function walk(dir, acc = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.isDirectory()) {

@@ -51,6 +51,10 @@ test('توزيع منتظم: 8 ولايات لكل إقليم و12 بلدية ل
 
 test('لا نص قالبي في أي حقل اسم', () => {
   const bad = [/^#/, /^الحالة:/, /^الغرض:/, /domain name ar/, /هيكل تأسيسي/];
+  /**
+   * @param {string} label - معرّف الكيان، ليظهر في رسالة الفشل
+   * @param {string} name - الاسم المفحوص
+   */
   const check = (label, name) => {
     for (const p of bad) assert.ok(!p.test(name), `${label}: نص قالبي «${name}»`);
   };
@@ -81,12 +85,16 @@ test('عيب الهوية المزدوجة مسجّل ومطابق لعدد ال
 test('المجالات التي تحتاج مصادقة سيادية معلّمة صراحةً', () => {
   assert.ok(registry.domainsNeedingRatification.length > 0);
   for (const id of registry.domainsNeedingRatification) {
-    assert.equal(registry.domains.get(id).needs_ratification, true);
+    const domain = registry.domains.get(id);
+    assert.ok(domain, `المجال المعلَّم للمصادقة يجب أن يوجد في السجل: ${id}`);
+    assert.equal(domain.needs_ratification, true);
   }
 });
 
 test('السجل غير قابل للتعديل بعد البناء', () => {
   assert.throws(() => {
+    // @ts-expect-error يقصد هذا السطر الكتابة على حقل مُجمَّد ليثبت أن التجميد
+    // يرفضها زمن التشغيل. رفض المدقّق له هو نصف الإثبات، والتوكيد أدناه نصفه الآخر.
     registry.counts.regions = 99;
   }, TypeError);
 });

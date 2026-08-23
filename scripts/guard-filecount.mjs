@@ -17,9 +17,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const LIMIT = Number(process.env.FILE_COUNT_LIMIT ?? 3000);
-const ROOT = process.argv.includes('--root')
+// الوسيط يُقرأ في متغيّر ثم يُفحص صراحةً: `--root` قد يُمرَّر بلا قيمة بعده،
+// وحينها تكون القراءة بمؤشّر undefined، فالسقوط إلى مجلد العمل هو السلوك الصحيح.
+const rootArg = process.argv.includes('--root')
   ? process.argv[process.argv.indexOf('--root') + 1]
-  : process.cwd();
+  : undefined;
+const ROOT = rootArg ?? process.cwd();
 
 const SKIP = new Set(['.git', 'node_modules', 'dist', 'coverage', '.next']);
 

@@ -29,7 +29,12 @@ test('event log is tamper evident', () => {
   log.append('test', 'system', { ok: true });
   log.append('test', 'system', { ok: false });
   assert.equal(log.verify(), true);
-  log.events[0].data.ok = 'tampered';
+  const firstEvent = log.events[0];
+  assert.ok(firstEvent, 'يجب أن يوجد حدث أول لنعبث به');
+  // عبث مقصود: نوع `data` معلَن `object` لأن السجل لا يفرض شكل الحمولة، فيُوسَّع
+  // هنا إلى سجل مفاتيح للكتابة عليه. هذا هو محل الاختبار نفسه لا التفافاً عليه.
+  const tampered = /** @type {Record<string, unknown>} */ (firstEvent.data);
+  tampered.ok = 'tampered';
   assert.equal(log.verify(), false);
 });
 test('crown gateway rejects bad signature and stops safely', () => {

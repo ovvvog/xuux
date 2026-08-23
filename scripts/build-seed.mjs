@@ -16,17 +16,41 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
+/**
+ * يقرأ وسيط سطر أوامر بصيغة `--name value`.
+ * @param {string} n - اسم الوسيط مع الشرطتين
+ * @param {string} d - القيمة الافتراضية إن غاب الوسيط أو جاء بلا قيمة
+ * @returns {string}
+ */
 const getArg = (n, d) => {
   const i = args.indexOf(n);
-  return i !== -1 && args[i + 1] ? args[i + 1] : d;
+  const value = args[i + 1];
+  return i !== -1 && value ? value : d;
 };
 const SRC = path.resolve(getArg('--src', '.'));
 const OUT = path.resolve(getArg('--out', 'seed'));
 
+/**
+ * يقرأ ملفاً نصياً نسبةً إلى جذر المصدر.
+ * @param {string} rel
+ * @returns {string}
+ */
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8');
+
+/**
+ * يُصفّر رقماً إلى عرض ثابت (001، 012…) لتوليد معرّفات مستقرة الترتيب.
+ * @param {number} n
+ * @param {number} [w=3] - عدد الخانات
+ * @returns {string}
+ */
 const pad = (n, w = 3) => String(n).padStart(w, '0');
 
 // ── اقتباس YAML آمن: نضع كل نص بين علامتي تنصيص مزدوجتين مع تهريب ما يلزم ──
+/**
+ * اقتباس YAML آمن.
+ * @param {unknown} s
+ * @returns {string}
+ */
 const q = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 // ═══ 1) أبواب الوثيقة الأولى ═══
@@ -35,7 +59,9 @@ function chapters() {
   const out = [];
   for (const line of text.split('\n')) {
     const m = line.match(/^\d+ \| ## الباب المؤسسي (\d+): (?:الباب \d+: )?(.+?)(?: — .*)?\s*$/);
-    if (m) out.push({ n: Number(m[1]), name: m[2].trim() });
+    // النمط يضمن وجود المجموعتين عند النجاح، والفحص الصريح هو ما يُثبت ذلك
+    // للفاحص بدل علامة تأكيد عمياء.
+    if (m && m[1] && m[2]) out.push({ n: Number(m[1]), name: m[2].trim() });
   }
   // نستبعد البابين 104 و105 لأنهما بابا خطة ومعايير، لا مجال حكم
   return out.filter((c) => c.n <= 103).sort((a, b) => a.n - b.n);
@@ -47,7 +73,7 @@ function futureSciences() {
   const out = [];
   for (const line of text.split('\n')) {
     const m = line.match(/^## (\d+)\. (.+?)\s*$/);
-    if (m) out.push({ n: Number(m[1]), name: m[2].trim() });
+    if (m && m[1] && m[2]) out.push({ n: Number(m[1]), name: m[2].trim() });
   }
   return out.sort((a, b) => a.n - b.n);
 }
@@ -58,7 +84,7 @@ function launchPhases() {
   const out = [];
   for (const line of text.split('\n')) {
     const m = line.match(/^\d+ \| ## المرحلة (\d+): (.+?)(?: — .*)?\s*$/);
-    if (m) out.push({ n: Number(m[1]), name: m[2].trim() });
+    if (m && m[1] && m[2]) out.push({ n: Number(m[1]), name: m[2].trim() });
   }
   return out.sort((a, b) => a.n - b.n);
 }
@@ -69,7 +95,8 @@ function institutions() {
   const out = [];
   for (const line of text.split('\n')) {
     const m = line.match(/^(\d{3})\. (.+?) — (institutions\/.+?)\/?\s*$/);
-    if (m) out.push({ n: Number(m[1]), name: m[2].trim(), dir: m[3].trim() });
+    if (m && m[1] && m[2] && m[3])
+      out.push({ n: Number(m[1]), name: m[2].trim(), dir: m[3].trim() });
   }
   return out.sort((a, b) => a.n - b.n);
 }
@@ -121,8 +148,21 @@ function buildDomains() {
   const chs = chapters();
   const fs17 = futureSciences();
   const phases = launchPhases();
+  /** @type {Set<string>} */
   const seen = new Set();
+  /**
+   * مجال في طور البناء: الاسم ومصدره الوثائقي والمرجع داخل المصدر.
+   * @typedef {{ name: string, source: string, ref: string }} DomainDraft
+   */
+  /** @type {DomainDraft[]} */
   const domains = [];
+  /**
+   * يُضيف مجالاً إن لم يكن اسمه مستخدَماً، بعد تطبيع المسافات.
+   * @param {string} name
+   * @param {string} source - ملف المصدر الوثائقي
+   * @param {string} ref - المرجع داخل المصدر
+   * @returns {boolean} هل أُضيف فعلاً
+   */
   const push = (name, source, ref) => {
     const key = name.replace(/\s+/g, ' ').trim();
     if (seen.has(key)) return false;

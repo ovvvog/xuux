@@ -32,7 +32,9 @@ test('suspends and revokes agents irreversibly', () => {
   const { r, ca } = setup();
   const a = r.register({ name: 'worker', role: 'worker' });
   r.transition(a.id, AgentState.SUSPENDED, 'maintenance');
-  assert.equal(r.get(a.id).state, AgentState.SUSPENDED);
+  const suspended = r.get(a.id);
+  assert.ok(suspended, 'الوكيل الموقوف يجب أن يبقى في السجل');
+  assert.equal(suspended.state, AgentState.SUSPENDED);
   r.transition(a.id, AgentState.REVOKED, 'security');
   assert.equal(ca.isValid(a.certificate), false);
   assert.throws(() => r.transition(a.id, AgentState.ACTIVE, 'resume'), /REVOKED_AGENT_IMMUTABLE/);
