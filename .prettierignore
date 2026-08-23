@@ -1,8 +1,6 @@
 # ── نطاق التنسيق ──
 # يُنسَّق: الكود الفعلي وملفات الإعداد فقط.
-# تُستثنى مؤقتًا: الوثائق العربية الكبيرة وملفات الشجرة القالبية
-# التي تُحوَّل إلى بيانات أو تُحذف في المسار M1.
-# عند إغلاق بوابة G1 يُراجع هذا الملف ويُقلَّص.
+# راجَع هذا الملف وقُلِّص في M1.08 بعد حذف 33,271 ملفاً قالبياً.
 
 node_modules/
 dist/
@@ -11,32 +9,22 @@ package-lock.json
 # الوثائق: نص عربي مكتوب بيد الإنسان؛ لا يُعاد تنسيقه آليًا
 *.md
 
-# الشجرة التنظيمية القالبية — تُعالج في M1
-civilization/
-communications/
-contracts/
-data-platform/
-engines/
-facilities/
-federation/
-infrastructure/
-institutions/
-interfaces/
-knowledge/
-operations/
-platform/
-resources/
-science/
-security/
-agents/
-config/
-docs/
-
-# ── ملفات مولّدة آلياً (M1) ──
+# ── ملفات مولّدة آلياً ──
 # تُدقَّق ببواباتها الخاصة لا بالمنسّق:
-#   seed/*.yaml          → node scripts/validate-seed.mjs
-#   السجلات المشتقة      → node scripts/generate-registries.mjs --check
+#   seed/*.yaml     → node scripts/validate-seed.mjs
+#   السجلات المشتقة → node scripts/generate-registries.mjs --check
 # تنسيقها بالمنسّق يخلق انحرافاً دائماً عن ناتج المولّد.
 seed/domains.yaml
 seed/federation.yaml
 seed/institutions.yaml
+docs/DOMAIN_REGISTRY.yaml
+
+# ── العينة المرجعية القالبية (استثناء مُقرّ في M1.05–M1.07) ──
+# 109 ملفات مُبقاة عمداً لتوثيق شكل الهيكل الأصلي. محتواها تعليقات فقط،
+# وبعض ملفات .ts فيها تستخدم '#' للتعليق فلا يقرأها المنسّق أصلاً.
+# المرجع الكامل: docs/audit/template-allowlist.txt
+civilization/001-domain/
+federation/regions/001/الإقليم-الفدرالي-001/
+federation/regions/001/provinces/ولاية-001-01/
+federation/regions/001/provinces/001-01/municipalities/001/
+institutions/001-الديوان-الملكي/
