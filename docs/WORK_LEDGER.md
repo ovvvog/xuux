@@ -55,3 +55,10 @@
 - الاختبار: `tests/identity/agent-registry.test.mjs`.
 - التوثيق: `docs/stages/003-agent-identity.md`.
 - المتبقي: سجل موزع، إثبات الجهاز، تفويض زمني، ومزامنة إلغاء إنتاجية.
+
+## المرحلة 004 — طبقة النماذج ومحركات الذكاء
+- الحالة: **منجزة كنواة محلية**.
+- التنفيذ: `src/models/model-registry.mjs`.
+- الاختبار: `tests/models/model-registry.test.mjs`.
+- التوثيق: `docs/stages/004-model-layer.md`.
+- المتبقي: أوزان فعلية، تقييم شامل، GPU، استدلال إنتاجي، وتراجع موزع.
