@@ -1,6 +1,6 @@
 {
   "name": "digital-state-root-of-trust",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "private": true,
   "type": "module",
   "description": "الدولة الملكية الفدرالية الرقمية — جذر الثقة والنواة السيادية",
@@ -24,6 +24,7 @@
     "anchor:log": "node scripts/anchor-log.mjs",
     "halt": "node scripts/halt-switch.mjs",
     "validate:seed": "node scripts/validate-seed.mjs",
+    "migrate": "node scripts/migrate.mjs",
     "build:seed": "node scripts/build-seed.mjs",
     "gen:registries": "node scripts/generate-registries.mjs",
     "check:registries": "node scripts/generate-registries.mjs --check",
@@ -35,6 +36,7 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "20.19.43",
+    "@types/pg": "8.15.6",
     "ajv": "8.20.0",
     "eslint": "10.9.0",
     "prettier": "3.9.6",
@@ -42,6 +44,7 @@
     "typescript-eslint": "8.67.0"
   },
   "dependencies": {
+    "pg": "8.23.0",
     "yaml": "2.9.0"
   }
 }

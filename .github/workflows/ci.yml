@@ -1,4 +1,4 @@
-# التكامل المستمر — أُنشئ في M0.05 ووُسِّع في M1.08
+# التكامل المستمر — أُنشئ في M0.05 ووُسِّع في M1.08 ثم في M3.03
 #
 # القاعدة: لا يُدمج شيء في main إلا وهذا المسار أخضر.
 # المرجع: docs/roadmap/03-roadmap-to-100.md — البوابتان G0 و G1
@@ -25,6 +25,27 @@ jobs:
     name: فحص الجودة الكامل
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # قاعدة حقيقية في البوابة: اختبارات الاستمرارية تُتخطّى محلياً عند غياب
+    # DATABASE_URL، فلو غابت هنا أيضاً لصار التخطّي هو الحالة الدائمة ولقُرئ
+    # نجاحاً. فالخدمة معلَنة هنا والوصلة معلَنة على المهمة كلها.
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: state
+          POSTGRES_PASSWORD: state
+          POSTGRES_DB: state
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U state -d state"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://state:state@127.0.0.1:5432/state
 
     steps:
       - name: جلب المستودع
@@ -69,6 +90,15 @@ jobs:
         # مشفَّرة. والبوابة المحلية تبقى بوضع التطوير لأن للمطوّر مخزناً
         # محلياً مشفَّراً مشروعاً تحت مسارات التشغيل.
         run: npm run scan:keys -- --production
+
+      - name: الهجرات — تقديم ثم تراجع ثم تقديم (M3.03)
+        # التراجع مُشغَّل في البوابة قصداً: هجرة لا يُجرَّب تراجعها ليست قابلة
+        # للتراجع، وإنما مكتوبٌ عنها ذلك.
+        run: |
+          npm run migrate -- up
+          npm run migrate -- status
+          npm run migrate -- down
+          npm run migrate -- up
 
       - name: الاختبارات
         run: npm test
