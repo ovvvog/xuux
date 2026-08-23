@@ -1,11 +1,12 @@
 {
   "version": "0.1.0",
   "name": "الدولة الملكية الفدرالية الرقمية",
-  "stage": "M0 — البنية الهندسية الأساسية",
+  "stage": "M0 — البنية الهندسية الأساسية (8/9 منجزة)",
   "completion": {
-    "percent": 4,
-    "basis": "docs/roadmap/02-baseline-audit.md §2.9",
-    "gate": "G0"
+    "percent": 9,
+    "basis": "docs/roadmap/02-baseline-audit.md §2.9.1",
+    "gate": "G0 — مفتوحة جزئياً: M0.06 محجوبة بقيد خارجي",
+    "last_entry": "WL-002"
   },
   "versioning": {
     "scheme": "semver",
