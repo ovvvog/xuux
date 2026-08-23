@@ -39,3 +39,6 @@ Thumbs.db
 tmp/
 .tmp/
 .cache/
+
+# جرد الملفات الكامل: 4.5MB قابل للتوليد بأمر audit:inventory — لا يُلتزم
+docs/audit/file-inventory.csv
