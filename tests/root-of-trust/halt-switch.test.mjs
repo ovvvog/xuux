@@ -98,7 +98,11 @@ function deadPid() {
  * @param {number} timeoutMs - المهلة
  * @returns {Promise<void>} انتهاء الانتظار
  */
-async function until(condition, what, timeoutMs = 15000) {
+// المهلة ٤٥ ثانية لا ١٥: في M2.09 أُضيفت اختبارات تشغّل خوادم HTTP وتتعمّد
+// تعليق طلبات، فصار المعيار متعدد العمليات يُزاحم عليها على معالجَين فتنتهي
+// مهلته وهو سليم. والمهلة هنا حرسٌ ضد التعليق الأبدي لا قياسٌ للأداء، فرفعها
+// لا يُضعف ما يُثبته الاختبار.
+async function until(condition, what, timeoutMs = 45000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (condition()) return;

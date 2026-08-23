@@ -85,12 +85,22 @@ export class KingIdentity {
    * @returns صحة التوقيع
    */
   verify(payload: object, signature: string): boolean {
-    return verify(
-      null,
-      Buffer.from(JSON.stringify(payload)),
-      this.publicKey,
-      Buffer.from(signature, 'base64url'),
-    );
+    // توقيعٌ تالف يجب أن يُقرأ **باطلاً** لا أن يُسقط البوابة (M2.09). فقبل هذا
+    // الحرس كان توقيعٌ ليس نصاً، أو مادةٌ لا تُرتَّب في JSON (حلقة مرجعية،
+    // `BigInt`)، يرفع استثناءً من نوع آخر يخرج من `command()` قبل كل الفحوص —
+    // فيصير الفرق بين «رُفض» و«انهار» مجهولاً للمستدعي. والفشل مُغلَق: كل ما
+    // لا يمكن التحقق منه يُرجع `false`.
+    if (typeof signature !== 'string' || signature === '') return false;
+    try {
+      return verify(
+        null,
+        Buffer.from(JSON.stringify(payload)),
+        this.publicKey,
+        Buffer.from(signature, 'base64url'),
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -158,6 +168,9 @@ export class CertificateAuthority {
    * @returns صلاحية الشهادة الحالية
    */
   isValid(cert: Certificate): boolean {
+    // شهادةٌ ناقصة الحقول تُقرأ باطلة ولا تُسقط الفاحص: من يُلفّق شهادة يُلفّقها
+    // ناقصةً كذلك، وانهيارُ الفاحص عندها يُخرجه عن كونه فاحصاً.
+    if (!cert || typeof cert !== 'object' || typeof cert.id !== 'string') return false;
     return (
       !this.revoked.has(cert.id) &&
       this.king.verify(

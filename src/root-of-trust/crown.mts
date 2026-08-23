@@ -3,6 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { CommandLedger } from './command-ledger.mjs';
+import type { TrustedClock } from './clock.mjs';
 import type { HaltGuard } from './halt-switch.mjs';
 import type { EventLog } from './event-log.mjs';
 import type { Certificate, CertificateAuthority, KingIdentity } from './identity.mjs';
@@ -33,6 +34,13 @@ export interface CrownGatewayOptions {
    * عمليةٍ واحدة على هذه البوابة كذلك.
    */
   haltSwitch?: HaltGuard | null;
+  /**
+   * ساعة موثوقة تكشف انزياحها (M2.09). اختيارية ومطفأة افتراضياً كي لا يتغير
+   * سلوك مستهلك قائم؛ فإن غابت بقيت البوابة تأتمن `Date.now()` — أي **ساعة
+   * الجهاز** — فيُحيي رجوعُها أمراً منتهي الصلاحية ويُعطّل تقديمُها كل أمر.
+   * فإن وُصلت صار انزياح الساعة يُرفض برمزه ولا يُبنى عليه قرار قبول.
+   */
+  clock?: TrustedClock | null;
   maxCommandAgeMs?: number;
   clockSkewMs?: number;
 }
@@ -69,6 +77,7 @@ export class CrownGateway {
   policy: PolicyEngine | null;
   commandLedger: CommandLedger | null;
   haltSwitch: HaltGuard | null;
+  clock: TrustedClock | null;
   veto: Veto;
   stopped: boolean;
   heartbeatAt: number;
@@ -94,6 +103,7 @@ export class CrownGateway {
     this.policy = options.policy ?? null;
     this.commandLedger = options.commandLedger ?? null;
     this.haltSwitch = options.haltSwitch ?? null;
+    this.clock = options.clock ?? null;
     this.veto = new Veto();
     this.stopped = false;
     this.heartbeatAt = Date.now();
@@ -102,13 +112,22 @@ export class CrownGateway {
     this.clockSkewMs = options.clockSkewMs ?? 30000;
   }
 
+  /**
+   * يقرأ الوقت من الساعة الموثوقة إن وُصلت، وإلا من ساعة الجهاز. وانزياحُ
+   * الساعة يُرفع خطأً من هنا فلا يصل إلى حساب العمر أصلاً.
+   * @returns الوقت بالميلي ثانية
+   */
+  private nowMs(): number {
+    return this.clock ? this.clock.now() : Date.now();
+  }
+
   /** يثبت نبض التاج في السجل ما دامت البوابة غير موقوفة. */
   heartbeat(): void {
     // الإيقاف الشامل يُفحص قبل الإيقاف المحلي: الأول قرارٌ سيادي دائم يعلو على
     // حالة هذا الكائن، والنبض فعلٌ كذلك فلا يُثبت في دولةٍ موقوفة.
     this.haltSwitch?.assertOperational();
     if (this.stopped) throw new Error('CROWN_STOPPED');
-    this.heartbeatAt = Date.now();
+    this.heartbeatAt = this.nowMs();
     this.log.append('crown.heartbeat', this.king.id, {});
   }
 
@@ -135,15 +154,41 @@ export class CrownGateway {
       throw new Error('REPLAYED_COMMAND');
     const issued = Date.parse(command.issuedAt);
     if (!Number.isFinite(issued)) throw new Error('INVALID_COMMAND_TIME');
-    const age = Date.now() - issued;
+    // الوقت يُقرأ من الساعة الموثوقة قبل أي استهلاك للمعرّف: انزياحها يرفع
+    // خطأً هنا، فلا يُقبل أمر بزمنٍ لا يُؤتمن عليه ولا يُحرق معرّفه.
+    const nowMs = this.nowMs();
+    const age = nowMs - issued;
     if (age > this.maxCommandAgeMs) throw new Error('EXPIRED_COMMAND');
     if (age < -this.clockSkewMs) throw new Error('FUTURE_COMMAND');
-    this.seenCommands.add(command.id);
+    // الشهادة تُتحقَّق من سلطة التصديق **قبل** السياسة: السياسة تقرأ الدور
+    // والقدرات من الشهادة، فلو لم يُتحقَّق من توقيعها لكان كل من يصنع كائناً
+    // فيه `role` قد منح نفسه أي دور. أي أن محرّك السياسة بلا هذا الفحص كان
+    // يحكم بمطالبةٍ لا بتفويض.
+    if (command.certificate && !this.ca.isValid(command.certificate))
+      throw new Error('FORGED_CERTIFICATE');
     if (this.policy && command.certificate)
       this.policy.authorize(command.certificate, command.action);
-    if (this.commandLedger) this.commandLedger.record(command);
-    const accepted: AcceptedRoyalCommand = { ...command, acceptedAt: new Date().toISOString() };
-    this.log.append('crown.command.accepted', this.king.id, accepted);
+    const accepted: AcceptedRoyalCommand = {
+      ...command,
+      acceptedAt: new Date(nowMs).toISOString(),
+    };
+    // مرحلتان لا واحدة (M2.07): يُحجز المعرّف، ثم يُثبَّت السجل، ثم يُثبَّت
+    // الحجز. فلو فشل تخزين السجل أُلغي الحجز بسببه، فالأمر **لم يُنفَّذ ولم
+    // يُحرق معرّفه** ويجوز إعادة إرساله؛ ولو ثُبّت الحجز أولاً لصار فشلُ
+    // التخزين يُسقط الأمر إلى الأبد بلا أثرٍ ولا سجل.
+    const ledger = this.commandLedger;
+    if (ledger) ledger.begin(command);
+    try {
+      this.log.append('crown.command.accepted', this.king.id, accepted);
+    } catch (error) {
+      if (ledger) ledger.abort(command, 'LOG_APPEND_FAILED');
+      throw error;
+    }
+    if (ledger) ledger.commit(command);
+    // المعرّف يُستهلك في الذاكرة **بعد** ثبوت القبول لا قبله: كان يُستهلك قبل
+    // السياسة والدفتر، فأمرٌ رُفض بالسياسة أو سقط بفشل تخزين كان يصير غير
+    // قابل لإعادة الإرسال أبداً وإن لم يقع له أثر.
+    this.seenCommands.add(command.id);
     return accepted;
   }
 
