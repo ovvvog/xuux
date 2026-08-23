@@ -62,3 +62,10 @@
 - الاختبار: `tests/models/model-registry.test.mjs`.
 - التوثيق: `docs/stages/004-model-layer.md`.
 - المتبقي: أوزان فعلية، تقييم شامل، GPU، استدلال إنتاجي، وتراجع موزع.
+
+## المرحلة 005 — البيانات والذاكرة والمعرفة
+- الحالة: **منجزة كنواة محلية**.
+- التنفيذ: `src/data/data-catalog.mjs` و`src/data/memory-store.mjs`.
+- الاختبار: `tests/data/data-memory.test.mjs`.
+- التوثيق: `docs/stages/005-data-memory.md`.
+- المتبقي: تخزين موزع مشفر، محو آلي، ورسم معرفة واسترجاع دلالي.
