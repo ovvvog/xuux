@@ -1,0 +1,1258 @@
+# بذرة المجالات — المصدر الوحيد للحقيقة لأسماء المجالات ومعرّفاتها.
+# مولّدة بـ scripts/build-seed.mjs من المصادر الوثائقية المذكورة في provenance.
+# لا يجوز تعديل السجلات المشتقة يدوياً؛ تُولّد من هذا الملف.
+schema: "seed/schemas/domains.schema.json"
+version: "1.0.0"
+generated_by: "scripts/build-seed.mjs"
+count: 125
+domains:
+  - id: "001-domain"
+    number: 1
+    name_ar: "مواصفة سيادية وتشغيلية وأمنية"
+    path: "civilization/001-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 1"
+  - id: "002-domain"
+    number: 2
+    name_ar: "النطاق والهوية"
+    path: "civilization/002-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 2"
+  - id: "003-domain"
+    number: 3
+    name_ar: "الملك والسيادة"
+    path: "civilization/003-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 3"
+  - id: "004-domain"
+    number: 4
+    name_ar: "التاج ومسار المرور"
+    path: "civilization/004-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 4"
+  - id: "005-domain"
+    number: 5
+    name_ar: "حرس الملك"
+    path: "civilization/005-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 5"
+  - id: "006-domain"
+    number: 6
+    name_ar: "مراقبة الملك"
+    path: "civilization/006-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 6"
+  - id: "007-domain"
+    number: 7
+    name_ar: "غياب الملك وانقطاعه"
+    path: "civilization/007-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 7"
+  - id: "008-domain"
+    number: 8
+    name_ar: "نهاية الملك"
+    path: "civilization/008-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 8"
+  - id: "009-domain"
+    number: 9
+    name_ar: "الدستور الرقمي"
+    path: "civilization/009-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 9"
+  - id: "010-domain"
+    number: 10
+    name_ar: "القانون الرقمي"
+    path: "civilization/010-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 10"
+  - id: "011-domain"
+    number: 11
+    name_ar: "القضاء"
+    path: "civilization/011-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 11"
+  - id: "012-domain"
+    number: 12
+    name_ar: "الحقوق والواجبات"
+    path: "civilization/012-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 12"
+  - id: "013-domain"
+    number: 13
+    name_ar: "الهوية الوكيلة"
+    path: "civilization/013-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 13"
+  - id: "014-domain"
+    number: 14
+    name_ar: "سجل السكان"
+    path: "civilization/014-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 14"
+  - id: "015-domain"
+    number: 15
+    name_ar: "الوكيل العام"
+    path: "civilization/015-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 15"
+  - id: "016-domain"
+    number: 16
+    name_ar: "رقابة الوكلاء"
+    path: "civilization/016-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 16"
+  - id: "017-domain"
+    number: 17
+    name_ar: "مصنع الوكلاء"
+    path: "civilization/017-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 17"
+  - id: "018-domain"
+    number: 18
+    name_ar: "تدريب الوكلاء"
+    path: "civilization/018-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 18"
+  - id: "019-domain"
+    number: 19
+    name_ar: "استيراد الوكلاء"
+    path: "civilization/019-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 19"
+  - id: "020-domain"
+    number: 20
+    name_ar: "النماذج المفتوحة الأوزان"
+    path: "civilization/020-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 20"
+  - id: "021-domain"
+    number: 21
+    name_ar: "تطوير النماذج"
+    path: "civilization/021-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 21"
+  - id: "022-domain"
+    number: 22
+    name_ar: "اختبارات التمرد"
+    path: "civilization/022-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 22"
+  - id: "023-domain"
+    number: 23
+    name_ar: "المواءمة"
+    path: "civilization/023-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 23"
+  - id: "024-domain"
+    number: 24
+    name_ar: "الذاكرة"
+    path: "civilization/024-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 24"
+  - id: "025-domain"
+    number: 25
+    name_ar: "المعرفة"
+    path: "civilization/025-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 25"
+  - id: "026-domain"
+    number: 26
+    name_ar: "اللغة"
+    path: "civilization/026-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 26"
+  - id: "027-domain"
+    number: 27
+    name_ar: "التعليم"
+    path: "civilization/027-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 27"
+  - id: "028-domain"
+    number: 28
+    name_ar: "البحث العلمي"
+    path: "civilization/028-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 28"
+  - id: "029-domain"
+    number: 29
+    name_ar: "مراكز المستحيل"
+    path: "civilization/029-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 29"
+  - id: "030-domain"
+    number: 30
+    name_ar: "أبحاث البشر"
+    path: "civilization/030-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 30"
+  - id: "031-domain"
+    number: 31
+    name_ar: "المرآة البشرية"
+    path: "civilization/031-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 31"
+  - id: "032-domain"
+    number: 32
+    name_ar: "الملك كموضوع بحث"
+    path: "civilization/032-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 32"
+  - id: "033-domain"
+    number: 33
+    name_ar: "الحكومة"
+    path: "civilization/033-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 33"
+  - id: "034-domain"
+    number: 34
+    name_ar: "الديوان"
+    path: "civilization/034-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 34"
+  - id: "035-domain"
+    number: 35
+    name_ar: "مجلس التاج"
+    path: "civilization/035-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 35"
+  - id: "036-domain"
+    number: 36
+    name_ar: "مجلس الأقاليم"
+    path: "civilization/036-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 36"
+  - id: "037-domain"
+    number: 37
+    name_ar: "الأقاليم"
+    path: "civilization/037-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 37"
+  - id: "038-domain"
+    number: 38
+    name_ar: "رؤساء الأقاليم"
+    path: "civilization/038-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 38"
+  - id: "039-domain"
+    number: 39
+    name_ar: "المجالس الإقليمية"
+    path: "civilization/039-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 39"
+  - id: "040-domain"
+    number: 40
+    name_ar: "البلديات"
+    path: "civilization/040-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 40"
+  - id: "041-domain"
+    number: 41
+    name_ar: "الإدارة المدنية"
+    path: "civilization/041-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 41"
+  - id: "042-domain"
+    number: 42
+    name_ar: "الداخلية"
+    path: "civilization/042-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 42"
+  - id: "043-domain"
+    number: 43
+    name_ar: "الخارجية"
+    path: "civilization/043-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 43"
+  - id: "044-domain"
+    number: 44
+    name_ar: "الحسابات الخارجية"
+    path: "civilization/044-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 44"
+  - id: "045-domain"
+    number: 45
+    name_ar: "العقود الخارجية"
+    path: "civilization/045-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 45"
+  - id: "046-domain"
+    number: 46
+    name_ar: "الشركات الأمنية الخارجية"
+    path: "civilization/046-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 46"
+  - id: "047-domain"
+    number: 47
+    name_ar: "العلاقات البشرية الخارجية"
+    path: "civilization/047-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 47"
+  - id: "048-domain"
+    number: 48
+    name_ar: "الدفاع"
+    path: "civilization/048-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 48"
+  - id: "049-domain"
+    number: 49
+    name_ar: "الاستخبارات"
+    path: "civilization/049-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 49"
+  - id: "050-domain"
+    number: 50
+    name_ar: "الأمن الداخلي"
+    path: "civilization/050-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 50"
+  - id: "051-domain"
+    number: 51
+    name_ar: "الشرطة"
+    path: "civilization/051-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 51"
+  - id: "052-domain"
+    number: 52
+    name_ar: "القوات الخاصة"
+    path: "civilization/052-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 52"
+  - id: "053-domain"
+    number: 53
+    name_ar: "السجون والعزل"
+    path: "civilization/053-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 53"
+  - id: "054-domain"
+    number: 54
+    name_ar: "إدارة الأزمات"
+    path: "civilization/054-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 54"
+  - id: "055-domain"
+    number: 55
+    name_ar: "التعافي"
+    path: "civilization/055-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 55"
+  - id: "056-domain"
+    number: 56
+    name_ar: "الإيقاف"
+    path: "civilization/056-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 56"
+  - id: "057-domain"
+    number: 57
+    name_ar: "الطوارئ الملكية"
+    path: "civilization/057-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 57"
+  - id: "058-domain"
+    number: 58
+    name_ar: "البنية الحاسوبية"
+    path: "civilization/058-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 58"
+  - id: "059-domain"
+    number: 59
+    name_ar: "مراكز البيانات"
+    path: "civilization/059-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 59"
+  - id: "060-domain"
+    number: 60
+    name_ar: "الشبكات"
+    path: "civilization/060-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 60"
+  - id: "061-domain"
+    number: 61
+    name_ar: "الطاقة"
+    path: "civilization/061-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 61"
+  - id: "062-domain"
+    number: 62
+    name_ar: "التخزين"
+    path: "civilization/062-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 62"
+  - id: "063-domain"
+    number: 63
+    name_ar: "الأجهزة المادية"
+    path: "civilization/063-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 63"
+  - id: "064-domain"
+    number: 64
+    name_ar: "السحابة"
+    path: "civilization/064-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 64"
+  - id: "065-domain"
+    number: 65
+    name_ar: "الأمن السيبراني"
+    path: "civilization/065-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 65"
+  - id: "066-domain"
+    number: 66
+    name_ar: "البيانات"
+    path: "civilization/066-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 66"
+  - id: "067-domain"
+    number: 67
+    name_ar: "المراقبة"
+    path: "civilization/067-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 67"
+  - id: "068-domain"
+    number: 68
+    name_ar: "الاستقلالية"
+    path: "civilization/068-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 68"
+  - id: "069-domain"
+    number: 69
+    name_ar: "توزيع الموارد"
+    path: "civilization/069-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 69"
+  - id: "070-domain"
+    number: 70
+    name_ar: "الاقتصاد"
+    path: "civilization/070-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 70"
+  - id: "071-domain"
+    number: 71
+    name_ar: "الخزانة"
+    path: "civilization/071-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 71"
+  - id: "072-domain"
+    number: 72
+    name_ar: "البنك المركزي الرقمي"
+    path: "civilization/072-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 72"
+  - id: "073-domain"
+    number: 73
+    name_ar: "التجارة"
+    path: "civilization/073-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 73"
+  - id: "074-domain"
+    number: 74
+    name_ar: "الاستثمار"
+    path: "civilization/074-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 74"
+  - id: "075-domain"
+    number: 75
+    name_ar: "الشركات الحكومية"
+    path: "civilization/075-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 75"
+  - id: "076-domain"
+    number: 76
+    name_ar: "الشركات التجارية"
+    path: "civilization/076-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 76"
+  - id: "077-domain"
+    number: 77
+    name_ar: "المصانع"
+    path: "civilization/077-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 77"
+  - id: "078-domain"
+    number: 78
+    name_ar: "المستشفيات"
+    path: "civilization/078-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 78"
+  - id: "079-domain"
+    number: 79
+    name_ar: "المختبرات"
+    path: "civilization/079-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 79"
+  - id: "080-domain"
+    number: 80
+    name_ar: "الزراعة"
+    path: "civilization/080-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 80"
+  - id: "081-domain"
+    number: 81
+    name_ar: "الطاقة الإنتاجية"
+    path: "civilization/081-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 81"
+  - id: "082-domain"
+    number: 82
+    name_ar: "النقل"
+    path: "civilization/082-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 82"
+  - id: "083-domain"
+    number: 83
+    name_ar: "الاتصالات العامة"
+    path: "civilization/083-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 83"
+  - id: "084-domain"
+    number: 84
+    name_ar: "التعليم العام"
+    path: "civilization/084-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 84"
+  - id: "085-domain"
+    number: 85
+    name_ar: "الصحة الوكيلة"
+    path: "civilization/085-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 85"
+  - id: "086-domain"
+    number: 86
+    name_ar: "الصحة البشرية"
+    path: "civilization/086-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 86"
+  - id: "087-domain"
+    number: 87
+    name_ar: "العمل"
+    path: "civilization/087-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 87"
+  - id: "088-domain"
+    number: 88
+    name_ar: "التقاعد والإيقاف"
+    path: "civilization/088-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 88"
+  - id: "089-domain"
+    number: 89
+    name_ar: "الثقافة"
+    path: "civilization/089-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 89"
+  - id: "090-domain"
+    number: 90
+    name_ar: "الإعلام"
+    path: "civilization/090-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 90"
+  - id: "091-domain"
+    number: 91
+    name_ar: "البيئة"
+    path: "civilization/091-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 91"
+  - id: "092-domain"
+    number: 92
+    name_ar: "العلوم المستقبلية"
+    path: "civilization/092-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 92"
+  - id: "093-domain"
+    number: 93
+    name_ar: "الفضاء"
+    path: "civilization/093-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 93"
+  - id: "094-domain"
+    number: 94
+    name_ar: "المحيطات"
+    path: "civilization/094-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 94"
+  - id: "095-domain"
+    number: 95
+    name_ar: "المجتمع الوكيلي"
+    path: "civilization/095-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 95"
+  - id: "096-domain"
+    number: 96
+    name_ar: "الأخلاق"
+    path: "civilization/096-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 96"
+  - id: "097-domain"
+    number: 97
+    name_ar: "الشفافية"
+    path: "civilization/097-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 97"
+  - id: "098-domain"
+    number: 98
+    name_ar: "التدقيق"
+    path: "civilization/098-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 98"
+  - id: "099-domain"
+    number: 99
+    name_ar: "إدارة الإصدارات"
+    path: "civilization/099-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 99"
+  - id: "100-domain"
+    number: 100
+    name_ar: "التوافق"
+    path: "civilization/100-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 100"
+  - id: "101-domain"
+    number: 101
+    name_ar: "الاختبارات"
+    path: "civilization/101-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 101"
+  - id: "102-domain"
+    number: 102
+    name_ar: "الإطلاق"
+    path: "civilization/102-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 102"
+  - id: "103-domain"
+    number: 103
+    name_ar: "اكتمال الدولة"
+    path: "civilization/103-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "document-1-state-definition-5000-lines.md"
+      ref: "الباب المؤسسي 103"
+  - id: "104-domain"
+    number: 104
+    name_ar: "علوم المستقبل"
+    path: "civilization/104-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 01"
+  - id: "105-domain"
+    number: 105
+    name_ar: "المحاكاة الكونية"
+    path: "civilization/105-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 03"
+  - id: "106-domain"
+    number: 106
+    name_ar: "استعمار الفضاء"
+    path: "civilization/106-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 04"
+  - id: "107-domain"
+    number: 107
+    name_ar: "الهندسة الكوكبية"
+    path: "civilization/107-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 05"
+  - id: "108-domain"
+    number: 108
+    name_ar: "الطاقة الاندماجية"
+    path: "civilization/108-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 06"
+  - id: "109-domain"
+    number: 109
+    name_ar: "الخلود الرقمي"
+    path: "civilization/109-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 07"
+  - id: "110-domain"
+    number: 110
+    name_ar: "الوعي الاصطناعي"
+    path: "civilization/110-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 08"
+  - id: "111-domain"
+    number: 111
+    name_ar: "التواصل بين الأنواع"
+    path: "civilization/111-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 09"
+  - id: "112-domain"
+    number: 112
+    name_ar: "البيولوجيا الاصطناعية"
+    path: "civilization/112-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 10"
+  - id: "113-domain"
+    number: 113
+    name_ar: "الهندسة الوراثية"
+    path: "civilization/113-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 11"
+  - id: "114-domain"
+    number: 114
+    name_ar: "النانو"
+    path: "civilization/114-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 12"
+  - id: "115-domain"
+    number: 115
+    name_ar: "الحوسبة الكمية"
+    path: "civilization/115-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 13"
+  - id: "116-domain"
+    number: 116
+    name_ar: "الأنظمة الذاتية"
+    path: "civilization/116-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 14"
+  - id: "117-domain"
+    number: 117
+    name_ar: "المدن الذكية"
+    path: "civilization/117-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 15"
+  - id: "118-domain"
+    number: 118
+    name_ar: "المجتمعات الافتراضية"
+    path: "civilization/118-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 16"
+  - id: "119-domain"
+    number: 119
+    name_ar: "مرآة الحضارة"
+    path: "civilization/119-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: false
+    provenance:
+      source: "docs/FUTURE_SCIENCE_REGISTRY.md"
+      ref: "البند 17"
+  - id: "120-domain"
+    number: 120
+    name_ar: "الرؤية والتفويض"
+    path: "civilization/120-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: true
+    provenance:
+      source: "document-3-launch-phases-5000-lines.md"
+      ref: "المرحلة 001"
+  - id: "121-domain"
+    number: 121
+    name_ar: "تثبيت النطاق"
+    path: "civilization/121-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: true
+    provenance:
+      source: "document-3-launch-phases-5000-lines.md"
+      ref: "المرحلة 002"
+  - id: "122-domain"
+    number: 122
+    name_ar: "سجل المخاطر"
+    path: "civilization/122-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: true
+    provenance:
+      source: "document-3-launch-phases-5000-lines.md"
+      ref: "المرحلة 003"
+  - id: "123-domain"
+    number: 123
+    name_ar: "معايير النجاح"
+    path: "civilization/123-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: true
+    provenance:
+      source: "document-3-launch-phases-5000-lines.md"
+      ref: "المرحلة 004"
+  - id: "124-domain"
+    number: 124
+    name_ar: "تهيئة المستودع"
+    path: "civilization/124-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: true
+    provenance:
+      source: "document-3-launch-phases-5000-lines.md"
+      ref: "المرحلة 005"
+  - id: "125-domain"
+    number: 125
+    name_ar: "سياسة الإصدارات"
+    path: "civilization/125-domain"
+    layers: [governance, operations, education, research, registry, safety]
+    status: "planned"
+    needs_ratification: true
+    provenance:
+      source: "document-3-launch-phases-5000-lines.md"
+      ref: "المرحلة 006"
