@@ -31,3 +31,12 @@ security/
 agents/
 config/
 docs/
+
+# ── ملفات مولّدة آلياً (M1) ──
+# تُدقَّق ببواباتها الخاصة لا بالمنسّق:
+#   seed/*.yaml          → node scripts/validate-seed.mjs
+#   السجلات المشتقة      → node scripts/generate-registries.mjs --check
+# تنسيقها بالمنسّق يخلق انحرافاً دائماً عن ناتج المولّد.
+seed/domains.yaml
+seed/federation.yaml
+seed/institutions.yaml
