@@ -44,8 +44,13 @@ test('persistent event log reloads and verifies', () => {
     file = join(dir, 'events.jsonl');
   const a = new PersistentEventLog(file);
   a.append('boot', 'system', {});
+  // M2.05: صار السجل يقبل كاتباً واحداً، فلا يُفتح ثانٍ قبل إغلاق الأول — وفتحُ
+  // نسختين على ملف واحد كان بعينه ما يهدم السلسلة (لكل نسخة آخرُ تجزئةٍ عندها).
+  assert.throws(() => new PersistentEventLog(file), /LOG_ALREADY_LOCKED/);
+  a.close();
   const b = new PersistentEventLog(file);
   assert.equal(b.events.length, 1);
   assert.equal(b.verify(), true);
+  b.close();
   rmSync(dir, { recursive: true, force: true });
 });

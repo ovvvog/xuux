@@ -146,6 +146,10 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
     'describeKingKeyBinding',
     'kingKeyProviderFromEnv',
     'assertKingKeyProviderFit',
+    'verifyEventChain',
+    'hashEventBody',
+    'inspectEventLog',
+    'PersistentLogError',
   ]) {
     assert.equal(typeof exported[symbol], 'function', `الرمز ${symbol} مفقود من الوحدة المصرَّفة`);
   }

@@ -1,12 +1,27 @@
-// جذر الثقة — سجل الأحداث بسلسلة تجزئة. نُقل إلى TypeScript في M2.01 بلا تغيير سلوك:
-// نفس ترتيب مفاتيح الكائن المُجزَّأ (id, type, actor, data, previousHash, at ثم hash)،
-// لأن أي تغيير في الترتيب يغيّر ناتج JSON.stringify فيبطل كل تجزئة سابقة.
+// جذر الثقة — سجل الأحداث بسلسلة تجزئة.
+//
+// نُقل إلى TypeScript في M2.01 بلا تغيير سلوك. وفي M2.05 أُضيف **ترقيم متسلسل**
+// (`seq`) إلى الجسم المُجزَّأ، وهذا تغييرٌ مقصود يُبطل تجزئة كل سجل كُتب قبله —
+// لأن الترتيب والمحتوى داخل `JSON.stringify` هما ما يُجزَّأ. ولذلك يرفض السجل
+// الدائم أي ملف بلا `seq` برمز `LEGACY_LOG_FORMAT` بدل أن يتحقق منه فيفشل بغموض.
+//
+// لماذا الترقيم أصلاً وسلسلة التجزئة قائمة؟ لأن السلسلة تكشف تعديل حدث أو إعادة
+// ترتيبه، ولا تكشف **حذف حدث من الوسط** إلا بمقارنة الروابط، ولا تكشف حذف حدثٍ
+// من الطرف أصلاً. الترقيم يجعل الفراغ ظاهراً بذاته، ويجعل رسالة الخطأ تقول أيّ
+// موضع انكسر بدل «السجل تالف».
+//
+// ترتيب مفاتيح الجسم المُجزَّأ: id, seq, type, actor, data, previousHash, at — ثم
+// يُلحق `hash`. كل تغيير في هذا الترتيب تغييرُ صيغة يستوجب مُدخلةً في سجل الأعمال.
 
 import { createHash, randomUUID } from 'node:crypto';
 
-/** حدث ثابت التسلسل؛ يحفظ هاش السابق لتمكين كشف العبث في السجل. */
+/** تجزئة ما قبل الحدث الأول: السلسلة تبدأ من ثابت معلَن لا من قيمة فارغة. */
+export const GENESIS_HASH = 'GENESIS';
+
+/** حدث ثابت التسلسل؛ يحفظ رقمه وهاش السابق لتمكين كشف العبث في السجل. */
 export interface EventRecord {
   id: string;
+  seq: number;
   type: string;
   actor: string;
   data: object;
@@ -15,29 +30,84 @@ export interface EventRecord {
   hash: string;
 }
 
+/** أسباب انكسار السلسلة، مثبَّتة نصاً كي تُختبر ولا تُخمَّن من رسالة. */
+export const ChainBreakReasons = [
+  'SEQUENCE_MISMATCH',
+  'PREVIOUS_HASH_MISMATCH',
+  'HASH_MISMATCH',
+] as const;
+
+export type ChainBreakReason = (typeof ChainBreakReasons)[number];
+
+/** نتيجة تحقق مفصّلة: أين انكسرت السلسلة ولماذا، لا «صحيحة/فاسدة» فقط. */
+export interface ChainVerification {
+  ok: boolean;
+  count: number;
+  lastHash: string;
+  brokenAt?: number;
+  reason?: ChainBreakReason;
+}
+
+/**
+ * يحسب تجزئة جسم الحدث بلا `hash`. مُصدَّرة كي يستعملها السجل الدائم والمُفحِّص
+ * الخارجي بنفس القاعدة حرفياً، فلا تتفارق نسختان من حساب واحد.
+ * @param unsigned - جسم الحدث بلا تجزئته
+ * @returns التجزئة السداسية
+ */
+export function hashEventBody(unsigned: Omit<EventRecord, 'hash'>): string {
+  return createHash('sha256').update(JSON.stringify(unsigned)).digest('hex');
+}
+
+/**
+ * يتحقق من سلسلة أحداث معطاة: الترقيم متصل من 1، وكل حدث يشير إلى تجزئة سابقه،
+ * وتجزئته تُطابق إعادة حسابها. مُصدَّرة كي تُستعمل على أحداث مقروءة من قرص قبل
+ * قبولها في كائن حيّ.
+ * @param events - الأحداث بترتيب كتابتها
+ * @returns نتيجة التحقق المفصّلة
+ */
+export function verifyEventChain(events: readonly EventRecord[]): ChainVerification {
+  let previous = GENESIS_HASH;
+  let index = 0;
+  for (const event of events) {
+    index += 1;
+    const { hash, ...unsigned } = event;
+    const broken = (reason: ChainBreakReason): ChainVerification => ({
+      ok: false,
+      count: events.length,
+      lastHash: previous,
+      brokenAt: index,
+      reason,
+    });
+    if (event.seq !== index) return broken('SEQUENCE_MISMATCH');
+    if (event.previousHash !== previous) return broken('PREVIOUS_HASH_MISMATCH');
+    if (hash !== hashEventBody(unsigned)) return broken('HASH_MISMATCH');
+    previous = hash;
+  }
+  return { ok: true, count: events.length, lastHash: previous };
+}
+
 export class EventLog {
   events: EventRecord[] = [];
-  lastHash = 'GENESIS';
+  lastHash = GENESIS_HASH;
 
   /**
-   * يضيف حدثاً جديداً مع ربطه تشفيرياً بما سبقه.
+   * يضيف حدثاً جديداً مع ربطه تشفيرياً بما سبقه وترقيمه ترقيماً متصلاً.
    * @param type - نوع الواقعة المسجلة
    * @param actor - معرّف الجهة التي أحدثتها
    * @param data - تفاصيل الواقعة
    * @returns الحدث الذي أُلحق بالسجل
    */
   append(type: string, actor: string, data: object): EventRecord {
-    // الجسم بلا `hash` هو بعينه ما كان يُجزَّأ قبل النقل، وترتيب مفاتيحه محفوظ.
     const unsigned: Omit<EventRecord, 'hash'> = {
       id: randomUUID(),
+      seq: this.events.length + 1,
       type,
       actor,
       data,
       previousHash: this.lastHash,
       at: new Date().toISOString(),
     };
-    const hash = createHash('sha256').update(JSON.stringify(unsigned)).digest('hex');
-    const event: EventRecord = { ...unsigned, hash };
+    const event: EventRecord = { ...unsigned, hash: hashEventBody(unsigned) };
     this.events.push(Object.freeze(event));
     this.lastHash = event.hash;
     return event;
@@ -48,14 +118,15 @@ export class EventLog {
    * @returns صحة السلسلة من حدث التكوين حتى آخر حدث
    */
   verify(): boolean {
-    let previous = 'GENESIS';
-    for (const event of this.events) {
-      const { hash, ...unsigned } = event;
-      const expected = createHash('sha256').update(JSON.stringify(unsigned)).digest('hex');
-      if (event.previousHash !== previous || hash !== expected) return false;
-      previous = hash;
-    }
-    return true;
+    return this.verifyChain().ok;
+  }
+
+  /**
+   * تحقق مفصّل يقول أيّ موضع انكسر ولماذا — ما يحتاجه التدقيق بعد اشتباه عبث.
+   * @returns نتيجة التحقق المفصّلة
+   */
+  verifyChain(): ChainVerification {
+    return verifyEventChain(this.events);
   }
 
   /**
