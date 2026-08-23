@@ -1,4 +1,4 @@
-# التكامل المستمر — أُنشئ في M0.05 ووُسِّع في M1.08 ثم في M3.03
+# التكامل المستمر — أُنشئ في M0.05 ووُسِّع في M1.08 ثم في M3.03 ثم في M3.05–M3.08
 #
 # القاعدة: لا يُدمج شيء في main إلا وهذا المسار أخضر.
 # المرجع: docs/roadmap/03-roadmap-to-100.md — البوابتان G0 و G1
@@ -99,6 +99,19 @@ jobs:
           npm run migrate -- status
           npm run migrate -- down
           npm run migrate -- up
+
+      - name: النسخ الاحتياطي والاستعادة — تمرين فعلي بزمن معلَن (M3.07)
+        # لا يكفي وجود نصّ نسخ: النسخة التي لم تُستعد ليست نسخة. فالبوابة
+        # تُنشئ أرشيفاً وتتحقّق منه وتستعيده فوق قاعدة أخرى، وتطبع الزمن.
+        run: |
+          npm run backup -- create "$RUNNER_TEMP/ci-drill.dump"
+          npm run backup -- verify "$RUNNER_TEMP/ci-drill.dump"
+          npm run restore -- "$RUNNER_TEMP/ci-drill.dump" --database state_restore_drill --force
+
+      - name: سياسة الاحتفاظ — تقرير جاف لا يحذف شيئاً (M3.08)
+        # `plan` قراءةٌ محضة: تُشغَّل في البوابة لأن سياسةً لا تُقرأ آلياً
+        # سياسةٌ على الورق. والمحو الفعلي لا يُشغَّل في CI قصداً.
+        run: npm run retention -- plan
 
       - name: الاختبارات
         run: npm test
