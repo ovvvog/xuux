@@ -25,6 +25,13 @@
     "allowJs": true,
     "checkJs": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "src/**/*.mjs", "tests/**/*.mjs", "scripts/**/*.mjs"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "src/**/*.mts",
+    "src/**/*.mjs",
+    "tests/**/*.mjs",
+    "scripts/**/*.mjs"
+  ],
+  "exclude": ["node_modules", "dist", "src/root-of-trust/*.mjs", "src/root-of-trust/*.d.mts"]
 }

@@ -4,6 +4,14 @@ dist/
 build/
 *.tsbuildinfo
 
+# ── ناتج خطوة البناء في الموضع (M2.01) ──
+# مصادر جذر الثقة هي src/root-of-trust/*.mts، وهذه الملفات يولّدها
+# `npm run build` (tsconfig.build.json) بجوارها كي تبقى مسارات الاستيراد
+# عند المستهلكين كما هي. لا تُلتزم في Git: الملتزم هو المصدر لا الناتج.
+src/root-of-trust/*.mjs
+src/root-of-trust/*.d.mts
+src/root-of-trust/*.mjs.map
+
 # ── الأسرار والمفاتيح: يُمنع دفعها منعًا تامًا (المادة 7 من القاعدة الحاكمة) ──
 .env
 .env.*

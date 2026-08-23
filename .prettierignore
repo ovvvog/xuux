@@ -6,6 +6,12 @@ node_modules/
 dist/
 package-lock.json
 
+# ناتج خطوة البناء في الموضع (M2.01): مولّد بـ tsc من ملفات `.mts`،
+# وتنسيقه يخلق انحرافاً دائماً عن ناتج المصرّف كما في السجلات المولّدة أدناه.
+src/root-of-trust/*.mjs
+src/root-of-trust/*.d.mts
+src/root-of-trust/*.mjs.map
+
 # الوثائق: نص عربي مكتوب بيد الإنسان؛ لا يُعاد تنسيقه آليًا
 *.md
 

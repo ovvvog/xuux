@@ -63,6 +63,12 @@ export default [
       'science/**',
       'agents/**',
       'security/**',
+      // ── ناتج خطوة البناء (M2.01) ──
+      // مصادر جذر الثقة صارت `.mts`، وهذه الملفات مولّدة عنها بـ tsc.
+      // تُدقَّق مصادرها لا ناتجها، وإلا صار التحذير عن كود لم يكتبه أحد.
+      'src/root-of-trust/*.mjs',
+      'src/root-of-trust/*.d.mts',
+      'src/root-of-trust/*.map',
     ],
   },
 
@@ -92,10 +98,10 @@ export default [
   // ── كود TypeScript ──
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
-    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.mts', 'tests/**/*.ts'],
   })),
   {
-    files: ['src/**/*.ts', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.mts', 'tests/**/*.ts'],
     rules: {
       ...sharedRules,
       'no-unused-vars': 'off',

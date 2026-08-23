@@ -58,6 +58,9 @@ jobs:
       - name: فحص الأنواع (TypeScript)
         run: npm run typecheck
 
+      - name: بناء نواة جذر الثقة (mts ← mjs)
+        run: npm run build
+
       - name: فحص الأسرار
         run: npm run scan:secrets
 
