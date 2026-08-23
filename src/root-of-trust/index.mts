@@ -8,4 +8,7 @@ export * from './policy.mjs';
 export * from './persistent-log.mjs';
 
 export * from './key-store.mjs';
+export * from './key-provider.mjs';
+export * from './key-provider-local.mjs';
+export * from './key-provider-remote.mjs';
 export * from './command-ledger.mjs';
