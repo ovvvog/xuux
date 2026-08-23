@@ -3,6 +3,11 @@
 // يمنع عودة ملفات القوالب الفارغة إلى المستودع. يفشل عند أي ملف يُصنّف template
 // خارج قائمة الاستثناءات المعلنة في docs/audit/template-allowlist.txt.
 // الاستخدام: node scripts/guard-templates.mjs [--path <مسار>]
+//
+// مخرج هروب صريح: ملف يحتوي السطر `template-guard:allow` يُستثنى، ويُعدّ ويُطبع
+// عدده حتى لا يكون الاستثناء صامتاً. هذا ضروري للوثائق التي **تشرح** أنماط
+// الكشف نفسها (كسجل الأعمال ووثيقة التدقيق)، فذكر النمط فيها ليس قالباً.
+// النمط نفسه مقصود من فاحص الأسرار `secret-scan:allow` — قاعدة واحدة في المشروع.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +21,7 @@ const i = args.indexOf('--path');
 const TARGET = path.resolve(i !== -1 && args[i + 1] ? args[i + 1] : ROOT);
 
 const ALLOWLIST_FILE = path.join(ROOT, 'docs/audit/template-allowlist.txt');
+const ESCAPE_MARKER = 'template-guard:allow';
 
 function readAllowlist() {
   if (!fs.existsSync(ALLOWLIST_FILE)) return new Set();
@@ -42,6 +48,7 @@ function walk(dir, acc = []) {
 
 const allow = readAllowlist();
 const offenders = [];
+const escaped = [];
 let scanned = 0;
 let allowed = 0;
 
@@ -60,12 +67,20 @@ for (const abs of walk(TARGET)) {
     allowed += 1;
     continue;
   }
+  if (text.includes(ESCAPE_MARKER)) {
+    escaped.push(rel);
+    continue;
+  }
   offenders.push({ rel, reason });
 }
 
 console.log('═══ حاجز القوالب (M1.08) ═══');
 console.log(`ملفات مفحوصة: ${scanned}`);
 console.log(`استثناءات معلنة ومطابقة: ${allowed}`);
+if (escaped.length > 0) {
+  console.log(`ملفات بمخرج هروب معلَن (${ESCAPE_MARKER}): ${escaped.length}`);
+  for (const e of escaped) console.log(`  · ${e}`);
+}
 console.log(`مخالفات: ${offenders.length}`);
 
 if (offenders.length > 0) {
@@ -73,7 +88,7 @@ if (offenders.length > 0) {
   for (const o of offenders.slice(0, 60)) console.error(`  - ${o.rel} — ${o.reason}`);
   if (offenders.length > 60) console.error(`  … و${offenders.length - 60} ملفاً آخر`);
   console.error(
-    '\nالعلاج: احذف الملف، أو املأه بمحتوى فعلي، أو أضف مساره صراحةً إلى docs/audit/template-allowlist.txt مع تعليق يشرح السبب.',
+    `\nالعلاج: احذف الملف، أو املأه بمحتوى فعلي، أو أضف مساره صراحةً إلى docs/audit/template-allowlist.txt مع تعليق يشرح السبب.\nوإن كان الملف وثيقة تشرح أنماط الكشف نفسها فأضف فيه السطر: ${ESCAPE_MARKER}`,
   );
   process.exit(1);
 }
