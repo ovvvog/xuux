@@ -15,7 +15,7 @@
 
 | المسار | العنوان | الوزن | الحالة | التقدم |
 |---|---|---|---|---|
-| M0 | البنية الهندسية الأساسية | 5% | ⬜ | 0/9 |
+| M0 | البنية الهندسية الأساسية | 5% | 🟨 | 8/9 |
 | M1 | تصفية الحقيقة وتحويل الشجرة إلى بيانات | 5% | ⬜ | 0/8 |
 | M2 | جذر الثقة الإنتاجي | 12% | ⬜ | 0/10 |
 | M3 | طبقة الاستمرارية | 10% | ⬜ | 0/8 |
@@ -27,7 +27,7 @@
 | M9 | الواجهات السيادية | 7% | ⬜ | 0/7 |
 | M10 | التشغيل والموثوقية والتعافي | 8% | ⬜ | 0/9 |
 | M11 | الأمن والاعتماد والإطلاق | 7% | ⬜ | 0/9 |
-| — | **الإجمالي** | **100%** | — | **0/103** |
+| — | **الإجمالي** | **100%** | — | **8/103** |
 
 ---
 
@@ -38,17 +38,58 @@
 
 | # | الخطوة | المخرَج | معيار القبول | الحالة |
 |---|---|---|---|---|
-| M0.01 | ثبّت زمن التشغيل: أضف `.nvmrc` بقيمة `20`، وحقل `engines: {"node": ">=20 <21"}` و`"type": "module"` في `package.json` | `package.json` صالح | `node -v` يطابق، و`npm pkg get engines` يعيد القيمة | ⬜ |
-| M0.02 | أضف `tsconfig.json` بـ `strict: true`، `module: NodeNext`، `moduleResolution: NodeNext`، `target: ES2022`، `noEmitOnError: true`، `outDir: dist` | تهيئة بناء عاملة | `npx tsc --noEmit` يعمل ويُخرج تقريراً (الفشل مقبول هنا، الصمت غير مقبول) | ⬜ |
-| M0.03 | ثبّت التبعيات الدنيا: `typescript`, `@types/node`, `eslint`, `@typescript-eslint/*`, `prettier`, `vitest` — بإصدارات مقفولة و`package-lock.json` مدفوع | قفل تبعيات | `npm ci` ينجح من صفر | ⬜ |
-| M0.04 | أضف `eslint.config.js` و`.prettierrc`، وسكربتات `lint`, `format:check`, `typecheck`, `test`, `validate` في `package.json` | أوامر جودة موحّدة | `npm run validate` يشغّل الأربعة تسلسلياً | ⬜ |
-| M0.05 | أنشئ `.github/workflows/ci.yml`: يعمل على `push` و`pull_request`، يشغّل `npm ci && npm run validate` على Node 20 | تكامل مستمر فعّال | نجاح أول تشغيل مرئي في تبويب Actions | ⬜ |
-| M0.06 | فعّل حماية الفرع `main`: منع الدفع المباشر، اشتراط نجاح CI، اشتراط مراجعة واحدة | حماية الفرع | محاولة دفع مباشر تُرفض | ⬜ |
-| M0.07 | أضف `.gitignore` حقيقياً (‏`node_modules`, `dist`, `*.log`, `.env*`, `*.key`, `*.pem`, `data/`)، و`.gitattributes`، و`CODEOWNERS`، و`LICENSE` | نظافة المستودع | `git status` نظيف بعد `npm ci` وبناء كامل | ⬜ |
-| M0.08 | أضف فحص أسرار في CI (‏gitleaks أو ما يعادله) يفشل البناء عند أي مفتاح أو توكن | حماية الأسرار | زرع مفتاح تجريبي يُفشل البناء، ثم يُزال | ⬜ |
-| M0.09 | استبدل `version.json` بإصدار حقيقي `0.1.0` واكتب سياسة الإصدار (SemVer) في كتاب التشغيل | إصدار معلَن | `version.json` بلا كلمة placeholder، وموافق لـ `package.json` | ⬜ |
+| M0.01 | ثبّت زمن التشغيل: أضف `.nvmrc` بقيمة `20`، وحقل `engines: {"node": ">=20 <21"}` و`"type": "module"` في `package.json` | `package.json` صالح | `node -v` يطابق، و`npm pkg get engines` يعيد القيمة | ✅ |
+| M0.02 | أضف `tsconfig.json` بـ `strict: true`، `module: NodeNext`، `moduleResolution: NodeNext`، `target: ES2022`، `noEmitOnError: true`، `outDir: dist` | تهيئة بناء عاملة | `npx tsc --noEmit` يعمل ويُخرج تقريراً (الفشل مقبول هنا، الصمت غير مقبول) | ✅ |
+| M0.03 | ثبّت التبعيات الدنيا: `typescript`, `@types/node`, `eslint`, `@typescript-eslint/*`, `prettier`, `vitest` — بإصدارات مقفولة و`package-lock.json` مدفوع | قفل تبعيات | `npm ci` ينجح من صفر | ✅ |
+| M0.04 | أضف `eslint.config.js` و`.prettierrc`، وسكربتات `lint`, `format:check`, `typecheck`, `test`, `validate` في `package.json` | أوامر جودة موحّدة | `npm run validate` يشغّل الأربعة تسلسلياً | ✅ |
+| M0.05 | أنشئ `.github/workflows/ci.yml`: يعمل على `push` و`pull_request`، يشغّل `npm ci && npm run validate` على Node 20 | تكامل مستمر فعّال | نجاح أول تشغيل مرئي في تبويب Actions | ✅ |
+| M0.06 | فعّل حماية الفرع `main`: منع الدفع المباشر، اشتراط نجاح CI، اشتراط مراجعة واحدة | حماية الفرع | محاولة دفع مباشر تُرفض | ⛔ |
+| M0.07 | أضف `.gitignore` حقيقياً (‏`node_modules`, `dist`, `*.log`, `.env*`, `*.key`, `*.pem`, `data/`)، و`.gitattributes`، و`CODEOWNERS`، و`LICENSE` | نظافة المستودع | `git status` نظيف بعد `npm ci` وبناء كامل | ✅ |
+| M0.08 | أضف فحص أسرار في CI (‏gitleaks أو ما يعادله) يفشل البناء عند أي مفتاح أو توكن | حماية الأسرار | زرع مفتاح تجريبي يُفشل البناء، ثم يُزال | ✅ |
+| M0.09 | استبدل `version.json` بإصدار حقيقي `0.1.0` واكتب سياسة الإصدار (SemVer) في كتاب التشغيل | إصدار معلَن | `version.json` بلا كلمة placeholder، وموافق لـ `package.json` | ✅ |
 
 **🚪 بوابة G0:** `npm ci && npm run validate` ينجح محلياً وفي CI، وفحص الأسرار فعّال، و`main` محمي. **لا يُفتح M1 قبل ذلك.**
+
+### أدلّة تنفيذ M0 — 2026-08-23
+
+التفصيل الكامل والأوامر ونتائجها في [`05-work-log.md`](05-work-log.md) — مُدخلة `WL-002`. خلاصة الأدلّة:
+
+| الخطوة | الدليل المُتحقَّق منه |
+|---|---|
+| M0.01 | `.nvmrc` = `20` · `node -v` = `v20.20.1` · `engines` = `{node: ">=20 <21", npm: ">=10"}` · `type` = `module` |
+| M0.02 | `tsconfig.json`: `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` + `verbatimModuleSyntax` + `noEmitOnError` · `tsc --noEmit` يُنهي بلا أخطاء |
+| M0.03 | `package-lock.json` v3، ‏91 حزمة، ‏0 ثغرة · `npm ci` من صفر ينجح · الإصدارات مثبَّتة بالضبط بلا `^` |
+| M0.04 | `npm run validate` = ‏lint ← format:check ← typecheck ← scan:secrets ← test — الخمسة خضراء · ‏37 اختباراً ناجحاً (27 قائم + 10 جديد) |
+| M0.05 | `.github/workflows/ci.yml` · تشغيل ناجح على `main` عند الكوميت `c7f33db`: ‏[run #32](https://github.com/soaav-svg/xuux/actions/runs/32629759421) — كل الخطوات الثماني خضراء بما فيها `validate-tree.py` |
+| M0.06 | **محجوب** — انظر الفقرة أدناه |
+| M0.07 | `.gitignore` (يمنع `.env*`, `*.key`, `*.pem`, `secrets/`, `keys/`, `data/`) · `.gitattributes` · `CODEOWNERS` (حماية مسارات `root-of-trust`, `crown`, `identity`, `security`) · `LICENSE` مملوك |
+| M0.08 | `scripts/scan-secrets.mjs` — ‏12 نمطاً + منع امتدادات مواد المفاتيح · اختبار عملي: زُرِع توكن GitHub وملف `.pem` ⇒ الفحص فشل برمز خروج `1` وتقرير محجوب، ثم أُزيلا ⇒ رمز الخروج `0` |
+| M0.09 | `version.json` = `0.1.0` بلا كلمة `placeholder` · مطابق لـ `package.json` · وCI يفشل آلياً عند أي تعارض بين الملفين |
+
+#### ⛔ M0.06 — حماية الفرع: محجوبة بقيد خارجي
+
+**السبب المُتحقَّق منه:** المستودع خاص، وحماية الفروع على المستودعات الخاصة تتطلّب خطة مدفوعة. رد واجهة GitHub البرمجية على المحاولتين:
+
+```
+PUT /repos/soaav-svg/xuux/branches/main/protection
+POST /repos/soaav-svg/xuux/rulesets
+⇒ 403: "Upgrade to GitHub Pro or make this repository public to enable this feature."
+```
+
+**ما لا يجوز فعله:** تحويل المستودع إلى عام لتجاوز القيد — فيه جذر ثقة وحوكمة سيادية، والانفتاح قرار سيادي لا حلّ تقني.
+
+**القرار:** الخطوة تبقى `⛔` حتى يُنفّذ مالك المستودع أحد الخيارين:
+
+1. ترقية الحساب إلى GitHub Pro أو Team ⇒ ثم يُعاد تشغيل نفس الطلب أعلاه.
+2. نقل المستودع إلى مؤسسة (Organization) على خطة تدعم الحماية.
+
+**ضوابط تعويضية فعّالة الآن، لا تُغني عن الحماية:** ‏CI يعمل على كل دفع إلى `main` فيكشف أي مخالفة بعد وقوعها · `CODEOWNERS` يوجّه المراجعة · فاحص الأسرار يمنع تسريب المفاتيح.
+
+**أثر ذلك على البوابة G0:** البوابة **مفتوحة جزئياً**. شرطا `validate` و«فحص الأسرار» مُستوفيان بدليل، وشرط «‏`main` محمي» غير مستوفى بقيد خارجي موثَّق. يُسمح ببدء **M1** لأن الحجب خارج سيطرة المنفّذ، على أن يبقى بند الحماية مفتوحاً في السجل ويُغلق فور رفع القيد. هذا استثناء مُعلن، لا إلغاء للبوابة.
+
+#### ⏸️ قرار مؤجَّل داخل M0.03 — مُشغّل اختبارات TypeScript
+
+الخطوة نصّت على `vitest` ضمن التبعيات الدنيا. **لم يُثبَّت،** والسبب: الاختبارات القائمة كلها `.mjs` وتعمل على `node:test` المدمج، فإضافة `vitest` الآن تعني تبعية كبيرة بلا مستفيد، وهي مخالفة لمبدأ «التبعيات الدنيا» في العنوان نفسه. **موعد إعادة النظر:** الخطوة `M2.01` عند تحويل النواة إلى TypeScript — حينها يُختار مُشغّل يفهم الأنواع ويُثبَّت بإصدار مقفول. هذا القرار مُسجَّل عملاً بالقاعدة الملزمة رقم 4 في نهاية هذه الوثيقة.
 
 ---
 
