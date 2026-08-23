@@ -157,7 +157,9 @@
 | T27 | إعادة وضع توجيه إيقاف قديم (إعادة إرسال على زرّ الإيقاف) | X3 | عهدٌ لا يتراجع وتاريخٌ متسلسل ⇒ `STALE_HALT_DIRECTIVE` / `HALT_HISTORY_MISMATCH` | `src/root-of-trust/halt-switch.mts` | `tests/root-of-trust/halt-switch.test.mjs` | محو ملف العهد كلياً يُعيد البداية |
 | T28 | **فشل تخزين يُقرأ نجاحاً** فتُبنى الدولة على ما لم يُكتب | X3 | فشل مُغلق في كل مخزن: السجل والدفتر والتثبيت والتوجيه وحالة الساعة | `src/root-of-trust/persistent-log.mts` · `src/root-of-trust/command-ledger.mts` · `src/root-of-trust/halt-switch.mts` · `src/root-of-trust/clock.mts` | `tests/root-of-trust/failure-modes.test.mjs` | تعذّرٌ دائم يعني توقفاً دائماً (مُختار عن الكذب) |
 | T29 | فشل تخزين **يُتلف أمراً مشروعاً** فلا يُنفَّذ ولا يُعاد | X3 | مرحلتان في الدفتر: حجز ⇒ إلحاق ⇒ تثبيت، وإلغاءٌ بسببه عند الفشل، واستهلاك المعرّف بعد القبول | `src/root-of-trust/crown.mts` · `src/root-of-trust/command-ledger.mts` | `tests/root-of-trust/failure-modes.test.mjs` | لا شيء معروف؛ وكان عيباً حتى `M2.09` |
-| T30 | تجاوز بوابة الانتقال بمرجعٍ داخلي غير مُجمَّد | X1 | **لا ضابط بعد** — العيب D4 موصَّف في `WL-004` وموعده `M2.11` | `src/models/model-registry.mjs` | ⛔ لا اختبار بعد | **مفتوح**: `getActive` تُرجع مرجعاً غير مُجمَّد فيتجاوز المستدعي بوابة `transition` |
+| T30 | تجاوز بوابة الانتقال بمرجعٍ داخلي غير مُجمَّد | X1 | `getActive` تُرجع **صورة عميقة مُجمَّدة** لا المرجع الداخلي، والمؤشّر المعلَّق يفشل مُغلقاً ⇒ `MODEL_ACTIVE_POINTER_DANGLING` / `MODEL_ACTIVE_NOT_APPROVED` | `src/models/model-registry.mjs` · `src/lib/snapshot.mjs` | `tests/models/registry-gates.test.mjs` | من يملك مرجع السجل الداخلي نفسه (كودٌ داخل الوحدة) يعدّله؛ الحدّ حدُّ الوحدة لا حدُّ العملية |
+| T31 | **مناعة كاذبة**: `Object.freeze` سطحي فتُدسّ قدرة محرَّمة في مصفوفة سجل مسجَّل بعد فحصها | X1 | نسخٌ عميق ثم تجميد في كل مستوى لكل ما يُرجَع من السجلات (القدرات، الشهادة، سلسلة الاشتقاق، الأدلة، الحكم) | `src/lib/snapshot.mjs` · `src/identity/agent-registry.mjs` · `src/data/data-catalog.mjs` · `src/data/memory-store.mjs` · `src/governance/law-system.mjs` · `src/core/execution-kernel.mjs` | `tests/core/immutability-gates.test.mjs` | ما ليس مصفوفةً ولا كائناً بسيطاً (نسخة صنف، `Buffer`، `Date`) يُمرَّر بالمرجع — حدٌّ معلن في الوحدة |
+| T32 | نموذجٌ عُلِّق أو أُرجع عنه يبقى **هو النشط** لغرضه فيُستدعى بعد منعه | X1 | `transition` تُسقط مؤشّر النشاط عند أي حالة غير معتمدة وتُلحق حدث `model.deactivated`؛ والعودة تحتاج `activate` صريحاً | `src/models/model-registry.mjs` | `tests/models/registry-gates.test.mjs` | إسقاط النشاط لا يُوقف تنفيذاً جارياً بُدئ قبل التعليق |
 
 ---
 
@@ -181,6 +183,9 @@
 7. **لا مراجعة أمنية مستقلة.** كل ما في هذه الوثيقة مكتوبٌ من داخل المشروع، وذلك
    بطبيعته أضعف من مراجعةٍ خارجية عدائية.
 8. **لا قياس طفرات على اختبارات الفشل** — قوة الدليل في M2.09 مباشرةٌ لا إحصائية.
+9. **الصورة المُجمَّدة تحمي الهيكل لا كل محتوى.** ما ليس مصفوفةً ولا كائناً بسيطاً
+   يُمرَّر بالمرجع (‏`content` في مخزن الذاكرة مثلاً حين يكون نسخة صنف)، فمن سلّم مثله
+   قدر أن يعدّله بعد التسجيل. موضع الإصلاح: عقدٌ يمنع القيم غير البسيطة في M3.
 
 ---
 
