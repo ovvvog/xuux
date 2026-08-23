@@ -1,0 +1,41 @@
+# ── التبعيات والبناء ──
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# ── الأسرار والمفاتيح: يُمنع دفعها منعًا تامًا (المادة 7 من القاعدة الحاكمة) ──
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+secrets/
+keys/
+*.keystore
+
+# ── حالة التشغيل المحلية ──
+data/
+state/
+var/
+*.log
+*.jsonl
+!docs/**/*.jsonl
+coverage/
+.nyc_output/
+
+# ── أدوات المحرر ونظام التشغيل ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# ── مؤقتات ──
+tmp/
+.tmp/
+.cache/
