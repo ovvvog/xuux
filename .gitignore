@@ -11,6 +11,9 @@ build/
 src/root-of-trust/*.mjs
 src/root-of-trust/*.d.mts
 src/root-of-trust/*.mjs.map
+src/policy/model.mjs
+src/policy/model.d.mts
+src/policy/model.mjs.map
 
 # ── الأسرار والمفاتيح: يُمنع دفعها منعًا تامًا (المادة 7 من القاعدة الحاكمة) ──
 .env

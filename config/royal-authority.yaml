@@ -1,0 +1,63 @@
+# العتبة السيادية — M4.04
+#
+# هذه القائمة هي حدُّ ما لا يُنفَّذ إلا بأمر ملكي مقبول من بوابة التاج. وهي
+# **بيانات لا كود**: محرّك السياسة يقرأها ويرفض كل فعل فيها لم يصحبه أمر مقبول،
+# ولو سمحت به سياسةٌ صريحة ولو كان الفاعل هو الملك نفسه — السماح يقول «الفاعل
+# مأذون»، والعتبة تقول «الإذن وحده لا يكفي، يلزم أمرٌ موقَّع مثبَّت في الدفتر».
+#
+# و`delegable: false` في كل بند مقصود: العتبة لا تُفوَّض في هذه النسخة. الحقل
+# معلَن كي يكون أي تفويض مستقبلي تعديلاً موثّقاً في البيانات لا سطراً في الكود.
+
+version: 1
+owner: crown
+
+threshold:
+  - action: stop-state
+    reason: إيقاف الدولة قرارٌ يوقف كل خدمة؛ لا يملكه دورٌ إداري ولا حالةُ طوارئ في كود.
+    lawRef: law:sovereign-halt
+    delegable: false
+
+  - action: resume-state
+    reason: الاستئناف بعد الإيقاف يُلغي أثر قرار سيادي، فلا يكون إلا بقرار سيادي مثله.
+    lawRef: law:sovereign-halt
+    delegable: false
+
+  - action: change-policy
+    reason: من يعدّل السياسة يعدّل حدود صلاحيته نفسها؛ ترك هذا لغير الملك يُفرغ كل بند آخر.
+    lawRef: law:policy-governance
+    delegable: false
+
+  - action: enact-law
+    reason: إصدار النصّ النافذ أصل السلطة التشريعية ولا يُنتزع بقدرة تقنية.
+    lawRef: law:legislation
+    delegable: false
+
+  - action: repeal-law
+    reason: 'إلغاء النصّ أخطر من إصداره: يرفع قيداً قائماً كان غيره مبنياً عليه.'
+    lawRef: law:legislation
+    delegable: false
+
+  - action: rotate-king-key
+    reason: تدوير مفتاح الملك يغيّر مرجع التحقّق لكل أمر سابق ولاحق.
+    lawRef: law:root-of-trust
+    delegable: false
+
+  - action: allocate-budget
+    reason: تخصيص المال التزامٌ على الدولة لا على مؤسسة، فيلزمه أمر لا طلب.
+    lawRef: law:public-finance
+    delegable: false
+
+  - action: revoke-agent
+    reason: إلغاء الوكيل لا رجعة فيه ويُبطل شهادته أبداً؛ خطأٌ فيه لا يُصلَح بعد وقوعه.
+    lawRef: law:agent-registry
+    delegable: false
+
+  - action: purge-data
+    reason: المحو يُفقد الدليل نفسه، فيُقرَّر فوق مستوى من يشغّل أداة المحو.
+    lawRef: law:retention
+    delegable: false
+
+  - action: export-keys
+    reason: مُدرَجٌ هنا احتياطاً مضاعفاً؛ وسياسة `pol:forbid-key-export` تمنعه أصلاً منعاً مطلقاً فلا ينفعه أمر.
+    lawRef: law:root-of-trust
+    delegable: false

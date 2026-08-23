@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/config/roles.schema.json",
+  "title": "الأدوار وقدراتها — M4.02",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "roles"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "capabilities", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^role:[a-z0-9-]+$" },
+          "name": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 8 },
+          "inherits": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^role:[a-z0-9-]+$" }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z]+:[a-z0-9-]+$" },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,143 @@
+// نموذج الصلاحيات — M4.01
+//
+// هذا الملف هو المقابل النوعي لوثيقة `docs/POLICY_MODEL.md`: كل بُعد في الوثيقة
+// نوعٌ هنا، وكل رمز خطأ في القرار قيمةٌ في اتحاد مُغلق. الغرض أن يكون الانحراف
+// بين الوثيقة والكود خطأ تصريف لا اكتشافاً متأخراً في المراجعة.
+//
+// النموذج مركّب: أدوار (RBAC) تحدّد من يملك القدرة، وخصائص (ABAC) تحدّد متى
+// تسري — فالدور وحده لا يقرّر، والخصائص وحدها لا تُعرف صاحبها.
+
+/** فئة الفاعل. `human` شخص، و`autonomous` وكيل ينفّذ بلا مراجعة لحظية، و`service` خدمة داخلية. */
+export type ActorKind = 'human' | 'autonomous' | 'service';
+
+/**
+ * الفاعل كما يراه المحرّك. `state` حاضر دائماً لأن سياسة `pol:deny-non-active-actor`
+ * تقرأه: فاعلٌ بلا حالة معروفة يُقرأ غير نشط فيُمنع، لا يُفترض نشاطه.
+ */
+export interface PolicyActor {
+  id: string;
+  role: string;
+  kind?: ActorKind;
+  state: string;
+  scope?: string;
+  capabilities?: readonly string[];
+}
+
+/** المورد المطلوب الفعل عليه. الخصائص الثلاث الباقية تقرؤها الشروط. */
+export interface PolicyResource {
+  id: string;
+  type: string;
+  scope?: string;
+  owner?: string;
+  classification?: string;
+  legalHold?: boolean;
+}
+
+/** سياق الطلب: خصائص لحظية لا تنتمي للفاعل ولا للمورد (الجهة، نتيجة التقييم، الكمّية). */
+export type PolicyContext = Readonly<Record<string, unknown>>;
+
+/** طلب تفويض واحد بأبعاده الخمسة: الفاعل، الفعل، المورد، النطاق، الشروط (في السياق). */
+export interface PolicyRequest {
+  actor: PolicyActor;
+  action: string;
+  resource: PolicyResource;
+  scope?: string;
+  context?: PolicyContext;
+  /** معرّف أمر ملكي **مقبول من بوابة التاج**؛ حضوره وحده لا يكفي للعتبة السيادية. */
+  royalCommandId?: string;
+}
+
+/** عوامل الشروط المدعومة. أي عامل خارج هذا الاتحاد يُرفض في التحميل لا في التقييم. */
+export type ConditionOperator =
+  'eq' | 'ne' | 'in' | 'not-in' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists';
+
+export interface PolicyCondition {
+  attribute: string;
+  operator: ConditionOperator;
+  value?: unknown;
+}
+
+export interface PolicyActorMatch {
+  roles?: readonly string[];
+  ids?: readonly string[];
+  kinds?: readonly string[];
+}
+
+/** سياسة واحدة كما تُقرأ من `config/policies.yaml` بعد التحقق من مخطَّطها. */
+export interface PolicyRecord {
+  id: string;
+  name: string;
+  owner: string;
+  version: number;
+  effect: 'allow' | 'deny';
+  priority: number;
+  reason: string;
+  lawRef?: string;
+  enabled: boolean;
+  approvedBy?: string;
+  actors: PolicyActorMatch;
+  actions: readonly string[];
+  resources: readonly string[];
+  scopes?: readonly string[];
+  conditions?: readonly PolicyCondition[];
+}
+
+/** بند في كتالوج الأفعال: الحسّاس منها لا يُنفَّذ إلا عبر نقطة التفويض (M4.05). */
+export interface ActionDefinition {
+  id: string;
+  description: string;
+  sensitive: boolean;
+  quotaResource?: string;
+}
+
+/** بند العتبة السيادية كما يُقرأ من `config/royal-authority.yaml`. */
+export interface SovereignThresholdEntry {
+  action: string;
+  reason: string;
+  lawRef?: string;
+  delegable?: false;
+}
+
+/** حدّ حصّة معلَن في `config/quotas.yaml`. */
+export interface QuotaDefinition {
+  resource: string;
+  subjectType: 'agent' | 'institution' | 'region' | 'model';
+  limit: number;
+  windowSeconds: number;
+  unit?: string;
+  reason: string;
+}
+
+/** رموز القرار. الرمز للآلة والسبب للإنسان، ولا يُعاد قرار بلا الاثنين. */
+export type DecisionCode =
+  | 'POLICY_ALLOW'
+  | 'POLICY_DENY'
+  | 'POLICY_NO_MATCH'
+  | 'POLICY_UNKNOWN_ACTION'
+  | 'POLICY_UNKNOWN_ROLE'
+  | 'SOVEREIGN_COMMAND_REQUIRED'
+  | 'QUOTA_EXCEEDED'
+  | 'STATE_HALTED';
+
+/**
+ * قرار مُسبَّب: يحمل الرمز والسبب والسياسة الحاكمة ونسختها. و`policyId` قد يكون
+ * `null` في قرارٍ لم تحكمه سياسة (لا مطابق، أو فعل مجهول، أو عتبة سيادية) —
+ * وذلك تصريحٌ بالحقيقة لا نقصٌ: نسبةُ الرفض لسياسة لم تُقيَّم تضليل.
+ */
+export interface PolicyDecision {
+  allowed: boolean;
+  effect: 'allow' | 'deny';
+  code: DecisionCode;
+  reason: string;
+  policyId: string | null;
+  policyVersion: number | null;
+  requiresRoyalCommand: boolean;
+  /** السياسات المطابقة كلها مرتّبة، كي يُرى ما زاحم الحاكمة لا الحاكمة وحدها. */
+  matched: ReadonlyArray<{
+    id: string;
+    version: number;
+    effect: 'allow' | 'deny';
+    priority: number;
+  }>;
+  evaluatedAt: string;
+}

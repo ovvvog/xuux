@@ -1,0 +1,47 @@
+# الحصص كبيانات — M4.07
+#
+# قبل هذا الملف كانت الحصّة الوحيدة النافذة `maxAgents` في سجل الوكلاء. صارت
+# الحصص هنا بياناتٍ يُخصم عليها الاستهلاك في القاعدة (`state.quotas`)، وقيدُ
+# `quotas_consumed_within_limit` هو ما يوقف التجاوز — لا تذكّرُ المستدعي أن يفحص.
+#
+# `resource` يطابق `quotaResource` في `policies.yaml`؛ فعلٌ بلا حصّة معلنة لا
+# يُخصم عليه شيء، وهذا حدٌّ معلن لا سماحٌ ضمني بلا حدّ.
+
+version: 1
+owner: crown
+
+quotas:
+  - resource: agent-creations
+    subjectType: agent
+    limit: 25
+    windowSeconds: 86400
+    unit: وكيل/يوم
+    reason: تسجيل الوكلاء بلا حدّ يومي يسمح بتفريخ هوياتٍ أسرع من قدرة الرقابة على مراجعتها.
+
+  - resource: memory-writes
+    subjectType: agent
+    limit: 5000
+    windowSeconds: 3600
+    unit: كتابة/ساعة
+    reason: الكتابة المتدفقة تُغرق الذاكرة المؤسسية بضجيج يُخفي ما يستحق الحفظ.
+
+  - resource: egress-bytes
+    subjectType: agent
+    limit: 1073741824
+    windowSeconds: 86400
+    unit: بايت/يوم
+    reason: الإخراج المسموح به كمّاً غير محدود يجعل التسريب البطيء غير قابل للتمييز عن العمل.
+
+  - resource: budget-allocated
+    subjectType: institution
+    limit: 10000000
+    windowSeconds: 2592000
+    unit: وحدة مالية/شهر
+    reason: سقف شهري للتخصيص يمنع استنزاف الميزانية بقرارات متفرّقة كلٌّ منها صغير.
+
+  - resource: model-deployments
+    subjectType: institution
+    limit: 10
+    windowSeconds: 604800
+    unit: تنشيط/أسبوع
+    reason: تنشيط النماذج المتسارع يسبق قدرة التقييم، فيصير التقييم إجراءً شكلياً.

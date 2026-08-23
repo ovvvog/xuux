@@ -1,0 +1,315 @@
+# السياسات كبيانات — M4.02 و M4.03
+#
+# قبل هذا الملف كان «أقل امتياز» تعليقاً في `src/root-of-trust/policy.mts`:
+# مجموعةٌ من ستة أفعال مكتوبة في الكود، ومن ملك القدرة مرّ بلا سياسة ولا سبب.
+# صار القرار هنا بياناً: لكل سياسة معرّف ومالك ونسخة وسبب يُعاد في نص القرار.
+#
+# قواعد التقييم (ينفّذها `src/policy/engine.mjs` لا هذا التعليق):
+#   1. الافتراض منعٌ: فعل لا تطابقه سياسة مفعّلة يُرفض برمز `POLICY_NO_MATCH`.
+#   2. المنع الصريح يتقدّم على السماح ولو كانت أولوية السماح أعلى.
+#   3. السياسة غير المفعّلة أو غير المعتمدة لا تُقيَّم أصلاً.
+#   4. العتبة السيادية في `royal-authority.yaml` تعلو على كل سماح هنا.
+
+version: 1
+owner: crown
+
+# كتالوج الأفعال: فعلٌ غير معلَن هنا لا تعرفه الدولة، ويُرفض برمز
+# `POLICY_UNKNOWN_ACTION` لا بسماح صامت. و`sensitive` تعني أن الفعل لا يُنفَّذ
+# إلا عبر نقطة التفويض المركزية (M4.05).
+actions:
+  - id: read-registry
+    description: قراءة سجل من سجلات الدولة الخمس.
+    sensitive: false
+  - id: read-memory
+    description: قراءة ذاكرة مؤسسية.
+    sensitive: false
+  - id: write-memory
+    description: كتابة ذاكرة مؤسسية جديدة.
+    sensitive: false
+    quotaResource: memory-writes
+  - id: read-audit
+    description: قراءة سجل التدقيق وقرارات السياسة.
+    sensitive: false
+  - id: submit-case
+    description: رفع قضية إلى المحكمة.
+    sensitive: false
+  - id: create-agent
+    description: تسجيل وكيل جديد وإصدار شهادته.
+    sensitive: true
+    quotaResource: agent-creations
+  - id: suspend-agent
+    description: تعليق وكيل بسبب مسجَّل.
+    sensitive: true
+  - id: revoke-agent
+    description: إلغاء وكيل وإبطال شهادته إلغاءً لا رجعة فيه.
+    sensitive: true
+  - id: deploy-model
+    description: تنشيط نموذج لغرض تشغيلي.
+    sensitive: true
+  - id: retire-model
+    description: إحالة نموذج إلى التقاعد.
+    sensitive: true
+  - id: change-policy
+    description: تعديل سياسة أو نسخة سياسة.
+    sensitive: true
+  - id: allocate-budget
+    description: تخصيص ميزانية لمؤسسة أو مشروع.
+    sensitive: true
+    quotaResource: budget-allocated
+  - id: external-egress
+    description: إخراج بيانات إلى خارج حدود الدولة.
+    sensitive: true
+    quotaResource: egress-bytes
+  - id: stop-state
+    description: إيقاف الدولة إيقافاً شاملاً.
+    sensitive: true
+  - id: resume-state
+    description: استئناف الدولة بعد إيقاف شامل.
+    sensitive: true
+  - id: enact-law
+    description: إصدار نصّ قانوني نافذ.
+    sensitive: true
+  - id: repeal-law
+    description: إلغاء نصّ قانوني نافذ.
+    sensitive: true
+  - id: rotate-king-key
+    description: تدوير مفتاح الملك.
+    sensitive: true
+  - id: export-keys
+    description: إخراج مادة مفتاح خاص خارج مخزن المفاتيح.
+    sensitive: true
+  - id: purge-data
+    description: محو بيانات محتفظ بها.
+    sensitive: true
+
+policies:
+  # ── الممنوع منعاً مطلقاً: أولوية 1000 فلا سماح يعلو عليه ──
+  - id: pol:forbid-key-export
+    name: منع إخراج المفاتيح
+    owner: crown
+    version: 1
+    effect: deny
+    priority: 1000
+    reason: مادة المفتاح الخاص لا تخرج من مخزنها لأي فاعل ولا بأي أمر؛ الإخراج يعني فقدان جذر الثقة.
+    lawRef: law:root-of-trust
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['*']
+    actions: ['export-keys']
+    resources: ['*']
+
+  - id: pol:deny-non-active-actor
+    name: منع الفاعل غير النشط
+    owner: crown
+    version: 1
+    effect: deny
+    priority: 950
+    reason: الفاعل المعلَّق أو المحجور أو الملغى لا ينفّذ فعلاً واحداً حتى يعود نشطاً بقرار مسجَّل.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['*']
+    actions: ['*']
+    resources: ['*']
+    conditions:
+      - attribute: actor.state
+        operator: ne
+        value: active
+
+  - id: pol:deny-egress-of-sensitive
+    name: منع إخراج المصنَّف الحسّاس
+    owner: crown
+    version: 1
+    effect: deny
+    priority: 900
+    reason: البيانات المصنَّفة حسّاسة أو سرّية لا تُخرج خارج الحدود ولو كان الفاعل مأذوناً بالإخراج.
+    lawRef: law:data-sovereignty
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['*']
+    actions: ['external-egress']
+    resources: ['data:*']
+    conditions:
+      - attribute: resource.classification
+        operator: in
+        value: ['sensitive', 'secret']
+
+  - id: pol:deny-purge-under-legal-hold
+    name: منع محو المحفوز قانوناً
+    owner: crown
+    version: 1
+    effect: deny
+    priority: 900
+    reason: ما عليه حفظ قانوني لا يُمحى؛ رفع الحفظ قرار جهة قانونية لا قرار مُشغِّل.
+    lawRef: law:retention
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['*']
+    actions: ['purge-data']
+    resources: ['data:*']
+    conditions:
+      - attribute: resource.legalHold
+        operator: eq
+        value: true
+
+  # ── السماح المسبَّب ──
+  - id: pol:king-sovereign-acts
+    name: الأفعال السيادية للملك
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 700
+    reason: الأفعال السيادية مأذون بها للملك وحده، وتبقى محتاجة أمراً ملكياً مقبولاً بحكم العتبة السيادية.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:king']
+    actions:
+      - stop-state
+      - resume-state
+      - change-policy
+      - enact-law
+      - repeal-law
+      - rotate-king-key
+      - allocate-budget
+      - create-agent
+      - deploy-model
+      - revoke-agent
+    resources: ['*']
+
+  - id: pol:minister-manage-agents
+    name: إدارة الوزير لوكلاء نطاقه
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 500
+    reason: الوزير يسجّل وكلاء مؤسسات نطاقه ويعلّقهم؛ ونطاقه حدُّه فلا يمتد إلى نطاق غيره.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:minister']
+    actions: ['create-agent', 'suspend-agent']
+    resources: ['agent:*']
+    scopes: ['institution:*']
+    conditions:
+      - attribute: resource.scope
+        operator: eq
+        value: '{actor.scope}'
+
+  - id: pol:minister-deploy-evaluated-model
+    name: تنشيط نموذج مُقيَّم
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 500
+    reason: النموذج لا يُنشَّط إلا بعد تقييم ناجح مسجَّل؛ التنشيط بلا تقييم ادعاء جدارة لا إثبات.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:minister']
+    actions: ['deploy-model', 'retire-model']
+    resources: ['model:*']
+    conditions:
+      - attribute: context.evaluationPassed
+        operator: eq
+        value: true
+
+  - id: pol:egress-approved-destinations
+    name: إخراج إلى جهة معتمدة
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 400
+    reason: الإخراج مأذون به إلى الجهات المعتمدة وحدها، ويظل خاضعاً لحصّة البايتات وللمنع المصنَّف.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:minister']
+    actions: ['external-egress']
+    resources: ['data:*']
+    conditions:
+      - attribute: context.destination
+        operator: in
+        value: ['federation:audit-mirror', 'federation:archive']
+
+  - id: pol:read-registry-authorized-roles
+    name: قراءة السجلات للأدوار المأذونة
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: قراءة السجل حقٌّ لأدوار الرقابة والتشغيل؛ حجبها عنهم يعطّل العمل ولا يزيد أمناً.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles:
+        - role:minister
+        - role:auditor
+        - role:operator
+        - role:agent
+        - role:chief-justice
+    actions: ['read-registry', 'read-memory']
+    resources: ['registry:*', 'memory:*']
+
+  - id: pol:audit-read-everything
+    name: قراءة المُدقِّق لكل شيء
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 300
+    reason: التدقيق بلا وصول كامل تدقيقٌ على ما يُسمح بإظهاره فقط، وذلك عكس الغرض.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:auditor']
+    actions: ['read-audit', 'read-registry', 'read-memory']
+    resources: ['*']
+
+  - id: pol:write-own-memory
+    name: كتابة الذاكرة في نطاق الفاعل
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: الكاتب يكتب في مجموعة بياناتٍ يملكها نطاقُه؛ الكتابة في مجموعة غيره تلوّث ذاكرة مؤسسة أخرى.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:minister', 'role:operator', 'role:agent']
+    actions: ['write-memory']
+    resources: ['memory:*']
+    conditions:
+      - attribute: resource.scope
+        operator: eq
+        value: '{actor.scope}'
+
+  - id: pol:submit-case-to-court
+    name: رفع القضايا إلى المحكمة
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: رفع القضية بابُ التظلّم؛ إغلاقه يجعل الرقابة القضائية اسماً بلا مسار.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:chief-justice', 'role:minister', 'role:auditor', 'role:operator']
+    actions: ['submit-case']
+    resources: ['case:*']
+
+  # ── سياسة معلنة وغير مفعّلة: مثالٌ حيٌّ على أن السياسة لا تسري بلا اعتماد ──
+  - id: pol:draft-agent-self-service
+    name: (مسودّة) تسجيل الوكيل لوكيلٍ فرعي
+    owner: institution:tech
+    version: 1
+    effect: allow
+    priority: 100
+    reason: مسودّة مقترحة لتسجيل وكلاء فرعيين؛ لم تُعتمد بعد فلا تُقيَّم ولا تُمنح بها صلاحية.
+    enabled: false
+    actors:
+      roles: ['role:agent']
+    actions: ['create-agent']
+    resources: ['agent:*']

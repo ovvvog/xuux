@@ -13,6 +13,6 @@
     "checkJs": false,
     "noEmit": false
   },
-  "include": ["src/root-of-trust/*.mts"],
+  "include": ["src/root-of-trust/*.mts", "src/policy/model.mts"],
   "exclude": ["node_modules", "dist"]
 }

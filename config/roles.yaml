@@ -1,0 +1,68 @@
+# الأدوار وقدراتها — M4.02
+#
+# قبل هذا الملف كان الدور نصّاً في الشهادة والقدرات مطالبةً يكتبها من يصنع
+# الشهادة. صار الدور هنا بياناً له مالك ونسخة، والقدرات تُقرأ منه لا من المطالبة.
+# القدرة صيغتها `<فئة>:<اسم>`؛ وقدرة `action:<فعل>` تعني الإذن بذلك الفعل بعد
+# أن تسمح به سياسة، لا بديلاً عنها: القدرة شرطٌ لا قرار.
+
+version: 1
+owner: crown
+
+roles:
+  - id: role:king
+    name: الملك
+    description: صاحب السلطة السيادية؛ الأمر الملكي يصدر عنه وحده ولا يُفوَّض.
+    capabilities:
+      - sovereign:command
+      - action:stop-state
+      - action:resume-state
+      - action:change-policy
+      - action:enact-law
+      - action:repeal-law
+      - action:rotate-king-key
+      - action:allocate-budget
+      - action:create-agent
+      - action:deploy-model
+
+  - id: role:chief-justice
+    name: رئيس القضاء
+    description: يفصل في القضايا ويقرأ السجلات كلها ولا يملك تعديل السياسة.
+    capabilities:
+      - action:submit-case
+      - action:read-registry
+      - action:read-memory
+
+  - id: role:minister
+    name: وزير
+    description: 'يدير مؤسسات نطاقه: يسجّل الوكلاء ويطلب الميزانية ولا يُنشئ نصّاً.'
+    capabilities:
+      - action:create-agent
+      - action:suspend-agent
+      - action:read-registry
+      - action:write-memory
+      - action:read-memory
+      - action:deploy-model
+
+  - id: role:auditor
+    name: مُدقِّق
+    description: يقرأ كل شيء ولا يكتب شيئاً؛ قراءته لا تحتاج إذن مالك السجل.
+    capabilities:
+      - action:read-registry
+      - action:read-memory
+      - action:read-audit
+
+  - id: role:operator
+    name: مُشغِّل
+    description: ينفّذ العمل اليومي داخل حصّته؛ لا يملك فعلاً حسّاساً واحداً.
+    capabilities:
+      - action:read-registry
+      - action:write-memory
+      - action:read-memory
+
+  - id: role:agent
+    name: وكيل مستقل
+    description: برنامج ينفّذ باسم الدولة داخل حصّة معلنة وتحت رقابة كاملة.
+    capabilities:
+      - action:read-registry
+      - action:read-memory
+      - action:write-memory

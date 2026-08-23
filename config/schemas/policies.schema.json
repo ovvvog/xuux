@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/config/policies.schema.json",
+  "title": "السياسات كبيانات — M4.02",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "actions", "policies"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "actions": {
+      "description": "كتالوج الأفعال المعروفة. فعلٌ غير معلَن هنا لا تعرفه السياسة، والمحرّك يرفضه بالافتراض.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "description", "sensitive"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*(:[a-z0-9-]+)*$" },
+          "description": { "type": "string", "minLength": 8 },
+          "sensitive": { "type": "boolean" },
+          "quotaResource": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "policies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "owner",
+          "version",
+          "effect",
+          "priority",
+          "actors",
+          "actions",
+          "resources",
+          "enabled",
+          "reason"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^pol:[a-z0-9-]+$" },
+          "name": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "version": { "type": "integer", "minimum": 1 },
+          "effect": { "type": "string", "enum": ["allow", "deny"] },
+          "priority": { "type": "integer", "minimum": 0, "maximum": 1000 },
+          "reason": {
+            "description": "السبب المُعاد في القرار: قرارٌ بلا سبب مقروء لا يُراجع.",
+            "type": "string",
+            "minLength": 8
+          },
+          "lawRef": { "type": "string", "minLength": 1 },
+          "enabled": { "type": "boolean" },
+          "approvedBy": { "type": "string", "minLength": 1 },
+          "actors": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "roles": {
+                "type": "array",
+                "items": { "type": "string", "pattern": "^(role:[a-z0-9-]+|\\*)$" },
+                "uniqueItems": true
+              },
+              "ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+              "kinds": {
+                "type": "array",
+                "items": { "type": "string", "enum": ["human", "autonomous", "service", "*"] }
+              }
+            }
+          },
+          "actions": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "resources": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "scopes": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["attribute", "operator"],
+              "properties": {
+                "attribute": { "type": "string", "minLength": 1 },
+                "operator": {
+                  "type": "string",
+                  "enum": ["eq", "ne", "in", "not-in", "gt", "gte", "lt", "lte", "exists"]
+                },
+                "value": {}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -43,6 +43,15 @@ const DECLARED_NULLABLE = Object.freeze({
   'models.state_reason': 'لا سبب حالةٍ لنموذج لم يُنقل عن حالته الأولى.',
   'models.state_changed_at': 'نموذجٌ لم تتغيّر حالته بعد التسجيل لا وقت تغيير له.',
   'laws.state_changed_at': 'قانونٌ ما زال مشروعاً لم تتغيّر حالته بعد.',
+  // أُضيفت في الهجرة `0003` مع حوكمة إصدارات السياسة وسجل القرارات (`M4.06`).
+  'policy_versions.approved_by': 'نسخة مقترحة لم تُعتمد بعد؛ والقيد يمنع تنشيطها بلا معتمِد.',
+  'policy_versions.approval_signature': 'لا توقيع قبل الاعتماد؛ والقيد يمنع التنشيط بلا توقيع.',
+  'policy_decisions.actor_kind': 'فاعلٌ لم يُعلن فئته يُقرأ بالافتراض الأضيق لا بفئة مخترعة.',
+  'policy_decisions.actor_scope': 'فاعلٌ بلا نطاق مؤسسي — كالتاج نفسه.',
+  'policy_decisions.scope': 'طلبٌ لا يحمل نطاقاً غير نطاق فاعله.',
+  'policy_decisions.royal_command_id': 'أكثر الأفعال دون العتبة السيادية فلا أمر ملكي لها.',
+  'policy_decisions.policy_id': 'قرارُ منعٍ بالافتراض لا سياسة حاكمة له — وذلك نفسه ما يُسجَّل.',
+  'policy_decisions.policy_version': 'لا نسخة سياسة حيث لا سياسة حاكمة.',
 });
 
 /** @type {{ pool: import('pg').Pool, drop: () => Promise<void> } | null} */

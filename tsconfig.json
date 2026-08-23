@@ -33,5 +33,12 @@
     "tests/**/*.mjs",
     "scripts/**/*.mjs"
   ],
-  "exclude": ["node_modules", "dist", "src/root-of-trust/*.mjs", "src/root-of-trust/*.d.mts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/root-of-trust/*.mjs",
+    "src/root-of-trust/*.d.mts",
+    "src/policy/model.mjs",
+    "src/policy/model.d.mts"
+  ]
 }

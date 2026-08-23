@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/config/quotas.schema.json",
+  "title": "الحصص كبيانات — M4.07",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "quotas"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "quotas": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource", "subjectType", "limit", "windowSeconds", "reason"],
+        "properties": {
+          "resource": { "type": "string", "pattern": "^[a-z][a-z0-9-]*(:[a-z0-9-]+)*$" },
+          "subjectType": {
+            "type": "string",
+            "enum": ["agent", "institution", "region", "model"]
+          },
+          "limit": { "type": "number", "exclusiveMinimum": 0 },
+          "windowSeconds": { "type": "integer", "minimum": 1 },
+          "unit": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 8 }
+        }
+      }
+    }
+  }
+}
