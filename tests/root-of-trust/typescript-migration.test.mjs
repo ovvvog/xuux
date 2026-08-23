@@ -138,6 +138,7 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
     'PolicyEngine',
     'EncryptedKeyStore',
     'CommandLedger',
+    'CommandLedgerError',
     'LocalEncryptedKeyProvider',
     'RemoteSecretStoreKeyProvider',
     'KingKeyError',
@@ -163,6 +164,11 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
   ]) {
     assert.equal(typeof exported[symbol], 'function', `الرمز ${symbol} مفقود من الوحدة المصرَّفة`);
   }
+  // رموز قيمية لا دوال؛ تُفحص بنوعها حتى لا تسقط من الواجهة بلا ملاحظة.
+  for (const symbol of ['CommandLedgerErrorCodes', 'CommandStates']) {
+    assert.equal(Array.isArray(exported[symbol]), true, `القائمة ${symbol} مفقودة`);
+  }
+  assert.equal(typeof exported['LEDGER_CLAIMS_SUFFIX'], 'string');
   const log = new rot.EventLog();
   log.append('test.migration', 'test', { ok: true });
   assert.equal(log.verify(), true, 'سلسلة التجزئة انكسرت بعد النقل');
