@@ -1,7 +1,18 @@
 import { randomUUID } from 'node:crypto';
-import { snapshot } from '../lib/snapshot.mjs';
+import { DATA_ASSET_SPEC } from '../persistence/entities.mjs';
 
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
+
+/**
+ * فهرس البيانات — صار **دائماً** في الخطوة `M3.05`.
+ *
+ * كان `Map` في الذاكرة: فهرسٌ يُمحى بإعادة التشغيل يجعل كل قرار إتاحةٍ لاحقٍ
+ * قراراً بلا مرجع — لأن التصنيف نفسه ضاع. صار المخزن مستودعاً على جدول
+ * `state.data_assets`، وقيدُ التصنيف وسلطةُ الاحتفاظ صارا قيدين في القاعدة.
+ *
+ * **حدٌّ معلن:** كل العمليات صارت `async`، و`records` الداخلية زالت — من كان
+ * يقرأ `catalog.records` مباشرة (وقد كان اختبارٌ يفعلها) صار يقرأ `get(id)`.
+ */
 
 /**
  * مستويات تصنيف البيانات، مرتّبة تصاعدياً في الحساسية. الترتيب هو أساس قرار
@@ -26,7 +37,7 @@ export const Classification = Object.freeze({
  */
 
 /**
- * سجل مجموعة بيانات في الفهرس.
+ * سجل مجموعة بيانات في الفهرس. `createdAt` صار `Date` من القاعدة لا نصّاً.
  * @typedef {object} DataRecord
  * @property {string} id
  * @property {string} name
@@ -36,7 +47,20 @@ export const Classification = Object.freeze({
  * @property {unknown[]} lineage - سلسلة الاشتقاق كما أعلنها المالك
  * @property {number} retentionDays - مدة الاحتفاظ؛ 0 تعني بلا حد معلَن
  * @property {QualityValue} quality
- * @property {string} createdAt
+ * @property {boolean} legalHold - حفظٌ قانوني يمنع المحو ولو انتهى الاحتفاظ
+ * @property {number} version
+ * @property {Date} createdAt
+ * @property {Date} updatedAt
+ */
+
+/**
+ * عقد المستودع الذي يحتاجه هذا الفهرس.
+ * @typedef {object} DataRepository
+ * @property {(record: Record<string, unknown>) => Promise<Record<string, unknown>>} insert
+ * @property {(id: string) => Promise<Record<string, unknown> | null>} findById
+ * @property {(query?: { filter?: Record<string, unknown>, limit?: number }) => Promise<Array<Record<string, unknown>>>} list
+ * @property {(filter?: Record<string, unknown>) => Promise<number>} count
+ * @property {(id: string, expectedVersion: number, patch: Record<string, unknown>) => Promise<Record<string, unknown>>} update
  */
 
 /**
@@ -55,22 +79,38 @@ function isClassification(value) {
   return typeof value === 'string' && Object.hasOwn(RANK, value);
 }
 
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {DataRecord}
+ */
+function toRecord(row) {
+  return /** @type {DataRecord} */ (
+    /** @type {unknown} */ (Object.freeze({ ...row, lineage: row['lineage'] ?? [] }))
+  );
+}
+
 export class DataCatalog {
   /**
-   * السجل موصوف كاختياري في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
+   * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `DATA_CATALOG_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ log?: EventLog }} [deps]
+   * @param {{ log?: EventLog, repository?: DataRepository }} [deps]
    */
-  constructor({ log } = {}) {
-    if (!log) throw new Error('DATA_CATALOG_DEPENDENCY_MISSING');
+  constructor({ log, repository } = {}) {
+    if (!log || !repository) throw new Error('DATA_CATALOG_DEPENDENCY_MISSING');
     this.log = log;
-    /** @type {Map<string, DataRecord>} */
-    this.records = new Map();
+    /** @type {DataRepository} */
+    this.repository = repository;
+  }
+
+  /** @returns {import('../persistence/entities.mjs').EntitySpec} */
+  static get spec() {
+    return DATA_ASSET_SPEC;
   }
 
   /**
    * يسجّل مجموعة بيانات جديدة. الاسم والمالك والمصدر شروط تسجيل: بيانات بلا
-   * مالك معلَن ولا مصدر معلَن لا يجوز أن تدخل الفهرس.
+   * مالك معلَن ولا مصدر معلَن لا يجوز أن تدخل الفهرس. والاسم **فريد** في
+   * القاعدة، فمن سجّل اسماً مكرّراً أخذ `REPOSITORY_DUPLICATE_UNIQUE`.
    * @param {object} contract
    * @param {string} contract.name
    * @param {string} contract.owner
@@ -78,23 +118,24 @@ export class DataCatalog {
    * @param {string} contract.source
    * @param {unknown[]} [contract.lineage=[]]
    * @param {number} [contract.retentionDays=0]
-   * @returns {Readonly<DataRecord>}
+   * @param {boolean} [contract.legalHold=false]
+   * @returns {Promise<DataRecord>}
    */
-  register({
+  async register({
     name,
     owner,
     classification = Classification.INTERNAL,
     source,
     lineage = [],
     retentionDays = 0,
+    legalHold = false,
   }) {
     if (!name || !owner || !source) throw new Error('DATA_CONTRACT_REQUIRED');
     if (!Object.values(Classification).includes(classification)) {
       throw new Error('INVALID_CLASSIFICATION');
     }
     const id = 'data:' + randomUUID();
-    /** @type {DataRecord} */
-    const r = {
+    const row = await this.repository.insert({
       id,
       name,
       owner,
@@ -103,28 +144,28 @@ export class DataCatalog {
       lineage: [...lineage],
       retentionDays,
       quality: 'unverified',
-      createdAt: new Date().toISOString(),
-    };
-    this.records.set(id, r);
+      legalHold,
+    });
     this.log.append('data.registered', owner, { id, name, classification });
-    return snapshot(r);
+    return toRecord(row);
   }
 
   /**
    * يُعلن نتيجة تدقيق جودة. لا يقبل `unverified` لأنها حالة ابتدائية لا حكم.
    * @param {string} id
    * @param {'verified' | 'degraded' | 'rejected'} quality
-   * @returns {Readonly<DataRecord>}
+   * @returns {Promise<DataRecord>}
    */
-  markQuality(id, quality) {
-    const r = this.records.get(id);
-    if (!r) throw new Error('DATASET_NOT_FOUND');
+  async markQuality(id, quality) {
+    const row = await this.repository.findById(id);
+    if (row === null) throw new Error('DATASET_NOT_FOUND');
     if (!['verified', 'degraded', 'rejected'].includes(quality)) {
       throw new Error('INVALID_QUALITY');
     }
-    r.quality = quality;
-    this.log.append('data.quality.changed', r.owner, { id, quality });
-    return snapshot(r);
+    const current = toRecord(row);
+    const updated = await this.repository.update(id, current.version, { quality });
+    this.log.append('data.quality.changed', current.owner, { id, quality });
+    return toRecord(updated);
   }
 
   /**
@@ -133,23 +174,24 @@ export class DataCatalog {
    * @param {string} id
    * @param {string} actor - من يطلب القراءة، يُسجَّل عند الإتاحة
    * @param {unknown} clearance - مستوى التصريح؛ غير المعروف يسقط دون كل المستويات
-   * @returns {true}
+   * @returns {Promise<true>}
    */
-  canRead(id, actor, clearance) {
-    const r = this.records.get(id);
-    if (!r) throw new Error('DATASET_NOT_FOUND');
+  async canRead(id, actor, clearance) {
+    const row = await this.repository.findById(id);
+    if (row === null) throw new Error('DATASET_NOT_FOUND');
+    const record = toRecord(row);
     const granted = isClassification(clearance) ? RANK[clearance] : -1;
-    if (granted < RANK[r.classification]) throw new Error('DATA_ACCESS_DENIED');
+    if (granted < RANK[record.classification]) throw new Error('DATA_ACCESS_DENIED');
     this.log.append('data.read.authorized', actor, { id });
     return true;
   }
 
   /**
    * @param {string} id
-   * @returns {Readonly<DataRecord> | null} صورة مُجمَّدة، أو null إن لم يوجد السجل
+   * @returns {Promise<DataRecord | null>} صورة مُجمَّدة، أو null إن لم يوجد السجل
    */
-  get(id) {
-    const r = this.records.get(id);
-    return r ? snapshot(r) : null;
+  async get(id) {
+    const row = await this.repository.findById(id);
+    return row === null ? null : toRecord(row);
   }
 }

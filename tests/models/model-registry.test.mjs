@@ -2,39 +2,44 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import { ModelRegistry, ModelState, ModelSandbox } from '../../src/models/index.mjs';
-function setup() {
-  return { log: new EventLog() };
+import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+
+/** @returns {ModelRegistry} */
+function registry(log = new EventLog()) {
+  return new ModelRegistry({ log, repository: createMemoryRepository(ModelRegistry.spec) });
 }
-test('registers model with immutable weight digest', () => {
-  const { log } = setup(),
-    r = new ModelRegistry({ log }),
-    m = r.register({
+
+test('registers model with immutable weight digest', async () => {
+  const r = registry(),
+    m = await r.register({
       name: 'reasoner',
-      version: '1.0.0',
+      modelVersion: '1.0.0',
       purpose: 'planning',
-      source: 'internal',
+      provider: 'internal',
       weights: 'weights',
       capabilities: ['read:data'],
     });
   assert.equal(m.state, ModelState.REGISTERED);
-  assert.equal(r.verifyWeights(m.id, 'weights'), true);
-  assert.equal(r.verifyWeights(m.id, 'changed'), false);
+  assert.equal(m.isActive, false);
+  assert.equal(await r.verifyWeights(m.id, 'weights'), true);
+  assert.equal(await r.verifyWeights(m.id, 'changed'), false);
 });
-test('rejects unsafe model capabilities and missing manifest', () => {
-  const r = new ModelRegistry({ log: new EventLog() });
-  assert.throws(
+
+test('rejects unsafe model capabilities and missing manifest', async () => {
+  const r = registry();
+  await assert.rejects(
     () =>
       r.register({
         name: 'x',
-        version: '1',
+        modelVersion: '1',
         purpose: 'x',
-        source: 'x',
+        provider: 'x',
         weights: 'x',
         capabilities: ['bypass-crown'],
       }),
     /FORBIDDEN_MODEL_CAPABILITY/,
   );
-  assert.throws(
+  await assert.rejects(
     () =>
       // @ts-expect-error استدعاء ناقص الحقول مقصود: يثبت أن البيان الناقص يُرفض
       // زمن التشغيل بخطأ مُسمّى، لا أن يُمرَّر بصمت. رفض المدقّق له متوقَّع ومطلوب.
@@ -42,29 +47,41 @@ test('rejects unsafe model capabilities and missing manifest', () => {
     /MODEL_MANIFEST_REQUIRED/,
   );
 });
-test('requires approval before activation and supports sandbox', () => {
-  const r = new ModelRegistry({ log: new EventLog() }),
-    m = r.register({
+
+test('requires approval before activation and supports sandbox', async () => {
+  const r = registry(),
+    m = await r.register({
       name: 'safe',
-      version: '1',
+      modelVersion: '1',
       purpose: 'inspect',
-      source: 'test',
+      provider: 'test',
       weights: 'x',
     });
-  assert.throws(() => r.activate(m.id), /MODEL_NOT_APPROVED/);
-  r.transition(m.id, ModelState.SANDBOXED, 'evaluation');
+  await assert.rejects(() => r.activate(m.id), /MODEL_NOT_APPROVED/);
+  await r.transition(m.id, ModelState.SANDBOXED, 'evaluation');
   const s = new ModelSandbox();
-  const sandboxed = r.getActive('inspect') ?? r.models.get(m.id);
+  const sandboxed = await r.get(m.id);
   assert.ok(sandboxed, 'النموذج المعزول يجب أن يكون موجوداً في السجل');
   assert.equal(s.run(sandboxed, { x: 1 }).network, 'disabled');
-  r.transition(m.id, ModelState.APPROVED, 'passed');
-  assert.equal(r.activate(m.id).id, m.id);
+  const approved = await r.transition(m.id, ModelState.APPROVED, 'passed');
+  // الاعتماد لا يُعلن بلا معتمِد مسمّى، والسلطة المعلنة اليوم هي التاج.
+  assert.equal(approved.approvedBy, 'crown');
+  const active = await r.activate(m.id);
+  assert.equal(active.id, m.id);
+  assert.equal(active.isActive, true);
 });
-test('rolled back model cannot return to service', () => {
-  const r = new ModelRegistry({ log: new EventLog() }),
-    m = r.register({ name: 'bad', version: '1', purpose: 'x', source: 'test', weights: 'x' });
-  r.transition(m.id, ModelState.ROLLED_BACK, 'failed eval');
-  assert.throws(
+
+test('rolled back model cannot return to service', async () => {
+  const r = registry(),
+    m = await r.register({
+      name: 'bad',
+      modelVersion: '1',
+      purpose: 'x',
+      provider: 'test',
+      weights: 'x',
+    });
+  await r.transition(m.id, ModelState.ROLLED_BACK, 'failed eval');
+  await assert.rejects(
     () => r.transition(m.id, ModelState.APPROVED, 'retry'),
     /ROLLED_BACK_MODEL_IMMUTABLE/,
   );

@@ -19,37 +19,40 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
+import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 
 /** سجل ونموذج معتمد ومُفعَّل، وهو الوضع الذي تُختبر عليه البوابات. */
-function activeModel() {
+async function activeModel() {
   const log = new EventLog();
-  const registry = new ModelRegistry({ log });
-  const model = registry.register({
+  const repository = createMemoryRepository(ModelRegistry.spec);
+  const registry = new ModelRegistry({ log, repository });
+  const model = await registry.register({
     name: 'مدقّق',
-    version: '1.0.0',
+    modelVersion: '1.0.0',
     purpose: 'audit',
-    source: 'internal',
+    provider: 'internal',
     weights: 'w-1',
   });
-  registry.transition(model.id, ModelState.SANDBOXED, 'اختبار معزول');
-  registry.transition(model.id, ModelState.APPROVED, 'اعتماد');
-  registry.activate(model.id);
-  return { log, registry, id: model.id };
+  await registry.transition(model.id, ModelState.SANDBOXED, 'اختبار معزول');
+  await registry.transition(model.id, ModelState.APPROVED, 'اعتماد');
+  await registry.activate(model.id);
+  return { log, registry, repository, id: model.id };
 }
 
-test('D4 — getActive تُرجع صورة مُجمَّدة لا المرجع الداخلي', () => {
-  const { registry, id } = activeModel();
-  const active = registry.getActive('audit');
+test('D4 — getActive تُرجع صورة مُجمَّدة لا المرجع الداخلي', async () => {
+  const { registry, repository, id } = await activeModel();
+  const active = await registry.getActive('audit');
   assert.ok(active, 'لا نموذج نشط');
   assert.equal(Object.isFrozen(active), true, 'الصورة غير مُجمَّدة');
-  // العيب الأصلي: هذا الكائن **هو** السجل الداخلي، فالتعديل عليه يمرّ.
-  assert.notEqual(active, registry.models.get(id), 'المُرجَع هو المرجع الداخلي نفسه');
+  // العيب الأصلي: هذا الكائن **هو** السجل الداخلي، فالتعديل عليه يمرّ. وبعد
+  // `M3.05` لا سجل داخلياً أصلاً: المخزن مستودع، وكل قراءة صورةٌ جديدة.
+  assert.notEqual(active, await repository.findById(id), 'المُرجَع هو المرجع المخزون نفسه');
 });
 
-test('D4 — تعديل الصورة المُرجَعة لا يُغيّر حالة النموذج في السجل', () => {
-  const { registry, id } = activeModel();
+test('D4 — تعديل الصورة المُرجَعة لا يُغيّر حالة النموذج في السجل', async () => {
+  const { registry, id } = await activeModel();
   const active = /** @type {Record<string, unknown>} */ (
-    /** @type {unknown} */ (registry.getActive('audit'))
+    /** @type {unknown} */ (await registry.getActive('audit'))
   );
   assert.throws(
     () => {
@@ -59,18 +62,21 @@ test('D4 — تعديل الصورة المُرجَعة لا يُغيّر حال
     TypeError,
     'التعديل لم يُرفض',
   );
-  const internal = registry.models.get(id);
-  assert.equal(internal?.state, ModelState.APPROVED, 'الحالة الداخلية انحرفت');
+  const stored = await registry.get(id);
+  assert.equal(stored?.state, ModelState.APPROVED, 'الحالة المخزونة انحرفت');
 });
 
-test('D1 — القدرات في الصورة المُرجَعة لا تشترك مع مصفوفة السجل', () => {
+test('D1 — القدرات في الصورة المُرجَعة لا تشترك مع مصفوفة السجل', async () => {
   const log = new EventLog();
-  const registry = new ModelRegistry({ log });
-  const model = registry.register({
+  const registry = new ModelRegistry({
+    log,
+    repository: createMemoryRepository(ModelRegistry.spec),
+  });
+  const model = await registry.register({
     name: 'مولّد',
-    version: '2.0.0',
+    modelVersion: '2.0.0',
     purpose: 'draft',
-    source: 'internal',
+    provider: 'internal',
     weights: 'w-2',
     capabilities: ['text:generate'],
   });
@@ -78,69 +84,88 @@ test('D1 — القدرات في الصورة المُرجَعة لا تشترك
   // نفسها ممرَّرة بالمرجع — فمن أخذ «صورة مُجمَّدة» قدر أن يدسّ قدرة محرَّمة
   // في نموذج مسجَّل، متجاوزاً فحص `FORBIDDEN_CAPABILITIES` كله.
   assert.throws(() => model.capabilities.push('bypass-crown'), TypeError, 'المصفوفة قابلة للدسّ');
-  assert.deepEqual(registry.models.get(model.id)?.capabilities, ['text:generate']);
+  assert.deepEqual((await registry.get(model.id))?.capabilities, ['text:generate']);
 });
 
-test('D3 — تعليق النموذج النشط يُسقط كونه نشطاً لغرضه', () => {
-  const { registry, id } = activeModel();
-  registry.transition(id, ModelState.SUSPENDED, 'شبهة انحراف');
-  assert.equal(registry.getActive('audit'), null, 'المُعلَّق ما زال نشطاً لغرضه');
+test('D3 — تعليق النموذج النشط يُسقط كونه نشطاً لغرضه', async () => {
+  const { registry, id } = await activeModel();
+  await registry.transition(id, ModelState.SUSPENDED, 'شبهة انحراف');
+  assert.equal(await registry.getActive('audit'), null, 'المُعلَّق ما زال نشطاً لغرضه');
 });
 
-test('D3 — إرجاع النموذج النشط يُسقط كونه نشطاً لغرضه', () => {
-  const { registry, id } = activeModel();
-  registry.transition(id, ModelState.ROLLED_BACK, 'إرجاع');
-  assert.equal(registry.getActive('audit'), null, 'المُرجَع عنه ما زال نشطاً لغرضه');
+test('D3 — إرجاع النموذج النشط يُسقط كونه نشطاً لغرضه', async () => {
+  const { registry, id } = await activeModel();
+  await registry.transition(id, ModelState.ROLLED_BACK, 'إرجاع');
+  assert.equal(await registry.getActive('audit'), null, 'المُرجَع عنه ما زال نشطاً لغرضه');
 });
 
-test('D3 — إسقاط النشاط يُسجَّل حدثاً فلا يقع بصمت', () => {
-  const { log, registry, id } = activeModel();
-  registry.transition(id, ModelState.SUSPENDED, 'شبهة انحراف');
+test('D3 — إسقاط النشاط يُسجَّل حدثاً فلا يقع بصمت', async () => {
+  const { log, registry, id } = await activeModel();
+  await registry.transition(id, ModelState.SUSPENDED, 'شبهة انحراف');
   const kinds = log.events.map((e) => e.type);
   assert.ok(kinds.includes('model.deactivated'), `لا حدث إسقاط: ${kinds.join(', ')}`);
 });
 
-test('D3 — إعادة الاعتماد بعد التعليق تحتاج تفعيلاً صريحاً', () => {
-  const { registry, id } = activeModel();
-  registry.transition(id, ModelState.SUSPENDED, 'شبهة');
-  registry.transition(id, ModelState.APPROVED, 'انتهى التحقيق');
+test('D3 — إعادة الاعتماد بعد التعليق تحتاج تفعيلاً صريحاً', async () => {
+  const { registry, id } = await activeModel();
+  await registry.transition(id, ModelState.SUSPENDED, 'شبهة');
+  await registry.transition(id, ModelState.APPROVED, 'انتهى التحقيق');
   // الاعتماد ليس تفعيلاً: الرجوع إلى الخدمة قرارٌ يُعلن لا أثرٌ جانبي لانتقال.
-  assert.equal(registry.getActive('audit'), null, 'عاد نشطاً بلا تفعيل');
-  registry.activate(id);
-  assert.equal(registry.getActive('audit')?.id, id);
+  assert.equal(await registry.getActive('audit'), null, 'عاد نشطاً بلا تفعيل');
+  await registry.activate(id);
+  assert.equal((await registry.getActive('audit'))?.id, id);
 });
 
-test('D2 — مؤشّر نشط معلَّق يُرفع خطأً مُسمّى لا يُقرأ فراغاً', () => {
-  const { registry } = activeModel();
-  // محاكاة فساد حالة: مؤشّرٌ يشير إلى معرّف غير موجود في السجل. كان يُقرأ
-  // `undefined` فيُخلط بـ«لا نشط»، والفرق بينهما هو الفرق بين فراغٍ وفساد.
-  registry.activeByPurpose.set('audit', 'model:00000000-0000-4000-8000-000000000000');
-  assert.throws(() => registry.getActive('audit'), /MODEL_ACTIVE_POINTER_DANGLING/);
+test('D2 — «مؤشّر النشط» زال: النشاط عمودٌ لا خريطة موازية', async () => {
+  // كان الفساد الممكن: مؤشّرٌ في خريطة يشير إلى معرّف غير موجود، فيُقرأ
+  // `undefined` ويُخلط بـ«لا نشط». بعد `M3.05` لا خريطة موازية أصلاً — النشاط
+  // عمودٌ في صفّ النموذج، فلا وجود لمؤشّر معلَّق يُشار به إلى العدم. والحرس
+  // الباقي هو رفض المستودع أن يُكتب «نشطٌ غير معتمد».
+  const { registry, repository, id } = await activeModel();
+  const stored = await repository.findById(id);
+  assert.ok(stored);
+  await assert.rejects(
+    () =>
+      repository.update(id, Number(stored['version']), {
+        state: ModelState.SUSPENDED,
+        stateReason: 'شبهة',
+      }),
+    /MODEL_ACTIVE_MUST_BE_APPROVED/,
+    'كُتب نشطٌ غير معتمد',
+  );
+  assert.equal((await registry.getActive('audit'))?.id, id);
 });
 
-test('D2 — مؤشّر نشط إلى نموذج غير معتمد يفشل مُغلقاً', () => {
-  const { registry, id } = activeModel();
-  // فساد آخر: المؤشّر قائم والنموذج موجود لكن حالته ليست معتمدة. لا يقع هذا
-  // في المسار العادي بعد إصلاح D3، وحرسُه هنا لأن الفشل المُغلق لا يُبنى على
-  // ثقةٍ بأن المسار العادي هو الوحيد.
-  const internal = registry.models.get(id);
-  assert.ok(internal);
-  internal.state = ModelState.SUSPENDED;
-  assert.throws(() => registry.getActive('audit'), /MODEL_ACTIVE_NOT_APPROVED/);
+test('D2 — نشطان لغرض واحد يفشلان مُغلقاً لا يُقرأ أحدهما اعتباطاً', async () => {
+  const { registry, repository, id } = await activeModel();
+  // فسادٌ تمنعه القاعدة بفهرس جزئي فريد، ولا يمنعه مستودع الذاكرة. وحرسُ
+  // السجل هنا هو ما يجعل القراءة تفشل مُغلقة بدل أن تختار أحدهما بلا معيار.
+  await repository.insert({
+    id: 'model:duplicate-active',
+    name: 'مدقّق-ثانٍ',
+    provider: 'internal',
+    modelVersion: '1.0.1',
+    purpose: 'audit',
+    fingerprint: 'a'.repeat(64),
+    state: ModelState.APPROVED,
+    approvedBy: 'crown',
+    isActive: true,
+  });
+  await assert.rejects(() => registry.getActive('audit'), /MODEL_ACTIVE_AMBIGUOUS/);
+  assert.ok(id);
 });
 
-test('لا نشط لغرضٍ لم يُفعَّل فيه شيء ⇒ null صريحة', () => {
-  const { registry } = activeModel();
-  assert.equal(registry.getActive('غرض-آخر'), null);
+test('لا نشط لغرضٍ لم يُفعَّل فيه شيء ⇒ null صريحة', async () => {
+  const { registry } = await activeModel();
+  assert.equal(await registry.getActive('غرض-آخر'), null);
 });
 
-test('انتقال بلا سبب لا يمحو سبب الانتقال السابق بـundefined', () => {
-  const { registry, id } = activeModel();
-  registry.transition(id, ModelState.SUSPENDED, 'سبب معلن');
-  const before = registry.models.get(id)?.reason;
-  assert.equal(before, 'سبب معلن');
-  registry.transition(id, ModelState.SUSPENDED);
+test('انتقال بلا سبب لا يمحو سبب الانتقال السابق بـundefined', async () => {
+  const { registry, id } = await activeModel();
+  await registry.transition(id, ModelState.SUSPENDED, 'سبب معلن');
+  assert.equal((await registry.get(id))?.stateReason, 'سبب معلن');
+  await registry.transition(id, ModelState.SUSPENDED);
   // سببٌ غائب لا يُكتب فوق سببٍ معلن، ولا يُقرأ سبباً للانتقال الجديد: الحقل
   // يبقى كما هو ووقتُ التغيير هو ما يتقدّم.
-  assert.equal(registry.models.get(id)?.reason, 'سبب معلن');
+  assert.equal((await registry.get(id))?.stateReason, 'سبب معلن');
 });

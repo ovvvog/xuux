@@ -1,7 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { snapshot } from '../lib/snapshot.mjs';
+import { LAW_SPEC } from '../persistence/entities.mjs';
 
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
+
+/**
+ * نظام القانون. **سجل القوانين صار دائماً** في الخطوة `M3.05`: قانونٌ نافذ يُمحى
+ * بإعادة التشغيل ليس قانوناً، وهذا أخطر ما كان في المخزن المؤقّت.
+ *
+ * **حدٌّ معلن — قرارُ مالك لا قرارُ منفّذ:** `Court` أدناه **بقيت في الذاكرة**.
+ * جدول `state.cases` في الهجرة `0001` يشترط `law_id` مرجعاً إلى قانون، ونموذج
+ * المحكمة هنا يرفع قضية بين طرفين بلا قانون مرجعي. المخطَّط والنموذج متناقضان،
+ * وتغيير أيّهما قرارٌ سياديّ لا يُتخذ صامتاً في خطوةٍ عنوانها «نقل السجلات».
+ * فالقضايا **تُفقد بإعادة التشغيل**، وهذا مُعلن هنا ومسجَّل في خارطة الطريق.
+ */
 
 /**
  * حالات القانون الخمس، مشتقة من الكائن المُجمَّد نفسه فلا تنحرف عنه.
@@ -14,7 +26,8 @@ import { snapshot } from '../lib/snapshot.mjs';
  */
 
 /**
- * قانون في السجل. `changedAt` يُضاف عند أول انتقال حالة فهو اختياري.
+ * قانون في السجل. `version` يديره المستودع ويزيد مع كل كتابة، فهو أثرٌ لا وصف —
+ * وهذه هي نفس دلالة النسخة التي كان السجل يحسبها بيده.
  * @typedef {object} Law
  * @property {string} id
  * @property {string} title
@@ -22,9 +35,22 @@ import { snapshot } from '../lib/snapshot.mjs';
  * @property {string} scope - نطاق السريان، و'all' تعني كل النطاقات
  * @property {string} proposer
  * @property {LawStateValue} state
- * @property {number} version - يزيد مع كل انتقال حالة، فهو أثر لا وصف
- * @property {string} createdAt
- * @property {string} [changedAt]
+ * @property {number} version
+ * @property {string | null} enactedBy - سلطة النفاذ؛ لا نفاذ بلا سلطة مسمّاة
+ * @property {Date | null} enactedAt
+ * @property {Date | null} repealedAt
+ * @property {Date | null} stateChangedAt
+ * @property {Date} createdAt
+ * @property {Date} updatedAt
+ */
+
+/**
+ * عقد المستودع الذي يحتاجه سجل القوانين.
+ * @typedef {object} LawRepository
+ * @property {(record: Record<string, unknown>) => Promise<Record<string, unknown>>} insert
+ * @property {(id: string) => Promise<Record<string, unknown> | null>} findById
+ * @property {(query?: { filter?: Record<string, unknown>, limit?: number }) => Promise<Array<Record<string, unknown>>>} list
+ * @property {(id: string, expectedVersion: number, patch: Record<string, unknown>) => Promise<Record<string, unknown>>} update
  */
 
 /**
@@ -66,69 +92,98 @@ export const CaseState = Object.freeze({
   APPEALED: 'appealed',
   CLOSED: 'closed',
 });
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {Law}
+ */
+function toLaw(row) {
+  return /** @type {Law} */ (/** @type {unknown} */ (Object.freeze({ ...row })));
+}
+
 export class LawRegistry {
   /**
-   * السجل موصوف كاختياري في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
+   * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `LAW_LOG_REQUIRED`؛ التحقّق في أول سطر هو ما يضيّق النوع بعده.
-   * @param {{ log?: EventLog }} [deps]
+   * @param {{ log?: EventLog, repository?: LawRepository }} [deps]
    */
-  constructor({ log } = {}) {
-    if (!log) throw new Error('LAW_LOG_REQUIRED');
+  constructor({ log, repository } = {}) {
+    if (!log || !repository) throw new Error('LAW_LOG_REQUIRED');
     this.log = log;
-    /** @type {Map<string, Law>} */
-    this.laws = new Map();
+    /** @type {LawRepository} */
+    this.repository = repository;
   }
+
+  /** @returns {import('../persistence/entities.mjs').EntitySpec} */
+  static get spec() {
+    return LAW_SPEC;
+  }
+
   /**
    * يقترح قانوناً جديداً في حالة مسوّدة. الاقتراح لا يُنفّذ شيئاً بذاته.
    * @param {{ title: string, text: string, scope: string, proposer: string }} draft
-   * @returns {Readonly<Law>}
+   * @returns {Promise<Law>}
    */
-  propose({ title, text, scope, proposer }) {
+  async propose({ title, text, scope, proposer }) {
     if (!title || !text || !scope || !proposer) throw new Error('LAW_REQUIRED');
     const id = 'law:' + randomUUID();
-    /** @type {Law} */
-    const l = {
+    const row = await this.repository.insert({
       id,
       title,
       text,
       scope,
       proposer,
       state: LawState.DRAFT,
-      version: 1,
-      createdAt: new Date().toISOString(),
-    };
-    this.laws.set(id, l);
+    });
     this.log.append('law.proposed', proposer, { id, title, scope });
-    return snapshot(l);
+    return toLaw(row);
   }
+
   /**
    * ينقل قانوناً إلى حالة أخرى. الإنفاذ حصر على التاج، والملغى لا يُعاد فتحه.
+   *
+   * وصار **التعليق والإلغاء لا يقعان على ما لم يَنفُذ**: قيد القاعدة
+   * `laws_enactment_authority_recorded` يشترط سلطة نفاذ ووقت نفاذ لكل حالةٍ بعد
+   * النفاذ، ومسوّدةٌ «معلَّقة» حالةٌ بلا معنى كانت تُقبل قبل هذه الخطوة.
    * @param {string} id
    * @param {LawStateValue} state - الحالة المطلوبة
    * @param {string} actor - من يطلب الانتقال؛ الإنفاذ يشترط 'crown'
-   * @returns {Readonly<Law>}
+   * @returns {Promise<Law>}
    */
-  transition(id, state, actor) {
-    const l = this.laws.get(id);
-    if (!l) throw new Error('LAW_NOT_FOUND');
+  async transition(id, state, actor) {
+    const row = await this.repository.findById(id);
+    if (row === null) throw new Error('LAW_NOT_FOUND');
+    const law = toLaw(row);
     if (!Object.values(LawState).includes(state)) throw new Error('INVALID_LAW_STATE');
-    if (l.state === LawState.REPEALED) throw new Error('REPEALED_LAW_IMMUTABLE');
+    if (law.state === LawState.REPEALED) throw new Error('REPEALED_LAW_IMMUTABLE');
     if (state === LawState.ENACTED && actor !== 'crown') throw new Error('CROWN_APPROVAL_REQUIRED');
-    l.state = state;
-    l.version++;
-    l.changedAt = new Date().toISOString();
-    this.log.append(`law.${state}`, actor, { id, version: l.version });
-    return snapshot(l);
+    const now = new Date();
+    /** @type {Record<string, unknown>} */
+    const patch = { state, stateChangedAt: now };
+    if (state === LawState.ENACTED) {
+      patch['enactedBy'] = actor;
+      patch['enactedAt'] = law.enactedAt ?? now;
+    } else if (state === LawState.SUSPENDED || state === LawState.REPEALED) {
+      if (law.enactedAt === null) throw new Error('LAW_NOT_ENACTED_YET');
+      if (state === LawState.REPEALED) patch['repealedAt'] = now;
+    }
+    const updated = await this.repository.update(id, law.version, patch);
+    this.log.append(`law.${state}`, actor, { id, version: updated['version'] });
+    return toLaw(updated);
   }
+
   /**
    * القوانين المُنفَّذة السارية على نطاق معيّن، بما فيها ما نطاقه 'all'.
+   *
+   * **حدٌّ معلن:** الترشيح على الحالة يجري في القاعدة (فهرس `laws_scope_status_idx`)
+   * وعلى النطاق في الذاكرة، لأن «نطاق هذا أو 'all'» ليس ترشيحاً بحقلٍ واحد.
    * @param {string} scope
-   * @returns {Array<Readonly<Law>>}
+   * @returns {Promise<Law[]>}
    */
-  active(scope) {
-    return [...this.laws.values()]
-      .filter((x) => x.state === LawState.ENACTED && (x.scope === scope || x.scope === 'all'))
-      .map((x) => snapshot(x));
+  async active(scope) {
+    const rows = await this.repository.list({ filter: { state: LawState.ENACTED } });
+    return rows
+      .map((row) => toLaw(row))
+      .filter((law) => law.scope === scope || law.scope === 'all');
   }
 }
 export class Court {

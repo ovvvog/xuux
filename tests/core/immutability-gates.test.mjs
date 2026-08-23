@@ -18,45 +18,73 @@ import { AgentRegistry } from '../../src/identity/agent-registry.mjs';
 import { DataCatalog } from '../../src/data/data-catalog.mjs';
 import { AgentMemoryStore } from '../../src/data/memory-store.mjs';
 import { Court, LawRegistry } from '../../src/governance/law-system.mjs';
+import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 
+// بعد `M3.05` صارت السجلات على مستودعات، فمستودع الذاكرة هو ما يُختبر عليه ضابط
+// `D1` هنا: التجميد العميق شرطٌ في **عقد المستودع** لا عادةٌ في صنفٍ واحد،
+// ومستودع القاعدة يجري عليه نفس الشرط في `tests/persistence/contract.test.mjs`.
 /** @returns {{ log: EventLog, agents: AgentRegistry }} */
 function agentSetup() {
   const log = new EventLog();
   const king = new KingIdentity();
   const ca = new CertificateAuthority(king);
-  return { log, agents: new AgentRegistry({ ca, log }) };
+  return {
+    log,
+    agents: new AgentRegistry({ ca, log, repository: createMemoryRepository(AgentRegistry.spec) }),
+  };
 }
 
-test('D1 — قدرات الوكيل المُرجَعة لا تشترك مع مصفوفة السجل', () => {
+/** @returns {DataCatalog} */
+function catalogSetup(log = new EventLog()) {
+  return new DataCatalog({ log, repository: createMemoryRepository(DataCatalog.spec) });
+}
+
+/** @returns {LawRegistry} */
+function lawSetup(log = new EventLog()) {
+  return new LawRegistry({ log, repository: createMemoryRepository(LawRegistry.spec) });
+}
+
+test('D1 — قدرات الوكيل المُرجَعة لا تشترك مع مصفوفة السجل', async () => {
   const { agents } = agentSetup();
-  const agent = agents.register({ name: 'وكيل', role: 'auditor', capabilities: ['read:log'] });
+  const agent = await agents.register({
+    name: 'وكيل',
+    role: 'auditor',
+    capabilities: ['read:log'],
+  });
   assert.throws(() => agent.capabilities.push('sovereign:root'), TypeError);
-  assert.deepEqual(agents.agents.get(agent.id)?.capabilities, ['read:log']);
+  assert.deepEqual((await agents.get(agent.id))?.capabilities, ['read:log']);
 });
 
-test('D1 — شهادة الوكيل المُرجَعة مُجمَّدة ولا تُعدَّل قدراتها', () => {
+test('D1 — شهادة الوكيل المُرجَعة مُجمَّدة ولا تُعدَّل قدراتها', async () => {
   const { agents } = agentSetup();
-  const agent = agents.register({ name: 'وكيل', role: 'auditor', capabilities: ['read:log'] });
+  const agent = await agents.register({
+    name: 'وكيل',
+    role: 'auditor',
+    capabilities: ['read:log'],
+  });
   // الشهادة هي مستند التفويض؛ تسريبُها بالمرجع يعني ترقية دورٍ بيد المستدعي.
   assert.equal(Object.isFrozen(agent.certificate), true, 'الشهادة غير مُجمَّدة');
   assert.throws(() => agent.certificate.capabilities.push('key:export'), TypeError);
 });
 
-test('D1 — الصورة المُرجَعة من get وlist مُجمَّدة في العمق', () => {
+test('D1 — الصورة المُرجَعة من get وlist مُجمَّدة في العمق', async () => {
   const { agents } = agentSetup();
-  const agent = agents.register({ name: 'وكيل', role: 'auditor', capabilities: ['read:log'] });
-  const fetched = agents.get(agent.id);
+  const agent = await agents.register({
+    name: 'وكيل',
+    role: 'auditor',
+    capabilities: ['read:log'],
+  });
+  const fetched = await agents.get(agent.id);
   assert.ok(fetched);
   assert.throws(() => fetched.capabilities.push('policy:self-modify'), TypeError);
-  const listed = agents.list()[0];
+  const listed = (await agents.list())[0];
   assert.ok(listed);
   assert.throws(() => listed.capabilities.push('policy:self-modify'), TypeError);
 });
 
-test('D1 — سلسلة اشتقاق البيانات المُرجَعة لا تُعدَّل', () => {
-  const log = new EventLog();
-  const catalog = new DataCatalog({ log });
-  const record = catalog.register({
+test('D1 — سلسلة اشتقاق البيانات المُرجَعة لا تُعدَّل', async () => {
+  const catalog = catalogSetup();
+  const record = await catalog.register({
     name: 'جدول',
     owner: 'crown',
     source: 'seed',
@@ -73,12 +101,12 @@ test('D1 — سلسلة اشتقاق البيانات المُرجَعة لا ت
     TypeError,
     'عنصر داخل السلسلة قابل للتعديل',
   );
-  assert.deepEqual(catalog.records.get(record.id)?.lineage, [{ from: 'seed' }]);
+  assert.deepEqual((await catalog.get(record.id))?.lineage, [{ from: 'seed' }]);
 });
 
 test('D1 — أدلة القضية المُرجَعة لا تُعدَّل بعد رفعها', () => {
   const log = new EventLog();
-  const court = new Court({ log, laws: new LawRegistry({ log }) });
+  const court = new Court({ log, laws: lawSetup(log) });
   const filed = court.file({
     claimant: 'وكيل-أ',
     respondent: 'وكيل-ب',
@@ -91,7 +119,7 @@ test('D1 — أدلة القضية المُرجَعة لا تُعدَّل بعد
 
 test('D1 — الحكم المُرجَع مُجمَّد فلا تُبدَّل نتيجته', () => {
   const log = new EventLog();
-  const court = new Court({ log, laws: new LawRegistry({ log }) });
+  const court = new Court({ log, laws: lawSetup(log) });
   const filed = court.file({ claimant: 'أ', respondent: 'ب', claim: 'دعوى' });
   court.hear(filed.id);
   const decided = court.decide(filed.id, { outcome: 'محكوم لصالح أ', reason: 'الدليل' });
@@ -109,17 +137,21 @@ test('D1 — الحكم المُرجَع مُجمَّد فلا تُبدَّل ن
   assert.equal(court.cases.get(filed.id)?.judgment?.outcome, 'محكوم لصالح أ');
 });
 
-test('محتوى الذاكرة الذي يملكه المستدعي لا يُجمَّد عليه — حدٌّ معلن', () => {
+test('محتوى الذاكرة الذي يملكه المستدعي لا يُجمَّد عليه — حدٌّ معلن', async () => {
   const log = new EventLog();
-  const catalog = new DataCatalog({ log });
-  const memory = new AgentMemoryStore({ catalog, log });
+  const catalog = catalogSetup(log);
+  const memory = new AgentMemoryStore({
+    catalog,
+    log,
+    repository: createMemoryRepository(AgentMemoryStore.spec),
+  });
   const content = { note: 'أصل' };
-  const entry = memory.remember('agent:1', content);
+  const entry = await memory.remember('agent:1', content);
   // الصورة المُرجَعة مُجمَّدة، **وكائن المستدعي يبقى كما هو**: التجميد يقع على
   // نسخةٍ لا على ما يملكه غيرنا. فلو جُمِّد الأصل لعطّلنا كوداً لا نملكه.
   content.note = 'مُعدَّل';
   assert.equal(content.note, 'مُعدَّل', 'جُمِّد كائن المستدعي');
-  const recalled = memory.recall('agent:1', entry.id);
+  const recalled = await memory.recall('agent:1', entry.id);
   const stored = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (recalled.content));
   assert.equal(stored.note, 'أصل', 'المخزون تبع تعديلاً لاحقاً على كائن المستدعي');
   assert.throws(
