@@ -1,7 +1,7 @@
-# التكامل المستمر — المسار M0.05
+# التكامل المستمر — أُنشئ في M0.05 ووُسِّع في M1.08
 #
 # القاعدة: لا يُدمج شيء في main إلا وهذا المسار أخضر.
-# المرجع: docs/roadmap/03-roadmap-to-100.md — البوابة G0
+# المرجع: docs/roadmap/03-roadmap-to-100.md — البوابتان G0 و G1
 # المادة 2 من القاعدة الحاكمة: لا إنجاز بلا دليل قابل للتشغيل؛ وهذا هو الدليل الآلي.
 
 name: CI
@@ -64,11 +64,20 @@ jobs:
       - name: الاختبارات
         run: npm test
 
-      - name: التحقق من اكتمال شجرة المجالات
-        run: python3 scripts/validate-tree.py
+      - name: التحقق من البذرة (المخططات + تماسك العدّادات)
+        run: npm run validate:seed
+
+      - name: التحقق من عدم انحراف السجلات المشتقة عن البذرة
+        run: npm run check:registries
+
+      - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
+        run: npm run guard:templates
+
+      - name: حاجز عدد الملفات — البوابة G1
+        run: npm run guard:filecount
 
   gate-report:
-    name: تقرير البوابة G0
+    name: تقرير البوابتين G0 و G1
     runs-on: ubuntu-latest
     needs: validate
     if: always()
@@ -76,9 +85,9 @@ jobs:
       - name: خلاصة النتيجة
         run: |
           if [ "${{ needs.validate.result }}" = "success" ]; then
-            echo "### ✅ البوابة G0 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### ⛔ البوابة G0 — فشل الفحص: ${{ needs.validate.result }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "### ⛔ فشل الفحص: ${{ needs.validate.result }}" >> "$GITHUB_STEP_SUMMARY"
             echo "لا يجوز الدمج. راجع docs/roadmap/04-execution-playbook.md §4.5" >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
