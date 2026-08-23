@@ -1,0 +1,33 @@
+# ── نطاق التنسيق ──
+# يُنسَّق: الكود الفعلي وملفات الإعداد فقط.
+# تُستثنى مؤقتًا: الوثائق العربية الكبيرة وملفات الشجرة القالبية
+# التي تُحوَّل إلى بيانات أو تُحذف في المسار M1.
+# عند إغلاق بوابة G1 يُراجع هذا الملف ويُقلَّص.
+
+node_modules/
+dist/
+package-lock.json
+
+# الوثائق: نص عربي مكتوب بيد الإنسان؛ لا يُعاد تنسيقه آليًا
+*.md
+
+# الشجرة التنظيمية القالبية — تُعالج في M1
+civilization/
+communications/
+contracts/
+data-platform/
+engines/
+facilities/
+federation/
+infrastructure/
+institutions/
+interfaces/
+knowledge/
+operations/
+platform/
+resources/
+science/
+security/
+agents/
+config/
+docs/
