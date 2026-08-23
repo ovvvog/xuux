@@ -10,8 +10,14 @@
  * ما يمنعه هذا الملف حتى لو كتب أحدٌ في الجدول بلا مستودع.
  *
  * **حدٌّ معلن:** الأنواع هنا مواصفة تُفحص وقت التشغيل، لا أنواعاً ثابتة لكل سجل
- * على حدة. تثبيت الأنواع الساكنة يجري في `M3.05` حين تتحوّل السجلات القائمة
- * (`agent-registry` و`model-registry` وغيرها) من الذاكرة إلى هذه المستودعات.
+ * على حدة؛ والسجلات القائمة صارت تُبنى عليها في `M3.05` لكن أنواعها الساكنة ما
+ * زالت مشتقّة من `EntityRecord` العام.
+ *
+ * والمواصفات هنا **صحَّحت** ما كتبه المخطَّط الأول على الورق: الحقول التي يحملها
+ * كل سجل فعلي (دورُ الوكيل ومالكه وشهادته، ومصدر أصل البيانات واشتقاقه وجودته،
+ * ونطاق القانون ومُقترِحه) أُضيفت في الهجرة `0002` وأُعلنت هنا، وقوائم الحالات
+ * صارت هي حالات الكود لا قوائم مُختلقة. من أراد الحكاية كاملة فليقرأ رأس
+ * `migrations/0002_align_domain_records.up.sql`.
  */
 
 /** @typedef {Record<string, unknown>} EntityRecord */
@@ -95,35 +101,51 @@ export const AGENT_SPEC = Object.freeze({
     Object.freeze({
       id: { column: 'id', type: 'string', required: true, maxLength: 128 },
       name: { column: 'name', type: 'string', required: true, maxLength: 200 },
+      role: { column: 'role', type: 'string', required: true, maxLength: 120 },
+      owner: { column: 'owner', type: 'string', required: true, maxLength: 128 },
       kind: {
         column: 'kind',
         type: 'enum',
         required: true,
         values: Object.freeze(['human', 'service', 'autonomous']),
       },
-      status: {
+      state: {
         column: 'status',
         type: 'enum',
         required: true,
-        values: Object.freeze(['registered', 'active', 'suspended', 'quarantined', 'retired']),
+        values: Object.freeze([
+          'registered',
+          'active',
+          'suspended',
+          'quarantined',
+          'revoked',
+          'retired',
+        ]),
       },
       capabilities: { column: 'capabilities', type: 'stringArray', required: false },
-      suspendedReason: { column: 'suspended_reason', type: 'string', nullable: true },
+      // الشهادة تُخزَّن كما أصدرها جذر الثقة: وكيلٌ يعود بعد إعادة التشغيل بلا
+      // شهادته وكيلٌ بلا إثبات تصريح، فلا تُقبل صلاحيته على الثقة.
+      certificate: { column: 'certificate', type: 'json', required: true },
+      stateReason: { column: 'suspended_reason', type: 'string', nullable: true },
+      stateChangedAt: { column: 'state_changed_at', type: 'timestamp', nullable: true },
       ...MANAGED,
     })
   ),
   unique: Object.freeze([Object.freeze(['name'])]),
-  filterable: Object.freeze(['status', 'kind']),
+  filterable: Object.freeze(['state', 'kind', 'owner']),
   invariants: Object.freeze([
     {
-      code: 'AGENT_SUSPENSION_NEEDS_REASON',
-      message: 'التعليق أو الحجْر يلزمه سبب مسجَّل، والسبب لا يُسجَّل لوكيل غير معلَّق.',
+      code: 'AGENT_PUNITIVE_NEEDS_REASON',
+      message: 'التعليق أو الحجْر أو الإلغاء يلزمه سبب مسجَّل، والسبب لا يُسجَّل لوكيل غير معاقَب.',
       /** @param {EntityRecord} record */
       check: (record) => {
-        const suspended = record['status'] === 'suspended' || record['status'] === 'quarantined';
+        const punitive =
+          record['state'] === 'suspended' ||
+          record['state'] === 'quarantined' ||
+          record['state'] === 'revoked';
         const hasReason =
-          typeof record['suspendedReason'] === 'string' && record['suspendedReason'].trim() !== '';
-        return suspended === hasReason;
+          typeof record['stateReason'] === 'string' && record['stateReason'].trim() !== '';
+        return punitive === hasReason;
       },
     },
   ]),
@@ -141,40 +163,52 @@ export const MODEL_SPEC = Object.freeze({
       id: { column: 'id', type: 'string', required: true, maxLength: 128 },
       name: { column: 'name', type: 'string', required: true, maxLength: 200 },
       provider: { column: 'provider', type: 'string', required: true, maxLength: 200 },
-      purpose: {
-        column: 'purpose',
-        type: 'enum',
-        required: true,
-        values: Object.freeze([
-          'governance',
-          'operations',
-          'research',
-          'education',
-          'safety',
-          'registry',
-        ]),
-      },
+      // نسخة النموذج نصٌّ يُعلنه المُودِع، وعمود `version` محجوز للقفل المتفائل.
+      modelVersion: { column: 'model_version', type: 'string', required: true, maxLength: 60 },
+      purpose: { column: 'purpose', type: 'string', required: true, maxLength: 120 },
       fingerprint: { column: 'fingerprint', type: 'string', required: true, maxLength: 64 },
-      status: {
+      state: {
         column: 'status',
         type: 'enum',
         required: true,
-        values: Object.freeze(['registered', 'evaluated', 'approved', 'suspended', 'retired']),
+        values: Object.freeze([
+          'registered',
+          'sandboxed',
+          'evaluated',
+          'approved',
+          'suspended',
+          'retired',
+          'rolled-back',
+        ]),
       },
+      capabilities: { column: 'capabilities', type: 'stringArray', required: false },
+      // النشاط قرارٌ مستقل عن الاعتماد: كثيرون يُعتمدون وواحدٌ يُفعَّل لغرضه.
+      isActive: { column: 'is_active', type: 'boolean', required: true },
       approvedBy: { column: 'approved_by', type: 'string', nullable: true },
+      stateReason: { column: 'state_reason', type: 'string', nullable: true },
+      stateChangedAt: { column: 'state_changed_at', type: 'timestamp', nullable: true },
       ...MANAGED,
     })
   ),
-  unique: Object.freeze([Object.freeze(['fingerprint']), Object.freeze(['name', 'provider'])]),
-  filterable: Object.freeze(['status', 'purpose']),
+  unique: Object.freeze([
+    Object.freeze(['fingerprint']),
+    Object.freeze(['name', 'provider', 'modelVersion']),
+  ]),
+  filterable: Object.freeze(['state', 'purpose', 'isActive']),
   invariants: Object.freeze([
     {
       code: 'MODEL_APPROVAL_NEEDS_APPROVER',
       message: 'الاعتماد لا يُعلن بلا معتمِد مسمّى.',
       /** @param {EntityRecord} record */
       check: (record) =>
-        record['status'] !== 'approved' ||
+        record['state'] !== 'approved' ||
         (typeof record['approvedBy'] === 'string' && record['approvedBy'].trim() !== ''),
+    },
+    {
+      code: 'MODEL_ACTIVE_MUST_BE_APPROVED',
+      message: 'النشط لغرضه يجب أن يكون معتمداً: هذا حرس `MODEL_ACTIVE_NOT_APPROVED` في المواصفة.',
+      /** @param {EntityRecord} record */
+      check: (record) => record['isActive'] !== true || record['state'] === 'approved',
     },
     {
       code: 'MODEL_FINGERPRINT_SHAPE',
@@ -186,8 +220,146 @@ export const MODEL_SPEC = Object.freeze({
   ]),
 });
 
+/** @type {EntitySpec} */
+export const DATA_ASSET_SPEC = Object.freeze({
+  name: 'data_assets',
+  table: 'state.data_assets',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      name: { column: 'name', type: 'string', required: true, maxLength: 200 },
+      owner: { column: 'owner', type: 'string', required: true, maxLength: 128 },
+      classification: {
+        column: 'classification',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['public', 'internal', 'sensitive', 'sovereign']),
+      },
+      source: { column: 'source', type: 'string', required: true, maxLength: 200 },
+      lineage: { column: 'lineage', type: 'json', required: false },
+      retentionDays: { column: 'retention_days', type: 'integer', required: true },
+      quality: {
+        column: 'quality',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['unverified', 'verified', 'degraded', 'rejected']),
+      },
+      legalHold: { column: 'legal_hold', type: 'boolean', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['name'])]),
+  // الترشيح مقصور على ما له فهرس في `0001`: ترشيحٌ بحقل بلا فهرس مسحٌ كامل
+  // يُخفي كلفته حتى يكبر الجدول.
+  filterable: Object.freeze(['owner', 'classification']),
+  invariants: Object.freeze([
+    {
+      code: 'DATA_HOLD_BLOCKS_ZERO_RETENTION',
+      message: 'احتفاظ صفر يعني «يُمحى فوراً»، ولا يقع على أصل محفوظ قانوناً.',
+      /** @param {EntityRecord} record */
+      check: (record) => record['legalHold'] !== true || Number(record['retentionDays']) > 0,
+    },
+  ]),
+});
+
+/** @type {EntitySpec} */
+export const MEMORY_SPEC = Object.freeze({
+  name: 'memories',
+  table: 'state.memories',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      agentId: { column: 'agent_id', type: 'string', required: true, maxLength: 128 },
+      // لا ذاكرة بلا عقد بيانات: المرجع إلزامي في المواصفة كما هو في القاعدة.
+      datasetId: { column: 'dataset_id', type: 'string', required: true, maxLength: 128 },
+      kind: {
+        column: 'kind',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['episodic', 'semantic', 'procedural']),
+      },
+      // المحتوى يُخزَّن مغلَّفاً `{ value: ... }` لأن عمود القاعدة يشترط كائناً،
+      // والذاكرة قد تكون نصاً أو عدداً. التغليف حدٌّ معلن لا شكلٌ خفي.
+      content: { column: 'content', type: 'json', required: true },
+      tags: { column: 'tags', type: 'stringArray', required: false },
+      legalHold: { column: 'legal_hold', type: 'boolean', required: true },
+      expiresAt: { column: 'expires_at', type: 'timestamp', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['agentId']),
+  invariants: Object.freeze([
+    {
+      code: 'MEMORY_HOLD_HAS_NO_EXPIRY',
+      message: 'ذاكرة محفوظة قانوناً لا تحمل تاريخ انتهاء: المحو المؤجَّل محوٌ مضمون.',
+      /** @param {EntityRecord} record */
+      check: (record) => record['legalHold'] !== true || record['expiresAt'] === null,
+    },
+  ]),
+});
+
+/** @type {EntitySpec} */
+export const LAW_SPEC = Object.freeze({
+  name: 'laws',
+  table: 'state.laws',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      title: { column: 'title', type: 'string', required: true, maxLength: 300 },
+      text: { column: 'body', type: 'string', required: true },
+      scope: { column: 'scope', type: 'string', required: true, maxLength: 120 },
+      proposer: { column: 'proposer', type: 'string', required: true, maxLength: 128 },
+      state: {
+        column: 'status',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['draft', 'proposed', 'enacted', 'suspended', 'repealed']),
+      },
+      enactedBy: { column: 'enacted_by', type: 'string', nullable: true },
+      enactedAt: { column: 'enacted_at', type: 'timestamp', nullable: true },
+      repealedAt: { column: 'repealed_at', type: 'timestamp', nullable: true },
+      stateChangedAt: { column: 'state_changed_at', type: 'timestamp', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['title', 'version'])]),
+  filterable: Object.freeze(['state', 'scope']),
+  invariants: Object.freeze([
+    {
+      code: 'LAW_ENACTMENT_AUTHORITY_RECORDED',
+      message: 'النفاذ فعلٌ سياديٌّ مؤرَّخ: لا نفاذ بلا سلطة نفاذ ووقت نفاذ.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const enactedOnce =
+          record['state'] === 'enacted' ||
+          record['state'] === 'suspended' ||
+          record['state'] === 'repealed';
+        if (!enactedOnce) return true;
+        return (
+          typeof record['enactedBy'] === 'string' &&
+          record['enactedBy'].trim() !== '' &&
+          record['enactedAt'] instanceof Date
+        );
+      },
+    },
+    {
+      code: 'LAW_REPEAL_IS_DATED',
+      message: 'الإلغاء يُؤرَّخ، والتاريخ لا يُسجَّل لقانون غير ملغى.',
+      /** @param {EntityRecord} record */
+      check: (record) => (record['state'] === 'repealed') === record['repealedAt'] instanceof Date,
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
-export const ENTITY_SPECS = Object.freeze({ agents: AGENT_SPEC, models: MODEL_SPEC });
+export const ENTITY_SPECS = Object.freeze({
+  agents: AGENT_SPEC,
+  models: MODEL_SPEC,
+  data_assets: DATA_ASSET_SPEC,
+  memories: MEMORY_SPEC,
+  laws: LAW_SPEC,
+});
 
 /**
  * @param {string} code

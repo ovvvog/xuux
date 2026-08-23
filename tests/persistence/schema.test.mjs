@@ -38,6 +38,11 @@ const DECLARED_NULLABLE = Object.freeze({
   'policies.law_id': 'سياسة تشغيلية قد لا تستند إلى نصٍّ قانوني بعينه.',
   'policies.approved_by': 'لا معتمِد قبل الاعتماد؛ والقيد يمنع تفعيلها بلا اعتماد.',
   'memories.expires_at': 'ذاكرة بلا انتهاء صريح تخضع لسياسة الاحتفاظ في M3.08.',
+  // أُضيفت في الهجرة `0002` مع مواءمة المخطَّط لسجلات الدولة (`M3.05`).
+  'agents.state_changed_at': 'وكيلٌ لم تتغيّر حالته بعد التسجيل لا وقت تغيير له.',
+  'models.state_reason': 'لا سبب حالةٍ لنموذج لم يُنقل عن حالته الأولى.',
+  'models.state_changed_at': 'نموذجٌ لم تتغيّر حالته بعد التسجيل لا وقت تغيير له.',
+  'laws.state_changed_at': 'قانونٌ ما زال مشروعاً لم تتغيّر حالته بعد.',
 });
 
 /** @type {{ pool: import('pg').Pool, drop: () => Promise<void> } | null} */
@@ -132,14 +137,16 @@ test('كل مفتاح خارجي مفهرس', { skip: skipWithoutDatabase }, asy
 test('قيود الحالة والسبب والاعتماد ترفض ما يخالفها', { skip: skipWithoutDatabase }, async () => {
   const client = pool();
   await client.query(
-    `INSERT INTO state.agents (id, name, kind, status) VALUES ('agent-001', 'وكيل التشغيل', 'service', 'active')`,
+    `INSERT INTO state.agents (id, name, role, owner, kind, status, certificate)
+     VALUES ('agent-001', 'وكيل التشغيل', 'auditor', 'crown', 'service', 'active', '{}'::jsonb)`,
   );
 
   // حالة خارج القيم المسموحة
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.agents (id, name, kind, status) VALUES ('agent-002', 'وكيل ثانٍ', 'service', 'ghost')`,
+        `INSERT INTO state.agents (id, name, role, owner, kind, status, certificate)
+         VALUES ('agent-002', 'وكيل ثانٍ', 'auditor', 'crown', 'service', 'ghost', '{}'::jsonb)`,
       ),
     /agents_status_check|check constraint/i,
   );
@@ -148,16 +155,19 @@ test('قيود الحالة والسبب والاعتماد ترفض ما يخا
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.agents (id, name, kind, status) VALUES ('agent-003', 'وكيل ثالث', 'service', 'suspended')`,
+        `INSERT INTO state.agents (id, name, role, owner, kind, status, certificate)
+         VALUES ('agent-003', 'وكيل ثالث', 'auditor', 'crown', 'service', 'suspended', '{}'::jsonb)`,
       ),
-    /agents_suspension_has_reason/,
+    // تغيّر اسم القيد في الهجرة `0002` لأنه صار يشمل الحجْر والإلغاء لا التعليق وحده.
+    /agents_punitive_has_reason/,
   );
 
   // معرّف لا يطابق نمط معرّفات الدولة (مجال entity_id)
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.agents (id, name, kind, status) VALUES ('a', 'قصير', 'service', 'active')`,
+        `INSERT INTO state.agents (id, name, role, owner, kind, status, certificate)
+         VALUES ('a', 'قصير', 'auditor', 'crown', 'service', 'active', '{}'::jsonb)`,
       ),
     /entity_id/,
   );
@@ -166,7 +176,8 @@ test('قيود الحالة والسبب والاعتماد ترفض ما يخا
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.agents (id, name, kind, status) VALUES ('agent-004', 'وكيل التشغيل', 'human', 'active')`,
+        `INSERT INTO state.agents (id, name, role, owner, kind, status, certificate)
+         VALUES ('agent-004', 'وكيل التشغيل', 'auditor', 'crown', 'human', 'active', '{}'::jsonb)`,
       ),
     /agents_name_unique/,
   );
@@ -175,26 +186,39 @@ test('قيود الحالة والسبب والاعتماد ترفض ما يخا
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status)
-         VALUES ('model-001', 'نموذج الحكم', 'internal', 'governance', repeat('a', 64), 'approved')`,
+        `INSERT INTO state.models (id, name, provider, model_version, purpose, fingerprint, status)
+         VALUES ('model-001', 'نموذج الحكم', 'internal', '1.0.0', 'governance', repeat('a', 64), 'approved')`,
       ),
     /models_approval_has_approver/,
   );
 });
 
-test('نموذجان معتمدان لغرض واحد مرفوضان في القاعدة', { skip: skipWithoutDatabase }, async () => {
+test('نموذجان **نشطان** لغرض واحد مرفوضان في القاعدة', { skip: skipWithoutDatabase }, async () => {
+  // تغيّر المعنى في الهجرة `0002`: كان القيد يمنع اعتماد نموذجين لغرض واحد،
+  // وهذا خطأ في وضع الشرط — الاعتماد صفة نموذج، والنشاط هو ما لا يُثنّى. فصار
+  // الفهرس الجزئي على `is_active`، ومعه قيدٌ يمنع أن يكون النشط غير معتمد.
   const client = pool();
   await client.query(
-    `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, approved_by)
-     VALUES ('model-approved-1', 'نموذج العمليات', 'internal', 'operations', repeat('b', 64), 'approved', 'king-001')`,
+    `INSERT INTO state.models (id, name, provider, model_version, purpose, fingerprint, status, approved_by, is_active)
+     VALUES ('model-approved-1', 'نموذج العمليات', 'internal', '1.0.0', 'operations', repeat('b', 64), 'approved', 'king-001', true)`,
   );
+  // اعتماد ثانٍ لنفس الغرض مقبول ما لم يُفعَّل.
+  await client.query(
+    `INSERT INTO state.models (id, name, provider, model_version, purpose, fingerprint, status, approved_by, is_active)
+     VALUES ('model-approved-2', 'نموذج العمليات البديل', 'internal', '2.0.0', 'operations', repeat('c', 64), 'approved', 'king-001', false)`,
+  );
+  await assert.rejects(
+    () => client.query(`UPDATE state.models SET is_active = true WHERE id = 'model-approved-2'`),
+    /models_one_active_per_purpose_idx/,
+  );
+  // ونشطٌ غير معتمد مرفوض بقيدٍ مسمّى.
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, approved_by)
-         VALUES ('model-approved-2', 'نموذج العمليات البديل', 'internal', 'operations', repeat('c', 64), 'approved', 'king-001')`,
+        `INSERT INTO state.models (id, name, provider, model_version, purpose, fingerprint, status, is_active)
+         VALUES ('model-sandbox-1', 'نموذج معزول', 'internal', '1.0.0', 'operations', repeat('d', 64), 'sandboxed', true)`,
       ),
-    /models_one_approved_per_purpose_idx/,
+    /models_active_must_be_approved/,
   );
 });
 
@@ -210,8 +234,8 @@ test('الحصة لا تتجاوز حدّها، والحكم لا يسبق ال�
   );
 
   await client.query(
-    `INSERT INTO state.laws (id, title, body, status, enacted_by, enacted_at)
-     VALUES ('law-001', 'نظام التشغيل', 'نصّ النظام', 'enacted', 'king-001', now())`,
+    `INSERT INTO state.laws (id, title, body, scope, proposer, status, enacted_by, enacted_at)
+     VALUES ('law-001', 'نظام التشغيل', 'نصّ النظام', 'operations', 'council', 'enacted', 'king-001', now())`,
   );
   await assert.rejects(
     () =>
@@ -228,8 +252,8 @@ test('ذاكرة محفوظة قانوناً لا تحمل تاريخ انتها
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.memories (id, agent_id, kind, content, legal_hold, expires_at)
-         VALUES ('mem-001', 'agent-001', 'episodic', '{}'::jsonb, true, now() + interval '1 day')`,
+        `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, expires_at)
+         VALUES ('mem-001', 'agent-001', 'data-001', 'episodic', '{}'::jsonb, true, now() + interval '1 day')`,
       ),
     /memories_hold_has_no_expiry/,
   );
@@ -245,3 +269,49 @@ test('كل عمود فراغه مُعلن مشروحٌ سببه في وثيقة 
     `أعمدة مُعلنة بلا شرح في docs/PERSISTENCE.md:\n${missing.join('\n')}`,
   );
 });
+
+test(
+  'ساعة القاعدة بدقّة الميليثانية فلا يسبق تغيّرُ الحالةِ إنشاءَ الصفّ كذباً',
+  { skip: skipWithoutDatabase },
+  async () => {
+    // عيبٌ حقيقي كان يظهر إخفاقاً **متقطّعاً** في اختبار الذرّية: `created_at`
+    // من ساعة القاعدة بدقّة الميكروثانية، و`state_changed_at` من `Date` في
+    // JavaScript بدقّة الميليثانية. فصفٌّ أُنشئ عند ‎.123456‎ ثم تغيّرت حالته
+    // بعده يحمل ‎.123‎ فيُقرأ **أسبق** من إنشائه ويرفضه القيد.
+    //
+    // القياس هنا في طبقتين: افتراض العمود مقصوصٌ إلى الميليثانية في الكتالوج،
+    // ثم تجربةٌ متكرّرة تكتب زمناً بدقّة JavaScript فور الإنشاء. والتكرار مقصود:
+    // العيب احتمالي، والمرّة الواحدة تنجح غالباً وتُطمئن كذباً.
+    const client = pool();
+    const defaults = await client.query(
+      `SELECT table_name, column_default
+         FROM information_schema.columns
+        WHERE table_schema = 'state' AND column_name = 'created_at'
+          AND table_name IN ('agents', 'models', 'laws', 'memories', 'data_assets')
+        ORDER BY table_name`,
+    );
+    assert.equal(defaults.rows.length, 5, 'الجداول الخمسة التي تُقارن أزمنتها بكود JavaScript.');
+    for (const row of defaults.rows) {
+      const value = String(/** @type {Record<string, unknown>} */ (row)['column_default']);
+      assert.match(
+        value,
+        /date_trunc\('milliseconds'::text, now\(\)\)/,
+        `افتراض created_at في ${String(/** @type {Record<string, unknown>} */ (row)['table_name'])} لم يُقصَّ إلى الميليثانية.`,
+      );
+    }
+
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const id = `agent-precision-${attempt}`;
+      await client.query(
+        `INSERT INTO state.agents (id, name, role, owner, kind, status, certificate)
+         VALUES ($1, $2, 'auditor', 'crown', 'service', 'active', '{}'::jsonb)`,
+        [id, `وكيل دقّة ${attempt}`],
+      );
+      await client.query(`UPDATE state.agents SET state_changed_at = $2 WHERE id = $1`, [
+        id,
+        new Date(),
+      ]);
+      await client.query(`DELETE FROM state.agents WHERE id = $1`, [id]);
+    }
+  },
+);

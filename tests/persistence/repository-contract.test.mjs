@@ -29,22 +29,27 @@ const FIXTURES = {
     make: (suffix) => ({
       id: `agent-${suffix}`,
       name: `وكيل ${suffix}`,
+      role: 'auditor',
+      owner: 'crown',
       kind: 'service',
-      status: 'registered',
+      state: 'registered',
       capabilities: ['read:events'],
+      // الشهادة إلزامية بعد `M3.05`: وكيلٌ بلا شهادة وكيلٌ بلا إثبات تصريح.
+      // وهذه صورة بنيةٍ فقط — صلاحيتها تُختبر في اختبارات الهوية لا هنا.
+      certificate: { subject: `agent-${suffix}`, issuer: 'king', signature: 'test' },
     }),
     /** @type {EntityRecord} */
-    validPatch: { status: 'active', capabilities: ['read:events', 'write:tasks'] },
+    validPatch: { state: 'active', capabilities: ['read:events', 'write:tasks'] },
     /** @type {EntityRecord} */
-    invalidPatch: { status: 'suspended' },
-    invariantCode: 'AGENT_SUSPENSION_NEEDS_REASON',
+    invalidPatch: { state: 'suspended' },
+    invariantCode: 'AGENT_PUNITIVE_NEEDS_REASON',
     uniqueField: 'name',
     /** قيم تجعل كل الحقول الفريدة مختلفة، ليبقى التعارض المختبر هو المعرّف وحده.
      * @param {string} tag
      * @returns {EntityRecord}
      */
     freshUniques: (tag) => ({ name: `وكيل مختلف ${tag}` }),
-    filter: { status: 'registered' },
+    filter: { state: 'registered' },
   },
   models: {
     spec: MODEL_SPEC,
@@ -53,17 +58,19 @@ const FIXTURES = {
       id: `model-${suffix}`,
       name: `نموذج ${suffix}`,
       provider: 'internal',
+      modelVersion: '1.0.0',
       purpose: 'research',
       // بصمة مشتقّة بتجزئة الوسم: توليدها بحشو النصّ وإبدال غير الستّ عشري كان
       // يُنتج البصمة نفسها لوسمين مختلفين، فيُخفق الاختبار بتعارض تفرّد
       // لا علاقة له بما يقيسه.
       fingerprint: crypto.createHash('sha256').update(suffix).digest('hex'),
-      status: 'registered',
+      state: 'registered',
+      isActive: false,
     }),
     /** @type {EntityRecord} */
-    validPatch: { status: 'evaluated' },
+    validPatch: { state: 'evaluated' },
     /** @type {EntityRecord} */
-    invalidPatch: { status: 'approved' },
+    invalidPatch: { state: 'approved' },
     invariantCode: 'MODEL_APPROVAL_NEEDS_APPROVER',
     uniqueField: 'name',
     /**
@@ -74,7 +81,7 @@ const FIXTURES = {
       name: `نموذج مختلف ${tag}`,
       fingerprint: crypto.createHash('sha256').update(`fresh:${tag}`).digest('hex'),
     }),
-    filter: { status: 'registered' },
+    filter: { state: 'registered' },
   },
 };
 
@@ -136,10 +143,10 @@ function contractSuite(kind, entity, unique) {
     const repo = repositoryFor(kind, fixture.spec);
     const record = await repo.insert(fixture.make(`${unique}-frozen`));
     assert.throws(() => {
-      /** @type {Record<string, unknown>} */ (record)['status'] = 'active';
+      /** @type {Record<string, unknown>} */ (record)['state'] = 'active';
     });
     const again = await repo.findById(String(record['id']));
-    assert.equal(again?.['status'], record['status']);
+    assert.equal(again?.['state'], record['state']);
   });
 
   test(`${label} معرّف مكرّر يُرفض بـ DUPLICATE_ID`, { skip }, async () => {
@@ -175,7 +182,7 @@ function contractSuite(kind, entity, unique) {
   test(`${label} قيمة خارج القيم المسموحة تُرفض`, { skip }, async () => {
     const repo = repositoryFor(kind, fixture.spec);
     await assert.rejects(
-      () => repo.insert({ ...fixture.make(`${unique}-e`), status: 'ghost' }),
+      () => repo.insert({ ...fixture.make(`${unique}-e`), state: 'ghost' }),
       (/** @type {unknown} */ error) => hasCode(error, REPOSITORY_ERRORS.INVALID_RECORD),
     );
   });

@@ -9,11 +9,16 @@
  * 2. **القفل متفائل بشرطٍ في `WHERE`** لا بقراءة ثم كتابة: `WHERE id = $ AND
  *    version = $` تجعل الفحص والكتابة فعلاً واحداً، فلا تنفذ كتابةٌ بين
  *    القراءة والتحديث.
- * 3. **أخطاء القاعدة تُترجَم إلى رموز العقد** فلا يرى المستدعي رمز PostgreSQL
+ * 3. **المُنفِّذ قد يكون مجمّعاً أو وصلةً محجوزة** (`M3.06`): إن مُرِّر مجمّع فكل
+ *    تحديث معاملةٌ لنفسه؛ وإن مُرِّرت وصلةٌ داخل معاملة أعلى فلا تُفتح معاملة
+ *    متداخلة، إذ إن `BEGIN` داخل `BEGIN` في PostgreSQL تحذيرٌ يُهمَل، فيصير
+ *    `COMMIT` الداخلي إقراراً لعملٍ لم يتم بعد — وهذا نقيض الذرّية المطلوبة.
+ * 4. **أخطاء القاعدة تُترجَم إلى رموز العقد** فلا يرى المستدعي رمز PostgreSQL
  *    الخام؛ ولو أخفق التحقّق في الكود فقيدُ القاعدة يمسكه ويصير خطأً مسمّى.
  */
 
 import { withTransaction } from './db.mjs';
+import { snapshot } from '../lib/snapshot.mjs';
 import {
   REPOSITORY_ERRORS,
   RepositoryError,
@@ -73,7 +78,11 @@ function toRecord(spec, row) {
       record[field] = value === undefined ? null : value;
     }
   }
-  return Object.freeze(record);
+  // تجميدٌ **عميق** لا سطحي: كان `Object.freeze(record)` يترك المصفوفات
+  // والكائنات المُقروءة من `jsonb` قابلة للتعديل، فتُرجع الصورة «مُجمَّدة» ويُدَسّ
+  // في قدرات وكيلٍ أو نسب أصلٍ بلا خطأ — نفس العيب `D1` من `M2.11` عائداً من باب
+  // القاعدة. والتجميد هنا يقع على صفٍّ حُوِّل توّاً فلا يُجمَّد كائنٌ يملكه غيرنا.
+  return /** @type {EntityRecord} */ (snapshot(record));
 }
 
 /**
@@ -95,7 +104,7 @@ function buildFilter(spec, filter) {
     }
     const fieldSpec = spec.fields[field];
     if (fieldSpec === undefined) continue;
-    values.push(value);
+    values.push(toParam(fieldSpec, value));
     conditions.push(`${fieldSpec.column} = $${values.length}`);
   }
   return {
@@ -105,11 +114,45 @@ function buildFilter(spec, filter) {
 }
 
 /**
+ * يهيّئ قيمة حقل للتمرير كمُعامل استعلام.
+ *
+ * عيبٌ مستور: مُشغّل `pg` يُسلسِل الكائن إلى JSON من نفسه، لكنه يُسلسِل
+ * **المصفوفة** إلى نصّ مصفوفة PostgreSQL (`{...}`) لا إلى JSON، فحقلُ `jsonb`
+ * قيمته مصفوفة — كسلسلة اشتقاق البيانات — يُرفض بـ`invalid input syntax for
+ * type json`. فالتسلسل يُصرَّح هنا لكل حقل `json` بلا اعتمادٍ على تخمين المُشغّل.
+ * @param {import('./entities.mjs').FieldSpec} fieldSpec
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function toParam(fieldSpec, value) {
+  if (fieldSpec.type !== 'json') return value;
+  if (value === null || value === undefined) return value;
+  return JSON.stringify(value);
+}
+
+/**
  * أنشئ مستودع PostgreSQL لمواصفة سجل.
- * @param {import('pg').Pool} pool
+ * @param {import('pg').Pool | import('pg').PoolClient} executor مجمّع، أو وصلة
+ *   محجوزة داخل معاملة قائمة (`withUnitOfWork`).
  * @param {EntitySpec} spec
  */
-export function createPostgresRepository(pool, spec) {
+export function createPostgresRepository(executor, spec) {
+  // التمييز بالقدرة لا بالصنف، لأن `instanceof pg.Pool` يكسر مع أي مجمّع مُغلَّف.
+  //
+  // وعيبٌ وقع هنا فعلاً ويُسجَّل: مُيِّز أولاً بوجود `connect`، و`PoolClient` يرث
+  // `connect` من `Client` فصُنِّفت الوصلة مجمّعاً، فحاولت فتح معاملة على نفسها
+  // وأخفقت بـ«Client has already been connected». العلامة الصحيحة هي `release`:
+  // الوصلة المحجوزة تُعاد إلى المجمّع، والمجمّع لا يُعاد إلى شيء.
+  const pool = /** @type {import('pg').Pool} */ (executor);
+  const isPool = typeof (/** @type {{ release?: unknown }} */ (executor).release) !== 'function';
+  /**
+   * ينفّذ العمل داخل معاملة إن كنا على مجمّع، أو مباشرةً إن كنا داخل معاملة أعلى.
+   * @template T
+   * @param {(client: import('pg').PoolClient) => Promise<T>} work
+   * @returns {Promise<T>}
+   */
+  const inTransaction = (work) =>
+    isPool ? withTransaction(pool, work) : work(/** @type {import('pg').PoolClient} */ (executor));
   /** الأعمدة التي يكتبها المستدعي (ما ليس مُداراً). */
   const writable = Object.entries(spec.fields).filter(([, field]) => field.managed !== true);
 
@@ -131,11 +174,11 @@ export function createPostgresRepository(pool, spec) {
       for (const [field, fieldSpec] of writable) {
         if (!Object.hasOwn(filled, field)) continue;
         columns.push(fieldSpec.column);
-        values.push(filled[field]);
+        values.push(toParam(fieldSpec, filled[field]));
       }
       const placeholders = columns.map((_, index) => `$${index + 1}`);
       try {
-        const result = await pool.query(
+        const result = await executor.query(
           `INSERT INTO ${spec.table} (${columns.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`,
           values,
         );
@@ -152,7 +195,7 @@ export function createPostgresRepository(pool, spec) {
      * @returns {Promise<EntityRecord | null>}
      */
     async findById(id) {
-      const result = await pool.query(`SELECT * FROM ${spec.table} WHERE id = $1`, [id]);
+      const result = await executor.query(`SELECT * FROM ${spec.table} WHERE id = $1`, [id]);
       const row = result.rows[0];
       return row === undefined ? null : toRecord(spec, row);
     },
@@ -172,7 +215,7 @@ export function createPostgresRepository(pool, spec) {
         values.push(query.limit);
         sql += ` LIMIT $${values.length}`;
       }
-      const result = await pool.query(sql, values);
+      const result = await executor.query(sql, values);
       return result.rows.map((row) => toRecord(spec, row));
     },
 
@@ -182,7 +225,7 @@ export function createPostgresRepository(pool, spec) {
      */
     async count(filter = {}) {
       const { clause, values } = buildFilter(spec, filter);
-      const result = await pool.query(
+      const result = await executor.query(
         `SELECT count(*)::int AS n FROM ${spec.table}${clause}`,
         values,
       );
@@ -208,7 +251,7 @@ export function createPostgresRepository(pool, spec) {
         }
       }
       try {
-        return await withTransaction(pool, async (client) => {
+        return await inTransaction(async (client) => {
           // القراءة تحت `FOR UPDATE` كي لا تتغيّر الحالة بين التحقّق والكتابة؛
           // والقفل المتفائل يبقى في شرط النسخة فلا يُعتمد على القفل وحده.
           const currentResult = await client.query(
@@ -238,7 +281,7 @@ export function createPostgresRepository(pool, spec) {
           const values = [];
           for (const [field, fieldSpec] of writable) {
             if (!Object.hasOwn(patch, field)) continue;
-            values.push(merged[field]);
+            values.push(toParam(fieldSpec, merged[field]));
             assignments.push(`${fieldSpec.column} = $${values.length}`);
           }
           assignments.push('version = version + 1', 'updated_at = now()');
@@ -267,12 +310,12 @@ export function createPostgresRepository(pool, spec) {
      * @returns {Promise<void>}
      */
     async remove(id, expectedVersion) {
-      const result = await pool.query(
+      const result = await executor.query(
         `DELETE FROM ${spec.table} WHERE id = $1 AND version = $2 RETURNING id`,
         [id, expectedVersion],
       );
       if (result.rowCount === 1) return;
-      const exists = await pool.query(`SELECT version FROM ${spec.table} WHERE id = $1`, [id]);
+      const exists = await executor.query(`SELECT version FROM ${spec.table} WHERE id = $1`, [id]);
       if (exists.rows.length === 0) {
         throw new RepositoryError(
           REPOSITORY_ERRORS.NOT_FOUND,

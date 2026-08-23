@@ -104,9 +104,15 @@ test(
     try {
       const before = await catalogSnapshot(db.pool);
 
+      // الأرقام تُقرأ من المستودع لا تُثبَّت في الاختبار: تثبيتُ «[1]» يعني أن
+      // إضافة أي هجرة تُفشل اختباراً لا علاقة له بصحّتها.
+      const versions = (await loadMigrations()).map((migration) => migration.version);
+      const latest = versions[versions.length - 1];
+      assert.ok(latest !== undefined, 'لا هجرات في المستودع');
+
       const applied = await up(db.pool);
-      assert.deepEqual(applied.applied, [1]);
-      assert.equal(applied.current, 1);
+      assert.deepEqual(applied.applied, versions);
+      assert.equal(applied.current, latest);
 
       const tables = await db.pool.query(
         `SELECT table_name FROM information_schema.tables WHERE table_schema = 'state' ORDER BY table_name`,
@@ -128,9 +134,12 @@ test(
         'المخطَّط الأول يجب أن يحمل الجداول العشرة المذكورة في M3.02',
       );
 
-      const reverted = await down(db.pool);
-      assert.deepEqual(reverted.reverted, [1]);
-      assert.equal(reverted.current, 0);
+      // التراجع خطوةً خطوة حتى الصفر: `down` تتراجع عن الأخيرة وحدها.
+      for (let step = versions.length; step > 0; step -= 1) {
+        const reverted = await down(db.pool);
+        assert.deepEqual(reverted.reverted, [versions[step - 1]]);
+        assert.equal(reverted.current, step === 1 ? 0 : versions[step - 2]);
+      }
 
       // دفتر النسخ يبقى موجوداً بعد التراجع (يملكه المُهاجر لا الهجرة)، لكنه فارغ؛
       // فيُستثنى من المقايسة بحذفه، ثم تُقايس القاعدة صورةً بصورة.
@@ -147,9 +156,10 @@ test('up مرتين لا يُطبّق شيئاً في الثانية', { skip: s
   const db = await createIsolatedDatabase('idempotent');
   try {
     await up(db.pool);
+    const versions = (await loadMigrations()).map((migration) => migration.version);
     const second = await up(db.pool);
     assert.deepEqual(second.applied, []);
-    assert.equal(second.current, 1);
+    assert.equal(second.current, versions[versions.length - 1]);
     const state = await status(db.pool);
     assert.equal(
       state.rows.every((row) => row.isApplied),
@@ -180,9 +190,13 @@ test('هجرة مُطبَّقة لا ملف لها تُكشف', { skip: skipWith
   const db = await createIsolatedDatabase('orphan');
   try {
     await up(db.pool);
+    // رقمٌ بعد آخر هجرة في المستودع، فلا يتعارض مع دفتر النسخ حين تُضاف هجرات.
+    const versions = (await loadMigrations()).map((migration) => migration.version);
+    const ghost = Number(versions[versions.length - 1] ?? 0) + 1;
     await db.pool.query(
       `INSERT INTO public.schema_migrations (version, name, checksum, applied_by)
-       VALUES (2, 'ghost', repeat('b', 64), 'test')`,
+       VALUES ($1, 'ghost', repeat('b', 64), 'test')`,
+      [ghost],
     );
     await assert.rejects(
       () => status(db.pool),

@@ -55,7 +55,10 @@ export async function createIsolatedDatabase(label) {
     pool,
     name,
     drop: async () => {
-      await pool.end();
+      // اختبار إعادة التشغيل يقطع المجمّع بنفسه (فذلك جزء من المحاكاة)، و`pg`
+      // يرفع «Called end on pool more than once». فالإقفال هنا يُبتلع خطؤه
+      // **وحده**: التنظيف لا يُفشل اختباراً نجح، وإسقاط القاعدة يبقى قاطعاً.
+      await pool.end().catch(() => undefined);
       const cleaner = new pg.Pool({ connectionString: url, max: 1 });
       try {
         await cleaner.query(`DROP DATABASE IF EXISTS ${quoteIdent(name)} WITH (FORCE)`);
