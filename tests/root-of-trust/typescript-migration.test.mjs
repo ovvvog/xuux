@@ -35,6 +35,7 @@ const REQUIRED_MODULES = [
   'persistent-log',
   'key-store',
   'key-provider',
+  'king-key',
   'command-ledger',
   'index',
 ];
@@ -137,6 +138,12 @@ test('الوحدة المصرَّفة تصدّر كل رموز الجذر وتع
     'CommandLedger',
     'LocalEncryptedKeyProvider',
     'RemoteSecretStoreKeyProvider',
+    'KingKeyError',
+    'provisionKingKey',
+    'loadKingIdentity',
+    'kingIdentityFromMaterial',
+    'describeKingKeyBinding',
+    'kingKeyProviderFromEnv',
   ]) {
     assert.equal(typeof exported[symbol], 'function', `الرمز ${symbol} مفقود من الوحدة المصرَّفة`);
   }
