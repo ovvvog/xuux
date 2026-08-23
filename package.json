@@ -18,14 +18,24 @@
     "format:check": "prettier --check .",
     "scan:secrets": "node scripts/scan-secrets.mjs --path .",
     "validate:tree": "python3 scripts/validate-tree.py",
-    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run scan:secrets && npm test"
+    "validate:seed": "node scripts/validate-seed.mjs",
+    "build:seed": "node scripts/build-seed.mjs",
+    "gen:registries": "node scripts/generate-registries.mjs",
+    "check:registries": "node scripts/generate-registries.mjs --check",
+    "audit:inventory": "node scripts/inventory.mjs",
+    "guard:templates": "node scripts/guard-templates.mjs",
+    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run scan:secrets && npm run validate:seed && npm run check:registries && npm test"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "20.19.43",
+    "ajv": "8.20.0",
     "eslint": "10.9.0",
     "prettier": "3.9.6",
     "typescript": "5.9.3",
     "typescript-eslint": "8.67.0"
+  },
+  "dependencies": {
+    "yaml": "2.9.0"
   }
 }
