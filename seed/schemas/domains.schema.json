@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "seed/schemas/domains.schema.json",
+  "title": "بذرة المجالات",
+  "type": "object",
+  "required": ["schema", "version", "generated_by", "count", "domains"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "seed/schemas/domains.schema.json" },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "generated_by": { "type": "string", "minLength": 1 },
+    "count": { "type": "integer", "minimum": 1 },
+    "domains": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "number",
+          "name_ar",
+          "path",
+          "layers",
+          "status",
+          "needs_ratification",
+          "provenance"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^\\d{3}-domain$" },
+          "number": { "type": "integer", "minimum": 1 },
+          "name_ar": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 60,
+            "not": { "pattern": "^(#|الغرض:|الحالة:|الوظيفة:)" },
+            "description": "اسم عربي حقيقي؛ يُمنع أن يبدأ بأي بادئة تعليق أو عبارة قالبية."
+          },
+          "path": { "type": "string", "pattern": "^civilization/\\d{3}-domain$" },
+          "layers": {
+            "type": "array",
+            "minItems": 6,
+            "maxItems": 6,
+            "uniqueItems": true,
+            "items": {
+              "enum": ["governance", "operations", "education", "research", "registry", "safety"]
+            }
+          },
+          "status": { "enum": ["planned", "in_progress", "active", "retired"] },
+          "needs_ratification": { "type": "boolean" },
+          "provenance": {
+            "type": "object",
+            "required": ["source", "ref"],
+            "additionalProperties": false,
+            "properties": {
+              "source": { "type": "string", "minLength": 3 },
+              "ref": { "type": "string", "minLength": 3 }
+            }
+          }
+        }
+      }
+    }
+  }
+}
