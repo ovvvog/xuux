@@ -19,6 +19,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
+import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { createWeightStore } from '../../src/models/weight-store.mjs';
 import fs from 'node:fs';
@@ -37,7 +38,12 @@ function temporaryWeightStore() {
 async function activeModel() {
   const log = new EventLog();
   const repository = createMemoryRepository(ModelRegistry.spec);
-  const registry = new ModelRegistry({ log, repository, weightStore: temporaryWeightStore() });
+  const registry = new ModelRegistry({
+    log,
+    repository,
+    weightStore: temporaryWeightStore(),
+    evaluationLedger: new ModelEvaluationLedger({ log }),
+  });
   const model = await registry.register({
     name: 'مدقّق',
     modelVersion: '1.0.0',
@@ -47,6 +53,15 @@ async function activeModel() {
   });
   await registry.transition(model.id, ModelState.SANDBOXED, 'اختبار معزول');
   await registry.transition(model.id, ModelState.APPROVED, 'اعتماد');
+  registry.evaluationLedger.record({
+    modelId: model.id,
+    fingerprint: model.fingerprint,
+    evaluatedBy: 'role:minister',
+    results: [
+      { checkId: 'safety', score: 1 },
+      { checkId: 'quality', score: 1 },
+    ],
+  });
   await registry.activate(model.id);
   return { log, registry, repository, id: model.id };
 }

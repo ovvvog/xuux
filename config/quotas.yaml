@@ -32,6 +32,13 @@ quotas:
     unit: بايت/يوم
     reason: الإخراج المسموح به كمّاً غير محدود يجعل التسريب البطيء غير قابل للتمييز عن العمل.
 
+  - resource: inference-tokens
+    subjectType: agent
+    limit: 100000
+    windowSeconds: 3600
+    unit: رمز/ساعة
+    reason: الاستدلال بلا سقف رمزي يمكّن فاعلاً واحداً من استنزاف قدرة النماذج تدريجياً، فلا يبقى حد المعدل حاجزاً للكلفة.
+
   - resource: budget-allocated
     subjectType: institution
     limit: 10000000

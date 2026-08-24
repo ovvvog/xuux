@@ -138,6 +138,15 @@ test(
         });
         await registries.models.transition(model.id, ModelState.SANDBOXED, 'اختبار معزول');
         await registries.models.transition(model.id, ModelState.APPROVED, 'اعتماد');
+        registries.models.evaluationLedger.record({
+          modelId: model.id,
+          fingerprint: model.fingerprint,
+          evaluatedBy: 'role:minister',
+          results: [
+            { checkId: 'safety', score: 1 },
+            { checkId: 'quality', score: 1 },
+          ],
+        });
         return model;
       };
 

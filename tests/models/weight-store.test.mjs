@@ -13,6 +13,7 @@ import path from 'node:path';
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
+import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import {
   WEIGHT_STORE_ERRORS,
   WeightStore,
@@ -36,6 +37,7 @@ function setup(deps = {}) {
     repository: createMemoryRepository(ModelRegistry.spec),
     weightStore,
     quarantine: deps.quarantine ?? null,
+    evaluationLedger: new ModelEvaluationLedger({ log }),
   });
   return { log, weightStore, registry };
 }
@@ -54,6 +56,15 @@ async function approvedModel(registry, weights) {
   });
   await registry.transition(model.id, ModelState.SANDBOXED);
   await registry.transition(model.id, ModelState.APPROVED);
+  registry.evaluationLedger.record({
+    modelId: model.id,
+    fingerprint: model.fingerprint,
+    evaluatedBy: 'role:minister',
+    results: [
+      { checkId: 'safety', score: 1 },
+      { checkId: 'quality', score: 1 },
+    ],
+  });
   return model;
 }
 

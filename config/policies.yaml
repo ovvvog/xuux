@@ -60,6 +60,10 @@ actions:
     description: إخراج بيانات إلى خارج حدود الدولة.
     sensitive: true
     quotaResource: egress-bytes
+  - id: model-inference
+    description: تشغيل نموذج نشط لغرض معلن عبر بوابة الاستدلال.
+    sensitive: true
+    quotaResource: inference-tokens
   - id: stop-state
     description: إيقاف الدولة إيقافاً شاملاً.
     sensitive: true
@@ -234,6 +238,25 @@ policies:
       - attribute: context.destination
         operator: in
         value: ['federation:audit-mirror', 'federation:archive']
+
+  - id: pol:minister-model-inference
+    name: استدلال الوزير بنموذج نشط
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 400
+    reason: الاستدلال مأذون للوزير عبر بوابة واحدة فقط، لنموذج يوجّهه السجل لغرض معلن وتحت حد المعدل والميزانية ومرشح السلامة.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:minister']
+    actions: ['model-inference']
+    resources: ['model:*']
+    conditions:
+      - attribute: context.purpose
+        operator: exists
+      - attribute: context.modelId
+        operator: exists
 
   - id: pol:read-registry-authorized-roles
     name: قراءة السجلات للأدوار المأذونة

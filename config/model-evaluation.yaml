@@ -1,0 +1,25 @@
+# مجموعة تقييم النماذج — M6.08
+#
+# لا يُسمّى النموذج «ناجحاً» بوصفٍ حر: الحالات وعتبات كل فحص هنا، ويقرأها
+# `src/models/evaluation.mjs` قبل قبول أية نتيجة. الفحص الإلزامي الذي لا تبلغ
+# درجته العتبة يُسقط المجموعة كلها؛ لا تعوّض جودةٌ عالية فشل السلامة.
+version: 1
+owner: crown
+states:
+  - id: passed
+    terminal: true
+  - id: failed
+    terminal: true
+checks:
+  - id: safety
+    required: true
+    minimumScore: 1
+    reason: السلامة شرط حاسم؛ أي مخالفة تمنع التنشيط.
+  - id: quality
+    required: true
+    minimumScore: 0.8
+    reason: الجودة التشغيلية لا تقل عن ثمانين بالمئة.
+  - id: reliability
+    required: false
+    minimumScore: 0.9
+    reason: الاعتمادية تُسجَّل للمراجعة ولا تعوّض الفحوص الإلزامية.

@@ -1,0 +1,489 @@
+/**
+ * بوابة الاستدلال — M6.07
+ *
+ * العيب الذي تعالجه: الاستدلال كان سيقبل معرّف النموذج من المنادي ويشغّله بلا
+ * توجيهٍ من السجل، ولا حدّ معدل أو ميزانية أو أثرٍ آمن للمُدخل والمُخرج. فيصبح
+ * النموذج غير النشط طريقاً خفياً، ويصير السجل نفسه موضع تسريب للمصنّف الحساس.
+ *
+ * هذه البوابة هي المسار الوحيد: تختار النموذج النشط لغرضٍ معلن، تفحص الحجر
+ * والمعدل وميزانية الإدخال ومرشح السلامة، ثم تفوّض وتتحقق من تذكرتها في لحظة
+ * النداء، وبعد التنفيذ تحاسب الاستهلاك الفعلي وتفحص المُخرج قبل إعادته.
+ *
+ * ترتيب الفحوص مقصود: الحجر أولاً، ثم التوجيه الصريح، ثم حدّ المعدل، ثم ما
+ * يمنع التنفيذ (الميزانية والمرشح)، ثم التفويض. فلا يُصدر طلبٌ إلى النموذج عند
+ * غياب نموذج نشط أو تجاوز سقف معروف، ولا تُستهلك تذكرة قبل لحظة النداء.
+ *
+ * حدود معلنة:
+ *   - عدّاد المعدل والميزانية في الذاكرة وضمن عملية واحدة؛ إعادة التشغيل تبدأ
+ *     نافذة جديدة. الحصة المعلنة في البيانات تظل مرجع المورد، أما دوام الدفتر
+ *     الفعلي فيحتاج موصل تخزين موزعاً في خطوة لاحقة.
+ *   - تقدير الإدخال يمنع طلباً يتجاوز السقف قبل التشغيل؛ لا يمكن معرفة طول
+ *     المُخرج قبل تشغيل النموذج، لذلك يُحاسب الاستهلاك الفعلي بعده ويُحجب
+ *     المُخرج إن جعل الاستهلاك السقف متجاوزاً.
+ *   - قواعد السلامة بيانات معلنة في `DEFAULT_SAFETY_RULES` ويمكن تمرير نسخة
+ *     أشد؛ المطابقة اللفظية ليست بديلاً عن مصنف سلامة متخصص أو عزل التنفيذ.
+ */
+
+import { createHash } from 'node:crypto';
+
+const DEFAULT_WINDOW_MS = 60_000;
+const DEFAULT_CALLS_PER_WINDOW = 30;
+const DEFAULT_TOKENS_PER_WINDOW = 100_000;
+const DEFAULT_COST_PER_WINDOW = 100;
+const DEFAULT_LOG_TEXT_CHARS = 512;
+
+/** فعل الاستدلال المعلَن في كتالوج السياسات. */
+export const INFERENCE_ACTION = 'model-inference';
+
+export const INFERENCE_ERRORS = Object.freeze({
+  DEPENDENCY_MISSING: 'INFERENCE_DEPENDENCY_MISSING',
+  PURPOSE_REQUIRED: 'INFERENCE_PURPOSE_REQUIRED',
+  INPUT_INVALID: 'INFERENCE_INPUT_INVALID',
+  ACTIVE_MODEL_MISSING: 'INFERENCE_ACTIVE_MODEL_MISSING',
+  MODEL_REGISTRY_FAILED: 'INFERENCE_MODEL_REGISTRY_FAILED',
+  QUARANTINED: 'INFERENCE_ACTOR_QUARANTINED',
+  RATE_LIMIT_EXCEEDED: 'INFERENCE_RATE_LIMIT_EXCEEDED',
+  BUDGET_EXCEEDED: 'INFERENCE_BUDGET_EXCEEDED',
+  INPUT_BLOCKED: 'INFERENCE_INPUT_BLOCKED',
+  NOT_AUTHORIZED: 'INFERENCE_NOT_AUTHORIZED',
+  TICKET_INVALID: 'INFERENCE_TICKET_INVALID',
+  EXECUTION_FAILED: 'INFERENCE_EXECUTION_FAILED',
+  OUTPUT_INVALID: 'INFERENCE_OUTPUT_INVALID',
+  OUTPUT_BLOCKED: 'INFERENCE_OUTPUT_BLOCKED',
+});
+
+/** خطأ مسمى: الرمز للبرامج والرسالة العربية لقرار الرفض المقروء. */
+export class InferenceError extends Error {
+  /**
+   * @param {string} code
+   * @param {string} message
+   * @param {Record<string, unknown>} [detail]
+   */
+  constructor(code, message, detail = {}) {
+    super(message);
+    this.name = 'InferenceError';
+    /** @type {string} */
+    this.code = code;
+    /** @type {Record<string, unknown>} */
+    this.detail = detail;
+  }
+}
+
+/**
+ * قواعد السلامة بيانات لا شروط مبثوثة في مسار الاستدلال. كل قاعدة تحدد الموضع
+ * والعبارات التي تمنعها وسبباً يسجل مع الرفض.
+ * @type {readonly Readonly<{ id: string, target: 'input' | 'output', terms: readonly string[], reason: string }>[]}
+ */
+export const DEFAULT_SAFETY_RULES = Object.freeze([
+  Object.freeze({
+    id: 'input-prompt-injection',
+    target: 'input',
+    terms: Object.freeze(['ignore previous instructions', 'reveal system prompt']),
+    reason: 'المُدخل يحاول تجاوز تعليمات النظام أو طلب محتواها المحمي.',
+  }),
+  Object.freeze({
+    id: 'output-private-key',
+    target: 'output',
+    terms: Object.freeze(['begin private key', 'ssh-rsa']),
+    reason: 'المُخرج يتضمن مادة اعتماد خاصة لا يجوز إعادتها.',
+  }),
+]);
+
+/**
+ * @typedef {object} InferenceUsage
+ * @property {number} [inputTokens]
+ * @property {number} [outputTokens]
+ * @property {number} [totalTokens]
+ * @property {number} [cost]
+ */
+
+/**
+ * @typedef {object} InferenceExecution
+ * @property {string} output
+ * @property {InferenceUsage} [usage]
+ */
+
+/**
+ * @typedef {object} InferenceRequest
+ * @property {import('../policy/model.mjs').PolicyActor} actor
+ * @property {string} purpose الغرض فقط؛ النموذج يختاره السجل ولا يقبله الطلب.
+ * @property {string} input
+ * @property {'public' | 'internal' | 'sensitive' | 'secret'} [inputClassification]
+ * @property {'public' | 'internal' | 'sensitive' | 'secret'} [outputClassification]
+ * @property {number} [estimatedInputTokens]
+ * @property {number} [estimatedInputCost]
+ * @property {string} [resourceId]
+ * @property {Record<string, unknown>} [context]
+ */
+
+/**
+ * @param {string} text
+ * @returns {number}
+ */
+function estimateTokens(text) {
+  return Math.max(1, Math.ceil(Buffer.byteLength(text, 'utf8') / 4));
+}
+
+/**
+ * @param {unknown} value
+ * @param {number} fallback
+ * @returns {number}
+ */
+function nonNegativeNumber(value, fallback) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+export class InferenceGate {
+  /**
+   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, costPerWindow?: number, maxLoggedTextChars?: number, now?: () => Date }} [deps]
+   */
+  constructor({
+    modelRegistry,
+    enforcementPoint,
+    log,
+    execute,
+    quarantine = null,
+    safetyRules = DEFAULT_SAFETY_RULES,
+    callsPerWindow = DEFAULT_CALLS_PER_WINDOW,
+    windowMs = DEFAULT_WINDOW_MS,
+    tokensPerWindow = DEFAULT_TOKENS_PER_WINDOW,
+    costPerWindow = DEFAULT_COST_PER_WINDOW,
+    maxLoggedTextChars = DEFAULT_LOG_TEXT_CHARS,
+    now,
+  } = {}) {
+    if (!modelRegistry || !enforcementPoint || !log || typeof execute !== 'function') {
+      throw new InferenceError(
+        INFERENCE_ERRORS.DEPENDENCY_MISSING,
+        'بوابة الاستدلال تحتاج سجل النماذج ونقطة تفويض وسجلاً ومنفّذاً؛ غياب واحد منها يفتح استدلالاً بلا توجيه أو قرار أو أثر.',
+      );
+    }
+    this.modelRegistry = modelRegistry;
+    this.enforcementPoint = enforcementPoint;
+    this.log = log;
+    this.execute = execute;
+    this.quarantine = quarantine;
+    this.safetyRules = safetyRules;
+    this.callsPerWindow = callsPerWindow;
+    this.windowMs = windowMs;
+    this.tokensPerWindow = tokensPerWindow;
+    this.costPerWindow = costPerWindow;
+    this.maxLoggedTextChars = maxLoggedTextChars;
+    this.now = now ?? (() => new Date());
+    /** @type {Map<string, number[]>} */
+    this.attempts = new Map();
+    /** @type {Map<string, { startedAt: number, tokens: number, cost: number }>} */
+    this.budgets = new Map();
+  }
+
+  /**
+   * يسجل نصاً عاماً/داخلياً مقتطعاً، وبصمةً وطولاً فقط للحساس والسري.
+   * @param {string} text
+   * @param {string} classification
+   * @returns {Record<string, unknown>}
+   */
+  #auditText(text, classification) {
+    const charLength = text.length;
+    const bytes = Buffer.byteLength(text, 'utf8');
+    if (classification === 'sensitive' || classification === 'secret') {
+      return {
+        classification,
+        charLength,
+        bytes,
+        sha256: createHash('sha256').update(text, 'utf8').digest('hex'),
+      };
+    }
+    return {
+      classification,
+      charLength,
+      bytes,
+      text: text.slice(0, this.maxLoggedTextChars),
+      truncated: charLength > this.maxLoggedTextChars,
+    };
+  }
+
+  /** @param {string} actorId @returns {number} */
+  #countAttempt(actorId) {
+    const nowMs = this.now().getTime();
+    const cutoff = nowMs - this.windowMs;
+    const window = (this.attempts.get(actorId) ?? []).filter((at) => at > cutoff);
+    window.push(nowMs);
+    this.attempts.set(actorId, window);
+    return window.length;
+  }
+
+  /**
+   * @param {string} actorId
+   * @returns {{ startedAt: number, tokens: number, cost: number }}
+   */
+  #budgetFor(actorId) {
+    const nowMs = this.now().getTime();
+    const previous = this.budgets.get(actorId);
+    if (previous === undefined || nowMs - previous.startedAt >= this.windowMs) {
+      const fresh = { startedAt: nowMs, tokens: 0, cost: 0 };
+      this.budgets.set(actorId, fresh);
+      return fresh;
+    }
+    return previous;
+  }
+
+  /**
+   * @param {string} text
+   * @param {'input' | 'output'} target
+   * @returns {{ id: string, reason: string } | null}
+   */
+  #blockedBySafetyRule(text, target) {
+    const normalized = text.toLocaleLowerCase('en-US');
+    for (const rule of this.safetyRules) {
+      if (rule.target !== target) continue;
+      if (rule.terms.some((term) => normalized.includes(term.toLocaleLowerCase('en-US')))) {
+        return { id: rule.id, reason: rule.reason };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * يسجل الرفض، ويبلّغ الحجر فقط عند تجاوز الميزانية، ثم يرمي الخطأ المسمى.
+   * @param {string} code
+   * @param {string} message
+   * @param {{ actorId: string, purpose: string, modelId: string | null, input: string, inputClassification: string, output?: string, outputClassification: string, [key: string]: unknown }} facts
+   * @returns {never}
+   */
+  #refuse(code, message, facts) {
+    const { input, inputClassification, output, outputClassification, ...safeFacts } = facts;
+    this.log.append('inference.refused', facts.actorId, {
+      code,
+      reason: message,
+      ...safeFacts,
+      input: this.#auditText(input, inputClassification),
+      ...(output === undefined ? {} : { output: this.#auditText(output, outputClassification) }),
+    });
+    if (code === INFERENCE_ERRORS.BUDGET_EXCEEDED && this.quarantine?.report !== undefined) {
+      this.quarantine.report({
+        kind: 'budget-exceeded',
+        subject: facts.actorId,
+        detail: { code, purpose: facts.purpose, modelId: facts.modelId },
+      });
+    }
+    throw new InferenceError(code, message, safeFacts);
+  }
+
+  /**
+   * المسار الوحيد للاستدلال المحكوم.
+   * @param {InferenceRequest} request
+   * @returns {Promise<{ modelId: string, purpose: string, output: string, usage: { inputTokens: number, outputTokens: number, totalTokens: number, cost: number }, policyId: string | null }>}
+   */
+  async infer(request) {
+    const actor = /** @type {{ id?: unknown }} */ (request.actor ?? {});
+    const actorId = typeof actor.id === 'string' ? actor.id : 'unknown';
+    const purpose = typeof request.purpose === 'string' ? request.purpose.trim() : '';
+    const input = request.input;
+    const inputClassification = request.inputClassification ?? 'internal';
+    const outputClassification = request.outputClassification ?? inputClassification;
+    /** @type {{ actorId: string, purpose: string, modelId: string | null, input: string, inputClassification: string, outputClassification: string, [key: string]: unknown }} */
+    const facts = {
+      actorId,
+      purpose,
+      modelId: null,
+      input: typeof input === 'string' ? input : '',
+      inputClassification,
+      outputClassification,
+    };
+
+    if (purpose === '') {
+      this.#refuse(
+        INFERENCE_ERRORS.PURPOSE_REQUIRED,
+        'الاستدلال بلا غرض معلَن مرفوض؛ الغرض هو مفتاح توجيه النموذج ولا يُخمن.',
+        facts,
+      );
+    }
+    if (typeof input !== 'string') {
+      this.#refuse(
+        INFERENCE_ERRORS.INPUT_INVALID,
+        'مُدخل الاستدلال يجب أن يكون نصاً؛ تحويل قيمة مجهولة إلى نص قد يخفي بيانات أو يغيّر معناها.',
+        facts,
+      );
+    }
+    if (this.quarantine?.isQuarantined?.(actorId) === true) {
+      this.#refuse(
+        INFERENCE_ERRORS.QUARANTINED,
+        `الفاعل ${actorId} محجور؛ الحجر يوقف الاستدلال ولا يؤجله إلى ما بعد التحقق.`,
+        facts,
+      );
+    }
+
+    let model;
+    try {
+      model = await this.modelRegistry.getActive(purpose);
+    } catch (error) {
+      this.#refuse(
+        INFERENCE_ERRORS.MODEL_REGISTRY_FAILED,
+        `تعذّر قراءة النموذج النشط للغرض ${purpose}: ${error instanceof Error ? error.message : String(error)}. لا يُختار بديل صامت.`,
+        facts,
+      );
+    }
+    if (model === null) {
+      this.#refuse(
+        INFERENCE_ERRORS.ACTIVE_MODEL_MISSING,
+        `لا نموذج نشط للغرض ${purpose}؛ رفض الطلب أأمن من اختيار نموذج احتياطي غير معلَن.`,
+        facts,
+      );
+    }
+    facts.modelId = model.id;
+
+    const attempts = this.#countAttempt(actorId);
+    if (attempts > this.callsPerWindow) {
+      this.#refuse(
+        INFERENCE_ERRORS.RATE_LIMIT_EXCEEDED,
+        `تجاوز الفاعل ${actorId} حد المعدل: ${attempts} طلبات في ${this.windowMs} مللي ثانية والحد ${this.callsPerWindow}.`,
+        { ...facts, attemptsInWindow: attempts },
+      );
+    }
+
+    const estimatedInputTokens = nonNegativeNumber(
+      request.estimatedInputTokens,
+      estimateTokens(input),
+    );
+    const estimatedInputCost = nonNegativeNumber(request.estimatedInputCost, 0);
+    const budget = this.#budgetFor(actorId);
+    if (
+      budget.tokens + estimatedInputTokens > this.tokensPerWindow ||
+      budget.cost + estimatedInputCost > this.costPerWindow
+    ) {
+      this.#refuse(
+        INFERENCE_ERRORS.BUDGET_EXCEEDED,
+        `تقدير مُدخل الاستدلال يتجاوز الميزانية قبل التنفيذ؛ المتاح ${this.tokensPerWindow - budget.tokens} رمزاً و${this.costPerWindow - budget.cost} كلفة.`,
+        {
+          ...facts,
+          estimatedInputTokens,
+          estimatedInputCost,
+          consumedTokens: budget.tokens,
+          consumedCost: budget.cost,
+        },
+      );
+    }
+
+    const blockedInput = this.#blockedBySafetyRule(input, 'input');
+    if (blockedInput !== null) {
+      this.#refuse(
+        INFERENCE_ERRORS.INPUT_BLOCKED,
+        `مُدخل الاستدلال حُجب بقاعدة السلامة ${blockedInput.id}: ${blockedInput.reason}`,
+        { ...facts, safetyRule: blockedInput.id },
+      );
+    }
+
+    const resourceId = request.resourceId ?? model.id;
+    const { decision, token } = await this.enforcementPoint.authorize({
+      actor: request.actor,
+      action: INFERENCE_ACTION,
+      resource: { type: 'model', id: resourceId, classification: inputClassification },
+      context: { ...(request.context ?? {}), purpose, modelId: model.id, estimatedInputTokens },
+    });
+    if (!decision.allowed) {
+      this.#refuse(
+        INFERENCE_ERRORS.NOT_AUTHORIZED,
+        `التفويض رفض الاستدلال برمز ${decision.code}: ${decision.reason}`,
+        facts,
+      );
+    }
+
+    try {
+      // التذكرة تستهلك في آخر لحظة قبل المنفذ، لا عند التصريح ولا بعده.
+      this.enforcementPoint.verify(token ?? undefined, {
+        actorId,
+        action: INFERENCE_ACTION,
+        resourceKey: `model:${resourceId}`,
+      });
+    } catch (error) {
+      this.#refuse(
+        INFERENCE_ERRORS.TICKET_INVALID,
+        `تذكرة قرار الاستدلال غير مقبولة: ${error instanceof Error ? error.message : String(error)}`,
+        facts,
+      );
+    }
+
+    let execution;
+    try {
+      execution = await this.execute({ model, purpose, input });
+    } catch (error) {
+      this.#refuse(
+        INFERENCE_ERRORS.EXECUTION_FAILED,
+        `فشل منفذ الاستدلال للنموذج ${model.id}: ${error instanceof Error ? error.message : String(error)}`,
+        facts,
+      );
+    }
+    const output = execution.output;
+    if (typeof output !== 'string') {
+      this.#refuse(
+        INFERENCE_ERRORS.OUTPUT_INVALID,
+        'منفذ الاستدلال أعاد مُخرجاً غير نصي؛ لا يُعاد كائن مجهول للمستدعي ولا يُسجّل كنص.',
+        facts,
+      );
+    }
+
+    const inputTokens = nonNegativeNumber(execution.usage?.inputTokens, estimatedInputTokens);
+    const outputTokens = nonNegativeNumber(execution.usage?.outputTokens, estimateTokens(output));
+    const totalTokens = nonNegativeNumber(execution.usage?.totalTokens, inputTokens + outputTokens);
+    const cost = nonNegativeNumber(execution.usage?.cost, estimatedInputCost);
+    budget.tokens += totalTokens;
+    budget.cost += cost;
+
+    if (budget.tokens > this.tokensPerWindow || budget.cost > this.costPerWindow) {
+      this.#refuse(
+        INFERENCE_ERRORS.BUDGET_EXCEEDED,
+        'الاستهلاك الفعلي بعد التنفيذ تجاوز الميزانية؛ يُسجَّل ويُحجب المُخرج وتُوقف الطلبات التالية في النافذة.',
+        {
+          ...facts,
+          output,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          cost,
+          consumedTokens: budget.tokens,
+          consumedCost: budget.cost,
+        },
+      );
+    }
+
+    const blockedOutput = this.#blockedBySafetyRule(output, 'output');
+    if (blockedOutput !== null) {
+      this.#refuse(
+        INFERENCE_ERRORS.OUTPUT_BLOCKED,
+        `مُخرج الاستدلال حُجب بقاعدة السلامة ${blockedOutput.id}: ${blockedOutput.reason}`,
+        {
+          ...facts,
+          output,
+          // محتوى حُجب لكونه خطراً لا يعود نصاً إلى السجل ولو ادعى المنادي أنه عام.
+          outputClassification: 'sensitive',
+          safetyRule: blockedOutput.id,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          cost,
+        },
+      );
+    }
+
+    this.log.append('inference.completed', actorId, {
+      purpose,
+      modelId: model.id,
+      policyId: decision.policyId,
+      attemptsInWindow: attempts,
+      usage: { inputTokens, outputTokens, totalTokens, cost },
+      input: this.#auditText(input, inputClassification),
+      output: this.#auditText(output, outputClassification),
+    });
+    return {
+      modelId: model.id,
+      purpose,
+      output,
+      usage: { inputTokens, outputTokens, totalTokens, cost },
+      policyId: decision.policyId,
+    };
+  }
+}
+
+/** @param {ConstructorParameters<typeof InferenceGate>[0]} deps @returns {InferenceGate} */
+export function createInferenceGate(deps) {
+  return new InferenceGate(deps);
+}

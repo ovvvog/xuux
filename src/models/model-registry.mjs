@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { MODEL_SPEC } from '../persistence/entities.mjs';
+import { ModelEvaluationError, ModelEvaluationLedger } from './evaluation.mjs';
 
 /**
  * سجل النماذج — صار **دائماً** في الخطوة `M3.05`.
@@ -92,7 +93,7 @@ export class ModelRegistry {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MODEL_REGISTRY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: ModelRepository, maxModels?: number, transaction?: import('../persistence/composition.mjs').StateTransaction | null, weightStore?: import('./weight-store.mjs').WeightStore | null, quarantine?: { report: (signal: object) => unknown } | null }} [deps]
+   * @param {{ log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: ModelRepository, maxModels?: number, transaction?: import('../persistence/composition.mjs').StateTransaction | null, weightStore?: import('./weight-store.mjs').WeightStore | null, evaluationLedger?: import('./evaluation.mjs').ModelEvaluationLedger | null, quarantine?: { report: (signal: object) => unknown } | null }} [deps]
    */
   constructor({
     log,
@@ -100,6 +101,7 @@ export class ModelRegistry {
     maxModels = 10000,
     transaction = null,
     weightStore = null,
+    evaluationLedger = null,
     quarantine = null,
   } = {}) {
     if (!log || !repository) throw new Error('MODEL_REGISTRY_DEPENDENCY_MISSING');
@@ -110,6 +112,13 @@ export class ModelRegistry {
      * @type {import('./weight-store.mjs').WeightStore | null}
      */
     this.weightStore = weightStore;
+    /**
+     * سجل التقييم شرط تنشيط لا تحسين اختياري. يُنشأ سجل ذاكرة عند عدم حقنه،
+     * فتظل النتيجة المفقودة رفضاً صريحاً ولا يصبح تركيبٌ ناقص طريقاً جانبياً.
+     * تمرّر طبقة التشغيل سجلاً دائماً حين تحتاج النتيجة إلى عبور إعادة التشغيل.
+     * @type {import('./evaluation.mjs').ModelEvaluationLedger}
+     */
+    this.evaluationLedger = evaluationLedger ?? new ModelEvaluationLedger({ log });
     /** @type {{ report: (signal: object) => unknown } | null} */
     this.quarantine = quarantine;
     /** @type {ModelRepository} */
@@ -241,11 +250,7 @@ export class ModelRegistry {
    * @returns {Promise<ModelRecord>}
    */
   async #activate(id) {
-    const row = await this.repository.findById(id);
-    if (row === null) throw new Error('MODEL_NOT_APPROVED');
-    const model = toModel(row);
-    if (model.state !== ModelState.APPROVED) throw new Error('MODEL_NOT_APPROVED');
-    this.#verifyFingerprintOrRefuse(model);
+    const model = await this.assertActivatable(id);
     const previous = await this.getActive(model.purpose);
     if (previous !== null && previous.id === id) return model;
     if (previous !== null) {
@@ -284,12 +289,63 @@ export class ModelRegistry {
   }
 
   /**
+   * يتحقق من كل بوابات التفعيل بلا كتابة. يستعمله التراجع قبل إرجاع الحالي، ثم
+   * يعيد `activate` الفحص نفسه عند لحظة الكتابة فلا تتحول المعاينة إلى تصريح.
+   * @param {string} id
+   * @returns {Promise<ModelRecord>}
+   */
+  async assertActivatable(id) {
+    const row = await this.repository.findById(id);
+    if (row === null) throw new Error('MODEL_NOT_APPROVED');
+    const model = toModel(row);
+    if (model.state !== ModelState.APPROVED) throw new Error('MODEL_NOT_APPROVED');
+    this.#verifyFingerprintOrRefuse(model);
+    this.#verifyEvaluationOrRefuse(model);
+    return model;
+  }
+
+  /**
+   * النماذج المسجلة لغرض واحد، مرتبة كما يعيدها المستودع. يستعمله التراجع لاختيار
+   * المعتمد السابق؛ لا يُعرض مخزن المستودع نفسه كي لا يُكتب حول بوابات السجل.
+   * @param {string} purpose
+   * @returns {Promise<ModelRecord[]>}
+   */
+  async listByPurpose(purpose) {
+    const rows = await this.repository.list({ filter: { purpose } });
+    return rows.map((row) => toModel(row));
+  }
+
+  /**
    * @param {string} id
    * @returns {Promise<ModelRecord | null>}
    */
   async get(id) {
     const row = await this.repository.findById(id);
     return row === null ? null : toModel(row);
+  }
+
+  /**
+   * يفرض نتيجة تقييم ناجحة مرتبطة ببصمة الأوزان ذاتها. التقييم مفقود وفاشل هما
+   * قراران مختلفان تشغيلياً، ولذلك يحمل كل منهما رمزاً مستقلاً ويُسجّل كلاهما.
+   * @param {ModelRecord} model
+   * @returns {void}
+   */
+  #verifyEvaluationOrRefuse(model) {
+    const result = this.evaluationLedger.latestFor(model.id, model.fingerprint);
+    if (result?.state === this.evaluationLedger.catalog.passedState) return;
+    const code = result === null ? 'MODEL_EVALUATION_MISSING' : 'MODEL_EVALUATION_FAILED';
+    const reason =
+      code === 'MODEL_EVALUATION_MISSING'
+        ? 'لا توجد نتيجة تقييم لهذه البصمة؛ اعتمادٌ بلا دليل لا يسمح بتنشيط النموذج.'
+        : 'نتيجة التقييم لهذه البصمة فاشلة؛ لا تعوّضها حالة اعتماد يدوية.';
+    this.log.append('model.activation-refused', 'crown', {
+      id: model.id,
+      fingerprint: model.fingerprint,
+      code,
+      evaluationState: result?.state ?? null,
+      reason,
+    });
+    throw new ModelEvaluationError(code, reason);
   }
 
   /**

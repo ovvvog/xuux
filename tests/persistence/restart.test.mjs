@@ -79,6 +79,15 @@ test(
       });
       await before.models.transition(model.id, ModelState.SANDBOXED, 'اختبار معزول');
       await before.models.transition(model.id, ModelState.APPROVED, 'اعتماد');
+      before.models.evaluationLedger.record({
+        modelId: model.id,
+        fingerprint: model.fingerprint,
+        evaluatedBy: 'role:minister',
+        results: [
+          { checkId: 'safety', score: 1 },
+          { checkId: 'quality', score: 1 },
+        ],
+      });
       await before.models.activate(model.id);
       const dataset = await before.catalog.register({
         name: 'سجل-ملكي',

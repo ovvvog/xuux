@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
-import { ModelRegistry, ModelState, ModelSandbox } from '../../src/models/index.mjs';
+import {
+  ModelEvaluationLedger,
+  ModelRegistry,
+  ModelState,
+  ModelSandbox,
+} from '../../src/models/index.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { createWeightStore } from '../../src/models/weight-store.mjs';
 import fs from 'node:fs';
@@ -23,6 +28,7 @@ function registry(log = new EventLog()) {
     log,
     repository: createMemoryRepository(ModelRegistry.spec),
     weightStore: temporaryWeightStore(),
+    evaluationLedger: new ModelEvaluationLedger({ log }),
   });
 }
 
@@ -83,6 +89,15 @@ test('requires approval before activation and supports sandbox', async () => {
   const approved = await r.transition(m.id, ModelState.APPROVED, 'passed');
   // الاعتماد لا يُعلن بلا معتمِد مسمّى، والسلطة المعلنة اليوم هي التاج.
   assert.equal(approved.approvedBy, 'crown');
+  r.evaluationLedger.record({
+    modelId: m.id,
+    fingerprint: m.fingerprint,
+    evaluatedBy: 'role:minister',
+    results: [
+      { checkId: 'safety', score: 1 },
+      { checkId: 'quality', score: 1 },
+    ],
+  });
   const active = await r.activate(m.id);
   assert.equal(active.id, m.id);
   assert.equal(active.isActive, true);
