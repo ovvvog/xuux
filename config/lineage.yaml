@@ -1,0 +1,72 @@
+# سياسة نسب البيانات — الخطوة M7.04.
+#
+# العيب الذي أغلقته هذه السياسة: كان في `state.data_assets` عمودٌ اسمه `lineage`
+# من نوع `jsonb` يقبل **أي** مصفوفة يُعلنها من يسجّل الأصل: `['command']` أو
+# `[{ from: 'seed' }]` أو `[]`. أي أن «النسب» كان **ادّعاءً في الطلب** يكتبه نفس
+# من قد يريد إخفاء مصدره — وهو بعينه نمطُ العيب الذي أُغلق في M7.01 (الاعتماد
+# حقلٌ في الطلب) وفي M7.02 (التخليص قيمةٌ في الطلب). ولم يكن هناك **استعلام نسب**
+# أصلاً: لا سبيل إلى «من حوّل هذا الأصل ومن قرأه».
+#
+# فصار النسب **صفوفاً تكتبها المسارات نفسها** في `state.data_lineage`، مسلسلةً
+# بسلسلة تجزئة لكل أصل، ولا واجهةَ تعديلٍ ولا حذفٍ لها.
+version: 1
+owner: crown
+
+# الأنواع معلَنة بياناً: نوعٌ غير معلَن يُرفض عند التسجيل ولا يُكتب صفّاً بنوعٍ
+# لا يعرفه أحد. و`requiresParents` هو الفرق بين أصلٍ له مصدرٌ خارجي وأصلٍ اشتُقّ
+# من أصولٍ مفهرسة.
+kinds:
+  - id: origin
+    requiresParents: false
+    describes: التسجيل الأول لأصل ومصدرُه الخارجي كما أُعلن في عقد التسجيل
+  - id: derivation
+    requiresParents: true
+    describes: اشتقاقٌ من أصولٍ قائمة، ولا يُقبل إلا بمعرّفات أصولٍ مفهرسة
+  - id: read
+    requiresParents: false
+    describes: قراءةٌ أُذن بها في بوابة الوصول، بفاعلها وغرضها
+  - id: write
+    requiresParents: false
+    describes: كتابةٌ أُذن بها في بوابة الوصول، بفاعلها وغرضها
+
+rules:
+  # اشتقاقٌ لا ينزل بالتصنيف: أصلٌ مشتقٌّ من «سيادي» لا يكون «داخلياً»، وإلا صار
+  # التحويل غسلاً للتصنيف يتجاوز اعتماد التخفيض في M7.01.
+  requireMonotonicClassification: true
+  # دورةٌ في النسب تجعل «سلسلة كاملة» غير منتهية، وتجعل الأصل مصدرَ نفسه.
+  refuseCycles: true
+  # حدٌّ معلَن للعمق: تجاوزُه يُرفض ولا يُعاد أثرٌ منقوص بوصفه كاملاً.
+  maxDepth: 64
+  # القيد يُكتب **قبل** الأثر: تسجيلٌ بعد الأثر يفقد كل قراءةٍ سقطت العملية بعدها،
+  # والاتجاه المقبول هو قيدٌ زائد لا قراءةٌ غير مقيَّدة.
+  recordBeforeEffect: true
+
+chain:
+  hash: sha256
+  perAsset: true
+
+# كل مسارٍ معلَن هنا **يجب** أن يستدعي التسجيل فعلاً؛ يفحصه
+# `scripts/guard-lineage.mjs` على النصّ لا على النية.
+recorders:
+  - module: src/data/data-catalog.mjs
+    kinds:
+      - origin
+      - derivation
+  - module: src/data/access-gate.mjs
+    kinds:
+      - read
+      - write
+
+store:
+  table: state.data_lineage
+  dbConstraints:
+    - data_lineage_kind_known
+    - data_lineage_origin_without_parents
+    - data_lineage_derivation_with_parents
+    - data_lineage_chain_linked
+
+# عمودُ الادّعاء المُلغى: الحاجز يفشل إن عاد إلى المخطَّط أو إلى مواصفة السجل،
+# فالحقيقةُ في موضعين تنحرف — وهذا الموضع الثاني كان يقبل ادّعاءً بلا تحقّق.
+retiredClaimColumn:
+  table: state.data_assets
+  column: lineage

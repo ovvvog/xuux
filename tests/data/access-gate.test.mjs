@@ -30,6 +30,7 @@ import { createMemoryRepository } from '../../src/persistence/repository-memory.
 import { QuarantineWarden } from '../../src/governance/quarantine.mjs';
 import { IncidentRegister } from '../../src/identity/incident-register.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
+import { createTestLedger } from '../helpers/lineage.mjs';
 
 const bundle = loadPolicyBundle();
 const lattice = loadClassificationLattice();
@@ -54,20 +55,28 @@ function memoryLog() {
 }
 
 /**
- * @param {{ withEnforcement?: boolean, withQuarantine?: boolean }} [options]
+ * @param {{ withEnforcement?: boolean, withQuarantine?: boolean, withLineage?: boolean }} [options]
  */
-function setup({ withEnforcement = true, withQuarantine = true } = {}) {
+function setup({ withEnforcement = true, withQuarantine = true, withLineage = true } = {}) {
   const log = memoryLog();
   const enforcementPoint = new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
   });
+  const assets = createMemoryRepository(DataCatalog.spec);
+  // دفتر النسب شرط تركيبٍ للفهرس وللبوابة معاً بعد `M7.04`.
+  const { ledger, repository: lineageRepository } = createTestLedger({
+    log: /** @type {never} */ (log),
+    assets,
+    lattice,
+  });
   const catalog = new DataCatalog({
     log: /** @type {never} */ (log),
-    repository: createMemoryRepository(DataCatalog.spec),
+    repository: assets,
     lattice,
     approvals: null,
     enforcementPoint,
+    lineage: withLineage ? ledger : null,
   });
   const warden = new QuarantineWarden({
     incidents: new IncidentRegister({}),
@@ -79,8 +88,9 @@ function setup({ withEnforcement = true, withQuarantine = true } = {}) {
     lattice,
     enforcementPoint: withEnforcement ? enforcementPoint : null,
     quarantine: withQuarantine ? warden : null,
+    lineage: withLineage ? ledger : null,
   });
-  return { log, catalog, gate, warden, enforcementPoint };
+  return { log, catalog, gate, warden, enforcementPoint, ledger, lineageRepository };
 }
 
 /**

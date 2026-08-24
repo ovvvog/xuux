@@ -34,6 +34,7 @@ import { createMemoryRepository } from '../../src/persistence/repository-memory.
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
+import { createTestLedger } from '../helpers/lineage.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const lattice = loadClassificationLattice();
@@ -65,13 +66,22 @@ async function rejectsWithCode(fn, code) {
 function memorySetup({ withEncryptor = true } = {}) {
   const log = new EventLog();
   const enforcementPoint = enforcementPointFor(log);
+  const assets = createMemoryRepository(DataCatalog.spec);
+  const { ledger } = createTestLedger({ log, assets, lattice });
   const catalog = new DataCatalog({
     log,
-    repository: createMemoryRepository(DataCatalog.spec),
+    repository: assets,
     lattice,
     enforcementPoint,
+    lineage: ledger,
   });
-  const accessGate = new DataAccessGate({ log, catalog, lattice, enforcementPoint });
+  const accessGate = new DataAccessGate({
+    log,
+    catalog,
+    lattice,
+    enforcementPoint,
+    lineage: ledger,
+  });
   const repository = createMemoryRepository(AgentMemoryStore.spec);
   const memory = new AgentMemoryStore({
     catalog,

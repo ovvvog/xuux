@@ -13,6 +13,7 @@ import { createTestEncryptor } from '../helpers/encryption.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
+import { createTestLedger } from '../helpers/lineage.mjs';
 
 const lattice = loadClassificationLattice();
 const bundle = loadPolicyBundle();
@@ -42,14 +43,24 @@ function setup(limits = {}) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
   });
+  const assets = createMemoryRepository(DataCatalog.spec);
+  const { ledger } = createTestLedger({ log, assets, lattice });
   const catalog = new DataCatalog({
     log,
-    repository: createMemoryRepository(DataCatalog.spec),
+    repository: assets,
     lattice,
     enforcementPoint,
+    lineage: ledger,
   });
-  // البوابة تُركَّب هنا كما تُركَّب في الإنتاج: مخزنٌ بلا بوابة يرفض كل استدعاء.
-  const accessGate = new DataAccessGate({ log, catalog, lattice, enforcementPoint });
+  // البوابة تُركَّب هنا كما تُركَّب في الإنتاج: مخزنٌ بلا بوابة يرفض كل استدعاء،
+  // وبلا دفتر نسبٍ كذلك (`M7.04`).
+  const accessGate = new DataAccessGate({
+    log,
+    catalog,
+    lattice,
+    enforcementPoint,
+    lineage: ledger,
+  });
   const memory = new AgentMemoryStore({
     catalog,
     log,
@@ -60,18 +71,21 @@ function setup(limits = {}) {
     encryptor: fixture.encryptor,
     ...limits,
   });
-  return { log, catalog, memory, accessGate };
+  return { log, catalog, memory, accessGate, ledger };
 }
 
-test('catalog registers lineage classification and quality', async () => {
-  const { catalog } = setup();
+test('catalog registers classification and quality with an origin lineage row', async () => {
+  const { catalog, ledger } = setup();
   const d = await catalog.register({
     name: 'royal-record',
     owner: 'crown',
     classification: Classification.SOVEREIGN,
     source: 'crown',
-    lineage: ['command'],
   });
+  // النسب لم يبقَ حقلاً في الطلب (`M7.04`): كل أصلٍ يُسجَّل يُكتب له قيد `origin`.
+  const traced = await ledger.trace(d.id);
+  assert.equal(traced.origins.length, 1);
+  assert.equal(traced.origins[0]?.actorId, 'crown');
   assert.equal(d.quality, 'unverified');
   // قرار الإتاحة انتقل إلى بوابة الوصول (`M7.02`) واختباره في
   // `tests/data/access-gate.test.mjs`؛ والمقيس هنا أن الفهرس لم يُبقِ منه مساراً.

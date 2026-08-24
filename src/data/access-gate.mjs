@@ -29,6 +29,17 @@
  * `clearance-denied` — فمحاولاتُ وصولٍ متكرّرة بلا تخليص تُفتح بها حادثة حجر بدل
  * أن تبقى أسطراً في سجل.
  *
+ * **وأُضيف في `M7.04`** قيدُ نسبٍ لكل وصول: كلُّ قراءةٍ وكل كتابةٍ تُكتب في دفتر
+ * النسب **قبل الأثر** لا بعده. والترتيب هنا هو المسألة كلها: من سجّل بعد الأثر
+ * فقد ما وقع ثم أخفق التسجيل — أي قراءةٌ حصلت ولا يعلم بها أحد. فالدفتر يُكتب
+ * أوّلاً، ونتيجتُه أن قيداً قد يُكتب لأثرٍ أخفق بعده (نُسجّل زائداً لا ناقصاً)،
+ * وهذا حدٌّ معلن مقصود: سؤالُ النسب هو «من **حاول** أن يقرأ ومن قرأ» لا «من نجح
+ * وحده».
+ *
+ * ودفتر النسب شرطُ **تركيب** كنقطة التفويض: بوابةٌ بلا دفتر ترفض كل وصول برمز
+ * `DATA_ACCESS_LINEAGE_REQUIRED`، لأن تركَه كان سيصير أسهلَ طريقٍ إلى قراءةٍ لا
+ * أثرَ نسبٍ لها.
+ *
  * **حدٌّ معلن:** هذه البوابة تحكم أصول `state.data_assets` وذاكرةَ الوكلاء
  * الموصولة بها. وحدودُ حجم الذاكرة وعزلُها بين الوكلاء عملُ الخطوة `M7.05` لا
  * هذه الخطوة، وتشفيرُ المادّة نفسها عملُ `M7.03`.
@@ -59,6 +70,7 @@ export const ACCESS_ERRORS = Object.freeze({
   NOT_AUTHORIZED: 'DATA_ACCESS_NOT_AUTHORIZED',
   TICKET_INVALID: 'DATA_ACCESS_TICKET_INVALID',
   EFFECT_REQUIRED: 'DATA_ACCESS_EFFECT_REQUIRED',
+  LINEAGE_REQUIRED: 'DATA_ACCESS_LINEAGE_REQUIRED',
 });
 
 /** خطأ وصولٍ مُسمّى: الرمز للأتمتة، والنص للقارئ، والتفصيل للتدقيق. */
@@ -80,9 +92,16 @@ export class DataAccessError extends Error {
 
 export class DataAccessGate {
   /**
-   * @param {{ log?: AccessEventLog, catalog?: { get: (id: string) => Promise<{ id: string, owner: string, classification: AccessTier } | null> }, lattice?: AccessLattice, enforcementPoint?: EnforcementPoint | null, quarantine?: { report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null }} [deps]
+   * @param {{ log?: AccessEventLog, catalog?: { get: (id: string) => Promise<{ id: string, owner: string, classification: AccessTier } | null> }, lattice?: AccessLattice, enforcementPoint?: EnforcementPoint | null, quarantine?: { report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, lineage?: import('./lineage.mjs').LineageLedger | null }} [deps]
    */
-  constructor({ log, catalog, lattice, enforcementPoint = null, quarantine = null } = {}) {
+  constructor({
+    log,
+    catalog,
+    lattice,
+    enforcementPoint = null,
+    quarantine = null,
+    lineage = null,
+  } = {}) {
     if (!log || !catalog || !lattice) throw new Error('DATA_ACCESS_DEPENDENCY_MISSING');
     this.log = log;
     this.catalog = catalog;
@@ -96,6 +115,12 @@ export class DataAccessGate {
      * @type {{ report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null}
      */
     this.quarantine = quarantine;
+    /**
+     * دفتر النسب — شرط تركيب (‏`M7.04`). غيابُه رفضٌ لكل قراءةٍ وكتابة، لا وصولٌ
+     * بلا قيد نسب.
+     * @type {import('./lineage.mjs').LineageLedger | null}
+     */
+    this.lineage = lineage;
   }
 
   /**
@@ -227,6 +252,12 @@ export class DataAccessGate {
         'بوابة الوصول بلا نقطة تفويض لا تُنفّذ قراءةً ولا كتابة؛ الغياب رفضٌ لا تجاوز.',
       );
     }
+    if (this.lineage === null) {
+      refuse(
+        ACCESS_ERRORS.LINEAGE_REQUIRED,
+        'بوابة الوصول بلا دفتر نسب لا تُنفّذ قراءةً ولا كتابة: وصولٌ لا يُكتب في النسب يجعل سؤال «من قرأ هذا الأصل» بلا جواب، فالغياب رفضٌ لا تجاوز.',
+      );
+    }
 
     const asset = await this.catalog.get(assetId);
     if (asset === null) {
@@ -292,6 +323,26 @@ export class DataAccessGate {
       refuse(
         ACCESS_ERRORS.TICKET_INVALID,
         `تذكرة القرار غير مقبولة: ${error instanceof Error ? error.message : String(error)}`,
+        { classification, clearance },
+      );
+    }
+
+    // **قبل الأثر**: القيد يُكتب أوّلاً كما تنصّ قاعدةُ `recordBeforeEffect` في
+    // `config/lineage.yaml`. وإخفاقُ الكتابة في الدفتر يمنع الأثر — لأن السماح
+    // عند إخفاق التسجيل هو بعينه القراءة التي لا يعلم بها أحد.
+    const ledger = /** @type {import('./lineage.mjs').LineageLedger} */ (this.lineage);
+    try {
+      await ledger.record({
+        assetId,
+        kind: mode === 'read' ? 'read' : 'write',
+        actorId: actor.id,
+        purpose,
+        asset: /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (asset)),
+      });
+    } catch (error) {
+      refuse(
+        ACCESS_ERRORS.LINEAGE_REQUIRED,
+        `تعذّر كتابة قيد النسب فمُنع الأثر: ${error instanceof Error ? error.message : String(error)}`,
         { classification, clearance },
       );
     }

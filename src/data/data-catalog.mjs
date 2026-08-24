@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DATA_ASSET_SPEC } from '../persistence/entities.mjs';
 import { Classification, loadClassificationLattice } from './classification.mjs';
+import { LINEAGE_ERRORS, LineageError } from './lineage.mjs';
 
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
 /** @typedef {import('./classification.mjs').ClassificationLattice} Lattice */
@@ -40,7 +41,6 @@ import { Classification, loadClassificationLattice } from './classification.mjs'
  * @property {string} owner - الجهة المسؤولة، تُنسب إليها كل أحداث السجل
  * @property {TierValue} classification
  * @property {string} source - أصل البيانات، شرط تسجيل لا حقل وصفي
- * @property {unknown[]} lineage - سلسلة الاشتقاق كما أعلنها المالك
  * @property {number} retentionDays - مدة الاحتفاظ؛ 0 تعني بلا حد معلَن
  * @property {QualityValue} quality
  * @property {boolean} legalHold - حفظٌ قانوني يمنع المحو ولو انتهى الاحتفاظ
@@ -108,18 +108,26 @@ export class ReclassifyError extends Error {
  * @returns {DataRecord}
  */
 function toRecord(row) {
-  return /** @type {DataRecord} */ (
-    /** @type {unknown} */ (Object.freeze({ ...row, lineage: row['lineage'] ?? [] }))
-  );
+  // لا حقل `lineage` في السجل المُعاد بعد `M7.04`: كان يُقرأ من عمود الادّعاء
+  // فيُصدَّق كأنه نسب. النسب يُقرأ الآن بـ`LineageLedger.trace(id)` وحدها.
+  return /** @type {DataRecord} */ (/** @type {unknown} */ (Object.freeze({ ...row })));
 }
 
 export class DataCatalog {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `DATA_CATALOG_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ log?: EventLog, repository?: DataRepository, lattice?: Lattice, approvals?: ApprovalRegistry | null, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint | null, now?: () => Date }} [deps]
+   * @param {{ log?: EventLog, repository?: DataRepository, lattice?: Lattice, approvals?: ApprovalRegistry | null, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint | null, lineage?: import('./lineage.mjs').LineageLedger | null, now?: () => Date }} [deps]
    */
-  constructor({ log, repository, lattice, approvals = null, enforcementPoint = null, now } = {}) {
+  constructor({
+    log,
+    repository,
+    lattice,
+    approvals = null,
+    enforcementPoint = null,
+    lineage = null,
+    now,
+  } = {}) {
     if (!log || !repository) throw new Error('DATA_CATALOG_DEPENDENCY_MISSING');
     this.log = log;
     /** @type {DataRepository} */
@@ -134,6 +142,12 @@ export class DataCatalog {
      */
     this.approvals = approvals;
     this.enforcementPoint = enforcementPoint;
+    /**
+     * دفتر النسب — شرط تركيبٍ للتسجيل (‏`M7.04`). غيابُه يُقرأ **رفضاً** في
+     * `register`، لا تسجيلاً بلا نسب.
+     * @type {import('./lineage.mjs').LineageLedger | null}
+     */
+    this.lineage = lineage;
     this.now = now ?? (() => new Date());
   }
 
@@ -146,29 +160,61 @@ export class DataCatalog {
    * يسجّل مجموعة بيانات جديدة. الاسم والمالك والمصدر شروط تسجيل: بيانات بلا
    * مالك معلَن ولا مصدر معلَن لا يجوز أن تدخل الفهرس. والاسم **فريد** في
    * القاعدة، فمن سجّل اسماً مكرّراً أخذ `REPOSITORY_DUPLICATE_UNIQUE`.
+   *
+   * وفي `M7.04` زال `lineage` من العقد: كان مصفوفةً حرّة يكتبها المُسجّل نفسه
+   * (`['command']`، `[{ from: 'seed' }]`) فتُقرأ لاحقاً كأنها نسب محقَّق. صار
+   * موضعُه `derivedFrom`: **معرّفات أصولٍ مفهرسة** يتحقّق منها دفتر النسب واحداً
+   * واحداً، ويرفض السلف المجهول، ويرفض الدورة، ويرفض اشتقاقاً ينزل بالتصنيف.
+   * ومن مرّر `lineage` أخذ رفضاً مُسمّى لا تجاهلاً صامتاً — لأن تجاهل حقلٍ يظنّ
+   * مُمرِّره أنه يُحفظ أسوأ من رفضه.
    * @param {object} contract
    * @param {string} contract.name
    * @param {string} contract.owner
    * @param {TierValue} [contract.classification=Classification.INTERNAL]
    * @param {string} contract.source
-   * @param {unknown[]} [contract.lineage=[]]
+   * @param {string[]} [contract.derivedFrom=[]] أسلاف الأصل: معرّفات أصولٍ قائمة
+   *   في الفهرس. مصفوفةٌ فارغة تعني أصلاً أوّلَ مصدرُه `source`.
+   * @param {string} [contract.purpose] غرضُ التسجيل، يُكتب في قيد النسب
    * @param {number} [contract.retentionDays=0]
    * @param {boolean} [contract.legalHold=false]
    * @returns {Promise<DataRecord>}
    */
-  async register({
-    name,
-    owner,
-    classification = Classification.INTERNAL,
-    source,
-    lineage = [],
-    retentionDays = 0,
-    legalHold = false,
-  }) {
+  async register(contract) {
+    if (Object.hasOwn(contract ?? {}, 'lineage')) {
+      throw new LineageError(
+        LINEAGE_ERRORS.CLAIM_REFUSED,
+        'الحقل `lineage` أُلغي في `M7.04`: كان نسباً يُدّعى في الطلب بلا تحقّق. مرّر `derivedFrom` بمعرّفات أصولٍ مفهرسة، أو لا تمرّر شيئاً إن كان الأصل أوّلاً.',
+      );
+    }
+    const {
+      name,
+      owner,
+      classification = Classification.INTERNAL,
+      source,
+      derivedFrom = [],
+      purpose,
+      retentionDays = 0,
+      legalHold = false,
+    } = contract ?? {};
     if (!name || !owner || !source) throw new Error('DATA_CONTRACT_REQUIRED');
     if (this.lattice.normalize(classification) !== classification) {
       throw new Error('INVALID_CLASSIFICATION');
     }
+    if (!Array.isArray(derivedFrom)) {
+      throw new LineageError(
+        LINEAGE_ERRORS.INPUT_INVALID,
+        '`derivedFrom` مصفوفة معرّفات أصولٍ مفهرسة.',
+      );
+    }
+    // الدفتر شرط **تركيب** لا حقل طلب: فهرسٌ يسجّل أصولاً بلا دفتر نسب يُنتج
+    // أصولاً لا جواب لسؤال «من أين جاءت» — وهو بعينه ما تُغلقه هذه الخطوة.
+    if (this.lineage === null) {
+      throw new LineageError(
+        LINEAGE_ERRORS.DEPENDENCY_MISSING,
+        'التسجيل يشترط دفتر نسبٍ مركّباً؛ فهرسٌ بلا دفتر يرفض التسجيل ولا يقبل أصلاً بلا مصدرٍ مقيَّد.',
+      );
+    }
+    const parents = derivedFrom.map((parent) => String(parent));
     const id = 'data:' + randomUUID();
     const row = await this.repository.insert({
       id,
@@ -176,12 +222,30 @@ export class DataCatalog {
       owner,
       classification,
       source,
-      lineage: [...lineage],
       retentionDays,
       quality: 'unverified',
       legalHold,
     });
-    this.log.append('data.registered', owner, { id, name, classification });
+    // **حدٌّ معلن:** قيد النسب يُكتب **بعد** صفّ الأصل، لأن مرجع القاعدة يشترط
+    // وجود الأصل. فإن أخفق التحقّق من سلفٍ (سلفٌ مجهول، أو دورة، أو اشتقاقٌ ينزل
+    // بالتصنيف) بقي صفُّ الأصل مكتوباً بلا نسب، ويُرفع الخطأ كما هو. ولا يُبتلع:
+    // الأصل الذي بلا قيد أصلٍ يكشفه `scripts/guard-lineage.mjs` وتكشفه
+    // `LineageLedger.verify()`. والذرّية تحتاج مُشغّل معاملة، وهي متاحة في
+    // `createPostgresRegistries` ومن ركّب على الذاكرة لا يملكها — والفرق معلَن.
+    await this.lineage.record({
+      assetId: id,
+      kind: parents.length === 0 ? 'origin' : 'derivation',
+      actorId: owner,
+      parents,
+      purpose: typeof purpose === 'string' && purpose.trim() !== '' ? purpose.trim() : 'register',
+      asset: row,
+    });
+    this.log.append('data.registered', owner, {
+      id,
+      name,
+      classification,
+      derivedFrom: [...parents],
+    });
     return toRecord(row);
   }
 

@@ -185,6 +185,8 @@ export class AgentMemoryStore {
       classification,
       source,
       retentionDays: 30,
+      // غرضُ قيد النسب (‏`M7.04`): عقدُ بياناتٍ وُلد لذاكرة وكيل، لا أصلٌ سُجّل بيدٍ.
+      purpose: 'memory',
     });
     // صورةٌ من المحتوى وقت التسليم لا مرجعٌ إليه: الذاكرة تُقيّد ما سُلِّم حين سُلِّم.
     const material = snapshot(content);

@@ -26,6 +26,7 @@ import {
   AGENT_SPEC,
   CLASSIFICATION_APPROVAL_SPEC,
   DATA_ASSET_SPEC,
+  DATA_LINEAGE_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -48,6 +49,7 @@ export function createClientRepositories(client) {
       memories: createPostgresRepository(client, MEMORY_SPEC),
       laws: createPostgresRepository(client, LAW_SPEC),
       classificationApprovals: createPostgresRepository(client, CLASSIFICATION_APPROVAL_SPEC),
+      dataLineage: createPostgresRepository(client, DATA_LINEAGE_SPEC),
     })
   );
 }

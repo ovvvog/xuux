@@ -102,7 +102,6 @@ test(
         owner: 'crown',
         classification: 'sovereign',
         source: 'crown',
-        lineage: [{ from: 'command' }],
         retentionDays: 3650,
       });
       await before.catalog.markQuality(dataset.id, 'verified');
@@ -163,7 +162,17 @@ test(
       assert.ok(recoveredDataset, 'عقد البيانات لم يعد');
       assert.equal(recoveredDataset.classification, 'sovereign');
       assert.equal(recoveredDataset.quality, 'verified');
-      assert.deepEqual(recoveredDataset.lineage, [{ from: 'command' }]);
+      // النسب لم يعد حقلاً في السجل (`M7.04`) بل صفوفاً في `state.data_lineage`:
+      // فالمقيس أن **السلسلة** نجت من إعادة التشغيل وأن تجزئتها ما زالت متّصلة —
+      // نسبٌ يُنسى بإعادة التشغيل لا يُجيب عن «من أين جاء هذا الأصل» بعد أول إقلاع.
+      const tracedAfter = await after.lineage.trace(dataset.id);
+      assert.equal(tracedAfter.origins.length, 1, 'قيد الأصل لم ينجُ من إعادة التشغيل');
+      assert.equal(tracedAfter.origins[0]?.actorId, 'crown');
+      assert.ok(
+        tracedAfter.reads.length >= 1,
+        'قراءةٌ وقعت قبل إعادة التشغيل ولم يبقَ لها قيد نسب',
+      );
+      assert.equal((await after.lineage.verify()).ok, true, 'سلسلة النسب انكسرت بعد الإقلاع');
       // التصنيف نجا من إعادة التشغيل ⇒ بوابة الوصول ترفض قراءته بتخليصٍ أدنى.
       // القرار صار في البوابة لا في الفهرس (`M7.02`)، والمقيس أن **البيانات**
       // المستعادة هي ما يبني الرفض.

@@ -16,6 +16,7 @@ import { loadClassificationLattice } from '../data/classification.mjs';
 import { DataAccessGate } from '../data/access-gate.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
+import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
@@ -26,6 +27,7 @@ import {
   AGENT_SPEC,
   CLASSIFICATION_APPROVAL_SPEC,
   DATA_ASSET_SPEC,
+  DATA_LINEAGE_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -44,6 +46,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} memories
  * @property {ReturnType<typeof createMemoryRepository>} laws
  * @property {ReturnType<typeof createMemoryRepository>} classificationApprovals
+ * @property {ReturnType<typeof createMemoryRepository>} dataLineage
  */
 
 /**
@@ -62,6 +65,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {AgentMemoryStore} memory
  * @property {LawRegistry} laws
  * @property {ClassificationApprovalRegistry} approvals
+ * @property {LineageLedger} lineage
  */
 
 /**
@@ -77,6 +81,7 @@ export function createMemoryRepositories(options = {}) {
     memories: createMemoryRepository(MEMORY_SPEC, options),
     laws: createMemoryRepository(LAW_SPEC, options),
     classificationApprovals: createMemoryRepository(CLASSIFICATION_APPROVAL_SPEC, options),
+    dataLineage: createMemoryRepository(DATA_LINEAGE_SPEC, options),
   };
 }
 
@@ -94,6 +99,7 @@ export function createPostgresRepositories(pool) {
       memories: createPostgresRepository(pool, MEMORY_SPEC),
       laws: createPostgresRepository(pool, LAW_SPEC),
       classificationApprovals: createPostgresRepository(pool, CLASSIFICATION_APPROVAL_SPEC),
+      dataLineage: createPostgresRepository(pool, DATA_LINEAGE_SPEC),
     })
   );
 }
@@ -148,12 +154,26 @@ export function createRegistries({
     repository: repositories.classificationApprovals,
     lattice: classificationLattice,
   });
+  // دفتر النسب يُركَّب **دائماً** (الخطوة `M7.04`): لو كان اختيارياً لصار تركُه
+  // مساراً لتسجيل أصولٍ بلا مصدرٍ مقيَّد وقراءةٍ بلا أثر نسب — وهو ما أغلقته الخطوة.
+  //
+  // وقارئُ الأصول هنا هو **المستودع** لا الفهرس: الدفتر يحتاج أن يقرأ تصنيف الأصل
+  // وأسلافه، والفهرسُ يحتاج الدفتر ليسجّل. تمريرُ الفهرس إلى الدفتر كان سيصنع
+  // اعتماداً دائرياً يُحلّ بتعيينٍ بعد الإنشاء — وحالةٌ تُركَّب على مرحلتين تُنسى
+  // مرحلتها الثانية في تركيبٍ آخر. فالدفتر يقرأ المستودع مباشرة، وهو نفسه المصدر.
+  const lineage = new LineageLedger({
+    log,
+    repository: repositories.dataLineage,
+    catalog: { get: (id) => repositories.dataAssets.findById(id) },
+    lattice: classificationLattice,
+  });
   const catalog = new DataCatalog({
     log,
     repository: repositories.dataAssets,
     lattice: classificationLattice,
     approvals,
     enforcementPoint,
+    lineage,
   });
   // بوابة الوصول تُركَّب **دائماً** (الخطوة `M7.02`): لو كانت اختيارية لصار تركُها
   // مساراً لقراءةٍ بلا قرار — وهو بالضبط ما أغلقته هذه الخطوة. وهي بلا نقطة تفويض
@@ -164,6 +184,7 @@ export function createRegistries({
     lattice: classificationLattice,
     enforcementPoint,
     quarantine,
+    lineage,
   });
   // المغلِّف يُركَّب حين يوجد مزوّد مفاتيح، ولا يُختلق مزوّد: مفتاحٌ يولّده الكود في
   // الذاكرة يضيع عند الإقلاع فيصير كل ما كُتب غير قابل للفكّ — فقدُ بيانات باسم
@@ -213,6 +234,7 @@ export function createRegistries({
     }),
     laws: new LawRegistry({ log, repository: repositories.laws }),
     approvals,
+    lineage,
   };
 }
 

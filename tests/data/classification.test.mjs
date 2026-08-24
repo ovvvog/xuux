@@ -30,6 +30,7 @@ import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { createTestLedger } from '../helpers/lineage.mjs';
 
 const bundle = loadPolicyBundle();
 const lattice = loadClassificationLattice();
@@ -67,14 +68,17 @@ function setup({ withEnforcement = true, withApprovals = true } = {}) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
   });
+  const assets = createMemoryRepository(DataCatalog.spec);
+  const { ledger } = createTestLedger({ log: /** @type {never} */ (log), assets, lattice });
   const catalog = new DataCatalog({
     log: /** @type {never} */ (log),
-    repository: createMemoryRepository(DataCatalog.spec),
+    repository: assets,
     lattice,
     approvals: withApprovals ? approvals : null,
     enforcementPoint: withEnforcement ? enforcementPoint : null,
+    lineage: ledger,
   });
-  return { log, approvals, catalog, enforcementPoint };
+  return { log, approvals, catalog, enforcementPoint, ledger };
 }
 
 /**
@@ -396,11 +400,14 @@ test('الاعتماد المنتهي لا يُقبل، فالنافذة ليس�
     lattice,
     now: () => clock,
   });
+  const windowAssets = createMemoryRepository(DataCatalog.spec);
   const catalog = new DataCatalog({
     log: /** @type {never} */ (log),
-    repository: createMemoryRepository(DataCatalog.spec),
+    repository: windowAssets,
     lattice,
     approvals,
+    lineage: createTestLedger({ log: /** @type {never} */ (log), assets: windowAssets, lattice })
+      .ledger,
     enforcementPoint: new EnforcementPoint({
       decisionPoint: createPolicyDecisionPoint({ bundle }),
       log,

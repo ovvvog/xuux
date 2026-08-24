@@ -236,7 +236,11 @@ export const DATA_ASSET_SPEC = Object.freeze({
         values: Object.freeze(['public', 'internal', 'sensitive', 'sovereign']),
       },
       source: { column: 'source', type: 'string', required: true, maxLength: 200 },
-      lineage: { column: 'lineage', type: 'json', required: false },
+      // لا حقل `lineage` هنا بعد `M7.04`. كان عموداً `jsonb` يقبل **أي** مصفوفة
+      // يُعلنها من يسجّل الأصل، فكان النسب ادّعاءً في الطلب لا واقعاً مقيَّداً.
+      // صار النسب صفوفاً في `state.data_lineage` تكتبها المسارات نفسها، ويحرس
+      // `scripts/guard-lineage.mjs` أن لا يعود عمود الادّعاء — فالحقيقة في
+      // موضعين تنحرف.
       retentionDays: { column: 'retention_days', type: 'integer', required: true },
       quality: {
         column: 'quality',
@@ -278,8 +282,9 @@ export const MEMORY_SPEC = Object.freeze({
         required: true,
         values: Object.freeze(['episodic', 'semantic', 'procedural']),
       },
-      // المحتوى يُخزَّن مغلَّفاً `{ value: ... }` لأن عمود القاعدة يشترط كائناً،
-      // والذاكرة قد تكون نصاً أو عدداً. التغليف حدٌّ معلن لا شكلٌ خفي.
+      // المحتوى يُخزَّن **غلافاً مشفَّراً** بعد `M7.03` (‏`__enc` ومعمّاه ووسمه)، لا
+      // `{ value: ... }` نصّاً؛ وقيدُ القاعدة `memories_content_sealed` يرفض صفّاً
+      // يحمل `value`. التغليف حدٌّ معلن لا شكلٌ خفي.
       content: { column: 'content', type: 'json', required: true },
       tags: { column: 'tags', type: 'stringArray', required: false },
       legalHold: { column: 'legal_hold', type: 'boolean', required: true },
@@ -419,6 +424,84 @@ export const CLASSIFICATION_APPROVAL_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * قيود نسب البيانات — `M7.04`.
+ *
+ * دفترٌ **يُكتب فيه ولا يُعدَّل**: لا حقل هنا يُحدَّث بعد الإدراج، والتسلسل
+ * `seq` مع `prevHash` يجعلان حذفَ صفٍّ أو تعديله مكشوفاً بـ`verify()`.
+ * و`recordedAt` **نصّ** ISO لا عمودٌ زمني، لأن فرق الدقّة بين ساعة القاعدة
+ * (ميكروثانية) و`Date` (ميليثانية) كان سيكسر التجزئة على البريء — وهو انحرافٌ
+ * سقط فيه المشروع مرّةً في `M3.05`.
+ */
+export const DATA_LINEAGE_SPEC = Object.freeze({
+  name: 'data_lineage',
+  table: 'state.data_lineage',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      assetId: { column: 'asset_id', type: 'string', required: true, maxLength: 128 },
+      seq: { column: 'seq', type: 'integer', required: true },
+      kind: {
+        column: 'kind',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['origin', 'derivation', 'read', 'write']),
+      },
+      actorId: { column: 'actor_id', type: 'string', required: true, maxLength: 128 },
+      parents: { column: 'parents', type: 'json', required: true },
+      purpose: { column: 'purpose', type: 'string', required: true, maxLength: 200 },
+      recordedAt: { column: 'recorded_at', type: 'string', required: true, maxLength: 40 },
+      prevHash: { column: 'prev_hash', type: 'string', required: true, maxLength: 64 },
+      hash: { column: 'hash', type: 'string', required: true, maxLength: 64 },
+      ...MANAGED,
+    })
+  ),
+  // التجزئة فريدة (صفٌّ مُعاد إدراجه يُرفض)، والتسلسل فريد لكل أصل (لا صفّان
+  // في نفس الموضع من السلسلة).
+  unique: Object.freeze([Object.freeze(['hash']), Object.freeze(['assetId', 'seq'])]),
+  filterable: Object.freeze(['assetId', 'kind', 'actorId']),
+  invariants: Object.freeze([
+    {
+      code: 'LINEAGE_SEQ_POSITIVE',
+      message: 'التسلسل يبدأ من 1: تسلسلٌ صفريٌّ أو سالب لا موضع له في سلسلة.',
+      /** @param {EntityRecord} record */
+      check: (record) => Number(record['seq']) >= 1,
+    },
+    {
+      code: 'LINEAGE_GENESIS_IS_FIRST',
+      message:
+        'الصفّ الأول وحده يحمل `genesis`، وما بعده يحمل تجزئة ما قبله؛ وإلا صار كل صفٍّ بدايةً جديدة فلا تُكشف ثغرة.',
+      /** @param {EntityRecord} record */
+      check: (record) => (Number(record['seq']) === 1) === (record['prevHash'] === 'genesis'),
+    },
+    {
+      code: 'LINEAGE_PARENTS_IS_ARRAY',
+      message: 'الأسلاف مصفوفة معرّفات؛ كائنٌ حرّ هنا هو بعينه الادّعاء الذي أُغلق.',
+      /** @param {EntityRecord} record */
+      check: (record) => Array.isArray(record['parents']),
+    },
+    {
+      code: 'LINEAGE_KIND_PARENTS_AGREE',
+      message:
+        'الاشتقاق وحده يحمل أسلافاً: قراءةٌ بأسلاف أو اشتقاقٌ بلا سلف يجعل الاستعلام يخلط التحويل بالوصول.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const parents = Array.isArray(record['parents']) ? record['parents'] : [];
+        return record['kind'] === 'derivation' ? parents.length > 0 : parents.length === 0;
+      },
+    },
+    {
+      code: 'LINEAGE_NO_SELF_PARENT',
+      message: 'أصلٌ سلفُ نفسه يجعل مصدره نفسه ويجعل السلسلة غير منتهية.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const parents = Array.isArray(record['parents']) ? record['parents'] : [];
+        return !parents.includes(record['assetId']);
+      },
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -427,6 +510,7 @@ export const ENTITY_SPECS = Object.freeze({
   memories: MEMORY_SPEC,
   laws: LAW_SPEC,
   classification_approvals: CLASSIFICATION_APPROVAL_SPEC,
+  data_lineage: DATA_LINEAGE_SPEC,
 });
 
 /**

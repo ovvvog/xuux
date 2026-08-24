@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://state.local/schemas/lineage.schema.json",
+  "title": "سياسة نسب البيانات",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "kinds", "rules", "chain", "recorders", "store"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "kinds": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "requiresParents", "describes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z-]*$" },
+          "requiresParents": { "type": "boolean" },
+          "describes": { "type": "string", "minLength": 8 }
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireMonotonicClassification",
+        "refuseCycles",
+        "maxDepth",
+        "recordBeforeEffect"
+      ],
+      "properties": {
+        "requireMonotonicClassification": {
+          "const": true,
+          "description": "اشتقاقٌ ينزل بالتصنيف غسلٌ للتصنيف؛ فلا يُسمح بإطفاء القاعدة من الإعداد."
+        },
+        "refuseCycles": {
+          "const": true,
+          "description": "دورةٌ في النسب تجعل الاستعلام غير منتهٍ والأصل مصدرَ نفسه."
+        },
+        "maxDepth": { "type": "integer", "minimum": 8, "maximum": 4096 },
+        "recordBeforeEffect": {
+          "const": true,
+          "description": "القيد قبل الأثر: تسجيلٌ بعده يفقد كل ما سقطت العملية بعده."
+        }
+      }
+    },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["hash", "perAsset"],
+      "properties": {
+        "hash": { "const": "sha256" },
+        "perAsset": { "const": true }
+      }
+    },
+    "recorders": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module", "kinds"],
+        "properties": {
+          "module": { "type": "string", "pattern": "^src/.+\\.mjs$" },
+          "kinds": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[a-z][a-z-]*$" }
+          }
+        }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "dbConstraints"],
+      "properties": {
+        "table": { "type": "string", "pattern": "^state\\.[a-z_]+$" },
+        "dbConstraints": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[a-z_]+$" }
+        }
+      }
+    },
+    "retiredClaimColumn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "column"],
+      "properties": {
+        "table": { "type": "string", "pattern": "^state\\.[a-z_]+$" },
+        "column": { "type": "string", "pattern": "^[a-z_]+$" }
+      }
+    }
+  }
+}
