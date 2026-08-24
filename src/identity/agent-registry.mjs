@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AGENT_SPEC } from '../persistence/entities.mjs';
+import { loadCapabilityCatalog } from './capability-catalog.mjs';
+import { IncidentSeverity } from './incident-register.mjs';
 
 /**
  * سجل الوكلاء — صار **دائماً** في الخطوة `M3.05`.
@@ -67,7 +69,11 @@ export const AgentState = Object.freeze({
 /** الحالات العقابية التي لا تُعلن بلا سبب مسجَّل (نفس قيد القاعدة). */
 const PUNITIVE = new Set([AgentState.SUSPENDED, 'quarantined', AgentState.REVOKED]);
 
-const FORBIDDEN = new Set(['sovereign:root', 'key:export', 'policy:self-modify']);
+// القدرات المحرَّمة **صارت بياناتٍ** في `config/capabilities.yaml` (‏M6.03). كانت
+// هنا `new Set` بثلاث قيم: من أضاف محرَّماً رابعاً عدّل كوداً، ومن منح قدرةً بعد
+// التسجيل لم يمرّ بهذا الفحص أصلاً. والكتالوج يُمرَّر أو يُحمَّل من الملف، ولا
+// يوجد مسارٌ ثالث يسقط إلى مجموعة فارغة — كتالوج محرَّماتٍ فارغ يعني السماح بكل
+// شيء، وذلك أسوأ من التوقّف.
 
 /**
  * حوّل صفّ المستودع إلى سجل وكيل. الفحص هنا ليس تجميلاً: من قرأ صفّاً من قاعدة
@@ -87,15 +93,28 @@ export class AgentRegistry {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `AGENT_REGISTRY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ ca?: import('../root-of-trust/identity.mjs').CertificateAuthority, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: AgentRepository, maxAgents?: number }} [deps]
+   * @param {{ ca?: import('../root-of-trust/identity.mjs').CertificateAuthority, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: AgentRepository, maxAgents?: number, catalog?: import('./capability-catalog.mjs').CapabilityCatalog, grants?: import('./capability-grants.mjs').CapabilityGrantLedger | null, incidents?: import('./incident-register.mjs').IncidentRegister | null }} [deps]
    */
-  constructor({ ca, log, repository, maxAgents = 100000 } = {}) {
+  constructor({
+    ca,
+    log,
+    repository,
+    maxAgents = 100000,
+    catalog,
+    grants = null,
+    incidents = null,
+  } = {}) {
     if (!ca || !log || !repository) throw new Error('AGENT_REGISTRY_DEPENDENCY_MISSING');
     this.ca = ca;
     this.log = log;
     /** @type {AgentRepository} */
     this.repository = repository;
     this.maxAgents = maxAgents;
+    // الكتالوج يُحمَّل من الملف إن لم يُمرَّر: المستدعي القديم لا يتغيّر، والحدّ
+    // يبقى نافذاً — لا يوجد استدعاء يُنتج سجلاً بلا محرَّمات.
+    this.catalog = catalog ?? loadCapabilityCatalog();
+    this.grants = grants;
+    this.incidents = incidents;
   }
 
   /**
@@ -116,7 +135,21 @@ export class AgentRegistry {
   async register({ name, role, capabilities = [], owner = 'crown', kind = 'autonomous' }) {
     if (!name || !role) throw new Error('AGENT_IDENTITY_REQUIRED');
     if ((await this.repository.count()) >= this.maxAgents) throw new Error('AGENT_QUOTA_EXCEEDED');
-    if (capabilities.some((x) => FORBIDDEN.has(x))) throw new Error('FORBIDDEN_CAPABILITY');
+    const banned = capabilities.filter((x) => this.catalog.forbidden.has(x));
+    if (banned.length > 0) {
+      // تُفتح حادثة ويُسجَّل الحدث قبل رفع الخطأ (‏M6.03): طلبُ قدرةٍ محرَّمة عند
+      // التسجيل واقعةٌ تُراجَع، لا خطأً يُعاد المحاولة بعده بلا أثر.
+      if (this.incidents !== null) {
+        this.incidents.open({
+          type: 'forbidden-capability',
+          subject: owner,
+          severity: IncidentSeverity.CRITICAL,
+          detail: { capabilities: banned, requestedName: name, requestedRole: role },
+        });
+      }
+      this.log.append('capability.register.forbidden', owner, { capabilities: banned, role });
+      throw new Error('FORBIDDEN_CAPABILITY');
+    }
     const id = 'agent:' + randomUUID();
     const certificate = this.ca.issue(id, role, capabilities);
     const row = await this.repository.insert({
@@ -164,6 +197,11 @@ export class AgentRegistry {
     });
     if (state === AgentState.REVOKED) {
       this.ca.revoke(current.certificate.id, reason ?? 'agent revoked');
+    }
+    // إبطال الهوية أو تعليقها يسحب المنح المؤقّتة معها (‏M6.01/‏M6.02): وإلا بقيت
+    // قدرةٌ ممنوحة لهويةٍ لا تعمل، تعود بمجرّد إعادة تفعيلها بلا قرار جديد.
+    if (this.grants !== null && PUNITIVE.has(state)) {
+      this.grants.revokeAllFor(id, reason ?? `agent ${state}`);
     }
     this.log.append(`agent.${state}`, 'crown', { id, reason });
     return toAgent(updated);

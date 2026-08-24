@@ -31,6 +31,13 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 
 /** @typedef {(record: { decision: PolicyDecision, request: PolicyRequest }) => void | Promise<void>} DecisionSink */
 
+/**
+ * بوابة الهوية كما تحتاجها النقطة (‏M6.01). الواجهة ضيقة عن قصد: النقطة لا
+ * تعرف شهادات ولا منحاً، والبوابة لا تعرف سياسةً ولا تذاكر.
+ * @typedef {object} IdentityGateLike
+ * @property {(actorId: string) => Promise<{ ok: boolean, code: string, reason: string, actor: { id: string, role: string, state: string, kind: import('./model.mjs').ActorKind, capabilities: readonly string[] } | null }>} verify
+ */
+
 /** عمر التذكرة: القرار يُنفَّذ الآن أو يُطلب من جديد. */
 const DECISION_TTL_MS = 60000;
 
@@ -50,7 +57,7 @@ function bindingOf(request) {
 
 export class EnforcementPoint {
   /**
-   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, secret?: Buffer, now?: () => Date }} [deps]
+   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, secret?: Buffer, now?: () => Date }} [deps]
    */
   constructor({
     decisionPoint,
@@ -58,6 +65,7 @@ export class EnforcementPoint {
     haltSwitch = null,
     quotaLedger = null,
     decisionSink = null,
+    identityGate = null,
     secret,
     now,
   } = {}) {
@@ -65,6 +73,7 @@ export class EnforcementPoint {
     this.decisionPoint = decisionPoint;
     this.log = log;
     this.haltSwitch = haltSwitch;
+    this.identityGate = identityGate;
     this.quotaLedger = quotaLedger;
     this.decisionSink = decisionSink;
     // مفتاح التذكرة يُولَّد لكل عملية: تذكرةٌ من عملية سابقة لا تُقبل بعد إعادة
@@ -95,6 +104,9 @@ export class EnforcementPoint {
    */
   async authorize(request) {
     const evaluatedAt = this.now().toISOString();
+    // الطلب المُقيَّم متغيّرٌ محلي: بوابة الهوية تستبدل فاعله بما يقوله جذر
+    // الثقة، وتعديل المُعامل نفسه يخفي على من يقرأ أيُّ طلبٍ وصل وأيُّ طلبٍ قُيّم.
+    let evaluated = request;
     if (this.haltSwitch) {
       try {
         this.haltSwitch.assertOperational();
@@ -115,14 +127,48 @@ export class EnforcementPoint {
       }
     }
 
-    let decision = this.decisionPoint.evaluate(request);
+    // الهوية تُحقَّق قبل السياسة وبعد الإيقاف الشامل (‏M6.01). والترتيب مقصود
+    // مرّتين: الدولة الموقوفة لا تُستعلَم فيها هوية أصلاً، والسياسة لا تُقيّم على
+    // فاعلٍ مزعوم. وما تردّه البوابة **يستبدل** مطالبة المستدعي لا يُدمج معها:
+    // الدمج يترك للمستدعي أن يزيد قدرةً ليست له، وهو عين ما تمنعه الخطوة.
+    if (this.identityGate !== null) {
+      const verdict = await this.identityGate.verify(evaluated.actor.id);
+      if (!verdict.ok || verdict.actor === null) {
+        const decision = Object.freeze({
+          allowed: false,
+          effect: /** @type {const} */ ('deny'),
+          code: /** @type {const} */ ('IDENTITY_UNVERIFIED'),
+          reason: `${verdict.code}: ${verdict.reason}`,
+          policyId: null,
+          policyVersion: null,
+          requiresRoyalCommand: this.decisionPoint.requiresRoyalCommand(evaluated.action),
+          matched: Object.freeze([]),
+          evaluatedAt,
+        });
+        await this.record(decision, evaluated);
+        return { decision, token: null };
+      }
+      evaluated = Object.freeze({
+        ...evaluated,
+        actor: Object.freeze({
+          ...evaluated.actor,
+          id: verdict.actor.id,
+          role: verdict.actor.role,
+          state: verdict.actor.state,
+          kind: verdict.actor.kind,
+          capabilities: verdict.actor.capabilities,
+        }),
+      });
+    }
+
+    let decision = this.decisionPoint.evaluate(evaluated);
 
     if (decision.allowed) {
-      const quotaResource = this.decisionPoint.bundle.actions.get(request.action)?.quotaResource;
+      const quotaResource = this.decisionPoint.bundle.actions.get(evaluated.action)?.quotaResource;
       if (quotaResource !== undefined && this.quotaLedger !== null) {
-        const amountRaw = request.context?.['quotaAmount'];
+        const amountRaw = evaluated.context?.['quotaAmount'];
         const amount = typeof amountRaw === 'number' && amountRaw > 0 ? amountRaw : 1;
-        const subject = this.quotaSubject(request, quotaResource);
+        const subject = this.quotaSubject(evaluated, quotaResource);
         try {
           const state = await this.quotaLedger.debit({
             subjectType: subject.type,
@@ -130,7 +176,7 @@ export class EnforcementPoint {
             resource: quotaResource,
             amount,
           });
-          this.log.append('policy.quota.debited', request.actor.id, {
+          this.log.append('policy.quota.debited', evaluated.actor.id, {
             resource: quotaResource,
             amount,
             remaining: state.remaining,
@@ -147,9 +193,9 @@ export class EnforcementPoint {
       }
     }
 
-    await this.record(decision, request);
+    await this.record(decision, evaluated);
     if (!decision.allowed) return { decision, token: null };
-    return { decision, token: this.issue(request, decision) };
+    return { decision, token: this.issue(evaluated, decision) };
   }
 
   /**

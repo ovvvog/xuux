@@ -128,7 +128,7 @@ export class AgentMemoryStore {
   async #write(
     agentId,
     content,
-    { classification = 'internal', source = 'agent', kind = 'episodic', tags = [] } = {}
+    { classification = 'internal', source = 'agent', kind = 'episodic', tags = [] } = {},
   ) {
     if ((await this.repository.count()) >= this.maxEntries)
       throw new Error('MEMORY_QUOTA_EXCEEDED');

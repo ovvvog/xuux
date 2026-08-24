@@ -117,7 +117,11 @@ export type DecisionCode =
   | 'POLICY_UNKNOWN_ROLE'
   | 'SOVEREIGN_COMMAND_REQUIRED'
   | 'QUOTA_EXCEEDED'
-  | 'STATE_HALTED';
+  | 'STATE_HALTED'
+  // الهوية لم تُحقَّق من جذر الثقة (‏M6.01): فاعلٌ ليس في السجل، أو حالته
+  // غير نشطة، أو شهادته مسحوبة أو لموضوعٍ آخر. وهو متميز عن `POLICY_DENY` لأنّ هذا
+  // رفضٌ قبل السياسة لا بها: لا تُراجَع له قاعدة، بل تُراجَع له الهوية.
+  | 'IDENTITY_UNVERIFIED';
 
 /**
  * قرار مُسبَّب: يحمل الرمز والسبب والسياسة الحاكمة ونسختها. و`policyId` قد يكون

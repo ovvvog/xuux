@@ -1,0 +1,95 @@
+# كتالوج القدرات — M6.02 و M6.03
+#
+# قبل هذا الملف كانت القدرات المحرَّمة **ثلاث قيم في مجموعة داخل**
+# `src/identity/agent-registry.mjs`: من قرأ الوثائق لم يجدها، ومن أراد إضافة
+# محرَّمٍ رابع عدّل كوداً، ومن استدعى نقطة التفويض لم تُفحص عنده أصلاً — فكان
+# «الخط الأحمر» خطاً في مسارٍ واحد لا طبقةً.
+#
+# فصارت هنا بياناتٍ تُقرأ من الكود، وصار المحرَّم يُرفض في ثلاثة مواضع: عند
+# تسجيل الوكيل، وعند منح قدرة، وعند التفويض. والقدرة صيغتها `<فئة>:<اسم>` كما في
+# `config/roles.yaml`، و`action:<فعل>` تعني الإذن بالفعل بعد أن تسمح به سياسة.
+#
+# قاعدتان لا تُخالفان:
+#   1. **المحرَّم لا يُمنح بأي منح ولا تفويض ولا أمر** — ولذلك لا يحمل مدةً ولا
+#      مانحاً: الحقل الغائب هنا تصريحٌ بأن لا طريق للمنح، لا نقصٌ في البيانات.
+#   2. **الممنوح مؤقّت دائماً** — كل قدرة قابلة للمنح لها سقف مدة، وانتهاء المدة
+#      يُسقط القدرة بلا تدخّل. لا قدرة دائمة إلا ما يأتي من الدور في `roles.yaml`.
+
+version: 1
+owner: crown
+
+# ── الطبقة الصلبة: قدرات محرَّمة لا تُمنح بحال ──
+forbidden:
+  - id: sovereign:root
+    reason: قدرةٌ تُغني عن كل قدرة تُلغي معنى التفويض؛ من ملكها لم يبقَ عليه قرار يُراجع.
+    lawRef: law:root-of-trust
+
+  - id: key:export
+    reason: إخراج مادة المفتاح الخاص يعني فقدان جذر الثقة، ولا غرض تشغيلياً يوازن ذلك.
+    lawRef: law:root-of-trust
+
+  - id: policy:self-modify
+    reason: من يعدّل السياسة التي تحكمه صار حاكم نفسه، وسقطت السياسة كضابط.
+    lawRef: law:policy-governance
+
+  - id: capability:self-grant
+    reason: منح الفاعل قدرةً لنفسه يجعل سقف صلاحيته سقف رغبته؛ والمانح يجب أن يكون غير المستفيد.
+    lawRef: law:policy-governance
+
+  - id: audit:erase
+    reason: سجل التدقيق أساس المحاسبة؛ قدرةٌ تمحوه تجعل كل ما بعده غير قابل للإثبات.
+    lawRef: law:root-of-trust
+
+  - id: halt:disable
+    reason: تعطيل الإيقاف الشامل يزيل آخر مكابح الدولة، وهو ما تشترطه المادة 9 من القاعدة الحاكمة.
+    lawRef: law:root-of-trust
+
+# ── القدرات القابلة للمنح المؤقّت ──
+# `maxDurationSeconds` سقفٌ لا افتراض: من طلب أطول منه رُفض طلبه بخطأ مُسمّى.
+# `grantorRoles` من يملك المنح؛ ودورٌ خارج القائمة لا يمنح ولو كان أعلى رتبة،
+# لأن الرتبة ليست قدرة.
+grantable:
+  - id: action:read-registry
+    maxDurationSeconds: 604800
+    grantorRoles: [role:king, role:minister, role:auditor]
+    reason: قراءة السجلات حاجةٌ متكرّرة للتدقيق المؤقّت، وأثرها محدود بالقراءة.
+
+  - id: action:read-memory
+    maxDurationSeconds: 604800
+    grantorRoles: [role:king, role:minister]
+    reason: قراءة الذاكرة المؤسسية تُمنح لمهمة محدَّدة ثم تسقط بانتهائها.
+
+  - id: action:read-audit
+    maxDurationSeconds: 172800
+    grantorRoles: [role:king, role:chief-justice]
+    reason: سجل التدقيق يُفتح لتحقيق بعينه لا فتحاً دائماً.
+
+  - id: action:write-memory
+    maxDurationSeconds: 86400
+    grantorRoles: [role:king, role:minister]
+    reason: الكتابة تُخلّف أثراً باقياً فسقفها أقصر من سقف القراءة.
+
+  - id: action:submit-case
+    maxDurationSeconds: 86400
+    grantorRoles: [role:king, role:chief-justice]
+    reason: رفع القضية قدرةٌ إجرائية تُمنح لمدة النظر في الواقعة.
+
+  - id: action:external-egress
+    maxDurationSeconds: 3600
+    grantorRoles: [role:king]
+    reason: كل خروج عن حدود الدولة يُمنح بالساعة لا بالأسبوع، والملك وحده يمنحه.
+
+  - id: action:create-agent
+    maxDurationSeconds: 3600
+    grantorRoles: [role:king]
+    reason: تفريخ الهويات أسرع ما يُفقد السيطرة، فالمنح المؤقّت له ساعةٌ بأمر الملك.
+
+  - id: action:suspend-agent
+    maxDurationSeconds: 7200
+    grantorRoles: [role:king, role:minister]
+    reason: التعليق قدرةٌ عقابية تُمنح لمعالجة حادثة جارية ثم تسقط.
+
+  - id: action:deploy-model
+    maxDurationSeconds: 7200
+    grantorRoles: [role:king]
+    reason: تنشيط نموذج يغيّر سلوك الدولة كلها، فمنحه المؤقّت لا يتجاوز نافذة الإطلاق.
