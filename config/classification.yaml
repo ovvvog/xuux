@@ -69,3 +69,30 @@ demotion:
   approverRoles:
     - role:auditor
     - role:king
+
+# التخليص الأمني بالدور — M7.02
+#
+# القرار الذي كان ناقصاً: كانت `canRead` في فهرس البيانات تقارن **تصريحاً يُمرَّر
+# في الطلب** بتصنيف الأصل، ولا سياسة ولا تذكرة ولا سجلَّ رفض. فمن نادى الدالة
+# بـ`'sovereign'` قرأ السيادي، وهو نفس عيب «الاعتماد حقلٌ يُمرَّر» في M7.01.
+#
+# فصار التخليص **مشتقّاً من دور الفاعل** كما هي هنا، لا من قيمةٍ يقولها الطالب؛
+# ودورٌ غير مذكور في هذه القائمة **لا تخليص له** فيُرفض وصولُه (فشلٌ مغلق) —
+# لا يُفترض له «عام» ولا «داخلي».
+#
+# والترتيب في `src/data/access-gate.mjs` مقصود: التفويض **أولاً** (وفيه بوابةُ
+# الهوية تستبدل دور المُطالب بما يقوله جذر الثقة، فدورٌ مزعوم يُرفض بـ
+# `IDENTITY_UNVERIFIED`)، ثم يُشتقّ التخليص من الدور، ثم تُتحقَّق التذكرة قبل الأثر.
+clearances:
+  - role: role:king
+    tier: sovereign
+  - role: role:chief-justice
+    tier: sovereign
+  - role: role:minister
+    tier: sensitive
+  - role: role:auditor
+    tier: sensitive
+  - role: role:operator
+    tier: internal
+  - role: role:agent
+    tier: internal

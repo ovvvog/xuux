@@ -21,6 +21,7 @@ import {
 import { withUnitOfWork } from '../../src/persistence/unit-of-work.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 
 /**
  * @param {import('pg').Pool} pool
@@ -44,11 +45,16 @@ test(
     const created = await createIsolatedDatabase('atomic');
     try {
       await up(created.pool);
+      // نقطة التفويض تُمرَّر كي يصل الطلب إلى الكتابة أصلاً: بلا بوابةٍ مُفوَّضة
+      // يُرفض «تذكّر» قبل أي كتابة، فلا يبقى إخفاقٌ **بين** الكتابتين ليُقاس.
+      const log = new EventLog();
       const registries = createPostgresRegistries({
         pool: created.pool,
         ca: authority(),
-        log: new EventLog(),
+        log,
+        enforcementPoint: enforcementPointFor(log),
       });
+      const operator = testActor('role:operator');
       const agent = await registries.agents.register({ name: 'وكيل-ذرّي', role: 'auditor' });
 
       // نوع ذاكرة خارج القيم المُعلنة: يُرفض عند كتابة **الذاكرة** أي بعد كتابة
@@ -60,6 +66,7 @@ test(
             { note: 'لا ينبغي أن يبقى' },
             {
               kind: /** @type {'episodic'} */ (/** @type {unknown} */ ('نوع-غير-معلن')),
+              actor: operator,
             },
           ),
         /REPOSITORY_INVALID_RECORD|FIELD_ENUM/,
@@ -85,11 +92,14 @@ test(
     try {
       await up(created.pool);
       // نفس المستودعات، بلا مُشغّل معاملة: هذا هو ما كان عليه الحال قبل `M3.06`.
+      const log = new EventLog();
       const registries = createRegistries({
         ca: authority(),
-        log: new EventLog(),
+        log,
         repositories: createPostgresRepositories(created.pool),
+        enforcementPoint: enforcementPointFor(log),
       });
+      const operator = testActor('role:operator');
       const agent = await registries.agents.register({ name: 'وكيل-غير-ذرّي', role: 'auditor' });
       await assert.rejects(() =>
         registries.memory.remember(
@@ -97,6 +107,7 @@ test(
           { note: 'أثر جزئي' },
           {
             kind: /** @type {'episodic'} */ (/** @type {unknown} */ ('نوع-غير-معلن')),
+            actor: operator,
           },
         ),
       );

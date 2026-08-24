@@ -19,6 +19,9 @@ import { DataCatalog } from '../../src/data/data-catalog.mjs';
 import { AgentMemoryStore } from '../../src/data/memory-store.mjs';
 import { Court, LawRegistry } from '../../src/governance/law-system.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { DataAccessGate } from '../../src/data/access-gate.mjs';
+import { loadClassificationLattice } from '../../src/data/classification.mjs';
+import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 
 // بعد `M3.05` صارت السجلات على مستودعات، فمستودع الذاكرة هو ما يُختبر عليه ضابط
 // `D1` هنا: التجميد العميق شرطٌ في **عقد المستودع** لا عادةٌ في صنفٍ واحد،
@@ -36,7 +39,27 @@ function agentSetup() {
 
 /** @returns {DataCatalog} */
 function catalogSetup(log = new EventLog()) {
-  return new DataCatalog({ log, repository: createMemoryRepository(DataCatalog.spec) });
+  return new DataCatalog({
+    log,
+    repository: createMemoryRepository(DataCatalog.spec),
+    enforcementPoint: enforcementPointFor(log),
+  });
+}
+
+/**
+ * بوابة وصولٍ حقيقية: مخزن الذاكرة يرفض العمل بلا واحدة بعد `M7.02`، والمقيس في
+ * هذا الملف هو التجميد العميق لا الإتاحة.
+ * @param {EventLog} log
+ * @param {DataCatalog} catalog
+ * @returns {DataAccessGate}
+ */
+function accessGateFor(log, catalog) {
+  return new DataAccessGate({
+    log,
+    catalog,
+    lattice: loadClassificationLattice(),
+    enforcementPoint: enforcementPointFor(log),
+  });
 }
 
 /** @returns {LawRegistry} */
@@ -144,14 +167,17 @@ test('محتوى الذاكرة الذي يملكه المستدعي لا يُج
     catalog,
     log,
     repository: createMemoryRepository(AgentMemoryStore.spec),
+    // البوابة لازمة للتذكّر والاستدعاء (`M7.02`)؛ والمقيس هنا التجميد لا الإتاحة.
+    accessGate: accessGateFor(log, catalog),
   });
+  const actor = testActor('role:agent', { id: 'agent:1' });
   const content = { note: 'أصل' };
-  const entry = await memory.remember('agent:1', content);
+  const entry = await memory.remember('agent:1', content, { actor });
   // الصورة المُرجَعة مُجمَّدة، **وكائن المستدعي يبقى كما هو**: التجميد يقع على
   // نسخةٍ لا على ما يملكه غيرنا. فلو جُمِّد الأصل لعطّلنا كوداً لا نملكه.
   content.note = 'مُعدَّل';
   assert.equal(content.note, 'مُعدَّل', 'جُمِّد كائن المستدعي');
-  const recalled = await memory.recall('agent:1', entry.id);
+  const recalled = await memory.recall({ id: entry.id, actor });
   const stored = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (recalled.content));
   assert.equal(stored.note, 'أصل', 'المخزون تبع تعديلاً لاحقاً على كائن المستدعي');
   assert.throws(

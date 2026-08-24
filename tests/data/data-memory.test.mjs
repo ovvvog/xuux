@@ -1,21 +1,56 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
-import { AgentMemoryStore, Classification, DataCatalog } from '../../src/data/index.mjs';
+import {
+  AgentMemoryStore,
+  Classification,
+  DataAccessGate,
+  DataCatalog,
+  loadClassificationLattice,
+} from '../../src/data/index.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
+import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
+import { loadPolicyBundle } from '../../src/policy/loader.mjs';
+
+const lattice = loadClassificationLattice();
+const bundle = loadPolicyBundle();
+
+/** فاعلٌ وكيلٌ حقيقي: التخليص يُشتقّ من دوره ولا يُمرَّر (`M7.02`). */
+function agentActor(id = 'agent:a') {
+  return /** @type {never} */ ({
+    id,
+    role: 'role:agent',
+    kind: 'agent',
+    state: 'active',
+    scope: 'org:interior',
+  });
+}
 
 // الفهرس والذاكرة صارا على مستودعات (`M3.05`)؛ ومستودع الذاكرة هنا لسرعة
 // الاختبار لا لإثبات الاستمرارية، وإثباتها في `tests/persistence/restart.test.mjs`.
 function setup(limits = {}) {
   const log = new EventLog();
-  const catalog = new DataCatalog({ log, repository: createMemoryRepository(DataCatalog.spec) });
+  const enforcementPoint = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint({ bundle }),
+    log,
+  });
+  const catalog = new DataCatalog({
+    log,
+    repository: createMemoryRepository(DataCatalog.spec),
+    lattice,
+    enforcementPoint,
+  });
+  // البوابة تُركَّب هنا كما تُركَّب في الإنتاج: مخزنٌ بلا بوابة يرفض كل استدعاء.
+  const accessGate = new DataAccessGate({ log, catalog, lattice, enforcementPoint });
   const memory = new AgentMemoryStore({
     catalog,
     log,
     repository: createMemoryRepository(AgentMemoryStore.spec),
+    accessGate,
     ...limits,
   });
-  return { log, catalog, memory };
+  return { log, catalog, memory, accessGate };
 }
 
 test('catalog registers lineage classification and quality', async () => {
@@ -28,7 +63,14 @@ test('catalog registers lineage classification and quality', async () => {
     lineage: ['command'],
   });
   assert.equal(d.quality, 'unverified');
-  await assert.rejects(() => catalog.canRead(d.id, 'agent', 'sensitive'), /DATA_ACCESS_DENIED/);
+  // قرار الإتاحة انتقل إلى بوابة الوصول (`M7.02`) واختباره في
+  // `tests/data/access-gate.test.mjs`؛ والمقيس هنا أن الفهرس لم يُبقِ منه مساراً.
+  assert.equal(
+    /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (DataCatalog.prototype))[
+      'canRead'
+    ],
+    undefined,
+  );
   await catalog.markQuality(d.id, 'verified');
   const after = await catalog.get(d.id);
   assert.ok(after, 'السجل يجب أن يبقى بعد تعليم الجودة');
@@ -39,17 +81,23 @@ test('catalog registers lineage classification and quality', async () => {
 
 test('memory is isolated by agent identity', async () => {
   const { memory } = setup();
-  const x = await memory.remember('agent:a', 'private note');
-  assert.equal((await memory.recall('agent:a', x.id)).content, 'private note');
-  await assert.rejects(() => memory.recall('agent:b', x.id), /MEMORY_NOT_FOUND/);
+  const x = await memory.remember('agent:a', 'private note', { actor: agentActor() });
+  assert.equal((await memory.recall({ id: x.id, actor: agentActor() })).content, 'private note');
+  await assert.rejects(
+    () => memory.recall({ id: x.id, actor: agentActor('agent:b') }),
+    /MEMORY_NOT_FOUND/,
+  );
   await memory.forget('agent:a', x.id);
-  await assert.rejects(() => memory.recall('agent:a', x.id), /MEMORY_NOT_FOUND/);
+  await assert.rejects(() => memory.recall({ id: x.id, actor: agentActor() }), /MEMORY_NOT_FOUND/);
 });
 
 test('memory quota is enforced', async () => {
   const { memory } = setup({ maxEntries: 1 });
-  await memory.remember('agent:a', 'one');
-  await assert.rejects(() => memory.remember('agent:a', 'two'), /MEMORY_QUOTA_EXCEEDED/);
+  await memory.remember('agent:a', 'one', { actor: agentActor() });
+  await assert.rejects(
+    () => memory.remember('agent:a', 'two', { actor: agentActor() }),
+    /MEMORY_QUOTA_EXCEEDED/,
+  );
 });
 
 test('two memories for the same agent do not collide on dataset name', async () => {
@@ -57,8 +105,8 @@ test('two memories for the same agent do not collide on dataset name', async () 
   // `memory:${agentId}` فيتعارض عند ثاني ذاكرة لنفس الوكيل. القيد الفريد في
   // القاعدة هو ما كشفه، والاسم صار يحمل معرّف الذاكرة.
   const { memory, catalog } = setup();
-  const first = await memory.remember('agent:a', 'one');
-  const second = await memory.remember('agent:a', 'two');
+  const first = await memory.remember('agent:a', 'one', { actor: agentActor() });
+  const second = await memory.remember('agent:a', 'two', { actor: agentActor() });
   assert.notEqual(first.datasetId, second.datasetId);
   assert.ok(await catalog.get(first.datasetId));
   assert.ok(await catalog.get(second.datasetId));

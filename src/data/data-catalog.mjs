@@ -203,24 +203,12 @@ export class DataCatalog {
     return toRecord(updated);
   }
 
-  /**
-   * يقرّر إتاحة القراءة بمقارنة مستوى التصريح بمستوى التصنيف، ويسجّل الإتاحة
-   * عند القبول. الرفض يُرفع كخطأ لا يُرجَع كقيمة، فلا يمكن تجاهله بالإهمال.
-   * @param {string} id
-   * @param {string} actor - من يطلب القراءة، يُسجَّل عند الإتاحة
-   * @param {unknown} clearance - مستوى التصريح؛ غير المعروف يسقط دون كل المستويات
-   * @returns {Promise<true>}
-   */
-  async canRead(id, actor, clearance) {
-    const row = await this.repository.findById(id);
-    if (row === null) throw new Error('DATASET_NOT_FOUND');
-    const record = toRecord(row);
-    if (!this.lattice.dominates(clearance, record.classification)) {
-      throw new Error('DATA_ACCESS_DENIED');
-    }
-    this.log.append('data.read.authorized', actor, { id });
-    return true;
-  }
+  // قرار الإتاحة **ليس هنا** — الخطوة `M7.02`. كانت في هذا الموضع دالّة
+  // `canRead(id, actor, clearance)` تقارن تصريحاً **يمرّره المُنادي** بتصنيف الأصل
+  // بلا سياسةٍ تُقيَّم ولا تذكرةٍ تُحقَّق ولا رفضٍ يُسجَّل: فمن نادى بـ«sovereign» قرأ
+  // السيادي. ومن يمرّر تصريحه يخترعه — وهو نفس عيب «الاعتماد حقلٌ في الطلب».
+  // فحُذفت، وصار الوصول من `src/data/access-gate.mjs` وحدها: تفويضٌ فتخليصٌ
+  // مشتقٌّ من الدور فتذكرةٌ قبل الأثر، وكلُّ رفضٍ مسجَّلٌ ومُبلَّغٌ للحاجب.
 
   /**
    * يُعيد تصنيف أصل بيانات — الخطوة `M7.01`.

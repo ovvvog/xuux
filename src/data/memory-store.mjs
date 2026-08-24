@@ -73,11 +73,25 @@ export class AgentMemoryStore {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MEMORY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null }} [deps]
+   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null }} [deps]
    */
-  constructor({ catalog, log, repository, maxEntries = 100000, transaction = null } = {}) {
+  constructor({
+    catalog,
+    log,
+    repository,
+    maxEntries = 100000,
+    transaction = null,
+    accessGate = null,
+  } = {}) {
     if (!catalog || !log || !repository) throw new Error('MEMORY_DEPENDENCY_MISSING');
     this.catalog = catalog;
+    /**
+     * بوابة الوصول (الخطوة `M7.02`). اختيارية في **التركيب** لا في الفعل: مخزنٌ
+     * بلا بوابة **يرفض** الاستدعاء والتذكّر برمز `MEMORY_ACCESS_GATE_REQUIRED`
+     * ولا يمرّرهما بقرارٍ ناقص — فالتركيب الناقص ليس مساراً جانبياً.
+     * @type {import('./access-gate.mjs').DataAccessGate | null}
+     */
+    this.accessGate = accessGate;
     this.log = log;
     /** @type {MemoryRepository} */
     this.repository = repository;
@@ -105,10 +119,18 @@ export class AgentMemoryStore {
    * يكن يظهر في `Map` بلا قيد فريد.
    * @param {string} agentId
    * @param {unknown} content
-   * @param {{ classification?: import('./classification.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[] }} [options]
+   * @param {{ classification?: import('./classification.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[], actor?: import('../policy/model.mjs').PolicyActor }} [options]
    * @returns {Promise<MemoryEntry>}
    */
   async remember(agentId, content, options = {}) {
+    // الكتابة قرار إتاحة أيضاً: من يحمل تخليصاً عالياً لا يُنشئ مادةً مصنّفة أدنى
+    // منه، لأن ذلك ينقل ما يعرفه إلى مرتبةٍ يقرؤها من هو أدنى منه بلا إعادة تصنيف.
+    if (this.accessGate === null) throw new Error('MEMORY_ACCESS_GATE_REQUIRED');
+    const actor = options.actor;
+    if (actor === undefined || typeof actor.role !== 'string') {
+      throw new Error('MEMORY_ACTOR_REQUIRED');
+    }
+    this.accessGate.assertNoWriteDown(actor, options.classification ?? 'internal');
     // كتابتان: عقد بيانات ثم ذاكرة تحيل إليه. إن أخفقت الثانية بقي عقدٌ بلا
     // ذاكرة — أثرٌ لا يقوله أحد. فحين يوجد مُشغّل معاملة تُلَفّان معاً.
     if (this.transaction === null) return this.#write(agentId, content, options);
@@ -122,7 +144,7 @@ export class AgentMemoryStore {
    * جسم «تذكّر» بلا معاملة — يُنادى مباشرةً أو داخل وحدة عمل.
    * @param {string} agentId
    * @param {unknown} content
-   * @param {{ classification?: import('./classification.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[] }} options
+   * @param {{ classification?: import('./classification.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[], actor?: import('../policy/model.mjs').PolicyActor }} options
    * @returns {Promise<MemoryEntry>}
    */
   async #write(
@@ -156,18 +178,38 @@ export class AgentMemoryStore {
   }
 
   /**
-   * يستدعي ذاكرة. شرطان معاً: ملكية المدخل، وإتاحة الفهرس بمستوى التصريح.
-   * @param {string} agentId
-   * @param {string} id
-   * @param {import('./classification.mjs').ClassificationValue} [clearance='internal']
+   * يستدعي ذاكرة. شرطان معاً: **ملكية** المدخل، و**قرار إتاحة كامل** من بوابة
+   * الوصول على عقد البيانات المقابل (الخطوة `M7.02`).
+   *
+   * كان التوقيع `recall(agentId, id, clearance)` والتصريح **يُمرَّر** فيُقارن بتصنيف
+   * الأصل: فمن نادى بـ`'sovereign'` قرأ. صار التخليص يُشتقّ من دور الفاعل بعد
+   * تفويضٍ يتحقّق من هويته، والمادّة لا تُعاد إلا بعد التحقّق من تذكرة القرار.
+   * الملكية تُقاس بالفاعل لا بوسيطٍ يُمرَّر: الوكيل يستدعي ما كتبه هو، ومن ليس
+   * وكيلاً (مراجعٌ أو وزير) يستدعي ذاكرة غيره **بقرار البوابة** لا بحقٍّ ذاتي.
+   * @param {{ id: string, actor: import('../policy/model.mjs').PolicyActor, agentId?: string, purpose?: string }} request
    * @returns {Promise<MemoryEntry>}
    */
-  async recall(agentId, id, clearance = 'internal') {
+  async recall({ id, actor, agentId, purpose = 'agent-recall' }) {
+    if (this.accessGate === null) throw new Error('MEMORY_ACCESS_GATE_REQUIRED');
+    if (actor === undefined || typeof actor.id !== 'string')
+      throw new Error('MEMORY_ACTOR_REQUIRED');
     const row = await this.repository.findById(id);
-    if (row === null || row['agentId'] !== agentId) throw new Error('MEMORY_NOT_FOUND');
+    if (row === null) throw new Error('MEMORY_NOT_FOUND');
+    if (agentId !== undefined && row['agentId'] !== agentId) throw new Error('MEMORY_NOT_FOUND');
+    // الوكيل محصورٌ في ذاكرته: لو قُيس المالك بوسيطٍ يُمرَّره المُنادي لصار كلُّ
+    // مَن يعرف معرّف وكيلٍ آخر يقرأ ذاكرته بذكر اسمه.
+    if (actor.role === 'role:agent' && row['agentId'] !== actor.id) {
+      throw new Error('MEMORY_NOT_FOUND');
+    }
     const entry = toEntry(row);
-    await this.catalog.canRead(entry.datasetId, agentId, clearance);
-    return entry;
+    return /** @type {Promise<MemoryEntry>} */ (
+      this.accessGate.read({
+        actor,
+        assetId: entry.datasetId,
+        purpose,
+        reader: () => entry,
+      })
+    );
   }
 
   /**

@@ -88,6 +88,12 @@ actions:
   - id: reclassify-data
     description: تغيير تصنيف حساسية أصل بيانات، رفعاً أو إنزالاً.
     sensitive: true
+  - id: read-data
+    description: قراءة مادة أصل بيانات مفهرس عبر بوابة الوصول.
+    sensitive: true
+  - id: write-data
+    description: الكتابة في أصل بيانات مفهرس عبر بوابة الوصول.
+    sensitive: true
 
 policies:
   # ── الممنوع منعاً مطلقاً: أولوية 1000 فلا سماح يعلو عليه ──
@@ -333,6 +339,66 @@ policies:
       - attribute: resource.scope
         operator: eq
         value: '{actor.scope}'
+
+  # ── الوصول إلى البيانات: قراءةً وكتابةً — M7.02 ──
+  #
+  # قرار الإتاحة قراران لا قرار واحد: السياسة تقول **من** يقرأ ويكتب، والسلّم
+  # يقول **ماذا** يبلغ تخليصه. ولا يكفي أحدهما: سياسةٌ بلا سلّم تُتيح لوزيرٍ قراءة
+  # السيادي، وسلّمٌ بلا سياسة يُتيح لكل من بلغ تخليصه أن يكتب في أصل غيره.
+  - id: pol:deny-agent-read-sovereign
+    name: منع قراءة الوكلاء للمادة السيادية
+    owner: crown
+    version: 1
+    effect: deny
+    priority: 850
+    reason: الوكيل منفّذٌ لا مطّلع؛ مادة القرار السيادي لا تمرّ في سياق نموذجٍ يُستدعى بطلب.
+    lawRef: law:data-sovereignty
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:agent']
+    actions: ['read-data']
+    resources: ['data:*']
+    conditions:
+      - attribute: resource.classification
+        operator: eq
+        value: sovereign
+
+  - id: pol:read-data-cleared
+    name: قراءة البيانات لمن أُعلن تخليصه
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: القراءة فعلٌ يومي؛ يُؤذن به للأدوار المخلَّصة ويبقى قرار السلّم فوقه فلا يقرأ أحد فوق تخليصه.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles:
+        [
+          'role:king',
+          'role:chief-justice',
+          'role:minister',
+          'role:auditor',
+          'role:operator',
+          'role:agent',
+        ]
+    actions: ['read-data']
+    resources: ['data:*']
+
+  - id: pol:write-data-operators
+    name: الكتابة في البيانات للمنفّذين
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: الكتابة تُنسب إلى منفّذٍ مسجَّل؛ والمراجع يقرأ ولا يكتب كي لا يراجع أثرَ نفسه.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:king', 'role:minister', 'role:operator', 'role:agent']
+    actions: ['write-data']
+    resources: ['data:*']
 
   - id: pol:reclassify-data-owners
     name: إعادة تصنيف البيانات للوزير والمُدقِّق

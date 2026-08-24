@@ -13,6 +13,7 @@
 
 import { ClassificationApprovalRegistry } from '../data/approvals.mjs';
 import { loadClassificationLattice } from '../data/classification.mjs';
+import { DataAccessGate } from '../data/access-gate.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
@@ -55,6 +56,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {AgentRegistry} agents
  * @property {ModelRegistry} models
  * @property {DataCatalog} catalog
+ * @property {DataAccessGate} accessGate
  * @property {AgentMemoryStore} memory
  * @property {LawRegistry} laws
  * @property {ClassificationApprovalRegistry} approvals
@@ -140,6 +142,16 @@ export function createRegistries({
     approvals,
     enforcementPoint,
   });
+  // بوابة الوصول تُركَّب **دائماً** (الخطوة `M7.02`): لو كانت اختيارية لصار تركُها
+  // مساراً لقراءةٍ بلا قرار — وهو بالضبط ما أغلقته هذه الخطوة. وهي بلا نقطة تفويض
+  // ترفض كل قراءة وكتابة، فالتركيب الناقص يظهر رفضاً لا سماحاً.
+  const accessGate = new DataAccessGate({
+    log,
+    catalog,
+    lattice: classificationLattice,
+    enforcementPoint,
+    quarantine,
+  });
   // مخزن الأوزان يُركَّب دائماً: لو كان اختياريّاً لصار تركه مساراً لتنشيطٍ
   // بلا فحص بصمة، وهو بالضبط ما يمنعه M6.06.
   const weights =
@@ -163,11 +175,13 @@ export function createRegistries({
       ...(limits.maxModels === undefined ? {} : { maxModels: limits.maxModels }),
     }),
     catalog,
+    accessGate,
     memory: new AgentMemoryStore({
       catalog,
       log,
       repository: repositories.memories,
       transaction,
+      accessGate,
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),
     laws: new LawRegistry({ log, repository: repositories.laws }),
@@ -192,13 +206,24 @@ export function createRegistries({
  * @returns {StateRegistries}
  */
 export function createPostgresRegistries({ pool, ca, log, limits = {}, enforcementPoint = null }) {
+  // السلّم يُحمَّل مرّة واحدة ويُمرَّر إلى السجلات داخل المعاملة أيضاً: تحميلُه في كل
+  // معاملة يقرأ الملف على كل كتابة، وسلّمان في عمليةٍ واحدة يفتحان انحرافاً.
+  const classificationLattice = loadClassificationLattice();
   /** @type {StateTransaction} */
   const transaction = (work) =>
     withUnitOfWork(pool, (repositories) =>
       // المستودعات داخل المعاملة تُركّب سجلاتٍ جديدة بنفس الحدود ونفس السجل،
       // ولا تُمرَّر لها معاملةٌ أخرى: معاملة داخل معاملة ليست ذرّية.
       work(
-        createRegistries({ ca, log, repositories, limits, transaction: null, enforcementPoint }),
+        createRegistries({
+          ca,
+          log,
+          repositories,
+          limits,
+          transaction: null,
+          enforcementPoint,
+          lattice: classificationLattice,
+        }),
       ),
     );
   return createRegistries({
@@ -208,5 +233,6 @@ export function createPostgresRegistries({ pool, ca, log, limits = {}, enforceme
     limits,
     transaction,
     enforcementPoint,
+    lattice: classificationLattice,
   });
 }

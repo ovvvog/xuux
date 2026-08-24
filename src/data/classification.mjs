@@ -111,9 +111,9 @@ export const Classification = Object.freeze({
  */
 export class ClassificationLattice {
   /**
-   * @param {{ version: number, owner: string, tiers: readonly ClassificationTier[], aliases: ReadonlyMap<string, ClassificationValue>, promotion: PromotionRules, demotion: DemotionRules }} parts
+   * @param {{ version: number, owner: string, tiers: readonly ClassificationTier[], aliases: ReadonlyMap<string, ClassificationValue>, clearances?: ReadonlyMap<string, ClassificationValue>, promotion: PromotionRules, demotion: DemotionRules }} parts
    */
-  constructor({ version, owner, tiers, aliases, promotion, demotion }) {
+  constructor({ version, owner, tiers, aliases, clearances = new Map(), promotion, demotion }) {
     /** @type {number} */
     this.version = version;
     /** @type {string} */
@@ -122,6 +122,13 @@ export class ClassificationLattice {
     this.tiers = Object.freeze([...tiers].sort((a, b) => a.rank - b.rank));
     /** @type {ReadonlyMap<string, ClassificationValue>} */
     this.aliases = aliases;
+    /**
+     * التخليص الأمني لكل دور — بيانٌ في `config/classification.yaml` (الخطوة
+     * `M7.02`)، لا قيمةٌ يمرّرها الطالب. دورٌ غير مذكور لا تخليص له، ويردّ
+     * `clearanceFor` عنه `null` فيُرفض وصولُه بدل أن يُفترض له أدنى مرتبة.
+     * @type {ReadonlyMap<string, ClassificationValue>}
+     */
+    this.clearances = clearances;
     /** @type {PromotionRules} */
     this.promotion = Object.freeze({ ...promotion });
     /** @type {DemotionRules} */
@@ -189,6 +196,23 @@ export class ClassificationLattice {
     const required = this.rank(classification);
     if (required < 0) return false;
     return this.rank(clearance) >= required;
+  }
+
+  /**
+   * التخليص المعلَن لدور. **الجهل رفضٌ لا افتراض:** دورٌ لا تُعلن له مرتبة يردّ
+   * `null`، والمُنادي يرفض به — ومن أعاد «public» هنا لدورٍ مجهول جعل كل مجهولٍ
+   * قارئاً.
+   * @param {unknown} role
+   * @returns {ClassificationValue | null}
+   */
+  clearanceFor(role) {
+    if (typeof role !== 'string') return null;
+    return this.clearances.get(role) ?? null;
+  }
+
+  /** @returns {readonly string[]} الأدوار التي أُعلن لها تخليص */
+  get clearedRoles() {
+    return Object.freeze([...this.clearances.keys()]);
   }
 
   /**
@@ -272,10 +296,10 @@ function readSchema(dir) {
 /**
  * فحوص تماسك لا يبلغها المخطط: تفرّد المُعرّفات والرتب، وتلاصق السلّم من الصفر،
  * وتطابق البيانات مع تعداد الكود، وسلامة المترادفات.
- * @param {{ tiers: ClassificationTier[], aliasEntries: Array<{ from: string, to: string }> }} parts
+ * @param {{ tiers: ClassificationTier[], aliasEntries: Array<{ from: string, to: string }>, clearanceEntries?: Array<{ role: string, tier: string }> }} parts
  * @returns {void}
  */
-function assertCoherent({ tiers, aliasEntries }) {
+function assertCoherent({ tiers, aliasEntries, clearanceEntries = [] }) {
   /** @param {string} message @returns {never} */
   const fail = (message) => {
     throw new ClassificationError(CLASSIFICATION_ERRORS.LATTICE_INCOHERENT, message);
@@ -331,6 +355,19 @@ function assertCoherent({ tiers, aliasEntries }) {
     if (seenAlias.has(alias.from)) fail(`مترادف مكرّر: ${alias.from}.`);
     seenAlias.add(alias.from);
   }
+
+  const seenRole = new Set();
+  for (const entry of clearanceEntries) {
+    if (!declared.has(/** @type {never} */ (entry.tier))) {
+      fail(`تخليص الدور «${entry.role}» يحيل إلى مرتبة غير معلنة «${entry.tier}».`);
+    }
+    if (seenRole.has(entry.role)) {
+      fail(
+        `تخليص مكرّر للدور «${entry.role}»؛ دورٌ بتخليصين يجعل قرار الإتاحة رهنَ ترتيب القراءة.`,
+      );
+    }
+    seenRole.add(entry.role);
+  }
 }
 
 /**
@@ -354,12 +391,13 @@ export function loadClassificationLattice({ dir = DEFAULT_CONFIG_DIR } = {}) {
   }
 
   const parsed =
-    /** @type {{ version: number, owner: string, tiers: ClassificationTier[], aliases?: Array<{ from: string, to: string }>, promotion: PromotionRules, demotion: DemotionRules }} */ (
+    /** @type {{ version: number, owner: string, tiers: ClassificationTier[], aliases?: Array<{ from: string, to: string }>, clearances?: Array<{ role: string, tier: string }>, promotion: PromotionRules, demotion: DemotionRules }} */ (
       raw
     );
   const aliasEntries = parsed.aliases ?? [];
+  const clearanceEntries = parsed.clearances ?? [];
   const tiers = parsed.tiers.map((tier) => Object.freeze({ ...tier }));
-  assertCoherent({ tiers: [...tiers], aliasEntries });
+  assertCoherent({ tiers: [...tiers], aliasEntries, clearanceEntries });
 
   return new ClassificationLattice({
     version: parsed.version,
@@ -367,6 +405,12 @@ export function loadClassificationLattice({ dir = DEFAULT_CONFIG_DIR } = {}) {
     tiers,
     aliases: new Map(
       aliasEntries.map((alias) => [alias.from, /** @type {ClassificationValue} */ (alias.to)]),
+    ),
+    clearances: new Map(
+      clearanceEntries.map((entry) => [
+        entry.role,
+        /** @type {ClassificationValue} */ (entry.tier),
+      ]),
     ),
     promotion: parsed.promotion,
     demotion: parsed.demotion,

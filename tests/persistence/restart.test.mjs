@@ -24,6 +24,7 @@ import {
 } from '../../src/persistence/composition.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, databaseUrl, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 
 /**
  * مجمّع جديد على نفس القاعدة — يمثّل عمليةً جديدة لا تعرف شيئاً عن سابقتها.
@@ -57,11 +58,18 @@ test(
       const king = new KingIdentity();
       const ca = new CertificateAuthority(king);
 
+      // نقطة التفويض تُمرَّر لأن الوصول إلى البيانات صار يمرّ ببوابةٍ تُقيّم السياسة
+      // (`M7.02`): سجلاتٌ بلا نقطة تفويض ترفض كل قراءة وكتابة، والمقيس هنا النجاة
+      // من إعادة التشغيل لا التركيب الناقص.
+      const beforeLog = new EventLog();
       const before = createRegistries({
         ca,
-        log: new EventLog(),
+        log: beforeLog,
         repositories: createPostgresRepositories(created.pool),
+        enforcementPoint: enforcementPointFor(beforeLog),
       });
+      // مشغّلٌ تخليصه «internal»: يكتب ذاكرةً داخلية بلا كتابةٍ إلى الأسفل.
+      const operator = testActor('role:operator');
 
       const agent = await before.agents.register({
         name: 'مدقّق-الاستمرارية',
@@ -98,7 +106,11 @@ test(
         retentionDays: 3650,
       });
       await before.catalog.markQuality(dataset.id, 'verified');
-      const memory = await before.memory.remember(agent.id, { note: 'ما يجب أن يبقى' });
+      const memory = await before.memory.remember(
+        agent.id,
+        { note: 'ما يجب أن يبقى' },
+        { actor: operator },
+      );
       const law = await before.laws.propose({
         title: 'استمرارية الحالة',
         text: 'ما لا يبقى بعد إعادة التشغيل لا يُحكم به',
@@ -111,10 +123,12 @@ test(
       // لا يقرأ شيئاً من ذاكرة العملية السابقة إلا المعرّفات التي نتحقّق منها.
       await created.pool.end();
       second = reconnect(created.name);
+      const afterLog = new EventLog();
       const after = createRegistries({
         ca,
-        log: new EventLog(),
+        log: afterLog,
         repositories: createPostgresRepositories(second),
+        enforcementPoint: enforcementPointFor(afterLog),
       });
 
       const recoveredAgent = await after.agents.get(agent.id);
@@ -150,17 +164,25 @@ test(
       assert.equal(recoveredDataset.classification, 'sovereign');
       assert.equal(recoveredDataset.quality, 'verified');
       assert.deepEqual(recoveredDataset.lineage, [{ from: 'command' }]);
+      // التصنيف نجا من إعادة التشغيل ⇒ بوابة الوصول ترفض قراءته بتخليصٍ أدنى.
+      // القرار صار في البوابة لا في الفهرس (`M7.02`)، والمقيس أن **البيانات**
+      // المستعادة هي ما يبني الرفض.
       await assert.rejects(
-        () => after.catalog.canRead(dataset.id, agent.id, 'internal'),
-        /DATA_ACCESS_DENIED/,
-        'التصنيف السيادي ضاع فصار يُقرأ بتصريح أدنى',
+        () =>
+          after.accessGate.read({
+            actor: operator,
+            assetId: dataset.id,
+            reader: () => 'مادة سيادية',
+          }),
+        /تخليص/,
+        'التصنيف السيادي ضاع فصار يُقرأ بتخليصٍ أدنى',
       );
 
-      const recalled = await after.memory.recall(agent.id, memory.id, 'sovereign');
+      const recalled = await after.memory.recall({ id: memory.id, actor: operator });
       assert.deepEqual(recalled.content, { note: 'ما يجب أن يبقى' });
       assert.equal(recalled.datasetId, memory.datasetId);
       await assert.rejects(
-        () => after.memory.recall('agent:غريب', memory.id, 'sovereign'),
+        () => after.memory.recall({ id: memory.id, agentId: 'agent:غريب', actor: operator }),
         /MEMORY_NOT_FOUND/,
         'عزل الذاكرة بالهوية ضاع بعد إعادة التشغيل',
       );

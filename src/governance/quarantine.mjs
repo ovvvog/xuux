@@ -67,6 +67,11 @@ export const ANOMALY_KINDS = Object.freeze({
     severity: IncidentSeverity.CRITICAL,
     reason: 'هوية الفاعل لا يؤكّدها جذر الثقة',
   }),
+  'clearance-denied': Object.freeze({
+    threshold: 3,
+    severity: IncidentSeverity.HIGH,
+    reason: 'محاولات وصولٍ إلى بيانات بلا تخليص كافٍ — تكرارُها مسحٌ لا خطأ',
+  }),
   'egress-refused': Object.freeze({
     threshold: 3,
     severity: IncidentSeverity.HIGH,
