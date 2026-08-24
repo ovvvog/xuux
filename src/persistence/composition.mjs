@@ -15,7 +15,9 @@ import { DataCatalog } from '../data/data-catalog.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
+import path from 'node:path';
 import { ModelRegistry } from '../models/model-registry.mjs';
+import { createWeightStore } from '../models/weight-store.mjs';
 import { AGENT_SPEC, DATA_ASSET_SPEC, LAW_SPEC, MEMORY_SPEC, MODEL_SPEC } from './entities.mjs';
 import { createMemoryRepository } from './repository-memory.mjs';
 import { createPostgresRepository } from './repository-postgres.mjs';
@@ -88,10 +90,29 @@ export function createPostgresRepositories(pool) {
  * @param {{ maxAgents?: number, maxModels?: number, maxEntries?: number }} [deps.limits]
  * @param {StateTransaction | null} [deps.transaction] مُشغّل معاملة، يُمرَّر حين
  *   تكون المستودعات على قاعدة كي تصير العمليات المركّبة ذرّية.
+ * @param {import('../models/weight-store.mjs').WeightStore | null} [deps.weightStore] مخزن
+ *   الأوزان المعنوَن بالمحتوى (M6.06). إن لم يُمرَّر فُتحيّز الجذر من `WEIGHTS_DIR`
+ *   أو `.state/weights`؛ فالتنشيط لا يقع بلا إعادة حساب البصمة في أي تركيب.
+ * @param {{ report: (signal: object) => unknown } | null} [deps.quarantine] حاجب الحجر (M6.09).
  * @returns {StateRegistries}
  */
-export function createRegistries({ ca, log, repositories, limits = {}, transaction = null }) {
+export function createRegistries({
+  ca,
+  log,
+  repositories,
+  limits = {},
+  transaction = null,
+  weightStore = null,
+  quarantine = null,
+}) {
   const catalog = new DataCatalog({ log, repository: repositories.dataAssets });
+  // مخزن الأوزان يُركَّب دائماً: لو كان اختياريّاً لصار تركه مساراً لتنشيطٍ
+  // بلا فحص بصمة، وهو بالضبط ما يمنعه M6.06.
+  const weights =
+    weightStore ??
+    createWeightStore({
+      root: process.env['WEIGHTS_DIR'] ?? path.join(process.cwd(), '.state/weights'),
+    });
   return {
     agents: new AgentRegistry({
       ca,
@@ -103,6 +124,8 @@ export function createRegistries({ ca, log, repositories, limits = {}, transacti
       log,
       repository: repositories.models,
       transaction,
+      weightStore: weights,
+      quarantine,
       ...(limits.maxModels === undefined ? {} : { maxModels: limits.maxModels }),
     }),
     catalog,

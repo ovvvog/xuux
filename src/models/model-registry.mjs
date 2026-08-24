@@ -92,11 +92,26 @@ export class ModelRegistry {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MODEL_REGISTRY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: ModelRepository, maxModels?: number, transaction?: import('../persistence/composition.mjs').StateTransaction | null }} [deps]
+   * @param {{ log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: ModelRepository, maxModels?: number, transaction?: import('../persistence/composition.mjs').StateTransaction | null, weightStore?: import('./weight-store.mjs').WeightStore | null, quarantine?: { report: (signal: object) => unknown } | null }} [deps]
    */
-  constructor({ log, repository, maxModels = 10000, transaction = null } = {}) {
+  constructor({
+    log,
+    repository,
+    maxModels = 10000,
+    transaction = null,
+    weightStore = null,
+    quarantine = null,
+  } = {}) {
     if (!log || !repository) throw new Error('MODEL_REGISTRY_DEPENDENCY_MISSING');
     this.log = log;
+    /**
+     * مخزن الأوزان المعنوَن بالمحتوى (M6.06). بغيره لا يُنشَّط نموذج: التنشيط
+     * بلا إعادة حساب البصمة ثقةٌ بوصفٍ محفوظ، وهو ما كان العيب.
+     * @type {import('./weight-store.mjs').WeightStore | null}
+     */
+    this.weightStore = weightStore;
+    /** @type {{ report: (signal: object) => unknown } | null} */
+    this.quarantine = quarantine;
     /** @type {ModelRepository} */
     this.repository = repository;
     this.maxModels = maxModels;
@@ -132,6 +147,11 @@ export class ModelRegistry {
     if (capabilities.some((x) => FORBIDDEN_CAPABILITIES.has(x)))
       throw new Error('FORBIDDEN_MODEL_CAPABILITY');
     const fingerprint = createHash('sha256').update(weights).digest('hex');
+    // الأوزان تُخزَّن معنوَنةً بمحتواها كي تُعاد قراءتها عند كل تنشيط (M6.06).
+    if (this.weightStore !== null) {
+      const stored = this.weightStore.put(weights);
+      if (stored !== fingerprint) throw new Error('MODEL_FINGERPRINT_MISMATCH');
+    }
     const id = 'model:' + randomUUID();
     const row = await this.repository.insert({
       id,
@@ -225,6 +245,7 @@ export class ModelRegistry {
     if (row === null) throw new Error('MODEL_NOT_APPROVED');
     const model = toModel(row);
     if (model.state !== ModelState.APPROVED) throw new Error('MODEL_NOT_APPROVED');
+    this.#verifyFingerprintOrRefuse(model);
     const previous = await this.getActive(model.purpose);
     if (previous !== null && previous.id === id) return model;
     if (previous !== null) {
@@ -269,6 +290,49 @@ export class ModelRegistry {
   async get(id) {
     const row = await this.repository.findById(id);
     return row === null ? null : toModel(row);
+  }
+
+  /**
+   * يعيد حساب بصمة الأوزان المخزَّنة قبل كل تنشيط — M6.06.
+   *
+   * الفحص قبل الكتابة لا بعدها: تنشيطٌ يُلغى لاحقاً يعني أن النموذج كان نشطاً
+   * لحظةً، ولحظةٌ واحدة تكفي لاستدلالات. والرفض يُسجَّل ويُبلَّغ الحجر الصحّي
+   * (M6.09): تبدّل أوزانٍ بعد الاعتماد شذوذٌ لا خطأ مستخدم.
+   * @param {ModelRecord} model
+   * @returns {void}
+   */
+  #verifyFingerprintOrRefuse(model) {
+    if (this.weightStore === null) {
+      this.log.append('model.activation-refused', 'crown', {
+        id: model.id,
+        code: 'MODEL_WEIGHT_STORE_MISSING',
+      });
+      throw new Error('MODEL_WEIGHT_STORE_MISSING');
+    }
+    try {
+      const { bytes } = this.weightStore.verify(model.fingerprint);
+      this.log.append('model.fingerprint-verified', 'crown', {
+        id: model.id,
+        fingerprint: model.fingerprint,
+        bytes,
+      });
+    } catch (error) {
+      const code = /** @type {{ code?: string }} */ (error).code ?? 'MODEL_FINGERPRINT_MISMATCH';
+      this.log.append('model.activation-refused', 'crown', {
+        id: model.id,
+        code,
+        fingerprint: model.fingerprint,
+      });
+      if (this.quarantine !== null) {
+        this.quarantine.report({
+          kind: 'model-fingerprint-mismatch',
+          subject: model.id,
+          detail: { code, fingerprint: model.fingerprint },
+        });
+      }
+      // السبب يُرفق: رمز الخطأ للأتمتة والسبب الأصلي لمن يقرأ الأثر.
+      throw new Error(code, { cause: error });
+    }
   }
 
   /**

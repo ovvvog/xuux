@@ -3,10 +3,27 @@ import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import { ModelRegistry, ModelState, ModelSandbox } from '../../src/models/index.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { createWeightStore } from '../../src/models/weight-store.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * مخزن أوزان في مجلّد مؤقّت: التنشيط صار يعيد حساب البصمة (M6.06)، فسجلٌّ بلا
+ * مخزن لا يُنشّط شيئاً — وذلك مقصود لا عائق.
+ * @returns {import('../../src/models/weight-store.mjs').WeightStore}
+ */
+function temporaryWeightStore() {
+  return createWeightStore({ root: fs.mkdtempSync(path.join(os.tmpdir(), 'weights-')) });
+}
 
 /** @returns {ModelRegistry} */
 function registry(log = new EventLog()) {
-  return new ModelRegistry({ log, repository: createMemoryRepository(ModelRegistry.spec) });
+  return new ModelRegistry({
+    log,
+    repository: createMemoryRepository(ModelRegistry.spec),
+    weightStore: temporaryWeightStore(),
+  });
 }
 
 test('registers model with immutable weight digest', async () => {

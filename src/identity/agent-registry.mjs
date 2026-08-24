@@ -62,6 +62,10 @@ import { IncidentSeverity } from './incident-register.mjs';
 export const AgentState = Object.freeze({
   ACTIVE: 'active',
   SUSPENDED: 'suspended',
+  // الحجر الصحّي (M6.09) حالةٌ مفصولة عن التعليق: التعليق قرارٌ إداري،
+  // والحجر عزلٌ تلقائي على شذوذ مقيس. خلطهما يُضيّع الفرق في المراجعة.
+  // والقيمة مقبولة أصلاً في قيد القاعدة (الهجرة 0002) فلا تحتاج هجرةً جديدة.
+  QUARANTINED: 'quarantined',
   REVOKED: 'revoked',
   RETIRED: 'retired',
 });

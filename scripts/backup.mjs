@@ -16,11 +16,14 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import pg from 'pg';
 import { fileURLToPath } from 'node:url';
+import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-tools.mjs';
 
 const STATE_SCHEMA = 'state';
 const MIGRATION_LEDGER = 'schema_migrations';
-const PG_DUMP = '/usr/bin/pg_dump';
-const PG_RESTORE = '/usr/bin/pg_restore';
+// المسار لا يُثبَّت نصّاً: عميلٌ أقدم من الخادم يرفض القراءة، وقد أسقط ذلك بوابة
+// الفحص كلها في WL-022. فالأداة تُختار من أعلى إصدار مثبَّت فعلاً.
+const pgDump = () => resolvePgTool('pg_dump');
+const pgRestore = () => resolvePgTool('pg_restore');
 
 export const BACKUP_ERRORS = Object.freeze({
   ARGUMENT: 'BACKUP_ARGUMENT',
@@ -31,6 +34,7 @@ export const BACKUP_ERRORS = Object.freeze({
   HASH_MISMATCH: 'BACKUP_HASH_MISMATCH',
   DUMP_UNREADABLE: 'BACKUP_DUMP_UNREADABLE',
   COMMAND_FAILED: 'BACKUP_COMMAND_FAILED',
+  TOOL_UNUSABLE: 'BACKUP_TOOL_UNUSABLE',
 });
 
 /** خطأ مسمّى كي تميّز الأتمتة سبب الفشل من نصه العربي. */
@@ -237,6 +241,28 @@ function parseArguments(argv) {
 }
 
 /**
+ * يختار الأداة ويتحقّق أنّ إصدارها لا يقلّ عن إصدار الخادم **قبل** التنفيذ.
+ *
+ * الفحص قبليّ لا بعديّ لأن الفشل بعد التنفيذ يترك ملفاً ناقصاً يُظنّ نسخة،
+ * ولأن رمز الخروج 1 من أداة خارجيّة لا يقول للقارئ إنّ السبب فرقُ إصدار.
+ * @param {string} serverVersion إصدار الخادم كما أجاب به.
+ * @returns {Promise<string>} مسار `pg_dump` القابل للاستخدام.
+ */
+export async function resolveVerifiedDumpTool(serverVersion) {
+  try {
+    const toolPath = pgDump();
+    const clientVersion = await readToolVersion(toolPath);
+    assertClientNotOlder({ toolPath, clientVersion, serverVersion });
+    return toolPath;
+  } catch (error) {
+    throw new BackupError(
+      BACKUP_ERRORS.TOOL_UNUSABLE,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/**
  * أنشئ نسخة بصيغة PostgreSQL المخصّصة وبيانها المجاور.
  * @param {string} dumpPath
  * @param {string} databaseUrl
@@ -247,6 +273,7 @@ export async function createBackup(dumpPath, databaseUrl) {
   const pool = new pg.Pool({ connectionString: requireDatabaseUrl(databaseUrl), max: 1 });
   try {
     const before = await inspectDatabase(pool);
+    const dumpTool = await resolveVerifiedDumpTool(before.databaseVersion);
     fs.mkdirSync(path.dirname(dumpPath), { recursive: true });
     const ledgerStagingTable = `__backup_schema_migrations_${crypto.randomBytes(6).toString('hex')}`;
     await stageMigrationLedger(pool, ledgerStagingTable);
@@ -254,7 +281,7 @@ export async function createBackup(dumpPath, databaseUrl) {
     /** @type {{ code: number, stderr: string }} */
     let result;
     try {
-      result = await run(PG_DUMP, [
+      result = await run(dumpTool, [
         '--format=custom',
         '--file',
         dumpPath,
@@ -343,7 +370,7 @@ export async function verifyBackup(dumpPath) {
       `تجزئة النسخة لا تطابق البيان: المتوقعة ${manifest.sha256} والفعلية ${actual}.`,
     );
   }
-  const result = await run(PG_RESTORE, ['--list', dumpPath]);
+  const result = await run(pgRestore(), ['--list', dumpPath]);
   if (result.code !== 0) {
     throw new BackupError(
       BACKUP_ERRORS.DUMP_UNREADABLE,

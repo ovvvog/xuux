@@ -16,10 +16,12 @@ import { spawn } from 'node:child_process';
 import pg from 'pg';
 import { fileURLToPath } from 'node:url';
 import { BACKUP_ERRORS, BackupError, readManifest, verifyBackup } from './backup.mjs';
+import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-tools.mjs';
 
 const STATE_SCHEMA = 'state';
 const MIGRATION_LEDGER = 'schema_migrations';
-const PG_RESTORE = '/usr/bin/pg_restore';
+// لا مسار موقّت نصّاً: راجع WL-022 و`scripts/lib/pg-tools.mjs`.
+const pgRestore = () => resolvePgTool('pg_restore');
 
 export const RESTORE_ERRORS = Object.freeze({
   ARGUMENT: 'RESTORE_ARGUMENT',
@@ -30,6 +32,7 @@ export const RESTORE_ERRORS = Object.freeze({
   LEDGER_MISSING: 'RESTORE_LEDGER_MISSING',
   ROW_COUNT_MISMATCH: 'RESTORE_ROW_COUNT_MISMATCH',
   MIGRATION_VERSION_MISMATCH: 'RESTORE_MIGRATION_VERSION_MISMATCH',
+  TOOL_UNUSABLE: 'RESTORE_TOOL_UNUSABLE',
 });
 
 /** خطأ مسمّى يجعل فشل الاستعادة صالحاً للبوابات والأتمتة. */
@@ -264,6 +267,25 @@ function sameCounts(expected, actual) {
 }
 
 /**
+ * يختار `pg_restore` ويرفض ما إصداره أقدم من الخادم الذي أنشأ النسخة.
+ * @param {string} dumpServerVersion إصدار الخادم المسجّل في بيان النسخة.
+ * @returns {Promise<string>}
+ */
+export async function resolveVerifiedRestoreTool(dumpServerVersion) {
+  try {
+    const toolPath = pgRestore();
+    const clientVersion = await readToolVersion(toolPath);
+    assertClientNotOlder({ toolPath, clientVersion, serverVersion: dumpServerVersion });
+    return toolPath;
+  } catch (error) {
+    throw new RestoreError(
+      RESTORE_ERRORS.TOOL_UNUSABLE,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+/**
  * @param {RestoreOptions} options
  * @param {string} databaseUrl
  * @returns {Promise<{ durationMs: number, created: boolean }>}
@@ -305,8 +327,11 @@ export async function restoreBackup(options, databaseUrl) {
     await pool.end();
   }
 
+  // إصدار الأداة يُفحص قبل اللمس: عميلٌ أقدم من النسخة يترك قاعدةً ناقصة تُظنّ
+  // مستعادة، وذلك أسوأ من الفشل المعلن.
+  const restoreTool = await resolveVerifiedRestoreTool(manifest.databaseVersion);
   const started = process.hrtime.bigint();
-  const result = await run(PG_RESTORE, [
+  const result = await run(restoreTool, [
     '--exit-on-error',
     '--no-owner',
     '--no-privileges',

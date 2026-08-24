@@ -20,12 +20,24 @@ import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { createWeightStore } from '../../src/models/weight-store.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+/**
+ * مخزن أوزان في مجلّد مؤقّت — لازمٌ للتنشيط بعد M6.06.
+ * @returns {import('../../src/models/weight-store.mjs').WeightStore}
+ */
+function temporaryWeightStore() {
+  return createWeightStore({ root: fs.mkdtempSync(path.join(os.tmpdir(), 'weights-')) });
+}
 
 /** سجل ونموذج معتمد ومُفعَّل، وهو الوضع الذي تُختبر عليه البوابات. */
 async function activeModel() {
   const log = new EventLog();
   const repository = createMemoryRepository(ModelRegistry.spec);
-  const registry = new ModelRegistry({ log, repository });
+  const registry = new ModelRegistry({ log, repository, weightStore: temporaryWeightStore() });
   const model = await registry.register({
     name: 'مدقّق',
     modelVersion: '1.0.0',
@@ -71,6 +83,7 @@ test('D1 — القدرات في الصورة المُرجَعة لا تشترك
   const registry = new ModelRegistry({
     log,
     repository: createMemoryRepository(ModelRegistry.spec),
+    weightStore: temporaryWeightStore(),
   });
   const model = await registry.register({
     name: 'مولّد',
