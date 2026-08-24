@@ -114,7 +114,7 @@
 
 ```bash
 npm run validate   # عشر بوابات ثم كل الاختبارات
-npm test           # 56 ملف اختبار
+npm test           # 60 ملف اختبار
 ```
 
 والأدلة موضعية لا مجمَلة: `tests/root-of-trust/` لكل وحدة، و
