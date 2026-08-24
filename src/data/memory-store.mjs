@@ -105,7 +105,7 @@ export class AgentMemoryStore {
    * يكن يظهر في `Map` بلا قيد فريد.
    * @param {string} agentId
    * @param {unknown} content
-   * @param {{ classification?: import('./data-catalog.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[] }} [options]
+   * @param {{ classification?: import('./classification.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[] }} [options]
    * @returns {Promise<MemoryEntry>}
    */
   async remember(agentId, content, options = {}) {
@@ -122,7 +122,7 @@ export class AgentMemoryStore {
    * جسم «تذكّر» بلا معاملة — يُنادى مباشرةً أو داخل وحدة عمل.
    * @param {string} agentId
    * @param {unknown} content
-   * @param {{ classification?: import('./data-catalog.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[] }} options
+   * @param {{ classification?: import('./classification.mjs').ClassificationValue, source?: string, kind?: 'episodic' | 'semantic' | 'procedural', tags?: string[] }} options
    * @returns {Promise<MemoryEntry>}
    */
   async #write(
@@ -159,7 +159,7 @@ export class AgentMemoryStore {
    * يستدعي ذاكرة. شرطان معاً: ملكية المدخل، وإتاحة الفهرس بمستوى التصريح.
    * @param {string} agentId
    * @param {string} id
-   * @param {import('./data-catalog.mjs').ClassificationValue} [clearance='internal']
+   * @param {import('./classification.mjs').ClassificationValue} [clearance='internal']
    * @returns {Promise<MemoryEntry>}
    */
   async recall(agentId, id, clearance = 'internal') {

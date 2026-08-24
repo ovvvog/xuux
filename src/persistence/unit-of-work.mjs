@@ -22,7 +22,14 @@
  */
 
 import { withTransaction } from './db.mjs';
-import { AGENT_SPEC, DATA_ASSET_SPEC, LAW_SPEC, MEMORY_SPEC, MODEL_SPEC } from './entities.mjs';
+import {
+  AGENT_SPEC,
+  CLASSIFICATION_APPROVAL_SPEC,
+  DATA_ASSET_SPEC,
+  LAW_SPEC,
+  MEMORY_SPEC,
+  MODEL_SPEC,
+} from './entities.mjs';
 import { createPostgresRepository } from './repository-postgres.mjs';
 
 /** @typedef {import('./composition.mjs').StateRepositories} StateRepositories */
@@ -40,6 +47,7 @@ export function createClientRepositories(client) {
       dataAssets: createPostgresRepository(client, DATA_ASSET_SPEC),
       memories: createPostgresRepository(client, MEMORY_SPEC),
       laws: createPostgresRepository(client, LAW_SPEC),
+      classificationApprovals: createPostgresRepository(client, CLASSIFICATION_APPROVAL_SPEC),
     })
   );
 }

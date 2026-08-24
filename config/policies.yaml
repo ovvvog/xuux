@@ -85,6 +85,9 @@ actions:
   - id: purge-data
     description: محو بيانات محتفظ بها.
     sensitive: true
+  - id: reclassify-data
+    description: تغيير تصنيف حساسية أصل بيانات، رفعاً أو إنزالاً.
+    sensitive: true
 
 policies:
   # ── الممنوع منعاً مطلقاً: أولوية 1000 فلا سماح يعلو عليه ──
@@ -158,6 +161,28 @@ policies:
       - attribute: resource.legalHold
         operator: eq
         value: true
+
+  # التخفيض إلى «عام» نشرٌ لا إعادة تصنيف: الفرق بين «داخلي» و«عام» هو الفرق بين
+  # حدود الدولة وخارجها، فلا يقع بقرار مُشغِّلٍ ولو حمل اعتماداً. والمنع هنا فوق
+  # كل سماح (أولوية 900) كي لا يصير دفتر الاعتمادات باباً للنشر.
+  - id: pol:deny-reclassify-to-public
+    name: منع تخفيض التصنيف إلى العام
+    owner: crown
+    version: 1
+    effect: deny
+    priority: 900
+    reason: إعلان بياناتٍ للعموم قرار نشرٍ سيادي، لا خطوةٌ في سلّم التصنيف يُنزلها منفّذ باعتماد تشغيلي.
+    lawRef: law:data-sovereignty
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['*']
+    actions: ['reclassify-data']
+    resources: ['data:*']
+    conditions:
+      - attribute: context.to
+        operator: eq
+        value: public
 
   # ── السماح المسبَّب ──
   - id: pol:king-sovereign-acts
@@ -308,6 +333,20 @@ policies:
       - attribute: resource.scope
         operator: eq
         value: '{actor.scope}'
+
+  - id: pol:reclassify-data-owners
+    name: إعادة تصنيف البيانات للوزير والمُدقِّق
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: تصنيفٌ لا يُصحَّح تصنيفٌ يشيخ؛ والسماح هنا بالفعل لا بالاتجاه — التخفيض يظل مشروطاً باعتماد مسجّل في دفتر الاعتمادات.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:minister', 'role:auditor']
+    actions: ['reclassify-data']
+    resources: ['data:*']
 
   - id: pol:submit-case-to-court
     name: رفع القضايا إلى المحكمة

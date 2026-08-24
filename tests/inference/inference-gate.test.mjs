@@ -323,6 +323,51 @@ test('السجل يكتب النص العام ويستبدله ببصمة وأط
   );
 });
 
+test('المرتبة السيادية تُحجب عن نصّ السجل كما تُحجب الحساسة — M7.01', async () => {
+  // العيب المُصلَح: الحجب كان مكتوباً هنا بنصّين `sensitive` و`secret`، و`secret`
+  // مرتبةٌ لا وجود لها في الفهرس بينما `sovereign` — أعلى المراتب — لم تكن مذكورة،
+  // فكان أعلى تصنيفٍ يُكتب نصّه كاملاً في سجل التدقيق. القرار الآن من السلّم.
+  const sovereignInput = 'مُدخل سيادي لا يجوز أن يظهر في السجل';
+  const sovereignOutput = 'مُخرج سيادي لا يجوز أن يظهر في السجل';
+  const { gate, log } = await setup({
+    execute: async () => ({ output: sovereignOutput, usage: { totalTokens: 4, cost: 0 } }),
+  });
+  await gate.infer({
+    actor: minister(),
+    purpose: 'planning',
+    input: sovereignInput,
+    inputClassification: 'sovereign',
+    outputClassification: 'sovereign',
+  });
+  const completed = log.events.find((event) => event.type === 'inference.completed');
+  assert.ok(completed);
+  assert.doesNotMatch(
+    JSON.stringify(completed.payload),
+    new RegExp(`${sovereignInput}|${sovereignOutput}`, 'u'),
+  );
+  const inputAudit = /** @type {Record<string, unknown>} */ (completed.payload['input']);
+  assert.equal(inputAudit['text'], undefined);
+  assert.equal(/** @type {string} */ (inputAudit['sha256']).length, 64);
+});
+
+test('المرتبة المجهولة تُحجب لا تُكشف: الفشل إلى الحجب', async () => {
+  const unknownText = 'نصّ بمرتبة لا يعرفها السلّم';
+  const { gate, log } = await setup({
+    execute: async () => ({ output: 'مُخرج', usage: { totalTokens: 4, cost: 0 } }),
+  });
+  await gate.infer({
+    actor: minister(),
+    purpose: 'planning',
+    input: unknownText,
+    inputClassification: 'top-secret',
+  });
+  const completed = log.events.find((event) => event.type === 'inference.completed');
+  assert.ok(completed);
+  const inputAudit = /** @type {Record<string, unknown>} */ (completed.payload['input']);
+  assert.equal(inputAudit['text'], undefined, 'تصريحٌ مجهول لا يُقرأ عامّاً');
+  assert.equal(/** @type {string} */ (inputAudit['sha256']).length, 64);
+});
+
 test('الدور غير المأذون يرفض عبر محرك السياسات ونقطة التفويض الحقيقيين', async () => {
   const { gate, executions, log } = await setup();
   await assert.rejects(

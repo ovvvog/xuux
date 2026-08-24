@@ -1,0 +1,71 @@
+# مراتب التصنيف وقواعد الترقية والتخفيض — M7.01
+#
+# قبل هذا الملف كان سلّم الحساسية **مكتوباً في الكود** في موضعين لا يتفقان:
+# `RANK` في `src/data/data-catalog.mjs` بمراتب `public/internal/sensitive/sovereign`،
+# وفحصٌ نصّي في `src/inference/inference-gate.mjs` يحجب `sensitive` و`secret` —
+# و`secret` مرتبةٌ لا وجود لها في سلّم الدولة، بينما `sovereign` (أعلى المراتب)
+# كانت تُسجَّل في سجل التدقيق **بنصّها الكامل** لأنها لم تُذكر في ذلك الفحص.
+# فمفردةٌ واحدة زائدة في موضع، ومفردةٌ ناقصة في موضع، صنعتا ثقب تسريب.
+#
+# فصار السلّم بياناً واحداً يقرؤه `src/data/classification.mjs`، ويتحقّق المحمّل
+# أن مراتب هذا الملف تطابق تعداد الكود تطابقاً تامّاً — فأي انحراف يُسقط التحميل
+# بخطأ `CLASSIFICATION_ENUM_DRIFT` ولا يمرّ صامتاً.
+#
+# قواعد الاتجاه (ينفّذها الكود لا هذا التعليق):
+#   1. **الترقية** (رفع الحساسية) لا تحتاج اعتماداً: هي الاتجاه الآمن، ويكفيها
+#      تسبيبٌ مسجَّل. من اشترط لها اعتماداً أخّر تصحيح تصنيفٍ ناقص.
+#   2. **التخفيض** (إنزال الحساسية) هو الفعل الخطر — به تُنشر بيانات سيادية —
+#      فيشترط اعتماداً مسبقاً من جهةٍ **غير المنفّذ**، مربوطاً بالأصل وبنسخته
+#      وبالمرتبتين، صالحاً مرّة واحدة وفي نافذة زمنية.
+#   3. المرتبة المختومة (`sealed`) لا تُخفَّض بأي اعتماد: إنزال السيادي إجراءٌ
+#      دستوري لا قرار مُشغِّل، وموضعه M8 (الدستور والقضاء) لا هذه الخطوة.
+#   4. `maxStepDown` يمنع الهبوط قفزاً: من أراد إنزال مرتبتين طلب اعتمادين،
+#      فيُقرأ كل درجةٍ قرارٌ مستقل ويُسجَّل مستقلاً.
+
+version: 1
+owner: crown
+
+# المراتب مرتّبة تصاعدياً في الحساسية. `rank` هو أساس قرار الإتاحة، و`redactInLogs`
+# يعني أن نصّ المادة لا يُكتب في سجل التدقيق بل بصمتُه وطوله.
+tiers:
+  - id: public
+    rank: 0
+    redactInLogs: false
+    sealed: false
+    description: بيانات معلَنة للعموم، لا يضرّ نشرها.
+  - id: internal
+    rank: 1
+    redactInLogs: false
+    sealed: false
+    description: بيانات تشغيلية داخلية، تُقرأ داخل الدولة ولا تُنشر.
+  - id: sensitive
+    rank: 2
+    redactInLogs: true
+    sealed: false
+    description: بيانات يضرّ إفشاؤها بأشخاص أو بمؤسسات؛ لا يُكتب نصّها في السجلات.
+  - id: sovereign
+    rank: 3
+    redactInLogs: true
+    sealed: true
+    description: بيانات جذر الثقة والقرار السيادي؛ لا تُخفَّض إلا بمسار دستوري.
+
+# أسماءٌ أخرى ظهرت في الكود لمرتبةٍ قائمة. تُقبل مُدخلاً وتُحلّ إلى مرتبتها، ولا
+# تُخزَّن ولا تُعاد — فالمترادف لا يصير مرتبةً ثانية.
+aliases:
+  - from: secret
+    to: sovereign
+
+promotion:
+  requiresApproval: false
+  requiresJustification: true
+  minJustificationChars: 12
+
+demotion:
+  requiresApproval: true
+  requiresJustification: true
+  minJustificationChars: 12
+  maxStepDown: 1
+  approvalTtlMs: 900000
+  approverRoles:
+    - role:auditor
+    - role:king

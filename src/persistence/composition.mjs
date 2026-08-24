@@ -11,6 +11,8 @@
  * فلا يثبتها على الذاكرة.
  */
 
+import { ClassificationApprovalRegistry } from '../data/approvals.mjs';
+import { loadClassificationLattice } from '../data/classification.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
@@ -18,7 +20,14 @@ import { AgentRegistry } from '../identity/agent-registry.mjs';
 import path from 'node:path';
 import { ModelRegistry } from '../models/model-registry.mjs';
 import { createWeightStore } from '../models/weight-store.mjs';
-import { AGENT_SPEC, DATA_ASSET_SPEC, LAW_SPEC, MEMORY_SPEC, MODEL_SPEC } from './entities.mjs';
+import {
+  AGENT_SPEC,
+  CLASSIFICATION_APPROVAL_SPEC,
+  DATA_ASSET_SPEC,
+  LAW_SPEC,
+  MEMORY_SPEC,
+  MODEL_SPEC,
+} from './entities.mjs';
 import { createMemoryRepository } from './repository-memory.mjs';
 import { createPostgresRepository } from './repository-postgres.mjs';
 import { withUnitOfWork } from './unit-of-work.mjs';
@@ -32,6 +41,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} dataAssets
  * @property {ReturnType<typeof createMemoryRepository>} memories
  * @property {ReturnType<typeof createMemoryRepository>} laws
+ * @property {ReturnType<typeof createMemoryRepository>} classificationApprovals
  */
 
 /**
@@ -47,6 +57,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {DataCatalog} catalog
  * @property {AgentMemoryStore} memory
  * @property {LawRegistry} laws
+ * @property {ClassificationApprovalRegistry} approvals
  */
 
 /**
@@ -61,6 +72,7 @@ export function createMemoryRepositories(options = {}) {
     dataAssets: createMemoryRepository(DATA_ASSET_SPEC, options),
     memories: createMemoryRepository(MEMORY_SPEC, options),
     laws: createMemoryRepository(LAW_SPEC, options),
+    classificationApprovals: createMemoryRepository(CLASSIFICATION_APPROVAL_SPEC, options),
   };
 }
 
@@ -77,6 +89,7 @@ export function createPostgresRepositories(pool) {
       dataAssets: createPostgresRepository(pool, DATA_ASSET_SPEC),
       memories: createPostgresRepository(pool, MEMORY_SPEC),
       laws: createPostgresRepository(pool, LAW_SPEC),
+      classificationApprovals: createPostgresRepository(pool, CLASSIFICATION_APPROVAL_SPEC),
     })
   );
 }
@@ -94,6 +107,11 @@ export function createPostgresRepositories(pool) {
  *   الأوزان المعنوَن بالمحتوى (M6.06). إن لم يُمرَّر فُتحيّز الجذر من `WEIGHTS_DIR`
  *   أو `.state/weights`؛ فالتنشيط لا يقع بلا إعادة حساب البصمة في أي تركيب.
  * @param {{ report: (signal: object) => unknown } | null} [deps.quarantine] حاجب الحجر (M6.09).
+ * @param {import('../policy/enforcement-point.mjs').EnforcementPoint | null} [deps.enforcementPoint] نقطة
+ *   التفويض (M7.01). من لم يمرّرها حصل على فهرسٍ يسجّل ويقرأ، و**تُرفض** عنده
+ *   إعادة التصنيف برمز `CLASSIFICATION_ENFORCEMENT_REQUIRED` — فالفرق معلَن لا مخفيّ.
+ * @param {import('../data/classification.mjs').ClassificationLattice | null} [deps.lattice] سلّم
+ *   التصنيف؛ يُحمَّل من `config/classification.yaml` إن لم يُمرَّر.
  * @returns {StateRegistries}
  */
 export function createRegistries({
@@ -104,8 +122,24 @@ export function createRegistries({
   transaction = null,
   weightStore = null,
   quarantine = null,
+  enforcementPoint = null,
+  lattice = null,
 }) {
-  const catalog = new DataCatalog({ log, repository: repositories.dataAssets });
+  // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
+  // يُمنح على اتجاهٍ ويُقرأ اتجاهاً آخر.
+  const classificationLattice = lattice ?? loadClassificationLattice();
+  const approvals = new ClassificationApprovalRegistry({
+    log,
+    repository: repositories.classificationApprovals,
+    lattice: classificationLattice,
+  });
+  const catalog = new DataCatalog({
+    log,
+    repository: repositories.dataAssets,
+    lattice: classificationLattice,
+    approvals,
+    enforcementPoint,
+  });
   // مخزن الأوزان يُركَّب دائماً: لو كان اختياريّاً لصار تركه مساراً لتنشيطٍ
   // بلا فحص بصمة، وهو بالضبط ما يمنعه M6.06.
   const weights =
@@ -137,6 +171,7 @@ export function createRegistries({
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),
     laws: new LawRegistry({ log, repository: repositories.laws }),
+    approvals,
   };
 }
 
@@ -151,15 +186,20 @@ export function createRegistries({
  * @param {import('../root-of-trust/identity.mjs').CertificateAuthority} deps.ca
  * @param {import('../root-of-trust/event-log.mjs').EventLog} deps.log
  * @param {{ maxAgents?: number, maxModels?: number, maxEntries?: number }} [deps.limits]
+ * @param {import('../policy/enforcement-point.mjs').EnforcementPoint | null} [deps.enforcementPoint] نقطة
+ *   التفويض؛ تُمرَّر إلى السجلات داخل المعاملة أيضاً كي لا تصير إعادة التصنيف
+ *   الذرّية مساراً بلا قرار.
  * @returns {StateRegistries}
  */
-export function createPostgresRegistries({ pool, ca, log, limits = {} }) {
+export function createPostgresRegistries({ pool, ca, log, limits = {}, enforcementPoint = null }) {
   /** @type {StateTransaction} */
   const transaction = (work) =>
     withUnitOfWork(pool, (repositories) =>
       // المستودعات داخل المعاملة تُركّب سجلاتٍ جديدة بنفس الحدود ونفس السجل،
       // ولا تُمرَّر لها معاملةٌ أخرى: معاملة داخل معاملة ليست ذرّية.
-      work(createRegistries({ ca, log, repositories, limits, transaction: null })),
+      work(
+        createRegistries({ ca, log, repositories, limits, transaction: null, enforcementPoint }),
+      ),
     );
   return createRegistries({
     ca,
@@ -167,5 +207,6 @@ export function createPostgresRegistries({ pool, ca, log, limits = {} }) {
     repositories: createPostgresRepositories(pool),
     limits,
     transaction,
+    enforcementPoint,
   });
 }

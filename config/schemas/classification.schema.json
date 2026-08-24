@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/config/classification.schema.json",
+  "title": "مراتب التصنيف وقواعد الترقية والتخفيض — M7.01",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "tiers", "promotion", "demotion"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "tiers": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "rank", "redactInLogs", "sealed", "description"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "rank": { "type": "integer", "minimum": 0 },
+          "redactInLogs": { "type": "boolean" },
+          "sealed": { "type": "boolean" },
+          "description": { "type": "string", "minLength": 8 }
+        }
+      }
+    },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "to": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+        }
+      }
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiresApproval", "requiresJustification", "minJustificationChars"],
+      "properties": {
+        "requiresApproval": { "type": "boolean" },
+        "requiresJustification": { "type": "boolean" },
+        "minJustificationChars": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "demotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requiresApproval",
+        "requiresJustification",
+        "minJustificationChars",
+        "maxStepDown",
+        "approvalTtlMs",
+        "approverRoles"
+      ],
+      "properties": {
+        "requiresApproval": { "type": "boolean" },
+        "requiresJustification": { "type": "boolean" },
+        "minJustificationChars": { "type": "integer", "minimum": 0 },
+        "maxStepDown": { "type": "integer", "minimum": 1 },
+        "approvalTtlMs": { "type": "integer", "minimum": 1000 },
+        "approverRoles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        }
+      }
+    }
+  }
+}

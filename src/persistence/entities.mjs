@@ -352,6 +352,73 @@ export const LAW_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * اعتمادات إعادة التصنيف — الخطوة `M7.01`.
+ *
+ * الاعتماد سجلٌّ لا وسيط: `reclassify` لا تقبل كائن اعتماد يُمرَّر في الطلب بل
+ * مُعرّفاً تقرؤه من هذا المستودع. من يستطيع تمرير كائن يستطيع اختراعه، ومن يريد
+ * صفّاً في هذا الجدول يحتاج فعل اعتمادٍ منفصلاً بمعتمِدٍ غير الطالب.
+ *
+ * والقيود التي تُختبر في القاعدة (`migrations/0005`) مُعلنة هنا أيضاً كثوابت،
+ * فتطبيق الذاكرة لا يكون أرخى من القاعدة فيُطمئن كذباً.
+ */
+/** @type {EntitySpec} */
+export const CLASSIFICATION_APPROVAL_SPEC = Object.freeze({
+  name: 'classification_approvals',
+  table: 'state.classification_approvals',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      assetId: { column: 'asset_id', type: 'string', required: true, maxLength: 128 },
+      fromClassification: {
+        column: 'from_classification',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['public', 'internal', 'sensitive', 'sovereign']),
+      },
+      toClassification: {
+        column: 'to_classification',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['public', 'internal', 'sensitive', 'sovereign']),
+      },
+      requestedBy: { column: 'requested_by', type: 'string', required: true, maxLength: 128 },
+      approvedBy: { column: 'approved_by', type: 'string', required: true, maxLength: 128 },
+      approverRole: { column: 'approver_role', type: 'string', required: true, maxLength: 120 },
+      justification: { column: 'justification', type: 'string', required: true, maxLength: 2000 },
+      recordVersion: { column: 'record_version', type: 'integer', required: true },
+      expiresAt: { column: 'expires_at', type: 'timestamp', required: true },
+      consumedAt: { column: 'consumed_at', type: 'timestamp', nullable: true },
+      consumedBy: { column: 'consumed_by', type: 'string', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['assetId']),
+  invariants: Object.freeze([
+    {
+      code: 'CLASSIFICATION_APPROVAL_HAS_DIRECTION',
+      message: 'اعتمادٌ من مرتبة إلى نفسها لا يغيّر شيئاً، فليس اعتماداً.',
+      /** @param {EntityRecord} record */
+      check: (record) => record['fromClassification'] !== record['toClassification'],
+    },
+    {
+      code: 'CLASSIFICATION_APPROVAL_SEPARATION_OF_DUTIES',
+      message: 'من طلب إعادة التصنيف لا يعتمدها: الاعتماد الذاتي إلغاءٌ للاعتماد.',
+      /** @param {EntityRecord} record */
+      check: (record) => record['approvedBy'] !== record['requestedBy'],
+    },
+    {
+      code: 'CLASSIFICATION_APPROVAL_CONSUMER_RECORDED',
+      message: 'الاستهلاك يُنسب: وقتٌ بلا مستهلِك، أو مستهلِكٌ بلا وقت، أثرٌ ناقص.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        record['consumedAt'] instanceof Date ===
+        (typeof record['consumedBy'] === 'string' && record['consumedBy'].trim() !== ''),
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -359,6 +426,7 @@ export const ENTITY_SPECS = Object.freeze({
   data_assets: DATA_ASSET_SPEC,
   memories: MEMORY_SPEC,
   laws: LAW_SPEC,
+  classification_approvals: CLASSIFICATION_APPROVAL_SPEC,
 });
 
 /**

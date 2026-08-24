@@ -25,6 +25,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { loadClassificationLattice } from '../data/classification.mjs';
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_CALLS_PER_WINDOW = 30;
@@ -108,8 +109,8 @@ export const DEFAULT_SAFETY_RULES = Object.freeze([
  * @property {import('../policy/model.mjs').PolicyActor} actor
  * @property {string} purpose الغرض فقط؛ النموذج يختاره السجل ولا يقبله الطلب.
  * @property {string} input
- * @property {'public' | 'internal' | 'sensitive' | 'secret'} [inputClassification]
- * @property {'public' | 'internal' | 'sensitive' | 'secret'} [outputClassification]
+ * @property {string} [inputClassification] مرتبة من سلّم `config/classification.yaml`؛ المجهول يُعامل معاملة المحجوب
+ * @property {string} [outputClassification]
  * @property {number} [estimatedInputTokens]
  * @property {number} [estimatedInputCost]
  * @property {string} [resourceId]
@@ -135,7 +136,7 @@ function nonNegativeNumber(value, fallback) {
 
 export class InferenceGate {
   /**
-   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, costPerWindow?: number, maxLoggedTextChars?: number, now?: () => Date }} [deps]
+   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, costPerWindow?: number, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
    */
   constructor({
     modelRegistry,
@@ -149,6 +150,7 @@ export class InferenceGate {
     tokensPerWindow = DEFAULT_TOKENS_PER_WINDOW,
     costPerWindow = DEFAULT_COST_PER_WINDOW,
     maxLoggedTextChars = DEFAULT_LOG_TEXT_CHARS,
+    lattice = null,
     now,
   } = {}) {
     if (!modelRegistry || !enforcementPoint || !log || typeof execute !== 'function') {
@@ -168,6 +170,14 @@ export class InferenceGate {
     this.tokensPerWindow = tokensPerWindow;
     this.costPerWindow = costPerWindow;
     this.maxLoggedTextChars = maxLoggedTextChars;
+    /**
+     * سلّم التصنيف هو مصدر قرار الحجب في السجل. كان الحجب مكتوباً هنا بنصّين
+     * (`sensitive` و`secret`) و`secret` مرتبةٌ لا وجود لها في الفهرس، بينما
+     * `sovereign` — أعلى المراتب — لم تكن مذكورة، فكان نصّها يُكتب كاملاً في سجل
+     * التدقيق. الآن القرار من السلّم عبر `redactInLogs`، والمجهول يُحجب.
+     * @type {import('../data/classification.mjs').ClassificationLattice}
+     */
+    this.lattice = lattice ?? loadClassificationLattice();
     this.now = now ?? (() => new Date());
     /** @type {Map<string, number[]>} */
     this.attempts = new Map();
@@ -176,7 +186,21 @@ export class InferenceGate {
   }
 
   /**
-   * يسجل نصاً عاماً/داخلياً مقتطعاً، وبصمةً وطولاً فقط للحساس والسري.
+   * هل تُحجب مادة هذه المرتبة عن نصّ السجل؟ المرتبة المجهولة **تُحجب**: تصريحٌ
+   * لا يُعرف لا يُقرأ عامّاً، والفشل إلى الحجب لا إلى الكشف.
+   * @param {string} classification
+   * @returns {boolean}
+   */
+  #redacts(classification) {
+    try {
+      return this.lattice.redactInLogs(classification);
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * يسجل نصاً عاماً/داخلياً مقتطعاً، وبصمةً وطولاً فقط لما تُحجب مرتبته.
    * @param {string} text
    * @param {string} classification
    * @returns {Record<string, unknown>}
@@ -184,7 +208,7 @@ export class InferenceGate {
   #auditText(text, classification) {
     const charLength = text.length;
     const bytes = Buffer.byteLength(text, 'utf8');
-    if (classification === 'sensitive' || classification === 'secret') {
+    if (this.#redacts(classification)) {
       return {
         classification,
         charLength,
