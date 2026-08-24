@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { snapshot } from '../lib/snapshot.mjs';
 import { loadGovernedActions } from '../policy/governed.mjs';
+import { TaskLifecycle, assertTransition } from '../execution/lifecycle.mjs';
 
 /** @typedef {import('../root-of-trust/crown.mjs').CrownGateway} CrownGateway */
 /** @typedef {import('../root-of-trust/crown.mjs').RoyalCommand} RoyalCommand */
@@ -37,6 +38,39 @@ export const TaskState = Object.freeze({
   FAILED: 'failed',
   STOPPED: 'stopped',
 });
+
+/**
+ * مقايسة حالات النواة (الخمس، في الذاكرة) بدورة حياة المهمة الدائمة السبع
+ * (`src/execution/lifecycle.mjs`) — الخطوة `M5.01`.
+ *
+ * قبل هذه المقايسة كانت النواة تُبدّل نصّاً في كائن، فأيُّ انتقال كان ممكناً بنيوياً
+ * ولو كان محرَّماً منطقياً. صارت الآن **كل نقلة حالة في النواة تُصدَّق بجدول
+ * الانتقالات المشروعة نفسه** الذي يحرس الطابور الدائم، فلا مصدرَي حقٍّ لدورة حياة
+ * واحدة. و«مجدولة» هي مقابل `QUEUED` لأن الإدراج في طابور النواة يقع **بعد**
+ * التصريح (التاج والتفويض) لا قبله، و`STOPPED` تقابل «ملغاة» لأن كليهما إنهاءٌ
+ * بقرارٍ خارجي لا بفشلٍ في العمل.
+ * @type {Readonly<Record<TaskStateValue, import('../execution/lifecycle.mjs').TaskLifecycleState>>}
+ */
+export const KERNEL_STATE_TO_LIFECYCLE = Object.freeze({
+  [TaskState.QUEUED]: TaskLifecycle.SCHEDULED,
+  [TaskState.RUNNING]: TaskLifecycle.RUNNING,
+  [TaskState.SUCCEEDED]: TaskLifecycle.SUCCEEDED,
+  [TaskState.FAILED]: TaskLifecycle.FAILED,
+  [TaskState.STOPPED]: TaskLifecycle.CANCELLED,
+});
+
+/**
+ * ينقل مهمة النواة إلى حالة جديدة **بعد** تصديق الانتقال بجدول دورة الحياة.
+ * انتقالٌ غير مشروع يرفع `LifecycleError` ولا يُكتب في المهمة، فالحالة الفاسدة لا
+ * تُسجَّل ثم تُصلَح — لا تُسجَّل أصلاً (المادة 9).
+ * @param {Task} task
+ * @param {TaskStateValue} next
+ * @returns {void}
+ */
+function transitionKernelTask(task, next) {
+  assertTransition(KERNEL_STATE_TO_LIFECYCLE[task.state], KERNEL_STATE_TO_LIFECYCLE[next]);
+  task.state = next;
+}
 
 export class SafeMode {
   constructor() {
@@ -99,11 +133,11 @@ export class ExecutionKernel {
    * سجل أحداث كامل من الطابور إلى النتيجة.
    * @param {RoyalCommand} command - الأمر الملكي المطلوب تنفيذه
    * @param {string} signature - توقيع الأمر، يتحقّق منه التاج لا النواة
-   * @param {(command: AcceptedRoyalCommand) => unknown} handler - المُنفِّذ الفعلي
+   * @param {(command: AcceptedRoyalCommand) => unknown | Promise<unknown>} handler - المُنفِّذ الفعلي
    * @param {{ decisionToken?: string }} [authorization] - تذكرة القرار من نقطة التفويض؛ لازمة لكل فعل محكوم (M4.05)
-   * @returns {Readonly<Task>} صورة مُجمَّدة من المهمة بعد نجاحها
+   * @returns {Promise<Readonly<Task>>} صورة مُجمَّدة من المهمة بعد نجاحها
    */
-  submit(command, signature, handler, authorization = {}) {
+  async submit(command, signature, handler, authorization = {}) {
     // الإيقاف الشامل أولاً: قرارٌ سيادي دائم يعلو على الوضع الآمن المحلي.
     if (this.haltSwitch) this.haltSwitch.assertOperational();
     this.safeMode.assertOperational();
@@ -129,17 +163,28 @@ export class ExecutionKernel {
       // زمنية قد يصدر فيها إيقاف، وضيقُها لا يعني انعدامها. والفعل هو المُعالِج
       // لا الإدراج في الطابور، فمنعُه هنا هو المقصود بـ«صفر تنفيذ بعد الإيقاف».
       if (this.haltSwitch) this.haltSwitch.assertOperational();
-      task.state = TaskState.RUNNING;
+      transitionKernelTask(task, TaskState.RUNNING);
       task.startedAt = new Date().toISOString();
       this.log.append('kernel.task.started', accepted.target, { taskId: task.id });
-      const result = handler(accepted);
-      task.state = TaskState.SUCCEEDED;
+      // **تحويلٌ إلى اللاتزامن (`M5.01`)**: كانت النواة تنتظر مُعالِجاً متزامناً
+      // وحده، فمُعالِجٌ يُعيد وعداً كان «ينجح» قبل أن يعمل، وفشلُه بعد ذلك يقع
+      // خارج المهمة فلا يُسجَّل ولا يُقرأ. والانتظار هنا هو ما يجعل حالة المهمة
+      // خبراً عن العمل لا عن إقلاعه.
+      const result = await handler(accepted);
+      transitionKernelTask(task, TaskState.SUCCEEDED);
       task.result = result;
       task.finishedAt = new Date().toISOString();
       this.log.append('kernel.task.succeeded', accepted.target, { taskId: task.id });
       return snapshot(task);
     } catch (error) {
-      task.state = TaskState.FAILED;
+      // الفشل يُسجَّل من أي حالة سابقة مشروعة؛ ولو كان الانتقال إلى «فاشلة» نفسه
+      // محرَّماً (كأن تكون المهمة قد انتهت) فالخطأ الأصلي يُعاد ولا يُستبدل بخطأ
+      // دورة حياة يحجب سببه.
+      try {
+        transitionKernelTask(task, TaskState.FAILED);
+      } catch {
+        task.state = TaskState.FAILED;
+      }
       task.error = error instanceof Error ? error.message : String(error);
       task.finishedAt = new Date().toISOString();
       this.log.append('kernel.task.failed', accepted.target, {

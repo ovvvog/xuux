@@ -40,6 +40,20 @@ function setup() {
 }
 
 /**
+ * كسابقتها لكن لوعدٍ مرفوض: لزمت مع تحويل `submit` إلى اللاتزامن (`M5.01`).
+ * @param {() => Promise<unknown>} fn - النداء المتوقع رفضه
+ * @returns {Promise<unknown>} الخطأ الملقى
+ */
+async function captureAsync(fn) {
+  try {
+    await fn();
+  } catch (error) {
+    return error;
+  }
+  throw new Error('لم يُرفض النداء وكان يجب أن يُرفض.');
+}
+
+/**
  * يمسك خطأ نداء ويُرجعه، لأن `assert.throws` لا تُرجع الخطأ فلا يُفحص رمزه.
  * @param {() => unknown} fn - النداء المتوقع فشله
  * @returns {unknown} الخطأ الملقى
@@ -480,7 +494,7 @@ test('بوابة التاج ترفض الأمر عند الإيقاف ولا ت�
   assert.equal(crown.command(command, signature).id, command.id);
 });
 
-test('نواة التنفيذ لا تُشغّل المُعالِج عند الإيقاف', (t) => {
+test('نواة التنفيذ لا تُشغّل المُعالِج عند الإيقاف', async (t) => {
   const { dir, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const king = new KingIdentity();
@@ -490,13 +504,15 @@ test('نواة التنفيذ لا تُشغّل المُعالِج عند الإ
   const kernel = new ExecutionKernel({ crown, log: new EventLog(), haltSwitch: halt });
   let runs = 0;
   const first = createRoyalCommand('act', 'target', {});
-  kernel.submit(first, king.sign(first), () => {
+  await kernel.submit(first, king.sign(first), () => {
     runs += 1;
   });
   assert.equal(runs, 1);
   halt.halt('إيقاف أثناء التشغيل');
   const second = createRoyalCommand('act', 'target', {});
-  const rejected = capture(() =>
+  // صار `submit` غير متزامن (`M5.01`)، فالرفض يأتي وعداً مرفوضاً لا رميةً
+  // متزامنة؛ والفحص هنا على **رمز** الخطأ لا على رسالته.
+  const rejected = await captureAsync(() =>
     kernel.submit(second, king.sign(second), () => {
       runs += 1;
     }),
@@ -504,7 +520,7 @@ test('نواة التنفيذ لا تُشغّل المُعالِج عند الإ
   assert.equal(rejected instanceof HaltError ? rejected.code : null, 'SOVEREIGN_HALT');
   assert.equal(runs, 1);
   halt.resume();
-  kernel.submit(second, king.sign(second), () => {
+  await kernel.submit(second, king.sign(second), () => {
     runs += 1;
   });
   assert.equal(runs, 2);

@@ -97,6 +97,23 @@ npm test                                               # اختبارات الق
 | `policy_decisions.policy_id` | منعٌ بالافتراض بلا سياسة حاكمة | الرمز `POLICY_NO_MATCH` يُسجّل معه |
 | `policy_decisions.policy_version` | لا نسخة حيث لا سياسة | مرتبط بالعمود السابق |
 
+وأُضيفت في الهجرة `0004` (النواة التشغيلية الموزّعة — `M5`) هذه الأعمدة:
+
+| العمود | متى يكون فارغاً | ما يُلزمه عند الحاجة |
+| --- | --- | --- |
+| `tasks.parent_id` | مهمة جزرية لا أم لها | مفتاح خارجي إلى `tasks` عند وجوده + `tasks_no_self_parent` |
+| `tasks.started_at` | مهمة لم تُشغّل بعد | `tasks_finish_after_start`؛ ووجوده هو **دليل أن المُعالِج شُغّل فعلاً** |
+| `tasks.finished_at` | مهمة جارية أو منتظرة | `tasks_terminal_needs_finish` — لا حالة نهائية بلا وقت نهاية |
+| `tasks.result` | لا نتيجة قبل النجاح | فراغها دليلٌ على عدم التنفيذ لا على نتيجةٍ فارغة؛ ولا تُكتب إلا مع `succeed` |
+| `tasks.error_code` | مهمة لم تفشل | `tasks_failed_needs_code` — لا فشل مبهم |
+| `tasks.error_message` | لا خطأ فلا رسالة | **حدٌّ مُعلن**: لا قيد قاعدة يلزمها — `queue.fail` هي من تكتبها مع الرمز |
+| `tasks.cancel_reason` | لم يُطلب إلغاؤها | `tasks_cancelled_needs_reason` |
+| `tasks.lease_owner` | مهمة غير محجوزة، أو أُطلق عقدها بعد النهاية | `tasks_running_needs_lease` |
+| `tasks.lease_expires_at` | لا عقد فلا انتهاء له | `tasks_running_needs_lease` — مهمةٌ جارية لا تكون بلا عقد |
+| `tasks.budget_resource` | مهمة لا ميزانية عليها | `tasks_budget_amount_needs_resource` — لا مبلغ بلا مورد |
+| `tasks.budget_debited_at` | لم تُخصم: لا ميزانية عليها أو رُفضت قبل البدء | هو نفسه **قيد «مرّة واحدة»**: الخصم يُسجَّل مرّة فلا تُحاسَب إعادةُ المحاولة ثانياً (`M5.06`) |
+| `task_transitions.from_state` | أول انتقال في حياة المهمة | كأول حدثٍ بلا سابق في سلسلة الأحداث |
+
 > الأعمدة الأربعة قبل جدول `0003` أُضيفت في الهجرة `0002`، ومعها حُذف
 > `data_assets.schema_ref` لأنه لم يكن يُكتب من أي مسار: عمودٌ لا يكتبه شيء
 > ليس قيداً مرناً، بل حقلٌ يوهم بمعلومةٍ غير موجودة.

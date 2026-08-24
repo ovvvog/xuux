@@ -1,6 +1,6 @@
 {
   "name": "digital-state-root-of-trust",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "type": "module",
   "description": "الدولة الملكية الفدرالية الرقمية — جذر الثقة والنواة السيادية",
@@ -35,7 +35,9 @@
     "guard:templates": "node scripts/guard-templates.mjs",
     "validate": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run scan:secrets && npm run scan:keys && npm run validate:seed && npm run check:registries && npm run guard:templates && npm run guard:authorization && npm run guard:filecount && npm test",
     "guard:filecount": "node scripts/guard-filecount.mjs",
-    "guard:authorization": "node scripts/guard-authorization.mjs"
+    "guard:authorization": "node scripts/guard-authorization.mjs",
+    "worker": "node scripts/worker.mjs",
+    "stress": "node scripts/stress.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

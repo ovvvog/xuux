@@ -68,13 +68,17 @@ function record(type, epoch) {
 
 /**
  * محاولة فعل واحد: أمر ملكي محلي يمرّ بالتاج ثم النواة.
- * @returns {void}
+ *
+ * صارت غير متزامنة مع تحويل `submit` إلى اللاتزامن (`M5.01`)، **وهذا يهمّ هذا
+ * المساعد بعينه**: لو لم تُنتظر لكانت العقدة تُسجّل «نُفِّذ» قبل أن يعمل المُعالِج،
+ * فيصير دليل «صفر تنفيذ بعد الإيقاف» دليلاً على إقلاعٍ لا على تنفيذ.
+ * @returns {Promise<void>}
  */
-function attempt() {
+async function attempt() {
   const epochBefore = halt.read().epoch;
   const command = createRoyalCommand('worker.tick', nodeId, { seq });
   try {
-    kernel.submit(command, localKing.sign(command), () => 'ok');
+    await kernel.submit(command, localKing.sign(command), () => 'ok');
     record('exec', epochBefore);
   } catch (error) {
     if (error instanceof Error && error.message === 'SOVEREIGN_HALT') {
@@ -92,13 +96,14 @@ function attempt() {
 
 /**
  * دورة العقدة: تحاول فعلاً كل فترة قصيرة حتى يطلب منها التوقف. التتالي
- * بـ`setTimeout` لا بموقّت دوري كي لا تتداخل محاولتان إن طالت واحدة.
- * @returns {void}
+ * بـ`setTimeout` **بعد** انتهاء المحاولة لا بموقّت دوري، كي لا تتداخل محاولتان
+ * إن طالت واحدة.
+ * @returns {Promise<void>}
  */
-function loop() {
+async function loop() {
   if (existsSync(stopFile)) return;
-  attempt();
-  setTimeout(loop, 12);
+  await attempt();
+  setTimeout(() => void loop(), 12);
 }
 
-loop();
+void loop();

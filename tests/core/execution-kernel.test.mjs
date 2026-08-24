@@ -14,11 +14,11 @@ function setup() {
     crown = new CrownGateway(king, new CertificateAuthority(king), log);
   return { king, log, crown };
 }
-test('kernel executes only through crown and records lifecycle', () => {
+test('kernel executes only through crown and records lifecycle', async () => {
   const { king, log, crown } = setup();
   const k = new ExecutionKernel({ crown, log });
   const c = createRoyalCommand('inspect', 'agent:one');
-  const result = k.submit(c, king.sign(c), () => ({ ok: true }));
+  const result = await k.submit(c, king.sign(c), () => ({ ok: true }));
   assert.equal(result.state, TaskState.SUCCEEDED);
   const stored = k.getTask(result.id);
   assert.ok(stored, 'المهمة الناجحة يجب أن تكون محفوظة في النواة');
@@ -26,11 +26,12 @@ test('kernel executes only through crown and records lifecycle', () => {
   assert.deepEqual(stored.result, { ok: true });
   assert.equal(log.events.filter((x) => x.type.startsWith('kernel.task')).length, 3);
 });
-test('kernel records failures and propagates them', () => {
+test('kernel records failures and propagates them', async () => {
   const { king, log, crown } = setup();
   const k = new ExecutionKernel({ crown, log });
   const c = createRoyalCommand('inspect', 'agent:one');
-  assert.throws(
+  // `submit` صارت غير متزامنة (`M5.01`) فالفشل يأتي رفضاً لا رمياً.
+  await assert.rejects(
     () =>
       k.submit(c, king.sign(c), () => {
         throw new Error('controlled failure');
@@ -41,12 +42,12 @@ test('kernel records failures and propagates them', () => {
   assert.ok(failed, 'المهمة الفاشلة يجب أن تكون محفوظة في النواة');
   assert.equal(failed.state, TaskState.FAILED);
 });
-test('safe mode blocks new tasks until resumed', () => {
+test('safe mode blocks new tasks until resumed', async () => {
   const { king, log, crown } = setup();
   const k = new ExecutionKernel({ crown, log });
   k.stop('maintenance');
   const c = createRoyalCommand('inspect', 'agent:one');
-  assert.throws(() => k.submit(c, king.sign(c), () => true), /SAFE_MODE/);
+  await assert.rejects(() => k.submit(c, king.sign(c), () => true), /SAFE_MODE/);
   k.resume();
-  assert.equal(k.submit(c, king.sign(c), () => true).state, TaskState.SUCCEEDED);
+  assert.equal((await k.submit(c, king.sign(c), () => true)).state, TaskState.SUCCEEDED);
 });

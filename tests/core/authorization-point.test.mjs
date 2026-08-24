@@ -39,24 +39,25 @@ function governedCommand() {
   return createRoyalCommand('change-policy', 'policy:retention');
 }
 
-test('فعلٌ محكوم بلا تذكرة قرار يُرفض بخطأ مُسمّى', () => {
+test('فعلٌ محكوم بلا تذكرة قرار يُرفض بخطأ مُسمّى', async () => {
   const { king, crown, log, enforcement } = setup();
   const kernel = new ExecutionKernel({ crown, log, enforcement });
   const command = governedCommand();
-  assert.throws(
+  // `submit` غير متزامنة بعد `M5.01`، فالرفض وعدٌ مرفوض لا رميةٌ متزامنة.
+  await assert.rejects(
     () => kernel.submit(command, king.sign(command), () => ({ changed: true })),
     /AUTHORIZATION_DECISION_MISSING/,
   );
   assert.equal(kernel.tasks.size, 0, 'الفعل المرفوض لا يُدرج مهمةً في النواة');
 });
 
-test('نواةٌ بلا نقطة تفويض ترفض كل فعل محكوم — الغياب ليس استثناءً', () => {
+test('نواةٌ بلا نقطة تفويض ترفض كل فعل محكوم — الغياب ليس استثناءً', async () => {
   const { king, crown, log } = setup();
   const kernel = new ExecutionKernel({ crown, log });
   assert.ok(kernel.governedActions.size >= 15, 'الكتالوج يُقرأ من البيانات لا من النقطة');
   for (const action of ['change-policy', 'export-keys', 'purge-data', 'create-agent']) {
     const command = createRoyalCommand(action, 'resource:one');
-    assert.throws(
+    await assert.rejects(
       () => kernel.submit(command, king.sign(command), () => true),
       /AUTHORIZATION_POINT_REQUIRED/,
       `فعلٌ محكوم نُفِّذ بلا نقطة تفويض: ${action}`,
@@ -64,11 +65,11 @@ test('نواةٌ بلا نقطة تفويض ترفض كل فعل محكوم — 
   }
 });
 
-test('فعلٌ غير محكوم يبقى مساره كما كان قبل M4', () => {
+test('فعلٌ غير محكوم يبقى مساره كما كان قبل M4', async () => {
   const { king, crown, log, enforcement } = setup();
   const kernel = new ExecutionKernel({ crown, log, enforcement });
   const command = createRoyalCommand('inspect', 'agent:one');
-  const task = kernel.submit(command, king.sign(command), () => ({ ok: true }));
+  const task = await kernel.submit(command, king.sign(command), () => ({ ok: true }));
   assert.equal(task.state, TaskState.SUCCEEDED);
 });
 
@@ -79,7 +80,7 @@ test('تذكرة القرار تُنفِذ الفعل المحكوم وتُسج�
   const signature = king.sign(command);
 
   // المحاولة الأولى ترفض لغياب التذكرة…
-  assert.throws(() => kernel.submit(command, signature, () => true), /AUTHORIZATION/);
+  await assert.rejects(() => kernel.submit(command, signature, () => true), /AUTHORIZATION/);
 
   // …ثم يُطلب القرار من النقطة الوحيدة، ويُنفَّذ **نفس** الأمر بنفس معرّفه.
   const { decision, token } = await enforcement.authorize({
@@ -92,7 +93,7 @@ test('تذكرة القرار تُنفِذ الفعل المحكوم وتُسج�
   assert.equal(decision.allowed, true, `القرار جاء رفضاً: ${decision.code} — ${decision.reason}`);
   assert.equal(typeof token, 'string');
 
-  const task = kernel.submit(command, signature, () => ({ changed: true }), {
+  const task = await kernel.submit(command, signature, () => ({ changed: true }), {
     decisionToken: /** @type {string} */ (token),
   });
   assert.equal(task.state, TaskState.SUCCEEDED);
@@ -117,8 +118,8 @@ test('تذكرة الفعل المحكوم لا تُستعمل مرّتين ول
     royalCommandId: command.id,
   });
   const authorization = { decisionToken: /** @type {string} */ (token) };
-  kernel.submit(command, signature, () => true, authorization);
-  assert.throws(
+  await kernel.submit(command, signature, () => true, authorization);
+  await assert.rejects(
     () => kernel.submit(command, signature, () => true, authorization),
     /AUTHORIZATION_DECISION_REUSED|COMMAND_REPLAY|ROYAL_COMMAND/,
     'إعادة التنفيذ بنفس التذكرة يجب أن تُرفض',
@@ -136,7 +137,7 @@ test('تذكرةٌ صحيحة لفعل آخر لا تُنفِّذ الفعل ا�
     royalCommandId: 'cmd:other',
   });
   const command = governedCommand();
-  assert.throws(
+  await assert.rejects(
     () =>
       kernel.submit(command, king.sign(command), () => true, {
         decisionToken: /** @type {string} */ (token),

@@ -90,6 +90,12 @@ export default [
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
         structuredClone: 'readonly',
+        // أُضيفت مع النواة التشغيلية (`M5`): الحلقة الدورية للنبضة وإلغاء
+        // التنفيذ القسري. وهي عوالم Node قياسية، وإعلانها هنا صريحٌ كي لا
+        // يُلتقط اسمٌ مطبعيّ خطأً على أنه عالمٌ موجود.
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        AbortController: 'readonly',
       },
     },
     rules: sharedRules,
