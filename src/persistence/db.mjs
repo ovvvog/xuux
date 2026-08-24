@@ -10,9 +10,34 @@
  * 2. **الفشل مُغلَق في الإنتاج** (المادة 9). وصلةٌ بلا TLS في وضع الإنتاج تُرفض
  *    بـ`DB_INSECURE_IN_PRODUCTION`؛ فتسهيلُ `docker-compose.yml` بمصادقة `trust`
  *    لا يُستعمل من حيث لا يُقصد.
+ * 3. **التشفير عند النقل شرطٌ على المضيف لا على اسم البيئة** (الخطوة `M7.03`).
+ *    القاعدة قبل هذه الخطوة كانت تشترط TLS **في الإنتاج وحده**، فبيئةٌ اسمها
+ *    `staging` تحمل بيانات حقيقية كانت تنقل كل صفٍّ نصّاً على الشبكة — والاسم ليس
+ *    هو ما يحمي الأسلاك. فصار الشرط: مضيفٌ غير محلي بلا TLS مرفوض في **كل** بيئة
+ *    بـ`ENCRYPTION_TRANSPORT_INSECURE`، ولا يُستثنى إلا `loopback` في غير الإنتاج
+ *    حيث لا شبكة تُنصت أصلاً. والاستثناء نفسه **بيانٌ** في `config/encryption.yaml`
+ *    لا شرطٌ في هذا الملف.
  */
 
 import pg from 'pg';
+
+import { loadClassificationLattice } from '../data/classification.mjs';
+import { assertSecureTransport, loadEncryptionPolicy } from '../data/encryption.mjs';
+
+/**
+ * سياسة التشفير تُقرأ مرّة واحدة لكل عملية: قراءتها عند كل وصلة تفتح ملفين على
+ * كل اتصال، وتجعل تعديلاً وسط التشغيل يُطبَّق على بعض الوصلات دون بعض.
+ * @type {import('../data/encryption.mjs').EncryptionPolicy | null}
+ */
+let transportPolicy = null;
+
+/**
+ * @returns {import('../data/encryption.mjs').EncryptionPolicy}
+ */
+function policy() {
+  transportPolicy ??= loadEncryptionPolicy({ lattice: loadClassificationLattice() });
+  return transportPolicy;
+}
 
 /** رموز أخطاء الوحدة — مثبَّتة نصاً لأن المستدعي يفرّق بها لا بنص الرسالة. */
 export const DB_ERRORS = Object.freeze({
@@ -86,6 +111,10 @@ export function resolveDatabaseConfig(options = {}) {
       'وصلة بلا TLS مرفوضة في وضع الإنتاج: أضف sslmode=require إلى DATABASE_URL.',
     );
   }
+  // ثم شرط المضيف (M7.03): يُطبَّق في كل بيئة، فلا يمرّ نقلٌ نصّي إلى قاعدةٍ على
+  // الشبكة لأن اسم البيئة `staging`. والخطأ يُرفع برمز التشفير لا برمز الوصلة،
+  // لأن ما اختُرق ليس شكل الوصلة بل سرّية ما يُنقل فيها.
+  assertSecureTransport({ host: url.hostname, tls, environment, policy: policy() });
 
   return { url, environment, tls };
 }

@@ -46,25 +46,39 @@ import { MEMORY_SPEC } from '../persistence/entities.mjs';
  */
 
 /**
- * يفكّ تغليف المحتوى: يُخزَّن `{ value: ... }` لأن عمود القاعدة يشترط كائناً،
- * ويُقرأ كما سلّمه الوكيل.
+ * يبني مدخلاً من صفّ المستودع ومادةٍ **مفكوكة من غلافها** (الخطوة `M7.03`).
+ *
+ * ولماذا تُمرَّر المادة وسيطاً ولا تُقرأ من الصفّ: لأن الصفّ لا يحمل مادةً
+ * بعد اليوم بل معمّى؛ ودالّةٌ تقرأ `content` مباشرةً كانت ستُعيد الغلاف نفسه
+ * لمن لم يمرّ بالفكّ فيصير للمادة مسار قراءةٍ ثانٍ.
  * @param {Record<string, unknown>} row
+ * @param {unknown} content
  * @returns {MemoryEntry}
  */
-function toEntry(row) {
-  const wrapper = row['content'];
-  if (typeof wrapper !== 'object' || wrapper === null || !('value' in wrapper)) {
-    throw new Error('MEMORY_CONTENT_CORRUPT');
-  }
+function toEntry(row, content) {
   return /** @type {MemoryEntry} */ (
     /** @type {unknown} */ (
       Object.freeze({
         ...row,
-        content: /** @type {{ value: unknown }} */ (wrapper).value,
+        // `snapshot` لا `content` كما وصلت: المادة العائدة من الفكّ كائنٌ حديث
+        // مُحلَّل من نصّ، فلو مُرِّرت كما هي لعاد الاستدعاء بمخزونٍ **قابل
+        // للتعديل** — وهو الحدّ الذي كان قائماً قبل التشفير وكاد يسقط معه.
+        content: snapshot(content),
         tags: row['tags'] ?? [],
       })
     )
   );
+}
+
+/**
+ * ربط الغلاف بهويّة صفّه: معرّف المدخل ومالكه وعقد بياناته. فمعمّى يُنقل
+ * من صفّ إلى صفّ — وهو ما يفعله من يريد قراءة ذاكرة غيره بلا مفتاح — يُخفق
+ * عند الفكّ ولا يُعاد نصّاً.
+ * @param {{ id: string, agentId: string, datasetId: string }} parts
+ * @returns {Record<string, string>}
+ */
+function bindingOf({ id, agentId, datasetId }) {
+  return { id, agentId, datasetId };
 }
 
 /** @typedef {import('../persistence/composition.mjs').StateTransaction} TransactionRunner */
@@ -73,7 +87,7 @@ export class AgentMemoryStore {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MEMORY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null }} [deps]
+   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null, encryptor?: import('./encryption.mjs').DataEncryptor | null }} [deps]
    */
   constructor({
     catalog,
@@ -82,6 +96,7 @@ export class AgentMemoryStore {
     maxEntries = 100000,
     transaction = null,
     accessGate = null,
+    encryptor = null,
   } = {}) {
     if (!catalog || !log || !repository) throw new Error('MEMORY_DEPENDENCY_MISSING');
     this.catalog = catalog;
@@ -92,6 +107,14 @@ export class AgentMemoryStore {
      * @type {import('./access-gate.mjs').DataAccessGate | null}
      */
     this.accessGate = accessGate;
+    /**
+     * مغلّف المادة (الخطوة `M7.03`). اختياري في **التركيب** وليس في الفعل:
+     * مخزنٌ بلا مغلّف يرفض التذكّر والاستدعاء برمز `MEMORY_ENCRYPTOR_REQUIRED`.
+     * ولماذا لا يكتب نصّاً حين لا مغلّف: لأن ذلك يجعل **تركَ التركيب** طريقاً
+     * مفتوحاً للنصّ الصريح — وهو أسهل من اختراق التشفير نفسه.
+     * @type {import('./encryption.mjs').DataEncryptor | null}
+     */
+    this.encryptor = encryptor;
     this.log = log;
     /** @type {MemoryRepository} */
     this.repository = repository;
@@ -126,6 +149,7 @@ export class AgentMemoryStore {
     // الكتابة قرار إتاحة أيضاً: من يحمل تخليصاً عالياً لا يُنشئ مادةً مصنّفة أدنى
     // منه، لأن ذلك ينقل ما يعرفه إلى مرتبةٍ يقرؤها من هو أدنى منه بلا إعادة تصنيف.
     if (this.accessGate === null) throw new Error('MEMORY_ACCESS_GATE_REQUIRED');
+    if (this.encryptor === null) throw new Error('MEMORY_ENCRYPTOR_REQUIRED');
     const actor = options.actor;
     if (actor === undefined || typeof actor.role !== 'string') {
       throw new Error('MEMORY_ACTOR_REQUIRED');
@@ -162,19 +186,38 @@ export class AgentMemoryStore {
       source,
       retentionDays: 30,
     });
+    // صورةٌ من المحتوى وقت التسليم لا مرجعٌ إليه: الذاكرة تُقيّد ما سُلِّم حين سُلِّم.
+    const material = snapshot(content);
+    // ثم **تُغلَّف** قبل أن تلمس المستودع (الخطوة `M7.03`): فمن قرأ القاعدة من
+    // غير طريق الكود — نسخةٌ احتياطية أو حساب صيانة أو قرصٌ مُصادَر — قرأ معمّى.
+    // والتغليف دائمٌ ولو كان التصنيف عامّاً، لأن التصنيف يسكن `state.data_assets`
+    // لا `state.memories`، فقيدُ القاعدة لا يقرؤه؛ ونسخُ التصنيف عموداً ثانياً هو
+    // انحراف «الحقيقة في موضعين» الذي أُصلح في M7.01.
+    const sealed = await /** @type {import('./encryption.mjs').DataEncryptor} */ (
+      this.encryptor
+    ).seal({
+      value: material,
+      classification,
+      binding: bindingOf({ id, agentId, datasetId: dataset.id }),
+    });
     const row = await this.repository.insert({
       id,
       agentId,
       datasetId: dataset.id,
       kind,
-      // صورةٌ من المحتوى وقت التسليم لا مرجعٌ إليه: الذاكرة تُقيّد ما سُلِّم حين
-      // سُلِّم. والتغليف `{ value }` شرط عمود `jsonb` الكائني في القاعدة.
-      content: { value: snapshot(content) },
+      content: sealed,
       tags: [...tags],
       legalHold: false,
     });
-    this.log.append('memory.created', agentId, { id, datasetId: dataset.id });
-    return toEntry(row);
+    // السجل يقول إنّ الذاكرة كُتبت **مغلَّفة** وبأي مرتبة، ولا يحمل مادتها ولا
+    // شيئاً من مفتاحها: سجلٌّ يحمل المادة يُبطل التشفير من باب التدقيق.
+    this.log.append('memory.created', agentId, {
+      id,
+      datasetId: dataset.id,
+      encrypted: true,
+      tier: sealed.tier,
+    });
+    return toEntry(row, material);
   }
 
   /**
@@ -191,6 +234,7 @@ export class AgentMemoryStore {
    */
   async recall({ id, actor, agentId, purpose = 'agent-recall' }) {
     if (this.accessGate === null) throw new Error('MEMORY_ACCESS_GATE_REQUIRED');
+    if (this.encryptor === null) throw new Error('MEMORY_ENCRYPTOR_REQUIRED');
     if (actor === undefined || typeof actor.id !== 'string')
       throw new Error('MEMORY_ACTOR_REQUIRED');
     const row = await this.repository.findById(id);
@@ -201,13 +245,31 @@ export class AgentMemoryStore {
     if (actor.role === 'role:agent' && row['agentId'] !== actor.id) {
       throw new Error('MEMORY_NOT_FOUND');
     }
-    const entry = toEntry(row);
+    const encryptor = /** @type {import('./encryption.mjs').DataEncryptor} */ (this.encryptor);
+    const datasetId = String(row['datasetId']);
     return /** @type {Promise<MemoryEntry>} */ (
       this.accessGate.read({
         actor,
-        assetId: entry.datasetId,
+        assetId: datasetId,
         purpose,
-        reader: () => entry,
+        // الفكّ **داخل** أثر البوابة لا قبله: فلا تُفكّ مادةٌ إلا بعد أن تُقيَّم
+        // السياسة وتُستهلَك تذكرة القرار. ولو فُكّت قبل النداء لصارت المادة
+        // مكشوفة في الذاكرة حتى لمن سيُرفض بعد سطرين.
+        // ومرتبة الأصل تُمرَّر من قرار البوابة لا من الغلاف: غلافٌ بمفتاح مرتبةٍ
+        // لا تطابق تصنيف أصله اليوم يُرفض بـ`ENCRYPTION_ENVELOPE_TIER_MISMATCH`.
+        reader: async (asset) =>
+          toEntry(
+            row,
+            await encryptor.open({
+              envelope: row['content'],
+              binding: bindingOf({
+                id: String(row['id']),
+                agentId: String(row['agentId']),
+                datasetId,
+              }),
+              classification: asset.classification,
+            }),
+          ),
       })
     );
   }

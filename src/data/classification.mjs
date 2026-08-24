@@ -80,6 +80,7 @@ export const Classification = Object.freeze({
  * @property {ClassificationValue} id
  * @property {number} rank
  * @property {boolean} redactInLogs - نصّ المادة لا يُكتب في السجل، بل بصمتها وطولها
+ * @property {boolean} encryptAtRest - مادة هذه المرتبة لا تُخزَّن نصّاً (M7.03)
  * @property {boolean} sealed - لا تُخفَّض بأي اعتماد تشغيلي
  * @property {string} description
  */
@@ -157,6 +158,21 @@ export class ClassificationLattice {
       return /** @type {ClassificationValue} */ (value);
     }
     return this.aliases.get(value) ?? null;
+  }
+
+  /**
+   * هل تُشفَّر مادة هذه المرتبة عند التخزين؟ (الخطوة `M7.03`.)
+   *
+   * والمجهول يُشفَّر: مرتبةٌ لا تُعرف ليست إذناً بالنصّ الصريح، فالجواب عن غير
+   * المعروف `true` لا `false` — والقرار المبني عليه يرفض قبل أن يكتب، لأن
+   * `encryptorFor` لا يجد لها مفتاحاً معلَناً.
+   * @param {unknown} value
+   * @returns {boolean}
+   */
+  requiresEncryption(value) {
+    const id = this.normalize(value);
+    if (id === null) return true;
+    return /** @type {ClassificationTier} */ (this.byId.get(id)).encryptAtRest === true;
   }
 
   /**
@@ -330,6 +346,19 @@ function assertCoherent({ tiers, aliasEntries, clearanceEntries = [] }) {
   for (const tier of sorted) {
     if (tier.sealed && tier.rank !== top.rank) {
       fail(`مرتبة مختومة في وسط السلّم (${tier.id})؛ الختم للقمّة وحدها كي لا ينقسم السلّم.`);
+    }
+  }
+
+  // التشفير عند التخزين مُطّرد صعوداً: إن شُفِّرت مرتبةٌ فكل ما فوقها مشفَّر.
+  // بلا هذا الفحص كان ملفٌ يقول «الحساس مشفَّر والسيادي نصّ» يُقبل بلا شكوى —
+  // وهو أسوأ من «لا تشفير» لأنه يقرأ كأنّ الحماية قائمة.
+  for (const tier of sorted) {
+    if (!tier.encryptAtRest) continue;
+    const plainAbove = sorted.filter((other) => other.rank > tier.rank && !other.encryptAtRest);
+    if (plainAbove.length > 0) {
+      fail(
+        `مرتبة «${tier.id}» تُشفَّر عند التخزين ومرتبةٌ أعلى منها لا تُشفَّر (${plainAbove.map((other) => other.id).join('، ')})؛ حمايةٌ تنقص كلما زادت الحساسية ليست حماية.`,
+      );
     }
   }
 

@@ -14,11 +14,12 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "rank", "redactInLogs", "sealed", "description"],
+        "required": ["id", "rank", "redactInLogs", "encryptAtRest", "sealed", "description"],
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
           "rank": { "type": "integer", "minimum": 0 },
           "redactInLogs": { "type": "boolean" },
+          "encryptAtRest": { "type": "boolean" },
           "sealed": { "type": "boolean" },
           "description": { "type": "string", "minLength": 8 }
         }

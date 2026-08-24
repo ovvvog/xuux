@@ -15,6 +15,7 @@ import { ClassificationApprovalRegistry } from '../data/approvals.mjs';
 import { loadClassificationLattice } from '../data/classification.mjs';
 import { DataAccessGate } from '../data/access-gate.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
+import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
@@ -57,6 +58,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ModelRegistry} models
  * @property {DataCatalog} catalog
  * @property {DataAccessGate} accessGate
+ * @property {DataEncryptor | null} encryptor
  * @property {AgentMemoryStore} memory
  * @property {LawRegistry} laws
  * @property {ClassificationApprovalRegistry} approvals
@@ -114,6 +116,14 @@ export function createPostgresRepositories(pool) {
  *   إعادة التصنيف برمز `CLASSIFICATION_ENFORCEMENT_REQUIRED` — فالفرق معلَن لا مخفيّ.
  * @param {import('../data/classification.mjs').ClassificationLattice | null} [deps.lattice] سلّم
  *   التصنيف؛ يُحمَّل من `config/classification.yaml` إن لم يُمرَّر.
+ * @param {import('../root-of-trust/key-provider.mjs').KeyProvider | null} [deps.keyProvider] مزوّد
+ *   مفاتيح التشفير عند التخزين (M7.03). من لم يمرّره حصل على مخزن ذاكرةٍ **يرفض**
+ *   التذكّر والاستدعاء برمز `MEMORY_ENCRYPTOR_REQUIRED`، ولا يكتب نصّاً صريحاً:
+ *   لأن الكتابة نصّاً عند غياب المزوّد تجعل **تركَ المزوّد** أسهلَ طريقٍ إلى
+ *   المخزون المكشوف. ولا مزوّد افتراضي في الكود: مفتاحٌ يولّده الكود مفتاحٌ منشور.
+ * @param {import('../data/encryption.mjs').EncryptionPolicy | null} [deps.encryptionPolicy] سياسة
+ *   التشفير؛ تُحمَّل من `config/encryption.yaml` إن لم تُمرَّر ووُجد مزوّد.
+ * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
 export function createRegistries({
@@ -126,6 +136,9 @@ export function createRegistries({
   quarantine = null,
   enforcementPoint = null,
   lattice = null,
+  keyProvider = null,
+  encryptionPolicy = null,
+  environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
   // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
   // يُمنح على اتجاهٍ ويُقرأ اتجاهاً آخر.
@@ -152,6 +165,18 @@ export function createRegistries({
     enforcementPoint,
     quarantine,
   });
+  // المغلِّف يُركَّب حين يوجد مزوّد مفاتيح، ولا يُختلق مزوّد: مفتاحٌ يولّده الكود في
+  // الذاكرة يضيع عند الإقلاع فيصير كل ما كُتب غير قابل للفكّ — فقدُ بيانات باسم
+  // التشفير. وغيابُ المزوّد يُقرأ **رفضاً** في مخزن الذاكرة لا كتابةً نصّاً.
+  const encryptor =
+    keyProvider === null
+      ? null
+      : new DataEncryptor({
+          policy: encryptionPolicy ?? loadEncryptionPolicy({ lattice: classificationLattice }),
+          lattice: classificationLattice,
+          keyProvider,
+          environment,
+        });
   // مخزن الأوزان يُركَّب دائماً: لو كان اختياريّاً لصار تركه مساراً لتنشيطٍ
   // بلا فحص بصمة، وهو بالضبط ما يمنعه M6.06.
   const weights =
@@ -176,12 +201,14 @@ export function createRegistries({
     }),
     catalog,
     accessGate,
+    encryptor,
     memory: new AgentMemoryStore({
       catalog,
       log,
       repository: repositories.memories,
       transaction,
       accessGate,
+      encryptor,
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),
     laws: new LawRegistry({ log, repository: repositories.laws }),
@@ -203,12 +230,26 @@ export function createRegistries({
  * @param {import('../policy/enforcement-point.mjs').EnforcementPoint | null} [deps.enforcementPoint] نقطة
  *   التفويض؛ تُمرَّر إلى السجلات داخل المعاملة أيضاً كي لا تصير إعادة التصنيف
  *   الذرّية مساراً بلا قرار.
+ * @param {import('../root-of-trust/key-provider.mjs').KeyProvider | null} [deps.keyProvider] مزوّد
+ *   مفاتيح التشفير؛ يُمرَّر إلى السجلات داخل المعاملة أيضاً، فمغلِّفان بسياستين في
+ *   عمليةٍ واحدة يفتحان انحرافاً كالذي يفتحه سلّمان.
  * @returns {StateRegistries}
  */
-export function createPostgresRegistries({ pool, ca, log, limits = {}, enforcementPoint = null }) {
+export function createPostgresRegistries({
+  pool,
+  ca,
+  log,
+  limits = {},
+  enforcementPoint = null,
+  keyProvider = null,
+}) {
   // السلّم يُحمَّل مرّة واحدة ويُمرَّر إلى السجلات داخل المعاملة أيضاً: تحميلُه في كل
   // معاملة يقرأ الملف على كل كتابة، وسلّمان في عمليةٍ واحدة يفتحان انحرافاً.
   const classificationLattice = loadClassificationLattice();
+  // وسياسة التشفير كذلك: تُقرأ مرّة واحدة، وقراءتها في كل معاملة تفتح الملف على كل
+  // كتابة وتجعل تعديلاً وسط التشغيل يُطبَّق على بعض الكتابات دون بعض.
+  const policy =
+    keyProvider === null ? null : loadEncryptionPolicy({ lattice: classificationLattice });
   /** @type {StateTransaction} */
   const transaction = (work) =>
     withUnitOfWork(pool, (repositories) =>
@@ -223,6 +264,8 @@ export function createPostgresRegistries({ pool, ca, log, limits = {}, enforceme
           transaction: null,
           enforcementPoint,
           lattice: classificationLattice,
+          keyProvider,
+          encryptionPolicy: policy,
         }),
       ),
     );
@@ -234,5 +277,7 @@ export function createPostgresRegistries({ pool, ca, log, limits = {}, enforceme
     transaction,
     enforcementPoint,
     lattice: classificationLattice,
+    keyProvider,
+    encryptionPolicy: policy,
   });
 }

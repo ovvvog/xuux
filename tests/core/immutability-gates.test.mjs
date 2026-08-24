@@ -22,6 +22,11 @@ import { createMemoryRepository } from '../../src/persistence/repository-memory.
 import { DataAccessGate } from '../../src/data/access-gate.mjs';
 import { loadClassificationLattice } from '../../src/data/classification.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
+
+// مغلِّفٌ واحد لهذا الملف على مجلد مفاتيح مؤقّت؛ يُنظَّف عند انتهاء الملف.
+const fixture = await createTestEncryptor();
+test.after(() => fixture.cleanup());
 
 // بعد `M3.05` صارت السجلات على مستودعات، فمستودع الذاكرة هو ما يُختبر عليه ضابط
 // `D1` هنا: التجميد العميق شرطٌ في **عقد المستودع** لا عادةٌ في صنفٍ واحد،
@@ -169,6 +174,9 @@ test('محتوى الذاكرة الذي يملكه المستدعي لا يُج
     repository: createMemoryRepository(AgentMemoryStore.spec),
     // البوابة لازمة للتذكّر والاستدعاء (`M7.02`)؛ والمقيس هنا التجميد لا الإتاحة.
     accessGate: accessGateFor(log, catalog),
+    // والمغلِّف لازم كذلك (`M7.03`). والتجميد يبقى مقيساً على المادة **بعد الفكّ**:
+    // لو رجع الفكّ كائناً غير مُجمَّد لصار المستدعي يعدّل ما استُدعي.
+    encryptor: fixture.encryptor,
   });
   const actor = testActor('role:agent', { id: 'agent:1' });
   const content = { note: 'أصل' };

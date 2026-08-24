@@ -9,6 +9,7 @@ import {
   loadClassificationLattice,
 } from '../../src/data/index.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
@@ -29,6 +30,12 @@ function agentActor(id = 'agent:a') {
 
 // الفهرس والذاكرة صارا على مستودعات (`M3.05`)؛ ومستودع الذاكرة هنا لسرعة
 // الاختبار لا لإثبات الاستمرارية، وإثباتها في `tests/persistence/restart.test.mjs`.
+// المغلِّف يُبنى مرّة لهذا الملف: مزوّد مفاتيح لكل نداء `setup` كان سيُنشئ مجلداً
+// مؤقّتاً لكل اختبار فيبطئ الملف بلا أن يقيس شيئاً زائداً — والمقيس هنا الذاكرة
+// لا عزل المفاتيح، وعزلُها مقيس في `tests/data/encryption.test.mjs`.
+const fixture = await createTestEncryptor();
+test.after(() => fixture.cleanup());
+
 function setup(limits = {}) {
   const log = new EventLog();
   const enforcementPoint = new EnforcementPoint({
@@ -48,6 +55,9 @@ function setup(limits = {}) {
     log,
     repository: createMemoryRepository(AgentMemoryStore.spec),
     accessGate,
+    // المغلِّف لازم للتذكّر والاستدعاء (`M7.03`): مخزنٌ بلا مغلِّف يرفض، ولا يكتب
+    // نصّاً — فلو كتب نصّاً لصار تركُ المغلِّف أسهلَ طريقٍ إلى مخزونٍ مكشوف.
+    encryptor: fixture.encryptor,
     ...limits,
   });
   return { log, catalog, memory, accessGate };

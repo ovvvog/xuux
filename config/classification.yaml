@@ -27,25 +27,36 @@ owner: crown
 
 # المراتب مرتّبة تصاعدياً في الحساسية. `rank` هو أساس قرار الإتاحة، و`redactInLogs`
 # يعني أن نصّ المادة لا يُكتب في سجل التدقيق بل بصمتُه وطوله.
+#
+# و`encryptAtRest` — M7.03 — يعني أن مادة هذه المرتبة **لا تُخزَّن نصّاً**: تُغلَّف
+# بمفتاح المرتبة المُعلَن في `config/encryption.yaml`، والمفتاح يأتي من مزوّد
+# مفاتيح لا من الكود ولا من هذا الملف. وهو خاصيّة **المرتبة** لأن سؤال «هل تُشفَّر»
+# سؤالٌ عن حساسية المادة لا عن الجدول الذي تسكنه، وكتابتُه في موضعين كانت ستُنتج
+# نفس انحراف السلّم الذي عالجته M7.01. والعامّ وحده معفى: تشفيرُ ما يُنشر للعموم
+# يشتري كلفةَ مفتاحٍ بلا سرٍّ يحميه.
 tiers:
   - id: public
     rank: 0
     redactInLogs: false
+    encryptAtRest: false
     sealed: false
     description: بيانات معلَنة للعموم، لا يضرّ نشرها.
   - id: internal
     rank: 1
     redactInLogs: false
+    encryptAtRest: true
     sealed: false
     description: بيانات تشغيلية داخلية، تُقرأ داخل الدولة ولا تُنشر.
   - id: sensitive
     rank: 2
     redactInLogs: true
+    encryptAtRest: true
     sealed: false
     description: بيانات يضرّ إفشاؤها بأشخاص أو بمؤسسات؛ لا يُكتب نصّها في السجلات.
   - id: sovereign
     rank: 3
     redactInLogs: true
+    encryptAtRest: true
     sealed: true
     description: بيانات جذر الثقة والقرار السيادي؛ لا تُخفَّض إلا بمسار دستوري.
 

@@ -29,6 +29,7 @@ import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { QuarantineWarden } from '../../src/governance/quarantine.mjs';
 import { IncidentRegister } from '../../src/identity/incident-register.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 
 const bundle = loadPolicyBundle();
 const lattice = loadClassificationLattice();
@@ -433,16 +434,20 @@ test('المسار الجانبي أُغلق: لا دالّة canRead في فه�
 
 // ── ذاكرة الوكلاء تمرّ من البوابة ───────────────────────────────────────────
 
+const fixture = await createTestEncryptor();
+test.after(() => fixture.cleanup());
+
 /**
- * @param {{ withGate?: boolean }} [options]
+ * @param {{ withGate?: boolean, withEncryptor?: boolean }} [options]
  */
-function memorySetup({ withGate = true } = {}) {
+function memorySetup({ withGate = true, withEncryptor = true } = {}) {
   const { log, catalog, gate } = setup();
   const memory = new AgentMemoryStore({
     catalog,
     log: /** @type {never} */ (log),
     repository: createMemoryRepository(AgentMemoryStore.spec),
     accessGate: withGate ? gate : null,
+    encryptor: withEncryptor ? fixture.encryptor : null,
   });
   return { log, catalog, gate, memory };
 }

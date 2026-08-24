@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/config/encryption.schema.json",
+  "title": "سياسة التشفير عند التخزين وعند النقل — M7.03",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "cipher", "keys", "stores", "transport", "provider"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "cipher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "keyBytes", "ivBytes", "tagBytes"],
+      "properties": {
+        "algorithm": { "const": "aes-256-gcm" },
+        "keyBytes": { "const": 32 },
+        "ivBytes": { "type": "integer", "minimum": 12, "maximum": 16 },
+        "tagBytes": { "type": "integer", "minimum": 16, "maximum": 16 }
+      }
+    },
+    "keys": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["perTier", "createOnDemand", "maxAgeDays"],
+      "properties": {
+        "perTier": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tier", "name"],
+            "properties": {
+              "tier": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+              "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._:-]{0,63}$" }
+            }
+          }
+        },
+        "createOnDemand": { "const": false },
+        "maxAgeDays": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "stores": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "field", "writer", "alwaysEncrypt", "dbConstraint"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z_]+\\.[a-z_]+$" },
+          "field": { "type": "string", "pattern": "^[a-z_]+$" },
+          "writer": { "type": "string", "pattern": "^src/.+\\.mjs$" },
+          "alwaysEncrypt": { "type": "boolean" },
+          "dbConstraint": { "type": "string", "minLength": 3 }
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireTls", "allowPlaintextToLoopback", "loopbackHosts"],
+      "properties": {
+        "requireTls": { "const": true },
+        "allowPlaintextToLoopback": { "type": "boolean" },
+        "loopbackHosts": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireProductionReadyIn", "environmentVariables"],
+      "properties": {
+        "requireProductionReadyIn": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "environmentVariables": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["remote", "local"],
+          "properties": {
+            "remote": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" }
+            },
+            "local": {
+              "type": "array",
+              "minItems": 2,
+              "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
