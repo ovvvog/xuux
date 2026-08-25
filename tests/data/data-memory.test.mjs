@@ -111,7 +111,7 @@ test('memory is isolated by agent identity', async () => {
     () => memory.recall({ id: x.id, actor: agentActor('agent:b') }),
     /MEMORY_NOT_FOUND/,
   );
-  await memory.forget('agent:a', x.id);
+  await memory.forget({ id: x.id, actor: agentActor() });
   await assert.rejects(() => memory.recall({ id: x.id, actor: agentActor() }), /MEMORY_NOT_FOUND/);
 });
 

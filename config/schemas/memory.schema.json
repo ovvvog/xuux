@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://state.local/schemas/memory.schema.json",
+  "title": "سياسة ذاكرة الوكلاء",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "owner",
+    "quotas",
+    "expiry",
+    "isolation",
+    "anomaly",
+    "store",
+    "guardedPaths",
+    "repositoryHolders"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "quotas": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["perAgentEntries", "perAgentStoredBytes", "maxEntryBytes", "globalEntries"],
+      "properties": {
+        "perAgentEntries": { "type": "integer", "minimum": 1 },
+        "perAgentStoredBytes": { "type": "integer", "minimum": 1024 },
+        "maxEntryBytes": { "type": "integer", "minimum": 64 },
+        "globalEntries": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "expiry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "defaultDays", "maxDays", "refuseRecallAfterExpiry", "sweeperRoles"],
+      "properties": {
+        "required": {
+          "const": true,
+          "description": "ذاكرةٌ بلا انتهاء تناقض الاحتفاظ؛ فلا يُطفأ الشرط من الإعداد."
+        },
+        "defaultDays": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["episodic", "semantic", "procedural"],
+          "properties": {
+            "episodic": { "type": "integer", "minimum": 1 },
+            "semantic": { "type": "integer", "minimum": 1 },
+            "procedural": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "maxDays": { "type": "integer", "minimum": 1, "maximum": 3650 },
+        "refuseRecallAfterExpiry": {
+          "const": true,
+          "description": "الفجوة بين الانتهاء ومرور المطهِّر ليست إذناً بالقراءة."
+        },
+        "sweeperRoles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^role:[a-z-]+$" }
+        }
+      }
+    },
+    "isolation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ownerFromActor", "ownerRole", "crossAgentNeedsGate", "refuseSharedNamespace"],
+      "properties": {
+        "ownerFromActor": {
+          "const": true,
+          "description": "الملكية وسيطاً في الطلب هي نفسها عيبُ الادّعاء في M7.01 وM7.02."
+        },
+        "ownerRole": { "type": "string", "pattern": "^role:[a-z-]+$" },
+        "crossAgentNeedsGate": {
+          "const": true,
+          "description": "العبور بين الوكلاء يمرّ بقرار بوابةٍ على عقد البيانات لا بحقٍّ ذاتي."
+        },
+        "refuseSharedNamespace": {
+          "const": true,
+          "description": "مدخلٌ بلا مالكٍ واحد هو قناةُ التسريب المشتركة التي تمنعها الخطوة."
+        }
+      }
+    },
+    "anomaly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["crossAgentAttemptsBeforeSignal", "signalKind"],
+      "properties": {
+        "crossAgentAttemptsBeforeSignal": { "type": "integer", "minimum": 1, "maximum": 100 },
+        "signalKind": { "type": "string", "pattern": "^[a-z][a-z-]*$" }
+      }
+    },
+    "store": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "dbConstraints"],
+      "properties": {
+        "table": { "const": "state.memories" },
+        "dbConstraints": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[a-z_]+$" }
+        }
+      }
+    },
+    "guardedPaths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module", "methods"],
+        "properties": {
+          "module": { "type": "string", "pattern": "^src/.+\\.mjs$" },
+          "methods": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[a-zA-Z]+$" }
+          }
+        }
+      }
+    },
+    "repositoryHolders": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+    }
+  }
+}

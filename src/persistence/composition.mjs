@@ -129,6 +129,9 @@ export function createPostgresRepositories(pool) {
  *   المخزون المكشوف. ولا مزوّد افتراضي في الكود: مفتاحٌ يولّده الكود مفتاحٌ منشور.
  * @param {import('../data/encryption.mjs').EncryptionPolicy | null} [deps.encryptionPolicy] سياسة
  *   التشفير؛ تُحمَّل من `config/encryption.yaml` إن لم تُمرَّر ووُجد مزوّد.
+ * @param {import('../data/memory-limits.mjs').MemoryPolicy | null} [deps.memoryPolicy] سياسة حدود
+ *   الذاكرة (M7.05): الحصص لكل وكيل، والانتهاء الإلزامي، وعزلُ الوكلاء. تُحمَّل من
+ *   `config/memory.yaml` إن لم تُمرَّر، ولا افتراضَ في الكود يغني عنها.
  * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
@@ -144,6 +147,7 @@ export function createRegistries({
   lattice = null,
   keyProvider = null,
   encryptionPolicy = null,
+  memoryPolicy = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
   // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
@@ -230,6 +234,10 @@ export function createRegistries({
       transaction,
       accessGate,
       encryptor,
+      // الحجر يصل المخزن كما يصل سجل النماذج: تكرارُ محاولةِ عبورِ حدّ وكيلٍ
+      // إلى آخر إشارةٌ تُرفع لا رفضٌ يُعدّ في صمت (M7.05).
+      quarantine,
+      ...(memoryPolicy === null ? {} : { policy: memoryPolicy }),
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),
     laws: new LawRegistry({ log, repository: repositories.laws }),

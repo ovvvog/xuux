@@ -213,8 +213,11 @@ async function seedEveryTable(pool) {
     ['asset-001', 'Backup Asset', 'internal', 'agent-001', 30, 'integration-test'],
   );
   await pool.query(
-    `INSERT INTO state.memories (id, agent_id, kind, content, tags, dataset_id)
-     VALUES ($1, $2, $3, $4::jsonb, $5, $6)`,
+    // تاريخ الانتهاء إلزامي بعد الترحيل `0008` (‏M7.05): مدخلٌ بلا انتهاء ولا
+    // حفظٍ قانوني يرفضه القيد `memories_expiry_required`، فالنسخة تُؤخذ لصفٍّ
+    // مشروع لا لصفٍّ ما كان ليُكتب.
+    `INSERT INTO state.memories (id, agent_id, kind, content, tags, dataset_id, expires_at)
+     VALUES ($1, $2, $3, $4::jsonb, $5, $6, now() + interval '30 days')`,
     [
       'memory-001',
       'agent-001',

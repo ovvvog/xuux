@@ -301,6 +301,19 @@ export const MEMORY_SPEC = Object.freeze({
       /** @param {EntityRecord} record */
       check: (record) => record['legalHold'] !== true || record['expiresAt'] === null,
     },
+    {
+      // مرآة قيد الترحيل `memories_expiry_required` (‏`0008`) في المستودع الذاكري،
+      // لأن العيب المُغلَق (‏`M7.05`) كان حرفياً: العمود موجود منذ `0001` ولم يُكتب
+      // مرّةً. فلو بقي القيد في القاعدة وحدها لمرّت كل اختبارات المستودع الذاكري
+      // على ذاكرةٍ أبديّة وهي تقول «نجحنا»، ولانكشف الفرق في التشغيل لا في القياس.
+      code: 'MEMORY_EXPIRY_REQUIRED',
+      message:
+        'مدخل ذاكرة بلا تاريخ انتهاء ولا حفظٍ قانوني: الأبديّة تناقض الاحتفاظ، ودورةُ محوٍ تمرّ على صفر صفوف تُعلن نجاحاً لم يحدث.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        record['legalHold'] === true ||
+        (record['expiresAt'] !== null && record['expiresAt'] !== undefined),
+    },
   ]),
 });
 
