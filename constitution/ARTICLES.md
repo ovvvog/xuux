@@ -2,7 +2,7 @@
 
 > **وثيقةٌ مشتقّة لا مصدر.** المصدرُ `config/constitution.yaml`، وهذا الملفُّ يُولَّد منه بـ`node scripts/render-constitution-docs.mjs`. ويتحقّق `npm run guard:constitution` (القاعدة R7) من أنّ كلَّ مادةٍ هنا تحمل تجزئتَها الصحيحة؛ فالوثيقةُ لا تتخلّف عن النصّ في صمت.
 
-النصُّ المؤسِّس: **11** مادة، منها **3** مختومة. جذرُ النصّ: `6a2af653fc92b73bec9446de00736fcbc328eac3cb25ffa57dfec1eeb9d8b5eb`
+النصُّ المؤسِّس: **11** مادة، منها **3** مختومة. جذرُ النصّ: `ea54d3bea2dd25e1c2c5eea72294134f70e1d27fa688d1972fabd12eaacdac71`
 
 | المادة | العنوان | مرجع القانون | مختومة |
 | --- | --- | --- | --- |
@@ -62,8 +62,8 @@
 
 - **مرجع القانون:** `law:legislation`
 - **الحالة:** قابلةٌ للتعديل بالمسار الملكيّ الرباعيّ
-- **مواضع الإنفاذ:** `src/governance/law-system.mjs`
-- **التجزئة:** `2e72cb249a8eeef31e17597d1e93c2ec1710529038d53ceab13f704f0966e9d4`
+- **مواضع الإنفاذ:** `src/governance/law-system.mjs` · `src/legislation/legislature.mjs` · `src/legislation/conflict-engine.mjs`
+- **التجزئة:** `cdf47607d66aaaae1fcd49657438767ef1ddc6d80bc727d86c55ce741ffe0d80`
 
 ## art:06 — حكم السياسات
 

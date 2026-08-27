@@ -26,15 +26,22 @@ import { createPolicyVersionStore } from './versioning.mjs';
  * @property {EnforcementPoint} enforcement
  * @property {ReturnType<typeof createQuotaLedger> | null} quotaLedger
  * @property {ReturnType<typeof createPolicyVersionStore> | null} versionStore
- * @property {{ quotasEnforced: boolean, decisionsPersisted: boolean, policyVersioning: boolean }} guarantees - ما هو نافذ فعلاً في هذا التركيب
+ * @property {{ quotasEnforced: boolean, decisionsPersisted: boolean, policyVersioning: boolean, legislationEnforced: boolean }} guarantees - ما هو نافذ فعلاً في هذا التركيب
  */
 
 /**
  * يبني تركيب الحكم كاملاً.
- * @param {{ log: { append: (type: string, actor: string, payload: object) => unknown }, pool?: import('pg').Pool | null, haltSwitch?: { assertOperational: () => void } | null, signer?: Parameters<typeof createPolicyVersionStore>[0]['signer'] | null, bundle?: import('./loader.mjs').PolicyBundle }} deps
+ * @param {{ log: { append: (type: string, actor: string, payload: object) => unknown }, pool?: import('pg').Pool | null, haltSwitch?: { assertOperational: () => void } | null, signer?: Parameters<typeof createPolicyVersionStore>[0]['signer'] | null, bundle?: import('./loader.mjs').PolicyBundle, legislationGate?: { blockedActions: () => Promise<ReadonlySet<string>> } | null }} deps
  * @returns {Governance}
  */
-export function createGovernance({ log, pool = null, haltSwitch = null, signer = null, bundle }) {
+export function createGovernance({
+  log,
+  pool = null,
+  haltSwitch = null,
+  signer = null,
+  bundle,
+  legislationGate = null,
+}) {
   if (!log) throw new Error('GOVERNANCE_LOG_REQUIRED');
   const loaded = bundle ?? loadPolicyBundle();
   const decisionPoint = createPolicyDecisionPoint({ bundle: loaded });
@@ -51,6 +58,9 @@ export function createGovernance({ log, pool = null, haltSwitch = null, signer =
     haltSwitch,
     quotaLedger,
     decisionSink,
+    // حاجزُ التشريع (‏M8.02) اختياريٌّ في التركيب ومُعلَنٌ في `guarantees`: من
+    // لم يمرّره لا يظنّ أنّ التعارضَ يمنع عنده إنفاذاً، فالوعدُ يُقرأ من المُعاد.
+    legislationGate,
   });
 
   return Object.freeze({
@@ -63,6 +73,7 @@ export function createGovernance({ log, pool = null, haltSwitch = null, signer =
       quotasEnforced: quotaLedger !== null,
       decisionsPersisted: decisionSink !== null,
       policyVersioning: versionStore !== null,
+      legislationEnforced: legislationGate !== null,
     }),
   });
 }

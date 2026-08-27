@@ -468,12 +468,30 @@ channels:
       - role:operator
       - role:chief-justice
     types:
+      # رفضُ ربطٍ: صفٌ نافذٌ بلا مادةٍ ولا سياسة (الخطوة `M8.02`).
+      - type: law.binding.refused
+        version: 1
+        required: [id, reason, open]
+      # ربطٌ واقع: قانونٌ صار له سندٌ دستوريٌّ وأداةُ إنفاذٍ مُفعَّلة.
+      - type: law.bound
+        version: 1
+        required: [id, articleId, policyIds, commandId]
+      - type: law.conflict.detected
+        version: 1
+        required: [id, count, codes, open]
+      - type: law.conflict.resolved
+        version: 1
+        required: [id, commandId, reason, resolved]
       - type: law.draft
         version: 1
         required: [id, version]
       - type: law.enacted
         version: 1
         required: [id, version]
+      # منعُ إنفاذٍ بسبب تعارضٍ تشريعيٍّ قائم: يُنشر من نقطة الإنفاذ.
+      - type: law.enforcement.blocked
+        version: 1
+        required: [id, reason, open]
       - type: law.proposed
         version: 1
         required: [id]

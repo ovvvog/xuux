@@ -200,6 +200,8 @@ articles:
     lawRef: law:legislation
     enforcedBy:
       - src/governance/law-system.mjs
+      - src/legislation/legislature.mjs
+      - src/legislation/conflict-engine.mjs
     text: >-
       لا يَنفُذ قانونٌ إلا باعتمادٍ من التاج، ولكلِّ قانونٍ نافذٍ سلطةُ نفاذٍ
       مسمّاةٌ ووقتُ نفاذٍ مسجَّل. ولا يُعلَّق ما لم يَنفُذ ولا يُلغى، والملغى لا

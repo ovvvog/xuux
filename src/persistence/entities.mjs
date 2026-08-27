@@ -342,6 +342,10 @@ export const LAW_SPEC = Object.freeze({
       enactedAt: { column: 'enacted_at', type: 'timestamp', nullable: true },
       repealedAt: { column: 'repealed_at', type: 'timestamp', nullable: true },
       stateChangedAt: { column: 'state_changed_at', type: 'timestamp', nullable: true },
+      // ربطُ القانون بسنَده وبأداةِ إنفاذه (الخطوة `M8.02`، الهجرة 0011). كانا
+      // غائبين، فكان «القانونُ النافذ» صفّاً لا يقرؤه قرارٌ واحد في الدولة.
+      articleId: { column: 'article_id', type: 'string', nullable: true, maxLength: 40 },
+      policyIds: { column: 'policy_ids', type: 'stringArray', nullable: true },
       ...MANAGED,
     })
   ),
@@ -362,6 +366,23 @@ export const LAW_SPEC = Object.freeze({
           typeof record['enactedBy'] === 'string' &&
           record['enactedBy'].trim() !== '' &&
           record['enactedAt'] instanceof Date
+        );
+      },
+    },
+    {
+      code: 'LAW_ENACTED_REQUIRES_BINDING',
+      message:
+        'القانونُ النافذُ مربوطٌ بمادةٍ دستوريةٍ وبسياسةٍ تُنفِّذه؛ ونافذٌ بلا ربطٍ نصٌّ لا أثرَ له في قرار.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        if (record['state'] !== 'enacted') return true;
+        const article = record['articleId'];
+        const policies = record['policyIds'];
+        return (
+          typeof article === 'string' &&
+          article.trim() !== '' &&
+          Array.isArray(policies) &&
+          policies.length > 0
         );
       },
     },

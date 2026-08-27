@@ -82,6 +82,10 @@ actions:
   - id: repeal-law
     description: إلغاء نصّ قانوني نافذ.
     sensitive: true
+  # الخطوة `M8.02`: فعلٌ معلَنٌ لحلّ التعارض، مفصولٌ عن فعل النفاذ.
+  - id: resolve-law-conflict
+    description: ترجيح قانون على قانون عند تعارض مانع، بتعليق أحدهما.
+    sensitive: true
   - id: rotate-king-key
     description: تدوير مفتاح الملك.
     sensitive: true

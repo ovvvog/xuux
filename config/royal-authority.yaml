@@ -47,6 +47,14 @@ threshold:
     lawRef: law:legislation
     delegable: false
 
+  # الخطوة `M8.02`: حلُّ تعارضٍ تشريعيٍّ يعني ترجيحَ مشرِّعٍ على مشرِّع.
+  - action: resolve-law-conflict
+    reason: >-
+      ترجيحُ قانونٍ على قانونٍ عند التعارض قرارٌ تشريعيٌّ لا تقنيٌّ، وتركُه لترتيب
+      المعرّفات أبجدياً يجعل حرفَ الاسم مشرِّعاً أعلى.
+    lawRef: law:legislation
+    delegable: false
+
   - action: rotate-king-key
     reason: تدوير مفتاح الملك يغيّر مرجع التحقّق لكل أمر سابق ولاحق.
     lawRef: law:root-of-trust

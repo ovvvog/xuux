@@ -1,0 +1,139 @@
+# وثيقةُ التشريع النافذ — الخطوة M8.02
+#
+# **العيبُ الذي تعالجه هذه الوثيقة:** كان «القانون» في هذه الدولة نصّاً حرّاً.
+# `LawRegistry.propose` يقبل أيَّ `text` بلا حدٍّ ولا سند، و`transition(...,
+# 'enacted')` يقارن اسمَ الفاعل بالنصِّ `crown` فيُعدُّ الأمرَ ملكيّاً، ثم لا
+# يقرأ أحدٌ القانونَ بعد نفاذه: لا نقطةُ تفويضٍ ولا محرّكُ سياسةٍ ولا مُنفِّذ.
+# فكان النافذُ نافذاً في جدولٍ فقط، ولا أثرَ له في قرارٍ واحد. وهذه الوثيقة
+# تُعلن الشرطَ الذي يصير به القانونُ **قابلاً للإنفاذ**: مادةٌ دستوريةٌ تسنده،
+# وسياسةٌ مُفعَّلةٌ واحدةٌ على الأقل تُنفِّذه، وأمرٌ ملكيٌّ موقَّعٌ يُصدره.
+#
+# **وحدٌّ معلَن:** هذه الوثيقةُ تُعلن الشرطَ ولا تُنفِّذه. المنفِّذُ هو
+# `src/legislation/legislature.mjs` و`src/legislation/conflict-engine.mjs`،
+# والحاجزُ الذي يمنع انحرافَ الوثيقةِ عن الكود هو `scripts/guard-legislation.mjs`
+# (البوابة 19).
+
+version: 1
+
+# حاملو السلطة التشريعية: من له أن يقترح، ومن له أن يُصدر، ومن له أن يحلَّ
+# تعارضاً. والفصلُ مقصود: المقترحُ لا يُصدر لنفسه.
+holders:
+  - role: role:king
+    may: [propose, bind, enact, resolve]
+    reason: النفاذُ أصلُ السلطة السيادية، والتاجُ وحده يُصدر.
+  - role: role:chief-justice
+    may: [propose, bind, resolve]
+    reason: القضاءُ يقرأ التعارضَ ويقترح حلَّه، ولا يُصدر النصَّ بنفسه.
+  - role: role:minister
+    may: [propose, bind]
+    reason: الوزارةُ تُعِدُّ النصَّ وتربطه بسياسته، ثم ترفعه.
+
+# شرطُ الربط: ما لا يستوفيه نصٌّ لا يُصدَر، ورفضُه يحمل رمزاً مُعلَناً.
+binding:
+  # مادةٌ دستوريةٌ قائمةٌ غيرُ ملغاة يستند إليها القانون.
+  requireArticle: true
+  # سياسةٌ مُفعَّلةٌ واحدةٌ على الأقل تُنفِّذ القانون فعلاً.
+  minPolicies: 1
+  # مرجعُ قانونِ السياسة يجب أن يساوي مرجعَ المادة المسنَد إليها: سياسةٌ
+  # تُنفِّذ قانوناً وتُسنَد إلى مادةٍ أخرى تُخفي سلسلةَ السند.
+  requireLawRefMatch: true
+  # نصٌّ أقصرُ من هذا لا يُقاس عليه شيء؛ والحدُّ محلُّ اجتهادٍ مُعلَنٍ لا برهان.
+  minTextLength: 120
+  # النطاقُ مُلزم: قانونٌ بلا نطاقٍ يسري على كل شيء بلا أن يقول ذلك.
+  requireScope: true
+  # الفعلُ الذي لا يَنفُذ قانونٌ إلا به، والفعلُ الذي يُحَلُّ به التعارض.
+  enactAction: enact-law
+  resolveAction: resolve-law-conflict
+
+# أنواعُ التعارض: كلُّ نوعٍ رمزٌ يقع، وموضعُ إنفاذٍ يُقاس، وقرارٌ في المنع.
+conflictKinds:
+  - kind: effect-contradiction
+    code: LEGISLATION_CONFLICT_EFFECT
+    blocking: true
+    statement: >-
+      قانونان نافذان تتقاطع سياستاهما في فعلٍ ومَورِدٍ ودورِ فاعلٍ ونطاقٍ واحد
+      وأثرُهما متعاكس. والمحرّكُ يحلُّ هذا صامتاً بغَلَبةِ الرفض، فيَنفُذ أحدُ
+      المشرِّعين على الآخر بلا قرارٍ يُقرأ.
+    enforcedBy:
+      - src/legislation/conflict-engine.mjs
+
+  - kind: priority-tie
+    code: LEGISLATION_CONFLICT_PRIORITY_TIE
+    blocking: true
+    statement: >-
+      تقاطعٌ بأولويةٍ متساوية: الترتيبُ يعود إلى ترتيب المعرّفات أبجدياً، فيصير
+      اسمُ السياسة هو المشرِّعَ الأعلى. وهذا ترتيبٌ مُحدَّدٌ لا محكوم.
+    enforcedBy:
+      - src/legislation/conflict-engine.mjs
+
+  - kind: shared-policy
+    code: LEGISLATION_CONFLICT_SHARED_POLICY
+    blocking: true
+    statement: >-
+      سياسةٌ واحدةٌ مربوطةٌ بقانونين: إلغاءُ أحدهما يترك السياسةَ نافذةً بسند
+      الآخر، فيصير الإلغاءُ إلغاءً في السجل لا في الأثر.
+    enforcedBy:
+      - src/legislation/conflict-engine.mjs
+
+  - kind: article-collision
+    code: LEGISLATION_CONFLICT_ARTICLE_COLLISION
+    blocking: false
+    statement: >-
+      قانونان يستندان إلى المادة نفسها. وهذا مقبولٌ بذاته — للمادة قوانينُ
+      تفصيلٍ عدّة — ويُعلَن لأنه موضعُ التعارضِ الأرجح، فيُقرأ ولا يمنع.
+    enforcedBy:
+      - src/legislation/conflict-engine.mjs
+
+# بنودُ الضمان: كلُّ بندٍ مربوطٌ برمزِ رفضٍ واقعٍ في الكود، لا بجملةِ نيّة.
+guarantees:
+  - code: LEGISLATION_BINDING_REQUIRED
+    statement: لا يُصدَر قانونٌ غيرُ مربوطٍ بمادةٍ وبسياسةٍ مُفعَّلةٍ تُنفِّذه.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_ARTICLE_UNKNOWN
+    statement: المادةُ المسنَدُ إليها يجب أن تكون قائمةً في الدستور المُحمَّل.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_POLICY_UNKNOWN
+    statement: السياسةُ المربوطةُ يجب أن تكون معلَنةً في حزمة السياسات.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_POLICY_DISABLED
+    statement: سياسةٌ معلَّقةٌ لا تُنفِّذ قانوناً؛ فالربطُ بها ربطٌ بنصٍّ نائم.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_LAWREF_MISMATCH
+    statement: مرجعُ قانونِ السياسة يجب أن يساوي مرجعَ المادة المسنَد إليها.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_TEXT_TOO_SHORT
+    statement: نصٌّ أقصرُ من الحدِّ المُعلَن لا يُقاس عليه إنفاذ.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_ROYAL_COMMAND_REQUIRED
+    statement: >-
+      النفاذُ لا يقع إلا بأمرٍ ملكيٍّ موقَّعٍ يمرُّ ببوابة التاج، لا بمقارنة اسمِ
+      فاعلٍ بالنصِّ «crown».
+    enforcedBy:
+      - src/legislation/legislature.mjs
+
+  - code: LEGISLATION_CONFLICT_UNRESOLVED
+    statement: >-
+      ما دام تعارضٌ مانعٌ قائماً فلا نفاذَ لقانونٍ جديدٍ في محلّه، ولا إنفاذَ
+      للأفعال المتقاطعة حتى يُحَلَّ التعارضُ ويُقاس زوالُه.
+    enforcedBy:
+      - src/legislation/legislature.mjs
+      - src/policy/enforcement-point.mjs
+
+  - code: LEGISLATION_RESOLUTION_INEFFECTIVE
+    statement: >-
+      أمرُ الحلِّ لا يُقبَل إلا إذا زال التعارضُ بعده فعلاً؛ فحلٌّ يُسجَّل ولا
+      يُقاس أثرُه إعلانُ نصرٍ على الدفتر.
+    enforcedBy:
+      - src/legislation/legislature.mjs

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/legislation.schema.json",
+  "title": "التشريع النافذ — شرطُ الربط وأنواعُ التعارض",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "holders", "binding", "conflictKinds", "guarantees"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "holders": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "may", "reason"],
+        "properties": {
+          "role": { "type": "string", "pattern": "^role:[a-z-]+$" },
+          "may": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["propose", "bind", "enact", "resolve"] }
+          },
+          "reason": { "type": "string", "minLength": 10 }
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireArticle",
+        "minPolicies",
+        "requireLawRefMatch",
+        "minTextLength",
+        "requireScope",
+        "enactAction",
+        "resolveAction"
+      ],
+      "properties": {
+        "requireArticle": { "const": true },
+        "minPolicies": { "type": "integer", "minimum": 1 },
+        "requireLawRefMatch": { "const": true },
+        "minTextLength": { "type": "integer", "minimum": 1 },
+        "requireScope": { "const": true },
+        "enactAction": { "type": "string", "minLength": 3 },
+        "resolveAction": { "type": "string", "minLength": 3 }
+      }
+    },
+    "conflictKinds": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "code", "blocking", "statement", "enforcedBy"],
+        "properties": {
+          "kind": { "type": "string", "pattern": "^[a-z-]+$" },
+          "code": { "type": "string", "pattern": "^LEGISLATION_CONFLICT_[A-Z_]+$" },
+          "blocking": { "type": "boolean" },
+          "statement": { "type": "string", "minLength": 40 },
+          "enforcedBy": { "$ref": "#/$defs/holderPaths" }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement", "enforcedBy"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^LEGISLATION_[A-Z_]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": { "$ref": "#/$defs/holderPaths" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "holderPaths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+    }
+  }
+}

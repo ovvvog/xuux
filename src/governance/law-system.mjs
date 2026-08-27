@@ -42,6 +42,8 @@ import { LAW_SPEC } from '../persistence/entities.mjs';
  * @property {Date | null} stateChangedAt
  * @property {Date} createdAt
  * @property {Date} updatedAt
+ * @property {string | null} articleId - المادةُ الدستوريةُ الساندة (‏M8.02)
+ * @property {readonly string[] | null} policyIds - السياساتُ التي تُنفِّذ القانون (‏M8.02)
  */
 
 /**
@@ -156,6 +158,14 @@ export class LawRegistry {
     if (!Object.values(LawState).includes(state)) throw new Error('INVALID_LAW_STATE');
     if (law.state === LawState.REPEALED) throw new Error('REPEALED_LAW_IMMUTABLE');
     if (state === LawState.ENACTED && actor !== 'crown') throw new Error('CROWN_APPROVAL_REQUIRED');
+    // النفاذُ لم يبقَ انتقالَ حالةٍ (‏M8.02): القانونُ النافذُ مربوطٌ بمادةٍ
+    // وبسياسةٍ تُنفِّذه، والربطُ لا يُصنَع هنا. فمن أراد نفاذاً مرَّ بـ
+    // `Legislature.enact` — أمرٌ ملكيٌّ موقَّعٌ وكشفُ تعارضٍ قبل النفاذ — أو لم
+    // يمرّ. وتركُ هذا المسار مفتوحاً يُعيد «النافذَ» صفّاً لا يقرؤه قرار، حتى
+    // لو منعه ثابتُ الكيان بعد حين برسالةٍ لا تدلّ على الطريق.
+    if (state === LawState.ENACTED && (law.articleId === null || law.policyIds === null)) {
+      throw new Error('LAW_ENACTMENT_PATH_REQUIRED');
+    }
     const now = new Date();
     /** @type {Record<string, unknown>} */
     const patch = { state, stateChangedAt: now };

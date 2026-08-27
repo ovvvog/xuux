@@ -14,6 +14,13 @@
  * والتذكرة داخلية لا سيادية: هي إثبات «مررتُ بالنقطة»، لا بديل عن توقيع الملك.
  * توقيع الأمر الملكي يتحقّق منه التاج كما كان، والعتبة السيادية تشترط أمراً
  * مقبولاً فوق ذلك.
+ *
+ * **وأُضيف في الخطوة `M8.02` حاجزُ التشريع** (`legislationGate`): كان تضادُّ
+ * قانونين يُحسم صامتاً بغَلَبةِ الرفض ثم بترتيب المعرّفات أبجدياً، فيَنفُذ أحدُ
+ * المشرِّعين على الآخر بلا قرارٍ يُقرأ. فصار الفعلُ الذي يقع فيه تعارضٌ مانعٌ
+ * **ممنوعَ الإنفاذ** برمز `LEGISLATION_CONFLICT_UNRESOLVED` حتى يُحَلَّ التعارضُ
+ * ويُقاس زوالُه. والحاجزُ يُسأل **قبل** تقييم السياسة وبعد الهوية: سياسةٌ تُقيَّم
+ * على فعلٍ متعارَضٍ فيه تُنتج قراراً يبدو محكوماً وهو محسومٌ بحرف الاسم.
  */
 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -38,6 +45,14 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
  * @property {(actorId: string) => Promise<{ ok: boolean, code: string, reason: string, actor: { id: string, role: string, state: string, kind: import('./model.mjs').ActorKind, capabilities: readonly string[] } | null }>} verify
  */
 
+/**
+ * حاجزُ التشريع كما تحتاجه النقطة (الخطوة `M8.02`). الواجهةُ ضيّقةٌ عن قصد:
+ * النقطةُ لا تعرف قوانينَ ولا موادَّ دستورية ولا تملك سبيلاً إلى الإصدار، وهذا
+ * ما يمنع أن يصير الإنفاذُ مُشرِّعاً. وترْكُه `null` يُبقي السلوكَ كما كان.
+ * @typedef {object} LegislationGateLike
+ * @property {() => Promise<ReadonlySet<string>>} blockedActions
+ */
+
 /** عمر التذكرة: القرار يُنفَّذ الآن أو يُطلب من جديد. */
 const DECISION_TTL_MS = 60000;
 
@@ -57,7 +72,7 @@ function bindingOf(request) {
 
 export class EnforcementPoint {
   /**
-   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, secret?: Buffer, now?: () => Date }} [deps]
+   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, secret?: Buffer, now?: () => Date }} [deps]
    */
   constructor({
     decisionPoint,
@@ -66,6 +81,7 @@ export class EnforcementPoint {
     quotaLedger = null,
     decisionSink = null,
     identityGate = null,
+    legislationGate = null,
     secret,
     now,
   } = {}) {
@@ -74,6 +90,7 @@ export class EnforcementPoint {
     this.log = log;
     this.haltSwitch = haltSwitch;
     this.identityGate = identityGate;
+    this.legislationGate = legislationGate;
     this.quotaLedger = quotaLedger;
     this.decisionSink = decisionSink;
     // مفتاح التذكرة يُولَّد لكل عملية: تذكرةٌ من عملية سابقة لا تُقبل بعد إعادة
@@ -159,6 +176,33 @@ export class EnforcementPoint {
           capabilities: verdict.actor.capabilities,
         }),
       });
+    }
+
+    // حاجزُ التشريع (‏M8.02): فعلٌ يقع فيه تعارضٌ تشريعيٌّ مانعٌ لا يُنفَّذ حتى
+    // يُحَلَّ التعارض. والقائمةُ محسوبةٌ من البيانات في كل نداء لا مخزَّنةً:
+    // قائمةٌ مخزَّنةٌ تحتاج من يُحدِّثها عند الحلّ، ومن نسي منع فعلاً لا مانعَ له.
+    if (this.legislationGate !== null) {
+      const blocked = await this.legislationGate.blockedActions();
+      if (blocked.has(evaluated.action)) {
+        const decision = Object.freeze({
+          allowed: false,
+          effect: /** @type {const} */ ('deny'),
+          code: /** @type {const} */ ('LEGISLATION_CONFLICT_UNRESOLVED'),
+          reason: `الفعل ${evaluated.action} يقع في تعارضٍ تشريعيٍّ مانعٍ لم يُحَلّ؛ ولا يُنفَّذ حتى يُحَلَّ التعارضُ ويُقاس زوالُه (M8.02).`,
+          policyId: null,
+          policyVersion: null,
+          requiresRoyalCommand: this.decisionPoint.requiresRoyalCommand(evaluated.action),
+          matched: Object.freeze([]),
+          evaluatedAt,
+        });
+        this.log.append('law.enforcement.blocked', evaluated.actor.id, {
+          id: evaluated.action,
+          reason: 'LEGISLATION_CONFLICT_UNRESOLVED',
+          open: true,
+        });
+        await this.record(decision, evaluated);
+        return { decision, token: null };
+      }
     }
 
     let decision = this.decisionPoint.evaluate(evaluated);
