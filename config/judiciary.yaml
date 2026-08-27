@@ -1,0 +1,181 @@
+# وثيقةُ القضاء النافذ — الخطوة M8.03
+#
+# **العيبُ الذي تعالجه هذه الوثيقة:** كان «القضاء» في هذه الدولة خرائطَ في
+# الذاكرة. `Court` في `src/governance/law-system.mjs` يفتح القضيةَ في `Map`،
+# ويقبل `decide(id, outcome, actor)` **بلا سببٍ مكتوب**، ويسمح بالحكم بعد
+# `hear` بمقارنةِ حالةٍ في الذاكرة لا بقيدٍ في القاعدة، ولا يعرف تنفيذَ حكمٍ
+# ولا تراجعاً عنه. فكان الحكمُ سطراً يُكتب ثم يضيع بإعادة التشغيل، وكان
+# «الاستئناف» انتقالَ حالةٍ لا أثرَ له. والمادةُ 11 من الدستور تقول غيرَ ذلك:
+# جلسةٌ لازمةٌ قبل الحكم، وحكمٌ مُسبَّبٌ لا يُقبل بلا سببٍ مكتوب، واستئنافٌ
+# مكفول، وتنفيذٌ مسجَّلٌ قابلٌ للتدقيق والتراجع بأمرٍ مُسبَّب.
+#
+# وهذه الوثيقة تُعلن الشرطَ الذي يصير به الحكمُ **قابلاً للتنفيذ**: قضيةٌ
+# مسنَدةٌ إلى قانونٍ نافذ، وجلسةٌ محضورةٌ مسجَّلةُ الوقت، وسببٌ مكتوبٌ يبلغ
+# الحدَّ المُعلَن، وقاضٍ ليس طرفاً ولا يحكم في قضيةٍ لم يسمعها، وتنفيذٌ بأمرٍ
+# ملكيٍّ موقَّعٍ يُقاس أثرُه في البيانات، وتراجعٌ يُقاس رجوعُ الأثر فيه.
+#
+# **وحدٌّ معلَن:** هذه الوثيقةُ تُعلن الشرطَ ولا تُنفِّذه. المنفِّذُ هو
+# `src/judiciary/court.mjs` و`src/judiciary/executors.mjs`، والحاجزُ الذي يمنع
+# انحرافَ الوثيقةِ عن الكود هو `scripts/guard-judiciary.mjs` (البوابة 20).
+#
+# **وحدٌّ معلَن ثانٍ:** `Court` القديمُ في `src/governance/law-system.mjs` باقٍ
+# ولم يُحذف، ومفرداتُ حالاته (`decided`) تخالف مفرداتَ الجدول (`judged`).
+# القضاءُ النافذُ هو ما في `src/judiciary/`، والقديمُ مسجَّلٌ للإسقاط في
+# `docs/REMAINING_WORK.md` ولم يُسقَط في هذه الخطوة كي لا يتّسع نطاقُها.
+
+version: 1
+
+# حاملو السلطة القضائية وفعلُ كلٍّ منهم. والفصلُ مقصودٌ ومقيسٌ في المُحمِّل:
+# من يحكم لا يُنفِّذ، ومن يُنفِّذ لا يحكم — «ولا يُراجع أحدٌ عملَ نفسه».
+holders:
+  - role: role:chief-justice
+    may: [hear, judge]
+    reason: القضاءُ يسمع الجلسةَ ويُصدر الحكمَ مُسبَّباً، ولا يُنفِّذ ما حكم به.
+  - role: role:king
+    may: [execute, reverse]
+    reason: تنفيذُ الحكم فعلٌ يمسّ الحقوقَ فلا يقع إلا بأمرٍ سياديٍّ موقَّع، والتراجعُ مثلُه.
+  - role: role:minister
+    may: [file, appeal]
+    reason: الوزارةُ ترفع الدعوى وتستأنف على ما حُكم، ولا تسمع ولا تحكم ولا تُنفِّذ.
+
+# شرطُ الإجراء: ما لا يستوفيه مسارٌ لا يُنتج حكماً، ورفضُه يحمل رمزاً مُعلَناً.
+procedure:
+  # لا حكمَ قبل جلسةٍ محضورةٍ مسجَّلةِ الوقت (المادة 11).
+  requireHearingBeforeJudgment: true
+  # لا حكمَ إلا من القاضي الذي سمع الجلسة: قاضٍ يحكم في قضيةٍ لم يسمعها يُبطل
+  # لزومَ الجلسة من حيث لا يُبطل نصَّها.
+  requireSameJudgeAsHearing: true
+  # القاضي ليس طرفاً: لا مدّعياً ولا مدّعىً عليه.
+  requireJudgeNotParty: true
+  # الدعوى تُسنَد إلى قانونٍ **نافذ**: دعوى بلا سندٍ نافذٍ نزاعٌ بلا مقياس.
+  requireEnactedLaw: true
+  # سببُ الحكم أقصرُ من هذا لا يُراجَع عليه شيء؛ والحدُّ اجتهادٌ مُعلَنٌ لا برهان.
+  # ونفسُ العدد مكتوبٌ في قيد الهجرة 0012 وفي ثابتِ `entities.mjs`، والحاجزُ 20
+  # يفحص وقوعَه في الهجرة كي لا يُشدَّد هنا ويُترك في القاعدة.
+  minReasonLength: 60
+  # سببُ الاستئناف وسببُ التراجع كذلك مكتوبان لا معلَنان.
+  minAppealReasonLength: 40
+  minReversalReasonLength: 40
+  # منطوقُ الحكم: قيمةٌ من هذه القائمة لا نصٌّ حرّ.
+  outcomes: [guilty, innocent, dismissed]
+  # المنطوقُ الذي لا شيءَ فيه يُنفَّذ: تنفيذُ «بريء» فعلٌ على من لم يُحكم عليه.
+  nonExecutableOutcomes: [innocent, dismissed]
+  # فعلُ التنفيذ وفعلُ التراجع: أمرانِ ملكيّانِ متمايزان لا فعلٌ واحد.
+  executeAction: execute-judgment
+  reverseAction: reverse-judgment
+
+# آثارُ التنفيذ المُعلَنة: لا يُنفَّذ حكمٌ بأثرٍ غيرِ معلَنٍ هنا، ولا أثرَ غيرُ
+# قابلٍ للتراجع. والأثرُ يُقاس ببصمةٍ قبل التنفيذ وبعده لا يُعلَن بتسجيله.
+effects:
+  - name: suspend-respondent-agent
+    reversible: true
+    statement: >-
+      تعليقُ هويةِ المدّعى عليه بسببٍ مسجَّلٍ هو أثرُ الحكم، ورفعُ التعليق هو
+      تراجعُه. والبصمةُ حالةُ الهوية نفسُها: تنفيذٌ لا تتغيّر به الحالةُ تنفيذٌ
+      لم يقع، وتراجعٌ لا ترجع به الحالةُ تراجعٌ على الدفتر.
+    enforcedBy:
+      - src/judiciary/executors.mjs
+
+# بنودُ الضمان: كلُّ بندٍ مربوطٌ برمزِ رفضٍ واقعٍ في الكود، لا بجملةِ نيّة.
+guarantees:
+  - code: JUDICIARY_LAW_NOT_ENACTED
+    statement: لا تُرفع دعوى إلا مسنَدةً إلى قانونٍ نافذٍ قائمٍ في السجل.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_CASE_NOT_FOUND
+    statement: كلُّ فعلٍ قضائيٍّ يقع على صفِّ قضيةٍ قائمٍ في الجدول لا على معرّفٍ مُرسَل.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_HEARING_REQUIRED
+    statement: >-
+      لا حكمَ قبل جلسةٍ محضورةٍ مسجَّلةِ الوقت؛ وحكمٌ يسبق الجلسةَ يجعل الجلسةَ
+      مراسمَ بعد القرار.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_JUDGE_IS_PARTY
+    statement: لا يفصل قاضٍ في قضيةٍ هو مدّعيها أو المدّعى عليه فيها.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_JUDGE_MISMATCH
+    statement: لا يحكم في القضية إلا القاضي الذي سمع جلستَها.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_REASON_REQUIRED
+    statement: >-
+      لا يُقبل حكمٌ ولا استئنافٌ ولا تراجعٌ بلا سببٍ مكتوبٍ يبلغ الحدَّ المُعلَن
+      لكلٍّ منها؛ وقرارٌ بلا سببٍ لا يُراجَع عليه شيء.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_OUTCOME_UNKNOWN
+    statement: منطوقُ الحكم قيمةٌ من قائمةٍ معلَنة لا نصٌّ حرّ.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_ROYAL_COMMAND_REQUIRED
+    statement: >-
+      تنفيذُ الحكم والتراجعُ عنه لا يقعان إلا بأمرٍ ملكيٍّ موقَّعٍ يمرُّ ببوابة
+      التاج، ولكلٍّ منهما فعلُه المتمايز.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_NOTHING_TO_EXECUTE
+    statement: لا يُنفَّذ حكمٌ لم يُصدر، ولا منطوقٌ مُعلَنٌ أنه غيرُ قابلٍ للتنفيذ.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_ALREADY_EXECUTED
+    statement: لا يُنفَّذ الحكمُ مرّتين؛ وتنفيذٌ يُعاد أثرٌ يُضاعف بأمرٍ واحد.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_APPEAL_PENDING
+    statement: لا يُنفَّذ حكمٌ مستأنَفٌ قائمٌ استئنافُه؛ والتنفيذُ حينها يُفرغ الاستئناف.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_EFFECT_UNKNOWN
+    statement: لا يُنفَّذ حكمٌ بأثرٍ غيرِ معلَنٍ في وثيقة القضاء.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_EXECUTOR_MISSING
+    statement: >-
+      أثرٌ معلَنٌ بلا مُنفِّذٍ مركَّبٍ يُوقف التنفيذَ رفضاً؛ ولا يُسجَّل تنفيذٌ
+      لأثرٍ لا يملك الكودُ سبيلاً إلى إحداثه.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_EXECUTION_INEFFECTIVE
+    statement: >-
+      لا يُسجَّل تنفيذٌ إلا إذا تغيّرت بصمةُ الأثر فعلاً؛ فتنفيذٌ يُسجَّل ولا
+      يُقاس إعلانُ نصرٍ على الدفتر.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_NOTHING_TO_REVERSE
+    statement: لا تراجعَ عن تنفيذٍ لم يقع، ولا تراجعَ عن تراجعٍ سابق.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_REVERSAL_INEFFECTIVE
+    statement: >-
+      لا يُسجَّل تراجعٌ إلا إذا رجعت بصمةُ الأثر إلى ما كانت عليه قبل التنفيذ؛
+      وتراجعٌ لا يرجع به شيءٌ نصٌّ في السجل.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_NOT_APPEALABLE
+    statement: لا استئنافَ على ما لم يُحكم فيه، ولا استئنافَ يُقدَّم مرّتين.
+    enforcedBy:
+      - src/judiciary/court.mjs
+
+  - code: JUDICIARY_APPELLANT_NOT_PARTY
+    statement: الاستئنافُ مكفولٌ لطرفَي القضية، ولا يستأنف من ليس طرفاً فيها.
+    enforcedBy:
+      - src/judiciary/court.mjs

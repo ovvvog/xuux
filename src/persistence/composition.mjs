@@ -23,6 +23,12 @@ import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
+import {
+  Judiciary,
+  createAgentSuspensionExecutor,
+  executorIndex,
+  loadJudiciaryPolicy,
+} from '../judiciary/index.mjs';
 import path from 'node:path';
 import { ModelRegistry } from '../models/model-registry.mjs';
 import { createWeightStore } from '../models/weight-store.mjs';
@@ -34,6 +40,7 @@ import {
   ERASURE_RECORD_SPEC,
   EVENT_MESSAGE_SPEC,
   EVENT_OFFSET_SPEC,
+  CASE_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -51,6 +58,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} dataAssets
  * @property {ReturnType<typeof createMemoryRepository>} memories
  * @property {ReturnType<typeof createMemoryRepository>} laws
+ * @property {ReturnType<typeof createMemoryRepository>} cases
  * @property {ReturnType<typeof createMemoryRepository>} classificationApprovals
  * @property {ReturnType<typeof createMemoryRepository>} dataLineage
  * @property {ReturnType<typeof createMemoryRepository>} erasureRecords
@@ -73,6 +81,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {DataEncryptor | null} encryptor
  * @property {AgentMemoryStore} memory
  * @property {LawRegistry} laws
+ * @property {Judiciary} judiciary
  * @property {ClassificationApprovalRegistry} approvals
  * @property {LineageLedger} lineage
  * @property {ErasureLedger} erasureLedger
@@ -92,6 +101,7 @@ export function createMemoryRepositories(options = {}) {
     dataAssets: createMemoryRepository(DATA_ASSET_SPEC, options),
     memories: createMemoryRepository(MEMORY_SPEC, options),
     laws: createMemoryRepository(LAW_SPEC, options),
+    cases: createMemoryRepository(CASE_SPEC, options),
     classificationApprovals: createMemoryRepository(CLASSIFICATION_APPROVAL_SPEC, options),
     dataLineage: createMemoryRepository(DATA_LINEAGE_SPEC, options),
     erasureRecords: createMemoryRepository(ERASURE_RECORD_SPEC, options),
@@ -113,6 +123,7 @@ export function createPostgresRepositories(pool) {
       dataAssets: createPostgresRepository(pool, DATA_ASSET_SPEC),
       memories: createPostgresRepository(pool, MEMORY_SPEC),
       laws: createPostgresRepository(pool, LAW_SPEC),
+      cases: createPostgresRepository(pool, CASE_SPEC),
       classificationApprovals: createPostgresRepository(pool, CLASSIFICATION_APPROVAL_SPEC),
       dataLineage: createPostgresRepository(pool, DATA_LINEAGE_SPEC),
       erasureRecords: createPostgresRepository(pool, ERASURE_RECORD_SPEC),
@@ -156,6 +167,12 @@ export function createPostgresRepositories(pool) {
  * @param {import('../events/contracts.mjs').EventsPolicy | null} [deps.eventsPolicy] سياسة
  *   قنوات الأحداث (M7.07): القنواتُ ومنتِجوها وقُرّاؤها وعقودُ أنواعها. تُحمّل من
  *   `config/events.yaml` إن لم تُمرَّر.
+ * @param {import('../judiciary/judiciary.mjs').JudiciaryPolicy | null} [deps.judiciaryPolicy] وثيقةُ
+ *   القضاء (M8.03): حائزو الأفعال، وإجراءُ التقاضي، وآثارُ التنفيذ، وضماناتُه.
+ *   تُحمّل من `config/judiciary.yaml` إن لم تُمرَّر.
+ * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
+ *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
+ *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
  * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
@@ -174,6 +191,8 @@ export function createRegistries({
   memoryPolicy = null,
   retentionPolicy = null,
   eventsPolicy = null,
+  judiciaryPolicy = null,
+  crown = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
   // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
@@ -243,13 +262,15 @@ export function createRegistries({
     createWeightStore({
       root: process.env['WEIGHTS_DIR'] ?? path.join(process.cwd(), '.state/weights'),
     });
+  const agents = new AgentRegistry({
+    ca,
+    log,
+    repository: repositories.agents,
+    ...(limits.maxAgents === undefined ? {} : { maxAgents: limits.maxAgents }),
+  });
+  const laws = new LawRegistry({ log, repository: repositories.laws });
   return {
-    agents: new AgentRegistry({
-      ca,
-      log,
-      repository: repositories.agents,
-      ...(limits.maxAgents === undefined ? {} : { maxAgents: limits.maxAgents }),
-    }),
+    agents,
     models: new ModelRegistry({
       log,
       repository: repositories.models,
@@ -274,7 +295,24 @@ export function createRegistries({
       ...(memoryPolicy === null ? {} : { policy: memoryPolicy }),
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),
-    laws: new LawRegistry({ log, repository: repositories.laws }),
+    laws,
+    // القضاءُ يُركَّب **دائماً** لنفس سبب ناقل القنوات ودفتري النسب والمحو:
+    // سلطةٌ اختياريةُ التركيب تصير سلطةً لا مسارَ لها في التشغيل. وهو عيبٌ
+    // قائمٌ اليوم في التشريع نفسه: سجلُّ `Legislature` (الخطوة M8.02) غيرُ
+    // مُركَّبٍ على أيِّ مسارٍ إنتاجيّ، وهو مسجَّلٌ في `docs/REMAINING_WORK.md` لا
+    // مُدَّعىً إغلاقُه.
+    //
+    // وبوابةُ التاج تُمرَّر من الخارج أو تُترك: قضاءٌ بلا بوابةٍ يسمع ويحكم
+    // ويستأنف، ويرفض التنفيذَ والتراجعَ برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`.
+    // وهذا هو الفشلُ المُغلَق: تنفيذُ حكمٍ يمسّ الحقوقَ لا يقع بتركيبٍ صامت.
+    judiciary: new Judiciary({
+      policy: judiciaryPolicy ?? loadJudiciaryPolicy(),
+      laws,
+      log,
+      repository: repositories.cases,
+      crown,
+      executors: executorIndex([createAgentSuspensionExecutor({ agents })]),
+    }),
     approvals,
     lineage,
     erasureLedger,

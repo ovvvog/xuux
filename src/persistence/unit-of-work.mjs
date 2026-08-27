@@ -30,6 +30,7 @@ import {
   ERASURE_RECORD_SPEC,
   EVENT_MESSAGE_SPEC,
   EVENT_OFFSET_SPEC,
+  CASE_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -51,6 +52,7 @@ export function createClientRepositories(client) {
       dataAssets: createPostgresRepository(client, DATA_ASSET_SPEC),
       memories: createPostgresRepository(client, MEMORY_SPEC),
       laws: createPostgresRepository(client, LAW_SPEC),
+      cases: createPostgresRepository(client, CASE_SPEC),
       classificationApprovals: createPostgresRepository(client, CLASSIFICATION_APPROVAL_SPEC),
       dataLineage: createPostgresRepository(client, DATA_LINEAGE_SPEC),
       // دفتر شواهد المحو داخل المعاملة نفسها (`M7.06`): شاهدٌ يُكتب في وصلةٍ

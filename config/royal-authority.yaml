@@ -55,6 +55,22 @@ threshold:
     lawRef: law:legislation
     delegable: false
 
+  # الخطوة `M8.03`: تنفيذُ الحكم والتراجعُ عنه.
+  - action: execute-judgment
+    reason: >-
+      تنفيذُ الحكم يُحدث أثراً على حقوقِ مَن حُكم عليه، فلا يقع بنداءِ دالّةٍ في
+      الكود ولو صحّ الحكمُ وسببُه؛ والقاضي يفصل ولا يُنفِّذ، إذ من يفصل ويُنفِّذ
+      يجمع السيفَ والميزان.
+    lawRef: law:judiciary
+    delegable: false
+
+  - action: reverse-judgment
+    reason: >-
+      التراجعُ عن تنفيذٍ واقعٍ يمحو أثراً قائماً، وهو كإنشائه في الخطر: لو جاز
+      بأقلَّ من أمرٍ موقَّعٍ لصار محوُ آثار الأحكام أسهلَ من إيقاعها.
+    lawRef: law:judiciary
+    delegable: false
+
   - action: rotate-king-key
     reason: تدوير مفتاح الملك يغيّر مرجع التحقّق لكل أمر سابق ولاحق.
     lawRef: law:root-of-trust

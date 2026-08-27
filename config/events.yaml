@@ -179,15 +179,35 @@ channels:
       - type: court.case.appealed
         version: 1
         required: [id]
+        # المستأنِفُ وطولُ سببه اختياريان لا مطلوبان: القضاءُ القديم في
+        # `src/governance/law-system.mjs` ينشر النوعَ بالمعرّف وحده، والقضاءُ
+        # النافذ في `src/judiciary/court.mjs` ينشره كاملاً. وترقيةُ الحقلين إلى
+        # `required` تُسقط الناشرَ القديم، وحذفُه قرارٌ لم يُتخذ في هذه الخطوة.
+        optional: [appellant, reasonLength]
       - type: court.case.decided
         version: 1
         required: [id, outcome]
+        optional: [judge, reasonLength]
       - type: court.case.heard
         version: 1
         required: [id]
+        optional: [judge]
       - type: court.case.opened
         version: 1
         required: [claimant, id, respondent]
+        optional: [lawId]
+      # تنفيذُ الحكم والتراجعُ عنه ورفضُهما: أنواعٌ جديدةٌ لا وجودَ لها قبل
+      # الخطوة M8.03، لأن الدولةَ لم يكن فيها تنفيذُ حكمٍ أصلاً. والإضافةُ غيرُ
+      # كاسرةٍ للعقد (نوعٌ جديدٌ لا حقلٌ مطلوبٌ في نوعٍ قائم).
+      - type: court.judgment.executed
+        version: 1
+        required: [commandId, effect, id]
+      - type: court.judgment.refused
+        version: 1
+        required: [id, reason]
+      - type: court.judgment.reversed
+        version: 1
+        required: [commandId, id, reasonLength]
   - id: crown
     subject: أوامرُ التاج وقبولُها وإيقافُها الطارئ
     classification: sovereign

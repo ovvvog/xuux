@@ -747,6 +747,252 @@ export const EVENT_OFFSET_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * الحدُّ الأدنى لطول سببِ الحكم — الخطوة `M8.03`.
+ *
+ * العددُ مكتوبٌ في ثلاثة مواضع بالضرورة: هنا (ثابتُ المستودعين)، وفي
+ * `config/judiciary.yaml` (`procedure.minReasonLength`)، وفي قيد الهجرة 0012
+ * (`cases_judgment_reasoned`). والبوابةُ 20 تفحص وقوعَ العدد في الهجرة، وتفحص
+ * تساويه هنا مع الوثيقة؛ فمن شدَّد في موضعٍ وترك موضعاً رُدَّ عمله. وتوحيدُه في
+ * موضعٍ واحدٍ غيرُ ممكن: القاعدةُ لا تقرأ YAML ولا تستورد JavaScript.
+ */
+export const JUDGMENT_MIN_REASON_LENGTH = 60;
+
+/** الحدُّ الأدنى لطول سببِ الاستئناف وسببِ التراجع (الخطوة `M8.03`). */
+export const CASE_MIN_SECONDARY_REASON_LENGTH = 40;
+
+/**
+ * القضايا — الخطوة `M8.03`.
+ *
+ * **العيبُ الذي تُغلقه هذه المواصفة:** جدولُ `state.cases` كان موجوداً من الهجرة
+ * 0001 ولا مواصفةَ له في الكود، فلا مستودعَ يقرؤه ولا يكتب فيه. والقضاءُ الوحيدُ
+ * في الدولة (`Court` في `src/governance/law-system.mjs`) كان يفتح القضيةَ في
+ * `Map` تُمحى بإعادة التشغيل. فكان في الدولة جدولُ قضايا فارغٌ أبداً، وقضاءٌ
+ * بلا أثرٍ في القاعدة.
+ *
+ * **اختيارانِ مُعلَنان لا مسكوتٌ عنهما:**
+ *
+ *   1. `law_id` في الجدول `NOT NULL REFERENCES state.laws(id)`، بينما وصفُ
+ *      الخطوة في خارطة الطريق لا يشترط سنداً قانونياً للدعوى. والحُكمُ للجدول:
+ *      دعوى بلا سندٍ نافذٍ نزاعٌ بلا مقياسٍ يُفصل به، فأُبقي القيدُ وأُعلن
+ *      الشرطُ في `config/judiciary.yaml` (`requireEnactedLaw`).
+ *
+ *   2. العمودُ القائم `subject` هو **المدّعى عليه**، ويُقرأ في الكود باسم
+ *      `respondent`. والاسمُ في الجدول لم يُغيَّر كي لا تُعاد كتابةُ هجرةٍ
+ *      مُطبَّقة؛ والاسمُ في الكود مطابقٌ لمفردات المادة 11.
+ *
+ * وكلُّ قيدٍ يُفحَص في القاعدة (`migrations/0012`) مُعلَنٌ هنا ثابتاً، فتطبيقُ
+ * الذاكرة لا يكون أرخى من القاعدة فيُطمئن كذباً.
+ */
+/** @type {EntitySpec} */
+/**
+ * حقلٌ فارغٌ: غائبٌ عن السجل أو مُعلَنٌ فراغَه.
+ *
+ * والفرقُ بينهما شكليٌّ لا معنويّ، **والثوابتُ تُفحَص قبل ملء الفراغات المُعلَنة**
+ * (`validateRecord` ثم `withDeclaredBlanks` في `repository-memory.mjs`). فمن قرأ
+ * `=== null` وحدها ردَّ كتابةً صحيحةً لمجرّد أنّ الحقلَ لم يُذكر في الإدراج، وهو
+ * ما يجعل الثابتَ يمنع العملَ لا الخطأ.
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+const blank = (value) => value === null || value === undefined;
+
+export const CASE_SPEC = Object.freeze({
+  name: 'cases',
+  table: 'state.cases',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      lawId: { column: 'law_id', type: 'string', required: true, maxLength: 128 },
+      claimant: { column: 'claimant', type: 'string', required: true, maxLength: 128 },
+      respondent: { column: 'subject', type: 'string', required: true, maxLength: 128 },
+      claim: { column: 'claim', type: 'string', required: true },
+      state: {
+        column: 'state',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['opened', 'heard', 'judged', 'appealed', 'closed']),
+      },
+      openedAt: { column: 'opened_at', type: 'timestamp', required: true },
+      heardAt: { column: 'heard_at', type: 'timestamp', nullable: true },
+      judge: { column: 'judge', type: 'string', nullable: true, maxLength: 128 },
+      verdict: {
+        column: 'verdict',
+        type: 'enum',
+        nullable: true,
+        values: Object.freeze(['guilty', 'innocent', 'dismissed']),
+      },
+      reason: { column: 'reason', type: 'string', nullable: true },
+      judgedAt: { column: 'judged_at', type: 'timestamp', nullable: true },
+      executedAt: { column: 'executed_at', type: 'timestamp', nullable: true },
+      executedEffect: { column: 'executed_effect', type: 'string', nullable: true, maxLength: 120 },
+      executionCommandId: {
+        column: 'execution_command_id',
+        type: 'string',
+        nullable: true,
+        maxLength: 128,
+      },
+      // بصمةُ الأثر قبل التنفيذ: بها وحدها يُقاس أنّ التراجعَ أرجع الحالَ إلى ما
+      // كان. تركُها في الذاكرة يجعل التراجعَ بعد إعادة التشغيل غيرَ قابلٍ للقياس.
+      executionFingerprintBefore: {
+        column: 'execution_fingerprint_before',
+        type: 'string',
+        nullable: true,
+        maxLength: 200,
+      },
+      reversedAt: { column: 'reversed_at', type: 'timestamp', nullable: true },
+      reversalReason: { column: 'reversal_reason', type: 'string', nullable: true },
+      reversalCommandId: {
+        column: 'reversal_command_id',
+        type: 'string',
+        nullable: true,
+        maxLength: 128,
+      },
+      appealedAt: { column: 'appealed_at', type: 'timestamp', nullable: true },
+      appellant: { column: 'appellant', type: 'string', nullable: true, maxLength: 128 },
+      appealReason: { column: 'appeal_reason', type: 'string', nullable: true },
+      closedAt: { column: 'closed_at', type: 'timestamp', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['state', 'lawId', 'respondent', 'claimant', 'judge']),
+  invariants: Object.freeze([
+    {
+      code: 'CASE_JUDGMENT_NEEDS_HEARING',
+      message:
+        'لا حكمَ قبل جلسةٍ محضورةٍ مسجَّلةِ الوقت؛ وحكمٌ يسبق الجلسةَ يجعلها مراسمَ بعد القرار.',
+      /** @param {EntityRecord} record */
+      check: (record) => blank(record['verdict']) || record['heardAt'] instanceof Date,
+    },
+    {
+      code: 'CASE_JUDGMENT_REASONED',
+      message:
+        'الحكمُ مُسبَّبٌ بسببٍ مكتوبٍ يبلغ الحدَّ المُعلَن، ولا سببَ يُسجَّل لقضيةٍ لم يُحكم فيها.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const reason = record['reason'];
+        const reasoned = typeof reason === 'string' && reason.trim().length >= 60;
+        return !blank(record['verdict']) === reasoned;
+      },
+    },
+    {
+      code: 'CASE_JUDGMENT_ATTRIBUTED',
+      message: 'الحكمُ مؤرَّخٌ منسوبٌ إلى قاضٍ مسمّى؛ وحكمٌ بلا قاضٍ ولا وقتٍ لا يُراجَع.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const attributed =
+          record['judgedAt'] instanceof Date &&
+          typeof record['judge'] === 'string' &&
+          record['judge'].trim() !== '';
+        return !blank(record['verdict']) === attributed;
+      },
+    },
+    {
+      code: 'CASE_JUDGE_NOT_PARTY',
+      message: 'لا يفصل قاضٍ في قضيةٍ هو مدّعيها أو المدّعى عليه فيها.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        blank(record['judge']) ||
+        (record['judge'] !== record['claimant'] && record['judge'] !== record['respondent']),
+    },
+    {
+      code: 'CASE_EXECUTION_NEEDS_JUDGMENT',
+      message:
+        'تنفيذُ الحكم واقعةٌ كاملةٌ: حكمٌ قائم، وأثرٌ مسمّى، وأمرٌ ملكيٌّ، وبصمةٌ قبله يُقاس بها التراجع.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const executed = record['executedAt'] instanceof Date;
+        if (!executed) {
+          return (
+            blank(record['executedEffect']) &&
+            blank(record['executionCommandId']) &&
+            blank(record['executionFingerprintBefore'])
+          );
+        }
+        return (
+          !blank(record['verdict']) &&
+          typeof record['executedEffect'] === 'string' &&
+          typeof record['executionCommandId'] === 'string' &&
+          typeof record['executionFingerprintBefore'] === 'string'
+        );
+      },
+    },
+    {
+      code: 'CASE_REVERSAL_NEEDS_EXECUTION',
+      message: 'لا تراجعَ عن تنفيذٍ لم يقع، ولا تراجعَ بلا سببٍ مكتوبٍ وأمرٍ ملكيٍّ مسجَّل.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const reversedAt = record['reversedAt'];
+        const executedAt = record['executedAt'];
+        if (!(reversedAt instanceof Date)) {
+          return blank(record['reversalReason']) && blank(record['reversalCommandId']);
+        }
+        const reason = record['reversalReason'];
+        return (
+          executedAt instanceof Date &&
+          reversedAt.getTime() >= executedAt.getTime() &&
+          typeof reason === 'string' &&
+          reason.trim().length >= 40 &&
+          typeof record['reversalCommandId'] === 'string'
+        );
+      },
+    },
+    {
+      code: 'CASE_APPEAL_NEEDS_JUDGMENT',
+      message: 'لا استئنافَ على ما لم يُحكم فيه، ولا استئنافَ بلا مستأنِفٍ مسمّى وسببٍ مكتوب.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const appealed = record['appealedAt'] instanceof Date;
+        if (!appealed) return blank(record['appellant']) && blank(record['appealReason']);
+        const reason = record['appealReason'];
+        return (
+          !blank(record['verdict']) &&
+          typeof record['appellant'] === 'string' &&
+          typeof reason === 'string' &&
+          reason.trim().length >= 40
+        );
+      },
+    },
+    {
+      code: 'CASE_STATE_MATCHES_TIMELINE',
+      message:
+        'حالةُ القضية محسوبةٌ من وقائعها لا مُعلَنةٌ بجانبها؛ وحالةٌ تخالف الوقائعَ حالةٌ تكذب.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const state = record['state'];
+        if (state === 'opened') return blank(record['heardAt']) && blank(record['verdict']);
+        if (state === 'heard') return record['heardAt'] instanceof Date;
+        if (state === 'judged') return !blank(record['verdict']) && blank(record['appealedAt']);
+        if (state === 'appealed') return !blank(record['verdict']);
+        return record['closedAt'] instanceof Date;
+      },
+    },
+    {
+      code: 'CASE_TIMELINE_ORDERED',
+      message: 'وقائعُ القضية مرتَّبةٌ زمناً: جلسةٌ بعد فتحٍ، وحكمٌ بعد جلسة، وتنفيذٌ بعد حكم.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const opened = record['openedAt'];
+        if (!(opened instanceof Date)) return false;
+        /** @type {Array<[string, unknown]>} */
+        const ordered = [
+          ['heardAt', record['heardAt']],
+          ['judgedAt', record['judgedAt']],
+          ['executedAt', record['executedAt']],
+        ];
+        let previous = opened.getTime();
+        for (const [, value] of ordered) {
+          if (blank(value)) continue;
+          if (!(value instanceof Date) || value.getTime() < previous) return false;
+          previous = value.getTime();
+        }
+        return true;
+      },
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -759,6 +1005,7 @@ export const ENTITY_SPECS = Object.freeze({
   erasure_records: ERASURE_RECORD_SPEC,
   event_messages: EVENT_MESSAGE_SPEC,
   event_offsets: EVENT_OFFSET_SPEC,
+  cases: CASE_SPEC,
 });
 
 /**

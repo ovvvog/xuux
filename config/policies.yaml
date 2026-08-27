@@ -86,6 +86,14 @@ actions:
   - id: resolve-law-conflict
     description: ترجيح قانون على قانون عند تعارض مانع، بتعليق أحدهما.
     sensitive: true
+  # الخطوة `M8.03`: فعلا التنفيذ والتراجع، معلَنان كي تقرأهما نقطةُ التفويض.
+  # وغيابُهما هنا كان سيجعل العتبةَ السيادية تحرس فعلاً لا تعرفه السياسة.
+  - id: execute-judgment
+    description: تنفيذ حكم قضائي بأثر مقيس قابل للتراجع.
+    sensitive: true
+  - id: reverse-judgment
+    description: التراجع عن تنفيذ حكم قضائي وإرجاع أثره.
+    sensitive: true
   - id: rotate-king-key
     description: تدوير مفتاح الملك.
     sensitive: true

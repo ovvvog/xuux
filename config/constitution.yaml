@@ -285,6 +285,7 @@ articles:
     lawRef: law:judiciary
     enforcedBy:
       - src/governance/law-system.mjs
+      - src/judiciary/court.mjs
     text: >-
       القضاءُ يفصل في النزاع بجلسةٍ لازمةٍ قبل الحكم، وبحكمٍ مُسبَّبٍ لا يُقبل
       بلا سببٍ مكتوب، وباستئنافٍ مكفولٍ على ما حُكم. ولا يفصل قاضٍ في قضيةٍ له

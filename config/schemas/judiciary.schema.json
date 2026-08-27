@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/judiciary.schema.json",
+  "title": "القضاء النافذ — شرطُ الإجراء وآثارُ التنفيذ",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "holders", "procedure", "effects", "guarantees"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "holders": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["role", "may", "reason"],
+        "properties": {
+          "role": { "type": "string", "pattern": "^role:[a-z-]+$" },
+          "may": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "enum": ["file", "hear", "judge", "execute", "reverse", "appeal"] }
+          },
+          "reason": { "type": "string", "minLength": 10 }
+        }
+      }
+    },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireHearingBeforeJudgment",
+        "requireSameJudgeAsHearing",
+        "requireJudgeNotParty",
+        "requireEnactedLaw",
+        "minReasonLength",
+        "minAppealReasonLength",
+        "minReversalReasonLength",
+        "outcomes",
+        "nonExecutableOutcomes",
+        "executeAction",
+        "reverseAction"
+      ],
+      "properties": {
+        "requireHearingBeforeJudgment": { "const": true },
+        "requireSameJudgeAsHearing": { "const": true },
+        "requireJudgeNotParty": { "const": true },
+        "requireEnactedLaw": { "const": true },
+        "minReasonLength": { "type": "integer", "minimum": 20 },
+        "minAppealReasonLength": { "type": "integer", "minimum": 10 },
+        "minReversalReasonLength": { "type": "integer", "minimum": 10 },
+        "outcomes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z-]+$" }
+        },
+        "nonExecutableOutcomes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z-]+$" }
+        },
+        "executeAction": { "type": "string", "minLength": 3 },
+        "reverseAction": { "type": "string", "minLength": 3 }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "reversible", "statement", "enforcedBy"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z-]+$" },
+          "reversible": { "const": true },
+          "statement": { "type": "string", "minLength": 40 },
+          "enforcedBy": { "$ref": "#/$defs/holderPaths" }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement", "enforcedBy"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^JUDICIARY_[A-Z_]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": { "$ref": "#/$defs/holderPaths" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "holderPaths": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+    }
+  }
+}
