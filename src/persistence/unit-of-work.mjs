@@ -28,6 +28,8 @@ import {
   DATA_ASSET_SPEC,
   DATA_LINEAGE_SPEC,
   ERASURE_RECORD_SPEC,
+  EVENT_MESSAGE_SPEC,
+  EVENT_OFFSET_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -54,6 +56,11 @@ export function createClientRepositories(client) {
       // دفتر شواهد المحو داخل المعاملة نفسها (`M7.06`): شاهدٌ يُكتب في وصلةٍ
       // أخرى يبقى لو تراجعت معاملةُ المحو — فتشهد الدولة على محوٍ لم يقع.
       erasureRecords: createPostgresRepository(client, ERASURE_RECORD_SPEC),
+      // رسائلُ القنوات ومواضعُ قراءتها داخل المعاملة نفسها (`M7.07`): رسالةٌ
+      // تُنشر في وصلةٍ أخرى تبقى لو تراجعت معاملةُ فعلها — فتُعلِم القناةُ بما
+      // لم يقع، وموضعٌ يُثبّت خارجها يُقرّ بمعالجةٍ تراجعت.
+      eventMessages: createPostgresRepository(client, EVENT_MESSAGE_SPEC),
+      eventOffsets: createPostgresRepository(client, EVENT_OFFSET_SPEC),
     })
   );
 }

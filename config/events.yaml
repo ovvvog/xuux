@@ -1,0 +1,593 @@
+# قنوات الأحداث وعقودُها — الخطوة `M7.07`
+#
+# **ما كان قبل هذا الملف، بنصّه لا بوصفٍ لطيف:** «قنوات الأحداث: 16» كان رقماً
+# في `PROJECT_STATUS.md` **يعدّ مجلدات قالبية فارغة** (‏`federation/**/communications.yaml`
+# لا يحمل إلا أربعة أسطر تعليق)، وقد سُحب الرقم من الجدول لأنه غير قابل للإثبات.
+# وفي الوقت نفسه كانت الدولة تنشر أحداثاً **حقيقية** بـ`log.append(type, actor, data)`
+# في خمسةٍ وعشرين موضعاً من `src/`، بلا عقدٍ لأيٍّ منها: لا حقولَ إلزامية معلَنة،
+# ولا نسخةَ عقد، ولا تصنيفَ حساسية للقناة، ولا مستهلكاً يقرأ تدفّقاً بموضعِ قراءةٍ
+# محفوظ. أي أن الأحداث كانت **سجلاً** لا **قنوات**: من أراد قراءتها قرأ السجل كلّه
+# من أوّله في كل مرّة، ولا شيء يمنع منتِجاً من تغيير حقلٍ يقرؤه مستهلك.
+#
+# **فصار ما تنشره الشيفرة هو مصدرَ هذا الملف لا العكس:** العقودُ أدناه استُخرجت من
+# **شجرة الشيفرة** (‏`scripts/lib/event-emissions.mjs` يحلّل كل نداء `append`
+# ويقرأ نوعَ الحدث ومفاتيح حِمْله)، ويقايسها `npm run guard:events` بالشيفرة في كل
+# تحقّق. فحقلٌ يُضاف في الشيفرة ولا يُعلَن هنا يُسقط البوابة، وعقدٌ يُعلَن هنا ولا
+# يُنشره أحدٌ يُسقط البوابة أيضاً — فلا عقودَ ميتة ولا حقولَ مخفيّة.
+#
+# **والعددُ الحقيقي ثمانيَ عشرةَ قناةً لا ستَّ عشرة**: القنواتُ هي مجالاتُ ما
+# يُنشَر فعلاً (‏`agent` … `retention`)، وعددُها ما تعدّه الشيفرة. والرقمُ القديم
+# لم يُصحَّح إلى ثمانية عشر لأنه كان أقلَّ من الحقيقة، بل لأنه كان **يعدّ شيئاً
+# آخر**: مجلدات لا تدفّقات.
+#
+# **قواعدُ التوافق الخلفي** (ينفّذها `src/events/contracts.mjs` ويحرسها
+# `scripts/guard-events.mjs` بمقايسة هذا الملف بـ`config/events.baseline.json`):
+#   1. إضافةُ حقلٍ **اختياري** أو نوعِ حدثٍ جديد أو قناةٍ جديدة: **توافقيّة** —
+#      المستهلكُ القديم يبقى يقرأ ما يعرفه ويتجاهل ما لا يعرفه.
+#   2. حذفُ حقلٍ إلزامي أو إعادةُ تسميته، أو نقلُ حقلٍ من اختياريٍّ إلى إلزامي،
+#      أو حذفُ نوعِ حدثٍ أو قناة: **كاسرة** — تستوجب رفعَ `version` للنوع (أو
+#      للقناة) في هذا الملف، وإلا سقطت البوابة. لأن مستهلكاً يقرأ حقلاً حُذف
+#      بلا رفعِ نسخةٍ لا يعرف أنه صار يقرأ غياباً.
+#   3. النسخةُ في الحدث المنشور (`contractVersion`) تُكتب في الرسالة نفسها، ولا
+#      تُستنتج من تاريخٍ ولا من ترتيب: مستهلكٌ يشترط نسخةً معيّنة يرفض ما دونها
+#      برمزٍ مُسمّى لا يُخمِّن.
+#
+# **وحدٌّ معلَن:** الحِمْل يُوصف هنا بمفاتيحه الإلزامية والاختيارية **لا بأنواع
+# قيمِه**. عقدُ أنواعٍ لكل حقل يقتضي مخطَّطاً لكل نوعِ حدثٍ من أربعةٍ وثمانين،
+# ووصفُ نوعٍ لم يُقَس على قيمةٍ حقيقية ادّعاءٌ آخر؛ فالمفاتيح مقيسةٌ سكونياً على
+# الشيفرة، والأنواع حدٌّ مكتوب في `docs/REMAINING_WORK.md` لا نقصٌ مسكوت.
+#
+# **وحدٌّ معلَن ثانٍ:** ما لا يُقرأ حِمْلُه سكونياً (نشرٌ `...` أو متغيّر) يُعلَن
+# `open: true`، فيُقاس على حقوله الإلزامية ولا يُمنع من حمل غيرها. وهي تسعةُ أنواع
+# مسمّاةٌ أدناه لا استثناءٌ عام.
+
+version: 1
+owner: crown
+
+# سقفُ الدفعة الواحدة للمستهلك: قراءةٌ بلا سقف تجعل مستهلكاً واحداً يسحب التدفّق
+# كلّه في نداءٍ واحد فيصير الموضعُ المحفوظ بلا معنى عملي.
+maxBatch: 500
+
+# الأدوار التي يجوز لها **نقلُ** الأحداث من سجل جذر الثقة إلى القنوات. والنقلُ
+# ليس تأليفاً: الناقلُ لا يُنشئ حدثاً، بل يحمل حدثاً مُؤلَّفاً ومُجزَّأً في السجل
+# إلى قناته — فلذلك يُسمح له بكل القنوات، بينما `publish` المباشر مقيَّدٌ بمنتِجي
+# القناة وحدهم.
+relayRoles:
+  - role:operator
+  - role:king
+
+# مفاتيحُ لا تُحمل في أي قناة بحال: قناةٌ تحمل مادّةً أو سرّاً تُبطل التصنيف
+# والتشفير معاً، إذ تصير المادةُ مقروءةً لمن يقرأ التدفّق وإن مُنع من الأصل.
+forbiddenPayloadKeys:
+  - content
+  - plaintext
+  - material
+  - secret
+  - password
+  - token
+  - privateKey
+
+# الوحدات التي يجوز لها الوصول إلى مستودعَي الرسائل والمواضع، ومنعُ ما سواها
+# مسارٌ جانبياً يكتب في التدفّق بلا عقدٍ ولا سلسلة.
+repositoryHolders:
+  # الحاملُ هو من يُعلن الجدولين أو يبنيهما أو يكتب فيهما، لا من يقرأ منهما.
+  - src/events/event-bus.mjs
+  - src/persistence/entities.mjs
+  - src/persistence/composition.mjs
+  - src/persistence/unit-of-work.mjs
+
+channels:
+  - id: agent
+    subject: حالاتُ هويّات الوكلاء وتسجيلُها
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:operator
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: agent.active
+        version: 1
+        required: [id, reason]
+      - type: agent.quarantined
+        version: 1
+        required: [id, reason]
+      - type: agent.registered
+        version: 1
+        required: [capabilities, id, role]
+      - type: agent.retired
+        version: 1
+        required: [id, reason]
+      - type: agent.revoked
+        version: 1
+        required: [id, reason]
+      - type: agent.suspended
+        version: 1
+        required: [id, reason]
+  - id: capability
+    subject: منحُ القدرات وسحبُها ورفضُها
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:minister
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: capability.grant.forbidden
+        version: 1
+        required: [beneficiary, capability, reason]
+      - type: capability.granted
+        version: 1
+        required: [agentId, capability, expiresAt, id, reason, ttlSeconds]
+      - type: capability.grants.pruned
+        version: 1
+        required: [count]
+      - type: capability.register.forbidden
+        version: 1
+        required: [capabilities, role]
+      - type: capability.revoked
+        version: 1
+        required: [agentId, capability, id, reason]
+  - id: court
+    subject: 'القضايا: فتحُها وسماعُها والحكمُ فيها واستئنافُها'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:chief-justice
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: court.case.appealed
+        version: 1
+        required: [id]
+      - type: court.case.decided
+        version: 1
+        required: [id, outcome]
+      - type: court.case.heard
+        version: 1
+        required: [id]
+      - type: court.case.opened
+        version: 1
+        required: [claimant, id, respondent]
+  - id: crown
+    subject: أوامرُ التاج وقبولُها وإيقافُها الطارئ
+    classification: sovereign
+    version: 1
+    producers:
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+    types:
+      - type: crown.command.accepted
+        version: 1
+        required: []
+        open: true
+      - type: crown.emergency.stop
+        version: 1
+        required: [reason]
+      - type: crown.heartbeat
+        version: 1
+        required: []
+      - type: crown.resume
+        version: 1
+        required: []
+  - id: data
+    subject: أصولُ البيانات وتصنيفاتُها واعتماداتُها ونسبُها
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:minister
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: data.access.granted
+        version: 1
+        required: [action, assetId, classification, clearance, purpose]
+      - type: data.access.refused
+        version: 1
+        required: []
+        open: true
+      - type: data.classification.approval.consumed
+        version: 1
+        required: [approvedBy, assetId, from, id, to]
+      - type: data.classification.approval.granted
+        version: 1
+        required: [approverRole, assetId, expiresAt, from, id, recordVersion, requestedBy, to]
+      - type: data.classification.changed
+        version: 1
+        required: [approvalId, direction, from, id, justification, to]
+      - type: data.classification.refused
+        version: 1
+        required: [code, direction, from, id, to]
+      - type: data.lineage.recorded
+        version: 1
+        required: [assetId, hash, kind, parents, purpose, seq]
+      - type: data.quality.changed
+        version: 1
+        required: [id, quality]
+      - type: data.registered
+        version: 1
+        required: [classification, derivedFrom, id, name]
+      - type: data.write.committed
+        version: 1
+        required: [action, assetId, classification, clearance, purpose]
+  - id: egress
+    subject: 'الخروجُ إلى الخارج: ما أُرسل وما رُفض'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: egress.refused
+        version: 1
+        required: []
+        open: true
+      - type: egress.sent
+        version: 1
+        required: [attemptsInWindow, bytes, classification, destination, policyId, purpose, uri]
+  - id: halt
+    subject: 'مِفتاحُ الإيقاف: إصدارُه وتأكيدُه واستئنافُ العمل'
+    classification: sovereign
+    version: 1
+    producers:
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+    types:
+      - type: halt.confirmed
+        version: 1
+        required: [epoch]
+      - type: halt.issued
+        version: 1
+        required: [epoch, reason]
+      - type: halt.resumed
+        version: 1
+        required: [epoch, reason, recoveredFrom]
+  - id: identity
+    subject: بوابةُ الهوية وتجريدُ القدرات عند العبور
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:operator
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: identity.capability.stripped
+        version: 1
+        required: [capabilities]
+  - id: incident
+    subject: 'سجلُّ الحوادث: فتحُها وإغلاقُها'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:auditor
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: incident.closed
+        version: 1
+        required: [id, reason]
+      - type: incident.opened
+        version: 1
+        required: []
+        open: true
+  - id: inference
+    subject: 'الاستدلال: ما تمّ وما رُفض (بنصٍّ منقَّحٍ بحسب التصنيف)'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:agent
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: inference.completed
+        version: 1
+        required: [attemptsInWindow, input, modelId, output, policyId, purpose, usage]
+      - type: inference.refused
+        version: 1
+        required: []
+        open: true
+  - id: isolation
+    subject: 'العزلُ التنفيذي: بدؤُه وانتهاؤُه ومنعُ الهروب منه'
+    classification: internal
+    version: 1
+    producers:
+      - role:operator
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: isolation.completed
+        version: 1
+        required: [durationMs, exitCode, stdoutBytes]
+      - type: isolation.escape-blocked
+        version: 1
+        required: [code, durationMs, kind]
+      - type: isolation.refused
+        version: 1
+        required: [code, reason]
+        optional: [durationMs, exitCode, phase, signal]
+      - type: isolation.started
+        version: 1
+        required:
+          [
+            command,
+            maxFileSizeMb,
+            memoryLimitMb,
+            network,
+            processLimit,
+            timeoutMs,
+            workdir,
+            writableDir,
+          ]
+      - type: isolation.timeout
+        version: 1
+        required: [code, durationMs, signal, timeoutMs]
+  - id: kernel
+    subject: 'نواةُ التنفيذ: المهامُّ وتصريحُها ووضعُ السلامة'
+    classification: internal
+    version: 1
+    producers:
+      - role:operator
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: kernel.authorization.verified
+        version: 1
+        required: [action, policyId, target]
+      - type: kernel.safe-mode.entered
+        version: 1
+        required: [reason]
+      - type: kernel.safe-mode.left
+        version: 1
+        required: []
+      - type: kernel.task.failed
+        version: 1
+        required: [error, taskId]
+      - type: kernel.task.queued
+        version: 1
+        required: [action, taskId]
+      - type: kernel.task.started
+        version: 1
+        required: [taskId]
+      - type: kernel.task.succeeded
+        version: 1
+        required: [taskId]
+  - id: law
+    subject: 'القوانين: اقتراحُها وسَنُّها وتعليقُها وإلغاؤها'
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:chief-justice
+      - role:minister
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: law.draft
+        version: 1
+        required: [id, version]
+      - type: law.enacted
+        version: 1
+        required: [id, version]
+      - type: law.proposed
+        version: 1
+        required: [id]
+        optional: [scope, title, version]
+      - type: law.repealed
+        version: 1
+        required: [id, version]
+      - type: law.suspended
+        version: 1
+        required: [id, version]
+  - id: memory
+    subject: 'ذاكرةُ الوكلاء: إنشاؤُها وانتهاؤُها وعزلُها (واصفاتٌ بلا مادّة)'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:agent
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: memory.created
+        version: 1
+        required: [datasetId, encrypted, expiresAt, id, tier]
+      - type: memory.deleted
+        version: 1
+        required: [actorId, id]
+      - type: memory.expired
+        version: 1
+        required: [actorId, expiresAt, id]
+      - type: memory.isolation.refused
+        version: 1
+        required: [attempts, reason, role, subject]
+      - type: memory.listed
+        version: 1
+        required: [agentId, count]
+  - id: model
+    subject: 'النماذج: تسجيلُها وتقييمُها وتفعيلُها والتراجعُ عنها'
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:operator
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: model.activated
+        version: 1
+        required: [id, previous, purpose]
+      - type: model.activation-refused
+        version: 1
+        required: [code, id]
+        optional: [evaluationState, fingerprint, reason]
+      - type: model.approved
+        version: 1
+        required: [id, reason]
+      - type: model.deactivated
+        version: 1
+        required: [id, purpose, reason, state]
+      - type: model.evaluation.failed
+        version: 1
+        required: [fingerprint, modelId, requiredChecksPassed, results, state]
+      - type: model.evaluation.passed
+        version: 1
+        required: [fingerprint, modelId, requiredChecksPassed, results, state]
+      - type: model.fingerprint-verified
+        version: 1
+        required: [bytes, fingerprint, id]
+      - type: model.registered
+        version: 1
+        required: [id]
+        optional: [fingerprint, modelVersion, name, reason]
+      - type: model.rollback-failed
+        version: 1
+        required: [activeId, code, previousId, purpose, reason]
+      - type: model.rollback-refused
+        version: 1
+        required: [code, purpose, reason]
+        optional: [activeId]
+      - type: model.rolled-back
+        version: 1
+        required: [id, reason]
+        open: true
+      - type: model.sandboxed
+        version: 1
+        required: [id, reason]
+      - type: model.suspended
+        version: 1
+        required: [id, reason]
+  - id: policy
+    subject: قراراتُ السياسة وخصمُ الحصص
+    classification: internal
+    version: 1
+    producers:
+      - role:operator
+      - role:king
+      - role:minister
+      - role:agent
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+      - role:chief-justice
+    types:
+      - type: policy.decision
+        version: 1
+        required: [action, allowed, code, policyId, policyVersion, reason, resource]
+      - type: policy.quota.debited
+        version: 1
+        required: [amount, remaining, resource]
+  - id: quarantine
+    subject: 'الحجرُ الصحّي: الإشاراتُ والعزلُ والإفراج'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: quarantine.isolated
+        version: 1
+        required: [count, incidentId, kind, severity, threshold]
+      - type: quarantine.isolation-failed
+        version: 1
+        required: [error, incidentId, kind]
+      - type: quarantine.released
+        version: 1
+        required: [incidentId, kind, reason]
+      - type: quarantine.signal
+        version: 1
+        required: []
+        open: true
+  - id: retention
+    subject: 'الاحتفاظُ والمحو: ما مُحي ومتى وبأيّ شاهد (بلا مادّةِ ما مُحي)'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: retention.cycle.completed
+        version: 1
+        required: [capped, erased, ledgerSeq, now, refused]
+      - type: retention.directed
+        version: 1
+        required: [id, ledgerSeq, target]
+      - type: retention.erased
+        version: 1
+        required: [classification, dependents, hash, owner, reason, seq, target, targetId]
+      - type: retention.planned
+        version: 1
+        required: [now, targets]

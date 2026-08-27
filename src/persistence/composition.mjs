@@ -17,6 +17,7 @@ import { DataAccessGate } from '../data/access-gate.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
 import { ErasureLedger } from '../data/erasure-ledger.mjs';
+import { EventBus, loadEventsPolicy } from '../events/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -31,6 +32,8 @@ import {
   DATA_ASSET_SPEC,
   DATA_LINEAGE_SPEC,
   ERASURE_RECORD_SPEC,
+  EVENT_MESSAGE_SPEC,
+  EVENT_OFFSET_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -51,6 +54,8 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} classificationApprovals
  * @property {ReturnType<typeof createMemoryRepository>} dataLineage
  * @property {ReturnType<typeof createMemoryRepository>} erasureRecords
+ * @property {ReturnType<typeof createMemoryRepository>} eventMessages
+ * @property {ReturnType<typeof createMemoryRepository>} eventOffsets
  */
 
 /**
@@ -72,6 +77,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {LineageLedger} lineage
  * @property {ErasureLedger} erasureLedger
  * @property {RetentionCycle} retention
+ * @property {EventBus} events
  */
 
 /**
@@ -89,6 +95,8 @@ export function createMemoryRepositories(options = {}) {
     classificationApprovals: createMemoryRepository(CLASSIFICATION_APPROVAL_SPEC, options),
     dataLineage: createMemoryRepository(DATA_LINEAGE_SPEC, options),
     erasureRecords: createMemoryRepository(ERASURE_RECORD_SPEC, options),
+    eventMessages: createMemoryRepository(EVENT_MESSAGE_SPEC, options),
+    eventOffsets: createMemoryRepository(EVENT_OFFSET_SPEC, options),
   };
 }
 
@@ -108,6 +116,8 @@ export function createPostgresRepositories(pool) {
       classificationApprovals: createPostgresRepository(pool, CLASSIFICATION_APPROVAL_SPEC),
       dataLineage: createPostgresRepository(pool, DATA_LINEAGE_SPEC),
       erasureRecords: createPostgresRepository(pool, ERASURE_RECORD_SPEC),
+      eventMessages: createPostgresRepository(pool, EVENT_MESSAGE_SPEC),
+      eventOffsets: createPostgresRepository(pool, EVENT_OFFSET_SPEC),
     })
   );
 }
@@ -143,6 +153,9 @@ export function createPostgresRepositories(pool) {
  * @param {import('../data/retention-cycle.mjs').RetentionCyclePolicy | null} [deps.retentionPolicy] سياسة
  *   دورة الاحتفاظ والمحو (M7.06): ترتيبُ الأهداف، وأدوارُ المطهّر، وتوابعُ الأصل
  *   المشهود عليها. تُحمّل من `config/retention.yaml` إن لم تُمرَّر.
+ * @param {import('../events/contracts.mjs').EventsPolicy | null} [deps.eventsPolicy] سياسة
+ *   قنوات الأحداث (M7.07): القنواتُ ومنتِجوها وقُرّاؤها وعقودُ أنواعها. تُحمّل من
+ *   `config/events.yaml` إن لم تُمرَّر.
  * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
@@ -160,6 +173,7 @@ export function createRegistries({
   encryptionPolicy = null,
   memoryPolicy = null,
   retentionPolicy = null,
+  eventsPolicy = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
   // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
@@ -274,6 +288,15 @@ export function createRegistries({
         classificationApprovals: repositories.classificationApprovals,
       },
       ...(retentionPolicy === null ? {} : { policy: retentionPolicy }),
+    }),
+    // ناقلُ القنوات يُركَّب **دائماً** (الخطوة `M7.07`)، لنفس سبب دفتري النسب
+    // والمحو: ناقلٌ اختياريٌّ يصير تركُه مساراً لأحداثٍ تُقرأ بلا تخليصٍ ولا عقد
+    // ولا موضعِ قراءة — وهو العيب الذي أغلقته الخطوة.
+    events: new EventBus({
+      policy: eventsPolicy ?? loadEventsPolicy(),
+      lattice: classificationLattice,
+      messages: repositories.eventMessages,
+      offsets: repositories.eventOffsets,
     }),
   };
 }

@@ -603,6 +603,129 @@ export const ERASURE_RECORD_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * رسائلُ قنوات الأحداث — `M7.07`.
+ *
+ * جدولٌ **يُكتب فيه ولا يُعدَّل**، وسلسلةُ التجزئة فيه **لكل قناة على حدة**:
+ * `seq` يبدأ من 1 داخل كل قناة، فالتفرّد على `[channel, seq]` لا على `seq` وحده.
+ * ولماذا لا سلسلةٌ واحدة للجدول كلّه؟ لأن القناة هي وحدةُ القراءة، وفحصُ قناةٍ
+ * بسلسلةٍ عامّة يقتضي قراءةَ قنواتٍ لا تخليصَ للقارئ عليها — وذلك يهدم البوابة
+ * التي بُنيت القنواتُ لإقامتها.
+ *
+ * و`authorId` منفصلٌ عن `actorId` قصداً: الأولُ فاعلُ الواقعة كما كُتب في سجل
+ * جذر الثقة، والثاني من حملها إلى القناة. ودمجُهما يجعل كلَّ حدثٍ منقولٍ يبدو
+ * كأن الناقلَ فعله.
+ *
+ * و`recordedAt` **نصّ** ISO لا عمودٌ زمني، لنفس سبب دفتري النسب والمحو: التجزئة
+ * تُحسب عليه، وفرقُ الدقّة بين ساعة القاعدة و`Date` يكسر السلسلة على البريء.
+ */
+/** @type {EntitySpec} */
+export const EVENT_MESSAGE_SPEC = Object.freeze({
+  name: 'event_messages',
+  table: 'state.event_messages',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      channel: { column: 'channel', type: 'string', required: true, maxLength: 40 },
+      type: { column: 'type', type: 'string', required: true, maxLength: 120 },
+      contractVersion: { column: 'contract_version', type: 'integer', required: true },
+      seq: { column: 'seq', type: 'integer', required: true },
+      // فاعلُ الواقعة الأصلي، ثم من حملها إلى القناة.
+      authorId: { column: 'author_id', type: 'string', required: true, maxLength: 128 },
+      actorId: { column: 'actor_id', type: 'string', required: true, maxLength: 128 },
+      actorRole: { column: 'actor_role', type: 'string', required: true, maxLength: 60 },
+      classification: { column: 'classification', type: 'string', required: true, maxLength: 40 },
+      payload: { column: 'payload', type: 'json', required: true },
+      relayed: { column: 'relayed', type: 'boolean', required: true },
+      recordedAt: { column: 'recorded_at', type: 'string', required: true, maxLength: 40 },
+      prevHash: { column: 'prev_hash', type: 'string', required: true, maxLength: 64 },
+      hash: { column: 'hash', type: 'string', required: true, maxLength: 64 },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['channel', 'seq']), Object.freeze(['hash'])]),
+  filterable: Object.freeze(['channel', 'type', 'relayed']),
+  invariants: Object.freeze([
+    {
+      code: 'EVENT_SEQ_POSITIVE',
+      message: 'ترقيمُ القناة يبدأ من 1: ترقيمٌ صفريٌّ أو سالب لا موضع له في سلسلة.',
+      /** @param {EntityRecord} record */
+      check: (record) => Number(record['seq']) >= 1,
+    },
+    {
+      code: 'EVENT_GENESIS_IS_FIRST',
+      message:
+        'أولُ رسالةٍ في القناة وحدها تحمل `genesis`، وما بعدها يحمل تجزئة ما قبلها؛ وإلا صارت كلُّ رسالةٍ بدايةً فلا تُكشف ثغرة.',
+      /** @param {EntityRecord} record */
+      check: (record) => (Number(record['seq']) === 1) === (record['prevHash'] === 'genesis'),
+    },
+    {
+      code: 'EVENT_TYPE_IN_CHANNEL',
+      message:
+        'النوعُ يبدأ بمعرّف قناته: نوعٌ في قناةٍ لا تملكه يجعل القارئ يقرأ مجالاً غير الذي خُلِّص له.',
+      /** @param {EntityRecord} record */
+      check: (record) => String(record['type']).split('.')[0] === String(record['channel']),
+    },
+    {
+      code: 'EVENT_PAYLOAD_IS_OBJECT',
+      message:
+        'الحِمل كائنٌ من حقلٍ إلى قيمة؛ مصفوفةٌ أو نصٌّ حرٌّ هنا يجعل العقد غيرَ قابلٍ للقياس.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        typeof record['payload'] === 'object' &&
+        record['payload'] !== null &&
+        !Array.isArray(record['payload']),
+    },
+    {
+      code: 'EVENT_CARRIES_NO_MATERIAL',
+      message:
+        'الرسالةُ لا تحمل مادّةً ولا سرّاً في جسدها: قناةٌ تحمل المادة تصير طريقاً حول بوابة الوصول وحول التعمية معاً.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        !Object.prototype.hasOwnProperty.call(record, 'content') &&
+        !Object.prototype.hasOwnProperty.call(record, 'plaintext') &&
+        !Object.prototype.hasOwnProperty.call(record, 'secret'),
+    },
+  ]),
+});
+
+/**
+ * مواضعُ قراءة القنوات — `M7.07`.
+ *
+ * صفٌّ لكل «مجموعةِ استهلاكٍ × قناة» يحمل آخرَ ترقيمٍ **عُولج وثُبِّت**. وهو
+ * الحقلُ الوحيد في مجال الأحداث الذي **يُحدَّث**، ولذلك يمرّ تحديثُه بالقفل
+ * المتفائل: مستهلكان يثبّتان معاً على نسخةٍ واحدة كان أحدُهما سيمحو تقدّمَ الآخر
+ * فيُعاد ما عُولج بلا أثر.
+ *
+ * والمجموعةُ `relay` محفوظةٌ لموضع النقل من سجل جذر الثقة، وقناتُها `*` لأن
+ * النقلَ يمشي على ترقيم السجل الواحد لا على ترقيم قناةٍ بعينها.
+ */
+/** @type {EntitySpec} */
+export const EVENT_OFFSET_SPEC = Object.freeze({
+  name: 'event_offsets',
+  table: 'state.event_offsets',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      group: { column: 'consumer_group', type: 'string', required: true, maxLength: 80 },
+      channel: { column: 'channel', type: 'string', required: true, maxLength: 40 },
+      committedSeq: { column: 'committed_seq', type: 'integer', required: true },
+      committedAt: { column: 'committed_at', type: 'string', required: true, maxLength: 40 },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['group', 'channel'])]),
+  filterable: Object.freeze(['group', 'channel']),
+  invariants: Object.freeze([
+    {
+      code: 'OFFSET_NOT_NEGATIVE',
+      message: 'الموضعُ صفرٌ لمن لم يقرأ بعد، ثم يتقدّم؛ وموضعٌ سالب لا يقابل رسالةً في القناة.',
+      /** @param {EntityRecord} record */
+      check: (record) => Number(record['committedSeq']) >= 0,
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -613,6 +736,8 @@ export const ENTITY_SPECS = Object.freeze({
   classification_approvals: CLASSIFICATION_APPROVAL_SPEC,
   data_lineage: DATA_LINEAGE_SPEC,
   erasure_records: ERASURE_RECORD_SPEC,
+  event_messages: EVENT_MESSAGE_SPEC,
+  event_offsets: EVENT_OFFSET_SPEC,
 });
 
 /**

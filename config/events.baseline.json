@@ -1,0 +1,667 @@
+{
+  "channels": [
+    {
+      "id": "agent",
+      "version": 1,
+      "types": [
+        {
+          "type": "agent.active",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "agent.quarantined",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "agent.registered",
+          "version": 1,
+          "required": ["capabilities", "id", "role"],
+          "optional": []
+        },
+        {
+          "type": "agent.retired",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "agent.revoked",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "agent.suspended",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "capability",
+      "version": 1,
+      "types": [
+        {
+          "type": "capability.grant.forbidden",
+          "version": 1,
+          "required": ["beneficiary", "capability", "reason"],
+          "optional": []
+        },
+        {
+          "type": "capability.granted",
+          "version": 1,
+          "required": ["agentId", "capability", "expiresAt", "id", "reason", "ttlSeconds"],
+          "optional": []
+        },
+        {
+          "type": "capability.grants.pruned",
+          "version": 1,
+          "required": ["count"],
+          "optional": []
+        },
+        {
+          "type": "capability.register.forbidden",
+          "version": 1,
+          "required": ["capabilities", "role"],
+          "optional": []
+        },
+        {
+          "type": "capability.revoked",
+          "version": 1,
+          "required": ["agentId", "capability", "id", "reason"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "court",
+      "version": 1,
+      "types": [
+        {
+          "type": "court.case.appealed",
+          "version": 1,
+          "required": ["id"],
+          "optional": []
+        },
+        {
+          "type": "court.case.decided",
+          "version": 1,
+          "required": ["id", "outcome"],
+          "optional": []
+        },
+        {
+          "type": "court.case.heard",
+          "version": 1,
+          "required": ["id"],
+          "optional": []
+        },
+        {
+          "type": "court.case.opened",
+          "version": 1,
+          "required": ["claimant", "id", "respondent"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "crown",
+      "version": 1,
+      "types": [
+        {
+          "type": "crown.command.accepted",
+          "version": 1,
+          "required": [],
+          "optional": []
+        },
+        {
+          "type": "crown.emergency.stop",
+          "version": 1,
+          "required": ["reason"],
+          "optional": []
+        },
+        {
+          "type": "crown.heartbeat",
+          "version": 1,
+          "required": [],
+          "optional": []
+        },
+        {
+          "type": "crown.resume",
+          "version": 1,
+          "required": [],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "version": 1,
+      "types": [
+        {
+          "type": "data.access.granted",
+          "version": 1,
+          "required": ["action", "assetId", "classification", "clearance", "purpose"],
+          "optional": []
+        },
+        {
+          "type": "data.access.refused",
+          "version": 1,
+          "required": [],
+          "optional": []
+        },
+        {
+          "type": "data.classification.approval.consumed",
+          "version": 1,
+          "required": ["approvedBy", "assetId", "from", "id", "to"],
+          "optional": []
+        },
+        {
+          "type": "data.classification.approval.granted",
+          "version": 1,
+          "required": [
+            "approverRole",
+            "assetId",
+            "expiresAt",
+            "from",
+            "id",
+            "recordVersion",
+            "requestedBy",
+            "to"
+          ],
+          "optional": []
+        },
+        {
+          "type": "data.classification.changed",
+          "version": 1,
+          "required": ["approvalId", "direction", "from", "id", "justification", "to"],
+          "optional": []
+        },
+        {
+          "type": "data.classification.refused",
+          "version": 1,
+          "required": ["code", "direction", "from", "id", "to"],
+          "optional": []
+        },
+        {
+          "type": "data.lineage.recorded",
+          "version": 1,
+          "required": ["assetId", "hash", "kind", "parents", "purpose", "seq"],
+          "optional": []
+        },
+        {
+          "type": "data.quality.changed",
+          "version": 1,
+          "required": ["id", "quality"],
+          "optional": []
+        },
+        {
+          "type": "data.registered",
+          "version": 1,
+          "required": ["classification", "derivedFrom", "id", "name"],
+          "optional": []
+        },
+        {
+          "type": "data.write.committed",
+          "version": 1,
+          "required": ["action", "assetId", "classification", "clearance", "purpose"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "egress",
+      "version": 1,
+      "types": [
+        {
+          "type": "egress.refused",
+          "version": 1,
+          "required": [],
+          "optional": []
+        },
+        {
+          "type": "egress.sent",
+          "version": 1,
+          "required": [
+            "attemptsInWindow",
+            "bytes",
+            "classification",
+            "destination",
+            "policyId",
+            "purpose",
+            "uri"
+          ],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "halt",
+      "version": 1,
+      "types": [
+        {
+          "type": "halt.confirmed",
+          "version": 1,
+          "required": ["epoch"],
+          "optional": []
+        },
+        {
+          "type": "halt.issued",
+          "version": 1,
+          "required": ["epoch", "reason"],
+          "optional": []
+        },
+        {
+          "type": "halt.resumed",
+          "version": 1,
+          "required": ["epoch", "reason", "recoveredFrom"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "identity",
+      "version": 1,
+      "types": [
+        {
+          "type": "identity.capability.stripped",
+          "version": 1,
+          "required": ["capabilities"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "incident",
+      "version": 1,
+      "types": [
+        {
+          "type": "incident.closed",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "incident.opened",
+          "version": 1,
+          "required": [],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "inference",
+      "version": 1,
+      "types": [
+        {
+          "type": "inference.completed",
+          "version": 1,
+          "required": [
+            "attemptsInWindow",
+            "input",
+            "modelId",
+            "output",
+            "policyId",
+            "purpose",
+            "usage"
+          ],
+          "optional": []
+        },
+        {
+          "type": "inference.refused",
+          "version": 1,
+          "required": [],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "isolation",
+      "version": 1,
+      "types": [
+        {
+          "type": "isolation.completed",
+          "version": 1,
+          "required": ["durationMs", "exitCode", "stdoutBytes"],
+          "optional": []
+        },
+        {
+          "type": "isolation.escape-blocked",
+          "version": 1,
+          "required": ["code", "durationMs", "kind"],
+          "optional": []
+        },
+        {
+          "type": "isolation.refused",
+          "version": 1,
+          "required": ["code", "reason"],
+          "optional": ["durationMs", "exitCode", "phase", "signal"]
+        },
+        {
+          "type": "isolation.started",
+          "version": 1,
+          "required": [
+            "command",
+            "maxFileSizeMb",
+            "memoryLimitMb",
+            "network",
+            "processLimit",
+            "timeoutMs",
+            "workdir",
+            "writableDir"
+          ],
+          "optional": []
+        },
+        {
+          "type": "isolation.timeout",
+          "version": 1,
+          "required": ["code", "durationMs", "signal", "timeoutMs"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "kernel",
+      "version": 1,
+      "types": [
+        {
+          "type": "kernel.authorization.verified",
+          "version": 1,
+          "required": ["action", "policyId", "target"],
+          "optional": []
+        },
+        {
+          "type": "kernel.safe-mode.entered",
+          "version": 1,
+          "required": ["reason"],
+          "optional": []
+        },
+        {
+          "type": "kernel.safe-mode.left",
+          "version": 1,
+          "required": [],
+          "optional": []
+        },
+        {
+          "type": "kernel.task.failed",
+          "version": 1,
+          "required": ["error", "taskId"],
+          "optional": []
+        },
+        {
+          "type": "kernel.task.queued",
+          "version": 1,
+          "required": ["action", "taskId"],
+          "optional": []
+        },
+        {
+          "type": "kernel.task.started",
+          "version": 1,
+          "required": ["taskId"],
+          "optional": []
+        },
+        {
+          "type": "kernel.task.succeeded",
+          "version": 1,
+          "required": ["taskId"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "law",
+      "version": 1,
+      "types": [
+        {
+          "type": "law.draft",
+          "version": 1,
+          "required": ["id", "version"],
+          "optional": []
+        },
+        {
+          "type": "law.enacted",
+          "version": 1,
+          "required": ["id", "version"],
+          "optional": []
+        },
+        {
+          "type": "law.proposed",
+          "version": 1,
+          "required": ["id"],
+          "optional": ["scope", "title", "version"]
+        },
+        {
+          "type": "law.repealed",
+          "version": 1,
+          "required": ["id", "version"],
+          "optional": []
+        },
+        {
+          "type": "law.suspended",
+          "version": 1,
+          "required": ["id", "version"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "memory",
+      "version": 1,
+      "types": [
+        {
+          "type": "memory.created",
+          "version": 1,
+          "required": ["datasetId", "encrypted", "expiresAt", "id", "tier"],
+          "optional": []
+        },
+        {
+          "type": "memory.deleted",
+          "version": 1,
+          "required": ["actorId", "id"],
+          "optional": []
+        },
+        {
+          "type": "memory.expired",
+          "version": 1,
+          "required": ["actorId", "expiresAt", "id"],
+          "optional": []
+        },
+        {
+          "type": "memory.isolation.refused",
+          "version": 1,
+          "required": ["attempts", "reason", "role", "subject"],
+          "optional": []
+        },
+        {
+          "type": "memory.listed",
+          "version": 1,
+          "required": ["agentId", "count"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "version": 1,
+      "types": [
+        {
+          "type": "model.activated",
+          "version": 1,
+          "required": ["id", "previous", "purpose"],
+          "optional": []
+        },
+        {
+          "type": "model.activation-refused",
+          "version": 1,
+          "required": ["code", "id"],
+          "optional": ["evaluationState", "fingerprint", "reason"]
+        },
+        {
+          "type": "model.approved",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "model.deactivated",
+          "version": 1,
+          "required": ["id", "purpose", "reason", "state"],
+          "optional": []
+        },
+        {
+          "type": "model.evaluation.failed",
+          "version": 1,
+          "required": ["fingerprint", "modelId", "requiredChecksPassed", "results", "state"],
+          "optional": []
+        },
+        {
+          "type": "model.evaluation.passed",
+          "version": 1,
+          "required": ["fingerprint", "modelId", "requiredChecksPassed", "results", "state"],
+          "optional": []
+        },
+        {
+          "type": "model.fingerprint-verified",
+          "version": 1,
+          "required": ["bytes", "fingerprint", "id"],
+          "optional": []
+        },
+        {
+          "type": "model.registered",
+          "version": 1,
+          "required": ["id"],
+          "optional": ["fingerprint", "modelVersion", "name", "reason"]
+        },
+        {
+          "type": "model.rollback-failed",
+          "version": 1,
+          "required": ["activeId", "code", "previousId", "purpose", "reason"],
+          "optional": []
+        },
+        {
+          "type": "model.rollback-refused",
+          "version": 1,
+          "required": ["code", "purpose", "reason"],
+          "optional": ["activeId"]
+        },
+        {
+          "type": "model.rolled-back",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "model.sandboxed",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        },
+        {
+          "type": "model.suspended",
+          "version": 1,
+          "required": ["id", "reason"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "version": 1,
+      "types": [
+        {
+          "type": "policy.decision",
+          "version": 1,
+          "required": [
+            "action",
+            "allowed",
+            "code",
+            "policyId",
+            "policyVersion",
+            "reason",
+            "resource"
+          ],
+          "optional": []
+        },
+        {
+          "type": "policy.quota.debited",
+          "version": 1,
+          "required": ["amount", "remaining", "resource"],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "quarantine",
+      "version": 1,
+      "types": [
+        {
+          "type": "quarantine.isolated",
+          "version": 1,
+          "required": ["count", "incidentId", "kind", "severity", "threshold"],
+          "optional": []
+        },
+        {
+          "type": "quarantine.isolation-failed",
+          "version": 1,
+          "required": ["error", "incidentId", "kind"],
+          "optional": []
+        },
+        {
+          "type": "quarantine.released",
+          "version": 1,
+          "required": ["incidentId", "kind", "reason"],
+          "optional": []
+        },
+        {
+          "type": "quarantine.signal",
+          "version": 1,
+          "required": [],
+          "optional": []
+        }
+      ]
+    },
+    {
+      "id": "retention",
+      "version": 1,
+      "types": [
+        {
+          "type": "retention.cycle.completed",
+          "version": 1,
+          "required": ["capped", "erased", "ledgerSeq", "now", "refused"],
+          "optional": []
+        },
+        {
+          "type": "retention.directed",
+          "version": 1,
+          "required": ["id", "ledgerSeq", "target"],
+          "optional": []
+        },
+        {
+          "type": "retention.erased",
+          "version": 1,
+          "required": [
+            "classification",
+            "dependents",
+            "hash",
+            "owner",
+            "reason",
+            "seq",
+            "target",
+            "targetId"
+          ],
+          "optional": []
+        },
+        {
+          "type": "retention.planned",
+          "version": 1,
+          "required": ["now", "targets"],
+          "optional": []
+        }
+      ]
+    }
+  ]
+}
