@@ -13,6 +13,14 @@
 جردِ مواضع النشر الفعلية في `src/` هو **18 قناةً و84 نوعاً**، والفرقُ
 مُعلَنٌ في ترويسة `config/events.yaml` ولم يُخفَ بإعادةِ ترقيمٍ صامتة.
 
+> **تحديثٌ بعد `M7.08` (‏`WL-032`):** صار العددُ **19 قناةً و87 عقداً** بإضافة
+> قناة `knowledge` بثلاثة عقود. **وحاجزُ هذه الوثيقة رفض التغييرَ مرّتين وكان
+> محقّاً:** أوّلاً لأن الأنواعَ الثلاثةَ كانت تُنشَر بلا عقد، ثم لأن
+> `experimentId` أُضيف حقلاً إلزامياً إلى `model.evaluation.passed`/`.failed`
+> **بلا رفعِ نسخة العقد** (‏`R6: field-required-added`) — فرُفع العقدان إلى
+> **النسخة 2**. وهذا أوّلُ دليلٍ مُشغَّلٍ على أن حاجزَ التوافق الخلفي يعمل على
+> تغييرٍ حقيقيٍّ لم يُصنَع لأجله.
+
 ولم يكن في المستودع ناقلُ أحداثٍ أصلاً. الموجودُ كان `EventLog` في
 `src/root-of-trust/event-log.mjs`: سجلٌّ **متزامنٌ في الذاكرة** يُلحِق
 سطراً بسلسلةِ تجزئةٍ ويُشهد عليه — وهو صالحٌ لما بُني له (أثرٌ لا يُنكَر)
@@ -41,7 +49,7 @@
 | `forbiddenPayloadKeys` | مفاتيحُ محرَّمة في أي حِمل: `content`، `plaintext`، `material`، `secret`، `password`، `token`، `privateKey` |
 | `repositoryHolders` | الوحداتُ الوحيدةُ المسموحُ لها لمسُ مستودعي الأحداث |
 
-### القنوات الثماني عشرة
+### القنوات التسع عشرة (كانت ثماني عشرة قبل `M7.08`)
 
 | القناة | الموضوع | التصنيف | النسخة | الأنواع | المنتِجون | المستهلكون |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -57,6 +65,7 @@
 | `inference` | الاستدلال: ما تمّ وما رُفض | sensitive | v1 | 2 | role:operator، role:agent | king، auditor، minister، operator |
 | `isolation` | العزلُ التنفيذي: بدؤُه وانتهاؤُه ومنعُ الهروب منه | internal | v1 | 5 | role:operator | king، auditor، minister، operator، chief-justice |
 | `kernel` | نواةُ التنفيذ: المهامُّ وتصريحُها ووضعُ السلامة | internal | v1 | 7 | role:operator، role:king | king، auditor، minister، operator، chief-justice |
+| `knowledge` | سجلُّ التجارب: مَن سجّل تجربةً وبأيّ فرضيةٍ ومقاييسَ ومتى ثُبّتت ومن راجعها (واصفاتٌ بلا مادّة) | internal | v1 | 3 | role:king، role:minister، role:operator، role:auditor، role:chief-justice | king، auditor، chief-justice، minister، operator |
 | `law` | القوانين: اقتراحُها وسَنُّها وتعليقُها وإلغاؤها | internal | v1 | 5 | role:king، role:chief-justice، role:minister | king، auditor، minister، operator، chief-justice |
 | `memory` | ذاكرةُ الوكلاء: إنشاؤُها وانتهاؤُها وعزلُها | sensitive | v1 | 5 | role:operator، role:agent | king، auditor، minister، operator |
 | `model` | النماذج: تسجيلُها وتقييمُها وتفعيلُها والتراجعُ عنها | internal | v1 | 13 | role:king، role:operator | king، auditor، minister، operator، chief-justice |
