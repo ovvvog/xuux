@@ -17,6 +17,7 @@ export const RETENTION_ERRORS = Object.freeze({
   LEGAL_HOLD: 'RETENTION_LEGAL_HOLD',
   NOT_FOUND: 'RETENTION_NOT_FOUND',
   EVENTS_IMMUTABLE: 'RETENTION_EVENTS_IMMUTABLE',
+  DEPENDENTS_PRESENT: 'RETENTION_DEPENDENTS_PRESENT',
 });
 
 /** خطأ سياسة احتفاظ يحمل رمزاً ثابتاً للمستدعي وأداة سطر الأوامر. */
@@ -31,6 +32,34 @@ export class RetentionError extends Error {
     /** @type {string} */
     this.code = code;
   }
+}
+
+/**
+ * يترجم خطأ مرجعٍ خاماً من PostgreSQL (‏`23503`) إلى رفضٍ مُسمّى — الخطوة
+ * `M7.06`.
+ *
+ * **العيب المُقاس:** `state.data_lineage.asset_id` و
+ * `state.classification_approvals.asset_id` يرجعان إلى `state.data_assets(id)` بلا
+ * `ON DELETE` — وهو مقصودٌ في الهجرة `0007`. فكان `purge` يرفع خطأ قاعدةٍ
+ * خاماً بنصٍ إنجليزيٍ يسمّي القيد ولا يسمّي الفعل المطلوب، فيُقرأ خللاً لا رفضاً.
+ * والفعل المطلوب معروف: دورةُ `RetentionCycle` تمحو التوابع بعد الشهادة عليها.
+ *
+ * وهي دالّةٌ **نقيّة ومُصدَّرة** لا شرطٌ مدفون في `catch`: الترجمة تُختبر بلا
+ * قاعدةٍ حيّة، وفي بيئةٍ بلا قاعدة يبقى مسارُ الرفض مقيساً لا مدّعىً.
+ * @param {unknown} error
+ * @param {string} table الجدول المقصود بالمحو، ليُسمّى في الرفض.
+ * @returns {RetentionError | null} رفضٌ مُسمّى، أو `null` لخطأٍ ليس خطأ مرجع.
+ */
+export function dependentFault(error, table) {
+  if (typeof error !== 'object' || error === null) return null;
+  const code = /** @type {{ code?: unknown }} */ (error).code;
+  if (code !== '23503') return null;
+  const constraint = /** @type {{ constraint?: unknown }} */ (error).constraint;
+  const detail = typeof constraint === 'string' && constraint !== '' ? constraint : 'غير مسمّى';
+  return new RetentionError(
+    RETENTION_ERRORS.DEPENDENTS_PRESENT,
+    `محو ${table} مرفوض: ما زالت له صفوفٌ تابعة ترجع إليه (القيد: ${detail}). والتوابع لا تُحذف أثراً جانبياً لحدفٍ عابر: امحُ بدورة الاحتفاظ المحكومة (RetentionCycle.run) فتُشهد على عدد التوابع ورأس سلسلتها قبل زوالها.`,
+  );
 }
 
 /**
@@ -256,11 +285,19 @@ async function deletePolicy(policy, client, now) {
       'محو state.events مرفوض: أي حذف يقطع مرآة سلسلة التجزئة المتصلة.',
     );
   }
-  const result = await client.query(
-    `DELETE FROM ${quoteRelation(policy.table)} WHERE ${conditions.eligible}`,
-    [now],
-  );
-  return result.rowCount ?? 0;
+  try {
+    const result = await client.query(
+      `DELETE FROM ${quoteRelation(policy.table)} WHERE ${conditions.eligible}`,
+      [now],
+    );
+    return result.rowCount ?? 0;
+  } catch (error) {
+    // خطأ المرجع يُسمّى ولا يُبتلع: المعاملة تتراجع كما كانت، والفرق أنّ المستدعي
+    // يقرأ رفضاً معه الفعل المطلوب لا خللاً في قاعدة.
+    const named = dependentFault(error, policy.table);
+    if (named === null) throw error;
+    throw named;
+  }
 }
 
 /**
@@ -339,10 +376,18 @@ export async function eraseById(pool, table, id) {
         `محو ${policy.table} بالمعرّف ${id} مرفوض: الصف محفوظ قانوناً.`,
       );
     }
-    const deleted = await client.query(
-      `DELETE FROM ${quoteRelation(policy.table)} WHERE ${quoteIdentifier('id')} = $1`,
-      [id],
-    );
+    /** @type {import('pg').QueryResult} */
+    let deleted;
+    try {
+      deleted = await client.query(
+        `DELETE FROM ${quoteRelation(policy.table)} WHERE ${quoteIdentifier('id')} = $1`,
+        [id],
+      );
+    } catch (error) {
+      const named = dependentFault(error, policy.table);
+      if (named === null) throw error;
+      throw named;
+    }
     if (deleted.rowCount !== 1) {
       throw new RetentionError(
         RETENTION_ERRORS.NOT_FOUND,

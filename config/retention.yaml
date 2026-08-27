@@ -1,0 +1,103 @@
+# سياسة دورة الاحتفاظ والمحو — الخطوة M7.06.
+#
+# ما قبل هذه السياسة، بنصّه كما كان في الكود:
+#
+#  1. **محوٌ لا يُسجَّل.** `src/persistence/retention.mjs` (‏M3.08) يحذف الصفوف
+#     المنتهية بـ`DELETE` مباشرةً. فبعد المحو لا يبقى في المستودع شيءٌ يقول إنّ
+#     صفّاً كان ثم مُحي: لا فاعل، ولا سبب، ولا تصنيف ما مُحي، ولا شهادةَ نسبٍ
+#     قبل زواله. ومعيار قبول هذه الخطوة نصّه «دورة احتفاظ كاملة **تُمحى
+#     وتُسجَّل**»، والشطر الثاني كان غائباً تماماً.
+#  2. **دورةٌ تفشل على مرجع.** `state.data_lineage.asset_id` و
+#     `state.classification_approvals.asset_id` يرجعان إلى `state.data_assets(id)`
+#     بلا `ON DELETE` — وهذا مقصود (‏0007): «المحوُ فعلٌ محكوم في M7.06 لا أثرٌ
+#     جانبي لحذفٍ عابر». لكن `purge` لا يعرف التوابع، فمحوُ أصلٍ له صفّ نسبٍ
+#     واحد يفشل بخطأ مرجعٍ خام (‏23503) لا برفضٍ مُسمّى، **ويُرجع المعاملة كلها**
+#     فلا يُمحى شيءٌ ولو كان مؤهّلاً.
+#  3. **ذاكرةٌ تُمحى وعقدها يبقى.** `AgentMemoryStore.sweepExpired` (‏M7.05)
+#     يحذف صفّ الذاكرة ويترك عقد بياناته في `state.data_assets` — يتيماً بلا
+#     مادّة، وتعليقُه في الكود يُحيل الدورة الكاملة إلى هذه الخطوة بالاسم.
+#  4. **ترتيبٌ غير معلَن.** `state.memories.dataset_id` يرجع إلى الأصل بـ
+#     `ON DELETE RESTRICT`. فمحوُ الأصل قبل ذاكرته يُرفض في القاعدة، وترتيبُ
+#     المحو كان مصادفةَ ترتيبِ مفاتيحٍ في كائن لا قراراً معلَناً.
+version: 1
+owner: crown
+
+# ترتيب المحو **معلَن لا مصادفة**: الذاكرة قبل عقدها، لأن `memories.dataset_id`
+# يرجع إلى الأصل بـ`ON DELETE RESTRICT` — فعكسُ الترتيب رفضٌ محتومٌ في القاعدة.
+# والمُحمِّل يرفض ترتيباً يخالف هذا، فلا يُقلب في ملفٍ ويُقرأ سياسةً.
+cycle:
+  order:
+    - memories
+    - data_assets
+  # المطهِّر فعلُ تشغيلٍ لا فعلُ وكيل: من يمحو ما انتهت مدّته يمحو دليلاً فلا
+  # يكون صاحبه. وهذه القائمة **يجب** أن تطابق `expiry.sweeperRoles` في
+  # `config/memory.yaml` حرفاً بحرف، ويفرض المُحمِّل التطابق: قائمتان مختلفتان
+  # في ملفّين تعنيان أنّ المحو يقع بدورٍ لا يملكه في الملف الآخر.
+  sweeperRoles:
+    - role:operator
+    - role:king
+  # سقفُ الدورة الواحدة: محوٌ بلا سقف يجعل تشغيلةً واحدة تُفرغ جدولاً بخطأٍ
+  # واحد في الساعة المُمرَّرة، والسقفُ يجعل الأثر محدوداً ومراجَعاً.
+  maxErasuresPerRun: 500
+  # المدّة الدنيا بين دورتين. الدورة **لا تُجدول نفسها** (حدٌّ معلَن في
+  # docs/RETENTION.md): هذه القيمة بوابةُ تكرارٍ تفحصها `run` على آخر صفٍّ في
+  # دفتر المحو، فتشغيلٌ يُعاد بالخطأ بعد دقيقة يُرفض لا يُضاعف.
+  minHoursBetweenRuns: 1
+
+# الأهداف المعلَنة. لا يُمحى في هذه الدورة إلا مفتاحٌ هنا؛ ووجود جدولٍ في
+# المخطَّط لا يجيز محوه (وهو نصّ قرار M3.08 نفسه).
+targets:
+  memories:
+    table: state.memories
+    endsBy: expires_at
+    legalHoldProtected: true
+    # عقد البيانات المقابل يُمحى في نفس الدورة بعد المدخل: تركُه يتيماً هو
+    # العيب الثالث أعلاه.
+    erasesOwningAsset: true
+  data_assets:
+    table: state.data_assets
+    endsBy: retention_days
+    legalHoldProtected: true
+    # توابعُ تُمحى **بعد إثبات عددها وشهادة رأس سلسلتها** في دفتر المحو: حذفٌ
+    # بلا إثبات يمحو الجواب عن «من قرأ هذا الأصل» في نفس اللحظة التي يُسأل فيها.
+    dependents:
+      - table: state.data_lineage
+        column: asset_id
+        attest: true
+      - table: state.classification_approvals
+        column: asset_id
+        attest: true
+    # مانعٌ يُرفض عنده المحو رفضاً مُسمّى لا يُتجاوز: أصلٌ ما زالت له ذاكرةٌ
+    # حيّة لا يُمحى، والمرجع في القاعدة `ON DELETE RESTRICT` هو الضمان الأخير.
+    blockedBy:
+      - table: state.memories
+        column: dataset_id
+
+# دفتر المحو: يُكتب فيه ولا يُعدَّل، وسلسلتُه متصلة بالتجزئة فحذفُ شاهدٍ مكشوف.
+# ولا مرجعَ فيه إلى `state.data_assets`: الهدف **زائلٌ بالقصد**، ومرجعٌ إليه
+# يجعل الشاهد يزول مع المشهود عليه.
+ledger:
+  table: state.erasure_records
+  dbConstraints:
+    - erasure_records_chain_linked
+    - erasure_records_hash_unique
+    - erasure_records_seq_unique
+    - erasure_records_target_known
+    - erasure_records_reason_known
+
+# كل مسارٍ معلَن هنا **يجب** أن يقيس الدور على الفاعل ويكتب في الدفتر؛ يفحصه
+# `scripts/guard-retention.mjs` على النصّ لا على النية.
+guardedPaths:
+  - module: src/data/retention-cycle.mjs
+    methods:
+      - plan
+      - run
+
+# الوحدات التي يجوز لها لمس دفتر المحو. أي وحدةٍ أخرى في `src/` تلمسه فهي
+# مسارٌ يكتب شاهداً بلا سلسلة أو يمحو صفّاً بلا شاهد.
+ledgerHolders:
+  - src/data/erasure-ledger.mjs
+  - src/data/retention-cycle.mjs
+  - src/persistence/composition.mjs
+  # تركيب مستودعات المعاملة: الدفتر يُكتب في وصلة المحو نفسها لا في أخرى.
+  - src/persistence/unit-of-work.mjs

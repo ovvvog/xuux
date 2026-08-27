@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://state.local/schemas/retention.schema.json",
+  "title": "سياسة دورة الاحتفاظ والمحو",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "cycle", "targets", "ledger", "guardedPaths", "ledgerHolders"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "cycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["order", "sweeperRoles", "maxErasuresPerRun", "minHoursBetweenRuns"],
+      "properties": {
+        "order": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["memories", "data_assets"] },
+          "description": "الذاكرة قبل عقدها: عكسُ الترتيب رفضٌ محتوم من مرجع ON DELETE RESTRICT."
+        },
+        "sweeperRoles": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^role:[a-z-]+$" }
+        },
+        "maxErasuresPerRun": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "minHoursBetweenRuns": { "type": "integer", "minimum": 0, "maximum": 8760 }
+      }
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memories", "data_assets"],
+      "properties": {
+        "memories": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["table", "endsBy", "legalHoldProtected", "erasesOwningAsset"],
+          "properties": {
+            "table": { "const": "state.memories" },
+            "endsBy": { "const": "expires_at" },
+            "legalHoldProtected": {
+              "const": true,
+              "description": "المحفوظ قانوناً لا يُمحى بدورةٍ آلية؛ الرفض مُسمّى لا صامت."
+            },
+            "erasesOwningAsset": {
+              "const": true,
+              "description": "عقدُ بياناتٍ يبقى بعد محو مادّته أصلٌ يتيمٌ في الفهرس."
+            }
+          }
+        },
+        "data_assets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["table", "endsBy", "legalHoldProtected", "dependents", "blockedBy"],
+          "properties": {
+            "table": { "const": "state.data_assets" },
+            "endsBy": { "const": "retention_days" },
+            "legalHoldProtected": { "const": true },
+            "dependents": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/reference" }
+            },
+            "blockedBy": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/reference" }
+            }
+          }
+        }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "dbConstraints"],
+      "properties": {
+        "table": { "const": "state.erasure_records" },
+        "dbConstraints": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "pattern": "^[a-z_]+$" }
+        }
+      }
+    },
+    "guardedPaths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["module", "methods"],
+        "properties": {
+          "module": { "type": "string", "pattern": "^src/.+\\.mjs$" },
+          "methods": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[a-zA-Z]+$" }
+          }
+        }
+      }
+    },
+    "ledgerHolders": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+    }
+  },
+  "$defs": {
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "column"],
+      "properties": {
+        "table": { "type": "string", "pattern": "^state\\.[a-z_]+$" },
+        "column": { "type": "string", "pattern": "^[a-z_]+$" },
+        "attest": {
+          "const": true,
+          "description": "تابعٌ يُشهد على عدده ورأس سلسلته قبل زواله؛ حذفٌ بلا شهادة يمحو الجواب."
+        }
+      }
+    }
+  }
+}

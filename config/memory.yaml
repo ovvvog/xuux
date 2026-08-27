@@ -88,3 +88,7 @@ repositoryHolders:
   - src/data/memory-store.mjs
   - src/persistence/composition.mjs
   - src/persistence/unit-of-work.mjs
+  # دورة الاحتفاظ (M7.06) تلمس مستودع الذاكرة لأنها تمحو المدخلات المنتهية
+  # وتُشهد عليها. ولا تُقرأ منها مادّة: القراءة تبقى في المخزن حيث فكُّ التشفير
+  # والعزل، والدورة لا تفكّ شيئاً — تمحو الصفَّ وتكتب شاهده.
+  - src/data/retention-cycle.mjs

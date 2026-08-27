@@ -16,8 +16,10 @@ import { loadClassificationLattice } from '../data/classification.mjs';
 import { DataAccessGate } from '../data/access-gate.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
+import { ErasureLedger } from '../data/erasure-ledger.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
+import { RetentionCycle } from '../data/retention-cycle.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
 import path from 'node:path';
@@ -28,6 +30,7 @@ import {
   CLASSIFICATION_APPROVAL_SPEC,
   DATA_ASSET_SPEC,
   DATA_LINEAGE_SPEC,
+  ERASURE_RECORD_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -47,6 +50,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} laws
  * @property {ReturnType<typeof createMemoryRepository>} classificationApprovals
  * @property {ReturnType<typeof createMemoryRepository>} dataLineage
+ * @property {ReturnType<typeof createMemoryRepository>} erasureRecords
  */
 
 /**
@@ -66,6 +70,8 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {LawRegistry} laws
  * @property {ClassificationApprovalRegistry} approvals
  * @property {LineageLedger} lineage
+ * @property {ErasureLedger} erasureLedger
+ * @property {RetentionCycle} retention
  */
 
 /**
@@ -82,6 +88,7 @@ export function createMemoryRepositories(options = {}) {
     laws: createMemoryRepository(LAW_SPEC, options),
     classificationApprovals: createMemoryRepository(CLASSIFICATION_APPROVAL_SPEC, options),
     dataLineage: createMemoryRepository(DATA_LINEAGE_SPEC, options),
+    erasureRecords: createMemoryRepository(ERASURE_RECORD_SPEC, options),
   };
 }
 
@@ -100,6 +107,7 @@ export function createPostgresRepositories(pool) {
       laws: createPostgresRepository(pool, LAW_SPEC),
       classificationApprovals: createPostgresRepository(pool, CLASSIFICATION_APPROVAL_SPEC),
       dataLineage: createPostgresRepository(pool, DATA_LINEAGE_SPEC),
+      erasureRecords: createPostgresRepository(pool, ERASURE_RECORD_SPEC),
     })
   );
 }
@@ -132,6 +140,9 @@ export function createPostgresRepositories(pool) {
  * @param {import('../data/memory-limits.mjs').MemoryPolicy | null} [deps.memoryPolicy] سياسة حدود
  *   الذاكرة (M7.05): الحصص لكل وكيل، والانتهاء الإلزامي، وعزلُ الوكلاء. تُحمَّل من
  *   `config/memory.yaml` إن لم تُمرَّر، ولا افتراضَ في الكود يغني عنها.
+ * @param {import('../data/retention-cycle.mjs').RetentionCyclePolicy | null} [deps.retentionPolicy] سياسة
+ *   دورة الاحتفاظ والمحو (M7.06): ترتيبُ الأهداف، وأدوارُ المطهّر، وتوابعُ الأصل
+ *   المشهود عليها. تُحمّل من `config/retention.yaml` إن لم تُمرَّر.
  * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
@@ -148,6 +159,7 @@ export function createRegistries({
   keyProvider = null,
   encryptionPolicy = null,
   memoryPolicy = null,
+  retentionPolicy = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
   // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
@@ -170,6 +182,14 @@ export function createRegistries({
     repository: repositories.dataLineage,
     catalog: { get: (id) => repositories.dataAssets.findById(id) },
     lattice: classificationLattice,
+  });
+  // دفتر شواهد المحو ودورةُ الاحتفاظ يُركّبان **دائماً** (الخطوة `M7.06`)، لنفس سبب
+  // دفتر النسب: دفترٌ اختياريٌّ يصير تركُه مساراً لمحوٍ بلا شاهد — وهو العيب الذي
+  // أغلقته الخطوة بعينه. والسياسة تُحمّل من `config/retention.yaml`، ومُحمّلُها يرفض
+  // أن تختلف أدوارُ المطهّر عن `config/memory.yaml`.
+  const erasureLedger = new ErasureLedger({
+    log,
+    repository: repositories.erasureRecords,
   });
   const catalog = new DataCatalog({
     log,
@@ -243,6 +263,18 @@ export function createRegistries({
     laws: new LawRegistry({ log, repository: repositories.laws }),
     approvals,
     lineage,
+    erasureLedger,
+    retention: new RetentionCycle({
+      log,
+      erasureLedger,
+      repositories: {
+        dataAssets: repositories.dataAssets,
+        memories: repositories.memories,
+        dataLineage: repositories.dataLineage,
+        classificationApprovals: repositories.classificationApprovals,
+      },
+      ...(retentionPolicy === null ? {} : { policy: retentionPolicy }),
+    }),
   };
 }
 

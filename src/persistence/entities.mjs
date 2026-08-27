@@ -293,7 +293,11 @@ export const MEMORY_SPEC = Object.freeze({
     })
   ),
   unique: Object.freeze([]),
-  filterable: Object.freeze(['agentId']),
+  // `datasetId` أُضيف في `M7.06`: دورةُ المحو تسأل «هل ما زالت لهذا الأصل ذاكرةٌ
+  // حيّة؟» قبل محوه، وبلا ترشيحٍ به كان الجواب يقتضي مسح الجدول كلّه في الكود —
+  // أي إخفاءَ كلفةِ المسح لا منعَها. والفهرس المقابل `memories_dataset_idx` في
+  // الهجرة `0009`، فلا يُعلَن ترشيحٌ بلا فهرس.
+  filterable: Object.freeze(['agentId', 'datasetId']),
   invariants: Object.freeze([
     {
       code: 'MEMORY_HOLD_HAS_NO_EXPIRY',
@@ -515,6 +519,90 @@ export const DATA_LINEAGE_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * شواهد المحو — `M7.06`.
+ *
+ * دفترٌ **يُكتب فيه ولا يُعدَّل**: لا حقل هنا يُحدَّث بعد الإدراج، والتسلسل `seq`
+ * مع `prevHash` يجعلان حذفَ شاهدٍ أو تعديله مكشوفاً بـ`verify()`.
+ *
+ * ولا مرجعَ في `targetId` إلى `state.data_assets`: الهدف **زائلٌ بالقصد**، ومرجعٌ
+ * إليه يجعل الشاهد يزول مع المشهود عليه — أو يمنع المحو أصلاً وهو نقضُ الغرض.
+ *
+ * و`recordedAt` **نصّ** ISO لا عمودٌ زمني، لنفس سبب دفتر النسب: التجزئة تُحسب
+ * عليه، وفرقُ الدقّة بين ساعة القاعدة و`Date` كان سيكسر السلسلة على البريء.
+ */
+/** @type {EntitySpec} */
+export const ERASURE_RECORD_SPEC = Object.freeze({
+  name: 'erasure_records',
+  table: 'state.erasure_records',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      target: {
+        column: 'target',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['memories', 'data_assets']),
+      },
+      // نصٌّ لا مرجع: المشهود عليه زائل.
+      targetId: { column: 'target_id', type: 'string', required: true, maxLength: 128 },
+      reason: {
+        column: 'reason',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['retention', 'directed']),
+      },
+      actorId: { column: 'actor_id', type: 'string', required: true, maxLength: 128 },
+      classification: { column: 'classification', type: 'string', required: true, maxLength: 40 },
+      owner: { column: 'owner', type: 'string', required: true, maxLength: 128 },
+      // شهادةُ التوابع: عددُ صفوفها ورأسُ سلسلتها قبل زوالها. تُقرأ قبل الحذف
+      // ولا تُستنتج بعده، فبعد الحذف لا يبقى ما يُشهد عليه.
+      dependents: { column: 'dependents', type: 'json', required: true },
+      seq: { column: 'seq', type: 'integer', required: true },
+      recordedAt: { column: 'recorded_at', type: 'string', required: true, maxLength: 40 },
+      prevHash: { column: 'prev_hash', type: 'string', required: true, maxLength: 64 },
+      hash: { column: 'hash', type: 'string', required: true, maxLength: 64 },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['hash']), Object.freeze(['seq'])]),
+  filterable: Object.freeze(['target', 'reason', 'targetId']),
+  invariants: Object.freeze([
+    {
+      code: 'ERASURE_SEQ_POSITIVE',
+      message: 'التسلسل يبدأ من 1: تسلسلٌ صفريٌّ أو سالب لا موضع له في سلسلة.',
+      /** @param {EntityRecord} record */
+      check: (record) => Number(record['seq']) >= 1,
+    },
+    {
+      code: 'ERASURE_GENESIS_IS_FIRST',
+      message:
+        'الشاهد الأول وحده يحمل `genesis`، وما بعده يحمل تجزئة ما قبله؛ وإلا صار كل شاهدٍ بدايةً جديدة فلا تُكشف ثغرة.',
+      /** @param {EntityRecord} record */
+      check: (record) => (Number(record['seq']) === 1) === (record['prevHash'] === 'genesis'),
+    },
+    {
+      code: 'ERASURE_DEPENDENTS_IS_OBJECT',
+      message:
+        'شهادةُ التوابع كائنٌ من الجدول إلى عدده ورأس سلسلته؛ مصفوفةٌ أو نصٌّ حرٌّ هنا يجعل الشهادة غير مقروءة آلياً.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        typeof record['dependents'] === 'object' &&
+        record['dependents'] !== null &&
+        !Array.isArray(record['dependents']),
+    },
+    {
+      code: 'ERASURE_CARRIES_NO_MATERIAL',
+      message:
+        'شاهدُ المحو لا يحمل مادّة ما مُحي ولا غلافه: دفترٌ يحمل المادة يُبطل المحو من باب التدقيق فيصير الاحتفاظ نقلاً للبيانات.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        !Object.prototype.hasOwnProperty.call(record, 'content') &&
+        !Object.prototype.hasOwnProperty.call(record, 'value'),
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -524,6 +612,7 @@ export const ENTITY_SPECS = Object.freeze({
   laws: LAW_SPEC,
   classification_approvals: CLASSIFICATION_APPROVAL_SPEC,
   data_lineage: DATA_LINEAGE_SPEC,
+  erasure_records: ERASURE_RECORD_SPEC,
 });
 
 /**
