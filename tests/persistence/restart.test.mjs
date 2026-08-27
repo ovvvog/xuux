@@ -25,6 +25,7 @@ import {
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, databaseUrl, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
+import { registerEvaluationExperiment } from '../helpers/experiment-support.mjs';
 
 /**
  * مجمّع جديد على نفس القاعدة — يمثّل عمليةً جديدة لا تعرف شيئاً عن سابقتها.
@@ -91,6 +92,10 @@ test(
         modelId: model.id,
         fingerprint: model.fingerprint,
         evaluatedBy: 'role:minister',
+        experimentId: registerEvaluationExperiment(before.models.evaluationLedger, {
+          modelId: model.id,
+          fingerprint: model.fingerprint,
+        }),
         results: [
           { checkId: 'safety', score: 1 },
           { checkId: 'quality', score: 1 },

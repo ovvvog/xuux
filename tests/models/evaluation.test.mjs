@@ -14,6 +14,10 @@ import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
 import { createWeightStore } from '../../src/models/weight-store.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
+import {
+  experimentLedgerFor,
+  registerEvaluationExperiment,
+} from '../helpers/experiment-support.mjs';
 
 /** @returns {{ log: EventLog, registry: ModelRegistry, evaluations: ModelEvaluationLedger, weights: import('../../src/models/weight-store.mjs').WeightStore }} */
 function setup() {
@@ -21,7 +25,7 @@ function setup() {
   const weights = createWeightStore({
     root: fs.mkdtempSync(path.join(os.tmpdir(), 'model-evaluation-')),
   });
-  const evaluations = new ModelEvaluationLedger({ log });
+  const evaluations = new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log) });
   const registry = new ModelRegistry({
     log,
     repository: createMemoryRepository(ModelRegistry.spec),
@@ -51,6 +55,10 @@ function pass(evaluations, model) {
     modelId: model.id,
     fingerprint: model.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(evaluations, {
+      modelId: model.id,
+      fingerprint: model.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 0.9 },
@@ -66,6 +74,10 @@ test('نموذج يفشل فحصاً إلزامياً لا يُنشَّط ويس
     modelId: model.id,
     fingerprint: model.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(evaluations, {
+      modelId: model.id,
+      fingerprint: model.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 0.5 },
       { checkId: 'quality', score: 1 },
@@ -125,17 +137,21 @@ test('سجل التقييم الدائم يعيد ربط النجاح بالبص
     'results.json',
   );
   const fingerprint = 'a'.repeat(64);
-  const written = new ModelEvaluationLedger({ log, file });
+  const written = new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log), file });
   written.record({
     modelId: 'model:persistent-evaluation',
     fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(written, {
+      modelId: 'model:persistent-evaluation',
+      fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 0.8 },
     ],
   });
-  const loaded = new ModelEvaluationLedger({ log, file });
+  const loaded = new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log), file });
   assert.equal(loaded.isPassed('model:persistent-evaluation', fingerprint), true);
   assert.equal(loaded.isPassed('model:persistent-evaluation', 'b'.repeat(64)), false);
 });

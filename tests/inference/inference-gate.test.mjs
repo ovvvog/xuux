@@ -18,6 +18,10 @@ import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
 import { createWeightStore } from '../../src/models/weight-store.mjs';
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import {
+  experimentLedgerFor,
+  registerEvaluationExperiment,
+} from '../helpers/experiment-support.mjs';
+import {
   createInferenceGate,
   INFERENCE_ERRORS,
   InferenceGate,
@@ -57,6 +61,10 @@ async function activateModel(registry, evaluations, purpose = 'planning') {
     modelId: model.id,
     fingerprint: model.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(evaluations, {
+      modelId: model.id,
+      fingerprint: model.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 1 },
@@ -71,7 +79,12 @@ async function activateModel(registry, evaluations, purpose = 'planning') {
  */
 async function setup(options = {}) {
   const log = memoryLog();
-  const evaluations = new ModelEvaluationLedger({ log });
+  const evaluations = new ModelEvaluationLedger({
+    log,
+    experiments: experimentLedgerFor(
+      /** @type {{ append: (type: string, actor: string, payload: object) => unknown }} */ (log),
+    ),
+  });
   const registry = new ModelRegistry({
     log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (
       /** @type {unknown} */ (log)

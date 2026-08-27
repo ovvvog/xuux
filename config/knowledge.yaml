@@ -1,0 +1,164 @@
+# سياسة المعرفة — الخطوة M7.08
+#
+# ما كان قبل هذا الملف: خارطةُ الطريق تُلزم بمعايير معرفةٍ «مربوطة بالكود لا
+# نصوصاً حرة»، **ولم يكن في المستودع مجلَّد `knowledge/` أصلاً** — لا ملفاً ولا
+# مجلَّداً فارغاً. وسجلُّ تقييم النماذج (`M6.08`) كان يقبل نتيجةً لأي نموذجٍ
+# وأيِّ بصمةٍ **بلا أن يسأل: أيُّ تجربةٍ أنتجت هذه الدرجات؟ ومن أعلن فرضيتها
+# ومقاييسها قبل أن يراها؟** فكان النجاحُ يُعلن بدرجاتٍ لا يعرف أحدٌ من أين جاءت،
+# وهذا هو **الانتقاءُ اللاحق للنتائج** بعينه: من يشتقّ المقاييس بعد رؤية الأرقام
+# يجد فيها ما يريد. ومعيارُ القبول المعلَن — «تجربة بلا تسجيل في سجل التجارب
+# تُرفض» — لم يكن له طرفٌ يُقاس عليه.
+#
+# وهذا الملف هو المصدرُ الوحيد: المعاييرُ الأربعةُ وبنودُها، **وكلُّ بندٍ مربوطٌ
+# برمز خطأٍ يفرضه في وحدةٍ مسمّاة** — فبندٌ بلا رمز نصٌّ حرّ، ورمزٌ بلا بندٍ
+# رفضٌ بلا سند. ويحرس الرابطةَ `npm run guard:knowledge`.
+#
+# مخطَّطه: config/schemas/knowledge.schema.json (‏additionalProperties: false).
+
+version: 1
+owner: crown
+
+# ── المعايير الأربعة ──
+# لكل معيارٍ وثيقةٌ في `knowledge/` وواحدةٌ أو أكثرُ من الوحدات تفرضه، وبنودٌ
+# لكلٍّ منها **رمزُ الرفض** الذي يقع فعلاً عند خرقه. والحاجز يشترط: أن توجد
+# الوثيقة، وأن تذكر كلَّ بندٍ برمزه، وأن يكون الرمزُ معرَّفاً في وحدةِ الإنفاذ.
+standards:
+  - id: experiment-ledger
+    title: سجل التجارب — لا تجربةَ بلا قيدٍ سابقٍ لها
+    document: knowledge/standards/experiment-ledger.md
+    enforcedBy:
+      - src/knowledge/experiment-ledger.mjs
+    clauses:
+      - id: KL-1
+        rule: كل تجربةٍ تُسجَّل قبل أن تُجرى، ونتيجةٌ لتجربةٍ غيرِ مسجَّلة تُرفض ولا تُكتب.
+        code: KNOWLEDGE_EXPERIMENT_UNREGISTERED
+      - id: KL-2
+        rule: نوعُ التجربة معلَنٌ في هذه السياسة؛ ونوعٌ لا يعرفه أحدٌ لا يُقاس عليه شيء.
+        code: KNOWLEDGE_KIND_UNKNOWN
+      - id: KL-3
+        rule: المُسجِّل دورٌ مصرَّحٌ في `roles.registrars`؛ فمن لا يملك التسجيل لا يُنشئ سنداً لنتيجة.
+        code: KNOWLEDGE_REGISTER_REFUSED
+      - id: KL-4
+        rule: القيدُ لا يُعدَّل ولا يُحذف، وسلسلةُ تجزئةٍ واحدةٌ تكشف العبثَ بأي قيدٍ سابق.
+        code: KNOWLEDGE_CHAIN_BROKEN
+
+  - id: reproducibility
+    title: قابلية إعادة الإنتاج — بذرةٌ وبياناتٌ وشيفرةٌ وبيئة
+    document: knowledge/standards/reproducibility.md
+    enforcedBy:
+      - src/knowledge/experiment-ledger.mjs
+    clauses:
+      - id: RP-1
+        rule: كل تجربةٍ تحمل الحقولَ المعلَنة في `reproducibility.requiredFields` كاملةً، وتجربةٌ ينقصها أحدُها تُرفض عند التسجيل لا عند النشر.
+        code: KNOWLEDGE_REPRODUCIBILITY_INCOMPLETE
+      - id: RP-2
+        rule: تجزئةُ مجموعة البيانات ومراجعةُ الشيفرة قيمتان بصيغةٍ مقيسة (sha256 وأربعون خانةً ست عشرية على الأقل)، لا وصفٌ حرٌّ كـ«أحدث البيانات».
+        code: KNOWLEDGE_INPUT_INVALID
+      - id: RP-3
+        rule: التجربةُ المُنتهية لا تُعاد كتابتُها؛ من أراد نتيجةً أخرى يسجّل تجربةً أخرى بقيدٍ جديد.
+        code: KNOWLEDGE_ALREADY_CONCLUDED
+
+  - id: model-evaluation
+    title: تقييم النماذج — الدرجةُ لا تصير تصريحاً إلا بسندٍ يُقرأ
+    document: knowledge/standards/model-evaluation.md
+    enforcedBy:
+      - src/knowledge/experiment-ledger.mjs
+      - src/models/evaluation.mjs
+    clauses:
+      - id: ME-1
+        rule: كل نتيجةِ تقييمٍ مربوطةٌ بتجربةٍ مسجَّلةٍ من نوع `model-evaluation`، والنداءُ بلا معرّف تجربةٍ مرفوض.
+        code: KNOWLEDGE_EXPERIMENT_UNREGISTERED
+      - id: ME-2
+        rule: موضوعُ التجربة هو نفسُه النموذجُ والبصمةُ في النتيجة؛ فتجربةٌ على بصمةٍ أخرى ليست سنداً لهذه.
+        code: KNOWLEDGE_SUBJECT_MISMATCH
+      - id: ME-3
+        rule: سجلُّ التقييم لا يُبنى بلا سجل تجارب — كما لا يُبنى بلا سجل أحداث؛ فالاعتمادُ الغائب يُسقط التركيب لا يُتجاوز.
+        code: MODEL_EVALUATION_DEPENDENCY_MISSING
+      - id: ME-4
+        rule: تسجيلُ تجربةِ تقييمٍ يشترط موضوعاً ببصمةٍ sha256 كاملة؛ فسندٌ بموضوعٍ مبهم لا يربط شيئاً بشيء.
+        code: KNOWLEDGE_INPUT_INVALID
+
+  - id: research-integrity
+    title: نزاهة البحث — الفرضيةُ والمقاييسُ قبل الأرقام، والمراجعُ ليس المُجري
+    document: knowledge/standards/research-integrity.md
+    enforcedBy:
+      - src/knowledge/experiment-ledger.mjs
+    clauses:
+      - id: RI-1
+        rule: الفرضيةُ تُكتب عند التسجيل، وتجربةٌ بلا فرضيةٍ مُعلَنة تُرفض.
+        code: KNOWLEDGE_HYPOTHESIS_MISSING
+      - id: RI-2
+        rule: مقاييسُ الحكم تُعلَن قبل النتيجة، ونتيجةٌ تحمل مقياساً لم يُسجَّل مسبقاً تُرفض — فهذا هو الانتقاءُ اللاحق نفسه.
+        code: KNOWLEDGE_METRIC_UNDECLARED
+      - id: RI-3
+        rule: المُجري ليس المراجع؛ ومراجعةُ المرء تجربتَه نفسَها ليست مراجعة.
+        code: KNOWLEDGE_SELF_REVIEW_REFUSED
+      - id: RI-4
+        rule: قيدُ التجربة لا يحمل مادّةً خامّاً؛ سجلٌّ يحمل المادّة يجعل المعرفةَ قناةَ تسريب.
+        code: KNOWLEDGE_FORBIDDEN_FIELD
+
+# ── أنواع التجارب ──
+# `subjectKeys` مفاتيحُ الموضوع الواجبة، و`boundTo` موضعُ الإنفاذ الفعليّ في
+# الشيفرة — أو `null` **بسببٍ مكتوب**. والحاجز يشترط أحدَ الأمرين: رمزٌ موجودٌ
+# في وحدةٍ موجودة، أو `null` وسببٌ غيرُ فارغ. فنوعٌ يُعلن ارتباطاً لا وجود له
+# أسوأُ من نوعٍ يُعلن أنه غيرُ مربوطٍ بعد.
+experimentKinds:
+  - id: model-evaluation
+    subject: تقييمُ أوزانِ نموذجٍ بعينه قبل تنشيطه
+    subjectKeys: [modelId, fingerprint]
+    boundTo: src/models/evaluation.mjs#ModelEvaluationLedger.record
+    reason: null
+  - id: inference-benchmark
+    subject: قياسُ كلفةِ الاستدلال وزمنِه على نموذجٍ مُنشَّط
+    subjectKeys: [modelId]
+    boundTo: null
+    reason: بوابةُ الاستدلال تحدّ المعدّلَ والميزانية ولا تُجري قياساً مقارَناً؛ ووصلُ القياس بها يحتاج عدّادات في تخزين مشترك — وهو تحفّظ G6 الثالث القائم.
+  - id: policy-simulation
+    subject: محاكاةُ أثرِ تغييرِ سياسةٍ قبل سَنِّها
+    subjectKeys: [policyId]
+    boundTo: null
+    reason: سنُّ القوانين ومحاكاتُها مسارٌ دستوريٌّ موضعُه M8؛ وربطُ المحاكاة بمحرّك السياسات قبل وجود مسار السَّنّ يربط طرفاً بلا طرف.
+  - id: data-quality
+    subject: قياسُ جودةِ أصلِ بياناتٍ ونسبِه
+    subjectKeys: [assetId]
+    boundTo: null
+    reason: بوابةُ الوصول ودفترُ النسب يسجّلان القراءةَ والكتابة ولا يقيسان جودة؛ ومقياسُ الجودة يحتاج عقداً للحقول لا وجود له (حدُّ M7.04 المعلَن).
+
+# ── قابلية إعادة الإنتاج ──
+reproducibility:
+  requiredFields: [seed, datasetHash, codeRevision, environment]
+  minHexLength: 40
+  # حدٌّ معلَن في الوثيقة: الحقولُ تُقاس **حضوراً وصيغةً** لا صدقاً — لا شيء
+  # يتحقّق أن `datasetHash` تجزئةُ البياناتِ المستعملة فعلاً.
+
+# ── نزاهة البحث ──
+integrity:
+  requireHypothesis: true
+  minHypothesisLength: 24
+  requirePreregisteredMetrics: true
+  forbidSelfReview: true
+  forbiddenFields:
+    - content
+    - plaintext
+    - material
+    - secret
+    - password
+    - token
+    - privateKey
+    - weights
+
+# ── الأدوار ──
+roles:
+  registrars: [role:king, role:minister, role:operator]
+  reviewers: [role:auditor, role:chief-justice, role:king]
+  # الوكيلُ (`role:agent`) ليس مُسجِّلاً ولا مراجعاً **بالقصد**: من تُقاس أوزانُه
+  # لا يكتب سندَ قياسِها ولا يراجعه.
+
+# ── الوحدات الوحيدة المسموح لها ببناء سجل التجارب أو لمسِ مخزنه ──
+# يحرس الحاجز أن لا وحدةَ أخرى تحت `src/` تستورد `experiment-ledger.mjs`؛ فمسارٌ
+# ثالثٌ إلى المخزن يعني حاجزاً يُتجاوَز من حيث لا يُقرأ.
+ledgerHolders:
+  - src/knowledge/experiment-ledger.mjs
+  - src/knowledge/index.mjs
+  - src/models/evaluation.mjs
+  - src/models/model-registry.mjs

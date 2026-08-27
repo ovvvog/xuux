@@ -402,6 +402,32 @@ channels:
       - type: kernel.task.succeeded
         version: 1
         required: [taskId]
+  - id: knowledge
+    subject: 'سجلُّ التجارب: من سجّل تجربةً وبأيّ فرضيةٍ ومقاييسَ ومتى ثُبّتت ومن راجعها (واصفاتٌ بلا مادّة)'
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:minister
+      - role:operator
+      - role:auditor
+      - role:chief-justice
+    consumers:
+      - role:king
+      - role:auditor
+      - role:chief-justice
+      - role:minister
+      - role:operator
+    types:
+      - type: knowledge.experiment.concluded
+        version: 1
+        required: [id, kind, metrics, outcome]
+      - type: knowledge.experiment.registered
+        version: 1
+        required: [id, kind, metrics, seq, subject]
+      - type: knowledge.experiment.reviewed
+        version: 1
+        required: [id, kind, outcome]
   - id: law
     subject: 'القوانين: اقتراحُها وسَنُّها وتعليقُها وإلغاؤها'
     classification: internal
@@ -489,11 +515,11 @@ channels:
         version: 1
         required: [id, purpose, reason, state]
       - type: model.evaluation.failed
-        version: 1
-        required: [fingerprint, modelId, requiredChecksPassed, results, state]
+        version: 2
+        required: [experimentId, fingerprint, modelId, requiredChecksPassed, results, state]
       - type: model.evaluation.passed
-        version: 1
-        required: [fingerprint, modelId, requiredChecksPassed, results, state]
+        version: 2
+        required: [experimentId, fingerprint, modelId, requiredChecksPassed, results, state]
       - type: model.fingerprint-verified
         version: 1
         required: [bytes, fingerprint, id]

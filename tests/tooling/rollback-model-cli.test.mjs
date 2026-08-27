@@ -16,11 +16,15 @@ import { createWeightStore } from '../../src/models/weight-store.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { parseArgs, run } from '../../scripts/rollback-model.mjs';
+import {
+  experimentLedgerFor,
+  registerEvaluationExperiment,
+} from '../helpers/experiment-support.mjs';
 
 /** @returns {{ log: EventLog, registry: ModelRegistry, evaluations: ModelEvaluationLedger }} */
 function setup() {
   const log = new EventLog();
-  const evaluations = new ModelEvaluationLedger({ log });
+  const evaluations = new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log) });
   const registry = new ModelRegistry({
     log,
     repository: createMemoryRepository(ModelRegistry.spec),
@@ -47,6 +51,10 @@ async function approvedAndEvaluated(registry, evaluations, version) {
     modelId: model.id,
     fingerprint: model.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(evaluations, {
+      modelId: model.id,
+      fingerprint: model.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 0.95 },

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { MODEL_SPEC } from '../persistence/entities.mjs';
+import { ExperimentLedger } from '../knowledge/experiment-ledger.mjs';
 import { ModelEvaluationError, ModelEvaluationLedger } from './evaluation.mjs';
 
 /**
@@ -116,9 +117,16 @@ export class ModelRegistry {
      * سجل التقييم شرط تنشيط لا تحسين اختياري. يُنشأ سجل ذاكرة عند عدم حقنه،
      * فتظل النتيجة المفقودة رفضاً صريحاً ولا يصبح تركيبٌ ناقص طريقاً جانبياً.
      * تمرّر طبقة التشغيل سجلاً دائماً حين تحتاج النتيجة إلى عبور إعادة التشغيل.
+     *
+     * ومنذ `M7.08` لا يُبنى سجلُّ التقييم بلا سجل تجارب (البند ME-3)، فالسجلُّ
+     * الافتراضيُّ هنا يحمل سجلَّ تجاربَ في الذاكرة: لا نتيجةَ بلا تجربةٍ مسجَّلة،
+     * ولا تنشيطَ بلا نتيجة. والذاكرةُ حدٌّ معلَن: تجاربُ هذا السجل لا تعبر إعادةَ
+     * التشغيل إلا إذا مرّرت طبقةُ التركيب سجلاً بملفّ.
      * @type {import('./evaluation.mjs').ModelEvaluationLedger}
      */
-    this.evaluationLedger = evaluationLedger ?? new ModelEvaluationLedger({ log });
+    this.evaluationLedger =
+      evaluationLedger ??
+      new ModelEvaluationLedger({ log, experiments: new ExperimentLedger({ log }) });
     /** @type {{ report: (signal: object) => unknown } | null} */
     this.quarantine = quarantine;
     /** @type {ModelRepository} */

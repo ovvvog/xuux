@@ -12,6 +12,10 @@ import { createWeightStore } from '../../src/models/weight-store.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  experimentLedgerFor,
+  registerEvaluationExperiment,
+} from '../helpers/experiment-support.mjs';
 
 /**
  * مخزن أوزان في مجلّد مؤقّت: التنشيط صار يعيد حساب البصمة (M6.06)، فسجلٌّ بلا
@@ -28,7 +32,7 @@ function registry(log = new EventLog()) {
     log,
     repository: createMemoryRepository(ModelRegistry.spec),
     weightStore: temporaryWeightStore(),
-    evaluationLedger: new ModelEvaluationLedger({ log }),
+    evaluationLedger: new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log) }),
   });
 }
 
@@ -93,6 +97,10 @@ test('requires approval before activation and supports sandbox', async () => {
     modelId: m.id,
     fingerprint: m.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(r.evaluationLedger, {
+      modelId: m.id,
+      fingerprint: m.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 1 },

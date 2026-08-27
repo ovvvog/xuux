@@ -25,6 +25,10 @@ import { createWeightStore } from '../../src/models/weight-store.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  experimentLedgerFor,
+  registerEvaluationExperiment,
+} from '../helpers/experiment-support.mjs';
 
 /**
  * مخزن أوزان في مجلّد مؤقّت — لازمٌ للتنشيط بعد M6.06.
@@ -42,7 +46,7 @@ async function activeModel() {
     log,
     repository,
     weightStore: temporaryWeightStore(),
-    evaluationLedger: new ModelEvaluationLedger({ log }),
+    evaluationLedger: new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log) }),
   });
   const model = await registry.register({
     name: 'مدقّق',
@@ -57,6 +61,10 @@ async function activeModel() {
     modelId: model.id,
     fingerprint: model.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(registry.evaluationLedger, {
+      modelId: model.id,
+      fingerprint: model.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 1 },

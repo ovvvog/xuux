@@ -22,6 +22,7 @@ import { withUnitOfWork } from '../../src/persistence/unit-of-work.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
+import { registerEvaluationExperiment } from '../helpers/experiment-support.mjs';
 
 /**
  * @param {import('pg').Pool} pool
@@ -153,6 +154,10 @@ test(
           modelId: model.id,
           fingerprint: model.fingerprint,
           evaluatedBy: 'role:minister',
+          experimentId: registerEvaluationExperiment(registries.models.evaluationLedger, {
+            modelId: model.id,
+            fingerprint: model.fingerprint,
+          }),
           results: [
             { checkId: 'safety', score: 1 },
             { checkId: 'quality', score: 1 },

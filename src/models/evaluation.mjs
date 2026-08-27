@@ -88,6 +88,7 @@ export class ModelEvaluationError extends Error {
  * @property {string} state
  * @property {string} evaluatedBy
  * @property {string} evaluatedAt
+ * @property {string} experimentId
  * @property {readonly EvaluationResult[]} results
  */
 
@@ -181,16 +182,27 @@ function isFingerprint(value) {
 
 export class ModelEvaluationLedger {
   /**
-   * @param {{ log?: { append: (type: string, actor: string, payload: object) => unknown }, catalog?: EvaluationCatalog, file?: string | null, now?: () => Date }} [deps]
+   * @param {{ log?: { append: (type: string, actor: string, payload: object) => unknown }, experiments?: { assertRegistered: (input: { experimentId: string, kind: string, subject: Record<string, string> }) => unknown }, catalog?: EvaluationCatalog, file?: string | null, now?: () => Date }} [deps]
    */
-  constructor({ log, catalog = loadModelEvaluationCatalog(), file = null, now } = {}) {
+  constructor({ log, experiments, catalog = loadModelEvaluationCatalog(), file = null, now } = {}) {
     if (!log) {
       throw new ModelEvaluationError(
         MODEL_EVALUATION_ERRORS.DEPENDENCY_MISSING,
         'سجل التقييم يحتاج سجل أحداث؛ قرار نجاح أو فشل بلا أثر مدقّق ممنوع.',
       );
     }
+    if (!experiments) {
+      // البند ME-3 من معيار «تقييم النماذج» (‏M7.08): سجلُّ التقييم لا يُبنى بلا
+      // سجل تجارب — كما لا يُبنى بلا سجل أحداث. وقبل هذا الشرط كانت الدرجاتُ
+      // تُكتب بلا سندٍ يقول: أيُّ تجربةٍ أنتجتها، ومن أعلن فرضيتَها ومقاييسَها
+      // قبل أن يراها. اعتمادٌ اختياريٌّ هنا يعني حاجزاً يُتجاوَز بحذف وسيط.
+      throw new ModelEvaluationError(
+        MODEL_EVALUATION_ERRORS.DEPENDENCY_MISSING,
+        'سجل التقييم يحتاج سجل تجارب؛ درجةٌ بلا تجربةٍ مسجَّلةٍ سابقةٍ لها ممنوعة.',
+      );
+    }
     this.log = log;
+    this.experiments = experiments;
     this.catalog = catalog;
     this.file = file === null ? null : path.resolve(file);
     this.now = now ?? (() => new Date());
@@ -227,11 +239,15 @@ export class ModelEvaluationLedger {
         typeof record.state !== 'string' ||
         typeof record.evaluatedBy !== 'string' ||
         typeof record.evaluatedAt !== 'string' ||
+        // نتيجةٌ محفوظةٌ بلا معرّف تجربة سندُها مفقود؛ وقبولُها من الملف كان
+        // سيصير الطريقَ الجانبيّ الذي يُبطل شرطَ `record` نفسَه.
+        typeof record.experimentId !== 'string' ||
+        record.experimentId.trim() === '' ||
         !Array.isArray(record.results)
       ) {
         throw new ModelEvaluationError(
           MODEL_EVALUATION_ERRORS.STORAGE_INVALID,
-          'سجل التقييم الدائم يحوي نتيجة ناقصة أو ببصمة غير صالحة.',
+          'سجل التقييم الدائم يحوي نتيجة ناقصة أو ببصمة غير صالحة أو بلا معرّف تجربة.',
         );
       }
       const saved = /** @type {EvaluationRecord} */ (
@@ -258,10 +274,14 @@ export class ModelEvaluationLedger {
 
   /**
    * يسجّل نتيجة كاملة ويرد الحالة المحسوبة من العتبات المعلنة.
-   * @param {{ modelId: string, fingerprint: string, evaluatedBy: string, results: Array<{ checkId: string, score: number }> }} input
+   *
+   * البندان ME-1 وME-2 (‏M7.08): `experimentId` **واجب**، والتجربةُ تُطابَق نوعاً
+   * وموضوعاً **قبل أيّ كتابة أو نشرِ حدث** — فتجربةٌ غيرُ مسجَّلةٍ تُرفض ولا تُخلّف
+   * في السجل نتيجةً منقوصةَ السند.
+   * @param {{ modelId: string, fingerprint: string, evaluatedBy: string, experimentId: string, results: Array<{ checkId: string, score: number }> }} input
    * @returns {EvaluationRecord}
    */
-  record({ modelId, fingerprint, evaluatedBy, results }) {
+  record({ modelId, fingerprint, evaluatedBy, experimentId, results }) {
     if (
       typeof modelId !== 'string' ||
       modelId.trim() === '' ||
@@ -276,6 +296,12 @@ export class ModelEvaluationLedger {
         'نتيجة التقييم تحتاج معرّف نموذج وبصمة sha256 ومقيّماً وقائمة درجات صالحة.',
       );
     }
+    // الرفضُ يقع هنا: قبل حساب الحالة، وقبل `#persist`، وقبل `log.append`.
+    this.experiments.assertRegistered({
+      experimentId,
+      kind: 'model-evaluation',
+      subject: { modelId, fingerprint },
+    });
     /** @type {Map<string, number>} */
     const scores = new Map();
     for (const result of results) {
@@ -324,6 +350,7 @@ export class ModelEvaluationLedger {
         state,
         evaluatedBy,
         evaluatedAt: this.now().toISOString(),
+        experimentId,
         results: Object.freeze(detailed),
       })
     );
@@ -334,6 +361,7 @@ export class ModelEvaluationLedger {
     this.log.append(`model.evaluation.${state}`, evaluatedBy, {
       modelId,
       fingerprint,
+      experimentId,
       state,
       requiredChecksPassed: !failedRequired,
       results: detailed,

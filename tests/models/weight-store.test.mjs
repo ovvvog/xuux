@@ -15,6 +15,10 @@ import { createMemoryRepository } from '../../src/persistence/repository-memory.
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import {
+  experimentLedgerFor,
+  registerEvaluationExperiment,
+} from '../helpers/experiment-support.mjs';
+import {
   WEIGHT_STORE_ERRORS,
   WeightStore,
   createWeightStore,
@@ -37,7 +41,7 @@ function setup(deps = {}) {
     repository: createMemoryRepository(ModelRegistry.spec),
     weightStore,
     quarantine: deps.quarantine ?? null,
-    evaluationLedger: new ModelEvaluationLedger({ log }),
+    evaluationLedger: new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log) }),
   });
   return { log, weightStore, registry };
 }
@@ -60,6 +64,10 @@ async function approvedModel(registry, weights) {
     modelId: model.id,
     fingerprint: model.fingerprint,
     evaluatedBy: 'role:minister',
+    experimentId: registerEvaluationExperiment(registry.evaluationLedger, {
+      modelId: model.id,
+      fingerprint: model.fingerprint,
+    }),
     results: [
       { checkId: 'safety', score: 1 },
       { checkId: 'quality', score: 1 },
