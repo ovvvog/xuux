@@ -1,6 +1,6 @@
 {
   "name": "digital-state-root-of-trust",
-  "version": "0.29.0",
+  "version": "0.30.0",
   "private": true,
   "type": "module",
   "description": "الدولة الملكية الفدرالية الرقمية — جذر الثقة والنواة السيادية",
@@ -33,7 +33,7 @@
     "check:registries": "node scripts/generate-registries.mjs --check",
     "audit:inventory": "node scripts/inventory.mjs",
     "guard:templates": "node scripts/guard-templates.mjs",
-    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run scan:secrets && npm run scan:keys && npm run validate:seed && npm run check:registries && npm run guard:templates && npm run guard:authorization && npm run guard:encryption && npm run guard:lineage && npm run guard:memory && npm run guard:retention && npm run guard:events && npm run guard:knowledge && npm run guard:filecount && npm test",
+    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run scan:secrets && npm run scan:keys && npm run validate:seed && npm run check:registries && npm run guard:templates && npm run guard:authorization && npm run guard:encryption && npm run guard:lineage && npm run guard:memory && npm run guard:retention && npm run guard:events && npm run guard:knowledge && npm run guard:constitution && npm run guard:filecount && npm test",
     "guard:filecount": "node scripts/guard-filecount.mjs",
     "guard:authorization": "node scripts/guard-authorization.mjs",
     "guard:encryption": "node scripts/guard-encryption.mjs",
@@ -42,6 +42,8 @@
     "guard:retention": "node scripts/guard-retention.mjs",
     "guard:events": "node scripts/guard-events.mjs",
     "guard:knowledge": "node scripts/guard-knowledge.mjs",
+    "guard:constitution": "node scripts/guard-constitution.mjs",
+    "docs:constitution": "node scripts/render-constitution-docs.mjs",
     "worker": "node scripts/worker.mjs",
     "stress": "node scripts/stress.mjs",
     "rollback:model": "node scripts/rollback-model.mjs"

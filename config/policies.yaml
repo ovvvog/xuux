@@ -52,6 +52,12 @@ actions:
   - id: change-policy
     description: تعديل سياسة أو نسخة سياسة.
     sensitive: true
+  - id: amend-constitution
+    description: طرح تعديل على مادة دستورية غير مختومة؛ أوّل خطوة في مسار من أربع.
+    sensitive: true
+  - id: ratify-constitution
+    description: إبرام تعديل دستوري بعد مراجعة القضاء وانقضاء مهلة التدبُّر.
+    sensitive: true
   - id: allocate-budget
     description: تخصيص ميزانية لمؤسسة أو مشروع.
     sensitive: true

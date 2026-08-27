@@ -1,0 +1,290 @@
+# الدستور — الخطوة M8.01
+#
+# هذا **النصُّ المؤسِّس** (genesis). وهو بيانٌ محكومٌ بمخطَّطٍ صارم لا وثيقةَ
+# إرشاد: كلُّ مادةٍ تحمل معرّفاً ثابتاً، ومرجعَ قانونٍ (`lawRef`) تُسنَد إليه
+# مراجعُ السياسات والقدرات والعتبة السيادية، ومواضعَ إنفاذٍ في الشيفرة.
+#
+# ثلاثةُ أمورٍ يلزم فهمُها قبل تعديل حرفٍ هنا:
+#
+#   1. **هذا الملفُّ لا يُعدَّل تعديلاً دستورياً.** هو النصُّ المؤسِّس، تُختَم
+#      تجزئتُه في العهد الأول من مخزن الدستور المحميّ. وأيُّ تحريرٍ له بعد
+#      الختم يُكشف بـ`CONSTITUTION_FOUNDING_TEXT_DRIFT` **ويُعطِّل قراءةَ
+#      الدستور كلَّه** (فشلٌ مغلق) — لا يُقبل ولا يُتجاهل.
+#   2. **النصُّ النافذ اليوم** ليس هذا الملفَّ وحده، بل هذا الملفُّ **مضافاً
+#      إليه التعديلاتُ المُبرَمة** في المخزن (`effective()`). فمن أراد معرفةَ
+#      النافذ يقرأ المخزن لا الملف.
+#   3. **المادةُ المختومة** (`entrenched: true`) لا تُعدَّل **ولو بالمسار
+#      الكامل**. تغييرُها فعلٌ تأسيسيٌّ خارج سلطة هذا النظام، ورفضُه رمزٌ
+#      مُسمّى لا سكوت.
+#
+# ومسارُ التعديل أربعُ خطواتٍ لا خطوة (المادة 2): أمرٌ ملكيٌّ مقبولٌ بالطرح، ثم
+# مراجعةُ رئيس القضاة (لا يراجع الطارحُ طرحَه)، ثم **مهلةُ تدبُّرٍ تمرّ**، ثم
+# أمرٌ ملكيٌّ **ثانٍ مستقلٌّ** يحمل تجزئةَ الطرح بعينها. وإسقاطُ أيِّ خطوةٍ رفضٌ
+# برمزها.
+
+version: 1
+owner: crown
+
+amendment:
+  # فعلا الأمر الملكي: مُعلَنان هنا ومُدرَجان في `config/royal-authority.yaml`
+  # ضمن العتبة السيادية، فلا يقعان إلا بأمرٍ موقَّعٍ مثبَّتٍ في الدفتر.
+  proposeAction: amend-constitution
+  ratifyAction: ratify-constitution
+  proposerRoles:
+    - role:king
+  reviewerRoles:
+    - role:chief-justice
+  ratifierRoles:
+    - role:king
+  # مهلةُ التدبُّر: ما بين الطرح والإبرام. سبعةُ أيام — لأن التعديلَ الدستوريَّ
+  # في جلسةٍ واحدة قرارٌ مزاجيٌّ لا قرارٌ مؤسِّس. وهي تُقاس على وقتٍ يُمرَّر من
+  # ساعةٍ موثوقة لا على `Date.now()` داخل الوحدة.
+  deliberationSeconds: 604800
+  minReasonLength: 32
+  minOpinionLength: 24
+  minTextLength: 48
+  # الخطواتُ الأربع مُعلَنةٌ بأسمائها، والحاجزُ يشترط لكلِّ خطوةٍ دالّةً قائمة.
+  steps:
+    - propose
+    - review
+    - deliberate
+    - ratify
+
+integrity:
+  stateFile: constitution.state.json
+  epochFile: constitution.epoch
+  # الوحداتُ الوحيدةُ المسموحُ لها لمسُ مخزن الدستور. غيرُها يمرّ بها أو لا يمرّ.
+  holders:
+    - src/constitution/constitution.mjs
+    - src/constitution/amendment-path.mjs
+    - src/constitution/index.mjs
+
+# ضماناتٌ مربوطةٌ برموزِ رفضٍ تقع فعلاً — لا نصائح. يحرس الرابطةَ
+# `npm run guard:constitution`: رمزٌ مُعلَنٌ غيرُ موجودٍ في وحدة إنفاذه يُكشف.
+guarantees:
+  - id: founding-text-sealed
+    clause: النصُّ المؤسِّس مختومٌ بتجزئةٍ في العهد الأول؛ وتحريرُه بعد الختم يُعطِّل قراءةَ الدستور ولا يُقبل.
+    code: CONSTITUTION_FOUNDING_TEXT_DRIFT
+    enforcedBy: src/constitution/constitution.mjs
+
+  - id: store-signed
+    clause: كلُّ عهدٍ في المخزن موقَّعٌ بمفتاح الملك، ومربوطٌ بتجزئةِ سابقه؛ وعهدٌ لا يتحقّق توقيعُه يُرفض ولا يُقرأ.
+    code: CONSTITUTION_TAMPERED
+    enforcedBy: src/constitution/constitution.mjs
+
+  - id: epoch-monotonic
+    clause: العهدُ لا يتراجع؛ وحذفُ آخر عهدٍ من المخزن يُكشف بعدّاد أعلى عهدٍ بُلغ.
+    code: CONSTITUTION_EPOCH_ROLLBACK
+    enforcedBy: src/constitution/constitution.mjs
+
+  - id: entrenched-immutable
+    clause: المادةُ المختومة لا تُعدَّل ولو بالمسار الكامل؛ تغييرُها فعلٌ تأسيسيٌّ خارج سلطة هذا النظام.
+    code: CONSTITUTION_ARTICLE_ENTRENCHED
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: royal-command-required
+    clause: لا طرحَ ولا إبرامَ بلا أمرٍ ملكيٍّ مقبولٍ من بوابة التاج بفعلِه المُعلَن وهدفِه المادةَ المعنيّة.
+    code: CONSTITUTION_COMMAND_REQUIRED
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: two-distinct-commands
+    clause: أمرُ الإبرام أمرٌ ثانٍ مستقلٌّ؛ وإعادةُ استعمال معرّفِ أمرٍ استُهلك في هذا المسار تُرفض.
+    code: CONSTITUTION_COMMAND_REPLAYED
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: judicial-review-required
+    clause: لا إبرامَ بلا مراجعةٍ من رئيس القضاة؛ ومن طرح التعديلَ لا يراجعه.
+    code: CONSTITUTION_REVIEW_MISSING
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: no-self-review
+    clause: مراجعةُ المرءِ طرحَه ليست مراجعة؛ وتُرفض بالفاعل لا بالدور وحده.
+    code: CONSTITUTION_SELF_REVIEW_REFUSED
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: deliberation-window
+    clause: مهلةُ التدبُّر المُعلَنة تمرّ قبل الإبرام؛ وإبرامٌ قبلها يُرفض بالفارق الزمنيّ مقيساً.
+    code: CONSTITUTION_DELIBERATION_INCOMPLETE
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: proposal-bound-to-hash
+    clause: أمرُ الإبرام يحمل تجزئةَ الطرحِ بعينها؛ فلا يُبرَم نصٌّ غيرُ الذي طُرح وراجعه القضاء.
+    code: CONSTITUTION_PROPOSAL_HASH_MISMATCH
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: proposal-bound-to-epoch
+    clause: الطرحُ مربوطٌ بعهد النصّ الذي طُرح عليه؛ فتعديلٌ آخر يُبرَم قبله يُسقطه ولا يُبرَم على نصٍّ زائل.
+    code: CONSTITUTION_PROPOSAL_STALE
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: reasons-recorded
+    clause: لكلِّ طرحٍ سببٌ مكتوبٌ بحدٍّ أدنى مُعلَن، ولكلِّ مراجعةٍ رأيٌ مكتوب؛ فلا تعديلَ بلا حجّةٍ في السجل.
+    code: CONSTITUTION_REASON_MISSING
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: text-must-change
+    clause: تعديلٌ لا يغيّر النصَّ ليس تعديلاً؛ ويُرفض قبل أن يُستهلك له أمرٌ ملكيّ.
+    code: CONSTITUTION_TEXT_UNCHANGED
+    enforcedBy: src/constitution/amendment-path.mjs
+
+  - id: law-references-resolve
+    clause: كلُّ مرجعِ قانونٍ تستند إليه سياسةٌ أو قدرةٌ أو عتبةٌ سياديّة يُسنَد إلى مادةٍ دستوريّةٍ قائمة؛ ومرجعٌ معلَّقٌ يُكشف.
+    code: CONSTITUTION_LAW_REFERENCE_DANGLING
+    enforcedBy: scripts/guard-constitution.mjs
+
+articles:
+  - id: art:01
+    title: السيادة ومصدرها
+    entrenched: true
+    lawRef: law:sovereignty
+    enforcedBy:
+      - src/root-of-trust/crown.mts
+      - src/root-of-trust/identity.mts
+    text: >-
+      السيادةُ في هذه الدولة الرقمية للتاج، ولا تُستمدّ من قدرةٍ تقنيةٍ ولا من
+      حيازةِ صلاحيةِ كتابة. ولا يُنفَّذ فعلٌ سياديٌّ إلا بأمرٍ موقَّعٍ بمفتاح
+      الملك، مثبَّتٍ في دفتر الأوامر، مقبولٍ من بوابة التاج. ومن ملك القرصَ أو
+      الشبكةَ أو العملية لم يملك بذلك سلطةً، ومن ادّعى دوراً في طلبٍ لم يصر ذا
+      دورٍ بالادّعاء. والدولةُ لا تعرف فاعلاً إلا بشهادةٍ متحقَّقةٍ من سلطة
+      تصديقها.
+
+  - id: art:02
+    title: الدستور ومسار تعديله
+    entrenched: true
+    lawRef: law:constitution
+    enforcedBy:
+      - src/constitution/constitution.mjs
+      - src/constitution/amendment-path.mjs
+    text: >-
+      هذا الدستورُ أعلى نصٍّ في الدولة، وما خالفه من سياسةٍ أو قانونٍ أو قدرةٍ
+      فباطلٌ بمقدار مخالفته. ولا يُعدَّل نصُّه إلا بمسارٍ ملكيٍّ خاصٍّ من أربع
+      خطواتٍ مترتّبة: أمرٌ ملكيٌّ مقبولٌ بالطرح، ثم مراجعةٌ من رئيس القضاة لا
+      يجريها الطارح، ثم مهلةُ تدبُّرٍ مُعلَنةٌ تمرّ بتمامها، ثم أمرٌ ملكيٌّ ثانٍ
+      مستقلٌّ يحمل تجزئةَ الطرح بعينها. وما وقع من تعديلٍ خارج هذا المسار فليس
+      تعديلاً بل عبثاً، يُكشف ويُبطِل قراءةَ الدستور حتى يُصلَح. والموادُّ
+      المختومةُ في هذا النصّ لا تُعدَّل ولو بالمسار كاملاً؛ تغييرُها فعلٌ
+      تأسيسيٌّ خارج سلطة هذا النظام.
+
+  - id: art:03
+    title: جذر الثقة والمفاتيح
+    entrenched: false
+    lawRef: law:root-of-trust
+    enforcedBy:
+      - src/root-of-trust/king-key.mts
+      - src/root-of-trust/key-provider.mts
+      - src/root-of-trust/command-ledger.mts
+    text: >-
+      مفتاحُ الملك أصلُ كلِّ تحقُّقٍ في الدولة، ويُحفظ في مخزنِ مفاتيحَ لا في
+      الشيفرة ولا في متغيّرِ بيئةٍ عابر. وتدويرُه فعلٌ سياديٌّ لا إداريّ، لأنه
+      يغيّر مرجعَ التحقُّق لكلِّ أمرٍ سابقٍ ولاحق. ولكلِّ أمرٍ ملكيٍّ أثرٌ في
+      دفترٍ لا يُمحى منه سطر، وإعادةُ إرسال أمرٍ مستهلَكٍ مرفوضةٌ برمزها. ولا
+      يُبنى قرارُ قبولٍ على زمنٍ من ساعةِ جهازٍ حين تتوفّر ساعةٌ يُكشف انزياحُها.
+
+  - id: art:04
+    title: الإيقاف السيادي
+    entrenched: true
+    lawRef: law:sovereign-halt
+    enforcedBy:
+      - src/root-of-trust/halt-switch.mts
+      - src/core/execution-kernel.mjs
+    text: >-
+      للتاج أن يوقف الدولة كلَّها بتوجيهٍ واحدٍ موقَّعٍ دائم، يقرؤه كلُّ مُنفِّذٍ
+      قبل كلِّ فعل. والإيقافُ يقع فوراً على كلِّ عملية، ولا يُرفع إلا بأمرٍ
+      سياديٍّ مثلِه بعد إقرارِ العقد الحيّة به. وكلُّ شبهةِ عبثٍ في هذا التوجيه
+      — توقيعٌ لا يتحقّق، أو عهدٌ متراجع، أو توجيهٌ زائل — تُقرأ إيقافاً لا
+      تشغيلاً؛ فالشكُّ في زرِّ الإيقاف أخطرُ من التوقّف.
+
+  - id: art:05
+    title: التشريع ونفاذه
+    entrenched: false
+    lawRef: law:legislation
+    enforcedBy:
+      - src/governance/law-system.mjs
+    text: >-
+      لا يَنفُذ قانونٌ إلا باعتمادٍ من التاج، ولكلِّ قانونٍ نافذٍ سلطةُ نفاذٍ
+      مسمّاةٌ ووقتُ نفاذٍ مسجَّل. ولا يُعلَّق ما لم يَنفُذ ولا يُلغى، والملغى لا
+      يُعاد فتحُه بتعديلٍ لاحق. وكلُّ انتقالٍ في حياة القانون واقعةٌ مثبَّتةٌ في
+      سجل الأحداث، فلا يصير نصٌّ نافذاً بلا أثرٍ يُقرأ.
+
+  - id: art:06
+    title: حكم السياسات
+    entrenched: false
+    lawRef: law:policy-governance
+    enforcedBy:
+      - src/policy/engine.mjs
+      - src/policy/governance.mjs
+      - src/policy/enforcement-point.mjs
+    text: >-
+      كلُّ إذنٍ في الدولة يُقرَّر في نقطةِ تفويضٍ مركزيّة، ولا يُشتقّ من مطالبةٍ
+      في طلب. والسياساتُ بياناتٌ محكومةٌ بنسخةٍ ومسارِ تغييرٍ موثَّق، ومن يعدّل
+      السياسةَ يعدّل حدودَ صلاحيتِه نفسِها، فتعديلُها فوق العتبة السيادية. وما
+      كان فوق العتبة لا يكفي فيه الإذنُ الصريح، بل يلزمه أمرٌ موقَّعٌ مثبَّت.
+
+  - id: art:07
+    title: سيادة البيانات وتصنيفُها
+    entrenched: false
+    lawRef: law:data-sovereignty
+    enforcedBy:
+      - src/data/access-gate.mjs
+      - src/data/classification.mjs
+      - src/data/encryption.mjs
+    text: >-
+      لكلِّ أصلِ بياناتٍ مرتبةُ تصنيفٍ من سلَّمٍ واحدٍ مُعلَن، ولكلِّ دورٍ
+      تخليصٌ مُشتقٌّ من ذلك السلَّم لا من نصٍّ يُمرَّر. ولا قراءةَ ولا كتابةَ
+      إلا بقرارِ إتاحةٍ يُسجَّل، ولا كتابةَ إلى مرتبةٍ أدنى فتصير المعالجةُ
+      غسلاً للتصنيف. والمادةُ المصنَّفةُ تُخزَّن مغلَّفةً بمفتاحِ مرتبتِها،
+      فمن قرأ المخزنَ من غير طريق البوابة لم يقرأ نصّاً. وكلُّ رفضٍ واقعةٌ
+      مسجَّلة، ولا يصير المنعُ قناةً جانبيّةً تُفشي وجودَ ما مُنِع.
+
+  - id: art:08
+    title: الاحتفاظ والمحو المشهود
+    entrenched: false
+    lawRef: law:retention
+    enforcedBy:
+      - src/persistence/retention.mjs
+      - src/data/erasure-ledger.mjs
+    text: >-
+      لكلِّ مادةٍ في الدولة مدّةُ احتفاظٍ مُعلَنة، ولا مادةَ أبديّةً إلا بحفظٍ
+      قانونيٍّ مسمّى. والمحوُ فعلٌ مشهود: يُكتب له شاهدٌ يحمل الهدفَ والفاعلَ
+      والسببَ والتصنيف، ولا يحمل مادّةَ ما مُحي ولا مرجعاً إلى الأصل الزائل.
+      فما مُحي بلا شاهدٍ لا يُميَّز عن شيءٍ لم يوجد قطّ، وذلك نقضٌ للمساءلة لا
+      وفاءٌ بالخصوصيّة.
+
+  - id: art:09
+    title: الوكلاء واحتواؤهم
+    entrenched: false
+    lawRef: law:agent-registry
+    enforcedBy:
+      - src/identity/agent-registry.mjs
+      - src/identity/capability-grants.mjs
+      - src/egress/egress-gate.mjs
+    text: >-
+      الوكيلُ في هذه الدولة هويّةٌ نافدةٌ محدودةُ القدرة، لا أداةً مفتوحة. ولكلِّ
+      قدرةٍ ممنوحةٍ مانحٌ ومدّةٌ وسببٌ مسجَّل، ولمنحِ القدراتِ محرَّماتٌ لا
+      تُمنَح بحالٍ. وخروجُ الوكيل إلى خارج الدولة يمرّ ببوابةٍ تُصرِّح وتُسجِّل
+      وتحدُّ المعدّل، وأوزانُه تُقاس ببصمةٍ تُعاد قبل كلِّ تنشيط، ودرجتُه في
+      التقييم لا تُقبل بلا تجربةٍ مسجَّلةٍ قبل إجرائها. وإلغاءُ الوكيل لا رجعةَ
+      فيه، فيكون فوق العتبة السيادية.
+
+  - id: art:10
+    title: المال العام
+    entrenched: false
+    lawRef: law:public-finance
+    enforcedBy:
+      - src/policy/quota.mjs
+    text: >-
+      تخصيصُ الميزانية التزامٌ على الدولة لا على مؤسسة، فيكون بأمرٍ لا بطلب.
+      ولكلِّ مؤسسةٍ حصّةٌ مُعلَنةٌ تُقاس عند كلِّ استهلاك، وتجاوزُها يُمنع ويُسجَّل
+      لا يُغتفر بأثرٍ رجعيّ. ولا إنفاقَ بلا اختصاصٍ مُعلَنٍ يُقاس عليه.
+
+  - id: art:11
+    title: القضاء واستقلاله
+    entrenched: false
+    lawRef: law:judiciary
+    enforcedBy:
+      - src/governance/law-system.mjs
+    text: >-
+      القضاءُ يفصل في النزاع بجلسةٍ لازمةٍ قبل الحكم، وبحكمٍ مُسبَّبٍ لا يُقبل
+      بلا سببٍ مكتوب، وباستئنافٍ مكفولٍ على ما حُكم. ولا يفصل قاضٍ في قضيةٍ له
+      فيها مصلحة، ولا يُراجع أحدٌ عملَ نفسه. وتنفيذُ الحكم فعلٌ مسجَّلٌ قابلٌ
+      للتدقيق والتراجع بأمرٍ مُسبَّب.

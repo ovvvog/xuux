@@ -22,6 +22,16 @@ threshold:
     lawRef: law:sovereign-halt
     delegable: false
 
+  - action: amend-constitution
+    reason: 'طرحُ تعديل الدستور أوّلُ خطوةٍ في مسارٍ من أربع؛ ولا يُفتح هذا المسار بطلبٍ عاديّ.'
+    lawRef: law:constitution
+    delegable: false
+
+  - action: ratify-constitution
+    reason: 'إبرامُ التعديل يغيّر أعلى نصٍّ في الدولة، فيلزمه أمرٌ ثانٍ مستقلٌّ لا تكرارُ الأول.'
+    lawRef: law:constitution
+    delegable: false
+
   - action: change-policy
     reason: من يعدّل السياسة يعدّل حدود صلاحيته نفسها؛ ترك هذا لغير الملك يُفرغ كل بند آخر.
     lawRef: law:policy-governance

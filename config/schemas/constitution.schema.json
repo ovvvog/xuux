@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/constitution.schema.json",
+  "title": "الدستور — النص المؤسس ومسار تعديله",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "amendment", "integrity", "guarantees", "articles"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "const": "crown" },
+    "amendment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proposeAction",
+        "ratifyAction",
+        "proposerRoles",
+        "reviewerRoles",
+        "ratifierRoles",
+        "deliberationSeconds",
+        "minReasonLength",
+        "minOpinionLength",
+        "minTextLength",
+        "steps"
+      ],
+      "properties": {
+        "proposeAction": { "type": "string", "minLength": 3 },
+        "ratifyAction": { "type": "string", "minLength": 3 },
+        "proposerRoles": { "$ref": "#/$defs/roleList" },
+        "reviewerRoles": { "$ref": "#/$defs/roleList" },
+        "ratifierRoles": { "$ref": "#/$defs/roleList" },
+        "deliberationSeconds": { "type": "integer", "minimum": 1 },
+        "minReasonLength": { "type": "integer", "minimum": 1 },
+        "minOpinionLength": { "type": "integer", "minimum": 1 },
+        "minTextLength": { "type": "integer", "minimum": 1 },
+        "steps": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 3 }
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateFile", "epochFile", "holders"],
+      "properties": {
+        "stateFile": { "type": "string", "minLength": 3 },
+        "epochFile": { "type": "string", "minLength": 3 },
+        "holders": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "clause", "code", "enforcedBy"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "clause": { "type": "string", "minLength": 24 },
+          "code": { "type": "string", "pattern": "^CONSTITUTION_[A-Z_]+$" },
+          "enforcedBy": { "type": "string", "pattern": "^(src|scripts)/.+\\.mjs$" }
+        }
+      }
+    },
+    "articles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "entrenched", "lawRef", "enforcedBy", "text"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^art:[0-9]{2}$" },
+          "title": { "type": "string", "minLength": 4 },
+          "entrenched": { "type": "boolean" },
+          "lawRef": { "type": "string", "pattern": "^law:[a-z-]+$" },
+          "enforcedBy": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^src/.+\\.(mjs|mts)$" }
+          },
+          "text": { "type": "string", "minLength": 48 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "roleList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^role:[a-z-]+$" }
+    }
+  }
+}

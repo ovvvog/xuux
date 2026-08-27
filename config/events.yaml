@@ -138,6 +138,31 @@ channels:
       - type: capability.revoked
         version: 1
         required: [agentId, capability, id, reason]
+  - id: constitution
+    subject: 'مسارُ التعديل الدستوريّ: من طرح تعديلاً على أيّ مادةٍ وبأيّ سببٍ، ومن راجعه، ومتى أُبرم، وما رُفض وبأيّ رمز'
+    classification: sovereign
+    version: 1
+    producers:
+      - role:king
+      - role:chief-justice
+    consumers:
+      - role:king
+      - role:chief-justice
+      - role:auditor
+    types:
+      - type: constitution.amendment.proposed
+        version: 1
+        required: [articleId, commandId, epoch, proposalHash, proposalId, reason]
+      - type: constitution.amendment.ratified
+        version: 1
+        required: [articleId, commandId, epoch, proposalHash, proposalId]
+      - type: constitution.amendment.refused
+        version: 1
+        required: [code, detail]
+        open: true
+      - type: constitution.amendment.reviewed
+        version: 1
+        required: [articleId, opinion, proposalId, state, verdict]
   - id: court
     subject: 'القضايا: فتحُها وسماعُها والحكمُ فيها واستئنافُها'
     classification: sensitive
