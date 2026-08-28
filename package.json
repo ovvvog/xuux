@@ -1,6 +1,6 @@
 {
   "name": "digital-state-root-of-trust",
-  "version": "0.34.0",
+  "version": "0.34.1",
   "private": true,
   "type": "module",
   "description": "الدولة الملكية الفدرالية الرقمية — جذر الثقة والنواة السيادية",
