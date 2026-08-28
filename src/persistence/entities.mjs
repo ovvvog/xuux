@@ -1093,6 +1093,16 @@ export const INSTITUTION_MIN_SUBJECT_LENGTH = 20;
 export const INSTITUTION_MIN_REFUSAL_REASON_LENGTH = 20;
 
 /**
+ * الحدُ الأدنى لطول تفصيلِ مخالفةِ الاختصاص (الخطوة `M8.06`).
+ *
+ * ونفسُ العددِ مكتوبٌ في `config/institutional-mandates.yaml` تحت
+ * `procedure.minBreachDetailLength` وفي قيدِ الهجرة 0015
+ * `institution_breaches_reasoned`، والبوابةُ 22 تفحص وقوعَه **في موضعه** من
+ * القيد. ومخالفةٌ بلا تفصيلٍ مكتوبٍ لا يُسأل عليها أحد.
+ */
+export const INSTITUTION_MANDATE_MIN_BREACH_DETAIL_LENGTH = 20;
+
+/**
  * المؤسسةُ المُشغَّلةُ فعلاً — الخطوة `M8.05`.
  *
  * والميزانيةُ عمودان في هذا الصفِّ لا دفترٌ خارجه: `budgetAllocated` مقروءٌ من
@@ -1182,6 +1192,10 @@ export const INSTITUTION_TASK_SPEC = Object.freeze({
       id: { column: 'id', type: 'string', required: true, maxLength: 128 },
       institutionId: { column: 'institution_id', type: 'string', required: true, maxLength: 128 },
       kind: { column: 'kind', type: 'string', required: true, maxLength: 64 },
+      // مجالُ المهمّة المُعلَنُ عند رفعها (الخطوة `M8.06`). ويُحفظ في الصفِّ
+      // لأنّ مجالاً مُستنبَطاً من النوعِ وحدَه لا يُقاس تجاوزُه: المتجاوِزُ لا
+      // يُعلن، فالإعلانُ نفسُه هو ما يُقاس عليه الاختصاص.
+      domain: { column: 'domain', type: 'string', required: true, maxLength: 64 },
       subject: { column: 'subject', type: 'string', required: true },
       submittedBy: { column: 'submitted_by', type: 'string', required: true, maxLength: 128 },
       state: {
@@ -1219,8 +1233,18 @@ export const INSTITUTION_TASK_SPEC = Object.freeze({
     })
   ),
   unique: Object.freeze([]),
-  filterable: Object.freeze(['institutionId', 'state', 'kind', 'agentId']),
+  filterable: Object.freeze(['institutionId', 'state', 'kind', 'agentId', 'domain']),
   invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_TASK_DOMAIN_DECLARED',
+      message:
+        'مجالُ المهمّة مُعلَنٌ غيرُ فارغٍ؛ ومهمّةٌ بلا مجالٍ معلَنٍ لا يُقاس تجاوزُها اختصاصَ مؤسستها.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const domain = record['domain'];
+        return typeof domain === 'string' && domain.trim() !== '';
+      },
+    },
     {
       code: 'INSTITUTION_TASK_SUBJECT_MEASURED',
       message: 'موضوعُ المهمّة يبلغ الحدَ المُعلن؛ وموضوعٌ أقصرُ منه لا يُعرَف ما طُلب فيه.',
@@ -1377,6 +1401,260 @@ export const INSTITUTION_OUTPUT_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * نموذجُ تشغيلِ المؤسسة النافذ — الخطوة `M8.06`.
+ *
+ * والصفُّ هو **نفاذُ** الاختصاص لا إعلانُه: المجالاتُ والمُستثنياتُ والصلاحياتُ
+ * والمحرَّماتُ وسقفُ المدّةِ وجهةُ المساءلةِ ومدّةُ التقرير تُقرأ من هنا وقتَ
+ * الفحص، فلا يُوسَّع اختصاصٌ بتعديلِ وثيقةٍ بعد الإنفاذ بلا صفٍّ جديدٍ وأثرٍ.
+ *
+ * و`institutionKey` فريد: نموذجان لمؤسسةٍ واحدةٍ حدّان يُقرأ أحدُهما مكانَ الآخر.
+ */
+/** @type {EntitySpec} */
+export const INSTITUTION_MANDATE_SPEC = Object.freeze({
+  name: 'institution_mandates',
+  table: 'state.institution_mandates',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      institutionId: { column: 'institution_id', type: 'string', required: true, maxLength: 128 },
+      institutionKey: { column: 'charter_key', type: 'string', required: true, maxLength: 64 },
+      domains: { column: 'domains', type: 'stringArray', required: true },
+      excludedDomains: { column: 'excluded_domains', type: 'stringArray', required: true },
+      powers: { column: 'powers', type: 'stringArray', required: true },
+      prohibitions: { column: 'prohibitions', type: 'stringArray', required: true },
+      budgetPeriodDays: { column: 'budget_period_days', type: 'integer', required: true },
+      budgetCeiling: { column: 'budget_ceiling', type: 'integer', required: true },
+      accountableTo: { column: 'accountable_to', type: 'string', required: true, maxLength: 64 },
+      escalateTo: { column: 'escalate_to', type: 'string', required: true, maxLength: 64 },
+      reportingPeriodDays: { column: 'reporting_period_days', type: 'integer', required: true },
+      reportingGraceDays: { column: 'reporting_grace_days', type: 'integer', required: true },
+      modelVersion: { column: 'model_version', type: 'integer', required: true },
+      enactedAt: { column: 'enacted_at', type: 'timestamp', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['institutionKey'])]),
+  filterable: Object.freeze(['institutionKey', 'institutionId']),
+  invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_MANDATE_JURISDICTION_DECLARED',
+      message:
+        'الاختصاصُ مجالٌ واحدٌ على الأقل، ولا مجالَ مُعلَنٌ ومُستثنىً معاً؛ ونموذجٌ بلا مجالٍ يُقرأ إباحةً مطلقةً أو منعاً مطلقاً بحسب من يقرؤه.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const domains = record['domains'];
+        const excluded = record['excludedDomains'];
+        if (!Array.isArray(domains) || domains.length === 0) return false;
+        if (!Array.isArray(excluded)) return false;
+        return !excluded.some((entry) => domains.includes(entry));
+      },
+    },
+    {
+      code: 'INSTITUTION_MANDATE_POWERS_DECLARED',
+      message:
+        'الصلاحياتُ الممنوحةُ صلاحيةٌ واحدةٌ على الأقل، ولا صلاحيةَ ممنوحةٌ ومحرَّمةٌ معاً؛ والمحرَّمُ يغلب الممنوحَ فلا يجتمعان في صفٍّ واحد.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const powers = record['powers'];
+        const prohibitions = record['prohibitions'];
+        if (!Array.isArray(powers) || powers.length === 0) return false;
+        if (!Array.isArray(prohibitions)) return false;
+        return !prohibitions.some((entry) => powers.includes(entry));
+      },
+    },
+    {
+      code: 'INSTITUTION_MANDATE_ACCOUNTABILITY_EXTERNAL',
+      message:
+        'جهةُ المساءلةِ وجهةُ التصعيد دوران مُعلَنان مختلفان؛ وتصعيدٌ إلى نفس الجهة ليس تصعيداً، ولا يُسائل أحدٌ نفسَه.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const accountableTo = record['accountableTo'];
+        const escalateTo = record['escalateTo'];
+        if (typeof accountableTo !== 'string' || typeof escalateTo !== 'string') return false;
+        if (!/^role:[a-z-]+$/.test(accountableTo) || !/^role:[a-z-]+$/.test(escalateTo))
+          return false;
+        return accountableTo !== escalateTo;
+      },
+    },
+    {
+      code: 'INSTITUTION_MANDATE_PERIODS_POSITIVE',
+      message:
+        'مدّةُ الميزانيةِ وسقفُها ومدّةُ التقرير أعدادٌ موجبةٌ ومهلةُ السماح غيرُ سالبة؛ وسقفٌ صفريٌّ يمنع كلَّ عملٍ ومدّةٌ صفريةٌ تجعل التقريرَ مستحقّاً دائماً.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const positive = ['budgetPeriodDays', 'budgetCeiling', 'reportingPeriodDays'].every(
+          (key) => {
+            const value = record[key];
+            return typeof value === 'number' && value >= 1;
+          },
+        );
+        const grace = record['reportingGraceDays'];
+        return positive && typeof grace === 'number' && grace >= 0;
+      },
+    },
+  ]),
+});
+
+/**
+ * مخالفةُ اختصاصٍ أو صلاحيةٍ أو سقفٍ أو موعدِ تقرير — الخطوة `M8.06`.
+ *
+ * والصفُّ **مادّةُ المساءلة**: مُنِعَ ولم يُسجَّل يعني أنّ الجهةَ المسؤولةَ لا
+ * تُسأل عن شيء، وأنّ الدورةَ التقريريةَ تُقرأ خاليةً من مخالفةٍ وقعت. ولذلك
+ * يُنسَب الصفُّ إلى جهةِ المساءلةِ وجهةِ التصعيد وقتَ الوقوع لا وقتَ القراءة.
+ *
+ * **وحدٌّ معلَن:** المخالفةُ تُسجَّل ولا تُعالَج: لا تسويةَ ولا إغلاقَ ولا جزاءً
+ * يقع على المؤسسة. وذلك أضعفُ من مساءلةٍ كاملةٍ ولا يُدَّعى أنّه هي.
+ */
+/** @type {EntitySpec} */
+export const INSTITUTION_BREACH_SPEC = Object.freeze({
+  name: 'institution_breaches',
+  table: 'state.institution_breaches',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 200 },
+      institutionId: { column: 'institution_id', type: 'string', required: true, maxLength: 128 },
+      institutionKey: { column: 'charter_key', type: 'string', required: true, maxLength: 64 },
+      taskId: { column: 'task_id', type: 'string', nullable: true, maxLength: 128 },
+      code: { column: 'code', type: 'string', required: true, maxLength: 120 },
+      domain: { column: 'domain', type: 'string', nullable: true, maxLength: 64 },
+      power: { column: 'power', type: 'string', nullable: true, maxLength: 64 },
+      detail: { column: 'detail', type: 'string', required: true },
+      accountableTo: { column: 'accountable_to', type: 'string', required: true, maxLength: 64 },
+      escalateTo: { column: 'escalate_to', type: 'string', required: true, maxLength: 64 },
+      detectedAt: { column: 'detected_at', type: 'timestamp', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['institutionId', 'institutionKey', 'code', 'taskId']),
+  invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_BREACH_REASONED',
+      message:
+        'المخالفةُ مكتوبةُ التفصيلِ بحدِّه المُعلَن؛ ومخالفةٌ بلا تفصيلٍ رمزٌ في عمودٍ لا يُسأل عليه أحد.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const detail = record['detail'];
+        return (
+          typeof detail === 'string' &&
+          detail.trim().length >= INSTITUTION_MANDATE_MIN_BREACH_DETAIL_LENGTH
+        );
+      },
+    },
+    {
+      code: 'INSTITUTION_BREACH_CODE_DECLARED',
+      message:
+        'رمزُ المخالفةِ من رموزِ نموذجِ التشغيل المُعلَنة؛ ورمزٌ حرٌّ يجعل عدَّ المخالفاتِ في التقرير عدَّ نصوصٍ لا وقائع.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const code = record['code'];
+        return typeof code === 'string' && code.startsWith('MANDATE_');
+      },
+    },
+    {
+      code: 'INSTITUTION_BREACH_ATTRIBUTED',
+      message:
+        'المخالفةُ منسوبةٌ إلى جهةِ مساءلةٍ وجهةِ تصعيدٍ مختلفتين؛ ومخالفةٌ بلا جهةٍ تُسأل عنها واقعةٌ تُقرأ ولا تُحاسَب.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const accountableTo = record['accountableTo'];
+        const escalateTo = record['escalateTo'];
+        return (
+          typeof accountableTo === 'string' &&
+          typeof escalateTo === 'string' &&
+          accountableTo.trim() !== '' &&
+          escalateTo.trim() !== '' &&
+          accountableTo !== escalateTo
+        );
+      },
+    },
+  ]),
+});
+
+/**
+ * دورةٌ تقريريةٌ مُغلَقة — الخطوة `M8.06`.
+ *
+ * والتقريرُ **مُشتقٌّ** من صفوفِ المدّة: عددُ مهامِّها ومنفَّذِها ومرفوضِها وما
+ * صُرف فيها وعددُ مخالفاتها. ولا نصَّ يُخزَّن ثم يُقرأ تقريراً، فنصٌّ مخزَّنٌ
+ * يُكتب مرّةً ويصدق مرّةً.
+ *
+ * و(المؤسسة، بدايةُ المدّة) فريدٌ: دورتان لمدّةٍ واحدةٍ تقريران يُحتسب بهما
+ * العملُ مرّتين.
+ */
+/** @type {EntitySpec} */
+export const INSTITUTION_REPORT_CYCLE_SPEC = Object.freeze({
+  name: 'institution_report_cycles',
+  table: 'state.institution_report_cycles',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 200 },
+      institutionId: { column: 'institution_id', type: 'string', required: true, maxLength: 128 },
+      institutionKey: { column: 'charter_key', type: 'string', required: true, maxLength: 64 },
+      periodStart: { column: 'period_start', type: 'timestamp', required: true },
+      periodEnd: { column: 'period_end', type: 'timestamp', required: true },
+      dueAt: { column: 'due_at', type: 'timestamp', required: true },
+      closedAt: { column: 'closed_at', type: 'timestamp', required: true },
+      closedBy: { column: 'closed_by', type: 'string', required: true, maxLength: 64 },
+      tasksTotal: { column: 'tasks_total', type: 'integer', required: true },
+      tasksExecuted: { column: 'tasks_executed', type: 'integer', required: true },
+      tasksRefused: { column: 'tasks_refused', type: 'integer', required: true },
+      breachCount: { column: 'breach_count', type: 'integer', required: true },
+      budgetConsumed: { column: 'budget_consumed', type: 'integer', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['institutionKey', 'periodStart'])]),
+  filterable: Object.freeze(['institutionId', 'institutionKey']),
+  invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_CYCLE_WINDOW_ORDERED',
+      message:
+        'مدّةُ الدورةِ تبدأ قبل أن تنتهي، واستحقاقُها بعد انتهائها؛ ومدّةٌ مقلوبةُ الحدَّين لا يُقرأ فيها شيء.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const start = record['periodStart'];
+        const end = record['periodEnd'];
+        const dueAt = record['dueAt'];
+        if (!(start instanceof Date) || !(end instanceof Date) || !(dueAt instanceof Date)) {
+          return false;
+        }
+        return start.getTime() < end.getTime() && end.getTime() <= dueAt.getTime();
+      },
+    },
+    {
+      code: 'INSTITUTION_CYCLE_CLOSED_AFTER_PERIOD',
+      message:
+        'الدورةُ تُغلَق بعد انقضاء مدّتها؛ وإغلاقٌ قبلها يُنتج تقريراً عن مدّةٍ لم تكتمل فيُقرأ أداءً كاملاً وهو جزءٌ منه.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const end = record['periodEnd'];
+        const closedAt = record['closedAt'];
+        if (!(end instanceof Date) || !(closedAt instanceof Date)) return false;
+        return closedAt.getTime() >= end.getTime();
+      },
+    },
+    {
+      code: 'INSTITUTION_CYCLE_COUNTS_COHERENT',
+      message:
+        'أعدادُ الدورةِ غيرُ سالبةٍ ومجموعُ المنفَّذِ والمرفوضِ لا يتجاوز مهامَّها؛ وعددٌ يتجاوز مجموعَه تقريرٌ يُقرأ ولا يُصدَّق.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const counts = [
+          'tasksTotal',
+          'tasksExecuted',
+          'tasksRefused',
+          'breachCount',
+          'budgetConsumed',
+        ].map((key) => record[key]);
+        if (!counts.every((value) => typeof value === 'number' && value >= 0)) return false;
+        const [total = 0, executed = 0, refused = 0] = /** @type {number[]} */ (counts);
+        return executed + refused <= total;
+      },
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -1393,6 +1671,9 @@ export const ENTITY_SPECS = Object.freeze({
   institutions: INSTITUTION_SPEC,
   institution_tasks: INSTITUTION_TASK_SPEC,
   institution_outputs: INSTITUTION_OUTPUT_SPEC,
+  institution_mandates: INSTITUTION_MANDATE_SPEC,
+  institution_breaches: INSTITUTION_BREACH_SPEC,
+  institution_report_cycles: INSTITUTION_REPORT_CYCLE_SPEC,
 });
 
 /**

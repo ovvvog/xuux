@@ -17,9 +17,12 @@ import {
   REPORTER,
   SUBMITTER,
   agentWithRole,
+  domainFor,
   eligibleRole,
+  establish,
   field,
   firstTaskKind,
+  mandatesWithCeilingAtAllocation,
   pilot,
   ranTask,
   state,
@@ -37,7 +40,7 @@ for (const key of KEYS) {
   test(`دورةُ تشغيلٍ كاملةٌ للمؤسسة ${key}: استقبالٌ فإسنادٌ فتنفيذٌ باستهلاكِ ميزانيةٍ فتقرير`, async () => {
     const s = state();
     const declared = pilot(key);
-    const commissioned = await s.ops.commission({ key });
+    const commissioned = await establish(s, key);
 
     // ١. المُخصَّصُ من العهد، والمقيَّدُ صفرٌ عند التأسيس.
     assert.equal(field(commissioned, 'budgetAllocated'), declared.budget.allocation);
@@ -51,6 +54,7 @@ for (const key of KEYS) {
       id: taskId,
       institutionKey: key,
       kind: kind.kind,
+      domain: domainFor(key, kind.kind),
       subject: subjectFor(kind.kind),
       submittedBy: SUBMITTER,
       actorRole: SUBMITTER,
@@ -118,10 +122,12 @@ for (const key of KEYS) {
   });
 
   test(`ميزانيةُ المؤسسة ${key} تنفد فعلاً: ما بعد المُخصَّصِ يُرفض ولا مخرَجَ له`, async () => {
-    const s = state();
+    // سقفُ المدّةِ يُرفع هنا إلى المُخصَّصِ الكلّي كي يقيس هذا الاختبارُ نفادَ
+    // المُخصَّصِ نفسَه لا حدَّ المدّة؛ والسقفُ الزمنيُّ مقيسٌ في mandate.test.mjs.
+    const s = state({ mandatesPolicy: mandatesWithCeilingAtAllocation() });
     const declared = pilot(key);
     const kind = firstTaskKind(key);
-    const institution = await s.ops.commission({ key });
+    const institution = await establish(s, key);
     // عددُ المهام التي يحملها المُخصَّصُ محسوبٌ من العهد لا مكتوبٌ رقماً: رقمٌ
     // مكتوبٌ يبقى أخضرَ بعد تغيُّرِ المُخصَّصِ أو الكلفة فيقيس ما لم يبقَ.
     const affordable = Math.floor(declared.budget.allocation / kind.cost);
@@ -139,6 +145,7 @@ for (const key of KEYS) {
       id: overId,
       institutionKey: key,
       kind: kind.kind,
+      domain: domainFor(key, kind.kind),
       subject: subjectFor(kind.kind),
       submittedBy: SUBMITTER,
       actorRole: SUBMITTER,
@@ -175,7 +182,7 @@ test('المؤسسةُ لا تُؤسَّس مرّتين: التأسيسُ الث
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   await ranTask(s, { key, id: `task:${key}:1` });
   await assert.rejects(
     () => s.ops.commission({ key }),
@@ -196,6 +203,7 @@ test('مهمّةٌ إلى مؤسسةٍ لم تُؤسَّس تُرفض: لا عم
         id: 'task:orphan',
         institutionKey: key,
         kind: kind.kind,
+        domain: domainFor(key, kind.kind),
         subject: subjectFor(kind.kind),
         submittedBy: SUBMITTER,
         actorRole: SUBMITTER,
@@ -209,7 +217,7 @@ test('الدورُ غيرُ الحائزِ للفعل يُرفض: الرفعُ �
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   const kind = firstTaskKind(key);
   // فاعلُ التنفيذِ ليس فاعلَ الرفع: الفصلُ مقروءٌ من العهد ومُتحقَّقٌ عند تحميله.
   await assert.rejects(
@@ -218,6 +226,7 @@ test('الدورُ غيرُ الحائزِ للفعل يُرفض: الرفعُ �
         id: 'task:role',
         institutionKey: key,
         kind: kind.kind,
+        domain: domainFor(key, kind.kind),
         subject: subjectFor(kind.kind),
         submittedBy: OPERATOR,
         actorRole: OPERATOR,
@@ -234,13 +243,14 @@ test('نوعُ المهمّةِ غيرُ المُعلَنِ للمؤسسةِ ي�
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   await assert.rejects(
     () =>
       s.ops.submit({
         id: 'task:kind',
         institutionKey: key,
         kind: 'إجراءٌ لم تُعلنه الوثيقة',
+        domain: domainFor(key, firstTaskKind(key).kind),
         subject: subjectFor('إجراء'),
         submittedBy: SUBMITTER,
         actorRole: SUBMITTER,
@@ -253,7 +263,7 @@ test('موضوعٌ أقصرُ من الحدِّ المُعلَنِ يُرفض ب
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   const kind = firstTaskKind(key);
   await assert.rejects(
     () =>
@@ -261,6 +271,7 @@ test('موضوعٌ أقصرُ من الحدِّ المُعلَنِ يُرفض ب
         id: 'task:short',
         institutionKey: key,
         kind: kind.kind,
+        domain: domainFor(key, kind.kind),
         subject: 'ط'.repeat(POLICY.procedure.minSubjectLength - 1),
         submittedBy: SUBMITTER,
         actorRole: SUBMITTER,
@@ -273,7 +284,7 @@ test('وكيلٌ معلَّقٌ أو غيرُ مؤهَّلِ الدورِ لا �
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   const kind = firstTaskKind(key);
 
   /** @param {string} id */
@@ -282,6 +293,7 @@ test('وكيلٌ معلَّقٌ أو غيرُ مؤهَّلِ الدورِ لا �
       id,
       institutionKey: key,
       kind: kind.kind,
+      domain: domainFor(key, kind.kind),
       subject: subjectFor(kind.kind),
       submittedBy: SUBMITTER,
       actorRole: SUBMITTER,
@@ -320,12 +332,13 @@ test('المهمّةُ لا تُنفَّذ قبل إسنادها ولا تُنف
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   const kind = firstTaskKind(key);
   await s.ops.submit({
     id: 'task:order',
     institutionKey: key,
     kind: kind.kind,
+    domain: domainFor(key, kind.kind),
     subject: subjectFor(kind.kind),
     submittedBy: SUBMITTER,
     actorRole: SUBMITTER,
@@ -350,12 +363,13 @@ test('أثرٌ بلا منفِّذٍ مُسجَّلٍ يُرفض ويُسجَّ�
   const s = state({ effects: false });
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   const kind = firstTaskKind(key);
   await s.ops.submit({
     id: 'task:noeffect',
     institutionKey: key,
     kind: kind.kind,
+    domain: domainFor(key, kind.kind),
     subject: subjectFor(kind.kind),
     submittedBy: SUBMITTER,
     actorRole: SUBMITTER,
@@ -379,12 +393,13 @@ test('تنفيذٌ لا يُغيِّر بصمةَ المخزن يُرفض، وا
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
   assert.equal(POLICY.budget.refundOnIneffectiveExecution, false);
-  const institution = await s.ops.commission({ key });
+  const institution = await establish(s, key);
   const kind = firstTaskKind(key);
   await s.ops.submit({
     id: 'task:noeffectrun',
     institutionKey: key,
     kind: kind.kind,
+    domain: domainFor(key, kind.kind),
     subject: subjectFor(kind.kind),
     submittedBy: SUBMITTER,
     actorRole: SUBMITTER,
@@ -418,7 +433,7 @@ test('تقريرٌ عن مؤسسةٍ بلا مهمّةٍ واحدةٍ يُرفض
   const s = state();
   const [key] = KEYS;
   assert.ok(typeof key === 'string');
-  await s.ops.commission({ key });
+  await establish(s, key);
   await assert.rejects(
     () => s.ops.report({ institutionKey: key, actorRole: REPORTER }),
     (error) => field(error, 'code') === INSTITUTION_ERRORS.REPORT_EMPTY,
@@ -437,8 +452,8 @@ test('المؤسستان مستقلّتان: ميزانيةُ إحداهما ل�
   const s = state();
   const [first, second] = KEYS;
   assert.ok(typeof first === 'string' && typeof second === 'string');
-  await s.ops.commission({ key: first });
-  await s.ops.commission({ key: second });
+  await establish(s, first);
+  await establish(s, second);
   await ranTask(s, { key: first, id: `task:${first}:solo` });
 
   const firstReport = await s.ops.report({ institutionKey: first, actorRole: REPORTER });

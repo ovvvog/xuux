@@ -24,11 +24,13 @@ import { RetentionCycle } from '../data/retention-cycle.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
 import {
+  InstitutionMandate,
   InstitutionOperations,
   createServiceCatalogExecutor,
   createStatisticalBulletinExecutor,
   effectIndex,
   loadInstitutionsPolicy,
+  loadMandatesPolicy,
 } from '../institutions/index.mjs';
 import {
   Judiciary,
@@ -51,6 +53,9 @@ import {
   INSTITUTION_SPEC,
   INSTITUTION_TASK_SPEC,
   INSTITUTION_OUTPUT_SPEC,
+  INSTITUTION_MANDATE_SPEC,
+  INSTITUTION_BREACH_SPEC,
+  INSTITUTION_REPORT_CYCLE_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -77,6 +82,9 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} institutions
  * @property {ReturnType<typeof createMemoryRepository>} institutionTasks
  * @property {ReturnType<typeof createMemoryRepository>} institutionOutputs
+ * @property {ReturnType<typeof createMemoryRepository>} institutionMandates
+ * @property {ReturnType<typeof createMemoryRepository>} institutionBreaches
+ * @property {ReturnType<typeof createMemoryRepository>} institutionReportCycles
  */
 
 /**
@@ -124,6 +132,9 @@ export function createMemoryRepositories(options = {}) {
     institutions: createMemoryRepository(INSTITUTION_SPEC, options),
     institutionTasks: createMemoryRepository(INSTITUTION_TASK_SPEC, options),
     institutionOutputs: createMemoryRepository(INSTITUTION_OUTPUT_SPEC, options),
+    institutionMandates: createMemoryRepository(INSTITUTION_MANDATE_SPEC, options),
+    institutionBreaches: createMemoryRepository(INSTITUTION_BREACH_SPEC, options),
+    institutionReportCycles: createMemoryRepository(INSTITUTION_REPORT_CYCLE_SPEC, options),
   };
 }
 
@@ -149,6 +160,9 @@ export function createPostgresRepositories(pool) {
       institutions: createPostgresRepository(pool, INSTITUTION_SPEC),
       institutionTasks: createPostgresRepository(pool, INSTITUTION_TASK_SPEC),
       institutionOutputs: createPostgresRepository(pool, INSTITUTION_OUTPUT_SPEC),
+      institutionMandates: createPostgresRepository(pool, INSTITUTION_MANDATE_SPEC),
+      institutionBreaches: createPostgresRepository(pool, INSTITUTION_BREACH_SPEC),
+      institutionReportCycles: createPostgresRepository(pool, INSTITUTION_REPORT_CYCLE_SPEC),
     })
   );
 }
@@ -194,6 +208,10 @@ export function createPostgresRepositories(pool) {
  *   التشغيل المؤسسي (M8.05): حائزو الأفعال، وإجراءُ المهمّة، وحدُّ الميزانية،
  *   والآثارُ المُعلَنة، والمؤسستان التجريبيتان. يُحمَّل من `config/institutions.yaml`
  *   إن لم يُمرَّر.
+ * @param {import('../institutions/mandate.mjs').MandatesPolicy | null} [deps.mandatesPolicy] نموذجُ
+ *   التشغيل المؤسسي (M8.06): الاختصاصُ والصلاحياتُ وسقفُ المدّةِ والمساءلةُ ومدّةُ
+ *   التقرير الدوريِّ لكلِّ مؤسسةٍ مُشغَّلة. يُحمَّل من
+ *   `config/institutional-mandates.yaml` إن لم يُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -217,6 +235,7 @@ export function createRegistries({
   eventsPolicy = null,
   judiciaryPolicy = null,
   institutionsPolicy = null,
+  mandatesPolicy = null,
   crown = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
@@ -294,6 +313,18 @@ export function createRegistries({
     ...(limits.maxAgents === undefined ? {} : { maxAgents: limits.maxAgents }),
   });
   const laws = new LawRegistry({ log, repository: repositories.laws });
+  // ونموذجُ التشغيل يُركَّب قبل التشغيلِ المؤسسي لا داخلَ وسائطه (الخطوة `M8.06`):
+  // بلا اختصاصٍ مُنفَذٍ تعمل المؤسسةُ بلا حدّ، ولذلك يرفض `InstitutionOperations`
+  // الإنشاءَ بلا هذا الوسيط. وإفرادُه باسمٍ يجعل وصلَه مقروءاً في سطرٍ واحد.
+  const institutionMandate = new InstitutionMandate({
+    policy: mandatesPolicy ?? loadMandatesPolicy(),
+    log,
+    institutions: repositories.institutions,
+    mandates: repositories.institutionMandates,
+    breaches: repositories.institutionBreaches,
+    cycles: repositories.institutionReportCycles,
+    tasks: repositories.institutionTasks,
+  });
   return {
     agents,
     models: new ModelRegistry({
@@ -367,6 +398,10 @@ export function createRegistries({
       tasks: repositories.institutionTasks,
       outputs: repositories.institutionOutputs,
       agents,
+      // ونموذجُ التشغيل موصولٌ لا متروك (الخطوة `M8.06`): بلا اختصاصٍ مُنفَذٍ
+      // تعمل المؤسسةُ بلا حدٍّ، وهو العيبُ الذي أغلقته الخطوةُ بعينه. ولذلك
+      // يرفض `InstitutionOperations` الإنشاءَ بلا هذا الوسيط لا يعمل بدونه.
+      mandate: institutionMandate,
       effects: effectIndex([
         createServiceCatalogExecutor({ outputs: repositories.institutionOutputs }),
         createStatisticalBulletinExecutor({ outputs: repositories.institutionOutputs }),

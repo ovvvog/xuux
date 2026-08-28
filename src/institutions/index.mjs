@@ -1,4 +1,4 @@
-/** واجهةُ التشغيل المؤسسي — الخطوة M8.05. */
+/** واجهةُ التشغيل المؤسسي — الخطوتان M8.05 وM8.06. */
 
 export {
   DEFAULT_INSTITUTIONS_CONFIG_DIR,
@@ -18,3 +18,11 @@ export {
   outputFingerprint,
 } from './executors.mjs';
 export { INSTITUTION_EVENTS, InstitutionOperations } from './operations.mjs';
+export {
+  MANDATE_ERRORS,
+  MANDATE_EVENTS,
+  MandateError,
+  InstitutionMandate,
+  loadMandatesPolicy,
+  mandateFor,
+} from './mandate.mjs';

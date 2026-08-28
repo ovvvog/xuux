@@ -17,20 +17,76 @@ import path from 'node:path';
 import { CertificateAuthority, EventLog, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { AgentRegistry } from '../../src/identity/agent-registry.mjs';
 import {
+  INSTITUTION_BREACH_SPEC,
+  INSTITUTION_MANDATE_SPEC,
   INSTITUTION_OUTPUT_SPEC,
+  INSTITUTION_REPORT_CYCLE_SPEC,
   INSTITUTION_SPEC,
   INSTITUTION_TASK_SPEC,
 } from '../../src/persistence/entities.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import {
+  InstitutionMandate,
   InstitutionOperations,
   createServiceCatalogExecutor,
   createStatisticalBulletinExecutor,
   effectIndex,
   loadInstitutionsPolicy,
+  loadMandatesPolicy,
+  mandateFor,
 } from '../../src/institutions/index.mjs';
 
 export const POLICY = loadInstitutionsPolicy({ dir: path.join(process.cwd(), 'config') });
+
+/** نموذجُ التشغيل المؤسسي النافذ، مقروءاً من الوثيقة لا مُختلقاً في الاختبار. */
+export const MANDATES = loadMandatesPolicy({ dir: path.join(process.cwd(), 'config') });
+
+/** حاملُ فعلِ الإنفاذ وحاملُ فعلِ إغلاقِ الدورة، مقروءان من الوثيقة. */
+export const ENACTOR = MANDATES.acts.enact;
+export const CYCLE_CLOSER = MANDATES.acts.closeCycle;
+
+/**
+ * نموذجُ تشغيلِ مؤسسةٍ بمفتاحها.
+ * @param {string} key
+ * @returns {import('../../src/institutions/mandate.mjs').InstitutionMandateEntry}
+ */
+export function mandateOf(key) {
+  return mandateFor(MANDATES, key);
+}
+
+/**
+ * مجالُ الاختصاصِ المُعلَنُ لنوعِ مهمّةٍ في نموذجِ مؤسستها: يُقرأ من الوثيقة كي
+ * لا يبقى الاختبارُ أخضرَ بعد تغيُّرِ حدِّ الاختصاص.
+ * @param {string} key
+ * @param {string} kind
+ * @returns {string}
+ */
+export function domainFor(key, kind) {
+  const act = mandateOf(key).acts.find((entry) => entry.kind === kind);
+  if (act === undefined) {
+    throw new Error(`النوع ${kind} لا حدَّ حاكماً له في نموذج ${key}`);
+  }
+  return act.domain;
+}
+
+/**
+ * نموذجٌ يُرفع فيه سقفُ المدّةِ إلى المُخصَّصِ الكلّي، **لا أكثر**.
+ *
+ * ولهذا موضعٌ واحدٌ مشروع: اختبارُ نفادِ المُخصَّصِ الكلّي في `M8.05`. فسقفُ
+ * المدّةِ المُعلَنُ في الوثيقة أدنى من المُخصَّص، فلو بقي لَحجب الرفضَ الذي يقيسه
+ * ذاك الاختبارُ برمزٍ آخر، فيصير اختبارُ الميزانيةِ يقيس السقفَ الزمنيَّ لا نفادَ
+ * المُخصَّص. والسقفُ الزمنيُّ يُقاس في `mandate.test.mjs` بوثيقته النافذة.
+ * @returns {import('../../src/institutions/mandate.mjs').MandatesPolicy}
+ */
+export function mandatesWithCeilingAtAllocation() {
+  return /** @type {import('../../src/institutions/mandate.mjs').MandatesPolicy} */ ({
+    ...MANDATES,
+    mandates: MANDATES.mandates.map((entry) => ({
+      ...entry,
+      budget: { ...entry.budget, ceiling: pilot(entry.key).budget.allocation },
+    })),
+  });
+}
 
 /**
  * حاملُ فعلٍ مُعلَنٌ في العهد. يُقرأ من الوثيقة لا يُكتب حرفاً في الاختبار:
@@ -99,9 +155,13 @@ export function subjectFor(kind) {
 /**
  * يُركّب دولةً مصغَّرة: سجلُّ أحداثٍ، سجلُّ هويات، ثلاثةُ مستودعات، ومنفِّذا
  * الأثرِ الحقيقيّان، وتشغيلٌ مؤسسيٌّ نافذ.
- * @param {{ effects?: boolean }} [options]
+ * @param {{
+ *   effects?: boolean,
+ *   now?: () => Date,
+ *   mandatesPolicy?: import('../../src/institutions/mandate.mjs').MandatesPolicy,
+ * }} [options]
  */
-export function state({ effects = true } = {}) {
+export function state({ effects = true, now, mandatesPolicy = MANDATES } = {}) {
   const log = new EventLog();
   const ca = new CertificateAuthority(new KingIdentity());
   const agents = new AgentRegistry({
@@ -112,6 +172,19 @@ export function state({ effects = true } = {}) {
   const institutions = createMemoryRepository(INSTITUTION_SPEC);
   const tasks = createMemoryRepository(INSTITUTION_TASK_SPEC);
   const outputs = createMemoryRepository(INSTITUTION_OUTPUT_SPEC);
+  const mandateRows = createMemoryRepository(INSTITUTION_MANDATE_SPEC);
+  const breaches = createMemoryRepository(INSTITUTION_BREACH_SPEC);
+  const cycles = createMemoryRepository(INSTITUTION_REPORT_CYCLE_SPEC);
+  const mandate = new InstitutionMandate({
+    policy: mandatesPolicy,
+    log,
+    institutions,
+    mandates: mandateRows,
+    breaches,
+    cycles,
+    tasks,
+    now,
+  });
   const ops = new InstitutionOperations({
     policy: POLICY,
     log,
@@ -119,6 +192,8 @@ export function state({ effects = true } = {}) {
     tasks,
     outputs,
     agents,
+    mandate,
+    now,
     effects: effectIndex(
       effects
         ? [
@@ -128,7 +203,32 @@ export function state({ effects = true } = {}) {
         : [],
     ),
   });
-  return { log, ca, agents, institutions, tasks, outputs, ops };
+  return {
+    log,
+    ca,
+    agents,
+    institutions,
+    tasks,
+    outputs,
+    mandateRows,
+    breaches,
+    cycles,
+    mandate,
+    ops,
+  };
+}
+
+/**
+ * مؤسسةٌ مُؤسَّسةٌ **ونموذجُ تشغيلِها مُنفَذ**: الشرطان معاً هما ما يجعل العملَ
+ * ممكناً بعد `M8.06`، فلا تُستقبَل مهمّةٌ قبل أن يكون للاختصاصِ صفٌّ محفوظ.
+ * @param {ReturnType<typeof state>} s
+ * @param {string} key
+ * @returns {Promise<import('../../src/persistence/entities.mjs').EntityRecord>}
+ */
+export async function establish(s, key) {
+  const institution = await s.ops.commission({ key });
+  await s.mandate.enact({ institutionKey: key, actorRole: ENACTOR });
+  return institution;
 }
 
 /** أسماءُ الهويات فريدةٌ في السجل، فتُرقَّم كي يجتمع عدةُ وكلاءَ في اختبارٍ واحد. */
@@ -169,6 +269,7 @@ export async function ranTask(s, { key, id }) {
     id,
     institutionKey: key,
     kind: kind.kind,
+    domain: domainFor(key, kind.kind),
     subject: subjectFor(kind.kind),
     submittedBy: SUBMITTER,
     actorRole: SUBMITTER,

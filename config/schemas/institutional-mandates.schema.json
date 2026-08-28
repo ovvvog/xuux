@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/institutional-mandates.schema.json",
+  "title": "نموذجُ التشغيل المؤسسي — الاختصاصُ والصلاحياتُ وسقفُ الميزانيةِ والمساءلةُ والتقاريرُ الدورية",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "acts", "procedure", "mandates", "guarantees"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "acts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enact", "closeCycle"],
+      "properties": {
+        "enact": { "$ref": "#/$defs/role" },
+        "closeCycle": { "$ref": "#/$defs/role" }
+      }
+    },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireEnactedMandate",
+        "requireDeclaredDomain",
+        "requireGrantedPower",
+        "recordBreach",
+        "enforcePeriodCeiling",
+        "blockOverdueReporting",
+        "minBreachDetailLength"
+      ],
+      "properties": {
+        "requireEnactedMandate": { "const": true },
+        "requireDeclaredDomain": { "const": true },
+        "requireGrantedPower": { "const": true },
+        "recordBreach": { "const": true },
+        "enforcePeriodCeiling": { "const": true },
+        "blockOverdueReporting": { "const": true },
+        "minBreachDetailLength": { "type": "integer", "minimum": 20 }
+      }
+    },
+    "mandates": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "jurisdiction",
+          "powers",
+          "prohibitions",
+          "acts",
+          "budget",
+          "accountability",
+          "reporting"
+        ],
+        "properties": {
+          "key": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" },
+          "jurisdiction": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["domains", "excludes", "statement"],
+            "properties": {
+              "domains": { "$ref": "#/$defs/nameList" },
+              "excludes": { "$ref": "#/$defs/nameListMaybeEmpty" },
+              "statement": { "type": "string", "minLength": 40 }
+            }
+          },
+          "powers": { "$ref": "#/$defs/nameList" },
+          "prohibitions": { "$ref": "#/$defs/nameListMaybeEmpty" },
+          "acts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "domain", "power"],
+              "properties": {
+                "kind": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" },
+                "domain": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" },
+                "power": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" }
+              }
+            }
+          },
+          "budget": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["periodDays", "ceiling"],
+            "properties": {
+              "periodDays": { "type": "integer", "minimum": 1 },
+              "ceiling": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "accountability": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["accountableTo", "escalateTo", "statement"],
+            "properties": {
+              "accountableTo": { "$ref": "#/$defs/role" },
+              "escalateTo": { "$ref": "#/$defs/role" },
+              "statement": { "type": "string", "minLength": 40 }
+            }
+          },
+          "reporting": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["periodDays", "graceDays"],
+            "properties": {
+              "periodDays": { "type": "integer", "minimum": 1 },
+              "graceDays": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement", "enforcedBy"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^MANDATE_[A-Z_]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "role": { "type": "string", "pattern": "^role:[a-z-]+$" },
+    "nameList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" }
+    },
+    "nameListMaybeEmpty": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" }
+    }
+  }
+}

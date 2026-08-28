@@ -32,10 +32,13 @@
  * وتوحيدُ هذا مع دفتر الحصص الذرّي في `src/policy/quota.mjs` مسجَّلٌ في
  * `docs/REMAINING_WORK.md`.
  *
- * **وحدٌّ معلَن ثانٍ:** حدودُ اختصاص المؤسسة ومساءلتُها وتقاريرُها الدوريةُ
- * كبياناتٍ حاكمةٍ هي الخطوةُ `M8.06`، وليست في هذا الملف. وما يُقاس هنا هو
- * **دورةُ التشغيل** لا حدُّ الاختصاص: أنواعُ المهام مُعلَنةٌ لكلِّ مؤسسةٍ، وهذا
- * أضيقُ من «اختصاصٍ» بالمعنى الحاكم ولا يُدَّعى أنّه هو.
+ * **والاختصاصُ موصولٌ لا مفترض (الخطوة `M8.06`):** حدودُ الاختصاصِ والصلاحياتِ
+ * وسقفُ المدّةِ والمساءلةُ والتقريرُ الدوريُّ تسكن `src/institutions/mandate.mjs`،
+ * وهذا الملفُ **يستدعيها ولا يعمل بدونها**: `submit` يطلب `domain` ويمرّره إلى
+ * `mandate.authorize` بعد `mandate.assertReportingCurrent`، و`execute` يسأل
+ * `mandate.assertWithinPeriodCeiling` قبل القيد. وما يُقاس في هذا الملف وحده
+ * **دورةُ التشغيل**: أنواعُ المهام المُعلَنةُ لكلِّ مؤسسةٍ أضيقُ من «اختصاصٍ»
+ * بالمعنى الحاكم، ولا يُدَّعى أنّها هو.
  *
  * **وحدٌّ معلَن ثالث:** الأفعالُ هنا لا تمرّ بنقطة التفويض
  * (`src/policy/enforcement-point.mjs`) لأنّها ليست من الأفعال المحكومة المُعلَنة
@@ -51,6 +54,7 @@ import {
   rolesFor,
   taskKindOf,
 } from './institutions.mjs';
+import { MANDATE_ERRORS } from './mandate.mjs';
 
 /**
  * أنواعُ حوادثِ التشغيل المؤسسي. وكلُّ نوعٍ هنا عقدٌ في قناة `institutions` من
@@ -106,9 +110,10 @@ export class InstitutionOperations {
    * @param {import('../persistence/repository-memory.mjs').Repository} deps.outputs
    * @param {import('../identity/agent-registry.mjs').AgentRegistry} deps.agents
    * @param {Map<string, import('./executors.mjs').InstitutionEffectExecutor>} deps.effects
+   * @param {import('./mandate.mjs').InstitutionMandate} deps.mandate
    * @param {() => Date} [deps.now]
    */
-  constructor({ policy, log, institutions, tasks, outputs, agents, effects, now }) {
+  constructor({ policy, log, institutions, tasks, outputs, agents, effects, mandate, now }) {
     if (!policy) throw new Error('INSTITUTION_POLICY_REQUIRED');
     if (!log) throw new Error('INSTITUTION_EVENT_LOG_REQUIRED');
     if (!institutions || !tasks || !outputs) throw new Error('INSTITUTION_REPOSITORY_REQUIRED');
@@ -116,6 +121,11 @@ export class InstitutionOperations {
     // فيصير الإسنادُ اسماً في عمود — وهو العيبُ الذي تُغلقه هذه الخطوة.
     if (!agents) throw new Error('INSTITUTION_AGENT_REGISTRY_REQUIRED');
     if (!effects) throw new Error('INSTITUTION_EFFECT_INDEX_REQUIRED');
+    // ونموذجُ التشغيل لازمٌ لا اختياري (الخطوة `M8.06`): وسيطٌ اختياريٌّ يعني
+    // أنّ تركَه مسارٌ لمؤسسةٍ تعمل بلا اختصاصٍ يمنع، وهو العيبُ الذي تُغلقه
+    // الخطوةُ بعينه. والرفضُ عند التركيب لا عند أول مهمّة: خطأُ التركيب يُقرأ
+    // حين يُركَّب لا حين تمرّ عليه مهمّةٌ أولى في الإنتاج.
+    if (!mandate) throw new Error('INSTITUTION_MANDATE_REQUIRED');
     this.policy = policy;
     this.log = log;
     this.institutions = institutions;
@@ -123,6 +133,7 @@ export class InstitutionOperations {
     this.outputs = outputs;
     this.agents = agents;
     this.effects = effects;
+    this.mandate = mandate;
     this.now = now ?? (() => new Date());
   }
 
@@ -202,15 +213,26 @@ export class InstitutionOperations {
   }
 
   /**
-   * يستقبل مهمّةً من نوعٍ مُعلَنٍ لهذه المؤسسة.
-   * @param {{ id: string, institutionKey: string, kind: string, subject: string, submittedBy: string, actorRole: string }} input
+   * يستقبل مهمّةً من نوعٍ مُعلَنٍ لهذه المؤسسة **وفي مجالٍ من اختصاصها**.
+   *
+   * و`domain` وسيطٌ مطلوبٌ لا مستنبَط: مجالٌ يُستنبط من نوع المهمّة يجعل
+   * دعوى المؤسسةِ وإقرارَ الدولةِ شيئاً واحداً، فلا يبقى ما يُقارن بالاختصاص.
+   * وترتيبُ الفحوص مقصود: الدورُ أوّلاً، ثمّ المؤسسةُ مُأسّسةٌ، ثمّ النوعُ مُعلَنٌ،
+   * ثمّ التقريرُ الدوريُّ غيرُ متأخّر، ثمّ **الاختصاصُ والصلاحية**، وأخيراً طولُ
+   * الموضوع. فمؤسسةٌ تتجاوز اختصاصَها تُمنع وتُسجَّل ولو كان موضوعُها قصيراً:
+   * رفضُ الشكل لا يجوز أن يُخفي مخالفةَ الاختصاص فتمرّ بلا أثر.
+   * @param {{ id: string, institutionKey: string, kind: string, domain: string, subject: string, submittedBy: string, actorRole: string }} input
    * @returns {Promise<import('../persistence/entities.mjs').EntityRecord>}
    */
-  async submit({ id, institutionKey, kind, subject, submittedBy, actorRole }) {
+  async submit({ id, institutionKey, kind, domain, subject, submittedBy, actorRole }) {
     this.#permit('submit', actorRole);
     const institution = await this.#commissioned(institutionKey);
     const pilot = pilotOf(this.policy, institutionKey);
     const taskKind = taskKindOf(pilot, kind);
+    // التقريرُ قبل الإجازة: مؤسسةٌ تأخّرت عن تقريرها الدوريّ لا تُستقبل لها
+    // مهمّةٌ جديدةٌ ولو كانت داخلَ اختصاصها؛ فالمساءلةُ شرطُ العمل لا أثرُه.
+    await this.mandate.assertReportingCurrent({ institutionKey, at: this.now() });
+    await this.mandate.authorize({ institutionKey, kind, domain, taskId: id });
     // حدُّ الموضوع مقروءٌ من الوثيقة، ونفسُ الحدِّ ثابتٌ في `entities.mjs` وقيدٌ
     // في الهجرة 0014. والرفضُ هنا يحمل رمزَه المُعلَن كي يُقرأ في القناة رفضَ
     // شرطٍ لا انهيارَ مواصفة.
@@ -224,6 +246,7 @@ export class InstitutionOperations {
       id,
       institutionId: String(institution['id']),
       kind,
+      domain,
       subject,
       submittedBy,
       state: 'received',
@@ -385,6 +408,26 @@ export class InstitutionOperations {
         task,
         INSTITUTION_ERRORS.BUDGET_EXHAUSTED,
         `ميزانيةُ المؤسسة ${readText(institution, 'key')} نفدت: المُخصَّص ${allocated} والمقيَّد ${consumed} وكلفةُ المهمّة ${cost}؛ ونفادُ الميزانية يوقف المهمّةَ قبل أن تبدأ.`,
+      );
+    }
+    // وسقفُ المدّةِ يُسأل **قبل القيد** لا بعده (الخطوة `M8.06`): مُخصَّصٌ كلّيٌّ لا
+    // يمنع مؤسسةً تستنفد موردَ سنةٍ في أسبوع، والسقفُ المرحليُّ هو الحدُّ المعنيُّ
+    // بذلك. والرفضُ يُسجَّل في صفِّ المهمّة ويُنشر، ولا يُقَيّد ما مُنِع.
+    try {
+      await this.mandate.assertWithinPeriodCeiling({
+        institutionKey: readText(institution, 'key'),
+        institutionId,
+        cost,
+        taskId,
+        at: this.now(),
+      });
+    } catch (error) {
+      return this.#refuse(
+        task,
+        MANDATE_ERRORS.PERIOD_CEILING_EXCEEDED,
+        error instanceof Error && error.message.length > 0
+          ? error.message
+          : `المهمّة ${taskId} تتجاوز سقفَ المدّةِ المُعلَن لمؤسستها؛ والسقفُ يمنع قبل القيد لا بعده.`,
       );
     }
     // التحديثُ المتفائل هو الحاجز: محاولتان متزامنتان تنجح إحداهما وتُخفق

@@ -443,6 +443,22 @@ channels:
         version: 1
         required: [institutionId, tasks, outputs]
         optional: [consumed, remaining]
+      # نموذجُ التشغيل المؤسسي — الخطوة M8.06. أنواعٌ تُضاف إلى قناةٍ قائمة،
+      # والإضافةُ غيرُ كاسرة: لا حقلَ إلزاميّاً جديداً على نوعٍ منشور.
+      - type: institutions.mandate.enacted
+        version: 1
+        required: [institutionId, key, domains, powers, accountableTo]
+      # تجاوزُ الاختصاص واقعةٌ تُنشر لا تُطوى في رفضِ مهمّة: معيارُ القبول
+      # «تُمنع وتُسجَّل»، وجهةُ المساءلةِ وجهةُ التصعيدِ في الحملِ لأنّهما من لهما
+      # أن يقرأا الواقعة. والحقولُ الثلاثةُ الأخيرةُ تُرسل دائماً، وتكون فارغةً إذا
+      # وقعت المخالفةُ خارجَ مهمّةٍ أو خارجَ مجالٍ مطلوب، فتُعلن اختياريّةً لا إلزاميّة.
+      - type: institutions.mandate.exceeded
+        version: 1
+        required: [institutionId, key, code, accountableTo, escalateTo]
+        optional: [taskId, domain, power]
+      - type: institutions.report.cycle.closed
+        version: 1
+        required: [institutionId, key, periodStart, periodEnd, tasks, breaches, consumed]
   - id: isolation
     subject: 'العزلُ التنفيذي: بدؤُه وانتهاؤُه ومنعُ الهروب منه'
     classification: internal

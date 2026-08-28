@@ -34,6 +34,9 @@ import {
   INSTITUTION_SPEC,
   INSTITUTION_TASK_SPEC,
   INSTITUTION_OUTPUT_SPEC,
+  INSTITUTION_MANDATE_SPEC,
+  INSTITUTION_BREACH_SPEC,
+  INSTITUTION_REPORT_CYCLE_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -72,6 +75,9 @@ export function createClientRepositories(client) {
       institutions: createPostgresRepository(client, INSTITUTION_SPEC),
       institutionTasks: createPostgresRepository(client, INSTITUTION_TASK_SPEC),
       institutionOutputs: createPostgresRepository(client, INSTITUTION_OUTPUT_SPEC),
+      institutionMandates: createPostgresRepository(client, INSTITUTION_MANDATE_SPEC),
+      institutionBreaches: createPostgresRepository(client, INSTITUTION_BREACH_SPEC),
+      institutionReportCycles: createPostgresRepository(client, INSTITUTION_REPORT_CYCLE_SPEC),
     })
   );
 }
