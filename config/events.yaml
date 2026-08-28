@@ -316,6 +316,34 @@ channels:
       - type: egress.sent
         version: 1
         required: [attemptsInWindow, bytes, classification, destination, policyId, purpose, uri]
+  - id: federation
+    subject: 'التفويضُ الترابيّ: نفاذُه وسحبُه وما مُورس به وما رُفض'
+    classification: internal
+    version: 1
+    producers:
+      - role:king
+      - role:minister
+      - role:operator
+      - role:agent
+      - role:auditor
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: federation.act.exercised
+        version: 1
+        required: [actingKey, id, kind, power, territoryKey]
+      - type: federation.act.refused
+        version: 1
+        required: [code, kind, level, power, requestedTerritoryKey, territoryKey]
+      - type: federation.delegation.activated
+        version: 1
+        required: [exercisedBy, level, parentKey, powers, territoryKey]
+      - type: federation.delegation.revoked
+        version: 1
+        required: [level, reason, revokedBy, territoryKey]
   - id: halt
     subject: 'مِفتاحُ الإيقاف: إصدارُه وتأكيدُه واستئنافُ العمل'
     classification: sovereign

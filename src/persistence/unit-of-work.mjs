@@ -37,6 +37,9 @@ import {
   INSTITUTION_MANDATE_SPEC,
   INSTITUTION_BREACH_SPEC,
   INSTITUTION_REPORT_CYCLE_SPEC,
+  FEDERATION_DELEGATION_SPEC,
+  FEDERATION_ACT_SPEC,
+  FEDERATION_REFUSAL_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -78,6 +81,9 @@ export function createClientRepositories(client) {
       institutionMandates: createPostgresRepository(client, INSTITUTION_MANDATE_SPEC),
       institutionBreaches: createPostgresRepository(client, INSTITUTION_BREACH_SPEC),
       institutionReportCycles: createPostgresRepository(client, INSTITUTION_REPORT_CYCLE_SPEC),
+      federationDelegations: createPostgresRepository(client, FEDERATION_DELEGATION_SPEC),
+      federationActs: createPostgresRepository(client, FEDERATION_ACT_SPEC),
+      federationRefusals: createPostgresRepository(client, FEDERATION_REFUSAL_SPEC),
     })
   );
 }

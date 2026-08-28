@@ -1655,6 +1655,255 @@ export const INSTITUTION_REPORT_CYCLE_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * حدُّ سببِ الرفضِ الترابيِّ وسببِ سحبِ التفويض — الخطوة `M8.07`. ونفسُ الرقمِ
+ * قيدٌ في الهجرة 0016 ومُعلَنٌ في `config/federation-delegation.yaml`، والبوابةُ
+ * 23 تفحص وقوعَه في موضعه من القيد.
+ */
+export const FEDERATION_MIN_REASON_LENGTH = 20;
+
+/** حدُّ موضوعِ الفعلِ الترابي: فعلٌ بلا موضوعٍ مكتوبٍ لا يُراجَع ولا يُنسَب. */
+export const FEDERATION_MIN_SUBJECT_LENGTH = 20;
+
+/**
+ * تفويضُ ترابٍ نافذٌ أو مسحوب — الخطوة `M8.07`.
+ *
+ * والصفُّ **سندُ السلطة**: صلاحياتُ المستوى ودورُ ممارستها وأصلُه الترابيُّ ووقتُ
+ * نفاذِ التفويضِ ووقتُ سحبه. وسحبُ التفويضِ يُكتب في الصفِّ نفسِه لا في جدولٍ
+ * آخر: حالٌ تُقرأ من موضعين تُقرأ متعارضةً في اللحظة التي يهمّ فيها الفرق.
+ *
+ * **وحدٌّ معلَن:** لا مُخصَّصَ ولا سقفَ صرفٍ ترابيّاً في هذا الصفّ: ميزانيةُ
+ * الترابِ ليست في `M8.07`.
+ */
+/** @type {EntitySpec} */
+export const FEDERATION_DELEGATION_SPEC = Object.freeze({
+  name: 'federation_delegations',
+  table: 'state.federation_delegations',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      territoryKey: { column: 'territory_key', type: 'string', required: true, maxLength: 32 },
+      level: {
+        column: 'level',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['region', 'province', 'municipality']),
+      },
+      parentKey: { column: 'parent_key', type: 'string', nullable: true, maxLength: 32 },
+      exercisedBy: { column: 'exercised_by', type: 'string', required: true, maxLength: 64 },
+      powers: { column: 'powers', type: 'stringArray', required: true },
+      kinds: { column: 'kinds', type: 'stringArray', required: true },
+      modelVersion: { column: 'model_version', type: 'integer', required: true },
+      activatedAt: { column: 'activated_at', type: 'timestamp', required: true },
+      activatedBy: { column: 'activated_by', type: 'string', required: true, maxLength: 64 },
+      revokedAt: { column: 'revoked_at', type: 'timestamp', nullable: true },
+      revokedBy: { column: 'revoked_by', type: 'string', nullable: true, maxLength: 64 },
+      revocationReason: { column: 'revocation_reason', type: 'string', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['territoryKey'])]),
+  filterable: Object.freeze(['territoryKey', 'level', 'parentKey']),
+  invariants: Object.freeze([
+    {
+      code: 'FEDERATION_DELEGATION_LEVEL_KEY_SHAPED',
+      message:
+        'مفتاحُ الترابِ يطابق مرتبتَه: الإقليمُ `Rnnn`، والولايةُ `Pnnn-nn`، والبلديةُ `Pnnn-nn-nnn`؛ ومفتاحٌ لا يقول مرتبتَه يُقرأ في غيرِ موضعه من الشجرة.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const key = record['territoryKey'];
+        const level = record['level'];
+        if (typeof key !== 'string' || typeof level !== 'string') return false;
+        if (level === 'region') return /^R[0-9]{3}$/.test(key);
+        if (level === 'province') return /^P[0-9]{3}-[0-9]{2}$/.test(key);
+        return /^P[0-9]{3}-[0-9]{2}-[0-9]{3}$/.test(key);
+      },
+    },
+    {
+      code: 'FEDERATION_DELEGATION_PARENT_COHERENT',
+      message:
+        'الإقليمُ بلا أصلٍ ترابيٍّ وفوقَه المركز، وما دونه أصلُه مُعلَنٌ وهو من ترابه بحسب مفتاحه؛ وفرعٌ بلا أصلٍ سلطةٌ بلا مصدر.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const key = record['territoryKey'];
+        const level = record['level'];
+        const parent = record['parentKey'];
+        if (typeof key !== 'string' || typeof level !== 'string') return false;
+        if (level === 'region') return parent === null;
+        if (typeof parent !== 'string' || parent === '') return false;
+        // أصلُ الولايةِ إقليمٌ مفتاحُه `Rnnn` ومفتاحُها `Pnnn-nn`: القرابةُ بالرقم
+        // لا بالحرف. وأصلُ البلديةِ ولايةٌ فمفتاحُها امتدادُ مفتاحِ أصله نصّاً.
+        if (/^R[0-9]{3}$/.test(parent)) return key.startsWith(`P${parent.slice(1)}-`);
+        return key.startsWith(`${parent}-`);
+      },
+    },
+    {
+      code: 'FEDERATION_DELEGATION_POWERS_DECLARED',
+      message:
+        'التفويضُ صلاحيةٌ واحدةٌ على الأقلّ ونوعُ فعلٍ واحدٌ على الأقلّ؛ وتفويضٌ بلا صلاحيةٍ إعلانُ سلطةٍ لا تُمارَس فلا يُقاس سحبُها.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const powers = record['powers'];
+        const kinds = record['kinds'];
+        return (
+          Array.isArray(powers) && powers.length > 0 && Array.isArray(kinds) && kinds.length > 0
+        );
+      },
+    },
+    {
+      code: 'FEDERATION_DELEGATION_REVOCATION_COMPLETE',
+      message:
+        'السحبُ وقتٌ وفاعلٌ وسببٌ مكتوبٌ يبلغ الحدَّ المُعلَن، والثلاثةُ تحضر معاً أو تغيب معاً؛ وسحبٌ بلا سببٍ قرارٌ لا يُراجَع، وسببٌ بلا وقتٍ سحبٌ لا يُعرَف متى نفَذ.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const at = record['revokedAt'];
+        const by = record['revokedBy'];
+        const reason = record['revocationReason'];
+        if (at === null) return by === null && reason === null;
+        if (!(at instanceof Date)) return false;
+        if (typeof by !== 'string' || by === '') return false;
+        return typeof reason === 'string' && reason.trim().length >= FEDERATION_MIN_REASON_LENGTH;
+      },
+    },
+    {
+      code: 'FEDERATION_DELEGATION_REVOKED_AFTER_ACTIVATION',
+      message: 'السحبُ لا يسبق التفويض؛ وسحبٌ قبل نفاذِه يُقرأ سلطةً سُحبت قبل أن تُمنح.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const at = record['revokedAt'];
+        const from = record['activatedAt'];
+        if (at === null) return true;
+        return at instanceof Date && from instanceof Date && at.getTime() >= from.getTime();
+      },
+    },
+  ]),
+});
+
+/**
+ * فعلٌ ترابيٌّ مُمارَسٌ فعلاً — الخطوة `M8.07`.
+ *
+ * والصفُّ **دليلُ الاستقلال**: فعلٌ وقع في ترابٍ بدورِ مستواه، لا بإذنٍ مركزيٍّ
+ * لكلِّ فعل. ويحمل الترابَ المعمولَ فيه والمستوى الذي مارسه، وهما قد يختلفان:
+ * الأصلُ يعمل في فرعه ولا يعمل الفرعُ في غيرِ ترابه.
+ *
+ * **وحدٌّ معلَن:** المخرَجُ نصُّ الموضوعِ في الصفِّ نفسِه، فلا منفِّذَ أثرٍ خارجيٌّ
+ * ولا مخرَجٌ في مخزنٍ مستقلٍّ كما في `M8.05`.
+ */
+/** @type {EntitySpec} */
+export const FEDERATION_ACT_SPEC = Object.freeze({
+  name: 'federation_local_acts',
+  table: 'state.federation_local_acts',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      territoryKey: { column: 'territory_key', type: 'string', required: true, maxLength: 32 },
+      actingKey: { column: 'acting_key', type: 'string', required: true, maxLength: 32 },
+      level: {
+        column: 'level',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['region', 'province', 'municipality']),
+      },
+      kind: { column: 'kind', type: 'string', required: true, maxLength: 64 },
+      power: { column: 'power', type: 'string', required: true, maxLength: 64 },
+      subject: { column: 'subject', type: 'string', required: true, maxLength: 2000 },
+      exercisedBy: { column: 'exercised_by', type: 'string', required: true, maxLength: 64 },
+      exercisedAt: { column: 'exercised_at', type: 'timestamp', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['territoryKey', 'actingKey', 'level', 'kind']),
+  invariants: Object.freeze([
+    {
+      code: 'FEDERATION_ACT_SUBJECT_SUBSTANTIAL',
+      message:
+        'موضوعُ الفعلِ مكتوبٌ بحدٍّ معلَن؛ وفعلٌ بموضوعٍ فارغٍ أو حرفين لا يُراجَع ولا يُعرَف ما وقع به.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const subject = record['subject'];
+        return (
+          typeof subject === 'string' && subject.trim().length >= FEDERATION_MIN_SUBJECT_LENGTH
+        );
+      },
+    },
+    {
+      code: 'FEDERATION_ACT_WITHIN_ACTING_TERRITORY',
+      message:
+        'الفعلُ في ترابِ من مارسه أو في فرعٍ منه؛ وفعلٌ خارجَ ترابِ صاحبه سلطةٌ عبرت حدَّها فلا يبقى للعزلِ معنى.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const territory = record['territoryKey'];
+        const acting = record['actingKey'];
+        if (typeof territory !== 'string' || typeof acting !== 'string') return false;
+        if (territory === acting) return true;
+        if (/^R[0-9]{3}$/.test(acting)) return territory.startsWith(`P${acting.slice(1)}-`);
+        return territory.startsWith(`${acting}-`);
+      },
+    },
+  ]),
+});
+
+/**
+ * رفضُ فعلٍ ترابيٍّ — الخطوة `M8.07`.
+ *
+ * والصفُّ **مادّةُ مراجعةِ العزل**: مُنِعَ ولم يُسجَّل يعني أنّ الترابَ المتجاوِزَ
+ * لا يُقرأ في أيِّ جدول، وأنّ سحبَ التفويضِ لا يُعرَف أنّه أوقف عملاً. ويُحفظ فيه
+ * **الترابُ المطلوبُ** مع ترابِ من طلبه: الفرقُ بينهما هو الخروجُ من الحدّ.
+ *
+ * **وحدٌّ معلَن:** الرفضُ يُسجَّل ولا يُعالَج: لا تصعيدَ ولا إشعارَ لجهةٍ ولا جزاءَ
+ * يقع. وذلك أضعفُ من مساءلةٍ كاملةٍ ولا يُدَّعى أنّه هي.
+ */
+/** @type {EntitySpec} */
+export const FEDERATION_REFUSAL_SPEC = Object.freeze({
+  name: 'federation_refusals',
+  table: 'state.federation_refusals',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 200 },
+      territoryKey: { column: 'territory_key', type: 'string', nullable: true, maxLength: 32 },
+      requestedTerritoryKey: {
+        column: 'requested_territory_key',
+        type: 'string',
+        required: true,
+        maxLength: 32,
+      },
+      level: { column: 'level', type: 'string', nullable: true, maxLength: 32 },
+      kind: { column: 'kind', type: 'string', nullable: true, maxLength: 64 },
+      power: { column: 'power', type: 'string', nullable: true, maxLength: 64 },
+      code: { column: 'code', type: 'string', required: true, maxLength: 120 },
+      reason: { column: 'reason', type: 'string', required: true, maxLength: 2000 },
+      actorRole: { column: 'actor_role', type: 'string', nullable: true, maxLength: 64 },
+      refusedAt: { column: 'refused_at', type: 'timestamp', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['territoryKey', 'requestedTerritoryKey', 'code', 'level']),
+  invariants: Object.freeze([
+    {
+      code: 'FEDERATION_REFUSAL_REASON_SUBSTANTIAL',
+      message:
+        'سببُ الرفضِ مكتوبٌ بحدٍّ معلَن؛ ورفضٌ بلا سببٍ مكتوبٍ يُقرأ بعد حينٍ منعاً بلا موجبٍ فلا يُراجَع ولا يُنقَض.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const reason = record['reason'];
+        return typeof reason === 'string' && reason.trim().length >= FEDERATION_MIN_REASON_LENGTH;
+      },
+    },
+    {
+      code: 'FEDERATION_REFUSAL_CODE_DECLARED',
+      message:
+        'رمزُ الرفضِ رمزٌ من رموزِ التفويض الترابي المُعلَنة؛ ورمزٌ حرٌّ يجعل جدولَ الرفوضِ نصّاً لا يُصنَّف.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const code = record['code'];
+        return typeof code === 'string' && /^FEDERATION_[A-Z_]+$/.test(code);
+      },
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -1674,6 +1923,9 @@ export const ENTITY_SPECS = Object.freeze({
   institution_mandates: INSTITUTION_MANDATE_SPEC,
   institution_breaches: INSTITUTION_BREACH_SPEC,
   institution_report_cycles: INSTITUTION_REPORT_CYCLE_SPEC,
+  federation_delegations: FEDERATION_DELEGATION_SPEC,
+  federation_local_acts: FEDERATION_ACT_SPEC,
+  federation_refusals: FEDERATION_REFUSAL_SPEC,
 });
 
 /**

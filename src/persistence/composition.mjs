@@ -18,6 +18,7 @@ import { DataCatalog } from '../data/data-catalog.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
 import { ErasureLedger } from '../data/erasure-ledger.mjs';
 import { EventBus, loadEventsPolicy } from '../events/index.mjs';
+import { RegionalDelegation, loadDelegationPolicy } from '../federation/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -56,6 +57,9 @@ import {
   INSTITUTION_MANDATE_SPEC,
   INSTITUTION_BREACH_SPEC,
   INSTITUTION_REPORT_CYCLE_SPEC,
+  FEDERATION_DELEGATION_SPEC,
+  FEDERATION_ACT_SPEC,
+  FEDERATION_REFUSAL_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -85,6 +89,9 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} institutionMandates
  * @property {ReturnType<typeof createMemoryRepository>} institutionBreaches
  * @property {ReturnType<typeof createMemoryRepository>} institutionReportCycles
+ * @property {ReturnType<typeof createMemoryRepository>} federationDelegations
+ * @property {ReturnType<typeof createMemoryRepository>} federationActs
+ * @property {ReturnType<typeof createMemoryRepository>} federationRefusals
  */
 
 /**
@@ -109,6 +116,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {RetentionCycle} retention
  * @property {EventBus} events
  * @property {InstitutionOperations} institutions
+ * @property {RegionalDelegation} federation
  */
 
 /**
@@ -135,6 +143,9 @@ export function createMemoryRepositories(options = {}) {
     institutionMandates: createMemoryRepository(INSTITUTION_MANDATE_SPEC, options),
     institutionBreaches: createMemoryRepository(INSTITUTION_BREACH_SPEC, options),
     institutionReportCycles: createMemoryRepository(INSTITUTION_REPORT_CYCLE_SPEC, options),
+    federationDelegations: createMemoryRepository(FEDERATION_DELEGATION_SPEC, options),
+    federationActs: createMemoryRepository(FEDERATION_ACT_SPEC, options),
+    federationRefusals: createMemoryRepository(FEDERATION_REFUSAL_SPEC, options),
   };
 }
 
@@ -163,6 +174,9 @@ export function createPostgresRepositories(pool) {
       institutionMandates: createPostgresRepository(pool, INSTITUTION_MANDATE_SPEC),
       institutionBreaches: createPostgresRepository(pool, INSTITUTION_BREACH_SPEC),
       institutionReportCycles: createPostgresRepository(pool, INSTITUTION_REPORT_CYCLE_SPEC),
+      federationDelegations: createPostgresRepository(pool, FEDERATION_DELEGATION_SPEC),
+      federationActs: createPostgresRepository(pool, FEDERATION_ACT_SPEC),
+      federationRefusals: createPostgresRepository(pool, FEDERATION_REFUSAL_SPEC),
     })
   );
 }
@@ -212,6 +226,10 @@ export function createPostgresRepositories(pool) {
  *   التشغيل المؤسسي (M8.06): الاختصاصُ والصلاحياتُ وسقفُ المدّةِ والمساءلةُ ومدّةُ
  *   التقرير الدوريِّ لكلِّ مؤسسةٍ مُشغَّلة. يُحمَّل من
  *   `config/institutional-mandates.yaml` إن لم يُمرَّر.
+ * @param {import('../federation/delegation.mjs').DelegationPolicy | null} [deps.delegationPolicy] وثيقةُ
+ *   التفويض الترابي (M8.07): الإقليمُ المعزولُ ومستوياتُه الثلاثةُ وصلاحياتُ كلِّ
+ *   مستوى ودورُ ممارستها والصلاحياتُ المحجوزةُ للمركز. تُحمَّل من
+ *   `config/federation-delegation.yaml` إن لم تُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -234,6 +252,7 @@ export function createRegistries({
   retentionPolicy = null,
   eventsPolicy = null,
   judiciaryPolicy = null,
+  delegationPolicy = null,
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
@@ -325,6 +344,16 @@ export function createRegistries({
     cycles: repositories.institutionReportCycles,
     tasks: repositories.institutionTasks,
   });
+  // والتفويضُ الترابيُّ يُركَّب قبل بنيةِ الإرجاع لا داخلَ وسائطها (الخطوة `M8.07`):
+  // إقليمٌ اختياريُّ التركيبِ يصير إقليماً بلا مسارٍ في التشغيل، فلا يُقاس استقلالُه
+  // ولا نفاذُ سحبِ تفويضه. وإفرادُه باسمٍ يجعل وصلَه مقروءاً في موضعٍ واحد.
+  const regionalDelegation = new RegionalDelegation({
+    policy: delegationPolicy ?? loadDelegationPolicy(),
+    log,
+    delegations: repositories.federationDelegations,
+    acts: repositories.federationActs,
+    refusals: repositories.federationRefusals,
+  });
   return {
     agents,
     models: new ModelRegistry({
@@ -407,6 +436,10 @@ export function createRegistries({
         createStatisticalBulletinExecutor({ outputs: repositories.institutionOutputs }),
       ]),
     }),
+    // والتفويضُ الترابيُّ موصولٌ **دائماً** (الخطوة `M8.07`)، لنفس سببِ المؤسسة:
+    // إقليمٌ لا مسارَ له في التشغيلِ لا يُمارِس فعلاً ولا يُوقفه سحبُ تفويضٍ، فلا
+    // يبقى لمعيارِ القبولِ ما يُقاس عليه.
+    federation: regionalDelegation,
     // ناقلُ القنوات يُركَّب **دائماً** (الخطوة `M7.07`)، لنفس سبب دفتري النسب
     // والمحو: ناقلٌ اختياريٌّ يصير تركُه مساراً لأحداثٍ تُقرأ بلا تخليصٍ ولا عقد
     // ولا موضعِ قراءة — وهو العيب الذي أغلقته الخطوة.

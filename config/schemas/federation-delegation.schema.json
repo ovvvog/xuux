@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/federation-delegation.schema.json",
+  "title": "الإقليمُ المعزولُ وصلاحياتُه المفوَّضة — الاختصاصُ الترابيُّ وسلسلةُ التفويضِ وسحبُه",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "acts", "procedure", "reserved", "region", "levels", "guarantees"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "acts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["activate", "revoke"],
+      "properties": {
+        "activate": { "$ref": "#/$defs/role" },
+        "revoke": { "$ref": "#/$defs/role" }
+      }
+    },
+    "procedure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireActivatedDelegation",
+        "requireDeclaredTerritory",
+        "requireDelegatedPower",
+        "enforceChainOfDelegation",
+        "revocationEffectiveImmediately",
+        "recordRefusal",
+        "minRefusalReasonLength"
+      ],
+      "properties": {
+        "requireActivatedDelegation": { "const": true },
+        "requireDeclaredTerritory": { "const": true },
+        "requireDelegatedPower": { "const": true },
+        "enforceChainOfDelegation": { "const": true },
+        "revocationEffectiveImmediately": { "const": true },
+        "recordRefusal": { "const": true },
+        "minRefusalReasonLength": { "type": "integer", "minimum": 20 }
+      }
+    },
+    "reserved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["powers", "statement"],
+      "properties": {
+        "powers": { "$ref": "#/$defs/nameList" },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "region": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regionKey", "provinceKey", "municipalityKey", "statement"],
+      "properties": {
+        "regionKey": { "$ref": "#/$defs/regionKey" },
+        "provinceKey": { "$ref": "#/$defs/provinceKey" },
+        "municipalityKey": { "$ref": "#/$defs/municipalityKey" },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "levels": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["level", "key", "parent", "exercisedBy", "powers", "acts", "statement"],
+        "properties": {
+          "level": { "enum": ["region", "province", "municipality"] },
+          "key": { "type": "string", "pattern": "^[RP][0-9]{3}(-[0-9]{2})?(-[0-9]{3})?$" },
+          "parent": { "type": "string", "pattern": "^([RP][0-9]{3}(-[0-9]{2})?)?$" },
+          "exercisedBy": { "$ref": "#/$defs/role" },
+          "powers": { "$ref": "#/$defs/nameList" },
+          "acts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "power"],
+              "properties": {
+                "kind": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" },
+                "power": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" }
+              }
+            }
+          },
+          "statement": { "type": "string", "minLength": 40 }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement", "enforcedBy"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^FEDERATION_[A-Z_]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^src/.+\\.mjs$" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "role": { "type": "string", "pattern": "^role:[a-z-]+$" },
+    "regionKey": { "type": "string", "pattern": "^R[0-9]{3}$" },
+    "provinceKey": { "type": "string", "pattern": "^P[0-9]{3}-[0-9]{2}$" },
+    "municipalityKey": { "type": "string", "pattern": "^P[0-9]{3}-[0-9]{2}-[0-9]{3}$" },
+    "nameList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z][a-z-]{2,40}$" }
+    }
+  }
+}
