@@ -23,6 +23,13 @@
  *       يُلتفُّ عليه بكتابةٍ مباشرة، وحدّان مختلفان في الموضعين أسوأ من واحد.
  *   R7: `cases` مركَّبٌ في `composition.mjs` و`unit-of-work.mjs`، والقضاءُ نفسُه
  *       مُنشَأٌ في `createRegistries`؛ فسلطةٌ ككودٍ غيرِ مركَّبٍ سلطةٌ لا مسارَ لها.
+ *   R9: أعمدةُ فصل المصالح والمراجعة وقيودُها في الهجرات (الهجرة 0013).
+ *   R10: حدُّ سبب المراجعة وحدُّ سبب التنحّي: رقمٌ واحدٌ في الوثيقة والقاعدة
+ *        والمواصفة، مقروءاً في موضعه من القيد لا في أيّ موضعٍ من النصّ.
+ *   R11: فحصُ المصالح مربوطٌ بمسارٍ حقيقيّ: `agents` ممرَّرٌ إلى `new Judiciary(`
+ *        والفحصُ لازمٌ في الوثيقة.
+ *   R12: المراجعةُ البشرية لازمةٌ، وموضوعُها مُعلَنٌ، وتوابعُها موجودةٌ، وبوابةُ
+ *        التنفيذ ترفض برمزَيها.
  *   R8: كلُّ نوعِ حدثٍ في `JUDICIARY_EVENTS` معلَنٌ عقداً في قناة `court` من
  *       `config/events.yaml`.
  *
@@ -309,6 +316,111 @@ if (policy !== null) {
       );
     }
   }
+
+  // ═══ R9: أعمدةُ فصل المصالح والمراجعة وقيودُها في القاعدة ═══
+  // وأسماءُ القيود هي أسماءُ الثوابت في `CASE_SPEC`: قيدٌ في المستودع
+  // الذاكري بلا نظيرٍ في القاعدة يُلتَفُّ عليه بكتابةٍ مباشرة على الجدول.
+  for (const needle of [
+    'reviewed_at',
+    'reviewer',
+    'review_decision',
+    'review_reason',
+    'recused_judges',
+    'recusal_reason',
+    'cases_review_complete',
+    'cases_execution_not_rejected',
+    'cases_judge_not_recused',
+    'cases_recusal_reasoned',
+  ]) {
+    if (!migrations.includes(needle)) {
+      violations.push(
+        `R9: ${needle} غيرُ موجودٍ في الهجرات — فصلُ مصالحٍ ومراجعةٌ بلا قيدٍ في القاعدة شرطٌ يسقط بكتابةٍ مباشرة.`,
+      );
+    }
+  }
+
+  // ═══ R10: حدّا سبب المراجعة وسبب التنحّي: رقمٌ واحدٌ في ثلاثة مواضع ═══
+  // والرقمُ يُقرأ **في موضعه من القيد** لا في أيّ موضعٍ من النص، وهو عينُ
+  // العيب الموصوف في R6 وقد كُشِف بتزييفٍ مقصود.
+  const reviewLimits = [
+    {
+      column: 'review_reason',
+      limit: String(policy.review.minReviewReasonLength),
+      constant: 'CASE_MIN_REVIEW_REASON_LENGTH',
+    },
+    {
+      column: 'recusal_reason',
+      limit: String(policy.procedure.minRecusalReasonLength),
+      constant: 'CASE_MIN_RECUSAL_REASON_LENGTH',
+    },
+  ];
+  for (const { column, limit, constant } of reviewLimits) {
+    const inMigration = new RegExp(
+      String.raw`length\(btrim\(` + column + String.raw`\)\)\s*>=\s*` + limit + String.raw`\b`,
+    );
+    if (!inMigration.test(migrations)) {
+      violations.push(
+        `R10: قيدُ ${column} في الهجرات لا يقرأ الحدَّ ${limit} — حدٌّ في الوثيقة وقيدٌ آخرُ في القاعدة شرطان لا شرط.`,
+      );
+    }
+    if (!new RegExp(constant + String.raw`\s*=\s*` + limit + String.raw`\b`).test(entities)) {
+      violations.push(
+        `R10: ${constant} في src/persistence/entities.mjs لا يساوي ${limit} — ثابتُ المستودع الذاكري ينحرف عن الوثيقة.`,
+      );
+    }
+  }
+  if (policy.review.minReviewReasonLength < policy.procedure.minReasonLength) {
+    violations.push(
+      'R10: حدُّ سبب المراجعة أقلُ من حدّ سبب الحكم — فمراجعةٌ تُجاز بأقلَّ ممّا يُجاز به الحكمُ نفسُه.',
+    );
+  }
+
+  // ═══ R11: فحصُ المصالح مربوطٌ بمسارٍ حقيقيٍّ لا معلَّقٌ ═══
+  // فسجلُّ الهويات هو منبعُ الملكية؛ وقضاءٌ يُركَّب بلا سجلِّ هوياتٍ لا يفحص
+  // مصلحةً ولا يقرأ بشريةَ مراجع، فيصير الفصلُ كوداً لا يُستدعى.
+  // ويُقرأ `agents` **حقلاً مُمرَّراً** (`agents,` أو `agents:`) لا مجرَّدَ كلمةٍ
+  // في الكتلة: كلمةُ `agents` تقع في الكتلة نفسِها ضمن
+  // `createAgentSuspensionExecutor({ agents })`، فبحثٌ عن الكلمة يمرُّ ولو نُزع
+  // الحقلُ. (عيبٌ وقع في أول صياغةٍ لهذه القاعدة وكُشِف بتزييفٍ مقصود: نزعُ
+  // الحقل لم يُسقِط الحاجز.)
+  const wiring = composition.match(/new Judiciary\(\{[\s\S]*?\n\s*\}\)/);
+  if (wiring === null || !/\bagents\s*[,:]/.test(wiring[0])) {
+    violations.push(
+      'R11: `agents` غيرُ ممرَّرٍ إلى `new Judiciary(` في src/persistence/composition.mjs — فحصُ مصالحٍ بلا سجلِّ هوياتٍ مركَّبٍ فحصٌ لا يقع.',
+    );
+  }
+  if (policy.procedure.requireInterestScreening !== true) {
+    violations.push(
+      'R11: `procedure.requireInterestScreening` ليس true في config/judiciary.yaml — وفحصٌ غيرُ لازمٍ يُتجاوز بحذف سجلِّ الهويات.',
+    );
+  }
+
+  // ═══ R12: المراجعةُ البشرية لازمةٌ وموضوعُها معلَنٌ ═══
+  // وحملةُ سلطة المراجعة مفصولون عن القضاة والمنفّذين: مراجعٌ يحكم أو
+  // ينفّذ يُراجع عملَ نفسه (والفحصُ التفصيليُّ في `loadJudiciaryPolicy`).
+  if (policy.review.requireHumanReview !== true) {
+    violations.push(
+      'R12: `review.requireHumanReview` ليس true — ومراجعةٌ غيرُ لازمةٍ تُرفع بتغيير حرفٍ في الوثيقة.',
+    );
+  }
+  if (policy.review.sensitiveOutcomes.length === 0) {
+    violations.push(
+      'R12: `review.sensitiveOutcomes` فارغةٌ — فمراجعةٌ لازمةٌ بلا حكمٍ حسّاسٍ مراجعةٌ لا تقع أبداً.',
+    );
+  }
+  const court = readFile('src/judiciary/court.mjs');
+  for (const needle of ['async ratify(', 'async recuse(', 'async screen(', 'isSensitive(']) {
+    if (!court.includes(needle)) {
+      violations.push(
+        `R12: ${needle} غيرُ موجودٍ في src/judiciary/court.mjs — ووثيقةٌ تُعلن مراجعةً وتنحّياً بلا تابعٍ ينفّذهما وعدٌ.`,
+      );
+    }
+  }
+  if (!court.includes('HUMAN_REVIEW_REQUIRED') || !court.includes('REVIEW_REJECTED')) {
+    violations.push(
+      'R12: بوابةُ التنفيذ في src/judiciary/court.mjs لا ترفض برمزي HUMAN_REVIEW_REQUIRED وREVIEW_REJECTED — فمراجعةٌ لا تمنع التنفيذ رأيٌ يُستأنس به.',
+    );
+  }
 }
 
 if (violations.length > 0) {
@@ -321,5 +433,5 @@ const guarantees = policy ? policy.guarantees.length : 0;
 const effects = policy ? policy.effects.length : 0;
 const minReason = policy ? policy.procedure.minReasonLength : 0;
 console.log(
-  `✅ حاجز القضاء: ${guarantees} بندَ ضمانٍ مربوطاً برمزِ رفضٍ واقع، و${effects} أثرَ تنفيذٍ لكلٍّ منفِّذٌ مسمّى، وحدُّ سبب الحكم ${minReason} حرفاً في الوثيقة والقاعدة والمواصفة، وفعلا التنفيذ والتراجع معلَنان في العتبة والكتالوج.`,
+  `✅ حاجز القضاء: ${guarantees} بندَ ضمانٍ مربوطاً برمزِ رفضٍ واقع، و${effects} أثرَ تنفيذٍ لكلٍّ منفِّذٌ مسمّى، وحدُّ سبب الحكم ${minReason} حرفاً في الوثيقة والقاعدة والمواصفة، وفعلا التنفيذ والتراجع معلَنان في العتبة والكتالوج، وفصلُ المصالح والمراجعةُ البشرية مقيَّدان في الهجرات ومربوطان بسجلِّ الهويات.`,
 );

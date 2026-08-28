@@ -13,4 +13,10 @@ export {
   rolesFor,
 } from './judiciary.mjs';
 export { createAgentSuspensionExecutor, executorIndex } from './executors.mjs';
+export {
+  CONFLICT_RULES,
+  SOVEREIGN_OWNER,
+  recusedJudgesOf,
+  screenJudicialInterest,
+} from './interests.mjs';
 export { JUDICIARY_EVENTS, Judiciary } from './court.mjs';

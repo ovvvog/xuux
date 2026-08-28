@@ -170,6 +170,10 @@ channels:
     producers:
       - role:chief-justice
       - role:king
+      # والمُدقّق ناشرٌ لا مستمعٌ فقط منذ الخطوة M8.04: المراجعةُ البشرية
+      # تُنشر باسمه لا باسم القاضي ولا الملك؛ ومراجعةٌ تُنشر باسم من حكم
+      # أو من يُنفّذ لا تُقرأ من السجل مراجعةً من خارجهما.
+      - role:auditor
     consumers:
       - role:king
       - role:auditor
@@ -208,6 +212,22 @@ channels:
       - type: court.judgment.reversed
         version: 1
         required: [commandId, id, reasonLength]
+      # فصلُ المصالح والمراجعةُ البشرية — الخطوة M8.04. أنواعٌ جديدةٌ لا
+      # حقولٌ مطلوبةٌ في نوعٍ قائم، فالإضافةُ غيرُ كاسرةٍ للعقد. والتعارضُ
+      # والتنحي والمراجعةُ وقائعٌ تُنشر: رفضٌ لا يُنشر رفضٌ لا يُدقّق.
+      - type: court.conflict.detected
+        version: 1
+        # والقاعدةُ مطلوبةٌ لا اختيارية: «تعارضُ مصالح» بلا قاعدةٍ تُسمّى
+        # خبرٌ لا يُراجَع، والمُدقّق يحتاج أن يعرف **بأيّ قاعدةٍ** رُفض.
+        required: [id, judge, rule]
+      - type: court.judge.recused
+        version: 1
+        required: [id, judge]
+        optional: [reasonLength]
+      - type: court.judgment.reviewed
+        version: 1
+        required: [decision, id, reviewer]
+        optional: [reasonLength]
   - id: crown
     subject: أوامرُ التاج وقبولُها وإيقافُها الطارئ
     classification: sovereign
@@ -373,6 +393,56 @@ channels:
         version: 1
         required: []
         open: true
+  # قناةُ التشغيل المؤسسي — الخطوة M8.05. قناةٌ جديدةٌ لا وجودَ لها قبلها، لأنّ
+  # الدولةَ لم يكن فيها مؤسسةٌ تستقبل مهمّةً وتُنفِّذها وتستهلك ميزانية. والإضافةُ
+  # غيرُ كاسرةٍ للعقد: قناةٌ جديدةٌ لا حقلٌ مطلوبٌ في نوعٍ قائم.
+  - id: institutions
+    subject: 'التشغيلُ المؤسسي: المهامُ وإسنادُها وقيدُ الميزانيةِ والمخرجاتُ والتقارير'
+    classification: internal
+    version: 1
+    producers:
+      # الوزارةُ ترفع المهمّة، والتشغيلُ يُسنِد ويُنفِّذ، والتدقيقُ يستخرج
+      # التقرير — نفسُ حاملي الأفعال في `config/institutions.yaml`.
+      - role:minister
+      - role:operator
+      - role:auditor
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    types:
+      - type: institutions.institution.commissioned
+        version: 1
+        required: [id, key, allocation]
+        optional: [seedId, resource]
+      - type: institutions.task.received
+        version: 1
+        required: [id, institutionId, kind]
+        optional: [cost, subjectLength]
+      - type: institutions.task.assigned
+        version: 1
+        required: [id, institutionId, agentId]
+        optional: [role]
+      # قيدُ الميزانية واقعةٌ تُنشر على حِدَة لا تُدمَج في التنفيذ: مهمّةٌ قُيِّدت
+      # ميزانيتُها ثم خرج تنفيذُها بلا أثرٍ تُقرأ من القناة على وجهها — استهلاكٌ
+      # وقع ورفضٌ وقع — لا حادثةً واحدةً تُوهم بأنّ المقيَّدَ رُدّ.
+      - type: institutions.budget.debited
+        version: 1
+        required: [institutionId, taskId, cost, remaining]
+        optional: [resource]
+      - type: institutions.task.executed
+        version: 1
+        required: [id, institutionId, effect, outputId]
+        optional: [agentId]
+      - type: institutions.task.refused
+        version: 1
+        required: [id, reason]
+        optional: [institutionId]
+      - type: institutions.report.produced
+        version: 1
+        required: [institutionId, tasks, outputs]
+        optional: [consumed, remaining]
   - id: isolation
     subject: 'العزلُ التنفيذي: بدؤُه وانتهاؤُه ومنعُ الهروب منه'
     classification: internal

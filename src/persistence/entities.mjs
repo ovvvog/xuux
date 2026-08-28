@@ -762,6 +762,17 @@ export const JUDGMENT_MIN_REASON_LENGTH = 60;
 export const CASE_MIN_SECONDARY_REASON_LENGTH = 40;
 
 /**
+ * الحدُ الأدنى لطول سببِ المراجعة البشرية — الخطوة `M8.04`.
+ *
+ * وهو مساوٍ لحدِّ سبب الحكم لا أقلَ منه: مراجعةٌ تُكتب في أقلَ ممّا يُكتب به
+ * الحكمُ توقيعٌ لا قراءة، والتساوي مفحوصٌ في البوابة 20 مقابلَ الوثيقة والهجرة 0013.
+ */
+export const CASE_MIN_REVIEW_REASON_LENGTH = 60;
+
+/** الحدُ الأدنى لطول سببِ التنحي (الخطوة `M8.04`، والهجرة 0013). */
+export const CASE_MIN_RECUSAL_REASON_LENGTH = 40;
+
+/**
  * القضايا — الخطوة `M8.03`.
  *
  * **العيبُ الذي تُغلقه هذه المواصفة:** جدولُ `state.cases` كان موجوداً من الهجرة
@@ -852,11 +863,24 @@ export const CASE_SPEC = Object.freeze({
       appellant: { column: 'appellant', type: 'string', nullable: true, maxLength: 128 },
       appealReason: { column: 'appeal_reason', type: 'string', nullable: true },
       closedAt: { column: 'closed_at', type: 'timestamp', nullable: true },
+      // المراجعةُ البشرية والتنحي — الخطوة `M8.04`. وموضعُها الجدولُ لا الذاكرة:
+      // مراجعةٌ تُحفظ في العملية تُمحى بإعادة التشغيل فيُنفّذ الحكمُ بعدها بلا قارئ.
+      reviewedAt: { column: 'reviewed_at', type: 'timestamp', nullable: true },
+      reviewer: { column: 'reviewer', type: 'string', nullable: true, maxLength: 128 },
+      reviewDecision: {
+        column: 'review_decision',
+        type: 'enum',
+        nullable: true,
+        values: Object.freeze(['approved', 'rejected']),
+      },
+      reviewReason: { column: 'review_reason', type: 'string', nullable: true },
+      recusedJudges: { column: 'recused_judges', type: 'stringArray', required: false },
+      recusalReason: { column: 'recusal_reason', type: 'string', nullable: true },
       ...MANAGED,
     })
   ),
   unique: Object.freeze([]),
-  filterable: Object.freeze(['state', 'lawId', 'respondent', 'claimant', 'judge']),
+  filterable: Object.freeze(['state', 'lawId', 'respondent', 'claimant', 'judge', 'reviewer']),
   invariants: Object.freeze([
     {
       code: 'CASE_JUDGMENT_NEEDS_HEARING',
@@ -955,6 +979,67 @@ export const CASE_SPEC = Object.freeze({
       },
     },
     {
+      code: 'CASE_REVIEW_COMPLETE',
+      message:
+        'المراجعةُ واقعةٌ كاملة: حكمٌ قبلَها، ومراجعٌ مسمّى ليس قاضياً ولا خصماً، وقرارٌ، وسببٌ مكتوبٌ يبلغ الحدَ المُعلن.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const reviewedAt = record['reviewedAt'];
+        if (!(reviewedAt instanceof Date)) {
+          return (
+            blank(record['reviewer']) &&
+            blank(record['reviewDecision']) &&
+            blank(record['reviewReason'])
+          );
+        }
+        const judgedAt = record['judgedAt'];
+        const reason = record['reviewReason'];
+        const reviewer = record['reviewer'];
+        return (
+          judgedAt instanceof Date &&
+          reviewedAt.getTime() >= judgedAt.getTime() &&
+          !blank(record['reviewDecision']) &&
+          typeof reason === 'string' &&
+          reason.trim().length >= CASE_MIN_REVIEW_REASON_LENGTH &&
+          typeof reviewer === 'string' &&
+          reviewer !== record['judge'] &&
+          reviewer !== record['claimant'] &&
+          reviewer !== record['respondent']
+        );
+      },
+    },
+    {
+      code: 'CASE_EXECUTION_NOT_REJECTED',
+      message: 'لا يُنفّذ حكمٌ رُفضت مراجعتُه؛ وتنفيذٌ بعد رفضٍ يجعل المراجعةَ رأياً يُستأنس به.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        !(record['executedAt'] instanceof Date) || record['reviewDecision'] !== 'rejected',
+    },
+    {
+      code: 'CASE_JUDGE_NOT_RECUSED',
+      message: 'لا يجلس للقضية من تنحّى عنها؛ وعودتُه تُفرغ التنحي من معناه.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const recused = record['recusedJudges'];
+        if (!Array.isArray(recused)) return blank(recused);
+        const judge = record['judge'];
+        return blank(judge) || !recused.includes(judge);
+      },
+    },
+    {
+      code: 'CASE_RECUSAL_REASONED',
+      message: 'التنحي مُسبّبٌ بسببٍ مكتوبٍ يبلغ الحدَ المُعلن؛ وتنحٍ بلا سببٍ انسحابٌ لا يُدقّق.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const recused = record['recusedJudges'];
+        const any = Array.isArray(recused) && recused.length > 0;
+        const reason = record['recusalReason'];
+        const reasoned =
+          typeof reason === 'string' && reason.trim().length >= CASE_MIN_RECUSAL_REASON_LENGTH;
+        return any === reasoned;
+      },
+    },
+    {
       code: 'CASE_STATE_MATCHES_TIMELINE',
       message:
         'حالةُ القضية محسوبةٌ من وقائعها لا مُعلَنةٌ بجانبها؛ وحالةٌ تخالف الوقائعَ حالةٌ تكذب.',
@@ -993,6 +1078,305 @@ export const CASE_SPEC = Object.freeze({
   ]),
 });
 
+/**
+ * الحدُ الأدنى لطول موضوعِ المهمّة المؤسسية (الخطوة `M8.05`).
+ *
+ * ونفسُ العددِ مكتوبٌ في `config/institutions.yaml` تحت
+ * `procedure.minSubjectLength` وفي قيدِ الهجرة 0014
+ * `institution_tasks_subject_measured`، والبوابةُ 21 تفحص وقوعَه **في موضعه** من
+ * القيد لا في أيِّ موضعٍ من نصّه. وحدٌّ في الكود بلا قيدٍ في القاعدة يُلتفُّ
+ * عليه بكتابةٍ مباشرة، وحدّان مختلفان في الموضعين أسوأ من واحد.
+ */
+export const INSTITUTION_MIN_SUBJECT_LENGTH = 20;
+
+/** الحدُ الأدنى لطول سببِ رفضِ المهمّة (الخطوة `M8.05`، والهجرة 0014). */
+export const INSTITUTION_MIN_REFUSAL_REASON_LENGTH = 20;
+
+/**
+ * المؤسسةُ المُشغَّلةُ فعلاً — الخطوة `M8.05`.
+ *
+ * والميزانيةُ عمودان في هذا الصفِّ لا دفترٌ خارجه: `budgetAllocated` مقروءٌ من
+ * عهدِ التشغيل عند التأسيس، و`budgetConsumed` يُزاد **قبل** كلِّ تنفيذٍ
+ * بتحديثٍ متفائلٍ على `version`. فالذرّيةُ هي ذرّيةُ التحديث نفسِه: محاولتان
+ * متزامنتان تنجح إحداهما وتُخفق الأخرى بتعارض النسخة، فلا يتجاوز المقيَّدُ
+ * المُخصَّصَ بمرورِ اثنتين معاً.
+ *
+ * **وحدٌّ معلَن:** هذا ليس دفتر الحصص الذرّي في `src/policy/quota.mjs` (وفيه
+ * `'institution'` معلَنٌ في `SUBJECT_TYPES`) ولا ميزانيةَ المهام في
+ * `src/execution/budget.mjs`؛ كلاهما PostgreSQL وحده. وتوحيدُ الدفاتر مسجَّلٌ
+ * في `docs/REMAINING_WORK.md`.
+ */
+/** @type {EntitySpec} */
+export const INSTITUTION_SPEC = Object.freeze({
+  name: 'institutions',
+  table: 'state.institutions',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      // مفتاحُ المؤسسة في عهدِ التشغيل، ومعرِّفُها في البذرة. وكلاهما فريد:
+      // مؤسستان بمفتاحٍ واحدٍ تُنادى إحداهما مكانَ الأخرى، ومؤسستان بمعرِّفِ
+      // بذرةٍ واحدٍ تُقرآن سنداً واحداً.
+      key: { column: 'charter_key', type: 'string', required: true, maxLength: 64 },
+      seedId: { column: 'seed_id', type: 'string', required: true, maxLength: 8 },
+      name: { column: 'name', type: 'string', required: true, maxLength: 200 },
+      agentRoles: { column: 'agent_roles', type: 'stringArray', required: true },
+      budgetResource: { column: 'budget_resource', type: 'string', required: true, maxLength: 64 },
+      budgetAllocated: { column: 'budget_allocated', type: 'integer', required: true },
+      budgetConsumed: { column: 'budget_consumed', type: 'integer', required: true },
+      charterVersion: { column: 'charter_version', type: 'integer', required: true },
+      commissionedAt: { column: 'commissioned_at', type: 'timestamp', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['key']), Object.freeze(['seedId'])]),
+  filterable: Object.freeze(['key', 'seedId']),
+  invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_BUDGET_NOT_OVERDRAWN',
+      message:
+        'المقيَّدُ من الميزانية لا يتجاوز المُخصَّصَ ولا ينزل عن الصفر؛ ونفادُ الميزانية يوقف المهمّةَ قبل أن تبدأ.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const allocated = record['budgetAllocated'];
+        const consumed = record['budgetConsumed'];
+        if (typeof allocated !== 'number' || typeof consumed !== 'number') return false;
+        return consumed >= 0 && consumed <= allocated;
+      },
+    },
+    {
+      code: 'INSTITUTION_ALLOCATION_POSITIVE',
+      message: 'مؤسسةٌ بمُخصَّصٍ صفريٍّ لا تُنفِّذ مهمّةً واحدة؛ وتشغيلُها إعلانٌ لا عمل.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const allocated = record['budgetAllocated'];
+        return typeof allocated === 'number' && allocated >= 1;
+      },
+    },
+    {
+      code: 'INSTITUTION_ROLES_DECLARED',
+      message:
+        'أدوارُ وكلاءِ المؤسسة مُعلَنةٌ غيرُ فارغةٍ بصيغةِ الأدوار؛ ومؤسسةٌ بلا دورٍ مؤهَّلٍ يُسنَد إليها كلُّ وكيل.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const roles = record['agentRoles'];
+        if (!Array.isArray(roles) || roles.length === 0) return false;
+        return roles.every((role) => typeof role === 'string' && /^role:[a-z-]+$/.test(role));
+      },
+    },
+  ]),
+});
+
+/**
+ * مهمّةُ المؤسسة — الخطوة `M8.05`.
+ *
+ * والصفُّ يحمل الواقعةَ كلَّها: من رفعها، ومن أُسنِدت إليه، وكم قُيِّد لها من
+ * الميزانية ومتى، وبصمةَ مخزنِ المخرجات **قبل** التنفيذ وبعده. والبصمتان هما
+ * الدليل: تنفيذٌ لا يُغيِّر البصمةَ لا يُسجَّل منفَّذاً بل يُرفض بسببٍ مكتوب.
+ */
+/** @type {EntitySpec} */
+export const INSTITUTION_TASK_SPEC = Object.freeze({
+  name: 'institution_tasks',
+  table: 'state.institution_tasks',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      institutionId: { column: 'institution_id', type: 'string', required: true, maxLength: 128 },
+      kind: { column: 'kind', type: 'string', required: true, maxLength: 64 },
+      subject: { column: 'subject', type: 'string', required: true },
+      submittedBy: { column: 'submitted_by', type: 'string', required: true, maxLength: 128 },
+      state: {
+        column: 'state',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['received', 'assigned', 'executed', 'refused']),
+      },
+      receivedAt: { column: 'received_at', type: 'timestamp', required: true },
+      budgetCost: { column: 'budget_cost', type: 'integer', required: true },
+      agentId: { column: 'agent_id', type: 'string', nullable: true, maxLength: 128 },
+      assignedAt: { column: 'assigned_at', type: 'timestamp', nullable: true },
+      budgetDebitedAt: { column: 'budget_debited_at', type: 'timestamp', nullable: true },
+      effect: { column: 'effect', type: 'string', nullable: true, maxLength: 120 },
+      outputId: { column: 'output_id', type: 'string', nullable: true, maxLength: 128 },
+      // البصمتان: بهما وحدهما يُقاس أنّ للتنفيذ أثراً في البيانات. وتركُهما
+      // يجعل «منفَّذ» عَلَماً يُرفع في عمودٍ لا واقعةً تُراجَع.
+      fingerprintBefore: {
+        column: 'fingerprint_before',
+        type: 'string',
+        nullable: true,
+        maxLength: 200,
+      },
+      fingerprintAfter: {
+        column: 'fingerprint_after',
+        type: 'string',
+        nullable: true,
+        maxLength: 200,
+      },
+      executedAt: { column: 'executed_at', type: 'timestamp', nullable: true },
+      refusalCode: { column: 'refusal_code', type: 'string', nullable: true, maxLength: 120 },
+      refusalReason: { column: 'refusal_reason', type: 'string', nullable: true },
+      refusedAt: { column: 'refused_at', type: 'timestamp', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([]),
+  filterable: Object.freeze(['institutionId', 'state', 'kind', 'agentId']),
+  invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_TASK_SUBJECT_MEASURED',
+      message: 'موضوعُ المهمّة يبلغ الحدَ المُعلن؛ وموضوعٌ أقصرُ منه لا يُعرَف ما طُلب فيه.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const subject = record['subject'];
+        return (
+          typeof subject === 'string' && subject.trim().length >= INSTITUTION_MIN_SUBJECT_LENGTH
+        );
+      },
+    },
+    {
+      code: 'INSTITUTION_TASK_COST_POSITIVE',
+      message: 'كلفةُ المهمّة وحدةٌ واحدةٌ على الأقل؛ ومهمّةٌ بكلفةٍ صفريةٍ تُنفَّذ بلا حدّ.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const cost = record['budgetCost'];
+        return typeof cost === 'number' && cost >= 1;
+      },
+    },
+    {
+      code: 'INSTITUTION_TASK_ASSIGNMENT_COMPLETE',
+      message: 'الإسنادُ واقعةٌ كاملة: وكيلٌ مسمّى ووقتٌ مسجَّل؛ ونصفُ إسنادٍ لا يُراجَع.',
+      /** @param {EntityRecord} record */
+      check: (record) => blank(record['agentId']) === blank(record['assignedAt']),
+    },
+    {
+      code: 'INSTITUTION_TASK_BUDGET_BEFORE_EXECUTION',
+      message:
+        'الميزانيةُ تُقيَّد قبل التنفيذ لا بعده؛ وقيدٌ بعد التنفيذ يسمح بتجاوزِ الحدِّ مرّةً واحدةً — وهي المرّةُ التي تهمّ.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const executedAt = record['executedAt'];
+        if (!(executedAt instanceof Date)) return true;
+        const debitedAt = record['budgetDebitedAt'];
+        return debitedAt instanceof Date && debitedAt.getTime() <= executedAt.getTime();
+      },
+    },
+    {
+      code: 'INSTITUTION_TASK_EXECUTION_MEASURED',
+      message:
+        'التنفيذُ واقعةٌ مقيسة: وكيلٌ، وأثرٌ مسمّى، ومخرَجٌ، وبصمتان مختلفتان قبله وبعده. وبصمتان متساويتان تنفيذٌ بلا أثر.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const executedAt = record['executedAt'];
+        if (!(executedAt instanceof Date)) {
+          return (
+            blank(record['effect']) &&
+            blank(record['outputId']) &&
+            blank(record['fingerprintAfter'])
+          );
+        }
+        const before = record['fingerprintBefore'];
+        const after = record['fingerprintAfter'];
+        return (
+          !blank(record['agentId']) &&
+          typeof record['effect'] === 'string' &&
+          typeof record['outputId'] === 'string' &&
+          typeof before === 'string' &&
+          typeof after === 'string' &&
+          before !== after
+        );
+      },
+    },
+    {
+      code: 'INSTITUTION_TASK_REFUSAL_REASONED',
+      message:
+        'الرفضُ واقعةٌ كاملة: رمزٌ مُعلَنٌ وسببٌ مكتوبٌ يبلغ حدَّه ووقتٌ مسجَّل؛ ولا تُرفض مهمّةٌ نُفِّذت.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const refusedAt = record['refusedAt'];
+        if (!(refusedAt instanceof Date)) {
+          return blank(record['refusalCode']) && blank(record['refusalReason']);
+        }
+        const reason = record['refusalReason'];
+        return (
+          typeof record['refusalCode'] === 'string' &&
+          typeof reason === 'string' &&
+          reason.trim().length >= INSTITUTION_MIN_REFUSAL_REASON_LENGTH &&
+          !(record['executedAt'] instanceof Date)
+        );
+      },
+    },
+    {
+      code: 'INSTITUTION_TASK_STATE_MATCHES_TIMELINE',
+      message:
+        'حالةُ المهمّة محسوبةٌ من وقائعها لا مُعلَنةٌ بجانبها؛ وحالةٌ تخالف الوقائعَ حالةٌ تكذب.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const state = record['state'];
+        if (state === 'received') {
+          return (
+            blank(record['agentId']) && blank(record['executedAt']) && blank(record['refusedAt'])
+          );
+        }
+        if (state === 'assigned') {
+          return (
+            !blank(record['agentId']) && blank(record['executedAt']) && blank(record['refusedAt'])
+          );
+        }
+        if (state === 'executed') return record['executedAt'] instanceof Date;
+        return record['refusedAt'] instanceof Date;
+      },
+    },
+  ]),
+});
+
+/**
+ * مخرَجُ المؤسسة — الخطوة `M8.05`.
+ *
+ * وهو مخزنٌ **خارج صفِّ المهمّة** مقصوداً: بصمةُ الأثر لو قُرئت من صفِّ المهمّة
+ * نفسِه لتغيّرت بمجرّد كتابةِ الصفِّ، فصار «قياسُ الأثر» يقيس كتابتَه هو. ومن
+ * هذه الصفوف — لا من نصٍّ محفوظ — يُشتقُّ تقريرُ المؤسسة.
+ *
+ * و`taskId` فريد: مخرَجان لمهمّةٍ واحدةٍ يجعلان الكلفةَ المقيَّدةَ مرّةً تُنتج
+ * أثرين.
+ */
+/** @type {EntitySpec} */
+export const INSTITUTION_OUTPUT_SPEC = Object.freeze({
+  name: 'institution_outputs',
+  table: 'state.institution_outputs',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      institutionId: { column: 'institution_id', type: 'string', required: true, maxLength: 128 },
+      taskId: { column: 'task_id', type: 'string', required: true, maxLength: 128 },
+      kind: { column: 'kind', type: 'string', required: true, maxLength: 64 },
+      effect: { column: 'effect', type: 'string', required: true, maxLength: 120 },
+      payload: { column: 'payload', type: 'json', required: true },
+      producedBy: { column: 'produced_by', type: 'string', required: true, maxLength: 128 },
+      producedAt: { column: 'produced_at', type: 'timestamp', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['taskId'])]),
+  filterable: Object.freeze(['institutionId', 'taskId', 'kind']),
+  invariants: Object.freeze([
+    {
+      code: 'INSTITUTION_OUTPUT_ATTRIBUTED',
+      message:
+        'المخرَجُ منسوبٌ إلى مهمّةٍ وإلى الوكيل الذي أنتجه؛ ومخرَجٌ بلا نسبةٍ لا يُدقَّق ولا يُقرأ في تقرير.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const task = record['taskId'];
+        const by = record['producedBy'];
+        return (
+          typeof task === 'string' &&
+          task.trim() !== '' &&
+          typeof by === 'string' &&
+          by.trim() !== ''
+        );
+      },
+    },
+  ]),
+});
+
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
@@ -1006,6 +1390,9 @@ export const ENTITY_SPECS = Object.freeze({
   event_messages: EVENT_MESSAGE_SPEC,
   event_offsets: EVENT_OFFSET_SPEC,
   cases: CASE_SPEC,
+  institutions: INSTITUTION_SPEC,
+  institution_tasks: INSTITUTION_TASK_SPEC,
+  institution_outputs: INSTITUTION_OUTPUT_SPEC,
 });
 
 /**

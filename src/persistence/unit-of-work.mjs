@@ -31,6 +31,9 @@ import {
   EVENT_MESSAGE_SPEC,
   EVENT_OFFSET_SPEC,
   CASE_SPEC,
+  INSTITUTION_SPEC,
+  INSTITUTION_TASK_SPEC,
+  INSTITUTION_OUTPUT_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -63,6 +66,12 @@ export function createClientRepositories(client) {
       // لم يقع، وموضعٌ يُثبّت خارجها يُقرّ بمعالجةٍ تراجعت.
       eventMessages: createPostgresRepository(client, EVENT_MESSAGE_SPEC),
       eventOffsets: createPostgresRepository(client, EVENT_OFFSET_SPEC),
+      // مؤسساتُ التشغيل داخل المعاملة نفسها (`M8.05`): قيدُ الميزانية يُكتب في
+      // صفِّ المؤسسة والمخرَجُ في جدولٍ آخر، فوصلتان تعنيان أن يبقى المقيَّدُ
+      // بلا مخرَجٍ أو يبقى المخرَجُ بلا قيدٍ إن تراجعت إحداهما.
+      institutions: createPostgresRepository(client, INSTITUTION_SPEC),
+      institutionTasks: createPostgresRepository(client, INSTITUTION_TASK_SPEC),
+      institutionOutputs: createPostgresRepository(client, INSTITUTION_OUTPUT_SPEC),
     })
   );
 }

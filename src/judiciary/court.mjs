@@ -37,6 +37,7 @@
 
 import { LawState } from '../governance/law-system.mjs';
 import { JUDICIARY_ERRORS, JudiciaryError } from './judiciary.mjs';
+import { recusedJudgesOf, screenJudicialInterest } from './interests.mjs';
 
 /** @typedef {import('./judiciary.mjs').JudiciaryPolicy} JudiciaryPolicy */
 /** @typedef {import('./executors.mjs').JudgmentExecutor} JudgmentExecutor */
@@ -56,6 +57,10 @@ export const JUDICIARY_EVENTS = Object.freeze({
   EXECUTED: 'court.judgment.executed',
   REVERSED: 'court.judgment.reversed',
   REFUSED: 'court.judgment.refused',
+  // الخطوة M8.04: التعارضُ والتنحّي والمراجعةُ وقائعُ تُقرأ لا قراراتٌ تُخفى.
+  CONFLICTED: 'court.conflict.detected',
+  RECUSED: 'court.judge.recused',
+  REVIEWED: 'court.judgment.reviewed',
 });
 
 /**
@@ -76,9 +81,23 @@ export class Judiciary {
    * @param {{ insert: (record: CaseRow) => Promise<CaseRow>, findById: (id: string) => Promise<CaseRow | null>, list: (query?: { filter?: Record<string, unknown>, limit?: number }) => Promise<CaseRow[]>, update: (id: string, expectedVersion: number, patch: CaseRow) => Promise<CaseRow> }} deps.repository
    * @param {{ command: (command: RoyalCommand, signature: string) => unknown } | null} [deps.crown]
    * @param {ReadonlyMap<string, JudgmentExecutor>} [deps.executors]
+   * @param {import('./interests.mjs').AgentLookup | null} [deps.agents] - سجلُ الهويات؛ ومنه
+   *   تُقرأ الملكيةُ في فحص المصالح وبشريةُ المراجع. وتركُه **لا يُرخّص التجاوز**:
+   *   مع `requireInterestScreening` المرفوع يرفض السماعُ والحكمُ برمز
+   *   `JUDICIARY_INTEREST_SCREENING_UNAVAILABLE`، وتُرفض المراجعةُ برمز
+   *   `JUDICIARY_REVIEWER_NOT_HUMAN`.
    * @param {() => Date} [deps.now]
    */
-  constructor({ policy, laws, log, repository, crown = null, executors = new Map(), now }) {
+  constructor({
+    policy,
+    laws,
+    log,
+    repository,
+    crown = null,
+    executors = new Map(),
+    agents = null,
+    now,
+  }) {
     if (!policy || !laws || !log || !repository) throw new Error('JUDICIARY_DEPENDENCY_MISSING');
     this.policy = policy;
     this.laws = laws;
@@ -86,7 +105,62 @@ export class Judiciary {
     this.repository = repository;
     this.crown = crown;
     this.executors = executors;
+    this.agents = agents;
     this.now = now ?? (() => new Date());
+  }
+
+  /**
+   * يفحص مصلحةَ قاضٍ في قضية، ويرفض إن تحقّقت قاعدةٌ من قواعد التعارض.
+   *
+   * والفحصُ يقع في **السماع والحكم معاً** لا في السماع وحده. **وحدٌّ معلَن:**
+   * المُلكيةُ في `state.agents` تُكتب عند التسجيل ولا تُعدَّل بعده، وخصومُ القضية
+   * لا يُغيَّرون بعد رفعها؛ فلا سبيلَ اليومَ إلى إنشاء تعارضِ مُلكيةٍ **بين**
+   * الجلسة والحكم من خارج المستودع، وفحصُ المُلكية عند الحكم حاجزٌ عمقيٌّ لا
+   * مسارٌ مقيس. والمقيسُ عند الحكم هو قيدُ التنحّي، وهو يقع من هنا.
+   * @param {CaseRow} row
+   * @param {string} judge
+   * @returns {Promise<void>}
+   */
+  async screen(row, judge) {
+    const caseId = String(row['id']);
+    if (recusedJudgesOf(row).includes(judge)) {
+      this.log.append('court.conflict.detected', 'role:chief-justice', {
+        id: caseId,
+        judge,
+        rule: 'recused',
+      });
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.JUDGE_RECUSED,
+        `${judge} تنحّى عن القضية ${caseId} فلا يعود إليها؛ وعودتُه تُفرغ التنحّي من معناه.`,
+      );
+    }
+    const finding = await screenJudicialInterest({
+      judge,
+      row,
+      agents: this.agents,
+      required: this.policy.procedure.requireInterestScreening,
+    });
+    if (finding === null) return;
+    this.log.append('court.conflict.detected', 'role:chief-justice', {
+      id: caseId,
+      judge,
+      rule: finding.rule,
+    });
+    throw new JudiciaryError(JUDICIARY_ERRORS.CONFLICT_OF_INTEREST, finding.detail);
+  }
+
+  /**
+   * هل الحكمُ حسّاسٌ بمنطوقِه أو بأثرِ تنفيذِه؟ والسؤالُ يُجاب من الوثيقة لا
+   * من تقدير المستدعي: حساسيةٌ يقرّرها من يطلب التنفيذ حساسيةٌ يُسقِطها.
+   * @param {CaseRow} row
+   * @param {string} effect
+   * @returns {boolean}
+   */
+  isSensitive(row, effect) {
+    return (
+      this.policy.review.sensitiveOutcomes.includes(String(row['verdict'])) ||
+      this.policy.review.sensitiveEffects.includes(effect)
+    );
   }
 
   /**
@@ -231,6 +305,7 @@ export class Judiciary {
         `${judge} طرفٌ في القضية ${caseId}؛ ولا يفصل قاضٍ في قضيةٍ له فيها مصلحة.`,
       );
     }
+    await this.screen(row, judge);
     const updated = await this.repository.update(caseId, Number(row['version']), {
       state: 'heard',
       heardAt: this.now(),
@@ -280,6 +355,7 @@ export class Judiciary {
         `${judge} طرفٌ في القضية ${caseId}؛ ولا يفصل قاضٍ في قضيةٍ له فيها مصلحة.`,
       );
     }
+    await this.screen(row, judge);
     const written = this.assertReason(reason, this.policy.procedure.minReasonLength, 'سببُ الحكم');
     const updated = await this.repository.update(caseId, Number(row['version']), {
       state: 'judged',
@@ -291,6 +367,172 @@ export class Judiciary {
       id: caseId,
       outcome: verdict,
       judge,
+      reasonLength: written.trim().length,
+    });
+    return updated;
+  }
+
+  /**
+   * يُسجل تنحي قاضٍ عن قضيةٍ قبل الحكم فيها.
+   *
+   * والتنحي **لا يقع بعد الحكم**: من حكم ثم تنحى يترك حكماً قائماً بلا قاضٍ
+   * يُسأل عنه، وهو فرارٌ من المسؤولية لا فصلٌ للمصالح. وتصحيح حكمٍ وقع بابُه
+   * الاستئناف والتراجع لا محوُ القاضي من الصف.
+   *
+   * والتنحي قيدٌ **دائم**: يُقيد القاضي في `recusedJudges` ويُمنع من العودة إلى
+   * القضية أبداً — وتنحٍ يُرفع بنداءٍ تالٍ تنحٍ بالاسم فقط.
+   * @param {object} input
+   * @param {string} input.caseId
+   * @param {string} input.judge
+   * @param {string} input.reason
+   * @returns {Promise<CaseRow>}
+   */
+  async recuse({ caseId, judge, reason }) {
+    const row = await this.caseOf(caseId);
+    if (row['judge'] !== judge) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.RECUSAL_NOT_PERMITTED,
+        `${judge} ليس قاضيَ القضية ${caseId}؛ ولا يتنحى عن مجلسٍ من لم يجلسه.`,
+      );
+    }
+    if (row['judgedAt'] instanceof Date) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.RECUSAL_NOT_PERMITTED,
+        `حُكم في ${caseId} قبل طلب التنحي؛ وتنحٍ بعد الحكم فرارٌ من مسؤولية حكمٍ قائم.`,
+      );
+    }
+    const written = this.assertReason(
+      reason,
+      this.policy.procedure.minRecusalReasonLength,
+      'سبب التنحي',
+    );
+    const recused = [...recusedJudgesOf(row), judge];
+    const updated = await this.repository.update(caseId, Number(row['version']), {
+      state: 'opened',
+      judge: null,
+      heardAt: null,
+      recusedJudges: recused,
+      recusalReason: written,
+    });
+    this.log.append('court.judge.recused', 'role:chief-justice', {
+      id: caseId,
+      judge,
+      reasonLength: written.trim().length,
+    });
+    return updated;
+  }
+
+  /**
+   * يُصدر مراجعةً بشريةً على حكمٍ قبل تنفيذه.
+   *
+   * **وبشرية المراجع تُقرأ من الجدول لا تُقبل بالاسم:** المراجع هويةٌ
+   * مسجلةٌ نوعُها `human` وحالُها `active` ودورُها من `reviewerRoles`، وليست
+   * قاضيَ القضية ولا خصماً فيها ولا ذاتَ مصلحةٍ بقواعد فحص المصالح نفسها. ولو
+   * قُبل اسمٌ يدعي البشرية لصارت «المراجعة البشرية» حرفاً يكتبه أيُ وكيلٍ عن نفسه.
+   * @param {object} input
+   * @param {string} input.caseId
+   * @param {string} input.reviewer
+   * @param {string} input.decision
+   * @param {string} input.reason
+   * @returns {Promise<CaseRow>}
+   */
+  async ratify({ caseId, reviewer, decision, reason }) {
+    const row = await this.caseOf(caseId);
+    if (!(row['judgedAt'] instanceof Date)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEW_NOT_PERMITTED,
+        `القضية ${caseId} لم يُحكم فيها؛ ولا تُراجع ما لم يُقض به.`,
+      );
+    }
+    if (row['executedAt'] instanceof Date) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEW_NOT_PERMITTED,
+        `حكمُ ${caseId} نُفذ؛ ومراجعةٌ بعد التنفيذ شهادةٌ على واقعٍ لا إذنٌ به.`,
+      );
+    }
+    if (row['reviewDecision'] !== null && row['reviewDecision'] !== undefined) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEW_NOT_PERMITTED,
+        `روجع حكمُ ${caseId} بقرار ${String(row['reviewDecision'])}؛ ومراجعةٌ تُعاد حتى تُقبل ليست مراجعة.`,
+      );
+    }
+    if (!this.policy.review.decisions.includes(decision)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEW_NOT_PERMITTED,
+        `قرارُ المراجعة ${decision} غيرُ مُعلن؛ والمُعلن هو: ${this.policy.review.decisions.join('، ')}.`,
+      );
+    }
+    if (this.agents === null) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEWER_NOT_HUMAN,
+        'لا سجلَ هوياتٍ مركباً تُقرأ منه بشريةُ المراجع؛ ومراجعٌ لا يُتحقق منه لا يُقبل بشراً.',
+      );
+    }
+    const record = await this.agents.get(reviewer);
+    if (record === null) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEWER_NOT_HUMAN,
+        `المراجع ${reviewer} غيرُ مسجلٍ في سجل الهويات؛ واسمٌ بلا هويةٍ لا تُقاس بشريتُه.`,
+      );
+    }
+    if (record['kind'] !== 'human') {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEWER_NOT_HUMAN,
+        `المراجع ${reviewer} نوعُه ${String(record['kind'])} لا human؛ ومراجعةٌ يوقعها وكيلٌ ليست مراجعةً بشرية.`,
+      );
+    }
+    if (record['state'] !== 'active') {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEWER_NOT_HUMAN,
+        `المراجع ${reviewer} حالُه ${String(record['state'])} لا active؛ وهويةٌ موقوفةٌ لا تملك إذناً تمنحه.`,
+      );
+    }
+    if (!this.policy.review.reviewerRoles.includes(String(record['role']))) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEW_NOT_PERMITTED,
+        `دورُ المراجع ${String(record['role'])} ليس من حاملي سلطة المراجعة؛ والمُعلن هو: ${this.policy.review.reviewerRoles.join('، ')}.`,
+      );
+    }
+    if (
+      this.policy.review.requireDistinctReviewer &&
+      (reviewer === row['judge'] || reviewer === row['claimant'] || reviewer === row['respondent'])
+    ) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.REVIEW_NOT_PERMITTED,
+        `المراجع ${reviewer} قاضٍ أو خصمٌ في ${caseId}؛ ولا يُراجع أحدٌ عملَ نفسه.`,
+      );
+    }
+    // وقواعد التعارض نفسُها تسري على المراجع: من يملك هويةَ خصمٍ لا يأذن
+    // بتنفيذ حكمٍ عليه ولا له.
+    const finding = await screenJudicialInterest({
+      judge: reviewer,
+      row,
+      agents: this.agents,
+      required: this.policy.procedure.requireInterestScreening,
+    });
+    if (finding !== null) {
+      this.log.append('court.conflict.detected', 'role:auditor', {
+        id: caseId,
+        judge: reviewer,
+        rule: finding.rule,
+      });
+      throw new JudiciaryError(JUDICIARY_ERRORS.CONFLICT_OF_INTEREST, finding.detail);
+    }
+    const written = this.assertReason(
+      reason,
+      this.policy.review.minReviewReasonLength,
+      'سبب المراجعة',
+    );
+    const updated = await this.repository.update(caseId, Number(row['version']), {
+      reviewedAt: this.now(),
+      reviewer,
+      reviewDecision: decision,
+      reviewReason: written,
+    });
+    this.log.append('court.judgment.reviewed', 'role:auditor', {
+      id: caseId,
+      reviewer,
+      decision,
       reasonLength: written.trim().length,
     });
     return updated;
@@ -389,6 +631,25 @@ export class Judiciary {
         JUDICIARY_ERRORS.EXECUTOR_MISSING,
         `الأثر ${effect} معلَنٌ ولا منفِّذَ له مركَّباً؛ ولا يُسجَّل تنفيذٌ لأثرٍ لا سبيلَ للكود إلى إحداثه.`,
       );
+    }
+    // والحكمُ الحساس لا يُنفذ بلا مراجعةٍ بشريةٍ موجودةٍ في الجدول، ولو كان الأمرُ
+    // الملكي صحيحاً: الأمرُ يُجيز التنفيذ ولا يقوم مقامَ قراءةِ بشرٍ للحكم.
+    if (this.policy.review.requireHumanReview && this.isSensitive(row, effect)) {
+      const decision = row['reviewDecision'];
+      if (decision === null || decision === undefined) {
+        this.refuse(
+          caseId,
+          JUDICIARY_ERRORS.HUMAN_REVIEW_REQUIRED,
+          `حكمُ ${caseId} حساسٌ (منطوق: ${String(verdict)}، أثر: ${effect}) ولم يُراجعه بشرٌ؛ وأثرٌ يقع بلا قارئٍ بشريٍ أثرٌ لا يُسأل عنه أحد.`,
+        );
+      }
+      if (decision === 'rejected') {
+        this.refuse(
+          caseId,
+          JUDICIARY_ERRORS.REVIEW_REJECTED,
+          `مراجعةُ ${caseId} رُفضت من ${String(row['reviewer'])}؛ وتنفيذٌ بعد رفضٍ يجعل المراجعةَ رأياً يُستأنس به.`,
+        );
+      }
     }
     const target = String(row['respondent']);
     const before = await executor.fingerprint(target);

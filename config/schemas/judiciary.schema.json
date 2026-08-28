@@ -4,7 +4,7 @@
   "title": "القضاء النافذ — شرطُ الإجراء وآثارُ التنفيذ",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "holders", "procedure", "effects", "guarantees"],
+  "required": ["version", "holders", "procedure", "review", "effects", "guarantees"],
   "properties": {
     "version": { "type": "integer", "minimum": 1 },
     "holders": {
@@ -20,7 +20,9 @@
             "type": "array",
             "minItems": 1,
             "uniqueItems": true,
-            "items": { "enum": ["file", "hear", "judge", "execute", "reverse", "appeal"] }
+            "items": {
+              "enum": ["file", "hear", "judge", "execute", "reverse", "appeal", "review"]
+            }
           },
           "reason": { "type": "string", "minLength": 10 }
         }
@@ -40,7 +42,9 @@
         "outcomes",
         "nonExecutableOutcomes",
         "executeAction",
-        "reverseAction"
+        "reverseAction",
+        "requireInterestScreening",
+        "minRecusalReasonLength"
       ],
       "properties": {
         "requireHearingBeforeJudgment": { "const": true },
@@ -63,7 +67,52 @@
           "items": { "type": "string", "pattern": "^[a-z-]+$" }
         },
         "executeAction": { "type": "string", "minLength": 3 },
-        "reverseAction": { "type": "string", "minLength": 3 }
+        "reverseAction": { "type": "string", "minLength": 3 },
+        "requireInterestScreening": { "const": true },
+        "minRecusalReasonLength": { "type": "integer", "minimum": 10 }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requireHumanReview",
+        "sensitiveOutcomes",
+        "sensitiveEffects",
+        "reviewerRoles",
+        "decisions",
+        "minReviewReasonLength",
+        "requireDistinctReviewer"
+      ],
+      "properties": {
+        "requireHumanReview": { "const": true },
+        "sensitiveOutcomes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z-]+$" }
+        },
+        "sensitiveEffects": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z-]+$" }
+        },
+        "reviewerRoles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^role:[a-z-]+$" }
+        },
+        "decisions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["approved", "rejected"] }
+        },
+        "minReviewReasonLength": { "type": "integer", "minimum": 20 },
+        "requireDistinctReviewer": { "const": true }
       }
     },
     "effects": {

@@ -50,6 +50,15 @@ export const JUDICIARY_ERRORS = Object.freeze({
   REVERSAL_INEFFECTIVE: 'JUDICIARY_REVERSAL_INEFFECTIVE',
   NOT_APPEALABLE: 'JUDICIARY_NOT_APPEALABLE',
   APPELLANT_NOT_PARTY: 'JUDICIARY_APPELLANT_NOT_PARTY',
+  // الخطوة M8.04 — فصلُ المصالح والمراجعةُ البشرية.
+  CONFLICT_OF_INTEREST: 'JUDICIARY_CONFLICT_OF_INTEREST',
+  INTEREST_SCREENING_UNAVAILABLE: 'JUDICIARY_INTEREST_SCREENING_UNAVAILABLE',
+  JUDGE_RECUSED: 'JUDICIARY_JUDGE_RECUSED',
+  RECUSAL_NOT_PERMITTED: 'JUDICIARY_RECUSAL_NOT_PERMITTED',
+  HUMAN_REVIEW_REQUIRED: 'JUDICIARY_HUMAN_REVIEW_REQUIRED',
+  REVIEW_REJECTED: 'JUDICIARY_REVIEW_REJECTED',
+  REVIEWER_NOT_HUMAN: 'JUDICIARY_REVIEWER_NOT_HUMAN',
+  REVIEW_NOT_PERMITTED: 'JUDICIARY_REVIEW_NOT_PERMITTED',
 });
 
 /**
@@ -70,7 +79,7 @@ export class JudiciaryError extends Error {
 }
 
 /**
- * @typedef {'file' | 'hear' | 'judge' | 'execute' | 'reverse' | 'appeal'} JudicialAct
+ * @typedef {'file' | 'hear' | 'judge' | 'execute' | 'reverse' | 'appeal' | 'review'} JudicialAct
  */
 
 /**
@@ -93,6 +102,19 @@ export class JudiciaryError extends Error {
  * @property {readonly string[]} nonExecutableOutcomes
  * @property {string} executeAction
  * @property {string} reverseAction
+ * @property {true} requireInterestScreening
+ * @property {number} minRecusalReasonLength
+ */
+
+/**
+ * @typedef {object} JudiciaryReview
+ * @property {true} requireHumanReview
+ * @property {readonly string[]} sensitiveOutcomes
+ * @property {readonly string[]} sensitiveEffects
+ * @property {readonly string[]} reviewerRoles
+ * @property {readonly string[]} decisions
+ * @property {number} minReviewReasonLength
+ * @property {true} requireDistinctReviewer
  */
 
 /**
@@ -115,6 +137,7 @@ export class JudiciaryError extends Error {
  * @property {number} version
  * @property {readonly JudiciaryHolder[]} holders
  * @property {JudiciaryProcedure} procedure
+ * @property {JudiciaryReview} review
  * @property {readonly JudiciaryEffect[]} effects
  * @property {readonly JudiciaryGuarantee[]} guarantees
  */
@@ -241,6 +264,76 @@ export function loadJudiciaryPolicy(options = {}) {
         `الدور ${role} يحكم ويُنفِّذ معاً؛ ومن ينفّذ حكمَ نفسه يُراجع عملَ نفسه.`,
       );
     }
+  }
+
+  // ═══ الخطوة M8.04: تماسكُ المراجعة البشرية ═══
+  //
+  // المراجعُ سلطةٌ ثالثةٌ بين من يحكم ومن يُنفِّذ: لو كان دورُ المراجعة هو دورَ
+  // الحكم صارت المراجعةُ توقيعَ القاضي على حكمه، ولو كان دورَ التنفيذ صارت
+  // إذناً يمنحه المُنفِّذ لنفسه. وكلاهما «مراجعةٌ» بالاسم فقط.
+  const reviewers = rolesFor(parsed, 'review');
+  if (reviewers.size === 0) {
+    throw new JudiciaryError(
+      JUDICIARY_ERRORS.CONFIG_INVALID,
+      'لا حاملَ لسلطة المراجعة في الوثيقة، والمراجعةُ مطلوبةٌ للأحكام الحسّاسة؛ فشرطٌ بلا حاملٍ شرطٌ لا يقع.',
+    );
+  }
+  for (const role of reviewers) {
+    if (judges.has(role) || executors.has(role)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.CONFIG_INVALID,
+        `الدور ${role} يراجع ويحكم أو يُنفِّذ معاً؛ ولا يُراجع أحدٌ عملَ نفسه.`,
+      );
+    }
+  }
+  // وأدوارُ المراجعة المُعلَنة في `review` هي نفسُها حاملو فعل `review` في
+  // `holders`: قائمتان مختلفتان تجعلان المراجعَ مقبولاً في موضعٍ مرفوضاً في آخر.
+  for (const role of parsed.review.reviewerRoles) {
+    if (!reviewers.has(role)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.CONFIG_INVALID,
+        `الدور ${role} معلَنٌ مراجعاً في review ولا يملك فعلَ review في holders؛ وقائمتان مختلفتان تجعلان الشرطَ مبهماً.`,
+      );
+    }
+  }
+  for (const role of reviewers) {
+    if (!parsed.review.reviewerRoles.includes(role)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.CONFIG_INVALID,
+        `الدور ${role} يملك فعلَ review في holders وليس في review.reviewerRoles؛ وسلطةٌ بنصفِ إعلانٍ سلطةٌ لا تُقاس.`,
+      );
+    }
+  }
+  // المنطوقُ الحسّاس منطوقٌ **قابلٌ للتنفيذ**: اشتراطُ مراجعةٍ لمنطوقٍ لا يُنفَّذ
+  // شرطٌ لا يقع أبداً، فيُقرأ ضماناً وهو حرفٌ ميّت.
+  for (const outcome of parsed.review.sensitiveOutcomes) {
+    if (!parsed.procedure.outcomes.includes(outcome)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.CONFIG_INVALID,
+        `المنطوقُ ${outcome} مُعلَنٌ حسّاساً وهو ليس من المنطوقات المُعلَنة.`,
+      );
+    }
+    if (parsed.procedure.nonExecutableOutcomes.includes(outcome)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.CONFIG_INVALID,
+        `المنطوقُ ${outcome} مُعلَنٌ حسّاساً وهو غيرُ قابلٍ للتنفيذ؛ فمراجعتُه شرطٌ لا يقع أبداً.`,
+      );
+    }
+  }
+  for (const effect of parsed.review.sensitiveEffects) {
+    if (!effects.has(effect)) {
+      throw new JudiciaryError(
+        JUDICIARY_ERRORS.CONFIG_INVALID,
+        `الأثر ${effect} مُعلَنٌ حسّاساً وهو ليس من آثار التنفيذ المُعلَنة.`,
+      );
+    }
+  }
+  // ومراجعةٌ أقصرُ من الحكم مُصادَقةٌ لا مراجعة.
+  if (parsed.review.minReviewReasonLength < parsed.procedure.minReasonLength) {
+    throw new JudiciaryError(
+      JUDICIARY_ERRORS.CONFIG_INVALID,
+      `حدُّ سبب المراجعة (${parsed.review.minReviewReasonLength}) أقصرُ من حدِّ سبب الحكم (${parsed.procedure.minReasonLength})؛ ومراجعةٌ أقصرُ من الحكم توقيعٌ لا قراءة.`,
+    );
   }
   return Object.freeze(parsed);
 }

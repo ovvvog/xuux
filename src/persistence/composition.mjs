@@ -24,6 +24,13 @@ import { RetentionCycle } from '../data/retention-cycle.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
 import {
+  InstitutionOperations,
+  createServiceCatalogExecutor,
+  createStatisticalBulletinExecutor,
+  effectIndex,
+  loadInstitutionsPolicy,
+} from '../institutions/index.mjs';
+import {
   Judiciary,
   createAgentSuspensionExecutor,
   executorIndex,
@@ -41,6 +48,9 @@ import {
   EVENT_MESSAGE_SPEC,
   EVENT_OFFSET_SPEC,
   CASE_SPEC,
+  INSTITUTION_SPEC,
+  INSTITUTION_TASK_SPEC,
+  INSTITUTION_OUTPUT_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -64,6 +74,9 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} erasureRecords
  * @property {ReturnType<typeof createMemoryRepository>} eventMessages
  * @property {ReturnType<typeof createMemoryRepository>} eventOffsets
+ * @property {ReturnType<typeof createMemoryRepository>} institutions
+ * @property {ReturnType<typeof createMemoryRepository>} institutionTasks
+ * @property {ReturnType<typeof createMemoryRepository>} institutionOutputs
  */
 
 /**
@@ -87,6 +100,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ErasureLedger} erasureLedger
  * @property {RetentionCycle} retention
  * @property {EventBus} events
+ * @property {InstitutionOperations} institutions
  */
 
 /**
@@ -107,6 +121,9 @@ export function createMemoryRepositories(options = {}) {
     erasureRecords: createMemoryRepository(ERASURE_RECORD_SPEC, options),
     eventMessages: createMemoryRepository(EVENT_MESSAGE_SPEC, options),
     eventOffsets: createMemoryRepository(EVENT_OFFSET_SPEC, options),
+    institutions: createMemoryRepository(INSTITUTION_SPEC, options),
+    institutionTasks: createMemoryRepository(INSTITUTION_TASK_SPEC, options),
+    institutionOutputs: createMemoryRepository(INSTITUTION_OUTPUT_SPEC, options),
   };
 }
 
@@ -129,6 +146,9 @@ export function createPostgresRepositories(pool) {
       erasureRecords: createPostgresRepository(pool, ERASURE_RECORD_SPEC),
       eventMessages: createPostgresRepository(pool, EVENT_MESSAGE_SPEC),
       eventOffsets: createPostgresRepository(pool, EVENT_OFFSET_SPEC),
+      institutions: createPostgresRepository(pool, INSTITUTION_SPEC),
+      institutionTasks: createPostgresRepository(pool, INSTITUTION_TASK_SPEC),
+      institutionOutputs: createPostgresRepository(pool, INSTITUTION_OUTPUT_SPEC),
     })
   );
 }
@@ -170,6 +190,10 @@ export function createPostgresRepositories(pool) {
  * @param {import('../judiciary/judiciary.mjs').JudiciaryPolicy | null} [deps.judiciaryPolicy] وثيقةُ
  *   القضاء (M8.03): حائزو الأفعال، وإجراءُ التقاضي، وآثارُ التنفيذ، وضماناتُه.
  *   تُحمّل من `config/judiciary.yaml` إن لم تُمرَّر.
+ * @param {import('../institutions/institutions.mjs').InstitutionsPolicy | null} [deps.institutionsPolicy] عهدُ
+ *   التشغيل المؤسسي (M8.05): حائزو الأفعال، وإجراءُ المهمّة، وحدُّ الميزانية،
+ *   والآثارُ المُعلَنة، والمؤسستان التجريبيتان. يُحمَّل من `config/institutions.yaml`
+ *   إن لم يُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -192,6 +216,7 @@ export function createRegistries({
   retentionPolicy = null,
   eventsPolicy = null,
   judiciaryPolicy = null,
+  institutionsPolicy = null,
   crown = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
@@ -312,6 +337,10 @@ export function createRegistries({
       repository: repositories.cases,
       crown,
       executors: executorIndex([createAgentSuspensionExecutor({ agents })]),
+      // وسجلُ الهويات موصولٌ لا متروك: منه يُقرأ مالكُ الخصم في فحص المصالح
+      // (الخطوة M8.04) وبشريةُ المراجع. وتركُه لا يفتح الباب بل يُغلقه: السماعُ
+      // يُرفض حينها برمز `JUDICIARY_INTEREST_SCREENING_UNAVAILABLE`.
+      agents,
     }),
     approvals,
     lineage,
@@ -326,6 +355,22 @@ export function createRegistries({
         classificationApprovals: repositories.classificationApprovals,
       },
       ...(retentionPolicy === null ? {} : { policy: retentionPolicy }),
+    }),
+    // التشغيلُ المؤسسي يُركَّب **دائماً** (الخطوة `M8.05`)، لنفس سبب القضاء
+    // وناقلِ القنوات: مؤسسةٌ اختياريةُ التركيب تصير مؤسسةً لا مسارَ لها في
+    // التشغيل، وهو العيبُ الذي أغلقته الخطوة بعينه. وسجلُّ الهويات موصولٌ لا
+    // متروك: منه تُقرأ حالةُ الوكيل ودورُه، وبلا ذلك يصير الإسنادُ اسماً في عمود.
+    institutions: new InstitutionOperations({
+      policy: institutionsPolicy ?? loadInstitutionsPolicy(),
+      log,
+      institutions: repositories.institutions,
+      tasks: repositories.institutionTasks,
+      outputs: repositories.institutionOutputs,
+      agents,
+      effects: effectIndex([
+        createServiceCatalogExecutor({ outputs: repositories.institutionOutputs }),
+        createStatisticalBulletinExecutor({ outputs: repositories.institutionOutputs }),
+      ]),
     }),
     // ناقلُ القنوات يُركَّب **دائماً** (الخطوة `M7.07`)، لنفس سبب دفتري النسب
     // والمحو: ناقلٌ اختياريٌّ يصير تركُه مساراً لأحداثٍ تُقرأ بلا تخليصٍ ولا عقد
