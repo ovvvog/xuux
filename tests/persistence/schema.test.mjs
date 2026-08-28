@@ -74,6 +74,21 @@ const DECLARED_NULLABLE = Object.freeze({
     'اعتماد ممنوح لم يُستهلَك بعد؛ وفراغه هو **شرط القيد الفريد الجزئي** الذي يمنع اعتمادين حيَّين لنفس الانتقال.',
   'classification_approvals.consumed_by':
     'لا مستهلِك قبل الاستهلاك؛ والقيد `_consumer` يُلزِم وجوده مع وقت الاستهلاك أو غيابهما معاً، فلا استهلاك مجهول المنفّذ.',
+  // أُضيفت في الهجرة `0014` مع تشغيل المؤسستين التجريبيتين (`M8.05`).
+  'institution_tasks.agent_id': 'مهمّةٌ مرفوعةٌ لم تُسند بعد لا وكيلَ لها.',
+  'institution_tasks.assigned_at': 'لا وقتَ إسنادٍ قبل الإسناد؛ والقيد يُلزم العمودَين معاً.',
+  'institution_tasks.budget_debited_at':
+    'مهمّةٌ لم يُقيَّد عليها المُخصَّص بعد؛ ووجودُه شرطُ أنّ القيدَ سبق التنفيذَ زمناً.',
+  'institution_tasks.effect': 'لا أثرَ قبل التنفيذ؛ والقيد يُلزمه مع وقت التنفيذ.',
+  'institution_tasks.output_id': 'لا مخرَجَ قبل التنفيذ؛ ومخرَجٌ واحدٌ لكل مهمّة عند وقوعه.',
+  'institution_tasks.fingerprint_before':
+    'لا قياسَ قبليَّ قبل بدء التنفيذ؛ ووجودُه دليلُ أنّ الأثرَ قِيس لا أنّه ادُّعي.',
+  'institution_tasks.fingerprint_after':
+    'لا قياسَ بعديَّ قبل التنفيذ؛ وتساويه مع القبليّ رفضٌ لا نجاح.',
+  'institution_tasks.executed_at': 'مهمّةٌ مرفوعةٌ أو مُسندةٌ أو مرفوضةٌ لا وقتَ تنفيذٍ لها.',
+  'institution_tasks.refusal_code': 'مهمّةٌ لم تُرفض لا رمزَ رفضٍ لها؛ والقيد يمنع رفضاً مبهماً.',
+  'institution_tasks.refusal_reason': 'لا سببَ رفضٍ حيث لا رفض؛ وحدُّه مقيسٌ عند وقوعه.',
+  'institution_tasks.refused_at': 'مهمّةٌ لم تُرفض لا وقتَ رفضٍ لها.',
 });
 
 /** @type {{ pool: import('pg').Pool, drop: () => Promise<void> } | null} */

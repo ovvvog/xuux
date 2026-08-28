@@ -117,6 +117,30 @@ npm test                                               # اختبارات الق
 | `classification_approvals.consumed_at` | اعتماد ممنوح لم يُستهلَك بعد | فراغه هو **شرط القيد الفريد الجزئي** `classification_approvals_live_idx`: لا اعتمادان حيّان لنفس (الأصل، من، إلى، نسخة السجل) — `M7.01` |
 | `classification_approvals.consumed_by` | لا مستهلِك قبل الاستهلاك | `classification_approvals_consumer` — يُلزم العمودين معاً أو غيابهما معاً، فلا استهلاك مجهول المنفّذ |
 
+وأُضيفت في الهجرة `0014` (تشغيل المؤسستين التجريبيتين — `M8.05`) أعمدةُ مسار
+المهمّة المؤسسية في `state.institution_tasks`. وكلُّها فارغةٌ في الحالة `received`
+لأنّ المهمّةَ حينها **مرفوعةٌ ولم تُسند ولم تُنفَّذ**، ويُلزمها القيدُ حين
+تنتقل الحالة:
+
+| العمود | متى يكون فارغاً | ما يُلزمه عند الحاجة |
+| --- | --- | --- |
+| `institution_tasks.agent_id` | مهمّة مرفوعة لم تُسند إلى وكيل | `institution_tasks_assignment_complete` — يُلزم العمودَين معاً أو غيابَهما معاً |
+| `institution_tasks.assigned_at` | لا وقت إسنادٍ قبل الإسناد | نفس القيد — إسنادٌ بلا وقتٍ إسنادٌ لا يُراجَع |
+| `institution_tasks.budget_debited_at` | مهمّة لم يُقيَّد عليها المُخصَّص بعد | `institution_tasks_budget_before_execution` — لا تنفيذَ إلا وقيدُ الميزانية سابقٌ له زمناً |
+| `institution_tasks.effect` | لا أثرَ قبل التنفيذ | `institution_tasks_execution_measured` — يُلزم الأثرَ والمخرَجَ والبصمتين مع التنفيذ |
+| `institution_tasks.output_id` | لا مخرَجَ قبل التنفيذ | نفس القيد + `institution_outputs_task_unique` — مخرَجٌ واحدٌ لكل مهمّة |
+| `institution_tasks.fingerprint_before` | لا قياسَ قبليَّ قبل بدء التنفيذ | نفس القيد — وهو **دليلُ أنّ الأثرَ قِيس لا أنّه ادُّعي** |
+| `institution_tasks.fingerprint_after` | لا قياسَ بعديَّ قبل التنفيذ | نفس القيد؛ وتساويه مع البصمة القبلية يُرفض في `INSTITUTION_EXECUTION_INEFFECTIVE` |
+| `institution_tasks.executed_at` | مهمّة مرفوعةٌ أو مُسندةٌ أو مرفوضة | `institution_tasks_state_matches_timeline` — لا حالة `executed` بلا وقتِ تنفيذ |
+| `institution_tasks.refusal_code` | مهمّة لم تُرفض | `institution_tasks_refusal_reasoned` — لا رفضَ مبهم |
+| `institution_tasks.refusal_reason` | لا سببَ رفضٍ حيث لا رفض | نفس القيد بحدٍّ مقيس (`length(btrim(refusal_reason)) >= 20`) |
+| `institution_tasks.refused_at` | مهمّة لم تُرفض | `institution_tasks_state_matches_timeline` + منعُ الرفض والتنفيذ معاً |
+
+> **حدٌّ معلَن**: قيودُ الهجرة `0014` مكتوبةٌ ولم تُقَس على PostgreSQL حقيقيّ في
+> هذه البيئة؛ المقيسُ هو نظائرُها في `INSTITUTION_TASK_SPEC` عبر
+> `tests/institutions/operations.test.mjs`، وحاجزُ المؤسسات يقرأ أسماءَ القيود
+> وأرقامَ حدودها في نصّ الهجرة. وهو مسجَّل في `docs/REMAINING_WORK.md`.
+
 > الأعمدة الأربعة قبل جدول `0003` أُضيفت في الهجرة `0002`، ومعها حُذف
 > `data_assets.schema_ref` لأنه لم يكن يُكتب من أي مسار: عمودٌ لا يكتبه شيء
 > ليس قيداً مرناً، بل حقلٌ يوهم بمعلومةٍ غير موجودة.
