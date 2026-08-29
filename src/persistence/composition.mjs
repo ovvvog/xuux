@@ -24,6 +24,7 @@ import {
   loadDelegationPolicy,
 } from '../federation/index.mjs';
 import { RoyalReportGenerator, createReportMeasures, loadReportPolicy } from '../reports/index.mjs';
+import { MonitorAgent, loadMonitoringPolicy } from '../observability/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -128,6 +129,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {RegionalDelegation} federation
  * @property {DelegationRegister} federationRegister
  * @property {RoyalReportGenerator} reports
+ * @property {MonitorAgent} monitor
  */
 
 /**
@@ -249,6 +251,10 @@ export function createPostgresRepositories(pool) {
  *   التقاريرِ الملكيةِ الدورية (M8.09): نافذةُ التقريرِ وأقسامُه وحقولُ كلِّ قسمٍ
  *   ومصادرُ قياسِها ومسارُ مراجعتِها ونشرِها. تُحمَّل من `config/royal-reports.yaml`
  *   إن لم تُمرَّر.
+ * @param {import('../observability/monitor-agent.mjs').MonitoringPolicy | null} [deps.monitoringPolicy] وثيقةُ
+ *   المراقبةِ للقراءةِ فقط (M9.01): دورُ المراقبةِ وقدراتُه المسموحةُ ونداءاتُه
+ *   المقروءةُ ومشاهدُه وحدُّ صفوفِه. تُحمَّل من `config/monitoring.yaml` إن لم
+ *   تُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -273,6 +279,7 @@ export function createRegistries({
   judiciaryPolicy = null,
   delegationPolicy = null,
   reportsPolicy = null,
+  monitoringPolicy = null,
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
@@ -395,8 +402,20 @@ export function createRegistries({
     agents,
     crown,
   });
+  // ووكيلُ المراقبةِ للقراءةِ فقط يُركَّب **دائماً** (الخطوة `M9.01`): مراقبةٌ
+  // اختياريةُ التركيبِ تصير مراقبةً لا مسارَ لها، فيعود القارئُ إلى المستودعاتِ
+  // كما هي — أي إلى القراءةِ بسلطةِ كتابةٍ معها، وهو العيبُ نفسُه. والسجلُّ
+  // والهوياتُ موصولان: بلا الأولِ لا قراءةَ (لا أثرَ تدقيق)، وبلا الثاني لا
+  // قراءةَ (لا هويةَ محقَّقة).
+  const monitor = new MonitorAgent({
+    policy: monitoringPolicy ?? loadMonitoringPolicy(),
+    repositories,
+    agents,
+    log,
+  });
   return {
     agents,
+    monitor,
     models: new ModelRegistry({
       log,
       repository: repositories.models,
