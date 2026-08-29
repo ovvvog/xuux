@@ -48,6 +48,8 @@ import {
 } from '../judiciary/index.mjs';
 import path from 'node:path';
 import { ModelRegistry } from '../models/model-registry.mjs';
+import { ModelEvaluationLedger } from '../models/evaluation.mjs';
+import { ExperimentLedger } from '../knowledge/experiment-ledger.mjs';
 import { createWeightStore } from '../models/weight-store.mjs';
 import {
   AGENT_SPEC,
@@ -212,6 +214,11 @@ export function createPostgresRepositories(pool) {
  * @param {import('../models/weight-store.mjs').WeightStore | null} [deps.weightStore] مخزن
  *   الأوزان المعنوَن بالمحتوى (M6.06). إن لم يُمرَّر فُتحيّز الجذر من `WEIGHTS_DIR`
  *   أو `.state/weights`؛ فالتنشيط لا يقع بلا إعادة حساب البصمة في أي تركيب.
+ * @param {import('../models/evaluation.mjs').ModelEvaluationLedger | null} [deps.evaluationLedger] دفترُ
+ *   تقييمِ النماذج (M6.07). صُحّح في `WL-045`: كان التركيبُ لا يُمرّره إلى السجل
+ *   الداخليِّ المعاملاتيِّ فيُبنى دفترٌ فارغٌ جديد، فيصير التنشيطُ على قاعدةٍ
+ *   حقيقيةٍ مستحيلاً برمز `MODEL_EVALUATION_MISSING`. فمن مرَّره حصل على دفترٍ
+ *   واحدٍ يشهد للتركيبين، ومن لم يمرّره حصل على دفترٍ يُبنى له مرّةً واحدة.
  * @param {{ report: (signal: object) => unknown } | null} [deps.quarantine] حاجب الحجر (M6.09).
  * @param {import('../policy/enforcement-point.mjs').EnforcementPoint | null} [deps.enforcementPoint] نقطة
  *   التفويض (M7.01). من لم يمرّرها حصل على فهرسٍ يسجّل ويقرأ، و**تُرفض** عنده
@@ -274,6 +281,7 @@ export function createRegistries({
   limits = {},
   transaction = null,
   weightStore = null,
+  evaluationLedger = null,
   quarantine = null,
   enforcementPoint = null,
   lattice = null,
@@ -442,6 +450,12 @@ export function createRegistries({
       transaction,
       weightStore: weights,
       quarantine,
+      // دفتر التقييم يُمرَّر إن أُعطي، ولا يُخترع هنا واحدٌ آخر: التفعيل يجري داخل
+      // معاملة، والمعاملة تُركّب سجلاتٍ جديدة. فلو أنشأ كلُّ تركيبٍ دفتراً خاصّاً
+      // به لقرأ التفعيلُ دفتراً فارغاً ورفض بـ`MODEL_EVALUATION_MISSING` نموذجاً
+      // مقيَّماً فعلاً — وهو عيبٌ حقيقيٌّ أخفق به تفعيلُ **كل** نموذج على
+      // PostgreSQL، لم يظهر لأن اختبارات القاعدة كانت متخطّاةً دائماً (`WL-045`).
+      ...(evaluationLedger === null ? {} : { evaluationLedger }),
       ...(limits.maxModels === undefined ? {} : { maxModels: limits.maxModels }),
     }),
     catalog,
@@ -568,6 +582,12 @@ export function createPostgresRegistries({
   // كتابة وتجعل تعديلاً وسط التشغيل يُطبَّق على بعض الكتابات دون بعض.
   const policy =
     keyProvider === null ? null : loadEncryptionPolicy({ lattice: classificationLattice });
+  // ودفتر التقييم واحدٌ للتركيب كلِّه ولِما تُركّبه المعاملة داخله: دفترٌ لكل
+  // معاملة يعني أن شهادة التقييم تُكتب في دفترٍ ويُسأل عنها دفترٌ آخر.
+  const evaluationLedger = new ModelEvaluationLedger({
+    log,
+    experiments: new ExperimentLedger({ log }),
+  });
   /** @type {StateTransaction} */
   const transaction = (work) =>
     withUnitOfWork(pool, (repositories) =>
@@ -584,6 +604,7 @@ export function createPostgresRegistries({
           lattice: classificationLattice,
           keyProvider,
           encryptionPolicy: policy,
+          evaluationLedger,
         }),
       ),
     );
@@ -597,5 +618,6 @@ export function createPostgresRegistries({
     lattice: classificationLattice,
     keyProvider,
     encryptionPolicy: policy,
+    evaluationLedger,
   });
 }

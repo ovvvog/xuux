@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -249,7 +249,21 @@ test('جذور الفحص تشمل مسارات التشغيل ومتغيّرا�
 
     assert.ok(RUNTIME_ENV_VARS.includes('KING_KEY_DIR'));
     assert.ok(RUNTIME_PATHS.includes('secrets'));
-    assert.deepEqual(resolveScanRoots([join(dir, 'لا-وجود-له')]), []);
+    // الدعوى: مسارٌ مُعلَنٌ لا وجودَ له لا يصير جذرَ فحصٍ مُخترعاً. وكانت
+    // مكتوبةً `deepEqual(…, [])`، وذاك يدّعي زيادةً أنّ **لا جذورَ تشغيلٍ أخرى**
+    // — فيُخفق الاختبارُ متى وُجد `‎.state‎` في الشجرة، أي متى شُغِّل بعد اختبارٍ
+    // كتب أوزاناً. وهو تعلّقٌ بترتيب التشغيل لا دعوى عن الفاحص: الجذورُ القائمة
+    // **يجب** أن تُفحص، وذاك نفسُ عنوان هذا الاختبار. شُخِّص وأُصلح في `WL-045`.
+    const resolved = resolveScanRoots([join(dir, 'لا-وجود-له')]);
+    assert.equal(
+      resolved.includes(join(dir, 'لا-وجود-له')),
+      false,
+      'مسارٌ لا وجودَ له صار جذرَ فحصٍ مُخترعاً',
+    );
+    assert.ok(
+      resolved.every((root) => existsSync(root)),
+      'جذرٌ مُعاد لا وجودَ له على القرص',
+    );
   });
 });
 

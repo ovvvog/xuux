@@ -31,3 +31,6 @@ DROP INDEX state.royal_reports_published_period_idx;
 DROP INDEX state.royal_reports_state_period_idx;
 
 DROP TABLE state.royal_reports;
+
+-- والدالّةُ بعد الجدولِ الذي يناديها قيدُه، لا قبله.
+DROP FUNCTION state.report_sections_declared(jsonb);

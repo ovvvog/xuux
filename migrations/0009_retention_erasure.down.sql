@@ -20,6 +20,9 @@ BEGIN
   END IF;
 END $$;
 
-DROP INDEX state.memories_dataset_idx;
+-- ولا `DROP INDEX state.memories_dataset_idx` هنا: هذه الهجرةُ لم تُنشئه — هو ملكُ
+-- الهجرة `0002` وتراجعُها هو من يُسقطه. وتراجعٌ يُسقط ما لم يُنشئ يترك القاعدةَ
+-- في حالٍ لا تُصفها أيُّ هجرةٍ سابقة، ويُعطِّل سؤالَ الاحتفاظِ عن الذاكرةِ الحيّة
+-- بلا إعلان.
 
 DROP TABLE state.erasure_records;

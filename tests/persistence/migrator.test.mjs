@@ -120,11 +120,30 @@ test(
       assert.deepEqual(
         tables.rows.map((row) => /** @type {Record<string, unknown>} */ (row)['table_name']),
         [
+          // النواة والحوكمة والتشغيل (`0001`–`0005`)
           'agents',
           'cases',
+          'classification_approvals',
           'commands',
           'data_assets',
+          // النسب والاحتفاظ والقنوات (`0007`–`0010`)
+          'data_lineage',
+          'erasure_records',
+          'event_messages',
+          'event_offsets',
           'events',
+          // الاتحاد (`0016`–`0017`)
+          'federation_delegation_register',
+          'federation_delegations',
+          'federation_local_acts',
+          'federation_refusals',
+          // المؤسسات وولاياتها (`0014`–`0015`)
+          'institution_breaches',
+          'institution_mandates',
+          'institution_outputs',
+          'institution_report_cycles',
+          'institution_tasks',
+          'institutions',
           'laws',
           'memories',
           'models',
@@ -132,11 +151,19 @@ test(
           'policy_decisions',
           'policy_versions',
           'quotas',
+          // التقارير الملكية (`0018`)
+          'royal_reports',
           'task_dead_letters',
           'task_transitions',
           'tasks',
         ],
-        'جداول المخطَّط بعد كل الهجرات: عشرة من M3.02، واثنان من حوكمة السياسة (M4.06)، وثلاثة من النواة التشغيلية (M5.01)',
+        // القائمةُ مُثبَّتةٌ قصداً — لا تُشتقّ من القاعدة نفسها: قائمةٌ تُقرأ من
+        // القاعدة تُصادق على أيِّ جدولٍ يظهر فيها ولا تكشف جدولاً أُضيف بلا قرار.
+        // وكانت متوقّفةً عند خمسة عشر جدولاً (حال `M5.01`) فأخفقت من أوّلِ هجرةٍ
+        // بعدها، ولم يظهر ذلك لأن اختبارات القاعدة كانت متخطّاةً دائماً — شُخِّص
+        // وأُصلح في `WL-045`. **من يضيف هجرةً تُنشئ جدولاً يُحدِّث هذه القائمة
+        // بيده**، وذاك هو المقصود.
+        'جداول المخطَّط بعد كل الهجرات الثماني عشرة: أحدٌ وثلاثون جدولاً',
       );
 
       // التراجع خطوةً خطوة حتى الصفر: `down` تتراجع عن الأخيرة وحدها.

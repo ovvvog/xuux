@@ -138,6 +138,63 @@ jobs:
       - name: التحقق من عدم انحراف السجلات المشتقة عن البذرة
         run: npm run check:registries
 
+      # **العيبُ الذي تُغلقه هذه الخطوات (WL-045):** ستّةَ عشرَ حاجزاً مُعلَناً في
+      # `npm run validate` لم يكن يُشغِّلها هذا المسار قطُّ — كان يُشغِّل
+      # `guard:templates` و`guard:filecount` وحدهما. فحواجزُ صِيغت خطوةً بعد خطوة
+      # لتمنع الانحراف كانت تُقاس على جهاز المطوّر إن شاء، ولا تمنع دمجاً. والبوابةُ
+      # التي لا تُشغَّل آلياً ليست بوابةً بل نيّة. ولها هنا خطواتٌ مُسمَّاةٌ لا سطرٌ
+      # جامعٌ واحدٌ، كي يدلَّ اسمُ الخطوة الحمراء على الحاجز الذي سقط.
+      - name: حاجز التخويل — لا فعل حسّاس بلا سلطة معلَنة
+        run: npm run guard:authorization
+
+      - name: حاجز التغليف — لا مادة سياديّة بلا مغلِّف
+        run: npm run guard:encryption
+
+      - name: حاجز النسب — لا أصل بلا قيد
+        run: npm run guard:lineage
+
+      - name: حاجز الذاكرة — لا استرجاع بلا عزل هوية
+        run: npm run guard:memory
+
+      - name: حاجز الاحتفاظ — لا صفّ يبقى بلا مدّة معلَنة
+        run: npm run guard:retention
+
+      - name: حاجز السجل — لا واقعة بلا قيد
+        run: npm run guard:events
+
+      - name: حاجز المعرفة — لا دعوى بلا سند
+        run: npm run guard:knowledge
+
+      - name: حاجز الدستور — لا مادة بلا مرجع
+        run: npm run guard:constitution
+
+      - name: حاجز التشريع — لا نفاذ بلا ربط وأمر موقَّع
+        run: npm run guard:legislation
+
+      - name: حاجز القضاء — لا حكم بلا جلسة وسبب
+        run: npm run guard:judiciary
+
+      - name: حاجز المؤسسات — لا مؤسسة بلا ولاية
+        run: npm run guard:institutions
+
+      - name: حاجز الولايات — لا ولاية بلا حدود معلَنة
+        run: npm run guard:mandates
+
+      - name: حاجز الاتحاد — لا تفويض بلا سجل
+        run: npm run guard:federation
+
+      - name: حاجز السيادة — لا قرار سياديّ بلا تاج
+        run: npm run guard:sovereignty
+
+      - name: حاجز التقارير — لا تقدير بلا إعلان
+        run: npm run guard:reports
+
+      - name: حاجز الرقابة — لا مقياس بلا مصدر
+        run: npm run guard:monitoring
+
+      - name: حاجز طبقة الواجهة (M9.02) — لا مسار بلا تخويل معلَن
+        run: npm run guard:api
+
       - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
         run: npm run guard:templates
 

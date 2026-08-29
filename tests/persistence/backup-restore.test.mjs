@@ -16,6 +16,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { up } from '../../src/persistence/migrator.mjs';
 import { catalogSnapshot, createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -145,88 +146,110 @@ async function stateRowCounts(pool) {
  * @returns {Promise<void>}
  */
 async function seedEveryTable(pool) {
-  await pool.query(
-    `INSERT INTO state.agents (id, name, kind, status, capabilities, role, owner, certificate)
+  const encryption = await createTestEncryptor();
+  try {
+    await pool.query(
+      `INSERT INTO state.agents (id, name, kind, status, capabilities, role, owner, certificate)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-    [
-      'agent-001',
-      'Agent One',
-      'service',
-      'active',
-      ['backup'],
-      'operator',
-      'owner-001',
-      JSON.stringify({ issuer: 'test' }),
-    ],
-  );
-  await pool.query(
-    `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, model_version)
+      [
+        'agent-001',
+        'Agent One',
+        'service',
+        'active',
+        ['backup'],
+        'operator',
+        'owner-001',
+        JSON.stringify({ issuer: 'test' }),
+      ],
+    );
+    await pool.query(
+      `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, model_version)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    ['model-001', 'Model One', 'internal', 'operations', 'a'.repeat(64), 'registered', '1.0.0'],
-  );
-  await pool.query(
-    `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
+      ['model-001', 'Model One', 'internal', 'operations', 'a'.repeat(64), 'registered', '1.0.0'],
+    );
+    await pool.query(
+      `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, now())`,
-    [
-      'event-001',
-      'backup.created',
-      'agent-001',
-      JSON.stringify({ source: 'test' }),
-      'b'.repeat(64),
-    ],
-  );
-  await pool.query(
-    `INSERT INTO state.commands (id, nonce, issued_by, kind, state, payload)
+      [
+        'event-001',
+        'backup.created',
+        'agent-001',
+        JSON.stringify({ source: 'test' }),
+        'b'.repeat(64),
+      ],
+    );
+    await pool.query(
+      `INSERT INTO state.commands (id, nonce, issued_by, kind, state, payload)
      VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
-    [
-      'command-001',
-      'nonce-123456',
-      'agent-001',
-      'backup',
-      'claimed',
-      JSON.stringify({ restore: true }),
-    ],
-  );
-  await pool.query(
-    `INSERT INTO state.laws (id, title, body, status, scope, proposer)
+      [
+        'command-001',
+        'nonce-123456',
+        'agent-001',
+        'backup',
+        'claimed',
+        JSON.stringify({ restore: true }),
+      ],
+    );
+    await pool.query(
+      `INSERT INTO state.laws (id, title, body, status, scope, proposer)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    ['law-001', 'Backup Law', 'A test law.', 'draft', 'testing', 'agent-001'],
-  );
-  await pool.query(
-    `INSERT INTO state.cases (id, law_id, subject, state)
-     VALUES ($1, $2, $3, $4)`,
-    ['case-001', 'law-001', 'agent-001', 'opened'],
-  );
-  await pool.query(
-    `INSERT INTO state.policies (id, name, effect, resource, action, law_id)
+      ['law-001', 'Backup Law', 'A test law.', 'draft', 'testing', 'agent-001'],
+    );
+    await pool.query(
+      // `claimant` و`claim` عمودان **إلزاميان** أضافتهما هجرةُ مسار الدعوى
+      // (`0012`): دعوى بلا مُدَّعٍ ولا مطلبٍ دعوى لا يُعرف من رفعها ولا بماذا.
+      // كان هذا التمهيدُ يُخفق بـ`23502` من يومِ تلك الهجرة، ولم يظهر لأن
+      // اختبارات القاعدة كانت متخطّاةً دائماً (`WL-045`).
+      `INSERT INTO state.cases (id, law_id, subject, state, claimant, claim)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    ['policy-001', 'Backup policy', 'allow', 'backup', 'read', 'law-001'],
-  );
-  await pool.query(
-    `INSERT INTO state.quotas (id, subject_type, subject_id, resource, limit_value, window_seconds)
+      ['case-001', 'law-001', 'agent-001', 'opened', 'agent-001', 'مطلبُ تمهيدٍ لتمرين النسخ.'],
+    );
+    await pool.query(
+      `INSERT INTO state.policies (id, name, effect, resource, action, law_id)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    ['quota-001', 'agent', 'agent-001', 'backup', 10, 60],
-  );
-  await pool.query(
-    `INSERT INTO state.data_assets (id, name, classification, owner, retention_days, source)
+      ['policy-001', 'Backup policy', 'allow', 'backup', 'read', 'law-001'],
+    );
+    await pool.query(
+      `INSERT INTO state.quotas (id, subject_type, subject_id, resource, limit_value, window_seconds)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    ['asset-001', 'Backup Asset', 'internal', 'agent-001', 30, 'integration-test'],
-  );
-  await pool.query(
-    // تاريخ الانتهاء إلزامي بعد الترحيل `0008` (‏M7.05): مدخلٌ بلا انتهاء ولا
-    // حفظٍ قانوني يرفضه القيد `memories_expiry_required`، فالنسخة تُؤخذ لصفٍّ
-    // مشروع لا لصفٍّ ما كان ليُكتب.
-    `INSERT INTO state.memories (id, agent_id, kind, content, tags, dataset_id, expires_at)
+      ['quota-001', 'agent', 'agent-001', 'backup', 10, 60],
+    );
+    await pool.query(
+      `INSERT INTO state.data_assets (id, name, classification, owner, retention_days, source)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+      ['asset-001', 'Backup Asset', 'internal', 'agent-001', 30, 'integration-test'],
+    );
+    await pool.query(
+      // تاريخ الانتهاء إلزامي بعد الترحيل `0008` (‏M7.05): مدخلٌ بلا انتهاء ولا
+      // حفظٍ قانوني يرفضه القيد `memories_expiry_required`، فالنسخة تُؤخذ لصفٍّ
+      // مشروع لا لصفٍّ ما كان ليُكتب.
+      // المحتوى **مغلَّفٌ فعلاً** بالمغلِّف نفسه لا بشكلٍ مصطنعٍ يُشبه المغلَّف:
+      // هجرةُ التشفير (`0006`) تفرض `memories_content_sealed`، وكان هذا التمهيدُ
+      // يكتب نصّاً صريحاً فيُخفق من يومِ تلك الهجرة — لم يظهر لأن اختبارات القاعدة
+      // كانت متخطّاةً دائماً (`WL-045`). ولو أُغلق بشكلٍ مُخترعٍ لصار التمرينُ
+      // يستعيد ما لا يُفكّ، وهو نسخةٌ لا تُستعاد.
+      `INSERT INTO state.memories (id, agent_id, kind, content, tags, dataset_id, expires_at)
      VALUES ($1, $2, $3, $4::jsonb, $5, $6, now() + interval '30 days')`,
-    [
-      'memory-001',
-      'agent-001',
-      'episodic',
-      JSON.stringify({ action: 'backup' }),
-      ['backup'],
-      'asset-001',
-    ],
-  );
+      [
+        'memory-001',
+        'agent-001',
+        'episodic',
+        JSON.stringify(
+          await encryption.encryptor.seal({
+            value: { action: 'backup' },
+            classification: 'internal',
+            binding: { id: 'memory-001', agentId: 'agent-001', datasetId: 'asset-001' },
+          }),
+        ),
+        ['backup'],
+        'asset-001',
+      ],
+    );
+  } finally {
+    // مادةُ المفاتيح المؤقّتة تُزال دائماً: التمرين يقيس النسخَ والاستعادة لا
+    // يترك مفاتيحَ على القرص.
+    encryption.cleanup();
+  }
 }
 
 test(

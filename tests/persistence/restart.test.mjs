@@ -24,6 +24,8 @@ import {
 } from '../../src/persistence/composition.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, databaseUrl, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { BINDABLE_TEXT, enactLawThroughCrown } from '../helpers/legislation.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 import { registerEvaluationExperiment } from '../helpers/experiment-support.mjs';
 
@@ -48,6 +50,12 @@ test(
   'إعادة تشغيل كاملة لا تفقد أي حالة من السجلات الخمس',
   { skip: skipWithoutDatabase },
   async () => {
+    // مزوّدُ المفاتيح **واحدٌ قبل الانقطاع وبعده**: الذاكرة صارت مغلَّفةً
+    // (`M7.03`) و`remember` يرفض بلا مغلِّف بـ`MEMORY_ENCRYPTOR_REQUIRED`. ومزوّدٌ
+    // جديدٌ بعد الإقلاع يعني مفتاحاً جديداً لا يفكّ ما كُتب — وذاك ليس «إعادة
+    // تشغيل» بل فقدُ مفاتيح. فمادةُ المفاتيح تنجو كما تنجو القاعدة، وهو ما
+    // يجعل المقيسَ نجاةَ الحالة لا نجاةَ الشكل (`WL-045`).
+    const encryption = await createTestEncryptor();
     const created = await createIsolatedDatabase('restart');
     /** @type {import('pg').Pool | null} */
     let second = null;
@@ -68,6 +76,7 @@ test(
         log: beforeLog,
         repositories: createPostgresRepositories(created.pool),
         enforcementPoint: enforcementPointFor(beforeLog),
+        keyProvider: encryption.keyProvider,
       });
       // مشغّلٌ تخليصه «internal»: يكتب ذاكرةً داخلية بلا كتابةٍ إلى الأسفل.
       const operator = testActor('role:operator');
@@ -110,6 +119,17 @@ test(
         retentionDays: 3650,
       });
       await before.catalog.markQuality(dataset.id, 'verified');
+      // **قراءةٌ فعليةٌ قبل الانقطاع.** الاختبارُ يدّعي بعد الإقلاع أن «قراءةً
+      // وقعت قبل إعادة التشغيل ولم يبقَ لها قيد نسب» دعوى منتفية — ولم تكن قبل
+      // `WL-045` أيُّ قراءةٍ تقع أصلاً، فالدعوى كانت تُقاس على فراغٍ ولا تصدُق
+      // أبداً. والقارئُ ملكٌ لأن العقدَ سياديّ: قارئٌ أدنى تخليصاً يُرفض، ورفضٌ
+      // ليس قراءةً تُترك لها قيد نسب.
+      const sovereignReader = testActor('role:king');
+      await before.accessGate.read({
+        actor: sovereignReader,
+        assetId: dataset.id,
+        reader: () => 'مادة سيادية',
+      });
       const memory = await before.memory.remember(
         agent.id,
         { note: 'ما يجب أن يبقى' },
@@ -117,11 +137,17 @@ test(
       );
       const law = await before.laws.propose({
         title: 'استمرارية الحالة',
-        text: 'ما لا يبقى بعد إعادة التشغيل لا يُحكم به',
+        // النصُّ يبلغ الحدَّ الأدنى المُعلَن للربط: قانونٌ أقصرُ منه لا يُنفَّذ.
+        text: BINDABLE_TEXT,
         scope: 'operations',
         proposer: 'council',
       });
-      await before.laws.transition(law.id, LawState.ENACTED, 'crown');
+      // النفاذُ يمرّ بالسلطةِ التشريعيةِ بأمرٍ ملكيٍّ موقَّع (`M8.02`) لا
+      // بـ`transition(…, 'crown')`: ذاك مقارنةُ نصٍّ لا سلطة، ويرفضه المسارُ
+      // الآن بـ`LAW_ENACTMENT_PATH_REQUIRED`. وكان هذا الاختبارُ يستعمله فيُخفق
+      // من يومِ `M8.02` — لم يظهر لأنه متخطّىً بغياب `DATABASE_URL` (`WL-045`).
+      await before.laws.transition(law.id, LawState.PROPOSED, 'council');
+      await enactLawThroughCrown({ laws: before.laws, log: beforeLog, lawId: law.id });
 
       // إعادة التشغيل: ينقطع المجمّع وتُهدم كل كائنات السجلات. ما بعد هذا السطر
       // لا يقرأ شيئاً من ذاكرة العملية السابقة إلا المعرّفات التي نتحقّق منها.
@@ -133,6 +159,7 @@ test(
         log: afterLog,
         repositories: createPostgresRepositories(second),
         enforcementPoint: enforcementPointFor(afterLog),
+        keyProvider: encryption.keyProvider,
       });
 
       const recoveredAgent = await after.agents.get(agent.id);
@@ -209,6 +236,7 @@ test(
     } finally {
       if (second !== null) await second.end();
       await created.drop();
+      encryption.cleanup();
     }
   },
 );

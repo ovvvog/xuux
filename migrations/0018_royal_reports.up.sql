@@ -40,6 +40,47 @@
 --
 -- ولا `BEGIN`/`COMMIT` هنا: المُهاجر يفتح المعاملة بنفسه.
 
+-- **عيبٌ حقيقيٌّ شُخِّص على PostgreSQL 18.6 فعليٍّ وأُصلح في `WL-044`:** كان قيدُ
+-- `royal_reports_estimates_declared` يحمل `NOT EXISTS (SELECT …)` مباشرةً، والقاعدةُ
+-- ترفض الاستعلامَ الفرعيَّ في `CHECK` رفضاً محتوماً (`0A000`) — فلم تكن هذه الهجرةُ
+-- تُنشأ أصلاً على قاعدةٍ حقيقية، ولم يكن الضابطُ نافذاً يوماً. والاستعلامُ مسموحٌ
+-- **داخل دالّةٍ `IMMUTABLE`** يُنادى من القيد، فنُقل إلى موضعِه المشروع بنصِّه كما هو
+-- دون تخفيفِ شرطٍ واحد: الضابطُ يُنقل لا يُحذف.
+--
+-- **حدٌّ معلَن:** قيدٌ يُنادي دالّةً لا يُعاد تقييمُه إن تغيّر جسمُ الدالّة على
+-- صفوفٍ قائمة. ولهذا تُغيَّر هذه الدالّةُ بهجرةٍ تُعيد التحقّقَ (`VALIDATE`) لا
+-- بـ`CREATE OR REPLACE` صامت.
+CREATE FUNCTION state.report_sections_declared(sections jsonb) RETURNS boolean
+  LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+  AS $fn$
+    SELECT NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(sections) AS field
+      WHERE NOT (
+        (
+          (field->>'estimated')::boolean IS TRUE
+          AND length(btrim(coalesce(field->>'assumption', ''))) >= 60
+          AND jsonb_typeof(field->'value') = 'null'
+        )
+        OR (
+          (field->>'estimated')::boolean IS FALSE
+          AND length(btrim(coalesce(field->>'measuredFrom', ''))) > 0
+          AND (field->>'rowCount')::bigint >= 0
+          AND (
+            jsonb_typeof(field->'value') IN ('number', 'string')
+            OR (
+              jsonb_typeof(field->'value') = 'null'
+              AND (field->>'rowCount')::bigint = 0
+            )
+          )
+        )
+      )
+    )
+  $fn$;
+
+COMMENT ON FUNCTION state.report_sections_declared(jsonb) IS
+  'كلُّ حقلٍ في أقسامِ التقرير إمّا مقيسٌ بمصدرٍ مُسمّىً وعددِ صفوف، وإمّا تقديريٌّ بفرضيةٍ معلَنةٍ وقيمةٍ غيرِ معروفة. لا حقلَ ثالثاً.';
+
 CREATE TABLE state.royal_reports (
   id state.entity_id PRIMARY KEY,
   report_id text NOT NULL,
@@ -85,29 +126,7 @@ CREATE TABLE state.royal_reports (
   --    بفرضيةٍ لا تقلّ عن ستين حرفاً وقيمةٍ غيرِ معروفة. ولا حقلَ ثالثاً: حقلٌ
   --    بلا مصدرٍ ولا فرضيةٍ حقلٌ تقديريٌّ غيرُ معلَن، وهو ما جاءت الخطوةُ لمنعه.
   CONSTRAINT royal_reports_estimates_declared CHECK (
-    NOT EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(sections) AS field
-      WHERE NOT (
-        (
-          (field->>'estimated')::boolean IS TRUE
-          AND length(btrim(coalesce(field->>'assumption', ''))) >= 60
-          AND jsonb_typeof(field->'value') = 'null'
-        )
-        OR (
-          (field->>'estimated')::boolean IS FALSE
-          AND length(btrim(coalesce(field->>'measuredFrom', ''))) > 0
-          AND (field->>'rowCount')::bigint >= 0
-          AND (
-            jsonb_typeof(field->'value') IN ('number', 'string')
-            OR (
-              jsonb_typeof(field->'value') = 'null'
-              AND (field->>'rowCount')::bigint = 0
-            )
-          )
-        )
-      )
-    )
+    state.report_sections_declared(sections)
   ),
   -- ٦. المراجعةُ كاملةٌ أو غائبةٌ كلُّها، والغائبةُ لا تكون إلا لتقريرٍ مُولَّدٍ
   --    بعد. ومراجعةٌ نصفُها مكتوبٌ مراجعةٌ لا يُعرف من أجراها ولا بأيِّ موجب.
