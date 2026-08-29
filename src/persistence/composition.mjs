@@ -18,7 +18,11 @@ import { DataCatalog } from '../data/data-catalog.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
 import { ErasureLedger } from '../data/erasure-ledger.mjs';
 import { EventBus, loadEventsPolicy } from '../events/index.mjs';
-import { RegionalDelegation, loadDelegationPolicy } from '../federation/index.mjs';
+import {
+  DelegationRegister,
+  RegionalDelegation,
+  loadDelegationPolicy,
+} from '../federation/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -60,6 +64,7 @@ import {
   FEDERATION_DELEGATION_SPEC,
   FEDERATION_ACT_SPEC,
   FEDERATION_REFUSAL_SPEC,
+  FEDERATION_REGISTER_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -92,6 +97,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} federationDelegations
  * @property {ReturnType<typeof createMemoryRepository>} federationActs
  * @property {ReturnType<typeof createMemoryRepository>} federationRefusals
+ * @property {ReturnType<typeof createMemoryRepository>} federationRegister
  */
 
 /**
@@ -117,6 +123,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {EventBus} events
  * @property {InstitutionOperations} institutions
  * @property {RegionalDelegation} federation
+ * @property {DelegationRegister} federationRegister
  */
 
 /**
@@ -146,6 +153,7 @@ export function createMemoryRepositories(options = {}) {
     federationDelegations: createMemoryRepository(FEDERATION_DELEGATION_SPEC, options),
     federationActs: createMemoryRepository(FEDERATION_ACT_SPEC, options),
     federationRefusals: createMemoryRepository(FEDERATION_REFUSAL_SPEC, options),
+    federationRegister: createMemoryRepository(FEDERATION_REGISTER_SPEC, options),
   };
 }
 
@@ -177,6 +185,7 @@ export function createPostgresRepositories(pool) {
       federationDelegations: createPostgresRepository(pool, FEDERATION_DELEGATION_SPEC),
       federationActs: createPostgresRepository(pool, FEDERATION_ACT_SPEC),
       federationRefusals: createPostgresRepository(pool, FEDERATION_REFUSAL_SPEC),
+      federationRegister: createPostgresRepository(pool, FEDERATION_REGISTER_SPEC),
     })
   );
 }
@@ -347,12 +356,21 @@ export function createRegistries({
   // والتفويضُ الترابيُّ يُركَّب قبل بنيةِ الإرجاع لا داخلَ وسائطها (الخطوة `M8.07`):
   // إقليمٌ اختياريُّ التركيبِ يصير إقليماً بلا مسارٍ في التشغيل، فلا يُقاس استقلالُه
   // ولا نفاذُ سحبِ تفويضه. وإفرادُه باسمٍ يجعل وصلَه مقروءاً في موضعٍ واحد.
+  // وسجلُّ التفويضاتِ النافذةِ يُركَّب معه (الخطوة `M8.08`) وتُمرَّر إليه بوابةُ التاج:
+  // بلا بوابةٍ لا تفعيلَ ولا سحب، وبلا سجلٍّ لا يُقاس نفاذُ السحبِ ولا يُقرأ النافذُ
+  // الآن من سلسلةِ أوامرَ يُراجَع أثرُها.
+  const delegationRegister = new DelegationRegister({
+    repository: repositories.federationRegister,
+    log,
+  });
   const regionalDelegation = new RegionalDelegation({
     policy: delegationPolicy ?? loadDelegationPolicy(),
     log,
     delegations: repositories.federationDelegations,
     acts: repositories.federationActs,
     refusals: repositories.federationRefusals,
+    register: delegationRegister,
+    crown,
   });
   return {
     agents,
@@ -440,6 +458,7 @@ export function createRegistries({
     // إقليمٌ لا مسارَ له في التشغيلِ لا يُمارِس فعلاً ولا يُوقفه سحبُ تفويضٍ، فلا
     // يبقى لمعيارِ القبولِ ما يُقاس عليه.
     federation: regionalDelegation,
+    federationRegister: delegationRegister,
     // ناقلُ القنوات يُركَّب **دائماً** (الخطوة `M7.07`)، لنفس سبب دفتري النسب
     // والمحو: ناقلٌ اختياريٌّ يصير تركُه مساراً لأحداثٍ تُقرأ بلا تخليصٍ ولا عقد
     // ولا موضعِ قراءة — وهو العيب الذي أغلقته الخطوة.

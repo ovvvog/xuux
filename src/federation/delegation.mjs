@@ -69,6 +69,11 @@ export const FEDERATION_ERRORS = Object.freeze({
   POWER_RESERVED: 'FEDERATION_POWER_RESERVED',
   ACT_UNKNOWN: 'FEDERATION_ACT_UNKNOWN',
   OUT_OF_TERRITORY: 'FEDERATION_OUT_OF_TERRITORY',
+  ROYAL_COMMAND_REQUIRED: 'FEDERATION_ROYAL_COMMAND_REQUIRED',
+  COMMAND_ACTION_UNKNOWN: 'FEDERATION_COMMAND_ACTION_UNKNOWN',
+  COMMAND_TARGET_MISMATCH: 'FEDERATION_COMMAND_TARGET_MISMATCH',
+  REVOCATION_DEADLINE_MISSED: 'FEDERATION_REVOCATION_DEADLINE_MISSED',
+  REGISTER_DIVERGED: 'FEDERATION_REGISTER_DIVERGED',
 });
 
 /** أنواعُ حوادثِ التفويض الترابي. وكلُّ نوعٍ عقدٌ في قناة `federation`. */
@@ -80,6 +85,8 @@ export const FEDERATION_EVENTS = Object.freeze({
   REVOKED: 'federation.delegation.revoked',
   EXERCISED: 'federation.act.exercised',
   REFUSED: 'federation.act.refused',
+  REGISTERED: 'federation.delegation.registered',
+  OVERDUE: 'federation.revocation.overdue',
 });
 
 /** رفضٌ في التفويض الترابي: يحمل رمزَه وتفصيلَه. */
@@ -118,6 +125,12 @@ export class FederationError extends Error {
  * @typedef {Readonly<{
  *   version: number,
  *   acts: Readonly<{ activate: string, revoke: string }>,
+ *   sovereignty: Readonly<{
+ *     statement: string,
+ *     commands: Readonly<{ activate: string, revoke: string }>,
+ *     revocation: Readonly<{ deadlineMs: number, statement: string }>,
+ *     register: Readonly<{ statement: string }>,
+ *   }>,
  *   procedure: Readonly<{
  *     requireActivatedDelegation: true,
  *     requireDeclaredTerritory: true,
@@ -141,6 +154,17 @@ export class FederationError extends Error {
  *     enforcedBy: readonly string[],
  *   }>[],
  * }>} DelegationPolicy
+ */
+
+/**
+ * أمرٌ ملكيٌّ كما تقرؤه هذه الوحدة. والشكلُ من `src/root-of-trust/crown.mjs`،
+ * ويُوصَف هنا بنيةً لا يُستورَد صنفاً: الوحدةُ تقيس فعلَ الأمرِ وهدفَه ثم تُسلّمه
+ * للبوابة، ولا تتحقّق من توقيعه بنفسها.
+ * @typedef {Readonly<{ id: string, action: string, target: string, issuedAt: string, payload: object }>} RoyalCommandLike
+ */
+
+/**
+ * @typedef {{ command: (command: RoyalCommandLike, signature: string) => unknown }} CrownLike
  */
 
 /**
@@ -365,6 +389,14 @@ export function loadDelegationPolicy(options = {}) {
     }
   }
 
+  // فعلا الأمرِ الملكيِّ متمايزان: اسمٌ واحدٌ للفعلين يجعل أمرَ المنحِ صالحاً
+  // للسحبِ وبالعكس، فيصير التمييزُ بنيّةِ المستدعي لا بنصِّ الأمر.
+  if (parsed.sovereignty.commands.activate === parsed.sovereignty.commands.revoke) {
+    invalidConfig(
+      'فعلُ أمرِ التفويضِ وفعلُ أمرِ سحبه اسمٌ واحد؛ وأمرٌ يصلح للمنحِ والسحبِ معاً أمرٌ لا يُقرأ منه ما أمر به التاج.',
+    );
+  }
+
   // ── السندُ في بذرة الفدرالية ──
   const seeded = seedTerritories(options.seedDir ?? DEFAULT_FEDERATION_SEED_DIR);
   if (!seeded.regions.has(region.key)) {
@@ -449,20 +481,92 @@ export class RegionalDelegation {
    * @param {import('../persistence/repository-memory.mjs').Repository} deps.delegations
    * @param {import('../persistence/repository-memory.mjs').Repository} deps.acts
    * @param {import('../persistence/repository-memory.mjs').Repository} deps.refusals
+   * @param {import('./sovereignty.mjs').DelegationRegister} deps.register سجلُّ التفويضاتِ النافذة.
+   * @param {CrownLike | null} [deps.crown] بوابةُ التاج؛ وبلاها لا تفعيلَ ولا سحب.
    * @param {() => Date} [deps.now]
    */
-  constructor({ policy, log, delegations, acts, refusals, now }) {
+  constructor({ policy, log, delegations, acts, refusals, register, crown = null, now }) {
     if (!policy) throw new Error('FEDERATION_POLICY_REQUIRED');
     if (!log) throw new Error('FEDERATION_EVENT_LOG_REQUIRED');
     // مستودعُ الرفوضِ لازمٌ لا اختياري: بلا صفٍّ يُكتب فيه الرفضُ يصير «يُمنع
     // ويُسجَّل» نصفَ شرطٍ، والعزلُ بلا سجلٍّ عزلٌ لا يُراجَع.
     if (!delegations || !acts || !refusals) throw new Error('FEDERATION_REPOSITORY_REQUIRED');
+    // وسجلُّ التفويضاتِ النافذةِ لازمٌ كذلك (`M8.08`): أثرُ الأمرِ الملكيِّ يُكتب
+    // فيه، وبلاه يصير التفويضُ حالةً حاضرةً لا سلسلةَ أوامرَ تُراجَع.
+    if (!register) throw new Error('FEDERATION_REGISTER_REQUIRED');
     this.policy = policy;
     this.log = log;
     this.delegations = delegations;
     this.acts = acts;
     this.refusals = refusals;
+    this.register = register;
+    this.crown = crown;
     this.now = now ?? (() => new Date());
+  }
+
+  /**
+   * يُمرِّر أمرَ التفويضِ أو سحبِه ببوابة التاج، ويرفض ما ليس أمراً ملكيّاً على
+   * فعلِه وهدفِه.
+   *
+   * والترتيبُ مقصود: الفعلُ والهدفُ يُقاسان **قبل** البوابة كي لا يُحرَق معرّفُ
+   * أمرٍ على نداءٍ في غير موضعه؛ ثم البوابةُ وحدَها تُثبت التوقيعَ وتمنع الإعادةَ
+   * وتُسقط الأمرَ القديمَ وتردّه في دولةٍ موقوفة. فبلا بوابةٍ لا سيادةَ أصلاً:
+   * مقارنةُ اسمِ دورٍ بالنصِّ سلطةٌ مُدَّعاةٌ لا سلطةٌ مُفوَّضة.
+   * @param {'activate' | 'revoke'} act
+   * @param {string} territoryKey
+   * @param {RoyalCommandLike | undefined} command
+   * @param {string | undefined} signature
+   * @returns {{ issuedAt: Date, acceptedAt: Date, commandId: string, action: string }}
+   */
+  #royal(act, territoryKey, command, signature) {
+    if (this.crown === null) {
+      throw new FederationError(
+        FEDERATION_ERRORS.ROYAL_COMMAND_REQUIRED,
+        `لا بوابةَ تاجٍ مركَّبةٌ في التفويض الترابي؛ و${act} بلا بوابةٍ فعلٌ يقع بمقارنةِ اسمِ دورٍ بالنصِّ لا بأمرٍ موقَّع.`,
+      );
+    }
+    if (command === undefined || command === null || typeof signature !== 'string') {
+      throw new FederationError(
+        FEDERATION_ERRORS.ROYAL_COMMAND_REQUIRED,
+        `${act} على ${territoryKey} يقتضي أمراً ملكيّاً موقَّعاً؛ ونداءٌ بلا أمرٍ نداءٌ بلا سلطة.`,
+      );
+    }
+    const expected = this.policy.sovereignty.commands[act];
+    if (command.action !== expected) {
+      throw new FederationError(
+        FEDERATION_ERRORS.COMMAND_ACTION_UNKNOWN,
+        `فعلُ الأمر ${String(command.action)} ليس فعلَ ${act} المُعلَن (${expected})؛ وأمرٌ يُقبل على غير فعلِه أمرٌ يُنقل بتوقيعٍ صحيح.`,
+      );
+    }
+    if (command.target !== territoryKey) {
+      throw new FederationError(
+        FEDERATION_ERRORS.COMMAND_TARGET_MISMATCH,
+        `هدفُ الأمر ${String(command.target)} ليس الترابَ ${territoryKey}؛ وأثرٌ يقع في ترابٍ لم يأمر به أمرٌ لم يُصدَر.`,
+      );
+    }
+    const accepted = /** @type {{ acceptedAt?: unknown }} */ (
+      this.crown.command(command, signature)
+    );
+    const issuedAt = new Date(String(command.issuedAt));
+    const acceptedAt =
+      accepted && typeof accepted.acceptedAt === 'string'
+        ? new Date(accepted.acceptedAt)
+        : this.now();
+    return {
+      issuedAt,
+      acceptedAt,
+      commandId: String(command.id),
+      action: String(command.action),
+    };
+  }
+
+  /**
+   * التفويضاتُ النافذةُ الآن مقروءةً من سجلِّ التفويضاتِ النافذةِ **بعد** مقابلتها
+   * بالصفوف؛ وتباعدُ الاثنين يُردّ ولا يُقرأ أحدُهما وحدَه.
+   * @returns {Promise<ReadonlyMap<string, import('../persistence/entities.mjs').EntityRecord>>}
+   */
+  async effective() {
+    return this.register.assertConsistent(this.delegations);
   }
 
   /**
@@ -494,10 +598,13 @@ export class RegionalDelegation {
   /**
    * يُفعِّل تفويضَ ترابٍ: صلاحياتُه ودورُ ممارستها وأصلُه الترابيُّ تُكتب صفّاً
    * واحداً مقروءاً، فلا تبقى سلطتُه نصّاً في وثيقة.
-   * @param {{ territoryKey: string, actorRole: string }} input
+   *
+   * ولا يقع الفعلُ إلا بأمرٍ ملكيٍّ موقَّعٍ مقبولٍ في بوابة التاج (`M8.08`)، ويُكتب
+   * أثرُ الأمرِ صفّاً في سجلِّ التفويضاتِ النافذة.
+   * @param {{ territoryKey: string, actorRole: string, command?: RoyalCommandLike, signature?: string }} input
    * @returns {Promise<import('../persistence/entities.mjs').EntityRecord>}
    */
-  async activate({ territoryKey, actorRole }) {
+  async activate({ territoryKey, actorRole, command, signature }) {
     this.#permit('activate', actorRole);
     const level = levelFor(this.policy, territoryKey);
     const existing = await this.#row(territoryKey);
@@ -531,6 +638,9 @@ export class RegionalDelegation {
         );
       }
     }
+    // البوابةُ **آخرَ** الشروطِ المقروءةِ من الحالة: أمرٌ يُقبل ثم يُردّ لانكسارِ
+    // سلسلةٍ أمرٌ أُحرِق معرّفُه بلا أثر، فلا يُعاد استعمالُه ولو كان الردُّ صحيحاً.
+    const royal = this.#royal('activate', territoryKey, command, signature);
     const at = this.now();
     const record = await this.delegations.insert({
       id: `delegation:${territoryKey}`,
@@ -547,6 +657,19 @@ export class RegionalDelegation {
       revokedBy: null,
       revocationReason: null,
     });
+    await this.register.record({
+      commandId: royal.commandId,
+      action: royal.action,
+      effect: 'GRANT',
+      territoryKey,
+      level: level.level,
+      actorRole,
+      issuedAt: royal.issuedAt,
+      acceptedAt: royal.acceptedAt,
+      effectiveAt: this.now(),
+      deadlineMs: null,
+      reason: null,
+    });
     this.log.append('federation.delegation.activated', 'role:king', {
       territoryKey,
       level: level.level,
@@ -560,12 +683,16 @@ export class RegionalDelegation {
   /**
    * يسحب تفويضَ ترابٍ. والنفاذُ **في اللحظة نفسِها**: وقتُ السحبِ يُكتب في الصفِّ
    * فأولُ فعلٍ بعده يُرفض بلا تقديمِ ساعةٍ ولا نافذةِ سماح.
-   * @param {{ territoryKey: string, actorRole: string, reason: string }} input
+   *
+   * وهو أمرٌ ملكيٌّ بمهلةٍ مُعلَنةٍ ومقيسة (`M8.08`): أمرٌ بلغ عمرُه المهلةَ قبل
+   * تطبيقه يُردّ ويُسجَّل صفّاً ولا يُطبَّق بأثرٍ متأخِّرٍ يُدَّعى أنه وقع في المهلة،
+   * وسحبٌ طُبِّق ثم تجاوز قياسُه المهلةَ يُكتب متجاوِزاً وتُنشر له حادثة.
+   * @param {{ territoryKey: string, actorRole: string, reason: string, command?: RoyalCommandLike, signature?: string }} input
    * @returns {Promise<import('../persistence/entities.mjs').EntityRecord>}
    */
-  async revoke({ territoryKey, actorRole, reason }) {
+  async revoke({ territoryKey, actorRole, reason, command, signature }) {
     this.#permit('revoke', actorRole);
-    levelFor(this.policy, territoryKey);
+    const level = levelFor(this.policy, territoryKey);
     const text = typeof reason === 'string' ? reason.trim() : '';
     if (text.length < this.policy.procedure.minRefusalReasonLength) {
       throw new FederationError(
@@ -586,11 +713,41 @@ export class RegionalDelegation {
         `تفويضُ ${territoryKey} مسحوبٌ سلفاً؛ وسحبٌ ثانٍ يمحو لحظةَ السحبِ الأولى وهي مادّةُ المراجعة.`,
       );
     }
+    const royal = this.#royal('revoke', territoryKey, command, signature);
+    const deadlineMs = this.policy.sovereignty.revocation.deadlineMs;
     const at = this.now();
+    const age = at.getTime() - royal.issuedAt.getTime();
+    if (age > deadlineMs) {
+      // الردُّ قبل التطبيق: أمرٌ انقضت مهلتُه لا يُطبَّق ثم يُوصَف بأنه نفذ في
+      // مهلته. والصفُّ يبقى شاهداً على التأخُّر، والتاجُ يُصدر أمراً جديداً.
+      return this.#refuse({
+        code: FEDERATION_ERRORS.REVOCATION_DEADLINE_MISSED,
+        detail: `أمرُ سحبِ تفويضِ ${territoryKey} بلغ عمرُه ${age}ms وهو فوق المهلةِ المُعلَنة (${deadlineMs}ms)؛ فلم يُطبَّق، ويُصدر التاجُ أمراً جديداً يُقاس نفاذُه من إصداره.`,
+        territoryKey,
+        requestedTerritoryKey: territoryKey,
+        level: level.level,
+        actorRole,
+      });
+    }
     const updated = await this.delegations.update(String(row['id']), Number(row['version'] ?? 1), {
       revokedAt: at,
       revokedBy: actorRole,
       revocationReason: text,
+    });
+    // زمنُ النفاذِ يُقرأ **بعد** كتابةِ الصفِّ لا قبلها: قياسٌ يُؤخَذ قبل الكتابةِ
+    // يقيس عزمَ السحبِ لا نفاذَه، وكتابةٌ بطيئةٌ تجعل السحبَ متجاوِزاً فيُعلَن.
+    await this.register.record({
+      commandId: royal.commandId,
+      action: royal.action,
+      effect: 'REVOKE',
+      territoryKey,
+      level: level.level,
+      actorRole,
+      issuedAt: royal.issuedAt,
+      acceptedAt: royal.acceptedAt,
+      effectiveAt: this.now(),
+      deadlineMs,
+      reason: text,
     });
     this.log.append('federation.delegation.revoked', 'role:king', {
       territoryKey,

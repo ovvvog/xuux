@@ -317,7 +317,7 @@ channels:
         version: 1
         required: [attemptsInWindow, bytes, classification, destination, policyId, purpose, uri]
   - id: federation
-    subject: 'التفويضُ الترابيّ: نفاذُه وسحبُه وما مُورس به وما رُفض'
+    subject: 'التفويضُ الترابيّ: أمرُ نفاذه وسحبِه وقياسُه، وما مُورس به وما رُفض'
     classification: internal
     version: 1
     producers:
@@ -341,9 +341,15 @@ channels:
       - type: federation.delegation.activated
         version: 1
         required: [exercisedBy, level, parentKey, powers, territoryKey]
+      - type: federation.delegation.registered
+        version: 1
+        required: [commandId, effect, latencyMs, territoryKey, withinDeadline]
       - type: federation.delegation.revoked
         version: 1
         required: [level, reason, revokedBy, territoryKey]
+      - type: federation.revocation.overdue
+        version: 1
+        required: [commandId, deadlineMs, latencyMs, territoryKey]
   - id: halt
     subject: 'مِفتاحُ الإيقاف: إصدارُه وتأكيدُه واستئنافُ العمل'
     classification: sovereign

@@ -40,6 +40,7 @@ import {
   FEDERATION_DELEGATION_SPEC,
   FEDERATION_ACT_SPEC,
   FEDERATION_REFUSAL_SPEC,
+  FEDERATION_REGISTER_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -84,6 +85,7 @@ export function createClientRepositories(client) {
       federationDelegations: createPostgresRepository(client, FEDERATION_DELEGATION_SPEC),
       federationActs: createPostgresRepository(client, FEDERATION_ACT_SPEC),
       federationRefusals: createPostgresRepository(client, FEDERATION_REFUSAL_SPEC),
+      federationRegister: createPostgresRepository(client, FEDERATION_REGISTER_SPEC),
     })
   );
 }

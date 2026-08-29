@@ -1780,6 +1780,111 @@ export const FEDERATION_DELEGATION_SPEC = Object.freeze({
 });
 
 /**
+ * سجلُّ التفويضاتِ النافذة — الخطوة `M8.08`.
+ *
+ * **العيبُ الذي يعالجه هذا الصف:** في `M8.07` كان أثرُ التفويضِ يُقرأ من صفِّ
+ * التفويضِ وحدَه، فلا يُعرَف **بأيِّ أمرٍ** فُوِّض الترابُ ولا بأيِّ أمرٍ سُحب، ولا
+ * كم استغرق نفاذُ السحبِ من لحظةِ إصدارِ أمره. وهذا الصفُّ **أثرُ أمرٍ ملكيٍّ واحد**:
+ * معرّفُه لا يتكرّر، ووقتُ إصداره ووقتُ نفاذه محفوظان، والزمنُ بينهما مقيسٌ
+ * ومقابَلٌ بمهلةٍ مُعلَنة. والصفوفُ **لا تُحدَّث**: تسلسلُ الأوامرِ هو السجل.
+ */
+/** @type {EntitySpec} */
+export const FEDERATION_REGISTER_SPEC = Object.freeze({
+  name: 'federation_delegation_register',
+  table: 'state.federation_delegation_register',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      commandId: { column: 'command_id', type: 'string', required: true, maxLength: 128 },
+      action: { column: 'action', type: 'string', required: true, maxLength: 64 },
+      effect: {
+        column: 'effect',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['GRANT', 'REVOKE']),
+      },
+      territoryKey: { column: 'territory_key', type: 'string', required: true, maxLength: 32 },
+      level: {
+        column: 'level',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['region', 'province', 'municipality']),
+      },
+      actorRole: { column: 'actor_role', type: 'string', required: true, maxLength: 64 },
+      issuedAt: { column: 'issued_at', type: 'timestamp', required: true },
+      acceptedAt: { column: 'accepted_at', type: 'timestamp', required: true },
+      effectiveAt: { column: 'effective_at', type: 'timestamp', required: true },
+      latencyMs: { column: 'latency_ms', type: 'integer', required: true },
+      deadlineMs: { column: 'deadline_ms', type: 'integer', nullable: true },
+      withinDeadline: { column: 'within_deadline', type: 'boolean', nullable: true },
+      reason: { column: 'reason', type: 'string', nullable: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['commandId'])]),
+  filterable: Object.freeze(['commandId', 'territoryKey', 'effect', 'level']),
+  invariants: Object.freeze([
+    {
+      code: 'FEDERATION_REGISTER_TIMES_ORDERED',
+      message:
+        'وقتُ الإصدارِ ثم القبولِ ثم النفاذ، بهذا الترتيبِ لا غيره؛ وأمرٌ نفَذ قبل أن يُقبل أو قُبل قبل أن يُصدر زمنٌ لا يُقرأ منه سببٌ ولا يُقاس منه تأخُّر.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const issued = record['issuedAt'];
+        const accepted = record['acceptedAt'];
+        const effective = record['effectiveAt'];
+        if (!(issued instanceof Date) || !(accepted instanceof Date)) return false;
+        if (!(effective instanceof Date)) return false;
+        return accepted.getTime() >= issued.getTime() && effective.getTime() >= accepted.getTime();
+      },
+    },
+    {
+      code: 'FEDERATION_REGISTER_LATENCY_MEASURED',
+      message:
+        'الزمنُ المقيسُ هو الفارقُ بين إصدارِ الأمرِ ونفاذِ أثره بالميلي ثانية، غيرَ سالبٍ ومطابقاً للوقتين المحفوظين؛ ورقمٌ لا يُشتقّ من وقتين محفوظين رقمٌ يُكتب باليد.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const issued = record['issuedAt'];
+        const effective = record['effectiveAt'];
+        const latency = record['latencyMs'];
+        if (!(issued instanceof Date) || !(effective instanceof Date)) return false;
+        if (typeof latency !== 'number' || !Number.isInteger(latency) || latency < 0) return false;
+        return latency === effective.getTime() - issued.getTime();
+      },
+    },
+    {
+      code: 'FEDERATION_REGISTER_DEADLINE_JUDGED',
+      message:
+        'السحبُ وحدَه له مهلةٌ مُعلَنةٌ وحكمٌ عليها، والحكمُ محسوبٌ من الزمنِ المقيسِ لا مكتوبٌ استقلالاً؛ ومنحٌ بمهلةٍ أو سحبٌ بلا حكمٍ على مهلته سجلٌّ يُقرأ منه ما لم يُقَس.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const effect = record['effect'];
+        const deadline = record['deadlineMs'];
+        const within = record['withinDeadline'];
+        const latency = record['latencyMs'];
+        if (effect === 'GRANT') return deadline === null && within === null;
+        if (typeof deadline !== 'number' || !Number.isInteger(deadline) || deadline <= 0)
+          return false;
+        if (typeof latency !== 'number') return false;
+        return within === latency <= deadline;
+      },
+    },
+    {
+      code: 'FEDERATION_REGISTER_REASON_BOUND_TO_EFFECT',
+      message:
+        'لكلِّ سحبٍ سببٌ مكتوبٌ يبلغ الحدَّ المُعلَن، ولا سببَ لمنحٍ؛ وسحبٌ بلا سببٍ في السجلِّ سيادةٌ سُحبت بلا موجبٍ يُقرأ.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const effect = record['effect'];
+        const reason = record['reason'];
+        if (effect === 'GRANT') return reason === null;
+        return typeof reason === 'string' && reason.trim().length >= FEDERATION_MIN_REASON_LENGTH;
+      },
+    },
+  ]),
+});
+
+/**
  * فعلٌ ترابيٌّ مُمارَسٌ فعلاً — الخطوة `M8.07`.
  *
  * والصفُّ **دليلُ الاستقلال**: فعلٌ وقع في ترابٍ بدورِ مستواه، لا بإذنٍ مركزيٍّ
@@ -1926,6 +2031,7 @@ export const ENTITY_SPECS = Object.freeze({
   federation_delegations: FEDERATION_DELEGATION_SPEC,
   federation_local_acts: FEDERATION_ACT_SPEC,
   federation_refusals: FEDERATION_REFUSAL_SPEC,
+  federation_delegation_register: FEDERATION_REGISTER_SPEC,
 });
 
 /**

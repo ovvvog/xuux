@@ -20,8 +20,15 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { EventLog } from '../../src/root-of-trust/index.mjs';
 import {
+  CertificateAuthority,
+  CrownGateway,
+  EventLog,
+  KingIdentity,
+  createRoyalCommand,
+} from '../../src/root-of-trust/index.mjs';
+import {
+  DelegationRegister,
   FEDERATION_ERRORS,
   FEDERATION_EVENTS,
   RegionalDelegation,
@@ -32,6 +39,7 @@ import {
   FEDERATION_DELEGATION_SPEC,
   FEDERATION_MIN_REASON_LENGTH,
   FEDERATION_REFUSAL_SPEC,
+  FEDERATION_REGISTER_SPEC,
 } from '../../src/persistence/entities.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 
@@ -101,13 +109,24 @@ function state(options = {}) {
   const delegations = createMemoryRepository(FEDERATION_DELEGATION_SPEC);
   const acts = createMemoryRepository(FEDERATION_ACT_SPEC);
   const refusals = createMemoryRepository(FEDERATION_REFUSAL_SPEC);
+  const registerRepo = createMemoryRepository(FEDERATION_REGISTER_SPEC);
   let clock = new Date('2026-01-01T00:00:00.000Z');
+  // وبوابةُ التاجِ تقرأ **الساعةَ المجمَّدةَ نفسَها** (الخطوة `M8.08`): بوابةٌ
+  // بساعةِ الجهازِ وأمرٌ بوقتِ الساعةِ المجمَّدةِ يُقرأ أمراً من المستقبل، فيصير
+  // الاختبارُ يقيس فارقَ ساعتين لا سلطةَ أمرٍ ملكيّ.
+  const king = new KingIdentity();
+  const crown = new CrownGateway(king, new CertificateAuthority(king), log, {
+    clock: /** @type {never} */ ({ now: () => clock.getTime() }),
+  });
+  const register = new DelegationRegister({ repository: registerRepo, log });
   const federation = new RegionalDelegation({
     policy: options.policy ?? POLICY,
     log,
     delegations,
     acts,
     refusals,
+    register,
+    crown,
     now: () => clock,
   });
   return {
@@ -115,7 +134,20 @@ function state(options = {}) {
     delegations,
     acts,
     refusals,
+    registerRepo,
+    register,
+    king,
+    crown,
     federation,
+    /**
+     * أمرٌ ملكيٌّ موقَّعٌ فعلاً بوقتِ الساعةِ المجمَّدة.
+     * @param {string} action
+     * @param {string} target
+     */
+    order: (action, target) => {
+      const command = { ...createRoyalCommand(action, target), issuedAt: clock.toISOString() };
+      return { command, signature: king.sign(command) };
+    },
     /** @param {number} ms */
     advance: (ms) => {
       clock = new Date(clock.getTime() + ms);
@@ -130,7 +162,11 @@ function state(options = {}) {
  */
 async function delegateAll(s) {
   for (const key of [REGION_KEY, PROVINCE_KEY, MUNICIPALITY_KEY]) {
-    await s.federation.activate({ territoryKey: key, actorRole: KING });
+    await s.federation.activate({
+      territoryKey: key,
+      actorRole: KING,
+      ...s.order(POLICY.sovereignty.commands.activate, key),
+    });
   }
 }
 
@@ -195,6 +231,7 @@ test('معيارُ القبول ٢: سحبُ التفويضِ يُوقف الع�
     territoryKey: MUNICIPALITY_KEY,
     actorRole: POLICY.acts.revoke,
     reason: REASON,
+    ...s.order(POLICY.sovereignty.commands.revoke, MUNICIPALITY_KEY),
   });
   assert.equal(field(revoked, 'revokedBy'), POLICY.acts.revoke);
   assert.deepEqual(field(revoked, 'revokedAt'), at);
@@ -242,6 +279,7 @@ test('سحبُ تفويضِ الإقليمِ يقطع سلسلةَ فرعِه: �
     territoryKey: REGION_KEY,
     actorRole: POLICY.acts.revoke,
     reason: REASON,
+    ...s.order(POLICY.sovereignty.commands.revoke, REGION_KEY),
   });
 
   await assert.rejects(
@@ -363,6 +401,8 @@ test('الصفُّ سندُ السلطةِ لا الوثيقةُ الحاضرة:
     delegations: s.delegations,
     acts: s.acts,
     refusals: s.refusals,
+    register: s.register,
+    crown: s.crown,
     now: s.now,
   });
 
@@ -403,7 +443,11 @@ test('نوعُ فعلٍ غيرُ معروفٍ في المستوى يُرفض و�
 
 test('فعلٌ في ترابٍ لم يُفعَّل تفويضُه بعدُ يُرفض: التفويضُ سندٌ لا افتراض', async () => {
   const s = state();
-  await s.federation.activate({ territoryKey: REGION_KEY, actorRole: KING });
+  await s.federation.activate({
+    territoryKey: REGION_KEY,
+    actorRole: KING,
+    ...s.order(POLICY.sovereignty.commands.activate, REGION_KEY),
+  });
   const level = levelOf(PROVINCE_KEY);
   const act = actOf(PROVINCE_KEY);
 
@@ -431,6 +475,7 @@ test('سحبٌ بلا سببٍ يبلغ الحدَّ المُعلَنَ يُرف
         territoryKey: MUNICIPALITY_KEY,
         actorRole: POLICY.acts.revoke,
         reason: 'قصير',
+        ...s.order(POLICY.sovereignty.commands.revoke, MUNICIPALITY_KEY),
       }),
     (error) => field(error, 'code') === FEDERATION_ERRORS.REVOCATION_REASON_REQUIRED,
   );
@@ -444,13 +489,19 @@ test('التفويضُ لا يُفعَّل مرّتين ولا يُسحب مرّ
   await delegateAll(s);
 
   await assert.rejects(
-    () => s.federation.activate({ territoryKey: REGION_KEY, actorRole: KING }),
+    () =>
+      s.federation.activate({
+        territoryKey: REGION_KEY,
+        actorRole: KING,
+        ...s.order(POLICY.sovereignty.commands.activate, REGION_KEY),
+      }),
     (error) => field(error, 'code') === FEDERATION_ERRORS.ALREADY_ACTIVATED,
   );
   await s.federation.revoke({
     territoryKey: MUNICIPALITY_KEY,
     actorRole: POLICY.acts.revoke,
     reason: REASON,
+    ...s.order(POLICY.sovereignty.commands.revoke, MUNICIPALITY_KEY),
   });
   await assert.rejects(
     () =>
@@ -458,6 +509,7 @@ test('التفويضُ لا يُفعَّل مرّتين ولا يُسحب مرّ
         territoryKey: MUNICIPALITY_KEY,
         actorRole: POLICY.acts.revoke,
         reason: REASON,
+        ...s.order(POLICY.sovereignty.commands.revoke, MUNICIPALITY_KEY),
       }),
     (error) => field(error, 'code') === FEDERATION_ERRORS.ALREADY_REVOKED,
   );
@@ -466,7 +518,12 @@ test('التفويضُ لا يُفعَّل مرّتين ولا يُسحب مرّ
 test('الفرعُ لا يُفعَّل قبل أصلِه: سلسلةٌ مقطوعةٌ من أولها تُرفض', async () => {
   const s = state();
   await assert.rejects(
-    () => s.federation.activate({ territoryKey: MUNICIPALITY_KEY, actorRole: KING }),
+    () =>
+      s.federation.activate({
+        territoryKey: MUNICIPALITY_KEY,
+        actorRole: KING,
+        ...s.order(POLICY.sovereignty.commands.activate, MUNICIPALITY_KEY),
+      }),
     (error) =>
       field(error, 'code') === FEDERATION_ERRORS.CHAIN_BROKEN ||
       field(error, 'code') === FEDERATION_ERRORS.NOT_ACTIVATED,
@@ -478,12 +535,23 @@ test('التفويضُ والسحبُ فعلان ملكيّان: دورٌ آخر
   const s = state();
   const other = levelOf(MUNICIPALITY_KEY).exercisedBy;
   await assert.rejects(
-    () => s.federation.activate({ territoryKey: REGION_KEY, actorRole: other }),
+    () =>
+      s.federation.activate({
+        territoryKey: REGION_KEY,
+        actorRole: other,
+        ...s.order(POLICY.sovereignty.commands.activate, REGION_KEY),
+      }),
     (error) => field(error, 'code') === FEDERATION_ERRORS.ROLE_NOT_PERMITTED,
   );
   await delegateAll(s);
   await assert.rejects(
-    () => s.federation.revoke({ territoryKey: REGION_KEY, actorRole: other, reason: REASON }),
+    () =>
+      s.federation.revoke({
+        territoryKey: REGION_KEY,
+        actorRole: other,
+        reason: REASON,
+        ...s.order(POLICY.sovereignty.commands.revoke, REGION_KEY),
+      }),
     (error) => field(error, 'code') === FEDERATION_ERRORS.ROLE_NOT_PERMITTED,
   );
   assert.equal(field(await s.federation.status(REGION_KEY), 'state'), 'active');

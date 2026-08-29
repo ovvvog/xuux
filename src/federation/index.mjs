@@ -1,8 +1,8 @@
 /**
- * واجهةُ الفدرالية — الخطوة `M8.07`.
+ * واجهةُ الفدرالية — الخطوتان `M8.07` و`M8.08`.
  *
  * مَجمَعُ تصديرٍ واحدٌ للتفويض الترابي: الوثيقةُ تُحمَّل بـ`loadDelegationPolicy`،
- * وتُنفَّذ بـ`RegionalDelegation`. والاستيرادُ من هنا لا من مسارِ الوحدةِ مباشرةً
+ * وتُنفَّذ بـ`RegionalDelegation`، وأثرُ كلِّ أمرٍ ملكيٍّ يُكتب في `DelegationRegister`. والاستيرادُ من هنا لا من مسارِ الوحدةِ مباشرةً
  * كي يبقى للفدرالية بابٌ واحدٌ كما لغيرها من المسارات.
  *
  * **حدٌّ معلَن:** لا شيءَ هنا يقرأ شجرةَ الفدراليةِ كاملةً — ذاك عملُ
@@ -21,3 +21,5 @@ export {
   loadDelegationPolicy,
   withinTerritory,
 } from './delegation.mjs';
+
+export { DelegationRegister, REGISTER_EFFECTS } from './sovereignty.mjs';
