@@ -1,0 +1,279 @@
+# طبقة الواجهة الداخلية الموحّدة — الخطوة `M9.02`
+#
+# قبل هذا الملف لم يكن في الدولة **مدخل** واحد: من ملك مرجعاً إلى سجلٍّ أو إلى
+# وكيل المراقبة قرأ بلا جلسةٍ ولا حدِّ معدَّلٍ ولا قيدِ تدقيقٍ باسم النداء. فصار
+# المدخلُ بياناتٍ هنا: المسارُ لا يوجد إن لم يُعلَن، وفعلُه المحكومُ مُعلَنٌ باسمه،
+# ومشهدُه الذي يقرأ منه مُعلَنٌ في `config/monitoring.yaml`، وحدُّ معدَّلِه رقمٌ
+# يُقرأ لا تقديرٌ في الكود.
+#
+# وما لا تفعله هذه الوثيقة: لا تمنح إذناً. الإذنُ قرارُ `config/policies.yaml`
+# تُصدره نقطةُ التفويض المركزية؛ والمسارُ المُعلَنُ هنا يقول «هذا الفعلُ على هذا
+# المورد» لا «هذا مسموح».
+
+version: 1
+
+statement: >-
+  كلُّ نداءٍ في هذه الطبقة يمرّ بخمسِ عقباتٍ بترتيبٍ ثابت: مسارٌ معلَنٌ، ثم جلسةٌ
+  صالحةٌ لهويةٍ نشطة، ثم حدُّ معدَّلٍ يَعُدُّ المرفوضَ كما يَعُدُّ المقبول، ثم
+  قرارُ نقطةِ التفويضِ المركزيةِ وتذكرتُها المستهلكة، ثم المشهدُ المقروءُ وحده.
+  وغيابُ أيِّ تابعٍ رفضٌ مُسمّى لا سقوطٌ إلى السماح.
+
+# ── الجلسة: مصادقةُ هذه الطبقة ──
+# الرمزُ عشوائيٌّ لا مُشتقٌّ من هوية، ويُخزَّن **بصمتُه** لا هو، وينتهي بمهلةٍ
+# معلَنةٍ لا تُمدَّد ضمناً بالاستعمال: جلسةٌ تُمدَّد بكلِّ نداءٍ جلسةٌ لا تنتهي.
+session:
+  ttlSeconds: 900
+  tokenBytes: 32
+  digest: sha256
+
+# ── حدُّ المعدَّل: نافذةٌ ثابتةٌ لكلِّ (مسار، هوية) ──
+# والعدُّ يشمل النداءَ المرفوضَ: حدٌّ لا يَعُدُّ إلا الناجحَ يترك للمُخفِقِ محاولاتٍ
+# بلا نهاية، وذاك عينُ ما يُستنزَف به النظام.
+rateLimit:
+  windowSeconds: 60
+  maxCalls: 60
+
+audit:
+  callEvent: api.call
+  refusalEvent: api.call.refused
+  sessionOpenedEvent: api.session.opened
+  sessionClosedEvent: api.session.closed
+  statement: >-
+    قيدُ النداءِ يُكتب قبل سؤالِ التفويض، فيبقى لكلِّ نداءٍ موثَّقٍ أثرٌ ولو رُفض
+    بعده؛ وكلُّ رفضٍ قيدٌ ثانٍ برمزِه. والثمنُ معلَن: قيدُ نداءٍ لم يُنفَّذ زائدٌ
+    لا ناقص.
+
+# ── رموزُ الرفض ──
+# مُعلَنةٌ هنا كي يُقابَل المُعلَنُ بالمكتوبِ في الكود في الاتجاهين عند كلِّ تحقُّق.
+refusalCodes:
+  - API_CONFIG_INVALID
+  - API_ROUTE_UNKNOWN
+  - API_AUTH_REQUIRED
+  - API_SESSION_INVALID
+  - API_SESSION_EXPIRED
+  - API_IDENTITY_UNVERIFIED
+  - API_RATE_LIMITED
+  - API_AUTHORIZATION_DENIED
+  - API_TICKET_INVALID
+  - API_ENFORCEMENT_REQUIRED
+  - API_AUDIT_REQUIRED
+  - API_HANDLER_UNDECLARED
+  - API_HANDLER_REFUSED
+  - API_PARAMS_INVALID
+
+# ── المسارات ──
+# `action` فعلٌ في كتالوجِ `config/policies.yaml`، و`view` مشهدٌ في
+# `config/monitoring.yaml`، و`call` نداءٌ مقروءٌ مُعلَنٌ فيها. وكلُّ مسارٍ هنا
+# **قارئٌ فقط**: الكتابةُ من الواجهةِ نصُّ `M9.03` (الأمرُ الملكيُّ الموقَّع) ولا
+# يُعلَن مسارٌ كاتبٌ قبل أن يوجد مَن يوقّعه.
+routes:
+  - id: state.agents.list
+    method: GET
+    path: /state/agents
+    action: read-registry
+    resource: 'registry:agents'
+    view: agents
+    call: list
+    purpose: سردُ الهويات المسجَّلة بحدٍّ معلَن.
+    rateLimit:
+      maxCalls: 30
+      windowSeconds: 60
+
+  - id: state.agents.get
+    method: GET
+    path: /state/agents/:id
+    action: read-registry
+    resource: 'registry:agents'
+    view: agents
+    call: findById
+    purpose: قراءةُ هويةٍ واحدةٍ بمعرّفها.
+
+  - id: state.agents.count
+    method: GET
+    path: /state/agents/count
+    action: read-registry
+    resource: 'registry:agents'
+    view: agents
+    call: count
+    purpose: عددُ الهويات بترشيحٍ معلَن.
+
+  - id: state.institutions.list
+    method: GET
+    path: /state/institutions
+    action: read-registry
+    resource: 'registry:institutions'
+    view: institutions
+    call: list
+    purpose: سردُ المؤسسات القائمة.
+    rateLimit:
+      maxCalls: 30
+      windowSeconds: 60
+
+  - id: state.institutions.get
+    method: GET
+    path: /state/institutions/:id
+    action: read-registry
+    resource: 'registry:institutions'
+    view: institutions
+    call: findById
+    purpose: قراءةُ مؤسسةٍ واحدةٍ بمعرّفها.
+
+  - id: state.institution-tasks.list
+    method: GET
+    path: /state/institution-tasks
+    action: read-registry
+    resource: 'registry:institution-tasks'
+    view: institutionTasks
+    call: list
+    purpose: سردُ مهامِّ المؤسسات وحالاتها.
+
+  - id: state.institution-breaches.list
+    method: GET
+    path: /state/institution-breaches
+    action: read-registry
+    resource: 'registry:institution-breaches'
+    view: institutionBreaches
+    call: list
+    purpose: سردُ إخلالاتِ المؤسسات المسجَّلة.
+
+  - id: state.institution-report-cycles.list
+    method: GET
+    path: /state/institution-report-cycles
+    action: read-registry
+    resource: 'registry:institution-report-cycles'
+    view: institutionReportCycles
+    call: list
+    purpose: سردُ دوراتِ تقاريرِ المؤسسات.
+
+  - id: state.cases.list
+    method: GET
+    path: /state/cases
+    action: read-registry
+    resource: 'registry:cases'
+    view: cases
+    call: list
+    purpose: سردُ القضايا المرفوعة.
+
+  - id: state.cases.get
+    method: GET
+    path: /state/cases/:id
+    action: read-registry
+    resource: 'registry:cases'
+    view: cases
+    call: findById
+    purpose: قراءةُ قضيةٍ واحدةٍ بمعرّفها.
+
+  - id: state.laws.list
+    method: GET
+    path: /state/laws
+    action: read-registry
+    resource: 'registry:laws'
+    view: laws
+    call: list
+    purpose: سردُ القوانين النافذة والملغاة.
+
+  - id: state.federation-delegations.list
+    method: GET
+    path: /state/federation/delegations
+    action: read-registry
+    resource: 'registry:federation-delegations'
+    view: federationDelegations
+    call: list
+    purpose: سردُ التفويضات الإقليمية.
+
+  - id: state.federation-acts.list
+    method: GET
+    path: /state/federation/acts
+    action: read-registry
+    resource: 'registry:federation-acts'
+    view: federationActs
+    call: list
+    purpose: سردُ الأفعالِ الإقليمية المنفَّذة بتفويض.
+
+  - id: state.federation-refusals.list
+    method: GET
+    path: /state/federation/refusals
+    action: read-registry
+    resource: 'registry:federation-refusals'
+    view: federationRefusals
+    call: list
+    purpose: سردُ امتناعاتِ الإقليم المسجَّلة.
+
+  - id: state.royal-reports.list
+    method: GET
+    path: /state/royal-reports
+    action: read-registry
+    resource: 'registry:royal-reports'
+    view: royalReports
+    call: list
+    purpose: سردُ التقارير الملكية المُولَّدة.
+
+  - id: state.royal-reports.get
+    method: GET
+    path: /state/royal-reports/:id
+    action: read-registry
+    resource: 'registry:royal-reports'
+    view: royalReports
+    call: findById
+    purpose: قراءةُ تقريرٍ ملكيٍّ واحدٍ بمعرّفه.
+
+# ── الضمانات ──
+# كلُّ ضمانٍ نصٌّ وملفُّ إنفاذٍ ورموزُ رفضٍ يُقابَل حضورُها في الملفِّ نفسِه.
+guarantees:
+  - id: G-API-ROUTE-DECLARED
+    statement: مسارٌ غيرُ معلَنٍ في هذه الوثيقةِ لا وجودَ له، ولا يُخترع من نداءِ المستدعي.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_ROUTE_UNKNOWN]
+
+  - id: G-API-AUTH-REQUIRED
+    statement: نداءٌ بلا رمزِ جلسةٍ صالحٍ يُرفض ويُسجَّل، ولا مسارَ مجهولَ الهوية.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_AUTH_REQUIRED, API_SESSION_INVALID, API_SESSION_EXPIRED]
+
+  - id: G-API-IDENTITY-ACTIVE
+    statement: الجلسةُ لا تُفتح ولا تُقبل إلا لهويةٍ مسجَّلةٍ حالُها نشط.
+    enforcedBy: src/api/session-store.mjs
+    codes: [API_IDENTITY_UNVERIFIED]
+
+  - id: G-API-SESSION-HASHED
+    statement: رمزُ الجلسةِ لا يُخزَّن نصّاً بل بصمتُه، فمن قرأ الذاكرةَ لا يملك رمزاً صالحاً.
+    enforcedBy: src/api/session-store.mjs
+    codes: []
+
+  - id: G-API-SESSION-EXPIRES
+    statement: الجلسةُ تنتهي بمهلةٍ معلَنةٍ ولا تُمدَّد ضمناً بالاستعمال.
+    enforcedBy: src/api/session-store.mjs
+    codes: [API_SESSION_EXPIRED]
+
+  - id: G-API-RATE-LIMIT
+    statement: حدُّ المعدَّل يَعُدُّ النداءَ المرفوضَ كما يَعُدُّ المقبول، فلا محاولاتٍ بلا ثمن.
+    enforcedBy: src/api/rate-limiter.mjs
+    codes: [API_RATE_LIMITED]
+
+  - id: G-API-CENTRAL-AUTHORIZATION
+    statement: كلُّ نداءٍ يمرّ بنقطةِ التفويضِ المركزيةِ وتُستهلَك تذكرتُها، ولا مسارَ جانبيَّ للسماح.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_AUTHORIZATION_DENIED, API_TICKET_INVALID, API_ENFORCEMENT_REQUIRED]
+
+  - id: G-API-AUDIT-EVERY-CALL
+    statement: لكلِّ نداءٍ موثَّقٍ قيدُ تدقيقٍ قبل سؤالِ التفويض، ولكلِّ رفضٍ قيدٌ برمزِه.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_AUDIT_REQUIRED]
+
+  - id: G-API-READ-ONLY
+    statement: لا نداءَ كتابةٍ في هذه الطبقة، والقراءةُ كلُّها من مشهدِ المراقبةِ لا من مستودع.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_HANDLER_UNDECLARED]
+
+  - id: G-API-REFUSAL-DECLARED
+    statement: >-
+      رفضُ المُعالِجِ لا يخرج من هذه الطبقةِ برمزٍ من طبقةٍ أخرى؛ يُغلَّف برمزٍ
+      معلَنٍ هنا ويُحفَظ رمزُ المُعالِجِ في تفصيلِه، فيبقى كتالوجُ الرفضِ صادقاً
+      ويبقى السببُ الأصليُّ مقروءاً.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_HANDLER_REFUSED]
+
+  - id: G-API-PARAMS-BOUNDED
+    statement: وسائطُ النداءِ محدودةٌ بما يقبله المشهد، وما زاد يُرفض لا يُهمَل صامتاً.
+    enforcedBy: src/api/gateway.mjs
+    codes: [API_PARAMS_INVALID, API_CONFIG_INVALID]

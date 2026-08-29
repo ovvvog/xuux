@@ -25,6 +25,7 @@ import {
 } from '../federation/index.mjs';
 import { RoyalReportGenerator, createReportMeasures, loadReportPolicy } from '../reports/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../observability/index.mjs';
+import { ApiGateway, loadApiPolicy } from '../api/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -130,6 +131,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {DelegationRegister} federationRegister
  * @property {RoyalReportGenerator} reports
  * @property {MonitorAgent} monitor
+ * @property {ApiGateway} api
  */
 
 /**
@@ -255,6 +257,10 @@ export function createPostgresRepositories(pool) {
  *   المراقبةِ للقراءةِ فقط (M9.01): دورُ المراقبةِ وقدراتُه المسموحةُ ونداءاتُه
  *   المقروءةُ ومشاهدُه وحدُّ صفوفِه. تُحمَّل من `config/monitoring.yaml` إن لم
  *   تُمرَّر.
+ * @param {import('../api/gateway.mjs').ApiPolicy | null} [deps.apiPolicy] وثيقةُ
+ *   طبقةِ الواجهةِ الداخلية (M9.02): مساراتُها المُعلَنةُ وأفعالُها ومشاهدُها،
+ *   ومهلةُ جلستِها، وحدُّ معدَّلِها، وأحداثُ تدقيقِها، ورموزُ رفضِها وضماناتُها.
+ *   تُحمَّل من `config/api.yaml` إن لم تُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -280,6 +286,7 @@ export function createRegistries({
   delegationPolicy = null,
   reportsPolicy = null,
   monitoringPolicy = null,
+  apiPolicy = null,
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
@@ -413,9 +420,22 @@ export function createRegistries({
     agents,
     log,
   });
+  // وبوابةُ الواجهةِ الداخليةِ تُركَّب **دائماً** (الخطوة `M9.02`)، لنفسِ السبب:
+  // بوابةٌ اختياريةُ التركيبِ تصير بوابةً يُلتفّ حولها بنداءِ الوكيلِ مباشرةً بلا
+  // جلسةٍ ولا حدِّ معدَّلٍ ولا مرورٍ بنقطةِ التفويض. وما ينقص من وصلاتِها يظهر
+  // **رفضاً** لا سماحاً: بلا نقطةِ تفويضٍ لا نداءَ، وبلا سجلٍّ لا نداءَ، وبلا
+  // سجلِّ هوياتٍ لا جلسة.
+  const api = new ApiGateway({
+    policy: apiPolicy ?? loadApiPolicy(),
+    log,
+    agents,
+    monitor,
+    enforcementPoint,
+  });
   return {
     agents,
     monitor,
+    api,
     models: new ModelRegistry({
       log,
       repository: repositories.models,
