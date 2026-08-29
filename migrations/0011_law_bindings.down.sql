@@ -32,3 +32,6 @@ ALTER TABLE state.laws
 ALTER TABLE state.laws
   DROP COLUMN policy_ids,
   DROP COLUMN article_id;
+
+-- والدالّةُ تُسقط بعد القيدِ الذي يناديها، لا قبله.
+DROP FUNCTION state.text_array_is_named(text[]);

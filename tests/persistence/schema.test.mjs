@@ -16,6 +16,7 @@ import test, { after, before } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -89,6 +90,83 @@ const DECLARED_NULLABLE = Object.freeze({
   'institution_tasks.refusal_code': 'مهمّةٌ لم تُرفض لا رمزَ رفضٍ لها؛ والقيد يمنع رفضاً مبهماً.',
   'institution_tasks.refusal_reason': 'لا سببَ رفضٍ حيث لا رفض؛ وحدُّه مقيسٌ عند وقوعه.',
   'institution_tasks.refused_at': 'مهمّةٌ لم تُرفض لا وقتَ رفضٍ لها.',
+  // ── أعمدةٌ أضافتها الهجرات `0011`–`0018` ولم تكن مُعلَنةً هنا ────────────────
+  // هذا الاختبار لم يُشغَّل على قاعدةٍ حقيقيةٍ قطُّ قبل `WL-045` (كان متخطّىً
+  // بغياب `DATABASE_URL`، ومسارُ CI يموت قبله في خطوة الهجرات)، فبقيت أربعون
+  // عموداً تقبل الفراغ بلا إعلانٍ منذ الهجرة `0011`. والإعلانُ يُكتب هنا لا
+  // يُلغى الاختبار: عمودٌ يقبل الفراغ بلا سببٍ مكتوب عمودٌ لا يُعرف معنى فراغه.
+  //
+  // مسارُ الدعوى وتنفيذُها ومراجعتُها (`0012`, `0013`).
+  'cases.judge': 'دعوى لم تُحكم بعد لا قاضيَ لها؛ والقيد يُلزم القاضيَ مع الحكم ووقتِه.',
+  'cases.judged_at': 'لا وقتَ حكمٍ قبل الحكم؛ ووجودُه هو ما يجعل الحكمَ واقعةً لا رأياً.',
+  'cases.reason': 'لا تسبيبَ قبل الحكم؛ وحكمٌ بلا سببٍ يمنعه القيد، فلا حكمَ مبهم.',
+  'cases.executed_at': 'حكمٌ لم يُنفَّذ بعد لا وقتَ تنفيذٍ له؛ وفراغُه هو الفرقُ بين حكمٍ ونفاذٍ.',
+  'cases.executed_effect': 'لا أثرَ قبل التنفيذ؛ والأثرُ يُكتب عند وقوعه لا يُفترض.',
+  'cases.execution_command_id':
+    'لا أمرَ تنفيذٍ قبل التنفيذ؛ ووجودُه يربط النفاذَ بأمرٍ موقَّعٍ لا بفعلٍ مجهول.',
+  'cases.execution_fingerprint_before':
+    'لا قياسَ قبليَّ قبل بدء التنفيذ؛ ووجودُه دليلُ أنّ الأثرَ قِيس لا أنّه ادُّعي.',
+  'cases.reversed_at': 'حكمٌ لم يُنقض لا وقتَ نقضٍ له؛ والنقضُ واقعةٌ تُوقَّت لا حالةٌ تُستنتج.',
+  'cases.reversal_reason': 'لا سببَ نقضٍ حيث لا نقض؛ والقيد يُلزمه مع وقتِه فلا نقضَ مبهم.',
+  'cases.reversal_command_id': 'لا أمرَ نقضٍ قبل النقض؛ ونقضٌ بلا أمرٍ نقضٌ لا يُعرف من أمر به.',
+  'cases.appealed_at': 'دعوى لم يُستأنف حكمُها لا وقتَ استئنافٍ لها.',
+  'cases.appellant':
+    'لا مستأنِفَ قبل الاستئناف؛ والقيد يُلزمه مع وقتِه، فلا استئنافَ مجهولَ الرافع.',
+  'cases.appeal_reason': 'لا سببَ استئنافٍ حيث لا استئناف؛ واستئنافٌ بلا موجبٍ يمنعه القيد.',
+  'cases.reviewed_at': 'استئنافٌ لم يُراجع بعد لا وقتَ مراجعةٍ له.',
+  'cases.reviewer': 'لا مُراجِعَ قبل المراجعة؛ ومراجعةٌ بلا مُراجعٍ مراجعةٌ لا يُعرف من أجراها.',
+  'cases.review_decision':
+    'لا قرارَ مراجعةٍ قبل المراجعة؛ والقيد يُلزم القرارَ والمُراجِعَ والوقتَ معاً.',
+  'cases.review_reason': 'لا تسبيبَ مراجعةٍ حيث لا مراجعة؛ وقرارٌ بلا سببٍ قرارٌ لا يُحاسب عليه.',
+  'cases.recusal_reason':
+    'قاضٍ لم يتنحَّ لا سببَ تنحٍّ له؛ ووجودُه وحدَه ما يجعل التنحّيَ معلَناً لا صمتاً.',
+  // ولايةُ القانون: ربطُه بمادةٍ وسياسةٍ (`0011`).
+  'laws.article_id':
+    'قانونٌ لم يُربط بمادةٍ دستوريةٍ بعد؛ والربطُ قرارٌ تشريعيٌّ يُوقَّع، والقيدُ `laws_enacted_requires_binding` يُلزمه قبل النفاذ لا قبله.',
+  'laws.policy_ids':
+    'قانونٌ لم تُسنَد إليه سياساتُ إنفاذٍ بعد؛ ونفاذُه بلا سياسةٍ يمنعه نفسُ القيد، فالفراغُ حالُ المسوَّدة لا حالُ النافذ.',
+  // مؤسساتٌ وخروقُها (`0014`, `0015`).
+  'institution_breaches.task_id':
+    'خرقٌ لا يتعلّق بمهمّةٍ بعينها (كخرقِ حدٍّ مؤسسيٍّ عامّ) لا معرِّفَ مهمّةٍ له.',
+  'institution_breaches.domain':
+    'خرقٌ ليس في نطاقٍ مُسمّىً لا نطاقَ له؛ ونطاقٌ مُخترعٌ خرقٌ في غير موضعه.',
+  'institution_breaches.power':
+    'خرقٌ ليس تجاوزَ سلطةٍ مُسمّاةٍ لا سلطةَ له؛ وتسميةٌ مفترضةٌ تُحمّل غيرَ المتجاوز.',
+  // الاتحاد: التفويضُ وسحبُه، وسِفرُ الرفض (`0016`, `0017`).
+  'federation_delegations.parent_key':
+    'تفويضٌ من الأصل لا أبَ له؛ وسلسلةٌ بلا رأسٍ بلا أبٍ سلسلةٌ لا تُتبَّع إلى مصدرها.',
+  'federation_delegations.revoked_at':
+    'تفويضٌ قائمٌ لم يُسحب لا وقتَ سحبٍ له؛ والسحبُ واقعةٌ تُوقَّت.',
+  'federation_delegations.revoked_by':
+    'لا ساحبَ قبل السحب؛ وسحبٌ بلا ساحبٍ سحبٌ لا يُعرف من أمر به.',
+  'federation_delegations.revocation_reason': 'لا سببَ سحبٍ حيث لا سحب؛ والقيد يُلزمه مع وقتِه.',
+  'federation_delegation_register.within_deadline':
+    'سجلٌّ لا يقيس مهلةً (كتسجيلِ إسنادٍ لا رفعٍ) لا حكمَ مهلةٍ له؛ وحكمٌ مفترضٌ يُخضِّر قياساً لم يُجرَ.',
+  'federation_delegation_register.deadline_ms':
+    'لا مهلةَ معلَنةً لِما لا مهلةَ عليه؛ والقيد يُلزم المهلةَ مع حكمِها أو غيابَهما معاً.',
+  'federation_delegation_register.reason':
+    'قيدٌ ناجحٌ لا سببَ له؛ والسببُ يُكتب حيث يكون رفضاً أو تأخّراً، فلا رفضَ مبهم.',
+  'federation_refusals.territory_key':
+    'رفضٌ ليس في إقليمٍ بعينه (كرفضٍ اتحاديٍّ عامّ) لا إقليمَ له.',
+  'federation_refusals.power':
+    'رفضٌ ليس على سلطةٍ مُسمّاةٍ لا سلطةَ له؛ وتسميةٌ مفترضةٌ تنسب الرفضَ لغير موضعه.',
+  'federation_refusals.kind':
+    'رفضٌ لم يُصنَّف نوعاً لا نوعَ له؛ وتصنيفٌ مفترضٌ يُخفي أنّ التصنيفَ لم يُجرَ.',
+  'federation_refusals.level':
+    'رفضٌ لم تُحدَّد مرتبتُه لا مرتبةَ له؛ والمرتبةُ تُعلَن حيث تُقاس لا تُفترض.',
+  'federation_refusals.actor_role': 'رفضٌ من النظام لا من فاعلٍ ذي صفةٍ لا صفةَ له.',
+  // التقارير الملكية: مراجعتُها ونشرُها (`0018`).
+  'royal_reports.reviewer':
+    'تقريرٌ مولَّدٌ لم يُراجع بعد لا مُراجعَ له؛ والقيدُ يُلزم المراجعةَ كاملةً أو غائبةً كلَّها.',
+  'royal_reports.reviewed_at':
+    'لا وقتَ مراجعةٍ قبل المراجعة؛ ووقتٌ مفترضٌ يجعل تقريراً غيرَ مقروءٍ يبدو مقروءاً.',
+  'royal_reports.review_decision':
+    'لا قرارَ مراجعةٍ قبل المراجعة؛ وقرارٌ مفترضٌ اعتمادٌ بلا مُعتمِد.',
+  'royal_reports.review_reason': 'لا تسبيبَ مراجعةٍ حيث لا مراجعة؛ والقيدُ يُلزمه مع القرار.',
+  'royal_reports.published_at':
+    'تقريرٌ لم يُنشر بعد لا وقتَ نشرٍ له؛ والنشرُ واقعةٌ تُوقَّت لا حالةٌ تُستنتج.',
+  'royal_reports.publish_command_id':
+    'لا أمرَ نشرٍ قبل النشر؛ ونشرٌ بلا أمرٍ موقَّعٍ نشرٌ لا يُعرف من أذن به.',
 });
 
 /** @type {{ pool: import('pg').Pool, drop: () => Promise<void> } | null} */
@@ -279,15 +357,23 @@ test('الحصة لا تتجاوز حدّها، والحكم لا يسبق ال�
     /quotas_consumed_within_limit/,
   );
 
+  // القانونُ النافذ يحمل ربطَه بمادةٍ وسياسة: قيدُ `laws_enacted_requires_binding`
+  // (الهجرة `0011`) يرفض نفاذاً بلا سند. وكان هذا التمهيدُ يُخفق من يومِ تلك
+  // الهجرة، ولم يظهر لأن الاختبار متخطّىً بغياب `DATABASE_URL` (`WL-045`).
   await client.query(
-    `INSERT INTO state.laws (id, title, body, scope, proposer, status, enacted_by, enacted_at)
-     VALUES ('law-001', 'نظام التشغيل', 'نصّ النظام', 'operations', 'council', 'enacted', 'king-001', now())`,
+    `INSERT INTO state.laws (id, title, body, scope, proposer, status, article_id, policy_ids, enacted_by, enacted_at)
+     VALUES ('law-001', 'نظام التشغيل', 'نصّ النظام', 'operations', 'council', 'enacted', 'art:07', ARRAY['pol:ops-baseline'], 'king-001', now())`,
   );
+  // و`claimant` و`claim` إلزاميان (الهجرة `0012`): بلا تمريرهما يُرفض الصفُّ
+  // بـ`23502` **قبل** أن يُقاس القيدُ المقصود، فيمرّ الاختبار على غير ما يدّعي.
   await assert.rejects(
     () =>
       client.query(
-        `INSERT INTO state.cases (id, law_id, subject, state, verdict)
-         VALUES ('case-001', 'law-001', 'agent-001', 'judged', 'guilty')`,
+        // الحكمُ منسوبٌ كاملاً (قاضٍ ووقتٌ مع الحكم) كي يعبُر
+        // `cases_judgment_attributed`، فيبقى النقصُ المقصودُ وحده: **لا سماع**.
+        // اختبارٌ يُرفض على قيدٍ غيرِ الذي يدّعي قياسه اختبارٌ لا يُثبت دعواه.
+        `INSERT INTO state.cases (id, law_id, subject, state, claimant, claim, verdict, judge, judged_at, reason)
+         VALUES ('case-001', 'law-001', 'agent-001', 'judged', 'agent-002', 'مطلبُ فحصِ القيد.', 'guilty', 'judge-001', now(), 'تسبيبُ فحصِ القيد.')`,
       ),
     /cases_judgment_needs_hearing/,
   );
@@ -295,14 +381,28 @@ test('الحصة لا تتجاوز حدّها، والحكم لا يسبق ال�
 
 test('ذاكرة محفوظة قانوناً لا تحمل تاريخ انتهاء', { skip: skipWithoutDatabase }, async () => {
   const client = pool();
-  await assert.rejects(
-    () =>
-      client.query(
-        `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, expires_at)
-         VALUES ('mem-001', 'agent-001', 'data-001', 'episodic', '{}'::jsonb, true, now() + interval '1 day')`,
-      ),
-    /memories_hold_has_no_expiry/,
-  );
+  // المحتوى مغلَّفٌ فعلاً: قيدُ `memories_content_sealed` (الهجرة `0006`) يرفض
+  // `'{}'` **قبل** أن يُقاس قيدُ الحفظ القانوني، فكان الاختبار يمرّ — لو شُغِّل —
+  // على رفضٍ غيرِ الذي يدّعي قياسه (`WL-045`).
+  const encryption = await createTestEncryptor();
+  try {
+    const sealed = await encryption.encryptor.seal({
+      value: { note: 'فحصُ الحفظ القانوني' },
+      classification: 'internal',
+      binding: { id: 'mem-001', agentId: 'agent-001', datasetId: 'data-001' },
+    });
+    await assert.rejects(
+      () =>
+        client.query(
+          `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, expires_at)
+         VALUES ('mem-001', 'agent-001', 'data-001', 'episodic', $1::jsonb, true, now() + interval '1 day')`,
+          [JSON.stringify(sealed)],
+        ),
+      /memories_hold_has_no_expiry/,
+    );
+  } finally {
+    encryption.cleanup();
+  }
 });
 
 test('كل عمود فراغه مُعلن مشروحٌ سببه في وثيقة الاستمرارية', () => {

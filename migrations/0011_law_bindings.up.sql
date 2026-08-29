@@ -29,18 +29,40 @@
 --
 -- ولا `BEGIN`/`COMMIT` هنا: المُهاجر يفتح المعاملة بنفسه.
 
+-- **عيبان حقيقيان في أوّلِ صياغةِ هذه الهجرة، شُخِّصا على PostgreSQL 18.6 فعليٍّ
+-- وأُصلحا في `WL-044`** — ولم تكن الهجرةُ قد شُغِّلت على قاعدةٍ حقيقيةٍ قبلها قطُّ:
+--
+-- ١. `NOT EXISTS (SELECT …)` **داخل قيدِ `CHECK`** ⇒ ‏`0A000 cannot use subquery in
+--    check constraint`. القاعدةُ ترفضه رفضاً محتوماً، فكان القيدُ نصّاً لا يُنشأ
+--    أصلاً — وأبقى مسارَ CI أحمرَ من يومِ إضافةِ هذه الهجرة. والاستعلامُ الفرعيُّ
+--    مسموحٌ **داخل دالّةٍ `IMMUTABLE`** يُنادى من القيد، فنُقل إلى موضعِه المشروع.
+--
+-- ٢. `array_position(policy_ids, NULL) IS NULL` **قيدٌ زخرفيٌّ لا يمنع شيئاً:**
+--    ‏`array_position` صارمةٌ (`STRICT`) فمُدخلٌ `NULL` يُخرِج `NULL` دائماً، أي أن
+--    الشرطَ يصدُق أبداً ولو حمل المصفوفُ عنصراً معدوماً. والصحيحُ `array_positions`
+--    ‏— وهي غيرُ صارمةٍ في المطلوبِ وتَجِد المعدومَ فعلاً.
+--
+-- **ولم يُصلَح الأولُ بحذفِ الشرط:** «سياسةٌ باسمٍ فارغ» صفٌّ يجعل القانونَ يبدو
+-- منفَّذاً ولا سياسةَ له. فالضابطُ يبقى، ويُنقل إلى حيث تسمح القاعدةُ بتنفيذِه.
+
+-- والوسيطُ `items` لا `values`: ‏`VALUES` كلمةٌ محجوزةٌ في SQL، واستعمالُها اسماً
+-- يُخفِق بـ`42601` — أُصلح في نفسِ التشغيلِ الذي كشفه.
+CREATE FUNCTION state.text_array_is_named(items text[]) RETURNS boolean
+  LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+  AS $fn$
+    SELECT array_length(items, 1) >= 1
+       AND array_positions(items, NULL) = '{}'::int[]
+       AND NOT EXISTS (SELECT 1 FROM unnest(items) AS item WHERE btrim(item) = '')
+  $fn$;
+
+COMMENT ON FUNCTION state.text_array_is_named(text[]) IS
+  'مصفوفةُ نصوصٍ غيرُ فارغةٍ ولا تحمل عنصراً معدوماً ولا عنصراً فارغَ الاسم. موضعُها دالّةٌ لأن القيدَ لا يقبل استعلاماً فرعيّاً — لا لأن الضابطَ اختياريّ.';
+
 ALTER TABLE state.laws
   ADD COLUMN article_id text
     CHECK (article_id IS NULL OR article_id ~ '^art:[0-9]{2}$'),
   ADD COLUMN policy_ids text[]
-    CHECK (
-      policy_ids IS NULL
-      OR (
-        array_length(policy_ids, 1) >= 1
-        AND array_position(policy_ids, NULL) IS NULL
-        AND NOT EXISTS (SELECT 1 FROM unnest(policy_ids) AS value WHERE btrim(value) = '')
-      )
-    );
+    CHECK (policy_ids IS NULL OR state.text_array_is_named(policy_ids));
 
 COMMENT ON COLUMN state.laws.article_id IS
   'المادةُ الدستوريةُ التي يستند إليها القانون. لا مفتاحَ أجنبيّاً: الدستورُ ملفٌّ موقَّعٌ لا جدول (انظر رأس الهجرة).';

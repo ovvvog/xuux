@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/api.schema.json",
+  "title": "طبقةُ الواجهةِ الداخليةِ الموحّدة — جلستُها وحدُّ معدَّلِها وتدقيقُها ومساراتُها وضماناتُها",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "session",
+    "rateLimit",
+    "audit",
+    "refusalCodes",
+    "routes",
+    "guarantees"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 80
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ttlSeconds", "tokenBytes", "digest"],
+      "properties": {
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 86400
+        },
+        "tokenBytes": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 128
+        },
+        "digest": {
+          "type": "string",
+          "enum": ["sha256", "sha384", "sha512"]
+        }
+      }
+    },
+    "rateLimit": { "$ref": "#/$defs/rateLimit" },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "callEvent",
+        "refusalEvent",
+        "sessionOpenedEvent",
+        "sessionClosedEvent",
+        "statement"
+      ],
+      "properties": {
+        "callEvent": { "$ref": "#/$defs/eventType" },
+        "refusalEvent": { "$ref": "#/$defs/eventType" },
+        "sessionOpenedEvent": { "$ref": "#/$defs/eventType" },
+        "sessionClosedEvent": { "$ref": "#/$defs/eventType" },
+        "statement": {
+          "type": "string",
+          "minLength": 40
+        }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 10,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/refusalCode" }
+    },
+    "routes": {
+      "type": "array",
+      "minItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "method", "path", "action", "resource", "view", "call", "purpose"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*){1,3}$"
+          },
+          "method": {
+            "type": "string",
+            "enum": ["GET"]
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(/(:?[a-z][a-z0-9-]*))+$"
+          },
+          "action": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,47}$"
+          },
+          "resource": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,31}:[a-z][a-z0-9-]{2,63}$"
+          },
+          "view": { "$ref": "#/$defs/identifier" },
+          "call": {
+            "type": "string",
+            "enum": ["findById", "list", "count"]
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 12
+          },
+          "rateLimit": { "$ref": "#/$defs/rateLimit" }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy", "codes"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^G-API-[A-Z-]{3,48}$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 40
+          },
+          "enforcedBy": {
+            "type": "string",
+            "pattern": "^src/[a-z0-9/._-]+\\.mjs$"
+          },
+          "codes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "$ref": "#/$defs/refusalCode" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "rateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windowSeconds", "maxCalls"],
+      "properties": {
+        "windowSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "maxCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        }
+      }
+    },
+    "refusalCode": {
+      "type": "string",
+      "pattern": "^API_[A-Z_]{4,48}$"
+    },
+    "eventType": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*){1,3}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-zA-Z0-9]{2,63}$"
+    }
+  }
+}

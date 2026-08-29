@@ -7,7 +7,13 @@
  * عمليات `node` حقيقية متزامنة على قاعدة واحدة فلا يحرسها إلا `FOR UPDATE SKIP
  * LOCKED` نفسه.
  *
- * الاستعمال: `node claim-child.mjs <DATABASE_URL> <اسم العامل> <حدّ الحجز>`
+ * الاستعمال: `node claim-child.mjs <DATABASE_URL> <اسم العامل> <حدّ الحجز> [خطُّ البداية]`
+ * و«خطُّ البداية» عصرٌ بالمللي ثانية ينتظره الابن **بعد** تسخين اتصاله وقبل أوّلِ
+ * حجز. أُضيف في `WL-045`: كان الأبناء يُقلعون على غير موعدٍ، فعلى آلةٍ مشغولةٍ
+ * يسبق أوّلُهم البقيةَ بمئاتِ المللي ثانية فيحجز الستّين كلَّها، فيُخفق الاختبارُ
+ * بدعواه الصادقة «عاملٌ واحدٌ حجز الكلَّ ⇒ لا تزاحمَ فُحص فعلاً» — إخفاقُ ترتيبِ
+ * إقلاعٍ لا إخفاقُ ذرّيةِ حجز. والخطُّ الواحدُ يجعل التزاحمَ **مُقاماً** لا
+ * مرجوّاً، ولا يُضعِف الدعوى: `FOR UPDATE SKIP LOCKED` هو وحده ما يحرسها.
  * ويُطبع على المخرج القياسي سطرُ JSON واحد: `{"worker":…,"claimed":[معرّفات]}`.
  *
  * حدٌّ معلن: الابن يحجز ولا يُنفّذ ولا يُنهي المهمة؛ فالمقصود قياس الحجز وحده.
@@ -17,7 +23,7 @@ import pg from 'pg';
 
 import { createTaskQueue } from '../../../src/execution/queue.mjs';
 
-const [url, worker, limitRaw] = process.argv.slice(2);
+const [url, worker, limitRaw, startAtRaw] = process.argv.slice(2);
 if (url === undefined || worker === undefined) {
   console.error('الاستعمال: node claim-child.mjs <DATABASE_URL> <worker> [limit]');
   process.exit(2);
@@ -31,6 +37,15 @@ try {
   /** @type {string[]} */
   const claimed = [];
   const limit = Number(limitRaw ?? '1');
+
+  // تسخينُ الاتصالِ قبل خطِّ البداية: أوّلُ نداءٍ يفتح مِقبساً ويُصادِق، وذاك
+  // زمنٌ لا علاقةَ له بالتزاحم فلا يُحسَب فيه.
+  await pool.query('SELECT 1');
+  const startAt = Number(startAtRaw ?? '0');
+  if (Number.isFinite(startAt) && startAt > 0) {
+    const remaining = startAt - Date.now();
+    if (remaining > 0) await new Promise((resolve) => setTimeout(resolve, remaining));
+  }
 
   // يحجز مراراً حتى يجفّ الطابور: عاملٌ يحجز مرّة واحدة لا يزاحم أحداً، والمقصود
   // هو التزاحم على آخر المهام حيث يظهر التكرار لو وُجد.

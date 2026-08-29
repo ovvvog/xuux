@@ -25,6 +25,7 @@ import {
 } from '../federation/index.mjs';
 import { RoyalReportGenerator, createReportMeasures, loadReportPolicy } from '../reports/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../observability/index.mjs';
+import { ApiGateway, loadApiPolicy } from '../api/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -47,6 +48,8 @@ import {
 } from '../judiciary/index.mjs';
 import path from 'node:path';
 import { ModelRegistry } from '../models/model-registry.mjs';
+import { ModelEvaluationLedger } from '../models/evaluation.mjs';
+import { ExperimentLedger } from '../knowledge/experiment-ledger.mjs';
 import { createWeightStore } from '../models/weight-store.mjs';
 import {
   AGENT_SPEC,
@@ -130,6 +133,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {DelegationRegister} federationRegister
  * @property {RoyalReportGenerator} reports
  * @property {MonitorAgent} monitor
+ * @property {ApiGateway} api
  */
 
 /**
@@ -210,6 +214,11 @@ export function createPostgresRepositories(pool) {
  * @param {import('../models/weight-store.mjs').WeightStore | null} [deps.weightStore] مخزن
  *   الأوزان المعنوَن بالمحتوى (M6.06). إن لم يُمرَّر فُتحيّز الجذر من `WEIGHTS_DIR`
  *   أو `.state/weights`؛ فالتنشيط لا يقع بلا إعادة حساب البصمة في أي تركيب.
+ * @param {import('../models/evaluation.mjs').ModelEvaluationLedger | null} [deps.evaluationLedger] دفترُ
+ *   تقييمِ النماذج (M6.07). صُحّح في `WL-045`: كان التركيبُ لا يُمرّره إلى السجل
+ *   الداخليِّ المعاملاتيِّ فيُبنى دفترٌ فارغٌ جديد، فيصير التنشيطُ على قاعدةٍ
+ *   حقيقيةٍ مستحيلاً برمز `MODEL_EVALUATION_MISSING`. فمن مرَّره حصل على دفترٍ
+ *   واحدٍ يشهد للتركيبين، ومن لم يمرّره حصل على دفترٍ يُبنى له مرّةً واحدة.
  * @param {{ report: (signal: object) => unknown } | null} [deps.quarantine] حاجب الحجر (M6.09).
  * @param {import('../policy/enforcement-point.mjs').EnforcementPoint | null} [deps.enforcementPoint] نقطة
  *   التفويض (M7.01). من لم يمرّرها حصل على فهرسٍ يسجّل ويقرأ، و**تُرفض** عنده
@@ -255,6 +264,10 @@ export function createPostgresRepositories(pool) {
  *   المراقبةِ للقراءةِ فقط (M9.01): دورُ المراقبةِ وقدراتُه المسموحةُ ونداءاتُه
  *   المقروءةُ ومشاهدُه وحدُّ صفوفِه. تُحمَّل من `config/monitoring.yaml` إن لم
  *   تُمرَّر.
+ * @param {import('../api/gateway.mjs').ApiPolicy | null} [deps.apiPolicy] وثيقةُ
+ *   طبقةِ الواجهةِ الداخلية (M9.02): مساراتُها المُعلَنةُ وأفعالُها ومشاهدُها،
+ *   ومهلةُ جلستِها، وحدُّ معدَّلِها، وأحداثُ تدقيقِها، ورموزُ رفضِها وضماناتُها.
+ *   تُحمَّل من `config/api.yaml` إن لم تُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -268,6 +281,7 @@ export function createRegistries({
   limits = {},
   transaction = null,
   weightStore = null,
+  evaluationLedger = null,
   quarantine = null,
   enforcementPoint = null,
   lattice = null,
@@ -280,6 +294,7 @@ export function createRegistries({
   delegationPolicy = null,
   reportsPolicy = null,
   monitoringPolicy = null,
+  apiPolicy = null,
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
@@ -413,15 +428,34 @@ export function createRegistries({
     agents,
     log,
   });
+  // وبوابةُ الواجهةِ الداخليةِ تُركَّب **دائماً** (الخطوة `M9.02`)، لنفسِ السبب:
+  // بوابةٌ اختياريةُ التركيبِ تصير بوابةً يُلتفّ حولها بنداءِ الوكيلِ مباشرةً بلا
+  // جلسةٍ ولا حدِّ معدَّلٍ ولا مرورٍ بنقطةِ التفويض. وما ينقص من وصلاتِها يظهر
+  // **رفضاً** لا سماحاً: بلا نقطةِ تفويضٍ لا نداءَ، وبلا سجلٍّ لا نداءَ، وبلا
+  // سجلِّ هوياتٍ لا جلسة.
+  const api = new ApiGateway({
+    policy: apiPolicy ?? loadApiPolicy(),
+    log,
+    agents,
+    monitor,
+    enforcementPoint,
+  });
   return {
     agents,
     monitor,
+    api,
     models: new ModelRegistry({
       log,
       repository: repositories.models,
       transaction,
       weightStore: weights,
       quarantine,
+      // دفتر التقييم يُمرَّر إن أُعطي، ولا يُخترع هنا واحدٌ آخر: التفعيل يجري داخل
+      // معاملة، والمعاملة تُركّب سجلاتٍ جديدة. فلو أنشأ كلُّ تركيبٍ دفتراً خاصّاً
+      // به لقرأ التفعيلُ دفتراً فارغاً ورفض بـ`MODEL_EVALUATION_MISSING` نموذجاً
+      // مقيَّماً فعلاً — وهو عيبٌ حقيقيٌّ أخفق به تفعيلُ **كل** نموذج على
+      // PostgreSQL، لم يظهر لأن اختبارات القاعدة كانت متخطّاةً دائماً (`WL-045`).
+      ...(evaluationLedger === null ? {} : { evaluationLedger }),
       ...(limits.maxModels === undefined ? {} : { maxModels: limits.maxModels }),
     }),
     catalog,
@@ -548,6 +582,12 @@ export function createPostgresRegistries({
   // كتابة وتجعل تعديلاً وسط التشغيل يُطبَّق على بعض الكتابات دون بعض.
   const policy =
     keyProvider === null ? null : loadEncryptionPolicy({ lattice: classificationLattice });
+  // ودفتر التقييم واحدٌ للتركيب كلِّه ولِما تُركّبه المعاملة داخله: دفترٌ لكل
+  // معاملة يعني أن شهادة التقييم تُكتب في دفترٍ ويُسأل عنها دفترٌ آخر.
+  const evaluationLedger = new ModelEvaluationLedger({
+    log,
+    experiments: new ExperimentLedger({ log }),
+  });
   /** @type {StateTransaction} */
   const transaction = (work) =>
     withUnitOfWork(pool, (repositories) =>
@@ -564,6 +604,7 @@ export function createPostgresRegistries({
           lattice: classificationLattice,
           keyProvider,
           encryptionPolicy: policy,
+          evaluationLedger,
         }),
       ),
     );
@@ -577,5 +618,6 @@ export function createPostgresRegistries({
     lattice: classificationLattice,
     keyProvider,
     encryptionPolicy: policy,
+    evaluationLedger,
   });
 }

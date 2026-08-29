@@ -23,6 +23,7 @@ import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 import { registerEvaluationExperiment } from '../helpers/experiment-support.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 
 /**
  * @param {import('pg').Pool} pool
@@ -43,6 +44,11 @@ test(
   'إخفاق في منتصف «تذكّر» لا يُبقي عقد بيانات يتيماً',
   { skip: skipWithoutDatabase },
   async () => {
+    const encryption = await createTestEncryptor();
+    // مزوّد المفاتيح يُمرَّر: `remember` صار يشترط مغلِّفاً (`M7.03`) ويرفض
+    // بـ`MEMORY_ENCRYPTOR_REQUIRED` **قبل** أي كتابة. وبلا مزوّدٍ كان الاختبار
+    // يقيس رفضاً سابقاً للكتابتين لا إخفاقاً بينهما — أي لا يقيس الذرّية أصلاً.
+    // لم يظهر لأن اختبارات القاعدة كانت متخطّاةً دائماً (`WL-045`).
     const created = await createIsolatedDatabase('atomic');
     try {
       await up(created.pool);
@@ -54,6 +60,7 @@ test(
         ca: authority(),
         log,
         enforcementPoint: enforcementPointFor(log),
+        keyProvider: encryption.keyProvider,
       });
       const operator = testActor('role:operator');
       const agent = await registries.agents.register({ name: 'وكيل-ذرّي', role: 'auditor' });
@@ -81,6 +88,7 @@ test(
       );
     } finally {
       await created.drop();
+      encryption.cleanup();
     }
   },
 );
@@ -89,6 +97,11 @@ test(
   'بلا معاملة يبقى الأثر الجزئي — الفرق الذي تصنعه وحدة العمل',
   { skip: skipWithoutDatabase },
   async () => {
+    const encryption = await createTestEncryptor();
+    // مزوّد المفاتيح يُمرَّر: `remember` صار يشترط مغلِّفاً (`M7.03`) ويرفض
+    // بـ`MEMORY_ENCRYPTOR_REQUIRED` **قبل** أي كتابة. وبلا مزوّدٍ كان الاختبار
+    // يقيس رفضاً سابقاً للكتابتين لا إخفاقاً بينهما — أي لا يقيس الذرّية أصلاً.
+    // لم يظهر لأن اختبارات القاعدة كانت متخطّاةً دائماً (`WL-045`).
     const created = await createIsolatedDatabase('nonatomic');
     try {
       await up(created.pool);
@@ -99,6 +112,7 @@ test(
         log,
         repositories: createPostgresRepositories(created.pool),
         enforcementPoint: enforcementPointFor(log),
+        keyProvider: encryption.keyProvider,
       });
       const operator = testActor('role:operator');
       const agent = await registries.agents.register({ name: 'وكيل-غير-ذرّي', role: 'auditor' });
@@ -120,6 +134,7 @@ test(
       );
     } finally {
       await created.drop();
+      encryption.cleanup();
     }
   },
 );

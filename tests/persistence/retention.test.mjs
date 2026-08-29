@@ -10,6 +10,7 @@ import test, { after, before } from 'node:test';
 import { up } from '../../src/persistence/migrator.mjs';
 import { eraseById, plan, purge, RETENTION_ERRORS } from '../../src/persistence/retention.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { createTestEncryptor } from '../helpers/encryption.mjs';
 
 /** @type {{ pool: import('pg').Pool, drop: () => Promise<void> } | null} */
 let db = null;
@@ -75,11 +76,26 @@ async function insertExpiredMemory(id) {
   // الذاكرة تحيل إلى عقد بيانات (مفتاح خارجي أُضيف في الهجرة `0002`)، والعقد
   // هنا **بعيد الانتهاء وحديث** كي لا يدخل في عدّ ما يستحق المحو فيُشوّش القياس.
   await insertLongLivedAsset(`dataset-${id}`);
-  await pool().query(
-    `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, created_at, expires_at)
-     VALUES ($1, 'agent-retention-001', $4, 'episodic', '{}'::jsonb, FALSE, $2, $3)`,
-    [id, OLDER, OLD, `dataset-${id}`],
-  );
+  // والمحتوى **مغلَّفٌ بالمغلِّف نفسه**: قيدُ `memories_content_sealed` (الهجرة
+  // `0006`) يرفض `'{}'` رفضاً محتوماً بـ`23514`. فكان هذا التمهيدُ يُخفق من يومِ
+  // تلك الهجرة، ولم يظهر لأن اختبارات القاعدة متخطّاةٌ بغياب `DATABASE_URL`
+  // ومسارُ CI يموت قبلها في خطوة الهجرات (`WL-045`). ولا يُغلَق بشكلٍ مُخترعٍ
+  // يُشبه المغلَّف: دورةُ الاحتفاظ تمحو صفوفاً حقيقيةً لا أشكالاً.
+  const encryption = await createTestEncryptor();
+  try {
+    const sealed = await encryption.encryptor.seal({
+      value: { note: `ذاكرةٌ منتهيةٌ ${id}` },
+      classification: 'internal',
+      binding: { id, agentId: 'agent-retention-001', datasetId: `dataset-${id}` },
+    });
+    await pool().query(
+      `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, created_at, expires_at)
+     VALUES ($1, 'agent-retention-001', $4, 'episodic', $5::jsonb, FALSE, $2, $3)`,
+      [id, OLDER, OLD, `dataset-${id}`, JSON.stringify(sealed)],
+    );
+  } finally {
+    encryption.cleanup();
+  }
 }
 
 /**
@@ -156,11 +172,31 @@ test(
 test('ذاكرة منتهية تُمحى وذاكرة الحفظ القانوني لا تمس', { skip: skipWithoutDatabase }, async () => {
   await insertExpiredMemory('memory-expired-001');
   await insertLongLivedAsset('dataset-memory-hold-001');
-  await pool().query(
-    `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, created_at)
-       VALUES ($1, 'agent-retention-001', 'dataset-memory-hold-001', 'semantic', '{}'::jsonb, TRUE, $2)`,
-    ['memory-hold-001', OLD],
-  );
+  // ومحتوى ذاكرةِ الحفظ القانوني مغلَّفٌ كذلك: نفسُ القيد ونفسُ السبب (`WL-045`).
+  const hold = await createTestEncryptor();
+  try {
+    await pool().query(
+      `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, created_at)
+       VALUES ($1, 'agent-retention-001', 'dataset-memory-hold-001', 'semantic', $3::jsonb, TRUE, $2)`,
+      [
+        'memory-hold-001',
+        OLD,
+        JSON.stringify(
+          await hold.encryptor.seal({
+            value: { note: 'ذاكرةٌ محفوظةٌ قانوناً' },
+            classification: 'internal',
+            binding: {
+              id: 'memory-hold-001',
+              agentId: 'agent-retention-001',
+              datasetId: 'dataset-memory-hold-001',
+            },
+          }),
+        ),
+      ],
+    );
+  } finally {
+    hold.cleanup();
+  }
 
   const result = await purge(pool(), { now: NOW, tables: ['memories'] });
   assert.equal(result.tables[0]?.deleted, 1);
