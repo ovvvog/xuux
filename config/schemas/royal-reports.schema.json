@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://digital-state.local/schemas/royal-reports.schema.json",
+  "title": "التقريرُ الملكيُّ الدوريُّ — أقسامُه وحقولُه ومصادرُ قياسِها ومسارُ مراجعتِه ونشرِه",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "period",
+    "acts",
+    "review",
+    "command",
+    "sections",
+    "guarantees"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 80
+    },
+    "period": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windowMs", "minIntervalMs", "statement"],
+      "properties": {
+        "windowMs": {
+          "type": "integer",
+          "minimum": 60000
+        },
+        "minIntervalMs": {
+          "type": "integer",
+          "minimum": 1000
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 40
+        }
+      }
+    },
+    "acts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["generate", "review", "publish"],
+      "properties": {
+        "generate": { "$ref": "#/$defs/role" },
+        "review": { "$ref": "#/$defs/role" },
+        "publish": { "$ref": "#/$defs/role" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredType", "reviewerRoles", "minReasonLength", "statement"],
+      "properties": {
+        "requiredType": {
+          "type": "string",
+          "enum": ["human"]
+        },
+        "reviewerRoles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/role" }
+        },
+        "minReasonLength": {
+          "type": "integer",
+          "minimum": 40
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 40
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["publish", "statement"],
+      "properties": {
+        "publish": { "$ref": "#/$defs/actionName" },
+        "statement": {
+          "type": "string",
+          "minLength": 40
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "fields"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["state", "risks", "violations", "cost"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 4
+          },
+          "fields": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "$ref": "#/$defs/field" }
+          }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 14,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement", "enforcedBy"],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^REPORTS_[A-Z_]{4,48}$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 40
+          },
+          "enforcedBy": {
+            "type": "string",
+            "pattern": "^src/[a-z0-9/._-]+\\.mjs$"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "role": {
+      "type": "string",
+      "pattern": "^role:[a-z][a-z0-9-]{2,31}$"
+    },
+    "actionName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{4,63}$"
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "measure", "estimated"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 4
+        },
+        "measure": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-zA-Z0-9]*\\.[a-z][a-zA-Z0-9]*$"
+        },
+        "estimated": {
+          "type": "boolean"
+        },
+        "assumption": {
+          "type": "string",
+          "minLength": 60
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "estimated": { "const": true } },
+            "required": ["estimated"]
+          },
+          "then": {
+            "required": ["assumption"],
+            "properties": { "measure": { "type": "null" } }
+          },
+          "else": {
+            "properties": { "measure": { "type": "string" } },
+            "not": { "required": ["assumption"] }
+          }
+        }
+      ]
+    }
+  }
+}

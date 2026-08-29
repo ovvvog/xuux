@@ -1,0 +1,221 @@
+# التقارير الملكية الدورية — الخطوة `M8.09` (بند P1)
+#
+# **العيب الذي تُغلقه هذه الوثيقة:** «تقارير دورية عن الحالة والأحداث والمخاطر»
+# كانت بنداً في `docs/REMAINING_WORK.md` تحت `P1` ولا موضع في المستودع يُولّد
+# تقريراً عن الدولة كلها. وما كان موجوداً تقريرُ **مؤسسةٍ واحدةٍ** عن دورتها
+# (`M8.05`/`M8.06`) لا تقريرَ دولة، ولا مخاطرَ، ولا تكلفةَ مُجمَّعة.
+#
+# **القاعدة الحاكمة في هذه الوثيقة:** كل حقل في التقرير **مقيس من صفوف** بمصدر
+# مُسمّى (`measure`)، أو **تقديري مُعلَن** (`estimated: true`) ومعه فرضيته نصّاً.
+# ولا حقل ثالث: حقل بلا مصدر ولا فرضية يُرفض عند التحميل، وقيمة لم تُقَس ولم
+# تُعلَن تقديريةً تُرفض عند التوليد. وهذا هو معيار القبول: «بلا حقول تقديرية غير
+# معلَنة».
+
+version: 1
+
+statement: >-
+  التقرير الملكي الدوري تقريرٌ مُولَّدٌ من صفوف الدولة لا من تقدير: أربعة أقسام
+  (حالة الدولة، والمخاطر، والمخالفات، والتكلفة) كل حقل فيها مقيسٌ بمصدرٍ مُسمّى
+  ومعه عدد الصفوف التي قِيس منها، أو تقديريٌّ مُعلَنٌ بفرضيته. ولا يُنشر تقريرٌ
+  إلا بمراجعةٍ بشريةٍ مقروءةٍ من سجل الهويات وبأمرٍ ملكيٍّ عبر بوابة التاج، وبعد
+  إعادة القياس على النافذة نفسها فإن تغيّر القياس رُدَّ التقريرُ بائتاً لا مُنشَراً.
+
+period:
+  # النافذة الزمنية للتقرير: شهر (30 يوماً) بالميلي ثانية.
+  windowMs: 2592000000
+  # أدنى مدة بين تقريرين منشورين: لا يُنشر تقريران على النافذة نفسها.
+  minIntervalMs: 3600000
+  statement: >-
+    النافذة مُعلَنة بالميلي ثانية لا بوصف، وكل قياس في التقرير محصورٌ فيها،
+    وبدايتها ونهايتها محفوظتان في الصف كي يُعاد القياس عليهما بعينهما.
+
+acts:
+  # من يُولّد التقرير ليس من يُراجعه، ومن يُراجعه ليس من يأمر بنشره.
+  generate: role:operator
+  review: role:auditor
+  publish: role:king
+
+review:
+  # المراجعة بشرية تُقرأ من سجل الهويات (`type: human`)، لا إعلاناً في الطلب.
+  requiredType: human
+  reviewerRoles:
+    - role:auditor
+    - role:chief-justice
+  minReasonLength: 60
+  statement: >-
+    المراجعةُ بشريةٌ مقروءةٌ من `state.agents`: نوعُ الهوية `human` وحالُها
+    `active` ودورُها من `reviewerRoles`، وليست هي مَن ولّد التقرير، وقرارُها
+    مُعلَنٌ بسببٍ لا يقلّ عن ستين حرفاً — فالمراجعةُ حكمٌ مكتوبٌ لا ختمٌ صامت.
+
+command:
+  # اسم الفعل الملكي الذي يُنشر به التقرير، وهدفه معرّف التقرير بعينه.
+  publish: publish-royal-report
+  statement: >-
+    النشرُ أمرٌ ملكيٌّ يمرّ ببوابة التاج قبل تغيير حالِ التقرير: فعلُه هو الفعلُ
+    المعلَن هنا، وهدفُه معرّفُ التقرير بعينه، ودفترُ الأوامر يمنع إعادة إرساله.
+
+sections:
+  - id: state
+    title: حالة الدولة
+    fields:
+      - id: institutions.active
+        title: مؤسسات نافذة الاختصاص
+        measure: institutions.activeCount
+        estimated: false
+      - id: institutions.tasks
+        title: مهام مؤسسية في النافذة
+        measure: institutions.taskCount
+        estimated: false
+      - id: federation.effectiveDelegations
+        title: تفويضات ترابية نافذة
+        measure: federation.effectiveCount
+        estimated: false
+      - id: federation.localActs
+        title: أفعال محلية مُورسَت في النافذة
+        measure: federation.actCount
+        estimated: false
+
+  - id: risks
+    title: المخاطر
+    fields:
+      - id: risks.overdueRevocations
+        title: سحوبُ تفويضٍ تجاوزت مهلتها المعلَنة
+        measure: risks.overdueRevocationCount
+        estimated: false
+      - id: risks.lateReportCycles
+        title: دورات تقرير مؤسسي متأخرة عن مهلتها
+        measure: risks.lateCycleCount
+        estimated: false
+      - id: risks.budgetExhaustedInstitutions
+        title: مؤسسات نفدت ميزانيتها
+        measure: risks.budgetExhaustedCount
+        estimated: false
+      - id: risks.refusedTasks
+        title: مهام مؤسسية امتنع تنفيذها في النافذة
+        measure: risks.refusedTaskCount
+        estimated: false
+
+  - id: violations
+    title: المخالفات
+    fields:
+      - id: violations.institutionBreaches
+        title: تجاوزات اختصاصٍ مؤسسي في النافذة
+        measure: violations.breachCount
+        estimated: false
+      - id: violations.federationRefusals
+        title: امتناعات ترابية مسجَّلة في النافذة
+        measure: violations.refusalCount
+        estimated: false
+      - id: violations.topRefusalCode
+        title: أكثر رمز امتناع تكراراً
+        measure: violations.topRefusalCode
+        estimated: false
+
+  - id: cost
+    title: التكلفة
+    fields:
+      - id: cost.budgetDebited
+        title: مجموع ما قُيِّد من ميزانيات المؤسسات في النافذة
+        measure: cost.debitedTotal
+        estimated: false
+      - id: cost.budgetRemaining
+        title: المتبقي من مخصصات المؤسسات الآن
+        measure: cost.remainingTotal
+        estimated: false
+      - id: cost.computeUnits
+        title: وحدات حساب مُستهلَكة
+        measure: null
+        estimated: true
+        assumption: >-
+          لا عدّاد لوحدات الحساب في المستودع: لا جدول استهلاكٍ للاستدلال ولا قياس
+          لزمن المعالجة في صفوف المهام، فهذا الحقل تقديريٌّ مُعلَنٌ صراحةً قيمتُه
+          دائماً غير معروفة (`null`) ولا يُجمَع في أي مجموع، حتى يُنفَّذ عدّاد
+          استهلاكٍ حقيقي في `M9`.
+
+guarantees:
+  - code: REPORTS_CONFIG_INVALID
+    statement: >-
+      وثيقةٌ لا تُطابق مخطَّطها، أو حقلٌ لا مصدرَ له ولا فرضيةَ تقديرٍ معلَنة، أو
+      مصدرُ قياسٍ لا يقع في وحدة التنفيذ، أو معرّفُ حقلٍ مكرَّر، أو دورٌ خارج
+      `config/roles.yaml` — لا تُحمَّل الوثيقةُ أصلاً.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_MEASURE_MISSING
+    statement: >-
+      حقلٌ مقيسٌ يُعلن مصدراً لا تُنفِّذه الوحدة يُردّ عند التركيب لا عند أول
+      توليد: فتقابلُ الحقولِ المعلَنةِ بالمقاييسِ المنفَّذةِ في الاتجاهين.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_ROLE_NOT_PERMITTED
+    statement: >-
+      من ليس دورُه حاملَ الفعلِ المعلَنِ في `acts` لا يُولّد تقريراً ولا يُراجعه؛
+      ومن ولّد التقرير لا يُراجع تقريرَه.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_PERIOD_INVALID
+    statement: >-
+      نافذةٌ مقلوبةٌ أو صفريةٌ أو أطولُ من النافذة المعلَنة أو منتهيةٌ في المستقبل
+      تُردّ: التقريرُ عن مدّةٍ مضت لا عن مدّةٍ لم تأتِ.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_FIELD_UNMEASURED
+    statement: >-
+      حقلٌ معلَنٌ مقيساً ولم يُرجِع مصدرُه قيمةً ولا عددَ صفوفٍ لا يُكتب صفراً ولا
+      يُترك فارغاً: يُردّ التقريرُ كلُّه — فصفرٌ مكتوبٌ مكانَ قياسٍ فائتٍ كذبةٌ
+      أهدأُ من الفشل.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_ESTIMATE_UNDECLARED
+    statement: >-
+      قيمةٌ لم تُقَس ولم تُعلَن تقديريةً بفرضيتها تُردّ. وهذا معيارُ القبول نفسُه:
+      لا حقولَ تقديريةً غيرَ معلَنة.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_HUMAN_REVIEW_REQUIRED
+    statement: >-
+      تقريرٌ لم يُراجعه بشريٌّ مقروءُ النوعِ والحالِ والدورِ من سجل الهويات لا
+      يُنشر؛ وسجلُّ هويّاتٍ غائبٌ يُوقف المراجعةَ لا يُمرّرها صامتة.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_REVIEW_REJECTED
+    statement: >-
+      مراجعةٌ رافضةٌ تُثبَت في الصفِّ بسببها ولا تُمحى، والتقريرُ المرفوضُ لا
+      يُنشر ولا يُعاد استخدامُه.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_ROYAL_COMMAND_REQUIRED
+    statement: >-
+      بلا بوابةِ تاجٍ مُركَّبةٍ وأمرٍ موقَّعٍ على معرّفِ التقريرِ بعينه لا يُنشر
+      تقريرٌ ولا يقع النشرُ بمقارنةِ اسمِ دور.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_COMMAND_ACTION_UNKNOWN
+    statement: >-
+      أمرٌ فعلُه غيرُ الفعلِ المعلَنِ في `command.publish` لا يُنشر تقريراً ولو صحّ
+      توقيعُه.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_COMMAND_TARGET_MISMATCH
+    statement: >-
+      أمرٌ هدفُه غيرُ معرّفِ التقريرِ المطلوبِ نشرُه لا يُنشره: أمرٌ على تقريرٍ لا
+      ينفُذ في تقريرٍ آخر.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_NOT_REVIEWED
+    statement: >-
+      لا نشرَ قبل مراجعة: التقريرُ المولَّدُ حالُه `generated` ولا ينتقل إلى
+      `published` إلا من `reviewed`.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_STALE
+    statement: >-
+      عند النشرِ يُعاد القياسُ على النافذةِ المحفوظةِ بعينها، فإن خالف القياسُ
+      الجديدُ ما في الصفِّ رُدَّ التقريرُ بائتاً ولم يُنشر: تقريرٌ يُنشر بعد أن
+      تغيّرت الصفوفُ تقريرٌ عن دولةٍ أخرى.
+    enforcedBy: src/reports/royal-report.mjs
+
+  - code: REPORTS_TOO_SOON
+    statement: >-
+      تقريرانِ منشورانِ لا يقلّ ما بينهما عن `minIntervalMs` ولا يُنشران على
+      النافذةِ نفسِها مرّتين.
+    enforcedBy: src/reports/royal-report.mjs

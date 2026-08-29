@@ -2010,6 +2010,170 @@ export const FEDERATION_REFUSAL_SPEC = Object.freeze({
 });
 
 /** كل المواصفات المُعلنة، للاستعمال في الاختبارات والأدوات. */
+/**
+ * التقريرُ الملكيُّ الدوريُّ — الخطوة `M8.09`.
+ *
+ * الصفُّ يحفظ **النافذةَ** التي قِيس عليها، و**عددَ الحقولِ** المعلَنةِ والمقيسةِ
+ * والتقديرية، و**بصمةَ القياس** كي يُعاد القياسُ عند النشر فيُردَّ التقريرُ إن
+ * تغيّرت الصفوف، و**أقسامَه** بحقولها كما قِيست: كلُّ حقلٍ بقيمتِه ومصدرِه وعددِ
+ * الصفوف، أو بفرضيتِه إن كان تقديريّاً معلَناً.
+ */
+export const ROYAL_REPORT_SPEC = Object.freeze({
+  name: 'royal_reports',
+  table: 'state.royal_reports',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      reportId: { column: 'report_id', type: 'string', required: true, maxLength: 128 },
+      periodStart: { column: 'period_start', type: 'timestamp', required: true },
+      periodEnd: { column: 'period_end', type: 'timestamp', required: true },
+      generatedBy: { column: 'generated_by', type: 'string', required: true, maxLength: 64 },
+      generatedAt: { column: 'generated_at', type: 'timestamp', required: true },
+      state: {
+        column: 'state',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['generated', 'reviewed', 'rejected', 'published']),
+      },
+      fieldsDeclared: { column: 'fields_declared', type: 'integer', required: true },
+      fieldsMeasured: { column: 'fields_measured', type: 'integer', required: true },
+      fieldsEstimated: { column: 'fields_estimated', type: 'integer', required: true },
+      digest: { column: 'digest', type: 'string', required: true, maxLength: 64 },
+      sections: { column: 'sections', type: 'json', required: true },
+      reviewer: { column: 'reviewer', type: 'string', nullable: true, maxLength: 128 },
+      reviewDecision: {
+        column: 'review_decision',
+        type: 'enum',
+        nullable: true,
+        values: Object.freeze(['accept', 'reject']),
+      },
+      reviewReason: { column: 'review_reason', type: 'string', nullable: true },
+      reviewedAt: { column: 'reviewed_at', type: 'timestamp', nullable: true },
+      publishCommandId: {
+        column: 'publish_command_id',
+        type: 'string',
+        nullable: true,
+        maxLength: 128,
+      },
+      publishedAt: { column: 'published_at', type: 'timestamp', nullable: true },
+      modelVersion: { column: 'model_version', type: 'integer', required: true },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([Object.freeze(['reportId'])]),
+  filterable: Object.freeze(['reportId', 'state', 'generatedBy']),
+  invariants: Object.freeze([
+    {
+      code: 'ROYAL_REPORT_PERIOD_ORDERED',
+      message:
+        'نافذةُ التقريرِ تبدأُ قبل أن تنتهي، والتوليدُ بعد انتهائها؛ ونافذةٌ مقلوبةٌ أو تقريرٌ يُولَّد قبل انقضاءِ مدّته تقريرٌ عن مدّةٍ لم تكتمل.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const start = record['periodStart'];
+        const end = record['periodEnd'];
+        const generated = record['generatedAt'];
+        if (!(start instanceof Date) || !(end instanceof Date)) return false;
+        if (!(generated instanceof Date)) return false;
+        return end.getTime() > start.getTime() && generated.getTime() >= end.getTime();
+      },
+    },
+    {
+      code: 'ROYAL_REPORT_FIELDS_MEASURED',
+      message:
+        'مجموعُ المقيسِ والتقديريِّ هو عددُ الحقولِ المعلَنة، وكلُّها موجبة؛ وتقريرٌ تُعلَن حقولُه ولا تُغطّى تقريرٌ ناقصٌ يُقرأ كاملاً.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const declared = record['fieldsDeclared'];
+        const measured = record['fieldsMeasured'];
+        const estimated = record['fieldsEstimated'];
+        if (typeof declared !== 'number' || !Number.isInteger(declared) || declared <= 0) {
+          return false;
+        }
+        if (typeof measured !== 'number' || !Number.isInteger(measured) || measured < 0) {
+          return false;
+        }
+        if (typeof estimated !== 'number' || !Number.isInteger(estimated) || estimated < 0) {
+          return false;
+        }
+        return measured + estimated === declared;
+      },
+    },
+    {
+      code: 'ROYAL_REPORT_ESTIMATES_DECLARED',
+      message:
+        'كلُّ حقلٍ في الأقسامِ إمّا مقيسٌ بمصدرٍ مُسمّى، وإمّا تقديريٌّ بفرضيةٍ مكتوبةٍ وقيمةٍ غيرِ معروفة؛ وحقلٌ ثالثٌ حقلٌ تقديريٌّ غيرُ معلَن.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const sections = record['sections'];
+        if (!Array.isArray(sections) || sections.length === 0) return false;
+        let estimated = 0;
+        let measured = 0;
+        for (const entry of sections) {
+          if (entry === null || typeof entry !== 'object') return false;
+          const field = /** @type {Record<string, unknown>} */ (entry);
+          if (typeof field['id'] !== 'string' || field['id'] === '') return false;
+          if (field['estimated'] === true) {
+            if (typeof field['assumption'] !== 'string' || field['assumption'].length < 60) {
+              return false;
+            }
+            if (field['value'] !== null) return false;
+            estimated += 1;
+            continue;
+          }
+          if (field['estimated'] !== false) return false;
+          if (typeof field['measuredFrom'] !== 'string' || field['measuredFrom'] === '') {
+            return false;
+          }
+          const value = field['value'];
+          const rowCount = field['rowCount'];
+          if (typeof rowCount !== 'number' || !Number.isInteger(rowCount) || rowCount < 0) {
+            return false;
+          }
+          if (value === null && rowCount !== 0) return false;
+          if (value !== null && typeof value !== 'number' && typeof value !== 'string') {
+            return false;
+          }
+          measured += 1;
+        }
+        return measured === record['fieldsMeasured'] && estimated === record['fieldsEstimated'];
+      },
+    },
+    {
+      code: 'ROYAL_REPORT_REVIEW_BOUND',
+      message:
+        'المراجعةُ إمّا كاملةٌ (مراجعٌ وقرارٌ وسببٌ ووقت) وإمّا غائبةٌ كلُّها؛ ومراجعةٌ نصفُها مكتوبٌ مراجعةٌ لا يُعرف من أجراها.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const parts = [
+          record['reviewer'],
+          record['reviewDecision'],
+          record['reviewReason'],
+          record['reviewedAt'],
+        ];
+        const filled = parts.filter((part) => part !== null && part !== undefined).length;
+        if (filled !== 0 && filled !== parts.length) return false;
+        if (filled === 0) return record['state'] === 'generated';
+        return true;
+      },
+    },
+    {
+      code: 'ROYAL_REPORT_PUBLISH_REQUIRES_REVIEW',
+      message:
+        'التقريرُ المنشورُ له أمرُ نشرٍ ووقتُ نشرٍ ومراجعةٌ قابلة، وغيرُ المنشورِ لا أمرَ نشرٍ له؛ ونشرٌ بلا أمرٍ نشرٌ بلا سلطة.',
+      /** @param {EntityRecord} record */
+      check: (record) => {
+        const published = record['state'] === 'published';
+        const command = record['publishCommandId'];
+        const when = record['publishedAt'];
+        if (!published) return command === null && when === null;
+        if (typeof command !== 'string' || command === '') return false;
+        if (!(when instanceof Date)) return false;
+        return record['reviewDecision'] === 'accept';
+      },
+    },
+  ]),
+});
+
 export const ENTITY_SPECS = Object.freeze({
   agents: AGENT_SPEC,
   models: MODEL_SPEC,
@@ -2032,6 +2196,7 @@ export const ENTITY_SPECS = Object.freeze({
   federation_local_acts: FEDERATION_ACT_SPEC,
   federation_refusals: FEDERATION_REFUSAL_SPEC,
   federation_delegation_register: FEDERATION_REGISTER_SPEC,
+  royal_reports: ROYAL_REPORT_SPEC,
 });
 
 /**

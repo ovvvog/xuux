@@ -23,6 +23,7 @@ import {
   RegionalDelegation,
   loadDelegationPolicy,
 } from '../federation/index.mjs';
+import { RoyalReportGenerator, createReportMeasures, loadReportPolicy } from '../reports/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -65,6 +66,7 @@ import {
   FEDERATION_ACT_SPEC,
   FEDERATION_REFUSAL_SPEC,
   FEDERATION_REGISTER_SPEC,
+  ROYAL_REPORT_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -98,6 +100,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} federationActs
  * @property {ReturnType<typeof createMemoryRepository>} federationRefusals
  * @property {ReturnType<typeof createMemoryRepository>} federationRegister
+ * @property {ReturnType<typeof createMemoryRepository>} royalReports
  */
 
 /**
@@ -124,6 +127,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {InstitutionOperations} institutions
  * @property {RegionalDelegation} federation
  * @property {DelegationRegister} federationRegister
+ * @property {RoyalReportGenerator} reports
  */
 
 /**
@@ -154,6 +158,7 @@ export function createMemoryRepositories(options = {}) {
     federationActs: createMemoryRepository(FEDERATION_ACT_SPEC, options),
     federationRefusals: createMemoryRepository(FEDERATION_REFUSAL_SPEC, options),
     federationRegister: createMemoryRepository(FEDERATION_REGISTER_SPEC, options),
+    royalReports: createMemoryRepository(ROYAL_REPORT_SPEC, options),
   };
 }
 
@@ -186,6 +191,7 @@ export function createPostgresRepositories(pool) {
       federationActs: createPostgresRepository(pool, FEDERATION_ACT_SPEC),
       federationRefusals: createPostgresRepository(pool, FEDERATION_REFUSAL_SPEC),
       federationRegister: createPostgresRepository(pool, FEDERATION_REGISTER_SPEC),
+      royalReports: createPostgresRepository(pool, ROYAL_REPORT_SPEC),
     })
   );
 }
@@ -239,6 +245,10 @@ export function createPostgresRepositories(pool) {
  *   التفويض الترابي (M8.07): الإقليمُ المعزولُ ومستوياتُه الثلاثةُ وصلاحياتُ كلِّ
  *   مستوى ودورُ ممارستها والصلاحياتُ المحجوزةُ للمركز. تُحمَّل من
  *   `config/federation-delegation.yaml` إن لم تُمرَّر.
+ * @param {import('../reports/royal-report.mjs').ReportPolicy | null} [deps.reportsPolicy] وثيقةُ
+ *   التقاريرِ الملكيةِ الدورية (M8.09): نافذةُ التقريرِ وأقسامُه وحقولُ كلِّ قسمٍ
+ *   ومصادرُ قياسِها ومسارُ مراجعتِها ونشرِها. تُحمَّل من `config/royal-reports.yaml`
+ *   إن لم تُمرَّر.
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
@@ -262,6 +272,7 @@ export function createRegistries({
   eventsPolicy = null,
   judiciaryPolicy = null,
   delegationPolicy = null,
+  reportsPolicy = null,
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
@@ -372,6 +383,18 @@ export function createRegistries({
     register: delegationRegister,
     crown,
   });
+  // والتقريرُ الملكيُّ الدوريُّ يُركَّب **دائماً** (الخطوة `M8.09`)، لنفس سببِ
+  // المؤسسةِ والإقليم: تقريرٌ اختياريُّ التركيبِ يصير تقريراً لا مسارَ له في
+  // التشغيل، فلا يُقاس منه حالُ الدولةِ ولا مخاطرُها. والمقاييسُ مبنيّةٌ على
+  // المستودعاتِ نفسِها وعلى سجلِّ السيادة، وبوابةُ التاجِ وسجلُّ الهوياتِ موصولان:
+  // بلا الأولِ لا نشرَ، وبلا الثاني لا مراجعةَ بشريةً تُقاس.
+  const royalReports = new RoyalReportGenerator({
+    policy: reportsPolicy ?? loadReportPolicy(),
+    reports: repositories.royalReports,
+    measures: createReportMeasures({ repositories, register: delegationRegister }),
+    agents,
+    crown,
+  });
   return {
     agents,
     models: new ModelRegistry({
@@ -459,6 +482,7 @@ export function createRegistries({
     // يبقى لمعيارِ القبولِ ما يُقاس عليه.
     federation: regionalDelegation,
     federationRegister: delegationRegister,
+    reports: royalReports,
     // ناقلُ القنوات يُركَّب **دائماً** (الخطوة `M7.07`)، لنفس سبب دفتري النسب
     // والمحو: ناقلٌ اختياريٌّ يصير تركُه مساراً لأحداثٍ تُقرأ بلا تخليصٍ ولا عقد
     // ولا موضعِ قراءة — وهو العيب الذي أغلقته الخطوة.
