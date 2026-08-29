@@ -1,0 +1,181 @@
+# وكيل المراقبة للقراءة فقط — الخطوة `M9.01` (بند P1)
+#
+# **العيب الذي تُغلقه هذه الوثيقة:** كل قارئ للحالة في المستودع يقرؤها من
+# **نفس الكائن** الذي يكتب بها: `createRegistries` تُعيد سجلاتٍ فيها `insert`
+# و`update` و`remove` بجوار `list` و`count`. فمن أراد رؤيةً وحدها أخذ سلطةً
+# معها، ولا موضع واحد في المستودع يقول «هذا المسار يقرأ ولا يكتب» بحدٍّ يقع في
+# زمن التشغيل لا بنصيحةٍ في مراجعة. ووكيل مراقبةٍ يُبنى على السجلات كما هي وكيلٌ
+# قدرتُه على الكتابة قائمةٌ وإن لم يستعملها — والقدرة غير المستعملة قدرة.
+#
+# **القاعدة الحاكمة في هذه الوثيقة: لا سطح ثالث.** كل ما يصل إليه وكيل المراقبة
+# **مَشهدٌ مُعلَنٌ هنا** باسمه وبمستودعه وبجدوله، وكل ما يُنادى عليه اسمٌ من
+# `readMethods` وحدها. وما ليس مشهداً معلَناً ولا اسماً مقروءاً **يُرفض عند لمسه**
+# لا عند تنفيذه: الوصول إلى `insert` على مشهدٍ يرفع `MONITOR_WRITE_FORBIDDEN`
+# قبل أن توجد مكالمة، فلا يُمسك المستدعي بدالّة كتابةٍ أصلاً. وهذا معيار القبول:
+# «كل محاولة كتابة من هذا المسار تُرفض بنيوياً».
+
+version: 1
+
+statement: >-
+  وكيل المراقبة يقرأ حال الدولة ولا يملك قدرة كتابة واحدة: هويّته تُقرأ من
+  `state.agents` نوعاً وحالاً ودوراً، ودورُه لا يحمل إلا القدرات المُعلَنة هنا
+  فقدرةٌ زائدة تمنع تركيبَه لا تُستعمَل بصمت، ومشاهدُه مُعلَنةٌ بمستوداتها
+  وجداولها فمشهدٌ بلا مستودعٍ مركَّب يمنع التركيب، وكل نداء يُسجَّل في سجل
+  الأحداث **قبل** القراءة فقراءةٌ بلا أثرِ تدقيقٍ لا تقع، والصفوف المُعادة صورٌ
+  مُجمَّدة تجميداً عميقاً فمن قرأ لا يُعدِّل ما في المخزن بيده.
+
+# دور وكيل المراقبة. لم يُخترَع دورٌ جديد: `role:auditor` مُعلَن في
+# `config/roles.yaml` بنصٍّ يقول «يقرأ كل شيء ولا يكتب شيئاً»، فاختراع دورٍ
+# موازٍ كان سيصير دورين لمعنى واحد يفترقان بأول تعديل.
+role: role:auditor
+
+# القدرات المسموحة لهذا الدور — والتقابل مفحوصٌ في الاتجاهين عند التركيب:
+# قدرةٌ في الدور خارج هذه القائمة تمنع التركيب (`MONITOR_CAPABILITY_FORBIDDEN`)،
+# وقدرةٌ معلَنة هنا ولا يحملها الدور تمنعه أيضاً (`MONITOR_CAPABILITY_UNDECLARED`).
+# فالحدّ يقع على **بيانات الأدوار** لا على نيّة الكاتب: من منح المُدقِّق
+# `action:write-memory` غداً أوقف وكيل المراقبة، ولم يوسّعه صامتاً.
+allowedCapabilities:
+  - action:read-registry
+  - action:read-memory
+  - action:read-audit
+
+# أسماء النداءات المقروءة — ولا اسمَ غيرها يُرى على المشهد أصلاً.
+readMethods:
+  - findById
+  - list
+  - count
+
+# أقصى عدد صفوف في نداء واحد. الحدّ ليس تجميلاً: قراءةٌ بلا حدٍّ على مستودعٍ
+# بملايين الصفوف مسحٌ كامل يُخفي كلفته، وهو عينُ ما تمنعه مواصفات الترشيح.
+maxRows: 500
+
+# نوع حدث التدقيق المُلحَق قبل كل قراءة، ونوع حدث الرفض المُلحَق قبل رميه.
+audit:
+  readEvent: monitor.read
+  refusalEvent: monitor.read.refused
+  statement: >-
+    القيد يُكتب قبل الأثر لا بعده: من سجّل بعد القراءة فقد ما وقع ثم أخفق
+    التسجيل — أي قراءةٌ حصلت ولا يعلم بها أحد. والثمن مُعلَن: قد يُكتب قيدٌ
+    لقراءةٍ أخفقت بعده، فنسجّل زائداً لا ناقصاً.
+
+views:
+  - id: agents
+    registry: agents
+    entity: state.agents
+    purpose: هويات الدولة وحالها — من يعمل الآن ومن عُلِّق أو حُجِر.
+
+  - id: institutions
+    registry: institutions
+    entity: state.institutions
+    purpose: المؤسسات وحال اختصاصها ومخصّصاتها.
+
+  - id: institutionTasks
+    registry: institutionTasks
+    entity: state.institution_tasks
+    purpose: المهام المؤسسية وحالها ومن أُسندت إليه.
+
+  - id: institutionBreaches
+    registry: institutionBreaches
+    entity: state.institution_breaches
+    purpose: تجاوزات الاختصاص المسجَّلة برموزها.
+
+  - id: institutionReportCycles
+    registry: institutionReportCycles
+    entity: state.institution_report_cycles
+    purpose: دورات التقارير المؤسسية ومهلها.
+
+  - id: cases
+    registry: cases
+    entity: state.cases
+    purpose: القضايا وحالها من الدعوى إلى تنفيذ الحكم.
+
+  - id: laws
+    registry: laws
+    entity: state.laws
+    purpose: القوانين وحال نفاذها.
+
+  - id: federationDelegations
+    registry: federationDelegations
+    entity: state.federation_delegations
+    purpose: الأقاليم المفوَّضة ومستوياتها.
+
+  - id: federationActs
+    registry: federationActs
+    entity: state.federation_local_acts
+    purpose: الأفعال المحلية المُمارَسة بتفويض.
+
+  - id: federationRefusals
+    registry: federationRefusals
+    entity: state.federation_refusals
+    purpose: الامتناعات الترابية برموزها.
+
+  - id: royalReports
+    registry: royalReports
+    entity: state.royal_reports
+    purpose: التقارير الملكية الدورية وحالها ومراجعتها.
+
+guarantees:
+  - code: MONITOR_CONFIG_INVALID
+    statement: >-
+      وثيقةٌ لا تُطابق مخطَّطها، أو مشهدان بمعرّفٍ واحد، أو دورٌ لا وجود له في
+      `config/roles.yaml`، أو اسمُ نداءٍ مقروءٍ يقع في قائمة النداءات الكاتبة —
+      لا تُحمَّل الوثيقة أصلاً، ولا يُنشأ وكيل مراقبةٍ بلا وثيقة.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_VIEW_NOT_COMPOSED
+    statement: >-
+      مشهدٌ مُعلَنٌ لا مستودعَ له في السجلات المُمرَّرة يُردّ **عند التركيب** لا
+      عند أول قراءة: مشهدٌ يُعلَن ولا يُقرأ منه شيء وعدٌ لا يُقاس.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_ENTITY_MISMATCH
+    statement: >-
+      مشهدٌ يُعلن جدولاً غيرَ جدولِ مستودعه يُردّ عند التركيب: اسمٌ في وثيقةٍ
+      يخالف الجدولَ المقروءَ منه فعلاً يجعل سجلَّ التدقيق يكذب على قارئه.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_WRITE_FORBIDDEN
+    statement: >-
+      كل اسمٍ خارج `readMethods` يُرفض **عند لمسه** على المشهد لا عند تنفيذه،
+      فلا يُمسك المستدعي بدالّة كتابةٍ أصلاً؛ والمشهد لا يُكتب فيه ولا يُوسَّع
+      ولا يُحذف منه. وهذا معيار القبول: كل محاولة كتابة من هذا المسار مرفوضة
+      بنيوياً لا بفحصٍ مؤدَّب.
+    enforcedBy: src/observability/read-only-view.mjs
+
+  - code: MONITOR_CAPABILITY_FORBIDDEN
+    statement: >-
+      دورُ وكيل المراقبة إن حمل قدرةً خارج `allowedCapabilities` منع التركيب:
+      قدرةُ كتابةٍ في بيانات الأدوار توقف الوكيل ولا تُستعمَل صامتة.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_CAPABILITY_UNDECLARED
+    statement: >-
+      قدرةٌ معلَنةٌ في هذه الوثيقة ولا يحملها الدور في `config/roles.yaml` تمنع
+      التركيب أيضاً: التقابل في الاتجاهين، فوثيقةٌ تَعِد بقراءةٍ لا يملكها الدور
+      وثيقةٌ تكذب.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_IDENTITY_UNVERIFIED
+    statement: >-
+      من ليس هويّةً مسجَّلةً في `state.agents` حالُها `active` ودورُها دورَ
+      المراقبة لا يقرأ شيئاً؛ وسجلُّ هوياتٍ غيرُ مركَّبٍ **يوقف القراءة** ولا
+      يمرّرها صامتة (المادة 9).
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_AUDIT_REQUIRED
+    statement: >-
+      سجلُّ أحداثٍ غيرُ مركَّبٍ يرفض كل قراءة: قراءةٌ بلا أثرِ تدقيقٍ أسوأ من
+      قراءةٍ مرفوضة، لأنها تقع ولا تُرى.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_VIEW_UNKNOWN
+    statement: >-
+      قراءةٌ من مشهدٍ غيرِ مُعلَنٍ تُردّ برمزها وتُسجَّل: المشاهدُ بياناتٌ في
+      هذه الوثيقة لا أسماءٌ يخترعها المستدعي.
+    enforcedBy: src/observability/monitor-agent.mjs
+
+  - code: MONITOR_QUERY_UNSUPPORTED
+    statement: >-
+      ترشيحٌ بحقلٍ غيرِ قابلٍ للترشيح في مواصفة السجل، أو حدٌّ أعلى من `maxRows`،
+      أو حدٌّ غيرُ صحيحٍ موجَب — يُردّ: مسحٌ كامل يُخفي كلفته ليس قراءةً محكومة.
+    enforcedBy: src/observability/monitor-agent.mjs
