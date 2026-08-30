@@ -195,6 +195,9 @@ jobs:
       - name: حاجز طبقة الواجهة (M9.02) — لا مسار بلا تخويل معلَن
         run: npm run guard:api
 
+      - name: حاجز الديوان الملكي (M9.03) — لا أمر بلا إعلان وتوقيع وقيد دائم قبل أثره
+        run: npm run guard:console
+
       - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
         run: npm run guard:templates
 

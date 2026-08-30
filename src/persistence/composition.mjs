@@ -26,6 +26,7 @@ import {
 import { RoyalReportGenerator, createReportMeasures, loadReportPolicy } from '../reports/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../observability/index.mjs';
 import { ApiGateway, loadApiPolicy } from '../api/index.mjs';
+import { RoyalConsole, loadConsolePolicy } from '../console/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -134,6 +135,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {RoyalReportGenerator} reports
  * @property {MonitorAgent} monitor
  * @property {ApiGateway} api
+ * @property {RoyalConsole} royalConsole
  */
 
 /**
@@ -271,6 +273,19 @@ export function createPostgresRepositories(pool) {
  * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
+ * @param {import('../console/royal-console.mjs').ConsolePolicy | null} [deps.consolePolicy] وثيقةُ
+ *   الديوانِ الملكيّ (M9.03): مشاهدُه المُعلَنةُ ومساراتُها في طبقةِ الواجهة،
+ *   وأوامرُه بأفعالِها وأهدافِها ومساراتِها، وأحداثُ تدقيقِه، ورموزُ رفضِه
+ *   وضماناتُه. تُحمَّل من `config/royal-console.yaml` إن لم تُمرَّر.
+ * @param {import('../console/royal-console.mjs').ConsoleHaltLike | null} [deps.haltSwitch] زرُّ
+ *   الإيقافِ الشامل. من لم يمرّره حصل على ديوانٍ يقرأ ويَنقُض، و**يرفض** الإيقافَ
+ *   والاستئنافَ برمز `CONSOLE_HALT_REQUIRED`؛ فالنقصُ يظهر رفضاً لا سماحاً.
+ * @param {import('../console/royal-console.mjs').ConsoleKingLike | null} [deps.king] هويةُ
+ *   الملك. لازمةٌ لمسارِ التعافي وحده (رفعُ النقضِ والاستئنافُ) لأنه لا يمرّ ببوابةِ
+ *   التاج؛ ومن لم يمرّرها رُفض تعافيه بـ`CONSOLE_KING_REQUIRED`.
+ * @param {import('../console/royal-console.mjs').ConsoleLedgerLike | null} [deps.commandLedger] دفترُ
+ *   الأوامرِ الدائم. يمنع إعادةَ إرسالِ أمرِ تعافٍ موقَّعٍ بعد إعادةِ التشغيل؛
+ *   وغيابُه يحصر منعَ الإعادةِ في ذاكرةِ العمليةِ الواحدة وذاك حدٌّ معلَن.
  * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
@@ -295,6 +310,10 @@ export function createRegistries({
   reportsPolicy = null,
   monitoringPolicy = null,
   apiPolicy = null,
+  consolePolicy = null,
+  haltSwitch = null,
+  king = null,
+  commandLedger = null,
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
@@ -440,10 +459,36 @@ export function createRegistries({
     monitor,
     enforcementPoint,
   });
+  // والديوانُ الملكيُّ يُركَّب **دائماً** (الخطوة `M9.03`): ديوانٌ اختياريُّ
+  // التركيبِ يعني أن ممارسةَ السلطةِ تعود إلى نداءِ `crown.stop()` أو
+  // `veto.block()` من داخلِ الكودِ بلا أمرٍ موقَّعٍ ولا قيدٍ دائم — وهو العيبُ
+  // نفسُه الذي جاءت الخطوةُ لتغلقه. وما ينقص من وصلاتِه يظهر **رفضاً** مُسمّى:
+  // بلا سجلٍّ لا أمرَ ولا مشهد، وبلا بوابةِ تاجٍ لا أمرَ على مسارِها، وبلا زرِّ
+  // إيقافٍ لا إيقافَ ولا استئناف، وبلا هويةِ ملكٍ لا تعافي.
+  //
+  // وبوابةُ التاجِ تُقرأ بعقدِ الديوانِ لا بعقدِ القضاء: القضاءُ لا يحتاج منها
+  // إلا `command`، والديوانُ يحتاج معها حقَّ النقضِ وحالَ التوقّف. فبوابةٌ لا
+  // تحمل `veto` ليست بوابةَ ديوانٍ، ويُقرأ غيابُها رفضاً لا يُفترَض حضورُها.
+  const royalCrown =
+    crown !== null && 'veto' in crown
+      ? /** @type {import('../console/royal-console.mjs').ConsoleCrownLike} */ (
+          /** @type {unknown} */ (crown)
+        )
+      : null;
+  const royalConsole = new RoyalConsole({
+    policy: consolePolicy ?? loadConsolePolicy(),
+    gateway: api,
+    crown: royalCrown,
+    haltSwitch,
+    king,
+    commandLedger,
+    log,
+  });
   return {
     agents,
     monitor,
     api,
+    royalConsole,
     models: new ModelRegistry({
       log,
       repository: repositories.models,

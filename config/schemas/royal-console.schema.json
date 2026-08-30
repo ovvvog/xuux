@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/royal-console.schema.json",
+  "title": "وثيقة الديوان الملكي — M9.03",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "statement", "audit", "refusalCodes", "views", "commands", "guarantees"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viewEvent",
+        "commandExecutedEvent",
+        "commandRefusedEvent",
+        "recoveryEvent",
+        "statement"
+      ],
+      "properties": {
+        "viewEvent": { "type": "string", "minLength": 3 },
+        "commandExecutedEvent": { "type": "string", "minLength": 3 },
+        "commandRefusedEvent": { "type": "string", "minLength": 3 },
+        "recoveryEvent": { "type": "string", "minLength": 3 },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^CONSOLE_[A-Z_]+$" }
+    },
+    "views": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "route", "purpose"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^view:[a-z0-9.-]+$" },
+          "route": { "type": "string", "minLength": 3 },
+          "purpose": { "type": "string", "minLength": 8 }
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "action", "kind", "path", "target", "purpose"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^cmd:[a-z0-9.-]+$" },
+          "action": { "type": "string", "minLength": 3 },
+          "kind": {
+            "type": "string",
+            "enum": ["halt", "halt-resume", "veto", "veto-clear"]
+          },
+          "path": { "type": "string", "enum": ["crown", "sovereign-recovery"] },
+          "target": { "type": "string", "pattern": "^[a-z-]+:[a-z0-9.-]+$" },
+          "purpose": { "type": "string", "minLength": 8 },
+          "sovereignThreshold": { "type": "boolean" }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy", "codes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-CONSOLE-[A-Z-]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": { "type": "string", "minLength": 5 },
+          "codes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
