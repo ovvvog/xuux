@@ -76,15 +76,8 @@ jobs:
           /usr/lib/postgresql/18/bin/pg_dump --version
           /usr/lib/postgresql/18/bin/pg_restore --version
 
-      - name: التحقق من مطابقة الإصدار بين package.json و version.json
-        run: |
-          PKG=$(node -p "require('./package.json').version")
-          VER=$(node -p "require('./version.json').version")
-          echo "package.json=$PKG  version.json=$VER"
-          if [ "$PKG" != "$VER" ]; then
-            echo "::error::تعارض إصدار: package.json=$PKG لكن version.json=$VER"
-            exit 1
-          fi
+      - name: حاجز تطابق الإصدار (WL-046) — نفس النصّ الذي يُقاس محلّياً
+        run: npm run guard:version
 
       - name: فحص الأسلوب (ESLint)
         run: npm run lint
