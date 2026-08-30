@@ -1,0 +1,195 @@
+# الديوان الملكي — الخطوة `M9.03`
+#
+# قبل هذا الملف كانت السلطةُ الملكيةُ **موجودةً ولا مُمارَسة**: بوابةُ التاج تقبل
+# أمراً موقَّعاً، وزرُّ الإيقافِ الشاملِ يعمل، وحقُّ النقضِ مكتوبٌ في `Veto` —
+# ولا موضعَ واحدٌ يجلس فيه الملكُ فيرى الحالةَ ويُصدر أمراً ويرى أثرَه في السجلِّ
+# الدائم. فكان كلُّ ذلك يُنادى من داخلِ الكودِ بيدِ من يكتبه، لا من ديوان.
+#
+# وهذه الوثيقة تجعل الديوانَ **بياناتٍ لا كوداً**: المشهدُ لا يُقرأ إن لم يُعلَن
+# هنا، والأمرُ لا يُنفَّذ إن لم يُعلَن هنا بفعلِه وهدفِه ومسارِه، ولا يخترع
+# المُنادي فعلاً ولا مساراً.
+#
+# وما لا تفعله: لا تمنح إذناً ولا توقّع أمراً. الإذنُ في `config/policies.yaml`
+# والعتبةُ السياديةُ في `config/royal-authority.yaml`، والتوقيعُ بمفتاحِ الملكِ
+# وحده. وهذه الوثيقةُ تقول «هذا الأمرُ معلَنٌ وهذا مسارُه» لا «هذا مسموح».
+
+version: 1
+
+statement: >-
+  الديوانُ لا يقرأ إلا من طبقةِ الواجهةِ المُدقَّقة، ولا يكتب إلا بأمرٍ ملكيٍّ
+  موقَّعٍ مُعلَنٍ في هذه الوثيقة. وكلُّ أمرٍ يُثبَّت في السجلِّ الدائمِ **قبل**
+  أن يقع أثرُه، فلا أثرَ بلا قيدٍ يشهد عليه؛ والعكسُ ممكنٌ ومعلَنٌ ثمناً: قيدُ
+  قبولٍ لأمرٍ أخفق تنفيذُه بعده، ويُميّزه قيدُ التنفيذِ المنفصل.
+
+# ── التدقيق ──
+# ثلاثةُ أحداثٍ لا حدثٌ واحد: القبولُ يكتبه التاجُ (`crown.command.accepted`)،
+# والتنفيذُ يكتبه الديوانُ، والرفضُ يكتبه الديوانُ برمزِه. فمن قرأ السجلَّ ميَّز
+# «أمرٌ قُبل ولم يُنفَّذ» من «أمرٌ نُفِّذ» — وهما حالتان لا واحدة.
+audit:
+  viewEvent: console.view.read
+  commandExecutedEvent: console.command.executed
+  commandRefusedEvent: console.command.refused
+  recoveryEvent: console.recovery.executed
+  statement: >-
+    قيدُ القبولِ يسبق الأثرَ ويكتبه التاجُ في السجلِّ الدائم، وقيدُ التنفيذِ
+    يتبعه ويكتبه الديوان، وكلُّ رفضٍ قيدٌ ثالثٌ برمزِه. وما لا يُثبَّت في
+    السجلِّ الدائمِ لا يُنفَّذ من هذا الديوان.
+
+# ── رموزُ الرفض ──
+# مُعلَنةٌ هنا كي يُقابَل المُعلَنُ بالمكتوبِ في الكودِ في الاتجاهين.
+refusalCodes:
+  - CONSOLE_CONFIG_INVALID
+  - CONSOLE_AUDIT_REQUIRED
+  - CONSOLE_VIEW_UNDECLARED
+  - CONSOLE_GATEWAY_REQUIRED
+  - CONSOLE_VIEW_REFUSED
+  - CONSOLE_COMMAND_UNDECLARED
+  - CONSOLE_ACTION_MISMATCH
+  - CONSOLE_TARGET_MISMATCH
+  - CONSOLE_CROWN_REQUIRED
+  - CONSOLE_COMMAND_REJECTED
+  - CONSOLE_KING_REQUIRED
+  - CONSOLE_SIGNATURE_INVALID
+  - CONSOLE_REPLAYED_COMMAND
+  - CONSOLE_HALT_REQUIRED
+  - CONSOLE_EFFECT_REFUSED
+  - CONSOLE_PATH_UNDECLARED
+
+# ── المشاهد: قراءةُ الحالة ──
+# كلُّ مشهدٍ **مسارٌ في `config/api.yaml`** لا نداءٌ في مستودع: الديوانُ يجلس فوق
+# طبقةِ الواجهةِ لا بجوارها، فيَرِث منها الجلسةَ والحدَّ والتفويضَ والتدقيق. ولو
+# قرأ الديوانُ من مستودعٍ مباشرةً لكان قد بنى المسارَ الجانبيَّ الذي أُغلق في
+# `M4.05` وسمّاه «ديواناً».
+views:
+  - id: view:agents
+    route: state.agents.list
+    purpose: سردُ الوكلاء المسجَّلين وحالِهم.
+
+  - id: view:agents.one
+    route: state.agents.get
+    purpose: قراءةُ وكيلٍ واحدٍ بمعرّفه.
+
+  - id: view:institutions
+    route: state.institutions.list
+    purpose: سردُ المؤسسات القائمة.
+
+  - id: view:institution-breaches
+    route: state.institution-breaches.list
+    purpose: سردُ إخلالاتِ المؤسسات المسجَّلة.
+
+  - id: view:cases
+    route: state.cases.list
+    purpose: سردُ القضايا القضائية.
+
+  - id: view:laws
+    route: state.laws.list
+    purpose: سردُ القوانين وحالاتِها.
+
+  - id: view:federation-refusals
+    route: state.federation-refusals.list
+    purpose: سردُ امتناعاتِ الإقليم المسجَّلة.
+
+  - id: view:royal-reports
+    route: state.royal-reports.list
+    purpose: سردُ التقارير الملكية المُولَّدة.
+
+# ── الأوامر: ممارسةُ السلطة ──
+# `path` حقلٌ مقصودٌ لا زينة، وسببُه بنيويّ: بوابةُ التاج تفحص الإيقافَ الشاملَ
+# والنقضَ **قبل** التوقيع، فأمرُ استئنافٍ يمرّ بها يُرفض لأن الدولةَ موقوفة،
+# وأمرُ رفعِ نقضٍ يُرفض لأن النقضَ قائم. فأمرُ التعافي لا يمرّ من حيث يمرّ غيرُه
+# ولا يجوز أن يمرّ: لو مرّ لصار الإيقافُ الشاملُ بلا رجعةٍ إلا بيدٍ خارجَ
+# الديوان. فمسارُ التعافي مُعلَنٌ منفصلاً، ومحدودٌ بنوعين لا يزيدان
+# (`halt-resume` و`veto-clear`)، ويتحقّق من توقيعِ الملكِ بنفسِه ويمنع الإعادةَ
+# بدفترِ الأوامرِ الدائم، ويُثبَّت في السجلِّ الدائمِ قبل أثرِه كغيره.
+commands:
+  - id: cmd:halt
+    action: stop-state
+    kind: halt
+    path: crown
+    target: 'state:sovereign'
+    purpose: إيقافٌ شاملٌ للدولةِ بتوجيهٍ دائمٍ موقَّعٍ يقرأه كلُّ عقدةٍ من القرص.
+    sovereignThreshold: true
+
+  - id: cmd:resume
+    action: resume-state
+    kind: halt-resume
+    path: sovereign-recovery
+    target: 'state:sovereign'
+    purpose: استئنافٌ بعد إيقافٍ شامل، ولا يمرّ ببوابةِ التاجِ لأنها موقوفةٌ بالتوجيه نفسِه.
+    sovereignThreshold: true
+
+  - id: cmd:veto
+    action: veto-commands
+    kind: veto
+    path: crown
+    target: 'crown:gateway'
+    purpose: نقضٌ يُغلق بوابةَ التاجِ فلا تقبل أمراً حتى يرفعه الملكُ صراحةً.
+
+  - id: cmd:veto.clear
+    action: clear-veto
+    kind: veto-clear
+    path: sovereign-recovery
+    target: 'crown:gateway'
+    purpose: رفعُ النقض، ولا يمرّ ببوابةِ التاجِ لأنها مغلقةٌ بالنقضِ نفسِه.
+
+# ── الضمانات ──
+guarantees:
+  - id: G-CONSOLE-VIEW-DECLARED
+    statement: مشهدٌ غيرُ معلَنٍ في هذه الوثيقةِ لا يُقرأ، ولا يخترعه المُنادي.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_VIEW_UNDECLARED]
+
+  - id: G-CONSOLE-READ-THROUGH-API
+    statement: >-
+      قراءةُ الديوانِ كلُّها عبر طبقةِ الواجهةِ المُدقَّقة، فلا مستودعَ في يدِه
+      ولا مسارَ قراءةٍ يتجاوز الجلسةَ والحدَّ والتفويض.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_GATEWAY_REQUIRED, CONSOLE_VIEW_REFUSED]
+
+  - id: G-CONSOLE-COMMAND-DECLARED
+    statement: >-
+      لا أمرَ إلا معلَنٌ هنا بفعلِه وهدفِه ومسارِه، ومن وقّع فعلاً غيرَ فعلِ
+      الأمرِ المُعلَنِ أو هدفاً غيرَ هدفِه رُدَّ أمرُه.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_COMMAND_UNDECLARED, CONSOLE_ACTION_MISMATCH, CONSOLE_TARGET_MISMATCH]
+
+  - id: G-CONSOLE-SIGNED-WRITE
+    statement: >-
+      كلُّ كتابةٍ من الديوانِ أمرٌ ملكيٌّ موقَّعٌ متحقَّقٌ منه، ولا مِقبضَ كتابةٍ
+      آخرَ في هذه الطبقةِ ولا وسيطَ «تنفيذٍ مباشر».
+    enforcedBy: src/console/royal-console.mjs
+    codes:
+      [
+        CONSOLE_CROWN_REQUIRED,
+        CONSOLE_COMMAND_REJECTED,
+        CONSOLE_SIGNATURE_INVALID,
+        CONSOLE_KING_REQUIRED,
+      ]
+
+  - id: G-CONSOLE-PERMANENT-RECORD
+    statement: >-
+      الأمرُ يُثبَّت في السجلِّ الدائمِ قبل أن يقع أثرُه؛ وبلا سجلٍّ لا أمرَ
+      ولا مشهد.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_AUDIT_REQUIRED]
+
+  - id: G-CONSOLE-NO-REPLAY
+    statement: >-
+      معرّفُ الأمرِ يُستهلَك مرّةً واحدة، وأمرُ التعافي يُقيَّد في دفترِ الأوامرِ
+      الدائمِ كي لا يُعاد إرسالُه بعد إعادةِ التشغيل.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_REPLAYED_COMMAND]
+
+  - id: G-CONSOLE-RECOVERY-BOUNDED
+    statement: >-
+      مسارُ التعافي محدودٌ بنوعَي الرفعِ والاستئناف؛ ولا يُعلَن لغيرِهما مسارٌ
+      يتجاوز بوابةَ التاج.
+    enforcedBy: scripts/guard-console.mjs
+    codes: [CONSOLE_PATH_UNDECLARED, CONSOLE_CONFIG_INVALID]
+
+  - id: G-CONSOLE-EFFECT-DECLARED
+    statement: >-
+      لكلِّ نوعِ أمرٍ أثرٌ واحدٌ مكتوبٌ في الكود، ورفضُ الأثرِ يُغلَّف برمزٍ معلَنٍ
+      هنا ويُحفَظ رمزُه الأصليُّ في تفصيلِه.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_EFFECT_REFUSED, CONSOLE_HALT_REQUIRED]
