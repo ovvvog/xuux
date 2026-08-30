@@ -16,11 +16,15 @@
  * **ترتيبُ العقباتِ على كلِّ أمرٍ (لا يُقلب):**
  * 1. **سجلٌّ دائمٌ موصول** — وبلا موضعٍ يُشهَد فيه لا أمرَ (`CONSOLE_AUDIT_REQUIRED`).
  * 2. **أمرٌ معلَنٌ** في `config/royal-console.yaml` بمعرّفِه.
- * 3. **مطابقةُ الفعلِ والهدفِ** لما وُقِّع عليه: من وقَّع فعلاً ثم ناداه بمعرّفِ
+ * 3. **جلسةٌ قويةٌ قائمةٌ للملك** بعاملٍ ثانٍ على جهازٍ موثوق — تُشترط على أنواعِ
+ *    الأوامرِ المُعلَنةِ في `config/king-authentication.yaml`، ونقصُها
+ *    `CONSOLE_AUTHENTICATION_REQUIRED` (‏`M9.04`). وجلسةُ القراءةِ في طبقةِ
+ *    الواجهةِ لا تُصدر أمراً ولو كانت صحيحة.
+ * 4. **مطابقةُ الفعلِ والهدفِ** لما وُقِّع عليه: من وقَّع فعلاً ثم ناداه بمعرّفِ
  *    أمرٍ آخرَ رُدَّ أمرُه (`CONSOLE_ACTION_MISMATCH` / `CONSOLE_TARGET_MISMATCH`).
- * 4. **إثباتُ السلطة**: توقيعٌ متحقَّقٌ منه، ومنعُ إعادةٍ بمعرّفٍ مستهلَك.
- * 5. **قيدُ القبولِ في السجلِّ الدائمِ قبل الأثر.**
- * 6. **أثرٌ واحدٌ معلَنٌ لنوعِ الأمر**، ثم قيدُ تنفيذٍ منفصل.
+ * 5. **إثباتُ السلطة**: توقيعٌ متحقَّقٌ منه، ومنعُ إعادةٍ بمعرّفٍ مستهلَك.
+ * 6. **قيدُ القبولِ في السجلِّ الدائمِ قبل الأثر.**
+ * 7. **أثرٌ واحدٌ معلَنٌ لنوعِ الأمر**، ثم قيدُ تنفيذٍ منفصل.
  *
  * **لماذا مسارانِ لا مسارٌ واحد (اكتشافٌ بنيويٌّ لا اختيارُ ذوق):** بوابةُ التاج
  * تفحص الإيقافَ الشاملَ ثم النقضَ **قبل** التحقّقِ من التوقيع. فأمرُ استئنافٍ
@@ -80,6 +84,7 @@ export const CONSOLE_ERRORS = Object.freeze({
   CROWN_REQUIRED: 'CONSOLE_CROWN_REQUIRED',
   COMMAND_REJECTED: 'CONSOLE_COMMAND_REJECTED',
   KING_REQUIRED: 'CONSOLE_KING_REQUIRED',
+  AUTHENTICATION_REQUIRED: 'CONSOLE_AUTHENTICATION_REQUIRED',
   SIGNATURE_INVALID: 'CONSOLE_SIGNATURE_INVALID',
   REPLAYED_COMMAND: 'CONSOLE_REPLAYED_COMMAND',
   HALT_REQUIRED: 'CONSOLE_HALT_REQUIRED',
@@ -323,6 +328,15 @@ export function loadConsolePolicy(options = {}) {
  */
 
 /**
+ * مصادقةُ الملكِ القويةُ كما يراها الديوانُ: مِقبضُ اشتراطٍ واحدٌ لا أكثر —
+ * `requireForCommand` يرمي عند النقصِ ويعيد وصفاً عند الكفاية. والديوانُ لا
+ * يعرف كيف تُحسب العواملُ ولا أين تُخزَّن الجلسات، ولا يستورد وحدةَ المصادقةِ
+ * صنفاً: يقابل شكلاً كما يقابل التاجَ وزرَّ الإيقاف.
+ * @typedef {object} ConsoleAuthnLike
+ * @property {(token: string | undefined, kind: string) => ({ actorId: string, deviceId: string, sessionRef: string, expiresAt: string } | null)} requireForCommand
+ */
+
+/**
  * @typedef {object} ConsoleLedgerLike
  * @property {(id: string) => boolean} has
  * @property {(command: { id: string }) => unknown} begin
@@ -355,6 +369,8 @@ export class RoyalConsole {
   #haltSwitch;
   /** @type {ConsoleKingLike | null} */
   #king;
+  /** @type {ConsoleAuthnLike | null} */
+  #kingAuth;
   /** @type {ConsoleLedgerLike | null} */
   #ledger;
   /** @type {ConsoleLogLike | null} */
@@ -369,7 +385,7 @@ export class RoyalConsole {
   #seen = new Set();
 
   /**
-   * @param {{ policy?: ConsolePolicy, dir?: string, gateway?: ConsoleGatewayLike | null, crown?: ConsoleCrownLike | null, haltSwitch?: ConsoleHaltLike | null, king?: ConsoleKingLike | null, commandLedger?: ConsoleLedgerLike | null, log?: ConsoleLogLike | null, nowMs?: () => number, maxCommandAgeMs?: number, clockSkewMs?: number }} [deps]
+   * @param {{ policy?: ConsolePolicy, dir?: string, gateway?: ConsoleGatewayLike | null, crown?: ConsoleCrownLike | null, haltSwitch?: ConsoleHaltLike | null, king?: ConsoleKingLike | null, kingAuth?: ConsoleAuthnLike | null, commandLedger?: ConsoleLedgerLike | null, log?: ConsoleLogLike | null, nowMs?: () => number, maxCommandAgeMs?: number, clockSkewMs?: number }} [deps]
    */
   constructor(deps = {}) {
     this.#policy =
@@ -378,6 +394,7 @@ export class RoyalConsole {
     this.#crown = deps.crown ?? null;
     this.#haltSwitch = deps.haltSwitch ?? null;
     this.#king = deps.king ?? null;
+    this.#kingAuth = deps.kingAuth ?? null;
     this.#ledger = deps.commandLedger ?? null;
     this.#log = deps.log ?? null;
     this.#nowMs = deps.nowMs ?? (() => Date.now());
@@ -496,7 +513,11 @@ export class RoyalConsole {
 
   /**
    * إصدارُ أمرٍ ملكيٍّ موقَّعٍ من الديوان — مِقبضُ الكتابةِ الوحيد.
-   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string }} request
+   *
+   * و`sovereignSession` رمزُ **جلسةٍ قويةٍ** من `src/authn/king-auth.mjs` لا رمزُ
+   * جلسةِ القراءةِ في `config/api.yaml`: تلك تقرأ وهذه تُوقف دولةً — وخلطُهما
+   * يجعل العاملَ الثانيَ زينة.
+   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string }} request
    * @returns {Promise<{ command: string, action: string, kind: string, path: string, commandId: string, acceptedAt: string, status: 'executed', effect: Record<string, unknown> }>}
    */
   async issue(request) {
@@ -519,7 +540,7 @@ export class RoyalConsole {
   }
 
   /**
-   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string }} request
+   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string }} request
    * @param {string} commandKey
    * @param {ConsoleLogLike} log
    * @returns {Promise<{ command: string, action: string, kind: string, path: string, commandId: string, acceptedAt: string, status: 'executed', effect: Record<string, unknown> }>}
@@ -534,7 +555,30 @@ export class RoyalConsole {
       );
     }
 
-    // ── (2) مطابقةُ ما وُقِّع عليه لما يُنادى به ──
+    // ── (2) جلسةٌ قويةٌ للملكِ قبل أيِّ فحصٍ آخرَ للأمرِ نفسِه (`M9.04`) ──
+    // وموضعُها هنا مقصود: قبل التوقيعِ وقبل التاجِ وقبل الأثر، فمن لا جلسةَ له
+    // لا يُقاس أمرُه أصلاً. والاشتراطُ **بياناتٌ** في
+    // `config/king-authentication.yaml` لا شرطٌ مكتوبٌ هنا؛ ووحدةُ المصادقةِ
+    // غائبةً رفضٌ لا سماحٌ صامت — وإلا صار العاملُ الثاني إعداداً اختيارياً.
+    const kingAuth = this.#kingAuth;
+    if (kingAuth === null) {
+      throw new ConsoleError(
+        CONSOLE_ERRORS.AUTHENTICATION_REQUIRED,
+        `الأمر ${spec.id} يشترط جلسةً قويةً للملكِ ومصادقتُه غيرُ موصولةٍ بالديوان؛ ومصادقةٌ غائبةٌ رفضٌ لا تخطٍّ، وإلا كان مفتاحُ التوقيعِ وحدَه كلَّ السلطة.`,
+        { kind: spec.kind, command: spec.id },
+      );
+    }
+    try {
+      kingAuth.requireForCommand(request.sovereignSession, spec.kind);
+    } catch (error) {
+      throw new ConsoleError(
+        CONSOLE_ERRORS.AUTHENTICATION_REQUIRED,
+        `الأمر ${spec.id} لا جلسةَ قويةً تُجيزه: ${errorText(error)}`,
+        { kind: spec.kind, command: spec.id, authnCode: codeOf(error) },
+      );
+    }
+
+    // ── (3) مطابقةُ ما وُقِّع عليه لما يُنادى به ──
     const royal = request.royalCommand;
     if (royal === null || typeof royal !== 'object' || Array.isArray(royal)) {
       throw new ConsoleError(
@@ -569,7 +613,7 @@ export class RoyalConsole {
       );
     }
 
-    // ── (3) إثباتُ السلطةِ ثم (4) قيدُ القبولِ في السجلِّ الدائمِ قبل الأثر ──
+    // ── (4) إثباتُ السلطةِ ثم (5) قيدُ القبولِ في السجلِّ الدائمِ قبل الأثر ──
     /** @type {string} */
     let acceptedAt;
     if (spec.path === 'crown') {
@@ -583,7 +627,7 @@ export class RoyalConsole {
       );
     }
 
-    // ── (5) الأثرُ: واحدٌ لكلِّ نوعٍ مكتوبٌ في الكودِ لا في الوثيقة ──
+    // ── (6) الأثرُ: واحدٌ لكلِّ نوعٍ مكتوبٌ في الكودِ لا في الوثيقة ──
     /** @type {Record<string, unknown>} */
     let effect;
     try {
@@ -596,7 +640,7 @@ export class RoyalConsole {
       );
     }
 
-    // ── (6) قيدُ التنفيذِ: يُميّز «نُفِّذ» من «قُبل ولم يُنفَّذ» ──
+    // ── (7) قيدُ التنفيذِ: يُميّز «نُفِّذ» من «قُبل ولم يُنفَّذ» ──
     log.append(this.#policy.audit.commandExecutedEvent, this.#actorId(), {
       command: spec.id,
       commandId,
