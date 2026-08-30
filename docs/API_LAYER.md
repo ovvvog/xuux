@@ -1,8 +1,116 @@
-{
-  "sha": "81d24c10922dc411db2a89eeec8b87e16b707582",
-  "node_id": "B_kwDOUBAug9oAKDgxZDI0YzEwOTIyZGM0MTFkYjJhODllZWVjOGI4N2UxNmI3MDc1ODI",
-  "size": 8922,
-  "url": "https://api.github.com/repos/soaav-svg/xuux/git/blobs/81d24c10922dc411db2a89eeec8b87e16b707582",
-  "content": "IyDYt9io2YLYqSDYp9mE2YjYp9is2YfYqSDYp9mE2K/Yp9iu2YTZitipINin\n2YTZhdmI2K3Zkdiv2KkKCj4g2KfZhNiu2LfZiNipIGBNOS4wMmAg4oCUINin\n2YTYqNmI2KfYqNipINin2YTYs9in2KjYudipINmI2KfZhNi52LTYsdmI2YYg\n2YHZiiBgbnBtIHJ1biB2YWxpZGF0ZWAuCj4g2KfZhNmF2LXYp9iv2LEg2KfZ\nhNit2KfZg9mF2Kk6IGBjb25maWcvYXBpLnlhbWxg2IwgYHNyYy9hcGkvYNiM\nIGBzY3JpcHRzL2d1YXJkLWFwaS5tanNg2IwKPiBgdGVzdHMvYXBpL2dhdGV3\nYXkudGVzdC5tanNgLgoKIyMg2YXYpyDZg9in2YYg2YLYqNmE2YfYp9iMINmI\n2YXYpyDYqti62YrZkdixCgrYqNi52K8gYE05LjAxYCDYtdin2LEg2YTZhNiv\n2YjZhNipICoq2YXYs9in2LEg2YLYsdin2KHYqSDZhdmP2K/ZgtmO2ZHZgioq\nOiDZiNmD2YrZhCDYp9mE2YXYsdin2YLYqNipINmK2YLYsdijINmF2YYg2YXY\ntNin2YfYryDZhNinCtiq2YXZhNmDINin2LPZhdin2Ysg2YPYp9iq2KjYp9mL\nINmI2KfYrdiv2KfZi9iMINmI2YrZg9iq2Kgg2YLZitivINiq2K/ZgtmK2YIg\n2YLYqNmEINmD2YQg2YLYsdin2KHYqS4g2YTZg9mG2ZEgKirZhdmGINmG2KfY\nr9mJINiw2YTZgwrYp9mE2YXYs9in2LEqKiDZg9in2YYg2YrZgtmI2YQg2LnZ\nhiDZhtmB2LPZhyDZhdinINi02KfYoTog2YrZhdix2ZHYsSDZhdi52LHZkdmB\nINmB2KfYudmEINmG2LXZkdin2YvYjCDZgdiq2Y/Zgtix2KMg2KfZhNmH2YjZ\nitipINmF2YYK2LPYrNmE2ZEg2KfZhNmH2YjZitin2Kog2YjZhNinINmK2Y/Y\ns9ij2YQg2YXZjtmGINij2KvYqNiqINij2YbZhyDYsNmE2YMg2KfZhNmB2KfY\nudmELiDZiNmE2Kcg2K3Yr9mRINmF2LnYr9mO2ZHZhCDZitmI2YLZgSDYo9mE\n2YEg2YbYr9in2KEg2YHZigrYp9mE2KvYp9mG2YrYqS4g2YjZhNinINmF2LHZ\niNixINio2YbZgti32Kkg2KfZhNiq2YHZiNmK2LYg2KfZhNmF2LHZg9iy2YrY\nqdiMINmB2KPZgdi52KfZhCDYp9mE2YLYsdin2KHYqSDZg9in2YbYqiDYrtin\n2LHYrCDZg9iq2KfZhNmI2KwK2KfZhNij2YHYudin2YQg2KfZhNmF2K3Zg9mI\n2YXYqSDigJQg2K/ZjtmK2YbZjCDYs9mP2KzZkNmR2YQg2YHZiiBgV0wtMDQz\nYC4KCtmH2LDZhyDYp9mE2LfYqNmC2Kkg2KrZj9i62YTZgiDYp9mE2KvZhNin\n2KvYqTogKirZhdi12KfYr9mC2KkqKiDYqNis2YTYs9ip2Iwg2YgqKtit2K/Z\nkSDZhdi52K/ZjtmR2YQqKiDZitmO2LnZj9iv2ZEg2KfZhNmF2K3Yp9mI2YTY\nqdiMCtmIKirYqtmB2YjZiti2Kiog2YXZhiDYp9mE2YbZgti32Kkg2KfZhNmF\n2LHZg9iy2YrYqSDZiNit2K/Zh9inLgoKIyMg2KfZhNi52YLYqNin2Kog2KfZ\nhNiu2YXYsyDYqNiq2LHYqtmK2KjZh9inINin2YTYq9in2KjYqgoKfCAjIHwg\n2KfZhNi52YLYqNipIHwg2KfZhNmF2YjYtti5IHwg2LHZgdi22YfYpyB8Cnwt\nLS18LS0tfC0tLXwtLS18Cnwg2aEgfCDZhdiz2KfYsSDZhdi52YTZjtmGINmB\n2YogYGNvbmZpZy9hcGkueWFtbGAgfCBgZ2F0ZXdheS5tanNgIHwgYEFQSV9S\nT1VURV9VTktOT1dOYCB8Cnwg2aIgfCDYrNmE2LPYqSDYtdin2YTYrdipINmE\n2YfZiNmK2Kkg2YbYtNi32KkgfCBgc2Vzc2lvbi1zdG9yZS5tanNgIHwgYEFQ\nSV9BVVRIX1JFUVVJUkVEYCDCtyBgQVBJX1NFU1NJT05fSU5WQUxJRGAgwrcg\nYEFQSV9TRVNTSU9OX0VYUElSRURgIMK3IGBBUElfSURFTlRJVFlfVU5WRVJJ\nRklFRGAgfAp8INmjIHwg2K3Yr9mRINmF2LnYr9mO2ZHZhCDZitmO2LnZj9iv\n2ZEg2KfZhNmF2LHZgdmI2LYgfCBgcmF0ZS1saW1pdGVyLm1qc2AgfCBgQVBJ\nX1JBVEVfTElNSVRFRGAgfAp8INmkIHwg2YLYsdin2LEg2KfZhNmG2YLYt9ip\nINin2YTZhdix2YPYstmK2Kkg2YjYqtiw2YPYsdiq2YfYpyDYp9mE2YXYs9iq\n2YfZhNmD2KkgfCBgZ2F0ZXdheS5tanNgIHwgYEFQSV9BVVRIT1JJWkFUSU9O\nX0RFTklFRGAgwrcgYEFQSV9USUNLRVRfSU5WQUxJRGAgfAp8INmlIHwg2YXY\ntNmH2K8g2KfZhNmF2LHYp9mC2KjYqSDZiNit2K/ZhyB8IGBnYXRld2F5Lm1q\nc2AgfCBgQVBJX0hBTkRMRVJfVU5ERUNMQVJFRGAgwrcgYEFQSV9IQU5ETEVS\nX1JFRlVTRURgIHwKCioq2YjZhNmF2KfYsNinINmH2LDYpyDYp9mE2KrYsdiq\n2YrYqDoqKiDYp9mE2YXYtdin2K/ZgtipINmC2KjZhCDYp9mE2K3Yr9mRINmE\n2KPZhiDYrdiv2ZHYp9mLINi52YTZiSDZhdmP2YbYp9iv2Y0g2YXYrNmH2YjZ\nhCDZitmP2K3Ys9mO2Kgg2LnZhNmJCtmF2Y7ZhtifINmI2KfZhNit2K/ZkSDZ\ngtio2YQg2KfZhNiq2YHZiNmK2LYg2YTYo9mGINmG2K/Yp9ih2Ysg2YXYsdmB\n2YjYttin2Ysg2YrYrNioINij2YYg2YrZj9mD2YTZkNmR2YEg2LXYp9it2KjZ\nhyDigJQg2YjZhtmC2LfYqSDYp9mE2KrZgdmI2YrYtgrZhNinINiq2K7YtdmF\nINin2YTYrdi12ZHYqSDYudmE2Ykg2YXYsdmB2YjYttiMINio2K3ZgtmROiDZ\niNil2YTYpyDYp9iz2KrZj9mG2LLZgdiqINit2LXZkdipINmI2YPZitmE2Y0g\n2KjYt9mE2KjYp9iqINmF2LHZgdmI2LbYqSDZitix2LPZhNmH2KcK2LrZitix\n2YcuINmI2KfZhNiq2LDZg9ix2Kkg2YLYqNmEINin2YTYo9ir2LEg2YTYo9mG\nINil2KvYqNin2KogwqvZhdix2LHYqtmPINio2KfZhNmG2YLYt9ipwrsg2KjY\nudivINin2YTZgtix2KfYodipINil2KvYqNin2Kog2YTYpyDZitmF2YbYuQrY\ntNmK2KbYp9mLLgoKKirZiNmC2YrYryDYp9mE2KrYr9mC2YrZgiDZitmP2YPY\nqtioINmC2KjZhCDYs9ik2KfZhCDYp9mE2KrZgdmI2YrYtioqICjYqNmK2YYg\n2aMg2YjZpCkuINmB2YLYryDZitmP2YPYqtioINmC2YrYryDZhNmG2K/Yp9ih\n2Y0g2LHZj9mB2LYK2KjYudiv2Yc6INiy2KfYptiv2Ywg2YTYpyDZhtin2YLY\ntdiMINmI2YfZiCDZhtmB2LMg2KfYrtiq2YrYp9ixIGBNOS4wMWAuCgojIyDY\np9mE2KzZhNiz2KkKCtin2YTYsdmF2LIg2LnYtNmI2KfYptmKIChgcmFuZG9t\nQnl0ZXMoMzIpYCkg2YTYpyDZitmP2LTYqtmC2ZEg2YXZhiDYp9mE2YfZiNmK\n2KnYjCDZiCoq2YTYpyDZitmP2K7YstmO2ZHZhiDZhti12ZHYp9mLKio6INmK\n2Y/YrdmB2LgKYHNoYTI1NmAg2YTZhyDZiNit2K/Zh9iMINmI2KfZhNio2K3Y\nqyDZitmC2Lkg2KjYqNi12YXYqSDZhdinINmC2K/ZkdmF2Ycg2KfZhNmF2Y/Z\nhtin2K/Zii4g2YHZhdmGINmC2LHYoyDYsNin2YPYsdipINin2YTYudmF2YTZ\nitipINij2YgK2YXZgti32Lkg2KrYtNiu2YrYtSDZhNinINmK2KzYryDYsdmF\n2LLYp9mLINi12KfZhNit2KfZiy4g2YjYp9mE2YXYudix2ZHZgSDYp9mE2LDZ\niiDZitiv2K7ZhCDZgtmK2YjYryDYp9mE2KrYr9mC2YrZgiDZh9mIICoq2KjY\ntdmF2KkK2YXZgtiq2LfYudipKiog2YTYpyDYp9mE2LHZhdiy2Iwg2YHZhNin\nINmK2LXZitixINin2YTYs9is2YQg2K7Ystin2YbYqSDYo9iz2LHYp9ixLgoK\n2YjYp9mE2YXZh9mE2KkgKirZqdmg2aAg2KvYp9mG2YrYqSDZhdi52YTZjtmG\n2Kkg2YjZhNinINiq2Y/Zhdiv2Y7ZkdivINi22YXZhtin2YsqKi4g2KzZhNiz\n2Kkg2KrZj9mF2K/ZjtmR2K8g2KjZg9mEINmG2K/Yp9ihINis2YTYs9ipINmE\n2KcK2KrZhtiq2YfZitiMINmI2YXZhiDYs9mP2LHZkNmCINix2YXYstmHINio\n2YLZiiDYp9mE2YXYs9in2LEg2YXZgdiq2YjYrdin2Ysg2YXYpyDYr9in2YUg\n2KfZhNiz2KfYsdmCINmK2YbYp9iv2YouINmI2YXZhiDYo9ix2KfYryDYp9mE\n2YXYqtin2KjYudipCtmB2KrYrSDYrNmE2LPYqSDYrNiv2YrYr9ipINio2YfZ\niNmK2Kkg2KrZj9iq2K3ZgtmO2ZHZgiDZhdmGINis2K/ZitivLgoK2YjYp9mE\n2YfZiNmK2Kkg2KrZj9mC2LHYoyAqKti52YbYryDYp9mE2YHYqtitINmI2LnZ\nhtivINmD2YQg2K3ZhNmRKio6INin2YTYqtit2YLZkdmCINi52YbYryDYp9mE\n2YHYqtitINmI2K3Yr9mHINmK2KrYsdmDINmG2KfZgdiw2Kkg2KjYt9mI2YQK\n2KfZhNmF2YfZhNipINmK2Y/Zhtin2K/ZiiDZgdmK2YfYpyDZhdmGINi52Y/Z\nhNmQ2ZHZgi4KCiMjINit2K/ZkSDYp9mE2YXYudiv2Y7ZkdmECgrZhtin2YHY\nsNipINir2KfYqNiq2Kkg2YTZg9mEIGAo2YXYs9in2LHYjCDZh9mI2YrYqSlg\nOiDZptmgINmG2K/Yp9ih2Ysg2YHZiiDZptmgINir2KfZhtmK2Kkg2KfZgdiq\n2LHYp9i22KfZi9iMINmI2YXYs9in2LHYp9iqINir2YLZitmE2KkK2YTZh9in\nINiz2YLZgSDYo9iv2YbZiSDZhdmP2LnZhNmO2YYg2YHZiiDZiNir2YrZgtiq\n2YfYpy4KCi0gKirZitmO2LnZj9iv2ZEg2KfZhNmF2K3Yp9mI2YTYqSDZhNin\nINin2YTZhtis2KfYrS4qKiDYp9mE2K3YtdmR2KkgKGBjb25maWcvcXVvdGFz\nLnlhbWxgKSDYqtit2K/ZkSAq2YXYpyDYqtmF2YTZg9mHKiDZhdmGCiAg2LnZ\nhdmEINmG2KfZgdiw2Jsg2YjZh9iw2Kcg2YrYrdiv2ZEgKtmF2Kcg2KrYt9mE\n2KjZhyog2YXZhiDYp9mE2YbYuNin2YUg2YHZiiDZiNit2K/YqSDYstmF2YYu\nCi0gKirYp9mE2YXZgdiq2KfYrSAo2YXYs9in2LHYjCDZh9mI2YrYqSkqKiDZ\nhNinINin2YTZh9mI2YrYqSDZiNit2K/Zh9inOiDYrdiv2YzZkSDYudmE2Ykg\n2KfZhNmH2YjZitipINmK2KzYudmEINmC2LHYp9ih2Kkg2LPYrNmE2ZEg2KvZ\ngtmK2YQKICDYqtmP2YbZgdmCINit2K/ZkSDZg9mEINin2YTZhdiz2KfYsdin\n2KrYjCDZiNit2K/ZjNmRINi52YTZiSDYp9mE2YXYs9in2LEg2YrYrNi52YQg\n2YXZj9mG2KfYr9mK2KfZiyDZiNin2K3Yr9in2Ysg2YrZj9i62YTZgiDYp9mE\n2YXYs9in2LEg2LnZhNmJCiAg2KfZhNis2YXZiti5LgotICoq2YbYp9mB2LDY\nqSDYq9in2KjYqtipINmE2Kcg2YXZhtiy2YTZgtip2Iwg2YjYrdiv2ZHZh9in\nINmF2YbYt9mI2YI6Kiog2KrYs9mF2K0g2KjYsNix2YjYqSDYudmE2Ykg2K3Y\nr9mRINmG2KfZgdiw2KrZitmGINmF2KrYrNin2YjYsdiq2YrZhgogICjYrdiq\n2Ykg2LbZkNi52YEg2KfZhNit2K/ZkSDZgdmKINmE2K3YuNipKdibINmI2KfZ\nhNmF2YbYstmE2YLYqSDYqtit2KrYp9isINit2YHYuCDYstmF2YYg2YPZhCDZ\nhtiv2KfYoSDZgdiq2LXZitixINin2YTYsNin2YPYsdipINmG2YHYs9mH2KcK\nICDYs9i32K0g2KfYs9iq2YbYstin2YEuCgojIyDYp9mE2YXYs9in2LHYp9iq\nCgrYs9iq2Kkg2LnYtNixINmF2LPYp9ix2KfZi9iMICoq2YPZhNmR2YfYpyBg\nR0VUYCDZgtin2LHYptipKiouINmE2YPZhCDZhdiz2KfYsTog2YHYudmEINmF\n2YYg2YPYqtin2YTZiNisCmBjb25maWcvcG9saWNpZXMueWFtbGDYjCDZiNmF\n2YjYsdiv2Iwg2YjZhdi02YfYryDZhdmGIGBjb25maWcvbW9uaXRvcmluZy55\nYW1sYNiMINmI2YbYr9in2KEg2YXZgtix2YjYoQooYGxpc3RgIMK3IGBmaW5k\nQnlJZGAgwrcgYGNvdW50YCnYjCDZiNi62LHYtiDZhdmG2LfZiNmCLgoK2KfZ\nhNmD2KrYp9io2Kkg2YXZhiDYp9mE2YjYp9is2YfYqSAqKtij2YXYsSDZhdmE\n2YPZiiDZhdmI2YLZjtmR2LkqKiDZiNmG2LXZkdmH2KcgYE05LjAzYNibINmI\n2YTYpyDZitmP2LnZhNmO2YYg2YXYs9in2LEg2YPYp9iq2Kgg2YLYqNmECtij\n2YYg2YrZiNis2K8g2YXZjtmGINmK2YjZgtmR2LnZhyDZiNmF2Y7ZhiDZitiq\n2K3ZgtmR2YIg2YXZhiDYqtmI2YLZiti52YcuCgojIyDYp9mE2K3Yr9mI2K8g\n2KfZhNmF2LnZhNmO2YbYqQoK2aEuICoq2YTYpyDYt9io2YLYqSDZhtmC2YQg\n2YfZhtinLioqINmE2Kcg2YXZj9mG2LXZkNiqIEhUVFAg2YjZhNinINmF2ZDZ\ngtio2LMg2LTYqNmD2Kk6INin2YTYqNmI2KfYqNipINmG2K/Yp9ihINiv2KfY\nrtmE2Yog2YHZigrYp9mE2LnZhdmE2YrYqSDZhtmB2LPZh9in2Iwg2YjZhdit\n2YjZkNmR2YQg2KfZhNmG2YLZhCDZitmP2KjZhtmJINmB2YogYE05LjAzYCDZ\ngdmI2YIg2YfYsNmHINin2YTYt9io2YLYqS4g2YjYo9ir2LEg2LDZhNmDINmF\n2YbYt9mI2YI6INmD2YQK2YXYpyDZitmP2YLYp9izINmH2YbYpyDZh9mIINin\n2YTYqtmB2YjZiti2INmI2KfZhNiq2K/ZgtmK2YIg2YjYp9mE2K3Yr9mRIOKA\nlCAqKtmE2KcqKiDYo9mF2YYg2KfZhNmG2YLZhCDZiNmE2Kcg2KfZhNix2KTZ\niNizINmI2YTYpyBDT1JTCtmI2YTYpyBUTFMuCgrZoi4gKirYrdiv2ZEg2KfZ\nhNmF2LnYr9mO2ZHZhCDZhNmD2YQg2LnZhdmE2YrYqSDZhNinINmE2YTYudmG\n2YLZiNivLioqINin2YTYudiv2ZHYp9ivINmB2Yog2LDYp9mD2LHYqSDYp9mE\n2LnZhdmE2YrYqdiMINmB2YbYtNix2Ywg2KjYudiv2ZHYqQrZhtiz2K4g2YrZ\nj9i22KfYudmBINin2YTYrdiv2ZEg2KfZhNmB2LnZhNmK2ZEg2KjYudiv2K/Z\nh9inLiDYp9mE2K3Yr9mRINin2YTYudmG2YLZiNiv2Yog2YrYrdiq2KfYrCDZ\nhdiu2LLZhtin2Ysg2YXYtNiq2LHZg9in2Ysg2YjZh9mIINmC2LHYp9ixCtiq\n2LTYutmK2YQg2YHZiiBgTTEwYNiMINmI2YTYpyDZitmP2LLYudmO2YUg2YfZ\nhtinLgoK2aMuICoq2KfZhNis2YTYs9in2Kog2YHZiiDYp9mE2LDYp9mD2LHY\nqSoqINmB2KrYstmI2YQg2KjYpdi52KfYr9ipINin2YTYqti02LrZitmEIOKA\nlCDYp9mE2KzZhNiz2Kkg2KXYsNmGINmG2K/Yp9ihINmE2K3YuNmKINmE2Kcg\n2LPYrNmE2ZEK2K/Yp9im2YXYjCDZiNmH2Ygg2YbZgdizINin2K7YqtmK2KfY\nsSDYqtiw2YPYsdipINmG2YLYt9ipINin2YTYqtmB2YjZiti2LiDZiNmE2Kcg\n2LnYp9mF2YQg2KvYp9mG2Y0g2YfZhtinOiDYp9mE2YXYtdin2K/ZgtipINin\n2YTZgtmI2YrYqQrZhNmE2YXZhNmDINmG2LXZkSBgTTkuMDRgLgoK2aQuICoq\n2KrZgdin2YjYqiDZhdmC2LXZiNivINin2YTYpdi42YfYp9ixINio2YrZhiDY\np9mE2YXYo9iw2YjZhiDZhdix2YPYstmK2KfZiyDZiNin2YTZhdiu2K/ZiNmF\nINmB2LnZhNin2YsuKiog2YPYqtin2YTZiNisINin2YTYs9mK2KfYs9in2KoK\n2YrYo9iw2YYg2YTZgGByb2xlOm1pbmlzdGVyYCDZiGByb2xlOm9wZXJhdG9y\nYCDZiGByb2xlOmFnZW50YCDZiGByb2xlOmNoaWVmLWp1c3RpY2VgINio2YHY\nudmECmByZWFkLXJlZ2lzdHJ5YNibINmI2YjZg9mK2YQg2KfZhNmF2LHYp9mC\n2KjYqSDZhNinINmK2K7Yr9mFINil2YTYpyDYr9mI2LHZhyDYp9mE2YXZj9i5\n2YTZjtmGIGByb2xlOmF1ZGl0b3JgLiDZgdmF2YYK2KPYsNmG2Kog2YTZhyDY\np9mE2YbZgti32Kkg2KfZhNmF2LHZg9iy2YrYqSDZgtivINmK2LHYr9mR2Ycg\n2KfZhNmF2Y/Yudin2YTZkNisINio2LHZhdiyIGBBUElfSEFORExFUl9SRUZV\nU0VEYNiMINmI2YrZj9it2YHZjti4Ctix2YXYsiDYp9mE2YXZj9i52KfZhNmQ\n2KwgKGBNT05JVE9SX0lERU5USVRZX1VOVkVSSUZJRURgKSDZgdmKINiq2YHY\ntdmK2YQg2KfZhNix2YHYtiDZiNmB2Yog2YLZitiv2YcuICoq2YjZh9iw2KcK\n2KfZg9iq2Y/YtNmBINio2KfZhNmC2YrYp9izINmE2Kcg2KjYp9mE2KrYrti3\n2YrYtyoqICjYp9mG2LjYsSBgV0wtMDQ0YCnYjCDZiNmE2YUg2YrZj9iu2YHZ\njiDYqNiq2YjYs9mK2Lkg2K7Yr9mF2Kkg2KfZhNmF2LTZh9ivINmF2YYK2K/Y\np9iu2YQg2YfYsNmHINin2YTYrti32YjYqTog2KrZiNiz2YrYudmH2Kcg2YLY\nsdin2LEg2K3ZjtmI2ZLZg9mF2Kkg2YHZiiBgY29uZmlnL21vbml0b3Jpbmcu\neWFtbGDYjCDZiNmB2KrYrdmHINmH2YbYpyDZg9in2YYK2LPZitmD2YjZhiDY\nqtmI2LPZiti5INi12YTYp9it2YrYqSDZgtix2KfYodipINmF2YYg2LfYqNmC\n2Kkg2YTYpyDYqtmF2YTZgyDYo9mGINiq2YLYsdmR2LHZhy4KCtmlLiAqKtin\n2YTYrdin2KzYsiDZitmC2LHYoyDYp9mE2YbYtdmRINmI2KfZhNmI2KvZitmC\n2Kkg2YjZhNinINmK2YHYqtitINmF2ZDZgtio2LPYp9mLLioqINin2YTYqtix\n2KrZitioINmK2Y/Zgtin2LMg2KjZhdmI2LbYuSDYp9mE2YbYtdmRINmB2YoK\nYGNhbGxg2Iwg2YHZitmF2YbYuSDYp9mE2YLZhNioINio2KfZhNmD2KrYp9io\n2Kkg2YTYpyDYp9mE2YLZhNioINio2KfZhNiq2YHYp9mBINiw2YPZitmRINmB\n2Yog2LLZhdmGINin2YTYqti02LrZitmEIOKAlCDZiNi12K/ZgiDYp9mE2LHZ\ngdi2CtmF2YLZitizINmB2YogYHRlc3RzL2FwaS9nYXRld2F5LnRlc3QubWpz\nYC4KCiMjINmF2Kcg2YrYrdix2LPZhyDYp9mE2K3Yp9is2LIKCmBucG0gcnVu\nIGd1YXJkOmFwaWAg4oCUINir2YXYp9mG2Yog2YLZiNin2LnYrzog2KrZgtin\n2KjZhCDYp9mE2YXYs9in2LHYp9iqINmF2Lkg2YPYqtin2YTZiNisINin2YTY\no9mB2LnYp9mEINmI2YjYq9mK2YLYqQrYp9mE2YXYsdin2YLYqNipIChSMSnY\njCDZiNiq2YLYp9io2YQg2LHZhdmI2LIg2KfZhNix2YHYtiDZgdmKINin2YTY\np9iq2KzYp9mH2YrZhiDZiNit2LbZiNixINmD2YQg2LHZhdiyINmB2Yog2YXZ\nhNmBINil2YbZgdin2LDZhyAoUjIp2IwK2YjYqtix2KrZitioINin2YTYudmC\n2KjYp9iqINmG2LXZkdin2YsgKFIzKdiMINmI2KjYtdmF2Kkg2KfZhNix2YXY\nsiDZhNinINmG2LXZkdmHIChSNCnYjCDZiNiq2LHZg9mK2Kgg2KfZhNio2YjY\np9io2Kkg2KjZhNinINi02LHYtwooUjUp2Iwg2YjZhNinINmG2K/Yp9ihINmD\n2KrYp9io2Kkg2YjZhNinINmF2LPYqtmI2K/YuSDZgdmKINin2YTYt9io2YLY\nqSAoUjYp2Iwg2YjYqtiz2KzZitmEINmD2YQg2LHZgdi2INio2LHZhdiyINmF\n2Y/YudmE2Y7ZhiAoUjcp2IwK2YjZiNis2YjYryDYp9mE2KfYrtiq2KjYp9ix\nINmI2YLZitin2LPZhyDZhNmE2LHZhdmI2LIg2KfZhNit2KfZg9mF2KkgKFI4\nKS4KCtmI2YLYryDYsdmP2YHYtiDYp9mE2K3Yp9is2LIg2YHZiiDYq9mE2KfY\nqyDYqtis2KfYsdioINiq2LLZiNmK2LEg2YXZgti12YjYr9ipINmC2KjZhCDZ\ngtio2YjZhNmHOiDZgtmE2Kgg2KfZhNiq2LHYqtmK2KjYjCDZiNiq2K7YstmK\n2YYg2KfZhNix2YXYsgrZhti12ZHYp9mL2Iwg2YjYqtix2YPZitioINin2YTY\nqNmI2KfYqNipINio2LTYsdi3LiDZiNin2YTYq9in2YTYq9ipICoq2YXYsdmR\n2Kog2YHZiiDYo9mI2YQg2LXZitin2LrYqSoqINmE2KPZhiDYp9mE2YLYp9i5\n2K/YqSDZg9in2YbYqgrYqtmP2K3YtdmKINij2LTZg9in2YQg2KfZhNi02LHY\ntyAoYGlmYCkg2KjYr9mEINij2YYg2KrZj9mI2KzYqCDYp9mE2LTZg9mEINin\n2YTZhdmC2KjZiNmE2Jsg2YHYo9mP2LnZitiv2Kog2LXZitin2LrYqtmH2Kcg\n2KXZitis2KfYqNin2YsuCtmI2YLYp9im2YXYqSDYp9mE2YXZhdmG2YjYuSDZ\nhNinINiq2YbYqtmH2YrYjCDZiNil2YrYrNin2Kgg2KfZhNmF2YLYqNmI2YQg\n2YrZhtiq2YfZii4K\n",
-  "encoding": "base64"
-}
+# طبقة الواجهة الداخلية الموحّدة
+
+> الخطوة `M9.02` — البوابة السابعة والعشرون في `npm run validate`.
+> المصادر الحاكمة: `config/api.yaml`، `src/api/`، `scripts/guard-api.mjs`،
+> `tests/api/gateway.test.mjs`.
+
+## ما كان قبلها، وما تغيّر
+
+بعد `M9.01` صار للدولة **مسار قراءة مُدقَّق**: وكيل المراقبة يقرأ من مشاهد لا
+تملك اسماً كاتباً واحداً، ويكتب قيد تدقيق قبل كل قراءة. لكنّ **من نادى ذلك
+المسار** كان يقول عن نفسه ما شاء: يمرّر معرّف فاعل نصّاً، فتُقرأ الهوية من
+سجلّ الهويات ولا يُسأل مَن أثبت أنه ذلك الفاعل. ولا حدّ معدَّل يوقف ألف نداء في
+الثانية. ولا مرور بنقطة التفويض المركزية، فأفعال القراءة كانت خارج كتالوج
+الأفعال المحكومة — دَينٌ سُجِّل في `WL-043`.
+
+هذه الطبقة تُغلق الثلاثة: **مصادقة** بجلسة، و**حدّ معدَّل** يَعُدّ المحاولة،
+و**تفويض** من النقطة المركزية وحدها.
+
+## العقبات الخمس بترتيبها الثابت
+
+| # | العقبة | الموضع | رفضها |
+|---|---|---|---|
+| ١ | مسار معلَن في `config/api.yaml` | `gateway.mjs` | `API_ROUTE_UNKNOWN` |
+| ٢ | جلسة صالحة لهوية نشطة | `session-store.mjs` | `API_AUTH_REQUIRED` · `API_SESSION_INVALID` · `API_SESSION_EXPIRED` · `API_IDENTITY_UNVERIFIED` |
+| ٣ | حدّ معدَّل يَعُدّ المرفوض | `rate-limiter.mjs` | `API_RATE_LIMITED` |
+| ٤ | قرار النقطة المركزية وتذكرتها المستهلكة | `gateway.mjs` | `API_AUTHORIZATION_DENIED` · `API_TICKET_INVALID` |
+| ٥ | مشهد المراقبة وحده | `gateway.mjs` | `API_HANDLER_UNDECLARED` · `API_HANDLER_REFUSED` |
+
+**ولماذا هذا الترتيب:** المصادقة قبل الحدّ لأن حدّاً على مُنادٍ مجهول يُحسَب على
+مَن؟ والحدّ قبل التفويض لأن نداءً مرفوضاً يجب أن يُكلِّف صاحبه — ونقطة التفويض
+لا تخصم الحصّة على مرفوض، بحقّ: وإلا استُنزفت حصّة وكيلٍ بطلبات مرفوضة يرسلها
+غيره. والتذكرة قبل الأثر لأن إثبات «مررتُ بالنقطة» بعد القراءة إثبات لا يمنع
+شيئاً.
+
+**وقيد التدقيق يُكتب قبل سؤال التفويض** (بين ٣ و٤). فقد يُكتب قيد لنداءٍ رُفض
+بعده: زائدٌ لا ناقص، وهو نفس اختيار `M9.01`.
+
+## الجلسة
+
+الرمز عشوائي (`randomBytes(32)`) لا يُشتقّ من الهوية، و**لا يُخزَّن نصّاً**: يُحفظ
+`sha256` له وحده، والبحث يقع ببصمة ما قدّمه المُنادي. فمن قرأ ذاكرة العملية أو
+مقطع تشخيص لا يجد رمزاً صالحاً. والمعرّف الذي يدخل قيود التدقيق هو **بصمة
+مقتطعة** لا الرمز، فلا يصير السجل خزانة أسرار.
+
+والمهلة **٩٠٠ ثانية معلَنة ولا تُمدَّد ضمناً**. جلسة تُمدَّد بكل نداء جلسة لا
+تنتهي، ومن سُرِق رمزه بقي المسار مفتوحاً ما دام السارق ينادي. ومن أراد المتابعة
+فتح جلسة جديدة بهوية تُتحقَّق من جديد.
+
+والهوية تُقرأ **عند الفتح وعند كل حلّ**: التحقّق عند الفتح وحده يترك نافذة بطول
+المهلة يُنادي فيها من عُلِّق.
+
+## حدّ المعدَّل
+
+نافذة ثابتة لكل `(مسار، هوية)`: ٦٠ نداءً في ٦٠ ثانية افتراضاً، ومسارات ثقيلة
+لها سقف أدنى مُعلَن في وثيقتها.
+
+- **يَعُدّ المحاولة لا النجاح.** الحصّة (`config/quotas.yaml`) تحدّ *ما تملكه* من
+  عمل نافذ؛ وهذا يحدّ *ما تطلبه* من النظام في وحدة زمن.
+- **المفتاح (مسار، هوية)** لا الهوية وحدها: حدٌّ على الهوية يجعل قراءة سجلّ ثقيل
+  تُنفق حدّ كل المسارات، وحدٌّ على المسار يجعل مُنادياً واحداً يُغلق المسار على
+  الجميع.
+- **نافذة ثابتة لا منزلقة، وحدّها منطوق:** تسمح بذروة على حدّ نافذتين متجاورتين
+  (حتى ضِعف الحدّ في لحظة)؛ والمنزلقة تحتاج حفظ زمن كل نداء فتصير الذاكرة نفسها
+  سطح استنزاف.
+
+## المسارات
+
+ستة عشر مساراً، **كلّها `GET` قارئة**. لكل مسار: فعل من كتالوج
+`config/policies.yaml`، ومورد، ومشهد من `config/monitoring.yaml`، ونداء مقروء
+(`list` · `findById` · `count`)، وغرض منطوق.
+
+الكتابة من الواجهة **أمر ملكي موقَّع** ونصّها `M9.03`؛ ولا يُعلَن مسار كاتب قبل
+أن يوجد مَن يوقّعه ومَن يتحقّق من توقيعه.
+
+## الحدود المعلَنة
+
+١. **لا طبقة نقل هنا.** لا مُنصِت HTTP ولا مِقبس شبكة: البوابة نداء داخلي في
+العملية نفسها، ومحوِّل النقل يُبنى في `M9.03` فوق هذه الطبقة. وأثر ذلك منطوق: كل
+ما يُقاس هنا هو التفويض والتدقيق والحدّ — **لا** أمن النقل ولا الرؤوس ولا CORS
+ولا TLS.
+
+٢. **حدّ المعدَّل لكل عملية لا للعنقود.** العدّاد في ذاكرة العملية، فنشرٌ بعدّة
+نسخ يُضاعف الحدّ الفعليّ بعددها. الحدّ العنقودي يحتاج مخزناً مشتركاً وهو قرار
+تشغيل في `M10`، ولا يُزعَم هنا.
+
+٣. **الجلسات في الذاكرة** فتزول بإعادة التشغيل — الجلسة إذن نداء لحظي لا سجلّ
+دائم، وهو نفس اختيار تذكرة نقطة التفويض. وجلسة القراءة هنا **بعامل واحد**: المصادقة
+القوية بعامل ثانٍ مُنجَزة في `M9.04` (`src/authn/`، `config/king-authentication.yaml`،
+البوابة `npm run guard:king-auth`)، وهي مشترطة للأوامر السيادية من الديوان لا
+لمسارات القراءة الستة عشر.
+
+٤. **تفاوت مقصود الإظهار بين المأذون مركزياً والمخدوم فعلاً.** كتالوج السياسات
+يأذن لـ`role:minister` و`role:operator` و`role:agent` و`role:chief-justice` بفعل
+`read-registry`؛ ووكيل المراقبة لا يخدم إلا دوره المُعلَن `role:auditor`. فمن
+أذنت له النقطة المركزية قد يردّه المُعالِج برمز `API_HANDLER_REFUSED`، ويُحفَظ
+رمز المُعالِج (`MONITOR_IDENTITY_UNVERIFIED`) في تفصيل الرفض وفي قيده. **وهذا
+اكتُشف بالقياس لا بالتخطيط** (انظر `WL-044`)، ولم يُخفَ بتوسيع خدمة المشهد من
+داخل هذه الخطوة: توسيعها قرار حَوْكمة في `config/monitoring.yaml`، وفتحه هنا كان
+سيكون توسيع صلاحية قراءة من طبقة لا تملك أن تقرّره.
+
+٥. **الحاجز يقرأ النصّ والوثيقة ولا يفتح مِقبساً.** الترتيب يُقاس بموضع النصّ في
+`call`، فيمنع القلب بالكتابة لا القلب بالتفاف ذكيّ في زمن التشغيل — وصدق الرفض
+مقيس في `tests/api/gateway.test.mjs`.
+
+## ما يحرسه الحاجز
+
+`npm run guard:api` — ثماني قواعد: تقابل المسارات مع كتالوج الأفعال ووثيقة
+المراقبة (R1)، وتقابل رموز الرفض في الاتجاهين وحضور كل رمز في ملف إنفاذه (R2)،
+وترتيب العقبات نصّاً (R3)، وبصمة الرمز لا نصّه (R4)، وتركيب البوابة بلا شرط
+(R5)، ولا نداء كتابة ولا مستودع في الطبقة (R6)، وتسجيل كل رفض برمز مُعلَن (R7)،
+ووجود الاختبار وقياسه للرموز الحاكمة (R8).
+
+وقد رُفض الحاجز في ثلاث تجارب تزوير مقصودة قبل قبوله: قلب الترتيب، وتخزين الرمز
+نصّاً، وتركيب البوابة بشرط. والثالثة **مرّت في أول صياغة** لأن القاعدة كانت
+تُحصي أشكال الشرط (`if`) بدل أن تُوجب الشكل المقبول؛ فأُعيدت صياغتها إيجاباً.
+وقائمة الممنوع لا تنتهي، وإيجاب المقبول ينتهي.
