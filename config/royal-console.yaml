@@ -49,6 +49,7 @@ refusalCodes:
   - CONSOLE_CROWN_REQUIRED
   - CONSOLE_COMMAND_REJECTED
   - CONSOLE_KING_REQUIRED
+  - CONSOLE_AUTHENTICATION_REQUIRED
   - CONSOLE_SIGNATURE_INVALID
   - CONSOLE_REPLAYED_COMMAND
   - CONSOLE_HALT_REQUIRED
@@ -165,6 +166,14 @@ guarantees:
         CONSOLE_SIGNATURE_INVALID,
         CONSOLE_KING_REQUIRED,
       ]
+
+  - id: G-CONSOLE-STRONG-AUTH
+    statement: >-
+      كلُّ أمرٍ يُصدَر من الديوانِ يشترط جلسةً قويةً قائمةً للملكِ فُتِحت
+      بعاملٍ ثانٍ على جهازٍ موثوقٍ مُعلَنٍ في `config/king-authentication.yaml`؛
+      ومفتاحُ التوقيعِ وحدَه لا يُصدر أمراً، وجلسةُ القراءةِ لا تُصدره.
+    enforcedBy: src/console/royal-console.mjs
+    codes: [CONSOLE_AUTHENTICATION_REQUIRED]
 
   - id: G-CONSOLE-PERMANENT-RECORD
     statement: >-

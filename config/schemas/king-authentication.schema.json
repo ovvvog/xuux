@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/king-authentication.schema.json",
+  "title": "وثيقة مصادقة الملك القوية — M9.04",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "session",
+    "secondFactor",
+    "devices",
+    "assurance",
+    "audit",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ttlSeconds", "tokenBytes", "digest", "statement"],
+      "properties": {
+        "ttlSeconds": { "type": "integer", "minimum": 30, "maximum": 900 },
+        "tokenBytes": { "type": "integer", "minimum": 32 },
+        "digest": { "type": "string", "enum": ["sha256", "sha512"] },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "secondFactor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "digits",
+        "stepSeconds",
+        "acceptedSkewSteps",
+        "singleUse",
+        "statement"
+      ],
+      "properties": {
+        "algorithm": { "type": "string", "enum": ["hmac-sha256", "hmac-sha512"] },
+        "digits": { "type": "integer", "minimum": 6, "maximum": 10 },
+        "stepSeconds": { "type": "integer", "minimum": 15, "maximum": 120 },
+        "acceptedSkewSteps": { "type": "integer", "minimum": 0, "maximum": 2 },
+        "singleUse": { "type": "boolean", "const": true },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "devices": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "purpose", "state", "factorRef"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^device:[a-z0-9.-]+$" },
+          "purpose": { "type": "string", "minLength": 8 },
+          "state": { "type": "string", "enum": ["trusted", "revoked"] },
+          "factorRef": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]+$" }
+        }
+      }
+    },
+    "assurance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredForCommandKinds", "statement"],
+      "properties": {
+        "requiredForCommandKinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["halt", "halt-resume", "veto", "veto-clear"] }
+        },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessionOpenedEvent",
+        "sessionClosedEvent",
+        "refusedEvent",
+        "factorConsumedEvent",
+        "statement"
+      ],
+      "properties": {
+        "sessionOpenedEvent": { "type": "string", "minLength": 3 },
+        "sessionClosedEvent": { "type": "string", "minLength": 3 },
+        "refusedEvent": { "type": "string", "minLength": 3 },
+        "factorConsumedEvent": { "type": "string", "minLength": 3 },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^AUTHN_[A-Z_]+$" }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy", "codes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-AUTHN-[A-Z-]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": { "type": "string", "minLength": 5 },
+          "codes": { "type": "array", "minItems": 1, "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
