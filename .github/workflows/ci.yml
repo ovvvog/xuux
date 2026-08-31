@@ -194,6 +194,9 @@ jobs:
       - name: حاجز مصادقة الملك (M9.04) — لا أمر سيادي بجلسة بلا عامل ثانٍ
         run: npm run guard:king-auth
 
+      - name: حاجز مركز العمليات (M9.05) — لا لوحة بلا مصدر معلَن ولا حادثة بلا مهلة مقيسة
+        run: npm run guard:operations
+
       - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
         run: npm run guard:templates
 

@@ -1,0 +1,197 @@
+# مركز العمليات — الخطوة `M9.05`
+#
+# قبل هذا الملف كان التشغيلُ **مقروءاً ولا مرئيّاً**: `M9.01` فتحت مشهداً آمناً
+# للقراءة، و`M9.02` أعلنت ستةَ عشرَ مساراً مُدقَّقاً، و`M9.03` أجلست الملكَ في
+# ديوانٍ يرى الحالةَ ويُصدر الأمرَ. ولا موضعَ واحدٌ يقول: **الآنَ**، هل النظامُ
+# صحيح؟ ما المهامُ الجارية؟ أيُّ حادثةٍ وقعت؟ أين السعةُ من حدِّها؟ وما التكلفةُ
+# المستهلَكة؟ فمن أراد أن يعرف قرأ سجلَّ أحداثٍ بيدِه وحسب الحصصَ ذهناً.
+#
+# وهذه الوثيقةُ تجعل مركزَ العملياتِ **بياناتٍ لا كوداً**: لا لوحةَ تُقرأ إن لم
+# تُعلَن هنا بمصدرِها ووجهِها، ولا حادثةَ تُقبل بدرجةٍ غيرِ معلَنةٍ هنا، و**المهلةُ
+# المُعلَنةُ رقمٌ في هذه الوثيقةِ لا في الكود** — فمعيارُ قبولِ الخطوةِ يُقاس عليه.
+#
+# وما لا تفعله: لا تمنح إذناً ولا تفتح مساراً. الإذنُ في `config/policies.yaml`،
+# والمساراتُ في `config/api.yaml`، والحصصُ في `config/quotas.yaml`. وهذه الوثيقةُ
+# تقول «هذا الوجهُ مُعلَنٌ ومصدرُه هذا» لا «هذا مسموح».
+
+version: 1
+
+statement: >-
+  مركزُ العملياتِ سطحُ قراءةٍ وحده: لا يكتب في مستودعٍ ولا يُصدر أمراً، ولوحاتُه
+  على مصادرَ معلَنةٍ — ما كان منها على مسارٍ فمن طبقةِ الواجهةِ المُدقَّقةِ وحدها،
+  وما كان داخليّاً فمن مزوِّدٍ مُمرَّرٍ إليه لا يخترعه. والحادثةُ تُقيَّد في السجلِّ
+  الدائمِ **قبل** أن تدخل الذاكرةَ، وظهورُها في اللوحةِ مقيسٌ على **ساعةٍ
+  مُمرَّرةٍ** لا على ساعةِ النظام، فالمهلةُ المُعلَنةُ دعوى تُقاس لا وعدٌ يُقال.
+
+# ── التدقيق ──
+# أربعةُ أحداثٍ لا حدثٌ واحد: قراءةُ لوحةٍ، ورفضُ قراءةٍ، وتسجيلُ حادثةٍ، ورفضُ
+# حادثةٍ. فمن قرأ السجلَّ ميَّز «لوحةٌ قُرئت» من «حادثةٌ سُجِّلت» من «مهلةٌ فُوِّتت».
+audit:
+  panelEvent: operations.panel.read
+  panelRefusedEvent: operations.panel.read.refused
+  incidentEvent: operations.incident.recorded
+  incidentRefusedEvent: operations.incident.refused
+  statement: >-
+    كلُّ قراءةِ لوحةٍ قيدٌ، وكلُّ حادثةٍ قيدٌ يُكتب قبل دخولِها الذاكرةَ، وكلُّ
+    رفضٍ قيدٌ برمزِه. وبلا سجلٍّ دائمٍ موصولٍ لا لوحةَ تُقرأ ولا حادثةَ تُسجَّل.
+
+# ── المهلةُ المُعلَنة ──
+# معيارُ قبولِ `M9.05` بحرفه: «حادثةٌ مُصطنعةٌ تظهر في الواجهةِ خلال مهلةٍ
+# معلَنة». والمهلةُ هنا بالميلي ثانية، وتُقاس بالساعةِ المُمرَّرةِ إلى الوحدةِ
+# (`nowMs`) لا بـ`Date.now()` — كي يكون القياسُ قابلاً للقيادةِ في اختبارٍ
+# وقابلاً للتفويتِ **عمداً** فيُرَدَّ برمزٍ مُعلَن.
+visibility:
+  deadlineMs: 2000
+  statement: >-
+    الحادثةُ المُسجَّلةُ تظهر في لوحةِ الحوادثِ خلال المهلةِ المُعلَنةِ مقيسةً
+    على الساعةِ المُمرَّرة؛ وفوقَها يُرَدُّ التحقُّقُ بـ`OPERATIONS_VISIBILITY_MISSED`
+    والحادثةُ تبقى ظاهرةً موسومةً بتأخُّرِها، فلا يُخفى التفويتُ ولا تُخفى الحادثة.
+
+# ── حدودُ سجلِّ الحوادث ──
+# السجلُّ في ذاكرةِ العمليةِ (حدٌّ معلَنٌ في `docs/OPERATIONS_CENTER.md`)، وسعتُه
+# مُعلَنةٌ رقماً: فوقَها **رفضٌ مُسمّىً** لا إسقاطُ أقدمِ حادثةٍ بصمت — فمن أسقط
+# حادثةً كي يقبل أخرى بنى عمًى في موضعِ الرؤية.
+incidents:
+  maxOpen: 500
+  severities:
+    - info
+    - warning
+    - critical
+  requiredFields:
+    - id
+    - severity
+    - title
+    - source
+  statement: >-
+    الحادثةُ تُقبل بمعرّفٍ لم يُستهلَك، وبدرجةٍ من الدرجاتِ المُعلَنةِ وحدها،
+    وبحقولٍ لازمةٍ كاملةٍ؛ وفوقَ السعةِ المُعلَنةِ رفضٌ مُسمّىً لا إسقاطٌ صامت.
+
+# ── رموزُ الرفض ──
+# مُعلَنةٌ هنا كي يُقابَل المُعلَنُ بالمكتوبِ في الكودِ في الاتجاهين.
+refusalCodes:
+  - OPERATIONS_CONFIG_INVALID
+  - OPERATIONS_AUDIT_REQUIRED
+  - OPERATIONS_PANEL_UNDECLARED
+  - OPERATIONS_GATEWAY_REQUIRED
+  - OPERATIONS_PANEL_REFUSED
+  - OPERATIONS_SOURCE_MISSING
+  - OPERATIONS_INCIDENT_INVALID
+  - OPERATIONS_SEVERITY_UNDECLARED
+  - OPERATIONS_INCIDENT_REPLAYED
+  - OPERATIONS_INCIDENT_OVERFLOW
+  - OPERATIONS_CLOCK_INVALID
+  - OPERATIONS_VISIBILITY_MISSED
+  - OPERATIONS_INCIDENT_UNKNOWN
+
+# ── اللوحات: خمسةُ أوجهٍ لا وجهٌ واحد ──
+# نصُّ الخطوةِ يُعلن خمسةَ أوجهٍ بأسمائها: صحةُ النظامِ والمهامُ والحوادثُ
+# والسعةُ والتكلفة. فكلُّ وجهٍ لوحةٌ واحدةٌ لا أكثرَ ولا أقلّ، ويحرس ذلك
+# `scripts/guard-operations.mjs` (‏R1) كي لا يُعلَن مركزُ عملياتٍ ناقصُ وجه.
+#
+# و`source` يُعلن **من أين تُقرأ اللوحة**: `route:` مسارٌ في `config/api.yaml`
+# فتُقرأ من طبقةِ الواجهةِ بجلستِها وحدِّها وتدقيقِها — لا من مستودعٍ في يدِ
+# المركز؛ و`internal:` مزوِّدٌ مُمرَّرٌ إلى الوحدةِ عند التركيب، وغيابُه رفضٌ
+# مُسمّىً (`OPERATIONS_SOURCE_MISSING`) لا لوحةٌ فارغةٌ تُقرأ «صحيحة».
+panels:
+  - id: panel:health
+    face: health
+    source: internal:health
+    purpose: صحةُ النظامِ من مسابرَ مُعلَنةٍ عند التركيب، كلُّ مسبارٍ باسمِه وحالِه.
+
+  - id: panel:tasks
+    face: tasks
+    source: route:state.institution-tasks.list
+    purpose: المهامُ المؤسسيةُ الجاريةُ وحالُها، مقروءةً من مسارِ الواجهةِ المُدقَّق.
+
+  - id: panel:incidents
+    face: incidents
+    source: internal:incidents
+    purpose: الحوادثُ المُسجَّلةُ بدرجاتِها وزمنِ ظهورِها مقيساً على الساعةِ المُمرَّرة.
+
+  # ولوحتا السعةِ والتكلفةِ تُعلنان **مواردَهما بأسمائها** من `config/quotas.yaml`،
+  # فلا يُقسَم الحصصُ في الكودِ بحدسٍ على الوحداتِ وأسماءِ الموارد: من قسَم في
+  # الكودِ نسي، ومن أعلن قُوبل إعلانُه بالوثيقةِ الأصلِ في الحاجز (‏R2).
+  - id: panel:capacity
+    face: capacity
+    source: internal:capacity
+    purpose: السعةُ المستهلَكةُ من حدِّها المُعلَنِ في `config/quotas.yaml` لكلِّ حصّةٍ سعةٍ.
+    resources:
+      - agent-creations
+      - memory-writes
+      - egress-bytes
+      - task-executions
+      - model-deployments
+
+  - id: panel:cost
+    face: cost
+    source: internal:cost
+    purpose: التكلفةُ المستهلَكةُ من ميزانيتِها المُعلَنةِ، بالحصصِ الماليةِ وحدها.
+    resources:
+      - inference-tokens
+      - budget-allocated
+
+# ── الضمانات ──
+guarantees:
+  - id: G-OPS-PANEL-DECLARED
+    statement: >-
+      لوحةٌ غيرُ معلَنةٍ في هذه الوثيقةِ لا تُقرأ ولا يخترعها المُنادي، والأوجهُ
+      الخمسةُ كلُّها معلَنةٌ مرّةً واحدةً لا أكثرَ ولا أقلّ.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_PANEL_UNDECLARED, OPERATIONS_CONFIG_INVALID]
+
+  - id: G-OPS-READ-THROUGH-API
+    statement: >-
+      لوحةٌ مصدرُها مسارٌ تُقرأ من طبقةِ الواجهةِ وحدها، فترِث جلستَها وحدَّها
+      وتفويضَها وتدقيقَها؛ ولا مستودعَ في يدِ هذه الطبقةِ ولا مسارَ قراءةٍ جانبيّ.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_GATEWAY_REQUIRED, OPERATIONS_PANEL_REFUSED]
+
+  - id: G-OPS-SOURCE-WIRED
+    statement: >-
+      مزوِّدُ اللوحةِ الداخليةِ غيرُ الموصولِ رفضٌ مُسمّىً لا لوحةٌ فارغةٌ تُقرأ
+      «صحيحةً»؛ فمن رأى صفراً بلا مصدرٍ رأى كذباً مُطمئناً.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_SOURCE_MISSING]
+
+  - id: G-OPS-AUDIT-BEFORE-EFFECT
+    statement: >-
+      بلا سجلٍّ دائمٍ موصولٍ لا لوحةَ ولا حادثة، وقيدُ الحادثةِ يُكتب قبل دخولِها
+      الذاكرةَ فلا حادثةٌ في المركزِ بلا أثرٍ يشهد عليها.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_AUDIT_REQUIRED]
+
+  - id: G-OPS-INCIDENT-DECLARED
+    statement: >-
+      الحادثةُ تُقبل بحقولٍ لازمةٍ كاملةٍ وبدرجةٍ معلَنةٍ ومعرّفٍ لم يُستهلَك،
+      وفوقَ السعةِ المُعلَنةِ رفضٌ مُسمّىً لا إسقاطٌ صامتٌ لأقدمِ حادثة.
+    enforcedBy: src/operations/operations-center.mjs
+    codes:
+      [
+        OPERATIONS_INCIDENT_INVALID,
+        OPERATIONS_SEVERITY_UNDECLARED,
+        OPERATIONS_INCIDENT_REPLAYED,
+        OPERATIONS_INCIDENT_OVERFLOW,
+      ]
+
+  - id: G-OPS-DECLARED-DEADLINE
+    statement: >-
+      ظهورُ الحادثةِ في اللوحةِ مقيسٌ بالمهلةِ المُعلَنةِ في هذه الوثيقة؛ وحادثةٌ
+      لا تظهر أو تظهر بعد المهلةِ تُرَدُّ برمزٍ مُعلَنٍ ويُكتب رفضُها في السجل.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_VISIBILITY_MISSED, OPERATIONS_INCIDENT_UNKNOWN]
+
+  - id: G-OPS-INJECTED-CLOCK
+    statement: >-
+      كلُّ قياسِ زمنٍ في المركزِ من ساعةٍ مُمرَّرةٍ تُعطي عدداً منتهياً غيرَ سالبٍ،
+      وساعةٌ تُعطي غيرَ ذلك تُرَدُّ برمزٍ مُعلَنٍ ولا يُقاس عليها ظهورٌ ولا تأخُّر.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_CLOCK_INVALID]
+
+  - id: G-OPS-READ-ONLY
+    statement: >-
+      مصدرُ اللوحةِ لا يكون إلا مساراً مقروءاً في طبقةِ الواجهةِ أو مزوِّداً
+      داخليّاً معلَناً، وما سواهما يُرَدُّ عند تحميلِ الوثيقة؛ وصفوفُ اللوحاتِ صورٌ
+      مُجمَّدةٌ عميقاً لا مراجعُ حالةٍ حيّة. وغيابُ نداءِ الكتابةِ نصّاً من
+      `src/operations/` يحرسه `scripts/guard-operations.mjs` (‏R5) لا زمنُ التشغيل.
+    enforcedBy: src/operations/operations-center.mjs
+    codes: [OPERATIONS_CONFIG_INVALID]
