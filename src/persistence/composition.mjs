@@ -13,6 +13,7 @@
 
 import { ClassificationApprovalRegistry } from '../data/approvals.mjs';
 import { loadClassificationLattice } from '../data/classification.mjs';
+import { loadPolicyBundle } from '../policy/index.mjs';
 import { DataAccessGate } from '../data/access-gate.mjs';
 import { DataCatalog } from '../data/data-catalog.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../data/encryption.mjs';
@@ -28,6 +29,11 @@ import { MonitorAgent, loadMonitoringPolicy } from '../observability/index.mjs';
 import { ApiGateway, loadApiPolicy } from '../api/index.mjs';
 import { RoyalConsole, loadConsolePolicy } from '../console/index.mjs';
 import { KingAuthenticator, loadKingAuthPolicy } from '../authn/index.mjs';
+import {
+  OperationsCenter,
+  loadOperationsPolicy,
+  quotaReaderFromPolicy,
+} from '../operations/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -138,6 +144,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ApiGateway} api
  * @property {RoyalConsole} royalConsole
  * @property {KingAuthenticator} kingAuth
+ * @property {OperationsCenter} operations
  */
 
 /**
@@ -295,6 +302,22 @@ export function createPostgresRepositories(pool) {
  * @param {import('../console/royal-console.mjs').ConsoleLedgerLike | null} [deps.commandLedger] دفترُ
  *   الأوامرِ الدائم. يمنع إعادةَ إرسالِ أمرِ تعافٍ موقَّعٍ بعد إعادةِ التشغيل؛
  *   وغيابُه يحصر منعَ الإعادةِ في ذاكرةِ العمليةِ الواحدة وذاك حدٌّ معلَن.
+ * @param {import('../operations/operations-center.mjs').OperationsPolicy | null} [deps.operationsPolicy] وثيقةُ
+ *   مركزِ العمليات (M9.05): لوحاتُه الخمسُ ومصادرُها، ومهلةُ ظهورِ الحادثةِ
+ *   المُعلَنةُ، وسعةُ سجلِّ الحوادثِ ودرجاتُها، وأحداثُ تدقيقِه، ورموزُ رفضِه
+ *   وضماناتُه. تُحمَّل من `config/operations-center.yaml` إن لم تُمرَّر.
+ * @param {ReadonlyArray<{ id: string, check: () => { status: string, detail?: string } | Promise<{ status: string, detail?: string }> }> | null} [deps.healthProbes] مسابرُ
+ *   صحةٍ للوحةِ الصحة. من لم يمرّرها حصل على لوحةٍ **تُرَدُّ** بـ`OPERATIONS_SOURCE_MISSING`
+ *   لا على لوحةٍ فارغةٍ تُقرأ «صحيحةً»؛ فصفرٌ بلا مصدرٍ كذبٌ مُطمئن.
+ * @param {ReadonlyArray<{ resource: string, limit: number, unit?: string, windowSeconds: number }> | null} [deps.quotas] حدودُ
+ *   الحصصِ الأصلُ للوحتَي السعةِ والتكلفة. تُقرأ من `config/quotas.yaml` عبر
+ *   `loadPolicyBundle` إن لم تُمرَّر؛ ومستهلَكُها من `deps.quotaConsumption`، وما لم
+ *   يُقَس يُعاد `null` صريحاً لا صفراً.
+ * @param {((resource: string) => number | null) | null} [deps.quotaConsumption] قارئُ
+ *   المستهلَكِ من كلِّ موردٍ. المركزُ لا يحسب حصّةً ولا يخصم عليها، وهذا حدٌّ معلَن.
+ * @param {(() => number) | null} [deps.nowMs] ساعةُ
+ *   مركزِ العمليات. تُمرَّر في الاختبارِ لتُقاد المهلةُ صعوداً وهبوطاً؛ وفي التشغيلِ
+ *   ساعةُ النظام.
  * @param {string} [deps.environment] البيئة؛ تُقرَّر بها صلاحية المزوّد للإنتاج.
  * @returns {StateRegistries}
  */
@@ -322,6 +345,11 @@ export function createRegistries({
   consolePolicy = null,
   authnPolicy = null,
   factorSecrets = null,
+  operationsPolicy = null,
+  healthProbes = null,
+  quotas = null,
+  quotaConsumption = null,
+  nowMs = null,
   haltSwitch = null,
   king = null,
   commandLedger = null,
@@ -508,12 +536,40 @@ export function createRegistries({
     commandLedger,
     log,
   });
+  // ومركزُ العملياتِ يُركَّب **دائماً** (الخطوة `M9.05`)، لنفسِ سببِ الديوانِ
+  // والمراقبة: مركزٌ اختياريُّ التركيبِ يعني أن حالَ التشغيلِ يعود إلى قراءةِ
+  // سجلِّ أحداثٍ باليدِ وحسابِ الحصصِ ذهناً — أي تشغيلٌ **يُستنبَط** لا تشغيلٌ
+  // يُرى، وهو العيبُ الذي جاءت الخطوةُ لتغلقه. وما ينقص من وصلاتِه يظهر **رفضاً**
+  // مُسمّى: بلا سجلٍّ دائمٍ لا لوحةَ ولا حادثة (`OPERATIONS_AUDIT_REQUIRED`)، وبلا
+  // طبقةِ واجهةٍ لا لوحةَ على مسارٍ مُعلَن (`OPERATIONS_GATEWAY_REQUIRED`)، وبلا
+  // مزوِّدٍ داخليٍّ تُرَدُّ لوحتُه (`OPERATIONS_SOURCE_MISSING`) ولا تُقرأ فارغة.
+  //
+  // وطبقةُ الواجهةِ تُمرَّر هي لا المستودعاتُ: لوحةُ المهامِ تُقرأ من مسارٍ مُعلَنٍ
+  // في `config/api.yaml` فتَرِث الجلسةَ وحدَّ المعدَّلِ ونقطةَ التفويضِ والتدقيق.
+  // ولو قرأ المركزُ مستودعاً مباشرةً لبنى المسارَ الجانبيَّ الذي أُغلق في `M4.05`
+  // وسمّاه «مركزَ عمليات».
+  //
+  // وحدودُ الحصصِ تُقرأ من `config/quotas.yaml` عبر حزمةِ الوثائقِ لا من أرقامٍ
+  // في الكود: رقمٌ بلا أصلٍ رقمٌ مخترَع. والمستهلَكُ من مزوِّدٍ خارجَ الوحدةِ،
+  // فالمركزُ يعرض ولا يحسب.
+  const operations = new OperationsCenter({
+    policy: operationsPolicy ?? loadOperationsPolicy(),
+    log,
+    gateway: api,
+    healthProbes,
+    quotaReader: quotaReaderFromPolicy({
+      quotas: quotas ?? loadPolicyBundle().quotas,
+      ...(quotaConsumption === null ? {} : { consumed: quotaConsumption }),
+    }),
+    ...(nowMs === null ? {} : { nowMs }),
+  });
   return {
     agents,
     monitor,
     api,
     kingAuth,
     royalConsole,
+    operations,
     models: new ModelRegistry({
       log,
       repository: repositories.models,
