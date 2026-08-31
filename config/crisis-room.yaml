@@ -1,0 +1,266 @@
+# غرفةُ الأزمات — الخطوة `M9.06`
+#
+# العيبُ الذي جاءت لتُغلقه، بدقة: بعد `M9.05` صارت الحادثةُ **تُرى** ولا **تُدار**.
+# فمركزُ العملياتِ يُظهرها في لوحةٍ خلال مهلةٍ مقيسة، وزرُّ الإيقافِ الشاملِ قائمٌ
+# منذ `M2.08`، والحجْرُ حالةٌ معلَنةٌ في سجلِّ الهوياتِ منذ `M6.09`، والديوانُ
+# الملكيُّ يُصدر أمراً موقَّعاً منذ `M9.03` بمصادقةٍ قويةٍ منذ `M9.04` — **ولا
+# إجراءَ واحدٌ يربط ذلك كلَّه بترتيبٍ محفوظ**. فمن وقعت عنده أزمةٌ كان عليه أن
+# يتذكّر: أحجُرُ أولاً أم أُوقف؟ ومن أُبلِغ؟ ومتى يُستأنف؟ فكانت إدارةُ الأزمةِ
+# **ذاكرةَ مُشغِّلٍ** لا إجراءً مُعلَناً، وذاك بعينه ما يُخفق تحت الضغط.
+#
+# وهذه الوثيقةُ تجعل الإجراءَ **بياناتٍ لا كوداً ولا عُرفاً**: الخطوةُ لا تُنفَّذ
+# إن لم تُعلَن هنا، ولا تُنفَّذ قبل التي قبلها، ولا تُطوى واحدةٌ منها. والتمرينُ
+# لا يُغلَق «منجزاً» إلا إذا شهد **ملفُّ السجلِّ على القرص** بكلِّ خطوةٍ مُعلَنة.
+#
+# وما لا تفعله: لا توقّع أمراً ولا تملك مفتاحاً ولا تمنح إذناً. الأمرُ يُوقَّع
+# بمفتاحِ الملكِ ويمرّ من الديوانِ (`config/royal-console.yaml`)، والحجْرُ يقع في
+# سجلِّ الهوياتِ فيُرفض صاحبُه من طبقةِ الواجهةِ نفسِها، والحادثةُ تُقيَّد في
+# مركزِ العمليات. وهذه الوثيقةُ تقول «هذا الإجراءُ معلَنٌ وهذا ترتيبُه» لا «هذا
+# مسموح».
+
+version: 1
+
+statement: >-
+  لا خطوةَ أزمةٍ إلا معلَنةٌ في هذا الملفِّ بنوعِها وأثرِها وموضعِها من الترتيب،
+  ولا خطوةَ تُنفَّذ قبل التي تسبقها ولا بدلاً عنها، ولا أمرَ سياديٌّ يُنفَّذ من
+  هذه الغرفةِ إلا من الديوانِ الملكيِّ موقَّعاً؛ وكلُّ خطوةٍ تُقيَّد في السجلِّ
+  الدائمِ **قبل** أن يقع أثرُها، والتمرينُ لا يُغلَق إلا بشهادةِ ملفِّ السجلِّ
+  على كلِّ خطوةٍ معلَنةٍ وبإقرارِ بشريٍّ من غيرِ من صعَّد.
+
+# ── التدقيق ──
+# ستةُ أحداثٍ لا حدثٌ واحد: فتحُ التمرين، وتنفيذُ خطوةٍ، ورفضُ خطوةٍ، وتصعيدٌ
+# رُفع، وإقرارٌ بشريٌّ وقع، وإغلاقُ التمرين. فمن قرأ السجلَّ بعد سنةٍ ميَّز
+# «تمرينٌ فُتح ولم يُغلَق» من «تمرينٌ اكتمل»، و«خطوةٌ رُفضت» من «خطوةٌ لم تُحاوَل».
+audit:
+  drillOpenedEvent: crisis.drill.opened
+  stepExecutedEvent: crisis.step.executed
+  stepRefusedEvent: crisis.step.refused
+  escalationRaisedEvent: crisis.escalation.raised
+  escalationAcknowledgedEvent: crisis.escalation.acknowledged
+  drillClosedEvent: crisis.drill.closed
+  statement: >-
+    قيدُ الخطوةِ يُكتب قبل أثرِها، وكلُّ رفضٍ قيدٌ برمزِه وتفصيلِه؛ وما لا
+    يُثبَّت في السجلِّ الدائمِ لا تقع خطوتُه من هذه الغرفة.
+
+# ── رموزُ الرفض ──
+# مُعلَنةٌ هنا كي يُقابَل المُعلَنُ بالمكتوبِ في الكودِ في الاتجاهين، فلا رمزٌ
+# يُرفع بلا إعلانٍ ولا رمزٌ يُعلَن بلا موضعِ إنفاذ.
+refusalCodes:
+  - CRISIS_CONFIG_INVALID
+  - CRISIS_AUDIT_REQUIRED
+  - CRISIS_PROCEDURE_UNDECLARED
+  - CRISIS_DRILL_REQUIRED
+  - CRISIS_DRILL_ACTIVE
+  - CRISIS_DRILL_EXPIRED
+  - CRISIS_STEP_UNDECLARED
+  - CRISIS_STEP_OUT_OF_ORDER
+  - CRISIS_CONSOLE_REQUIRED
+  - CRISIS_COMMAND_REFUSED
+  - CRISIS_OPERATIONS_REQUIRED
+  - CRISIS_INCIDENT_REFUSED
+  - CRISIS_REGISTRY_REQUIRED
+  - CRISIS_QUARANTINE_REASON_REQUIRED
+  - CRISIS_QUARANTINE_SCOPE_UNDECLARED
+  - CRISIS_QUARANTINE_REFUSED
+  - CRISIS_ESCALATION_CONTACT_UNKNOWN
+  - CRISIS_ESCALATION_SELF_ACK
+  - CRISIS_ESCALATION_DEADLINE_MISSED
+  - CRISIS_ESCALATION_PENDING
+  - CRISIS_EVIDENCE_MISSING
+  - CRISIS_CLOCK_INVALID
+
+# ── الحجْر ──
+# الحجْرُ ليس علماً في ذاكرةِ هذه الغرفة: هو **حالةٌ في سجلِّ الهوياتِ** تُقرأ
+# عند كلِّ نداءٍ في طبقةِ الواجهة (‏`src/api/session-store.mjs`)، فمن حُجِر رُدَّ
+# نداؤه بـ`API_IDENTITY_UNVERIFIED` ولو كانت جلستُه مفتوحةً قبل حجْره. وبهذا
+# يكون للحجْرِ أثرٌ يُقاس على المسارِ الحقيقيِّ لا حالةٌ تُعلَن ولا تمنع شيئاً.
+quarantine:
+  scopes:
+    - agent
+  state: quarantined
+  releaseState: active
+  maxActive: 25
+  # سببٌ قصيرٌ («خطأ») يُقرأ بعد شهرٍ ولا يُفهم، ومراجعةُ قرارٍ عقابيٍّ بلا سببٍ
+  # مقروءٍ مراجعةٌ صورية. والحدُّ في الوثيقةِ لا في الكودِ كي يكون رفعُه قراراً.
+  reasonMinLength: 24
+  releaseRequiresAcknowledgedEscalation: true
+  statement: >-
+    الحجْرُ حالةٌ في سجلِّ الهوياتِ بسببٍ مسجَّلٍ لا يقلّ عن الحدِّ المُعلَن،
+    ولا يُرفع إلا بعد إقرارٍ بشريٍّ على تصعيدٍ قائم.
+
+# ── التصعيدُ البشريّ ──
+# جهاتُ التصعيدِ **مُعلَنةٌ بأدوارِها**، والمهلةُ رقمٌ في الوثيقةِ يُقاس على ساعةٍ
+# مُمرَّرةٍ لا على ساعةِ النظام. ومن رفع التصعيدَ لا يُقرّه بنفسِه: إقرارٌ ذاتيٌّ
+# يجعل «التصعيدَ البشريَّ» توقيعاً على مرآة.
+escalation:
+  contacts:
+    - id: contact:sovereign-desk
+      role: role:king
+      channel: channel:sovereign-desk
+      purpose: صاحبُ القرارِ السياديِّ يُبلَّغ بكلِّ إيقافٍ شاملٍ ويُقرّ به.
+    - id: contact:audit-desk
+      role: role:auditor
+      channel: channel:audit-desk
+      purpose: المدقّقُ يُبلَّغ بالحجْرِ ليُراجع سببَه بعد رفعِه.
+  acknowledgmentDeadlineMs: 900000
+  minAcknowledgers: 1
+  selfAcknowledgeForbidden: true
+  statement: >-
+    التصعيدُ لا يُرفع إلا إلى جهةٍ معلَنةٍ بدورِها، ولا يُقرّ إلا من غيرِ رافعِه
+    وداخلَ المهلةِ المُعلَنةِ مقيسةً على الساعةِ المُمرَّرة.
+
+# ── التمرين ──
+# «تمرينٌ موثَّقٌ يُنفَّذ من الواجهةِ كاملاً» — وهو نصُّ معيارِ القبول. فالتوثيقُ
+# هنا ليس ملفاً يكتبه إنسانٌ بعد الحادثة: هو **قراءةُ ملفِّ السجلِّ من القرص**
+# والتحقُّقُ من قيدِ تنفيذٍ لكلِّ خطوةٍ معلَنةٍ في الإجراء. فما لا يشهد به السجلُّ
+# لم يقع، ولو قال المُشغِّلُ إنه وقع.
+drill:
+  requireAllSteps: true
+  evidence: on-disk-log
+  maxDurationMs: 3600000
+  statement: >-
+    التمرينُ لا يُغلَق إلا وقد نُفِّذت كلُّ خطوةٍ معلَنةٍ في إجرائه بترتيبها،
+    وشهد ملفُّ السجلِّ الدائمِ بقيدِ تنفيذٍ لكلِّ واحدةٍ منها، وأُقرّ كلُّ تصعيدٍ
+    رُفع فيه.
+
+# ── الإجراءات ──
+# `kind` نوعُ الخطوةِ وأثرُها معاً: `incident` قيدُ حادثةٍ في مركزِ العمليات،
+# و`quarantine` حجْرٌ في سجلِّ الهويات، و`command` أمرٌ ملكيٌّ من الديوانِ بمعرّفِ
+# أمرٍ معلَنٍ هناك، و`escalation` تصعيدٌ إلى جهةٍ معلَنة، و`release` رفعُ الحجْر.
+# ولا نوعَ سادسٌ يُخترع في الكود.
+procedures:
+  - id: procedure:rogue-agent
+    title: وكيلٌ خرج عن حدِّه — عزلٌ ثم إيقافٌ ثم تصعيدٌ ثم استئنافٌ ثم رفعُ عزل
+    trigger: شذوذٌ مقيسٌ في سلوكِ وكيلٍ يُرجَّح معه أنه يتصرّف خارجَ تفويضه.
+    steps:
+      - id: step:record-incident
+        kind: incident
+        severity: critical
+        purpose: تُقيَّد الحادثةُ أولاً فتصير مرئيةً في مركزِ العملياتِ خلال مهلتِه المُعلَنة.
+
+      - id: step:quarantine-actor
+        kind: quarantine
+        scope: agent
+        purpose: يُعزَل الوكيلُ قبل الإيقافِ الشاملِ كي لا يستفيد من نافذةِ التوقّفِ نفسِها.
+
+      - id: step:halt-state
+        kind: command
+        command: cmd:halt
+        purpose: إيقافٌ شاملٌ بتوجيهٍ موقَّعٍ يقرأه كلُّ عقدةٍ من القرص.
+
+      - id: step:escalate-sovereign
+        kind: escalation
+        contact: contact:sovereign-desk
+        purpose: لا إيقافَ شاملٌ بلا إبلاغِ صاحبِ القرارِ السياديِّ وإقرارِه.
+
+      - id: step:resume-state
+        kind: command
+        command: cmd:resume
+        purpose: استئنافٌ بمسارِ التعافي، ولا يمرّ ببوابةِ التاجِ لأنها موقوفةٌ بالتوجيهِ نفسِه.
+
+      - id: step:release-actor
+        kind: release
+        scope: agent
+        purpose: رفعُ الحجْرِ بعد إقرارِ التصعيد، فلا يعود الوكيلُ بقرارِ من حجَره وحدَه.
+
+  - id: procedure:crown-breach
+    title: خللٌ في بوابةِ التاج — نقضٌ ثم تصعيدٌ ثم رفعُ نقض
+    trigger: أمرٌ مشتبَهٌ قُبل في بوابةِ التاجِ أو خللٌ في مسارِ قبولِ الأوامر.
+    steps:
+      - id: step:record-breach
+        kind: incident
+        severity: warning
+        purpose: تُقيَّد الحادثةُ قبل أيِّ إجراءٍ فيُعرَف ما دفع إلى النقض.
+
+      - id: step:veto-crown
+        kind: command
+        command: cmd:veto
+        purpose: نقضٌ يُغلق بوابةَ التاجِ فلا تقبل أمراً حتى يرفعه الملكُ صراحةً.
+
+      - id: step:escalate-audit
+        kind: escalation
+        contact: contact:audit-desk
+        purpose: المدقّقُ يُبلَّغ بالنقضِ ليُراجع سببَه قبل رفعِه.
+
+      - id: step:clear-veto
+        kind: command
+        command: cmd:veto.clear
+        purpose: رفعُ النقضِ بمسارِ التعافي بعد إقرارِ المدقّق.
+
+# ── الضمانات ──
+guarantees:
+  - id: G-CRISIS-PROCEDURE-DECLARED
+    statement: >-
+      إجراءٌ أو خطوةٌ غيرُ معلَنةٍ في هذه الوثيقةِ لا تُنفَّذ، ولا يخترعها
+      المُنادي في زمنِ التشغيل.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes: [CRISIS_PROCEDURE_UNDECLARED, CRISIS_STEP_UNDECLARED]
+
+  - id: G-CRISIS-ORDER-KEPT
+    statement: >-
+      خطواتُ الإجراءِ تُنفَّذ بترتيبِ إعلانِها؛ ولا تُطوى خطوةٌ ولا تُقدَّم على
+      ما قبلها، ولا خطوةَ بلا تمرينٍ مفتوحٍ قائمٍ داخلَ مدّتِه.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes:
+      [CRISIS_STEP_OUT_OF_ORDER, CRISIS_DRILL_REQUIRED, CRISIS_DRILL_ACTIVE, CRISIS_DRILL_EXPIRED]
+
+  - id: G-CRISIS-COMMAND-THROUGH-CONSOLE
+    statement: >-
+      كلُّ أثرٍ سياديٍّ من هذه الغرفةِ يمرّ بالديوانِ الملكيِّ أمراً موقَّعاً؛ ولا
+      نداءَ مباشرٌ على زرِّ الإيقافِ ولا على بوابةِ التاجِ من هذه الوحدة.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes: [CRISIS_CONSOLE_REQUIRED, CRISIS_COMMAND_REFUSED]
+
+  - id: G-CRISIS-QUARANTINE-IN-REGISTRY
+    statement: >-
+      الحجْرُ حالةٌ تُكتب في سجلِّ الهوياتِ بسببٍ مسجَّلٍ يبلغ الحدَّ المُعلَن، فيُرَدُّ
+      المحجورُ من طبقةِ الواجهةِ نفسِها؛ ولا علمَ حجْرٍ في ذاكرةِ هذه الغرفةِ وحدَها.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes:
+      [
+        CRISIS_REGISTRY_REQUIRED,
+        CRISIS_QUARANTINE_REASON_REQUIRED,
+        CRISIS_QUARANTINE_SCOPE_UNDECLARED,
+        CRISIS_QUARANTINE_REFUSED,
+      ]
+
+  - id: G-CRISIS-HUMAN-IN-LOOP
+    statement: >-
+      التصعيدُ لا يُقرّ إلا من جهةٍ معلَنةٍ غيرِ رافعِه وداخلَ المهلةِ المُعلَنة؛
+      ولا يُغلَق تمرينٌ وفيه تصعيدٌ لم يُقَرّ.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes:
+      [
+        CRISIS_ESCALATION_CONTACT_UNKNOWN,
+        CRISIS_ESCALATION_SELF_ACK,
+        CRISIS_ESCALATION_DEADLINE_MISSED,
+        CRISIS_ESCALATION_PENDING,
+      ]
+
+  - id: G-CRISIS-EVIDENCE-FROM-LOG
+    statement: >-
+      إغلاقُ التمرينِ يُقاس بقراءةِ قيودِ السجلِّ الدائمِ لكلِّ خطوةٍ معلَنة؛ ولا
+      يُغلَق تمرينٌ على شهادةِ ذاكرةٍ في العملية.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes: [CRISIS_EVIDENCE_MISSING]
+
+  - id: G-CRISIS-AUDIT-BEFORE-EFFECT
+    statement: >-
+      قيدُ الخطوةِ يُكتب في السجلِّ الدائمِ قبل أن يقع أثرُها، وبلا سجلٍّ لا خطوةَ
+      ولا تمرين.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes: [CRISIS_AUDIT_REQUIRED]
+
+  - id: G-CRISIS-INJECTED-CLOCK
+    statement: >-
+      الزمنُ في هذه الغرفةِ من ساعةٍ مُمرَّرةٍ تُقاس عليها مهلةُ الإقرارِ ومدّةُ
+      التمرين؛ فلا يُقاس شرطٌ زمنيٌّ على ساعةٍ لا يملكها الاختبار.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes: [CRISIS_CLOCK_INVALID]
+
+  - id: G-CRISIS-INCIDENT-THROUGH-OPERATIONS
+    statement: >-
+      حادثةُ الأزمةِ تُقيَّد في مركزِ العملياتِ (‏`M9.05`) فتَرِث مهلتَه ولوحتَه
+      وتدقيقَه؛ ولا سجلَّ حوادثَ ثانياً في هذه الغرفة.
+    enforcedBy: src/crisis/crisis-room.mjs
+    codes: [CRISIS_OPERATIONS_REQUIRED, CRISIS_INCIDENT_REFUSED]

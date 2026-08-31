@@ -197,6 +197,9 @@ jobs:
       - name: حاجز مركز العمليات (M9.05) — لا لوحة بلا مصدر معلَن ولا حادثة بلا مهلة مقيسة
         run: npm run guard:operations
 
+      - name: حاجز غرفة الأزمات (M9.06) — لا خطوة أزمة خارج ترتيبها ولا أمر سيادي خارج الديوان
+        run: npm run guard:crisis
+
       - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
         run: npm run guard:templates
 

@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/crisis-room.schema.json",
+  "title": "وثيقة غرفة الأزمات — M9.06",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "audit",
+    "refusalCodes",
+    "quarantine",
+    "escalation",
+    "drill",
+    "procedures",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "drillOpenedEvent",
+        "stepExecutedEvent",
+        "stepRefusedEvent",
+        "escalationRaisedEvent",
+        "escalationAcknowledgedEvent",
+        "drillClosedEvent",
+        "statement"
+      ],
+      "properties": {
+        "drillOpenedEvent": { "type": "string", "minLength": 3 },
+        "stepExecutedEvent": { "type": "string", "minLength": 3 },
+        "stepRefusedEvent": { "type": "string", "minLength": 3 },
+        "escalationRaisedEvent": { "type": "string", "minLength": 3 },
+        "escalationAcknowledgedEvent": { "type": "string", "minLength": 3 },
+        "drillClosedEvent": { "type": "string", "minLength": 3 },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 12,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^CRISIS_[A-Z_]+$" }
+    },
+    "quarantine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scopes",
+        "state",
+        "releaseState",
+        "maxActive",
+        "reasonMinLength",
+        "releaseRequiresAcknowledgedEscalation",
+        "statement"
+      ],
+      "properties": {
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z-]+$" }
+        },
+        "state": { "type": "string", "minLength": 3 },
+        "releaseState": { "type": "string", "minLength": 3 },
+        "maxActive": { "type": "integer", "minimum": 1 },
+        "reasonMinLength": { "type": "integer", "minimum": 8 },
+        "releaseRequiresAcknowledgedEscalation": { "type": "boolean" },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contacts",
+        "acknowledgmentDeadlineMs",
+        "minAcknowledgers",
+        "selfAcknowledgeForbidden",
+        "statement"
+      ],
+      "properties": {
+        "contacts": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "role", "channel", "purpose"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^contact:[a-z-]+$" },
+              "role": { "type": "string", "pattern": "^role:[a-z-]+$" },
+              "channel": { "type": "string", "pattern": "^channel:[a-z-]+$" },
+              "purpose": { "type": "string", "minLength": 20 }
+            }
+          }
+        },
+        "acknowledgmentDeadlineMs": { "type": "integer", "minimum": 1000 },
+        "minAcknowledgers": { "type": "integer", "minimum": 1 },
+        "selfAcknowledgeForbidden": { "type": "boolean" },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "drill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireAllSteps", "evidence", "maxDurationMs", "statement"],
+      "properties": {
+        "requireAllSteps": { "type": "boolean", "const": true },
+        "evidence": { "type": "string", "const": "on-disk-log" },
+        "maxDurationMs": { "type": "integer", "minimum": 1000 },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "procedures": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "trigger", "steps"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^procedure:[a-z-]+$" },
+          "title": { "type": "string", "minLength": 10 },
+          "trigger": { "type": "string", "minLength": 20 },
+          "steps": {
+            "type": "array",
+            "minItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind", "purpose"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^step:[a-z-]+$" },
+                "kind": {
+                  "type": "string",
+                  "enum": ["incident", "quarantine", "command", "escalation", "release"]
+                },
+                "purpose": { "type": "string", "minLength": 20 },
+                "severity": { "type": "string", "pattern": "^[a-z]+$" },
+                "scope": { "type": "string", "pattern": "^[a-z-]+$" },
+                "command": { "type": "string", "pattern": "^cmd:[a-z.]+$" },
+                "contact": { "type": "string", "pattern": "^contact:[a-z-]+$" }
+              },
+              "allOf": [
+                {
+                  "if": { "properties": { "kind": { "const": "command" } } },
+                  "then": { "required": ["command"] }
+                },
+                {
+                  "if": { "properties": { "kind": { "const": "escalation" } } },
+                  "then": { "required": ["contact"] }
+                },
+                {
+                  "if": { "properties": { "kind": { "const": "incident" } } },
+                  "then": { "required": ["severity"] }
+                },
+                {
+                  "if": { "properties": { "kind": { "const": "quarantine" } } },
+                  "then": { "required": ["scope"] }
+                },
+                {
+                  "if": { "properties": { "kind": { "const": "release" } } },
+                  "then": { "required": ["scope"] }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy", "codes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-CRISIS-[A-Z-]+$" },
+          "statement": { "type": "string", "minLength": 40 },
+          "enforcedBy": { "type": "string", "minLength": 5 },
+          "codes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^CRISIS_[A-Z_]+$" }
+          }
+        }
+      }
+    }
+  }
+}
