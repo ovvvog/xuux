@@ -34,6 +34,7 @@ import {
   loadOperationsPolicy,
   quotaReaderFromPolicy,
 } from '../operations/index.mjs';
+import { CrisisRoom, loadCrisisPolicy } from '../crisis/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -145,6 +146,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {RoyalConsole} royalConsole
  * @property {KingAuthenticator} kingAuth
  * @property {OperationsCenter} operations
+ * @property {CrisisRoom} crisis
  */
 
 /**
@@ -306,6 +308,14 @@ export function createPostgresRepositories(pool) {
  *   مركزِ العمليات (M9.05): لوحاتُه الخمسُ ومصادرُها، ومهلةُ ظهورِ الحادثةِ
  *   المُعلَنةُ، وسعةُ سجلِّ الحوادثِ ودرجاتُها، وأحداثُ تدقيقِه، ورموزُ رفضِه
  *   وضماناتُه. تُحمَّل من `config/operations-center.yaml` إن لم تُمرَّر.
+ * @param {import('../crisis/crisis-room.mjs').CrisisPolicy | null} [deps.crisisPolicy] وثيقةُ
+ *   غرفةِ الأزمات (M9.06): إجراءاتُها وترتيبُ خطواتِها، ونطاقاتُ الحجْرِ وحدُّ سببِه،
+ *   وجهاتُ التصعيدِ ومهلةُ إقرارِها، ومدّةُ التمرينِ وأحداثُ تدقيقِه ورموزُ رفضِه.
+ *   تُحمَّل من `config/crisis-room.yaml` إن لم تُمرَّر.
+ * @param {(() => ReadonlyArray<{ type: string, actor: string, data: Record<string, unknown> }>) | null} [deps.crisisEvidence] قارئُ
+ *   دليلِ التمرينِ من **السجلِّ الدائمِ على القرص**. من لم يمرّره حصل على غرفةٍ
+ *   تُدير الأزمةَ و**ترفض** إغلاقَ التمرينِ بـ`CRISIS_EVIDENCE_MISSING`؛ فالنقصُ
+ *   رفضٌ مُسمّى لا إغلاقٌ على شهادةِ ذاكرةٍ عن نفسِها.
  * @param {ReadonlyArray<{ id: string, check: () => { status: string, detail?: string } | Promise<{ status: string, detail?: string }> }> | null} [deps.healthProbes] مسابرُ
  *   صحةٍ للوحةِ الصحة. من لم يمرّرها حصل على لوحةٍ **تُرَدُّ** بـ`OPERATIONS_SOURCE_MISSING`
  *   لا على لوحةٍ فارغةٍ تُقرأ «صحيحةً»؛ فصفرٌ بلا مصدرٍ كذبٌ مُطمئن.
@@ -346,6 +356,8 @@ export function createRegistries({
   authnPolicy = null,
   factorSecrets = null,
   operationsPolicy = null,
+  crisisPolicy = null,
+  crisisEvidence = null,
   healthProbes = null,
   quotas = null,
   quotaConsumption = null,
@@ -563,6 +575,21 @@ export function createRegistries({
     }),
     ...(nowMs === null ? {} : { nowMs }),
   });
+  // وغرفةُ الأزمات (`M9.06`): إجراءٌ معلَنٌ بترتيبٍ محفوظٍ فوق ما بُني قبله، لا
+  // محرّكٌ جديدٌ تحته. فالأمرُ السياديُّ يمرّ بالديوانِ المُمرَّرِ نفسِه — بتوقيعِه
+  // وتاجِه وجلستِه القوية — والحادثةُ تُقيَّد في مركزِ العملياتِ فتَرِث مهلتَه
+  // ولوحتَه، والحجْرُ يقع في سجلِّ الهوياتِ فيرُدُّ صاحبَه `requireActiveIdentity`
+  // في طبقةِ الواجهةِ عند أوّلِ نداءٍ بعده. ولو مرّرنا لها زرَّ الإيقافِ مباشرةً
+  // لبنينا طريقاً حولَ حواجزِ `M9.03` و`M9.04` وسمّيناه «إجراءَ طوارئ».
+  const crisis = new CrisisRoom({
+    policy: crisisPolicy ?? loadCrisisPolicy(),
+    console: royalConsole,
+    operations,
+    agents,
+    log,
+    ...(crisisEvidence === null ? {} : { evidence: crisisEvidence }),
+    ...(nowMs === null ? {} : { nowMs }),
+  });
   return {
     agents,
     monitor,
@@ -570,6 +597,7 @@ export function createRegistries({
     kingAuth,
     royalConsole,
     operations,
+    crisis,
     models: new ModelRegistry({
       log,
       repository: repositories.models,
