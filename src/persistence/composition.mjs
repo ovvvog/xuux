@@ -37,6 +37,7 @@ import {
 import { CrisisRoom, loadCrisisPolicy } from '../crisis/index.mjs';
 import { AuditLogViewer, loadAuditViewerPolicy } from '../audit-viewer/index.mjs';
 import { createTelemetry, loadTelemetryPolicy } from '../telemetry/index.mjs';
+import { createServiceLevels, loadServiceLevelPolicy } from '../service-levels/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -151,6 +152,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {CrisisRoom} crisis
  * @property {AuditLogViewer} auditViewer
  * @property {import('../telemetry/telemetry.mjs').Telemetry} telemetry
+ * @property {import('../service-levels/service-levels.mjs').ServiceLevels} serviceLevels
  */
 
 /**
@@ -328,6 +330,11 @@ export function createPostgresRepositories(pool) {
  *   القياسِ الموحَّد (M10.01): مدَياتُه المُعلَنةُ بملفّاتِ إصدارِها، ومقاييسُه
  *   بأنواعِها ووحداتِها، وحدودُه ومستوياتُ سجلِّه ورموزُ رفضِه. تُحمَّل من
  *   `config/telemetry.yaml` إن لم تُمرَّر.
+ * @param {import('../service-levels/service-levels.mjs').ServiceLevelPolicy | null} [deps.serviceLevelsPolicy] وثيقةُ
+ *   مستوياتِ الخدمة (M10.02): قدراتُها الأساسيةُ وأهدافُها بمؤشِّراتِها من
+ *   مقاييسِ القياسِ الموحَّدِ نفسِها، وعتباتُها وأهدافُها أرقاماً، وسياسةُ
+ *   ميزانيةِ أخطائها ورموزُ رفضِها وضماناتُها. تُحمَّل من
+ *   `config/service-levels.yaml` إن لم تُمرَّر.
  * @param {ReadonlyArray<{ id: string, check: () => { status: string, detail?: string } | Promise<{ status: string, detail?: string }> }> | null} [deps.healthProbes] مسابرُ
  *   صحةٍ للوحةِ الصحة. من لم يمرّرها حصل على لوحةٍ **تُرَدُّ** بـ`OPERATIONS_SOURCE_MISSING`
  *   لا على لوحةٍ فارغةٍ تُقرأ «صحيحةً»؛ فصفرٌ بلا مصدرٍ كذبٌ مُطمئن.
@@ -372,6 +379,7 @@ export function createRegistries({
   crisisEvidence = null,
   auditViewerPolicy = null,
   telemetryPolicy = null,
+  serviceLevelsPolicy = null,
   healthProbes = null,
   quotas = null,
   quotaConsumption = null,
@@ -511,8 +519,20 @@ export function createRegistries({
   // المارُّ بالطبقاتِ الثلاثِ **أثراً واحداً**؛ فمثيلان أثران لنداءٍ واحد، وذاك
   // نقضُ معيارِ قبولِ الخطوةِ بعينِه. ومن حقَن ساعتَه في `nowMs` قَوَّمَ زمنَ
   // المدَياتِ في الاختبارِ صعوداً وهبوطاً بلا انتظارٍ حقيقيّ.
+  const resolvedTelemetryPolicy = telemetryPolicy ?? loadTelemetryPolicy();
   const telemetry = createTelemetry({
-    policy: telemetryPolicy ?? loadTelemetryPolicy(),
+    policy: resolvedTelemetryPolicy,
+    ...(nowMs === null ? {} : { now: nowMs }),
+  });
+  // ولوحةُ مستوياتِ الخدمةِ (`M10.02`) تُركَّب على **سجلِّ مقاييسِ هذا المثيلِ
+  // بعينِه** لا على سجلٍّ ثانٍ يُنشأ لها: مثيلانِ للمقاييسِ رقمانِ لشيءٍ واحدٍ،
+  // فتقرأ اللوحةُ صفراً والنداءاتُ تُجمَع في غيرِه — وذاك «الأخضرُ الفارغُ»
+  // الذي جاء الضمانُ `G-SLO-SINGLE-SOURCE` ليمنعه. ووثيقةُ القياسِ تُمرَّر
+  // كما حُلَّت، فلا تُقرأ من القرصِ مرّتين ولا يُقرأ منها اثنانِ مختلفان.
+  const serviceLevels = createServiceLevels({
+    policy: serviceLevelsPolicy ?? loadServiceLevelPolicy(),
+    telemetryPolicy: resolvedTelemetryPolicy,
+    metrics: telemetry.metrics,
     ...(nowMs === null ? {} : { now: nowMs }),
   });
   const monitor = new MonitorAgent({
@@ -635,6 +655,7 @@ export function createRegistries({
     crisis,
     auditViewer,
     telemetry,
+    serviceLevels,
     models: new ModelRegistry({
       log,
       repository: repositories.models,

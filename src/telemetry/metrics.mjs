@@ -257,6 +257,83 @@ export class MetricsRegistry {
   }
 
   /**
+   * مجموعُ عدّادٍ **على سلاسلِه كلِّها** لا على وسمٍ بعينِه.
+   *
+   * **ولمَ لا تكفي `counterValue`؟** لأنّ العدّادَ يُفرَّق بوسومِه (مسارٌ
+   * وفاعلٌ ورمزُ رفضٍ)، فمن قرأه بوسومٍ فارغةٍ قرأ **سلسلةً لم تُنادَ
+   * قطّ** فخرج بصفرٍ والنداءاتُ معدودةٌ في غيرِه — وذاك «أخضرٌ فارغٌ»
+   * بأوضح معانيه. ومستوى الخدمةِ حكمٌ على القدرةِ كلِّها لا على وسمٍ
+   * واحدٍ، فالجمعُ على السلاسلِ هو القراءةُ الصادقةُ له.
+   *
+   * @param {string} name
+   * @returns {number}
+   */
+  counterTotal(name) {
+    this.#require(name, 'counter');
+    let total = 0;
+    for (const series of this.#counters.values()) {
+      if (series.name === name) total += series.value;
+    }
+    return total;
+  }
+
+  /**
+   * قيمُ مدرجٍ **مجموعةً من سلاسلِه كلِّها** — و`null` إن لم يُنادَ
+   * بأيِّ وسم. والفرقُ بين `count` و`retained` مُعلَنٌ كما في
+   * `histogramSamples`، لكنّه يُجمَع هنا على السلاسل: فسقفُ المعاينةِ
+   * لكلِّ سلسلةٍ وحدَها.
+   *
+   * @param {string} name
+   * @returns {{ count: number, retained: number, values: ReadonlyArray<number> } | null}
+   */
+  histogramTotals(name) {
+    this.#require(name, 'histogram');
+    let count = 0;
+    /** @type {number[]} */
+    const values = [];
+    let seen = false;
+    for (const series of this.#histograms.values()) {
+      if (series.name !== name) continue;
+      seen = true;
+      count += series.count;
+      values.push(...series.values);
+    }
+    if (!seen) return null;
+    return Object.freeze({ count, retained: values.length, values: Object.freeze(values) });
+  }
+
+  /**
+   * قيمُ مدرجٍ بعينِه محفوظةً كما هي — و`null` إن لم يُنادَ بعدُ بهذه
+   * الوسوم.
+   *
+   * **ولمَ تُفتح القيمُ وقد كفت `percentile`؟** لأن مؤشّرَ مستوى الخدمة
+   * ليس «المئينيَّ التاسعَ والتسعين» بل «كم نداءً أتمَّ دون العتبة»،
+   * والفرقُ بينهما فرقٌ حاكمٌ لا صياغيٌّ: من أعلن مئينيًّا أعلن رقمًا لا تُشتقُّ
+   * منه ميزانيةُ أخطاءٍ بأحداثٍ معدودة، وميزانيةٌ بلا أحداثٍ معدودةٍ لا
+   * تُستهلَك ولا تُقرأ. **والفرقُ بين `count` و`retained` مُعلَنٌ قصداً**
+   * ليقرأ المستدعي متى صار المحفوظُ دون المقيسِ فيُعلن رقمَه مُعايَنًا لا
+   * تامًّا.
+   *
+   * @param {string} name
+   * @param {Record<string, string | number | boolean>} [attributes]
+   * @returns {{ count: number, retained: number, sum: number, min: number, max: number, values: ReadonlyArray<number> } | null}
+   */
+  histogramSamples(name, attributes = {}) {
+    this.#require(name, 'histogram');
+    const key = seriesKey(name, normalizeAttributes(attributes));
+    const series = this.#histograms.get(key);
+    if (series === undefined) return null;
+    return Object.freeze({
+      count: series.count,
+      retained: series.values.length,
+      sum: series.sum,
+      min: series.min,
+      max: series.max,
+      values: Object.freeze([...series.values]),
+    });
+  }
+
+  /**
    * كلُّ القراءاتِ صورةً مُجمَّدةً — بها يُصدَّر إلى مُجمِّعٍ خارجيٍّ لاحقاً.
    * @returns {{ counters: ReadonlyArray<CounterReading>, histograms: ReadonlyArray<HistogramReading> }}
    */

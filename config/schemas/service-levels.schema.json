@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/service-levels.schema.json",
+  "title": "وثيقة مستويات الخدمة — M10.02",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "window",
+    "capabilities",
+    "errorBudget",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope", "statement"],
+      "properties": {
+        "scope": { "const": "process" },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "capabilities": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "objectives"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^capability:[a-z][a-z0-9-]*$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "objectives": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "kind", "totalMetric", "target", "statement"],
+              "properties": {
+                "id": { "type": "string", "pattern": "^slo:[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$" },
+                "kind": { "enum": ["ratio", "latency"] },
+                "totalMetric": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+                },
+                "badMetric": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+                },
+                "durationMetric": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$"
+                },
+                "thresholdMs": { "type": "number", "exclusiveMinimum": 0, "maximum": 600000 },
+                "target": { "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1 },
+                "statement": { "type": "string", "minLength": 20 }
+              },
+              "allOf": [
+                {
+                  "if": { "properties": { "kind": { "const": "ratio" } } },
+                  "then": {
+                    "required": ["badMetric"],
+                    "not": {
+                      "anyOf": [{ "required": ["durationMetric"] }, { "required": ["thresholdMs"] }]
+                    }
+                  }
+                },
+                {
+                  "if": { "properties": { "kind": { "const": "latency" } } },
+                  "then": {
+                    "required": ["durationMetric", "thresholdMs"],
+                    "not": { "required": ["badMetric"] }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "errorBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "policy"],
+      "properties": {
+        "statement": { "type": "string", "minLength": 20 },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["onExhausted", "statement"],
+          "properties": {
+            "onExhausted": { "const": "refuse-assertion" },
+            "statement": { "type": "string", "minLength": 20 }
+          }
+        }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^SLO_[A-Z_]+$" }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "enforcedIn", "codes", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-SLO-[A-Z0-9-]+$" },
+          "enforcedIn": { "type": "string", "pattern": "^src/[A-Za-z0-9_./-]+\\.mjs$" },
+          "codes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^SLO_[A-Z_]+$" }
+          },
+          "statement": { "type": "string", "minLength": 20 }
+        }
+      }
+    }
+  }
+}
