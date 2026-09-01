@@ -293,6 +293,46 @@ test('قيمةٌ باطلةٌ على عدّادٍ أو مدرجٍ تُرَدُّ
   assert.equal(registry.counterValue('api.call.count'), 0);
 });
 
+test('قيمُ المدرجِ تُفتَح للقراءةِ مع فرقٍ مُعلَنٍ بين المقيسِ والمحفوظ', () => {
+  const registry = new MetricsRegistry([
+    { name: 'api.call.duration', kind: 'histogram', unit: 'ms', purpose: 'زمن' },
+  ]);
+  // ولا مدرجَ قبل أوّلِ نداءٍ: `null` صريحةٌ لا صفرٌ يُقرأ قياساً.
+  assert.equal(registry.histogramSamples('api.call.duration'), null);
+  for (const value of [10, 20, 30]) registry.recordHistogram('api.call.duration', value);
+  const reading = registry.histogramSamples('api.call.duration');
+  assert.ok(reading !== null);
+  assert.equal(reading.count, 3);
+  assert.equal(reading.retained, 3);
+  assert.deepEqual([...reading.values], [10, 20, 30]);
+  assert.ok(Object.isFrozen(reading));
+  assert.ok(Object.isFrozen(reading.values));
+  // والوسومُ تفصل السلاسل: قراءةُ وسمٍ لم يُنادَ بِه `null` لا قيمُ غيرِه.
+  assert.equal(registry.histogramSamples('api.call.duration', { 'api.route': 'r' }), null);
+  assert.throws(
+    () => registry.histogramSamples('api.invented'),
+    (/** @type {unknown} */ error) =>
+      /** @type {{ code?: string }} */ (error).code === TELEMETRY_ERRORS.METRIC_UNDECLARED,
+  );
+});
+
+test('فوق سقفِ المعاينةِ يبقى العدُّ صادقاً ويُعلَن المحفوظُ أقلَّ منه', () => {
+  const registry = new MetricsRegistry([
+    { name: 'api.call.duration', kind: 'histogram', unit: 'ms', purpose: 'زمن' },
+  ]);
+  const total = 2100;
+  for (let index = 0; index < total; index += 1) {
+    registry.recordHistogram('api.call.duration', 1);
+  }
+  const reading = registry.histogramSamples('api.call.duration');
+  assert.ok(reading !== null);
+  // العدُّ المقيسُ كاملٌ، والمحفوظُ محدودٌ بسقفِ المعاينة: والفرقُ **مُعلَنٌ**
+  // ليقرأ المستدعي رقمَه مُعايَناً لا تامّاً، فلا يُدَّعى قياسٌ كاملٌ على معاينة.
+  assert.equal(reading.count, total);
+  assert.ok(reading.retained < reading.count);
+  assert.equal(reading.retained, reading.values.length);
+});
+
 test('العدّادُ يجمع بالوسومِ لا بترتيبِ كتابتِها', () => {
   const registry = new MetricsRegistry([
     { name: 'api.call.count', kind: 'counter', unit: '{call}', purpose: 'عدّ' },
