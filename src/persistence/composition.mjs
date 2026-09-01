@@ -36,6 +36,7 @@ import {
 } from '../operations/index.mjs';
 import { CrisisRoom, loadCrisisPolicy } from '../crisis/index.mjs';
 import { AuditLogViewer, loadAuditViewerPolicy } from '../audit-viewer/index.mjs';
+import { createTelemetry, loadTelemetryPolicy } from '../telemetry/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -149,6 +150,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {OperationsCenter} operations
  * @property {CrisisRoom} crisis
  * @property {AuditLogViewer} auditViewer
+ * @property {import('../telemetry/telemetry.mjs').Telemetry} telemetry
  */
 
 /**
@@ -322,6 +324,10 @@ export function createPostgresRepositories(pool) {
  *   عارضِ سجلِّ التدقيق (M9.07): مشاهدُهُ الثلاثةُ بأوجهِها ومصدرِها، وحقولُ
  *   بحثِه وحدودُه، وأسبابُ انكسارِ السلسلةِ ورموزُ رفضِه. تُحمَّل من
  *   `config/audit-log-viewer.yaml` إن لم تُمرَّر.
+ * @param {import('../telemetry/telemetry.mjs').TelemetryPolicy | null} [deps.telemetryPolicy] وثيقةُ
+ *   القياسِ الموحَّد (M10.01): مدَياتُه المُعلَنةُ بملفّاتِ إصدارِها، ومقاييسُه
+ *   بأنواعِها ووحداتِها، وحدودُه ومستوياتُ سجلِّه ورموزُ رفضِه. تُحمَّل من
+ *   `config/telemetry.yaml` إن لم تُمرَّر.
  * @param {ReadonlyArray<{ id: string, check: () => { status: string, detail?: string } | Promise<{ status: string, detail?: string }> }> | null} [deps.healthProbes] مسابرُ
  *   صحةٍ للوحةِ الصحة. من لم يمرّرها حصل على لوحةٍ **تُرَدُّ** بـ`OPERATIONS_SOURCE_MISSING`
  *   لا على لوحةٍ فارغةٍ تُقرأ «صحيحةً»؛ فصفرٌ بلا مصدرٍ كذبٌ مُطمئن.
@@ -365,6 +371,7 @@ export function createRegistries({
   crisisPolicy = null,
   crisisEvidence = null,
   auditViewerPolicy = null,
+  telemetryPolicy = null,
   healthProbes = null,
   quotas = null,
   quotaConsumption = null,
@@ -499,11 +506,21 @@ export function createRegistries({
   // كما هي — أي إلى القراءةِ بسلطةِ كتابةٍ معها، وهو العيبُ نفسُه. والسجلُّ
   // والهوياتُ موصولان: بلا الأولِ لا قراءةَ (لا أثرَ تدقيق)، وبلا الثاني لا
   // قراءةَ (لا هويةَ محقَّقة).
+  // والقياسُ الموحَّدُ (`M10.01`) يُركَّب قبلَ من يُقاس: مثيلٌ واحدٌ للعمليةِ
+  // يُحقَن في البوابةِ وفي وكيلِ المراقبةِ معاً — وبوحدتِه وحدَها يصير النداءُ
+  // المارُّ بالطبقاتِ الثلاثِ **أثراً واحداً**؛ فمثيلان أثران لنداءٍ واحد، وذاك
+  // نقضُ معيارِ قبولِ الخطوةِ بعينِه. ومن حقَن ساعتَه في `nowMs` قَوَّمَ زمنَ
+  // المدَياتِ في الاختبارِ صعوداً وهبوطاً بلا انتظارٍ حقيقيّ.
+  const telemetry = createTelemetry({
+    policy: telemetryPolicy ?? loadTelemetryPolicy(),
+    ...(nowMs === null ? {} : { now: nowMs }),
+  });
   const monitor = new MonitorAgent({
     policy: monitoringPolicy ?? loadMonitoringPolicy(),
     repositories,
     agents,
     log,
+    telemetry,
   });
   // وبوابةُ الواجهةِ الداخليةِ تُركَّب **دائماً** (الخطوة `M9.02`)، لنفسِ السبب:
   // بوابةٌ اختياريةُ التركيبِ تصير بوابةً يُلتفّ حولها بنداءِ الوكيلِ مباشرةً بلا
@@ -516,6 +533,7 @@ export function createRegistries({
     agents,
     monitor,
     enforcementPoint,
+    telemetry,
   });
   // والديوانُ الملكيُّ يُركَّب **دائماً** (الخطوة `M9.03`): ديوانٌ اختياريُّ
   // التركيبِ يعني أن ممارسةَ السلطةِ تعود إلى نداءِ `crown.stop()` أو
@@ -616,6 +634,7 @@ export function createRegistries({
     operations,
     crisis,
     auditViewer,
+    telemetry,
     models: new ModelRegistry({
       log,
       repository: repositories.models,

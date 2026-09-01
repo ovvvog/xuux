@@ -276,6 +276,29 @@ export function loadApiPolicy(options = {}) {
  */
 
 /**
+ * عقدُ القياسِ الموحَّدِ (`M10.01`) مكتوباً **بنُيةِ الطرفِ لا باسمِ وحدتِه**، وذاك
+ * مقصودٌ: البوابةُ لا تستورد من `src/telemetry/` شيئاً — لا في زمنِ التنفيذِ
+ * ولا في الأنواع — فيبقى القياسُ محقوناً يُرفَع في الاختبارِ ويُوصَل في التركيب،
+ * وتبقى البوابةُ تعمل بلا قياسٍ أصلاً. **والقياسُ يُضاف ولا يَحكم:** خطأُ قياسٍ
+ * لا يُردُّ نداءً مأذوناً، ونجاحُ قياسٍ لا يُجيز نداءً ممنوعاً.
+ *
+ * @typedef {object} ApiSpanLike
+ * @property {(key: string, value: string | number | boolean) => unknown} setAttribute
+ */
+
+/**
+ * @typedef {object} ApiMetricsLike
+ * @property {(name: string, value?: number, attributes?: Record<string, string | number | boolean>) => void} addCounter
+ * @property {(name: string, value: number, attributes?: Record<string, string | number | boolean>) => void} recordHistogram
+ */
+
+/**
+ * @typedef {object} ApiTelemetryLike
+ * @property {<T>(name: string, options: { attributes?: Record<string, string | number | boolean> }, fn: (span: ApiSpanLike) => Promise<T>) => Promise<T>} span
+ * @property {ApiMetricsLike} metrics
+ */
+
+/**
  * @typedef {object} ApiEnforcementLike
  * @property {(request: import('../policy/model.mjs').PolicyRequest) => Promise<{ decision: { allowed: boolean, code: string, reason: string, policyId: string | null }, token: string | null }>} authorize
  * @property {(token: string | undefined, binding: { actorId: string, action: string, resourceKey: string }) => { policyId: string | null }} verify
@@ -300,9 +323,13 @@ export class ApiGateway {
   #monitor;
   /** @type {import('./session-store.mjs').SessionLogLike | null} */
   #log;
+  /** @type {ApiTelemetryLike | null} */
+  #telemetry;
+  /** @type {() => Date} */
+  #now;
 
   /**
-   * @param {{ policy?: ApiPolicy, dir?: string, log?: import('./session-store.mjs').SessionLogLike | null, agents?: import('./session-store.mjs').SessionAgentsLike | null, monitor?: ApiMonitorLike | null, enforcementPoint?: ApiEnforcementLike | null, now?: () => Date }} [deps]
+   * @param {{ policy?: ApiPolicy, dir?: string, log?: import('./session-store.mjs').SessionLogLike | null, agents?: import('./session-store.mjs').SessionAgentsLike | null, monitor?: ApiMonitorLike | null, enforcementPoint?: ApiEnforcementLike | null, telemetry?: ApiTelemetryLike | null, now?: () => Date }} [deps]
    */
   constructor(deps = {}) {
     const policy = deps.policy ?? loadApiPolicy(deps.dir === undefined ? {} : { dir: deps.dir });
@@ -310,6 +337,11 @@ export class ApiGateway {
     this.#log = deps.log ?? null;
     this.#monitor = deps.monitor ?? null;
     this.#enforcement = deps.enforcementPoint ?? null;
+    // القياسُ يُحقَن ولا يُستورَد — والبوابةُ تبقى غيرَ مستوردةٍ من طبقةِ الرصدِ
+    // شيئاً في زمنِ التشغيل كما نصَّ رأسُ هذا الملفِّ في `M9.02`. وغيابُه
+    // `null` يعني نداءً بلا قياسٍ لا نداءً مرفوضاً: القياسُ يُضاف ولا يَحكم.
+    this.#telemetry = deps.telemetry ?? null;
+    this.#now = deps.now ?? (() => new Date());
     for (const route of policy.routes) this.#routes.set(route.id, route);
     /** @type {Map<string, { windowSeconds: number, maxCalls: number }>} */
     const rules = new Map();
@@ -379,6 +411,25 @@ export class ApiGateway {
    * @returns {Promise<{ route: string, status: 'ok', policyId: string | null, session: string, data: unknown }>}
    */
   async call(request) {
+    const routeId = typeof request?.route === 'string' ? request.route.trim() : '';
+    const telemetry = this.#telemetry;
+    if (telemetry === null) return this.#callAudited(request, routeId, null);
+    // المدى الجذر `api.call`: هو الذي يُولِّد معرّفَ الأثرِ الذي ترثه كلُّ طبقةٍ
+    // بعده، فيصير النداءُ الثلاثيُّ أثراً واحداً كما ينصُّ معيارُ قبولِ `M10.01`.
+    return telemetry.span(
+      'api.call',
+      { attributes: { 'api.route': routeId === '' ? 'unknown' : routeId } },
+      (span) => this.#callAudited(request, routeId, span),
+    );
+  }
+
+  /**
+   * @param {ApiCallRequest} request
+   * @param {string} routeId
+   * @param {ApiSpanLike | null} span
+   * @returns {Promise<{ route: string, status: 'ok', policyId: string | null, session: string, data: unknown }>}
+   */
+  async #callAudited(request, routeId, span) {
     const log = this.#log;
     if (log === null) {
       throw new ApiError(
@@ -386,12 +437,36 @@ export class ApiGateway {
         'سجلُّ الأحداثِ غيرُ موصولٍ ببوابةِ الواجهة؛ ونداءٌ بلا أثرِ تدقيقٍ أسوأُ من نداءٍ مرفوضٍ لأنه يقع ولا يُرى.',
       );
     }
-    const routeId = typeof request?.route === 'string' ? request.route.trim() : '';
+    const routeLabel = routeId === '' ? 'unknown' : routeId;
+    const metrics = this.#telemetry?.metrics ?? null;
+    const startedMs = this.#now().getTime();
+    // العدُّ للمحاولةِ لا للنجاح — كما يَعُدُّ حدُّ المعدَّلِ في العقبةِ (3)،
+    // فمن عدَّ النجاحَ وحدَه لم يرَ عاصفةَ الرفضِ حين تقع.
+    metrics?.addCounter('api.call.count', 1, { 'api.route': routeLabel });
     /** @type {string} */
     let actorId = 'unknown';
     try {
-      return await this.#callChecked(request, routeId, log, (id) => (actorId = id));
+      const result = await this.#callChecked(request, routeId, log, (id) => (actorId = id), span);
+      metrics?.recordHistogram('api.call.duration', this.#now().getTime() - startedMs, {
+        'api.route': routeLabel,
+        'api.outcome': 'ok',
+      });
+      return result;
     } catch (error) {
+      const refusalCode = codeOf(error);
+      try {
+        span?.setAttribute('api.refusal.code', refusalCode);
+      } catch {
+        // وسمٌ أخفق لا يُبدِّل الرفض؛ والقياسُ لا يَحكم.
+      }
+      metrics?.addCounter('api.call.refusals', 1, {
+        'api.route': routeLabel,
+        'api.refusal.code': refusalCode,
+      });
+      metrics?.recordHistogram('api.call.duration', this.#now().getTime() - startedMs, {
+        'api.route': routeLabel,
+        'api.outcome': 'refused',
+      });
       try {
         const detail = error instanceof ApiError ? error.detail : {};
         log.append(this.#policy.audit.refusalEvent, actorId, {
@@ -415,9 +490,10 @@ export class ApiGateway {
    * @param {string} routeId
    * @param {import('./session-store.mjs').SessionLogLike} log
    * @param {(actorId: string) => void} remember
+   * @param {ApiSpanLike | null} [span]
    * @returns {Promise<{ route: string, status: 'ok', policyId: string | null, session: string, data: unknown }>}
    */
-  async #callChecked(request, routeId, log, remember) {
+  async #callChecked(request, routeId, log, remember, span = null) {
     // ── (1) مسارٌ معلَن ──
     const route = this.#routes.get(routeId);
     if (route === undefined) {
@@ -427,9 +503,20 @@ export class ApiGateway {
       );
     }
 
+    if (span !== null) {
+      span.setAttribute('api.method', route.method);
+      span.setAttribute('api.path', route.path);
+      span.setAttribute('api.action', route.action);
+      span.setAttribute('api.resource', route.resource);
+    }
+
     // ── (2) المصادقة: جلسةٌ صالحةٌ لهويةٍ نشطة ──
     const session = await this.#sessions.resolve(request.token);
     remember(session.actorId);
+    if (span !== null) {
+      span.setAttribute('api.actor', session.actorId);
+      span.setAttribute('api.session', session.id);
+    }
 
     // ── (3) حدُّ المعدَّل: يَعُدُّ المحاولةَ لا النجاح ──
     const limit = this.#limiter.consume({ routeId: route.id, actorId: session.actorId });

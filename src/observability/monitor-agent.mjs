@@ -301,6 +301,21 @@ export function readRoleCapabilities({ dir, role }) {
  */
 
 /**
+ * عقدُ القياسِ الموحَّدِ (`M10.01`) مكتوباً بنُيةِ الطرفِ لا باسمِ وحدتِه؛ فلا
+ * تستورد طبقةُ الرصدِ من `src/telemetry/` شيئاً، ويبقى القياسُ محقوناً يُوصَل
+ * في التركيب ويُرفَع في الاختبار. **والقياسُ يُضاف ولا يَحكم.**
+ *
+ * @typedef {object} MonitorSpanLike
+ * @property {(key: string, value: string | number | boolean) => unknown} setAttribute
+ */
+
+/**
+ * @typedef {object} MonitorTelemetryLike
+ * @property {<T>(name: string, options: { attributes?: Record<string, string | number | boolean> }, fn: (span: MonitorSpanLike) => Promise<T>) => Promise<T>} span
+ * @property {{ addCounter: (name: string, value?: number, attributes?: Record<string, string | number | boolean>) => void, recordHistogram: (name: string, value: number, attributes?: Record<string, string | number | boolean>) => void }} metrics
+ */
+
+/**
  * وكيلُ مراقبةٍ يقرأ ولا يكتب. لا يُصدِّر مشهداً ولا مستودعاً: المستودعاتُ في
  * حقلٍ خاصٍّ لا يُقرأ من خارجِ الصنف، والمشاهدُ أسطحٌ لا تحمل إلا القراءة، والقراءةُ
  * كلُّها تمرّ من `read` وحده — فلا قراءةَ بلا قيدِ تدقيق.
@@ -316,9 +331,13 @@ export class MonitorAgent {
   #log;
   /** @type {MonitorAgentsLike | null} */
   #agents;
+  /** @type {MonitorTelemetryLike | null} */
+  #telemetry;
+  /** @type {() => Date} */
+  #now;
 
   /**
-   * @param {{ policy?: MonitoringPolicy, repositories?: Record<string, unknown>, agents?: MonitorAgentsLike | null, log?: MonitorLogLike | null, roleCapabilities?: readonly string[], dir?: string }} [deps]
+   * @param {{ policy?: MonitoringPolicy, repositories?: Record<string, unknown>, agents?: MonitorAgentsLike | null, log?: MonitorLogLike | null, roleCapabilities?: readonly string[], telemetry?: MonitorTelemetryLike | null, now?: () => Date, dir?: string }} [deps]
    */
   constructor(deps = {}) {
     const policy =
@@ -326,6 +345,8 @@ export class MonitorAgent {
     this.#policy = policy;
     this.#log = deps.log ?? null;
     this.#agents = deps.agents ?? null;
+    this.#telemetry = deps.telemetry ?? null;
+    this.#now = deps.now ?? (() => new Date());
 
     // ── حدُّ القدرات: يقع عند التركيب، وفي الاتجاهين ──
     const capabilities =
@@ -392,7 +413,42 @@ export class MonitorAgent {
           );
         }
         const fn = /** @type {(...args: unknown[]) => unknown} */ (candidate);
-        readers[name] = async (/** @type {unknown[]} */ ...args) => fn.apply(repository, args);
+        // وهذا هو **حدُّ التخزينِ الحقيقيُّ**: الموضعُ الذي ينتقل فيه النداءُ
+        // من وكيلِ المراقبةِ إلى المستودعِ نفسِه. وقياسُه هنا لا فيما فوقه يجعل
+        // الزمنَ المقيسَ زمنَ المستودعِ وحدَه لا زمنَ الطبقةِ التي تحتويه؛ فمن قاس
+        // الطبقةَ الفوقيةَ وحدَها رأى البطءَ ولم يرَ من سبَّبَه.
+        const registry = view.registry;
+        const entity = view.entity;
+        readers[name] = async (/** @type {unknown[]} */ ...args) => {
+          const telemetry = this.#telemetry;
+          if (telemetry === null) return fn.apply(repository, args);
+          /** @type {Record<string, string>} */
+          const labels = { 'storage.registry': registry, 'storage.method': name };
+          const startedMs = this.#now().getTime();
+          try {
+            return await telemetry.span(
+              'storage.read',
+              {
+                attributes: {
+                  'storage.registry': registry,
+                  'storage.entity': entity,
+                  'storage.method': name,
+                },
+              },
+              async () => fn.apply(repository, args),
+            );
+          } finally {
+            // العدُّ والمدَّةُ يُسجَّلان نجحَ النداءُ أم أخفق؛ فقراءةٌ أخفقت بعد
+            // ثانيتين حملت المستودعَ ثانيتين، وإسقاطُها من القياسِ يُري التخزينَ
+            // أسرعَ ممّا هو كلّما اشتدَّ عليه الضغط.
+            telemetry.metrics.addCounter('storage.read.count', 1, labels);
+            telemetry.metrics.recordHistogram(
+              'storage.read.duration',
+              this.#now().getTime() - startedMs,
+              labels,
+            );
+          }
+        };
       }
       this.#views.set(
         view.id,
@@ -435,6 +491,30 @@ export class MonitorAgent {
    * @returns {Promise<unknown>}
    */
   async read(viewId, request) {
+    const telemetry = this.#telemetry;
+    if (telemetry === null) return this.#readTraced(viewId, request, null);
+    // مدًى ابنٌ حين يأتي النداءُ من البوابة (فيرث معرّفَ الأثرِ من السياقِ
+    // الضمنيَّ بلا تمريرٍ يُنسَى)، ومدًى جذرٌ حين يُنادَى المشهدُ مباشرةً —
+    // وكلتا الحالتين مُعلَنةٌ في `config/telemetry.yaml`.
+    return telemetry.span(
+      'monitor.read',
+      {
+        attributes: {
+          'monitor.view': viewId,
+          'monitor.method': typeof request?.method === 'string' ? request.method : 'list',
+        },
+      },
+      (span) => this.#readTraced(viewId, request, span),
+    );
+  }
+
+  /**
+   * @param {string} viewId
+   * @param {MonitorReadRequest} request
+   * @param {MonitorSpanLike | null} span
+   * @returns {Promise<unknown>}
+   */
+  async #readTraced(viewId, request, span) {
     const log = this.#log;
     if (log === null) {
       throw new MonitorError(
@@ -443,6 +523,7 @@ export class MonitorAgent {
       );
     }
     const actor = typeof request?.actor === 'string' ? request.actor.trim() : '';
+    if (span !== null && actor !== '') span.setAttribute('monitor.actor', actor);
     try {
       return await this.#readChecked(viewId, request, actor, log);
     } catch (error) {
@@ -450,6 +531,11 @@ export class MonitorAgent {
         error instanceof MonitorError || error instanceof ReadOnlyViewError
           ? error.code
           : 'MONITOR_READ_FAILED';
+      try {
+        span?.setAttribute('monitor.refusal.code', code);
+      } catch {
+        // وسمٌ أخفق لا يُبدِّل الرفض؛ والقياسُ لا يَحكم.
+      }
       try {
         log.append(this.#policy.audit.refusalEvent, actor === '' ? 'unknown' : actor, {
           view: viewId,

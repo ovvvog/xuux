@@ -203,6 +203,9 @@ jobs:
       - name: حاجز عارض سجل التدقيق (M9.07) — لا مشهد بلا حكم سلامة ولا قراءة بلا قيد
         run: npm run guard:audit-viewer
 
+      - name: حاجز القياس الموحّد (M10.01) — لا إشارة بلا اسم معلَن ولا نداء بلا معرّف ارتباط واحد
+        run: npm run guard:telemetry
+
       - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
         run: npm run guard:templates
 
