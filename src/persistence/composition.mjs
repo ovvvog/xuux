@@ -35,6 +35,7 @@ import {
   quotaReaderFromPolicy,
 } from '../operations/index.mjs';
 import { CrisisRoom, loadCrisisPolicy } from '../crisis/index.mjs';
+import { AuditLogViewer, loadAuditViewerPolicy } from '../audit-viewer/index.mjs';
 import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
@@ -147,6 +148,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {KingAuthenticator} kingAuth
  * @property {OperationsCenter} operations
  * @property {CrisisRoom} crisis
+ * @property {AuditLogViewer} auditViewer
  */
 
 /**
@@ -316,6 +318,10 @@ export function createPostgresRepositories(pool) {
  *   دليلِ التمرينِ من **السجلِّ الدائمِ على القرص**. من لم يمرّره حصل على غرفةٍ
  *   تُدير الأزمةَ و**ترفض** إغلاقَ التمرينِ بـ`CRISIS_EVIDENCE_MISSING`؛ فالنقصُ
  *   رفضٌ مُسمّى لا إغلاقٌ على شهادةِ ذاكرةٍ عن نفسِها.
+ * @param {import('../audit-viewer/audit-log-viewer.mjs').AuditViewerPolicy | null} [deps.auditViewerPolicy] وثيقةُ
+ *   عارضِ سجلِّ التدقيق (M9.07): مشاهدُهُ الثلاثةُ بأوجهِها ومصدرِها، وحقولُ
+ *   بحثِه وحدودُه، وأسبابُ انكسارِ السلسلةِ ورموزُ رفضِه. تُحمَّل من
+ *   `config/audit-log-viewer.yaml` إن لم تُمرَّر.
  * @param {ReadonlyArray<{ id: string, check: () => { status: string, detail?: string } | Promise<{ status: string, detail?: string }> }> | null} [deps.healthProbes] مسابرُ
  *   صحةٍ للوحةِ الصحة. من لم يمرّرها حصل على لوحةٍ **تُرَدُّ** بـ`OPERATIONS_SOURCE_MISSING`
  *   لا على لوحةٍ فارغةٍ تُقرأ «صحيحةً»؛ فصفرٌ بلا مصدرٍ كذبٌ مُطمئن.
@@ -358,6 +364,7 @@ export function createRegistries({
   operationsPolicy = null,
   crisisPolicy = null,
   crisisEvidence = null,
+  auditViewerPolicy = null,
   healthProbes = null,
   quotas = null,
   quotaConsumption = null,
@@ -590,6 +597,16 @@ export function createRegistries({
     ...(crisisEvidence === null ? {} : { evidence: crisisEvidence }),
     ...(nowMs === null ? {} : { nowMs }),
   });
+  // وعارضُ سجلِّ التدقيق (`M9.07`): سطحُ قراءةٍ محضٌ على **عينِ** السجلِّ
+  // الدائمِ الذي تكتب فيه الطبقاتُ كلُّها أثرَها، لا على نسخةٍ ثانيةٍ تُقرأ سجلّاً
+  // غيرَ الذي تشهد عليه الدولة. ولا مستودعَ في يدِه ولا نداءَ كتابةٍ واحدٌ على
+  // المفحوص: يقرأ بـ`inspectEventLog` ويكتب أثرَ قراءتِه في السجلِّ نفسِه **قبل**
+  // أن يفتحَه، ويُعيد مع كلِّ مشهدٍ حكمَ سلامةِ السلسلةِ مقروءاً من نفسِ القراءة.
+  const auditViewer = new AuditLogViewer({
+    policy: auditViewerPolicy ?? loadAuditViewerPolicy(),
+    log,
+    ...(nowMs === null ? {} : { nowMs }),
+  });
   return {
     agents,
     monitor,
@@ -598,6 +615,7 @@ export function createRegistries({
     royalConsole,
     operations,
     crisis,
+    auditViewer,
     models: new ModelRegistry({
       log,
       repository: repositories.models,

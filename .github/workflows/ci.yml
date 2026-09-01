@@ -200,6 +200,9 @@ jobs:
       - name: حاجز غرفة الأزمات (M9.06) — لا خطوة أزمة خارج ترتيبها ولا أمر سيادي خارج الديوان
         run: npm run guard:crisis
 
+      - name: حاجز عارض سجل التدقيق (M9.07) — لا مشهد بلا حكم سلامة ولا قراءة بلا قيد
+        run: npm run guard:audit-viewer
+
       - name: حاجز القوالب — لا ملفات فارغة تعود إلى الشجرة
         run: npm run guard:templates
 
