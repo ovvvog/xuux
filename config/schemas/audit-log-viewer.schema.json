@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/audit-log-viewer.schema.json",
+  "title": "وثيقة عارض سجل التدقيق — M9.07",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "audit",
+    "search",
+    "integrity",
+    "refusalCodes",
+    "views",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "viewEvent",
+        "viewRefusedEvent",
+        "integrityEvent",
+        "integrityWarnedEvent",
+        "statement"
+      ],
+      "properties": {
+        "viewEvent": { "type": "string", "minLength": 3 },
+        "viewRefusedEvent": { "type": "string", "minLength": 3 },
+        "integrityEvent": { "type": "string", "minLength": 3 },
+        "integrityWarnedEvent": { "type": "string", "minLength": 3 },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "maxRows", "maxTermLength", "statement"],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-zA-Z]+$" }
+        },
+        "maxRows": { "type": "integer", "minimum": 1, "maximum": 5000 },
+        "maxTermLength": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["breakReasons", "severity", "statement"],
+      "properties": {
+        "breakReasons": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z_]+$" }
+        },
+        "severity": { "type": "string", "pattern": "^[a-z]+$" },
+        "statement": { "type": "string", "minLength": 40 }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^AUDIT_VIEWER_[A-Z_]+$" }
+    },
+    "views": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "face", "source", "purpose"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^view:[a-z0-9.-]+$" },
+          "face": { "type": "string", "enum": ["search", "timeline", "integrity"] },
+          "source": { "type": "string", "const": "log:events" },
+          "purpose": { "type": "string", "minLength": 8 }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy", "codes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-AUDIT-[A-Z-]+$" },
+          "statement": { "type": "string", "minLength": 20 },
+          "enforcedBy": { "type": "string", "minLength": 5 },
+          "codes": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^AUDIT_VIEWER_[A-Z_]+$" }
+          }
+        }
+      }
+    }
+  }
+}
