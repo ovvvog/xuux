@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/telemetry.schema.json",
+  "title": "وثيقة القياس الموحّد — M10.01",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "sampling",
+    "limits",
+    "correlation",
+    "logLevels",
+    "spans",
+    "metrics",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "sampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "statement"],
+      "properties": {
+        "mode": { "const": "alwaysOn" },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxSpansPerTrace", "maxAttributesPerSpan", "maxAttributeLength", "statement"],
+      "properties": {
+        "maxSpansPerTrace": { "type": "integer", "minimum": 8, "maximum": 4096 },
+        "maxAttributesPerSpan": { "type": "integer", "minimum": 4, "maximum": 256 },
+        "maxAttributeLength": { "type": "integer", "minimum": 32, "maximum": 8192 },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "correlation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traceIdField",
+        "spanIdField",
+        "parentSpanIdField",
+        "traceparentHeader",
+        "traceparentVersion",
+        "statement"
+      ],
+      "properties": {
+        "traceIdField": { "type": "string", "minLength": 3 },
+        "spanIdField": { "type": "string", "minLength": 3 },
+        "parentSpanIdField": { "type": "string", "minLength": 3 },
+        "traceparentHeader": { "type": "string", "minLength": 3 },
+        "traceparentVersion": { "const": "00" },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "logLevels": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[a-z]+$" }
+    },
+    "spans": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "emittedIn", "purpose", "attributes"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$" },
+          "kind": { "enum": ["server", "client", "internal", "producer", "consumer"] },
+          "emittedIn": { "type": "string", "pattern": "^src/[A-Za-z0-9_./-]+\\.mjs$" },
+          "purpose": { "type": "string", "minLength": 20 },
+          "attributes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$" }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "kind", "unit", "purpose"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9]*)+$" },
+          "kind": { "enum": ["counter", "histogram"] },
+          "unit": { "type": "string", "minLength": 1 },
+          "purpose": { "type": "string", "minLength": 10 }
+        }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^TELEMETRY_[A-Z_]+$" }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "enforcedIn", "codes", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-TEL-[A-Z0-9-]+$" },
+          "enforcedIn": { "type": "string", "pattern": "^src/[A-Za-z0-9_./-]+\\.mjs$" },
+          "codes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^TELEMETRY_[A-Z_]+$" }
+          },
+          "statement": { "type": "string", "minLength": 20 }
+        }
+      }
+    }
+  }
+}
