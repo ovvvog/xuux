@@ -36,7 +36,7 @@
 - **مُنشأة (9):** `config/cost-capacity.yaml` · `config/schemas/cost-capacity.schema.json` · `src/cost-capacity/errors.mjs` · `src/cost-capacity/pricing.mjs` · `src/cost-capacity/deviation.mjs` · `src/cost-capacity/cost-capacity.mjs` · `src/cost-capacity/index.mjs` · `tests/cost-capacity/monthly-report.test.mjs` · `tests/cost-capacity/cost-capacity.test.mjs` · `scripts/guard-cost-capacity.mjs` · `docs/COST_CAPACITY.md`
 - **معدَّلة (8):** `package.json` (`guard:cost-capacity` و`validate` و`0.50.0`) · `.github/workflows/ci.yml` (خطوةٌ مسمّاةٌ للبوابة) · `docs/ROOT_OF_TRUST.md` (عددُ ملفّاتِ الاختبار) · `version.json` · `docs/roadmap/03-roadmap-to-100.md` · `docs/roadmap/02-baseline-audit.md` · `docs/REMAINING_WORK.md` · `PROJECT_STATUS.md` · `docs/roadmap/05-work-log.md`
 
-**الـ commit:** الفرعُ `feat/m10-04-cost-capacity` على رأسِ `main` `c3b5c1eb`، والدفعُ عبر واجهةِ بياناتِ Git لأن `codeload.github.com` محجوبٌ في هذه البيئة. وطلبُ الدمجِ **#`__PR_NUMBER__`** — <__PR_URL__>.
+**الـ commit:** الفرعُ `feat/m10-04-cost-capacity` على رأسِ `main` `c3b5c1eb`، والدفعُ عبر واجهةِ بياناتِ Git لأن `codeload.github.com` محجوبٌ في هذه البيئة. وطلبُ الدمجِ **#`16`** — <https://github.com/soaav-svg/xuux/pull/16>.
 
 **الدليل:**
 
@@ -44,7 +44,7 @@
 - **العيبُ المقروءُ الذي أُصلح في الجذر:** إخفاقُ `2 !== 5` في اختبارِ قيدِ الرفضِ **قبل** الإصلاح، ونجاحُه **بعده** ضمن **13 اختباراً ناجحاً و0 فاشلاً** في `node --test tests/cost-capacity/`.
 - **البوابةُ تقيس فعلاً:** أوّلُ تشغيلٍ لـ`npm run guard:cost-capacity` خرج **مغلقاً بستٍّ وثلاثين مخالفةً** (وثيقةٌ غائبةٌ ووصلٌ غائبٌ)، ثم خرج **أخضرَ** بعد استيفاءِ القواعدِ العشرِ، ورسالتُه تُعلن المقيسَ: 4 بنودٍ · 3 أبعادٍ · 3 حدودٍ · 3 قواعدَ · 8 أقسامٍ · 11 رمزاً · 8 ضماناتٍ.
 - **محلياً:** `npm run validate` خروجٌ **0** بسلسلةِ **38 خطوةً** — **1034 اختباراً** (‏**948** ناجحاً و**0** فاشلاً و**86** متخطّىً لعدمِ وجودِ PostgreSQL في هذه البيئة) — وملفّاتُ الاختبارِ **102** والملفّاتُ المتعقَّبةُ **614** من حدِّ 3000.
-- **وحكمُ CI الفعليُّ على الفرعِ — وهو الحكمُ لا الأخضرُ المحليّ:** التشغيلةُ **`__CI_RUN__`** على `feat/m10-04-cost-capacity` (‏`__CI_SHA__`) — **`__CI_CONCLUSION__`** — `__CI_STARTED__` ⇐ `__CI_COMPLETED__` — <__CI_URL__> — وخطوةُ «الاختبارات» فيها على PostgreSQL حقيقيّةٍ: **`__CI_TESTS__` اختباراً، `__CI_PASS__` ناجحاً، `__CI_FAIL__` فاشلاً، `__CI_SKIP__` متخطّاة**.
+- **وحكمُ CI الفعليُّ على الفرعِ — وهو الحكمُ لا الأخضرُ المحليّ:** التشغيلةُ **`168`** على `feat/m10-04-cost-capacity` (‏`be7b6e0e`) — **success** — `2026-09-02T06:54:56Z` ⇐ `2026-09-02T06:58:48Z` — <https://github.com/soaav-svg/xuux/actions/runs/33601023940> — وخطوةُ «الاختبارات» فيها على PostgreSQL حقيقيّةٍ: **`1034` اختباراً، `1029` ناجحاً، `0` فاشلاً، `5` متخطّاة**.
 
 **ما لم يتم ولماذا:**
 
