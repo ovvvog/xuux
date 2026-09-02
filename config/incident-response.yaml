@@ -1,0 +1,383 @@
+# مسارُ الاستجابةِ للحوادث — الخطوة `M10.03`
+#
+# العيبُ الذي جاءت لتُغلقه، بدقة: أعطت `M10.01` النظامَ **رقماً**، وأعطته
+# `M10.02` **حكماً** — فصار يُقال «انكسر العهد» بعتبةٍ معلَنةٍ لا برأيٍ في
+# اجتماع. **ولكنّ اللوحةَ تُقرأ ولا تُرسِل**، وذاك حدٌّ أُعلن في `M10.02`
+# بنصِّه. فمن أراد أن يعرف أنّ العهدَ انكسر **كان عليه أن يسأل** — ولا أحدَ
+# يسأل في الثالثةِ صباحاً. فالانكسارُ يُقاس ولا يُبلَّغ، **وقياسٌ لا يبلغ
+# أحداً صمتٌ موثَّقٌ لا رصد**.
+#
+# وأخطرُ منه: **غيابُ القياسِ نفسُه لم يكن يُنبِّه أحداً.** فالحكمُ «غيرُ
+# مقيسٍ» أُنشئ في `M10.02` ليقتل الأخضرَ الفارغَ، فصار الصفرُ يُقال عنه «لم
+# يُقَس» بدل «مئةٌ في المئة» — **ثم ظلَّ غيرَ مقيسٍ إلى الأبدِ بلا صوت**.
+# فانقطاعُ القياسِ عن قدرةٍ أساسيةٍ صار أهدأَ من انكسارِ عهدِها، وهذا مخرجٌ
+# للعمى من البابِ الذي أُغلق.
+#
+# وثالثٌ: غرفةُ الأزماتِ (`M9.06`) تُدير الأزمةَ بإجراءٍ مُرتَّبٍ لا يُتجاوَز،
+# ومركزُ العملياتِ (`M9.05`) يُقيِّد الحادثةَ ويراها، والتصعيدُ البشريُّ مُعلَنٌ
+# بجهاتِه ومهلةِ إقرارِه — **ولا شيءَ يُشعِل ذلك كلَّه إلا يدُ إنسانٍ قرّرت
+# أن تُشعِله**. فالإجراءُ محفوظٌ والمُشعِلُ مفقود.
+#
+# ورابعٌ: جهاتُ التصعيدِ في `M9.06` مُعلَنةٌ **بأدوارِها** ولا **مناوبةَ**
+# فيها. و«يُبلَّغ المدقّق» جوابٌ لا يُنفَّذ في الثالثةِ صباحاً: أيُّ مدقّقٍ،
+# وهل هو على المناوبةِ الآن؟ فمن لم يُعلِن شِفتاً أعلن أملاً.
+#
+# وخامسٌ: الحادثةُ تُغلَق ولا يُكتب لماذا وقعت ولا ما يمنع تكرارَها.
+# **والحادثةُ التي تُغلَق بلا مراجعةٍ تعود.**
+#
+# وما لا تفعله هذه الوثيقة: **لا تقيس شيئاً** ولا تُعلن هدفاً ولا عتبةً ولا
+# رقماً من أرقامِ `config/service-levels.yaml` — تُشير إلى الأهدافِ
+# **بمعرّفاتِها** فمصدرُ الحقيقةِ واحدٌ لا مكرَّر؛ **ولا تُعلن جهةَ تصعيدٍ
+# جديدةً** بل تُشير إلى جهاتِ `config/crisis-room.yaml` بمعرّفاتِها؛ **ولا
+# تُنشئ سجلَّ حوادثَ ثانياً** بل تُقيِّد الحادثةَ في مركزِ العملياتِ ودرجاتُها
+# درجاتُه؛ **ولا تملك قناةَ نقلٍ** — القناةُ معرّفٌ ومقصدٌ في قيدٍ، والنقلُ
+# الخارجيُّ دَينٌ معلَنٌ لا يُدَّعى إنجازُه.
+
+version: 1
+
+statement: >-
+  لا تنبيهَ إلا من قاعدةٍ معلَنةٍ في هذا الملفِّ مربوطةٍ بهدفٍ معلَنٍ في وثيقةِ
+  مستوياتِ الخدمة، ولا درجةَ إلا مُعلَنةً بمهلةِ إقرارِها ومهلةِ تصعيدِها، ولا
+  مستجيبَ إلا من شِفتٍ يُحلُّ على ساعةٍ مُمرَّرةٍ من جدولٍ يُغطّي الدورةَ كلَّها
+  بلا فجوةٍ ولا تداخُل، ولا تصعيدَ إلا إلى جهةٍ معلَنةٍ في غرفةِ الأزماتِ
+  بترتيبِ سلَّمٍ لا يُقفَز، ولا إغلاقَ لحادثةٍ تستوجب مراجعةً إلا بتقريرٍ
+  أقسامُه مُعلَنةٌ وخطُّ زمنِه **مقروءٌ من قيودِ السجلِّ الدائمِ على القرص** لا
+  مكتوبٌ من ذاكرةِ مُراجِعٍ، ولا يُقرّ التقريرَ من استجاب للتنبيهِ نفسِه.
+
+# ── التدقيق ──
+# سبعةُ أحداثٍ لا حدثٌ واحد: تنبيهٌ رُفع، وتنبيهٌ كُتم بقاعدةٍ معلَنة، وإقرارٌ
+# وقع، وتصعيدٌ رُفع، وحادثةٌ حُلَّت، وتقريرُ مراجعةٍ نُشر، ورفضٌ وقع. فمن قرأ
+# السجلَّ بعد سنةٍ ميَّز «تنبيهٌ لم يُقَرّ» من «تنبيهٌ أُقِرَّ متأخّراً» من
+# «تنبيهٌ لم يُرفَع أصلاً» — وهذه ثلاثةُ أحوالٍ لا حالٌ واحد.
+audit:
+  alertRaisedEvent: incident.alert.raised
+  alertSuppressedEvent: incident.alert.suppressed
+  alertAcknowledgedEvent: incident.alert.acknowledged
+  alertEscalatedEvent: incident.alert.escalated
+  alertResolvedEvent: incident.alert.resolved
+  reviewPublishedEvent: incident.review.published
+  refusedEvent: incident.action.refused
+  statement: >-
+    قيدُ كلِّ خطوةٍ يُكتب في السجلِّ الدائمِ قبل أن يقع أثرُها، وكلُّ رفضٍ قيدٌ
+    برمزِه وتفصيلِه؛ وما لا يشهد به ملفُّ السجلِّ لم يقع ولو قاله المُشغِّل.
+
+# ── رموزُ الرفض ──
+# مُعلَنةٌ هنا كي يُقابَل المُعلَنُ بالمكتوبِ في الكودِ في الاتجاهين، فلا رمزٌ
+# يُرفع بلا إعلانٍ ولا رمزٌ يُعلَن بلا موضعِ إنفاذ.
+refusalCodes:
+  - IR_CONFIG_INVALID
+  - IR_POLICY_REQUIRED
+  - IR_AUDIT_REQUIRED
+  - IR_SERVICE_LEVELS_REQUIRED
+  - IR_OPERATIONS_REQUIRED
+  - IR_OBJECTIVE_UNDECLARED
+  - IR_SEVERITY_UNDECLARED
+  - IR_RULE_UNDECLARED
+  - IR_ALERT_UNKNOWN
+  - IR_ALERT_NOT_OPEN
+  - IR_ALERT_ALREADY_ACKNOWLEDGED
+  - IR_RESPONDER_UNKNOWN
+  - IR_RESPONDER_NOT_ON_CALL
+  - IR_ROTATION_GAP
+  - IR_ESCALATION_TIER_EXHAUSTED
+  - IR_ESCALATION_PREMATURE
+  - IR_ACKNOWLEDGE_DEADLINE_MISSED
+  - IR_RESOLVE_BEFORE_ACKNOWLEDGE
+  - IR_REVIEW_REQUIRED
+  - IR_REVIEW_SECTION_MISSING
+  - IR_REVIEW_EVIDENCE_MISSING
+  - IR_REVIEW_REVIEWER_CONFLICT
+  - IR_REVIEW_DEADLINE_MISSED
+  - IR_CLOCK_INVALID
+
+# ── التصنيف ──
+# الدرجةُ ليست وسماً لغويّاً: هي **مهلتان ورقمُ إلزامٍ بمراجعة**. فمن قال
+# «حرِج» ولم يقل «يُقَرُّ في خمسِ دقائقَ ويُصعَّد في عشرٍ» لم يُصنِّف شيئاً.
+# و`incidentSeverity` درجةُ **مركزِ العملياتِ** بعينِها — تُقابَل بوثيقتِه فلا
+# تُخترَع درجةٌ لا يعرف ثقلَها المركزُ الذي ستُقيَّد فيه الحادثة.
+severities:
+  - id: severity:critical
+    incidentSeverity: critical
+    acknowledgeWithinMs: 300000
+    escalateAfterMs: 600000
+    requiresReview: true
+    statement: >-
+      انكسارُ عهدٍ على قدرةٍ أساسيةٍ أو نفادُ ميزانيةِ أخطائها: يُقَرُّ داخلَ
+      خمسِ دقائقَ ويُصعَّد بعد عشرٍ، ولا يُغلَق بلا تقريرِ مراجعةٍ.
+
+  - id: severity:warning
+    incidentSeverity: warning
+    acknowledgeWithinMs: 1800000
+    escalateAfterMs: 3600000
+    requiresReview: true
+    statement: >-
+      انحرافٌ عن هدفٍ لا يبلغ نفادَ الميزانية: يُقَرُّ داخلَ نصفِ ساعةٍ
+      ويُصعَّد بعد ساعةٍ، ولا يُغلَق بلا تقريرِ مراجعةٍ.
+
+  - id: severity:info
+    incidentSeverity: info
+    acknowledgeWithinMs: 86400000
+    escalateAfterMs: 172800000
+    requiresReview: false
+    statement: >-
+      خبرٌ يُقيَّد ليُقرأ ولا يُوقِظ أحداً: يُقَرُّ في يومٍ ويُصعَّد في يومين،
+      ولا يُلزِم بتقريرِ مراجعةٍ — ومن أَلزَم كلَّ خبرٍ بتقريرٍ أَلغى قيمةَ
+      التقرير.
+
+# ── قواعدُ التنبيه ──
+# كلُّ قاعدةٍ تُشير إلى **معرّفِ هدفٍ** في `config/service-levels.yaml` ولا
+# تُعيد كتابةَ هدفِه ولا عتبتِه: تشديدُ الهدفِ سطرٌ في وثيقتِه يظهر أثرُه هنا
+# بلا حرفٍ يُغيَّر. والشرطُ من ثلاثةٍ لا رابعَ لها في الكود:
+#   `objective-breaching`  — الحكمُ المقيسُ «مُخفِقٌ» عن هدفِه.
+#   `budget-exhausted`     — ميزانيةُ الأخطاءِ نُفدت.
+#   `measurement-missing`  — الحكمُ «غيرُ مقيسٍ» **وقد مضى على النافذةِ**
+#                            `graceMs` — وهذا هو البابُ الذي أُغلق: صمتُ
+#                            القياسِ صار يُنبِّه، ولا يُنبِّه في أولِ ثانيةٍ
+#                            من عمرِ العمليةِ فيصير ضجيجاً يُتعلَّم تجاهُلُه.
+#
+# **وكلُّ هدفٍ معلَنٍ في وثيقةِ مستوياتِ الخدمةِ له قاعدةٌ واحدةٌ على الأقلّ**،
+# يفحص ذلك الحاجزُ في الاتجاهين: هدفٌ بلا قاعدةٍ عهدٌ لا يراقبه أحدٌ، وقاعدةٌ
+# بلا هدفٍ تنبيهٌ لا مصدرَ له.
+rules:
+  - id: alert:api-availability-breaching
+    objective: slo:api.availability
+    condition: objective-breaching
+    severity: severity:critical
+    channel: channel:audit-desk
+    statement: >-
+      إتاحةُ نداءِ الواجهةِ انحرفت تحتَ هدفِها المُعلَن؛ وهي أوّلُ ما يمسّه
+      المستعمِلُ فدرجتُها حرِجة.
+
+  - id: alert:api-availability-budget-exhausted
+    objective: slo:api.availability
+    condition: budget-exhausted
+    severity: severity:critical
+    channel: channel:sovereign-desk
+    statement: >-
+      نفادُ ميزانيةِ أخطاءِ الإتاحةِ ليس انحرافاً يُنتظَر تحسُّنُه: هو استهلاكُ
+      كلِّ ما كان مسموحاً، فيُصعَّد إلى مكتبِ القرارِ لا إلى مكتبِ التدقيقِ وحدَه.
+
+  - id: alert:api-availability-unmeasured
+    objective: slo:api.availability
+    condition: measurement-missing
+    graceMs: 900000
+    severity: severity:warning
+    channel: channel:audit-desk
+    statement: >-
+      مضى على النافذةِ ربعُ ساعةٍ ولم يقع تحتَ إتاحةِ الواجهةِ حدثٌ مقيسٌ
+      واحد؛ وصمتُ القياسِ على قدرةٍ أساسيةٍ خبرٌ لا سكون.
+
+  - id: alert:api-latency-breaching
+    objective: slo:api.latency
+    condition: objective-breaching
+    severity: severity:warning
+    channel: channel:audit-desk
+    statement: >-
+      مدّةُ نداءِ الواجهةِ خرجت عن عتبتِها المُعلَنةِ بأكثرَ مما يسمح هدفُها؛
+      وبطءٌ لا يُقَرُّ به يصير عادةً تُقاس عليها التوقّعات.
+
+  - id: alert:api-latency-unmeasured
+    objective: slo:api.latency
+    condition: measurement-missing
+    graceMs: 900000
+    severity: severity:info
+    channel: channel:audit-desk
+    statement: >-
+      لا مدّةَ واحدةً سُجِّلت لنداءِ الواجهةِ بعد ربعِ ساعةٍ من النافذة؛ وهو
+      خبرٌ يُقيَّد لأن مُدرَّجَ المدّاتِ مُعايَنٌ بسقفٍ معلَنٍ فقد يصمت بحقّ.
+
+  - id: alert:storage-latency-breaching
+    objective: slo:storage.latency
+    condition: objective-breaching
+    severity: severity:warning
+    channel: channel:audit-desk
+    statement: >-
+      مدّةُ القراءةِ من التخزينِ خرجت عن عتبتِها؛ وانفصالُ زمنِ التخزينِ عن
+      زمنِ الواجهةِ هو موضعُ الإسنادِ الذي أُنشئ في `M10.01`.
+
+  - id: alert:storage-latency-unmeasured
+    objective: slo:storage.latency
+    condition: measurement-missing
+    graceMs: 900000
+    severity: severity:info
+    channel: channel:audit-desk
+    statement: >-
+      لا قراءةَ تخزينٍ واحدةً سُجِّلت مدّتُها بعد ربعِ ساعةٍ من النافذة؛ خبرٌ
+      يُقيَّد ولا يُوقِظ.
+
+# ── المناوبة ──
+# الشِفتُ **إزاحةٌ في دورةٍ** لا ساعةُ حائطٍ: تُحسَب بالباقي من تقسيمِ اللحظةِ
+# على مدّةِ الدورة، فلا منطقةَ زمنيةً ولا توقيتاً صيفيّاً ولا ساعةَ نظامٍ
+# تُقرأ من تحتِ الاختبار. **والجدولُ يُغطّي الدورةَ كلَّها بلا فجوةٍ ولا
+# تداخُل** — يفحصه المُحمِّلُ والحاجزُ معاً: فجوةٌ واحدةٌ في الجدولِ تعني
+# لحظةً لا مستجيبَ فيها، وذاك بعينُه العطبُ الذي جاءت المناوبةُ لتمنعه؛
+# وتداخُلٌ يعني مسؤولين اثنين، وكلٌّ منهما يظنّ أنّ الآخرَ سيردّ.
+#
+# والمستجيبونَ **جهاتُ `config/crisis-room.yaml` بمعرّفاتِها** — لا قائمةَ
+# جهاتٍ ثانيةً تُصان في موضعين فتتباعدان.
+rotation:
+  cycleMs: 86400000
+  statement: >-
+    لكلِّ لحظةٍ من الدورةِ مستجيبٌ واحدٌ بعينِه يُحَلُّ من الجدولِ على ساعةٍ
+    مُمرَّرة؛ ولا لحظةَ بلا مستجيبٍ ولا لحظةَ بمستجيبين.
+  shifts:
+    - id: shift:day
+      startMs: 0
+      endMs: 43200000
+      responder: contact:audit-desk
+      purpose: نصفُ الدورةِ الأولُ على مكتبِ التدقيقِ فهو من يُراجع الأثرَ بعده.
+
+    - id: shift:night
+      startMs: 43200000
+      endMs: 86400000
+      responder: contact:sovereign-desk
+      purpose: >-
+        نصفُ الدورةِ الثاني على مكتبِ القرارِ السياديِّ، لأن الحادثةَ في
+        الساعاتِ الهادئةِ لا تجد من يُقرّرها إن لم يُعلَن لها صاحبُ قرار.
+
+# ── سلَّمُ التصعيد ──
+# ترتيبٌ لا يُقفَز: من لم يُبلِّغ المرتبةَ الأولى لا يُبلِّغ الثانية،
+# **والتصعيدُ قبل انقضاءِ مهلةِ الدرجةِ رفضٌ مُسمّىً** — فمن صعَّد في الثانيةِ
+# الأولى أحرق سلَّمَه، ومن أراد نداءَ صاحبِ القرارِ في كلِّ خبرٍ جعل نداءَه
+# لا يُسمَع. والجهاتُ جهاتُ غرفةِ الأزماتِ بمعرّفاتِها.
+escalation:
+  selfAcknowledgeForbidden: true
+  statement: >-
+    التصعيدُ لا يقع إلا بعد انقضاءِ مهلةِ الدرجةِ مقيسةً على ساعةٍ مُمرَّرةٍ،
+    ولا يتجاوز مرتبةً إلى ما بعدها، ولا يُرفَع إلى جهةٍ غيرِ معلَنةٍ في غرفةِ
+    الأزمات؛ ومن استجاب لا يُقرّ تقريرَ مراجعتِه بنفسِه.
+  ladder:
+    - tier: 1
+      contact: contact:audit-desk
+      purpose: المدقّقُ أولاً فهو من يقرأ الأثرَ ويُراجعه.
+
+    - tier: 2
+      contact: contact:sovereign-desk
+      purpose: صاحبُ القرارِ السياديِّ آخراً، فما بلغه لا مرتبةَ بعده.
+
+# ── المراجعةُ اللاحقة ──
+# **خطُّ الزمنِ لا يُكتَب: يُقرأ.** يُبنى من قيودِ السجلِّ الدائمِ على القرصِ
+# لهذا التنبيهِ بعينِه، فمن لم يقع له قيدٌ لم تقع خطوتُه ولو كتبها المُراجِعُ
+# في تقريره. وما يكتبه المُراجِعُ هو ما **لا يعرفه السجلُّ**: الأثرُ في
+# الخارجِ، والسببُ الجذريُّ، والإجراءاتُ المانعةُ للتكرار — ولكلٍّ حدُّ طولٍ
+# **في الوثيقةِ لا في الكودِ** كي يكون رفعُه قراراً معلَناً: سببٌ جذريٌّ من
+# كلمتين يُقرأ بعد شهرٍ ولا يُفهم، ومراجعةٌ بلا إجراءٍ مانعٍ مراجعةٌ تُطمئن
+# ولا تمنع.
+#
+# **والمُراجِعُ ليس المستجيب.** ومن أقرّ التنبيهَ ثم راجع نفسَه كتب شهادةً
+# على مرآة — وهي نفسُ قاعدةِ «الإقرارُ من غيرِ رافعِ التصعيد» في `M9.06`
+# ونفسُ قاعدةِ المراجعةِ المستقلةِ في القاعدةِ الحاكمة.
+review:
+  dueWithinMs: 604800000
+  minRootCauseLength: 60
+  minImpactLength: 40
+  minCorrectiveActions: 1
+  minCorrectiveActionLength: 20
+  independentReviewer: true
+  evidence: on-disk-log
+  statement: >-
+    تقريرُ المراجعةِ لا يُنشَر إلا وخطُّ زمنِه مقروءٌ من قيودِ السجلِّ الدائمِ
+    على القرصِ لهذا التنبيهِ بعينِه، وأقسامُه المُعلَنةُ كلُّها حاضرةٌ بحدودِ
+    طولِها، وإجراءٌ مانعٌ واحدٌ على الأقلّ مكتوبٌ، والمُراجِعُ غيرُ المستجيبِ،
+    وداخلَ المهلةِ المُعلَنةِ مقيسةً على ساعةٍ مُمرَّرة.
+  requiredSections:
+    - id: section:timeline
+      source: on-disk-log
+      purpose: خطُّ الزمنِ يُقرأ من قيودِ السجلِّ لا من ذاكرةِ المُراجِع.
+
+    - id: section:impact
+      source: reviewer
+      purpose: ما وقع في الخارجِ لا يعرفه السجلُّ، فيكتبه المُراجِعُ بحدِّ طولٍ معلَن.
+
+    - id: section:root-cause
+      source: reviewer
+      purpose: السببُ الجذريُّ لا العرَض، وبحدِّ طولٍ يمنع «خطأٌ عارض».
+
+    - id: section:corrective-actions
+      source: reviewer
+      purpose: إجراءٌ مانعٌ للتكرارِ واحدٌ على الأقلّ، وإلا فالمراجعةُ إنشاءٌ.
+
+# ── الضمانات ──
+guarantees:
+  - id: G-IR-ALERT-FROM-DECLARED-OBJECTIVE
+    statement: >-
+      لا تنبيهَ إلا من قاعدةٍ معلَنةٍ في هذه الوثيقةِ مربوطةٍ بهدفٍ معلَنٍ في
+      وثيقةِ مستوياتِ الخدمة؛ ولا يخترع المُنادي قاعدةً ولا هدفاً في زمنِ
+      التشغيل.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes: [IR_RULE_UNDECLARED, IR_OBJECTIVE_UNDECLARED]
+
+  - id: G-IR-SINGLE-SOURCE-OF-TRUTH
+    statement: >-
+      الحكمُ يُقرأ من لوحةِ مستوياتِ الخدمةِ بعينِها ولا يُحسَب هنا من جديد،
+      والدرجةُ تُقيَّد بدرجاتِ مركزِ العملياتِ لا بدرجاتٍ ثانيةٍ، والجهاتُ
+      جهاتُ غرفةِ الأزماتِ بمعرّفاتِها؛ فلا رقمَ يُقاس مرّتين ولا قائمةَ
+      تُصان في موضعين.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes: [IR_SERVICE_LEVELS_REQUIRED, IR_OPERATIONS_REQUIRED, IR_SEVERITY_UNDECLARED]
+
+  - id: G-IR-SILENCE-IS-A-SIGNAL
+    statement: >-
+      غيابُ القياسِ عن هدفٍ معلَنٍ بعد مضيِّ مهلةِ السماحِ يرفع تنبيهاً؛ فلا
+      يبقى «غيرُ مقيسٍ» حالاً هادئةً إلى الأبد.
+    enforcedBy: src/incident-response/alerts.mjs
+    codes: []
+
+  - id: G-IR-ON-CALL-RESOLVED
+    statement: >-
+      لكلِّ لحظةٍ مستجيبٌ واحدٌ بعينِه يُحَلُّ من جدولِ المناوبةِ على ساعةٍ
+      مُمرَّرةٍ، والجدولُ يُغطّي الدورةَ بلا فجوةٍ ولا تداخُل؛ ولا يُقِرُّ
+      التنبيهَ من ليس على المناوبةِ في لحظتِه.
+    enforcedBy: src/incident-response/rotation.mjs
+    codes: [IR_ROTATION_GAP, IR_RESPONDER_UNKNOWN, IR_RESPONDER_NOT_ON_CALL]
+
+  - id: G-IR-ESCALATION-ORDER-KEPT
+    statement: >-
+      التصعيدُ لا يقع قبل انقضاءِ مهلةِ الدرجةِ ولا يتجاوز مرتبةً في السلَّمِ
+      ولا يُرفَع بعد آخرِ مرتبةٍ؛ والمهلةُ من الوثيقةِ لا من الكود.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes: [IR_ESCALATION_PREMATURE, IR_ESCALATION_TIER_EXHAUSTED]
+
+  - id: G-IR-REVIEW-FROM-LOG
+    statement: >-
+      خطُّ زمنِ تقريرِ المراجعةِ يُبنى من قيودِ السجلِّ الدائمِ على القرصِ
+      لهذا التنبيهِ بعينِه، ولا يُنشَر تقريرٌ بلا دليلٍ مقروءٍ ولا بقسمٍ
+      لازمٍ ناقصٍ.
+    enforcedBy: src/incident-response/review.mjs
+    codes: [IR_REVIEW_EVIDENCE_MISSING, IR_REVIEW_SECTION_MISSING]
+
+  - id: G-IR-INDEPENDENT-REVIEWER
+    statement: >-
+      لا يُقرّ تقريرَ المراجعةِ من استجاب للتنبيهِ نفسِه، ولا تُغلَق حادثةٌ
+      تستوجب مراجعةً بلا تقريرٍ منشورٍ داخلَ مهلتِه.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes: [IR_REVIEW_REVIEWER_CONFLICT, IR_REVIEW_REQUIRED, IR_REVIEW_DEADLINE_MISSED]
+
+  - id: G-IR-AUDIT-BEFORE-EFFECT
+    statement: >-
+      قيدُ كلِّ خطوةٍ يُكتب في السجلِّ الدائمِ قبل أن يقع أثرُها، وبلا سجلٍّ
+      لا تنبيهَ ولا إقرارَ ولا تصعيدَ ولا تقرير.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes: [IR_AUDIT_REQUIRED]
+
+  - id: G-IR-ORDER-OF-RESPONSE
+    statement: >-
+      لا حلَّ لتنبيهٍ لم يُقَرّ، ولا إقرارَ مرّتين، ولا إقرارَ لتنبيهٍ ليس
+      مفتوحاً، ولا إقرارَ بعد انقضاءِ مهلةِ درجتِه بلا تسجيلِ تفويتِها.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes:
+      [
+        IR_RESOLVE_BEFORE_ACKNOWLEDGE,
+        IR_ALERT_ALREADY_ACKNOWLEDGED,
+        IR_ALERT_NOT_OPEN,
+        IR_ALERT_UNKNOWN,
+        IR_ACKNOWLEDGE_DEADLINE_MISSED,
+      ]
+
+  - id: G-IR-INJECTED-CLOCK
+    statement: >-
+      الزمنُ كلُّه من ساعةٍ مُمرَّرةٍ: حلُّ الشِفتِ، ومهلةُ الإقرارِ، ومهلةُ
+      التصعيدِ، ومهلةُ التقريرِ؛ ولا مؤقِّتَ يعمل بنفسِه في هذه الوحدةِ ولا
+      شرطَ زمنيٍّ يُقاس على ساعةٍ لا يملكها الاختبار.
+    enforcedBy: src/incident-response/incident-response.mjs
+    codes: [IR_CLOCK_INVALID]

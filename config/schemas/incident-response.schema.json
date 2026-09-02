@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/schemas/incident-response.schema.json",
+  "title": "وثيقة مسار الاستجابة للحوادث — M10.03",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "audit",
+    "refusalCodes",
+    "severities",
+    "rules",
+    "rotation",
+    "escalation",
+    "review",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "statement": { "type": "string", "minLength": 80 },
+
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alertRaisedEvent",
+        "alertSuppressedEvent",
+        "alertAcknowledgedEvent",
+        "alertEscalatedEvent",
+        "alertResolvedEvent",
+        "reviewPublishedEvent",
+        "refusedEvent",
+        "statement"
+      ],
+      "properties": {
+        "alertRaisedEvent": { "$ref": "#/$defs/eventName" },
+        "alertSuppressedEvent": { "$ref": "#/$defs/eventName" },
+        "alertAcknowledgedEvent": { "$ref": "#/$defs/eventName" },
+        "alertEscalatedEvent": { "$ref": "#/$defs/eventName" },
+        "alertResolvedEvent": { "$ref": "#/$defs/eventName" },
+        "reviewPublishedEvent": { "$ref": "#/$defs/eventName" },
+        "refusedEvent": { "$ref": "#/$defs/eventName" },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 12,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^IR_[A-Z][A-Z_]*$" }
+    },
+
+    "severities": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "incidentSeverity",
+          "acknowledgeWithinMs",
+          "escalateAfterMs",
+          "requiresReview",
+          "statement"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^severity:[a-z][a-z0-9-]*$" },
+          "incidentSeverity": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "acknowledgeWithinMs": { "type": "integer", "minimum": 1000 },
+          "escalateAfterMs": { "type": "integer", "minimum": 1000 },
+          "requiresReview": { "type": "boolean" },
+          "statement": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+
+    "rules": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "objective", "condition", "severity", "channel", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^alert:[a-z][a-z0-9-]*$" },
+          "objective": { "type": "string", "pattern": "^slo:[a-z][a-z0-9.-]*$" },
+          "condition": {
+            "enum": ["objective-breaching", "budget-exhausted", "measurement-missing"]
+          },
+          "severity": { "type": "string", "pattern": "^severity:[a-z][a-z0-9-]*$" },
+          "channel": { "type": "string", "pattern": "^channel:[a-z][a-z0-9-]*$" },
+          "graceMs": { "type": "integer", "minimum": 1000 },
+          "statement": { "type": "string", "minLength": 20 }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "condition": { "const": "measurement-missing" } } },
+            "then": { "required": ["graceMs"] },
+            "else": { "not": { "required": ["graceMs"] } }
+          }
+        ]
+      }
+    },
+
+    "rotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cycleMs", "statement", "shifts"],
+      "properties": {
+        "cycleMs": { "type": "integer", "minimum": 60000 },
+        "statement": { "type": "string", "minLength": 20 },
+        "shifts": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "startMs", "endMs", "responder", "purpose"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^shift:[a-z][a-z0-9-]*$" },
+              "startMs": { "type": "integer", "minimum": 0 },
+              "endMs": { "type": "integer", "minimum": 1 },
+              "responder": { "$ref": "#/$defs/contactId" },
+              "purpose": { "type": "string", "minLength": 20 }
+            }
+          }
+        }
+      }
+    },
+
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selfAcknowledgeForbidden", "statement", "ladder"],
+      "properties": {
+        "selfAcknowledgeForbidden": { "const": true },
+        "statement": { "type": "string", "minLength": 20 },
+        "ladder": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tier", "contact", "purpose"],
+            "properties": {
+              "tier": { "type": "integer", "minimum": 1 },
+              "contact": { "$ref": "#/$defs/contactId" },
+              "purpose": { "type": "string", "minLength": 10 }
+            }
+          }
+        }
+      }
+    },
+
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dueWithinMs",
+        "minRootCauseLength",
+        "minImpactLength",
+        "minCorrectiveActions",
+        "minCorrectiveActionLength",
+        "independentReviewer",
+        "evidence",
+        "statement",
+        "requiredSections"
+      ],
+      "properties": {
+        "dueWithinMs": { "type": "integer", "minimum": 60000 },
+        "minRootCauseLength": { "type": "integer", "minimum": 20 },
+        "minImpactLength": { "type": "integer", "minimum": 20 },
+        "minCorrectiveActions": { "type": "integer", "minimum": 1 },
+        "minCorrectiveActionLength": { "type": "integer", "minimum": 10 },
+        "independentReviewer": { "const": true },
+        "evidence": { "const": "on-disk-log" },
+        "statement": { "type": "string", "minLength": 40 },
+        "requiredSections": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "source", "purpose"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^section:[a-z][a-z0-9-]*$" },
+              "source": { "enum": ["on-disk-log", "reviewer"] },
+              "purpose": { "type": "string", "minLength": 20 }
+            }
+          }
+        }
+      }
+    },
+
+    "guarantees": {
+      "type": "array",
+      "minItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy", "codes"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-IR-[A-Z][A-Z-]*$" },
+          "statement": { "type": "string", "minLength": 40 },
+          "enforcedBy": { "type": "string", "minLength": 8 },
+          "codes": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^IR_[A-Z][A-Z_]*$" }
+          }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "eventName": { "type": "string", "pattern": "^incident\\.[a-z]+\\.[a-z]+$" },
+    "contactId": { "type": "string", "pattern": "^contact:[a-z][a-z0-9-]*$" }
+  }
+}
