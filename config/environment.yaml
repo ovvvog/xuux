@@ -1,0 +1,390 @@
+# عقدُ البيئةِ — الخطوة `M10.05`
+#
+# **موضعُ الحقيقةِ الواحدُ لسؤالِ «ما الذي تحتاجه هذه البيئةُ لتعمل؟».**
+# كانت الإجابةُ قبل هذه الوثيقةِ موزّعةً على `engines` في `package.json` و`.nvmrc`
+# و`docker-compose.yml` و`README.md` وقراءةِ `src/persistence/db.mjs` — ومن وُزِّعت
+# عليه الحقيقةُ خمسةَ مواضعَ قرأ أربعةً وظنّ أنه قرأ كلَّها. فما لم يُعلَن هنا لا
+# يُقيمه `npm run bootstrap` ولا يفحصه `npm run verify:env`.
+#
+# ⚠ حدودٌ معلَنةٌ في متنِ الوثيقةِ نفسِها لا في هامشِها:
+#   1. **هذه الوثيقةُ لا تحمل قيمةَ سرٍّ واحدةٍ.** تُعلن اسمَ المتغيّرِ وصيغتَه
+#      وموضعَ لزومِه، والقيمةُ تأتي من البيئةِ أو من مخزنِ الأسرارِ لا من ملفٍّ
+#      متعقَّبٍ في المستودعِ (المادة 7 من القاعدة الحاكمة).
+#   2. **لا نشرَ ولا تراجعَ ولا تعددَ أقاليمَ هنا** — تلك نصوصُ `M10.06`–`M10.07`.
+#   3. **لا مُجدوِلَ يعمل بنفسِه:** الفحصُ يقع بنداءٍ، والساعةُ مُمرَّرةٌ.
+
+version: 1
+
+statement: >-
+  البيئةُ عقدٌ مُعلَنٌ لا معرفةٌ في رأسِ من بناها: تُقام بأمرٍ واحدٍ بأطوارٍ
+  مرتَّبةٍ لكلِّ طورٍ شرطُ تخطٍّ مُعلَنٌ، ويُحكَم على صلاحيتِها بمجساتٍ لكلٍّ
+  درجتُه؛ فمن نزل بمستودعٍ نظيفٍ لم يحتج إلى من يُخبره بالترتيب، ومن سأل «هل
+  هذه البيئةُ صالحةٌ؟» وجد حكماً لا تشخيصاً بالفشل.
+
+# ─────────────────────────── أوضاعُ البيئةِ المُعلَنة ───────────────────────────
+# ثلاثةٌ لا رابعَ لها، وكلُّ لزومِ متغيّرٍ أو تخطّي طورٍ يُنسَب إلى واحدٍ منها
+# بالاسم؛ فوضعٌ غيرُ مُعلَنٍ يجعل «لازمٌ» كلمةً بلا موضعٍ تلزم فيه.
+profiles:
+  - id: development
+    statement: >-
+      جهازُ المطوِّرِ: القاعدةُ تُقام محلياً بحاويةٍ، والمفاتيحُ على قرصٍ
+      مشفَّرٍ، ولا TLS مطلوبٌ على الوصلةِ المحليّة.
+  - id: ci
+    statement: >-
+      مسارُ التكاملِ المستمرِّ: القاعدةُ خدمةٌ مُقامةٌ سلفاً في المهمّةِ فلا
+      يُقيمها الطورُ، والتبعياتُ من القفلِ وحدَه.
+  - id: production
+    statement: >-
+      الخدمةُ العاملةُ: مخزنُ أسرارٍ خارجيٌّ وTLS على الوصلةِ شرطانِ لا
+      يُتخطّيان، وإقامةُ القاعدةِ ليست من عملِ هذا السكربت.
+
+# ─────────────────────────── أدواتُ السلسلةِ اللازمة ───────────────────────────
+# لكلِّ أداةٍ **أمرُ استخبارٍ لا أمرُ عملٍ**: `--version` وما يجري مجراه، فلا
+# يُغيّر الفحصُ ما يفحصه. و`minMajor` أدنى إصدارٍ رئيسٍ مقبولٌ، وغيابُه يعني
+# «أيُّ إصدارٍ يكفي».
+toolchain:
+  - id: tool:node
+    command: node
+    args: ['--version']
+    minMajor: 20
+    maxMajor: 20
+    requiredIn: [development, ci, production]
+    statement: >-
+      نُسخةُ Node مُثبَّتةٌ في `.nvmrc` وفي `engines`، ومجالُها هنا **مغلَقٌ
+      من الطرفين**: إصدارٌ أحدثُ يُغيّر سلوكَ `node --test` ونتائجَ الفحصِ
+      النوعيِّ فيصير الأخضرُ المحليُّ حكماً على بيئةٍ أخرى.
+  - id: tool:npm
+    command: npm
+    args: ['--version']
+    minMajor: 10
+    requiredIn: [development, ci, production]
+    statement: >-
+      التثبيتُ من القفلِ وحدَه (`npm ci`) يلزمه إصدارٌ يفهم `lockfileVersion`
+      المكتوبَ في `package-lock.json`.
+  - id: tool:docker
+    command: docker
+    args: ['--version']
+    requiredIn: [development]
+    statement: >-
+      حاويةُ PostgreSQL في `docker-compose.yml` هي طريقُ «الأمرِ الواحدِ» على
+      جهازِ المطوِّر؛ وفي CI القاعدةُ خدمةٌ مُقامةٌ سلفاً فلا تلزم الأداةُ،
+      وفي الإنتاجِ القاعدةُ ليست من عملِ هذا السكربت.
+
+# ─────────────────────────── متغيّراتُ البيئةِ المُعلَنة ────────────────────────
+# `format` تعبيرٌ نمطيٌّ يُطبَّق على **القيمةِ** لا على اسمِها، و`secret: true`
+# يمنع طبعَ القيمةِ في أيِّ مخرَجٍ — فمتغيّرٌ يُطبَع في سجلِّ بناءٍ سرٌّ انتهى.
+variables:
+  - id: DATABASE_URL
+    requiredIn: [ci, production]
+    format: '^postgres(ql)?://[^\s]+$'
+    secret: true
+    statement: >-
+      وصلةُ القاعدةِ. **غيابُها محلياً يُتخطّى ولا يُسكَت**: اختباراتُ
+      الاستمرارِ تُتخطّى فيُقرأ الأخضرُ ناقصاً، فيُعلَن التخطّي حكماً
+      `degraded` لا `healthy` — ومن قرأ «صحّةً كاملةً» على بيئةٍ بلا قاعدةٍ
+      قرأ ما لم يُقَس.
+  - id: STATE_ENV
+    requiredIn: [production]
+    format: '^(development|ci|production)$'
+    secret: false
+    statement: >-
+      وضعُ البيئةِ الصريحُ. وغيابُه في الإنتاجِ يجعل `src/persistence/db.mjs`
+      يقرأ `development` فيقبل وصلةً بلا TLS — **والافتراضُ الآمنُ لا يُترَك
+      لسلسلةِ افتراضاتٍ**.
+  - id: NODE_ENV
+    requiredIn: [production]
+    format: '^(development|test|production)$'
+    secret: false
+    statement: >-
+      يقرؤه `src/root-of-trust/king-key.mts` ليُلزِم بمخزنِ أسرارٍ خارجيٍّ؛
+      فغيابُه في الإنتاجِ يُسقِط إلزامَ المخزنِ صامتاً.
+  - id: WEIGHTS_DIR
+    requiredIn: []
+    format: '^/.*|^\./.*'
+    secret: false
+    statement: >-
+      جِذرُ أوزانِ النماذجِ؛ وغيابُه يعني `.state/weights` تحت مجلَّدِ العمل،
+      وهو مُعلَنٌ في `directories` أدناه فلا يُنشَأ ضِمناً عند أوّلِ كتابة.
+
+# ─────────────────────────── مجلَّداتُ زمنِ التشغيل ─────────────────────────────
+# كلُّها **خارجَ التعقُّبِ** ويحرسها فاحصُ مادةِ المفاتيح؛ وإنشاؤها طورٌ مُعلَنٌ
+# لا أثرٌ جانبيٌّ لأوّلِ كتابةٍ تقع.
+directories:
+  - path: .state
+    statement: حالةُ التشغيلِ المحليّةُ كلُّها تحت جِذرٍ واحدٍ يُحذَف بأمرٍ واحد.
+  - path: .state/weights
+    statement: أوزانُ النماذجِ وبصماتُها؛ يقرؤها `src/persistence/composition.mjs`.
+  - path: .state/logs
+    statement: سجلَّاتُ التشغيلِ الدائمةُ على القرصِ (‏`PersistentEventLog`).
+
+# ─────────────────────────── أطوارُ الإقامةِ بترتيبِها ─────────────────────────
+# **الترتيبُ عقدٌ لا ترتيبٌ اعتباطيّ**: من صرّف قبل أن يُثبِّتَ لم يجد المُصرِّف،
+# ومن هاجَرَ قبل أن تُقام القاعدةُ رأى رفضَ وصلةٍ لا خطأَ هجرة. ولكلِّ طورٍ:
+#   `skipWhenProfileIn`  — أوضاعٌ لا يُنفَّذ فيها الطورُ أصلاً، بنصٍّ مُعلَن.
+#   `skipWhenVariableUnset` — يُتخطّى إن غاب المتغيّرُ (لا يُصطنَع له قيمة).
+#   `skipWhenToolMissing`   — يُتخطّى إن غابت الأداةُ (لا يُدَّعى أنه نُفِّذ).
+#   `idempotent: true` — إعادةُ الأمرِ على بيئةٍ قائمةٍ لا تُفسِدها؛ وطورٌ غيرُ
+#                        متكافئٍ يمنع «أمراً واحداً يُعاد» ويجعله «أمراً يُحفَظ
+#                        عدَدُ مرّاتِه».
+phases:
+  - id: phase:directories
+    title: إنشاءُ مجلَّداتِ زمنِ التشغيل
+    kind: directories
+    idempotent: true
+    timeoutMs: 5000
+    statement: >-
+      المجلَّداتُ المُعلَنةُ أعلاه تُنشَأ أوّلاً؛ فطورٌ يكتب في مجلَّدٍ لم
+      يُنشَأ يفشل بخطأٍ يدلّ على الكتابةِ لا على النقص.
+  - id: phase:install
+    title: تثبيتُ التبعياتِ من القفلِ وحدَه
+    kind: command
+    command: npm
+    args: ['ci']
+    idempotent: true
+    timeoutMs: 600000
+    statement: >-
+      `npm ci` لا `npm install`: الأوّلُ يُقيم ما في `package-lock.json`
+      حرفياً، والثاني قد يُحدّث القفلَ فتختلف البيئتانِ باختلافِ يومِ الإقامة.
+  - id: phase:database
+    title: إقامةُ قاعدةِ البياناتِ المحليّةِ بحاوية
+    kind: command
+    command: docker
+    args: ['compose', 'up', '-d', '--wait']
+    skipWhenProfileIn: [ci, production]
+    skipWhenToolMissing: tool:docker
+    idempotent: true
+    timeoutMs: 300000
+    statement: >-
+      `--wait` لا `up -d` وحدَه: بلا انتظارِ الجهوزِ تنطلق الهجرةُ على قاعدةٍ
+      تقبل الوصلةَ ولا تقبل الاستعلامَ، فيُقرأ الفشلُ خطأَ هجرةٍ وهو سباقُ
+      إقلاع. وفي CI القاعدةُ خدمةٌ مُقامةٌ في المهمّةِ فيُتخطّى الطورُ
+      **بإعلانٍ** لا بصمت.
+  - id: phase:build
+    title: تصريفُ نواةِ جذرِ الثقةِ
+    kind: command
+    command: npm
+    args: ['run', 'build']
+    idempotent: true
+    timeoutMs: 300000
+    statement: >-
+      `src/root-of-trust/*.mts` تُصرَّف في موضعِها، وما يُنادى قبل التصريفِ
+      يجد ملفَّ `.mjs` قديماً أو غائباً.
+  - id: phase:migrate
+    title: تطبيقُ الهجراتِ على القاعدة
+    kind: command
+    command: npm
+    args: ['run', 'migrate', '--', 'up']
+    skipWhenVariableUnset: DATABASE_URL
+    idempotent: true
+    timeoutMs: 300000
+    statement: >-
+      الهجراتُ تُطبَّق تقديماً حتى آخرِ نسخةٍ. وبلا `DATABASE_URL` **يُتخطّى
+      الطورُ ولا تُصطنَع وصلةٌ**: وصلةٌ يخترعها سكربتٌ تُقيم مخطَّطاً في
+      قاعدةٍ لم يقصدها أحد.
+  - id: phase:seed
+    title: التحقّقُ من بذرةِ الدولةِ وترابطِها
+    kind: command
+    command: npm
+    args: ['run', 'validate:seed']
+    idempotent: true
+    timeoutMs: 120000
+    statement: >-
+      البذرةُ مصدرُ الحقيقةِ الوحيدُ لبنيةِ الدولةِ؛ فبيئةٌ تعمل ببذرةٍ
+      مُتناقضةٍ بيئةٌ تُنتج أرقاماً لا تُطابَق.
+
+# ─────────────────────────── مجساتُ فحصِ الصحّة ────────────────────────────────
+# **كلُّها قراءةٌ لا كتابةٌ** (الضمان `G-ENV-VERIFY-READ-ONLY`): فحصٌ يُصلِح ما
+# يفحصه لا يُخبر عن حالِ البيئةِ بل عن حالِ ما تركه هو. ولكلِّ مجسٍّ درجةٌ من
+# درجاتِ مركزِ العملياتِ نفسِها لا من قائمةٍ ثانية.
+probes:
+  - id: probe:node-version
+    kind: tool
+    target: tool:node
+    severity: critical
+    statement: نُسخةُ Node داخلَ المجالِ المُعلَنِ؛ وخارجَه حكمُ البيئةِ غيرُ صالح.
+  - id: probe:npm-version
+    kind: tool
+    target: tool:npm
+    severity: critical
+    statement: نُسخةُ npm تكفي للتثبيتِ من القفل.
+  - id: probe:docker-present
+    kind: tool
+    target: tool:docker
+    severity: warning
+    statement: >-
+      الحاويةُ طريقُ القاعدةِ محلياً؛ وغيابُها في `development` نقصٌ يُعلَن
+      ولا يُبطِل البيئةَ لأنّ القاعدةَ قد تكون مُقامةً بغيرِ حاوية.
+  - id: probe:database-url
+    kind: variable
+    target: DATABASE_URL
+    severity: warning
+    statement: >-
+      غيابُها محلياً يُتخطّى معه 86 اختبارَ استمرارٍ؛ **والتخطّي ليس نجاحاً**
+      فيهبط الحكمُ إلى `degraded` ويُقال السببُ بالاسم.
+  - id: probe:state-env
+    kind: variable
+    target: STATE_ENV
+    severity: warning
+    statement: وضعُ البيئةِ الصريحُ؛ وغيابُه يُقرأ `development` ضِمناً.
+  - id: probe:state-dir
+    kind: directory
+    target: .state
+    severity: critical
+    statement: جِذرُ حالةِ التشغيلِ؛ وغيابُه يعني أنّ طورَ المجلَّداتِ لم يقع.
+  - id: probe:weights-dir
+    kind: directory
+    target: .state/weights
+    severity: warning
+    statement: جِذرُ الأوزانِ؛ وغيابُه يُؤجِّل الفشلَ إلى أوّلِ تنشيطِ نموذج.
+  - id: probe:build-output
+    kind: file
+    target: src/root-of-trust/index.mjs
+    severity: critical
+    statement: >-
+      خرْجُ التصريفِ حاضرٌ؛ وغيابُه يعني أنّ طورَ البناءِ لم يقع، وأنّ ما
+      يُنادى من النواةِ سيُقرأ من ملفٍّ لا وجودَ له.
+  - id: probe:lockfile
+    kind: file
+    target: package-lock.json
+    severity: critical
+    statement: القفلُ حاضرٌ؛ وبلا قفلٍ يصير `npm ci` مستحيلاً وتصير البيئةُ غيرَ معادةٍ بذاتِها.
+  - id: probe:contract-self
+    kind: file
+    target: config/environment.yaml
+    severity: critical
+    statement: >-
+      العقدُ يفحص حضورَ نفسِه؛ فمن نسخ الشجرةَ ناقصةً رأى حكماً بالاسمِ لا
+      انهياراً في أوّلِ قراءة.
+
+# ─────────────────────────── حكمُ الصحّةِ الثلاثيّ ─────────────────────────────
+# **الحكمُ يُحسَب من الدرجاتِ لا من عدَدِ الناجحين**: مجسٌّ `critical` ساقطٌ
+# يُبطِل البيئةَ ولو نجح تسعةٌ غيرُه، ومجسٌّ `warning` ساقطٌ يُنقِص ولا يُبطِل.
+# ورمزُ الخروجِ مُعلَنٌ هنا لا في الكودِ، فمن قرأ الوثيقةَ عرف ما يعنيه رقمُه.
+healthCheck:
+  verdicts:
+    - id: healthy
+      exitCode: 0
+      statement: لا مجسَّ ساقطاً — بيئةٌ صالحةٌ بحكمٍ مقيسٍ لا بانطباع.
+    - id: degraded
+      exitCode: 0
+      statement: >-
+        كلُّ الساقطِ من درجةِ `warning`: البيئةُ تعمل وحكمُها **ناقصٌ مُعلَنٌ**،
+        ويُقبَل رمزُ خروجٍ صفراً لأنّ منعَ العملِ على نقصٍ مُعلَنٍ يُوقف
+        التطويرَ بلا سببٍ — **والنقصُ يُقال ولا يُسكَت**.
+    - id: unfit
+      exitCode: 2
+      statement: >-
+        مجسٌّ واحدٌ من درجةِ `critical` ساقطٌ ⇒ بيئةٌ غيرُ صالحةٍ ورمزُ خروجٍ
+        غيرُ صفريّ؛ فحكمٌ بالفشلِ يخرج صفراً حكمٌ لا يقرؤه مسارٌ آليّ.
+  requiredProbes:
+    - probe:node-version
+    - probe:npm-version
+    - probe:state-dir
+    - probe:build-output
+    - probe:lockfile
+    - probe:contract-self
+  statement: >-
+    المجساتُ اللازمةُ أعلاه لا يجوز أن تكون غائبةً من نتيجةِ الفحصِ؛ فمجسٌّ
+    مُعلَنٌ لم يُشغَّل ثم قُرئ الحكمُ «صحيحاً» هو صمتٌ يُقرأ نجاحاً — ويُرَدُّ
+    بالرمزِ `ENV_PROBE_MISSING`.
+
+# ─────────────────────────── القيدُ في السجلِّ ─────────────────────────────────
+# كلُّ إقامةٍ وكلُّ فحصٍ يُقيَّد في السجلِّ الدائمِ المُحقَنِ — **ولا سجلَّ
+# ثانياً يُستحدَث هنا** (الضمان `G-ENV-SINGLE-LEDGER`).
+audit:
+  events:
+    - type: environment.bootstrap.planned
+      statement: خطّةُ الإقامةِ بأطوارِها المُنفَّذةِ والمُتخطّاةِ وأسبابِ التخطّي.
+    - type: environment.bootstrap.phase
+      statement: طورٌ واحدٌ بحصيلتِه ومدّتِه ورمزِ خروجِه.
+    - type: environment.verify.completed
+      statement: حكمُ فحصِ الصحّةِ بمجساتِه ودرجاتِ ساقطِها.
+
+# ─────────────────────────── رموزُ الرفضِ ─────────────────────────────────────
+# متقابلةٌ **في الاتجاهين** مع `ENV_ERRORS` في `src/environment/errors.mjs`،
+# ويقيس الحاجزُ التقابلَ (R3): رمزٌ في الكودِ بلا إعلانٍ رمزٌ لا يجده قارئُ
+# الوثيقة، ورمزٌ في الوثيقةِ بلا كودٍ وعدٌ لا يُنفَّذ.
+refusalCodes:
+  - code: ENV_CONFIG_INVALID
+    statement: العقدُ غائبٌ أو يخالف مخطَّطَه؛ وبلا عقدٍ صحيحٍ لا خطّةَ ولا حكم.
+  - code: ENV_PROFILE_UNDECLARED
+    statement: وضعُ بيئةٍ غيرُ مُعلَنٍ في `profiles`.
+  - code: ENV_TOOL_UNDECLARED
+    statement: أداةٌ يُسأل عنها ولم تُعلَن في `toolchain`.
+  - code: ENV_VARIABLE_UNDECLARED
+    statement: متغيّرٌ يُسأل عنه ولم يُعلَن في `variables`.
+  - code: ENV_PHASE_UNDECLARED
+    statement: طورٌ يُنفَّذ ولم يُعلَن في `phases`.
+  - code: ENV_PHASE_NOT_IDEMPOTENT
+    statement: >-
+      طورٌ مُعلَنٌ غيرُ متكافئٍ؛ و«أمرٌ واحدٌ» لا يقوم على طورٍ يُفسِد بيئةً
+      قائمةً إن أُعيد.
+  - code: ENV_PROBE_UNDECLARED
+    statement: مجسٌّ يُقيَّم ولم يُعلَن في `probes`.
+  - code: ENV_PROBE_MISSING
+    statement: مجسٌّ لازمٌ غائبٌ من نتيجةِ الفحصِ؛ فلا حكمَ يُصدَر على نقصٍ صامت.
+  - code: ENV_PROBE_DUPLICATE
+    statement: نتيجتانِ لمجسٍّ واحدٍ في فحصٍ واحدٍ؛ فأيُّهما الحكم؟
+  - code: ENV_SEVERITY_UNDECLARED
+    statement: درجةٌ خارجَ درجاتِ مركزِ العملياتِ المُعلَنة.
+  - code: ENV_VERDICT_UNDECLARED
+    statement: حكمٌ خارجَ أحكامِ `healthCheck.verdicts`.
+  - code: ENV_CLOCK_INVALID
+    statement: ساعةٌ لا تُعيد عدداً منتهياً؛ وقيدٌ بلا زمنٍ قيدٌ لا يقع في تقريرٍ بعينه.
+  - code: ENV_LOG_REQUIRED
+    statement: سجلٌّ غيرُ مُحقَنٍ؛ وإقامةٌ لا تُقيَّد إقامةٌ لا يُسأل عنها أحد.
+
+# ─────────────────────────── الضماناتُ ومواضعُ إنفاذِها ────────────────────────
+# لكلِّ ضمانٍ **ملفُّ إنفاذٍ مُعلَنٌ**، ويقيس الحاجزُ حضورَ الرمزِ نصّاً فيه
+# (R4)؛ فضمانٌ بلا موضعٍ وعدٌ في وثيقةٍ لا يُساءَل عليه أحد.
+guarantees:
+  - id: G-ENV-SINGLE-SOURCE
+    file: config/environment.yaml
+    statement: >-
+      عقدُ البيئةِ في وثيقةٍ واحدةٍ؛ ولا قائمةَ أدواتٍ ولا متغيّراتٍ ثانيةً
+      تُصان في موضعين فتتباعدان.
+  - id: G-ENV-NO-SECRET-VALUES
+    file: src/environment/contract.mjs
+    statement: >-
+      العقدُ يُرفَض إن حمل حقلَ قيمةٍ لمتغيّرٍ سرّيٍّ؛ فسرٌّ في وثيقةٍ متعقَّبةٍ
+      سرٌّ انتهى.
+  - id: G-ENV-ORDERED-PHASES
+    file: src/environment/plan.mjs
+    statement: >-
+      الأطوارُ تُنفَّذ بترتيبِ إعلانِها لا بترتيبِ نجاحِها؛ ومن صرّف قبل أن
+      يُثبِّتَ لم يجد المُصرِّف.
+  - id: G-ENV-DECLARED-SKIP
+    file: src/environment/plan.mjs
+    statement: >-
+      كلُّ طورٍ مُتخطّىً يحمل **سببَ تخطٍّ مُسمّىً**؛ وتخطٍّ صامتٌ يُقرأ
+      تنفيذاً فيُظَنُّ أنّ الهجراتِ طُبِّقت وهي لم تُطبَّق.
+  - id: G-ENV-IDEMPOTENT-BOOTSTRAP
+    file: src/environment/plan.mjs
+    statement: >-
+      كلُّ طورٍ مُعلَنٍ متكافئٌ؛ فـ«الأمرُ الواحدُ» يُعاد على بيئةٍ قائمةٍ فلا
+      يُفسِدها.
+  - id: G-ENV-VERIFY-READ-ONLY
+    file: src/environment/probes.mjs
+    statement: >-
+      تقييمُ المجساتِ حسابٌ على وقائعَ مُمرَّرةٍ لا قراءةَ قرصٍ ولا تشغيلَ
+      أمرٍ ولا إصلاحَ شيءٍ؛ ففحصٌ يُصلِح لا يُخبر عن الحال.
+  - id: G-ENV-SEVERITY-DECIDES
+    file: src/environment/probes.mjs
+    statement: >-
+      الحكمُ من درجاتِ الساقطِ لا من عدَدِه؛ فمجسٌّ حاسمٌ واحدٌ يُبطِل البيئةَ
+      ولو نجح ما سواه.
+  - id: G-ENV-NO-SILENT-PASS
+    file: src/environment/probes.mjs
+    statement: >-
+      مجسٌّ لازمٌ غائبٌ من النتيجةِ يُوقف الحكمَ بالرمزِ `ENV_PROBE_MISSING`؛
+      فالصمتُ لا يُقرأ نجاحاً.
+  - id: G-ENV-INJECTED-CLOCK
+    file: src/environment/environment.mjs
+    statement: >-
+      الساعةُ مُحقَنةٌ ولا مؤقِّتَ يعمل بنفسِه؛ فمدّةٌ تُقاس على ساعةِ النظامِ
+      لا تُثبَّت في اختبار.
+  - id: G-ENV-SINGLE-LEDGER
+    file: src/environment/environment.mjs
+    statement: >-
+      القيدُ في السجلِّ الدائمِ المُحقَنِ وحدَه؛ ولا سجلَّ إقامةٍ ثانياً
+      يُستحدَث فيتباعد عن الأول.
