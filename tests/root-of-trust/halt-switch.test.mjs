@@ -526,6 +526,96 @@ test('نواة التنفيذ لا تُشغّل المُعالِج عند الإ
   assert.equal(runs, 2);
 });
 
+// السببُ الجذريُّ لإخفاقِ التشغيلةِ 165 على `main`: العقدةُ تُمسِك `SOVEREIGN_HALT`
+// ثم تقرأ الحالةَ لتُقِرَّ بالتوقف، **وبين اللحظتين قد تكون الأمُّ استأنفت**، فيُرفَع
+// `HALT_NOT_HALTED` من دورةٍ لا تُمسِكه فتموت العمليةُ ولا تعود إلى العملِ أبداً،
+// فيُقرأ العطبُ «مهلةً انتهت» لا سبباً. وهذا الاختبارُ يقصد ذلك السباقَ بعينِه:
+// استئنافٌ عاجلٌ لا ينتظر إقراراً، ثم يُشترط أن **تعود العقدُ الثلاثُ كلُّها** إلى
+// التنفيذِ في العهدِ الجديد — وهو ما كان يستحيل قبل الإصلاحِ إن ماتت واحدة.
+test(
+  'استئنافٌ عاجلٌ بُعيدَ الإيقافِ لا يقتل عقدةً، والثلاثُ تعود إلى العمل',
+  { timeout: 90000 },
+  async (t) => {
+    const { dir, file, king, halt } = setup();
+    const stopFile = join(dir, 'stop');
+    const pemPath = join(dir, 'king.pub.pem');
+    writeFileSync(pemPath, String(king.publicKey.export({ type: 'spki', format: 'pem' })));
+
+    const nodeIds = ['race-a', 'race-b', 'race-c'];
+    const outFiles = new Map(nodeIds.map((id) => [id, join(dir, `${id}.jsonl`)]));
+    for (const path of outFiles.values()) writeFileSync(path, '');
+
+    const children = nodeIds.map((id) =>
+      spawn(
+        process.execPath,
+        [
+          WORKER,
+          '--file',
+          file,
+          '--pubkey',
+          pemPath,
+          '--node',
+          id,
+          '--out',
+          String(outFiles.get(id)),
+          '--stop',
+          stopFile,
+        ],
+        { stdio: ['ignore', 'ignore', 'inherit'] },
+      ),
+    );
+
+    t.after(async () => {
+      writeFileSync(stopFile, '');
+      for (const child of children) child.kill('SIGKILL');
+      rmSync(dir, { recursive: true, force: true });
+    });
+
+    /**
+     * يقرأ سجلات عقدة.
+     * @param {string} nodeId - العقدة
+     * @returns {{ type: string, epoch: number, seq: number }[]} وقائعها
+     */
+    const records = (nodeId) =>
+      readFileSync(String(outFiles.get(nodeId)), 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line));
+
+    await until(() => halt.nodes().length === 3, 'تسجيل العقد الثلاث');
+    await until(
+      () => nodeIds.every((id) => records(id).some((entry) => entry.type === 'exec')),
+      'تنفيذ فعلي من كل عقدة قبل الإيقاف',
+    );
+
+    // إيقافٌ، ثم استئنافٌ **في اللحظةِ التي يكتمل فيها آخرُ إقرارٍ** بلا مهلةِ
+    // تهدئةٍ بعده: وهذه هي نافذةُ السباقِ بعينِها، إذ قد تكون عقدةٌ أخرى ما زالت
+    // تُمسِك `SOVEREIGN_HALT` من العهدِ المنقضي فتقرأ العهدَ الجديدَ عند إقرارها.
+    // (والاستئنافُ قبل اكتمالِ الإقراراتِ مرفوضٌ بـ`HALT_NOT_CONFIRMED`، وهو قيدٌ
+    //  سياديٌّ لا يُلتَفّ عليه في اختبار.)
+    assert.equal(halt.halt('إيقاف السباق').epoch, 1);
+    await until(() => halt.confirmations(1).length === 3, 'إقرار العقد الثلاث بالتوقف');
+    const resumed = halt.resume('استئناف عاجل');
+    assert.equal(resumed.epoch, 2);
+    assert.equal(resumed.state, 'running');
+
+    await until(
+      () =>
+        nodeIds.every((id) =>
+          records(id).some((entry) => entry.type === 'exec' && entry.epoch === 2),
+        ),
+      'عودة العقد الثلاث إلى التنفيذ بعد الاستئناف العاجل',
+    );
+    for (const child of children) assert.equal(child.exitCode, null, 'عقدةٌ ماتت في السباق');
+    assert.equal(
+      nodeIds.flatMap((id) => records(id)).some((entry) => entry.type === 'error'),
+      false,
+      'لا أخطاء غير متوقعة',
+    );
+    assert.equal(halt.verifyHistory().ok, true);
+  },
+);
+
 test(
   'المعيار: عدة عمليات، إيقاف واحد، صفر تنفيذ بعده، ثم استئناف سليم',
   { timeout: 90000 },

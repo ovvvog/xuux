@@ -75,23 +75,54 @@ function record(type, epoch) {
  * @returns {Promise<void>}
  */
 async function attempt() {
-  const epochBefore = halt.read().epoch;
+  /** @type {number} */
+  let epochBefore;
+  try {
+    epochBefore = halt.read().epoch;
+  } catch {
+    // قراءةُ التوجيهِ من القرصِ قد تُصادف لحظةَ كتابةِ الأمِّ له. وهذا ليس عبثاً
+    // ولا خطأَ تنفيذٍ، فلا يُسجَّل واقعةً؛ والدورةُ التالية تقرأ الملفَّ تامّاً.
+    return;
+  }
   const command = createRoyalCommand('worker.tick', nodeId, { seq });
   try {
     await kernel.submit(command, localKing.sign(command), () => 'ok');
     record('exec', epochBefore);
   } catch (error) {
     if (error instanceof Error && error.message === 'SOVEREIGN_HALT') {
-      const reading = halt.read();
-      if (!ackedEpochs.has(reading.epoch)) {
-        halt.confirmHalt(nodeId, `توقفت عند الفعل ${seq + 1}`);
-        ackedEpochs.add(reading.epoch);
-        record('ack', reading.epoch);
-      }
+      acknowledge();
       return;
     }
     record('error', epochBefore);
   }
+}
+
+/**
+ * إقرارٌ بالتوقفِ لعهدِ الإيقافِ **القائمِ وقتَ القراءة** لا لعهدٍ انقضى.
+ *
+ * السببُ الجذريُّ الذي أسقط هذا المساعدَ في التشغيلةِ 165: النواةُ ترفع
+ * `SOVEREIGN_HALT` ثم تُقرأ الحالةُ من جديدٍ، **وبين اللحظتين قد تكون الأمُّ قد
+ * استأنفت**، فيصير الإقرارُ إقراراً بتوقفٍ لم يعد قائماً فترفعه `HaltSwitch`
+ * بـ`HALT_NOT_HALTED`، ويخرج الخطأُ من دورةٍ لا تُمسِكه **فتموت العمليةُ**
+ * فلا تعود العقدةُ إلى العملِ في العهدِ الجديدِ أبداً. فالشرطُ أن تُقرأ الحالةُ
+ * ولا يُقَرَّ إلا وهي `halted`، وأن يُبتلَع سباقُ اللحظةِ الأخيرةِ إن وقع.
+ *
+ * **ولا يُضعِف هذا ما يُثبته المعيار:** الأمُّ لا تستأنف إلا بعد أن تعدَّ إقراراتِ
+ * العقدِ الثلاثِ كلِّها، فكلُّ إقرارٍ لازمٍ يقع والإيقافُ قائمٌ؛ وما يُبتلَع هنا
+ * إقرارٌ لا محلَّ له بعد انقضاءِ عهدِه. ولا تُسجَّل واقعةُ تنفيذٍ في الحالين.
+ * @returns {void}
+ */
+function acknowledge() {
+  const reading = halt.read();
+  if (reading.state !== 'halted' || ackedEpochs.has(reading.epoch)) return;
+  try {
+    halt.confirmHalt(nodeId, `توقفت عند الفعل ${seq + 1}`);
+  } catch (error) {
+    if (/** @type {{ code?: string }} */ (error)?.code === 'HALT_NOT_HALTED') return;
+    throw error;
+  }
+  ackedEpochs.add(reading.epoch);
+  record('ack', reading.epoch);
 }
 
 /**
@@ -102,7 +133,19 @@ async function attempt() {
  */
 async function loop() {
   if (existsSync(stopFile)) return;
-  await attempt();
+  try {
+    await attempt();
+  } catch (error) {
+    // حارسٌ أخيرٌ: عطبٌ غيرُ متوقَّعٍ يُسجَّل واقعةَ خطأٍ تراها الأمُّ فتُخفِق به
+    // صراحةً، **ولا يُسقِط العمليةَ صامتاً** فيصير العطبُ «مهلةً انتهت» لا سبباً
+    // مقروءاً. والاختبارُ يشترط ألّا تقع واقعةُ خطأٍ واحدة.
+    process.stderr.write(`HALT_WORKER_UNEXPECTED ${String(error)}\n`);
+    try {
+      record('error', -1);
+    } catch {
+      /* لا يُخفى العطبُ الأولُ بعطبِ تسجيلِه */
+    }
+  }
   setTimeout(() => void loop(), 12);
 }
 
