@@ -1,0 +1,263 @@
+# تتبّعُ التكلفةِ والسعة — الخطوة M10.04
+#
+# **العيبُ الذي تُغلقه هذه الوثيقة:** أعطت `M10.01` النظامَ رقماً، وأعطته
+# `M10.02` حكماً، وأعطته `M10.03` صوتاً — وكلُّ ذلك في بُعدِ **الصحّة** وحدَه.
+# فالنظامُ يعرف أنه «بخيرٍ» ولا يعرف **بكم** كان بخير: لا ثمنَ مُعلَنٌ لعملٍ،
+# ولا إسنادَ لاستهلاكٍ إلى مؤسسةٍ أو وكيلٍ أو نموذجٍ، ولا سقفَ سعةٍ يُقاس
+# التجاوزُ عليه قبل وقوعِه، ولا تقريرَ يُولَّد فيُقرأ ما أُنفق. ومن لا يُعرَف
+# استهلاكُه لا يُحاسَب عليه، والكلفةُ التي تُقرأ بعد فواتِ الشهرِ خبرٌ لا ضبط.
+#
+# **وحدٌّ معلَنٌ أوّلُ وأخطرُ ما في هذه الوثيقة:** الأسعارُ هنا **وحداتٌ
+# محاسبيةٌ داخليةٌ مُعلَنةٌ** لا عملةٌ ولا فاتورةُ مزوِّدٍ ولا سعرُ سوق. ولا
+# موصلَ فوترةٍ خارجيّاً في هذه الخطوةِ ولا تحصيلَ ولا مطالبة. فمن قرأ رقماً
+# هنا قرأ **ما تُقرّره هذه الوثيقةُ ثمناً** لا ما دفعته الدولةُ فعلاً لأحد.
+#
+# **وحدٌّ معلَنٌ ثانٍ:** الحسابُ كلُّه بالأعداد الصحيحةِ في **مِلّي‑وحدةٍ
+# محاسبية** (‏`Milli`)، فلا يُبنى دفترٌ على فواصلَ عائمةٍ تتراكم أخطاؤها
+# قيداً بعد قيد؛ والتقريبُ لأقربِ مِلّي‑وحدةٍ **عند كلِّ قيدٍ على حدة**
+# (‏`Math.round`)، وهو تقريبٌ مُعلَنٌ لا سهو.
+#
+# **وحدٌّ معلَنٌ ثالث:** بنودُ الكلفةِ مربوطةٌ **بمواردِ `config/quotas.yaml`
+# بمعرّفاتِها** لا بقائمةِ مواردَ ثانيةٍ تُستحدَث هنا فتتباعد الوثيقتان عند
+# أوّلِ تعديل. والحصّةُ تمنع التجاوزَ، وهذه تُسعِّر ما وقع تحتَها.
+#
+# والمنفِّذُ هو `src/cost-capacity/`، والحاجزُ الذي يمنع انحرافَ الوثيقةِ عن
+# الكودِ هو `scripts/guard-cost-capacity.mjs` (البوابة السابعة والثلاثون).
+
+version: 1
+owner: crown
+statement: >-
+  لكلِّ عملٍ ثمنٌ مُعلَنٌ قبل وقوعِه، ولكلِّ ثمنٍ صاحبٌ يُسنَد إليه، ولكلِّ
+  صاحبٍ سقفُ سعةٍ يُقاس عليه، وللشهرِ تقريرٌ يُولَّد من قيودِ السجلِّ لا من
+  ذاكرةِ كاتبِه.
+
+# ── وحدةُ الحساب ──
+accounting:
+  unit: مِلّي‑وحدة محاسبية داخلية
+  rounding: half-up-per-entry
+  statement: >-
+    الوحدةُ داخليةٌ مُعلَنةٌ لا عملةٌ ولا فاتورةُ مزوِّدٍ؛ والحسابُ بالأعدادِ
+    الصحيحةِ وحدَها، والتقريبُ لأقربِ مِلّي‑وحدةٍ عند كلِّ قيدٍ على حدة.
+
+# ── بنودُ الكلفة: كلُّ بندٍ مربوطٌ بموردِ حصّةٍ معلَنٍ في config/quotas.yaml ──
+costItems:
+  - id: cost:inference-tokens
+    resource: inference-tokens
+    quantityUnit: رمز
+    perUnits: 1000
+    unitPriceMilli: 2000
+    statement: >-
+      الاستدلالُ أغلى ما تستهلكه الدولةُ وأسرعُه انفلاتاً، فثمنُه مُعلَنٌ لكلِّ
+      ألفِ رمزٍ لا لكلِّ رمزٍ كي يُقرأ الرقمُ على مقياسِ استعمالِه.
+  - id: cost:egress-bytes
+    resource: egress-bytes
+    quantityUnit: بايت
+    perUnits: 1048576
+    unitPriceMilli: 90
+    statement: >-
+      الإخراجُ كلفةٌ ومخاطرةٌ معاً؛ وتسعيرُه يجعل التسريبَ البطيءَ مرئيّاً في
+      الدفترِ كما هو مرئيٌّ في حدِّ الحصّة.
+  - id: cost:memory-writes
+    resource: memory-writes
+    quantityUnit: كتابة
+    perUnits: 1000
+    unitPriceMilli: 400
+    statement: >-
+      الكتابةُ المتدفّقةُ تُغرِق الذاكرةَ المؤسسيةَ، ولها ثمنٌ يُقرأ في الدفترِ
+      لا في الحصّةِ وحدَها.
+  - id: cost:task-executions
+    resource: task-executions
+    quantityUnit: مهمّة
+    perUnits: 100
+    unitPriceMilli: 1500
+    statement: >-
+      تنفيذُ المهامِ هو العملُ المؤسسيُّ نفسُه، وثمنُه مُعلَنٌ كي تُقارَن كلفةُ
+      مؤسسةٍ بأخرى على أساسٍ واحد.
+
+# ── أبعادُ الإسناد: مؤسسةٌ ووكيلٌ ونموذج ──
+dimensions:
+  - id: institution
+    subjectPrefix: 'institution:'
+    membership: declared
+    source: config/institutions.yaml
+    members:
+      - institution:digital-administration
+      - institution:statistics-authority
+    statement: >-
+      المؤسساتُ المُشغَّلةُ اثنتان بنصِّ `M8.05`، ومعرّفاهما من وثيقتِهما
+      النافذةِ لا من قائمةٍ ثانيةٍ تُكتَب هنا؛ ومؤسسةٌ غيرُ مُشغَّلةٍ لا يُسنَد
+      إليها إنفاقٌ لأنها لا تعمل بعد.
+  - id: agent
+    subjectPrefix: 'agent:'
+    membership: dynamic
+    source: سجلُّ الهوياتِ في زمنِ التشغيل
+    statement: >-
+      الوكلاءُ يُنشَؤون ويُوقَفون في زمنِ التشغيل، فلا تُجمَّد أسماؤهم في وثيقةٍ
+      تُصان بيدٍ؛ والمقبولُ ما حمل البادئةَ المُعلَنةَ، **وصحّةُ وجودِ الوكيلِ
+      حدٌّ معلَنٌ متروكٌ لسجلِّ الهوياتِ لا يُدَّعى هنا**.
+  - id: model
+    subjectPrefix: 'model:'
+    membership: dynamic
+    source: سجلُّ النماذجِ src/models/model-registry.mjs
+    statement: >-
+      النماذجُ تُسجَّل وتُنشَّط ويُتراجَع عنها في زمنِ التشغيل، فحكمُها حكمُ
+      الوكلاءِ في العضوية، وإسنادُ الكلفةِ إليها هو ما يجعل «أيُّ نموذجٍ كلَّفَنا
+      أكثر؟» سؤالاً له جواب.
+
+# ── حدودُ السعة: سقفٌ لكلِّ عضوٍ في بُعدٍ على بندٍ في الشهر ──
+capacityLimits:
+  - id: capacity:institution-inference
+    dimension: institution
+    item: cost:inference-tokens
+    limitUnits: 2000000
+    severity: warning
+    statement: >-
+      سقفُ استدلالِ المؤسسةِ الواحدةِ في الشهر؛ وتجاوزُه لا يُوقف عملاً هنا بل
+      يُعلَن حكماً ويُقيَّد حادثةً — والإيقافُ فعلُ الحصّةِ لا فعلُ الدفتر.
+  - id: capacity:agent-egress
+    dimension: agent
+    item: cost:egress-bytes
+    limitUnits: 21474836480
+    severity: warning
+    statement: >-
+      سقفُ إخراجِ الوكيلِ الواحدِ في الشهر، مقروءاً فوقَ حدِّ اليومِ في
+      `config/quotas.yaml`: من بقي تحت الحدِّ اليوميَّ ثلاثين يوماً قد يتجاوز
+      المعقولَ شهريّاً بلا أن يُخالف يوماً واحداً.
+  - id: capacity:model-inference
+    dimension: model
+    item: cost:inference-tokens
+    limitUnits: 5000000
+    severity: critical
+    statement: >-
+      سقفُ استدلالِ النموذجِ الواحدِ في الشهر؛ ودرجتُه حرِجةٌ لأنّ انفلاتَ نموذجٍ
+      بعينِه يستنزف قدرةَ الدولةِ كلِّها لا قدرةَ صاحبِه وحدَه.
+
+# ── قواعدُ الانحراف: خطُّ أساسٍ معلَنٌ وهامشُ احتمالٍ معلَن ──
+deviationRules:
+  - id: deviation:institution-total
+    dimension: institution
+    item: cost:inference-tokens
+    baselineUnits: 800000
+    toleranceRatio: 0.25
+    severity: warning
+    channel: channel:audit-desk
+    statement: >-
+      القفزةُ المفاجئةُ في استدلالِ مؤسسةٍ فوقَ خطِّ أساسِها بهامشٍ معلَنٍ تُقرأ
+      انحرافاً قبل بلوغِ السقف؛ فمن انتظر السقفَ انتظر وقوعَ الضرر.
+  - id: deviation:model-total
+    dimension: model
+    item: cost:inference-tokens
+    baselineUnits: 1500000
+    toleranceRatio: 0.2
+    severity: critical
+    channel: channel:sovereign-desk
+    statement: >-
+      انحرافُ نموذجٍ عن خطِّ أساسِه أسرعُ مؤشِّرٍ على تغيُّرٍ في سلوكِه أو في
+      طريقةِ استعمالِه، وهو حرِجٌ لأنّ أثرَه يعمّ كلَّ من يناديه.
+  - id: deviation:agent-egress
+    dimension: agent
+    item: cost:egress-bytes
+    baselineUnits: 5368709120
+    toleranceRatio: 0.5
+    severity: warning
+    channel: channel:audit-desk
+    statement: >-
+      هامشُ الإخراجِ أوسعُ لأنّ تفاوتَه المشروعَ أوسع؛ وهامشٌ ضيّقٌ على بندٍ
+      متقلّبٍ يُنتج تنبيهاً يُتعلَّم تجاهُلُه.
+
+# ── التقريرُ الشهري ──
+report:
+  period: calendar-month-utc
+  requiredSections:
+    - period
+    - totals
+    - byInstitution
+    - byAgent
+    - byModel
+    - capacity
+    - deviations
+    - evidence
+  statement: >-
+    الشهرُ شهرٌ تقويميٌّ بالتوقيتِ العالميِّ المنسَّقِ يُشتَقُّ من ختمِ القيدِ
+    نفسِه لا من ساعةِ من يطلب التقرير، والأقسامُ اللازمةُ كلُّها حاضرةٌ أو لا
+    يُسمّى الناتجُ تقريراً، **وشهرٌ بلا قيدٍ واحدٍ يُعلَن «غيرَ مقيسٍ» لا «صفرَ
+    إنفاق»** — فالصفرُ بلا مصدرٍ كذبٌ مُطمئنٌّ كالذي قُتل في `M10.02`.
+
+# ── قيدُ التدقيق: أسماءُ الأحداثِ التي تُكتب في السجلِّ الدائم ──
+audit:
+  usageRecordedEvent: cost.usage.recorded
+  reportGeneratedEvent: cost.report.generated
+  deviationRaisedEvent: cost.deviation.raised
+  refusedEvent: cost.action.refused
+  statement: >-
+    القيدُ قبل الأثر: كلُّ استهلاكٍ يُقيَّد وكلُّ تقريرٍ يُقيَّد وكلُّ انحرافٍ
+    يُقيَّد وكلُّ رفضٍ يُقيَّد؛ والرفضُ يُكتب كما يُكتب القبول.
+
+# ── رموزُ الرفض — تقابلُها مع COST_ERRORS محروسٌ في الاتجاهين ──
+refusalCodes:
+  - COST_CONFIG_INVALID
+  - COST_POLICY_REQUIRED
+  - COST_LOG_REQUIRED
+  - COST_LEDGER_REQUIRED
+  - COST_OPERATIONS_REQUIRED
+  - COST_ITEM_UNDECLARED
+  - COST_DIMENSION_UNDECLARED
+  - COST_SUBJECT_UNDECLARED
+  - COST_QUANTITY_INVALID
+  - COST_PERIOD_INVALID
+  - COST_CLOCK_INVALID
+
+# ── الضمانات: كلُّ رمزٍ حاضرٌ نصّاً في ملفِّ إنفاذِه ──
+guarantees:
+  - id: G-COST-PRICES-ARE-DATA
+    enforcedIn: scripts/guard-cost-capacity.mjs
+    codes: [COST_CONFIG_INVALID]
+    statement: >-
+      لا سعرَ ولا سقفَ ولا خطَّ أساسٍ مكتوبٌ نصّاً في وحدةٍ من وحداتِ المسار؛
+      فرقمٌ في الوثيقةِ وفي الكودِ مصدرا حقيقةٍ لشيءٍ واحدٍ يُشدَّد أحدُهما
+      ويبقى الآخر.
+  - id: G-COST-SUBJECT-DECLARED
+    enforcedIn: src/cost-capacity/cost-capacity.mjs
+    codes: [COST_DIMENSION_UNDECLARED, COST_SUBJECT_UNDECLARED]
+    statement: >-
+      لا يُقيَّد استهلاكٌ إلى صاحبٍ بلا بُعدٍ معلَنٍ وبادئةٍ معلَنةٍ وعضويةٍ
+      مقبولةٍ في بُعدِه؛ وإسنادٌ إلى مجهولٍ إسنادٌ لا يُحاسَب عليه أحد.
+  - id: G-COST-INTEGER-MONEY
+    enforcedIn: src/cost-capacity/pricing.mjs
+    codes: [COST_QUANTITY_INVALID]
+    statement: >-
+      الكميّاتُ أعدادٌ صحيحةٌ غيرُ سالبةٍ والأثمانُ مِلّي‑وحداتٍ صحيحةٌ،
+      والتقريبُ عند القيدِ لا عند الجمع؛ فدفترٌ على فاصلةٍ عائمةٍ دفترٌ لا
+      يُطابَق.
+  - id: G-COST-PERIOD-FROM-ENTRY
+    enforcedIn: src/cost-capacity/pricing.mjs
+    codes: [COST_PERIOD_INVALID]
+    statement: >-
+      شهرُ القيدِ يُشتَقُّ من ختمِ القيدِ نفسِه بالتوقيتِ العالميِّ المنسَّق، لا
+      من ساعةِ طالبِ التقرير؛ فتقريرُ شهرٍ لا يتبدّل بمن قرأه ولا بمكانِه.
+  - id: G-COST-NO-EMPTY-ZERO
+    enforcedIn: src/cost-capacity/cost-capacity.mjs
+    codes: []
+    statement: >-
+      شهرٌ بلا قيدٍ واحدٍ يُعلَن «غيرَ مقيسٍ» ولا يُعرَض صفرَ إنفاقٍ؛ والصفرُ
+      بلا مصدرٍ أخضرُ فارغٌ أسوأُ من الأحمر.
+  - id: G-COST-REPORT-FROM-LEDGER
+    enforcedIn: src/cost-capacity/cost-capacity.mjs
+    codes: [COST_LEDGER_REQUIRED]
+    statement: >-
+      التقريرُ يُبنى من قيودِ السجلِّ المقروءةِ من قارئٍ مُحقَنٍ لا من ذاكرةِ
+      المُنشئِ عن نفسِه؛ ومن لم يُمرَّر إليه قارئٌ رُدَّ ولم يُعطَ تقريراً
+      صفريّاً يُقرأ قياساً.
+  - id: G-COST-SINGLE-INCIDENT-LEDGER
+    enforcedIn: src/cost-capacity/cost-capacity.mjs
+    codes: [COST_OPERATIONS_REQUIRED]
+    statement: >-
+      الانحرافُ يُقيَّد حادثةً في **مركزِ العملياتِ بعينِه** عبر
+      `operations.record(`؛ ولا سجلَّ حوادثَ ثانياً ولا درجاتٍ ثانيةً ولا مسارَ
+      استجابةٍ موازياً لمسارِ `M10.03`.
+  - id: G-COST-INJECTED-CLOCK
+    enforcedIn: src/cost-capacity/cost-capacity.mjs
+    codes: [COST_CLOCK_INVALID]
+    statement: >-
+      الزمنُ من ساعةٍ مُمرَّرةٍ تُفحَص عند كلِّ قراءةٍ، ولا مؤقِّتَ يعمل بنفسِه
+      ولا جدولةَ ذاتيةَ التشغيلِ في هذه الخطوة.
