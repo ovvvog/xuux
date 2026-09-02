@@ -1,0 +1,159 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://state.local/schemas/deployment.schema.json",
+  "title": "عقد النشر القابل للتراجع — الخطوة M10.06",
+  "description": "مخطَّط صارم لعقد النشر: ما لم يُعلَن هنا لا تنشره scripts/deploy.mjs ولا تحكم عليه بوابة. و additionalProperties: false في كل موضع، فحقل لم يُعلَن حقل لا يقرؤه أحد ويُظَنّ أنه نافذ. ولا رقم هدفٍ ولا عتبة زمنٍ يُقبلان في هذا المخطَّط: البوابات تُشير إلى أهداف مستويات الخدمة بمعرّفاتها.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "statement",
+    "release",
+    "waves",
+    "rollback",
+    "verdicts",
+    "ledger",
+    "audit",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "statement": { "type": "string", "minLength": 40 },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["idPattern", "manifestFile", "probeFile", "statement"],
+      "properties": {
+        "idPattern": { "type": "string", "minLength": 4 },
+        "manifestFile": { "$ref": "#/$defs/fileName" },
+        "probeFile": { "$ref": "#/$defs/fileName" },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "waves": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "order",
+          "sharePercent",
+          "minObservations",
+          "timeoutMs",
+          "objectives",
+          "statement"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^wave:[a-z][a-z0-9-]*$" },
+          "order": { "type": "integer", "minimum": 1 },
+          "sharePercent": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "minObservations": { "type": "integer", "minimum": 1 },
+          "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 600000 },
+          "objectives": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^slo:[a-z][a-z0-9.-]*$" }
+          },
+          "statement": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["automatic", "triggerOn", "maxDurationMs", "statement"],
+      "properties": {
+        "automatic": { "type": "boolean" },
+        "triggerOn": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/verdictId" }
+        },
+        "maxDurationMs": { "type": "integer", "minimum": 1000, "maximum": 600000 },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "exitCode", "statement"],
+        "properties": {
+          "id": { "$ref": "#/$defs/verdictId" },
+          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
+          "statement": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "pointerPath", "releasesPath", "statement"],
+      "properties": {
+        "path": { "$ref": "#/$defs/statePath" },
+        "pointerPath": { "$ref": "#/$defs/statePath" },
+        "releasesPath": { "$ref": "#/$defs/statePath" },
+        "statement": { "type": "string", "minLength": 20 }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "statement"],
+            "properties": {
+              "type": { "type": "string", "pattern": "^deploy\\.[a-z.]+$" },
+              "statement": { "type": "string", "minLength": 10 }
+            }
+          }
+        }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "statement"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^DEPLOY_[A-Z_]+$" },
+          "statement": { "type": "string", "minLength": 10 }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "file", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-DEPLOY-[A-Z-]+$" },
+          "file": { "type": "string", "minLength": 5 },
+          "statement": { "type": "string", "minLength": 20 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "verdictId": { "type": "string", "pattern": "^verdict:[a-z][a-z0-9-]*$" },
+    "fileName": { "type": "string", "pattern": "^[a-z][a-z0-9.-]*$" },
+    "statePath": { "type": "string", "pattern": "^\\.state/[A-Za-z0-9._/-]+$" }
+  }
+}
