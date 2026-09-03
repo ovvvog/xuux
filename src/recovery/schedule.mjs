@@ -65,6 +65,20 @@ export function evaluateDrillDueness(contract, facts) {
       { lastDrillAt: last },
     );
   }
+  // ── إصلاحُ الانحراف `DEV-CHAOS-CLOCK-SKEW` (‏`M10.09`، مُغلَقٌ في `WL-062`) ──
+  // كشفت تجربةُ `chaos:clock-skew` أنّ سجلًّا تاريخُه **في المستقبلِ** كان
+  // يُنتِج مدّةً سالبةً مضت وحكماً `overdue: false` وعبارةَ «والعهدُ قائم» — أي
+  // أنّ ساعةً رجعت إلى الوراءِ كانت تكفي لإظهارِ امتثالٍ لدوريّةٍ لم تجرِ.
+  // والسببُ الجذريُّ أنّ الحسابَ كان يثق بفرقٍ **قد يكون سالباً**، فصار
+  // السجلُّ المستقبليُّ مردوداً برمزِ `RECOVERY_LEDGER_INVALID` لا مقروءاً
+  // امتثالاً؛ فامتثالٌ مصدرُه ساعةٌ فاسدةٌ ادّعاءٌ لا دليل.
+  if (last > facts.now) {
+    throw new RecoveryError(
+      RECOVERY_ERRORS.LEDGER_INVALID,
+      `تاريخُ آخرِ تجربةٍ (${String(last)}) يسبق الآنَ (${String(facts.now)}) في المستقبلِ — وساعةٌ رجعت إلى الوراءِ لا تُنتِج امتثالاً، فالسجلُّ مردودٌ لا محتَجٌّ به.`,
+      { lastDrillAt: last, now: facts.now },
+    );
+  }
   const dueAt = last + everyDays * MS_PER_DAY;
   const deadlineAt = dueAt + graceDays * MS_PER_DAY;
   const sinceDays = Math.floor((facts.now - last) / MS_PER_DAY);

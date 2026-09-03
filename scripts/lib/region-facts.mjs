@@ -293,6 +293,21 @@ export function readLedger(contract, root) {
   if (!fs.existsSync(file)) {
     return [];
   }
+  // ── إصلاحُ الانحراف `DEV-CHAOS-DISK-FULL` (‏`M10.09`، مُغلَقٌ في `WL-062`) ──
+  // كشفت تجربةُ `chaos:disk-full` أنّ **الكتابةَ** إلى قرصٍ ممتلئٍ تُرمى خطأً
+  // فلا تكتب نصفَ سطرٍ — وذاك المطلوب — أمّا **القراءةُ** فكانت تفتح الملفَّ
+  // كما هو أيّاً كان نوعُه: فإن صار مسارُ الدفترِ ملفَّ جهازٍ لا نهايةَ له
+  // (‏`/dev/full` مثلاً) استنزفت `readFileSync` الذاكرةَ حتى تُقتل العمليّةُ
+  // بـ`std::bad_alloc` بلا رمزِ رفضٍ ولا رسالةٍ تُقرأ. والسببُ الجذريُّ غيابُ
+  // التحقّقِ من **نوعِ** الملفِّ قبل قراءتِه، فصار الدفترُ الذي ليس ملفَّ نصٍّ
+  // عاديّاً مردوداً بـ`REGION_CONFIG_INVALID` قبل أن تُقرأ منه بايتٌ واحد.
+  if (!fs.statSync(file).isFile()) {
+    throw new RegionError(
+      REGION_ERRORS.CONFIG_INVALID,
+      'مسارُ دفترِ الأقاليمِ ليس ملفَّ نصٍّ عاديّاً — ودفترٌ صار ملفَّ جهازٍ لا يُقرأ سطراً سطراً بل يستنزف الذاكرةَ حتى تُقتل العمليّة.',
+      { file },
+    );
+  }
   /** @type {Array<Record<string, unknown>>} */
   const entries = [];
   for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
