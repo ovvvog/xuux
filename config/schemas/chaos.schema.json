@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/chaos.schema.json",
+  "title": "عقد اختبارات الفوضى — الخطوة M10.09",
+  "description": "يُعلن تجاربَ الفوضى الخمسَ بعطبٍ موصوفٍ رقماً وفرضيّةٍ مكتوبةٍ ورمزِ انحرافٍ لكلِّ تجربةٍ، وأحكامَها ورموزَ خروجِها، ودفترَ انحرافاتٍ كلُّ مُدخلةٍ فيه مربوطةٌ بمُدخلةِ عملٍ تُغلِقها، ورموزَ رفضِها وضماناتِها.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "experiments",
+    "verdicts",
+    "deviations",
+    "source",
+    "ledger",
+    "events",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "$defs": {
+    "experimentId": {
+      "type": "string",
+      "pattern": "^chaos:[a-z][a-z-]*[a-z]$"
+    },
+    "verdictId": {
+      "type": "string",
+      "pattern": "^chaos:[a-z][a-z-]*[a-z]$"
+    },
+    "deviationCode": {
+      "type": "string",
+      "pattern": "^DEV-CHAOS-[A-Z][A-Z-]*[A-Z]$"
+    },
+    "workLogId": {
+      "type": "string",
+      "pattern": "^WL-[0-9]{3}$"
+    },
+    "eventName": {
+      "type": "string",
+      "pattern": "^chaos\\.[a-z]+(\\.[a-z]+)*$"
+    },
+    "errorCode": {
+      "type": "string",
+      "pattern": "^CHAOS_[A-Z_]+$"
+    },
+    "guaranteeId": {
+      "type": "string",
+      "pattern": "^G-CHAOS-[A-Z-]+$"
+    },
+    "relPath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "minLength": 1
+    },
+    "faultKind": {
+      "type": "string",
+      "enum": ["process-kill", "latency", "disk-exhaustion", "corrupt-record", "clock-reversal"]
+    },
+    "faultUnit": {
+      "type": "string",
+      "enum": ["signal", "milliseconds", "bytes-free", "lines"]
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "experiments": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "order", "fault", "target", "hypothesis", "deviationCode"],
+        "properties": {
+          "id": { "$ref": "#/$defs/experimentId" },
+          "order": { "type": "integer", "minimum": 1 },
+          "fault": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "magnitude", "unit", "description"],
+            "properties": {
+              "kind": { "$ref": "#/$defs/faultKind" },
+              "magnitude": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "قدرُ العطبِ رقماً — فعطبٌ يُوصَف بعبارةٍ لا يُقاس ولا يُعاد."
+              },
+              "unit": { "$ref": "#/$defs/faultUnit" },
+              "description": { "type": "string", "minLength": 30 }
+            }
+          },
+          "target": { "$ref": "#/$defs/relPath" },
+          "hypothesis": {
+            "type": "string",
+            "minLength": 60,
+            "description": "ما ندّعي بقاءَه صادقاً أثناءَ العطب — مكتوباً بلغةٍ يفهمها من ليس مبرمجاً."
+          },
+          "deviationCode": { "$ref": "#/$defs/deviationCode" }
+        }
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "exitCode", "meaning"],
+        "properties": {
+          "id": { "$ref": "#/$defs/verdictId" },
+          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
+          "meaning": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "deviations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "experiment", "finding", "fixedIn", "marker", "closedBy"],
+        "properties": {
+          "code": { "$ref": "#/$defs/deviationCode" },
+          "experiment": { "$ref": "#/$defs/experimentId" },
+          "finding": { "type": "string", "minLength": 60 },
+          "fixedIn": { "$ref": "#/$defs/relPath" },
+          "marker": {
+            "type": "string",
+            "minLength": 5,
+            "description": "شاهدٌ نصّيٌّ يجب حضورُه في ملفِّ الإصلاح — رمزُ الرفضِ الذي صار يُرَدُّ به العطب."
+          },
+          "closedBy": { "$ref": "#/$defs/workLogId" }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root"],
+      "properties": {
+        "root": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/eventName" }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 12,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "when"],
+        "properties": {
+          "code": { "$ref": "#/$defs/errorCode" },
+          "when": { "type": "string", "minLength": 15 }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedIn"],
+        "properties": {
+          "id": { "$ref": "#/$defs/guaranteeId" },
+          "statement": { "type": "string", "minLength": 30 },
+          "enforcedIn": { "$ref": "#/$defs/relPath" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/recovery.schema.json",
+  "title": "عقد تجارب التعافي الدورية — الخطوة M10.08",
+  "description": "يُعلن زمنَ التعافي المستهدَف ودوريّةَ التجربة وأطوارَها المرتَّبةَ وأحكامَها ورموزَ رفضِها وضماناتِها. ولا يحمل رقمَ نافذةِ الفقد (RPO) البتّةَ: مصدرُه الوحيدُ config/regions.yaml.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "objective",
+    "cadence",
+    "phases",
+    "verdicts",
+    "source",
+    "ledger",
+    "events",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "$defs": {
+    "phaseId": {
+      "type": "string",
+      "pattern": "^phase:[a-z][a-z-]*[a-z]$"
+    },
+    "verdictId": {
+      "type": "string",
+      "pattern": "^recovery:[a-z][a-z-]*[a-z]$"
+    },
+    "eventName": {
+      "type": "string",
+      "pattern": "^recovery\\.[a-z]+(\\.[a-z]+)*$"
+    },
+    "errorCode": {
+      "type": "string",
+      "pattern": "^RECOVERY_[A-Z_]+$"
+    },
+    "guaranteeId": {
+      "type": "string",
+      "pattern": "^G-RECOVERY-[A-Z-]+$"
+    },
+    "relPath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "minLength": 1
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxRecoveryMs", "statement"],
+      "properties": {
+        "maxRecoveryMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "زمنُ التعافي المستهدَف (RTO) بالملّي ثانية — الرقمُ الوحيدُ الذي يُحاسَب عليه زمنُ التجربة."
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 40,
+          "description": "عهدُ التعافي مكتوباً بلغةٍ يفهمها من ليس مبرمجاً."
+        }
+      }
+    },
+    "cadence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["everyDays", "label", "graceDays"],
+      "properties": {
+        "everyDays": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "دوريّةُ التجربة بالأيّام — رُبعُ سنةٍ = 90."
+        },
+        "graceDays": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "سماحُ التأخّرِ عن الموعدِ قبل أن تُعَدَّ التجربةُ فائتةً."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 3
+        }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "order", "purpose"],
+        "properties": {
+          "id": { "$ref": "#/$defs/phaseId" },
+          "order": { "type": "integer", "minimum": 1 },
+          "purpose": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "exitCode", "meaning"],
+        "properties": {
+          "id": { "$ref": "#/$defs/verdictId" },
+          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
+          "meaning": { "type": "string", "minLength": 20 }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateRoot", "backupRoot", "restoreRoot"],
+      "properties": {
+        "stateRoot": { "$ref": "#/$defs/relPath" },
+        "backupRoot": { "$ref": "#/$defs/relPath" },
+        "restoreRoot": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "lastDrillPath"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relPath" },
+        "lastDrillPath": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 4,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/eventName" }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "when"],
+        "properties": {
+          "code": { "$ref": "#/$defs/errorCode" },
+          "when": { "type": "string", "minLength": 15 }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedIn"],
+        "properties": {
+          "id": { "$ref": "#/$defs/guaranteeId" },
+          "statement": { "type": "string", "minLength": 30 },
+          "enforcedIn": { "$ref": "#/$defs/relPath" }
+        }
+      }
+    }
+  }
+}
