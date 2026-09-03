@@ -79,6 +79,9 @@ jobs:
       - name: حاجز تطابق الإصدار (WL-046) — نفس النصّ الذي يُقاس محلّياً
         run: npm run guard:version
 
+      - name: حاجز التقدّم (WL-063) — لا نسبة تُقدَّر تقديراً ولا عدّاد ينحرف يدوّاً
+        run: npm run guard:progress
+
       - name: فحص الأسلوب (ESLint)
         run: npm run lint
 
@@ -235,6 +238,9 @@ jobs:
 
       - name: حاجز عدد الملفات — البوابة G1
         run: npm run guard:filecount
+
+      - name: حاجز التقدّم (WL-063) — لا نسبة تُقدَّر تقديراً ولا عدّاد ينحرف يدوّاً
+        run: npm run guard:progress
 
   gate-report:
     name: تقرير البوابتين G0 و G1
