@@ -186,9 +186,14 @@ if (violations.length === 0) {
  * @returns {string} نصُّ القسمِ.
  */
 function extractSection291(txt) {
-  const start = txt.indexOf('2.9.1');
-  if (start < 0) return '';
-  // القسمُ التالي يبدأ بـ `## ` أو `### ` بعدَ `§2.9.1`.
-  const afterStart = txt.indexOf('\n##', start + 1);
+  // ابحث عن عنوانِ القسمِ نفسِه (سطرٌ يبدأُ بـ`###` أو `##` ثمّ `2.9.1`)،
+  // لا أوّلِ ظهورٍ لنصِّ «2.9.1» — فقد يَظهرُ هذا النصُّ في سردٍ نثريٍّ قبلَ العنوانِ،
+  // فيُؤخذُ السردُ عنواناً خطأً ويُقتطعُ الجدولُ قبلَ أوّلِ صفٍّ فعليٍّ.
+  const headerRe = /(^|\n)(#{2,3})\s*2\.9\.1[^\n]*\n/;
+  const headerMatch = txt.match(headerRe);
+  if (!headerMatch) return '';
+  const start = (headerMatch.index ?? 0) + headerMatch[0].length;
+  // القسمُ التالي يبدأ بـ `## ` (عنوانُ مستوى ثانٍ) بعدَ عنوانِ `§2.9.1`.
+  const afterStart = txt.indexOf('\n## ', start);
   return afterStart < 0 ? txt.slice(start) : txt.slice(start, afterStart);
 }
