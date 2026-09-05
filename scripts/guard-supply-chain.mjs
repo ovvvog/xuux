@@ -65,10 +65,14 @@ try {
   const pkg = readJson('package.json');
   const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
   const rangePattern = /^[\^~>=<]/;
-  const unpinned = Object.entries(deps).filter(([, version]) => typeof version === 'string' && rangePattern.test(version));
+  const unpinned = Object.entries(deps).filter(
+    ([, version]) => typeof version === 'string' && rangePattern.test(version),
+  );
   if (unpinned.length > 0) {
     violations.push(
-      `R1: تبعيّاتٌ غير مثبَّتةٍ بدقّة: ${unpinned.map(([name, version]) => `${name}@${version}`).join('، ')}.`,
+      `R1: تبعيّاتٌ غير مثبَّتةٍ بدقّة: ${unpinned
+        .map(([name, version]) => `${name}@${version}`)
+        .join('، ')}.`,
     );
   }
 
@@ -99,7 +103,11 @@ try {
       const audit = JSON.parse(readFileSync(auditPath, 'utf8'));
       const vulns = audit.vulnerabilities ?? {};
       const critical = Object.values(vulns).filter(
-        (v) => typeof v === 'object' && v !== null && 'severity' in v && (v.severity === 'critical' || v.severity === 'high'),
+        (v) =>
+          typeof v === 'object' &&
+          v !== null &&
+          'severity' in v &&
+          (v.severity === 'critical' || v.severity === 'high'),
       );
       if (critical.length > 0) {
         violations.push(
@@ -129,4 +137,6 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log('\n✅ حاجز سلسلة التوريد مفتوح: تبعيّاتٌ مثبَّتة وSBOM موجودٌ ولا ثغراتٍ حرجة.');
+console.log(
+  '\n✅ حاجز سلسلة التوريد مفتوح: تبعيّاتٌ مثبَّتة وSBOM موجودٌ ولا ثغراتٍ حرجة.',
+);

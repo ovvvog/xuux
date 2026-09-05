@@ -32,7 +32,11 @@ try {
   if (critical.length > 0) {
     console.error(`\n⛔ ${critical.length} ثغرةٌ حرجة/عالية:`);
     for (const [name, v] of critical) {
-      console.error(`   - ${name}: ${v.severity} — ${v.via?.map((x) => typeof x === 'string' ? x : x.title).join(', ')}`);
+      console.error(
+        `   - ${name}: ${v.severity} — ${v.via
+          ?.map((x) => (typeof x === 'string' ? x : x.title))
+          .join(', ')}`,
+      );
     }
     process.exit(1);
   }
