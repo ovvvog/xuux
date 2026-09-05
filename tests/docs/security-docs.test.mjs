@@ -247,3 +247,25 @@ test('عدد ملفات الاختبار المذكور في وثيقة جذر �
     .filter((file) => file.endsWith('.test.mjs')).length;
   assert.equal(Number(claim[1]), actual, `الوثيقة تقول ${claim[1]} والقرص فيه ${actual}`);
 });
+
+// M11.01 — يُثبتُ أنّ نموذجَ التهديدِ يغطّي الفئاتِ الستَّ المطلوبةَ على النظامِ النهائيِّ.
+// الفئاتُ الأربعُ (مارق، تصعيد، عبث، تسريب) لها حَواجزُ منجزةٌ (T33–T36)؛ والفئتانِ
+// المتبقيتانِ (توريد، تواطؤ) مُعلَنٌ نقصُهما في §7 بانتظارِ M11.02 وM11.03. فلا يُدَّعى
+// غطاؤُ فئةٍ بلا ضابطٍ، ولا يُخفى نقصُ فئةٍ في النصِّ.
+test('نموذجُ التهديدِ يغطّي الفئاتِ الستَّ لـ M11.01 بضابطٍ أو بنقصٍ مُعلَن', () => {
+  const text = readDoc('docs/THREAT_MODEL.md');
+  const rows = tableRows(text, 'T');
+  // الفئاتُ المغطّاةُ بالضوابطِ تظهرُ في عمودِ التهديدِ (cells[1]) والضابطِ (cells[3]).
+  const coveredText = rows.map((cells) => `${cells[1]} ${cells[3]}`).join('\n');
+  const section7 = text.split('تهديدات معروفة بلا ضابط')[1] ?? '';
+  const categories = [
+    { name: 'وكيل مارق', covered: /مارق/.test(coveredText) },
+    { name: 'تصعيد صلاحيات', covered: /تصعيد/.test(coveredText) },
+    { name: 'عبث بالسجل', covered: /عبث.*السجل|السجل.*عبث/.test(coveredText) },
+    { name: 'تسريب بيانات', covered: /تسريب.*بيانات|بيانات.*حسّاسة/.test(coveredText) },
+    { name: 'تخريب سلسلة التوريد', covered: /توريد/.test(section7) },
+    { name: 'تواطؤ وكلاء', covered: /تواطؤ/.test(section7) },
+  ];
+  const missing = categories.filter((c) => !c.covered).map((c) => c.name);
+  assert.equal(missing.length, 0, `نموذجُ التهديدِ لا يغطّي: ${missing.join('، ')}`);
+});
