@@ -20,7 +20,7 @@
 // ولا يُدَّعى أنَّ هذا بديلٌ عن الفحصِ الخارجيِّ (M11.04) — هو فحصٌ آليٌّ
 // داخليٌّ لا أكثر.
 
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -103,7 +103,7 @@ try {
       );
       if (critical.length > 0) {
         violations.push(
-          `R3: ${critical.length} ثغرةٌ حرجة/عالية في `audit-report.json`.`,
+          `R3: ${critical.length} ثغرة حرجة/عالية في audit-report.json.`,
         );
       }
     } catch {
