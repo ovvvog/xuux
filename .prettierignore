@@ -34,3 +34,8 @@ federation/regions/001/الإقليم-الفدرالي-001/
 federation/regions/001/provinces/ولاية-001-01/
 federation/regions/001/provinces/001-01/municipalities/001/
 institutions/001-الديوان-الملكي/
+
+# مُخرَجاتُ حاجزِ سلسلةِ التوريدِ (M11.02): مولَّدةٌ بـ`gen:sbom`/`audit:check`،
+# تُدقَّق بـ`guard:supply-chain` لا بالمنسّقِ. وُثِّق في `WL-067`.
+sbom.cdx.json
+audit-report.json

@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readProgressFacts } from '../../scripts/progress-facts.mjs';
 
 const repoRoot = process.cwd();
 const guard = path.join(repoRoot, 'scripts', 'guard-progress.mjs');
@@ -32,7 +33,7 @@ const guard = path.join(repoRoot, 'scripts', 'guard-progress.mjs');
  *   panelM10Done?: string,
  *   percent?: number,
  *   lastEntry?: string,
- *   section21?: string,
+ *   section21?: number,
  * }} patch
  * @returns {string} مسارُ الجذرِ المؤقَّت.
  */
@@ -53,9 +54,17 @@ function makeRoot(patch) {
 
   let baselinePatched = baseline;
   if (patch.section21 !== undefined) {
+    // العبارةُ نفسُها التي يقرأها الحارس في `R4` — بلا تشكيلٍ وبمسافةٍ محتملةٍ بعدَ «≈».
+    const before = baselinePatched;
     baselinePatched = baselinePatched.replace(
-      /النسبةُ المعتمدةُ الآن: ≈\d+%/u,
-      `النسبةُ المعتمدةُ الآن: ≈${patch.section21}%`,
+      /النسبة المعتمدة الآن\s*:\s*≈?\s*\d+/u,
+      `النسبة المعتمدة الآن: ≈ ${patch.section21}`,
+    );
+    // لو لم يُطبَّق التعديلُ فالاختبارُ سيقيسُ نسخةً سليمةً ويكذبُ نجاحُه — فيُغلَق هنا.
+    assert.notEqual(
+      baselinePatched,
+      before,
+      'تعديلُ §2.1 لم يُطبَّق: عبارةُ «النسبة المعتمدة الآن» غيرُ موجودةٍ.',
     );
   }
   writeFileSync(path.join(root, 'docs', 'roadmap', '02-baseline-audit.md'), baselinePatched);
@@ -65,6 +74,16 @@ function makeRoot(patch) {
   if (patch.lastEntry !== undefined) state.completion.last_entry = patch.lastEntry;
   writeFileSync(path.join(root, 'version.json'), JSON.stringify(state));
   return root;
+}
+
+/**
+ * يُرجع نسبةً تُخالف المحسوبةَ حتماً — لا رقماً محفوراً قد يصيرُ صحيحاً لاحقاً.
+ *
+ * @returns {number}
+ */
+function driftedPercent() {
+  const facts = readProgressFacts({ root: repoRoot });
+  return facts.percentRounded >= 100 ? facts.percentRounded - 1 : facts.percentRounded + 1;
 }
 
 /**
@@ -101,8 +120,10 @@ test('انحرافُ اللوحةِ (M10 9/9 → 8/9) يُغلق الحاجزَ 
   }
 });
 
-test('انحرافُ النسبةِ في version.json (92 → 95) يُغلق الحاجزَ — القيمةُ المقدَّرةُ تقديراً تُرفض', () => {
-  const root = makeRoot({ percent: 95 });
+test('انحرافُ النسبةِ في version.json يُغلق الحاجزَ — القيمةُ المقدَّرةُ تقديراً تُرفض', () => {
+  // الانحرافُ **يُشتَقُّ من القيمةِ المحسوبةِ** لا من رقمٍ محفورٍ: رقمٌ محفورٌ يصيرُ يوماً
+  // هو القيمةَ الصحيحةَ فيمرُّ الاختبارُ بلا عيبٍ مصنوعٍ — وهو ما حدثَ في `WL-067`.
+  const root = makeRoot({ percent: driftedPercent() });
   try {
     const result = runGuard(root);
     assert.equal(result.status, 1);
@@ -120,6 +141,18 @@ test('last_entry معلَّقٌ (WL-999 غيرُ موجودٍ في §2.9.1) يُ
     assert.equal(result.status, 1);
     assert.match(result.output, /R3/u);
     assert.match(result.output, /WL-999/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('انحرافُ §2.1 «النسبة المعتمدة الآن» يُغلق الحاجزَ — R4 مقيسٌ لا مقروءٌ', () => {
+  const root = makeRoot({ section21: driftedPercent() });
+  try {
+    const result = runGuard(root);
+    assert.equal(result.status, 1);
+    assert.match(result.output, /R4/u);
+    assert.match(result.output, /النسبة المعتمدة الآن/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

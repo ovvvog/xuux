@@ -249,23 +249,44 @@ test('عدد ملفات الاختبار المذكور في وثيقة جذر �
 });
 
 // M11.01 — يُثبتُ أنّ نموذجَ التهديدِ يغطّي الفئاتِ الستَّ المطلوبةَ على النظامِ النهائيِّ.
-// الفئاتُ الأربعُ (مارق، تصعيد، عبث، تسريب) لها حَواجزُ منجزةٌ (T33–T36)؛ والفئتانِ
-// المتبقيتانِ (توريد، تواطؤ) مُعلَنٌ نقصُهما في §7 بانتظارِ M11.02 وM11.03. فلا يُدَّعى
-// غطاؤُ فئةٍ بلا ضابطٍ، ولا يُخفى نقصُ فئةٍ في النصِّ.
-test('نموذجُ التهديدِ يغطّي الفئاتِ الستَّ لـ M11.01 بضابطٍ أو بنقصٍ مُعلَن', () => {
+//
+// **تشديدٌ في `WL-067`:** كانت الصيغةُ الأولى (‏`WL-066`) تقبلُ فئتي التوريدِ
+// والتواطؤِ **بمجرّدِ ذكرِهما نقصاً في §7** لأنّ ضابطَهما لم يكن قد نُفّذَ بعدُ
+// (‏`M11.02` و`M11.03`). وقد نُفّذا ودُمجا في `main` (‏`PR #28` و`PR #29`)،
+// فلو بقيتِ الصيغةُ المتسامحةُ لمرَّ **محوُ الصفّينِ `T37`/`T38` من §6** بلا فشلٍ
+// ما دامت الكلمتانِ مذكورتَينِ في §7 — فصارَ المطلوبُ أن تكونَ **الستُّ كلُّها**
+// مُغطّاةً بصفٍّ في جدولِ §6 له ضابطٌ ومسارٌ ودليلٌ موجودةٌ على القرصِ. والفحصُ
+// الأوّلُ (وجودُ المساراتِ) مُنفَّذٌ أصلاً في اختبارٍ أعلاهُ، وهنا يُربَطُ بالفئةِ
+// نفسِها كي لا تُقرَأَ فئةٌ مُغطّاةً بلغةٍ عامّةٍ بلا دليلٍ.
+test('نموذجُ التهديدِ يغطّي الفئاتِ الستَّ لـ M11.01 بصفٍ له ضابطٌ ودليلٌ موجود', () => {
   const text = readDoc('docs/THREAT_MODEL.md');
   const rows = tableRows(text, 'T');
-  // الفئاتُ المغطّاةُ بالضوابطِ تظهرُ في عمودِ التهديدِ (cells[1]) والضابطِ (cells[3]).
-  const coveredText = rows.map((cells) => `${cells[1]} ${cells[3]}`).join('\n');
-  const section7 = text.split('تهديدات معروفة بلا ضابط')[1] ?? '';
   const categories = [
-    { name: 'وكيل مارق', covered: /مارق/.test(coveredText) },
-    { name: 'تصعيد صلاحيات', covered: /تصعيد/.test(coveredText) },
-    { name: 'عبث بالسجل', covered: /عبث.*السجل|السجل.*عبث/.test(coveredText) },
-    { name: 'تسريب بيانات', covered: /تسريب.*بيانات|بيانات.*حسّاسة/.test(coveredText) },
-    { name: 'تخريب سلسلة التوريد', covered: /توريد/.test(section7) },
-    { name: 'تواطؤ وكلاء', covered: /تواطؤ/.test(section7) },
+    { name: 'وكيل مارق', pattern: /مارق/ },
+    { name: 'تصعيد صلاحيات', pattern: /تصعيد/ },
+    { name: 'عبث بالسجل', pattern: /عبث.*السجل|السجل.*عبث/ },
+    { name: 'تسريب بيانات', pattern: /تسريب.*بيانات|بيانات.*حسّاسة/ },
+    { name: 'تخريب سلسلة التوريد', pattern: /توريد/ },
+    { name: 'تواطؤ وكلاء', pattern: /تواطؤ/ },
   ];
-  const missing = categories.filter((c) => !c.covered).map((c) => c.name);
-  assert.equal(missing.length, 0, `نموذجُ التهديدِ لا يغطّي: ${missing.join('، ')}`);
+  const failures = [];
+  for (const { name, pattern } of categories) {
+    // الفئةُ تُطابَقُ في عمودِ التهديدِ وحدهُ (cells[1]) لا في الورقةِ كلّها.
+    const matching = rows.filter((cells) => pattern.test(/** @type {string} */ (cells[1] ?? '')));
+    if (matching.length === 0) {
+      failures.push(`${name}: لا صفَّ لها في جدولِ §6`);
+      continue;
+    }
+    // ولا يكفي وجودُ الصفِّ: ضابطٌ يقولُ «لا ضابطَ» ليس ضابطاً، ودليلٌ لا ملفَ
+    // اختبارٍ لهُ على القرصِ دعوى لا دليل.
+    const proven = matching.some((cells) => {
+      const control = /** @type {string} */ (cells[3] ?? '');
+      const evidence = /** @type {string} */ (cells[5] ?? '');
+      if (/لا ضابط|⛔/.test(control)) return false;
+      const tests = backticked(evidence).filter((token) => token.endsWith('.test.mjs'));
+      return tests.length > 0 && tests.every((token) => existsSync(join(ROOT, token)));
+    });
+    if (!proven) failures.push(`${name}: صفٌ بلا ضابطٍ فعليٍّ أو بلا ملفِ اختبارٍ موجودٍ`);
+  }
+  assert.deepEqual(failures, [], `فئاتُ M11.01 غيرُ مُبرهَنةٍ:\n${failures.join('\n')}`);
 });
