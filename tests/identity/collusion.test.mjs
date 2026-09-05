@@ -172,7 +172,7 @@ test('collusion: a suspended agent loses its temporary grants', async () => {
   });
   const agentB = await registry.register({
     name: 'beta',
-    role: 'role:admin',
+    role: 'role:minister',
     capabilities: ['action:read-registry'],
   });
 
@@ -182,7 +182,7 @@ test('collusion: a suspended agent loses its temporary grants', async () => {
     capability: 'action:read-registry',
     reason: 'temporary access',
     grantedBy: agentB.id,
-    grantorRole: 'role:admin',
+    grantorRole: 'role:minister',
     ttlSeconds: 3600,
   });
 
