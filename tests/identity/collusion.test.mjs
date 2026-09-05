@@ -153,12 +153,11 @@ test('collusion: quarantine prevents an agent from operating after signaling', (
     log,
     incidents,
     now: () => new Date(nowMs),
-    thresholds: { 'fingerprint-drift': 1 },
     windowMs: 60000,
   });
 
   // Report an anomaly to quarantine an agent
-  warden.report({ kind: 'fingerprint-drift', subject: 'agent:beta' });
+  warden.report({ kind: 'model-fingerprint-mismatch', subject: 'agent:beta' });
 
   // The agent should be quarantined
   assert.ok(warden.isQuarantined('agent:beta'));
