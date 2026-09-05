@@ -36,11 +36,12 @@ try {
   if (critical.length > 0) {
     console.error(`\n⛔ ${critical.length} ثغرةٌ حرجة/عالية:`);
     for (const [name, v] of critical) {
-      console.error(
-        `   - ${name}: ${v.severity} — ${v.via
-          ?.map((x) => (typeof x === 'string' ? x : x.title))
-          .join(', ')}`,
-      );
+      console.error(`   - ${name}: ${v.severity}`);
+      if (v.via) {
+        const via = Array.isArray(v.via) ? v.via : [v.via];
+        const desc = via.map((x) => (typeof x === 'string' ? x : x.title)).join(', ');
+        console.error(`     عبر: ${desc}`);
+      }
     }
     process.exit(1);
   }
@@ -49,9 +50,10 @@ try {
   console.log(`\n✅ لا ثغراتٍ حرجة/عالية (${total} ثغرة منخفضة/متوسطة).`);
 } catch (error) {
   // npm audit returns non-zero exit when vulnerabilities found
-  if (error instanceof Error && 'stdout' in error) {
+  const err = /** @type {Error & { stdout?: string }} */ (error);
+  if (err.stdout) {
     try {
-      const audit = JSON.parse(error.stdout);
+      const audit = JSON.parse(err.stdout);
       const outPath = `${repoRoot}/audit-report.json`;
       writeFileSync(outPath, JSON.stringify(audit, null, 2) + '\n');
       const vulns = audit.vulnerabilities ?? {};
@@ -71,7 +73,7 @@ try {
         process.exit(1);
       }
     } catch {
-      console.error('⛔ فشل تحليل تقرير npm audit:', error.message);
+      console.error('⛔ فشل تحليل تقرير npm audit:', err.message);
       process.exit(1);
     }
   } else {

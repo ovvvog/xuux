@@ -147,10 +147,18 @@ test('collusion: two agents have separate certificates and cannot share them', a
 });
 
 test('collusion: quarantine prevents an agent from operating after signaling', () => {
-  const { warden } = setup();
+  const { log, incidents } = setup();
+  let nowMs = Date.UTC(2026, 8, 5, 2, 0, 0);
+  const warden = new QuarantineWarden({
+    log,
+    incidents,
+    now: () => new Date(nowMs),
+    thresholds: { 'fingerprint-drift': 1 },
+    windowMs: 60000,
+  });
 
-  // Signal an anomaly to quarantine an agent
-  warden.signal('fingerprint-drift', 'agent:beta');
+  // Report an anomaly to quarantine an agent
+  warden.report({ kind: 'fingerprint-drift', subject: 'agent:beta' });
 
   // The agent should be quarantined
   assert.ok(warden.isQuarantined('agent:beta'));
