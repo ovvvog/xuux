@@ -148,7 +148,7 @@ test('collusion: two agents have separate certificates and cannot share them', a
 
 test('collusion: quarantine prevents an agent from operating after signaling', () => {
   const { log, incidents } = setup();
-  let nowMs = Date.UTC(2026, 8, 5, 2, 0, 0);
+  const nowMs = Date.UTC(2026, 8, 5, 2, 0, 0);
   const warden = new QuarantineWarden({
     log,
     incidents,
