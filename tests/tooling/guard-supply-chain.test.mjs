@@ -12,6 +12,7 @@ const repoRoot = path.resolve(__dirname, '../../');
 //
 // كلُّ اختبار يهيِّئ جذرًا مؤقّتًا ويُشغّل الحاجزَ ثم يتحقّق من الحكم.
 
+/** @param {string} root */
 function runGuard(root) {
   try {
     const output = execFileSync('node', ['scripts/guard-supply-chain.mjs', '--root', root], {
@@ -20,7 +21,8 @@ function runGuard(root) {
     });
     return { ok: true, output };
   } catch (error) {
-    return { ok: false, output: error.stdout ?? '', stderr: error.stderr ?? '' };
+    const err = /** @type {Error & { stdout?: string; stderr?: string }} */ (error);
+    return { ok: false, output: err.stdout ?? '', stderr: err.stderr ?? '' };
   }
 }
 
@@ -34,6 +36,7 @@ function makeTempRoot() {
   return tmp;
 }
 
+/** @param {string} root */
 function cleanup(root) {
   rmSync(root, { recursive: true, force: true });
 }

@@ -39,7 +39,9 @@ try {
       console.error(`   - ${name}: ${v.severity}`);
       if (v.via) {
         const via = Array.isArray(v.via) ? v.via : [v.via];
-        const desc = via.map((x) => (typeof x === 'string' ? x : x.title)).join(', ');
+        const desc = via
+          .map((/** @type {any} */ x) => (typeof x === 'string' ? x : x.title))
+          .join(', ');
         console.error(`     عبر: ${desc}`);
       }
     }
