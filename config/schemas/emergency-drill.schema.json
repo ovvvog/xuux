@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/emergency-drill.schema.json",
+  "title": "عقد تمرين الطوارئ الكامل — الخطوة M11.07",
+  "description": "يُعلن أطوارَ تمرينِ الطوارئ الخمسةَ مرتَّبةً، ولكلِّ طورٍ عهدُ زمنٍ بالملّي ثانية وإنفاذٌ مقيسٌ يجب أن يقع فعلاً، ثم الأحكامَ ورموزَ خروجِها والجذورَ والدفترَ وأحداثَ التدقيقِ ورموزَ الرفضِ والضمانات. ولا يُقرأ نجاحُ التمرين مراجعةً مستقلّةً ولا قراراً ملكيّاً ولا إذناً بإطلاق.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "objective",
+    "phases",
+    "verdicts",
+    "source",
+    "ledger",
+    "events",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "$defs": {
+    "phaseId": {
+      "type": "string",
+      "pattern": "^phase:[a-z][a-z-]*[a-z]$"
+    },
+    "verdictId": {
+      "type": "string",
+      "pattern": "^emergency:[a-z][a-z-]*[a-z]$"
+    },
+    "eventName": {
+      "type": "string",
+      "pattern": "^emergency\\.[a-z]+(\\.[a-z]+)*$"
+    },
+    "errorCode": {
+      "type": "string",
+      "pattern": "^EMERGENCY_[A-Z_]+$"
+    },
+    "guaranteeId": {
+      "type": "string",
+      "pattern": "^G-EMERGENCY-[A-Z-]+$"
+    },
+    "relPath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "minLength": 1
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxDrillMs", "statement"],
+      "properties": {
+        "maxDrillMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "زمنُ التمرينِ كاملاً بالملّي ثانية — الرقمُ الوحيدُ الذي يُحاسَب عليه التمرينُ من أوّلِ طورٍ إلى آخرِه."
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 40,
+          "description": "عهدُ التمرينِ مكتوباً بلغةٍ يفهمها من ليس مبرمجاً."
+        }
+      }
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "order", "maxMs", "purpose", "enforcement", "enforcedBy"],
+        "properties": {
+          "id": { "$ref": "#/$defs/phaseId" },
+          "order": { "type": "integer", "minimum": 1 },
+          "maxMs": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "عهدُ زمنِ الطورِ بالملّي ثانية — فطورٌ بلا رقمٍ طورٌ لا يُحاسَب."
+          },
+          "purpose": { "type": "string", "minLength": 40 },
+          "enforcement": {
+            "type": "string",
+            "minLength": 40,
+            "description": "الرفضُ أو القبولُ الذي يجب أن يقع فعلاً حتى يُعَدَّ الطورُ مُنفَّذاً — لا يُقرأ غيابُ الخطأِ إنفاذاً."
+          },
+          "enforcedBy": { "$ref": "#/$defs/relPath" }
+        }
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "exitCode", "meaning"],
+        "properties": {
+          "id": { "$ref": "#/$defs/verdictId" },
+          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
+          "meaning": { "type": "string", "minLength": 40 }
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stateRoot", "reportsDir"],
+      "properties": {
+        "stateRoot": { "$ref": "#/$defs/relPath" },
+        "reportsDir": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "lastDrillPath"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relPath" },
+        "lastDrillPath": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/eventName" }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "when"],
+        "properties": {
+          "code": { "$ref": "#/$defs/errorCode" },
+          "when": { "type": "string", "minLength": 10 }
+        }
+      }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedIn"],
+        "properties": {
+          "id": { "$ref": "#/$defs/guaranteeId" },
+          "statement": { "type": "string", "minLength": 40 },
+          "enforcedIn": { "$ref": "#/$defs/relPath" }
+        }
+      }
+    }
+  }
+}
