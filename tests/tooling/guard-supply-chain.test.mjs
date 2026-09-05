@@ -43,24 +43,38 @@ test('guard:supply-chain passes when all conditions are met', () => {
   try {
     // Minimal valid setup
     mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
-    writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
-      name: 'test', version: '1.0.0', private: true,
-      dependencies: { pg: '8.23.0' },
-      devDependencies: { typescript: '5.9.3' },
-    }));
-    writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify({
-      lockfileVersion: 3,
-      name: 'test',
-      packages: {},
-    }));
-    writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify({
-      bomFormat: 'CycloneDX',
-      specVersion: '1.4',
-      components: [{ name: 'pg', version: '8.23.0' }],
-    }));
-    writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({
-      vulnerabilities: {},
-    }));
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 'test',
+        version: '1.0.0',
+        private: true,
+        dependencies: { pg: '8.23.0' },
+        devDependencies: { typescript: '5.9.3' },
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'package-lock.json'),
+      JSON.stringify({
+        lockfileVersion: 3,
+        name: 'test',
+        packages: {},
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'sbom.cdx.json'),
+      JSON.stringify({
+        bomFormat: 'CycloneDX',
+        specVersion: '1.4',
+        components: [{ name: 'pg', version: '8.23.0' }],
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'audit-report.json'),
+      JSON.stringify({
+        vulnerabilities: {},
+      }),
+    );
     writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
 
     const result = runGuard(tmp);
@@ -73,13 +87,21 @@ test('guard:supply-chain passes when all conditions are met', () => {
 test('guard:supply-chain fails when package-lock.json is missing', () => {
   const tmp = makeTempRoot();
   try {
-    writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
-      name: 'test', version: '1.0.0',
-      dependencies: { pg: '8.23.0' },
-    }));
-    writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify({
-      bomFormat: 'CycloneDX', components: [{ name: 'pg' }],
-    }));
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 'test',
+        version: '1.0.0',
+        dependencies: { pg: '8.23.0' },
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'sbom.cdx.json'),
+      JSON.stringify({
+        bomFormat: 'CycloneDX',
+        components: [{ name: 'pg' }],
+      }),
+    );
     writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({ vulnerabilities: {} }));
     writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
 
@@ -94,16 +116,29 @@ test('guard:supply-chain fails when package-lock.json is missing', () => {
 test('guard:supply-chain fails when dependencies are not pinned', () => {
   const tmp = makeTempRoot();
   try {
-    writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
-      name: 'test', version: '1.0.0',
-      dependencies: { pg: '^8.23.0' },
-    }));
-    writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify({
-      lockfileVersion: 3, name: 'test', packages: {},
-    }));
-    writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify({
-      bomFormat: 'CycloneDX', components: [{ name: 'pg' }],
-    }));
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 'test',
+        version: '1.0.0',
+        dependencies: { pg: '^8.23.0' },
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'package-lock.json'),
+      JSON.stringify({
+        lockfileVersion: 3,
+        name: 'test',
+        packages: {},
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'sbom.cdx.json'),
+      JSON.stringify({
+        bomFormat: 'CycloneDX',
+        components: [{ name: 'pg' }],
+      }),
+    );
     writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({ vulnerabilities: {} }));
     writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
 
@@ -118,13 +153,22 @@ test('guard:supply-chain fails when dependencies are not pinned', () => {
 test('guard:supply-chain fails when SBOM is missing', () => {
   const tmp = makeTempRoot();
   try {
-    writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
-      name: 'test', version: '1.0.0',
-      dependencies: { pg: '8.23.0' },
-    }));
-    writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify({
-      lockfileVersion: 3, name: 'test', packages: {},
-    }));
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 'test',
+        version: '1.0.0',
+        dependencies: { pg: '8.23.0' },
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'package-lock.json'),
+      JSON.stringify({
+        lockfileVersion: 3,
+        name: 'test',
+        packages: {},
+      }),
+    );
     writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({ vulnerabilities: {} }));
     writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
 
@@ -139,21 +183,37 @@ test('guard:supply-chain fails when SBOM is missing', () => {
 test('guard:supply-chain fails when critical vulnerabilities exist', () => {
   const tmp = makeTempRoot();
   try {
-    writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
-      name: 'test', version: '1.0.0',
-      dependencies: { pg: '8.23.0' },
-    }));
-    writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify({
-      lockfileVersion: 3, name: 'test', packages: {},
-    }));
-    writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify({
-      bomFormat: 'CycloneDX', components: [{ name: 'pg' }],
-    }));
-    writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({
-      vulnerabilities: {
-        'pg': { severity: 'critical', via: [{ title: 'SQL Injection' }] },
-      },
-    }));
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 'test',
+        version: '1.0.0',
+        dependencies: { pg: '8.23.0' },
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'package-lock.json'),
+      JSON.stringify({
+        lockfileVersion: 3,
+        name: 'test',
+        packages: {},
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'sbom.cdx.json'),
+      JSON.stringify({
+        bomFormat: 'CycloneDX',
+        components: [{ name: 'pg' }],
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'audit-report.json'),
+      JSON.stringify({
+        vulnerabilities: {
+          pg: { severity: 'critical', via: [{ title: 'SQL Injection' }] },
+        },
+      }),
+    );
     writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
 
     const result = runGuard(tmp);

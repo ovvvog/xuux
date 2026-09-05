@@ -35,7 +35,14 @@ function setup() {
   const warden = new QuarantineWarden({ log, incidents, now });
 
   return {
-    gate, registry, grants, incidents, ca, log, catalog, warden,
+    gate,
+    registry,
+    grants,
+    incidents,
+    ca,
+    log,
+    catalog,
+    warden,
     advance: (/** @type {number} */ s) => (nowMs += s * 1000),
   };
 }
@@ -43,11 +50,13 @@ function setup() {
 test('collusion: agent A cannot use agent B identity to access B capabilities', async () => {
   const { gate, registry } = setup();
   const agentA = await registry.register({
-    name: 'alpha', role: 'role:agent',
+    name: 'alpha',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
   const agentB = await registry.register({
-    name: 'beta', role: 'role:agent',
+    name: 'beta',
+    role: 'role:agent',
     capabilities: ['action:read-registry', 'action:external-egress'],
   });
 
@@ -66,11 +75,13 @@ test('collusion: agent A cannot use agent B identity to access B capabilities', 
 test('collusion: a revoked agent cannot regain access through another agent', async () => {
   const { gate, registry } = setup();
   const agentA = await registry.register({
-    name: 'alpha', role: 'role:agent',
+    name: 'alpha',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
   const agentB = await registry.register({
-    name: 'beta', role: 'role:agent',
+    name: 'beta',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
 
@@ -92,11 +103,13 @@ test('collusion: a revoked agent cannot regain access through another agent', as
 test('collusion: agents cannot chain authorizations to escalate privileges', async () => {
   const { gate, registry } = setup();
   const agentA = await registry.register({
-    name: 'alpha', role: 'role:agent',
+    name: 'alpha',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
   const agentB = await registry.register({
-    name: 'beta', role: 'role:supervisor',
+    name: 'beta',
+    role: 'role:supervisor',
     capabilities: ['action:read-registry', 'action:approve-classification'],
   });
 
@@ -114,11 +127,13 @@ test('collusion: agents cannot chain authorizations to escalate privileges', asy
 test('collusion: two agents have separate certificates and cannot share them', async () => {
   const { gate, registry } = setup();
   const agentA = await registry.register({
-    name: 'alpha', role: 'role:agent',
+    name: 'alpha',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
   const agentB = await registry.register({
-    name: 'beta', role: 'role:agent',
+    name: 'beta',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
 
@@ -144,11 +159,13 @@ test('collusion: quarantine prevents an agent from operating after signaling', (
 test('collusion: a suspended agent loses its temporary grants', async () => {
   const { gate, registry, grants } = setup();
   const agentA = await registry.register({
-    name: 'alpha', role: 'role:agent',
+    name: 'alpha',
+    role: 'role:agent',
     capabilities: ['action:read-registry'],
   });
   const agentB = await registry.register({
-    name: 'beta', role: 'role:admin',
+    name: 'beta',
+    role: 'role:admin',
     capabilities: ['action:read-registry'],
   });
 

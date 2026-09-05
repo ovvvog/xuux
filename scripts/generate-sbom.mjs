@@ -24,9 +24,6 @@ try {
   writeFileSync(outPath, JSON.stringify(sbom, null, 2) + '\n');
   console.log(`✅ SBOM مُولَّدٌ: ${outPath} (${sbom.components?.length ?? 0} مكوّن)`);
 } catch (error) {
-  console.error(
-    '⛔ فشل توليد SBOM:',
-    error instanceof Error ? error.message : String(error),
-  );
+  console.error('⛔ فشل توليد SBOM:', error instanceof Error ? error.message : String(error));
   process.exit(1);
 }

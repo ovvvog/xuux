@@ -25,8 +25,12 @@ try {
 
   const vulns = audit.vulnerabilities ?? {};
   const critical = Object.entries(vulns).filter(([, v]) => {
-    return typeof v === 'object' && v !== null && 'severity' in v &&
-      (v.severity === 'critical' || v.severity === 'high');
+    return (
+      typeof v === 'object' &&
+      v !== null &&
+      'severity' in v &&
+      (v.severity === 'critical' || v.severity === 'high')
+    );
   });
 
   if (critical.length > 0) {
@@ -52,8 +56,12 @@ try {
       writeFileSync(outPath, JSON.stringify(audit, null, 2) + '\n');
       const vulns = audit.vulnerabilities ?? {};
       const critical = Object.entries(vulns).filter(([, v]) => {
-        return typeof v === 'object' && v !== null && 'severity' in v &&
-          (v.severity === 'critical' || v.severity === 'high');
+        return (
+          typeof v === 'object' &&
+          v !== null &&
+          'severity' in v &&
+          (v.severity === 'critical' || v.severity === 'high')
+        );
       });
       if (critical.length > 0) {
         console.error(`\n⛔ ${critical.length} ثغرةٌ حرجة/عالية:`);

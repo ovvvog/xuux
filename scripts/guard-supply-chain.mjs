@@ -110,9 +110,7 @@ try {
           (v.severity === 'critical' || v.severity === 'high'),
       );
       if (critical.length > 0) {
-        violations.push(
-          `R3: ${critical.length} ثغرة حرجة/عالية في audit-report.json.`,
-        );
+        violations.push(`R3: ${critical.length} ثغرة حرجة/عالية في audit-report.json.`);
       }
     } catch {
       violations.push('R3: `audit-report.json` ليس JSON صالح.');
@@ -137,6 +135,4 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  '\n✅ حاجز سلسلة التوريد مفتوح: تبعيّاتٌ مثبَّتة وSBOM موجودٌ ولا ثغراتٍ حرجة.',
-);
+console.log('\n✅ حاجز سلسلة التوريد مفتوح: تبعيّاتٌ مثبَّتة وSBOM موجودٌ ولا ثغراتٍ حرجة.');
