@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/readiness-deferrals.schema.json",
+  "title": "سجل التأجيلات المُصرَّحة — الخطوة M11.08",
+  "description": "كل بند هنا غيرُ منجَزٍ، ووجودُه إعلانُ عدمِ إنجازٍ لا دليلُ إنجازٍ. ولكل تأجيلٍ سببُه وحاجزُه ونوعُ حاجزِه وشرطُ فكِّه وصاحبُ قرارِه ومُدخلةُ إعلانِه — فتأجيلٌ ناقصُ حقلٍ يُوقف حكمَ التقرير.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "deferrals"],
+  "$defs": {
+    "arabicText": {
+      "type": "string",
+      "minLength": 12
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "deferrals": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "reason",
+          "blocker",
+          "blockerKind",
+          "unblockCondition",
+          "authority",
+          "declaredIn"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^(M\\d+\\.\\d+|G\\d+)$" },
+          "kind": { "type": "string", "enum": ["step", "gate"] },
+          "title": { "type": "string", "minLength": 8 },
+          "reason": { "$ref": "#/$defs/arabicText" },
+          "blocker": { "$ref": "#/$defs/arabicText" },
+          "blockerKind": {
+            "type": "string",
+            "enum": ["external-party", "external-plan", "sovereign-decision"]
+          },
+          "unblockCondition": { "$ref": "#/$defs/arabicText" },
+          "authority": {
+            "type": "string",
+            "enum": ["owner", "external-independent-party", "github"]
+          },
+          "declaredIn": { "type": "string", "pattern": "^WL-\\d{3}$" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,139 @@
+# عقدُ تقريرِ الجاهزيّةِ — الخطوة `M11.08`
+#
+# معيارُ القبولِ بحرفِه: «صفرُ بندٍ بلا دليلٍ أو بلا تأجيلٍ معلَنٍ». فالعقدُ هنا
+# يُعلن **مصادرَ البنودِ** (لوحةُ الخطواتِ والبوابات) و**أنواعَ الدليلِ المقبولةِ**
+# و**شكلَ التأجيلِ المُصرَّحِ**، ثم الأحكامَ ورموزَ خروجِها والأحداثَ ورموزَ الرفضِ
+# والضمانات.
+#
+# **وحدٌّ يُقرأ مع كلِّ سطرٍ بعده:** تقريرُ الجاهزيّةِ **يقيس وجودَ الدليلِ وموضعَه
+# لا كفايتَه**، و`readiness:reported` حكمُ آلةٍ على تغطيةِ البنودِ — **لا اعتمادٌ
+# أمنيٌّ ولا قانونيٌّ ولا أخلاقيٌّ، ولا فتحٌ لـ`G11`، ولا إذنٌ بإطلاقٍ، ولا `100%`.**
+
+version: '1.0.0'
+
+objective:
+  statement: >-
+    يُقابِلُ كلَّ بندٍ من معاييرِ الاكتمالِ — كلَّ خطوةٍ في لوحةِ الخطواتِ وكلَّ
+    بوابةٍ معلَنةٍ — بدليلِه على القرصِ أو بتأجيلٍ مُصرَّحٍ بسببِه وحاجزِه وشرطِ
+    فكِّه وصاحبِ قرارِه؛ فبندٌ بلا دليلٍ ولا تأجيلٍ يُوقِفُ الحكمَ.
+  limit: >-
+    وجودُ الدليلِ وموضعُه مقيسٌ، وكفايةُ الضابطِ **غيرُ مقيسةٍ** هنا: كفايتُه شأنُ
+    المراجعةِ المستقلّةِ واختبارِ الاختراقِ والمراجعةِ الأخلاقيّةِ القانونيّةِ
+    (‏`M11.04`–`M11.06`) ولا يُنفِّذُها المنفِّذُ ولا يُوضَعُ حكمُها نيابةً عنها.
+
+sources:
+  roadmap: docs/roadmap/03-roadmap-to-100.md
+  workLog: docs/roadmap/05-work-log.md
+  deferrals: config/readiness-deferrals.yaml
+  status: PROJECT_STATUS.md
+  version: version.json
+  output: docs/READINESS_REPORT.md
+
+# أنواعُ الدليلِ المقبولةِ — ولكلِّ نوعٍ **موضعٌ يُقرأ على القرصِ**، فلا يُقبَل
+# «دليلٌ» لا يُشار إلى سطرِه.
+evidenceKinds:
+  - id: evidence:worklog-entry
+    meaning: >-
+      مُدخلةُ سجلِّ عملٍ (‏`WL-0NN`) تذكرُ مُعرِّفَ البندِ نصّاً — دليلٌ على أنّ
+      العملَ وُثِّقَ بمنفِّذِه وتاريخِه وما لم يتمَّ منه.
+    locatedIn: docs/roadmap/05-work-log.md
+  - id: evidence:roadmap-table
+    meaning: >-
+      صفٌّ في جدولِ «أدلّة تنفيذ» داخلَ خارطةِ الطريقِ يذكرُ البندَ بدليلِه
+      المُتحقَّقِ منه.
+    locatedIn: docs/roadmap/03-roadmap-to-100.md
+  - id: evidence:declared-deferral
+    meaning: >-
+      تأجيلٌ **مُصرَّحٌ** في سجلِّ التأجيلاتِ بسببِه وحاجزِه وشرطِ فكِّه وصاحبِ
+      قرارِه ومُدخلةِ إعلانِه — وهو **ليس دليلَ إنجازٍ** بل إعلانُ عدمِ إنجازٍ.
+    locatedIn: config/readiness-deferrals.yaml
+
+# البنودُ تُقرأ من مصدرِها لا تُكتَب بيدٍ: صفوفُ الخطواتِ من جداولِ الخارطةِ،
+# والبواباتُ من عناوينِها المعلَنةِ فيها.
+itemSources:
+  - id: item:step
+    pattern: '^\|\s*(M\d+\.\d+)\s*\|'
+    countedIn: docs/roadmap/03-roadmap-to-100.md
+    expected: 105
+  - id: item:gate
+    pattern: '🚪.*?\b(G\d+)\b'
+    countedIn: docs/roadmap/03-roadmap-to-100.md
+    expected: 12
+
+verdicts:
+  - id: readiness:reported
+    exitCode: 0
+    meaning: >-
+      كلُّ بندٍ مقابَلٌ بدليلٍ يُشار إلى موضعِه أو بتأجيلٍ مُصرَّحٍ كاملِ الحقولِ —
+      **تغطيةٌ مقيسةٌ لا اعتمادٌ**.
+  - id: readiness:incomplete
+    exitCode: 82
+    meaning: بندٌ واحدٌ على الأقلِّ بلا دليلٍ ولا تأجيلٍ مُصرَّحٍ، أو تأجيلٌ ناقصُ الحقولِ.
+  - id: readiness:unmeasured
+    exitCode: 83
+    meaning: >-
+      لم يُقَسْ أصلاً: عقدٌ مخالفٌ لمخطَّطِه، أو مصدرٌ غائبٌ، أو عددُ بنودٍ مقروءٍ
+      يخالف المُعلَنَ — فصمتٌ لا يُقرأ نجاحاً.
+
+events:
+  - readiness.report.generated
+  - readiness.item.evidenced
+  - readiness.item.deferred
+  - readiness.item.uncovered
+  - readiness.drift.detected
+  - readiness.report.refused
+
+refusalCodes:
+  - READINESS_CONFIG_INVALID
+  - READINESS_DEFERRALS_INVALID
+  - READINESS_SOURCE_MISSING
+  - READINESS_ITEM_COUNT_MISMATCH
+  - READINESS_ITEM_UNCOVERED
+  - READINESS_DEFERRAL_INCOMPLETE
+  - READINESS_DEFERRAL_UNDECLARED
+  - READINESS_DEFERRAL_ORPHAN
+  - READINESS_EVIDENCE_MISSING
+  - READINESS_REPORT_DRIFT
+  - READINESS_SELF_APPROVAL
+  - READINESS_LAUNCH_CLAIM
+  - READINESS_VERDICT_UNDECLARED
+  - READINESS_ARGUMENT_UNKNOWN
+
+guarantees:
+  - id: G-READINESS-EVERY-ITEM-COVERED
+    statement: >-
+      كلُّ بندٍ مقروءٍ من مصدرِه يظهر في التقريرِ بحالتِه، وبندٌ لا دليلَ له ولا
+      تأجيلَ يُصدِر `readiness:incomplete` — فتقريرٌ يسكتُ عن بندٍ يخفي أضعفَ حلقةٍ.
+    enforcedBy: src/readiness/judgement.mjs
+  - id: G-READINESS-DEFERRAL-DECLARED-NOT-IMPLIED
+    statement: >-
+      التأجيلُ لا يُستنتَج من غيابِ الدليلِ: يجب أن يكون **مُصرَّحاً** بسببِه
+      وحاجزِه ونوعِ حاجزِه وشرطِ فكِّه وصاحبِ قرارِه ومُدخلةِ إعلانِه.
+    enforcedBy: src/readiness/deferrals.mjs
+  - id: G-READINESS-EVIDENCE-POINTS-TO-DISK
+    statement: >-
+      كلُّ دليلٍ يُشار إلى ملفِّه ومُدخلتِه؛ فدليلٌ بلا موضعٍ ادّعاءٌ لا يُراجَع.
+    enforcedBy: scripts/lib/readiness-facts.mjs
+  - id: G-READINESS-NO-SELF-APPROVAL
+    statement: >-
+      لا يحتوي التقريرُ لفظَ اعتمادٍ ذاتيٍّ (‏`VERIFIED`/`APPROVED`/`Secure`) ولا
+      يُنسَب إليه حكمُ جهةٍ مستقلّةٍ لم تُراجعْ.
+    enforcedBy: scripts/guard-readiness.mjs
+  - id: G-READINESS-NO-LAUNCH-CLAIM
+    statement: >-
+      لا يُعلِنُ التقريرُ فتحَ `G11` ولا جاهزيّةَ إطلاقٍ ولا `100%`؛ وهي قراراتٌ
+      سياديّةٌ خارجَ سلطةِ المولِّدِ.
+    enforcedBy: scripts/guard-readiness.mjs
+  - id: G-READINESS-DRIFT-DETECTED
+    statement: >-
+      التقريرُ المُقيَّدُ في المستودعِ يُقارَن بايتاً ببايتٍ بالمولَّدِ من الحقيقةِ
+      الراهنةِ، وانزياحُه يُصدِر `readiness:incomplete` — فتقريرٌ قديمٌ يكذبُ بصمتٍ.
+    enforcedBy: scripts/readiness-report.mjs
+  - id: G-READINESS-ONLY-REPORTED-EXITS-ZERO
+    statement: لكلِّ حكمٍ رمزُ خروجٍ مُفرَدٌ، و`readiness:reported` وحدَه يخرج صفراً.
+    enforcedBy: src/readiness/contract.mjs
+  - id: G-READINESS-PURE-JUDGEMENT
+    statement: >-
+      وحداتُ الحكمِ في `src/readiness/` لا تلمس القرصَ ولا العمليّاتِ ولا الساعةَ؛
+      واللمسُ محصورٌ في جامعِ الوقائعِ وحدَه.
+    enforcedBy: scripts/guard-readiness.mjs

@@ -1,0 +1,354 @@
+#!/usr/bin/env node
+/**
+ * حاجزُ تقريرِ الجاهزيّةِ بتأجيلاتٍ صريحةٍ — البوابةُ السادسةُ والأربعون في تسلسلِ
+ * الحواجزِ المُعلَنِ في سجلِّ العمل (الخطوة `M11.08`).
+ *
+ * **رتبةٌ مقيسةٌ لا مُدَّعاة (المادة 4):** الرتبةُ أعلاه تتبع التسلسلَ المكتوبَ في
+ * سجلِّ العملِ منذ `WL-043`، وهو تسلسلٌ **سرديٌّ** يختلف عن موضعِ الحاجزِ المقيسِ
+ * في سلسلةِ `npm run validate`؛ وفارقُهما دَينُ توثيقٍ **سابقٌ** لهذه الخطوةِ
+ * مسجَّلٌ في `WL-048` و`WL-050`–`WL-060`، ولا يُصلَح بتعديلِ سجلٍّ قديم.
+ *
+ * الحواجزُ قبلَها تحرس أن يعملَ النظامُ ويتعافى ويُوقَف. وهذه تحرس سؤالاً آخرَ:
+ * **هل يُقال الناقصُ ناقصاً؟** فمعيارُ `M11.08` بحرفِه «صفرُ بندٍ بلا دليلٍ أو بلا
+ * تأجيلٍ معلَنٍ» — وعشرُ قواعد:
+ *
+ *   R0: `config/readiness-report.yaml` و`config/readiness-deferrals.yaml` تُحمَّلان
+ *       بمخطَّطَيهما الصارمَين؛ ووثيقةٌ تُخالف مخطَّطَها تُوقف البوابةَ قبل كلِّ فحصٍ.
+ *   R1: كلُّ حكمٍ وحدثٍ ورمزِ رفضٍ وضمانٍ ونوعِ دليلٍ ومصدرِ بنودٍ موثَّقٌ **بالاسمِ**
+ *       في `docs/READINESS.md` (المادة 1).
+ *   R2: التقابلُ في الاتجاهين بين `refusalCodes` في العقدِ و`READINESS_ERRORS`.
+ *   R3: كلُّ رمزِ ضمانٍ (`G-READINESS-*`) حاضرٌ **نصّاً** في ملفِّ إنفاذِه المُعلَن.
+ *   R4: **صفرُ بندٍ بلا تغطيةٍ**: عددُ البنودِ المقروءِ يطابق المُعلَنَ في العقدِ،
+ *       وكلُّ بندٍ إمّا بدليلٍ يُشار إلى موضعِه أو بتأجيلٍ مُصرَّحٍ — وهذا هو معيارُ
+ *       القبولِ نفسُه لا بديلٌ عنه.
+ *   R5: كلُّ تأجيلٍ **مُصرَّحٌ كاملُ الحقولِ**، ومُدخلةُ إعلانِه موجودةٌ فعلاً في
+ *       سجلِّ العملِ، وليس تأجيلاً يتيماً ولا تأجيلاً لبندٍ مُعلَنٍ مُنجَزاً.
+ *   R6: لكلِّ حكمٍ رمزُ خروجٍ **مُفرَدٌ**، و`readiness:reported` وحدَه يخرج صفراً؛
+ *       فتقريرٌ ناقصٌ يخرج صفراً بوابةٌ تقرأ النقصَ نجاحاً.
+ *   R7: التقريرُ المُقيَّدُ في المستودعِ **غيرُ منزاحٍ** — يُقارَن بايتاً ببايتٍ
+ *       بالمولَّدِ من الحقيقةِ الراهنةِ؛ فوثيقةُ جاهزيّةٍ قديمةٌ تكذبُ بصمتٍ.
+ *   R8: **لا اعتمادَ ذاتيّاً ولا ادّعاءَ إطلاقٍ**: لا لفظَ `VERIFIED`/`APPROVED`
+ *       ولا ما يوازيه في التقريرِ، ولا إعلانَ فتحِ `G11` ولا جاهزيّةِ إطلاقٍ ولا
+ *       `100%` — فتلك قراراتٌ سياديّةٌ أو أحكامُ جهةٍ مستقلّةٍ لا يُنتحَل حكمُها؛
+ *       وهنا يُنفَّذ الضمانان `G-READINESS-NO-SELF-APPROVAL` و
+ *       `G-READINESS-NO-LAUNCH-CLAIM`.
+ *   R9: **الحكمُ نقيٌّ ومربوطٌ بالمسارِ**: وحداتُ `src/readiness/` (خلا `contract.mjs`
+ *       الذي يقرأ العقدَ) لا تستورد `node:fs` ولا `node:child_process` ولا
+ *       `node:process` ولا تقرأ ساعةً؛ و`npm run guard:readiness` مربوطٌ في
+ *       `validate` وفي `.github/workflows/ci.yml`، و`readiness:report` أمرٌ واحدٌ،
+ *       واختبارُ القبولِ يُنادي المولِّدَ **عمليّةً ابنةً** ويقرأ رمزَ خروجِه؛ وهنا
+ *       يُنفَّذ الضمانُ `G-READINESS-PURE-JUDGEMENT` بنيةً لا نيّةً.
+ *
+ * **حدٌّ معلَن أول:** الحاجزُ يقيس **وجودَ الدليلِ وموضعَه لا كفايتَه**؛ فمُدخلةُ
+ * سجلٍّ تذكر بنداً دليلٌ على توثيقِه لا شهادةٌ بأنّ ضابطَه كافٍ.
+ *
+ * **حدٌّ معلَن ثانٍ:** R8 يقيس النصَّ: ادّعاءُ اعتمادٍ بصياغةٍ لم تُعدَّ في قائمةِ
+ * الألفاظِ لا يراه هذا الحاجزُ — وهو دَينٌ معلَنٌ في `docs/REMAINING_WORK.md`.
+ *
+ * **حدٌّ معلَن ثالث:** `readiness:reported` حكمُ **تغطيةٍ** لا اعتمادٌ: لا يفتح
+ * `G11` ولا يُعلن جاهزيّةَ إطلاقٍ ولا `100%` ولا يقوم مقامَ `M11.04`–`M11.06`.
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+import { collectReadinessFacts } from './lib/readiness-facts.mjs';
+import { loadDeferrals, loadReadinessContract } from '../src/readiness/contract.mjs';
+import { READINESS_ERRORS } from '../src/readiness/errors.mjs';
+import { renderReport } from '../src/readiness/render.mjs';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, '..');
+const DOC = 'docs/READINESS.md';
+
+/** @param {string} relative @returns {string} */
+function readOrEmpty(relative) {
+  const file = path.join(ROOT, relative);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+}
+
+/** @type {string[]} */
+const violations = [];
+
+/** وحداتُ الحكمِ التي يجب أن تبقى نقيّةً (R9). */
+const PURE_FILES = [
+  'src/readiness/errors.mjs',
+  'src/readiness/items.mjs',
+  'src/readiness/evidence.mjs',
+  'src/readiness/deferrals.mjs',
+  'src/readiness/judgement.mjs',
+  'src/readiness/render.mjs',
+];
+
+// ── R0: العقدُ وسجلُّ التأجيلاتِ يُحمَّلان بمخطَّطَيهما ──
+/** @type {Record<string, unknown> | null} */
+let contract = null;
+/** @type {import('../src/readiness/deferrals.mjs').DeferralRecord[]} */
+let deferrals = [];
+try {
+  contract = loadReadinessContract();
+  deferrals = loadDeferrals();
+} catch (error) {
+  violations.push(
+    `R0: عقدُ تقريرِ الجاهزيّةِ أو سجلُّ التأجيلاتِ لا يُحمَّل: ${
+      error instanceof Error ? error.message : String(error)
+    }`,
+  );
+}
+
+if (contract !== null) {
+  const doc = readOrEmpty(DOC);
+  const verdicts = /** @type {{ id: string, exitCode: number }[]} */ (contract.verdicts);
+  const events = /** @type {string[]} */ (contract.events);
+  const refusalCodes = /** @type {string[]} */ (contract.refusalCodes);
+  const guarantees = /** @type {{ id: string, statement: string, enforcedBy: string }[]} */ (
+    contract.guarantees
+  );
+  const evidenceKinds = /** @type {{ id: string }[]} */ (contract.evidenceKinds);
+  const itemSources = /** @type {{ id: string, expected: number }[]} */ (contract.itemSources);
+
+  // ── R1: كلُّ معرَّفٍ موثَّقٌ بالاسمِ ──
+  if (doc === '') {
+    violations.push(`R1: ${DOC} غائبةٌ — ولا عملَ بلا توثيقٍ (المادة 1).`);
+  } else {
+    /** @type {Array<[string, string]>} */
+    const documented = [
+      ...verdicts.map((verdict) => /** @type {[string, string]} */ (['الحكم', verdict.id])),
+      ...events.map((event) => /** @type {[string, string]} */ (['حدث المساءلة', event])),
+      ...refusalCodes.map((code) => /** @type {[string, string]} */ (['رمز الرفض', code])),
+      ...guarantees.map((guarantee) => /** @type {[string, string]} */ (['الضمان', guarantee.id])),
+      ...evidenceKinds.map((kind) => /** @type {[string, string]} */ (['نوع الدليل', kind.id])),
+      ...itemSources.map((source) => /** @type {[string, string]} */ (['مصدر البنود', source.id])),
+      ...deferrals.map(
+        (deferral) => /** @type {[string, string]} */ (['البند المؤجَّل', deferral.id]),
+      ),
+    ];
+    for (const [kind, id] of documented) {
+      if (!doc.includes(id)) {
+        violations.push(
+          `R1: ${kind} «${id}» غيرُ موثَّقٍ بالاسمِ في ${DOC} — والعهدُ يُكتب لا يُفترَض.`,
+        );
+      }
+    }
+    for (const section of ['ما لا يقولُه', 'التأجيل المُصرَّح', 'حدود معلَنة']) {
+      if (!doc.includes(section)) {
+        violations.push(
+          `R1: قسمُ «${section}» غائبٌ عن ${DOC} — وتقريرُ جاهزيّةٍ بلا حدودٍ مكتوبةٍ يُقرأ اعتماداً.`,
+        );
+      }
+    }
+  }
+
+  // ── R2: تقابلُ رموزِ الرفضِ في الاتجاهين ──
+  const declaredCodes = new Set(refusalCodes);
+  const implementedCodes = new Set(/** @type {string[]} */ (Object.values(READINESS_ERRORS)));
+  for (const code of declaredCodes) {
+    if (!implementedCodes.has(code)) {
+      violations.push(
+        `R2: الرمز «${code}» معلَنٌ في العقدِ ولا وجودَ له في READINESS_ERRORS — وعدٌ لا يُرَدُّ به شيء.`,
+      );
+    }
+  }
+  for (const code of implementedCodes) {
+    if (!declaredCodes.has(code)) {
+      violations.push(
+        `R2: الرمز «${code}» في READINESS_ERRORS ولا إعلانَ له في العقدِ — رفضٌ لا يجد قارئُ العقدِ معناه.`,
+      );
+    }
+  }
+
+  // ── R3: كلُّ ضمانٍ حاضرٌ نصّاً في ملفِّ إنفاذِه ──
+  for (const guarantee of guarantees) {
+    const enforcing = readOrEmpty(guarantee.enforcedBy);
+    if (enforcing === '') {
+      violations.push(`R3: ملفُّ إنفاذِ الضمان «${guarantee.id}» (${guarantee.enforcedBy}) غائب.`);
+      continue;
+    }
+    if (!enforcing.includes(guarantee.id)) {
+      violations.push(
+        `R3: الضمان «${guarantee.id}» ليس حاضراً نصّاً في ملفِّ إنفاذِه ${guarantee.enforcedBy} — وضمانٌ لا يُشار إليه في منفِّذِه ضمانٌ يُنسى عند أوّلِ إعادةِ كتابة.`,
+      );
+    }
+  }
+
+  // ── R4 و R5: معيارُ القبولِ نفسُه مقيسٌ على القرصِ ──
+  /** @type {ReturnType<typeof collectReadinessFacts> | null} */
+  let facts = null;
+  try {
+    facts = collectReadinessFacts({ root: ROOT, contract, deferrals });
+  } catch (error) {
+    violations.push(
+      `R4: وقائعُ الجاهزيّةِ لا تُقاس: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (facts !== null) {
+    for (const fault of facts.judgement.faults) {
+      const rule = fault.code === READINESS_ERRORS.ITEM_UNCOVERED ? 'R4' : 'R5';
+      violations.push(`${rule}: ${fault.code} · ${fault.id} — ${fault.evidence}`);
+    }
+    if (facts.judgement.coverage.total === 0) {
+      violations.push('R4: لم يُقرأ بندٌ واحدٌ — وتقريرٌ عن لا شيءٍ ليس قياساً.');
+    }
+
+    // ── R7: التقريرُ غيرُ منزاحٍ ──
+    const outputRelative = /** @type {Record<string, string>} */ (contract.sources).output ?? '';
+    const rendered = `${renderReport({
+      items: facts.items,
+      judgement: facts.judgement,
+      deferrals,
+      project: facts.project,
+      contract:
+        /** @type {{ objective: { statement: string, limit: string }, version: string }} */ (
+          contract
+        ),
+    })}\n`;
+    const onDisk = readOrEmpty(outputRelative);
+    if (onDisk === '') {
+      violations.push(`R7: ${outputRelative} غائبٌ — ومعيارٌ يوجب تقريراً لا يُوفى بغيابِه.`);
+    } else if (onDisk !== rendered) {
+      violations.push(
+        `R7: ${READINESS_ERRORS.REPORT_DRIFT} — ${outputRelative} منزاحٌ عن الحقيقةِ الراهنةِ بايتاً ببايتٍ؛ شغِّلْ \`npm run readiness:report\`.`,
+      );
+    }
+
+    // ── R8: لا اعتمادَ ذاتيّاً ولا ادّعاءَ إطلاقٍ ──
+    /** @type {Array<[RegExp, string, string]>} */
+    const forbiddenClaims = [
+      [
+        /\bVERIFIED\b/,
+        READINESS_ERRORS.SELF_APPROVAL,
+        'لفظُ اعتمادٍ لا يُوضَع نيابةً عن جهةٍ مستقلّةٍ.',
+      ],
+      [
+        /\bAPPROVED\b/,
+        READINESS_ERRORS.SELF_APPROVAL,
+        'والموافقةُ قرارُ صاحبِها لا قرارُ مولِّدِ التقريرِ.',
+      ],
+      [/النظامُ آمنٌ/, READINESS_ERRORS.SELF_APPROVAL, 'و«آمنٌ» حكمُ مراجعةٍ مستقلّةٍ لم تقع.'],
+      [/جاهزٌ للإطلاق/, READINESS_ERRORS.LAUNCH_CLAIM, 'وجاهزيّةُ الإطلاقِ قرارٌ سياديٌّ مؤجَّلٌ.'],
+      [
+        /(?:^|[^\d])100%/,
+        READINESS_ERRORS.LAUNCH_CLAIM,
+        'و«100%» إعلانُ اكتمالٍ لم تسمحْ به آلةُ الحالاتِ.',
+      ],
+      [/G11\s*مفتوح/, READINESS_ERRORS.LAUNCH_CLAIM, 'وفتحُ البوابةِ النهائيّةِ لا يُعلَن هنا.'],
+    ];
+    for (const [pattern, code, why] of forbiddenClaims) {
+      const lines = onDisk.split('\n');
+      for (const [index, line] of lines.entries()) {
+        // السطورُ التي تُصرِّح بالنفي («لا يُعلِنُ… ولا 100%») مقصودةٌ فتُستثنى.
+        if (!pattern.test(line)) continue;
+        if (/\bلا\b|ليس|ممنوع|غيرُ/.test(line)) continue;
+        violations.push(
+          `R8: ${code} — ${outputRelative}:${String(index + 1)} «${line.trim().slice(0, 60)}» — ${why}`,
+        );
+      }
+    }
+  }
+
+  // ── R6: رمزُ خروجٍ مُفرَدٌ لكلِّ حكمٍ، والصفرُ للتقريرِ وحدَه ──
+  const exitCodes = verdicts.map((verdict) => verdict.exitCode);
+  if (new Set(exitCodes).size !== exitCodes.length) {
+    violations.push('R6: حكمانِ يتشاركانِ رمزَ خروجٍ — فلا يُميَّز أحدُهما من الآخرِ آلياً.');
+  }
+  for (const verdict of verdicts) {
+    if (verdict.id === 'readiness:reported' && verdict.exitCode !== 0) {
+      violations.push(
+        'R6: حكمُ التقريرِ الكاملِ لا يخرج صفراً — والمسارُ الآليُّ يقرأ الصفرَ نجاحاً.',
+      );
+    }
+    if (verdict.id !== 'readiness:reported' && verdict.exitCode === 0) {
+      violations.push(
+        `R6: الحكم «${verdict.id}» يخرج صفراً — وحكمٌ بالنقصِ يخرج صفراً حكمٌ لا يقرؤه مسارٌ آليّ.`,
+      );
+    }
+  }
+
+  // ── R9: نقاءُ الحكمِ وربطُ المسارِ واختبارُ القبولِ ──
+  const FORBIDDEN_IMPORTS = ['node:fs', 'node:child_process', 'node:process'];
+  for (const relative of PURE_FILES) {
+    const source = readOrEmpty(relative);
+    if (source === '') {
+      violations.push(`R9: الوحدة ${relative} غائبةٌ فلا يُقاس نقاؤها.`);
+      continue;
+    }
+    for (const specifier of FORBIDDEN_IMPORTS) {
+      if (source.includes(`'${specifier}'`)) {
+        violations.push(
+          `R9: الوحدة ${relative} تستورد «${specifier}» — وحكمٌ يملك أن يكتب على ما يفحصه يملك أن يُصلِحه ثم يُثني عليه.`,
+        );
+      }
+    }
+    if (source.includes('Date.now(')) {
+      violations.push(
+        `R9: ${relative} يُنادي Date.now( — وتقريرٌ يحمل لحظةَ تشغيلِه يُبطِل قياسَ انزياحِه.`,
+      );
+    }
+  }
+  const manifest = readOrEmpty('package.json');
+  const WIRE = 'npm run guard:readiness';
+  if (!manifest.includes(WIRE)) {
+    violations.push(`R9: «${WIRE}» غيرُ مربوطٍ في سلسلةِ validate — وبوابةٌ لا تُشغَّل نيّة.`);
+  }
+  if (!readOrEmpty('.github/workflows/ci.yml').includes(WIRE)) {
+    violations.push(
+      `R9: «${WIRE}» غيرُ مربوطٍ في .github/workflows/ci.yml — والأخضرُ المحليُّ ليس حكماً (المادة 2).`,
+    );
+  }
+  if (!manifest.includes('"readiness:report"')) {
+    violations.push(
+      'R9: أمرُ «readiness:report» غيرُ مُعلَنٍ في package.json — وتقريرٌ يحتاج سلسلةَ أوامرَ يدويّةٍ تقريرٌ لا يُولَّد.',
+    );
+  }
+  const generator = readOrEmpty('scripts/readiness-report.mjs');
+  for (const needle of ['--write', '--json', 'ARGUMENT_UNKNOWN']) {
+    if (!generator.includes(needle)) {
+      violations.push(
+        `R9: مولِّدُ التقريرِ لا يذكر «${needle}» — وأداةٌ تتجاهل وسيطاً لم تفهمْه قد تكون فهمت شيئاً آخرَ.`,
+      );
+    }
+  }
+  for (const needle of ['force-pass', 'process.stdin', 'prompt(']) {
+    if (generator.includes(needle)) {
+      violations.push(
+        `R9: مولِّدُ التقريرِ يحمل «${needle}» — وخطوةٌ يدويّةٌ تنقض «أمراً واحداً».`,
+      );
+    }
+  }
+  const acceptance = readOrEmpty('tests/readiness/report.test.mjs');
+  if (acceptance === '') {
+    violations.push(
+      'R9: tests/readiness/report.test.mjs غائب — ومعيارُ «صفرُ بندٍ بلا دليلٍ أو بلا تأجيلٍ معلَنٍ» بلا اختبارِ قبولٍ ادّعاء.',
+    );
+  } else {
+    for (const needle of ['node:child_process', 'scripts/readiness-report.mjs', 'status']) {
+      if (!acceptance.includes(needle)) {
+        violations.push(
+          `R9: اختبارُ القبولِ لا يذكر «${needle}» — ونداءُ دالّةٍ في العمليّةِ نفسِها لا يقيس أمراً واحداً يمشي بلا تدخّل.`,
+        );
+      }
+    }
+  }
+}
+
+if (violations.length > 0) {
+  console.error('⛔ حاجز تقرير الجاهزية بتأجيلات صريحة رفض:');
+  for (const violation of violations) {
+    console.error(`   • ${violation}`);
+  }
+  process.exit(1);
+}
+
+const verdictCount = contract === null ? 0 : /** @type {unknown[]} */ (contract.verdicts).length;
+const codeCount = contract === null ? 0 : /** @type {unknown[]} */ (contract.refusalCodes).length;
+const guaranteeCount =
+  contract === null ? 0 : /** @type {unknown[]} */ (contract.guarantees).length;
+const eventCount = contract === null ? 0 : /** @type {unknown[]} */ (contract.events).length;
+const facts = contract === null ? null : collectReadinessFacts({ root: ROOT, contract, deferrals });
+const coverage = facts?.judgement.coverage ?? { total: 0, evidenced: 0, deferred: 0, uncovered: 0 };
+console.log(
+  `✅ حاجز تقرير الجاهزية بتأجيلات صريحة: ${String(coverage.total)} بنداً مقروءاً من مصدرِها لا مكتوبةً بيدٍ — ${String(coverage.evidenced)} بدليلٍ يُشار إلى ملفِّه ومُدخلتِه، و${String(coverage.deferred)} مؤجَّلةٌ تأجيلاً **مُصرَّحاً** بسببِه وحاجزِه ونوعِ حاجزِه وشرطِ فكِّه وصاحبِ قرارِه ومُدخلةِ إعلانٍ موجودةٍ فعلاً في سجلِّ العملِ، و${String(coverage.uncovered)} بلا دليلٍ ولا تأجيلٍ — فمعيارُ «صفرُ بندٍ بلا دليلٍ أو بلا تأجيلٍ معلَنٍ» مقيسٌ لا مُدَّعى؛ والتقريرُ مولَّدٌ بأمرٍ واحدٍ ويُقارَن بايتاً ببايتٍ فلا يبقى قديماً بصمتٍ، و${String(verdictCount)} أحكامٍ لكلٍّ رمزُ خروجٍ مُفرَدٌ لا يخرج صفراً إلا التقريرُ الكاملُ، و${String(eventCount)} أحداثِ مساءلةٍ و${String(codeCount)} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`READINESS_ERRORS\`، و${String(guaranteeCount)} ضماناتٍ كلٌّ برمزٍ حاضرٍ نصّاً في ملفِّ إنفاذِه، ووحداتُ الحكمِ نقيّةٌ لا تلمس قرصاً ولا عمليّةً ولا ساعةً. وحدٌّ معلَنٌ: التقريرُ يقيس **وجودَ الدليلِ وموضعَه لا كفايتَه**، و\`readiness:reported\` حكمُ تغطيةٍ لا اعتمادٌ — لا مراجعةً مستقلّةً (M11.04–M11.06) ولا قراراً ملكيّاً (M11.09) ولا فتحاً لـG11 ولا إذناً بإطلاق.`,
+);

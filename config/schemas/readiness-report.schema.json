@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/readiness-report.schema.json",
+  "title": "عقد تقرير الجاهزية — الخطوة M11.08",
+  "description": "يُعلن مصادرَ بنودِ معاييرِ الاكتمالِ وأنواعَ الدليلِ المقبولةِ والأحكامَ ورموزَ خروجِها والأحداثَ ورموزَ الرفضِ والضمانات. ولا يُقرأ حكمُ التغطيةِ اعتماداً أمنياً ولا قانونياً ولا إذناً بإطلاق.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "objective",
+    "sources",
+    "evidenceKinds",
+    "itemSources",
+    "verdicts",
+    "events",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "$defs": {
+    "relPath": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "minLength": 1
+    },
+    "arabicText": {
+      "type": "string",
+      "minLength": 12
+    }
+  },
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statement", "limit"],
+      "properties": {
+        "statement": { "$ref": "#/$defs/arabicText" },
+        "limit": { "$ref": "#/$defs/arabicText" }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roadmap", "workLog", "deferrals", "status", "version", "output"],
+      "properties": {
+        "roadmap": { "$ref": "#/$defs/relPath" },
+        "workLog": { "$ref": "#/$defs/relPath" },
+        "deferrals": { "$ref": "#/$defs/relPath" },
+        "status": { "$ref": "#/$defs/relPath" },
+        "version": { "$ref": "#/$defs/relPath" },
+        "output": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "evidenceKinds": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "meaning", "locatedIn"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^evidence:[a-z][a-z-]*[a-z]$" },
+          "meaning": { "$ref": "#/$defs/arabicText" },
+          "locatedIn": { "$ref": "#/$defs/relPath" }
+        }
+      }
+    },
+    "itemSources": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "pattern", "countedIn", "expected"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^item:[a-z]+$" },
+          "pattern": { "type": "string", "minLength": 3 },
+          "countedIn": { "$ref": "#/$defs/relPath" },
+          "expected": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "exitCode", "meaning"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^readiness:[a-z][a-z-]*[a-z]$" },
+          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
+          "meaning": { "$ref": "#/$defs/arabicText" }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^readiness\\.[a-z]+(\\.[a-z]+)*$" }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 10,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^READINESS_[A-Z_]+$" }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "enforcedBy"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-READINESS-[A-Z-]+$" },
+          "statement": { "$ref": "#/$defs/arabicText" },
+          "enforcedBy": { "$ref": "#/$defs/relPath" }
+        }
+      }
+    }
+  }
+}
