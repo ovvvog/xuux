@@ -53,6 +53,7 @@ export const ISOLATION_ERRORS = Object.freeze({
   WORKDIR_INVALID: 'ISOLATION_WORKDIR_INVALID',
   WRITABLE_DIR_INVALID: 'ISOLATION_WRITABLE_DIR_INVALID',
   TIMEOUT: 'ISOLATION_TIMEOUT',
+  CANCELLED: 'ISOLATION_CANCELLED',
   RESOURCE_LIMIT: 'ISOLATION_RESOURCE_LIMIT',
   ESCAPE_BLOCKED: 'ISOLATION_ESCAPE_BLOCKED',
   COMMAND_FAILED: 'ISOLATION_COMMAND_FAILED',
@@ -105,6 +106,7 @@ if [ -n "$RUNTIME_COMMAND" ]; then
   mount -o remount,bind,ro "$ROOT/runtime/runner"
 fi
 mount --bind "$WORKDIR" "$ROOT/workspace"
+mkdir -p "$ROOT/workspace/output"
 mount -o remount,bind,ro "$ROOT/workspace"
 mount --bind "$WRITABLE_DIR" "$ROOT/workspace/output"
 mount -o remount,bind,rw "$ROOT/workspace/output"
@@ -248,7 +250,7 @@ function escapeKind(stderr) {
  * تعبر حدّ العملية، وقبولها يوهم بعزلٍ لا يحدث. يستعمل `handler` مرادفاً لفظياً
  * لمسار أمر كي يدعم مستدعي سجلّ المعالجات.
  *
- * @param {{ command?: string, handler?: string, args?: readonly string[], workdir: string, writableDir: string, timeoutMs?: number, memoryLimitMb?: number, maxFileSizeMb?: number, processLimit?: number, actor?: string, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: { report: (signal: object) => unknown } | null }} request
+ * @param {{ command?: string, handler?: string, args?: readonly string[], workdir: string, writableDir: string, timeoutMs?: number, memoryLimitMb?: number, maxFileSizeMb?: number, processLimit?: number, actor?: string, signal?: AbortSignal, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: { report: (signal: object) => unknown } | null }} request
  * @returns {Promise<IsolatedRun>}
  */
 export async function runIsolated(request) {
@@ -414,6 +416,7 @@ export async function runIsolated(request) {
     let stderr = '';
     let killed = false;
     let timedOut = false;
+    let cancelled = false;
     let settled = false;
     const childPid = child.pid;
     /** @param {string} chunk @param {'stdout' | 'stderr'} stream */
@@ -425,11 +428,11 @@ export async function runIsolated(request) {
     }
     child.stdout?.on('data', (chunk) => collect(String(chunk), 'stdout'));
     child.stderr?.on('data', (chunk) => collect(String(chunk), 'stderr'));
-    const timer = setTimeout(() => {
-      timedOut = true;
+    /** @param {string} reason */
+    const terminate = (reason) => {
       killed = true;
       if (childPid === undefined) {
-        stderr += '\nلم تنشئ عملية unshare معرّفاً يمكن قتل مجموعته.';
+        stderr += `\nلم تنشئ عملية unshare معرّفاً للإيقاف (${reason}).`;
         return;
       }
       try {
@@ -446,8 +449,19 @@ export async function runIsolated(request) {
           }
         }
       }, 200).unref();
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      terminate('timeout');
     }, timeoutMs);
     timer.unref();
+    const abortHandler = () => {
+      if (settled || timedOut) return;
+      cancelled = true;
+      terminate('abort');
+    };
+    if (request.signal?.aborted) abortHandler();
+    else request.signal?.addEventListener('abort', abortHandler, { once: true });
 
     child.on('error', (error) => {
       stderr += `\nتعذّر بدء unshare: ${error.message}`;
@@ -456,6 +470,7 @@ export async function runIsolated(request) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      request.signal?.removeEventListener('abort', abortHandler);
       fs.rmSync(sandboxRoot, { recursive: true, force: true });
       const durationMs = Date.now() - startedAt;
       /** @type {IsolatedRun} */
@@ -479,6 +494,10 @@ export async function runIsolated(request) {
           durationMs,
           signal,
         });
+      } else if (cancelled) {
+        result.code = ISOLATION_ERRORS.CANCELLED;
+        result.message = 'أُلغي التنفيذ المعزول بعد سحب العقد أو طلب الإلغاء.';
+        log.append('isolation.cancelled', actor, { code: result.code, durationMs, signal });
       } else if (exitCode === 0) {
         result.ok = true;
         result.message = 'أُنجزت الحمولة داخل namespaces بلا شبكة وبجذر قراءة فقط.';

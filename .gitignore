@@ -70,3 +70,8 @@ backups/
 # وُثِّق في `WL-067`.
 sbom.cdx.json
 audit-report.json
+
+# مخرجات العزل المؤقتة — تُركّب للكتابة داخل العامل ولا تُعدّ مصدراً
+.isolation-output/
+.xuux-worker-isolation-*
+.isolation-runner-output-*

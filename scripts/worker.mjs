@@ -12,6 +12,7 @@
 
 import process from 'node:process';
 
+import { PersistentEventLog } from '../src/root-of-trust/persistent-log.mjs';
 import { HaltSwitch, royalVerifierFromPublicKey } from '../src/root-of-trust/index.mjs';
 import { createTaskQueue } from '../src/execution/queue.mjs';
 import { createWorker } from '../src/execution/worker.mjs';
@@ -67,12 +68,20 @@ async function main() {
   const halt = new HaltSwitch(options.haltFile, royalVerifierFromPublicKey(options.publicKey));
   const pool = createPool();
   const queue = createTaskQueue({ pool });
+  const isolationLog = new PersistentEventLog(
+    process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl',
+  );
   const worker = createWorker({
     queue,
     pool,
     haltGuard: halt,
     ledger: createQuotaLedger({ pool, definitions: loadPolicyBundle().quotas }),
     worker: options.worker,
+    isolation: {
+      workdir: process.cwd(),
+      outputRoot: process.env['ISOLATION_OUTPUT_ROOT'] ?? '.isolation-output',
+      log: isolationLog,
+    },
   });
 
   let stopping = false;
@@ -98,6 +107,7 @@ async function main() {
       handled += 1;
     }
   } finally {
+    isolationLog.close();
     await pool.end();
   }
   process.stdout.write(`عاملٌ توقّف: ${options.worker} — مهام مُعالَجة: ${handled}\n`);

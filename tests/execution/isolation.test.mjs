@@ -146,6 +146,35 @@ test('حد الذاكرة يوقف حمولة تستنزف الكومة', { skip
   assert.match(result.stderr, /out of memory|fatal process oom|cannot allocate memory/i);
 });
 
+test(
+  'مسار isolated-task-runner يشغّل handler فعلياً داخل العزل',
+  { skip: kernelSkip },
+  async () => {
+    const outputRoot = fs.mkdtempSync(path.join(process.cwd(), '.isolation-runner-output-'));
+    const log = memoryLog();
+    const runner = path.resolve(HERE, '../../scripts/isolated-task-runner.mjs');
+    try {
+      const result = await runIsolated({
+        command: process.execPath,
+        args: [runner, 'اختبار.نجاح', JSON.stringify({ قيمة: 7 })],
+        workdir: path.resolve(HERE, '../..'),
+        writableDir: outputRoot,
+        timeoutMs: 2_000,
+        memoryLimitMb: 1_024,
+        actor: 'agent:isolated-task-runner-test',
+        log,
+      });
+      assert.equal(result.ok, true, `${result.code}: ${result.stderr}`);
+      const envelope = JSON.parse(result.stdout);
+      assert.equal(envelope.ok, true);
+      assert.equal(envelope.result.صدى.قيمة, 7);
+      assert.ok(log.events.some((event) => event.type === 'isolation.completed'));
+    } finally {
+      fs.rmSync(outputRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 test('غياب unshare يرفض مغلقاً ولا يبدأ الحمولة', async () => {
   const spec = fixture('isolation-write-inside.mjs');
   const moduleUrl = new URL('../../src/execution/isolation.mjs', import.meta.url).href;

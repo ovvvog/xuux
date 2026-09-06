@@ -506,6 +506,9 @@ channels:
       - role:operator
       - role:chief-justice
     types:
+      - type: isolation.cancelled
+        version: 1
+        required: [code, durationMs, signal]
       - type: isolation.completed
         version: 1
         required: [durationMs, exitCode, stdoutBytes]

@@ -24,7 +24,12 @@
  *   من حاصدٍ مجدول. عاملٌ واحد بلا حاصد يعني مهمةً معلّقة إلى أن يُقلع غيره.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { createBudgetGate } from './budget.mjs';
+import { runIsolated } from './isolation.mjs';
 import { LIMIT_ERRORS, runWithLimits } from './limits.mjs';
 import { TaskLifecycle } from './lifecycle.mjs';
 import { QUEUE_ERRORS, QueueError } from './queue.mjs';
@@ -32,6 +37,8 @@ import { QUEUE_ERRORS, QueueError } from './queue.mjs';
 /** رموز العامل. */
 export const WORKER_ERRORS = Object.freeze({
   DEPENDENCY_MISSING: 'WORKER_DEPENDENCY_MISSING',
+  ISOLATION_CONFIG_INVALID: 'WORKER_ISOLATION_CONFIG_INVALID',
+  ISOLATION_RESULT_INVALID: 'WORKER_ISOLATION_RESULT_INVALID',
 });
 
 /** خطأ إعداد العامل. */
@@ -67,8 +74,18 @@ export class WorkerError extends Error {
  * @param {string} dependencies.worker اسم العامل — يُكتب في العقد فيُعرف صاحبه.
  * @param {number} [dependencies.heartbeatMs]
  * @param {(run: import('./limits.mjs').LimitedRun) => void} [dependencies.onRun]
+ * @param {{ workdir?: string, outputRoot?: string, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: { report: (signal: object) => unknown } | null }} [dependencies.isolation]
  */
-export function createWorker({ queue, pool, haltGuard, ledger, worker, heartbeatMs = 500, onRun }) {
+export function createWorker({
+  queue,
+  pool,
+  haltGuard,
+  ledger,
+  worker,
+  heartbeatMs = 500,
+  onRun,
+  isolation,
+}) {
   if (queue === undefined || pool === undefined || haltGuard === undefined) {
     throw new WorkerError(
       WORKER_ERRORS.DEPENDENCY_MISSING,
@@ -83,6 +100,79 @@ export function createWorker({ queue, pool, haltGuard, ledger, worker, heartbeat
   }
 
   const budget = ledger === undefined ? null : createBudgetGate({ pool, ledger });
+  const isolatedRunner = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../scripts/isolated-task-runner.mjs',
+  );
+  if (isolation !== undefined && (!isolation.log || typeof isolation.log.append !== 'function')) {
+    throw new WorkerError(
+      WORKER_ERRORS.ISOLATION_CONFIG_INVALID,
+      'العزل المفعّل يحتاج سجلاً دائماً؛ لا يُسمح بتشغيل مهمة معزولة بلا أثر تدقيقي.',
+    );
+  }
+
+  /**
+   * نفّذ المهمة في العزل الحقيقي عند تفعيله، أو في مسار حدود الموارد للاختبارات
+   * والوحدات التي لم تُركّب لها بيئة تشغيل إنتاجية بعد.
+   * @param {object} input
+   * @param {Record<string, unknown>} input.task
+   * @param {AbortSignal} input.signal
+   */
+  async function runTask({ task, signal }) {
+    if (isolation === undefined) {
+      return runWithLimits({
+        action: String(task['action']),
+        payload: /** @type {Record<string, unknown>} */ (task['payload'] ?? {}),
+        timeoutMs: Number(task['timeoutMs']),
+        memoryLimitMb: Number(task['memoryLimitMb']),
+        signal,
+        taskId: String(task['id']),
+      });
+    }
+    const workdir = path.resolve(isolation.workdir ?? process.cwd());
+    const outputRoot = path.resolve(
+      isolation.outputRoot ?? path.join(workdir, '.isolation-output'),
+    );
+    fs.mkdirSync(outputRoot, { recursive: true });
+    const outputDir = fs.mkdtempSync(path.join(outputRoot, 'task-'));
+    try {
+      const result = await runIsolated({
+        command: process.execPath,
+        args: [isolatedRunner, String(task['action']), JSON.stringify(task['payload'] ?? {})],
+        workdir,
+        writableDir: outputDir,
+        timeoutMs: Number(task['timeoutMs']),
+        memoryLimitMb: Number(task['memoryLimitMb']),
+        signal,
+        actor: `worker:${worker}:${String(task['id'])}`,
+        log: isolation.log,
+        quarantine: isolation.quarantine ?? null,
+      });
+      if (!result.ok) return { ...result, result: undefined, cpuMs: 0 };
+      try {
+        const envelope = JSON.parse(result.stdout.trim());
+        if (
+          envelope?.ok !== true ||
+          typeof envelope.result !== 'object' ||
+          envelope.result === null
+        ) {
+          throw new Error('غلاف نتيجة العزل غير صالح.');
+        }
+        return { ...result, result: envelope.result, cpuMs: 0 };
+      } catch (error) {
+        return {
+          ...result,
+          ok: false,
+          code: WORKER_ERRORS.ISOLATION_RESULT_INVALID,
+          message: error instanceof Error ? error.message : String(error),
+          result: undefined,
+          cpuMs: 0,
+        };
+      }
+    } finally {
+      fs.rmSync(outputDir, { recursive: true, force: true });
+    }
+  }
 
   /** @returns {boolean} هل النظام مُوقف الآن؟ */
   function isHalted() {
@@ -167,14 +257,7 @@ export function createWorker({ queue, pool, haltGuard, ledger, worker, heartbeat
 
       try {
         // (5) التنفيذ بحدوده في عملية منفصلة.
-        const run = await runWithLimits({
-          action: task.action,
-          payload: task.payload,
-          timeoutMs: task.timeoutMs,
-          memoryLimitMb: task.memoryLimitMb,
-          signal: controller.signal,
-          taskId: task.id,
-        });
+        const run = await runTask({ task, signal: controller.signal });
         onRun?.(run);
 
         if (run.ok) {
