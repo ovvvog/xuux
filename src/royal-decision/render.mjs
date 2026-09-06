@@ -142,6 +142,20 @@ export function renderRoyalDecisionPacket(packet) {
     lines.push(`**المقياسُ:** ${String(phase.measure)}`);
     lines.push('');
   }
+  lines.push('## الأحكامُ المُقيَّدةُ — قناةُ الحكمِ الوحيدةُ');
+  lines.push('');
+  lines.push(
+    'كلُّ حكمِ حالةٍ في هذه الحزمةِ مكتوبٌ هنا بقيمةٍ **مقروءةٍ من مصدرِها** ومطابقةٍ له بايتاً ببايتٍ؛ وقاعدةُ الاعتمادِ في `guard:royal-decision` **مغلقةٌ على الفشلِ**: قيمةٌ غيرُ عضوٍ في مجموعةِ مصدرِها، أو مخالفةٌ لما يقولُه المصدرُ، أو ذاتُ نصٍّ إضافيٍّ أو فراغٍ زائدٍ أو حالةِ حرفٍ مختلفةٍ — تُرَدُّ. **والنصُّ الحرُّ لا يحملُ حكماً**: أيُّ رمزِ ادّعاءٍ فيه غيرِ مسموحٍ صراحةً يُرَدُّ، ولا استثناءَ بأداةِ نفيٍ.',
+  );
+  lines.push('');
+  lines.push('| الموضوع | مصدرُ القيمِ المسموحةِ | القيمةُ المُثبَتةُ |');
+  lines.push('| --- | --- | --- |');
+  for (const attestation of packet.attestations) {
+    lines.push(
+      `| \`${attestation.subject}\` | \`${attestation.valueSource}\` | \`${attestation.value}\` |`,
+    );
+  }
+  lines.push('');
   lines.push('## الأحكامُ ورموزُ الخروجِ');
   lines.push('');
   lines.push('| الحكم | رمزُ الخروجِ | المعنى |');

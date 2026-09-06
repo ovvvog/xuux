@@ -111,8 +111,13 @@ function main() {
 
   let rendered;
   try {
-    const packet = loadRoyalDecisionPacket({ configDir: path.join(options.root, 'config') });
+    // الخطوةُ تُقاسُ **قبلَ** الحزمةِ: إن كانت مُغلَقةً فذاك هو سببُ الرفضِ بعينِه،
+    // ولا يُحجَبُ وراءَ خلافٍ بينَ حكمِ الحزمةِ وصفِّ اللوحةِ.
     assertStepOpen({ root: options.root });
+    const packet = loadRoyalDecisionPacket({
+      configDir: path.join(options.root, 'config'),
+      root: options.root,
+    });
     rendered = `${renderRoyalDecisionPacket(packet)}`;
   } catch (error) {
     const judged = judgeError(error);

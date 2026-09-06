@@ -28,9 +28,13 @@
  *       الضمانُ `G-ROYAL-DECISION-OPTIONS-SYMMETRIC`.
  *   R5: **خطةُ التوسّعِ بمعاييرِ تراجعٍ مقيسةٍ**: كلُّ مرحلةٍ لها دخولٌ وخروجٌ
  *       وتراجعٌ ومقياسٌ، ومعيارُ قبولِ `M11.09` يطلبُ ذلك بحرفِه.
- *   R6: **لا اعتمادَ ذاتيّاً ولا ادّعاءَ إطلاقٍ**: لا `VERIFIED`/`APPROVED` ولا
- *       «جاهزٌ للإطلاقِ» ولا «تمَّ الإطلاقُ» ولا `100%` ولا فتحُ `G11` في العقدِ
- *       ولا في الوثيقةِ، إلا في سطرٍ ينفيهِ صراحةً.
+ *   R6: **الاعتمادُ مغلقٌ على الفشلِ**: لا يُعَدُّ حكمُ حالةٍ صالحاً إلا إن كُتِبَ في
+ *       `attestations` بقيمةٍ **عضوٍ في مجموعةٍ مقروءةٍ من مصدرِها الفعليِّ في
+ *       المستودعِ** ومطابقةٍ بايتاً ببايتٍ لما يقولُه المصدرُ؛ وكلُّ رمزِ ادّعاءٍ في
+ *       نصٍّ حرٍّ (رمزُ حالةٍ، نسبةٌ مئويّةٌ، كلمةٌ لاتينيّةٌ كبيرةٌ) يجبُ أن يكونَ عضواً
+ *       في مجموعةِ الرموزِ المسموحةِ المستخرجةِ من الحقولِ المُعرِّفةِ — وما ليسَ عضواً
+ *       **يُرَدُّ**، ولا استثناءَ بأداةِ نفيٍ. الضمانُ
+ *       `G-ROYAL-DECISION-CLAIMS-ALLOWLISTED`.
  *   R7: **الحكمُ مربوطٌ بالمسارِ ولا ينزاحُ**: الوثيقةُ المُقيَّدةُ تُقارَنُ بايتاً
  *       ببايتٍ بالمولَّدِ من العقدِ، والأمرانِ `royal:packet` و
  *       `guard:royal-decision` مُعلَنانِ في `package.json` ومربوطانِ في
@@ -40,8 +44,10 @@
  * **حدٌّ معلَن أول:** الحاجزُ يقيسُ **خُلوَّ الحزمةِ من قرارٍ**؛ ولا يقيسُ صوابَ
  * القرارِ ولا كفايةَ أدلّتِه — ذاك للمالكِ وحدَه.
  *
- * **حدٌّ معلَن ثانٍ:** R6 يقيسُ النصَّ؛ فادّعاءٌ بصياغةٍ لم تُعَدَّ في قائمةِ الألفاظِ
- * لا يراهُ هذا الحاجزُ — وهو دَينٌ معلَنٌ في `docs/REMAINING_WORK.md`.
+ * **حدٌّ معلَن ثانٍ:** R6 تمنعُ **الاعتمادَ كقيمةٍ** ورموزَ الادّعاءِ في النصِّ؛ ولا
+ * تحكمُ على صوابِ القرارِ ولا على كفايةِ أدلّتِه. وهي لم تَعُدْ قائمةَ ألفاظٍ ممنوعةٍ:
+ * الدَينُ الذي كانَ معلَناً في `docs/REMAINING_WORK.md` أُزيلَ في `WL-073`، إذ صارَ
+ * المسموحُ هو ما يُوجَبُ، فأيُّ صياغةٍ غيرِ مُدرَجةٍ تُرَدُّ لا تمرُّ.
  *
  * **حدٌّ معلَن ثالث:** مرورُ هذا الحاجزِ **ليس قراراً ولا جاهزيّةً ولا إطلاقاً**:
  * `M11.09` تبقى `⬜`، و`G11` تبقى مؤجَّلةً بقرارٍ سياديٍّ قائمٍ.
@@ -52,7 +58,11 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { loadRoyalDecisionPacket, assertStepOpen } from '../src/royal-decision/contract.mjs';
+import {
+  assertClaimDiscipline,
+  assertStepOpen,
+  loadRoyalDecisionPacket,
+} from '../src/royal-decision/contract.mjs';
 import { ROYAL_DECISION_ERRORS, RoyalDecisionError } from '../src/royal-decision/errors.mjs';
 import { renderRoyalDecisionPacket } from '../src/royal-decision/render.mjs';
 
@@ -133,32 +143,31 @@ if (packet !== null) {
   }
 }
 
-// R6: لا لفظَ اعتمادٍ ذاتيٍّ ولا ادّعاءَ إطلاقٍ في العقدِ ولا في الوثيقةِ.
-{
-  const forbidden = [
-    /\bVERIFIED\b/,
-    /\bAPPROVED\b/,
-    /جاهزٌ للإطلاق/,
-    /تمَّ الإطلاقُ/,
-    /النظامُ آمنٌ/,
-    /100%/,
-    /G11 مفتوحة/,
-  ];
+// R6: الاعتمادُ مغلقٌ على الفشلِ — قيمةٌ مسموحةٌ صريحاً من مصدرِها، ونصٌّ بلا ادّعاءٍ.
+//
+// الاتجاهُ مقلوبٌ عمّا كانَ: لا تُعَدُّ الألفاظُ الممنوعةُ (فقائمتُها لا تنتهي، وكانَ
+// النفيُ يُبطِلُها)، بل يُوجَبُ المسموحُ. ومصادرُ المسموحِ ملفاتٌ فعليّةٌ في المستودعِ.
+if (packet !== null) {
+  /** @type {{ relative: string, text: string }[]} */
+  const files = [];
   for (const relative of ['config/royal-decision.yaml', PACKET_DOC]) {
     const text = readOrEmpty(relative);
     if (text === '') {
-      violations.push(`R6: «${relative}» غائبٌ — ولا يُقاس نصٌّ لا وجودَ له.`);
+      violations.push(`R6: «${relative}» غائبٌ — ولا يُقاس نصٌّ لا وجودَ له (فشلٌ مغلقٌ).`);
       continue;
     }
-    for (const [index, line] of text.split('\n').entries()) {
-      for (const pattern of forbidden) {
-        if (!pattern.test(line)) continue;
-        if (/لا\s|ليس|ممنوع|غير|يُرَدُّ|تمنع|تبقى|مؤجَّل/.test(line)) continue;
-        violations.push(
-          `R6: ${relative}:${String(index + 1)} «${line.trim().slice(0, 60)}» — لفظُ اعتمادٍ أو ادّعاءُ إطلاقٍ في حزمةِ تجهيزٍ.`,
-        );
-      }
-    }
+    files.push({ relative, text });
+  }
+  try {
+    assertClaimDiscipline(/** @type {Record<string, unknown>} */ (packet), {
+      root: ROOT,
+      configDir: path.join(ROOT, 'config'),
+      files,
+    });
+  } catch (error) {
+    const detail =
+      error instanceof RoyalDecisionError ? `${error.code}: ${error.message}` : String(error);
+    violations.push(`R6: ${detail}`);
   }
 }
 

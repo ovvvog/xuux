@@ -91,6 +91,20 @@ test('لفظُ اعتمادٍ في الوثيقةِ يُسقِطُ الحاجز�
   assert.match(result.stderr, /R6|R7/);
 });
 
+// الدَينُ الذي أُزيلَ في `WL-073`: كانت `R6` قائمةَ ألفاظٍ، فصياغةٌ لم تُعَدَّ فيها
+// تمرُّ. والقياسُ هنا صياغةٌ **لم تكن في أيِّ قائمةٍ** وأخرى **راكبةٌ على نفيٍ**.
+// وتفصيلُ الحالاتِ في `tests/royal/decision-attestations.test.mjs`.
+for (const claim of ['RATIFIED-FOR-LAUNCH', 'لا شيءَ هنا: SIGNED-OFF']) {
+  test(`صياغةُ اعتمادٍ غيرُ مُدرَجةٍ «${claim}» تُسقِطُ الحاجزَ (R6 مغلقةٌ على الفشلِ)`, () => {
+    const root = sandbox();
+    const file = join(root, 'docs/ROYAL_DECISION_PACKET.md');
+    writeFileSync(file, `${readFileSync(file, 'utf8')}\n${claim}\n`);
+    const result = runGuard(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /R6|LAUNCH_CLAIM/);
+  });
+}
+
 test('فكُّ ربطِ الحاجزِ من سلسلةِ التحقّقِ يُسقِطُه (R7)', () => {
   const root = sandbox();
   const file = join(root, 'package.json');
