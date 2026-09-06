@@ -83,21 +83,27 @@ const NAMESPACE_RUNNER = String.raw`
 ROOT="$1"
 WORKDIR="$2"
 WRITABLE_DIR="$3"
-MEMORY_KB="$4"
-FILE_KB="$5"
-PROCESS_LIMIT="$6"
-CPU_SECONDS="$7"
-COMMAND="$8"
-shift 8
+RUNTIME_COMMAND="$4"
+MEMORY_KB="$5"
+FILE_KB="$6"
+PROCESS_LIMIT="$7"
+CPU_SECONDS="$8"
+COMMAND="$9"
+shift 9
 
 mount --make-rprivate /
 mount -t tmpfs -o "size=$((MEMORY_KB / 2))k,nosuid,nodev" tmpfs "$ROOT"
-mkdir -p "$ROOT/usr" "$ROOT/usr/local" "$ROOT/lib" "$ROOT/lib64" "$ROOT/bin" "$ROOT/sbin" "$ROOT/workspace" "$ROOT/proc" "$ROOT/dev"
+mkdir -p "$ROOT/usr" "$ROOT/usr/local" "$ROOT/lib" "$ROOT/lib64" "$ROOT/bin" "$ROOT/sbin" "$ROOT/workspace" "$ROOT/proc" "$ROOT/dev" "$ROOT/runtime"
 for directory in /usr /usr/local /lib /lib64 /bin /sbin; do
   [ -e "$directory" ] || continue
   mount --bind "$directory" "$ROOT$directory"
   mount -o remount,bind,ro "$ROOT$directory"
 done
+if [ -n "$RUNTIME_COMMAND" ]; then
+  : > "$ROOT/runtime/runner"
+  mount --bind "$RUNTIME_COMMAND" "$ROOT/runtime/runner"
+  mount -o remount,bind,ro "$ROOT/runtime/runner"
+fi
 mount --bind "$WORKDIR" "$ROOT/workspace"
 mount -o remount,bind,ro "$ROOT/workspace"
 mount --bind "$WRITABLE_DIR" "$ROOT/workspace/output"
@@ -189,8 +195,11 @@ function isolatedPath(candidate, workdir) {
   if (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) {
     return path.posix.join('/workspace', relative.split(path.sep).join('/'));
   }
-  // مسارات وقت التشغيل وحدها متاحة في جذر العزل؛ أي مسار مضيف آخر لا يُمرَّر خفيةً.
+  // مسارات النظام المربوطة للقراءة فقط متاحة داخل الجذر؛ وأي مسار مضيف آخر
+  // لا يُمرَّر خفيةً. مسار Node الذي أطلق الاختبار/المشغّل استثناءٌ محدود:
+  // يُربط كملف واحد إلى /runtime/runner للقراءة فقط، لا كمجلد runtime كامل.
   if (/^\/(usr|bin|sbin|lib|lib64)(\/|$)/.test(candidate)) return candidate;
+  if (candidate === process.execPath) return '/runtime/runner';
   throw new IsolationError(
     ISOLATION_ERRORS.COMMAND_INVALID,
     `المسار ${candidate} خارج workdir وليس من زمن التشغيل المربوط للقراءة فقط؛ لا يُمرَّر مسار مضيف خفي إلى المعزول.`,
@@ -357,6 +366,7 @@ export async function runIsolated(request) {
     'processLimit',
   );
   const commandInJail = isolatedPath(command, workdir);
+  const runtimeCommand = command === process.execPath ? command : '';
   const argsInJail = args.map((value) => isolatedPath(value, workdir));
   const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-isolation-'));
   const startedAt = Date.now();
@@ -390,6 +400,7 @@ export async function runIsolated(request) {
         sandboxRoot,
         workdir,
         writableDir,
+        runtimeCommand,
         String(memoryLimitMb * 1024),
         String(maxFileSizeMb * 1024),
         String(processLimit),
