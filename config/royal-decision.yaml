@@ -1,0 +1,186 @@
+# حزمةُ القرارِ الملكيِّ — تجهيزُ الخطوةِ `M11.09` (وليس تنفيذَها)
+#
+# **هذا الملفُّ مُدخلٌ لقرارٍ لم يصدرْ.** وهو ليس قراراً، ولا نيابةً عن قرارٍ، ولا
+# تمهيداً لاعتبارِ `M11.09` مغلقةً: الخطوةُ تبقى `⬜` حتى يصدرَ أمرٌ ملكيٌّ موقَّعٌ
+# من المالكِ نفسِه ويُقيَّدَ في سجلِّ الأحداثِ. والمنفِّذُ **لا يُوقِّعُ ولا يُقرِّرُ
+# ولا يُطلِقُ**، والحاجزُ `guard:royal-decision` يجعلُ هذا المنعَ **شيئاً يفشلُ**
+# لا نيّةً حسنةً: أيُّ قيمةٍ في `decision` أو `signature` أو `signedBy` أو
+# `issuedAt` أو `recordedEventId` تُرَدُّ رفضاً.
+#
+# وما لا يقولُه هذا الملفُّ: لا يقولُ إنَّ الشروطَ السابقةَ مستوفاةٌ، ولا إنَّ
+# النظامَ جاهزٌ للإطلاقِ، ولا إنَّ `G11` قابلةٌ للفتحِ. حالةُ الشروطِ تُقرأ من
+# `config/readiness-deferrals.yaml` ولا تُكتَبُ هنا.
+
+version: '1.0.0'
+declaredIn: WL-072
+decisionId: RD-M11.09-001
+step: M11.09
+subject: قرارُ الجاهزيّةِ الملكيُّ ثم إطلاقٌ محدودٌ ثم توسّعٌ تدريجيٌّ
+authority: owner
+preparedBy: executor
+preparedFor: owner
+
+# الحقولُ الخمسةُ الفارغةُ: موضعُ القرارِ لا القرارُ. مَن يملؤها هو المالكُ.
+decision: null
+signature: null
+signedBy: null
+issuedAt: null
+recordedEventId: null
+
+scope:
+  decides:
+    - إصدارُ أمرٍ ملكيٍّ موقَّعٍ يأذنُ بإطلاقٍ **محدودٍ** وفقَ خطةِ المراحلِ أدناه، أو تأجيلُه، أو رفضُه.
+    - تحديدُ المرحلةِ الأولى المأذونِ بها بعينِها (لا الإطلاقَ الكاملَ).
+    - إقرارُ معاييرِ التراجعِ التي يُنفَّذُ التراجعُ عندَها بلا قرارٍ ثانٍ.
+  doesNotDecide:
+    - لا يُغني عن `M11.04` و`M11.05` و`M11.06` ولا يُسقِطُ شرطاً منها.
+    - لا يفتحُ `G11` ولا يُعلِنُ `100%` — تلك بوابةٌ مؤجَّلةٌ بقرارٍ سياديٍّ قائمٍ.
+    - لا يُعتبَرُ اعتماداً أمنياً ولا قانونياً ولا أخلاقياً لأيِّ مكوِّنٍ.
+    - لا يُعدِّلُ عقدَ العتبةِ السياديّةِ (`config/royal-authority.yaml`) — ربطُ الفعلِ بالعتبةِ فعلُ تنفيذٍ لا فعلُ تجهيزٍ.
+
+# حالةُ الشروطِ **تُقرأ** من سجلِّ التأجيلاتِ: لا حقلَ حالةٍ يُكتَبُ هنا كي لا
+# يُنتحَلَ استيفاءٌ. والحاجزُ يُثبِتُ أنَّ كلَّ شرطٍ مذكورٌ هناك مؤجَّلاً.
+preconditions:
+  - id: M11.04
+    requirement: مراجعةٌ أمنيّةٌ مستقلّةٌ منجَزةٌ ونتائجُها الحرجةُ مغلقةٌ.
+    statusSource: config/readiness-deferrals.yaml
+  - id: M11.05
+    requirement: اختبارُ اختراقٍ خارجيٌّ منجَزٌ ونتائجُه الحرجةُ مغلقةٌ.
+    statusSource: config/readiness-deferrals.yaml
+  - id: M11.06
+    requirement: مراجعةٌ بشريّةٌ مستقلّةٌ منجَزةٌ ونتائجُها الحرجةُ مغلقةٌ.
+    statusSource: config/readiness-deferrals.yaml
+
+options:
+  - id: approve
+    meaning: يأذنُ المالكُ بتنفيذِ المرحلةِ الأولى من خطةِ الإطلاقِ المحدودِ.
+    consequences:
+      - يلزمُ **قبلَ** التنفيذِ استيفاءُ `M11.04`–`M11.06`؛ فالإذنُ لا يُسقِطُ شرطاً.
+      - يُقيَّدُ الأمرُ في سجلِّ الأحداثِ، ويصيرُ التراجعُ عنه قراراً سياديّاً ثانياً.
+      - 'تُفتَحُ مسؤوليّةُ تشغيلٍ حقيقيّةٍ: مناوبةٌ ومراقبةٌ وحدودُ سعةٍ ومعاييرُ تراجعٍ نافذةٌ.'
+      - 'لا يُقرأُ إذناً بالمرحلةِ الثانيةِ: كلُّ مرحلةٍ تحتاجُ معيارَ خروجِها المُقاسَ.'
+    requiredArtifacts:
+      - أمرٌ ملكيٌّ موقَّعٌ بصيغةِ `signatureRequirement`.
+      - قيدٌ في سجلِّ الأحداثِ بنوعٍ من `auditRecord.requiredEventTypes`.
+      - مُدخلةُ سجلِّ عملٍ تُوثِّقُ الإصدارَ والزمنَ والنطاقَ.
+  - id: defer
+    meaning: يُبقي المالكُ القرارَ مؤجَّلاً؛ ولا يتغيّرُ شيءٌ في حالةِ المشروعِ.
+    consequences:
+      - تبقى `M11.09` `⬜` وتبقى `G11` مؤجَّلةً — وهذا هو **الوضعُ القائمُ** الآن.
+      - لا يُقرأُ التأجيلُ رفضاً ولا نقصاً تقنياً؛ هو احتباسُ قرارٍ بسلطتِه.
+      - يلزمُ تحديثُ `unblockCondition` في سجلِّ التأجيلاتِ إن تغيّرَ شرطُ الفكِّ.
+    requiredArtifacts:
+      - مُدخلةُ سجلِّ عملٍ تُوثِّقُ التأجيلَ وتاريخَ إعادةِ النظرِ إن وُجِدَ.
+  - id: reject
+    meaning: يرفضُ المالكُ الإطلاقَ المحدودَ في هذه النسخةِ.
+    consequences:
+      - يُغلَقُ مسارُ الإطلاقِ لهذه النسخةِ، ولا يُعادُ طرحُه إلا بحزمةِ قرارٍ جديدةٍ برقمٍ جديدٍ.
+      - يبقى العملُ التقنيُّ قائماً؛ الرفضُ لا يُلغي ما أُنجِزَ ولا يُنقِصُ نسبةً.
+      - يلزمُ تسجيلُ سببِ الرفضِ كي لا يُعادَ الطرحُ على الحالةِ نفسِها.
+    requiredArtifacts:
+      - مُدخلةُ سجلِّ عملٍ تُوثِّقُ الرفضَ وسببَه ونطاقَه.
+
+# الصيغةُ **ليست مخترعةً هنا**: هي صيغةُ بوابةِ التاجِ القائمةِ نفسُها.
+signatureRequirement:
+  algorithm: ed25519
+  encoding: base64url
+  signedPayload: JSON.stringify(command)
+  envelopeFields:
+    - id
+    - action
+    - target
+    - payload
+    - issuedAt
+  action: authorize-limited-launch
+  target: 'step:M11.09'
+  verifiedBy: src/root-of-trust/crown.mts
+  verifierEntry: CrownGateway.command
+  maxCommandAgeMs: 300000
+  clockSkewMs: 30000
+  replayProtection: مُعرِّفُ الأمرِ لا يُقبَلُ مرّتَينِ في البوابةِ نفسِها.
+  bindingNote: >-
+    ربطُ الفعلِ `authorize-limited-launch` بالعتبةِ السياديّةِ في
+    `config/royal-authority.yaml` عملُ تنفيذٍ يتبعُ القرارَ، ولم يُنفَّذْ هنا كي لا
+    يُعدَّلَ عقدُ `M4` قبلَ صدورِ قرارٍ.
+
+auditRecord:
+  requiredEventTypes:
+    - crown.command.accepted
+  eventSource: config/events.yaml
+  ledger: src/root-of-trust/command-ledger.mts
+  requirements:
+    - القيدُ يُنشَأُ عندَ قبولِ الأمرِ في البوابةِ لا عندَ كتابةِ وثيقةٍ.
+    - مُعرِّفُ القيدِ يُنسَخُ إلى `recordedEventId` في هذا الملفِّ **بعدَ** القبولِ.
+    - لا يُحرَّرُ قيدٌ ولا يُحذَفُ؛ التصحيحُ قيدٌ جديدٌ يُشيرُ إلى الأوّلِ.
+
+# خطةُ التوسّعِ **مقترحةٌ** — معيارُ قبولِ `M11.09` يطلبُها، وإقرارُها جزءٌ من القرارِ.
+rolloutPlan:
+  proposed: true
+  phases:
+    - id: phase-0
+      title: تشغيلٌ داخليٌّ مغلقٌ بلا مستخدمٍ خارجيٍّ
+      entryCriteria:
+        - أمرٌ ملكيٌّ موقَّعٌ مقيَّدٌ في سجلِّ الأحداثِ.
+        - سلسلةُ CI خضراءُ على `main` عندَ الوسمِ المُطلَقِ.
+      exitCriteria:
+        - سبعةُ أيّامٍ متّصلةٍ بلا حادثٍ من الدرجةِ الأولى.
+        - كلُّ إنذارٍ صدرَ له سببٌ جذريٌّ مكتوبٌ.
+      rollbackCriteria:
+        - حادثٌ واحدٌ من الدرجةِ الأولى.
+        - فقدُ قيدٍ في سجلِّ الأحداثِ أو انكسارُ سلسلةِ التجزئةِ.
+      measure: سجلُّ الأحداثِ وتقاريرُ المراقبةِ (`npm run guard:monitoring`).
+    - id: phase-1
+      title: إطلاقٌ محدودٌ لدائرةٍ مُسمّاةٍ من المستخدمينِ
+      entryCriteria:
+        - إتمامُ `phase-0` بمعاييرِ خروجِها.
+        - نتائجُ `M11.04`–`M11.06` الحرجةُ مغلقةٌ.
+      exitCriteria:
+        - أربعةَ عشرَ يوماً بمعدّلِ خطأٍ دونَ الحدِّ المُعلَنِ في عقدِ مستوياتِ الخدمةِ.
+        - صفرُ تجاوزٍ لحدودِ السعةِ المُعلَنةِ.
+      rollbackCriteria:
+        - تجاوزُ حدِّ الخطأِ المُعلَنِ مرّتَينِ في أربعٍ وعشرينَ ساعةً.
+        - أيُّ تسريبٍ لبياناتٍ مصنَّفةٍ أو تجاوزٍ لسلطةٍ.
+      measure: عقدُ مستوياتِ الخدمةِ (`config/service-levels.yaml`) وتقاريرُ الحوادثِ.
+    - id: phase-2
+      title: توسّعٌ تدريجيٌّ بحدودِ سعةٍ مرفوعةٍ على مراحلَ
+      entryCriteria:
+        - إتمامُ `phase-1` بمعاييرِ خروجِها.
+        - قرارٌ سياديٌّ ثانٍ يأذنُ برفعِ الحدِّ.
+      exitCriteria:
+        - استقرارُ المؤشراتِ عندَ كلِّ رفعٍ قبلَ الرفعِ التالي.
+      rollbackCriteria:
+        - أيُّ معيارِ تراجعٍ من المرحلتَينِ السابقتَينِ يبقى نافذاً.
+      measure: تقاريرُ السعةِ والكلفةِ (`npm run guard:cost-capacity`).
+
+verdicts:
+  - id: royal-decision:prepared
+    exitCode: 0
+    meaning: الحزمةُ مُجهَّزةٌ وخاليةٌ من قرارٍ منتحَلٍ — ولا قرارَ صدرَ.
+  - id: royal-decision:incomplete
+    exitCode: 84
+    meaning: الحزمةُ ينقصُها حقلٌ إلزاميٌّ فلا تصلحُ أن تُعرَضَ على المالكِ.
+  - id: royal-decision:impersonated
+    exitCode: 85
+    meaning: قرارٌ أو توقيعٌ أو لفظُ اعتمادٍ وُضِعَ في الحزمةِ — وهذا يُرَدُّ.
+
+refusalCodes:
+  - ROYAL_DECISION_CONFIG_INVALID
+  - ROYAL_DECISION_SELF_SIGNED
+  - ROYAL_DECISION_SELF_APPROVAL
+  - ROYAL_DECISION_LAUNCH_CLAIM
+  - ROYAL_DECISION_PRECONDITION_UNDECLARED
+  - ROYAL_DECISION_OPTION_INCOMPLETE
+  - ROYAL_DECISION_PHASE_INCOMPLETE
+  - ROYAL_DECISION_PACKET_DRIFT
+  - ROYAL_DECISION_STEP_CLOSED
+  - ROYAL_DECISION_ARGUMENT_UNKNOWN
+
+guarantees:
+  - id: G-ROYAL-DECISION-NO-SELF-SIGNATURE
+    statement: لا توقيعَ ولا قرارَ يُكتَبُ في الحزمةِ من المنفِّذِ؛ الحقولُ الخمسةُ تبقى فارغةً.
+  - id: G-ROYAL-DECISION-STEP-STAYS-OPEN
+    statement: تجهيزُ الحزمةِ لا يُغلِقُ `M11.09` في لوحةِ الخطواتِ ولا يرفعُ نسبةً.
+  - id: G-ROYAL-DECISION-PRECONDITIONS-READ-ONLY
+    statement: حالةُ `M11.04`–`M11.06` تُقرأُ من سجلِّ التأجيلاتِ ولا تُكتَبُ هنا.
+  - id: G-ROYAL-DECISION-OPTIONS-SYMMETRIC
+    statement: لكلِّ خيارٍ (قبولٌ، تأجيلٌ، رفضٌ) عواقبُ مكتوبةٌ ومُخرَجاتٌ لازمةٌ — فلا خيارَ يُرجَّحُ بصمتِ الوثيقةِ.

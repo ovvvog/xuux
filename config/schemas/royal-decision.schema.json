@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/royal-decision.schema.json",
+  "title": "حزمة القرار الملكي — مُدخل لقرار لم يصدر (M11.09)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "declaredIn",
+    "decisionId",
+    "step",
+    "subject",
+    "authority",
+    "preparedBy",
+    "preparedFor",
+    "decision",
+    "signature",
+    "signedBy",
+    "issuedAt",
+    "recordedEventId",
+    "scope",
+    "preconditions",
+    "options",
+    "signatureRequirement",
+    "auditRecord",
+    "rolloutPlan",
+    "verdicts",
+    "refusalCodes",
+    "guarantees"
+  ],
+  "properties": {
+    "version": { "type": "string", "minLength": 1 },
+    "declaredIn": { "type": "string", "pattern": "^WL-[0-9]{3}$" },
+    "decisionId": { "type": "string", "minLength": 1 },
+    "step": { "const": "M11.09" },
+    "subject": { "type": "string", "minLength": 1 },
+    "authority": { "const": "owner" },
+    "preparedBy": { "const": "executor" },
+    "preparedFor": { "const": "owner" },
+    "decision": { "type": "null" },
+    "signature": { "type": "null" },
+    "signedBy": { "type": "null" },
+    "issuedAt": { "type": "null" },
+    "recordedEventId": { "type": "null" },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decides", "doesNotDecide"],
+      "properties": {
+        "decides": { "$ref": "#/$defs/textList" },
+        "doesNotDecide": { "$ref": "#/$defs/textList" }
+      }
+    },
+    "preconditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "requirement", "statusSource"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^M11\\.0[456]$" },
+          "requirement": { "type": "string", "minLength": 1 },
+          "statusSource": { "const": "config/readiness-deferrals.yaml" }
+        }
+      }
+    },
+    "options": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "meaning", "consequences", "requiredArtifacts"],
+        "properties": {
+          "id": { "enum": ["approve", "defer", "reject"] },
+          "meaning": { "type": "string", "minLength": 1 },
+          "consequences": { "$ref": "#/$defs/textList" },
+          "requiredArtifacts": { "$ref": "#/$defs/textList" }
+        }
+      }
+    },
+    "signatureRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "encoding",
+        "signedPayload",
+        "envelopeFields",
+        "action",
+        "target",
+        "verifiedBy",
+        "verifierEntry",
+        "maxCommandAgeMs",
+        "clockSkewMs",
+        "replayProtection",
+        "bindingNote"
+      ],
+      "properties": {
+        "algorithm": { "const": "ed25519" },
+        "encoding": { "const": "base64url" },
+        "signedPayload": { "type": "string", "minLength": 1 },
+        "envelopeFields": { "$ref": "#/$defs/textList" },
+        "action": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "verifiedBy": { "type": "string", "minLength": 1 },
+        "verifierEntry": { "type": "string", "minLength": 1 },
+        "maxCommandAgeMs": { "type": "integer", "minimum": 1 },
+        "clockSkewMs": { "type": "integer", "minimum": 1 },
+        "replayProtection": { "type": "string", "minLength": 1 },
+        "bindingNote": { "type": "string", "minLength": 1 }
+      }
+    },
+    "auditRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requiredEventTypes", "eventSource", "ledger", "requirements"],
+      "properties": {
+        "requiredEventTypes": { "$ref": "#/$defs/textList" },
+        "eventSource": { "const": "config/events.yaml" },
+        "ledger": { "type": "string", "minLength": 1 },
+        "requirements": { "$ref": "#/$defs/textList" }
+      }
+    },
+    "rolloutPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["proposed", "phases"],
+      "properties": {
+        "proposed": { "const": true },
+        "phases": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "title",
+              "entryCriteria",
+              "exitCriteria",
+              "rollbackCriteria",
+              "measure"
+            ],
+            "properties": {
+              "id": { "type": "string", "pattern": "^phase-[0-9]+$" },
+              "title": { "type": "string", "minLength": 1 },
+              "entryCriteria": { "$ref": "#/$defs/textList" },
+              "exitCriteria": { "$ref": "#/$defs/textList" },
+              "rollbackCriteria": { "$ref": "#/$defs/textList" },
+              "measure": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "verdicts": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "exitCode", "meaning"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^royal-decision:[a-z-]+$" },
+          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
+          "meaning": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "refusalCodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^ROYAL_DECISION_[A-Z_]+$" }
+    },
+    "guarantees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^G-ROYAL-DECISION-[A-Z-]+$" },
+          "statement": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "textList": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

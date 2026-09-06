@@ -63,7 +63,7 @@
 
 ```bash
 npm ci
-npm run validate        # ست وأربعون بوابة ثم كل الاختبارات
+npm run validate        # سبع وأربعون بوابة ثم كل الاختبارات
 npm run readiness:report --silent
 npm run emergency:drill # سلسلةُ الطوارئِ الخمسةُ بأمرٍ واحدٍ
 npm run gen:sbom && npm run audit:check
