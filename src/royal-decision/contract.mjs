@@ -28,6 +28,12 @@ const Ajv2020 = /** @type {typeof import('ajv/dist/2020.js').Ajv2020} */ (
 import YAML from 'yaml';
 
 import { loadDeferrals } from '../readiness/contract.mjs';
+import {
+  assertAttestations,
+  findUnpermittedClaims,
+  readRoadmapStatusGlyphs,
+  resolvePermittedClaimTokens,
+} from './attestations.mjs';
 import { ROYAL_DECISION_ERRORS, RoyalDecisionError } from './errors.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -66,11 +72,12 @@ export const OWNER_ONLY_FIELDS = Object.freeze([
  * @property {{ id: string, exitCode: number, meaning: string }[]} verdicts
  * @property {string[]} refusalCodes
  * @property {{ id: string, statement: string }[]} guarantees
+ * @property {{ subject: string, valueSource: string, value: string }[]} attestations
  */
 
 /**
  * يقرأُ العقدَ ويتحقّقُ من مخطَّطِه ثم من ترابطِه مع سجلِّ التأجيلاتِ.
- * @param {{ configDir?: string }} [options]
+ * @param {{ configDir?: string, root?: string }} [options]
  * @returns {RoyalDecisionPacketConfig}
  */
 export function loadRoyalDecisionPacket(options = {}) {
@@ -83,7 +90,8 @@ export function loadRoyalDecisionPacket(options = {}) {
       { file },
     );
   }
-  const parsed = /** @type {Record<string, unknown>} */ (YAML.parse(fs.readFileSync(file, 'utf8')));
+  const raw = fs.readFileSync(file, 'utf8');
+  const parsed = /** @type {Record<string, unknown>} */ (YAML.parse(raw));
   // القرارُ يُفحَص **قبلَ** المخطَّطِ: حقلٌ مملوءٌ انتحالُ سلطةٍ لا مخالفةُ صياغةٍ،
   // فلا يُقرأ «نقصاً في التجهيزِ» ولا يُخفى تحت رسالةِ مخطَّطٍ.
   assertUnsigned(parsed);
@@ -106,6 +114,13 @@ export function loadRoyalDecisionPacket(options = {}) {
   assertUnsigned(packet);
   assertVerdicts(packet);
   assertPreconditionsDeferred(packet, { configDir });
+  // القاعدةُ `R6` مغلقةٌ على الفشلِ: الحكمُ لا يُقالُ إلا بقيمةٍ مسموحةٍ صريحاً
+  // مطابقةٍ لمصدرِها، والنصُّ الحرُّ في العقدِ لا يحملُ رمزَ ادّعاءٍ غيرَ مسموحٍ.
+  assertClaimDiscipline(packet, {
+    root: options.root ?? path.dirname(configDir),
+    configDir,
+    files: [{ relative: 'config/royal-decision.yaml', text: raw }],
+  });
   return packet;
 }
 
@@ -205,4 +220,41 @@ export function assertStepOpen(options = {}) {
       { row: row.trim() },
     );
   }
+}
+
+/**
+ * إنفاذُ القاعدةِ `R6` مغلقةً على الفشلِ: أحكامٌ بقيمٍ **مسموحةٍ صريحاً** مقروءةٍ
+ * من مصادرِها ومطابقةٍ لها، ونصٌّ حرٌّ **بلا رمزِ ادّعاءٍ** غيرِ مسموحٍ.
+ *
+ * ولا استثناءَ بأداةِ نفيٍ: البابُ الذي كانَ يمرُّ منه اعتمادٌ راكباً على نفيٍ
+ * مسدودٌ، ومطابقةُ القيمِ تامّةٌ لا جزئيّةٌ ولا مُشذَّبةٌ ولا مُوحَّدةُ حالةِ الحرفِ.
+ *
+ * @param {Record<string, unknown>} packet
+ * @param {{ root: string, configDir: string, files: { relative: string, text: string }[] }} context
+ * @returns {{ subject: string, value: string }[]}
+ */
+export function assertClaimDiscipline(packet, context) {
+  const glyphs = readRoadmapStatusGlyphs(context.root);
+  const verified = assertAttestations(packet, {
+    root: context.root,
+    configDir: context.configDir,
+  });
+  const permitted = resolvePermittedClaimTokens(packet, {
+    root: context.root,
+    glyphs,
+    verified,
+  });
+  const found = findUnpermittedClaims(context.files, { permitted, glyphs });
+  if (found.length > 0) {
+    const detail = found
+      .slice(0, 5)
+      .map((item) => `${item.relative}:${String(item.line)} «${item.token}»`)
+      .join('؛ ');
+    throw new RoyalDecisionError(
+      ROYAL_DECISION_ERRORS.LAUNCH_CLAIM,
+      `رمزُ ادّعاءٍ غيرُ مسموحٍ في نصٍّ حرٍّ — والحكمُ لا يُقالُ إلا في \`attestations\` بقيمةٍ من مصدرِها: ${detail}`,
+      { found },
+    );
+  }
+  return verified;
 }

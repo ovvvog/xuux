@@ -41,6 +41,8 @@ function sandbox() {
   for (const entry of ['config', 'docs', 'scripts', 'src', 'package.json']) {
     cpSync(join(ROOT, entry), join(root, entry), { recursive: true });
   }
+  // مسارُ التكاملِ مصدرٌ فعليٌّ للقاعدةِ `R6` (اسمُ المسارِ رمزٌ مسموحٌ مقروءٌ لا مكتوبٌ).
+  cpSync(join(ROOT, '.github'), join(root, '.github'), { recursive: true });
   // التبعيّاتُ تُوصَل وصلاً لا نسخاً: نسخُ `node_modules` يجعل الاختبارَ ثقيلاً بلا فائدةٍ.
   symlinkSync(join(ROOT, 'node_modules'), join(root, 'node_modules'), 'dir');
   return root;

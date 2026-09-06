@@ -34,7 +34,7 @@ scope:
     - إقرارُ معاييرِ التراجعِ التي يُنفَّذُ التراجعُ عندَها بلا قرارٍ ثانٍ.
   doesNotDecide:
     - لا يُغني عن `M11.04` و`M11.05` و`M11.06` ولا يُسقِطُ شرطاً منها.
-    - لا يفتحُ `G11` ولا يُعلِنُ `100%` — تلك بوابةٌ مؤجَّلةٌ بقرارٍ سياديٍّ قائمٍ.
+    - لا يفتحُ `G11` ولا يُعلِنُ اكتمالَ تعريفِ المئةِ في المئةِ — تلك بوابةٌ مؤجَّلةٌ بقرارٍ سياديٍّ قائمٍ.
     - لا يُعتبَرُ اعتماداً أمنياً ولا قانونياً ولا أخلاقياً لأيِّ مكوِّنٍ.
     - لا يُعدِّلُ عقدَ العتبةِ السياديّةِ (`config/royal-authority.yaml`) — ربطُ الفعلِ بالعتبةِ فعلُ تنفيذٍ لا فعلُ تجهيزٍ.
 
@@ -152,6 +152,34 @@ rolloutPlan:
         - أيُّ معيارِ تراجعٍ من المرحلتَينِ السابقتَينِ يبقى نافذاً.
       measure: تقاريرُ السعةِ والكلفةِ (`npm run guard:cost-capacity`).
 
+# قناةُ الحكمِ **الوحيدةُ** في هذه الحزمةِ (قاعدةُ الاعتمادِ مغلقةٌ على الفشلِ):
+# كلُّ حكمِ حالةٍ يُكتَبُ هنا بقيمةٍ **مقروءةٍ من مصدرِها** ومطابقةٍ له بايتاً ببايتٍ؛
+# وقيمةٌ غيرُ عضوٍ في مجموعةِ مصدرِها، أو مخالفةٌ لما يقولُه المصدرُ، أو ذاتُ نصٍّ
+# إضافيٍّ أو فراغٍ زائدٍ — تُرَدُّ. والنصُّ الحرُّ في هذا الملفِّ **لا يحملُ حكماً**:
+# أيُّ رمزِ ادّعاءٍ فيه غيرِ مسموحٍ صراحةً يُرَدُّ بلا استثناءِ نفيٍ.
+attestations:
+  - subject: 'step:M11.09'
+    valueSource: roadmap-step-status
+    value: '⬜'
+  - subject: 'deferral:M11.04'
+    valueSource: readiness-deferral-blocker-kind
+    value: external-party
+  - subject: 'deferral:M11.05'
+    valueSource: readiness-deferral-blocker-kind
+    value: external-party
+  - subject: 'deferral:M11.06'
+    valueSource: readiness-deferral-blocker-kind
+    value: external-party
+  - subject: 'deferral:M11.09'
+    valueSource: readiness-deferral-blocker-kind
+    value: sovereign-decision
+  - subject: 'deferral:G11'
+    valueSource: readiness-deferral-blocker-kind
+    value: sovereign-decision
+  - subject: 'packet:self'
+    valueSource: royal-decision-verdict
+    value: 'royal-decision:prepared'
+
 verdicts:
   - id: royal-decision:prepared
     exitCode: 0
@@ -182,5 +210,7 @@ guarantees:
     statement: تجهيزُ الحزمةِ لا يُغلِقُ `M11.09` في لوحةِ الخطواتِ ولا يرفعُ نسبةً.
   - id: G-ROYAL-DECISION-PRECONDITIONS-READ-ONLY
     statement: حالةُ `M11.04`–`M11.06` تُقرأُ من سجلِّ التأجيلاتِ ولا تُكتَبُ هنا.
+  - id: G-ROYAL-DECISION-CLAIMS-ALLOWLISTED
+    statement: كلُّ حكمِ حالةٍ في الحزمةِ قيمةٌ مسموحةٌ صريحاً مقروءةٌ من مصدرِها ومطابقةٌ له، والنصُّ الحرُّ لا يحملُ رمزَ ادّعاءٍ غيرَ مسموحٍ — فصياغةُ اعتمادٍ غيرُ مُدرَجةٍ تُرَدُّ ولا تمرُّ.
   - id: G-ROYAL-DECISION-OPTIONS-SYMMETRIC
     statement: لكلِّ خيارٍ (قبولٌ، تأجيلٌ، رفضٌ) عواقبُ مكتوبةٌ ومُخرَجاتٌ لازمةٌ — فلا خيارَ يُرجَّحُ بصمتِ الوثيقةِ.

@@ -26,29 +26,64 @@
     "rolloutPlan",
     "verdicts",
     "refusalCodes",
-    "guarantees"
+    "guarantees",
+    "attestations"
   ],
   "properties": {
-    "version": { "type": "string", "minLength": 1 },
-    "declaredIn": { "type": "string", "pattern": "^WL-[0-9]{3}$" },
-    "decisionId": { "type": "string", "minLength": 1 },
-    "step": { "const": "M11.09" },
-    "subject": { "type": "string", "minLength": 1 },
-    "authority": { "const": "owner" },
-    "preparedBy": { "const": "executor" },
-    "preparedFor": { "const": "owner" },
-    "decision": { "type": "null" },
-    "signature": { "type": "null" },
-    "signedBy": { "type": "null" },
-    "issuedAt": { "type": "null" },
-    "recordedEventId": { "type": "null" },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "declaredIn": {
+      "type": "string",
+      "pattern": "^WL-[0-9]{3}$"
+    },
+    "decisionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "step": {
+      "const": "M11.09"
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authority": {
+      "const": "owner"
+    },
+    "preparedBy": {
+      "const": "executor"
+    },
+    "preparedFor": {
+      "const": "owner"
+    },
+    "decision": {
+      "type": "null"
+    },
+    "signature": {
+      "type": "null"
+    },
+    "signedBy": {
+      "type": "null"
+    },
+    "issuedAt": {
+      "type": "null"
+    },
+    "recordedEventId": {
+      "type": "null"
+    },
     "scope": {
       "type": "object",
       "additionalProperties": false,
       "required": ["decides", "doesNotDecide"],
       "properties": {
-        "decides": { "$ref": "#/$defs/textList" },
-        "doesNotDecide": { "$ref": "#/$defs/textList" }
+        "decides": {
+          "$ref": "#/$defs/textList"
+        },
+        "doesNotDecide": {
+          "$ref": "#/$defs/textList"
+        }
       }
     },
     "preconditions": {
@@ -59,9 +94,17 @@
         "additionalProperties": false,
         "required": ["id", "requirement", "statusSource"],
         "properties": {
-          "id": { "type": "string", "pattern": "^M11\\.0[456]$" },
-          "requirement": { "type": "string", "minLength": 1 },
-          "statusSource": { "const": "config/readiness-deferrals.yaml" }
+          "id": {
+            "type": "string",
+            "pattern": "^M11\\.0[456]$"
+          },
+          "requirement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "statusSource": {
+            "const": "config/readiness-deferrals.yaml"
+          }
         }
       }
     },
@@ -73,10 +116,19 @@
         "additionalProperties": false,
         "required": ["id", "meaning", "consequences", "requiredArtifacts"],
         "properties": {
-          "id": { "enum": ["approve", "defer", "reject"] },
-          "meaning": { "type": "string", "minLength": 1 },
-          "consequences": { "$ref": "#/$defs/textList" },
-          "requiredArtifacts": { "$ref": "#/$defs/textList" }
+          "id": {
+            "enum": ["approve", "defer", "reject"]
+          },
+          "meaning": {
+            "type": "string",
+            "minLength": 1
+          },
+          "consequences": {
+            "$ref": "#/$defs/textList"
+          },
+          "requiredArtifacts": {
+            "$ref": "#/$defs/textList"
+          }
         }
       }
     },
@@ -98,18 +150,51 @@
         "bindingNote"
       ],
       "properties": {
-        "algorithm": { "const": "ed25519" },
-        "encoding": { "const": "base64url" },
-        "signedPayload": { "type": "string", "minLength": 1 },
-        "envelopeFields": { "$ref": "#/$defs/textList" },
-        "action": { "type": "string", "minLength": 1 },
-        "target": { "type": "string", "minLength": 1 },
-        "verifiedBy": { "type": "string", "minLength": 1 },
-        "verifierEntry": { "type": "string", "minLength": 1 },
-        "maxCommandAgeMs": { "type": "integer", "minimum": 1 },
-        "clockSkewMs": { "type": "integer", "minimum": 1 },
-        "replayProtection": { "type": "string", "minLength": 1 },
-        "bindingNote": { "type": "string", "minLength": 1 }
+        "algorithm": {
+          "const": "ed25519"
+        },
+        "encoding": {
+          "const": "base64url"
+        },
+        "signedPayload": {
+          "type": "string",
+          "minLength": 1
+        },
+        "envelopeFields": {
+          "$ref": "#/$defs/textList"
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verifiedBy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "verifierEntry": {
+          "type": "string",
+          "minLength": 1
+        },
+        "maxCommandAgeMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "clockSkewMs": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "replayProtection": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bindingNote": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "auditRecord": {
@@ -117,10 +202,19 @@
       "additionalProperties": false,
       "required": ["requiredEventTypes", "eventSource", "ledger", "requirements"],
       "properties": {
-        "requiredEventTypes": { "$ref": "#/$defs/textList" },
-        "eventSource": { "const": "config/events.yaml" },
-        "ledger": { "type": "string", "minLength": 1 },
-        "requirements": { "$ref": "#/$defs/textList" }
+        "requiredEventTypes": {
+          "$ref": "#/$defs/textList"
+        },
+        "eventSource": {
+          "const": "config/events.yaml"
+        },
+        "ledger": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirements": {
+          "$ref": "#/$defs/textList"
+        }
       }
     },
     "rolloutPlan": {
@@ -128,7 +222,9 @@
       "additionalProperties": false,
       "required": ["proposed", "phases"],
       "properties": {
-        "proposed": { "const": true },
+        "proposed": {
+          "const": true
+        },
         "phases": {
           "type": "array",
           "minItems": 2,
@@ -144,12 +240,27 @@
               "measure"
             ],
             "properties": {
-              "id": { "type": "string", "pattern": "^phase-[0-9]+$" },
-              "title": { "type": "string", "minLength": 1 },
-              "entryCriteria": { "$ref": "#/$defs/textList" },
-              "exitCriteria": { "$ref": "#/$defs/textList" },
-              "rollbackCriteria": { "$ref": "#/$defs/textList" },
-              "measure": { "type": "string", "minLength": 1 }
+              "id": {
+                "type": "string",
+                "pattern": "^phase-[0-9]+$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "entryCriteria": {
+                "$ref": "#/$defs/textList"
+              },
+              "exitCriteria": {
+                "$ref": "#/$defs/textList"
+              },
+              "rollbackCriteria": {
+                "$ref": "#/$defs/textList"
+              },
+              "measure": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           }
         }
@@ -163,16 +274,29 @@
         "additionalProperties": false,
         "required": ["id", "exitCode", "meaning"],
         "properties": {
-          "id": { "type": "string", "pattern": "^royal-decision:[a-z-]+$" },
-          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
-          "meaning": { "type": "string", "minLength": 1 }
+          "id": {
+            "type": "string",
+            "pattern": "^royal-decision:[a-z-]+$"
+          },
+          "exitCode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 125
+          },
+          "meaning": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
     "refusalCodes": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "pattern": "^ROYAL_DECISION_[A-Z_]+$" }
+      "items": {
+        "type": "string",
+        "pattern": "^ROYAL_DECISION_[A-Z_]+$"
+      }
     },
     "guarantees": {
       "type": "array",
@@ -182,8 +306,40 @@
         "additionalProperties": false,
         "required": ["id", "statement"],
         "properties": {
-          "id": { "type": "string", "pattern": "^G-ROYAL-DECISION-[A-Z-]+$" },
-          "statement": { "type": "string", "minLength": 1 }
+          "id": {
+            "type": "string",
+            "pattern": "^G-ROYAL-DECISION-[A-Z-]+$"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "attestations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["subject", "valueSource", "value"],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "pattern": "^(?:step:M11\\.09|deferral:(?:M11\\.0[456]|M11\\.09|G11)|packet:self)$"
+          },
+          "valueSource": {
+            "enum": [
+              "roadmap-step-status",
+              "readiness-deferral-blocker-kind",
+              "royal-decision-verdict"
+            ]
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     }
@@ -192,7 +348,10 @@
     "textList": {
       "type": "array",
       "minItems": 1,
-      "items": { "type": "string", "minLength": 1 }
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   }
 }
