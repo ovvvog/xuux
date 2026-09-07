@@ -21,7 +21,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const CONTRACT_PATH = 'config/external-review.yaml';
 const DOC_PATH = 'docs/EXTERNAL_REVIEW_PACK.md';
 const EXPECTED_ENGAGEMENTS = ['M11.04', 'M11.05', 'M11.06'];
-const ONLY_STATUS = 'awaiting-independent-party';
+const ONLY_STATUS = 'awaiting-model-council';
 
 /**
  * @returns {Record<string, unknown>}
@@ -51,15 +51,15 @@ test('الارتباطاتُ الثلاثةُ هي بنودُ الخارطةِ �
   }
 });
 
-test('لا حالةَ إلا انتظارُ الجهةِ المستقلّةِ — ولا مفردةَ «مُنجَزٍ» في المفرداتِ أصلاً', () => {
+test('لا حالةَ إلا انتظارُ مجلسِ النماذجِ — ولا مفردةَ «مُنجَزٍ» في المفرداتِ أصلاً', () => {
   const contract = readContract();
   assert.deepEqual(contract.statusVocabulary, [ONLY_STATUS]);
-  assert.equal(contract.resultAuthority, 'independent-third-party');
+  assert.equal(contract.resultAuthority, 'model-council');
   for (const engagement of readEngagements()) {
     assert.equal(
       engagement.status,
       ONLY_STATUS,
-      `حالةُ «${String(engagement.id)}» ليست انتظارَ الجهةِ المستقلّةِ — وهذا انتحالُ حكمٍ`,
+      `حالةُ «${String(engagement.id)}» ليست انتظارَ المجلسِ — وهذا انتحالُ حكمٍ`,
     );
     assert.equal(
       engagement.executedBy,
@@ -69,9 +69,50 @@ test('لا حالةَ إلا انتظارُ الجهةِ المستقلّةِ �
   }
 });
 
-test('سجلُّ النتائجِ فارغٌ: لا نتيجةَ تُقيَّدُ قبلَ أن تصدُرَ من جهةٍ مستقلّةٍ', () => {
+test('سلطةُ المراجعةِ مُعرَّفةٌ ومستقلّةٌ عن المنفِّذِ', () => {
   const contract = readContract();
-  assert.deepEqual(contract.findings, [], 'نتيجةُ مراجعةٍ مُقيَّدةٌ ولا مراجعةَ وقعتْ');
+  const council = /** @type {Record<string, unknown>} */ (contract.councilAuthority);
+  assert.ok(council, 'لا تعريفُ لسلطةِ المراجعةِ في العقدِ');
+  assert.equal(council.kind, 'model-council');
+  assert.ok(Number(council.minModels) >= 2, 'مجلسُ النماذجِ يطلبُ نموذجينِ حدوديّينِ على الأقلّ');
+  assert.equal(council.distinctProviders, true, 'النماذجُ يجبُ أن تكونَ من مزوّدينَ مختلفينَ');
+  assert.ok(
+    typeof council.reportArtifactPattern === 'string' &&
+      council.reportArtifactPattern.includes('<id>'),
+    'نمطُ التقريرِ الخامِّ غيرُ مُعرَّفٍ',
+  );
+  assert.ok(
+    Array.isArray(council.completionRequires) && council.completionRequires.length >= 3,
+    'شروطُ اكتمالِ المراجعةِ غيرُ مُعلَنةٍ',
+  );
+});
+
+test('النتائجُ فارغةٌ ما دامت المراجعةُ تنتظرُ — ولا نتيجةَ قبلَ صدورِها', () => {
+  const contract = readContract();
+  const engagements = readEngagements();
+  const awaiting = engagements.filter((e) => String(e.status) === ONLY_STATUS);
+  // ما دام كلُّ ارتباطٍ في انتظارِ المجلسِ، فلا نتيجةَ تُقيَّدُ بعدُ.
+  if (awaiting.length === engagements.length) {
+    assert.deepEqual(contract.findings, [], 'نتيجةُ مراجعةٍ مُقيَّدةٌ ولا مراجعةَ وقعتْ');
+    return;
+  }
+  // وإذا اكتملت مراجعةٌ (حالةٌ مستقبليّةٌ)، فلا يُقبلُ توليفٌ بلا تقايريرَ خامَّةٍ.
+  assert.ok(
+    Array.isArray(contract.findings) && contract.findings.length > 0,
+    'اكتملت مراجعةٌ ولا نتائجَ مُقيَّدةٌ',
+  );
+  for (const finding of contract.findings) {
+    assert.ok(finding.engagement, 'نتيجةٌ بلا ارتباطٍ');
+    assert.ok(finding.severity, 'نتيجةٌ بلا درجةِ خطورةٍ');
+    assert.ok(finding.reproductionPath, 'نتيجةٌ بلا مسارِ إعادةِ إنتاجٍ');
+    assert.ok(
+      typeof finding.rawReports === 'object' && Object.keys(finding.rawReports).length >= 2,
+      `نتيجةُ «${String(finding.engagement)}» بلا تقايريرَ خامَّةٍ لكلِّ نموذجٍ — التوليفُ ليس دليلاً`,
+    );
+    for (const modelId of Object.keys(finding.rawReports)) {
+      assert.ok(finding.rawReports[modelId], `تقريرُ نموذجٍ «${modelId}» غيرُ مُشارٍ إليه`);
+    }
+  }
 });
 
 test('كلُّ دليلٍ مُشارٍ إليه موجودٌ على القرصِ أو مولَّدٌ بأمرٍ معلَنٍ', () => {
@@ -124,7 +165,7 @@ test('الوثيقةُ تُصرِّح بما لا تقولُه ولا تحمل �
   for (const needle of [
     'ما لا تقولُه هذه الوثيقةُ',
     'الحدودُ المعلَنةُ',
-    'awaiting-independent-party',
+    'awaiting-model-council',
   ]) {
     assert.ok(doc.includes(needle), `الوثيقةُ لا تُصرِّح بحدِّها: «${needle}»`);
   }
