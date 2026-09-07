@@ -227,3 +227,47 @@ test('كتالوج الأفعال المحكومة يشمل الحسّاس وا�
   }
   assert.equal(governed.has('read-registry'), false, 'فعلٌ غير حسّاس لا يُثقَل بتذكرة');
 });
+
+// مراجعة M11.04 — Grok-F01: المصنع الرسمي للإدارة كان يبني نقطةَ تفويضٍ بلا
+// بوابةِ هويةٍ، فيقرأ دور الفاعل من ادعاء المستدعي. الإصلاح: التركيبُ الذي يلزم
+// البوابةَ يفشلُ مغلقًا برمزٍ مُسمَّى حين تُغيَب، فلا يبقى مسارٌ «رسميّ» يقبل فاعلًا
+// بلا شهادةٍ من جذر الثقة.
+test('التركيبُ الذي يلزم بوابةَ الهوية يرفضُ التفويضَ بلا بوابةٍ بفشلٍ مغلق (M11.04 Grok-F01)', async () => {
+  const log = memoryLog();
+  const point = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint({ bundle }),
+    log,
+    requireIdentityGate: true,
+    identityGate: null,
+  });
+  const result = await point.authorize(writeMemory());
+  assert.equal(result.decision.allowed, false, 'لا يُسمح بلا بوابةِ هويةٍ في التركيب المُلزم');
+  assert.equal(result.decision.code, 'IDENTITY_GATE_REQUIRED', 'الرفضُ مُسمَّى لا صامت');
+  assert.equal(result.token, null, 'لا تُصدر تذكرةٌ على رفضٍ مغلق');
+  // الرفضُ يُسجَّل كما يُسجَّل السماح: أثرٌ للتركيبِ الناقص، لا قبولٌ صامت.
+  const gateDenial = log.events.find((e) => e.type === 'policy.decision');
+  const denialPayload = /** @type {{ code?: unknown }} */ (gateDenial?.payload);
+  assert.equal(
+    denialPayload.code,
+    'IDENTITY_GATE_REQUIRED',
+    'يُكتب قيدُ التركيبِ الناقص في سجل القرارات',
+  );
+});
+
+test('التركيبُ غير المُلزم يبقى متساهلًا مع بقاء البوابة اختيارية (توافقٌ مع الإصدار)', async () => {
+  const log = memoryLog();
+  const point = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint({ bundle }),
+    log,
+    requireIdentityGate: false,
+    identityGate: null,
+  });
+  const result = await point.authorize(writeMemory());
+  // بلا بوابةٍ ولا إلزامٍ: يسقط إلى سلوك الإصدار القديم (لا يُعرَض فاعلٌ مُستبدَل)،
+  // وهذا مقصودٌ كي لا تنكسر اختباراتٌ تبني النقطة مباشرةً بلا بوابة.
+  assert.notEqual(
+    result.decision.code,
+    'IDENTITY_GATE_REQUIRED',
+    'الإلزامُ مُفعَّلٌ فقط حين يطلبه التركيب',
+  );
+});

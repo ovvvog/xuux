@@ -72,7 +72,7 @@ function bindingOf(request) {
 
 export class EnforcementPoint {
   /**
-   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, secret?: Buffer, now?: () => Date }} [deps]
+   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, requireIdentityGate?: boolean, secret?: Buffer, now?: () => Date }} [deps]
    */
   constructor({
     decisionPoint,
@@ -82,6 +82,7 @@ export class EnforcementPoint {
     decisionSink = null,
     identityGate = null,
     legislationGate = null,
+    requireIdentityGate = false,
     secret,
     now,
   } = {}) {
@@ -90,6 +91,7 @@ export class EnforcementPoint {
     this.log = log;
     this.haltSwitch = haltSwitch;
     this.identityGate = identityGate;
+    this.requireIdentityGate = requireIdentityGate;
     this.legislationGate = legislationGate;
     this.quotaLedger = quotaLedger;
     this.decisionSink = decisionSink;
@@ -148,6 +150,28 @@ export class EnforcementPoint {
     // مرّتين: الدولة الموقوفة لا تُستعلَم فيها هوية أصلاً، والسياسة لا تُقيّم على
     // فاعلٍ مزعوم. وما تردّه البوابة **يستبدل** مطالبة المستدعي لا يُدمج معها:
     // الدمج يترك للمستدعي أن يزيد قدرةً ليست له، وهو عين ما تمنعه الخطوة.
+    //
+    // حمايةٌ من تركيبٍ ناقص (مراجعة M11.04 — Grok-F01): المصنع الرسمي للإدارة
+    // يلزم بوابةَ هويةٍ موصولة. فمن بنى النقطة بلا بوابةٍ وهو يعلم أنها لازمةٌ
+    // لا يجتاز هذا الحدّ: الرفضُ مُسمَّى `IDENTITY_GATE_REQUIRED` لا قبولٌ صامتٌ
+    // لفاعلٍ يصفه المستدعي كما يشاء. وهذا هو الفرق بين «الضابط موجودٌ في الشجرة»
+    // و«الضابط نافذٌ في التشغيل».
+    if (this.requireIdentityGate && this.identityGate === null) {
+      const decision = Object.freeze({
+        allowed: false,
+        effect: /** @type {const} */ ('deny'),
+        code: /** @type {const} */ ('IDENTITY_GATE_REQUIRED'),
+        reason:
+          'التركيبُ يلزم بوابةَ هويةٍ موصولةً، ولم تُمرَّر؛ فلا يُقبل فاعلٌ بلا شهادةٍ من جذر الثقة (M11.04 — Grok-F01).',
+        policyId: null,
+        policyVersion: null,
+        requiresRoyalCommand: this.decisionPoint.requiresRoyalCommand(evaluated.action),
+        matched: Object.freeze([]),
+        evaluatedAt,
+      });
+      await this.record(decision, evaluated);
+      return { decision, token: null };
+    }
     if (this.identityGate !== null) {
       const verdict = await this.identityGate.verify(evaluated.actor.id);
       if (!verdict.ok || verdict.actor === null) {

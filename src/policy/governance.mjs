@@ -26,12 +26,12 @@ import { createPolicyVersionStore } from './versioning.mjs';
  * @property {EnforcementPoint} enforcement
  * @property {ReturnType<typeof createQuotaLedger> | null} quotaLedger
  * @property {ReturnType<typeof createPolicyVersionStore> | null} versionStore
- * @property {{ quotasEnforced: boolean, decisionsPersisted: boolean, policyVersioning: boolean, legislationEnforced: boolean }} guarantees - ما هو نافذ فعلاً في هذا التركيب
+ * @property {{ quotasEnforced: boolean, decisionsPersisted: boolean, policyVersioning: boolean, identityEnforced: boolean, legislationEnforced: boolean }} guarantees - ما هو نافذ فعلاً في هذا التركيب
  */
 
 /**
  * يبني تركيب الحكم كاملاً.
- * @param {{ log: { append: (type: string, actor: string, payload: object) => unknown }, pool?: import('pg').Pool | null, haltSwitch?: { assertOperational: () => void } | null, signer?: Parameters<typeof createPolicyVersionStore>[0]['signer'] | null, bundle?: import('./loader.mjs').PolicyBundle, legislationGate?: { blockedActions: () => Promise<ReadonlySet<string>> } | null }} deps
+ * @param {{ log: { append: (type: string, actor: string, payload: object) => unknown }, pool?: import('pg').Pool | null, haltSwitch?: { assertOperational: () => void } | null, signer?: Parameters<typeof createPolicyVersionStore>[0]['signer'] | null, bundle?: import('./loader.mjs').PolicyBundle, identityGate?: import('./enforcement-point.mjs').IdentityGateLike | null, legislationGate?: { blockedActions: () => Promise<ReadonlySet<string>> } | null }} deps
  * @returns {Governance}
  */
 export function createGovernance({
@@ -40,6 +40,7 @@ export function createGovernance({
   haltSwitch = null,
   signer = null,
   bundle,
+  identityGate = null,
   legislationGate = null,
 }) {
   if (!log) throw new Error('GOVERNANCE_LOG_REQUIRED');
@@ -58,6 +59,13 @@ export function createGovernance({
     haltSwitch,
     quotaLedger,
     decisionSink,
+    // بوابةُ الهوية (‏M6.01) اختياريّةٌ في التركيب ومُعلَنةٌ في `guarantees`: من
+    // لم يمرّرها لا يظنّ أنّ الفاعلَ يُحقَّق من جذر الثقة. **لكنّ** المصنع الرسميّ
+    // يلزمها: من بنى إدارةً بلا بوابةٍ ولم يمرّرها يُرفضُ فشلًا مغلقًا برمز
+    // `IDENTITY_GATE_REQUIRED` — فلا يبقى تركيبٌ «رسميّ» يقرأ دور الفاعل من ادعائه.
+    // (مراجعة M11.04 — Grok-F01.)
+    identityGate,
+    requireIdentityGate: true,
     // حاجزُ التشريع (‏M8.02) اختياريٌّ في التركيب ومُعلَنٌ في `guarantees`: من
     // لم يمرّره لا يظنّ أنّ التعارضَ يمنع عنده إنفاذاً، فالوعدُ يُقرأ من المُعاد.
     legislationGate,
@@ -73,6 +81,7 @@ export function createGovernance({
       quotasEnforced: quotaLedger !== null,
       decisionsPersisted: decisionSink !== null,
       policyVersioning: versionStore !== null,
+      identityEnforced: identityGate !== null,
       legislationEnforced: legislationGate !== null,
     }),
   });
