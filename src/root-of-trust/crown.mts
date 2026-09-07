@@ -1,7 +1,7 @@
 // جذر الثقة — بوابة التاج: التوقيع والمنع والإيقاف الآمن.
 // نُقل إلى TypeScript في M2.01 بلا تغيير سلوك: نفس ترتيب الفحوص ونفس نصوص الأخطاء.
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import type { CommandLedger } from './command-ledger.mjs';
 import type { TrustedClock } from './clock.mjs';
 import type { HaltGuard } from './halt-switch.mjs';
@@ -223,4 +223,44 @@ export function createRoyalCommand(
   payload: object = {},
 ): RoyalCommand {
   return { id: randomUUID(), action, target, payload, issuedAt: new Date().toISOString() };
+}
+
+/**
+ * سلسلةٌ أساسيةٌ مستقرّةٌ لقيمةٍ ما: المفاتيحُ مرتَّبةٌ والمصفوفاتُ على ترتيبِها،
+ * فلا يتغيّرُ المُخرَجُ بترتيبِ إدراجِ المفاتيح. هذا ما يجعلُ الملخصَ قابلاً
+ * لإعادةِ الحسابِ من طرفينِ مختلفينِ فيتفقانِ.
+ */
+function canonicalStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalStringify(obj[key])}`).join(',')}}`;
+}
+
+/**
+ * ملخصُ أمرٍ ملكيٍّ يربطُ التذكرةَ بمحتوى الأمرِ المقبولِ لا بمعرّفِه وحدَه:
+ * معرّفٌ واحدٌ قد يُعادُ استعمالُه في هجومٍ إن ضعُفَ حجزُ المعرّف، فربطُ
+ * الملخصِ بـ`id`/`action`/`target`/`payload`/`issuedAt` يجعلُ تبديلَ الحمولةِ
+ * أو الهدفِ مع بقاءِ المعرّفِ مُكشَفاً عندَ مقارنةِ النواةِ للتذكرةِ بالأمرِ
+ * الفعليِّ قبلَ استهلاكِها. ويُستبعدُ `certificate` و`acceptedAt` لأنّهما ليسا
+ * جزءاً من مادةِ الأمرِ التي يُنفَّذُ عليها.
+ * @param command - الأمر الملكي (مقبولاً أو قبل القبول)
+ * @returns ملخصٌ سداسيٌّ بطولِ 64
+ */
+export function royalCommandDigest(
+  command: Pick<RoyalCommand, 'id' | 'action' | 'target' | 'payload' | 'issuedAt'>,
+): string {
+  return createHash('sha256')
+    .update(
+      canonicalStringify({
+        id: command.id,
+        action: command.action,
+        target: command.target,
+        payload: command.payload,
+        issuedAt: command.issuedAt,
+      }),
+      'utf8',
+    )
+    .digest('hex');
 }

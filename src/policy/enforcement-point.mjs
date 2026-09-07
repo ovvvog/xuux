@@ -58,15 +58,25 @@ const DECISION_TTL_MS = 60000;
 
 /**
  * ينسخ ما تُسجّله التذكرة من الطلب. الفاعل والفعل والمورد هي ما تُربط به
- * التذكرة، فتذكرةُ قراءةٍ لا تُنفَّذ بها كتابة.
+ * التذكرة، فتذكرةُ قراءةٍ لا تُنفَّذ بها كتابة. ومتى وُجد أمرٌ ملكيٌّ رُبطَ
+ * المعرّفُ والملخصُ معاً كي لا تُستبدَلَ بأمرٍ آخرَ يطابقُ الفاعلَ/الفعلَ/الموردَ
+ * ويختلفُ في الأمرِ المقبولِ نفسِه (`GPT-F06`).
  * @param {PolicyRequest} request
- * @returns {{ actorId: string, action: string, resourceKey: string }}
+ * @returns {{ actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }}
  */
 function bindingOf(request) {
   return {
     actorId: request.actor.id,
     action: request.action,
     resourceKey: `${request.resource.type}:${request.resource.id}`,
+    ...(typeof request.royalCommandId === 'string'
+      ? {
+          royalCommandId: request.royalCommandId,
+          ...(typeof request.royalCommandDigest === 'string'
+            ? { royalCommandDigest: request.royalCommandDigest }
+            : {}),
+        }
+      : {}),
   };
 }
 
@@ -322,9 +332,11 @@ export class EnforcementPoint {
 
   /**
    * يتحقّق من تذكرة ويستهلكها. كل إخفاق خطأٌ مُسمّى: تذكرة مبتورة، أو توقيع لا
-   * يطابق، أو انتهت، أو استُهلكت، أو صدرت لفعل أو مورد أو فاعل آخر.
+   * يطابق، أو انتهت، أو استُهلكت، أو صدرت لفعل أو مورد أو فاعل آخر. ومتى حملَت
+   * التذكرةُ معرّفَ أمرٍ ملكيٍّ يلزمُ أن يطابقَ المعرّفَ وملخصَه ما تُقدّمه
+   * النواةُ من الأمرِ الفعليِّ، وإلّا رُفضت مغلقًا قبلَ التنفيذ (`GPT-F06`).
    * @param {string | undefined} token
-   * @param {{ actorId: string, action: string, resourceKey: string }} binding
+   * @param {{ actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }} binding
    * @returns {{ policyId: string | null }}
    */
   verify(token, binding) {
@@ -342,7 +354,7 @@ export class EnforcementPoint {
     if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
       throw new Error('AUTHORIZATION_DECISION_FORGED');
     }
-    /** @type {{ nonce?: unknown, actorId?: unknown, action?: unknown, resourceKey?: unknown, policyId?: unknown, expiresAt?: unknown }} */
+    /** @type {{ nonce?: unknown, actorId?: unknown, action?: unknown, resourceKey?: unknown, policyId?: unknown, expiresAt?: unknown, royalCommandId?: unknown, royalCommandDigest?: unknown }} */
     let payload;
     try {
       payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
@@ -364,6 +376,19 @@ export class EnforcementPoint {
       resourceKey !== binding.resourceKey
     ) {
       throw new Error('AUTHORIZATION_DECISION_MISMATCH');
+    }
+    // ربطُ الأمرِ الملكيِّ (`GPT-F06`): التذكرةُ التي صدرتْ لأمرٍ ملكيٍّ يجبُ أن
+    // يطابقَ معرّفُها وملخصُها الأمرَ الفعليَّ الذي تُقدّمهُ النواة. تبديلُ
+    // الأمرِ — معرّفاً أو حمولةً — يُكشَفُ هنا قبلَ استهلاكِ التذكرةِ والتنفيذ.
+    if (typeof payload.royalCommandId === 'string' && payload.royalCommandId !== '') {
+      if (
+        typeof binding.royalCommandId !== 'string' ||
+        payload.royalCommandId !== binding.royalCommandId ||
+        typeof payload.royalCommandDigest !== 'string' ||
+        payload.royalCommandDigest !== binding.royalCommandDigest
+      ) {
+        throw new Error('ROYAL_COMMAND_MISMATCH');
+      }
     }
     this.issued.delete(nonce);
     return { policyId: typeof payload.policyId === 'string' ? payload.policyId : null };

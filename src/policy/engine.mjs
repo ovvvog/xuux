@@ -296,14 +296,20 @@ export class PolicyDecisionPoint {
     // الرفض نقصاً في الصلاحية فيُطلب توسيعها.
     if (this.threshold.has(request.action)) {
       const entry = this.threshold.get(request.action);
-      const hasCommand =
-        typeof request.royalCommandId === 'string' && request.royalCommandId.trim() !== '';
+      const royalCommandId =
+        typeof request.royalCommandId === 'string' ? request.royalCommandId.trim() : '';
+      const royalCommandDigest =
+        typeof request.royalCommandDigest === 'string' ? request.royalCommandDigest.trim() : '';
+      // المعرّف وحده لا يكفي: التذكرةُ تربطُ ملخصَ الأمرِ المقبولِ ومعرّفَه، فلا
+      // يُقبلُ معرّفٌ بلا ملخصٍ يربطُه بمحتوى الأمرِ. حضورُ أحدهما دونَ الآخر
+      // رفضٌ مغلقٌ، فلا يمرُّ تذكرةٌ ناقصةُ الربطِ إلى المحرّك.
+      const hasCommand = royalCommandId !== '' && royalCommandDigest !== '';
       if (!hasCommand) {
         return Object.freeze({
           allowed: false,
           effect: 'deny',
           code: 'SOVEREIGN_COMMAND_REQUIRED',
-          reason: `فعلٌ فوق العتبة السيادية: ${request.action}. ${entry?.reason ?? ''} والسياسة ${governingAllow.id} تأذن به لكن التنفيذ يلزمه أمر ملكي مقبول.`,
+          reason: `فعلٌ فوق العتبة السيادية: ${request.action}. ${entry?.reason ?? ''} والسياسة ${governingAllow.id} تأذن به لكن التنفيذ يلزمه أمراً ملكياً مقبولاً بمعرّفِه وملخصِه معاً.`,
           policyId: governingAllow.id,
           policyVersion: governingAllow.version,
           requiresRoyalCommand: true,
@@ -313,6 +319,15 @@ export class PolicyDecisionPoint {
       }
     }
 
+    const sovereign = this.threshold.has(request.action);
+    // القرارُ يصفُ نفسَه: هذا الإذنُ صدرَ للأمرِ الملكيِّ الفلانيِّ. والنواةُ
+    // تُقارنُ هذا المعرّفَ وملخصَه بالأمرِ الفعليِّ قبلَ استهلاكِ التذكرة. وحينَ
+    // يكونُ الفعلُ دونَ العتبةِ السياديّةِ يُغيبُ الحقلُ كليّةً (لا `undefined`
+    // صريحاً) ليتطابقَ مع `royalCommandId?: string` في العقد.
+    const royalBinding =
+      sovereign && typeof request.royalCommandId === 'string'
+        ? { royalCommandId: request.royalCommandId }
+        : {};
     return Object.freeze({
       allowed: true,
       effect: 'allow',
@@ -320,7 +335,8 @@ export class PolicyDecisionPoint {
       reason: governingAllow.reason,
       policyId: governingAllow.id,
       policyVersion: governingAllow.version,
-      requiresRoyalCommand: this.threshold.has(request.action),
+      requiresRoyalCommand: sovereign,
+      ...royalBinding,
       matched: trace,
       evaluatedAt,
     });

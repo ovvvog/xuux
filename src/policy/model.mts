@@ -45,6 +45,13 @@ export interface PolicyRequest {
   context?: PolicyContext;
   /** معرّف أمر ملكي **مقبول من بوابة التاج**؛ حضوره وحده لا يكفي للعتبة السيادية. */
   royalCommandId?: string;
+  /**
+   * ملخصُ الأمرِ الملكيِّ المقبولِ (`royalCommandDigest`) — ربطٌ إضافيٌّ يمنعُ
+   * استبدالَ أمرٍ بآخرَ يحملُ المعرّفَ نفسه ويطابقُ الفاعلَ/الفعلَ/الموردَ.
+   * التذكرةُ تربطُ المعرّفَ والملخصَ معاً، وتقارنُ النواةُ الأمرَ الفعليَّ
+   * بهما قبلَ الاستهلاك. مطلوبٌ متى وُجد `royalCommandId`.
+   */
+  royalCommandDigest?: string;
 }
 
 /** عوامل الشروط المدعومة. أي عامل خارج هذا الاتحاد يُرفض في التحميل لا في التقييم. */
@@ -143,6 +150,11 @@ export interface PolicyDecision {
   policyId: string | null;
   policyVersion: number | null;
   requiresRoyalCommand: boolean;
+  /**
+   * المعرّفُ الذي صدرَ القرارُ من أجلِه عندَ العتبةِ السياديّة، إن وُجد — يجعلُ
+   * القرارَ واصفاً ذاتَه: «هذا الإذنُ صدرَ للأمرِ الملكيِّ الفلانيِّ».
+   */
+  royalCommandId?: string;
   /** السياسات المطابقة كلها مرتّبة، كي يُرى ما زاحم الحاكمة لا الحاكمة وحدها. */
   matched: ReadonlyArray<{
     id: string;

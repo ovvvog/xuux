@@ -19,6 +19,7 @@ import {
   EventLog,
   KingIdentity,
   createRoyalCommand,
+  royalCommandDigest,
 } from '../../src/root-of-trust/index.mjs';
 import { ExecutionKernel, TaskState } from '../../src/core/index.mjs';
 import { createPolicyDecisionPoint, EnforcementPoint } from '../../src/policy/index.mjs';
@@ -89,6 +90,7 @@ test('تذكرة القرار تُنفِذ الفعل المحكوم وتُسج�
     resource: { type: 'policy', id: 'retention' },
     context: {},
     royalCommandId: command.id,
+    royalCommandDigest: royalCommandDigest(command),
   });
   assert.equal(decision.allowed, true, `القرار جاء رفضاً: ${decision.code} — ${decision.reason}`);
   assert.equal(typeof token, 'string');
@@ -116,6 +118,7 @@ test('تذكرة الفعل المحكوم لا تُستعمل مرّتين ول
     resource: { type: 'policy', id: 'retention' },
     context: {},
     royalCommandId: command.id,
+    royalCommandDigest: royalCommandDigest(command),
   });
   const authorization = { decisionToken: /** @type {string} */ (token) };
   await kernel.submit(command, signature, () => true, authorization);
@@ -135,6 +138,7 @@ test('تذكرةٌ صحيحة لفعل آخر لا تُنفِّذ الفعل ا�
     resource: { type: 'policy', id: 'other' },
     context: {},
     royalCommandId: 'cmd:other',
+    royalCommandDigest: 'digest:cmd:other',
   });
   const command = governedCommand();
   await assert.rejects(

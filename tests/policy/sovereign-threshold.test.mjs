@@ -20,7 +20,7 @@ const pdp = createPolicyDecisionPoint({ bundle });
 
 /**
  * @param {string} action
- * @param {{ royalCommandId?: string }} [extra]
+ * @param {{ royalCommandId?: string, royalCommandDigest?: string }} [extra]
  * @returns {import('../../src/policy/model.mjs').PolicyRequest}
  */
 function kingRequest(action, extra = {}) {
@@ -86,11 +86,16 @@ test('رمز الرفض يفرّق بين «يلزمه أمر ملكي» و«م�
 });
 
 test('الأمر الملكي يفتح فعل العتبة ولا يفتح الممنوع المطلق', () => {
-  const stop = pdp.evaluate(kingRequest('stop-state', { royalCommandId: 'cmd:0001' }));
+  const stop = pdp.evaluate(
+    kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: 'digest:0001' }),
+  );
   assert.equal(stop.allowed, true, 'الأمر الملكي المقبول يُنفِذ الفعل السيادي');
   assert.equal(stop.policyId, 'pol:king-sovereign-acts');
+  assert.equal(stop.royalCommandId, 'cmd:0001', 'القرار يصف الأمر الذي صدر من أجله');
 
-  const keys = pdp.evaluate(kingRequest('export-keys', { royalCommandId: 'cmd:0002' }));
+  const keys = pdp.evaluate(
+    kingRequest('export-keys', { royalCommandId: 'cmd:0002', royalCommandDigest: 'digest:0002' }),
+  );
   assert.equal(keys.allowed, false, 'إخراج المفاتيح لا يُفتح بأمر ملكي — منعٌ مطلق');
   assert.equal(keys.code, 'POLICY_DENY');
 });

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { snapshot } from '../lib/snapshot.mjs';
 import { loadGovernedActions } from '../policy/governed.mjs';
 import { TaskLifecycle, assertTransition } from '../execution/lifecycle.mjs';
+import { royalCommandDigest } from '../root-of-trust/crown.mjs';
 
 /** @typedef {import('../root-of-trust/crown.mjs').CrownGateway} CrownGateway */
 /** @typedef {import('../root-of-trust/crown.mjs').RoyalCommand} RoyalCommand */
@@ -213,6 +214,11 @@ export class ExecutionKernel {
       actorId: this.actorOf(command),
       action: command.action,
       resourceKey: command.target,
+      // ربطُ الأمرِ الملكيِّ (`GPT-F06`): النواةُ تُقدّمُ معرّفَ الأمرِ الفعليِّ
+      // وملخصَه فتُقارَنُ بالتذكرة. تذكرةٌ صدرتْ لأمرٍ آخرَ — ولو طابقَ الفاعلَ
+      // والفعلَ والموردَ — تُرفَضُ هنا قبلَ استهلاكِها والتنفيذ.
+      royalCommandId: command.id,
+      royalCommandDigest: royalCommandDigest(command),
     };
     const verified = this.enforcement.verify(authorization.decisionToken, binding);
     this.log.append('kernel.authorization.verified', binding.actorId, {
