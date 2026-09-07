@@ -260,6 +260,7 @@ export function loadApiPolicy(options = {}) {
  * @property {string} route معرّفُ المسارِ المُعلَن.
  * @property {string} [token] رمزُ الجلسة؛ غيابُه رفضٌ لا نداءٌ مجهولُ الهوية.
  * @property {Record<string, unknown>} [params] وسائطُ النداءِ بحدودِ ما يقبله المشهد.
+ * @property {{ signature: string, timestamp: string, nonce: string }} [pop] إثباتُ الحيازةِ (M11.04): توقيعٌ على الحمولةِ المتّفَقِ عليها بطابعٍ زمنيٍّ وnonceٍ — يُلزمُه التركيبُ الذي يُفعّلُ `requirePoP`.
  */
 
 /**
@@ -329,7 +330,7 @@ export class ApiGateway {
   #now;
 
   /**
-   * @param {{ policy?: ApiPolicy, dir?: string, log?: import('./session-store.mjs').SessionLogLike | null, agents?: import('./session-store.mjs').SessionAgentsLike | null, monitor?: ApiMonitorLike | null, enforcementPoint?: ApiEnforcementLike | null, telemetry?: ApiTelemetryLike | null, now?: () => Date }} [deps]
+   * @param {{ policy?: ApiPolicy, dir?: string, log?: import('./session-store.mjs').SessionLogLike | null, agents?: import('./session-store.mjs').SessionAgentsLike | null, monitor?: ApiMonitorLike | null, enforcementPoint?: ApiEnforcementLike | null, telemetry?: ApiTelemetryLike | null, now?: () => Date, requirePoP?: boolean, popWindowSeconds?: number }} [deps]
    */
   constructor(deps = {}) {
     const policy = deps.policy ?? loadApiPolicy(deps.dir === undefined ? {} : { dir: deps.dir });
@@ -357,8 +358,22 @@ export class ApiGateway {
       audit: policy.audit,
       log: deps.log ?? null,
       agents: deps.agents ?? null,
+      requirePoP: deps.requirePoP === true,
+      ...(deps.popWindowSeconds !== undefined ? { popWindowSeconds: deps.popWindowSeconds } : {}),
       ...clock,
     });
+  }
+
+  /**
+   * يُسجِّلُ مفتاحَ حيازةٍ لفاعلٍ (M11.04 — GPT-F01/Grok-F02) — تمريرٌ إلى مخزنِ
+   * الجلساتِ. في التركيبِ الرسميِّ يُستدعى عندَ تسجيلِ الوكيلِ؛ وفي الاختبارِ يُستدعى
+   * صراحةً. ولا يُخزَّنُ مفتاحٌ خاصٌّ البتّة.
+   * @param {string} actorId
+   * @param {string} publicKeyPem
+   * @returns {boolean}
+   */
+  registerPoPKey(actorId, publicKeyPem) {
+    return this.#sessions.registerPoPKey(actorId, publicKeyPem);
   }
 
   /** @returns {ApiPolicy} */
@@ -518,6 +533,17 @@ export class ApiGateway {
       span.setAttribute('api.session', session.id);
     }
 
+    // ── (2ب) إثباتُ الحيازةِ لكلِّ طلبٍ (M11.04 — GPT-F01/Grok-F02) ──
+    // لا يكفي فتحُ الجلسةِ مرّةً: من سُرِقَ الرمزُ لا يَنْتَحِلُ صاحبَه إلا
+    // بتوقيعٍ جديدٍ على حمولةِ الطلبِ نفسِه، بطابعٍ زمنيٍّ داخلَ النافذةِ وnonceٍ غيرِ
+    // مكرَّرٍ. والفشلُ مغلقٌ قبلَ حدِّ المعدَّلِ والتفويضِ.
+    this.#sessions.verifyPoP(session, {
+      popSignature: request?.pop?.signature,
+      popTimestamp: request?.pop?.timestamp,
+      popNonce: request?.pop?.nonce,
+      canonicalPayload: this.#canonicalCallPayload(route, request.params),
+    });
+
     // ── (3) حدُّ المعدَّل: يَعُدُّ المحاولةَ لا النجاح ──
     const limit = this.#limiter.consume({ routeId: route.id, actorId: session.actorId });
 
@@ -632,6 +658,24 @@ export class ApiGateway {
   #splitResource(resource) {
     const index = resource.indexOf(':');
     return [resource.slice(0, index), resource.slice(index + 1)];
+  }
+
+  /**
+   * الحمولةُ المتّفَقُ عليها لتوقيعِ إثباتِ الحيازةِ (M11.04). ثابتةٌ لا يعتمدُ
+   * ترتيبُها على المُنادي: المسارُ والفعلُ والموردُ والمعاملاتُ بترتيبٍ مستقرٍ،
+   * فلا يُوقّعُ المُهاجمُ حمولةً مغايرةً ويمرّ بها.
+   * @param {ApiRouteSpec} route
+   * @param {Record<string, unknown> | undefined} params
+   * @returns {string}
+   */
+  #canonicalCallPayload(route, params) {
+    return [
+      route.method,
+      route.path,
+      route.action,
+      route.resource,
+      JSON.stringify(params ?? {}),
+    ].join('|');
   }
 
   /**

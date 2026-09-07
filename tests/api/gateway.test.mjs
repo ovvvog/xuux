@@ -460,6 +460,7 @@ test('لا مسارَ ثانٍ: البوابةُ لا تُصدِّر مشهدا�
     'openSession',
     'closeSession',
     'call',
+    'registerPoPKey',
   ]);
   for (const name of surface) {
     assert.ok(

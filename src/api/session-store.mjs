@@ -26,7 +26,7 @@
  * نقطةِ التفويض. ولا عاملَ ثانٍ هنا: المصادقةُ القويةُ للملكِ نصُّ `M9.04`.
  */
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 
 /** رموزُ رفضِ الجلسة — كلُّها مُعلَنةٌ في `config/api.yaml`. */
 export const SESSION_ERRORS = Object.freeze({
@@ -35,6 +35,13 @@ export const SESSION_ERRORS = Object.freeze({
   SESSION_EXPIRED: 'API_SESSION_EXPIRED',
   IDENTITY_UNVERIFIED: 'API_IDENTITY_UNVERIFIED',
   AUDIT_REQUIRED: 'API_AUDIT_REQUIRED',
+  // إثباتُ الحيازةِ (M11.04 — GPT-F01 / Grok-F02): الجلسةُ لا تُفتح ولا تُحَلُّ
+  // بمعرّفٍ عامٍّ وحدَه. لا بدَّ من توقيعٍ يُثبتُ حيازةَ المفتاحِ الخاصِّ المربوطِ
+  // بالفاعلِ. والفشلُ مغلقٌ: غيابُ التوقيعِ أو خطؤُه أو إعادةُ تشغيله رفضٌ لا قبولٌ صامت.
+  POP_REQUIRED: 'API_POP_REQUIRED',
+  POP_INVALID: 'API_POP_INVALID',
+  POP_REPLAY: 'API_POP_REPLAY',
+  POP_EXPIRED: 'API_POP_EXPIRED',
 });
 
 /** خطأُ جلسةٍ برمزٍ مُعلَن. */
@@ -104,23 +111,129 @@ export class SessionStore {
   #agents;
   /** @type {() => Date} */
   #now;
-  /** @type {Map<string, { actorId: string, expiresAtMs: number, openedAtMs: number }>} */
+  /** @type {Map<string, { actorId: string, expiresAtMs: number, openedAtMs: number, popPublicKey: import('node:crypto').KeyObject | null, nonces: Set<string> }>} */
   #sessions = new Map();
+  /** @type {boolean} */
+  #requirePoP;
+  /** @type {Map<string, import('node:crypto').KeyObject>} */
+  #popKeys = new Map();
+  /** @type {Set<string>} */
+  #openNonces = new Set();
+  /** @type {number} نافذةُ قبولِ الطابعِ الزمنيِّ بالثواني — خارجُها رفضٌ يمنعُ إعادةَ التشغيل. */
+  #popWindowSeconds = 300;
 
   /**
-   * @param {{ policy: SessionPolicy, audit: SessionAuditPolicy, log?: SessionLogLike | null, agents?: SessionAgentsLike | null, now?: () => Date }} deps
+   * @param {{ policy: SessionPolicy, audit: SessionAuditPolicy, log?: SessionLogLike | null, agents?: SessionAgentsLike | null, now?: () => Date, requirePoP?: boolean, popWindowSeconds?: number }} deps
    */
-  constructor({ policy, audit, log = null, agents = null, now }) {
+  constructor({
+    policy,
+    audit,
+    log = null,
+    agents = null,
+    now,
+    requirePoP = false,
+    popWindowSeconds = 300,
+  }) {
     this.#policy = policy;
     this.#audit = audit;
     this.#log = log;
     this.#agents = agents;
     this.#now = now ?? (() => new Date());
+    this.#requirePoP = requirePoP === true;
+    if (Number.isFinite(popWindowSeconds) && popWindowSeconds > 0) {
+      this.#popWindowSeconds = popWindowSeconds;
+    }
   }
 
   /** عددُ الجلساتِ القائمة — للقياسِ لا للوصول؛ ولا يُعاد رمزٌ ولا بصمةٌ كاملة. */
   get size() {
     return this.#sessions.size;
+  }
+
+  /**
+   * يُسجِّلُ مفتاحًا عامًّا لإثباتِ الحيازةِ لفاعلٍ ما (M11.04 — GPT-F01/Grok-F02).
+   * **لا يُفتَحُ مفتاحٌ خاصٌّ هنا ولا يُخزَّنُ:** يُسجَّلُ المفتاحُ العامُّ وحدَه،
+   * فيُثبتُ مَن يَملكُ الخاصَّ المقابلَ دون أن يَقدِرَ النظامُ نفسُه على انتحالِه.
+   * والفشلُ مغلقٌ: إن لُزِمَ PoP ولم يُسجَّلْ للفاعلِ مفتاحٌ، لا تُفتَحُ له جلسةٌ
+   * ولو أثبتَ هويةً نشطة — فالمعرّفُ العامُّ وحدَه لا يكفي.
+   * @param {string} actorId
+   * @param {string} publicKeyPem — مفتاحٌ عامٌّ Ed25519 بصيغةِ SPKI PEM
+   * @returns {boolean} هل سُجِّلَ المفتاحُ صالحًا
+   */
+  registerPoPKey(actorId, publicKeyPem) {
+    if (typeof actorId !== 'string' || actorId.trim() === '') return false;
+    if (typeof publicKeyPem !== 'string' || publicKeyPem.trim() === '') return false;
+    try {
+      const key = createPublicKey(publicKeyPem);
+      if (key.asymmetricKeyType !== 'ed25519') return false;
+      this.#popKeys.set(actorId, key);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * هل لُزِمَ إثباتُ الحيازةِ في هذا المخزن؟ للقراءةِ في القيودِ لا لتغييرِ السلوك.
+   * @returns {boolean}
+   */
+  get requirePoP() {
+    return this.#requirePoP;
+  }
+
+  /**
+   * يتحققُ من إثباتِ الحيازةِ لكلِّ طلبٍ (M11.04 — GPT-F01/Grok-F02). لا يكفي فتحُ
+   * الجلسةِ مرّةً: من سُرِقَ الرمزُ لا يَنْتَحِلُ صاحبَه إلا بتوقيعٍ جديدٍ على حمولةِ
+   * الطلبِ نفسِه، بطابعٍ زمنيٍّ داخلَ النافذةِ وnonceٍ غيرِ مكرَّرٍ. والفشلُ مغلقٌ.
+   * @param {ResolvedSession} session
+   * @param {{ popSignature: string | undefined, popTimestamp: string | undefined, popNonce: string | undefined, canonicalPayload: string }} ctx
+   * @returns {void}
+   */
+  verifyPoP(session, ctx) {
+    if (!this.#requirePoP) return;
+    const fingerprint = session.id;
+    // الجلسةُ لا تُوجدُ بـ`id` وحده — `id` مقطوعٌ من البصمة، فنبحثُ بالجلسةِ نفسِها
+    // بحثًا يربطُ التحقّقَ بالخريطةِ لا بنصٍّ يكتبُه المستدعي.
+    let entry = null;
+    for (const [fp, e] of this.#sessions) {
+      if (sessionIdOf(fp) === fingerprint) {
+        entry = e;
+        break;
+      }
+    }
+    if (entry === null || entry.popPublicKey === null) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_REQUIRED,
+        'الجلسةُ لا تحملُ مفتاحَ حيازةٍ مربوطًا؛ ولا تُحَلُّ جلسةٌ بلا إثباتِ حيازةٍ في تركيبٍ يُلزمُه.',
+      );
+    }
+    const { popSignature, popTimestamp, popNonce, canonicalPayload } = ctx ?? {};
+    if (
+      typeof popSignature !== 'string' ||
+      typeof popTimestamp !== 'string' ||
+      typeof popNonce !== 'string' ||
+      typeof canonicalPayload !== 'string'
+    ) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_REQUIRED,
+        'لا يُقبلُ الطلبُ بلا توقيعِ حيازةٍ وطابعٍ زمنيٍّ وnonceٍ وحمولةٍ متّفَقٍ عليها؛ والغيابُ رفضٌ لا استثناءٌ مسموح.',
+      );
+    }
+    this.#checkTimestamp(popTimestamp);
+    if (entry.nonces.has(popNonce)) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_REPLAY,
+        'الـnonce مكرَّرٌ؛ ولا يُقبلُ توقيعٌ واحدٌ مرّتَين — فإعادةُ التشغيلِ مرفوضةٌ ولو كان التوقيعُ صالحًا.',
+      );
+    }
+    const message = this.#canonicalMessage(canonicalPayload, popTimestamp, popNonce);
+    if (!this.#verifySignature(entry.popPublicKey, message, popSignature)) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_INVALID,
+        'توقيعُ الحيازةِ لا يطابقُ المفتاحَ المربوطَ بالجلسةِ على الحمولةِ المُوقَّعةِ؛ فمن لا يملكُ الخاصَّ لا يُمثِّلُ صاحبَ الجلسة.',
+      );
+    }
+    entry.nonces.add(popNonce);
   }
 
   /**
@@ -139,17 +252,28 @@ export class SessionStore {
     }
     const actorId = typeof request?.actorId === 'string' ? request.actorId.trim() : '';
     const record = await this.#requireActiveIdentity(actorId);
+    // إثباتُ الحيازةِ عندَ الفتحِ (M11.04 — GPT-F01/Grok-F02): المعرّفُ العامُّ وحدَه
+    // لا يَنْتَحِلُ. لا بدَّ من توقيعٍ يُثبتُ حيازةَ المفتاحِ الخاصِّ المربوطِ بالفاعلِ،
+    // وإلا بقيَتِ الثغرةُ: من عرفَ معرّفًا نشطًا فتحَ جلسةً كأنّه صاحبُها. والفشلُ مغلقٌ.
+    const popPublicKey = this.#requireOpenPoP(actorId, request);
     const token = randomBytes(this.#policy.tokenBytes).toString('base64url');
     const fingerprint = this.#fingerprint(token);
     const nowMs = this.#now().getTime();
     const expiresAtMs = nowMs + this.#policy.ttlSeconds * 1000;
-    this.#sessions.set(fingerprint, { actorId, expiresAtMs, openedAtMs: nowMs });
+    this.#sessions.set(fingerprint, {
+      actorId,
+      expiresAtMs,
+      openedAtMs: nowMs,
+      popPublicKey,
+      nonces: new Set(),
+    });
     const sessionId = sessionIdOf(fingerprint);
     log.append(this.#audit.sessionOpenedEvent, actorId, {
       session: sessionId,
       role: String(record['role']),
       ttlSeconds: this.#policy.ttlSeconds,
       expiresAt: new Date(expiresAtMs).toISOString(),
+      popEnforced: this.#requirePoP,
     });
     return {
       token,
@@ -260,6 +384,117 @@ export class SessionStore {
       );
     }
     return record;
+  }
+
+  /**
+   * يلزمُ إثباتَ الحيازةِ عندَ فتحِ الجلسةِ. يُعيدُ المفتاحَ العامَّ المربوطَ
+   * بالفاعلِ ليُخزَّنَ على الجلسةِ، أو يرفضُ فشلاً مغلقًا. وإن لم يُلزمِ المخزنُ PoP
+   * فلا يُتحقَّقُ شيءٌ (توافقٌ مع الإصدارِ).
+   * @param {string} actorId
+   * @param {Record<string, unknown>} request
+   * @returns {import('node:crypto').KeyObject | null}
+   */
+  #requireOpenPoP(actorId, request) {
+    if (!this.#requirePoP) return null;
+    const publicKey = this.#popKeys.get(actorId);
+    if (publicKey === undefined) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_REQUIRED,
+        `لا مفتاحَ حيازةٍ مسجَّلٌ للفاعلِ «${actorId}»؛ ولا تُفتَحُ جلسةٌ بمعرّفٍ عامٍّ وحدَه — فمن عرفَ الاسمَ لا يَنْتَحِلُ صاحبَه.`,
+      );
+    }
+    const popSignature = typeof request?.popSignature === 'string' ? request.popSignature : '';
+    const popTimestamp = typeof request?.popTimestamp === 'string' ? request.popTimestamp : '';
+    const popNonce = typeof request?.popNonce === 'string' ? request.popNonce : '';
+    if (popSignature === '' || popTimestamp === '' || popNonce === '') {
+      throw new SessionError(
+        SESSION_ERRORS.POP_REQUIRED,
+        'فتحُ الجلسةِ يلزمُه توقيعُ حيازةٍ وطابعٌ زمنيٌّ وnonceٌ؛ والغيابُ رفضٌ لا استثناءٌ مسموح.',
+      );
+    }
+    this.#checkTimestamp(popTimestamp);
+    if (this.#openNonces.has(popNonce)) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_REPLAY,
+        'الـnonce مكرَّرٌ عندَ الفتحِ؛ ولا يُقبلُ توقيعٌ واحدٌ مرّتَين.',
+      );
+    }
+    const message = this.#canonicalOpenMessage(actorId, popTimestamp, popNonce);
+    if (!this.#verifySignature(publicKey, message, popSignature)) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_INVALID,
+        'توقيعُ الفتحِ لا يطابقُ المفتاحَ المسجَّلَ للفاعلِ؛ فمن لا يملكُ الخاصَّ لا يفتحُ جلسةً باسمِه.',
+      );
+    }
+    this.#openNonces.add(popNonce);
+    return publicKey;
+  }
+
+  /**
+   * يتحققُ من أنّ الطابعَ الزمنيِّ داخلَ نافذةِ القبولِ. الفشلُ مغلقٌ: طابعٌ قديمٌ
+   * أو مستقبليٌّ خارجٌ عن النافذةِ يُرفضُ كي لا يُعادَ تشغيلُ توقيعٍ مسجَّلٍ سلفًا.
+   * @param {string} popTimestamp - ISO 8601
+   */
+  #checkTimestamp(popTimestamp) {
+    const ts = Date.parse(popTimestamp);
+    if (!Number.isFinite(ts)) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_EXPIRED,
+        'الطابعُ الزمنيُّ لإثباتِ الحيازةِ غيرُ مقروءٍ؛ وما لا يُعرَفُ وقتُه لا يُقبلُ توقيعُه.',
+      );
+    }
+    const nowMs = this.#now().getTime();
+    const skewMs = Math.abs(nowMs - ts);
+    if (skewMs > this.#popWindowSeconds * 1000) {
+      throw new SessionError(
+        SESSION_ERRORS.POP_EXPIRED,
+        `الطابعُ الزمنيُّ لإثباتِ الحيازةِ خارجَ نافذةِ القبولِ (‏${this.#popWindowSeconds}ث)؛ والتوقيعُ منتهيًا لا يُقبلُ ولو كان صالحًا.`,
+      );
+    }
+  }
+
+  /**
+   * صياغةُ الرسالةِ المتّفَقِ عليها للتحققِ من التوقيعِ. الثباتُ شرطٌ: تغييرُ ترتيبٍ
+   * أو فاصلٍ يكسرُ التحقّقَ، فلا يُتركُ للموقِّعِ أن يختارَه.
+   * @param {string} canonicalPayload
+   * @param {string} popTimestamp
+   * @param {string} popNonce
+   * @returns {string}
+   */
+  #canonicalMessage(canonicalPayload, popTimestamp, popNonce) {
+    return `${canonicalPayload}|${popTimestamp}|${popNonce}`;
+  }
+
+  /**
+   * الرسالةُ المتّفَقُ عليها عندَ الفتحِ: توقّعُ الحمولةِ على المعرّفِ والطابعِ وnonce.
+   * @param {string} actorId
+   * @param {string} popTimestamp
+   * @param {string} popNonce
+   * @returns {string}
+   */
+  #canonicalOpenMessage(actorId, popTimestamp, popNonce) {
+    return this.#canonicalMessage(`open:${actorId}`, popTimestamp, popNonce);
+  }
+
+  /**
+   * يتحققُ من توقيعِ Ed25519. كلُّ ما لا يمكنُ التحققُ منه يُرجعُ `false` لا أن يُسقطَ
+   * الفاحصَ — فالتوقيعُ التالفُ باطلٌ لا حادثٌ.
+   * @param {import('node:crypto').KeyObject} publicKey
+   * @param {string} message
+   * @param {string} signatureB64url
+   * @returns {boolean}
+   */
+  #verifySignature(publicKey, message, signatureB64url) {
+    try {
+      return cryptoVerify(
+        null,
+        Buffer.from(message, 'utf8'),
+        publicKey,
+        Buffer.from(signatureB64url, 'base64url'),
+      );
+    } catch {
+      return false;
+    }
   }
 
   /**
