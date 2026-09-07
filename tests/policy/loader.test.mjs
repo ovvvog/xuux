@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import YAML from 'yaml';
 
 import { CONFIG_DIR, loadPolicyBundle } from '../../src/policy/loader.mjs';
+import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 
 /**
  * ينسخ بيانات المشروع إلى مجلد مؤقّت كي يُفسد فيها بندٌ واحد بلا لمس المستودع.
@@ -67,6 +68,83 @@ test('البنية المحمَّلة مجمَّدة فلا تُعدَّل ال�
     // محاولة التعديل، لا ما يمنعه المُصرِّف.
     /** @type {{ effect: string }} */ (/** @type {unknown} */ (first)).effect = 'allow';
   });
+});
+
+test('GPT-F03: التجميد عميقٌ لا سطحيٌّ — تعديل المصفوفات المتداخلة والخرائط مرفوضٌ، والقرار لا يتغيّر', () => {
+  // هذا عينُ عيبِ التقرير: `p.actions.push('read-audit')` و`p.resources.push('audit:*')`
+  // كانا يُغيّران القرار الحيَّ من `POLICY_NO_MATCH` إلى `POLICY_ALLOW` لأنّ التجميد
+  // كان سطحياً. والخريطتان (`actions`/`roles`) كانتا قابلتين للحقن بـ`.set`.
+  const bundle = loadPolicyBundle();
+  const pdp = createPolicyDecisionPoint({ bundle });
+  const baseline = pdp.evaluate({
+    actor: { id: 'agent:one', kind: 'autonomous', role: 'role:agent', state: 'active' },
+    action: 'write-memory',
+    resource: { type: 'memory', id: 'agent:one' },
+    context: {},
+  });
+
+  // (أ) حقنُ فعلٍ جديدٍ في خريطة الأفعال يجب أن يُرفض.
+  assert.throws(() => {
+    /** @type {any} */ (bundle.actions).set('fabricate-authority', {
+      id: 'fabricate-authority',
+      description: 'محقون',
+      sensitive: true,
+    });
+  }, /POLICY_BUNDLE_IMMUTABLE/);
+  assert.throws(() => {
+    /** @type {any} */ (bundle.actions).delete('read-registry');
+  }, /POLICY_BUNDLE_IMMUTABLE/);
+  assert.throws(() => {
+    /** @type {any} */ (bundle.actions).clear();
+  }, /POLICY_BUNDLE_IMMUTABLE/);
+
+  // (ب) حقنُ دورٍ جديدٍ في خريطة الأدوار يجب أن يُرفض.
+  assert.throws(() => {
+    /** @type {any} */ (bundle.roles).set('role:ghost', {
+      id: 'role:ghost',
+      capabilities: new Set(),
+    });
+  }, /POLICY_BUNDLE_IMMUTABLE/);
+
+  // (ج) تعديلُ مصفوفات السياسة المتداخلة (`actions`/`resources`/`actors.roles`)
+  // يجب أن يُرفض — وهو عينُ ما كان يُغيّر القرار.
+  const target = bundle.policies.find(
+    (p) => p.enabled && p.actions.length > 0 && (p.actors.roles?.length ?? 0) > 0,
+  );
+  assert.ok(target, 'يجب أن توجد سياسة مفعّلة بأفعال وأدوار لاختبار التجميد العميق');
+  assert.throws(() => {
+    /** @type {any} */ (target.actions).push('read-audit');
+  }, TypeError);
+  assert.throws(() => {
+    /** @type {any} */ (target.resources).push('audit:*');
+  }, TypeError);
+  assert.throws(() => {
+    /** @type {any} */ (target.actors.roles).push('role:ghost');
+  }, TypeError);
+  assert.throws(() => {
+    /** @type {any} */ (target.actors.roles).splice(0, 1);
+  }, TypeError);
+
+  // (د) إضافةُ قدرةٍ إلى مجموعةِ قدراتِ دورٍ يجب أن تُرفض.
+  const role = bundle.roles.get('role:agent');
+  assert.ok(role);
+  assert.throws(() => {
+    /** @type {any} */ (role.capabilities).add('action:fabricate');
+  }, /POLICY_BUNDLE_IMMUTABLE/);
+  assert.throws(() => {
+    /** @type {any} */ (role.capabilities).delete('sovereign:command');
+  }, /POLICY_BUNDLE_IMMUTABLE/);
+
+  // (هـ) القرارُ لم يتغيّر بعد كل محاولات التعديل: الحزمة ثابتةٌ بعد التحميل.
+  const after = pdp.evaluate({
+    actor: { id: 'agent:one', kind: 'autonomous', role: 'role:agent', state: 'active' },
+    action: 'write-memory',
+    resource: { type: 'memory', id: 'agent:one' },
+    context: {},
+  });
+  assert.equal(after.allowed, baseline.allowed);
+  assert.equal(after.code, baseline.code);
+  assert.equal(after.policyId, baseline.policyId);
 });
 
 test('مخالفة المخطَّط تُفشل التحميل بخطأ يسمّي الملف', () => {

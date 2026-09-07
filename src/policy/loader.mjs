@@ -45,6 +45,95 @@ export const CONFIG_DIR = path.join(ROOT, 'config');
  */
 
 /**
+ * يجمّد كائناً ومصفوفاته المتداخلة وكائناته الفرعية البسيطة. على عكس
+ * `Object.freeze` السطحي، يمنع `push`/`splice` على المصفوفات المتداخلة (تُلقي
+ * في الوضع الصارم) ويجمّد `actors`/`conditions`/`value` المتداخلة. وهو ما يُغلق
+ * به عيبُ `GPT-F03`: التجميد السطحي لسجلّ السياسة كان يترك `p.actions` و`p.resources`
+ * و`p.actors.roles` قابلةً للتعديل بعد التحقّق من YAML، فيتغيّر القرار الحي.
+ * @template T
+ * @param {T} value
+ * @returns {T}
+ */
+function deepFreezeValue(value) {
+  if (value === null || typeof value !== 'object') return value;
+  if (Object.isFrozen(value)) return value;
+  if (Array.isArray(value)) {
+    for (const item of value) deepFreezeValue(item);
+    Object.freeze(value);
+    return value;
+  }
+  // كائن بسيط فقط: لا نُجمّد نسخ الصنف (Date/Map/Set/Buffer) له معالَجٌ خاصّ،
+  // ولا نُجمّد ما ليس لنا ملكُه بمعنًى يتلفه التجميد.
+  const proto = Object.getPrototypeOf(value);
+  if (proto === Object.prototype || proto === null) {
+    for (const key of Object.keys(value))
+      deepFreezeValue(/** @type {Record<string, unknown>} */ (value)[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/**
+ * خطأٌ واحدٌ مُسمّى يُلقى عند كل محاولة تعديل بنية السياسات بعد التحميل.
+ */
+class PolicyBundleImmutableError extends TypeError {
+  constructor() {
+    super('POLICY_BUNDLE_IMMUTABLE: لا يُسمح بتعديل خريطة/مجموعة السياسات بعد التحميل (GPT-F03).');
+  }
+}
+
+const MUTATION_BLOCKED = () => {
+  throw new PolicyBundleImmutableError();
+};
+
+/**
+ * يُغلّف خريطةً بغلافٍ يمنع `set`/`delete`/`clear` ويُمرّر القراءة. `Object.freeze`
+ * على `Map` لا يمنع `Map.prototype.set` (يكتب في [[MapData]] الداخلي)، فالخريطة
+ * «المجمّدة» تبقى قابلةً للحقن. هذا الغلاف يُلقي عند كل محاولة كتابة على الخريطة
+ * أو على خصائصها، بينما تمرّ `has`/`get`/`values`/`entries`/`forEach`/`size`.
+ * @template K, V
+ * @param {Map<K, V>} map
+ * @returns {ReadonlyMap<K, V>}
+ */
+function readOnlyMap(map) {
+  return /** @type {ReadonlyMap<K, V>} */ (
+    new Proxy(map, {
+      get(target, prop) {
+        if (prop === 'set' || prop === 'delete' || prop === 'clear') return MUTATION_BLOCKED;
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+      set: MUTATION_BLOCKED,
+      deleteProperty: MUTATION_BLOCKED,
+      defineProperty: MUTATION_BLOCKED,
+      setPrototypeOf: MUTATION_BLOCKED,
+    })
+  );
+}
+
+/**
+ * نظيرُ `readOnlyMap` للمجموعة: يمنع `add`/`delete`/`clear` ويُمرّر القراءة.
+ * @template V
+ * @param {Set<V>} set
+ * @returns {ReadonlySet<V>}
+ */
+function readOnlySet(set) {
+  return /** @type {ReadonlySet<V>} */ (
+    new Proxy(set, {
+      get(target, prop) {
+        if (prop === 'add' || prop === 'delete' || prop === 'clear') return MUTATION_BLOCKED;
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+      set: MUTATION_BLOCKED,
+      deleteProperty: MUTATION_BLOCKED,
+      defineProperty: MUTATION_BLOCKED,
+      setPrototypeOf: MUTATION_BLOCKED,
+    })
+  );
+}
+
+/**
  * يقرأ ملف YAML ويرفع خطأً يسمّيه إن غاب أو فسد نصّه.
  * @param {string} dir - مجلد البيانات
  * @param {string} file - اسم الملف داخل المجلد
@@ -133,7 +222,7 @@ export function loadPolicyBundle(options = {}) {
   /** @type {string[]} */
   const problems = [];
 
-  /** @type {Map<string, { id: string, capabilities: ReadonlySet<string> }>} */
+  /** @type {Map<string, { id: string, capabilities: Set<string> }>} */
   const roles = new Map();
   for (const role of rolesDoc.roles) {
     if (roles.has(role.id)) problems.push(`دور مكرَّر: ${role.id}`);
@@ -215,12 +304,28 @@ export function loadPolicyBundle(options = {}) {
     throw new Error(`POLICY_CONFIG_INCOHERENT: ${problems.join(' | ')}`);
   }
 
+  // تجميدٌ عميقٌ لا سطحيٌّ (GPT-F03): `Object.freeze` على `Map`/`Set` لا يمنع
+  // `.set`/`.add`، والتجميد السطحي لسجلّ السياسة لا يجمّد `actions`/`resources`/
+  // `actors` المتداخلة فيبقى `push` يُغيّر القرار بعد التحقّق. فالخريطتان للقراءة
+  // فقط، والمصفوفات والكائنات المتداخلة مجمّدةٌ كلّها.
+  const frozenActions = new Map();
+  for (const [id, action] of actions) {
+    frozenActions.set(id, deepFreezeValue({ ...action }));
+  }
+  const frozenRoles = new Map();
+  for (const [id, role] of roles) {
+    frozenRoles.set(
+      id,
+      deepFreezeValue({ id: role.id, capabilities: readOnlySet(role.capabilities) }),
+    );
+  }
+
   return Object.freeze({
-    actions,
-    policies: Object.freeze(policiesDoc.policies.map((p) => Object.freeze({ ...p }))),
-    roles,
-    threshold: Object.freeze(thresholdDoc.threshold.map((t) => Object.freeze({ ...t }))),
-    quotas: Object.freeze(quotasDoc.quotas.map((q) => Object.freeze({ ...q }))),
+    actions: readOnlyMap(frozenActions),
+    policies: Object.freeze(policiesDoc.policies.map((p) => deepFreezeValue({ ...p }))),
+    roles: readOnlyMap(frozenRoles),
+    threshold: Object.freeze(thresholdDoc.threshold.map((t) => deepFreezeValue({ ...t }))),
+    quotas: Object.freeze(quotasDoc.quotas.map((q) => deepFreezeValue({ ...q }))),
     versions: Object.freeze({
       policies: policiesDoc.version,
       roles: rolesDoc.version,
