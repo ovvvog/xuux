@@ -15,6 +15,7 @@
 const AUTHORITY_TEXT = Object.freeze({
   owner: 'المالكُ (قرارٌ سياديٌّ)',
   'external-independent-party': 'جهةٌ خارجيّةٌ مستقلّةٌ (لا المنفِّذُ)',
+  'model-council': 'مجلسُ نماذجٍ مستقلٌّ (Model Council — لا المنفِّذُ)',
   github: 'GitHub (قيدُ خطةٍ خارجيٌّ)',
 });
 

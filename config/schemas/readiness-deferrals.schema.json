@@ -48,7 +48,7 @@
           "unblockCondition": { "$ref": "#/$defs/arabicText" },
           "authority": {
             "type": "string",
-            "enum": ["owner", "external-independent-party", "github"]
+            "enum": ["owner", "external-independent-party", "model-council", "github"]
           },
           "declaredIn": { "type": "string", "pattern": "^WL-\\d{3}$" }
         }
