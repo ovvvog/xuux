@@ -27,7 +27,7 @@
 3. **`tests/policy/enforcement-point.test.mjs`:** أُضيفَ اختبارانِ خصميّانِ: الأوّلُ يُثبتُ أنّ التركيبَ المُلزمَ بلا بوابةٍ يرفضُ `write-memory` بـ`IDENTITY_GATE_REQUIRED` ولا يُصدرُ تذكرةً ويُسجّلُ قيدَ الرفضِ؛ والثاني يُثبتُ أنّ التركيبَ غيرَ المُلزمِ يبقى متساهلًا (توافقٌ مع الإصدارِ: الاختباراتُ التي تبني النقطةَ مباشرةً بلا بوابةٍ لا تنكسرُ).
 4. **إعادةُ بناءٍ وتحقّقٍ:** `npm run build` (‏`tsc`) نجحَ بلا أخطاءِ أنواعٍ — فإضافةُ المعاملِ الاختياريِّ والضمانِ الجديدِ لا تكسرُ فحصَ JSDoc. وأُعيدَ تنسيقُ الملفّاتِ المعدَّلةِ بـPrettier.
 
-**الملفّات المتأثرة:** `src/policy/enforcement-point.mjs` (معدَّلٌ)، `src/policy/governance.mjs` (معدَّلٌ)، `tests/policy/enforcement-point.test.mjs` (معدَّلٌ — اختبارانِ خصميّانِ جديدانِ)، `docs/roadmap/05-work-log.md` (هذه المُدخلةُ)، `version.json` (`0.63.1` ⇒ `0.63.2`)، `package.json` (`0.63.1` ⇒ `0.63.2`). **ولم تُمسَسْ `config/external-review.yaml` ولا بقيةُ النتائجِ العاليةِ في هذه المُدخلةِ.**
+**الملفّات المتأثرة:** `src/policy/enforcement-point.mjs` (معدَّلٌ)، `src/policy/governance.mjs` (معدَّلٌ)، `src/policy/model.mts` (معدَّلٌ — أُضيفَ `IDENTITY_GATE_REQUIRED` إلى `DecisionCode`)، `tests/policy/enforcement-point.test.mjs` (معدَّلٌ — اختبارانِ خصميّانِ جديدانِ)، `docs/roadmap/05-work-log.md` (هذه المُدخلةُ)، `docs/roadmap/02-baseline-audit.md` (صفّا `WL-077`/`WL-078` في §2.9.1)، `docs/READINESS_REPORT.md` (مُعادُ توليدُه)، `version.json` (`0.63.1` ⇒ `0.63.2`)، `package.json` (`0.63.1` ⇒ `0.63.2`). **ولم تُمسَسْ `config/external-review.yaml` ولا بقيةُ النتائجِ العاليةِ في هذه المُدخلةِ.**
 
 **الدليلُ المحليُّ (لا بديلَ عن CI):**
 
@@ -38,7 +38,7 @@
 5. **`npm run format:check`** ⇒ كلُّ الملفّاتِ تطابقُ نمطَ Prettier.
 6. **`npm run typecheck`** (ضمنَ `build`) ⇒ خروجٌ `0` بلا أخطاءِ أنواعٍ.
 
-**حكمُ CI (مقروءٌ لا مُدَّعىً):** يُقرأُ بعدَ الدفعِ إلى `origin/main` — ولم يُدَّعَ بعدُ.
+**حكمُ CI (مقروءٌ لا مُدَّعىً):** التشغيلةُ **`34162233226`** على `main` (‏`b3bc45398f6983a56b246a0b0eb4a90813a923b8`) — **`success`** في `4m12s` — <https://github.com/ovvvog/xuux/actions/runs/34162233226>. وبها قِيسَ إخضرارُ المسارِ على `main` بعدَ الإصلاحِ، والاختباراتُ على PostgreSQL حقيقيّةٍ في CI. **ولا يعني الإخضرارُ `VERIFIED` ولا اعتماداً: حكمُ الإغلاقِ وإعادةُ الاختبارِ للمجلسِ وحدَه.**
 
 **ما لم يتم وسببه (الدَينُ المُسجَّلُ المانعُ لإغلاقِ `M11.04`):**
 
