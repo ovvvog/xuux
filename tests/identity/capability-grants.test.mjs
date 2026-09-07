@@ -29,8 +29,7 @@ const base = {
   agentId: 'agent:worker',
   capability: 'action:read-registry',
   reason: 'تدقيق حادثة رقم 7',
-  grantedBy: 'agent:minister',
-  grantorRole: 'role:minister',
+  principal: { id: 'agent:minister', role: 'role:minister', state: 'active' },
   ttlSeconds: 3600,
 };
 
@@ -101,8 +100,7 @@ test('the duration ceiling comes from data, not from the caller', () => {
       ledger.grant({
         ...base,
         capability: 'action:external-egress',
-        grantorRole: 'role:king',
-        grantedBy: 'agent:king',
+        principal: { id: 'agent:king', role: 'role:king', state: 'active' },
         ttlSeconds: 3601,
       }),
     /CAPABILITY_GRANT_TTL_ABOVE_MAX/,
@@ -114,7 +112,11 @@ test('the duration ceiling comes from data, not from the caller', () => {
 test('an unlisted grantor role grants nothing, however senior', () => {
   const { ledger } = setup();
   assert.throws(
-    () => ledger.grant({ ...base, grantorRole: 'role:operator' }),
+    () =>
+      ledger.grant({
+        ...base,
+        principal: { id: 'agent:operator', role: 'role:operator', state: 'active' },
+      }),
     /CAPABILITY_GRANTOR_NOT_AUTHORIZED/,
   );
   assert.throws(
@@ -122,7 +124,7 @@ test('an unlisted grantor role grants nothing, however senior', () => {
       ledger.grant({
         ...base,
         capability: 'action:external-egress',
-        grantorRole: 'role:minister',
+        principal: { id: 'agent:operator', role: 'role:operator', state: 'active' },
         ttlSeconds: 60,
       }),
     /CAPABILITY_GRANTOR_NOT_AUTHORIZED/,
@@ -132,20 +134,79 @@ test('an unlisted grantor role grants nothing, however senior', () => {
 test('nobody grants themselves a capability', () => {
   const { ledger } = setup();
   assert.throws(
-    () => ledger.grant({ ...base, grantedBy: 'agent:worker', grantorRole: 'role:minister' }),
+    () =>
+      ledger.grant({
+        ...base,
+        principal: { id: 'agent:worker', role: 'role:minister', state: 'active' },
+      }),
     /CAPABILITY_SELF_GRANT_FORBIDDEN/,
   );
 });
 
 test('every contract field is mandatory', () => {
   const { ledger } = setup();
-  for (const field of ['agentId', 'capability', 'reason', 'grantedBy', 'grantorRole']) {
+  for (const field of ['agentId', 'capability', 'reason']) {
     assert.throws(
       () => ledger.grant({ ...base, [field]: '   ' }),
       new RegExp(`CAPABILITY_GRANT_FIELD_MISSING: ${field}`),
       `الحقل ${field} يجب أن يكون إلزامياً`,
     );
   }
+});
+
+test('GPT-F04: لا منحَ بلا مانحٍ موثَّق — الفشلُ مغلقٌ', () => {
+  const { ledger } = setup();
+  // ادّعاءُ المانحِ من الطالبِ غيرُ مقبولٍ بعدَ الآن.
+  assert.throws(
+    () =>
+      ledger.grant({
+        agentId: 'agent:worker',
+        capability: 'action:read-registry',
+        reason: 'سببٌ',
+        grantedBy: 'agent:not-registered',
+        grantorRole: 'role:minister',
+        ttlSeconds: 3600,
+      }),
+    /CAPABILITY_GRANTOR_UNVERIFIED/,
+    'لا منحَ بلا principal موثَّق — فانتحالُ المانحِ مُغلقٌ.',
+  );
+  assert.equal(ledger.capabilitiesOf('agent:worker').size, 0);
+});
+
+test('GPT-F04: مانحٌ موقوفٌ لا يمنحُ', () => {
+  const { ledger } = setup();
+  assert.throws(
+    () =>
+      ledger.grant({
+        ...base,
+        principal: { id: 'agent:minister', role: 'role:minister', state: 'suspended' },
+      }),
+    /CAPABILITY_GRANTOR_NOT_ACTIVE/,
+    'المانحُ الموقوفُ لا تنفذُ منحُه.',
+  );
+});
+
+test('GPT-F04: انتحالُ دورٍ أرفعَ يُرفضُ صراحةً', () => {
+  const { ledger } = setup();
+  // مشغّلٌ يمرّرُ principal موثَّقاً لكنّه يدّعي دورَ وزيرٍ مختلفًا.
+  assert.throws(
+    () =>
+      ledger.grant({
+        ...base,
+        principal: { id: 'agent:operator', role: 'role:operator', state: 'active' },
+        grantorRole: 'role:minister',
+      }),
+    /CAPABILITY_GRANTOR_MISMATCH/,
+    'ادّعاءُ دورٍ مختلفٍ عمّا ثبتَ في المانحِ يُرفضُ — فلا انتحالَ.',
+  );
+});
+
+test('GPT-F04: مانحٌ موثَّقٌ صحيحٌ يمنحُ', () => {
+  const { ledger } = setup();
+  const grant = ledger.grant(base);
+  assert.equal(grant.grantedBy, 'agent:minister');
+  assert.equal(grant.grantorRole, 'role:minister');
+  assert.deepEqual([...ledger.capabilitiesOf('agent:worker')], ['action:read-registry']);
 });
 
 test('revocation is immediate and needs a recorded reason', () => {

@@ -29,6 +29,13 @@ import { IncidentSeverity } from './incident-register.mjs';
 /** @typedef {import('./capability-catalog.mjs').CapabilityCatalog} CapabilityCatalog */
 
 /**
+ * مانحٌ موثَّقٌ — هويةٌ تحقّقَ منها بوابةُ الهويّة (أو إثباتُ الحيازة) لا
+ * ادّعاءٌ من الطالب. الدورُ هنا حقيقيٌّ لا قابلٌ للتزوير: لا يُقبلُ دورٌ
+ * مختلفٌ عمّا ثبتَ في المانح، ومحاولةُ التظاهرِ بدورٍ أرفعَ تُرفضُ صراحةً.
+ * @typedef {{ id: string, role: string, state: string }} VerifiedPrincipal
+ */
+
+/**
  * منحة واحدة كما تُقرأ.
  * @typedef {object} CapabilityGrant
  * @property {string} id
@@ -58,41 +65,71 @@ export class CapabilityGrantLedger {
   }
 
   /**
-   * يمنح قدرةً مؤقّتة. الترتيب مقصود: **المحرَّم يُفحص أولاً** فلا يُقيَّم مانحٌ
-   * ولا مدة لطلبٍ لا يجوز أصلاً، ولا تُفتح حادثةٌ مرتين على نفس الطلب.
-   * @param {{ agentId: string, capability: string, reason: string, grantedBy: string, grantorRole: string, ttlSeconds: number }} spec
+   * يمنح قدرةً مؤقّتة. المانحُ **موثَّقٌ** لا ادّعاءٌ: لا يُقبلُ منحٌ بلا
+   * `principal` تحقّقَ منه بوابةُ الهويّة، ودورُه حقيقيٌّ لا قابلٌ للتزوير. ومحاولةُ
+   * تمريرِ `grantedBy`/`grantorRole` مخالفةٍ لِما ثبتَ في المانح تُرفضُ صراحةً
+   * (`CAPABILITY_GRANTOR_MISMATCH`) — فلا ينتحلُ مشغّلٌ دورَ وزير. الترتيب مقصود:
+   * **المحرَّم يُفحص أولاً** فلا يُقيَّم مانحٌ ولا مدة لطلبٍ لا يجوز أصلاً، ولا
+   * تُفتح حادثةٌ مرتين على نفس الطلب.
+   * @param {{ agentId: string, capability: string, reason: string, principal?: VerifiedPrincipal, ttlSeconds: number, grantedBy?: string, grantorRole?: string }} spec
    * @returns {CapabilityGrant}
    */
-  grant({ agentId, capability, reason, grantedBy, grantorRole, ttlSeconds }) {
+  grant({ agentId, capability, reason, principal, ttlSeconds, grantedBy, grantorRole }) {
     for (const [field, value] of Object.entries({
       agentId,
       capability,
       reason,
-      grantedBy,
-      grantorRole,
     })) {
       if (typeof value !== 'string' || value.trim() === '') {
         throw new Error(`CAPABILITY_GRANT_FIELD_MISSING: ${field}`);
       }
     }
 
+    // الفشلُ مغلقٌ بلا مانحٍ موثَّق: لا ثقةَ بادّعاءِ المانح من الطالب.
+    if (
+      principal === undefined ||
+      principal === null ||
+      typeof principal !== 'object' ||
+      typeof principal.id !== 'string' ||
+      typeof principal.role !== 'string' ||
+      typeof principal.state !== 'string' ||
+      principal.id.trim() === '' ||
+      principal.role.trim() === '' ||
+      principal.state.trim() === ''
+    ) {
+      throw new Error('CAPABILITY_GRANTOR_UNVERIFIED');
+    }
+    if (principal.state !== 'active') {
+      throw new Error('CAPABILITY_GRANTOR_NOT_ACTIVE');
+    }
+    // إن أُمرِرَ ادّعاءُ مانحٍ/دورٍ مختلفٌ عمّا ثبتَ في المانح، يُرفضُ صراحةً —
+    // فمحاولةُ انتحالِ دورٍ أرفعَ تُكشفُ ولا تُقبل.
+    if (grantedBy !== undefined && grantedBy.trim() !== '' && grantedBy !== principal.id) {
+      throw new Error('CAPABILITY_GRANTOR_MISMATCH');
+    }
+    if (grantorRole !== undefined && grantorRole.trim() !== '' && grantorRole !== principal.role) {
+      throw new Error('CAPABILITY_GRANTOR_MISMATCH');
+    }
+    const verifiedGrantedBy = principal.id;
+    const verifiedGrantorRole = principal.role;
+
     if (this.catalog.forbidden.has(capability)) {
       const entry = this.catalog.forbidden.get(capability);
       if (this.incidents !== null) {
         this.incidents.open({
           type: 'forbidden-capability',
-          subject: grantedBy,
+          subject: verifiedGrantedBy,
           severity: IncidentSeverity.CRITICAL,
           detail: {
             capability,
             beneficiary: agentId,
-            grantorRole,
+            grantorRole: verifiedGrantorRole,
             lawRef: entry?.lawRef ?? null,
             attemptedReason: reason,
           },
         });
       }
-      this.log.append('capability.grant.forbidden', grantedBy, {
+      this.log.append('capability.grant.forbidden', verifiedGrantedBy, {
         capability,
         beneficiary: agentId,
         reason: entry?.reason ?? 'قدرة محرَّمة',
@@ -103,8 +140,8 @@ export class CapabilityGrantLedger {
     const definition = this.catalog.grantable.get(capability);
     if (definition === undefined) throw new Error('CAPABILITY_NOT_GRANTABLE');
 
-    if (grantedBy === agentId) throw new Error('CAPABILITY_SELF_GRANT_FORBIDDEN');
-    if (!definition.grantorRoles.has(grantorRole)) {
+    if (verifiedGrantedBy === agentId) throw new Error('CAPABILITY_SELF_GRANT_FORBIDDEN');
+    if (!definition.grantorRoles.has(verifiedGrantorRole)) {
       throw new Error('CAPABILITY_GRANTOR_NOT_AUTHORIZED');
     }
     if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
@@ -121,15 +158,15 @@ export class CapabilityGrantLedger {
       agentId,
       capability,
       reason,
-      grantedBy,
-      grantorRole,
+      grantedBy: verifiedGrantedBy,
+      grantorRole: verifiedGrantorRole,
       grantedAt: grantedAt.toISOString(),
       expiresAt: new Date(grantedAt.getTime() + ttlSeconds * 1000).toISOString(),
       revokedAt: null,
       revokedReason: null,
     });
     this.grants.set(record.id, record);
-    this.log.append('capability.granted', grantedBy, {
+    this.log.append('capability.granted', verifiedGrantedBy, {
       id: record.id,
       agentId,
       capability,

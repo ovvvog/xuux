@@ -82,8 +82,7 @@ test('a suspended agent is rejected too, and loses its temporary grants', async 
     agentId: agent.id,
     capability: 'action:read-audit',
     reason: 'تحقيق جارٍ',
-    grantedBy: 'agent:justice',
-    grantorRole: 'role:chief-justice',
+    principal: { id: 'agent:justice', role: 'role:chief-justice', state: 'active' },
     ttlSeconds: 3600,
   });
   assert.equal(
@@ -138,8 +137,7 @@ test('active grants add to the certificate, and expiry removes them', async () =
     agentId: agent.id,
     capability: 'action:write-memory',
     reason: 'كتابة تقرير الحادثة',
-    grantedBy: 'agent:minister',
-    grantorRole: 'role:minister',
+    principal: { id: 'agent:minister', role: 'role:minister', state: 'active' },
     ttlSeconds: 120,
   });
   assert.deepEqual((await gate.verify(agent.id)).actor?.capabilities, [

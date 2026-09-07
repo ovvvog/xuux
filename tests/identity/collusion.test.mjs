@@ -181,8 +181,7 @@ test('collusion: a suspended agent loses its temporary grants', async () => {
     agentId: agentA.id,
     capability: 'action:read-registry',
     reason: 'temporary access',
-    grantedBy: agentB.id,
-    grantorRole: 'role:minister',
+    principal: { id: agentB.id, role: 'role:minister', state: 'active' },
     ttlSeconds: 3600,
   });
 
