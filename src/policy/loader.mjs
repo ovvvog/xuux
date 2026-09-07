@@ -54,7 +54,7 @@ export const CONFIG_DIR = path.join(ROOT, 'config');
  * @param {T} value
  * @returns {T}
  */
-function deepFreezeValue(value) {
+export function deepFreezeValue(value) {
   if (value === null || typeof value !== 'object') return value;
   if (Object.isFrozen(value)) return value;
   if (Array.isArray(value)) {

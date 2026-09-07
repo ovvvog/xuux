@@ -13,6 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import { withTransaction } from '../persistence/db.mjs';
+import { deepFreezeValue } from './loader.mjs';
 
 /** @typedef {import('./loader.mjs').PolicyBundle} PolicyBundle */
 /** @typedef {import('./model.mjs').PolicyRecord} PolicyRecord */
@@ -52,6 +53,8 @@ export class PolicyGovernanceError extends Error {
  * @property {string | null} signature
  * @property {boolean} active
  * @property {Date} createdAt
+ * @property {string} signatureKind
+ * @property {number | null} rollbackFromVersion
  */
 
 /**
@@ -199,7 +202,79 @@ function versionFromRow(row) {
     signature: row['approval_signature'] === null ? null : String(row['approval_signature']),
     active: Boolean(row['active']),
     createdAt: /** @type {Date} */ (row['created_at']),
+    signatureKind: row['signature_kind'] === 'rollback' ? 'rollback' : 'approval',
+    rollbackFromVersion:
+      row['rollback_from_version'] === null || row['rollback_from_version'] === undefined
+        ? null
+        : Number(row['rollback_from_version']),
   };
+}
+
+/**
+ * يعيد بناء مادة الظرف الموقَّع من الصفِّ وحدَه (GPT-F02). التوقيع كان يُفحَصُ عندَ
+ * الاعتمادِ فقط؛ فمن يملكُ الكتابةَ المباشرةَ على الصفِّ يستطيعُ تبديلَ الوثيقةِ
+ * أو المعتمدِ ويظلُّ الصفُّ نافذاً. هنا يُعادُ اشتقاقُ الحمولةِ التي وُقِّعت من
+ * حقولِ الصفِّ الحاليّة، فإن غُيِّرتِ الوثيقةُ أو المعتمدُ اختلفَ الملخصُ فلا يتحقّقُ
+ * التوقيعُ ويفشلُ مغلقًا قبلَ أن يصلَ إلى المحرّكِ.
+ * @param {PolicyVersion} version
+ * @returns {object | null} الحمولة المُعاد بناؤها، أو `null` إن كان الصفُّ غامضاً
+ */
+function rederiveSignedPayload(version) {
+  if (version.approvedBy === null) return null;
+  if (version.signatureKind === 'approval') {
+    if (version.rollbackFromVersion !== null) return null;
+    return policyApprovalPayload({
+      policyId: version.policyId,
+      version: version.version,
+      policy: version.policy,
+      approvedBy: version.approvedBy,
+    });
+  }
+  if (version.signatureKind === 'rollback') {
+    if (version.rollbackFromVersion === null) return null;
+    // الصفُّ المخزَّنُ يحمِلُ `{...target.policy, version: nextVersion, enabled:false}`،
+    // والسياسةُ الموقَّعةُ كانت `target.policy` بـ`version: toVersion`. فإرجاعُ
+    // `version` إلى النسخةِ الأصليّةِ للتراجعِ يُعيدُ بناءَ نفسِ الملخصِ الذي وُقِّع عليه.
+    const signedPolicy = { ...version.policy, version: version.rollbackFromVersion };
+    return policyRollbackPayload({
+      policyId: version.policyId,
+      toVersion: version.rollbackFromVersion,
+      policy: signedPolicy,
+      approvedBy: version.approvedBy,
+      reason: version.reason,
+    });
+  }
+  return null;
+}
+
+/**
+ * يتحقّقُ من توقيعِ صفٍّ نشطٍ بإعادةِ بناءِ ظرفِه من الصفِّ وحدَه. يفشلُ مغلقًا برمزِ
+ * `SIGNATURE_INVALID` عندَ: غيابِ المعتمدِ أو التوقيعِ، أو غموضِ نوعِ العمليةِ، أو
+ * عدمِ تطابُقِ التوقيعِ مع المادةِ الحاليّةِ. لا تُقرأُ سياسةٌ نافذةٌ بلا تحقّقٍ.
+ * @param {PolicyVersion} version
+ * @param {PolicySigner} signer
+ * @returns {void}
+ */
+function assertActiveSignatureVerified(version, signer) {
+  if (version.approvedBy === null || version.signature === null) {
+    throw new PolicyGovernanceError(
+      POLICY_GOVERNANCE_ERRORS.SIGNATURE_INVALID,
+      `النسخة الناشطة ${version.policyId}:${version.version} بلا معتمد أو توقيع قابلٍ للتحقّق.`,
+    );
+  }
+  const payload = rederiveSignedPayload(version);
+  if (payload === null) {
+    throw new PolicyGovernanceError(
+      POLICY_GOVERNANCE_ERRORS.SIGNATURE_INVALID,
+      `ظرفُ توقيعِ النسخةِ ${version.policyId}:${version.version} غامضٌ أو غيرُ قابلٍ لإعادةِ البناءِ من الصفّ.`,
+    );
+  }
+  if (!signer.verify(payload, version.signature)) {
+    throw new PolicyGovernanceError(
+      POLICY_GOVERNANCE_ERRORS.SIGNATURE_INVALID,
+      `توقيعُ النسخةِ الناشطةِ ${version.policyId}:${version.version} لا يطابقُ مادّتَها المخزَّنةَ (GPT-F02).`,
+    );
+  }
 }
 
 /**
@@ -252,7 +327,8 @@ export function createPolicyVersionStore({ pool, signer }) {
             (policy_id, version, document, change_reason, proposed_by)
            VALUES ($1, $2, $3::jsonb, $4, $5)
            RETURNING policy_id, version, document, change_reason, proposed_by,
-                     approved_by, approval_signature, active, created_at`,
+                     approved_by, approval_signature, active, created_at,
+                     signature_kind, rollback_from_version`,
           [policyId, version, JSON.stringify(document), proposalReason, proposer],
         );
         const row = /** @type {Record<string, unknown> | undefined} */ (result.rows[0]);
@@ -286,7 +362,8 @@ export function createPolicyVersionStore({ pool, signer }) {
         await lockPolicy(client, id);
         const selected = await client.query(
           `SELECT policy_id, version, document, change_reason, proposed_by,
-                  approved_by, approval_signature, active, created_at
+                  approved_by, approval_signature, active, created_at,
+                  signature_kind, rollback_from_version
              FROM state.policy_versions
             WHERE policy_id = $1 AND version = $2
             FOR UPDATE`,
@@ -324,10 +401,12 @@ export function createPolicyVersionStore({ pool, signer }) {
         );
         const approved = await client.query(
           `UPDATE state.policy_versions
-              SET active = true, approved_by = $3, approval_signature = $4
+              SET active = true, approved_by = $3, approval_signature = $4,
+                  signature_kind = 'approval', rollback_from_version = NULL
             WHERE policy_id = $1 AND version = $2
             RETURNING policy_id, version, document, change_reason, proposed_by,
-                      approved_by, approval_signature, active, created_at`,
+                      approved_by, approval_signature, active, created_at,
+                      signature_kind, rollback_from_version`,
           [id, version, approver, signature],
         );
         const approvedRow = /** @type {Record<string, unknown> | undefined} */ (approved.rows[0]);
@@ -375,7 +454,8 @@ export function createPolicyVersionStore({ pool, signer }) {
         await lockPolicy(client, id);
         const targetResult = await client.query(
           `SELECT policy_id, version, document, change_reason, proposed_by,
-                  approved_by, approval_signature, active, created_at
+                  approved_by, approval_signature, active, created_at,
+                  signature_kind, rollback_from_version
              FROM state.policy_versions
             WHERE policy_id = $1 AND version = $2
             FOR UPDATE`,
@@ -421,11 +501,21 @@ export function createPolicyVersionStore({ pool, signer }) {
         );
         const restored = await client.query(
           `INSERT INTO state.policy_versions
-            (policy_id, version, document, change_reason, proposed_by, approved_by, approval_signature, active)
-           VALUES ($1, $2, $3::jsonb, $4, $5, $5, $6, true)
+            (policy_id, version, document, change_reason, proposed_by,
+             approved_by, approval_signature, active, signature_kind, rollback_from_version)
+           VALUES ($1, $2, $3::jsonb, $4, $5, $5, $6, true, 'rollback', $7)
            RETURNING policy_id, version, document, change_reason, proposed_by,
-                     approved_by, approval_signature, active, created_at`,
-          [id, nextVersion, JSON.stringify(document), rollbackReason, approver, signature],
+                     approved_by, approval_signature, active, created_at,
+                     signature_kind, rollback_from_version`,
+          [
+            id,
+            nextVersion,
+            JSON.stringify(document),
+            rollbackReason,
+            approver,
+            signature,
+            toVersion,
+          ],
         );
         const restoredRow = /** @type {Record<string, unknown> | undefined} */ (restored.rows[0]);
         if (restoredRow === undefined) throw new Error('POLICY_VERSION_ROLLBACK_MISSING');
@@ -443,7 +533,8 @@ export function createPolicyVersionStore({ pool, signer }) {
       const id = requiredText(policyId, 'policyId');
       const result = await pool.query(
         `SELECT policy_id, version, document, change_reason, proposed_by,
-                approved_by, approval_signature, active, created_at
+                approved_by, approval_signature, active, created_at,
+                signature_kind, rollback_from_version
            FROM state.policy_versions
           WHERE policy_id = $1
           ORDER BY version ASC`,
@@ -462,7 +553,8 @@ export function createPolicyVersionStore({ pool, signer }) {
     async bundleWithOverrides(baseBundle) {
       const result = await pool.query(
         `SELECT policy_id, version, document, change_reason, proposed_by,
-                approved_by, approval_signature, active, created_at
+                approved_by, approval_signature, active, created_at,
+                signature_kind, rollback_from_version
            FROM state.policy_versions
           WHERE active = true
           ORDER BY policy_id`,
@@ -471,6 +563,10 @@ export function createPolicyVersionStore({ pool, signer }) {
       const overrides = new Map();
       for (const raw of result.rows) {
         const row = versionFromRow(/** @type {Record<string, unknown>} */ (raw));
+        // GPT-F02: لا تُقرأُ سياسةٌ نافذةٌ بلا إعادةِ تحقّقٍ من توقيعِها. يُعادُ بناءُ
+        // الظرفِ من الصفِّ وحدَه، فإن بُدِّلتِ الوثيقةُ أو المعتمدُ لم يتحقّقِ
+        // التوقيعُ ويفشلُ مغلقًا قبلَ أن يصلَ إلى المحرّكِ.
+        assertActiveSignatureVerified(row, signer);
         /** @type {PolicyRecord} */
         const policy =
           row.approvedBy === null
@@ -497,7 +593,10 @@ export function createPolicyVersionStore({ pool, signer }) {
             );
           }
         }
-        overrides.set(row.policyId, Object.freeze(policy));
+        // GPT-F03: تجميدٌ عميقٌ للسياسة المعاد استخدامِها من قاعدةِ البياناتِ، لا
+        // تجميدٌ سطحيٌّ. فبدونَه يستطيعُ مستهلكٌ تعديلَ `actions`/`actors.roles`
+        // بعدَ التحقّقِ فيتغيّرُ القرارُ الحيُّ رغمَ أنّ `loadPolicyBundle()` محصَّنة.
+        overrides.set(row.policyId, deepFreezeValue(policy));
       }
       const merged = baseBundle.policies.map((policy) => overrides.get(policy.id) ?? policy);
       for (const [policyId, policy] of overrides) {
