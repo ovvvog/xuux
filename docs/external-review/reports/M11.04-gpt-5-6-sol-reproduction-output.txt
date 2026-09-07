@@ -1,0 +1,51 @@
+{
+  "sessionImpersonation": {
+    "opened": true,
+    "claimedActor": "agent:auditor",
+    "claimedRole": "role:auditor",
+    "proofSupplied": false
+  },
+  "royalCommandBinding": {
+    "decisionAllowed": true,
+    "forgedId": "cmd:forged-not-accepted",
+    "realId": "0f4be828-62e8-4fde-bf85-610626007fb6",
+    "idsDiffer": true,
+    "kernelState": "succeeded"
+  },
+  "mutablePolicyBundle": {
+    "mapFrozen": false,
+    "nestedActionsFrozen": false,
+    "before": "POLICY_NO_MATCH",
+    "after": "POLICY_ALLOW",
+    "afterAllowed": true,
+    "mapMutationVisible": true
+  },
+  "policyOverrideSignature": {
+    "verifyCalls": 0,
+    "loadedVersion": 77,
+    "loadedEffect": "deny",
+    "loadedReason": "tampered row"
+  },
+  "haltConfirmationSpoof": {
+    "pendingBefore": [
+      "node:a",
+      "node:b"
+    ],
+    "ackPids": [
+      12555,
+      12555
+    ],
+    "sameProcess": true,
+    "pendingAfter": [],
+    "resumedState": "running"
+  },
+  "grantorImpersonation": {
+    "granted": true,
+    "grantId": "grant:9f387b17-a1e7-48c6-b981-9f39d6424509",
+    "grantedBy": "agent:not-registered",
+    "claimedRole": "role:minister",
+    "effective": [
+      "action:read-registry"
+    ]
+  }
+}
