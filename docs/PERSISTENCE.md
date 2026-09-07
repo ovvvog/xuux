@@ -91,6 +91,7 @@ npm test                                               # اختبارات الق
 | --- | --- | --- |
 | `policy_versions.approved_by` | نسخة مقترحة لم تُعتمد بعد | `policy_versions_active_needs_approval` |
 | `policy_versions.approval_signature` | لا توقيع قبل الاعتماد | نفس القيد — لا تنشيط بلا توقيع |
+| `policy_versions.rollback_from_version` | نسخة الاعتماد لا تحمل نسخةً أصليّةً للتراجع | قيد `policy_versions_signature_kind_consistent` يجعلها إلزاميّةً لنسخ التراجع وحدَه |
 | `policy_decisions.actor_kind` | فاعل لم يُعلن فئته | المحرّك يقرأ الافتراض الأضيق `autonomous` |
 | `policy_decisions.actor_scope` | فاعل بلا نطاق مؤسسي — كالتاج | شروط النطاق تمنع المطابقة عند غيابه |
 | `policy_decisions.scope` | طلب لا نطاق له غير نطاق فاعله | المحرّك يرجع إلى `actor.scope` |

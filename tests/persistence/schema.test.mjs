@@ -47,6 +47,8 @@ const DECLARED_NULLABLE = Object.freeze({
   // أُضيفت في الهجرة `0003` مع حوكمة إصدارات السياسة وسجل القرارات (`M4.06`).
   'policy_versions.approved_by': 'نسخة مقترحة لم تُعتمد بعد؛ والقيد يمنع تنشيطها بلا معتمِد.',
   'policy_versions.approval_signature': 'لا توقيع قبل الاعتماد؛ والقيد يمنع التنشيط بلا توقيع.',
+  'policy_versions.rollback_from_version':
+    'نسخة الاعتماد لا تحمل نسخةً أصليّةً للتراجع؛ والقيد يجعلها إلزاميّةً لنسخ التراجع وحدَه.',
   'policy_decisions.actor_kind': 'فاعلٌ لم يُعلن فئته يُقرأ بالافتراض الأضيق لا بفئة مخترعة.',
   'policy_decisions.actor_scope': 'فاعلٌ بلا نطاق مؤسسي — كالتاج نفسه.',
   'policy_decisions.scope': 'طلبٌ لا يحمل نطاقاً غير نطاق فاعله.',
