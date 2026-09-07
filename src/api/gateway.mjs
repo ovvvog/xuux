@@ -40,6 +40,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import Ajv2020Default from 'ajv/dist/2020.js';
@@ -541,7 +542,7 @@ export class ApiGateway {
       popSignature: request?.pop?.signature,
       popTimestamp: request?.pop?.timestamp,
       popNonce: request?.pop?.nonce,
-      canonicalPayload: this.#canonicalCallPayload(route, request.params),
+      canonicalPayload: this.#canonicalCallPayload(route, session.id, request.params),
     });
 
     // ── (3) حدُّ المعدَّل: يَعُدُّ المحاولةَ لا النجاح ──
@@ -662,20 +663,22 @@ export class ApiGateway {
 
   /**
    * الحمولةُ المتّفَقُ عليها لتوقيعِ إثباتِ الحيازةِ (M11.04). ثابتةٌ لا يعتمدُ
-   * ترتيبُها على المُنادي: المسارُ والفعلُ والموردُ والمعاملاتُ بترتيبٍ مستقرٍ،
-   * فلا يُوقّعُ المُهاجمُ حمولةً مغايرةً ويمرّ بها.
+   * ترتيبُها على المُنادي، ومُلزَمةٌ بمعرّفِ الجلسةِ كي لا يُعادَ تشغيلُ توقيعِ
+   * طلبٍ بينَ جلستَينِ لنفسِ الفاعلِ — فدفترُ nonce لكلِّ جلسةٍ، والتوقيعُ مرتبطٌ
+   * بالجلسةِ نفسِها. والمعاملاتُ تُهضَمُ بـsha256 لا تُوقّعُ خامَّةً (استقرارٌ
+   * وحدٌّ لِحجمِ الرسالة).
    * @param {ApiRouteSpec} route
+   * @param {string} sessionId
    * @param {Record<string, unknown> | undefined} params
    * @returns {string}
    */
-  #canonicalCallPayload(route, params) {
-    return [
-      route.method,
-      route.path,
-      route.action,
-      route.resource,
-      JSON.stringify(params ?? {}),
-    ].join('|');
+  #canonicalCallPayload(route, sessionId, params) {
+    const paramsDigest = createHash('sha256')
+      .update(JSON.stringify(params ?? {}))
+      .digest('base64url');
+    return [route.method, route.path, route.action, route.resource, sessionId, paramsDigest].join(
+      '|',
+    );
   }
 
   /**

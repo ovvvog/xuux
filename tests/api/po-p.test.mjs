@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, sign, randomUUID, createHash } from 'node:crypto';
 import { ApiGateway } from '../../src/api/gateway.mjs';
 import { SessionError, SESSION_ERRORS } from '../../src/api/session-store.mjs';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
@@ -146,7 +146,7 @@ test('Grok-F02: توقيعٌ صحيحٌ لكلِّ طلبٍ يمرُّ', async (
   const kp = keyPair();
   gateway.registerPoPKey(AUDITOR, pubPem(kp));
   const session = await gateway.openSession(openRequest(AUDITOR, kp.privateKey));
-  const result = await callSigned(gateway, session.token, ROUTE, {}, kp.privateKey);
+  const result = await callSigned(gateway, session, ROUTE, {}, kp.privateKey);
   assert.equal(result.status, 'ok');
 });
 
@@ -155,18 +155,11 @@ test('Grok-F02: إعادةُ تشغيلِ التوقيعِ (replay) مرفوضة
   const kp = keyPair();
   gateway.registerPoPKey(AUDITOR, pubPem(kp));
   const session = await gateway.openSession(openRequest(AUDITOR, kp.privateKey));
-  const clock = () => new Date();
-  const timestamp = clock().toISOString();
+  const timestamp = new Date().toISOString();
   const nonce = randomUUID();
   const route = gateway.policy.routes.find((r) => r.id === ROUTE);
   if (route === undefined) throw new Error(`مسارٌ غيرُ معروف: ${ROUTE}`);
-  const canonical = [
-    route.method,
-    route.path,
-    route.action,
-    route.resource,
-    JSON.stringify({}),
-  ].join('|');
+  const canonical = canonicalPayload(route, session.sessionId, {});
   const message = `${canonical}|${timestamp}|${nonce}`;
   const signature = signWith(kp.privateKey, message);
   // الطلبُ الأوّلُ يمرُّ.
@@ -184,6 +177,31 @@ test('Grok-F02: إعادةُ تشغيلِ التوقيعِ (replay) مرفوضة
     }),
     (err) => err instanceof SessionError && err.code === SESSION_ERRORS.POP_REPLAY,
     'التوقيعُ نفسُه لا يُقبلُ مرّتَين — فإعادةُ التشغيلِ مرفوضةٌ.',
+  );
+});
+
+test('Grok-F02: لا يُعادُ تشغيلُ توقيعٍ بينَ جلستَينِ لنفسِ الفاعلِ', async () => {
+  const { gateway } = popGateway();
+  const kp = keyPair();
+  gateway.registerPoPKey(AUDITOR, pubPem(kp));
+  // الفاعلُ يفتحُ جلستَينِ؛ دفترُ nonce لكلِّ جلسةٍ منفصلٌ.
+  const first = await gateway.openSession(openRequest(AUDITOR, kp.privateKey));
+  const second = await gateway.openSession(openRequest(AUDITOR, kp.privateKey));
+  const route = gateway.policy.routes.find((r) => r.id === ROUTE);
+  if (route === undefined) throw new Error(`مسارٌ غيرُ معروف: ${ROUTE}`);
+  const timestamp = new Date().toISOString();
+  const nonce = randomUUID();
+  // توقيعٌ مرتبطٌ بمعرّفِ الجلسةِ الأولى لا يصلحُ للثانية.
+  const message = `${canonicalPayload(route, first.sessionId, {})}|${timestamp}|${nonce}`;
+  const signature = signWith(kp.privateKey, message);
+  await assert.rejects(
+    gateway.call({
+      route: ROUTE,
+      token: second.token,
+      pop: { signature, timestamp, nonce },
+    }),
+    (err) => err instanceof SessionError && err.code === SESSION_ERRORS.POP_INVALID,
+    'التوقيعُ مرتبطٌ بالجلسةِ؛ فلا يُعادُ تشغيلُه على جلسةٍ أخرى ولو كان الفاعلُ نفسَه.',
   );
 });
 
@@ -234,29 +252,38 @@ test('التوافقُ مع الإصدارِ: البوابةُ بلا requirePoP
 });
 
 /**
+ * الحمولةُ المتّفَقُ عليها — مطابقةٌ لِما تبنيهُ البوابةُ داخلًا: تضمُّ معرّفَ
+ * الجلسةِ كي يُربطَ التوقيعُ بجلسةٍ بعينِها، وتُهضَمُ المعاملاتُ بـsha256.
+ * @param {{ method: string, path: string, action: string, resource: string }} route
+ * @param {string} sessionId
+ * @param {Record<string, unknown>} params
+ * @returns {string}
+ */
+function canonicalPayload(route, sessionId, params) {
+  const digest = createHash('sha256')
+    .update(JSON.stringify(params ?? {}))
+    .digest('base64url');
+  return [route.method, route.path, route.action, route.resource, sessionId, digest].join('|');
+}
+
+/**
  * يبني طلبًا موقّعًا وينادي البوابةَ.
  * @param {ApiGateway} gateway
- * @param {string} token
+ * @param {{ token: string, sessionId: string }} session
  * @param {string} routeId
  * @param {Record<string, unknown>} params
  * @param {import('node:crypto').KeyObject} privateKey
  */
-async function callSigned(gateway, token, routeId, params, privateKey) {
+async function callSigned(gateway, session, routeId, params, privateKey) {
   const route = gateway.policy.routes.find((r) => r.id === routeId);
   if (route === undefined) throw new Error(`مسارٌ غيرُ معروف: ${routeId}`);
-  const canonical = [
-    route.method,
-    route.path,
-    route.action,
-    route.resource,
-    JSON.stringify(params),
-  ].join('|');
+  const canonical = canonicalPayload(route, session.sessionId, params);
   const timestamp = new Date().toISOString();
   const nonce = randomUUID();
   const message = `${canonical}|${timestamp}|${nonce}`;
   return gateway.call({
     route: routeId,
-    token,
+    token: session.token,
     params,
     pop: { signature: signWith(privateKey, message), timestamp, nonce },
   });
