@@ -16,7 +16,7 @@
 // وحاجبُ حجْرٍ، ومنفِّذُ التعافي **عمليّةً ابنةً** لا نداءَ دالّةٍ تُطمئن.
 
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, generateKeyPairSync } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -37,8 +37,10 @@ import {
   HaltSwitch,
   KingIdentity,
   LocalEncryptedKeyProvider,
+  haltAckPayload,
   loadKingKeySet,
   provisionKingKey,
+  signHaltAck,
 } from '../../src/root-of-trust/index.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -160,9 +162,19 @@ async function runHaltPhase(context) {
   const halt = new HaltSwitch(context.paths.halt, king, { fsync: false });
   context.state.halt = halt;
 
-  // عقدةٌ حيّةٌ بعمليّةٍ قائمةٍ فعلاً: بلا من يُقرُّ بالتوقّفِ لا معنى لقياسِ
-  // «رفضِ الاستئنافِ قبل الإقرار».
-  halt.registerNode(DRILL_NODE_ID, process.pid);
+  // GPT-F05: عقدةُ التمرينِ لها مفتاحها (Ed25519) كأيِّ عقدةٍ في التشغيل. المفتاحُ
+  // العامُّ يُسجَّل، والإقرارُ يُوقَّعُ به فوق (التجزئة، العهد، المعرّف) — فلا يُنتحَل.
+  const drillPair = generateKeyPairSync('ed25519');
+  const drillPrivateKeyPem = drillPair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const drillPublicKeyPem = drillPair.publicKey.export({ type: 'spki', format: 'pem' });
+  context.state.drillNodeKey = String(drillPrivateKeyPem);
+  halt.registerNode(DRILL_NODE_ID, {
+    pid: process.pid,
+    nodeKey: {
+      publicKeyPem: String(drillPublicKeyPem),
+      sign: (payload) => signHaltAck(String(drillPrivateKeyPem), payload),
+    },
+  });
   const directive = halt.halt('تمرين الطوارئ M11.07 — إيقاف سيادي مقيس');
   const reading = halt.read();
   if (reading.state !== 'halted' || reading.epoch <= 0) {
@@ -375,7 +387,13 @@ async function runResumePhase(context) {
     };
   }
   const haltEpoch = Number(context.state.haltEpoch ?? 0);
-  halt.confirmHalt(DRILL_NODE_ID, 'تمرين الطوارئ M11.07 — إقرارُ العقدةِ بالإيقاف');
+  // GPT-F05: يُوقّع الإقرارُ بمفتاح العقدة فوق (التجزئة، العهد، المعرّف).
+  const drillReading = halt.read();
+  const drillProof = signHaltAck(
+    String(context.state.drillNodeKey),
+    haltAckPayload(drillReading.directive?.hash ?? '', drillReading.epoch, DRILL_NODE_ID),
+  );
+  halt.confirmHalt(DRILL_NODE_ID, drillProof, 'تمرين الطوارئ M11.07 — إقرارُ العقدةِ بالإيقاف');
   const directive = halt.resume('تمرين الطوارئ M11.07 — استئناف بعد إقرار العقدة');
   const reading = halt.read();
   const historyOk = halt.verifyHistory().ok === true;

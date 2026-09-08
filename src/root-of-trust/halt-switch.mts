@@ -55,7 +55,14 @@ import {
   rmSync,
   writeSync,
 } from 'node:fs';
-import { createHash, createPublicKey, randomUUID, verify as verifySignature } from 'node:crypto';
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  randomUUID,
+  sign as signSignature,
+  verify as verifySignature,
+} from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fingerprint } from './identity.mjs';
 
@@ -123,6 +130,11 @@ export const HaltErrorCodes = [
   'UNKNOWN_HALT_NODE',
   'INVALID_HALT_NODE',
   'HALT_SIGNER_REQUIRED',
+  // GPT-F05: لا يُقبل إقرارٌ إلا أن يكون موقَّعاً من مفتاح العقدة المسجَّل،
+  // فلا يستطيع الانتقالَ عقدةٌ عن عقدةٍ أخرى، ولا يُقبل إقرارٌ منسوخٌ أو منقضٍ.
+  'HALT_NODE_KEY_REQUIRED',
+  'HALT_NODE_PROOF_REQUIRED',
+  'HALT_NODE_PROOF_INVALID',
 ] as const;
 
 export type HaltErrorCode = (typeof HaltErrorCodes)[number];
@@ -182,6 +194,71 @@ export interface HaltSigner extends HaltVerifier {
   sign(payload: object): string;
 }
 
+/**
+ * مفتاح عقدة (GPT-F05): العقدة تحمل المفتاح الخاصّ وتُقدّم العامّ عند التسجيل،
+ * وتوقّع إقرارها به. فلا يستطيع أحدٌ أن يُقرّ باسم عقدةٍ لا يملك مفتاحها، ولا
+ * يُقبل إقرارٌ منسوخٌ بين عقدتين. مطابقٌ في الترميز لتوقيع الملك: Ed25519،
+ * base64url، فوق تمثيلٍ كائنيّ منضبط.
+ */
+export interface HaltNodeKey {
+  /** المفتاح العام بترميز PEM — يُخزَّن في سجل العقدة. */
+  publicKeyPem: string;
+  /** يوقّع المادة الكائنية المنضبطة ويرجعها base64url. */
+  sign(payload: object): string;
+}
+
+/**
+ * يبني المادة الموقَّعة للإقرار: تجزئة التوجيه + العهد + معرّف العقدة. ربطُ
+ * الإقرار بالتوجيه والعهد هو ما يمنع إعادة استخدام إقرارٍ من عهدٍ منقضٍ أو
+ * توجيهٍ مُبدَّل. والترتيب مثبَّتٌ بالبناء كي لا تكسر إعادةُ ترتيب الحقول
+ * التواقيعَ المحفوظة.
+ * @param directiveHash - تجزئة التوجيه الذي يُقرّ به
+ * @param epoch - العهد الذي وقع فيه الإيقاف
+ * @param nodeId - العقدة المُقرّة
+ * @returns المادة المنضبطة الموقَّعة
+ */
+export function haltAckPayload(directiveHash: string, epoch: number, nodeId: string): object {
+  return [directiveHash, epoch, nodeId];
+}
+
+/**
+ * يتحقق من توقيع إقرار عقدة ضد مفتاحها العامّ المسجَّل. الفشل مغلق: كل ما لا
+ * يمكن التحقق منه يُرجع `false`، فلا تُسقِط عقدةٌ تالفةٌ الدولةَ.
+ * @param publicKeyPem - المفتاح العام للعقدة
+ * @param payload - المادة الموقَّعة كما استُلمت
+ * @param proof - التوقيع بترميز base64url
+ * @returns صحّة التوقيع
+ */
+export function verifyHaltAckProof(publicKeyPem: string, payload: object, proof: string): boolean {
+  if (typeof proof !== 'string' || proof === '') return false;
+  try {
+    const publicKey = createPublicKey(publicKeyPem);
+    return verifySignature(
+      null,
+      Buffer.from(JSON.stringify(payload)),
+      publicKey,
+      Buffer.from(proof, 'base64url'),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * يوقّع إقرار عقدة بمفتاحها الخاصّ — أداةٌ للاختبارات والأدوات. العقدة
+ * المنتجة توقّع بنفسها؛ هذه الدالة تُيسّر بناء الإثبات في الاختبارات.
+ * @param privateKeyPem - المفتاح الخاص للعقدة بترميز PEM
+ * @param payload - المادة الموقَّعة
+ * @returns التوقيع بترميز base64url
+ */
+export function signHaltAck(privateKeyPem: string, payload: object): string {
+  return signSignature(
+    null,
+    Buffer.from(JSON.stringify(payload)),
+    createPrivateKey(privateKeyPem),
+  ).toString('base64url');
+}
+
 /** أقلّ ما يُحتاج من سجل الأحداث؛ كُتب واجهةً كي لا تعتمد الوحدة على صنف بعينه. */
 export interface HaltEventSink {
   append(type: string, actor: string, data: object): unknown;
@@ -208,14 +285,20 @@ export interface HaltNodeRecord {
   nodeId: string;
   pid: number;
   at: string;
+  /** المفتاح العام للعقدة (GPT-F05) — بدونه لا يُقبل إقرارٌ منها. */
+  nodeKeyPem?: string;
 }
 
 /** إقرار عقدة بالتوقف في عهدٍ بعينه. */
 export interface HaltConfirmation {
   nodeId: string;
   epoch: number;
+  /** تجزئة التوجيه الذي أُقرّ به (GPT-F05) — يربط الإقرار بالتوجيه لا بالعقد وحده. */
+  directiveHash: string;
   pid: number;
   at: string;
+  /** توقيع العقدة على (تجزئة التوجيه، العهد، المعرّف) — لا يُقبل الإقرار بدونه. */
+  proof: string;
   detail?: string;
 }
 
@@ -493,13 +576,26 @@ export class HaltSwitch implements HaltGuard {
   /**
    * يسجّل عقدة تنفيذ: من يجب أن يُقرّ بالتوقف حتى يصير الإيقاف متحقَّقاً منه.
    * التسجيل يُحدَّث في كل إقلاع لأن رقم العملية يتغير.
+   *
+   * GPT-F05: يُقبل تسجيلٌ بمفتاح عقدة (Ed25519). المفتاح العامّ يُخزَّن في
+   * السجل، ولا يُقبل إقرارٌ من العقدة إلا أن يكون موقَّعاً بمفتاحها الخاصّ
+   * فوق (تجزئة التوجيه، العهد، المعرّف). فلا يستطيع أحدٌ أن يُقرّ باسم عقدةٍ لا
+   * يملك مفتاحها، ولا يُقبل إقرارٌ منسوخٌ من عقدةٍ أخرى. والعقدة بلا مفتاح
+   * تبقى معلَّقة لا تُقرّ — فالفشل مغلق: من لا يُثبت إقراره لا يُقبل منه.
    * @param nodeId - معرّف العقدة
-   * @param pid - رقم عمليتها
+   * @param options - رقم العملية، ومفتاح العقدة اختياريّ
    * @returns سجل العقدة
    */
-  registerNode(nodeId: string, pid: number = process.pid): HaltNodeRecord {
+  registerNode(
+    nodeId: string,
+    options: { pid?: number; nodeKey?: HaltNodeKey } = {},
+  ): HaltNodeRecord {
     const id = this.#assertNodeId(nodeId);
+    const pid = options.pid ?? process.pid;
     const record: HaltNodeRecord = { nodeId: id, pid, at: new Date().toISOString() };
+    if (options.nodeKey !== undefined) {
+      record.nodeKeyPem = options.nodeKey.publicKeyPem;
+    }
     this.#writeAtomic(join(this.nodesDir, this.#key(id) + '.json'), JSON.stringify(record) + '\n');
     return record;
   }
@@ -531,42 +627,85 @@ export class HaltSwitch implements HaltGuard {
   /**
    * إقرار عقدة بالتوقف في العهد الجاري. الإقرار ثابت: نداءٌ ثانٍ لا يُنشئ
    * إقراراً ثانياً ولا يُبدّل وقت الأول، لأن وقت التوقف هو الأول لا الأخير.
+   *
+   * GPT-F05: لا يُقبل الإقرار إلا أن يكون موقَّعاً من مفتاح العقدة المسجَّل،
+   * فوق (تجزئة التوجيه، العهد، المعرّف). فيتحقق:
+   *   • عقدةٌ بلا مفتاح مسجَّل ⇒ `HALT_NODE_KEY_REQUIRED` (تبقى معلَّقة).
+   *   • إقرارٌ بلا إثبات ⇒ `HALT_NODE_PROOF_REQUIRED`.
+   *   • إثباتٌ لا يطابق مفتاح العقدة فوق المادة المنضبطة ⇒ `HALT_NODE_PROOF_INVALID`.
+   * والإقرار الموجود يُعاد التحقق منه عند القراءة، فلا يُقبل ملفٌ منسوخٌ من
+   * عقدةٍ أخرى: تواقيعها لا تُطابق مفتاح هذه العقدة.
    * @param nodeId - معرّف العقدة
+   * @param proof - توقيع العقدة على (التجزئة، العهد، المعرّف) بترميز base64url
    * @param detail - تفصيل تشغيلي يُسجَّل (كعدد الأفعال المرفوضة)
    * @returns الإقرار المحفوظ
    */
-  confirmHalt(nodeId: string, detail?: string): HaltConfirmation {
+  confirmHalt(nodeId: string, proof?: string, detail?: string): HaltConfirmation {
     const id = this.#assertNodeId(nodeId);
     const reading = this.read();
     if (reading.state !== 'halted') {
       throw new HaltError('HALT_NOT_HALTED', { epoch: reading.epoch });
     }
-    if (!existsSync(join(this.nodesDir, this.#key(id) + '.json'))) {
+    const nodeRecord = this.#readJson<HaltNodeRecord>(join(this.nodesDir, this.#key(id) + '.json'));
+    if (nodeRecord === null || typeof nodeRecord.nodeId !== 'string') {
       throw new HaltError('UNKNOWN_HALT_NODE', { detail: id });
     }
+    if (typeof nodeRecord.nodeKeyPem !== 'string' || nodeRecord.nodeKeyPem === '') {
+      throw new HaltError('HALT_NODE_KEY_REQUIRED', { detail: id });
+    }
+    const directiveHash = reading.directive?.hash ?? '';
+    const payload = haltAckPayload(directiveHash, reading.epoch, id);
+    if (typeof proof !== 'string' || proof === '') {
+      throw new HaltError('HALT_NODE_PROOF_REQUIRED', { detail: id });
+    }
+    if (!verifyHaltAckProof(nodeRecord.nodeKeyPem, payload, proof)) {
+      throw new HaltError('HALT_NODE_PROOF_INVALID', { detail: id });
+    }
     const path = this.#ackPath(id, reading.epoch);
+    // إن وُجد إقرارٌ صحيحٌ لهذه العقدة فوق مادته، أُعيد كما هو — فالإقرار ثابتٌ لا
+    // يُبدّل وقتُه. وإن وُجد ملفٌ غيرُ صالحٍ (منسوخٌ من عقدةٍ أخرى، أو معبثٌ به)،
+    // عُدّ كأنه غائبٌ وكُتب فوقه: لا يُسمح لملفٍ مزيفٍ أن يحبس عقدةً في pending.
     const existing = this.#readJson<HaltConfirmation>(path);
-    if (existing !== null) return existing;
+    if (existing !== null && this.#ackProofValid(existing, nodeRecord.nodeKeyPem)) {
+      return existing;
+    }
     const confirmation: HaltConfirmation = {
       nodeId: id,
       epoch: reading.epoch,
+      directiveHash,
       pid: process.pid,
       at: new Date().toISOString(),
+      proof,
     };
     if (detail !== undefined) confirmation.detail = detail;
-    try {
-      this.#createExclusive(path, JSON.stringify(confirmation) + '\n');
-    } catch (error) {
-      if ((error as { code?: string }).code !== 'EEXIST') throw error;
-      const raced = this.#readJson<HaltConfirmation>(path);
-      if (raced !== null) return raced;
-    }
+    this.#writeAtomic(path, JSON.stringify(confirmation) + '\n');
     this.#log?.append('halt.confirmed', id, { epoch: confirmation.epoch });
     return confirmation;
   }
 
   /**
+   * يتحقق من أن إقراراً مقروءاً موقَّعٌ بمفتاح عقدته فوق مادته المنضبطة. هو
+   * ما يمنع قبول ملفٍ منسوخٍ من عقدةٍ أخرى: تواقيعها لا تُطابق مفتاح هذه.
+   * @param confirmation - الإقرار المقروء
+   * @param publicKeyPem - المفتاح العام للعقدة المسجَّلة
+   * @returns صحّة الإثبات
+   */
+  #ackProofValid(confirmation: HaltConfirmation, publicKeyPem: string): boolean {
+    if (typeof confirmation.proof !== 'string') return false;
+    const payload = haltAckPayload(
+      confirmation.directiveHash,
+      confirmation.epoch,
+      confirmation.nodeId,
+    );
+    return verifyHaltAckProof(publicKeyPem, payload, confirmation.proof);
+  }
+
+  /**
    * إقرارات عهدٍ بعينه — والافتراض العهد الجاري.
+   *
+   * GPT-F05: لا يُحسب إقرارٌ إلا أن يكون موقَّعاً بمفتاح عقدته. فملفٌ منسوخٌ
+   * من عقدةٍ أخرى — تواقيعها لا تُطابق مفتاح هذه — يُستبعد، فلا يُنتحَل
+   * إقرارٌ من عقدةٍ على عقدةٍ أخرى.
    * @param epoch - العهد المطلوب
    * @returns الإقرارات مرتَّبة بأوقاتها
    */
@@ -576,9 +715,25 @@ export class HaltSwitch implements HaltGuard {
       if (name.startsWith('.')) continue;
       const record = this.#readJson<HaltConfirmation>(join(this.acksDir, name));
       if (record === null || record.epoch !== epoch) continue;
+      if (!this.#ackProofValidFor(record)) continue;
       found.push(record);
     }
     return found.sort((left, right) => left.at.localeCompare(right.at));
+  }
+
+  /**
+   * يتحقق من إثبات إقرارٍ مقروء ضد مفتاح عقدته المسجَّلة. يربط ملف الإقرار
+   * بالعقدة التي تدّعيه، لا بالمسار وحده.
+   * @param confirmation - الإقرار المقروء
+   * @returns صحّة الإثبات
+   */
+  #ackProofValidFor(confirmation: HaltConfirmation): boolean {
+    if (typeof confirmation.nodeId !== 'string') return false;
+    const nodeRecord = this.#readJson<HaltNodeRecord>(
+      join(this.nodesDir, this.#key(confirmation.nodeId) + '.json'),
+    );
+    if (nodeRecord === null || typeof nodeRecord.nodeKeyPem !== 'string') return false;
+    return this.#ackProofValid(confirmation, nodeRecord.nodeKeyPem);
   }
 
   /**
@@ -900,21 +1055,6 @@ export class HaltSwitch implements HaltGuard {
     }
     renameSync(temporary, path);
     this.#fsyncDir(dirname(path));
-  }
-
-  /**
-   * يُنشئ ملفاً إنشاءً حصرياً؛ يفشل بـ`EEXIST` إن سبقه غيره.
-   * @param path - المسار
-   * @param text - المحتوى
-   */
-  #createExclusive(path: string, text: string): void {
-    const fd = openSync(path, 'wx');
-    try {
-      this.#writeAll(fd, text);
-      if (this.#fsync) fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
   }
 
   /**

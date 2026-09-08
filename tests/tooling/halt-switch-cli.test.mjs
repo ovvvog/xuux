@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -21,6 +21,7 @@ import {
   kingKeyProviderFromEnv,
   loadKingKeySet,
   provisionKingKey,
+  signHaltAck,
 } from '../../src/root-of-trust/index.mjs';
 import { formatDescription, parseArgs, readConfig } from '../../scripts/halt-switch.mjs';
 import { scanPathForKeys } from '../../scripts/scan-private-keys.mjs';
@@ -30,6 +31,21 @@ const cli = join(repoRoot, 'scripts/halt-switch.mjs');
 
 /** @type {string[]} */
 const directories = [];
+
+/**
+ * يولّد مفتاح عقدة (Ed25519) ويكتب خاصّه إلى ملف PEM — كما تفعل العقدة في
+ * التشغيل. هو ما يُتيح اختبار أمر confirm بمفتاحٍ موقَّع به (GPT-F05).
+ * @param {string} directory - مجلد الكتابة
+ * @returns {{ privateKeyPem: string, publicKeyPem: string, keyFile: string }} مفتاح العقدة وملفه
+ */
+function nodeKeyFile(directory) {
+  const pair = generateKeyPairSync('ed25519');
+  const privateKeyPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const publicKeyPem = pair.publicKey.export({ type: 'spki', format: 'pem' });
+  const keyFile = join(directory, 'node.key.pem');
+  writeFileSync(keyFile, privateKeyPem, { mode: 0o600 });
+  return { privateKeyPem: String(privateKeyPem), publicKeyPem: String(publicKeyPem), keyFile };
+}
 
 /**
  * يهيّئ بيئة معزولة: مخزن مفاتيح مزوَّد وملف توجيه داخله.
@@ -87,10 +103,23 @@ test('فكّ الوسائط يقبل المعروف ويرفض المجهول و
     command: 'halt',
     json: true,
     reason: 'سبب',
+    nodeKeyFile: null,
   });
-  assert.deepEqual(parseArgs([]), { command: 'status', json: false, reason: null });
+  assert.deepEqual(parseArgs([]), {
+    command: 'status',
+    json: false,
+    reason: null,
+    nodeKeyFile: null,
+  });
+  assert.deepEqual(parseArgs(['confirm', '--node-key', '/k.pem']), {
+    command: 'confirm',
+    json: false,
+    reason: null,
+    nodeKeyFile: '/k.pem',
+  });
   assert.throws(() => parseArgs(['halt', '--force']), /وسيط غير معروف/);
   assert.throws(() => parseArgs(['halt', '--reason']), /--reason بلا قيمة/);
+  assert.throws(() => parseArgs(['confirm', '--node-key']), /--node-key بلا قيمة/);
 });
 
 test('الإعداد يُقرأ من البيئة ولا يُخترع مسار افتراضي لزرّ إيقاف', () => {
@@ -99,6 +128,9 @@ test('الإعداد يُقرأ من البيئة ولا يُخترع مسار �
   assert.equal(config.file, '/tmp/halt.json');
   assert.equal(config.nodeId, 'node-1');
   assert.equal(config.publicKeyFile, null);
+  assert.equal(config.nodeKeyFile, null);
+  const withKey = readConfig({ HALT_SWITCH_FILE: '/tmp/halt.json', HALT_NODE_KEY_FILE: '/k.pem' });
+  assert.equal(withKey.nodeKeyFile, '/k.pem');
 });
 
 test('التقرير النصي يُظهر الحالة والعهد والعقد التي لم تُقرّ', () => {
@@ -135,12 +167,19 @@ test('دورة كاملة من سطر الأوامر: حالة ثم إيقاف �
   // عقدة حيّة مسجَّلة تمنع الاستئناف حتى تُقرّ — الإيقاف متحقَّق منه لا مظنون.
   const king = await loadKingKeySet(kingKeyProviderFromEnv(env));
   const halt = new HaltSwitch(file, king);
-  halt.registerNode('node-live', process.pid);
+  const node = nodeKeyFile(env['KING_KEY_DIR'] ?? '/tmp');
+  halt.registerNode('node-live', {
+    pid: process.pid,
+    nodeKey: { publicKeyPem: node.publicKeyPem, sign: (p) => signHaltAck(node.privateKeyPem, p) },
+  });
   const blocked = runCli(['resume'], env);
   assert.equal(blocked.status, 1);
   assert.match(blocked.stderr, /HALT_NOT_CONFIRMED/);
 
-  const confirmed = runCli(['confirm', '--json'], { ...env, HALT_NODE_ID: 'node-live' });
+  const confirmed = runCli(['confirm', '--node-key', node.keyFile, '--json'], {
+    ...env,
+    HALT_NODE_ID: 'node-live',
+  });
   assert.equal(confirmed.status, 0);
   assert.equal(JSON.parse(confirmed.stdout).confirmation.epoch, 1);
 
@@ -162,6 +201,14 @@ test('أمر confirm بلا معرّف عقدة يُرفض', async () => {
   assert.match(failure.stderr, /HALT_NODE_ID/);
 });
 
+test('أمر confirm بلا مفتاح عقدة يُرفض (GPT-F05)', async () => {
+  const { env } = await environment();
+  runCli(['halt'], env);
+  const failure = runCli(['confirm'], { ...env, HALT_NODE_ID: 'node-bare' });
+  assert.equal(failure.status, 1);
+  assert.match(failure.stderr, /HALT_NODE_KEY_FILE/);
+});
+
 test('وضع المفتاح العام يقرأ ويُقرّ ولا يُصدر إيقافاً', async () => {
   const { env, directory, file } = await environment();
   const king = await loadKingKeySet(kingKeyProviderFromEnv(env));
@@ -181,7 +228,11 @@ test('وضع المفتاح العام يقرأ ويُقرّ ولا يُصدر �
   runCli(['halt', '--reason', 'إيقاف من الملك'], env);
   const status = runCli(['status', '--json'], nodeEnv);
   assert.equal(JSON.parse(status.stdout).state, 'halted');
-  const confirmed = runCli(['confirm', '--json'], { ...nodeEnv, HALT_NODE_ID: 'node-public' });
+  const node = nodeKeyFile(directory);
+  const confirmed = runCli(['confirm', '--node-key', node.keyFile, '--json'], {
+    ...nodeEnv,
+    HALT_NODE_ID: 'node-public',
+  });
   assert.equal(confirmed.status, 0);
   const cannotResume = runCli(['resume'], nodeEnv);
   assert.equal(cannotResume.status, 1);

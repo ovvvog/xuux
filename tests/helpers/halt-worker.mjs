@@ -15,6 +15,7 @@
 // تُنفّذ فعلاً **بعد** لحظة إقرارها بالتوقف.
 
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { generateKeyPairSync } from 'node:crypto';
 import {
   CertificateAuthority,
   EventLog,
@@ -22,7 +23,9 @@ import {
   HaltSwitch,
   KingIdentity,
   createRoyalCommand,
+  haltAckPayload,
   royalVerifierFromPublicKey,
+  signHaltAck,
 } from '../../src/root-of-trust/index.mjs';
 import { ExecutionKernel } from '../../src/core/execution-kernel.mjs';
 
@@ -43,7 +46,19 @@ if (!haltFile || !publicKeyPath || !nodeId || !outFile || !stopFile) {
 
 const verifier = royalVerifierFromPublicKey(readFileSync(publicKeyPath, 'utf8'));
 const halt = new HaltSwitch(haltFile, verifier, { fsync: false });
-halt.registerNode(nodeId);
+
+// GPT-F05: لكل عقدةٍ مفتاحها الخاصّ (Ed25519) لا تُفشي معه أحد. المفتاح العامّ
+// يُسجَّل فيُصير إقرارها موقَّعاً لا منتَحَلاً: من لا يملك مفتاح العقدة لا يستطيع
+// أن يُقرّ باسمها، ولا يُقبل ملفٌ منسوخٌ من عقدةٍ أخرى.
+const nodeKeyPair = generateKeyPairSync('ed25519');
+const nodePrivateKeyPem = nodeKeyPair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+const nodePublicKeyPem = nodeKeyPair.publicKey.export({ type: 'spki', format: 'pem' });
+halt.registerNode(nodeId, {
+  nodeKey: {
+    publicKeyPem: String(nodePublicKeyPem),
+    sign: (payload) => signHaltAck(String(nodePrivateKeyPem), payload),
+  },
+});
 
 // تاجٌ ونواةٌ محليّان لهذه العقدة، موصولان بمفتاح الإيقاف المشترك.
 const localKing = new KingIdentity();
@@ -115,8 +130,15 @@ async function attempt() {
 function acknowledge() {
   const reading = halt.read();
   if (reading.state !== 'halted' || ackedEpochs.has(reading.epoch)) return;
+  // GPT-F05: يوقّع الإقرار بمفتاح العقدة فوق (تجزئة التوجيه، العهد، المعرّف)،
+  // فلا يُقبل إلا من العقدة التي تملك مفتاحها.
+  const directiveHash = reading.directive?.hash ?? '';
+  const proof = signHaltAck(
+    String(nodePrivateKeyPem),
+    haltAckPayload(directiveHash, reading.epoch, nodeId),
+  );
   try {
-    halt.confirmHalt(nodeId, `توقفت عند الفعل ${seq + 1}`);
+    halt.confirmHalt(nodeId, proof, `توقفت عند الفعل ${seq + 1}`);
   } catch (error) {
     if (/** @type {{ code?: string }} */ (error)?.code === 'HALT_NOT_HALTED') return;
     throw error;

@@ -7,7 +7,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { generateKeyPairSync, createHash } from 'node:crypto';
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,18 +23,49 @@ import {
   CrownGateway,
   EventLog,
   GENESIS_DIRECTIVE_HASH,
+  HALT_ACKS_SUFFIX,
   HALT_EPOCH_SUFFIX,
   HALT_HISTORY_SUFFIX,
   HaltError,
   HaltSwitch,
   KingIdentity,
   createRoyalCommand,
+  haltAckPayload,
   hashHaltBody,
   royalVerifierFromPublicKey,
+  signHaltAck,
 } from '../../src/root-of-trust/index.mjs';
 import { ExecutionKernel } from '../../src/core/execution-kernel.mjs';
 
 const WORKER = new URL('../helpers/halt-worker.mjs', import.meta.url).pathname;
+
+/**
+ * يولّد مفتاح عقدة (Ed25519) للاختبارات: خاصّ يُوقّع به، وعامّ يُسجَّل به. وهو
+ * ما يُتيح إثبات أن إقرار العقدة لا يُنتحَل (GPT-F05).
+ * @returns {{ publicKeyPem: string, privateKeyPem: string, sign: (payload: object) => string }} مفتاح العقدة
+ */
+function nodeKey() {
+  const pair = generateKeyPairSync('ed25519');
+  const privateKeyPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const publicKeyPem = pair.publicKey.export({ type: 'spki', format: 'pem' });
+  return {
+    publicKeyPem: String(publicKeyPem),
+    privateKeyPem: String(privateKeyPem),
+    sign: (payload) => signHaltAck(String(privateKeyPem), payload),
+  };
+}
+
+/**
+ * يوقّع إقرار عقدة لمفتاح إيقافٍ وعقدةٍ بعينها — فوق (التجزئة، العهد، المعرّف).
+ * @param {ReturnType<typeof nodeKey>} key - مفتاح العقدة
+ * @param {import('../../src/root-of-trust/halt-switch.mjs').HaltReading} reading - قراءة التوجيه
+ * @param {string} nodeId - العقدة
+ * @returns {string} الإثبات بترميز base64url
+ */
+function ackProofFor(key, reading, nodeId) {
+  const directiveHash = reading.directive?.hash ?? '';
+  return signHaltAck(key.privateKeyPem, haltAckPayload(directiveHash, reading.epoch, nodeId));
+}
 
 /**
  * يهيئ مجلداً مؤقتاً وملكاً ومفتاح إيقاف عليه.
@@ -192,12 +231,17 @@ test('استئناف دولة تعمل يُرفض', (t) => {
 test('عقدة حيّة لم تُقرّ تمنع الاستئناف، والإقرار يفتحه', (t) => {
   const { dir, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  halt.registerNode('node-alive', process.pid);
+  const key = nodeKey();
+  halt.registerNode('node-alive', { pid: process.pid, nodeKey: key });
   halt.halt('إيقاف متحقَّق منه');
   const rejected = capture(() => halt.resume());
   assert.equal(rejected instanceof HaltError ? rejected.code : null, 'HALT_NOT_CONFIRMED');
   assert.deepEqual(rejected instanceof HaltError ? rejected.pending : null, ['node-alive']);
-  const confirmation = halt.confirmHalt('node-alive', 'رفضت فعلين');
+  const confirmation = halt.confirmHalt(
+    'node-alive',
+    ackProofFor(key, halt.read(), 'node-alive'),
+    'رفضت فعلين',
+  );
   assert.equal(confirmation.epoch, 1);
   assert.equal(confirmation.detail, 'رفضت فعلين');
   assert.deepEqual(
@@ -211,7 +255,7 @@ test('عقدة حيّة لم تُقرّ تمنع الاستئناف، والإق
 test('عقدة ميتة لا تمنع الاستئناف — موتها إقرار بأنها لا تُنفّذ', (t) => {
   const { dir, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  halt.registerNode('node-dead', deadPid());
+  halt.registerNode('node-dead', { pid: deadPid() });
   halt.halt();
   const pending = halt.pendingConfirmations();
   assert.equal(pending.length, 1);
@@ -223,10 +267,12 @@ test('عقدة ميتة لا تمنع الاستئناف — موتها إقرا
 test('الإقرار ثابت: نداء ثانٍ لا يُبدّل وقت التوقف الأول', (t) => {
   const { dir, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  halt.registerNode('node-1', process.pid);
+  const key = nodeKey();
+  halt.registerNode('node-1', { pid: process.pid, nodeKey: key });
   halt.halt();
-  const first = halt.confirmHalt('node-1');
-  const second = halt.confirmHalt('node-1');
+  const proof = ackProofFor(key, halt.read(), 'node-1');
+  const first = halt.confirmHalt('node-1', proof);
+  const second = halt.confirmHalt('node-1', proof);
   assert.deepEqual(second, first);
   assert.equal(halt.confirmations(1).length, 1);
 });
@@ -238,7 +284,7 @@ test('إقرار عقدة غير مسجَّلة يُرفض، وإقرار في �
   const unknown = capture(() => halt.confirmHalt('ghost'));
   assert.equal(unknown instanceof HaltError ? unknown.code : null, 'UNKNOWN_HALT_NODE');
   halt.resume();
-  halt.registerNode('node-1', process.pid);
+  halt.registerNode('node-1', { pid: process.pid });
   const notHalted = capture(() => halt.confirmHalt('node-1'));
   assert.equal(notHalted instanceof HaltError ? notHalted.code : null, 'HALT_NOT_HALTED');
 });
@@ -253,8 +299,8 @@ test('معرّف عقدة فارغ يُرفض — عقدة بلا اسم تُس�
 test('شطب التسجيل يزيل العقدة من قائمة من يجب أن يُقرّ', (t) => {
   const { dir, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  halt.registerNode('node-1', process.pid);
-  halt.registerNode('node-2', process.pid);
+  halt.registerNode('node-1', { pid: process.pid });
+  halt.registerNode('node-2', { pid: process.pid });
   assert.equal(halt.nodes().length, 2);
   halt.unregisterNode('node-1');
   assert.deepEqual(
@@ -279,8 +325,176 @@ test('العقدة تحمل المفتاح العام وحده: تقرأ وتُ�
     cannotResume instanceof HaltError ? cannotResume.code : null,
     'HALT_SIGNER_REQUIRED',
   );
-  nodeSwitch.registerNode('node-public', process.pid);
-  assert.equal(nodeSwitch.confirmHalt('node-public').epoch, 1);
+  const nodeKeyPair = nodeKey();
+  nodeSwitch.registerNode('node-public', { pid: process.pid, nodeKey: nodeKeyPair });
+  const nodeKeyRecord = nodeSwitch.nodes().find((n) => n.nodeId === 'node-public');
+  assert.ok(nodeKeyRecord && nodeKeyRecord.nodeKeyPem, 'سُجّل مفتاح العقدة العام');
+  // العقدة تحمل المفتاح العام وحده فلا توقّع بنفسها؛ تُوقّع في الاختبار بمفتاحها.
+  const proof = signHaltAck(
+    nodeKeyPair.privateKeyPem,
+    haltAckPayload(halt.read().directive?.hash ?? '', nodeSwitch.read().epoch, 'node-public'),
+  );
+  assert.equal(nodeSwitch.confirmHalt('node-public', proof).epoch, 1);
+});
+
+// ─── GPT-F05: اختبارات الخصم — منع انتحال العقدة ونسخ الإقرار ───────────────
+// شرط الإغلاق الذي طلبه المجلس: «عمليتان حقيقيتان بمفتاحي عقدة مختلفين؛ تحاول A
+// تأكيد B، وتحاول إعادة إقرار من epoch سابق، وتبديل directiveHash، ونسخ ملف
+// إقرار. يجب أن يبقى B في pending في كل حالة». كلٌّ من هذه يُثبت أن الإقرار
+// لا يُقبل إلا من العقدة التي تملك مفتاحها فوق (التجزئة، العهد، المعرّف).
+
+/**
+ * يبني مسار ملف إقرار عقدة في عهد — مطابقاً لما يستخدمه HaltSwitch داخلياً.
+ * @param {string} file - ملف التوجيه
+ * @param {string} nodeId - العقدة
+ * @param {number} epoch - العهد
+ * @returns {string} مسار ملف الإقرار
+ */
+function ackPathFor(file, nodeId, epoch) {
+  const dir = file + HALT_ACKS_SUFFIX;
+  const key = createHash('sha256').update(nodeId).digest('hex').slice(0, 32);
+  return join(dir, `${key}-${epoch}.json`);
+}
+
+test('GPT-F05: عقدة بلا مفتاح لا يُقبل إقرارها — تبقى معلَّقة', (t) => {
+  const { dir, halt } = setup();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  halt.registerNode('node-bare', { pid: process.pid });
+  halt.halt('إيقاف بلا مفتاح');
+  // بلا مفتاح مسجَّل: لا إثبات يُغني — الفشل مغلق، العقدة تبقى معلَّقة.
+  const noProof = capture(() => halt.confirmHalt('node-bare'));
+  assert.equal(noProof instanceof HaltError ? noProof.code : null, 'HALT_NODE_KEY_REQUIRED');
+  const withBogus = capture(() => halt.confirmHalt('node-bare', 'إثباتٌ مزيف'));
+  assert.equal(withBogus instanceof HaltError ? withBogus.code : null, 'HALT_NODE_KEY_REQUIRED');
+  assert.equal(halt.isFullyConfirmed(), false);
+  assert.deepEqual(
+    halt.pendingConfirmations().map((n) => n.nodeId),
+    ['node-bare'],
+  );
+});
+
+test('GPT-F05: عقدة بمفتاح تُرفض إن لم تُقدّم إثباتاً صحيحاً', (t) => {
+  const { dir, halt } = setup();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const key = nodeKey();
+  halt.registerNode('node-keyed', { pid: process.pid, nodeKey: key });
+  halt.halt('إيقاف لاختبار الإثبات');
+  const missing = capture(() => halt.confirmHalt('node-keyed'));
+  assert.equal(missing instanceof HaltError ? missing.code : null, 'HALT_NODE_PROOF_REQUIRED');
+  const bogus = capture(() => halt.confirmHalt('node-keyed', 'إثباتٌ لا يطابق'));
+  assert.equal(bogus instanceof HaltError ? bogus.code : null, 'HALT_NODE_PROOF_INVALID');
+  assert.deepEqual(
+    halt.pendingConfirmations().map((n) => n.nodeId),
+    ['node-keyed'],
+  );
+});
+
+test('GPT-F05: A لا يستطيع أن يُقرّ باسم B — التواقيع لا تتطابق', (t) => {
+  const { dir, halt } = setup();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keyA = nodeKey();
+  const keyB = nodeKey();
+  halt.registerNode('node-a', { pid: process.pid, nodeKey: keyA });
+  halt.registerNode('node-b', { pid: process.pid, nodeKey: keyB });
+  halt.halt('إيقاف لمنع الانتحال');
+  // A يوقّع إقرار B بمفتاح A لا بمفتاح B — فيجب أن يُرفض.
+  const forgedProof = ackProofFor(keyA, halt.read(), 'node-b');
+  const forged = capture(() => halt.confirmHalt('node-b', forgedProof));
+  assert.equal(forged instanceof HaltError ? forged.code : null, 'HALT_NODE_PROOF_INVALID');
+  assert.deepEqual(
+    halt.confirmations(1).map((r) => r.nodeId),
+    [],
+  );
+  assert.deepEqual(
+    halt.pendingConfirmations().map((n) => n.nodeId),
+    ['node-a', 'node-b'],
+  );
+  // ثم يُقرّ B بمفتاحه فيُقبل — ليثبت أن الرفض كان للانتحال لا لخطأٍ آخر.
+  const valid = halt.confirmHalt('node-b', ackProofFor(keyB, halt.read(), 'node-b'));
+  assert.equal(valid.nodeId, 'node-b');
+  assert.deepEqual(
+    halt.confirmations(1).map((r) => r.nodeId),
+    ['node-b'],
+  );
+});
+
+test('GPT-F05: إقرارٌ من عهدٍ منقضٍ لا يُعاد استخدامه في عهدٍ جديد', (t) => {
+  const { dir, halt } = setup();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const key = nodeKey();
+  halt.registerNode('node-1', { pid: process.pid, nodeKey: key });
+  halt.halt('الإيقاف الأول');
+  const proofEpoch1 = ackProofFor(key, halt.read(), 'node-1');
+  halt.confirmHalt('node-1', proofEpoch1);
+  assert.equal(halt.isFullyConfirmed(), true);
+  // استئناف ثم إيقاف ثانٍ — عهدٌ جديد وتوجيهٌ جديد بتجزئةٍ مختلفة.
+  halt.resume('استئناف');
+  halt.halt('الإيقاف الثاني');
+  assert.equal(halt.read().epoch, 3);
+  // إثبات العهد المنقضى فوق المادة الجديدة لا يطابق — تجزئة التوجيه وعهده مختلفان.
+  const stale = capture(() => halt.confirmHalt('node-1', proofEpoch1));
+  assert.equal(stale instanceof HaltError ? stale.code : null, 'HALT_NODE_PROOF_INVALID');
+  assert.equal(halt.isFullyConfirmed(), false);
+  assert.deepEqual(
+    halt.pendingConfirmations().map((n) => n.nodeId),
+    ['node-1'],
+  );
+});
+
+test('GPT-F05: تبديل directiveHash في ملف الإقرار يُسقطه — لا يُحسب', (t) => {
+  const { dir, file, halt } = setup();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const key = nodeKey();
+  halt.registerNode('node-1', { pid: process.pid, nodeKey: key });
+  halt.halt('إيقاف قبل العبث');
+  halt.confirmHalt('node-1', ackProofFor(key, halt.read(), 'node-1'));
+  assert.equal(halt.isFullyConfirmed(), true);
+  // عبث: تُبدَّل تجزئة التوجيه في ملف الإقرار. التواقيع لم تَعُد تتطابق.
+  const path = ackPathFor(file, 'node-1', 1);
+  const tampered = JSON.parse(readFileSync(path, 'utf8'));
+  tampered.directiveHash = 'تجزئةٌ مزيفة';
+  writeFileSync(path, JSON.stringify(tampered) + '\n');
+  assert.equal(halt.confirmations(1).length, 0);
+  assert.equal(halt.isFullyConfirmed(), false);
+  assert.deepEqual(
+    halt.pendingConfirmations().map((n) => n.nodeId),
+    ['node-1'],
+  );
+});
+
+test('GPT-F05: نسخ ملف إقرار A إلى مسار B لا يُنسبه إلى B', (t) => {
+  const { dir, file, halt } = setup();
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const keyA = nodeKey();
+  const keyB = nodeKey();
+  halt.registerNode('node-a', { pid: process.pid, nodeKey: keyA });
+  halt.registerNode('node-b', { pid: process.pid, nodeKey: keyB });
+  halt.halt('إيقاف لاختبار النسخ');
+  // يُقرّ A بمفتاحه فيُقبل.
+  halt.confirmHalt('node-a', ackProofFor(keyA, halt.read(), 'node-a'));
+  assert.deepEqual(
+    halt.confirmations(1).map((r) => r.nodeId),
+    ['node-a'],
+  );
+  // نسخ: يُوضع ملف إقرار A في مسار B. محتواه يُنسب إلى A (معرّفه داخله)،
+  // فلا يُنسب الإقرار إلى B — تبقى B معلَّقة لا يُعفيها ملفٌ لا توقيع فيه لها.
+  const src = ackPathFor(file, 'node-a', 1);
+  const dst = ackPathFor(file, 'node-b', 1);
+  copyFileSync(src, dst);
+  assert.deepEqual(
+    halt.confirmations(1).map((r) => r.nodeId),
+    ['node-a', 'node-a'],
+    'الملف المنسوخ يُنسب إلى صاحب التوقيع لا إلى المسار',
+  );
+  assert.deepEqual(
+    halt.pendingConfirmations().map((n) => n.nodeId),
+    ['node-b'],
+    'B تبقى معلَّقة رغم الملف المنسوخ',
+  );
+  // ولا يُقبل إقرار B لاحقاً إلا بمفتاح B — لا بالملف المنسوخ.
+  const valid = halt.confirmHalt('node-b', ackProofFor(keyB, halt.read(), 'node-b'));
+  assert.equal(valid.nodeId, 'node-b');
+  assert.equal(halt.isFullyConfirmed(), true);
 });
 
 test('توجيه تالف يُقرأ موقوفاً لا عاملاً', (t) => {
@@ -422,7 +636,7 @@ test('ذيل تاريخ مقطوع يُتجاوز ولا يُسقط التحقق
 test('توجيه معطوب: الاستئناف يستعيد الدولة في عهد جديد بلا إقرارات عهدٍ مجهول', (t) => {
   const { dir, file, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  halt.registerNode('node-alive', process.pid);
+  halt.registerNode('node-alive', { pid: process.pid, nodeKey: nodeKey() });
   halt.halt();
   writeFileSync(file, 'محتوى معطوب');
   assert.equal(halt.read().problem, 'CORRUPT_HALT_DIRECTIVE');
@@ -437,9 +651,10 @@ test('الوقائع تُثبت في سجل الأحداث: إصدار وإقر�
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const log = new EventLog();
   const halt = new HaltSwitch(file, king, { fsync: false, log });
-  halt.registerNode('node-1', process.pid);
+  const key = nodeKey();
+  halt.registerNode('node-1', { pid: process.pid, nodeKey: key });
   halt.halt('سبب مسجَّل');
-  halt.confirmHalt('node-1');
+  halt.confirmHalt('node-1', ackProofFor(key, halt.read(), 'node-1'));
   halt.resume('استئناف مسجَّل');
   const types = log.events.map((event) => event.type);
   assert.deepEqual(types, ['halt.issued', 'halt.confirmed', 'halt.resumed']);
@@ -448,10 +663,11 @@ test('الوقائع تُثبت في سجل الأحداث: إصدار وإقر�
 test('الخلاصة تعرض الحالة والعقد والإقرارات والمعلَّقات', (t) => {
   const { dir, halt } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  halt.registerNode('node-1', process.pid);
-  halt.registerNode('node-2', process.pid);
+  const key = nodeKey();
+  halt.registerNode('node-1', { pid: process.pid, nodeKey: key });
+  halt.registerNode('node-2', { pid: process.pid, nodeKey: nodeKey() });
   halt.halt('للخلاصة');
-  halt.confirmHalt('node-1');
+  halt.confirmHalt('node-1', ackProofFor(key, halt.read(), 'node-1'));
   const description = halt.describe();
   assert.equal(description.state, 'halted');
   assert.equal(description.epoch, 1);

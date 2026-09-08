@@ -21,11 +21,14 @@
 // العام وحده، فتُقرّ ويُرفض عليها الإصدار برمز `HALT_SIGNER_REQUIRED`.
 
 import { readFileSync } from 'node:fs';
+import { createPublicKey } from 'node:crypto';
 import {
   HaltSwitch,
+  haltAckPayload,
   kingKeyProviderFromEnv,
   loadKingKeySet,
   royalVerifierFromPublicKey,
+  signHaltAck,
 } from '../src/root-of-trust/index.mjs';
 
 /** الاستعمال المطبوع عند الخطأ أو عند `--help`. */
@@ -33,23 +36,24 @@ const USAGE = `الاستعمال:
   node scripts/halt-switch.mjs status  [--json]
   node scripts/halt-switch.mjs halt    [--reason "سبب"] [--json]
   node scripts/halt-switch.mjs resume  [--reason "سبب"] [--json]
-  node scripts/halt-switch.mjs confirm [--json]
+  node scripts/halt-switch.mjs confirm --node-key <pem> [--json]
   node scripts/halt-switch.mjs verify  [--json]
 
 البيئة:
   HALT_SWITCH_FILE      ملف التوجيه الدائم (إلزامي)
   HALT_NODE_ID          معرّف العقدة (إلزامي لأمر confirm)
+  HALT_NODE_KEY_FILE    مفتاح العقدة الخاص (إلزامي لأمر confirm — GPT-F05)
   HALT_PUBLIC_KEY_FILE  مفتاح الملك العام: قراءة وإقرار بلا قدرة إصدار
   مخزن المفاتيح:        KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER`;
 
 /**
  * يفكّ وسائط سطر الأوامر إلى أمرٍ وخيارات.
  * @param {string[]} argv - الوسائط بعد اسم السكربت
- * @returns {{ command: string, json: boolean, reason: string | null }} الأمر وخياراته
+ * @returns {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null }} الأمر وخياراته
  */
 export function parseArgs(argv) {
-  /** @type {{ command: string, json: boolean, reason: string | null }} */
-  const parsed = { command: argv[0] ?? 'status', json: false, reason: null };
+  /** @type {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null }} */
+  const parsed = { command: argv[0] ?? 'status', json: false, reason: null, nodeKeyFile: null };
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--json') parsed.json = true;
@@ -57,6 +61,11 @@ export function parseArgs(argv) {
       const value = argv[index + 1];
       if (!value) throw new Error('--reason بلا قيمة');
       parsed.reason = value;
+      index += 1;
+    } else if (argument === '--node-key') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('--node-key بلا قيمة');
+      parsed.nodeKeyFile = value;
       index += 1;
     } else throw new Error(`وسيط غير معروف: ${argument}`);
   }
@@ -66,7 +75,7 @@ export function parseArgs(argv) {
 /**
  * يقرأ الإعداد من البيئة ويرفض ما ينقص، فلا يُخترع مسار افتراضي لزرّ إيقاف.
  * @param {NodeJS.ProcessEnv} env - البيئة
- * @returns {{ file: string, nodeId: string | null, publicKeyFile: string | null }} الإعداد
+ * @returns {{ file: string, nodeId: string | null, publicKeyFile: string | null, nodeKeyFile: string | null }} الإعداد
  */
 export function readConfig(env) {
   const file = env['HALT_SWITCH_FILE'];
@@ -75,6 +84,7 @@ export function readConfig(env) {
     file,
     nodeId: env['HALT_NODE_ID'] ?? null,
     publicKeyFile: env['HALT_PUBLIC_KEY_FILE'] ?? null,
+    nodeKeyFile: env['HALT_NODE_KEY_FILE'] ?? null,
   };
 }
 
@@ -133,9 +143,28 @@ export async function run(argv, env) {
   }
 
   if (args.command === 'confirm') {
+    // GPT-F05: لا يُقبل إقرارٌ إلا أن يكون موقَّعاً من مفتاح العقدة. فالأداة
+    // تُحمّل مفتاح العقدة الخاصّ، وتُسجّل بالمفتاح العامّ، وتوقّع الإقرار فوق
+    // (تجزئة التوجيه، العهد، المعرّف). من لا يملك مفتاح العقدة لا يُقرّ بها.
     if (!config.nodeId) throw new Error('HALT_NODE_ID غير معلَن');
-    halt.registerNode(config.nodeId);
-    const confirmation = halt.confirmHalt(config.nodeId, 'إقرار من أداة التشغيل');
+    const nodeKeyFile = args.nodeKeyFile ?? config.nodeKeyFile;
+    if (!nodeKeyFile)
+      throw new Error('HALT_NODE_KEY_FILE غير معلَن (مطلوب لأمر confirm — GPT-F05)');
+    const privateKeyPem = readFileSync(nodeKeyFile, 'utf8');
+    const publicKeyPem = createPublicKey(privateKeyPem).export({ type: 'spki', format: 'pem' });
+    halt.registerNode(config.nodeId, {
+      nodeKey: {
+        publicKeyPem: String(publicKeyPem),
+        sign: (payload) => signHaltAck(privateKeyPem, payload),
+      },
+    });
+    const reading = halt.read();
+    const directiveHash = reading.directive?.hash ?? '';
+    const proof = signHaltAck(
+      privateKeyPem,
+      haltAckPayload(directiveHash, reading.epoch, config.nodeId),
+    );
+    const confirmation = halt.confirmHalt(config.nodeId, proof, 'إقرار من أداة التشغيل');
     return args.json
       ? JSON.stringify({ confirmed: true, confirmation }, null, 2)
       : `✅ أقرّت العقدة ${confirmation.nodeId} بالتوقف في العهد ${confirmation.epoch}`;
