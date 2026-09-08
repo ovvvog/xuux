@@ -29,9 +29,12 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 
+// أصناف كائنات PKCS#11 v3.0 (§4.1): DATA=0، CERTIFICATE=1، PUBLIC_KEY=2،
+// PRIVATE_KEY=3، SECRET_KEY=4. القيم السابقة كانت مُبدَّلة فصُنِّف F05 (AES)
+// كصنفٍ مجهول وصُنِّفت المفاتيح الخاصة كـSECRET_KEY في manifest.json.
 const CKO_PUBLIC_KEY = 0x00000002;
-const CKO_SECRET_KEY = 0x00000003;
-const CKO_PRIVATE_KEY = 0x00000001;
+const CKO_PRIVATE_KEY = 0x00000003;
+const CKO_SECRET_KEY = 0x00000004;
 const CKA_CLASS = 0x00000000;
 const CKA_ID = 0x00000102;
 const CKA_LABEL = 0x00000003;
