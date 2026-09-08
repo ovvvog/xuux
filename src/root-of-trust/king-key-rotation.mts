@@ -480,6 +480,10 @@ export function reissueCertificate(certificate: Certificate, king: KingIdentity)
     role: certificate.role,
     capabilities: [...certificate.capabilities],
     issuedAt: certificate.issuedAt,
+    // انتهاءُ الصلاحيّةِ يُحفَظُ كما هو: الشهادةُ هي هي، تغيَّرَ مُصدِّرُها لا
+    // أجلُها. فإعادةُ التوقيعِ بعدَ تدويرِ مفتاحِ الملكِ لا تُمدِّدُ صلاحيّةَ
+    // شهادةٍ منتهيةٍ ولا تُعيدُها (`Grok-F03`).
+    notAfter: certificate.notAfter,
   };
   return { ...body, signature: king.sign(body) };
 }

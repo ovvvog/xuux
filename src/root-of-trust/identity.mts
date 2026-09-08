@@ -19,6 +19,13 @@ export interface Certificate {
   role: string;
   capabilities: string[];
   issuedAt: string;
+  /**
+   * وقتُ انتهاءِ صلاحيّةِ الشهادةِ (ISO-8601). **إلزاميٌّ** في كلِّ شهادةٍ
+   * جديدة: لا تُصدرُ سلطةُ التصديقِ شهادةً بلا انتهاء، فلا تبقى شهادةٌ
+   * مسروقةٌ صالحةً إلى الأبد. والانتهاءُ جزءٌ من الجسمِ الموقَّع، فلا يُبدَّلُ
+   * إلا بكسرِ التوقيع. (`Grok-F03`).
+   */
+  notAfter: string;
   signature: string;
 }
 
@@ -32,6 +39,54 @@ export interface KingCertificate {
   publicKey: string;
   purpose: string;
 }
+
+/**
+ * مصدرُ الزمنِ القابلُ للحقنِ في سلطةِ التصديق. الافتراضيُّ `() => Date.now()`،
+ * لكنّ الغرضَ من عزله جعلُ إلزامِ الساعةِ الموثوقة (`Grok-F04`) تغييراً في
+ * التركيبِ والسياسةِ لا إعادةَ تصميم: تُحقَنُ ساعةٌ موثوقةٌ (`TrustedClock`)
+ * في الإنتاجِ، وتُحقَنُ ساعةٌ قابلةٌ للتحكيمِ في الاختبار. ولا يستعملُ أحدٌ
+ * `Date.now()` مباشرةً في منطقِ انتهاءِ الصلاحيّة.
+ */
+export type TimeSource = () => number;
+
+/**
+ * مخزنُ سحبِ الشهاداتِ الدائم. الافتراضيُّ في الذاكرةِ (للاختبارِ والتطوير)،
+ * لكنّ وجودَ تنفيذٍ دائمٍ (PostgreSQL) هو ما يُغلقُ `Grok-F03`: شهادةٌ
+ * تُسحبُ تُكتَبُ هنا، ويُحمَّلُ هذا المخزنُ قبلَ أيِّ `isValid`، فلا تعودُ
+ * شهادةٌ مسحوبةٌ صالحةً بعدَ إعادةِ إقلاعٍ. والواجهةُ **تفشلُ مغلقةً**: إن لم
+ * يكن المخزنُ جاهزاً للقراءةِ يُرجعُ `isValid` `false`، فلا يمرُّ وكيلٌ
+ * بناءً على غيابِ دليلِ الإبطال.
+ */
+export interface RevocationStore {
+  /** هل سُحبتْ هذه الشهادة؟ يُحمَّلُ من القرصِ، فلا يُفقدُ بعدَ إعادةِ تشغيل. */
+  isRevoked(certificateId: string): boolean;
+  /** يسحبُ شهادةً بكتابةٍ دائمة. يُرجعُ `true` إن نجحَ الحفظُ، `false` إن فشل. */
+  revoke(certificateId: string, revokedBy: string, reason: string): boolean;
+  /** هل حُمِّلَ المخزنُ وجاهزٌ للقراءة؟ إن لم يكن، `isValid` يُرجعُ `false`. */
+  ready(): boolean;
+}
+
+/**
+ * مخزنُ سحبٍ في الذاكرةِ — التنفيذُ الافتراضيُّ للسلطة. يُستعملُ في الاختبارِ
+ * والتطويرِ، وفيه أثرُ السحبِ ضمنَ العمليةِ الحيّةِ وحدَها. لا يَدومُ، لكنّه
+ * يَحققُ نفسَ عقدِ `RevocationStore` فيُحقَنُ حيثُ لا قاعدةَ بيانات.
+ */
+export class MemoryRevocationStore implements RevocationStore {
+  private readonly revoked = new Set<string>();
+  isRevoked(certificateId: string): boolean {
+    return this.revoked.has(certificateId);
+  }
+  revoke(certificateId: string): boolean {
+    this.revoked.add(certificateId);
+    return true;
+  }
+  ready(): boolean {
+    return true;
+  }
+}
+
+/** المدّةُ الافتراضيّةُ لصلاحيّةِ الشهادة: سبعةُ أيّام. مسمّاةٌ وموثَّقةٌ. */
+export const DEFAULT_CERTIFICATE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * يحوّل المفتاح العام إلى بصمة مستقرة صالحة لتعريف صاحب السيادة.
@@ -117,53 +172,109 @@ export class KingIdentity {
   }
 }
 
+export interface CertificateAuthorityOptions {
+  /** مخزنُ سحبٍ دائم؛ إن غاب فالذاكرة (في العمليةِ الحيّةِ وحدَها). */
+  revocationStore?: RevocationStore;
+  /** مصدرُ الزمنِ؛ إن غاب فـ`Date.now`. يُعزلُ ليُحقَنَ الموثوقُ لاحقاً. */
+  now?: TimeSource;
+  /**
+   * مدّةُ صلاحيّةِ كلِّ شهادةٍ تُصدرُ؛ إن غابت فالافتراضيّة `DEFAULT_CERTIFICATE_TTL_MS`.
+   * لا يمكنٌ إصدارُ شهادةٍ بلا انتهاء.
+   */
+  defaultTtlMs?: number;
+  /**
+   * قبولُ الشهاداتِ القديمةِ بلا `notAfter`؟ **افتراضُه `false`**: شهادةٌ بلا
+   * انتهاءٍ تُرفَضُ، فلا تمرُّ شهادةٌ مسروقةٌ قديمةٌ بلا أمد. لا يُفعَّلُ إلّا
+   * لترحيلٍ موثَّقٍ صراحةً.
+   */
+  allowLegacyCertificatesWithoutExpiry?: boolean;
+}
+
 export class CertificateAuthority {
   king: KingIdentity;
-  revoked: Set<string>;
+  private readonly revoked: RevocationStore;
+  private readonly now: TimeSource;
+  private readonly defaultTtlMs: number;
+  private readonly allowLegacy: boolean;
 
   /**
    * @param king - هوية الملك التي توقع الشهادات
+   * @param options - مخزنُ السحبِ ومصدرُ الزمنِ ومدّةُ الصلاحيّةِ
    */
-  constructor(king: KingIdentity) {
+  constructor(king: KingIdentity, options: CertificateAuthorityOptions = {}) {
     this.king = king;
-    this.revoked = new Set();
+    this.revoked = options.revocationStore ?? new MemoryRevocationStore();
+    this.now = options.now ?? (() => Date.now());
+    this.defaultTtlMs = options.defaultTtlMs ?? DEFAULT_CERTIFICATE_TTL_MS;
+    this.allowLegacy = options.allowLegacyCertificatesWithoutExpiry ?? false;
   }
 
   /**
-   * يصدر تفويضاً محدد الدور والقدرات لوكيل معروف.
+   * يصدر تفويضاً محدد الدور والقدرات لوكيل معروف. كلُّ شهادةٍ تنتهي بعدَ مدّةٍ
+   * محدودةٍ (`notAfter`)، فلا تبقى صالحةً إلى الأبد. والانتهاءُ جزءٌ من الجسمِ
+   * الموقَّع، فلا يُبدَّلُ إلا بكسرِ التوقيع.
    * @param subject - معرّف الموضوع المفوّض
    * @param role - الدور التنظيمي للموضوع
    * @param capabilities - أقل القدرات الممنوحة
+   * @param ttlMs - مدّةُ الصلاحيّةِ؛ إن غابت فالافتراضيّة
    * @returns شهادة موقعة قابلة للتحقق
    */
-  issue(subject: string, role: string, capabilities: string[] = []): Certificate {
+  issue(
+    subject: string,
+    role: string,
+    capabilities: string[] = [],
+    ttlMs?: number,
+  ): Certificate {
+    const issuedAt = this.now();
+    const notAfter = new Date(issuedAt + (ttlMs ?? this.defaultTtlMs)).toISOString();
     const body: CertificateBody = {
       id: randomUUID(),
       subject,
       issuer: this.king.id,
       role,
       capabilities,
-      issuedAt: new Date().toISOString(),
+      issuedAt: new Date(issuedAt).toISOString(),
+      notAfter,
     };
     return { ...body, signature: this.king.sign(body) };
   }
 
   /**
-   * يسحب شهادةً بحيث لا تعود مقبولة حتى لو ظل توقيعها صحيحاً.
+   * يسحبُ شهادةً بكتابةٍ دائمة في المخزن. إن فشلَ الحفظُ الدائمُ لم يُحدَّث
+   * في الذاكرةِ — فلا يُمرَّرُ السحبُ كأنّه نجح. والسحبُ أحاديُّ الاتجاهِ: لا
+   * يُلغى إلّا بإصدارِ شهادةٍ جديدةٍ بمعرّفٍ مختلف.
    * @param certificateId - معرّف الشهادة المسحوبة
    * @param reason - سبب السحب المسجل
-   * @returns سجل السحب
+   * @returns سجل السحب؛ `persisted: false` إن لم يُكتبْ في المخزنِ الدائم
    */
   revoke(
     certificateId: string,
     reason: string,
-  ): { certificateId: string; reason: string; revokedAt: string } {
-    this.revoked.add(certificateId);
-    return { certificateId, reason, revokedAt: new Date().toISOString() };
+  ): { certificateId: string; reason: string; revokedAt: string; persisted: boolean } {
+    // الفشلُ مغلقٌ: إن لم يكن المخزنُ جاهزاً، أو رفضَ الكتابةَ، فالسحبُ **لم
+    // يحدثْ**. فلا يدَّعي المستدعي أنّ الشهادةَ مسحوبةٌ وهي لم تُكتبْ، فتبقى
+    // صالحةً عند من لم يرَ المخزنَ.
+    if (!this.revoked.ready()) {
+      return {
+        certificateId,
+        reason,
+        revokedAt: new Date(this.now()).toISOString(),
+        persisted: false,
+      };
+    }
+    const persisted = this.revoked.revoke(certificateId, this.king.id, reason);
+    return {
+      certificateId,
+      reason,
+      revokedAt: new Date(this.now()).toISOString(),
+      persisted,
+    };
   }
 
   /**
-   * يجمع بين فحص السحب وفحص توقيع ملك الإصدار.
+   * يجمع بين فحصِ السحبِ الدائمِ وفحصِ انتهاءِ الصلاحيّةِ وفحصِ توقيعِ ملكِ
+   * الإصدار. كلُّ ما لا يمكنُ التحققُ منه يُرجعُ `false` — فلا تمرُّ شهادةٌ
+   * بناءً على غيابِ دليلٍ.
    * @param cert - الشهادة المطلوب التحقق منها
    * @returns صلاحية الشهادة الحالية
    */
@@ -171,20 +282,32 @@ export class CertificateAuthority {
     // شهادةٌ ناقصة الحقول تُقرأ باطلة ولا تُسقط الفاحص: من يُلفّق شهادة يُلفّقها
     // ناقصةً كذلك، وانهيارُ الفاحص عندها يُخرجه عن كونه فاحصاً.
     if (!cert || typeof cert !== 'object' || typeof cert.id !== 'string') return false;
-    return (
-      !this.revoked.has(cert.id) &&
-      this.king.verify(
-        {
-          id: cert.id,
-          subject: cert.subject,
-          issuer: cert.issuer,
-          role: cert.role,
-          capabilities: cert.capabilities,
-          issuedAt: cert.issuedAt,
-        },
-        cert.signature,
-      )
-    );
+    // المخزنُ غيرُ جاهزٍ ← رفضٌ مغلقٌ: لا يُسمحُ بمرورِ وكيلٍ بناءً على غيابِ
+    // دليلِ الإبطال. إن لم يُحمَلْ السجلُ الدائمُ فلا يُعرفُ هل سُحبتْ، فيُرفض.
+    if (!this.revoked.ready()) return false;
+    if (this.revoked.isRevoked(cert.id)) return false;
+    // انتهاءُ الصلاحيّةِ (`Grok-F03`): شهادةٌ بلا `notAfter` تُرفَضُ افتراضاً
+    // (إلّا في وضعِ الترحيلِ الصريح)، فلا تمرُّ شهادةٌ قديمةٌ بلا أمد. وانتهى
+    // أجلُها ← باطلةٌ وإن صحَّ توقيعُها.
+    if (typeof cert.notAfter !== 'string' || cert.notAfter === '') {
+      if (!this.allowLegacy) return false;
+    } else {
+      const notAfterMs = Date.parse(cert.notAfter);
+      if (!Number.isFinite(notAfterMs)) return false;
+      if (this.now() >= notAfterMs) return false;
+    }
+    // الجسمُ الموقَّعُ يُعادُ بناؤه من حقولِ الشهادةِ بترتيبٍ ثابت: `notAfter`
+    // جزءٌ منه، فتبديلُه يكسرُ التوقيع.
+    const body: CertificateBody = {
+      id: cert.id,
+      subject: cert.subject,
+      issuer: cert.issuer,
+      role: cert.role,
+      capabilities: cert.capabilities,
+      issuedAt: cert.issuedAt,
+      notAfter: cert.notAfter,
+    };
+    return this.king.verify(body, cert.signature);
   }
 }
 
