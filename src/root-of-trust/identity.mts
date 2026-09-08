@@ -219,12 +219,7 @@ export class CertificateAuthority {
    * @param ttlMs - مدّةُ الصلاحيّةِ؛ إن غابت فالافتراضيّة
    * @returns شهادة موقعة قابلة للتحقق
    */
-  issue(
-    subject: string,
-    role: string,
-    capabilities: string[] = [],
-    ttlMs?: number,
-  ): Certificate {
+  issue(subject: string, role: string, capabilities: string[] = [], ttlMs?: number): Certificate {
     const issuedAt = this.now();
     const notAfter = new Date(issuedAt + (ttlMs ?? this.defaultTtlMs)).toISOString();
     const body: CertificateBody = {
