@@ -19,7 +19,6 @@ import { ClockError } from '../../src/root-of-trust/clock.mjs';
 
 /**
  * ساعةٌ موثوقةٌ مُسجَّلةٌ قابلٌ للحقنِ والتحكّمِ في «الآن».
- * @implements {import('../../src/root-of-trust/clock.mjs').TrustedClock}
  */
 class FakeTrustedClock {
   #now = Date.now();
@@ -44,6 +43,7 @@ class FakeTrustedClock {
 }
 
 /** يبني بوابةً للإنتاجِ (تُلزمُ الساعةَ الموثوقة) أو للتطويرِ. */
+/** @param {{ requireTrustedClock: boolean, clock: any }} opts */
 function makeGateway({ requireTrustedClock, clock }) {
   const king = new KingIdentity();
   const ca = new CertificateAuthority(king);
@@ -55,6 +55,7 @@ function makeGateway({ requireTrustedClock, clock }) {
 }
 
 /** يصنع أمراً ملكياً موقعاً صالحاً لنصفِ ساعةٍ مضت. */
+/** @param {import('../../src/root-of-trust/identity.mjs').KingIdentity} king */
 function signedRecentCommand(king) {
   const issuedAt = new Date(Date.now() - 30_000).toISOString();
   const command = {
