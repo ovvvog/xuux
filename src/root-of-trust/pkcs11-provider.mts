@@ -286,7 +286,11 @@ export class Pkcs11HsmProvider {
         'توقيع EdDSA داخل HSM غير متاح في هذا البناء (غالباً OpenSSL backend). شغّل scripts/pkcs11-eddsa-sign-probe.mjs للتأكد، أو استعمل خلفية Botan/HSM عتادي.',
       );
     }
-    const handle = this.findKey(keyId);
+    // الفحص مقيَّد بصنف المفتاح الخاص: البحث بالمعرّف وحده كان يعيد أول كائن
+    // يحمل نفس `CKA_ID` — وهو للمفتاح المدوَّر قد يكون **الكائن العام**، فيفشل
+    // التوقيع برسالة آلية غامضة بدل أن يُقال «لا مفتاح خاص». ونطاق الصنف هو
+    // نفس الدرس الذي أنتجه خطأ ثوابت الأصناف في جرد التوكن (b63e0c81).
+    const handle = this.findKeyOfClass(keyId, (this.lib.CKO_PRIVATE_KEY as number) ?? 3);
     if (!handle) throw new HsmError('KEY_NOT_FOUND', `لا مفتاح توقيع بالمعرّف ${keyId}`);
     return {
       keyId,
@@ -314,7 +318,8 @@ export class Pkcs11HsmProvider {
     if (!this.aeadReady) {
       throw new HsmError('CAPABILITY_SELFTEST_FAILED', 'تشفير AES-GCM داخل HSM غير متاح');
     }
-    const handle = this.findKey(keyId);
+    // AEAD يلزمه صنف المفتاح السرّي حصراً؛ مفتاحٌ خاصٌّ بنفس المعرّف لا يصلح.
+    const handle = this.findKeyOfClass(keyId, (this.lib.CKO_SECRET_KEY as number) ?? 4);
     if (!handle) throw new HsmError('KEY_NOT_FOUND', `لا مفتاح AEAD بالمعرّف ${keyId}`);
     return {
       keyId,
@@ -367,11 +372,12 @@ export class Pkcs11HsmProvider {
   private aesGcmMech(): number {
     return (this.lib.CKM_AES_GCM as number) ?? 0x00001087;
   }
-  private findKey(keyId: string): Buffer | null {
+  private findKeyOfClass(keyId: string, keyClass: number): Buffer | null {
     const id = Buffer.from(keyId, 'hex');
     try {
       this.mod.C_FindObjectsInit(this.session, [
         { type: (this.lib.CKA_ID as number) ?? 0x00000102, value: id },
+        { type: (this.lib.CKA_CLASS as number) ?? 0, value: keyClass },
       ]);
       const handles = this.mod.C_FindObjects(this.session, 1);
       this.mod.C_FindObjectsFinal(this.session);
