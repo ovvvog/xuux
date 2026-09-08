@@ -48,7 +48,7 @@ export class HsmError extends Error {
 const CKM_EC_EDWARDS_KEY_PAIR_GEN = 0x00001055;
 const CKM_EDDSA = 0x00001057;
 const CKK_EC_EDWARDS = 0x00000040; // 0x40 وليس 0x28
-const ED25519_EC_PARAMS = Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x6e]); // OID 1.3.101.110 (id-Ed25519) DER
+const ED25519_EC_PARAMS = Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x70]); // OID 1.3.101.112 (Ed25519) DER — آخر بايت 0x70 وليس 0x6e (X25519)
 
 export interface HsmProviderConfig {
   /** مسار موديول PKCS#11. */

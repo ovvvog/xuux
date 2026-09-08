@@ -30,7 +30,7 @@
 | 1 | الاسم والمعرّف | CKA_LABEL = `king-signing-key`، CKA_ID = `06` (سداسي) — يطابق `KING_KEY_NAME` في `king-key.mts` |
 | 2 | نوع المفتاح والخوارزمية | Ed25519 — `CKK_EC_EDWARDS`، آلية التوقيع `CKM_EDDSA` (EdDSA نقيّ بلا تجزئة) |
 | 3 | العمليات المسموح بها | `CKA_SIGN = true` فقط؛ `CKA_VERIFY = false` على الخاص (التحقق في البرنامج بالمفتاح العام)؛ `CKA_ENCRYPT/DECRYPT/WRAP/UNWRAP = false` |
-| 4 | خصائص PKCS#11 | `CKA_TOKEN = true`، `CKA_PRIVATE = true`، `CKA_SENSITIVE = true`، `CKA_EXTRACTABLE = false`، `CKA_SIGN = true`، `CKA_SIGN_RECOVER = false`، `CKA_DECRYPT = false`، `CKA_UNWRAP = false`، `CKA_DERIVE = false`. القالب العام: `CKK_EC_EDWARDS` (0x40) + `CKA_EC_PARAMS` = OID Ed25519 `1.3.101.110` بصيغة DER (`06 03 2B 65 6E` — المُتحقَّق في SoftHSM2)، `CKA_VERIFY = true`. ملاحظة: `CKA_ENCRYPT`/`CKA_WRAP` غير صالحة على مفتاح EC فلا تُضبط |
+| 4 | خصائص PKCS#11 | `CKA_TOKEN = true`، `CKA_PRIVATE = true`، `CKA_SENSITIVE = true`، `CKA_EXTRACTABLE = false`، `CKA_SIGN = true`، `CKA_SIGN_RECOVER = false`، `CKA_DECRYPT = false`، `CKA_UNWRAP = false`، `CKA_DERIVE = false`. القالب العام: `CKK_EC_EDWARDS` (0x40) + `CKA_EC_PARAMS` = OID Ed25519 `1.3.101.112` بصيغة DER (`06 03 2B 65 70` — المُتحقَّق في SoftHSM2)، `CKA_VERIFY = true`. ملاحظة: `1.3.101.110` (`06 03 2B 65 6E`) هو X25519 لا Ed25519 — راجع ADR-0002. `CKA_ENCRYPT`/`CKA_WRAP` غير صالحة على مفتاح EC فلا تُضبط |
 | 5 | اختبار عدم الاستخراج | (أ) `C_GetAttributeValue(CKA_VALUE)` على الخاص ⇒ `CKR_ATTRIBUTE_SENSITIVE`. (ب) التحقق بعد الإنشاء: `CKA_EXTRACTABLE = false`، `CKA_NEVER_EXTRACTABLE = true`. (ج) `C_Sign(CKM_EDDSA)` ناجح لإثبات أن الرفض ليس لغياب المفتاح (حين تدعم الخلفية EdDSA) |
 | 6 | النسخ الاحتياطي وCI | نسخٌ مشفَّرٌ لمخزن التوكن عبر `softhsm2-util` أو نسخ ملفات `.softhsm/token` إلى وسطٍ مشفَّرٍ **خارج Git**. في CI: توكن SoftHSM منفصل (`xuux-ci`) بمفاتيح اختبار بـCKA_ID مختلفة، يُنشأ داخل workflow. **لا توكن الإنتاج ولا CKA_ID الإنتاجي في CI.** |
 
@@ -60,7 +60,7 @@
 | 1 | الاسم والمعرّف | CKA_LABEL = `command-ledger-signing-key`، CKA_ID = `07` (سداسي) |
 | 2 | نوع المفتاح والخوارزمية | Ed25519 — `CKK_EC_EDWARDS`، آلية `CKM_EDDSA` |
 | 3 | العمليات المسموح بها | `CKA_SIGN = true` فقط؛ `CKA_VERIFY = false`؛ `CKA_ENCRYPT/DECRYPT/WRAP/UNWRAP = false` |
-| 4 | خصائص PKCS#11 | مطابقة لـF06 تماماً (`CKA_TOKEN/PRIVATE/SENSITIVE=true`، `CKA_EXTRACTABLE=false`، `CKA_SIGN=true`، `CKA_SIGN_RECOVER/DECRYPT/UNWRAP/DERIVE=false`، `CKA_EC_PARAMS` = OID Ed25519 `1.3.101.110`). **مفتاح مستقل عن مفتاح الملك** — مفتاحٌ لكل غرض |
+| 4 | خصائص PKCS#11 | مطابقة لـF06 تماماً (`CKA_TOKEN/PRIVATE/SENSITIVE=true`، `CKA_EXTRACTABLE=false`، `CKA_SIGN=true`، `CKA_SIGN_RECOVER/DECRYPT/UNWRAP/DERIVE=false`، `CKA_EC_PARAMS` = OID Ed25519 `1.3.101.112`). **مفتاح مستقل عن مفتاح الملك** — مفتاحٌ لكل غرض |
 | 5 | اختبار عدم الاستخراج | مطابق لـF06 |
 | 6 | النسخ الاحتياطي وCI | مطابق لـF06 |
 

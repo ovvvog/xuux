@@ -16,11 +16,11 @@
 import { Buffer } from 'node:buffer';
 import { createPublicKey, verify } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
+import { ED25519_EC_PARAMS } from './pkcs11-oids.mjs';
 
 const CKM_EC_EDWARDS_KEY_PAIR_GEN = 0x00001055;
 const CKM_EDDSA = 0x00001057;
 const CKK_EC_EDWARDS = 0x00000040;
-const ED25519_EC_PARAMS = Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x6e]);
 const PROBE_LABEL = 'xuux-eddsa-probe';
 
 function out(msg) {
@@ -87,6 +87,7 @@ function discover({ PKCS11, modulePath, tokenLabel, expectedSerial }) {
 }
 
 async function main() {
+  let result;
   const tokenLabel = process.env.XUUX_PKCS11_TOKEN ?? 'xuux-security';
   const expectedSerial = process.env.XUUX_PKCS11_TOKEN_SERIAL ?? '';
   const modulePath =
@@ -153,24 +154,25 @@ async function main() {
 
   if (signature) {
     out('[probe] الخطوة 4/4: التحقق من التوقيع بالمفتاح العام...');
+    let ok = false;
     try {
-      const ok = verify(null, message, pubKey, signature);
+      ok = verify(null, message, pubKey, signature);
       if (ok) {
         out('[probe] === PASS: التوقيع داخل HSM يعمل والتحقق ناجح ===');
       } else {
-        out('[probe] === FAIL: التوقيع أُنتج لكنه لا يُحقَّق — تناقق ===');
+        out('[probe] === FAIL: التوقيع أُنتج لكنه لا يُتحقَّق — تناقض ===');
       }
     } catch (e) {
       out(`[probe] === FAIL: تعذّر التحقق: ${e.message} ===`);
     }
+    result = ok ? 'pass' : 'fail';
   } else {
-    out('[probe] === FAIL: التوقيع داخل HSM غير مدعوم في هذا البناء (غالباً OpenSSL backend). ===');
+    out('[probe] === FAIL: التوقيع داخل HSM (CKM_EDDSA) فشل ===');
+    out('[probe] تحقَّق أولاً من OID Ed25519 (1.3.101.112 / 0x70 وليس X25519 1.3.101.110 / 0x6e).');
     out(
-      '[probe] التوصية: أعد بناء SoftHSM2 بخلفية Botan (--with-crypto-backend=botan --enable-eddsa)',
+      '[probe] إن صحّ OID: تأكد من تفعيل EdDSA في البناء (SoftHSM2 بخلفية Botan مع WITH_EDDSA، أو عتادياً YubiHSM2).',
     );
-    out(
-      '[probe] أو استعمل HSM عتادياً يدعم Ed25519 (YubiHSM2). قبل ربط توقيع الملك (F06) وسجل الأوامر (F07).',
-    );
+    result = 'fail';
   }
 
   // تنظيف: طمس المفتاح المؤقت.
@@ -183,6 +185,10 @@ async function main() {
   mod.C_Logout(session);
   mod.C_CloseSession(session);
   mod.C_Finalize();
+  if (result !== 'pass') {
+    process.stderr.write(`[probe] exiting nonzero (result=${result})\n`);
+    process.exit(1);
+  }
 }
 
 main().catch((e) => fail('UNEXPECTED', e.stack || e.message));

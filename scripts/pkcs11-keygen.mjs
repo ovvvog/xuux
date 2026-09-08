@@ -18,13 +18,14 @@
 // المخرجات: المفتاح العام فقط (PEM) + إثبات عدم الاستخراج. لا تُطبع المادة الخاصة.
 import { Buffer } from 'node:buffer';
 import { createPublicKey } from 'node:crypto';
+import { ED25519_EC_PARAMS } from './pkcs11-oids.mjs';
 
 // ثوابت PKCS#11 v3.0 غير المُصدَّرة في pkcs11js 2.1.7 (متحقَّق من ترويسة p11-kit).
 const CKM_EC_EDWARDS_KEY_PAIR_GEN = 0x00001055;
 const CKM_EDDSA = 0x00001057;
 const CKK_EC_EDWARDS = 0x00000040; // 0x40 وليس 0x28
 // CKM_AES_GCM = 0x1087 (lib.CKM_AES_GCM)؛ CKM_AES_KEY_GEN = 0x1080؛ CKK_AES = 0x1f.
-const ED25519_EC_PARAMS = Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x6e]); // OID 1.3.101.110 (id-Ed25519) بصيغة DER
+// ED25519_EC_PARAMS مستورد من ./pkcs11-oids.mjs (OID 1.3.101.112 = Ed25519).
 
 const KEY_SPECS = [
   {
@@ -57,6 +58,40 @@ function boolStr(v) {
   if (v === false) return 'false';
   if (v && typeof v === 'object') return v[0] ? 'true' : 'false';
   return '?';
+}
+
+// حرّاس الاستبدال: يمنع --replace من تدمير مفاتيح F06/F07 قبل وثائق خطة النسخ/التدوير/التراجع.
+// يجب أن يفشل قبل تحميل موديول PKCS#11 أو قراءة PIN أو الوصول إلى HSM.
+const REPLACE_PLAN_REQUIRED_HEADINGS = ['backup', 'rotation', 'rollback'];
+function assertReplacePlan(argv) {
+  if (!argv.includes('--replace')) return; // لا استبدال → لا حاجة للخطة
+  const idx = argv.indexOf('--replace-plan');
+  const planPath = idx >= 0 ? argv[idx + 1] : null;
+  if (!planPath) {
+    fail(
+      'REPLACE_PLAN_REQUIRED',
+      '--replace يتطلب --replace-plan <path> يوثّق النسخ الاحتياطي والتدوير والتراجع. ' +
+        'أنشئ ملف ADR (مثال: docs/adr/0002-hsm-eddsa-oid.md) يحتوي الأقسام: ' +
+        REPLACE_PLAN_REQUIRED_HEADINGS.join('، ') +
+        '.',
+    );
+  }
+  let text;
+  try {
+    text = readFileSync(planPath, 'utf8');
+  } catch {
+    fail('REPLACE_PLAN_MISSING', `ملف خطة الاستبدال غير موجود: ${planPath}`);
+  }
+  const missing = REPLACE_PLAN_REQUIRED_HEADINGS.filter(
+    (h) => !new RegExp(`\\b${h}\\b`, 'i').test(text),
+  );
+  if (missing.length) {
+    fail(
+      'REPLACE_PLAN_INCOMPLETE',
+      `خطة الاستبدال ${planPath} ناقصة الأقسام: ${missing.join('، ')}.`,
+    );
+  }
+  console.log(`[keygen] خطة الاستبدال مقبولة: ${planPath}`);
 }
 
 async function loadPkcs11() {
@@ -302,7 +337,9 @@ function exportEd25519PublicPem(mod, session, lib, publicKeyHandle) {
 }
 
 async function main() {
-  const replace = process.argv.includes('--replace');
+  const argv = process.argv;
+  assertReplacePlan(argv); // يفشل قبل أي وصول إلى HSM
+  const replace = argv.includes('--replace');
   const tokenLabel = process.env.XUUX_PKCS11_TOKEN ?? 'xuux-security';
   const expectedSerial = process.env.XUUX_PKCS11_TOKEN_SERIAL ?? '';
   const modulePath =
