@@ -63,6 +63,7 @@ test('رموز أخطاء الساعة مثبَّتة نصاً ولا تنحرف
       'CLOCK_SKEW_DETECTED',
       'CLOCK_REGRESSED',
       'CLOCK_UNTRUSTED',
+      'CLOCK_REQUIRED_IN_PRODUCTION',
       'CLOCK_STATE_CORRUPT',
       'CLOCK_STATE_UNREADABLE',
       'CLOCK_STATE_UNWRITABLE',

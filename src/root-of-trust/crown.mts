@@ -3,6 +3,7 @@
 
 import { randomUUID, createHash } from 'node:crypto';
 import type { CommandLedger } from './command-ledger.mjs';
+import { ClockError } from './clock.mjs';
 import type { TrustedClock } from './clock.mjs';
 import type { HaltGuard } from './halt-switch.mjs';
 import type { EventLog } from './event-log.mjs';
@@ -41,6 +42,15 @@ export interface CrownGatewayOptions {
    * فإن وُصلت صار انزياح الساعة يُرفض برمزه ولا يُبنى عليه قرار قبول.
    */
   clock?: TrustedClock | null;
+  /**
+   * إلزامُ الساعةِ الموثوقةِ في هذا التركيبِ (`Grok-F04`). الافتراضُ مشتقٌّ من
+   * بيئةِ التشغيلِ: `process.env.NODE_ENV === 'production'`. في الإنتاجِ تُرفَضُ
+   * البوابةُ فشلاً مغلقاً (`CLOCK_REQUIRED_IN_PRODUCTION`) إن غابَ `clock` أو
+   * كان غيرَ موثوقٍ — ولا تسقطُ إلى `Date.now()`، فساعةُ الجهازِ يملكُها من يملكُ
+   * الجهازَ، ورجوعُها يُحيي أمراً منتهي الصلاحيّةِ ويلفَّقُ عمرَ أمرٍ جديدٍ.
+   * في التطويرِ والاختبارِ يُسمَحُ بالغيبَبُ صراحةً لتُبقيَ المستهلكِين القائمين.
+   */
+  requireTrustedClock?: boolean;
   maxCommandAgeMs?: number;
   clockSkewMs?: number;
 }
@@ -78,6 +88,7 @@ export class CrownGateway {
   commandLedger: CommandLedger | null;
   haltSwitch: HaltGuard | null;
   clock: TrustedClock | null;
+  requireTrustedClock: boolean;
   veto: Veto;
   stopped: boolean;
   heartbeatAt: number;
@@ -104,6 +115,7 @@ export class CrownGateway {
     this.commandLedger = options.commandLedger ?? null;
     this.haltSwitch = options.haltSwitch ?? null;
     this.clock = options.clock ?? null;
+    this.requireTrustedClock = options.requireTrustedClock ?? process.env.NODE_ENV === 'production';
     this.veto = new Veto();
     this.stopped = false;
     this.heartbeatAt = Date.now();
@@ -113,12 +125,29 @@ export class CrownGateway {
   }
 
   /**
-   * يقرأ الوقت من الساعة الموثوقة إن وُصلت، وإلا من ساعة الجهاز. وانزياحُ
-   * الساعة يُرفع خطأً من هنا فلا يصل إلى حساب العمر أصلاً.
+   * يقرأ الوقت من الساعةِ الموثوقةِ إن وُصلت، وإلا من ساعةِ الجهازِ. وانزياحُ
+   * الساعةِ يُرفعُ خطأً من هنا فلا يصلُ إلى حسابِ العمرِ أصلاً. وفي التركيبِ
+   * الإنتاجيِّ يُلزَمُ وجودُ ساعةٍ موثوقةٍ — فغيابُها فشلٌ مغلقٌ، لا سقوطٌ
+   * صامتٌ إلى `Date.now()`.
    * @returns الوقت بالميلي ثانية
    */
   private nowMs(): number {
+    this.assertTrustedClock();
     return this.clock ? this.clock.now() : Date.now();
+  }
+
+  /**
+   * يرفعُ `ClockError` برمزِ `CLOCK_REQUIRED_IN_PRODUCTION` حين يكونُ التركيبُ
+   * إنتاجياً وساعةٌ موثوقةٌ غائبةٌ — فشلٌ مغلقٌ قبلَ أيِّ قرارِ قبولٍ. ولا
+   * يُستدعى في التطويرِ حيث غيابُ الساعةِ مقبولٌ صراحةً.
+   */
+  private assertTrustedClock(): void {
+    if (this.requireTrustedClock && !this.clock) {
+      throw new ClockError('CLOCK_REQUIRED_IN_PRODUCTION', {
+        detail:
+          'التركيبُ الإنتاجيُّ يلزمُ ساعةً موثوقةً؛ غيابُها فشلٌ مغلقٌ لا سقوطٌ إلى Date.now().',
+      });
+    }
   }
 
   /** يثبت نبض التاج في السجل ما دامت البوابة غير موقوفة. */
