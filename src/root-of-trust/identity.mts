@@ -11,6 +11,8 @@ import {
   type KeyObject,
 } from 'node:crypto';
 
+import { assertSoftwareKingIdentityAllowed } from './production-boot.mjs';
+
 /** شهادة صادرة من سلطة التصديق، وتحمل المادة اللازمة للتحقق من تفويض الوكيل. */
 export interface Certificate {
   id: string;
@@ -116,12 +118,20 @@ export class KingIdentity {
    * يُبقي السلوك القديم حرفياً — توليد زوج جديد — فلم يتغير مستدعٍ واحد.
    * والاشتقاق نفسه لم يُمسّ: المعرّف يبقى بصمة المفتاح العام، فنفس المادة
    * تُنتج نفس المعرّف، وهذا عين ما يُثبت أن الربط ربطٌ لا إعادة توليد.
+   *
+   * وأُضيف في `WL-089` قيدُ التركيب: هذه الهويةُ **برمجيّةٌ** — مادتُها في
+   * ذاكرةِ العمليةِ — فتُرفَض في الإنتاج (`SOFTWARE_KING_IDENTITY_FORBIDDEN_IN_PRODUCTION`)
+   * ويبقى بديلُها `HsmSigner` في `hsm-binding.mts`. والفحصُ **قبل** توليدِ
+   * الزوجِ لا بعده: المعاملُ الافتراضيُّ نُقل إلى جسمِ المُنشئِ كي لا تُولَّد
+   * مادةُ مفتاحٍ في الإنتاج ثم يُرفع الخطأُ بعد وجودِها في الذاكرة.
    * @param keys - زوج مفاتيح محضَر؛ إن غاب وُلّد زوج جديد في الذاكرة
    */
-  constructor(keys: KingKeyPair = generateKeyPairSync('ed25519')) {
-    this.id = 'king:' + fingerprint(keys.publicKey).slice(0, 24);
-    this.privateKey = keys.privateKey;
-    this.publicKey = keys.publicKey;
+  constructor(keys?: KingKeyPair) {
+    assertSoftwareKingIdentityAllowed();
+    const material = keys ?? generateKeyPairSync('ed25519');
+    this.id = 'king:' + fingerprint(material.publicKey).slice(0, 24);
+    this.privateKey = material.privateKey;
+    this.publicKey = material.publicKey;
   }
 
   /**

@@ -27,6 +27,7 @@ import {
   KingKeyErrorCodes,
   KING_KEY_NAME,
   LocalEncryptedKeyProvider,
+  ProductionBootError,
   RemoteSecretStoreKeyProvider,
   describeKingKeyBinding,
   kingIdentityFromMaterial,
@@ -290,32 +291,53 @@ test('المخزن يُبنى من البيئة: خارجي إن أُعلن، و
   );
 });
 
-test('في الإنتاج تُرفض إعدادات القرص المحلي وإعدادات النقل غير المشفَّر', () => {
-  assert.throws(
-    () =>
-      kingKeyProviderFromEnv({
-        NODE_ENV: 'production',
-        KING_KEY_DIR: '/var/keys',
-        KING_KEY_MASTER: randomUUID(),
-      }),
-    (error) => error instanceof KingKeyError && error.code === 'PROVIDER_NOT_PRODUCTION_READY',
-  );
+// هذا الاختبارُ كان يُثبِّت الحدَّ لا يسدُّه (WL-089): أوّلُه يرفض القرصَ
+// المحليَّ والنقلَ المكشوف، وكان آخرُه **يقبل** مخزنَ أسرارٍ برمجيّاً في
+// الإنتاج ويُعلنه `productionReady: true` — أي أنّه كان يُوثّق إخراجَ مادةِ
+// مفتاحِ الملكِ إلى ذاكرةِ العمليةِ مساراً إنتاجيّاً مقبولاً. فصار المقيسُ: لا
+// مخزنَ مادةٍ برمجيّاً في الإنتاج أصلاً، وحجّةُ الرفضِ واحدةٌ لا ثلاث.
+test('في الإنتاج يُرفض كلُّ مخزنِ مفاتيحَ برمجيّ، قرصاً أو مخزنَ أسرارٍ مشفَّرَ النقل', () => {
+  /**
+   * يتحقّق أنّ التركيبَ رُدَّ فشلاً مغلقاً برمزِ قيدِ الإقلاع.
+   * @param {NodeJS.ProcessEnv} env - البيئةُ المقيسة
+   */
+  const assertClosedFailure = (env) => {
+    assert.throws(
+      () => kingKeyProviderFromEnv(env),
+      (error) =>
+        error instanceof ProductionBootError &&
+        error.code === 'SOFTWARE_KEY_STORE_FORBIDDEN_IN_PRODUCTION',
+    );
+  };
 
-  // ولا يُقبل السماح بالنقل غير المشفَّر في الإنتاج ولو أُعلن في البيئة.
-  assert.throws(() =>
-    kingKeyProviderFromEnv({
-      NODE_ENV: 'production',
-      KING_KEY_STORE_ENDPOINT: 'http://vault.internal',
-      KING_KEY_STORE_TOKEN: randomUUID(),
-      KING_KEY_STORE_ALLOW_INSECURE: 'true',
-    }),
-  );
+  // قرصٌ محليٌّ مشفَّر: مادةُ مفتاحٍ مقيمةٌ على قرصِ الخدمة.
+  assertClosedFailure({
+    NODE_ENV: 'production',
+    KING_KEY_DIR: '/var/keys',
+    KING_KEY_MASTER: randomUUID(),
+  });
 
-  // والصحيح يمرّ: https مع توكن ⇒ مخزن إنتاجي.
-  const provider = kingKeyProviderFromEnv({
+  // نقلٌ غيرُ مشفَّرٍ ولو أُعلن السماحُ به صراحةً.
+  assertClosedFailure({
+    NODE_ENV: 'production',
+    KING_KEY_STORE_ENDPOINT: 'http://vault.internal',
+    KING_KEY_STORE_TOKEN: randomUUID(),
+    KING_KEY_STORE_ALLOW_INSECURE: 'true',
+  });
+
+  // ومخزنُ أسرارٍ على https مع توكن — أي أنقى إعدادٍ برمجيٍّ ممكن —
+  // يُرَدُّ أيضاً: مخزنٌ يُخرج المادةَ إلى الذاكرةِ ليس جذرَ ثقةٍ إنتاجيّاً،
+  // وبديلُه التوكنُ عبر `bindHsmRootOfTrust`.
+  assertClosedFailure({
     NODE_ENV: 'production',
     KING_KEY_STORE_ENDPOINT: 'https://vault.internal',
     KING_KEY_STORE_TOKEN: randomUUID(),
   });
-  assert.equal(provider.describe().productionReady, true);
+
+  // والإعلانُ بـ `STATE_ENV` يستوي و`NODE_ENV`، فلا يُفلت من القيدِ بتبديلِ الاسم.
+  assertClosedFailure({
+    STATE_ENV: 'production',
+    KING_KEY_STORE_ENDPOINT: 'https://vault.internal',
+    KING_KEY_STORE_TOKEN: randomUUID(),
+  });
 });

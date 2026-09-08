@@ -25,6 +25,11 @@ import { KingIdentity } from './identity.mjs';
 import type { KeyProvider, KeyProviderDescription, KeyRecord } from './key-provider.mjs';
 import { LocalEncryptedKeyProvider } from './key-provider-local.mjs';
 import { RemoteSecretStoreKeyProvider } from './key-provider-remote.mjs';
+import {
+  ProductionBootError,
+  assertProductionKeyProviderAllowed,
+  isProductionRuntime,
+} from './production-boot.mjs';
 
 /**
  * اسم مفتاح الملك في المخزن. مثبَّت في الكود لا في الإعداد، لأن اسماً قابلاً
@@ -57,6 +62,11 @@ export class KingKeyError extends Error {
 
 /** خيارات الربط. `requireProductionReady` افتراضه مشتق من بيئة التشغيل. */
 export interface KingKeyOptions {
+  /**
+   * البيئةُ المقروءةُ في قيدِ التركيبِ الإنتاجيِّ (`WL-089`)؛ افتراضُها بيئةُ
+   * العملية. مُعزولةٌ لتُحقَن في الاختبارِ بلا مسِّ `process.env` العامّة.
+   */
+  env?: NodeJS.ProcessEnv;
   /**
    * يمنع ربط جذر الثقة بمخزن يُعلن أنه غير إنتاجي. افتراضه `true` حين تكون
    * `NODE_ENV === 'production'`: في الإنتاج لا يُقبل قرص محلي مشفَّر، وفي
@@ -92,7 +102,14 @@ export function assertKingKeyProviderFit(
   options: KingKeyOptions = {},
 ): void {
   const description = provider.describe();
-  const requireProduction = options.requireProductionReady ?? process.env.NODE_ENV === 'production';
+  const env = options.env ?? process.env;
+  // قيدُ التركيبِ الإنتاجيُّ **أولُ** فحصٍ (`WL-089`): كان هذا الموضعُ يُلزِم
+  // `canExport: true` فيقبل المخزنَ البرمجيَّ ويرفض التوكن — أي أنه كان يُفضّل
+  // البرمجيَّ على العتاديِّ في الإنتاج. فصار الإنتاجُ يُرَدُّ هنا قبل أن يُقاس
+  // شيءٌ آخر: عقدُ المادةِ (`put`/`get`) لا يخدم الإنتاجَ أصلاً، ومسارُه
+  // الإنتاجيُّ هو `hsm-binding.mts` لا هذه الوحدة.
+  assertProductionKeyProviderAllowed(description, env);
+  const requireProduction = options.requireProductionReady ?? isProductionRuntime(env);
   if (requireProduction && !description.productionReady) {
     throw new KingKeyError('PROVIDER_NOT_PRODUCTION_READY');
   }
@@ -199,7 +216,17 @@ export async function describeKingKeyBinding(provider: KeyProvider): Promise<Kin
 export function kingKeyProviderFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): LocalEncryptedKeyProvider | RemoteSecretStoreKeyProvider {
-  const production = env.NODE_ENV === 'production';
+  const production = isProductionRuntime(env);
+  // `WL-089`: كلُّ ما تبنيه هذه الدالّةُ مخزنٌ **برمجيٌّ** يُخرج المادةَ إلى
+  // ذاكرةِ العملية (`canExport: true` في التطبيقين). فالإنتاجُ يُرَدُّ من هنا
+  // فشلاً مغلقاً — لا مخزنَ أسرارٍ بعيداً ولو كان https، ولا قرصاً مشفَّراً —
+  // وبديلُه التوكنُ عبر `Pkcs11HsmProvider.fromEnv` و`bindHsmRootOfTrust`.
+  if (production) {
+    throw new ProductionBootError(
+      'SOFTWARE_KEY_STORE_FORBIDDEN_IN_PRODUCTION',
+      'kingKeyProviderFromEnv',
+    );
+  }
   const endpoint = env.KING_KEY_STORE_ENDPOINT;
   const token = env.KING_KEY_STORE_TOKEN;
 

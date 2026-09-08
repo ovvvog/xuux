@@ -46,6 +46,7 @@ import type { LedgerEntry } from './command-ledger.mjs';
 import { verifyEventChain } from './event-log.mjs';
 import { fingerprint } from './identity.mjs';
 import type { AeadKeyHandle, SigningKeyHandle } from './pkcs11-provider.mjs';
+import { SOFTWARE_KEY_STORE_ENV_VARS } from './production-boot.mjs';
 
 /**
  * أدوار المفاتيح الثلاثة كما هي في التوكن. المعرّفات والأسماء **مثبَّتة في
@@ -73,14 +74,12 @@ export const SEAL_TAG_BYTES = 16;
  * متغيّرات بيئةٍ تدلّ على مخزن مفاتيح **برمجي**. وجود أيٍّ منها مع الربط
  * الإنتاجي يُرفض: مسارٌ برمجيٌّ مهيَّأ بجانب مسار HSM هو fallback بالفعل ولو
  * لم يُستدع، لأنه يُنتظر عند أول فشل.
+ *
+ * ومنذ `WL-089` صار مصدرُ هذه القائمةِ واحداً في `production-boot.mts`، ويُعاد
+ * تصديرُها هنا باسمِها القائمِ حفظاً للعقدِ القائم: نسختانِ من قائمةِ منعٍ
+ * تفترقانِ بمتغيّرٍ واحدٍ تُنتجانِ متغيّراً ممنوعاً في وحدةٍ مقبولاً في أخرى.
  */
-export const SOFTWARE_KEY_ENV_VARS = [
-  'KING_KEY_DIR',
-  'KING_KEY_MASTER',
-  'KING_KEY_STORE_ENDPOINT',
-  'KING_KEY_STORE_TOKEN',
-  'KING_KEY_STORE_ALLOW_INSECURE',
-] as const;
+export const SOFTWARE_KEY_ENV_VARS = SOFTWARE_KEY_STORE_ENV_VARS;
 
 /** رموز أخطاء الربط، مثبَّتة نصاً كي تُختبر ولا تُخمَّن من رسالة. */
 export const HsmBindingErrorCodes = [
