@@ -48,6 +48,36 @@ const KEY_SPECS = [
   },
 ];
 
+// تحديد المفاتيح المستهدفة بالتدوير (--only 06,07) وحماية F05 من التدمير العرضي.
+// دوالٌ نقيةٌ قابلةٌ للاختبارِ بلا HSM.
+export function parseOnly(argv) {
+  const idx = argv.indexOf('--only');
+  if (idx === -1) return null;
+  const raw = argv[idx + 1];
+  if (!raw) fail('ONLY_REQUIRED', '--only يتطلب قائمة معرّفات مفصولة بفواصل (مثل 06,07)');
+  return new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => (s.length === 1 ? `0${s}` : s)),
+  );
+}
+
+export function selectSpecs(onlySet, specs = KEY_SPECS) {
+  if (!onlySet) return specs;
+  const selected = specs.filter((s) => onlySet.has(s.id));
+  if (selected.length === 0) {
+    fail('ONLY_NO_MATCH', `لا يوجد مفتاحٌ في KEY_SPECS يطابق --only: ${[...onlySet].join(',')}`);
+  }
+  return selected;
+}
+
+// هل يُحظَر تدمير F05 (AES) صراحةً؟ يُسمح فقط إذا كان 05 ضمن --only.
+export function f05Protected(spec, onlySet) {
+  return spec.id === '05' && (!onlySet || !onlySet.has('05'));
+}
+
 function fail(code, msg) {
   process.stderr.write(`[keygen] FAIL (${code}): ${msg}\n`);
   process.exit(1);
@@ -71,6 +101,7 @@ function assertReplacePlan(argv) {
     fail(
       'REPLACE_PLAN_REQUIRED',
       '--replace يتطلب --replace-plan <path> يوثّق النسخ الاحتياطي والتدوير والتراجع. ' +
+        'استعمل --only 06,07 لتدوير انتقائي يحمي F05 (AES) السليم. ' +
         'أنشئ ملف ADR (مثال: docs/adr/0002-hsm-eddsa-oid.md) يحتوي الأقسام: ' +
         REPLACE_PLAN_REQUIRED_HEADINGS.join('، ') +
         '.',
@@ -340,6 +371,8 @@ async function main() {
   const argv = process.argv;
   assertReplacePlan(argv); // يفشل قبل أي وصول إلى HSM
   const replace = argv.includes('--replace');
+  const onlySet = parseOnly(argv);
+  const specs = selectSpecs(onlySet);
   const tokenLabel = process.env.XUUX_PKCS11_TOKEN ?? 'xuux-security';
   const expectedSerial = process.env.XUUX_PKCS11_TOKEN_SERIAL ?? '';
   const modulePath =
@@ -351,13 +384,34 @@ async function main() {
   const mod = ctx.mod;
 
   console.log(`[keygen] token=${tokenLabel} serial=${ctx.serial ?? '(غير متحقَّق)'}`);
-  for (const spec of KEY_SPECS) {
+  if (onlySet)
+    console.log(`[keygen] تدوير انتقائي: CKA_ID=${[...onlySet].join(',')} (المفاتيح الأخرى محمية)`);
+  // تحقّقٌ مسبقٌ: افشل قبل أي تدمير إن كان أي مفتاح محمي (F05) ضمن النطاق الشامل.
+  if (replace) {
+    for (const spec of specs) {
+      const existing = findKeyObjects(mod, session, lib, spec.label);
+      if (existing.length > 0 && f05Protected(spec, onlySet)) {
+        fail(
+          'F05_PROTECTED',
+          `رفض تدمير F05 (${spec.label}). F05 سليمٌ ولا يُلمَس. أضف 05 صراحةً إلى --only لتأكيد تدوير مفتاح AES.`,
+        );
+      }
+    }
+  }
+  for (const spec of specs) {
     const existing = findKeyObjects(mod, session, lib, spec.label);
     if (existing.length > 0) {
       if (!replace) {
         fail(
           'KEY_EXISTS',
           `مفتاح ${spec.label} موجود بالفعل (${existing.length} عنصر). استعمل --replace للاستبدال الصريح بعد تأكيد إتلاف القديم.`,
+        );
+      }
+      // حارس F05 مكرّر (دفاعٌ في عمق) — يُفترض ألا يصل إليه بعد التحقق المسبق.
+      if (f05Protected(spec, onlySet)) {
+        fail(
+          'F05_PROTECTED',
+          `رفض تدمير F05 (${spec.label}). F05 سليمٌ ولا يُلمَس. أضف 05 صراحةً إلى --only لتأكيد تدوير مفتاح AES.`,
         );
       }
       const n = destroyKeyObjects(mod, session, lib, spec.label);
@@ -391,4 +445,6 @@ async function main() {
   console.log('[keygen] تم.');
 }
 
-main().catch((e) => fail('UNEXPECTED', e.stack || e.message));
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((e) => fail('UNEXPECTED', e.stack || e.message));
+}
