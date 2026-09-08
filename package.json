@@ -1,6 +1,6 @@
 {
   "name": "digital-state-root-of-trust",
-  "version": "0.63.11",
+  "version": "0.63.12",
   "private": true,
   "type": "module",
   "description": "الدولة الملكية الفدرالية الرقمية — جذر الثقة والنواة السيادية",
@@ -23,6 +23,8 @@
     "rotate:king-key": "node scripts/rotate-king-key.mjs",
     "anchor:log": "node scripts/anchor-log.mjs",
     "halt": "node scripts/halt-switch.mjs",
+    "hsm:keygen": "node scripts/pkcs11-keygen.mjs",
+    "hsm:probe": "node scripts/pkcs11-eddsa-sign-probe.mjs",
     "validate:seed": "node scripts/validate-seed.mjs",
     "migrate": "node scripts/migrate.mjs",
     "backup": "node scripts/backup.mjs",
@@ -101,5 +103,8 @@
   "dependencies": {
     "pg": "8.23.0",
     "yaml": "2.9.0"
+  },
+  "optionalDependencies": {
+    "pkcs11js": "^2.1.7"
   }
 }

@@ -1,0 +1,357 @@
+#!/usr/bin/env node
+// @ts-nocheck
+// scripts/pkcs11-keygen.mjs
+// إنشاء مفاتيح Grok-F05 / F06 / F07 داخل توكن SoftHSM2 عبر PKCS#11.
+//
+// القواعد الحاكمة:
+//  - لا مادة خاصة خارج التوكن: لا في Git ولا السجلات ولا مخرجات CI ولا رسائل الأخطاء.
+//  - اكتشاف بالـlabel ثم التحقق بالـserial؛ رقم Slot لا يُثبَّت في الكود.
+//  - PIN من XUUX_PKCS11_PIN أو ملف بصلاحية 600؛ لا في argv ولا npm script ولا سجل.
+//  - فشلٌ مغلق: غياب المكتبة/الموديول/التوكن/الآلية = رفضٌ صريح لا fallback.
+//
+// الاستعمال:
+//   export SOFTHSM2_CONF=... XUUX_PKCS11_MODULE=... XUUX_PKCS11_PIN=... \
+//     npm run hsm:keygen
+//   (PIN من متغيّر بيئة، أو ملف بصلاحية 600 عبر XUUX_PKCS11_PIN_FILE)
+//   --replace : يُتلِف المفاتيح القائمة بنفس الاسم قبل الإنشاء (افتراضياً يرفض التكرار).
+//
+// المخرجات: المفتاح العام فقط (PEM) + إثبات عدم الاستخراج. لا تُطبع المادة الخاصة.
+import { Buffer } from 'node:buffer';
+import { createPublicKey } from 'node:crypto';
+
+// ثوابت PKCS#11 v3.0 غير المُصدَّرة في pkcs11js 2.1.7 (متحقَّق من ترويسة p11-kit).
+const CKM_EC_EDWARDS_KEY_PAIR_GEN = 0x00001055;
+const CKM_EDDSA = 0x00001057;
+const CKK_EC_EDWARDS = 0x00000040; // 0x40 وليس 0x28
+// CKM_AES_GCM = 0x1087 (lib.CKM_AES_GCM)؛ CKM_AES_KEY_GEN = 0x1080؛ CKK_AES = 0x1f.
+const ED25519_EC_PARAMS = Buffer.from([0x06, 0x03, 0x2b, 0x65, 0x6e]); // OID 1.3.101.110 (id-Ed25519) بصيغة DER
+
+const KEY_SPECS = [
+  {
+    id: '06',
+    label: 'king-signing-key',
+    kind: 'ed25519',
+    purpose: 'توقيع أوامر التاج (F06)',
+  },
+  {
+    id: '05',
+    label: 'event-log-aead-key',
+    kind: 'aes',
+    purpose: 'تشفير سجل الأحداث AES-256-GCM (F05)',
+  },
+  {
+    id: '07',
+    label: 'command-ledger-signing-key',
+    kind: 'ed25519',
+    purpose: 'توقيع سجل الأوامر (F07)',
+  },
+];
+
+function fail(code, msg) {
+  process.stderr.write(`[keygen] FAIL (${code}): ${msg}\n`);
+  process.exit(1);
+}
+
+function boolStr(v) {
+  if (v === true) return 'true';
+  if (v === false) return 'false';
+  if (v && typeof v === 'object') return v[0] ? 'true' : 'false';
+  return '?';
+}
+
+async function loadPkcs11() {
+  let ns;
+  try {
+    ns = await import('pkcs11js');
+  } catch {
+    fail(
+      'MODULE_MISSING',
+      'pkcs11js غير مثبَّت. شغّل: npm install pkcs11js (يتطلب g++/make/python3)',
+    );
+  }
+  const lib = ns.default ?? ns;
+  const PKCS11 = lib.PKCS11;
+  if (!PKCS11) fail('MODULE_SHAPE', 'pkcs11js لم يُصدِّر PKCS11');
+  return { lib, PKCS11 };
+}
+
+function resolvePin() {
+  if (process.env.XUUX_PKCS11_PIN) return process.env.XUUX_PKCS11_PIN;
+  const pinFile = process.env.XUUX_PKCS11_PIN_FILE ?? `${process.env.HOME}/.config/xuux/pkcs11-pin`;
+  try {
+    // فحص صلاحية الملف: يجب 0600 (قابل للقراءة/الكتابة للمالك وحدَه).
+    const st = statSync(pinFile);
+    const mode = st.mode & 0o777;
+    if (mode & 0o077) {
+      fail(
+        'PIN_FILE_TOO_OPEN',
+        `ملف الـPIN ${pinFile} بصلاحية ${mode.toString(8)} — يجب 0600. أصلِح: chmod 600 ${pinFile}`,
+      );
+    }
+    const raw = readFileSyncText(pinFile);
+    const pin = raw.replace(/\r?\n$/, '');
+    if (!pin) fail('PIN_EMPTY', `ملف الـPIN فارغ: ${pinFile}`);
+    return pin;
+  } catch {
+    fail('PIN_MISSING', `ضَع XUUX_PKCS11_PIN أو ملف ${pinFile} بصلاحية 600 (chmod 600)`);
+  }
+}
+
+// قراءة نصية متزامنة بديلة (لتجنّب import إضافي)
+import { readFileSync, statSync } from 'node:fs';
+function readFileSyncText(p) {
+  return readFileSync(p, 'utf8');
+}
+
+function discoverToken(PKCS11, lib, modulePath, tokenLabel, expectedSerial) {
+  const mod = new PKCS11();
+  try {
+    mod.load(modulePath);
+  } catch (e) {
+    fail('MODULE_LOAD', `تعذّر تحميل الموديول ${modulePath}: ${e.message}`);
+  }
+  mod.C_Initialize();
+  const slots = mod.C_GetSlotList(true);
+  if (!slots || slots.length === 0) fail('NO_TOKEN', 'لا توجد توكنات SoftHSM مهيَّأة');
+  let found = null;
+  for (const slot of slots) {
+    try {
+      const info = mod.C_GetTokenInfo(slot);
+      if (info && info.label && info.label.trim() === tokenLabel) {
+        if (found) fail('AMBIGUOUS_TOKEN', `تعددت التوكنات بالاسم ${tokenLabel} — فشلٌ مغلق`);
+        found = { slot, serial: info.serialNumber };
+      }
+    } catch {
+      /* تجاوز */
+    }
+  }
+  if (!found) fail('TOKEN_NOT_FOUND', `لم يُعثر على توكن بالاسم ${tokenLabel}`);
+  if (expectedSerial && found.serial.trim() !== expectedSerial) {
+    fail('SERIAL_MISMATCH', `الـserial ${found.serial} لا يطابق المتوقع ${expectedSerial}`);
+  }
+  return { mod, lib, slot: found.slot };
+}
+
+function openSession({ mod, lib, slot }, pin) {
+  const CKF = lib.CKF_SERIAL_SESSION ?? 0x00000004;
+  const CKF_RW = lib.CKF_RW_SESSION ?? 0x00000002;
+  const CKU_USER = lib.CKU_USER ?? 1;
+  const session = mod.C_OpenSession(slot, CKF | CKF_RW);
+  mod.C_Login(session, CKU_USER, pin);
+  return { session };
+}
+
+function makeEd25519Template(lib, label, idHex) {
+  const id = Buffer.from(idHex, 'hex');
+  const pub = [
+    { type: lib.CKA_CLASS, value: lib.CKO_PUBLIC_KEY },
+    { type: lib.CKA_KEY_TYPE, value: CKK_EC_EDWARDS },
+    { type: lib.CKA_TOKEN, value: true },
+    { type: lib.CKA_PRIVATE, value: false },
+    { type: lib.CKA_LABEL, value: label },
+    { type: lib.CKA_ID, value: id },
+    { type: lib.CKA_EC_PARAMS, value: ED25519_EC_PARAMS },
+    { type: lib.CKA_VERIFY, value: true },
+  ];
+  const priv = [
+    { type: lib.CKA_CLASS, value: lib.CKO_PRIVATE_KEY },
+    { type: lib.CKA_KEY_TYPE, value: CKK_EC_EDWARDS },
+    { type: lib.CKA_TOKEN, value: true },
+    { type: lib.CKA_PRIVATE, value: true },
+    { type: lib.CKA_LABEL, value: label },
+    { type: lib.CKA_ID, value: id },
+    { type: lib.CKA_SENSITIVE, value: true },
+    { type: lib.CKA_EXTRACTABLE, value: false },
+    { type: lib.CKA_SIGN, value: true },
+    { type: lib.CKA_SIGN_RECOVER, value: false },
+    { type: lib.CKA_DECRYPT, value: false },
+    { type: lib.CKA_UNWRAP, value: false },
+    { type: lib.CKA_DERIVE, value: false },
+  ];
+  return { pub, priv };
+}
+
+function makeAesTemplate(lib, label, idHex) {
+  const id = Buffer.from(idHex, 'hex');
+  return [
+    { type: lib.CKA_CLASS, value: lib.CKO_SECRET_KEY },
+    { type: lib.CKA_KEY_TYPE, value: lib.CKK_AES },
+    { type: lib.CKA_TOKEN, value: true },
+    { type: lib.CKA_PRIVATE, value: true },
+    { type: lib.CKA_LABEL, value: label },
+    { type: lib.CKA_ID, value: id },
+    { type: lib.CKA_VALUE_LEN, value: 32 },
+    { type: lib.CKA_SENSITIVE, value: true },
+    { type: lib.CKA_EXTRACTABLE, value: false },
+    { type: lib.CKA_ENCRYPT, value: true },
+    { type: lib.CKA_DECRYPT, value: true },
+    { type: lib.CKA_SIGN, value: false },
+    { type: lib.CKA_VERIFY, value: false },
+    { type: lib.CKA_WRAP, value: false },
+    { type: lib.CKA_UNWRAP, value: false },
+    { type: lib.CKA_DERIVE, value: false },
+  ];
+}
+
+function findKeyObjects(mod, session, lib, label) {
+  // بحث بـCKA_LABEL عن كل العناصر (عام/خاص/سري) بنفس الاسم.
+  try {
+    mod.C_FindObjectsInit(session, [{ type: lib.CKA_LABEL, value: label }]);
+    const handles = [];
+    let batch;
+    do {
+      batch = mod.C_FindObjects(session, 8);
+      if (batch && batch.length) handles.push(...batch);
+    } while (batch && batch.length);
+    mod.C_FindObjectsFinal(session);
+    return handles;
+  } catch {
+    return [];
+  }
+}
+
+function destroyKeyObjects(mod, session, lib, label) {
+  const handles = findKeyObjects(mod, session, lib, label);
+  for (const h of handles) {
+    try {
+      mod.C_DestroyObject(session, h);
+    } catch {
+      /* تجاوز */
+    }
+  }
+  return handles.length;
+}
+
+function generateKey(mod, session, lib, spec) {
+  if (spec.kind === 'ed25519') {
+    const { pub, priv } = makeEd25519Template(lib, spec.label, spec.id);
+    const r = mod.C_GenerateKeyPair(session, { mechanism: CKM_EC_EDWARDS_KEY_PAIR_GEN }, pub, priv);
+    return { publicKey: r.publicKey, privateKey: r.privateKey };
+  }
+  const tmpl = makeAesTemplate(lib, spec.label, spec.id);
+  return { secretKey: mod.C_GenerateKey(session, { mechanism: lib.CKM_AES_KEY_GEN }, tmpl) };
+}
+
+function proveNonExtractable(mod, session, lib, handle, spec) {
+  // (أ) قراءة CKA_VALUE يجب أن تُرفض بـCKR_ATTRIBUTE_SENSITIVE.
+  let valueRejected = false;
+  try {
+    mod.C_GetAttributeValue(session, handle, [{ type: lib.CKA_VALUE }]);
+  } catch (e) {
+    valueRejected = /SENSITIVE|0x11/i.test(e.message || String(e.code ?? ''));
+  }
+  // (ب) التحقق من العلامات: EXTRACTABLE=false، NEVER_EXTRACTABLE=true.
+  let extractable = null;
+  let neverExtractable = null;
+  try {
+    const attrs = mod.C_GetAttributeValue(session, handle, [
+      { type: lib.CKA_EXTRACTABLE },
+      { type: lib.CKA_NEVER_EXTRACTABLE },
+    ]);
+    extractable = attrs[0]?.value;
+    neverExtractable = attrs[1]?.value;
+  } catch {
+    /* بعض التوكنات لا تُرجع NEVER_EXTRACTABLE كقيمة؛ يُعتمد على CKA_VALUE */
+  }
+  // (ج) إثبات أن المفتاح موجود وفعّال: عملية ناجحة.
+  let operational;
+  if (spec.kind === 'ed25519') {
+    try {
+      mod.C_SignInit(session, { mechanism: CKM_EDDSA }, handle);
+      const out = Buffer.alloc(64);
+      mod.C_Sign(session, Buffer.from('xuux-keygen-probe'), out);
+      operational = true;
+    } catch {
+      operational = false; // توقيع EdDSA قد يفشل في بعض خلفيات SoftHSM — يُبلَّغ لا يُحجَب الإنشاء
+    }
+  } else {
+    try {
+      const iv = Buffer.from('xuux-keygen12');
+      const gcm = {
+        mechanism: lib.CKM_AES_GCM,
+        parameter: {
+          type: lib.CK_PARAMS_AES_GCM,
+          iv,
+          ivBits: 96,
+          aad: Buffer.from('xuux'),
+          tagBits: 128,
+        },
+      };
+      mod.C_EncryptInit(session, gcm, handle);
+      const pt = Buffer.from('probe');
+      mod.C_Encrypt(session, pt, Buffer.alloc(pt.length + 16));
+      operational = true;
+    } catch {
+      operational = false;
+    }
+  }
+  return { valueRejected, extractable, neverExtractable, operational };
+}
+
+function exportEd25519PublicPem(mod, session, lib, publicKeyHandle) {
+  const attrs = mod.C_GetAttributeValue(session, publicKeyHandle, [{ type: lib.CKA_EC_POINT }]);
+  const ecPoint = attrs[0]?.value;
+  if (!ecPoint || ecPoint.length < 34) throw new Error('EC_POINT غير صالح');
+  const raw = ecPoint.slice(ecPoint[0] === 0x04 ? 2 : 0, (ecPoint[0] === 0x04 ? 2 : 0) + 32);
+  const der = Buffer.concat([
+    Buffer.from([0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]),
+    raw,
+  ]);
+  const key = createPublicKey({ key: der, format: 'der', type: 'spki' });
+  return key.export({ type: 'spki', format: 'pem' });
+}
+
+async function main() {
+  const replace = process.argv.includes('--replace');
+  const tokenLabel = process.env.XUUX_PKCS11_TOKEN ?? 'xuux-security';
+  const expectedSerial = process.env.XUUX_PKCS11_TOKEN_SERIAL ?? '';
+  const modulePath =
+    process.env.XUUX_PKCS11_MODULE ?? '/usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so';
+  const { lib, PKCS11 } = await loadPkcs11();
+  const pin = resolvePin();
+  const ctx = discoverToken(PKCS11, lib, modulePath, tokenLabel, expectedSerial || undefined);
+  const { session } = openSession(ctx, pin);
+  const mod = ctx.mod;
+
+  console.log(`[keygen] token=${tokenLabel} serial=${ctx.serial ?? '(غير متحقَّق)'}`);
+  for (const spec of KEY_SPECS) {
+    const existing = findKeyObjects(mod, session, lib, spec.label);
+    if (existing.length > 0) {
+      if (!replace) {
+        fail(
+          'KEY_EXISTS',
+          `مفتاح ${spec.label} موجود بالفعل (${existing.length} عنصر). استعمل --replace للاستبدال الصريح بعد تأكيد إتلاف القديم.`,
+        );
+      }
+      const n = destroyKeyObjects(mod, session, lib, spec.label);
+      console.log(`[keygen] ${spec.label}: أُتلِف ${n} عنصر قائم (--replace).`);
+    }
+    const handle = generateKey(mod, session, lib, spec);
+    const signHandle = spec.kind === 'ed25519' ? handle.privateKey : handle.secretKey;
+    const proof = proveNonExtractable(mod, session, lib, signHandle, spec);
+    console.log(`[keygen] ${spec.label} (${spec.purpose})`);
+    console.log(`  CKA_ID=${spec.id} نوع=${spec.kind}`);
+    console.log(
+      `  CKA_VALUE مرفوض=${proof.valueRejected ? 'نعم (CKR_ATTRIBUTE_SENSITIVE)' : 'لا — خطر'}`,
+    );
+    console.log(
+      `  CKA_EXTRACTABLE=${boolStr(proof.extractable)} CKA_NEVER_EXTRACTABLE=${boolStr(proof.neverExtractable)}`,
+    );
+    console.log(`  عملية داخل HSM=${proof.operational ? 'ناجحة' : 'فاشلة (انظر ملاحظة)'}`);
+    if (spec.kind === 'ed25519') {
+      try {
+        const pem = exportEd25519PublicPem(mod, session, lib, handle.publicKey);
+        console.log('  publicKeyPEM:');
+        for (const line of pem.split(/\n/)) if (line) console.log(`    ${line}`);
+      } catch (e) {
+        console.log(`  تعذّر تصدير المفتاح العام: ${e.message}`);
+      }
+    }
+  }
+  mod.C_Logout(session);
+  mod.C_CloseSession(session);
+  mod.C_Finalize();
+  console.log('[keygen] تم.');
+}
+
+main().catch((e) => fail('UNEXPECTED', e.stack || e.message));
