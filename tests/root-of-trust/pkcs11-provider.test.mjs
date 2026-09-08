@@ -95,6 +95,7 @@ describe('Pkcs11HsmProvider', () => {
   describe('AeadKeyHandle (AES-256-GCM داخل HSM) — F05', () => {
     let aead;
     before(async () => {
+      if (!provider) return;
       aead = await provider.getAeadKey('05');
     });
 
