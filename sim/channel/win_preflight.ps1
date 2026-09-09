@@ -1,3 +1,4 @@
+﻿[Console]::OutputEncoding = [System.Text.Encoding]::UTF8   # خرجٌ عربيٌّ سليمٌ في وحدة التحكم
 # sim/channel/win_preflight.ps1
 #
 # PoC تشخيصي مؤقت غير إنتاجي (transient, non-production, no-TPM-write diagnostic PoC).

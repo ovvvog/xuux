@@ -1,4 +1,4 @@
-# sim/channel/win_responder.ps1
+﻿# sim/channel/win_responder.ps1
 #
 # PoC تشخيصي مؤقت غير إنتاجي (transient, non-production, no-TPM-write diagnostic PoC).
 # مستجيب وهمي TCP على Windows ببروتوكول XU-frame (مطابق لـtcp_responder.mjs في WSL).
@@ -22,6 +22,7 @@ param(
   [string]$KillFile = '',
   [switch]$AllowWslNat
 )
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8   # خرجٌ عربيٌّ سليمٌ في وحدة التحكم
 
 $ErrorActionPreference = 'Stop'
 

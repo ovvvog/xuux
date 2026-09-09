@@ -1,4 +1,4 @@
-# sim/channel/win_tcp_probe.ps1
+﻿# sim/channel/win_tcp_probe.ps1
 #
 # PoC تشخيصي مؤقت غير إنتاجي (transient, non-production, no-TPM-write diagnostic PoC).
 # عميل Windows يرسل رسائل XU-frame إلى مستجيب قناة (tcp_responder.mjs داخل WSL)
@@ -15,6 +15,7 @@ param(
   [int]$PayloadSize = 64,
   [int]$TimeoutMs = 10000
 )
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8   # خرجٌ عربيٌّ سليمٌ في وحدة التحكم
 
 $ErrorActionPreference = 'Stop'
 if ($Count -lt 1 -or $Count -gt 100) { Write-Output 'COUNT: 1..100'; exit 2 }

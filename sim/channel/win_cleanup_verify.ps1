@@ -1,4 +1,4 @@
-# sim/channel/win_cleanup_verify.ps1
+﻿# sim/channel/win_cleanup_verify.ps1
 #
 # PoC تشخيصي مؤقت غير إنتاجي — أمر تحقق مستقل بعد كل خطوة قناة على Windows.
 # يثبت عدم بقاء: مستمع على منافذ PoC، عملية أدوات PoC، مفتاح سجل مؤقت،
@@ -10,6 +10,7 @@
 param(
   [int[]]$Ports = @(47849, 60601)
 )
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8   # خرجٌ عربيٌّ سليمٌ في وحدة التحكم
 
 $ErrorActionPreference = 'Continue'
 $verdict = [ordered]@{

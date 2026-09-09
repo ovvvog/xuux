@@ -1,4 +1,4 @@
-# sim/channel/win_hvsock_listener.ps1
+﻿# sim/channel/win_hvsock_listener.ps1
 #
 # PoC تشخيصي مؤقت غير إنتاجي (transient, non-production, no-TPM-write diagnostic PoC).
 # EXPERIMENTAL — مستجيب وهمي عبر AF_HYPERV (hvsocket) على Windows يستقبل اتصال AF_VSOCK
@@ -26,6 +26,7 @@ param(
   [string]$KillFile = '',
   [switch]$RegisterServiceKey
 )
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8   # خرجٌ عربيٌّ سليمٌ في وحدة التحكم
 
 $ErrorActionPreference = 'Stop'
 if ($LifetimeSec -le 0 -or $LifetimeSec -gt 300) { Write-Output 'LIFETIME: 1..300'; exit 2 }
