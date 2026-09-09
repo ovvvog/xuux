@@ -4,9 +4,15 @@
 // اختبار النموذج: حذف + إعادة تعريف العدّاد بحالته الخام.
 // يبرهن على سلوك swtpm: عدّاد بعد إعادة التعريف يبدأ فوق الحد الأقصى السابق.
 //
-// تنبيه أمان: هذا سلوك swtpm 0.10.1. سلوك TPM الحقيقي قد يختلف (قد يُصفّر إلى 1).
-// لذلك ضمان ADR 0007 المضاد للإعادة يعتمد على مقارنة body.counter مع عدّاد TPM
-// + ملف staged، لا على رتابة العدّاد عبر إعادة التعريف. هذا يُوثَّق في التقرير.
+// سند المواصفة: هذا سلوك swtpm 0.10.1، وهو مضمون نصاً بالمواصفة لا خاص
+// بالمحاكي — TPM 2.0 Library Part 3 §31.2 (NV Counters): «When an NV counter
+// is created, the TPM shall initialize the 8-octet counter value with a number
+// that is greater than any count value for any NV counter on the TPM since the
+// time of TPM manufacture»، و Part 1 §37.2.6.3 NOTE 2: «a counter with a
+// particular Name cannot be rolled back by deleting it and redefining it».
+// القيم الخام تُسجَّل أدناه للتحقق. ومع ذلك يبقى ضمان ADR 0007 المضاد للإعادة
+// معتمداً على مقارنة body.counter مع عدّاد TPM + ملف staged، لا على رتابة
+// العدّاد عبر إعادة التعريف وحدها.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

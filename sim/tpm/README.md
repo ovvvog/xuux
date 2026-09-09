@@ -36,10 +36,15 @@
 
 - **AF_VSOCK** و**TCP/NAT** بين Windows وWSL2: غير مُثبتَين على المضيف
   (الكود موجود لكنه غير مُشغَّل تشغيلياً على WSL2 الحقيقي).
-- **سلوك TPM الحقيقي** عبر `undefine`/`redefine` للعدّاد: swtpm 0.10.1 لا
-  يُصفّر العدّاد (يكمل من قيمته السابقة)، وقد يختلف سلوك TPM الحقيقي (قد
-  يُصفّر إلى 1). لذا يعتمد ضمان ADR 0007 المضاد للإعادة على مقارنة
-  `body.counter` مع عدّاد TPM + ملف `staged`، لا على رتابة العدّاد عبر
-  إعادة التعريف.
+- **سلوك TPM عبر `undefine`/`redefine` للعدّاد:** swtpm 0.10.1 لا يُصفّر العدّاد
+  (يكمل من قيمته السابقة — مثال خام مُقاس: 0x12 قبل الحذف، 0x13 بعده). وهذا
+  السلوك **مضمون بالمواصفة لا خاص بالمحاكي**: TPM 2.0 Library Part 3 §31.2
+  (NV Counters): «When an NV counter is created, the TPM shall initialize the
+  8-octet counter value with a number that is greater than any count value for
+  any NV counter on the TPM since the time of TPM manufacture»، و Part 1
+  §37.2.6.3 NOTE 2: «a counter with a particular Name cannot be rolled back by
+  deleting it and redefining it». ومع ذلك يبقى ضمان ADR 0007 المضاد للإعادة
+  معتمداً على مقارنة `body.counter` مع عدّاد TPM + ملف `staged` — دفاعٌ على
+  الطبقة العليا لا اعتماداً وحيداً على رتابة العتاد.
 - **TPM2_NV_Certify الحقيقي**: يتطلب إعداد EK/AK خارج نطاق هذا التحقيق غير
   الإنتاجي. تُحاكى بنية الشهادة وعقد تحققها فقط.

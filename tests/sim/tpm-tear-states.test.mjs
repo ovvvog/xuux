@@ -126,3 +126,97 @@ simTest('tear 7: شهادة تالفة ⇒ ATTEST_INVALID', async () => {
   assert.equal(rec.state, 'halted');
   assert.equal(rec.error, 'STATE_TPM_ATTEST_INVALID');
 });
+
+// ── حالات الانقطاع عبر نقاط التعليق في مسار الختم نفسه (hooks) ──
+// تُحاكي انقطاعَ العملية في كل نقطة من ترتيب الكتابة الذرّي (§4.4 خطوات 1–6)،
+// ثم يُستدعى recover() كما لو أُعيد الإقلاع بعد الانقطاع.
+
+// 8) انقطاع قبل زيادة العدّاد (بين الخطوتين 2 و3)
+simTest('tear 8: انقطاع قبل زيادة العدّاد (hook) ⇒ تجاهل staged والمتابعة', async () => {
+  const { a } = await setup();
+  await assert.rejects(
+    () => a.seal({ beforeIncrement() { throw new Error('TEAR_BEFORE_INCREMENT'); } }),
+    /TEAR_BEFORE_INCREMENT/,
+  );
+  // staged موجود (C+1) والعدّاد لم يُزَد (C) والمتن الملتزم عند C
+  const rec = await a.recover();
+  assert.equal(rec.state, 'running');
+  assert.equal(rec.recovered, 'discard-staged');
+});
+
+// 9) انقطاع بعد الزيادة وقبل الشهادة (بين الخطوتين 3 و4)
+simTest('tear 9: انقطاع بعد الزيادة وقبل certify (hook) ⇒ recertify-complete', async () => {
+  const { a } = await setup();
+  await assert.rejects(
+    () => a.seal({ beforeCertify() { throw new Error('TEAR_BEFORE_CERTIFY'); } }),
+    /TEAR_BEFORE_CERTIFY/,
+  );
+  // staged عند C+1 (بلا شهادة)، العدّاد صار C+1، المتن الملتزم عند C
+  const rec = await a.recover();
+  assert.equal(rec.state, 'running');
+  assert.equal(rec.recovered, 'recertify-complete');
+  assert.equal(rec.counter, rec.bodyCounter);
+});
+
+// 10) انقطاع بعد الشهادة وقبل rename (بين الخطوتين 4 و5)
+simTest('tear 10: انقطاع بعد certify وقبل rename (hook) ⇒ recertify-complete', async () => {
+  const { a } = await setup();
+  await assert.rejects(
+    () => a.seal({ beforeRename() { throw new Error('TEAR_BEFORE_RENAME'); } }),
+    /TEAR_BEFORE_RENAME/,
+  );
+  // نفس الحالة على القرص: staged عند C+1، العدّاد C+1، المتن الملتزم عند C
+  const rec = await a.recover();
+  assert.equal(rec.state, 'running');
+  assert.equal(rec.recovered, 'recertify-complete');
+});
+
+// 11) انقطاع بعد rename وقبل حذف staged (بين الخطوتين 5 و6)
+simTest('tear 11: انقطاع بعد rename وقبل حذف staged (hook) ⇒ إتمام خامد التكرار', async () => {
+  const { a } = await setup();
+  await assert.rejects(
+    () => a.seal({ beforeUnlinkStaged() { throw new Error('TEAR_BEFORE_UNLINK'); } }),
+    /TEAR_BEFORE_UNLINK/,
+  );
+  // المتن الملتزم صار C+1 بالشهادة، وstaged ما زال موجوداً عند C+1
+  const rec = await a.recover();
+  assert.equal(rec.state, 'running');
+  assert.equal(rec.recovered, 'recertify-complete');
+  // إعادة التنفيذ بعد «إعادة إقلاع» أخرى: نفس الحالة، لا تغيير — خاملة التكرار
+  const rec2 = await a.recover();
+  assert.equal(rec2.state, 'running');
+  assert.equal(rec2.bodyCounter, rec2.counter);
+});
+
+// 12) إعادة التنفيذ بعد restart: recover متكرر لا يغيّر شيئاً (خمول التكرار)
+simTest('tear 12: إعادة recover بعد تعافٍ ناجح ⇒ نفس الحالة بلا تغيير', async () => {
+  const { a } = await setup();
+  const s = await a.seal();
+  assert.equal(s.ok, true);
+  const r1 = await a.recover();
+  const r2 = await a.recover();
+  const r3 = await a.recover();
+  assert.deepEqual([r1.state, r2.state, r3.state], ['running', 'running', 'running']);
+  assert.equal(r3.counter, r1.counter);
+  assert.equal(r3.bodyCounter, r1.bodyCounter);
+});
+
+// 13) العدّاد متقدّم على body.counter بأكثر من واحد وبلا staged مطابق
+//     ملاحظة تصنيفية: جدول §4.4 يسمّي هذه الحالة TORN («تمزّق أو عبث»)،
+//     بينما يفرض §4.8 رمز MISMATCH لسيناريو الإعادة. المحاكاة تحسمها
+//     إغلاقاً برمز MISMATCH (direction=replay) — كلتاهما إغلاقٌ لا إقلعاً.
+//     يُسجَّل هذا التفاوت التسميوي كسؤالٍ مفتوح لصاحب ADR 0007 (يبقى proposed).
+simTest('tear 13: العدّاد متقدّم بأكثر من واحد بلا staged ⇒ إغلاق MISMATCH', async () => {
+  const { a, root } = await setup();
+  await a.seal();
+  await a.seal(); // يتقدّم العدّاد خطوتين
+  const C = await a.readCounter();
+  writeMan(root, body(a, C - 3)); // المتن متخلّف بأكثر من واحد
+  if (existsSync(join(root, STAGED))) rmSync(join(root, STAGED));
+  const rec = await a.recover();
+  assert.equal(rec.state, 'halted');
+  assert.equal(rec.error, 'STATE_TPM_COUNTER_MISMATCH');
+  assert.equal(rec.direction, 'replay');
+  // لا إقلعاً لاحقاً: الأمر المكرر يُرفض
+  await assert.rejects(() => a.seal(), /HALTED/);
+});

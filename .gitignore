@@ -75,3 +75,8 @@ audit-report.json
 .isolation-output/
 .xuux-worker-isolation-*
 .isolation-runner-output-*
+
+# بقايا حالات اختبارات المحاكي — تُولَّد زمن التشغيل ولا تُرفَع
+sim/tpm/_replay/
+sim/tpm/_tear/
+sim/tpm/_snap/
