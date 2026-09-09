@@ -450,6 +450,13 @@ test('الرموز والحالات مثبَّتة نصاً ومصدَّرة', (
       'INVALID_COMMAND_ID',
       'UNCLAIMED_COMMAND',
       'UNKNOWN_COMMAND',
+      // رموزُ الدفترِ الموقَّعِ — WL-092: تُثبَّتُ نصاً كسابقاتِها، فرمزٌ يتغيّرُ
+      // اسمُه يكسرُ كلَّ مُتعاملٍ يقرأُه، والترتيبُ جزءٌ من العقدِ المعلَن.
+      'SIGNED_LEDGER_REQUIRES_ASYNC',
+      'LEDGER_ENTRY_UNSIGNED',
+      'LEDGER_SIGNATURE_INVALID',
+      'LEDGER_KEY_MISMATCH',
+      'LEDGER_SIGNER_MISSING',
     ],
   );
   assert.deepEqual(

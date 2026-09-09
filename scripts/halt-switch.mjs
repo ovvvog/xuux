@@ -25,8 +25,10 @@ import { createPublicKey } from 'node:crypto';
 import {
   HaltSwitch,
   haltAckPayload,
+  isProductionRuntime,
   kingKeyProviderFromEnv,
   loadKingKeySet,
+  openProductionSigners,
   royalVerifierFromPublicKey,
   signHaltAck,
 } from '../src/root-of-trust/index.mjs';
@@ -112,77 +114,102 @@ export function formatDescription(description) {
  * ينفّذ الأمر ويرجع ما يُطبع، بلا مسّ `process`، كي يُختبر نداءً لا عملية.
  * @param {string[]} argv - الوسائط
  * @param {NodeJS.ProcessEnv} env - البيئة
+ * @param {import('../src/root-of-trust/index.mjs').ProductionRuntimeDeps} [deps] - حقنُ مصدرِ المفاتيحِ للاختبار (الإنتاج فقط)
  * @returns {Promise<string>} المخرج المطبوع
  */
-export async function run(argv, env) {
+export async function run(argv, env, deps = {}) {
   const args = parseArgs(argv);
   if (args.command === '--help' || args.command === 'help') return USAGE;
   const config = readConfig(env);
-  const king = config.publicKeyFile
-    ? royalVerifierFromPublicKey(readFileSync(config.publicKeyFile, 'utf8'))
-    : await loadKingKeySet(kingKeyProviderFromEnv(env));
-  const halt = new HaltSwitch(config.file, king);
-
-  if (args.command === 'status') {
-    const description = halt.describe();
-    return args.json ? JSON.stringify(description, null, 2) : formatDescription(description);
+  const production = isProductionRuntime(env);
+  // ترتيبُ الاختيارِ مقصود: وضعُ «القراءةِ والإقرار» بمفتاحٍ عامٍّ أولاً — فمن
+  // أعطى مفتاحاً عامّاً طلبَ عقدةً لا مُصدِراً. ثم الإنتاجُ على التوكن
+  // (WL-092): كانت الأداةُ تفشلُ هنا لأن المخزنَ البرمجيَّ مرفوضٌ في الإنتاج،
+  // فصار الإصدارُ يقعُ بمفتاحِ F06 داخلَ التوكن. ثم المخزنُ البرمجيُّ للتطوير.
+  let signers = null;
+  let king;
+  if (config.publicKeyFile) {
+    king = royalVerifierFromPublicKey(readFileSync(config.publicKeyFile, 'utf8'));
+  } else if (production) {
+    signers = await openProductionSigners(env, deps);
+    king = signers.anchorSigner;
+  } else {
+    king = await loadKingKeySet(kingKeyProviderFromEnv(env));
   }
+  try {
+    const halt = new HaltSwitch(config.file, king);
 
-  if (args.command === 'halt') {
-    const directive = halt.halt(args.reason ?? 'royal sovereign halt');
-    return args.json
-      ? JSON.stringify({ halted: true, directive }, null, 2)
-      : `⛔ صدر الإيقاف في العهد ${directive.epoch} بإصدار المفتاح ${directive.keyVersion}\nالسبب: ${directive.reason}\nالتجزئة: ${directive.hash}`;
+    if (args.command === 'status') {
+      const description = halt.describe();
+      return args.json ? JSON.stringify(description, null, 2) : formatDescription(description);
+    }
+
+    if (args.command === 'halt') {
+      // في الإنتاج التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكن، ولا نظيرَ متزامنٌ له:
+      // `HsmSigner.sign` يرفعُ `HSM_SYNC_SIGN_UNSUPPORTED` عن قصد.
+      const directive = production
+        ? await halt.haltAsync(args.reason ?? 'royal sovereign halt')
+        : halt.halt(args.reason ?? 'royal sovereign halt');
+      return args.json
+        ? JSON.stringify({ halted: true, directive }, null, 2)
+        : `⛔ صدر الإيقاف في العهد ${directive.epoch} بإصدار المفتاح ${directive.keyVersion}\nالسبب: ${directive.reason}\nالتجزئة: ${directive.hash}`;
+    }
+
+    if (args.command === 'resume') {
+      const directive = production
+        ? await halt.resumeAsync(args.reason ?? 'royal resume')
+        : halt.resume(args.reason ?? 'royal resume');
+      return args.json
+        ? JSON.stringify({ resumed: true, directive }, null, 2)
+        : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;
+    }
+
+    if (args.command === 'confirm') {
+      // GPT-F05: لا يُقبل إقرارٌ إلا أن يكون موقَّعاً من مفتاح العقدة. فالأداة
+      // تُحمّل مفتاح العقدة الخاصّ، وتُسجّل بالمفتاح العامّ، وتوقّع الإقرار فوق
+      // (تجزئة التوجيه، العهد، المعرّف). من لا يملك مفتاح العقدة لا يُقرّ بها.
+      if (!config.nodeId) throw new Error('HALT_NODE_ID غير معلَن');
+      const nodeKeyFile = args.nodeKeyFile ?? config.nodeKeyFile;
+      if (!nodeKeyFile)
+        throw new Error('HALT_NODE_KEY_FILE غير معلَن (مطلوب لأمر confirm — GPT-F05)');
+      const privateKeyPem = readFileSync(nodeKeyFile, 'utf8');
+      const publicKeyPem = createPublicKey(privateKeyPem).export({ type: 'spki', format: 'pem' });
+      halt.registerNode(config.nodeId, {
+        nodeKey: {
+          publicKeyPem: String(publicKeyPem),
+          sign: (payload) => signHaltAck(privateKeyPem, payload),
+        },
+      });
+      const reading = halt.read();
+      const directiveHash = reading.directive?.hash ?? '';
+      const proof = signHaltAck(
+        privateKeyPem,
+        haltAckPayload(directiveHash, reading.epoch, config.nodeId),
+      );
+      const confirmation = halt.confirmHalt(config.nodeId, proof, 'إقرار من أداة التشغيل');
+      return args.json
+        ? JSON.stringify({ confirmed: true, confirmation }, null, 2)
+        : `✅ أقرّت العقدة ${confirmation.nodeId} بالتوقف في العهد ${confirmation.epoch}`;
+    }
+
+    if (args.command === 'verify') {
+      const result = halt.verifyHistory();
+      if (args.json) return JSON.stringify(result, null, 2);
+      const lines = [
+        result.ok ? '✅ سلسلة التوجيهات متصلة وموقَّعة' : '❌ سلسلة التوجيهات منكسرة',
+        `توجيهات: ${result.directives}`,
+      ];
+      if (result.problem)
+        lines.push(`العطب: ${result.problem}${result.problemAt ? ` عند ${result.problemAt}` : ''}`);
+      return lines.join('\n');
+    }
+
+    throw new Error(`أمر غير معروف: ${args.command}\n\n${USAGE}`);
+  } finally {
+    // جلسةُ التوكنِ تُغلقُ دائماً: أداةُ إيقافٍ تُنادى في لحظةِ أزمةٍ لا تصحُّ
+    // أن تتركَ دخولاً مفتوحاً على المفتاحِ السياديّ.
+    if (signers) await signers.close();
   }
-
-  if (args.command === 'resume') {
-    const directive = halt.resume(args.reason ?? 'royal resume');
-    return args.json
-      ? JSON.stringify({ resumed: true, directive }, null, 2)
-      : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;
-  }
-
-  if (args.command === 'confirm') {
-    // GPT-F05: لا يُقبل إقرارٌ إلا أن يكون موقَّعاً من مفتاح العقدة. فالأداة
-    // تُحمّل مفتاح العقدة الخاصّ، وتُسجّل بالمفتاح العامّ، وتوقّع الإقرار فوق
-    // (تجزئة التوجيه، العهد، المعرّف). من لا يملك مفتاح العقدة لا يُقرّ بها.
-    if (!config.nodeId) throw new Error('HALT_NODE_ID غير معلَن');
-    const nodeKeyFile = args.nodeKeyFile ?? config.nodeKeyFile;
-    if (!nodeKeyFile)
-      throw new Error('HALT_NODE_KEY_FILE غير معلَن (مطلوب لأمر confirm — GPT-F05)');
-    const privateKeyPem = readFileSync(nodeKeyFile, 'utf8');
-    const publicKeyPem = createPublicKey(privateKeyPem).export({ type: 'spki', format: 'pem' });
-    halt.registerNode(config.nodeId, {
-      nodeKey: {
-        publicKeyPem: String(publicKeyPem),
-        sign: (payload) => signHaltAck(privateKeyPem, payload),
-      },
-    });
-    const reading = halt.read();
-    const directiveHash = reading.directive?.hash ?? '';
-    const proof = signHaltAck(
-      privateKeyPem,
-      haltAckPayload(directiveHash, reading.epoch, config.nodeId),
-    );
-    const confirmation = halt.confirmHalt(config.nodeId, proof, 'إقرار من أداة التشغيل');
-    return args.json
-      ? JSON.stringify({ confirmed: true, confirmation }, null, 2)
-      : `✅ أقرّت العقدة ${confirmation.nodeId} بالتوقف في العهد ${confirmation.epoch}`;
-  }
-
-  if (args.command === 'verify') {
-    const result = halt.verifyHistory();
-    if (args.json) return JSON.stringify(result, null, 2);
-    const lines = [
-      result.ok ? '✅ سلسلة التوجيهات متصلة وموقَّعة' : '❌ سلسلة التوجيهات منكسرة',
-      `توجيهات: ${result.directives}`,
-    ];
-    if (result.problem)
-      lines.push(`العطب: ${result.problem}${result.problemAt ? ` عند ${result.problemAt}` : ''}`);
-    return lines.join('\n');
-  }
-
-  throw new Error(`أمر غير معروف: ${args.command}\n\n${USAGE}`);
 }
 
 // التشغيل المباشر فقط؛ الاستيراد للاختبار لا يُنفّذ شيئاً.

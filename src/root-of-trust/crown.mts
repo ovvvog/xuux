@@ -4,6 +4,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import type { CommandLedger } from './command-ledger.mjs';
 import { ClockError } from './clock.mjs';
+import { isProductionRuntime } from './production-boot.mjs';
 import type { TrustedClock } from './clock.mjs';
 import type { HaltGuard } from './halt-switch.mjs';
 import type { EventLog } from './event-log.mjs';
@@ -51,6 +52,22 @@ export interface CrownGatewayOptions {
    * في التطويرِ والاختبارِ يُسمَحُ بالغيبَبُ صراحةً لتُبقيَ المستهلكِين القائمين.
    */
   requireTrustedClock?: boolean;
+  /**
+   * إلزامُ دفترِ الأوامرِ في هذا التركيبِ (`Grok-F07`، `WL-092`). الافتراضُ مشتقٌّ
+   * من بيئةِ التشغيلِ عبر `isProductionRuntime`. في الإنتاجِ يُرفَضُ **بناءُ**
+   * البوابةِ أصلاً (`COMMAND_LEDGER_REQUIRED_IN_PRODUCTION`) إن غابَ الدفترُ: بلا
+   * دفترٍ لا يوجدُ منعُ إعادةٍ دائمٌ، وإنما ذاكرةُ عمليةٍ تُنسى بإعادةِ تشغيلٍ —
+   * فيُقبلُ الأمرُ ذاتُه مرّتين. والرفضُ عندَ البناءِ لا عندَ أولِ أمرٍ، كي لا
+   * تعملَ عقدةٌ لحظةً واحدةً بلا هذا الضمان.
+   */
+  requireCommandLedger?: boolean;
+  /**
+   * إلزامُ مفتاحِ الإيقافِ الشاملِ في هذا التركيبِ (`Grok-F07`، `WL-092`).
+   * الافتراضُ من بيئةِ التشغيل. في الإنتاجِ يُرفَضُ البناءُ
+   * (`HALT_SWITCH_REQUIRED_IN_PRODUCTION`) إن غابَ: بوابةٌ بلا مفتاحِ إيقافٍ لا
+   * يبلغُها قرارُ الإيقافِ السياديُّ، فتستمرُّ في القبولِ بينما الدولةُ موقوفة.
+   */
+  requireHaltSwitch?: boolean;
   maxCommandAgeMs?: number;
   clockSkewMs?: number;
 }
@@ -89,6 +106,10 @@ export class CrownGateway {
   haltSwitch: HaltGuard | null;
   clock: TrustedClock | null;
   requireTrustedClock: boolean;
+  /** إلزامُ دفترِ الأوامرِ — يُفحصُ عندَ البناء. */
+  requireCommandLedger: boolean;
+  /** إلزامُ مفتاحِ الإيقافِ الشامل — يُفحصُ عندَ البناء. */
+  requireHaltSwitch: boolean;
   veto: Veto;
   stopped: boolean;
   heartbeatAt: number;
@@ -116,6 +137,18 @@ export class CrownGateway {
     this.haltSwitch = options.haltSwitch ?? null;
     this.clock = options.clock ?? null;
     this.requireTrustedClock = options.requireTrustedClock ?? process.env.NODE_ENV === 'production';
+    // `isProductionRuntime` لا `NODE_ENV` وحدَه: مسارُ الحالةِ يُعرَّفُ في هذا
+    // المستودعِ بـ `STATE_ENV` كذلك، وبوابةٌ تُلزَمُ بالمعيارِ الأضيقِ تُخطئُ في
+    // الجهةِ الآمنة.
+    const production = isProductionRuntime(process.env);
+    this.requireCommandLedger = options.requireCommandLedger ?? production;
+    this.requireHaltSwitch = options.requireHaltSwitch ?? production;
+    if (this.requireCommandLedger && this.commandLedger === null) {
+      throw new Error('COMMAND_LEDGER_REQUIRED_IN_PRODUCTION');
+    }
+    if (this.requireHaltSwitch && this.haltSwitch === null) {
+      throw new Error('HALT_SWITCH_REQUIRED_IN_PRODUCTION');
+    }
     this.veto = new Veto();
     this.stopped = false;
     this.heartbeatAt = Date.now();

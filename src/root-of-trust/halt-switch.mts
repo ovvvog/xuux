@@ -195,6 +195,21 @@ export interface HaltSigner extends HaltVerifier {
 }
 
 /**
+ * موقّعٌ **غيرُ متزامنٍ** للتوجيهات (`WL-092`): مسنودٌ بتوكنِ HSM، فمفتاحُ F06
+ * لا يخرجُ منه ولا يوقّعُ متزامناً. ولذلك لم يُوسَّع `HaltSigner` بل أُضيف عقدٌ
+ * ثانٍ: لو زُيِّف التزامنُ لكان التوقيعُ من مادةٍ في ذاكرةِ العملية — وهو عينُ
+ * ما يمنعُه هذا المسار. و`haltAsync`/`resumeAsync` هما بابُه الوحيد.
+ */
+export interface HaltAsyncSigner extends HaltVerifier {
+  /**
+   * يوقّعُ مادةَ التوجيهِ داخلَ التوكن.
+   * @param payload - جسمُ التوجيهِ المنضبط
+   * @returns التوقيعُ بترميز base64url
+   */
+  signAsync(payload: object): Promise<string>;
+}
+
+/**
  * مفتاح عقدة (GPT-F05): العقدة تحمل المفتاح الخاصّ وتُقدّم العامّ عند التسجيل،
  * وتوقّع إقرارها به. فلا يستطيع أحدٌ أن يُقرّ باسم عقدةٍ لا يملك مفتاحها، ولا
  * يُقبل إقرارٌ منسوخٌ بين عقدتين. مطابقٌ في الترميز لتوقيع الملك: Ed25519،
@@ -574,6 +589,53 @@ export class HaltSwitch implements HaltGuard {
   }
 
   /**
+   * نظيرُ `halt` بتوقيعٍ داخلَ التوكن (F06). نفسُ الفحوصِ ونفسُ الترتيبِ ونفسُ
+   * الأخطاء، والفرقُ الوحيدُ أن التوقيعَ نداءٌ غيرُ متزامنٍ لا استدعاءٌ محليّ.
+   * @param reason - سبب الإيقاف، يُسجَّل ويُعاد في كل رفض
+   * @returns التوجيه الصادر
+   */
+  async haltAsync(reason = 'royal sovereign halt'): Promise<HaltDirective> {
+    const current = this.read();
+    if (current.state === 'halted' && current.problem === undefined) {
+      throw new HaltError('HALT_ALREADY_HALTED', { epoch: current.epoch, reason: current.reason });
+    }
+    const directive = await this.#issueAsync('halted', reason);
+    this.#log?.append('halt.issued', directive.kingId, {
+      epoch: directive.epoch,
+      reason: directive.reason,
+    });
+    return directive;
+  }
+
+  /**
+   * نظيرُ `resume` بتوقيعٍ داخلَ التوكن (F06) — بنفسِ شرطِ الإقرارِ الكامل.
+   * @param reason - سبب الاستئناف، يُسجَّل
+   * @returns التوجيه الصادر
+   */
+  async resumeAsync(reason = 'royal resume'): Promise<HaltDirective> {
+    const current = this.read();
+    if (current.state !== 'halted') {
+      throw new HaltError('HALT_NOT_HALTED', { epoch: current.epoch });
+    }
+    if (current.problem === undefined) {
+      const pending = this.pendingConfirmations().filter((node) => node.alive);
+      if (pending.length > 0) {
+        throw new HaltError('HALT_NOT_CONFIRMED', {
+          epoch: current.epoch,
+          pending: pending.map((node) => node.nodeId),
+        });
+      }
+    }
+    const directive = await this.#issueAsync('running', reason);
+    this.#log?.append('halt.resumed', directive.kingId, {
+      epoch: directive.epoch,
+      reason: directive.reason,
+      recoveredFrom: current.problem ?? null,
+    });
+    return directive;
+  }
+
+  /**
    * يسجّل عقدة تنفيذ: من يجب أن يُقرّ بالتوقف حتى يصير الإيقاف متحقَّقاً منه.
    * التسجيل يُحدَّث في كل إقلاع لأن رقم العملية يتغير.
    *
@@ -865,9 +927,43 @@ export class HaltSwitch implements HaltGuard {
    */
   #issue(state: HaltState, reason: string): HaltDirective {
     const signer = this.#assertSigner();
+    const body = this.#directiveBody(state, reason, signer);
+    return this.#publish({
+      ...body,
+      hash: hashHaltBody(body),
+      signature: signer.sign(body),
+    });
+  }
+
+  /**
+   * نظيرُ `#issue` بتوقيعٍ غيرِ متزامنٍ داخلَ التوكن. نفسُ الجسمِ ونفسُ ترتيبِ
+   * النشرِ حرفاً بحرفٍ — مصدرٌ واحدٌ للجسمِ وللنشرِ، فلا يفترقُ توجيهٌ عتاديٌّ
+   * عن توجيهٍ برمجيٍّ في شيءٍ إلا في موضعِ المفتاح.
+   * @param state - الحالة المطلوبة
+   * @param reason - سببها
+   * @returns التوجيه
+   */
+  async #issueAsync(state: HaltState, reason: string): Promise<HaltDirective> {
+    const signer = this.#assertAsyncSigner();
+    const body = this.#directiveBody(state, reason, signer);
+    return this.#publish({
+      ...body,
+      hash: hashHaltBody(body),
+      signature: await signer.signAsync(body),
+    });
+  }
+
+  /**
+   * يبني جسمَ التوجيهِ: العهدُ والسلسلةُ والمنشأ.
+   * @param state - الحالة المطلوبة
+   * @param reason - سببها
+   * @param signer - صاحبُ التوقيع (لمعرّفِه وإصدارِ مفتاحِه)
+   * @returns الجسم
+   */
+  #directiveBody(state: HaltState, reason: string, signer: HaltVerifier): HaltDirectiveBody {
     const previous = this.#lastHistoryHash();
     const epoch = Math.max(this.#readEpoch(), this.history().length) + 1;
-    const body: HaltDirectiveBody = {
+    return {
       version: 1,
       epoch,
       state,
@@ -877,20 +973,35 @@ export class HaltSwitch implements HaltGuard {
       keyVersion: haltKeyVersion(signer),
       previousDirectiveHash: previous ?? GENESIS_DIRECTIVE_HASH,
     };
-    const directive: HaltDirective = {
-      ...body,
-      hash: hashHaltBody(body),
-      signature: signer.sign(body),
-    };
+  }
+
+  /**
+   * ينشرُ توجيهاً موقَّعاً بترتيبٍ مغلقٍ: العهدُ ثم التاريخُ ثم التوجيه.
+   * @param directive - التوجيهُ الموقَّع
+   * @returns هو نفسُه
+   */
+  #publish(directive: HaltDirective): HaltDirective {
     const line = JSON.stringify(directive) + '\n';
     // الترتيب مقصود: العهد يُرفع أولاً، ثم يُلحق التاريخ، ثم يُنشر التوجيه.
     // فالانقطاع في أي موضع يترك حالةً **أشدّ إغلاقاً** لا أوسع: عهدٌ مرفوع
     // بلا توجيه ⇒ `HALT_DIRECTIVE_MISSING` ⇒ موقوف. ولو نُشر التوجيه أولاً
     // لأمكن أن يُقرأ استئنافٌ لم يُثبَّت عهده بعد.
-    this.#writeEpoch(epoch);
+    this.#writeEpoch(directive.epoch);
     this.#appendLine(this.historyFile, line);
     this.#writeAtomic(this.file, line);
     return directive;
+  }
+
+  /**
+   * يرفعُ خطأً إن كان الحاملُ لا يوقّعُ بغيرِ تزامنٍ — أي ليس موقّعَ توكن.
+   * @returns الموقّعُ غيرُ المتزامن
+   */
+  #assertAsyncSigner(): HaltAsyncSigner {
+    const candidate = this.king as Partial<HaltAsyncSigner>;
+    if (typeof candidate.signAsync !== 'function') {
+      throw new HaltError('HALT_SIGNER_REQUIRED', { detail: this.king.id });
+    }
+    return this.king as HaltAsyncSigner;
   }
 
   /**

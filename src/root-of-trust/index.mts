@@ -22,3 +22,6 @@ export * from './command-ledger.mjs';
 export * from './hsm-binding.mjs';
 export * from './halt-switch.mjs';
 export * from './clock.mjs';
+
+// المصنعُ الإنتاجيُّ (WL-092): يُصدَّرُ بعدَ كلِّ ما يبنيه، فهو مستهلكُها جميعاً.
+export * from './production-runtime.mjs';

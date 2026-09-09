@@ -52,6 +52,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
+import { ledgerEntryBody } from './hsm-binding.mjs';
 import { basename, dirname, join } from 'node:path';
 
 /** لاحقة مجلد الحجوزات: مفتاحٌ لكل أمر، وإنشاؤه الحصري هو الذرّية نفسها. */
@@ -66,6 +67,11 @@ export const CommandLedgerErrorCodes = [
   'INVALID_COMMAND_ID',
   'UNCLAIMED_COMMAND',
   'UNKNOWN_COMMAND',
+  'SIGNED_LEDGER_REQUIRES_ASYNC',
+  'LEDGER_ENTRY_UNSIGNED',
+  'LEDGER_SIGNATURE_INVALID',
+  'LEDGER_KEY_MISMATCH',
+  'LEDGER_SIGNER_MISSING',
 ] as const;
 
 export type CommandLedgerErrorCode = (typeof CommandLedgerErrorCodes)[number];
@@ -132,6 +138,55 @@ export interface LedgerRecovery {
 export interface CommandLedgerOptions {
   /** مزامنة القرص بعد كل تثبيت. تعطيلها يُسرّع ويُضعف الضمان. */
   fsync?: boolean;
+  /**
+   * موقّعُ قراراتِ الدفترِ (F07 داخلَ التوكن، `WL-092`). إن وُصِل:
+   *   • كلُّ سطرٍ يُكتبُ موقَّعاً عبر `commitSigned`/`abortSigned` غيرِ المتزامنين،
+   *   • والمساراتُ المتزامنةُ تُرفَض (`SIGNED_LEDGER_REQUIRES_ASYNC`) لأنّ التوكنَ
+   *     لا يوقّعُ متزامناً، وتوقيعٌ برمجيٌّ بديلاً عنه هو عينُ ما يُمنَع،
+   *   • والتحميلُ يرفضُ سطراً غيرَ موقّعٍ أو مُعدَّلاً أو منسوباً إلى مفتاحٍ آخر.
+   */
+  signer?: LedgerDecisionSigner | null;
+}
+
+/**
+ * أقلُّ ما يحتاجُه الدفترُ من موقّعِ F07. عقدٌ بنيويٌّ يُوافقُ `HsmSigner` ولا
+ * يورِّثُه: الدفترُ لا يعرفُ PKCS#11، والتوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكن،
+ * والتحقّقُ متزامنٌ بالمفتاحِ العامِّ المُصدَّرِ من التوكن.
+ */
+export interface LedgerDecisionSigner {
+  /** معرّفُ المفتاحِ في التوكن (F07 = `07`). */
+  readonly keyId: string;
+  /** إصدارُ المفتاحِ الذي يوقّعُ الآن. */
+  readonly activeVersion: number;
+  /**
+   * يوقّعُ مادةً داخلَ التوكن.
+   * @param payload - المادةُ المنضبطة
+   * @returns التوقيعُ بترميز base64url
+   */
+  signAsync(payload: object): Promise<string>;
+  /**
+   * يتحقّقُ بالمفتاحِ العامّ.
+   * @param payload - المادةُ الموقّعة
+   * @param signature - التوقيع
+   * @returns صحّتُه
+   */
+  verify(payload: object, signature: string): boolean;
+}
+
+/** سطرُ دفترٍ موقَّعٌ كما يُكتبُ ويُقرأُ من القرص. */
+export interface SignedLedgerEntryRecord extends LedgerEntry {
+  keyId: string;
+  keyVersion: number;
+  signature: string;
+}
+
+/** خلاصةُ تحقّقٍ من توقيعاتِ الدفترِ كاملاً — للتدقيقِ ولحزمِ الأدلة. */
+export interface LedgerSignatureAudit {
+  ok: boolean;
+  entries: number;
+  signed: number;
+  problemAt?: number;
+  problem?: CommandLedgerErrorCode;
 }
 
 /** محتوى ملف الحجز: من حجز، ومتى، وأي أمر. */
@@ -151,6 +206,7 @@ export class CommandLedger {
 
   #aborted: Set<string> = new Set();
   #fsync: boolean;
+  readonly #signer: LedgerDecisionSigner | null;
 
   /**
    * @param file - مسار دفتر المعرّفات الدائم
@@ -161,6 +217,9 @@ export class CommandLedger {
     this.claimsDir = file + LEDGER_CLAIMS_SUFFIX;
     this.ids = new Set();
     this.#fsync = options.fsync ?? true;
+    // الموقّعُ يُثبَّتُ قبلَ `load()`: التحميلُ نفسُه يتحقّقُ من التوقيعاتِ، فلو
+    // أُسنِدَ بعدَه لكان أولُ تحميلٍ يقبلُ سطراً غيرَ موقّعٍ صامتاً.
+    this.#signer = options.signer ?? null;
     mkdirSync(dirname(file), { recursive: true });
     mkdirSync(this.claimsDir, { recursive: true });
     this.load();
@@ -193,6 +252,9 @@ export class CommandLedger {
           detail: `السطر ${index + 1} بلا معرّف`,
         });
       }
+      // سطرٌ موقَّعٌ يُتحقَّقُ منه **قبلَ** أن يدخلَ الذاكرة: دفترٌ يُحمَّلُ ثم
+      // يُتحقَّقُ منه لاحقاً هو دفترٌ عملَ بسطرٍ مزوَّرٍ لحظةً واحدةً على الأقل.
+      if (this.#signer !== null) this.#assertEntrySigned(entry, index + 1);
       // الصيغة القديمة (M2.01) كانت `{id, recordedAt}` بلا حالة، ومعناها
       // «نُفّذ» — فتُقرأ تثبيتاً، إذ لم يكن هناك إلغاء أصلاً.
       if (entry.state === 'aborted') {
@@ -275,6 +337,7 @@ export class CommandLedger {
    * @param reason - سبب يُسجَّل عند الحاجة (كفصل حالة غامضة)
    */
   commit(command: RecordedCommand, reason?: string): void {
+    this.#assertSyncAllowed();
     const id = this.#assertId(command);
     if (!existsSync(this.#claimPath(id))) throw new CommandLedgerError('UNCLAIMED_COMMAND', { id });
     this.load();
@@ -289,6 +352,7 @@ export class CommandLedger {
    * @param reason - سبب الإلغاء، يُسجَّل للتدقيق
    */
   abort(command: RecordedCommand, reason = 'aborted by executor'): void {
+    this.#assertSyncAllowed();
     const id = this.#assertId(command);
     this.load();
     if (this.ids.has(id)) throw new CommandLedgerError('REPLAYED_COMMAND', { id });
@@ -303,6 +367,7 @@ export class CommandLedger {
    * @param command - الأمر الذي يحمل المعرّف المراد تثبيته
    */
   record(command: RecordedCommand): void {
+    this.#assertSyncAllowed();
     this.begin(command);
     this.commit(command);
   }
@@ -314,6 +379,7 @@ export class CommandLedger {
    * @param decision - القرار وسببه
    */
   resolveIndeterminate(id: string, decision: { executed: boolean; reason: string }): void {
+    this.#assertSyncAllowed();
     const current = this.state(id);
     if (current !== 'indeterminate') {
       throw new CommandLedgerError('UNKNOWN_COMMAND', { id, detail: `الحالة ${current}` });
@@ -335,6 +401,196 @@ export class CommandLedger {
       pending.push({ ...claim, alive: this.#pidAlive(claim.pid) });
     }
     return pending.sort((left, right) => left.at.localeCompare(right.at));
+  }
+
+  /**
+   * يُثبت تنفيذَ أمرٍ محجوزٍ **بقرارٍ موقَّعٍ داخلَ التوكن** (F07). نظيرُ `commit`
+   * بنفسِ ترتيبِ الفحوصِ ونفسِ الأخطاء، والتوقيعُ يقعُ **قبلَ** الكتابةِ: فلا
+   * يُكتبُ سطرٌ ثم يُطلبُ له توقيعٌ قد لا يأتي، ولا يُكتبُ سطرٌ بلا منشأٍ تشفيريّ.
+   * @param command - الأمر
+   * @param reason - سببٌ يُسجَّلُ عند الحاجة
+   * @returns السطرُ الموقَّعُ كما كُتب
+   */
+  async commitSigned(command: RecordedCommand, reason?: string): Promise<SignedLedgerEntryRecord> {
+    const signer = this.#assertSigner();
+    const id = this.#assertId(command);
+    if (!existsSync(this.#claimPath(id))) throw new CommandLedgerError('UNCLAIMED_COMMAND', { id });
+    this.load();
+    if (this.ids.has(id)) throw new CommandLedgerError('REPLAYED_COMMAND', { id });
+    return this.#appendSignedEntry(signer, id, 'committed', reason);
+  }
+
+  /**
+   * يُلغي حجزَ أمرٍ عُلم أن أثرَه لم يقع، بقرارٍ موقَّعٍ داخلَ التوكن.
+   * @param command - الأمر
+   * @param reason - سببُ الإلغاء، يُسجَّلُ ويدخلُ التوقيع
+   * @returns السطرُ الموقَّعُ كما كُتب
+   */
+  async abortSigned(
+    command: RecordedCommand,
+    reason = 'aborted by executor',
+  ): Promise<SignedLedgerEntryRecord> {
+    const signer = this.#assertSigner();
+    const id = this.#assertId(command);
+    this.load();
+    if (this.ids.has(id)) throw new CommandLedgerError('REPLAYED_COMMAND', { id });
+    const entry = await this.#appendSignedEntry(signer, id, 'aborted', reason);
+    rmSync(this.#claimPath(id), { force: true });
+    this.#fsyncDir();
+    return entry;
+  }
+
+  /**
+   * حجزٌ ذريٌّ ثم تثبيتٌ موقَّعٌ — نظيرُ `record` في المسارِ الإنتاجيّ.
+   * @param command - الأمر
+   * @returns السطرُ الموقَّع
+   */
+  async recordSigned(command: RecordedCommand): Promise<SignedLedgerEntryRecord> {
+    this.begin(command);
+    return this.commitSigned(command);
+  }
+
+  /**
+   * يفصلُ حالةً غامضةً بقرارٍ موقَّعٍ صريح.
+   * @param id - معرّفُ الأمر
+   * @param decision - القرارُ وسببُه
+   * @returns السطرُ الموقَّع
+   */
+  async resolveIndeterminateSigned(
+    id: string,
+    decision: { executed: boolean; reason: string },
+  ): Promise<SignedLedgerEntryRecord> {
+    const signer = this.#assertSigner();
+    const current = this.state(id);
+    if (current !== 'indeterminate') {
+      throw new CommandLedgerError('UNKNOWN_COMMAND', { id, detail: `الحالة ${current}` });
+    }
+    if (decision.executed) {
+      return this.#appendSignedEntry(signer, id, 'committed', decision.reason);
+    }
+    return this.abortSigned({ id }, decision.reason);
+  }
+
+  /**
+   * يتحقّقُ من توقيعاتِ الدفترِ كاملاً بلا تحميلٍ للحالة — للتدقيقِ ولحزمِ الأدلة.
+   * ولا يرفعُ خطأً: يُرجعُ موضعَ أولِ سطرٍ مرفوضٍ ورمزَه، فالتقريرُ لا يُسقِطُ
+   * مُستدعيَه، والحكمُ يبقى في `load()`.
+   * @returns خلاصةُ التحقّق
+   */
+  auditSignatures(): LedgerSignatureAudit {
+    if (this.#signer === null) {
+      return { ok: false, entries: 0, signed: 0, problem: 'LEDGER_SIGNER_MISSING' };
+    }
+    if (!existsSync(this.file)) return { ok: true, entries: 0, signed: 0 };
+    const lines = readFileSync(this.file, 'utf8')
+      .split('\n')
+      .filter((line) => line.length > 0);
+    let signed = 0;
+    for (const [index, line] of lines.entries()) {
+      let entry: Partial<SignedLedgerEntryRecord>;
+      try {
+        entry = JSON.parse(line) as Partial<SignedLedgerEntryRecord>;
+      } catch {
+        return {
+          ok: false,
+          entries: lines.length,
+          signed,
+          problemAt: index + 1,
+          problem: 'CORRUPT_COMMAND_LEDGER',
+        };
+      }
+      try {
+        this.#assertEntrySigned(entry, index + 1);
+        signed += 1;
+      } catch (error) {
+        const code = (error as CommandLedgerError).code;
+        return { ok: false, entries: lines.length, signed, problemAt: index + 1, problem: code };
+      }
+    }
+    return { ok: true, entries: lines.length, signed };
+  }
+
+  /**
+   * يرفعُ خطأً إن كان الدفترُ موقَّعاً وطُلب منه مسارٌ متزامن. الرفضُ صريحٌ لا
+   * توقيعٌ برمجيٌّ بديل: التوكنُ لا يوقّعُ متزامناً، والبديلُ البرمجيُّ هو الانهيارُ
+   * الذي تُبنى هذه الوحدةُ لمنعِه.
+   */
+  #assertSyncAllowed(): void {
+    if (this.#signer !== null) {
+      throw new CommandLedgerError('SIGNED_LEDGER_REQUIRES_ASYNC', {
+        detail: 'استعمل commitSigned/abortSigned/recordSigned',
+      });
+    }
+  }
+
+  /**
+   * يُرجعُ الموقّعَ أو يرفضُ فشلاً مغلقاً.
+   * @returns الموقّع
+   */
+  #assertSigner(): LedgerDecisionSigner {
+    if (this.#signer === null) throw new CommandLedgerError('LEDGER_SIGNER_MISSING');
+    return this.#signer;
+  }
+
+  /**
+   * يتحقّقُ من سطرٍ موقَّعٍ: حضورُ حقولِ المنشأِ، ثم مطابقةُ المفتاحِ وإصدارِه،
+   * ثم التوقيعُ فوقَ المادةِ نفسِها التي يبنيها `ledgerEntryBody` — مصدرٌ واحدٌ
+   * للمادةِ، فلا يتفارقُ ما وُقّع عمّا يُتحقَّقُ منه.
+   * @param entry - السطرُ كما قُرئ
+   * @param line - رقمُ السطرِ للتشخيص
+   */
+  #assertEntrySigned(entry: Partial<SignedLedgerEntryRecord>, line: number): void {
+    const signer = this.#assertSigner();
+    const at = `السطر ${line}`;
+    if (
+      typeof entry.signature !== 'string' ||
+      entry.signature.length === 0 ||
+      typeof entry.keyId !== 'string' ||
+      typeof entry.keyVersion !== 'number'
+    ) {
+      throw new CommandLedgerError('LEDGER_ENTRY_UNSIGNED', { detail: at });
+    }
+    // منشأٌ مكذوبٌ عبثٌ ولو صحَّ التوقيعُ: مفتاحٌ آخرُ أو إصدارٌ آخرُ يُرفَض.
+    if (entry.keyId !== signer.keyId || entry.keyVersion !== signer.activeVersion) {
+      throw new CommandLedgerError('LEDGER_KEY_MISMATCH', { detail: at });
+    }
+    let body: (string | number | null)[];
+    try {
+      body = ledgerEntryBody(entry as LedgerEntry);
+    } catch {
+      throw new CommandLedgerError('LEDGER_SIGNATURE_INVALID', { detail: `${at}: مادةٌ ناقصة` });
+    }
+    if (!signer.verify(body as unknown as object, entry.signature)) {
+      throw new CommandLedgerError('LEDGER_SIGNATURE_INVALID', { detail: at });
+    }
+  }
+
+  /**
+   * يبني سطراً ثم يوقّعُه داخلَ التوكنِ ثم يكتبُه مُزامَناً. الترتيبُ مقصودٌ:
+   * لا سطرَ على القرصِ إلا وقد صار له توقيعٌ.
+   * @param signer - موقّعُ F07
+   * @param id - معرّفُ الأمر
+   * @param state - القرار
+   * @param reason - سببُه إن وُجد
+   * @returns السطرُ الموقَّع
+   */
+  async #appendSignedEntry(
+    signer: LedgerDecisionSigner,
+    id: string,
+    state: 'committed' | 'aborted',
+    reason?: string,
+  ): Promise<SignedLedgerEntryRecord> {
+    const entry: LedgerEntry = { id, state, pid: process.pid, at: new Date().toISOString() };
+    if (reason !== undefined) entry.reason = reason;
+    const signature = await signer.signAsync(ledgerEntryBody(entry) as unknown as object);
+    const signedEntry: SignedLedgerEntryRecord = {
+      ...entry,
+      keyId: signer.keyId,
+      keyVersion: signer.activeVersion,
+      signature,
+    };
+    this.#writeEntry(signedEntry);
+    return signedEntry;
   }
 
   /**
@@ -365,6 +621,17 @@ export class CommandLedger {
   #appendEntry(id: string, state: 'committed' | 'aborted', reason?: string): void {
     const entry: LedgerEntry = { id, state, pid: process.pid, at: new Date().toISOString() };
     if (reason !== undefined) entry.reason = reason;
+    this.#writeEntry(entry);
+  }
+
+  /**
+   * يكتبُ سطراً — موقَّعاً أو غيرَ موقَّعٍ — بكتابةٍ كاملةٍ ومزامنةٍ، ويُحدّثُ
+   * الذاكرةَ. مسارُ كتابةٍ واحدٌ للمسارين، فلا يفترقُ ضمانُ الدوامِ بينهما.
+   * @param entry - السطرُ كما سيُكتب
+   */
+  #writeEntry(entry: LedgerEntry | SignedLedgerEntryRecord): void {
+    const state = entry.state;
+    const id = entry.id;
     const fd = openSync(this.file, 'a');
     try {
       this.#writeAll(fd, JSON.stringify(entry) + '\n');

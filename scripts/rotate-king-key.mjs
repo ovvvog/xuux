@@ -22,8 +22,10 @@
 
 import {
   describeKingKeyRotation,
+  isProductionRuntime,
   kingKeyProviderFromEnv,
   loadKingKeySet,
+  openProductionSigners,
   revokeKingKeyVersion,
   rotateKingKey,
 } from '../src/root-of-trust/index.mjs';
@@ -35,7 +37,10 @@ const USAGE = `الاستعمال:
   node scripts/rotate-king-key.mjs revoke --version <رقم> --reason <نص> [--json]
 
 المخزن يُعلَن في البيئة لا في الأمر:
-  الإنتاج:  KING_KEY_STORE_ENDPOINT و KING_KEY_STORE_TOKEN
+  الإنتاج:  لا مخزنَ برمجيّاً — المفتاحُ في التوكن (XUUX_PKCS11_MODULE/TOKEN وPIN).
+            الأمر status يعملُ ويقرأُ هويةَ المفتاحِ من التوكن؛ وrotate/revoke
+            يُردّان برمزٍ صريحٍ لأن تدويرَ مفتاحٍ داخلَ توكنٍ يقعُ بأداةِ التوكن:
+            node scripts/pkcs11-keygen.mjs
   التطوير:  KING_KEY_DIR و KING_KEY_MASTER`;
 
 /**
@@ -99,16 +104,76 @@ function formatVersion(record, now) {
 }
 
 /**
+ * المسارُ الإنتاجيّ: هويةُ المفتاحِ تُقرأُ من التوكن، والتغييرُ يُردُّ إلى أداةِ
+ * التوكن. ورمزُ الخروجِ 2 لا 1 في الردِّ: خطأُ استعمالٍ لا فشلُ نظام.
+ * @param {{command: string, json: boolean}} options - الأمرُ وخياراته
+ * @param {NodeJS.ProcessEnv} env - البيئة
+ * @param {import('../src/root-of-trust/index.mjs').ProductionRuntimeDeps} deps - حقنُ مصدرِ المفاتيحِ للاختبار
+ * @returns {Promise<number>} رمزُ الخروج
+ */
+async function runOnHsm(options, env, deps) {
+  if (options.command === 'rotate' || options.command === 'revoke') {
+    console.error(
+      '⛔ HSM_ROTATION_REQUIRES_TOKEN_TOOL: مفتاحُ الملكِ في الإنتاجِ داخلَ التوكنِ ولا يخرجُ منه،',
+    );
+    console.error(
+      '   فلا يُدوَّرُ ولا يُبطَلُ من هذه الأداة. استعمل: node scripts/pkcs11-keygen.mjs',
+    );
+    return 2;
+  }
+  if (options.command !== 'status') {
+    console.error(`⛔ أمر غير معروف: ${options.command}\n`);
+    console.error(USAGE);
+    return 2;
+  }
+  const signers = await openProductionSigners(env, deps);
+  try {
+    const signer = signers.anchorSigner;
+    const payload = {
+      mode: 'hsm',
+      providerKind: signers.boot.effectiveMode === 'hsm' ? 'pkcs11-hsm' : 'unknown',
+      keyId: signer.keyId,
+      kingId: signer.id,
+      activeVersion: signer.activeVersion,
+      acceptedVersions: [signer.activeVersion],
+      publicKeyPem: signer.publicKeyPem,
+      rotationTool: 'scripts/pkcs11-keygen.mjs',
+    };
+    if (options.json) {
+      console.log(JSON.stringify(payload, null, 2));
+      return 0;
+    }
+    console.log('═══ حالة مفتاح الملك — داخل التوكن (HSM) ═══');
+    console.log(`المخزن: التوكن (${payload.providerKind}) · إنتاجي: نعم`);
+    console.log(`معرّف المفتاح في التوكن: CKA_ID=${payload.keyId}`);
+    console.log(`هوية الملك: ${payload.kingId}`);
+    console.log(`الإصدار الفعّال: ${payload.activeVersion}`);
+    console.log(`الإصدارات المقبولة للتحقق الآن: ${payload.acceptedVersions.join(' · ')}`);
+    console.log(`التدوير يقع بأداة التوكن: ${payload.rotationTool}`);
+    return 0;
+  } finally {
+    await signers.close();
+  }
+}
+
+/**
  * ينفّذ الأمر المطلوب.
  * @param {string[]} argv - الوسائط بعد اسم السكربت
+ * @param {NodeJS.ProcessEnv} [env] - البيئة المقروءة
+ * @param {import('../src/root-of-trust/index.mjs').ProductionRuntimeDeps} [deps] - حقنُ مصدرِ المفاتيحِ للاختبار (الإنتاج فقط)
  * @returns {Promise<number>} رمز الخروج
  */
-export async function run(argv) {
+export async function run(argv, env = process.env, deps = {}) {
   if (argv.includes('--help') || argv.includes('-h')) {
     console.log(USAGE);
     return 0;
   }
   const options = parseArgs(argv);
+  // في الإنتاج لا يُبنى موفّرُ مفاتيحَ برمجيٌّ أصلاً (WL-089): الأداةُ كانت تفشلُ
+  // هنا فشلاً غامضاً، فصار لها مسارٌ عتاديٌّ صريحٌ (WL-092) — `status` يقرأُ هويةَ
+  // المفتاحِ من التوكن، والتدويرُ والإبطالُ يُردّان إلى أداةِ التوكن. ولا يُزعمُ
+  // أن الأداةَ تدوّرُ مفتاحاً في التوكن: مفتاحٌ لا يخرجُ لا يُدوَّرُ من خارجه.
+  if (isProductionRuntime(env)) return runOnHsm(options, env, deps);
   const provider = kingKeyProviderFromEnv();
   const now = new Date();
 

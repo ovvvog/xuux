@@ -500,6 +500,11 @@ test('رموز أخطاء السجل الدائم مثبَّتة نصاً، وا
       'LOG_ALREADY_LOCKED',
       'LOG_CLOSED',
       'PARTIAL_WRITE',
+      // رموزُ الختمِ — WL-092: السجلُّ في الإنتاجِ مختومٌ، ومن يُقلِعُه بلا خاتمٍ
+      // أو يُنادي `append` المتزامنَ عليه يُردُّ برمزٍ مُعلَنٍ لا برسالةٍ مبهمة.
+      'EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION',
+      'SEALED_LOG_REQUIRES_ASYNC_APPEND',
+      'EVENT_LOG_SEALER_MISSING',
     ],
   );
   const error = new PersistentLogError('CORRUPT_EVENT_LOG', { brokenAt: 4 });

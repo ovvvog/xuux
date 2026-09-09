@@ -8,12 +8,21 @@
  * السكربت لا يُنشئ سياسةً ولا مفتاح إيقاف من عنده: يقرأ `state/halt.json` القائم
  * ويتحقّق منه بمفتاح الملك العام. **وبلا مفتاح إيقاف قابل للقراءة لا يُقلع العامل
  * أصلاً** — عاملٌ لا يستطيع أن يعرف أنّ النظام أُوقف أخطر من عاملٍ لا يعمل.
+ *
+ * وفي الإنتاج (‏WL-092): سجلُّ وقائعِ العزلِ **مختومٌ** بمفتاح التوكن، فلا يبقى
+ * على القرصِ نصٌّ ظاهرٌ عمّا نُفِّذ ولا عمّن حاول الهرب. والعاملُ يبقى مالكاً
+ * لمفتاحٍ عامٍّ وحدَه للإيقاف: عقدةٌ تنفيذٍ تُقرُّ بالتوقفِ ولا تستأنفُ الدولة.
  */
 
 import process from 'node:process';
 
 import { PersistentEventLog } from '../src/root-of-trust/persistent-log.mjs';
-import { HaltSwitch, royalVerifierFromPublicKey } from '../src/root-of-trust/index.mjs';
+import {
+  HaltSwitch,
+  isProductionRuntime,
+  openProductionEventLog,
+  royalVerifierFromPublicKey,
+} from '../src/root-of-trust/index.mjs';
 import { createTaskQueue } from '../src/execution/queue.mjs';
 import { createWorker } from '../src/execution/worker.mjs';
 import { createQuotaLedger } from '../src/policy/quota.mjs';
@@ -68,9 +77,14 @@ async function main() {
   const halt = new HaltSwitch(options.haltFile, royalVerifierFromPublicKey(options.publicKey));
   const pool = createPool();
   const queue = createTaskQueue({ pool });
-  const isolationLog = new PersistentEventLog(
-    process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl',
-  );
+  const isolationLogFile = process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl';
+  // في الإنتاج يُفتحُ السجلُّ مختوماً بمفتاحِ التوكن، ويُلبَسُ مصرِفاً مرتَّباً
+  // لأن عقدَ `log.append` عندَ العزلِ متزامنٌ والختمُ ليس كذلك. التصريفُ يقعُ
+  // عندَ حدودِ المهامِّ وقبلَ الإغلاق، فإن فشلَ ختمُ واقعةٍ توقّفَ العامل.
+  const production = isProductionRuntime(process.env);
+  const sealed = production ? await openProductionEventLog(process.env, isolationLogFile) : null;
+  const isolationLog = sealed === null ? new PersistentEventLog(isolationLogFile) : sealed.log;
+  const isolationSink = sealed === null ? isolationLog : sealed.sink;
   const worker = createWorker({
     queue,
     pool,
@@ -80,7 +94,7 @@ async function main() {
     isolation: {
       workdir: process.cwd(),
       outputRoot: process.env['ISOLATION_OUTPUT_ROOT'] ?? '.isolation-output',
-      log: isolationLog,
+      log: isolationSink,
     },
   });
 
@@ -105,9 +119,21 @@ async function main() {
         continue;
       }
       handled += 1;
+      // تصريفٌ عندَ حدِّ المهمّة: واقعةُ عزلٍ لم تُختَم ولم تُكتَب توقفُ العامل
+      // ولا تُمرَّرُ مهمةٌ تالية — سجلٌّ ناقصٌ أخطرُ من عاملٍ متوقف.
+      if (sealed !== null) await sealed.sink.drain();
     }
   } finally {
-    isolationLog.close();
+    if (sealed !== null) {
+      try {
+        await sealed.sink.drain();
+      } finally {
+        isolationLog.close();
+        await sealed.close();
+      }
+    } else {
+      isolationLog.close();
+    }
     await pool.end();
   }
   process.stdout.write(`عاملٌ توقّف: ${options.worker} — مهام مُعالَجة: ${handled}\n`);

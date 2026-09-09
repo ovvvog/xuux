@@ -24,7 +24,7 @@
 
 ## 2. الوحدات
 
-خمس عشرة وحدة `.mts` في `src/root-of-trust/`، تُبنى إلى `.mjs` بـ`npm run build`:
+عشرون وحدة `.mts` في `src/root-of-trust/`، تُبنى إلى `.mjs` بـ`npm run build`:
 
 | الوحدة | ما تفعله | المُدخلة |
 | --- | --- | --- |
@@ -41,10 +41,22 @@
 | `src/root-of-trust/key-provider.mts` · `src/root-of-trust/key-provider-local.mts` · `src/root-of-trust/key-provider-remote.mts` | عقدٌ واحد لمزوّد المفاتيح: محلي للتطوير، ومخزن أسرار بعيد للإنتاج، وتعذُّرٌ يُقرأ `PROVIDER_UNAVAILABLE` | `WL-006` |
 | `src/root-of-trust/king-key.mts` | ربط مفتاح الملك بالمزود: تهيئةٌ لا تُكرَّر، ومادةٌ لا تُصدَّر، ورفضُ مزوّد التطوير إنتاجياً | `WL-007` |
 | `src/root-of-trust/king-key-rotation.mts` | تدوير بفترة تعايش، وإبطال إصدار، ومنعُ إبطال الإصدار النشط | `WL-008` |
+| `src/root-of-trust/pkcs11-provider.mts` | موفّر PKCS#11: جلسةٌ إلى توكنٍ عتاديٍّ، ومفاتيحُ لا تخرج، ورفضُ توكنٍ يُصدِّر مادةً | `WL-086` |
+| `src/root-of-trust/hsm-binding.mts` | ربطُ القدراتِ بالتوكن: ختمُ الوقائعِ (`sealEventData`/`openEventData`)، وتثبيتٌ موقَّعٌ داخلَ التوكنِ (`anchorLogWithHsm`)، وتوقيعُ مُدخلاتِ الدفترِ (`signLedgerEntry`/`verifyLedgerEntry`) | `WL-087` |
+| `src/root-of-trust/production-boot.mts` | قيدُ الإقلاعِ: في الإنتاجِ لا وضعَ تطويرٍ ولا مخزنَ مفاتيحَ برمجيّاً ولا توكنَ يُصدِّرُ مادةً — يُرَدُّ برمزٍ لا يُقلَعُ بعده | `WL-089` |
+| `src/root-of-trust/production-runtime.mts` | **المصنعُ الإنتاجيُّ**: يبني السجلَّ المختومَ ودفترَ الأوامرِ الموقَّعَ ومفتاحَ الإيقافِ على مفاتيحِ التوكنِ، ويُلزِمُ البوابةَ بهما، ويفتحُ سجلاً مختوماً وحدَه لمن يحتاجُه | `WL-092` |
 | `src/root-of-trust/index.mts` | المنفذ العام الوحيد للوحدات | — |
 
 وأدوات التشغيل في `scripts/`: `scripts/halt-switch.mjs` و`scripts/rotate-king-key.mjs` و`scripts/anchor-log.mjs`.
 وهي **لا تمرّ بالبوابة** بحكم وظيفتها (الحد TB6 في نموذج التهديد).
+
+**وفي الإنتاج تعمل الثلاثُ على التوكن (‏`WL-092`)**، لا على مخزنٍ برمجيٍّ ولا معطَّلةً:
+`anchor-log` يُثبِّتُ ويتحقّقُ بمفتاحِ التوقيعِ الملكيِّ داخلَ التوكن، و`halt-switch`
+يُصدِرُ الإيقافَ والاستئنافَ بتوقيعٍ داخلَه (‏`haltAsync`/`resumeAsync`)، و`rotate-king-key`
+يقرأُ هويةَ المفتاحِ وإصدارَه من التوكنِ في `status` **ويردُّ `rotate`/`revoke`** برمزِ
+`HSM_ROTATION_REQUIRES_TOKEN_TOOL` إلى `scripts/pkcs11-keygen.mjs`: مفتاحٌ لا يخرجُ من
+التوكنِ لا يُدوَّرُ من خارجِه، وادّعاءُ تدويرِه بأداةٍ خارجيّةٍ كذبٌ في وثيقةٍ أمنيّة.
+وجلسةُ التوكنِ تُغلَقُ في `finally` في الثلاثِ. والدليل: `tests/tooling/production-cli-hsm.test.mjs`.
 
 ---
 
@@ -99,7 +111,12 @@
 
 هذه ليست تحذيراً عاماً بل قائمةٌ مقابلة لخارطة الطريق:
 
-1. **لا HSM ولا KMS** — المادة تمرّ في ذاكرة العملية عند التوقيع (M3/M10).
+1. **HSM في الإنتاج، ومخزنٌ برمجيٌّ في التطوير** — في الإنتاجِ لا تمرُّ مادةُ مفتاحٍ
+   في ذاكرةِ العملية: الختمُ والتوقيعُ داخلَ التوكن (‏`WL-086`–`WL-089`، `WL-092`). وفي
+   التطويرِ يبقى المخزنُ البرمجيُّ، وهو **ليس بديلاً عن التوكن**. و**حدٌّ باقٍ مُصرَّحٌ**:
+   توقيعُ الأمرِ الملكيِّ نفسِه (`KingIdentity`) لم يُهاجَرْ إلى التوكنِ بعدُ، فهو في
+   الإنتاجِ **مقفولٌ فشلاً مُغلَقاً** لا عاملاً بمفتاحٍ برمجيّ — والمُهاجَرُ هو ختمُ
+   السجلِّ وتثبيتُه وتوقيعُ توجيهِ الإيقافِ ومُدخلاتِ الدفتر.
 2. **سحب الشهادات في الذاكرة فقط** — يُنسى بإعادة التشغيل (M3).
 3. **الساعة تكشف الانزياح ولا تُبرهن الوقت**، وخيارها مطفأ افتراضياً في البوابة (M5/M10).
 4. **لا نقل شبكي ولا مصادقة بين العقد** — العقد اليوم تتشارك نظام ملفات (M5).
@@ -114,9 +131,21 @@
 
 ```bash
 npm run validate   # سبع وأربعون بوابة ثم كل الاختبارات
-npm test           # 136 ملف اختبار
+npm test           # 139 ملف اختبار
 ```
 
 والأدلة موضعية لا مجمَلة: `tests/root-of-trust/` لكل وحدة، و
 `tests/root-of-trust/failure-modes.test.mjs` لحالات الفشل الستّ، و
-`tests/docs/security-docs.test.mjs` لصدق هذه الوثائق نفسها.
+`tests/docs/security-docs.test.mjs` لصدق هذه الوثائق نفسها، و
+`tests/root-of-trust/production-runtime.test.mjs` لأن المساراتِ الإنتاجيّةَ **تستدعي**
+ربطَ التوكنِ فعلاً لا أنها تقدرُ عليه، و`tests/root-of-trust/production-runtime-softhsm.test.mjs`
+لتوكنٍ حقيقيٍّ **محلياً** بـ`XUUX_HSM_TEST=1` — ويُتخطّى في CI، فلا يُقرأُ نجاحُ CI
+شهادةً على توكنٍ حقيقيّ.
+
+**رموزٌ يردُّها المسارُ الإنتاجيُّ (‏`WL-092`)** — الرسالةُ هي الرمزُ بلا قيمةٍ ولا مادة:
+`EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION` · `SEALED_LOG_REQUIRES_ASYNC_APPEND` ·
+`EVENT_LOG_SEALER_MISSING` · `SIGNED_LEDGER_REQUIRES_ASYNC` · `LEDGER_ENTRY_UNSIGNED` ·
+`LEDGER_SIGNATURE_INVALID` · `LEDGER_KEY_MISMATCH` · `LEDGER_SIGNER_MISSING` ·
+`COMMAND_LEDGER_REQUIRED_IN_PRODUCTION` · `HALT_SWITCH_REQUIRED_IN_PRODUCTION` ·
+`PRODUCTION_RUNTIME_REQUIRES_HSM` · `PRODUCTION_RUNTIME_ROOT_MISSING` ·
+`HSM_ROTATION_REQUIRES_TOKEN_TOOL`.

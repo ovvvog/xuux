@@ -26,8 +26,12 @@ import {
   FileAnchorStore,
   LogAnchorer,
   inspectEventLog,
+  isProductionRuntime,
   kingKeyProviderFromEnv,
   loadKingKeySet,
+  maybeAnchorLogWithHsm,
+  openProductionSigners,
+  verifyAnchoredLog,
 } from '../src/root-of-trust/index.mjs';
 
 /** الاستعمال المطبوع عند الخطأ أو عند `--help`. */
@@ -40,7 +44,9 @@ const USAGE = `الاستعمال:
   EVENT_LOG_FILE            ملف سجل الأحداث (إلزامي)
   ANCHOR_STORE_FILE         ملف التثبيتات المنفصل (إلزامي)
   ANCHOR_INTERVAL_MINUTES   الفترة بين تثبيتين بالدقائق (افتراضها 60)
-  مخزن المفاتيح:            KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER`;
+  مخزن المفاتيح:            KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER
+                            (في الإنتاج: لا مخزنَ برمجيّاً — التوقيع داخل التوكن عبر
+                             XUUX_PKCS11_MODULE/TOKEN وXUUX_PKCS11_PIN أو PIN_FILE)`;
 
 /**
  * يفكّ وسائط سطر الأوامر إلى أمرٍ وخيارات.
@@ -94,15 +100,100 @@ export function formatVerification(result) {
 }
 
 /**
+ * المسارُ الإنتاجيُّ: نفسُ الأوامرِ الثلاثةِ بتوقيعِ F06 داخلَ التوكن. جلسةُ
+ * التوكنِ تُغلقُ دائماً في `finally`: أداةٌ دوريةٌ تتركُ جلسةً مفتوحةً بعدَ كلِّ
+ * تشغيلٍ تُنهِكُ التوكنَ وتُبقي دخولاً لا حاجةَ إليه.
+ * @param {{command: string, json: boolean, force: boolean}} args - الأمرُ وخياراته
+ * @param {{logFile: string, storeFile: string, intervalMs: number}} config - إعدادُ البيئة
+ * @param {NodeJS.ProcessEnv} env - البيئة
+ * @param {import('../src/root-of-trust/index.mjs').ProductionRuntimeDeps} deps - حقنُ مصدرِ المفاتيحِ للاختبار
+ * @returns {Promise<string>} المخرجُ المطبوع
+ */
+async function runOnHsm(args, config, env, deps) {
+  const store = new FileAnchorStore(config.storeFile);
+  store.assertSeparateFrom(config.logFile);
+  const inspection = inspectEventLog(config.logFile);
+  const log = { events: inspection.events, file: config.logFile };
+  const signers = await openProductionSigners(env, deps);
+  try {
+    const signer = signers.anchorSigner;
+    const anchors = store.read();
+    const latest = anchors.length === 0 ? null : anchors[anchors.length - 1];
+
+    if (args.command === 'status') {
+      const payload = {
+        mode: 'hsm',
+        keyId: signer.keyId,
+        signerId: signer.id,
+        logFile: config.logFile,
+        storeFile: store.location,
+        events: inspection.count,
+        logProblem: inspection.problem ?? null,
+        anchors: anchors.length,
+        latestAnchor: latest
+          ? { seq: latest.seq, count: latest.count, at: latest.at, keyVersion: latest.keyVersion }
+          : null,
+        intervalMinutes: config.intervalMs / 60000,
+        acceptedKeyVersions: [signer.activeVersion],
+      };
+      if (args.json) return JSON.stringify(payload, null, 2);
+      return [
+        `الوضع: توقيع داخل التوكن (HSM) بمفتاح ${signer.keyId} إصدار ${signer.activeVersion}`,
+        `ملف السجل: ${payload.logFile}`,
+        `مخزن التثبيتات: ${payload.storeFile}`,
+        `أحداث على القرص: ${payload.events}${payload.logProblem ? ` (عطب: ${payload.logProblem})` : ''}`,
+        `تثبيتات محفوظة: ${payload.anchors}`,
+        latest
+          ? `آخر تثبيت: رقم ${latest.seq} عند الحدث ${latest.count} في ${latest.at} بإصدار المفتاح ${latest.keyVersion}`
+          : 'آخر تثبيت: لا يوجد — السجل غير مُثبَت بعد',
+        `الفترة: ${payload.intervalMinutes} دقيقة`,
+      ].join('\n');
+    }
+
+    if (args.command === 'anchor') {
+      if (inspection.problem) throw new Error(`لا يُثبَّت سجل معطوب: ${inspection.problem}`);
+      const record = await maybeAnchorLogWithHsm(store, signer, log, {
+        intervalMs: config.intervalMs,
+        force: args.force,
+      });
+      if (record === null) {
+        const message = 'لم يقع تثبيت: الفترة لم تنقضِ أو لا جديد. استعمل --force للتثبيت الآن.';
+        return args.json
+          ? JSON.stringify({ anchored: false, reason: 'INTERVAL_OR_NO_NEW_EVENTS' })
+          : message;
+      }
+      if (args.json)
+        return JSON.stringify({ anchored: true, mode: 'hsm', anchor: record }, null, 2);
+      return `✅ تثبيت رقم ${record.seq} عند الحدث ${record.count} بمفتاح التوكن ${signer.keyId} إصدار ${record.keyVersion}\nالتجزئة المشهود لها: ${record.lastHash}`;
+    }
+
+    if (args.command === 'verify') {
+      const result = verifyAnchoredLog({ events: log.events, anchors, king: signer });
+      if (args.json) return JSON.stringify(result, null, 2);
+      return formatVerification(result);
+    }
+
+    throw new Error(`أمر غير معروف: ${args.command}\n\n${USAGE}`);
+  } finally {
+    await signers.close();
+  }
+}
+
+/**
  * ينفّذ الأمر ويرجع ما يُطبع، بلا مسّ `process`, كي يُختبر نداءً لا عملية.
  * @param {string[]} argv - الوسائط
  * @param {NodeJS.ProcessEnv} env - البيئة
+ * @param {import('../src/root-of-trust/index.mjs').ProductionRuntimeDeps} [deps] - حقنُ مصدرِ المفاتيحِ للاختبار (الإنتاج فقط)
  * @returns {Promise<string>} المخرج المطبوع
  */
-export async function run(argv, env) {
+export async function run(argv, env, deps = {}) {
   const args = parseArgs(argv);
   if (args.command === '--help' || args.command === 'help') return USAGE;
   const config = readConfig(env);
+  // في الإنتاج تعملُ الأداةُ على التوكن (WL-092): كانت تفشلُ هنا لأن
+  // `kingKeyProviderFromEnv` يرفضُ المخزنَ البرمجيَّ في الإنتاج، فصار لها مسارٌ
+  // عتاديٌّ كامل — لا أداةٌ معطَّلةٌ ولا سقوطٌ إلى مفتاحٍ في ذاكرةِ العملية.
+  if (isProductionRuntime(env)) return runOnHsm(args, config, env, deps);
   const king = await loadKingKeySet(kingKeyProviderFromEnv(env));
   const store = new FileAnchorStore(config.storeFile);
   store.assertSeparateFrom(config.logFile);

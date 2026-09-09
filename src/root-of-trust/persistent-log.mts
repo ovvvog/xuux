@@ -23,6 +23,20 @@
 // ما لا يفعله (معلَن، لا مضمر): الرأس **غير موقَّع**، فمن يملك الكتابة على القرص
 // يستطيع إعادة بناء السجل والرأس معاً بلا كشف. حدّ ذلك هو التثبيت الموقَّع
 // المنفصل (`M2.06`)، ويوجد اختبار يُثبت هذا العجز صراحةً كي لا يُظن مغلقاً.
+//
+// إضافةُ `WL-092` — **الختمُ الإنتاجيُّ بمفتاحِ F05 داخلَ التوكن**: كان جسمُ كلِّ
+// حدثٍ يُكتب نصّاً صريحاً على القرص، وكان `sealEventData`/`openEventData` قدرةً
+// في `hsm-binding.mts` بلا مستهلكٍ واحدٍ. فصار السجلُّ يقبل **خاتماً** (`sealer`)
+// يختمُ جسمَ الحدثِ داخلَ التوكنِ قبلَ الكتابة، وثلاثُ قواعدَ تحكمُه:
+//   1. **لا مسارَ نصٍّ صريحٍ في الإنتاج**: مُنشئُ السجلِّ يرفضُ بلا خاتمٍ فشلاً
+//      مغلقاً (`EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION`).
+//   2. **لا تزييفَ تزامنٍ**: الختمُ نداءٌ غيرُ متزامنٍ إلى التوكن، فـ`append`
+//      المتزامنُ **يُرفَض** حين يوجد خاتمٌ (`SEALED_LOG_REQUIRES_ASYNC_APPEND`)
+//      ويُستعمل `appendSealed`. ولو أُرجع من `append` نصٌّ صريحٌ لصار الخاتمُ
+//      زينةً يُتجاوَزُ بأولِ نداءٍ قديم.
+//   3. **السلسلةُ تبقى فوقَ ما يُكتب فعلاً**: التجزئةُ تُحسَب على الجسمِ المختومِ
+//      كما هو على القرص، فالتحقّقُ من السلسلةِ يبقى بلا مفتاحٍ ولا توكن — وهو
+//      شرطُ التدقيقِ الخارجيّ.
 
 import {
   closeSync,
@@ -38,6 +52,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
+import { isProductionRuntime } from './production-boot.mjs';
 import {
   EventLog,
   GENESIS_HASH,
@@ -62,6 +77,9 @@ export const PersistentLogErrorCodes = [
   'LOG_ALREADY_LOCKED',
   'LOG_CLOSED',
   'PARTIAL_WRITE',
+  'EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION',
+  'SEALED_LOG_REQUIRES_ASYNC_APPEND',
+  'EVENT_LOG_SEALER_MISSING',
 ] as const;
 
 export type PersistentLogErrorCode = (typeof PersistentLogErrorCodes)[number];
@@ -106,6 +124,29 @@ export interface LogRecovery {
   stolenLockPid: number | null;
 }
 
+/**
+ * خاتمُ أجسامِ الأحداث. عقدٌ بنيويٌّ لا وراثةٌ ولا استيرادٌ من `hsm-binding`:
+ * السجلُّ لا يعرف PKCS#11 ولا يستوردُه، إنما يقبلُ من يختمُ ويفكُّ. وهذا يُتيح
+ * تشغيلَ المسارِ الإنتاجيِّ نفسِه في CI بخلفيةِ توكنٍ مزيَّفةٍ **بتشفيرٍ حقيقيٍّ**،
+ * فتُشتغَّل الاختباراتُ الخصميّةُ فعلاً بدل أن تُتجاوز.
+ */
+export interface EventDataSealer {
+  /** معرّفُ مفتاحِ الختمِ في التوكن (F05 = `05`) — يُقرأ للتدقيقِ لا للاشتقاق. */
+  readonly keyId: string;
+  /**
+   * يختمُ جسمَ الحدثِ داخلَ التوكن.
+   * @param data - الجسمُ الصريح
+   * @returns الختمُ الصالحُ للكتابةِ على القرص
+   */
+  seal(data: unknown): Promise<object>;
+  /**
+   * يفكُّ ختمَ جسمِ حدثٍ داخلَ التوكن.
+   * @param sealed - الختمُ كما قُرئ من القرص
+   * @returns الجسمُ الصريح
+   */
+  open(sealed: unknown): Promise<unknown>;
+}
+
 /** خيارات السجل الدائم. */
 export interface PersistentEventLogOptions {
   /** قفل الكاتب الواحد. يُعطَّل في القراءة الفاحصة فقط. */
@@ -114,6 +155,12 @@ export interface PersistentEventLogOptions {
   fsync?: boolean;
   /** قبول سجلٍ بلا رأس (تبنٍّ أول أو استعادة نسخة) — يُسجَّل في `recovery`. */
   acceptMissingHead?: boolean;
+  /**
+   * خاتمُ أجسامِ الأحداثِ (F05). إلزاميٌّ في الإنتاج: بدونه يُرفض المُنشئ.
+   */
+  sealer?: EventDataSealer | null;
+  /** البيئةُ التي يُقرأ منها حكمُ الإنتاج — تُمرَّر في الاختبارِ كائناً صريحاً. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** نتيجة فحص قراءة محضة لملف سجل، بلا قفل وبلا كتابة حرف واحد. */
@@ -287,13 +334,22 @@ export class PersistentEventLog extends EventLog {
   #locked = false;
   #fsync: boolean;
   #closed = false;
+  readonly #sealer: EventDataSealer | null;
 
   /**
    * @param file - مسار ملف الأحداث المتسلسل
-   * @param options - القفل والمزامنة وقبول رأس مفقود
+   * @param options - القفل والمزامنة وقبول رأس مفقود والخاتم
    */
   constructor(file: string, options: PersistentEventLogOptions = {}) {
     super();
+    this.#sealer = options.sealer ?? null;
+    // الفحصُ قبلَ إنشاءِ مجلدٍ أو أخذِ قفلٍ أو فتحِ مقبضٍ: تركيبٌ مرفوضٌ
+    // لا يتركُ أثراً على القرص، ولا يُنتزعُ قفلٌ من كاتبٍ شرعيٍّ لأجلِ مُنشئٍ سيُردُّ.
+    if (this.#sealer === null && isProductionRuntime(options.env ?? process.env)) {
+      throw new PersistentLogError('EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION', {
+        detail: 'سجلُّ أحداثٍ بلا ختمٍ في الإنتاج: الجسمُ سيُكتب نصّاً صريحاً',
+      });
+    }
     this.file = file;
     this.headFile = file + LOG_HEAD_SUFFIX;
     this.lockFile = file + LOG_LOCK_SUFFIX;
@@ -480,6 +536,53 @@ export class PersistentEventLog extends EventLog {
    * @returns الحدث الذي أُلحق بالسجل
    */
   override append(type: string, actor: string, data: object): EventRecord {
+    // خاتمٌ موصولٌ ونداءٌ متزامنٌ: رفضٌ صريحٌ لا كتابةٌ نصٍّ صريحٍ. وهذا
+    // هو موضعُ الفشلِ المغلقِ الأول، فمن لم يُهاجر إلى `appendSealed` يُردُّ
+    // عندَ أولِ إلحاقٍ لا يُكتبُ له حدثٌ مقروءٌ.
+    if (this.#sealer !== null) throw new PersistentLogError('SEALED_LOG_REQUIRES_ASYNC_APPEND');
+    return this.#appendRecord(type, actor, data);
+  }
+
+  /**
+   * يختمُ جسمَ الحدثِ داخلَ التوكنِ (F05) ثمَّ يُلحقُ المختومَ وحدَه. والمسارُ
+   * الإنتاجيُّ هو هذا لا `append`: لا جسمَ حدثٍ يمسُّ القرصَ إلاّ مختوماً.
+   * @param type - نوع الواقعة المسجلة
+   * @param actor - معرّف الجهة التي أحدثتها
+   * @param data - تفاصيل الواقعة الصريحة (لا تُكتب كما هي)
+   * @returns الحدث كما أُلحق بالسجل (جسمُه مختومٌ)
+   */
+  async appendSealed(type: string, actor: string, data: object): Promise<EventRecord> {
+    if (this.#sealer === null) throw new PersistentLogError('EVENT_LOG_SEALER_MISSING');
+    if (this.#closed || this.#fd === null) throw new PersistentLogError('LOG_CLOSED');
+    const sealed = await this.#sealer.seal(data);
+    return this.#appendRecord(type, actor, sealed);
+  }
+
+  /**
+   * يفكُّ ختمَ جسمِ حدثٍ مقروءٍ. وكلُّ عبثٍ في المختومِ يُرفعُ خطأً من التوكن،
+   * لا يُرجعُ جسماً مشكوكاً فيه: علامةُ GCM ترفضُ ولا تُصلِح.
+   * @param event - الحدث كما قُرئ من القرص
+   * @returns جسمُه الصريح
+   */
+  async openEvent(event: EventRecord): Promise<unknown> {
+    if (this.#sealer === null) throw new PersistentLogError('EVENT_LOG_SEALER_MISSING');
+    return this.#sealer.open((event as { data?: unknown }).data);
+  }
+
+  /** هل هذا السجلُّ مختومٌ فعلاً؟ يُقرأ للتدقيقِ وللتقارير، ولا يُغني عن الفحص. */
+  get sealed(): boolean {
+    return this.#sealer !== null;
+  }
+
+  /**
+   * جسمُ الإلحاقِ المشتركُ بين المسارين: نفسُ ترتيبِ الكتابةِ والمزامنةِ
+   * وتحديثِ الرأس، فلا يتفارقُ مسارٌ مختومٌ ومسارٌ صريحٌ في ضمانِ الدوام.
+   * @param type - نوع الواقعة
+   * @param actor - معرّف الفاعل
+   * @param data - الجسمُ كما سيُكتب على القرص
+   * @returns الحدث المُلحَق
+   */
+  #appendRecord(type: string, actor: string, data: object): EventRecord {
     if (this.#closed || this.#fd === null) throw new PersistentLogError('LOG_CLOSED');
     const event = super.append(type, actor, data);
     try {
