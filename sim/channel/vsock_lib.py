@@ -161,11 +161,13 @@ def vsock_listen(fd: int, backlog: int = 8) -> None:
 
 
 def vsock_connect(fd: int, cid: int, port: int, timeout_ms: int = 3000) -> dict:
-    """اتصال غير محجوب مع مهلة، بالطريقة القياسية (اتصالٌ ثانٍ ينتظر EISCONN).
-    يرجع {'ok': bool, 'errno': str?} — لا يعتبر الاتصال ناجحاً إلا بتأكيدٍ صريح
-    من النواة (rc==0 أو EISCONN)، وإلا يرجع errno الخام كتشخيص."""
+    """اتصال غير محجوب مع مهلة — getsockopt(SO_ERROR) للتحقق من الاكتمال.
+    الطريقة القياسية POSIX بدلاً من connect() ثانية: select قد يعود قبل الأوان
+    على AF_VSOCK، لذا نتحقق من SO_ERROR في حلقة بالوقت المتبقي.
+    يرجع {'ok': bool, 'errno': str?, 'so_error': int?}."""
     import fcntl
     import select as _select
+    import time as _time
 
     libc = _get_libc()
     flags = fcntl.fcntl(fd, fcntl.F_GETFL)
@@ -185,19 +187,36 @@ def vsock_connect(fd: int, cid: int, port: int, timeout_ms: int = 3000) -> dict:
         _restore()
         return {"ok": False, "errno": _errno.errorcode.get(e, str(e))}
 
-    ready = _select.select([], [fd], [], timeout_ms / 1000.0)
-    if not ready[1]:
-        _restore()
-        return {"ok": False, "errno": "ETIMEDOUT"}
-
-    # اتصالٌ ثانٍ: EISCONN = اكتمل فعلاً؛ أيّ خطأ آخر = الحالة الخام للتشخيص.
-    ctypes.set_errno(0)
-    rc2 = libc.connect(fd, ctypes.byref(a), ctypes.sizeof(_SockaddrVm))
-    e2 = ctypes.get_errno()
-    _restore()
-    if rc2 == 0 or e2 == _errno.EISCONN:
-        return {"ok": True}
-    return {"ok": False, "errno": _errno.errorcode.get(e2, str(e2))}
+    # حلقة انتظار: select قد يعود قبل اكتمال الاتصال على AF_VSOCK
+    SOL_SOCKET = 1
+    SO_ERROR = 4
+    deadline = _time.monotonic() + timeout_ms / 1000.0
+    while True:
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            _restore()
+            return {"ok": False, "errno": "ETIMEDOUT", "so_error": _errno.EINPROGRESS}
+        ready = _select.select([], [fd], [], remaining)
+        if not ready[1]:
+            _restore()
+            return {"ok": False, "errno": "ETIMEDOUT", "so_error": _errno.EINPROGRESS}
+        errval = ctypes.c_int(0)
+        errlen = ctypes.c_int(ctypes.sizeof(errval))
+        ctypes.set_errno(0)
+        gsrc = libc.getsockopt(fd, SOL_SOCKET, SO_ERROR,
+                               ctypes.byref(errval), ctypes.byref(errlen))
+        if gsrc != 0:
+            ge = ctypes.get_errno()
+            _restore()
+            return {"ok": False, "errno": _errno.errorcode.get(ge, str(ge))}
+        if errval.value == 0:
+            _restore()
+            return {"ok": True}
+        if errval.value != _errno.EINPROGRESS:
+            _restore()
+            return {"ok": False, "errno": _errno.errorcode.get(errval.value, str(errval.value)),
+                    "so_error": errval.value}
+        # EINPROGRESS — select عاد قبل الأوان، أعد المحاولة بالوقت المتبقي
 
 
 def set_nonblocking(fd: int) -> None:

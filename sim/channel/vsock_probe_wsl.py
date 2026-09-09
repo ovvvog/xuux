@@ -81,6 +81,7 @@ def main() -> int:
                 "port": args.connect_port,
                 "ok": r["ok"],
                 "errno": r.get("errno"),
+                "so_error": r.get("so_error"),
             }
             if r["ok"] and args.send_frame:
                 import select as _sel
@@ -113,7 +114,8 @@ def main() -> int:
             os.close(cfd)
         except OSError as e:
             report["connect_host"] = {"ok": False,
-                                      "errno": _errno.errorcode.get(e.errno, str(e.errno))}
+                                      "errno": _errno.errorcode.get(e.errno, str(e.errno)),
+                                      "so_error": None}
 
     if report["verdict"] is None:
         report["verdict"] = "available" if report["bind_listen"] else "unavailable"
