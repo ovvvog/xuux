@@ -21,6 +21,7 @@ const simTest = (name, fn) =>
 const NV = '0x1500011';
 const MAN = 'root-of-trust.manifest.json';
 const STAGED = 'root-of-trust.manifest.staged.json';
+const TOKEN = 'token-state.json';
 
 function body(anchor, counter, certify = null) {
   return {
@@ -32,6 +33,11 @@ function body(anchor, counter, certify = null) {
 }
 function writeMan(dir, b) { writeFileSync(join(dir, MAN), JSON.stringify(b)); }
 function writeStaged(dir, b) { writeFileSync(join(dir, STAGED), JSON.stringify(b)); }
+// حالةُ التوكنِ البرمجيِّ المُحاكى على القرص: التوكنُ يختمُ المتنَ الملتزمَ،
+// فآخرُ عدّادٍ مختومٍ داخلَهُ يطابقُ عدّادَ المتنِ المكتوبِ في كل بناءٍ يدويّ.
+function writeToken(dir, counter) {
+  writeFileSync(join(dir, TOKEN), JSON.stringify({ tokenSerial: 'sim-token-inst-tear', sealEpoch: 1, lastSealedCounter: counter }));
+}
 
 async function setup() {
   await tpm.nvUndefine(NV);
@@ -57,6 +63,7 @@ simTest('tear 2: staged قبل الزيادة ⇒ تجاهل staged', async () =
   const { a, root } = await setup();
   const C = await a.readCounter();
   writeMan(root, body(a, C));              // المتن الملتزم = C
+  writeToken(root, C);                     // التوكنُ ختمَ المتنَ الملتزمَ
   writeStaged(root, body(a, C + 1));       // staged = C+1 (قبل الزيادة)
   const rec = await a.recover();
   assert.equal(rec.state, 'running');
@@ -70,6 +77,7 @@ simTest('tear 3: staged بعد الزيادة ⇒ recertify-complete', async () 
   await a.seal(); // now body == TPM == C0+1
   const C = await a.readCounter();
   writeMan(root, body(a, C - 1));           // المتن الملتزم متخلّف
+  writeToken(root, C - 1);                  // التوكنُ ختمَ آخرَ متنٍ مكتملٍ (C-1)
   writeStaged(root, body(a, C));            // staged عند C (بعد الزيادة)
   const rec = await a.recover();
   assert.equal(rec.state, 'running');
@@ -81,6 +89,7 @@ simTest('tear 4: staged غير مطابق ⇒ TORN', async () => {
   const { a, root } = await setup();
   const C = await a.readCounter();
   writeMan(root, body(a, C));
+  writeToken(root, C);
   writeStaged(root, body(a, C + 5)); // غير مطابق لـ C أو C+1
   const rec = await a.recover();
   assert.equal(rec.state, 'halted');
@@ -92,6 +101,7 @@ simTest('tear 5: body يتقدّم على العدّاد ⇒ MISMATCH', async ()
   const { a, root } = await setup();
   const C = await a.readCounter();
   writeMan(root, body(a, C + 1)); // body > TPM
+  writeToken(root, C + 1);
   if (existsSync(join(root, STAGED))) rmSync(join(root, STAGED));
   const rec = await a.recover();
   assert.equal(rec.state, 'halted');
@@ -105,6 +115,7 @@ simTest('tear 6: replay ⇒ MISMATCH', async () => {
   await a.seal();
   const C = await a.readCounter();
   writeMan(root, body(a, C - 1)); // body < TPM
+  writeToken(root, C - 1);
   if (existsSync(join(root, STAGED))) rmSync(join(root, STAGED));
   const rec = await a.recover();
   assert.equal(rec.state, 'halted');
@@ -212,6 +223,7 @@ simTest('tear 13: العدّاد متقدّم بأكثر من واحد بلا st
   await a.seal(); // يتقدّم العدّاد خطوتين
   const C = await a.readCounter();
   writeMan(root, body(a, C - 3)); // المتن متخلّف بأكثر من واحد
+  writeToken(root, C - 3);
   if (existsSync(join(root, STAGED))) rmSync(join(root, STAGED));
   const rec = await a.recover();
   assert.equal(rec.state, 'halted');
@@ -219,4 +231,27 @@ simTest('tear 13: العدّاد متقدّم بأكثر من واحد بلا st
   assert.equal(rec.direction, 'replay');
   // لا إقلعاً لاحقاً: الأمر المكرر يُرفض
   await assert.rejects(() => a.seal(), /HALTED/);
+});
+
+// 14) التوكنُ البرمجيُّ وحدهُ متخلّفٌ عن المتنِ (أو متقدّمٌ عليه) ⇒ تمزّقٌ لا إقلاعَ.
+//     يمثّلُ استعادةَ لقطةِ توكنٍ قديمةٍ فوقَ متنٍ أحدثَ (والعكس) بلا تقدّمٍ في TPM.
+simTest('tear 14: توكنٌ لا يطابقُ المتنَ ⇒ TORN (token-manifest-inconsistent)', async () => {
+  const { a, root } = await setup();
+  const C = await a.readCounter();
+  writeMan(root, body(a, C));
+  rmSync(join(root, STAGED), { force: true });
+  // ختمُ توكنٍ أقدمَ منَ المتنِ الملتزمِ (C):
+  writeToken(root, C - 1);
+  const rec = await a.recover();
+  assert.equal(rec.state, 'halted');
+  assert.equal(rec.error, 'STATE_MANIFEST_TPM_TORN');
+  assert.equal(rec.torn, 'token-manifest-inconsistent');
+  assert.equal(rec.tokenSealedCounter, C - 1);
+  assert.equal(rec.bodyCounter, C);
+  // والعكسُ أيضاً: توكنٌ متقدّمٌ على المتنِ
+  writeToken(root, C + 1);
+  const rec2 = await a.recover();
+  assert.equal(rec2.state, 'halted');
+  assert.equal(rec2.error, 'STATE_MANIFEST_TPM_TORN');
+  assert.equal(rec2.torn, 'token-manifest-inconsistent');
 });

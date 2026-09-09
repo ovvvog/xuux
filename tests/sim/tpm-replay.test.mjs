@@ -12,7 +12,8 @@ import assert from 'node:assert/strict';
 import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
 import * as tpm from '../../sim/tpm/tpm_client.mjs';
 import { FreshnessAnchorSim, snapshotState, restoreState } from '../../sim/tpm/manifest_seal_sim.mjs';
-import { rmSync } from 'node:fs';
+import { rmSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const sim = isSimEnabled();
 const simTest = (name, fn) =>
@@ -45,7 +46,11 @@ simTest('replay: لقطة قديمة فوق عدّاد متقدّم ⇒ MISMATCH
   assert.ok(s2.counter > s1.counter, 'counter must advance');
 
   // استعد اللقطة القديمة: body.counter = s1.counter، لكن TPM = s2.counter
+  // اللقطةُ تشملُ التوكنَ البرمجيَّ المُحاكى (token-state.json) — استُعيدَ معها
+  // فكانت الحالةُ المُستعادةُ كلُّها متّسقةً داخليّاً (توكنٌ ومتنٌ من عصرِ s1).
   restoreState(snap, root);
+  const tokenState = JSON.parse(readFileSync(join(root, 'token-state.json'), 'utf8'));
+  assert.equal(tokenState.lastSealedCounter, s1.counter, 'old software-token state must be the restored one');
 
   // التعافي يجب أن يكشف الإعادة ويُغلق
   const rec = await a.recover();

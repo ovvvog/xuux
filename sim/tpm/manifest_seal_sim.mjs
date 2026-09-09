@@ -22,6 +22,10 @@ export const RUNNING = 'running';
 const MANIFEST = 'root-of-trust.manifest.json';
 const STAGED = 'root-of-trust.manifest.staged.json';
 const HALT_FILE = 'halt.json';
+// حالةُ التوكنِ البرمجيِّ المُحاكى (مقابلُ tokenSerial + الختمِ داخلَ التوكنِ في
+// النظامِ الحقيقيِّ — WL-098). تدخلُ في اللقطةِ والاستعادةِ كاملةً حتى يُثبَتَ أنّ
+// تراجعَ التوكنِ نفسِهِ لا ينفعُ ما دامَ عدّادُ TPM متقدّماً.
+const TOKEN_STATE = 'token-state.json';
 
 /**
  * محاكاة عقد TPM2_NV_Certify — عقدُ التحقق هو ما يُختبر، لا أمر TPM نفسه.
@@ -132,6 +136,13 @@ export class FreshnessAnchorSim {
   manifestPath() { return join(this.dir, MANIFEST); }
   stagedPath() { return join(this.dir, STAGED); }
   haltPath() { return join(this.dir, HALT_FILE); }
+  tokenStatePath() { return join(this.dir, TOKEN_STATE); }
+
+  readTokenState() {
+    if (!existsSync(this.tokenStatePath())) return null;
+    return JSON.parse(readFileSync(this.tokenStatePath(), 'utf8'));
+  }
+  writeTokenState(state) { writeFileSync(this.tokenStatePath(), JSON.stringify(state)); }
 
   readManifest() {
     if (!existsSync(this.manifestPath())) return null;
@@ -177,6 +188,8 @@ export class FreshnessAnchorSim {
       tpm: { akName: this.akName, nvIndexName: this.nvIndexName, counter, certify: null },
     };
     writeFileSync(this.manifestPath(), JSON.stringify(body));
+    // حالةُ التوكنِ البرمجيِّ: التسلسلُ وأوّلُ عدّادٍ مختومٍ داخلَهُ.
+    this.writeTokenState({ tokenSerial: 'sim-token-' + body.instanceId, sealEpoch: 1, lastSealedCounter: counter });
     this.writeHalt(RUNNING);
     return body;
   }
@@ -216,6 +229,9 @@ export class FreshnessAnchorSim {
     const tmp = this.stagedPath() + '.final';
     writeFileSync(tmp, JSON.stringify(finalBody));
     renameSync(tmp, this.manifestPath());
+    // 5 (تتمّتُهُ): الختمُ داخلَ التوكنِ جزءٌ من كتابةِ المتنِ النهائيِّ —
+    // آخرُ عدّادٍ مختومٍ داخلَ التوكنِ صارَ C+1 معَ rename نفسِهِ.
+    this.writeTokenState({ ...(this.readTokenState() ?? { tokenSerial: 'sim-token-unknown', sealEpoch: 0 }), lastSealedCounter: C + 1 });
     if (hooks.beforeUnlinkStaged) hooks.beforeUnlinkStaged();
     // 6: حذف staged
     if (existsSync(this.stagedPath())) rmSync(this.stagedPath());
@@ -236,6 +252,19 @@ export class FreshnessAnchorSim {
     if (!committed) return { state: HALT, error: 'STATE_ROOT_UNPROVISIONED' };
     const B = committed.tpm.counter;
     const staged = this.readStaged();
+
+    // اتساقُ التوكنِ البرمجيِّ معَ المتنِ: آخرُ عدّادٍ مختومٍ داخلَ التوكنِ يجبُ
+    // أن يطابقَ عدّادَ المتنِ الملتزمِ. توكنٌ أقدمُ أو أحدثُ منَ المتنِ = تمزّقٌ
+    // لا إقلاعَ معهُ (القاعدةُ: كلُّ ما لا يطابقُ ⇒ إغلاق).
+    const tokenState = this.readTokenState();
+    if (tokenState && tokenState.lastSealedCounter !== B) {
+      this.writeHalt(HALT);
+      return {
+        state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B,
+        tokenSealedCounter: tokenState.lastSealedCounter,
+        torn: 'token-manifest-inconsistent',
+      };
+    }
 
     if (staged) {
       const S = staged.tpm.counter;
@@ -293,18 +322,18 @@ export class FreshnessAnchorSim {
   }
 }
 
-/** يأخذ لقطة من ملفات الجذر فقط (لا تشمل TPM — عمداً). */
+/** يأخذ لقطة من ملفات الجذر والتوكن البرمجي معاً (لا تشمل TPM — عمداً). */
 export function snapshotState(srcDir, snapDir) {
   mkdirSync(snapDir, { recursive: true });
-  for (const f of [MANIFEST, STAGED, HALT_FILE]) {
+  for (const f of [MANIFEST, STAGED, HALT_FILE, TOKEN_STATE]) {
     const s = join(srcDir, f);
     if (existsSync(s)) copyFileSync(s, join(snapDir, f));
   }
 }
 
-/** يستعيد لقطة ملفات الجذر فوق الحالية (لا يمسّ TPM). */
+/** يستعيد لقطة ملفات الجذر والتوكن فوق الحالية (لا يمسّ TPM). */
 export function restoreState(snapDir, dstDir) {
-  for (const f of [MANIFEST, STAGED, HALT_FILE]) {
+  for (const f of [MANIFEST, STAGED, HALT_FILE, TOKEN_STATE]) {
     const s = join(snapDir, f);
     const d = join(dstDir, f);
     if (existsSync(d)) rmSync(d);

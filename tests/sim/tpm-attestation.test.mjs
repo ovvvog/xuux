@@ -84,6 +84,43 @@ test('attest 7: شهادة غائبة/مشوّهة ⇒ رفض', () => {
   );
 });
 
+// 8) بصمةُ المتنِ مختلفةٌ معَ نَفسِ instanceId وsequence — تغييرُ محتوىً لا
+//    هويةٍ (journalHead/ledgerCommitted) ⇒ qualifyingData مختلفة ⇒ رفض.
+//    هذا هو اختبارُ «manifest digest مختلف» مستقلاً عن الهويةِ والتسلسلِ.
+test('attest 8: manifest digest مختلف (محتوىً لا هويةً) ⇒ qualifyingData_mismatch', () => {
+  const { c, certify, counter } = freshCertify();
+  const tamperedBody = { ...makeBody(), journalHead: 'tampered:' + 'x'.repeat(32) };
+  const v = c.verify(certify, { akName: AK, nvIndexName: NV, counter, body: tamperedBody });
+  assert.equal(v.ok, false);
+  assert.equal(v.error, 'qualifyingData_mismatch');
+  // وكذلك تغييرُ حقلِ عدٍّ رتيبٍ آخرَ في المتنِ:
+  const tamperedBody2 = { ...makeBody(), ledgerCommitted: 42 };
+  assert.equal(
+    c.verify(certify, { akName: AK, nvIndexName: NV, counter, body: tamperedBody2 }).error,
+    'qualifyingData_mismatch',
+  );
+});
+
+// 9) شهادةٌ أحدثُ (counter أعلى) معَ manifest أقدمَ (متوقّعٌ أدنى) ⇒ رفض.
+test('attest 9: شهادة أحدث مع manifest أقدم ⇒ counter_mismatch', () => {
+  const { c, body, certify } = freshCertify(); // الشهادة عند counter=5
+  const v = c.verify(certify, { akName: AK, nvIndexName: NV, counter: 4, body }); // المتنُّ يتوقّعُ 4
+  assert.equal(v.ok, false);
+  assert.equal(v.error, 'counter_mismatch');
+});
+
+// 10) شهادةٌ قديمةٌ معَ manifest أحدثَ (العكسُ) ⇒ رفض — والاتجاهانِ معاً
+//     يمنعانِ خلطَ شهاداتِ عصورٍ مختلفةٍ على متنٍّ واحدٍ.
+test('attest 10: شهادة قديمة مع manifest أحدث ⇒ counter_mismatch (الاتجاهانِ مرفوضانِ)', () => {
+  const { c, body, certify } = freshCertify(); // الشهادة عند counter=5
+  const newer = c.verify(certify, { akName: AK, nvIndexName: NV, counter: 6, body }); // المتنُّ يتوقّعُ 6
+  assert.equal(newer.ok, false);
+  assert.equal(newer.error, 'counter_mismatch');
+  const older = c.verify(certify, { akName: AK, nvIndexName: NV, counter: 4, body });
+  assert.equal(older.ok, false);
+  assert.equal(older.error, 'counter_mismatch');
+});
+
 test('attest: شهادة صالحة ⇒ قبول', () => {
   const { c, body, counter, certify } = freshCertify();
   const v = c.verify(certify, { akName: AK, nvIndexName: NV, counter, body });
