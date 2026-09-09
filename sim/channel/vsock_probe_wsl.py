@@ -32,6 +32,8 @@ def main() -> int:
     ap.add_argument("--connect-port", type=int, default=0,
                     help="إن أُعطي: محاولة اتصال بـCID المضيف (2) على هذا المنفذ")
     ap.add_argument("--timeout-ms", type=int, default=3000)
+    ap.add_argument("--send-frame", action="store_true",
+                    help="بعد اتصال ناجح: إرسال إطار XU واحد وانتظار الصدى (إثبات تبادل فعلي)")
     args = ap.parse_args()
 
     # timeout إلزامي ذاتي: لا تعيش العملية أكثر من 30 ثانية مهما كان.
@@ -80,6 +82,34 @@ def main() -> int:
                 "ok": r["ok"],
                 "errno": r.get("errno"),
             }
+            if r["ok"] and args.send_frame:
+                import select as _sel
+                t0 = time.monotonic()
+                f = vs.frame(b"vsock-poc-ping", 1)
+                report["exchange"] = {"sent": len(f), "echo": None}
+                try:
+                    os.write(cfd, f)  # إطار واحد فقط (السوكيت حجوبي بعد الاتصال)
+                    if _sel.select([cfd], [], [], 4.0)[0]:
+                        data = os.read(cfd, vs.MAX_FRAME)
+                        rtt_ms = round((time.monotonic() - t0) * 1000, 2)
+                        msgs = vs.FrameFeed().push(data)
+                        if msgs and msgs[0]["ok"]:
+                            report["exchange"] = {
+                                "sent": len(f),
+                                "echo": True,
+                                "counter": msgs[0]["counter"],
+                                "len": len(msgs[0]["payload"]),
+                                "rtt_ms": rtt_ms,
+                            }
+                        else:
+                            report["exchange"] = {"sent": len(f), "echo": False,
+                                                  "error": "NO_VALID_ECHO"}
+                    else:
+                        report["exchange"] = {"sent": len(f), "echo": False,
+                                              "error": "ECHO_TIMEOUT"}
+                except OSError as e:
+                    report["exchange"] = {"sent": len(f), "echo": False,
+                                          "error": _errno.errorcode.get(e.errno, str(e))}
             os.close(cfd)
         except OSError as e:
             report["connect_host"] = {"ok": False,

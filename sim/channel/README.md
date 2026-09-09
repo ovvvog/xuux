@@ -63,7 +63,7 @@
 | `tcp_responder.mjs` | WSL | مستجيب وهمي TCP ببروتوكول XU |
 | `tcp_probe.mjs` | WSL/تحضير | عميل TCP يقيس RTT |
 | `vsock_lib.py` | WSL/تحضير | مكتبة تأطير XU بلغة Python مطابقة بايتاً-بايتاً + AF_VSOCK عبر ctypes |
-| `vsock_probe_wsl.py` | WSL | فحص توافر AF_VSOCK (لا يغيّر شيئاً) |
+| `vsock_probe_wsl.py [--send-frame]` | WSL | فحص توافر AF_VSOCK + اتصال/تبادل اختياري (لا يغيّر شيئاً) |
 | `vsock_responder.py` | WSL | مستجيب وهمي عبر AF_VSOCK |
 | `win_preflight.ps1` | Windows | فحص استطاعة للقراءة فقط (WSL/hvsock/السجل/المحوّل/NAT mode) |
 | `win_responder.ps1` | Windows | مستجيب وهمي TCP (لاتجاه WSL→Windows) |
