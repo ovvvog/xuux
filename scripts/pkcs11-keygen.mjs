@@ -14,10 +14,17 @@
 //     npm run hsm:keygen
 //   (PIN من متغيّر بيئة، أو ملف بصلاحية 600 عبر XUUX_PKCS11_PIN_FILE)
 //   --replace : يُتلِف المفاتيح القائمة بنفس الاسم قبل الإنشاء (افتراضياً يرفض التكرار).
+//   --log <path> : يكتبُ شهادةَ التوليدِ (نفسَ سطورِ المخرَجِ) في ملفٍّ يقرؤُه
+//     `hsm:verify:f05`. عقدٌ واحدٌ بينَ الأمرينِ (`UF-16`): كان المتحقِّقُ يطلبُ
+//     سجلاً لا يُنشئُه أحدٌ، فيخرجُ الأمرُ بـ1 دائماً. المسارُ من العَلَمِ ثمَّ
+//     `XUUX_KEYGEN_LOG` ثمَّ الافتراضِ `artifacts/hsm/keygen.log`.
+//     ولا يُكتَبُ في السجلِّ PIN ولا مادةُ مفتاحٍ — المكتوبُ هو المطبوعُ نفسُه.
 //
 // المخرجات: المفتاح العام فقط (PEM) + إثبات عدم الاستخراج. لا تُطبع المادة الخاصة.
 import { Buffer } from 'node:buffer';
 import { createPublicKey } from 'node:crypto';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { ED25519_EC_PARAMS } from './pkcs11-oids.mjs';
 
 // ثوابت PKCS#11 v3.0 غير المُصدَّرة في pkcs11js 2.1.7 (متحقَّق من ترويسة p11-kit).
@@ -76,6 +83,37 @@ export function selectSpecs(onlySet, specs = KEY_SPECS) {
 // هل يُحظَر تدمير F05 (AES) صراحةً؟ يُسمح فقط إذا كان 05 ضمن --only.
 export function f05Protected(spec, onlySet) {
   return spec.id === '05' && (!onlySet || !onlySet.has('05'));
+}
+
+/** المسارُ الافتراضيُّ لشهادةِ التوليدِ — نفسُه في `pkcs11-f05-verify.mjs`. */
+export const DEFAULT_KEYGEN_LOG = 'artifacts/hsm/keygen.log';
+
+/**
+ * يحلُّ مسارَ شهادةِ التوليدِ: العَلَمُ ثمَّ `XUUX_KEYGEN_LOG` ثمَّ الافتراض.
+ * ترتيبٌ مطابقٌ لِمَا في المتحقِّقِ، فلا يفترقُ الأمرانِ (`UF-16`).
+ * @param {NodeJS.ProcessEnv} [env] - بيئةُ العملية
+ * @param {string[]} [argv] - وسائطُ الأمر
+ * @returns {string} مسارُ السجل
+ */
+export function resolveKeygenLogPath(env = process.env, argv = process.argv) {
+  const index = argv.indexOf('--log');
+  const flag = (index >= 0 ? (argv[index + 1] ?? '') : '').trim();
+  if (flag !== '') return flag;
+  const declared = (env.XUUX_KEYGEN_LOG ?? '').trim();
+  if (declared !== '') return declared;
+  return DEFAULT_KEYGEN_LOG;
+}
+
+let logFile = null;
+
+/**
+ * يطبعُ سطراً ويكتبُه في شهادةِ التوليدِ.
+ * @param {string} line - السطرُ المطبوع
+ */
+function say(line) {
+  console.log(line);
+  if (logFile === null) return;
+  appendFileSync(logFile, line + '\n', 'utf8');
 }
 
 function fail(code, msg) {
@@ -369,6 +407,10 @@ function exportEd25519PublicPem(mod, session, lib, publicKeyHandle) {
 
 async function main() {
   const argv = process.argv;
+  logFile = resolveKeygenLogPath(process.env, argv);
+  mkdirSync(dirname(logFile), { recursive: true });
+  // شهادةٌ جديدةٌ في كلِّ تشغيلٍ: سجلٌّ متراكمٌ يخلطُ تدويراً بإنشاءٍ فيُقرأُ غلطاً.
+  writeFileSync(logFile, '', 'utf8');
   assertReplacePlan(argv); // يفشل قبل أي وصول إلى HSM
   const replace = argv.includes('--replace');
   const onlySet = parseOnly(argv);
@@ -383,9 +425,13 @@ async function main() {
   const { session } = openSession(ctx, pin);
   const mod = ctx.mod;
 
-  console.log(`[keygen] token=${tokenLabel} serial=${ctx.serial ?? '(غير متحقَّق)'}`);
+  // سطرُ الوضعِ عقدٌ مقروءٌ آلياً: إنشاءٌ أوّليٌّ لا يُتلِفُ شيئاً، وتدويرٌ يُتلِفُ
+  // في نطاقٍ مُعلَنٍ. والمتحقِّقُ يفرضُ على كلِّ وضعٍ شرطَه (`UF-16`).
+  say(`[keygen] وضع=${replace ? 'rotation' : 'initial'}`);
+  say(`[keygen] token=${tokenLabel} serial=${ctx.serial ?? '(غير متحقَّق)'}`);
+  say(`[keygen] نطاق الإنشاء: CKA_ID=${specs.map((spec) => spec.id).join(',')}`);
   if (onlySet)
-    console.log(`[keygen] تدوير انتقائي: CKA_ID=${[...onlySet].join(',')} (المفاتيح الأخرى محمية)`);
+    say(`[keygen] تدوير انتقائي: CKA_ID=${[...onlySet].join(',')} (المفاتيح الأخرى محمية)`);
   // تحقّقٌ مسبقٌ: افشل قبل أي تدمير إن كان أي مفتاح محمي (F05) ضمن النطاق الشامل.
   if (replace) {
     for (const spec of specs) {
@@ -415,34 +461,32 @@ async function main() {
         );
       }
       const n = destroyKeyObjects(mod, session, lib, spec.label);
-      console.log(`[keygen] ${spec.label}: أُتلِف ${n} عنصر قائم (--replace).`);
+      say(`[keygen] ${spec.label}: أُتلِف ${n} عنصر قائم (--replace).`);
     }
     const handle = generateKey(mod, session, lib, spec);
     const signHandle = spec.kind === 'ed25519' ? handle.privateKey : handle.secretKey;
     const proof = proveNonExtractable(mod, session, lib, signHandle, spec);
-    console.log(`[keygen] ${spec.label} (${spec.purpose})`);
-    console.log(`  CKA_ID=${spec.id} نوع=${spec.kind}`);
-    console.log(
-      `  CKA_VALUE مرفوض=${proof.valueRejected ? 'نعم (CKR_ATTRIBUTE_SENSITIVE)' : 'لا — خطر'}`,
-    );
-    console.log(
+    say(`[keygen] ${spec.label} (${spec.purpose})`);
+    say(`  CKA_ID=${spec.id} نوع=${spec.kind}`);
+    say(`  CKA_VALUE مرفوض=${proof.valueRejected ? 'نعم (CKR_ATTRIBUTE_SENSITIVE)' : 'لا — خطر'}`);
+    say(
       `  CKA_EXTRACTABLE=${boolStr(proof.extractable)} CKA_NEVER_EXTRACTABLE=${boolStr(proof.neverExtractable)}`,
     );
-    console.log(`  عملية داخل HSM=${proof.operational ? 'ناجحة' : 'فاشلة (انظر ملاحظة)'}`);
+    say(`  عملية داخل HSM=${proof.operational ? 'ناجحة' : 'فاشلة (انظر ملاحظة)'}`);
     if (spec.kind === 'ed25519') {
       try {
         const pem = exportEd25519PublicPem(mod, session, lib, handle.publicKey);
-        console.log('  publicKeyPEM:');
-        for (const line of pem.split(/\n/)) if (line) console.log(`    ${line}`);
+        say('  publicKeyPEM:');
+        for (const line of pem.split(/\n/)) if (line) say(`    ${line}`);
       } catch (e) {
-        console.log(`  تعذّر تصدير المفتاح العام: ${e.message}`);
+        say(`  تعذّر تصدير المفتاح العام: ${e.message}`);
       }
     }
   }
   mod.C_Logout(session);
   mod.C_CloseSession(session);
   mod.C_Finalize();
-  console.log('[keygen] تم.');
+  say('[keygen] تم.');
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

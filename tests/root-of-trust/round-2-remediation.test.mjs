@@ -294,8 +294,11 @@ describe('UF-03 — محوُ ثلاثيةِ الإيقافِ لا يُعيدُ �
     try {
       await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
       rmSync(join(root, 'halt'), { recursive: true, force: true });
+      // صيغةُ البيانِ صارت مختومةً (‏`WL-098`): المتنُ تحتَ `body` والخاتَمُ
+      // بجانبِه. الثابتُ المختبَرُ لم يتغيّر: العهدُ يسكنُ خارجَ `halt/`.
       const manifest = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
-      assert.equal(manifest.haltEpoch >= 1, true);
+      assert.equal(manifest.body.haltEpoch >= 1, true);
+      assert.equal(typeof manifest.seal.signature, 'string');
       assert.notEqual(runtime.haltSwitch.read().state, 'running');
     } finally {
       cleanup();

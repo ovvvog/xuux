@@ -124,6 +124,14 @@
 6. **لا مراجعة أمنية مستقلة** — كل توثيق هنا مكتوبٌ من داخل المشروع.
 7. **لا حرس على ملفات الحالة**: سكربت صيانة يمسح مساراً مؤقتاً يمحو ذاكرة الدولة بلا
    أي خطأ يُرفع.
+8. **البيانُ مختومٌ ولا يمنعُ الإعادةَ** — بيانُ جذرِ الحالةِ
+   (`src/root-of-trust/state-manifest.mts`) موقَّعٌ داخلَ التوكنِ ومربوطٌ بالهويةِ والتوكنِ
+   والوحدةِ وسياقِ النشرِ والإصدارِ، فيُرفَضُ الإقلاعُ مغلقاً عندَ غيابِ الخاتَمِ أو
+   فسادِه أو تخفيضِ حقلٍ أو اختلافِ الهويّةِ، ولا تُقرَأُ حالةٌ ممحوّةٌ `GENESIS`.
+   **والحدُّ المُصرَّحُ:** استعادةُ لقطةٍ كاملةٍ متّسقةٍ (البيانُ وكلُّ تابعٍ وحالةُ
+   التوكنِ) لا تُكشَفُ محلياً؛ القرارُ المعماريُّ وخياراتُه في
+   `docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md` وهو **ليس إغلاقاً**
+   لأيِّ نتيجةِ مراجعة.
 
 ---
 
@@ -131,7 +139,7 @@
 
 ```bash
 npm run validate   # سبع وأربعون بوابة ثم كل الاختبارات
-npm test           # 140 ملف اختبار
+npm test           # 141 ملف اختبار
 ```
 
 والأدلة موضعية لا مجمَلة: `tests/root-of-trust/` لكل وحدة، و
@@ -148,4 +156,8 @@ npm test           # 140 ملف اختبار
 `LEDGER_SIGNATURE_INVALID` · `LEDGER_KEY_MISMATCH` · `LEDGER_SIGNER_MISSING` ·
 `COMMAND_LEDGER_REQUIRED_IN_PRODUCTION` · `HALT_SWITCH_REQUIRED_IN_PRODUCTION` ·
 `PRODUCTION_RUNTIME_REQUIRES_HSM` · `PRODUCTION_RUNTIME_ROOT_MISSING` ·
-`HSM_ROTATION_REQUIRES_TOKEN_TOOL`.
+`HSM_ROTATION_REQUIRES_TOKEN_TOOL` · `PRODUCTION_STATE_ROOT_UNPROVISIONED` ·
+`STATE_MANIFEST_SEAL_MISSING` · `STATE_MANIFEST_SEAL_INVALID` ·
+`STATE_MANIFEST_BINDING_MISMATCH` · `STATE_MANIFEST_KING_MISMATCH` ·
+`STATE_MANIFEST_JOURNAL_INVALID` · `STATE_MANIFEST_ROLLBACK_DETECTED` ·
+`STATE_MANIFEST_VERSION_UNSUPPORTED`.

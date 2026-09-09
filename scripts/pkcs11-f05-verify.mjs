@@ -21,7 +21,13 @@
 //   8. CKA_VALUE مرفوضٌ بـCKR_ATTRIBUTE_SENSITIVE (لا مادة مفتاح تُقرأ).
 //   9. جولة AES-256-GCM كاملة داخل التوكن: تشفيرٌ ثم فكٌّ يُعيد النصّ نفسه،
 //      مع رفض فكِّ نصٍّ مُعدَّلٍ (إثبات صحّة وسم المصادقة).
-//  10. أن نطاق الإتلاف في سجل keygen كان 06 و07 فقط ولم يشمل 05.
+//  10. شهادةَ التوليدِ (`keygen`) بحسبِ وضعِها المُعلَنِ فيها (`UF-16`):
+//      • `وضع=initial` (إنشاءٌ أوّليٌّ): لا سطرَ إتلافٍ أصلاً ولا اشتباكَ حارسٍ،
+//        ونطاقُ الإنشاءِ يشملُ 05.
+//      • `وضع=rotation` (تدويرٌ): نطاقُ الإتلافِ 06 و07 فقط ولم يشملْ 05.
+//      وشهادةٌ بلا سطرِ وضعٍ تُرَدُّ: عقدُ الأمرينِ صارَ واحداً، فسجلٌّ من عقدٍ
+//      قديمٍ لا يُقرأُ تخميناً. والشهادةُ مربوطةٌ بوسمِ التوكنِ الذي تُقرأُ عندَه،
+//      فلا تُستعارُ شهادةُ توكنٍ آخرَ دليلاً على هذا.
 //
 // لا يُطبع ولا يُسجَّل: PIN، CKA_VALUE، أو أيّ مادة مفتاح. النصوص المستخدمة
 // في جولة GCM ثابتةٌ معروفةٌ ولا تحمل معلومات.
@@ -117,7 +123,8 @@ function readU32(v) {
  * يُحلّل سجل keygen ويستخرج نطاق التدوير وأوسمة الإتلاف الفعلية.
  * دالةٌ نقيةٌ مُصدَّرةٌ لتُختبر بلا HSM.
  * @param {string} text نص السجل
- * @returns {{scopeIds: string[]|null, destroyedLabels: string[], f05Trip: boolean}}
+ * @returns {{scopeIds: string[]|null, destroyedLabels: string[], f05Trip: boolean,
+ *   mode: 'initial'|'rotation'|null, createdIds: string[]|null, tokenLabel: string|null}}
  */
 export function parseKeygenLog(text) {
   // أسطر الإتلاف: "[keygen] <label>: أُتلِف <n> عنصر قائم (--replace)."
@@ -125,10 +132,16 @@ export function parseKeygenLog(text) {
     .map((m) => m[1])
     .sort();
   const scope = text.match(/تدوير انتقائي:\s*CKA_ID=([0-9,]+)/);
+  const created = text.match(/نطاق الإنشاء:\s*CKA_ID=([0-9,]+)/);
+  const mode = text.match(/^\[keygen\]\s*وضع=(initial|rotation)\s*$/m);
+  const token = text.match(/^\[keygen\]\s*token=(\S+)\s+serial=/m);
   return {
     scopeIds: scope ? scope[1].split(',').filter(Boolean).sort() : null,
     destroyedLabels,
     f05Trip: /F05_PROTECTED/.test(text),
+    mode: mode ? mode[1] : null,
+    createdIds: created ? created[1].split(',').filter(Boolean).sort() : null,
+    tokenLabel: token ? token[1] : null,
   };
 }
 
@@ -136,8 +149,13 @@ export function parseKeygenLog(text) {
 export const F06_F07_LABELS = ['command-ledger-signing-key', 'king-signing-key'];
 export const F05_LABEL = DEFAULT_LABEL;
 
-// ---- 10) نطاق الإتلاف من سجل keygen (فحصٌ نصّيٌّ لا يمسّ التوكن) ----
-function verifyKeygenLogScope(logPath) {
+// ---- 10) شهادةُ التوليدِ بحسبِ وضعِها (فحصٌ نصّيٌّ لا يمسّ التوكن) ----
+/**
+ * يفحصُ شهادةَ التوليدِ بحسبِ الوضعِ المُعلَنِ فيها، ويربطُها بوسمِ التوكن.
+ * @param {string} logPath - مسارُ الشهادة
+ * @param {string} tokenLabel - وسمُ التوكنِ الذي يُتحقَّقُ عندَه
+ */
+function verifyKeygenLogScope(logPath, tokenLabel) {
   let text;
   try {
     text = readFileSync(logPath, 'utf8');
@@ -145,7 +163,44 @@ function verifyKeygenLogScope(logPath) {
     check(false, 'keygen_log_readable', `لا يمكن قراءة ${logPath}`);
     return;
   }
-  const { scopeIds, destroyedLabels, f05Trip } = parseKeygenLog(text);
+  check(true, 'keygen_log_readable', logPath);
+  const {
+    scopeIds,
+    destroyedLabels,
+    f05Trip,
+    mode,
+    createdIds,
+    tokenLabel: logged,
+  } = parseKeygenLog(text);
+  check(
+    mode === 'initial' || mode === 'rotation',
+    'keygen_mode_declared',
+    mode ?? 'لا سطرَ وضعٍ في الشهادة',
+  );
+  check(
+    logged !== null && logged === tokenLabel,
+    'keygen_log_bound_to_token',
+    `شهادةٌ لوسمِ ${logged ?? '(غير مذكور)'} والتحقّقُ عندَ ${tokenLabel}`,
+  );
+  check(
+    !f05Trip,
+    'keygen_no_f05_protection_trip',
+    'لم يُشتبك حارس F05 أي أن 05 لم يدخل نطاقَ إتلافٍ أصلاً',
+  );
+  if (mode === 'initial') {
+    // إنشاءٌ أوّليٌّ: لا إتلافَ، والمفتاحُ 05 مُنشأٌ في هذه الشهادةِ نفسِها.
+    check(
+      destroyedLabels.length === 0,
+      'keygen_initial_destroyed_nothing',
+      `أوسمةُ الإتلاف: ${destroyedLabels.join(', ') || '(لا شيء)'}`,
+    );
+    check(
+      createdIds !== null && createdIds.includes(EXPECTED_ID),
+      'keygen_initial_created_f05',
+      createdIds ? `CKA_ID=${createdIds.join(',')}` : 'سطرُ نطاقِ الإنشاءِ غيرُ موجود',
+    );
+    return;
+  }
   check(
     scopeIds !== null && scopeIds.join(',') === '06,07',
     'keygen_scope_is_06_07_only',
@@ -161,11 +216,6 @@ function verifyKeygenLogScope(logPath) {
       destroyedLabels.every((l, i) => l === F06_F07_LABELS[i]),
     'keygen_destroyed_exactly_f06_f07',
     `أوسمة الإتلاف: ${destroyedLabels.join(', ') || '(لا شيء)'}`,
-  );
-  check(
-    !f05Trip,
-    'keygen_no_f05_protection_trip',
-    'لم يُشتبك حارس F05 أي أن 05 لم يدخل النطاق أصلاً',
   );
 }
 
@@ -313,7 +363,7 @@ async function main() {
     // المسارُ محلولٌ دائماً؛ وغيابُ الملفِ نفسِه يُرفَضُ داخلَ
     // `verifyKeygenLogScope` بـ`keygen_log_readable` لا بـ`keygen_log_provided`.
     check(true, 'keygen_log_provided', keygenLog);
-    verifyKeygenLogScope(keygenLog);
+    verifyKeygenLogScope(keygenLog, tokenLabel);
   } finally {
     try {
       if (session) {

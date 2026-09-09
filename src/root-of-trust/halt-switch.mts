@@ -347,6 +347,13 @@ export interface HaltSwitchOptions {
    * لأن الشاهدَ كان يسكنُ ما يشهدُ عليه.
    */
   epochFloor?: HaltEpochFloor | null;
+  /**
+   * ختمُ العهدِ بعدَ نشرِ توجيهٍ موقَّعٍ غيرِ متزامنٍ (‏`R3-A-01`). الرفعُ
+   * متزامنٌ فلا يُوقَّعُ لحظتَه داخلَ التوكن؛ فيُنادى هذا الخطّافُ حيثُ يجوزُ
+   * الانتظارُ، فيصيرُ العهدُ داخلَ متنٍ مختومٍ بلا تأخيرٍ إلى الإقلاعِ التالي.
+   * وفشلُه يُرفَعُ: ختمٌ ساقطٌ لا يُتجاوَزُ صامتاً.
+   */
+  sealEpoch?: (() => Promise<void>) | null;
   /** بيئةُ التشغيلِ — تُقرأُ لمعرفةِ هل الحدُّ الخارجيُّ إلزامٌ أم لا. */
   env?: NodeJS.ProcessEnv;
 }
@@ -450,6 +457,7 @@ export class HaltSwitch implements HaltGuard {
   #fsync: boolean;
   #log: HaltEventSink | null;
   #epochFloor: HaltEpochFloor | null;
+  #sealEpoch: (() => Promise<void>) | null;
 
   /**
    * @param file - مسار ملف التوجيه الدائم
@@ -466,6 +474,7 @@ export class HaltSwitch implements HaltGuard {
     this.#fsync = options.fsync ?? true;
     this.#log = options.log ?? null;
     this.#epochFloor = options.epochFloor ?? null;
+    this.#sealEpoch = options.sealEpoch ?? null;
     // في الإنتاجِ لا يُركَّبُ مفتاحُ إيقافٍ شاهدُه داخلَ ما يُمحى معَه: فشلٌ
     // مغلقٌ عندَ التركيبِ لا عندَ أوّلِ محوٍ (‏`UF-03`).
     if (this.#epochFloor === null && isProductionRuntime(options.env ?? process.env)) {
@@ -973,11 +982,13 @@ export class HaltSwitch implements HaltGuard {
   async #issueAsync(state: HaltState, reason: string): Promise<HaltDirective> {
     const signer = this.#assertAsyncSigner();
     const body = this.#directiveBody(state, reason, signer);
-    return this.#publish({
+    const directive = this.#publish({
       ...body,
       hash: hashHaltBody(body),
       signature: await signer.signAsync(body),
     });
+    if (this.#sealEpoch !== null) await this.#sealEpoch();
+    return directive;
   }
 
   /**

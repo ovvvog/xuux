@@ -1,32 +1,49 @@
-// جذرُ الثقة — بيانُ جذرِ الحالةِ الدائمُ (`WL-094`، إصلاحُ نتائجِ الجولةِ الثانية).
+// جذرُ الثقة — بيانُ جذرِ الحالةِ الدائمُ، **مختوماً داخلَ التوكن** (`WL-098`).
 //
-// **المشكلةُ التي أوجبَتْه** — أثبتَها عضوا الجولةِ الثانيةِ كلاهما بإعادةِ إنتاجٍ
-// على توكنٍ حقيقيّ:
-//   1. `UF-01`: حذفُ `events.log` و`events.log.head` معاً يجعلُ الإقلاعَ يبدأُ من
-//      `GENESIS` **ويقبلُ حدثاً ملفَّقاً**، لأن لا شيءَ على القرصِ يقولُ «كان هنا
-//      سجلٌّ بطولِ كذا». والمرساةُ الموقَّعةُ كانت قدرةً بلا مُلزِمٍ: مصنعُ الإنتاجِ
-//      لا يشترطُها أصلاً.
-//   2. `UF-03`: حذفُ ثلاثيةِ الإيقافِ (توجيهٌ + تاريخٌ + عهدٌ) يُرجعُ الحالةَ
-//      `running` و`epoch=0` بعدَ إيقافٍ سياديّ — لأن حدَّ العهدِ الأعلى كان مخزوناً
-//      **داخلَ** ما يُمحى.
-//   3. `UF-07`: حذفُ دفترِ الأوامرِ ومجلَّدِ حجوزاتِه معاً يُعيدُ قبولَ أمرٍ ثُبِّت.
+// **لماذا كُتِبت هذه النسخةُ الثانيةُ** — الجولةُ الثالثةُ (العضو A، تقريرُ
+// `M11.04-round-3-model-council-report-gpt-5-6-terra.md`) نفّذت مجَسّاً أثبتَ أنّ
+// النسخةَ الأولى كانت **شاهداً بلا خاتَم**: ملفُّ JSON على القرصِ يقرؤُه الإقلاعُ
+// ويثقُ بأعدادِه. فمن ملكَ القرصَ خفَضَ الأعدادَ يدوياً وحذفَ الملفّاتِ التابعةَ
+// معاً، فوقعَ الثلاثةُ التي زعمَ الإصلاحُ سدَّها:
+//   • `UF-01`: `anchoredCount=0` + حذفُ السجلِّ ورأسِه ومخزنِ المراسي ⇒ إقلاعٌ
+//     بلا رمي، أي عودةٌ إلى `GENESIS` من بابٍ آخر.
+//   • `UF-03`: `haltEpoch=0` + مسحُ `halt/` ⇒ `running` و`epoch=0` بعدَ إيقافٍ.
+//   • `UF-07`: `ledgerCommitted=0` + إفراغُ الدفترِ وإعادةُ إنشاءِ الحجوزاتِ ⇒
+//     قبولُ أمرٍ مكرَّرٍ ثُبِّت.
+// وهي مُسجَّلةٌ نتيجةً جديدةً باسمِ `R3-A-01`.
 //
-// والجامعُ بين الثلاثةِ واحدٌ: **كلُّ شاهدٍ كان يسكنُ ما يشهدُ عليه**. فمن ملكَ
-// حذفَ المشهودِ ملكَ حذفَ الشاهدِ معه، فلا يبقى تناقضٌ يُكشَف.
+// **ما يفعلُه هذا الملفُّ الآن:**
+//   1. **خاتَمٌ داخلَ التوكن**: متنُ البيانِ يُوقَّعُ Ed25519 بمفتاحِ الملكِ (F06)
+//      **داخلَ HSM**، ويُتحقَّقُ منه بالمفتاحِ العامِّ المُصدَّرِ منه. فلا مادةَ
+//      خاصّةً في الذاكرةِ، ولا اعتمادَ شبكيَّ، ولا عتادَ جديدٌ.
+//   2. **ربطُ الخاتَمِ بالهويةِ والسياقِ والإصدارِ**: `kingId` و`tokenSerial`
+//      و`moduleSha256` و`context` و`version` و`instanceId` كلُّها **داخلَ المتنِ
+//      الموقَّعِ**، فلا يُنقَلُ بيانُ نشرٍ إلى نشرٍ آخرَ ولا إلى توكنٍ آخرَ.
+//   3. **دفترُ رفعٍ متسلسلٌ بالتجزئة**: الرفعُ متزامنٌ (يناديه الدفترُ ومفتاحُ
+//      الإيقافِ من مسارٍ متزامنٍ) والتوقيعُ لا يكونُ إلا لا-متزامناً. فبدلَ ادّعاءِ
+//      توقيعٍ متزامنٍ — وهو لا يكونُ إلا بمادةٍ برمجيّةٍ محليّةٍ، وذاك عينُ ما
+//      يُمنَعُ — تُلحَقُ كلُّ زيادةٍ سطراً في دفترٍ **مُسلسَلٍ بالتجزئةِ** رأسُه
+//      مختومٌ عندَ كلِّ نقطةِ ضبطٍ (`checkpointAsync`).
 //
-// **ما تفعلُه هذه الوحدةُ:** ملفٌّ واحدٌ في جذرِ الحالةِ — خارجَ ملفِّ السجلِّ
-// ورأسِه، وخارجَ مجلَّدِ `halt/`، وخارجَ الدفترِ ومجلَّدِ حجوزاتِه — يحملُ ثلاثةَ
-// حدودٍ عليا **لا تتراجعُ**: عَدَّ المرساةِ، وعهدَ الإيقافِ، وعَدَّ الأوامرِ
-// المُثبَّتة. ويحملُ معها **هويةَ الملكِ** التي هُيِّئ بها الجذرُ، فتوكنٌ بديلٌ
-// بالاسمِ نفسِه يُرفَض (`UF-05`).
-//
-// **حدٌّ يُصرَّحُ به لا يُخفى:** هذا الملفُّ على القرصِ نفسِه. فهو يكشفُ كلَّ محوٍ
-// **جزئيٍّ** — وهو عينُ ما أثبتَه العضوانِ — ويُفشِلُ الإقلاعَ فشلاً مغلقاً. أمّا
-// محوُ جذرِ الحالةِ **كلِّه** فيصيرُ «جذراً غيرَ مُهيَّأٍ»: يتوقّفُ الإقلاعُ ويلزمُ
-// إعلانُ تهيئةٍ صريحٌ من البيئةِ، فلا تكفي صلاحيةُ الكتابةِ على القرصِ وحدَها
-// لإرجاعِ دولةٍ موقوفةٍ إلى العملِ. والحدُّ الأعلى — مرساةٌ داخلَ التوكنِ — يبقى
-// مفتوحاً مُعلَناً، إذ يقتضي كتابةً في التوكنِ.
+// **منعُ الإعادةِ (rollback/replay) — قرارٌ معماريٌّ لا ادعاءٌ:**
+//   • الخاتَمُ يمنعُ **التزييفَ والتخفيضَ بالتحريرِ**: لا يُخفَضُ حقلٌ ولا يُستبدَلُ
+//     بيانٌ بآخرَ من نشرٍ أو توكنٍ أو هويةٍ أخرى.
+//   • ولا يمنعُ **الإعادةَ**: من ملكَ القرصَ وأعادَ لقطةً كاملةً متّسقةً (البيانُ
+//     المختومُ ودفترُ الرفعِ وحالةُ التوكنِ نفسُها) فتوقيعُها صحيحٌ لأنّه وقّعَ
+//     حالةً كانت صحيحةً يوماً. **صحّةُ التوقيعِ ليست حمايةً من الإعادة.**
+//   • ولا يُصطنَعُ هنا «عدّادٌ رتيبٌ» في ملفٍّ آخرَ على القرصِ يُسمَّى منعَ إعادةٍ:
+//     مصدرُ الحقيقةِ يبقى البيانَ المختومَ وحدَه، ودفترُ الرفعِ لا يُقرأُ إلا
+//     مُسلسَلاً بالتجزئةِ إلى رأسٍ **داخلَ المتنِ الموقَّعِ** ومربوطاً بنسخةِ
+//     الجذرِ؛ فهو امتدادٌ للجذرِ المختومِ لا جذرٌ ثانٍ.
+//   • المنعُ الكاملُ يقتضي عدّاداً رتيباً **داخلَ عتادٍ** أو مرساةً **خارجَ نطاقِ
+//     القرصِ**، وكلاهما ممنوعٌ في هذه الدفعةِ نصّاً. فالحدُّ مُعلَنٌ خطراً
+//     متبقّياً في `docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md`، ولا يُسجَّلُ
+//     إغلاقاً.
+//   • وأقوى ضمانٍ محليٍّ مُطبَّقٌ الآن: نقطةُ ضبطٍ مختومةٌ عندَ كلِّ إقلاعٍ تُقلِّصُ
+//     نافذةَ الإعادةِ غيرِ المكشوفةِ إلى ما بينَ إقلاعينِ، مع الفحوصِ المتقاطعةِ
+//     القائمةِ (المراسي والدفترُ ومفتاحُ الإيقافِ) التي تكشفُ اللقطةَ الجزئيّة.
 
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   existsSync,
@@ -35,6 +52,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -42,8 +60,17 @@ import { dirname, join } from 'node:path';
 /** اسمُ الملفِّ في جذرِ الحالةِ — مثبَّتٌ كي لا يُخترَع في موضعينِ. */
 export const STATE_MANIFEST_FILE = 'root-of-trust.manifest.json';
 
+/** دفترُ الرفعِ المتسلسلُ بالتجزئةِ — يجاورُ البيانَ ويُطوى عندَ نقطةِ الضبط. */
+export const STATE_JOURNAL_FILE = 'root-of-trust.manifest.journal';
+
 /** المتغيّرُ الذي يُعلَنُ به إذنُ التهيئةِ — إعلانٌ لا استنباط. */
 export const STATE_PROVISION_ENV = 'XUUX_ROOT_OF_TRUST_PROVISION';
+
+/** سياقُ النشرِ المُعلَنُ — يدخلُ المتنَ الموقَّعَ فلا يُنقَلُ بيانٌ بينَ نشرينِ. */
+export const STATE_CONTEXT_ENV = 'XUUX_STATE_CONTEXT';
+
+/** إصدارُ صيغةِ البيانِ. يدخلُ المتنَ الموقَّعَ: صيغةٌ أقدمُ لا تُقبَلُ صامتةً. */
+export const STATE_MANIFEST_VERSION = 2;
 
 /** أخطاءُ البيانِ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const StateManifestErrorCodes = [
@@ -52,6 +79,13 @@ export const StateManifestErrorCodes = [
   'STATE_MANIFEST_KING_MISMATCH',
   'STATE_MANIFEST_REGRESSION',
   'STATE_PROVISION_NOT_DECLARED',
+  'STATE_MANIFEST_SEAL_MISSING',
+  'STATE_MANIFEST_SEAL_INVALID',
+  'STATE_MANIFEST_BINDING_MISMATCH',
+  'STATE_MANIFEST_VERSION_UNSUPPORTED',
+  'STATE_MANIFEST_JOURNAL_INVALID',
+  'STATE_MANIFEST_ROLLBACK_DETECTED',
+  'STATE_MANIFEST_SEALER_REQUIRED',
 ] as const;
 
 export type StateManifestErrorCode = (typeof StateManifestErrorCodes)[number];
@@ -73,24 +107,60 @@ export class StateManifestError extends Error {
   }
 }
 
-/** متنُ البيانِ كما يُحفَظُ. لا يحملُ مادةَ مفتاحٍ ولا سرّاً. */
-export interface StateManifestBody {
-  version: 1;
-  /** هويةُ الملكِ التي هُيِّئ بها الجذرُ — بصمةُ مفتاحٍ عامٍّ لا مادةٌ خاصّة. */
+/** الحقولُ الثلاثةُ الرتيبةُ التي لا تنزلُ. */
+export type MonotonicKey = 'anchoredCount' | 'haltEpoch' | 'ledgerCommitted';
+
+/** ما يربطُ البيانَ بنظامِه: هويةٌ وسياقٌ وتوكنٌ وموديول. */
+export interface StateManifestBinding {
   kingId: string;
+  context: string;
+  tokenSerial: string;
+  moduleSha256: string;
+}
+
+/** متنُ البيانِ كما يُوقَّعُ ويُحفَظُ. لا يحملُ مادةَ مفتاحٍ ولا سرّاً. */
+export interface StateManifestBody extends StateManifestBinding {
+  version: number;
+  /** مُعرِّفُ نسخةِ الجذرِ — عشوائيٌّ عندَ التهيئةِ، يربطُ المواضعَ الثلاثةَ. */
+  instanceId: string;
   createdAt: string;
-  /** أعلى عَدِّ أحداثٍ شهدَتْ له مرساةٌ موقَّعة. */
+  sealedAt: string;
+  /** عدّادُ نقاطِ الضبطِ — يعلو ولا ينزل. */
+  sequence: number;
   anchoredCount: number;
-  /** أعلى عهدِ إيقافٍ بلغَتْه الدولةُ. */
   haltEpoch: number;
-  /** أعلى عَدِّ أوامرَ مُثبَّتةٍ في الدفتر. */
   ledgerCommitted: number;
+  /** رأسُ دفترِ الرفعِ لحظةَ الختمِ — يمنعُ قصَّ الدفترِ إلى ما قبلَ الختم. */
+  journalHead: string;
+}
+
+/** البيانُ كما يُكتَبُ: متنٌ وخاتَمُه. */
+export interface SealedStateManifest {
+  body: StateManifestBody;
+  seal: { alg: 'ed25519'; signerId: string; signature: string };
+}
+
+/** أقلُّ ما يلزمُ من الموقّعِ — يوافقُ `HsmSigner` بلا اقترانٍ بوحدتِه. */
+export interface ManifestSealer {
+  readonly id: string;
+  signAsync(payload: object): Promise<string>;
+  verify(payload: object, signature: string): boolean;
 }
 
 /** حدٌّ أدنى دائمٌ: يُقرأُ ويُرفَعُ ولا يُخفَض. عقدٌ بنيويٌّ كي يُحقَنَ في الاختبار. */
 export interface MonotonicFloor {
   read(): number;
   raise(value: number): void;
+}
+
+/** سطرُ دفترِ الرفعِ — مُسلسَلٌ بالتجزئةِ فلا يُقَصُّ ولا يُدَسُّ فيه. */
+interface JournalEntry {
+  seq: number;
+  key: MonotonicKey;
+  value: number;
+  at: string;
+  prev: string;
+  hash: string;
 }
 
 /**
@@ -113,19 +183,92 @@ export function stateManifestPath(root: string): string {
 }
 
 /**
- * بيانُ جذرِ الحالةِ: قراءةٌ ورفعٌ فقط. لا تخفيضَ ولا حذفَ — عن قصد.
+ * يقرأُ رِباطَ البيانِ من البيئةِ: الهويةُ والسياقُ والتوكنُ والموديول.
+ * @param kingId - هويةُ الملكِ الحاضرة
+ * @param env - البيئةُ المقروءة
+ * @returns الرِباطُ كما يدخلُ المتنَ الموقَّع
+ */
+export function stateManifestBinding(
+  kingId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): StateManifestBinding {
+  return {
+    kingId,
+    context: (env[STATE_CONTEXT_ENV] ?? '').trim(),
+    tokenSerial: (env.XUUX_PKCS11_TOKEN_SERIAL ?? '').trim(),
+    moduleSha256: (env.XUUX_PKCS11_MODULE_SHA256 ?? '').trim(),
+  };
+}
+
+/** تجزئةُ سطرٍ في دفترِ الرفعِ — تشملُ السابقَ فتصيرُ سلسلةً لا كومةً. */
+function journalHash(instanceId: string, entry: Omit<JournalEntry, 'hash'>): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        instanceId,
+        seq: entry.seq,
+        key: entry.key,
+        value: entry.value,
+        at: entry.at,
+        prev: entry.prev,
+      }),
+    )
+    .digest('hex');
+}
+
+/** كتابةٌ ذريّةٌ: ملفٌّ مؤقّتٌ ثمَّ `rename`، فلا يُقرأُ نصفُ ملفٍّ عطباً. */
+function writeAtomic(file: string, text: string, fsync: boolean): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const temporary = `${file}.tmp-${String(process.pid)}`;
+  const line = Buffer.from(text, 'utf8');
+  const fd = openSync(temporary, 'w');
+  try {
+    let written = 0;
+    while (written < line.length) written += writeSync(fd, line, written);
+    if (fsync) fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(temporary, file);
+}
+
+/** إلحاقٌ كاملٌ لا جزئيٌّ صامتٌ — سطرُ دفترِ رفعٍ ناقصٌ يُقرأُ عبثاً بحقٍّ. */
+function appendLine(file: string, text: string, fsync: boolean): void {
+  mkdirSync(dirname(file), { recursive: true });
+  const buffer = Buffer.from(text, 'utf8');
+  const fd = openSync(file, 'a');
+  try {
+    let written = 0;
+    while (written < buffer.length) written += writeSync(fd, buffer, written);
+    if (fsync) fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * بيانُ جذرِ الحالةِ المختومُ: يُقرأُ بعدَ التحقّقِ، ويُرفَعُ ولا يُخفَض.
+ *
+ * دورةُ الحياةِ: `provisionAsync` مرّةً واحدةً ⇒ `openAsync` عندَ كلِّ إقلاعٍ
+ * (تحقُّقٌ ثمَّ نقطةُ ضبطٍ) ⇒ `raise` متزامنٌ في مسارِ العملِ ⇒ `checkpointAsync`
+ * يطوي دفترَ الرفعِ في متنٍ مختومٍ جديد.
  */
 export class StateManifest {
   readonly location: string;
-  #fsync: boolean;
+  readonly journalFile: string;
+  readonly #fsync: boolean;
+  #sealer: ManifestSealer | null;
+  #verified: StateManifestBody | null = null;
 
   /**
    * @param file - مسارُ ملفِّ البيان
-   * @param options - مزامنةُ القرصِ بعدَ كلِّ كتابة
+   * @param options - مزامنةُ القرصِ، والموقّعُ الذي يختمُ ويتحقّق
    */
-  constructor(file: string, options: { fsync?: boolean } = {}) {
+  constructor(file: string, options: { fsync?: boolean; sealer?: ManifestSealer } = {}) {
     this.location = file;
+    this.journalFile = join(dirname(file), STATE_JOURNAL_FILE);
     this.#fsync = options.fsync ?? true;
+    this.#sealer = options.sealer ?? null;
   }
 
   /**
@@ -138,41 +281,98 @@ export class StateManifest {
   }
 
   /**
-   * يقرأُ البيانَ. غيابُه **ليس حالةً افتراضيّةً**: جذرٌ غيرُ مُهيَّأٍ فشلٌ مغلقٌ
-   * لا صفرٌ صامتٌ. وأيُّ عطبٍ في متنِه عبثٌ لا انقطاعٌ، فيُرفَعُ برمزِه.
-   * @returns متنُ البيان
+   * يُثبِّتُ الموقّعَ الذي يُختَمُ به ويُتحقَّقُ. بلا موقّعٍ لا يُقرأُ بيانٌ في
+   * مسارٍ إنتاجيٍّ — وذاك مقصودٌ: خاتَمٌ لا يُتحقَّقُ منه ليس خاتَماً.
+   * @param sealer - الموقّعُ المسنودُ بالتوكن
    */
-  read(): StateManifestBody {
-    if (!existsSync(this.location)) {
-      throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(this.location, 'utf8'));
-    } catch {
-      throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'تعذّر التحليل');
-    }
-    const body = parsed as Partial<StateManifestBody>;
-    if (
-      body.version !== 1 ||
-      typeof body.kingId !== 'string' ||
-      body.kingId.length === 0 ||
-      typeof body.createdAt !== 'string' ||
-      !Number.isSafeInteger(body.anchoredCount) ||
-      !Number.isSafeInteger(body.haltEpoch) ||
-      !Number.isSafeInteger(body.ledgerCommitted) ||
-      (body.anchoredCount as number) < 0 ||
-      (body.haltEpoch as number) < 0 ||
-      (body.ledgerCommitted as number) < 0
-    ) {
-      throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'حقولٌ ناقصةٌ أو غيرُ صحيحة');
-    }
-    return body as StateManifestBody;
+  useSealer(sealer: ManifestSealer): void {
+    this.#sealer = sealer;
+    this.#verified = null;
   }
 
   /**
-   * يقابلُ هويةَ الملكِ الحاضرةَ بالتي هُيِّئ بها الجذرُ. توكنٌ بديلٌ بالاسمِ
-   * نفسِه يحملُ مفتاحاً آخرَ ⇒ هويةٌ أخرى ⇒ رفضٌ (‏`UF-05`).
+   * يُهيّئ جذرَ الحالةِ مختوماً، أو يفتحُ جذراً قائماً بالتحقّقِ الكامل.
+   * @param binding - الرِباطُ المُعلَنُ (هويةٌ وسياقٌ وتوكنٌ وموديول)
+   * @param env - البيئةُ المقروءة
+   */
+  async provisionAsync(
+    binding: StateManifestBinding,
+    env: NodeJS.ProcessEnv = process.env,
+  ): Promise<void> {
+    const sealer = this.#requireSealer();
+    if (existsSync(this.location)) {
+      await this.openAsync(binding);
+      return;
+    }
+    if (!stateProvisionDeclared(env)) {
+      throw new StateManifestError('STATE_PROVISION_NOT_DECLARED', STATE_PROVISION_ENV);
+    }
+    if (binding.kingId !== sealer.id) {
+      throw new StateManifestError('STATE_MANIFEST_KING_MISMATCH', `يُنتظَرُ ${sealer.id}`);
+    }
+    const now = new Date().toISOString();
+    const body: StateManifestBody = {
+      version: STATE_MANIFEST_VERSION,
+      kingId: binding.kingId,
+      context: binding.context,
+      tokenSerial: binding.tokenSerial,
+      moduleSha256: binding.moduleSha256,
+      instanceId: createHash('sha256')
+        .update(`${binding.kingId}|${now}|${String(process.pid)}|${String(Math.random())}`)
+        .digest('hex'),
+      createdAt: now,
+      sealedAt: now,
+      sequence: 1,
+      anchoredCount: 0,
+      haltEpoch: 0,
+      ledgerCommitted: 0,
+      journalHead: 'genesis',
+    };
+    await this.#seal(body);
+    rmSync(this.journalFile, { force: true });
+    this.#verified = body;
+  }
+
+  /**
+   * يفتحُ بياناً قائماً: خاتَمٌ ثمَّ رِباطٌ ثمَّ دفترُ رفعٍ ثمَّ مرساةُ حدٍّ أعلى.
+   * ولا يُوثَقُ بحقلٍ واحدٍ قبلَ تمامِ الأربعةِ — وذاك عينُ ما نقضَه `R3-A-01`.
+   * @param binding - الرِباطُ المُعلَنُ
+   * @returns المتنُ الفعّالُ بعدَ طيِّ دفترِ الرفع
+   */
+  async openAsync(binding: StateManifestBinding): Promise<StateManifestBody> {
+    const effective = this.#verify(binding);
+    await this.checkpointAsync();
+    return effective;
+  }
+
+  /**
+   * نقطةُ ضبطٍ: يطوي دفترَ الرفعِ في متنٍ جديدٍ ويختمُه داخلَ التوكن. تُنادى
+   * عندَ كلِّ إقلاعٍ، فنافذةُ الإعادةِ المُعلَنةُ ما بينَ إقلاعينِ لا أكثر.
+   */
+  async checkpointAsync(): Promise<void> {
+    const body = this.#verified ?? this.#verify(null);
+    const next: StateManifestBody = {
+      ...body,
+      sequence: body.sequence + 1,
+      sealedAt: new Date().toISOString(),
+      journalHead: 'checkpoint:' + String(body.sequence + 1),
+    };
+    await this.#seal(next);
+    rmSync(this.journalFile, { force: true });
+    this.#verified = next;
+  }
+
+  /**
+   * يقرأُ المتنَ الفعّالَ. غيابُ البيانِ أو خاتَمِه أو مرساتِه فشلٌ مغلقٌ لا
+   * صفرٌ صامت.
+   * @returns المتنُ الفعّال
+   */
+  read(): StateManifestBody {
+    return this.#verified ?? this.#verify(null);
+  }
+
+  /**
+   * يقابلُ هويةَ الملكِ الحاضرةَ بالتي هُيِّئ بها الجذرُ.
    * @param kingId - هويةُ الملكِ الحاضرة
    */
   assertKing(kingId: string): void {
@@ -183,42 +383,24 @@ export class StateManifest {
   }
 
   /**
-   * يُهيّئ جذرَ الحالةِ إن لم يكن مُهيَّأً، ويُلزِمُ إعلانَ الإذنِ قبلَ ذلك. وإن
-   * كان مُهيَّأً فلا يُكتَبُ شيءٌ ويُقابَلُ الملكُ وحدَه — فالتهيئةُ لا تُعاد.
-   * @param kingId - هويةُ الملكِ الحاضرة
-   * @param env - البيئةُ المقروءة
-   */
-  provision(kingId: string, env: NodeJS.ProcessEnv = process.env): void {
-    if (existsSync(this.location)) {
-      this.assertKing(kingId);
-      return;
-    }
-    if (!stateProvisionDeclared(env)) {
-      throw new StateManifestError('STATE_PROVISION_NOT_DECLARED', STATE_PROVISION_ENV);
-    }
-    this.#write({
-      version: 1,
-      kingId,
-      createdAt: new Date().toISOString(),
-      anchoredCount: 0,
-      haltEpoch: 0,
-      ledgerCommitted: 0,
-    });
-  }
-
-  /**
-   * يرفعُ حدّاً أعلى. القيمةُ الأدنى **تُهمَل بلا خطأ** (فقراءةٌ متأخّرةٌ ليست
-   * عبثاً)، أمّا الأدنى المطلوبُ فرضاً فيُرفَضُ من `#lower`.
+   * يرفعُ حدّاً أعلى متزامناً: سطرٌ في دفترِ الرفعِ المُسلسَلِ ثمَّ مرساةُ الحدِّ.
+   * القيمةُ الأدنى تُهمَلُ بلا خطأٍ (قراءةٌ متأخّرةٌ ليست عبثاً)، والسالبةُ تُرَدُّ.
    * @param key - الحدُّ المرفوع
    * @param value - القيمةُ الجديدة
    */
-  raise(key: 'anchoredCount' | 'haltEpoch' | 'ledgerCommitted', value: number): void {
+  raise(key: MonotonicKey, value: number): void {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new StateManifestError('STATE_MANIFEST_REGRESSION', `${key}=${String(value)}`);
     }
     const body = this.read();
     if (value <= body[key]) return;
-    this.#write({ ...body, [key]: value });
+    const head = this.#journalHead(body);
+    const at = new Date().toISOString();
+    const seq = body.sequence;
+    const entry: Omit<JournalEntry, 'hash'> = { seq, key, value, at, prev: head };
+    const full: JournalEntry = { ...entry, hash: journalHash(body.instanceId, entry) };
+    appendLine(this.journalFile, JSON.stringify(full) + '\n', this.#fsync);
+    this.#verified = { ...body, [key]: value };
   }
 
   /**
@@ -228,7 +410,9 @@ export class StateManifest {
   haltEpochFloor(): MonotonicFloor {
     return {
       read: (): number => this.read().haltEpoch,
-      raise: (value: number): void => this.raise('haltEpoch', value),
+      raise: (value: number): void => {
+        this.raise('haltEpoch', value);
+      },
     };
   }
 
@@ -239,27 +423,171 @@ export class StateManifest {
   ledgerWitness(): MonotonicFloor {
     return {
       read: (): number => this.read().ledgerCommitted,
-      raise: (value: number): void => this.raise('ledgerCommitted', value),
+      raise: (value: number): void => {
+        this.raise('ledgerCommitted', value);
+      },
     };
   }
 
-  /**
-   * كتابةٌ ذريّةٌ: ملفٌّ مؤقّتٌ ثم `rename`. فانقطاعٌ في منتصفِ الكتابةِ لا يترك
-   * بياناً نصفَ مكتوبٍ يُقرأُ «عطباً» فيُغلَقُ بابُ إقلاعٍ سليم.
-   * @param body - المتنُ المكتوب
-   */
-  #write(body: StateManifestBody): void {
-    mkdirSync(dirname(this.location), { recursive: true });
-    const temporary = `${this.location}.tmp-${String(process.pid)}`;
-    const line = Buffer.from(JSON.stringify(body, null, 2) + '\n', 'utf8');
-    const fd = openSync(temporary, 'w');
-    try {
-      let written = 0;
-      while (written < line.length) written += writeSync(fd, line, written);
-      if (this.#fsync) fsyncSync(fd);
-    } finally {
-      closeSync(fd);
+  /** الموقّعُ أو خطأٌ: مسارٌ إنتاجيٌّ بلا خاتَمٍ ليس مساراً مقبولاً. */
+  #requireSealer(): ManifestSealer {
+    if (this.#sealer === null) {
+      throw new StateManifestError('STATE_MANIFEST_SEALER_REQUIRED', this.location);
     }
-    renameSync(temporary, this.location);
+    return this.#sealer;
+  }
+
+  /** يختمُ متناً ويكتبُه ذريّاً. التوقيعُ داخلَ التوكنِ لا في هذه العملية. */
+  async #seal(body: StateManifestBody): Promise<void> {
+    const sealer = this.#requireSealer();
+    const signature = await sealer.signAsync(body);
+    const sealed: SealedStateManifest = {
+      body,
+      seal: { alg: 'ed25519', signerId: sealer.id, signature },
+    };
+    writeAtomic(this.location, JSON.stringify(sealed, null, 2) + '\n', this.#fsync);
+  }
+
+  /**
+   * التحقّقُ الكاملُ ثمَّ الطيُّ: خاتَمٌ، رِباطٌ، سلسلةُ دفترِ الرفعِ، مرساةُ
+   * الحدِّ الأعلى. كلُّ فشلٍ رمزُه، ولا واحدَ منها يُقرأُ «حالةً افتراضيّةً».
+   */
+  #verify(binding: StateManifestBinding | null): StateManifestBody {
+    const sealer = this.#requireSealer();
+    if (!existsSync(this.location)) {
+      throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.location, 'utf8'));
+    } catch {
+      throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'تعذّر التحليل');
+    }
+    const file = parsed as Partial<SealedStateManifest>;
+    const body = file.body as Partial<StateManifestBody> | undefined;
+    const seal = file.seal;
+    if (body === undefined || typeof body !== 'object') {
+      // صيغةُ ما قبلَ الختمِ: حقولٌ في جذرِ الملفِّ بلا متنٍ ولا خاتَم. تُقرأُ
+      // «خاتَماً غائباً» لا «ملفاً عاطباً»، ولا تُرقَّى ضمناً بحالٍ: الترقيةُ
+      // الصامتةُ هي البابُ الذي نقضَه `R3-A-01`.
+      const legacy = parsed as { kingId?: unknown; anchoredCount?: unknown };
+      if (typeof legacy.kingId === 'string' || typeof legacy.anchoredCount === 'number') {
+        throw new StateManifestError('STATE_MANIFEST_SEAL_MISSING', 'صيغةٌ بلا خاتَم');
+      }
+      throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'لا متنَ في الملف');
+    }
+    if (seal === undefined || typeof seal.signature !== 'string' || seal.signature === '') {
+      // بيانٌ بلا خاتَمٍ: هذا هو شكلُ النسخةِ الأولى، وهو المسارُ الذي نقضَه
+      // `R3-A-01`. لا يُقبَلُ ولا يُرقَّى صامتاً.
+      throw new StateManifestError('STATE_MANIFEST_SEAL_MISSING', this.location);
+    }
+    if (body.version !== STATE_MANIFEST_VERSION) {
+      throw new StateManifestError(
+        'STATE_MANIFEST_VERSION_UNSUPPORTED',
+        String(body.version ?? 'غائب'),
+      );
+    }
+    if (
+      typeof body.kingId !== 'string' ||
+      body.kingId.length === 0 ||
+      typeof body.context !== 'string' ||
+      typeof body.tokenSerial !== 'string' ||
+      typeof body.moduleSha256 !== 'string' ||
+      typeof body.instanceId !== 'string' ||
+      body.instanceId.length === 0 ||
+      typeof body.createdAt !== 'string' ||
+      typeof body.sealedAt !== 'string' ||
+      typeof body.journalHead !== 'string' ||
+      !Number.isSafeInteger(body.sequence) ||
+      !Number.isSafeInteger(body.anchoredCount) ||
+      !Number.isSafeInteger(body.haltEpoch) ||
+      !Number.isSafeInteger(body.ledgerCommitted) ||
+      (body.sequence as number) < 1 ||
+      (body.anchoredCount as number) < 0 ||
+      (body.haltEpoch as number) < 0 ||
+      (body.ledgerCommitted as number) < 0
+    ) {
+      throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'حقولٌ ناقصةٌ أو غيرُ صحيحة');
+    }
+    const sealedBody = body as StateManifestBody;
+    // ترتيبٌ مقصودٌ: الهويةُ والرِباطُ **يُرفَضانِ قبلَ** التحقّقِ من الخاتَمِ، كي
+    // يبقى الرمزُ المُبلَّغُ دقيقاً (بيانُ ملكٍ آخرَ = `KING_MISMATCH` لا خاتَمٌ
+    // عاطبٌ). ولا يُوثَقُ بحقلٍ بهذا الترتيبِ: الرفضُ لا يمنحُ ثقةً، والثقةُ لا
+    // تُمنَحُ إلا بعدَ نجاحِ الخاتَمِ أسفلَ هذه الفحوص.
+    if (seal.signerId !== sealer.id || sealedBody.kingId !== sealer.id) {
+      throw new StateManifestError('STATE_MANIFEST_KING_MISMATCH', `يُنتظَرُ ${sealer.id}`);
+    }
+    if (binding !== null) {
+      for (const key of ['kingId', 'context', 'tokenSerial', 'moduleSha256'] as const) {
+        if (sealedBody[key] !== binding[key]) {
+          throw new StateManifestError('STATE_MANIFEST_BINDING_MISMATCH', key);
+        }
+      }
+    }
+    if (!sealer.verify(sealedBody, seal.signature)) {
+      throw new StateManifestError('STATE_MANIFEST_SEAL_INVALID', this.location);
+    }
+    const folded = this.#foldJournal(sealedBody);
+    this.#verified = folded.body;
+    return folded.body;
+  }
+
+  /** يقرأُ دفترَ الرفعِ ويتحقّقُ من سلسلتِه ثمَّ يطويه في المتن. */
+  #foldJournal(body: StateManifestBody): { body: StateManifestBody; head: string } {
+    if (!existsSync(this.journalFile)) return { body, head: body.journalHead };
+    const lines = readFileSync(this.journalFile, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '');
+    let head = body.journalHead;
+    const folded: StateManifestBody = { ...body };
+    let first = true;
+    for (const line of lines) {
+      let entry: JournalEntry;
+      try {
+        entry = JSON.parse(line) as JournalEntry;
+      } catch {
+        throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'سطرٌ لا يُحلَّل');
+      }
+      if (entry.prev !== head) {
+        // أوّلُ سطرٍ لا يتّصلُ برأسِ المتنِ المختومِ = بيانٌ أقدمُ تحتَ دفترٍ أحدثَ،
+        // وهذا استرجاعٌ جزئيٌّ مكشوفٌ لا سلسلةٌ عاطبةٌ فقط.
+        throw new StateManifestError(
+          first ? 'STATE_MANIFEST_ROLLBACK_DETECTED' : 'STATE_MANIFEST_JOURNAL_INVALID',
+          first ? 'متنٌ أقدمُ من دفترِ الرفع' : 'سلسلةٌ منقطعة',
+        );
+      }
+      first = false;
+      const { hash, ...rest } = entry;
+      if (hash !== journalHash(body.instanceId, rest)) {
+        throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'تجزئةٌ لا تُطابق');
+      }
+      if (
+        (entry.key !== 'anchoredCount' &&
+          entry.key !== 'haltEpoch' &&
+          entry.key !== 'ledgerCommitted') ||
+        !Number.isSafeInteger(entry.value) ||
+        entry.value <= folded[entry.key]
+      ) {
+        throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'قيمةٌ غيرُ صاعدة');
+      }
+      folded[entry.key] = entry.value;
+      head = hash;
+    }
+    return { body: folded, head };
+  }
+
+  /** رأسُ دفترِ الرفعِ الحاليُّ — من الدفترِ إن وُجِدَ، وإلا من المتنِ المختوم. */
+  #journalHead(body: StateManifestBody): string {
+    if (!existsSync(this.journalFile)) return body.journalHead;
+    const lines = readFileSync(this.journalFile, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '');
+    const last = lines[lines.length - 1];
+    if (last === undefined) return body.journalHead;
+    try {
+      return (JSON.parse(last) as JournalEntry).hash;
+    } catch {
+      throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'سطرٌ أخيرٌ لا يُحلَّل');
+    }
   }
 }

@@ -158,6 +158,11 @@ export interface CommandLedgerOptions {
    */
   witness?: LedgerWitness | null;
   /**
+   * ختمُ الشاهدِ بعدَ إلحاقِ قرارٍ موقَّعٍ (‏`R3-A-01`). الإلحاقُ يرفعُ الشاهدَ
+   * متزامناً، والختمُ لا يكونُ إلا لا-متزامناً؛ فيُنادى هنا حيثُ يجوزُ الانتظارُ.
+   */
+  sealWitness?: (() => Promise<void>) | null;
+  /**
    * تهيئةٌ أولى مُعلَنةٌ لجذرِ الحالة. يُمرِّرُها المصنعُ الإنتاجيُّ وحدَه حين
    * يقولُ بيانُ الجذرِ إنه لم يُهيَّأ بعد؛ وعندَها يُنشَأُ المجلَّدانِ. وفي كلِّ
    * إقلاعٍ بعدَها غيابُ المجلَّدِ **محوٌ يُرَدُّ** لا نقصٌ يُكمَّل (‏`UF-13`).
@@ -236,6 +241,7 @@ export class CommandLedger {
   #fsync: boolean;
   readonly #signer: LedgerDecisionSigner | null;
   readonly #witness: LedgerWitness | null;
+  readonly #sealWitness: (() => Promise<void>) | null;
 
   /**
    * @param file - مسار دفتر المعرّفات الدائم
@@ -250,6 +256,7 @@ export class CommandLedger {
     // أُسنِدَ بعدَه لكان أولُ تحميلٍ يقبلُ سطراً غيرَ موقّعٍ صامتاً.
     this.#signer = options.signer ?? null;
     this.#witness = options.witness ?? null;
+    this.#sealWitness = options.sealWitness ?? null;
     // خارجَ الإنتاجِ يُنشأُ المجلَّدانِ ضمناً كما كان؛ أمّا في الإنتاجِ فلا:
     // مجلَّدُ حجوزاتٍ مفقودٌ قد يكونُ محواً، وإنشاءُه صامتاً يمحو أثرَ المحو
     // (‏`UF-13`).
@@ -642,6 +649,7 @@ export class CommandLedger {
       signature,
     };
     this.#writeEntry(signedEntry);
+    if (this.#sealWitness !== null) await this.#sealWitness();
     return signedEntry;
   }
 

@@ -41,7 +41,12 @@ import {
   isProductionRuntime,
 } from './production-boot.mjs';
 import { FileAnchorStore, verifyAnchoredLog } from './anchor.mjs';
-import { StateManifest, stateManifestPath, stateProvisionDeclared } from './state-manifest.mjs';
+import {
+  StateManifest,
+  stateManifestBinding,
+  stateManifestPath,
+  stateProvisionDeclared,
+} from './state-manifest.mjs';
 
 /** أخطاءُ المصنعِ الإنتاجيّ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const ProductionRuntimeErrorCodes = [
@@ -285,17 +290,19 @@ export async function createProductionRootOfTrust(
   try {
     const sealer = signers.sealer;
     const fsync = options.fsync ?? true;
-    const log = new PersistentEventLog(join(options.root, 'events.log'), {
-      sealer,
-      env,
+    // بيانُ جذرِ الحالةِ **المختومُ داخلَ التوكن** (‏`UF-01`، ‏`UF-03`، ‏`UF-07`،
+    // ‏`R3-A-01`): مرساةٌ محليّةٌ واحدةٌ تحملُ ما لا يجوزُ أن يرجعَ — عدَّ المُثبَّتِ
+    // وعهدَ الإيقافِ وعدَّ المُقرَّرِ — ومتنُها موقَّعٌ Ed25519 بمفتاحِ F06 **داخلَ
+    // HSM** ومربوطٌ بالهويةِ والسياقِ والتوكنِ وبصمةِ الموديولِ والإصدار.
+    // نقضَت الجولةُ الثالثةُ النسخةَ الأولى: كانت JSON بلا خاتَمٍ، فمن ملكَ القرصَ
+    // خفَضَ أعدادَها وحذفَ الملفّاتِ التابعةَ معاً فعادَ إلى GENESIS و`running`
+    // وقَبِلَ أمراً مكرَّراً. الخاتَمُ يسدُّ التزييفَ والتخفيضَ، **ولا يُدَّعى** أنّه
+    // يسدُّ إعادةَ لقطةٍ كاملةٍ متّسقةٍ: ذاك قرارٌ معماريٌّ مُعلَنٌ في
+    // `docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md`.
+    const manifest = new StateManifest(stateManifestPath(options.root), {
       fsync,
+      sealer: signers.anchorSigner,
     });
-    // بيانُ جذرِ الحالةِ (‏`UF-01`، ‏`UF-03`، ‏`UF-07`): مرساةٌ محليّةٌ واحدةٌ
-    // تحملُ ما لا يجوزُ أن يرجعَ: عدَّ المُثبَّتِ وعهدَ الإيقافِ وعدَّ المُقرَّر.
-    // ولماثا بيانٌ لا تثبيتُ GENESIS: `createAnchor` يرفضُ `count<=0`، فسجلٌ خالٍ
-    // لا يُمكنُ تثبيتُه؛ ومرساةٌ داخلَ التوكنِ تقتضي كتابةً فيه — وهي ممنوعةٌ
-    // في هذه الدفعة (لا keygen ولا تدوير). الحدُّ مُصرَّحٌ به في مصفوفةِ النتائج.
-    const manifest = new StateManifest(stateManifestPath(options.root), { fsync });
     const production = isProductionRuntime(env);
     // تهيئةٌ أولى مُعلَنةٌ أم إقلاعٌ على جذرٍ قائم؟ الفرقُ هو كلُّ الفرقِ في
     // `UF-13`: مجلَّدٌ مفقودٌ عندَ التهيئةِ الأولى يُنشَأُ، ومجلَّدٌ مفقودٌ بعدَها
@@ -308,13 +315,26 @@ export async function createProductionRootOfTrust(
         stateManifestPath(options.root),
       );
     }
-    manifest.provision(signers.anchorSigner.id, env);
+    // التحقّقُ **قبلَ** الوثوقِ بأيِّ حقلٍ: خاتَمٌ ثمَّ رِباطٌ ثمَّ دفترُ الرفعِ،
+    // ثمَّ نقطةُ ضبطٍ مختومةٌ تطوي ما رُفِعَ متزامناً منذ الإقلاعِ السابق.
+    await manifest.provisionAsync(stateManifestBinding(signers.anchorSigner.id, env), env);
     manifest.assertKing(signers.anchorSigner.id);
+    // السجلُّ يُفتَحُ **بعدَ** التحقّقِ من الخاتَمِ: رفضُ الإقلاعِ لا يُنشئُ ملفَّ
+    // وقائعَ جديداً، فلا يُقرأُ ملفٌّ فارغٌ خلَّفَه رفضٌ «سجلاً من GENESIS».
+    const log = new PersistentEventLog(join(options.root, 'events.log'), {
+      sealer,
+      env,
+      fsync,
+    });
     assertLogNotBehindAnchors(manifest, log, signers.anchorSigner, options, fsync, env);
+    // نقطةُ ضبطٍ ثانيةٌ بعدَ فحصِ المراسي: ما يرفعُه الفحصُ (عدُّ المُثبَّتِ) يُختَمُ
+    // في المتنِ الآنَ لا في الإقلاعِ التالي، فلا يبقى شاهدٌ خارجَ الخاتَم.
+    await manifest.checkpointAsync();
     const ledger = new CommandLedger(join(options.root, 'commands.ledger'), {
       signer: signers.ledgerSigner,
       fsync,
       witness: manifest.ledgerWitness(),
+      sealWitness: (): Promise<void> => manifest.checkpointAsync(),
       provisioning,
       env,
     });
@@ -326,7 +346,13 @@ export async function createProductionRootOfTrust(
     const haltSwitch = new HaltSwitch(
       join(options.root, 'halt', 'directive.json'),
       signers.anchorSigner as unknown as HaltAsyncSigner,
-      { fsync, log: null, epochFloor: manifest.haltEpochFloor(), env },
+      {
+        fsync,
+        log: null,
+        epochFloor: manifest.haltEpochFloor(),
+        sealEpoch: (): Promise<void> => manifest.checkpointAsync(),
+        env,
+      },
     );
     return {
       log,
