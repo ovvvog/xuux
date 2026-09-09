@@ -42,6 +42,7 @@ import {
   assertNonExportingSource,
   bindHsmRootOfTrust,
   createHsmAnchor,
+  fingerprint,
   ledgerEntryBody,
   openEventData,
   sealEventData,
@@ -53,16 +54,21 @@ import {
 
 /**
  * توكن مزيَّف: يحفظ المفاتيح داخله ولا يُصدِّر إلا العام، كما يفعل التوكن.
+ * @param king - مفتاحُ الملكِ حين يلزمُ معرفةُ هويتِه قبلَ الربط
  * @returns موفّراً يحقق عقد `HsmKeySource`
  */
-function fakeToken() {
+function fakeToken(king = generateKeyPairSync('ed25519')) {
   const aesKeys = new Map();
   const edKeys = new Map();
   for (const keyId of ['05']) aesKeys.set(keyId, randomBytes(32));
-  for (const keyId of ['06', '07']) edKeys.set(keyId, generateKeyPairSync('ed25519'));
+  edKeys.set('06', king);
+  edKeys.set('07', generateKeyPairSync('ed25519'));
   const aad = Buffer.from('xuux-event');
   return {
-    describe: () => ({ canExport: false }),
+    // WL-094 (`UF-02`): البديلُ يُعلن نوعَه `pkcs11-hsm` لأنه بديلُ توكنٍ لا
+    // مخزنٌ برمجيّ. وموفّرٌ لا يُعلن نوعَه يُرَدُّ في الإنتاجِ الآن، وذلك
+    // مُختبَرٌ صراحةً في `round-2-remediation.test.mjs`.
+    describe: () => ({ kind: 'pkcs11-hsm', canExport: false }),
     getAeadKey: async (keyId) => {
       const key = aesKeys.get(keyId);
       if (!key) throw new Error('KEY_NOT_FOUND');
@@ -97,6 +103,16 @@ function fakeToken() {
 
 /** بيئة نظيفة: بلا أي متغيّر مخزن مفاتيح برمجي. */
 const CLEAN_ENV = Object.freeze({ NODE_ENV: 'production' });
+
+/**
+ * هويةُ الملكِ كما يشتقُّها `HsmSigner`. WL-094 (`UF-05`): الربطُ في الإنتاجِ
+ * يُقابلُ الهويةَ المُثبَّتةَ، فالاختبارُ يشتقُّها من مفتاحِ البديلِ لا يخترعُها.
+ * @param pair - زوجُ مفاتيحِ الملك
+ * @returns الهويةُ المُثبَّتة
+ */
+function kingIdOf(pair) {
+  return 'king:' + fingerprint(pair.publicKey).slice(0, 24);
+}
 /**
  * يمسك الخطأ المرفوع ليُفحص حقلاه؛ `assert.throws` لا يعيد الخطأ.
  * @param fn - الدالة المتوقّع فشلها
@@ -266,7 +282,10 @@ describe('F07 — سطور الدفتر موقَّعة داخل التوكن', (
 
 describe('الربط الكامل وفحوص فشل مغلق', () => {
   test('`bindHsmRootOfTrust` يعيد المقابض الثلاثة بمعرّفاتها', async () => {
-    const binding = await bindHsmRootOfTrust(fakeToken(), { env: CLEAN_ENV });
+    const king = generateKeyPairSync('ed25519');
+    const binding = await bindHsmRootOfTrust(fakeToken(king), {
+      env: { ...CLEAN_ENV, XUUX_KING_ID: kingIdOf(king) },
+    });
     assert.equal(binding.eventLogAead.keyId, '05');
     assert.equal(binding.kingSigner.keyId, '06');
     assert.equal(binding.ledgerSigner.keyId, '07');
@@ -287,7 +306,10 @@ describe('الربط الكامل وفحوص فشل مغلق', () => {
   });
 
   test('موفّرٌ يُعلن `canExport: true` يُرفض قبل أي مقبض', async () => {
-    const exporting = { ...fakeToken(), describe: () => ({ canExport: true }) };
+    const exporting = {
+      ...fakeToken(),
+      describe: () => ({ kind: 'pkcs11-hsm', canExport: true }),
+    };
     assert.throws(() => assertNonExportingSource(exporting), {
       code: 'HSM_PROVIDER_EXPORTS_MATERIAL',
     });
@@ -305,7 +327,7 @@ describe('الربط الكامل وفحوص فشل مغلق', () => {
 
   test('غياب المفتاح في التوكن خطأٌ صريح لا سقوطٌ إلى مفتاح مولَّد', async () => {
     const empty = {
-      describe: () => ({ canExport: false }),
+      describe: () => ({ kind: 'pkcs11-hsm', canExport: false }),
       getAeadKey: () => Promise.reject(new Error('KEY_NOT_FOUND')),
       getSigningKey: () => Promise.reject(new Error('KEY_NOT_FOUND')),
     };

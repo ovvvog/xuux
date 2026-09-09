@@ -65,6 +65,7 @@ import {
 } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fingerprint } from './identity.mjs';
+import { isProductionRuntime } from './production-boot.mjs';
 
 /** لاحقة مجلد الإقرارات: ملفٌ لكل عقدة في كل عهد، وإنشاؤه الحصري هو ذرّيته. */
 export const HALT_ACKS_SUFFIX = '.acks';
@@ -135,6 +136,8 @@ export const HaltErrorCodes = [
   'HALT_NODE_KEY_REQUIRED',
   'HALT_NODE_PROOF_REQUIRED',
   'HALT_NODE_PROOF_INVALID',
+  // `UF-03`: مفتاحُ إيقافٍ شاهدُ عهدِه داخلَ ما يُمحى معَه لا يُركَّبُ في الإنتاج.
+  'HALT_EPOCH_FLOOR_REQUIRED_IN_PRODUCTION',
 ] as const;
 
 export type HaltErrorCode = (typeof HaltErrorCodes)[number];
@@ -324,11 +327,28 @@ export interface PendingConfirmation {
   alive: boolean;
 }
 
+/**
+ * حدٌّ أدنى دائمٌ للعهدِ، يسكنُ **خارجَ ملفّاتِ الإيقافِ الثلاثة**. عقدٌ بنيويٌّ
+ * لا اقترانٌ بوحدةٍ، فيُحقَنُ في الاختبارِ ويُملأُ في الإنتاجِ من `StateManifest`.
+ */
+export interface HaltEpochFloor {
+  read(): number;
+  raise(value: number): void;
+}
+
 /** خيارات المفتاح: مزامنة القرص، وسجل أحداث اختياري للتدقيق. */
 export interface HaltSwitchOptions {
   /** مزامنة القرص بعد كل كتابة. تعطيلها يُسرّع ويُضعف الضمان. */
   fsync?: boolean;
   log?: HaltEventSink | null;
+  /**
+   * الحدُّ الخارجيُّ للعهدِ (‏`UF-03`). أثبتَ العضوانِ أنّ حذفَ الثلاثيةِ
+   * (توجيهٌ + تاريخٌ + عهدٌ) يُرجِعُ `running`/`epoch=0` بعدَ إيقافٍ سياديٍّ،
+   * لأن الشاهدَ كان يسكنُ ما يشهدُ عليه.
+   */
+  epochFloor?: HaltEpochFloor | null;
+  /** بيئةُ التشغيلِ — تُقرأُ لمعرفةِ هل الحدُّ الخارجيُّ إلزامٌ أم لا. */
+  env?: NodeJS.ProcessEnv;
 }
 
 /** خلاصة تشغيلية للأداة والتدقيق. */
@@ -429,6 +449,7 @@ export class HaltSwitch implements HaltGuard {
 
   #fsync: boolean;
   #log: HaltEventSink | null;
+  #epochFloor: HaltEpochFloor | null;
 
   /**
    * @param file - مسار ملف التوجيه الدائم
@@ -444,6 +465,12 @@ export class HaltSwitch implements HaltGuard {
     this.king = king;
     this.#fsync = options.fsync ?? true;
     this.#log = options.log ?? null;
+    this.#epochFloor = options.epochFloor ?? null;
+    // في الإنتاجِ لا يُركَّبُ مفتاحُ إيقافٍ شاهدُه داخلَ ما يُمحى معَه: فشلٌ
+    // مغلقٌ عندَ التركيبِ لا عندَ أوّلِ محوٍ (‏`UF-03`).
+    if (this.#epochFloor === null && isProductionRuntime(options.env ?? process.env)) {
+      throw new HaltError('HALT_EPOCH_FLOOR_REQUIRED_IN_PRODUCTION', {});
+    }
     mkdirSync(dirname(file), { recursive: true });
     mkdirSync(this.acksDir, { recursive: true });
     mkdirSync(this.nodesDir, { recursive: true });
@@ -1084,10 +1111,14 @@ export class HaltSwitch implements HaltGuard {
    * @returns رقم العهد
    */
   #readEpoch(): number {
-    let stored = 0;
+    // الحدُّ الخارجيُّ يُقرأُ أوّلاً: حتّى لو مُحيَت الثلاثيةُ جميعاً يبقى من يقولُ
+    // «بُلِغَ عهدٌ» فتُقرأُ الحالةُ `halted` لا `running` (‏`UF-03`).
+    let stored = this.#epochFloor === null ? 0 : this.#epochFloor.read();
     if (existsSync(this.epochFile)) {
       const raw = Number.parseInt(readFileSync(this.epochFile, 'utf8').trim(), 10);
-      if (Number.isInteger(raw) && raw > 0) stored = raw;
+      // `Math.max` لا إسنادٌ: عدّادٌ مُحيَ ثم أُعيدَ كتابتُه بقيمةٍ أدنى لا يُخفِّضُ
+      // الحدَّ الخارجيَّ، وإلا صار الحدُّ زينةً لا قيداً.
+      if (Number.isInteger(raw) && raw > 0) stored = Math.max(stored, raw);
     }
     const directives = this.history();
     const last = directives[directives.length - 1];
@@ -1101,6 +1132,8 @@ export class HaltSwitch implements HaltGuard {
    */
   #writeEpoch(epoch: number): void {
     this.#writeAtomic(this.epochFile, String(epoch) + '\n');
+    // الرفعُ في الموضعينِ معاً: من محا الداخلَ لم يمحُ الخارج.
+    this.#epochFloor?.raise(epoch);
   }
 
   /**

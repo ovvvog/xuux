@@ -53,6 +53,7 @@ import Ajv2020Default from 'ajv/dist/2020.js';
 
 import { LocalEncryptedKeyProvider } from '../root-of-trust/key-provider-local.mjs';
 import { RemoteSecretStoreKeyProvider } from '../root-of-trust/key-provider-remote.mjs';
+import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 
 const Ajv2020 = /** @type {typeof import('ajv/dist/2020.js').Ajv2020} */ (
   /** @type {unknown} */ (Ajv2020Default)
@@ -761,7 +762,11 @@ function isProductionLike(environment) {
  * @returns {import('../root-of-trust/key-provider.mjs').KeyProvider}
  */
 export function dataKeyProviderFromEnv(env = process.env) {
-  const production = (env.STATE_ENV ?? env.NODE_ENV) === 'production';
+  // `UF-15`: كان `(env.STATE_ENV ?? env.NODE_ENV) === 'production'` يقرأُ
+  // `STATE_ENV=''` حاضراً فيحجبُ `NODE_ENV=production` فيُقبَلُ قرصٌ محليٌّ في
+  // الإنتاج. والتعليقُ أعلاه يدّعي تكافؤاً مع جذرِ الثقةِ، فليكنِ التكافؤُ
+  // بالاستدعاءِ لا بالدّعوى.
+  const production = isProductionRuntime(env);
   const endpoint = env.DATA_KEY_STORE_ENDPOINT;
   const token = env.DATA_KEY_STORE_TOKEN;
   if (endpoint !== undefined && endpoint !== '' && token !== undefined && token !== '') {

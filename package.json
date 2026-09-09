@@ -25,7 +25,7 @@
     "halt": "node scripts/halt-switch.mjs",
     "hsm:keygen": "node scripts/pkcs11-keygen.mjs",
     "hsm:probe": "node scripts/pkcs11-eddsa-sign-probe.mjs",
-    "hsm:verify:f05": "node scripts/pkcs11-f05-verify.mjs",
+    "hsm:verify:f05": "node scripts/pkcs11-f05-verify.mjs --keygen-log artifacts/hsm/keygen.log",
     "validate:seed": "node scripts/validate-seed.mjs",
     "migrate": "node scripts/migrate.mjs",
     "backup": "node scripts/backup.mjs",

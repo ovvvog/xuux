@@ -457,6 +457,10 @@ test('الرموز والحالات مثبَّتة نصاً ومصدَّرة', (
       'LEDGER_SIGNATURE_INVALID',
       'LEDGER_KEY_MISMATCH',
       'LEDGER_SIGNER_MISSING',
+      // رموزُ الشاهدِ — WL-094 (`UF-07`): الدفترُ لا يُصدَّقُ وحدَه، ودليلُ
+      // الحالةِ لازمٌ في الإنتاج.
+      'LEDGER_BEHIND_WITNESS',
+      'LEDGER_STATE_ROOT_MISSING',
     ],
   );
   assert.deepEqual(

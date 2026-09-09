@@ -19,6 +19,7 @@
 
 import test, { after, before, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,22 +33,68 @@ const SO_PIN = '1234'; // secret-scan:allow
 
 let tokenDir = '';
 let ready = false;
+let setupError = null;
+let identity = null;
+
+const PROVIDER_URL = new URL('../../src/root-of-trust/pkcs11-provider.mjs', import.meta.url).href;
+const BINDING_URL = new URL('../../src/root-of-trust/hsm-binding.mjs', import.meta.url).href;
 
 /**
- * هل SoftHSM حاضرٌ فعلاً؟ حضورُ المتغيّرِ وحدَه لا يكفي.
- * @returns حضورُه
+ * هل أداةُ SoftHSM حاضرةٌ في المسار؟
+ * @returns حضورُها
  */
-function softhsmAvailable() {
+function utilAvailable() {
   try {
     execFileSync('softhsm2-util', ['--version'], { stdio: 'ignore' });
-    return existsSync(MODULE);
+    return true;
   } catch {
     return false;
   }
 }
 
+/**
+ * يستخرجُ من التوكنِ رقمَه التسلسليَّ وهويةَ ملكِه **في عمليّةٍ ابنةٍ**.
+ *
+ * لماذا عمليّةٌ ابنةٌ: مكتبةُ PKCS#11 تُهيَّأُ مرّةً واحدةً لكلِّ عمليّةٍ، فمن
+ * فتحَ موفّراً هنا ثم أقلعَ المصنعَ بعدَه لقيَ `ALREADY_INITIALIZED` بحقٍّ
+ * (‏`UF-12`). والاستخراجُ **من التوكنِ نفسِه** لا من قيمةٍ مكتوبةٍ في الاختبار:
+ * تثبيتٌ يُقابِلُ قيمةً يخترعُها الاختبارُ لا يُثبِتُ شيئاً.
+ * @returns الرقمُ التسلسليُّ وهويةُ الملك
+ */
+function probeTokenIdentity() {
+  const script = join(tokenDir, 'probe-identity.mjs');
+  writeFileSync(
+    script,
+    [
+      "import { Pkcs11HsmProvider } from '" + PROVIDER_URL + "';",
+      "import { bindHsmRootOfTrust } from '" + BINDING_URL + "';",
+      'const provider = await Pkcs11HsmProvider.create({',
+      '  modulePath: process.env.XUUX_PKCS11_MODULE,',
+      '  tokenLabel: process.env.XUUX_PKCS11_TOKEN,',
+      '  pin: process.env.XUUX_PKCS11_PIN,',
+      '});',
+      '// بيئةٌ غيرُ إنتاجيّةٍ عن قصد: الاستخراجُ يسبقُ التثبيتَ فلا يُقابَلُ به.',
+      'const binding = await bindHsmRootOfTrust(provider, { env: {} });',
+      'process.stdout.write(',
+      '  JSON.stringify({ serial: provider.describe().tokenSerial, kingId: binding.kingSigner.id }),',
+      ');',
+      'await provider.close();',
+    ].join('\n'),
+  );
+  const out = execFileSync('node', [script], {
+    env: {
+      ...process.env,
+      XUUX_PKCS11_MODULE: MODULE,
+      XUUX_PKCS11_TOKEN: TOKEN_LABEL,
+      XUUX_PKCS11_PIN: PIN,
+    },
+    encoding: 'utf8',
+  });
+  return JSON.parse(out);
+}
+
 before(() => {
-  if (!ENABLED || !softhsmAvailable()) return;
+  if (!ENABLED) return;
   try {
     tokenDir = mkdtempSync(join(tmpdir(), 'xuux-prod-hsm-'));
     const confPath = join(tokenDir, 'softhsm2.conf');
@@ -68,9 +115,11 @@ before(() => {
       },
       stdio: 'ignore',
     });
+    identity = probeTokenIdentity();
     ready = true;
   } catch (error) {
-    console.error('[prod-hsm-test] تعذّرت التهيئة:', error?.message ?? error);
+    // `UF-14`: يُحفَظُ الخطأُ ويُرفَعُ في اختبارٍ يفشل، ولا يُطبَعُ ويُنسى.
+    setupError = error;
   }
 });
 
@@ -78,12 +127,25 @@ after(() => {
   if (tokenDir) rmSync(tokenDir, { recursive: true, force: true });
 });
 
-const skip = !ENABLED || !softhsmAvailable();
+// `UF-14`: `XUUX_HSM_TEST=1` **عقدٌ لا رغبة**. كان التخطّي يقعُ حتى مع إعلانِ
+// المتغيّرِ إذا غابَ SoftHSM، فيخرجُ الأمرُ صفراً ويُقرأُ «التوكنُ الحقيقيُّ
+// مُختبَرٌ» على بيئةٍ لم تلمسْ توكناً. الآن: بلا إعلانٍ ⇒ تخطٍّ مُعلَنٌ كما كان،
+// ومع إعلانٍ ⇒ غيابُ الأداةِ أو الموديولِ أو فشلُ التهيئةِ **فشلٌ** باسمِه.
+const skip = !ENABLED;
 const it = skip ? test.skip : test;
 
 describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (SoftHSM، محليٌّ لا CI)', () => {
-  it('يُقلعُ من البيئةِ وحدَها، فيَختمُ السجلَّ ويوقّعُ الدفترَ والتثبيتَ داخلَ التوكن', async () => {
+  it('إعلانُ XUUX_HSM_TEST=1 عقدٌ: غيابُ الأداةِ أو الموديولِ فشلٌ لا تخطٍّ (UF-14)', () => {
+    assert.equal(utilAvailable(), true, 'XUUX_HSM_TEST=1 مُعلَنٌ و`softhsm2-util` غائبٌ عن المسار');
+    assert.equal(existsSync(MODULE), true, `XUUX_HSM_TEST=1 مُعلَنٌ والموديولُ غائبٌ: ${MODULE}`);
+    assert.equal(setupError, null, `تهيئةُ التوكنِ فشلت: ${setupError?.message ?? setupError}`);
     assert.equal(ready, true, 'التهيئةُ لم تكتمل');
+    assert.equal(typeof identity?.serial, 'string');
+    assert.notEqual(identity?.serial, '', 'الرقمُ التسلسليُّ مُستخرَجٌ من التوكنِ لا مخترَع');
+    assert.match(identity?.kingId ?? '', /^king:[0-9a-f]{24}$/);
+  });
+
+  it('يُقلعُ من البيئةِ وحدَها، فيَختمُ السجلَّ ويوقّعُ الدفترَ والتثبيتَ داخلَ التوكن', async () => {
     const { createProductionRootOfTrust, FileAnchorStore, anchorLogWithHsm, verifyAnchorChain } =
       await import('../../src/root-of-trust/index.mjs');
     const root = mkdtempSync(join(tmpdir(), 'xuux-prod-state-'));
@@ -93,8 +155,13 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
       XUUX_ROOT_OF_TRUST_MODE: 'hsm',
       XUUX_PKCS11_MODULE: MODULE,
       XUUX_PKCS11_TOKEN: TOKEN_LABEL,
-      XUUX_PKCS11_TOKEN_SERIAL: '',
+      // `UF-05`: الرقمُ والبصمةُ والهويةُ **مُستخرَجَةٌ من التوكنِ والملفِّ**، لا
+      // فراغٌ يُمرَّرُ ليمرَّ الاختبار.
+      XUUX_PKCS11_TOKEN_SERIAL: identity.serial,
+      XUUX_PKCS11_MODULE_SHA256: createHash('sha256').update(readFileSync(MODULE)).digest('hex'),
+      XUUX_KING_ID: identity.kingId,
       XUUX_PKCS11_PIN: PIN,
+      XUUX_ROOT_OF_TRUST_PROVISION: '1',
     };
     // لا حقنَ هنا: المصدرُ الافتراضيُّ هو `Pkcs11HsmProvider.fromEnv`.
     const runtime = await createProductionRootOfTrust(env, { root });

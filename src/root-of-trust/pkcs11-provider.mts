@@ -14,8 +14,9 @@
 //  - self-test لكل قدرة قبل التسليم: EdDSA sign+verify عند طلب توقيع؛ AES-GCM
 //    encrypt+decrypt عند طلب تشفير. فشل self-test التوقيع لا يُسقط التشفير.
 import { Buffer } from 'node:buffer';
-import { createPublicKey, verify as cryptoVerify, randomBytes } from 'node:crypto';
+import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { isProductionRuntime } from './production-boot.mjs';
 
 /** رموز أخطاء HSM — مُثبَّتة نصاً للاختبار والتدقيق. */
 export const HsmErrorCodes = [
@@ -32,6 +33,11 @@ export const HsmErrorCodes = [
   'NON_EXTRACTABLE_VIOLATION',
   'SIGN_OPERATION_FAILED',
   'AEAD_OPERATION_FAILED',
+  // `UF-12`: `CKR_CRYPTOKI_ALREADY_INITIALIZED` كان يخرجُ خاماً من pkcs11js
+  // فيُقرأُ «عطلاً غيرَ معروف» بدلَ «المكتبةُ مُهيّأةٌ من قبلُ».
+  'ALREADY_INITIALIZED',
+  // `UF-05`: ملفُ الموديولِ لا يُوافقُ بصمتَه المُثبَّتة — قبلَ تحميلِه لا بعدَه.
+  'MODULE_FINGERPRINT_MISMATCH',
 ] as const;
 export type HsmErrorCode = (typeof HsmErrorCodes)[number];
 
@@ -57,6 +63,11 @@ export interface HsmProviderConfig {
   tokenLabel: string;
   /** الرقم التسلسلي للتوكن — تحقق إضافي (اختياري). */
   tokenSerial?: string;
+  /**
+   * بصمةُ SHA-256 لملفِّ الموديولِ بترميزٍ ستَّ عشريٍّ (‏`UF-05`). تُقابَلُ
+   * **قبلَ** `mod.load`، فموديولٌ مبدَّلٌ يملكُ العمليّةَ من لحظةِ تحميلِه.
+   */
+  moduleSha256?: string;
   /** PIN — لا يُسجَّل. */
   pin: string;
 }
@@ -135,6 +146,28 @@ async function loadPkcs11Module(): Promise<{ lib: Pkcs11Lib; PKCS11: new () => P
   return { lib: lib as Pkcs11Lib, PKCS11 };
 }
 
+/**
+ * يُقابلُ بصمةَ ملفِّ الموديولِ بالمُثبَّتةِ قبلَ تحميلِه (‏`UF-05`). المقابلةُ
+ * حرفٌ بحرفٍ على صيغةٍ واحدةٍ صغرى، والتعذّرُ عن قراءةِ الملفِ رفضٌ لا تجاوُز.
+ * @param config - تهيئةُ الموفّرِ كما وردت
+ */
+function assertModuleFingerprint(config: HsmProviderConfig): void {
+  const expected = (config.moduleSha256 ?? '').trim().toLowerCase();
+  if (expected === '') return;
+  let actual: string;
+  try {
+    actual = createHash('sha256').update(readFileSync(config.modulePath)).digest('hex');
+  } catch (e) {
+    throw new HsmError(
+      'MODULE_MISSING',
+      `تعذّر قراءةُ ${config.modulePath} للبصم: ${(e as Error).message}`,
+    );
+  }
+  if (actual !== expected) {
+    throw new HsmError('MODULE_FINGERPRINT_MISMATCH', `${actual} ≠ ${expected}`);
+  }
+}
+
 function resolvePin(envPin?: string, pinFile?: string): string {
   if (envPin) return envPin;
   const path = pinFile ?? `${process.env.HOME ?? ''}/.config/xuux/pkcs11-pin`;
@@ -165,6 +198,9 @@ export class Pkcs11HsmProvider {
     const CKF_RW = (lib.CKF_RW_SESSION as number) ?? 0x00000002;
     const CKU_USER = (lib.CKU_USER as number) ?? 1;
     const mod = new PKCS11();
+    // البصمةُ **قبلَ التحميلِ**: موديولٌ مبدَّلٌ ينفّذُ شيفرتَه في عمليّتِنا فورَ
+    // تحميلِه، ففحصٌ بعدَه فحصٌ متأخرٌ لا قيمةَ له (‏`UF-05`).
+    assertModuleFingerprint(config);
     try {
       mod.load(config.modulePath);
     } catch (e) {
@@ -173,7 +209,17 @@ export class Pkcs11HsmProvider {
         `تعذّر تحميل ${config.modulePath}: ${(e as Error).message}`,
       );
     }
-    mod.C_Initialize();
+    try {
+      mod.C_Initialize();
+    } catch (e) {
+      // يُلفَّفُ برمزٍ مُسمَّى ولا يُتجاوَز: جلسةٌ على مكتبةٍ هيّأها غيرُنا حالةٌ
+      // يجبُ أن يعرفَها المشغّلُ (‏`UF-12`).
+      const message = (e as Error).message;
+      if (message.includes('CKR_CRYPTOKI_ALREADY_INITIALIZED')) {
+        throw new HsmError('ALREADY_INITIALIZED', 'مكتبةُ PKCS#11 مُهيّأةٌ من قبلُ في هذه العملية');
+      }
+      throw new HsmError('MODULE_LOAD', `تعذّر تهيئةُ المكتبة: ${message}`);
+    }
     const slots = mod.C_GetSlotList(true);
     if (!slots || slots.length === 0) {
       throw new HsmError('TOKEN_NOT_FOUND', 'لا توكنات مهيَّأة');
@@ -219,7 +265,23 @@ export class Pkcs11HsmProvider {
     }
     const pin = resolvePin(env.XUUX_PKCS11_PIN, env.XUUX_PKCS11_PIN_FILE);
     const config: HsmProviderConfig = { modulePath, tokenLabel, pin };
-    if (env.XUUX_PKCS11_TOKEN_SERIAL) config.tokenSerial = env.XUUX_PKCS11_TOKEN_SERIAL;
+    const serial = (env.XUUX_PKCS11_TOKEN_SERIAL ?? '').trim();
+    if (serial !== '') config.tokenSerial = serial;
+    const fingerprint = (env.XUUX_PKCS11_MODULE_SHA256 ?? '').trim();
+    if (fingerprint !== '') config.moduleSha256 = fingerprint;
+    // في الإنتاجِ الرقمُ والبصمةُ إلزامٌ لا خيارٌ: اكتشافٌ بالاسمِ وحدَه
+    // يقبلُ توكناً بديلاً يحملُ الاسمَ نفسَه (‏`UF-05`).
+    if (isProductionRuntime(env)) {
+      if (config.tokenSerial === undefined) {
+        throw new HsmError('SERIAL_MISMATCH', 'XUUX_PKCS11_TOKEN_SERIAL إلزاميٌّ في الإنتاج');
+      }
+      if (config.moduleSha256 === undefined) {
+        throw new HsmError(
+          'MODULE_FINGERPRINT_MISMATCH',
+          'XUUX_PKCS11_MODULE_SHA256 إلزاميٌّ في الإنتاج',
+        );
+      }
+    }
     return Pkcs11HsmProvider.create(config);
   }
 

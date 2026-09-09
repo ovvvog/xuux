@@ -23,6 +23,20 @@ import pg from 'pg';
 
 import { loadClassificationLattice } from '../data/classification.mjs';
 import { assertSecureTransport, loadEncryptionPolicy } from '../data/encryption.mjs';
+import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
+
+/**
+ * يُرجِعُ اسمَ بيئةِ التشغيلِ المعتمدَ بتعريفِ جذرِ الثقةِ لا بتعريفٍ محلّيٍّ.
+ * @param {NodeJS.ProcessEnv} env - بيئةُ العملية
+ * @returns {string} اسمُ البيئة
+ */
+function resolveRuntimeEnvironment(env) {
+  if (isProductionRuntime(env)) return 'production';
+  const stateEnv = (env.STATE_ENV ?? '').trim();
+  if (stateEnv !== '') return stateEnv;
+  const nodeEnv = (env.NODE_ENV ?? '').trim();
+  return nodeEnv !== '' ? nodeEnv : 'development';
+}
 
 /**
  * سياسة التشفير تُقرأ مرّة واحدة لكل عملية: قراءتها عند كل وصلة تفتح ملفين على
@@ -102,10 +116,13 @@ export function resolveDatabaseConfig(options = {}) {
     );
   }
 
-  const environment =
-    options.environment ?? process.env.STATE_ENV ?? process.env.NODE_ENV ?? 'development';
+  // `UF-15`: كان `??` يقرأُ `STATE_ENV=''` قيمةً حاضرةً فيُقرأُ غيرَ إنتاجٍ،
+  // وكان التعليقُ يدّعي تكافؤاً مع جذرِ الثقةِ بلا تكافؤ. المصدرُ الآن واحدٌ:
+  // `isProductionRuntime`، وهو يقصُّ الفراغَ ويرفضُ القيمَ غيرَ المعلَنة.
+  const environment = options.environment ?? resolveRuntimeEnvironment(process.env);
+  const production = environment === 'production';
   const tls = requestsTls(url);
-  if (environment === 'production' && !tls) {
+  if (production && !tls) {
     throw new DatabaseConfigError(
       DB_ERRORS.INSECURE_IN_PRODUCTION,
       'وصلة بلا TLS مرفوضة في وضع الإنتاج: أضف sslmode=require إلى DATABASE_URL.',

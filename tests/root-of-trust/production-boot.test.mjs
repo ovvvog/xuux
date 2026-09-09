@@ -34,11 +34,16 @@ import {
  * إعدادُ HSM كاملٌ وصحيحٌ: خطُّ الأساسِ الذي يجب أن **يعبُر**.
  * @type {Readonly<NodeJS.ProcessEnv>}
  */
+// WL-094 (`UF-05`): بيئةٌ إنتاجيّةٌ «كاملةٌ» لم تعُد اسمَ توكنٍ ومساراً: التثبيتُ
+// جزءٌ من الاكتمال، فالرقمُ التسلسليُّ وبصمةُ الموديولِ وهويةُ الملكِ إلزاميّةٌ.
 const HSM_ENV = Object.freeze({
   NODE_ENV: 'production',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-security',
   XUUX_PKCS11_PIN_FILE: '/home/king/.config/xuux/pkcs11-pin',
+  XUUX_PKCS11_TOKEN_SERIAL: 'DEADBEEFCAFE0001',
+  XUUX_PKCS11_MODULE_SHA256: 'a'.repeat(64),
+  XUUX_KING_ID: 'king:' + '0'.repeat(24),
 });
 
 /**

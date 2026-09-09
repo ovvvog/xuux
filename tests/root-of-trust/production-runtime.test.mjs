@@ -36,19 +36,40 @@ import {
   anchorLogWithHsm,
   createProductionRootOfTrust,
   describeProductionBindings,
+  fingerprint,
   royalVerifierFromPublicKey,
   verifyAnchorChain,
   verifyEventChain,
 } from '../../src/root-of-trust/index.mjs';
 
-/** بيئةُ إنتاجٍ كاملةٌ الشرطِ: وضعُ توكنٍ ومسارُ وحدةٍ واسمُ توكنٍ وPIN. */
+/**
+ * بيئةُ إنتاجٍ كاملةُ الشرطِ. وWL-094 (`UF-05`) شدَّت الشرطَ: الرقمُ التسلسليُّ
+ * وبصمةُ الموديولِ وهويةُ الملكِ **إلزاميّةٌ** في الإنتاج، فبيئةٌ بلا تثبيتٍ لم
+ * تعُد «كاملةَ الشرط». وهويةُ الملكِ تُحسَبُ من مفتاحِ البديلِ نفسِه في
+ * `buildRuntime` لأنها تتغيّرُ بتغيّرِ المفتاحِ المولَّدِ لكلِّ اختبار.
+ */
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
   XUUX_ROOT_OF_TRUST_MODE: 'hsm',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-test',
+  XUUX_PKCS11_TOKEN_SERIAL: 'DEADBEEFCAFE0001',
+  XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
+  // هويةٌ نائبةٌ صحيحةُ الصيغةِ لاختباراتِ ما قبلَ فتحِ التوكن؛ و`buildRuntime`
+  // يستبدلُها بهويةِ مفتاحِ البديلِ الحقيقيةِ فلا يمرُّ إقلاعٌ بهويةٍ لا تُقابَل.
+  XUUX_KING_ID: 'king:' + '0'.repeat(24),
   XUUX_PKCS11_PIN: 'fake-pin-not-used-by-injected-source', // secret-scan:allow
+  XUUX_ROOT_OF_TRUST_PROVISION: '1',
 });
+
+/**
+ * هويةُ الملكِ كما يشتقُّها `HsmSigner` من المفتاحِ العامّ.
+ * @param pair - زوجُ المفاتيحِ المولَّدُ للبديل
+ * @returns الهويةُ المُثبَّتة
+ */
+function kingIdOf(pair) {
+  return 'king:' + fingerprint(pair.publicKey).slice(0, 24);
+}
 
 /**
  * توكنٌ مزيَّفٌ: المفاتيحُ داخلَه، ولا يُصدَّرُ إلا العام — كما يفعلُ التوكن.
@@ -63,7 +84,13 @@ function fakeToken(overrides = {}) {
   ]);
   const aad = Buffer.from('xuux-event');
   return {
-    describe: () => ({ canExport: false }),
+    // WL-094 (`UF-02`): البديلُ يُعلن نوعَه ورقمَه التسلسليَّ لأنه بديلُ توكنٍ.
+    // وموفّرٌ لا يُعلن `pkcs11-hsm` يُرَدُّ في الإنتاجِ الآن.
+    describe: () => ({
+      kind: 'pkcs11-hsm',
+      canExport: false,
+      tokenSerial: 'DEADBEEFCAFE0001',
+    }),
     getAeadKey: async (keyId) => {
       const key = aesKeys.get(keyId);
       if (!key) throw new Error('KEY_NOT_FOUND');
@@ -103,9 +130,12 @@ function fakeToken(overrides = {}) {
  */
 async function buildRuntime(options = {}) {
   const root = mkdtempSync(join(tmpdir(), 'xuux-prod-'));
-  const token = options.token ?? fakeToken();
+  // `UF-05`: هويةُ الملكِ تُثبَّتُ في البيئةِ، فتُشتقُّ من مفتاحِ البديلِ نفسِه
+  // لا من قيمةٍ ثابتةٍ تُخترَع.
+  const king = options.king ?? generateKeyPairSync('ed25519');
+  const token = options.token ?? fakeToken({ king });
   const runtime = await createProductionRootOfTrust(
-    { ...PRODUCTION_ENV, ...(options.env ?? {}) },
+    { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) },
     { root, fsync: false },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
@@ -113,6 +143,7 @@ async function buildRuntime(options = {}) {
     runtime,
     root,
     token,
+    king,
     cleanup: () => {
       runtime.log.close?.();
       rmSync(root, { recursive: true, force: true });
@@ -206,7 +237,10 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
 
   test('مصدرٌ يُصدِّرُ مفاتيحَه يُرفض ولو صحّت البيئة، والجلسةُ تُغلق', async () => {
     let closed = false;
-    const exporting = { ...fakeToken(), describe: () => ({ canExport: true }) };
+    const exporting = {
+      ...fakeToken(),
+      describe: () => ({ kind: 'pkcs11-hsm', canExport: true }),
+    };
     const error = await caughtAsync(() =>
       createProductionRootOfTrust(
         PRODUCTION_ENV,
@@ -221,7 +255,10 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
         },
       ),
     );
-    assert.equal(error.code, 'HSM_PROVIDER_EXPORTS_MATERIAL');
+    // WL-094 (`UF-02`): الرمزُ الآن رمزُ **قيدِ الإنتاج** لأن المصنعَ صار
+    // يُنادي `assertProductionKeyProviderAllowed` — وهي التي كانت مكتوبةً
+    // ومُختبَرةً ولا مصنعَ ينادِيها. والرفضُ في الحالين قبلَ أيِّ مقبض.
+    assert.equal(error.code, 'EXPORTABLE_PROVIDER_FORBIDDEN_IN_PRODUCTION');
     assert.equal(closed, true, 'جلسةُ توكنٍ لا تبقى مفتوحةً بعدَ فشلِ الإقلاع');
   });
 });
@@ -325,8 +362,12 @@ describe('F06: التثبيتُ الإنتاجيُّ موقَّعٌ بمفتاح
     const { runtime, cleanup } = await buildRuntime();
     try {
       await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      // WL-094 (`UF-03`): الاختبارُ كان اسمُه «الثلاثة» ويحذفُ اثنين، فكان
+      // بابُ العودةِ إلى `running` وepoch=0 مفتوحاً ولا يراه أحد. الآن
+      // يُحذَفُ **الثالثُ** أيضاً: ملفُّ الحقبة.
       rmSync(runtime.haltSwitch.file, { force: true });
       rmSync(runtime.haltSwitch.historyFile, { force: true });
+      rmSync(runtime.haltSwitch.epochFile, { force: true });
       const reading = runtime.haltSwitch.read();
       assert.equal(reading.state, 'halted');
       assert.equal(reading.problem !== undefined, true);
@@ -438,20 +479,14 @@ describe('F07: دفترُ الأوامرِ الإنتاجيُّ لا يقبلُ 
       // محوُ سطرِ الدفترِ لا يمحو الحجزَ الذريَّ على القرص، فإعادةُ إرسالِ الأمرِ
       // تُردُّ حالةً غامضةً تُفصَلُ بقرارٍ صريحٍ — لا تُنفَّذُ ثانيةً بصمت.
       writeFileSync(runtime.ledger.file, '', 'utf8');
-      runtime.ledger.load();
-      const rejection = caught(() => runtime.ledger.begin({ id: 'cmd-0004' }));
-      assert.equal(
-        ['COMMAND_IN_FLIGHT', 'INDETERMINATE_COMMAND'].includes(rejection.code),
-        true,
-        `رمزٌ غيرُ متوقّع: ${rejection.code}`,
-      );
-      // وإعادةُ التثبيتِ تبقى موقَّعةً: لا سطرَ يعودُ إلى الدفترِ بلا مفتاحِ F07.
-      const recommitted = await runtime.ledger.commitSigned(
-        { id: 'cmd-0004' },
-        'تثبيتٌ بعدَ العبث',
-      );
-      assert.equal(recommitted.keyId, '07');
-      assert.equal(runtime.ledger.auditSignatures().ok, true);
+      // WL-094 (`UF-07`): كان المحوُ يُقرأُ «دفتراً فارغاً» فيُردُّ الأمرُ حالةً
+      // غامضةً بفضلِ الحجزِ وحدَه — وتلك بقيّةُ WL-011. الآن الشاهدُ خارجَ
+      // الدفترِ يقولُ «كان فيه كذا»، فالمحوُ **يُكشَفُ باسمِه** ولا يُقرأُ نقصاً.
+      const wipe = caught(() => runtime.ledger.load());
+      assert.equal(wipe.code, 'LEDGER_BEHIND_WITNESS');
+      // ولا يُقبَلُ أمرٌ جديدٌ على دفترٍ ممسوحٍ: الرفضُ مغلقٌ لا يُتجاوَز.
+      const rejection = caught(() => runtime.ledger.begin({ id: 'cmd-0005' }));
+      assert.equal(rejection.code, 'LEDGER_BEHIND_WITNESS');
     } finally {
       cleanup();
     }
@@ -506,7 +541,8 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
         {
           commandLedger: runtime.ledger,
           haltSwitch: runtime.haltSwitch,
-          requireTrustedClock: false,
+          // WL-094 (`UF-06`): `requireTrustedClock: false` لم يعُد يُقبَلُ في
+          // الإنتاجِ ولو كان الباقي صحيحاً — إطفاءُ ضمانٍ بخيارٍ هو الثغرة.
         },
       );
       assert.equal(gateway.requireCommandLedger, true);

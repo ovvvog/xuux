@@ -53,6 +53,7 @@ import {
 } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { ledgerEntryBody } from './hsm-binding.mjs';
+import { isProductionRuntime } from './production-boot.mjs';
 import { basename, dirname, join } from 'node:path';
 
 /** لاحقة مجلد الحجوزات: مفتاحٌ لكل أمر، وإنشاؤه الحصري هو الذرّية نفسها. */
@@ -72,6 +73,10 @@ export const CommandLedgerErrorCodes = [
   'LEDGER_SIGNATURE_INVALID',
   'LEDGER_KEY_MISMATCH',
   'LEDGER_SIGNER_MISSING',
+  // `UF-07`: الدفترُ أقصرُ ممّا يشهدُ له الشاهدُ الخارجيُّ — محوٌ لا انقطاع.
+  'LEDGER_BEHIND_WITNESS',
+  // `UF-13`: مجلَّدُ الحجوزاتِ مفقودٌ — خطأٌ مُسمَّى لا `ENOENT` خامٌ.
+  'LEDGER_STATE_ROOT_MISSING',
 ] as const;
 
 export type CommandLedgerErrorCode = (typeof CommandLedgerErrorCodes)[number];
@@ -146,6 +151,29 @@ export interface CommandLedgerOptions {
    *   • والتحميلُ يرفضُ سطراً غيرَ موقّعٍ أو مُعدَّلاً أو منسوباً إلى مفتاحٍ آخر.
    */
   signer?: LedgerDecisionSigner | null;
+  /**
+   * شاهدٌ خارجيٌّ لعدَّ الأوامرِ المُثبَّتةِ (‏`UF-07`، بقيةُ `WL-011`).
+   * أثبتَ العضوُ الأولُ أنّ حذفَ ملفِّ الدفترِ **ومجلَّدِ حجوزاتِه معاً**
+   * يُعيدُ قبولَ أمرٍ ثُبِّتَ، لأن شاهدَ الدفترِ كان الدفترَ نفسَه.
+   */
+  witness?: LedgerWitness | null;
+  /**
+   * تهيئةٌ أولى مُعلَنةٌ لجذرِ الحالة. يُمرِّرُها المصنعُ الإنتاجيُّ وحدَه حين
+   * يقولُ بيانُ الجذرِ إنه لم يُهيَّأ بعد؛ وعندَها يُنشَأُ المجلَّدانِ. وفي كلِّ
+   * إقلاعٍ بعدَها غيابُ المجلَّدِ **محوٌ يُرَدُّ** لا نقصٌ يُكمَّل (‏`UF-13`).
+   */
+  provisioning?: boolean;
+  /** بيئةُ التشغيلِ — تُقرأُ لمعرفةِ هل يُنشأُ مجلَّدُ الحجوزاتِ ضمناً أم لا. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * شاهدٌ دائمٌ لعدَّ المُثبَّتاتِ يسكنُ **خارجَ الدفترِ ومجلَّدِ حجوزاتِه**.
+ * عقدٌ بنيويٌّ لا اقترانٌ بوحدةٍ، يُملأُ في الإنتاجِ من `StateManifest`.
+ */
+export interface LedgerWitness {
+  read(): number;
+  raise(value: number): void;
 }
 
 /**
@@ -207,6 +235,7 @@ export class CommandLedger {
   #aborted: Set<string> = new Set();
   #fsync: boolean;
   readonly #signer: LedgerDecisionSigner | null;
+  readonly #witness: LedgerWitness | null;
 
   /**
    * @param file - مسار دفتر المعرّفات الدائم
@@ -220,8 +249,18 @@ export class CommandLedger {
     // الموقّعُ يُثبَّتُ قبلَ `load()`: التحميلُ نفسُه يتحقّقُ من التوقيعاتِ، فلو
     // أُسنِدَ بعدَه لكان أولُ تحميلٍ يقبلُ سطراً غيرَ موقّعٍ صامتاً.
     this.#signer = options.signer ?? null;
-    mkdirSync(dirname(file), { recursive: true });
-    mkdirSync(this.claimsDir, { recursive: true });
+    this.#witness = options.witness ?? null;
+    // خارجَ الإنتاجِ يُنشأُ المجلَّدانِ ضمناً كما كان؛ أمّا في الإنتاجِ فلا:
+    // مجلَّدُ حجوزاتٍ مفقودٌ قد يكونُ محواً، وإنشاءُه صامتاً يمحو أثرَ المحو
+    // (‏`UF-13`).
+    if (isProductionRuntime(options.env ?? process.env) && options.provisioning !== true) {
+      if (!existsSync(dirname(file)) || !existsSync(this.claimsDir)) {
+        throw new CommandLedgerError('LEDGER_STATE_ROOT_MISSING', { detail: basename(file) });
+      }
+    } else {
+      mkdirSync(dirname(file), { recursive: true });
+      mkdirSync(this.claimsDir, { recursive: true });
+    }
     this.load();
   }
 
@@ -263,6 +302,17 @@ export class CommandLedger {
       } else {
         this.ids.add(entry.id);
         this.#aborted.delete(entry.id);
+      }
+    }
+    // الشاهدُ يُقابَلُ **بعدَ** القراءةِ وقبلَ أوّلِ استعمالٍ: دفترٌ فيه من
+    // المُثبَّتاتِ أقلُّ ممّا شهدَ له الشاهدُ ليس دفتراً ناقصاً بل دفتراً مُحيّاً
+    // (‏`UF-07`). والفشلُ مغلقٌ: لا يُقبَلُ أمرٌ على دفترٍ لا يُوافقُ شاهدَه.
+    if (this.#witness !== null) {
+      const witnessed = this.#witness.read();
+      if (this.ids.size < witnessed) {
+        throw new CommandLedgerError('LEDGER_BEHIND_WITNESS', {
+          detail: `الدفتر ${String(this.ids.size)} والشاهد ${String(witnessed)}`,
+        });
       }
     }
   }
@@ -392,6 +442,8 @@ export class CommandLedger {
   pendingClaims(): { id: string; pid: number; at: string; alive: boolean }[] {
     this.load();
     const pending: { id: string; pid: number; at: string; alive: boolean }[] = [];
+    // مجلَّدٌ مفقودٌ يُرفَعُ برمزِه لا بـ`ENOENT` خامٍ يُقرأُ عطلَ قراءةٍ (‏`UF-13`).
+    this.#assertClaimsDir();
     for (const name of readdirSync(this.claimsDir)) {
       // ملفات الحجز قبل نشر اسمها ليست حجوزاً بعد، فلا تُعرض تدقيقاً.
       if (name.startsWith('.')) continue;
@@ -642,6 +694,9 @@ export class CommandLedger {
     if (state === 'committed') {
       this.ids.add(id);
       this.#aborted.delete(id);
+      // الشاهدُ يُرفَعُ من مسارِ الكتابةِ الواحدِ لا من `commit` وحدَه: وإلا كان
+      // المسارُ الموقَّعُ (F07) يُثبِّتُ بلا شاهدٍ فيعودُ محوُه ممكناً (‏`UF-07`).
+      this.#witness?.raise(this.ids.size);
     } else {
       this.#aborted.add(id);
       this.ids.delete(id);
@@ -667,6 +722,18 @@ export class CommandLedger {
    */
   #claimPath(id: string): string {
     return join(this.claimsDir, createHash('sha256').update(id).digest('hex'));
+  }
+
+  /**
+   * يرفعُ خطأً مُسمَّى إن اختفى مجلَّدُ الحجوزاتِ بعدَ التركيبِ (‏`UF-13`).
+   * فالمستدعي يحتاجُ أن يعرفَ «جذرُ الحالةِ ناقصٌ» لا «تعذرت قراءةُ مسارٍ».
+   */
+  #assertClaimsDir(): void {
+    if (!existsSync(this.claimsDir)) {
+      throw new CommandLedgerError('LEDGER_STATE_ROOT_MISSING', {
+        detail: basename(this.claimsDir),
+      });
+    }
   }
 
   /**

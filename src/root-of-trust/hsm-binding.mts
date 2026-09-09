@@ -46,7 +46,12 @@ import type { LedgerEntry } from './command-ledger.mjs';
 import { verifyEventChain } from './event-log.mjs';
 import { fingerprint } from './identity.mjs';
 import type { AeadKeyHandle, SigningKeyHandle } from './pkcs11-provider.mjs';
-import { SOFTWARE_KEY_STORE_ENV_VARS } from './production-boot.mjs';
+import type { ProviderDescriptionLike } from './production-boot.mjs';
+import {
+  assertKingIdentityPinned,
+  assertProductionKeyProviderAllowed,
+  SOFTWARE_KEY_STORE_ENV_VARS,
+} from './production-boot.mjs';
 
 /**
  * أدوار المفاتيح الثلاثة كما هي في التوكن. المعرّفات والأسماء **مثبَّتة في
@@ -92,6 +97,8 @@ export const HsmBindingErrorCodes = [
   'HSM_SEAL_ALGORITHM_REJECTED',
   'HSM_SIGNATURE_LENGTH_INVALID',
   'HSM_LEDGER_ENTRY_INVALID',
+  // `UF-05`: التوكنُ المفتوحُ ليس التوكنَ المُثبَّتَ ولو حملَ الاسمَ نفسَه.
+  'HSM_TOKEN_SERIAL_MISMATCH',
 ] as const;
 
 export type HsmBindingErrorCode = (typeof HsmBindingErrorCodes)[number];
@@ -122,7 +129,18 @@ export class HsmBindingError extends Error {
  * تُتجاوز — واختبارٌ يُتجاوز ليس اختباراً.
  */
 export interface HsmKeySource {
-  describe(): { canExport: boolean };
+  /**
+   * وصفُ الموفّرِ **كما يُعلنه عن نفسِه**. و`kind` جزءٌ من العقدِ لا زيادةٌ فيه:
+   * أثبتَ العضوُ الأولُ (‏`UF-02`) أنّ مصدراً يُعلن `canExport:false` و
+   * `kind:'in-memory-opaque'` ويحملُ `PrivateKeyObject` في ذاكرةِ العمليةِ كان
+   * يمرُّ من الربطِ بلا رفضٍ، لأن الفحصَ كان على `canExport` وحدَه.
+   */
+  describe(): {
+    canExport: boolean;
+    kind?: string;
+    productionReady?: boolean;
+    tokenSerial?: string;
+  };
   getSigningKey(keyId: string): Promise<SigningKeyHandle>;
   getAeadKey(keyId: string): Promise<AeadKeyHandle>;
 }
@@ -157,8 +175,53 @@ export function assertNoSoftwareKeyFallback(env: NodeJS.ProcessEnv = process.env
  * @param source - الموفّر المرشَّح
  */
 export function assertNonExportingSource(source: HsmKeySource): void {
-  if (source.describe().canExport) {
+  // `!== false` نصّاً لا صدقيّةً (‏`UF-10`): `canExport: undefined` و`0` كانا
+  // يمرّانِ. ومَن لم يقلْ «لا أُصدِّر» صريحاً لم يُعلِنْ أنه لا يُصدِّر.
+  if (source.describe().canExport !== false) {
     throw new HsmBindingError('HSM_PROVIDER_EXPORTS_MATERIAL');
+  }
+}
+
+/**
+ * يحكمُ على مصدرِ المفاتيحِ بعقدِ الإقلاعِ الإنتاجيِّ كاملاً — لا بفحصِ التصديرِ
+ * وحدَه. وهذا هو البابُ الذي كان مفقوداً في `UF-02`: `assertProductionKeyProviderAllowed`
+ * كانت موجودةً ومُختبَرةً، **ولا مصنعَ إنتاجيٍّ ينادِيها**.
+ * @param source - الموفّرُ المرشَّح
+ * @param env - البيئةُ المقروءة
+ */
+export function assertProductionSource(
+  source: HsmKeySource,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const description = source.describe();
+  assertNonExportingSource(source);
+  const like: ProviderDescriptionLike = {
+    // موفّرٌ لا يُعلن نوعَه لا يُقرأُ نوعُه افتراضاً: `unknown` تُرَدُّ في الإنتاجِ
+    // كما يُرَدُّ كلُّ ما ليس `pkcs11-hsm`.
+    kind: description.kind ?? 'unknown',
+    canExport: description.canExport,
+  };
+  if (description.productionReady !== undefined) like.productionReady = description.productionReady;
+  assertProductionKeyProviderAllowed(like, env);
+}
+
+/**
+ * يقابلُ الرقمَ التسلسليَّ للتوكنِ المفتوحِ بالمُثبَّتِ في البيئةِ (‏`UF-05`). في
+ * الإنتاجِ التثبيتُ إلزاميٌّ (يفرضُه `assertHsmRequiredInProduction`)، وهنا تقعُ
+ * **المقابلةُ** لا الإلزامُ — فالموفّرُ المزيَّفُ في الاختبارِ لا يحملُ رقماً.
+ * @param source - الموفّرُ المفتوح
+ * @param env - البيئةُ المقروءة
+ */
+export function assertPinnedToken(
+  source: HsmKeySource,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const pinned = (env.XUUX_PKCS11_TOKEN_SERIAL ?? '').trim();
+  if (pinned === '') return;
+  const serial = source.describe().tokenSerial;
+  if (serial === undefined) return;
+  if (serial.trim() !== pinned) {
+    throw new HsmBindingError('HSM_TOKEN_SERIAL_MISMATCH', 'XUUX_PKCS11_TOKEN_SERIAL');
   }
 }
 
@@ -379,7 +442,10 @@ export async function bindHsmRootOfTrust(
 ): Promise<HsmRootOfTrustBinding> {
   const env = options.env ?? process.env;
   assertNoSoftwareKeyFallback(env);
-  assertNonExportingSource(source);
+  // العقدُ كاملاً لا شقُّه: نوعُ الموفّرِ وتصديرُه وجاهزيّتُه، ثم هويةُ التوكنِ
+  // المُثبَّتة — كلُّها قبلَ فتحِ مقبضٍ واحد (‏`UF-02` و`UF-05`).
+  assertProductionSource(source, env);
+  assertPinnedToken(source, env);
   const eventLogAead = await source.getAeadKey(HSM_KEY_ROLES.eventLogAead.keyId);
   if (eventLogAead.keyId !== HSM_KEY_ROLES.eventLogAead.keyId) {
     throw new HsmBindingError('HSM_SEAL_KEY_MISMATCH', 'eventLogAead');
@@ -391,6 +457,9 @@ export async function bindHsmRootOfTrust(
     'kingSigning',
     signerOptions(options.kingKeyVersion),
   );
+  // هويةُ الملكِ تُقابَلُ بالمُثبَّتةِ **قبلَ** فتحِ موقّعِ الدفترِ: توكنٌ بديلٌ
+  // بالاسمِ نفسِه يُرَدُّ عندَ أوّلِ مفتاحٍ يُعرَف، لا بعدَ استكمالِ الربط.
+  assertKingIdentityPinned(kingSigner.id, env);
   const ledgerSigner = await HsmSigner.open(
     source,
     'commandLedgerSigning',

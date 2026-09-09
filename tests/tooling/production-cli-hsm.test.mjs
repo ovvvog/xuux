@@ -25,33 +25,46 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
 
-import { SEAL_IV_BYTES, createProductionRootOfTrust } from '../../src/root-of-trust/index.mjs';
+import {
+  SEAL_IV_BYTES,
+  createProductionRootOfTrust,
+  fingerprint,
+} from '../../src/root-of-trust/index.mjs';
 import { run as runAnchor } from '../../scripts/anchor-log.mjs';
 import { run as runHalt } from '../../scripts/halt-switch.mjs';
 import { run as runRotate } from '../../scripts/rotate-king-key.mjs';
 
 /** بيئةُ إنتاجٍ كاملةُ الشرط: وضعٌ ووحدةٌ وتوكنٌ وPIN. */
+// WL-094 (`UF-05`): التثبيتُ صارَ جزءاً من شرطِ الإنتاج، فبيئةُ الأدواتِ تحملُه.
+// وهويةُ الملكِ تُشتقُّ في `context()` من مفتاحِ البديلِ لا تُخترَع.
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
   XUUX_ROOT_OF_TRUST_MODE: 'hsm',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-test',
+  XUUX_PKCS11_TOKEN_SERIAL: 'DEADBEEFCAFE0001',
+  XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
   XUUX_PKCS11_PIN: 'fake-pin-not-used-by-injected-source', // secret-scan:allow
+  XUUX_ROOT_OF_TRUST_PROVISION: '1',
 });
 
 /**
  * توكنٌ مزيَّفٌ: المفاتيحُ لا تخرجُ منه إلا عامّةً، كما يفعلُ التوكن.
  * @returns {object} موفّرٌ يحقّقُ عقدَ `HsmKeySource`
  */
-function fakeToken() {
+function fakeToken(king = generateKeyPairSync('ed25519')) {
   const aesKeys = new Map([['05', randomBytes(32)]]);
   const edKeys = new Map([
-    ['06', generateKeyPairSync('ed25519')],
+    ['06', king],
     ['07', generateKeyPairSync('ed25519')],
   ]);
   const aad = Buffer.from('xuux-event');
   return {
-    describe: () => ({ canExport: false }),
+    describe: () => ({
+      kind: 'pkcs11-hsm',
+      canExport: false,
+      tokenSerial: 'DEADBEEFCAFE0001',
+    }),
     getAeadKey: async (keyId) => {
       const key = aesKeys.get(keyId);
       if (!key) throw new Error('KEY_NOT_FOUND');
@@ -90,11 +103,13 @@ function fakeToken() {
  */
 function context() {
   const root = mkdtempSync(join(tmpdir(), 'xuux-prod-cli-'));
-  const token = fakeToken();
+  const king = generateKeyPairSync('ed25519');
+  const token = fakeToken(king);
   return {
     root,
     env: {
       ...PRODUCTION_ENV,
+      XUUX_KING_ID: 'king:' + fingerprint(king.publicKey).slice(0, 24),
       EVENT_LOG_FILE: join(root, 'events.log'),
       ANCHOR_STORE_FILE: join(root, 'anchors.jsonl'),
       HALT_SWITCH_FILE: join(root, 'halt', 'directive.json'),

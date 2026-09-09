@@ -77,6 +77,28 @@ function argValue(flag) {
   return i >= 0 ? process.argv[i + 1] : undefined;
 }
 
+/** المسارُ الافتراضيُّ لسجلِّ التوليدِ حين لا يُمرَّرُ ولا يُعلَنُ في البيئة. */
+export const DEFAULT_KEYGEN_LOG = 'artifacts/hsm/keygen.log';
+
+/**
+ * يحلُّ مسارَ سجلِّ التوليدِ: الوسيطُ ثمَّ `XUUX_KEYGEN_LOG` ثمَّ الافتراضُ.
+ *
+ * `UF-16`: كان `npm run hsm:verify:f05` يُسقِطُ الوسيطَ فيخرجُ الأمرُ بـ1 عند
+ * `keygen_log_provided` دائماً — فشلٌ بسببِ نصِّ الأمرِ لا بسببِ الثبات، وهو
+ * أسوأُ من الفشلِ الحقيقيِّ لأنّه يُعلِّمُ المشغّلَ تجاهلَ خروجٍ غيرِ صفريّ.
+ * @param {NodeJS.ProcessEnv} [env] - بيئةُ العملية
+ * @param {string[]} [argv] - وسائطُ الأمرِ — تُمرَّرُ في الاختبارِ صراحةً
+ * @returns {string} مسارُ السجل
+ */
+export function resolveKeygenLogPath(env = process.env, argv = process.argv) {
+  const index = argv.indexOf('--keygen-log');
+  const flag = (index >= 0 ? (argv[index + 1] ?? '') : '').trim();
+  if (flag !== '') return flag;
+  const declared = (env.XUUX_KEYGEN_LOG ?? '').trim();
+  if (declared !== '') return declared;
+  return DEFAULT_KEYGEN_LOG;
+}
+
 /** يقرأ قيمة سمةٍ منطقيةٍ من buffer بطول بايت واحد أو أكثر. */
 function readBool(v) {
   if (v === undefined || v === null) return null;
@@ -150,7 +172,7 @@ function verifyKeygenLogScope(logPath) {
 // ---- التحقق داخل التوكن ----
 async function main() {
   const label = argValue('--label') ?? DEFAULT_LABEL;
-  const keygenLog = argValue('--keygen-log');
+  const keygenLog = resolveKeygenLogPath();
 
   console.log('[f05-verify] تحقّق موجَّه من ثبات F05 (CKA_ID=05, AES-256-GCM)');
   console.log(`[f05-verify] الوسم المتوقَّع: ${label}`);
@@ -288,8 +310,10 @@ async function main() {
     }
 
     // 10) نطاق الإتلاف من سجل keygen
-    if (keygenLog) verifyKeygenLogScope(keygenLog);
-    else check(false, 'keygen_log_provided', 'مرّر --keygen-log <path> لإثبات نطاق الإتلاف');
+    // المسارُ محلولٌ دائماً؛ وغيابُ الملفِ نفسِه يُرفَضُ داخلَ
+    // `verifyKeygenLogScope` بـ`keygen_log_readable` لا بـ`keygen_log_provided`.
+    check(true, 'keygen_log_provided', keygenLog);
+    verifyKeygenLogScope(keygenLog);
   } finally {
     try {
       if (session) {

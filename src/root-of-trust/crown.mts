@@ -68,6 +68,12 @@ export interface CrownGatewayOptions {
    * يبلغُها قرارُ الإيقافِ السياديُّ، فتستمرُّ في القبولِ بينما الدولةُ موقوفة.
    */
   requireHaltSwitch?: boolean;
+  /**
+   * بيئةُ التشغيلِ المقروءةُ (‏`UF-11`). كانت البوابةُ تقرأُ `process.env`
+   * مباشرةً في ثلاثةِ مواضعَ، وأحدُها يقرأُ `NODE_ENV` خاماً دونَ `STATE_ENV`،
+   * فيختلفُ معنى «الإنتاج» بينَ حقلٍ وحقلٍ في البوابةِ نفسِها.
+   */
+  env?: NodeJS.ProcessEnv;
   maxCommandAgeMs?: number;
   clockSkewMs?: number;
 }
@@ -136,13 +142,29 @@ export class CrownGateway {
     this.commandLedger = options.commandLedger ?? null;
     this.haltSwitch = options.haltSwitch ?? null;
     this.clock = options.clock ?? null;
-    this.requireTrustedClock = options.requireTrustedClock ?? process.env.NODE_ENV === 'production';
-    // `isProductionRuntime` لا `NODE_ENV` وحدَه: مسارُ الحالةِ يُعرَّفُ في هذا
-    // المستودعِ بـ `STATE_ENV` كذلك، وبوابةٌ تُلزَمُ بالمعيارِ الأضيقِ تُخطئُ في
-    // الجهةِ الآمنة.
-    const production = isProductionRuntime(process.env);
-    this.requireCommandLedger = options.requireCommandLedger ?? production;
-    this.requireHaltSwitch = options.requireHaltSwitch ?? production;
+    // مصدرٌ واحدٌ لمعنى «الإنتاج» في البوابةِ كلَّها (‏`UF-11`): `isProductionRuntime`
+    // لا `process.env.NODE_ENV` خاماً، فلا يصيرُ `STATE_ENV=production` إنتاجاً لحقلٍ
+    // وتطويراً لحقلٍ آخر.
+    const env = options.env ?? process.env;
+    const production = isProductionRuntime(env);
+    // في الإنتاجِ الإلزامُ **لا يُطفأُ بخيارٍ**: أثبتَ العضوانِ (‏`UF-06`) أنّ
+    // `requireCommandLedger:false` و`requireHaltSwitch:false` كانا يُقبَلانِ في
+    // `STATE_ENV=production` فتعملُ بوابةٌ إنتاجيّةٌ بلا دفترٍ ولا مفتاحِ إيقافٍ.
+    // والخيارُ المخالفُ لا يُتجاوَزُ صامتاً بل يُرفَضُ برمزِه، فمن طلبَ إطفاءً
+    // في الإنتاجِ يُعلَمُ أنّ طلبَه مردودٌ لا أنّه أُجيب.
+    if (production) {
+      for (const [name, value] of [
+        ['requireCommandLedger', options.requireCommandLedger],
+        ['requireHaltSwitch', options.requireHaltSwitch],
+        ['requireTrustedClock', options.requireTrustedClock],
+      ] as const) {
+        if (value === false)
+          throw new Error(`CROWN_GUARANTEE_CANNOT_BE_DISABLED_IN_PRODUCTION:${name}`);
+      }
+    }
+    this.requireTrustedClock = production ? true : (options.requireTrustedClock ?? false);
+    this.requireCommandLedger = production ? true : (options.requireCommandLedger ?? false);
+    this.requireHaltSwitch = production ? true : (options.requireHaltSwitch ?? false);
     if (this.requireCommandLedger && this.commandLedger === null) {
       throw new Error('COMMAND_LEDGER_REQUIRED_IN_PRODUCTION');
     }

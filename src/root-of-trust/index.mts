@@ -11,6 +11,7 @@ export * from './anchor.mjs';
 // قيدُ التركيبِ عند نقطةِ الإقلاعِ الإنتاجيّة (WL-089): يُصدَّر قبل وحداتِ
 // المفاتيح لأن كلَّ مَن يبني موفّراً أو هويةً يمرُّ عليه.
 export * from './production-boot.mjs';
+export * from './state-manifest.mjs';
 
 export * from './key-store.mjs';
 export * from './key-provider.mjs';

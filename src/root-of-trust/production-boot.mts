@@ -39,6 +39,23 @@
  */
 export const RUNTIME_ENV_KEYS = ['STATE_ENV', 'NODE_ENV'] as const;
 
+/**
+ * القيمُ المقبولةُ لكلِّ متغيّرِ إعلانٍ — **منقولةٌ حرفاً عن `config/environment.yaml`**
+ * (‏`STATE_ENV` بصيغةِ `^(development|ci|production)$` و`NODE_ENV` بصيغةِ
+ * `^(development|test|production)$`)، فلا يُخترَعُ هنا عقدٌ ثانٍ للبيئة.
+ *
+ * ولماذا لُزوم القائمةِ لا مجردُ المقابلةِ بـ`'production'`: أثبتَ عضوا الجولةِ
+ * الثانيةِ (‏`UF-04`) أنّ `NODE_ENV=Production` و`'production '` و`STATE_ENV=' '`
+ * كانت **تُقرأُ «ليس إنتاجاً»** فتُفتَحُ مساراتُ المفاتيحِ البرمجيّةِ في عقدةٍ
+ * يظنُّ مشغّلُها أنه أعلنَ الإنتاج. فالقيمةُ التي لا يعرفُها العقدُ **تُرفَض**
+ * ولا تُقرأُ إذناً ولا تُقرأُ تطويراً.
+ */
+export const RUNTIME_ENV_VALUES: Readonly<Record<(typeof RUNTIME_ENV_KEYS)[number], string[]>> =
+  Object.freeze({
+    STATE_ENV: ['development', 'ci', 'production'],
+    NODE_ENV: ['development', 'test', 'production'],
+  });
+
 /** اسمُ المتغيّرِ الذي يُصرِّح بوضعِ جذرِ الثقةِ صراحةً. */
 export const ROOT_OF_TRUST_MODE_ENV = 'XUUX_ROOT_OF_TRUST_MODE';
 
@@ -55,6 +72,23 @@ export const HSM_REQUIRED_ENV_VARS = ['XUUX_PKCS11_MODULE', 'XUUX_PKCS11_TOKEN']
 
 /** مصدرا PIN المقبولان؛ أحدُهما يكفي، وغيابُهما جميعاً نقصُ إعدادٍ. */
 export const HSM_PIN_ENV_VARS = ['XUUX_PKCS11_PIN', 'XUUX_PKCS11_PIN_FILE'] as const;
+
+/**
+ * **تثبيتُ هويّةِ التوكنِ والملكِ** — إلزاميٌّ في الإنتاجِ (‏`UF-05`).
+ *
+ * أثبتَ العضوُ الثاني بإعادةِ إنتاجٍ على توكنينِ حقيقيّينِ أنّ توكناً ثانياً
+ * يحملُ **الاسمَ نفسَه** يُقبَلُ بلا إنذارٍ فيصيرُ الملكُ ملكاً آخرَ: الاكتشافُ
+ * كان بالاسمِ وحدَه، والرقمُ التسلسليُّ اختياريّاً، ولا بصمةَ للموديولِ ولا
+ * تثبيتَ لهويةِ الملكِ. فصارت الثلاثةُ عقداً:
+ *   • `XUUX_PKCS11_TOKEN_SERIAL` — الرقمُ التسلسليُّ للتوكنِ المقصودِ بعينِه.
+ *   • `XUUX_PKCS11_MODULE_SHA256` — بصمةُ ملفِّ موديولِ PKCS#11 قبلَ تحميلِه.
+ *   • `XUUX_KING_ID` — هويةُ الملكِ المنتظرةُ (بصمةُ مفتاحٍ عامٍّ لا مادةٌ خاصّة).
+ */
+export const HSM_PINNING_ENV_VARS = [
+  'XUUX_PKCS11_TOKEN_SERIAL',
+  'XUUX_PKCS11_MODULE_SHA256',
+  'XUUX_KING_ID',
+] as const;
 
 /**
  * متغيّراتُ مخزنِ المفاتيحِ **البرمجي**. المصدرُ الواحدُ لهذه القائمة: تُقرأ
@@ -81,6 +115,9 @@ export const ProductionBootErrorCodes = [
   'SOFTWARE_KING_IDENTITY_FORBIDDEN_IN_PRODUCTION',
   'DEV_MODE_FORBIDDEN_IN_PRODUCTION',
   'ROOT_OF_TRUST_MODE_INVALID',
+  'RUNTIME_ENV_INVALID',
+  'HSM_PINNING_REQUIRED_IN_PRODUCTION',
+  'KING_IDENTITY_PIN_MISMATCH',
 ] as const;
 
 export type ProductionBootErrorCode = (typeof ProductionBootErrorCodes)[number];
@@ -112,7 +149,33 @@ export class ProductionBootError extends Error {
  * @returns هل هي حاضرةٌ فعلاً
  */
 function present(value: string | undefined): boolean {
-  return value !== undefined && value !== '';
+  // `trim` لا مقابلةٌ بالفراغِ وحدَه: أثبتَ العضوُ الثاني (‏`UF-09`) أنّ
+  // `XUUX_PKCS11_MODULE=' '` كانت تُقرأُ **حاضرةً** فيصيرُ `hsmConfigured=true`
+  // على إعدادٍ لا يفتحُ توكناً؛ وقيمةٌ من فراغٍ غيابٌ لا حضور.
+  return value !== undefined && value.trim() !== '';
+}
+
+/**
+ * يرفضُ كلَّ قيمةِ إعلانٍ لا يعرفُها العقدُ. الفشلُ مغلقٌ في كلِّ البيئاتِ: قيمةٌ
+ * مكتوبةٌ خطأً (‏`Production`، `prod`، `production `) كانت تُقرأُ «ليس إنتاجاً»
+ * فتُلغي أثرَ الإعلانِ صامتةً — وهو ما أثبتَه العضوانِ في `UF-04`. والفراغُ
+ * غيابٌ لا قيمةٌ، فلا يُحكَمُ عليه هنا (يحكمُ عليه `present`).
+ * @param env - البيئةُ المقروءة
+ */
+export function assertRuntimeEnvDeclared(env: NodeJS.ProcessEnv = process.env): void {
+  for (const key of RUNTIME_ENV_KEYS) {
+    const raw = env[key];
+    if (!present(raw)) continue;
+    const value = (raw as string).trim();
+    // القيمةُ تُقارَنُ **بعدَ `trim` وحدَه** لا بعدَ توحيدِ حالةِ الأحرفِ: من
+    // كتبَ `Production` أخطأ إعلاناً، ولا يُصحَّحُ له إعلانُه ضِمناً.
+    if (!(RUNTIME_ENV_VALUES[key] ?? []).includes(value)) {
+      throw new ProductionBootError('RUNTIME_ENV_INVALID', key);
+    }
+    if (value !== raw) {
+      throw new ProductionBootError('RUNTIME_ENV_INVALID', key);
+    }
+  }
 }
 
 /**
@@ -123,6 +186,9 @@ function present(value: string | undefined): boolean {
  * @returns هل الوضعُ إنتاجيٌّ
  */
 export function isProductionRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
+  // الفحصُ قبلَ القراءةِ: إعلانٌ لا يعرفُه العقدُ يُرفَعُ خطأً ولا يُقرأُ حالةً
+  // ثالثةً صامتةً (‏`UF-04`).
+  assertRuntimeEnvDeclared(env);
   const declared = present(env.STATE_ENV) ? env.STATE_ENV : env.NODE_ENV;
   return declared === 'production';
 }
@@ -181,6 +247,34 @@ export function assertHsmRequiredInProduction(env: NodeJS.ProcessEnv = process.e
       HSM_PIN_ENV_VARS.join('|'),
     );
   }
+  // تثبيتُ الهويّةِ آخرُ الفحوصِ لا أوّلُها: من نقصَه التوكنُ أصلاً يُقالُ له
+  // «لا توكن» لا «لا بصمة»، فالرمزُ الراجعُ يدلُّ على السببِ الأوّل.
+  const unpinned = HSM_PINNING_ENV_VARS.filter((name) => !present(env[name]));
+  if (unpinned.length > 0) {
+    throw new ProductionBootError('HSM_PINNING_REQUIRED_IN_PRODUCTION', unpinned.join(','));
+  }
+}
+
+/**
+ * يقابلُ هويةَ الملكِ الحاضرةَ بالمُثبَّتةِ في البيئةِ (‏`UF-05`). خارجَ الإنتاجِ
+ * لا يحكمُ شيئاً إن لم تُثبَّت، ويحكمُ إن ثُبِّتت — فمن ثبّتَ أراد التثبيتَ.
+ * @param kingId - هويةُ الملكِ كما اشتُقّت من المفتاحِ العامِّ في التوكن
+ * @param env - البيئةُ المقروءة
+ */
+export function assertKingIdentityPinned(
+  kingId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const pinned = env.XUUX_KING_ID;
+  if (!present(pinned)) {
+    if (!isProductionRuntime(env)) return;
+    throw new ProductionBootError('HSM_PINNING_REQUIRED_IN_PRODUCTION', 'XUUX_KING_ID');
+  }
+  if ((pinned as string).trim() !== kingId) {
+    // التفصيلُ يحملُ **المنتظَرَ** لا الحاضرَ: هويةُ الملكِ بصمةٌ عامّةٌ، والرسالةُ
+    // تُقرأُ في سجلٍّ فلا يُضاف إليها ما لا يلزمُ التشخيص.
+    throw new ProductionBootError('KING_IDENTITY_PIN_MISMATCH', 'XUUX_KING_ID');
+  }
 }
 
 /**
@@ -229,7 +323,10 @@ export function assertProductionKeyProviderAllowed(
   env: NodeJS.ProcessEnv = process.env,
 ): void {
   if (!isProductionRuntime(env)) return;
-  if (description.canExport) {
+  // `!== false` نصّاً لا صدقيّةً: أثبتَ العضوُ الثاني (‏`UF-10`) أنّ
+  // `canExport: undefined` و`0` كانا يمرّانِ من فحصِ الصدقيّةِ. وموفّرٌ لا يقولُ
+  // «لا أُصدِّر» صريحاً ليس موفّراً غيرَ مُصدِّرٍ.
+  if (description.canExport !== false) {
     throw new ProductionBootError('EXPORTABLE_PROVIDER_FORBIDDEN_IN_PRODUCTION', description.kind);
   }
   if (description.kind !== PRODUCTION_PROVIDER_KIND) {
@@ -271,7 +368,8 @@ export function describeRootOfTrustBoot(
   }
   const hsmConfigured =
     HSM_REQUIRED_ENV_VARS.every((name) => present(env[name])) &&
-    HSM_PIN_ENV_VARS.some((name) => present(env[name]));
+    HSM_PIN_ENV_VARS.some((name) => present(env[name])) &&
+    HSM_PINNING_ENV_VARS.every((name) => present(env[name]));
   return {
     production,
     declaredMode,

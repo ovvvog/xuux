@@ -36,14 +36,23 @@ import type { EventDataSealer } from './persistent-log.mjs';
 import { Pkcs11HsmProvider } from './pkcs11-provider.mjs';
 import {
   assertHsmRequiredInProduction,
+  assertProductionKeyProviderAllowed,
   describeRootOfTrustBoot,
   isProductionRuntime,
 } from './production-boot.mjs';
+import { FileAnchorStore, verifyAnchoredLog } from './anchor.mjs';
+import { StateManifest, stateManifestPath, stateProvisionDeclared } from './state-manifest.mjs';
 
 /** أخطاءُ المصنعِ الإنتاجيّ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const ProductionRuntimeErrorCodes = [
   'PRODUCTION_RUNTIME_REQUIRES_HSM',
   'PRODUCTION_RUNTIME_ROOT_MISSING',
+  // `UF-01`: جذرُ حالةٍ إنتاجيٌّ بلا بيانٍ لا يُقرأُ «جديداً» بل يُرفَض.
+  'PRODUCTION_STATE_ROOT_UNPROVISIONED',
+  // `UF-01`: البيانُ يشهدُ بتثبيتٍ ومخزنُ التثبيتاتِ خالٍ أو السجلُ أقصر.
+  'PRODUCTION_LOG_BEHIND_ANCHOR',
+  // `UF-01`: سلسلةُ التثبيتاتِ أو سلسلةُ الوقائعِ لا تتحقّق عندَ الإقلاع.
+  'PRODUCTION_ANCHOR_CHAIN_INVALID',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -91,6 +100,12 @@ export interface ProductionRuntimeOptions {
   ledgerKeyVersion?: number;
   /** مزامنةُ القرصِ. لا تُعطَّلُ في الإنتاج، وتُعطَّلُ في الاختبارِ للسرعة. */
   fsync?: boolean;
+  /**
+   * مخزنُ التثبيتاتِ المقروءُ عندَ الإقلاعِ (‏`UF-01`). الافتراضُ
+   * `XUUX_ANCHOR_STORE` ثمَّ `anchors.jsonl` داخلَ الجذر. وحقنُه للاختبارِ لا
+   * لتخفيفِ الشرطِ: الفحصُ يقعُ عليه أيّاً كان.
+   */
+  anchorStore?: AnchorStore;
 }
 
 /** التركيبُ الإنتاجيُّ كما يُسلَّمُ للمستهلك. */
@@ -184,6 +199,20 @@ export async function openProductionSigners(
     if (versions.ledgerKeyVersion !== undefined) {
       bindOptions.ledgerKeyVersion = versions.ledgerKeyVersion;
     }
+    // `UF-02`: الحراسةُ تُستدعى من **المصنعِ** لا من الربطِ وحدَه: كانت
+    // الحراسةُ موجودةً ومختبَرةً ولا مستدعٍي لها من أيِّ مسارِ إنتاج، فكان
+    // موفّرٌ غيرُ `pkcs11-hsm` يمرُّ متى ادّعى `canExport:false`.
+    const described = opened.source.describe();
+    assertProductionKeyProviderAllowed(
+      {
+        kind: described.kind ?? 'unknown',
+        canExport: described.canExport,
+        ...(described.productionReady === undefined
+          ? {}
+          : { productionReady: described.productionReady }),
+      },
+      env,
+    );
     const binding = await bindHsmRootOfTrust(opened.source, bindOptions);
     return {
       sealer: sealerFromAeadHandle(binding.eventLogAead),
@@ -261,9 +290,33 @@ export async function createProductionRootOfTrust(
       env,
       fsync,
     });
+    // بيانُ جذرِ الحالةِ (‏`UF-01`، ‏`UF-03`، ‏`UF-07`): مرساةٌ محليّةٌ واحدةٌ
+    // تحملُ ما لا يجوزُ أن يرجعَ: عدَّ المُثبَّتِ وعهدَ الإيقافِ وعدَّ المُقرَّر.
+    // ولماثا بيانٌ لا تثبيتُ GENESIS: `createAnchor` يرفضُ `count<=0`، فسجلٌ خالٍ
+    // لا يُمكنُ تثبيتُه؛ ومرساةٌ داخلَ التوكنِ تقتضي كتابةً فيه — وهي ممنوعةٌ
+    // في هذه الدفعة (لا keygen ولا تدوير). الحدُّ مُصرَّحٌ به في مصفوفةِ النتائج.
+    const manifest = new StateManifest(stateManifestPath(options.root), { fsync });
+    const production = isProductionRuntime(env);
+    // تهيئةٌ أولى مُعلَنةٌ أم إقلاعٌ على جذرٍ قائم؟ الفرقُ هو كلُّ الفرقِ في
+    // `UF-13`: مجلَّدٌ مفقودٌ عندَ التهيئةِ الأولى يُنشَأُ، ومجلَّدٌ مفقودٌ بعدَها
+    // محوٌ يُرَدُّ. ولا يُخمَّنُ الفرقُ: بيانُ الجذرِ يقولُه.
+    const provisioning = !manifest.exists();
+    if (production && !manifest.exists() && !stateProvisionDeclared(env)) {
+      // جذرٌ ممسوحٌ لا يُقرأُ «نشأةً جديدةً»: تلك كانت ثغرةَ `UF-01` بعينِها.
+      throw new ProductionRuntimeError(
+        'PRODUCTION_STATE_ROOT_UNPROVISIONED',
+        stateManifestPath(options.root),
+      );
+    }
+    manifest.provision(signers.anchorSigner.id, env);
+    manifest.assertKing(signers.anchorSigner.id);
+    assertLogNotBehindAnchors(manifest, log, signers.anchorSigner, options, fsync, env);
     const ledger = new CommandLedger(join(options.root, 'commands.ledger'), {
       signer: signers.ledgerSigner,
       fsync,
+      witness: manifest.ledgerWitness(),
+      provisioning,
+      env,
     });
     // مفتاحُ الإيقافِ يأخذُ موقّعَ F06 نفسَه: التوجيهُ قرارٌ ملكيٌّ، ومصدرُه
     // مفتاحُ المملكةِ لا مفتاحُ الدفتر.
@@ -273,7 +326,7 @@ export async function createProductionRootOfTrust(
     const haltSwitch = new HaltSwitch(
       join(options.root, 'halt', 'directive.json'),
       signers.anchorSigner as unknown as HaltAsyncSigner,
-      { fsync, log: null },
+      { fsync, log: null, epochFloor: manifest.haltEpochFloor(), env },
     );
     return {
       log,
@@ -291,6 +344,72 @@ export async function createProductionRootOfTrust(
     await signers.close().catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * يحلُّ ملفَ مخزنِ التثبيتاتِ من البيئةِ ثمَّ من الجذر.
+ * @param root - جذرُ الحالة
+ * @param env - البيئة
+ * @returns مسارُ مخزنِ التثبيتات
+ */
+function resolveAnchorFile(root: string, env: NodeJS.ProcessEnv): string {
+  const declared = (env.XUUX_ANCHOR_STORE ?? '').trim();
+  return declared !== '' ? declared : join(root, 'anchors.jsonl');
+}
+
+/**
+ * يرفضُ إقلاعاً على سجلٍ أقصرَ ممّا تشهدُ به المرساةُ (‏`UF-01`).
+ *
+ * الثابتُ المنتهَكُ قبلَ الإصلاح: حذفُ ملفِ الوقائعِ ورأسِه كان يُقرأُ
+ * «سجلاً جديداً من GENESIS» فيُقبَلُ بلا مرساةٍ موثوقة، فيمحو التاريخَ من
+ * يملكُ القرصَ دونَ أن يملكَ التوكن.
+ * @param manifest - بيانُ الجذر
+ * @param log - السجلُ المبنيُّ
+ * @param king - موقّعُ التثبيت (F06)
+ * @param options - خياراتُ المصنع
+ * @param fsync - مزامنةُ القرص
+ * @param env - البيئة
+ */
+function assertLogNotBehindAnchors(
+  manifest: StateManifest,
+  log: PersistentEventLog,
+  king: HsmSigner,
+  options: ProductionRuntimeOptions,
+  fsync: boolean,
+  env: NodeJS.ProcessEnv,
+): void {
+  const store =
+    options.anchorStore ?? new FileAnchorStore(resolveAnchorFile(options.root, env), { fsync });
+  if (store instanceof FileAnchorStore) store.assertSeparateFrom(log.file);
+  log.load();
+  const anchors = store.read();
+  const witnessed = manifest.read().anchoredCount;
+  if (anchors.length === 0) {
+    // لا تثبيتاتٍ والبيانُ يشهدُ بواحدٍ: المخزنُ مُزيلٌ لا فارغٌ أصلاً.
+    if (witnessed > 0) {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_LOG_BEHIND_ANCHOR',
+        `البيانُ يشهدُ بـ${String(witnessed)} ولا تثبيتات`,
+      );
+    }
+    return;
+  }
+  const verification = verifyAnchoredLog({ events: log.events, anchors, king });
+  if (!verification.ok) {
+    throw new ProductionRuntimeError(
+      'PRODUCTION_ANCHOR_CHAIN_INVALID',
+      verification.problem ?? 'unknown',
+    );
+  }
+  const last = anchors[anchors.length - 1] as { count: number };
+  const floor = Math.max(witnessed, last.count);
+  if (log.events.length < floor) {
+    throw new ProductionRuntimeError(
+      'PRODUCTION_LOG_BEHIND_ANCHOR',
+      `السجلُ ${String(log.events.length)} والمرساةُ ${String(floor)}`,
+    );
+  }
+  manifest.raise('anchoredCount', last.count);
 }
 
 /**

@@ -98,6 +98,96 @@ variables:
     statement: >-
       يقرؤه `src/root-of-trust/king-key.mts` ليُلزِم بمخزنِ أسرارٍ خارجيٍّ؛
       فغيابُه في الإنتاجِ يُسقِط إلزامَ المخزنِ صامتاً.
+  # ── متغيّراتُ جذرِ الثقةِ (‏`UF-08`) ──
+  # كانت هذه كلُّها مقروءةً في الكودِ وغيرَ مُعلَنةٍ هنا، فكان الفحصُ يردُّ
+  # `ENV_VARIABLE_UNDECLARED` على بيئةٍ إنتاجيّةٍ صحيحةٍ، ويسكتُ عن غيابِ ما
+  # يُغلِقُ بابَ الإقلاع. والإعلانُ لا يُغني عن الإنفاذِ: الإنفاذُ في
+  # `assertHsmRequiredInProduction` وهو أضيقُ من هذه الوثيقة.
+  - id: XUUX_ROOT_OF_TRUST_MODE
+    requiredIn: [production]
+    format: '^(hsm|software)$'
+    secret: false
+    statement: >-
+      وضعُ جذرِ الثقة. `software` مرفوضٌ في الإنتاجِ رفضاً مغلقاً؛ وغيابُه في
+      الإنتاجِ رفضٌ كذلك، فلا يُستنبَطُ وضعُ المفاتيحِ من سلسلةِ افتراضات.
+  - id: XUUX_PKCS11_MODULE
+    requiredIn: [production]
+    format: '^/.+$'
+    secret: false
+    statement: >-
+      مسارُ مكتبةِ PKCS#11. يُقرأُ قبلَ التحميلِ ويُقابَلُ بصمتُه بـ
+      `XUUX_PKCS11_MODULE_SHA256`، فموديولٌ مبدَّلٌ يملكُ العمليّةَ لو حُمِّل.
+  - id: XUUX_PKCS11_MODULE_SHA256
+    requiredIn: [production]
+    format: '^[0-9a-fA-F]{64}$'
+    secret: false
+    statement: >-
+      بصمةُ SHA-256 لملفِّ الموديول. إلزاميّةٌ في الإنتاجِ (‏`UF-05`): بلا
+      بصمةٍ يُقبَلُ أيُّ ملفٍ في المسارِ المُعلَن.
+  - id: XUUX_PKCS11_TOKEN
+    requiredIn: [production]
+    format: '^.{1,64}$'
+    secret: false
+    statement: >-
+      اسمُ التوكن — معيارُ الاكتشافِ الأوّل. والاسمُ وحدَه لا يُثبِتُ هويّةً:
+      يُقابَلُ بعدَه الرقمُ التسلسليّ.
+  - id: XUUX_PKCS11_TOKEN_SERIAL
+    requiredIn: [production]
+    format: '^\S{1,64}$'
+    secret: false
+    statement: >-
+      الرقمُ التسلسليُّ للتوكن. إلزاميٌّ في الإنتاجِ (‏`UF-05`): توكنٌ بديلٌ
+      يحملُ الاسمَ نفسَه كان يُقبَلُ حين تُرِك الرقمُ اختياريّاً.
+  - id: XUUX_KING_ID
+    requiredIn: [production]
+    format: '^king:[0-9a-f]{24}$'
+    secret: false
+    statement: >-
+      هويةُ الملكِ المُثبَّتةُ. تُقابَلُ بهويةِ الموقّعِ المفتوحِ من التوكنِ
+      عندَ الإقلاع، فمفتاحٌ آخرُ في توكنٍ آخرَ يُرفَضُ ولا يُقرأُ ملكاً.
+  - id: XUUX_PKCS11_PIN
+    requiredIn: []
+    format: '^.{4,}$'
+    secret: true
+    statement: >-
+      رمزُ الدخولِ للتوكن. هو أو `XUUX_PKCS11_PIN_FILE` — أحدُهما لازمٌ في
+      الإنتاجِ وإلزامُهما مُنفَّذٌ في الكودِ لا هنا، ولا يُطبَعُ في أيِّ مخرَج.
+  - id: XUUX_PKCS11_PIN_FILE
+    requiredIn: []
+    format: '^/.+$'
+    secret: false
+    statement: >-
+      ملفُّ رمزِ الدخولِ بصلاحيةِ 600. بديلٌ عن `XUUX_PKCS11_PIN` كي لا يقيمَ
+      السرُّ في بيئةِ عمليّةٍ تُقرأُ من `/proc`.
+  - id: XUUX_ROOT_OF_TRUST_PROVISION
+    requiredIn: []
+    format: '^1$'
+    secret: false
+    statement: >-
+      إذنُ تهيئةِ جذرِ الحالةِ لأوّلِ مرّة. بلا إعلانِه يُرفَضُ جذرٌ إنتاجيٌّ
+      بلا بيانٍ (‏`UF-01`)، فلا يُقرأُ محوُ القرصِ «نشأةً جديدة».
+  - id: XUUX_ANCHOR_STORE
+    requiredIn: []
+    format: '^/.*|^\./.*'
+    secret: false
+    statement: >-
+      مخزنُ التثبيتاتِ المقروءُ عندَ الإقلاعِ؛ وغيابُه يعني `anchors.jsonl`
+      داخلَ جذرِ الحالة. ويُرفَضُ أن يكون ملفَّ السجلِّ نفسَه أو رأسَه.
+  - id: XUUX_KEYGEN_LOG
+    requiredIn: []
+    format: '^/.*|^\./.*|^[^/].*'
+    secret: false
+    statement: >-
+      سجلُّ توليدِ المفاتيحِ الذي يقرؤه `npm run hsm:verify:f05` لإثباتِ نطاقِ
+      الإتلاف؛ وغيابُه يعني `artifacts/hsm/keygen.log` (‏`UF-16`).
+  - id: XUUX_TASK_ID
+    requiredIn: []
+    format: '^[A-Za-z0-9._:-]{0,64}$'
+    secret: false
+    statement: >-
+      معرِّفُ المهمّةِ يُمرَّرُ من `src/execution/limits.mjs` إلى العمليّةِ الابنةِ
+      وحدَها. يُعلَنُ هنا لأنّ كلَّ متغيّرٍ يقرؤه الكودُ يُعلَنُ في العقدِ ولو لم
+      يكن إلزاميّاً في أيِّ بيئة.
   - id: WEIGHTS_DIR
     requiredIn: []
     format: '^/.*|^\./.*'
