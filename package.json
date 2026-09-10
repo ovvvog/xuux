@@ -29,6 +29,7 @@
     "validate:seed": "node scripts/validate-seed.mjs",
     "migrate": "node scripts/migrate.mjs",
     "verify:migrations": "node scripts/verify-migrations.mjs",
+    "verify:data": "node scripts/verify-data-preservation.mjs",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
     "retention": "node scripts/retention.mjs",
