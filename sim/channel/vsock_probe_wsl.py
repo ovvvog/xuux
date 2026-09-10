@@ -87,13 +87,21 @@ def main() -> int:
                 import select as _sel
                 t0 = time.monotonic()
                 f = vs.frame(b"vsock-poc-ping", 1)
-                report["exchange"] = {"sent": len(f), "echo": None}
+                report["exchange"] = {"sent": len(f), "echo": None,
+                                      "sent_hex": f.hex()}
                 try:
                     os.write(cfd, f)  # إطار واحد فقط (السوكيت حجوبي بعد الاتصال)
                     if _sel.select([cfd], [], [], 4.0)[0]:
                         data = os.read(cfd, vs.MAX_FRAME)
                         rtt_ms = round((time.monotonic() - t0) * 1000, 2)
-                        msgs = vs.FrameFeed().push(data)
+                        try:
+                            msgs = vs.FrameFeed().push(data)
+                        except ValueError as pe:
+                            msgs = []
+                            report["exchange"] = {"sent": len(f), "echo": False,
+                                                  "error": str(pe),
+                                                  "echo_bytes": len(data),
+                                                  "echo_hex": data[:64].hex()}
                         if msgs and msgs[0]["ok"]:
                             report["exchange"] = {
                                 "sent": len(f),
@@ -102,9 +110,11 @@ def main() -> int:
                                 "len": len(msgs[0]["payload"]),
                                 "rtt_ms": rtt_ms,
                             }
-                        else:
+                        elif report["exchange"].get("echo") is not False:
                             report["exchange"] = {"sent": len(f), "echo": False,
-                                                  "error": "NO_VALID_ECHO"}
+                                                  "error": "NO_VALID_ECHO",
+                                                  "echo_bytes": len(data),
+                                                  "echo_hex": data[:64].hex()}
                     else:
                         report["exchange"] = {"sent": len(f), "echo": False,
                                               "error": "ECHO_TIMEOUT"}

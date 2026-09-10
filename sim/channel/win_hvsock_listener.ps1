@@ -124,6 +124,7 @@ $stats = [ordered]@{
   tool = 'win_hvsock_listener'; port = $Port; vm_id = $VmId; service_id = $ServiceId
   lifetime_s = $LifetimeSec; connections = 0; messages_ok = 0
   rejected = [ordered]@{ MALFORMED = 0; OVERSIZE = 0; REPLAY = 0 }
+  last_reject = $null; bytes_received = 0; first_bytes_hex = $null
   exit_reason = $null
 }
 
@@ -159,32 +160,55 @@ try {
     try {
       $client.ReceiveTimeout = 10000
       $client.SendTimeout = 10000
-      # اقرأ إطاراً واحداً (حد أقصى 65552 بايتاً)
+      # اقرأ إطاراً واحداً (حد أقصى 65552 بايتاً) — بأنواع byte[] صريحة، ورفض مُعلَّل
       $recvBuf = New-Object byte[] 65552
       $acc = New-Object System.Collections.Generic.List[byte]
-      $frame = $null
+      [byte[]]$frame = $null
+      [int]$total = 0
+      [int]$fl = 0
+      $rejectReason = $null
+      $readDeadline = (Get-Date).AddSeconds(10)
       while ($true) {
-        $n = $client.Receive($recvBuf)
-        if ($n -le 0) { break }
+        if ((Get-Date) -ge $readDeadline) { $rejectReason = 'READ_TIMEOUT'; break }
+        $n = 0
+        try { $n = $client.Receive($recvBuf) }
+        catch { $rejectReason = 'RECV_ERROR:' + $_.Exception.Message; break }
+        if ($n -le 0) { $rejectReason = 'PEER_CLOSED'; break }
         for ($i = 0; $i -lt $n; $i++) { $acc.Add($recvBuf[$i]) }
         if ($acc.Count -lt ($XU_HEADER + $XU_CRC)) { continue }
-        $lenBytes = @($acc[10..13]); [Array]::Reverse($lenBytes)
-        $fl = [BitConverter]::ToUInt32($lenBytes, 0)
-        if ($fl -gt $XU_MAX_PAYLOAD) { $stats.rejected.OVERSIZE++; break }
+        [byte[]]$lenBytes = @($acc[10], $acc[11], $acc[12], $acc[13])
+        [Array]::Reverse($lenBytes)
+        $fl = [int][BitConverter]::ToUInt32($lenBytes, 0)
+        if ($fl -gt $XU_MAX_PAYLOAD) { $rejectReason = 'OVERSIZE'; break }
         $total = $XU_HEADER + $fl + $XU_CRC
         if ($acc.Count -lt $total) { continue }
-        $frame = $acc.GetRange(0, $total).ToArray()
+        [byte[]]$frame = $acc.GetRange(0, $total).ToArray()
         break
       }
+
+      # بصمة تشخيصية للبايتات الواصلة فعلاً (بيانات وهمية فقط — لا أسرار)
+      $stats.bytes_received = $acc.Count
+      if ($acc.Count -gt 0) {
+        $take = [Math]::Min(64, $acc.Count)
+        $stats.first_bytes_hex = (($acc.GetRange(0, $take).ToArray() |
+          ForEach-Object { $_.ToString('x2') }) -join '')
+      }
+
       if ($frame) {
-        if ($frame[0] -ne 0x58 -or $frame[1] -ne 0x55) { $stats.rejected.MALFORMED++ }
+        if ($frame[0] -ne 0x58 -or $frame[1] -ne 0x55) {
+          $rejectReason = ('BAD_MAGIC got=0x{0:x2}{1:x2}' -f $frame[0], $frame[1])
+        }
         else {
-          $crcBytes = @($frame[($total - 2)..($total - 1)]); [Array]::Reverse($crcBytes)
-          $crc = [BitConverter]::ToUInt16($crcBytes, 0)
-          $expected = Get-Crc16 $frame[0..($total - 3)]
-          if ($crc -ne $expected) { $stats.rejected.MALFORMED++ }
+          [byte[]]$crcBytes = @($frame[$total - 2], $frame[$total - 1])
+          [Array]::Reverse($crcBytes)
+          $crc = [int][BitConverter]::ToUInt16($crcBytes, 0)
+          [byte[]]$covered = $frame[0..($total - 3)]
+          $expected = [int](Get-Crc16 $covered)
+          if ($crc -ne $expected) {
+            $rejectReason = ('BAD_CRC got=0x{0:x4} want=0x{1:x4} len={2}' -f $crc, $expected, $fl)
+          }
           else {
-            $cntBytes = @($frame[2..9]); [Array]::Reverse($cntBytes)
+            [byte[]]$cntBytes = @($frame[2..9]); [Array]::Reverse($cntBytes)
             $counter = [BitConverter]::ToUInt64($cntBytes, 0)
             $stats.messages_ok++
             $reply = [Text.Encoding]::ASCII.GetBytes("diag:ok:counter=$counter`:len=$fl`:no-tpm")
@@ -193,6 +217,14 @@ try {
             Write-Output ("CONN_OK counter=$counter len=$fl")
           }
         }
+      }
+      elseif (-not $rejectReason) { $rejectReason = 'INCOMPLETE' }
+
+      if ($rejectReason) {
+        $stats.last_reject = $rejectReason
+        if ($rejectReason -eq 'OVERSIZE') { $stats.rejected.OVERSIZE++ }
+        else { $stats.rejected.MALFORMED++ }
+        Write-Output ("CONN_REJECT $rejectReason bytes=$($acc.Count) hex=$($stats.first_bytes_hex)")
       }
     } catch {
       Write-Output ("CONN_ERROR: " + $_.Exception.Message)
