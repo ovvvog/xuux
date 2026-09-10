@@ -14,7 +14,7 @@
  * البوابةُ السابعةُ والثلاثون تحرس أن يكون لكلِّ عملٍ ثمنٌ مُعلَنٌ وسقفٌ يُقاس.
  * وهذه تحرس ما هو **أسبقُ من كلِّ ذلك**: أن تكون البيئةُ التي يجري فيها العملُ
  * **مُعلَنةً في وثيقةٍ واحدةٍ**، وأن تُقام **بأمرٍ واحدٍ**، وأن يكون لصلاحِها
- * **فحصٌ يُصدر حكماً** لا تشخيصاً بالفشل. وعشرُ قواعد:
+ * **فحصٌ يُصدر حكماً** لا تشخيصاً بالفشل. وإحدى عشرةَ قاعدة:
  *
  *   R0: `config/environment.yaml` تُحمَّل بمخطَّطها الصارم؛ ووثيقةٌ تُخالف
  *       مخطَّطَها تُوقف البوابةَ قبل أيِّ فحصٍ آخر.
@@ -44,6 +44,12 @@
  *       `node:child_process` ويُنادي السكربتين بالاسمِ ويقرأ رمزَ الخروجِ —
  *       فمعيارُ «تشغيلٌ بأمرٍ واحد» لا يُقاس بنداءِ دالّةٍ في العمليّةِ نفسِها،
  *       ولا بنصٍّ يُقرأ في حاجز.
+ *   R10: **سطحُ استدعاءِ العمليّاتِ محصورٌ ومُعلَن**: يُحسَب الإغلاقُ التبعيُّ
+ *       للاستيراداتِ النسبيّةِ ابتداءً من مدخلَي المسارِ المُعلَنين في
+ *       `docs/ENVIRONMENT.md` §١٦، ثم يُقابَل من يستورد `node:child_process`
+ *       فيه بالمائدةِ المُعلَنةِ هناك **في الاتجاهين**: جامعٌ ثانٍ يتسلّل يُردّ،
+ *       وإعلانٌ بقي بعد زوالِ سببِه يُردّ كذلك. والحكمُ في وحدةٍ نقيّةٍ
+ *       (`src/environment/spawn-surface.mjs`) تُحقَن قارئَها فلا تلمس القرصَ.
  *
  * **حدٌّ معلَن أول:** الحاجزُ يقرأ النصَّ والوثيقةَ **ولا يُقيم بيئةً ولا
  * يفحصها**؛ ومعيارُ القبولِ («بيئةٌ نظيفةٌ ⇒ نظامٌ عاملٌ بأمرٍ واحدٍ ⇒ فحصُ
@@ -54,10 +60,11 @@
  * المجلَّداتِ لأنّها تُنشَأ من `plan.directories` المقروءةِ من الوثيقةِ ولا
  * تُكتب في المُنفِّذ.
  *
- * **حدٌّ معلَن ثالث:** الحاجزُ لا يفحص أنّ `scripts/lib/environment-facts.mjs`
- * وحدَه يلمس القرصَ — يفحص نقاءَ `probes.mjs` و`plan.mjs` (R7) وهو ما يُنفَّذ
- * بنيويّاً؛ وأمّا `contract.mjs` فتقرأ الوثيقةَ بحكمِ عملِها. وذلك حدٌّ مسجَّلٌ
- * في `docs/REMAINING_WORK.md` لا سهوٌ يُكتشَف.
+ * **حدٌّ معلَن ثالث (ضاق بـR10 ولم يزُل):** كان الحاجزُ لا يفحص حصرَ جمعِ
+ * الوقائعِ في `scripts/lib/environment-facts.mjs` أصلاً؛ وR10 تفحصه الآن على
+ * **الاستيرادِ الساكنِ داخلَ إغلاقِ المداخلِ المُعلَنة**، ولا تقيس `import()`
+ * الديناميَّ ولا `createRequire`، ولا تمتدّ إلى سكربتٍ لا يصله المسار. وأمّا
+ * `contract.mjs` فتقرأ الوثيقةَ بحكمِ عملِها ولذلك ليست في قائمةِ النقاء (R7).
  */
 
 import fs from 'node:fs';
@@ -68,6 +75,7 @@ import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
 import { ENV_ERRORS, loadEnvironmentContract } from '../src/environment/index.mjs';
+import { SPAWN_IMPORT, auditSpawnSurface } from '../src/environment/spawn-surface.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -81,6 +89,53 @@ function readOrEmpty(relative) {
 /** @type {string[]} */
 const violations = [];
 
+/** عددُ مُطلِقي العمليّاتِ ومقاسُ الإغلاقِ — يُملآن في R10 ويُذكران في الحكم. */
+let spawnSurfaceSize = 0;
+let spawnClosureSize = 0;
+
+/**
+ * قارئٌ يُميّز الغيابَ من الفراغِ — يُحقَن في وحدةِ الحكمِ النقيّةِ (R10).
+ *
+ * @param {string} relative
+ * @returns {string | null}
+ */
+function sourceOf(relative) {
+  const file = path.join(ROOT, relative);
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+}
+
+/**
+ * نصُّ قسمٍ من وثيقةٍ بين عنوانِه والعنوانِ التالي من رتبتِه.
+ *
+ * @param {string} document
+ * @param {string} heading
+ * @returns {string}
+ */
+function sectionOf(document, heading) {
+  const start = document.indexOf(heading);
+  if (start === -1) return '';
+  const rest = document.slice(start + heading.length);
+  const end = rest.indexOf('\n## ');
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/**
+ * المساراتُ المُقتبَسةُ بعلامةِ الشيفرةِ في سطورٍ تُطابق نمطاً.
+ *
+ * @param {string} text
+ * @param {RegExp} pattern
+ * @returns {string[]}
+ */
+function matchAllPaths(text, pattern) {
+  /** @type {string[]} */
+  const found = [];
+  for (const match of text.matchAll(pattern)) {
+    const value = match[1];
+    if (value !== undefined && value.includes('/')) found.push(value);
+  }
+  return [...new Set(found)];
+}
+
 /** وحداتُ المسارِ التي تُفحَص نصّاً — تُعلَن هنا كي لا يُفلت ملفٌّ بإضافتِه. */
 const MODULE_FILES = [
   'src/environment/environment.mjs',
@@ -89,6 +144,7 @@ const MODULE_FILES = [
   'src/environment/probes.mjs',
   'src/environment/errors.mjs',
   'src/environment/index.mjs',
+  'src/environment/spawn-surface.mjs',
 ];
 
 /** الوحدتان اللتان يجب أن تبقيا نقيّتين تماماً (R7). */
@@ -294,6 +350,41 @@ if (contract !== null) {
       );
     }
   }
+
+  // ── R10: سطحُ استدعاءِ العمليّاتِ محصورٌ ومُعلَنٌ في الوثيقة ──
+  const surfaceSection = sectionOf(doc, '## ١٦.');
+  if (surfaceSection === '') {
+    violations.push(
+      'R10: القسم «١٦. سطحُ استدعاءِ العمليّات» غائبٌ من docs/ENVIRONMENT.md — ولا يُقاس سطحٌ بلا إعلان.',
+    );
+  } else {
+    const entries = matchAllPaths(surfaceSection, /^- `([^`]+)`/gmu);
+    const declaredSpawners = matchAllPaths(surfaceSection, /^\| `([^`]+)` \|/gmu);
+    if (entries.length === 0 || declaredSpawners.length === 0) {
+      violations.push(
+        'R10: القسم ١٦ لا يُعلن مداخلَ المسارِ أو مائدةَ الملفّاتِ المسموحِ لها — وقسمٌ بلا قائمتين لا يُقابَل.',
+      );
+    } else {
+      const audit = auditSpawnSurface({ entries, declared: declaredSpawners, sourceOf });
+      for (const file of audit.missing) {
+        violations.push(
+          `R10: الملفُّ «${file}» معلَنٌ في المسارِ ولا وجودَ له — ووثيقةٌ تصف مستودعاً آخر.`,
+        );
+      }
+      for (const file of audit.undeclared) {
+        violations.push(
+          `R10: «${file}» يستورد ${SPAWN_IMPORT} داخلَ إغلاقِ مسارِ البيئةِ ولا إعلانَ له في docs/ENVIRONMENT.md §١٦ — وجمعُ وقائعَ ثانٍ لا تعرفه الوثيقةُ يُبطِل حصرَ السطح.`,
+        );
+      }
+      for (const file of audit.stale) {
+        violations.push(
+          `R10: «${file}» معلَنٌ في §١٦ ولم يعد يستورد ${SPAWN_IMPORT} — وإذنٌ بقي بعد زوالِ سببِه يُوسِّع السطحَ بلا حاجةٍ ويُعلِّم القارئَ خطأً.`,
+        );
+      }
+      spawnSurfaceSize = audit.spawners.length;
+      spawnClosureSize = audit.closure.length;
+    }
+  }
 }
 
 if (violations.length > 0) {
@@ -312,5 +403,5 @@ const verdictCount = contract === null ? 0 : contract.healthCheck.verdicts.lengt
 const codeCount = contract === null ? 0 : contract.refusalCodes.length;
 const guaranteeCount = contract === null ? 0 : contract.guarantees.length;
 console.log(
-  `✅ حاجز عقد البيئة والإقامة بأمر واحد: ${profileCount} أوضاعِ بيئةٍ و${toolCount} أدواتٍ لكلٍّ مجالُ إصدارٍ معلَنٌ و${variableCount} متغيّراتٍ لكلٍّ صيغتُه ومَن يلزمُه، و${directoryCount} مجلَّداتِ زمنِ تشغيلٍ تُنشَأ من الوثيقةِ لا من الكودِ، و${phaseCount} أطوارِ إقامةٍ مرتَّبةٍ متكافئةٍ كلُّ تخطٍّ فيها بسببٍ مُسمّى، و${probeCount} مجسّاتٍ درجاتُها من وثيقةِ مركزِ العملياتِ لا من قائمةٍ ثانيةٍ تُصدِر ${verdictCount} أحكامِ صحّةٍ برموزِ خروجٍ من الوثيقةِ، و${codeCount} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`ENV_ERRORS\`، و${guaranteeCount} ضماناتٍ كلٌّ برمزٍ حاضرٍ في ملفِّ إنفاذِه، والحكمُ نقيٌّ لا يستورد قرصاً ولا عمليّةً فلا يستطيع أن يُصلِح ما يفحص، والساعةُ مُمرَّرةٌ ولا مؤقِّتَ يعمل بنفسِه، ومعيارُ «الأمرِ الواحدِ» مقيسٌ بعمليّاتٍ أبناءٍ حقيقيّةٍ لا بنصٍّ يُقرأ.`,
+  `✅ حاجز عقد البيئة والإقامة بأمر واحد: ${profileCount} أوضاعِ بيئةٍ و${toolCount} أدواتٍ لكلٍّ مجالُ إصدارٍ معلَنٌ و${variableCount} متغيّراتٍ لكلٍّ صيغتُه ومَن يلزمُه، و${directoryCount} مجلَّداتِ زمنِ تشغيلٍ تُنشَأ من الوثيقةِ لا من الكودِ، و${phaseCount} أطوارِ إقامةٍ مرتَّبةٍ متكافئةٍ كلُّ تخطٍّ فيها بسببٍ مُسمّى، و${probeCount} مجسّاتٍ درجاتُها من وثيقةِ مركزِ العملياتِ لا من قائمةٍ ثانيةٍ تُصدِر ${verdictCount} أحكامِ صحّةٍ برموزِ خروجٍ من الوثيقةِ، و${codeCount} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`ENV_ERRORS\`، و${guaranteeCount} ضماناتٍ كلٌّ برمزٍ حاضرٍ في ملفِّ إنفاذِه، والحكمُ نقيٌّ لا يستورد قرصاً ولا عمليّةً فلا يستطيع أن يُصلِح ما يفحص، والساعةُ مُمرَّرةٌ ولا مؤقِّتَ يعمل بنفسِه، ومعيارُ «الأمرِ الواحدِ» مقيسٌ بعمليّاتٍ أبناءٍ حقيقيّةٍ لا بنصٍّ يُقرأ، وسطحُ استدعاءِ العمليّاتِ محصورٌ في ${spawnSurfaceSize} ملفّاتٍ معلَنةٍ في الوثيقةِ داخلَ إغلاقٍ تبعيٍّ مقيسٍ من ${spawnClosureSize} ملفّاتٍ.`,
 );
