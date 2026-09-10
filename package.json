@@ -28,6 +28,7 @@
     "hsm:verify:f05": "node scripts/pkcs11-f05-verify.mjs --keygen-log ${XUUX_KEYGEN_LOG:-artifacts/hsm/keygen.log}",
     "validate:seed": "node scripts/validate-seed.mjs",
     "migrate": "node scripts/migrate.mjs",
+    "verify:migrations": "node scripts/verify-migrations.mjs",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
     "retention": "node scripts/retention.mjs",

@@ -78,52 +78,7 @@ export function quoteIdent(identifier) {
   return `"${identifier.replace(/"/g, '""')}"`;
 }
 
-/**
- * صورة من كتالوج القاعدة: المخطَّطات والجداول والأعمدة وقيودها وفهارسها.
- * تُستعمل لمقايسة حالة القاعدة قبل الهجرة وبعد التراجع مقايسةً نصّية.
- * @param {import('pg').Pool} pool
- * @returns {Promise<string>}
- */
-export async function catalogSnapshot(pool) {
-  const schemas = await pool.query(
-    `SELECT nspname FROM pg_namespace
-     WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema'
-     ORDER BY nspname`,
-  );
-  const columns = await pool.query(
-    `SELECT table_schema, table_name, column_name, data_type, is_nullable, column_default
-     FROM information_schema.columns
-     WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
-     ORDER BY table_schema, table_name, column_name`,
-  );
-  const constraints = await pool.query(
-    `SELECT connamespace::regnamespace::text AS schema, conrelid::regclass::text AS rel,
-            conname, pg_get_constraintdef(oid) AS def
-     FROM pg_constraint
-     WHERE connamespace::regnamespace::text NOT IN ('pg_catalog', 'information_schema')
-     ORDER BY schema, rel, conname`,
-  );
-  const indexes = await pool.query(
-    `SELECT schemaname, tablename, indexname, indexdef
-     FROM pg_indexes
-     WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-     ORDER BY schemaname, tablename, indexname`,
-  );
-  const domains = await pool.query(
-    `SELECT domain_schema, domain_name, data_type
-     FROM information_schema.domains
-     WHERE domain_schema NOT IN ('pg_catalog', 'information_schema')
-     ORDER BY domain_schema, domain_name`,
-  );
-  return JSON.stringify(
-    {
-      schemas: schemas.rows,
-      columns: columns.rows,
-      constraints: constraints.rows,
-      indexes: indexes.rows,
-      domains: domains.rows,
-    },
-    null,
-    1,
-  );
-}
+// صورةُ الكتالوجِ تعيشُ في `src/persistence/catalog.mjs` منذ برهانِ الانعكاس
+// (`WL-109`): الاختبارُ والأداةُ يقيسانِ بالمسطرةِ نفسِها، لا بنسختَينِ منها.
+// وتُصدَّرُ من هنا كذلك حفاظاً على مواضعِ الاستيرادِ القائمةِ في الاختبارات.
+export { catalogSnapshot } from '../../src/persistence/catalog.mjs';
