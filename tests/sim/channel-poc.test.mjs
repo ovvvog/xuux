@@ -240,3 +240,25 @@ test('live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع ت�
   assert.equal(typeof report.dev_vsock, 'boolean');
   assert.equal(typeof report.family_supported, 'boolean');
 });
+
+// انحدارٌ مثبَتٌ ميدانياً (WL-105): في PowerShell يبقى [byte] -shl 8 بعرضِ بايتٍ ويُقصُّ
+// إلى صفر، فيُحسبُ CRC على مدخلاتٍ صفريةٍ ويُرفضُ كلُّ إطارٍ سليمٍ بـBAD_CRC.
+// أُثبتَ ذلك على حدِّ Windows↔WSL2 الحقيقي: got=0x8dff want=0xac9f، و0xac9f هي
+// بالضبط قيمةُ CRC عندما تكونُ كلُّ بايتاتِ الدخلِ صفراً. الحشوُ إلى [int] إلزامي.
+test('static: سكربتات PowerShell تحشو البايت إلى [int] قبل الإزاحة في CRC', () => {
+  const psFiles = readdirSync(channelDir).filter((f) => f.endsWith('.ps1'));
+  assert.ok(psFiles.length >= 3);
+  for (const f of psFiles) {
+    const src = readFileSync(join(channelDir, f), 'utf8');
+    if (!/-shl\s+8/.test(src)) continue;
+    assert.match(
+      src,
+      /\[int\]\$b\s+-shl\s+8/,
+      `${f}: يجب أن تكون الإزاحة ([int]$b -shl 8) لا ($b -shl 8) — وإلا قُصَّت إلى صفر`,
+    );
+    assert.ok(
+      !/[^\]]\$b\s+-shl\s+8/.test(src.replace(/\[int\]\$b\s+-shl\s+8/g, '')),
+      `${f}: بقيت إزاحةُ بايتٍ بلا حشو`,
+    );
+  }
+});

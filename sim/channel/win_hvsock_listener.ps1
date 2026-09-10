@@ -99,7 +99,8 @@ $XU_HEADER = 14; $XU_CRC = 2; $XU_MAX_PAYLOAD = 65536
 function Get-Crc16([byte[]]$data) {
   [int]$crc = 0xFFFF
   foreach ($b in $data) {
-    $crc = $crc -bxor ($b -shl 8)
+    # ملاحظة حرجة: [byte] -shl 8 في PowerShell يبقى بعرض بايت ويُقصّ إلى صفر ⇒ حشو صريح إلى [int]
+    $crc = $crc -bxor ([int]$b -shl 8)
     for ($i = 0; $i -lt 8; $i++) {
       if ($crc -band 0x8000) { $crc = (($crc -shl 1) -bxor 0x1021) -band 0xFFFF }
       else { $crc = ($crc -shl 1) -band 0xFFFF }
