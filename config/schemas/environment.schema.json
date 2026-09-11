@@ -53,7 +53,20 @@
           "minMajor": { "type": "integer", "minimum": 0 },
           "maxMajor": { "type": "integer", "minimum": 0 },
           "requiredIn": { "$ref": "#/$defs/profileList" },
-          "statement": { "type": "string", "minLength": 20 }
+          "statement": { "type": "string", "minLength": 20 },
+          "readiness": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["args", "statement"],
+            "properties": {
+              "args": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "statement": { "type": "string", "minLength": 20 }
+            }
+          }
         }
       }
     },

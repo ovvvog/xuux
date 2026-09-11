@@ -15,3 +15,10 @@ export { ENV_ERRORS, EnvironmentError } from './errors.mjs';
 export { Environment } from './environment.mjs';
 export { bootstrapPlan, versionInRange } from './plan.mjs';
 export { evaluateProbes, healthVerdict } from './probes.mjs';
+export {
+  READINESS_STATES,
+  declaresReadiness,
+  judgeToolReadiness,
+  readinessCommandText,
+  toolsDeclaringReadiness,
+} from './tool-readiness.mjs';

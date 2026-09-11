@@ -20,6 +20,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { versionInRange } from '../../src/environment/plan.mjs';
+import { declaresReadiness, judgeToolReadiness } from '../../src/environment/tool-readiness.mjs';
 
 /**
  * @typedef {import('../../src/environment/contract.mjs').EnvironmentContract} EnvironmentContract
@@ -45,6 +46,31 @@ export function detectProfile(env = process.env) {
   if (env['CI'] === 'true' || env['GITHUB_ACTIONS'] === 'true') return 'ci';
   if (env['NODE_ENV'] === 'production') return 'production';
   return 'development';
+}
+
+/**
+ * جاهزيّةُ أداةٍ بأمرِها الثاني المُعلَنِ — **استخبارٌ لا عملٌ**، والحكمُ على
+ * نتيجتِه في الوحدةِ النقيّةِ `src/environment/tool-readiness.mjs` لا هنا.
+ *
+ * ولا يُطبَع مخرَجُ الأمرِ إلاّ سطرًا أوّلَ مقصوصاً: رسائلُ أخطاءِ الأدواتِ
+ * قد تحمل مساراتٍ ومقابسَ وأسماءَ مستخدمين، ومخرَجُ فحصٍ يُحفَظ في سجلِّ بناء.
+ *
+ * @param {EnvironmentTool} tool
+ * @returns {{ ok: boolean, observed: string | null }}
+ */
+export function probeToolReadiness(tool) {
+  const spec = tool.readiness;
+  if (spec === undefined) return { ok: false, observed: null };
+  /** @type {import('node:child_process').SpawnSyncReturns<string>} */
+  const outcome = spawnSync(tool.command, spec.args, {
+    encoding: 'utf8',
+    timeout: PROBE_TIMEOUT_MS,
+    shell: false,
+  });
+  const ok = outcome.error === undefined && outcome.status === 0;
+  const text = `${outcome.stdout ?? ''}${outcome.stderr ?? ''}`.trim();
+  const firstLine = text.split('\n')[0] ?? '';
+  return { ok, observed: firstLine === '' ? null : firstLine.slice(0, 120) };
 }
 
 /**
@@ -118,14 +144,20 @@ export function collectObservations(contract, options = {}) {
       const tool = contract.toolchain.find((entry) => entry.id === probe.target);
       if (tool === undefined) continue;
       const outcome = probeTool(tool);
+      // البُعدُ الثاني لا يُشغَّل إلاّ لمن أعلَنَه وكانت أداتُه حاضرةً أصلاً:
+      // فأمرٌ ثانٍ على أداةٍ غائبةٍ يُضيف عشرَ ثوانٍ مهلةٍ ولا يُضيف علماً.
+      const readiness =
+        declaresReadiness(tool) && outcome.present && outcome.inRange
+          ? probeToolReadiness(tool)
+          : undefined;
+      const judgement = judgeToolReadiness(
+        tool,
+        readiness === undefined ? outcome : { ...outcome, readiness },
+      );
       observations.push({
         probe: probe.id,
-        satisfied: outcome.present && outcome.inRange,
-        detail: !outcome.present
-          ? `الأداةُ «${tool.command}» غيرُ موجودةٍ في المسارِ.`
-          : outcome.inRange
-            ? `الأداةُ «${tool.command}» حاضرةٌ بإصدارٍ داخلَ المجالِ المُعلَنِ.`
-            : `الأداةُ «${tool.command}» حاضرةٌ بإصدارٍ خارجَ المجالِ المُعلَنِ (${String(tool.minMajor ?? '—')}..${String(tool.maxMajor ?? '—')}).`,
+        satisfied: judgement.satisfied,
+        detail: judgement.detail,
         observed: outcome.version ?? 'غائبة',
       });
       continue;

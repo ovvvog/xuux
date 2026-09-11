@@ -14,7 +14,7 @@
  * البوابةُ السابعةُ والثلاثون تحرس أن يكون لكلِّ عملٍ ثمنٌ مُعلَنٌ وسقفٌ يُقاس.
  * وهذه تحرس ما هو **أسبقُ من كلِّ ذلك**: أن تكون البيئةُ التي يجري فيها العملُ
  * **مُعلَنةً في وثيقةٍ واحدةٍ**، وأن تُقام **بأمرٍ واحدٍ**، وأن يكون لصلاحِها
- * **فحصٌ يُصدر حكماً** لا تشخيصاً بالفشل. وإحدى عشرةَ قاعدة:
+ * **فحصٌ يُصدر حكماً** لا تشخيصاً بالفشل. واثنتا عشرةَ قاعدة:
  *
  *   R0: `config/environment.yaml` تُحمَّل بمخطَّطها الصارم؛ ووثيقةٌ تُخالف
  *       مخطَّطَها تُوقف البوابةَ قبل أيِّ فحصٍ آخر.
@@ -33,7 +33,8 @@
  *       `.github/workflows/ci.yml` بنصٍّ واحد؛ فبوابةٌ لا تُشغَّل آلياً ليست
  *       بوابةً بل نيّة.
  *   R7: **الحكمُ نقيٌّ لا يلمس القرصَ**: `src/environment/probes.mjs` و
- *       `src/environment/plan.mjs` **لا تستوردان** `node:fs` ولا
+ *       `src/environment/plan.mjs` و`src/environment/tool-readiness.mjs`
+ *       **لا تستورد** `node:fs` ولا
  *       `node:child_process` ولا `node:process` — فالضمان
  *       `G-ENV-VERIFY-READ-ONLY` بنيةٌ لا نيّة، ووحدةٌ لا تملك المُلحِقَ لا
  *       تستطيع أن تكتب ولو أراد كاتبُها.
@@ -50,6 +51,13 @@
  *       فيه بالمائدةِ المُعلَنةِ هناك **في الاتجاهين**: جامعٌ ثانٍ يتسلّل يُردّ،
  *       وإعلانٌ بقي بعد زوالِ سببِه يُردّ كذلك. والحكمُ في وحدةٍ نقيّةٍ
  *       (`src/environment/spawn-surface.mjs`) تُحقَن قارئَها فلا تلمس القرصَ.
+ *   R11: **حضورُ الأداةِ ليس صلاحيتَها**: كلُّ أداةٍ تُعلِن `readiness` في
+ *        العقدِ موثَّقةٌ **باسمِها وبنصِّ أمرِها** في `docs/ENVIRONMENT.md` §١٧
+ *        والتقابلُ في الاتجاهين؛ وأمرُ الجاهزيّةِ يخالف أمرَ الإصدارِ وإلاّ
+ *        فهو قياسٌ يُعاد بنفسِه ثمّ يُقرأ توكيداً — فـ`--version` يقرأ
+ *        الملفَّ التنفيذيَّ وحدَه ولا يمسُّ ما تَعِدُ به الأداةُ. والفصلُ
+ *        واجبٌ: الحكمُ في `src/environment/tool-readiness.mjs` النقيّة،
+ *        والتشغيلُ في جامعِ الوقائعِ وحدَه (‏`R7` و`R10`).
  *
  * **حدٌّ معلَن أول:** الحاجزُ يقرأ النصَّ والوثيقةَ **ولا يُقيم بيئةً ولا
  * يفحصها**؛ ومعيارُ القبولِ («بيئةٌ نظيفةٌ ⇒ نظامٌ عاملٌ بأمرٍ واحدٍ ⇒ فحصُ
@@ -65,6 +73,12 @@
  * **الاستيرادِ الساكنِ داخلَ إغلاقِ المداخلِ المُعلَنة**، ولا تقيس `import()`
  * الديناميَّ ولا `createRequire`، ولا تمتدّ إلى سكربتٍ لا يصله المسار. وأمّا
  * `contract.mjs` فتقرأ الوثيقةَ بحكمِ عملِها ولذلك ليست في قائمةِ النقاء (R7).
+ *
+ * **حدٌّ معلَنٌ رابع (R11):** الحاجزُ يقيس **إعلانَ** الجاهزيّةِ وتقابلَه
+ * مع الوثيقةِ ومغايرتَه لأمرِ الإصدار؛ **ولا يحكم أنّ أمرَ الجاهزيّةِ المُختارَ
+ * هو أصدقُ ما يُقاس به عملُ الأداة** — ذلك حكمٌ هندسيٌّ يُعلَن في `statement`
+ * ويُراجَع بالعَين، وحاجزٌ يدّعي قياسَه يدّعي ما لا يقدِر.
+ *
  */
 
 import fs from 'node:fs';
@@ -76,6 +90,10 @@ import YAML from 'yaml';
 
 import { ENV_ERRORS, loadEnvironmentContract } from '../src/environment/index.mjs';
 import { SPAWN_IMPORT, auditSpawnSurface } from '../src/environment/spawn-surface.mjs';
+import {
+  auditReadinessSurface,
+  toolsDeclaringReadiness,
+} from '../src/environment/tool-readiness.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -92,6 +110,7 @@ const violations = [];
 /** عددُ مُطلِقي العمليّاتِ ومقاسُ الإغلاقِ — يُملآن في R10 ويُذكران في الحكم. */
 let spawnSurfaceSize = 0;
 let spawnClosureSize = 0;
+let readinessSurfaceSize = 0;
 
 /**
  * قارئٌ يُميّز الغيابَ من الفراغِ — يُحقَن في وحدةِ الحكمِ النقيّةِ (R10).
@@ -145,10 +164,15 @@ const MODULE_FILES = [
   'src/environment/errors.mjs',
   'src/environment/index.mjs',
   'src/environment/spawn-surface.mjs',
+  'src/environment/tool-readiness.mjs',
 ];
 
-/** الوحدتان اللتان يجب أن تبقيا نقيّتين تماماً (R7). */
-const PURE_FILES = ['src/environment/probes.mjs', 'src/environment/plan.mjs'];
+/** الوحداتُ التي يجب أن تبقى نقيّةً تماماً (R7). */
+const PURE_FILES = [
+  'src/environment/probes.mjs',
+  'src/environment/plan.mjs',
+  'src/environment/tool-readiness.mjs',
+];
 
 // ── R0: الوثيقةُ تُحمَّل بمخطَّطها ──
 /** @type {import('../src/environment/contract.mjs').EnvironmentContract | null} */
@@ -385,6 +409,55 @@ if (contract !== null) {
       spawnClosureSize = audit.closure.length;
     }
   }
+
+  // ── R11: حضورُ الأداةِ ليس صلاحيتَها ──
+  const readinessTools = toolsDeclaringReadiness(contract);
+  for (const tool of readinessTools) {
+    const version = contract.toolchain.find((entry) => entry.id === tool.id);
+    if (
+      version !== undefined &&
+      version.args.join('\u0000') === tool.readiness.args.join('\u0000')
+    ) {
+      violations.push(
+        `R11: أمرُ جاهزيّةِ «${tool.id}» هو أمرُ إصدارِها نفسُه — وقياسٌ يُعاد بنفسِه ثمّ يُقرأ توكيداً أسوأُ من بُعدٍ لم يُقَس أصلاً.`,
+      );
+    }
+  }
+  const readinessSection = sectionOf(doc, '## ١٧.');
+  if (readinessTools.length > 0 && readinessSection === '') {
+    violations.push(
+      'R11: القسم «١٧. جاهزيّةُ الأدوات» غائبٌ من docs/ENVIRONMENT.md والعقدُ يُعلِن جاهزيّاتٍ — وبُعدٌ يُقاس ولا يُعلَن يُفاجئ قارئَه بحكمٍ لا يعرف من أين جاء.',
+    );
+  } else {
+    /** @type {{ tool: string, command: string }[]} */
+    const documentedReadiness = [];
+    for (const match of readinessSection.matchAll(/^\| `([^`]+)` \| `([^`]+)` \|/gmu)) {
+      const id = match[1];
+      const command = match[2];
+      if (id !== undefined && command !== undefined)
+        documentedReadiness.push({ tool: id, command });
+    }
+    const audit = auditReadinessSurface({
+      tools: readinessTools,
+      documented: documentedReadiness,
+    });
+    for (const id of audit.undeclared) {
+      violations.push(
+        `R11: الأداةُ «${id}» تُعلِن جاهزيّةً في العقدِ ولا مُدخَلةَ لها في docs/ENVIRONMENT.md §١٧ — وقياسٌ يُغيّر حكمَ البيئةِ ولا تعرفُه الوثيقةُ مُخالفةٌ للمادّة 1.`,
+      );
+    }
+    for (const id of audit.stale) {
+      violations.push(
+        `R11: «${id}» مُعلَنٌ في §١٧ ولم يعد يُعلِن جاهزيّةً في العقدِ — ومُدخَلةٌ بقيت بعدَ زوالِ سببِها تُعلِّم القارئَ أنّ الأداةَ تُقاس وهي لا تُقاس.`,
+      );
+    }
+    for (const entry of audit.mismatched) {
+      violations.push(
+        `R11: أمرُ جاهزيّةِ «${entry.tool}» في العقدِ «${entry.contract}» وفي الوثيقةِ «${entry.documented}» — ووثيقةٌ تصف أمراً غيرَ الذي يجري أسوأُ من صمتِها.`,
+      );
+    }
+    readinessSurfaceSize = audit.measured;
+  }
 }
 
 if (violations.length > 0) {
@@ -403,5 +476,5 @@ const verdictCount = contract === null ? 0 : contract.healthCheck.verdicts.lengt
 const codeCount = contract === null ? 0 : contract.refusalCodes.length;
 const guaranteeCount = contract === null ? 0 : contract.guarantees.length;
 console.log(
-  `✅ حاجز عقد البيئة والإقامة بأمر واحد: ${profileCount} أوضاعِ بيئةٍ و${toolCount} أدواتٍ لكلٍّ مجالُ إصدارٍ معلَنٌ و${variableCount} متغيّراتٍ لكلٍّ صيغتُه ومَن يلزمُه، و${directoryCount} مجلَّداتِ زمنِ تشغيلٍ تُنشَأ من الوثيقةِ لا من الكودِ، و${phaseCount} أطوارِ إقامةٍ مرتَّبةٍ متكافئةٍ كلُّ تخطٍّ فيها بسببٍ مُسمّى، و${probeCount} مجسّاتٍ درجاتُها من وثيقةِ مركزِ العملياتِ لا من قائمةٍ ثانيةٍ تُصدِر ${verdictCount} أحكامِ صحّةٍ برموزِ خروجٍ من الوثيقةِ، و${codeCount} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`ENV_ERRORS\`، و${guaranteeCount} ضماناتٍ كلٌّ برمزٍ حاضرٍ في ملفِّ إنفاذِه، والحكمُ نقيٌّ لا يستورد قرصاً ولا عمليّةً فلا يستطيع أن يُصلِح ما يفحص، والساعةُ مُمرَّرةٌ ولا مؤقِّتَ يعمل بنفسِه، ومعيارُ «الأمرِ الواحدِ» مقيسٌ بعمليّاتٍ أبناءٍ حقيقيّةٍ لا بنصٍّ يُقرأ، وسطحُ استدعاءِ العمليّاتِ محصورٌ في ${spawnSurfaceSize} ملفّاتٍ معلَنةٍ في الوثيقةِ داخلَ إغلاقٍ تبعيٍّ مقيسٍ من ${spawnClosureSize} ملفّاتٍ.`,
+  `✅ حاجز عقد البيئة والإقامة بأمر واحد: ${profileCount} أوضاعِ بيئةٍ و${toolCount} أدواتٍ لكلٍّ مجالُ إصدارٍ معلَنٌ و${variableCount} متغيّراتٍ لكلٍّ صيغتُه ومَن يلزمُه، و${directoryCount} مجلَّداتِ زمنِ تشغيلٍ تُنشَأ من الوثيقةِ لا من الكودِ، و${phaseCount} أطوارِ إقامةٍ مرتَّبةٍ متكافئةٍ كلُّ تخطٍّ فيها بسببٍ مُسمّى، و${probeCount} مجسّاتٍ درجاتُها من وثيقةِ مركزِ العملياتِ لا من قائمةٍ ثانيةٍ تُصدِر ${verdictCount} أحكامِ صحّةٍ برموزِ خروجٍ من الوثيقةِ، و${codeCount} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`ENV_ERRORS\`، و${guaranteeCount} ضماناتٍ كلٌّ برمزٍ حاضرٍ في ملفِّ إنفاذِه، والحكمُ نقيٌّ لا يستورد قرصاً ولا عمليّةً فلا يستطيع أن يُصلِح ما يفحص، والساعةُ مُمرَّرةٌ ولا مؤقِّتَ يعمل بنفسِه، ومعيارُ «الأمرِ الواحدِ» مقيسٌ بعمليّاتٍ أبناءٍ حقيقيّةٍ لا بنصٍّ يُقرأ، وسطحُ استدعاءِ العمليّاتِ محصورٌ في ${spawnSurfaceSize} ملفّاتٍ معلَنةٍ في الوثيقةِ داخلَ إغلاقٍ تبعيٍّ مقيسٍ من ${spawnClosureSize} ملفّاتٍ، و${readinessSurfaceSize} أداةً تُقاس **صلاحيتُها لا حضورُها وحدَه** بأمرٍ ثانٍ يخالف أمرَ الإصدارِ ومُتقابِلٍ في الاتجاهين مع §١٧ من الوثيقة.`,
 );

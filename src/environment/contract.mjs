@@ -60,6 +60,12 @@ function invalidContract(message) {
 }
 
 /**
+ * @typedef {object} EnvironmentToolReadiness
+ * @property {string[]} args
+ * @property {string} statement
+ */
+
+/**
  * @typedef {object} EnvironmentTool
  * @property {string} id
  * @property {string} command
@@ -68,6 +74,7 @@ function invalidContract(message) {
  * @property {number} [maxMajor]
  * @property {string[]} requiredIn
  * @property {string} statement
+ * @property {EnvironmentToolReadiness} [readiness]
  */
 
 /**
@@ -187,6 +194,7 @@ export function loadEnvironmentContract(options = {}) {
   assertUniqueIds(parsed);
   assertNoSecretValues(parsed, file);
   assertPhaseReferences(parsed);
+  assertToolReadiness(parsed);
   assertProbeReferences(parsed);
   assertHealthCheck(parsed);
 
@@ -326,6 +334,27 @@ function assertPhaseReferences(contract) {
           { variable: variable.id, profile },
         );
       }
+    }
+  }
+}
+
+/**
+ * جاهزيّةُ الأداةِ إن أُعلِنت فهي **أمرٌ ثانٍ يقيس غيرَ ما يقيسه أمرُ الإصدارِ**.
+ *
+ * فمن أعلن `readiness.args` مطابقةً لـ`args` لم يُضِف بُعداً بل كرّر القياسَ
+ * مرّتين ثمّ قرأ تكرارَه توكيداً — وهو أسوأُ من ترْكِ البُعدِ غيرَ مقيسٍ، لأنّ
+ * الأوّلَ صمتٌ مُعلَنٌ والثاني ثقةٌ مبنيّةٌ على لا شيء.
+ *
+ * @param {EnvironmentContract} contract
+ */
+function assertToolReadiness(contract) {
+  for (const tool of contract.toolchain) {
+    const readiness = tool.readiness;
+    if (readiness === undefined) continue;
+    if (readiness.args.join('\u0000') === tool.args.join('\u0000')) {
+      invalidContract(
+        `أمرُ جاهزيّةِ الأداةِ «${tool.id}» مطابقٌ لأمرِ إصدارِها؛ وقياسٌ يُعاد بنفسِه لا يُضيف بُعداً بل يُضاعف ثقةً بلا سند — والمقصودُ أمرٌ يمسُّ ما تَعِدُ به الأداةُ لا ما يُثبِت وجودَ ملفِّها.`,
+      );
     }
   }
 }
