@@ -79,13 +79,13 @@ export function stableStringify(value) {
 /**
  * بصمُ قيدٍ واحدٍ فوقَ سابقِه.
  *
- * @param {{ seq: number, prev: string, type: string, actor: string, data: unknown }} record
+ * @param {{ seq: number, prevHash: string, type: string, actor: string, data: unknown }} record
  * @returns {string}
  */
-export function recordDigest(record) {
+export function ledgerHash(record) {
   const canonical = stableStringify({
     seq: record.seq,
-    prev: record.prev,
+    prevHash: record.prevHash,
     type: record.type,
     actor: record.actor,
     data: record.data,
@@ -94,23 +94,23 @@ export function recordDigest(record) {
 }
 
 /** بصمُ البذرةِ — رأسُ دفترٍ فارغٍ. @returns {string} */
-export function genesisDigest() {
+export function genesisHash() {
   return createHash('sha256').update(LEDGER_GENESIS, 'utf8').digest('hex');
 }
 
 /**
  * بناءُ قيدٍ مُسلسَلٍ فوقَ رأسٍ قائمٍ — دالّةٌ محضةٌ لا تكتب شيئاً.
  *
- * @param {string} prev رأسُ السلسلةِ قبلَ هذا القيدِ.
+ * @param {string} prevHash رأسُ السلسلةِ قبلَ هذا القيدِ.
  * @param {number} seq ترتيبُ القيدِ في الدفترِ كلِّه (يبدأ من 1).
  * @param {string} type
  * @param {string} actor
  * @param {Record<string, unknown>} data
- * @returns {{ seq: number, prev: string, type: string, actor: string, data: Record<string, unknown>, digest: string }}
+ * @returns {{ seq: number, prevHash: string, type: string, actor: string, data: Record<string, unknown>, hash: string }}
  */
-export function chainRecord(prev, seq, type, actor, data) {
-  const base = { seq, prev, type, actor, data };
-  return { ...base, digest: recordDigest(base) };
+export function chainRecord(prevHash, seq, type, actor, data) {
+  const base = { seq, prevHash, type, actor, data };
+  return { ...base, hash: ledgerHash(base) };
 }
 
 /**
@@ -232,7 +232,7 @@ export function auditLedgerChain(input) {
     );
   }
 
-  let running = genesisDigest();
+  let running = genesisHash();
   for (let index = 0; index < header.count; index += 1) {
     /** @type {unknown} */
     let parsed;
@@ -263,7 +263,7 @@ export function auditLedgerChain(input) {
         present,
       );
     }
-    if (record.prev !== running) {
+    if (record.prevHash !== running) {
       return verdict(
         LEDGER_STATES.MUTATED,
         `القيدُ رقمَ ${String(index + 1)} يُشير إلى سابقٍ غيرِ الذي قبلَه فعلاً — السلسلةُ مقطوعةٌ عندَ هذا الموضعِ.`,
@@ -271,14 +271,14 @@ export function auditLedgerChain(input) {
         present,
       );
     }
-    const recomputed = recordDigest({
+    const recomputed = ledgerHash({
       seq: index + 1,
-      prev: running,
+      prevHash: running,
       type: String(record.type),
       actor: String(record.actor),
       data: record.data,
     });
-    if (record.digest !== recomputed) {
+    if (record.hash !== recomputed) {
       return verdict(
         LEDGER_STATES.MUTATED,
         `بصمُ القيدِ رقمَ ${String(index + 1)} لا يُطابق محتواه — حقلٌ بُدِّل بعدَ الكتابةِ.`,

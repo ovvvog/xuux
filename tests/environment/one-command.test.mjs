@@ -38,7 +38,7 @@ import YAML from 'yaml';
 import {
   auditLedgerChain,
   exitCodeOf,
-  genesisDigest,
+  genesisHash,
   loadEnvironmentContract,
 } from '../../src/environment/index.mjs';
 
@@ -195,7 +195,7 @@ test('بيئةٌ نظيفةٌ ⇒ أمرٌ واحدٌ ⇒ فحصُ صحّةٍ ن
   assert.equal(audit.state, 'intact', audit.detail);
   assert.equal(audit.refuses, false);
   assert.equal(audit.committed, entries.length);
-  assert.equal(entries[0].prev, genesisDigest(), 'أوّلُ قيدٍ يُشير إلى البذرةِ المُعلَنة');
+  assert.equal(entries[0].prevHash, genesisHash(), 'أوّلُ قيدٍ يُشير إلى البذرةِ المُعلَنة');
 
   // والملفُّ القديمُ **لا يُكتَب فيه أصلاً** بعد `ADR 0008`.
   assert.equal(

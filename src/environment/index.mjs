@@ -20,7 +20,7 @@ export {
   LEDGER_VERSION,
   auditLedgerChain,
   chainRecord,
-  genesisDigest,
+  genesisHash,
   ledgerHeader,
   ledgerStateRefuses,
   parseLedgerHeader,

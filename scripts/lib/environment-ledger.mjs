@@ -32,7 +32,7 @@ import path from 'node:path';
 import {
   auditLedgerChain,
   chainRecord,
-  genesisDigest,
+  genesisHash,
   ledgerHeader,
   parseLedgerHeader,
 } from '../../src/environment/ledger-chain.mjs';
@@ -131,7 +131,7 @@ export class EnvironmentLedger {
   /** @type {boolean} */
   #loaded = false;
   /** @type {string} */
-  #chain = genesisDigest();
+  #chain = genesisHash();
   /** @type {number} */
   #seq = 0;
   /** @type {string | null} */
@@ -169,7 +169,7 @@ export class EnvironmentLedger {
     }
     const header = parseLedgerHeader(readOrNull(this.#head) ?? '');
     if (header === null) {
-      this.#chain = genesisDigest();
+      this.#chain = genesisHash();
       this.#seq = 0;
       return;
     }
@@ -206,7 +206,7 @@ export class EnvironmentLedger {
     }
     const record = chainRecord(this.#chain, this.#seq + 1, type, actor, data);
     fs.appendFileSync(this.#file, `${JSON.stringify(record)}\n`, 'utf8');
-    this.#chain = record.digest;
+    this.#chain = record.hash;
     this.#seq = record.seq;
     const temporary = `${this.#head}.tmp`;
     fs.writeFileSync(

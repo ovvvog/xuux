@@ -20,7 +20,7 @@ import {
   LEDGER_STATES,
   auditLedgerChain,
   chainRecord,
-  genesisDigest,
+  genesisHash,
   ledgerHeader,
   ledgerStateRefuses,
   parseLedgerHeader,
@@ -77,8 +77,8 @@ test('دفترٌ حديثُ الكتابةِ سليمٌ، ورأسُه يشهد 
   assert.notEqual(header, null);
   assert.equal(header?.count, 3);
   const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
-  assert.equal(header?.head, JSON.parse(/** @type {string} */ (lines[2])).digest);
-  assert.equal(JSON.parse(/** @type {string} */ (lines[0])).prev, genesisDigest());
+  assert.equal(header?.head, JSON.parse(/** @type {string} */ (lines[2])).hash);
+  assert.equal(JSON.parse(/** @type {string} */ (lines[0])).prevHash, genesisHash());
 });
 
 test('دفترٌ مفتوحٌ ثانيةً يستأنف السلسلةَ ولا يبدأ من البذرةِ من جديد', () => {
@@ -134,8 +134,8 @@ test('متنٌ بلا رأسٍ يُرَدُّ، ورأسٌ لا يُقرأ يُ�
 
 test('رأسٌ من دفترٍ آخرَ يُكشَف بـhead-mismatch لا بـmutated', () => {
   const { file, head } = freshLedger();
-  const other = chainRecord(genesisDigest(), 1, 'x', 'y', {});
-  fs.writeFileSync(head, `${JSON.stringify(ledgerHeader(3, other.digest))}\n`, 'utf8');
+  const other = chainRecord(genesisHash(), 1, 'x', 'y', {});
+  fs.writeFileSync(head, `${JSON.stringify(ledgerHeader(3, other.hash))}\n`, 'utf8');
   const audit = auditLedgerFile(file);
   assert.equal(audit.state, LEDGER_STATES.HEAD_MISMATCH);
   assert.equal(audit.refuses, true);
@@ -143,7 +143,7 @@ test('رأسٌ من دفترٍ آخرَ يُكشَف بـhead-mismatch لا بـ
 
 test('ذيلٌ لم يشهد به رأسٌ يُعلَن ولا يُغلَق عليه — انقطاعٌ لا عبث', () => {
   const { file } = freshLedger();
-  fs.appendFileSync(file, `${JSON.stringify({ seq: 4, prev: 'z', type: 't' })}\n`, 'utf8');
+  fs.appendFileSync(file, `${JSON.stringify({ seq: 4, prevHash: 'z', type: 't' })}\n`, 'utf8');
   const audit = auditLedgerFile(file);
   assert.equal(audit.state, LEDGER_STATES.PENDING_TAIL);
   assert.equal(audit.refuses, false, 'انقطاعُ تيّارٍ لا يُعطِّل الفحصَ إلى الأبد');
