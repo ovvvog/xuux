@@ -25,7 +25,7 @@
   7. **خصالُ `pending-tail` الأربعُ مكتوبةً صراحةً** في ADR §٤ و§١٨: انقطاعُ **نهايةِ الملفِّ وحدَه** حالةُ استردادٍ يدويّة · **لا حالةَ وسطيّةً تالفةً تُقبَل** · **لا إصلاحَ تلقائيَّ ولا صامتَ** · **الإصلاحُ مراسمُ يدويّةٌ موثَّقةٌ**.
   8. **`REMAINING_WORK.md` — إضافةُ توثيقٍ لا حذفَ بندٍ.** ذُيِّل بندُ `M10.05` بمُلحَقٍ يفصل الشِّقَّ المسحوبَ (الترقيمُ والرأسُ والكشفُ) عن الشِّقِّ الباقي (وصلُ `PersistentEventLog`)، ويُسجِّل الباقيَ **«قراراً مؤجَّلاً بعلّةٍ بنيويّةٍ لا بندَ نقصٍ يُنجَز»** — الدائريّةُ بين الإقامةِ و`phase:build` و`F05`/التوكن — وبنصٍّ صريح: **استقلالُ الدفترِ سببُ صحّتِه لا قصورُه، ولا يُقرأ بقاؤه نقصاً في تنفيذِ `ADR 0008`**.
 - **الملفات المتأثرة:** `src/environment/ledger-chain.mjs` · `src/environment/index.mjs` · `scripts/lib/environment-ledger.mjs` · `scripts/bootstrap.mjs` · `scripts/verify-environment.mjs` · `tests/environment/ledger-chain.test.mjs` · `tests/environment/one-command.test.mjs` · `docs/adr/0008-environment-bootstrap-ledger.md` · `docs/ENVIRONMENT.md` · `docs/REMAINING_WORK.md` · `docs/roadmap/05-work-log.md`
-- **الـ commit:** `__COMMIT__`
+- **الـ commit:** `5c66f0b9` على `main`، مدفوعٌ فوقَ `0e1a88c3`. **حقلُ البصمةِ أُكمِلَ في دفعةٍ تالية** (عُرفُ `WL-109` و`WL-115`). وحكمُ CI يُقرأُ من المستودعِ لا يُدَّعى هنا.
 - **الدليل — مقيسٌ على هذه البيئةِ الحيّة:**
   - **ردُّ المقدّمةِ مقيسٌ:** `grep -n "prevHash\|sequence" docs/adr/0008-*.md` ⇐ **لا نتيجة** قبل هذه الدفعة.
   - **الشذوذُ مقيسٌ:** `lineage.mjs` و`experiment-ledger.mjs` و`event-bus.mjs` ⇐ `prevHash`؛ و`ledger-chain.mjs` وحدَه كان ⇐ `prev`.
