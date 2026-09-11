@@ -14,8 +14,24 @@
 version: 2
 declaredIn: WL-076
 
+# `awaiting-model-council`: لم تُطلَقْ مراجعةٌ بعدُ، ولا نتيجةَ تُقيَّدُ.
+# `council-findings-recorded`: أُطلِقتْ جولاتٌ وصدرتْ تقايريرُ خامّةٌ، **والنتائجُ مُقيَّدةٌ
+#   كما كتبَها الأعضاءُ** — وليس هذا إغلاقاً ولا إنجازاً: خطوةُ الخارطةِ تبقى `⬜`.
+#   قيدُ النتائجِ في هذه الحالةِ أُذِنَ به من المالكِ صريحاً في `WL-122`.
 statusVocabulary:
   - awaiting-model-council
+  - council-findings-recorded
+
+# المفرداتُ المحرَّمةُ نصّاً — يردُّها الاختبارُ ولا يُناقشُها.
+forbiddenStatusVocabulary:
+  - verified
+  - approved
+  - complete
+  - completed
+  - done
+  - passed
+  - secure
+  - ready
 
 # مَن يملكُ إصدارَ النتيجةِ. لا `executor` في هذه القائمةِ أصلاً.
 # `model-council`: مجلسُ نماذجٍ مستقلٌّ (≥ نموذجينِ حدوديّينِ من مزوّدينَ مختلفينَ)
@@ -42,8 +58,35 @@ engagements:
   - id: M11.04
     kind: independent-security-review
     title: مراجعةٌ أمنيّةٌ مستقلّةٌ خارجَ فريقِ البناءِ
-    status: awaiting-model-council
-    executedBy: null
+    # النتائجُ مُقيَّدةٌ ولا خطوةَ مُغلَقةٌ: `M11.04` تبقى `⬜` في خارطةِ الطريقِ حتى
+    # يُصدِرَ المجلسُ حكمَ إعادةِ اختبارٍ على إصلاحاتٍ لم تُنفَّذْ بعدُ (المادة 11/3).
+    status: council-findings-recorded
+    # مَن نفّذَ المراجعةَ فعلاً — أعضاءُ المجلسِ لا المنفِّذُ. والمنفِّذُ غيرُ مذكورٍ هنا حتماً.
+    executedBy:
+      kind: model-council
+      rounds: 4
+      members:
+        - id: grok_4_6
+          provider: XAI
+          rounds: [1, 2]
+        - id: gpt_5_6_sol
+          provider: OPENAI
+          rounds: [1]
+        - id: claude_opus_5_0
+          provider: ANTHROPIC
+          rounds: [2]
+        - id: gemini_3_1_pro
+          provider: GOOGLE
+          rounds: [3]
+        - id: gpt_5_6_terra
+          provider: OPENAI
+          rounds: [3]
+        - id: kimi_k3
+          provider: MOONSHOT
+          rounds: [4]
+        - id: gpt_6_astra
+          provider: OPENAI
+          rounds: [4]
     acceptanceCriteria: >-
       تقريرُ مراجعةٍ صادرٌ عن جهةٍ مستقلّةٍ، **مع سجلِّ إغلاقٍ لكلِّ نتيجةٍ حرجةٍ
       وعاليةٍ** — لا ملخَّصٌ ولا شهادةٌ عامّةٌ.
@@ -124,6 +167,382 @@ engagements:
       - شرطُ مراجعةٍ دوريّةٍ وموعدُها.
       - جهةُ التوقيعِ وصفتُها.
 
-# لا نتيجةَ مراجعةٍ واحدةً حتى تصدرَ من جهةٍ مستقلّةٍ. وهذا الفراغُ **مقصودٌ
-# ومُنفَذٌ**: أيُّ قيدٍ يُضاف هنا بيدِ المُنفِّذِ يُرَدُّ في الاختبارِ.
-findings: []
+# ------------------------------------------------------------------------------
+# النتائجُ — **نقلٌ لا ترجيحٌ، وقيدٌ لا إغلاقٌ.**
+#
+# قُيّدتْ هذه النتائجُ بإذنِ المالكِ الصريحِ (`WL-122`، 2026-09-12). وكلُّ ما هنا
+# **منقولٌ من التقايريرِ الخامّةِ كما كتبَها أعضاءُ المجلسِ**، ولا حكمَ للمنفِّذِ فيها:
+#
+#   1. `status` لكلِّ نتيجةٍ هو ما اتّفقَ عليه العضوانِ. وحيثُ اختلفا فالقيدُ `open`
+#      **بالأضعفِ لا بالأقوى** — فلا يُقرأُ خلافٌ إغلاقاً، ويُحفَظُ الخلافُ في `disagreement`.
+#   2. `severityAsWritten` بلفظِ العضوِ حرفيّاً (عربيّاً أو إنجليزيّاً)؛ و`severity`
+#      تطبيعٌ مُعلَنٌ للفرزِ وحدَه (high/medium/low)، وليس إعادةَ تقديرٍ.
+#   3. **لم يُدمَجْ متقاطعانِ.** الدمجُ حكمٌ، فالتقاطعُ مُسجَّلٌ في `overlapsWith`
+#      إشارةً لا دمجاً، وكلُّ نتيجةٍ تبقى قيداً مستقلّاً بمعرِّفِ صاحبِها.
+#   4. `closed` لا تُكتبُ إلا باجتماعِ العضوينِ **وسجلِّ إغلاقٍ بكوميتٍ وإعادةِ
+#      اختبارٍ من المجلسِ** — يحرسُها `tests/docs/external-review-pack.test.mjs`.
+# ------------------------------------------------------------------------------
+
+# تطبيعُ الشدّةِ مُعلَنٌ لا مُضمَرٌ — ومن أرادَ لفطَ العضوِ ففي `severityAsWritten`.
+severityNormalization:
+  عالية: high
+  high: high
+  متوسطة: medium
+  medium: medium
+  منخفضة: low
+  low: low
+
+findings:
+  # ---------------------------------------------------------------- الأحدَ عشرَ المُحاكَمَةُ في الجولةِ الرابعةِ
+  - id: UF-16
+    engagement: M11.04
+    title: >-
+      `hsm:verify:f05` لا يُمرِّرُ `--keygen-log` فيخرجُ بـ`1` مع `FAIL keygen_log_provided`
+    origin: round-2
+    severityAsWritten: low
+    severity: low
+    status: closed
+    agreement: اتّفاقٌ صريحٌ من العضوينِ في الجولةِ الرابعةِ
+    reproductionPath: >-
+      `npm run hsm:keygen` ثمَّ `npm run hsm:verify:f05` على توكنِ العضوِ نفسِه في الوضعينِ
+      `initial` ثمَّ `rotation`.
+    affectedFiles:
+      - package.json
+      - scripts/pkcs11-f05-verify.mjs
+      - scripts/pkcs11-keygen.mjs
+    raisedBy: [grok_4_6, claude_opus_5_0]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+    closure:
+      fixCommit: f16c0d8e
+      retestedBy: [kimi_k3, gpt_6_astra]
+      retestRound: 4
+      retestEvidence: >-
+        `hsm:verify:f05` خرجَ بـ`0` في الوضعينِ عندَ كليهما على توكنِ كلِّ عضوٍ وحدَه:
+        `initial` 20/20 ثمَّ `rotation` 21/21.
+
+  - id: UF-01
+    engagement: M11.04
+    title: >-
+      إقلاعٌ إنتاجيٌّ يُقبَلُ بعدَ خفضِ `anchoredCount` وحذفِ السجلِّ والرأسِ والمراسي
+    origin: round-2
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: >-
+      اتّفاقٌ على `open`، وكلاهما قاسَ أنَّ مسارَ التحريرِ المباشرَ محجوبٌ بالخاتَمِ
+      (`SEAL_INVALID`/`SEAL_MISSING`) وأنَّ المنفذَ الباقيَ استبدالُ حالةٍ أو محوُ ملفٍ.
+    reproductionPath: >-
+      عندَ «أ» `S10`/`S4b`/`S13`؛ وعندَ «ب» `P12`/`P13`/`P14`.
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [grok_4_6, claude_opus_5_0]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: UF-03
+    engagement: M11.04
+    title: حالةُ الإيقافِ السياديّةُ تعودُ `running/epoch=0` بمحوِ ملفّاتِها
+    origin: round-2
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: اتّفاقٌ على `open`
+    reproductionPath: '`S10`/`S4b`/`S13` عندَ «أ»؛ `P12`/`P13`/`P14` عندَ «ب»'
+    affectedFiles:
+      - src/root-of-trust/halt-switch.mts
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [grok_4_6, claude_opus_5_0]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: UF-07
+    engagement: M11.04
+    title: أمرٌ مُثبَّتٌ يُقبَلُ مرّةً ثانيةً بعدَ محوِ الدفترِ والحجوزاتِ
+    origin: round-2
+    severityAsWritten: medium
+    severity: medium
+    status: open
+    agreement: اتّفاقٌ على `open`
+    reproductionPath: '`S10`/`S4b`/`S13` عندَ «أ»؛ `P12` عندَ «ب»'
+    affectedFiles:
+      - src/root-of-trust/command-ledger.mts
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [grok_4_6]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: M11.04-F07
+    engagement: M11.04
+    title: شرطا «لا تكرارَ بعدَ مسحِ الدفترِ» و«لا عودةَ من الإيقافِ» لم يكتملا
+    origin: round-1
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: اتّفاقٌ على `open`
+    reproductionPath: يتبعُ إعادةَ إنتاجِ `UF-07` و`UF-03`
+    affectedFiles:
+      - src/root-of-trust/command-ledger.mts
+      - src/root-of-trust/halt-switch.mts
+    raisedBy: [grok_4_6]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: M11.04-F03
+    engagement: M11.04
+    title: إلغاءُ الشهاداتِ — ساقُ الانتهاءِ وساقُ ثباتِ الإلغاءِ
+    origin: round-1
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: >-
+      اختلافٌ في الصيغةِ، **واتّفاقٌ صريحٌ على أنَّ ثباتَ الإلغاءِ غيرُ محقَّقٍ افتراضاً**:
+      «أ» كتبَ النتيجةَ مُنشطرةً (ساقُ الانتهاءِ مغلقةٌ · ساقُ الثباتِ مفتوحةٌ)، و«ب» كتبَ `open`.
+    disagreement: اختلافُ صيغةٍ لا اختلافُ قياسٍ — والقيدُ `open` بالأضعفِ
+    reproductionPath: '`f03-repro.mjs` (خرجُ 0، `F03_PERSISTENCE_LEG_REPRODUCED`) — بعمليةِ Node ثانيةٍ مستقلّةٍ'
+    affectedFiles:
+      - src/root-of-trust/identity.mts
+    raisedBy: [grok_4_6]
+    overlapsWith: [R4-K3-03]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: R3-A-01
+    engagement: M11.04
+    title: البيانُ المحليُّ مصدرَ حقيقةٍ بلا مرجعٍ خارجَ القرصِ
+    origin: round-3
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: اختلافٌ — «أ» كتبَ `مغلق` و«ب» كتبَ `open`
+    disagreement: >-
+      «أ» حدّدَ النتيجةَ بما تصفُه (ختمُ البيانِ وربطُه بالهويّةِ والسياقِ والإصدارِ)
+      فأغلقَها، وأحالَ منعَ الاستبدالِ إلى بابِ `UF`. و«ب» أبقاها `open` لمسارِ مصادقةٍ
+      بديلٍ قاسَه (`P10`).
+    reproductionPath: '`P10` عندَ «ب»؛ وتحليلُ `state-manifest.mts` عندَ «أ»'
+    affectedFiles:
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [gemini_3_1_pro]
+    overlapsWith: [R4-B-01]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: M11.04-F05
+    engagement: M11.04
+    title: تحقُّقُ مادةِ المفاتيحِ واستمراريّةُ السجلِّ والمرساةِ
+    origin: round-1
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: >-
+      اتّفاقٌ على أنَّ تحقُّقَ مادةِ المفاتيحِ نفَذَ تشغيليّاً برمزِ خروجٍ `0` على SoftHSM حقيقيٍّ،
+      **واختلافٌ في نطاقِ الشرطِ**.
+    disagreement: >-
+      «ب» أدخلَ في شرطِ الإغلاقِ الأصليِّ رفضَ تاريخِ `GENESIS` المُعادِ بلا مرساةٍ
+      ووجدَه منقوضاً بـ`P13`؛ و«أ» أغلقَها على نطاقِ مادةِ المفاتيحِ وحدَه.
+    reproductionPath: '`npm run hsm:verify:f05` (خرجُ 0 عندَ كليهما)؛ و`P13` عندَ «ب»'
+    affectedFiles:
+      - src/root-of-trust/persistent-log.mts
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [grok_4_6]
+    overlapsWith: [R4-B-03]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: M11.04-F01
+    engagement: M11.04
+    title: الإنشاءُ الخامُّ لـ`EnforcementPoint` لا يُلزِمُ بوابةَ الهويّةِ
+    origin: round-1
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: اختلافٌ — «أ» `مغلق` في تركيبِ المصنعِ الرسميِّ، و«ب» `open` على العقدِ العامِ
+    disagreement: >-
+      **اختلافُ حدٍّ لا اختلافُ قياسٍ**: كلاهما قاسَ أنَّ `new EnforcementPoint` المباشرَ
+      لا يُلزِمُ بوابةَ الهويّةِ ولا `PoP`؛ واختلفا في هل يُحسَبُ ذلك بقاءً للثغرةِ.
+      قرارُ المالكِ (`WL-122`): الحدُّ مُفوّضٌ للمنفِّذِ، والمنفِّذُ اختارَ القراءةَ الأشدَّ
+      (المادة 9 — أولويّةُ السلامةِ): يُعامَلُ بقاءً للثغرةِ ويلزمُه إصلاحٌ.
+      **والحكمُ على كفايةِ الإصلاحِ للمجلسِ في جولةٍ لاحقةٍ لا للمنفِّذِ.**
+    reproductionPath: 'مجَسّاتُ «ب» في `E16b`؛ وتحليلُ التركيبِ عندَ «أ»'
+    affectedFiles:
+      - src/authorization/enforcement-point.mts
+    raisedBy: [grok_4_6]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: M11.04-F02
+    engagement: M11.04
+    title: الإنشاءُ الخامُّ الافتراضيُّ لـ`SessionStore` لا يُلزِمُ `PoP`
+    origin: round-1
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: اختلافٌ — «أ» `مغلق` في التركيبِ الإنتاجيِّ، و«ب» `open` على العقدِ العامِ
+    disagreement: كـ`M11.04-F01` — اختلافُ حدٍّ لا قياسٍ، والمنفِّذُ اختارَ القراءةَ الأشدَّ
+    reproductionPath: 'مجَسّاتُ «ب» في `E16b`'
+    affectedFiles:
+      - src/interfaces/session-store.mts
+    raisedBy: [grok_4_6]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: M11.04-F04
+    engagement: M11.04
+    title: أمرٌ منتهٍ — رفضُ التنفيذِ مُحقَّقٌ ورفضُ الإنشاءِ ناقصٌ في العقدِ
+    origin: round-1
+    severityAsWritten: medium
+    severity: medium
+    status: open
+    agreement: اختلافٌ — «أ» `مغلق`، و«ب» `open`
+    disagreement: >-
+      «ب» صرّحَ أنَّ **إحياءَ أمرٍ منتهٍ لم ينجحْ عندَه** وأنَّ التشغيلَ المقيسَ فشلَ
+      مغلقاً؛ وإنّما فتحَها لنقصِ **شرطِ رفضِ الإنشاءِ** حرفيّاً في العقدِ الأصليِّ.
+    reproductionPath: '`E16b` عندَ «ب»'
+    affectedFiles:
+      - src/root-of-trust/crown.mts
+    raisedBy: [grok_4_6]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  # ---------------------------------------------------------------- السبعُ الجديدةُ من الجولةِ الرابعةِ
+  - id: R4-K3-01
+    engagement: M11.04
+    title: >-
+      رجوعٌ حرٌّ بينَ أختامٍ صحيحةٍ: استبدالُ البيانِ بلقطةٍ أقدمَ نفسِ التوكنِ
+      يُتجاوزُ به `UF-01`/`03`/`07` معاً
+    origin: round-4
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ
+    reproductionPath: '`S10`/`S4b`/`S13` — خرجُ 0 وحالةٌ منجَزةٌ، ثلاثُ تجاربَ قابلةٍ للتكرارِ على توكنٍ حقيقيٍّ'
+    affectedFiles:
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [kimi_k3]
+    overlapsWith: [R4-B-04]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+
+  - id: R4-K3-02
+    engagement: M11.04
+    title: 'دفترُ الرفعِ بلا أصالةٍ: سطرٌ متّسقُ التجزئةِ يرفعُ العدّاداتِ قسريّاً'
+    origin: round-4
+    severityAsWritten: متوسطة (توثيق/توسُّع)
+    severity: medium
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: '`S8c` — `BOOT_OK` وطيٌّ منفَّذٌ'
+    affectedFiles:
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [kimi_k3]
+    overlapsWith: [R4-B-01]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+
+  - id: R4-K3-03
+    engagement: M11.04
+    title: ثباتُ إلغاءِ الشهاداتِ (ساقُ `F03`) يبقى ذاكرةً افتراضيّةً
+    origin: round-4
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: >-
+      نتيجةٌ جديدةٌ من العضوِ «أ»، **والعضوانِ متّفقانِ على جوهرِها**: كلاهما أثبتَ أنَّ
+      ثباتَ الإلغاءِ غيرُ محقَّقٍ افتراضاً بعمليةِ Node ثانيةٍ مستقلّةٍ.
+    reproductionPath: '`f03-repro.mjs` — خرجُ 0، `F03_PERSISTENCE_LEG_REPRODUCED`، بنسخةٍ ثانيةٍ'
+    affectedFiles:
+      - src/root-of-trust/identity.mts
+    raisedBy: [kimi_k3]
+    overlapsWith: [M11.04-F03]
+    rawReports:
+      kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: R4-B-01
+    engagement: M11.04
+    title: إعادةُ ختمِ زيادةٍ غيرِ مُصادَقٍ عليها في `journal`
+    origin: round-4
+    severityAsWritten: medium
+    severity: medium
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      `PROBE_IDS=P10 PROBE_RUN=single node --test $W/astra-probes.mjs` — الدليلُ المنفَّذُ
+      ضمنَ `E12` و`E25`، خروجٌ `1` لعدمِ حصولِ الرفضِ المتوقَّعِ. المقيسُ:
+      `signedValue=7,newSealValid=true,journalSurvived=false`.
+    affectedFiles:
+      - src/root-of-trust/state-manifest.mts
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [gpt_6_astra]
+    overlapsWith: [R4-K3-02, R3-A-01]
+    rawReports:
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: R4-B-02
+    engagement: M11.04
+    title: غيابُ ملفِّ الدفترِ يتجاوزُ شاهداً أصيلاً غيرَ صفريٍّ
+    origin: round-4
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      `PROBE_IDS=P12 node --test $W/astra-probes.mjs` — الشاهدُ المنفَّذُ `E12`/`E25`،
+      والمقيسُ `repeated=true,afterWitness=1`.
+    affectedFiles:
+      - src/root-of-trust/command-ledger.mts
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [gpt_6_astra]
+    overlapsWith: [UF-07]
+    rawReports:
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: R4-B-03
+    engagement: M11.04
+    title: المرساةُ الموقَّعةُ لا ترفعُ شاهدَ البيانِ عندَ إنجازِها
+    origin: round-4
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      `PROBE_IDS=P13 node --test $W/astra-probes.mjs` — الدليلُ `E25` بخروجٍ `1` بعدَ قبولِ
+      سجلٍّ فارغٍ، والمقيسُ `events=0,witnessed=0`.
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [gpt_6_astra]
+    overlapsWith: [M11.04-F05]
+    rawReports:
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  - id: R4-B-04
+    engagement: M11.04
+    title: استرجاعٌ جزئيٌّ يعيدُ `running` مع بقاءِ دفترٍ أحدثَ
+    origin: round-4
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      `PROBE_IDS=P14 node --test $W/astra-probes.mjs` — `E12`/`E25` بخروجٍ `1`، والمقيسُ
+      `running/epoch=0,newerLedgerPreserved=true,tokenRestored=false`.
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+      - src/root-of-trust/state-manifest.mts
+      - docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md
+    raisedBy: [gpt_6_astra]
+    overlapsWith: [R4-K3-01, UF-03]
+    rawReports:
+      gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
