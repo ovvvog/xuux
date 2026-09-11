@@ -13,6 +13,18 @@ export {
 } from './contract.mjs';
 export { ENV_ERRORS, EnvironmentError } from './errors.mjs';
 export { Environment } from './environment.mjs';
+export {
+  LEDGER_GENESIS,
+  LEDGER_REFUSING_STATES,
+  LEDGER_STATES,
+  LEDGER_VERSION,
+  auditLedgerChain,
+  chainRecord,
+  genesisDigest,
+  ledgerHeader,
+  ledgerStateRefuses,
+  parseLedgerHeader,
+} from './ledger-chain.mjs';
 export { bootstrapPlan, versionInRange } from './plan.mjs';
 export { evaluateProbes, healthVerdict } from './probes.mjs';
 export {

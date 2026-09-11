@@ -20,6 +20,7 @@ export const ENV_ERRORS = Object.freeze({
   VERDICT_UNDECLARED: 'ENV_VERDICT_UNDECLARED',
   CLOCK_INVALID: 'ENV_CLOCK_INVALID',
   LOG_REQUIRED: 'ENV_LOG_REQUIRED',
+  LEDGER_BROKEN: 'ENV_LEDGER_BROKEN',
 });
 
 /** خطأُ مسارِ البيئة — يحمل رمزَه من `ENV_ERRORS` وتفصيلَه. */

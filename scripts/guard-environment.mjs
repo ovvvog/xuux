@@ -33,7 +33,8 @@
  *       `.github/workflows/ci.yml` بنصٍّ واحد؛ فبوابةٌ لا تُشغَّل آلياً ليست
  *       بوابةً بل نيّة.
  *   R7: **الحكمُ نقيٌّ لا يلمس القرصَ**: `src/environment/probes.mjs` و
- *       `src/environment/plan.mjs` و`src/environment/tool-readiness.mjs`
+ *       `src/environment/plan.mjs` و`src/environment/tool-readiness.mjs` و
+ *       `src/environment/ledger-chain.mjs`
  *       **لا تستورد** `node:fs` ولا
  *       `node:child_process` ولا `node:process` — فالضمان
  *       `G-ENV-VERIFY-READ-ONLY` بنيةٌ لا نيّة، ووحدةٌ لا تملك المُلحِقَ لا
@@ -73,6 +74,12 @@
  * **الاستيرادِ الساكنِ داخلَ إغلاقِ المداخلِ المُعلَنة**، ولا تقيس `import()`
  * الديناميَّ ولا `createRequire`، ولا تمتدّ إلى سكربتٍ لا يصله المسار. وأمّا
  * `contract.mjs` فتقرأ الوثيقةَ بحكمِ عملِها ولذلك ليست في قائمةِ النقاء (R7).
+ *
+ * **حدٌّ معلَنٌ خامس (`ADR 0008`):** رأسُ دفترِ أثرِ الإقامةِ **ذرّيٌّ لا
+ * موقَّعٌ**، فالسلسلةُ تكشف الضياعَ والبترَ والتبديلَ الجزئيَّ ولا تصمد أمامَ
+ * خصمٍ يملك القرصَ فيُعيد كتابةَ المتنِ والرأسِ معاً. و**`R3-A-01` تبقى
+ * مفتوحةً** — ولا يقيس هذا الحاجزُ الدفترَ أصلاً لأنّ الدفترَ أثرُ تشغيلٍ لا
+ * نصٌّ في المستودعِ؛ الحكمُ عليه في `verify:env` بالرمزِ `ENV_LEDGER_BROKEN`.
  *
  * **حدٌّ معلَنٌ رابع (R11):** الحاجزُ يقيس **إعلانَ** الجاهزيّةِ وتقابلَه
  * مع الوثيقةِ ومغايرتَه لأمرِ الإصدار؛ **ولا يحكم أنّ أمرَ الجاهزيّةِ المُختارَ
@@ -165,6 +172,7 @@ const MODULE_FILES = [
   'src/environment/index.mjs',
   'src/environment/spawn-surface.mjs',
   'src/environment/tool-readiness.mjs',
+  'src/environment/ledger-chain.mjs',
 ];
 
 /** الوحداتُ التي يجب أن تبقى نقيّةً تماماً (R7). */
@@ -172,6 +180,7 @@ const PURE_FILES = [
   'src/environment/probes.mjs',
   'src/environment/plan.mjs',
   'src/environment/tool-readiness.mjs',
+  'src/environment/ledger-chain.mjs',
 ];
 
 // ── R0: الوثيقةُ تُحمَّل بمخطَّطها ──

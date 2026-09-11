@@ -22,12 +22,18 @@
  * `--ledger=<path>` ملفُّ سجلِّ الأثر.
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
-import { Environment } from '../src/environment/index.mjs';
+import { ENV_ERRORS, Environment } from '../src/environment/index.mjs';
 import { collectObservations, detectProfile } from './lib/environment-facts.mjs';
-import { EnvironmentLedger } from './lib/environment-ledger.mjs';
+import {
+  EnvironmentLedger,
+  auditLedgerFile,
+  defaultLedgerPath,
+  frozenLedgerPath,
+} from './lib/environment-ledger.mjs';
 
 /** @param {string} name @returns {string | null} */
 function flag(name) {
@@ -38,12 +44,15 @@ function flag(name) {
 
 const asJson = process.argv.includes('--json');
 const configDir = flag('dir');
-const ledgerPath =
-  flag('ledger') ?? path.join(process.cwd(), '.state', 'logs', 'environment.jsonl');
+const ledgerPath = flag('ledger') ?? defaultLedgerPath(process.cwd());
 // **الفاحصُ لا يُنشئ مجلَّدَ السجلِّ**: لو أنشأه لكان يُصلِح المجلَّدَ الذي
 // يفحص مجسٌّ حاسمٌ حضورَه، فيسقط المجسُّ مرّةً ثم يقوم بلا إقامةٍ — فحصٌ
 // يُخضِّر نفسَه بالتشغيلِ الثاني. وعند غيابِه يُعلَن القيدُ مُسقَطاً.
 const ledger = new EnvironmentLedger(ledgerPath, { createDir: false });
+
+// **الحكمُ على الدفترِ يُقرأ قبلَ أن يكتُبَ الفاحصُ فيه سطراً واحداً** — وإلّا لقاس
+// أثرَ نفسِه لا ما وجدَ. وما تتسامح معه الإقامةُ يرفضُه الفاحصُ: `ADR 0008`.
+const ledgerAudit = auditLedgerFile(ledgerPath);
 
 /** @type {Environment} */
 let environment;
@@ -89,6 +98,13 @@ if (asJson) {
       exitCode: report.exitCode,
       auditWritten: ledger.count,
       auditDropped: ledger.dropped,
+      ledger: {
+        state: ledgerAudit.state,
+        refuses: ledgerAudit.refuses,
+        committed: ledgerAudit.committed,
+        present: ledgerAudit.present,
+        detail: ledgerAudit.detail,
+      },
       criticalFailures: report.criticalFailures,
       warningFailures: report.warningFailures,
       probes: report.results.map((result) => ({
@@ -115,12 +131,35 @@ if (asJson) {
       `│ قيدُ الأثرِ مُسقَطٌ (${String(ledger.dropped)}): مجلَّدُ السجلِّ «${path.dirname(ledger.file)}» غائبٌ، والفاحصُ لا يُنشئه — فالإسقاطُ يُقال ولا يُسكَت.`,
     );
   }
+  const ledgerMark = ledgerAudit.refuses ? '⛔' : ledgerAudit.state === 'intact' ? '✅' : 'ℹ️ ';
+  console.log(`│ ${ledgerMark} دفترُ الأثرِ [${ledgerAudit.state}] — ${ledgerAudit.detail}`);
+  if (fs.existsSync(frozenLedgerPath(ledgerPath))) {
+    console.log(
+      `│ ℹ️  دفترٌ مُجمَّدٌ ما قبلَ ADR 0008 حاضرٌ: ${frozenLedgerPath(ledgerPath)} — لا يُكتَب فيه ولا يُهاجَر منه؛ ولا يدخل في هذا الحكمِ لأنّه بلا رأسٍ يُشهَد به.`,
+    );
+  }
   console.log(`└─ الحكمُ: ${report.verdict} — ${report.statement}`);
   if (report.verdict === 'unfit') {
     console.error(
       '⛔ بيئةٌ غيرُ صالحةٍ. أعِد `npm run bootstrap` — كلُّ طورٍ متكافئٌ فلا يُفسِد ما قام.',
     );
   }
+}
+
+// **فشلٌ مغلَقٌ على مسارِ التحقّقِ وحدَه (`ADR 0008`):** إن كان دفترُ الأثرِ
+// مبتوراً أو مُبدَّلاً أو بلا رأسٍ يشهد به، فلا يُقال عن البيئةِ «صالحةٌ»: حكمٌ
+// يستند إلى أثرٍ لا يُوثَق به حكمٌ بلا سند. **والإقامةُ لا تُعطَّل بهذا** — تمضي
+// وتُعلِن الحجرَ، فمن ربط إصلاحَ البيئةِ بسلامةِ دفترِها أغلق بابَ الإصلاحِ على نفسِه.
+if (ledgerAudit.refuses) {
+  const code = ENV_ERRORS.LEDGER_BROKEN;
+  if (asJson) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, code, message: ledgerAudit.detail, ledger: ledgerAudit })}\n`,
+    );
+  } else {
+    console.error(`⛔ دفترُ أثرِ الإقامةِ مرفوضٌ [${code}]: ${ledgerAudit.detail}`);
+  }
+  process.exit(environment.exitCodeFor('unfit'));
 }
 
 process.exit(report.exitCode);

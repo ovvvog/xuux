@@ -24,7 +24,7 @@ import path from 'node:path';
 export const SPAWN_IMPORT = 'node:child_process';
 
 /** يلتقطُ مواصفةَ كلِّ استيرادٍ ساكنٍ أو `export ... from`. */
-const IMPORT_SPEC = /(?:^|\n)\s*(?:import|export)[^'"\n]*?from\s*['"]([^'"]+)['"]/gu;
+const IMPORT_SPEC = /(?:^|\n)\s*(?:import|export)[^'";]*?from\s*['"]([^'"]+)['"]/gu;
 
 /**
  * مواصفاتُ الاستيرادِ الظاهرةُ في نصِّ ملفٍّ واحد.

@@ -31,7 +31,11 @@ import process from 'node:process';
 
 import { Environment } from '../src/environment/index.mjs';
 import { collectFacts, collectObservations, detectProfile } from './lib/environment-facts.mjs';
-import { EnvironmentLedger } from './lib/environment-ledger.mjs';
+import {
+  EnvironmentLedger,
+  defaultLedgerPath,
+  frozenLedgerPath,
+} from './lib/environment-ledger.mjs';
 
 /** @param {string} name @returns {string | null} */
 function flag(name) {
@@ -43,8 +47,7 @@ function flag(name) {
 const dryRun = process.argv.includes('--dry-run');
 const asJson = process.argv.includes('--json');
 const configDir = flag('dir');
-const ledgerPath =
-  flag('ledger') ?? path.join(process.cwd(), '.state', 'logs', 'environment.jsonl');
+const ledgerPath = flag('ledger') ?? defaultLedgerPath(process.cwd());
 // المُقيمُ يُنشئ مجلَّدَ السجلِّ لأنّ إنشاءَ المجلَّداتِ **طورٌ من عملِه
 // المُعلَن**؛ أمّا التشغيلُ الجافُّ **فلا يُحدِث أثراً على القرصِ أصلاً** ولو
 // كان أثرَ قيدٍ: فمن قال «جافٌّ» ثم أنشأ مجلَّداً قال ما لم يفعل، وعندها
@@ -84,6 +87,17 @@ if (!asJson) {
     `│ الأطوارُ: ${String(plan.executeCount)} تُنفَّذ و${String(plan.skipCount)} تُتخطّى بسببٍ مُسمّى`,
   );
   console.log(`│ سجلُّ الأثر: ${ledger.file}`);
+  console.log(`│ رأسُ السجلِّ الذرّيُّ: ${ledger.headFile}`);
+  if (ledger.quarantine !== null) {
+    console.log(
+      `│ ⚠️  الدفترُ في الحجرِ — ${ledger.quarantine} فلا يُكتَب فيه حرفٌ ويُصان كما وُجِد، **والإقامةُ تمضي**: من عطّلها بعطبِ دفترِها سلّم لمن أفسد ملفَّ سجلٍّ مفتاحَ تعطيلِ الدولةِ. والفاحصُ verify:env يُغلَق عليه.`,
+    );
+  }
+  if (fs.existsSync(frozenLedgerPath(ledger.file))) {
+    console.log(
+      `│ الدفترُ المُجمَّدُ: ${frozenLedgerPath(ledger.file)} — ما قبلَ ADR 0008؛ لا يُكتَب فيه ولا يُهاجَر منه ولا يُحذَف.`,
+    );
+  }
   console.log('└─');
 }
 

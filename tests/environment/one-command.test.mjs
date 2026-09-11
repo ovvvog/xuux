@@ -35,7 +35,12 @@ import test from 'node:test';
 
 import YAML from 'yaml';
 
-import { exitCodeOf, loadEnvironmentContract } from '../../src/environment/index.mjs';
+import {
+  auditLedgerChain,
+  exitCodeOf,
+  genesisDigest,
+  loadEnvironmentContract,
+} from '../../src/environment/index.mjs';
 
 const ROOT = process.cwd();
 const BOOTSTRAP = 'scripts/bootstrap.mjs';
@@ -166,9 +171,12 @@ test('بيئةٌ نظيفةٌ ⇒ أمرٌ واحدٌ ⇒ فحصُ صحّةٍ ن
       `المجلَّد ${directory} لم يُنشَأ`,
     );
   }
-  // وسجلُّ الأثرِ كُتِب على القرصِ بقيودٍ تُقرأ.
-  const ledger = path.join(workdir, '.state', 'logs', 'environment.jsonl');
+  // ودفترُ الأثرِ كُتِب على القرصِ بقيودٍ تُقرأ — ومعه **رأسٌ ذرّيٌّ**
+  // يشهد بعدَدِها وبآخرِ بصمٍ فيها (`ADR 0008`).
+  const ledger = path.join(workdir, '.state', 'logs', 'environment-ledger.jsonl');
+  const ledgerHead = path.join(workdir, '.state', 'logs', 'environment-ledger.head.json');
   assert.equal(fs.existsSync(ledger), true);
+  assert.equal(fs.existsSync(ledgerHead), true, 'دفترٌ بلا رأسٍ لا يُعرَف كم كان طولُه');
   const entries = fs
     .readFileSync(ledger, 'utf8')
     .split('\n')
@@ -178,6 +186,23 @@ test('بيئةٌ نظيفةٌ ⇒ أمرٌ واحدٌ ⇒ فحصُ صحّةٍ ن
   assert.ok(entries.some((entry) => entry.type === 'environment.bootstrap.planned'));
   assert.ok(entries.some((entry) => entry.type === 'environment.bootstrap.phase'));
   assert.ok(entries.some((entry) => entry.type === 'environment.verify.completed'));
+
+  // السلسلةُ متّصلةٌ والرأسُ يشهد بآخرِها — مقيسٌ بإعادةِ الحسابِ لا بالنظر.
+  const audit = auditLedgerChain({
+    headerText: fs.readFileSync(ledgerHead, 'utf8'),
+    bodyText: fs.readFileSync(ledger, 'utf8'),
+  });
+  assert.equal(audit.state, 'intact', audit.detail);
+  assert.equal(audit.refuses, false);
+  assert.equal(audit.committed, entries.length);
+  assert.equal(entries[0].prev, genesisDigest(), 'أوّلُ قيدٍ يُشير إلى البذرةِ المُعلَنة');
+
+  // والملفُّ القديمُ **لا يُكتَب فيه أصلاً** بعد `ADR 0008`.
+  assert.equal(
+    fs.existsSync(path.join(workdir, '.state', 'logs', 'environment.jsonl')),
+    false,
+    'الدفترُ القديمُ مُجمَّدٌ: إقامةٌ جديدةٌ لا تُنشئُه ولا تكتب فيه',
+  );
 
   // الفحصُ المستقلُّ بعدَ الإقامةِ: حكمٌ ناجحٌ برمزٍ صفريّ.
   const after = run(VERIFY, ['--json', `--dir=${configDir}`], workdir);

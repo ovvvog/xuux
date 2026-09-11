@@ -49,6 +49,30 @@ test('استخراجُ المواصفاتِ يلتقط الاستيرادَ ال
   assert.ok(!specs.includes('./dynamic.mjs'), 'الحدُّ المعلَن: الديناميُّ خارجَ القياس');
 });
 
+test('الاستيرادُ الممتدُّ على أسطرٍ يُلتقَط — وإلّا كان كسرُ السطرِ بابَ تسلُّلٍ من الحاجز', () => {
+  // قيسَ هذا بالتنفيذِ لا بالنظرِ: إضافةُ ملفٍ جديدٍ إلى المسارِ باستيرادٍ
+  // ممتدٍّ **أنقصت** الإغلاقَ المقيسَ من 11 إلى 10 بدلَ أن تزيدَه، فكان من
+  // يكسر سطرَ استيرادِه يخرج من قياسِ R10 وهو داخلَ المسارِ فعلاً.
+  const source = [
+    'import {',
+    '  EnvironmentLedger,',
+    '  auditLedgerFile,',
+    "} from './lib/environment-ledger.mjs';",
+    'export {',
+    '  judge,',
+    "} from '../src/environment/tool-readiness.mjs';",
+  ].join('\n');
+  assert.deepEqual(importSpecifiers(source), [
+    './lib/environment-ledger.mjs',
+    '../src/environment/tool-readiness.mjs',
+  ]);
+});
+
+test('المواصفةُ لا تعبُر حدَّ الجملةِ فيُختلق تبعٌ لا وجودَ له', () => {
+  const source = ["import a from './a.mjs';", "const x = qq from './ghost.mjs';"].join('\n');
+  assert.deepEqual(importSpecifiers(source), ['./a.mjs']);
+});
+
 test('حلُّ المواصفةِ النسبيّةِ يُعطي مساراً من الجذرِ ويُهمِل غيرَ النسبيّة', () => {
   assert.equal(resolveRelative('scripts/bootstrap.mjs', './lib/x.mjs'), 'scripts/lib/x.mjs');
   assert.equal(resolveRelative('scripts/lib/x.mjs', '../../src/y.mjs'), 'src/y.mjs');
