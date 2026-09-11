@@ -26,6 +26,118 @@ export const SPAWN_IMPORT = 'node:child_process';
 /** يلتقطُ مواصفةَ كلِّ استيرادٍ ساكنٍ أو `export ... from`. */
 const IMPORT_SPEC = /(?:^|\n)\s*(?:import|export)[^'";]*?from\s*['"]([^'"]+)['"]/gu;
 
+/** يلتقطُ `import('…')` و`require('…')` بمواصفةٍ **حرفيّةٍ** تُقرأ. */
+const DYNAMIC_SPEC = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/gu;
+
+/** يلتقطُ تحميلاً بمواصفةٍ **غيرِ حرفيّةٍ** — لا تُقاس فلا تُمرَّر. */
+const OPAQUE_LOAD = /\b(?:import|require)\s*\(\s*(?!['"])[^)]/u;
+
+/** `createRequire` بابٌ إلى `require` في مستودعٍ كلُّه وحداتُ ESM. */
+const CREATE_REQUIRE = /\bcreateRequire\b/u;
+
+/**
+ * تجريدُ النصِّ من التعليقاتِ قبلَ قياسِه.
+ *
+ * **لماذا هذا شرطٌ لا زينة:** `import('…')` يَرِدُ في هذا المستودعِ **داخلَ
+ * تعليقاتِ JSDoc** نوعاً لا تحميلاً (`@type {import('./x.mjs').T}`) — عشراتُ
+ * المواضع. فمن عدَّها تحميلاً أطلقَ إنذاراتٍ كاذبةً تُدرَّب العينُ على
+ * تجاهلِها، وحاجزٌ يُتجاهَل أسوأُ من حاجزٍ لا يوجد.
+ *
+ * والسلاسلُ النصّيّةُ تُصان كما هي: `'//'` داخلَ سلسلةٍ ليس بدايةَ تعليق.
+ *
+ * @param {string} source
+ * @returns {string}
+ */
+export function stripComments(source) {
+  let out = '';
+  let index = 0;
+  /** @type {null | 'line' | 'block' | '\'' | '"' | '`'} */
+  let mode = null;
+  while (index < source.length) {
+    const two = source.slice(index, index + 2);
+    const ch = source[index] ?? '';
+    if (mode === null) {
+      if (two === '//') {
+        mode = 'line';
+        index += 2;
+        continue;
+      }
+      if (two === '/*') {
+        mode = 'block';
+        index += 2;
+        continue;
+      }
+      if (ch === "'" || ch === '"' || ch === '`') mode = /** @type {'\'' | '"' | '`'} */ (ch);
+      out += ch;
+      index += 1;
+      continue;
+    }
+    if (mode === 'line') {
+      if (ch === '\n') {
+        mode = null;
+        out += ch;
+      }
+      index += 1;
+      continue;
+    }
+    if (mode === 'block') {
+      if (two === '*/') {
+        mode = null;
+        index += 2;
+      } else {
+        if (ch === '\n') out += ch;
+        index += 1;
+      }
+      continue;
+    }
+    // داخلَ سلسلةٍ نصّيّة.
+    if (ch === '\\') {
+      out += source.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+    if (ch === mode) mode = null;
+    out += ch;
+    index += 1;
+  }
+  return out;
+}
+
+/**
+ * مواصفاتُ التحميلِ الديناميِّ الحرفيّةِ — `import('…')` و`require('…')`.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function dynamicSpecifiers(source) {
+  /** @type {string[]} */
+  const specs = [];
+  for (const match of stripComments(source).matchAll(DYNAMIC_SPEC)) {
+    const spec = match[1];
+    if (spec !== undefined) specs.push(spec);
+  }
+  return specs;
+}
+
+/**
+ * أسبابُ تعذُّرِ القياسِ في ملفٍّ — تحميلٌ بمواصفةٍ غيرِ حرفيّةٍ أو `createRequire`.
+ *
+ * **فشلٌ مغلَقٌ عن قصد:** حاجزٌ لا يستطيع أن يقيسَ ملفّاً **لا يُمرِّرُه**.
+ * فالمرورُ عند العجزِ يقول «قِستُ فلم أجد» وهو لم يَقِس.
+ *
+ * @param {string} source
+ * @returns {string[]}
+ */
+export function opaqueLoadReasons(source) {
+  const code = stripComments(source);
+  /** @type {string[]} */
+  const reasons = [];
+  if (OPAQUE_LOAD.test(code)) reasons.push('تحميلٌ بمواصفةٍ غيرِ حرفيّةٍ لا تُقرأ نصّاً');
+  if (CREATE_REQUIRE.test(code))
+    reasons.push('`createRequire` — بابٌ إلى `require` خارجَ قياسِ الاستيراد');
+  return reasons;
+}
+
 /**
  * مواصفاتُ الاستيرادِ الظاهرةُ في نصِّ ملفٍّ واحد.
  *
@@ -81,7 +193,7 @@ export function importClosure({ entries, sourceOf }) {
       continue;
     }
     seen.add(file);
-    for (const spec of importSpecifiers(source)) {
+    for (const spec of [...importSpecifiers(source), ...dynamicSpecifiers(source)]) {
       const resolved = resolveRelative(file, spec);
       if (resolved !== null && !seen.has(resolved)) queue.push(resolved);
     }
@@ -100,19 +212,24 @@ export function importClosure({ entries, sourceOf }) {
  * @param {string[]} input.entries
  * @param {string[]} input.declared الملفّاتُ التي تُجيز لها الوثيقةُ إطلاقَ عمليّة.
  * @param {(file: string) => string | null} input.sourceOf
- * @returns {{ closure: string[], spawners: string[], undeclared: string[], stale: string[], missing: string[] }}
+ * @returns {{ closure: string[], spawners: string[], undeclared: string[], stale: string[], missing: string[], opaque: { file: string, reasons: string[] }[] }}
  */
 export function auditSpawnSurface({ entries, declared, sourceOf }) {
   const { closure, missing } = importClosure({ entries, sourceOf });
   const allowed = new Set(declared);
   /** @type {string[]} */
   const spawners = [];
+  /** @type {{ file: string, reasons: string[] }[]} */
+  const opaque = [];
   for (const file of closure) {
     const source = sourceOf(file);
     if (source === null) continue;
-    if (importSpecifiers(source).includes(SPAWN_IMPORT)) spawners.push(file);
+    const specs = [...importSpecifiers(source), ...dynamicSpecifiers(source)];
+    if (specs.includes(SPAWN_IMPORT)) spawners.push(file);
+    const reasons = opaqueLoadReasons(source);
+    if (reasons.length > 0) opaque.push({ file, reasons });
   }
   const undeclared = spawners.filter((file) => !allowed.has(file));
   const stale = declared.filter((file) => !spawners.includes(file)).sort();
-  return { closure, spawners, undeclared, stale, missing };
+  return { closure, spawners, undeclared, stale, missing, opaque };
 }
