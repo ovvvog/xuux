@@ -17,7 +17,21 @@
  *    بـ`ENCRYPTION_TRANSPORT_INSECURE`، ولا يُستثنى إلا `loopback` في غير الإنتاج
  *    حيث لا شبكة تُنصت أصلاً. والاستثناء نفسه **بيانٌ** في `config/encryption.yaml`
  *    لا شرطٌ في هذا الملف.
+ * 4. **جهةُ الإصدارِ تُعلَنُ ولا يُسقَطُ التحقُّقُ** (سدادُ الدَينِ `D-12`).
+ *    كانت الوصلةُ تُنشَأُ بـ`rejectUnauthorized: true` **بلا سبيلٍ إلى تمريرِ شهادةِ
+ *    جهةٍ مُصدِّرةٍ**، فكلُّ قاعدةٍ مُدارةٍ تُوقِّعُ شهادتَها بجهةٍ خاصّةٍ بها — وهي
+ *    الحالةُ الشائعةُ في الخدماتِ المُدارةِ — كانت **غيرَ قابلةٍ للوصلِ أصلاً**،
+ *    وقِيسَ ذلك بفشلٍ حقيقيٍّ برمزِ `SELF_SIGNED_CERT_IN_CHAIN`. والطريقُ الذي
+ *    يسلكُه الناسُ عند هذا الفشلِ هو `rejectUnauthorized: false`، وهو **إبطالُ
+ *    التشفيرِ المُوثَّقِ** لا إصلاحُه: يبقى النقلُ مُعمّىً ويسقطُ التحقُّقُ من
+ *    الطرفِ، فيُقبَلُ وسيطٌ يعترضُ. فالحلُّ هنا: **تُعلَنُ الشهادةُ** في
+ *    `DATABASE_CA_FILE` (مسارٌ) أو `DATABASE_CA` (نصُّ PEM)، **ولا يوجدُ في هذه
+ *    الوحدةِ مفتاحٌ يُسقِطُ التحقُّقَ بحالٍ** — لا متغيّرَ بيئةٍ ولا وسيطَ نداءٍ.
+ *    ومَن أعلنَ مساراً لا يُقرأُ فَشِلَ صراحةً بـ`DB_CA_UNREADABLE` عند حلِّ
+ *    الإعدادِ، لا عندَ أوّلِ استعلامٍ، ولا سقطَ صامتاً إلى مخزنِ الثقةِ الافتراضيِّ.
  */
+
+import fs from 'node:fs';
 
 import pg from 'pg';
 
@@ -58,6 +72,7 @@ export const DB_ERRORS = Object.freeze({
   URL_MISSING: 'DB_URL_MISSING',
   URL_INVALID: 'DB_URL_INVALID',
   INSECURE_IN_PRODUCTION: 'DB_INSECURE_IN_PRODUCTION',
+  CA_UNREADABLE: 'DB_CA_UNREADABLE',
 });
 
 /** خطأ وصلة يحمل رمزاً مسمّى. */
@@ -86,12 +101,61 @@ function requestsTls(url) {
 }
 
 /**
+ * يُعلِنُ شهادةَ جهةِ الإصدارِ إن أُعلِنتْ، ويُفشِلُ مُغلَقاً إن أُعلِنَ ما لا يُقرأُ.
+ * الترتيبُ مقصودٌ: وسيطُ النداءِ يسبقُ البيئةَ كي يُختبَرَ بلا تلويثِ `process.env`،
+ * والمسارُ يسبقُ النصَّ لأنّ ملفاً على القرصِ لا يُسرَّبُ في قائمةِ عمليّاتٍ.
+ * @param {object} options
+ * @param {string | undefined} [options.ca] نصُّ PEM مُمرَّرٌ صراحةً.
+ * @param {string | undefined} [options.caFile] مسارُ ملفِّ PEM.
+ * @returns {string | null}
+ */
+function resolveCertificateAuthority(options) {
+  const inlineArg = options.ca;
+  if (typeof inlineArg === 'string' && inlineArg.trim() !== '') return inlineArg;
+
+  const fileArg = options.caFile ?? process.env.DATABASE_CA_FILE;
+  if (typeof fileArg === 'string' && fileArg.trim() !== '') {
+    try {
+      const pem = fs.readFileSync(fileArg.trim(), 'utf8');
+      if (!pem.includes('BEGIN CERTIFICATE')) {
+        throw new DatabaseConfigError(
+          DB_ERRORS.CA_UNREADABLE,
+          `DATABASE_CA_FILE لا يحملُ شهادةً بصيغةِ PEM: ${fileArg.trim()}`,
+        );
+      }
+      return pem;
+    } catch (error) {
+      if (error instanceof DatabaseConfigError) throw error;
+      throw new DatabaseConfigError(
+        DB_ERRORS.CA_UNREADABLE,
+        `DATABASE_CA_FILE مُعلَنٌ ولا يُقرأُ: ${fileArg.trim()} — ${/** @type {Error} */ (error).message}`,
+      );
+    }
+  }
+
+  const inlineEnv = process.env.DATABASE_CA;
+  if (typeof inlineEnv === 'string' && inlineEnv.trim() !== '') {
+    if (!inlineEnv.includes('BEGIN CERTIFICATE')) {
+      throw new DatabaseConfigError(
+        DB_ERRORS.CA_UNREADABLE,
+        'DATABASE_CA مُعلَنٌ وليس شهادةً بصيغةِ PEM.',
+      );
+    }
+    return inlineEnv;
+  }
+
+  return null;
+}
+
+/**
  * تحقّق من صلاحية وصلة قاعدة البيانات في البيئة المعطاة، وأعِد أجزاءها.
  * تُصدَّر منفردة كي يُختبر الحرس بلا فتح وصلة فعلية.
  * @param {object} [options]
  * @param {string | undefined} [options.url] الوصلة؛ الافتراضي `process.env.DATABASE_URL`.
  * @param {string | undefined} [options.environment] وضع التشغيل؛ الافتراضي `STATE_ENV` ثم `NODE_ENV`.
- * @returns {{ url: URL, environment: string, tls: boolean }}
+ * @param {string | undefined} [options.ca] شهادةُ جهةِ الإصدارِ نصّاً (PEM).
+ * @param {string | undefined} [options.caFile] مسارُ ملفِّ شهادةِ جهةِ الإصدارِ.
+ * @returns {{ url: URL, environment: string, tls: boolean, ca: string | null }}
  */
 export function resolveDatabaseConfig(options = {}) {
   const raw = options.url ?? process.env.DATABASE_URL;
@@ -133,7 +197,11 @@ export function resolveDatabaseConfig(options = {}) {
   // لأن ما اختُرق ليس شكل الوصلة بل سرّية ما يُنقل فيها.
   assertSecureTransport({ host: url.hostname, tls, environment, policy: policy() });
 
-  return { url, environment, tls };
+  // الشهادةُ تُحَلُّ هنا لا في `createPool`: مسارٌ مُعلَنٌ لا يُقرأُ عَيبُ إعدادٍ
+  // يُكشَفُ عندَ التحقُّقِ، لا عَطَبٌ يظهرُ عندَ أوّلِ استعلامٍ في الإنتاجِ.
+  const ca = tls ? resolveCertificateAuthority(options) : null;
+
+  return { url, environment, tls, ca };
 }
 
 /**
@@ -146,16 +214,26 @@ export function resolveDatabaseConfig(options = {}) {
  * @returns {import('pg').Pool}
  */
 export function createPool(options = {}) {
-  const { url, tls } = resolveDatabaseConfig(options);
+  const { url, tls, ca } = resolveDatabaseConfig(options);
+  // `sslmode` يُقرأُ في هذه الوحدةِ وُيُحذَفُ من الوصلةِ قبلَ تمريرِها إلى `pg`.
+  // والسببُ مقيسٌ لا نظريٌّ: `pg` يشتقُّ من `sslmode` إعدادَ TLS الخاصَّ به
+  // **فيُلغي به كائنَ `ssl` المُمرَّرَ**، فتضيعُ شهادةُ جهةِ الإصدارِ وتفشلُ الوصلةُ
+  // بـ`SELF_SIGNED_CERT_IN_CHAIN` مع أنّ الشهادةَ مُعلَنةٌ وصحيحةٌ. فمصدرُ الحقيقةِ
+  // واحدٌ: الوصلةُ تُعلِنُ النيّةَ، وهذه الوحدةُ تترجمُها إلى خيارٍ واحدٍ لا يُنازَعُ.
+  const dsn = new URL(url.toString());
+  dsn.searchParams.delete('sslmode');
   const pool = new pg.Pool({
-    connectionString: url.toString(),
+    connectionString: dsn.toString(),
     max: options.max ?? 8,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 10_000,
     statement_timeout: 30_000,
     query_timeout: 30_000,
     application_name: 'digital-state',
-    ...(tls ? { ssl: { rejectUnauthorized: true } } : {}),
+    // `rejectUnauthorized` مُثبَّتٌ على `true` ولا يُمرَّرُ من وسيطٍ ولا من بيئةٍ:
+    // خيارٌ واحدٌ يُسقِطُ التحقُّقَ يُستَعمَلُ يومَ يضيقُ الوقتُ، ويبقى. ومَن لزمتْه
+    // جهةُ إصدارٍ خاصّةٌ أعلَنَها فَوَصَلَ بتحقُّقٍ كاملٍ، لا أسقطَ التحقُّقَ ليمرُّ.
+    ...(tls ? { ssl: { rejectUnauthorized: true, ...(ca ? { ca } : {}) } } : {}),
   });
   // خطأ في وصلة خاملة يرفعه المجمّع على مستوى المجمّع لا على مستوى الاستعلام،
   // ومن لم يستمع له أسقط العملية كلها بخطأ غير ممسوك.
