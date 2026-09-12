@@ -44,6 +44,15 @@ export const ADAPTER_ERRORS = Object.freeze({
   USAGE_INVALID: 'INFERENCE_ADAPTER_USAGE_INVALID',
   MODEL_MISMATCH: 'INFERENCE_ADAPTER_MODEL_MISMATCH',
   TIMED_OUT: 'INFERENCE_ADAPTER_TIMED_OUT',
+  // ── رموزُ نقلِ الشبكةِ: تُستعملُ في مُوائمِ `https` وحدَه، ومكانُها هنا لأنّ
+  //    رمزَ الرفضِ عقدٌ يُقرأُ من خارجِ الوحدةِ، ورمزٌ يُعلَنُ في كلِّ مُوائمٍ
+  //    وحدَه يصيرُ رمزينِ لعَيبٍ واحدٍ.
+  KEY_ABSENT: 'INFERENCE_ADAPTER_KEY_ABSENT',
+  ENDPOINT_INSECURE: 'INFERENCE_ADAPTER_ENDPOINT_INSECURE',
+  PROVIDER_REFUSED: 'INFERENCE_ADAPTER_PROVIDER_REFUSED',
+  TRANSPORT_FAILED: 'INFERENCE_ADAPTER_TRANSPORT_FAILED',
+  RESPONSE_UNREADABLE: 'INFERENCE_ADAPTER_RESPONSE_UNREADABLE',
+  RESPONSE_TOO_LARGE: 'INFERENCE_ADAPTER_RESPONSE_TOO_LARGE',
 });
 
 /** خطأٌ مسمّىً لعقدِ المُوائمِ. */
@@ -88,6 +97,28 @@ export const MAX_ADAPTER_TIMEOUT_MS = 120_000;
 
 const SECRET_LOOKING = /^(sk-|pk-|Bearer\s|xoxb-|ghp_|AIza)/i;
 const ENV_NAME = /^[A-Z][A-Z0-9_]{2,63}$/;
+
+/**
+ * هل تُشبِهُ القيمةُ مفتاحاً؟ **مُصدَّرةٌ لا مخفيّةٌ**: مُوائمُ الشبكةِ يفحصُ بها
+ * ترويساتَه وحقولَه الثابتةَ بنفسِ المقياسِ الذي يفحصُ به العقدُ الإعلانَ، ولو
+ * كرَّرَ كلُّ مُوائمٍ نمطَه لصارَ للسرِّ مقياسانِ يفترقانِ عندَ أوّلِ تعديلٍ.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function looksLikeSecret(value) {
+  return SECRET_LOOKING.test(value);
+}
+
+/**
+ * اسمُ متغيّرِ بيئةٍ لا قيمتُه — نفسُ مقياسِ `apiKeyEnv` في هذا العقدِ.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isEnvName(value) {
+  return ENV_NAME.test(value);
+}
 
 /**
  * @param {string} code

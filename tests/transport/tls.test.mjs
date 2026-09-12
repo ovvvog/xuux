@@ -42,6 +42,7 @@ import {
   secureClientOptions,
 } from '../../src/transport/index.mjs';
 import { enforcementPointFor } from '../helpers/authorization.mjs';
+import { issueMaterial } from '../helpers/tls-material.mjs';
 
 const ROOT = process.cwd();
 const CONFIG_DIR = path.join(ROOT, 'config');
@@ -49,59 +50,6 @@ const API_POLICY = loadApiPolicy({ dir: CONFIG_DIR });
 const MONITORING_POLICY = loadMonitoringPolicy({ dir: CONFIG_DIR });
 const ROUTES = compileRoutes({ policy: API_POLICY });
 const AUDITOR = 'agent:tls-auditor';
-
-/**
- * يُولِّدُ جهةَ إصدارٍ وشهادةَ خادمٍ موقَّعةً منها في مجلَّدٍ مؤقَّتٍ.
- * @param {string} dir
- * @param {string} name بادئةُ الملفّاتِ — تُميِّزُ جهةَ إصدارٍ عن أخرى.
- * @returns {{ caFile: string, certFile: string, keyFile: string }}
- */
-function issueMaterial(dir, name) {
-  const caKey = path.join(dir, `${name}-ca.key`);
-  const caFile = path.join(dir, `${name}-ca.crt`);
-  const keyFile = path.join(dir, `${name}-server.key`);
-  const csr = path.join(dir, `${name}-server.csr`);
-  const certFile = path.join(dir, `${name}-server.crt`);
-  const extFile = path.join(dir, `${name}-server.ext`);
-  const ec = ['-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1', '-nodes'];
-  /** @param {string[]} args */
-  const openssl = (args) => execFileSync('openssl', args, { stdio: 'pipe' });
-
-  openssl([
-    'req',
-    '-x509',
-    ...ec,
-    '-keyout',
-    caKey,
-    '-out',
-    caFile,
-    '-days',
-    '1',
-    '-subj',
-    `/CN=${name}-ca`,
-  ]);
-  openssl(['req', '-new', ...ec, '-keyout', keyFile, '-out', csr, '-subj', '/CN=localhost']);
-  // الاسمُ البديلُ مُعلَنٌ: شهادةٌ بلا `subjectAltName` تُرَدُّ في العملاءِ
-  // الحديثينِ، فاختبارُ نجاحٍ بلا اسمٍ بديلٍ كان سيَقيسُ فشلاً ويُسمّيه نجاحاً.
-  fs.writeFileSync(extFile, 'subjectAltName=DNS:localhost,IP:127.0.0.1\n');
-  openssl([
-    'x509',
-    '-req',
-    '-in',
-    csr,
-    '-CA',
-    caFile,
-    '-CAkey',
-    caKey,
-    '-out',
-    certFile,
-    '-days',
-    '1',
-    '-extfile',
-    extFile,
-  ]);
-  return { caFile, certFile, keyFile };
-}
 
 /** دولةٌ مصغَّرةٌ ببوابةٍ حقيقيّةٍ على مكوّناتٍ حقيقيّةٍ. */
 function realGateway() {

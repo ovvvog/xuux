@@ -9,7 +9,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,113 +25,10 @@ import {
   deterministicExecutor,
   estimateTokens,
 } from '../../src/inference/adapters/deterministic.mjs';
-import { createInferenceGate, INFERENCE_ERRORS } from '../../src/inference/inference-gate.mjs';
-import { loadPolicyBundle } from '../../src/policy/loader.mjs';
-import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
-import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
-import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
-import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
-import { createWeightStore } from '../../src/models/weight-store.mjs';
-import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
-import {
-  experimentLedgerFor,
-  registerEvaluationExperiment,
-} from '../helpers/experiment-support.mjs';
+import { INFERENCE_ERRORS } from '../../src/inference/inference-gate.mjs';
+import { gateWithAdapter, minister } from '../helpers/inference-gate.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-/** @returns {{ events: Array<{ type: string, actor: string, payload: Record<string, unknown> }>, append: (type: string, actor: string, payload: object) => void }} */
-function memoryLog() {
-  /** @type {Array<{ type: string, actor: string, payload: Record<string, unknown> }>} */
-  const events = [];
-  return {
-    events,
-    append(type, actor, payload) {
-      events.push({ type, actor, payload: /** @type {Record<string, unknown>} */ (payload) });
-    },
-  };
-}
-
-/**
- * بوابةٌ حقيقيّةٌ بنقطةِ تفويضٍ حقيقيّةٍ وسجلِّ نماذجٍ حقيقيٍّ، ومُنفِّذُها هو
- * المُوائمُ الحتميُّ عبرَ عقدِه — فما يُقاسُ سلسلةٌ كاملةٌ لا حلقةٌ منها.
- *
- * @param {{ purpose?: string, execute?: (call: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<{ output: string, usage?: Record<string, number> }>, tokensPerWindow?: number }} [options]
- */
-async function gateWithAdapter(options = {}) {
-  const purpose = options.purpose ?? 'planning';
-  const bundle = loadPolicyBundle();
-  const log = memoryLog();
-  const enforcementPoint = new EnforcementPoint({
-    decisionPoint: createPolicyDecisionPoint({ bundle }),
-    log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (
-      /** @type {unknown} */ (log)
-    ),
-  });
-  const evaluations = new ModelEvaluationLedger({
-    log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (
-      /** @type {unknown} */ (log)
-    ),
-    experiments: experimentLedgerFor(
-      /** @type {{ append: (type: string, actor: string, payload: object) => unknown }} */ (log),
-    ),
-  });
-  const registry = new ModelRegistry({
-    repository: createMemoryRepository(ModelRegistry.spec),
-    log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (
-      /** @type {unknown} */ (log)
-    ),
-    weightStore: createWeightStore({
-      root: fs.mkdtempSync(path.join(os.tmpdir(), 'adapter-weights-')),
-    }),
-    evaluationLedger: evaluations,
-  });
-  const model = await registry.register({
-    name: 'نموذجُ التخطيطِ',
-    modelVersion: '1.0.0',
-    purpose,
-    provider: 'داخليٌّ',
-    weights: `weights:${purpose}`,
-  });
-  await registry.transition(model.id, ModelState.SANDBOXED, 'اختبارٌ مقبولٌ');
-  await registry.transition(model.id, ModelState.APPROVED, 'اعتمادٌ');
-  evaluations.record({
-    modelId: model.id,
-    fingerprint: model.fingerprint,
-    evaluatedBy: 'role:minister',
-    experimentId: registerEvaluationExperiment(evaluations, {
-      modelId: model.id,
-      fingerprint: model.fingerprint,
-    }),
-    results: [
-      { checkId: 'safety', score: 1 },
-      { checkId: 'quality', score: 1 },
-      { checkId: 'reliability', score: 1 },
-    ],
-  });
-  const active = await registry.activate(model.id);
-  const gate = createInferenceGate({
-    modelRegistry: registry,
-    enforcementPoint,
-    log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (
-      /** @type {unknown} */ (log)
-    ),
-    execute: options.execute ?? deterministicExecutor(),
-    ...(options.tokensPerWindow === undefined ? {} : { tokensPerWindow: options.tokensPerWindow }),
-  });
-  return { gate, log, purpose, model: active, bundle };
-}
-
-/** فاعلٌ بشكلِ عقدِ السياساتِ نفسِه؛ فاعلٌ ناقصُ حقلٍ يُرفَضُ في التفويضِ لا في المُوائمِ. */
-function minister() {
-  return {
-    id: 'agent:minister-adapter-1',
-    role: 'role:minister',
-    kind: /** @type {const} */ ('human'),
-    state: 'active',
-    scope: 'org:planning',
-  };
-}
 
 test('الإعلانُ المُتناقِضُ مع نقلِه يُرفَضُ، والمُهلةُ المفتوحةُ تُرفَضُ', () => {
   const base = {
