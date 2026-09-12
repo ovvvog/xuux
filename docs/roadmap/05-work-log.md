@@ -23,7 +23,7 @@
   5. **لا تكرارَ للسقالاتِ:** مِسنَدُ البوابةِ نُقِلَ إلى `tests/helpers/inference-gate.mjs`، وتوليدُ الشهاداتِ إلى `tests/helpers/tls-material.mjs` يُنادِيهما `tests/transport/tls.test.mjs` و`tests/inference/adapters.test.mjs` بدلاً من نسخِهما.
   6. `scripts/guard-inference.mjs`: القاعدتانِ `I6` و`I7`، و`I5` وُسِّعَتْ إلى المِسنَدِ المنقولِ. و`I6` **لا تكتفي بقراءةِ النصِّ**: تبني مُوائماً حقيقيّاً وتقيسُ رفضَه عنواناً `http:`.
 - **الملفات المتأثرة:** `src/inference/adapters/https.mjs` (جديدٌ) · `src/inference/adapters/contract.mjs` · `src/inference/index.mjs` · `tests/inference/https-adapter.test.mjs` (جديدٌ) · `tests/helpers/inference-gate.mjs` (جديدٌ) · `tests/helpers/tls-material.mjs` (جديدٌ) · `tests/inference/adapters.test.mjs` · `tests/transport/tls.test.mjs` · `scripts/guard-inference.mjs` · `docs/INFERENCE.md` · `docs/ROOT_OF_TRUST.md` · `PRODUCT_BUILD_PLAN.md` · `docs/roadmap/05-work-log.md`
-- **الـ commit:** `__COMMIT__`
+- **الـ commit:** `cf5ba1b730349e8f55a4506ffa9e82e6cc65d515` (وهذا القيدُ في كوميتٍ تالٍ لأنّ البصمةَ لا تُعرَفُ قبلَ إنشائِها)
 - **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):**
   - `node --test tests/inference/` ⇒ **39 ناجحاً · 0 فاشلاً** (‏14 منها لهذا الشوطِ).
   - `npm run guard:inference` ⇒ رمزُ خروجٍ **`0`**، و`npx tsc --noEmit` ⇒ **`0`**، و`npm run lint` ⇒ **0 خطأً** و**تحذيرانِ سابقانِ** في `tests/api/gateway.test.mjs`.
