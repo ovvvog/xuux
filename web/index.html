@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>مشهدُ الدولةِ — قارئٌ محكومٌ</title>
+    <!--
+      لا شفرةَ ولا نمطَ داخلَ هذا الملفِّ، ولا مصدرَ خارجيّاً واحداً: سياسةُ
+      المحتوى التي يَرُدُّها الخادمُ تمنعُ `unsafe-inline` وتمنعُ `default-src`
+      غيرَ الذاتِ. فواجهةٌ تحتاجُ `inline` تُلزِمُ بتخفيفِ السياسةِ، والتخفيفُ
+      لأجلِ الراحةِ هو بابُ حَقْنِ النصوصِ بعينِه.
+    -->
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>مشهدُ الدولةِ</h1>
+      <p class="note">
+        قارئٌ محكومٌ: كلُّ قراءةٍ تمرُّ ببوابةِ الواجهةِ وعقباتِها الخمسِ — مسارٌ مُعلَنٌ، ثمَّ
+        جلسةٌ، ثمَّ حدُّ معدَّلٍ، ثمَّ تفويضٌ مركزيٌّ بتذكرةٍ، ثمَّ مشهدٌ مقروءٌ. ولا كتابةَ من هنا
+        بحالٍ.
+      </p>
+    </header>
+
+    <main>
+      <section aria-labelledby="session-title">
+        <h2 id="session-title">الجلسةُ</h2>
+        <p class="note">
+          الرمزُ يُصدَرُ <strong>خارجَ السلكِ</strong> لأنّ <code>config/api.yaml</code> لا تُعلِنُ
+          مسارَ فتحِ جلسةٍ، وإعلانُه في الواجهةِ اختراعُ سطحٍ لم يُؤذَنْ به. ويُحمَلُ في ترويسةِ
+          <code>Authorization</code> لا في العنوانِ.
+        </p>
+        <label for="token">رمزُ الجلسةِ</label>
+        <input
+          id="token"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="يُلصَقُ هنا ولا يُخزَّنُ"
+        />
+        <p class="note" id="token-note">
+          لا يُكتَبُ الرمزُ في ذاكرةِ المتصفِّحِ الدائمةِ ولا في العنوانِ: رمزٌ في العنوانِ يُكتَبُ
+          في سجلّاتِ الوسائطِ وتاريخِ المتصفِّحِ فيُسرَّبُ بعدَ انتهاءِ الجلسةِ.
+        </p>
+      </section>
+
+      <section aria-labelledby="read-title">
+        <h2 id="read-title">قراءةٌ</h2>
+        <form id="read-form">
+          <label for="path">العنوانُ المُعلَنُ</label>
+          <input
+            id="path"
+            type="text"
+            value="/state/agents"
+            spellcheck="false"
+            autocomplete="off"
+            required
+          />
+          <label for="limit">حدُّ الصفوفِ <span class="optional">(اختياريٌّ)</span></label>
+          <input id="limit" type="number" min="0" step="1" inputmode="numeric" />
+          <label for="filter">الترشيحُ كائنَ JSON <span class="optional">(اختياريٌّ)</span></label>
+          <input
+            id="filter"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder='{"state":"active"}'
+          />
+          <button type="submit" id="submit">اقرأْ</button>
+        </form>
+        <p class="note">
+          والعنوانُ لا يُختارُ من قائمةٍ مكتوبةٍ في هذه الصفحةِ عن قصدٍ: قائمةٌ مكتوبةٌ هنا نسخةٌ
+          ثانيةٌ من <code>config/api.yaml</code> تفترقُ عنها في أوّلِ تعديلٍ. فالوثيقةُ هي المرجعُ،
+          وما لم تُعلِنْه يُرَدُّ <code>404</code> باسمِه.
+        </p>
+      </section>
+
+      <section aria-labelledby="result-title">
+        <h2 id="result-title">النتيجةُ</h2>
+        <p id="status" class="status" role="status" aria-live="polite">لم تُطلَبْ قراءةٌ بعدُ.</p>
+        <div id="table-wrap" hidden>
+          <table id="table">
+            <thead>
+              <tr id="head-row"></tr>
+            </thead>
+            <tbody id="body-rows"></tbody>
+          </table>
+        </div>
+        <details id="raw-wrap" hidden>
+          <summary>الردُّ كما وردَ</summary>
+          <pre id="raw"></pre>
+        </details>
+      </section>
+    </main>
+
+    <footer>
+      <p class="note">
+        هذه الواجهةُ سدادُ الشطرِ الثالثِ من الدَينِ <code>D-1</code>. ولا تُقرأُ إعلانَ جاهزيّةٍ:
+        إنهاءُ <code>TLS</code> والكتابةُ الموقَّعةُ دَينانِ باقيانِ مُعلَنانِ في
+        <code>docs/TRANSPORT.md</code>.
+      </p>
+    </footer>
+
+    <script type="module" src="/app.mjs"></script>
+  </body>
+</html>

@@ -1,0 +1,199 @@
+/*
+ * نمطُ مشهدِ الدولةِ — بلا خطٍّ خارجيٍّ ولا مصدرٍ بعيدٍ واحدٍ.
+ *
+ * وسببُه ليس ذوقاً: خطٌّ من مصدرٍ بعيدٍ يعني أنّ كلَّ فتحةٍ لهذه الصفحةِ تُخبِرُ
+ * طرفاً ثالثاً أنّ أحداً يقرأُ مشهدَ الدولةِ ومتى — وهذا تسريبُ وقائعِ استعمالٍ
+ * بلا مقابلٍ. فالخطوطُ خطوطُ النظامِ، والسياسةُ التي يَرُدُّها الخادمُ تمنعُ
+ * غيرَ الذاتِ أصلاً فلا يُمكِنُ نقضُ هذا سهواً.
+ */
+
+:root {
+  --ink: #12161c;
+  --ink-soft: #5a6472;
+  --paper: #f7f8fa;
+  --card: #ffffff;
+  --line: #dde2e9;
+  --accent: #1f4b7a;
+  --deny: #8c2f2f;
+  --allow: #1f6b4a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem clamp(1rem, 4vw, 3rem) 3rem;
+  background: var(--paper);
+  color: var(--ink);
+  font-family:
+    'Noto Naskh Arabic',
+    'Amiri',
+    'Segoe UI',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+header {
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+  letter-spacing: 0;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+  color: var(--accent);
+}
+
+main {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 62rem;
+}
+
+section {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.1rem 1.25rem 1.35rem;
+}
+
+.note {
+  margin: 0.35rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+.optional {
+  color: var(--ink-soft);
+  font-weight: normal;
+}
+
+label {
+  display: block;
+  margin: 0.9rem 0 0.3rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.95rem;
+}
+
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button {
+  margin-top: 1.1rem;
+  padding: 0.6rem 1.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: var(--ink-soft);
+  cursor: progress;
+}
+
+code {
+  font-family: ui-monospace, 'Cascadia Code', Menlo, monospace;
+  font-size: 0.85em;
+  background: #eef1f5;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  direction: ltr;
+  display: inline-block;
+}
+
+.status {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  background: #eef1f5;
+  font-size: 0.95rem;
+}
+
+/* الرفضُ يُرى رفضاً: لونٌ واحدٌ للحالَينِ يجعلُ القارئَ يظنُّ أنّه قرأَ وقد رُدَّ. */
+.status[data-kind='allow'] {
+  background: #e8f3ed;
+  color: var(--allow);
+  border: 1px solid #bfe0cf;
+}
+
+.status[data-kind='deny'] {
+  background: #f7eaea;
+  color: var(--deny);
+  border: 1px solid #e2c3c3;
+}
+
+#table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+th,
+td {
+  border: 1px solid var(--line);
+  padding: 0.4rem 0.6rem;
+  text-align: right;
+  vertical-align: top;
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
+th {
+  background: #eef1f5;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+pre {
+  margin: 0.5rem 0 0;
+  padding: 0.7rem;
+  background: #12161c;
+  color: #e6e9ee;
+  border-radius: 6px;
+  overflow-x: auto;
+  direction: ltr;
+  text-align: left;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+footer {
+  margin-top: 1.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  max-width: 62rem;
+}

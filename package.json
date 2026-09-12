@@ -57,6 +57,7 @@
     "guard:reports": "node scripts/guard-reports.mjs",
     "guard:monitoring": "node scripts/guard-monitoring.mjs",
     "guard:api": "node scripts/guard-api.mjs",
+    "serve": "node scripts/serve-state.mjs",
     "guard:transport": "node scripts/guard-transport.mjs",
     "guard:console": "node scripts/guard-console.mjs",
     "guard:operations": "node scripts/guard-operations.mjs",

@@ -110,6 +110,39 @@ export default [
     rules: sharedRules,
   },
 
+  // ── واجهةُ مشهدِ الدولةِ (`web/`) — سدادُ `D-1` ──
+  //
+  // عوالمُ متصفِّحٍ لا عوالمُ Node، وتُعلَنُ **مُعدَّدةً لا بجملةٍ واحدةٍ**: إعلانُ
+  // «كلِّ عوالمِ المتصفِّحِ» كان سيَخفي اسماً مطبعيّاً في شفرةٍ تعملُ بجلسةِ قارئٍ.
+  // ولا `process` ولا `Buffer` هنا: شفرةٌ في متصفِّحٍ تُنادي عالماً من Node خطأٌ
+  // يظهرُ عندَ القارئِ لا عندَ الكاتبِ.
+  {
+    files: ['web/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        fetch: 'readonly',
+        URL: 'readonly',
+        console: 'readonly',
+        // العوالمُ الوسميّةُ تُعلَنُ لأنّ الشفرةَ تُصرِّحُ بأنواعِها في تعليقاتِ
+        // النوعِ، فيَقرأُها المُدقِّقُ أسماءَ عوالمَ.
+        HTMLInputElement: 'readonly',
+        HTMLFormElement: 'readonly',
+        HTMLButtonElement: 'readonly',
+        HTMLParagraphElement: 'readonly',
+        HTMLDivElement: 'readonly',
+        HTMLPreElement: 'readonly',
+        HTMLDetailsElement: 'readonly',
+        HTMLTableRowElement: 'readonly',
+        HTMLTableSectionElement: 'readonly',
+      },
+    },
+    rules: sharedRules,
+  },
+
   // ── كود TypeScript ──
   ...tseslint.configs.recommended.map((config) => ({
     ...config,
