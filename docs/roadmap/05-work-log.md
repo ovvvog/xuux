@@ -23,7 +23,7 @@
   5. `scripts/guard-inference.mjs`: القاعدتانِ `I8` و`I9`. و`I8` **لا تكتفي بقراءةِ نصٍّ**: تُحمِّلُ الوثيقةَ الحقيقيّةَ و**تبني مُوائماً لكلِّ مزوّدٍ فيها** وتقيسُ أنّ عنوانَه واسمَ متغيّرِ مفتاحِه هما المُعلَنانِ، ثمّ تمسحُ `src/` مسحاً متكرِّراً بعدَ تجريدِ التعليقاتِ فترفضُ أيَّ نصٍّ يبدأُ بـ`https://` في شفرةِ الإنتاجِ. و`I9` تحرسُ ألّا يُنزَعَ من الاختبارِ قياسُ الرفضِ.
   6. `tests/inference/providers.test.mjs` **جديدٌ**: **14 اختباراً**، أكثرُها يقيسُ **الرفضَ** بأسمائِه، وآخرُها يُمرِّرُ استدلالاً من **البوابةِ الحقيقيّةِ** بمُوائمٍ **مبنيٍّ من وثيقةٍ** إلى **مِقبسِ `https` حقيقيٍّ** فيقرأُ ترويسةَ التفويضِ وجسمَ الطلبِ وقيدَ `inference.completed`.
 - **الملفات المتأثرة:** `config/inference-providers.yaml` (جديدٌ) · `config/schemas/inference-providers.schema.json` (جديدٌ) · `src/inference/providers.mjs` (جديدٌ) · `src/inference/index.mjs` · `tests/inference/providers.test.mjs` (جديدٌ) · `scripts/guard-inference.mjs` · `docs/INFERENCE.md` · `PRODUCT_BUILD_PLAN.md` · `docs/READINESS_REPORT.md` (مُولَّدٌ بـ`npm run readiness:report`) · `docs/roadmap/05-work-log.md`
-- **الـ commit:** يُقيَّدُ في كوميتٍ تالٍ لأنّ البصمةَ لا تُعرَفُ قبلَ إنشائِها.
+- **الـ commit:** `eea298d9fffa5c899c7afc4d8178075cb55b9952` (وهذا القيدُ في كوميتٍ تالٍ لأنّ البصمةَ لا تُعرَفُ قبلَ إنشائِها)
 - **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):**
   - `node --test tests/inference/providers.test.mjs` ⇒ **14 ناجحاً · 0 فاشلاً**، و`node --test tests/inference/` ⇒ **53 ناجحاً · 0 فاشلاً**.
   - `npm run guard:inference` ⇒ رمزُ خروجٍ **`0`**، و`npx tsc --noEmit` ⇒ **`0`**، و`npm run format:check` ⇒ **`0`**، و`npm run lint` ⇒ **0 خطأً** و**تحذيرانِ سابقانِ** في `tests/api/gateway.test.mjs` لا علاقةَ لهما بهذا العملِ.
