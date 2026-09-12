@@ -31,6 +31,14 @@
  *       الرفضَ: شهادةً غيرَ موثوقةٍ، ومفتاحاً غائباً، وعنواناً بلا تعميةٍ، ومزوّداً
  *       رادّاً، وردّاً يتجاوزُ السقفَ، وتبديلَ النموذجِ، وانقضاءَ المُهلةِ، وحجبَ
  *       المفتاحِ من رسالةِ الخطأِ.
+ *   I8: **لا مزوّدَ إلا مُعلَناً في وثيقةٍ.** `config/inference-providers.yaml`
+ *       موجودةٌ ومقروءةٌ بمخطَّطِها، وكلُّ مزوّدٍ فيها **يُبنى مُوائماً فعلاً**
+ *       هنا لا نصّاً: عنوانُه `https`، ومفتاحُه اسمُ متغيّرِ بيئةٍ لا قيمتُه.
+ *       ولا عنوانَ مزوّدٍ مكتوبٌ في شفرةِ `src/` بعدَ تجريدِ التعليقاتِ — فعنوانٌ
+ *       في شفرةٍ مزوّدٌ يُضافُ بلا مراجعةٍ، وهو العَيبُ الذي جاءَ الإعلانُ ليُغلقَه.
+ *   I9: اختبارُ الإعلانِ يقيسُ الرفضَ: سرّاً في الوثيقةِ، وعنواناً بلا تعميةٍ،
+ *       ومعرّفاً مكرَّراً، ومُهلةً فوقَ سقفِ العقدِ، ومزوّداً غيرَ مُعلَنٍ، ومروراً
+ *       بالبوابةِ على مِقبسٍ حقيقيٍّ من وثيقةٍ لا من خيارٍ مكتوبٍ في الاختبارِ.
  *   I5: الاختبارُ موجودٌ ويقيسُ **الرفضَ** لا المرورَ فقط: ادّعاءَ السلطةِ،
  *       والاستهلاكَ الفاسدَ، والنموذجَ المُخالِفَ، وانقضاءَ المُهلةِ بإشارةٍ يراها
  *       المُنفِّذُ، وخصمَ الاستهلاكِ حتّى الرفضِ بتجاوزِ السقفِ.
@@ -52,6 +60,11 @@ import {
 } from '../src/inference/adapters/contract.mjs';
 import { createDeterministicAdapter } from '../src/inference/adapters/deterministic.mjs';
 import { createHttpsAdapter } from '../src/inference/adapters/https.mjs';
+import {
+  createDeclaredHttpsAdapter,
+  INFERENCE_PROVIDERS_FILE,
+  loadInferenceProviders,
+} from '../src/inference/providers.mjs';
 
 const argv = process.argv.slice(2);
 const rootIndex = argv.indexOf('--root');
@@ -276,6 +289,89 @@ if (httpsTest === '') {
   }
 }
 
+// ── I8: لا مزوّدَ إلا مُعلَناً في وثيقةٍ ──
+// والقياسُ بناءٌ لا قراءةُ نصٍ؛ فوثيقةٌ تُقرأُ ولا يُبنى منها مُوائمٌ وثيقةٌ
+// يُقالُ إنّها نافذةٌ ولا يُعرَفُ أنّها كذلك.
+const providersFile = path.join(ROOT, 'config', INFERENCE_PROVIDERS_FILE);
+if (!fs.existsSync(providersFile)) {
+  violations.push(
+    `I8: وثيقةُ المزوّدينَ \`config/${INFERENCE_PROVIDERS_FILE}\` غائبةٌ — ومزوّدٌ يُنادى بلا وثيقةٍ تُعلنُ عنوانَه مزوّدٌ يُضافُ بلا مراجعةٍ.`,
+  );
+} else {
+  try {
+    const document = loadInferenceProviders({ dir: path.join(ROOT, 'config') });
+    if (document.providers.length === 0) {
+      violations.push('I8: وثيقةُ المزوّدينَ بلا مزوّدٍ واحدٍ مُعلَنٍ.');
+    }
+    for (const entry of document.providers) {
+      const adapter = createDeclaredHttpsAdapter({
+        id: entry.id,
+        document,
+        env: { [entry.apiKeyEnv]: 'قيمةٌ لا تُنادَى بها شبكةٌ في حاجزٍ' },
+      });
+      if (adapter.endpoint.protocol !== 'https:') {
+        violations.push(`I8: عنوانُ المزوّدِ «${entry.id}» ليس بتعميةٍ.`);
+      }
+      if (adapter.declaration.apiKeyEnv !== entry.apiKeyEnv) {
+        violations.push(
+          `I8: مفتاحُ المزوّدِ «${entry.id}» لا يُقرأُ بالاسمِ المُعلَنِ في الوثيقةِ.`,
+        );
+      }
+    }
+  } catch (error) {
+    violations.push(
+      `I8: وثيقةُ المزوّدينَ لا تُحمَّلُ ولا يُبنى منها مُوائمٌ: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+// ولا عنوانَ مزوّدٍ مكتوبٌ في شفرةِ الإنتاجِ: العنوانُ من الوثيقةِ وحدَها.
+const ENDPOINT_LITERAL = /(['"`])https:\/\//u;
+/** @param {string} dir @returns {string[]} */
+function sourceFilesUnder(dir) {
+  const full = path.join(ROOT, dir);
+  if (!fs.existsSync(full)) return [];
+  /** @type {string[]} */
+  const found = [];
+  for (const entry of fs.readdirSync(full, { withFileTypes: true })) {
+    const relative = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...sourceFilesUnder(relative));
+    else if (entry.name.endsWith('.mjs')) found.push(relative);
+  }
+  return found;
+}
+for (const file of sourceFilesUnder('src')) {
+  if (ENDPOINT_LITERAL.test(codeOf(readFile(file)))) {
+    violations.push(
+      `I8: عنوانٌ مكتوبٌ في \`${file}\` — وعنوانُ مزوّدٍ في شفرةٍ مزوّدٌ يُضافُ بلا مراجعةٍ؛ والعنوانُ من \`config/${INFERENCE_PROVIDERS_FILE}\` وحدَها.`,
+    );
+  }
+}
+
+// ── I9: اختبارُ الإعلانِ يقيسُ الرفضَ ──
+const providersTest = readFile(path.join('tests', 'inference', 'providers.test.mjs'));
+if (providersTest === '') {
+  violations.push(
+    'I9: `tests/inference/providers.test.mjs` غائبٌ — وإعلانٌ بلا قياسِ رفضِه إعلانٌ يُقرأُ ولا يُحكَمُ به.',
+  );
+} else {
+  /** @type {Array<[string, string]>} */
+  const DECLARATION_MEASURED = [
+    ['loadInferenceProviders()', 'الوثيقةُ النافذةُ في `config/` غيرُ مقروءةٍ في الاختبارِ'],
+    ['SECRET_INLINE', 'رفضُ سرٍّ مكتوبٍ في الوثيقةِ غيرُ مقيسٍ'],
+    ['DECLARATION_INVALID', 'رفضُ وثيقةٍ مخالفةٍ غيرُ مقيسٍ'],
+    ["'http://", 'رفضُ عنوانٍ بلا تعميةٍ في الوثيقةِ غيرُ مقيسٍ'],
+    ['MAX_ADAPTER_TIMEOUT_MS', 'رفضُ مُهلةٍ فوقَ سقفِ العقدِ غيرُ مقيسٍ'],
+    ['adapter:not-declared', 'رفضُ مزوّدٍ غيرَ مُعلَنٍ غيرُ مقيسٍ'],
+    ['describeInferenceProviders', 'خلوُ وصفِ المزوّدينَ من قيمةِ المفتاحِ غيرُ مقيسٍ'],
+    ["from 'node:https'", 'ما قِيسَ من إعلانٍ ليس نداءً على مِقبسٍ حقيقيٍّ'],
+    ['gateWithAdapter', 'ما قِيسَ ليس مروراً بالبوابةِ من مزوّدٍ مُعلَنٍ'],
+  ];
+  for (const [needle, why] of DECLARATION_MEASURED) {
+    if (!providersTest.includes(needle)) violations.push(`I9: ${why} (${needle}).`);
+  }
+}
+
 // ── I5: الاختبارُ يقيسُ الرفضَ لا المرورَ فقط ──
 // ومِسنَدُ البوابةِ موضعٌ واحدٌ يُنادِيه الاختباران، فيُقاسُ فيه بناءُ البوابةِ
 // ونقطةِ التفويضِ، ويُقاسُ في كلِّ اختبارٍ أنّه يُنادِيه فعلاً.
@@ -315,5 +411,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `✅ حاجز مُوائم الاستدلال: ${adapterFiles.length} ملفَّ مُوائمٍ بلا سياسةٍ ولا مستودعٍ ولا سجلٍّ في يدِه ولا تفويضٍ يمنحُه لنفسِه، ومُوائمٌ حتميٌّ لا يستعملُ شبكةً ولا نظامَ ملفّاتٍ فإعلانُ \`disabled\` مقيسٌ لا مُصدَّقٌ، وبلا قيمةٍ تُشبِهُ مفتاحاً في الشفرةِ والمفتاحُ باسمِ متغيّرِ بيئةٍ وحدَه، و${FORBIDDEN_RESULT_FIELDS.length} حقلَ سلطةٍ مرفوضاً في الناتجِ، وكلُّ ناتجٍ يمرُّ بـ\`assertAdapterResult\` بمُهلةٍ تُجهِضُ بإشارةٍ لا تُهمِلُ النداءَ، ومُوائمُ \`https\` يأخذُ خياراتَ تعميتِه من موضعِ التعميةِ الواحدِ بلا ذكرٍ لـ\`rejectUnauthorized\` في نصِّه، ويقرأُ مفتاحَه من البيئةِ عندَ كلِّ نداءٍ، ولجسمِ ردِّه سقفٌ، ومقيسٌ على مِقبسٍ حقيقيٍّ في \`tests/inference/https-adapter.test.mjs\`.`,
+  `✅ حاجز مُوائم الاستدلال: ${adapterFiles.length} ملفَّ مُوائمٍ بلا سياسةٍ ولا مستودعٍ ولا سجلٍّ في يدِه ولا تفويضٍ يمنحُه لنفسِه، ومُوائمٌ حتميٌّ لا يستعملُ شبكةً ولا نظامَ ملفّاتٍ فإعلانُ \`disabled\` مقيسٌ لا مُصدَّقٌ، وبلا قيمةٍ تُشبِهُ مفتاحاً في الشفرةِ والمفتاحُ باسمِ متغيّرِ بيئةٍ وحدَه، و${FORBIDDEN_RESULT_FIELDS.length} حقلَ سلطةٍ مرفوضاً في الناتجِ، وكلُّ ناتجٍ يمرُّ بـ\`assertAdapterResult\` بمُهلةٍ تُجهِضُ بإشارةٍ لا تُهمِلُ النداءَ، ومُوائمُ \`https\` يأخذُ خياراتَ تعميتِه من موضعِ التعميةِ الواحدِ بلا ذكرٍ لـ\`rejectUnauthorized\` في نصِّه، ويقرأُ مفتاحَه من البيئةِ عندَ كلِّ نداءٍ، ولجسمِ ردِّه سقفٌ، ومقيسٌ على مِقبسٍ حقيقيٍّ في \`tests/inference/https-adapter.test.mjs\`؛ ولا مزوّدَ إلا مُعلَناً في \`config/${INFERENCE_PROVIDERS_FILE}\` — **مَقيساً ببناءِ مُوائمٍ لكلِّ مزوّدٍ مُعلَنٍ هنا لا بقراءةِ نصِّها** — وبلا عنوانٍ مكتوبٍ في شفرةِ \`src/\`، ورفضُ الإعلانِ الفاسدِ مقيسٌ في \`tests/inference/providers.test.mjs\`.`,
 );

@@ -25,6 +25,15 @@ export {
   REDACTION_MARK,
 } from './adapters/https.mjs';
 export {
+  createDeclaredHttpsAdapter,
+  declaredHttpsExecutor,
+  declaredProvider,
+  DEFAULT_INFERENCE_CONFIG_DIR,
+  describeInferenceProviders,
+  INFERENCE_PROVIDERS_FILE,
+  loadInferenceProviders,
+} from './providers.mjs';
+export {
   createDeterministicAdapter,
   DETERMINISTIC_ADAPTER_ID,
   DETERMINISTIC_TIMEOUT_MS,

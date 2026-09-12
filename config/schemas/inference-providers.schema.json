@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.state/config/inference-providers.schema.json",
+  "title": "مزوّدو الاستدلال كبيانات — D-11 (الشوط الثالث)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "owner", "providers"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "owner": { "type": "string", "minLength": 1 },
+    "providers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "provider",
+          "transport",
+          "endpoint",
+          "apiKeyEnv",
+          "outputPath",
+          "statement"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^adapter:[a-z][a-z0-9-]*$" },
+          "provider": { "type": "string", "minLength": 1 },
+          "transport": { "type": "string", "enum": ["https"] },
+          "endpoint": { "type": "string", "pattern": "^https://[^\\s@]+$" },
+          "apiKeyEnv": { "type": "string", "minLength": 1 },
+          "caFileEnv": { "type": "string", "minLength": 1 },
+          "authHeader": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+          "authScheme": { "type": "string", "minLength": 1 },
+          "timeoutMs": { "type": "integer", "minimum": 1 },
+          "headers": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "requestFields": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "model": { "type": "string", "minLength": 1 },
+              "input": { "type": "string", "minLength": 1 },
+              "purpose": { "type": "string", "minLength": 1 }
+            }
+          },
+          "requestExtras": { "type": "object" },
+          "outputPath": { "$ref": "#/$defs/route" },
+          "modelPath": { "$ref": "#/$defs/route" },
+          "usagePaths": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "inputTokens": { "$ref": "#/$defs/route" },
+              "outputTokens": { "$ref": "#/$defs/route" },
+              "totalTokens": { "$ref": "#/$defs/route" },
+              "cost": { "$ref": "#/$defs/route" }
+            }
+          },
+          "statement": { "type": "string", "minLength": 8 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "route": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "type": "string", "minLength": 1 },
+          { "type": "integer", "minimum": 0 }
+        ]
+      }
+    }
+  }
+}
