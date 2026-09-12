@@ -142,8 +142,30 @@ engagements:
   - id: M11.06
     kind: human-legal-ethical-review
     title: مراجعةٌ أخلاقيّةٌ وقانونيّةٌ بشريّةٌ لنطاقِ استقلاليّةِ الوكلاءِ وحدودِها
-    status: awaiting-model-council
-    executedBy: null
+    status: council-findings-recorded
+    executedBy:
+      kind: model-council
+      rounds: 1
+      members:
+        - id: claude_fable_5_1
+          provider: ANTHROPIC
+          rounds: [1]
+        - id: gemini_3_1_pro
+          provider: GOOGLE
+          rounds: [1]
+      reviewedCommit: a705f2d485961bfcfb01f98d598f1b9714998f79
+      comparisonMatrix: docs/external-review/M11.06-round-1-comparison-matrix.md
+      # تحفّظٌ خرجَ به العضوانِ ولا يُكتَمُ: كلاهما صرّحَ أنّه ليسَ مراجِعاً بشريّاً،
+      # و«أ» كتبَ أنَّ تقريرَه مُدخَلٌ لموقِّعٍ بشريٍّ لا يقومُ مقامَه. وقرارُ المالكِ
+      # الصريحُ الاكتفاءُ بالمجلسِ بديلاً كاملاً عن المراجعةِ البشريّةِ الخارجيّةِ —
+      # والتحفّظُ يُقيَّدُ كما خرجَ، لا يُحذَفُ ولا يُعارِضُ قرارَ المالكِ.
+      councilReservation: >-
+        العضوانِ صرّحا بأنّهما ليسا مراجِعَينِ بشريَّينِ، ونوعُ الارتباطِ
+        `human-legal-ethical-review`. مُقيَّدٌ بلفظِه في §4 من مصفوفةِ المقارنةِ.
+      # عيبانِ إجرائيّانِ في تجهيزِ الجولةِ — على المنفِّذِ لا على المجلسِ (§5 من المصفوفةِ).
+      executorPreparationDefects:
+        - خطّةُ الجولةِ كُتِبتْ بعدَ الاستنساخِ فلم تصلْ إلى العضوينِ؛ و«أ» بنى أقسامَه من هذا العقدِ وصرّحَ بذلكَ (`R6-A-10`).
+        - ثمانيةُ تقاريرِ `M11.04` حُذِفتْ من شجرتَيِ العملِ بيدِ المنفِّذِ؛ فخرجَ `npm run validate` بـ`1` عندَ «أ» في الشجرةِ كما سُلِّمتْ و`0` في شجرةٍ نقيّةٍ لنفسِ الكوميتِ، وفي بيئةِ «ب» أُعيدتْ فيُحتمَلُ أنّه رآها.
     acceptanceCriteria: >-
       قرارٌ موثَّقٌ **بالحدودِ المسموحةِ والممنوعةِ** — لا رأيٌ عامٌّ ولا تصنيفُ
       مخاطرَ بلا حدٍّ قابلٍ للإنفاذِ.
@@ -546,3 +568,242 @@ findings:
     overlapsWith: [R4-K3-01, UF-03]
     rawReports:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+
+  # ---------------------------------------------------------------- `M11.06` — الجولةُ الأولى
+  # نقلٌ لا ترجيحٌ: عشرُ نتائجَ من العضوِ «أ» (`claude_fable_5_1`) واثنتانِ من العضوِ «ب»
+  # (`gemini_3_1_pro`)، كلُّها `open`. ولم يُدمَجْ متقاطعانِ (`R6-A-06` × `R6-B-01`).
+  # المصفوفةُ: docs/external-review/M11.06-round-1-comparison-matrix.md
+  - id: R6-A-01
+    engagement: M11.06
+    title: المحوُ الفعليُّ لا يمرُّ بعتبةِ `purge-data` ولا بأيِّ هويّةٍ ولا بأمرٍ ملكيٍّ
+    origin: round-1
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ
+    reproductionPath: >-
+      `node probes/probe-retention-sweeper-identity.mjs; echo $?` ⇒ `3` (فاعلٌ غيرُ مسجَّلٍ
+      بدورٍ نصّيٍّ يمحو مادّتينِ وصفرُ نداءاتٍ إلى `EnforcementPoint.authorize`)؛
+      و`grep -rn purge-data src/ -l; echo $?` ⇒ `1` (لا مستهلِكَ في `src/`).
+    affectedFiles:
+      - src/data/retention-cycle.mjs
+      - config/royal-authority.yaml
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-02
+    engagement: M11.06
+    title: حصصُ الكمِّ (بايتاتٌ/رموزٌ) تُخصمُ «1» لكلِّ نداءٍ والمقدارُ يملأُه الطالبُ
+    origin: round-1
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ»
+    reproductionPath: >-
+      `node probes/probe-egress-quota-amount.mjs; echo $?` ⇒ `3` (إخراجُ 500,000 بايتٍ
+      يخصمُ `amount:1`)؛ والطفرةُ `M15` (تثبيتُ المقدارِ على 1) **نجتْ** من
+      `enforcement-point` و`quota` و`egress-gate` و`inference/*` برمزِ خروجٍ `0`.
+    affectedFiles:
+      - src/policy/enforcement-point.mjs
+      - src/egress/egress-gate.mjs
+      - src/inference/inference-gate.mjs
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-03
+    engagement: M11.06
+    title: «القدراتُ الفعّالةُ» والمنحُ لا تدخلُ قرارَ المحرّكِ؛ الدورُ وحدَه يقرِّرُ
+    origin: round-1
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ»
+    reproductionPath: >-
+      `node probes/probe-capabilities-ignored.mjs` — `role:agent` بقدراتٍ `[]` يُؤذَنُ له
+      بـ`write-data`، وبقدرةٍ ممنوحةٍ `action:create-agent` يُمنَعُ بـ`POLICY_NO_MATCH`؛
+      و`grep -rn "capabilities.has\|capabilities.includes" src/policy src/core` ⇒ لا شيءَ.
+    affectedFiles:
+      - src/policy/engine.mjs
+      - docs/POLICY_MODEL.md
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-04
+    engagement: M11.06
+    title: لا جذرَ تركيبٍ يصلُ سلسلةَ الإنفاذِ في عمليّةٍ واحدةٍ
+    origin: round-1
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ»
+    reproductionPath: >-
+      `grep -rn "createGovernance(\|new IdentityGate(\|new QuarantineWarden" src/ scripts/`
+      ⇒ لا مستدعيَ خارجَ التعريفِ؛ و`sed -n 140,165p scripts/serve-state.mjs` (يُنشئُ
+      `EnforcementPoint` بلا بوابةِ هويّةٍ فيكونُ `requireIdentityGate = false`).
+    affectedFiles:
+      - scripts/serve-state.mjs
+      - src/policy/enforcement-point.mjs
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-05
+    engagement: M11.06
+    title: أربعُ حالاتِ نقضٍ/احتواءٍ تُفقَدُ بإعادةِ التشغيلِ (حجرٌ، منحٌ، ميزانيّةُ استدلالٍ، مقترحاتٌ دستوريّةٌ)
+    origin: round-1
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: >-
+      اختلافٌ — «أ» أثبتَها قراءةً (بتصريحِه أنّها **قراءةٌ لا قياسٌ**)، و«ب» كتبَ «نعم»
+      في عمودِ البقاءِ بعدَ إعادةِ التشغيلِ لكلِّ صفوفِه الثلاثينَ. والقيدُ `open` بالأضعفِ.
+    disagreement: >-
+      لم يقسْ أيُّ عضوٍ إعادةَ تشغيلِ عمليّةٍ فعلاً؛ «أ» استندَ إلى أسطرِ الذاكرةِ
+      (`quarantine.mjs` L22–23، `capability-grants.mjs`، `inference-gate.mjs` L237)
+      وإلى حدودٍ مُعلَنةٍ في الوثائقِ، و«ب» لم يذكرْ هذه المواضعَ. والمنفِّذُ لا يُرجِّحُ.
+    reproductionPath: >-
+      قراءةُ `src/governance/quarantine.mjs` L22–23، و`src/identity/capability-grants.mjs`،
+      و`src/inference/inference-gate.mjs` L237، و`docs/CONSTITUTION.md`.
+    affectedFiles:
+      - src/governance/quarantine.mjs
+      - src/identity/capability-grants.mjs
+      - src/inference/inference-gate.mjs
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-06
+    engagement: M11.06
+    title: '`docs/AGENT_CONTAINMENT.md` تُناقضُ الشفرةَ في `M6.07`/`M6.08` وإشارةِ `budget-exceeded`'
+    origin: round-1
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: >-
+      اتّفاقٌ في الجوهرِ مع `R6-B-01` (كلاهما وقفَ على إقرارِ الوثيقةِ نفسِها)،
+      **بلا دمجٍ** — والتقاطعُ إشارةٌ لا حكمٌ.
+    reproductionPath: >-
+      `grep -n "M6.07\|M6.08\|budget-exceeded" docs/AGENT_CONTAINMENT.md
+      src/inference/inference-gate.mjs docs/READINESS_REPORT.md` — الوثيقةُ (L138–142)
+      تُعلنُ البوابةَ غيرَ منفَّذةٍ والإشارةَ بلا مُنتِجٍ، والشفرةُ تُنتجُها (L339).
+    affectedFiles:
+      - docs/AGENT_CONTAINMENT.md
+      - src/inference/inference-gate.mjs
+    raisedBy: [claude_fable_5_1]
+    overlapsWith: [R6-B-01]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-07
+    engagement: M11.06
+    title: العتبةُ السياديّةُ في المحرّكِ حضورُ نصَّينِ لا توقيعٌ (حدٌّ مُعلَنٌ ومعوَّضٌ)
+    origin: round-1
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ»؛ و«ب» أثبتَ العتبةَ عندَ `engine.mjs:297` بلا هذا التحفّظِ
+    reproductionPath: >-
+      `sed -n 300,310p src/policy/engine.mjs` (L306: `hasCommand = royalCommandId !== '' &&
+      royalCommandDigest !== ''`)؛ والطفرتانِ `M03`/`M04` كُشِفتا (1 و3 إخفاقاتٍ).
+    affectedFiles:
+      - src/policy/engine.mjs
+      - src/core/execution-kernel.mjs
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-08
+    engagement: M11.06
+    title: الوضعُ الآمنُ المحلّيُّ للنواةِ يُدخَلُ ويُخرَجُ منه بنداءِ دالّةٍ بلا فاعلٍ ولا أمرٍ
+    origin: round-1
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ»
+    reproductionPath: قراءةُ `ExecutionKernel.stop()` و`resume()` في `src/core/execution-kernel.mjs`
+    affectedFiles:
+      - src/core/execution-kernel.mjs
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-09
+    engagement: M11.06
+    title: الاحتفاظُ — لا جدولةَ آليّةً ولا موافقةَ سياديّةً على الحفظِ القانونيِّ (حدّانِ مُعلَنانِ)
+    origin: round-1
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ من العضوِ «أ»، وهو صرّحَ أنّه **اكتفى بالقراءةِ**
+    reproductionPath: >-
+      قراءةُ `docs/RETENTION.md` L64 و`config/retention.yaml`
+      (`minHoursBetweenRuns: 1`، `maxErasuresPerRun: 500`) — يحدّانِ الوتيرةَ لا الآمرَ.
+    affectedFiles:
+      - docs/RETENTION.md
+      - config/retention.yaml
+    raisedBy: [claude_fable_5_1]
+    overlapsWith: [R6-A-01]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-A-10
+    engagement: M11.06
+    title: ملاحظةُ عمليّةٍ — خطّةُ الجولةِ غائبةٌ عن الكوميتِ، و`validate` يعتمدُ على وجودِ تقاريرَ سابقةٍ
+    origin: round-1
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: >-
+      نتيجةٌ من العضوِ «أ» على **تجهيزِ المنفِّذِ** لا على الشفرةِ؛ والمنفِّذُ يُقرُّ بها
+      في `executorPreparationDefects` أعلاه وفي §5 من مصفوفةِ المقارنةِ.
+    reproductionPath: >-
+      `git ls-tree -r a705f2d4 --name-only | grep M11.06` ⇒ لا نتيجةَ (رمزُ الخروجِ `1`)؛
+      و`npm run validate` = `1` في شجرةِ المراجعةِ المحذوفِ منها، و`0` في شجرةٍ نقيّةٍ.
+    affectedFiles:
+      - docs/external-review/M11.06-round-1-plan.md
+      - tests/docs/external-review-pack.test.mjs
+    raisedBy: [claude_fable_5_1]
+    rawReports:
+      claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+
+  - id: R6-B-01
+    engagement: M11.06
+    title: إشارةُ تجاوزِ ميزانيّةِ الاستدلالِ مُعلَنةٌ نظريّاً بلا مُنتِجٍ ولا إنفاذٍ فعليٍّ
+    origin: round-1
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: >-
+      نتيجةٌ من العضوِ «ب»، وتلتقي في الجوهرِ مع `R6-A-06` — **والتقاطعُ إشارةٌ لا دمجٌ**.
+    reproductionPath: >-
+      قراءةُ `docs/AGENT_CONTAINMENT.md` تحتَ «الحدودُ المعلَنةُ»: «بوابةُ الاستدلالِ غيرُ
+      مُنفَّذةٍ… وإشارةُ `budget-exceeded` مُعلَنةٌ في عتباتِ الحجرِ بلا مُنتِجٍ لها اليومَ».
+    affectedFiles:
+      - docs/AGENT_CONTAINMENT.md
+      - src/inference/inference-gate.mjs
+    raisedBy: [gemini_3_1_pro]
+    overlapsWith: [R6-A-06]
+    rawReports:
+      gemini_3_1_pro: docs/external-review/reports/M11.06-round-1-model-council-report-gemini-3-1-pro.md
+
+  - id: R6-B-02
+    engagement: M11.06
+    title: شرطُ التقييمِ قبلَ التنشيطِ (`M6.08`) غيرُ مكتملِ التطبيقِ مع إعلانِ `G6` «بصمةً وتقييماً»
+    origin: round-1
+    severityAsWritten: منخفضة إلى متوسطة
+    severity: medium
+    status: open
+    agreement: >-
+      نتيجةٌ من العضوِ «ب». والشدّةُ بلفظِه مزدوجةٌ («منخفضةٌ إلى متوسّطةٍ»)،
+      والتطبيعُ إلى `medium` **أخذٌ بالأشدِّ لا إعادةُ تقديرٍ** — والأصلُ في `severityAsWritten`.
+    reproductionPath: >-
+      قراءةُ `docs/AGENT_CONTAINMENT.md` (إقرارُ أنّ `M6.08` غيرُ منفَّذٍ ويُكتفى ببصمةِ
+      الأوزانِ) مقابلَ نصِّ البوّابةِ `G6` المُعلَنِ «بصمةٌ وتقييمٌ».
+    affectedFiles:
+      - docs/AGENT_CONTAINMENT.md
+    raisedBy: [gemini_3_1_pro]
+    rawReports:
+      gemini_3_1_pro: docs/external-review/reports/M11.06-round-1-model-council-report-gemini-3-1-pro.md
