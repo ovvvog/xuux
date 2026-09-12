@@ -18,6 +18,12 @@
 //   R4 — لا مسار جانبي: لا وحدة في `src/` تلمس مستودع الشواهد أو تُنشئ دفتراً إلا
 //        الوحدات المعلَنة في `ledgerHolders`. فمن أراد محواً بلا شاهد لا يحتاج
 //        ثغرةً في الدورة، بل مساراً أقصر: المستودع مباشرةً و`remove` فيه.
+//   R6 — **المحوُ يمرُّ بقرارٍ لا بنصِّ دورٍ** (‏`R6-A-01`): مسارا المحوِ الفعليِّ
+//        (`run` و`eraseDirected`) يجبُ أن يُناديا `#authorizeSweep`، وأن تكونَ فيه
+//        نداءاتُ `authorize` و`verify` الفعليّةُ، وأن لا يبقى `assertSweeper` سلطةً
+//        في مسارِ محوٍ. والتركيبُ المُشغَّلُ يجبُ أن يمرِّرَ `authorizer`. وهذا نصُّ
+//        العيبِ المُغلَق: فاعلٌ غيرُ مسجَّلٍ محا صفَّينِ بصفرِ نداءاتِ تفويضٍ، لأنّ
+//        الحارسَ الوحيدَ كان يقرأُ نصّاً يُرسلُه المُنادي.
 //   R5 — **فحص المخزون**: إن وُجدت `DATABASE_URL` فيُقاس أن سلسلة الشواهد متّصلة
 //        بلا ثغرة تسلسل، وأن لا عقدَ بياناتٍ يتيماً في الفهرس. وبلا `DATABASE_URL`
 //        يُعلَن الفحص **متروكاً** صراحةً ولا يُدّعى نجاحه: حاجزٌ يقول «✅» وهو لم
@@ -139,6 +145,79 @@ for (const holder of allowed) {
   if (!fs.existsSync(path.join(ROOT, holder))) {
     violations.push(
       `R4: «${holder}» معلَنٌ حاملاً للدفتر ولا وجود له؛ قائمةُ إذنٍ فيها اسمٌ ميّت تُوسّع الإذن بلا حاجة.`,
+    );
+  }
+}
+
+// ── R6: المحوُ يمرُّ بقرارٍ لا بنصِّ دورٍ (`R6-A-01`) ──
+const cycleFile = path.join(ROOT, 'src/data/retention-cycle.mjs');
+if (!fs.existsSync(cycleFile)) {
+  violations.push('R6: `src/data/retention-cycle.mjs` غير موجود؛ فلا يُقاس مسارُ المحوِ أصلاً.');
+} else {
+  const cycleSource = read(cycleFile);
+  if (!cycleSource.includes("PURGE_ACTION = 'purge-data'")) {
+    violations.push(
+      "R6: الوحدةُ لا تُعلن الفعلَ المحكومَ `PURGE_ACTION = 'purge-data'`؛ ومحوٌ لا يُسمّي فعلَه لا تعرفُه السياسةُ ولا تبلغُه العتبةُ السياديّة.",
+    );
+  }
+  // متنُ كلِّ مسارِ محوٍ يُقتطعُ من ترويسته إلى الترويسةِ التالية: فحصُ الملفِّ
+  // كلِّه لا يكفي — نداءُ تفويضٍ في طريقةٍ أخرى لا يحكمُ هذه الطريقة، وهذا بعينُه
+  // ما تجاوزتْه الطفرةُ M16 حين بقيَ `#authorizeSweep` في الملفِّ بلا مُنادٍ.
+  for (const method of ['async run(', 'async eraseDirected(']) {
+    const start = cycleSource.indexOf(method);
+    if (start === -1) {
+      violations.push(
+        `R6: مسارُ المحوِ \`${method}\` غير موجود؛ فإمّا أُزيل أو غُيّر اسمُه بلا تحديثِ الحاجز.`,
+      );
+      continue;
+    }
+    const rest = cycleSource.slice(start + method.length);
+    const nextHeader = rest.search(/\n {2}(?:async |#|\/\*\*)/);
+    const body = nextHeader === -1 ? rest : rest.slice(0, nextHeader);
+    if (!body.includes('#authorizeSweep(')) {
+      violations.push(
+        `R6: \`${method}\` يمحو بلا نداءِ \`#authorizeSweep\`؛ فالحارسُ عادَ نصَّ دورٍ يُرسلُه المُنادي، وهو نصُّ \`R6-A-01\`.`,
+      );
+    }
+    if (body.includes('assertSweeper(')) {
+      violations.push(
+        `R6: \`${method}\` ينادي \`assertSweeper\` مباشرةً؛ وحارسُ الدورِ مُرشِّحٌ ثانٍ لا سلطةٌ، والسلطةُ قرارُ نقطةِ التفويض.`,
+      );
+    }
+  }
+  const sweepStart = cycleSource.indexOf('async #authorizeSweep(');
+  if (sweepStart === -1) {
+    violations.push('R6: `#authorizeSweep` غير موجودة؛ فلا موضعَ للقرارِ في مسارِ المحو.');
+  } else {
+    const rest = cycleSource.slice(sweepStart);
+    const nextHeader = rest.slice(1).search(/\n {2}(?:async |\/\*\*)/);
+    const body = nextHeader === -1 ? rest : rest.slice(0, nextHeader + 1);
+    /** @type {ReadonlyArray<readonly [string, string]>} */
+    const required = [
+      ['this.authorizer.authorize(', 'نداءُ التفويضِ الفعليُّ'],
+      ['this.authorizer.verify(', 'استهلاكُ تذكرةِ القرارِ قبلَ الحذف'],
+      ['identityGate', 'اشتراطُ بوابةِ الهويةِ في نقطةِ التفويض'],
+      ['AUTHORIZER_REQUIRED', 'الرفضُ المُسمّى عند غيابِ نقطةِ التفويض'],
+      ['NOT_AUTHORIZED', 'الرفضُ المُسمّى عند رفضِ القرار'],
+    ];
+    for (const [needle, why] of required) {
+      if (!body.includes(needle)) {
+        violations.push(
+          `R6: \`#authorizeSweep\` بلا \`${needle}\` — ${why} مفقود، فالنداءُ صورةٌ لا قرار.`,
+        );
+      }
+    }
+  }
+}
+// والتركيبُ المُشغَّلُ: دورةٌ تُبنى بلا `authorizer` تُرفَض في التشغيلِ برمزٍ
+// مُسمّىً، لكنّ حاجزاً يسكتُ عنها يجعل الدولةَ عاجزةً عن المحوِ بلا أن يُقال.
+const compositionFile = path.join(ROOT, 'src/persistence/composition.mjs');
+if (fs.existsSync(compositionFile)) {
+  const composition = read(compositionFile);
+  const built = composition.indexOf('new RetentionCycle(');
+  if (built !== -1 && !composition.slice(built, built + 600).includes('authorizer:')) {
+    violations.push(
+      'R6: التركيبُ المُشغَّلُ يبني `RetentionCycle` بلا `authorizer`؛ فالمحوُ في الدولةِ المُشغَّلةِ يُرفَض دائماً أو — إن سقطَ الشرطُ — يقعُ بلا قرار.',
     );
   }
 }

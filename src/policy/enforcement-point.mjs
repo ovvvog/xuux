@@ -21,6 +21,18 @@
  * **ممنوعَ الإنفاذ** برمز `LEGISLATION_CONFLICT_UNRESOLVED` حتى يُحَلَّ التعارضُ
  * ويُقاس زوالُه. والحاجزُ يُسأل **قبل** تقييم السياسة وبعد الهوية: سياسةٌ تُقيَّم
  * على فعلٍ متعارَضٍ فيه تُنتج قراراً يبدو محكوماً وهو محسومٌ بحرف الاسم.
+ *
+ * **وأُغلق في `R6-A-02` عيبُ مقدارِ الخصمِ.** كان الخصمُ يقرأُ
+ * `context.quotaAmount` من سياقِ الطلبِ وإلّا خصمَ `1`. والسياقُ يبسُطُ
+ * `request.context` الذي يملكُه المُنادي، فكانت الكمّيةُ إمّا **رقماً يحقنُه
+ * الطالبُ بنفسِه** وإمّا **عدَّ نداءاتٍ لا كمّيةً**: سقفُ `egress-bytes` مُعلَنٌ
+ * جيجابايتاً في اليومِ وكان خمسُمئةِ ألفِ بايتٍ تخصمُ واحداً، فالسقفُ المُعلَنُ
+ * بالبايتِ لم يكن نافذاً بالبايتِ. فصارت وحدةُ القياسِ **بياناً** في
+ * `config/quotas.yaml` (`measure.kind` و`measure.key`)، والكمّيةُ تُقرأُ من
+ * **قناةِ قياسٍ منفصلةٍ** هي الوسيطُ الثاني لـ`authorize` — لا من السياقِ — فلا
+ * يبلغُها المُنادي. ومَورِدٌ بلا وحدةِ قياسٍ مُعلَنةٍ أو كمّيةٍ مقيسةٍ **يُرفَض**
+ * برمزٍ مُسمّىً (`QUOTA_MEASURE_UNDECLARED`، `QUOTA_AMOUNT_UNMEASURED`) لا
+ * يسقُطُ إلى رقمٍ ضمنيٍّ: سقوطٌ صامتٌ إلى `1` هو العيبُ بعينِه.
  */
 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -105,6 +117,16 @@ export class EnforcementPoint {
     this.legislationGate = legislationGate;
     this.quotaLedger = quotaLedger;
     this.decisionSink = decisionSink;
+    // وحداتُ القياسِ من البياناتِ لا من الشفرةِ (‏`R6-A-02`): خريطةُ
+    // `resource -> measure` تُبنى مرّةً من حزمةِ السياسةِ، وغيابُ المدخلِ رفضٌ
+    // مُسمّىً لا خصمُ واحدٍ.
+    /** @type {ReadonlyMap<string, { kind: 'calls' | 'measured', key?: string }>} */
+    this.quotaMeasures = new Map(
+      (this.decisionPoint.bundle?.quotas ?? []).map((entry) => [
+        String(entry['resource']),
+        /** @type {{ kind: 'calls' | 'measured', key?: string }} */ (entry['measure']),
+      ]),
+    );
     // مفتاح التذكرة يُولَّد لكل عملية: تذكرةٌ من عملية سابقة لا تُقبل بعد إعادة
     // التشغيل، وذلك هو المقصود — التذكرة إذنُ تنفيذٍ لحظي لا رخصة دائمة.
     this.secret = secret ?? randomBytes(32);
@@ -129,9 +151,13 @@ export class EnforcementPoint {
    * وكيلٍ بطلباتٍ مرفوضة)، و**يُسجَّل الرفض كما يُسجَّل السماح** (وإلا صار سجل
    * التدقيق سجل النجاح فقط).
    * @param {PolicyRequest} request
-   * @returns {Promise<{ decision: PolicyDecision, token: string | null }>}
+   * @param {{ measured?: Record<string, unknown> }} [measurement] قناةُ القياسِ
+   *   (‏`R6-A-02`): الكمّياتُ المقيسةُ التي تحسبُها البوابةُ بنفسِها من الحمولةِ
+   *   الفعليّةِ. **ليست جزءاً من `request.context`** عن قصدٍ: السياقُ يملكُه
+   *   المُنادي، فحقنُه فيه يجعلُ المخصومَ رقماً يعلنُه الطالبُ عن نفسِه.
+   * @returns {Promise<{ decision: PolicyDecision, token: string | null, quota: { resource: string, subjectType: string, subjectId: string, amount: number } | null }>}
    */
-  async authorize(request) {
+  async authorize(request, measurement = {}) {
     const evaluatedAt = this.now().toISOString();
     // الطلب المُقيَّم متغيّرٌ محلي: بوابة الهوية تستبدل فاعله بما يقوله جذر
     // الثقة، وتعديل المُعامل نفسه يخفي على من يقرأ أيُّ طلبٍ وصل وأيُّ طلبٍ قُيّم.
@@ -152,7 +178,7 @@ export class EnforcementPoint {
           evaluatedAt,
         });
         await this.record(decision, request);
-        return { decision, token: null };
+        return { decision, token: null, quota: null };
       }
     }
 
@@ -180,7 +206,7 @@ export class EnforcementPoint {
         evaluatedAt,
       });
       await this.record(decision, evaluated);
-      return { decision, token: null };
+      return { decision, token: null, quota: null };
     }
     if (this.identityGate !== null) {
       const verdict = await this.identityGate.verify(evaluated.actor.id);
@@ -197,7 +223,7 @@ export class EnforcementPoint {
           evaluatedAt,
         });
         await this.record(decision, evaluated);
-        return { decision, token: null };
+        return { decision, token: null, quota: null };
       }
       evaluated = Object.freeze({
         ...evaluated,
@@ -235,45 +261,144 @@ export class EnforcementPoint {
           open: true,
         });
         await this.record(decision, evaluated);
-        return { decision, token: null };
+        return { decision, token: null, quota: null };
       }
     }
 
     let decision = this.decisionPoint.evaluate(evaluated);
 
+    /** @type {{ resource: string, subjectType: string, subjectId: string, amount: number } | null} */
+    let quota = null;
     if (decision.allowed) {
       const quotaResource = this.decisionPoint.bundle.actions.get(evaluated.action)?.quotaResource;
       if (quotaResource !== undefined && this.quotaLedger !== null) {
-        const amountRaw = evaluated.context?.['quotaAmount'];
-        const amount = typeof amountRaw === 'number' && amountRaw > 0 ? amountRaw : 1;
-        const subject = this.quotaSubject(evaluated, quotaResource);
-        try {
-          const state = await this.quotaLedger.debit({
-            subjectType: subject.type,
-            subjectId: subject.id,
-            resource: quotaResource,
-            amount,
-          });
-          this.log.append('policy.quota.debited', evaluated.actor.id, {
-            resource: quotaResource,
-            amount,
-            remaining: state.remaining,
-          });
-        } catch (error) {
-          decision = Object.freeze({
-            ...decision,
-            allowed: false,
-            effect: /** @type {const} */ ('deny'),
-            code: /** @type {const} */ ('QUOTA_EXCEEDED'),
-            reason: `الحصّة استُنفدت على المورد ${quotaResource}: ${error instanceof Error ? error.message : String(error)}. السياسة ${decision.policyId ?? '—'} تأذن بالفعل، والحدّ يوقفه.`,
-          });
+        const resolved = this.resolveQuotaAmount(quotaResource, measurement.measured);
+        if (!resolved.ok) {
+          // كمّيةٌ غيرَ مقيسةٍ **ترفضُ الفعلَ** ولا تخصمُ رقماً افتراضياً: خصمُ
+          // واحدٍ عندَ الجهلِ بالكمّيةِ يُنتج سقفاً يُعلَن ولا يَنفُذ.
+          decision = /** @type {import('./model.mjs').PolicyDecision} */ (
+            Object.freeze({
+              ...decision,
+              allowed: false,
+              effect: 'deny',
+              code: resolved.code,
+              reason: resolved.reason,
+            })
+          );
+        } else {
+          const subject = this.quotaSubject(evaluated, quotaResource);
+          try {
+            const state = await this.quotaLedger.debit({
+              subjectType: subject.type,
+              subjectId: subject.id,
+              resource: quotaResource,
+              amount: resolved.amount,
+            });
+            quota = {
+              resource: quotaResource,
+              subjectType: subject.type,
+              subjectId: subject.id,
+              amount: resolved.amount,
+            };
+            this.log.append('policy.quota.debited', evaluated.actor.id, {
+              resource: quotaResource,
+              amount: resolved.amount,
+              measure: resolved.measure,
+              remaining: state.remaining,
+            });
+          } catch (error) {
+            decision = Object.freeze({
+              ...decision,
+              allowed: false,
+              effect: /** @type {const} */ ('deny'),
+              code: /** @type {const} */ ('QUOTA_EXCEEDED'),
+              reason: `الحصّة استُنفدت على المورد ${quotaResource}: ${error instanceof Error ? error.message : String(error)}. السياسة ${decision.policyId ?? '—'} تأذن بالفعل، والحدّ يوقفه.`,
+            });
+          }
         }
       }
     }
 
     await this.record(decision, evaluated);
-    if (!decision.allowed) return { decision, token: null };
-    return { decision, token: this.issue(evaluated, decision) };
+    if (!decision.allowed) return { decision, token: null, quota: null };
+    return { decision, token: this.issue(evaluated, decision), quota };
+  }
+
+  /**
+   * كمّيةُ الخصمِ من وحدةِ القياسِ المُعلَنةِ (‏`R6-A-02`).
+   *
+   * ثلاثُ حالاتٍ لا رابعَ لها، وليس فيها سقوطٌ إلى رقمٍ ضمنيٍّ:
+   *  - لا وحدةَ قياسٍ مُعلَنةً للمَورِدِ ⇒ `QUOTA_MEASURE_UNDECLARED`. مَورِدٌ
+   *    يُخصمُ عليه بوحدةٍ لا تُقرأُ من الوثيقةِ يجعلُ تعديلَ الوثيقةِ بلا أثرٍ.
+   *  - `kind: 'calls'` ⇒ واحدٌ، **لأنّ الوثيقةَ أعلنت أنّ النداءَ هو الكمّيةُ**
+   *    (وكيل/يوم، كتابة/ساعة) لا لأنّ الكمّيةَ مجهولةٌ.
+   *  - `kind: 'measured'` ⇒ العددُ من `measured[key]` وحدَه. غيابُه أو كونُه غيرَ
+   *    عددٍ منتهٍ موجبٍ ⇒ `QUOTA_AMOUNT_UNMEASURED`.
+   * @param {string} resource
+   * @param {Record<string, unknown> | undefined} measured
+   * @returns {{ ok: true, amount: number, measure: string } | { ok: false, code: 'QUOTA_MEASURE_UNDECLARED' | 'QUOTA_AMOUNT_UNMEASURED', reason: string }}
+   */
+  resolveQuotaAmount(resource, measured) {
+    const measure = this.quotaMeasures.get(resource);
+    if (measure === undefined) {
+      return {
+        ok: false,
+        code: /** @type {const} */ ('QUOTA_MEASURE_UNDECLARED'),
+        reason: `المورد ${resource} يُخصم عليه ولا وحدةَ قياسٍ معلَنةً له في وثيقةِ الحصصِ (measure)؛ وخصمٌ بوحدةٍ غيرِ معلَنةٍ سقفٌ يُعلَن ولا يَنفُذ.`,
+      };
+    }
+    if (measure.kind === 'calls') return { ok: true, amount: 1, measure: 'calls' };
+    const key = measure.key;
+    if (key === undefined) {
+      return {
+        ok: false,
+        code: /** @type {const} */ ('QUOTA_MEASURE_UNDECLARED'),
+        reason: `المورد ${resource} معلَنٌ measured بلا مفتاحِ قياسٍ (key)؛ فلا يُعرف أيُّ كمّيةٍ تُخصم.`,
+      };
+    }
+    const raw = measured === undefined ? undefined : measured[key];
+    if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+      return {
+        ok: false,
+        code: /** @type {const} */ ('QUOTA_AMOUNT_UNMEASURED'),
+        reason: `المورد ${resource} يُخصم بالكمّيةِ المقيسةِ «${key}» ولم تُقَس (وصل: ${String(raw)})؛ والخصمُ واحداً عندَ الجهلِ بالكمّيةِ يجعلُ الحدَّ المعلَنَ بالوحدةِ عدَّ نداءاتٍ.`,
+      };
+    }
+    return { ok: true, amount: Math.ceil(raw), measure: key };
+  }
+
+  /**
+   * تسويةُ الخصمِ بعدَ التنفيذِ (‏`R6-A-02`).
+   *
+   * بعضُ الكمّياتِ لا تُقاسُ إلا **بعدَ** الفعلِ: رموزُ المُخرَجِ لا تُعرفُ قبلَ
+   * توليدِه. فيُخصمُ عندَ التفويضِ ما قيسَ (المُدخَلُ)، ثمّ تُخصمُ هنا الزيادةُ
+   * المقيسةُ فعلاً — فلا يبقى الفرقُ استهلاكاً واقعاً بلا خصمٍ. والتسويةُ
+   * **زيادةٌ فقط**: كمّيةٌ فعليّةٌ أقلُّ من المُقدَّرِ لا تُعاد، إذ ردُّ الحصّةِ
+   * يفتحُ بابَ تقديرٍ مرتفعٍ يُستردُّ فيصيرُ الخصمُ بلا أثرٍ.
+   * @param {{ resource: string, subjectType: string, subjectId: string, amount: number }} debited ما خُصم عند التفويض
+   * @param {number} actual الكمّيةُ المقيسةُ فعلاً بعدَ التنفيذِ
+   * @param {string} actorId
+   * @returns {Promise<{ settled: number }>}
+   */
+  async settleQuota(debited, actual, actorId) {
+    if (this.quotaLedger === null) return { settled: 0 };
+    if (!Number.isFinite(actual)) return { settled: 0 };
+    const extra = Math.ceil(actual) - debited.amount;
+    if (extra <= 0) return { settled: 0 };
+    const state = await this.quotaLedger.debit({
+      subjectType: debited.subjectType,
+      subjectId: debited.subjectId,
+      resource: debited.resource,
+      amount: extra,
+    });
+    this.log.append('policy.quota.settled', actorId, {
+      resource: debited.resource,
+      debited: debited.amount,
+      actual: Math.ceil(actual),
+      settled: extra,
+      remaining: state.remaining,
+    });
+    return { settled: extra };
   }
 
   /**

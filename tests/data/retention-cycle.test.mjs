@@ -45,6 +45,12 @@ test.after(() => fixture.cleanup());
 
 const HOUR = 3600000;
 
+// `R6-A-01`: المحوُ صارَ يمرُّ بنقطةِ التفويضِ على الفعلِ `purge-data`، وهو فوقَ
+// العتبةِ السياديّةِ؛ فكلُّ محوٍ في هذا الملفِّ يحملُ أمراً ملكيّاً بمعرّفِه
+// وملخّصِه، وفاعلُه مسجَّلٌ في بوابةِ الهويةِ. وهذا ليس تخفيفاً للاختبارِ بل
+// تشديدٌ: قبلَ الإصلاحِ كان يكفي نصُّ دورٍ يُرسلُه المُنادي.
+const ROYAL = { id: 'rc:retention-test', digest: 'b'.repeat(64) };
+
 /**
  * @param {string} id
  * @returns {never}
@@ -80,9 +86,40 @@ function operator(role = 'role:operator') {
  */
 function setup() {
   const log = new EventLog();
+  // بوابةُ هويةٍ مصغَّرةٌ تحاكي جذرَ الثقةِ: تعرفُ المطهِّرَ المسجَّلَ وحدَه، فلا
+  // يمحو من يصفُ نفسَه مطهِّراً. وقياسُ الرفضِ التفصيليُّ في
+  // `tests/data/retention-authorization.test.mjs`.
+  const identityGate = {
+    /**
+     * @param {string} actorId
+     */
+    async verify(actorId) {
+      if (actorId !== 'operator:root') {
+        return {
+          ok: false,
+          code: 'IDENTITY_UNKNOWN',
+          reason: `الفاعل ${actorId} غير مسجَّل في جذر الثقة.`,
+          actor: null,
+        };
+      }
+      return {
+        ok: true,
+        code: 'IDENTITY_OK',
+        reason: 'مسجَّل ونشط.',
+        actor: {
+          id: 'operator:root',
+          role: 'role:operator',
+          state: 'active',
+          kind: /** @type {any} */ ('human'),
+          capabilities: [],
+        },
+      };
+    },
+  };
   const enforcementPoint = new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
+    identityGate: /** @type {never} */ (identityGate),
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   const { ledger, repository: lineageRepository } = createTestLedger({ log, assets, lattice });
@@ -114,6 +151,18 @@ function setup() {
   const retention = new RetentionCycle({
     log,
     erasureLedger,
+    authorizer: /** @type {never} */ ({
+      identityGate,
+      /**
+       * @param {any} request
+       */
+      authorize: (request) => enforcementPoint.authorize(request),
+      /**
+       * @param {string | undefined} token
+       * @param {any} expected
+       */
+      verify: (token, expected) => enforcementPoint.verify(token, expected),
+    }),
     repositories: {
       dataAssets: assets,
       memories,
@@ -159,7 +208,7 @@ test('فحص القبول: دورة احتفاظ كاملة تُمحى وتُس�
   assert.ok(lineageBefore.length > 0, 'عقدُ البيانات بلا صفّ نسبٍ واحد، فلا شهادةَ تُقاس.');
   await forceRow(memories, expiring.id, { expiresAt: new Date(Date.now() - 1000) });
 
-  const report = await retention.run({ actor: operator() });
+  const report = await retention.run({ actor: operator(), royalCommand: ROYAL });
 
   // (1) المادّة زالت، وعقدُها زال معها: عقدٌ يبقى بعد مادّته أصلٌ يتيمٌ في الفهرس.
   assert.equal(await memories.findById(expiring.id), null);
@@ -207,7 +256,7 @@ test('كشفُ العبث: شاهدٌ يُحرَّف أو يُحذف يُسقط 
   const alpha = agent('agent:alpha');
   const entry = await memory.remember('agent:alpha', 'مادّة', { actor: alpha });
   await forceRow(memories, entry.id, { expiresAt: new Date(Date.now() - 1000) });
-  await retention.run({ actor: operator() });
+  await retention.run({ actor: operator(), royalCommand: ROYAL });
   assert.equal(await erasureLedger.assertIntact(), 2);
 
   // تحريفُ فاعلِ المحو في الشاهد الأول: التجزئة تُحسب على الفاعل، فينقطع الربط.
@@ -250,7 +299,13 @@ test('محوُ عقدٍ قبل ذاكرته مرفوض، والمحفوظُ قا
   // (1) محوُ العقد قبل ذاكرته: `state.memories.dataset_id … ON DELETE RESTRICT` يرفضه
   //     في القاعدة رفضاً محتوماً، والدورة ترفضه برمزٍ مُسمّى قبل أن تصل القاعدة.
   await assert.rejects(
-    () => retention.eraseDirected({ actor: operator(), target: 'data_assets', id: heldAsset }),
+    () =>
+      retention.eraseDirected({
+        actor: operator(),
+        target: 'data_assets',
+        id: heldAsset,
+        royalCommand: ROYAL,
+      }),
     (error) =>
       error instanceof Error && error.message.includes(RETENTION_CYCLE_ERRORS.DEPENDENT_PRESENT),
   );
@@ -259,7 +314,7 @@ test('محوُ عقدٍ قبل ذاكرته مرفوض، والمحفوظُ قا
   //     برفضٍ مُسمّى في التقرير — وإسقاطُ الدورة هنا كان سيمنع محو كل ما بعده.
   await forceRow(assets, heldAsset, { legalHold: true });
   await forceRow(memories, held.id, { expiresAt: new Date(Date.now() - 1000) });
-  const report = await retention.run({ actor: operator() });
+  const report = await retention.run({ actor: operator(), royalCommand: ROYAL });
 
   assert.equal(await memories.findById(held.id), null);
   assert.ok((await assets.findById(heldAsset)) !== null);
@@ -277,13 +332,13 @@ test('بوابةُ التكرار ترفض إعادة التشغيل، والد�
   const alpha = agent('agent:alpha');
   const entry = await memory.remember('agent:alpha', 'مادّة', { actor: alpha });
   await forceRow(memories, entry.id, { expiresAt: new Date(Date.now() - 1000) });
-  const first = await retention.run({ actor: operator() });
+  const first = await retention.run({ actor: operator(), royalCommand: ROYAL });
   assert.equal(first.erased.length, 2);
 
   // تشغيلٌ يُعاد فوراً يُرفض: المدّة الدنيا معلَنة في السياسة، وتُقاس على آخر شاهدٍ
   // في الدفتر لا على متغيّرٍ في الذاكرة الحيّة يُصفَّر بإعادة التشغيل.
   await assert.rejects(
-    () => retention.run({ actor: operator() }),
+    () => retention.run({ actor: operator(), royalCommand: ROYAL }),
     (error) => error instanceof Error && error.message.includes(RETENTION_CYCLE_ERRORS.TOO_SOON),
   );
   // وبعد مرور المدّة: تمرّ الدورة ولا تمحو شيئاً ولا تكتب شاهداً — المحو مُقتصرٌ
@@ -291,6 +346,7 @@ test('بوابةُ التكرار ترفض إعادة التشغيل، والد�
   const later = await retention.run({
     actor: operator(),
     now: new Date(Date.now() + 2 * HOUR),
+    royalCommand: ROYAL,
   });
   assert.deepEqual(later.erased, []);
   assert.equal((await erasureLedger.entries()).length, 2);

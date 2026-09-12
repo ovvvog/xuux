@@ -751,9 +751,13 @@ export function createRegistries({
     approvals,
     lineage,
     erasureLedger,
+    // نقطةُ التفويضِ موصولةٌ بدورةِ المحوِ (‏`R6-A-01`): المحوُ فعلٌ محكومٌ
+    // (`purge-data`) فوقَ العتبةِ السياديّةِ، وكان يقعُ بحارسِ دورٍ نصّيٍّ يُرسلُه
+    // المُنادي. وتركُها `null` لا يفتحُ الباب: المحوُ يُرفَض برمزٍ مُسمّىً.
     retention: new RetentionCycle({
       log,
       erasureLedger,
+      ...(enforcementPoint === null ? {} : { authorizer: enforcementPoint }),
       repositories: {
         dataAssets: repositories.dataAssets,
         memories: repositories.memories,

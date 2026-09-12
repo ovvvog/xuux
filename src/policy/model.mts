@@ -113,10 +113,21 @@ export interface QuotaDefinition {
   windowSeconds: number;
   unit?: string;
   reason: string;
+  /**
+   * وحدةُ القياسِ التي يُخصَمُ بها (‏`R6-A-02`). `calls` يخصمُ واحداً **بالإعلانِ**
+   * لا بالسقوطِ، و`measured` يخصمُ ما قاسَتْه البوّابةُ نفسُها بالمفتاحِ `key`.
+   * ومقدارٌ غيرُ مقيسٍ لحصّةٍ `measured` رفضٌ لا خصمُ واحدٍ.
+   */
+  measure: { kind: 'calls' } | { kind: 'measured'; key: string };
 }
 
 /** رموز القرار. الرمز للآلة والسبب للإنسان، ولا يُعاد قرار بلا الاثنين. */
 export type DecisionCode =
+  // `R6-A-02`: رفضٌ لأنّ الكمّيةَ غيرُ مقيسةٍ، أو لأنّ وحدةَ القياسِ غيرُ معلَنةٍ.
+  // ورمزانِ مُسمّيانِ لا رمزٌ عامٌّ: خصمُ واحدٍ عندَ الجهلِ بالكمّيةِ يُنتج سقفاً
+  // يُعلَن ولا يَنفُذ، فالجهلُ يُرفَضُ باسمِه.
+  | 'QUOTA_MEASURE_UNDECLARED'
+  | 'QUOTA_AMOUNT_UNMEASURED'
   | 'POLICY_ALLOW'
   | 'POLICY_DENY'
   | 'POLICY_NO_MATCH'

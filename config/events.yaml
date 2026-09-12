@@ -750,8 +750,17 @@ channels:
         version: 1
         required: [action, allowed, code, policyId, policyVersion, reason, resource]
       - type: policy.quota.debited
+        # النسخةُ 2: أُضيفَ حقلٌ إلزاميٌّ (`measure`)، وإضافةُ إلزاميٍّ كسرُ توافقٍ
+        # يُعلَنُ برفعِ النسخةِ لا يُمرَّرُ صامتاً (`R6-A-02`).
+        version: 2
+        # `R6-A-02`: الحقلُ `measure` مُعلَنٌ لأنّ القارئَ لا يُقيّمُ خصماً بلا وحدةِ
+        # قياسِه — «خصمُ 500,000» بلا «بايتاً» رقمٌ لا معنى له في مراجعةٍ.
+        required: [amount, measure, remaining, resource]
+      # تسويةُ الحصّةِ بعدَ التنفيذِ (‏`R6-A-02`): الفرقُ الموجبُ وحدَه يُخصَم، ولا
+      # تُردُّ حصّةٌ أبداً؛ والحدثُ يُعلِن الأربعةَ كي يُراجَعَ الفرقُ لا النتيجةُ.
+      - type: policy.quota.settled
         version: 1
-        required: [amount, remaining, resource]
+        required: [actual, debited, remaining, resource, settled]
   - id: quarantine
     subject: 'الحجرُ الصحّي: الإشاراتُ والعزلُ والإفراج'
     classification: sensitive
@@ -794,6 +803,11 @@ channels:
       - type: retention.cycle.completed
         version: 1
         required: [capped, erased, ledgerSeq, now, refused]
+      # `R6-A-01`: المحوُ صارَ يمرُّ بقرارٍ، والقرارُ حدثٌ لا فعلٌ صامتٌ — فمَن
+      # راجعَ محواً يجدُ قبلَه تفويضَه باسمِ فعلِه ومورِدِه.
+      - type: retention.authorized
+        version: 1
+        required: [action, resourceKey]
       - type: retention.directed
         version: 1
         required: [id, ledgerSeq, target]

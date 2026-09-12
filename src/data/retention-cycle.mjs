@@ -28,6 +28,24 @@
  * تركيب الدولة كاملاً بقاعدةٍ حيّة، ولم تتوفّر قاعدةٌ في بيئة هذه الخطوة فلم
  * يُكتب ما لا يُقاس — وهو مسجَّل في `docs/REMAINING_WORK.md`.
  *
+ * **والعيبُ الخامسُ أُغلقَ في `R6-A-01`** (مجلسُ النماذجِ، الجولةُ `M11.06`):
+ * كان حارسُ المحوِ الوحيدُ `assertSweeper` يقرأُ `actor.role` **نصّاً يُرسلُه
+ * المُنادي** ويقارنُه بأدوارِ المطهِّرِ المُعلَنةِ — بلا بوابةِ هويةٍ، وبلا نداءٍ
+ * إلى `EnforcementPoint.authorize`، وبلا أمرٍ ملكيٍّ. وقياسُ المجلسِ: فاعلٌ
+ * `{ id: 'nobody:unregistered', role: 'role:operator' }` غيرُ مسجَّلٍ ولا شهادةَ
+ * له محا صفَّينِ فعلاً بصفرِ نداءاتٍ إلى `authorize`. وفي الوقتِ نفسِه كان
+ * `purge-data` مُعلَناً فوقَ العتبةِ السياديّةِ (`config/royal-authority.yaml`،
+ * `delegable: false`) **بلا مستهلِكٍ واحدٍ في `src/`** — فالعتبةُ تُعلَن على فعلٍ
+ * لا يُنادى عليه أحدٌ، والمحوُ يقعُ من مسارٍ لا يعرفُه القانونُ.
+ *
+ * فصارَ المحوُ الفعليُّ (`run` و`eraseDirected`) يمرُّ **فعلاً** بنقطةِ التفويضِ
+ * على الفعلِ `purge-data`: هويةُ الفاعلِ تُستبدَلُ بما يقولُه جذرُ الثقةِ في
+ * بوابةِ الهويةِ، والسياسةُ تُقيَّم، والعتبةُ السياديّةُ تطلبُ أمراً ملكيّاً،
+ * وتذكرةُ القرارِ تُستهلَكُ قبلَ أوّلِ حذفٍ. وغيابُ نقطةِ التفويضِ أو غيابُ بوابةِ
+ * الهويةِ فيها **رفضٌ مُسمّىً** (`RETENTION_AUTHORIZER_REQUIRED`) لا سقوطٌ إلى
+ * حارسِ الدورِ النصّيِّ: تركيبٌ صامتٌ يمحو هو العيبُ بعينِه. وحارسُ الدورِ باقٍ
+ * **مُرشِّحاً ثانياً** لا سلطةً: ما يحكمُ هو القرارُ لا نصُّ المُنادي.
+ *
  * **وحدٌّ معلَن ثانٍ:** الكتابةُ في الذاكرة لا تُشغّل دورةً لتحرير الحصّة. وهذا
  * **قرارٌ لا نقص**: أدوار المطهِّر لا تشمل الوكيل قصداً (`config/memory.yaml`)،
  * فمحوٌ يُشغّله فعلُ الوكيل يمنحه سلطةً منعتها السياسة عنه. فالحصّة تُحرَّر بمرور
@@ -62,7 +80,17 @@ export const RETENTION_CYCLE_ERRORS = Object.freeze({
   DEPENDENT_PRESENT: 'RETENTION_DEPENDENT_PRESENT',
   NOT_FOUND: 'RETENTION_NOT_FOUND',
   NOT_DUE: 'RETENTION_NOT_DUE',
+  // `R6-A-01`: غيابُ نقطةِ التفويضِ (أو غيابُ بوابةِ الهويةِ فيها) رفضٌ مُسمّىً.
+  AUTHORIZER_REQUIRED: 'RETENTION_AUTHORIZER_REQUIRED',
+  NOT_AUTHORIZED: 'RETENTION_NOT_AUTHORIZED',
 });
+
+/**
+ * الفعلُ المحكومُ الذي يُنادى عليه المحوُ (‏`R6-A-01`). مُعلَنٌ في
+ * `config/policies.yaml` وفوقَ العتبةِ السياديّةِ في `config/royal-authority.yaml`،
+ * وكان قبلَ هذه الخطوةِ بلا مستهلِكٍ واحدٍ في `src/`.
+ */
+export const PURGE_ACTION = 'purge-data';
 
 /** خطأ دورةٍ مُسمّى: الرمز للأتمتة والنص لمن يقرأ الرفض. */
 export class RetentionCycleError extends Error {
@@ -295,8 +323,11 @@ export class RetentionCycle {
    * @param {import('./erasure-ledger.mjs').ErasureLedger} deps.erasureLedger
    * @param {{ dataAssets: any, memories: any, dataLineage: any, classificationApprovals: any }} deps.repositories
    * @param {RetentionCyclePolicy} [deps.policy]
+   * @param {{ authorize: (request: import('../policy/model.mjs').PolicyRequest, measurement?: { measured?: Record<string, unknown> }) => Promise<{ decision: { allowed: boolean, code: string, reason: string }, token: string | null }>, verify: (token: string | undefined, expected: { actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }) => unknown, identityGate?: unknown } | null} [deps.authorizer]
+   *   نقطةُ التفويضِ (‏`R6-A-01`). وتركُها لا يفتحُ الباب بل يُغلقُه: المحوُ
+   *   يُرفَضُ برمزٍ مُسمّىً، إذ محوٌ يقعُ بتركيبٍ صامتٍ هو العيبُ المُغلَق.
    */
-  constructor({ log, erasureLedger, repositories, policy }) {
+  constructor({ log, erasureLedger, repositories, policy, authorizer = null }) {
     if (log === undefined || erasureLedger === undefined || repositories === undefined) {
       throw new RetentionCycleError(
         RETENTION_CYCLE_ERRORS.INPUT_INVALID,
@@ -307,6 +338,94 @@ export class RetentionCycle {
     this.erasureLedger = erasureLedger;
     this.repositories = repositories;
     this.policy = policy ?? loadRetentionPolicy();
+    this.authorizer = authorizer;
+  }
+
+  /**
+   * تفويضُ المحوِ (‏`R6-A-01`): نداءٌ **فعليٌّ** إلى نقطةِ التفويضِ على الفعلِ
+   * `purge-data` قبلَ أوّلِ حذفٍ، وتذكرةُ القرارِ تُستهلَكُ بعدَه.
+   *
+   * وثلاثةُ حدودٍ مُعلَنةٍ لا تُتجاوَز:
+   *  1. **لا نقطةَ تفويضٍ ⇒ لا محوَ.** الرفضُ `RETENTION_AUTHORIZER_REQUIRED`.
+   *  2. **لا بوابةَ هويةٍ في النقطةِ ⇒ لا محوَ.** نقطةٌ بلا بوابةٍ تقبلُ الفاعلَ
+   *     كما وصفَ نفسَه، وهو نصُّ العيبِ المقيسِ: فاعلٌ غيرُ مسجَّلٍ محا صفَّينِ.
+   *  3. **رفضُ القرارِ ⇒ لا محوَ**، ورمزُ الرفضِ يُنقلُ كما هو لا يُترجَمُ إلى
+   *     «رفضِ دورٍ»: العتبةُ السياديّةُ ترفضُ بلا أمرٍ ملكيٍّ، وبوابةُ الهويةِ
+   *     ترفضُ الفاعلَ المجهولَ، وهما رفضانِ مختلفانِ يُقرآنِ مختلفَينِ.
+   * @param {{ actor: { id?: unknown, role?: unknown, kind?: unknown, state?: unknown }, resourceKey: string, resourceId: string, context?: Record<string, unknown>, royalCommand?: { id: string, digest: string } }} request
+   * @returns {Promise<{ id: string, role: string }>}
+   */
+  async #authorizeSweep({ actor, resourceKey, resourceId, context = {}, royalCommand }) {
+    const sweeper = assertSweeper(actor, this.policy);
+    if (this.authorizer === null || typeof this.authorizer.authorize !== 'function') {
+      throw new RetentionCycleError(
+        RETENTION_CYCLE_ERRORS.AUTHORIZER_REQUIRED,
+        `المحوُ فعلٌ محكومٌ («${PURGE_ACTION}») فوقَ العتبةِ السياديّةِ، ولم تُمرَّر نقطةُ تفويضٍ؛ ومحوٌ يقعُ بلا قرارٍ هو تصعيدُ صلاحيةٍ لا دورةُ احتفاظٍ.`,
+        { action: PURGE_ACTION },
+      );
+    }
+    if (
+      this.authorizer.identityGate === null ||
+      this.authorizer.identityGate === undefined ||
+      typeof (/** @type {{ verify?: unknown }} */ (this.authorizer.identityGate).verify) !==
+        'function'
+    ) {
+      throw new RetentionCycleError(
+        RETENTION_CYCLE_ERRORS.AUTHORIZER_REQUIRED,
+        'نقطةُ التفويضِ الممرَّرةُ بلا بوابةِ هويةٍ موصولةٍ؛ فتقبلُ الفاعلَ كما وصفَ نفسَه، والمحوُ لا يقعُ على وصفٍ يُرسلُه المُنادي.',
+        { action: PURGE_ACTION },
+      );
+    }
+    const { decision, token } = await this.authorizer.authorize({
+      actor: {
+        id: sweeper.id,
+        role: sweeper.role,
+        kind: /** @type {import('../policy/model.mjs').ActorKind} */ (
+          typeof actor.kind === 'string' ? actor.kind : 'human'
+        ),
+        state: typeof actor.state === 'string' ? actor.state : 'active',
+      },
+      action: PURGE_ACTION,
+      resource: { type: 'data', id: resourceId, classification: 'secret' },
+      context,
+      // الأمرُ الملكيُّ حقلٌ في الطلبِ لا في السياقِ (‏`engine.mjs` L296–320):
+      // العتبةُ السياديّةُ تقرؤه من هناك، ووضعُه في السياقِ يجعلُه بلا أثرٍ.
+      ...(royalCommand === undefined
+        ? {}
+        : { royalCommandId: royalCommand.id, royalCommandDigest: royalCommand.digest }),
+    });
+    if (!decision.allowed) {
+      throw new RetentionCycleError(
+        RETENTION_CYCLE_ERRORS.NOT_AUTHORIZED,
+        `نقطةُ التفويضِ رفضت المحوَ برمز ${decision.code}: ${decision.reason}`,
+        { action: PURGE_ACTION, code: decision.code },
+      );
+    }
+    // التذكرةُ تُستهلَكُ قبلَ أوّلِ حذفٍ لا بعدَه: قرارٌ لا تُستهلَكُ تذكرتُه يبقى
+    // قابلاً لإعادةِ الاستعمالِ على محوٍ ثانٍ.
+    try {
+      this.authorizer.verify(token ?? undefined, {
+        actorId: sweeper.id,
+        action: PURGE_ACTION,
+        resourceKey,
+        // ربطُ الأمرِ الملكيِّ يُقدَّم للتحقّقِ كما هو: تذكرةٌ صدرتْ لأمرٍ ثمّ
+        // قُدِّمتْ بأمرٍ آخرَ تُرفَض، ولا يُستهلَكُ قرارُ أمرٍ على أمرٍ غيرِه.
+        ...(royalCommand === undefined
+          ? {}
+          : { royalCommandId: royalCommand.id, royalCommandDigest: royalCommand.digest }),
+      });
+    } catch (error) {
+      throw new RetentionCycleError(
+        RETENTION_CYCLE_ERRORS.NOT_AUTHORIZED,
+        `تذكرةُ قرارِ المحوِ غيرُ مقبولةٍ: ${error instanceof Error ? error.message : String(error)}`,
+        { action: PURGE_ACTION },
+      );
+    }
+    this.log.append('retention.authorized', sweeper.id, {
+      action: PURGE_ACTION,
+      resourceKey,
+    });
+    return sweeper;
   }
 
   /**
@@ -537,12 +656,22 @@ export class RetentionCycle {
    *
    * والترتيب من السياسة لا من ترتيب المفاتيح: الذاكرة قبل عقدها. والسقفُ
    * `maxErasuresPerRun` يجعل أثر تشغيلةٍ واحدة محدوداً ومراجَعاً.
-   * @param {{ actor: { id: string, role: string }, now?: Date }} request
+   * @param {{ actor: { id: string, role: string }, now?: Date, royalCommand?: { id: string, digest: string } }} request
+   *   و`royalCommand` مطلوبٌ لأنّ `purge-data` فوقَ العتبةِ السياديّةِ
+   *   (‏`R6-A-01`): دورةٌ تمحو بلا أمرٍ تُرفَض برمزِ نقطةِ التفويضِ.
    * @returns {Promise<{ now: Date, erased: Array<{ target: string, id: string }>, refused: Array<{ target: string, id: string, code: string, message: string }>, ledgerSeq: number, capped: boolean }>}
    */
-  async run({ actor, now = new Date() }) {
+  async run({ actor, now = new Date(), royalCommand }) {
     const at = assertNow(now);
-    const sweeper = assertSweeper(actor, this.policy);
+    // التفويضُ **قبلَ** أيِّ قراءةٍ أو حذفٍ (‏`R6-A-01`): جردُ ما سيُمحى بنفسِه
+    // إفصاحٌ عن الأصولِ المنتهيةِ، فلا يُسبَقُ به القرارُ.
+    const sweeper = await this.#authorizeSweep({
+      actor,
+      resourceKey: 'data:retention-cycle',
+      resourceId: 'retention-cycle',
+      context: { reason: 'retention', now: at.toISOString() },
+      ...(royalCommand === undefined ? {} : { royalCommand }),
+    });
     // بوابةُ التكرار: تشغيلٌ يُعاد بالخطأ بعد دقيقة يُرفض لا يُضاعف. وتُقاس على
     // آخر شاهدٍ في الدفتر لا على متغيّرٍ في الذاكرة الحيّة: متغيّرٌ يُصفَّر بإعادة
     // التشغيل يجعل البوابة تُفتح بأرخص فعل.
@@ -629,11 +758,10 @@ export class RetentionCycle {
    * محوٌ موجَّه بقرار: هدفٌ واحد بمعرّفه، وسببُه `directed` في الدفتر. لا يُنتظر
    * به انتهاء المدّة — والحفظُ القانوني والتوابع الحيّة يبقيان مانعين، فالتوجيه
    * سلطةٌ على **الوقت** لا على القيود.
-   * @param {{ actor: { id: string, role: string }, target: 'memories' | 'data_assets', id: string }} request
+   * @param {{ actor: { id: string, role: string }, target: 'memories' | 'data_assets', id: string, royalCommand?: { id: string, digest: string } }} request
    * @returns {Promise<{ target: string, id: string, seq: number }>}
    */
-  async eraseDirected({ actor, target, id }) {
-    const sweeper = assertSweeper(actor, this.policy);
+  async eraseDirected({ actor, target, id, royalCommand }) {
     if (!RETENTION_TARGETS.includes(target)) {
       throw new RetentionCycleError(
         RETENTION_CYCLE_ERRORS.INPUT_INVALID,
@@ -641,6 +769,15 @@ export class RetentionCycle {
         { target },
       );
     }
+    // والمحوُ الموجَّهُ أخطرُ من الدوريِّ: لا يَنتظرُ انتهاءَ مدّةٍ. فيمرُّ بنفسِ
+    // نقطةِ التفويضِ على هدفِه بعينِه (‏`R6-A-01`)، ولا يُقرأُ الصفُّ قبلَ القرارِ.
+    const sweeper = await this.#authorizeSweep({
+      actor,
+      resourceKey: `data:${target}:${id}`,
+      resourceId: `${target}:${id}`,
+      context: { reason: 'directed', target, targetId: id },
+      ...(royalCommand === undefined ? {} : { royalCommand }),
+    });
     const repository =
       target === 'memories' ? this.repositories.memories : this.repositories.dataAssets;
     const row = await repository.findById(id);

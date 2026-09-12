@@ -204,7 +204,13 @@ export class EgressGate {
       resource: { type: 'data', id: resourceId, classification },
       context: { ...(request.context ?? {}), destination: destination.id, bytes },
     };
-    const { decision, token } = await this.enforcementPoint.authorize(policyRequest);
+    // قناةُ القياسِ منفصلةٌ عن السياقِ (‏`R6-A-02`): `bytes` هنا هو الحجمُ الذي
+    // قاسته البوابةُ من الحمولةِ نفسِها، فيُخصمُ من `egress-bytes` بالبايتِ كما
+    // أُعلنَ الحدُّ. وإبقاؤه في السياقِ للسياساتِ لا يجعلُه مصدرَ الخصمِ: سياقٌ
+    // يملكُه المُنادي لا يُخصمُ منه.
+    const { decision, token } = await this.enforcementPoint.authorize(policyRequest, {
+      measured: { bytes },
+    });
     if (!decision.allowed) {
       this.#refuse(
         EGRESS_ERRORS.NOT_AUTHORIZED,

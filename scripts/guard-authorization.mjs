@@ -11,6 +11,11 @@
 //        `authorize`)، وإلا فذلك فعلٌ حسّاس يُنفَّذ من مكانٍ لا يعرفه المحرّك.
 //   R3 — لا فعل محكوم في الكود لا تعرفه البيانات: كل فعل مذكور في مجموعات الكود
 //        يجب أن يكون معلَناً في `config/policies.yaml`.
+//   R5 — الحصّةُ تُخصمُ بوحدةِ قياسٍ مُعلَنةٍ (‏`R6-A-02`): كلُّ موردِ حصّةٍ مربوطٍ
+//        بفعلٍ له `measure` في `config/quotas.yaml`؛ ونقطةُ التفويضِ **لا تقرأُ
+//        مقدارَ الخصمِ من سياقِ الطلبِ** ولا تُمرِّرُ رقماً ثابتاً إلى `debit`؛
+//        وكلُّ موردٍ `measured` له مُنادٍ في `src/` يُمرِّرُ مفتاحَ قياسِه في قناةِ
+//        القياسِ. وهذه القاعدةُ هي ما يجعلُ التثبيتَ على `amount: 1` مكشوفاً.
 //   R4 — لا انحراف بين المحرّك الأدنى والبيانات: مجموعة `SENSITIVE` في
 //        `src/root-of-trust/policy.mts` يجب أن تكون **جزءاً** من الكتالوج
 //        المعلَن، فلا تبقى قائمةٌ في الكود تحكم بما لا يعرفه الملف.
@@ -114,6 +119,112 @@ if (sensitiveBlock === null) {
     if (!governed.has(action)) {
       violations.push(`R4: فعلٌ حسّاس في الكود وغير محكوم في البيانات: ${action}.`);
     }
+  }
+}
+
+// ── R5: مقدارُ خصمِ الحصّةِ بوحدةِ قياسٍ مُعلَنةٍ لا برقمٍ ثابتٍ ولا بسياقِ المُنادي ──
+/** @type {Map<string, { kind?: string, key?: string }>} */
+const measures = new Map();
+for (const quota of bundle.quotas ?? []) {
+  measures.set(
+    String(quota['resource']),
+    /** @type {{ kind?: string, key?: string }} */ (quota['measure'] ?? {}),
+  );
+}
+/** @type {Set<string>} */
+const attachedResources = new Set();
+for (const action of bundle.actions.values()) {
+  const resource = /** @type {{ quotaResource?: string }} */ (action).quotaResource;
+  if (typeof resource === 'string') attachedResources.add(resource);
+}
+for (const resource of attachedResources) {
+  const measure = measures.get(resource);
+  if (measure === undefined) {
+    violations.push(`R5: الفعلُ يُخصم على المورد «${resource}» ولا حصّةَ معلَنةً له.`);
+    continue;
+  }
+  if (measure.kind !== 'calls' && measure.kind !== 'measured') {
+    violations.push(
+      `R5: المورد «${resource}» بلا وحدةِ قياسٍ معلَنةٍ (measure.kind)؛ فالخصمُ يقعُ بوحدةٍ لا تُقرأ من الوثيقةِ.`,
+    );
+    continue;
+  }
+  if (measure.kind === 'measured' && typeof measure.key !== 'string') {
+    violations.push(`R5: المورد «${resource}» معلَنٌ measured بلا مفتاحِ قياسٍ (measure.key).`);
+  }
+}
+
+const enforcementPath = path.join(ROOT, 'src', 'policy', 'enforcement-point.mjs');
+const enforcementSource = fs.readFileSync(enforcementPath, 'utf8');
+const enforcementCode = enforcementSource
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .split('\n')
+  .filter((line) => !/^\s*\/\//.test(line))
+  .join('\n');
+if (/quotaAmount/.test(enforcementCode)) {
+  violations.push(
+    'R5: نقطةُ التفويضِ تقرأُ مقدارَ الخصمِ من سياقِ الطلبِ (quotaAmount)؛ والسياقُ يملكُه المُنادي فيُعلنُ عن نفسِه ما يُخصمُ منه.',
+  );
+}
+if (!/resolveQuotaAmount\(/.test(enforcementCode)) {
+  violations.push(
+    'R5: نقطةُ التفويضِ لا تُشتقُّ مقدارَ الخصمِ من وحدةِ القياسِ المعلَنةِ (resolveQuotaAmount).',
+  );
+}
+// الفحصُ على **نداءِ الخصمِ نفسِه** لا على الملفِّ كلِّه: الفرعُ المُعلَنُ
+// `kind: 'calls'` يُرجعُ واحداً بحقٍّ لأنّ الوثيقةَ أعلنت أنّ النداءَ هو الكمّيةُ،
+// أمّا نداءُ `debit` فلا يجوزُ أن يحملَ رقماً في الشفرةِ بحالٍ.
+for (const call of enforcementCode.matchAll(/quotaLedger\.debit\(\{([\s\S]*?)\}\)/g)) {
+  if (/amount:\s*\d/.test(call[1] ?? '')) {
+    violations.push(
+      'R5: نقطةُ التفويضِ تُمرِّرُ مقداراً ثابتاً إلى دفترِ الحصصِ؛ ورقمٌ ثابتٌ يجعلُ الحدَّ المعلَنَ بالوحدةِ عدَّ نداءاتٍ.',
+    );
+  }
+}
+
+// قناةُ القياسِ لا بدَّ لها من مُنادٍ: مفتاحُ قياسٍ لا يُمرِّرُه أحدٌ يعني أنّ كلَّ
+// نداءٍ على ذلك الموردِ يُرفَض — أو أنّ الخصمَ لا يقعُ. وكلتاهما عيبٌ يُكشَف.
+/** @type {Set<string>} */
+const passedMeasureKeys = new Set();
+for (const file of walk(path.join(ROOT, 'src'))) {
+  const source = fs.readFileSync(file, 'utf8');
+  for (const match of source.matchAll(/measured:\s*\{([^}]*)\}/g)) {
+    for (const key of (match[1] ?? '').matchAll(/([a-zA-Z][a-zA-Z0-9]*)\s*:/g)) {
+      if (key[1] !== undefined) passedMeasureKeys.add(key[1]);
+    }
+    // الشكلُ المختصرُ `{ bytes }` لا يحمل نقطتين.
+    for (const key of (match[1] ?? '').matchAll(/(?:^|,)\s*([a-zA-Z][a-zA-Z0-9]*)\s*(?:,|$)/g)) {
+      if (key[1] !== undefined) passedMeasureKeys.add(key[1]);
+    }
+  }
+}
+// ونطاقُ القاعدةِ مُعلَنٌ: تُطبَّقُ على الموردِ الذي **له مُستهلِكٌ** يُسمّي فعلَه في
+// `src/`. فعلٌ مُعلَنٌ بلا مستهلِكٍ أصلاً (‏`allocate-budget` اليومَ) عيبٌ من نوعٍ
+// آخرَ — «مُعلَنٌ لا يَنفُذ» — مُسجَّلٌ في `docs/REMAINING_WORK.md`، ولا تُخفيه هذه
+// القاعدةُ ولا تدّعي إغلاقَه: خصمٌ لموردٍ لا يُنادى عليه أحدٌ لا يُقاس بحاجزٍ نصّي.
+/** @type {Map<string, string>} */
+const resourceOfAction = new Map();
+for (const action of bundle.actions.values()) {
+  const resource = /** @type {{ quotaResource?: string }} */ (action).quotaResource;
+  if (typeof resource === 'string') resourceOfAction.set(action.id, resource);
+}
+// والمحرّكُ الأدنى مُستثنىً كما في R2: قائمةُ `SENSITIVE` فيه تُسمّي الأفعالَ
+// تعريفاً لا استهلاكاً، فعدُّها مُستهلِكاً يُخفي فعلاً بلا مستهلِكٍ.
+const srcCorpus = walk(path.join(ROOT, 'src'))
+  .filter((file) => file !== legacyEngine && file !== legacyEngine.replace(/\.mts$/, '.mjs'))
+  .map((file) => fs.readFileSync(file, 'utf8'))
+  .join('\n');
+for (const [actionId, resource] of resourceOfAction) {
+  const measure = measures.get(resource);
+  if (measure === undefined || measure.kind !== 'measured') continue;
+  const key = measure.key;
+  if (typeof key !== 'string') continue;
+  const consumed = new RegExp(`['"\`]${actionId.replace(/[-]/g, '\\-')}['"\`]`).test(srcCorpus);
+  if (!consumed) continue;
+  if (!passedMeasureKeys.has(key)) {
+    violations.push(
+      `R5: المورد «${resource}» (الفعل «${actionId}») يُخصم بالكمّيةِ المقيسةِ «${key}» ولا مُنادٍ في src يُمرِّرُها في قناةِ القياسِ.`,
+    );
   }
 }
 

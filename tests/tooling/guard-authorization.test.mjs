@@ -140,3 +140,74 @@ test('الحاجز يفشل إن نُزع فعلٌ من الكتالوج الم�
     cleanup();
   }
 });
+
+// ── R5 (‏`R6-A-02`): الحاجزُ يفشلُ إن رجعَ مقدارُ الخصمِ رقماً ثابتاً أو سياقاً ──
+//
+// وهذه هي القاعدةُ التي كان غيابُها سببَ نجاةِ الطفرةِ M15 («ثبِّت المقدارَ على
+// 1») من الاختباراتِ كلِّها في جولةِ M11.06.
+
+test('الحاجز يفشل إن قرأت نقطة التفويض مقدار الخصم من سياق المُنادي', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    const target = join(dir, 'src', 'policy', 'enforcement-point.mjs');
+    const source = readFileSync(target, 'utf8');
+    writeFileSync(
+      target,
+      source.replace(
+        'const resolved = this.resolveQuotaAmount(quotaResource, measurement.measured);',
+        "const amountRaw = evaluated.context?.['quotaAmount'];\n        const resolved = { ok: true, amount: typeof amountRaw === 'number' ? amountRaw : 1, measure: 'x' };",
+      ),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'قراءةُ المقدارِ من السياقِ عبرت الحاجز');
+    assert.match(output, /R5/);
+    assert.match(output, /quotaAmount/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('الحاجز يفشل إن مُرِّر مقدارٌ ثابتٌ إلى دفتر الحصص', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    const target = join(dir, 'src', 'policy', 'enforcement-point.mjs');
+    const source = readFileSync(target, 'utf8');
+    writeFileSync(target, source.replace('amount: resolved.amount,', 'amount: 1,'));
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'تثبيتُ المقدارِ على 1 عبر الحاجز');
+    assert.match(output, /R5/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('الحاجز يفشل إن حُذفت وحدة القياس المعلَنة من وثيقة الحصص', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    const quotasPath = join(dir, 'config', 'quotas.yaml');
+    const source = readFileSync(quotasPath, 'utf8');
+    writeFileSync(
+      quotasPath,
+      source.replace(/\n {4}measure:\n {6}kind: measured\n {6}key: bytes/, ''),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, `حذفُ وحدةِ القياسِ من الوثيقةِ عبر الحاجز: ${output}`);
+  } finally {
+    cleanup();
+  }
+});
+
+test('الحاجز يفشل إن كفّت بوابة الإخراج عن تمرير الحجم المقيس', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    const target = join(dir, 'src', 'egress', 'egress-gate.mjs');
+    const source = readFileSync(target, 'utf8');
+    writeFileSync(target, source.replace('measured: { bytes },', 'measured: {},'));
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'قطعُ قناةِ القياسِ عبر الحاجز');
+    assert.match(output, /R5/);
+    assert.match(output, /egress-bytes/);
+  } finally {
+    cleanup();
+  }
+});

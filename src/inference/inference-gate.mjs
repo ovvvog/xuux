@@ -449,12 +449,21 @@ export class InferenceGate {
     }
 
     const resourceId = request.resourceId ?? model.id;
-    const { decision, token } = await this.enforcementPoint.authorize({
-      actor: request.actor,
-      action: INFERENCE_ACTION,
-      resource: { type: 'model', id: resourceId, classification: inputClassification },
-      context: { ...(request.context ?? {}), purpose, modelId: model.id, estimatedInputTokens },
-    });
+    const {
+      decision,
+      token,
+      quota: debitedQuota,
+    } = await this.enforcementPoint.authorize(
+      {
+        actor: request.actor,
+        action: INFERENCE_ACTION,
+        resource: { type: 'model', id: resourceId, classification: inputClassification },
+        context: { ...(request.context ?? {}), purpose, modelId: model.id, estimatedInputTokens },
+      },
+      // قناةُ القياسِ منفصلةٌ عن السياقِ (‏`R6-A-02`): الرموزُ المُقدَّرةُ للمُدخَلِ
+      // تُقاسُ هنا، ورموزُ المُخرَجِ لا تُعرفُ قبلَ توليدِه فتُسوّى بعدَه.
+      { measured: { tokens: estimatedInputTokens } },
+    );
     if (!decision.allowed) {
       this.#refuse(
         INFERENCE_ERRORS.NOT_AUTHORIZED,
@@ -503,6 +512,22 @@ export class InferenceGate {
     const cost = nonNegativeNumber(execution.usage?.cost, estimatedInputCost);
     budget.tokens += totalTokens;
     budget.cost += cost;
+
+    // تسويةُ الحصّةِ بالاستهلاكِ المقيسِ فعلاً (‏`R6-A-02`): خُصمَ المُدخَلُ
+    // المُقدَّرُ عندَ التفويضِ، وهنا يُخصمُ فرقُ ما استُهلكَ فعلاً. وتقعُ التسويةُ
+    // **قبلَ** فحصِ الميزانيةِ وحجبِ المُخرَجِ: استهلاكٌ وقعَ يُخصمُ ولو حُجبَ
+    // مُخرَجُه، وإلّا صارَ تجاوزُ السقفِ مجّانياً على الحصّةِ.
+    if (debitedQuota !== null && debitedQuota !== undefined) {
+      try {
+        await this.enforcementPoint.settleQuota(debitedQuota, totalTokens, actorId);
+      } catch (error) {
+        this.#refuse(
+          INFERENCE_ERRORS.NOT_AUTHORIZED,
+          `الحصّةُ استُنفدت عندَ تسويةِ الاستهلاكِ الفعليِّ (${totalTokens} رمزاً): ${error instanceof Error ? error.message : String(error)}. ولا يُعادُ مُخرَجٌ استُهلكَ فوقَ الحصّةِ.`,
+          { ...facts, totalTokens },
+        );
+      }
+    }
 
     if (budget.tokens > this.tokensPerWindow || budget.cost > this.costPerWindow) {
       this.#refuse(

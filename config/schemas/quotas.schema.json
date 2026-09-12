@@ -14,7 +14,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["resource", "subjectType", "limit", "windowSeconds", "reason"],
+        "required": ["resource", "subjectType", "limit", "windowSeconds", "reason", "measure"],
         "properties": {
           "resource": { "type": "string", "pattern": "^[a-z][a-z0-9-]*(:[a-z0-9-]+)*$" },
           "subjectType": {
@@ -24,7 +24,27 @@
           "limit": { "type": "number", "exclusiveMinimum": 0 },
           "windowSeconds": { "type": "integer", "minimum": 1 },
           "unit": { "type": "string", "minLength": 1 },
-          "reason": { "type": "string", "minLength": 8 }
+          "reason": { "type": "string", "minLength": 8 },
+          "measure": {
+            "$comment": "R6-A-02: وحدةُ القياسِ التي يُخصم بها — بيانٌ لا اجتهادُ مُنادٍ. kind=calls يخصم واحداً لأنّ المورد نفسه يُقاس بالنداء (وكيل/يوم)، وkind=measured يخصم كمّيةً مقيسةً يقرؤها الإنفاذُ من قناةِ قياسٍ لا من سياقِ الطالب.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["calls", "measured"] },
+              "key": { "type": "string", "pattern": "^[a-zA-Z][a-zA-Z0-9]*$" }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "kind": { "const": "measured" } } },
+                "then": { "required": ["key"] }
+              },
+              {
+                "if": { "properties": { "kind": { "const": "calls" } } },
+                "then": { "not": { "required": ["key"] } }
+              }
+            ]
+          }
         }
       }
     }

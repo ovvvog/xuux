@@ -167,6 +167,34 @@ policies:
         operator: in
         value: ['sensitive', 'secret']
 
+  # `R6-A-01`: قبلَ هذه السياسةِ لم يكن للفعلِ `purge-data` **سياسةُ إذنٍ واحدةٌ**،
+  # وكان في الوثيقةِ منعُه على المحفوظِ قانوناً وحدَه. فكان كلُّ نداءٍ عليه يسقطُ
+  # إلى «الافتراضُ منع» — ولذلك لم يُنادِ عليه أحدٌ، ووقعَ المحوُ الفعليُّ في
+  # `RetentionCycle` من مسارٍ لا يعرفُه القانونُ بحارسِ دورٍ نصّيٍّ يُرسلُه المُنادي.
+  # فصارَ المسارُ المحكومُ مُعلَناً: أدوارُ المطهِّرِ وحدَها (وهي نفسُها
+  # `cycle.sweeperRoles` في `config/retention.yaml`)، وسببٌ مُعلَنٌ لا محوٌ بلا
+  # سببٍ، **وفوقَ ذلك** أمرٌ ملكيٌّ لأنّ الفعلَ فوقَ العتبةِ السياديّةِ في
+  # `config/royal-authority.yaml` (`delegable: false`). والمنعُ على المحفوظِ قانوناً
+  # أعلى أولويّةً (900) فيبقى غالباً على هذا الإذنِ.
+  - id: pol:purge-data-sweeper-roles
+    name: محو ما انتهت مدّته لأدوار المطهِّر بأمر ملكي
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 400
+    reason: دورةُ الاحتفاظ فرضٌ معلَنٌ لا رخصةٌ، فلا بدّ لها من مسارٍ مأذونٍ؛ وإذنٌ بلا دورٍ معلَنٍ ولا سببٍ معلَنٍ يجعل المحوَ فعلاً لا يُراجَع، وهو ما يُفقد الدليل نفسه.
+    lawRef: law:retention
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:operator', 'role:king']
+    actions: ['purge-data']
+    resources: ['data:*']
+    conditions:
+      - attribute: context.reason
+        operator: in
+        value: ['retention', 'directed']
+
   - id: pol:deny-purge-under-legal-hold
     name: منع محو المحفوز قانوناً
     owner: crown
