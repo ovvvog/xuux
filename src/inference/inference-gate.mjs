@@ -17,6 +17,15 @@
  *   - عدّاد المعدل والميزانية في الذاكرة وضمن عملية واحدة؛ إعادة التشغيل تبدأ
  *     نافذة جديدة. الحصة المعلنة في البيانات تظل مرجع المورد، أما دوام الدفتر
  *     الفعلي فيحتاج موصل تخزين موزعاً في خطوة لاحقة.
+ *   - **سقفُ الرموزِ ونافذتُه من `config/quotas.yaml` وحدَها** (المورد
+ *     `inference-tokens`) عبر `loadInferenceTokenQuota`، ولا رقمَ سقفٍ في هذا
+ *     الملفِّ ولا سقوطَ صامتاً إلى رقمٍ مكتوبٍ عندَ غيابِ الحصّةِ. ونافذةُ
+ *     الميزانيةِ **مستقلّةٌ** عن نافذةِ حدِّ المعدَّلِ (`windowMs`): الأولى من
+ *     الوثيقةِ والثانيةُ حدُّ نداءاتٍ لا حدُّ كلفةٍ.
+ *   - **الاستهلاكُ يُقيَّدُ في دفترِ التكلفةِ إن مُرِّرَ الدفترُ**، وفشلُ القيدِ
+ *     **يمنعُ إعادةَ المُخرَجِ** (`INFERENCE_USAGE_UNRECORDED`): استهلاكٌ يقعُ
+ *     ولا يُقيَّدُ استهلاكٌ لا دليلَ عليه (المادة 2). وغيابُ الدفترِ نفسِه حدٌّ
+ *     مُعلَنٌ لا مُخفىً: البوابةُ تعملُ بلا محاسبةٍ ماليّةٍ عندَ عدمِ تمريرِه.
  *   - تقدير الإدخال يمنع طلباً يتجاوز السقف قبل التشغيل؛ لا يمكن معرفة طول
  *     المُخرج قبل تشغيل النموذج، لذلك يُحاسب الاستهلاك الفعلي بعده ويُحجب
  *     المُخرج إن جعل الاستهلاك السقف متجاوزاً.
@@ -26,10 +35,10 @@
 
 import { createHash } from 'node:crypto';
 import { loadClassificationLattice } from '../data/classification.mjs';
+import { inferenceCostItem, loadInferenceTokenQuota } from './quota.mjs';
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_CALLS_PER_WINDOW = 30;
-const DEFAULT_TOKENS_PER_WINDOW = 100_000;
 const DEFAULT_COST_PER_WINDOW = 100;
 const DEFAULT_LOG_TEXT_CHARS = 512;
 
@@ -51,6 +60,7 @@ export const INFERENCE_ERRORS = Object.freeze({
   EXECUTION_FAILED: 'INFERENCE_EXECUTION_FAILED',
   OUTPUT_INVALID: 'INFERENCE_OUTPUT_INVALID',
   OUTPUT_BLOCKED: 'INFERENCE_OUTPUT_BLOCKED',
+  USAGE_UNRECORDED: 'INFERENCE_USAGE_UNRECORDED',
 });
 
 /** خطأ مسمى: الرمز للبرامج والرسالة العربية لقرار الرفض المقروء. */
@@ -136,7 +146,7 @@ function nonNegativeNumber(value, fallback) {
 
 export class InferenceGate {
   /**
-   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, costPerWindow?: number, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
+   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown } | null, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
    */
   constructor({
     modelRegistry,
@@ -147,8 +157,12 @@ export class InferenceGate {
     safetyRules = DEFAULT_SAFETY_RULES,
     callsPerWindow = DEFAULT_CALLS_PER_WINDOW,
     windowMs = DEFAULT_WINDOW_MS,
-    tokensPerWindow = DEFAULT_TOKENS_PER_WINDOW,
+    tokensPerWindow,
+    budgetWindowMs,
+    quota,
     costPerWindow = DEFAULT_COST_PER_WINDOW,
+    costLedger = null,
+    costInstitution,
     maxLoggedTextChars = DEFAULT_LOG_TEXT_CHARS,
     lattice = null,
     now,
@@ -167,8 +181,46 @@ export class InferenceGate {
     this.safetyRules = safetyRules;
     this.callsPerWindow = callsPerWindow;
     this.windowMs = windowMs;
-    this.tokensPerWindow = tokensPerWindow;
+    /**
+     * سقفُ الرموزِ ونافذتُه **من الوثيقةِ**: `config/quotas.yaml` هي مرجعُ
+     * الموردِ، وقراءتُها هنا تجعلُ حذفَ الحصّةِ منها رفضاً مقيساً لا سقوطاً إلى
+     * رقمٍ مكتوبٍ في الشفرةِ. والتمريرُ الصريحُ للاختبارِ لا للتخييرِ.
+     * @type {Readonly<import('./quota.mjs').InferenceTokenQuota> | null}
+     */
+    this.quota =
+      tokensPerWindow !== undefined && budgetWindowMs !== undefined
+        ? null
+        : (quota ?? loadInferenceTokenQuota());
+    this.tokensPerWindow =
+      tokensPerWindow ?? /** @type {NonNullable<typeof this.quota>} */ (this.quota).tokensPerWindow;
+    // نافذةُ الميزانيةِ ليست نافذةَ حدِّ المعدَّلِ: تلك حدُّ نداءاتٍ في دقيقةٍ،
+    // وهذه سقفُ استهلاكٍ في نافذةِ الحصّةِ المُعلَنةِ. وخلطُهما كان يُنفِذُ
+    // سقفَ ساعةٍ في دقيقةٍ فيصيرُ الحدُّ المُعلَنُ ستّينَ ضِعفَ ما يَنفُذُ.
+    this.budgetWindowMs =
+      budgetWindowMs ?? /** @type {NonNullable<typeof this.quota>} */ (this.quota).budgetWindowMs;
     this.costPerWindow = costPerWindow;
+    /** @type {{ record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown } | null} */
+    this.costLedger = costLedger;
+    /**
+     * بندُ الكلفةِ يُقرأُ من الوثيقةِ **مقابَلاً بموردِ الحصّةِ**، ولا يُقرأُ
+     * أصلاً إن لم يُمرَّرْ دفترٌ — فلا تُلزَمُ بوابةٌ بلا محاسبةٍ بقراءةِ وثيقةِ
+     * تسعيرٍ لا تستعملُها.
+     * @type {string | null}
+     */
+    this.costItem = costLedger === null ? null : inferenceCostItem().id;
+    /**
+     * صاحبُ الإنفاقِ في بُعدِ المؤسسةِ. الدفترُ يشترطُ أبعادَه الثلاثةَ معاً،
+     * والوكيلُ والنموذجُ يُشتقّانِ من الطلبِ نفسِه، أمّا المؤسسةُ فقرارُ تركيبٍ
+     * **لا يُخمَّنُ**: دفترٌ مع مؤسسةٍ مجهولةٍ يُسنِدُ الإنفاقَ إلى غيرِ صاحبِه.
+     * @type {string | null}
+     */
+    this.costInstitution = costInstitution ?? null;
+    if (costLedger !== null && this.costInstitution === null) {
+      throw new InferenceError(
+        INFERENCE_ERRORS.DEPENDENCY_MISSING,
+        'دفترُ التكلفةِ مُمرَّرٌ بلا مؤسسةٍ يُسنَدُ إليها الإنفاقُ؛ وإسنادٌ يُخمَّنُ إسنادٌ إلى غيرِ صاحبِه.',
+      );
+    }
     this.maxLoggedTextChars = maxLoggedTextChars;
     /**
      * سلّم التصنيف هو مصدر قرار الحجب في السجل. كان الحجب مكتوباً هنا بنصّين
@@ -242,7 +294,7 @@ export class InferenceGate {
   #budgetFor(actorId) {
     const nowMs = this.now().getTime();
     const previous = this.budgets.get(actorId);
-    if (previous === undefined || nowMs - previous.startedAt >= this.windowMs) {
+    if (previous === undefined || nowMs - previous.startedAt >= this.budgetWindowMs) {
       const fresh = { startedAt: nowMs, tokens: 0, cost: 0 };
       this.budgets.set(actorId, fresh);
       return fresh;
@@ -486,6 +538,31 @@ export class InferenceGate {
           cost,
         },
       );
+    }
+
+    // ── قيدُ الاستهلاكِ في دفترِ التكلفةِ قبلَ إعادةِ المُخرَجِ ──
+    // الترتيبُ مقصودٌ: استهلاكٌ يقعُ ولا يُقيَّدُ استهلاكٌ لا دليلَ عليه
+    // (المادة 2)، فإن رفضَ الدفترُ القيدَ **لا يُعادُ المُخرَجُ** ولو نجحَ
+    // النداءُ — والرفضُ يُقيَّد في السجلِّ باسمِه لا يُهمَل.
+    if (this.costLedger !== null && this.costItem !== null) {
+      try {
+        this.costLedger.record(
+          {
+            item: this.costItem,
+            quantity: Math.round(totalTokens),
+            institution: /** @type {string} */ (this.costInstitution),
+            agent: actorId.startsWith('agent:') ? actorId : `agent:${actorId}`,
+            model: `model:${model.id}`,
+          },
+          { actor: actorId },
+        );
+      } catch (error) {
+        this.#refuse(
+          INFERENCE_ERRORS.USAGE_UNRECORDED,
+          `تعذّر تقييدُ استهلاكِ الاستدلالِ في دفترِ التكلفةِ: ${error instanceof Error ? error.message : String(error)}. ولا يُعادُ مُخرَجٌ استُهلِكَ له موردٌ بلا قيدٍ.`,
+          { ...facts, output, inputTokens, outputTokens, totalTokens, cost },
+        );
+      }
     }
 
     this.log.append('inference.completed', actorId, {

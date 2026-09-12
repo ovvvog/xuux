@@ -44,7 +44,7 @@ export function memoryLog() {
  * بوابةٌ حقيقيّةٌ بنقطةِ تفويضٍ حقيقيّةٍ وسجلِّ نماذجٍ حقيقيٍّ، ومُنفِّذُها هو
  * المُوائمُ الحتميُّ عبرَ عقدِه — فما يُقاسُ سلسلةٌ كاملةٌ لا حلقةٌ منها.
  *
- * @param {{ purpose?: string, execute?: (call: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<{ output: string, usage?: Record<string, number> }>, tokensPerWindow?: number }} [options]
+ * @param {{ purpose?: string, execute?: (call: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<{ output: string, usage?: Record<string, number> }>, tokensPerWindow?: number, budgetWindowMs?: number, costLedger?: object, costInstitution?: string, now?: () => Date }} [options]
  */
 export async function gateWithAdapter(options = {}) {
   const purpose = options.purpose ?? 'planning';
@@ -106,6 +106,17 @@ export async function gateWithAdapter(options = {}) {
     ),
     execute: options.execute ?? deterministicExecutor(),
     ...(options.tokensPerWindow === undefined ? {} : { tokensPerWindow: options.tokensPerWindow }),
+    ...(options.budgetWindowMs === undefined ? {} : { budgetWindowMs: options.budgetWindowMs }),
+    ...(options.costLedger === undefined
+      ? {}
+      : {
+          costLedger:
+            /** @type {{ record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }} */ (
+              options.costLedger
+            ),
+        }),
+    ...(options.costInstitution === undefined ? {} : { costInstitution: options.costInstitution }),
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   return { gate, log, purpose, model: active, bundle };
 }

@@ -39,6 +39,16 @@
  *   I9: اختبارُ الإعلانِ يقيسُ الرفضَ: سرّاً في الوثيقةِ، وعنواناً بلا تعميةٍ،
  *       ومعرّفاً مكرَّراً، ومُهلةً فوقَ سقفِ العقدِ، ومزوّداً غيرَ مُعلَنٍ، ومروراً
  *       بالبوابةِ على مِقبسٍ حقيقيٍّ من وثيقةٍ لا من خيارٍ مكتوبٍ في الاختبارِ.
+ *   I10: **لا سقفَ في الشفرةِ.** سقفُ رموزِ الاستدلالِ ونافذتُه من
+ *       `config/quotas.yaml` وحدَها: يُقاسُ هنا أنّ `loadInferenceTokenQuota`
+ *       تُعيدُ ما في الوثيقةِ حرفاً بحرفٍ، وأنّ غيابَ الحصّةِ **رفضٌ مُسمّىً
+ *       يُقاسُ بتشغيلِه** لا سقوطٌ إلى رقمٍ مكتوبٍ، وأنّ بندَ الكلفةِ مربوطٌ
+ *       بموردِ الحصّةِ نفسِه، وأنّ ملفَّ البوابةِ خالٍ من رقمِ سقفٍ افتراضيٍّ،
+ *       وأنّ نافذةَ الميزانيةِ ليست نافذةَ حدِّ المعدَّلِ في `#budgetFor`.
+ *   I11: **استهلاكٌ يقعُ يُقيَّدُ.** البوابةُ تُنادي دفترَ التكلفةِ ببندِ
+ *       الاستدلالِ، وفشلُ القيدِ يمنعُ إعادةَ المُخرَجِ برمزٍ مُسمّىً
+ *       (`USAGE_UNRECORDED`)؛ وذلك مقيسٌ في `tests/inference/quota-binding.test.mjs`
+ *       بدفترٍ حقيقيٍّ لا بدالّةٍ مزيّفةٍ.
  *   I5: الاختبارُ موجودٌ ويقيسُ **الرفضَ** لا المرورَ فقط: ادّعاءَ السلطةِ،
  *       والاستهلاكَ الفاسدَ، والنموذجَ المُخالِفَ، وانقضاءَ المُهلةِ بإشارةٍ يراها
  *       المُنفِّذُ، وخصمَ الاستهلاكِ حتّى الرفضِ بتجاوزِ السقفِ.
@@ -54,10 +64,19 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+import YAML from 'yaml';
+
 import {
   assertAdapterDeclaration,
   FORBIDDEN_RESULT_FIELDS,
 } from '../src/inference/adapters/contract.mjs';
+import {
+  INFERENCE_QUOTA_ERRORS,
+  INFERENCE_TOKENS_RESOURCE,
+  inferenceCostItem,
+  InferenceQuotaError,
+  loadInferenceTokenQuota,
+} from '../src/inference/quota.mjs';
 import { createDeterministicAdapter } from '../src/inference/adapters/deterministic.mjs';
 import { createHttpsAdapter } from '../src/inference/adapters/https.mjs';
 import {
@@ -404,6 +423,109 @@ if (testCode === '') {
   }
 }
 
+// ── I10: لا سقفَ في الشفرةِ — السقفُ والنافذةُ من وثيقةِ الحصصِ وحدَها ──
+// القياسُ **بالتشغيلِ** لا بقراءةِ نصٍّ: تُقرأُ الوثيقةُ خاماً وتُقابَلُ بما
+// تُعيدُه الدالّةُ، ويُشغَّلُ غيابُ الحصّةِ ليُرى أنّه رفضٌ مُسمّىً.
+{
+  const quotasRaw = readFile(path.join('config', 'quotas.yaml'));
+  /** @type {Record<string, unknown> | undefined} */
+  let declaredQuota;
+  if (quotasRaw === '') {
+    violations.push('I10: `config/quotas.yaml` غائبةٌ — وسقفٌ بلا وثيقةٍ سقفٌ يُكتَبُ في الشفرةِ.');
+  } else {
+    const parsed = YAML.parse(quotasRaw);
+    const quotas = Array.isArray(parsed?.quotas) ? parsed.quotas : [];
+    declaredQuota = quotas.find(
+      (/** @type {Record<string, unknown>} */ entry) =>
+        entry?.['resource'] === INFERENCE_TOKENS_RESOURCE,
+    );
+    if (declaredQuota === undefined) {
+      violations.push(
+        `I10: لا حصّةَ مُعلَنةً للموردِ \`${INFERENCE_TOKENS_RESOURCE}\` في وثيقةِ الحصصِ — والبوابةُ بلا حصّةٍ بوابةٌ بسقفٍ مكتوبٍ في يدِها.`,
+      );
+    }
+  }
+  try {
+    const quota = loadInferenceTokenQuota();
+    if (declaredQuota !== undefined) {
+      if (quota.tokensPerWindow !== declaredQuota['limit']) {
+        violations.push(
+          `I10: السقفُ النافذُ ${quota.tokensPerWindow} لا يساوي المُعلَنَ ${String(declaredQuota['limit'])} — وسقفانِ لموردٍ واحدٍ أحدُهما لا يُقرأُ.`,
+        );
+      }
+      if (quota.budgetWindowMs !== Number(declaredQuota['windowSeconds']) * 1000) {
+        violations.push(
+          `I10: نافذةُ الميزانيةِ ${quota.budgetWindowMs} مللي لا تساوي المُعلَنَةَ ${String(declaredQuota['windowSeconds'])} ثانيةً.`,
+        );
+      }
+    }
+    const costItem = inferenceCostItem();
+    if (costItem.resource !== INFERENCE_TOKENS_RESOURCE) {
+      violations.push('I10: بندُ كلفةِ الاستدلالِ مربوطٌ بموردٍ غيرِ موردِ الحصّةِ.');
+    }
+  } catch (error) {
+    violations.push(
+      `I10: حصّةُ الاستدلالِ أو بندُ كلفتِها لا يُقرآنِ من الوثيقةِ: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  /** @type {unknown} */
+  let refusal = null;
+  try {
+    loadInferenceTokenQuota({ bundle: { quotas: [] } });
+  } catch (error) {
+    refusal = error;
+  }
+  if (
+    !(refusal instanceof InferenceQuotaError) ||
+    refusal.code !== INFERENCE_QUOTA_ERRORS.QUOTA_UNDECLARED
+  ) {
+    violations.push(
+      'I10: غيابُ الحصّةِ لا يُرفَضُ برمزٍ مُسمّىً — وسقوطٌ صامتٌ إلى رقمٍ مكتوبٍ يجعلُ حذفَ الحصّةِ من الوثيقةِ بلا أثرٍ.',
+    );
+  }
+  const gateCode = codeOf(readFile(path.join('src', 'inference', 'inference-gate.mjs')));
+  if (/DEFAULT_TOKENS_PER_WINDOW/.test(gateCode)) {
+    violations.push(
+      'I10: `DEFAULT_TOKENS_PER_WINDOW` عادَ إلى شفرةِ البوابةِ — وسقفٌ افتراضيٌّ في الشفرةِ يُغني عن الوثيقةِ.',
+    );
+  }
+  const budgetBody = gateCode.slice(gateCode.indexOf('#budgetFor('));
+  if (budgetBody === '' || !budgetBody.slice(0, 400).includes('this.budgetWindowMs')) {
+    violations.push(
+      'I10: نافذةُ الميزانيةِ في `#budgetFor` ليست `budgetWindowMs` — وخلطُها بنافذةِ حدِّ المعدَّلِ يُنفِذُ سقفَ ساعةٍ في دقيقةٍ.',
+    );
+  }
+}
+
+// ── I11: استهلاكٌ يقعُ يُقيَّدُ، وقيدٌ يفشلُ يمنعُ المُخرَجَ ──
+{
+  const gateCode = codeOf(readFile(path.join('src', 'inference', 'inference-gate.mjs')));
+  for (const [needle, why] of /** @type {Array<[string, string]>} */ ([
+    ['costLedger.record(', 'البوابةُ لا تُقيِّدُ استهلاكَها في دفترِ التكلفةِ'],
+    ['USAGE_UNRECORDED', 'فشلُ القيدِ بلا رمزِ رفضٍ مُسمّىً'],
+    ['inferenceCostItem', 'بندُ الكلفةِ مكتوبٌ في الشفرةِ لا مقروءٌ من الوثيقةِ'],
+  ])) {
+    if (!gateCode.includes(needle)) violations.push(`I11: ${why} (${needle}).`);
+  }
+  const quotaTest = readFile(path.join('tests', 'inference', 'quota-binding.test.mjs'));
+  if (quotaTest === '') {
+    violations.push(
+      'I11: `tests/inference/quota-binding.test.mjs` غائبٌ — وقيدُ استهلاكٍ بلا قياسِ فشلِه قيدٌ يُدَّعى.',
+    );
+  } else {
+    for (const [needle, why] of /** @type {Array<[string, string]>} */ ([
+      ['CostCapacity', 'ما قِيسَ ليس دفتراً حقيقيّاً بل دالّةٌ مزيّفةٌ'],
+      ['cost.usage.recorded', 'قيدُ الاستهلاكِ في السجلِّ غيرُ مقيسٍ'],
+      ['USAGE_UNRECORDED', 'منعُ المُخرَجِ عندَ فشلِ القيدِ غيرُ مقيسٍ'],
+      ['budgetWindowMs', 'استقلالُ نافذةِ الميزانيةِ عن نافذةِ المعدَّلِ غيرُ مقيسٍ'],
+      ['QUOTA_UNDECLARED', 'رفضُ غيابِ الحصّةِ غيرُ مقيسٍ'],
+      ['COST_ITEM_MISMATCH', 'مقابلةُ بندِ الكلفةِ بموردِ الحصّةِ غيرُ مقيسةٍ'],
+    ])) {
+      if (!quotaTest.includes(needle)) violations.push(`I11: ${why} (${needle}).`);
+    }
+  }
+}
+
 if (violations.length > 0) {
   console.error('⛔ حاجز مُوائم الاستدلال رفض:');
   for (const violation of violations) console.error(`   • ${violation}`);
@@ -411,5 +533,5 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `✅ حاجز مُوائم الاستدلال: ${adapterFiles.length} ملفَّ مُوائمٍ بلا سياسةٍ ولا مستودعٍ ولا سجلٍّ في يدِه ولا تفويضٍ يمنحُه لنفسِه، ومُوائمٌ حتميٌّ لا يستعملُ شبكةً ولا نظامَ ملفّاتٍ فإعلانُ \`disabled\` مقيسٌ لا مُصدَّقٌ، وبلا قيمةٍ تُشبِهُ مفتاحاً في الشفرةِ والمفتاحُ باسمِ متغيّرِ بيئةٍ وحدَه، و${FORBIDDEN_RESULT_FIELDS.length} حقلَ سلطةٍ مرفوضاً في الناتجِ، وكلُّ ناتجٍ يمرُّ بـ\`assertAdapterResult\` بمُهلةٍ تُجهِضُ بإشارةٍ لا تُهمِلُ النداءَ، ومُوائمُ \`https\` يأخذُ خياراتَ تعميتِه من موضعِ التعميةِ الواحدِ بلا ذكرٍ لـ\`rejectUnauthorized\` في نصِّه، ويقرأُ مفتاحَه من البيئةِ عندَ كلِّ نداءٍ، ولجسمِ ردِّه سقفٌ، ومقيسٌ على مِقبسٍ حقيقيٍّ في \`tests/inference/https-adapter.test.mjs\`؛ ولا مزوّدَ إلا مُعلَناً في \`config/${INFERENCE_PROVIDERS_FILE}\` — **مَقيساً ببناءِ مُوائمٍ لكلِّ مزوّدٍ مُعلَنٍ هنا لا بقراءةِ نصِّها** — وبلا عنوانٍ مكتوبٍ في شفرةِ \`src/\`، ورفضُ الإعلانِ الفاسدِ مقيسٌ في \`tests/inference/providers.test.mjs\`.`,
+  `✅ حاجز مُوائم الاستدلال: ${adapterFiles.length} ملفَّ مُوائمٍ بلا سياسةٍ ولا مستودعٍ ولا سجلٍّ في يدِه ولا تفويضٍ يمنحُه لنفسِه، ومُوائمٌ حتميٌّ لا يستعملُ شبكةً ولا نظامَ ملفّاتٍ فإعلانُ \`disabled\` مقيسٌ لا مُصدَّقٌ، وبلا قيمةٍ تُشبِهُ مفتاحاً في الشفرةِ والمفتاحُ باسمِ متغيّرِ بيئةٍ وحدَه، و${FORBIDDEN_RESULT_FIELDS.length} حقلَ سلطةٍ مرفوضاً في الناتجِ، وكلُّ ناتجٍ يمرُّ بـ\`assertAdapterResult\` بمُهلةٍ تُجهِضُ بإشارةٍ لا تُهمِلُ النداءَ، ومُوائمُ \`https\` يأخذُ خياراتَ تعميتِه من موضعِ التعميةِ الواحدِ بلا ذكرٍ لـ\`rejectUnauthorized\` في نصِّه، ويقرأُ مفتاحَه من البيئةِ عندَ كلِّ نداءٍ، ولجسمِ ردِّه سقفٌ، ومقيسٌ على مِقبسٍ حقيقيٍّ في \`tests/inference/https-adapter.test.mjs\`؛ ولا مزوّدَ إلا مُعلَناً في \`config/${INFERENCE_PROVIDERS_FILE}\` — **مَقيساً ببناءِ مُوائمٍ لكلِّ مزوّدٍ مُعلَنٍ هنا لا بقراءةِ نصِّها** — وبلا عنوانٍ مكتوبٍ في شفرةِ \`src/\`، ورفضُ الإعلانِ الفاسدِ مقيسٌ في \`tests/inference/providers.test.mjs\`؛ ولا سقفَ رموزٍ في الشفرةِ — الحدُّ والنافذةُ من \`config/quotas.yaml\` **مقابَلَينِ بها هنا** وغيابُ الحصّةِ رفضٌ مُسمّىً مقيسٌ بتشغيلِه، ونافذةُ الميزانيةِ مستقلّةٌ عن نافذةِ حدِّ المعدَّلِ، والاستهلاكُ يُقيَّدُ في دفترِ التكلفةِ ببندِ الوثيقةِ وفشلُ القيدِ يمنعُ المُخرَجَ.`,
 );

@@ -39,3 +39,11 @@ export {
   DETERMINISTIC_TIMEOUT_MS,
   deterministicExecutor,
 } from './adapters/deterministic.mjs';
+export {
+  INFERENCE_COST_ITEM,
+  INFERENCE_QUOTA_ERRORS,
+  INFERENCE_TOKENS_RESOURCE,
+  inferenceCostItem,
+  InferenceQuotaError,
+  loadInferenceTokenQuota,
+} from './quota.mjs';
