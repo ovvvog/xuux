@@ -44,6 +44,9 @@ import {
 } from '../src/persistence/composition.mjs';
 import { createPool } from '../src/persistence/db.mjs';
 import { createPolicyDecisionPoint } from '../src/policy/engine.mjs';
+import { LawRegistry } from '../src/governance/law-system.mjs';
+import { loadConstitutionPolicy } from '../src/constitution/constitution.mjs';
+import { Legislature, enforcementGate, loadLegislationPolicy } from '../src/legislation/index.mjs';
 import { EnforcementPoint } from '../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../src/policy/loader.mjs';
 import { EventLog } from '../src/root-of-trust/index.mjs';
@@ -128,14 +131,35 @@ async function main() {
     agents: /** @type {never} */ (agents),
     log: /** @type {never} */ (log),
   });
+  // وحاجزُ التشريعِ موصولٌ بنقطةِ الإنفاذِ في هذا المسارِ الحيِّ (الخطوةُ `M8.02`):
+  // سلطةٌ تشريعيّةٌ تكشفُ التعارضَ ولا يقرأُها إنفاذٌ تبقى تقريراً لا مَنعاً، فيَنفُذُ
+  // فعلٌ مُعلَنٌ ممنوعاً في قانونٍ نافذٍ. وبوابةُ التاجِ غيرُ مُركَّبةٍ هنا بعمدٍ:
+  // هذا مسارُ قراءةٍ فقط، فالنفاذُ يُرفَضُ برمزِ `LEGISLATION_ROYAL_COMMAND_REQUIRED`
+  // بدلَ أن يُفتحَ إصدارُ قانونٍ من واجهةِ عرضٍ. والقراءةُ لكلِّ تفويضٍ ثمنُها نداءُ
+  // مستودعِ القوانينِ — حدٌّ مُعلَنٌ لا مُخفى.
+  const bundle = loadPolicyBundle();
+  const legislature = new Legislature({
+    policy: loadLegislationPolicy({ dir: CONFIG_DIR }),
+    bundle,
+    articles: loadConstitutionPolicy({ dir: CONFIG_DIR }).articles,
+    laws: new LawRegistry({
+      log: /** @type {never} */ (log),
+      repository: /** @type {never} */ (
+        /** @type {Record<string, unknown>} */ (repositories)['laws']
+      ),
+    }),
+    log: /** @type {never} */ (log),
+    crown: null,
+  });
   const gateway = new ApiGateway({
     policy: apiPolicy,
     log,
     agents,
     monitor,
     enforcementPoint: new EnforcementPoint({
-      decisionPoint: createPolicyDecisionPoint({ bundle: loadPolicyBundle() }),
+      decisionPoint: createPolicyDecisionPoint({ bundle }),
       log: /** @type {never} */ (log),
+      legislationGate: enforcementGate(legislature),
     }),
   });
 

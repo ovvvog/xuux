@@ -200,6 +200,35 @@ if (policy !== null) {
     );
   }
 
+  // ═══ R9 ═══ وصلُ السلطةِ بالتركيبِ الدائمِ ونفيُ «القضاءينِ».
+  //
+  // كانت `Legislature` مبنيّةً ومُختبَرةً ولا مسارَ إنتاجيَّ لها: سلطةٌ تكشفُ
+  // التعارضَ ولا يقرأُها إنفاذٌ. والقاعدةُ تُثبِّت الوصلَ في موضعينِ لا في وعدٍ:
+  // التركيبُ الرسميُّ يبنيها ويُخرِج حاجزَها، والخادمُ الحيُّ يُمرِّرُ الحاجزَ إلى
+  // نقطةِ الإنفاذ. وتمنعُ كذلك عودةَ قضاءٍ ثانٍ إلى `src/governance`.
+  const composition = readFile('src/persistence/composition.mjs');
+  for (const needle of ['new Legislature({', 'legislationGate: enforcementGate(legislature)']) {
+    if (!composition.includes(needle)) {
+      violations.push(
+        `R9: ${needle} غيرُ موجودٍ في src/persistence/composition.mjs — سلطةٌ غيرُ مُركَّبةٍ دائماً تصيرُ سلطةً بلا مسارٍ في التشغيل.`,
+      );
+    }
+  }
+  const server = readFile('scripts/serve-state.mjs');
+  if (!server.includes('legislationGate: enforcementGate(legislature)')) {
+    violations.push(
+      'R9: الخادمُ الحيُّ لا يُمرِّرُ حاجزَ التشريعِ إلى نقطةِ الإنفاذ؛ فالكشفُ يبقى تقريراً لا مَنعاً في المسارِ الواقع.',
+    );
+  }
+  const lawSystem = readFile('src/governance/law-system.mjs');
+  for (const dead of ['export class Court', 'export const CaseState']) {
+    if (lawSystem.includes(dead)) {
+      violations.push(
+        `R9: ${dead} عادَ إلى src/governance/law-system.mjs — قضاءانِ في المستودعِ يجعلانِ القارئَ لا يعلمُ أيُّهما الحاكم؛ والقضاءُ النافذُ في src/judiciary/.`,
+      );
+    }
+  }
+
   // ═══ R8 ═══
   /** @type {unknown} */
   let events;

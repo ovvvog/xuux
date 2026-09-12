@@ -17,11 +17,11 @@ import { CertificateAuthority, EventLog, KingIdentity } from '../../src/root-of-
 import { AgentRegistry } from '../../src/identity/agent-registry.mjs';
 import { DataCatalog } from '../../src/data/data-catalog.mjs';
 import { AgentMemoryStore } from '../../src/data/memory-store.mjs';
-import { Court, LawRegistry } from '../../src/governance/law-system.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 import { DataAccessGate } from '../../src/data/access-gate.mjs';
 import { loadClassificationLattice } from '../../src/data/classification.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
+import { judged, state as judiciaryState } from '../judiciary/harness.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
 import { createTestLedger } from '../helpers/lineage.mjs';
 
@@ -77,11 +77,6 @@ function accessGateFor(log, catalog, ledger) {
     // والدفتر لازم كذلك (`M7.04`): بوابةٌ بلا دفتر ترفض كل وصول.
     lineage: ledger,
   });
-}
-
-/** @returns {LawRegistry} */
-function lawSetup(log = new EventLog()) {
-  return new LawRegistry({ log, repository: createMemoryRepository(LawRegistry.spec) });
 }
 
 test('D1 — قدرات الوكيل المُرجَعة لا تشترك مع مصفوفة السجل', async () => {
@@ -151,37 +146,26 @@ test('D1 — قيد نسب البيانات المُرجَع لا يُعدَّل
   ]);
 });
 
-test('D1 — أدلة القضية المُرجَعة لا تُعدَّل بعد رفعها', () => {
-  const log = new EventLog();
-  const court = new Court({ log, laws: lawSetup(log) });
-  const filed = court.file({
-    claimant: 'وكيل-أ',
-    respondent: 'وكيل-ب',
-    claim: 'تجاوز صلاحية',
-    evidence: [{ ref: 'حدث-1' }],
-  });
-  assert.throws(() => filed.evidence.push({ ref: 'دليل-مدسوس' }), TypeError);
-  assert.equal(court.cases.get(filed.id)?.evidence.length, 1);
-});
-
-test('D1 — الحكم المُرجَع مُجمَّد فلا تُبدَّل نتيجته', () => {
-  const log = new EventLog();
-  const court = new Court({ log, laws: lawSetup(log) });
-  const filed = court.file({ claimant: 'أ', respondent: 'ب', claim: 'دعوى' });
-  court.hear(filed.id);
-  const decided = court.decide(filed.id, { outcome: 'محكوم لصالح أ', reason: 'الدليل' });
-  const judgment = /** @type {Record<string, unknown>} */ (
-    /** @type {unknown} */ (decided.judgment)
-  );
+// وكان هنا اختبارانِ لـ`Court` في `src/governance/law-system.mjs` — قضاءٌ في
+// الذاكرةِ لا ينادِيه مسارٌ إنتاجيٌّ، حُذِف في الفجوةِ الثالثةِ من الأمرِ التنفيذيِّ.
+// فنُقِل القياسُ إلى القضاءِ النافذِ (`src/judiciary/`) لأنّ ضابطَ `D1` يُشترى على
+// السطحِ الذي يُنادى فعلاً: صفٌّ يُعادُ من المستودعِ مُجمَّداً، ومحاولةُ تبديلِ
+// حكمِه لا تمسُّ ما في المستودع.
+test('D1 — صفُّ القضيةِ المُعادُ من القضاءِ النافذِ مُجمَّدٌ فلا يُبدَّل حكمُه', async () => {
+  const s = judiciaryState();
+  const { caseId } = await judged(s);
+  const row = await s.judiciary.repository.findById(caseId);
+  assert.ok(row, 'القضيةُ لم تُقرأ من المستودع');
+  assert.equal(Object.isFrozen(row), true, 'الصفُّ المُعادُ غيرُ مُجمَّد');
   assert.throws(
     () => {
       'use strict';
-      judgment.outcome = 'محكوم لصالح ب';
+      /** @type {Record<string, unknown>} */ (row)['verdict'] = 'innocent';
     },
     TypeError,
-    'نتيجة الحكم قابلة للتبديل',
+    'نتيجةُ الحكمِ قابلةٌ للتبديلِ في الصفِّ المُعاد',
   );
-  assert.equal(court.cases.get(filed.id)?.judgment?.outcome, 'محكوم لصالح أ');
+  assert.equal((await s.judiciary.repository.findById(caseId))?.['verdict'], row['verdict']);
 });
 
 test('محتوى الذاكرة الذي يملكه المستدعي لا يُجمَّد عليه — حدٌّ معلن', async () => {

@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { snapshot } from '../lib/snapshot.mjs';
 import { LAW_SPEC } from '../persistence/entities.mjs';
 
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} EventLog */
@@ -8,21 +7,18 @@ import { LAW_SPEC } from '../persistence/entities.mjs';
  * نظام القانون. **سجل القوانين صار دائماً** في الخطوة `M3.05`: قانونٌ نافذ يُمحى
  * بإعادة التشغيل ليس قانوناً، وهذا أخطر ما كان في المخزن المؤقّت.
  *
- * **حدٌّ معلن — قرارُ مالك لا قرارُ منفّذ:** `Court` أدناه **بقيت في الذاكرة**.
- * جدول `state.cases` في الهجرة `0001` يشترط `law_id` مرجعاً إلى قانون، ونموذج
- * المحكمة هنا يرفع قضية بين طرفين بلا قانون مرجعي. المخطَّط والنموذج متناقضان،
- * وتغيير أيّهما قرارٌ سياديّ لا يُتخذ صامتاً في خطوةٍ عنوانها «نقل السجلات».
- * فالقضايا **تُفقد بإعادة التشغيل**، وهذا مُعلن هنا ومسجَّل في خارطة الطريق.
+ * **وحُذِف من هذا الملف قضاءٌ ثانٍ:** كان فيه `Court` و`CaseState` بمفرداتِ
+ * `open/heard/decided` تفتحُ القضيةَ في `Map` تُمحى بإعادةِ التشغيلِ، ولا ينادِيه
+ * مسارٌ إنتاجيٌّ واحدٌ منذ أن حلَّ محلَّه القضاءُ النافذُ في `src/judiciary/`
+ * (الخطوةُ `M8.03`): سجلٌّ على `state.cases`، وإجراءٌ من وثيقةِ `config/judiciary.yaml`،
+ * وتنفيذٌ بأمرٍ ملكيٍّ موقَّعٍ. وبقاءُ الاثنينِ كان يجعلَ قارئَ المستودعِ يجدُ
+ * «قضاءينِ» ولا يعلمُ أيُّهما الحاكمُ — وذاك عيبُ قراءةٍ لا زخرفة. ونصُّ الصنفِ
+ * المحذوفِ محفوظٌ في تاريخِ git لا في شجرةِ العملِ.
  */
 
 /**
  * حالات القانون الخمس، مشتقة من الكائن المُجمَّد نفسه فلا تنحرف عنه.
  * @typedef {(typeof LawState)[keyof typeof LawState]} LawStateValue
- */
-
-/**
- * حالات القضية الخمس.
- * @typedef {(typeof CaseState)[keyof typeof CaseState]} CaseStateValue
  */
 
 /**
@@ -55,44 +51,12 @@ import { LAW_SPEC } from '../persistence/entities.mjs';
  * @property {(id: string, expectedVersion: number, patch: Record<string, unknown>) => Promise<Record<string, unknown>>} update
  */
 
-/**
- * حكم صادر في قضية.
- * @typedef {{ outcome: string, reason: string, actor: string, at: string }} Judgment
- */
-
-/**
- * طلب استئناف على حكم.
- * @typedef {{ reason: string, actor: string, at: string }} Appeal
- */
-
-/**
- * قضية أمام المحكمة. الحقول التالية للفتح تُضاف عند الانتقال فهي اختيارية.
- * @typedef {object} LegalCase
- * @property {string} id
- * @property {string} claimant
- * @property {string} respondent
- * @property {string} claim
- * @property {unknown[]} evidence - الأدلة كما قدّمها الأطراف، لا تفرض المحكمة شكلها
- * @property {CaseStateValue} state
- * @property {string} createdAt
- * @property {string} [heardBy]
- * @property {Judgment} [judgment]
- * @property {Appeal} [appeal]
- */
-
 export const LawState = Object.freeze({
   DRAFT: 'draft',
   PROPOSED: 'proposed',
   ENACTED: 'enacted',
   SUSPENDED: 'suspended',
   REPEALED: 'repealed',
-});
-export const CaseState = Object.freeze({
-  OPEN: 'open',
-  HEARD: 'heard',
-  DECIDED: 'decided',
-  APPEALED: 'appealed',
-  CLOSED: 'closed',
 });
 /**
  * @param {Record<string, unknown>} row
@@ -194,88 +158,5 @@ export class LawRegistry {
     return rows
       .map((row) => toLaw(row))
       .filter((law) => law.scope === scope || law.scope === 'all');
-  }
-}
-export class Court {
-  /**
-   * الاعتماديات اختيارية في النوع لأن التوقيع يردّ بخطأ مُسمّى
-   * `COURT_DEPENDENCY_MISSING` بدل الانهيار؛ التحقّق بعده يضيّق النوع.
-   * @param {{ log?: EventLog, laws?: LawRegistry }} [deps]
-   */
-  constructor({ log, laws } = {}) {
-    if (!log || !laws) throw new Error('COURT_DEPENDENCY_MISSING');
-    this.log = log;
-    this.laws = laws;
-    /** @type {Map<string, LegalCase>} */
-    this.cases = new Map();
-  }
-  /**
-   * يرفع قضية جديدة في حالة مفتوحة.
-   * @param {{ claimant: string, respondent: string, claim: string, evidence?: unknown[] }} filing
-   * @returns {Readonly<LegalCase>}
-   */
-  file({ claimant, respondent, claim, evidence = [] }) {
-    if (!claimant || !respondent || !claim) throw new Error('CASE_REQUIRED');
-    const id = 'case:' + randomUUID();
-    /** @type {LegalCase} */
-    const c = {
-      id,
-      claimant,
-      respondent,
-      claim,
-      evidence: [...evidence],
-      state: CaseState.OPEN,
-      createdAt: new Date().toISOString(),
-    };
-    this.cases.set(id, c);
-    this.log.append('court.case.opened', 'court', { id, claimant, respondent });
-    return snapshot(c);
-  }
-  /**
-   * ينظر في قضية مفتوحة فينقلها إلى حالة «منظورة».
-   * @param {string} id
-   * @param {string} [actor='court']
-   * @returns {Readonly<LegalCase>}
-   */
-  hear(id, actor = 'court') {
-    const c = this.cases.get(id);
-    if (!c) throw new Error('CASE_NOT_FOUND');
-    if (c.state !== CaseState.OPEN) throw new Error('CASE_NOT_OPEN');
-    c.state = CaseState.HEARD;
-    c.heardBy = actor;
-    this.log.append('court.case.heard', actor, { id });
-    return snapshot(c);
-  }
-  /**
-   * يصدر حكماً في قضية منظورة. الحكم يشترط نتيجة وسبباً معلَنين.
-   * @param {string} id
-   * @param {{ outcome: string, reason: string }} judgment
-   * @param {string} [actor='crown']
-   * @returns {Readonly<LegalCase>}
-   */
-  decide(id, { outcome, reason }, actor = 'crown') {
-    const c = this.cases.get(id);
-    if (!c) throw new Error('CASE_NOT_FOUND');
-    if (c.state !== CaseState.HEARD) throw new Error('CASE_NOT_HEARD');
-    if (!outcome || !reason) throw new Error('JUDGMENT_REQUIRED');
-    c.state = CaseState.DECIDED;
-    c.judgment = { outcome, reason, actor, at: new Date().toISOString() };
-    this.log.append('court.case.decided', actor, { id, outcome });
-    return snapshot(c);
-  }
-  /**
-   * يستأنف حكماً صادراً. غير المحكوم فيها لا تُستأنف.
-   * @param {string} id
-   * @param {string} reason
-   * @param {string} actor
-   * @returns {Readonly<LegalCase>}
-   */
-  appeal(id, reason, actor) {
-    const c = this.cases.get(id);
-    if (!c || c.state !== CaseState.DECIDED) throw new Error('CASE_NOT_APPEALABLE');
-    c.state = CaseState.APPEALED;
-    c.appeal = { reason, actor, at: new Date().toISOString() };
-    this.log.append('court.case.appealed', actor, { id });
-    return snapshot(c);
   }
 }

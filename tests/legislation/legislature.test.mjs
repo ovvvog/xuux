@@ -18,6 +18,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 import { LawRegistry, LawState } from '../../src/governance/index.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
+import { createMemoryRepositories, createRegistries } from '../../src/persistence/composition.mjs';
 import { PolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { createGovernance } from '../../src/policy/governance.mjs';
@@ -516,4 +517,64 @@ test('تركيبُ الحكم يُعلِن حاجزَ التشريع في ضما
   });
   assert.equal(wired.guarantees.legislationEnforced, true);
   assert.equal(wired.enforcement.legislationGate !== null, true, 'والوعدُ موصولٌ بالنقطة فعلاً');
+});
+
+// وصلُ السلطةِ بالتركيبِ الدائمِ (الفجوةُ الثالثةُ من الأمرِ التنفيذيِّ): كانت
+// `Legislature` مبنيّةً ومُختبَرةً ولا مسارَ إنتاجيَّ لها — أي سلطةٌ تكشفُ التعارضَ
+// ولا يقرأُها إنفاذٌ. وهذا الاختبارُ يقيسُ الوصلَ من `createRegistries` نفسِها:
+// سلطةٌ مُعادةٌ، وحاجزٌ يُقرأُ، وبوابةُ تاجٍ نافذةٌ حين تُمرَّر، ورفضٌ مُسمَّى حين لا.
+test('تركيبُ السجلاتِ يُخرِج سلطةً تشريعيّةً موصولةً دائماً بحاجزِها', async () => {
+  const log = new EventLog();
+  const registries = createRegistries({
+    ca: /** @type {never} */ (new CertificateAuthority(new KingIdentity())),
+    log: /** @type {never} */ (log),
+    repositories: /** @type {never} */ (createMemoryRepositories()),
+  });
+  assert.ok(registries.legislature, 'السلطةُ التشريعيّةُ غيرُ مُركَّبةٍ في التركيبِ الرسميِّ');
+  assert.equal(typeof registries.legislationGate.blockedActions, 'function');
+  const blocked = await registries.legislationGate.blockedActions();
+  assert.equal(blocked instanceof Set, true, 'الحاجزُ لا يُعيد مجموعةَ أفعالٍ ممنوعةٍ');
+  // وبلا بوابةِ تاجٍ يُرفَض النفاذُ برمزِه لا بمقارنةِ اسمٍ: تركيبٌ صامتٌ كان سيجعل
+  // إصدارَ قانونٍ ممكناً من أيِّ نداءٍ.
+  const lawId = await proposed(registries.laws, 'قانونُ التركيبِ الدائمِ');
+  await assert.rejects(
+    () =>
+      registries.legislature.enact({
+        lawId,
+        articleId: 'art:05',
+        policyIds: ['pol:allow'],
+        command: /** @type {never} */ ({}),
+        signature: 'x',
+      }),
+    (/** @type {Error & { code?: string }} */ error) =>
+      error.code === 'LEGISLATION_ROYAL_COMMAND_REQUIRED',
+  );
+});
+
+test('تركيبُ السجلاتِ يمرّر بوابةَ التاجِ إلى السلطةِ فيَنفُذ القانونُ فعلاً', async () => {
+  const log = new EventLog();
+  const king = new KingIdentity();
+  const ca = new CertificateAuthority(king);
+  const crown = new CrownGateway(king, ca, log);
+  const registries = createRegistries({
+    ca: /** @type {never} */ (ca),
+    log: /** @type {never} */ (log),
+    repositories: /** @type {never} */ (createMemoryRepositories()),
+    crown: /** @type {never} */ (crown),
+    legislationPolicy: /** @type {never} */ (LEGISLATION_POLICY),
+    constitutionPolicy: /** @type {never} */ ({ articles: ARTICLES }),
+    policyBundle: /** @type {never} */ (
+      bundleOf([policyRecord({ id: 'pol:allow', effect: 'allow', priority: 70 })])
+    ),
+  });
+  const lawId = await proposed(registries.laws, 'قانونٌ يَنفُذ من التركيبِ');
+  const enactCommand = createRoyalCommand(LEGISLATION_POLICY.binding.enactAction, lawId);
+  const { law } = await registries.legislature.enact({
+    lawId,
+    articleId: 'art:05',
+    policyIds: ['pol:allow'],
+    command: enactCommand,
+    signature: king.sign(enactCommand),
+  });
+  assert.equal(law['state'], LawState.ENACTED);
 });

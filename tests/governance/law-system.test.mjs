@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
-import { LawRegistry, Court, LawState, CaseState } from '../../src/governance/index.mjs';
+import { LawRegistry, LawState } from '../../src/governance/index.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
 
 /** @returns {LawRegistry} */
@@ -59,26 +59,6 @@ test('law requires crown for enactment and is versioned', async () => {
   assert.equal(e['enactedBy'], 'crown');
   assert.ok(e['enactedAt'] instanceof Date, 'النفاذ فعلٌ مؤرَّخ');
   assert.equal((await r.active('operations')).length, 1);
-});
-
-test('court enforces hearing before judgment and supports appeal', async () => {
-  const log = new EventLog(),
-    laws = registry(log),
-    court = new Court({ log, laws }),
-    c = court.file({
-      claimant: 'agent:a',
-      respondent: 'institution:x',
-      claim: 'boundary violation',
-      evidence: ['event:1'],
-    });
-  assert.throws(
-    () => court.decide(c.id, { outcome: 'upheld', reason: 'evidence' }, 'crown'),
-    /CASE_NOT_HEARD/,
-  );
-  court.hear(c.id);
-  const d = court.decide(c.id, { outcome: 'upheld', reason: 'evidence' }, 'crown');
-  assert.equal(d.state, CaseState.DECIDED);
-  assert.equal(court.appeal(c.id, 'new evidence', 'agent:a').state, CaseState.APPEALED);
 });
 
 test('repealed law cannot be changed', async () => {

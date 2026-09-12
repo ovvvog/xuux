@@ -42,6 +42,8 @@ import { LineageLedger } from '../data/lineage.mjs';
 import { AgentMemoryStore } from '../data/memory-store.mjs';
 import { RetentionCycle } from '../data/retention-cycle.mjs';
 import { LawRegistry } from '../governance/law-system.mjs';
+import { loadConstitutionPolicy } from '../constitution/constitution.mjs';
+import { Legislature, enforcementGate, loadLegislationPolicy } from '../legislation/index.mjs';
 import { AgentRegistry } from '../identity/agent-registry.mjs';
 import {
   InstitutionMandate,
@@ -135,6 +137,8 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {AgentMemoryStore} memory
  * @property {LawRegistry} laws
  * @property {Judiciary} judiciary
+ * @property {Legislature} legislature
+ * @property {{ blockedActions: () => Promise<ReadonlySet<string>> }} legislationGate
  * @property {ClassificationApprovalRegistry} approvals
  * @property {LineageLedger} lineage
  * @property {ErasureLedger} erasureLedger
@@ -263,6 +267,15 @@ export function createPostgresRepositories(pool) {
  * @param {import('../judiciary/judiciary.mjs').JudiciaryPolicy | null} [deps.judiciaryPolicy] وثيقةُ
  *   القضاء (M8.03): حائزو الأفعال، وإجراءُ التقاضي، وآثارُ التنفيذ، وضماناتُه.
  *   تُحمّل من `config/judiciary.yaml` إن لم تُمرَّر.
+ * @param {import('../legislation/legislation.mjs').LegislationPolicy | null} [deps.legislationPolicy] ورَقةُ
+ *   التشريعِ (M8.02): أنواعُ التعارضِ المانعةُ والمُبلِّغةُ، وبنودُ الضمانِ.
+ *   تُحمّل من `config/legislation.yaml` إن لم تُمرَّر.
+ * @param {import('../constitution/constitution.mjs').ConstitutionPolicy | null} [deps.constitutionPolicy] وثيقةُ
+ *   الدستورِ: موادُها هيَ سندُ نفاذِ القانونِ. تُحمّل من `config/constitution.yaml`
+ *   إن لم تُمرَّر.
+ * @param {import('../policy/loader.mjs').PolicyBundle | null} [deps.policyBundle] حزمةُ السياساتِ:
+ *   التشريعُ يربطُ كلَّ قانونٍ بسياسةٍ قائمةٍ فيها. تُحمّل من `config/policies/`
+ *   إن لم تُمرَّر.
  * @param {import('../institutions/institutions.mjs').InstitutionsPolicy | null} [deps.institutionsPolicy] عهدُ
  *   التشغيل المؤسسي (M8.05): حائزو الأفعال، وإجراءُ المهمّة، وحدُّ الميزانية،
  *   والآثارُ المُعلَنة، والمؤسستان التجريبيتان. يُحمَّل من `config/institutions.yaml`
@@ -390,6 +403,9 @@ export function createRegistries({
   institutionsPolicy = null,
   mandatesPolicy = null,
   crown = null,
+  legislationPolicy = null,
+  constitutionPolicy = null,
+  policyBundle = null,
   environment = process.env['STATE_ENV'] ?? process.env['NODE_ENV'] ?? 'development',
 }) {
   // السلّم واحد للفهرس ولدفتر الاعتمادات: سلّمان منفصلان يعنيان أن الاعتماد قد
@@ -466,6 +482,24 @@ export function createRegistries({
     ...(limits.maxAgents === undefined ? {} : { maxAgents: limits.maxAgents }),
   });
   const laws = new LawRegistry({ log, repository: repositories.laws });
+  // والسلطةُ التشريعيّةُ تُركَّبُ **دائماً** (الخطوةُ `M8.02`)، لنفسِ سببِ القضاءِ
+  // والتشغيلِ المؤسّسيِّ: سلطةٌ اختياريّةُ التركيبِ تصيرُ سلطةً لا مسارَ لها في
+  // التشغيلِ، فلا يُقاسُ منعُ التعارضِ للإنفاذِ ولا ربطُ قانونٍ بمادّةٍ وسياسةٍ.
+  // وكان هذا عيباً مُعلَناً في `docs/REMAINING_WORK.md` (‏«سجلُ `Legislature` غيرُ مُركَّبٍ على
+  // أيِّ مسارٍ إنتاجيٍّ») وأُغلِقَ هنا بالتركيبِ لا بالوعدِ.
+  //
+  // وموادُ الدستورِ تُقرأُ من وثيقتِها لا تُكتبُ يداً: سندٌ مكتوبٌ في التركيبِ
+  // يفترقُ عن `config/constitution.yaml` في أوّلِ تعديلٍ، فيَنفُذُ قانونٌ بسندٍ لا وجودَ
+  // له — وتلكَ ثغرةٌ لا سهوٌ. وبوابةُ التاجِ تُمرَّرُ كما هيَ: بلا بوابةٍ يُرفَضُ
+  // النفاذُ برمزِه ولا يُقارنُ اسمُ فاعلٍ بالنصِّ «crown».
+  const legislature = new Legislature({
+    policy: legislationPolicy ?? loadLegislationPolicy(),
+    bundle: policyBundle ?? loadPolicyBundle(),
+    articles: (constitutionPolicy ?? loadConstitutionPolicy()).articles,
+    laws,
+    log,
+    crown,
+  });
   // ونموذجُ التشغيل يُركَّب قبل التشغيلِ المؤسسي لا داخلَ وسائطه (الخطوة `M8.06`):
   // بلا اختصاصٍ مُنفَذٍ تعمل المؤسسةُ بلا حدّ، ولذلك يرفض `InstitutionOperations`
   // الإنشاءَ بلا هذا الوسيط. وإفرادُه باسمٍ يجعل وصلَه مقروءاً في سطرٍ واحد.
@@ -691,11 +725,13 @@ export function createRegistries({
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),
     laws,
+    // والسلطةُ التشريعيّةُ مُركَّبةٌ أعلاه، وحاجزُها يُعادُ معها: من ركَّبَ سلطةً
+    // ولم يُخرِجْ حاجزَها تركَ كشفَ التعارضِ تقريراً لا مَنعاً — ونقطةُ الإنفاذِ
+    // تقرأُ `blockedActions()` فتمنعُ الأفعالَ المتقاطعةَ في المسارِ الواقعِ.
+    legislature,
+    legislationGate: enforcementGate(legislature),
     // القضاءُ يُركَّب **دائماً** لنفس سبب ناقل القنوات ودفتري النسب والمحو:
-    // سلطةٌ اختياريةُ التركيب تصير سلطةً لا مسارَ لها في التشغيل. وهو عيبٌ
-    // قائمٌ اليوم في التشريع نفسه: سجلُّ `Legislature` (الخطوة M8.02) غيرُ
-    // مُركَّبٍ على أيِّ مسارٍ إنتاجيّ، وهو مسجَّلٌ في `docs/REMAINING_WORK.md` لا
-    // مُدَّعىً إغلاقُه.
+    // سلطةٌ اختياريةُ التركيب تصير سلطةً لا مسارَ لها في التشغيل.
     //
     // وبوابةُ التاج تُمرَّر من الخارج أو تُترك: قضاءٌ بلا بوابةٍ يسمع ويحكم
     // ويستأنف، ويرفض التنفيذَ والتراجعَ برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`.
