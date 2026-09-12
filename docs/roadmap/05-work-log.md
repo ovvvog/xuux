@@ -23,7 +23,7 @@
   - **نقلُ قياسِ `D1` إلى السطحِ الحيِّ لا إسقاطُه:** اختبارا التجميدِ اللذانِ كانا على `Court` استُبدِلا باختبارٍ على القضاءِ النافذِ (صفُّ القضيةِ المُعادُ من المستودعِ مُجمَّدٌ، ومحاولةُ تبديلِ الحكمِ ترفعُ `TypeError` ولا تمسُّ المستودعَ)، واختبارُ محكمةٍ في `tests/governance/law-system.test.mjs` حُذِفَ مع الصنفِ. **ولا اختبارَ أُضعِفَ ولا معيارَ خُفِّضَ.**
   - **قاعدةٌ تاسعةٌ في حاجزِ التشريعِ (`R9`)** تُسقِطُ البناءَ إن غابَ `new Legislature({` أو `legislationGate: enforcementGate(legislature)` من التركيبِ، أو إن لم يُمرِّرْ الخادمُ الحيُّ الحاجزَ، أو إن عادَ `Court`/`CaseState` إلى `src/governance`.
 - **الملفات المتأثرة:** `src/persistence/composition.mjs` · `scripts/serve-state.mjs` · `src/governance/law-system.mjs` · `src/judiciary/court.mjs` (تعليقٌ) · `src/persistence/entities.mjs` (تعليقٌ) · `scripts/guard-legislation.mjs` · `tests/legislation/legislature.test.mjs` · `tests/core/immutability-gates.test.mjs` · `tests/governance/law-system.test.mjs` · `docs/LEGISLATION.md` · `docs/REMAINING_WORK.md` · `PRODUCT_BUILD_PLAN.md` · `docs/READINESS_REPORT.md`
-- **الـ commit:** `__COMMIT__`
+- **الـ commit:** `5531d1e5`
 - **الدليل — كلُّ رقمٍ مقيسٌ بتشغيلٍ:**
   - **فشلٌ قبلَ الوصلِ ونجاحٌ بعدَه (طريقةُ المستودعِ نفسُها):** بحذفِ سطرَي الإرجاعِ من التركيبِ ⇒ `not ok 9` و`not ok 10` (‏`# fail 2`)، وبإعادتِهما ⇒ `# pass 10 · # fail 0` في `tests/legislation/legislature.test.mjs`.
   - **القاعدةُ `R9` غيرُ خاويةٍ:** ثلاثُ تحويراتٍ فعليّةٍ (حذفُ بناءِ السلطةِ، حذفُ إعادةِ الحاجزِ، حذفُ تمريرِه في الخادمِ) ⇒ رفضٌ في كلٍّ منها؛ وبالأصلِ السليمِ ⇒ خروجٌ **0**.
