@@ -6,7 +6,17 @@
  * الخطأِ — لأنّ لكلٍّ منها اختباراً مباشراً وحاجزاً يقابلُه بالوثيقةِ.
  */
 
-export { createStateServer } from './server.mjs';
+export { createStateServer, createSecureStateServer } from './server.mjs';
 export { TransportError, compileRoutes, matchRoute, paramsFor } from './router.mjs';
 export { TRANSPORT_ERRORS, STATUS_BY_CODE, codeOf, problemFor } from './problem.mjs';
 export { resolveStaticFile } from './static.mjs';
+export {
+  TLS_ERRORS,
+  TransportTlsError,
+  MIN_TLS_VERSION,
+  assertVerificationEnabled,
+  resolveTrustedAuthority,
+  resolveServerTlsMaterial,
+  secureClientOptions,
+  createTlsServer,
+} from './tls.mjs';

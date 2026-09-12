@@ -25,10 +25,21 @@
  *       الوسائطِ وتاريخِ المتصفِّحِ فيُسرَّبُ الرمزُ — ولا يُخدَمُ ملفٌّ خارجَ
  *       الجذرِ ولا امتدادٌ غيرُ مُعلَنٍ.
  *   T7: الاختبارُ موجودٌ ويقيسُ الرفضَ لا المرورَ فقط: `401` و`403` و`404` و`405`.
+ *   T8: لا سبيلَ إلى إسقاطِ تحقُّقِ الشهادةِ: لا `rejectUnauthorized` محسوبٌ ولا
+ *       مُسنَدٌ إلى غيرِ `true`، ولا عَلَمَ تخطٍّ، ولا قراءةَ
+ *       `NODE_TLS_REJECT_UNAUTHORIZED` إلا لتُرفَضَ حالُ التعطيلِ. فخيارٌ واحدٌ
+ *       يُسقِطُ التحقُّقَ يُحوِّلُ القناةَ المُعمّاةَ إلى **إيهامِ تعميةٍ**.
+ *   T9: لا رجوعَ غيرَ آمنٍ: نقصُ مادّةِ TLS يَرفعُ `TransportTlsError` ولا يُنشِئُ
+ *       خادمَ نصٍّ بديلاً، ولا `node:http` في وحدةِ TLS، و`Strict-Transport-Security`
+ *       لا تُرَدُّ إلا على ردٍّ خرجَ من مِقبسٍ مُعمّىً فعلاً.
+ *  T10: ولا مادّةَ مفاتيحَ في المستودعِ: لا `.pem` ولا `.key` ولا `.p12` ولا `.pfx`
+ *       مُتتبَّعٌ، ولا شهادةٌ مُدمَجةٌ في الشفرةِ؛ والمادّةُ تُقرأُ من مساراتٍ في
+ *       البيئةِ. واختبارُ TLS موجودٌ ويقيسُ النجاحَ والرفضَ ومنعَ التسريبِ.
  *
- * **حدٌّ مُعلَنٌ:** الحاجزُ يقرأُ النصَّ والوثيقةَ ولا يفتحُ مِقبساً، وإنهاءُ TLS
- * خارجَ ما تُدَّعيه هذه الطبقةُ أصلاً (وهي تُعلِنُه بترويسةٍ صريحةٍ)، فلا يُقاسُ
- * هنا شيءٌ عن TLS كي لا يُوهِمَ حاجزٌ بضمانٍ لا يَملِكُه.
+ * **حدٌّ مُعلَنٌ:** الحاجزُ يقرأُ النصَّ والوثيقةَ **ولا يفتحُ مِقبساً ولا يُصافِحُ**؛
+ * فنجاحُ المُصافحةِ ورفضُ الشهادةِ غيرِ الموثوقةِ يُقاسانِ في
+ * `tests/transport/tls.test.mjs` على مِقبسٍ حقيقيٍّ، والحاجزُ يحرسُ **ألّا يُنقَضَ
+ * ما قاسَه الاختبارُ** لا أن يُنيبَ عنه.
  */
 
 import fs from 'node:fs';
@@ -280,6 +291,125 @@ if (test === '') {
   }
 }
 
+// ═══ T8: لا سبيلَ إلى إسقاطِ تحقُّقِ الشهادةِ ═══
+const tlsSource = sources.get('tls.mjs') ?? '';
+const tlsCode = code.get('tls.mjs') ?? '';
+if (tlsSource === '') {
+  violations.push('T8: `src/transport/tls.mjs` غائبةٌ — وباقي الدَينِ `D-1` يُقالُ مسدَّداً.');
+} else {
+  for (const [name, source] of code) {
+    for (const match of source.matchAll(/rejectUnauthorized\s*:\s*([^,}\n]+)/g)) {
+      const value = (match[1] ?? '').trim();
+      if (value !== 'true') {
+        violations.push(
+          `T8: \`rejectUnauthorized\` غيرُ مُثبَّتٍ على \`true\` في src/transport/${name}: ${value} — وقيمةٌ محسوبةٌ قد تصيرُ \`false\`.`,
+        );
+      }
+    }
+    for (const needle of [
+      'NODE_TLS_REJECT_UNAUTHORIZED = ',
+      'checkServerIdentity: () =>',
+      'insecure',
+    ]) {
+      if (source.includes(needle)) {
+        violations.push(`T8: سبيلٌ إلى إسقاطِ التحقُّقِ في src/transport/${name}: ${needle}.`);
+      }
+    }
+  }
+  if (!tlsCode.includes('rejectUnauthorized: true')) {
+    violations.push(
+      'T8: وحدةُ TLS لا تُثبِّتُ `rejectUnauthorized: true` — فبأيِّ شيءٍ يُتحقَّقُ؟',
+    );
+  }
+  if (!tlsCode.includes('VERIFICATION_DISABLED')) {
+    violations.push(
+      'T8: تعطيلُ التحقُّقِ في العمليّةِ كلِّها لا يُرفَضُ — فيُشغَّلُ خادمٌ يظنُّ مُشغِّلُه أنّه يتحقَّقُ.',
+    );
+  }
+  if (!/minVersion:\s*MIN_TLS_VERSION/.test(tlsCode) || !tlsCode.includes("'TLSv1.2'")) {
+    violations.push('T8: لا حدَّ أدنى مُعلَنٌ لإصدارِ TLS — وإصدارٌ قديمٌ تعميةٌ بالاسمِ.');
+  }
+}
+
+// ═══ T9: لا رجوعَ غيرَ آمنٍ ═══
+if (tlsCode !== '') {
+  if (/from\s+['"]node:http['"]/.test(tlsCode)) {
+    violations.push('T9: `node:http` في وحدةِ TLS — وبابُ نصٍّ في وحدةِ تعميةٍ بابُ رجوعٍ صامتٍ.');
+  }
+  for (const thrower of ['CERT_MISSING', 'KEY_MISSING', 'MATERIAL_UNREADABLE']) {
+    if (!tlsCode.includes(thrower)) {
+      violations.push(`T9: نقصُ المادّةِ لا يُرفَعُ به خطأٌ: ${thrower} — فالنقصُ يُتجاهَلُ.`);
+    }
+  }
+}
+if (serverCode !== '') {
+  if (!serverCode.includes('strict-transport-security')) {
+    violations.push('T9: لا `Strict-Transport-Security` في ردودِ القناةِ المُعمّاةِ.');
+  }
+  if (!/socket\.encrypted/.test(serverCode)) {
+    violations.push(
+      'T9: ترويسةُ النقلِ لا تُشتقُّ من حقيقةِ المِقبسِ — فقد يُزعَمُ تأمينٌ على قناةِ نصٍّ.',
+    );
+  }
+  const hstsIndex = serverCode.indexOf('strict-transport-security');
+  const baseIndex = serverCode.indexOf("'x-state-transport': 'plaintext");
+  if (hstsIndex >= 0 && baseIndex >= 0 && hstsIndex < baseIndex) {
+    violations.push(
+      'T9: `Strict-Transport-Security` في ترويساتِ قناةِ النصِّ — زعمُ تأمينٍ لم يقعْ.',
+    );
+  }
+}
+
+// ═══ T10: لا مادّةَ مفاتيحَ في المستودعِ، والاختبارُ يقيسُ TLS ═══
+for (const [name, source] of sources) {
+  if (source.includes('-----BEGIN')) {
+    violations.push(`T10: مادّةُ شهادةٍ أو مفتاحٍ مُدمَجةٌ في src/transport/${name}.`);
+  }
+}
+/**
+ * يَجمعُ الملفّاتَ المُتتبَّعةَ حديثاً بلا نداءِ `git` كي يعملَ الحاجزُ في بيئةٍ
+ * بلا مستودعٍ؛ فالفحصُ يَمشي على الشجرةِ ويتجاوزُ ما لا يُتتبَّعُ أصلاً.
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function walk(dir) {
+  /** @type {string[]} */
+  const found = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (['node_modules', '.git', 'dist', 'coverage', '.local'].includes(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...walk(full));
+    else found.push(path.relative(ROOT, full));
+  }
+  return found;
+}
+const material = walk(ROOT).filter((file) => /\.(pem|key|p12|pfx)$/.test(file));
+if (material.length > 0) {
+  violations.push(
+    `T10: مادّةُ مفاتيحَ في شجرةِ المستودعِ: ${material.join(', ')} — والسرُّ في مستودعٍ مُسرَّبٌ من يومِ كتابتِه.`,
+  );
+}
+const tlsTest = readFile(path.join('tests', 'transport', 'tls.test.mjs'));
+if (tlsTest === '') {
+  violations.push(
+    'T10: `tests/transport/tls.test.mjs` غائبٌ — وحاجزٌ بلا مُصافحةٍ مقيسةٍ نصفُ حاجزٍ.',
+  );
+} else {
+  /** @type {Array<[string, string]>} */
+  const measuredTls = [
+    ['createSecureStateServer', 'لا خادمَ مُعمّىً يُنشَأُ في الاختبارِ'],
+    ['server.listen', 'لا مِقبسَ مُعمّىً يُفتَحُ — فما قِيسَ ليس مُصافحةً'],
+    ['assert.rejects', 'رفضُ الشهادةِ غيرِ الموثوقةِ غيرُ مقيسٍ'],
+    ['PRIVATE KEY', 'منعُ تسريبِ مادّةِ المفتاحِ غيرُ مقيسٍ'],
+    ['VERIFICATION_DISABLED', 'رفضُ التشغيلِ عندَ تعطيلِ التحقُّقِ غيرُ مقيسٍ'],
+    ['strict-transport-security', 'ترويسةُ القناةِ المُعمّاةِ غيرُ مقيسةٍ'],
+    ['os.tmpdir()', 'مادّةُ الاختبارِ لا تُولَّدُ خارجَ المستودعِ'],
+  ];
+  for (const [needle, why] of measuredTls) {
+    if (!tlsTest.includes(needle)) violations.push(`T10: ${why} (${needle}).`);
+  }
+}
+
 if (violations.length > 0) {
   console.error('⛔ حاجز طبقة النقل رفض:');
   for (const violation of violations) console.error(`   • ${violation}`);
@@ -288,5 +418,5 @@ if (violations.length > 0) {
 
 const routeCount = policy === null ? 0 : policy.routes.length;
 console.log(
-  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` ولا جسمَ طلبٍ يُقرأُ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` وحدَه، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ.`,
+  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` ولا جسمَ طلبٍ يُقرأُ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` وحدَه، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ.`,
 );

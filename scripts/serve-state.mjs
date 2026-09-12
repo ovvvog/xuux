@@ -5,10 +5,12 @@
  * **هذا السكربتُ للتطويرِ المحلّيِّ وحدَه، ولا يُقرأُ تركيبَ إنتاجٍ.** وسببُ ذلك
  * مُعلَنٌ لا مُخفىً في ثلاثةِ حدودٍ:
  *
- * 1. **لا إنهاءَ `TLS` هنا:** طبقةُ النقلِ نصٌّ صريحٌ تَرُدُّ ترويسةَ
- *    `x-state-transport: plaintext; terminate-tls-upstream`. وشهادةٌ موقَّعةٌ من
- *    نفسِها كانت ستُظهِرُ قُفلاً في المتصفِّحِ بلا سلطةِ تصديقٍ — وذاك إيهامُ
- *    تأمينٍ أسوأُ من انعدامِه، لأنّه يُطمئِنُ من لا ينبغي أن يطمئنَّ.
+ * 1. **`TLS` لا يُختلَقُ ولا يُزعَمُ:** بلا مادّةٍ مُعلَنةٍ يعملُ الخادمُ نصّاً
+ *    صريحاً ويَرُدُّ في كلِّ ردٍّ `x-state-transport: plaintext; terminate-tls-upstream`؛
+ *    ومَن أعلنَ `STATE_TLS_CERT_FILE` و`STATE_TLS_KEY_FILE` نالَ إنهاءَ `TLS`
+ *    في موضعِه بتحقُّقٍ كاملٍ (`src/transport/tls.mjs`). ولا شهادةَ يُولِّدُها هذا
+ *    السكربتُ لنفسِه: شهادةٌ موقَّعةٌ من نفسِها تُظهِرُ قُفلاً بلا سلطةِ تصديقٍ،
+ *    وذاك إيهامُ تأمينٍ أسوأُ من انعدامِه لأنّه يُطمئِنُ من لا ينبغي أن يطمئنَّ.
  * 2. **لا إثباتَ حيازةٍ (`PoP`) في هذا التركيبِ:** التوقيعُ يقتضي مفتاحاً خاصّاً
  *    لا يَحملُه متصفِّحٌ، والتركيبُ الرسميُّ يُشدِّدُه (`requirePoP`). فمن أرادَ
  *    قراءةً بإثباتِ حيازةٍ فمَحلُّها عميلٌ يَحملُ مفتاحَه لا صفحةٌ.
@@ -21,6 +23,10 @@
  *
  * الاستعمالُ:
  *   node scripts/serve-state.mjs [--port 4179] [--host 127.0.0.1] [--db]
+ *
+ * و`STATE_TLS_CERT_FILE` و`STATE_TLS_KEY_FILE` (ومعهما `STATE_TLS_CA_FILE`
+ * اختياريّةً لجهةِ إصدارٍ موثوقةٍ) تُشغِّلُ `https`؛ ونقصُ إحداهما بعدَ إعلانِ
+ * الأخرى **يُفشِلُ التشغيلَ ولا يَرجعُ إلى نصٍّ صامتاً**.
  *
  * و`--db` يقرأُ من قاعدةٍ حقيقيّةٍ عبرَ `DATABASE_URL` (ومعها `DATABASE_CA_FILE`
  * عندَ `sslmode=verify-full`)؛ وبدونِه المستودعاتُ في الذاكرةِ فالمشهدُ فارغٌ
@@ -41,7 +47,11 @@ import { createPolicyDecisionPoint } from '../src/policy/engine.mjs';
 import { EnforcementPoint } from '../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../src/policy/loader.mjs';
 import { EventLog } from '../src/root-of-trust/index.mjs';
-import { compileRoutes, createStateServer } from '../src/transport/index.mjs';
+import {
+  compileRoutes,
+  createSecureStateServer,
+  createStateServer,
+} from '../src/transport/index.mjs';
 
 const args = process.argv.slice(2);
 
@@ -63,6 +73,13 @@ const PORT = Number(argOf('--port', '4179'));
 // حيازةٍ يُربَطُ بكلِّ واجهاتِ الشبكةِ يصيرُ بابَ قراءةٍ لكلِّ من في الشبكةِ.
 const HOST = argOf('--host', '127.0.0.1');
 const USE_DB = args.includes('--db');
+/**
+ * إعلانُ مادّةِ `TLS` من البيئةِ: **مساراتٌ لا محتوىً**، فمحتوى المفتاحِ في
+ * متغيّرِ بيئةٍ يُطبَعُ في كلِّ فحصِ عمليّةٍ ويُورَثُ لكلِّ ابنٍ.
+ */
+const TLS_CERT_FILE = process.env.STATE_TLS_CERT_FILE ?? '';
+const TLS_KEY_FILE = process.env.STATE_TLS_KEY_FILE ?? '';
+const USE_TLS = TLS_CERT_FILE !== '' || TLS_KEY_FILE !== '';
 const CONFIG_DIR = path.join(process.cwd(), 'config');
 const WEB_DIR = path.join(process.cwd(), 'web');
 const ACTOR_ID = 'service:state-viewer-dev';
@@ -123,11 +140,19 @@ async function main() {
   });
 
   const session = await gateway.openSession({ actorId: ACTOR_ID });
-  const server = createStateServer({
-    gateway: /** @type {never} */ (gateway),
-    webDir: WEB_DIR,
-    routes,
-  });
+  // ولا فرعَ ثالثَ بينَهما: إمّا تعميةٌ مُعلَنةٌ مادّتُها تُقرأُ، وإمّا نصٌّ
+  // **مُصرَّحٌ به في كلِّ ردٍّ**. ونقصُ المادّةِ بعدَ إعلانِها يَرفعُ خطأً هنا.
+  const server = USE_TLS
+    ? createSecureStateServer({
+        gateway: /** @type {never} */ (gateway),
+        webDir: WEB_DIR,
+        routes,
+      })
+    : createStateServer({
+        gateway: /** @type {never} */ (gateway),
+        webDir: WEB_DIR,
+        routes,
+      });
 
   await new Promise((resolve) => server.listen(PORT, HOST, () => resolve(undefined)));
 
@@ -135,7 +160,7 @@ async function main() {
     '',
     '  بابُ الدولةِ — تشغيلُ تطويرٍ لا إنتاجٍ',
     '  ────────────────────────────────────',
-    `  العنوانُ:      http://${HOST}:${PORT}/`,
+    `  العنوانُ:      ${USE_TLS ? 'https' : 'http'}://${HOST}:${PORT}/`,
     `  المصدرُ:       ${source}`,
     `  الفاعلُ:       ${ACTOR_ID} بدورِ ${String(monitoringPolicy.role)}`,
     `  رمزُ الجلسةِ:   ${session.token}`,
@@ -147,7 +172,14 @@ async function main() {
   }
   lines.push(
     '',
-    '  حدودٌ مُعلَنةٌ: لا TLS، ولا إثباتَ حيازةٍ في هذا التركيبِ، ولا كتابةَ.',
+    USE_TLS
+      ? `  إنهاءُ TLS في موضعِه بتحقُّقٍ كاملٍ: شهادةٌ من ${TLS_CERT_FILE}${
+          process.env.STATE_TLS_CA_FILE === undefined
+            ? ''
+            : `، وجهةُ إصدارٍ من ${String(process.env.STATE_TLS_CA_FILE)}`
+        }.`
+      : '  حدودٌ مُعلَنةٌ: لا TLS في هذا التشغيلِ (تُعلَنُ مادّتُه في `STATE_TLS_CERT_FILE`).',
+    '  ولا إثباتَ حيازةٍ في هذا التركيبِ، ولا كتابةَ بحالٍ.',
     '  ولا يُنشَرُ هذا على شبكةٍ عامّةٍ. (`docs/TRANSPORT.md`)',
     '',
   );

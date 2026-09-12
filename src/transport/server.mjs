@@ -18,11 +18,12 @@
  *    الكتابةِ يلزمُه أمرٌ ملكيٌّ موقَّعٌ (`M9.03`)، والتوقيعُ لا يُنتِجُه متصفِّحٌ.
  * 4. **فتحُ الجلسةِ ليس مساراً على السلكِ.** لأنّ `config/api.yaml` لا تُعلِنُه
  *    مساراً، وإعلانُه هنا اختراعُ سطحٍ لم يأذنْ به المالكُ. فالرمزُ يُصدَرُ خارجَ
- *    السلكِ (`scripts/session-open.mjs`) ويُقدَّمُ في ترويسةِ `Authorization`.
- * 5. **لا TLS في هذه الوحدةِ.** إنهاءُ TLS عهدٌ ثانٍ منفصلٌ، وزعمُه هنا بشهادةٍ
- *    مُوقَّعةٍ ذاتيّاً يُنتِجُ **إيهامَ تأمينٍ**. فالوحدةُ تُنشِئُ خادماً غيرَ
- *    مُشفَّرٍ، وتُعلِنُ أنّه لا يُنشَرُ إلا خلفَ مُنهٍ لـTLS، ويَرُدُّ الخادمُ
- *    بترويسةٍ صريحةٍ تقولُ ذلك بدلَ أن يَسكُتَ عنه.
+ *    السلكِ (`scripts/serve-state.mjs`) ويُقدَّمُ في ترويسةِ `Authorization`.
+ * 5. **إنهاءُ TLS في وحدةٍ مُنفصلةٍ** (`tls.mjs`، سدادُ باقي `D-1`): مَن أعلنَ
+ *    مادّةَ TLS نالَ خادماً مُعمّىً بـ`createSecureStateServer`، ومَن لم يُعلِنْها
+ *    نالَ خادماً نصّيّاً **يُصرِّحُ في كلِّ ردٍّ** أنّه لا يُنشَرُ إلا خلفَ مُنهٍ.
+ *    ولا رجوعَ صامتاً من الأوّلِ إلى الثاني: نقصُ المادّةِ يَرفعُ خطأً ولا يُنشِئُ
+ *    خادماً نصّيّاً «مؤقّتاً».
  */
 
 import http from 'node:http';
@@ -31,6 +32,7 @@ import fs from 'node:fs';
 import { TRANSPORT_ERRORS, codeOf, problemFor } from './problem.mjs';
 import { TransportError, compileRoutes, matchRoute, paramsFor } from './router.mjs';
 import { resolveStaticFile } from './static.mjs';
+import { createTlsServer } from './tls.mjs';
 
 /** حدُّ طولِ العنوانِ: عنوانٌ بلا حدٍّ بابُ استنزافٍ رخيصٍ. */
 const MAX_URL_LENGTH = 2048;
@@ -48,9 +50,34 @@ const BASE_HEADERS = Object.freeze({
   // واجهةٌ بلا شفرةٍ خارجيّةٍ ولا `inline`: هذا ما يُمكِّنُ منعَ `unsafe-inline`.
   'content-security-policy':
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  // إعلانٌ صريحٌ لا سكوتٌ: هذه الطبقةُ لا تُنهي TLS.
+  // إعلانٌ صريحٌ لا سكوتٌ: هذا الردُّ خرجَ من قناةٍ غيرِ مُعمّاةٍ.
   'x-state-transport': 'plaintext; terminate-tls-upstream',
 });
+
+/**
+ * ترويساتُ ردٍّ خرجَ من قناةٍ **مُعمّاةٍ أُنهِيَتْ في هذا الخادمِ**.
+ *
+ * و`Strict-Transport-Security` **لا تُرَدُّ إلا هنا**: رَدُّها على قناةٍ نصّيّةٍ
+ * إمّا مُهمَلٌ من المتصفِّحِ أو مُضِرٌّ، وفي الحالَينِ هو **زعمُ تأمينٍ لم يقعْ**.
+ * @type {Readonly<Record<string, string>>}
+ */
+const SECURE_HEADERS = Object.freeze({
+  ...BASE_HEADERS,
+  'x-state-transport': 'tls; terminated-here',
+  'strict-transport-security': 'max-age=31536000; includeSubDomains',
+});
+
+/**
+ * يَشتقُّ ترويساتَ الردِّ من **حقيقةِ المِقبسِ** لا من إعدادٍ يُوصَفُ.
+ *
+ * فالخادمُ لا يَزعُمُ تعميةً: إن كان المِقبسُ مُعمّىً قالها، وإلا صرَّحَ بأنّه نصٌّ.
+ * @param {http.IncomingMessage} request
+ * @returns {Readonly<Record<string, string>>}
+ */
+function headersFor(request) {
+  const socket = /** @type {{ encrypted?: boolean }} */ (/** @type {unknown} */ (request.socket));
+  return socket.encrypted === true ? SECURE_HEADERS : BASE_HEADERS;
+}
 
 /**
  * يقرأُ رمزَ الجلسةِ من ترويسةِ `Authorization`.
@@ -121,20 +148,76 @@ export function createStateServer(options) {
   const routes = options.routes ?? compileRoutes();
   const webDir = options.webDir ?? null;
 
-  return http.createServer((request, response) => {
-    void handle(request, response, { gateway, routes, webDir });
+  return http.createServer(handlerFor({ gateway, routes, webDir }));
+}
+
+/**
+ * يُنشِئُ **مُعالِجَ الطلبِ** وحدَه، مُنفصلاً عن نوعِ الخادمِ.
+ *
+ * وفَصلُه ليس تجميلاً: خادمُ النصِّ وخادمُ TLS **يتشاركانِ المُعالِجَ نفسَه**، فلا
+ * تنشأُ نسخةٌ ثانيةٌ من الحُكمِ تفترقُ عن الأولى فيَمُرُّ على إحداهما ما رُدَّ على
+ * الأخرى.
+ * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, webDir: string | null }} deps
+ * @returns {(request: http.IncomingMessage, response: http.ServerResponse) => void}
+ */
+function handlerFor(deps) {
+  return (request, response) => {
+    void handle(request, response, deps);
+  };
+}
+
+/**
+ * يُنشِئُ خادمَ الدولةِ **مُنهياً لـTLS في موضعِه** — سدادُ باقي `D-1`.
+ *
+ * والمادّةُ تُقرأُ من مساراتٍ مُعلَنةٍ في البيئةِ (`STATE_TLS_CERT_FILE`،
+ * `STATE_TLS_KEY_FILE`، و`STATE_TLS_CA_FILE` اختياريّةً)، **ولا رجوعَ إلى نصٍّ
+ * صريحٍ إن نقصتْ**: يُرفَعُ `TransportTlsError` ولا يُنشَأُ خادمٌ. ومَن يُخفي هذا
+ * الخطأَ ويُشغِّلُ النصَّ الصريحَ يُعطي المُنادي **إيهامَ قناةٍ مُعمّاةٍ**.
+ * @param {object} options
+ * @param {GatewayLike} options.gateway
+ * @param {string | null} [options.webDir]
+ * @param {ReturnType<typeof compileRoutes>} [options.routes]
+ * @param {string} [options.certFile]
+ * @param {string} [options.keyFile]
+ * @param {string} [options.caFile]
+ * @param {boolean} [options.requestClientCertificate]
+ * @param {NodeJS.ProcessEnv} [options.env]
+ * @returns {import('node:https').Server}
+ */
+export function createSecureStateServer(options) {
+  const gateway = options?.gateway;
+  if (gateway === null || gateway === undefined || typeof gateway.call !== 'function') {
+    throw new TransportError(
+      TRANSPORT_ERRORS.GATEWAY_REQUIRED,
+      'لا خادمَ بلا بوابةٍ: النقلُ يَنقُلُ ولا يَحكُمُ، فبلا مَن يَحكُمُ لا نقلَ.',
+    );
+  }
+  return createTlsServer({
+    handler: handlerFor({
+      gateway,
+      routes: options.routes ?? compileRoutes(),
+      webDir: options.webDir ?? null,
+    }),
+    ...(options.certFile === undefined ? {} : { certFile: options.certFile }),
+    ...(options.keyFile === undefined ? {} : { keyFile: options.keyFile }),
+    ...(options.caFile === undefined ? {} : { caFile: options.caFile }),
+    ...(options.requestClientCertificate === undefined
+      ? {}
+      : { requestClientCertificate: options.requestClientCertificate }),
+    ...(options.env === undefined ? {} : { env: options.env }),
   });
 }
 
 /**
+ * @param {http.IncomingMessage} request
  * @param {http.ServerResponse} response
  * @param {number} status
  * @param {unknown} body
  */
-function sendJson(response, status, body) {
+function sendJson(request, response, status, body) {
   const payload = JSON.stringify(body);
   response.writeHead(status, {
-    ...BASE_HEADERS,
+    ...headersFor(request),
     'content-type': 'application/json; charset=utf-8',
     // بياناتُ الدولةِ لا تُخزَّنُ في وسيطٍ ولا في متصفِّحٍ: قراءةٌ محكومةٌ تُخزَّنُ
     // تصيرُ قراءةً بلا جلسةٍ بعدَ انتهاءِ الجلسةِ.
@@ -154,7 +237,7 @@ async function handle(request, response, deps) {
     const rawUrl = request.url ?? '/';
     if (rawUrl.length > MAX_URL_LENGTH) {
       const { status, body } = problemFor(TRANSPORT_ERRORS.URI_TOO_LONG);
-      sendJson(response, status, body);
+      sendJson(request, response, status, body);
       return;
     }
     // جسمُ طلبٍ في قراءةٍ يُرَدُّ لا يُهمَلُ: تجاهلُه يجعلُ المُنادي يظنُّ أنّه
@@ -162,7 +245,7 @@ async function handle(request, response, deps) {
     const declaredLength = Number.parseInt(String(request.headers['content-length'] ?? '0'), 10);
     if (Number.isFinite(declaredLength) && declaredLength > 0) {
       const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
-      sendJson(response, status, body);
+      sendJson(request, response, status, body);
       return;
     }
     const url = new URL(rawUrl, 'http://state.invalid');
@@ -179,7 +262,11 @@ async function handle(request, response, deps) {
         ...(token === undefined ? {} : { token }),
         ...(pop === undefined ? {} : { pop }),
       });
-      sendJson(response, 200, { route: result.route, status: result.status, data: result.data });
+      sendJson(request, response, 200, {
+        route: result.route,
+        status: result.status,
+        data: result.data,
+      });
       return;
     }
 
@@ -188,7 +275,7 @@ async function handle(request, response, deps) {
       if (file !== null) {
         const content = fs.readFileSync(file.file);
         response.writeHead(200, {
-          ...BASE_HEADERS,
+          ...headersFor(request),
           'content-type': file.type,
           'cache-control': 'no-cache',
           'content-length': String(content.byteLength),
@@ -199,12 +286,12 @@ async function handle(request, response, deps) {
     }
 
     const { status, body } = problemFor(TRANSPORT_ERRORS.ROUTE_UNKNOWN);
-    sendJson(response, status, body);
+    sendJson(request, response, status, body);
   } catch (error) {
     // كلُّ رفضٍ مُسمّىً يُترجَمُ بخريطةٍ مُعلَنةٍ، وما لا اسمَ له يُرَدُّ `500`
     // **بلا نصِّ استثناءٍ على السلكِ**: القيدُ الكاملُ في سجلِّ الأحداثِ.
     const { status, body } = problemFor(codeOf(error));
-    if (!response.headersSent) sendJson(response, status, body);
+    if (!response.headersSent) sendJson(request, response, status, body);
     else response.end();
   }
 }
