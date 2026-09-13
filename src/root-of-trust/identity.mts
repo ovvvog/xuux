@@ -10,6 +10,8 @@ import {
   createHash,
   type KeyObject,
 } from 'node:crypto';
+import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import { assertSoftwareKingIdentityAllowed, isProductionRuntime } from './production-boot.mjs';
 
@@ -84,6 +86,89 @@ export class MemoryRevocationStore implements RevocationStore {
   }
   ready(): boolean {
     return true;
+  }
+}
+
+/**
+ * سجلُّ سحبٍ واحدٍ في ملفٍ JSONL — يُحمَّلُ كاملاً عندَ البناءِ ويُلحقُ به كلُّ
+ * سحبٍ جديد. ينفّذُ `RevocationStore` فيدومُ عبرَ إعادةِ التشغيل.
+ *
+ * الفشلُ مغلقٌ: إن لم يُقرأْ الملفُ أو كان تالفاً يُعلنُ `ready() ← false`،
+ * فترفضُ السلطةُ كلَّ شهادةٍ (لا يمرُّ وكيلٌ بناءً على غيابِ دليلِ الإبطال).
+ * السجلُّ التالفُ لا يُمحى ولا يُتجاوز — يدخلُ النظامُ في وضعِ الرفضِ حتّى
+ * يُصلَحَ الملفُ يدويّاً.
+ *
+ * @remarks R4-K3-03: ثباتُ إلغاءِ الشهاداتِ على القرصِ — مخزنُ الذاكرةِ لا
+ * يدومُ عبرَ إعادةِ التشغيل، وهذا التنفيذُ يحلُّ المشكلةَ بتخزينٍ دائمٍ على القرص.
+ */
+export class FileRevocationStore implements RevocationStore {
+  private readonly revoked = new Set<string>();
+  private readonly path: string;
+  private loaded: boolean;
+
+  /**
+   * @param filePath - مسارُ ملفِّ السجلِّ (JSONL: سطرٌ JSON لكلِّ سحبٍ)
+   * @param options - خيارات: `fsync` لفرضِ الكتابةِ المتزامنةِ على القرصِ (الافتراضي: true)
+   */
+  constructor(filePath: string, _options: { fsync?: boolean } = {}) {
+    this.path = filePath;
+    this.loaded = false;
+    this.load();
+  }
+
+  /** يحمّلُ السجلَّ كاملاً من القرصِ. تالفاً أو غيرَ قابلٍ للقراءةِ ← `loaded = false`. */
+  private load(): void {
+    try {
+      if (!existsSync(this.path)) {
+        // ملفٌ غيرُ موجودٍ بعدُ: لا سحبَ سابقاً، جاهزٌ وقابلٌ للكتابةِ.
+        this.loaded = true;
+        return;
+      }
+      const content = readFileSync(this.path, 'utf8');
+      const lines = content.split('\n');
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === '') continue;
+        const entry = JSON.parse(trimmed) as {
+          certificateId: string;
+          revokedBy: string;
+          reason: string;
+          at: string;
+        };
+        this.revoked.add(entry.certificateId);
+      }
+      this.loaded = true;
+    } catch {
+      // فشلٌ في القراءةِ أو التحليلِ: الفشلُ مغلقٌ — لا يُدَّعى أنّ المخزنَ جاهزٌ.
+      this.loaded = false;
+    }
+  }
+
+  isRevoked(certificateId: string): boolean {
+    return this.revoked.has(certificateId);
+  }
+
+  revoke(certificateId: string, revokedBy: string, reason: string): boolean {
+    if (!this.loaded) return false;
+    try {
+      const dir = dirname(this.path);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const entry = JSON.stringify({
+        certificateId,
+        revokedBy,
+        reason,
+        at: new Date().toISOString(),
+      });
+      appendFileSync(this.path, entry + '\n', { encoding: 'utf8' });
+      this.revoked.add(certificateId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  ready(): boolean {
+    return this.loaded;
   }
 }
 
