@@ -129,6 +129,10 @@ export interface ProductionRootOfTrust {
   ledgerSigner: HsmSigner & LedgerDecisionSigner;
   /** خلاصةُ الإقلاعِ للتدقيقِ — بلا أيِّ سرٍّ فيها. */
   boot: ReturnType<typeof describeRootOfTrustBoot>;
+  /** بيانُ جذرِ الحالةِ المختومُ — مرجعُ الشواهدِ الرتيبةِ للمثبَّتِ والعهدِ والقرار. */
+  manifest: StateManifest;
+  /** يرفعُ شاهدَ المرساةِ في البيانِ عندَ إنجازِها — لا يؤجَّلُ إلى الإقلاعِ القادمِ (‏`UF-01`). */
+  raiseAnchorWitness(count: number): void;
   /** يُغلقُ جلسةَ التوكن. */
   close(): Promise<void>;
 }
@@ -377,6 +381,8 @@ export async function createProductionRootOfTrust(
       anchorSigner: signers.anchorSigner,
       ledgerSigner: signers.ledgerSigner,
       boot: signers.boot,
+      manifest,
+      raiseAnchorWitness: (count: number) => manifest.raise('anchoredCount', count),
       close: signers.close,
     };
   } catch (error) {

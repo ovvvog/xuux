@@ -24,7 +24,14 @@ import {
   randomBytes,
   sign as softwareSign,
 } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+  appendFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
@@ -38,6 +45,7 @@ import {
   createProductionRootOfTrust,
   describeProductionBindings,
   fingerprint,
+  maybeAnchorLogWithHsm,
   royalVerifierFromPublicKey,
   verifyAnchorChain,
   verifyEventChain,
@@ -559,6 +567,26 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
   });
 });
 
+test('UF-07: محوُ ملفِّ الدفترِ مع شاهدٍ موجبٍ يُرفَضُ لا يُقبَلُ كنشأةٍ', async () => {
+  const { runtime, cleanup } = await buildRuntime();
+  try {
+    runtime.ledger.begin({ id: 'cmd-uf-07' });
+    await runtime.ledger.commitSigned({ id: 'cmd-uf-07' });
+    assert.equal(runtime.ledger.has('cmd-uf-07'), true);
+    assert.equal(runtime.manifest.read().ledgerCommitted, 1);
+
+    unlinkSync(runtime.ledger.file);
+
+    assert.throws(
+      () => runtime.ledger.load(),
+      (err) => /** @type {Error & { code?: string }} */ (err).code === 'LEDGER_BEHIND_WITNESS',
+      'محوُ الدفترِ مع شاهدٍ موجبٍ يجبُ أن يُرفَض',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test('R4-B-01: سطرُ دفترِ رفعٍ بلا مصادقةٍ يُرفَضُ عندَ وجودِ مفتاحٍ من التوكنِ (M11.04-F05)', async () => {
   const { runtime, root, cleanup } = await buildRuntime();
   try {
@@ -598,6 +626,41 @@ test('R4-B-01: سطرُ دفترِ رفعٍ بلا مصادقةٍ يُرفَضُ
         /** @type {Error & { code?: string }} */ (err).code ===
         'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
       'سطرُ دفترِ رفعٍ بلا مصادقةٍ يجبُ أن يُرفَضَ عندَ وجودِ مفتاحٍ من التوكنِ',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يمنعُ الإقلاعَ بعدَ محوِ السجلِّ والمرساة', async () => {
+  const { runtime, root, token, king, cleanup } = await buildRuntime();
+  try {
+    await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
+    const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
+    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+      force: true,
+    });
+    assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
+    runtime.raiseAnchorWitness(record.count);
+    assert.equal(runtime.manifest.read().anchoredCount, record.count);
+
+    // إغلاقُ السجلِّ قبلَ محوِه: القفلُ لا يُتْرَكُ مفتوحاً.
+    runtime.log.close?.();
+
+    unlinkSync(runtime.log.file);
+    unlinkSync(runtime.log.headFile);
+    unlinkSync(join(root, 'anchors.json'));
+
+    await assert.rejects(
+      () =>
+        createProductionRootOfTrust(
+          { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+          { root, fsync: false },
+          { openSource: async () => ({ source: token, close: async () => undefined }) },
+        ),
+      (err) =>
+        /** @type {Error & { code?: string }} */ (err).code === 'PRODUCTION_LOG_BEHIND_ANCHOR',
+      'الإقلاعُ بعدَ محوِ السجلِّ والمرساةِ مع شاهدٍ موجبٍ يجبُ أن يُرفَض',
     );
   } finally {
     cleanup();

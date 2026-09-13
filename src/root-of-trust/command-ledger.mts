@@ -282,15 +282,13 @@ export class CommandLedger {
     this.#aborted = new Set();
     this.recovery = { droppedTailBytes: 0 };
     if (!existsSync(this.file)) {
-      // مراجعة R4-B-02: غيابُ ملفِّ الدفترِ لا يتجاوزُ الشاهدَ — دفترٌ مفقودٌ
-      // بشاهدٍ غيرِ صفريٍّ هو دفترٌ مُحيّاً لا دفترٌ جديد. الفشلُ مغلقٌ.
-      if (this.#witness !== null) {
-        const witnessed = this.#witness.read();
-        if (witnessed > 0) {
-          throw new CommandLedgerError('LEDGER_BEHIND_WITNESS', {
-            detail: `الدفتر 0 والشاهد ${String(witnessed)}`,
-          });
-        }
+      // `UF-07`: غيابُ ملفِّ الدفترِ ليس دائماً نشأةً جديدةً. إن شهدَ البيانُ
+      // بوجودِ أوامرَ مُثبَّتةٍ سابقاً، فالغيابُ محوٌ لا نشأةٌ — يُرفَضُ فشلاً
+      // مغلقاً قبلَ أن يُقبَلَ أمرٌ مكرَّرٌ.
+      if (this.#witness !== null && this.#witness.read() > 0) {
+        throw new CommandLedgerError('LEDGER_BEHIND_WITNESS', {
+          detail: `الدفترُ محوٌ والشاهدُ ${String(this.#witness.read())}`,
+        });
       }
       return;
     }
