@@ -28,7 +28,11 @@ function setup() {
   const king = new KingIdentity();
   const log = new EventLog();
   const crown = new CrownGateway(king, new CertificateAuthority(king), log);
-  const enforcement = new EnforcementPoint({ decisionPoint: createPolicyDecisionPoint(), log });
+  const enforcement = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint(),
+    log,
+    requireIdentityGate: false,
+  });
   return { king, log, crown, enforcement };
 }
 

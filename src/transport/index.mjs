@@ -7,7 +7,13 @@
  */
 
 export { createStateServer, createSecureStateServer } from './server.mjs';
-export { TransportError, compileRoutes, matchRoute, paramsFor } from './router.mjs';
+export {
+  TransportError,
+  compileCommandRoutes,
+  compileRoutes,
+  matchRoute,
+  paramsFor,
+} from './router.mjs';
 export { TRANSPORT_ERRORS, STATUS_BY_CODE, codeOf, problemFor } from './problem.mjs';
 export { resolveStaticFile } from './static.mjs';
 export {

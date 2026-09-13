@@ -88,6 +88,7 @@ function setup(deps = {}) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
     quotaLedger: deps.quotaLedger ?? null,
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   return { point, log };
 }

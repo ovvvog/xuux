@@ -62,6 +62,7 @@ function setup({ withEnforcement = true, withQuarantine = true, withLineage = tr
   const enforcementPoint = new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   // دفتر النسب شرط تركيبٍ للفهرس وللبوابة معاً بعد `M7.04`.

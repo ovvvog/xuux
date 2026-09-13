@@ -534,6 +534,7 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
         message: 'COMMAND_LEDGER_REQUIRED_IN_PRODUCTION',
       });
       // ومع المكوّنين الحقيقيّين يُبنى: التركيبُ الإنتاجيُّ يوفّرُهما معاً.
+      // M11.04-F04: الساعةُ الموثوقةُ إلزاميّةٌ عندَ البناءِ كذلك.
       const gateway = new CrownGateway(
         { id: 'king:x' },
         {},
@@ -541,8 +542,7 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
         {
           commandLedger: runtime.ledger,
           haltSwitch: runtime.haltSwitch,
-          // WL-094 (`UF-06`): `requireTrustedClock: false` لم يعُد يُقبَلُ في
-          // الإنتاجِ ولو كان الباقي صحيحاً — إطفاءُ ضمانٍ بخيارٍ هو الثغرة.
+          clock: { now: () => Date.now(), assertTrusted: () => undefined },
         },
       );
       assert.equal(gateway.requireCommandLedger, true);
@@ -553,4 +553,36 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
       cleanup();
     }
   });
+});
+
+test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبرَ onAnchor (M11.04-F05)', async () => {
+  const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
+  const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');
+  const { StateManifest, stateManifestPath } =
+    await import('../../src/root-of-trust/state-manifest.mjs');
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    const store = new FileAnchorStore(join(root, 'anchors.jsonl'), { fsync: false });
+    // أضفْ وقعةً للسجلِّ قبلَ التثبيتِ — لا يُثبَّتُ سجلٌّ فارغٌ.
+    await runtime.log.appendSealed('test.event', runtime.anchorSigner.id, { n: 1 });
+    const manifest = new StateManifest(stateManifestPath(root), {
+      fsync: false,
+      sealer: runtime.anchorSigner,
+    });
+    // البيانُ أُنشئَ بالفعلِ في `buildRuntime` — نقرأُهُ فقط.
+    const witnessed = manifest.read().anchoredCount;
+    assert.equal(witnessed, 0, 'قبلَ التثبيت: صفرٌ');
+    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+      force: true,
+      onAnchor: (r) => manifest.raise('anchoredCount', r.count),
+    });
+    assert.notEqual(record, null, 'التثبيتُ وقع');
+    assert.equal(
+      manifest.read().anchoredCount,
+      record.count,
+      'بعدَ التثبيت: شاهدُ البيانِ ارتفعَ إلى عدِّ المرساة',
+    );
+  } finally {
+    cleanup();
+  }
 });

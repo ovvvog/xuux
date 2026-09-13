@@ -281,7 +281,19 @@ export class CommandLedger {
     this.ids = new Set();
     this.#aborted = new Set();
     this.recovery = { droppedTailBytes: 0 };
-    if (!existsSync(this.file)) return;
+    if (!existsSync(this.file)) {
+      // مراجعة R4-B-02: غيابُ ملفِّ الدفترِ لا يتجاوزُ الشاهدَ — دفترٌ مفقودٌ
+      // بشاهدٍ غيرِ صفريٍّ هو دفترٌ مُحيّاً لا دفترٌ جديد. الفشلُ مغلقٌ.
+      if (this.#witness !== null) {
+        const witnessed = this.#witness.read();
+        if (witnessed > 0) {
+          throw new CommandLedgerError('LEDGER_BEHIND_WITNESS', {
+            detail: `الدفتر 0 والشاهد ${String(witnessed)}`,
+          });
+        }
+      }
+      return;
+    }
     const raw = readFileSync(this.file, 'utf8');
     const parts = raw.split('\n');
     const tail = parts.pop() ?? '';

@@ -359,7 +359,7 @@ export class ApiGateway {
       audit: policy.audit,
       log: deps.log ?? null,
       agents: deps.agents ?? null,
-      requirePoP: deps.requirePoP === true,
+      requirePoP: deps.requirePoP !== false,
       ...(deps.popWindowSeconds !== undefined ? { popWindowSeconds: deps.popWindowSeconds } : {}),
       ...clock,
     });

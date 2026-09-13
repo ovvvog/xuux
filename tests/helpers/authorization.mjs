@@ -19,6 +19,7 @@ export function enforcementPointFor(log) {
   return new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log: /** @type {never} */ (log),
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
 }
 

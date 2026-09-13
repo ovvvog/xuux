@@ -75,6 +75,7 @@ function state(options = {}) {
     monitor,
     enforcementPoint: enforcementPointFor(log),
     telemetry,
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
   return { gateway, monitor, telemetry, log };
 }
@@ -230,6 +231,7 @@ test('القياسُ يُضاف ولا يَحكم: بوابةٌ بلا قياس�
     agents: /** @type {never} */ (agents),
     monitor,
     enforcementPoint: enforcementPointFor(log),
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
   const session = await gateway.openSession({ actorId: AUDITOR });
   const result = await gateway.call({

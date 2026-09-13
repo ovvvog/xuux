@@ -131,7 +131,7 @@ export class SessionStore {
     log = null,
     agents = null,
     now,
-    requirePoP = false,
+    requirePoP = true,
     popWindowSeconds = 300,
   }) {
     this.#policy = policy;
@@ -139,7 +139,7 @@ export class SessionStore {
     this.#log = log;
     this.#agents = agents;
     this.#now = now ?? (() => new Date());
-    this.#requirePoP = requirePoP === true;
+    this.#requirePoP = requirePoP !== false;
     if (Number.isFinite(popWindowSeconds) && popWindowSeconds > 0) {
       this.#popWindowSeconds = popWindowSeconds;
     }
