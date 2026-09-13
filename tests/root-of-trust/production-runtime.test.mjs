@@ -19,11 +19,12 @@ import { Buffer } from 'node:buffer';
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   generateKeyPairSync,
   randomBytes,
   sign as softwareSign,
 } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
@@ -40,6 +41,9 @@ import {
   royalVerifierFromPublicKey,
   verifyAnchorChain,
   verifyEventChain,
+  StateManifest,
+  stateManifestPath,
+  stateManifestBinding,
 } from '../../src/root-of-trust/index.mjs';
 
 /**
@@ -553,4 +557,49 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
       cleanup();
     }
   });
+});
+
+test('R4-B-01: سطرُ دفترِ رفعٍ بلا مصادقةٍ يُرفَضُ عندَ وجودِ مفتاحٍ من التوكنِ (M11.04-F05)', async () => {
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    const manifestPath = stateManifestPath(root);
+    const journalPath = join(root, 'root-of-trust.manifest.journal');
+    const sealed = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const body = sealed.body;
+    const forgedEntry = {
+      seq: body.sequence,
+      key: 'anchoredCount',
+      value: 7,
+      at: new Date().toISOString(),
+      prev: body.journalHead,
+      hash: createHash('sha256')
+        .update(
+          JSON.stringify({
+            instanceId: body.instanceId,
+            seq: body.sequence,
+            key: 'anchoredCount',
+            value: 7,
+            at: new Date().toISOString(),
+            prev: body.journalHead,
+          }),
+        )
+        .digest('hex'),
+    };
+    appendFileSync(journalPath, JSON.stringify(forgedEntry) + '\n');
+
+    const manifest = new StateManifest(manifestPath, {
+      fsync: false,
+      sealer: runtime.anchorSigner,
+    });
+    const binding = stateManifestBinding(runtime.anchorSigner.id, PRODUCTION_ENV);
+    await assert.rejects(
+      () => manifest.provisionAsync(binding, process.env),
+      (err) =>
+        /** @type {Error & { code?: string }} */ (err).code ===
+        'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+      'سطرُ دفترِ رفعٍ بلا مصادقةٍ يجبُ أن يُرفَضَ عندَ وجودِ مفتاحٍ من التوكنِ',
+    );
+  } finally {
+    cleanup();
+  }
 });
