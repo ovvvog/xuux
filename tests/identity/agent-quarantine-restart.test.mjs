@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,7 +22,7 @@ import { AgentRegistry, AgentState } from '../../src/identity/agent-registry.mjs
  * يُحاكي الثباتَ عبرَ إعادةِ التشغيل: مستودعٌ جديدٌ على نفسِ المجلدِّ يقرأُ
  * ما كُتبَ سابقاً.
  */
-function createFileRepository(spec) {
+function createFileRepository(_spec) {
   const dir = mkdtempSync(join(tmpdir(), 'xuux-file-repo-'));
   const ext = '.json';
 
@@ -88,7 +88,6 @@ test('R6-A-05: حالةُ حجرِ الوكيلِ تدومُ عبرَ إعادة
   assert.equal(quarantined.state, AgentState.QUARANTINED, 'محجور قبل التوقف');
 
   // «إعادةُ التشغيل»: مستودعٌ جديدٌ على نفسِ المجلدِّ — يقرأُ ما كُتبَ سابقاً.
-  const repo2 = createFileRepository(AgentRegistry.spec);
   // نُعيدُ تعيينَ المجلدِّ إلى نفسِهِ يدويّاً:
   // في الواقعِ مستودعُ الإنتاجِ (Postgres) يقرأُ من قاعدةِ البياناتِ نفسِها.
   // هنا نُحاكي ذلك بنسخِ المستودعِ الأول:
