@@ -460,6 +460,7 @@ test('الرموز والحالات مثبَّتة نصاً ومصدَّرة', (
       // رموزُ الشاهدِ — WL-094 (`UF-07`): الدفترُ لا يُصدَّقُ وحدَه، ودليلُ
       // الحالةِ لازمٌ في الإنتاج.
       'LEDGER_BEHIND_WITNESS',
+      'LEDGER_AHEAD_OF_WITNESS',
       'LEDGER_STATE_ROOT_MISSING',
     ],
   );
@@ -480,5 +481,21 @@ test('حدٌّ معلَن: من يملك القرص يمحو الدفتر وال
   // ربطه بالتثبيت الموقَّع أو شاهدٍ خارجي — دينٌ مُقيَّد في WL-011.
   new CommandLedger(file).record({ id: 'erasable' });
   assert.equal(new CommandLedger(file).has('erasable'), true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('R4-B-04: دفترٌ أمامَ الشاهدِ يُرفَضُ — استرجاعٌ جزئيٌّ بمتنٍ قديم', () => {
+  const { dir, file } = workDir();
+  const ledger = new CommandLedger(file);
+  ledger.record({ id: 'first' });
+  ledger.record({ id: 'second' });
+  // الشاهدُ يقولُ: واحدٌ مُثبَّت (كما لو استُرجِعَ البيانُ إلى إصدارٍ أقدم).
+  const witness = { read: () => 1, raise: () => undefined };
+  // الدفترُ يقولُ: اثنانِ — هذا استرجاعٌ جزئيٌّ بمتنٍ قديم.
+  assert.throws(
+    () => new CommandLedger(file, { witness }),
+    (err) => /** @type {Error} */ (err).message === 'LEDGER_AHEAD_OF_WITNESS',
+    'دفترٌ أمامَ شاهدِهِ يجبُ أن يُرفَضَ بـLEDGER_AHEAD_OF_WITNESS',
+  );
   rmSync(dir, { recursive: true, force: true });
 });

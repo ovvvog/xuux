@@ -75,6 +75,8 @@ export const CommandLedgerErrorCodes = [
   'LEDGER_SIGNER_MISSING',
   // `UF-07`: الدفترُ أقصرُ ممّا يشهدُ له الشاهدُ الخارجيُّ — محوٌ لا انقطاع.
   'LEDGER_BEHIND_WITNESS',
+  // `R4-B-04`: الدفترُ أطولُ ممّا يشهدُ له الشاهدُ — استرجاعٌ جزئيٌّ بمتنٍ قديم.
+  'LEDGER_AHEAD_OF_WITNESS',
   // `UF-13`: مجلَّدُ الحجوزاتِ مفقودٌ — خطأٌ مُسمَّى لا `ENOENT` خامٌ.
   'LEDGER_STATE_ROOT_MISSING',
 ] as const;
@@ -318,6 +320,14 @@ export class CommandLedger {
       const witnessed = this.#witness.read();
       if (this.ids.size < witnessed) {
         throw new CommandLedgerError('LEDGER_BEHIND_WITNESS', {
+          detail: `الدفتر ${String(this.ids.size)} والشاهد ${String(witnessed)}`,
+        });
+      }
+      // مراجعة R4-B-04: دفترٌ أمامَ الشاهدِ يعني أنَّ البيانَ استُرجِعَ إلى إصدارٍ
+      // أقدم (حُذفَ دفترُ الرفعِ واستُعمِلَ متنٌ مختومٌ قديم). الفشلُ مغلقٌ:
+      // لا يُقبَلُ دفترٌ يسبقُ شاهدَه.
+      if (this.ids.size > witnessed) {
+        throw new CommandLedgerError('LEDGER_AHEAD_OF_WITNESS', {
           detail: `الدفتر ${String(this.ids.size)} والشاهد ${String(witnessed)}`,
         });
       }
