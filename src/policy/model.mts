@@ -56,7 +56,20 @@ export interface PolicyRequest {
 
 /** عوامل الشروط المدعومة. أي عامل خارج هذا الاتحاد يُرفض في التحميل لا في التقييم. */
 export type ConditionOperator =
-  'eq' | 'ne' | 'in' | 'not-in' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists';
+  | 'eq'
+  | 'ne'
+  | 'in'
+  | 'not-in'
+  | 'gt'
+  | 'gte'
+  | 'lt'
+  | 'lte'
+  | 'exists'
+  // R6-A-03: يفحصُ هل القيمةُ المُعطاةُ عضوٌ في مصفوفةِ الخاصِّيةِ — كأن يتحقَّقَ
+  // من حضورِ قدرةٍ في `actor.capabilities`. عكسُ `in` الذي يفحصُ هل الخاصِّيةُ عضوٌ
+  // في مصفوفةٍ مُعطاةٍ. `not-includes` عكسُه: يرفضُ إن وُجدت القيمةُ في المصفوفة.
+  | 'includes'
+  | 'not-includes';
 
 export interface PolicyCondition {
   attribute: string;
