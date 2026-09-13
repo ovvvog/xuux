@@ -501,7 +501,6 @@ test('R4-B-02: دفترٌ مفقودٌ بشاهدٍ غيرِ صفريٍّ يُر
   rmSync(dir, { recursive: true, force: true });
 });
 
-
 test('R4-B-04: دفترٌ أمامَ الشاهدِ يُرفَضُ — استرجاعٌ جزئيٌّ بمتنٍ قديم', () => {
   const { dir, file } = workDir();
   const ledger = new CommandLedger(file);
