@@ -698,3 +698,51 @@ test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبر
     cleanup();
   }
 });
+
+describe('المصنعُ الإنتاجيُّ يُسلِّمُ مخزنَ سحبٍ دائماً (R4-K3-03)', () => {
+  test('revocationStore ليس null وهو من نوع FileRevocationStore', async () => {
+    const { runtime, cleanup } = await buildRuntime();
+    try {
+      assert.ok(runtime.revocationStore, 'المخزن مُسلَّم');
+      assert.equal(typeof runtime.revocationStore.ready, 'function', 'يحقق عقد RevocationStore');
+      assert.equal(
+        typeof runtime.revocationStore.isRevoked,
+        'function',
+        'يحقق عقد RevocationStore',
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('revocationStore يُحقَنُ في CertificateAuthority ويدومُ عبرَ إعادةِ التشغيل', async () => {
+    const { runtime, root, king, cleanup } = await buildRuntime();
+    try {
+      const store = runtime.revocationStore;
+      assert.equal(store.ready(), true, 'المخزن جاهز');
+
+      // بناءُ سلطةِ تصديقٍ بمخزنِ الإنتاج.
+      const KingIdentity = (await import('../../src/root-of-trust/identity.mjs')).KingIdentity;
+      const CertificateAuthority = (await import('../../src/root-of-trust/identity.mjs'))
+        .CertificateAuthority;
+      const kingId = new KingIdentity();
+      const ca = new CertificateAuthority(kingId, { revocationStore: store });
+      const cert = ca.issue('agent:x', 'minister', ['read']);
+      assert.equal(ca.isValid(cert), true, 'قبل السحب: مقبولة');
+      const result = ca.revoke(cert.id, 'compromised');
+      assert.equal(result.persisted, true, 'السحب كُتب في المخزن');
+      assert.equal(ca.isValid(cert), false, 'بعد السحب: مرفوضة');
+
+      // «إعادةُ تشغيل»: مخزنٌ جديدٌ من نفسِ الملف.
+      const FileRevocationStore = (await import('../../src/root-of-trust/identity.mjs'))
+        .FileRevocationStore;
+      const store2 = new FileRevocationStore(join(root, 'revoked.jsonl'), {
+        fsync: false,
+      });
+      const ca2 = new CertificateAuthority(kingId, { revocationStore: store2 });
+      assert.equal(ca2.isValid(cert), false, 'بعد إعادة التشغيل بنفس الملف: ما زالت مسحوبة');
+    } finally {
+      cleanup();
+    }
+  });
+});

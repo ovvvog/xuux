@@ -10,7 +10,15 @@ import {
   createHash,
   type KeyObject,
 } from 'node:crypto';
-import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  readFileSync,
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  fsyncSync,
+} from 'node:fs';
 import { dirname } from 'node:path';
 
 import { assertSoftwareKingIdentityAllowed, isProductionRuntime } from './production-boot.mjs';
@@ -104,16 +112,39 @@ export class MemoryRevocationStore implements RevocationStore {
 export class FileRevocationStore implements RevocationStore {
   private readonly revoked = new Set<string>();
   private readonly path: string;
+  private readonly fsync: boolean;
   private loaded: boolean;
 
   /**
    * @param filePath - مسارُ ملفِّ السجلِّ (JSONL: سطرٌ JSON لكلِّ سحبٍ)
    * @param options - خيارات: `fsync` لفرضِ الكتابةِ المتزامنةِ على القرصِ (الافتراضي: true)
    */
-  constructor(filePath: string, _options: { fsync?: boolean } = {}) {
+  constructor(filePath: string, options: { fsync?: boolean } = {}) {
     this.path = filePath;
+    this.fsync = options.fsync ?? true;
     this.loaded = false;
     this.load();
+  }
+
+  /**
+   * يتحقّقُ من شكلِ سجلِّ السحبِ: كلُّ حقلٍ يجبُ أن يكونَ نصّاً غيرَ فارغ.
+   * سجلٌّ ناقصُ الحقولِ أو بأنواعٍ خاطئةٍ يُعدُّ تالفاً.
+   */
+  private isValidEntry(entry: unknown): entry is {
+    certificateId: string;
+    revokedBy: string;
+    reason: string;
+    at: string;
+  } {
+    if (entry === null || typeof entry !== 'object') return false;
+    const e = entry as Record<string, unknown>;
+    return (
+      typeof e.certificateId === 'string' &&
+      e.certificateId.length > 0 &&
+      typeof e.revokedBy === 'string' &&
+      typeof e.reason === 'string' &&
+      typeof e.at === 'string'
+    );
   }
 
   /** يحمّلُ السجلَّ كاملاً من القرصِ. تالفاً أو غيرَ قابلٍ للقراءةِ ← `loaded = false`. */
@@ -126,20 +157,25 @@ export class FileRevocationStore implements RevocationStore {
       }
       const content = readFileSync(this.path, 'utf8');
       const lines = content.split('\n');
+      // لا نُضيفُ إلى المجموعةِ حتى تُتحقَّقَ كلُّ الأسطر: سجلٌّ تالفٌ واحدٌ يُبطلُ الكل.
+      const pending: string[] = [];
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed === '') continue;
-        const entry = JSON.parse(trimmed) as {
-          certificateId: string;
-          revokedBy: string;
-          reason: string;
-          at: string;
-        };
-        this.revoked.add(entry.certificateId);
+        const entry = JSON.parse(trimmed);
+        if (!this.isValidEntry(entry)) {
+          // سجلٌّ ناقصُ الحقولِ أو بأنواعٍ خاطئةٍ: تالفٌ — فشلٌ مغلق.
+          this.revoked.clear();
+          this.loaded = false;
+          return;
+        }
+        pending.push(entry.certificateId);
       }
+      for (const id of pending) this.revoked.add(id);
       this.loaded = true;
     } catch {
       // فشلٌ في القراءةِ أو التحليلِ: الفشلُ مغلقٌ — لا يُدَّعى أنّ المخزنَ جاهزٌ.
+      this.revoked.clear();
       this.loaded = false;
     }
   }
@@ -159,7 +195,19 @@ export class FileRevocationStore implements RevocationStore {
         reason,
         at: new Date().toISOString(),
       });
-      appendFileSync(this.path, entry + '\n', { encoding: 'utf8' });
+      // fsync: نفتحُ مقبضَ الملفِّ ونُجبرُ الكتابةَ على القرصِ قبلَ الإغلاقِ.
+      // هذا يضمنُ أنّ السحبَ لا يُفقَدُ لو انقطعتْ الطاقةُ بعدَ الإلحاقِ.
+      if (this.fsync) {
+        const fd = openSync(this.path, 'a');
+        try {
+          appendFileSync(fd, entry + '\n', { encoding: 'utf8' });
+          fsyncSync(fd);
+        } finally {
+          closeSync(fd);
+        }
+      } else {
+        appendFileSync(this.path, entry + '\n', { encoding: 'utf8' });
+      }
       this.revoked.add(certificateId);
       return true;
     } catch {
