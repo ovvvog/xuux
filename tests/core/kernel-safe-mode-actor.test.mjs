@@ -10,7 +10,7 @@ import { EventLog } from '../../src/root-of-trust/index.mjs';
 describe('R6-A-08: kernel safe-mode stop/resume accept actor identity', () => {
   function buildKernel() {
     const log = new EventLog();
-    const crown = {
+    const crown = /** @type {any} */ ({
       stopped: false,
       stop() {
         this.stopped = true;
@@ -19,7 +19,7 @@ describe('R6-A-08: kernel safe-mode stop/resume accept actor identity', () => {
         this.stopped = false;
       },
       command: async () => ({ ok: true }),
-    };
+    });
     const kernel = new ExecutionKernel({ crown, log });
     return { kernel, log };
   }
