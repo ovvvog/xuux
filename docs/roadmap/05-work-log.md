@@ -22,7 +22,7 @@
   4. **والمصنعُ صارَ يُعلِّمُ الإلزامَ بحضورِها:** `createGovernance` صارَ يُمرِّرُ `requireIdentityGate: identityGate !== null` — مَن مرّرها أُلزِمَت، ومَن لم يمرّرها لم يُلزَم ولم يَدّعِها في `guarantees.identityEnforced`.
   5. **وكلُّ موضعِ إنشاءٍ في الاختباراتِ صُرِّحَ فيه:** 16 ملفَّ اختبارٍ ومساعدَي اختبارٍ ودليلَ تطويرٍ صارَ فيها `requireIdentityGate: false` صريحةً حيثُ لا بوابةَ هويةٍ — لا سقوطَ صامتَ.
 - **الملفات المتأثرة:** `src/policy/enforcement-point.mjs` · `src/policy/governance.mjs` · `scripts/serve-state.mjs` · `tests/helpers/authorization.mjs` · `tests/helpers/inference-gate.mjs` · `tests/policy/enforcement-point.test.mjs` · `tests/legislation/legislature.test.mjs` · `tests/core/gpt-f06-royal-command-binding.test.mjs` · `tests/core/authorization-point.test.mjs` · `tests/policy/quota-measured-amount.test.mjs` · `tests/egress/egress-gate.test.mjs` · `tests/inference/inference-gate.test.mjs` · `tests/data/access-gate.test.mjs` · `tests/data/classification.test.mjs` · `tests/data/retention-authorization.test.mjs` · `tests/data/memory-limits.test.mjs` · `tests/data/data-memory.test.mjs` · `docs/roadmap/05-work-log.md`
-- **الـ commit:** (يُملأ بعد الدفعِ)
+- **الـ commit:** `30a24eba`
 - **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):**
   - `npm run validate` ⇒ **1594 ناجحاً · 0 فاشلاً · 121 مُتخطّىً** (بلا قاعدةِ بياناتٍ).
   - اختبارانِ جديدانِ يقيسانِ: (أ) الإنشاءُ بلا بوابةٍ يرفعُ `ENFORCEMENT_IDENTITY_GATE_REQUIRED`، (ب) الإنشاءُ مع بوابةٍ ينجحُ.
