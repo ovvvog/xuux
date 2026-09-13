@@ -21,7 +21,7 @@
   3. **وكلُّ موضعِ إنشاءٍ في الاختباراتِ صُرِّحَ فيه:** 12 ملفَّ اختبارٍ صارَ فيها `requirePoP: false` صريحةً حيثُ لا حيازةَ — لا سقوطَ صامتَ.
   4. **واختبارٌ جديدٌ يقيسُ الافتراضيَّ:** الإنشاءُ بلا تصريحٍ يُلزمُ الحيازةَ — فتحُ الجلسةِ بلا مفتاحٍ مسجَّلٍ يُرفَضُ بـ`API_POP_REQUIRED`.
 - **الملفات المتأثرة:** `src/api/session-store.mjs` · `src/api/gateway.mjs` · `tests/api/po-p.test.mjs` · `tests/api/gateway.test.mjs` · `tests/authn/king-auth.test.mjs` · `tests/telemetry/one-trace.test.mjs` · `tests/incident-response/drill.test.mjs` · `tests/console/royal-console.test.mjs` · `tests/service-levels/dashboard.test.mjs` · `tests/crisis/crisis-room.test.mjs` · `tests/operations/operations-center.test.mjs` · `tests/transport/server.test.mjs` · `tests/transport/web.test.mjs` · `tests/transport/tls.test.mjs` · `docs/roadmap/05-work-log.md`
-- **الـ commit:** (يُملأ بعد الدفعِ)
+- **الـ commit:** `9adfbb0d`
 - **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):**
   - `npm run validate` ⇒ **1593 ناجحاً · 0 فاشلاً · 121 مُتخطّىً** (بلا قاعدةِ بياناتٍ).
   - اختبارٌ جديدٌ يقيسُ: الإنشاءُ بلا `requirePoP` يُلزمُ الحيازةَ افتراضاً.
