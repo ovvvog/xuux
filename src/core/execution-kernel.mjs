@@ -247,16 +247,27 @@ export class ExecutionKernel {
 
   /**
    * إيقاف طارئ: يُدخل الوضع الآمن ويُسجّل السبب.
+   *
+   * R6-A-08: كانَ الفاعلُ ثابتاً (`crown`) لا يُمرَّر. صارَ يُمرَّرُ اختياريّاً،
+   * والمنادي مسؤولٌ عن تمريرِه — والمنادي الإنتاجيُّ يُمرِّرُ هويةَ الفاعلِ الآمرة.
    * @param {string} [reason='kernel emergency stop']
+   * @param {string} [actorId='crown'] - هويةُ الفاعلِ الآمرِ بالإيقافِ (R6-A-08)
    * @returns {void}
    */
-  stop(reason = 'kernel emergency stop') {
+  stop(reason = 'kernel emergency stop', actorId = 'crown') {
     this.safeMode.enter(reason);
-    this.log.append('kernel.safe-mode.entered', 'crown', { reason });
+    this.log.append('kernel.safe-mode.entered', actorId, { reason });
   }
-  resume() {
+  /**
+   * يستأنف التنفيذ ويُخرجُ من الوضع الآمن.
+   *
+   * R6-A-08: كانَ الفاعلُ ثابتاً (`crown`) لا يُمرَّر. صارَ يُمرَّرُ اختياريّاً.
+   * @param {string} [actorId='crown'] - هويةُ الفاعلِ الآمرِ بالاستئنافِ (R6-A-08)
+   * @returns {void}
+   */
+  resume(actorId = 'crown') {
     this.safeMode.leave();
-    this.log.append('kernel.safe-mode.left', 'crown', {});
+    this.log.append('kernel.safe-mode.left', actorId, {});
   }
   /**
    * @param {string} id - معرّف المهمة
