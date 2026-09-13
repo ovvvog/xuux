@@ -66,7 +66,6 @@ test('SafeMode.restore يرفض اللقطة الفاسدة', () => {
 test('SafeMode.restore يتعامل مع الحقول الناقصة بأمان', () => {
   const sm1 = new SafeMode();
   sm1.enter('test');
-  const snap = sm1.snapshot();
   // لقطةٌ ناقصةُ الحقول.
   const partial = { active: true };
   const sm2 = new SafeMode();
