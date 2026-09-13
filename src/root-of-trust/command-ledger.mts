@@ -279,7 +279,17 @@ export class CommandLedger {
     this.ids = new Set();
     this.#aborted = new Set();
     this.recovery = { droppedTailBytes: 0 };
-    if (!existsSync(this.file)) return;
+    if (!existsSync(this.file)) {
+      // `UF-07`: غيابُ ملفِّ الدفترِ ليس دائماً نشأةً جديدةً. إن شهدَ البيانُ
+      // بوجودِ أوامرَ مُثبَّتةٍ سابقاً، فالغيابُ محوٌ لا نشأةٌ — يُرفَضُ فشلاً
+      // مغلقاً قبلَ أن يُقبَلَ أمرٌ مكرَّرٌ.
+      if (this.#witness !== null && this.#witness.read() > 0) {
+        throw new CommandLedgerError('LEDGER_BEHIND_WITNESS', {
+          detail: `الدفترُ محوٌ والشاهدُ ${String(this.#witness.read())}`,
+        });
+      }
+      return;
+    }
     const raw = readFileSync(this.file, 'utf8');
     const parts = raw.split('\n');
     const tail = parts.pop() ?? '';
