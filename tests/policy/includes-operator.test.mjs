@@ -13,10 +13,12 @@ import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
  * حضورِ قدرةٍ في `actor.capabilities`.
  */
 
-function withMutatedConfig(mutate) {
+function withMutatedConfig(
+  /** @type {(docs: { roles: any, policies: any, threshold: any, quotas: any }) => void} */ mutate,
+) {
   const dir = mkdtempSync(join(tmpdir(), 'xuux-pol-incl-'));
   cpSync(CONFIG_DIR, dir, { recursive: true });
-  const read = (f) => YAML.parse(readFileSync(join(dir, f), 'utf8'));
+  const read = (/** @type {string} */ f) => YAML.parse(readFileSync(join(dir, f), 'utf8'));
   const docs = {
     roles: read('roles.yaml'),
     policies: read('policies.yaml'),
