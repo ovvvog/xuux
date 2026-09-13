@@ -22,12 +22,14 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { API_ERRORS, ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
+import { CONSOLE_ERRORS, ConsoleError, loadConsolePolicy } from '../../src/console/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../../src/observability/index.mjs';
 import { createMemoryRepositories } from '../../src/persistence/composition.mjs';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import {
   STATUS_BY_CODE,
   TRANSPORT_ERRORS,
+  compileCommandRoutes,
   compileRoutes,
   createStateServer,
   matchRoute,
@@ -43,6 +45,8 @@ const CONFIG_DIR = path.join(process.cwd(), 'config');
 const API_POLICY = loadApiPolicy({ dir: CONFIG_DIR });
 const MONITORING_POLICY = loadMonitoringPolicy({ dir: CONFIG_DIR });
 const ROUTES = compileRoutes({ policy: API_POLICY });
+const CONSOLE_POLICY = loadConsolePolicy({ dir: CONFIG_DIR });
+const COMMAND_ROUTES = compileCommandRoutes({ policy: CONSOLE_POLICY });
 
 const AUDITOR = 'agent:transport-auditor';
 const KING = 'human:transport-king';
@@ -89,7 +93,7 @@ function realGateway() {
 
 /**
  * يُشغِّلُ خادماً على منفذٍ يختارُه النظامُ، ويُغلِقُه بعدَ العملِ حتماً.
- * @param {{ gateway: unknown, webDir?: string | null }} options
+ * @param {{ gateway: unknown, webDir?: string | null, console?: unknown, commandRoutes?: unknown }} options
  * @param {(base: string) => Promise<void>} work
  */
 async function serving(options, work) {
@@ -342,9 +346,19 @@ test('كلُّ رمزِ رفضٍ في البوابةِ له ترجمةٌ مُع�
   for (const code of Object.values(TRANSPORT_ERRORS)) {
     assert.ok(Object.prototype.hasOwnProperty.call(STATUS_BY_CODE, code), `بلا ترجمةٍ: ${code}`);
   }
+  for (const code of Object.values(CONSOLE_ERRORS)) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(STATUS_BY_CODE, code),
+      `رمزُ رفضِ ديوانٍ بلا ترجمةٍ: ${code}`,
+    );
+  }
   // ولا ترجمةَ لرمزٍ لا وجودَ له: خريطةٌ فيها زائدٌ خريطةٌ لِما لا يُرَدُّ.
   const known = /** @type {Set<string>} */ (
-    new Set([...Object.values(API_ERRORS), ...Object.values(TRANSPORT_ERRORS)])
+    new Set([
+      ...Object.values(API_ERRORS),
+      ...Object.values(TRANSPORT_ERRORS),
+      ...Object.values(CONSOLE_ERRORS),
+    ])
   );
   for (const code of Object.keys(STATUS_BY_CODE)) {
     assert.ok(known.has(code), `ترجمةٌ لرمزٍ غيرِ مُعلَنٍ: ${code}`);
@@ -373,4 +387,230 @@ test('لا خادمَ بلا بوابةٍ — فشلٌ مُغلَقٌ عندَ �
       return true;
     },
   );
+});
+
+// ═══════════════════════════════════════════════════════════════
+// مسارُ الكتابةِ السياديّةِ المُوقَّعةِ — سدادُ باقي `D-1` (`M9.03` عبر النقل)
+// ═══════════════════════════════════════════════════════════════
+
+/** ديوانٌ مُتَتبِّعٌ يسجِّلُ النداءاتِ ويُعيدُ نتيجةً أو يرمي خطأً. */
+/**
+ * @param {(() => Promise<Record<string, unknown>>) | Record<string, unknown>} behavior
+ */
+function trackingConsole(behavior) {
+  /** @type {Array<{ command: string, royalCommand: unknown, signature: string, sovereignSession?: string }>} */
+  const calls = [];
+  return {
+    calls,
+    /** @param {{ command: string, royalCommand: unknown, signature: string, sovereignSession?: string }} request */
+    issue: async (request) => {
+      calls.push(request);
+      if (typeof behavior === 'function') return behavior();
+      return behavior;
+    },
+  };
+}
+
+/** نتيجةُ أمرٍ ناجحٍ ثابتةٌ. */
+const SUCCESS_RESULT = Object.freeze({
+  command: 'cmd:halt',
+  action: 'stop-state',
+  kind: 'halt',
+  path: 'crown',
+  commandId: 'test-command-id',
+  acceptedAt: '2026-01-01T00:00:00.000Z',
+  status: 'executed',
+  effect: Object.freeze({ state: 'halted', epoch: 1, reason: 'test' }),
+});
+
+test('مساراتُ الكتابةِ مُشتَقّةٌ من `config/royal-console.yaml` وحدَها', () => {
+  assert.ok(COMMAND_ROUTES.length > 0, 'لا مساراتِ كتابةٍ مُشتَقّةٍ.');
+  for (const route of COMMAND_ROUTES) {
+    assert.equal(route.method, 'POST', `مسارُ كتابةٍ بفعلٍ غيرِ POST: ${route.id}`);
+    assert.ok(route.path.startsWith('/state/console/'), `مسارٌ خارجَ الديوانِ: ${route.path}`);
+  }
+  // كلُّ أمرٍ مُعلَنٍ له مسارٌ، وكلُّ مسارٍ له أمرٌ.
+  const commandIds = new Set(CONSOLE_POLICY.commands.map((c) => c.id));
+  const routeIds = new Set(COMMAND_ROUTES.map((r) => r.id));
+  assert.deepEqual(
+    [...commandIds].sort(),
+    [...routeIds].sort(),
+    'الأوامرُ والمساراتُ غيرُ متطابقةٍ.',
+  );
+});
+
+test('كلُّ أمرٍ مُعلَنٍ يُخدَمُ على مقبسٍ حقيقيٍّ عبر النقلِ', async () => {
+  const { gateway } = realGateway();
+  const console_ = trackingConsole(SUCCESS_RESULT);
+  await serving({ gateway, console: console_, commandRoutes: COMMAND_ROUTES }, async (base) => {
+    for (const command of CONSOLE_POLICY.commands) {
+      const path = `/state/console/${command.action}`;
+      const response = await fetch(`${base}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          royalCommand: {
+            id: 'test',
+            action: command.action,
+            target: command.target,
+            payload: {},
+            issuedAt: new Date().toISOString(),
+          },
+          signature: 'test-signature',
+          sovereignSession: 'test-session',
+        }),
+      });
+      assert.equal(response.status, 200, `أمرٌ مُعلَنٌ رُدَّ: ${command.id} → ${response.status}`);
+      const body = /** @type {Record<string, unknown>} */ (await response.json());
+      assert.equal(body.status, 'executed', `أمرٌ لم يُنفَّذ: ${command.id}`);
+    }
+  });
+  // وكلُّ نداءٍ مرَّ بالديوانِ لا بسلطةٍ في النقلِ.
+  assert.equal(
+    console_.calls.length,
+    CONSOLE_POLICY.commands.length,
+    'ليس كلُّ الأوامرِ مرَّت بالديوانِ.',
+  );
+});
+
+test('أمرٌ غيرُ مُعلَنٍ يُرَدُّ `404` — ولو كان العنوانُ معقولاً', async () => {
+  const { gateway } = realGateway();
+  const console_ = trackingConsole(SUCCESS_RESULT);
+  await serving({ gateway, console: console_, commandRoutes: COMMAND_ROUTES }, async (base) => {
+    const response = await fetch(`${base}/state/console/nonexistent-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ royalCommand: {}, signature: 'x' }),
+    });
+    assert.equal(response.status, 404);
+    assert.equal(
+      /** @type {Record<string, unknown>} */ (await response.json()).code,
+      TRANSPORT_ERRORS.ROUTE_UNKNOWN,
+    );
+  });
+  assert.equal(console_.calls.length, 0, 'أمرٌ غيرُ مُعلَنٍ مرَّ بالديوانِ!');
+});
+
+test('بلا ديوانٍ يُرَدُّ `503` — فالكتابةُ ليست قائمةً', async () => {
+  const { gateway } = realGateway();
+  await serving({ gateway, console: null, commandRoutes: COMMAND_ROUTES }, async (base) => {
+    const response = await fetch(`${base}/state/console/stop-state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ royalCommand: {}, signature: 'x' }),
+    });
+    assert.equal(response.status, 503);
+    assert.equal(
+      /** @type {Record<string, unknown>} */ (await response.json()).code,
+      CONSOLE_ERRORS.GATEWAY_REQUIRED,
+    );
+  });
+});
+
+test('رموزُ رفضِ الديوانِ تُترجَمُ بحالتِها المُعلَنةِ لا بـ`500`', async () => {
+  const { gateway } = realGateway();
+  const codes = [
+    [CONSOLE_ERRORS.COMMAND_UNDECLARED, 404],
+    [CONSOLE_ERRORS.AUTHENTICATION_REQUIRED, 401],
+    [CONSOLE_ERRORS.SIGNATURE_INVALID, 403],
+    [CONSOLE_ERRORS.REPLAYED_COMMAND, 409],
+    [CONSOLE_ERRORS.ACTION_MISMATCH, 400],
+    [CONSOLE_ERRORS.CROWN_REQUIRED, 503],
+  ];
+  for (const [code, status] of codes) {
+    const console_ = trackingConsole(() => {
+      throw new ConsoleError(/** @type {string} */ (code), 'test');
+    });
+    await serving({ gateway, console: console_, commandRoutes: COMMAND_ROUTES }, async (base) => {
+      const response = await fetch(`${base}/state/console/stop-state`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ royalCommand: {}, signature: 'x' }),
+      });
+      assert.equal(response.status, status, `رمزٌ ${code} رُدَّ بحالةٍ غيرِ ${status}`);
+      assert.equal(
+        /** @type {Record<string, unknown>} */ (await response.json()).code,
+        code,
+        `رمزٌ ${code} رُدَّ برمزٍ آخر`,
+      );
+    });
+  }
+});
+
+test('النقلُ يُمرِّرُ الظرفَ كما هو — لا يُوقِّعُ ولا يُتحقَّقُ', async () => {
+  const { gateway } = realGateway();
+  /** @type {Record<string, unknown>} */
+  const royalCommand = {
+    id: 'cmd-123',
+    action: 'stop-state',
+    target: 'state:sovereign',
+    payload: { reason: 'test' },
+    issuedAt: '2026-01-01T00:00:00.000Z',
+  };
+  const signature = 'ed25519:test-signature';
+  const sovereignSession = 'sovereign-session-token';
+  const console_ = trackingConsole(SUCCESS_RESULT);
+  await serving({ gateway, console: console_, commandRoutes: COMMAND_ROUTES }, async (base) => {
+    await fetch(`${base}/state/console/stop-state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ royalCommand, signature, sovereignSession }),
+    });
+  });
+  assert.equal(console_.calls.length, 1, 'لم يصلِ النداءُ للديوانِ.');
+  const call = console_.calls[0];
+  assert.ok(call, 'لم يُسجَّل النداءُ.');
+  assert.equal(call.command, 'cmd:halt', 'معرّفُ الأمرِ لم يُشتَقَّ من المسارِ.');
+  assert.deepEqual(call.royalCommand, royalCommand, 'الأمرُ الملكيُّ لم يُمرَّر كما هو.');
+  assert.equal(call.signature, signature, 'التوقيعُ لم يُمرَّر كما هو.');
+  assert.equal(call.sovereignSession, sovereignSession, 'الجلسةُ القويةُ لم تُمرَّر كما هي.');
+});
+
+test('جسمٌ غيرُ JSON يُرَدُّ `400` — لا يُهمَلُ ولا يُخمَّنُ', async () => {
+  const { gateway } = realGateway();
+  const console_ = trackingConsole(SUCCESS_RESULT);
+  await serving({ gateway, console: console_, commandRoutes: COMMAND_ROUTES }, async (base) => {
+    const response = await fetch(`${base}/state/console/stop-state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'not-json',
+    });
+    assert.equal(response.status, 400);
+    assert.equal(
+      /** @type {Record<string, unknown>} */ (await response.json()).code,
+      TRANSPORT_ERRORS.BODY_NOT_ALLOWED,
+    );
+  });
+  assert.equal(console_.calls.length, 0, 'جسمٌ غيرُ صالحٍ مرَّ بالديوانِ!');
+});
+
+test('ظرفٌ ناقصُ الحقول يُرَدُّ `400`', async () => {
+  const { gateway } = realGateway();
+  const console_ = trackingConsole(SUCCESS_RESULT);
+  await serving({ gateway, console: console_, commandRoutes: COMMAND_ROUTES }, async (base) => {
+    // بلا royalCommand
+    const r1 = await fetch(`${base}/state/console/stop-state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ signature: 'x' }),
+    });
+    assert.equal(r1.status, 400);
+    // بلا signature
+    const r2 = await fetch(`${base}/state/console/stop-state`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ royalCommand: {} }),
+    });
+    assert.equal(r2.status, 400);
+  });
+  assert.equal(console_.calls.length, 0, 'ظرفٌ ناقصٌ مرَّ بالديوانِ!');
+});
+
+test('كلُّ رموزِ رفضِ الديوانِ لها ترجمةُ حالةٍ في النقلِ', () => {
+  for (const code of Object.values(CONSOLE_ERRORS)) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(STATUS_BY_CODE, code),
+      `رمزُ رفضٍ بلا ترجمةٍ في طبقةِ النقلِ: ${code}`,
+    );
+  }
 });

@@ -11,15 +11,15 @@
  *       وكلُّ مسارٍ في الجدولِ مُعلَنٌ فيها — **في الاتجاهين**. وليس في
  *       `src/transport/` عنوانٌ مكتوبٌ يداً، لأنّ المكتوبَ يداً يفترقُ عن الوثيقةِ
  *       في أوّلِ تعديلٍ: يُحذَفُ مسارٌ منها فيبقى مخدوماً، وذاك ثغرةٌ لا سهوٌ.
- *   T2: قارئةٌ فقط: لا فعلَ غيرَ `GET` في الوثيقةِ ولا في الجدولِ، ولا نداءَ كاتبٍ
- *       (`.insert(` `.update(` `.remove(` `.upsert(`) في الطبقةِ، ولا جسمَ طلبٍ
- *       يُقرأُ (`req.on('data'`).
+ *   T2: قراءةٌ وحدَها من `config/api.yaml`: لا فعلَ غيرَ `GET` في وثيقةِ القراءةِ
+ *       ولا في جدولِها، ولا نداءَ كاتبٍ (`.insert(` `.update(` `.remove(` `.upsert(`)
+ *       في الطبقةِ. وجسمُ طلبٍ في قراءةٍ يُرَدُّ لا يُهمَلُ.
  *   T3: لا سلطةَ في النقلِ: لا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ الطبقةِ،
- *       ولا نداءَ إلا عبرَ `gateway.call`. فطبقةٌ تقرأُ القاعدةَ مباشرةً تُخرِجُ
- *       القراءةَ من العقباتِ الخمسِ كلِّها.
- *   T4: كلُّ رمزِ رفضٍ في `API_ERRORS` و`TRANSPORT_ERRORS` له ترجمةُ حالةٍ مُعلَنةٌ،
- *       ولا ترجمةَ لرمزٍ غيرِ مُعلَنٍ — **في الاتجاهين**. فرمزٌ بلا ترجمةٍ يُسلَّمُ
- *       بحالةٍ مخمَّنةٍ، و`200` على رفضٍ أسوأُ من انقطاعٍ.
+ *       ولا نداءَ إلا عبرَ `gateway.call` للقراءةِ أو `console.issue` للكتابةِ. فطبقةٌ
+ *       تقرأُ القاعدةَ مباشرةً تُخرِجُ القراءةَ من العقباتِ الخمسِ كلِّها.
+ *   T4: كلُّ رمزِ رفضٍ في `API_ERRORS` و`TRANSPORT_ERRORS` و`CONSOLE_ERRORS` له ترجمةُ
+ *       حالةٍ مُعلَنةٌ، ولا ترجمةَ لرمزٍ غيرِ مُعلَنٍ — **في الاتجاهين**. فرمزٌ بلا
+ *       ترجمةٍ يُسلَّمُ بحالةٍ مخمَّنةٍ، و`200` على رفضٍ أسوأُ من انقطاعٍ.
  *   T5: بلا اعتمادِ npm واحدٍ: كلُّ استيرادٍ في الطبقةِ إمّا `node:` وإمّا نسبيٌّ.
  *   T6: الرمزُ لا يُقرأُ من مُلحقِ استعلامٍ — المُلحقاتُ تُكتَبُ في سجلّاتِ
  *       الوسائطِ وتاريخِ المتصفِّحِ فيُسرَّبُ الرمزُ — ولا يُخدَمُ ملفٌّ خارجَ
@@ -35,6 +35,12 @@
  *  T10: ولا مادّةَ مفاتيحَ في المستودعِ: لا `.pem` ولا `.key` ولا `.p12` ولا `.pfx`
  *       مُتتبَّعٌ، ولا شهادةٌ مُدمَجةٌ في الشفرةِ؛ والمادّةُ تُقرأُ من مساراتٍ في
  *       البيئةِ. واختبارُ TLS موجودٌ ويقيسُ النجاحَ والرفضَ ومنعَ التسريبِ.
+ *  T11: مساراتُ الكتابةِ السياديّةِ مُشتَقّةٌ من `config/royal-console.yaml` وحدَها:
+ *       كلُّ أمرٍ مُعلَنٍ فيه مسارُ `POST` واحدٌ على `/state/console/<action>`،
+ *       ولا مسارَ كتابةٍ مكتوبٌ يداً. والنقلُ يقبلُ الظرفَ المُوقَّعَ ويُمرِّرُه
+ *       للديوانِ — لا يُوقِّعُ ولا يُتحقَّقُ ولا يُنفِّذُ بسلطتِه. وجسمُ الطلبِ يُقرأُ
+ *       للمسارِ السياديِّ وحدَه بحدٍّ مُعلَنٍ، ولا يُقرأُ لغيرِه. واختبارُ الكتابةِ
+ *       موجودٌ ويقيسُ مساراً مُعلَناً ومساراً غيرَ مُعلَنٍ وبلا ديوانٍ.
  *
  * **حدٌّ مُعلَنٌ:** الحاجزُ يقرأُ النصَّ والوثيقةَ **ولا يفتحُ مِقبساً ولا يُصافِحُ**؛
  * فنجاحُ المُصافحةِ ورفضُ الشهادةِ غيرِ الموثوقةِ يُقاسانِ في
@@ -48,8 +54,9 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { API_ERRORS, loadApiPolicy } from '../src/api/gateway.mjs';
+import { CONSOLE_ERRORS } from '../src/console/index.mjs';
 import { STATUS_BY_CODE, TRANSPORT_ERRORS } from '../src/transport/problem.mjs';
-import { compileRoutes, matchRoute } from '../src/transport/router.mjs';
+import { compileCommandRoutes, compileRoutes, matchRoute } from '../src/transport/router.mjs';
 
 const argv = process.argv.slice(2);
 const rootIndex = argv.indexOf('--root');
@@ -173,19 +180,17 @@ for (const [name, source] of code) {
   }
 }
 
-// ═══ T2: قارئةٌ فقط ═══
+// ═══ T2: قراءةٌ وحدَها من وثيقةِ القراءة ═══
 if (policy !== null) {
   for (const route of policy.routes) {
-    if (route.method !== 'GET') violations.push(`T2: مسارٌ بفعلٍ كاتبٍ في الوثيقةِ: ${route.id}.`);
+    if (route.method !== 'GET')
+      violations.push(`T2: مسارٌ بفعلٍ كاتبٍ في وثيقةِ القراءةِ: ${route.id}.`);
   }
 }
 for (const [name, source] of code) {
   for (const needle of ['.insert(', '.update(', '.remove(', '.upsert(']) {
     if (source.includes(needle))
       violations.push(`T2: نداءٌ كاتبٌ في src/transport/${name}: ${needle}.`);
-  }
-  if (/\.on\(\s*['"]data['"]/.test(source)) {
-    violations.push(`T2: جسمُ طلبٍ يُقرأُ في src/transport/${name} — والطبقةُ لا تُعلِنُ جسماً.`);
   }
 }
 
@@ -203,10 +208,21 @@ const serverCode = code.get('server.mjs') ?? '';
 if (serverCode !== '' && !serverCode.includes('gateway.call(')) {
   violations.push('T3: الخادمُ لا يُنادي `gateway.call` — فبأيِّ طريقٍ تُقرأُ الدولةُ؟');
 }
+if (
+  serverCode !== '' &&
+  !serverCode.includes('console_.issue(') &&
+  !serverCode.includes('console.issue(')
+) {
+  violations.push('T3: الخادمُ لا يُنادي `console.issue` — فبأيِّ طريقٍ تُكتبُ الدولةُ؟');
+}
 
 // ═══ T4: خريطةُ الحالاتِ تامّةٌ في الاتجاهين ═══
 const knownCodes = /** @type {Set<string>} */ (
-  new Set([...Object.values(API_ERRORS), ...Object.values(TRANSPORT_ERRORS)])
+  new Set([
+    ...Object.values(API_ERRORS),
+    ...Object.values(TRANSPORT_ERRORS),
+    ...Object.values(CONSOLE_ERRORS),
+  ])
 );
 for (const value of knownCodes) {
   if (!Object.prototype.hasOwnProperty.call(STATUS_BY_CODE, value)) {
@@ -410,6 +426,62 @@ if (tlsTest === '') {
   }
 }
 
+// ═══ T11: مساراتُ الكتابةِ السياديّةِ مُشتَقّةٌ من royal-console.yaml ═══
+const CONSOLE_POLICY_PATH = path.join(ROOT, 'config', 'royal-console.yaml');
+if (!fs.existsSync(CONSOLE_POLICY_PATH)) {
+  violations.push('T11: `config/royal-console.yaml` غائبةٌ — ولا كتابةَ بلا ديوان.');
+} else {
+  /** @type {ReturnType<typeof compileCommandRoutes> | null} */
+  let commandRoutes = null;
+  try {
+    commandRoutes = compileCommandRoutes({ dir: path.join(ROOT, 'config') });
+  } catch (error) {
+    violations.push(
+      `T11: تعذّر اشتقاقُ مساراتِ الكتابةِ: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  if (commandRoutes !== null) {
+    for (const route of commandRoutes) {
+      if (route.method !== 'POST') {
+        violations.push(`T11: مسارُ كتابةٍ بفعلٍ غيرِ POST: ${route.id}.`);
+      }
+      if (!route.path.startsWith('/state/console/')) {
+        violations.push(`T11: مسارُ كتابةٍ خارجَ الديوانِ: ${route.id} → ${route.path}.`);
+      }
+    }
+    // والجدولُ غيرُ فارغٍ: لا ديوانَ بلا أوامرَ.
+    if (commandRoutes.length === 0) {
+      violations.push('T11: لا أوامرَ مُعلَنةٌ في `config/royal-console.yaml`.');
+    }
+  }
+}
+// ولا مفتاحَ خاصّاً في الطبقةِ: التوقيعُ خارجُها.
+for (const [name, source] of code) {
+  if (source.includes('privateKey') || source.includes('sign(')) {
+    violations.push(
+      `T11: مفتاحٌ خاصٌّ أو توقيعٌ في src/transport/${name} — والنقلُ يقبلُ الموقَّعَ لا يُوقِّعُ.`,
+    );
+  }
+}
+// وجسمُ الطلبِ يُقرأُ بحدٍّ مُعلَنٍ.
+if (serverCode !== '' && !serverCode.includes('MAX_COMMAND_BODY')) {
+  violations.push('T11: لا حدَّ مُعلَناً لحجمِ جسمِ الأمرِ — وجسمٌ بلا حدٍّ بابُ استنزافٍ.');
+}
+// والاختبارُ يقيسُ الكتابةَ.
+const commandTest = readFile(path.join('tests', 'transport', 'server.test.mjs'));
+if (commandTest !== '') {
+  /** @type {Array<[string, string]>} */
+  const measuredCommand = [
+    ['POST', 'لا اختبارَ للكتابةِ السياديّةِ — فما لا يُقاسُ لا يُحرسُ.'],
+    ['console', 'لا ديوانَ في الاختبارِ — فالقياسُ على مُزيَّفٍ يقيسُ المُزيَّفَ.'],
+    ['COMMAND_UNDECLARED', 'رفضُ أمرٍ غيرِ مُعلَنٍ غيرُ مقيسٍ.'],
+    ['GATEWAY_REQUIRED', 'بلا ديوانٍ غيرُ مقيسٍ.'],
+  ];
+  for (const [needle, why] of measuredCommand) {
+    if (!commandTest.includes(needle)) violations.push(`T11: ${why} (${needle}).`);
+  }
+}
+
 if (violations.length > 0) {
   console.error('⛔ حاجز طبقة النقل رفض:');
   for (const violation of violations) console.error(`   • ${violation}`);
@@ -417,6 +489,15 @@ if (violations.length > 0) {
 }
 
 const routeCount = policy === null ? 0 : policy.routes.length;
+const commandRouteCount = /** @type {ReturnType<typeof compileCommandRoutes>} */ (
+  (() => {
+    try {
+      return compileCommandRoutes({ dir: path.join(ROOT, 'config') });
+    } catch {
+      return [];
+    }
+  })()
+).length;
 console.log(
-  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` ولا جسمَ طلبٍ يُقرأُ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` وحدَه، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ.`,
+  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` في القراءةِ ولا نداءَ كاتبٍ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` للقراءةِ و\`console.issue\` للكتابةِ، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ، و${commandRouteCount} مسارَ كتابةٍ سياديّةٍ مُشتَقّةٍ من \`config/royal-console.yaml\` بلا عنوانٍ مكتوبٍ يداً ولا مفتاحٍ خاصٍّ في الطبقةِ وجسمٍ بحدٍّ مُعلَنٍ.`,
 );
