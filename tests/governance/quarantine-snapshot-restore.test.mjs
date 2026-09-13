@@ -34,7 +34,7 @@ function buildWarden() {
 
 describe('R6-A-05: quarantine snapshot/restore survives restart', () => {
   test('snapshot تُلتقطُ المحجورين وrestore تُعيدُهم', () => {
-    const { warden, events } = buildWarden();
+    const { warden } = buildWarden();
 
     // محجورانِ مختلفان
     warden.report({ kind: 'budget-exceeded', subject: 'agent:one', detail: {} });
@@ -83,9 +83,17 @@ describe('R6-A-05: quarantine snapshot/restore survives restart', () => {
 
   test('restore تتجاهلُ المدخلاتِ غيرَ الصالحة', () => {
     const { warden } = buildWarden();
-    assert.equal(warden.restore(null), 0);
-    assert.equal(warden.restore('not-an-array'), 0);
-    assert.equal(warden.restore([{ subject: 'x' }]), 0, 'missing kind should be skipped');
-    assert.equal(warden.restore([{ kind: 'x' }]), 0, 'missing subject should be skipped');
+    assert.equal(warden.restore(/** @type {any} */ (null)), 0);
+    assert.equal(warden.restore(/** @type {any} */ ('text')), 0);
+    assert.equal(
+      warden.restore(/** @type {any} */ ([{ subject: 'x' }])),
+      0,
+      'missing kind should be skipped',
+    );
+    assert.equal(
+      warden.restore(/** @type {any} */ ([{ kind: 'x' }])),
+      0,
+      'missing subject should be skipped',
+    );
   });
 });

@@ -269,7 +269,7 @@ export class QuarantineWarden {
   /**
    * يُعيدُ بناءَ حالة الحجر من لقطةٍ بعدَ إعادةِ التشغيلِ (R6-A-05).
    * يُسجِّلُ كلَّ مستردٍّ في سجلِّ الأحداثِ بـ`quarantine.restored`.
-   * @param {Array<{ subject: string, kind: string, incidentId: string, at: string }>} entries
+   * @param {ReadonlyArray<{ subject: string, kind: string, incidentId?: string, at?: string }>} entries
    * @returns {number} عددُ المسترجَعين
    */
   restore(entries) {
