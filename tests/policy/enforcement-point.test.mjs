@@ -49,6 +49,7 @@ function setup(deps = {}) {
       sunk.push(record);
     },
     ...(deps.now ? { now: deps.now } : {}),
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   return { point, log, sunk };
 }
@@ -232,25 +233,21 @@ test('كتالوج الأفعال المحكومة يشمل الحسّاس وا�
 // بوابةِ هويةٍ، فيقرأ دور الفاعل من ادعاء المستدعي. الإصلاح: التركيبُ الذي يلزم
 // البوابةَ يفشلُ مغلقًا برمزٍ مُسمَّى حين تُغيَب، فلا يبقى مسارٌ «رسميّ» يقبل فاعلًا
 // بلا شهادةٍ من جذر الثقة.
-test('التركيبُ الذي يلزم بوابةَ الهوية يرفضُ التفويضَ بلا بوابةٍ بفشلٍ مغلق (M11.04 Grok-F01)', async () => {
+test('التركيبُ الذي يلزم بوابةَ الهوية يرفضُ البناءَ بلا بوابةٍ بفشلٍ مغلق (M11.04 Grok-F01)', () => {
   const log = memoryLog();
-  const point = new EnforcementPoint({
-    decisionPoint: createPolicyDecisionPoint({ bundle }),
-    log,
-    requireIdentityGate: true,
-    identityGate: null,
-  });
-  const result = await point.authorize(writeMemory());
-  assert.equal(result.decision.allowed, false, 'لا يُسمح بلا بوابةِ هويةٍ في التركيب المُلزم');
-  assert.equal(result.decision.code, 'IDENTITY_GATE_REQUIRED', 'الرفضُ مُسمَّى لا صامت');
-  assert.equal(result.token, null, 'لا تُصدر تذكرةٌ على رفضٍ مغلق');
-  // الرفضُ يُسجَّل كما يُسجَّل السماح: أثرٌ للتركيبِ الناقص، لا قبولٌ صامت.
-  const gateDenial = log.events.find((e) => e.type === 'policy.decision');
-  const denialPayload = /** @type {{ code?: unknown }} */ (gateDenial?.payload);
-  assert.equal(
-    denialPayload.code,
-    'IDENTITY_GATE_REQUIRED',
-    'يُكتب قيدُ التركيبِ الناقص في سجل القرارات',
+  // الإنشاءُ بـ`requireIdentityGate: true` و`identityGate: null` يُرفَض عند البناءِ —
+  // لا ينتظرُ حتى الاستعمال. وهذا هو سدُّ العقدِ العامِّ: الرفضُ مُسمَّى
+  // `ENFORCEMENT_IDENTITY_GATE_REQUIRED` لا قبولٌ صامتٌ لفاعلٍ بلا شهادة.
+  assert.throws(
+    () =>
+      new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle }),
+        log,
+        requireIdentityGate: true,
+        identityGate: null,
+      }),
+    /ENFORCEMENT_IDENTITY_GATE_REQUIRED/,
+    'الإنشاءُ بلا بوابةِ هويةٍ في التركيب المُلزم يجب أن يُرفَض عند البناءِ',
   );
 });
 
@@ -270,4 +267,49 @@ test('التركيبُ غير المُلزم يبقى متساهلًا مع بق
     'IDENTITY_GATE_REQUIRED',
     'الإلزامُ مُفعَّلٌ فقط حين يطلبه التركيب',
   );
+});
+
+test('الإنشاءُ الخامُّ بلا بوابةِ هويةٍ يُرفَض عند البناءِ (M11.04-F01)', () => {
+  const log = memoryLog();
+  // الإنشاءُ بلا بوابةٍ وبدون تصريحٍ صريحٍ بـ`requireIdentityGate: false` يرفعُ خطأً
+  // عند البناءِ — لا ينتظرُ حتى الاستعمال. وهذا هو سدُّ العقدِ العامِّ.
+  assert.throws(
+    () =>
+      new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle }),
+        log,
+      }),
+    /ENFORCEMENT_IDENTITY_GATE_REQUIRED/,
+    'الإنشاءُ الخامُّ بلا بوابةٍ يجب أن يُرفَض عند البناءِ',
+  );
+});
+
+test('الإنشاءُ مع بوابةِ هويةٍ ينجحُ عند البناءِ (M11.04-F01)', () => {
+  const log = memoryLog();
+  const gate = {
+    /**
+     * @param {string} _actorId
+     */
+    async verify(_actorId) {
+      return {
+        ok: true,
+        code: 'IDENTITY_OK',
+        reason: '',
+        actor: {
+          id: _actorId,
+          role: 'role:agent',
+          state: 'active',
+          kind: /** @type {const} */ ('autonomous'),
+          capabilities: [],
+        },
+      };
+    },
+  };
+  // الإنشاءُ مع بوابةٍ ينجحُ — الافتراضيُّ `requireIdentityGate: true` يُلزِمُها
+  const point = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint({ bundle }),
+    log,
+    identityGate: gate,
+  });
+  assert.ok(point, 'الإنشاءُ مع بوابةِ هويةٍ يجب أن ينجح');
 });

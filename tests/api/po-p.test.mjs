@@ -244,7 +244,9 @@ test('التوافقُ مع الإصدارِ: البوابةُ بلا requirePoP
     agents: resolvedAgents,
     monitor,
     enforcementPoint: enforcementPointFor(log),
-    // requirePoP غائبٌ افتراضيًا → التوافقُ مع الإصدارِ.
+    // requirePoP: false صراحةً — افتراضيُّ البوابةِ صار `true` (M11.04-F02)،
+    // فالتركيبُ الذي لا يُلزمُ الحيازةَ يُصرِّحُ بذلك صراحةً لا يسقطُ إليه صامتاً.
+    requirePoP: false,
   });
   const session = await gateway.openSession({ actorId: AUDITOR });
   const result = await gateway.call({ route: ROUTE, token: session.token });
@@ -288,3 +290,30 @@ async function callSigned(gateway, session, routeId, params, privateKey) {
     pop: { signature: signWith(privateKey, message), timestamp, nonce },
   });
 }
+
+test('الافتراضيُّ صارَ `requirePoP: true` — الإنشاءُ بلا تصريحٍ يُلزمُ الحيازةَ (M11.04-F02)', async () => {
+  const log = new EventLog();
+  const resolvedAgents = {
+    get: async (/** @type {string} */ id) => (id === AUDITOR ? activeAgent() : null),
+  };
+  const monitor = new MonitorAgent({
+    policy: loadMonitoringPolicy({ dir: CONFIG_DIR }),
+    repositories: createMemoryRepositories(),
+    agents: /** @type {never} */ (resolvedAgents),
+    log: /** @type {never} */ (log),
+  });
+  const gateway = new ApiGateway({
+    policy: loadApiPolicy({ dir: CONFIG_DIR }),
+    log: /** @type {never} */ (log),
+    agents: resolvedAgents,
+    monitor,
+    enforcementPoint: enforcementPointFor(log),
+    // requirePoP غائبٌ — والافتراضيُّ صارَ `true` (M11.04-F02)
+  });
+  // فتحُ الجلسةِ بلا مفتاحِ حيازةٍ مسجَّلٍ يُرفَضُ بـ`API_POP_REQUIRED`
+  await assert.rejects(
+    gateway.openSession({ actorId: AUDITOR }),
+    (/** @type {SessionError} */ err) => err.code === SESSION_ERRORS.POP_REQUIRED,
+    'فتحُ الجلسةِ بلا إثباتِ حيازةٍ يجب أن يُرفَض',
+  );
+});

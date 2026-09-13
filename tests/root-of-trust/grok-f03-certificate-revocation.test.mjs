@@ -147,3 +147,51 @@ test('منعُ الترحيل الضمني: لا يُفعَّلُ قبولُ ا�
     'حذف notAfter من شهادة موقَّعة يكسر التوقيع حتى في وضع الترحيل',
   );
 });
+
+test('Grok-F03 (M11.04-F03): الإنتاجُ يرفضُ بناءَ السلطةِ بمخزنِ الذاكرةِ — لا ثباتَ بلا دائمٍ', () => {
+  const king = new KingIdentity();
+  const previous = process.env.STATE_ENV;
+  process.env.STATE_ENV = 'production';
+  try {
+    assert.throws(
+      () => new CertificateAuthority(king),
+      (err) =>
+        /** @type {Error} */ (err).message === 'PERSISTENT_REVOCATION_STORE_REQUIRED_IN_PRODUCTION',
+      'يجبُ رفضُ بناءِ السلطةِ في الإنتاجِ بمخزنِ الذاكرةِ — لا ثباتَ بلا دائمٍ',
+    );
+  } finally {
+    if (previous === undefined) delete process.env.STATE_ENV;
+    else process.env.STATE_ENV = previous;
+  }
+});
+
+test('Grok-F03 (M11.04-F03): الإنتاجُ بقبولِ مخزنٍ دائمٍ ينجحُ', () => {
+  const king = new KingIdentity();
+  const previous = process.env.STATE_ENV;
+  process.env.STATE_ENV = 'production';
+  try {
+    // مخزنُ سحبٍ دائمٌ للتركيبِ — ليس `MemoryRevocationStore`، فيُقبَلُ في الإنتاجِ.
+    const persistentStore = {
+      revoked: new Set(),
+      isRevoked(/** @type {string} */ id) {
+        return this.revoked.has(id);
+      },
+      revoke(/** @type {string} */ id) {
+        this.revoked.add(id);
+        return true;
+      },
+      ready() {
+        return true;
+      },
+    };
+    const ca = new CertificateAuthority(king, { revocationStore: persistentStore });
+    assert.equal(
+      ca instanceof CertificateAuthority,
+      true,
+      'البناءُ بمخزنٍ دائمٍ صريحٍ ينجحُ في الإنتاجِ',
+    );
+  } finally {
+    if (previous === undefined) delete process.env.STATE_ENV;
+    else process.env.STATE_ENV = previous;
+  }
+});

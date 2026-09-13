@@ -61,6 +61,7 @@ test('صفحةُ المشهدِ تُخدَمُ من طبقةِ النقلِ بس
       log: /** @type {never} */ (log),
     }),
     enforcementPoint: enforcementPointFor(log),
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
   const server = createStateServer({
     gateway: /** @type {never} */ (gateway),

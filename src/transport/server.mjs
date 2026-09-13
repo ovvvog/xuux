@@ -14,8 +14,10 @@
  *    نقطةُ التفويضِ المركزيّةُ وتذكرتُها، ثمَّ المشهدُ المقروءُ) في موضعِها.
  * 2. **جدولُ المساراتِ مُشتَقٌّ** من `config/api.yaml` (انظر `router.mjs`): ما لم
  *    تُعلِنْه الوثيقةُ يُرَدُّ `404`.
- * 3. **قارئةٌ فقط.** لا `POST` ولا `PUT` ولا `DELETE`، ولا جسمَ طلبٍ يُقرأُ. فتحُ
- *    الكتابةِ يلزمُه أمرٌ ملكيٌّ موقَّعٌ (`M9.03`)، والتوقيعُ لا يُنتِجُه متصفِّحٌ.
+ * 3. **قارئةٌ للقراءةِ، كاتبةٌ بالأمرِ الملكيِّ.** لا `POST` على مسارِ قراءةٍ ولا
+ *    `PUT` ولا `DELETE`، ولا جسمَ طلبٍ يُقرأُ للقراءةِ. وفتحُ الكتابةِ يلزمُه أمرٌ
+ *    ملكيٌّ موقَّعٌ (`M9.03`) بمسارٍ مُشتَقٍّ من `config/royal-console.yaml`، والتوقيعُ
+ *    لا يُنتِجُه متصفِّحٌ ولا خادمٌ — يقبلُ النقلُ الظرفَ المُوقَّعَ ويُمرِّرُه للديوانِ.
  * 4. **فتحُ الجلسةِ ليس مساراً على السلكِ.** لأنّ `config/api.yaml` لا تُعلِنُه
  *    مساراً، وإعلانُه هنا اختراعُ سطحٍ لم يأذنْ به المالكُ. فالرمزُ يُصدَرُ خارجَ
  *    السلكِ (`scripts/serve-state.mjs`) ويُقدَّمُ في ترويسةِ `Authorization`.
@@ -30,12 +32,21 @@ import http from 'node:http';
 import fs from 'node:fs';
 
 import { TRANSPORT_ERRORS, codeOf, problemFor } from './problem.mjs';
-import { TransportError, compileRoutes, matchRoute, paramsFor } from './router.mjs';
+import {
+  TransportError,
+  compileCommandRoutes,
+  compileRoutes,
+  matchRoute,
+  paramsFor,
+} from './router.mjs';
 import { resolveStaticFile } from './static.mjs';
 import { createTlsServer } from './tls.mjs';
 
 /** حدُّ طولِ العنوانِ: عنوانٌ بلا حدٍّ بابُ استنزافٍ رخيصٍ. */
 const MAX_URL_LENGTH = 2048;
+
+/** حدُّ حجمِ جسمِ الأمرِ السياديِّ: أمرٌ موقَّعٌ لا ملفٌّ يُرفَع. */
+const MAX_COMMAND_BODY = 16 * 1024;
 
 /**
  * ترويساتٌ تُرَدُّ على كلِّ ردٍّ. وكلُّ واحدةٍ لسببٍ لا للعادةِ.
@@ -127,14 +138,30 @@ function proofOfPossessionOf(request) {
  */
 
 /**
+ * @typedef {object} ConsoleLike
+ * @property {(request: { command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string }) => Promise<{ command: string, action: string, kind: string, path: string, commandId: string, acceptedAt: string, status: 'executed', effect: Record<string, unknown> }>} issue
+ */
+
+/**
+ * @typedef {object} StateServerOptions
+ * @property {GatewayLike} gateway
+ * @property {ConsoleLike | null} [console] الديوانُ الملكيُّ — إن وُصل فُتحَ مسارُ الكتابةِ السياديّةِ المُوقَّعةِ.
+ * @property {string | null} [webDir] جذرُ ملفّاتِ الواجهةِ، أو `null` فلا واجهةَ.
+ * @property {ReturnType<typeof compileRoutes>} [routes]
+ * @property {ReturnType<typeof compileCommandRoutes>} [commandRoutes]
+ * @property {string} [certFile]
+ * @property {string} [keyFile]
+ * @property {string} [caFile]
+ * @property {boolean} [requestClientCertificate]
+ * @property {NodeJS.ProcessEnv} [env]
+ */
+
+/**
  * يُنشِئُ خادمَ الدولةِ.
  *
  * **فشلٌ مُغلَقٌ عندَ التركيبِ:** بلا بوابةٍ لا خادمَ. وخادمٌ يُنشَأُ ثمَّ يَرُدُّ
  * `503` على كلِّ نداءٍ يُوهِمُ بأنّ الدولةَ قائمةٌ وهي ليست مُركَّبةً.
- * @param {object} options
- * @param {GatewayLike} options.gateway
- * @param {string | null} [options.webDir] جذرُ ملفّاتِ الواجهةِ، أو `null` فلا واجهةَ.
- * @param {ReturnType<typeof compileRoutes>} [options.routes]
+ * @param {StateServerOptions} options
  * @returns {http.Server}
  */
 export function createStateServer(options) {
@@ -146,9 +173,13 @@ export function createStateServer(options) {
     );
   }
   const routes = options.routes ?? compileRoutes();
+  const commandRoutes = options.commandRoutes ?? compileCommandRoutes();
   const webDir = options.webDir ?? null;
+  const console_ = options.console ?? null;
 
-  return http.createServer(handlerFor({ gateway, routes, webDir }));
+  return http.createServer(
+    handlerFor({ gateway, routes, commandRoutes, console: console_, webDir }),
+  );
 }
 
 /**
@@ -157,7 +188,7 @@ export function createStateServer(options) {
  * وفَصلُه ليس تجميلاً: خادمُ النصِّ وخادمُ TLS **يتشاركانِ المُعالِجَ نفسَه**، فلا
  * تنشأُ نسخةٌ ثانيةٌ من الحُكمِ تفترقُ عن الأولى فيَمُرُّ على إحداهما ما رُدَّ على
  * الأخرى.
- * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, webDir: string | null }} deps
+ * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, commandRoutes: ReturnType<typeof compileCommandRoutes>, console: ConsoleLike | null, webDir: string | null }} deps
  * @returns {(request: http.IncomingMessage, response: http.ServerResponse) => void}
  */
 function handlerFor(deps) {
@@ -173,15 +204,7 @@ function handlerFor(deps) {
  * `STATE_TLS_KEY_FILE`، و`STATE_TLS_CA_FILE` اختياريّةً)، **ولا رجوعَ إلى نصٍّ
  * صريحٍ إن نقصتْ**: يُرفَعُ `TransportTlsError` ولا يُنشَأُ خادمٌ. ومَن يُخفي هذا
  * الخطأَ ويُشغِّلُ النصَّ الصريحَ يُعطي المُنادي **إيهامَ قناةٍ مُعمّاةٍ**.
- * @param {object} options
- * @param {GatewayLike} options.gateway
- * @param {string | null} [options.webDir]
- * @param {ReturnType<typeof compileRoutes>} [options.routes]
- * @param {string} [options.certFile]
- * @param {string} [options.keyFile]
- * @param {string} [options.caFile]
- * @param {boolean} [options.requestClientCertificate]
- * @param {NodeJS.ProcessEnv} [options.env]
+ * @param {StateServerOptions} options
  * @returns {import('node:https').Server}
  */
 export function createSecureStateServer(options) {
@@ -192,11 +215,17 @@ export function createSecureStateServer(options) {
       'لا خادمَ بلا بوابةٍ: النقلُ يَنقُلُ ولا يَحكُمُ، فبلا مَن يَحكُمُ لا نقلَ.',
     );
   }
+  const routes = options.routes ?? compileRoutes();
+  const commandRoutes = options.commandRoutes ?? compileCommandRoutes();
+  const webDir = options.webDir ?? null;
+  const console_ = options.console ?? null;
   return createTlsServer({
     handler: handlerFor({
       gateway,
-      routes: options.routes ?? compileRoutes(),
-      webDir: options.webDir ?? null,
+      routes,
+      commandRoutes,
+      console: console_,
+      webDir,
     }),
     ...(options.certFile === undefined ? {} : { certFile: options.certFile }),
     ...(options.keyFile === undefined ? {} : { keyFile: options.keyFile }),
@@ -228,9 +257,38 @@ function sendJson(request, response, status, body) {
 }
 
 /**
+ * يقرأُ جسمَ طلبٍ بحدٍّ مُعلَنٍ — للمسارِ السياديِّ وحدَه.
+ * @param {http.IncomingMessage} request
+ * @returns {Promise<string>}
+ */
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    /** @type {Buffer[]} */
+    const chunks = [];
+    let total = 0;
+    request.on('data', (/** @type {Buffer} */ chunk) => {
+      total += chunk.length;
+      if (total > MAX_COMMAND_BODY) {
+        reject(
+          new TransportError(
+            TRANSPORT_ERRORS.BODY_NOT_ALLOWED,
+            `جسمُ الأمرِ تجاوزَ الحدَّ المُعلَنَ (${MAX_COMMAND_BODY} بايت).`,
+          ),
+        );
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    request.on('error', reject);
+  });
+}
+
+/**
  * @param {http.IncomingMessage} request
  * @param {http.ServerResponse} response
- * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, webDir: string | null }} deps
+ * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, commandRoutes: ReturnType<typeof compileCommandRoutes>, console: ConsoleLike | null, webDir: string | null }} deps
  */
 async function handle(request, response, deps) {
   try {
@@ -240,19 +298,28 @@ async function handle(request, response, deps) {
       sendJson(request, response, status, body);
       return;
     }
-    // جسمُ طلبٍ في قراءةٍ يُرَدُّ لا يُهمَلُ: تجاهلُه يجعلُ المُنادي يظنُّ أنّه
-    // أرسلَ شيئاً ذا أثرٍ، وقراءتُه تفتحُ سطحاً لا تُعلِنُه هذه الطبقةُ.
-    const declaredLength = Number.parseInt(String(request.headers['content-length'] ?? '0'), 10);
-    if (Number.isFinite(declaredLength) && declaredLength > 0) {
-      const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
-      sendJson(request, response, status, body);
-      return;
-    }
     const url = new URL(rawUrl, 'http://state.invalid');
     const method = (request.method ?? 'GET').toUpperCase();
 
-    const matched = matchRoute(deps.routes, method, url.pathname);
+    // قراءةٌ (`GET`) تَرفضُ الجسمَ: لا حاجةَ له، وقراءتُه سطحٌ لا تُعلِنُه الطبقةُ.
+    if (method === 'GET') {
+      const declaredLength = Number.parseInt(String(request.headers['content-length'] ?? '0'), 10);
+      if (Number.isFinite(declaredLength) && declaredLength > 0) {
+        const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+        sendJson(request, response, status, body);
+        return;
+      }
+    }
+
+    // جدولُ القراءةِ وجدولُ الكتابةِ مُدمَجانِ: المطابقةُ تَفحَصُ المسارَ والفعلَ معاً،
+    // فلا يَعبرُ `POST` مساراً قارئاً ولا `GET` مساراً كاتباً.
+    const allRoutes = [...deps.routes, ...deps.commandRoutes];
+    const matched = matchRoute(allRoutes, method, url.pathname);
     if (matched !== null) {
+      if (method === 'POST') {
+        await handleCommand(request, response, deps, matched.route);
+        return;
+      }
       const params = paramsFor(matched.route, matched.pathParams, url.searchParams);
       const pop = proofOfPossessionOf(request);
       const token = tokenOf(request);
@@ -294,4 +361,60 @@ async function handle(request, response, deps) {
     if (!response.headersSent) sendJson(request, response, status, body);
     else response.end();
   }
+}
+
+/**
+ * مسارُ الكتابةِ السياديّةِ المُوقَّعةِ: يقرأُ الظرفَ المُوقَّعَ ويُمرِّرُه للديوانِ.
+ *
+ * والنقلُ هنا **بلا سلطةٍ**: لا يُوقِّعُ ولا يُتحقَّقُ ولا يُنفِّذُ. كلُّ ما يفعلُه أن
+ * يقرأَ الجسمَ ويُمرِّرَه إلى `console.issue` — فالتحقُّقُ والتوقيعُ والقيدُ قبلَ الأثرِ
+ * كلُّها في الديوانِ، لا هنا.
+ * @param {http.IncomingMessage} request
+ * @param {http.ServerResponse} response
+ * @param {{ console: ConsoleLike | null }} deps
+ * @param {import('./router.mjs').CompiledRoute} route
+ */
+async function handleCommand(request, response, deps, route) {
+  const console_ = deps.console;
+  if (console_ === null || typeof console_.issue !== 'function') {
+    const { status, body } = problemFor('CONSOLE_GATEWAY_REQUIRED');
+    sendJson(request, response, status, body);
+    return;
+  }
+  const raw = await readBody(request);
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  const envelope = /** @type {Record<string, unknown>} */ (parsed);
+  const royalCommand = envelope['royalCommand'];
+  const signature = envelope['signature'];
+  const sovereignSession = envelope['sovereignSession'];
+  if (
+    royalCommand === null ||
+    typeof royalCommand !== 'object' ||
+    Array.isArray(royalCommand) ||
+    typeof signature !== 'string'
+  ) {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  const result = await console_.issue({
+    command: route.id,
+    royalCommand: /** @type {Record<string, unknown>} */ (royalCommand),
+    signature,
+    ...(typeof sovereignSession === 'string' ? { sovereignSession } : {}),
+  });
+  sendJson(request, response, 200, result);
 }

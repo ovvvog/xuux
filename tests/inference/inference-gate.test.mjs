@@ -96,7 +96,11 @@ async function setup(options = {}) {
   const purpose = options.purpose ?? 'planning';
   const model =
     options.activate === false ? null : await activateModel(registry, evaluations, purpose);
-  const point = new EnforcementPoint({ decisionPoint: createPolicyDecisionPoint({ bundle }), log });
+  const point = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint({ bundle }),
+    log,
+    requireIdentityGate: false,
+  });
   /** @type {Array<{ model: { id: string, purpose: string }, purpose: string, input: string }>} */
   const executions = [];
   const gate = createInferenceGate({

@@ -54,7 +54,11 @@ function setup(deps = {}) {
   const log = memoryLog();
   /** @type {Array<{ destination: { id: string }, bytes: number }>} */
   const sent = [];
-  const point = new EnforcementPoint({ decisionPoint: createPolicyDecisionPoint({ bundle }), log });
+  const point = new EnforcementPoint({
+    decisionPoint: createPolicyDecisionPoint({ bundle }),
+    log,
+    requireIdentityGate: false,
+  });
   const gate = createEgressGate({
     enforcementPoint: point,
     log,
