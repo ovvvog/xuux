@@ -43,7 +43,7 @@
 //     نافذةَ الإعادةِ غيرِ المكشوفةِ إلى ما بينَ إقلاعينِ، مع الفحوصِ المتقاطعةِ
 //     القائمةِ (المراسي والدفترُ ومفتاحُ الإيقافِ) التي تكشفُ اللقطةَ الجزئيّة.
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   closeSync,
   existsSync,
@@ -84,6 +84,7 @@ export const StateManifestErrorCodes = [
   'STATE_MANIFEST_BINDING_MISMATCH',
   'STATE_MANIFEST_VERSION_UNSUPPORTED',
   'STATE_MANIFEST_JOURNAL_INVALID',
+  'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
   'STATE_MANIFEST_ROLLBACK_DETECTED',
   'STATE_MANIFEST_SEALER_REQUIRED',
 ] as const;
@@ -145,6 +146,13 @@ export interface ManifestSealer {
   readonly id: string;
   signAsync(payload: object): Promise<string>;
   verify(payload: object, signature: string): boolean;
+  /**
+   * يستخرجُ مفتاحَ مصادقةٍ لدفترِ الرفعِ من التوكن (R4-B-01). إن وُجد، صارتْ
+   * تجزئةُ سطرِ الدفترِ HMAC لا SHA-256 عاريّاً، فلا يستطيعُ مالكُ القرصِ أن
+   * يَدُسَّ سطراً غيرَ مُصادَقٍ عليه ثم يُختَمَ في المتنِ. مفتاحٌ واحدٌ يُستخرجُ
+   * مرةً واحدةً عندَ الإقلاع.
+   */
+  deriveJournalKey?(instanceId: string): Promise<string>;
 }
 
 /** حدٌّ أدنى دائمٌ: يُقرأُ ويُرفَعُ ولا يُخفَض. عقدٌ بنيويٌّ كي يُحقَنَ في الاختبار. */
@@ -161,6 +169,12 @@ interface JournalEntry {
   at: string;
   prev: string;
   hash: string;
+  /**
+   * مصادقةُ السطرِ بمفتاحٍ مستخرجٍ من التوكن (R4-B-01). إن وُجد، فالتجزئةُ
+   * `hash` صارتْ HMAC-SHA256 لا SHA-256 عاريّاً. إن لم يكن للموقّعِ
+   * `deriveJournalKey`، يبقى السطرُ بلا `mac` — وهذا مسارُ الاختبارِ فقط.
+   */
+  mac?: string;
 }
 
 /**
@@ -201,19 +215,23 @@ export function stateManifestBinding(
 }
 
 /** تجزئةُ سطرٍ في دفترِ الرفعِ — تشملُ السابقَ فتصيرُ سلسلةً لا كومةً. */
-function journalHash(instanceId: string, entry: Omit<JournalEntry, 'hash'>): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        instanceId,
-        seq: entry.seq,
-        key: entry.key,
-        value: entry.value,
-        at: entry.at,
-        prev: entry.prev,
-      }),
-    )
-    .digest('hex');
+function journalHash(
+  instanceId: string,
+  entry: Omit<JournalEntry, 'hash' | 'mac'>,
+  key?: string | null,
+): string {
+  const data = JSON.stringify({
+    instanceId,
+    seq: entry.seq,
+    key: entry.key,
+    value: entry.value,
+    at: entry.at,
+    prev: entry.prev,
+  });
+  if (key) {
+    return createHmac('sha256', key).update(data).digest('hex');
+  }
+  return createHash('sha256').update(data).digest('hex');
 }
 
 /** كتابةٌ ذريّةٌ: ملفٌّ مؤقّتٌ ثمَّ `rename`، فلا يُقرأُ نصفُ ملفٍّ عطباً. */
@@ -259,6 +277,11 @@ export class StateManifest {
   readonly #fsync: boolean;
   #sealer: ManifestSealer | null;
   #verified: StateManifestBody | null = null;
+  /**
+   * مفتاحُ مصادقةِ دفترِ الرفعِ (R4-B-01). يُستخرجُ من التوكن مرةً واحدةً عندَ
+   * الإقلاعِ، فيُستعملُ في تجزئةِ سطورِ الدفترِ HMAC لا SHA-256 عاريّاً.
+   */
+  #journalKey: string | null = null;
 
   /**
    * @param file - مسارُ ملفِّ البيان
@@ -288,6 +311,31 @@ export class StateManifest {
   useSealer(sealer: ManifestSealer): void {
     this.#sealer = sealer;
     this.#verified = null;
+  }
+
+  /**
+   * يستخرجُ مفتاحَ مصادقةِ دفترِ الرفعِ من التوكن (R4-B-01). يُستدعى مرةً واحدةً
+   * عندَ الإقلاعِ بعدَ `provisionAsync`. إن لم يكن للموقّعِ `deriveJournalKey`،
+   * يبقى المفتاحُ `null` فيُسقُطُ الدفترُ إلى تجزئةٍ عاريّةٍ (مسارُ الاختبارِ).
+   * بعدَ الاستخراجِ يُبطَلُ المتنُ المُتحقَّقُ مِن قبلُ ليُعادَ التحقّقُ بالمفتاح.
+   */
+  async initJournalKey(): Promise<void> {
+    const sealer = this.#sealer;
+    if (sealer === null || typeof sealer.deriveJournalKey !== 'function') return;
+    const body = this.read();
+    this.#journalKey = await sealer.deriveJournalKey(body.instanceId);
+    // أبطِلْ المتنَ المُتحقَّقَ مِن قبلُ ليُعادَ طيُّ الدفترِ بالمفتاحِ الآن.
+    this.#verified = null;
+  }
+
+  /**
+   * يستخرجُ مفتاحَ مصادقةِ دفترِ الرفعِ من التوكنِ داخليّاً (R4-B-01). يُستدعى
+   * من `openAsync` بعدَ التحقّقِ من الخاتَمِ وقبلَ طيِّ الدفترِ.
+   */
+  async #deriveJournalKey(instanceId: string): Promise<void> {
+    const sealer = this.#sealer;
+    if (sealer === null || typeof sealer.deriveJournalKey !== 'function') return;
+    this.#journalKey = await sealer.deriveJournalKey(instanceId);
   }
 
   /**
@@ -340,9 +388,14 @@ export class StateManifest {
    * @returns المتنُ الفعّالُ بعدَ طيِّ دفترِ الرفع
    */
   async openAsync(binding: StateManifestBinding): Promise<StateManifestBody> {
-    const effective = this.#verify(binding);
+    // R4-B-01: استخرجْ مفتاحَ المصادقةِ قبلَ طيِّ الدفترِ، فلا يُقبَلُ سطرٌ غيرُ
+    // مُصادَقٍ عليه. الترتيبُ مقصودٌ: الخاتَمُ أولاً، ثمَّ المفتاحُ، ثمَّ الطيُّ.
+    const sealedBody = this.#verifySeal(binding);
+    await this.#deriveJournalKey(sealedBody.instanceId);
+    const folded = this.#foldJournal(sealedBody);
+    this.#verified = folded.body;
     await this.checkpointAsync();
-    return effective;
+    return folded.body;
   }
 
   /**
@@ -397,8 +450,14 @@ export class StateManifest {
     const head = this.#journalHead(body);
     const at = new Date().toISOString();
     const seq = body.sequence;
-    const entry: Omit<JournalEntry, 'hash'> = { seq, key, value, at, prev: head };
-    const full: JournalEntry = { ...entry, hash: journalHash(body.instanceId, entry) };
+    const entry: Omit<JournalEntry, 'hash' | 'mac'> = { seq, key, value, at, prev: head };
+    const hash = journalHash(body.instanceId, entry, this.#journalKey);
+    const full: JournalEntry = { ...entry, hash };
+    // R4-B-01: إن وُجدَ مفتاحٌ من التوكن، فاكتبْ الـ HMAC كحقلٍ مُنفصلٍ أيضاً
+    // كي يُعرفَ عندَ التحقّقِ أنَّ السطرَ مُصادَقٌ عليه لا عارٍ.
+    if (this.#journalKey) {
+      full.mac = hash;
+    }
     appendLine(this.journalFile, JSON.stringify(full) + '\n', this.#fsync);
     this.#verified = { ...body, [key]: value };
   }
@@ -453,6 +512,17 @@ export class StateManifest {
    * الحدِّ الأعلى. كلُّ فشلٍ رمزُه، ولا واحدَ منها يُقرأُ «حالةً افتراضيّةً».
    */
   #verify(binding: StateManifestBinding | null): StateManifestBody {
+    const sealedBody = this.#verifySeal(binding);
+    const folded = this.#foldJournal(sealedBody);
+    this.#verified = folded.body;
+    return folded.body;
+  }
+
+  /**
+   * يتحقّقُ من الخاتَمِ والرباطِ فقط — بلا طيِّ دفترِ الرفعِ (R4-B-01). يُستدعى
+   * أولاً، ثمَّ يُستخرجُ مفتاحُ المصادقةِ، ثمَّ يُطوى الدفترُ بالمفتاح.
+   */
+  #verifySeal(binding: StateManifestBinding | null): StateManifestBody {
     const sealer = this.#requireSealer();
     if (!existsSync(this.location)) {
       throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
@@ -527,9 +597,7 @@ export class StateManifest {
     if (!sealer.verify(sealedBody, seal.signature)) {
       throw new StateManifestError('STATE_MANIFEST_SEAL_INVALID', this.location);
     }
-    const folded = this.#foldJournal(sealedBody);
-    this.#verified = folded.body;
-    return folded.body;
+    return sealedBody;
   }
 
   /** يقرأُ دفترَ الرفعِ ويتحقّقُ من سلسلتِه ثمَّ يطويه في المتن. */
@@ -557,9 +625,27 @@ export class StateManifest {
         );
       }
       first = false;
-      const { hash, ...rest } = entry;
-      if (hash !== journalHash(body.instanceId, rest)) {
-        throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'تجزئةٌ لا تُطابق');
+      const { hash, mac, ...rest } = entry;
+      // R4-B-01: إن وُجدَ مفتاحٌ من التوكن، فالتجزئةُ المتوقَّعةُ HMAC لا SHA-256.
+      // والسطرُ المزوَّرُ بلا `mac` يُرفَضُ هنا — لا بـ`hash` الذي لا يُطابقُ HMAC.
+      let nextHead: string;
+      if (this.#journalKey) {
+        // المفتاحُ موجودٌ: كلُّ سطرٍ يجبُ أن يحملَ `mac` يُطابقُ الـ HMAC.
+        // وإن لم يكن له `mac`، فهو سطرٌ غيرُ مُصادَقٍ عليه — يُرفَضُ.
+        const expected = journalHash(body.instanceId, rest, this.#journalKey);
+        if (mac !== expected) {
+          throw new StateManifestError(
+            'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+            'سطرٌ بلا مصادقةٍ أو بمصادقةٍ لا تُطابق',
+          );
+        }
+        nextHead = mac;
+      } else {
+        // لا مفتاحَ: مسارُ الاختبارِ — تجزئةٌ عاريّةٌ.
+        if (hash !== journalHash(body.instanceId, rest)) {
+          throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'تجزئةٌ لا تُطابق');
+        }
+        nextHead = hash;
       }
       if (
         (entry.key !== 'anchoredCount' &&
@@ -571,7 +657,7 @@ export class StateManifest {
         throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'قيمةٌ غيرُ صاعدة');
       }
       folded[entry.key] = entry.value;
-      head = hash;
+      head = nextHead;
     }
     return { body: folded, head };
   }
@@ -585,7 +671,9 @@ export class StateManifest {
     const last = lines[lines.length - 1];
     if (last === undefined) return body.journalHead;
     try {
-      return (JSON.parse(last) as JournalEntry).hash;
+      const entry = JSON.parse(last) as JournalEntry;
+      // R4-B-01: إن وُجدَ `mac`، فهو رأسُ السلسلةِ المُصادَقِ عليها.
+      return entry.mac ?? entry.hash;
     } catch {
       throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'سطرٌ أخيرٌ لا يُحلَّل');
     }
