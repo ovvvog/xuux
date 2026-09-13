@@ -716,7 +716,7 @@ describe('المصنعُ الإنتاجيُّ يُسلِّمُ مخزنَ سحب
   });
 
   test('revocationStore يُحقَنُ في CertificateAuthority ويدومُ عبرَ إعادةِ التشغيل', async () => {
-    const { runtime, root, king, cleanup } = await buildRuntime();
+    const { runtime, root, cleanup } = await buildRuntime();
     try {
       const store = runtime.revocationStore;
       assert.equal(store.ready(), true, 'المخزن جاهز');
