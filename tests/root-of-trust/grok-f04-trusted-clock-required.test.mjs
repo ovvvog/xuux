@@ -68,13 +68,13 @@ function signedRecentCommand(king) {
   return { command, signature: king.sign(command) };
 }
 
-test('Grok-F04: التركيبُ الإنتاجيُّ بلا ساعةٍ موثوقةٍ يفشلُ مغلقاً (CLOCK_REQUIRED_IN_PRODUCTION)', () => {
-  const { king, gateway } = makeGateway({ requireTrustedClock: true, clock: null });
-  const { command, signature } = signedRecentCommand(king);
+test('Grok-F04: التركيبُ الإنتاجيُّ بلا ساعةٍ موثوقةٍ يفشلُ مغلقاً عند البناءِ (M11.04-F04)', () => {
+  // M11.04-F04: رفضُ الإنشاءِ صارَ عندَ البناءِ لا عندَ الاستعمال —
+  // كرفيقيهِ (الدفترِ ومفتاحِ الإيقافِ). لا يُبنى تبويبٌ إنتاجيٌّ بلا ساعةٍ.
   assert.throws(
-    () => gateway.command(command, signature),
+    () => makeGateway({ requireTrustedClock: true, clock: null }),
     (err) => err instanceof ClockError && err.code === 'CLOCK_REQUIRED_IN_PRODUCTION',
-    'يجبُ رفضُ الأمرِ في الإنتاجِ بلا ساعةٍ موثوقةٍ برمزِ CLOCK_REQUIRED_IN_PRODUCTION',
+    'يجبُ رفضُ بناءِ البوابةِ في الإنتاجِ بلا ساعةٍ موثوقةٍ برمزِ CLOCK_REQUIRED_IN_PRODUCTION',
   );
 });
 
@@ -122,11 +122,11 @@ test('Grok-F04: التطويرُ بلا ساعةٍ (requireTrustedClock:false) �
   );
 });
 
-test('Grok-F04: النبضُ في الإنتاجِ بلا ساعةٍ يفشلُ مغلقاً كذلك', () => {
-  const { gateway } = makeGateway({ requireTrustedClock: true, clock: null });
+test('Grok-F04: النبضُ في الإنتاجِ بلا ساعةٍ يفشلُ مغلقاً عند البناءِ كذلك (M11.04-F04)', () => {
+  // M11.04-F04: البناءُ نفسُه يرفضُ غيابَ الساعةِ — فلا يصلُ النداءُ إلى النبضِ.
   assert.throws(
-    () => gateway.heartbeat(),
+    () => makeGateway({ requireTrustedClock: true, clock: null }),
     (err) => err instanceof ClockError && err.code === 'CLOCK_REQUIRED_IN_PRODUCTION',
-    'النبضُ كذلك يلزمُه ساعةٌ موثوقةٌ في الإنتاج',
+    'النبضُ كذلك يلزمُه ساعةٌ موثوقةٌ في الإنتاج — والبناءُ يرفضُ غيابَها',
   );
 });

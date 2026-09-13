@@ -171,6 +171,15 @@ export class CrownGateway {
     if (this.requireHaltSwitch && this.haltSwitch === null) {
       throw new Error('HALT_SWITCH_REQUIRED_IN_PRODUCTION');
     }
+    // مراجعة M11.04-F04: رفضُ الإنشاءِ ناقصٌ في العقدِ — كانَ فحصُ الساعةِ
+    // يقعُ عندَ `nowMs()` لا عندَ البناءِ. صارَ يُرفَضُ عندَ البناءِ كرفيقيهِ
+    // (الدفترِ ومفتاحِ الإيقافِ) — فلا يُبنى تبويبٌ إنتاجيٌّ بلا ساعةٍ موثوقةٍ.
+    if (this.requireTrustedClock && this.clock === null) {
+      throw new ClockError('CLOCK_REQUIRED_IN_PRODUCTION', {
+        detail:
+          'التركيبُ الإنتاجيُّ يلزمُ ساعةً موثوقةً، ولم تُمرَّر؛ فلا يُبنى البابُ (M11.04-F04).',
+      });
+    }
     this.veto = new Veto();
     this.stopped = false;
     this.heartbeatAt = Date.now();

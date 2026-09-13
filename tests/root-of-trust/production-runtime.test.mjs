@@ -534,6 +534,7 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
         message: 'COMMAND_LEDGER_REQUIRED_IN_PRODUCTION',
       });
       // ومع المكوّنين الحقيقيّين يُبنى: التركيبُ الإنتاجيُّ يوفّرُهما معاً.
+      // M11.04-F04: الساعةُ الموثوقةُ إلزاميّةٌ عندَ البناءِ كذلك.
       const gateway = new CrownGateway(
         { id: 'king:x' },
         {},
@@ -541,8 +542,7 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
         {
           commandLedger: runtime.ledger,
           haltSwitch: runtime.haltSwitch,
-          // WL-094 (`UF-06`): `requireTrustedClock: false` لم يعُد يُقبَلُ في
-          // الإنتاجِ ولو كان الباقي صحيحاً — إطفاءُ ضمانٍ بخيارٍ هو الثغرة.
+          clock: { now: () => Date.now(), assertTrusted: () => undefined },
         },
       );
       assert.equal(gateway.requireCommandLedger, true);
