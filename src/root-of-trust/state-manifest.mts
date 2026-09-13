@@ -628,6 +628,7 @@ export class StateManifest {
       const { hash, mac, ...rest } = entry;
       // R4-B-01: إن وُجدَ مفتاحٌ من التوكن، فالتجزئةُ المتوقَّعةُ HMAC لا SHA-256.
       // والسطرُ المزوَّرُ بلا `mac` يُرفَضُ هنا — لا بـ`hash` الذي لا يُطابقُ HMAC.
+      let nextHead: string;
       if (this.#journalKey) {
         // المفتاحُ موجودٌ: كلُّ سطرٍ يجبُ أن يحملَ `mac` يُطابقُ الـ HMAC.
         // وإن لم يكن له `mac`، فهو سطرٌ غيرُ مُصادَقٍ عليه — يُرفَضُ.
@@ -638,14 +639,13 @@ export class StateManifest {
             'سطرٌ بلا مصادقةٍ أو بمصادقةٍ لا تُطابق',
           );
         }
-        // `hash` للسلسلةِ: استعملْ الـ HMAC كرأسٍ للسلسلةِ أيضاً.
-        head = mac;
+        nextHead = mac;
       } else {
         // لا مفتاحَ: مسارُ الاختبارِ — تجزئةٌ عاريّةٌ.
         if (hash !== journalHash(body.instanceId, rest)) {
           throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'تجزئةٌ لا تُطابق');
         }
-        head = hash;
+        nextHead = hash;
       }
       if (
         (entry.key !== 'anchoredCount' &&
@@ -657,7 +657,7 @@ export class StateManifest {
         throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'قيمةٌ غيرُ صاعدة');
       }
       folded[entry.key] = entry.value;
-      head = hash;
+      head = nextHead;
     }
     return { body: folded, head };
   }
