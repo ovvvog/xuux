@@ -47,6 +47,8 @@ import {
   stateManifestPath,
   stateProvisionDeclared,
 } from './state-manifest.mjs';
+import { FileRevocationStore } from './identity.mjs';
+import type { RevocationStore } from './identity.mjs';
 
 /** أخطاءُ المصنعِ الإنتاجيّ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const ProductionRuntimeErrorCodes = [
@@ -111,6 +113,12 @@ export interface ProductionRuntimeOptions {
    * لتخفيفِ الشرطِ: الفحصُ يقعُ عليه أيّاً كان.
    */
   anchorStore?: AnchorStore;
+  /**
+   * مخزنُ سحبِ الشهاداتِ الدائم (‏`R4-K3-03`). الافتراضُ `revoked.jsonl` داخلَ
+   * الجذر. يُبنى من `FileRevocationStore` فيُستعملُ عندَ بناءِ سلطةِ التصديقِ في
+   * الإنتاج. وحقنُه للاختبارِ لا لتخفيفِ الشرطِ.
+   */
+  revocationStore?: RevocationStore;
 }
 
 /** التركيبُ الإنتاجيُّ كما يُسلَّمُ للمستهلك. */
@@ -133,6 +141,11 @@ export interface ProductionRootOfTrust {
   manifest: StateManifest;
   /** يرفعُ شاهدَ المرساةِ في البيانِ عندَ إنجازِها — لا يؤجَّلُ إلى الإقلاعِ القادمِ (‏`UF-01`). */
   raiseAnchorWitness(count: number): void;
+  /**
+   * مخزنُ سحبِ الشهاداتِ الدائم (‏`R4-K3-03`). يُمرَّرُ إلى سلطةِ التصديقِ في
+   * الإنتاجِ كي يدومَ السحبُ عبرَ إعادةِ التشغيل.
+   */
+  revocationStore: RevocationStore;
   /** يُغلقُ جلسةَ التوكن. */
   close(): Promise<void>;
 }
@@ -383,6 +396,12 @@ export async function createProductionRootOfTrust(
       boot: signers.boot,
       manifest,
       raiseAnchorWitness: (count: number) => manifest.raise('anchoredCount', count),
+      // R4-K3-03: مخزنُ سحبٍ دائمٌ على القرص — يُبنى من `FileRevocationStore`
+      // ليُمرَّرَ إلى سلطةِ التصديقِ في الإنتاج. لا يُقبلُ `MemoryRevocationStore`
+      // في الإنتاج، وهذا التنفيذُ يدومُ عبرَ إعادةِ التشغيل.
+      revocationStore:
+        options.revocationStore ??
+        new FileRevocationStore(join(options.root, 'revoked.jsonl'), { fsync }),
       close: signers.close,
     };
   } catch (error) {
