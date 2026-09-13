@@ -255,6 +255,42 @@ export class QuarantineWarden {
   list() {
     return [...this.quarantined.entries()].map(([subject, entry]) => ({ subject, ...entry }));
   }
+
+  /**
+   * لقطةٌ من حالة الحجر تُستعمَلُ لإعادةِ البناءِ بعدَ إعادةِ التشغيلِ (R6-A-05).
+   * تُعيدُ قائمةً من المحجورين بتفاصيلهم. لا تُخزَّنُ الإشاراتُ (signals)
+   * لأنّها نافذةٌ زمنيّةٌ تنتهي، والمحجورُ هو من يدوم.
+   * @returns {Array<{ subject: string, kind: string, incidentId: string, at: string }>}
+   */
+  snapshot() {
+    return [...this.quarantined.entries()].map(([subject, entry]) => ({ subject, ...entry }));
+  }
+
+  /**
+   * يُعيدُ بناءَ حالة الحجر من لقطةٍ بعدَ إعادةِ التشغيلِ (R6-A-05).
+   * يُسجِّلُ كلَّ مستردٍّ في سجلِّ الأحداثِ بـ`quarantine.restored`.
+   * @param {ReadonlyArray<{ subject: string, kind: string, incidentId?: string, at?: string }>} entries
+   * @returns {number} عددُ المسترجَعين
+   */
+  restore(entries) {
+    if (!Array.isArray(entries)) return 0;
+    let count = 0;
+    for (const entry of entries) {
+      if (!entry || typeof entry.subject !== 'string' || typeof entry.kind !== 'string') continue;
+      if (this.quarantined.has(entry.subject)) continue;
+      this.quarantined.set(entry.subject, {
+        incidentId: entry.incidentId ?? '',
+        kind: entry.kind,
+        at: entry.at ?? this.now().toISOString(),
+      });
+      this.log.append('quarantine.restored', entry.subject, {
+        kind: entry.kind,
+        incidentId: entry.incidentId ?? '',
+      });
+      count++;
+    }
+    return count;
+  }
 }
 
 /**

@@ -783,6 +783,9 @@ channels:
       - type: quarantine.released
         version: 1
         required: [incidentId, kind, reason]
+      - type: quarantine.restored
+        version: 1
+        required: [kind, incidentId]
       - type: quarantine.signal
         version: 1
         required: []
