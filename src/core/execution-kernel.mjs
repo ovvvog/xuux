@@ -95,6 +95,29 @@ export class SafeMode {
   assertOperational() {
     if (this.active) throw new Error(`SAFE_MODE: ${this.reason}`);
   }
+  /**
+   * يُلتقطُ حالة الوضع الآمن لإبقائها عبرَ إعادةِ التشغيل (R6-A-05 — الجزءُ الثاني).
+   * @returns {{ active: boolean, reason: string | null }} اللقطة
+   */
+  snapshot() {
+    return { active: this.active, reason: this.reason };
+  }
+  /**
+   * يُعيدُ بناءَ حالة الوضع الآمن من لقطةٍ بعدَ إعادةِ التشغيل (R6-A-05 — الجزءُ الثاني).
+   * لا يُكتبُ في سجلِّ الأحداث: الاستعادةُ تستعيدُ الحالةَ لا تُنشئُها.
+   * @param {{ active?: boolean, reason?: string | null }} snapshot - اللقطة
+   * @returns {boolean} هل تُمَّت الاستعادةُ بنجاحٍ؟
+   */
+  restore(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return false;
+    if (typeof snapshot.active === 'boolean') {
+      this.active = snapshot.active;
+    }
+    if (typeof snapshot.reason === 'string' || snapshot.reason === null) {
+      this.reason = snapshot.reason ?? null;
+    }
+    return true;
+  }
 }
 
 export class ExecutionKernel {
