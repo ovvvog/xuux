@@ -160,6 +160,7 @@ async function main() {
       decisionPoint: createPolicyDecisionPoint({ bundle }),
       log: /** @type {never} */ (log),
       legislationGate: enforcementGate(legislature),
+      requireIdentityGate: false, // المشغِّلُ تطويرٌ محلّيٌّ بلا بوابةِ هويةٍ
     }),
   });
 

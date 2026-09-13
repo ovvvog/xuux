@@ -67,6 +67,7 @@ function setup({ withEnforcement = true, withApprovals = true } = {}) {
   const enforcementPoint = new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   const { ledger } = createTestLedger({ log: /** @type {never} */ (log), assets, lattice });
@@ -411,6 +412,7 @@ test('الاعتماد المنتهي لا يُقبل، فالنافذة ليس�
     enforcementPoint: new EnforcementPoint({
       decisionPoint: createPolicyDecisionPoint({ bundle }),
       log,
+      requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
     }),
   });
   const asset = await registerAsset(catalog, Classification.SENSITIVE, 'سجل النافذة');

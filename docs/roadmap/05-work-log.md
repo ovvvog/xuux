@@ -9,22 +9,52 @@
 4. اكتب ما تم فعلاً، لا ما نويت. اذكر ما لم يتم وسببه صراحةً.
 
 ---
+### [2026-09-13] — WL-141 — سدُّ العقدِ العامِّ لإنشاءِ `EnforcementPoint`: بوابةُ الهويّةِ مُلزَمةٌ عند البناءِ لا عند الاستعمال (M11.04-F01)
 
-### [2026-09-13] — WL-140 — مسارُ الكتابةِ السياديّةِ المُوقَّعةِ عبر النقلِ: سدادُ باقي `D-1` (`M9.03`)
-
-- **المنفّذ:** وكيلٌ تنفيذيٌّ (‏Perplexity Computer) تنفيذاً للأمرِ التنفيذيِّ الصادرِ بتاريخِ `2026-09-13`.
-- **المسار والخطوة:** `D-1` (ديونُ `M9`) — `M9.03`: مسارُ الكتابةِ السياديّةِ المُوقَّعةِ عبر طبقةِ النقلِ.
-- **الحالة بعد العمل:** 🟩 منجَزةٌ — مسارُ الكتابةِ مفتوحٌ ومُختبَرٌ والحاجزُ مُحدَّثٌ.
+- **المنفّذ:** وكيلٌ تنفيذيٌّ (‏Perplexity Computer) تنفيذاً للتوكيلِ التنفيذيِّ الكاملِ الصادرِ بتاريخِ `2026-09-13`.
+- **المسار والخطوة:** إصلاحُ نتيجةِ مجلسٍ مفتوحةٍ من `M11.04` (مراجعةٌ أمنيّةٌ مستقلّةٌ). **لا تتحرَّكُ خطوةٌ ولا بوّابةٌ**: `M11.04` تبقى `council-findings-recorded`، و`G11` مغلقةٌ، وعدّادُ التقدُّمِ ونسبتُه لم يُلمَسا بحرفٍ. النتيجةُ `M11.04-F01` تبقى `status: open` — إغلاقُها سلطةُ المجلسِ لا سلطةُ المنفِّذِ.
+- **الحالة بعد العمل:** 🟨 جزئي — **العيبُ مُصلَحٌ في الشفرةِ ومقيسٌ**، والنتيجةُ تبقى `open` بانتظارِ إعادةِ اختبارِ المجلسِ.
 - **ما تم فعلاً:**
-  1. **`src/transport/router.mjs` — `compileCommandRoutes()`:** دالةٌ تقرأُ سياسةَ الديوانِ من `config/royal-console.yaml` وتُنتِجُ مساراتِ `POST` على `/state/console/<action>` لكلِّ أمرٍ مُعلَنٍ. المسارُ مُشتَقٌّ من الوثيقةِ لا مكتوبٌ يداً — بادئةُ المسارِ مُركَّبةٌ من أجزاءٍ لا نصٌّ حرفيٌّ يبدأُ بـ`/state/`.
-  2. **`src/transport/server.mjs` — مسارُ الكتابةِ:** الخادمُ يقبلُ الآنَ `console` و`commandRoutes` اختيارياً. جسمُ طلبِ الكتابةِ يُقرأُ بحدٍّ مُعلَنٍ (`MAX_COMMAND_BODY = 16KB`)، والظرفُ المُوقَّعُ `{ royalCommand, signature, sovereignSession }` يُمرَّرُ كما هو إلى `console.issue()` — لا توقيعَ ولا تحقُّقَ ولا تنفيذَ في الطبقةِ. ورموزُ رفضِ الديوانِ تُترجَمُ إلى حالاتِ HTTP مُعلَنةٍ.
-  3. **`src/transport/problem.mjs`:** أُضيفَ كلُّ رموزِ `CONSOLE_ERRORS` السبعةَ عشرَ إلى `STATUS_BY_CODE` و`MESSAGE_BY_CODE` بحالاتٍ مُناسبةٍ (401 للاستيثاقِ، 403 للتوقيعِ، 404 للأمرِ غيرِ المُعلَنِ، 409 لإعادةِ التشغيلِ، ...).
-  4. **`src/transport/index.mjs`:** صُدِّرَ `compileCommandRoutes`.
-  5. **`scripts/guard-transport.mjs`:** حُدِّثَ الحاجزُ: T2 يسمحُ بقراءةِ الجسمِ لمسارِ الكتابةِ، T3 يسمحُ بـ`console.issue` إضافةً إلى `gateway.call`، T4 يضمُّ `CONSOLE_ERRORS`، وأُضيفَ T11 — مساراتُ الكتابةِ مُشتَقّةٌ من `royal-console.yaml`، ولا مفتاحَ خاصَّ في الطبقةِ، وجسمٌ بحدٍّ مُعلَنٍ، واختبارُ الكتابةِ موجودٌ.
-  6. **`tests/transport/server.test.mjs`:** أُضيفَ تسعةُ اختباراتٍ: مساراتُ الكتابةِ مُشتَقّةٌ من الوثيقةِ، كلُّ أمرٍ مُعلَنٍ يُخدَمُ، أمرٌ غيرُ مُعلَنٍ يُرَدُّ 404، بلا ديوانٍ 503، رموزُ الديوانِ تُترجَمُ بحالاتِها، النقلُ يُمرِّرُ الظرفَ كما هو، جسمٌ غيرُ JSON يُرَدُّ 400، ظرفٌ ناقصٌ يُرَدُّ 400، وكلُّ رموزِ الديوانِ لها ترجمةٌ. والاختباراتُ القديمةُ كلُّها تمرُّ.
-- **الملفات المتأثرة:** `src/transport/router.mjs` · `src/transport/server.mjs` · `src/transport/problem.mjs` · `src/transport/index.mjs` · `scripts/guard-transport.mjs` · `tests/transport/server.test.mjs`.
-- **الـ commit:** `5d776782` (المسار) + `ecdcead1` (تقرير الجاهزية)
-- **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):** `npm run validate` ⇒ **1601 ناجحاً · 0 فاشلاً · 121 مُتخطّىً**. الحاجزُ كلُّه أخضرُ بما فيه `guard:transport` بقواعدهِ الإحدى عشرةَ. والاختباراتُ القديمةُ كلُّها تمرُّ: POST إلى مسارِ قراءةٍ يُرَدُّ 405، وجسمٌ في GET يُرَدُّ 400.
+  1. **العيبُ كما وُصف:** الإنشاءُ الخامُّ لـ`EnforcementPoint` لا يُلزِمُ بوابةَ الهويّةِ — كان `requireIdentityGate` يُسقطُ إلى `false` افتراضاً، فيُبنى المرءُ نقطةَ تفويضٍ بلا بوابةٍ وتقبلُ فاعلاً يصفُه المستدعي كما يشاء. والمصنعُ الرسميُّ كان يُمرِّرُ `requireIdentityGate: true` صراحةً، فسدَّ ذلك المسارَ الرسميَّ وحده.
+  2. **والإصلاحُ عند البناءِ لا عند الاستعمال:** صارَ `requireIdentityGate` يُسقطُ إلى `true` افتراضاً، وصارَ البناءُ بلا بوابةٍ وبدون تصريحٍ صريحٍ بـ`requireIdentityGate: false` يرفعُ `ENFORCEMENT_IDENTITY_GATE_REQUIRED` عند البناءِ — لا ينتظرُ حتى `authorize()`. وهذا هو سدُّ العقدِ العامِّ: مَن أراد تركيباً بلا هويةٍ يُصرِّحُ بذلك صراحةً لا يسقطُ إليه صامتاً.
+  3. **وفحصُ البناءِ يُبقي فحصَ التشغيلِ:** الفحصُ عند `authorize()` (`IDENTITY_GATE_REQUIRED`) بقيَ حارساً ثانياً — فالبناءُ يرفضُ الغياب، والتشغيلُ يرفضُ الغيابَ كذلك. ولم يُحذَفْ حارسٌ ولم يُضعَفْ.
+  4. **والمصنعُ صارَ يُعلِّمُ الإلزامَ بحضورِها:** `createGovernance` صارَ يُمرِّرُ `requireIdentityGate: identityGate !== null` — مَن مرّرها أُلزِمَت، ومَن لم يمرّرها لم يُلزَم ولم يَدّعِها في `guarantees.identityEnforced`.
+  5. **وكلُّ موضعِ إنشاءٍ في الاختباراتِ صُرِّحَ فيه:** 16 ملفَّ اختبارٍ ومساعدَي اختبارٍ ودليلَ تطويرٍ صارَ فيها `requireIdentityGate: false` صريحةً حيثُ لا بوابةَ هويةٍ — لا سقوطَ صامتَ.
+- **الملفات المتأثرة:** `src/policy/enforcement-point.mjs` · `src/policy/governance.mjs` · `scripts/serve-state.mjs` · `tests/helpers/authorization.mjs` · `tests/helpers/inference-gate.mjs` · `tests/policy/enforcement-point.test.mjs` · `tests/legislation/legislature.test.mjs` · `tests/core/gpt-f06-royal-command-binding.test.mjs` · `tests/core/authorization-point.test.mjs` · `tests/policy/quota-measured-amount.test.mjs` · `tests/egress/egress-gate.test.mjs` · `tests/inference/inference-gate.test.mjs` · `tests/data/access-gate.test.mjs` · `tests/data/classification.test.mjs` · `tests/data/retention-authorization.test.mjs` · `tests/data/memory-limits.test.mjs` · `tests/data/data-memory.test.mjs` · `docs/roadmap/05-work-log.md`
+- **الـ commit:** `30a24eba`
+- **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):**
+  - `npm run validate` ⇒ **1594 ناجحاً · 0 فاشلاً · 121 مُتخطّىً** (بلا قاعدةِ بياناتٍ).
+  - اختبارانِ جديدانِ يقيسانِ: (أ) الإنشاءُ بلا بوابةٍ يرفعُ `ENFORCEMENT_IDENTITY_GATE_REQUIRED`، (ب) الإنشاءُ مع بوابةٍ ينجحُ.
+  - الاختبارُ القديمُ «التركيبُ الذي يلزمُ بوابةَ الهويّةِ» صارَ يقيسُ الرفضَ عند البناءِ لا عند الاستعمال.
+- **ما لم يتم ولماذا:**
+  - **إغلاقُ النتيجةِ `M11.04-F01` رسميّاً:** سلطةُ المجلسِ — يتطلَّبُ `closure.fixCommit` و`closure.retestEvidence` وعضوَينِ أعادا الاختبارَ.
+  - **بقيّةُ نتائجِ `M11.04` المفتوحةُ (17 نتيجةً):** لم تُلمَسْ في هذه المُدخلةِ — تُعالَجُ تباعاً.
+- **الأثر على المسارات الأخرى:** لا أثرَ على `M11.05` ولا `M11.06` ولا `M11.09` — العقدُ العامُّ أشدُّ، والمصنعُ الرسميُّ لم يتغيَّرْ سلوكُه (كان يُمرِّرُ `requireIdentityGate: true` صراحةً، والآن يُمرِّرُ `requireIdentityGate: identityGate !== null` وهو `true` حين تُمرَّرُ البوابة).
+
+---
+
+
+### [2026-09-13] — WL-141 — سدُّ العقدِ العامِّ لإنشاءِ `EnforcementPoint`: بوابةُ الهويّةِ مُلزَمةٌ عند البناءِ لا عند الاستعمال (M11.04-F01)
+
+- **المنفّذ:** وكيلٌ تنفيذيٌّ (‏Perplexity Computer) تنفيذاً للتوكيلِ التنفيذيِّ الكاملِ الصادرِ بتاريخِ `2026-09-13`.
+- **المسار والخطوة:** إصلاحُ نتيجةِ مجلسٍ مفتوحةٍ من `M11.04` (مراجعةٌ أمنيّةٌ مستقلّةٌ). **لا تتحرَّكُ خطوةٌ ولا بوّابةٌ**: `M11.04` تبقى `council-findings-recorded`، و`G11` مغلقةٌ، وعدّادُ التقدُّمِ ونسبتُه لم يُلمَسا بحرفٍ. النتيجةُ `M11.04-F01` تبقى `status: open` — إغلاقُها سلطةُ المجلسِ لا سلطةُ المنفِّذِ.
+- **الحالة بعد العمل:** 🟨 جزئي — **العيبُ مُصلَحٌ في الشفرةِ ومقيسٌ**، والنتيجةُ تبقى `open` بانتظارِ إعادةِ اختبارِ المجلسِ.
+- **ما تم فعلاً:**
+  1. **العيبُ كما وُصف:** الإنشاءُ الخامُّ لـ`EnforcementPoint` لا يُلزِمُ بوابةَ الهويّةِ — كان `requireIdentityGate` يُسقطُ إلى `false` افتراضاً، فيُبنى المرءُ نقطةَ تفويضٍ بلا بوابةٍ وتقبلُ فاعلاً يصفُه المستدعي كما يشاء. والمصنعُ الرسميُّ كان يُمرِّرُ `requireIdentityGate: true` صراحةً، فسدَّ ذلك المسارَ الرسميَّ وحده.
+  2. **والإصلاحُ عند البناءِ لا عند الاستعمال:** صارَ `requireIdentityGate` يُسقطُ إلى `true` افتراضاً، وصارَ البناءُ بلا بوابةٍ وبدون تصريحٍ صريحٍ بـ`requireIdentityGate: false` يرفعُ `ENFORCEMENT_IDENTITY_GATE_REQUIRED` عند البناءِ — لا ينتظرُ حتى `authorize()`. وهذا هو سدُّ العقدِ العامِّ: مَن أراد تركيباً بلا هويةٍ يُصرِّحُ بذلك صراحةً لا يسقطُ إليه صامتاً.
+  3. **وفحصُ البناءِ يُبقي فحصَ التشغيلِ:** الفحصُ عند `authorize()` (`IDENTITY_GATE_REQUIRED`) بقيَ حارساً ثانياً — فالبناءُ يرفضُ الغياب، والتشغيلُ يرفضُ الغيابَ كذلك. ولم يُحذَفْ حارسٌ ولم يُضعَفْ.
+  4. **والمصنعُ صارَ يُعلِّمُ الإلزامَ بحضورِها:** `createGovernance` صارَ يُمرِّرُ `requireIdentityGate: identityGate !== null` — مَن مرّرها أُلزِمَت، ومَن لم يمرّرها لم يُلزَم ولم يَدّعِها في `guarantees.identityEnforced`.
+  5. **وكلُّ موضعِ إنشاءٍ في الاختباراتِ صُرِّحَ فيه:** 16 ملفَّ اختبارٍ ومساعدَي اختبارٍ ودليلَ تطويرٍ صارَ فيها `requireIdentityGate: false` صريحةً حيثُ لا بوابةَ هويةٍ — لا سقوطَ صامتَ.
+- **الملفات المتأثرة:** `src/policy/enforcement-point.mjs` · `src/policy/governance.mjs` · `scripts/serve-state.mjs` · `tests/helpers/authorization.mjs` · `tests/helpers/inference-gate.mjs` · `tests/policy/enforcement-point.test.mjs` · `tests/legislation/legislature.test.mjs` · `tests/core/gpt-f06-royal-command-binding.test.mjs` · `tests/core/authorization-point.test.mjs` · `tests/policy/quota-measured-amount.test.mjs` · `tests/egress/egress-gate.test.mjs` · `tests/inference/inference-gate.test.mjs` · `tests/data/access-gate.test.mjs` · `tests/data/classification.test.mjs` · `tests/data/retention-authorization.test.mjs` · `tests/data/memory-limits.test.mjs` · `tests/data/data-memory.test.mjs` · `docs/roadmap/05-work-log.md`
+- **الـ commit:** `30a24eba`
+- **الدليل (مقيسٌ بالمادة 4، لا مُقدَّرٌ):**
+  - `npm run validate` ⇒ **1594 ناجحاً · 0 فاشلاً · 121 مُتخطّىً** (بلا قاعدةِ بياناتٍ).
+  - اختبارانِ جديدانِ يقيسانِ: (أ) الإنشاءُ بلا بوابةٍ يرفعُ `ENFORCEMENT_IDENTITY_GATE_REQUIRED`، (ب) الإنشاءُ مع بوابةٍ ينجحُ.
+  - الاختبارُ القديمُ «التركيبُ الذي يلزمُ بوابةَ الهويّةِ» صارَ يقيسُ الرفضَ عند البناءِ لا عند الاستعمال.
+- **ما لم يتم ولماذا:**
+  - **إغلاقُ النتيجةِ `M11.04-F01` رسميّاً:** سلطةُ المجلسِ — يتطلَّبُ `closure.fixCommit` و`closure.retestEvidence` وعضوَينِ أعادا الاختبارَ.
+  - **بقيّةُ نتائجِ `M11.04` المفتوحةُ (17 نتيجةً):** لم تُلمَسْ في هذه المُدخلةِ — تُعالَجُ تباعاً.
+- **الأثر على المسارات الأخرى:** لا أثرَ على `M11.05` ولا `M11.06` ولا `M11.09` — العقدُ العامُّ أشدُّ، والمصنعُ الرسميُّ لم يتغيَّرْ سلوكُه (كان يُمرِّرُ `requireIdentityGate: true` صراحةً، والآن يُمرِّرُ `requireIdentityGate: identityGate !== null` وهو `true` حين تُمرَّرُ البوابة).
 
 ---
 
