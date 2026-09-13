@@ -97,7 +97,19 @@
                 "attribute": { "type": "string", "minLength": 1 },
                 "operator": {
                   "type": "string",
-                  "enum": ["eq", "ne", "in", "not-in", "gt", "gte", "lt", "lte", "exists"]
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "in",
+                    "not-in",
+                    "gt",
+                    "gte",
+                    "lt",
+                    "lte",
+                    "exists",
+                    "includes",
+                    "not-includes"
+                  ]
                 },
                 "value": {}
               }

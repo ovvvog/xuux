@@ -111,6 +111,14 @@ function evaluateCondition(request, condition) {
       return Array.isArray(expected) && expected.includes(actual);
     case 'not-in':
       return Array.isArray(expected) && !expected.includes(actual);
+    case 'includes':
+      // R6-A-03: يفحصُ هل القيمةُ المُعطاةُ عضوٌ في مصفوفةِ الخاصِّيةِ —
+      // كأن يتحقَّقَ من حضورِ قدرةٍ في `actor.capabilities`. عكسُ `in`.
+      return Array.isArray(actual) && actual.includes(expected);
+    case 'not-includes':
+      // R6-A-03: عكسُ `includes` — يُرجِعُ true إن لم تكن القيمةُ في المصفوفةِ.
+      // يُستعمَلُ في سياساتِ المنع: «امنع إن لم تكن القدرةُ حاضرةً».
+      return !Array.isArray(actual) || !actual.includes(expected);
     case 'gt':
     case 'gte':
     case 'lt':
