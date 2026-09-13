@@ -55,6 +55,7 @@ export async function gateWithAdapter(options = {}) {
     log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (
       /** @type {unknown} */ (log)
     ),
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   const evaluations = new ModelEvaluationLedger({
     log: /** @type {import('../../src/root-of-trust/event-log.mjs').EventLog} */ (

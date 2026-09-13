@@ -111,7 +111,7 @@ function setup(options = {}) {
   const enforcementPoint = new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
-    ...(withIdentityGate ? { identityGate: gate } : {}),
+    ...(withIdentityGate ? { identityGate: gate } : { requireIdentityGate: false }),
   });
   /** @type {Array<{ actorId: string, action: string }>} */
   const authorizeCalls = [];

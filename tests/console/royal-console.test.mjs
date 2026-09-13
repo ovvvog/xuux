@@ -217,6 +217,7 @@ function realGateway(log) {
     agents: /** @type {never} */ (agents),
     monitor,
     enforcementPoint: enforcementPointFor(/** @type {never} */ (log)),
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
 }
 

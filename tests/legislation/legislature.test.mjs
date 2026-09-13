@@ -314,6 +314,7 @@ test('معيارُ القبول: قانونان متعارضان ⇒ كشفٌ و
     decisionPoint: new PolicyDecisionPoint({ bundle: s.legislature.bundle }),
     log: s.log,
     legislationGate: enforcementGate(s.legislature),
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   const request = {
     actor: Object.freeze({ id: 'agent:one', role: 'role:operator', kind: 'agent' }),
@@ -369,6 +370,7 @@ test('معيارُ القبول: قانونان متعارضان ⇒ كشفٌ و
     decisionPoint: new PolicyDecisionPoint({ bundle: amended }),
     log: s.log,
     legislationGate: enforcementGate(s.legislature),
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   const allowed = await restored.authorize(/** @type {never} */ (request));
   assert.equal(allowed.decision.allowed, true, 'وبعد الحلّ وتعديلِ السياسة يُنفَّذ الفعل');

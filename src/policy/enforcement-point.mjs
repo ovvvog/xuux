@@ -104,11 +104,18 @@ export class EnforcementPoint {
     decisionSink = null,
     identityGate = null,
     legislationGate = null,
-    requireIdentityGate = false,
+    requireIdentityGate = true,
     secret,
     now,
   } = {}) {
     if (!decisionPoint || !log) throw new Error('ENFORCEMENT_DEPENDENCY_MISSING');
+    // مراجعة M11.04-F01: الإنشاءُ الخامُّ يلزم بوابةَ هويةٍ موصولةً افتراضاً.
+    // الذي يبني النقطةَ بلا بوابةٍ وهو يعلم أنها لازمةٌ لا يجتاز هذا الحدّ —
+    // الرفضُ عندَ البناءِ لا عندَ الاستعمال. ومَن أراد تركيباً بلا هويةٍ يُصرِّحُ
+    // بـ`requireIdentityGate: false` صراحةً لا يسقطُ إليه صامتاً.
+    if (requireIdentityGate && identityGate === null) {
+      throw new Error('ENFORCEMENT_IDENTITY_GATE_REQUIRED');
+    }
     this.decisionPoint = decisionPoint;
     this.log = log;
     this.haltSwitch = haltSwitch;
@@ -188,10 +195,10 @@ export class EnforcementPoint {
     // الدمج يترك للمستدعي أن يزيد قدرةً ليست له، وهو عين ما تمنعه الخطوة.
     //
     // حمايةٌ من تركيبٍ ناقص (مراجعة M11.04 — Grok-F01): المصنع الرسمي للإدارة
-    // يلزم بوابةَ هويةٍ موصولة. فمن بنى النقطة بلا بوابةٍ وهو يعلم أنها لازمةٌ
-    // لا يجتاز هذا الحدّ: الرفضُ مُسمَّى `IDENTITY_GATE_REQUIRED` لا قبولٌ صامتٌ
-    // لفاعلٍ يصفه المستدعي كما يشاء. وهذا هو الفرق بين «الضابط موجودٌ في الشجرة»
-    // و«الضابط نافذٌ في التشغيل».
+    // يلزم بوابةَ هويةٍ موصولة. والإنشاءُ الخامُّ بلا بوابةٍ يُرفَض عند البناءِ.
+    // وهذا الحدُّ الإضافيُّ للمساراتِ التي تتجاوزُ البناءَ (حقنٌ بمرآةٍ، بناءٌ
+    // ديناميكيٌّ): الرفضُ مُسمَّى `IDENTITY_GATE_REQUIRED` لا قبولٌ صامتٌ
+    // لفاعلٍ يصفه المستدعي كما يشاء.
     if (this.requireIdentityGate && this.identityGate === null) {
       const decision = Object.freeze({
         allowed: false,

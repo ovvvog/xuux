@@ -252,7 +252,13 @@ export async function maybeAnchorLogWithHsm(
   store: AnchorStore,
   signer: HsmSigner,
   log: AnchorableLog,
-  options: { intervalMs?: number; minNewEvents?: number; force?: boolean; at?: Date } = {},
+  options: {
+    intervalMs?: number;
+    minNewEvents?: number;
+    force?: boolean;
+    at?: Date;
+    onAnchor?: (record: AnchorRecord) => void;
+  } = {},
 ): Promise<AnchorRecord | null> {
   const at = options.at ?? new Date();
   const intervalMs = options.intervalMs ?? DEFAULT_ANCHOR_INTERVAL_MS;
@@ -267,7 +273,12 @@ export async function maybeAnchorLogWithHsm(
       if (at.getTime() - Date.parse(previous.at) < intervalMs) return null;
     }
   }
-  return anchorLogWithHsm(store, signer, log, at);
+  const record = await anchorLogWithHsm(store, signer, log, at);
+  // مراجعة R4-B-03: المرساةُ الموقَّعةُ لا ترفعُ شاهدَ البيانِ عندَ إنجازِها —
+  // صارَ يُستدعى `onAnchor` بعدَ التثبيتِ فيرفعُ `anchoredCount` في البيانِ فلا
+  // يبقى شاهدٌ خارجَ الخاتَمِ.
+  if (options.onAnchor) options.onAnchor(record);
+  return record;
 }
 
 /**
@@ -323,6 +334,10 @@ export async function createProductionRootOfTrust(
     // ثمَّ نقطةُ ضبطٍ مختومةٌ تطوي ما رُفِعَ متزامناً منذ الإقلاعِ السابق.
     await manifest.provisionAsync(stateManifestBinding(signers.anchorSigner.id, env), env);
     manifest.assertKing(signers.anchorSigner.id);
+    // R4-B-01: استخرجْ مفتاحَ مصادقةِ دفترِ الرفعِ من التوكنِ بعدَ التحقّقِ من
+    // الخاتَمِ، قبلَ أيِّ رفعٍ متزامنٍ. بدونِ هذا، تبقى سطورُ الدفترِ بلا مصادقةٍ،
+    // فيستطيعُ مالكُ القرصِ أن يَدُسَّ سطراً غيرَ مُصادَقٍ عليه ثم يُختَمَ في المتنِ.
+    await manifest.initJournalKey();
     // السجلُّ يُفتَحُ **بعدَ** التحقّقِ من الخاتَمِ: رفضُ الإقلاعِ لا يُنشئُ ملفَّ
     // وقائعَ جديداً، فلا يُقرأُ ملفٌّ فارغٌ خلَّفَه رفضٌ «سجلاً من GENESIS».
     const log = new PersistentEventLog(join(options.root, 'events.log'), {
