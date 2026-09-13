@@ -56,8 +56,8 @@ test('SafeMode.restore يعيد بناء الحالة غير النشطة', () =
 
 test('SafeMode.restore يرفض اللقطة الفاسدة', () => {
   const sm = new SafeMode();
-  assert.equal(sm.restore(null), false, 'null مرفوض');
-  assert.equal(sm.restore('string'), false, 'string مرفوض');
+  assert.equal(sm.restore(/** @type {any} */ (null)), false, 'null مرفوض');
+  assert.equal(sm.restore(/** @type {any} */ ('string')), false, 'string مرفوض');
   // كائنٌ فارغ: الاستعادةُ ناجحةٌ لكنّها لا تُغيّر الحالة.
   assert.equal(sm.restore({}), true, 'كائن فارغ: ناجح بلا تغيير');
   assert.equal(sm.active, false, 'بقي غير نشط');
