@@ -11,7 +11,7 @@ import {
   type KeyObject,
 } from 'node:crypto';
 
-import { assertSoftwareKingIdentityAllowed } from './production-boot.mjs';
+import { assertSoftwareKingIdentityAllowed, isProductionRuntime } from './production-boot.mjs';
 
 /** شهادة صادرة من سلطة التصديق، وتحمل المادة اللازمة للتحقق من تفويض الوكيل. */
 export interface Certificate {
@@ -198,6 +198,11 @@ export interface CertificateAuthorityOptions {
    * لترحيلٍ موثَّقٍ صراحةً.
    */
   allowLegacyCertificatesWithoutExpiry?: boolean;
+  /**
+   * بيئةُ التشغيلِ المقروءةُ (M11.04-F03). في الإنتاجِ يُرفَضُ مخزنُ الذاكرةِ
+   * لأنّه لا يدومُ عبرَ إعادةِ التشغيل.
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 export class CertificateAuthority {
@@ -214,6 +219,14 @@ export class CertificateAuthority {
   constructor(king: KingIdentity, options: CertificateAuthorityOptions = {}) {
     this.king = king;
     this.revoked = options.revocationStore ?? new MemoryRevocationStore();
+    // مراجعة M11.04-F03: ثباتُ الإلغاءِ غيرُ محقَّقٍ افتراضاً — مخزنُ الذاكرةِ
+    // لا يدومُ عبرَ إعادةِ التشغيل، فيُقبلُ المسحوبُ بعدَ إقلاعٍ جديد. في الإنتاجِ
+    // يُرفَضُ البناءُ بـ`MemoryRevocationStore` — كما يُرفَضُ بناءُ البوابةِ بلا
+    // دفترٍ أو ساعةٍ. ومَن أراد تركيباً بلا ثباتٍ يُصرِّحُ ببيئةٍ غيرِ إنتاجيّةٍ.
+    const env = options.env ?? process.env;
+    if (isProductionRuntime(env) && this.revoked instanceof MemoryRevocationStore) {
+      throw new Error('PERSISTENT_REVOCATION_STORE_REQUIRED_IN_PRODUCTION');
+    }
     this.now = options.now ?? (() => Date.now());
     this.defaultTtlMs = options.defaultTtlMs ?? DEFAULT_CERTIFICATE_TTL_MS;
     this.allowLegacy = options.allowLegacyCertificatesWithoutExpiry ?? false;
