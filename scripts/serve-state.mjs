@@ -42,6 +42,7 @@ import {
   createMemoryRepositories,
   createPostgresRepositories,
 } from '../src/persistence/composition.mjs';
+import { createMemoryRepository } from '../src/persistence/repository-memory.mjs';
 import { createPool } from '../src/persistence/db.mjs';
 import { createPolicyDecisionPoint } from '../src/policy/engine.mjs';
 import { LawRegistry } from '../src/governance/law-system.mjs';
@@ -50,6 +51,14 @@ import { Legislature, enforcementGate, loadLegislationPolicy } from '../src/legi
 import { EnforcementPoint } from '../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../src/policy/loader.mjs';
 import { EventLog } from '../src/root-of-trust/index.mjs';
+import { KingIdentity, CertificateAuthority } from '../src/root-of-trust/identity.mjs';
+import {
+  AgentRegistry,
+  IdentityGate,
+  CapabilityGrantLedger,
+  IncidentRegister,
+  loadCapabilityCatalog,
+} from '../src/identity/index.mjs';
 import {
   compileRoutes,
   createSecureStateServer,
@@ -85,7 +94,7 @@ const TLS_KEY_FILE = process.env.STATE_TLS_KEY_FILE ?? '';
 const USE_TLS = TLS_CERT_FILE !== '' || TLS_KEY_FILE !== '';
 const CONFIG_DIR = path.join(process.cwd(), 'config');
 const WEB_DIR = path.join(process.cwd(), 'web');
-const ACTOR_ID = 'service:state-viewer-dev';
+const ACTOR_LABEL = 'service:state-viewer-dev';
 
 /**
  * @returns {Promise<{ repositories: unknown, close: () => Promise<void>, source: string }>}
@@ -115,15 +124,47 @@ async function main() {
   const { repositories, close, source } = await repositoriesFor();
   const log = new EventLog();
 
-  /** @type {Record<string, unknown>} */
-  const viewer = {
-    id: ACTOR_ID,
-    kind: 'service',
-    state: 'active',
+  // R6-A-04: تركيبُ نقطةِ التفويضِ ببوابةِ هويّةٍ موصولةٍ — لا إنشاءٌ خامٌّ بلا
+  // بوابةٍ. الفاعلُ يُحقَّقُ من جذرِ الثقةِ لا من ادّعاءٍ في الطلبِ. وفي مسارِ التطويرِ
+  // هذا يُبنى مِلكٌ هويّةٌ صغيرٌ: سجلٌّ في الذاكرةِ يُسجِّلُ فيه المشاهدُ، وسلطةُ
+  // تصديقٍ تُصدِّقُ شهادتَه، وكتالوجُ قدراتٍ من الإعداد. وليس هذا بديلاً عن جذرِ
+  // الثقةِ الإنتاجيِّ — هو تركيبُ تطويرٍ يُعلنُ حدودَه.
+  const kingIdentity = new KingIdentity();
+  const authority = new CertificateAuthority(kingIdentity);
+  const catalog = loadCapabilityCatalog({ dir: CONFIG_DIR });
+  const incidents = new IncidentRegister({ log: /** @type {never} */ (log) });
+  const grants = new CapabilityGrantLedger({
+    catalog,
+    log: /** @type {never} */ (log),
+    incidents,
+    now: () => new Date(),
+  });
+  const registry = new AgentRegistry({
+    ca: authority,
+    log: /** @type {never} */ (log),
+    repository: createMemoryRepository(AgentRegistry.spec),
+    catalog,
+    grants,
+    incidents,
+  });
+  const identityGate = new IdentityGate({
+    registry,
+    ca: authority,
+    catalog,
+    grants,
+    incidents,
+    log: /** @type {never} */ (log),
+  });
+  // تُسجَّلُ المشاهدُ في السجلِّ كي تُصدِّقَه البوابةُ: هويةٌ من جذرِ الثقةِ لا نصٌّ.
+  const viewerAgent = await registry.register({
+    name: 'state-viewer-dev',
     role: monitoringPolicy.role,
     capabilities: ['action:read-registry', 'action:read-memory', 'action:read-audit'],
+    kind: 'service',
+  });
+  const agents = {
+    get: async (/** @type {string} */ id) => (id === viewerAgent.id ? viewerAgent : null),
   };
-  const agents = { get: async (/** @type {string} */ id) => (id === ACTOR_ID ? viewer : null) };
 
   const monitor = new MonitorAgent({
     policy: monitoringPolicy,
@@ -160,11 +201,12 @@ async function main() {
       decisionPoint: createPolicyDecisionPoint({ bundle }),
       log: /** @type {never} */ (log),
       legislationGate: enforcementGate(legislature),
-      requireIdentityGate: false, // المشغِّلُ تطويرٌ محلّيٌّ بلا بوابةِ هويةٍ
+      identityGate,
+      requireIdentityGate: true,
     }),
   });
 
-  const session = await gateway.openSession({ actorId: ACTOR_ID });
+  const session = await gateway.openSession({ actorId: viewerAgent.id });
   // ولا فرعَ ثالثَ بينَهما: إمّا تعميةٌ مُعلَنةٌ مادّتُها تُقرأُ، وإمّا نصٌّ
   // **مُصرَّحٌ به في كلِّ ردٍّ**. ونقصُ المادّةِ بعدَ إعلانِها يَرفعُ خطأً هنا.
   const server = USE_TLS
@@ -187,7 +229,7 @@ async function main() {
     '  ────────────────────────────────────',
     `  العنوانُ:      ${USE_TLS ? 'https' : 'http'}://${HOST}:${PORT}/`,
     `  المصدرُ:       ${source}`,
-    `  الفاعلُ:       ${ACTOR_ID} بدورِ ${String(monitoringPolicy.role)}`,
+    `  الفاعلُ:       ${ACTOR_LABEL} بدورِ ${String(monitoringPolicy.role)}`,
     `  رمزُ الجلسةِ:   ${session.token}`,
     '',
     '  والمساراتُ القارئةُ مُشتقّةٌ من `config/api.yaml` لا مكتوبةٌ يداً:',
