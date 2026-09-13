@@ -191,6 +191,7 @@ async function room(options = {}) {
     agents: /** @type {never} */ (registry),
     monitor,
     enforcementPoint: enforcementPointFor(/** @type {never} */ (log)),
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
 
   const factorSecret = randomBytes(32).toString('hex');

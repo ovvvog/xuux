@@ -18,6 +18,7 @@
  */
 
 import { API_ERRORS } from '../api/index.mjs';
+import { CONSOLE_ERRORS } from '../console/index.mjs';
 
 /** رموزُ رفضٍ من طبقةِ النقلِ نفسِها — ما يُرَدُّ قبلَ أن تُسأَلَ البوابةُ. */
 export const TRANSPORT_ERRORS = Object.freeze({
@@ -62,6 +63,26 @@ export const STATUS_BY_CODE = Object.freeze({
   [TRANSPORT_ERRORS.BODY_NOT_ALLOWED]: 400,
   [TRANSPORT_ERRORS.GATEWAY_REQUIRED]: 503,
   [TRANSPORT_ERRORS.INTERNAL]: 500,
+  // ── رموزُ الديوانِ الملكيِّ (`M9.03`) ──
+  // الكتابةُ السياديّةُ المُوقَّعةُ تُترجَمُ برموزِها المُعلَنةِ لا تُخمَّنُ.
+  // والقاعدةُ نفسُها: رمزٌ بلا ترجمةٍ يُرَدُّ `500` ويُفشِلُه الحاجز.
+  [CONSOLE_ERRORS.CONFIG_INVALID]: 503,
+  [CONSOLE_ERRORS.AUDIT_REQUIRED]: 503,
+  [CONSOLE_ERRORS.VIEW_UNDECLARED]: 404,
+  [CONSOLE_ERRORS.GATEWAY_REQUIRED]: 503,
+  [CONSOLE_ERRORS.VIEW_REFUSED]: 502,
+  [CONSOLE_ERRORS.COMMAND_UNDECLARED]: 404,
+  [CONSOLE_ERRORS.ACTION_MISMATCH]: 400,
+  [CONSOLE_ERRORS.TARGET_MISMATCH]: 400,
+  [CONSOLE_ERRORS.CROWN_REQUIRED]: 503,
+  [CONSOLE_ERRORS.COMMAND_REJECTED]: 400,
+  [CONSOLE_ERRORS.KING_REQUIRED]: 503,
+  [CONSOLE_ERRORS.AUTHENTICATION_REQUIRED]: 401,
+  [CONSOLE_ERRORS.SIGNATURE_INVALID]: 403,
+  [CONSOLE_ERRORS.REPLAYED_COMMAND]: 409,
+  [CONSOLE_ERRORS.HALT_REQUIRED]: 503,
+  [CONSOLE_ERRORS.EFFECT_REFUSED]: 500,
+  [CONSOLE_ERRORS.PATH_UNDECLARED]: 404,
 });
 
 /** رسائلُ مُعلَنةٌ: لا يُسرَّبُ نصُّ الاستثناءِ الداخليِّ إلى السلكِ. */
@@ -86,6 +107,24 @@ const MESSAGE_BY_CODE = Object.freeze({
   [TRANSPORT_ERRORS.BODY_NOT_ALLOWED]: 'لا جسمَ في طلبِ قراءةٍ.',
   [TRANSPORT_ERRORS.GATEWAY_REQUIRED]: 'الدولةُ غيرُ مُركَّبةٍ؛ فلا نداءَ.',
   [TRANSPORT_ERRORS.INTERNAL]: 'عَطَبٌ داخليٌّ؛ وقيدُه في سجلِّ الأحداثِ لا في هذا الردِّ.',
+  // ── رسائلُ الديوانِ الملكيِّ ──
+  [CONSOLE_ERRORS.CONFIG_INVALID]: 'وثيقةُ الديوانِ غيرُ صالحةٍ؛ فلا يُخدَمُ أمرٌ.',
+  [CONSOLE_ERRORS.AUDIT_REQUIRED]: 'لا سجلَّ أحداثٍ موصولٍ بالديوان؛ ولا أمرَ بلا قيدٍ يشهد عليه.',
+  [CONSOLE_ERRORS.VIEW_UNDECLARED]: 'مشهدٌ غيرُ معلَنٍ في وثيقةِ الديوان.',
+  [CONSOLE_ERRORS.GATEWAY_REQUIRED]: 'طبقةُ الواجهةِ غيرُ موصولةٍ بالديوان.',
+  [CONSOLE_ERRORS.VIEW_REFUSED]: 'ردَّت طبقةُ الواجهةِ المشهدَ.',
+  [CONSOLE_ERRORS.COMMAND_UNDECLARED]: 'أمرٌ غيرُ معلَنٍ في وثيقةِ الديوان.',
+  [CONSOLE_ERRORS.ACTION_MISMATCH]: 'الفعلُ الموقَّعُ لا يطابقُ فعلَ الأمرِ المُعلَن.',
+  [CONSOLE_ERRORS.TARGET_MISMATCH]: 'الهدفُ الموقَّعُ لا يطابقُ هدفَ الأمرِ المُعلَن.',
+  [CONSOLE_ERRORS.CROWN_REQUIRED]: 'بوابةُ التاجِ غيرُ موصولةٍ بالديوان.',
+  [CONSOLE_ERRORS.COMMAND_REJECTED]: 'رُدَّ الأمرُ الملكيُّ.',
+  [CONSOLE_ERRORS.KING_REQUIRED]: 'هويةُ الملكِ غيرُ موصولةٍ بالديوان.',
+  [CONSOLE_ERRORS.AUTHENTICATION_REQUIRED]: 'الأمرُ يشترط جلسةً قويةً للملكِ ولم تُستوفَ.',
+  [CONSOLE_ERRORS.SIGNATURE_INVALID]: 'توقيعُ الأمرِ لم يُقبل.',
+  [CONSOLE_ERRORS.REPLAYED_COMMAND]: 'معرّفُ الأمرِ مستهلَكٌ؛ ولا تُعادُ الأوامرُ.',
+  [CONSOLE_ERRORS.HALT_REQUIRED]: 'زرُّ الإيقافِ الشاملِ غيرُ موصولٍ بالديوان.',
+  [CONSOLE_ERRORS.EFFECT_REFUSED]: 'قُبل الأمرُ وثُبِّت ثم ردَّه أثرُه؛ والقيدُ يبقى شاهداً.',
+  [CONSOLE_ERRORS.PATH_UNDECLARED]: 'مسارُ الأمرِ غيرُ معلَنٍ في الكودِ ولا في الوثيقة.',
 });
 
 /**

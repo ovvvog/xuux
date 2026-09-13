@@ -64,6 +64,7 @@ function setup(options = {}) {
   const enforcementPoint = new EnforcementPoint({
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
+    requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   const { ledger } = createTestLedger({ log, assets, lattice });

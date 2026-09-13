@@ -12,14 +12,17 @@
  *    كلاهما يطابقُ `/state/agents/count`. فلو رُتِّبَ بترتيبِ الوثيقةِ لقُرِئَ
  *    «count» معرّفَ هويّةٍ. فالتفضيلُ **بعددِ المقاطعِ الحرفيّةِ** لا بترتيبِ
  *    الظهورِ، والغموضُ الباقي يُفشِلُه الحاجزُ لا يَحُلُّه التخمينُ.
- * 2. **لا فعلَ إلا `GET`:** الوثيقةُ تنصُّ أنّ كلَّ مسارٍ فيها «قارئٌ فقط»،
- *    و`scripts/guard-api.mjs` يَرُدُّ أيَّ مسارٍ فعلُه غيرُ `GET`. فالكتابةُ من
- *    الواجهةِ نصُّ `M9.03` (أمرٌ ملكيٌّ موقَّعٌ) ولا تُفتَحُ هنا بحالٍ.
+ * 2. **لا فعلَ إلا `GET` للقراءةِ و`POST` للكتابةِ السياديّةِ:** قراءةٌ من
+ *    `config/api.yaml` (`GET` وحدَه) وكتابةٌ من `config/royal-console.yaml`
+ *    (`POST` وحدَه). و`scripts/guard-api.mjs` يَرُدُّ أيَّ مسارٍ قارئٍ فعلُه غيرُ
+ *    `GET`. والكتابةُ من الواجهةِ أمرٌ ملكيٌّ موقَّعٌ (`M9.03`) ولا تُفتَحُ إلا من
+ *    مسارٍ مُشتَقٍّ من وثيقةِ الديوان.
  * 3. **المُتغيِّرُ لا يعبرُ مقطعاً:** `:id` يطابقُ مقطعاً واحداً لا يحملُ `/`،
  *    فلا يَبلعُ مسارٌ واحدٌ شجرةً كاملةً.
  */
 
 import { loadApiPolicy } from '../api/index.mjs';
+import { loadConsolePolicy } from '../console/index.mjs';
 
 import { TRANSPORT_ERRORS } from './problem.mjs';
 
@@ -145,6 +148,41 @@ export function matchRoute(routes, method, pathname) {
     return { route, pathParams };
   }
   return null;
+}
+
+/**
+ * يبني جدولَ مساراتِ الكتابةِ السياديّةِ من وثيقةِ الديوانِ — **مصدرُ الجدولِ
+ * الوثيقةُ وحدَها**، كقرينِها من `config/api.yaml`.
+ *
+ * كلُّ أمرٍ مُعلَنٍ في `config/royal-console.yaml` يُشتَقُّ منه مسارُ `POST` واحدٌ
+ * على `/state/console/<action>`، فلا يُخدَمُ أمرٌ غيرُ مُعلَنٍ، ولا يُخدَمُ مسارٌ
+ * غيرُ مُشتَقٍّ. و`action` فريدٌ لكلِّ أمرٍ (يُفحَصُ في `loadConsolePolicy`)، فلا
+ * غموضَ في المطابقة.
+ *
+ * والجدولُ الناتجُ يُدمَجُ مع جدولِ القراءةِ في الخادمِ، فيطابقُ `matchRoute`
+ * المسارَ والفعلَ معاً: `GET` للقراءةِ و`POST` للكتابةِ.
+ * @param {{ policy?: ReturnType<typeof loadConsolePolicy>, dir?: string }} [options]
+ * @returns {ReadonlyArray<CompiledRoute>}
+ */
+export function compileCommandRoutes(options = {}) {
+  const policy =
+    options.policy ?? loadConsolePolicy(options.dir === undefined ? {} : { dir: options.dir });
+  /** @type {CompiledRoute[]} */
+  const compiled = [];
+  for (const command of policy.commands) {
+    const path = '/' + ['state', 'console', command.action].join('/');
+    const { segments, literals } = compilePath(path);
+    compiled.push({
+      id: command.id,
+      method: 'POST',
+      path,
+      call: 'command',
+      segments,
+      literals,
+    });
+  }
+  compiled.sort((a, b) => b.literals - a.literals || b.segments.length - a.segments.length);
+  return Object.freeze(compiled);
 }
 
 /**
