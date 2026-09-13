@@ -136,6 +136,7 @@ function state(options = {}) {
     monitor: withMonitor ? monitor : null,
     enforcementPoint: withEnforcement ? enforcementPointFor(log) : null,
     now: () => clock.current,
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
   return { gateway, log, repositories, identities, clock };
 }
