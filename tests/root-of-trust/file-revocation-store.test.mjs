@@ -148,3 +148,72 @@ test('FileRevocationStore لا يُقبلُ في الإنتاجِ بجانب Mem
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('FileRevocationStore: سجلٌّ ناقصُ الحقولِ يُعدُّ تالفاً (فشل مغلق)', () => {
+  const dir = tempDir();
+  try {
+    const storePath = join(dir, 'revoked.jsonl');
+    // سجلٌّ JSON صحيحٌ نحويّاً لكنّه ناقصُ الحقولِ.
+    writeFileSync(storePath, JSON.stringify({ certificateId: 'cert-1' }) + '\n', 'utf8');
+    const store = new FileRevocationStore(storePath);
+    assert.equal(store.ready(), false, 'سجل ناقص الحقول: غير جاهز');
+    assert.equal(store.isRevoked('cert-1'), false, 'لا يقرأ من سجل تالف');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('FileRevocationStore: سجلٌّ بحقولٍ بأنواعٍ خاطئةٍ يُعدُّ تالفاً', () => {
+  const dir = tempDir();
+  try {
+    const storePath = join(dir, 'revoked.jsonl');
+    const badEntry = JSON.stringify({
+      certificateId: 123,
+      revokedBy: 'king',
+      reason: 'compromised',
+      at: '2026-01-01',
+    });
+    writeFileSync(storePath, badEntry + '\n', 'utf8');
+    const store = new FileRevocationStore(storePath);
+    assert.equal(store.ready(), false, 'certificateId ليس نصاً: غير جاهز');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('FileRevocationStore: سجلٌّ صحيحٌ ثمّ سجلٌّ تالفٌ يُسقِطُ الكلّ', () => {
+  const dir = tempDir();
+  try {
+    const storePath = join(dir, 'revoked.jsonl');
+    const good = JSON.stringify({
+      certificateId: 'cert-1',
+      revokedBy: 'king',
+      reason: 'compromised',
+      at: '2026-01-01T00:00:00.000Z',
+    });
+    const bad = JSON.stringify({ certificateId: 'cert-2' }); // ناقص
+    writeFileSync(storePath, good + '\n' + bad + '\n', 'utf8');
+    const store = new FileRevocationStore(storePath);
+    assert.equal(store.ready(), false, 'سجل تالف في المنتصف: الكل مرفوض');
+    assert.equal(store.isRevoked('cert-1'), false, 'حتى الصحيح لا يُقرأ');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('FileRevocationStore: fsync=false يكتبُ بلا فتحِ مقبضٍ (مسارٌ سريعٌ للاختبار)', () => {
+  const dir = tempDir();
+  try {
+    const storePath = join(dir, 'revoked.jsonl');
+    const store = new FileRevocationStore(storePath, { fsync: false });
+    assert.equal(store.ready(), true, 'جاهز');
+    const result = store.revoke('cert-1', 'king', 'compromised');
+    assert.equal(result, true, 'كُتب بنجاح');
+    assert.equal(store.isRevoked('cert-1'), true, 'مسحوبة');
+    // إعادةُ تحميلٍ من القرص.
+    const store2 = new FileRevocationStore(storePath, { fsync: false });
+    assert.equal(store2.isRevoked('cert-1'), true, 'بُقيت على القرص');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
