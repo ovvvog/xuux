@@ -460,6 +460,7 @@ test('الرموز والحالات مثبَّتة نصاً ومصدَّرة', (
       // رموزُ الشاهدِ — WL-094 (`UF-07`): الدفترُ لا يُصدَّقُ وحدَه، ودليلُ
       // الحالةِ لازمٌ في الإنتاج.
       'LEDGER_BEHIND_WITNESS',
+      'LEDGER_AHEAD_OF_WITNESS',
       'LEDGER_STATE_ROOT_MISSING',
     ],
   );
