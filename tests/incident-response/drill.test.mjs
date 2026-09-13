@@ -138,6 +138,7 @@ function state(options = {}) {
     monitor,
     enforcementPoint: enforcementPointFor(/** @type {never} */ (log)),
     telemetry,
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
   const serviceLevels = createServiceLevels({
     policy: SERVICE_LEVELS_POLICY,

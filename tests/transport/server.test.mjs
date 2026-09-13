@@ -83,6 +83,7 @@ function realGateway() {
     agents,
     monitor,
     enforcementPoint: enforcementPointFor(log),
+    requirePoP: false, // اختباراتٌ بلا إثباتِ حيازةٍ
   });
   return { gateway, log };
 }
