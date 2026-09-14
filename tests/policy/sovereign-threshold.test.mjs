@@ -85,16 +85,21 @@ test('رمز الرفض يفرّق بين «يلزمه أمر ملكي» و«م�
   );
 });
 
+// ملخصانِ بصورةِ `sha256` الحقيقيّةِ: بعدَ النتيجةِ `R6-A-07` لم يعدْ أيُّ نصٍّ
+// يُقرأُ ملخصاً، فالسندُ في الاختبارِ يجبُ أن يكونَ ما يمكنُ أن يكونَ ملخصاً.
+const DIGEST_A = 'a'.repeat(64);
+const DIGEST_B = 'b'.repeat(64);
+
 test('الأمر الملكي يفتح فعل العتبة ولا يفتح الممنوع المطلق', () => {
   const stop = pdp.evaluate(
-    kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: 'digest:0001' }),
+    kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: DIGEST_A }),
   );
   assert.equal(stop.allowed, true, 'الأمر الملكي المقبول يُنفِذ الفعل السيادي');
   assert.equal(stop.policyId, 'pol:king-sovereign-acts');
   assert.equal(stop.royalCommandId, 'cmd:0001', 'القرار يصف الأمر الذي صدر من أجله');
 
   const keys = pdp.evaluate(
-    kingRequest('export-keys', { royalCommandId: 'cmd:0002', royalCommandDigest: 'digest:0002' }),
+    kingRequest('export-keys', { royalCommandId: 'cmd:0002', royalCommandDigest: DIGEST_B }),
   );
   assert.equal(keys.allowed, false, 'إخراج المفاتيح لا يُفتح بأمر ملكي — منعٌ مطلق');
   assert.equal(keys.code, 'POLICY_DENY');
@@ -118,4 +123,28 @@ test('فاعلٌ دون الملك لا يبلغ العتبة أصلاً ولو 
   });
   assert.equal(decision.allowed, false);
   assert.equal(decision.code, 'POLICY_NO_MATCH', 'لا سياسة تأذن لوزير بإيقاف الدولة');
+});
+
+test('R6-A-07: ملخصٌ لا يمكنُ أن يكونَ ملخصَ أمرٍ لا يفتحُ فعلاً سياديّاً', () => {
+  // العيبُ: كانتِ العتبةُ تقيسُ حضورَ نصّينِ، فسلسلةٌ مثل `digest:0001` — أو
+  // ملخصٌ بحرفٍ كبيرٍ أو ناقصِ الطولِ — تُنفِذُ فعلاً سياديّاً.
+  for (const digest of ['digest:0001', 'A'.repeat(64), 'a'.repeat(63), `${'a'.repeat(64)}0`]) {
+    const decision = pdp.evaluate(
+      kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: digest }),
+    );
+    assert.equal(decision.allowed, false, `ملخصٌ مشوَّهٌ فتحَ فعلاً سياديّاً: «${digest}»`);
+    assert.equal(
+      decision.code,
+      'SOVEREIGN_COMMAND_DIGEST_MALFORMED',
+      'خطأُ الربطِ لا يُخلَطُ بغيابِ الأمرِ فيُقرأَ نقصاً في الصلاحيةِ',
+    );
+    assert.equal(decision.requiresRoyalCommand, true);
+  }
+});
+
+test('R6-A-07: الملخصُ ذو الصورةِ الصحيحةِ يبقى نافذاً — الفحصُ صورةٌ لا تشديدٌ على السلطةِ', () => {
+  const decision = pdp.evaluate(
+    kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: DIGEST_A }),
+  );
+  assert.equal(decision.allowed, true, 'ملخصٌ صحيحُ الصورةِ رُدَّ — تضييقٌ تجاوزَ نطاقَه');
 });

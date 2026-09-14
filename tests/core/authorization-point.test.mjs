@@ -136,14 +136,19 @@ test('تذكرة الفعل المحكوم لا تُستعمل مرّتين ول
 test('تذكرةٌ صحيحة لفعل آخر لا تُنفِّذ الفعل المحكوم', async () => {
   const { king, crown, log, enforcement } = setup();
   const kernel = new ExecutionKernel({ crown, log, enforcement });
+  const otherCommand = createRoyalCommand('change-policy', 'policy:other');
   const { token } = await enforcement.authorize({
     actor: { id: 'crown', kind: 'human', role: 'role:king', state: 'active' },
     action: 'change-policy',
     resource: { type: 'policy', id: 'other' },
     context: {},
-    royalCommandId: 'cmd:other',
-    royalCommandDigest: 'digest:cmd:other',
+    // أمرٌ آخرُ حقيقيٌّ لا سلسلةٌ نائبةٌ: بعدَ النتيجةِ `R6-A-07` يُرفَضُ الملخصُ
+    // المشوَّهُ في المحرّكِ نفسِه، فتُصبحُ التذكرةُ معدومةً ويُختبَرُ غيابُها لا
+    // عدمُ تطابقِها. والمقصودُ هنا تذكرةٌ **صحيحةٌ تماماً** لأمرٍ آخرَ.
+    royalCommandId: otherCommand.id,
+    royalCommandDigest: royalCommandDigest(otherCommand),
   });
+  assert.equal(typeof token, 'string', 'تذكرةُ الأمرِ الآخرِ يجب أن تصدرَ فعلاً');
   const command = governedCommand();
   await assert.rejects(
     () =>
