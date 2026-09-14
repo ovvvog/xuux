@@ -315,6 +315,11 @@ export async function createProductionRootOfTrust(
   if (options.kingKeyVersion !== undefined) versions.kingKeyVersion = options.kingKeyVersion;
   if (options.ledgerKeyVersion !== undefined) versions.ledgerKeyVersion = options.ledgerKeyVersion;
   const signers = await openProductionSigners(env, deps, versions);
+  // مواردُ تُفتَحُ داخلَ الإقلاعِ وتُغلَقُ إن سقطَ بعدَ فتحِها: السجلُّ الدائمُ
+  // يأخذُ **قفلَ كاتبٍ واحدٍ** على القرصِ، فإقلاعٌ يفشلُ بعدَ فتحِه كان يتركُ
+  // القفلَ قائماً والمِقبضَ مفتوحاً، فيُردُّ كلُّ إقلاعٍ تالٍ في العمليةِ نفسِها
+  // بـ`LOG_ALREADY_LOCKED` — تعطيلٌ ذاتيٌّ لجذرِ الثقةِ لا يُرفَعُ إلا بحذفٍ يدويٍّ.
+  const openedOnBoot: Array<() => void> = [];
   try {
     const sealer = signers.sealer;
     const fsync = options.fsync ?? true;
@@ -362,6 +367,7 @@ export async function createProductionRootOfTrust(
       env,
       fsync,
     });
+    openedOnBoot.push((): void => log.close());
     assertLogNotBehindAnchors(manifest, log, signers.anchorSigner, options, fsync, env);
     // نقطةُ ضبطٍ ثانيةٌ بعدَ فحصِ المراسي: ما يرفعُه الفحصُ (عدُّ المُثبَّتِ) يُختَمُ
     // في المتنِ الآنَ لا في الإقلاعِ التالي، فلا يبقى شاهدٌ خارجَ الخاتَم.
@@ -411,6 +417,16 @@ export async function createProductionRootOfTrust(
   } catch (error) {
     // فشلٌ بعدَ فتحِ الجلسةِ يُغلقُها: توكنٌ يبقى مسجَّلَ الدخولِ بعدَ فشلِ
     // الإقلاعِ خطرٌ لا مجردُ تسريبِ موردٍ.
+    // وما فُتِحَ في الإقلاعِ يُغلَقُ بعكسِ ترتيبِ فتحِه: إقلاعٌ مردودٌ لا يجوزُ أن
+    // يتركَ قفلَ كاتبٍ يمنعُ الإقلاعَ المُصلَحَ بعدَه. وإن تعذّرَ الإغلاقُ لم يُبتلَعْ
+    // خطأُ الإقلاعِ الأصليُّ: هو السببُ وهو المرفوع.
+    for (const closeOpened of openedOnBoot.reverse()) {
+      try {
+        closeOpened();
+      } catch {
+        /* إغلاقٌ متعذّرٌ لا يحجبُ سببَ الفشلِ الأصليَّ */
+      }
+    }
     await signers.close().catch(() => undefined);
     throw error;
   }
