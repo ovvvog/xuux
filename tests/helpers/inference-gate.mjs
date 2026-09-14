@@ -44,7 +44,7 @@ export function memoryLog() {
  * بوابةٌ حقيقيّةٌ بنقطةِ تفويضٍ حقيقيّةٍ وسجلِّ نماذجٍ حقيقيٍّ، ومُنفِّذُها هو
  * المُوائمُ الحتميُّ عبرَ عقدِه — فما يُقاسُ سلسلةٌ كاملةٌ لا حلقةٌ منها.
  *
- * @param {{ purpose?: string, execute?: (call: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<{ output: string, usage?: Record<string, number> }>, tokensPerWindow?: number, budgetWindowMs?: number, costLedger?: object, costInstitution?: string, now?: () => Date }} [options]
+ * @param {{ purpose?: string, execute?: (call: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<{ output: string, usage?: Record<string, number> }>, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown }, costLedger?: object, costInstitution?: string, now?: () => Date }} [options]
  */
 export async function gateWithAdapter(options = {}) {
   const purpose = options.purpose ?? 'planning';
@@ -108,6 +108,7 @@ export async function gateWithAdapter(options = {}) {
     execute: options.execute ?? deterministicExecutor(),
     ...(options.tokensPerWindow === undefined ? {} : { tokensPerWindow: options.tokensPerWindow }),
     ...(options.budgetWindowMs === undefined ? {} : { budgetWindowMs: options.budgetWindowMs }),
+    ...(options.budgetStore === undefined ? {} : { budgetStore: options.budgetStore }),
     ...(options.costLedger === undefined
       ? {}
       : {
