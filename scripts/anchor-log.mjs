@@ -25,12 +25,15 @@
 import {
   FileAnchorStore,
   LogAnchorer,
+  StateManifest,
   inspectEventLog,
   isProductionRuntime,
   kingKeyProviderFromEnv,
   loadKingKeySet,
   maybeAnchorLogWithHsm,
   openProductionSigners,
+  stateManifestBinding,
+  stateManifestPath,
   verifyAnchoredLog,
 } from '../src/root-of-trust/index.mjs';
 
@@ -44,6 +47,8 @@ const USAGE = `الاستعمال:
   EVENT_LOG_FILE            ملف سجل الأحداث (إلزامي)
   ANCHOR_STORE_FILE         ملف التثبيتات المنفصل (إلزامي)
   ANCHOR_INTERVAL_MINUTES   الفترة بين تثبيتين بالدقائق (افتراضها 60)
+  XUUX_STATE_ROOT           جذر الحالة — إلزامي للتثبيت في الإنتاج: المرساة
+                            الموقَّعة ترفع شاهد البيان المختوم (WL-165)
   مخزن المفاتيح:            KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER
                             (في الإنتاج: لا مخزنَ برمجيّاً — التوقيع داخل التوكن عبر
                              XUUX_PKCS11_MODULE/TOKEN وXUUX_PKCS11_PIN أو PIN_FILE)`;
@@ -152,10 +157,33 @@ async function runOnHsm(args, config, env, deps) {
 
     if (args.command === 'anchor') {
       if (inspection.problem) throw new Error(`لا يُثبَّت سجل معطوب: ${inspection.problem}`);
+      // WL-165 (`R4-B-03`/`M11.04-F05`): كانت الأداة تُوقِّع مرساةً ولا ترفع
+      // شاهدَ البيان المختوم، فتبقى مرساةٌ موقَّعةٌ لا أثرَ لها في الخاتَم —
+      // وهذا نصُّ النتيجة المفتوحة. والإصلاحُ لا يُنشئ مصدرَ حقيقةٍ ثانياً:
+      // الأداة ترفع في البيان نفسِه داخلَ قفل دفتر الرفع، فالكاتبُ يبقى واحداً
+      // في اللحظة. وغيابُ جذر الحالة رفضٌ مغلق: لا تثبيتَ بلا شاهد.
+      const root = env['XUUX_STATE_ROOT'];
+      if (!root) {
+        throw new Error(
+          'ANCHOR_WITNESS_STATE_ROOT_MISSING: XUUX_STATE_ROOT غير معلَن — ' +
+            'المرساة الموقَّعة يجب أن ترفع شاهد البيان المختوم، ولا تثبيتَ بلا ذلك',
+        );
+      }
+      const manifest = new StateManifest(stateManifestPath(root), { sealer: signer, env });
+      if (!manifest.exists()) {
+        throw new Error(`ANCHOR_WITNESS_STATE_ROOT_MISSING: ${stateManifestPath(root)}`);
+      }
+      // التحقّقُ من الخاتَم والرِباط واستخراجُ مفتاح مصادقة دفتر الرفع قبل أي
+      // رفعٍ — الأداةُ لا تكتب في بيانٍ لم تتحقّق منه.
+      await manifest.openAsync(stateManifestBinding(signer.id, env));
       const record = await maybeAnchorLogWithHsm(store, signer, log, {
         intervalMs: config.intervalMs,
         force: args.force,
+        onAnchor: (anchored) => manifest.raise('anchoredCount', anchored.count),
       });
+      // الرفعُ يُطوى في متنٍ مختومٍ الآن لا في الإقلاع التالي، فلا يبقى شاهدٌ
+      // خارجَ الخاتَم بين تشغيل الأداة وإقلاع الخدمة.
+      if (record !== null) await manifest.checkpointAsync();
       if (record === null) {
         const message = 'لم يقع تثبيت: الفترة لم تنقضِ أو لا جديد. استعمل --force للتثبيت الآن.';
         return args.json

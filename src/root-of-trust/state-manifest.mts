@@ -65,6 +65,20 @@ export const STATE_MANIFEST_FILE = 'root-of-trust.manifest.json';
 /** دفترُ الرفعِ المتسلسلُ بالتجزئةِ — يجاورُ البيانَ ويُطوى عندَ نقطةِ الضبط. */
 export const STATE_JOURNAL_FILE = 'root-of-trust.manifest.journal';
 
+/**
+ * قفلُ الكاتبِ الواحدِ على دفترِ الرفعِ (‏`WL-165`، امتدادُ `R4-B-03`/`M11.04-F05`).
+ *
+ * **لماذا صارَ لازماً:** الرفعُ كان يقرأُ الرأسَ ثمَّ يُلحِقُ سطراً بلا أيِّ حجزٍ،
+ * والقيمةُ المقروءةُ من ذاكرةِ العمليةِ لا من القرصِ. فعمليّتانِ ترفعانِ الشاهدَ
+ * نفسَه — وهو ما يفعلُه بالضبطِ مُثبِّتُ السجلِّ خارجَ العمليةِ (`scripts/anchor-log.mjs`)
+ * معَ الخدمةِ العاملةِ — تكتبانِ سطرينِ يحملانِ `prev` نفسَه أو قيمةً غيرَ صاعدةٍ،
+ * فيُقرأُ الدفترُ عندَ الإقلاعِ التالي `STATE_MANIFEST_JOURNAL_INVALID` ولا يُقلعُ
+ * جذرُ الثقةِ إلّا بحذفٍ يدويٍّ. أي أنَّ تعدُّدَ الكُتّابِ كان تعطيلاً ذاتيّاً
+ * كامناً لا مجرَّدَ سباقٍ. فالرفعُ ونقطةُ الضبطِ صارا داخلَ قفلٍ حصريٍّ، والقراءةُ
+ * داخلَ القفلِ **من القرصِ** لا من الذاكرةِ.
+ */
+export const STATE_JOURNAL_LOCK_SUFFIX = '.lock';
+
 /** المتغيّرُ الذي يُعلَنُ به إذنُ التهيئةِ — إعلانٌ لا استنباط. */
 export const STATE_PROVISION_ENV = 'XUUX_ROOT_OF_TRUST_PROVISION';
 
@@ -89,6 +103,7 @@ export const StateManifestErrorCodes = [
   'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
   'STATE_MANIFEST_ROLLBACK_DETECTED',
   'STATE_MANIFEST_SEALER_REQUIRED',
+  'STATE_MANIFEST_JOURNAL_LOCKED',
 ] as const;
 
 export type StateManifestErrorCode = (typeof StateManifestErrorCodes)[number];
@@ -267,6 +282,34 @@ function appendLine(file: string, text: string, fsync: boolean): void {
 }
 
 /**
+ * مالكُ قفلِ الدفترِ إن كان مقروءاً.
+ * @param file - ملفُّ القفل
+ * @returns رقمُ العمليةِ المالكةِ أو `null`
+ */
+function journalLockOwner(file: string): number | null {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown };
+    return typeof parsed.pid === 'number' ? parsed.pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * هل العمليةُ حيّةٌ؟ قفلٌ لعمليةٍ ميتةٍ أثرُ تعطُّلٍ لا ملكيّةٌ.
+ * @param pid - رقمُ العملية
+ * @returns حياتُها
+ */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: string }).code === 'EPERM';
+  }
+}
+
+/**
  * بيانُ جذرِ الحالةِ المختومُ: يُقرأُ بعدَ التحقّقِ، ويُرفَعُ ولا يُخفَض.
  *
  * دورةُ الحياةِ: `provisionAsync` مرّةً واحدةً ⇒ `openAsync` عندَ كلِّ إقلاعٍ
@@ -276,6 +319,10 @@ function appendLine(file: string, text: string, fsync: boolean): void {
 export class StateManifest {
   readonly location: string;
   readonly journalFile: string;
+  /** قفلُ الكاتبِ الواحدِ على الدفترِ (‏`WL-165`). */
+  readonly journalLockFile: string;
+  /** هل هذه النسخةُ تحملُ القفلَ الآنَ؟ يمنعُ فكَّ قفلٍ مُتشعِّبٍ. */
+  #journalLockDepth = 0;
   readonly #fsync: boolean;
   #sealer: ManifestSealer | null;
   #verified: StateManifestBody | null = null;
@@ -301,6 +348,7 @@ export class StateManifest {
   ) {
     this.location = file;
     this.journalFile = join(dirname(file), STATE_JOURNAL_FILE);
+    this.journalLockFile = this.journalFile + STATE_JOURNAL_LOCK_SUFFIX;
     this.#fsync = options.fsync ?? true;
     this.#sealer = options.sealer ?? null;
     this.#env = options.env ?? process.env;
@@ -447,16 +495,66 @@ export class StateManifest {
    * عندَ كلِّ إقلاعٍ، فنافذةُ الإعادةِ المُعلَنةُ ما بينَ إقلاعينِ لا أكثر.
    */
   async checkpointAsync(): Promise<void> {
-    const body = this.#verified ?? this.#verify(null);
-    const next: StateManifestBody = {
-      ...body,
-      sequence: body.sequence + 1,
-      sealedAt: new Date().toISOString(),
-      journalHead: 'checkpoint:' + String(body.sequence + 1),
-    };
-    await this.#seal(next);
-    rmSync(this.journalFile, { force: true });
-    this.#verified = next;
+    // WL-165: الطيُّ يحذفُ الدفترَ، فلو وقعَ رفعٌ من عمليةٍ أخرى بينَ الختمِ
+    // والحذفِ لَضاعَ شاهدٌ مرفوعٌ بلا أثرٍ — وهو عينُ ما تقولُه `R4-B-03`:
+    // شاهدٌ يبقى خارجَ الخاتَمِ. فالطيُّ داخلَ القفلِ والقراءةُ من القرصِ داخلَه.
+    this.#acquireJournalLock();
+    try {
+      this.#verified = null;
+      const body = this.#verify(null);
+      const next: StateManifestBody = {
+        ...body,
+        sequence: body.sequence + 1,
+        sealedAt: new Date().toISOString(),
+        journalHead: 'checkpoint:' + String(body.sequence + 1),
+      };
+      await this.#seal(next);
+      rmSync(this.journalFile, { force: true });
+      this.#verified = next;
+    } finally {
+      this.#releaseJournalLock();
+    }
+  }
+
+  /**
+   * يأخذُ قفلَ الكاتبِ الواحدِ على دفترِ الرفعِ (‏`WL-165`). قفلٌ لعمليةٍ حيّةٍ
+   * أخرى رفضٌ مغلقٌ برمزِه، وقفلٌ لعمليةٍ ميتةٍ أو لا يُقرأُ يُنتزَعُ مرّةً واحدةً:
+   * أثرُ تعطُّلٍ لا ملكيّةٌ قائمةٌ، ولو بقيَ لعطَّلَ الرفعَ أبداً.
+   */
+  #acquireJournalLock(): void {
+    if (this.#journalLockDepth > 0) {
+      this.#journalLockDepth += 1;
+      return;
+    }
+    mkdirSync(dirname(this.journalFile), { recursive: true });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const fd = openSync(this.journalLockFile, 'wx', 0o600);
+        try {
+          writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+        } finally {
+          closeSync(fd);
+        }
+        this.#journalLockDepth = 1;
+        return;
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'EEXIST') throw error;
+        const owner = journalLockOwner(this.journalLockFile);
+        if (owner !== null && owner !== process.pid && pidAlive(owner)) {
+          throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
+        }
+        rmSync(this.journalLockFile, { force: true });
+      }
+    }
+    throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'تعذّرَ أخذُ القفل');
+  }
+
+  /** يفكُّ قفلَ الدفترِ عندَ الخروجِ من أعمقِ مستوى أُخِذَ فيه. */
+  #releaseJournalLock(): void {
+    this.#journalLockDepth -= 1;
+    if (this.#journalLockDepth > 0) return;
+    this.#journalLockDepth = 0;
+    rmSync(this.journalLockFile, { force: true });
   }
 
   /**
@@ -489,26 +587,35 @@ export class StateManifest {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new StateManifestError('STATE_MANIFEST_REGRESSION', `${key}=${String(value)}`);
     }
-    const body = this.read();
-    if (value <= body[key]) return;
     // R4-K3-02: لا يُكتَبُ سطرٌ غيرُ مُصادَقٍ عليه في الإنتاجِ أصلاً. ولو كُتِبَ
     // لصارَ في الدفترِ سطرٌ لا يفرقُ عن سطرِ المهاجمِ، فيُختَمُ معه في المتن.
     if (this.#journalKey === null) {
       this.#assertJournalKeyAvailable('رفعٌ بلا مفتاحِ مصادقةٍ');
     }
-    const head = this.#journalHead(body);
-    const at = new Date().toISOString();
-    const seq = body.sequence;
-    const entry: Omit<JournalEntry, 'hash' | 'mac'> = { seq, key, value, at, prev: head };
-    const hash = journalHash(body.instanceId, entry, this.#journalKey);
-    const full: JournalEntry = { ...entry, hash };
-    // R4-B-01: إن وُجدَ مفتاحٌ من التوكن، فاكتبْ الـ HMAC كحقلٍ مُنفصلٍ أيضاً
-    // كي يُعرفَ عندَ التحقّقِ أنَّ السطرَ مُصادَقٌ عليه لا عارٍ.
-    if (this.#journalKey) {
-      full.mac = hash;
+    // WL-165: القفلُ يلزمُ قبلَ **القراءةِ** لا قبلَ الكتابةِ وحدَها، والقيمةُ
+    // والرأسُ يُقرآنِ داخلَ القفلِ ومن القرصِ لا من الذاكرةِ. فلا يُلحَقُ سطرٌ
+    // برأسٍ أو بقيمةٍ قدَّمَهما كاتبٌ آخرُ في الأثناءِ فيُقرأَ الدفترُ منقطعاً.
+    this.#acquireJournalLock();
+    try {
+      this.#verified = null;
+      const body = this.#verify(null);
+      if (value <= body[key]) return;
+      const head = this.#journalHead(body);
+      const at = new Date().toISOString();
+      const seq = body.sequence;
+      const entry: Omit<JournalEntry, 'hash' | 'mac'> = { seq, key, value, at, prev: head };
+      const hash = journalHash(body.instanceId, entry, this.#journalKey);
+      const full: JournalEntry = { ...entry, hash };
+      // R4-B-01: إن وُجدَ مفتاحٌ من التوكن، فاكتبْ الـ HMAC كحقلٍ مُنفصلٍ أيضاً
+      // كي يُعرفَ عندَ التحقّقِ أنَّ السطرَ مُصادَقٌ عليه لا عارٍ.
+      if (this.#journalKey) {
+        full.mac = hash;
+      }
+      appendLine(this.journalFile, JSON.stringify(full) + '\n', this.#fsync);
+      this.#verified = { ...body, [key]: value };
+    } finally {
+      this.#releaseJournalLock();
     }
-    appendLine(this.journalFile, JSON.stringify(full) + '\n', this.#fsync);
-    this.#verified = { ...body, [key]: value };
   }
 
   /**

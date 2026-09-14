@@ -666,11 +666,13 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
   try {
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
+    // WL-165: مصرفُ الشاهدِ صارَ شرطاً، فالرفعُ يقعُ داخلَ المسارِ نفسِه لا
+    // بنداءٍ منفصلٍ بعدَه يُمكنُ أن يُنسى.
     const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
       force: true,
+      onAnchor: (anchored) => runtime.raiseAnchorWitness(anchored.count),
     });
     assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
-    runtime.raiseAnchorWitness(record.count);
     assert.equal(runtime.manifest.read().anchoredCount, record.count);
 
     // إغلاقُ السجلِّ قبلَ محوِه: القفلُ لا يُتْرَكُ مفتوحاً.
@@ -872,6 +874,101 @@ describe('المصنعُ الإنتاجيُّ يُسلِّمُ مخزنَ سحب
       });
       const ca2 = new CertificateAuthority(kingId, { revocationStore: store2 });
       assert.equal(ca2.isValid(cert), false, 'بعد إعادة التشغيل بنفس الملف: ما زالت مسحوبة');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// ————————————————————————————————————————————————————————————————————————
+// WL-165 — امتدادُ `R4-B-03`/`M11.04-F05`: شاهدُ المرساةِ لا يبقى خارجَ الخاتَمِ
+// بسهوِ مُستدعٍ، ودفترُ الرفعِ كاتبُه واحدٌ في اللحظةِ.
+//
+// لماذا أُضيفَ هذا القسمُ: الإصلاحُ السابقُ جعلَ `onAnchor` **اختياريّاً**،
+// والمُستدعي الحقيقيُّ الوحيدُ في المستودعِ (`scripts/anchor-log.mjs`) لم يكن
+// يُمرِّرُه — فكانت الأداةُ تُوقِّعُ مرساةً ولا يرتفعُ الشاهدُ، أي النتيجةُ
+// المفتوحةُ قائمةً في المسارِ التشغيليِّ بعدَ «إصلاحِها» في الدالّة.
+describe('WL-165: مصرفُ شاهدِ المرساةِ شرطٌ، ودفترُ الرفعِ كاتبُه واحدٌ', () => {
+  test('مرساةٌ بلا مصرفِ شاهدٍ تُرفَضُ قبلَ التوقيعِ ولا تُكتَبُ', async () => {
+    const { runtime, root, cleanup } = await buildRuntime();
+    try {
+      await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
+      const store = new FileAnchorStore(join(root, 'anchors-no-sink.json'), { fsync: false });
+      const error = await caughtAsync(() =>
+        maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, { force: true }),
+      );
+      assert.equal(error.code, 'ANCHOR_WITNESS_SINK_MISSING', 'الرفضُ برمزِه لا برسالةٍ عامّةٍ');
+      assert.equal(store.read().length, 0, 'ولا مرساةَ موقَّعةً خُلِّفت: الرفضُ قبلَ التوقيعِ');
+      assert.equal(runtime.manifest.read().anchoredCount, 0, 'والشاهدُ لم يتحرَّكْ');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('رفعٌ من نسخةٍ قديمةِ الذاكرةِ يقرأُ القرصَ فلا يُنتَجُ دفترٌ منقطعٌ', async () => {
+    const { runtime, root, king, cleanup } = await buildRuntime();
+    try {
+      const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) };
+      // نسخةٌ ثانيةٌ على الجذرِ نفسِه — تمثيلُ الأداةِ التي تعملُ خارجَ العمليةِ.
+      const second = new StateManifest(stateManifestPath(root), {
+        fsync: false,
+        sealer: runtime.anchorSigner,
+        env,
+      });
+      await second.openAsync(stateManifestBinding(runtime.anchorSigner.id, env));
+      // الأولى (نسخةُ الخدمةِ) تقرأُ الحالةَ فتصيرُ ذاكرتُها مرجعاً، ثمَّ ترفعُ
+      // الثانيةُ. ولو بقيَ الرفعُ يقرأُ من الذاكرةِ لكتبتِ الأولى سطراً برأسٍ
+      // قديمٍ أو بقيمةٍ غيرِ صاعدةٍ، فلا يُقرأُ الدفترُ عندَ الإقلاعِ التالي.
+      assert.equal(runtime.manifest.read().anchoredCount, 0);
+      second.raise('anchoredCount', 9);
+      // الخدمةُ ترفعُ قيمةً أدنى مما رفعتْه الأداةُ: لو قِيسَ الحدُّ من الذاكرةِ
+      // لكُتِبَ سطرٌ غيرُ صاعدٍ بعدَ سطرِ الأداةِ، فيُرفَضُ الدفترُ عندَ الإقلاعِ
+      // التالي — منعُ خدمةٍ بذاتِها. والقراءةُ من القرصِ داخلَ القفلِ تجعلُه
+      // لا عملاً بلا ضررٍ.
+      runtime.raiseAnchorWitness(7);
+      assert.equal(runtime.manifest.read().anchoredCount, 9, 'الحدُّ من القرصِ لا من الذاكرةِ');
+      runtime.raiseAnchorWitness(11);
+      // ثالثةٌ نظيفةُ الذاكرةِ تُطوي الدفترَ: لو انقطعتِ السلسلةُ لرُفِعَ رمزٌ.
+      const reader = new StateManifest(stateManifestPath(root), {
+        fsync: false,
+        sealer: runtime.anchorSigner,
+        env,
+      });
+      await reader.openAsync(stateManifestBinding(runtime.anchorSigner.id, env));
+      assert.equal(reader.read().anchoredCount, 11, 'الدفترُ مقروءٌ والقيمةُ أعلى الرفعَينِ');
+      assert.equal(existsSync(reader.journalLockFile), false, 'والقفلُ لا يُترَكُ قائماً');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('قفلٌ لعمليةٍ حيّةٍ أخرى يمنعُ الرفعَ رفضاً مغلقاً برمزِه', async () => {
+    const { runtime, cleanup } = await buildRuntime();
+    try {
+      // العمليةُ 1 حيّةٌ في كلِّ نظامٍ يعملُ عليه هذا الاختبارُ، وليست هذه العمليةَ.
+      writeFileSync(runtime.manifest.journalLockFile, JSON.stringify({ pid: 1, at: 'x' }));
+      const error = caught(() => runtime.raiseAnchorWitness(3));
+      assert.equal(error.code, 'STATE_MANIFEST_JOURNAL_LOCKED', 'رفضٌ مغلقٌ لا كتابةٌ متوازيةٌ');
+      assert.equal(runtime.manifest.read().anchoredCount, 0, 'ولا شاهدَ ارتفعَ');
+      rmSync(runtime.manifest.journalLockFile, { force: true });
+      runtime.raiseAnchorWitness(3);
+      assert.equal(runtime.manifest.read().anchoredCount, 3, 'وبزوالِ القفلِ يقعُ الرفعُ');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('قفلٌ لعمليةٍ ميتةٍ أثرُ تعطُّلٍ يُنتزَعُ فلا يتعطَّلُ الرفعُ أبداً', async () => {
+    const { runtime, cleanup } = await buildRuntime();
+    try {
+      // رقمُ عمليةٍ فوقَ الحدِّ الأقصى في لينكس: ميتٌ يقيناً لا تخميناً.
+      writeFileSync(
+        runtime.manifest.journalLockFile,
+        JSON.stringify({ pid: 4194305, at: 'stale' }),
+      );
+      runtime.raiseAnchorWitness(5);
+      assert.equal(runtime.manifest.read().anchoredCount, 5, 'قفلٌ ميتٌ لا يُعطِّلُ جذرَ الثقةِ');
+      assert.equal(existsSync(runtime.manifest.journalLockFile), false, 'والقفلُ فُكَّ بعدَه');
     } finally {
       cleanup();
     }

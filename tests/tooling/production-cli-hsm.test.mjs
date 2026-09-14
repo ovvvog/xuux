@@ -20,7 +20,7 @@ import {
   randomBytes,
   sign as softwareSign,
 } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
@@ -113,6 +113,9 @@ function context() {
       EVENT_LOG_FILE: join(root, 'events.log'),
       ANCHOR_STORE_FILE: join(root, 'anchors.jsonl'),
       HALT_SWITCH_FILE: join(root, 'halt', 'directive.json'),
+      // WL-165: جذرُ الحالةِ صارَ شرطاً للتثبيتِ — المرساةُ الموقَّعةُ ترفعُ
+      // شاهدَ البيانِ المختومِ، فلا تُوقَّعُ مرساةٌ لا أثرَ لها في الخاتَم.
+      XUUX_STATE_ROOT: root,
     },
     deps: { openSource: async () => ({ source: token, close: async () => undefined }) },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
@@ -172,6 +175,43 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
       const log = readFileSync(ctx.env.EVENT_LOG_FILE, 'utf8');
       assert.equal(log.includes('"n":1'), false);
       assert.match(log, /"alg":"AES-256-GCM"/);
+
+      // WL-165: وهذا موضعُ النتيجةِ المفتوحةِ — لا يكفي أن تُوقَّعَ المرساةُ؛
+      // شاهدُها يجبُ أن يرتفعَ في البيانِ المختومِ نفسِه، وإلّا أمكنَ محوُ
+      // السجلِّ والمخزنِ معاً والإقلاعُ نظيفاً. والقياسُ من الملفِّ لا من مقولةِ
+      // الأداةِ: متنُ البيانِ المختومِ على القرصِ بعدَ التثبيتِ.
+      const manifest = JSON.parse(
+        readFileSync(join(ctx.root, 'root-of-trust.manifest.json'), 'utf8'),
+      );
+      assert.equal(manifest.body.anchoredCount, 1, 'شاهدُ المرساةِ ارتفعَ في المتنِ المختومِ');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('anchor-log: التثبيت يُرفَض إذا غاب جذر الحالة فلا مرساةَ بلا شاهد (WL-165)', async () => {
+    const ctx = context();
+    try {
+      const runtime = await createProductionRootOfTrust(
+        ctx.env,
+        { root: ctx.root, fsync: false },
+        ctx.deps,
+      );
+      await runtime.log.appendSealed('cli.anchor', 'مدقّق', { n: 1 });
+      await runtime.close();
+
+      const env = { ...ctx.env };
+      delete env.XUUX_STATE_ROOT;
+      await assert.rejects(
+        () => runAnchor(['anchor', '--force', '--json'], env, ctx.deps),
+        /ANCHOR_WITNESS_STATE_ROOT_MISSING/,
+        'الرفضُ باسمِه: أداةٌ لا تعرفُ جذرَ الحالةِ لا تُوقِّعُ مرساةً',
+      );
+      assert.equal(
+        existsSync(ctx.env.ANCHOR_STORE_FILE),
+        false,
+        'ولا مرساةَ موقَّعةً خُلِّفت: الرفضُ قبلَ التوقيعِ',
+      );
     } finally {
       ctx.cleanup();
     }
