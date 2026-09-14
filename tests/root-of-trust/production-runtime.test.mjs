@@ -667,6 +667,108 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
   }
 });
 
+/**
+ * موقّعٌ بلا `deriveJournalKey` — أي توكنٌ لا يُسألُ مفتاحَ مصادقةٍ. وهذا هو
+ * المسارُ الذي كانَ يُسقِطُ الدفترَ إلى تجزئةٍ عاريّةٍ صامتاً (‏`R4-K3-02`).
+ * @param signer - الموقّعُ الحقيقيُّ
+ * @returns موقّعاً يختمُ ويتحقّقُ ولا يُشتقُّ منه مفتاحٌ
+ */
+function sealerWithoutJournalKey(signer) {
+  return {
+    id: signer.id,
+    signAsync: (payload) => signer.signAsync(payload),
+    verify: (payload, signature) => signer.verify(payload, signature),
+  };
+}
+
+test('R4-K3-02: موقّعٌ بلا مفتاحِ مصادقةٍ يُرفَضُ في الإنتاجِ ولا يُسقَطُ إلى تجزئةٍ عاريّةٍ', async () => {
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    const manifest = new StateManifest(stateManifestPath(root), {
+      fsync: false,
+      sealer: sealerWithoutJournalKey(runtime.anchorSigner),
+      env: PRODUCTION_ENV,
+    });
+    await assert.rejects(
+      () => manifest.openAsync(stateManifestBinding(runtime.anchorSigner.id, PRODUCTION_ENV)),
+      (err) =>
+        /** @type {Error & { code?: string }} */ (err).code ===
+        'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+      'الإنتاجُ لا يقبلُ دفترَ رفعٍ بلا مفتاحِ مصادقةٍ من التوكن',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('R4-K3-02: سطرٌ متّسقُ التجزئةِ لا يرفعُ العدّاداتِ حينَ يغيبُ المفتاحُ', async () => {
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    const manifestPath = stateManifestPath(root);
+    const journalPath = join(root, 'root-of-trust.manifest.journal');
+    const sealed = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const body = sealed.body;
+    const at = new Date().toISOString();
+    // سطرٌ يحسبُه مالكُ القرصِ بنفسِه: تجزئةٌ عاريّةٌ متّسقةٌ بلا أيِّ سرٍّ.
+    const entry = {
+      seq: body.sequence,
+      key: 'ledgerCommitted',
+      value: 99,
+      at,
+      prev: body.journalHead,
+    };
+    const forged = {
+      ...entry,
+      hash: createHash('sha256')
+        .update(JSON.stringify({ instanceId: body.instanceId, ...entry }))
+        .digest('hex'),
+    };
+    appendFileSync(journalPath, JSON.stringify(forged) + '\n');
+
+    const manifest = new StateManifest(manifestPath, {
+      fsync: false,
+      sealer: sealerWithoutJournalKey(runtime.anchorSigner),
+      env: PRODUCTION_ENV,
+    });
+    await assert.rejects(
+      () => manifest.openAsync(stateManifestBinding(runtime.anchorSigner.id, PRODUCTION_ENV)),
+      (err) =>
+        /** @type {Error & { code?: string }} */ (err).code ===
+        'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+      'سطرٌ مدسوسٌ متّسقُ التجزئةِ يجبُ أن يُرفَضَ لا أن يرفعَ عدّاداً',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('R4-K3-02: دفترٌ مُصادَقٌ يُقرأُ بلا مفتاحٍ يُرفَضُ تخفيضاً في كلِّ البيئاتِ', async () => {
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    // رفعٌ حقيقيٌّ عبرَ المسارِ الإنتاجيِّ: يكتبُ سطراً يحملُ `mac`.
+    runtime.manifest.raise('anchoredCount', 3);
+    const journalPath = join(root, 'root-of-trust.manifest.journal');
+    const written = JSON.parse(readFileSync(journalPath, 'utf8').trim().split('\n')[0]);
+    assert.equal(typeof written.mac, 'string', 'السطرُ المكتوبُ يجبُ أن يكونَ مُصادَقاً');
+
+    const devEnv = { NODE_ENV: 'test' };
+    const manifest = new StateManifest(stateManifestPath(root), {
+      fsync: false,
+      sealer: sealerWithoutJournalKey(runtime.anchorSigner),
+      env: devEnv,
+    });
+    await assert.rejects(
+      () => manifest.openAsync(stateManifestBinding(runtime.anchorSigner.id, PRODUCTION_ENV)),
+      (err) =>
+        /** @type {Error & { code?: string }} */ (err).code ===
+        'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+      'دفترٌ كُتِبَ مُصادَقاً ثمَّ قُرِئَ بلا مفتاحٍ تخفيضٌ يُرفَضُ',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
 test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبرَ onAnchor (M11.04-F05)', async () => {
   const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
   const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');

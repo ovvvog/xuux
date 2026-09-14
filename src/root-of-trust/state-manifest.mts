@@ -57,6 +57,8 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 
+import { isProductionRuntime } from './production-boot.mjs';
+
 /** اسمُ الملفِّ في جذرِ الحالةِ — مثبَّتٌ كي لا يُخترَع في موضعينِ. */
 export const STATE_MANIFEST_FILE = 'root-of-trust.manifest.json';
 
@@ -282,16 +284,37 @@ export class StateManifest {
    * الإقلاعِ، فيُستعملُ في تجزئةِ سطورِ الدفترِ HMAC لا SHA-256 عاريّاً.
    */
   #journalKey: string | null = null;
+  /**
+   * البيئةُ التي يُقرأُ منها إعلانُ الوضعِ (‏`R4-K3-02`). تُحقَنُ في الاختبارِ
+   * وتُقرأُ من العمليةِ في الإنتاجِ، فيُعرَفُ متى تكونُ مصادقةُ دفترِ الرفعِ
+   * **إلزاماً** لا خياراً.
+   */
+  readonly #env: NodeJS.ProcessEnv;
 
   /**
    * @param file - مسارُ ملفِّ البيان
-   * @param options - مزامنةُ القرصِ، والموقّعُ الذي يختمُ ويتحقّق
+   * @param options - مزامنةُ القرصِ، والموقّعُ الذي يختمُ ويتحقّق، والبيئة
    */
-  constructor(file: string, options: { fsync?: boolean; sealer?: ManifestSealer } = {}) {
+  constructor(
+    file: string,
+    options: { fsync?: boolean; sealer?: ManifestSealer; env?: NodeJS.ProcessEnv } = {},
+  ) {
     this.location = file;
     this.journalFile = join(dirname(file), STATE_JOURNAL_FILE);
     this.#fsync = options.fsync ?? true;
     this.#sealer = options.sealer ?? null;
+    this.#env = options.env ?? process.env;
+  }
+
+  /**
+   * هل مصادقةُ دفترِ الرفعِ إلزامٌ؟ (‏`R4-K3-02`) في الإنتاجِ نعم بلا استثناءٍ:
+   * تجزئةٌ عاريّةٌ (SHA-256 بلا مفتاحٍ) يقدرُ مالكُ القرصِ على حسابِها بنفسِه،
+   * فسطرٌ «متّسقُ التجزئةِ» يرفعُ العدّاداتِ قسريّاً. والمصادقةُ وحدَها هي التي
+   * تجعلُ الاتّساقَ برهاناً.
+   * @returns هل المصادقةُ إلزامٌ في هذا الوضع
+   */
+  #journalAuthRequired(): boolean {
+    return isProductionRuntime(this.#env);
   }
 
   /**
@@ -321,11 +344,27 @@ export class StateManifest {
    */
   async initJournalKey(): Promise<void> {
     const sealer = this.#sealer;
-    if (sealer === null || typeof sealer.deriveJournalKey !== 'function') return;
+    if (sealer === null || typeof sealer.deriveJournalKey !== 'function') {
+      this.#assertJournalKeyAvailable('لا مُشتِقَّ مفتاحٍ في الموقّع');
+      return;
+    }
     const body = this.read();
-    this.#journalKey = await sealer.deriveJournalKey(body.instanceId);
+    const key = await sealer.deriveJournalKey(body.instanceId);
+    if (key === '') this.#assertJournalKeyAvailable('مفتاحٌ فارغٌ من التوكن');
+    this.#journalKey = key === '' ? null : key;
     // أبطِلْ المتنَ المُتحقَّقَ مِن قبلُ ليُعادَ طيُّ الدفترِ بالمفتاحِ الآن.
     this.#verified = null;
+  }
+
+  /**
+   * فشلٌ مغلقٌ حينَ تكونُ المصادقةُ إلزاماً ولا مفتاحَ (‏`R4-K3-02`). لا يُسقَطُ
+   * الدفترُ إلى تجزئةٍ عاريّةٍ في الإنتاجِ: ذاك عينُ ما يجعلُ السطرَ المدسوسَ
+   * مقبولاً.
+   * @param detail - سببُ غيابِ المفتاحِ، اسماً لا سرّاً
+   */
+  #assertJournalKeyAvailable(detail: string): void {
+    if (!this.#journalAuthRequired()) return;
+    throw new StateManifestError('STATE_MANIFEST_JOURNAL_UNAUTHENTICATED', detail);
   }
 
   /**
@@ -334,8 +373,13 @@ export class StateManifest {
    */
   async #deriveJournalKey(instanceId: string): Promise<void> {
     const sealer = this.#sealer;
-    if (sealer === null || typeof sealer.deriveJournalKey !== 'function') return;
-    this.#journalKey = await sealer.deriveJournalKey(instanceId);
+    if (sealer === null || typeof sealer.deriveJournalKey !== 'function') {
+      this.#assertJournalKeyAvailable('لا مُشتِقَّ مفتاحٍ في الموقّع');
+      return;
+    }
+    const key = await sealer.deriveJournalKey(instanceId);
+    if (key === '') this.#assertJournalKeyAvailable('مفتاحٌ فارغٌ من التوكن');
+    this.#journalKey = key === '' ? null : key;
   }
 
   /**
@@ -447,6 +491,11 @@ export class StateManifest {
     }
     const body = this.read();
     if (value <= body[key]) return;
+    // R4-K3-02: لا يُكتَبُ سطرٌ غيرُ مُصادَقٍ عليه في الإنتاجِ أصلاً. ولو كُتِبَ
+    // لصارَ في الدفترِ سطرٌ لا يفرقُ عن سطرِ المهاجمِ، فيُختَمُ معه في المتن.
+    if (this.#journalKey === null) {
+      this.#assertJournalKeyAvailable('رفعٌ بلا مفتاحِ مصادقةٍ');
+    }
     const head = this.#journalHead(body);
     const at = new Date().toISOString();
     const seq = body.sequence;
@@ -606,6 +655,11 @@ export class StateManifest {
     const lines = readFileSync(this.journalFile, 'utf8')
       .split('\n')
       .filter((line) => line.trim() !== '');
+    // R4-K3-02: دفترٌ غيرُ فارغٍ بلا مفتاحِ مصادقةٍ في الإنتاجِ لا يُطوى: طيُّه
+    // بتجزئةٍ عاريّةٍ يجعلُ كلَّ سطرٍ يحسبُه مالكُ القرصِ سطراً «صحيحاً».
+    if (lines.length > 0 && this.#journalKey === null) {
+      this.#assertJournalKeyAvailable('طيُّ دفترٍ بلا مفتاحِ مصادقةٍ');
+    }
     let head = body.journalHead;
     const folded: StateManifestBody = { ...body };
     let first = true;
@@ -641,7 +695,15 @@ export class StateManifest {
         }
         nextHead = mac;
       } else {
-        // لا مفتاحَ: مسارُ الاختبارِ — تجزئةٌ عاريّةٌ.
+        // لا مفتاحَ: مسارُ الاختبارِ — تجزئةٌ عاريّةٌ. وسطرٌ يحملُ `mac` بلا
+        // مفتاحٍ يُتحقَّقُ به تخفيضٌ لا سهوٌ (‏`R4-K3-02`): دفترٌ كُتِبَ مُصادَقاً
+        // ثمَّ قُرِئَ بلا مفتاحٍ — يُرفَضُ في كلِّ البيئاتِ ولا يُقرأُ عاريّاً.
+        if (mac !== undefined) {
+          throw new StateManifestError(
+            'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+            'سطرٌ مُصادَقٌ يُقرأُ بلا مفتاحٍ',
+          );
+        }
         if (hash !== journalHash(body.instanceId, rest)) {
           throw new StateManifestError('STATE_MANIFEST_JOURNAL_INVALID', 'تجزئةٌ لا تُطابق');
         }
