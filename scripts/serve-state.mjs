@@ -37,28 +37,14 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { ApiGateway, loadApiPolicy } from '../src/api/index.mjs';
+import { composeEnforcementChain } from '../src/core/composition-root.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../src/observability/index.mjs';
 import {
   createMemoryRepositories,
   createPostgresRepositories,
 } from '../src/persistence/composition.mjs';
-import { createMemoryRepository } from '../src/persistence/repository-memory.mjs';
 import { createPool } from '../src/persistence/db.mjs';
-import { createPolicyDecisionPoint } from '../src/policy/engine.mjs';
-import { LawRegistry } from '../src/governance/law-system.mjs';
-import { loadConstitutionPolicy } from '../src/constitution/constitution.mjs';
-import { Legislature, enforcementGate, loadLegislationPolicy } from '../src/legislation/index.mjs';
-import { EnforcementPoint } from '../src/policy/enforcement-point.mjs';
-import { loadPolicyBundle } from '../src/policy/loader.mjs';
 import { EventLog } from '../src/root-of-trust/index.mjs';
-import { KingIdentity, CertificateAuthority } from '../src/root-of-trust/identity.mjs';
-import {
-  AgentRegistry,
-  IdentityGate,
-  CapabilityGrantLedger,
-  IncidentRegister,
-  loadCapabilityCatalog,
-} from '../src/identity/index.mjs';
 import {
   compileRoutes,
   createSecureStateServer,
@@ -124,37 +110,18 @@ async function main() {
   const { repositories, close, source } = await repositoriesFor();
   const log = new EventLog();
 
-  // R6-A-04: تركيبُ نقطةِ التفويضِ ببوابةِ هويّةٍ موصولةٍ — لا إنشاءٌ خامٌّ بلا
-  // بوابةٍ. الفاعلُ يُحقَّقُ من جذرِ الثقةِ لا من ادّعاءٍ في الطلبِ. وفي مسارِ التطويرِ
-  // هذا يُبنى مِلكٌ هويّةٌ صغيرٌ: سجلٌّ في الذاكرةِ يُسجِّلُ فيه المشاهدُ، وسلطةُ
-  // تصديقٍ تُصدِّقُ شهادتَه، وكتالوجُ قدراتٍ من الإعداد. وليس هذا بديلاً عن جذرِ
-  // الثقةِ الإنتاجيِّ — هو تركيبُ تطويرٍ يُعلنُ حدودَه.
-  const kingIdentity = new KingIdentity();
-  const authority = new CertificateAuthority(kingIdentity);
-  const catalog = loadCapabilityCatalog({ dir: CONFIG_DIR });
-  const incidents = new IncidentRegister({ log: /** @type {never} */ (log) });
-  const grants = new CapabilityGrantLedger({
-    catalog,
+  // R6-A-04: السلسلةُ تُوصَلُ من **جذرِ التركيبِ** لا بيدِ كلِّ مُشغِّلٍ. كان هذا
+  // النصُّ يُعيدُ بناءَ الهويّةِ والتفويضِ سطراً سطراً، فكانَ نسخةً ثانيةً من
+  // التركيبِ تفترقُ عن غيرِها عندَ أوّلِ وصلةٍ تُضافُ. والآنَ الموضعُ واحدٌ:
+  // `src/core/composition-root.mjs` — وبوابةُ الهويّةِ فيه ليست خياراً يُمرَّرُ.
+  const chain = composeEnforcementChain({
     log: /** @type {never} */ (log),
-    incidents,
-    now: () => new Date(),
+    configDir: CONFIG_DIR,
+    withLegislation: true,
+    lawRepository: /** @type {Record<string, unknown>} */ (repositories)['laws'],
+    crown: null,
   });
-  const registry = new AgentRegistry({
-    ca: authority,
-    log: /** @type {never} */ (log),
-    repository: createMemoryRepository(AgentRegistry.spec),
-    catalog,
-    grants,
-    incidents,
-  });
-  const identityGate = new IdentityGate({
-    registry,
-    ca: authority,
-    catalog,
-    grants,
-    incidents,
-    log: /** @type {never} */ (log),
-  });
+  const { registry, enforcementPoint } = chain;
   // تُسجَّلُ المشاهدُ في السجلِّ كي تُصدِّقَه البوابةُ: هويةٌ من جذرِ الثقةِ لا نصٌّ.
   const viewerAgent = await registry.register({
     name: 'state-viewer-dev',
@@ -172,38 +139,12 @@ async function main() {
     agents: /** @type {never} */ (agents),
     log: /** @type {never} */ (log),
   });
-  // وحاجزُ التشريعِ موصولٌ بنقطةِ الإنفاذِ في هذا المسارِ الحيِّ (الخطوةُ `M8.02`):
-  // سلطةٌ تشريعيّةٌ تكشفُ التعارضَ ولا يقرأُها إنفاذٌ تبقى تقريراً لا مَنعاً، فيَنفُذُ
-  // فعلٌ مُعلَنٌ ممنوعاً في قانونٍ نافذٍ. وبوابةُ التاجِ غيرُ مُركَّبةٍ هنا بعمدٍ:
-  // هذا مسارُ قراءةٍ فقط، فالنفاذُ يُرفَضُ برمزِ `LEGISLATION_ROYAL_COMMAND_REQUIRED`
-  // بدلَ أن يُفتحَ إصدارُ قانونٍ من واجهةِ عرضٍ. والقراءةُ لكلِّ تفويضٍ ثمنُها نداءُ
-  // مستودعِ القوانينِ — حدٌّ مُعلَنٌ لا مُخفى.
-  const bundle = loadPolicyBundle();
-  const legislature = new Legislature({
-    policy: loadLegislationPolicy({ dir: CONFIG_DIR }),
-    bundle,
-    articles: loadConstitutionPolicy({ dir: CONFIG_DIR }).articles,
-    laws: new LawRegistry({
-      log: /** @type {never} */ (log),
-      repository: /** @type {never} */ (
-        /** @type {Record<string, unknown>} */ (repositories)['laws']
-      ),
-    }),
-    log: /** @type {never} */ (log),
-    crown: null,
-  });
   const gateway = new ApiGateway({
     policy: apiPolicy,
     log,
     agents,
     monitor,
-    enforcementPoint: new EnforcementPoint({
-      decisionPoint: createPolicyDecisionPoint({ bundle }),
-      log: /** @type {never} */ (log),
-      legislationGate: enforcementGate(legislature),
-      identityGate,
-      requireIdentityGate: true,
-    }),
+    enforcementPoint,
   });
 
   const session = await gateway.openSession({ actorId: viewerAgent.id });
