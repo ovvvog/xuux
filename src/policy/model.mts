@@ -147,6 +147,11 @@ export type DecisionCode =
   | 'POLICY_UNKNOWN_ACTION'
   | 'POLICY_UNKNOWN_ROLE'
   | 'SOVEREIGN_COMMAND_REQUIRED'
+  // `R6-A-07`: الأمرُ حاضرٌ بمعرّفِه وملخصِه، لكنّ الملخصَ لا يمكنُ أن يكونَ
+  // ملخصَ أمرٍ أصلاً. ورمزٌ مستقلٌّ لا يُخلَطُ بالغيابِ: الأوّلُ خطأُ ربطٍ عندَ
+  // المُستدعي، والثاني نقصُ أمرٍ ملكيٍّ — وخلطُهما يدفعُ إلى طلبِ صلاحيةٍ
+  // لا تُصلحُ العطب.
+  | 'SOVEREIGN_COMMAND_DIGEST_MALFORMED'
   | 'QUOTA_EXCEEDED'
   | 'STATE_HALTED'
   // تعارضٌ تشريعيٌّ مانعٌ لم يُحَلّ (الخطوة `M8.02`): الفعلُ محكومٌ بقانونين
