@@ -25,6 +25,8 @@ import {
   sign as softwareSign,
 } from 'node:crypto';
 import {
+  existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -141,7 +143,7 @@ function fakeToken(overrides = {}) {
  * @returns التركيبُ وجذرُه ودالةُ التنظيف
  */
 async function buildRuntime(options = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'xuux-prod-'));
+  const root = options.root ?? mkdtempSync(join(tmpdir(), 'xuux-prod-'));
   // `UF-05`: هويةُ الملكِ تُثبَّتُ في البيئةِ، فتُشتقُّ من مفتاحِ البديلِ نفسِه
   // لا من قيمةٍ ثابتةٍ تُخترَع.
   const king = options.king ?? generateKeyPairSync('ed25519');
@@ -584,6 +586,33 @@ test('UF-07: محوُ ملفِّ الدفترِ مع شاهدٍ موجبٍ يُ�
     );
   } finally {
     cleanup();
+  }
+});
+
+test('إقلاعٌ مردودٌ لا يتركُ قفلَ كاتبٍ يمنعُ الإقلاعَ المُصلَحَ بعدَه', async () => {
+  // العيبُ: السجلُّ الدائمُ يُفتَحُ ويأخذُ قفلَ كاتبٍ واحدٍ **قبلَ** بناءِ الدفترِ
+  // ومفتاحِ الإيقافِ، فإن سقطَ الإقلاعُ بعدَه (مجلَّدُ حجوزاتٍ ممسوحٌ — `UF-13`)
+  // بقيَ القفلُ على القرصِ والمِقبضُ مفتوحاً، فيُردُّ الإقلاعُ المُصلَحُ بعدَه
+  // بـ`LOG_ALREADY_LOCKED`: تعطيلٌ ذاتيٌّ لا يُرفَعُ إلا بحذفٍ يدويٍّ.
+  const first = await buildRuntime();
+  const { root, king } = first;
+  const lockFile = join(root, 'events.log.lock');
+  try {
+    first.runtime.log.close?.();
+    const claimsDir = first.runtime.ledger.claimsDir;
+    rmSync(claimsDir, { recursive: true, force: true });
+
+    const refused = await caughtAsync(() => buildRuntime({ root, king }));
+    assert.equal(refused.code, 'LEDGER_STATE_ROOT_MISSING', `رمزٌ غيرُ متوقّعٍ: ${refused.code}`);
+    assert.equal(existsSync(lockFile), false, 'إقلاعٌ مردودٌ خلّفَ قفلَ كاتبٍ');
+
+    // والمقصودُ أثرٌ لا شكلُ ملفٍّ: إصلاحُ السببِ يُعيدُ الإقلاعَ فعلاً.
+    mkdirSync(claimsDir, { recursive: true });
+    const repaired = await buildRuntime({ root, king });
+    assert.equal(repaired.runtime.haltSwitch.read().state, 'running');
+    repaired.runtime.log.close?.();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
