@@ -330,6 +330,10 @@ export async function createProductionRootOfTrust(
     const manifest = new StateManifest(stateManifestPath(options.root), {
       fsync,
       sealer: signers.anchorSigner,
+      // R4-K3-02: البيئةُ تُمرَّرُ صريحةً لا تُستنبَطُ من العمليةِ — فمصادقةُ دفترِ
+      // الرفعِ إلزامٌ في الإنتاجِ، ولا يُسقَطُ الدفترُ إلى تجزئةٍ عاريّةٍ يحسبُها
+      // مالكُ القرصِ.
+      env,
     });
     const production = isProductionRuntime(env);
     // تهيئةٌ أولى مُعلَنةٌ أم إقلاعٌ على جذرٍ قائم؟ الفرقُ هو كلُّ الفرقِ في
