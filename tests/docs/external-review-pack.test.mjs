@@ -22,6 +22,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -362,4 +363,133 @@ test('الوثيقةُ لا تُصرِّح بأمرٍ غيرِ موجودٍ في
   );
   const unknown = [...claimed].filter((script) => scripts[script] === undefined);
   assert.deepEqual(unknown, [], `أوامرُ مذكورةٌ لا وجودَ لها: ${unknown.join('، ')}`);
+});
+
+// النتيجة `R6-A-10` — خطّةُ الجولةِ يجبُ أن تكونَ في الشجرةِ التي راجعَها المجلسُ.
+//
+// العيبُ المُقَرُّ به (‏`executorPreparationDefects` في العقدِ، و§5 من مصفوفةِ
+// المقارنةِ): خطّةُ جولةِ `M11.06` كُتِبت **بعدَ** استنساخِ الشجرةِ للأعضاءِ، فلم
+// تصلْ إليهم، وبنى أحدُهم أقسامَ تقريرِه من العقدِ نفسِه. وخطّةٌ لا يراها المراجِعُ
+// ليست خطّةَ مراجعةٍ بل سرداً لاحقاً — والمراجعةُ حينَها تُقاسُ بما اختارَه المُراجَعُ
+// عملُه أن يُريَه.
+//
+// ولم يكنْ في المستودعِ شيءٌ يفشلُ لهذا. فهذا الحارسُ يجعلُه يفشلُ:
+//   1. كلُّ جولةٍ مُقيَّدةٍ لها ملفُّ خطّةٍ على القرصِ.
+//   2. وإن صرّحَ الارتباطُ بكوميتِ المراجعةِ، فالخطّةُ يجبُ أن تكونَ **موجودةً في
+//      ذلكَ الكوميتِ نفسِه** لا في `main` بعدَه.
+// والقصورُ التاريخيُّ لا يُمحى ولا يُسكَتُ عنه: يُقيَّدُ استثناءً مُسمّىً بسببِه،
+// **ويُقاسُ الاستثناءُ نفسُه** — فإن زالَ سببُه سقطَ الاختبارُ حتى يُرفَعَ من القائمةِ،
+// فلا يبقى استثناءٌ ميتٌ يُوسِّعُ ثغرةً.
+const PLAN_DEFICIENCIES = [
+  {
+    engagement: 'M11.04',
+    round: 1,
+    kind: 'missing-file',
+    reason: 'جولةٌ أولى جرت قبلَ أن تُكتَبَ خطّةُ جولةٍ أصلاً — القصورُ مُقَرٌّ به لا مُبرَّرٌ',
+  },
+  {
+    engagement: 'M11.04',
+    round: 2,
+    kind: 'missing-file',
+    reason: 'الجولةُ الثانيةُ وُجِّهت بمصفوفةِ النتائجِ لا بخطّةٍ مستقلّةٍ',
+  },
+  {
+    engagement: 'M11.06',
+    round: 1,
+    kind: 'absent-from-reviewed-commit',
+    reason: 'الخطّةُ كُتِبت بعدَ الاستنساخِ فلم تصلِ الأعضاءَ — عينُ النتيجةِ `R6-A-10`',
+  },
+];
+
+/** @param {string} engagement @param {number} round @param {string} kind */
+function isExcused(engagement, round, kind) {
+  return PLAN_DEFICIENCIES.some(
+    (item) => item.engagement === engagement && item.round === round && item.kind === kind,
+  );
+}
+
+/** @param {string} commit @param {string} path @returns {boolean} */
+function existsAtCommit(commit, path) {
+  try {
+    execFileSync('git', ['cat-file', '-e', `${commit}:${path}`], { cwd: ROOT, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** @returns {{ id: string, rounds: number[], reviewedCommit: string | null }[]} */
+function executedEngagements() {
+  const contract = readContract();
+  const engagements = /** @type {Record<string, unknown>[]} */ (contract['engagements'] ?? []);
+  const rows = [];
+  for (const engagement of engagements) {
+    const executedBy = /** @type {Record<string, unknown> | null} */ (
+      engagement['executedBy'] ?? null
+    );
+    if (executedBy === null) continue;
+    const members = /** @type {Record<string, unknown>[]} */ (executedBy['members'] ?? []);
+    const rounds = new Set();
+    for (const member of members) {
+      for (const round of /** @type {number[]} */ (member['rounds'] ?? [])) rounds.add(round);
+    }
+    rows.push({
+      id: String(engagement['id']),
+      rounds: [...rounds].sort((a, b) => a - b),
+      reviewedCommit:
+        typeof executedBy['reviewedCommit'] === 'string' ? executedBy['reviewedCommit'] : null,
+    });
+  }
+  return rows;
+}
+
+test('R6-A-10: كلُّ جولةٍ مُقيَّدةٍ لها خطّةٌ على القرصِ', () => {
+  const offences = [];
+  for (const engagement of executedEngagements()) {
+    for (const round of engagement.rounds) {
+      const path = `docs/external-review/${engagement.id}-round-${String(round)}-plan.md`;
+      if (existsSync(join(ROOT, path))) continue;
+      if (isExcused(engagement.id, round, 'missing-file')) continue;
+      offences.push(path);
+    }
+  }
+  assert.deepEqual(offences, [], `جولاتٌ مُقيَّدةٌ بلا خطّةٍ:\n${offences.join('\n')}`);
+});
+
+test('R6-A-10: خطّةُ الجولةِ موجودةٌ في الكوميتِ الذي راجعَه المجلسُ', () => {
+  const offences = [];
+  for (const engagement of executedEngagements()) {
+    if (engagement.reviewedCommit === null) continue;
+    assert.ok(
+      existsAtCommit(engagement.reviewedCommit, 'package.json'),
+      `كوميتُ المراجعةِ ${engagement.reviewedCommit} غيرُ مقروءٍ هنا — ` +
+        'الحارسُ يحتاجُ تاريخاً كاملاً (‏`fetch-depth: 0`)، ولا يُقرأُ تعذُّرُ القراءةِ نجاحاً',
+    );
+    for (const round of engagement.rounds) {
+      const path = `docs/external-review/${engagement.id}-round-${String(round)}-plan.md`;
+      if (!existsSync(join(ROOT, path))) continue;
+      if (existsAtCommit(engagement.reviewedCommit, path)) continue;
+      if (isExcused(engagement.id, round, 'absent-from-reviewed-commit')) continue;
+      offences.push(`${path} ليست في ${engagement.reviewedCommit}`);
+    }
+  }
+  assert.deepEqual(offences, [], `خططُ جولاتٍ لم تصلِ المراجِعينَ:\n${offences.join('\n')}`);
+});
+
+test('R6-A-10: استثناءُ قصورٍ لا يبقى بعدَ زوالِ سببِه', () => {
+  const stale = [];
+  for (const item of PLAN_DEFICIENCIES) {
+    const path = `docs/external-review/${item.engagement}-round-${String(item.round)}-plan.md`;
+    const onDisk = existsSync(join(ROOT, path));
+    if (item.kind === 'missing-file' && onDisk) {
+      stale.push(`${path}: صارَ موجوداً فالاستثناءُ ميتٌ`);
+      continue;
+    }
+    if (item.kind !== 'absent-from-reviewed-commit') continue;
+    const engagement = executedEngagements().find((row) => row.id === item.engagement);
+    if (engagement === undefined || engagement.reviewedCommit === null) continue;
+    if (onDisk && !existsAtCommit(engagement.reviewedCommit, path)) continue;
+    stale.push(`${path}: لم يعدْ ينطبقُ عليه سببُ الاستثناءِ`);
+  }
+  assert.deepEqual(stale, [], `استثناءاتٌ ميتةٌ تُوسِّعُ الثغرةَ:\n${stale.join('\n')}`);
 });
