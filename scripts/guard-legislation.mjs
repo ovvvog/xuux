@@ -214,10 +214,22 @@ if (policy !== null) {
       );
     }
   }
+  // والخادمُ الحيُّ صارَ يأخذُ سلسلتَه من جذرِ التركيبِ (`R6-A-04`)، فالوصلُ يُقاسُ
+  // في حلقتَيه لا في واحدةٍ: الخادمُ يطلبُ التشريعَ من الجذرِ، والجذرُ يُحوِّلُه
+  // حاجزاً في نقطةِ الإنفاذ. وانقطاعُ أيِّ حلقةٍ يُعيدُ الكشفَ تقريراً لا مَنعاً.
   const server = readFile('scripts/serve-state.mjs');
-  if (!server.includes('legislationGate: enforcementGate(legislature)')) {
+  const root = readFile('src/core/composition-root.mjs');
+  const serverWires =
+    server.includes('legislationGate: enforcementGate(legislature)') ||
+    (server.includes('composeEnforcementChain(') && server.includes('withLegislation: true'));
+  if (!serverWires) {
     violations.push(
       'R9: الخادمُ الحيُّ لا يُمرِّرُ حاجزَ التشريعِ إلى نقطةِ الإنفاذ؛ فالكشفُ يبقى تقريراً لا مَنعاً في المسارِ الواقع.',
+    );
+  }
+  if (!root.includes('legislationGate: enforcementGate(legislature)')) {
+    violations.push(
+      'R9: جذرُ التركيبِ لا يُحوِّلُ التشريعَ حاجزاً في نقطةِ الإنفاذ؛ فطلبُ الخادمِ للتشريعِ يصيرُ طلباً بلا أثرٍ.',
     );
   }
   const lawSystem = readFile('src/governance/law-system.mjs');
