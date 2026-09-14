@@ -60,6 +60,10 @@ export const ProductionRuntimeErrorCodes = [
   'PRODUCTION_LOG_BEHIND_ANCHOR',
   // `UF-01`: سلسلةُ التثبيتاتِ أو سلسلةُ الوقائعِ لا تتحقّق عندَ الإقلاع.
   'PRODUCTION_ANCHOR_CHAIN_INVALID',
+  // `R4-B-03`/`M11.04-F05` (‏`WL-165`): توقيعُ مرساةٍ بلا مصرفٍ يرفعُ شاهدَ
+  // البيانِ يُرفَضُ **قبلَ** التوقيعِ: مرساةٌ موقَّعةٌ لا أثرَ لها في الخاتَمِ
+  // هي بعينِها النتيجةُ المفتوحةُ، فلا تُنتَجُ بسهوِ مُستدعٍ.
+  'ANCHOR_WITNESS_SINK_MISSING',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -273,6 +277,12 @@ export async function maybeAnchorLogWithHsm(
     onAnchor?: (record: AnchorRecord) => void;
   } = {},
 ): Promise<AnchorRecord | null> {
+  // WL-165: مصرفُ الشاهدِ **شرطٌ لا خيارٌ**، ويُفحَصُ قبلَ أيِّ توقيعٍ. وكان
+  // `onAnchor` اختياريّاً، فمُستدعٍ واحدٌ أغفلَه يُعيدُ النتيجةَ المفتوحةَ كاملةً
+  // بلا أن يسقطَ شيءٌ — وهو ما وقعَ فعلاً في أداةِ التثبيتِ خارجَ العمليةِ.
+  if (typeof options.onAnchor !== 'function') {
+    throw new ProductionRuntimeError('ANCHOR_WITNESS_SINK_MISSING', 'options.onAnchor');
+  }
   const at = options.at ?? new Date();
   const intervalMs = options.intervalMs ?? DEFAULT_ANCHOR_INTERVAL_MS;
   const minNewEvents = options.minNewEvents ?? 1;
@@ -290,7 +300,7 @@ export async function maybeAnchorLogWithHsm(
   // مراجعة R4-B-03: المرساةُ الموقَّعةُ لا ترفعُ شاهدَ البيانِ عندَ إنجازِها —
   // صارَ يُستدعى `onAnchor` بعدَ التثبيتِ فيرفعُ `anchoredCount` في البيانِ فلا
   // يبقى شاهدٌ خارجَ الخاتَمِ.
-  if (options.onAnchor) options.onAnchor(record);
+  options.onAnchor(record);
   return record;
 }
 
