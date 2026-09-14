@@ -49,6 +49,60 @@ const FORBIDDEN_STATUS_WORDS = [
   'ready',
 ];
 
+// ——————————————————————————————————————————————————————————————————————
+// `R6-A-10` (الشقُّ الثاني) — قياسُ حضورِ الدليلِ يقعُ على **المستودعِ** لا على
+// نسخةِ القرصِ وحدَها.
+//
+// العيبُ كما قِيسَ في الجولةِ: المنفِّذُ حذفَ ثمانيةَ تقاريرَ من الشجرةِ التي
+// سُلِّمتْ للعضوِ «أ»، فخرجَ `npm run validate` عندَه بـ`1` وعندَ غيرِه بـ`0`
+// لنفسِ الكوميتِ. والسببُ الجذريُّ ليس الحذفَ وحدَه: الحارسُ كان يقيسُ **شجرةَ
+// العملِ**، والدليلُ المُقيَّدُ في العقدِ دليلٌ يحملُه المستودعُ لا نسخةٌ عارضةٌ.
+// فصارَ عطبُ نسخةٍ يُقرأُ عطباً في الجودةِ، وهو أسوأُ من ثغرةٍ: يُعلِّمُ المراجِعَ
+// أنّ سقوطَ البوابةِ ضجيجٌ.
+//
+// والقياسُ الآن: الدليلُ حاضرٌ إن كان في شجرةِ العملِ **أو** في `HEAD`. فحذفٌ
+// **مُلتزَمٌ** يُسقِطُ الحارسَ كما كان (هذا ما يُقاسُ في المسارِ)، ونقصُ نسخةٍ
+// لا يُسقِطُه بل **يُعلَنُ** سطراً مقروءاً فلا يُسكَتُ عنه. وملفٌّ جديدٌ قبلَ
+// الالتزامِ يكفيه القرصُ فلا يُعطَّلُ عملٌ مشروعٌ.
+//
+// وتعذُّرُ القياسِ التاريخيِّ (شجرةٌ بلا `.git`) يُسقِطُ القياسَ إلى شجرةِ العملِ
+// وحدَها — وهو الأشدُّ لا الأخفُّ، فلا يصيرُ التعذُّرُ بواباً مفتوحاً.
+/** @type {string[]} */
+const PRUNED_TREE_NOTICES = [];
+
+/** @param {string} path @returns {boolean} */
+function existsAtHead(path) {
+  try {
+    execFileSync('git', ['cat-file', '-e', `HEAD:${path}`], { cwd: ROOT, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** @returns {boolean} */
+function headReadable() {
+  return existsAtHead('package.json');
+}
+
+/**
+ * هل الدليلُ يحملُه المستودعُ — قرصاً أو تاريخاً.
+ * @param {string} path - مسارُ الدليلِ من جذرِ المستودعِ
+ * @param {(path: string) => boolean} [onDisk] - مقياسُ القرصِ (يُحقَنُ للاختبارِ)
+ * @param {string[]} [notices] - سجلُّ ما نقصَ من شجرةِ العملِ
+ * @returns {boolean} هل يحملُه المستودعُ
+ */
+function evidenceExists(path, onDisk = (item) => existsSync(join(ROOT, item)), notices) {
+  if (onDisk(path)) return true;
+  if (!headReadable()) return false;
+  if (!existsAtHead(path)) return false;
+  const sink = notices ?? PRUNED_TREE_NOTICES;
+  // النقصُ يُعلَنُ مرّةً واحدةً: مسارٌ يُشارُ إليه من نتائجَ كثيرةٍ عطبُ نسخةٍ
+  // واحدٌ لا أربعةَ عشرَ، وتكرارُه يُضخِّمُ القياسَ فيُقرأُ أسوأَ ممّا هو.
+  if (!sink.includes(path)) sink.push(path);
+  return true;
+}
+
 /**
  * @returns {Record<string, unknown>}
  */
@@ -238,8 +292,8 @@ test('النتائجُ فارغةٌ ما دامت المراجعةُ تنتظر�
       const path = String(rawReports[modelId]);
       assert.ok(path, `تقريرُ نموذجٍ «${modelId}» غيرُ مُشارٍ إليه في «${fid}»`);
       assert.ok(
-        existsSync(join(ROOT, path)),
-        `تقريرُ «${modelId}» في «${fid}» لا موضعَ له على القرصِ: ${path}`,
+        evidenceExists(path),
+        `تقريرُ «${modelId}» في «${fid}» لا يحملُه المستودعُ لا قرصاً ولا تاريخاً: ${path}`,
       );
     }
     // مَن أثارَ نتيجةً في الجولةِ المُقيَّدةِ يجبُ أن يكونَ له تقريرٌ خامٌّ مُشارٌ إليه.
@@ -301,7 +355,7 @@ test('كلُّ دليلٍ مُشارٍ إليه موجودٌ على القرصِ
         );
         continue;
       }
-      if (!existsSync(join(ROOT, artifact))) missing.push(`${String(engagement.id)}: ${artifact}`);
+      if (!evidenceExists(artifact)) missing.push(`${String(engagement.id)}: ${artifact}`);
     }
   }
   assert.deepEqual(missing, [], `أدلّةٌ مذكورةٌ لا موضعَ لها:\n${missing.join('\n')}`);
@@ -448,7 +502,7 @@ test('R6-A-10: كلُّ جولةٍ مُقيَّدةٍ لها خطّةٌ على �
   for (const engagement of executedEngagements()) {
     for (const round of engagement.rounds) {
       const path = `docs/external-review/${engagement.id}-round-${String(round)}-plan.md`;
-      if (existsSync(join(ROOT, path))) continue;
+      if (evidenceExists(path)) continue;
       if (isExcused(engagement.id, round, 'missing-file')) continue;
       offences.push(path);
     }
@@ -467,7 +521,7 @@ test('R6-A-10: خطّةُ الجولةِ موجودةٌ في الكوميتِ ا
     );
     for (const round of engagement.rounds) {
       const path = `docs/external-review/${engagement.id}-round-${String(round)}-plan.md`;
-      if (!existsSync(join(ROOT, path))) continue;
+      if (!evidenceExists(path)) continue;
       if (existsAtCommit(engagement.reviewedCommit, path)) continue;
       if (isExcused(engagement.id, round, 'absent-from-reviewed-commit')) continue;
       offences.push(`${path} ليست في ${engagement.reviewedCommit}`);
@@ -480,7 +534,7 @@ test('R6-A-10: استثناءُ قصورٍ لا يبقى بعدَ زوالِ س�
   const stale = [];
   for (const item of PLAN_DEFICIENCIES) {
     const path = `docs/external-review/${item.engagement}-round-${String(item.round)}-plan.md`;
-    const onDisk = existsSync(join(ROOT, path));
+    const onDisk = evidenceExists(path);
     if (item.kind === 'missing-file' && onDisk) {
       stale.push(`${path}: صارَ موجوداً فالاستثناءُ ميتٌ`);
       continue;
@@ -492,4 +546,52 @@ test('R6-A-10: استثناءُ قصورٍ لا يبقى بعدَ زوالِ س�
     stale.push(`${path}: لم يعدْ ينطبقُ عليه سببُ الاستثناءِ`);
   }
   assert.deepEqual(stale, [], `استثناءاتٌ ميتةٌ تُوسِّعُ الثغرةَ:\n${stale.join('\n')}`);
+});
+
+test('R6-A-10: قياسُ الدليلِ يقعُ على المستودعِ لا على نسخةِ القرصِ وحدَها', () => {
+  /** @type {string[]} */
+  const notices = [];
+  if (headReadable()) {
+    // دليلٌ مُلتزَمٌ وغائبٌ عن شجرةِ العملِ: حاضرٌ في القياسِ ومُعلَنٌ في السجلِّ.
+    assert.equal(
+      evidenceExists(CONTRACT_PATH, () => false, notices),
+      true,
+      'دليلٌ يحملُه تاريخُ المستودعِ سقطَ لأنّ نسخةَ القرصِ منقوصةٌ',
+    );
+    assert.deepEqual(notices, [CONTRACT_PATH], 'النقصُ لم يُعلَنْ — وهذا إسكاتٌ لا قياسٌ');
+    // وما لا يحملُه المستودعُ لا يُقرأُ دليلاً بحالٍ.
+    assert.equal(
+      evidenceExists('docs/external-review/لا-وجودَ-لهذا-التقريرِ.md', () => false, []),
+      false,
+      'مسارٌ لا في القرصِ ولا في التاريخِ قُرئَ دليلاً',
+    );
+  } else {
+    // تعذُّرُ القياسِ التاريخيِّ يُسقِطُ القياسَ إلى القرصِ وحدَه — الأشدُّ لا الأخفُّ.
+    assert.equal(
+      evidenceExists(CONTRACT_PATH, () => false, []),
+      false,
+      'بلا تاريخٍ مقروءٍ يجبُ أن يبقى القياسُ على القرصِ وحدَه',
+    );
+  }
+  // وملفٌّ جديدٌ قبلَ الالتزامِ يكفيه القرصُ، فلا يُعطَّلُ عملٌ مشروعٌ ولا يُخفَى نقصٌ.
+  assert.equal(
+    evidenceExists('docs/external-review/تقريرٌ-جديدٌ.md', () => true, notices),
+    true,
+    'ملفٌّ حاضرٌ على القرصِ قبلَ الالتزامِ يجبُ أن يُقرأَ دليلاً',
+  );
+  assert.deepEqual(notices.length, 1, 'ما كان على القرصِ لا يُعَدُّ نقصاً في الشجرةِ');
+});
+
+test('R6-A-10: نقصُ شجرةِ العملِ يُعلَنُ سطراً مقروءاً لا يُسكَتُ عنه', () => {
+  const count = PRUNED_TREE_NOTICES.length;
+  // القياسُ يُعلَنُ في الحالينِ: صفراً كان أو أكثرَ. وسطرُ «صفرٍ» ليس زينةً —
+  // به يُعرَفُ أنّ الحارسَ قاسَ الشجرةَ ولم يسكتْ عنها.
+  console.error(
+    count === 0
+      ? 'ℹ️ شجرةُ العملِ كاملةٌ: كلُّ دليلٍ مُقيَّدٍ حاضرٌ على القرصِ.'
+      : `⚠️ ${String(count)} دليلاً مُقيَّداً في تاريخِ المستودعِ وغائباً عن شجرةِ العملِ:\n` +
+          PRUNED_TREE_NOTICES.map((path) => `  - ${path}`).join('\n') +
+          '\nوهذا نقصُ نسخةٍ لا عطبُ جودةٍ — والقياسُ وقعَ على تاريخِ المستودعِ.',
+  );
+  assert.ok(Array.isArray(PRUNED_TREE_NOTICES));
 });
