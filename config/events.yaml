@@ -426,6 +426,9 @@ channels:
       - role:minister
       - role:operator
     types:
+      - type: inference.budget.restored
+        version: 1
+        required: [cost, startedAt, tokens]
       - type: inference.completed
         version: 1
         required: [attemptsInWindow, input, modelId, output, policyId, purpose, usage]

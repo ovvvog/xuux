@@ -14,9 +14,16 @@
  * غياب نموذج نشط أو تجاوز سقف معروف، ولا تُستهلك تذكرة قبل لحظة النداء.
  *
  * حدود معلنة:
- *   - عدّاد المعدل والميزانية في الذاكرة وضمن عملية واحدة؛ إعادة التشغيل تبدأ
- *     نافذة جديدة. الحصة المعلنة في البيانات تظل مرجع المورد، أما دوام الدفتر
- *     الفعلي فيحتاج موصل تخزين موزعاً في خطوة لاحقة.
+ *   - **دفترُ الميزانيةِ يُلتقَطُ ويُستعادُ** (‏`budgetSnapshot`/`budgetRestore`،
+ *     `R6-A-05`): كان العدّادُ في الذاكرةِ وحدَها، فمن استنفدَ سقفَه استأنفَ
+ *     الإنفاقَ بإعادةِ التشغيلِ — وهذا **يوسِّعُ** الصلاحيةَ بفعلٍ لا يحتاجُ
+ *     صلاحيةً، فلا يجوزُ أن يُعَدَّ حدّاً مقبولاً كحدِّ دفترِ المنحِ (حيثُ
+ *     السقوطُ يضيِّقُ). والاستعادةُ **لا تُخفِّضُ**: الأعلى من المُقاسِ والمُستعادِ
+ *     هو المُلزِمُ، ونافذةٌ انقضتْ تُهمَلُ فلا يُمَدُّ عمرُها بلقطةٍ. أمّا **ربطُ
+ *     اللقطةِ بمخزنٍ مُدامٍ عندَ الإقلاعِ** فقرارُ تركيبٍ خارجَ هذه البوابةِ
+ *     (‏`R6-A-04`) وحدٌّ مُعلَنٌ لا مُخفىً: البوابةُ تُعطي المادةَ ولا تختارُ
+ *     المخزنَ. وعدّادُ حدِّ المعدَّلِ يبقى نافذةَ عمليّةٍ: سقوطُه يُعيدُ ثلاثينَ
+ *     نداءً في دقيقةٍ لا سقفَ كلفةٍ معلَناً، والفرقُ مقصودٌ لا مُغفَلٌ.
  *   - **سقفُ الرموزِ ونافذتُه من `config/quotas.yaml` وحدَها** (المورد
  *     `inference-tokens`) عبر `loadInferenceTokenQuota`، ولا رقمَ سقفٍ في هذا
  *     الملفِّ ولا سقوطَ صامتاً إلى رقمٍ مكتوبٍ عندَ غيابِ الحصّةِ. ونافذةُ
@@ -61,6 +68,8 @@ export const INFERENCE_ERRORS = Object.freeze({
   OUTPUT_INVALID: 'INFERENCE_OUTPUT_INVALID',
   OUTPUT_BLOCKED: 'INFERENCE_OUTPUT_BLOCKED',
   USAGE_UNRECORDED: 'INFERENCE_USAGE_UNRECORDED',
+  BUDGET_UNREADABLE: 'INFERENCE_BUDGET_UNREADABLE',
+  BUDGET_UNPERSISTED: 'INFERENCE_BUDGET_UNPERSISTED',
 });
 
 /** خطأ مسمى: الرمز للبرامج والرسالة العربية لقرار الرفض المقروء. */
@@ -146,7 +155,7 @@ function nonNegativeNumber(value, fallback) {
 
 export class InferenceGate {
   /**
-   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown } | null, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
+   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown } | null, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown } | null, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
    */
   constructor({
     modelRegistry,
@@ -159,6 +168,7 @@ export class InferenceGate {
     windowMs = DEFAULT_WINDOW_MS,
     tokensPerWindow,
     budgetWindowMs,
+    budgetStore = null,
     quota,
     costPerWindow = DEFAULT_COST_PER_WINDOW,
     costLedger = null,
@@ -235,6 +245,16 @@ export class InferenceGate {
     this.attempts = new Map();
     /** @type {Map<string, { startedAt: number, tokens: number, cost: number }>} */
     this.budgets = new Map();
+    /**
+     * مخزنُ دوامِ الميزانيةِ إن مُرِّرَ (‏`R6-A-05`). وجودُه يجعلُ الدوامَ
+     * **آليّاً** لا موقوفاً على شفرةِ إقلاعٍ يكتبُها مُركِّبٌ: القراءةُ عندَ أوّلِ
+     * قياسٍ والكتابةُ عندَ كلِّ تغيُّرٍ. وغيابُه حدٌّ مُعلَنٌ: البوابةُ تُعطي
+     * اللقطةَ ولا تختارُ المخزنَ.
+     * @type {{ load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown } | null}
+     */
+    this.budgetStore = budgetStore;
+    /** @type {boolean} */
+    this.budgetLoaded = budgetStore === null;
   }
 
   /**
@@ -288,10 +308,53 @@ export class InferenceGate {
   }
 
   /**
+   * يقرأُ دفترَ الميزانيةِ من المخزنِ مرّةً واحدةً عندَ أوّلِ قياسٍ.
+   *
+   * وتعذُّرُ القراءةِ **يُغلِقُ ولا يَفتحُ**: مخزنٌ لا يُقرأُ يعني استهلاكاً
+   * مجهولاً، وافتراضُ الصفرِ عندَه هو نفسُ التجاوزِ الذي يُعالَجُ هنا بلباسٍ
+   * آخرَ. فيُرفَضُ الاستدلالُ برمزٍ مُسمّىً.
+   * @returns {void}
+   */
+  #loadBudgets() {
+    if (this.budgetLoaded || this.budgetStore === null) return;
+    let entries;
+    try {
+      entries = this.budgetStore.load();
+    } catch (error) {
+      throw new InferenceError(
+        INFERENCE_ERRORS.BUDGET_UNREADABLE,
+        `مخزنُ ميزانيةِ الاستدلالِ لا يُقرأُ: ${error instanceof Error ? error.message : String(error)}. واستهلاكٌ مجهولٌ لا يُفترَضُ صفراً.`,
+      );
+    }
+    this.budgetLoaded = true;
+    this.budgetRestore(entries);
+  }
+
+  /**
+   * يكتبُ دفترَ الميزانيةِ إلى المخزنِ بعدَ كلِّ تغيُّرٍ.
+   *
+   * وفشلُ الكتابةِ يُرفَعُ خطأً مُسمّىً لا يُبتلَعُ: استهلاكٌ وقعَ ولم يُدَمْ هو
+   * سقفٌ يعودُ بإعادةِ التشغيلِ، وهو العيبُ نفسُه.
+   * @returns {void}
+   */
+  #persistBudgets() {
+    if (this.budgetStore === null) return;
+    try {
+      this.budgetStore.save(this.budgetSnapshot());
+    } catch (error) {
+      throw new InferenceError(
+        INFERENCE_ERRORS.BUDGET_UNPERSISTED,
+        `استهلاكُ الاستدلالِ وقعَ ولم يُقيَّدْ في مخزنِ الميزانيةِ: ${error instanceof Error ? error.message : String(error)}. وسقفٌ لا يدومُ سقفٌ يعودُ بإعادةِ التشغيلِ.`,
+      );
+    }
+  }
+
+  /**
    * @param {string} actorId
    * @returns {{ startedAt: number, tokens: number, cost: number }}
    */
   #budgetFor(actorId) {
+    this.#loadBudgets();
     const nowMs = this.now().getTime();
     const previous = this.budgets.get(actorId);
     if (previous === undefined || nowMs - previous.startedAt >= this.budgetWindowMs) {
@@ -300,6 +363,80 @@ export class InferenceGate {
       return fresh;
     }
     return previous;
+  }
+
+  /**
+   * لقطةٌ من دفترِ الميزانيةِ تُستعمَلُ لإعادةِ البناءِ بعدَ إعادةِ التشغيلِ
+   * (‏`R6-A-05`). تُعادُ النوافذُ **الحيّةُ** وحدَها: نافذةٌ انقضتْ لا معنى
+   * لحملِها، وحملُها كان سيُنفِذُ سقفَ نافذةٍ ماضيةٍ على نافذةٍ حاضرةٍ.
+   * @returns {Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>}
+   */
+  budgetSnapshot() {
+    const nowMs = this.now().getTime();
+    /** @type {Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>} */
+    const entries = [];
+    for (const [actorId, window] of this.budgets.entries()) {
+      if (nowMs - window.startedAt >= this.budgetWindowMs) continue;
+      entries.push({
+        actorId,
+        startedAt: window.startedAt,
+        tokens: window.tokens,
+        cost: window.cost,
+      });
+    }
+    return entries;
+  }
+
+  /**
+   * يُعيدُ بناءَ دفترِ الميزانيةِ من لقطةٍ بعدَ إعادةِ التشغيلِ (‏`R6-A-05`).
+   *
+   * والاستعادةُ **لا تكونُ بابَ تصفيرٍ**: لقطةٌ تُعلِنُ استهلاكاً أقلَّ من
+   * المُقاسِ في هذه العمليّةِ تُهمَلُ، فالأعلى هو المُلزِمُ — وإلّا صارَ الحقنُ
+   * بلقطةٍ مصنوعةٍ طريقاً إلى سقفٍ جديدٍ، وهو نفسُ العيبِ الذي تُعالِجُه اللقطةُ
+   * بلباسٍ آخرَ. ونافذةٌ انقضتْ تُهمَلُ فلا يُمَدُّ عمرُ نافذةٍ ولا يُحمَلُ
+   * استهلاكٌ قديمٌ على جديدةٍ. والسطرُ المعطوبُ يُهمَلُ وحدَه ولا يُسقِطُ اللقطةَ
+   * كلَّها، وكلُّ مُستعادٍ يُقيَّدُ في السجلِّ بـ`inference.budget.restored`.
+   *
+   * @param {unknown} entries
+   * @returns {number} عددُ النوافذِ المُطبَّقةِ
+   */
+  budgetRestore(entries) {
+    if (!Array.isArray(entries)) return 0;
+    const nowMs = this.now().getTime();
+    let applied = 0;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== 'object') continue;
+      const { actorId, startedAt, tokens, cost } = /** @type {Record<string, unknown>} */ (entry);
+      if (typeof actorId !== 'string' || actorId.trim() === '') continue;
+      if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) continue;
+      if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens < 0) continue;
+      if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) continue;
+      if (nowMs - startedAt >= this.budgetWindowMs) continue;
+      if (startedAt > nowMs) continue;
+      const current = this.budgets.get(actorId);
+      // لا تُخفَّضُ حصيلةٌ قائمةٌ، ولا يُؤخَّرُ بدءُ نافذةٍ قائمةٍ.
+      const merged = {
+        startedAt: current === undefined ? startedAt : Math.min(current.startedAt, startedAt),
+        tokens: Math.max(tokens, current?.tokens ?? 0),
+        cost: Math.max(cost, current?.cost ?? 0),
+      };
+      if (
+        current !== undefined &&
+        merged.tokens === current.tokens &&
+        merged.cost === current.cost &&
+        merged.startedAt === current.startedAt
+      ) {
+        continue;
+      }
+      this.budgets.set(actorId, merged);
+      this.log.append('inference.budget.restored', actorId, {
+        startedAt: merged.startedAt,
+        tokens: merged.tokens,
+        cost: merged.cost,
+      });
+      applied++;
+    }
+    return applied;
   }
 
   /**
@@ -512,6 +649,9 @@ export class InferenceGate {
     const cost = nonNegativeNumber(execution.usage?.cost, estimatedInputCost);
     budget.tokens += totalTokens;
     budget.cost += cost;
+    // الدوامُ يقعُ **قبلَ** أيِّ رفضٍ تالٍ: استهلاكٌ وقعَ يُقيَّدُ ولو حُجبَ
+    // مُخرَجُه، وإلّا صارَ تجاوزُ السقفِ مجّانياً بعدَ إعادةِ التشغيلِ.
+    this.#persistBudgets();
 
     // تسويةُ الحصّةِ بالاستهلاكِ المقيسِ فعلاً (‏`R6-A-02`): خُصمَ المُدخَلُ
     // المُقدَّرُ عندَ التفويضِ، وهنا يُخصمُ فرقُ ما استُهلكَ فعلاً. وتقعُ التسويةُ
