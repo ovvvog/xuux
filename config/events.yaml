@@ -284,6 +284,12 @@ channels:
       - type: data.classification.refused
         version: 1
         required: [code, direction, from, id, to]
+      - type: data.legal-hold.changed
+        version: 1
+        required: [from, id, justification, royalCommandId, to]
+      - type: data.legal-hold.refused
+        version: 1
+        required: [code, from, id, to]
       - type: data.lineage.recorded
         version: 1
         required: [assetId, hash, kind, parents, purpose, seq]

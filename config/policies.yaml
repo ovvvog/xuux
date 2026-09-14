@@ -103,6 +103,11 @@ actions:
   - id: purge-data
     description: محو بيانات محتفظ بها.
     sensitive: true
+  # `R6-A-09`: تغييرُ الحفظِ القانونيِّ لم يكنْ فعلاً معروفاً للدولةِ أصلاً — لا
+  # مسارَ تطبيقٍ له ولا سياسةَ إذنٍ. فصارَ فعلاً مُعلَناً فوقَ العتبةِ السياديّةِ.
+  - id: set-legal-hold
+    description: تعيين حفظٍ قانونيٍّ على أصل بيانات أو رفعه عنه.
+    sensitive: true
   - id: reclassify-data
     description: تغيير تصنيف حساسية أصل بيانات، رفعاً أو إنزالاً.
     sensitive: true
@@ -251,6 +256,7 @@ policies:
     actions:
       - stop-state
       - resume-state
+      - set-legal-hold
       - change-policy
       - enact-law
       - repeal-law
