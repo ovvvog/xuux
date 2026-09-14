@@ -86,6 +86,43 @@ export const RECLASSIFY_ERRORS = Object.freeze({
   TICKET_INVALID: 'CLASSIFICATION_RECLASSIFY_TICKET_INVALID',
 });
 
+/**
+ * فعلُ تغييرِ الحفظِ القانونيِّ (`R6-A-09`). قبلَ هذا كان الحفظُ القانونيُّ حقلاً
+ * يُكتَبُ عندَ التسجيلِ ولا مسارَ **مطلقاً** لتعيينِه أو رفعِه بعدَه إلا `UPDATE`
+ * مباشرٌ على القاعدةِ — فالوثيقةُ تقولُ «لا موافقةَ سياديّةً» وهي دقيقةٌ: لم يكنْ
+ * هناك ما يُوافَقُ عليه أصلاً. ورفعُ الحفظِ يفتحُ المحوَ على أصلٍ كان ممنوعاً
+ * محوُه، وتعيينُه يُعطِّلُ حقَّ محوٍ قد يكونَ واجباً؛ فالاتجاهانِ فوقَ العتبةِ.
+ */
+export const LEGAL_HOLD_ACTION = 'set-legal-hold';
+
+/** أقلُّ تسبيبٍ مقبولٍ لتغييرِ الحفظِ القانونيِّ؛ سببٌ أقصرُ لا يُراجَعُ لاحقاً. */
+export const LEGAL_HOLD_MIN_JUSTIFICATION = 24;
+
+export const LEGAL_HOLD_ERRORS = Object.freeze({
+  ENFORCEMENT_REQUIRED: 'LEGAL_HOLD_ENFORCEMENT_REQUIRED',
+  UNCHANGED: 'LEGAL_HOLD_UNCHANGED',
+  JUSTIFICATION_REQUIRED: 'LEGAL_HOLD_JUSTIFICATION_REQUIRED',
+  RETENTION_UNDECLARED: 'LEGAL_HOLD_RETENTION_UNDECLARED',
+  NOT_AUTHORIZED: 'LEGAL_HOLD_NOT_AUTHORIZED',
+  TICKET_INVALID: 'LEGAL_HOLD_TICKET_INVALID',
+});
+
+/** خطأ مُسمّى للحفظ القانوني: الرمز للأتمتة والنص للقارئ. */
+export class LegalHoldError extends Error {
+  /**
+   * @param {string} code
+   * @param {string} message
+   * @param {Record<string, unknown>} [detail]
+   */
+  constructor(code, message, detail = {}) {
+    super(message);
+    this.name = 'LegalHoldError';
+    this.code = code;
+    /** @type {Record<string, unknown>} */
+    this.detail = detail;
+  }
+}
+
 /** خطأ مُسمّى لإعادة التصنيف: الرمز للأتمتة والنص للقارئ. */
 export class ReclassifyError extends Error {
   /**
@@ -411,6 +448,118 @@ export class DataCatalog {
       direction,
       justification: reason,
       approvalId: consumedApprovalId,
+    });
+    return toRecord(updated);
+  }
+
+  /**
+   * يُعيّنُ الحفظَ القانونيَّ أو يرفعُه **بأمرٍ ملكيٍّ مقبولٍ** لا بقرارِ مُشغّلٍ.
+   *
+   * `R6-A-09`: لم يكنْ في الفهرسِ مسارُ تغييرٍ للحفظِ القانونيِّ بعدَ التسجيلِ،
+   * فكان تعيينُه ورفعُه يقعانِ — إن وقعا — بـ`UPDATE` مباشرٍ على القاعدةِ: بلا
+   * سياسةٍ، وبلا أمرٍ ملكيٍّ، وبلا قيدٍ في سجلِّ الأحداثِ يُقرأُ لاحقاً. والاتجاهانِ
+   * كلاهما محكومانِ: الرفعُ يفتحُ محوَ ما كان محميّاً، والتعيينُ يُعطِّلُ حقَّ محوٍ
+   * قد يكونَ واجباً — فليس أحدُهما «آمناً» بطبعِه.
+   *
+   * **والغيابُ رفضٌ لا تجاوزٌ:** فهرسٌ بلا نقطةِ تفويضٍ لا يُنفِّذُ الفعلَ.
+   *
+   * **حدٌّ معلَنٌ باقٍ:** هذا يحكمُ مسارَ التطبيقِ. ومن يملكُ اتّصالاً مباشراً
+   * بالقاعدةِ يبقى قادراً على تعديلِ العمودِ؛ إغلاقُ ذلك امتيازاتُ قاعدةٍ ومُشغّلٌ
+   * لا شفرةُ تطبيقٍ، وهو خارجَ نطاقِ هذا التغييرِ.
+   * @param {object} request
+   * @param {string} request.id
+   * @param {import('../policy/model.mjs').PolicyActor} request.actor
+   * @param {boolean} request.hold الحالةُ المطلوبةُ: تعيينٌ أم رفعٌ
+   * @param {string} request.justification
+   * @param {string} [request.royalCommandId]
+   * @param {string} [request.royalCommandDigest]
+   * @returns {Promise<DataRecord>}
+   */
+  async setLegalHold({ id, actor, hold, justification, royalCommandId, royalCommandDigest }) {
+    const row = await this.repository.findById(id);
+    if (row === null) throw new Error('DATASET_NOT_FOUND');
+    const current = toRecord(row);
+    const from = current.legalHold === true;
+    const to = hold === true;
+    const reason = typeof justification === 'string' ? justification.trim() : '';
+    const actorId = actor?.id ?? 'unknown';
+
+    /**
+     * الرفضُ يُسجَّلُ ثمَّ يُرفَعُ: محاولةُ رفعِ حفظٍ قانونيٍّ تُرَدُّ هي نفسُها
+     * واقعةٌ تستحقُّ القراءةَ، وسجلٌّ لا يحوي إلا النجاحَ لا يُرى فيه اعتداءٌ.
+     * @param {string} code
+     * @param {string} message
+     * @returns {never}
+     */
+    const refuse = (code, message) => {
+      this.log.append('data.legal-hold.refused', actorId, { id, from, to, code });
+      throw new LegalHoldError(code, message, { id, from, to });
+    };
+
+    if (from === to) {
+      refuse(
+        LEGAL_HOLD_ERRORS.UNCHANGED,
+        `الحفظ القانوني على «${id}» هو أصلاً ${to ? 'مُعيَّن' : 'مرفوع'}؛ تغييرٌ لا يغيّر شيئاً يملأ السجل بلا قرار.`,
+      );
+    }
+    if (reason.length < LEGAL_HOLD_MIN_JUSTIFICATION) {
+      refuse(
+        LEGAL_HOLD_ERRORS.JUSTIFICATION_REQUIRED,
+        `التسبيب أقصر من ${LEGAL_HOLD_MIN_JUSTIFICATION} حرفاً؛ ${to ? 'تعيينُ' : 'رفعُ'} حفظٍ قانونيٍّ بلا سبب مقروء لا يُراجَع لاحقاً.`,
+      );
+    }
+    // قيدُ القاعدةِ `data_assets_hold_blocks_zero_retention` يرفض حفظاً على أصلٍ
+    // بلا مدّةِ احتفاظٍ معلَنةٍ. ويُقرأُ الرفضُ هنا برمزٍ مُسمّى لا بخطأِ قاعدةٍ
+    // خامٍ يصلُ إلى المُنادي فيُقرأَ عطباً في الأداةِ لا رفضاً مقصوداً.
+    if (to && current.retentionDays === 0) {
+      refuse(
+        LEGAL_HOLD_ERRORS.RETENTION_UNDECLARED,
+        'حفظٌ قانونيٌّ على أصلٍ بلا مدّةِ احتفاظٍ معلَنةٍ مرفوضٌ؛ أعلِن المدّةَ أوّلاً فالقيدُ في القاعدةِ يرفضه.',
+      );
+    }
+    if (this.enforcementPoint === null) {
+      refuse(
+        LEGAL_HOLD_ERRORS.ENFORCEMENT_REQUIRED,
+        'تغييرُ الحفظ القانوني فعلٌ محكوم: فهرسٌ بلا نقطة تفويض لا ينفّذه، والغياب رفضٌ لا تجاوز.',
+      );
+    }
+
+    const { decision, token } = await this.enforcementPoint.authorize({
+      actor,
+      action: LEGAL_HOLD_ACTION,
+      resource: { type: 'data', id, classification: current.classification, legalHold: from },
+      context: { from, to, direction: to ? 'set' : 'lift', reason },
+      ...(typeof royalCommandId === 'string' ? { royalCommandId } : {}),
+      ...(typeof royalCommandDigest === 'string' ? { royalCommandDigest } : {}),
+    });
+    if (!decision.allowed) {
+      refuse(
+        LEGAL_HOLD_ERRORS.NOT_AUTHORIZED,
+        `التفويض رفض تغيير الحفظ القانوني برمز ${decision.code}: ${decision.reason}`,
+      );
+    }
+    try {
+      this.enforcementPoint.verify(token ?? undefined, {
+        actorId,
+        action: LEGAL_HOLD_ACTION,
+        resourceKey: `data:${id}`,
+        ...(typeof royalCommandId === 'string' ? { royalCommandId } : {}),
+        ...(typeof royalCommandDigest === 'string' ? { royalCommandDigest } : {}),
+      });
+    } catch (error) {
+      refuse(
+        LEGAL_HOLD_ERRORS.TICKET_INVALID,
+        `تذكرة القرار غير مقبولة: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    const updated = await this.repository.update(id, current.version, { legalHold: to });
+    this.log.append('data.legal-hold.changed', actorId, {
+      id,
+      from,
+      to,
+      justification: reason,
+      royalCommandId: typeof royalCommandId === 'string' ? royalCommandId : null,
     });
     return toRecord(updated);
   }
