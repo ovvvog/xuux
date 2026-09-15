@@ -17,9 +17,14 @@
  *   T3: لا سلطةَ في النقلِ: لا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ الطبقةِ،
  *       ولا نداءَ إلا عبرَ `gateway.call` للقراءةِ أو `console.issue` للكتابةِ. فطبقةٌ
  *       تقرأُ القاعدةَ مباشرةً تُخرِجُ القراءةَ من العقباتِ الخمسِ كلِّها.
- *   T4: كلُّ رمزِ رفضٍ في `API_ERRORS` و`TRANSPORT_ERRORS` و`CONSOLE_ERRORS` له ترجمةُ
- *       حالةٍ مُعلَنةٌ، ولا ترجمةَ لرمزٍ غيرِ مُعلَنٍ — **في الاتجاهين**. فرمزٌ بلا
- *       ترجمةٍ يُسلَّمُ بحالةٍ مخمَّنةٍ، و`200` على رفضٍ أسوأُ من انقطاعٍ.
+ *   T4: كلُّ رمزِ رفضٍ في `API_ERRORS` و`SESSION_ERRORS` و`TRANSPORT_ERRORS`
+ *       و`CONSOLE_ERRORS` له ترجمةُ حالةٍ مُعلَنةٌ، ولا ترجمةَ لرمزٍ غيرِ مُعلَنٍ
+ *       — **في الاتجاهين**. فرمزٌ بلا ترجمةٍ يُسلَّمُ بحالةٍ مخمَّنةٍ، و`200` على
+ *       رفضٍ أسوأُ من انقطاعٍ.
+ *       **وإقحامُ `SESSION_ERRORS` هنا سدادُ `LIVE-6`:** كان الحاجزُ يكتفي
+ *       بـ`API_ERRORS`، وهي جدولُ تسميةٍ يُغفِلُ رموزَ إثباتِ الحيازةِ الأربعةَ
+ *       مع أنَّها تخرجُ إلى المُنادي — فمرَّت بلا ترجمةٍ وسقطَتْ إلى `500`، والحاجزُ
+ *       ساكتٌ. فالمقياسُ مصادرُ الرموزِ لا جدولُ تسميتِها.
  *   T5: بلا اعتمادِ npm واحدٍ: كلُّ استيرادٍ في الطبقةِ إمّا `node:` وإمّا نسبيٌّ.
  *   T6: الرمزُ لا يُقرأُ من مُلحقِ استعلامٍ — المُلحقاتُ تُكتَبُ في سجلّاتِ
  *       الوسائطِ وتاريخِ المتصفِّحِ فيُسرَّبُ الرمزُ — ولا يُخدَمُ ملفٌّ خارجَ
@@ -54,6 +59,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { API_ERRORS, loadApiPolicy } from '../src/api/gateway.mjs';
+import { SESSION_ERRORS } from '../src/api/session-store.mjs';
 import { CONSOLE_ERRORS } from '../src/console/index.mjs';
 import { STATUS_BY_CODE, TRANSPORT_ERRORS } from '../src/transport/problem.mjs';
 import { compileCommandRoutes, compileRoutes, matchRoute } from '../src/transport/router.mjs';
@@ -220,6 +226,7 @@ if (
 const knownCodes = /** @type {Set<string>} */ (
   new Set([
     ...Object.values(API_ERRORS),
+    ...Object.values(SESSION_ERRORS),
     ...Object.values(TRANSPORT_ERRORS),
     ...Object.values(CONSOLE_ERRORS),
   ])
