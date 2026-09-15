@@ -60,6 +60,11 @@ refusalCodes:
   - API_HANDLER_UNDECLARED
   - API_HANDLER_REFUSED
   - API_PARAMS_INVALID
+  # رفضُ إثباتِ الحيازةِ — كان يخرجُ من الطبقةِ وهو غيرُ مُعلَنٍ هنا (‏`LIVE-6`).
+  - API_POP_REQUIRED
+  - API_POP_INVALID
+  - API_POP_REPLAY
+  - API_POP_EXPIRED
 
 # ── المسارات ──
 # `action` فعلٌ في كتالوجِ `config/policies.yaml`، و`view` مشهدٌ في
@@ -229,6 +234,14 @@ guarantees:
     statement: نداءٌ بلا رمزِ جلسةٍ صالحٍ يُرفض ويُسجَّل، ولا مسارَ مجهولَ الهوية.
     enforcedBy: src/api/gateway.mjs
     codes: [API_AUTH_REQUIRED, API_SESSION_INVALID, API_SESSION_EXPIRED]
+
+  - id: G-API-POP-PER-CALL
+    statement: >-
+      لا جلسةَ تُفتح ولا نداءَ يُقبل بمعرّفٍ عامٍّ وحدَه؛ لكلٍّ إثباتُ حيازةٍ موقَّعٌ
+      يربطُ الفعلَ والمسارَ والمورِدَ والجلسةَ وهضمَ الوسائطِ، ولا يُقبل توقيعٌ مرّتَينِ.
+      ورفضُه يُسلَّم `401` لأنّه إخفاقُ مصادقةٍ لا عَطَبٌ داخليٌّ.
+    enforcedBy: src/api/session-store.mjs
+    codes: [API_POP_REQUIRED, API_POP_INVALID, API_POP_REPLAY, API_POP_EXPIRED]
 
   - id: G-API-IDENTITY-ACTIVE
     statement: الجلسةُ لا تُفتح ولا تُقبل إلا لهويةٍ مسجَّلةٍ حالُها نشط.

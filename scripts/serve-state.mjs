@@ -44,7 +44,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 
-import { ApiGateway, loadApiPolicy } from '../src/api/index.mjs';
+import { ApiGateway, SESSION_ERRORS, loadApiPolicy } from '../src/api/index.mjs';
 import { createPoPClient } from '../src/api/pop-client.mjs';
 import { composeEnforcementChain } from '../src/core/composition-root.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../src/observability/index.mjs';
@@ -144,9 +144,28 @@ async function selfCheck(ctx) {
 
   const unsigned = await fetch(url, { headers: { authorization: `Bearer ${ctx.token}` } });
   const unsignedBody = await unsigned.text();
-  const refused = unsigned.status >= 400;
+  // **و`>= 400` لا يكفي — وهذا هو دَينُ `LIVE-6` الذي مرَّ من هنا:** كان
+  // هذا الفحصُ يرضى بأيِّ رقمٍ فوقَ `400`، فمرَّ `500` مرورَ الناجحِ وهو
+  // **إعلانُ عَطَبٍ داخليٍّ لا رفضُ مصادقةٍ**. فصارَ الحكمُ على **رقمٍ
+  // واحدٍ ورمزٍ واحدٍ**: `401` و`API_POP_REQUIRED` — وما خالفَ إخفاقٌ.
+  /** @returns {unknown} رمزُ الرفضِ إن كانَ الردُّ جسماً مُفهرَساً، وإلا `null`. */
+  const unsignedCodeOf = () => {
+    try {
+      return /** @type {{ code?: unknown }} */ (JSON.parse(unsignedBody)).code ?? null;
+    } catch {
+      return null;
+    }
+  };
+  const unsignedCode = unsignedCodeOf();
+  const refused = unsigned.status === 401 && unsignedCode === SESSION_ERRORS.POP_REQUIRED;
   lines.push(
-    `    نداءٌ بلا توقيعٍ: ‏${unsigned.status} — ${refused ? 'مردودٌ كما يجبُ' : '❌ قُبِلَ! فالحمايةُ ساقطةٌ'}`,
+    `    نداءٌ بلا توقيعٍ: ‏${unsigned.status} ‏«${String(unsignedCode)}» — ${
+      refused
+        ? 'مردودٌ رفضَ مصادقةٍ كما يجبُ'
+        : unsigned.status < 400
+          ? '❌ قُبِلَ! فالحمايةُ ساقطةٌ'
+          : `❌ رُدَّ بغيرِ ‏401/\`${SESSION_ERRORS.POP_REQUIRED}\` — ورفضُ مصادقةٍ يُقالُ «عَطَباً داخليّاً» يُضلِّلُ المُنادي`
+    }`,
   );
 
   const proof = ctx.popClient.signCall({ route, sessionId: ctx.sessionId, params: {} });

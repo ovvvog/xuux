@@ -21,7 +21,7 @@ import { request as httpRequest } from 'node:http';
 import path from 'node:path';
 import test from 'node:test';
 
-import { API_ERRORS, ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
+import { API_ERRORS, SESSION_ERRORS, ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
 import { CONSOLE_ERRORS, ConsoleError, loadConsolePolicy } from '../../src/console/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../../src/observability/index.mjs';
 import { createMemoryRepositories } from '../../src/persistence/composition.mjs';
@@ -353,10 +353,21 @@ test('كلُّ رمزِ رفضٍ في البوابةِ له ترجمةٌ مُع�
       `رمزُ رفضِ ديوانٍ بلا ترجمةٍ: ${code}`,
     );
   }
+  // **وهذا الشطرُ هو سدادُ `LIVE-6`:** كان الحاجزُ يقابلُ `API_ERRORS`
+  // و`CONSOLE_ERRORS` **ولا يقابلُ `SESSION_ERRORS`**، و`API_ERRORS` لا تُعيدُ
+  // تصديرَ رموزِ إثباتِ الحيازةِ الأربعةِ — فمرَّت بلا ترجمةٍ وسقطَتْ إلى `500`،
+  // أي قيلَ للمُنادي «عَطَبٌ داخليٌّ» وهو رفضُ مصادقةٍ.
+  for (const code of Object.values(SESSION_ERRORS)) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(STATUS_BY_CODE, code),
+      `رمزُ رفضِ جلسةٍ بلا ترجمةٍ: ${code} — ورفضُ مصادقةٍ بلا ترجمةٍ يُسلَّمُ «عَطَباً داخليّاً».`,
+    );
+  }
   // ولا ترجمةَ لرمزٍ لا وجودَ له: خريطةٌ فيها زائدٌ خريطةٌ لِما لا يُرَدُّ.
   const known = /** @type {Set<string>} */ (
     new Set([
       ...Object.values(API_ERRORS),
+      ...Object.values(SESSION_ERRORS),
       ...Object.values(TRANSPORT_ERRORS),
       ...Object.values(CONSOLE_ERRORS),
     ])

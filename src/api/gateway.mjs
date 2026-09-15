@@ -212,8 +212,18 @@ export function loadApiPolicy(options = {}) {
     }
   }
 
+  // **ومقابلَةُ الرموزِ تُقاسُ بمصادرِها لا بجدولِ أسمائِها (‏`LIVE-6`):** كان
+  // هذا الحاجزُ يتَّخِذُ `API_ERRORS` وحدَه مقياساً ل«ما يرفعُه الكودُ»، وهي
+  // **جدولُ تسميةٍ يُعيدُ تصديرَ بعضِ رموزِ الجلسةِ ويُغفِلُ بعضَها** — فأربعةُ
+  // رموزِ إثباتِ الحيازةِ تخرجُ من `SessionStore` إلى المُنادي ولا تمرُّ بجدولِ
+  // التسميةِ، فكانَ الحاجزُ يقولُ إنَّ التقابلَ تامٌّ وفي الواقعِ ثلمٌ. والمقياسُ الأمينُ
+  // اتّحادُ المصادرِ الثلاثةِ التي ترفعُ فعلاً إلى الخارجِ.
   /** @type {Set<string>} */
-  const declared = new Set(Object.values(API_ERRORS));
+  const declared = new Set([
+    ...Object.values(API_ERRORS),
+    ...Object.values(SESSION_ERRORS),
+    ...Object.values(RATE_LIMIT_ERRORS),
+  ]);
   /** @type {Set<string>} */
   const listed = new Set(parsed.refusalCodes);
   for (const code of declared) {
