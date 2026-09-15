@@ -25,6 +25,7 @@ import {
   loadDelegationPolicy,
 } from '../federation/index.mjs';
 import { RoyalReportGenerator, createReportMeasures, loadReportPolicy } from '../reports/index.mjs';
+import { CostCapacity } from '../cost-capacity/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../observability/index.mjs';
 import { ApiGateway, loadApiPolicy } from '../api/index.mjs';
 import { RoyalConsole, loadConsolePolicy } from '../console/index.mjs';
@@ -148,6 +149,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {RegionalDelegation} federation
  * @property {DelegationRegister} federationRegister
  * @property {RoyalReportGenerator} reports
+ * @property {import('../cost-capacity/cost-capacity.mjs').CostCapacity} costLedger
  * @property {MonitorAgent} monitor
  * @property {ApiGateway} api
  * @property {RoyalConsole} royalConsole
@@ -292,6 +294,10 @@ export function createPostgresRepositories(pool) {
  *   التقاريرِ الملكيةِ الدورية (M8.09): نافذةُ التقريرِ وأقسامُه وحقولُ كلِّ قسمٍ
  *   ومصادرُ قياسِها ومسارُ مراجعتِها ونشرِها. تُحمَّل من `config/royal-reports.yaml`
  *   إن لم تُمرَّر.
+ * @param {import('../cost-capacity/cost-capacity.mjs').CostCapacityPolicy | null} [deps.costCapacityPolicy] وثيقةُ
+ *   دفترِ التكلفةِ (M10.04): بنودُ الكلفةِ وأبعادُ الإسنادِ واسمُ حدثِ القيدِ. يُقرأُ
+ *   منها عدّادُ وحداتِ الحسابِ في التقريرِ الملكيِّ (`D-6`)؛ وتُحمَّل من
+ *   `config/cost-capacity.yaml` إن لم تُمرَّر.
  * @param {import('../observability/monitor-agent.mjs').MonitoringPolicy | null} [deps.monitoringPolicy] وثيقةُ
  *   المراقبةِ للقراءةِ فقط (M9.01): دورُ المراقبةِ وقدراتُه المسموحةُ ونداءاتُه
  *   المقروءةُ ومشاهدُه وحدُّ صفوفِه. تُحمَّل من `config/monitoring.yaml` إن لم
@@ -382,6 +388,7 @@ export function createRegistries({
   judiciaryPolicy = null,
   delegationPolicy = null,
   reportsPolicy = null,
+  costCapacityPolicy = null,
   monitoringPolicy = null,
   apiPolicy = null,
   consolePolicy = null,
@@ -536,10 +543,27 @@ export function createRegistries({
   // التشغيل، فلا يُقاس منه حالُ الدولةِ ولا مخاطرُها. والمقاييسُ مبنيّةٌ على
   // المستودعاتِ نفسِها وعلى سجلِّ السيادة، وبوابةُ التاجِ وسجلُّ الهوياتِ موصولان:
   // بلا الأولِ لا نشرَ، وبلا الثاني لا مراجعةَ بشريةً تُقاس.
+  // ودفترُ التكلفةِ يُقرأُ منه عدّادُ وحداتِ الحسابِ (`D-6`): دفترٌ حقيقيٌّ على
+  // السجلِّ الدائمِ نفسِهِ — فمن وحدتِهِ المُعلَنةِ (مِلّي‑وحدةٍ محاسبيةٍ) يُقاسُ
+  // ما استُهلِكَ في نافذةِ التقريرِ، لا من وصفٍ يُعلَن تقديراً. وقيودُ الاستهلاكِ
+  // تُدوَّنُ في هذا السجلِّ مِن مَن يُسجِّلُ الاستهلاكَ في زمنِ التشغيلِ (بوابةُ
+  // الاستدلالِ ومَن يُمرَّرُ إليه الدفترُ) — فدفترٌ بلا قيودٍ يُقيسُ صفراً **مقيساً**
+  // لا فراغاً مُعلَناً، وقيودٌ قديمةٌ لا تُحسَبُ في نافذةٍ لم تقع فيها.
+  const costLedger = new CostCapacity({
+    ...(costCapacityPolicy === null ? {} : { policy: costCapacityPolicy }),
+    log,
+    ledger: () =>
+      /** @type {readonly Record<string, unknown>[]} */ (/** @type {unknown} */ (log.snapshot())),
+    ...(nowMs === null ? {} : { nowMs }),
+  });
   const royalReports = new RoyalReportGenerator({
     policy: reportsPolicy ?? loadReportPolicy(),
     reports: repositories.royalReports,
-    measures: createReportMeasures({ repositories, register: delegationRegister }),
+    measures: createReportMeasures({
+      repositories,
+      register: delegationRegister,
+      costUsage: { list: async () => costLedger.usageEntries() },
+    }),
     agents,
     crown,
   });
@@ -792,6 +816,11 @@ export function createRegistries({
     federation: regionalDelegation,
     federationRegister: delegationRegister,
     reports: royalReports,
+    // دفترُ التكلفةِ موصولٌ في التركيبِ (`D-6`): مَن يُسجِّلُ الاستهلاكَ في زمنِ
+    // التشغيلِ يأخذُه من هنا فيُقيِّدُ في السجلِّ نفسِهِ الذي يقرأُ منه التقريرُ
+    // عدّادَ وحداتِ الحساب — فدفترانِ يعنيانِ عدّادينِ لاستهلاكٍ واحد، ومَن
+    // ركَّبَ من دونَه يُقيِّدُ في سجلٍّ لا يقرؤه أحد.
+    costLedger,
     // ناقلُ القنوات يُركَّب **دائماً** (الخطوة `M7.07`)، لنفس سبب دفتري النسب
     // والمحو: ناقلٌ اختياريٌّ يصير تركُه مساراً لأحداثٍ تُقرأ بلا تخليصٍ ولا عقد
     // ولا موضعِ قراءة — وهو العيب الذي أغلقته الخطوة.

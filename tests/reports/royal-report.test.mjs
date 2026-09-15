@@ -41,6 +41,7 @@ import {
   loadReportPolicy,
 } from '../../src/reports/index.mjs';
 import { createMemoryRepositories } from '../../src/persistence/composition.mjs';
+import { CostCapacity } from '../../src/cost-capacity/index.mjs';
 import { DelegationRegister } from '../../src/federation/index.mjs';
 
 /** وثيقةُ التقاريرِ النافذة، مقروءةً لا مُختلقة. */
@@ -79,6 +80,16 @@ function state(options = {}) {
     clock: /** @type {never} */ ({ now: () => clock.getTime() }),
   });
   const register = new DelegationRegister({ repository: repositories.federationRegister, log });
+  // دفترُ التكلفةِ الحقيقيُّ على السجلِّ نفسِهِ (`D-6`): عدّادُ وحداتِ الحسابِ
+  // يُقرأُ من قيودٍ يُدوّنُها الدفترُ نفسُه لا من قائمةٍ تكتبُها الدولةُ المصغّرةُ
+  // بيدِها — فلو خُتِمَت القيودُ في الاختبارِ لَما كان ما يُقاسُ عليه حقيقياً.
+  const costLedger = new CostCapacity({
+    log,
+    ledger: () =>
+      /** @type {readonly Record<string, unknown>[]} */ (/** @type {unknown} */ (log.snapshot())),
+    nowMs: () => clock.getTime(),
+  });
+  const costUsage = { list: async () => costLedger.usageEntries() };
   const identities = options.identities ?? {
     'human:auditor-1': { kind: 'human', state: 'active', role: REVIEW_ROLE },
     'human:operator-1': { kind: 'human', state: 'active', role: GENERATOR_ROLE },
@@ -96,7 +107,7 @@ function state(options = {}) {
   const generator = new RoyalReportGenerator({
     policy: POLICY,
     reports: repositories.royalReports,
-    measures: createReportMeasures({ repositories, register }),
+    measures: createReportMeasures({ repositories, register, costUsage }),
     agents: options.withAgents === false ? null : /** @type {never} */ (agents),
     crown: options.withCrown === false ? null : /** @type {never} */ (crown),
     now: () => clock,
@@ -105,6 +116,8 @@ function state(options = {}) {
     log,
     repositories,
     register,
+    costLedger,
+    costUsage,
     king,
     crown,
     generator,
@@ -253,12 +266,99 @@ test('معيارُ القبول: كلُّ حقلٍ تقديريٍّ معلَنٌ
   }
 });
 
+test('قيودُ دفترِ التكلفةِ غائبةٌ عن المقاييسِ تُردّ عند البناءِ لا عند التوليدِ (D-6)', () => {
+  const s = state();
+  // حقلٌ مُعلَنٌ مقيساً من الدفترِ (`cost.computeUnits`) بلا دفترٍ يُقرأُ منه يُخرِج
+  // صفراً يُقرأ قياساً — فغيابُ الدفترِ رفضٌ عند البناءِ لا فراغٌ عند التوليد.
+  // والوسيطُ محذوفٌ عمداً — فالإسقاطُ النوعيُّ جزءٌ من الاختبارِ لا خطأٌ فيه.
+  assert.throws(
+    () =>
+      createReportMeasures(
+        /** @type {never} */ ({ repositories: s.repositories, register: s.register }),
+      ),
+    (/** @type {unknown} */ error) => field(error, 'code') === REPORT_ERRORS.MEASURE_MISSING,
+  );
+  // وقيمةٌ باطلةٌ (‏null أو بلا list) تُردُّ بالرمزِ نفسِهِ لا بخطأِ نوعٍ خام —
+  // فالحارسُ يفحصُ الشكلَ لا الوجودَ وحدَه.
+  for (const invalid of [null, {}]) {
+    assert.throws(
+      () =>
+        createReportMeasures({
+          repositories: s.repositories,
+          register: s.register,
+          costUsage: /** @type {never} */ (invalid),
+        }),
+      (/** @type {unknown} */ error) => field(error, 'code') === REPORT_ERRORS.MEASURE_MISSING,
+    );
+  }
+});
+
+test('عدّادُ وحداتِ الحسابِ يُقاسُ من قيودِ دفترِ التكلفةِ في النافذةِ لا خارجَها (D-6)', async () => {
+  const s = state();
+  await seed(s);
+  // ساعةٌ خاصةٌ بالدفترِ تُحرَّك بيدِ الاختبار: قيدانِ داخلَ النافذةِ وثالثٌ قبلَها —
+  // فلو عدَّ العدّادُ القيدَ القديمَ لكان التقريرُ يُقيسُ استهلاكاً لم يقع في
+  // نافذتِهِ، ولو لم يعدَّ الجديدَ لم يكن العدّادُ عدّاداً. القيودُ تُدوَّنُ من
+  // دفترٍ حقيقيٍّ على سجلٍّ حقيقيٍّ (`CostCapacity.record`) لا صفوفاً تُختلَق بيدٍ —
+  // فالمطلوبُ قياسُ قيمةٍ غيرِ null لا مصادرةُ النتيجةِ على الاختبار.
+  let atMs = s.now().getTime() - 60000;
+  const ledger = new CostCapacity({
+    log: s.log,
+    ledger: () =>
+      /** @type {readonly Record<string, unknown>[]} */ (/** @type {unknown} */ (s.log.snapshot())),
+    nowMs: () => atMs,
+  });
+  // 1000 رمزِ استدلالٍ بـ2000 مِلّي‑وحدةٍ للألفِ = 2000؛ و2500 كتابةِ ذاكرةٍ
+  // بـ400 مِلّي‑وحدةٍ للألفِ = 1000؛ فمجموعُ داخلِ النافذةِ 3000 مِلّي‑وحدة.
+  ledger.record({
+    item: 'cost:inference-tokens',
+    institution: 'institution:statistics-authority',
+    agent: 'agent:statistician',
+    model: 'model:primary',
+    quantity: 1000,
+  });
+  ledger.record({
+    item: 'cost:memory-writes',
+    institution: 'institution:statistics-authority',
+    agent: 'agent:statistician',
+    model: 'model:primary',
+    quantity: 2500,
+  });
+  // وثالثٌ قبلَ النافذةِ (4000 رمزٍ = 8000): لا يُحسَبُ في نافذةٍ لم يقع فيها.
+  atMs = s.now().getTime() - POLICY.period.windowMs - 60000;
+  ledger.record({
+    item: 'cost:inference-tokens',
+    institution: 'institution:statistics-authority',
+    agent: 'agent:statistician',
+    model: 'model:primary',
+    quantity: 4000,
+  });
+  const row = await s.generator.generate({ actorRole: GENERATOR_ROLE, ...s.window() });
+  const sections = /** @type {Array<Record<string, unknown>>} */ (field(row, 'sections'));
+  const byId = new Map(sections.map((entry) => [String(entry['id']), entry]));
+  const units = byId.get('cost.computeUnits');
+  assert.ok(units, 'حقلُ وحداتِ الحسابِ غائبٌ من التقرير');
+  assert.equal(units?.['estimated'], false);
+  assert.equal(units?.['measuredFrom'], 'cost.usage.recorded');
+  assert.equal(units?.['value'], 3000);
+  // والقيدُ القديمُ مُسجَّلٌ في الدفترِ فيُعدُّ في الصفوفِ الممسوحةِ لا في القيمة.
+  assert.equal(units?.['rowCount'], 3);
+  // ولا تقديريَّ بعد اليومِ في هذا الحقلِ: مقيسٌ فيُحسَبُ مع المقيسةِ لا مع
+  // المقدَّرةِ، وفرضيتُهُ القديمةُ حُذفت من الوثيقةِ لا من الرصدِ وحده.
+  assert.equal(field(row, 'fieldsEstimated'), 0);
+  assert.equal(
+    Number(field(row, 'fieldsMeasured')) + Number(field(row, 'fieldsEstimated')),
+    Number(field(row, 'fieldsDeclared')),
+  );
+});
+
 test('قيمةٌ لم تُقَس ولم تُعلَن تقديريةً تُردّ ولا تُكتب صفراً', async () => {
   const s = state();
   await seed(s);
   const measures = createReportMeasures({
     repositories: s.repositories,
     register: s.register,
+    costUsage: s.costUsage,
   });
   // مقياسٌ يُرجِع «لا قيمة» مع صفوفٍ مقيسة: هذا بعينه التقديرُ غيرُ المعلَن.
   measures['institutions.taskCount'] = async () => ({
@@ -285,6 +385,7 @@ test('حقلٌ بلا مصدرٍ مقروءٍ يُردّ بلا كتابةِ ص�
   const measures = createReportMeasures({
     repositories: s.repositories,
     register: s.register,
+    costUsage: s.costUsage,
   });
   measures['risks.lateCycleCount'] = async () =>
     /** @type {never} */ ({ value: 3, rowCount: -1, measuredFrom: '' });
@@ -305,6 +406,7 @@ test('حقلٌ يُعلن مصدراً غيرَ منفَّذٍ يُردّ عند
   const measures = createReportMeasures({
     repositories: s.repositories,
     register: s.register,
+    costUsage: s.costUsage,
   });
   delete measures['cost.remainingTotal'];
   assert.throws(
@@ -318,7 +420,11 @@ test('حقلٌ يُعلن مصدراً غيرَ منفَّذٍ يُردّ عند
     (/** @type {unknown} */ error) => field(error, 'code') === REPORT_ERRORS.MEASURE_MISSING,
   );
   // والاتجاهُ الآخرُ محروسٌ كذلك: مقياسٌ لا حقلَ له.
-  const extra = createReportMeasures({ repositories: s.repositories, register: s.register });
+  const extra = createReportMeasures({
+    repositories: s.repositories,
+    register: s.register,
+    costUsage: s.costUsage,
+  });
   extra['cost.phantomTotal'] = async () => ({
     value: 0,
     rowCount: 0,

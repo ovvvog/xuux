@@ -200,6 +200,56 @@ export function loadCostCapacityPolicy(options = {}) {
  */
 
 /**
+ * استخراجُ قيودِ الاستهلاكِ الصحيحةِ من صفوفِ السجلِّ الخامِّ — منطقُ التحقّقِ من
+ * القيدِ **واحدٌ** هنا يقرأُ منه الدفترُ نفسُه وكلُّ من يقرأُ عدّادَ وحداتِ الحسابِ
+ * من خارجِه؛ فنسختانِ من منطقِ القيدِ تنفصلانِ عند أوّلِ تعديلٍ فيُعدَّ ما لا
+ * يعدّه الآخر.
+ *
+ * **والقيدُ الناقصُ يُطرَح ولا يُكمَّل بافتراضٍ:** صفٌّ ليس من نوعِ حدثِ القيدِ أو
+ * نقصَ أحدَ حقولِه المسمّاة أو جاء حقلٌ منها بنوعٍ باطلٍ يُترك، فقيدٌ مُرمَّمٌ قيدٌ
+ * اخترعه القارئ (المادة 2). ولا يُفلترُ هنا بزمنٍ ولا ببُعدٍ — فالزمنُ والبُعدُ
+ * سؤالُ من يقرأُ لا سؤالُ القيد.
+ *
+ * @param {readonly Record<string, unknown>[]} rows صفوفُ السجلِّ الخامّة كما يُقرؤها قارئُ الدفتر.
+ * @param {CostCapacityPolicy} policy وثيقةُ الدفتر — منها اسمُ حدثِ القيدِ (`audit.usageRecordedEvent`).
+ * @returns {import('./pricing.mjs').UsageEntryLike[]}
+ */
+export function usageEntriesOf(rows, policy) {
+  const wanted = policy.audit.usageRecordedEvent;
+  /** @type {import('./pricing.mjs').UsageEntryLike[]} */
+  const entries = [];
+  for (const raw of rows) {
+    if (raw === null || typeof raw !== 'object') continue;
+    if (raw['type'] !== wanted) continue;
+    const data = /** @type {Record<string, unknown>} */ (raw['data'] ?? {});
+    const atMs = data['atMs'];
+    const quantity = data['quantity'];
+    const costMilli = data['costMilli'];
+    if (
+      typeof data['item'] !== 'string' ||
+      typeof data['institution'] !== 'string' ||
+      typeof data['agent'] !== 'string' ||
+      typeof data['model'] !== 'string' ||
+      typeof atMs !== 'number' ||
+      typeof quantity !== 'number' ||
+      typeof costMilli !== 'number'
+    ) {
+      continue;
+    }
+    entries.push({
+      item: data['item'],
+      institution: data['institution'],
+      agent: data['agent'],
+      model: data['model'],
+      quantity,
+      costMilli,
+      atMs,
+    });
+  }
+  return entries;
+}
+
+/**
  * دفترُ التكلفةِ والسعة.
  *
  * **ثلاثةُ محاقنَ لا استيراداتٍ:** السجلُّ الدائمُ، وقارئُ القيودِ من القرص،
@@ -443,48 +493,32 @@ export class CostCapacity {
   }
 
   /**
-   * قراءةُ قيودِ شهرٍ **من قارئِ السجلِّ المُحقَنِ** لا من ذاكرةِ الدفترِ عن
+   * كلُّ قيودِ الاستهلاكِ الصحيحةِ **من قارئِ السجلِّ المُحقَنِ** لا من ذاكرةِ الدفترِ عن
    * نفسِه؛ وقيدٌ ناقصُ حقلٍ يُطرَح ولا يُكمَّل بافتراضٍ — فقيدٌ مُرمَّمٌ قيدٌ
-   * اخترعه القارئ.
+   * اخترعه القارئ. وهذا القراءُ العامُّ هو ما يقرأُ منه `#entriesOf` لشهرٍ بعينِه،
+   * وهو ما يقرأُ منه التقريرُ الملكيُّ عدّادَ وحداتِ الحسابِ (`D-6`) على نافذتِهِ
+   * لا على شهرِ التقويم — فالنافذةُ زمنُ القراءةِ والشهرُ زمنُ الحسبةِ، ولا يجوزُ أن
+   * يُقيَّدَ عدّادُ النافذةِ بمنطقِ الشهر.
+   *
+   * @returns {import('./pricing.mjs').UsageEntryLike[]}
+   */
+  usageEntries() {
+    const ledger = this.#requireLedger();
+    return usageEntriesOf(ledger(), this.#policy);
+  }
+
+  /**
+   * قراءةُ قيودِ شهرٍ من القراءِ العامِّ بترشيحِ الشهرِ — فمنطقُ التحقّقِ من القيدِ
+   * واحدٌ في `usageEntriesOf` ولا يُكرَّر في القارئات.
    *
    * @param {string} period
    * @returns {import('./pricing.mjs').UsageEntryLike[]}
    */
   #entriesOf(period) {
     const ledger = this.#requireLedger();
-    const wanted = this.#policy.audit.usageRecordedEvent;
-    /** @type {import('./pricing.mjs').UsageEntryLike[]} */
-    const entries = [];
-    for (const raw of ledger()) {
-      if (raw === null || typeof raw !== 'object') continue;
-      if (raw['type'] !== wanted) continue;
-      const data = /** @type {Record<string, unknown>} */ (raw['data'] ?? {});
-      const atMs = data['atMs'];
-      const quantity = data['quantity'];
-      const costMilli = data['costMilli'];
-      if (
-        typeof data['item'] !== 'string' ||
-        typeof data['institution'] !== 'string' ||
-        typeof data['agent'] !== 'string' ||
-        typeof data['model'] !== 'string' ||
-        typeof atMs !== 'number' ||
-        typeof quantity !== 'number' ||
-        typeof costMilli !== 'number'
-      ) {
-        continue;
-      }
-      if (periodOf(atMs) !== period) continue;
-      entries.push({
-        item: data['item'],
-        institution: data['institution'],
-        agent: data['agent'],
-        model: data['model'],
-        quantity,
-        costMilli,
-        atMs,
-      });
-    }
-    return entries;
+    return usageEntriesOf(ledger(), this.#policy).filter(
+      (entry) => periodOf(entry.atMs) === period,
+    );
   }
 
   /**
