@@ -40,7 +40,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { canonicalCallPayload } from './pop-canonical.mjs';
 import { fileURLToPath } from 'node:url';
 
 import Ajv2020Default from 'ajv/dist/2020.js';
@@ -673,12 +673,9 @@ export class ApiGateway {
    * @returns {string}
    */
   #canonicalCallPayload(route, sessionId, params) {
-    const paramsDigest = createHash('sha256')
-      .update(JSON.stringify(params ?? {}))
-      .digest('base64url');
-    return [route.method, route.path, route.action, route.resource, sessionId, paramsDigest].join(
-      '|',
-    );
+    // **ولا تُصاغُ الرسالةُ هنا:** الصياغةُ في `pop-canonical.mjs` موضعاً واحداً
+    // يقرأُه المُوقِّعُ والمُتحقِّقُ — فلا نسخةَ ثانيةً تفترقُ عن أختِها (‏`WL-179`).
+    return canonicalCallPayload(route, sessionId, params);
   }
 
   /**

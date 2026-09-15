@@ -28,6 +28,8 @@
 
 import { createHash, randomBytes, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 
+import { canonicalOpenPayload, popMessage } from './pop-canonical.mjs';
+
 /** رموزُ رفضِ الجلسة — كلُّها مُعلَنةٌ في `config/api.yaml`. */
 export const SESSION_ERRORS = Object.freeze({
   AUTH_REQUIRED: 'API_AUTH_REQUIRED',
@@ -462,7 +464,7 @@ export class SessionStore {
    * @returns {string}
    */
   #canonicalMessage(canonicalPayload, popTimestamp, popNonce) {
-    return `${canonicalPayload}|${popTimestamp}|${popNonce}`;
+    return popMessage(canonicalPayload, popTimestamp, popNonce);
   }
 
   /**
@@ -473,7 +475,7 @@ export class SessionStore {
    * @returns {string}
    */
   #canonicalOpenMessage(actorId, popTimestamp, popNonce) {
-    return this.#canonicalMessage(`open:${actorId}`, popTimestamp, popNonce);
+    return this.#canonicalMessage(canonicalOpenPayload(actorId), popTimestamp, popNonce);
   }
 
   /**
