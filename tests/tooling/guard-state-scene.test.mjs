@@ -51,7 +51,14 @@ function cloneTree() {
   ];
 
   // وكلُّ ملفّاتِ أسطحِ القرّاءِ.
-  for (const dir of ['src/api', 'src/transport', 'src/operations', 'src/console', 'src/crisis', 'src/audit-viewer']) {
+  for (const dir of [
+    'src/api',
+    'src/transport',
+    'src/operations',
+    'src/console',
+    'src/crisis',
+    'src/audit-viewer',
+  ]) {
     const fullDir = path.join(ROOT, dir);
     if (fs.existsSync(fullDir)) {
       for (const f of fs.readdirSync(fullDir)) {

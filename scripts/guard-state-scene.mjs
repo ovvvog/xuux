@@ -164,7 +164,12 @@ const testFile = readFile('tests/tooling/guard-state-scene.test.mjs');
 if (testFile === '') {
   violations.push('R6: tests/tooling/guard-state-scene.test.mjs غائب.');
 } else {
-  if (!testFile.includes('reject') && !testFile.includes('rejects') && !testFile.includes('يرفض') && !testFile.includes('مرفوض')) {
+  if (
+    !testFile.includes('reject') &&
+    !testFile.includes('rejects') &&
+    !testFile.includes('يرفض') &&
+    !testFile.includes('مرفوض')
+  ) {
     violations.push('R6: اختبارُ الحاجزِ لا يَقيسُ الرفضَ.');
   }
 }
