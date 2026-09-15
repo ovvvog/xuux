@@ -172,7 +172,7 @@ export class BudgetGate {
         resourceKey: `institution:${resourceId}`,
       });
     } catch (error) {
-      this.log.append('institutions.budget.ticket_invalid', actor.id, {
+      this.log.append('institutions.budget.ticket-invalid', actor.id, {
         institutionKey,
         amount,
         error: error instanceof Error ? error.message : String(error),
@@ -195,7 +195,7 @@ export class BudgetGate {
         budgetDebitedAt: this.now().toISOString(),
       });
     } catch (error) {
-      this.log.append('institutions.budget.allocation_failed', actor.id, {
+      this.log.append('institutions.budget.allocation-failed', actor.id, {
         institutionKey,
         amount,
         error: error instanceof Error ? error.message : String(error),

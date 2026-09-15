@@ -474,6 +474,20 @@ channels:
         version: 1
         required: [institutionId, taskId, cost, remaining]
         optional: [resource]
+      # تخصيصُ الميزانية واقعةٌ تُنشر على حِدَة لا تُدمَج في الرفض: قرارٌ صدرَ
+      # وقيدٌ وقع — لا حادثةً واحدةً تُوهم بأنّ المُخصَّصَ رُفِض. (WL-189 — LIM-2)
+      - type: institutions.budget.allocated
+        version: 1
+        required: [institutionKey, amount, purpose, newAllocated, remaining, resource]
+      - type: institutions.budget.refused
+        version: 1
+        required: [institutionKey, amount, code, reason]
+      - type: institutions.budget.ticket-invalid
+        version: 1
+        required: [institutionKey, amount, error]
+      - type: institutions.budget.allocation-failed
+        version: 1
+        required: [institutionKey, amount, error]
       - type: institutions.task.executed
         version: 1
         required: [id, institutionId, effect, outputId]
