@@ -46,6 +46,12 @@
  *       للديوانِ — لا يُوقِّعُ ولا يُتحقَّقُ ولا يُنفِّذُ بسلطتِه. وجسمُ الطلبِ يُقرأُ
  *       للمسارِ السياديِّ وحدَه بحدٍّ مُعلَنٍ، ولا يُقرأُ لغيرِه. واختبارُ الكتابةِ
  *       موجودٌ ويقيسُ مساراً مُعلَناً ومساراً غيرَ مُعلَنٍ وبلا ديوانٍ.
+ *  T12: **ووسيطُ التطويرِ الموقِّعُ مُعلَنٌ ومحدودٌ وخارجَ الإنتاجِ (‏`LIVE-5`):**
+ *       سلطتُهُ ومداهُ مكتوبانِ في `docs/TRANSPORT.md` **وفي واجهةِ المشهدِ
+ *       نفسِها** لا في الوثيقةِ وحدَها، والمُشغِّلُ يُوصِلُ `assertLoopbackHost`
+ *       فيَفشَلُ مُغلَقاً على مضيفٍ غيرِ محلّيٍّ، **ولا ملفَ تحتَ `src/` يستوردُهُ**.
+ *       فوسيطٌ يُوقِّعُ لمَن لا مفتاحَ لهُ **سلطةٌ مُسنَدةٌ**، وسلطةٌ بلا
+ *       إعلانٍ ولا حدٍّ لا تُفارقُ إسقاطَ الحمايةِ إلّا بالاسمِ.
  *
  * **حدٌّ مُعلَنٌ:** الحاجزُ يقرأُ النصَّ والوثيقةَ **ولا يفتحُ مِقبساً ولا يُصافِحُ**؛
  * فنجاحُ المُصافحةِ ورفضُ الشهادةِ غيرِ الموثوقةِ يُقاسانِ في
@@ -489,6 +495,74 @@ if (commandTest !== '') {
   }
 }
 
+// ═══ T12: وسيطُ التطويرِ الموقِّعُ مُعلَنٌ ومحدودٌ وخارجَ الإنتاجِ ═══
+const proxyModule = readFile(path.join('scripts', 'dev-pop-proxy.mjs'));
+if (proxyModule === '') {
+  violations.push('T12: `scripts/dev-pop-proxy.mjs` غائبٌ — ومشهدٌ يُخدَمُ ولا يقرأُ دَينٌ.');
+} else {
+  /** @type {Array<[string, string]>} */
+  const declaredInProxy = [
+    ['PROXY_AUTHORITY', 'سلطةُ الوسيطِ غيرُ مُعلَنةٍ رمزاً.'],
+    ['DEV_PROXY_READ_ONLY', 'لا رمزَ رفضٍ للمدى — ومدىً بلا رفضٍ مدٌّ لا حدٌّ.'],
+    ['assertLoopbackHost', 'لا حراسةَ مضيفٍ محلّيٍّ.'],
+    [
+      "signed ? 'yes' : 'no'",
+      'لا يُعلِنُ الوسيطُ أوَقَّعَ أم مرَّرَ — وإعلانٌ لا يفرِّقُ لا يُفيدُ.',
+    ],
+    ['authorization', 'لا تمريرَ لرمزِ المُنادي كما هو — وتوقيعٌ فوقَ رمزِ غيرِكَ انتحالٌ.'],
+  ];
+  for (const [needle, why] of declaredInProxy) {
+    if (!proxyModule.includes(needle)) violations.push(`T12: ${why} (${needle}).`);
+  }
+}
+// والمُشغِّلُ يُوصِلُ الحراسةَ فعلاً لا يكتفي بوجودِها.
+const devRunner = readFile(path.join('scripts', 'serve-state.mjs'));
+if (devRunner !== '') {
+  for (const needle of ['assertLoopbackHost', 'createSigningProxyHandler', 'PROXY_HEADER']) {
+    if (!devRunner.includes(needle)) {
+      violations.push(`T12: المُشغِّلُ لا يُوصِلُ الوسيطَ الموقِّعَ (${needle}).`);
+    }
+  }
+}
+// والإعلانُ في الوثيقةِ وفي واجهةِ المشهدِ نفسِها — وثيقةٌ وحدَها سترٌ.
+const transportDoc = readFile(path.join('docs', 'TRANSPORT.md'));
+if (transportDoc !== '' && !transportDoc.includes('dev-pop-proxy.mjs')) {
+  violations.push('T12: `docs/TRANSPORT.md` لا تُعلِنُ الوسيطَ الموقِّعَ ولا سلطتَهُ ومداهُ.');
+}
+const viewerPage = readFile(path.join('web', 'index.html'));
+if (viewerPage !== '' && !viewerPage.includes('x-state-pop-proxy')) {
+  violations.push(
+    'T12: واجهةُ المشهدِ لا تُعلِنُ مَن يُوقِّعُ قراءتَها — والقارِئُ أحقُّ بالعلمِ.',
+  );
+}
+// وخارجَ الإنتاجِ: لا ملفَ تحتَ `src/` يستوردُ وسيطَ تطويرٍ.
+/**
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function collectSourceFiles(dir) {
+  /** @type {string[]} */
+  const found = [];
+  /** @type {import('node:fs').Dirent[]} */
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) found.push(...collectSourceFiles(full));
+    else if (entry.name.endsWith('.mjs')) found.push(full);
+  }
+  return found;
+}
+for (const file of collectSourceFiles(path.join(ROOT, 'src'))) {
+  if (fs.readFileSync(file, 'utf8').includes('dev-pop-proxy')) {
+    violations.push(`T12: ملفُّ إنتاجٍ يستوردُ وسيطَ تطويرٍ: ${path.relative(ROOT, file)}.`);
+  }
+}
+
 if (violations.length > 0) {
   console.error('⛔ حاجز طبقة النقل رفض:');
   for (const violation of violations) console.error(`   • ${violation}`);
@@ -506,5 +580,5 @@ const commandRouteCount = /** @type {ReturnType<typeof compileCommandRoutes>} */
   })()
 ).length;
 console.log(
-  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` في القراءةِ ولا نداءَ كاتبٍ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` للقراءةِ و\`console.issue\` للكتابةِ، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ، و${commandRouteCount} مسارَ كتابةٍ سياديّةٍ مُشتَقّةٍ من \`config/royal-console.yaml\` بلا عنوانٍ مكتوبٍ يداً ولا مفتاحٍ خاصٍّ في الطبقةِ وجسمٍ بحدٍّ مُعلَنٍ.`,
+  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` في القراءةِ ولا نداءَ كاتبٍ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` للقراءةِ و\`console.issue\` للكتابةِ، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ، و${commandRouteCount} مسارَ كتابةٍ سياديّةٍ مُشتَقّةٍ من \`config/royal-console.yaml\` بلا عنوانٍ مكتوبٍ يداً ولا مفتاحٍ خاصٍّ في الطبقةِ وجسمٍ بحدٍّ مُعلَنٍ، ومشهدُ الويبِ يقرأُ بوسيطٍ موقِّعٍ مُعلَنِ السُّلطةِ والمدى مربوطٍ بالمضيفِ المحلّيِّ وحدَهُ خارجَ شجرةِ الإنتاجِ.`,
 );
