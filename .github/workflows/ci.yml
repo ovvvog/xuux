@@ -87,6 +87,9 @@ jobs:
       - name: حاجز حداثة لوحة الحالة (WL-171) — لا لوحةٌ تتجمَّدُ والسجلُّ يتقدَّمُ
         run: npm run guard:status-freshness
 
+      - name: حاجز اتّصال ترقيم سجلّ الأعمال (WL-178) — لا مُدخلةٌ تزولُ صامتةً
+        run: npm run guard:work-log-ids
+
       - name: حاجز التقدّم (WL-063) — لا نسبة تُقدَّر تقديراً ولا عدّاد ينحرف يدوّاً
         run: npm run guard:progress
 
