@@ -210,13 +210,11 @@ export function createWorker({
 
       // (3) الإيقاف بعد الحجز وقبل التشغيل: تُعاد المهمة بلا تنفيذ ولا فقدان.
       if (isHalted()) {
-        await queue.fail({
+        await queue.releaseForHalt({
           taskId: task.id,
           worker,
-          code: 'TASK_HALTED',
-          message:
+          reason:
             'أُوقف النظام إيقافاً شاملاً بعد الحجز وقبل التشغيل؛ أُعيدت المهمة إلى الطابور بلا تنفيذ.',
-          retryable: true,
         });
         return finish('halted', task.id, 'TASK_HALTED');
       }
@@ -273,15 +271,34 @@ export function createWorker({
           }
           // أُلغي التنفيذ بلا طلب إلغاء على المهمة ⇒ السبب إيقافٌ شامل أو فقدُ
           // عقد. تُعاد إلى الطابور بلا فقدان، ولا تُعلن ملغاة كذباً.
+          //
+          // والفرقُ بين السببَين فرقٌ في الحساب لا في اللفظ (الدَّينُ `D-8`):
+          // الإيقافُ فعلُ سلطةٍ فلا يُحمَّل على ميزانيةِ محاولاتِ المهمّة، فيُفرَجُ
+          // عنها بـ`releaseForHalt`. وأمّا فقدُ العقدِ أو تعذُّرُ النبضةِ فعطبُ
+          // سياقِ تنفيذٍ **تُحسَبُ** محاولتُه، وإلّا صارت المهمّةُ التي تُعطِّل
+          // عاملَها تُحجَزُ إلى الأبدِ بلا أن تستنفدَ محاولاتِها.
+          const halted = isHalted();
           try {
-            await queue.fail({
-              taskId: task.id,
-              worker,
-              code: 'TASK_HALTED',
-              message: 'قُطع التنفيذ (إيقاف شامل أو فقدُ عقد) فأُعيدت المهمة إلى الطابور.',
-              retryable: true,
-            });
-            return finish('requeued', task.id, 'TASK_HALTED');
+            if (halted) {
+              await queue.releaseForHalt({
+                taskId: task.id,
+                worker,
+                reason: 'أُوقف النظام إيقافاً شاملاً أثناء تنفيذٍ جارٍ فأُجهض وأُعيدت المهمة.',
+              });
+            } else {
+              await queue.fail({
+                taskId: task.id,
+                worker,
+                code: 'TASK_EXECUTION_INTERRUPTED',
+                message: 'قُطع التنفيذ (فقدُ عقد أو تعذُّر نبضة) فأُعيدت المهمة إلى الطابور.',
+                retryable: true,
+              });
+            }
+            return finish(
+              'requeued',
+              task.id,
+              halted ? 'TASK_HALTED' : 'TASK_EXECUTION_INTERRUPTED',
+            );
           } catch (error) {
             // فقدُ العقد يعني أن غيره استعادها: لا خبر أصدق من ذلك ولا فقدان.
             if (error instanceof QueueError && error.code === QUEUE_ERRORS.LEASE_LOST) {
