@@ -11,9 +11,16 @@
  *    في موضعِه بتحقُّقٍ كاملٍ (`src/transport/tls.mjs`). ولا شهادةَ يُولِّدُها هذا
  *    السكربتُ لنفسِه: شهادةٌ موقَّعةٌ من نفسِها تُظهِرُ قُفلاً بلا سلطةِ تصديقٍ،
  *    وذاك إيهامُ تأمينٍ أسوأُ من انعدامِه لأنّه يُطمئِنُ من لا ينبغي أن يطمئنَّ.
- * 2. **لا إثباتَ حيازةٍ (`PoP`) في هذا التركيبِ:** التوقيعُ يقتضي مفتاحاً خاصّاً
- *    لا يَحملُه متصفِّحٌ، والتركيبُ الرسميُّ يُشدِّدُه (`requirePoP`). فمن أرادَ
- *    قراءةً بإثباتِ حيازةٍ فمَحلُّها عميلٌ يَحملُ مفتاحَه لا صفحةٌ.
+ * 2. **إثباتُ الحيازةِ قائمٌ لا مُسقَطٌ (‏`WL-179`، إغلاقُ `LIVE-1`):** كان هذا
+ *    النصُّ يُعلِنُ «لا إثباتَ حيازةٍ في هذا التركيبِ» **وقد صارَ لازماً افتراضاً
+ *    في `SessionStore`، فكانَ الخادمُ يموتُ قبلَ الإنصاتِ** بـ`POP_REQUIRED` —
+ *    فالإعلانُ كان وصفَ ماضٍ لا وصفَ حالٍ. **ولم يُعالَجْ بـ`requirePoP: false`**:
+ *    يُولَّدُ للمُشغِّلِ مفتاحُ `Ed25519` **لحظيٌّ في الذاكرةِ لا يُكتَبُ على قرصٍ**،
+ *    ويُسجَّلُ عامُّه، وتُفتَحُ الجلسةُ بتوقيعٍ. **ولكلِّ نداءٍ توقيعُه** — لا الفتحِ
+ *    وحدَه.
+ * 2ب. **وصفحةُ المتصفِّحِ لا تُوقِّعُ:** لا مفتاحَ خاصَّ فيها، فمشهدُ الويبِ
+ *    **يُخدَمُ ساكناً ولا تنجحُ نداءاتُه** في تركيبٍ يُلزِمُ الحيازةَ. **وهذا حدٌّ
+ *    مقيسٌ لا مستورٌ**، قُيِّدَ ديناً باسمِه (`LIVE-5`) في سجلِّ الديونِ.
  * 3. **لا كتابةَ بحالٍ:** بابُ الدولةِ قارئٌ فقط، والكتابةُ أمرٌ ملكيٌّ موقَّعٌ
  *    (`M9.03`) بمفاتيحَ في وحدةِ أمانٍ.
  *
@@ -33,10 +40,12 @@
  * والقراءةُ مسموحةٌ بصفرِ صفوفٍ — وهذا فرقٌ يُقالُ للقارئِ صريحاً في الواجهةِ.
  */
 
+import { generateKeyPairSync } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 
 import { ApiGateway, loadApiPolicy } from '../src/api/index.mjs';
+import { createPoPClient } from '../src/api/pop-client.mjs';
 import { composeEnforcementChain } from '../src/core/composition-root.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../src/observability/index.mjs';
 import {
@@ -72,6 +81,12 @@ const PORT = Number(argOf('--port', '4179'));
 const HOST = argOf('--host', '127.0.0.1');
 const USE_DB = args.includes('--db');
 /**
+ * `--self-check`: **إقلاعٌ يُقاسُ لا يُوصَفُ.** يُنادى البابُ على السلكِ مرّتَينِ —
+ * مرّةً بلا توقيعٍ (‏فيُرَدُّ) ومرّةً بتوقيعٍ صحيحٍ (‏فيُقبَلُ) — ثمّ يُغلَقُ الخادمُ
+ * ويُخرَجُ برمزٍ. **فمن قالَ «يعملُ» أعطى رمزَ استجابةٍ لا وصفاً.**
+ */
+const SELF_CHECK = args.includes('--self-check');
+/**
  * إعلانُ مادّةِ `TLS` من البيئةِ: **مساراتٌ لا محتوىً**، فمحتوى المفتاحِ في
  * متغيّرِ بيئةٍ يُطبَعُ في كلِّ فحصِ عمليّةٍ ويُورَثُ لكلِّ ابنٍ.
  */
@@ -101,6 +116,60 @@ async function repositoriesFor() {
     },
     source: 'قاعدةُ بياناتٍ حقيقيّةٌ عبرَ `DATABASE_URL`',
   };
+}
+
+/** المسارُ الذي يُقاسُ به الإقلاعُ: عدُّ الوكلاءِ — قراءةٌ بلا مُلحقاتٍ. */
+const SELF_CHECK_ROUTE = 'state.agents.count';
+
+/**
+ * **فحصُ إقلاعٍ يُقاسُ على السلكِ.** يُثبِتُ أمرَينِ لا أمراً واحداً: أنّ البابَ
+ * يُنصِتُ ويُجيبُ، **وأنّ الحمايةَ لم تُسقَطْ لِيُجيبَ** — فنداءٌ بلا توقيعٍ يُرَدُّ،
+ * ونداءٌ بتوقيعٍ صحيحٍ يُقبَلُ. **ونجاحُ الأوّلِ وحدَه ليس نجاحاً.**
+ * @param {{ base: string, token: string, sessionId: string, routeSpec: { id: string, method: string, path: string, action: string, resource: string } | null, popClient: ReturnType<typeof createPoPClient> }} ctx
+ * @returns {Promise<{ ok: boolean, lines: string[] }>}
+ */
+async function selfCheck(ctx) {
+  const lines = ['  فحصُ إقلاعٍ (‏`--self-check`) — مقيسٌ على السلكِ:'];
+  const route = ctx.routeSpec;
+  if (route === null) {
+    lines.push(`    ❌ المسارُ «${SELF_CHECK_ROUTE}» غيرُ مُعلَنٍ في \`config/api.yaml\`.`);
+    return { ok: false, lines };
+  }
+  const url = `${ctx.base}${route.path}`;
+
+  const staticResponse = await fetch(`${ctx.base}/`);
+  lines.push(
+    `    مشهدٌ ساكنٌ: ‏${staticResponse.status} على \`/\` — والإنصاتُ ثابتٌ برمزٍ لا بوصفٍ.`,
+  );
+
+  const unsigned = await fetch(url, { headers: { authorization: `Bearer ${ctx.token}` } });
+  const unsignedBody = await unsigned.text();
+  const refused = unsigned.status >= 400;
+  lines.push(
+    `    نداءٌ بلا توقيعٍ: ‏${unsigned.status} — ${refused ? 'مردودٌ كما يجبُ' : '❌ قُبِلَ! فالحمايةُ ساقطةٌ'}`,
+  );
+
+  const proof = ctx.popClient.signCall({ route, sessionId: ctx.sessionId, params: {} });
+  const signed = await fetch(url, {
+    headers: {
+      authorization: `Bearer ${ctx.token}`,
+      ...ctx.popClient.headersFor(proof),
+    },
+  });
+  const signedBody = await signed.text();
+  const accepted = signed.status === 200;
+  lines.push(
+    `    نداءٌ بتوقيعٍ صحيحٍ: ‏${signed.status} — ${accepted ? 'مقبولٌ' : '❌ مردودٌ: ' + signedBody.slice(0, 200)}`,
+  );
+
+  const ok = staticResponse.status === 200 && refused && accepted;
+  lines.push(
+    ok
+      ? '    ✅ الحكمُ: البابُ يُقلِعُ ويُجيبُ، **وإثباتُ الحيازةِ قائمٌ لا مُسقَطٌ**.'
+      : '    ❌ الحكمُ: الفحصُ أخفقَ — ولا يُقالُ «يعملُ» بعدَ إخفاقٍ.',
+  );
+  if (!refused) lines.push(`    (‏جسمُ الردِّ غيرِ الموقَّعِ: ${unsignedBody.slice(0, 200)})`);
+  return { ok, lines };
 }
 
 async function main() {
@@ -147,7 +216,15 @@ async function main() {
     enforcementPoint,
   });
 
-  const session = await gateway.openSession({ actorId: viewerAgent.id });
+  // إثباتُ الحيازةِ لا إسقاطُه (‏`LIVE-1`): مفتاحٌ لحظيٌّ في الذاكرةِ، عامُّه
+  // يُسجَّلُ للفاعلِ، وخاصُّه لا يُكتَبُ على قرصٍ ولا يُطبَعُ ويموتُ مع العمليّةِ.
+  const popKeyPair = generateKeyPairSync('ed25519');
+  const popClient = createPoPClient({ privateKey: popKeyPair.privateKey });
+  gateway.registerPoPKey(
+    viewerAgent.id,
+    /** @type {string} */ (popKeyPair.publicKey.export({ type: 'spki', format: 'pem' })),
+  );
+  const session = await gateway.openSession(popClient.signOpen(viewerAgent.id));
   // ولا فرعَ ثالثَ بينَهما: إمّا تعميةٌ مُعلَنةٌ مادّتُها تُقرأُ، وإمّا نصٌّ
   // **مُصرَّحٌ به في كلِّ ردٍّ**. ونقصُ المادّةِ بعدَ إعلانِها يَرفعُ خطأً هنا.
   const server = USE_TLS
@@ -187,11 +264,26 @@ async function main() {
             : `، وجهةُ إصدارٍ من ${String(process.env.STATE_TLS_CA_FILE)}`
         }.`
       : '  حدودٌ مُعلَنةٌ: لا TLS في هذا التشغيلِ (تُعلَنُ مادّتُه في `STATE_TLS_CERT_FILE`).',
-    '  ولا إثباتَ حيازةٍ في هذا التركيبِ، ولا كتابةَ بحالٍ.',
+    '  وإثباتُ الحيازةِ لازمٌ لكلِّ نداءٍ (‏لا للفتحِ وحدَه)، ولا كتابةَ بحالٍ.',
+    '  وصفحةُ المتصفِّحِ لا تُوقِّعُ، فنداءاتُها تُرَدُّ — والحدُّ مُقيَّدٌ ديناً `LIVE-5`.',
     '  ولا يُنشَرُ هذا على شبكةٍ عامّةٍ. (`docs/TRANSPORT.md`)',
     '',
   );
   process.stdout.write(`${lines.join('\n')}\n`);
+
+  if (SELF_CHECK) {
+    const verdict = await selfCheck({
+      base: `${USE_TLS ? 'https' : 'http'}://${HOST}:${PORT}`,
+      token: session.token,
+      sessionId: session.sessionId,
+      routeSpec: gateway.routes().find((route) => route.id === SELF_CHECK_ROUTE) ?? null,
+      popClient,
+    });
+    process.stdout.write(`${verdict.lines.join('\n')}\n`);
+    await new Promise((resolve) => server.close(() => resolve(undefined)));
+    await close();
+    process.exit(verdict.ok ? 0 : 1);
+  }
 
   /** @param {string} signal */
   const shutdown = (signal) => {

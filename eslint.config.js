@@ -105,6 +105,13 @@ export default [
         setInterval: 'readonly',
         clearInterval: 'readonly',
         AbortController: 'readonly',
+        // أُضيفَ في `WL-179` (‏إغلاقُ `LIVE-1`): فحصُ الإقلاعِ الذاتيُّ في
+        // `scripts/serve-state.mjs` **يُنادي بابَه على السلكِ** لِيُثبِتَ أنّه
+        // يُنصِتُ وأنّ إثباتَ الحيازةِ قائمٌ — ونداءٌ يُقاسُ خيرٌ من وصفٍ يُقرأُ.
+        // وهو عالمُ Node قياسيٌّ منذُ الإصدارِ 18، ويُعلَنُ مُفرَداً لا بجملةٍ.
+        // **ولا يفتحُ هذا باباً لِشبكةٍ في نواةِ الاستدلالِ:** حاجزُ
+        // `guard:inference` يمنعُ `fetch(` في المُوائمِ الحتميِّ بنصِّه.
+        fetch: 'readonly',
       },
     },
     rules: sharedRules,
