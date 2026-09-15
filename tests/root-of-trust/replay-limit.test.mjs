@@ -24,11 +24,12 @@ import { Buffer } from 'node:buffer';
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   generateKeyPairSync,
   randomBytes,
   sign as softwareSign,
 } from 'node:crypto';
-import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
@@ -40,6 +41,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 
 const MANIFEST = 'root-of-trust.manifest.json';
+const JOURNAL = 'root-of-trust.manifest.journal';
 
 /**
  * توكنٌ مزيَّفٌ **ثابتُ المفاتيحِ** عبرَ الإقلاعاتِ — نظيرُ توكنٍ لم يُبدَّل.
@@ -200,6 +202,44 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(snapshot, { recursive: true, force: true });
+    }
+  });
+  test('حدُّ الإعادةِ لا يمتدُّ إلى ما هو أضيقُ: سطرُ دفترٍ مدسوسٌ بتجزئةٍ عامّةٍ يُرفَضُ', async () => {
+    // مجَسُّ المُراجعِ `P10` في `M11.04` الجولةِ الرابعةِ (النتيجةُ `R4-B-01`)
+    // قِيسَ عندَ رفعِه: `signedValue=7,newSealValid=true`. يُقاسُ هنا **من
+    // مصنعِ الإنتاجِ نفسِه** لا من وحدةِ البيانِ وحدَها، بشكلِ المُراجعِ نصّاً
+    // (`seq: body.sequence` و`prev: body.journalHead` وتجزئةٌ عاريّةٌ بلا سرٍّ)،
+    // ليُثبَتَ أنّ الحدَّ المُعلَنَ في هذا الملفِّ هو **اللقطةُ الكاملةُ
+    // المتّسقةُ وحدَها**، وأنّه ليس مسارَ مصادقةٍ بديلاً أوسعَ منها.
+    const { boot, body } = rig();
+    const root = mkdtempSync(join(tmpdir(), 'xuux-replay-'));
+    try {
+      const first = await boot(root);
+      first.log.close?.();
+      const before = body(root);
+      const entry = {
+        seq: before.sequence,
+        key: 'ledgerCommitted',
+        value: 7,
+        at: '2026-09-11T00:00:00Z',
+        prev: before.journalHead,
+      };
+      const hash = createHash('sha256')
+        .update(JSON.stringify({ instanceId: before.instanceId, ...entry }))
+        .digest('hex');
+      writeFileSync(join(root, JOURNAL), JSON.stringify({ ...entry, hash }) + '\n', 'utf8');
+
+      await assert.rejects(
+        () => boot(root),
+        (err) =>
+          /** @type {Error & { code?: string }} */ (err).code ===
+          'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+        'قيمةٌ غيرُ مصدَّقةٍ يجبُ ألّا تصيرَ مختومةً بمجرَّدِ سلسلةِ تجزئةٍ عامّةٍ',
+      );
+      // ولم يرتفعْ عدّادٌ على القرصِ بهذا الدسِّ.
+      assert.equal(body(root).ledgerCommitted, before.ledgerCommitted, 'العدّادُ ارتفعَ برفضٍ');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
