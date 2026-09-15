@@ -345,6 +345,16 @@ function readDeclaredRoles(dir, fallbackDir) {
  */
 
 /**
+ * مصدرُ قيودِ دفترِ التكلفةِ (`D-6`) — يُقرأُ منه عدّادُ وحداتِ الحسابِ. صفوفُه
+ * قيودُ استهلاكٍ صحيحةٌ كما يُخرِجُها الدفترُ نفسُه (`CostCapacity.usageEntries()`),
+ * فمنطقُ التحقّقِ من القيدِ في الدفترِ لا في التقرير — والتقريرُ يقرأُ ولا يُرمِّم
+ * قيداً. **وهو إلزاميّ:** من يُعلن حقلاً مقيساً من الدفترِ ولا يُمرِّر دفتراً يقرأُ
+ * منه يُردُّ عند بناءِ المقاييسِ لا عند أولِ توليدٍ يخرجُ صفراً فيُقرأ قياساً — فصفرٌ
+ * بلا مصدرٍ أخضرُ فارغٌ يُطمئنُ إلى لا شيء.
+ * @typedef {{ list: (query?: Readonly<Record<string, unknown>>) => Promise<ReadonlyArray<{ item: string, institution: string, agent: string, model: string, quantity: number, costMilli: number, atMs: number }>> }} CostUsageRepository
+ */
+
+/**
  * @param {Record<string, unknown>} row
  * @param {string} field
  * @returns {Date | null}
@@ -382,13 +392,20 @@ function number(row, field) {
 }
 
 /**
- * يبني مقاييسَ الحقولِ من المستودعاتِ الحقيقيةِ وسجلِّ السيادة.
+ * يبني مقاييسَ الحقولِ من المستودعاتِ الحقيقيةِ وسجلِّ السيادةِ ودفترِ التكلفةِ.
  * @param {object} deps
  * @param {ReportRepositories} deps.repositories
  * @param {RegisterLike} deps.register
+ * @param {CostUsageRepository} deps.costUsage قيودُ دفترِ التكلفةِ — **إلزاميّةٌ** (`D-6`)
  * @returns {Record<string, MeasureFn>}
  */
-export function createReportMeasures({ repositories, register }) {
+export function createReportMeasures({ repositories, register, costUsage }) {
+  if (costUsage === null || typeof costUsage !== 'object' || typeof costUsage.list !== 'function') {
+    throw new ReportError(
+      REPORT_ERRORS.MEASURE_MISSING,
+      'قيودُ دفترِ التكلفةِ غائبةٌ عن المقاييسِ؛ وحقلٌ مُعلَنٌ مقيساً من الدفترِ بلا دفترٍ يُقرأُ منه يُقرأُ صفراً فيُظنَّ قياساً — فغيابُ الدفترِ رفضٌ عند البناءِ لا صفرٌ عند التوليد.',
+    );
+  }
   const repo = repositories;
   return {
     'institutions.activeCount': async () => {
@@ -528,6 +545,27 @@ export function createReportMeasures({ repositories, register }) {
         0,
       );
       return { value: total, rowCount: rows.length, measuredFrom: 'state.institutions' };
+    },
+    // عدّادُ وحداتِ الحسابِ (`D-6`): مجموعُ ما استُهلِكَ من دفترِ التكلفةِ في النافذةِ
+    // بـ«مِلّي‑وحدةٍ محاسبيةٍ» — وحدةِ الدفترِ المُعلَنةِ — لا بكمّياتٍ خامٍ مختلطةٍ
+    // (رموزٌ وبايتاتٌ وكتاباتٌ ومهامّ لا يُجمَعُ بعضُها إلى بعضٍ بلا تسعيرٍ فيُقرأُ
+    // مجموعُها معنى وهو لا معنى له). والقيودُ تُقرأُ من الدفترِ مُتحقَّقاً منها
+    // (`CostCapacity.usageEntries()`) — والتقريرُ يُرشِّحُها بنافذتِهِ هو، فزمنُ النافذةِ
+    // سؤالُ التقريرِ لا سؤالَ الدفترِ.
+    'cost.consumedMilli': async (window) => {
+      const rows = await costUsage.list({});
+      const startMs = window.start.getTime();
+      const endMs = window.end.getTime();
+      let total = 0;
+      for (const entry of rows) {
+        if (entry.atMs < startMs || entry.atMs > endMs) continue;
+        total += entry.costMilli;
+      }
+      return {
+        value: total,
+        rowCount: rows.length,
+        measuredFrom: 'cost.usage.recorded',
+      };
     },
   };
 }

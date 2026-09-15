@@ -9,6 +9,7 @@ export {
   CostCapacity,
   DEFAULT_COST_CAPACITY_CONFIG_DIR,
   loadCostCapacityPolicy,
+  usageEntriesOf,
 } from './cost-capacity.mjs';
 export { COST_ERRORS, CostCapacityError } from './errors.mjs';
 export { assertPeriod, costMilliOf, periodOf } from './pricing.mjs';
