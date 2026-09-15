@@ -18,6 +18,8 @@ import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { NOT_APPROVAL_CLAIMS } from '../../src/readiness/render.mjs';
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 const GENERATOR = path.join(ROOT, 'scripts/readiness-report.mjs');
@@ -100,7 +102,9 @@ test('الحالةُ القائمةُ: كلُّ بندٍ بدليلٍ أو بت�
 
 test('التقريرُ يُصرِّح بما لا يقولُه: لا اعتمادَ ولا مراجعةً مستقلّةً ولا إطلاقاً', () => {
   const report = fs.readFileSync(path.join(ROOT, 'docs/READINESS_REPORT.md'), 'utf8');
-  for (const needle of ['لا يُعلِنُ اعتماداً أمنياً', 'ولا يُقرأ مراجعةً مستقلّةً']) {
+  // ويُقرأ الحدُّ من **مصدرِه الواحدِ** لا من نصٍّ منسوخٍ في الاختبارِ: نسخةٌ ثالثةٌ
+  // في الاختبارِ تُخضِّرُه بعدَ أن ينزاحَ المولِّدُ عن حدِّه (إغلاقُ `LIVE-2`).
+  for (const needle of NOT_APPROVAL_CLAIMS) {
     assert.ok(report.includes(needle), `التقريرُ لا يُصرِّح بحدِّه: «${needle}»`);
   }
   assert.ok(!/\bVERIFIED\b/u.test(report), 'التقريرُ يحمل لفظَ اعتمادٍ ذاتيٍّ');

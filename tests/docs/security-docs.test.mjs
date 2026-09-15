@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -242,9 +242,16 @@ test('عدد ملفات الاختبار المذكور في وثيقة جذر �
   assert.ok(claim, 'وثيقة جذر الثقة لا تُصرّح بحجم حزمة الاختبارات');
   // الرقم يُشتق من القرص لا من ذاكرة الكاتب. والفارق المسموح صفر: رقمٌ في وثيقة
   // أمنية إما أن يكون صحيحاً أو أن يُحذف — وهذا ما جعل هذه الوثيقة تصف ماضياً.
-  const actual = execFileSync('git', ['ls-files', 'tests'], { cwd: ROOT, encoding: 'utf8' })
-    .split('\n')
-    .filter((file) => file.endsWith('.test.mjs')).length;
+  //
+  // **وتصحيحُ مقياسٍ في `WL-182` (‏`DOC-9`):** كان العدُّ من `git ls-files` — أي من
+  // **فهرسِ Git لا من القرصِ** خلافاً لما يقولُه التعليقُ أعلاه. فملفُّ اختبارٍ
+  // جديدٌ لا يُعَدُّ قبلَ تقييدِه، **فيمرُّ `npm run validate` أخضرَ قبلَ الدفعِ ثمّ
+  // يُخفِقُ بعدَها** — وهو ما وقعَ فعلاً بين `WL-180` و`WL-182`. فصارَ العدُّ
+  // **مِشيةً على القرصِ نفسِه** كما يقولُ التعليقُ، مع تجاوزِ `node_modules`.
+  const actual = readdirSync(join(ROOT, 'tests'), {
+    recursive: true,
+    encoding: 'utf8',
+  }).filter((entry) => entry.endsWith('.test.mjs')).length;
   assert.equal(Number(claim[1]), actual, `الوثيقة تقول ${claim[1]} والقرص فيه ${actual}`);
 });
 

@@ -26,7 +26,12 @@ import { collectReadinessFacts } from './lib/readiness-facts.mjs';
 import { loadDeferrals, loadReadinessContract, REPO_ROOT } from '../src/readiness/contract.mjs';
 import { READINESS_ERRORS, ReadinessError } from '../src/readiness/errors.mjs';
 import { exitCodeFor } from '../src/readiness/judgement.mjs';
-import { renderReport } from '../src/readiness/render.mjs';
+import {
+  COVERAGE_BANNER_TITLE,
+  NOT_APPROVAL_CLAIMS,
+  renderReport,
+  VERDICT_QUALIFIER,
+} from '../src/readiness/render.mjs';
 
 const UNMEASURED = 'readiness:unmeasured';
 const INCOMPLETE = 'readiness:incomplete';
@@ -134,6 +139,14 @@ function main() {
       `${JSON.stringify(
         {
           verdict,
+          // `LIVE-2`: قارئُ الآلةِ كان يرى الحكمَ **مُجرَّداً** فيَقرؤه اعتماداً،
+          // والحدُّ مكتوبٌ في متنِ الوثيقةِ لا في المَخرَجِ الذي يقرؤه. فصارَ
+          // الحدُّ **ملازماً للقيمةِ في المَخرَجِ نفسِه**، ومصدرُه واحدٌ مع المتنِ.
+          verdictKind: 'coverage-not-approval',
+          verdictQualifier: VERDICT_QUALIFIER,
+          banner: COVERAGE_BANNER_TITLE,
+          limit: /** @type {{ objective: { limit: string } }} */ (contract).objective.limit,
+          doesNotImply: [...NOT_APPROVAL_CLAIMS],
           exitCode,
           drift,
           coverage: facts.judgement.coverage,
