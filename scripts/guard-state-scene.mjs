@@ -34,11 +34,19 @@ const ROOT =
 
 const violations = [];
 
+/**
+ * @param {string} relative
+ * @returns {string}
+ */
 function readFile(relative) {
   const full = path.join(ROOT, relative);
   return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : '';
 }
 
+/**
+ * @param {string} dir
+ * @returns {string[]}
+ */
 function listMjs(dir) {
   const full = path.join(ROOT, dir);
   if (!fs.existsSync(full)) return [];
@@ -100,10 +108,11 @@ if (composition === '') {
   violations.push('R2: src/persistence/composition.mjs غير مقروء.');
 } else {
   const gwMatch = composition.match(/new\s+ApiGateway\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/);
-  if (gwMatch === null || !/monitor\s*[:,}]/.test(gwMatch[1])) {
+  const gwBlock = gwMatch ? (gwMatch[1] ?? '') : '';
+  if (!/monitor\s*[:,}]/.test(gwBlock)) {
     violations.push('R2: البوابةُ لا تَأخذُ monitor في جذرِ التركيبِ.');
   }
-  if (gwMatch !== null && gwMatch[1].includes('repositories')) {
+  if (gwBlock.includes('repositories')) {
     violations.push('R2: البوابةُ تَأخذُ repositories مباشرةً.');
   }
 }
@@ -112,11 +121,13 @@ if (composition === '') {
 
 if (composition !== '') {
   const opsMatch = composition.match(/new\s+OperationsCenter\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/);
-  if (opsMatch === null || !/gateway\s*:\s*api/.test(opsMatch[1])) {
+  const opsBlock = opsMatch ? (opsMatch[1] ?? '') : '';
+  if (!/gateway\s*:\s*api/.test(opsBlock)) {
     violations.push('R3: مركزُ العملياتِ لا يَأخذُ gateway: api.');
   }
   const consoleMatch = composition.match(/new\s+RoyalConsole\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/);
-  if (consoleMatch === null || !/gateway\s*:\s*api/.test(consoleMatch[1])) {
+  const consoleBlock = consoleMatch ? (consoleMatch[1] ?? '') : '';
+  if (!/gateway\s*:\s*api/.test(consoleBlock)) {
     violations.push('R3: الديوانُ الملكيُّ لا يَأخذُ gateway: api.');
   }
 }

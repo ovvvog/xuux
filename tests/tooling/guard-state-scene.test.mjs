@@ -20,9 +20,10 @@ const GUARD = path.join(ROOT, 'scripts/guard-state-scene.mjs');
 
 /**
  * @param {string} guardPath
+ * @param {string | undefined} [root]
  * @returns {{ status: number | null, stdout: string, stderr: string }}
  */
-function runGuard(guardPath, root) {
+function runGuard(guardPath, root = undefined) {
   const args = root !== undefined ? [guardPath, '--root', root] : [guardPath];
   const outcome = spawnSync(process.execPath, args, { encoding: 'utf8', shell: false });
   return {
