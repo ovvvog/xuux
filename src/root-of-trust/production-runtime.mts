@@ -22,7 +22,7 @@ import type { AnchorRecord, AnchorStore, AnchorableLog } from './anchor.mjs';
 import { CommandLedger } from './command-ledger.mjs';
 import type { LedgerDecisionSigner } from './command-ledger.mjs';
 import { HaltSwitch } from './halt-switch.mjs';
-import type { HaltAsyncSigner } from './halt-switch.mjs';
+import type { HaltAsyncSigner, HaltEpochFloor } from './halt-switch.mjs';
 import {
   anchorLogWithHsm,
   bindHsmRootOfTrust,
@@ -64,6 +64,9 @@ export const ProductionRuntimeErrorCodes = [
   // البيانِ يُرفَضُ **قبلَ** التوقيعِ: مرساةٌ موقَّعةٌ لا أثرَ لها في الخاتَمِ
   // هي بعينِها النتيجةُ المفتوحةُ، فلا تُنتَجُ بسهوِ مُستدعٍ.
   'ANCHOR_WITNESS_SINK_MISSING',
+  // `M11.04-F07` (الشطرُ الثاني): واقعةُ إيقافٍ مختومةٌ في السجلِّ لا يُفَكُّ
+  // ختمُها عندَ الإقلاعِ — إفسادُ الجسمِ لا يُسقِطُ الشاهدَ بل يردُّ الإقلاعَ.
+  'PRODUCTION_HALT_WITNESS_UNREADABLE',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -390,18 +393,38 @@ export async function createProductionRootOfTrust(
       provisioning,
       env,
     });
+    // `M11.04-F07`: شاهدُ العهدِ يُقرأُ من **مصدرين** لا من واحدٍ — البيانُ
+    // المختومُ، والسجلُّ المختومُ. وذاك لأن البيانَ وحدَه يُسترجَعُ أقدمَ منه
+    // بخاتَمٍ صحيحٍ (لقطةٌ جزئيّةٌ)، والسجلُّ يبقى شاهداً لا يُصطنَعُ ولا يُقصُّ
+    // منه سطرٌ بلا كسرِ سلسلةٍ يُقاس.
+    const witnessedHaltEpoch = await haltEpochFromSealedLog(log);
+    const manifestHaltFloor = manifest.haltEpochFloor();
+    if (witnessedHaltEpoch > manifestHaltFloor.read()) {
+      // البيانُ رجعَ والسجلُّ لم يرجع: يُرفَعُ البيانُ إلى ما يشهدُ به السجلُّ
+      // ويُختَمُ الآنَ، فلا يبقى شاهدٌ خارجَ الخاتَمِ إلى الإقلاعِ التالي.
+      manifestHaltFloor.raise(witnessedHaltEpoch);
+      await manifest.checkpointAsync();
+    }
+    // أرضيّةٌ مركَّبةٌ: أعلى الشاهدين. ولا تُخترَعُ هنا «عدّادٌ رتيبٌ» ثالثٌ في
+    // ملفٍّ على القرصِ — ذاك ممنوعٌ نصّاً في `docs/adr/0006-…`؛ وإنّما يُقرأُ
+    // شاهدٌ قائمٌ أصلاً في جذرِ الثقة.
+    const epochFloor: HaltEpochFloor = {
+      read: (): number => Math.max(manifestHaltFloor.read(), witnessedHaltEpoch),
+      raise: (value: number): void => manifestHaltFloor.raise(value),
+    };
     // مفتاحُ الإيقافِ يأخذُ موقّعَ F06 نفسَه: التوجيهُ قرارٌ ملكيٌّ، ومصدرُه
     // مفتاحُ المملكةِ لا مفتاحُ الدفتر.
-    // ولا يُوصَلُ السجلُّ المختومُ سِنكاً لمفتاحِ الإيقاف: `HaltSwitch` يُلحقُ
-    // متزامناً، والسجلُّ المختومُ يرفضُ الإلحاقَ المتزامنَ بحقٍّ. وتاريخُ
-    // التوجيهاتِ موقَّعٌ ومسلسلٌ في ملفِّه، فالتدقيقُ لا يفقدُ شيئاً.
+    // والسجلُّ المختومُ يُوصَلُ بمسارَيه غيرِ المتزامنين وحدَهما (‏`logAsync`):
+    // `append` المتزامنُ يرفضُه السجلُّ المختومُ بحقٍّ، و`appendSealed` يُنتظَرُ
+    // حيثُ يجوزُ الانتظار. وتاريخُ التوجيهاتِ موقَّعٌ ومسلسلٌ في ملفِّه أيضاً.
     const haltSwitch = new HaltSwitch(
       join(options.root, 'halt', 'directive.json'),
       signers.anchorSigner as unknown as HaltAsyncSigner,
       {
         fsync,
         log: null,
-        epochFloor: manifest.haltEpochFloor(),
+        logAsync: log,
+        epochFloor,
         sealEpoch: (): Promise<void> => manifest.checkpointAsync(),
         env,
       },
@@ -451,6 +474,48 @@ export async function createProductionRootOfTrust(
 function resolveAnchorFile(root: string, env: NodeJS.ProcessEnv): string {
   const declared = (env.XUUX_ANCHOR_STORE ?? '').trim();
   return declared !== '' ? declared : join(root, 'anchors.jsonl');
+}
+
+/**
+ * يقرأُ **أعلى عهدِ إيقافٍ يشهدُ به السجلُّ المختوم** (‏`M11.04-F07`).
+ *
+ * الثابتُ المنتهَكُ قبلَ الإصلاحِ مقيسٌ: استرجاعُ بيانٍ **أقدمَ صحيحِ الخاتَمِ**
+ * معَ محوِ `halt/` وحدَه وإبقاءِ الدفترِ بايتاً ببايتٍ أعادَ التركيبَ
+ * `running`/`epoch=0` بعدَ إيقافٍ سياديٍّ. والسببُ أنّ شاهدَ العهدِ كانَ في موضعٍ
+ * واحدٍ يُسترجَعُ كلُّه.
+ *
+ * وكلُّ فشلٍ في فكِّ الختمِ يُرفَعُ ولا يُتجاوَزُ: واقعةُ إيقافٍ لا يُقرأُ جسمُها
+ * أسوأُ من واقعةٍ غائبةٍ، فالفشلُ مغلقٌ عندَ الإقلاعِ.
+ *
+ * **حدٌّ مُعلَنٌ:** من محا السجلَّ والمراسي والبيانَ **معاً** في لقطةٍ واحدةٍ
+ * متّسقةٍ لا يردُّه هذا الفحصُ؛ وذاك هو الخطرُ المتبقّي المُعلَنُ في
+ * `docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md`، ومنعُه التامُّ
+ * يحتاجُ مرساةً خارجَ القرصِ (‏`R3-A-01`).
+ * @param log - السجلُّ المحمَّلُ من القرص
+ * @returns أعلى عهدٍ مشهودٍ، أو صفرٌ إن لم يكن في السجلِّ واقعةُ إيقاف
+ */
+export async function haltEpochFromSealedLog(log: PersistentEventLog): Promise<number> {
+  let highest = 0;
+  for (const event of log.events) {
+    const type = (event as { type?: unknown }).type;
+    if (type !== 'halt.issued' && type !== 'halt.resumed') continue;
+    // فشلُ فكِّ الختمِ **يُرفَعُ برمزٍ نطاقيٍّ** لا يُتجاوَزُ ولا يُسلَّمُ خطأً
+    // نيئاً من طبقةِ التعمية: واقعةُ إيقافٍ لا يُقرأُ جسمُها أسوأُ من غائبةٍ،
+    // لأنّ من ملكَ القرصَ يستطيعُ إفسادَ الجسمِ ليُسقِطَ الشاهدَ. والرمزُ في
+    // نطاقِ `PRODUCTION_` كي يُختبَرَ ولا يُخمَّنَ.
+    let body: unknown;
+    try {
+      body = log.sealed ? await log.openEvent(event) : (event as { data?: unknown }).data;
+    } catch {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_HALT_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    const epoch = (body as { epoch?: unknown } | null)?.epoch;
+    if (typeof epoch === 'number' && Number.isInteger(epoch) && epoch > highest) highest = epoch;
+  }
+  return highest;
 }
 
 /**

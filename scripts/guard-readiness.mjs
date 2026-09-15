@@ -32,6 +32,15 @@
  *       `100%` — فتلك قراراتٌ سياديّةٌ أو أحكامُ جهةٍ مستقلّةٍ لا يُنتحَل حكمُها؛
  *       وهنا يُنفَّذ الضمانان `G-READINESS-NO-SELF-APPROVAL` و
  *       `G-READINESS-NO-LAUNCH-CLAIM`.
+ *   R10: **الحدُّ مقيسٌ في موضعِ قراءتِه لا موصوفٌ في تعليقٍ** (إغلاقُ `LIVE-2`):
+ *       ترويسةُ «حكمُ تغطيةٍ لا اعتمادٍ» حاضرةٌ في **أوّلِ التقريرِ** قبلَ أيِّ
+ *       مضمونٍ، ولاحقتُها **ملازمةٌ لقيمةِ الحكمِ** في خليّةِ الجدولِ، **والمَخرَجُ
+ *       الآليُّ (`--json`) يحملُ الحدَّ معَ القيمةِ** — يُقاسُ بتشغيلِ المولِّدِ
+ *       **عمليّةً منفصلةً** وقراءةِ مَخرَجِه لا بقراءةِ شفرتِه نصّاً. **وعلّةُ
+ *       وجودِها:** الحدُّ كان مُعلَناً في متنِ §1 والتعليقاتِ والطرفيّةِ، ولا
+ *       حاجزَ يقيسُ بقاءَه — **فحذفُه من المولِّدِ ثمّ إعادةُ التوليدِ تمُرُّ خضراءَ
+ *       بالمقارنةِ بايتاً ببايتٍ** (R7) لأنّ المقارنةَ تقيسُ التطابُقَ لا المضمونَ.
+ *       **وحدٌّ يُحذَفُ بلا أن يُسقِطَ بوابةً حدٌّ غيرُ مُنفَّذٍ.**
  *   R9: **الحكمُ نقيٌّ ومربوطٌ بالمسارِ**: وحداتُ `src/readiness/` (خلا `contract.mjs`
  *       الذي يقرأ العقدَ) لا تستورد `node:fs` ولا `node:child_process` ولا
  *       `node:process` ولا تقرأ ساعةً؛ و`npm run guard:readiness` مربوطٌ في
@@ -49,6 +58,7 @@
  * `G11` ولا يُعلن جاهزيّةَ إطلاقٍ ولا `100%` ولا يقوم مقامَ `M11.04`–`M11.06`.
  */
 
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -57,7 +67,12 @@ import { fileURLToPath } from 'node:url';
 import { collectReadinessFacts } from './lib/readiness-facts.mjs';
 import { loadDeferrals, loadReadinessContract } from '../src/readiness/contract.mjs';
 import { READINESS_ERRORS } from '../src/readiness/errors.mjs';
-import { renderReport } from '../src/readiness/render.mjs';
+import {
+  COVERAGE_BANNER_TITLE,
+  NOT_APPROVAL_CLAIMS,
+  renderReport,
+  VERDICT_QUALIFIER,
+} from '../src/readiness/render.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -332,6 +347,81 @@ if (contract !== null) {
       }
     }
   }
+
+  // ── R10: الحدُّ مقيسٌ في موضعِ قراءتِه — إغلاقُ `LIVE-2` ──
+  const reportText = readOrEmpty(
+    /** @type {Record<string, string>} */ (contract.sources).output ?? 'docs/READINESS_REPORT.md',
+  );
+  if (reportText === '') {
+    violations.push(
+      'R10: تقريرُ الجاهزيّةِ غائبٌ من موضعِه المُعلَنِ في العقدِ — وما لا يُقرأُ لا يُقاسُ حدُّه.',
+    );
+  } else {
+    // الترويسةُ قبلَ أيِّ مضمونٍ: تُقاسُ في أوّلِ خمسةِ أسطرٍ لا في الملفِّ كلِّه،
+    // فحدٌّ مدفونٌ في القاعِ حدٌّ لا يُقرأُ معَ الحكمِ.
+    const head = reportText.split('\n').slice(0, 5).join('\n');
+    if (!head.includes(COVERAGE_BANNER_TITLE)) {
+      violations.push(
+        `R10: ترويسةُ «${COVERAGE_BANNER_TITLE}» ليست في أوّلِ التقريرِ — ومن قرأَ العنوانَ ثمّ جدولَ الحكمِ قرأَ حكماً بلا حدَّه.`,
+      );
+    }
+    for (const claim of NOT_APPROVAL_CLAIMS) {
+      if (!reportText.includes(claim)) {
+        violations.push(
+          `R10: التقريرُ لا يحملُ نفيَ «${claim}» — وما لا يُنفَى نصّاً يُقرأُ مُثبَتاً ضمناً.`,
+        );
+      }
+    }
+    const verdictRow = reportText.split('\n').find((line) => line.startsWith('| الحكم |'));
+    if (verdictRow === undefined || !verdictRow.includes(VERDICT_QUALIFIER)) {
+      violations.push(
+        `R10: قيمةُ الحكمِ في جدولِ §2 بلا لاحقةِ «${VERDICT_QUALIFIER}» — وخليّةٌ تقولُ «readiness:reported» وحدَها تُقرأُ اعتماداً.`,
+      );
+    }
+  }
+
+  // وقارئُ الآلةِ يُقاسُ **على المَخرَجِ لا على الشفرةِ**: يُشغَّلُ المولِّدُ
+  // عمليّةً منفصلةً ويُقرأُ ما يطبعُه فعلاً — فحاجزٌ يقرأُ نصَّ المولِّدِ يمرُّ
+  // على حقلٍ مكتوبٍ ولا يُطبَعُ.
+  const probe = spawnSync(process.execPath, ['scripts/readiness-report.mjs', '--json'], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    timeout: 120_000,
+  });
+  /** @type {Record<string, unknown> | null} */
+  let emitted;
+  try {
+    emitted = /** @type {Record<string, unknown>} */ (JSON.parse(probe.stdout));
+  } catch {
+    emitted = null;
+  }
+  if (emitted === null) {
+    violations.push(
+      `R10: مَخرَجُ «readiness-report --json» لا يُقرأُ JSONاً (رمزُ خروجٍ ${String(probe.status)}) — وحكمٌ لا يُقرأُ برنامجيّاً لا يُقاسُ حدُّه.`,
+    );
+  } else {
+    const objective = /** @type {{ objective: { limit: string } }} */ (
+      /** @type {unknown} */ (contract)
+    ).objective;
+    if (emitted.verdictKind !== 'coverage-not-approval') {
+      violations.push(
+        'R10: المَخرَجُ الآليُّ بلا `verdictKind: "coverage-not-approval"` — وبرنامجٌ يقرأُ `readiness:reported` مُجرَّداً يبني عليه اعتماداً.',
+      );
+    }
+    if (emitted.limit !== objective.limit) {
+      violations.push(
+        'R10: حدُّ المَخرَجِ الآليِّ لا يطابقُ `objective.limit` في العقدِ — ومصدرانِ للحدِّ ينزاحُ أحدُهما بصمتٍ.',
+      );
+    }
+    const doesNotImply = Array.isArray(emitted.doesNotImply) ? emitted.doesNotImply : [];
+    for (const claim of NOT_APPROVAL_CLAIMS) {
+      if (!doesNotImply.includes(claim)) {
+        violations.push(
+          `R10: المَخرَجُ الآليُّ لا يحملُ «${claim}» — وما يُقالُ للإنسانِ ويُكتَمُ عن البرنامجِ حدٌّ ناقصٌ.`,
+        );
+      }
+    }
+  }
 }
 
 if (violations.length > 0) {
@@ -350,5 +440,5 @@ const eventCount = contract === null ? 0 : /** @type {unknown[]} */ (contract.ev
 const facts = contract === null ? null : collectReadinessFacts({ root: ROOT, contract, deferrals });
 const coverage = facts?.judgement.coverage ?? { total: 0, evidenced: 0, deferred: 0, uncovered: 0 };
 console.log(
-  `✅ حاجز تقرير الجاهزية بتأجيلات صريحة: ${String(coverage.total)} بنداً مقروءاً من مصدرِها لا مكتوبةً بيدٍ — ${String(coverage.evidenced)} بدليلٍ يُشار إلى ملفِّه ومُدخلتِه، و${String(coverage.deferred)} مؤجَّلةٌ تأجيلاً **مُصرَّحاً** بسببِه وحاجزِه ونوعِ حاجزِه وشرطِ فكِّه وصاحبِ قرارِه ومُدخلةِ إعلانٍ موجودةٍ فعلاً في سجلِّ العملِ، و${String(coverage.uncovered)} بلا دليلٍ ولا تأجيلٍ — فمعيارُ «صفرُ بندٍ بلا دليلٍ أو بلا تأجيلٍ معلَنٍ» مقيسٌ لا مُدَّعى؛ والتقريرُ مولَّدٌ بأمرٍ واحدٍ ويُقارَن بايتاً ببايتٍ فلا يبقى قديماً بصمتٍ، و${String(verdictCount)} أحكامٍ لكلٍّ رمزُ خروجٍ مُفرَدٌ لا يخرج صفراً إلا التقريرُ الكاملُ، و${String(eventCount)} أحداثِ مساءلةٍ و${String(codeCount)} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`READINESS_ERRORS\`، و${String(guaranteeCount)} ضماناتٍ كلٌّ برمزٍ حاضرٍ نصّاً في ملفِّ إنفاذِه، ووحداتُ الحكمِ نقيّةٌ لا تلمس قرصاً ولا عمليّةً ولا ساعةً. وحدٌّ معلَنٌ: التقريرُ يقيس **وجودَ الدليلِ وموضعَه لا كفايتَه**، و\`readiness:reported\` حكمُ تغطيةٍ لا اعتمادٌ — لا مراجعةً مستقلّةً (M11.04–M11.06) ولا قراراً ملكيّاً (M11.09) ولا فتحاً لـG11 ولا إذناً بإطلاق.`,
+  `✅ حاجز تقرير الجاهزية بتأجيلات صريحة: ${String(coverage.total)} بنداً مقروءاً من مصدرِها لا مكتوبةً بيدٍ — ${String(coverage.evidenced)} بدليلٍ يُشار إلى ملفِّه ومُدخلتِه، و${String(coverage.deferred)} مؤجَّلةٌ تأجيلاً **مُصرَّحاً** بسببِه وحاجزِه ونوعِ حاجزِه وشرطِ فكِّه وصاحبِ قرارِه ومُدخلةِ إعلانٍ موجودةٍ فعلاً في سجلِّ العملِ، و${String(coverage.uncovered)} بلا دليلٍ ولا تأجيلٍ — فمعيارُ «صفرُ بندٍ بلا دليلٍ أو بلا تأجيلٍ معلَنٍ» مقيسٌ لا مُدَّعى؛ والتقريرُ مولَّدٌ بأمرٍ واحدٍ ويُقارَن بايتاً ببايتٍ فلا يبقى قديماً بصمتٍ، و${String(verdictCount)} أحكامٍ لكلٍّ رمزُ خروجٍ مُفرَدٌ لا يخرج صفراً إلا التقريرُ الكاملُ، و${String(eventCount)} أحداثِ مساءلةٍ و${String(codeCount)} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`READINESS_ERRORS\`، و${String(guaranteeCount)} ضماناتٍ كلٌّ برمزٍ حاضرٍ نصّاً في ملفِّ إنفاذِه، ووحداتُ الحكمِ نقيّةٌ لا تلمس قرصاً ولا عمليّةً ولا ساعةً، و**حدُّ الحكمِ مقيسٌ في موضعِ قراءتِه لا موصوفٌ في تعليقٍ**: الترويسةُ «${COVERAGE_BANNER_TITLE}» في أوّلِ خمسةِ أسطرٍ من التقريرِ، ولاحقتُها ملازمةٌ لقيمةِ الحكمِ في خليّةِ §2، و${String(NOT_APPROVAL_CLAIMS.length)} نفياتٍ حاضرةٌ نصّاً في المتنِ **وفي المَخرَجِ الآليِّ** مع \`verdictKind\` و\`limit\` مطابقاً لـ\`objective.limit\` — مقيسةً بتشغيلِ \`readiness-report --json\` عمليّةً منفصلةً وقراءةِ ما طبعَه فعلاً. وحدٌّ معلَنٌ: التقريرُ يقيس **وجودَ الدليلِ وموضعَه لا كفايتَه**، و\`readiness:reported\` حكمُ تغطيةٍ لا اعتمادٌ — لا مراجعةً مستقلّةً (M11.04–M11.06) ولا قراراً ملكيّاً (M11.09) ولا فتحاً لـG11 ولا إذناً بإطلاق.`,
 );

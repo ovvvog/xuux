@@ -18,9 +18,16 @@
  *    يُولَّدُ للمُشغِّلِ مفتاحُ `Ed25519` **لحظيٌّ في الذاكرةِ لا يُكتَبُ على قرصٍ**،
  *    ويُسجَّلُ عامُّه، وتُفتَحُ الجلسةُ بتوقيعٍ. **ولكلِّ نداءٍ توقيعُه** — لا الفتحِ
  *    وحدَه.
- * 2ب. **وصفحةُ المتصفِّحِ لا تُوقِّعُ:** لا مفتاحَ خاصَّ فيها، فمشهدُ الويبِ
- *    **يُخدَمُ ساكناً ولا تنجحُ نداءاتُه** في تركيبٍ يُلزِمُ الحيازةَ. **وهذا حدٌّ
- *    مقيسٌ لا مستورٌ**، قُيِّدَ ديناً باسمِه (`LIVE-5`) في سجلِّ الديونِ.
+ * 2ب. **وصفحةُ المتصفِّحِ لا تُوقِّعُ — والتوقيعُ صارَ في الخادمِ (‏`LIVE-5`):**
+ *    لا مفتاحَ خاصَّ في الصّفحةِ، ولو حَمَلَتْهُ لكانَ مكشوفاً لكلِّ قارِئٍ.
+ *    فكانَ المشهدُ **يُخدَمُ ولا يقرأُ**. **والآنَ يُوَصَلُ وسيطٌ موقِّعٌ
+ *    في الخادمِ** (`scripts/dev-pop-proxy.mjs`): المفتاحُ يبقى هنا، والتوقيعُ
+ *    يقعُ هنا، **وسلطتُهُ ومداهُ مُعلَنانِ** في كلِّ ردٍّ (‏ترويسةُ
+ *    `x-state-pop-proxy`) وفي `docs/TRANSPORT.md` وفي واجهةِ المشهدِ نفسِها:
+ *    فاعلٌ رقابيٌّ واحدٌ، **قراءةٌ فقط** (‏وكلُّ فعلٍ غيرِ `GET` يُرَدُّ `405`)،
+ *    **والمضيفُ المحلّيُّ وحدَهُ** (‏وما سواهُ يُفشِلُ التركيبَ مُغلَقاً).
+ *    **ولم يُغلَقْ بـ`requirePoP: false`**: الحمايةُ قائمةٌ، ونداءٌ يبلُغُ
+ *    الطبقةَ الدّاخليّةَ بلا توقيعٍ يُرَدُّ `401` كما كانَ.
  * 3. **لا كتابةَ بحالٍ:** بابُ الدولةِ قارئٌ فقط، والكتابةُ أمرٌ ملكيٌّ موقَّعٌ
  *    (`M9.03`) بمفاتيحَ في وحدةِ أمانٍ.
  *
@@ -41,6 +48,7 @@
  */
 
 import { generateKeyPairSync } from 'node:crypto';
+import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -54,11 +62,8 @@ import {
 } from '../src/persistence/composition.mjs';
 import { createPool } from '../src/persistence/db.mjs';
 import { EventLog } from '../src/root-of-trust/index.mjs';
-import {
-  compileRoutes,
-  createSecureStateServer,
-  createStateServer,
-} from '../src/transport/index.mjs';
+import { compileRoutes, createStateServer, createTlsServer } from '../src/transport/index.mjs';
+import { PROXY_HEADER, assertLoopbackHost, createSigningProxyHandler } from './dev-pop-proxy.mjs';
 
 const args = process.argv.slice(2);
 
@@ -125,7 +130,13 @@ const SELF_CHECK_ROUTE = 'state.agents.count';
  * **فحصُ إقلاعٍ يُقاسُ على السلكِ.** يُثبِتُ أمرَينِ لا أمراً واحداً: أنّ البابَ
  * يُنصِتُ ويُجيبُ، **وأنّ الحمايةَ لم تُسقَطْ لِيُجيبَ** — فنداءٌ بلا توقيعٍ يُرَدُّ،
  * ونداءٌ بتوقيعٍ صحيحٍ يُقبَلُ. **ونجاحُ الأوّلِ وحدَه ليس نجاحاً.**
- * @param {{ base: string, token: string, sessionId: string, routeSpec: { id: string, method: string, path: string, action: string, resource: string } | null, popClient: ReturnType<typeof createPoPClient> }} ctx
+ *
+ * **ومُنذُ إغلاقِ `LIVE-5` يُقاسُ أمرانِ زائدانِ:** أنَّ نداءَ المتصفِّحِ (‏بلا رمزٍ
+ * ولا توقيعٍ) **يَبلُغُ ويُقبَلُ عبرَ الوسيطِ الموقِّعِ**، **وأنَّ مداهُ قراءةٌ فقط**:
+ * فعلٌ كاتبٌ يُرَدُّ `405` برمزٍ مُسمَّىً. **والفحصانِ الأوّلانِ يُناديانِ الطبقةَ
+ * الدّاخليّةَ مباشرةً** لأنَّ مرورَهما بالوسيطِ يُخفي ما يُقاسُ: الوسيطُ يُوقِّعُ،
+ * فلا يبقى نداءٌ غيرُ موقَّعٍ يُثبِتُ أنَّ الحمايةَ قائمةٌ.
+ * @param {{ base: string, proxyBase: string, token: string, sessionId: string, routeSpec: { id: string, method: string, path: string, action: string, resource: string } | null, popClient: ReturnType<typeof createPoPClient> }} ctx
  * @returns {Promise<{ ok: boolean, lines: string[] }>}
  */
 async function selfCheck(ctx) {
@@ -137,7 +148,7 @@ async function selfCheck(ctx) {
   }
   const url = `${ctx.base}${route.path}`;
 
-  const staticResponse = await fetch(`${ctx.base}/`);
+  const staticResponse = await fetch(`${ctx.proxyBase}/`);
   lines.push(
     `    مشهدٌ ساكنٌ: ‏${staticResponse.status} على \`/\` — والإنصاتُ ثابتٌ برمزٍ لا بوصفٍ.`,
   );
@@ -181,10 +192,35 @@ async function selfCheck(ctx) {
     `    نداءٌ بتوقيعٍ صحيحٍ: ‏${signed.status} — ${accepted ? 'مقبولٌ' : '❌ مردودٌ: ' + signedBody.slice(0, 200)}`,
   );
 
-  const ok = staticResponse.status === 200 && refused && accepted;
+  // **إغلاقُ `LIVE-5` مقيساً لا موصوفاً:** نداءٌ كنداءِ المتصفِّحِ — بلا
+  // رمزٍ ولا توقيعٍ — يَبلُغُ الوسيطَ فيُوقِّعُ عنهُ فيُقبَلُ.
+  const proxied = await fetch(`${ctx.proxyBase}${route.path}`, {
+    headers: { accept: 'application/json' },
+  });
+  const proxyHeader = String(proxied.headers.get(PROXY_HEADER) ?? '');
+  const proxiedOk = proxied.status === 200 && proxyHeader.includes('signed=yes');
+  lines.push(
+    `    نداءُ متصفِّحٍ عبرَ الوسيطِ: ‏${proxied.status} — ${
+      proxiedOk
+        ? 'مقبولٌ، والتوقيعُ وقعَ في الخادمِ لا في الصّفحةِ'
+        : '❌ لم يُقبَلْ أو لم يُعلِنِ الوسيطُ توقيعَهُ'
+    } ‏«${proxyHeader}»`,
+  );
+
+  // والمدى يُقاسُ كما تُقاسُ الميزةُ: فعلٌ كاتبٌ يُرَدُّ من الوسيطِ نفسِهِ.
+  const write = await fetch(`${ctx.proxyBase}${route.path}`, { method: 'POST' });
+  const writeBody = await write.text();
+  const readOnly = write.status === 405 && writeBody.includes('DEV_PROXY_READ_ONLY');
+  lines.push(
+    `    فعلٌ كاتبٌ عبرَ الوسيطِ: ‏${write.status} — ${
+      readOnly ? 'مردودٌ برمزٍ مُسمَّىً، فالمدى قراءةٌ فقط' : '❌ لم يُرَدَّ رفضَ مدىً'
+    }`,
+  );
+
+  const ok = staticResponse.status === 200 && refused && accepted && proxiedOk && readOnly;
   lines.push(
     ok
-      ? '    ✅ الحكمُ: البابُ يُقلِعُ ويُجيبُ، **وإثباتُ الحيازةِ قائمٌ لا مُسقَطٌ**.'
+      ? '    ✅ الحكمُ: البابُ يُقلِعُ ويُجيبُ، **وإثباتُ الحيازةِ قائمٌ لا مُسقَطٌ**، **والمشهدُ يقرأُ بوسيطٍ موقِّعٍ معلومِ السُّلطةِ والمدى**.'
       : '    ❌ الحكمُ: الفحصُ أخفقَ — ولا يُقالُ «يعملُ» بعدَ إخفاقٍ.',
   );
   if (!refused) lines.push(`    (‏جسمُ الردِّ غيرِ الموقَّعِ: ${unsignedBody.slice(0, 200)})`);
@@ -246,17 +282,40 @@ async function main() {
   const session = await gateway.openSession(popClient.signOpen(viewerAgent.id));
   // ولا فرعَ ثالثَ بينَهما: إمّا تعميةٌ مُعلَنةٌ مادّتُها تُقرأُ، وإمّا نصٌّ
   // **مُصرَّحٌ به في كلِّ ردٍّ**. ونقصُ المادّةِ بعدَ إعلانِها يَرفعُ خطأً هنا.
+  //
+  // **طبقتانِ لا واحدةٌ — وإغلاقُ `LIVE-5`:** الدّاخليّةُ طبقةُ النقلِ نفسُها
+  // بحُكمِها كامِلاً، مربوطةٌ بمنفَذٍ يَطلُبُهُ النِّطامُ على المضيفِ المحلّيِّ،
+  // **وإثباتُ الحيازةِ فيها لازمٌ لم يُمسَّ**. والأماميّةُ وسيطٌ موقِّعٌ
+  // يُناديها المتصفِّحُ، فيُوقِّعُ عنهُ بمفتاحِ المُشغِّلِ اللّحظيِّ **بسلطةٍ ومدىً
+  // مُعلَنَيْنِ**. ولو وُقِّعَ في المتصفِّحِ لكانَ المفتاحُ في نصٍّ يقرأُهُ كلُّ مَنْ
+  // فَتَحَ الصّفحةَ — وذاكَ إعلانُ مفتاحٍ لا إثباتُ حيازةٍ.
+  const inner = createStateServer({
+    gateway: /** @type {never} */ (gateway),
+    webDir: WEB_DIR,
+    routes,
+  });
+  await new Promise((resolve) => inner.listen(0, '127.0.0.1', () => resolve(undefined)));
+  const innerAddress = inner.address();
+  const innerPort =
+    typeof innerAddress === 'object' && innerAddress !== null ? innerAddress.port : 0;
+
+  // **فشلٌ مُغلَقٌ عندَ التركيبِ:** وسيطٌ يُوقِّعُ لكلِّ مُنادٍ، مربوطٌ
+  // بواجهةٍ غيرِ محلّيّةٍ، **إسقاطٌ للحيازةِ بصيغةٍ أخرى** — فلا يُشَغَّلُ.
+  assertLoopbackHost(HOST);
+  const proxyHandler = createSigningProxyHandler({
+    routes,
+    specs: gateway.routes(),
+    popClient,
+    sessionId: session.sessionId,
+    token: session.token,
+    origin: `http://127.0.0.1:${innerPort}`,
+  });
+  // ولا فرعَ ثالثَ بينَهما: إمّا تعميةٌ مُعلَنةٌ مادّتُها تُقرأُ ويُتحَقَّقُ
+  // منها في `src/transport/tls.mjs`، وإمّا نصᘑ **مُصرَّحٌ به في كلِّ ردٍّ**.
+  // ونقصُ المادّةِ بعدَ إعلانِها يَرفعُ خطأً هنا ولا يَرجعُ إلى نصٍّ صامتاً.
   const server = USE_TLS
-    ? createSecureStateServer({
-        gateway: /** @type {never} */ (gateway),
-        webDir: WEB_DIR,
-        routes,
-      })
-    : createStateServer({
-        gateway: /** @type {never} */ (gateway),
-        webDir: WEB_DIR,
-        routes,
-      });
+    ? createTlsServer({ handler: proxyHandler })
+    : http.createServer(proxyHandler);
 
   await new Promise((resolve) => server.listen(PORT, HOST, () => resolve(undefined)));
 
@@ -284,7 +343,9 @@ async function main() {
         }.`
       : '  حدودٌ مُعلَنةٌ: لا TLS في هذا التشغيلِ (تُعلَنُ مادّتُه في `STATE_TLS_CERT_FILE`).',
     '  وإثباتُ الحيازةِ لازمٌ لكلِّ نداءٍ (‏لا للفتحِ وحدَه)، ولا كتابةَ بحالٍ.',
-    '  وصفحةُ المتصفِّحِ لا تُوقِّعُ، فنداءاتُها تُرَدُّ — والحدُّ مُقيَّدٌ ديناً `LIVE-5`.',
+    `  ومشهدُ الويبِ يقرأُ عبرَ وسيطٍ موقِّعٍ في الخادمِ (‏إغلاقُ \`LIVE-5\`): سلطتُهُ ${ACTOR_LABEL}،`,
+    '  ومداهُ قراءةٌ فقط على المضيفِ المحلّيِّ وحدَهُ، ويُعلِنُ نفسَهُ في `x-state-pop-proxy`.',
+    '  ومَن أتى برمزِهِ مُرِّرَ كما هو بلا توقيعٍ: لا ينتحِلُ الوسيطُ جلسةَ غيرِهِ.',
     '  ولا يُنشَرُ هذا على شبكةٍ عامّةٍ. (`docs/TRANSPORT.md`)',
     '',
   );
@@ -292,7 +353,8 @@ async function main() {
 
   if (SELF_CHECK) {
     const verdict = await selfCheck({
-      base: `${USE_TLS ? 'https' : 'http'}://${HOST}:${PORT}`,
+      base: `http://127.0.0.1:${innerPort}`,
+      proxyBase: `${USE_TLS ? 'https' : 'http'}://${HOST}:${PORT}`,
       token: session.token,
       sessionId: session.sessionId,
       routeSpec: gateway.routes().find((route) => route.id === SELF_CHECK_ROUTE) ?? null,
@@ -300,6 +362,7 @@ async function main() {
     });
     process.stdout.write(`${verdict.lines.join('\n')}\n`);
     await new Promise((resolve) => server.close(() => resolve(undefined)));
+    await new Promise((resolve) => inner.close(() => resolve(undefined)));
     await close();
     process.exit(verdict.ok ? 0 : 1);
   }
@@ -308,7 +371,9 @@ async function main() {
   const shutdown = (signal) => {
     process.stdout.write(`\nيُغلَقُ البابُ عندَ ${signal}…\n`);
     server.close(() => {
-      void close().then(() => process.exit(0));
+      inner.close(() => {
+        void close().then(() => process.exit(0));
+      });
     });
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

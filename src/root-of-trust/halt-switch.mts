@@ -138,6 +138,9 @@ export const HaltErrorCodes = [
   'HALT_NODE_PROOF_INVALID',
   // `UF-03`: مفتاحُ إيقافٍ شاهدُ عهدِه داخلَ ما يُمحى معَه لا يُركَّبُ في الإنتاج.
   'HALT_EPOCH_FLOOR_REQUIRED_IN_PRODUCTION',
+  // `M11.04-F07`: ولا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ بلا شاهدٍ **خارجَ**
+  // البيانِ المختوم؛ فبيانٌ وحدَه شاهدٌ يُسترجَعُ أقدمُ منه بخاتَمٍ صحيح.
+  'HALT_SEALED_LOG_REQUIRED_IN_PRODUCTION',
 ] as const;
 
 export type HaltErrorCode = (typeof HaltErrorCodes)[number];
@@ -282,6 +285,24 @@ export interface HaltEventSink {
   append(type: string, actor: string, data: object): unknown;
 }
 
+/**
+ * مصرِفٌ **مختومٌ غيرُ متزامنٍ** لوقائعِ الإيقافِ (‏`M11.04-F07`، الشطرُ الثاني).
+ *
+ * المشكلةُ التي يحلُّها مقيسةٌ لا موصوفةٌ: قبلَه كانَ الإيقافُ السياديُّ لا يُخلِّفُ
+ * أثراً إلاّ في مجلَّدِ `halt/` وفي بيانِ الجذرِ المختوم. فمن ملكَ القرصَ استرجعَ
+ * بياناً **أقدمَ صحيحَ الخاتَمِ** ومحا `halt/` وحدَه وأبقى الدفترَ بايتاً ببايتٍ،
+ * فعادَ التركيبُ `running`/`epoch=0` بعدَ إيقافٍ سياديٍّ: لقطةٌ **جزئيّةٌ** لا
+ * كاملةٌ، فليست هي الحدَّ المُعلَنَ في `docs/adr/0006-…`.
+ *
+ * والشاهدُ الناجي هو السجلُّ المختومُ: جسمُ الواقعةِ مختومٌ داخلَ التوكنِ
+ * (‏AES-256-GCM) فلا يُصطنَعُ من خارجِه، وسطورُه مسلسلةٌ بتجزئةٍ متسلسلةٍ فلا
+ * يُحذَفُ سطرٌ منها بلا كسرٍ يُقاس. فمن أرادَ الرجوعَ لزمَه أن يُعيدَ السجلَّ
+ * والمراسي معَ البيانِ في لقطةٍ واحدةٍ متّسقةٍ — وذاك هو الحدُّ المُعلَنُ نصّاً.
+ */
+export interface HaltSealedEventSink {
+  appendSealed(type: string, actor: string, data: object): Promise<unknown>;
+}
+
 /** ما يحتاجه كل مُنفِّذ من هذه الوحدة: سطرٌ واحد يرفع الإيقاف اعتراضاً. */
 export interface HaltGuard {
   assertOperational(): void;
@@ -341,6 +362,13 @@ export interface HaltSwitchOptions {
   /** مزامنة القرص بعد كل كتابة. تعطيلها يُسرّع ويُضعف الضمان. */
   fsync?: boolean;
   log?: HaltEventSink | null;
+  /**
+   * مصرِفُ الوقائعِ المختومُ (‏`M11.04-F07`). المساراتُ غيرُ المتزامنةِ
+   * (‏`haltAsync`/`resumeAsync`) تُلحقُ به وتنتظرُه، فيصيرُ لكلِّ إيقافٍ سياديٍّ
+   * شاهدٌ مختومٌ **خارجَ** ما يُمحى معَه وخارجَ البيانِ الذي قد يُسترجَعُ أقدمَ.
+   * وفشلُ الإلحاقِ يُرفَعُ: شاهدٌ ساقطٌ لا يُتجاوَزُ صامتاً.
+   */
+  logAsync?: HaltSealedEventSink | null;
   /**
    * الحدُّ الخارجيُّ للعهدِ (‏`UF-03`). أثبتَ العضوانِ أنّ حذفَ الثلاثيةِ
    * (توجيهٌ + تاريخٌ + عهدٌ) يُرجِعُ `running`/`epoch=0` بعدَ إيقافٍ سياديٍّ،
@@ -457,6 +485,7 @@ export class HaltSwitch implements HaltGuard {
   #fsync: boolean;
   #log: HaltEventSink | null;
   #epochFloor: HaltEpochFloor | null;
+  #logAsync: HaltSealedEventSink | null;
   #sealEpoch: (() => Promise<void>) | null;
 
   /**
@@ -474,11 +503,17 @@ export class HaltSwitch implements HaltGuard {
     this.#fsync = options.fsync ?? true;
     this.#log = options.log ?? null;
     this.#epochFloor = options.epochFloor ?? null;
+    this.#logAsync = options.logAsync ?? null;
     this.#sealEpoch = options.sealEpoch ?? null;
     // في الإنتاجِ لا يُركَّبُ مفتاحُ إيقافٍ شاهدُه داخلَ ما يُمحى معَه: فشلٌ
     // مغلقٌ عندَ التركيبِ لا عندَ أوّلِ محوٍ (‏`UF-03`).
     if (this.#epochFloor === null && isProductionRuntime(options.env ?? process.env)) {
       throw new HaltError('HALT_EPOCH_FLOOR_REQUIRED_IN_PRODUCTION', {});
+    }
+    // `M11.04-F07`: ولا يُركَّبُ في الإنتاجِ مفتاحٌ بلا شاهدٍ مختومٍ خارجَ البيانِ.
+    // فشلٌ مغلقٌ عندَ التركيبِ لا عندَ أوّلِ استرجاعِ بيانٍ أقدم.
+    if (this.#logAsync === null && isProductionRuntime(options.env ?? process.env)) {
+      throw new HaltError('HALT_SEALED_LOG_REQUIRED_IN_PRODUCTION', {});
     }
     mkdirSync(dirname(file), { recursive: true });
     mkdirSync(this.acksDir, { recursive: true });
@@ -636,10 +671,19 @@ export class HaltSwitch implements HaltGuard {
       throw new HaltError('HALT_ALREADY_HALTED', { epoch: current.epoch, reason: current.reason });
     }
     const directive = await this.#issueAsync('halted', reason);
-    this.#log?.append('halt.issued', directive.kingId, {
-      epoch: directive.epoch,
-      reason: directive.reason,
-    });
+    // `M11.04-F07`: الشاهدُ المختومُ **يُنتظَرُ** لا يُطلَقُ ويُنسى. فإن سقطَ
+    // الإلحاقُ سقطَ النداءُ: إيقافٌ بلا شاهدٍ خارجَ البيانِ يُسترجَعُ عنه.
+    if (this.#logAsync !== null) {
+      await this.#logAsync.appendSealed('halt.issued', directive.kingId, {
+        epoch: directive.epoch,
+        reason: directive.reason,
+      });
+    } else {
+      this.#log?.append('halt.issued', directive.kingId, {
+        epoch: directive.epoch,
+        reason: directive.reason,
+      });
+    }
     return directive;
   }
 
@@ -663,11 +707,21 @@ export class HaltSwitch implements HaltGuard {
       }
     }
     const directive = await this.#issueAsync('running', reason);
-    this.#log?.append('halt.resumed', directive.kingId, {
-      epoch: directive.epoch,
-      reason: directive.reason,
-      recoveredFrom: current.problem ?? null,
-    });
+    // `M11.04-F07`: والاستئنافُ يُشهَدُ عليه كما يُشهَدُ على الإيقافِ، فيبقى
+    // أعلى عهدٍ مقروءاً من السجلِّ المختومِ لا من ملفٍّ يُمحى.
+    if (this.#logAsync !== null) {
+      await this.#logAsync.appendSealed('halt.resumed', directive.kingId, {
+        epoch: directive.epoch,
+        reason: directive.reason,
+        recoveredFrom: current.problem ?? null,
+      });
+    } else {
+      this.#log?.append('halt.resumed', directive.kingId, {
+        epoch: directive.epoch,
+        reason: directive.reason,
+        recoveredFrom: current.problem ?? null,
+      });
+    }
     return directive;
   }
 

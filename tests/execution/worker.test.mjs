@@ -264,3 +264,86 @@ test(
     );
   },
 );
+
+test(
+  'إيقافٌ شاملٌ أثناءَ تنفيذٍ جارٍ يُجهضه ويُعيد المهمة بلا استهلاك محاولة',
+  {
+    skip: skipWithoutDatabase,
+  },
+  async () => {
+    // شاهدُ الدَّينِ `D-8`: قبلَ الإصلاحِ كان الإيقافُ يَحسِبُ محاولةً على المهمّةِ
+    // المُجهَضةِ، فمهمّةٌ سقفُها محاولةٌ واحدةٌ تُعلَنُ `failed` وتُنقَلُ إلى الرسائلِ
+    // الميتةِ وهي لم تُخطئ. والقياسُ هنا ثلاثيٌّ: الإجهازُ سريعٌ لا انتظارُ مهلةٍ،
+    // والمحاولةُ مردودةٌ، ولا رسالةَ ميتةً.
+    const queue = createTaskQueue({ pool: pool(), leaseMs: 8_000 });
+    const halt = haltSwitch();
+    const worker = createWorker({
+      queue,
+      pool: pool(),
+      haltGuard: halt,
+      worker: 'عامل-الإجهاض',
+      heartbeatMs: 120,
+    });
+
+    // مهمّةٌ تَشغَلُ المعالجَ بحلقةٍ مشغولةٍ لا تُقاطَعُ إلّا بقتلٍ، ومهلتُها طويلةٌ
+    // جدّاً: فإن عادت المهمّةُ قبلَ المهلةِ فما أعادها إلّا إجهازٌ قسريٌّ.
+    const task = await enqueue(queue, 'إجهاض-جارٍ', {
+      action: 'اختبار.تجمّد',
+      payload: { busy: true },
+      timeoutMs: 30_000,
+      maxAttempts: 1,
+    });
+
+    const startedAt = Date.now();
+    const halting = (async () => {
+      for (;;) {
+        const current = await queue.get(task.id);
+        if (current?.state === TaskLifecycle.RUNNING) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      halt.halt('إيقافٌ شاملٌ أثناءَ تنفيذٍ جارٍ — شاهدُ `D-8`');
+    })();
+    const [tick] = await Promise.all([worker.tick(), halting]);
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(tick.outcome, 'requeued');
+    assert.equal(tick.code, 'TASK_HALTED');
+    assert.ok(
+      elapsedMs < 10_000,
+      `الفعلُ الجاري لم يُجهَضْ: انتظرَ ${elapsedMs}ms من مهلةٍ قدرُها 30000ms`,
+    );
+
+    const current = await queue.get(task.id);
+    assert.equal(current?.state, TaskLifecycle.SCHEDULED, 'الإيقافُ أضاعَ المهمّةَ بدلَ إعادتِها');
+    assert.equal(current?.errorCode, 'TASK_HALTED');
+    assert.equal(current?.attempts, 0, 'الإيقافُ استهلكَ محاولةً وهي لم تُخطئ');
+    assert.equal(current?.leaseOwner, null, 'عقدٌ لم يُفَكَّ بعدَ الإجهاضِ');
+    assert.equal(current?.result, null);
+
+    const dead = await queue.deadLetters();
+    assert.equal(
+      dead.some((entry) => entry.taskId === task.id),
+      false,
+      'الإيقافُ نقلَ مهمّةً إلى الرسائلِ الميتةِ، وذلك فقدانُ عملٍ لا حفظُه',
+    );
+
+    // والأثرُ مقروءٌ: الانتقالُ يُصرِّحُ بالسببِ وبأنّ المحاولةَ لم تُستهلَكْ.
+    const transitions = await queue.transitions(task.id);
+    const last = transitions.at(-1);
+    assert.equal(last?.from, TaskLifecycle.RUNNING);
+    assert.equal(last?.to, TaskLifecycle.SCHEDULED);
+    assert.match(last?.reason ?? '', /إيقاف شامل \(TASK_HALTED\)/u);
+    assert.match(last?.reason ?? '', /المحاولة لم تُستهلك/u);
+
+    // ثمّ الاستئنافُ يُعيدُ المهمّةَ قابلةً للحجزِ بميزانيتِها كاملةً.
+    halt.resume('استئنافٌ بعدَ شاهدِ `D-8`');
+    const reclaimed = await queue.claim({ worker: 'عامل-بعد-الاستئناف', limit: 1 });
+    assert.equal(reclaimed.length, 1, 'المهمّةُ لم تعُدْ قابلةً للحجزِ بعدَ الاستئنافِ');
+    assert.equal(reclaimed[0]?.id, task.id);
+    assert.equal(
+      reclaimed[0]?.attempts,
+      1,
+      'الحجزُ بعدَ الاستئنافِ هو المحاولةُ الأولى لا الثانية',
+    );
+  },
+);

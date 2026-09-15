@@ -42,6 +42,12 @@ export const QUEUE_ERRORS = Object.freeze({
   PARENT_TERMINAL: 'TASK_PARENT_TERMINAL',
 });
 
+/**
+ * رمزُ الإفراجِ عندَ الإيقافِ الشاملِ. مُعلَنٌ هنا لا مبثوثاً نصّاً في العاملِ،
+ * فمن قرأ صفَّ المهمّةِ عرفَ أنّ سببَ عودتِها سلطةٌ لا خطأٌ.
+ */
+export const HALT_RELEASE_CODE = 'TASK_HALTED';
+
 /** خطأ طابور مسمّى برمز يُفرَّق به آلياً. */
 export class QueueError extends Error {
   /**
@@ -571,6 +577,69 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
           task: toTask(/** @type {Record<string, unknown>} */ (failed.rows[0])),
           requeued: false,
           deadLettered: true,
+        };
+      });
+    },
+
+    /**
+     * **يُفرج** عن مهمّةٍ جاريةٍ أُجهضت بسببِ الإيقافِ الشاملِ السياديِّ
+     * (`M2.08`/`M5.08`) — لا يُسجِّلُ فشلاً.
+     *
+     * المسألةُ المقيسةُ (الدَّينُ `D-8`): كان العاملُ يُعيدُ المهمّةَ المُجهَضةَ عبرَ
+     * `fail({ code: 'TASK_HALTED', retryable: true })`، و`fail` تَحسِبُ المحاولةَ
+     * على المهمّةِ. فمهمّةٌ سقفُ محاولاتِها واحدةٌ أُوقِفت وهي جاريةٌ ⇒ تُعلَنُ
+     * `failed` وتُنقَلُ إلى الرسائلِ الميتةِ **وهي لم تُخطئ ولم تُحاوَلْ**، بينما
+     * كان العاملُ يُخبِرُ مناديه أنّها `requeued`. وذلك فقدانُ عملٍ لا حفظٌ له.
+     *
+     * والقاعدةُ التي تُصلِحُه: **الإيقافُ فعلُ السلطةِ لا خطأُ المهمّةِ**، فلا
+     * يُحمَّلُ على ميزانيةِ محاولاتِها. ولذلك تُرَدُّ `attempts` إلى ما كانت عليه
+     * قبلَ الحجزِ، ويُكتَبُ الانتقالُ مُعلِناً أنّ المحاولةَ **لم تُستهلَكْ**، ولا
+     * تأجيلَ تراجعيّاً: المنعُ نفسُه هو ما يَحجُبُ الحجزَ ما دامَ الإيقافُ قائماً.
+     *
+     * حدٌّ معلَنٌ: هذا الطريقُ **للإيقافِ وحدَه**. كلُّ انقطاعٍ آخرَ (عقدٌ مفقودٌ،
+     * نبضةٌ متعذِّرةٌ، عاملٌ ميتٌ) يَبقى على `fail`/`reclaimExpired` فتُحسَبَ
+     * محاولتُه، وإلّا صارت المهمّةُ التي تقتلُ عاملَها تُحجَزُ إلى الأبدِ.
+     * @param {{ taskId: string, worker: string, reason: string }} request
+     * @returns {Promise<{ task: TaskRecord, attemptRestored: boolean }>}
+     */
+    async releaseForHalt(request) {
+      const at = now();
+      const reason = requireText(request.reason, 'reason');
+      return withTransaction(pool, async (client) => {
+        const locked = await client.query(
+          `SELECT ${SELECT_COLUMNS} FROM state.tasks
+            WHERE id = $1 AND lease_owner = $2 AND state = 'running' FOR UPDATE`,
+          [request.taskId, request.worker],
+        );
+        const lockedRow = locked.rows[0];
+        if (lockedRow === undefined) {
+          throw new QueueError(
+            QUEUE_ERRORS.LEASE_LOST,
+            `العقد ليس لك أو المهمة ليست جارية: ${request.taskId}`,
+          );
+        }
+        const current = toTask(/** @type {Record<string, unknown>} */ (lockedRow));
+        const restored = Math.max(0, current.attempts - 1);
+        const released = await client.query(
+          `UPDATE state.tasks
+              SET state = 'scheduled', available_at = $2, attempts = $3,
+                  error_code = $4, error_message = $5,
+                  lease_owner = NULL, lease_expires_at = NULL, state_changed_at = $2
+            WHERE id = $1 RETURNING ${SELECT_COLUMNS}`,
+          [current.id, at, restored, HALT_RELEASE_CODE, reason],
+        );
+        await recordTransition(client, {
+          taskId: current.id,
+          from: TaskLifecycle.RUNNING,
+          to: TaskLifecycle.SCHEDULED,
+          reason: `إيقاف شامل (${HALT_RELEASE_CODE}) — أُجهض التنفيذ وأُعيدت المهمة والمحاولة لم تُستهلك (${restored}/${current.maxAttempts}): ${reason}`,
+          actor: request.worker,
+          attempt: current.attempts,
+          at,
+        });
+        return {
+          task: toTask(/** @type {Record<string, unknown>} */ (released.rows[0])),
+          attemptRestored: restored < current.attempts,
         };
       });
     },

@@ -15,7 +15,32 @@
  *    مُنِعَ من قراءتِه — وذاك أخطرُ من رسالةِ منعٍ صريحةٍ.
  * 4. **لا كتابةَ:** لا فعلَ غيرَ `GET` في هذا الملفِّ، ولا زرَّ يُعدِّلُ حالَ
  *    الدولةِ. الكتابةُ أمرٌ ملكيٌّ موقَّعٌ (`M9.03`) ولا يَحملُ متصفِّحٌ مفاتيحَه.
+ * 5. **ومَن وَقَّعَ يُقالُ لا يُستَرُ (‏إغلاقُ `LIVE-5`).** هذه الصّفحةُ **لا
+ *    تحملُ مفتاحاً خاصّاً ولن تحملَهُ**: مفتاحٌ في نصٍّ يُرسَلُ لكلِّ فاتحِ
+ *    صفحةٍ ليس إثباتَ حيازةٍ بل إعلانُ مفتاحٍ. **والتوقيعُ يقعُ في الخادمِ**
+ *    بوسيطٍ مُعلَنِ السُّلطةِ والمدى، وهو يُعلِنُ نفسَهُ في ترويسةِ
+ *    `x-state-pop-proxy` من كلِّ ردٍّ. **فتُقرأُ الترويسةُ ويُقالُ للقارِئِ مَنِ
+ *    وَقَّعَ قراءتَهُ**: قراءةٌ يُوقِّعُها غيرُ القارِئِ تُقالُ ولا تُوهَمُ قراءةً
+ *    بمفتاحِهِ.
  */
+
+// اسمُ ترويسةِ الوسيطِ الموقِّعِ كما يُرسِلُهُ `scripts/dev-pop-proxy.mjs` — ولا يُخمَّنُ.
+const PROXY_HEADER = 'x-state-pop-proxy';
+
+/**
+ * يقرأُ إعلانَ الوسيطِ في الرَّدِّ ويُحوّلُهُ نصّاً للقارِئِ: **مَن وَقَّعَ
+ * هذه القراءةَ وبأيِّ سلطةٍ**. وإن غابَ الإعلانُ قيلَ غيابُهُ ولم يُخمَّنْ.
+ * @param {Response} response
+ * @returns {string}
+ */
+function signerNote(response) {
+  const declared = response.headers.get(PROXY_HEADER);
+  if (declared === null) return ' ولا وسيطَ موقِّعاً أعلنَ نفسَهُ في هذا الرَّدِّ.';
+  if (declared.includes('signed=yes')) {
+    return ` ووقَّعَها وسيطُ الخادمِ لا هذه الصّفحةُ — ${declared}`;
+  }
+  return ` ولم يُوقِّعْها الوسيطُ — ${declared}`;
+}
 
 const tokenField = /** @type {HTMLInputElement} */ (document.getElementById('token'));
 const pathField = /** @type {HTMLInputElement} */ (document.getElementById('path'));
@@ -159,14 +184,17 @@ form.addEventListener('submit', async (event) => {
     rawWrap.hidden = false;
     if (response.ok && body !== null && typeof body === 'object' && 'data' in body) {
       const payload = /** @type {{ route?: unknown, data?: unknown }} */ (body);
-      say(`قراءةٌ مسموحةٌ عبرَ المسارِ ${String(payload.route ?? declared)}.`, 'allow');
+      say(
+        `قراءةٌ مسموحةٌ عبرَ المسارِ ${String(payload.route ?? declared)}.${signerNote(response)}`,
+        'allow',
+      );
       render(payload.data);
     } else {
       const refusal = /** @type {{ code?: unknown, message?: unknown }} */ (body ?? {});
       const code = typeof refusal.code === 'string' ? refusal.code : 'بلا رمزٍ';
       const message = typeof refusal.message === 'string' ? refusal.message : '';
       say(
-        `رُدَّتِ القراءةُ — ${response.status} · ${code}${message === '' ? '' : ` · ${message}`}`,
+        `رُدَّتِ القراءةُ — ${response.status} · ${code}${message === '' ? '' : ` · ${message}`}.${signerNote(response)}`,
         'deny',
       );
     }
