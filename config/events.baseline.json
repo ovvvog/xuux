@@ -662,6 +662,28 @@
           "optional": []
         }
       ]
+    },
+    {
+      "id": "notification",
+      "subject": "قناةُ الإشعارات: ماذا أُرسل، لمن، ومتى، وما النتيجة",
+      "classification": "sensitive",
+      "version": 1,
+      "producers": ["role:operator", "role:king"],
+      "consumers": ["role:king", "role:auditor", "role:operator"],
+      "types": [
+        {
+          "type": "notification.dispatched",
+          "version": 1,
+          "required": ["channel", "ownerId", "maskedDestination", "state", "attemptedAtMs"],
+          "optional": [
+            "providerMessageId",
+            "providerResult",
+            "failureReason",
+            "receivedAtMs",
+            "messageSubject"
+          ]
+        }
+      ]
     }
   ]
 }

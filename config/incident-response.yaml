@@ -57,6 +57,7 @@ audit:
   alertResolvedEvent: incident.alert.resolved
   reviewPublishedEvent: incident.review.published
   refusedEvent: incident.action.refused
+  notificationDeliveredEvent: incident.notification.delivered
   statement: >-
     قيدُ كلِّ خطوةٍ يُكتب في السجلِّ الدائمِ قبل أن يقع أثرُها، وكلُّ رفضٍ قيدٌ
     برمزِه وتفصيلِه؛ وما لا يشهد به ملفُّ السجلِّ لم يقع ولو قاله المُشغِّل.
@@ -89,6 +90,7 @@ refusalCodes:
   - IR_REVIEW_REVIEWER_CONFLICT
   - IR_REVIEW_DEADLINE_MISSED
   - IR_CLOCK_INVALID
+  - IR_DELIVERY_REQUIRED
 
 # ── التصنيف ──
 # الدرجةُ ليست وسماً لغويّاً: هي **مهلتان ورقمُ إلزامٍ بمراجعة**. فمن قال
@@ -381,3 +383,31 @@ guarantees:
       شرطَ زمنيٍّ يُقاس على ساعةٍ لا يملكها الاختبار.
     enforcedBy: src/incident-response/incident-response.mjs
     codes: [IR_CLOCK_INVALID]
+
+  - id: G-IR-DELIVERY-MEASURED
+    statement: >-
+      كلُّ قناةِ تنبيهٍ لها نقطةُ تسليمٍ مُعلَنة، والرسالةُ تُرسَلُ فعلاً
+      ويُقاسُ وصولُها برمزِ حالةٍ؛ والمُرسِلُ محقونٌ لا مستورد، فلا يصيرَ
+      الحكمُ تابعاً لشبكةٍ قد تنقطع. وحدٌّ معلَنٌ: لا Date.now ولا fetch
+      ولا setTimeout في وحدةِ التسليم.
+    enforcedBy: src/incident-response/notifier.mjs
+    codes: [IR_DELIVERY_REQUIRED]
+
+# ── التسليمُ الخارجيّ ──
+# كلُّ قناةِ تنبيهٍ لها نقطةُ تسليمٍ مُعلَنة هنا. والرسالةُ تُرسَلُ فعلاً
+# ويُقاسُ وصولُها: رمزُ حالةِ HTTP يُقيَّد في السجلِّ الدائمِ، والفشلُ قيدٌ لا
+# صمت. والمُرسِلُ محقونٌ لا مستورد: لا fetch ولا http في وحدةِ المسار،
+# فالنقلُ أثرٌ والوحدةُ حكم. وهذا إغلاقُ الدَّينِ D-3 الموروثِ من M9.06.
+delivery:
+  endpoints:
+    - id: channel:audit-desk
+      url: http://localhost:9800/notify/audit-desk
+      method: POST
+
+    - id: channel:sovereign-desk
+      url: http://localhost:9800/notify/sovereign-desk
+      method: POST
+  statement: >-
+    كلُّ قناةِ تنبيهٍ لها نقطةُ تسليمٍ مُعلَنة، والرسالةُ تُرسَلُ فعلاً ويُقاسُ
+    وصولُها برمزِ حالةٍ، والمُرسِلُ محقونٌ لا مستورد؛ فالنقلُ أثرٌ والوحدةُ حكمٌ،
+    ومن خلطهما جعل الحكمَ تابعاً لشبكةٍ قد تنقطع.

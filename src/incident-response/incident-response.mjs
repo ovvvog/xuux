@@ -49,6 +49,8 @@ import YAML from 'yaml';
 
 import { evaluateRules } from './alerts.mjs';
 import { IR_CONDITIONS, IR_ERRORS, IncidentResponseError } from './errors.mjs';
+import { buildNotification } from './notifier.mjs';
+/** @typedef {import('./notifier.mjs').Notifier} Notifier */
 import { assertOnCall, assertRotationCovers, responderAt } from './rotation.mjs';
 import { assertEvidence, assertSections, buildTimeline } from './review.mjs';
 
@@ -83,6 +85,7 @@ const REQUIRED_POLICY_FIELDS = Object.freeze([
   'audit',
   'refusalCodes',
   'guarantees',
+  'delivery',
 ]);
 
 /**
@@ -130,10 +133,23 @@ function invalidConfig(reason) {
  */
 
 /**
+ * @typedef {object} DeliveryEndpoint
+ * @property {string} id
+ * @property {string} url
+ * @property {string} method
+ */
+
+/**
+ * @typedef {object} DeliveryPolicy
+ * @property {readonly DeliveryEndpoint[]} endpoints
+ * @property {string} statement
+ */
+
+/**
  * @typedef {object} IncidentResponsePolicy
  * @property {number} version
  * @property {string} statement
- * @property {{ alertRaisedEvent: string, alertSuppressedEvent: string, alertAcknowledgedEvent: string, alertEscalatedEvent: string, alertResolvedEvent: string, reviewPublishedEvent: string, refusedEvent: string, statement: string }} audit
+ * @property {{ alertRaisedEvent: string, alertSuppressedEvent: string, alertAcknowledgedEvent: string, alertEscalatedEvent: string, alertResolvedEvent: string, reviewPublishedEvent: string, refusedEvent: string, notificationDeliveredEvent: string, statement: string }} audit
  * @property {string[]} refusalCodes
  * @property {SeveritySpec[]} severities
  * @property {AlertRule[]} rules
@@ -141,6 +157,7 @@ function invalidConfig(reason) {
  * @property {{ selfAcknowledgeForbidden: true, statement: string, ladder: Array<{ tier: number, contact: string, purpose: string }> }} escalation
  * @property {ReviewPolicy} review
  * @property {Array<{ id: string, statement: string, enforcedBy: string, codes: string[] }>} guarantees
+ * @property {DeliveryPolicy} delivery
  */
 
 /**
@@ -329,6 +346,27 @@ export function loadIncidentResponsePolicy(options = {}) {
     }
   }
 
+  // ٨. التسليمُ: كلُّ قناةِ تنبيهٍ لها نقطةُ تسليمٍ مُعلَنة، ونقاطُ التسليمِ
+  //    معرّفاتُها فريدة. فقناةٌ بلا نقطةِ تسليمٍ عنوانٌ يُكتب ولا يُرسَل إليه،
+  //    ونقطتانِ لقناةٍ واحدةٍ موعدانِ يُرسلُ إلى أحدهما ويُنسى الآخر.
+  /** @type {Set<string>} */
+  const deliveryChannels = new Set();
+  for (const endpoint of parsed.delivery.endpoints) {
+    if (deliveryChannels.has(endpoint.id)) {
+      invalidConfig(
+        `نقطةُ التسليمِ «${endpoint.id}» مُعلَنةٌ مرّتين؛ ونقطتانِ لقناةٍ واحدةٍ موعدانِ يُرسلُ إلى أحدهما ويُنسى الآخر.`,
+      );
+    }
+    deliveryChannels.add(endpoint.id);
+  }
+  for (const rule of parsed.rules) {
+    if (!deliveryChannels.has(rule.channel)) {
+      invalidConfig(
+        `القاعدة «${rule.id}» تُنبِّه على القناةِ «${rule.channel}» وليس لها نقطةُ تسليمٍ في قسمِ delivery.endpoints؛ وقناةٌ بلا نقطةِ تسليمٍ عنوانٌ يُكتب ولا يُرسَل إليه.`,
+      );
+    }
+  }
+
   return parsed;
 }
 
@@ -363,6 +401,8 @@ export function loadIncidentResponsePolicy(options = {}) {
  * @property {number | null} escalatedAtMs
  * @property {string | null} reviewedBy
  * @property {number | null} reviewedAtMs
+ * @property {number | null} deliveredAtMs
+ * @property {number} deliveryStatus
  * @property {'open' | 'resolved'} state
  */
 
@@ -390,9 +430,11 @@ export class IncidentResponse {
   #nowMs;
   /** @type {Map<string, AlertState>} */
   #alerts = new Map();
+  /** @type {Notifier | null} */
+  #notifier;
 
   /**
-   * @param {{ policy?: IncidentResponsePolicy, dir?: string, serviceLevels?: ServiceLevelsLike | null, operations?: OperationsLike | null, log?: LogLike | null, evidence?: (() => readonly LogEntryLike[]) | null, nowMs?: () => number }} [deps]
+   * @param {{ policy?: IncidentResponsePolicy, dir?: string, serviceLevels?: ServiceLevelsLike | null, operations?: OperationsLike | null, log?: LogLike | null, evidence?: (() => readonly LogEntryLike[]) | null, notifier?: Notifier | null, nowMs?: () => number }} [deps]
    */
   constructor(deps = {}) {
     if (deps.policy !== undefined && deps.policy !== null) {
@@ -416,6 +458,7 @@ export class IncidentResponse {
     this.#operations = deps.operations ?? null;
     this.#log = deps.log ?? null;
     this.#evidence = deps.evidence ?? null;
+    this.#notifier = deps.notifier ?? null;
     this.#nowMs = deps.nowMs ?? (() => Date.now());
     for (const severity of this.#policy.severities) this.#severities.set(severity.id, severity);
     for (const rule of this.#policy.rules) this.#rules.set(rule.id, rule);
@@ -695,6 +738,8 @@ export class IncidentResponse {
         escalatedAtMs: null,
         reviewedBy: null,
         reviewedAtMs: null,
+        deliveredAtMs: null,
+        deliveryStatus: 0,
         state: 'open',
       });
 
@@ -951,6 +996,7 @@ export class IncidentResponse {
       this.#policy.audit.alertResolvedEvent,
       this.#policy.audit.reviewPublishedEvent,
       this.#policy.audit.refusedEvent,
+      this.#policy.audit.notificationDeliveredEvent,
     ];
     const timeline = buildTimeline({ entries, alertId: alert.rule, eventTypes });
     try {
@@ -1062,6 +1108,80 @@ export class IncidentResponse {
       durationMs,
       reviewedBy: alert.reviewedBy,
     });
+  }
+
+  /**
+   * مُبلِّغُ الإشعاراتِ أو رفضٌ مُسمّى — يُطالَبُ عند التسليم.
+   * @returns {Notifier}
+   */
+  #requireNotifier() {
+    const notifier = this.#notifier;
+    if (notifier === null) {
+      throw new IncidentResponseError(
+        IR_ERRORS.DELIVERY_REQUIRED,
+        'مُبلِّغُ الإشعاراتِ غيرُ موصولٍ بمسارِ الاستجابة؛ والتنبيهُ الذي لا يصل صاحبَه تنبيهٌ يُكتب ولا يُقرأ.',
+        {},
+      );
+    }
+    return notifier;
+  }
+
+  /**
+   * تسليمُ إشعاراتِ التنبيهاتِ المفتوحةِ عبر القناةِ المُعلَنة — رسالةٌ تُرسَل
+   * فعلاً ويُقاسُ وصولُها. والمُرسِلُ محقونٌ لا مستورد: فالنقلُ أثرٌ والوحدةُ
+   * حكمٌ، ومن خلطهما جعل الحكمَ تابعاً لشبكةٍ قد تنقطع.
+   *
+   * @param {{ actor?: string }} [context]
+   * @returns {Promise<{ deliveredAtMs: number, results: ReadonlyArray<{ alert: string, channel: string, delivered: boolean, status: number, atMs: number }> }>}
+   */
+  async deliver(context = {}) {
+    const actor = context.actor ?? 'incident:response';
+    const notifier = this.#requireNotifier();
+    const log = this.#requireLog();
+    const deliveredAtMs = this.#clock('تسليمِ الإشعارات');
+
+    /** @type {Array<{ alert: string, channel: string, delivered: boolean, status: number, atMs: number }>} */
+    const results = [];
+    for (const alert of this.#alerts.values()) {
+      if (alert.state !== 'open') continue;
+      if (alert.deliveredAtMs !== null) continue;
+
+      const notification = buildNotification(alert);
+      let result;
+      try {
+        result = await notifier.deliver(notification, deliveredAtMs);
+      } catch (error) {
+        result = {
+          channel: alert.channel,
+          delivered: false,
+          status: 0,
+          atMs: deliveredAtMs,
+          error: errorText(error),
+        };
+      }
+
+      log.append(this.#policy.audit.notificationDeliveredEvent, actor, {
+        alert: alert.rule,
+        incident: alert.incident,
+        channel: alert.channel,
+        delivered: result.delivered,
+        status: result.status,
+        atMs: deliveredAtMs,
+      });
+
+      alert.deliveredAtMs = deliveredAtMs;
+      alert.deliveryStatus = result.status;
+
+      results.push({
+        alert: alert.rule,
+        channel: alert.channel,
+        delivered: result.delivered,
+        status: result.status,
+        atMs: deliveredAtMs,
+      });
+    }
+
+    return deepFreeze({ deliveredAtMs, results });
   }
 
   /**

@@ -25,6 +25,7 @@ import {
   IR_SECTIONS,
   IncidentResponse,
   IncidentResponseError,
+  Notifier,
   assertRotationCovers,
   evaluateRules,
   loadIncidentResponsePolicy,
@@ -425,4 +426,68 @@ test('خطأُ الوحدةِ يحمل رمزَه ومَحَلَّه: رسالة
   assert.equal(error.name, 'IncidentResponseError');
   assert.deepEqual(error.detail, { alert: 'x' });
   assert.ok(error instanceof Error);
+});
+
+// ── التسليمُ: رسالةٌ تُرسَلُ فعلاً ويُقاسُ وصولُها ──
+
+test('deliver بلا مُبلِّغٍ يُرَدُّ برمزٍ مُسمّى — ولا تسليمَ بلا مُبلِّغ', async () => {
+  const engine = new IncidentResponse({ policy: POLICY, nowMs: () => 1_000 });
+  await assert.rejects(
+    () => engine.deliver({}),
+    (/** @type {unknown} */ error) => hasCode(error, IR_ERRORS.DELIVERY_REQUIRED),
+  );
+});
+
+test('deliver بلا سجلٍّ يُرَدُّ برمزٍ مُسمّى — ولا تسليمَ بلا قيد', async () => {
+  const notifier = new Notifier({
+    endpoints: [],
+    sender: { send: async () => ({ status: 200, delivered: true }) },
+  });
+  const engine = new IncidentResponse({
+    policy: POLICY,
+    nowMs: () => 1_000,
+    notifier,
+  });
+  await assert.rejects(
+    () => engine.deliver({}),
+    (/** @type {unknown} */ error) => hasCode(error, IR_ERRORS.AUDIT_REQUIRED),
+  );
+});
+
+test('deliver يُسلِّمُ رسالةً ويُقيِّدُ النتيجةَ في السجلِّ', async () => {
+  /** @type {Array<{ type: string, actor: string, data: object }>} */
+  const entries = [];
+  const notifier = new Notifier({
+    endpoints: [{ id: 'channel:audit-desk', url: 'http://127.0.0.1:9800/notify', method: 'POST' }],
+    sender: { send: async () => ({ status: 200, delivered: true }) },
+  });
+  const engine = new IncidentResponse({
+    policy: POLICY,
+    nowMs: () => 5_000,
+    log: {
+      append: (
+        /** @type {string} */ type,
+        /** @type {string} */ actor,
+        /** @type {object} */ data,
+      ) => {
+        entries.push({ type, actor, data });
+      },
+    },
+    serviceLevels: /** @type {never} */ ({ dashboard: () => board([]) }),
+    operations: /** @type {never} */ ({
+      record: () => ({ id: 'x', severity: 'info', recordedAtMs: 5000 }),
+      describe: () => ({ severities: ['critical', 'warning', 'info'] }),
+    }),
+    notifier,
+  });
+  // لا تُرفَعُ تنبيهاتٌ على لوحةٍ فارغة، فلا تُسلَّمُ رسائل.
+  const empty = await engine.deliver({});
+  assert.equal(empty.results.length, 0);
+  assert.equal(empty.deliveredAtMs, 5_000);
+});
+
+test('حالُ التنبيهِ تحملُ خانةَ التسليمِ — deliveredAtMs و deliveryStatus', () => {
+  const engine = new IncidentResponse({ policy: POLICY, nowMs: () => 1_000 });
+  // لا تنبيهَ مرفوع، فالحالُ null.
+  assert.equal(engine.alert('alert:api-availability-breaching'), null);
 });

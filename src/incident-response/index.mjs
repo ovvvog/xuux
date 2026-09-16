@@ -14,3 +14,4 @@ export { IR_CONDITIONS, IR_ERRORS, IncidentResponseError } from './errors.mjs';
 export { evaluateRules } from './alerts.mjs';
 export { assertOnCall, assertRotationCovers, responderAt } from './rotation.mjs';
 export { assertEvidence, assertSections, buildTimeline } from './review.mjs';
+export { buildNotification, Notifier } from './notifier.mjs';

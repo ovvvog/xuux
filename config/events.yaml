@@ -888,3 +888,24 @@ channels:
       - type: scheduler.slot.missed
         version: 1
         required: [jobId, slotAt]
+
+  # قناةُ الإشعارات — WL-195 (D-3). قناةٌ جديدةٌ لا وجودَ لها قبلها، والإضافةُ
+  # غيرُ كاسرة: نوعٌ جديدٌ في قناةٍ جديدة. وما يُنشر فيها نتيجةُ إرسالٍ فعليٍّ
+  # (channel، ownerId، maskedDestination، state، attemptedAtMs) — والوجهةُ دائماً
+  # مخفيّةٌ في السجل، ولا سرَّ يُحمل.
+  - id: notification
+    subject: 'قناةُ الإشعارات: ماذا أُرسل، لمن، ومتى، وما النتيجة'
+    classification: sensitive
+    version: 1
+    producers:
+      - role:operator
+      - role:king
+    consumers:
+      - role:king
+      - role:auditor
+      - role:operator
+    types:
+      - type: notification.dispatched
+        version: 1
+        required: [channel, ownerId, maskedDestination, state, attemptedAtMs]
+        optional: [providerMessageId, providerResult, failureReason, messageSubject, receivedAtMs]

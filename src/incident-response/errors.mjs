@@ -33,6 +33,7 @@ export const IR_ERRORS = Object.freeze({
   REVIEW_REVIEWER_CONFLICT: 'IR_REVIEW_REVIEWER_CONFLICT',
   REVIEW_DEADLINE_MISSED: 'IR_REVIEW_DEADLINE_MISSED',
   CLOCK_INVALID: 'IR_CLOCK_INVALID',
+  DELIVERY_REQUIRED: 'IR_DELIVERY_REQUIRED',
 });
 
 /** الشروطُ المكتوبةُ في الكود — يقابلها `enum` في مخطَّطِ الوثيقة. */

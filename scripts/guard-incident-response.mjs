@@ -98,6 +98,7 @@ const MODULE_FILES = [
   'src/incident-response/review.mjs',
   'src/incident-response/errors.mjs',
   'src/incident-response/index.mjs',
+  'src/incident-response/notifier.mjs',
 ];
 
 // ── R0: الوثيقةُ تُحمَّل بمخطَّطها ──
@@ -390,6 +391,24 @@ if (policy !== null) {
       );
     }
   }
+
+  // ── R12: كلُّ قناةِ تنبيهٍ لها نقطةُ تسليمٍ مُعلَنة ──
+  if (policy.delivery?.endpoints) {
+    /** @type {Set<string>} */
+    const deliveryChannels = new Set(
+      policy.delivery.endpoints.map((/** @type {{ id: string }} */ ep) => ep.id),
+    );
+    for (const rule of policy.rules) {
+      if (!deliveryChannels.has(rule.channel)) {
+        violations.push(`R12: ${rule.id} channel ${rule.channel} has no delivery endpoint.`);
+      }
+    }
+    if (readOrEmpty('src/incident-response/notifier.mjs') === '') {
+      violations.push('R12: src/incident-response/notifier.mjs missing.');
+    }
+  } else {
+    violations.push('R12: delivery.endpoints section missing.');
+  }
 }
 
 if (violations.length > 0) {
@@ -405,6 +424,7 @@ const tierCount = policy === null ? 0 : policy.escalation.ladder.length;
 const codeCount = policy === null ? 0 : policy.refusalCodes.length;
 const guaranteeCount = policy === null ? 0 : policy.guarantees.length;
 const sectionCount = policy === null ? 0 : policy.review.requiredSections.length;
+const endpointCount = policy === null ? 0 : (policy.delivery?.endpoints?.length ?? 0);
 console.log(
-  `✅ حاجز مسار الاستجابة للحوادث: ${ruleCount} قواعدَ تنبيهٍ كلٌّ مربوطةٌ بهدفٍ معلَنٍ في وثيقةِ مستوياتِ الخدمةِ ولا هدفَ هناك بلا قاعدةٍ تراقبه (تقابلٌ في الاتجاهين)، و${severityCount} درجاتٍ كلٌّ بمهلةِ إقرارٍ ومهلةِ تصعيدٍ بعدَها ودرجةٍ مقابلةٍ في وثيقةِ مركزِ العملياتِ لا في قائمةٍ ثانية، و${shiftCount} شِفتاً تُغطّي دورةَ المناوبةِ بلا فجوةٍ ولا تداخُلٍ ومستجيبوها جهاتُ غرفةِ الأزماتِ بمعرّفاتِها، و${tierCount} مرتبةً في سلَّمِ تصعيدٍ متصلٍ من ١ لا تُقفَز مرتبةٌ فيه، و${sectionCount} أقسامٍ لازمةٍ في تقريرِ المراجعةِ خطُّ زمنِ أوّلِها مقروءٌ من قيودِ السجلِّ على القرصِ لا من ذاكرةِ مُراجِعٍ، و${codeCount} رمزَ رفضٍ متقابلةً في الاتجاهين مع \`IR_ERRORS\`، و${guaranteeCount} ضماناتٍ كلٌّ برمزٍ حاضرٍ في ملفِّ إنفاذِه، والمهلاتُ كلُّها من الوثيقةِ لا من الكودِ (لا مهلةَ منها مكتوبةٌ نصّاً في وحدةٍ من وحداتِ المسار)، والساعةُ مُمرَّرةٌ ولا مؤقِّتَ يعمل بنفسِه، والمسارُ يقرأ الحكمَ ولا يقيس ولا يستورد طبقةً يُحقَن مثيلُها.`,
+  `✅ حاجز مسار الاستجابة للحوادث: ${ruleCount} قواعدَ تنبيهٍ كلٌّ مربوطةٌ، و${severityCount} درجاتٍ، و${shiftCount} شِفتاً، و${tierCount} مرتبةً، و${sectionCount} أقسامًا، و${codeCount} رمزَ رفضٍ، و${guaranteeCount} ضماناتٍ، و${endpointCount} نقاطَ تسليمٍ مُعلَنةٌ، والمسار يقرأ الحكمَ ولا يقيس ولا يستورد، والساعة مُمرّرةٌ ولا مؤقِّتَ يعمل بنفسِهِ.`,
 );
