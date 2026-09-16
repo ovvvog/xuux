@@ -52,6 +52,14 @@
  *       فيَفشَلُ مُغلَقاً على مضيفٍ غيرِ محلّيٍّ، **ولا ملفَ تحتَ `src/` يستوردُهُ**.
  *       فوسيطٌ يُوقِّعُ لمَن لا مفتاحَ لهُ **سلطةٌ مُسنَدةٌ**، وسلطةٌ بلا
  *       إعلانٍ ولا حدٍّ لا تُفارقُ إسقاطَ الحمايةِ إلّا بالاسمِ.
+ *  T13: **ومسلكُ فتحِ الجلسةِ ومستهلِكُهُ الخارجيُّ مُشتَقّانِ ومحدودانِ
+ *       (‏`WL-194` — إغلاقُ `D-2`):** المسلكُ يُشتَقُّ من `config/api.yaml`
+ *       (‏`wire.sessionEndpoint`) ولا يُكتَبُ عنوانُهُ يداً، **ولا يُعلَنُ في
+ *       `routes`** فتُقرأَ مصادقةٌ قراءةً محكومةً بجلسةٍ لا تُوجَدُ بعدُ، والخادمُ
+ *       يُنادي `gateway.openSession(` ولا يُصدِرُ رمزاً بنفسِهِ. **والمستهلِكُ
+ *       الخارجيُّ خارجٌ فعلاً:** لا يستوردُ من `src/` إلا `pop-canonical.mjs`
+ *       ولا يقرأُ ملفاً من `config/` — فعميلٌ يستوردُ البوابةَ أو يقرأُ وثيقتَها
+ *       **يقيسُ نفسَهُ لا السلكَ**، ودَينٌ يُغلَقُ بشاهدٍ داخليٍّ لم يُغلَقْ.
  *
  * **حدٌّ مُعلَنٌ:** الحاجزُ يقرأُ النصَّ والوثيقةَ **ولا يفتحُ مِقبساً ولا يُصافِحُ**؛
  * فنجاحُ المُصافحةِ ورفضُ الشهادةِ غيرِ الموثوقةِ يُقاسانِ في
@@ -272,8 +280,29 @@ for (const [name, source] of code) {
     violations.push(`T6: رمزُ جلسةٍ يُقرأُ من مُلحقِ استعلامٍ في src/transport/${name}.`);
   }
 }
-if (serverCode !== '' && !/headers\[\s*'authorization'\s*\]/.test(serverCode)) {
+// **والاسمُ يُقرأُ من موضعٍ واحدٍ** (‏`WL-194`): صار للطبقةِ عقدٌ منشورٌ يُعلِنُ
+// الترويساتَ، فلو نُسِخَ الاسمُ في المولِّدِ لأمكنَ أن يفترقا، **فيُوقِّعَ العميلُ
+// في ترويسةٍ لا يقرأُها الخادمُ ويُرَدَّ بغيابِ إثباتٍ**. فيُقاسُ أنّ الخادمَ يقرأُ
+// من `WIRE_HEADERS` وأنّ الأسماءَ مُعلَنةٌ هناك نصّاً.
+if (serverCode !== '' && !/headers\[\s*WIRE_HEADERS\.authorization\s*\]/.test(serverCode)) {
   violations.push('T6: الرمزُ لا يُقرأُ من ترويسةِ `Authorization` — فمن أينَ يُقرأُ؟');
+}
+const wireHeadersCode = code.get('wire-headers.mjs') ?? '';
+if (wireHeadersCode === '') {
+  violations.push(
+    'T6: `src/transport/wire-headers.mjs` غائبٌ — وأسماءُ الترويساتِ بلا موضعٍ واحدٍ.',
+  );
+} else {
+  for (const needle of [
+    "'authorization'",
+    "'x-state-pop-signature'",
+    "'x-state-pop-timestamp'",
+    "'x-state-pop-nonce'",
+  ]) {
+    if (!wireHeadersCode.includes(needle)) {
+      violations.push(`T6: اسمُ ترويسةٍ غيرُ مُعلَنٍ في الموضعِ الواحدِ (${needle}).`);
+    }
+  }
 }
 const staticCode = code.get('static.mjs') ?? '';
 if (staticCode !== '') {
@@ -563,6 +592,107 @@ for (const file of collectSourceFiles(path.join(ROOT, 'src'))) {
   }
 }
 
+// ═══ T13: مسلكُ فتحِ الجلسةِ ومستهلِكُهُ الخارجيُّ ═══
+const CLIENT_REL = path.join('clients', 'state-reader', 'read-state.mjs');
+if (policy === null) {
+  violations.push('T13: لا وثيقةَ واجهةٍ تُقرأُ — ولا اشتقاقَ لمسلكِ جلسةٍ من غيابٍ.');
+} else {
+  const wire =
+    /** @type {{ sessionEndpoint?: { id: string, method: string, path: string } } | null} */ (
+      /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (policy))['wire'] ?? null
+    );
+  if (wire === null || wire.sessionEndpoint === undefined) {
+    violations.push(
+      'T13: `config/api.yaml` لا تُعلِنُ `wire.sessionEndpoint` — ومسلكُ مصادقةٍ غيرُ مُعلَنٍ مسلكٌ مكتوبٌ يداً.',
+    );
+  } else {
+    const endpoint = wire.sessionEndpoint;
+    if (endpoint.method !== 'POST') {
+      violations.push(`T13: مسلكُ فتحِ الجلسةِ بفعلٍ غيرِ POST: ${endpoint.method}.`);
+    }
+    if (policy.routes.some((route) => route.path === endpoint.path)) {
+      violations.push(
+        `T13: مسلكُ فتحِ الجلسةِ مُعلَنٌ في \`routes\` (${endpoint.path}) — ومصادقةٌ محكومةٌ بجلسةٍ لا تُفتَحُ أبداً.`,
+      );
+    }
+    if (policy.routes.some((route) => route.id === endpoint.id)) {
+      violations.push(`T13: معرِّفُ مسلكِ الفتحِ يُزاحمُ مساراً قارئاً: ${endpoint.id}.`);
+    }
+    // والعنوانُ لا يُكتَبُ يداً في طبقةِ النقلِ ولا في العميلِ: يُشتَقُّ.
+    for (const file of [path.join('src', 'transport', 'server.mjs'), CLIENT_REL]) {
+      const text = readFile(file);
+      if (text !== '' && text.includes(`'${endpoint.path}'`)) {
+        violations.push(`T13: عنوانُ مسلكِ الفتحِ مكتوبٌ يداً في ${file} — والاشتقاقُ أصلٌ.`);
+      }
+    }
+  }
+}
+const transportServer = readFile(path.join('src', 'transport', 'server.mjs'));
+if (transportServer !== '') {
+  /** @type {Array<[string, string]>} */
+  const derivedInServer = [
+    ['compileSessionRoute', 'مسلكُ الفتحِ غيرُ مُشتَقٍّ في الخادمِ.'],
+    [
+      'gateway.openSession(',
+      'الخادمُ لا يُنادي البوابةَ لفتحِ الجلسةِ — ونقلٌ يُصدِرُ رمزاً بنفسِهِ سلطةٌ.',
+    ],
+    [
+      TRANSPORT_ERRORS.SESSION_UNSERVED,
+      'بوابةٌ بلا فتحِ جلسةٍ بلا رمزِ رفضٍ مُسمّىً — والغيابُ يُقرأُ عَطَباً داخليّاً.',
+    ],
+  ];
+  for (const [needle, why] of derivedInServer) {
+    if (!transportServer.includes(needle)) violations.push(`T13: ${why} (${needle}).`);
+  }
+}
+const externalClient = readFile(CLIENT_REL);
+if (externalClient === '') {
+  violations.push(
+    `T13: ${CLIENT_REL} غائبٌ — وطبقةٌ بلا مستهلِكٍ خارجيٍّ يُقاسُ بنداءٍ هي نصُّ الدَينِ \`D-2\`.`,
+  );
+} else {
+  // **خارجٌ فعلاً:** كلُّ استيرادٍ من `src/` غيرِ صياغةِ التوقيعِ يُبطِلُ الشهادةَ.
+  for (const match of externalClient.matchAll(/from\s+'([^']*src\/[^']*)'/g)) {
+    const target = match[1] ?? '';
+    if (!target.endsWith('src/api/pop-canonical.mjs')) {
+      violations.push(
+        `T13: المستهلِكُ الخارجيُّ يستوردُ من الداخلِ: ${target} — والمقبولُ صياغةُ التوقيعِ وحدَها.`,
+      );
+    }
+  }
+  if (/['"][^'"]*config\//.test(externalClient)) {
+    violations.push(
+      'T13: المستهلِكُ الخارجيُّ يقرأُ من `config/` — وما لم يُنشَرْ في العقدِ لا سبيلَ له إليه.',
+    );
+  }
+  /** @type {Array<[string, string]>} */
+  const declaredInClient = [
+    ['API_CONTRACT', 'العميلُ لا يقرأُ العقدَ المنشورَ.'],
+    ['canonicalOpenPayload', 'العميلُ لا يُوقِّعُ حمولةَ الفتحِ من الموضعِ الواحدِ.'],
+    ['canonicalCallPayload', 'العميلُ لا يُوقِّعُ حمولةَ النداءِ من الموضعِ الواحدِ.'],
+  ];
+  for (const [needle, why] of declaredInClient) {
+    if (!externalClient.includes(needle)) violations.push(`T13: ${why} (${needle}).`);
+  }
+}
+// واختبارٌ يقيسُ النداءَ عمليَّتَينِ منفصلتَينِ — وشاهدٌ في العمليّةِ نفسِها ليس شاهداً.
+const clientTest = readFile(path.join('tests', 'tooling', 'state-read-client.test.mjs'));
+if (clientTest === '') {
+  violations.push(
+    'T13: `tests/tooling/state-read-client.test.mjs` غائبٌ — وإغلاقٌ بلا قياسٍ ادّعاءٌ.',
+  );
+} else {
+  /** @type {Array<[string, string]>} */
+  const measuredInTest = [
+    ['spawn(', 'الاختبارُ لا يُشغِّلُ الطرفَينِ عمليَّتَينِ منفصلتَينِ.'],
+    ['API_POP_INVALID', 'لا قياسَ لتوقيعٍ بمفتاحٍ غيرِ المُسجَّلِ.'],
+    ['API_IDENTITY_UNVERIFIED', 'لا قياسَ لفاعلٍ غيرِ مُسجَّلٍ.'],
+  ];
+  for (const [needle, why] of measuredInTest) {
+    if (!clientTest.includes(needle)) violations.push(`T13: ${why} (${needle}).`);
+  }
+}
+
 if (violations.length > 0) {
   console.error('⛔ حاجز طبقة النقل رفض:');
   for (const violation of violations) console.error(`   • ${violation}`);
@@ -580,5 +710,5 @@ const commandRouteCount = /** @type {ReturnType<typeof compileCommandRoutes>} */
   })()
 ).length;
 console.log(
-  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` في القراءةِ ولا نداءَ كاتبٍ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` للقراءةِ و\`console.issue\` للكتابةِ، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ، و${commandRouteCount} مسارَ كتابةٍ سياديّةٍ مُشتَقّةٍ من \`config/royal-console.yaml\` بلا عنوانٍ مكتوبٍ يداً ولا مفتاحٍ خاصٍّ في الطبقةِ وجسمٍ بحدٍّ مُعلَنٍ، ومشهدُ الويبِ يقرأُ بوسيطٍ موقِّعٍ مُعلَنِ السُّلطةِ والمدى مربوطٍ بالمضيفِ المحلّيِّ وحدَهُ خارجَ شجرةِ الإنتاجِ.`,
+  `✅ حاجز طبقة النقل: ${routeCount} مساراً قارئاً كلُّها مُشتَقّةٌ من \`config/api.yaml\` متقابلةً في الاتجاهين بلا عنوانٍ مكتوبٍ يداً ولا شكلٍ متنازَعٍ، ولا فعلَ غيرَ \`GET\` في القراءةِ ولا نداءَ كاتبٍ، ولا مستودعَ ولا قاعدةَ ولا نقطةَ تفويضٍ في يدِ النقلِ بل \`gateway.call\` للقراءةِ و\`console.issue\` للكتابةِ، و${Object.keys(STATUS_BY_CODE).length} رمزَ رفضٍ لكلٍّ ترجمةُ حالةِ خطأٍ متقابلةً في الاتجاهين، وبلا اعتمادِ npm واحدٍ، والرمزُ من ترويسةٍ لا من مُلحقٍ، والملفّاتُ بامتداداتٍ مُعلَنةٍ تحتَ جذرٍ محقَّقٍ، وإنهاءُ TLS بتحقُّقٍ مُثبَّتٍ على \`true\` بلا سبيلِ إسقاطٍ ولا رجوعٍ إلى نصٍّ عندَ نقصِ المادّةِ، ولا مادّةَ مفاتيحَ في الشجرةِ، و${commandRouteCount} مسارَ كتابةٍ سياديّةٍ مُشتَقّةٍ من \`config/royal-console.yaml\` بلا عنوانٍ مكتوبٍ يداً ولا مفتاحٍ خاصٍّ في الطبقةِ وجسمٍ بحدٍّ مُعلَنٍ، ومشهدُ الويبِ يقرأُ بوسيطٍ موقِّعٍ مُعلَنِ السُّلطةِ والمدى مربوطٍ بالمضيفِ المحلّيِّ وحدَهُ خارجَ شجرةِ الإنتاجِ، ومسلكُ فتحِ الجلسةِ مُشتَقٌّ من \`wire.sessionEndpoint\` خارجَ جدولِ القراءةِ يُنادي \`gateway.openSession\` ولهُ رمزُ رفضٍ حينَ لا تُخدَمُ الجلسةُ، ومستهلِكٌ خارجيٌّ لا يستوردُ من الداخلِ إلا صياغةَ التوقيعِ ولا يقرأُ إلا العقدَ المنشورَ ويُقاسُ بنداءٍ في عمليّتَينِ منفصلتَينِ.`,
 );

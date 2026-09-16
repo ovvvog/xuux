@@ -18,9 +18,14 @@
  *    `PUT` ولا `DELETE`، ولا جسمَ طلبٍ يُقرأُ للقراءةِ. وفتحُ الكتابةِ يلزمُه أمرٌ
  *    ملكيٌّ موقَّعٌ (`M9.03`) بمسارٍ مُشتَقٍّ من `config/royal-console.yaml`، والتوقيعُ
  *    لا يُنتِجُه متصفِّحٌ ولا خادمٌ — يقبلُ النقلُ الظرفَ المُوقَّعَ ويُمرِّرُه للديوانِ.
- * 4. **فتحُ الجلسةِ ليس مساراً على السلكِ.** لأنّ `config/api.yaml` لا تُعلِنُه
- *    مساراً، وإعلانُه هنا اختراعُ سطحٍ لم يأذنْ به المالكُ. فالرمزُ يُصدَرُ خارجَ
- *    السلكِ (`scripts/serve-state.mjs`) ويُقدَّمُ في ترويسةِ `Authorization`.
+ * 4. **فتحُ الجلسةِ مسلكٌ مُعلَنٌ مُشتَقٌّ — `WL-194`، إغلاقُ `D-2`.** وكان قبلَها لا
+ *    يُفتَحُ إلا داخلَ العمليةِ (`scripts/serve-state.mjs`)، **وأثرُه المقيسُ أنّ كلَّ مَن
+ *    قرأَ من خارجٍ قرأَ بسلطةِ وسيطٍ يُوقِّعُ عنه لا بمفتاحِ نفسِه** — فلم يكنِ القيدُ
+ *    ينسبُ النداءَ إلى فاعلِه. والمسلكُ الآنَ مُشتَقٌّ من `wire.sessionEndpoint` في
+ *    `config/api.yaml` **لا مكتوبٌ هنا**، وهو مصادقةٌ تُصدِرُ رمزاً لا كتابةَ
+ *    بياناتٍ، ولا يُفتَحُ إلا لهويةٍ سُجِّلَ مفتاحُها قبلَ الإقلاعِ. **ولا مسلكَ
+ *    لرفعِ مفتاحٍ بحالٍ:** تسجيلٌ على السلكِ بلا مُصادِقٍ يُمكِّنُ كلَّ مَن بلغَ
+ *    المنفَذَ من أن يُسجِّلَ نفسَه.
  * 5. **إنهاءُ TLS في وحدةٍ مُنفصلةٍ** (`tls.mjs`، سدادُ باقي `D-1`): مَن أعلنَ
  *    مادّةَ TLS نالَ خادماً مُعمّىً بـ`createSecureStateServer`، ومَن لم يُعلِنْها
  *    نالَ خادماً نصّيّاً **يُصرِّحُ في كلِّ ردٍّ** أنّه لا يُنشَرُ إلا خلفَ مُنهٍ.
@@ -36,11 +41,13 @@ import {
   TransportError,
   compileCommandRoutes,
   compileRoutes,
+  compileSessionRoute,
   matchRoute,
   paramsFor,
 } from './router.mjs';
 import { resolveStaticFile } from './static.mjs';
 import { createTlsServer } from './tls.mjs';
+import { WIRE_HEADERS } from './wire-headers.mjs';
 
 /** حدُّ طولِ العنوانِ: عنوانٌ بلا حدٍّ بابُ استنزافٍ رخيصٍ. */
 const MAX_URL_LENGTH = 2048;
@@ -98,7 +105,7 @@ function headersFor(request) {
  * @returns {string | undefined}
  */
 function tokenOf(request) {
-  const header = request.headers['authorization'];
+  const header = request.headers[WIRE_HEADERS.authorization];
   if (typeof header !== 'string') return undefined;
   const match = /^Bearer[ ]+(\S+)$/.exec(header.trim());
   return match === null ? undefined : match[1];
@@ -123,9 +130,9 @@ function tokenOf(request) {
  * @returns {{ signature: string, timestamp: string, nonce: string } | undefined}
  */
 function proofOfPossessionOf(request) {
-  const signature = request.headers['x-state-pop-signature'];
-  const timestamp = request.headers['x-state-pop-timestamp'];
-  const nonce = request.headers['x-state-pop-nonce'];
+  const signature = request.headers[WIRE_HEADERS.popSignature];
+  const timestamp = request.headers[WIRE_HEADERS.popTimestamp];
+  const nonce = request.headers[WIRE_HEADERS.popNonce];
   if (typeof signature !== 'string' || typeof timestamp !== 'string' || typeof nonce !== 'string') {
     return undefined;
   }
@@ -135,6 +142,7 @@ function proofOfPossessionOf(request) {
 /**
  * @typedef {object} GatewayLike
  * @property {(request: { route: string, token?: string, params?: Record<string, unknown>, pop?: { signature: string, timestamp: string, nonce: string } }) => Promise<{ route: string, status: string, data: unknown }>} call
+ * @property {((request: { actorId: string, pop?: { signature: string, timestamp: string, nonce: string } }) => Promise<{ token: string, sessionId: string, expiresAt: string }>) | undefined} [openSession] فتحُ الجلسةِ — وغيابُه يُردُّ `TRANSPORT_SESSION_UNSERVED` لا يُتجاوَزُ.
  */
 
 /**
@@ -149,6 +157,7 @@ function proofOfPossessionOf(request) {
  * @property {string | null} [webDir] جذرُ ملفّاتِ الواجهةِ، أو `null` فلا واجهةَ.
  * @property {ReturnType<typeof compileRoutes>} [routes]
  * @property {ReturnType<typeof compileCommandRoutes>} [commandRoutes]
+ * @property {ReturnType<typeof compileSessionRoute>} [sessionRoute] مسلكُ فتحِ الجلسةِ المُشتَقُّ.
  * @property {string} [certFile]
  * @property {string} [keyFile]
  * @property {string} [caFile]
@@ -174,11 +183,12 @@ export function createStateServer(options) {
   }
   const routes = options.routes ?? compileRoutes();
   const commandRoutes = options.commandRoutes ?? compileCommandRoutes();
+  const sessionRoute = options.sessionRoute ?? compileSessionRoute();
   const webDir = options.webDir ?? null;
   const console_ = options.console ?? null;
 
   return http.createServer(
-    handlerFor({ gateway, routes, commandRoutes, console: console_, webDir }),
+    handlerFor({ gateway, routes, commandRoutes, sessionRoute, console: console_, webDir }),
   );
 }
 
@@ -188,7 +198,7 @@ export function createStateServer(options) {
  * وفَصلُه ليس تجميلاً: خادمُ النصِّ وخادمُ TLS **يتشاركانِ المُعالِجَ نفسَه**، فلا
  * تنشأُ نسخةٌ ثانيةٌ من الحُكمِ تفترقُ عن الأولى فيَمُرُّ على إحداهما ما رُدَّ على
  * الأخرى.
- * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, commandRoutes: ReturnType<typeof compileCommandRoutes>, console: ConsoleLike | null, webDir: string | null }} deps
+ * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, commandRoutes: ReturnType<typeof compileCommandRoutes>, sessionRoute: ReturnType<typeof compileSessionRoute>, console: ConsoleLike | null, webDir: string | null }} deps
  * @returns {(request: http.IncomingMessage, response: http.ServerResponse) => void}
  */
 function handlerFor(deps) {
@@ -217,6 +227,7 @@ export function createSecureStateServer(options) {
   }
   const routes = options.routes ?? compileRoutes();
   const commandRoutes = options.commandRoutes ?? compileCommandRoutes();
+  const sessionRoute = options.sessionRoute ?? compileSessionRoute();
   const webDir = options.webDir ?? null;
   const console_ = options.console ?? null;
   return createTlsServer({
@@ -224,6 +235,7 @@ export function createSecureStateServer(options) {
       gateway,
       routes,
       commandRoutes,
+      sessionRoute,
       console: console_,
       webDir,
     }),
@@ -288,7 +300,7 @@ function readBody(request) {
 /**
  * @param {http.IncomingMessage} request
  * @param {http.ServerResponse} response
- * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, commandRoutes: ReturnType<typeof compileCommandRoutes>, console: ConsoleLike | null, webDir: string | null }} deps
+ * @param {{ gateway: GatewayLike, routes: ReturnType<typeof compileRoutes>, commandRoutes: ReturnType<typeof compileCommandRoutes>, sessionRoute: ReturnType<typeof compileSessionRoute>, console: ConsoleLike | null, webDir: string | null }} deps
  */
 async function handle(request, response, deps) {
   try {
@@ -313,9 +325,15 @@ async function handle(request, response, deps) {
 
     // جدولُ القراءةِ وجدولُ الكتابةِ مُدمَجانِ: المطابقةُ تَفحَصُ المسارَ والفعلَ معاً،
     // فلا يَعبرُ `POST` مساراً قارئاً ولا `GET` مساراً كاتباً.
-    const allRoutes = [...deps.routes, ...deps.commandRoutes];
+    // ومسلكُ فتحِ الجلسةِ يدخلُ الجدولَ المدموجَ لا جدولاً ثالثاً يُفتَشُ قبلَهما:
+    // جدولٌ موازٍ يسبقُ المطابقةَ يجعلُ مسلكاً يُخفي مساراً مُعلَناً بلا ردَّ.
+    const allRoutes = [...deps.routes, ...deps.commandRoutes, deps.sessionRoute];
     const matched = matchRoute(allRoutes, method, url.pathname);
     if (matched !== null) {
+      if (matched.route.id === deps.sessionRoute.id) {
+        await handleSessionOpen(request, response, deps);
+        return;
+      }
       if (method === 'POST') {
         await handleCommand(request, response, deps, matched.route);
         return;
@@ -361,6 +379,78 @@ async function handle(request, response, deps) {
     if (!response.headersSent) sendJson(request, response, status, body);
     else response.end();
   }
+}
+
+/**
+ * **فتحُ الجلسةِ على السلكِ** — `WL-194`، إغلاقُ `D-2`.
+ *
+ * والنقلُ هنا **بلا سلطةٍ** كما في كلِّ مسلكٍ: يقرأُ الهويةَ والإثباتَ من جسمٍ
+ * محدودِ الحجمِ ويُمرِّرُهما إلى `gateway.openSession`. **ولا يُخترعُ هنا مفتاحٌ ولا
+ * تُفحَصُ هويةٌ:** مَن لم يُسجَّلْ مفتاحُه قبلَ الإقلاعِ ترفضُه البوابةُ برمزِها المُعلَنِ،
+ * والنقلُ لا يُلَطِّفُ الرفضَ ولا يُبهِمُه.
+ *
+ * **وبوابةٌ لا تُصدِرُ جلساتٍ تُردُّ برمزٍ مُسمّىً** لا بـ`500` ولا بتجاوزٍ صامتٍ.
+ * @param {http.IncomingMessage} request
+ * @param {http.ServerResponse} response
+ * @param {{ gateway: GatewayLike }} deps
+ */
+async function handleSessionOpen(request, response, deps) {
+  // **يُفحَصُ الوجودُ ويُنادى على المالكِ:** استخراجُ التابعِ ثمّ نداؤُه مُفرَداً
+  // يفقدُ `this` فيسقطُ في عَطَبٍ داخليٍّ بدلَ رفضٍ مُسمّىً — فحصٌ هنا ونداءٌ هناك.
+  if (typeof deps.gateway.openSession !== 'function') {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.SESSION_UNSERVED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  const raw = await readBody(request);
+  /** @type {unknown} */
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  const envelope = /** @type {Record<string, unknown>} */ (parsed);
+  const actorId = envelope['actorId'];
+  if (typeof actorId !== 'string' || actorId.length === 0) {
+    const { status, body } = problemFor(TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    sendJson(request, response, status, body);
+    return;
+  }
+  // الإثباتُ يُقرأُ من الجسمِ لا من الترويساتِ: حمولةُ الفتحِ لا مسارَ لها ولا
+  // رمزَ جلسةٍ، وخلطُ حمولتَينِ في ترويساتٍ واحدةٍ يُتيحُ تقديمَ توقيعِ أحدِهما مكانَ الآخرِ.
+  const popRaw = envelope['pop'];
+  /** @type {{ signature: string, timestamp: string, nonce: string } | undefined} */
+  let pop;
+  if (popRaw !== null && typeof popRaw === 'object' && !Array.isArray(popRaw)) {
+    const fields = /** @type {Record<string, unknown>} */ (popRaw);
+    const signature = fields['signature'];
+    const timestamp = fields['timestamp'];
+    const nonce = fields['nonce'];
+    if (
+      typeof signature === 'string' &&
+      typeof timestamp === 'string' &&
+      typeof nonce === 'string'
+    ) {
+      pop = { signature, timestamp, nonce };
+    }
+  }
+  const opened = await deps.gateway.openSession({
+    actorId,
+    ...(pop === undefined ? {} : { pop }),
+  });
+  sendJson(request, response, 200, {
+    token: opened.token,
+    sessionId: opened.sessionId,
+    expiresAt: opened.expiresAt,
+  });
 }
 
 /**

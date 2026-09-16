@@ -11,11 +11,13 @@ export {
   TransportError,
   compileCommandRoutes,
   compileRoutes,
+  compileSessionRoute,
   matchRoute,
   paramsFor,
 } from './router.mjs';
 export { TRANSPORT_ERRORS, STATUS_BY_CODE, codeOf, problemFor } from './problem.mjs';
 export { resolveStaticFile } from './static.mjs';
+export { WIRE_HEADERS } from './wire-headers.mjs';
 export {
   TLS_ERRORS,
   TransportTlsError,

@@ -151,6 +151,42 @@ export function matchRoute(routes, method, pathname) {
 }
 
 /**
+ * يبني **مسلكَ فتحِ الجلسةِ** من إعلانِ السلكِ في `config/api.yaml` — `WL-194`،
+ * إغلاقُ `D-2`.
+ *
+ * **ولماذا مسلكٌ واحدٌ لا صفٌّ في جدولِ القراءةِ:** جدولُ القراءةِ `GET` وحدَه
+ * بحُكمِ وثيقتِه وحاجزِها، وفتحُ الجلسةِ فعلٌ يحملُ جسماً موقَّعاً فلا يكونُ `GET`.
+ * وإدخالُه في `routes` كان يُكسِرُ الضمانَ «لا فعلَ غيرَ `GET` في القراءةِ» —
+ * فأُعلِنَ **حيثُ معناه**: `wire.sessionEndpoint`.
+ *
+ * **وليس هذا كتابةَ بياناتٍ:** لا مورِدَ يُغيَّرُ ولا مشهدَ يُكتَبُ؛ هو مصادقةٌ
+ * تُصدِرُ رمزَ جلسةٍ — النداءُ نفسُه الذي كان يُنادى في العمليةِ، صارَ له مسلكٌ.
+ * @param {{ policy?: ReturnType<typeof loadApiPolicy>, dir?: string }} [options]
+ * @returns {CompiledRoute}
+ */
+export function compileSessionRoute(options = {}) {
+  const policy =
+    options.policy ?? loadApiPolicy(options.dir === undefined ? {} : { dir: options.dir });
+  const endpoint = policy.wire.sessionEndpoint;
+  // فعلٌ غيرُ `POST` في مسلكِ الفتحِ خِلافٌ بين الوثيقةِ ومعناها: يُرفَعُ لا يُمرَّرُ.
+  if (endpoint.method !== 'POST') {
+    throw new TransportError(
+      TRANSPORT_ERRORS.METHOD_NOT_ALLOWED,
+      `مسلكُ فتحِ الجلسةِ مُعلَنٌ بفعلِ ${endpoint.method}، وحمولتُه موقَّعةٌ فلا يكونُ إلا \`POST\`.`,
+    );
+  }
+  const { segments, literals } = compilePath(endpoint.path);
+  return Object.freeze({
+    id: endpoint.id,
+    method: endpoint.method,
+    path: endpoint.path,
+    call: 'open-session',
+    segments: Object.freeze(segments),
+    literals,
+  });
+}
+
+/**
  * يبني جدولَ مساراتِ الكتابةِ السياديّةِ من وثيقةِ الديوانِ — **مصدرُ الجدولِ
  * الوثيقةُ وحدَها**، كقرينِها من `config/api.yaml`.
  *
