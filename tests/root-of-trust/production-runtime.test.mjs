@@ -547,8 +547,24 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
       assert.throws(() => new CrownGateway({ id: 'king:x' }, {}, { append: () => undefined }, {}), {
         message: 'COMMAND_LEDGER_REQUIRED_IN_PRODUCTION',
       });
-      // ومع المكوّنين الحقيقيّين يُبنى: التركيبُ الإنتاجيُّ يوفّرُهما معاً.
-      // M11.04-F04: الساعةُ الموثوقةُ إلزاميّةٌ عندَ البناءِ كذلك.
+      // D-7: ساعةٌ تكشفُ انزياحَها ولا تُبرهِنُ وقتَها لا تكفي في الإنتاجِ.
+      // والرفضُ عندَ البناءِ لا عندَ أوّلِ أمرٍ: تركيبٌ يعملُ لحظةً بلا الضمانِ
+      // المُعلَنِ له قد قَبِلَ أمراً بزمنٍ لا شاهدَ له.
+      assert.throws(
+        () =>
+          new CrownGateway(
+            { id: 'king:x' },
+            {},
+            { append: () => undefined },
+            {
+              commandLedger: runtime.ledger,
+              haltSwitch: runtime.haltSwitch,
+              clock: { now: () => Date.now(), assertTrusted: () => undefined },
+            },
+          ),
+        { code: 'ATTESTED_TIME_REQUIRED' },
+      );
+      // ومع المكوّنين الحقيقيّين وساعةٍ تُبرهِنُ وقتَها يُبنى.
       const gateway = new CrownGateway(
         { id: 'king:x' },
         {},
@@ -556,11 +572,22 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
         {
           commandLedger: runtime.ledger,
           haltSwitch: runtime.haltSwitch,
-          clock: { now: () => Date.now(), assertTrusted: () => undefined },
+          clock: {
+            now: () => Date.now(),
+            assertTrusted: () => undefined,
+            attestation: () => ({
+              atMs: Date.now(),
+              radiusMs: 1000,
+              ageMs: 0,
+              sources: ['w1', 'w2'],
+              localSkewMs: 0,
+            }),
+          },
         },
       );
       assert.equal(gateway.requireCommandLedger, true);
       assert.equal(gateway.requireHaltSwitch, true);
+      assert.equal(gateway.requireAttestedTime, true);
     } finally {
       if (previous === undefined) delete process.env.STATE_ENV;
       else process.env.STATE_ENV = previous;
