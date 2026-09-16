@@ -108,6 +108,7 @@ import {
 import {
   compileCommandRoutes,
   compileRoutes,
+  compileSessionRoute,
   createStateServer,
   createTlsServer,
 } from '../src/transport/index.mjs';
@@ -530,10 +531,96 @@ async function writeChecks(ctx, lines) {
   return { ok: unsignedRefused && forgedRefused && signedAccepted && logged };
 }
 
+/**
+ * **يُسجِّلُ المستهلِكينَ المُعلَنينَ في `config/api.yaml`** — `WL-194`، إغلاقُ `D-2`.
+ *
+ * **والتسجيلُ فعلُ مُشغِّلٍ قبلَ الإقلاعِ لا مسلكٌ على السلكِ:** مَن أعلنَ موضعَ مفتاحٍ
+ * عامٍ في متغيِّرِ البيئةِ المُعلَنِ نالَ هويةً من سجلِّ الدولةِ ومفتاحَ حيازةٍ مربوطاً
+ * بها، ومَن لم يُعلِنْ فلا هويةَ له ويُقالُ ذلك في اللوحةِ **صريحاً لا صامتاً**.
+ *
+ * **ومادّةُ المفتاحِ تُقرأُ ولا تُخمَّنُ:** ملفٌ مُعلَنٌ ومفقودٌ يُرفعُ خطأً ولا
+ * يُتجاوَزُ، وملفٌ يحملُ مفتاحاً خاصّاً يُرفَضُ: مَن أعطى خاصَّه للخادمِ لم يُثبِتْ
+ * حيازةً بل أدّاها إليه.
+ *
+ * **والقدراتُ تُشتَقُّ من أفعالِ المساراتِ المُعلَنةِ لا تُكتَبُ هنا:** قائمةٌ مكتوبةٌ
+ * يداً تفترقُ عن الوثيقةِ في أوّلِ مسارٍ يُضافُ. والتفويضُ بعدَها يُقرِّرُ لا هي.
+ * @param {{ policy: import('../src/api/gateway.mjs').ApiPolicy, registry: { register: (input: { name: string, role: string, capabilities: string[], kind: string }) => Promise<{ id: string }> }, gateway: { registerPoPKey: (actorId: string, pem: string) => boolean }, identities: Map<string, { id: string, state: string }>, env: NodeJS.ProcessEnv, doorOrigin: string }} input
+ * @returns {Promise<Array<{ id: string, actorId: string | null, role: string, note: string }>>}
+ */
+async function enrollDeclaredConsumers(input) {
+  const { policy, registry, gateway, identities, env, doorOrigin } = input;
+  const capabilities = [...new Set(policy.routes.map((route) => `action:${route.action}`))];
+  /** @type {Array<{ id: string, actorId: string | null, role: string, note: string }>} */
+  const enrolled = [];
+  for (const consumer of policy.wire.consumers) {
+    const keyFile = env[consumer.publicKeyEnv] ?? '';
+    if (keyFile === '') {
+      enrolled.push({
+        id: consumer.id,
+        actorId: null,
+        role: consumer.role,
+        note: `غيرُ مُسجَّلٍ: لا مفتاحَ مُعلَناً في ${consumer.publicKeyEnv}`,
+      });
+      continue;
+    }
+    const pem = fs.readFileSync(keyFile, 'utf8');
+    if (pem.includes('PRIVATE KEY')) {
+      throw new Error(
+        `الملفُ المُعلَنُ في ${consumer.publicKeyEnv} يحملُ مفتاحاً خاصّاً؛ والمُسجَّلُ عامٌ وحدَه: مَن أعطى خاصَّه لم يُثبِتْ حيازةً بل أدّاها.`,
+      );
+    }
+    const agent = await registry.register({
+      name: consumer.name,
+      role: consumer.role,
+      capabilities,
+      kind: 'service',
+    });
+    identities.set(agent.id, /** @type {never} */ (agent));
+    if (!gateway.registerPoPKey(agent.id, pem)) {
+      throw new Error(
+        `مفتاحُ المستهلِكِ ${consumer.id} لم يُقبَلْ من ${keyFile}؛ ومفتاحٌ لا يُقرأُ لا يُتجاوَزُ.`,
+      );
+    }
+    // **ملفُّ التسجيلِ تسليمٌ خارجَ السلكِ:** فيه معرِّفُ الفاعلِ وموضعُ البابِ
+    // وموضعُ العقدِ، وليس فيه مادّةُ مفتاحٍ ألبتّةً.
+    const enrollmentFile = env[consumer.enrollmentFileEnv] ?? '';
+    if (enrollmentFile !== '') {
+      fs.writeFileSync(
+        enrollmentFile,
+        `${JSON.stringify(
+          {
+            consumer: consumer.id,
+            actorId: agent.id,
+            role: consumer.role,
+            doorOrigin,
+            contract: policy.wire.contract.file,
+            enrolledAt: new Date().toISOString(),
+          },
+          null,
+          2,
+        )}\n`,
+        { mode: 0o600 },
+      );
+    }
+    enrolled.push({
+      id: consumer.id,
+      actorId: agent.id,
+      role: consumer.role,
+      note:
+        enrollmentFile === ''
+          ? `مُسجَّلٌ ولا ملفَ تسجيلٍ (‏يُعلَنُ في ${consumer.enrollmentFileEnv})`
+          : `مُسجَّلٌ، وتسليمُه في ${enrollmentFile}`,
+    });
+  }
+  return enrolled;
+}
+
 async function main() {
   const apiPolicy = loadApiPolicy({ dir: CONFIG_DIR });
   const monitoringPolicy = loadMonitoringPolicy({ dir: CONFIG_DIR });
   const routes = compileRoutes({ policy: apiPolicy });
+  // ومسلكُ فتحِ الجلسةِ مُشتَقٌّ من الوثيقةِ نفسِها لا مكتوبٌ هنا (`WL-194`).
+  const sessionRoute = compileSessionRoute({ policy: apiPolicy });
   const { repositories, close, source } = await repositoriesFor();
   const log = new EventLog();
 
@@ -556,8 +643,12 @@ async function main() {
     capabilities: ['action:read-registry', 'action:read-memory', 'action:read-audit'],
     kind: 'service',
   });
+  // وسجلُّ الهويّاتِ الموصولُ بالبوابةِ خريطةٌ لا مقارنةُ معرِّفٍ واحدٍ: المستهلِكونَ
+  // المُعلَنونَ يُسجَّلونَ فيها بعدَ الربطِ (‏`WL-194`)، ومَن لم يُسجَّلْ فليس فيها.
+  /** @type {Map<string, { id: string, state: string }>} */
+  const identities = new Map([[viewerAgent.id, /** @type {never} */ (viewerAgent)]]);
   const agents = {
-    get: async (/** @type {string} */ id) => (id === viewerAgent.id ? viewerAgent : null),
+    get: async (/** @type {string} */ id) => identities.get(id) ?? null,
   };
 
   const monitor = new MonitorAgent({
@@ -603,12 +694,35 @@ async function main() {
     webDir: WEB_DIR,
     routes,
     commandRoutes,
+    sessionRoute,
     console: /** @type {never} */ (court.console),
   });
-  await new Promise((resolve) => inner.listen(0, '127.0.0.1', () => resolve(undefined)));
+  // **ومنفَذُ البابِ الدّاخليِّ مُعلَنٌ لا عابرٌ إن أُريدَ مستهلِكٌ خارجيٌّ** — `WL-194`:
+  // الوسيطُ الأماميُّ قارئٌ يُوقِّعُ بسلطتِه هو، فلا يعبرُه فتحُ جلسةٍ ولا نداءٌ
+  // موقَّعٌ من غيرِه. ومن ثمَّ يُعلَنُ منفَذُ البابِ نفسِه في متغيِّرٍ مُعلَنٍ في
+  // الوثيقةِ (`wire.doorPortEnv`)، **والأصلُ منفَذٌ عابرٌ على المضيفِ المحلّيِّ**
+  // فلا يُفتَحُ بابٌ ثابتٌ لمَن لم يُرِدْه.
+  const doorPortDeclared = process.env[apiPolicy.wire.doorPortEnv] ?? '';
+  const doorPort = doorPortDeclared === '' ? 0 : Number(doorPortDeclared);
+  if (!Number.isInteger(doorPort) || doorPort < 0 || doorPort > 65535) {
+    throw new Error(
+      `منفَذُ البابِ المُعلَنُ في ${apiPolicy.wire.doorPortEnv} ليس منفَذاً: «${doorPortDeclared}».`,
+    );
+  }
+  await new Promise((resolve) => inner.listen(doorPort, '127.0.0.1', () => resolve(undefined)));
   const innerAddress = inner.address();
   const innerPort =
     typeof innerAddress === 'object' && innerAddress !== null ? innerAddress.port : 0;
+  // والتسجيلُ بعدَ الربطِ لا قبلَه: ملفُّ التسليمِ يحملُ موضعَ البابِ، وموضعٌ
+  // يُكتَبُ قبلَ أن يُعرَفَ تسليمٌ لعنوانٍ لا يُطرَقُ.
+  const enrolledConsumers = await enrollDeclaredConsumers({
+    policy: apiPolicy,
+    registry: /** @type {never} */ (registry),
+    gateway: /** @type {never} */ (gateway),
+    identities,
+    env: process.env,
+    doorOrigin: `http://127.0.0.1:${innerPort}`,
+  });
 
   // **فشلٌ مُغلَقٌ عندَ التركيبِ:** وسيطٌ يُوقِّعُ لكلِّ مُنادٍ، مربوطٌ
   // بواجهةٍ غيرِ محلّيّةٍ، **إسقاطٌ للحيازةِ بصيغةٍ أخرى** — فلا يُشَغَّلُ.
@@ -654,6 +768,16 @@ async function main() {
         }.`
       : '  حدودٌ مُعلَنةٌ: لا TLS في هذا التشغيلِ (تُعلَنُ مادّتُه في `STATE_TLS_CERT_FILE`).',
     '  وإثباتُ الحيازةِ لازمٌ لكلِّ نداءٍ (‏لا للفتحِ وحدَه).',
+    '',
+    // ── المستهلِكُ الخارجيُّ (‏`WL-194` — إغلاقُ `D-2`) ──
+    `  وبابُ المستهلِكِ الخارجيِّ مباشرةً: http://127.0.0.1:${innerPort}/ (‏يُعلَنُ ثابتاً في \`${apiPolicy.wire.doorPortEnv}\`)`,
+    `  ومسلكُ فتحِ الجلسةِ مُشتَقٌّ من الوثيقةِ: ${sessionRoute.method} ${sessionRoute.path}   → ${sessionRoute.id}`,
+    `  والعقدُ المنشورُ للمستهلِكِ: ${apiPolicy.wire.contract.file} (‏يُولِّدُه \`${apiPolicy.wire.contract.generatedBy}\`)`,
+    '  والمستهلِكونَ المُعلَنونَ وحالُ تسجيلِهم — **ولا تسجيلَ على السلكِ بحالٍ**:',
+    ...enrolledConsumers.map(
+      (entry) =>
+        `    ${entry.id} بدورِ ${entry.role} → ${entry.actorId ?? 'لا هويةَ'}   (${entry.note})`,
+    ),
     '',
     `  ومشهدُ الويبِ يقرأُ عبرَ وسيطٍ موقِّعٍ في الخادمِ (‏إغلاقُ \`LIVE-5\`): سلطتُهُ ${ACTOR_LABEL}،`,
     '  ومداهُ قراءةٌ فقط على المضيفِ المحلّيِّ وحدَهُ، ويُعلِنُ نفسَهُ في `x-state-pop-proxy`.',

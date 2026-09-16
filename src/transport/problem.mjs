@@ -34,6 +34,11 @@ export const TRANSPORT_ERRORS = Object.freeze({
   URI_TOO_LONG: 'TRANSPORT_URI_TOO_LONG',
   BODY_NOT_ALLOWED: 'TRANSPORT_BODY_NOT_ALLOWED',
   GATEWAY_REQUIRED: 'TRANSPORT_GATEWAY_REQUIRED',
+  // مسلكُ فتحِ الجلسةِ مُعلَنٌ والبوابةُ الموصولةُ لا تُصدِرُ جلساتٍ — `WL-194`.
+  // **ولماذا رمزٌ جديدٌ لا `GATEWAY_REQUIRED`:** الأوّلُ يقولُ «لا دولةَ مُركَّبةً»
+  // وهذا يقولُ «الدولةُ مُركَّبةٌ وهذا المسلكُ بلا خادِمٍ»، وخلطُهما يُرسِلُ المُشغِّلَ
+  // يفحصُ التركيبَ كلَّه والعلةُ في واحدةٍ.
+  SESSION_UNSERVED: 'TRANSPORT_SESSION_UNSERVED',
   INTERNAL: 'TRANSPORT_INTERNAL',
 });
 
@@ -84,6 +89,8 @@ export const STATUS_BY_CODE = Object.freeze({
   [TRANSPORT_ERRORS.URI_TOO_LONG]: 414,
   [TRANSPORT_ERRORS.BODY_NOT_ALLOWED]: 400,
   [TRANSPORT_ERRORS.GATEWAY_REQUIRED]: 503,
+  // المسلكُ مُعلَنٌ والخادِمُ غائبٌ: عَطبُ تركيبٍ مؤقّتٌ لا خطأُ مُنادٍ.
+  [TRANSPORT_ERRORS.SESSION_UNSERVED]: 503,
   [TRANSPORT_ERRORS.INTERNAL]: 500,
   // ── رموزُ الديوانِ الملكيِّ (`M9.03`) ──
   // الكتابةُ السياديّةُ المُوقَّعةُ تُترجَمُ برموزِها المُعلَنةِ لا تُخمَّنُ.
@@ -131,10 +138,12 @@ const MESSAGE_BY_CODE = Object.freeze({
   [SESSION_ERRORS.POP_REPLAY]: 'مُعرِّفُ الإثباتِ مُستهلَكٌ؛ ولا يُقبَلُ توقيعٌ مرّتَينِ.',
   [SESSION_ERRORS.POP_EXPIRED]: 'انقضت مهلةُ إثباتِ الحيازةِ؛ ويُوقَّعُ النداءُ من جديدٍ.',
   [TRANSPORT_ERRORS.ROUTE_UNKNOWN]: 'لا مسارَ بهذا العنوانِ في وثيقةِ الواجهةِ.',
-  [TRANSPORT_ERRORS.METHOD_NOT_ALLOWED]: 'هذه الطبقةُ قارئةٌ فقط؛ ولا فعلَ إلا `GET`.',
+  [TRANSPORT_ERRORS.METHOD_NOT_ALLOWED]: 'المسارُ مُعلَنٌ بفعلٍ غيرِ هذا؛ والقراءةُ `GET` وحدَها.',
   [TRANSPORT_ERRORS.URI_TOO_LONG]: 'العنوانُ أطولُ من الحدِّ المُعلَنِ.',
   [TRANSPORT_ERRORS.BODY_NOT_ALLOWED]: 'لا جسمَ في طلبِ قراءةٍ.',
   [TRANSPORT_ERRORS.GATEWAY_REQUIRED]: 'الدولةُ غيرُ مُركَّبةٍ؛ فلا نداءَ.',
+  [TRANSPORT_ERRORS.SESSION_UNSERVED]:
+    'مسلكُ فتحِ الجلسةِ مُعلَنٌ والبوابةُ الموصولةُ لا تُصدِرُ جلساتٍ.',
   [TRANSPORT_ERRORS.INTERNAL]: 'عَطَبٌ داخليٌّ؛ وقيدُه في سجلِّ الأحداثِ لا في هذا الردِّ.',
   // ── رسائلُ الديوانِ الملكيِّ ──
   [CONSOLE_ERRORS.CONFIG_INVALID]: 'وثيقةُ الديوانِ غيرُ صالحةٍ؛ فلا يُخدَمُ أمرٌ.',

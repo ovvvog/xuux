@@ -30,6 +30,14 @@ import { createHash, randomBytes, createPublicKey, verify as cryptoVerify } from
 
 import { canonicalOpenPayload, popMessage } from './pop-canonical.mjs';
 
+/**
+ * **نوعُ مفتاحِ إثباتِ الحيازةِ المقبولُ — اسمٌ واحدٌ يقرأُه المُتحقِّقُ والعقدُ
+ * المنشورُ.** (‏`WL-194`.) كان نصّاً حرفيّاً في موضعِ التحقُّقِ وحدَه، فلمّا لزِمَ
+ * أن يُعلِنَه العقدُ للمستهلِكِ الخارجيِّ صار إعلانُه نسخاً؛ **ونسخُ شرطٍ أمنيٍّ
+ * يُنشئُ عقداً يَعِدُ بما لا يُتحقَّقُ به**.
+ */
+export const POP_KEY_TYPE = 'ed25519';
+
 /** رموزُ رفضِ الجلسة — كلُّها مُعلَنةٌ في `config/api.yaml`. */
 export const SESSION_ERRORS = Object.freeze({
   AUTH_REQUIRED: 'API_AUTH_REQUIRED',
@@ -167,7 +175,7 @@ export class SessionStore {
     if (typeof publicKeyPem !== 'string' || publicKeyPem.trim() === '') return false;
     try {
       const key = createPublicKey(publicKeyPem);
-      if (key.asymmetricKeyType !== 'ed25519') return false;
+      if (key.asymmetricKeyType !== POP_KEY_TYPE) return false;
       this.#popKeys.set(actorId, key);
       return true;
     } catch {
@@ -241,7 +249,10 @@ export class SessionStore {
   /**
    * يفتح جلسةً لهويةٍ مسجَّلةٍ نشطة. ويُعاد الرمزُ **مرّةً واحدةً هنا** ولا يُخزَّن،
    * فمن أضاعه فتح جلسةً جديدةً ولا يُستعاد.
-   * @param {{ actorId: string }} request
+   * **والحدُّ يُعلِنُ ما يقرأُ** (‏`WL-194`): الفتحُ يقرأُ حقولَ إثباتِ الحيازةِ
+   * المُسطَّحةَ فعلاً عبرَ `#requireOpenPoP`، فتُعلَنُ في العقدِ؛ فحدٌّ يقرأُ ما لا
+   * يُعلِنُ يُغري المُنادي بحذفِه ويَرفضُهُ حينَ يُرسِلُه.
+   * @param {{ actorId: string, popSignature?: string, popTimestamp?: string, popNonce?: string }} request
    * @returns {Promise<{ token: string, sessionId: string, actorId: string, expiresAt: string }>}
    */
   async open(request) {

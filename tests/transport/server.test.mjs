@@ -31,6 +31,7 @@ import {
   TRANSPORT_ERRORS,
   compileCommandRoutes,
   compileRoutes,
+  compileSessionRoute,
   createStateServer,
   matchRoute,
   resolveStaticFile,
@@ -625,4 +626,134 @@ test('كلُّ رموزِ رفضِ الديوانِ لها ترجمةُ حالة
       `رمزُ رفضٍ بلا ترجمةٍ في طبقةِ النقلِ: ${code}`,
     );
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// مسلكُ فتحِ الجلسةِ على السلكِ — `WL-194` (إغلاقُ الدَينِ `D-2`).
+//
+// **علّةُ وجودِ هذه الحالاتِ:** الطبقةُ كانت **بلا مسلكِ مصادقةٍ على السلكِ**، فمن
+// أرادَ رمزَ جلسةٍ استوردَ البوابةَ في عمليّتِه — وذاك عقدٌ داخليٌّ لا سلكٌ. فلمّا
+// صارَ المسلكُ مُشتَقّاً من الوثيقةِ لزِمَ أن **يُقاسَ بحالةٍ ورمزٍ مُفرَدَينِ**، لا
+// بـ`>= 400`: حالةٌ واحدةٌ ورمزٌ واحدٌ لكلِّ حالةٍ.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('مسلكُ فتحِ الجلسةِ مُشتَقٌّ من الوثيقةِ لا مكتوبٌ يداً', () => {
+  const derived = compileSessionRoute({ policy: API_POLICY });
+  assert.equal(derived.id, API_POLICY.wire.sessionEndpoint.id);
+  assert.equal(derived.path, API_POLICY.wire.sessionEndpoint.path);
+  assert.equal(derived.method, 'POST');
+  // ولا يُعلَنُ مسلكُ الفتحِ في `routes`: تلك قراءاتٌ محكومةٌ بجلسةٍ، وهذا بابُها.
+  assert.ok(
+    !API_POLICY.routes.some((route) => route.path === derived.path),
+    'مسلكُ الفتحِ ليس قراءةً محكومةً بجلسةٍ فلا يُعلَنُ فيها',
+  );
+});
+
+test('فتحُ جلسةٍ على السلكِ يُصدِرُ رمزاً يُقرأُ به فعلاً', async () => {
+  const { gateway } = realGateway();
+  await serving({ gateway }, async (base) => {
+    const opened = await fetch(`${base}/state/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actorId: AUDITOR }),
+    });
+    assert.equal(opened.status, 200);
+    const session = /** @type {Record<string, string>} */ (await opened.json());
+    assert.equal(typeof session['token'], 'string');
+    assert.equal(typeof session['sessionId'], 'string');
+    assert.equal(typeof session['expiresAt'], 'string');
+    // **والرمزُ يُقاسُ بنداءٍ لا بشكلِه:** رمزٌ يُصدَرُ ولا يُقرأُ به شيءٌ زينةٌ.
+    const read = await fetch(`${base}/state/agents`, {
+      headers: { authorization: `Bearer ${session['token']}` },
+    });
+    assert.equal(read.status, 200);
+    const body = /** @type {Record<string, unknown>} */ (await read.json());
+    assert.equal(body['status'], 'ok');
+  });
+});
+
+test('فاعلٌ غيرُ مُسجَّلٍ لا تُفتَحُ له جلسةٌ — `403` و`API_IDENTITY_UNVERIFIED`', async () => {
+  const { gateway } = realGateway();
+  await serving({ gateway }, async (base) => {
+    const response = await fetch(`${base}/state/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actorId: 'agent:not-registered' }),
+    });
+    assert.equal(response.status, 403);
+    const body = /** @type {Record<string, unknown>} */ (await response.json());
+    assert.equal(body['code'], 'API_IDENTITY_UNVERIFIED');
+  });
+});
+
+test('جسمٌ غيرُ JSON على مسلكِ الفتحِ يُرَدُّ `400` و`TRANSPORT_BODY_NOT_ALLOWED`', async () => {
+  const { gateway } = realGateway();
+  await serving({ gateway }, async (base) => {
+    for (const body of ['not-json', '[]', JSON.stringify({ actorId: 42 })]) {
+      const response = await fetch(`${base}/state/session`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      assert.equal(response.status, 400, `الجسمُ «${body}» يُرَدُّ بحالةٍ واحدةٍ`);
+      const parsed = /** @type {Record<string, unknown>} */ (await response.json());
+      assert.equal(parsed['code'], TRANSPORT_ERRORS.BODY_NOT_ALLOWED);
+    }
+  });
+});
+
+test('فعلٌ غيرُ `POST` على مسلكِ الفتحِ يُرَدُّ `405`', async () => {
+  const { gateway } = realGateway();
+  await serving({ gateway }, async (base) => {
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const response = await fetch(`${base}/state/session`, { method });
+      assert.equal(response.status, 405);
+      const parsed = /** @type {Record<string, unknown>} */ (await response.json());
+      assert.equal(parsed['code'], TRANSPORT_ERRORS.METHOD_NOT_ALLOWED);
+    }
+  });
+});
+
+test('بوابةٌ لا تُصدِرُ جلساتٍ تُرَدُّ `503` و`TRANSPORT_SESSION_UNSERVED` لا `500`', async () => {
+  const { gateway } = realGateway();
+  // بوابةٌ بلا `openSession`: **غيابُ تابعٍ رفضٌ مُسمّىً** لا عَطَبٌ داخليٌّ ولا
+  // تجاوزٌ صامتٌ إلى قراءةٍ بلا جلسةٍ.
+  const crippled = {
+    call: (/** @type {never} */ request) => gateway.call(request),
+  };
+  await serving({ gateway: crippled }, async (base) => {
+    const response = await fetch(`${base}/state/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actorId: AUDITOR }),
+    });
+    assert.equal(response.status, STATUS_BY_CODE[TRANSPORT_ERRORS.SESSION_UNSERVED]);
+    assert.equal(response.status, 503);
+    const parsed = /** @type {Record<string, unknown>} */ (await response.json());
+    assert.equal(parsed['code'], 'TRANSPORT_SESSION_UNSERVED');
+  });
+});
+
+test('إثباتُ الحيازةِ عندَ الفتحِ يُقرأُ من الجسمِ ويُمرَّرُ كما هو', async () => {
+  const { gateway } = realGateway();
+  /** @type {Record<string, unknown> | null} */
+  let seen = null;
+  const spy = {
+    call: (/** @type {never} */ request) => gateway.call(request),
+    openSession: async (/** @type {Record<string, unknown>} */ request) => {
+      seen = request;
+      return { token: 'tkn', sessionId: 'sid', expiresAt: '2026-01-01T00:00:00.000Z' };
+    },
+  };
+  const pop = { signature: 'sig', timestamp: '2026-01-01T00:00:00.000Z', nonce: 'once' };
+  await serving({ gateway: spy }, async (base) => {
+    const response = await fetch(`${base}/state/session`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ actorId: AUDITOR, pop }),
+    });
+    assert.equal(response.status, 200);
+    await response.json();
+  });
+  assert.deepEqual(seen, { actorId: AUDITOR, pop });
 });

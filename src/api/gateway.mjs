@@ -141,8 +141,19 @@ function codeOf(error) {
  * @property {{ windowSeconds: number, maxCalls: number }} rateLimit
  * @property {{ callEvent: string, refusalEvent: string, sessionOpenedEvent: string, sessionClosedEvent: string, statement: string }} audit
  * @property {readonly string[]} refusalCodes
+ * @property {ApiWireSpec} wire
  * @property {readonly ApiRouteSpec[]} routes
  * @property {ReadonlyArray<{ id: string, statement: string, enforcedBy: string, codes: readonly string[] }>} guarantees
+ */
+
+/**
+ * إعلانُ السلكِ للمستهلِكِ الخارجيِّ — `WL-194`، إغلاقُ `D-2`.
+ * @typedef {object} ApiWireSpec
+ * @property {string} statement
+ * @property {{ id: string, method: 'POST', path: string, purpose: string }} sessionEndpoint مسلكُ فتحِ الجلسةِ: **مصادقةٌ لا كتابةَ بياناتٍ**.
+ * @property {{ file: string, generatedBy: string, purpose: string }} contract موضعُ العقدِ المنشورِ ومَن يُولِّدُه.
+ * @property {string} doorPortEnv متغيِّرُ البيئةِ الذي يُعلِنُ منفَذَ البابِ للمستهلِكِ المُسجَّلِ.
+ * @property {ReadonlyArray<{ id: string, name: string, role: string, publicKeyEnv: string, enrollmentFileEnv: string, purpose: string }>} consumers ومعرِّفُ الفاعلِ **ليس مُعلَناً**: يُصدِرُه السجلُّ عندَ التسجيلِ ويُكتَبُ في ملفِّ التسجيلِ.
  */
 
 /**
@@ -240,6 +251,55 @@ export function loadApiPolicy(options = {}) {
       );
     }
   }
+  // ── تماسكُ إعلانِ السلكِ (`WL-194`) ──
+  // **ومسلكُ الجلسةِ لا يُزاحِمُ مساراً قارئاً:** مسلكانِ بنفسِ العنوانِ يجعلانِ
+  // المطابقةَ تختارُ أحدَهما ويظنُّ قارئُ الوثيقةِ أنّه اختارَ الآخرَ.
+  const sessionPath = parsed.wire.sessionEndpoint.path;
+  for (const route of parsed.routes) {
+    if (route.path === sessionPath) {
+      invalidConfig(
+        `مسلكُ فتحِ الجلسةِ ${sessionPath} مُعلَنٌ أيضاً مساراً قارئاً (${route.id})؛ ومسلكٌ بمعنيَينِ يُخفي أحدَهما.`,
+      );
+    }
+    if (route.id === parsed.wire.sessionEndpoint.id) {
+      invalidConfig(
+        `معرِّفُ مسلكِ الجلسةِ ${route.id} مُعلَنٌ أيضاً لمسارٍ قارئٍ؛ ولا معرِّفانِ لمقصدَينِ.`,
+      );
+    }
+  }
+  /** @type {Set<string>} */
+  const consumerIds = new Set();
+  /** @type {Set<string>} */
+  const consumerNames = new Set();
+  // ومتغيِّراتُ البيئةِ كلُّها في مجموعةٍ واحدةٍ: متغيِّرٌ بمعنيَينِ يجعلُ قيمةً
+  // واحدةً تُقرأُ مفتاحاً هنا ومنفَذاً هناك، وأحدُ القراءتَينِ يصمتُ.
+  /** @type {Map<string, string>} */
+  const envUses = new Map([[parsed.wire.doorPortEnv, 'منفَذُ البابِ']]);
+  for (const consumer of parsed.wire.consumers) {
+    if (consumerIds.has(consumer.id)) {
+      invalidConfig(`المستهلِكُ ${consumer.id} مُعلَنٌ مرّتَينِ؛ ولا مستهلِكانِ بمعرِّفٍ واحدٍ.`);
+    }
+    consumerIds.add(consumer.id);
+    if (consumerNames.has(consumer.name)) {
+      invalidConfig(
+        `الاسمُ ${consumer.name} مُعلَنٌ لمستهلِكَينِ؛ واسمٌ واحدٌ لفاعلَينِ يُفقِدُ القيدَ نسبتَه.`,
+      );
+    }
+    consumerNames.add(consumer.name);
+    for (const [env, use] of [
+      [consumer.publicKeyEnv, `مفتاحُ ${consumer.id}`],
+      [consumer.enrollmentFileEnv, `ملفُّ تسجيلِ ${consumer.id}`],
+    ]) {
+      const taken = envUses.get(/** @type {string} */ (env));
+      if (taken !== undefined) {
+        invalidConfig(
+          `متغيِّرُ البيئةِ ${String(env)} مُعلَنٌ لـ${taken} ولـ${String(use)}؛ ومتغيِّرٌ بمعنيَينِ يُسكِتُ أحدَهما.`,
+        );
+      }
+      envUses.set(/** @type {string} */ (env), /** @type {string} */ (use));
+    }
+  }
+
   for (const guarantee of parsed.guarantees) {
     for (const code of guarantee.codes) {
       if (!listed.has(code)) {
@@ -257,6 +317,15 @@ export function loadApiPolicy(options = {}) {
     rateLimit: Object.freeze({ ...parsed.rateLimit }),
     audit: Object.freeze({ ...parsed.audit }),
     refusalCodes: Object.freeze([...parsed.refusalCodes]),
+    wire: Object.freeze({
+      statement: parsed.wire.statement,
+      sessionEndpoint: Object.freeze({ ...parsed.wire.sessionEndpoint }),
+      contract: Object.freeze({ ...parsed.wire.contract }),
+      doorPortEnv: parsed.wire.doorPortEnv,
+      consumers: Object.freeze(
+        parsed.wire.consumers.map((consumer) => Object.freeze({ ...consumer })),
+      ),
+    }),
     routes: Object.freeze(parsed.routes.map((route) => Object.freeze({ ...route }))),
     guarantees: Object.freeze(
       parsed.guarantees.map((entry) =>
@@ -414,11 +483,29 @@ export class ApiGateway {
 
   /**
    * يفتح جلسةً. هذا هو المدخلُ الوحيدُ للمصادقةِ في هذه الطبقة، وهو نفسُه مُدقَّق.
-   * @param {{ actorId: string }} request
+   *
+   * **وشكلُ الإثباتِ واحدٌ على هذه الحدودِ** (‏`WL-194`): `call` يقبلُ
+   * `pop: { signature, timestamp, nonce }`، فيقبلُه الفتحُ كذلك ويُترجِمُه إلى
+   * حقولِ المخزنِ المُسطَّحةِ. **وحدودٌ تقبلُ شكلَينِ في مسلكٍ وشكلاً في آخرَ
+   * تُنتِجُ رفضاً بسببٍ مُشوَّشٍ**: يُرَدُّ «لا إثباتَ» على مَن أثبتَ بشكلٍ آخرَ.
+   * والحقولُ المُسطَّحةُ تُقبَلُ كما هي إبقاءً على المُنادينَ القائمينَ.
+   * @param {{ actorId: string, pop?: { signature?: string, timestamp?: string, nonce?: string }, popSignature?: string, popTimestamp?: string, popNonce?: string }} request
    * @returns {Promise<{ token: string, sessionId: string, actorId: string, expiresAt: string }>}
    */
   async openSession(request) {
-    return this.#sessions.open(request);
+    const pop = request?.pop;
+    if (pop === undefined || pop === null) return this.#sessions.open(request);
+    // **ولا يُصطنَعُ حقلٌ قيمتُهُ `undefined`**: المخزنُ يقرأُ الحضورَ لا القيمةَ،
+    // فحقلٌ حاضرٌ فارغٌ يُقرأُ إثباتاً ناقصاً لا إثباتاً غائباً، والرفضُ يُشوَّشُ.
+    /** @type {{ actorId: string, popSignature?: string, popTimestamp?: string, popNonce?: string }} */
+    const flat = { actorId: request.actorId };
+    const signature = request.popSignature ?? pop.signature;
+    const timestamp = request.popTimestamp ?? pop.timestamp;
+    const nonce = request.popNonce ?? pop.nonce;
+    if (signature !== undefined) flat.popSignature = signature;
+    if (timestamp !== undefined) flat.popTimestamp = timestamp;
+    if (nonce !== undefined) flat.popNonce = nonce;
+    return this.#sessions.open(flat);
   }
 
   /**

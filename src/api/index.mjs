@@ -13,5 +13,5 @@ export {
   loadApiPolicy,
   DEFAULT_API_CONFIG_DIR,
 } from './gateway.mjs';
-export { SessionStore, SessionError, SESSION_ERRORS } from './session-store.mjs';
+export { SessionStore, SessionError, SESSION_ERRORS, POP_KEY_TYPE } from './session-store.mjs';
 export { RateLimiter, RateLimitError, RATE_LIMIT_ERRORS } from './rate-limiter.mjs';

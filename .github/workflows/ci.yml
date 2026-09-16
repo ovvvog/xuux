@@ -202,6 +202,9 @@ jobs:
       - name: حاجز طبقة الواجهة (M9.02) — لا مسار بلا تخويل معلَن
         run: npm run guard:api
 
+      - name: حاجز عقد الواجهة المنشور (D-2) — لا عقد يفترق عن مولّده ببايت
+        run: npm run guard:api-contract
+
       - name: حاجز طبقة النقل (D-1) — لا مسار على السلك بلا إعلان، ولا سلطة في النقل
         run: npm run guard:transport
 
