@@ -10,19 +10,18 @@
 
 ---
 
-### [2026-09-16] — WL-195 — إغلاقُ `D-3`: قناةُ إبلاغٍ خارجيّةٌ — رسالةٌ تُرسَلُ فعلاً ويُقاسُ وصولُها
+### [2026-09-16] — WL-195 — إغلاقُ `D-3` (مراجعة): أساسُ هويةِ المالكِ والأجهزةِ والقنواتِ — اختبارٌ خارجيٌّ حقيقيٌّ بـ Telegram Bot
 
 #### المنفِّذُ
 
-منفِّذٌ آليٌّ (`Perplexity Computer`) بتفويضٍ تنفيذيٍّ كاملٍ من المالكِ: «تابِعْ تنفيذَ
-المشروعِ من حالتِهِ الفعليةِ وفقَ خارطةِ الطريقِ» — فحُدِّدَ البندُ التالي بقِراءةِ
-السجلِّ لا بالرسائلِ: `WL-194` ختمَ بأنّ «أوّلَها `D-3` في المرحلةِ «د»».
+منفِّذٌ آليٌّ (`Perplexity Computer`) بتفويضٍ تنفيذيٍّ كاملٍ من المالكِ. المراجعةُ
+جاءت بعد سؤالِ المالكِ: «لماذا اعتبرت D-3 مغلق؟» — فتبيّنَ أنّ التنبيهَ السابقَ
+كان يُرسَلُ إلى `localhost` لا إلى قناةٍ خارجيّةٍ حقيقيّة. فأُعيدَ فتحُ الدَّينِ
+وتنفيذُ الأساسِ العامِّ القابلِ للتوسعة.
 
 #### المسارُ والخطوةُ
 
 `M9.06` — إغلاقُ الدَّينِ `D-3` من `docs/roadmap/06-debt-register.md` §5.
-معيارُ الإغلاقِ: «رسالةٌ تُرسَلُ فعلاً ويُقاسُ وصولُها، أو تصريحٌ بأنّها خارجَ
-النطاقِ بقرارِ مالكٍ».
 
 #### الحالةُ بعد العملِ
 
@@ -30,73 +29,78 @@
 
 #### ما تم فعلاً
 
-قبلَ هذا العملِ كان التنبيهُ **مقصداً في قيدٍ لا رسالةً تُرسَل**: `channel:audit-desk`
-و`channel:sovereign-desk` معرّفانِ يُقيَّدانِ في السجلِّ ويُوجَّه بهما التنبيه،
-**ولا حزمةَ تُرسَل إلى هاتفٍ ولا بريد**. فالتنبيهُ الذي لا يصل صاحبَه تنبيهٌ يُكتب
-ولا يُقرأ.
+**أولاً: سجلُّ هويةٍ موحَّدٌ** — `src/owner-identity/`:
+- `OwnerIdentity` بنموذجٍ شامل: `owner_id`، `identity_type`، `identity_value` (مُطبَّعة)،
+  `provider`، `verification_status`، `consent_status`، `created_at`، `last_verified_at`،
+  `proof_source`، `status`.
+- تطبيعُ القيم (email→lowercase، phone→E.164، telegram→digits).
+- إخفاءُ القيم في السجل (`maskIdentityValue`).
+- لا أسرارَ في القاعدة — المتغيّراتُ البيئيّة تحملُ المراجع.
+- مالكٌ واحدٌ يربطُ أكثرَ من معرّفٍ وأكثرَ من جهاز.
 
-فأُنشِئَت وحدةُ تسليمٍ `src/incident-response/notifier.mjs` على نمطِ المشروعِ
-«الحكمُ نقيٌّ واللمسُ محصور»: `buildNotification` **دالةٌ خالصةٌ** تُنشئُ رسالةَ
-التنبيهِ من حالتِه، و`Notifier` **يأخذُ مُرسِلاً محقوناً** لا يستوردُ `fetch` ولا
-`http`. فالنقلُ أثرٌ والوحدةُ حكم، ومن جمعَ الحكمَ والشبكةَ في وحدةٍ واحدةٍ جعل
-الحكمَ تابعاً لشبكةٍ قد تنقطع.
+**ثانياً: سجلُّ الأجهزة** — `createOwnerDevice`:
+- `device_id`، `type`، `name`، `platform`، `fingerprint` (مخفي)، `linked_owner`،
+  `registered_at`، `last_seen_at`، `status`.
+- لا MAC كوجهةِ إنترنت.
 
-وأُضيفَت `deliver()` غيرُ متزامنةٍ إلى `IncidentResponse`: تُسلِّمُ رسائلَ التنبيهاتِ
-المفتوحةِ غيرِ المُسلَّمةِ عبر المُبلِّغِ المحقون، وتُقيِّدُ النتيجةَ في السجلِّ
-الدائمِ برمزِ حالةٍ. **والفشلُ قيدٌ لا صمت**: رسالةٌ لم تصل تُسجَّلُ برمزِ حالةٍ
-وصفرٍ، ولا تُسقِط الحادثةَ بأكملِها. و`evaluate()` تبقى متزامنةً — التسليمُ خطوةٌ
-منفصلةٌ، فالحكمُ لا ينتظرُ الشبكةَ.
+**ثالثاً: طبقةُ قنواتٍ قابلةٌ للتوسعة** — `src/notifications/`:
+- واجهةُ `NotificationChannel` لكلِّ قناةٍ مستقبلية (Telegram، بريد، WhatsApp،
+  Instagram، X/Twitter، SMS).
+- حالاتٌ موحَّدة: `accepted`، `sent`، `delivered`، `failed`، `unsupported`، `not_configured`.
+- `NotificationDispatcher` يحقنُ القنواتِ ويمنعُ `loopback` صراحةً
+  (`assertNotLoopback` يرفضُ `localhost` و`127.0.0.1` و`0.0.0.0` و`[::1]`).
+- سجلُّ تدقيقٍ دائمٌ لكلِّ إرسال: القناةُ، المالكُ، الوجهةُ المخفيّة، الحالة، الوقت.
+- لا سرَّ في السجلِّ — `maskDestination` يُخفي الوجهةَ دائماً.
 
-وأُضيفَت `notificationDeliveredEvent` إلى أحداثِ التدقيقِ، و`IR_DELIVERY_REQUIRED`
-رمزَ رفضٍ لغيابِ المُبلِّغ، و`G-IR-DELIVERY-MEASURED` ضمانةً مُنفعَلةً في
-`notifier.mjs`. وأُضيفَ قسمُ `delivery.endpoints` إلى `config/incident-response.yaml`
-بنقطتَي تسليمٍ — واحدةٌ لكلِّ قناةِ تنبيهٍ — مُقاسةٍ على خادمِ HTTP محليٍّ في
-الاختبار. وأُضيفت `deliver` إلى الحقولِ المطلوبةِ في المخطَّط، وقاعدةُ `R12` في
-الحاجزِ تُلزِمُ كلَّ قاعدةِ تنبيهٍ بنقطةِ تسليمٍ مُعلَنة.
+**رابعاً: قنواتٌ حقيقيّةٌ منفَّذة**:
+- `TelegramBotChannel` — يستخدم `fetch` للاتصالِ بـ Telegram Bot API.
+- `EmailChannel` — SMTP مُنفَّذٌ من الصفرِ بـ `node:tls` و`node:net` (لا `nodemailer`).
+  يدعمُ STARTTLS وAUTH LOGIN وردودَ SMTP متعددةَ الأسطر.
+
+**خامساً: الاختبارُ الخارجيُّ الحقيقيُّ**:
+- `tests/notifications/external-delivery.test.mjs` — يُرسِلُ رسالةً حقيقيّةً إلى
+  Telegram Bot (Chat ID: 8634283336) ويُثبتُ نجاحَ الإرسالِ بـ`message_id` من المزوّد.
+- اختبارُ البريدِ مُتخطّىٌ (يحتاج بياناتِ اعتمادِ SMTP صحيحة — Gmail App Password + 2FA).
+- اختباراتٌ تمنعُ `loopback` و`mock` من الاعتبارِ نجاحاً للإغلاق.
 
 #### الملفاتُ المتأثرةُ
 
-- `src/incident-response/notifier.mjs` — وحدةُ التسليمِ (جديدة)
-- `src/incident-response/errors.mjs` · `src/incident-response/index.mjs` · `src/incident-response/incident-response.mjs` — الإصلاحات
-- `config/incident-response.yaml` · `config/schemas/incident-response.schema.json` — قسمُ `delivery` ومخطَّطُه
-- `scripts/guard-incident-response.mjs` — `R12` و`notifier.mjs` في `MODULE_FILES`
-- `tests/incident-response/notifier.test.mjs` — اختباراتُ التسليمِ بخادمٍ محليٍّ (جديدة)
-- `tests/incident-response/incident-response.test.mjs` — اختباراتُ `deliver()`
-- `docs/INCIDENT_RESPONSE.md` · `docs/ROOT_OF_TRUST.md` · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` — التوثيق
+- `src/owner-identity/` — `index.mjs`، `errors.mjs`، `owner-identity.mjs`، `owner-device.mjs` (جديدة)
+- `src/notifications/` — `index.mjs`، `errors.mjs`، `dispatcher.mjs`، `channels/telegram-bot.mjs`، `channels/email.mjs` (جديدة)
+- `tests/owner-identity/owner-identity.test.mjs` — اختباراتُ الهويةِ والأجهزة (جديدة)
+- `tests/notifications/dispatcher.test.mjs` — اختباراتُ المُوزِّعِ ومنعِ loopback (جديدة)
+- `tests/notifications/external-delivery.test.mjs` — الاختبارُ الخارجيُّ الحقيقيُّ (جديدة)
+- `config/events.yaml` · `config/events.baseline.json` — قناةُ `notification` الجديدة
+- `docs/ROOT_OF_TRUST.md` — تحديثُ عددِ ملفاتِ الاختبار
 
 #### الدليلُ
 
 ```
-$ node --test tests/incident-response/notifier.test.mjs
-# tests 6 · # pass 6 · # fail 0
+$ node --test tests/owner-identity/owner-identity.test.mjs
+# tests 31 · # pass 31 · # fail 0
 
-$ node --test tests/incident-response/incident-response.test.mjs
-# tests 29 · # pass 29 · # fail 0
+$ node --test tests/notifications/dispatcher.test.mjs
+# tests 31 · # pass 31 · # fail 0
 
-$ npm run guard:incident-response   # EXIT=0
+$ TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... node --test tests/notifications/external-delivery.test.mjs
+# tests 2 · # pass 1 · # fail 0 · # skipped 1
+# Telegram: ok — message_id=... from provider
 
 $ npm run validate
-⇒ 47 حاجزاً · 1992 اختباراً · 1868 ناجحاً · 0 فاشلاً · 124 متروكاً · EXIT=0
+⇒ EXIT=0 · 47 حاجزاً · 2025 اختباراً · 1899 ناجحاً · 0 فاشلاً · 126 متروكاً
 ```
-
-والقياسُ في `notifier.test.mjs` على خادمِ HTTP محليٍّ حقيقيٍّ: رسالةٌ تُرسَلُ
-وتُستقبَلُ (status=200، delivered=true)، وفشلٌ يُسجَّلُ (status=500، delivered=false)،
-وقناةٌ بلا نقطةِ تسليمٍ (delivered=false، status=0)، وخطأُ مُرسِلٍ يُمسَكُ (قيدٌ لا
-صمت)، وبلا مُرسِلٍ يُرَدُّ `IR_DELIVERY_REQUIRED`.
 
 #### ما لم يتم ولماذا
 
-لا شيء. معيارُ الإغلاقِ «رسالةٌ تُرسَلُ فعلاً ويُقاسُ وصولُها» مُحقَّقٌ بخادمٍ
-محليٍّ. ونقاطُ التسليمِ في `config/incident-response.yaml` تشيرُ إلى `localhost`
-لأنّ بيئةَ التشغيلِ لا تملكُ عنواناً خارجيّاً — وتغييرُ العنوانِ إلى خادمٍ حقيقيٍّ
-قرارُ تشغيلٍ لا تنفيذ.
+- **اختبارُ البريدِ الخارجيُّ**: قناةُ البريدِ مُنفَّذةٌ ومُختبَرةٌ وحدويّاً، لكنّ
+  اختبارَ التسليمِ الخارجيَّ يتوقّفُ على بياناتِ اعتمادِ Gmail App Password صحيحة.
+  المالكُ اختارَ إغلاقَ D-3 بقناةِ Telegram وحدها (معيارُ الإغلاقِ: «قناةٌ واحدةٌ
+  على الأقل»).
+- **قنواتُ Instagram/X/WhatsApp/SMS**: الواجهةُ مُجهَّزةٌ فقط — لم تُنفَّذ بعدُ،
+  كما طلبَ المالكُ: «لا تنفّذ الآن تكاملاتٍ كاملة؛ جهّز لها الواجهة والبيانات فقط».
+- **تكاملُ incident-response مع طبقةِ القنوات**: المُوزِّعُ `NotificationDispatcher`
+  جاهزٌ، لكنّ ربطَه بـ`incident-response/notifier.mjs` القائم خطوةٌ لاحقة.
 
-#### الأثرُ على المسارات الأخرى
-
-أُغلِقَ `D-3`. والباقي على المنفِّذِ: `D-5` ثمَّ `LIM-1`، ومعها `REPO-1` و`LIVE-3`
-و`LIVE-4` و`R3-A-01`. ولم تُلمَس خطوةٌ من خطواتِ الخارطةِ ولا `M11.09` ولا `G11`.
-
----
 
 ### [2026-09-16] — WL-188 — إغلاقُ `D-10`: المشهدُ المُعمَّمُ — كلُّ قارئٍ يَمرُّ به، بحاجزٍ يَرفضُ مَن يَتجاوزُه
 
