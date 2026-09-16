@@ -7331,8 +7331,9 @@ budgetUnits }`. والحصّةُ مُعلَنةٌ بوحدةِ قياسٍ صحي
 - `tests/tooling/state-read-client.test.mjs` · `tests/tooling/guard-api-contract.test.mjs` · `tests/transport/server.test.mjs` — الشواهدُ
 - `docs/API_CONTRACT.json` · `docs/EXTERNAL_CONSUMER.md` · `docs/API_LAYER.md` · `docs/TRANSPORT.md` · `docs/ROOT_OF_TRUST.md` · `docs/READINESS_REPORT.md` · `docs/roadmap/06-debt-register.md` · `PRODUCT_BUILD_PLAN.md` · `PROJECT_STATUS.md` · `.prettierignore` — التوثيقُ ونطاقُ المنسّقِ
 
-- **الـ commit:** على الفرعِ `feat/wl-194-external-read-consumer` من `main` عندَ
-  `cbc9ae77` (‏آخِرُ اندماجٍ: طلبُ الدمجِ `#83` — `WL-193`).
+- **الـ commit:** `b3273575` — `feat(transport): مستهلِكٌ خارجيٌّ يقرأُ على السلكِ بعقدٍ منشورٍ (WL-194)`
+  على الفرعِ `feat/wl-194-external-read-consumer` من `main` عندَ `cbc9ae77`
+  (‏آخِرُ اندماجٍ: طلبُ الدمجِ `#83` — `WL-193`).
 - **الدليلُ:**
 
 ```
