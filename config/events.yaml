@@ -848,3 +848,43 @@ channels:
       - type: retention.planned
         version: 1
         required: [now, targets]
+
+  # `D-4`: الجدولةُ قناةٌ بنفسِها لا حدثٌ في قناةِ الاستعادةِ ولا في قناةِ
+  # التقاريرِ. والسببُ أنّ ما يُقرأُ هنا سؤالٌ واحدٌ: «هل عملت الدولةُ في غيابِ
+  # الناسِ، ومتى، وبأمرِ مَن؟». وتفريقُ هذا على قنواتِ الأعمالِ يجعلُ الجوابَ
+  # يُجمَعُ من ثلاثةِ مواضعَ فلا يُسأَلُ أصلاً.
+  - id: scheduler
+    subject: 'الجدولةُ: ما أُطلِقَ بلا نداءٍ يدويٍّ، ومتى، وبقرارِ مَن، وما فاتَ'
+    classification: internal
+    producers:
+      - role:king
+      - role:operator
+    consumers:
+      - role:king
+      - role:auditor
+      - role:minister
+      - role:operator
+    version: 1
+    types:
+      - type: scheduler.tick
+        version: 1
+        required: [dispatched, missed, now, refused]
+      # النبضةُ الفاشلةُ حدثٌ مُعلَنٌ لا استثناءٌ يُطوى في سجلٍّ: مُجدوِلٌ يفشلُ
+      # صامتاً يُقرأُ «لم يستحقَّ شيءٌ» وهو أخطرُ من توقّفٍ ظاهرٍ.
+      - type: scheduler.tick.failed
+        version: 1
+        required: [message]
+      - type: scheduler.job.dispatched
+        version: 1
+        required: [jobId, phase, seq, slotAt]
+      - type: scheduler.job.completed
+        version: 1
+        required: [jobId, phase, seq, slotAt]
+      - type: scheduler.job.failed
+        version: 1
+        required: [jobId, phase, seq, slotAt]
+      # الشقُّ الفائتُ يُعلَنُ ولا يُعوَّضُ: تشغيلُه متأخّراً يكتبُ في الدفترِ
+      # واقعةً تُقرأُ كأنّها وقعت في موعدِها، وذاك تزييفُ سجلٍّ لا استئنافُ خدمةٍ.
+      - type: scheduler.slot.missed
+        version: 1
+        required: [jobId, slotAt]

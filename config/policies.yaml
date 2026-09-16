@@ -117,6 +117,17 @@ actions:
   - id: write-data
     description: الكتابة في أصل بيانات مفهرس عبر بوابة الوصول.
     sensitive: true
+  # `D-4`: إطلاقُ عملٍ مُجدوَلٍ فعلٌ محكومٌ بنفسِه. فمُجدوِلٌ يُطلِقُ بلا قرارٍ
+  # يصيرُ مساراً يعملُ في غيابِ الناسِ بلا نسبةٍ ولا سجلٍّ — والقرارُ يُنسَبُ إلى
+  # الهويةِ التي شُغِّلَ بها المُجدوِلُ لا إلى «النظامِ» بلا فاعلٍ.
+  #
+  # **وهو مقصورٌ على الإطلاقِ لا على ما يفعلُه العملُ داخلَه:** كلُّ عملٍ يبقى
+  # محكوماً ببوّاباتِه (تقريرٌ يقرأُ بأبوابِه، وتمرينٌ يُجري بأبوابِه). والفعلُ
+  # **دونَ العتبةِ السياديّةِ بالقصدِ**: ما فوقَها لا يُجدوَلُ أصلاً لأنّ
+  # المُجدوِلَ لا يحملُ أمراً ملكيّاً — وذاك حدٌّ مُعلَنٌ في `docs/SCHEDULING.md`.
+  - id: run-scheduled-job
+    description: إطلاق عمل مُجدوَل في موعده المُعلَن (تقرير أو تمرين).
+    sensitive: true
 
 policies:
   # ── الممنوع منعاً مطلقاً: أولوية 1000 فلا سماح يعلو عليه ──
@@ -465,6 +476,20 @@ policies:
       roles: ['role:minister', 'role:auditor']
     actions: ['reclassify-data']
     resources: ['data:*']
+
+  - id: pol:scheduler-dispatch-roles
+    name: إطلاق الأعمال المُجدوَلة للمشغّل والملك
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: الجدولة فعلُ تشغيلٍ لا فعلُ وكيل؛ ووكيلٌ يُجدوِل عملاً يُشغّل نفسه بمواعيد يختارها.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:king', 'role:operator']
+    actions: ['run-scheduled-job']
+    resources: ['job:*']
 
   - id: pol:submit-case-to-court
     name: رفع القضايا إلى المحكمة

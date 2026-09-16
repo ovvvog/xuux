@@ -82,7 +82,7 @@
 
 ```bash
 npm ci
-npm run validate        # سبع وأربعون بوابة ثم كل الاختبارات
+npm run validate        # خمسة وأربعون حاجزاً (مقيسةً من `package.json`) ثم كل الاختبارات
 npm run readiness:report --silent
 npm run emergency:drill # سلسلةُ الطوارئِ الخمسةُ بأمرٍ واحدٍ
 npm run gen:sbom && npm run audit:check

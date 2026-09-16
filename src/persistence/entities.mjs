@@ -625,6 +625,85 @@ export const ERASURE_RECORD_SPEC = Object.freeze({
 });
 
 /**
+ * دفترُ الإطلاقاتِ المُجدوَلةِ — إغلاقُ الدَينِ `D-4` (‏`WL-191`).
+ *
+ * جدولٌ **يُكتَبُ فيه ولا يُعدَّلُ**، وهو موضعُ الحقيقةِ لموعدِ كلِّ عملٍ دوريٍّ
+ * **وللقفلِ** الذي يمنعُ إطلاقَ الشقِّ نفسِه مرّتَينِ. والتفرّدُ على
+ * `[jobId, slotAt, phase]` هو القفلُ نفسُه لا فحصٌ في الكودِ: شرطٌ في الكودِ
+ * («اقرأْ ثمّ اكتبْ») يمرُّ منه سباقٌ بين نسختَينِ من المُجدوِلِ بلا أثرٍ يُقرأُ.
+ *
+ * و`slotAt` **مُعرِّفُ شقٍّ** لا لحظةُ حدثٍ: يُحسَبُ على شبكةٍ ثابتةٍ من مبدأِ
+ * الزمنِ فيكونُ لكلِّ شقٍّ اسمٌ واحدٌ تعرفُه كلُّ نسخةٍ. وهو نصٌّ لا عمودٌ زمنيٌّ
+ * لأنّ التجزئةَ تُحسَبُ عليه — نفسُ سببِ دفترَي النسبِ والمحوِ.
+ */
+/** @type {EntitySpec} */
+export const SCHEDULED_RUN_SPEC = Object.freeze({
+  name: 'scheduled_runs',
+  table: 'state.scheduled_runs',
+  fields: /** @type {Readonly<Record<string, FieldSpec>>} */ (
+    Object.freeze({
+      id: { column: 'id', type: 'string', required: true, maxLength: 128 },
+      jobId: { column: 'job_id', type: 'string', required: true, maxLength: 64 },
+      slotAt: { column: 'slot_at', type: 'string', required: true, maxLength: 40 },
+      phase: {
+        column: 'phase',
+        type: 'enum',
+        required: true,
+        values: Object.freeze(['dispatched', 'completed', 'failed']),
+      },
+      actorId: { column: 'actor_id', type: 'string', required: true, maxLength: 128 },
+      decisionId: { column: 'decision_id', type: 'string', required: true, maxLength: 128 },
+      detail: { column: 'detail', type: 'json', required: true },
+      seq: { column: 'seq', type: 'integer', required: true },
+      recordedAt: { column: 'recorded_at', type: 'string', required: true, maxLength: 40 },
+      prevHash: { column: 'prev_hash', type: 'string', required: true, maxLength: 64 },
+      hash: { column: 'hash', type: 'string', required: true, maxLength: 64 },
+      ...MANAGED,
+    })
+  ),
+  unique: Object.freeze([
+    Object.freeze(['hash']),
+    Object.freeze(['seq']),
+    Object.freeze(['jobId', 'slotAt', 'phase']),
+  ]),
+  filterable: Object.freeze(['jobId', 'phase', 'slotAt']),
+  invariants: Object.freeze([
+    {
+      code: 'SCHEDULED_RUN_SEQ_POSITIVE',
+      message: 'التسلسلُ يبدأُ من 1: تسلسلٌ صفريٌّ أو سالبٌ لا موضعَ له في سلسلةٍ.',
+      /** @param {EntityRecord} record */
+      check: (record) => Number(record['seq']) >= 1,
+    },
+    {
+      code: 'SCHEDULED_RUN_GENESIS_IS_FIRST',
+      message:
+        'الواقعةُ الأولى وحدَها تحملُ `genesis`، وما بعدَها يحملُ تجزئةَ ما قبلَه؛ وإلا صارت كلُّ واقعةٍ بدايةً جديدةً فلا تُكشَفُ ثغرةٌ.',
+      /** @param {EntityRecord} record */
+      check: (record) => (Number(record['seq']) === 1) === (record['prevHash'] === 'genesis'),
+    },
+    {
+      code: 'SCHEDULED_RUN_SLOT_IS_ISO',
+      message:
+        'مُعرِّفُ الشقِّ نصُّ ISO بدقّةِ الميلي ثانيةِ؛ ونصٌّ حرٌّ هنا يجعلُ القفلَ يُكتَبُ بصيغتَينِ فيُفتَحُ الشقُّ مرّتَينِ.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        typeof record['slotAt'] === 'string' &&
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record['slotAt']),
+    },
+    {
+      code: 'SCHEDULED_RUN_DETAIL_IS_OBJECT',
+      message:
+        'التفصيلُ كائنٌ: مصفوفةٌ أو نصٌّ حرٌّ هنا يجعلُ الواقعةَ غيرَ مقروءةٍ آليّاً، والتجزئةَ تعتمدُ ترتيبَ مفاتيحِه المُرتَّبَ.',
+      /** @param {EntityRecord} record */
+      check: (record) =>
+        typeof record['detail'] === 'object' &&
+        record['detail'] !== null &&
+        !Array.isArray(record['detail']),
+    },
+  ]),
+});
+
+/**
  * رسائلُ قنوات الأحداث — `M7.07`.
  *
  * جدولٌ **يُكتب فيه ولا يُعدَّل**، وسلسلةُ التجزئة فيه **لكل قناة على حدة**:
@@ -2184,6 +2263,7 @@ export const ENTITY_SPECS = Object.freeze({
   classification_approvals: CLASSIFICATION_APPROVAL_SPEC,
   data_lineage: DATA_LINEAGE_SPEC,
   erasure_records: ERASURE_RECORD_SPEC,
+  scheduled_runs: SCHEDULED_RUN_SPEC,
   event_messages: EVENT_MESSAGE_SPEC,
   event_offsets: EVENT_OFFSET_SPEC,
   cases: CASE_SPEC,

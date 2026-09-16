@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/schedule.schema.json",
+  "title": "جدولة الأعمال الدورية",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "tick", "jobs"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "tick": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["everyMinutes", "maxJobsPerTick"],
+      "properties": {
+        "everyMinutes": { "type": "integer", "minimum": 1, "maximum": 1440 },
+        "maxJobsPerTick": { "type": "integer", "minimum": 1, "maximum": 32 }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "subject", "kind", "cadence", "actorRole", "performs"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^job:[a-z0-9-]+$" },
+          "subject": { "type": "string", "minLength": 3 },
+          "kind": { "type": "string", "enum": ["report", "drill"] },
+          "cadence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["everyHours", "graceHours"],
+            "properties": {
+              "everyHours": { "type": "integer", "minimum": 1, "maximum": 8760 },
+              "graceHours": { "type": "integer", "minimum": 0, "maximum": 8760 }
+            }
+          },
+          "actorRole": { "type": "string", "pattern": "^role:[a-z-]+$" },
+          "performs": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

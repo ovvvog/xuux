@@ -42,6 +42,7 @@ import {
   FEDERATION_REFUSAL_SPEC,
   FEDERATION_REGISTER_SPEC,
   ROYAL_REPORT_SPEC,
+  SCHEDULED_RUN_SPEC,
   LAW_SPEC,
   MEMORY_SPEC,
   MODEL_SPEC,
@@ -69,6 +70,10 @@ export function createClientRepositories(client) {
       // دفتر شواهد المحو داخل المعاملة نفسها (`M7.06`): شاهدٌ يُكتب في وصلةٍ
       // أخرى يبقى لو تراجعت معاملةُ المحو — فتشهد الدولة على محوٍ لم يقع.
       erasureRecords: createPostgresRepository(client, ERASURE_RECORD_SPEC),
+      // دفترُ الإطلاقاتِ المُجدوَلةِ داخلَ المعاملةِ نفسِها (‏`D-4`): حجزُ الشقِّ
+      // يُكتَبُ في وصلةٍ أخرى يبقى لو تراجعت معاملةُ العملِ — فيُقرأُ الشقُّ
+      // محجوزاً لعملٍ لم يقعْ فلا يُعادُ ولا يُعلَنُ فائتاً.
+      scheduledRuns: createPostgresRepository(client, SCHEDULED_RUN_SPEC),
       // رسائلُ القنوات ومواضعُ قراءتها داخل المعاملة نفسها (`M7.07`): رسالةٌ
       // تُنشر في وصلةٍ أخرى تبقى لو تراجعت معاملةُ فعلها — فتُعلِم القناةُ بما
       // لم يقع، وموضعٌ يُثبّت خارجها يُقرّ بمعالجةٍ تراجعت.
