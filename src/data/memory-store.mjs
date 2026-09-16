@@ -9,6 +9,11 @@ import {
   loadMemoryPolicy,
   storedBytesOf,
 } from './memory-limits.mjs';
+import {
+  PURGE_DATA_ACTION,
+  assertRoyalCommandForPurge,
+  loadPurgeAuthority,
+} from './purge-authority.mjs';
 
 // الأنواع المستوردة تُكتب بصيغة `import(...)` مباشرة في مواضعها ولا تُسمّى بأسماء
 // محلية: هذه الوحدة تُعاد تصديرها مع فهرس البيانات في src/data/index.mjs، وتسمية
@@ -95,7 +100,7 @@ export class AgentMemoryStore {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MEMORY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null, encryptor?: import('./encryption.mjs').DataEncryptor | null, policy?: import('./memory-limits.mjs').MemoryPolicy | null, quarantine?: { report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null }} [deps]
+   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null, encryptor?: import('./encryption.mjs').DataEncryptor | null, policy?: import('./memory-limits.mjs').MemoryPolicy | null, quarantine?: { report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, authorizer?: { authorize: (request: import('../policy/model.mjs').PolicyRequest, measurement?: { measured?: Record<string, unknown> }) => Promise<{ decision: { allowed: boolean, code: string, reason: string }, token: string | null }>, verify: (token: string | undefined, expected: { actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }) => unknown, identityGate?: unknown } | null, purgeAuthority?: import('./purge-authority.mjs').PurgeAuthority | null }} [deps]
    */
   constructor({
     catalog,
@@ -107,6 +112,8 @@ export class AgentMemoryStore {
     encryptor = null,
     policy = null,
     quarantine = null,
+    authorizer = null,
+    purgeAuthority = null,
   } = {}) {
     if (!catalog || !log || !repository) throw new Error('MEMORY_DEPENDENCY_MISSING');
     this.catalog = catalog;
@@ -135,6 +142,20 @@ export class AgentMemoryStore {
      * @type {import('./memory-limits.mjs').MemoryPolicy}
      */
     this.policy = policy ?? loadMemoryPolicy();
+    /**
+     * نقطةُ التفويضِ للتطهيرِ المحكومِ (‏`LIM-3`). اختياريّةٌ في **التركيبِ** لا
+     * في الفعلِ: مخزنٌ بلا نقطةِ تفويضٍ **يرفضُ** التطهيرَ برمزٍ مُسمّىً ولا
+     * يمحو بنصِّ دورٍ يُرسلُه المُنادي — وهو العيبُ المُغلَقُ في `WL-190`.
+     * @type {{ authorize: (request: import('../policy/model.mjs').PolicyRequest, measurement?: { measured?: Record<string, unknown> }) => Promise<{ decision: { allowed: boolean, code: string, reason: string }, token: string | null }>, verify: (token: string | undefined, expected: { actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }) => unknown, identityGate?: unknown } | null}
+     */
+    this.authorizer = authorizer;
+    /**
+     * عتبةُ `purge-data` كما تُقرأُ من `config/royal-authority.yaml`. تُحمَّلُ عند
+     * أوّلِ تطهيرٍ إن لم تُمرَّرْ، ولا تُثبَّتُ ثابتاً في الكودِ: العتبةُ بياناتٌ
+     * سياديّةٌ، ونسخةٌ منها في الكودِ تفترقُ عن أصلِها بلا أن يُقال.
+     * @type {import('./purge-authority.mjs').PurgeAuthority | null}
+     */
+    this.purgeAuthority = purgeAuthority;
     /**
      * السقف العالمي: يبقى قابلاً للتضييق في التركيب (‏`limits.maxEntries`) لأن
      * حجم النشر يختلف عن حجم الاختبار، ولا يبقى **بديلاً** عن حصّة الوكيل.
@@ -573,10 +594,18 @@ export class AgentMemoryStore {
    *
    * **حدٌّ معلَن:** عقد البيانات المقابل يبقى في الفهرس، ومحوه مع دورة الاحتفاظ
    * الكاملة عملُ `M7.06`؛ وهذا المطهِّر يفرض **الانتهاء** لا الاحتفاظ كلّه.
-   * @param {{ actor: import('../policy/model.mjs').PolicyActor, now?: Date }} request
+   *
+   * **وما تغيّر في `WL-190` إغلاقاً للدَينِ `LIM-3`:** كان هذا المسارُ يحذفُ
+   * الصفوفَ فعلاً وحارسُه الوحيدُ `policy.isSweeper(actor.role)` — نصُّ دورٍ
+   * يُرسلُه المُنادي — بلا بوابةِ هويةٍ ولا نداءِ تفويضٍ ولا أمرٍ ملكيٍّ، مع أنّ
+   * `purge-data` فوقَ العتبةِ السياديّةِ. فكان **مسارَ محوٍ ثانياً** بقيَ مفتوحاً
+   * بعدَ أن أُغلِقَ الأوّلُ في `R6-A-01`. فصارَ الدورُ **أهليّةً** والسلطةُ قرارَ
+   * نقطةِ التفويضِ مع أمرٍ ملكيٍّ بمعرِّفِه وملخّصِه، والتذكرةُ تُستهلَكُ **قبلَ
+   * أوّلِ حذفٍ** لا بعدَه.
+   * @param {{ actor: import('../policy/model.mjs').PolicyActor, now?: Date, royalCommand?: { id: string, digest: string } }} request
    * @returns {Promise<string[]>}
    */
-  async sweepExpired({ actor, now = new Date() }) {
+  async sweepExpired({ actor, now = new Date(), royalCommand }) {
     if (actor === undefined || typeof actor.role !== 'string') {
       throw new Error('MEMORY_ACTOR_REQUIRED');
     }
@@ -587,6 +616,10 @@ export class AgentMemoryStore {
         { role: actor.role },
       );
     }
+    await this.#authorizeSweep({
+      actor,
+      ...(royalCommand === undefined ? {} : { royalCommand }),
+    });
     const rows = await this.repository.list({});
     /** @type {string[]} */
     const purged = [];
@@ -602,5 +635,89 @@ export class AgentMemoryStore {
       purged.push(id);
     }
     return purged;
+  }
+
+  /**
+   * سلطةُ التطهيرِ (‏`LIM-3`، `WL-190`): أمرٌ ملكيٌّ فوقَ الأهليّةِ، ثمّ قرارُ
+   * نقطةِ تفويضٍ موصولةٍ ببوابةِ هويةٍ، ثمّ استهلاكُ التذكرةِ — كلُّ ذلك **قبلَ**
+   * أوّلِ حذفٍ. وعقدُه نفسُ عقدِ `RetentionCycle` كي لا يكونَ في الدولةِ مسارا
+   * محوٍ بعقدَينِ مختلفَينِ.
+   * @param {{ actor: import('../policy/model.mjs').PolicyActor, royalCommand?: { id: string, digest: string } }} request
+   * @returns {Promise<void>}
+   */
+  async #authorizeSweep({ actor, royalCommand }) {
+    const authority = this.purgeAuthority ?? loadPurgeAuthority();
+    this.purgeAuthority = authority;
+    // الرفضُ المُسمّى قبلَ نداءِ التفويضِ: الدورُ أهليّةٌ لا سلطةٌ، فمن جاءَ بدورٍ
+    // مأذونٍ وبلا أمرٍ ملكيٍّ يقرأُ سببَ رفضِه باسمِه لا رمزَ سياسةٍ عامّاً.
+    const bound = assertRoyalCommandForPurge({
+      authority,
+      role: actor.role,
+      sweeperRoles: this.policy.expiry.sweeperRoles,
+      ...(royalCommand === undefined ? {} : { royalCommand }),
+    });
+    if (this.authorizer === null || typeof this.authorizer.authorize !== 'function') {
+      throw new MemoryLimitError(
+        MEMORY_LIMIT_ERRORS.PURGE_AUTHORIZER_REQUIRED,
+        `التطهيرُ فعلٌ محكومٌ («${PURGE_DATA_ACTION}») فوقَ العتبةِ السياديّةِ، ولم تُمرَّر نقطةُ تفويضٍ؛ ومحوٌ يقعُ بتركيبٍ صامتٍ هو تصعيدُ صلاحيةٍ لا تطهيرُ منتهياتٍ.`,
+        { action: PURGE_DATA_ACTION, role: actor.role },
+      );
+    }
+    if (
+      this.authorizer.identityGate === null ||
+      this.authorizer.identityGate === undefined ||
+      typeof (/** @type {{ verify?: unknown }} */ (this.authorizer.identityGate).verify) !==
+        'function'
+    ) {
+      throw new MemoryLimitError(
+        MEMORY_LIMIT_ERRORS.PURGE_AUTHORIZER_REQUIRED,
+        'نقطةُ التفويضِ الممرَّرةُ بلا بوابةِ هويةٍ موصولةٍ؛ فتقبلُ الفاعلَ كما وصفَ نفسَه، والمحوُ لا يقعُ على وصفٍ يُرسلُه المُنادي.',
+        { action: PURGE_DATA_ACTION, role: actor.role },
+      );
+    }
+    const { decision, token } = await this.authorizer.authorize({
+      actor: {
+        id: String(actor.id),
+        role: actor.role,
+        kind: /** @type {import('../policy/model.mjs').ActorKind} */ (
+          typeof actor.kind === 'string' ? actor.kind : 'human'
+        ),
+        state: typeof actor.state === 'string' ? actor.state : 'active',
+      },
+      action: PURGE_DATA_ACTION,
+      resource: { type: 'data', id: 'memories', classification: 'secret' },
+      context: { reason: 'retention' },
+      ...(bound === null ? {} : { royalCommandId: bound.id, royalCommandDigest: bound.digest }),
+    });
+    if (!decision.allowed) {
+      throw new MemoryLimitError(
+        MEMORY_LIMIT_ERRORS.PURGE_NOT_AUTHORIZED,
+        `نقطةُ التفويضِ رفضت التطهيرَ برمز ${decision.code}: ${decision.reason}`,
+        { action: PURGE_DATA_ACTION, code: decision.code },
+      );
+    }
+    // التذكرةُ تُستهلَكُ قبلَ أوّلِ حذفٍ: قرارٌ لا تُستهلَكُ تذكرتُه يبقى قابلاً
+    // لإعادةِ الاستعمالِ على تطهيرٍ ثانٍ لم يُقرَّر.
+    try {
+      this.authorizer.verify(token ?? undefined, {
+        actorId: String(actor.id),
+        action: PURGE_DATA_ACTION,
+        // مفتاحُ المورد يُشتقُّ كما تشتقُّه نقطةُ الإنفاذِ من الطلبِ
+        // (`<type>:<id>`)؛ ومفتاحٌ يُكتَبُ بيدٍ مخالفاً يُسقِطُ التحقّقَ برمز
+        // `AUTHORIZATION_DECISION_MISMATCH` فيبدو التطهيرُ مرفوضاً لسببٍ آخرَ.
+        resourceKey: 'data:memories',
+        ...(bound === null ? {} : { royalCommandId: bound.id, royalCommandDigest: bound.digest }),
+      });
+    } catch (error) {
+      throw new MemoryLimitError(
+        MEMORY_LIMIT_ERRORS.PURGE_NOT_AUTHORIZED,
+        `تذكرةُ قرارِ التطهيرِ غيرُ مقبولةٍ: ${error instanceof Error ? error.message : String(error)}`,
+        { action: PURGE_DATA_ACTION },
+      );
+    }
+    this.log.append('memory.sweep.authorized', String(actor.id), {
+      action: PURGE_DATA_ACTION,
+      resourceKey: 'data:memories',
+    });
   }
 }

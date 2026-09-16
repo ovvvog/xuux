@@ -745,6 +745,11 @@ export function createRegistries({
       // الحجر يصل المخزن كما يصل سجل النماذج: تكرارُ محاولةِ عبورِ حدّ وكيلٍ
       // إلى آخر إشارةٌ تُرفع لا رفضٌ يُعدّ في صمت (M7.05).
       quarantine,
+      // ونقطةُ التفويضِ تصلُ المطهِّرَ كما تصلُ دورةَ الاحتفاظِ (‏`LIM-3`،
+      // `WL-190`): `sweepExpired` يحذفُ صفوفاً فعلاً، وكان حارسُه الوحيدُ نصَّ
+      // دورٍ يُرسلُه المُنادي — فكان مسارَ محوٍ ثانياً لا تحكمُه العتبةُ
+      // السياديّةُ. وتركُها `null` لا يفتحُ الباب: التطهيرُ يُرفَض برمزٍ مُسمّىً.
+      ...(enforcementPoint === null ? {} : { authorizer: enforcementPoint }),
       ...(memoryPolicy === null ? {} : { policy: memoryPolicy }),
       ...(limits.maxEntries === undefined ? {} : { maxEntries: limits.maxEntries }),
     }),

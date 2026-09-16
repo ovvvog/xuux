@@ -58,6 +58,11 @@ export const MEMORY_LIMIT_ERRORS = Object.freeze({
   ISOLATION_REFUSED: 'MEMORY_ISOLATION_REFUSED',
   EXPIRED: 'MEMORY_EXPIRED',
   SWEEP_REFUSED: 'MEMORY_SWEEP_REFUSED',
+  // `LIM-3`: رمزانِ للتطهيرِ المحكومِ. الأوّلُ للتركيبِ الناقصِ (‏نقطةُ تفويضٍ
+  // غائبةٌ أو بلا بوابةِ هويةٍ)، والثاني لقرارٍ رفضَ. وتركُهما بلا اسمَينِ يجعلُ
+  // كلَّ رفضٍ يُقرأُ «رفضَ الدورُ» وهو ليس السببَ.
+  PURGE_AUTHORIZER_REQUIRED: 'MEMORY_PURGE_AUTHORIZER_REQUIRED',
+  PURGE_NOT_AUTHORIZED: 'MEMORY_PURGE_NOT_AUTHORIZED',
 });
 
 /** خطأ حدٍّ مُسمّى: الرمز للأتمتة والنص لمن يقرأ الرفض. */
@@ -180,6 +185,14 @@ export class MemoryPolicy {
 
   /**
    * هل يجوز لهذا الدور تشغيل المطهِّر؟ وكيلٌ يطهّر يمحو أثره بنفسه.
+   *
+   * **حدٌّ مُعلَنٌ في موضعِ القراءةِ (‏`LIM-3`، `WL-190`):** هذه الدالّةُ تقيسُ
+   * **أهليّةً لا سلطةً**. صدقُها يعني «يجوزُ لهذا الدورِ أن يُشغِّلَ أداةَ
+   * المحوِ»، **ولا يعني** أنّ المحوَ يقعُ بقرارِه: الفعلُ `purge-data` مُعلَنٌ
+   * فوقَ العتبةِ السياديّةِ في `config/royal-authority.yaml` (‏`delegable: false`)
+   * فلا يبلغُها `role:operator` ولا غيرُه بدورِه، ويلزمُ أمرٌ ملكيٌّ لكلِّ محوٍ —
+   * ويُفرَضُ ذلك في `assertRoyalCommandForPurge` (‏`./purge-authority.mjs`).
+   * فمن جعلَ صدقَ هذه الدالّةِ إذناً بالحذفِ أعادَ العيبَ الذي أُغلق.
    * @param {string} role
    * @returns {boolean}
    */

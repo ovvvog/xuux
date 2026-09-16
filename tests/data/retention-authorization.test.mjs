@@ -27,6 +27,8 @@ import {
   DataAccessGate,
   DataCatalog,
   ErasureLedger,
+  MEMORY_LIMIT_ERRORS,
+  PURGE_AUTHORITY_ERRORS,
   RETENTION_CYCLE_ERRORS,
   RetentionCycle,
   loadClassificationLattice,
@@ -156,6 +158,9 @@ function setup(options = {}) {
     repository: memories,
     accessGate,
     encryptor: fixture.encryptor,
+    // `LIM-3`: نقطةُ التفويضِ تصلُ المطهِّرَ كما تصلُ الدورةَ. وقبلَ `WL-190` لم
+    // تكن تصلُه أصلاً، فكان `sweepExpired` يحذفُ بنصِّ دورٍ يُرسلُه المُنادي.
+    ...(withAuthorizer ? { authorizer } : {}),
   });
   const erasureRecords = createMemoryRepository(ERASURE_RECORD_SPEC);
   const erasureLedger = new ErasureLedger({ log, repository: erasureRecords });
@@ -173,8 +178,7 @@ function setup(options = {}) {
       }),
     },
   });
-  void memory;
-  return { retention, memories, authorizeCalls, gate, log };
+  return { retention, memory, memories, authorizeCalls, gate, log };
 }
 
 /**
@@ -439,4 +443,92 @@ test('تذكرةُ القرارِ تُستهلَكُ مرّةً واحدةً: ل
     royalCommand: ROYAL,
   });
   assert.equal((await memories.list({})).length, 0);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `LIM-3` (‏`WL-190`): **مسارُ المحوِ الثاني**. أُغلِقَ في `R6-A-01` مسارُ
+// `RetentionCycle`، وبقيَ `AgentMemoryStore.sweepExpired` يحذفُ صفوفاً فعلاً
+// (`repository.remove`) وحارسُه الوحيدُ `policy.isSweeper(actor.role)` — نصُّ دورٍ
+// يُرسلُه المُنادي. فكان `role:operator` مُعلَناً في أدوارِ المطهِّرِ ومأذوناً في
+// `pol:purge-data-sweeper-roles` **ولا يبلغُ العتبةَ السياديّةَ**، ومع ذلك يمحو.
+// والمقيسُ أدناه أربعةُ أشياءَ لا يُغني بعضُها عن بعضٍ: أنّ الأهليّةَ وحدَها لا
+// تمحو، وأنّ الرفضَ يقعُ **بصفرِ نداءاتِ تفويضٍ** (فرفضٌ متأخّرٌ سببُه آخرُ)،
+// وأنّ التركيبَ الناقصَ يُرفَض لا يُمرَّر، وأنّ المسارَ المأذونَ يمحو فعلاً بنداءِ
+// تفويضٍ **مقيسٍ**.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** @param {string} [role] */
+function sweeper(role = 'role:operator') {
+  return /** @type {any} */ ({ id: 'operator:root', role, kind: 'human', state: 'active' });
+}
+
+const SWEEPER_REGISTERED = [{ id: 'operator:root', role: 'role:operator' }];
+
+test('مطهِّرُ الذاكرةِ يمحو بأمرٍ ملكيٍّ وبنداءِ تفويضٍ مقيسٍ — `LIM-3`', async () => {
+  const { memory, memories, authorizeCalls } = setup({ registered: SWEEPER_REGISTERED });
+  await expiredMemory(memories, 'mem:one');
+  await expiredMemory(memories, 'mem:two');
+  const purged = await memory.sweepExpired({ actor: sweeper(), royalCommand: ROYAL });
+  assert.equal(purged.length, 2, 'المسارُ المأذونُ يمحو فعلاً لا يرفضُ كلَّ شيءٍ');
+  assert.equal(await memories.count(), 0);
+  const purgeCalls = authorizeCalls.filter((call) => call.action === 'purge-data');
+  assert.ok(purgeCalls.length > 0, 'نداءُ التفويضِ وقعَ فعلاً — وكان صفراً قبلَ الإصلاح');
+  assert.equal(purgeCalls[0]?.actorId, 'operator:root');
+});
+
+test('دورٌ مأذونٌ بلا أمرٍ ملكيٍّ لا يبلغُ العتبةَ: أهليّةٌ لا سلطةٌ', async () => {
+  const { memory, memories, authorizeCalls } = setup({ registered: SWEEPER_REGISTERED });
+  await expiredMemory(memories, 'mem:one');
+  await assert.rejects(
+    () => memory.sweepExpired({ actor: sweeper() }),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes(PURGE_AUTHORITY_ERRORS.ROLE_NOT_AUTHORITY) &&
+      error.message.includes('purge-data'),
+  );
+  assert.equal(await memories.count(), 1, 'الرفضُ لا يمحو صفّاً');
+  // الرفضُ **قبلَ** نداءِ التفويضِ: فرفضٌ متأخّرٌ يُقرأُ رمزَ سياسةٍ عامّاً ولا
+  // يُسمّي للمُنادي أنّ دورَه أهليّةٌ لا سلطةٌ.
+  assert.deepEqual(
+    authorizeCalls.filter((call) => call.action === 'purge-data'),
+    [],
+  );
+});
+
+test('مطهِّرٌ بلا نقطةِ تفويضٍ يُرفَض رفضاً مُسمّىً — التركيبُ الصامتُ لا يمحو', async () => {
+  const { memory, memories } = setup({ registered: SWEEPER_REGISTERED, withAuthorizer: false });
+  await expiredMemory(memories, 'mem:one');
+  await assert.rejects(
+    () => memory.sweepExpired({ actor: sweeper(), royalCommand: ROYAL }),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes(MEMORY_LIMIT_ERRORS.PURGE_AUTHORIZER_REQUIRED),
+  );
+  assert.equal(await memories.count(), 1);
+});
+
+test('نقطةُ تفويضٍ بلا بوابةِ هويةٍ لا تكفي المطهِّرَ: تقبلُ من يصفُ نفسَه', async () => {
+  const { memory, memories } = setup({ registered: SWEEPER_REGISTERED, withIdentityGate: false });
+  await expiredMemory(memories, 'mem:one');
+  await assert.rejects(
+    () => memory.sweepExpired({ actor: sweeper(), royalCommand: ROYAL }),
+    (error) =>
+      error instanceof Error &&
+      error.message.includes(MEMORY_LIMIT_ERRORS.PURGE_AUTHORIZER_REQUIRED),
+  );
+  assert.equal(await memories.count(), 1);
+});
+
+test('دورٌ ليس من أدوارِ المطهِّرِ يُرفَض قبلَ العتبةِ بصفرِ نداءاتِ تفويضٍ', async () => {
+  const { memory, memories, authorizeCalls } = setup({ registered: SWEEPER_REGISTERED });
+  await expiredMemory(memories, 'mem:one');
+  await assert.rejects(
+    () => memory.sweepExpired({ actor: sweeper('role:agent'), royalCommand: ROYAL }),
+    (error) => error instanceof Error && error.message.includes(MEMORY_LIMIT_ERRORS.SWEEP_REFUSED),
+  );
+  assert.equal(await memories.count(), 1);
+  assert.deepEqual(
+    authorizeCalls.filter((call) => call.action === 'purge-data'),
+    [],
+  );
 });
