@@ -28,8 +28,31 @@
  *    **والمضيفُ المحلّيُّ وحدَهُ** (‏وما سواهُ يُفشِلُ التركيبَ مُغلَقاً).
  *    **ولم يُغلَقْ بـ`requirePoP: false`**: الحمايةُ قائمةٌ، ونداءٌ يبلُغُ
  *    الطبقةَ الدّاخليّةَ بلا توقيعٍ يُرَدُّ `401` كما كانَ.
- * 3. **لا كتابةَ بحالٍ:** بابُ الدولةِ قارئٌ فقط، والكتابةُ أمرٌ ملكيٌّ موقَّعٌ
- *    (`M9.03`) بمفاتيحَ في وحدةِ أمانٍ.
+ * 3. **والكتابةُ السياديّةُ صارت قائمةً على السلكِ — وهي مقيسةٌ لا موصوفةٌ
+ *    (`WL-193`، سدادُ الشطرِ الأخيرِ من `D-1`):** كان هذا النصُّ يُعلِنُ «لا كتابةَ
+ *    بحالٍ» **ولم يكن ذاك حَدّاً بل نقصَ وصلةٍ**: مسارُ `POST /state/console/<action>`
+ *    مُشتقٌّ من `config/royal-console.yaml` في `src/transport/router.mjs` منذُ
+ *    `M9.03`، لكنَّ هذا المُشغِّلَ **لم يكن يُمرِّرُ ديواناً**، فكانَ كلُّ نداءِ كتابةٍ
+ *    يُرَدُّ `CONSOLE_GATEWAY_REQUIRED` — أي «لا بابَ» لا «مرفوضٌ». **والآنَ
+ *    يُوصَلُ الديوانُ الحقيقيُّ**، فيُرَدُّ غيرُ الموقَّعِ `403`
+ *    و`CONSOLE_SIGNATURE_INVALID` — **رفضُ سلطةٍ من الديوانِ لا نقصُ تركيبٍ**.
+ *    **والتوقيعُ لا يقعُ عندَ البابِ:** البابُ يتحقَّقُ ولا يوقِّعُ، والخَتمُ في
+ *    جانبِ الملكِ (`scripts/royal-command.mjs` على `SovereignWriter.seal`).
+ * 3ب. **وحدُّ هذا التشغيلِ مُعلَنٌ: الموقِّعُ هنا موقِّعُ تطويرٍ لا وحدةُ عتادٍ.**
+ *    مادّتُه في ذاكرةِ هذه العمليّةِ، ولذلك **يُعلِنُ نفسَه `productionReady: false`
+ *    فيَرُدُّه `SovereignWriter` في بيئةِ إنتاجٍ** بحُكمِ مخازنِ المفاتيحِ نفسِه
+ *    (`scripts/dev-royal-signer.mjs`). والإنتاجُ سبيلُه `moduleSignerFromHsm(HsmSigner)`
+ *    بلا تعديلِ سطرٍ في المُنادي. **وأثرُ الأمرِ في هذا التشغيلِ محصورٌ في محكمةٍ
+ *    مؤقّتةٍ** (‏تاجٌ ودفترُ أوامرٍ وزرُّ إيقافٍ وسجلٌّ دائمٌ في مجلدٍ يُمحى عندَ
+ *    الإغلاقِ) — فلا يمسُّ أمرُ تطويرٍ حالةَ دولةٍ حقيقيّةً.
+ * 3ج. **والخادمُ لا يحملُ مادّةَ خَتمٍ ملكيٍّ أصلاً:** التاجُ والديوانُ لا
+ *    يستعملانِ من الملكِ إلاّ `id` و`verify` (‏`src/root-of-trust/crown.mts:286`)،
+ *    فيُعطَيانِ هنا `royalVerifierFromPublicKey` — مُتحقِّقاً من مفتاحٍ عامٍّ
+ *    وحدَه، لا هويّةً تُوقِّعُ. ومعرّفُ الملكِ واحدٌ في الحالَتَينِ
+ *    (`'king:' + fingerprint(publicKey).slice(0, 24)`)، فلا تختلفُ جلسةٌ ولا قيدٌ.
+ *    **وأثرُ هذا أنّ سرقةَ الخادمِ كلِّه لا تُعطي سارقَه أمراً واحداً
+ *    مقبولاً**، والموقِّعُ في `--self-check` في العمليّةِ نفسِها لأنّ الفحصَ
+ *    يلعبُ دورَ الملكِ ودورَ البابِ معاً — وذاك حدُّ الفحصِ لا حدُّ البابِ.
  *
  * والهويّةُ التي تُفتَحُ بها الجلسةُ ليست مُختلَقةً: دورُها هو دورُ الرقابةِ
  * المُعلَنُ في `config/monitoring.yaml`، وقدراتُها قراءةٌ فقط، وقرارُ السماحِ
@@ -47,13 +70,23 @@
  * والقراءةُ مسموحةٌ بصفرِ صفوفٍ — وهذا فرقٌ يُقالُ للقارئِ صريحاً في الواجهةِ.
  */
 
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 
 import { ApiGateway, SESSION_ERRORS, loadApiPolicy } from '../src/api/index.mjs';
 import { createPoPClient } from '../src/api/pop-client.mjs';
+import { KingAuthenticator, factorCodeForStep, loadKingAuthPolicy } from '../src/authn/index.mjs';
+import {
+  CONSOLE_ERRORS,
+  RoyalConsole,
+  SovereignWriter,
+  loadConsolePolicy,
+} from '../src/console/index.mjs';
 import { composeEnforcementChain } from '../src/core/composition-root.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../src/observability/index.mjs';
 import {
@@ -61,9 +94,25 @@ import {
   createPostgresRepositories,
 } from '../src/persistence/composition.mjs';
 import { createPool } from '../src/persistence/db.mjs';
-import { EventLog } from '../src/root-of-trust/index.mjs';
-import { compileRoutes, createStateServer, createTlsServer } from '../src/transport/index.mjs';
+import {
+  CertificateAuthority,
+  CommandLedger,
+  CrownGateway,
+  EventLog,
+  HaltSwitch,
+  KingIdentity,
+  PersistentEventLog,
+  createRoyalCommand,
+  royalVerifierFromPublicKey,
+} from '../src/root-of-trust/index.mjs';
+import {
+  compileCommandRoutes,
+  compileRoutes,
+  createStateServer,
+  createTlsServer,
+} from '../src/transport/index.mjs';
 import { PROXY_HEADER, assertLoopbackHost, createSigningProxyHandler } from './dev-pop-proxy.mjs';
+import { createDevRoyalSigner } from './dev-royal-signer.mjs';
 
 const args = process.argv.slice(2);
 
@@ -123,8 +172,125 @@ async function repositoriesFor() {
   };
 }
 
+/**
+ * **محكمةُ أمرٍ موقَّتةٌ للتطويرِ:** ديوانٌ موصولٌ بجذرِ ثقةٍ حقيقيٍّ
+ * (‏تاجٌ، دفترُ أوامرٍ، زرُّ إيقافٍ، سجلٌّ دائمٌ على قرصٍ)، **وكاتبٌ سياديٌّ يوقّعُ
+ * بموقِّعٍ يُعلِنُ أنّه غيرُ إنتاجيٍّ**.
+ *
+ * **ولماذا مجلَدٌ موقَّتٌ لا مواضعُ الإنتاجِ؟** لأنّ أمرَ الإيقافِ يُكتَبُ
+ * توجيهاً على قرصٍ، وأمرُ تطويرٍ يكتبُ توجيهَ إيقافٍ حيثُ يقرأُه تركيبٌ آخرُ
+ * **يُوقِفُ دولةً لم يُرِدْ أحدٌ إيقافَها** — وذاك أسوأُ ما يفعلُه مُشغِّلُ تطويرٍ.
+ *
+ * **ومفتاحُ الملكِ لحظيٌّ في الذاكرةِ لا يُكتَبُ ولا يُطبَعُ**، وهو مفتاحٌ واحدٌ
+ * يُعطى للتاجِ وللموقِّعِ معاً: ولو كانا مفتاحَينِ لَرَدَّ التاجُ توقيعَ الوحدةِ
+ * لسببٍ لا علاقةَ له بما يُقاس.
+ * @returns {Promise<{ console: RoyalConsole, writer: SovereignWriter, sovereignSession: string, logFile: string, close: () => void }>}
+ */
+async function royalCourtFor() {
+  const consolePolicy = loadConsolePolicy({ dir: CONFIG_DIR });
+  const authnPolicy = loadKingAuthPolicy({ dir: CONFIG_DIR });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'state-royal-court-'));
+  const logFile = path.join(directory, 'sovereign-events.log');
+  const royalLog = new PersistentEventLog(logFile, { fsync: false });
+  const keys = generateKeyPairSync('ed25519');
+  const king = new KingIdentity(keys);
+  const ca = new CertificateAuthority(king);
+  const commandLedger = new CommandLedger(path.join(directory, 'commands.ledger'), {
+    fsync: false,
+  });
+  const haltSwitch = new HaltSwitch(path.join(directory, 'halt.directive'), king, {
+    log: royalLog,
+    fsync: false,
+  });
+  // **والبابُ يتحقَّقُ بمفتاحٍ عامٍّ لا يملكُ به خَتماً:** التاجُ والديوانُ لا
+  // يستعملانِ من الملكِ إلاّ `id` و`verify` (‏`crown.mts:286` و`:321`)، فيُعطَيانِ
+  // مُتحقِّقاً من مفتاحٍ عامٍّ وحدَه. وبهذا يكونُ إثباتُ `D-1` أقوى: لو سُرِقَ
+  // الخادمُ كلُّه لم يُوجَدْ فيه ما يُصدَرُ به أمرٌ ملكيّ. والخَتمُ في جانبِ الملكِ.
+  const royalVerifier = royalVerifierFromPublicKey(
+    keys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  );
+  const crown = new CrownGateway(/** @type {never} */ (royalVerifier), ca, royalLog, {
+    commandLedger,
+    haltSwitch,
+  });
+  // سرُّ العاملِ الزّائدِ لحظيٌّ أيضاً، وواحدٌ لكلِّ الأجهزةِ المُعلَنةِ في
+  // `config/king-authentication.yaml` — فالمقيسُ أنّ الجلسةَ القويّةَ لازمةٌ، لا أنّ
+  // لكلِّ جهازٍ سرّاً مختلفاً.
+  const factorSecret = randomBytes(32).toString('hex');
+  /** @type {Record<string, string>} */
+  const vault = {};
+  for (const device of authnPolicy.devices) vault[device.factorRef] = factorSecret;
+  const kingAuth = new KingAuthenticator({
+    policy: authnPolicy,
+    king,
+    log: royalLog,
+    factorSecrets: { read: (/** @type {string} */ name) => vault[name] ?? null },
+  });
+  const trustedDevice = authnPolicy.devices[0];
+  if (trustedDevice === undefined) {
+    throw new Error('KING_AUTH_POLICY_WITHOUT_TRUSTED_DEVICE');
+  }
+  const { stepSeconds, digits, algorithm } = authnPolicy.secondFactor;
+  const strongSession = await kingAuth.authenticate({
+    actorId: king.id,
+    deviceId: trustedDevice.id,
+    factorCode: factorCodeForStep({
+      secret: factorSecret,
+      step: Math.floor(Date.now() / 1000 / stepSeconds),
+      digits,
+      algorithm,
+    }),
+  });
+  const royalConsole = new RoyalConsole({
+    policy: consolePolicy,
+    gateway: null,
+    crown,
+    haltSwitch,
+    king: /** @type {never} */ (royalVerifier),
+    kingAuth,
+    commandLedger,
+    log: royalLog,
+  });
+  // والكاتبُ يُرفَضُ مُغلَقاً إن كانتِ البيئةُ إنتاجاً: موقِّعُ التطويرِ يُعلِنُ
+  // `productionReady: false`، والرفضُ يقعُ **عندَ التركيبِ** فيموتُ المُشغِّلُ
+  // قبلَ أن يُنصِتَ — لا أن يُنصِتَ ثمّ يَرُدَّ أوّلَ أمرٍ.
+  const writer = new SovereignWriter({
+    console: royalConsole,
+    signer: createDevRoyalSigner(keys),
+  });
+  return {
+    console: royalConsole,
+    writer,
+    sovereignSession: strongSession.token,
+    logFile,
+    close: () => {
+      royalLog.close?.();
+      fs.rmSync(directory, { recursive: true, force: true });
+    },
+  };
+}
+
 /** المسارُ الذي يُقاسُ به الإقلاعُ: عدُّ الوكلاءِ — قراءةٌ بلا مُلحقاتٍ. */
 const SELF_CHECK_ROUTE = 'state.agents.count';
+/**
+ * والأمرُ الذي تُقاسُ به الكتابةُ: أمرُ نقضٍ على بوابةِ تاجِ **محكمةِ التطويرِ
+ * الموقَّتةِ** وحدَها. ولَم لا `cmd:halt`؟ لأنّ الإيقافَ يُكتَبُ توجيهاً على قرصٍ
+ * ويُغلِقُ ما بعدَه، ففحصُ إقلاعٍ يُوقِفُ ما يفحصُه لا يقيسُ إلاّ نفسَه.
+ */
+const SELF_CHECK_COMMAND = 'cmd:veto';
+
+/**
+ * يُحرِّفُ توقيعاً تحريفاً لا يُخطئُ: يُفكُّ الترميزُ ويُقلَبُ أوّلُ بايتٍ ثم يُعادُ.
+ * @param {string} signature - التوقيعُ الصحيحُ بترميزِ `base64url`
+ * @returns {string} توقيعٌ مُحرَّفٌ بالطولِ نفسِه
+ */
+function forgeSignature(signature) {
+  const bytes = Buffer.from(signature, 'base64url');
+  const first = bytes[0];
+  if (bytes.length === 0 || first === undefined) throw new Error('SELF_CHECK_EMPTY_SIGNATURE');
+  bytes[0] = first ^ 0xff;
+  return bytes.toString('base64url');
+}
 
 /**
  * **فحصُ إقلاعٍ يُقاسُ على السلكِ.** يُثبِتُ أمرَينِ لا أمراً واحداً: أنّ البابَ
@@ -136,7 +302,13 @@ const SELF_CHECK_ROUTE = 'state.agents.count';
  * فعلٌ كاتبٌ يُرَدُّ `405` برمزٍ مُسمَّىً. **والفحصانِ الأوّلانِ يُناديانِ الطبقةَ
  * الدّاخليّةَ مباشرةً** لأنَّ مرورَهما بالوسيطِ يُخفي ما يُقاسُ: الوسيطُ يُوقِّعُ،
  * فلا يبقى نداءٌ غيرُ موقَّعٍ يُثبِتُ أنَّ الحمايةَ قائمةٌ.
- * @param {{ base: string, proxyBase: string, token: string, sessionId: string, routeSpec: { id: string, method: string, path: string, action: string, resource: string } | null, popClient: ReturnType<typeof createPoPClient> }} ctx
+ * **ومنذُ سدادِ الشطرِ الأخيرِ من `D-1` يُقاسُ معَ القراءةِ **الكتابةُ** على
+ * السلكِ أربعَ مرّاتٍ:** أمرٌ بلا توقيعٍ يُرَدُّ، وأمرٌ مختومٌ من موقِّعٍ يُقبَلُ،
+ * **وأثرُه يُقرأُ من ملفِّ السجلِّ الدائمِ لا من ردِّ الخادمِ**، وإعادةُ الظرفِ نفسِه
+ * تُرَدُّ `409`. **وقبولُ الموقَّعِ وحدَه ليس نجاحاً**: بابٌ يقبلُ الكلَّ يقبلُ
+ * الموقَّعَ أيضاً، وبابٌ بلا ديوانٍ يَرُدُّ الكلَّ بـ`CONSOLE_GATEWAY_REQUIRED` — ولذلك
+ * يُحكَمُ على **رمزٍ واحدٍ ورقمٍ واحدٍ** في كلِّ فحصٍ لا على `>= 400` (‏دَينُ `LIVE-6`).
+ * @param {{ base: string, proxyBase: string, token: string, sessionId: string, routeSpec: { id: string, method: string, path: string, action: string, resource: string } | null, popClient: ReturnType<typeof createPoPClient>, commandPath: string | null, court: Awaited<ReturnType<typeof royalCourtFor>> }} ctx
  * @returns {Promise<{ ok: boolean, lines: string[] }>}
  */
 async function selfCheck(ctx) {
@@ -217,14 +389,145 @@ async function selfCheck(ctx) {
     }`,
   );
 
-  const ok = staticResponse.status === 200 && refused && accepted && proxiedOk && readOnly;
+  const writeVerdict = await writeChecks(ctx, lines);
+
+  const ok =
+    staticResponse.status === 200 &&
+    refused &&
+    accepted &&
+    proxiedOk &&
+    readOnly &&
+    writeVerdict.ok;
   lines.push(
     ok
-      ? '    ✅ الحكمُ: البابُ يُقلِعُ ويُجيبُ، **وإثباتُ الحيازةِ قائمٌ لا مُسقَطٌ**، **والمشهدُ يقرأُ بوسيطٍ موقِّعٍ معلومِ السُّلطةِ والمدى**.'
+      ? '    ✅ الحكمُ: البابُ يُقلِعُ ويُجيبُ، **وإثباتُ الحيازةِ قائمٌ لا مُسقَطٌ**، **والمشهدُ يقرأُ بوسيطٍ موقِّعٍ معلومِ السُّلطةِ والمدى**، **والكتابةُ السياديّةُ تمرُّ بتوقيعٍ ويُرَدُّ غيرُ الموقَّعِ**.'
       : '    ❌ الحكمُ: الفحصُ أخفقَ — ولا يُقالُ «يعملُ» بعدَ إخفاقٍ.',
   );
   if (!refused) lines.push(`    (‏جسمُ الردِّ غيرِ الموقَّعِ: ${unsignedBody.slice(0, 200)})`);
   return { ok, lines };
+}
+
+/**
+ * **الكتابةُ السياديّةُ مقيسةً على السلكِ** — ومفصولةٌ لأنّ لها أربعَ
+ * قياساتٍ مستقلّةٍ، ودمجُها في دالّةٍ واحدةٍ يُخفي أيُّها أخفق.
+ * @param {{ base: string, commandPath: string | null, court: Awaited<ReturnType<typeof royalCourtFor>> }} ctx
+ * @param {string[]} lines
+ * @returns {Promise<{ ok: boolean }>}
+ */
+async function writeChecks(ctx, lines) {
+  if (ctx.commandPath === null) {
+    lines.push(
+      `    ❌ الأمرُ «${SELF_CHECK_COMMAND}» غيرُ مُعلَنٍ في \`config/royal-console.yaml\`، فلا مسارَ كتابةٍ يُقاس.`,
+    );
+    return { ok: false };
+  }
+  const url = `${ctx.base}${ctx.commandPath}`;
+  /**
+   * @param {Record<string, unknown>} envelope
+   * @returns {Promise<{ status: number, code: string, body: Record<string, unknown> }>}
+   */
+  const post = async (envelope) => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(envelope),
+    });
+    const text = await response.text();
+    /** @type {Record<string, unknown>} */
+    let body;
+    try {
+      body = /** @type {Record<string, unknown>} */ (JSON.parse(text));
+    } catch {
+      body = { raw: text.slice(0, 200) };
+    }
+    return { status: response.status, code: String(body['code'] ?? body['status'] ?? ''), body };
+  };
+
+  // ١. **غيرُ الموقَّعِ يُرَدُّ — وهو الشاهدُ الحرفيُّ الذي يطلبُه معيارُ `D-1`.**
+  const unsigned = await post({
+    royalCommand: createRoyalCommand('veto-commands', 'crown:gateway', {}),
+    signature: '',
+    sovereignSession: ctx.court.sovereignSession,
+  });
+  const unsignedRefused =
+    unsigned.status === 403 && unsigned.code === CONSOLE_ERRORS.SIGNATURE_INVALID;
+  lines.push(
+    `    أمرٌ بلا توقيعٍ على السلكِ: ‏${unsigned.status} ‏«${unsigned.code}» — ${
+      unsignedRefused
+        ? 'مردودٌ رفضَ سلطةٍ كما يجبُ'
+        : `❌ المطلوبُ ‏403/\`${CONSOLE_ERRORS.SIGNATURE_INVALID}\` — ورفضٌ يُقالُ «لا ديوانَ» أو «عَطَبٌ» ليس رفضَ سلطةٍ`
+    }`,
+  );
+
+  // ٢. **وتوقيعٌ مُحرَّفٌ يُرَدُّ أيضاً — فالبابُ يتحقَّقُ ولا يكتفي بوجودِ حقلٍ:**
+  //    فحصٌ يرضى بـ`signature` غيرِ فارغٍ ليس فحصَ توقيعٍ، وهو عينُ درسِ «حاجزٌ يفحصُ
+  //    وجودَ الردِّ ولا يفحصُ صحّتَه لا يحمي». ومعرّفُ الأمرِ لا يُستهلَكُ هنا لأنّ
+  //    فحصَ التوقيعِ في التاجِ **قبلَ** دفترِ الإعادةِ.
+  const forgedSeal = await ctx.court.writer.seal({
+    command: SELF_CHECK_COMMAND,
+    royalCommand: /** @type {Record<string, unknown>} */ (
+      /** @type {unknown} */ (createRoyalCommand('veto-commands', 'crown:gateway', {}))
+    ),
+    sovereignSession: ctx.court.sovereignSession,
+  });
+  const forged = await post({
+    royalCommand: forgedSeal.royalCommand,
+    // **بايتٌ واحدٌ يُقلَبُ في المادّةِ لا حرفٌ في نصِّها:** أوّلُ محاولةٍ قلبَتْ
+    // آخرَ حرفٍ من `base64url`، وآخرُ حرفٍ في ٨٦ حرفاً يحملُ بتَّينِ معنويَّينِ
+    // وأربعةَ مُهمَلةٍ — فكانَ التحريفُ يقعُ في المُهمَلِ أحياناً فتعودُ البايتاتُ
+    // نفسَها ويُقبَلُ «المُحرَّفُ». فالتحريفُ الآنَ على البايتِ الأوّلِ بعدَ فكِّ
+    // الترميزِ: تحريفٌ لا يُخطئُ. (وهذا درسُ «فحصٌ يمرُّ لسببٍ غيرِ الذي يُقاسُ له».)
+    signature: forgeSignature(forgedSeal.signature),
+    sovereignSession: forgedSeal.sovereignSession,
+  });
+  const forgedRefused = forged.status === 403 && forged.code === CONSOLE_ERRORS.SIGNATURE_INVALID;
+  lines.push(
+    `    توقيعٌ مُحرَّفٌ ببايتٍ واحدٍ: ‏${forged.status} ‏«${forged.code}» — ${
+      forgedRefused
+        ? 'مردودٌ — فالبابُ يتحقَّقُ لا يكتفي بوجودِ حقلٍ'
+        : `❌ المطلوبُ ‏403/\`${CONSOLE_ERRORS.SIGNATURE_INVALID}\``
+    }`,
+  );
+
+  // ٣. **موقَّعٌ من الموقِّعِ يُقبَلُ.** والخَتمُ في جانبِ الملكِ لا عندَ البابِ:
+  //    `seal` تُرجِعُ الظرفَ ولا تُرسِلُ، والإرسالُ هنا بـ`fetch` كما يفعلُ
+  //    `scripts/royal-command.mjs`.
+  const envelope = await ctx.court.writer.seal({
+    command: SELF_CHECK_COMMAND,
+    royalCommand: /** @type {Record<string, unknown>} */ (
+      /** @type {unknown} */ (createRoyalCommand('veto-commands', 'crown:gateway', {}))
+    ),
+    sovereignSession: ctx.court.sovereignSession,
+  });
+  const signed = await post({
+    royalCommand: envelope.royalCommand,
+    signature: envelope.signature,
+    sovereignSession: envelope.sovereignSession,
+  });
+  const signedAccepted = signed.status === 200 && signed.body['status'] === 'executed';
+  lines.push(
+    `    أمرٌ مختومٌ من موقِّعٍ على السلكِ: ‏${signed.status} ‏«${String(signed.body['status'] ?? signed.code)}» — ${
+      signedAccepted ? 'مقبولٌ ومُنفَّذٌ' : '❌ لم يُنفَّذ'
+    }`,
+  );
+
+  // ٤. **والأثرُ يُقرأُ من ملفِّ السجلِّ الدائمِ لا من ردِّ الخادمِ:** ردٌّ يقولُ
+  //    «نُفِّذَ» وسجلٌّ لا يحملُ قيداً إعلانُ أثرٍ لا إثباتُه.
+  const logged = fs.existsSync(ctx.court.logFile)
+    ? fs.readFileSync(ctx.court.logFile, 'utf8').includes('console.command.executed')
+    : false;
+  lines.push(
+    `    قيدُ التنفيذِ في ملفِّ السجلِّ الدائمِ: ${
+      logged ? 'موجودٌ — فالأثرُ مشهودٌ على قرصٍ' : '❌ غائبٌ'
+    }`,
+  );
+
+  // **ولماذا لا يُقاسُ منعُ الإعادةِ هنا؟** لأنّ أمرَ النقضِ يُغلِقُ بوابةَ التاجِ،
+  // وبوابةٌ مغلقةٌ تَرُدُّ الإعادةَ **قبلَ أن تبلُغَ دفترَ الأوامرِ** (`crown.mts:285`
+  // قبلَ `:293`)، فيُقرأُ رفضُ النقضِ منعَ إعادةٍ وهو غيرُه — وفحصٌ يمرُّ لسببٍ غيرِ
+  // الذي يُقاسُ له أسوأُ من لا فحصٍ. ومنعُ الإعادةِ مقيسٌ في
+  // `tests/console/royal-console.test.mjs` و`tests/root-of-trust/crown.test.mjs`.
+  return { ok: unsignedRefused && forgedRefused && signedAccepted && logged };
 }
 
 async function main() {
@@ -289,10 +592,18 @@ async function main() {
   // يُناديها المتصفِّحُ، فيُوقِّعُ عنهُ بمفتاحِ المُشغِّلِ اللّحظيِّ **بسلطةٍ ومدىً
   // مُعلَنَيْنِ**. ولو وُقِّعَ في المتصفِّحِ لكانَ المفتاحُ في نصٍّ يقرأُهُ كلُّ مَنْ
   // فَتَحَ الصّفحةَ — وذاكَ إعلانُ مفتاحٍ لا إثباتُ حيازةٍ.
+  // **والديوانُ يُوصَلُ حقيقيّاً لا يُمرَّرُ `null` (‏سدادُ آخرِ `D-1`):** مسارُ
+  // الكتابةِ مُشتقٌّ من `config/royal-console.yaml`، وبلا ديوانٍ يُرَدُّ كلُّ أمرٍ
+  // بـ`CONSOLE_GATEWAY_REQUIRED` — وذاك «لا بابَ» لا «مرفوضٌ»، فلا يُقاسُ به رفضُ
+  // غيرِ الموقَّعِ ولا قبولُ الموقَّعِ.
+  const court = await royalCourtFor();
+  const commandRoutes = compileCommandRoutes();
   const inner = createStateServer({
     gateway: /** @type {never} */ (gateway),
     webDir: WEB_DIR,
     routes,
+    commandRoutes,
+    console: /** @type {never} */ (court.console),
   });
   await new Promise((resolve) => inner.listen(0, '127.0.0.1', () => resolve(undefined)));
   const innerAddress = inner.address();
@@ -342,11 +653,28 @@ async function main() {
             : `، وجهةُ إصدارٍ من ${String(process.env.STATE_TLS_CA_FILE)}`
         }.`
       : '  حدودٌ مُعلَنةٌ: لا TLS في هذا التشغيلِ (تُعلَنُ مادّتُه في `STATE_TLS_CERT_FILE`).',
-    '  وإثباتُ الحيازةِ لازمٌ لكلِّ نداءٍ (‏لا للفتحِ وحدَه)، ولا كتابةَ بحالٍ.',
+    '  وإثباتُ الحيازةِ لازمٌ لكلِّ نداءٍ (‏لا للفتحِ وحدَه).',
+    '',
     `  ومشهدُ الويبِ يقرأُ عبرَ وسيطٍ موقِّعٍ في الخادمِ (‏إغلاقُ \`LIVE-5\`): سلطتُهُ ${ACTOR_LABEL}،`,
     '  ومداهُ قراءةٌ فقط على المضيفِ المحلّيِّ وحدَهُ، ويُعلِنُ نفسَهُ في `x-state-pop-proxy`.',
     '  ومَن أتى برمزِهِ مُرِّرَ كما هو بلا توقيعٍ: لا ينتحِلُ الوسيطُ جلسةَ غيرِهِ.',
     '  ولا يُنشَرُ هذا على شبكةٍ عامّةٍ. (`docs/TRANSPORT.md`)',
+    '',
+    '  والكتابةُ السياديّةُ قائمةٌ ومساراتُها مُشتقّةٌ من `config/royal-console.yaml`:',
+  );
+  for (const route of commandRoutes) {
+    lines.push(`    ${String(route.method)} ${String(route.path)}   → ${String(route.id)}`);
+  }
+  const declaration = court.writer.describe();
+  lines.push(
+    `  وموقِّعُ الأمرِ هنا «${declaration.kind}»: لا يُصدِّرُ مادّتَه، **ويُعلِنُ أنّه غيرُ إنتاجيٍّ**`,
+    `  (‏${declaration.productionReady ? 'إنتاجيٌّ' : 'غيرُ إنتاجيٍّ'}) فيَرُدُّه الكاتبُ في بيئةِ إنتاجٍ؛ والإنتاجُ سبيلُه \`moduleSignerFromHsm(HsmSigner)\`.`,
+    '  **والبابُ يتحقَّقُ ولا يوقِّعُ**: تاجُهُ وديوانُهُ يُعطَيانِ مُتحقِّقاً من مفتاحٍ عامٍّ',
+    '  وحدَهُ (`royalVerifierFromPublicKey`)، فلا مادّةَ خَتمٍ ملكيٍّ في هذا الخادمِ أصلاً.',
+    '  وأمرٌ بلا توقيعٍ أو بتوقيعٍ مُحرَّفٍ يُرَدُّ',
+    `  ‏403 و\`${CONSOLE_ERRORS.SIGNATURE_INVALID}\`؛ والخَتمُ في جانبِ الملكِ: \`node scripts/royal-command.mjs --help\`.`,
+    '  **وأثرُ الأمرِ في هذا التشغيلِ محصورٌ في محكمةٍ موقَّتةٍ تُمحى عندَ الإغلاقِ**،',
+    '  فلا يمسُّ أمرُ تطويرٍ حالةَ دولةٍ حقيقيّةً.',
     '',
   );
   process.stdout.write(`${lines.join('\n')}\n`);
@@ -359,11 +687,14 @@ async function main() {
       sessionId: session.sessionId,
       routeSpec: gateway.routes().find((route) => route.id === SELF_CHECK_ROUTE) ?? null,
       popClient,
+      commandPath: commandRoutes.find((route) => route.id === SELF_CHECK_COMMAND)?.path ?? null,
+      court,
     });
     process.stdout.write(`${verdict.lines.join('\n')}\n`);
     await new Promise((resolve) => server.close(() => resolve(undefined)));
     await new Promise((resolve) => inner.close(() => resolve(undefined)));
     await close();
+    court.close();
     process.exit(verdict.ok ? 0 : 1);
   }
 
@@ -372,7 +703,12 @@ async function main() {
     process.stdout.write(`\nيُغلَقُ البابُ عندَ ${signal}…\n`);
     server.close(() => {
       inner.close(() => {
-        void close().then(() => process.exit(0));
+        void close().then(() => {
+          // ومحكمةُ التطويرِ تُمحى: توجيهُ إيقافٍ يبقى بعدَ الإغلاقِ أثرٌ لا يعرفُ
+          // أحدٌ من أحدثَه، ومفتاحٌ لحطيٌّ يموتُ مع العمليّةِ فلا يُقرأُ بعدَها أمرٌ.
+          court.close();
+          process.exit(0);
+        });
       });
     });
   };

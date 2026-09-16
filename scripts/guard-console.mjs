@@ -43,7 +43,12 @@ import { fileURLToPath } from 'node:url';
 
 import YAML from 'yaml';
 
-import { CONSOLE_ERRORS, RECOVERY_KINDS, loadConsolePolicy } from '../src/console/index.mjs';
+import {
+  CONSOLE_ERRORS,
+  RECOVERY_KINDS,
+  WRITER_ERRORS,
+  loadConsolePolicy,
+} from '../src/console/index.mjs';
 import { loadApiPolicy } from '../src/api/index.mjs';
 
 const argv = process.argv.slice(2);
@@ -350,6 +355,85 @@ if (test === '') {
   for (const [needle, why] of measured) {
     if (!test.includes(needle)) violations.push(`R8: ${why} (${needle}).`);
   }
+}
+
+// ═══ R9 ═══ كاتبُ الديوانِ: الخَتمُ في وحدةِ أمانٍ، والبابُ يتحقَّقُ ولا يوقّعُ.
+//
+// **ولِمَ حاجزٌ لهذا؟** لأنّ `D-1` سُدَّ بأن صارَ التوقيعُ يُطلَبُ من وحدةٍ لا
+// يُصنَعُ في العمليّةِ. وذاك عهدٌ يُنقَضُ بسطرٍ واحدٍ: `sign` من `node:crypto` في
+// الكاتبِ، أو ديوانٌ يُمرَّرُ `null` في المُشغِّلِ فيعودَ كلُّ أمرٍ «لا بابَ»، أو
+// رمزُ رفضٍ يُزادُ في الكودِ ولا يُقرأُ في وثيقةٍ. فما لا يُقاسُ يعودُ.
+const writer = readFile('src/console/sovereign-writer.mjs');
+const writerTest = readFile('tests/console/sovereign-writer.test.mjs');
+if (writer === '') {
+  violations.push(
+    'R9: `src/console/sovereign-writer.mjs` غائب — ومعيارُ `D-1` كتابةٌ بتوقيعٍ من وحدةِ أمانٍ لا كتابةٌ بتوقيعٍ يصنعُه المُنادي.',
+  );
+} else {
+  // ١. لا خَتمَ برمجيّاً في الكاتبِ: يتحقَّقُ بـ`verify` ولا يستوردُ `sign`.
+  if (/\bsign\s+as\b|[{,]\s*sign\s*[,}]/u.test(writer)) {
+    violations.push(
+      'R9: الكاتبُ يستوردُ `sign` من `node:crypto` — وموقِّعٌ يملكُ خَتماً برمجيّاً يُبطِلُ معنى وحدةِ الأمانِ من أصلِه.',
+    );
+  }
+  // ٢. رموزُ رفضِ الكاتبِ متقابلةٌ مع الوثيقةِ في الاتجاهين.
+  const doc = readFile('docs/ROYAL_CONSOLE.md');
+  for (const [name, code] of Object.entries(WRITER_ERRORS)) {
+    if (!doc.includes(code)) {
+      violations.push(
+        `R9: الرمز \`${code}\` في الكودِ ولا ذِكرَ له في \`docs/ROYAL_CONSOLE.md\`؛ ورفضٌ لا يُعلَنُ لا يُعتمَدُ عليه.`,
+      );
+    }
+    // والاختبارُ يُقاسُ بالرمزِ نصّاً **أو** بقراءتِه من `WRITER_ERRORS` — فاختبارٌ
+    // يقرأُ الرمزَ من مصدرِه أدقُّ من اختبارٍ يُعيدُ كتابتَه، ولا يُعاقَبُ عليه.
+    if (!writerTest.includes(code) && !writerTest.includes(`WRITER_ERRORS.${name}`)) {
+      violations.push(
+        `R9: الرمز \`${code}\` غيرُ مقيسٍ في \`tests/console/sovereign-writer.test.mjs\`؛ ورمزٌ بلا اختبارٍ وعدٌ لا شاهدَ له.`,
+      );
+    }
+  }
+  for (const code of doc.match(/WRITER_[A-Z_]+/gu) ?? []) {
+    if (!(/** @type {readonly string[]} */ (Object.values(WRITER_ERRORS)).includes(code))) {
+      violations.push(
+        `R9: الوثيقةُ تُعلِنُ \`${code}\` ولا وجودَ له في \`WRITER_ERRORS\`؛ ووعدُ رفضٍ لا يُنفَّذُ أسوأُ من لا وعدٍ.`,
+      );
+    }
+  }
+}
+
+// ٣. مُشغِّلُ المشهدِ يُوصِلُ ديواناً حقيقيّاً ويتحقَّقُ بمفتاحٍ عامٍّ لا يوقّعُ به.
+const operator = readFile('scripts/serve-state.mjs');
+if (operator !== '') {
+  /** @type {Array<[string, string]>} */
+  const wiring = [
+    [
+      'console: /** @type {never} */ (court.console)',
+      'المُشغِّلُ لا يُمرِّرُ ديواناً للخادمِ، فيعودُ كلُّ أمرِ كتابةٍ `CONSOLE_GATEWAY_REQUIRED` — «لا بابَ» لا «مرفوضٌ»',
+    ],
+    [
+      'royalVerifierFromPublicKey',
+      'المُشغِّلُ يُعطي التاجَ هويّةً تُوقِّعُ لا مُتحقِّقاً من مفتاحٍ عامٍّ، فيحملُ الخادمُ ما يُصدَرُ به أمرٌ ملكيّ',
+    ],
+    [
+      'SovereignWriter',
+      'المُشغِّلُ لا يبني كاتباً سياديّاً، ففحصُ الكتابةِ فيه غيرُ مقيسٍ على السلكِ',
+    ],
+  ];
+  for (const [needle, why] of wiring) {
+    if (!operator.includes(needle)) violations.push(`R9: ${why} (${needle}).`);
+  }
+}
+
+// ٤. أداةُ جانبِ الملكِ قائمةٌ ومختبَرةٌ: خَتمٌ حيثُ المفتاحُ لا عندَ البابِ.
+if (readFile('scripts/royal-command.mjs') === '') {
+  violations.push(
+    'R9: `scripts/royal-command.mjs` غائبة — وبلا أداةِ خَتمٍ في جانبِ الملكِ يعودُ التوقيعُ إلى الخادمِ حيثُ لا يجوزُ أن يكون.',
+  );
+}
+if (readFile('tests/tooling/royal-command-cli.test.mjs') === '') {
+  violations.push(
+    'R9: اختبارُ أداةِ جانبِ الملكِ غائب — وأداةُ سلطةٍ بلا اختبارٍ على السلكِ وعدٌ لا شاهدَ له.',
+  );
 }
 
 if (violations.length > 0) {
