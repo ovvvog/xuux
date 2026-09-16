@@ -222,9 +222,18 @@ test('المطهِّر فعلُ تشغيلٍ لا فعلُ وكيل', async () =
     (error) => error instanceof Error && error.message.includes(MEMORY_LIMIT_ERRORS.SWEEP_REFUSED),
   );
   assert.equal(await repository.count(), 1, 'الرفض لا يمحو');
-  const purged = await memory.sweepExpired({ actor: operator() });
-  assert.deepEqual(purged, [entry.id]);
-  assert.equal(await repository.count(), 0);
+  // ودورُ المشغّلِ **مأذونٌ ولا يمحو** (‏`LIM-3`، `WL-190`): أدوارُ المطهِّرِ
+  // أهليّةٌ لا سلطةٌ، والفعلُ `purge-data` فوقَ العتبةِ السياديّةِ فلا يبلغُها
+  // دورٌ. فالتطهيرُ يلزمُه أمرٌ ملكيٌّ ونقطةُ تفويضٍ موصولةٌ ببوابةِ هويةٍ،
+  // والمسارُ المأذونُ الكاملُ مقيسٌ في `tests/data/retention-authorization.test.mjs`
+  // حيث تُركَّبُ نقطةُ الإنفاذِ الحقيقيةُ. وهذا المخزنُ هنا مُركَّبٌ بلا نقطةِ
+  // تفويضٍ بالقصدِ: المقيسُ أنّ التركيبَ الصامتَ لا يمحو.
+  await assert.rejects(
+    () => memory.sweepExpired({ actor: operator() }),
+    (error) =>
+      error instanceof Error && error.message.includes('PURGE') && !error.message.includes('SWEEP'),
+  );
+  assert.equal(await repository.count(), 1, 'الأهليّةُ وحدَها لا تمحو صفّاً');
 });
 
 test('حصّة الوكيل تُرفض عليه وحده ولا تُغلق المخزن على غيره', async () => {

@@ -696,6 +696,11 @@ channels:
       - type: memory.listed
         version: 1
         required: [agentId, count]
+      # `LIM-3`: تطهيرُ المنتهياتِ صارَ يمرُّ بقرارٍ فوقَ العتبةِ السياديّةِ،
+      # والقرارُ حدثٌ لا فعلٌ صامتٌ — فمَن راجعَ تطهيراً وجدَ قبلَه تفويضَه.
+      - type: memory.sweep.authorized
+        version: 1
+        required: [action, resourceKey]
   - id: model
     subject: 'النماذج: تسجيلُها وتقييمُها وتفعيلُها والتراجعُ عنها'
     classification: internal

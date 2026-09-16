@@ -24,6 +24,13 @@
 //        في مسارِ محوٍ. والتركيبُ المُشغَّلُ يجبُ أن يمرِّرَ `authorizer`. وهذا نصُّ
 //        العيبِ المُغلَق: فاعلٌ غيرُ مسجَّلٍ محا صفَّينِ بصفرِ نداءاتِ تفويضٍ، لأنّ
 //        الحارسَ الوحيدَ كان يقرأُ نصّاً يُرسلُه المُنادي.
+//   R7 — **أدوارُ المطهِّرِ أهليّةٌ لا سلطةٌ** (‏`LIM-3`): كلُّ وحدةٍ في `src/`
+//        تُنادي `isSweeper(` يجبُ أن تمرَّ بسلطةِ المحوِ في **الملفِّ نفسِه**
+//        (‏`assertRoyalCommandForPurge` أو `#authorizeSweep`) — فحارسُ دورٍ وحدَه
+//        كان مسارَ المحوِ الثاني الذي بقيَ مفتوحاً بعدَ `R6-A-01`. ويُقاسُ معه أنّ
+//        العتبةَ السياديّةَ **تُقرأُ من البيانات** لا تُثبَّتُ في الكودِ، وأنّ
+//        `purge-data` ما زالَ فوقَها؛ فلو أُنزِلَ عنها لصارَ ما تقولُه الوثيقةُ
+//        عن أدوارِ المطهِّرِ خبراً كاذباً يجبُ أن يسقطَ لا أن يُقرأ.
 //   R5 — **فحص المخزون**: إن وُجدت `DATABASE_URL` فيُقاس أن سلسلة الشواهد متّصلة
 //        بلا ثغرة تسلسل، وأن لا عقدَ بياناتٍ يتيماً في الفهرس. وبلا `DATABASE_URL`
 //        يُعلَن الفحص **متروكاً** صراحةً ولا يُدّعى نجاحه: حاجزٌ يقول «✅» وهو لم
@@ -219,6 +226,71 @@ if (fs.existsSync(compositionFile)) {
     violations.push(
       'R6: التركيبُ المُشغَّلُ يبني `RetentionCycle` بلا `authorizer`؛ فالمحوُ في الدولةِ المُشغَّلةِ يُرفَض دائماً أو — إن سقطَ الشرطُ — يقعُ بلا قرار.',
     );
+  }
+}
+
+// ── R7: أدوارُ المطهِّرِ أهليّةٌ لا سلطةٌ (`LIM-3`) ──
+// العتبةُ تُقرأُ من البيانات: الحاجزُ لا يُثبِّتُ «purge-data فوقَ العتبةِ» في
+// نصِّه، بل يُحمِّلُها من `config/royal-authority.yaml` بنفسِ الوحدةِ التي
+// يُحمِّلُها بها الكودُ المُشغَّلُ — فحاجزٌ يحملُ نسخةً ثانيةً يفترقُ عن الكودِ.
+const { loadPurgeAuthority } = await import('../src/data/purge-authority.mjs');
+const purgeAuthority = loadPurgeAuthority({ dir: path.join(ROOT, 'config') });
+if (!purgeAuthority.royalCommandRequired) {
+  violations.push(
+    'R7: `purge-data` لم يبقَ فوقَ العتبةِ السياديّةِ في `config/royal-authority.yaml`؛ وهذا **قرارُ مالكٍ** لا عيبُ شفرةٍ، لكنّ الوثائقَ (`docs/RETENTION.md` §أدوارُ المطهِّر) تُعلنُ أنّ الدورَ لا يبلغُ العتبةَ — فأحدُهما كاذبٌ الآن، ولا يمرُّ الحاجزُ على خبرٍ كاذبٍ.',
+  );
+}
+const purgeAuthorityFile = path.join(ROOT, 'src/data/purge-authority.mjs');
+if (!fs.existsSync(purgeAuthorityFile)) {
+  violations.push(
+    'R7: `src/data/purge-authority.mjs` غير موجود؛ فالإعلانُ أنّ الدورَ أهليّةٌ لا سلطةٌ عادَ نصّاً في وثيقةٍ بلا مُنفِّذٍ، وهو نصُّ الدَينِ `LIM-3`.',
+  );
+} else if (!read(purgeAuthorityFile).includes('royal-authority.yaml')) {
+  violations.push(
+    'R7: `purge-authority.mjs` لا يقرأُ `royal-authority.yaml`؛ فعتبةٌ منسوخةٌ في الكودِ تفترقُ عن أصلِها السياديِّ بلا أن يُقال.',
+  );
+}
+// وكلُّ قارئٍ لأدوارِ المطهِّرِ يمرُّ بالسلطةِ في ملفِّه: لا يكفي أن تكونَ
+// السلطةُ موجودةً في المستودعِ، فمسارٌ لا يُناديها مسارُ محوٍ بحارسِ دورٍ.
+for (const file of walk(path.join(ROOT, 'src'))) {
+  const source = read(file);
+  if (!source.includes('isSweeper(')) continue;
+  const relative = path.relative(ROOT, file);
+  // مُعلِنُ الدالّةِ نفسِه (`memory-limits.mjs`) يُقاسُ بإعلانِ الحدِّ في موضعِ
+  // قراءتِه لا بنداءِ سلطةٍ: هو سياسةٌ تُجيب، لا مسارٌ يمحو.
+  if (relative.endsWith('memory-limits.mjs')) {
+    if (!source.includes('أهليّةً لا سلطةً')) {
+      violations.push(
+        `R7: \`${relative}\` يُعلن \`isSweeper\` بلا إعلانِ الحدِّ في موضعِ قراءتِه؛ ومن قرأَ الدالّةَ وحدَها حسِبَ صدقَها إذناً بالمحوِ — وهو نصفُ الشرطِ.`,
+      );
+    }
+    continue;
+  }
+  if (!source.includes('assertRoyalCommandForPurge') && !source.includes('#authorizeSweep')) {
+    violations.push(
+      `R7: \`${relative}\` ينادي \`isSweeper\` ولا يمرُّ بسلطةِ المحوِ في الملفِّ نفسِه؛ فالدورُ صارَ سلطةً، وهو مسارُ المحوِ الذي أُغلق في \`LIM-3\`.`,
+    );
+  }
+}
+
+// وتركيبُ المُشغَّلِ يمرِّرُ نقطةَ التفويضِ إلى المطهِّرِ كما يمرِّرُها إلى
+// الدورةِ: سلطةٌ موصولةٌ في الشفرةِ وغيرُ ممرَّرةٍ في التركيبِ تعني أنّ التطهيرَ
+// **لا يقعُ أصلاً** في المسارِ الواقعِ — فشلٌ مغلقٌ لكنّه عطلٌ صامتٌ.
+const memoryCompositionFile = path.join(ROOT, 'src/persistence/composition.mjs');
+if (fs.existsSync(memoryCompositionFile)) {
+  const composition = read(memoryCompositionFile);
+  const start = composition.indexOf('new AgentMemoryStore({');
+  if (start === -1) {
+    violations.push(
+      'R7: تركيبُ `src/persistence/composition.mjs` لا يبني `AgentMemoryStore`؛ فمخزنُ الذاكرةِ صارَ بلا مسارٍ في التشغيلِ.',
+    );
+  } else {
+    const block = composition.slice(start, composition.indexOf('\n    }),', start));
+    if (!block.includes('authorizer')) {
+      violations.push(
+        'R7: التركيبُ المُشغَّلُ يبني `AgentMemoryStore` بلا تمريرِ نقطةِ التفويضِ؛ فالتطهيرُ يُرفَض دائماً في المسارِ الواقعِ — عطلٌ صامتٌ لا حمايةٌ.',
+      );
+    }
   }
 }
 

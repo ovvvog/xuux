@@ -45,6 +45,13 @@ expiry:
   # المؤجَّل لا يُبيح قراءةً في الفجوة بينه وبين الانتهاء.
   refuseRecallAfterExpiry: true
   # المطهِّر فعلُ تشغيلٍ لا فعلُ وكيل: وكيلٌ يطهّر يمحو أثره بنفسه.
+  #
+  # **وهذه القائمةُ أهليّةٌ لا سلطةٌ** (‏`LIM-3`، `WL-190`): تقولُ «مَن يجوزُ أن
+  # يُشغِّلَ أداةَ المحوِ»، ولا تقولُ «بأيِّ قرارٍ يقعُ المحوُ». فالفعلُ
+  # `purge-data` مُعلَنٌ فوقَ العتبةِ السياديّةِ في `config/royal-authority.yaml`
+  # (`delegable: false`) فلا يبلغُها `role:operator` ولا `role:king` بدورِه، ويلزمُ
+  # **أمرٌ ملكيٌّ لكلِّ تطهيرٍ** — و`AgentMemoryStore.sweepExpired` يرفضُ بدونِه
+  # برمزِ `PURGE_ROLE_NOT_AUTHORITY` قبلَ أن يقرأَ صفّاً.
   sweeperRoles:
     - role:operator
     - role:king

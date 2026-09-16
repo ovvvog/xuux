@@ -117,9 +117,12 @@ test('M18: الحاجز يفشل إن كفَّ التركيبُ المُشغَّ
   try {
     const file = join(dir, 'src', 'persistence', 'composition.mjs');
     const source = readFileSync(file, 'utf8');
+    // النصُّ نفسُه يقعُ مرّتين بعدَ `LIM-3` (الدورةُ والمطهِّرُ)، فالطفرةُ
+    // تُثبَّتُ على موضعِ الدورةِ بسياقِه: طفرةٌ تُصيبُ الموضعَ الآخرَ تقيسُ
+    // قاعدةً أخرى وتُخفي أنّ `R6` كفَّ عن الفحصِ.
     const mutated = source.replace(
-      '      ...(enforcementPoint === null ? {} : { authorizer: enforcementPoint }),\n',
-      '',
+      '      erasureLedger,\n      ...(enforcementPoint === null ? {} : { authorizer: enforcementPoint }),\n',
+      '      erasureLedger,\n',
     );
     assert.notEqual(mutated, source, 'الطفرةُ لم تُزرع.');
     writeFileSync(file, mutated);
@@ -170,6 +173,93 @@ test('M21: الحاجز يفشل إن لم تُعلَن الوحدةُ الفع�
     const { status, output } = runGuard(dir);
     assert.equal(status, 1, 'محوٌ لا يُسمّي فعلَه المحكومَ عبرَ الحاجز');
     assert.match(output, /R6/);
+  } finally {
+    cleanup();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// قاعدةُ `R7` (‏`LIM-3`، `WL-190`): أدوارُ المطهِّرِ أهليّةٌ لا سلطةٌ. وتُقاسُ
+// بنفسِ الطريقِ: تُزرعُ الطفرةُ التي كان التجاوزُ ممكناً بها، ويُطلبُ الرفضُ.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @param {string} dir
+ * @param {string} relative
+ * @param {(source: string) => string} mutate
+ */
+function mutateFile(dir, relative, mutate) {
+  const file = join(dir, relative);
+  const source = readFileSync(file, 'utf8');
+  const mutated = mutate(source);
+  assert.notEqual(mutated, source, 'الطفرةُ لم تُزرع.');
+  writeFileSync(file, mutated);
+}
+
+test('M22: الحاجز يفشل إن عادَ مطهِّرُ الذاكرةِ إلى حارسِ الدورِ وحدَه', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    // هذه هي إعادةُ عيبِ `LIM-3` بنصِّه: `sweepExpired` يبقى يقرأُ `isSweeper`
+    // ويحذفُ الصفوفَ، ولا يبقى في الملفِّ نداءٌ لسلطةِ المحوِ.
+    mutateFile(dir, join('src', 'data', 'memory-store.mjs'), (source) =>
+      source
+        .replace(/assertRoyalCommandForPurge/g, 'assertSweeperRoleOnly')
+        .replace(/#authorizeSweep/g, '#sweepRoleGuard'),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'مطهِّرٌ بحارسِ دورٍ وحدَه عبرَ الحاجز');
+    assert.match(output, /R7/);
+    assert.match(output, /memory-store\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M23: الحاجز يفشل إن أُسقط إعلانُ الحدِّ من موضعِ قراءةِ الدورِ', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mutateFile(dir, join('src', 'data', 'memory-limits.mjs'), (source) =>
+      source.replace('أهليّةً لا سلطةً', 'إذناً كافياً'),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'دالّةُ الأهليّةِ بلا إعلانِ حدِّها عبرت الحاجز');
+    assert.match(output, /R7/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M24: الحاجز يفشل إن نزلَ `purge-data` عن العتبةِ السياديّةِ', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    // إنزالُ الفعلِ عن العتبةِ **قرارُ مالكٍ** جائزٌ، لكنّه يُكذِّبُ ما تُعلنُه
+    // الوثيقةُ والشفرةُ عن أدوارِ المطهِّرِ؛ فالحاجزُ يوقفُ الخبرَ الكاذبَ.
+    mutateFile(dir, join('config', 'royal-authority.yaml'), (source) =>
+      source.replace(
+        '  - action: purge-data\n    reason: المحو يُفقد الدليل نفسه، فيُقرَّر فوق مستوى من يشغّل أداة المحو.\n    lawRef: law:retention\n    delegable: false',
+        '  - action: purge-data\n    reason: المحو يُفقد الدليل نفسه، فيُقرَّر فوق مستوى من يشغّل أداة المحو.\n    lawRef: law:retention\n    delegable: true',
+      ),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'فعلٌ نزلَ عن العتبةِ عبرَ الحاجزَ بلا أن يُقال');
+    assert.match(output, /R7/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M25: الحاجز يفشل إن كفَّ التركيبُ عن تمريرِ التفويضِ إلى المطهِّر', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mutateFile(dir, join('src', 'persistence', 'composition.mjs'), (source) =>
+      source.replace(
+        '      ...(enforcementPoint === null ? {} : { authorizer: enforcementPoint }),\n      ...(memoryPolicy === null ? {} : { policy: memoryPolicy }),',
+        '      ...(memoryPolicy === null ? {} : { policy: memoryPolicy }),',
+      ),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'مطهِّرٌ بلا نقطةِ تفويضٍ في التركيبِ عبرَ الحاجز');
+    assert.match(output, /R7/);
   } finally {
     cleanup();
   }

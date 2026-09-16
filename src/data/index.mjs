@@ -7,4 +7,5 @@ export * from './erasure-ledger.mjs';
 export * from './lineage.mjs';
 export * from './memory-limits.mjs';
 export * from './memory-store.mjs';
+export * from './purge-authority.mjs';
 export * from './retention-cycle.mjs';
