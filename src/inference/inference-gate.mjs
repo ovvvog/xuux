@@ -14,25 +14,20 @@
  * غياب نموذج نشط أو تجاوز سقف معروف، ولا تُستهلك تذكرة قبل لحظة النداء.
  *
  * حدود معلنة:
- *   - **دفترُ الميزانيةِ يُلتقَطُ ويُستعادُ** (‏`budgetSnapshot`/`budgetRestore`،
- *     `R6-A-05`): كان العدّادُ في الذاكرةِ وحدَها، فمن استنفدَ سقفَه استأنفَ
- *     الإنفاقَ بإعادةِ التشغيلِ — وهذا **يوسِّعُ** الصلاحيةَ بفعلٍ لا يحتاجُ
- *     صلاحيةً، فلا يجوزُ أن يُعَدَّ حدّاً مقبولاً كحدِّ دفترِ المنحِ (حيثُ
- *     السقوطُ يضيِّقُ). والاستعادةُ **لا تُخفِّضُ**: الأعلى من المُقاسِ والمُستعادِ
- *     هو المُلزِمُ، ونافذةٌ انقضتْ تُهمَلُ فلا يُمَدُّ عمرُها بلقطةٍ. أمّا **ربطُ
- *     اللقطةِ بمخزنٍ مُدامٍ عندَ الإقلاعِ** فقرارُ تركيبٍ خارجَ هذه البوابةِ
- *     (‏`R6-A-04`) وحدٌّ مُعلَنٌ لا مُخفىً: البوابةُ تُعطي المادةَ ولا تختارُ
- *     المخزنَ. وعدّادُ حدِّ المعدَّلِ يبقى نافذةَ عمليّةٍ: سقوطُه يُعيدُ ثلاثينَ
- *     نداءً في دقيقةٍ لا سقفَ كلفةٍ معلَناً، والفرقُ مقصودٌ لا مُغفَلٌ.
  *   - **سقفُ الرموزِ ونافذتُه من `config/quotas.yaml` وحدَها** (المورد
  *     `inference-tokens`) عبر `loadInferenceTokenQuota`، ولا رقمَ سقفٍ في هذا
  *     الملفِّ ولا سقوطَ صامتاً إلى رقمٍ مكتوبٍ عندَ غيابِ الحصّةِ. ونافذةُ
  *     الميزانيةِ **مستقلّةٌ** عن نافذةِ حدِّ المعدَّلِ (`windowMs`): الأولى من
  *     الوثيقةِ والثانيةُ حدُّ نداءاتٍ لا حدُّ كلفةٍ.
- *   - **الاستهلاكُ يُقيَّدُ في دفترِ التكلفةِ إن مُرِّرَ الدفترُ**، وفشلُ القيدِ
- *     **يمنعُ إعادةَ المُخرَجِ** (`INFERENCE_USAGE_UNRECORDED`): استهلاكٌ يقعُ
- *     ولا يُقيَّدُ استهلاكٌ لا دليلَ عليه (المادة 2). وغيابُ الدفترِ نفسِه حدٌّ
- *     مُعلَنٌ لا مُخفىً: البوابةُ تعملُ بلا محاسبةٍ ماليّةٍ عندَ عدمِ تمريرِه.
+ *   - **دفترُ الميزانيةِ مُلزَمٌ ودائمٌ على قرصٍ** (‏`LIM-1`، `WL-197`): كان
+ *     العدّادُ في الذاكرةِ وحدَها، فمن استنفدَ سقفَه استأنفَ الإنفاقَ بإعادةِ
+ *     التشغيلِ. وصارَ المخزنُ إلزاميّاً: لا تُبنى بوابةٌ بلا `budgetStore`، ولا
+ *     يُفترَضُ صفرٌ عندَ غيابِه. والاستعادةُ **لا تُخفِّضُ**: الأعلى من المُقاسِ
+ *     والمُستعادِ هو المُلزِمُ، ونافذةٌ انقضتْ تُهمَلُ فلا يُمَدُّ عمرُها بلقطةٍ.
+ *   - **الاستهلاكُ يُقيَّدُ في دفترِ التكلفةِ إلزاماً** (‏`LIM-1`، `WL-197`): كان
+ *     تمريرُ الدفترِ خيارَ تركيبٍ، فبوابةٌ بلا دفترٍ تُنفِقُ بلا أثرٍ. وصارَ الدفترُ
+ *     إلزاميّاً: لا تُبنى بوابةٌ بلا `costLedger`، وفشلُ القيدِ **يمنعُ إعادةَ
+ *     المُخرَجِ** (`INFERENCE_USAGE_UNRECORDED`).
  *   - تقدير الإدخال يمنع طلباً يتجاوز السقف قبل التشغيل؛ لا يمكن معرفة طول
  *     المُخرج قبل تشغيل النموذج، لذلك يُحاسب الاستهلاك الفعلي بعده ويُحجب
  *     المُخرج إن جعل الاستهلاك السقف متجاوزاً.
@@ -155,7 +150,7 @@ function nonNegativeNumber(value, fallback) {
 
 export class InferenceGate {
   /**
-   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown } | null, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown } | null, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
+   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown }, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
    */
   constructor({
     modelRegistry,
@@ -168,10 +163,10 @@ export class InferenceGate {
     windowMs = DEFAULT_WINDOW_MS,
     tokensPerWindow,
     budgetWindowMs,
-    budgetStore = null,
+    budgetStore,
     quota,
     costPerWindow = DEFAULT_COST_PER_WINDOW,
-    costLedger = null,
+    costLedger,
     costInstitution,
     maxLoggedTextChars = DEFAULT_LOG_TEXT_CHARS,
     lattice = null,
@@ -181,6 +176,44 @@ export class InferenceGate {
       throw new InferenceError(
         INFERENCE_ERRORS.DEPENDENCY_MISSING,
         'بوابة الاستدلال تحتاج سجل النماذج ونقطة تفويض وسجلاً ومنفّذاً؛ غياب واحد منها يفتح استدلالاً بلا توجيه أو قرار أو أثر.',
+      );
+    }
+    // ── دوامُ الميزانيةِ إلزامٌ لا خيارٌ (‏`LIM-1`، `WL-197`) ──
+    // كان العدّادُ في الذاكرةِ وحدَها، فمن استنفدَ سقفَه استأنفَ الإنفاقَ بإعادةِ
+    // التشغيلِ. والآن لا تُبنى بوابةٌ بلا مخزنٍ يُقرأُ منه ويُكتَبُ إليه.
+    if (
+      budgetStore === null ||
+      budgetStore === undefined ||
+      typeof (/** @type {{ load?: Function, save?: Function }} */ (budgetStore).load) !==
+        'function' ||
+      typeof (/** @type {{ load?: Function, save?: Function }} */ (budgetStore).save) !== 'function'
+    ) {
+      throw new InferenceError(
+        INFERENCE_ERRORS.DEPENDENCY_MISSING,
+        'بوابة الاستدلال تحتاج مخزنَ دوامٍ للميزانيةِ (budgetStore) بـ`load` و`save`؛ العدّادُ في الذاكرةِ وحدَها يعودُ بإعادةِ التشغيلِ.',
+      );
+    }
+    // ── دفترُ التكلفةِ إلزامٌ لا خيارٌ (‏`LIM-1`، `WL-197`) ──
+    // كان تمريرُ الدفترِ خيارَ تركيبٍ، فبوابةٌ بلا دفترٍ تُنفِقُ بلا أثرٍ. والآن
+    // لا تُبنى بوابةٌ بلا دفترٍ يُقيِّدُ الاستهلاكَ.
+    if (
+      costLedger === null ||
+      costLedger === undefined ||
+      typeof (/** @type {{ record?: Function }} */ (costLedger).record) !== 'function'
+    ) {
+      throw new InferenceError(
+        INFERENCE_ERRORS.DEPENDENCY_MISSING,
+        'بوابة الاستدلال تحتاج دفترَ تكلفةٍ (costLedger) بـ`record`؛ الاستهلاكُ بلا قيدٍ استهلاكٌ لا دليلَ عليه.',
+      );
+    }
+    if (
+      costInstitution === null ||
+      costInstitution === undefined ||
+      costInstitution.trim() === ''
+    ) {
+      throw new InferenceError(
+        INFERENCE_ERRORS.DEPENDENCY_MISSING,
+        'دفترُ التكلفةِ مُلزَمٌ بمؤسسةٍ يُسنَدُ إليها الإنفاقُ؛ وإسنادٌ يُخمَّنُ إسنادٌ إلى غيرِ صاحبِه.',
       );
     }
     this.modelRegistry = modelRegistry;
@@ -209,28 +242,20 @@ export class InferenceGate {
     this.budgetWindowMs =
       budgetWindowMs ?? /** @type {NonNullable<typeof this.quota>} */ (this.quota).budgetWindowMs;
     this.costPerWindow = costPerWindow;
-    /** @type {{ record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown } | null} */
+    /** @type {{ record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }} */
     this.costLedger = costLedger;
     /**
-     * بندُ الكلفةِ يُقرأُ من الوثيقةِ **مقابَلاً بموردِ الحصّةِ**، ولا يُقرأُ
-     * أصلاً إن لم يُمرَّرْ دفترٌ — فلا تُلزَمُ بوابةٌ بلا محاسبةٍ بقراءةِ وثيقةِ
-     * تسعيرٍ لا تستعملُها.
-     * @type {string | null}
+     * بندُ الكلفةِ يُقرأُ من الوثيقةِ **مقابَلاً بموردِ الحصّةِ**.
+     * @type {string}
      */
-    this.costItem = costLedger === null ? null : inferenceCostItem().id;
+    this.costItem = inferenceCostItem().id;
     /**
      * صاحبُ الإنفاقِ في بُعدِ المؤسسةِ. الدفترُ يشترطُ أبعادَه الثلاثةَ معاً،
      * والوكيلُ والنموذجُ يُشتقّانِ من الطلبِ نفسِه، أمّا المؤسسةُ فقرارُ تركيبٍ
      * **لا يُخمَّنُ**: دفترٌ مع مؤسسةٍ مجهولةٍ يُسنِدُ الإنفاقَ إلى غيرِ صاحبِه.
-     * @type {string | null}
+     * @type {string}
      */
-    this.costInstitution = costInstitution ?? null;
-    if (costLedger !== null && this.costInstitution === null) {
-      throw new InferenceError(
-        INFERENCE_ERRORS.DEPENDENCY_MISSING,
-        'دفترُ التكلفةِ مُمرَّرٌ بلا مؤسسةٍ يُسنَدُ إليها الإنفاقُ؛ وإسنادٌ يُخمَّنُ إسنادٌ إلى غيرِ صاحبِه.',
-      );
-    }
+    this.costInstitution = costInstitution;
     this.maxLoggedTextChars = maxLoggedTextChars;
     /**
      * سلّم التصنيف هو مصدر قرار الحجب في السجل. كان الحجب مكتوباً هنا بنصّين
@@ -246,15 +271,13 @@ export class InferenceGate {
     /** @type {Map<string, { startedAt: number, tokens: number, cost: number }>} */
     this.budgets = new Map();
     /**
-     * مخزنُ دوامِ الميزانيةِ إن مُرِّرَ (‏`R6-A-05`). وجودُه يجعلُ الدوامَ
-     * **آليّاً** لا موقوفاً على شفرةِ إقلاعٍ يكتبُها مُركِّبٌ: القراءةُ عندَ أوّلِ
-     * قياسٍ والكتابةُ عندَ كلِّ تغيُّرٍ. وغيابُه حدٌّ مُعلَنٌ: البوابةُ تُعطي
-     * اللقطةَ ولا تختارُ المخزنَ.
-     * @type {{ load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown } | null}
+     * مخزنُ دوامِ الميزانيةِ (‏`LIM-1`، `WL-197`). إلزامٌ لا خيارٌ: القراءةُ عندَ
+     * أوّلِ قياسٍ والكتابةُ عندَ كلِّ تغيُّرٍ، فلا يعودُ السقفُ بإعادةِ التشغيلِ.
+     * @type {{ load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown }}
      */
     this.budgetStore = budgetStore;
     /** @type {boolean} */
-    this.budgetLoaded = budgetStore === null;
+    this.budgetLoaded = false;
   }
 
   /**
@@ -316,7 +339,7 @@ export class InferenceGate {
    * @returns {void}
    */
   #loadBudgets() {
-    if (this.budgetLoaded || this.budgetStore === null) return;
+    if (this.budgetLoaded) return;
     let entries;
     try {
       entries = this.budgetStore.load();
@@ -338,7 +361,6 @@ export class InferenceGate {
    * @returns {void}
    */
   #persistBudgets() {
-    if (this.budgetStore === null) return;
     try {
       this.budgetStore.save(this.budgetSnapshot());
     } catch (error) {
@@ -709,25 +731,24 @@ export class InferenceGate {
     // الترتيبُ مقصودٌ: استهلاكٌ يقعُ ولا يُقيَّدُ استهلاكٌ لا دليلَ عليه
     // (المادة 2)، فإن رفضَ الدفترُ القيدَ **لا يُعادُ المُخرَجُ** ولو نجحَ
     // النداءُ — والرفضُ يُقيَّد في السجلِّ باسمِه لا يُهمَل.
-    if (this.costLedger !== null && this.costItem !== null) {
-      try {
-        this.costLedger.record(
-          {
-            item: this.costItem,
-            quantity: Math.round(totalTokens),
-            institution: /** @type {string} */ (this.costInstitution),
-            agent: actorId.startsWith('agent:') ? actorId : `agent:${actorId}`,
-            model: `model:${model.id}`,
-          },
-          { actor: actorId },
-        );
-      } catch (error) {
-        this.#refuse(
-          INFERENCE_ERRORS.USAGE_UNRECORDED,
-          `تعذّر تقييدُ استهلاكِ الاستدلالِ في دفترِ التكلفةِ: ${error instanceof Error ? error.message : String(error)}. ولا يُعادُ مُخرَجٌ استُهلِكَ له موردٌ بلا قيدٍ.`,
-          { ...facts, output, inputTokens, outputTokens, totalTokens, cost },
-        );
-      }
+    // والدفترُ إلزامٌ لا خيارٌ (‏`LIM-1`): لا بوابةَ بلا دفترٍ.
+    try {
+      this.costLedger.record(
+        {
+          item: this.costItem,
+          quantity: Math.round(totalTokens),
+          institution: this.costInstitution,
+          agent: actorId.startsWith('agent:') ? actorId : `agent:${actorId}`,
+          model: `model:${model.id}`,
+        },
+        { actor: actorId },
+      );
+    } catch (error) {
+      this.#refuse(
+        INFERENCE_ERRORS.USAGE_UNRECORDED,
+        `تعذّر تقييدُ استهلاكِ الاستدلالِ في دفترِ التكلفةِ: ${error instanceof Error ? error.message : String(error)}. ولا يُعادُ مُخرَجٌ استُهلِكَ له موردٌ بلا قيدٍ.`,
+        { ...facts, output, inputTokens, outputTokens, totalTokens, cost },
+      );
     }
 
     this.log.append('inference.completed', actorId, {

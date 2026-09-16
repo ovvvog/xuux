@@ -16,8 +16,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { CostCapacity, loadCostCapacityPolicy } from '../../src/cost-capacity/index.mjs';
 import { deterministicExecutor } from '../../src/inference/adapters/deterministic.mjs';
 import { createInferenceGate } from '../../src/inference/inference-gate.mjs';
+import { FileInferenceBudgetStore } from '../../src/inference/budget-store.mjs';
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
 import { createWeightStore } from '../../src/models/weight-store.mjs';
@@ -27,6 +29,9 @@ import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 
 import { experimentLedgerFor, registerEvaluationExperiment } from './experiment-support.mjs';
+
+const CONFIG_DIR = path.join(process.cwd(), 'config');
+const DEFAULT_INSTITUTION = 'institution:digital-administration';
 
 /** @returns {{ events: Array<{ type: string, actor: string, payload: Record<string, unknown> }>, append: (type: string, actor: string, payload: object) => void }} */
 export function memoryLog() {
@@ -43,6 +48,10 @@ export function memoryLog() {
 /**
  * بوابةٌ حقيقيّةٌ بنقطةِ تفويضٍ حقيقيّةٍ وسجلِّ نماذجٍ حقيقيٍّ، ومُنفِّذُها هو
  * المُوائمُ الحتميُّ عبرَ عقدِه — فما يُقاسُ سلسلةٌ كاملةٌ لا حلقةٌ منها.
+ *
+ * ودوامُ الميزانيةِ ودفترُ التكلفةِ **إلزامٌ** (‏`LIM-1`): كلُّ بوابةٍ تُبنى
+ * بمخزنِ قرصٍ حقيقيٍّ ودفترِ تكلفةٍ حقيقيٍّ. ومَن أراد قياسَ غيابِهما يبني
+ * بوابتَه يدويّاً لا بهذا المِسنَدِ.
  *
  * @param {{ purpose?: string, execute?: (call: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<{ output: string, usage?: Record<string, number> }>, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown }, costLedger?: object, costInstitution?: string, now?: () => Date }} [options]
  */
@@ -99,6 +108,30 @@ export async function gateWithAdapter(options = {}) {
     ],
   });
   const active = await registry.activate(model.id);
+
+  // ── دوامُ الميزانيةِ ودفترُ التكلفةِ إلزامٌ (‏`LIM-1`، `WL-197`) ──
+  // مخزنُ قرصٍ حقيقيٌّ افتراضيّاً: اختباراتُ الدوامِ تُقاسُ على ملفٍّ لا على
+  // مصفوفةٍ في الذاكرةِ. ومَن أراد مخزناً مخصّصاً يُمرِّرُه.
+  const budgetStore =
+    options.budgetStore ??
+    new FileInferenceBudgetStore({
+      filePath: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'budget-store-')), 'budget.json'),
+    });
+
+  // ── دفترُ التكلفةِ إلزامٌ (‏`LIM-1`، `WL-197`) ──
+  // دفترٌ حقيقيٌّ افتراضيّاً: اختباراتُ القيدِ تُقاسُ على `CostCapacity` لا على
+  // دالّةٍ مزيّفةٍ. ومَن أراد دفتراً مخصّصاً يُمرِّرُه.
+  const costLedger =
+    options.costLedger ??
+    new CostCapacity({
+      policy: loadCostCapacityPolicy({ dir: CONFIG_DIR }),
+      log: /** @type {never} */ (/** @type {unknown} */ (log)),
+      ledger: () => log.events.map((event) => ({ type: event.type, data: event.payload })),
+      operations: null,
+      nowMs: () => (options.now ? options.now().getTime() : Date.now()),
+    });
+  const costInstitution = options.costInstitution ?? DEFAULT_INSTITUTION;
+
   const gate = createInferenceGate({
     modelRegistry: registry,
     enforcementPoint,
@@ -108,16 +141,12 @@ export async function gateWithAdapter(options = {}) {
     execute: options.execute ?? deterministicExecutor(),
     ...(options.tokensPerWindow === undefined ? {} : { tokensPerWindow: options.tokensPerWindow }),
     ...(options.budgetWindowMs === undefined ? {} : { budgetWindowMs: options.budgetWindowMs }),
-    ...(options.budgetStore === undefined ? {} : { budgetStore: options.budgetStore }),
-    ...(options.costLedger === undefined
-      ? {}
-      : {
-          costLedger:
-            /** @type {{ record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }} */ (
-              options.costLedger
-            ),
-        }),
-    ...(options.costInstitution === undefined ? {} : { costInstitution: options.costInstitution }),
+    budgetStore,
+    costLedger:
+      /** @type {{ record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }} */ (
+        costLedger
+      ),
+    costInstitution,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   return { gate, log, purpose, model: active, bundle };
