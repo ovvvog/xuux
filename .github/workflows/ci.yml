@@ -289,6 +289,9 @@ jobs:
       - name: حاجز التقدّم (WL-063) — لا نسبة تُقدَّر تقديراً ولا عدّاد ينحرف يدوّاً
         run: npm run guard:progress
 
+      - name: حاجز عدّادات الوثائق (WL-196) — لا رقم يُكتَب يدوّاً ينحرف عن مصدره
+        run: npm run guard:doc-counts
+
   gate-report:
     name: تقرير البوابتين G0 و G1
     runs-on: ubuntu-latest
