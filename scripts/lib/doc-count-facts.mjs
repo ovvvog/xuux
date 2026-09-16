@@ -72,16 +72,13 @@ export function countOpenExecutorDebts(root) {
   const lines = text.split('\n');
   for (const line of lines) {
     if (line.includes('المفتوح') && line.includes('بنود') && line.includes('`D-')) {
-      // اعدّ المعرّفاتِ في القائمةِ فقط — بعد «المفتوح...بنودٍ:» وأوّلِ نقطةٍ.
-      const maftuhIdx = line.indexOf('المفتوح');
+      // اعدّ المعرّفاتِ في القائمةِ فقط — بعد «المفتوح...:» وأوّلِ نقطةٍ.
+      const maftuhIdx = line.lastIndexOf('المفتوح');
       if (maftuhIdx === -1) continue;
       const afterMaftuh = line.slice(maftuhIdx);
-      const bunoIdx = afterMaftuh.indexOf('بنود');
-      if (bunoIdx === -1) continue;
-      const afterBuno = afterMaftuh.slice(bunoIdx);
-      const colonIdx = afterBuno.indexOf(':');
+      const colonIdx = afterMaftuh.indexOf(':');
       if (colonIdx === -1) continue;
-      const afterColon = afterBuno.slice(colonIdx + 1);
+      const afterColon = afterMaftuh.slice(colonIdx + 1);
       const periodIdx = afterColon.indexOf('.');
       const listBlock = periodIdx === -1 ? afterColon : afterColon.slice(0, periodIdx);
       const ids = listBlock.match(/`[A-Z0-9-]+`/g);

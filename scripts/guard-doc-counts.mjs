@@ -39,20 +39,17 @@ function readText(file) {
 }
 
 /**
- * يَعدّ المعرّفاتِ في القائمةِ بعد «المفتوح...بنودٍ:» وأوّلِ نقطةٍ بعدَها.
+ * يَعدّ المعرّفاتِ في القائمةِ بعد «المفتوح...:» وأوّلِ نقطةٍ بعدَها.
  * @param {string} line
  * @returns {number}
  */
 function countIdsInList(line) {
-  const maftuhIdx = line.indexOf('المفتوح');
+  const maftuhIdx = line.lastIndexOf('المفتوح');
   if (maftuhIdx === -1) return 0;
   const afterMaftuh = line.slice(maftuhIdx);
-  const bunoIdx = afterMaftuh.indexOf('بنود');
-  if (bunoIdx === -1) return 0;
-  const afterBuno = afterMaftuh.slice(bunoIdx);
-  const colonIdx = afterBuno.indexOf(':');
+  const colonIdx = afterMaftuh.indexOf(':');
   if (colonIdx === -1) return 0;
-  const afterColon = afterBuno.slice(colonIdx + 1);
+  const afterColon = afterMaftuh.slice(colonIdx + 1);
   const periodIdx = afterColon.indexOf('.');
   const listBlock = periodIdx === -1 ? afterColon : afterColon.slice(0, periodIdx);
   const ids = listBlock.match(/`[A-Z0-9-]+`/g);

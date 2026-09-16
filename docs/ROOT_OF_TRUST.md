@@ -157,7 +157,7 @@
 ## 6. التشغيل والتحقق
 
 ```bash
-npm run validate   # ثمانية وأربعون حاجزاً (مقيسةً من `package.json`) ثم كل الاختبارات
+npm run validate   # الحواجزُ مقيسةٌ من `package.json` ثم كل الاختبارات
 npm test           # 206 ملف اختبار
 ```
 
