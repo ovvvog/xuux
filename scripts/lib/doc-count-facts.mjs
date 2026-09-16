@@ -71,7 +71,15 @@ export function countOpenExecutorDebts(root) {
   // ابحث عن السطرِ الذي يَذكُرُ البنودَ المفتوحةَ على المنفِّذِ بالمعرّفات.
   const lines = text.split('\n');
   for (const line of lines) {
-    if (line.includes('المفتوح') && line.includes('بنود') && line.includes('`D-')) {
+    if (
+      line.includes('المفتوح') &&
+      line.includes('بنود') &&
+      (line.includes('`D-') ||
+        line.includes('`LIM-') ||
+        line.includes('`REPO-') ||
+        line.includes('`LIVE-') ||
+        line.includes('`R3-A-'))
+    ) {
       // اعدّ المعرّفاتِ في القائمةِ فقط — بعد «المفتوح...:» وأوّلِ نقطةٍ.
       const maftuhIdx = line.lastIndexOf('المفتوح');
       if (maftuhIdx === -1) continue;
