@@ -10,6 +10,7 @@
     "objective",
     "sources",
     "evidenceKinds",
+    "attribution",
     "itemSources",
     "verdicts",
     "events",
@@ -67,6 +68,17 @@
           "meaning": { "$ref": "#/$defs/arabicText" },
           "locatedIn": { "$ref": "#/$defs/relPath" }
         }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "description": "موضعُ الإسنادِ في مُدخلةِ سجلِّ العملِ وصيغةُ الإحالةِ المحيَّدةِ — يُميَّزُ بهما ذِكرُ الإسنادِ من ذِكرِ السياقِ (الدَّين LIVE-4).",
+      "additionalProperties": false,
+      "required": ["fieldTitle", "neutralReferencePrefix", "meaning"],
+      "properties": {
+        "fieldTitle": { "type": "string", "minLength": 3 },
+        "neutralReferencePrefix": { "type": "string", "minLength": 3 },
+        "meaning": { "$ref": "#/$defs/arabicText" }
       }
     },
     "itemSources": {
