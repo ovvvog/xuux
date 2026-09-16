@@ -192,8 +192,10 @@ test('فشلُ القيدِ يمنعُ إعادةَ المُخرَجِ ويُق�
 
 test('دفترٌ بلا مؤسسةٍ يُسنَدُ إليها الإنفاقُ يُرفَضُ عندَ البناءِ لا عندَ أوّلِ قيدٍ', async () => {
   const { ledger } = ledgerOn(Date.UTC(2026, 4, 10, 12));
+  // لا نُمرِّرُ `gateWithAdapter` لأنّه يوفّرُ مؤسسةً افتراضيّةً — نُنشئُ البوابةَ
+  // مباشرةً لنقيسَ الرفضَ عندَ غيابِ المؤسسةِ.
   await assert.rejects(
-    () => gateWithAdapter({ costLedger: ledger }),
+    () => gateWithAdapter({ costLedger: ledger, costInstitution: '' }),
     (error) =>
       error instanceof InferenceError && error.code === INFERENCE_ERRORS.DEPENDENCY_MISSING,
   );

@@ -17,6 +17,8 @@ import { createMemoryRepository } from '../../src/persistence/repository-memory.
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
 import { createWeightStore } from '../../src/models/weight-store.mjs';
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
+import { FileInferenceBudgetStore } from '../../src/inference/budget-store.mjs';
+import { CostCapacity, loadCostCapacityPolicy } from '../../src/cost-capacity/index.mjs';
 import {
   experimentLedgerFor,
   registerEvaluationExperiment,
@@ -28,6 +30,8 @@ import {
 } from '../../src/inference/inference-gate.mjs';
 
 const bundle = loadPolicyBundle();
+const CONFIG_DIR = path.join(process.cwd(), 'config');
+const INSTITUTION = 'institution:digital-administration';
 
 /** @returns {{ events: Array<{ type: string, actor: string, payload: Record<string, unknown> }>, append: (type: string, actor: string, payload: object) => void }} */
 function memoryLog() {
@@ -103,6 +107,16 @@ async function setup(options = {}) {
   });
   /** @type {Array<{ model: { id: string, purpose: string }, purpose: string, input: string }>} */
   const executions = [];
+  const budgetStore = new FileInferenceBudgetStore({
+    filePath: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gate-budget-')), 'budget.json'),
+  });
+  const costLedger = new CostCapacity({
+    policy: loadCostCapacityPolicy({ dir: CONFIG_DIR }),
+    log: /** @type {never} */ (/** @type {unknown} */ (log)),
+    ledger: () => log.events.map((event) => ({ type: event.type, data: event.payload })),
+    operations: null,
+    nowMs: () => Date.now(),
+  });
   const gate = createInferenceGate({
     modelRegistry: registry,
     enforcementPoint: point,
@@ -113,6 +127,9 @@ async function setup(options = {}) {
     callsPerWindow: options.callsPerWindow ?? 30,
     tokensPerWindow: options.tokensPerWindow ?? 100_000,
     costPerWindow: options.costPerWindow ?? 100,
+    budgetStore,
+    costLedger,
+    costInstitution: INSTITUTION,
     execute:
       options.execute ??
       (async (record) => {
