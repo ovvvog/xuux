@@ -10,7 +10,7 @@
  *
  * الحواجزُ قبلَها تحرس أن يعملَ النظامُ ويتعافى ويُوقَف. وهذه تحرس سؤالاً آخرَ:
  * **هل يُقال الناقصُ ناقصاً؟** فمعيارُ `M11.08` بحرفِه «صفرُ بندٍ بلا دليلٍ أو بلا
- * تأجيلٍ معلَنٍ» — وعشرُ قواعد:
+ * تأجيلٍ معلَنٍ» — وإحدى عشرةَ قاعدةً:
  *
  *   R0: `config/readiness-report.yaml` و`config/readiness-deferrals.yaml` تُحمَّلان
  *       بمخطَّطَيهما الصارمَين؛ ووثيقةٌ تُخالف مخطَّطَها تُوقف البوابةَ قبل كلِّ فحصٍ.
@@ -47,6 +47,18 @@
  *       `validate` وفي `.github/workflows/ci.yml`، و`readiness:report` أمرٌ واحدٌ،
  *       واختبارُ القبولِ يُنادي المولِّدَ **عمليّةً ابنةً** ويقرأ رمزَ خروجِه؛ وهنا
  *       يُنفَّذ الضمانُ `G-READINESS-PURE-JUDGEMENT` بنيةً لا نيّةً.
+ *   R11: **الإسنادُ يُقرأ من حقلِه والسياقُ يُسمّى سياقاً** (إغلاقُ `LIVE-4`):
+ *       موضعُ الإسنادِ وصيغةُ الإحالةِ المحيَّدةِ **مُعلَنانِ في العقدِ**
+ *       (`attribution`) ومطابقانِ لما تقرأُه الشفرةُ — فمصدرانِ للصيغةِ
+ *       ينزاحُ أحدُهما بصمتٍ؛ وموثّقانِ **بنصِّهما** في `docs/READINESS.md`
+ *       وفي سجلِّ العملِ نفسِه (فمن يكتبُ المُدخلةَ يقرأُ القاعدةَ في
+ *       موضعِ كتابتِه). **والتمييزُ مقيسٌ سلوكاً لا مقروءٌ نصّاً**:
+ *       يُنادى `evidenceFor` على مُدخلاتٍ مصنوعةٍ فيُقاسُ أربعُ حالاتٍ:
+ *       ذِكرٌ في الحقلِ يُقرأ إسناداً، وذِكرٌ في المتنِ يُقرأ ذِكراً **لا**
+ *       إسناداً، وذِكرٌ محيَّدٌ في المتنِ **لا يُقرأ دليلاً أصلاً**، ومحيَّدٌ في
+ *       الحقلِ كذلكَ. والتقريرُ يُسمّي القسمَينِ ويعدُّ ما لا إسنادَ له.
+ *       **وعلّةُ وجودِها:** كان كلُّ ذِكرٍ دليلَ تنفيذٍ، فمُدخلةٌ تقولُ «هذه
+ *       الخطوةُ محجوبةٌ» تُصيِّرُها ذاتَ دليلٍ — **وذِكرُ الحَجبِ ليس إنجازاً.**
  *
  * **حدٌّ معلَن أول:** الحاجزُ يقيس **وجودَ الدليلِ وموضعَه لا كفايتَه**؛ فمُدخلةُ
  * سجلٍّ تذكر بنداً دليلٌ على توثيقِه لا شهادةٌ بأنّ ضابطَه كافٍ.
@@ -67,6 +79,12 @@ import { fileURLToPath } from 'node:url';
 import { collectReadinessFacts } from './lib/readiness-facts.mjs';
 import { loadDeferrals, loadReadinessContract } from '../src/readiness/contract.mjs';
 import { READINESS_ERRORS } from '../src/readiness/errors.mjs';
+import {
+  ATTRIBUTION_FIELD_TITLE,
+  evidenceFor,
+  NEUTRAL_REFERENCE_PREFIX,
+  readWorkLogEntries,
+} from '../src/readiness/evidence.mjs';
 import {
   COVERAGE_BANNER_TITLE,
   NOT_APPROVAL_CLAIMS,
@@ -377,6 +395,103 @@ if (contract !== null) {
       violations.push(
         `R10: قيمةُ الحكمِ في جدولِ §2 بلا لاحقةِ «${VERDICT_QUALIFIER}» — وخليّةٌ تقولُ «readiness:reported» وحدَها تُقرأُ اعتماداً.`,
       );
+    }
+  }
+
+  // ── R11: الإسنادُ من حقلِه والسياقُ يُسمّى سياقاً — إغلاقُ `LIVE-4` ──
+  const attribution = /** @type {{ fieldTitle: string, neutralReferencePrefix: string }} */ (
+    /** @type {unknown} */ (contract.attribution)
+  );
+  if (attribution === undefined || attribution === null) {
+    violations.push(
+      'R11: العقدُ بلا قسمِ `attribution` — وقاعدةُ قراءةِ الدليلِ مدفونةٌ في شفرةٍ قاعدةٌ لا يقرأُها من يكتبُ السجلَّ.',
+    );
+  } else {
+    if (attribution.fieldTitle !== ATTRIBUTION_FIELD_TITLE) {
+      violations.push(
+        `R11: حقلُ الإسنادِ في العقدِ «${attribution.fieldTitle}» وفي الشفرةِ «${ATTRIBUTION_FIELD_TITLE}» — ومصدرانِ للقاعدةِ ينزاحُ أحدُهما بصمتٍ.`,
+      );
+    }
+    if (attribution.neutralReferencePrefix !== NEUTRAL_REFERENCE_PREFIX) {
+      violations.push(
+        `R11: صيغةُ الإحالةِ المحيَّدةِ في العقدِ «${attribution.neutralReferencePrefix}» وفي الشفرةِ «${NEUTRAL_REFERENCE_PREFIX}» — فمن حيّدَ بما في الوثيقةِ حيّدَ بما لا يُقرأ.`,
+      );
+    }
+    // موضعُ الإعلانِ موضعُ الكتابةِ: من يكتبُ مُدخلةً يفتحُ سجلَّ العملِ لا العقدَ.
+    /** @type {{ where: string, text: string }[]} */
+    const declarationSites = [
+      { where: DOC, text: readOrEmpty(DOC) },
+      {
+        where: 'docs/roadmap/05-work-log.md',
+        text: readOrEmpty(/** @type {Record<string, string>} */ (contract.sources).workLog ?? ''),
+      },
+    ];
+    for (const { where, text } of declarationSites) {
+      if (text === '' || !text.includes(NEUTRAL_REFERENCE_PREFIX)) {
+        violations.push(
+          `R11: صيغةُ الإحالةِ المحيَّدةِ غيرُ موثّقةٍ بنصِّها في ${where} — وصيغةٌ لا يعلمُ بها الكاتبُ صيغةٌ لا تُستعمل.`,
+        );
+      }
+    }
+
+    // **والتمييزُ يُقاسُ سلوكاً:** مُدخلاتٌ مصنوعةٌ تُمرَّرُ على القارئِ نفسِه
+    // الذي يقرأُ المستودعَ — فحاجزٌ يقرأُ تعليقاً يمرُّ على قاعدةٍ موصوفةٍ غيرِ مُنفَّذةٍ.
+    const PROBE_ID = 'M4.03';
+    /** @param {string} body @returns {string[]} */
+    const kindsFor = (body) => {
+      const entries = readWorkLogEntries(
+        `### [2026-01-01] — WL-000 — مُدخلةُ قياسٍ
+${body}
+`,
+      );
+      return evidenceFor(PROBE_ID, {
+        entries,
+        roadmapRows: new Map(),
+        workLogPath: 'probe',
+        roadmapPath: 'probe',
+      }).map((ref) => ref.kind);
+    };
+    /** @type {Array<[string, string, string[]]>} */
+    const probes = [
+      [
+        'ذِكرٌ في حقلِ الإسنادِ',
+        `- **${ATTRIBUTION_FIELD_TITLE}:** الخطوة ${PROBE_ID}\n- **الحالة:** تمّة`,
+        ['evidence:worklog-attribution'],
+      ],
+      [
+        'ذِكرٌ سياقيٌّ في المتنِ',
+        `- **${ATTRIBUTION_FIELD_TITLE}:** الخطوة M9.09\n\nوالخطوة ${PROBE_ID} محجوبةٌ لا عملَ عليها هنا.`,
+        ['evidence:worklog-mention'],
+      ],
+      [
+        'ذِكرٌ محيَّدٌ في المتنِ',
+        `- **${ATTRIBUTION_FIELD_TITLE}:** الخطوة M9.09\n\nووثيقةُ ${NEUTRAL_REFERENCE_PREFIX}\`${PROBE_ID}\` قديمةٌ.`,
+        [],
+      ],
+      [
+        'ذِكرٌ محيَّدٌ في حقلِ الإسنادِ',
+        `- **${ATTRIBUTION_FIELD_TITLE}:** لا عملَ على ${NEUTRAL_REFERENCE_PREFIX}\`${PROBE_ID}\``,
+        [],
+      ],
+    ];
+    for (const [label, body, expected] of probes) {
+      const measured = kindsFor(body);
+      if (measured.join('|') !== expected.join('|')) {
+        violations.push(
+          `R11: ${label} يُقرأ «${measured.join('، ') || 'بلا دليلٍ'}» والمُعلَنُ «${expected.join('، ') || 'بلا دليلٍ'}» — وحكمٌ لا يفرِقُ الإسنادَ من السياقِ يقرأُ ذِكرَ الحَجبِ إنجازاً.`,
+        );
+      }
+    }
+
+    // والفرقُ **مرئيٌّ لمن يقرأُ التقريرَ** لا مدفونٌ في بنيةِ مُعطَياتٍ.
+    if (reportText !== '') {
+      for (const needle of ['إسناداً مُعلَناً', 'ذِكرٌ سياقيٌّ', NEUTRAL_REFERENCE_PREFIX]) {
+        if (!reportText.includes(needle)) {
+          violations.push(
+            `R11: التقريرُ لا يذكرُ «${needle}» — وفرقٌ لا يُرى في موضعِ قراءةِ الدليلِ فرقٌ غيرُ مُعلَنٍ.`,
+          );
+        }
+      }
     }
   }
 

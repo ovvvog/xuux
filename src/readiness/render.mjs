@@ -18,8 +18,16 @@
  * خليّةِ الجدولِ، **ومصدرُه واحدٌ** (`NOT_APPROVAL_CLAIMS` أدناه) يُقرأُ منه
  * المتنُ والمَخرَجُ الآليُّ معاً — فلا يفترقُ نصّانِ يقولانِ الشيءَ نفسَه.
  *
+ * **وتمييزُ الإسنادِ من السياقِ (`LIVE-4`):** كان عمودُ الدليلِ يسرُدُ المُدخلاتِ
+ * سرداً واحداً، فمُدخلةٌ ذكرَت البندَ في سياقِ «هذه الوثيقةُ قديمةٌ» تُقرأ في
+ * الجدولِ كمُدخلةٍ أُسنِدَ إليها العملُ. **فصارَ للعمودِ قسمانِ مُسمَّيانِ**:
+ * «إسناداً مُعلَناً» و«ذِكراً سياقيّاً»، وصارَ في §2 عدُّ البنودِ التي **لا إسنادَ
+ * مُعلَنَ لها** — فمن قرأَ الجدولَ رأى الفرقَ بلا أن يفتحَ الشفرةَ.
+ *
  * @module readiness/render
  */
+
+import { NEUTRAL_REFERENCE_PREFIX } from './evidence.mjs';
 
 /**
  * عنوانُ الترويسةِ الحاكمةِ — **يُقاسُ حضورُه في أوّلِ التقريرِ** بالقاعدةِ `R10`
@@ -75,14 +83,33 @@ function evidenceText(item) {
     return '**مؤجَّلٌ مُصرَّحاً** — سجلُّ التأجيلاتِ `config/readiness-deferrals.yaml`';
   }
   if (item.evidence.length === 0) return '**بلا دليلٍ**';
-  const worklog = item.evidence
-    .filter((ref) => ref.kind === 'evidence:worklog-entry')
+  const attribution = item.evidence
+    .filter((ref) => ref.kind === 'evidence:worklog-attribution')
+    .map((ref) => `\`${ref.locator}\``);
+  const mention = item.evidence
+    .filter((ref) => ref.kind === 'evidence:worklog-mention')
     .map((ref) => `\`${ref.locator}\``);
   const table = item.evidence.filter((ref) => ref.kind === 'evidence:roadmap-table');
   const parts = [];
-  if (worklog.length > 0) parts.push(`سجلُّ العملِ: ${worklog.join('، ')}`);
+  if (attribution.length > 0) parts.push(`إسناداً مُعلَناً: ${attribution.join('، ')}`);
+  if (mention.length > 0) parts.push(`ذِكراً سياقيّاً: ${mention.join('، ')}`);
   if (table.length > 0) parts.push('جدولُ «أدلّة تنفيذ» في الخارطةِ');
   return parts.join(' · ');
+}
+
+/**
+ * عددُ البنودِ التي **لا إسنادَ مُعلَنَ لها** — دليلُها ذِكرٌ في المتنِ أو صفُّ
+ * خارطةٍ لا حقلُ «المسار والخطوة». **وعددٌ لا يُعلَن عددٌ لا يُقاس.**
+ *
+ * @param {import('./judgement.mjs').CoveredItem[]} items
+ * @returns {number}
+ */
+function countWithoutAttribution(items) {
+  return items.filter(
+    (item) =>
+      item.coverage === 'evidenced' &&
+      !item.evidence.some((ref) => ref.kind === 'evidence:worklog-attribution'),
+  ).length;
 }
 
 /**
@@ -152,6 +179,12 @@ export function renderReport(facts) {
   lines.push(row(['بنودٌ بدليلٍ يُشار إلى موضعِه', String(judgement.coverage.evidenced)]));
   lines.push(row(['بنودٌ مؤجَّلةٌ تأجيلاً مُصرَّحاً', String(judgement.coverage.deferred)]));
   lines.push(row(['بنودٌ بلا دليلٍ ولا تأجيلٍ', String(judgement.coverage.uncovered)]));
+  lines.push(
+    row([
+      'منها: بنودٌ دليلُها **ذِكرٌ سياقيٌّ** لا إسنادٌ مُعلَنٌ',
+      String(countWithoutAttribution(items)),
+    ]),
+  );
   lines.push(row(['عدّادُ الخطواتِ', `\`${project.counter}\``]));
   lines.push(row(['النسبةُ المحسوبةُ آلياً', `${String(project.percent)}%`]));
   lines.push(row(['الإصدار', `\`${project.version}\``]));
@@ -162,6 +195,16 @@ export function renderReport(facts) {
     '**وقراءةُ الحكمِ:** `readiness:reported` تعني أنّ **كلَّ بندٍ مقابَلٌ بدليلٍ ' +
       'أو بتأجيلٍ مُصرَّحٍ** — لا أنّ كلَّ بندٍ منجَزٌ. وعددُ المؤجَّلاتِ أعلاه هو ' +
       'مقدارُ ما **لم يُنجَزْ** وأُعلِنَ عدمُ إنجازِه.',
+  );
+  lines.push('');
+  lines.push(
+    '**وفرقُ «الإسنادِ المُعلَنِ» من «الذِّكرِ السياقيِّ»:** الإسنادُ يُقرأ من حقلِ ' +
+      '«المسار والخطوة» في مُدخلةِ سجلِّ العملِ أو من عنوانِها — أي من **موضعٍ ' +
+      'يُعلِنُ صاحبُه أنّ العملَ وقعَ على هذا البندِ**. والذِّكرُ السياقيُّ ورودُ ' +
+      'المعرِّفِ في المتنِ وحدَه، وقد يكون في سياقِ حَجبٍ أو تقادُمِ وثيقةٍ — ' +
+      '**فهو موضعٌ يُراجَع لا إعلانُ إنجازٍ**. ومن أرادَ ذِكراً لا يُقرأ دليلاً ' +
+      `أصلاً كتبَ المعرِّفَ مسبوقاً بصيغةِ الإحالةِ المحيَّدةِ \`${NEUTRAL_REFERENCE_PREFIX}\` — ` +
+      'وهي مقيسةٌ بالقاعدةِ `R11` في `npm run guard:readiness`.',
   );
   lines.push('');
   lines.push('## 3. البنودُ المؤجَّلةُ — إعلانُ عدمِ إنجازٍ لا دليلُ إنجازٍ');
