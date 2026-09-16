@@ -14,7 +14,8 @@
     "rotation",
     "escalation",
     "review",
-    "guarantees"
+    "guarantees",
+    "delivery"
   ],
   "properties": {
     "version": { "type": "integer", "minimum": 1 },
@@ -41,6 +42,7 @@
         "alertResolvedEvent": { "$ref": "#/$defs/eventName" },
         "reviewPublishedEvent": { "$ref": "#/$defs/eventName" },
         "refusedEvent": { "$ref": "#/$defs/eventName" },
+        "notificationDeliveredEvent": { "$ref": "#/$defs/eventName" },
         "statement": { "type": "string", "minLength": 20 }
       }
     },
@@ -212,6 +214,29 @@
             "items": { "type": "string", "pattern": "^IR_[A-Z][A-Z_]*$" }
           }
         }
+      }
+    },
+
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoints", "statement"],
+      "properties": {
+        "endpoints": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "url", "method"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^channel:[a-z][a-z0-9-]*$" },
+              "url": { "type": "string", "pattern": "^https?://.+" },
+              "method": { "enum": ["POST", "PUT"] }
+            }
+          }
+        },
+        "statement": { "type": "string", "minLength": 40 }
       }
     }
   },
