@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xuux.local/schemas/time.schema.json",
+  "title": "سياسة الوقت المُبرهَن من مصدر موقَّع",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "quorum",
+    "maxRadiusMs",
+    "maxAgeMs",
+    "maxLocalSkewMs",
+    "requestTimeoutMs",
+    "sovereign",
+    "sources"
+  ],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "quorum": { "type": "integer", "minimum": 2, "maximum": 16 },
+    "maxRadiusMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
+    "maxAgeMs": { "type": "integer", "minimum": 1000, "maximum": 3600000 },
+    "maxLocalSkewMs": { "type": "integer", "minimum": 1, "maximum": 3600000 },
+    "requestTimeoutMs": { "type": "integer", "minimum": 100, "maximum": 30000 },
+    "sovereign": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requireAttestedTime"],
+      "properties": {
+        "requireAttestedTime": { "type": "boolean" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "dialect", "host", "port", "publicKey"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
+          "dialect": { "type": "string", "enum": ["ietf", "google"] },
+          "host": { "type": "string", "pattern": "^[a-z0-9.-]{3,253}$" },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "publicKey": { "type": "string", "pattern": "^[A-Za-z0-9+/]{43}=$" }
+        }
+      }
+    }
+  }
+}

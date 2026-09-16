@@ -68,6 +68,7 @@ test('رموز أخطاء الساعة مثبَّتة نصاً ولا تنحرف
       'CLOCK_STATE_UNREADABLE',
       'CLOCK_STATE_UNWRITABLE',
       'CLOCK_ATTESTATION_REQUIRED',
+      'ATTESTED_TIME_REQUIRED',
     ],
   );
 });

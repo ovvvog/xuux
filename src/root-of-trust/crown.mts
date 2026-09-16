@@ -69,6 +69,18 @@ export interface CrownGatewayOptions {
    */
   requireHaltSwitch?: boolean;
   /**
+   * إلزامُ **وقتٍ مُبرهَنٍ** لا ساعةٍ كاشفةِ انزياحٍ فقط (‏`D-7`، `WL-192`).
+   * الافتراضُ من بيئةِ التشغيلِ، ولا يُطفأُ بخيارٍ في الإنتاجِ.
+   *
+   * والفرقُ بينَه وبينَ `requireTrustedClock` هو موضعُ الدَّينِ كلِّه: تلك تلزمُ
+   * ساعةً **تكشفُ اضطرابَها**، وهذه تلزمُ ساعةً **يشهدُ لوقتِها مصدرٌ موقَّعٌ
+   * خارجيٌّ**. وجهازٌ يبدأُ عمرَه بساعةٍ مكذوبةٍ تتقدّمُ رتيباً يمرُّ من الأولى
+   * كلَّه: لا وثبةَ ولا رجوعَ، وكلُّ مُهلةٍ تُقاسُ على كذبٍ ثابتٍ. فإن لزمَ
+   * البُرهانُ ولم يوجد حاضراً يُرفَضُ الأمرُ بـ`ATTESTED_TIME_REQUIRED` قبلَ أن
+   * يُحرَقَ معرِّفُه.
+   */
+  requireAttestedTime?: boolean;
+  /**
    * بيئةُ التشغيلِ المقروءةُ (‏`UF-11`). كانت البوابةُ تقرأُ `process.env`
    * مباشرةً في ثلاثةِ مواضعَ، وأحدُها يقرأُ `NODE_ENV` خاماً دونَ `STATE_ENV`،
    * فيختلفُ معنى «الإنتاج» بينَ حقلٍ وحقلٍ في البوابةِ نفسِها.
@@ -116,6 +128,8 @@ export class CrownGateway {
   requireCommandLedger: boolean;
   /** إلزامُ مفتاحِ الإيقافِ الشامل — يُفحصُ عندَ البناء. */
   requireHaltSwitch: boolean;
+  /** إلزامُ وقتٍ مُبرهَنٍ — يُفحصُ عندَ البناءِ شكلاً وعندَ كلِّ قراءةِ وقتٍ حضوراً. */
+  requireAttestedTime: boolean;
   veto: Veto;
   stopped: boolean;
   heartbeatAt: number;
@@ -157,12 +171,14 @@ export class CrownGateway {
         ['requireCommandLedger', options.requireCommandLedger],
         ['requireHaltSwitch', options.requireHaltSwitch],
         ['requireTrustedClock', options.requireTrustedClock],
+        ['requireAttestedTime', options.requireAttestedTime],
       ] as const) {
         if (value === false)
           throw new Error(`CROWN_GUARANTEE_CANNOT_BE_DISABLED_IN_PRODUCTION:${name}`);
       }
     }
     this.requireTrustedClock = production ? true : (options.requireTrustedClock ?? false);
+    this.requireAttestedTime = production ? true : (options.requireAttestedTime ?? false);
     this.requireCommandLedger = production ? true : (options.requireCommandLedger ?? false);
     this.requireHaltSwitch = production ? true : (options.requireHaltSwitch ?? false);
     if (this.requireCommandLedger && this.commandLedger === null) {
@@ -178,6 +194,15 @@ export class CrownGateway {
       throw new ClockError('CLOCK_REQUIRED_IN_PRODUCTION', {
         detail:
           'التركيبُ الإنتاجيُّ يلزمُ ساعةً موثوقةً، ولم تُمرَّر؛ فلا يُبنى البابُ (M11.04-F04).',
+      });
+    }
+    // الشكلُ يُفحصُ عندَ البناءِ والحضورُ عندَ كلِّ أمرٍ: ساعةٌ لا تُعلِنُ
+    // `attestation()` أصلاً لا تُبرهِنُ وقتاً أبداً، فرفضُها عندَ أوّلِ أمرٍ
+    // يعني تركيباً إنتاجياً يعملُ لحظةً بلا الضمانِ الذي أُعلِنَ له.
+    if (this.requireAttestedTime && typeof this.clock?.attestation !== 'function') {
+      throw new ClockError('ATTESTED_TIME_REQUIRED', {
+        detail:
+          'التركيبُ يلزمُ وقتاً مُبرهَناً، والساعةُ المُمرَّرةُ لا تُعلِنُ بُرهاناً؛ فلا يُبنى البابُ (D-7).',
       });
     }
     this.veto = new Veto();
@@ -197,7 +222,28 @@ export class CrownGateway {
    */
   private nowMs(): number {
     this.assertTrustedClock();
+    this.assertAttestedTime();
     return this.clock ? this.clock.now() : Date.now();
+  }
+
+  /**
+   * يرفعُ `ClockError` برمزِ `ATTESTED_TIME_REQUIRED` حينَ يلزمُ التركيبُ وقتاً
+   * مُبرهَناً ولا بُرهانَ حاضراً — قبلَ أيِّ حسابِ عمرٍ وقبلَ استهلاكِ معرِّفِ
+   * الأمرِ.
+   *
+   * والبُرهانُ القديمُ يُقرأُ **عدماً** لا مقبولاً: الساعةُ المُبرهَنةُ تُرجعُ
+   * `null` إذا فاتَ عمرُ بُرهانِها، فلا تحتاجُ البوابةُ أن تتذكَّرَ فحصَ العمرِ
+   * — ومن احتاجَ ذاكرةَ مُستهلِكٍ ليصحَّ ضمانُه فضمانُه اختياريٌّ.
+   */
+  private assertAttestedTime(): void {
+    if (!this.requireAttestedTime) return;
+    const attestation = this.clock?.attestation?.() ?? null;
+    if (attestation === null) {
+      throw new ClockError('ATTESTED_TIME_REQUIRED', {
+        detail:
+          'لا بُرهانَ وقتٍ حاضراً من مصدرٍ موقَّعٍ؛ ومُهلةٌ تُقاسُ على ساعةٍ لا بُرهانَ لها ليست مُهلةً (D-7).',
+      });
+    }
   }
 
   /**
