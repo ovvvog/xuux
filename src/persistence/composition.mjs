@@ -72,6 +72,7 @@ import {
   DATA_ASSET_SPEC,
   DATA_LINEAGE_SPEC,
   ERASURE_RECORD_SPEC,
+  SCHEDULED_RUN_SPEC,
   EVENT_MESSAGE_SPEC,
   EVENT_OFFSET_SPEC,
   CASE_SPEC,
@@ -93,6 +94,7 @@ import {
 import { createMemoryRepository } from './repository-memory.mjs';
 import { createPostgresRepository } from './repository-postgres.mjs';
 import { withUnitOfWork } from './unit-of-work.mjs';
+import { Scheduler, ScheduledRunLedger, loadSchedulePolicy } from '../scheduling/index.mjs';
 
 /**
  * ترتيب الإنشاء مقصود: الوكلاء ثم أصول البيانات قبل الذاكرة، لأن مراجع القاعدة
@@ -120,6 +122,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {ReturnType<typeof createMemoryRepository>} federationRefusals
  * @property {ReturnType<typeof createMemoryRepository>} federationRegister
  * @property {ReturnType<typeof createMemoryRepository>} royalReports
+ * @property {ReturnType<typeof createMemoryRepository>} scheduledRuns
  */
 
 /**
@@ -149,6 +152,7 @@ import { withUnitOfWork } from './unit-of-work.mjs';
  * @property {RegionalDelegation} federation
  * @property {DelegationRegister} federationRegister
  * @property {RoyalReportGenerator} reports
+ * @property {Scheduler} scheduler
  * @property {import('../cost-capacity/cost-capacity.mjs').CostCapacity} costLedger
  * @property {MonitorAgent} monitor
  * @property {ApiGateway} api
@@ -190,6 +194,7 @@ export function createMemoryRepositories(options = {}) {
     federationRefusals: createMemoryRepository(FEDERATION_REFUSAL_SPEC, options),
     federationRegister: createMemoryRepository(FEDERATION_REGISTER_SPEC, options),
     royalReports: createMemoryRepository(ROYAL_REPORT_SPEC, options),
+    scheduledRuns: createMemoryRepository(SCHEDULED_RUN_SPEC, options),
   };
 }
 
@@ -223,6 +228,7 @@ export function createPostgresRepositories(pool) {
       federationRefusals: createPostgresRepository(pool, FEDERATION_REFUSAL_SPEC),
       federationRegister: createPostgresRepository(pool, FEDERATION_REGISTER_SPEC),
       royalReports: createPostgresRepository(pool, ROYAL_REPORT_SPEC),
+      scheduledRuns: createPostgresRepository(pool, SCHEDULED_RUN_SPEC),
     })
   );
 }
@@ -556,6 +562,33 @@ export function createRegistries({
       /** @type {readonly Record<string, unknown>[]} */ (/** @type {unknown} */ (log.snapshot())),
     ...(nowMs === null ? {} : { nowMs }),
   });
+  // المُجدوِلُ يُركَّبُ **دائماً** (‏`D-4`)، لنفسِ سببِ دفترَي النسبِ والمحوِ:
+  // مُجدوِلٌ اختياريُّ التركيبِ يصيرُ جدولةً لا مسارَ لها، فتعودُ التقاريرُ
+  // والتمارينُ إلى نداءٍ يدويٍّ — وهو العيبُ الذي أُغلِقَ بعينِه. ودفترُه على
+  // المستودعِ نفسِه الذي تقرأُ منه كلُّ نسخةٍ: موعدٌ في ذاكرةِ عمليّةٍ يزولُ
+  // بإعادةِ التشغيلِ فيُعادُ عملٌ وقعَ.
+  //
+  // ونقطةُ التفويضِ تُمرَّرُ كما هي: تركُها `null` **لا يفتحُ الباب** — كلُّ
+  // إطلاقٍ يُرفَضُ برمزِ `SCHEDULER_AUTHORIZER_REQUIRED`، فالتركيبُ الناقصُ يظهرُ
+  // رفضاً لا سماحاً. ولا مُنفِّذَ يُسجَّلُ هنا: تسجيلُ المُنفِّذينَ فعلُ المُشغِّلِ
+  // في `scripts/scheduler.mjs`، وجذرُ التركيبِ يُنشئُ المسارَ لا يُطلِقُه.
+  //
+  // وبناؤه **عندَ أوّلِ طلبٍ** لا في نصِّ التركيبِ: قيودُ الجدولةِ تُقاسُ على
+  // حزمةِ السياساتِ المُمرَّرةِ، ومن حقنَ حزمةً جزئيّةً (اختبارٌ يبني سياسةً
+  // واحدةً) كان تركيبُ الدولةِ كلِّه يسقطُ عندَه بعيبٍ ليس عيبَه. والرفضُ لا
+  // يُكتَمُ: أوّلُ قراءةٍ لـ`registries.scheduler` تُسقِطُ `SCHEDULER_CONFIG_INVALID`
+  // كما هو — فالتأجيلُ في زمنِ البناءِ لا في وجوبِ الرفضِ.
+  /** @type {Scheduler | null} */
+  let schedulerInstance = null;
+  const buildScheduler = () => {
+    schedulerInstance ??= new Scheduler({
+      policy: loadSchedulePolicy({ bundle: policyBundle ?? loadPolicyBundle() }),
+      ledger: new ScheduledRunLedger({ log, repository: repositories.scheduledRuns }),
+      ...(enforcementPoint === null ? {} : { authorizer: enforcementPoint }),
+      log,
+    });
+    return schedulerInstance;
+  };
   const royalReports = new RoyalReportGenerator({
     policy: reportsPolicy ?? loadReportPolicy(),
     reports: repositories.royalReports,
@@ -821,6 +854,9 @@ export function createRegistries({
     federation: regionalDelegation,
     federationRegister: delegationRegister,
     reports: royalReports,
+    get scheduler() {
+      return buildScheduler();
+    },
     // دفترُ التكلفةِ موصولٌ في التركيبِ (`D-6`): مَن يُسجِّلُ الاستهلاكَ في زمنِ
     // التشغيلِ يأخذُه من هنا فيُقيِّدُ في السجلِّ نفسِهِ الذي يقرأُ منه التقريرُ
     // عدّادَ وحداتِ الحساب — فدفترانِ يعنيانِ عدّادينِ لاستهلاكٍ واحد، ومَن
