@@ -453,6 +453,12 @@ const PLAN_DEFICIENCIES = [
     kind: 'absent-from-reviewed-commit',
     reason: 'الخطّةُ كُتِبت بعدَ الاستنساخِ فلم تصلِ الأعضاءَ — عينُ النتيجةِ `R6-A-10`',
   },
+  {
+    engagement: 'M11.06',
+    round: 2,
+    kind: 'absent-from-reviewed-commit',
+    reason: 'الخطّةُ وُجدتْ في استنساخِ العضوينِ لا في الكوميتِ المُراجَعِ — نفسُ عينِ `R6-A-10`',
+  },
 ];
 
 /** @param {string} engagement @param {number} round @param {string} kind */
