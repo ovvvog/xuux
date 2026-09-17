@@ -510,11 +510,31 @@ test('تركيبُ الحكم يُعلِن حاجزَ التشريع في ضما
   });
   // قانونٌ ثانٍ لا يَنفُذ لتعارضه، فيبقى التعارضُ محسوباً على مرشَّحٍ لا نافذ؛
   // ولذلك يُقاس هنا الوعدُ نفسُه: التركيبُ يُعلِن أنّ الحاجزَ موصولٌ أو غيرُ موصول.
-  const bare = createGovernance({ log: s.log, bundle: s.bundle });
+  // R5-A-02: المصنعُ الرسميُّ يُلزِمُ بوابةَ هويةٍ — لا يُبنى بلاها. وبوابةٌ
+  // مصغَّرةٌ تُحاكي جذرَ الثقةِ تكفي لقياسِ الوعدِ هنا.
+  const mockGate = {
+    /** @param {string} actorId */
+    async verify(actorId) {
+      return {
+        ok: true,
+        code: 'IDENTITY_OK',
+        reason: 'mock',
+        actor: {
+          id: actorId,
+          role: 'role:operator',
+          state: 'active',
+          kind: /** @type {const} */ ('human'),
+          capabilities: /** @type {readonly string[]} */ ([]),
+        },
+      };
+    },
+  };
+  const bare = createGovernance({ log: s.log, bundle: s.bundle, identityGate: mockGate });
   assert.equal(bare.guarantees.legislationEnforced, false, 'من لم يمرّره لا يُوعَد به');
   const wired = createGovernance({
     log: s.log,
     bundle: s.bundle,
+    identityGate: mockGate,
     legislationGate: enforcementGate(s.legislature),
   });
   assert.equal(wired.guarantees.legislationEnforced, true);

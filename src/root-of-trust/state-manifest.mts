@@ -632,6 +632,21 @@ export class StateManifest {
   }
 
   /**
+   * شاهدُ عَدِّ المُثبَّتاتِ كواجهةٍ صغيرةٍ تُحقَنُ في `maybeAnchorLogWithHsm`
+   * (‏`R5-B-02`): بدلَ callbackٍ عامٍّ يُستقبَلُ شاهدٌ موثوقٌ ويُرفَعُ مباشرةً، ثمّ
+   * يُتحقَّقُ من ارتفاعِهِ فلا يمرُّ مرساةٌ موقَّعةٌ بلا شاهدٍ.
+   * @returns الحدُّ الأدنى الدائم
+   */
+  anchoredCountFloor(): MonotonicFloor {
+    return {
+      read: (): number => this.read().anchoredCount,
+      raise: (value: number): void => {
+        this.raise('anchoredCount', value);
+      },
+    };
+  }
+
+  /**
    * شاهدُ عَدِّ الأوامرِ المُثبَّتةِ كواجهةٍ صغيرةٍ تُحقَنُ في `CommandLedger`.
    * @returns الحدُّ الأدنى الدائم
    */

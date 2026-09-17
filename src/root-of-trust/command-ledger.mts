@@ -165,6 +165,13 @@ export interface CommandLedgerOptions {
    */
   sealWitness?: (() => Promise<void>) | null;
   /**
+   * مَصَبُّ التزامٍ بعدَ الكتابةِ وقبلَ الختمِ (‏`R5-A-01`). يُستدعى في المسارِ
+   * الموقَّعِ بعدَ `#writeEntry` وقبلَ `#sealWitness`، فيكتبُ واقعةً مختومةً في السجلِّ
+   * بمعرّفِ الأمرِ وعدِّهِ — شاهدٌ ثانٍ لا يُسترجَعُ معَ البيانِ وحدَه. ومن لم
+   * يوصِله يبقى على شاهدٍ واحدٍ قابلٍ للاسترجاعِ.
+   */
+  onCommitSink?: ((entry: SignedLedgerEntryRecord) => Promise<void>) | null;
+  /**
    * تهيئةٌ أولى مُعلَنةٌ لجذرِ الحالة. يُمرِّرُها المصنعُ الإنتاجيُّ وحدَه حين
    * يقولُ بيانُ الجذرِ إنه لم يُهيَّأ بعد؛ وعندَها يُنشَأُ المجلَّدانِ. وفي كلِّ
    * إقلاعٍ بعدَها غيابُ المجلَّدِ **محوٌ يُرَدُّ** لا نقصٌ يُكمَّل (‏`UF-13`).
@@ -244,6 +251,7 @@ export class CommandLedger {
   readonly #signer: LedgerDecisionSigner | null;
   readonly #witness: LedgerWitness | null;
   readonly #sealWitness: (() => Promise<void>) | null;
+  readonly #onCommitSink: ((entry: SignedLedgerEntryRecord) => Promise<void>) | null;
 
   /**
    * @param file - مسار دفتر المعرّفات الدائم
@@ -259,6 +267,7 @@ export class CommandLedger {
     this.#signer = options.signer ?? null;
     this.#witness = options.witness ?? null;
     this.#sealWitness = options.sealWitness ?? null;
+    this.#onCommitSink = options.onCommitSink ?? null;
     // خارجَ الإنتاجِ يُنشأُ المجلَّدانِ ضمناً كما كان؛ أمّا في الإنتاجِ فلا:
     // مجلَّدُ حجوزاتٍ مفقودٌ قد يكونُ محواً، وإنشاءُه صامتاً يمحو أثرَ المحو
     // (‏`UF-13`).
@@ -669,6 +678,12 @@ export class CommandLedger {
       signature,
     };
     this.#writeEntry(signedEntry);
+    // R5-A-01: شاهدٌ ثانٍ من السجلِّ المختومِ. يُكتبُ بعدَ الدفترِ وقبلَ ختمِ
+    // البيانِ، فلا يبقى شاهدُ العهدِ في موضعٍ واحدٍ يُسترجَعُ معَه. ومن لم يوصِلْه
+    // يبقى على شاهدٍ واحدٍ قابلٍ للاسترجاعِ. ولا يُكتبُ إلا للالتزامِ لا للإلغاء.
+    if (this.#onCommitSink !== null && state === 'committed') {
+      await this.#onCommitSink(signedEntry);
+    }
     if (this.#sealWitness !== null) await this.#sealWitness();
     return signedEntry;
   }
