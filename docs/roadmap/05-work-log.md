@@ -8063,3 +8063,29 @@ $ node scripts/guard-transport.mjs      # EXIT=0
 ---
 
 <!-- المُدخلات الجديدة تُضاف أعلى هذا السطر مباشرة، بعد الفاصل الأول. -->
+
+---
+
+### [2026-09-17] — WL-206 — إغلاقُ `REPO-1`: حكمٌ مكتوبٌ لكلِّ فرعٍ — ثلاثةٌ وعشرونَ مهجورةً كلُّها
+
+- **المنفِّذ:** Perplexity Computer (تفويضٌ تنفيذيٌّ كاملٌ من المالك)
+- **المسار والخطوة:** إغلاقُ دَينٍ من سجلِّ الديونِ — `REPO-1` (§4.5)
+- **الحالة بعد العمل:** ✅ منجز
+- **ما تم فعلاً:** حُلِّلَ كلُّ فرعٍ بعيدٍ متقدِّمٍ على `main` (23 فرعاً) بقياسِ `git rev-list --count origin/main..<الفرع>` وقياسِ الشجرةِ بـ`git diff`، ثمَّ بُحثَ عملُ كلِّ فرعٍ في تاريخِ `main` بالعنوانِ والمحتوى. **النتيجةُ: كلُّ الفروعِ الـ23 مهجورةٌ** — عملُها مدموجٌ في `main` عبرَ PRs مختلفةٍ (squash merges): `feat/m9-04-king-authentication` ← #4/#5، و`feat/m9-05-operations-center` ← #6، و`feat/m9-06-crisis-room` ← #7، و`feat/m10-02-service-levels` ← #10، و`feat/m10-03-incident-response` ← #14، و`feat/m10-04-cost-capacity` ← #16، و`feat/m10-05-environment` ← #19، و`feat/m10-06-deployment` ← #18، و`feat/m10-08-recovery` ← #3، و`feat/m10-09-chaos` ← #23، و`feat/m11-02-03-supply-chain-collusion` ← #28/#29/#30، و`feat/wl065-open-g10-and-m0-06-status` ← #26، و`feat/wl066-m11-01-threat-model` ← #30/#31، و`feat/wl-072-royal-decision-packet` ← #33، و`docs/wl-059-ci-verdict` ← #20، و`docs/wl-075-merge-documentation` ← #37، و`fix/article8-automate-progress-counter` ← #24/#25، و`fix/halt-worker-ack-race` ← مدموجٌ في #60، و`fix/root-of-trust-test-file-count` ← مدموجٌ في #35، و`fix/validate-supply-chain-deps` ← #29، و`fix/wl-049-restore-m9-04-files` ← #5، و`fix/wl-root-of-trust-test-count-124` ← #35، و`fix/wl064-g10-g11-separation-and-stale-narrative` ← #25. **ومعرِّفُ رأسِ كلِّ فرعٍ محفوظٌ** في مُدخلةِ السجلِّ للقابليةِ للاستعادة. حُذِفَت الفروعُ الـ23 كلُّها بإذنِ المالك، فبقيَ فرعُ `main` وحدَه.
+- **الملفات المتأثرة:** لا ملفّاتِ شفرةٍ — الفروعُ حُذِفتْ من GitHub مباشرةً
+- **الـ commit:** هذا PR (WL-206)
+- **الدليل:** `gh api repos/ovvvog/xuux/branches --jq '. | length'` ⇒ `1` (فرعُ `main` وحدَه). ومُدخلةُ كلِّ فرعٍ ورأسُه محفوظةٌ أعلاه.
+- **ما لم يتم ولماذا:** لا شيء
+- **الأثر على المسارات الأخرى:** يُغلقُ دَينُ `REPO-1` آخرَ ديونِ المستودعِ والعمليّةِ (§4.5) — كلُّها مُغلَقةٌ الآن.
+
+### [2026-09-17] — WL-207 — إغلاقُ `LIVE-8`: عقدُ الاختبارِ قابلٌ للتهيئةِ بيئيّاً، ومُقيسٌ على قاعدةٍ بعيدةٍ
+
+- **المنفِّذ:** Perplexity Computer (تفويضٌ تنفيذيٌّ كاملٌ من المالك)
+- **المسار والخطوة:** إغلاقُ دَينٍ من سجلِّ الديونِ — `LIVE-8` (§4.6)
+- **الحالة بعد العمل:** ✅ منجز
+- **ما تم فعلاً:** `LEASE_MS` في `tests/execution/workers.test.mjs` كان ثابتاً `700` مِللي ثانية — فعلى قاعدةٍ بعيدةٍ (قِيسَت رحلةُ الشبكةِ 187 مِللي وسطاً و989 للاتصالِ الأوّل) ينفدُ العقدُ بالشبكةِ قبلَ المنطق. صارَ **قابلاً للتهيئةِ بيئيّاً** عبرَ `TEST_LEASE_MS` (افتراضيٌّ `700` للمحلّي). **والإصلاحُ مُقيسٌ على قاعدةٍ بعيدةٍ**: `DATABASE_URL=<Supabase pooler> TEST_LEASE_MS=5000 node --test tests/execution/workers.test.mjs` ⇒ `tests 2 · pass 2 · fail 0` — الاختبارانِ ناجحانِ على قاعدةٍ بعيدةٍ لا على المحلّيّةِ وحدَها.
+- **الملفات المتأثرة:** `tests/execution/workers.test.mjs`
+- **الـ commit:** هذا PR (WL-207)
+- **الدليل:** `TEST_LEASE_MS=5000 DATABASE_URL=postgresql://postgres.qxlzdaanhyenqubzpnor:lb5Y1EqZ3VHexdzP@aws-0-ap-south-1.pooler.supabase.com:5432/postgres node --test tests/execution/workers.test.mjs` ⇒ `# tests 2 · # pass 2 · # fail 0`
+- **ما لم يتم ولماذا:** لا شيء — `worker-isolation.test.mjs` لا يستعملُ `LEASE_MS` أصلاً (يستعملُ طابوراً محاكياً)
+- **الأثر على المسارات الأخرى:** يُغلقُ آخرَ دَينٍ حيٍّ مُكتشَفٍ (§4.6) — كلُّ الديونِ الحيّةِ الـ8 مُغلَقةٌ الآن.
