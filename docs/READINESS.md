@@ -116,6 +116,7 @@
 `READINESS_SOURCE_MISSING` · `READINESS_ITEM_COUNT_MISMATCH` ·
 `READINESS_ITEM_UNCOVERED` · `READINESS_DEFERRAL_INCOMPLETE` ·
 `READINESS_DEFERRAL_UNDECLARED` · `READINESS_DEFERRAL_ORPHAN` ·
+`READINESS_DEFERRAL_REVIEW_OVERDUE` ·
 `READINESS_EVIDENCE_MISSING` · `READINESS_REPORT_DRIFT` ·
 `READINESS_SELF_APPROVAL` · `READINESS_LAUNCH_CLAIM` ·
 `READINESS_VERDICT_UNDECLARED` · `READINESS_ARGUMENT_UNKNOWN`
@@ -123,12 +124,31 @@
 وهي **متقابلةٌ في الاتجاهين** مع `READINESS_ERRORS` في `src/readiness/errors.mjs`،
 يُثبت التقابلَ الحاجزُ `npm run guard:readiness`.
 
+### التأجيلُ موقوتٌ لا مفتوحٌ
+
+لكلِّ تأجيلٍ في `config/readiness-deferrals.yaml` قسمُ `recheck`: وتيرةً (`cadence`
+بصيغةِ مدّةٍ — `P1M` أو `P3M`)، وتاريخَ آخرِ مراجعةٍ فعليّةٍ للحاجزِ
+(`lastReviewedOn` بصيغةِ `YYYY-MM-DD`)، ومُدخلةَ قرارِ الوتيرةِ (`decidedIn`).
+**والوتيرةُ ليست اختيارَ منفِّذٍ:** تُقرأ من `recheckPolicy` في السجلِّ، وهي
+مُقابَلةٌ في الاتجاهين بقسمِ `deferralRecheck` في `config/readiness-report.yaml` —
+الأساسُ `P3M`، ويُشدَّدُ إلى `P1M` لِما سلطةُ فكِّه `model-council` (قرارُ المالكِ في
+`WL-204`).
+
+و«المراجعةُ القادمةُ» في §3 من التقريرِ **حاصلُ حسابٍ** (آخرُ مراجعةٍ + الوتيرةُ) لا
+وعدٌ مكتوبٌ بيدٍ، ويُحسَبُ في `nextReviewOn` بوحدةٍ نقيّةٍ لا تقرأُ ساعةَ النظامِ.
+ومن فاتَ موعدُه **أوقفَ الحاجزَ** `npm run guard:readiness` بالرمزِ
+`READINESS_DEFERRAL_REVIEW_OVERDUE` (القاعدةُ `R12`) — فيُراجَعُ الحاجزُ وتُسجَّلُ
+نتيجةُ المراجعةِ بمُدخلةٍ جديدةٍ يُحدَّثُ بها `lastReviewedOn`، أو تُعلَنُ وتيرةٌ أخرى
+بقرارِ صاحبِ السلطةِ. **وهذا فَواتٌ مقصودٌ لا خطأٌ عارضٌ:** تأجيلٌ مضى موعدُه بلا
+مراجعةٍ تأجيلٌ مفتوحٌ عملاً وإن كانَ موقوتاً كتابةً.
+
 ## 9. الضماناتُ وملفَّاتُ إنفاذِها
 
 | الضمان | ملفُّ الإنفاذِ |
 | --- | --- |
 | `G-READINESS-EVERY-ITEM-COVERED` | `src/readiness/judgement.mjs` |
 | `G-READINESS-DEFERRAL-DECLARED-NOT-IMPLIED` | `src/readiness/deferrals.mjs` |
+| `G-READINESS-DEFERRAL-REVIEW-DATED` | `src/readiness/deferrals.mjs` |
 | `G-READINESS-EVIDENCE-POINTS-TO-DISK` | `scripts/lib/readiness-facts.mjs` |
 | `G-READINESS-NO-SELF-APPROVAL` | `scripts/guard-readiness.mjs` |
 | `G-READINESS-NO-LAUNCH-CLAIM` | `scripts/guard-readiness.mjs` |

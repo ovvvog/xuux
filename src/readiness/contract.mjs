@@ -87,16 +87,28 @@ export function loadReadinessContract(options = {}) {
 }
 
 /**
+ * سجلُّ التأجيلاتِ كما هو: تأجيلاتُه **وسياسةُ إعادةِ النظرِ فيه** — فمن قرأَ
+ * التأجيلاتِ بلا سياستِها قرأَ وتيرةً بلا مصدرٍ يُقابَلُ به (الدَّين `LIVE-3`).
+ *
  * @param {{ configDir?: string }} [options]
- * @returns {import('./deferrals.mjs').DeferralRecord[]}
+ * @returns {{ version: string, deferrals: import('./deferrals.mjs').DeferralRecord[], recheckPolicy: { baselineCadence: string, byAuthority: Record<string, string>, decidedIn: string } }}
  */
-export function loadDeferrals(options = {}) {
+export function loadDeferralRegistry(options = {}) {
   const configDir = options.configDir ?? path.join(REPO_ROOT, 'config');
   const registry = loadValidated(
     path.join(configDir, 'readiness-deferrals.yaml'),
     path.join(configDir, 'schemas', 'readiness-deferrals.schema.json'),
     READINESS_ERRORS.DEFERRALS_INVALID,
   );
+  return /** @type {any} */ (registry);
+}
+
+/**
+ * @param {{ configDir?: string }} [options]
+ * @returns {import('./deferrals.mjs').DeferralRecord[]}
+ */
+export function loadDeferrals(options = {}) {
+  const registry = loadDeferralRegistry(options);
   const deferrals = /** @type {import('./deferrals.mjs').DeferralRecord[]} */ (registry.deferrals);
   const ids = new Set(deferrals.map((deferral) => deferral.id));
   if (ids.size !== deferrals.length) {

@@ -10,7 +10,7 @@
  *
  * الحواجزُ قبلَها تحرس أن يعملَ النظامُ ويتعافى ويُوقَف. وهذه تحرس سؤالاً آخرَ:
  * **هل يُقال الناقصُ ناقصاً؟** فمعيارُ `M11.08` بحرفِه «صفرُ بندٍ بلا دليلٍ أو بلا
- * تأجيلٍ معلَنٍ» — وإحدى عشرةَ قاعدةً:
+ * تأجيلٍ معلَنٍ» — واثنتا عشرةَ قاعدةً:
  *
  *   R0: `config/readiness-report.yaml` و`config/readiness-deferrals.yaml` تُحمَّلان
  *       بمخطَّطَيهما الصارمَين؛ ووثيقةٌ تُخالف مخطَّطَها تُوقف البوابةَ قبل كلِّ فحصٍ.
@@ -60,6 +60,15 @@
  *       **وعلّةُ وجودِها:** كان كلُّ ذِكرٍ دليلَ تنفيذٍ، فمُدخلةٌ تقولُ «هذه
  *       الخطوةُ محجوبةٌ» تُصيِّرُها ذاتَ دليلٍ — **وذِكرُ الحَجبِ ليس إنجازاً.**
  *
+ *   R12: **التأجيلُ موقوتٌ لا مفتوحٌ** (إغلاقُ `LIVE-3`): سياسةُ إعادةِ النظرِ
+ *       في `config/readiness-deferrals.yaml` مُقابَلةٌ بقسمِ `deferralRecheck` في
+ *       العقدِ في الاتجاهين، ولكلِّ تأجيلٍ وتيرةٌ **مطابقةٌ لسياسةِ سلطتِه** وتاريخُ
+ *       آخرِ مراجعةٍ غيرُ مستقبَليٍّ ومُدخلةُ قرارٍ موجودةٌ في سجلِّ العملِ، و**موعدُ
+ *       مراجعتِه لم يَفُتْ** بحسابِ يومِ التشغيلِ. والحسابُ يُقاسُ سلوكاً على
+ *       مُدخلاتٍ مصنوعةٍ (ناقصُ الحقلِ، ومخالفُ الوتيرةِ، والفائتُ، والمُنضبِطُ)،
+ *       والموعدُ مطبوعٌ في §3 من التقريرِ. **وعلّةُ وجودِها:** تأجيلٌ بشرطِ فكٍّ
+ *       مكتوبٍ وبلا موعدِ سؤالٍ يبقى دهراً بلا أن يُسألَ عنه أحدٌ.
+ *
  * **حدٌّ معلَن أول:** الحاجزُ يقيس **وجودَ الدليلِ وموضعَه لا كفايتَه**؛ فمُدخلةُ
  * سجلٍّ تذكر بنداً دليلٌ على توثيقِه لا شهادةٌ بأنّ ضابطَه كافٍ.
  *
@@ -77,7 +86,16 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { collectReadinessFacts } from './lib/readiness-facts.mjs';
-import { loadDeferrals, loadReadinessContract } from '../src/readiness/contract.mjs';
+import {
+  loadDeferralRegistry,
+  loadDeferrals,
+  loadReadinessContract,
+} from '../src/readiness/contract.mjs';
+import {
+  auditDeferralReviews,
+  cadenceForAuthority,
+  nextReviewOn,
+} from '../src/readiness/deferrals.mjs';
 import { READINESS_ERRORS } from '../src/readiness/errors.mjs';
 import {
   ATTRIBUTION_FIELD_TITLE,
@@ -489,6 +507,144 @@ ${body}
         if (!reportText.includes(needle)) {
           violations.push(
             `R11: التقريرُ لا يذكرُ «${needle}» — وفرقٌ لا يُرى في موضعِ قراءةِ الدليلِ فرقٌ غيرُ مُعلَنٍ.`,
+          );
+        }
+      }
+    }
+  }
+
+  // ── R12: التأجيلُ موقوتٌ لا مفتوحٌ — إغلاقُ `LIVE-3` ──
+  const recheckContract =
+    /** @type {{ baselineCadence: string, byAuthority: Record<string, string>, decidedIn: string } | undefined} */ (
+      /** @type {unknown} */ (contract.deferralRecheck)
+    );
+  /** @type {{ baselineCadence: string, byAuthority: Record<string, string>, decidedIn: string } | undefined} */
+  let recheckPolicy;
+  try {
+    recheckPolicy = loadDeferralRegistry().recheckPolicy;
+  } catch (error) {
+    violations.push(
+      `R12: سجلُّ التأجيلاتِ لا يُحمَّلُ لقراءةِ سياستِه (${error instanceof Error ? error.message : String(error)}).`,
+    );
+  }
+  if (recheckContract === undefined || recheckPolicy === undefined) {
+    violations.push(
+      'R12: سياسةُ إعادةِ النظرِ ناقصةٌ من أحدِ الموضعَينِ (`deferralRecheck` في العقدِ أو `recheckPolicy` في السجلِّ) — ووتيرةٌ بمصدرٍ واحدٍ وتيرةٌ لا تُقابَلُ.',
+    );
+  } else {
+    if (recheckContract.baselineCadence !== recheckPolicy.baselineCadence) {
+      violations.push(
+        `R12: وتيرةُ الأساسِ في العقدِ «${recheckContract.baselineCadence}» وفي السجلِّ «${recheckPolicy.baselineCadence}» — ومصدرانِ للوتيرةِ ينزاحُ أحدُهما بصمتٍ.`,
+      );
+    }
+    if (recheckContract.decidedIn !== recheckPolicy.decidedIn) {
+      violations.push(
+        `R12: مُدخلةُ قرارِ الوتيرةِ في العقدِ «${recheckContract.decidedIn}» وفي السجلِّ «${recheckPolicy.decidedIn}» — وقرارٌ بمرجعَينِ قرارٌ لا يُراجَع.`,
+      );
+    }
+    const authorities = new Set([
+      ...Object.keys(recheckContract.byAuthority ?? {}),
+      ...Object.keys(recheckPolicy.byAuthority ?? {}),
+    ]);
+    for (const authority of authorities) {
+      const inContract = cadenceForAuthority(recheckContract, authority);
+      const inRegistry = cadenceForAuthority(recheckPolicy, authority);
+      if (inContract !== inRegistry) {
+        violations.push(
+          `R12: وتيرةُ السلطةِ «${authority}» في العقدِ «${inContract}» وفي السجلِّ «${inRegistry}» — وتشديدٌ يُكتَبُ في وثيقةٍ ولا يُقرأُ في السجلِّ تشديدٌ لا يُنفَّذُ.`,
+        );
+      }
+    }
+
+    // والموعدُ **مقيسٌ على اليومِ** لا موصوفٌ: يومُ التشغيلِ يدخلُ وسيطاً في وحدةٍ نقيّةٍ.
+    const today = new Date().toISOString().slice(0, 10);
+    const workLogText = readOrEmpty(
+      /** @type {Record<string, string>} */ (contract.sources).workLog ?? '',
+    );
+    const workLogIds = new Set(
+      [...workLogText.matchAll(/WL-\d{3}/gu)].map((match) => String(match[0])),
+    );
+    const reviewFaults = auditDeferralReviews(deferrals, {
+      policy: recheckPolicy,
+      today,
+      workLogIds,
+    });
+    for (const fault of reviewFaults) {
+      violations.push(`R12: [${fault.code}] \`${fault.id}\` — ${fault.evidence}`);
+    }
+
+    // **والحسابُ يُقاسُ سلوكاً:** مُدخلاتٌ مصنوعةٌ تُمرَّرُ على الدالّةِ نفسِها التي
+    // يقرأُ بها التقريرُ — فحاجزٌ يقرأُ سياسةً موصوفةً يمرُّ على قاعدةٍ غيرِ مُنفَّذةٍ.
+    const probePolicy = { baselineCadence: 'P3M', byAuthority: { 'model-council': 'P1M' } };
+    /** @param {Record<string, unknown>} record @returns {string[]} */
+    const codesFor = (record) =>
+      auditDeferralReviews([/** @type {any} */ (record)], {
+        policy: probePolicy,
+        today: '2026-09-17',
+      }).map((fault) => fault.code);
+    /** @type {Array<[string, Record<string, unknown>, string[]]>} */
+    const reviewProbes = [
+      [
+        'تأجيلٌ بلا قسمِ إعادةِ نظرٍ',
+        { id: 'M9.99', authority: 'owner' },
+        ['READINESS_DEFERRAL_INCOMPLETE'],
+      ],
+      [
+        'وتيرةٌ تُخالفُ سياسةَ سلطتِها',
+        {
+          id: 'M9.99',
+          authority: 'model-council',
+          recheck: { cadence: 'P3M', lastReviewedOn: '2026-09-01', decidedIn: 'WL-204' },
+        },
+        ['READINESS_DEFERRAL_INCOMPLETE'],
+      ],
+      [
+        'موعدٌ فاتَ بلا مراجعةٍ',
+        {
+          id: 'M9.99',
+          authority: 'model-council',
+          recheck: { cadence: 'P1M', lastReviewedOn: '2026-06-01', decidedIn: 'WL-204' },
+        },
+        ['READINESS_DEFERRAL_REVIEW_OVERDUE'],
+      ],
+      [
+        'تاريخُ مراجعةٍ في المستقبلِ',
+        {
+          id: 'M9.99',
+          authority: 'owner',
+          recheck: { cadence: 'P3M', lastReviewedOn: '2027-01-01', decidedIn: 'WL-204' },
+        },
+        ['READINESS_DEFERRAL_INCOMPLETE'],
+      ],
+      [
+        'موعدٌ منضبِطٌ',
+        {
+          id: 'M9.99',
+          authority: 'owner',
+          recheck: { cadence: 'P3M', lastReviewedOn: '2026-09-01', decidedIn: 'WL-204' },
+        },
+        [],
+      ],
+    ];
+    for (const [label, record, expected] of reviewProbes) {
+      const measured = codesFor(record);
+      if (measured.join('|') !== expected.join('|')) {
+        violations.push(
+          `R12: ${label} يُقرأ «${measured.join('، ') || 'بلا خطأٍ'}» والمُعلَنُ «${expected.join('، ') || 'بلا خطأٍ'}» — وسياسةٌ لا تُقاسُ سلوكاً سياسةٌ موصوفةٌ لا مُنفَّذةٌ.`,
+        );
+      }
+    }
+    if (nextReviewOn('2026-12-31', 'P1M') !== '2027-01-31') {
+      violations.push(
+        'R12: حسابُ الموعدِ القادمِ لا يُجاوِزُ حدَّ السنةِ صحيحاً — وموعدٌ يُحسَبُ خطأً موعدٌ يُفوَّتُ بصمتٍ.',
+      );
+    }
+    // والموعدُ **مرئيٌّ لمن يقرأُ التقريرَ** لا مدفونٌ في سجلٍّ.
+    if (reportText !== '') {
+      for (const needle of ['المراجعةُ القادمةُ', 'READINESS_DEFERRAL_REVIEW_OVERDUE']) {
+        if (!reportText.includes(needle)) {
+          violations.push(
+            `R12: التقريرُ لا يذكرُ «${needle}» — وموعدٌ لا يُرى في موضعِ قراءةِ الحكمِ موعدٌ غيرُ مُعلَنٍ.`,
           );
         }
       }

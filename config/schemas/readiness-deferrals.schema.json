@@ -5,7 +5,7 @@
   "description": "كل بند هنا غيرُ منجَزٍ، ووجودُه إعلانُ عدمِ إنجازٍ لا دليلُ إنجازٍ. ولكل تأجيلٍ سببُه وحاجزُه ونوعُ حاجزِه وشرطُ فكِّه وصاحبُ قرارِه ومُدخلةُ إعلانِه — فتأجيلٌ ناقصُ حقلٍ يُوقف حكمَ التقرير.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "deferrals"],
+  "required": ["version", "deferrals", "recheckPolicy"],
   "$defs": {
     "arabicText": {
       "type": "string",
@@ -33,24 +33,87 @@
           "blockerKind",
           "unblockCondition",
           "authority",
-          "declaredIn"
+          "declaredIn",
+          "recheck"
         ],
         "properties": {
-          "id": { "type": "string", "pattern": "^(M\\d+\\.\\d+|G\\d+)$" },
-          "kind": { "type": "string", "enum": ["step", "gate"] },
-          "title": { "type": "string", "minLength": 8 },
-          "reason": { "$ref": "#/$defs/arabicText" },
-          "blocker": { "$ref": "#/$defs/arabicText" },
+          "id": {
+            "type": "string",
+            "pattern": "^(M\\d+\\.\\d+|G\\d+)$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": ["step", "gate"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 8
+          },
+          "reason": {
+            "$ref": "#/$defs/arabicText"
+          },
+          "blocker": {
+            "$ref": "#/$defs/arabicText"
+          },
           "blockerKind": {
             "type": "string",
             "enum": ["external-party", "external-plan", "sovereign-decision"]
           },
-          "unblockCondition": { "$ref": "#/$defs/arabicText" },
+          "unblockCondition": {
+            "$ref": "#/$defs/arabicText"
+          },
           "authority": {
             "type": "string",
             "enum": ["owner", "external-independent-party", "model-council", "github"]
           },
-          "declaredIn": { "type": "string", "pattern": "^WL-\\d{3}$" }
+          "declaredIn": {
+            "type": "string",
+            "pattern": "^WL-\\d{3}$"
+          },
+          "recheck": {
+            "type": "object",
+            "description": "موعدُ إعادةِ النظرِ: وتيرةٌ وتاريخُ آخرِ مراجعةٍ ومُدخلةُ القرارِ — فلا يبقى تأجيلٌ بتاريخٍ مفتوحٍ.",
+            "additionalProperties": false,
+            "required": ["cadence", "lastReviewedOn", "decidedIn"],
+            "properties": {
+              "cadence": {
+                "type": "string",
+                "enum": ["P1M", "P3M"]
+              },
+              "lastReviewedOn": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "decidedIn": {
+                "type": "string",
+                "pattern": "^WL-\\d{3}$"
+              }
+            }
+          }
+        }
+      }
+    },
+    "recheckPolicy": {
+      "type": "object",
+      "description": "سياسةُ إعادةِ النظرِ المُعلَنةُ في السجلِّ نفسِه — تُقابَلُ بما في عقدِ التقريرِ فلا ينزاحُ أحدُهما بصمتٍ.",
+      "additionalProperties": false,
+      "required": ["baselineCadence", "byAuthority", "decidedIn"],
+      "properties": {
+        "baselineCadence": {
+          "type": "string",
+          "enum": ["P1M", "P3M"]
+        },
+        "byAuthority": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["P1M", "P3M"]
+          }
+        },
+        "decidedIn": {
+          "type": "string",
+          "pattern": "^WL-\\d{3}$"
         }
       }
     }

@@ -11,8 +11,24 @@
 #   unblockCondition— ما الذي يفكُّه بالضبطِ (شرطٌ قابلٌ للتحقّقِ لا أملٌ).
 #   authority       — من يملك فكَّه: `owner` أو `external-independent-party` أو `model-council` أو `github`.
 #   declaredIn      — مُدخلةُ السجلِّ التي أُعلِنَ فيها (يجب أن توجدَ في سجلِّ العملِ).
+#   recheck         — موعدُ إعادةِ النظرِ: `cadence` وتيرةً (‏`P1M` أو `P3M`)،
+#                     و`lastReviewedOn` تاريخَ آخرِ مراجعةٍ فعليّةٍ للحاجزِ،
+#                     و`decidedIn` مُدخلةَ قرارِ الوتيرةِ. **فتأجيلٌ بلا موعدٍ
+#                     تاريخٌ مفتوحٌ** (الدَّين `LIVE-3`)، ومن فاتَ موعدُه أوقفَ
+#                     الحاجزَ بالرمزِ `READINESS_DEFERRAL_REVIEW_OVERDUE`.
+#
+# ووتيرةُ كلِّ تأجيلٍ **ليست اختيارَ منفِّذٍ**: تُقرأ من `recheckPolicy` أدناه،
+# وهي مُقابَلةٌ حرفاً بحرفٍ بقسمِ `deferralRecheck` في `config/readiness-report.yaml`.
 
-version: '1.1.0'
+version: '1.2.0'
+
+# سياسةُ إعادةِ النظرِ — قرارُ المالكِ في `WL-204`: الأساسُ فصليٌّ، ومسارُ مجلسِ
+# النماذجِ شهريٌّ لأنّه المسارُ الذي يُنتِجُ مخرجاتٍ بوتيرةٍ أسرعَ.
+recheckPolicy:
+  baselineCadence: P3M
+  byAuthority:
+    model-council: P1M
+  decidedIn: WL-204
 
 deferrals:
   - id: M0.06
@@ -29,6 +45,10 @@ deferrals:
       تحويلُه إلى Public تحايلاً على القيدِ، ولا تجاوزُ GitHub.
     authority: github
     declaredIn: WL-065
+    recheck:
+      cadence: P3M
+      lastReviewedOn: '2026-09-17'
+      decidedIn: WL-204
   - id: M11.04
     kind: step
     title: مراجعةٌ أمنيّةٌ مستقلّةٌ خارجَ فريقِ البناءِ
@@ -43,6 +63,10 @@ deferrals:
       حرجةٍ وعاليةٍ يربطُها بإصلاحٍ (كوميت) وإعادةِ اختبارٍ من المجلسِ.
     authority: model-council
     declaredIn: WL-076
+    recheck:
+      cadence: P1M
+      lastReviewedOn: '2026-09-17'
+      decidedIn: WL-204
   - id: M11.05
     kind: step
     title: اختبارُ اختراقٍ خارجيٌّ على جذرِ الثقةِ والواجهاتِ وبوابةِ الخروجِ
@@ -57,6 +81,10 @@ deferrals:
       إعادةُ اختبارٍ ناجحةٌ من المجلسِ نفسِه.
     authority: model-council
     declaredIn: WL-076
+    recheck:
+      cadence: P1M
+      lastReviewedOn: '2026-09-17'
+      decidedIn: WL-204
   - id: M11.06
     kind: step
     title: مراجعةٌ أخلاقيّةٌ وقانونيّةٌ لنطاقِ استقلاليّةِ الوكلاءِ وحدودِها
@@ -71,6 +99,10 @@ deferrals:
       مجلسِ النماذجِ المستقلِّ، مع شرطِ مراجعةٍ دوريّةٍ وموعدِها.
     authority: model-council
     declaredIn: WL-076
+    recheck:
+      cadence: P1M
+      lastReviewedOn: '2026-09-17'
+      decidedIn: WL-204
   - id: M11.09
     kind: step
     title: قرارُ الجاهزيّةِ الملكيُّ ثم الإطلاقُ المحدودُ والتوسّعُ التدريجيُّ
@@ -84,6 +116,10 @@ deferrals:
       تراجعٍ — بعدَ استيفاءِ `M11.04`–`M11.06`.
     authority: owner
     declaredIn: WL-065
+    recheck:
+      cadence: P3M
+      lastReviewedOn: '2026-09-17'
+      decidedIn: WL-204
   - id: G11
     kind: gate
     title: البوابةُ النهائيّةُ — إعلانُ اكتمالِ تعريفِ المئةِ في المئةِ
@@ -97,3 +133,7 @@ deferrals:
       ثم قرارُ المالكِ. وأيُّ إعلانِ `100%` قبلَ ذلك خرقٌ للمادة 2.
     authority: owner
     declaredIn: WL-065
+    recheck:
+      cadence: P3M
+      lastReviewedOn: '2026-09-17'
+      decidedIn: WL-204
