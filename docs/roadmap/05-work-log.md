@@ -8208,3 +8208,17 @@ $ node scripts/guard-transport.mjs      # EXIT=0
 - **الدليل:** `TEST_LEASE_MS=5000 DATABASE_URL=<Supabase pooler> node --test tests/execution/workers.test.mjs` ⇒ `# tests 2 · # pass 2 · # fail 0`
 - **ما لم يتم ولماذا:** لا شيء — `worker-isolation.test.mjs` لا يستعملُ `LEASE_MS` أصلاً (يستعملُ طابوراً محاكياً)
 - **الأثر على المسارات الأخرى:** يُغلقُ آخرَ دَينٍ حيٍّ مُكتشَفٍ (§4.6) — كلُّ الديونِ الحيّةِ الـ8 مُغلَقةٌ الآن.
+
+### [2026-09-17] — WL-212 — إصلاحُ R6-A-12 وR6-A-13 وR6-B-04 وR6-B-05: مسارُ tests/agents/ وحارسُ الاحتواءِ لـM6.07
+
+- **المنفِّذ:** Perplexity Computer (تفويضٌ تنفيذيٌّ كاملٌ من المالك)
+- **المسار والخطوة:** المرحلةُ «هـ» (§5) — إصلاحُ نتائجَ جديدةٍ مُكتشَفةٍ في الجولةِ الثانيةِ لـM11.06
+- **الحالة بعد العمل:** ✅ منجز (الإصلاحُ على المنفِّذِ — حكمُ الإغلاقِ للمجلسِ)
+- **ما تم فعلاً:**
+  - **R6-A-12/R6-B-04:** أُنشئَ مسارُ `tests/agents/` الذي كانَ غائباً والمسبارُ يَطلُبُه. ملفُّ اختبارٍ `tests/agents/agent-boundaries.test.mjs` يَفحَصُ حدودَ الوكلاءِ الثلاثةَ: حجرَ العزلِ، وبوابةَ الميزانيّةِ، والتقييمَ قبلَ التنشيطِ. `node --test tests/agents/` ⇒ `2/2 pass`.
+  - **R6-A-13/R6-B-05:** وُسِّعَ حارسُ وثيقةِ الاحتواءِ `tests/docs/agent-containment-claims.test.mjs` ليشملَ M6.07 (مُنتِجَ `budget-exceeded`) لا M6.08 وحدَه. اختبارانِ جديدانِ يَرفُضانِ الطفرةَ التي تُعيدُ عبارةَ «budget-exceeded بلا مُنتِجٍ». `node --test tests/docs/agent-containment-claims.test.mjs` ⇒ `4/4 pass`.
+- **الملفات المتأثرة:** `tests/agents/agent-boundaries.test.mjs` (جديد)، `tests/docs/agent-containment-claims.test.mjs`
+- **الـ commit:** هذا PR (WL-212)
+- **الدليل:** `node --test tests/agents/` ⇒ `# tests 2 · # pass 2 · # fail 0` · `node --test tests/docs/agent-containment-claims.test.mjs` ⇒ `# tests 4 · # pass 4 · # fail 0`
+- **ما لم يتم ولماذا:** حكمُ الإغلاقِ للمراجعينَ المستقلّينَ (المادة 11 §1) — الإصلاحُ على المنفِّذِ والحكمُ ليس عليه
+- **الأثر على المسارات الأخرى:** يُنهي البنودَ الأربعةَ المتبقّيةَ على المنفِّذِ من نتائجِ الجولةِ الثانيةِ لـM11.06. الباقي: M11.05 جولةٌ أولى (تجهيزٌ) ثمَّ البنودُ المالكِيّةُ
