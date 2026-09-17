@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
+import { createGovernance } from '../../src/policy/governance.mjs';
 
 const bundle = loadPolicyBundle();
 
@@ -312,4 +313,17 @@ test('الإنشاءُ مع بوابةِ هويةٍ ينجحُ عند البنا
     identityGate: gate,
   });
   assert.ok(point, 'الإنشاءُ مع بوابةِ هويةٍ يجب أن ينجح');
+});
+
+// R5-A-02: المصنعُ الرسميُّ `createGovernance` كانَ يُسقطُ بوابةَ الهويةِ صامتاً
+// (`requireIdentityGate: identityGate !== null`)، فالتركيبُ بلا بوابةٍ يَبني نقطةً
+// تُصدرُ تذاكرَ لفاعلٍ يصفُ دورَه بنفسِه. الإصلاحُ: المصنعُ يُلزِمُ البوابةَ دائماً.
+test('R5-A-02: createGovernance بلا بوابةِ هويةٍ يُرفَضُ عند البناءِ لا يُصدرُ تذاكر', () => {
+  const log = memoryLog();
+  // التركيبُ بلا بوابةٍ يجبُ أن يُرفَضَ برمزٍ مُسمَّى — لا أن يَبني نقطةً تُصدرُ تذاكرَ.
+  assert.throws(
+    () => createGovernance({ log, bundle }),
+    /ENFORCEMENT_IDENTITY_GATE_REQUIRED/,
+    'createGovernance بلا identityGate يجب أن يرفض البناء برمز ENFORCEMENT_IDENTITY_GATE_REQUIRED',
+  );
 });

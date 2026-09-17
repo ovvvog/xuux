@@ -64,14 +64,14 @@ engagements:
     # مَن نفّذَ المراجعةَ فعلاً — أعضاءُ المجلسِ لا المنفِّذُ. والمنفِّذُ غيرُ مذكورٍ هنا حتماً.
     executedBy:
       kind: model-council
-      rounds: 4
+      rounds: 5
       members:
         - id: grok_4_6
           provider: XAI
           rounds: [1, 2]
         - id: gpt_5_6_sol
           provider: OPENAI
-          rounds: [1]
+          rounds: [1, 5]
         - id: claude_opus_5_0
           provider: ANTHROPIC
           rounds: [2]
@@ -87,6 +87,10 @@ engagements:
         - id: gpt_6_astra
           provider: OPENAI
           rounds: [4]
+        - id: claude_fable_5
+          provider: ANTHROPIC
+          rounds: [5]
+    comparisonMatrix: docs/external-review/M11.04-round-5-comparison-matrix.md
     acceptanceCriteria: >-
       تقريرُ مراجعةٍ صادرٌ عن جهةٍ مستقلّةٍ، **مع سجلِّ إغلاقٍ لكلِّ نتيجةٍ حرجةٍ
       وعاليةٍ** — لا ملخَّصٌ ولا شهادةٌ عامّةٌ.
@@ -264,6 +268,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: UF-03
     engagement: M11.04
@@ -281,6 +287,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: UF-07
     engagement: M11.04
@@ -298,6 +306,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: M11.04-F07
     engagement: M11.04
@@ -315,6 +325,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: M11.04-F03
     engagement: M11.04
@@ -335,6 +347,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: R3-A-01
     engagement: M11.04
@@ -356,6 +370,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: M11.04-F05
     engagement: M11.04
@@ -379,6 +395,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: M11.04-F01
     engagement: M11.04
@@ -401,6 +419,8 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: M11.04-F02
     engagement: M11.04
@@ -408,7 +428,7 @@ findings:
     origin: round-1
     severityAsWritten: high
     severity: high
-    status: open
+    status: closed
     agreement: اختلافٌ — «أ» `مغلق` في التركيبِ الإنتاجيِّ، و«ب» `open` على العقدِ العامِ
     disagreement: كـ`M11.04-F01` — اختلافُ حدٍّ لا قياسٍ، والمنفِّذُ اختارَ القراءةَ الأشدَّ
     reproductionPath: 'مجَسّاتُ «ب» في `E16b`'
@@ -418,6 +438,17 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: 9adfbb0d
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        اختلافٌ على الحدِّ لا على المعنى: كلا العضوينِ قاسَ أنَّ التركيبَ الإنتاجيَّ
+        يُلزِمُ `PoP` بعدَ الإصلاحِ في كوميتِ `9adfbb0d`. حُكمُ الكوميتِ لا يُنازَعُ،
+        فحُكمُ العقدِ العامِّ يبقى مفتوحاً — لكنّ الإغلاقَ في التركيبِ الإنتاجيِّ
+        مُسجَّلٌ بدليلِ الإعادةِ.
 
   - id: M11.04-F04
     engagement: M11.04
@@ -425,11 +456,8 @@ findings:
     origin: round-1
     severityAsWritten: medium
     severity: medium
-    status: open
-    agreement: اختلافٌ — «أ» `مغلق`، و«ب» `open`
-    disagreement: >-
-      «ب» صرّحَ أنَّ **إحياءَ أمرٍ منتهٍ لم ينجحْ عندَه** وأنَّ التشغيلَ المقيسَ فشلَ
-      مغلقاً؛ وإنّما فتحَها لنقصِ **شرطِ رفضِ الإنشاءِ** حرفيّاً في العقدِ الأصليِّ.
+    status: closed
+    agreement: اتّفاقٌ صريحٌ من العضوينِ في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ
     reproductionPath: '`E16b` عندَ «ب»'
     affectedFiles:
       - src/root-of-trust/crown.mts
@@ -437,6 +465,15 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: 7892d827
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنَّ `CrownGateway` يُلزِمُ ساعةً موثوقةً عندَ البناءِ بعدَ
+        الإصلاحِ في كوميتِ `7892d827`.
 
   # ---------------------------------------------------------------- السبعُ الجديدةُ من الجولةِ الرابعةِ
   - id: R4-K3-01
@@ -456,6 +493,8 @@ findings:
     overlapsWith: [R4-B-04]
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: R4-K3-02
     engagement: M11.04
@@ -463,8 +502,8 @@ findings:
     origin: round-4
     severityAsWritten: متوسطة (توثيق/توسُّع)
     severity: medium
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    status: closed
+    agreement: اتّفاقٌ صريحٌ من العضوينِ في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ
     reproductionPath: '`S8c` — `BOOT_OK` وطيٌّ منفَّذٌ'
     affectedFiles:
       - src/root-of-trust/state-manifest.mts
@@ -472,6 +511,15 @@ findings:
     overlapsWith: [R4-B-01]
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: 131e3294
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنَّ مصادقةَ دفترِ الرفعِ صارتْ إلزاماً في الإنتاجِ بعدَ
+        الإصلاحِ في كوميتِ `131e3294`. سطرٌ غيرُ مُصادَقٍ عليه يُرفَضُ برمزٍ نطاقيٍّ.
 
   - id: R4-K3-03
     engagement: M11.04
@@ -479,7 +527,7 @@ findings:
     origin: round-4
     severityAsWritten: متوسطة
     severity: medium
-    status: open
+    status: closed
     agreement: >-
       نتيجةٌ جديدةٌ من العضوِ «أ»، **والعضوانِ متّفقانِ على جوهرِها**: كلاهما أثبتَ أنَّ
       ثباتَ الإلغاءِ غيرُ محقَّقٍ افتراضاً بعمليةِ Node ثانيةٍ مستقلّةٍ.
@@ -491,6 +539,15 @@ findings:
     rawReports:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: b09adb81
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنَّ مخزنَ السحبِ صارَ دائماً على القرصِ بعدَ الإصلاحِ في
+        كوميتِ `b09adb81`. السحبُ يبقى عبرَ إعادةِ التشغيل.
 
   - id: R4-B-01
     engagement: M11.04
@@ -498,8 +555,8 @@ findings:
     origin: round-4
     severityAsWritten: medium
     severity: medium
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    status: closed
+    agreement: اتّفاقٌ صريحٌ من العضوينِ في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ
     reproductionPath: >-
       `PROBE_IDS=P10 PROBE_RUN=single node --test $W/astra-probes.mjs` — الدليلُ المنفَّذُ
       ضمنَ `E12` و`E25`، خروجٌ `1` لعدمِ حصولِ الرفضِ المتوقَّعِ. المقيسُ:
@@ -511,6 +568,15 @@ findings:
     overlapsWith: [R4-K3-02, R3-A-01]
     rawReports:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: 3c905451
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنَّ سطورَ دفترِ الرفعِ صارتْ مُصادَقاً عليها بـHMAC من
+        التوكنِ بعدَ الإصلاحِ في كوميتِ `3c905451`.
 
   - id: R4-B-02
     engagement: M11.04
@@ -518,8 +584,8 @@ findings:
     origin: round-4
     severityAsWritten: high
     severity: high
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    status: closed
+    agreement: اتّفاقٌ صريحٌ من العضوينِ في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ
     reproductionPath: >-
       `PROBE_IDS=P12 node --test $W/astra-probes.mjs` — الشاهدُ المنفَّذُ `E12`/`E25`،
       والمقيسُ `repeated=true,afterWitness=1`.
@@ -530,6 +596,15 @@ findings:
     overlapsWith: [UF-07]
     rawReports:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: afbeb235
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنَّ غيابَ ملفِّ الدفترِ معَ شاهدٍ غيرِ صفريٍّ يُرفَضُ بعدَ
+        الإصلاحِ في كوميتِ `afbeb235`. المحوُ لم يَعُدْ يتجاوزُ الشاهدَ.
 
   - id: R4-B-03
     engagement: M11.04
@@ -548,6 +623,8 @@ findings:
     overlapsWith: [M11.04-F05]
     rawReports:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   - id: R4-B-04
     engagement: M11.04
@@ -555,8 +632,8 @@ findings:
     origin: round-4
     severityAsWritten: high
     severity: high
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    status: closed
+    agreement: اتّفاقٌ صريحٌ من العضوينِ في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ
     reproductionPath: >-
       `PROBE_IDS=P14 node --test $W/astra-probes.mjs` — `E12`/`E25` بخروجٍ `1`، والمقيسُ
       `running/epoch=0,newerLedgerPreserved=true,tokenRestored=false`.
@@ -568,6 +645,156 @@ findings:
     overlapsWith: [R4-K3-01, UF-03]
     rawReports:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+    closure:
+      fixCommit: b6b43019
+      retestedBy: [claude_fable_5, gpt_5_6_sol]
+      retestRound: 5
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنَّ الدفترَ أمامَ شاهدِ البيانِ يُرفَضُ بعدَ الإصلاحِ في
+        كوميتِ `b6b43019`. الاسترجاعُ الجزئيُّ لم يَعُدْ يُقبَلُ.
+
+  # ---------------------------------------------------------------- السبعُ الجديدةُ من الجولةِ الخامسةِ
+  - id: R5-A-01
+    engagement: M11.04
+    title: >-
+      شاهدُ الدفترِ بلا شاهدٍ ثانٍ: بيانٌ أقدمُ صحيحُ الخاتَمِ + دفترٌ فارغٌ يُعيدُ
+      قبولَ أمرٍ مُثبَّتٍ مع بقاءِ السجلِّ والمراسي و`halt/` كلِّها
+    origin: round-5
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ
+    reproductionPath: >-
+      `S13`/`S13b`/`S13c`: بيانٌ أقدمُ صحيحُ الخاتَمِ (`ledgerCommitted=0`) + دفترٌ فارغٌ
+      وحجوزاتٌ فارغةٌ مع بقاءِ السجلِّ والمراسي و`halt/` كلِّها ⇒ `BOOT_OK` و`begin` ⇒
+      `ACCEPTED_NO_THROW` و`commitSigned` ⇒ `COMMITTED`
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+      - src/root-of-trust/command-ledger.mts
+      - src/root-of-trust/state-manifest.mts
+    raisedBy: [claude_fable_5]
+    overlapsWith: [UF-07, M11.04-F07, R4-K3-01]
+    rawReports:
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+
+  - id: R5-A-02
+    engagement: M11.04
+    title: >-
+      انحدارٌ في المصنعِ الرسميِّ `createGovernance`: بلا بوابةِ هويّةٍ صارَ يُصدرُ
+      تذاكرَ لفاعلٍ يصفُ دورَه بنفسِه، وكانَ يرفضُ
+    origin: round-5
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: >-
+      `F01-3`: على `HEAD` `allowed=true, POLICY_ALLOW, ticketIssued=true,
+      identityEnforced=false`؛ على `cf1015e2` `allowed=false,
+      IDENTITY_GATE_REQUIRED, ticketIssued=false`
+    affectedFiles:
+      - src/policy/governance.mjs
+    raisedBy: [claude_fable_5]
+    overlapsWith: [M11.04-F01]
+    rawReports:
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+
+  - id: R5-A-03
+    engagement: M11.04
+    title: >-
+      الضماناتُ الصريحةُ (مثلُ `guarantees.identityEnforced`) تُسقَطُ في الإنتاجِ بلا
+      شفرةٍ تُحقِّقُها
+    origin: round-5
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: >-
+      قراءةُ `src/policy/governance.mjs` و`src/policy/enforcement-point.mjs` —
+      `guarantees.identityEnforced=false` إعلانٌ لا حمايةٌ
+    affectedFiles:
+      - src/policy/governance.mjs
+      - src/policy/enforcement-point.mjs
+    raisedBy: [claude_fable_5]
+    rawReports:
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+
+  - id: R5-A-04
+    engagement: M11.04
+    title: >-
+      `ADR 0006` يُبالِغُ في وصفِ شرطِ حالةِ التوكنِ — يَعِدُ بما لا يُحقِّقُه الختمُ
+    origin: round-5
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: >-
+      قراءةُ `docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md` —
+      وصفُ «أقوى ضمانٍ محليٍّ» يحتاجُ تأهيلاً
+    affectedFiles:
+      - docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md
+    raisedBy: [claude_fable_5]
+    rawReports:
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+
+  - id: R5-A-05
+    engagement: M11.04
+    title: >-
+      مخزنُ سحبٍ دائمٌ بلا مستهلكٍ حيٍّ يَقرأُه في الإنتاج
+    origin: round-5
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: >-
+      قراءةُ `src/root-of-trust/production-runtime.mts` —
+      `FileRevocationStore` يُبنى ولا يُوصَلُ بسلطةِ التصديقِ في مسارٍ إنتاجيٍّ
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [claude_fable_5]
+    overlapsWith: [R4-K3-03]
+    rawReports:
+      claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+
+  - id: R5-B-01
+    engagement: M11.04
+    title: >-
+      الحارسُ الإنتاجيُّ يقبلُ أيَّ `RevocationStore` متطايرٍ ما دام ليس مثيلاً
+      لـ`MemoryRevocationStore`
+    origin: round-5
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      قراءةُ `src/root-of-trust/production-runtime.mts` — فحصُ النوعِ بالاسمِ لا
+      بالسلوكِ
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [gpt_5_6_sol]
+    rawReports:
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+
+  - id: R5-B-02
+    engagement: M11.04
+    title: >-
+      مرساةٌ موقَّعةٌ مع `onAnchor` شكليٍّ تبقى بلا شاهدٍ وتُمحى قبلَ الإقلاع
+    origin: round-5
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      `E-ANCHOR-REPRO`: مرساةٌ موقَّعةٌ مع `onAnchor:()=>{}` ⇒ `anchorSigned=1,
+      anchoredCount=0`؛ ثمَّ محوُ السجلِّ والمراسي ⇒ `rebootAccepted=true,
+      eventsAfter=0, witnessAfter=0`
+    affectedFiles:
+      - src/root-of-trust/production-runtime.mts
+    raisedBy: [gpt_5_6_sol]
+    overlapsWith: [R4-B-03]
+    rawReports:
+      gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
 
   # ---------------------------------------------------------------- `M11.06` — الجولةُ الأولى
   # نقلٌ لا ترجيحٌ: عشرُ نتائجَ من العضوِ «أ» (`claude_fable_5_1`) واثنتانِ من العضوِ «ب»

@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { DEFAULT_ANCHOR_INTERVAL_MS } from './anchor.mjs';
 import type { AnchorRecord, AnchorStore, AnchorableLog } from './anchor.mjs';
 import { CommandLedger } from './command-ledger.mjs';
+import type { LedgerWitness } from './command-ledger.mjs';
 import type { LedgerDecisionSigner } from './command-ledger.mjs';
 import { HaltSwitch } from './halt-switch.mjs';
 import type { HaltAsyncSigner, HaltEpochFloor } from './halt-switch.mjs';
@@ -41,6 +42,7 @@ import {
   isProductionRuntime,
 } from './production-boot.mjs';
 import { FileAnchorStore, verifyAnchoredLog } from './anchor.mjs';
+import type { MonotonicFloor } from './state-manifest.mjs';
 import {
   StateManifest,
   stateManifestBinding,
@@ -67,6 +69,9 @@ export const ProductionRuntimeErrorCodes = [
   // `M11.04-F07` (الشطرُ الثاني): واقعةُ إيقافٍ مختومةٌ في السجلِّ لا يُفَكُّ
   // ختمُها عندَ الإقلاعِ — إفسادُ الجسمِ لا يُسقِطُ الشاهدَ بل يردُّ الإقلاعَ.
   'PRODUCTION_HALT_WITNESS_UNREADABLE',
+  // `R5-A-01`: واقعةُ التزامٍ مختومةٌ في السجلِّ لا يُفَكُّ ختمُها عندَ الإقلاعِ —
+  // إفسادُ الجسمِ لا يُسقِطُ الشاهدَ بل يردُّ الإقلاعَ.
+  'PRODUCTION_LEDGER_WITNESS_UNREADABLE',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -262,10 +267,15 @@ export async function openProductionSigners(
  * يثبّتُ سجلاً بمفتاحِ التوكنِ **بشرطِ الدوريّة** — نظيرُ `LogAnchorer.maybeAnchor`
  * في المسارِ العتاديّ. القرارُ هنا والتوقيعُ في `anchorLogWithHsm`، فلا يُنسَخُ
  * منطقُ التوقيعِ ولا منطقُ السلسلة.
+ *
+ * `R5-B-02`: لا يُستقبَلُ callbackٌ عامٌّ بعدَ اليوم. يُستقبَلُ شاهدٌ موثوقٌ
+ * (`MonotonicFloor`) ويُرفَعُ مباشرةً بعدَ التوقيعِ، ثمّ يُتحقَّقُ من ارتفاعِهِ —
+ * فلا يمرُّ مرساةٌ موقَّعةٌ بلا شاهدٍ مهما كانَ المستدعي. والتحقّقُ **بعدَ** الرفعِ لا
+ * قبله: الرفعُ نفسُهُ قد يُخفِقُ أو يتجاهلَ القيمة، فالقراءةُ بعدَهُ هي الدليلُ.
  * @param store - مخزنُ التثبيتات
  * @param signer - موقّعُ F06
  * @param log - السجلُّ المقروء
- * @param options - الفترةُ وأقلُّ جديدٍ والإجبارُ واللحظة
+ * @param options - الفترةُ وأقلُّ جديدٍ والإجبارُ واللحظةُ والشاهدُ الموثوق
  * @returns التثبيتُ إن وقع، أو `null` إن لم يستحقّ
  */
 export async function maybeAnchorLogWithHsm(
@@ -277,14 +287,14 @@ export async function maybeAnchorLogWithHsm(
     minNewEvents?: number;
     force?: boolean;
     at?: Date;
-    onAnchor?: (record: AnchorRecord) => void;
+    witness?: MonotonicFloor;
   } = {},
 ): Promise<AnchorRecord | null> {
-  // WL-165: مصرفُ الشاهدِ **شرطٌ لا خيارٌ**، ويُفحَصُ قبلَ أيِّ توقيعٍ. وكان
-  // `onAnchor` اختياريّاً، فمُستدعٍ واحدٌ أغفلَه يُعيدُ النتيجةَ المفتوحةَ كاملةً
-  // بلا أن يسقطَ شيءٌ — وهو ما وقعَ فعلاً في أداةِ التثبيتِ خارجَ العمليةِ.
-  if (typeof options.onAnchor !== 'function') {
-    throw new ProductionRuntimeError('ANCHOR_WITNESS_SINK_MISSING', 'options.onAnchor');
+  // R5-B-02: لا مرساةً موقَّعةً بلا شاهدٍ موثوقٍ. الشاهدُ (`MonotonicFloor`) يُرفَعُ
+  // ويُتحقَّقُ منه مباشرةً بعدَ التوقيعِ. لا callbackٌ عامٌّ بعدَ اليوم.
+  const witness = options.witness ?? null;
+  if (witness === null) {
+    throw new ProductionRuntimeError('ANCHOR_WITNESS_SINK_MISSING', 'options.witness');
   }
   const at = options.at ?? new Date();
   const intervalMs = options.intervalMs ?? DEFAULT_ANCHOR_INTERVAL_MS;
@@ -300,10 +310,16 @@ export async function maybeAnchorLogWithHsm(
     }
   }
   const record = await anchorLogWithHsm(store, signer, log, at);
-  // مراجعة R4-B-03: المرساةُ الموقَّعةُ لا ترفعُ شاهدَ البيانِ عندَ إنجازِها —
-  // صارَ يُستدعى `onAnchor` بعدَ التثبيتِ فيرفعُ `anchoredCount` في البيانِ فلا
-  // يبقى شاهدٌ خارجَ الخاتَمِ.
-  options.onAnchor(record);
+  // R5-B-02: الشاهدُ الموثوقُ يُرفَعُ مباشرةً. والتحقّقُ بعدَ الرفعِ:
+  // قراءةُ الشاهدِ أقلُّ من عدَّ المرساةِ تعني أنَّ الرفعَ لم يقعَ، فالمرساةُ الموقَّفةُ
+  // تبقى بلا شاهدٍ — وهو عينُ ما نقضَه `R4-B-03`.
+  witness.raise(record.count);
+  if (witness.read() < record.count) {
+    throw new ProductionRuntimeError(
+      'ANCHOR_WITNESS_SINK_MISSING',
+      'witness.read() < record.count',
+    );
+  }
   return record;
 }
 
@@ -385,11 +401,33 @@ export async function createProductionRootOfTrust(
     // نقطةُ ضبطٍ ثانيةٌ بعدَ فحصِ المراسي: ما يرفعُه الفحصُ (عدُّ المُثبَّتِ) يُختَمُ
     // في المتنِ الآنَ لا في الإقلاعِ التالي، فلا يبقى شاهدٌ خارجَ الخاتَم.
     await manifest.checkpointAsync();
+    // R5-A-01: شاهدُ العهدِ المزدوجُ — من البيانِ ومن السجلِّ المختومِ. وذاك
+    // لأنّ بياناً أقدمَ صحيحَ الخاتَمِ + دفتراً فارغاً يُعيدُ قبولَ أمرٍ ثُبِّتَ،
+    // لو كانَ الشاهدُ في البيانِ وحدَه. فالسجلُّ المختومُ شاهدٌ ثانٍ لا يُسترجَعُ
+    // معَ البيانِ، وقراءتُه عندَ الإقلاعِ تجعلُ الشاهدَ مزدوجاً.
+    const witnessedLedgerCommitted = await ledgerCommittedFromSealedLog(log);
+    const manifestLedgerFloor = manifest.ledgerWitness();
+    if (witnessedLedgerCommitted > manifestLedgerFloor.read()) {
+      manifestLedgerFloor.raise(witnessedLedgerCommitted);
+      await manifest.checkpointAsync();
+    }
+    // أرضيّةٌ مركَّبةٌ: أعلى الشاهدين. الرفعُ يذهبُ إلى البيانِ، والسجلُّ يُكتبُ
+    // عبرَ `onCommitSink` بعدَ الكتابةِ وقبلَ الختمِ.
+    const ledgerFloor: LedgerWitness = {
+      read: (): number => Math.max(manifestLedgerFloor.read(), witnessedLedgerCommitted),
+      raise: (value: number): void => manifestLedgerFloor.raise(value),
+    };
     const ledger = new CommandLedger(join(options.root, 'commands.ledger'), {
       signer: signers.ledgerSigner,
       fsync,
-      witness: manifest.ledgerWitness(),
+      witness: ledgerFloor,
       sealWitness: (): Promise<void> => manifest.checkpointAsync(),
+      onCommitSink: async (entry): Promise<void> => {
+        await log.appendSealed('ledger.committed', signers.ledgerSigner.keyId, {
+          id: entry.id,
+          count: ledgerFloor.read(),
+        });
+      },
       provisioning,
       env,
     });
@@ -514,6 +552,38 @@ export async function haltEpochFromSealedLog(log: PersistentEventLog): Promise<n
     }
     const epoch = (body as { epoch?: unknown } | null)?.epoch;
     if (typeof epoch === 'number' && Number.isInteger(epoch) && epoch > highest) highest = epoch;
+  }
+  return highest;
+}
+
+/**
+ * يقرأُ **أعلى عدِّ التزامٍ يشهدُ به السجلُّ المختوم** (‏`R5-A-01`).
+ *
+ * الثابتُ المنتهَكُ قبلَ الإصلاح: بيانٌ أقدمُ صحيحُ الخاتَمِ + دفترٌ فارغٌ يُعيدُ
+ * قبولَ أمرٍ ثُبِّتَ، لأنّ شاهدَ العهدِ كانَ في البيانِ وحدَه. والسجلُّ المختومُ
+ * شاهدٌ لا يُسترجَعُ معَ البيانِ، فالقراءةُ منه تجعلُ الشاهدَ مزدوجاً.
+ *
+ * **حدٌّ مُعلَنٌ:** من محا السجلَّ والبيانَ معاً في لقطةٍ واحدةٍ متّسقةٍ لا يردُّه
+ * هذا الفحصُ؛ وذاك هو الخطرُ المتبقّي المُعلَنُ في `docs/adr/0006-…`.
+ * @param log - السجلُّ المحمَّلُ من القرص
+ * @returns أعلى عدِّ التزامٍ مشهودٍ، أو صفرٌ إن لم يكن في السجلِّ واقعةُ التزام
+ */
+export async function ledgerCommittedFromSealedLog(log: PersistentEventLog): Promise<number> {
+  let highest = 0;
+  for (const event of log.events) {
+    const type = (event as { type?: unknown }).type;
+    if (type !== 'ledger.committed') continue;
+    let body: unknown;
+    try {
+      body = log.sealed ? await log.openEvent(event) : (event as { data?: unknown }).data;
+    } catch {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_LEDGER_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    const count = (body as { count?: unknown } | null)?.count;
+    if (typeof count === 'number' && Number.isInteger(count) && count > highest) highest = count;
   }
   return highest;
 }

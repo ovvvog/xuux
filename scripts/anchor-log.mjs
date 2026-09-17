@@ -179,7 +179,7 @@ async function runOnHsm(args, config, env, deps) {
       const record = await maybeAnchorLogWithHsm(store, signer, log, {
         intervalMs: config.intervalMs,
         force: args.force,
-        onAnchor: (anchored) => manifest.raise('anchoredCount', anchored.count),
+        witness: manifest.anchoredCountFloor(),
       });
       // الرفعُ يُطوى في متنٍ مختومٍ الآن لا في الإقلاع التالي، فلا يبقى شاهدٌ
       // خارجَ الخاتَم بين تشغيل الأداة وإقلاع الخدمة.

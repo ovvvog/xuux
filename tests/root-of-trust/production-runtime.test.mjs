@@ -693,11 +693,11 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
   try {
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
-    // WL-165: مصرفُ الشاهدِ صارَ شرطاً، فالرفعُ يقعُ داخلَ المسارِ نفسِه لا
-    // بنداءٍ منفصلٍ بعدَه يُمكنُ أن يُنسى.
+    // R5-B-02: الشاهدُ الموثوقُ يُحقَنُ لا callbackٌ عامٌّ. الرفعُ يقعُ داخلَ
+    // المسارِ نفسِه، والتحقّقُ بعدَهُ يمنعُ مرساةً موقَّعةً بلا شاهدٍ.
     const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
       force: true,
-      onAnchor: (anchored) => runtime.raiseAnchorWitness(anchored.count),
+      witness: runtime.manifest.anchoredCountFloor(),
     });
     assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
     assert.equal(runtime.manifest.read().anchoredCount, record.count);
@@ -827,7 +827,7 @@ test('R4-K3-02: دفترٌ مُصادَقٌ يُقرأُ بلا مفتاحٍ ي�
   }
 });
 
-test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبرَ onAnchor (M11.04-F05)', async () => {
+test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبرَ witness (R5-B-02)', async () => {
   const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
   const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');
   const { StateManifest, stateManifestPath } =
@@ -844,9 +844,10 @@ test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبر
     // البيانُ أُنشئَ بالفعلِ في `buildRuntime` — نقرأُهُ فقط.
     const witnessed = manifest.read().anchoredCount;
     assert.equal(witnessed, 0, 'قبلَ التثبيت: صفرٌ');
+    // R5-B-02: الشاهدُ الموثوقُ يُحقَنُ لا callbackٌ عامٌّ.
     const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
       force: true,
-      onAnchor: (r) => manifest.raise('anchoredCount', r.count),
+      witness: manifest.anchoredCountFloor(),
     });
     assert.notEqual(record, null, 'التثبيتُ وقع');
     assert.equal(
@@ -1000,4 +1001,89 @@ describe('WL-165: مصرفُ شاهدِ المرساةِ شرطٌ، ودفترُ
       cleanup();
     }
   });
+});
+
+// R5-B-02: مرساةٌ موقَّعةٌ مع `onAnchor` شكليٍّ تبقى بلا شاهدٍ — كانَ callbackٌ عامٌّ
+// يُمكنُ أن يُنسى أو يُمرَّرَ فارغاً. الإصلاحُ: الشاهدُ الموثوقُ يُحقَنُ ويُتحقَّقُ منه.
+test('R5-B-02: witness موثوقٌ يرفعُ ويُتحقَّقُ، وonAnchor شكليٌّ لا يكفي', async () => {
+  const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
+  const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');
+  const { StateManifest, stateManifestPath } =
+    await import('../../src/root-of-trust/state-manifest.mjs');
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    await runtime.log.appendSealed('test.event', runtime.anchorSigner.id, { n: 1 });
+    const store = new FileAnchorStore(join(root, 'anchors-r5b02.jsonl'), { fsync: false });
+    const manifest = new StateManifest(stateManifestPath(root), {
+      fsync: false,
+      sealer: runtime.anchorSigner,
+    });
+    const witnessed = manifest.read().anchoredCount;
+    assert.equal(witnessed, 0, 'قبلَ التثبيت: صفرٌ');
+    // الشاهدُ الموثوقُ يُرفَعُ ويُتحقَّقُ منه بعدَ التوقيع.
+    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+      force: true,
+      witness: manifest.anchoredCountFloor(),
+    });
+    assert.ok(record, 'التثبيتُ وقع');
+    assert.equal(
+      manifest.read().anchoredCount,
+      record.count,
+      'الشاهدُ ارتفعَ إلى عدِّ المرساةِ والتحقّقُ نجح',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+// R5-A-01: شاهدُ العهدِ المزدوجُ — من البيانِ ومن السجلِّ المختومِ. بيانٌ أقدمُ
+// صحيحُ الخاتَمِ + دفترٌ فارغٌ كانَ يُعيدُ قبولَ أمرٍ ثُبِّتَ، لأنّ الشاهدَ كانَ في
+// البيانِ وحدَه. الإصلاحُ: `onCommitSink` يكتبُ واقعةً مختومةً في السجلِّ،
+// و`ledgerCommittedFromSealedLog` يقرأُها عندَ الإقلاعِ.
+test('R5-A-01: ledgerCommittedFromSealedLog يقرأُ أعلى عدٍّ من السجلِّ المختوم', async () => {
+  const { ledgerCommittedFromSealedLog } =
+    await import('../../src/root-of-trust/production-runtime.mjs');
+  const { runtime, cleanup } = await buildRuntime();
+  try {
+    // قبلَ أيِّ التزامٍ: صفرٌ.
+    const before = await ledgerCommittedFromSealedLog(runtime.log);
+    assert.equal(before, 0, 'قبلَ أيِّ التزامٍ: صفرٌ');
+    // بعدَ التزامٍ موقَّعٍ: يُكتبُ واقعةٌ مختومةٌ في السجلِّ.
+    runtime.ledger.begin({ id: 'cmd:r5a01-test' });
+    await runtime.ledger.commitSigned({ id: 'cmd:r5a01-test' });
+    const after = await ledgerCommittedFromSealedLog(runtime.log);
+    assert.equal(after, 1, 'بعدَ التزامٍ واحدٍ: واحدٌ');
+  } finally {
+    cleanup();
+  }
+});
+
+// R5-B-02: onAnchor شكليٌّ لم يَعُدْ مقبولاً — callbackٌ عامٌّ كانَ ثغرةً. لا بدَّ من
+// شاهدٍ موثوقٍ يُرفَعُ ويُتحقَّقُ منه.
+test('R5-B-02: onAnchor شكليٌّ يُرفَضُ — لا بدَّ من witness موثوق', async () => {
+  const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
+  const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');
+  const { runtime, root, cleanup } = await buildRuntime();
+  try {
+    await runtime.log.appendSealed('test.event', runtime.anchorSigner.id, { n: 1 });
+    const store = new FileAnchorStore(join(root, 'anchors-r5b02-noop.jsonl'), {
+      fsync: false,
+    });
+    // onAnchor شكليٌّ لا يَرفعُ شاهداً ولا يُتحقَّقُ — يجبُ أن يُرفَض.
+    const error = await caughtAsync(() =>
+      maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+        force: true,
+        onAnchor: () => {},
+      }),
+    );
+    assert.equal(
+      error.code,
+      'ANCHOR_WITNESS_SINK_MISSING',
+      'onAnchor شكليٌّ يجبُ أن يُرفَضَ — لا بدَّ من witness',
+    );
+    assert.equal(store.read().length, 0, 'ولا مرساةَ موقَّعةً خُلِّفت');
+    assert.equal(runtime.manifest.read().anchoredCount, 0, 'والشاهدُ لم يتحرَّكْ');
+  } finally {
+    cleanup();
+  }
 });
