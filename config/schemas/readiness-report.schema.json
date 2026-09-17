@@ -11,6 +11,7 @@
     "sources",
     "evidenceKinds",
     "attribution",
+    "deferralRecheck",
     "itemSources",
     "verdicts",
     "events",
@@ -38,8 +39,12 @@
       "additionalProperties": false,
       "required": ["statement", "limit"],
       "properties": {
-        "statement": { "$ref": "#/$defs/arabicText" },
-        "limit": { "$ref": "#/$defs/arabicText" }
+        "statement": {
+          "$ref": "#/$defs/arabicText"
+        },
+        "limit": {
+          "$ref": "#/$defs/arabicText"
+        }
       }
     },
     "sources": {
@@ -47,12 +52,24 @@
       "additionalProperties": false,
       "required": ["roadmap", "workLog", "deferrals", "status", "version", "output"],
       "properties": {
-        "roadmap": { "$ref": "#/$defs/relPath" },
-        "workLog": { "$ref": "#/$defs/relPath" },
-        "deferrals": { "$ref": "#/$defs/relPath" },
-        "status": { "$ref": "#/$defs/relPath" },
-        "version": { "$ref": "#/$defs/relPath" },
-        "output": { "$ref": "#/$defs/relPath" }
+        "roadmap": {
+          "$ref": "#/$defs/relPath"
+        },
+        "workLog": {
+          "$ref": "#/$defs/relPath"
+        },
+        "deferrals": {
+          "$ref": "#/$defs/relPath"
+        },
+        "status": {
+          "$ref": "#/$defs/relPath"
+        },
+        "version": {
+          "$ref": "#/$defs/relPath"
+        },
+        "output": {
+          "$ref": "#/$defs/relPath"
+        }
       }
     },
     "evidenceKinds": {
@@ -64,9 +81,16 @@
         "additionalProperties": false,
         "required": ["id", "meaning", "locatedIn"],
         "properties": {
-          "id": { "type": "string", "pattern": "^evidence:[a-z][a-z-]*[a-z]$" },
-          "meaning": { "$ref": "#/$defs/arabicText" },
-          "locatedIn": { "$ref": "#/$defs/relPath" }
+          "id": {
+            "type": "string",
+            "pattern": "^evidence:[a-z][a-z-]*[a-z]$"
+          },
+          "meaning": {
+            "$ref": "#/$defs/arabicText"
+          },
+          "locatedIn": {
+            "$ref": "#/$defs/relPath"
+          }
         }
       }
     },
@@ -76,9 +100,17 @@
       "additionalProperties": false,
       "required": ["fieldTitle", "neutralReferencePrefix", "meaning"],
       "properties": {
-        "fieldTitle": { "type": "string", "minLength": 3 },
-        "neutralReferencePrefix": { "type": "string", "minLength": 3 },
-        "meaning": { "$ref": "#/$defs/arabicText" }
+        "fieldTitle": {
+          "type": "string",
+          "minLength": 3
+        },
+        "neutralReferencePrefix": {
+          "type": "string",
+          "minLength": 3
+        },
+        "meaning": {
+          "$ref": "#/$defs/arabicText"
+        }
       }
     },
     "itemSources": {
@@ -90,10 +122,21 @@
         "additionalProperties": false,
         "required": ["id", "pattern", "countedIn", "expected"],
         "properties": {
-          "id": { "type": "string", "pattern": "^item:[a-z]+$" },
-          "pattern": { "type": "string", "minLength": 3 },
-          "countedIn": { "$ref": "#/$defs/relPath" },
-          "expected": { "type": "integer", "minimum": 1 }
+          "id": {
+            "type": "string",
+            "pattern": "^item:[a-z]+$"
+          },
+          "pattern": {
+            "type": "string",
+            "minLength": 3
+          },
+          "countedIn": {
+            "$ref": "#/$defs/relPath"
+          },
+          "expected": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       }
     },
@@ -107,9 +150,18 @@
         "additionalProperties": false,
         "required": ["id", "exitCode", "meaning"],
         "properties": {
-          "id": { "type": "string", "pattern": "^readiness:[a-z][a-z-]*[a-z]$" },
-          "exitCode": { "type": "integer", "minimum": 0, "maximum": 125 },
-          "meaning": { "$ref": "#/$defs/arabicText" }
+          "id": {
+            "type": "string",
+            "pattern": "^readiness:[a-z][a-z-]*[a-z]$"
+          },
+          "exitCode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 125
+          },
+          "meaning": {
+            "$ref": "#/$defs/arabicText"
+          }
         }
       }
     },
@@ -117,13 +169,19 @@
       "type": "array",
       "minItems": 5,
       "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^readiness\\.[a-z]+(\\.[a-z]+)*$" }
+      "items": {
+        "type": "string",
+        "pattern": "^readiness\\.[a-z]+(\\.[a-z]+)*$"
+      }
     },
     "refusalCodes": {
       "type": "array",
       "minItems": 10,
       "uniqueItems": true,
-      "items": { "type": "string", "pattern": "^READINESS_[A-Z_]+$" }
+      "items": {
+        "type": "string",
+        "pattern": "^READINESS_[A-Z_]+$"
+      }
     },
     "guarantees": {
       "type": "array",
@@ -134,9 +192,43 @@
         "additionalProperties": false,
         "required": ["id", "statement", "enforcedBy"],
         "properties": {
-          "id": { "type": "string", "pattern": "^G-READINESS-[A-Z-]+$" },
-          "statement": { "$ref": "#/$defs/arabicText" },
-          "enforcedBy": { "$ref": "#/$defs/relPath" }
+          "id": {
+            "type": "string",
+            "pattern": "^G-READINESS-[A-Z-]+$"
+          },
+          "statement": {
+            "$ref": "#/$defs/arabicText"
+          },
+          "enforcedBy": {
+            "$ref": "#/$defs/relPath"
+          }
+        }
+      }
+    },
+    "deferralRecheck": {
+      "type": "object",
+      "description": "سياسةُ إعادةِ النظرِ في التأجيلاتِ: وتيرةُ الأساسِ ووتائرُ السلطاتِ ومُدخلةُ القرارِ (الدَّين LIVE-3).",
+      "additionalProperties": false,
+      "required": ["baselineCadence", "byAuthority", "decidedIn", "meaning"],
+      "properties": {
+        "baselineCadence": {
+          "type": "string",
+          "enum": ["P1M", "P3M"]
+        },
+        "byAuthority": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["P1M", "P3M"]
+          }
+        },
+        "decidedIn": {
+          "type": "string",
+          "pattern": "^WL-\\d{3}$"
+        },
+        "meaning": {
+          "$ref": "#/$defs/arabicText"
         }
       }
     }

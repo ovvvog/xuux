@@ -67,6 +67,23 @@ attribution:
     دليلاً أصلاً كتبَ المعرِّفَ مسبوقاً بـ`neutralReferencePrefix`، فيُستثنى ذلكَ
     الذِّكرُ وحدَه من الدليلِ دونَ أن تُحيدَ المُدخلةُ كلُّها.
 
+# التأجيلُ **موقوتٌ لا مفتوحٌ**: لكلِّ تأجيلٍ وتيرةُ إعادةِ نظرٍ يُحسَبُ منها موعدُ
+# مراجعتِه القادمةِ، ومن فاتَ موعدُه أوقفَ الحاجزَ `guard:readiness` بالرمزِ
+# `READINESS_DEFERRAL_REVIEW_OVERDUE` — والوتيرةُ قرارُ مالكٍ لا اختيارُ منفِّذٍ
+# (‏`WL-204`، إغلاقُ الدَّينِ `LIVE-3`).
+deferralRecheck:
+  baselineCadence: P3M
+  byAuthority:
+    model-council: P1M
+  decidedIn: WL-204
+  meaning: >-
+    الأساسُ مراجعةٌ كلَّ ثلاثةِ أشهرٍ (‏`P3M`) لكلِّ تأجيلٍ، وتُشدَّدُ إلى شهرٍ
+    (‏`P1M`) لِما سلطةُ فكِّه **مجلسُ النماذجِ** لأنّه المسارُ الذي يُنتِجُ مخرجاتٍ
+    بوتيرةٍ أسرعَ. وموعدُ المراجعةِ القادمةِ = آخرُ مراجعةٍ + الوتيرةُ، يُحسَبُ حساباً
+    نقيّاً في `src/readiness/deferrals.mjs` ويُطبَعُ في §3 من التقريرِ. **والفَواتُ
+    يُوقِفُ الحكمَ** لا يُنبِّهُ فقط: تأجيلٌ مضى موعدُه بلا مراجعةٍ تأجيلٌ مفتوحٌ
+    عملاً وإن كانَ موقوتاً كتابةً.
+
 # البنودُ تُقرأ من مصدرِها لا تُكتَب بيدٍ: صفوفُ الخطواتِ من جداولِ الخارطةِ،
 # والبواباتُ من عناوينِها المعلَنةِ فيها.
 itemSources:
@@ -111,6 +128,7 @@ refusalCodes:
   - READINESS_DEFERRAL_INCOMPLETE
   - READINESS_DEFERRAL_UNDECLARED
   - READINESS_DEFERRAL_ORPHAN
+  - READINESS_DEFERRAL_REVIEW_OVERDUE
   - READINESS_EVIDENCE_MISSING
   - READINESS_REPORT_DRIFT
   - READINESS_SELF_APPROVAL
@@ -128,6 +146,12 @@ guarantees:
     statement: >-
       التأجيلُ لا يُستنتَج من غيابِ الدليلِ: يجب أن يكون **مُصرَّحاً** بسببِه
       وحاجزِه ونوعِ حاجزِه وشرطِ فكِّه وصاحبِ قرارِه ومُدخلةِ إعلانِه.
+    enforcedBy: src/readiness/deferrals.mjs
+  - id: G-READINESS-DEFERRAL-REVIEW-DATED
+    statement: >-
+      لكلِّ تأجيلٍ **موعدُ إعادةِ نظرٍ محسوبٌ** من وتيرةٍ مقرَّرةٍ ومن تاريخِ آخرِ
+      مراجعةٍ ومُدخلةِ قرارٍ؛ ووتيرةٌ تُخالفُ سياسةَ سلطتِها أو موعدٌ فاتَ بلا مراجعةٍ
+      يُوقِفُ حكمَ التقريرِ — فتأجيلٌ بلا موعدٍ تاريخٌ مفتوحٌ لا إعلانُ عدمِ إنجازٍ.
     enforcedBy: src/readiness/deferrals.mjs
   - id: G-READINESS-EVIDENCE-POINTS-TO-DISK
     statement: >-

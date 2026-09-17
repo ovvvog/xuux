@@ -28,6 +28,7 @@
  */
 
 import { NEUTRAL_REFERENCE_PREFIX } from './evidence.mjs';
+import { nextReviewOn } from './deferrals.mjs';
 
 /**
  * عنوانُ الترويسةِ الحاكمةِ — **يُقاسُ حضورُه في أوّلِ التقريرِ** بالقاعدةِ `R10`
@@ -209,8 +210,20 @@ export function renderReport(facts) {
   lines.push('');
   lines.push('## 3. البنودُ المؤجَّلةُ — إعلانُ عدمِ إنجازٍ لا دليلُ إنجازٍ');
   lines.push('');
-  lines.push(row(['البند', 'الحاجزُ', 'نوعُه', 'شرطُ فكِّه', 'صاحبُ القرارِ', 'مُعلَنٌ في']));
-  lines.push(row(['---', '---', '---', '---', '---', '---']));
+  lines.push(
+    row([
+      'البند',
+      'الحاجزُ',
+      'نوعُه',
+      'شرطُ فكِّه',
+      'صاحبُ القرارِ',
+      'مُعلَنٌ في',
+      'الوتيرةُ',
+      'آخرُ مراجعةٍ',
+      'المراجعةُ القادمةُ',
+    ]),
+  );
+  lines.push(row(['---', '---', '---', '---', '---', '---', '---', '---', '---']));
   for (const deferral of deferrals) {
     lines.push(
       row([
@@ -222,9 +235,22 @@ export function renderReport(facts) {
         AUTHORITY_TEXT[/** @type {keyof typeof AUTHORITY_TEXT} */ (deferral.authority)] ??
           deferral.authority,
         `\`${deferral.declaredIn}\``,
+        `\`${deferral.recheck?.cadence ?? '—'}\``,
+        deferral.recheck?.lastReviewedOn ?? '—',
+        nextReviewOn(deferral.recheck?.lastReviewedOn ?? '', deferral.recheck?.cadence ?? '') ||
+          '—',
       ]),
     );
   }
+  lines.push('');
+  lines.push(
+    '**والتأجيلُ موقوتٌ لا مفتوحٌ:** لكلِّ سطرٍ أعلاه **وتيرةُ إعادةِ نظرٍ** ' +
+      'مُقرَّرةٌ في `config/readiness-deferrals.yaml` وتاريخُ آخرِ مراجعةٍ فعليّةٍ ' +
+      'للحاجزِ، و«المراجعةُ القادمةُ» حاصلُ جمعِهما لا وعدٌ مكتوبٌ بيدٍ. ومن فاتَ ' +
+      'موعدُه أوقفَ الحاجزَ `guard:readiness` بالرمزِ ' +
+      '`READINESS_DEFERRAL_REVIEW_OVERDUE` — فتأجيلٌ مضى موعدُه بلا مراجعةٍ ' +
+      '**تأجيلٌ مفتوحٌ عملاً** وإن كانَ موقوتاً كتابةً.',
+  );
   lines.push('');
   lines.push('### سببُ كلِّ تأجيلٍ بنصِّه');
   lines.push('');
