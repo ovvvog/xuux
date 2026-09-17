@@ -128,12 +128,14 @@ if (databaseUrl === undefined || databaseUrl === '') {
     'R5: فحص المخزون متروك — لا DATABASE_URL. فحص القبول «صفر بيانات مصنَّفة مخزَّنة بلا تشفير» لم يُقَس على قاعدة في هذا التشغيل، ويُقاس في CI حيث القاعدة قائمة.',
   );
 } else {
-  const { Pool } = await import('pg');
-  const { resolveDatabaseConfig } = await import('../src/persistence/db.mjs');
+  const { createPool } = await import('../src/persistence/db.mjs');
   // الوصلة تمرّ بنفس الحرس الذي يمرّ به التشغيل، فالحاجز لا يفتح وصلةً نصّية
-  // إلى مضيفٍ على الشبكة كي «يفحص التشفير».
-  resolveDatabaseConfig({ url: databaseUrl });
-  const pool = new Pool({ connectionString: databaseUrl });
+  // إلى مضيفٍ على الشبكة كي «يفحص التشفير». وكان الحاجزُ قبلَ هذا الإصلاحِ ينشئ
+  // مجمّعَ وصلاتٍ بـ`new Pool({ connectionString })` مباشرةً فلا يُمرِّرُ شهادةَ
+  // جهةِ الإصدارِ — فيفشلُ بـ`SELF_SIGNED_CERT_IN_CHAIN` مع أنّ الشهادةَ مُعلَنةٌ
+  // وصحيحةٌ. و`createPool` يُمرِّرُها لأنّه يُزيلُ `sslmode` من الوصلةِ ويبني خيارَ
+  // `ssl` بنفسِهِ — وهو ما يمنعُ `pg` من إلغاءِ الشهادةِ باشتقاقِ `sslmode` منها.
+  const pool = createPool({ url: databaseUrl });
   try {
     for (const store of policy.stores) {
       const [schema, table] = store.name.split('.');
