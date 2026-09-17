@@ -8086,6 +8086,6 @@ $ node scripts/guard-transport.mjs      # EXIT=0
 - **ما تم فعلاً:** `LEASE_MS` في `tests/execution/workers.test.mjs` كان ثابتاً `700` مِللي ثانية — فعلى قاعدةٍ بعيدةٍ (قِيسَت رحلةُ الشبكةِ 187 مِللي وسطاً و989 للاتصالِ الأوّل) ينفدُ العقدُ بالشبكةِ قبلَ المنطق. صارَ **قابلاً للتهيئةِ بيئيّاً** عبرَ `TEST_LEASE_MS` (افتراضيٌّ `700` للمحلّي). **والإصلاحُ مُقيسٌ على قاعدةٍ بعيدةٍ**: `DATABASE_URL=<Supabase pooler> TEST_LEASE_MS=5000 node --test tests/execution/workers.test.mjs` ⇒ `tests 2 · pass 2 · fail 0` — الاختبارانِ ناجحانِ على قاعدةٍ بعيدةٍ لا على المحلّيّةِ وحدَها.
 - **الملفات المتأثرة:** `tests/execution/workers.test.mjs`
 - **الـ commit:** هذا PR (WL-207)
-- **الدليل:** `TEST_LEASE_MS=5000 DATABASE_URL=postgresql://postgres.qxlzdaanhyenqubzpnor:lb5Y1EqZ3VHexdzP@aws-0-ap-south-1.pooler.supabase.com:5432/postgres node --test tests/execution/workers.test.mjs` ⇒ `# tests 2 · # pass 2 · # fail 0`
+- **الدليل:** `TEST_LEASE_MS=5000 DATABASE_URL=<Supabase pooler> node --test tests/execution/workers.test.mjs` ⇒ `# tests 2 · # pass 2 · # fail 0`
 - **ما لم يتم ولماذا:** لا شيء — `worker-isolation.test.mjs` لا يستعملُ `LEASE_MS` أصلاً (يستعملُ طابوراً محاكياً)
 - **الأثر على المسارات الأخرى:** يُغلقُ آخرَ دَينٍ حيٍّ مُكتشَفٍ (§4.6) — كلُّ الديونِ الحيّةِ الـ8 مُغلَقةٌ الآن.
