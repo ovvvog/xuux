@@ -22,8 +22,14 @@ import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HANG = path.join(HERE, 'helpers/hang-child.mjs');
 const AUTH = { decisionId: 'decision-موت-العامل' };
-/** عقدٌ قصير كي ينتهي في زمن اختبار معقول؛ الطول لا يُغيّر المنطق. */
-const LEASE_MS = 700;
+/**
+ * عقد الاختبار: قابلٌ للتهيئة بيئيّاً كي يُوسَّع حيث تبعد القاعدة.
+ *
+ * `LIVE-8`: العقد الثابت بـ700 مِللي يُنهي عقداً على قاعدةٍ بعيدةٍ قبلَ المنطقِ —
+ * رحلةُ الشبكةِ قِيسَت 187 مِللي وسطاً و989 للاتصالِ الأوّل. فالقيمةُ الافتراضيّةُ
+ * تبقى 700 للمحلّي، ومن يُشغّل على قاعدةٍ بعيدةٍ يُعلنُ `TEST_LEASE_MS`.
+ */
+const LEASE_MS = Number(process.env.TEST_LEASE_MS ?? '700');
 
 /** @type {{ pool: import('pg').Pool, name: string, drop: () => Promise<void> } | undefined} */
 let db;
