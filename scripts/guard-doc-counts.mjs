@@ -106,7 +106,8 @@ const facts = readDocCountFacts(root);
       (line.includes('`D-') ||
         line.includes('`LIM-') ||
         line.includes('`REPO-') ||
-        line.includes('`LIVE-'))
+        line.includes('`LIVE-') ||
+        line.includes('`R3-A-'))
     ) {
       const declared = countIdsInList(line);
       if (declared !== facts.openDebtCount) {
