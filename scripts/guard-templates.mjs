@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { classify, SKIP_DIRS } from './lib/classify.mjs';
+import { listTrackedFiles } from './lib/git-files.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -83,6 +84,25 @@ for (const abs of walk(TARGET)) {
   offenders.push({ rel, reason });
 }
 
+// ── إذنٌ لا مأذونَ له إذنٌ متروكٌ — إغلاقُ الدَّينِ `DOC-11` ──
+// **قائمةُ إذنٍ أوسعُ من واقعِها تأذنُ لما يُعادُ خلقُه باسمٍ قديمٍ**: مسارٌ مأذونٌ
+// حُذِفَ ملفُّه يبقى إذناً نائماً، فإن رجعَ الملفُّ قالبياً مرَّ بلا سؤالٍ. فيُقاسُ
+// الترهُّلُ: كلُّ مسارٍ في القائمةِ **موجودٌ على القرصِ ومتعقَّبٌ في Git**.
+// والقراءةُ بـ`-z` لا سطراً سطراً: `git ls-files` يَهرُبُ المساراتِ غيرَ ASCII
+// فيُخفيها عن كلِّ نمطٍ — وبذلك أُنتِجَ هذا الدَّينُ كاذباً في `WL-200`.
+/** @type {string[]} */
+const staleAllowances = [];
+if (TARGET === ROOT) {
+  const tracked = new Set(listTrackedFiles({ cwd: ROOT }));
+  for (const rel of allow) {
+    if (!fs.existsSync(path.join(ROOT, rel))) {
+      staleAllowances.push(`${rel} — لا وجودَ له على القرصِ`);
+    } else if (!tracked.has(rel)) {
+      staleAllowances.push(`${rel} — موجودٌ وغيرُ متعقَّبٍ في Git`);
+    }
+  }
+}
+
 console.log('═══ حاجز القوالب (M1.08) ═══');
 console.log(`ملفات مفحوصة: ${scanned}`);
 console.log(`استثناءات معلنة ومطابقة: ${allowed}`);
@@ -90,7 +110,17 @@ if (escaped.length > 0) {
   console.log(`ملفات بمخرج هروب معلَن (${ESCAPE_MARKER}): ${escaped.length}`);
   for (const e of escaped) console.log(`  · ${e}`);
 }
+console.log(`مداخل إذنٍ متروكة (لا ملفَّ لها أو غير متعقَّبة): ${staleAllowances.length}`);
 console.log(`مخالفات: ${offenders.length}`);
+
+if (staleAllowances.length > 0) {
+  console.error('\n❌ قائمة الإذن أوسع من واقعها — إذنٌ نائم يأذن لما يُعاد خلقه باسم قديم:');
+  for (const stale of staleAllowances) console.error(`  - ${stale}`);
+  console.error(
+    '\nالعلاج: قلِّم docs/audit/template-allowlist.txt إلى ما هو على القرص ومتعقَّب، وسجِّل التقليم في مُدخلة سجلٍّ.',
+  );
+  process.exit(1);
+}
 
 if (offenders.length > 0) {
   console.error('\n❌ ملفات قالبية فارغة ممنوعة في المستودع:');

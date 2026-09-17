@@ -14,10 +14,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { listTrackedFiles } from '../../scripts/lib/git-files.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -36,13 +36,12 @@ function backticked(text) {
 
 /** مصدرُ الحقيقة الذي تُقاس عليه الرموز: الكود نفسه لا وثيقةٌ أخرى. */
 function sourceCorpus() {
-  const files = execFileSync(
-    'git',
-    ['ls-files', 'src', 'scripts', 'tests', 'package.json', 'tsconfig.json'],
-    { cwd: ROOT, encoding: 'utf8' },
-  )
-    .split('\n')
-    .filter((line) => line.length > 0);
+  // بـ`-z` لا سطراً سطراً (‏`DOC-11`): مسارٌ غيرُ ASCII يخرجُ مقتبَساً مهروباً،
+  // فقراءتُه تُخفِقُ أو تُسقَطُ صامتةً — والفهرسُ هنا مصدرُ حقيقةِ الرموزِ.
+  const files = listTrackedFiles({
+    cwd: ROOT,
+    args: ['src', 'scripts', 'tests', 'package.json', 'tsconfig.json'],
+  });
   return files.map((file) => readFileSync(join(ROOT, file), 'utf8')).join('\n');
 }
 
