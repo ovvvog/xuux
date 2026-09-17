@@ -149,7 +149,7 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 1
+      rounds: 2
       members:
         - id: claude_fable_5_1
           provider: ANTHROPIC
@@ -157,8 +157,16 @@ engagements:
         - id: gemini_3_1_pro
           provider: GOOGLE
           rounds: [1]
+        - id: gpt_5_6_sol
+          provider: OPENAI
+          rounds: [2]
+        - id: grok_4_6
+          provider: XAI
+          rounds: [2]
       reviewedCommit: a705f2d485961bfcfb01f98d598f1b9714998f79
+      round2ReviewedCommit: 734397dc854383ce614be62cb362ec31cd35dd78
       comparisonMatrix: docs/external-review/M11.06-round-1-comparison-matrix.md
+      round2ComparisonMatrix: docs/external-review/M11.06-round-2-comparison-matrix.md
       # تحفّظٌ خرجَ به العضوانِ ولا يُكتَمُ: كلاهما صرّحَ أنّه ليسَ مراجِعاً بشريّاً،
       # و«أ» كتبَ أنَّ تقريرَه مُدخَلٌ لموقِّعٍ بشريٍّ لا يقومُ مقامَه. وقرارُ المالكِ
       # الصريحُ الاكتفاءُ بالمجلسِ بديلاً كاملاً عن المراجعةِ البشريّةِ الخارجيّةِ —
@@ -818,6 +826,8 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-A-02
     engagement: M11.06
@@ -825,7 +835,7 @@ findings:
     origin: round-1
     severityAsWritten: عالية
     severity: high
-    status: open
+    status: closed
     agreement: نتيجةٌ من العضوِ «أ»
     reproductionPath: >-
       `node probes/probe-egress-quota-amount.mjs; echo $?` ⇒ `3` (إخراجُ 500,000 بايتٍ
@@ -838,6 +848,16 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+    closure:
+      fixCommit: 98e88fbe
+      retestedBy: [gpt_5_6_sol, grok_4_6]
+      retestRound: 2
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنّ `enforcement-point.mjs:348-374` يأخذُ القياسَ من قناةٍ منفصلةٍ
+        ويردُّ الكميةَ الغائبةَ بـ`QUOTA_AMOUNT_UNMEASURED` ويخصمُ `Math.ceil(raw)`.
+        مرّتْ 9 اختباراتٍ عندَ «أ» واختباراتُ الخصمِ عندَ «ب». الطفرةُ أسقطتْ 3 عندَ «أ» و1 عندَ «ب».
 
   - id: R6-A-03
     engagement: M11.06
@@ -857,6 +877,8 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-A-04
     engagement: M11.06
@@ -864,7 +886,7 @@ findings:
     origin: round-1
     severityAsWritten: متوسطة
     severity: medium
-    status: open
+    status: closed
     agreement: نتيجةٌ من العضوِ «أ»
     reproductionPath: >-
       `grep -rn "createGovernance(\|new IdentityGate(\|new QuarantineWarden" src/ scripts/`
@@ -876,6 +898,16 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+    closure:
+      fixCommit: eb61cb44
+      retestedBy: [gpt_5_6_sol, grok_4_6]
+      retestRound: 2
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنّ `composition-root.mjs:87-190` يبني الهويةَ والتفويضَ
+        بـ`requireIdentityGate: true` ويستهلكه المسارُ الحيُّ. مرّتْ 7 اختباراتٍ عندَ «أ».
+        الطفرةُ أسقطتْ اختبارين عندَ «أ» و1 عندَ «ب».
 
   - id: R6-A-05
     engagement: M11.06
@@ -901,6 +933,8 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-A-06
     engagement: M11.06
@@ -908,7 +942,7 @@ findings:
     origin: round-1
     severityAsWritten: متوسطة
     severity: medium
-    status: open
+    status: closed
     agreement: >-
       اتّفاقٌ في الجوهرِ مع `R6-B-01` (كلاهما وقفَ على إقرارِ الوثيقةِ نفسِها)،
       **بلا دمجٍ** — والتقاطعُ إشارةٌ لا حكمٌ.
@@ -923,6 +957,16 @@ findings:
     overlapsWith: [R6-B-01]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+    closure:
+      fixCommit: 2b0398fb
+      retestedBy: [gpt_5_6_sol, grok_4_6]
+      retestRound: 2
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنّ `docs/AGENT_CONTAINMENT.md:150-164` يوافقُ المنتجَ في
+        `inference-gate.mjs:487-503`. مرَّ اختبارُ المنتجِ عندَ العضوين. الطفرةُ أسقطتْ
+        اختباراً عندَ «أ». حدٌّ باقٍ: حارسُ الوثيقةِ لا يغطّي هذا الادعاءَ — R6-A-13/R6-B-05.
 
   - id: R6-A-07
     engagement: M11.06
@@ -941,6 +985,8 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-A-08
     engagement: M11.06
@@ -956,6 +1002,8 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-A-09
     engagement: M11.06
@@ -975,6 +1023,8 @@ findings:
     overlapsWith: [R6-A-01]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-A-10
     engagement: M11.06
@@ -995,6 +1045,8 @@ findings:
     raisedBy: [claude_fable_5_1]
     rawReports:
       claude_fable_5_1: docs/external-review/reports/M11.06-round-1-model-council-report-claude-fable-5-1.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
 
   - id: R6-B-01
     engagement: M11.06
@@ -1002,7 +1054,7 @@ findings:
     origin: round-1
     severityAsWritten: متوسطة
     severity: medium
-    status: open
+    status: closed
     agreement: >-
       نتيجةٌ من العضوِ «ب»، وتلتقي في الجوهرِ مع `R6-A-06` — **والتقاطعُ إشارةٌ لا دمجٌ**.
     reproductionPath: >-
@@ -1015,6 +1067,16 @@ findings:
     overlapsWith: [R6-A-06]
     rawReports:
       gemini_3_1_pro: docs/external-review/reports/M11.06-round-1-model-council-report-gemini-3-1-pro.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+    closure:
+      fixCommit: 2b0398fb
+      retestedBy: [gpt_5_6_sol, grok_4_6]
+      retestRound: 2
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنّ المنتجَ في `inference-gate.mjs:496-501` يُرسلُ النوعَ
+        `budget-exceeded` إلى الحجر. مرَّ اختبارُ التجاوزِ عندَ العضوين. الطفرةُ أسقطتْه.
+        الرمزُ `INFERENCE_BUDGET_EXCEEDED`.
 
   - id: R6-B-02
     engagement: M11.06
@@ -1022,7 +1084,7 @@ findings:
     origin: round-1
     severityAsWritten: منخفضة إلى متوسطة
     severity: medium
-    status: open
+    status: closed
     agreement: >-
       نتيجةٌ من العضوِ «ب». والشدّةُ بلفظِه مزدوجةٌ («منخفضةٌ إلى متوسّطةٍ»)،
       والتطبيعُ إلى `medium` **أخذٌ بالأشدِّ لا إعادةُ تقديرٍ** — والأصلُ في `severityAsWritten`.
@@ -1034,3 +1096,123 @@ findings:
     raisedBy: [gemini_3_1_pro]
     rawReports:
       gemini_3_1_pro: docs/external-review/reports/M11.06-round-1-model-council-report-gemini-3-1-pro.md
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+    closure:
+      fixCommit: 9b22e3fb
+      retestedBy: [gpt_5_6_sol, grok_4_6]
+      retestRound: 2
+      retestEvidence: >-
+        كلا العضوينِ قاسَ أنّ `model-registry.mjs:305-356` يرفضُ التنشيطَ بلا نتيجةٍ
+        أو بنتيجةٍ فاشلةٍ بالرمزين `MODEL_EVALUATION_MISSING` و`MODEL_EVALUATION_FAILED`.
+        مرّتْ اختباراتُ السلوكِ والوثيقةِ. الطفرةُ أسقطتْ 4 من 6 عندَ «أ» و1 عندَ «ب».
+  # ---------------------------------------------------------------- `M11.06` — الجولةُ الثانيةُ — النتائجُ الجديدةُ
+  - id: R6-A-11
+    engagement: M11.06
+    title: أداةُ المحوِ القديمةُ مسارُ حذفٍ خارجَ سلطةِ `purge-data`
+    origin: round-2
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ
+    reproductionPath: >-
+      `node probes/probe-raw-purge-no-authority.mjs` من جذرِ الاستنساخِ؛ خرجُ `0` وسجلُ
+      `DELETE FROM "state"."memories"...` و`deleted: 1` باستخدامِ عميلٍ وهميٍّ، بلا مساسٍ
+      بقاعدةٍ حقيقيّةٍ.
+    affectedFiles:
+      - scripts/retention.mjs
+      - src/persistence/retention.mjs
+    raisedBy: [gpt_5_6_sol]
+    overlapsWith: [R6-A-01]
+    rawReports:
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+
+  - id: R6-A-12
+    engagement: M11.06
+    title: أمرُ الاختباراتِ الملزمُ يشيرُ إلى مسارٍ غيرِ موجودٍ (`tests/agents/`)
+    origin: round-2
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: '`node --test tests/agents/` ⇒ `Could not find .../tests/agents`، رمزُ الخروجِ `1`.'
+    affectedFiles:
+      - docs/external-review/M11.06-round-2-plan.md
+    raisedBy: [gpt_5_6_sol]
+    overlapsWith: [R6-B-04]
+    rawReports:
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+
+  - id: R6-A-13
+    engagement: M11.06
+    title: حارسُ وثيقةِ الاحتواءِ لا يغطّي ادعاءَ `M6.07` (منتجُ `budget-exceeded`)
+    origin: round-2
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    reproductionPath: >-
+      طفرةُ `M2A-CONTAINMENT-DOC` أعادتْ عبارةَ الغيابِ في بندِ `M6.07`؛
+      `node --test tests/docs/agent-containment-claims.test.mjs` خرجَ `0` بـ`2/2`.
+    affectedFiles:
+      - tests/docs/agent-containment-claims.test.mjs
+      - docs/AGENT_CONTAINMENT.md
+    raisedBy: [gpt_5_6_sol]
+    overlapsWith: [R6-B-05]
+    rawReports:
+      gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
+
+  - id: R6-B-03
+    engagement: M11.06
+    title: وصلةُ `DATABASE_URL` المُعلَنةُ للجولةِ لا تعبرُ `guard:encryption` فـ`validate` يخرجُ `1` قبلَ الاختباراتِ
+    origin: round-2
+    severityAsWritten: عالية
+    severity: high
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب» — وأشارَ إليها العضوُ «أ» في حدودِه
+    reproductionPath: >-
+      `export DATABASE_URL='postgresql://…:5432/postgres'` ثمّ `npm run validate` ⇒
+      `ENCRYPTION_TRANSPORT_INSECURE` في `src/data/encryption.mjs`. مع `sslmode=require` ⇒
+      `SELF_SIGNED_CERT_IN_CHAIN`.
+    affectedFiles:
+      - src/data/encryption.mjs
+      - scripts/guard-encryption.mjs
+    raisedBy: [grok_4_6]
+    overlapsWith: [R6-A-10]
+    rawReports:
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+
+  - id: R6-B-04
+    engagement: M11.06
+    title: الخطّةُ تطلبُ `tests/agents/` والمسارُ غيرُ موجودٍ
+    origin: round-2
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: '`ls tests/agents` ⇒ خروجُ `2`؛ `node --test tests/agents/` ⇒ خروجُ `1`.'
+    affectedFiles:
+      - docs/external-review/M11.06-round-2-plan.md
+    raisedBy: [grok_4_6]
+    overlapsWith: [R6-A-12]
+    rawReports:
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
+
+  - id: R6-B-05
+    engagement: M11.06
+    title: حارسُ صدقِ وثيقةِ الاحتواءِ لا يسقطُ إن أُعيدَ إقرارُ «`budget-exceeded` بلا مُنتِجٍ»
+    origin: round-2
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    reproductionPath: >-
+      الطفرةُ `M-A06` على `docs/AGENT_CONTAINMENT.md` ثمّ `node --test tests/docs/agent-containment-claims.test.mjs`
+      ⇒ خروجُ `0` (`SURVIVED`).
+    affectedFiles:
+      - tests/docs/agent-containment-claims.test.mjs
+      - docs/AGENT_CONTAINMENT.md
+    raisedBy: [grok_4_6]
+    overlapsWith: [R6-A-13]
+    rawReports:
+      grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
