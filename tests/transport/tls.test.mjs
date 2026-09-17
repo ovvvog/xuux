@@ -20,7 +20,6 @@
  */
 
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { request as httpsRequest } from 'node:https';
 import os from 'node:os';
@@ -43,6 +42,7 @@ import {
 } from '../../src/transport/index.mjs';
 import { enforcementPointFor } from '../helpers/authorization.mjs';
 import { issueMaterial } from '../helpers/tls-material.mjs';
+import { listTrackedFiles } from '../../scripts/lib/git-files.mjs';
 
 const ROOT = process.cwd();
 const CONFIG_DIR = path.join(ROOT, 'config');
@@ -308,7 +308,10 @@ test('لا سبيلَ في الشفرةِ إلى إسقاطِ التحقُّقِ
   // الشفرةَ لا تُشتقُّ منها خياراً، بل تَرفعُ خطأً إن كانت مُعطِّلةً.
   assert.ok(code.includes('TLS_ERRORS.VERIFICATION_DISABLED'), 'اختفى الفشلُ المُغلَقُ.');
 
-  const tracked = execFileSync('git', ['ls-files'], { cwd: ROOT, encoding: 'utf8' }).split('\n');
+  // القراءةُ بـ`-z` لا سطراً سطراً (‏`DOC-11`): `git ls-files` يَهرُبُ المسارَ غيرَ
+  // ASCII ويقتبسُه، فيصيرُ آخرُ السطرِ اقتباساً لا `.pem` — **فيمرُّ مفتاحٌ متعقَّبٌ
+  // تحتَ مسارٍ عربيٍّ بلا صرخةٍ**. وهذا إخفاءٌ صامتٌ لا نقصُ تغطيةٍ.
+  const tracked = listTrackedFiles({ cwd: ROOT });
   const suspicious = tracked.filter((file) => /\.(pem|key|p12|pfx)$/.test(file));
   assert.deepEqual(
     suspicious,
