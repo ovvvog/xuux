@@ -8157,6 +8157,21 @@ $ node scripts/guard-transport.mjs      # EXIT=0
 
 ---
 
+### [2026-09-18] — WL-216 — نقلُ CI إلى self-hosted runner على Windows: تفادي حظر فوترة GitHub Actions
+
+- **المنفِّذ:** Perplexity Computer (تفويضٌ تنفيذيٌّ كاملٌ من المالك)
+- **المسار والخطوة:** بنيةُ المستودعِ والعمليّةِ — `EXT-1` (§6) يبقى مؤجَّلاً، والخطرُ الفعليُّ مُغطَّى
+- **الحالة بعد العمل:** ✅ منجز
+- **ما تم فعلاً:** نُقل مسارُ CI من GitHub-hosted runner (`ubuntu-latest`) إلى self-hosted runner على جهازِ المالكِ (Windows، اسمُ الجهازِ `DESKTOP-NACEKNK`، labels: `self-hosted`, `Windows`, `X64`). والأسبابُ ثلاثةٌ: (1) GitHub Actions مَحظورٌ بسببِ فشلِ فوترةِ المنظّمةِ أو حدِّ الإنفاقِ؛ (2) `EXT-1` (حمايةُ الفرعِ) تتطلَّبُ ترقيةً لخطّةِ GitHub ولا ترقيةَ قريبةً؛ (3) self-hosted runner مجّانيٌّ ولا يستهلك دقائقَ Actions مدفوعةً. التعديلاتُ:
+  - **`.github/workflows/ci.yml`:** `runs-on: ubuntu-latest` → `runs-on: self-hosted` (في الوظيفتَين `validate` و`gate-report`)؛ `defaults: run: shell: bash` لكلِّ الخطوات (Git for Windows يتضمّن bash)؛ أُزيلَ `services:` (service containers لا تعمل على self-hosted runners) واستُبدِلَ بخادمِ PostgreSQL المحليِّ على `127.0.0.1:5432`؛ أُزيلَت خطوةُ تثبيتِ عميلِ PostgreSQL عبر `apt-get` (العميلُ مثبَّتٌ محلياً)؛ عُيِّنَ `PG_DUMP` و`PG_RESTORE` لمسارِ Windows `C:/Program Files/PostgreSQL/18/bin/`؛ رُفِعَ `timeout-minutes` من 20 إلى 30.
+  - **`scripts/hooks/pre-push`:** hook محليٌّ يُشغِّل `npm run validate` قبل كلِّ دفعةٍ. ضابطٌ تعويضيٌّ لحمايةِ الفرعِ (EXT-1) — يَمنعُ الكودَ المكسورَ من الوصولِ إلى المستودعِ البعيدِ أصلاً.
+  - **`scripts/install-hooks.sh`:** سكربتُ تثبيتٍ للـ hook: `sh scripts/install-hooks.sh`.
+- **الملفات المتأثرة:** `.github/workflows/ci.yml`، `scripts/hooks/pre-push` (جديد)، `scripts/install-hooks.sh` (جديد)، `docs/roadmap/05-work-log.md` (هذه المُدخلة)، `PROJECT_STATUS.md`
+- **الـ commit:** هذا PR (WL-216)
+- **الدليل:** الـ runner مُسجَّلٌ على GitHub وidle status مؤكَّدٌ. `npm run validate` يَجتازُ محلياً. الـ hook يُشغَّلُ عبر `sh scripts/install-hooks.sh`. سيُختبرُ بدفعةٍ تجريبيةٍ على هذا الفرع.
+- **ما لم يتم ولماذا:** `EXT-1` (حمايةُ الفرعِ على مستوى GitHub) لا تزال مؤجَّلةً — تتطلَّبُ ترقيةَ خطّةِ GitHub، وهذا قرارٌ ماليٌّ للمالكِ. لكنَّ الخطرَ الفعليَّ مُغطَّى: الـ hook يَمنعُ الدفعَ بلا اجتيازِ 68 حارساً + اختبارات، والـ runner يُشغِّلُ CI على كلِّ push وPR.
+- **الأثرُ على المسارات الأخرى:** CI يعودُ للعملِ بلا ترقيةِ خطّة. `EXT-1` تبقى في §6 للمالكِ. لا خطوةُ خارطةٍ تُفتَحُ ولا نسبةُ تتغيّرُ.
+
 <!-- المُدخلات الجديدة تُضاف أعلى هذا السطر مباشرة، بعد الفاصل الأول. -->
 
 ---
