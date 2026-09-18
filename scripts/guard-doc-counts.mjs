@@ -10,9 +10,9 @@
 //   - R1: عددُ الحواجزِ في `PROJECT_STATUS.md` يُطابقُ عددَ `guard:*` في `validate`.
 //   - R2: عددُ ملفاتِ الاختبارِ في `docs/ROOT_OF_TRUST.md` يُطابقُ عددَ `*.test.mjs`.
 //   - R3: عددُ البنودِ المفتوحةِ في `PROJECT_STATUS.md` يُطابقُ عددَ البنودِ المفتوحةِ على المنفِّذ.
-//   - R4: كلُّ صفٍّ في جدولِ §4.6 من سجلِّ الدَّينِ يُطابقُ عددَ خلايا ترويستِه — أُضيفَ في `WL-219`
-//     إغلاقاً للدَّينِ `DOC-13`. **يَنزِعُ ما بينَ علامتَيْ كودٍ قبلَ العدِّ**، فـ`|` داخلَ كودٍ
-//     ليسَ فاصلَ خليّةٍ. **ونطاقُهُ §4.6 وحدَها** — انظر `DOC-14` لبقيّةِ الجداول.
+//   - R4: كلُّ صفٍّ في كلِّ جدولٍ في سجلِّ الدَّينِ يُطابقُ عددَ خلايا ترويستِه — أُضيفَ في `WL-219`
+//     إغلاقاً للدَّينِ `DOC-13`، ووُسِّعَ في `WL-220` إغلاقاً للدَّينِ `DOC-14`. **يَنزِعُ ما بينَ علامتَيْ كودٍ قبلَ العدِّ**، فـ`|`
+//     داخلَ كودٍ ليسَ فاصلَ خليّةٍ. **ونطاقُهُ كلُّ جداولِ السجلِّ** — ترويسةً وفاصلاً وصفوفاً — لا §4.6 وحدَها.
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -129,33 +129,68 @@ const facts = readDocCountFacts(root);
   }
 }
 
-// ── R4: سلامةُ بِنيةِ جدولِ §4.6 في سجلِّ الدَّين ──
-// **لماذا:** دَينٌ قُيِّدَ في صفٍّ مُلتصِقٍ بسابقِه لا يُقرأُ صفّاً (‏`DOC-13`).
+// ── R4: سلامةُ بِنيةِ كلِّ جدولٍ في سجلِّ الدَّين ──
+// **لماذا:** دَينٌ قُيِّدَ في صفٍّ مُلتصِقٍ بسابقِه لا يُقرأُ صفّاً (‏`DOC-13`)، وصفوفٌ بأعدادِ
+// خلايا تُخالِفُ ترويستَها خارجَ §4.6 (‏`DOC-14`). **يَفحَصُ كلَّ جدولٍ في السجلِّ** — ترويسةً وفاصلاً وصفوفاً.
 {
   const registerText = readText('docs/roadmap/06-debt-register.md');
   const lines = registerText.split('\n');
-  const headingIndex = lines.findIndex((l) => l.startsWith('### 4.6'));
-  if (headingIndex === -1) {
-    violations.push('R4/MISSING: سجلُّ الدَّينِ لا يَحوي العنوانَ «### 4.6».');
-  } else {
-    /**
-     * عددُ الخلايا بعدَ نزعِ ما بينَ علامتَيْ كودٍ.
-     * @param {string} line
-     * @returns {number}
-     */
-    const cellCount = (line) => line.replace(/`[^`]*`/g, '§').split('|').length - 2;
-    /** @type {[number, string][]} */
-    const rows = [];
-    for (let i = headingIndex + 1; i < lines.length; i += 1) {
-      const line = lines[i] ?? '';
-      if (line.startsWith('|')) rows.push([i + 1, line]);
-      else if (rows.length > 0) break;
+  /**
+   * عددُ الخلايا بعدَ نزعِ ما بينَ علامتَيْ كودٍ.
+   * @param {string} line
+   * @returns {number}
+   */
+  const cellCount = (line) => line.replace(/`[^`]*`/g, '§').split('|').length - 2;
+  /** @type {{startLine: number, header: string, rows: [number, string][], separators: [number, string][]}[]} */
+  const tables = [];
+  /** @type {{startLine: number, header: string, rows: [number, string][], separators: [number, string][]} | null} */
+  let current = null;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (line.startsWith('|')) {
+      if (!current) {
+        current = {
+          startLine: i + 1,
+          header: line,
+          rows: /** @type {[number, string][]} */ ([]),
+          separators: /** @type {[number, string][]} */ ([]),
+        };
+      } else if (
+        current.rows.length === 0 &&
+        /^\s*[|:\-\s]+\s*$/.test(line.replace(/`[^`]*`/g, ''))
+      ) {
+        // صفٌّ فاصلٌ (---) — يُفحَصُ عرضُه ولا يُحسَبُ صفَّ بياناتٍ.
+        current.separators.push([i + 1, line]);
+      } else {
+        current.rows.push([i + 1, line]);
+      }
+    } else if (current) {
+      tables.push(current);
+      current = null;
     }
-    if (rows.length < 3) {
-      violations.push('R4/MISSING: جدولُ §4.6 لم يُعثَرْ عليه أو لا صفوفَ فيه.');
-    } else {
-      const width = cellCount(rows[0]?.[1] ?? '');
-      for (const [lineNumber, line] of rows) {
+  }
+  if (current) tables.push(current);
+
+  if (tables.length === 0) {
+    violations.push('R4/MISSING: لا جداولَ في سجلِّ الدَّينِ.');
+  } else {
+    for (const table of tables) {
+      const width = cellCount(table.header);
+      if (width < 2) {
+        violations.push(
+          `R4/SHAPE: جدولٌ عندَ السطرِ ${table.startLine}: ترويسةٌ بعرضٍ غيرِ صالحٍ (${width}).`,
+        );
+        continue;
+      }
+      for (const [lineNumber, line] of table.separators) {
+        const count = cellCount(line);
+        if (count !== width) {
+          violations.push(
+            `R4/SHAPE: سجلُّ الدَّينِ، السطرُ ${lineNumber}: صفٌّ فاصلٌ بعرضٍ ${count} والترويسةُ ${width}.`,
+          );
+        }
+      }
+      for (const [lineNumber, line] of table.rows) {
         const count = cellCount(line);
         if (count !== width) {
           violations.push(
