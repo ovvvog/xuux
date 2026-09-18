@@ -6,7 +6,7 @@
 #
 # WL-216: نُقل المسار من GitHub-hosted (ubuntu-latest) إلى self-hosted runner
 # على جهاز المالك (Windows) لتفادي حظر فوترة GitHub Actions. خادم PostgreSQL
-# محلي بدل service container، وshell: bash لكل الخطوات (Git for Windows).
+# محلي بدل service container، وpwsh shell لكل الخطوات (متوافق مع Windows).
 
 name: CI
 
@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: "C:\\Program Files\\Git\\bin\\bash.exe --noprofile --norc -e -o pipefail {0}"
+        shell: pwsh
 
     env:
       DATABASE_URL: postgresql://state:state@127.0.0.1:5432/state
@@ -51,7 +51,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-          cache: npm
 
       - name: تثبيت التبعيات من القفل
         run: npm ci
@@ -105,9 +104,10 @@ jobs:
         # لا يكفي وجود نصّ نسخ: النسخة التي لم تُستعد ليست نسخة. فالبوابة
         # تُنشئ أرشيفاً وتتحقّق منه وتستعيده فوق قاعدة أخرى، وتطبع الزمن.
         run: |
-          npm run backup -- create "$RUNNER_TEMP/ci-drill.dump"
-          npm run backup -- verify "$RUNNER_TEMP/ci-drill.dump"
-          npm run restore -- "$RUNNER_TEMP/ci-drill.dump" --database state_restore_drill --force
+          $dump = Join-Path $env:RUNNER_TEMP "ci-drill.dump"
+          npm run backup -- create $dump
+          npm run backup -- verify $dump
+          npm run restore -- $dump --database state_restore_drill --force
 
       - name: سياسة الاحتفاظ — تقرير جاف لا يحذف شيئاً (M3.08)
         # `plan` قراءةٌ محضة: تُشغَّل في البوابة لأن سياسةً لا تُقرأ آلياً
@@ -277,14 +277,14 @@ jobs:
     if: always()
     defaults:
       run:
-        shell: "C:\\Program Files\\Git\\bin\\bash.exe --noprofile --norc -e -o pipefail {0}"
+        shell: pwsh
     steps:
       - name: خلاصة النتيجة
         run: |
-          if [ "${{ needs.validate.result }}" = "success" ]; then
-            echo "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### ⛔ فشل الفحص: ${{ needs.validate.result }}" >> "$GITHUB_STEP_SUMMARY"
-            echo "لا يجوز الدمج. راجع docs/roadmap/04-execution-playbook.md §4.5" >> "$GITHUB_STEP_SUMMARY"
+          if ("${{ needs.validate.result }}" -eq "success") {
+            "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          } else {
+            "### ⛔ فشل الفحص: ${{ needs.validate.result }}" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+            "لا يجوز الدمج. راجع docs/roadmap/04-execution-playbook.md §4.5" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
             exit 1
-          fi
+          }
