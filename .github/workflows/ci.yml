@@ -55,6 +55,12 @@ jobs:
       - name: تثبيت التبعيات من القفل
         run: npm ci
 
+      - name: إضافة OpenSSL و Git tools إلى PATH
+        shell: powershell
+        run: |
+          "C:\Program Files\Git\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "C:\Program Files\Git\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
       # WL-216: عميل PostgreSQL 18 مثبَّت محليًا على جهاز المالك — لا حاجة للتثبيت.
       # المساران يُحدَّدان عبر PG_DUMP و PG_RESTORE في قسم env أعلاه.
 
