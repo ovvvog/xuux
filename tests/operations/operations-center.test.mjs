@@ -32,6 +32,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -145,7 +146,7 @@ function center(options = {}) {
     withQuotas = true,
     policy = OPERATIONS_POLICY,
   } = options;
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-center-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'operations-center-')));
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
   const clockState = { nowMs: 1_000_000 };
@@ -551,7 +552,7 @@ test('عقباتُ تسجيلِ الحادثة: حقولٌ ودرجةٌ ومعر
 });
 
 test('الحاجزُ نفسُه يُخفق على نسخةٍ مُزيَّفةٍ: وجهٌ محذوفٌ ورمزٌ محذوف', () => {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-guard-'));
+  const scratch = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'operations-guard-')));
   try {
     // نسخةٌ كاملةٌ من المستودعِ **بالربطِ الصلبِ للمجلداتِ اللازمةِ فقط**: الوثائقُ
     // والنصوصُ والوحدةُ والاختبارُ ومسارُ التكامل، فلا تُنسخ `node_modules`.
@@ -605,7 +606,9 @@ test('التركيبُ الحقيقيُّ يصل المركزَ دائماً ب�
   const { createMemoryRepositories, createRegistries } =
     await import('../../src/persistence/composition.mjs');
   const { CertificateAuthority, KingIdentity } = await import('../../src/root-of-trust/index.mjs');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'operations-composition-'));
+  const directory = registerTmpRoot(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'operations-composition-')),
+  );
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
   try {

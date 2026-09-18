@@ -10,6 +10,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from './tmp-roots.mjs';
 
 import { loadClassificationLattice } from '../../src/data/classification.mjs';
 import { DataEncryptor, loadEncryptionPolicy } from '../../src/data/encryption.mjs';
@@ -33,7 +34,7 @@ import { LocalEncryptedKeyProvider } from '../../src/root-of-trust/key-provider-
 export async function createTestEncryptor(options = {}) {
   const lattice = loadClassificationLattice();
   const policy = loadEncryptionPolicy({ lattice });
-  const directory = mkdtempSync(path.join(tmpdir(), 'state-data-keys-'));
+  const directory = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'state-data-keys-')));
   // المفتاح الرئيسي عشوائيٌّ لكل نداء ولا يُكتب في المستودع: مفتاحٌ ثابت في ملف
   // اختبار مفتاحٌ منشور، ويكشفه `npm run scan:secrets`.
   const keyProvider = new LocalEncryptedKeyProvider(

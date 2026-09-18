@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   CertificateAuthority,
@@ -49,7 +50,7 @@ const directories = [];
  * @returns {LocalEncryptedKeyProvider} مخزناً معزولاً
  */
 function freshProvider() {
-  const directory = mkdtempSync(join(tmpdir(), 'king-rotation-'));
+  const directory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'king-rotation-')));
   directories.push(directory);
   return new LocalEncryptedKeyProvider(directory, randomUUID());
 }

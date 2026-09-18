@@ -12,6 +12,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CLI = join(ROOT, 'scripts', 'time-attest.mjs');
@@ -70,7 +71,7 @@ test('`--describe` يُخرِجُ حدودَ السياسةِ ومصادرَها
 });
 
 test('`--root` يُوجِّهُ الأداةَ إلى شجرةٍ أخرى، وسياسةٌ مُعطَّبةٌ تُفشِلُها برمزٍ', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'xuux-time-cli-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-time-cli-')));
   try {
     cpSync(join(ROOT, 'config'), join(dir, 'config'), { recursive: true });
     const file = join(dir, 'config', 'time.yaml');

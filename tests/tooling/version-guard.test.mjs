@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const repoRoot = process.cwd();
 const guard = path.join(repoRoot, 'scripts', 'guard-version.mjs');
@@ -32,7 +33,7 @@ const guard = path.join(repoRoot, 'scripts', 'guard-version.mjs');
  * @returns {string} مسارُ الجذرِ المؤقَّت.
  */
 function makeRoot(patch) {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'version-guard-'));
+  const root = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'version-guard-')));
   const pkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   const state = JSON.parse(readFileSync(path.join(repoRoot, 'version.json'), 'utf8'));
   if (patch.packageVersion !== undefined) pkg.version = patch.packageVersion;

@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   CommandLedger,
   CommandLedgerError,
@@ -37,7 +38,7 @@ const MODULE_URL = new URL('../../src/root-of-trust/index.mjs', import.meta.url)
  * @returns المجلد ومسار الدفتر
  */
 function workDir() {
-  const dir = mkdtempSync(join(tmpdir(), 'cmd-ledger-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'cmd-ledger-')));
   return { dir, file: join(dir, 'commands.jsonl') };
 }
 

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   LOG_LOCK_SUFFIX,
@@ -36,7 +37,7 @@ const directories = [];
  * @returns {Promise<{ env: NodeJS.ProcessEnv, directory: string, logFile: string, storeFile: string }>} البيئة
  */
 async function environment(events) {
-  const directory = mkdtempSync(join(tmpdir(), 'anchor-cli-'));
+  const directory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'anchor-cli-')));
   directories.push(directory);
   const master = randomUUID();
   await provisionKingKey(new LocalEncryptedKeyProvider(directory, master), {

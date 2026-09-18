@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { createTaskQueue } from '../../src/execution/queue.mjs';
@@ -46,7 +47,7 @@ function pool() {
 
 /** يُنشئ مفتاح إيقاف حقيقياً موقَّعاً بمفتاح ملك (لا صورياً). */
 function haltSwitch() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'm5-halt-'));
+  const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'm5-halt-')));
   tempDirs.push(dir);
   return new HaltSwitch(path.join(dir, 'state', 'halt.json'), new KingIdentity(), { fsync: false });
 }

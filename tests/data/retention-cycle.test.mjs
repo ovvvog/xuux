@@ -14,6 +14,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import {
@@ -373,7 +374,7 @@ test('السياسة ترفض ترتيباً معكوساً وأدوارَ مط�
   // يقيس أسماء الوحدات المصرَّح لها على `path.resolve(dir, '..')` — أي على الشجرة
   // المفحوصة — فشجرةٌ في `/tmp` بلا `src/` كانت ستسقط لسببٍ غير المقصود بالقياس.
   const source = path.join(process.cwd(), 'config');
-  const dir = fs.mkdtempSync(path.join(process.cwd(), '.retention-policy-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(process.cwd(), '.retention-policy-')));
   try {
     // ونسخةُ الإعدادات تُوضع في المجلد المؤقّت **نفسه** لا في `config/` داخله: أبوه
     // حينها هو جذر المستودع، وفيه `src/` التي يقيس عليها المُحمِّل أسماء الوحدات.

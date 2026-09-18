@@ -37,6 +37,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   CommandLedger,
@@ -143,7 +144,7 @@ function fakeToken(overrides = {}) {
  * @returns التركيبُ وجذرُه ودالةُ التنظيف
  */
 async function buildRuntime(options = {}) {
-  const root = options.root ?? mkdtempSync(join(tmpdir(), 'xuux-prod-'));
+  const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-')));
   // `UF-05`: هويةُ الملكِ تُثبَّتُ في البيئةِ، فتُشتقُّ من مفتاحِ البديلِ نفسِه
   // لا من قيمةٍ ثابتةٍ تُخترَع.
   const king = options.king ?? generateKeyPairSync('ed25519');
@@ -199,7 +200,7 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
     const error = await caughtAsync(() =>
       createProductionRootOfTrust(
         { NODE_ENV: 'production' },
-        { root: mkdtempSync(join(tmpdir(), 'xuux-prod-')) },
+        { root: registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-'))) },
         {
           openSource: async () => {
             opened = true;
@@ -218,7 +219,7 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
     const error = await caughtAsync(() =>
       createProductionRootOfTrust(
         env,
-        { root: mkdtempSync(join(tmpdir(), 'xuux-prod-')) },
+        { root: registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-'))) },
         {
           openSource: async () => ({ source: fakeToken(), close: async () => undefined }),
         },
@@ -231,7 +232,7 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
     const error = await caughtAsync(() =>
       createProductionRootOfTrust(
         { ...PRODUCTION_ENV, XUUX_ROOT_OF_TRUST_MODE: 'software' },
-        { root: mkdtempSync(join(tmpdir(), 'xuux-prod-')) },
+        { root: registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-'))) },
         { openSource: async () => ({ source: fakeToken(), close: async () => undefined }) },
       ),
     );
@@ -242,7 +243,7 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
     const error = await caughtAsync(() =>
       createProductionRootOfTrust(
         { ...PRODUCTION_ENV, KING_KEY_DIR: '/tmp/xuux-keys' },
-        { root: mkdtempSync(join(tmpdir(), 'xuux-prod-')) },
+        { root: registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-'))) },
         { openSource: async () => ({ source: fakeToken(), close: async () => undefined }) },
       ),
     );
@@ -258,7 +259,7 @@ describe('المصنعُ الإنتاجيُّ يفشلُ مغلقاً قبلَ �
     const error = await caughtAsync(() =>
       createProductionRootOfTrust(
         PRODUCTION_ENV,
-        { root: mkdtempSync(join(tmpdir(), 'xuux-prod-')) },
+        { root: registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-'))) },
         {
           openSource: async () => ({
             source: exporting,

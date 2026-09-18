@@ -24,6 +24,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   SEAL_IV_BYTES,
@@ -102,7 +103,7 @@ function fakeToken(king = generateKeyPairSync('ed25519')) {
  * @returns {{root: string, env: object, deps: object, cleanup: () => void}} السياق
  */
 function context() {
-  const root = mkdtempSync(join(tmpdir(), 'xuux-prod-cli-'));
+  const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-cli-')));
   const king = generateKeyPairSync('ed25519');
   const token = fakeToken(king);
   return {

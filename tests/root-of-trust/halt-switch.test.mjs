@@ -18,6 +18,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   CertificateAuthority,
   CrownGateway,
@@ -72,7 +73,7 @@ function ackProofFor(key, reading, nodeId) {
  * @returns {{ dir: string, file: string, king: KingIdentity, halt: HaltSwitch }} بيئة الاختبار
  */
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), 'halt-switch-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'halt-switch-')));
   const file = join(dir, 'state', 'halt.json');
   const king = new KingIdentity();
   return { dir, file, king, halt: new HaltSwitch(file, king, { fsync: false }) };

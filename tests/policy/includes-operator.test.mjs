@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
 import { CONFIG_DIR, loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
@@ -16,7 +17,7 @@ import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 function withMutatedConfig(
   /** @type {(docs: { roles: any, policies: any, threshold: any, quotas: any }) => void} */ mutate,
 ) {
-  const dir = mkdtempSync(join(tmpdir(), 'xuux-pol-incl-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-pol-incl-')));
   cpSync(CONFIG_DIR, dir, { recursive: true });
   const read = (/** @type {string} */ f) => YAML.parse(readFileSync(join(dir, f), 'utf8'));
   const docs = {

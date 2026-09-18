@@ -18,6 +18,7 @@ import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 /** @typedef {import('../../src/root-of-trust/index.mjs').KeyProvider} KeyProvider */
 
@@ -32,7 +33,7 @@ import {
 // التوكن والمفتاح الرئيسي مولَّدان لكل تشغيل: لا سرّ ثابت في المستودع ولو للاختبار.
 const storeToken = randomUUID();
 const store = await startSecretStore(storeToken);
-const keyDirectory = mkdtempSync(join(tmpdir(), 'key-provider-'));
+const keyDirectory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'key-provider-')));
 
 const local = new LocalEncryptedKeyProvider(keyDirectory, randomUUID());
 const remote = new RemoteSecretStoreKeyProvider({

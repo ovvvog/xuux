@@ -21,6 +21,7 @@ import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { composeEnforcementChain } from '../../src/core/composition-root.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
@@ -361,7 +362,7 @@ test('النبضةُ بلا فاعلٍ تُرفَضُ: لا فاعلَ اسمُ�
 });
 
 test('القيودُ ترفضُ عندَ التحميلِ جدولةَ فعلٍ فوقَ العتبةِ السياديّةِ', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'xuux-schedule-config-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-schedule-config-')));
   try {
     cpSync(CONFIG_DIR, dir, { recursive: true });
     writeFileSync(

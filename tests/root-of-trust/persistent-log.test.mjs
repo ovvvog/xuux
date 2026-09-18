@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   PersistentEventLog,
   PersistentLogError,
@@ -37,7 +38,7 @@ const MODULE = join(ROOT, 'src/root-of-trust/index.mjs');
  * @returns {string} مسار ملف السجل
  */
 function logFile(t) {
-  const dir = mkdtempSync(join(tmpdir(), 'm205-log-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'm205-log-')));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return join(dir, 'events.jsonl');
 }

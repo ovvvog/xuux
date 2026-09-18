@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
 import {
@@ -125,7 +126,7 @@ function realm(options = {}) {
     withKingAuth = true,
     nowMs,
   } = options;
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'king-auth-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'king-auth-')));
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
   const king = new KingIdentity();
@@ -374,7 +375,7 @@ test('الجهازُ بياناتٌ في الوثيقة: مجهولٌ يُرَد
 
   // ووثيقةٌ فيها جهازٌ مسحوبةٌ ثقتُه: نسخةٌ مؤقّتةٌ من الوثيقةِ نفسِها لا وثيقةٌ
   // مصنوعةٌ بيدٍ، فما يُقاس قراءةُ الحالةِ من النصِّ لا شرطٌ في الكود.
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'king-auth-config-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'king-auth-config-')));
   try {
     fs.mkdirSync(path.join(directory, 'schemas'), { recursive: true });
     fs.copyFileSync(
@@ -579,7 +580,7 @@ test('حاجزُ `scripts/guard-king-auth.mjs` يمرّ على المستودع�
 
   // ونسخةٌ مكسورةٌ بيدٍ: يُحذف اشتراطُ الجلسةِ من الديوان، فيجب أن يرفض الحاجزُ
   // برمزِ خروجٍ غيرِ صفر. ولو مرَّ لكان حاجزاً يُطمئن ولا يمنع.
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'king-auth-guard-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'king-auth-guard-')));
   try {
     for (const entry of ['config', 'src', 'scripts', 'tests', 'package.json', '.github']) {
       fs.cpSync(path.join(ROOT, entry), path.join(directory, entry), { recursive: true });

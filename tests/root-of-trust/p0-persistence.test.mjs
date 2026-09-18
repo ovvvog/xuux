@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   KingIdentity,
   CertificateAuthority,
@@ -15,7 +16,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 
 test('command ledger survives process restart', () => {
-  const d = mkdtempSync(join(tmpdir(), 'ledger-')),
+  const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'ledger-'))),
     f = join(d, 'commands.jsonl'),
     k = new KingIdentity(),
     l = new EventLog(),
@@ -29,7 +30,7 @@ test('command ledger survives process restart', () => {
   rmSync(d, { recursive: true, force: true });
 });
 test('encrypted key store does not store plaintext', () => {
-  const d = mkdtempSync(join(tmpdir(), 'keys-')),
+  const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'keys-'))),
     f = join(d, 'king.key'),
     store = new EncryptedKeyStore(f, 'a-secure-master-key');
   store.save('king', 'private-key-material');

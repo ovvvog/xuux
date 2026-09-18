@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   CLOCK_STATE_VERSION,
   ClockError,
@@ -52,7 +53,7 @@ function capture(fn) {
 }
 
 function workspace() {
-  const dir = mkdtempSync(join(tmpdir(), 'clock-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'clock-')));
   return { dir, path: join(dir, 'clock-state.json') };
 }
 
@@ -202,7 +203,7 @@ test('مسار حالة لا يُقرأ يُرفض ولا يُقرأ غيابا�
 });
 
 test('فشل كتابة الحدّ الأعلى يُبطل الثقة ولا يُتجاوز بصمت', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'clock-ro-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'clock-ro-')));
   const locked = join(dir, 'locked');
   mkdirSync(locked);
   const path = join(locked, 'state.json');

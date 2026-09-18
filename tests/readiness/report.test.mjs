@@ -17,6 +17,7 @@ import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { NOT_APPROVAL_CLAIMS } from '../../src/readiness/render.mjs';
 
@@ -63,7 +64,7 @@ function runGenerator(args) {
 
 /** @returns {string} */
 function cloneSources() {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'readiness-'));
+  const target = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'readiness-')));
   for (const relative of SOURCES) {
     const from = path.join(ROOT, relative);
     if (!fs.existsSync(from)) continue;

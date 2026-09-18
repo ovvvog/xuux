@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   CHAOS_ERRORS,
@@ -202,7 +203,7 @@ test('انحرافٌ بلا مُدخلةِ عملٍ تُغلِقه يُرَدُ�
 });
 
 test('نصفُ قطرِ الانفجارِ محصورٌ: مسارٌ خارجَ جذرِ التجاربِ يُرَدُّ', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chaos-radius-'));
+  const root = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'chaos-radius-')));
   assert.ok(assertInsideBlastRadius(contract, root, '.state/chaos/node-drop').startsWith(root));
   for (const escape of ['.state/regions', '../outside', '/etc']) {
     assert.throws(
@@ -215,7 +216,7 @@ test('نصفُ قطرِ الانفجارِ محصورٌ: مسارٌ خارجَ �
 });
 
 test('الدفترُ إضافةٌ سطريّةٌ بساعةٍ مُمرَّرةٍ، وحدثٌ غيرُ معلَنٍ يُرَدّ', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'chaos-ledger-'));
+  const root = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'chaos-ledger-')));
   const at = 1_700_000_000_000;
   appendChaosLedger({
     contract,

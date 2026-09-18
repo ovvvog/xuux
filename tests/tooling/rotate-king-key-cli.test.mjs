@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   LocalEncryptedKeyProvider,
@@ -32,7 +33,7 @@ const directories = [];
  * @returns {Promise<{ env: NodeJS.ProcessEnv, directory: string, provider: LocalEncryptedKeyProvider }>} بيئة معزولة
  */
 async function provisionedEnvironment() {
-  const directory = mkdtempSync(join(tmpdir(), 'rotate-cli-'));
+  const directory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'rotate-cli-')));
   directories.push(directory);
   const master = randomUUID();
   const provider = new LocalEncryptedKeyProvider(directory, master);

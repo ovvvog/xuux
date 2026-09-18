@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { scanText, scanRepository, redact, PATTERNS } from '../../scripts/scan-secrets.mjs';
 
@@ -15,7 +16,7 @@ import { scanText, scanRepository, redact, PATTERNS } from '../../scripts/scan-s
  * @returns {string} مسار جذر المستودع المؤقت
  */
 function makeRepo(files) {
-  const root = mkdtempSync(join(tmpdir(), 'secret-scan-'));
+  const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'secret-scan-')));
   for (const [rel, content] of Object.entries(files)) {
     const full = join(root, rel);
     mkdirSync(join(full, '..'), { recursive: true });

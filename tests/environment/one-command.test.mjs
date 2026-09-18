@@ -32,6 +32,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -77,7 +78,7 @@ function run(script, args, cwd) {
  * @returns {string} مسارُ المجلَّدِ المؤقّتِ (وهو مجلَّدُ العملِ للأمرِ الواحد).
  */
 function cleanEnvironment() {
-  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-one-command-'));
+  const workdir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'env-one-command-')));
   const source = YAML.parse(fs.readFileSync(path.join(ROOT, 'config', 'environment.yaml'), 'utf8'));
 
   source.toolchain = source.toolchain.filter(
@@ -220,7 +221,7 @@ test('بيئةٌ نظيفةٌ ⇒ أمرٌ واحدٌ ⇒ فحصُ صحّةٍ ن
 });
 
 test('العقدُ الحقيقيُّ: تشغيلٌ جافٌّ يقرأ أطوارَه كلَّها ولا يُحدِث أثراً', () => {
-  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-dry-run-'));
+  const workdir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'env-dry-run-')));
   const contract = loadEnvironmentContract({ dir: path.join(ROOT, 'config') });
   const dry = run(
     BOOTSTRAP,

@@ -16,6 +16,7 @@ import { mkdtempSync, cpSync, readFileSync, symlinkSync, writeFileSync, rmSync }
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   loadRoyalDecisionPacket,
@@ -51,7 +52,7 @@ process.on('exit', () => {
  * @returns {string}
  */
 function sandbox() {
-  const root = mkdtempSync(join(tmpdir(), 'royal-decision-'));
+  const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'royal-decision-')));
   SANDBOX_ROOTS.push(root);
   for (const entry of ['config', 'docs', 'scripts', 'src', 'package.json']) {
     cpSync(join(ROOT, entry), join(root, entry), { recursive: true });

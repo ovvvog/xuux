@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { EventLog } from '../../src/root-of-trust/event-log.mjs';
 import { createMemoryRepository } from '../../src/persistence/repository-memory.mjs';
@@ -27,7 +28,7 @@ import {
 
 /** @returns {string} */
 function temporaryRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'weights-'));
+  return registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'weights-')));
 }
 
 /**

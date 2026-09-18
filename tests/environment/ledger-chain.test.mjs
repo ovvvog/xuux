@@ -15,6 +15,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   LEDGER_STATES,
@@ -38,7 +39,7 @@ const repoRoot = path.resolve(here, '..', '..');
 
 /** @returns {string} */
 function makeTempDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ledger-'));
+  return registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ledger-')));
 }
 
 /**

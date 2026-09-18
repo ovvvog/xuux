@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -287,7 +288,7 @@ test('حدٌّ لم يقع تحته قيدٌ يُعاد «غيرَ مقيسٍ» 
 });
 
 test('وثيقةٌ تخالف مخطَّطَها أو تُسقِط بُعداً من الثلاثةِ توقف التحميلَ ولا تُبتدأ بأسعارٍ افتراضية', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-cost-cfg-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-cost-cfg-')));
   fs.mkdirSync(path.join(directory, 'schemas'));
   fs.copyFileSync(
     path.join(CONFIG_DIR, 'schemas', 'cost-capacity.schema.json'),

@@ -38,6 +38,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
 import {
@@ -144,7 +145,7 @@ async function room(options = {}) {
     withEvidence = true,
     hideEvidenceFor = [],
   } = options;
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'crisis-room-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'crisis-room-')));
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
   const king = new KingIdentity();
@@ -903,7 +904,7 @@ test('الإغلاقُ يشترط دليلَ القرصِ: خطوةٌ لا يش�
 });
 
 test('حاجزُ غرفةِ الأزماتِ يسقط على نسخةٍ مُزيَّفةٍ — رتبتُه مقيسةٌ لا مُدَّعاة', () => {
-  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'crisis-guard-'));
+  const scratch = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'crisis-guard-')));
   try {
     for (const entry of ['config', 'scripts', 'src', 'tests', 'docs', '.github']) {
       fs.cpSync(path.join(REPO_ROOT, entry), path.join(scratch, entry), { recursive: true });

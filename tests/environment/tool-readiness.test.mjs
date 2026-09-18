@@ -15,6 +15,7 @@ import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -116,7 +117,7 @@ test('مقايسةُ العقدِ بالوثيقةِ ترفض في الاتجا�
 });
 
 test('عقدٌ يجعل أمرَ الجاهزيّةِ هو أمرَ الإصدارِ نفسَه يُرفَض عند التحميل', () => {
-  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-readiness-'));
+  const workdir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'env-readiness-')));
   const source = YAML.parse(fs.readFileSync(path.join(CONFIG_DIR, 'environment.yaml'), 'utf8'));
   for (const tool of source.toolchain) {
     if (tool.readiness !== undefined) {

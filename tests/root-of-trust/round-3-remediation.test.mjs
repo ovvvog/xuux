@@ -50,6 +50,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   FileAnchorStore,
@@ -163,7 +164,7 @@ function productionEnv(king, extra = {}) {
  * @returns التركيبُ وجذرُه ومفتاحُه ودالةُ التنظيف
  */
 async function boot(options = {}) {
-  const root = options.root ?? mkdtempSync(join(tmpdir(), 'xuux-r3-'));
+  const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r3-')));
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
   const runtime = await createProductionRootOfTrust(
@@ -386,7 +387,7 @@ describe('بيانٌ مُنشأٌ مسبقاً بهويةٍ مختلفة', () =>
     const other = await boot();
     const stolen = readFileSync(join(other.root, MANIFEST), 'utf8');
     other.cleanup();
-    const root = mkdtempSync(join(tmpdir(), 'xuux-r3-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r3-')));
     try {
       writeFileSync(join(root, MANIFEST), stolen, 'utf8');
       const error = await caughtAsync(() => boot({ root }));

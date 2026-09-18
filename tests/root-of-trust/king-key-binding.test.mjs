@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID, generateKeyPairSync } from 'node:crypto';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { startSecretStore } from '../helpers/secret-store.mjs';
 import { scanPathForKeys, partitionBySeverity } from '../../scripts/scan-private-keys.mjs';
@@ -38,8 +39,8 @@ import {
 
 const storeToken = randomUUID();
 const store = await startSecretStore(storeToken);
-const workDirectory = mkdtempSync(join(tmpdir(), 'king-key-work-'));
-const localDirectory = mkdtempSync(join(tmpdir(), 'king-key-local-'));
+const workDirectory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'king-key-work-')));
+const localDirectory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'king-key-local-')));
 
 /**
  * يُنشئ عميل مخزن خارجي جديداً في كل نداء، محاكياً «عملية جديدة» لا تحمل شيئاً
@@ -119,7 +120,7 @@ test('لا تزويد فوق تزويد، ولا إحضار لما لم يُزو
   );
 
   const empty = new LocalEncryptedKeyProvider(
-    mkdtempSync(join(tmpdir(), 'king-key-empty-')),
+    registerTmpRoot(mkdtempSync(join(tmpdir(), 'king-key-empty-'))),
     randomUUID(),
   );
   await assert.rejects(
@@ -279,7 +280,7 @@ test('المخزن يُبنى من البيئة: خارجي إن أُعلن، و
   );
 
   const dev = kingKeyProviderFromEnv({
-    KING_KEY_DIR: mkdtempSync(join(tmpdir(), 'king-key-env-')),
+    KING_KEY_DIR: registerTmpRoot(mkdtempSync(join(tmpdir(), 'king-key-env-'))),
     KING_KEY_MASTER: randomUUID(),
   });
   assert.equal(dev.describe().productionReady, false);

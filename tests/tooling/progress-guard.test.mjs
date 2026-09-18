@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { readProgressFacts } from '../../scripts/progress-facts.mjs';
 
 const repoRoot = process.cwd();
@@ -38,7 +39,7 @@ const guard = path.join(repoRoot, 'scripts', 'guard-progress.mjs');
  * @returns {string} مسارُ الجذرِ المؤقَّت.
  */
 function makeRoot(patch) {
-  const root = mkdtempSync(path.join(os.tmpdir(), 'progress-guard-'));
+  const root = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'progress-guard-')));
   mkdirSync(path.join(root, 'docs', 'roadmap'), { recursive: true });
   // نسخ ملفّي الخارطة وخطّ الأساس الفعليّين كي يُقاس على الواقع لا على مختبرٍ مُختزل.
   const roadmap = readFileSync(path.join(repoRoot, 'docs/roadmap/03-roadmap-to-100.md'), 'utf8');

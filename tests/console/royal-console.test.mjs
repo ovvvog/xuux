@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
 import {
@@ -111,7 +112,7 @@ async function court(options = {}) {
     withKing = true,
     withGateway = true,
   } = options;
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'royal-console-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'royal-console-')));
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
   const king = new KingIdentity();
