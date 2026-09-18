@@ -13,6 +13,6 @@
     "checkJs": false,
     "noEmit": false
   },
-  "include": ["src/root-of-trust/*.mts", "src/policy/model.mts"],
+  "include": ["src/root-of-trust/*.mts", "src/policy/model.mts", "types/pkcs11js.d.ts"],
   "exclude": ["node_modules", "dist"]
 }
