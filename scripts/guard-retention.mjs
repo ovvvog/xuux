@@ -31,6 +31,12 @@
 //        العتبةَ السياديّةَ **تُقرأُ من البيانات** لا تُثبَّتُ في الكودِ، وأنّ
 //        `purge-data` ما زالَ فوقَها؛ فلو أُنزِلَ عنها لصارَ ما تقولُه الوثيقةُ
 //        عن أدوارِ المطهِّرِ خبراً كاذباً يجبُ أن يسقطَ لا أن يُقرأ.
+//   R8 — **لا مسارَ محوٍ من سطرِ الأوامرِ** (‏`R6-A-11`): أداةُ المحوِ القديمةُ
+//        `scripts/retention.mjs purge` كانت مسارَ حذفٍ رابعاً خارجَ سلطةِ `purge-data`.
+//        المسارُ المحكومُ للمحوِ هو `RetentionCycle.run` في `src/data/retention-cycle.mjs`
+//        وحده. فلا يَنبغي أن يَستوردَ أيُّ ملفٍّ في `scripts/` دالّةَ `purge` من
+//        `src/persistence/retention.mjs` — فهي وحدةٌ منخفضةٌ يَختبرها
+//        `tests/persistence/retention.test.mjs` لا تُفتَحُ من سطرِ الأوامرِ.
 //   R5 — **فحص المخزون**: إن وُجدت `DATABASE_URL` فيُقاس أن سلسلة الشواهد متّصلة
 //        بلا ثغرة تسلسل، وأن لا عقدَ بياناتٍ يتيماً في الفهرس. وبلا `DATABASE_URL`
 //        يُعلَن الفحص **متروكاً** صراحةً ولا يُدّعى نجاحه: حاجزٌ يقول «✅» وهو لم
@@ -294,6 +300,52 @@ if (fs.existsSync(memoryCompositionFile)) {
   }
 }
 
+// ── R8: لا مسارَ محوٍ من سطرِ الأوامرِ (`R6-A-11`) ──
+// `purge()` في `src/persistence/retention.mjs` وحدةٌ منخفضةٌ يَختبرها
+// `tests/persistence/retention.test.mjs`. ولا يَنبغي أن يَستوردَها سطرُ الأوامرِ —
+// فالمسارُ المحكومُ للمحوِ هو `RetentionCycle.run` وحده. فأيُّ ملفٍّ في `scripts/`
+// يَستوردُ `purge` من `retention.mjs` يَفتحُ مسارَ حذفٍ رابعاً خارجَ السلطة.
+const scriptsDir = path.join(ROOT, 'scripts');
+for (const file of walk(scriptsDir)) {
+  const source = read(file);
+  const relative = path.relative(ROOT, file).replaceAll('\\', '/');
+  // نَكْشِفُ كُلَّ مسَارٍ يَفْتَحُ الوُصُولَ إِلىَ `purge` مِن `retention.mjs` فِي `scripts/`.
+  // لا نَكْشِفُ `tests/` — الاختِباراتُ تَخْتَبِرُ الوَحْدَةَ المُنْخَفِضَةَ بلا سُلْطَةٍ، وهو ما تُرَادُ.
+  // وَالأَنْمَاطُ المَكْشُوفَةُ:
+  //   1. استِيرادٌ مُسَمٌّ تَشْمَلُ `purge`
+  //   2. استِيرادُ فَضاءِ الأَسْماءِ (X.purge)
+  //   3. إِعادَةُ تَصْدِيرِ `purge`
+  //   4. إِعادَةُ تَصْدِيرٍ شَامِلٍ (يُصَدِّرُ purge)
+  //   5. استِيرادٌ دِينَامِيكِيٌ (ثَمَّ purge)
+  /** @type {[RegExp, string][]} */
+  const patterns = [
+    [
+      /import\s*\{[^}]*\bpurge\b[^}]*\}\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'استِيرادٌ مُسَمٌّ تَشْمَلُ purge',
+    ],
+    [
+      /import\s*\*\s*as\s+\w+\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'استِيرادُ فَضاءِ أَسْماءِ (يَفْتَحُ purge)',
+    ],
+    [
+      /export\s*\{[^}]*\bpurge\b[^}]*\}\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'إِعادَةُ تَصْدِيرِ purge',
+    ],
+    [
+      /export\s*\*\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'إِعادَةُ تَصْدِيرٍ شَامِلٍ (يُصَدِّرُ purge)',
+    ],
+    [/import\s*\(\s*['"][^'"]*retention\.mjs['"]/, 'استِيرادٌ دِينَامِيكِيٌ (يَفْتَحُ purge)'],
+  ];
+  for (const [pattern, description] of patterns) {
+    if (pattern.test(source)) {
+      violations.push(
+        `R8: \`${relative}\` ${description} \u0645\u0650\u0646 \`src/persistence/retention.mjs\`\u061b \u0648\u0647\u0630\u0627 \u0645\u0633\u064e\u0627\u0631\u064f \u0645\u064e\u062d\u0652\u0648\u064c \u0645\u0650\u0646 \u0633\u064e\u0637\u0652\u0631\u0650 \u0627\u0644\u0623\u064e\u0648\u0627\u0645\u0650\u0631\u0650 \u062e\u064e\u0627\u0631\u0650\u062c\u064e \u0633\u064f\u0644\u0652\u0637\u064e\u0629\u0650 \`purge-data\` (\u0646\u064e\u062a\u0650\u064a\u062c\u064e\u0629\u064f R6-A-11). \u0627\u0644\u0645\u0633\u064e\u0627\u0631\u064f \u0627\u0644\u0645\u064e\u062d\u0652\u0643\u064f\u0648\u0645\u064f \u0644\u0650\u0644\u0645\u064e\u062d\u0652\u0648\u0650 \u0647\u064f\u0648 \`RetentionCycle.run\` \u0641\u0650\u062a \`src/data/retention-cycle.mjs\` \u0648\u064e\u062d\u0652\u062f\u064e\u0647\u064f.`,
+      );
+      break;
+    }
+  }
+}
 // ── R5: فحص المخزون ──
 const databaseUrl = process.env['DATABASE_URL'];
 if (databaseUrl === undefined || databaseUrl.trim() === '') {

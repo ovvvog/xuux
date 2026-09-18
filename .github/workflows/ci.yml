@@ -3,6 +3,15 @@
 # القاعدة: لا يُدمج شيء في main إلا وهذا المسار أخضر.
 # المرجع: docs/roadmap/03-roadmap-to-100.md — البوابتان G0 و G1
 # المادة 2 من القاعدة الحاكمة: لا إنجاز بلا دليل قابل للتشغيل؛ وهذا هو الدليل الآلي.
+#
+# WL-216: نُقل المسار من GitHub-hosted (ubuntu-latest) إلى self-hosted runner
+# لتفادي حظر فوترة GitHub Actions.
+#
+# البيئة المُعتمدة: آلةٌ افتراضيّةٌ Linux أصليّةٌ على Hyper-V (الـ runner
+# `xuux-ci-linux`، الوسم `linux-vm`). ولم تُعتمد WSL2: قِيس عليها أنّ نواتَها
+# ترفض ربطَ `/usr` بـ bind mount داخلَ مساحةِ مستخدمٍ، فسقطت سبعةُ اختباراتِ
+# عزلٍ سقوطاً بيئيّاً لا شفريّاً — والعزلُ عقدٌ أمنيٌّ لا يُتخطّى ليُخضَّر مسارٌ.
+# فلا وسمَ `linux-wsl` في هذا الملفِّ، ولا شرطَ منصّةٍ في اختبارٍ.
 
 name: CI
 
@@ -23,12 +32,9 @@ concurrency:
 jobs:
   validate:
     name: فحص الجودة الكامل
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: [self-hosted, linux-vm]
+    timeout-minutes: 30
 
-    # قاعدة حقيقية في البوابة: اختبارات الاستمرارية تُتخطّى محلياً عند غياب
-    # DATABASE_URL، فلو غابت هنا أيضاً لصار التخطّي هو الحالة الدائمة ولقُرئ
-    # نجاحاً. فالخدمة معلَنة هنا والوصلة معلَنة على المهمة كلها.
     services:
       postgres:
         image: postgres:18.6-alpine
@@ -65,12 +71,23 @@ jobs:
       - name: تثبيت التبعيات من القفل
         run: npm ci
 
-      # صورة المنصّة تحمل عميل PostgreSQL 16 والخدمة أعلاه 18.6، و`pg_dump` يرفض
-      # خادماً أحدث منه. فبغير هذه الخطوة يفشل تمرين النسخ والاستعادة حتماً
-      # (WL-022). الخادم لا يُرجَع إلى إصدار أقدم: النسخة الاحتياطية تُختبر على
-      # ما يشبه التشغيل لا على ما يسهل تمريره.
+      # الخادم أعلاه 18.6 و`pg_dump` يرفض خادماً أحدث منه. على الـ runner
+      # الذاتي لا يأتي عميل PostgreSQL مثبتاً مسبقاً (على عكس ubuntu-latest)،
+      # فبدون هذه الخطوة يفشل تمرين النسخ والاستعادة حتماً (WL-022).
+      # التثبيت دائم على الـ runner الذاتي فلا يُعاد في كل تشغيلة.
       - name: تثبيت عميل PostgreSQL 18 المطابق للخادم
         run: |
+          if command -v pg_dump >/dev/null 2>&1 && pg_dump --version | grep -q ' 18\.'; then
+            echo "postgresql-client-18 مثبت مسبقاً — لا تثبيت في هذه التشغيلة"
+            exit 0
+          fi
+          # الـ runner الذاتي قد لا يمنح sudo بلا كلمة مرور. فيُقاس ذلك قبل
+          # المحاولة ليكون سببُ السقوط مقروءاً لا خطأً غامضاً في منتصف apt.
+          if ! sudo -n true 2>/dev/null; then
+            echo "::error::sudo يطلب كلمة مرور على هذا الـ runner، وعميل PostgreSQL 18 غير مثبَّت." >&2
+            echo "ثبِّته مرّةً واحدةً داخل الآلة الافتراضيّة ثم أعد التشغيل — التثبيت دائم فلا يتكرّر." >&2
+            exit 1
+          fi
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc
@@ -127,9 +144,10 @@ jobs:
         # لا يكفي وجود نصّ نسخ: النسخة التي لم تُستعد ليست نسخة. فالبوابة
         # تُنشئ أرشيفاً وتتحقّق منه وتستعيده فوق قاعدة أخرى، وتطبع الزمن.
         run: |
-          npm run backup -- create "$RUNNER_TEMP/ci-drill.dump"
-          npm run backup -- verify "$RUNNER_TEMP/ci-drill.dump"
-          npm run restore -- "$RUNNER_TEMP/ci-drill.dump" --database state_restore_drill --force
+          dump="$RUNNER_TEMP/ci-drill.dump"
+          npm run backup -- create "$dump"
+          npm run backup -- verify "$dump"
+          npm run restore -- "$dump" --database state_restore_drill --force
 
       - name: سياسة الاحتفاظ — تقرير جاف لا يحذف شيئاً (M3.08)
         # `plan` قراءةٌ محضة: تُشغَّل في البوابة لأن سياسةً لا تُقرأ آلياً
@@ -147,7 +165,7 @@ jobs:
 
       # **العيبُ الذي تُغلقه هذه الخطوات (WL-045):** ستّةَ عشرَ حاجزاً مُعلَناً في
       # `npm run validate` لم يكن يُشغِّلها هذا المسار قطُّ — كان يُشغِّل
-      # `guard:templates` و`guard:filecount` وحدهما. فحواجزُ صِيغت خطوةً بعد خطوة
+      # `guard:templates` و`guard:filecount` وحدها. فحواجزُ صِيغت خطوةً بعد خطوة
       # لتمنع الانحراف كانت تُقاس على جهاز المطوّر إن شاء، ولا تمنع دمجاً. والبوابةُ
       # التي لا تُشغَّل آلياً ليست بوابةً بل نيّة. ولها هنا خطواتٌ مُسمَّاةٌ لا سطرٌ
       # جامعٌ واحدٌ، كي يدلَّ اسمُ الخطوة الحمراء على الحاجز الذي سقط.
@@ -294,7 +312,7 @@ jobs:
 
   gate-report:
     name: تقرير البوابتين G0 و G1
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux-vm]
     needs: validate
     if: always()
     steps:

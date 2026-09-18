@@ -33,6 +33,7 @@ function copyTree() {
   cpSync(join(ROOT, 'config'), join(dir, 'config'), { recursive: true });
   cpSync(join(ROOT, 'src'), join(dir, 'src'), { recursive: true });
   cpSync(join(ROOT, 'migrations'), join(dir, 'migrations'), { recursive: true });
+  cpSync(join(ROOT, 'scripts'), join(dir, 'scripts'), { recursive: true });
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
@@ -260,6 +261,117 @@ test('M25: الحاجز يفشل إن كفَّ التركيبُ عن تمرير�
     const { status, output } = runGuard(dir);
     assert.equal(status, 1, 'مطهِّرٌ بلا نقطةِ تفويضٍ في التركيبِ عبرَ الحاجز');
     assert.match(output, /R7/);
+  } finally {
+    cleanup();
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// قاعدةُ `R8` (‏`R6-A-11`): لا مسارَ محوٍ من سطرِ الأوامرِ. `scripts/retention.mjs
+// purge` كان مسارَ حذفٍ رابعاً خارجَ سلطةِ `purge-data`. المسارُ المحكومُ هو
+// `RetentionCycle.run` وحده.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('M26: الحاجز يفشل إن استوردَ ملفٌّ في scripts/ دالّةَ purge من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'bad-tool.mjs'),
+      "import { plan, purge } from '../src/persistence/retention.mjs';\nexport { plan, purge };\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'استيرادُ purge من scripts/ عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /bad-tool\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M27: الحاجز يفشل إن استوردَ scripts/retention.mjs دالّةَ purge', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mutateFile(dir, join('scripts', 'retention.mjs'), (source) =>
+      source.replace(
+        "import { plan } from '../src/persistence/retention.mjs';",
+        "import { plan, purge } from '../src/persistence/retention.mjs';",
+      ),
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'استيرادُ purge في scripts/retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /retention\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M28: أداةُ retention.mjs ترفضُ purge قبلَ الاتصالِ بقاعدةِ البيانات', () => {
+  const env = { ...process.env, DATABASE_URL: '' };
+  let status = 0;
+  let output;
+  try {
+    output = execFileSync(process.execPath, [join(ROOT, 'scripts', 'retention.mjs'), 'purge'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env,
+    });
+  } catch (error) {
+    const failure = /** @type {{ status?: number, stdout?: string, stderr?: string }} */ (error);
+    status = failure.status ?? 1;
+    output = `${failure.stdout ?? ''}${failure.stderr ?? ''}`;
+  }
+  assert.equal(status, 1, 'أداةُ retention.mjs purge لم تُرفَض');
+  assert.match(output, /RETENTION_PURGE_CLI_FORBIDDEN/);
+});
+
+test('M29: الحاجز يفشل إن استوردَ scripts/ فضاءَ أسْماءِ من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'ns-tool.mjs'),
+      "import * as retention from '../src/persistence/retention.mjs';\nexport { retention };\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'استيرادُ فضاءِ أسْماءِ من retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /ns-tool\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M30: الحاجز يفشل إن استوردَ scripts/ استيرادًا دِينَامِيكيًا من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'dyn-tool.mjs'),
+      "const mod = await import('../src/persistence/retention.mjs');\nexport { mod };\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'استيرادُ دِينَامِيكيٌ من retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /dyn-tool\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M31: الحاجز يفشل إن أعادتَ scripts/ تصديرَ purge من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'reexport-tool.mjs'),
+      "export { purge } from '../src/persistence/retention.mjs';\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'إعادةُ تصديرِ purge من retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /reexport-tool\.mjs/);
   } finally {
     cleanup();
   }

@@ -7,10 +7,25 @@
  *   node scripts/retention.mjs purge [--table data_assets|memories|events] [--dry-run]
  *
  * الأمر بلا وسائط آمن: يعرض خطة جافة ولا ينفذ محواً.
+ *
+ * **`purge` مُغلَقٌ** (نتيجةُ `R6-A-11`): مسارُ الحذفِ من سطرِ الأوامرِ خارجَ سلطةِ
+ * `purge-data`. المحوُ المحكومُ يقعُ عبرَ `RetentionCycle.run` في
+ * `src/data/retention-cycle.mjs`. استدعاءُ `purge` يفشلُ فوراً قبلَ أيِّ اتصالٍ
+ * بقاعدةِ البيانات.
  */
 
 import { createPool } from '../src/persistence/db.mjs';
-import { plan, purge } from '../src/persistence/retention.mjs';
+import { plan } from '../src/persistence/retention.mjs';
+
+/**
+ * الأمر `purge` مسارُ حذفٍ خارجَ سلطةِ `purge-data` (نتيجةُ `R6-A-11`). المسارُ
+ * المحكومُ للمحوِ هو `RetentionCycle.run` في `src/data/retention-cycle.mjs`:
+ * يمرُّ ببوابةِ هويةٍ ونقطةِ تفويضٍ وأمرٍ ملكيٍّ واستهلاكِ تذكرةٍ وشاهدٍ في سجلِّ
+ * الأحداث. وأداةُ سطرِ الأوامرِ لا تركِّبُ هذا السلسلةَ السياديّةَ، فلا تفتحُ مساراً
+ * حاذفاً بلا قرار.
+ */
+const PURGE_FORBIDDEN_MESSAGE =
+  'RETENTION_PURGE_CLI_FORBIDDEN: مسارُ المحوِّ من سطرِ الأوامرِ مُغلَقٌ (نتيجةُ R6-A-11). المسارُ المحكومُ للمحوِ هو RetentionCycle.run في src/data/retention-cycle.mjs — يمرُّ ببوابةِ هويةٍ ونقطةِ تفويضٍ وأمرٍ ملكيٍّ وتذكرةٍ وشاهدٍ. لا يُفتَحُ مسارُ حذفٍ بلا قرارٍ سياديٍّ.';
 
 /**
  * @typedef {{ command: 'plan' | 'purge', tables: string[] | undefined, dryRun: boolean }} Arguments
@@ -63,8 +78,23 @@ function formatRow(row) {
   return `- ${row.table}: المؤهل=${row.eligible}، المحمي_قانوناً=${row.legalHoldProtected}${deleted}`;
 }
 
+/**
+ * يَرفضُ أمرَ المحوِ من سطرِ الأوامرِ قبلَ أيِّ اتصالٍ بقاعدةِ البياناتِ.
+ */
+function failPurge() {
+  console.error(PURGE_FORBIDDEN_MESSAGE);
+  process.exitCode = 1;
+}
+
+/**
+ * @returns {Promise<void>}
+ */
 async function main() {
   const arguments_ = parseArguments(process.argv.slice(2));
+  if (arguments_.command === 'purge') {
+    failPurge();
+    return;
+  }
   const pool = createPool();
   try {
     const now = new Date();
@@ -74,17 +104,6 @@ async function main() {
       for (const row of report.tables) console.log(formatRow(row));
       return;
     }
-    const report = await purge(pool, {
-      now,
-      ...(arguments_.tables === undefined ? {} : { tables: arguments_.tables }),
-      dryRun: arguments_.dryRun,
-    });
-    console.log(
-      report.dryRun
-        ? `محاكاة محو عند ${report.now.toISOString()}:`
-        : `محو احتفاظ مكتمل عند ${report.now.toISOString()}:`,
-    );
-    for (const row of report.tables) console.log(formatRow(row));
   } finally {
     await pool.end();
   }
