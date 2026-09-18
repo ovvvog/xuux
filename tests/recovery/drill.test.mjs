@@ -19,6 +19,7 @@ import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { loadRecoveryContract } from '../../src/recovery/index.mjs';
 
@@ -31,7 +32,7 @@ const contract = loadRecoveryContract();
 
 /** @returns {string} */
 function makeRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'recovery-drill-'));
+  return registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'recovery-drill-')));
 }
 
 /**

@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   SLO_ERRORS,
@@ -147,7 +148,7 @@ test('وثيقةُ المستودعِ تُحمَّل بمخطَّطها وتُع
 });
 
 test('وثيقةٌ غائبةٌ تُرَدُّ برمزِها ولا تُبتدأ لوحةٌ بأهدافٍ افتراضية', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slo-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'slo-')));
   assert.throws(
     () => loadServiceLevelPolicy({ dir }),
     (/** @type {unknown} */ error) => codeOf(error) === SLO_ERRORS.CONFIG_INVALID,
@@ -155,7 +156,7 @@ test('وثيقةٌ غائبةٌ تُرَدُّ برمزِها ولا تُبتد�
 });
 
 test('وثيقةٌ تُخالف مخطَّطَها تُرَدُّ ولا تُقرأ نصّاً حرّاً', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slo-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'slo-')));
   fs.writeFileSync(path.join(dir, 'service-levels.yaml'), 'version: 1\ncapabilities: []\n', 'utf8');
   assert.throws(
     () => loadServiceLevelPolicy({ dir }),

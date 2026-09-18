@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from './tmp-roots.mjs';
 
 import { CostCapacity, loadCostCapacityPolicy } from '../../src/cost-capacity/index.mjs';
 import { deterministicExecutor } from '../../src/inference/adapters/deterministic.mjs';
@@ -80,7 +81,7 @@ export async function gateWithAdapter(options = {}) {
       /** @type {unknown} */ (log)
     ),
     weightStore: createWeightStore({
-      root: fs.mkdtempSync(path.join(os.tmpdir(), 'adapter-weights-')),
+      root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'adapter-weights-'))),
     }),
     evaluationLedger: evaluations,
   });
@@ -115,7 +116,10 @@ export async function gateWithAdapter(options = {}) {
   const budgetStore =
     options.budgetStore ??
     new FileInferenceBudgetStore({
-      filePath: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'budget-store-')), 'budget.json'),
+      filePath: path.join(
+        registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'budget-store-'))),
+        'budget.json',
+      ),
     });
 
   // ── دفترُ التكلفةِ إلزامٌ (‏`LIM-1`، `WL-197`) ──

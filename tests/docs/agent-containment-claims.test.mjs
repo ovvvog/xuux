@@ -19,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
@@ -37,7 +38,7 @@ const CONTAINMENT = path.join(ROOT, 'docs/AGENT_CONTAINMENT.md');
 async function evaluationGateEnforced() {
   const log = new EventLog();
   const weightStore = createWeightStore({
-    root: fs.mkdtempSync(path.join(os.tmpdir(), 'containment-claims-')),
+    root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'containment-claims-'))),
   });
   const registry = new ModelRegistry({
     log,

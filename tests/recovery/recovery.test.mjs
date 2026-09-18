@@ -10,6 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -44,7 +45,7 @@ const MS_PER_DAY = 86400000;
  * @returns {string}
  */
 function configDirWith(mutate) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'recovery-config-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'recovery-config-')));
   fs.mkdirSync(path.join(dir, 'schemas'), { recursive: true });
   for (const name of ['recovery.yaml', 'regions.yaml']) {
     fs.copyFileSync(path.join(CONFIG_DIR, name), path.join(dir, name));

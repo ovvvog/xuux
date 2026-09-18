@@ -29,6 +29,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import { createMemoryRepositories } from '../../src/persistence/composition.mjs';
@@ -130,7 +131,7 @@ async function seedAgent(s, id, role, owner = 'crown') {
  * @returns {string}
  */
 function tempConfig(editMonitoring, editRoles) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'monitoring-config-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'monitoring-config-')));
   fs.writeFileSync(
     path.join(dir, 'monitoring.yaml'),
     editMonitoring(fs.readFileSync(path.join(CONFIG_DIR, 'monitoring.yaml'), 'utf8')),

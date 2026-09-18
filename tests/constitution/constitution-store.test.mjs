@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { KingIdentity } from '../../src/root-of-trust/index.mjs';
 import {
   ConstitutionStore,
@@ -22,7 +23,7 @@ const ROOT = path.resolve(import.meta.dirname, '..', '..');
  * @returns {{ dir: string, file: string }}
  */
 function isolatedConfig() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'constitution-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'constitution-')));
   const file = path.join(dir, 'constitution.yaml');
   fs.copyFileSync(path.join(ROOT, 'config', 'constitution.yaml'), file);
   return { dir, file };

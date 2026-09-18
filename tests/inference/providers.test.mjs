@@ -17,6 +17,7 @@ import { createServer } from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ADAPTER_ERRORS, MAX_ADAPTER_TIMEOUT_MS } from '../../src/inference/adapters/contract.mjs';
 import {
@@ -30,7 +31,7 @@ import {
 import { gateWithAdapter, minister } from '../helpers/inference-gate.mjs';
 import { issueMaterial } from '../helpers/tls-material.mjs';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'inference-providers-'));
+const TMP = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'inference-providers-')));
 const TRUSTED = issueMaterial(TMP, 'declared');
 const KEY_ENV = 'DECLARED_PROVIDER_API_KEY';
 const CA_ENV = 'DECLARED_PROVIDER_CA_FILE';
@@ -45,7 +46,7 @@ const SECRET = 'sk-declared-0123456789'; // secret-scan:allow
  * @returns {string}
  */
 function writeDocument(document) {
-  const dir = fs.mkdtempSync(path.join(TMP, 'dir-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(TMP, 'dir-')));
   fs.writeFileSync(path.join(dir, INFERENCE_PROVIDERS_FILE), JSON.stringify(document), 'utf8');
   return dir;
 }
@@ -153,7 +154,7 @@ test('وثيقةٌ مُجمَّدةٌ: تعديلُ إعلانٍ بعدَ تحم
 });
 
 test('وثيقةٌ غائبةٌ رفضٌ مُسمّىً: لا سجلَّ مزوّدينَ فارغٌ يُقرأُ «لا مزوّدَ»', () => {
-  const dir = fs.mkdtempSync(path.join(TMP, 'empty-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(TMP, 'empty-')));
   assert.throws(
     () => loadInferenceProviders({ dir }),
     (/** @type {Error & { code?: string }} */ error) =>

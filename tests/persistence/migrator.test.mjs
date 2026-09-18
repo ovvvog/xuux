@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   DEFAULT_MIGRATIONS_DIR,
   MIGRATION_ERRORS,
@@ -29,7 +30,7 @@ import { catalogSnapshot, createIsolatedDatabase, skipWithoutDatabase } from '..
  * @returns {string}
  */
 function tempMigrationsDir(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'migrations-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'migrations-')));
   for (const [name, body] of Object.entries(files)) {
     fs.writeFileSync(path.join(dir, name), body, 'utf8');
   }

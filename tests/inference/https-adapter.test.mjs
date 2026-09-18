@@ -20,6 +20,7 @@ import { createServer } from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ADAPTER_ERRORS, executorFor } from '../../src/inference/adapters/contract.mjs';
 import {
@@ -33,7 +34,7 @@ import {
 import { gateWithAdapter, minister } from '../helpers/inference-gate.mjs';
 import { issueMaterial } from '../helpers/tls-material.mjs';
 
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'https-adapter-'));
+const TMP = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'https-adapter-')));
 const TRUSTED = issueMaterial(TMP, 'trusted');
 const FOREIGN = issueMaterial(TMP, 'foreign');
 const KEY_ENV = 'PROVIDER_TEST_API_KEY';

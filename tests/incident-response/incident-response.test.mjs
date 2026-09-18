@@ -17,6 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -44,7 +45,7 @@ const RAW = YAML.parse(fs.readFileSync(path.join(CONFIG_DIR, 'incident-response.
  * @returns {() => void}
  */
 function loadMutated(mutate) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ir-config-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ir-config-')));
   fs.mkdirSync(path.join(directory, 'schemas'));
   const document = structuredClone(RAW);
   mutate(document);
@@ -86,7 +87,7 @@ test('الوثيقةُ النافذةُ تُحمَّل، وكلُّ رمزٍ ف�
 });
 
 test('وثيقةٌ غائبةٌ توقف التحميلَ ولا تُستكمَل بقواعدَ افتراضية', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ir-empty-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ir-empty-')));
   assert.throws(
     () => loadIncidentResponsePolicy({ dir: directory }),
     (/** @type {unknown} */ error) => hasCode(error, IR_ERRORS.CONFIG_INVALID),
@@ -94,7 +95,7 @@ test('وثيقةٌ غائبةٌ توقف التحميلَ ولا تُستكمَ�
 });
 
 test('مخطَّطٌ غائبٌ يوقف التحميلَ: إعلانُ قاعدةٍ بلا مخطَّطٍ نصٌّ حرٌّ كالعُرفِ الذي جاءت لتمنعه', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ir-noschema-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-ir-noschema-')));
   fs.copyFileSync(
     path.join(CONFIG_DIR, 'incident-response.yaml'),
     path.join(directory, 'incident-response.yaml'),
