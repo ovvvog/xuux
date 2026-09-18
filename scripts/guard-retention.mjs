@@ -309,18 +309,43 @@ const scriptsDir = path.join(ROOT, 'scripts');
 for (const file of walk(scriptsDir)) {
   const source = read(file);
   const relative = path.relative(ROOT, file).replaceAll('\\', '/');
-  // نَكشفُ الاستيرادَ المباشرَ لـ`purge` من `retention.mjs` في أيِّ ملفٍّ في `scripts/`.
-  // لا نَكشفُ `tests/` — الاختباراتُ تَختبرُ الوحدةَ المنخفضةَ بلا سلطةٍ، وهو ما يُراد.
-  const importMatch = source.match(
-    /import\s*\{[^}]*\bpurge\b[^}]*\}\s*from\s*['"][^'"]*retention\.mjs['"]/,
-  );
-  if (importMatch !== null) {
-    violations.push(
-      `R8: \`${relative}\` يَستوردُ \`purge\` من \`src/persistence/retention.mjs\`؛ وهذا مسارُ محوٍ من سطرِ الأوامرِ خارجَ سلطةِ \`purge-data\` (نتيجةُ R6-A-11). المسارُ المحكومُ للمحوِ هو \`RetentionCycle.run\` في \`src/data/retention-cycle.mjs\` وحده.`,
-    );
+  // نَكْشِفُ كُلَّ مسَارٍ يَفْتَحُ الوُصُولَ إِلىَ `purge` مِن `retention.mjs` فِي `scripts/`.
+  // لا نَكْشِفُ `tests/` — الاختِباراتُ تَخْتَبِرُ الوَحْدَةَ المُنْخَفِضَةَ بلا سُلْطَةٍ، وهو ما تُرَادُ.
+  // وَالأَنْمَاطُ المَكْشُوفَةُ:
+  //   1. استِيرادٌ مُسَمٌّ تَشْمَلُ `purge`
+  //   2. استِيرادُ فَضاءِ الأَسْماءِ (X.purge)
+  //   3. إِعادَةُ تَصْدِيرِ `purge`
+  //   4. إِعادَةُ تَصْدِيرٍ شَامِلٍ (يُصَدِّرُ purge)
+  //   5. استِيرادٌ دِينَامِيكِيٌ (ثَمَّ purge)
+  /** @type {[RegExp, string][]} */
+  const patterns = [
+    [
+      /import\s*\{[^}]*\bpurge\b[^}]*\}\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'استِيرادٌ مُسَمٌّ تَشْمَلُ purge',
+    ],
+    [
+      /import\s*\*\s*as\s+\w+\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'استِيرادُ فَضاءِ أَسْماءِ (يَفْتَحُ purge)',
+    ],
+    [
+      /export\s*\{[^}]*\bpurge\b[^}]*\}\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'إِعادَةُ تَصْدِيرِ purge',
+    ],
+    [
+      /export\s*\*\s*from\s*['"][^'"]*retention\.mjs['"]/,
+      'إِعادَةُ تَصْدِيرٍ شَامِلٍ (يُصَدِّرُ purge)',
+    ],
+    [/import\s*\(\s*['"][^'"]*retention\.mjs['"]/, 'استِيرادٌ دِينَامِيكِيٌ (يَفْتَحُ purge)'],
+  ];
+  for (const [pattern, description] of patterns) {
+    if (pattern.test(source)) {
+      violations.push(
+        `R8: \`${relative}\` ${description} \u0645\u0650\u0646 \`src/persistence/retention.mjs\`\u061b \u0648\u0647\u0630\u0627 \u0645\u0633\u064e\u0627\u0631\u064f \u0645\u064e\u062d\u0652\u0648\u064c \u0645\u0650\u0646 \u0633\u064e\u0637\u0652\u0631\u0650 \u0627\u0644\u0623\u064e\u0648\u0627\u0645\u0650\u0631\u0650 \u062e\u064e\u0627\u0631\u0650\u062c\u064e \u0633\u064f\u0644\u0652\u0637\u064e\u0629\u0650 \`purge-data\` (\u0646\u064e\u062a\u0650\u064a\u062c\u064e\u0629\u064f R6-A-11). \u0627\u0644\u0645\u0633\u064e\u0627\u0631\u064f \u0627\u0644\u0645\u064e\u062d\u0652\u0643\u064f\u0648\u0645\u064f \u0644\u0650\u0644\u0645\u064e\u062d\u0652\u0648\u0650 \u0647\u064f\u0648 \`RetentionCycle.run\` \u0641\u0650\u062a \`src/data/retention-cycle.mjs\` \u0648\u064e\u062d\u0652\u062f\u064e\u0647\u064f.`,
+      );
+      break;
+    }
   }
 }
-
 // ── R5: فحص المخزون ──
 const databaseUrl = process.env['DATABASE_URL'];
 if (databaseUrl === undefined || databaseUrl.trim() === '') {

@@ -325,3 +325,37 @@ test('M28: أداةُ retention.mjs ترفضُ purge قبلَ الاتصالِ �
   assert.equal(status, 1, 'أداةُ retention.mjs purge لم تُرفَض');
   assert.match(output, /RETENTION_PURGE_CLI_FORBIDDEN/);
 });
+
+test('M29: الحاجز يفشل إن استوردَ scripts/ فضاءَ أسْماءِ من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'ns-tool.mjs'),
+      "import * as retention from '../src/persistence/retention.mjs';\nexport { retention };\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'استيرادُ فضاءِ أسْماءِ من retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /ns-tool\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('M30: الحاجز يفشل إن استوردَ scripts/ استيرادًا دِينَامِيكيًا من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'dyn-tool.mjs'),
+      "const mod = await import('../src/persistence/retention.mjs');\nexport { mod };\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'استيرادُ دِينَامِيكيٌ من retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /dyn-tool\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
