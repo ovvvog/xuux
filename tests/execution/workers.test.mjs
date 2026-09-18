@@ -67,17 +67,25 @@ function spawnHangingWorker(worker) {
     });
     let buffer = '';
     let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(new Error('الابن لم يحجز خلال 10 ثوانٍ'));
+    }, 10_000);
     child.stdout.on('data', (chunk) => {
       buffer += String(chunk);
       const line = buffer.split('\n').find((entry) => entry.trim().startsWith('{'));
       if (line === undefined || settled) return;
       settled = true;
+      clearTimeout(timeout);
       const parsed = /** @type {{ claimed: string }} */ (JSON.parse(line));
       resolve({ taskId: parsed.claimed, child });
     });
     child.stderr.on('data', (chunk) => {
       if (!settled) {
         settled = true;
+        clearTimeout(timeout);
         child.kill('SIGKILL');
         reject(new Error(`الابن أخفق قبل الحجز: ${String(chunk)}`));
       }
@@ -85,6 +93,7 @@ function spawnHangingWorker(worker) {
     child.on('exit', (code) => {
       if (!settled) {
         settled = true;
+        clearTimeout(timeout);
         reject(new Error(`الابن انتهى قبل الحجز برمز ${String(code)}`));
       }
     });

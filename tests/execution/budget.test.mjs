@@ -22,6 +22,11 @@ import { createQuotaLedger } from '../../src/policy/quota.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { probeIsolation } from '../../src/execution/isolation.mjs';
+
+const isolationSkip = probeIsolation().available ? false : `تخطّي معلن: ${probeIsolation().reason}`;
+
+const testSkip = skipWithoutDatabase !== false ? skipWithoutDatabase : isolationSkip;
 
 const AUTH = { decisionId: 'decision-الميزانية' };
 /** موردٌ معلن في `config/quotas.yaml`؛ حدّه هناك هو الحدّ المُختبَر لا رقمٌ مُختلق. */
@@ -93,7 +98,7 @@ async function enqueue(queue, key, actorId, amount) {
 test(
   'نفاد الميزانية يوقف المهمة قبل تشغيلها ولا نتيجة لها',
   {
-    skip: skipWithoutDatabase,
+    skip: testSkip,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
@@ -136,7 +141,7 @@ test(
 test(
   'المهمة داخل الميزانية تُنفَّذ ويُحسم استهلاكها فعلاً في الدفتر',
   {
-    skip: skipWithoutDatabase,
+    skip: testSkip,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
@@ -181,7 +186,7 @@ test(
 test(
   'إعادة المحاولة لا تُحاسَب مرّتين على نفس المهمة',
   {
-    skip: skipWithoutDatabase,
+    skip: testSkip,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool(), leaseMs: 10_000 });
@@ -224,7 +229,7 @@ test(
 test(
   'خصمان متزامنان على آخر وحدة لا يُنتجان رصيداً سالباً',
   {
-    skip: skipWithoutDatabase,
+    skip: testSkip,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
@@ -266,7 +271,7 @@ test(
 test(
   'مورد ميزانية غير معلن يمنع التشغيل ولا يمرّ بلا حدّ',
   {
-    skip: skipWithoutDatabase,
+    skip: testSkip,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
@@ -291,7 +296,7 @@ test(
   },
 );
 
-test('بوابةٌ بلا دفتر حصص يُرفض بناؤها', { skip: skipWithoutDatabase }, () => {
+test('بوابةٌ بلا دفتر حصص يُرفض بناؤها', { skip: testSkip }, () => {
   assert.throws(
     () => createBudgetGate({ pool: pool(), ledger: /** @type {never} */ (undefined) }),
     { code: BUDGET_ERRORS.DEPENDENCY_MISSING },
