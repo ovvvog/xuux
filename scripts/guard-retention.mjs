@@ -31,6 +31,12 @@
 //        العتبةَ السياديّةَ **تُقرأُ من البيانات** لا تُثبَّتُ في الكودِ، وأنّ
 //        `purge-data` ما زالَ فوقَها؛ فلو أُنزِلَ عنها لصارَ ما تقولُه الوثيقةُ
 //        عن أدوارِ المطهِّرِ خبراً كاذباً يجبُ أن يسقطَ لا أن يُقرأ.
+//   R8 — **لا مسارَ محوٍ من سطرِ الأوامرِ** (‏`R6-A-11`): أداةُ المحوِ القديمةُ
+//        `scripts/retention.mjs purge` كانت مسارَ حذفٍ رابعاً خارجَ سلطةِ `purge-data`.
+//        المسارُ المحكومُ للمحوِ هو `RetentionCycle.run` في `src/data/retention-cycle.mjs`
+//        وحده. فلا يَنبغي أن يَستوردَ أيُّ ملفٍّ في `scripts/` دالّةَ `purge` من
+//        `src/persistence/retention.mjs` — فهي وحدةٌ منخفضةٌ يَختبرها
+//        `tests/persistence/retention.test.mjs` لا تُفتَحُ من سطرِ الأوامرِ.
 //   R5 — **فحص المخزون**: إن وُجدت `DATABASE_URL` فيُقاس أن سلسلة الشواهد متّصلة
 //        بلا ثغرة تسلسل، وأن لا عقدَ بياناتٍ يتيماً في الفهرس. وبلا `DATABASE_URL`
 //        يُعلَن الفحص **متروكاً** صراحةً ولا يُدّعى نجاحه: حاجزٌ يقول «✅» وهو لم
@@ -291,6 +297,27 @@ if (fs.existsSync(memoryCompositionFile)) {
         'R7: التركيبُ المُشغَّلُ يبني `AgentMemoryStore` بلا تمريرِ نقطةِ التفويضِ؛ فالتطهيرُ يُرفَض دائماً في المسارِ الواقعِ — عطلٌ صامتٌ لا حمايةٌ.',
       );
     }
+  }
+}
+
+// ── R8: لا مسارَ محوٍ من سطرِ الأوامرِ (`R6-A-11`) ──
+// `purge()` في `src/persistence/retention.mjs` وحدةٌ منخفضةٌ يَختبرها
+// `tests/persistence/retention.test.mjs`. ولا يَنبغي أن يَستوردَها سطرُ الأوامرِ —
+// فالمسارُ المحكومُ للمحوِ هو `RetentionCycle.run` وحده. فأيُّ ملفٍّ في `scripts/`
+// يَستوردُ `purge` من `retention.mjs` يَفتحُ مسارَ حذفٍ رابعاً خارجَ السلطة.
+const scriptsDir = path.join(ROOT, 'scripts');
+for (const file of walk(scriptsDir)) {
+  const source = read(file);
+  const relative = path.relative(ROOT, file).replaceAll('\\', '/');
+  // نَكشفُ الاستيرادَ المباشرَ لـ`purge` من `retention.mjs` في أيِّ ملفٍّ في `scripts/`.
+  // لا نَكشفُ `tests/` — الاختباراتُ تَختبرُ الوحدةَ المنخفضةَ بلا سلطةٍ، وهو ما يُراد.
+  const importMatch = source.match(
+    /import\s*\{[^}]*\bpurge\b[^}]*\}\s*from\s*['"][^'"]*retention\.mjs['"]/,
+  );
+  if (importMatch !== null) {
+    violations.push(
+      `R8: \`${relative}\` يَستوردُ \`purge\` من \`src/persistence/retention.mjs\`؛ وهذا مسارُ محوٍ من سطرِ الأوامرِ خارجَ سلطةِ \`purge-data\` (نتيجةُ R6-A-11). المسارُ المحكومُ للمحوِ هو \`RetentionCycle.run\` في \`src/data/retention-cycle.mjs\` وحده.`,
+    );
   }
 }
 
