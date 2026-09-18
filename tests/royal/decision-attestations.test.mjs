@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,12 +36,27 @@ const DOC = 'docs/ROYAL_DECISION_PACKET.md';
 const ROADMAP = 'docs/roadmap/03-roadmap-to-100.md';
 
 /**
+ * الجذورُ المؤقّتةُ التي أنشأتها هذه الحزمةُ. كلُّ ملفِّ اختبارٍ يُشغَّلُ في عمليّةٍ
+ * مستقلّةٍ تحتَ `node --test`، فيُمحى ما أنشأَه عندَ خروجِها. وبلا هذا المحوِ تَبقى
+ * نُسَخُ الشجرةِ في `/tmp` وتَتراكمُ على عدّاءٍ مقيمٍ حتّى تَستنفِدَ المساحةَ.
+ * @type {string[]}
+ */
+const SANDBOX_ROOTS = [];
+
+process.on('exit', () => {
+  for (const root of SANDBOX_ROOTS) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/**
  * جذرٌ مؤقّتٌ يكفي لتشغيلِ الحاجزِ والمولِّدِ، كي تُقاسَ حالاتُ الرفضِ بلا تعديلِ
  * المستودعِ. والتبعيّاتُ تُوصَل وصلاً لا نسخاً.
  * @returns {string}
  */
 function sandbox() {
   const root = mkdtempSync(join(tmpdir(), 'royal-attest-'));
+  SANDBOX_ROOTS.push(root);
   for (const entry of ['config', 'docs', 'scripts', 'src', 'package.json']) {
     cpSync(join(ROOT, entry), join(root, entry), { recursive: true });
   }
