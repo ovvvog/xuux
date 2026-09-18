@@ -6,13 +6,17 @@
 // `WL-063` بحاجزِ `guard:progress`، لكنّ بقيةَ العدّاداتِ اليدويّةِ لم تكن
 // محصورة.
 //
-// **الحاجزُ يَفحَصُ ثلاثةَ عدّادات:**
+// **الحاجزُ يَفحَصُ خمسَ قواعدَ** (وكانَ ثلاثةَ عدّاداتٍ يومَ `WL-196`):
 //   - R1: عددُ الحواجزِ في `PROJECT_STATUS.md` يُطابقُ عددَ `guard:*` في `validate`.
 //   - R2: عددُ ملفاتِ الاختبارِ في `docs/ROOT_OF_TRUST.md` يُطابقُ عددَ `*.test.mjs`.
 //   - R3: عددُ البنودِ المفتوحةِ في `PROJECT_STATUS.md` يُطابقُ عددَ البنودِ المفتوحةِ على المنفِّذ.
 //   - R4: كلُّ صفٍّ في كلِّ جدولٍ في سجلِّ الدَّينِ يُطابقُ عددَ خلايا ترويستِه — أُضيفَ في `WL-219`
 //     إغلاقاً للدَّينِ `DOC-13`، ووُسِّعَ في `WL-220` إغلاقاً للدَّينِ `DOC-14`. **يَنزِعُ ما بينَ علامتَيْ كودٍ قبلَ العدِّ**، فـ`|`
 //     داخلَ كودٍ ليسَ فاصلَ خليّةٍ. **ونطاقُهُ كلُّ جداولِ السجلِّ** — ترويسةً وفاصلاً وصفوفاً — لا §4.6 وحدَها.
+//   - R5: عمودُ الإغلاقِ في §4.3 من سجلِّ الدَّينِ يُطابقُ سلطةَ الإغلاقِ في `config/external-review.yaml` —
+//     أُضيفَ في `WL-221` إغلاقاً للدَّينِ `DOC-15`. فالعقدُ يَنُصُّ `resultAuthority: model-council` وأنّ
+//     «إعادةَ الاختبارِ وحكمَ الإغلاقِ يُصدِرُهما المجلسُ»، والمادة 11 §1 تقضي أنّ **المنفِّذَ ليسَ المراجعَ**؛
+//     فصفٌّ يُسنِدُ إغلاقَ نتيجةٍ إلى المنفِّذِ يُخالِفُ العقدَ. **يَقرأُ العقدَ بمُفسِّرِ YAML لا بمطابقةِ نصٍّ.**
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -21,6 +25,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { parse as parseYaml } from 'yaml';
 import { readDocCountFacts } from './lib/doc-count-facts.mjs';
 
 const rootIndex = process.argv.indexOf('--root');
@@ -196,6 +201,74 @@ const facts = readDocCountFacts(root);
           violations.push(
             `R4/SHAPE: سجلُّ الدَّينِ، السطرُ ${lineNumber}: ${count} خليّةً والترويسةُ ${width}.`,
           );
+        }
+      }
+    }
+  }
+}
+
+// ── R5: عمودُ الإغلاقِ في §4.3 يُطابقُ سلطةَ الإغلاقِ في العقدِ ──
+// **لماذا:** قِيسَ في `WL-221` أنّ خمسةَ صفوفٍ (`R6-A-12`،`R6-A-13`،`R6-B-03`،`R6-B-04`،`R6-B-05`)
+// كانت تُسنِدُ الإغلاقَ إلى «منفِّذ» بينما العقدُ يَحصُرُه في المجلسِ ونصُّ §4.3 نفسُه يقولُ ذلك —
+// فالجدولُ كان يَنقُضُ نصَّه وعقدَه. هذا الحاجزُ يَمنعُ رجوعَه.
+{
+  const contractText = readText('config/external-review.yaml');
+  if (contractText.trim() === '') {
+    violations.push('R5/MISSING: لا يمكنُ قراءةُ `config/external-review.yaml`.');
+  } else {
+    /** @type {unknown} */
+    let contract = null;
+    try {
+      contract = parseYaml(contractText);
+    } catch {
+      violations.push('R5/PARSE: `config/external-review.yaml` ليسَ YAML صالحاً.');
+    }
+    const authority =
+      contract && typeof contract === 'object'
+        ? /** @type {{resultAuthority?: unknown}} */ (contract).resultAuthority
+        : undefined;
+    if (authority !== 'model-council') {
+      violations.push(
+        `R5/CONTRACT: العقدُ يَذكُرُ سلطةَ نتائجٍ «${String(authority)}» والمُتوقَّعُ «model-council».`,
+      );
+    } else {
+      const lines = readText('docs/roadmap/06-debt-register.md').split('\n');
+      const start = lines.findIndex((l) => l.startsWith('### 4.3'));
+      if (start === -1) {
+        violations.push('R5/MISSING: لا قسمَ §4.3 في سجلِّ الدَّينِ.');
+      } else {
+        let dataRows = 0;
+        for (let i = start + 1; i < lines.length; i += 1) {
+          const line = lines[i] ?? '';
+          if (line.startsWith('### ')) break;
+          if (!line.startsWith('|')) continue;
+          const cells = line
+            .replace(/`[^`]*`/g, '§')
+            .split('|')
+            .slice(1, -1)
+            .map((c) => c.trim());
+          if (cells.length < 4) continue;
+          if (/^[:\-\s§]+$/.test(cells.join(''))) continue;
+          const raw = line
+            .split('|')
+            .slice(1, -1)
+            .map((c) => c.trim());
+          const id = raw[0] ?? '';
+          const closure = raw[raw.length - 1] ?? '';
+          if (closure === 'الإغلاقُ') continue;
+          dataRows += 1;
+          if (closure.includes('منفِّذ') || closure.includes('منفذ')) {
+            violations.push(
+              `R5/AUTHORITY: سجلُّ الدَّينِ، السطرُ ${i + 1} (${id}): عمودُ الإغلاقِ «${closure}» يُسنِدُ إغلاقَ نتيجةِ مراجعةٍ إلى المنفِّذِ، والعقدُ يَحصُرُه في المجلسِ (المادة 11 §1).`,
+            );
+          } else if (!closure.includes('مجلس')) {
+            violations.push(
+              `R5/AUTHORITY: سجلُّ الدَّينِ، السطرُ ${i + 1} (${id}): عمودُ الإغلاقِ «${closure}» لا يَذكُرُ المجلسَ.`,
+            );
+          }
+        }
+        if (dataRows === 0) {
+          violations.push('R5/MISSING: جدولُ §4.3 بلا صفوفِ نتائجٍ.');
         }
       }
     }
