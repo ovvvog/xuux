@@ -40,20 +40,20 @@ test('R1: الشكلُ القديمُ — المعرِّفُ في ذيلِ ال�
 });
 
 test('R1: معرِّفٌ مذكورٌ في عنوانِ تصحيحٍ لا يُملَكُ — الأوّلُ وحدَه هو المُدخلةُ', () => {
-  const logText = `${HEAD(1)}\n### [2026-09-15] — WL-002 — تصحيحُ حقلِ الكوميتِ في \`WL-001\`\n\n---\n`;
+  const logText = `### [2026-09-15] — WL-002 — تصحيحُ حقلِ الكوميتِ في \`WL-001\`\n\n---\n${HEAD(1)}`;
   const { failures, unique } = auditWorkLogIds({ logText, configText: EMPTY_CONFIG });
   assert.deepEqual(failures, []);
   assert.equal(unique, 2);
 });
 
 test('R2: تكرارٌ غيرُ مُعلَنٍ يُرفَضُ — وهو صنفُ عيبِ اللصقِ المزدوجِ', () => {
-  const logText = logOf([1, 2, 2, 3]);
+  const logText = logOf([3, 2, 2, 1]);
   const { failures } = auditWorkLogIds({ logText, configText: EMPTY_CONFIG });
   assert.ok(failures.some((message) => message.startsWith('R2:')));
 });
 
 test('R2: تكرارٌ مُعلَنٌ بعددِه يُقبَلُ', () => {
-  const logText = logOf([1, 2, 2, 3]);
+  const logText = logOf([3, 2, 2, 1]);
   const configText =
     'allowed_gaps: []\nallowed_duplicates:\n  - id: WL-002\n    count: 2\n    reason: مُدخلةٌ وتصحيحُها\n';
   const { failures } = auditWorkLogIds({ logText, configText });
@@ -61,13 +61,13 @@ test('R2: تكرارٌ مُعلَنٌ بعددِه يُقبَلُ', () => {
 });
 
 test('R3: فجوةٌ غيرُ مُعلَنةٍ تُرفَضُ — وهي صنفُ عيبِ الحذفِ السهوِ', () => {
-  const logText = logOf([1, 2, 4]);
+  const logText = logOf([4, 2, 1]);
   const { failures } = auditWorkLogIds({ logText, configText: EMPTY_CONFIG });
   assert.ok(failures.some((message) => message.startsWith('R3:') && message.includes('WL-003')));
 });
 
 test('R3: فجوةٌ مُعلَنةٌ بسببٍ مكتوبٍ تُقبَلُ', () => {
-  const logText = logOf([1, 2, 4]);
+  const logText = logOf([4, 2, 1]);
   const configText =
     'allowed_gaps:\n  - id: WL-003\n    reason: استُهلِكَ في رسالةِ كوميتٍ ووُثِّقَ جماعةً\nallowed_duplicates: []\n';
   const { failures } = auditWorkLogIds({ logText, configText });
@@ -75,7 +75,7 @@ test('R3: فجوةٌ مُعلَنةٌ بسببٍ مكتوبٍ تُقبَلُ', (
 });
 
 test('R4: استثناءُ فجوةٍ صارَ له عنوانٌ يُرفَضُ — لا مقبرةَ أعذارٍ', () => {
-  const logText = logOf([1, 2, 3]);
+  const logText = logOf([3, 2, 1]);
   const configText =
     'allowed_gaps:\n  - id: WL-003\n    reason: سببٌ قديمٌ لم يبقَ له محلٌّ\nallowed_duplicates: []\n';
   const { failures } = auditWorkLogIds({ logText, configText });
@@ -83,7 +83,7 @@ test('R4: استثناءُ فجوةٍ صارَ له عنوانٌ يُرفَضُ 
 });
 
 test('R4: تكرارٌ مُعلَنٌ بعددٍ يخالفُ المقيسَ يُرفَضُ', () => {
-  const logText = logOf([1, 2, 3]);
+  const logText = logOf([3, 2, 1]);
   const configText =
     'allowed_gaps: []\nallowed_duplicates:\n  - id: WL-002\n    count: 2\n    reason: سببٌ\n';
   const { failures } = auditWorkLogIds({ logText, configText });
@@ -91,14 +91,14 @@ test('R4: تكرارٌ مُعلَنٌ بعددٍ يخالفُ المقيسَ ي�
 });
 
 test('R5: استثناءٌ بلا سببٍ مكتوبٍ يُرفَضُ', () => {
-  const logText = logOf([1, 2, 4]);
+  const logText = logOf([4, 2, 1]);
   const configText = 'allowed_gaps:\n  - id: WL-003\n    reason: "   "\nallowed_duplicates: []\n';
   const { failures } = auditWorkLogIds({ logText, configText });
   assert.ok(failures.some((message) => message.startsWith('R5:')));
 });
 
 test('R5: استثناءٌ غيرُ مشروحٍ في خريطةِ المعرِّفاتِ يُرفَضُ', () => {
-  const logText = logOf([1, 2, 4]);
+  const logText = logOf([4, 2, 1]);
   const configText =
     'allowed_gaps:\n  - id: WL-003\n    reason: سببٌ مكتوبٌ\nallowed_duplicates: []\n';
   const withoutMap = auditWorkLogIds({ logText, configText, mapText: 'خريطةٌ لا تذكرُ شيئاً' });
@@ -109,6 +109,36 @@ test('R5: استثناءٌ غيرُ مشروحٍ في خريطةِ المعرِ�
     mapText: 'الفجوةُ `WL-003` مشروحةٌ هنا بسببِها',
   });
   assert.deepEqual(withMap.failures, []);
+});
+
+test('R6: الترتيبُ التنازليُّ الصحيحُ يُقبَلُ', () => {
+  const logText = logOf([5, 4, 3, 2, 1]);
+  const { failures } = auditWorkLogIds({ logText, configText: EMPTY_CONFIG });
+  assert.deepEqual(failures, []);
+});
+
+test('R6: طفرةٌ — مُدخلةٌ أحدثُ بعدَ أقدمَ تُرفَضُ', () => {
+  // WL-211 يَسبِقُ WL-221 — الترتيبُ مكسورٌ
+  const logText = logOf([211, 221]);
+  const { failures } = auditWorkLogIds({ logText, configText: EMPTY_CONFIG });
+  assert.ok(failures.some((message) => message.startsWith('R6:')));
+});
+
+test('R6: تكرارٌ مُعلَنٌ في ترتيبٍ تنازليٍّ يُقبَلُ', () => {
+  const logText = logOf([3, 2, 2, 1]);
+  const configText =
+    'allowed_gaps: []\nallowed_duplicates:\n  - id: WL-002\n    count: 2\n    reason: مُدخلةٌ وتصحيحُها\n';
+  const { failures } = auditWorkLogIds({ logText, configText });
+  assert.deepEqual(failures, []);
+});
+
+test('R6: تكرارٌ مُعلَنٌ لكن بترتيبٍ مكسورٍ يُرفَضُ', () => {
+  // WL-002 ثم WL-003 — الترتيبُ مكسورٌ رغم أنّ التكرارَ مُعلَنٌ
+  const logText = logOf([3, 2, 2, 3]);
+  const configText =
+    'allowed_gaps: []\nallowed_duplicates:\n  - id: WL-002\n    count: 2\n    reason: مُدخلةٌ وتصحيحُها\n';
+  const { failures } = auditWorkLogIds({ logText, configText });
+  assert.ok(failures.some((message) => message.startsWith('R6:')));
 });
 
 test('السجلُّ الحقيقيُّ في المستودعِ يمرُّ بالحاجزِ', async () => {
