@@ -20,7 +20,7 @@
 
 import process from 'node:process';
 
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { cpus, totalmem } from 'node:os';
 import path from 'node:path';
@@ -118,6 +118,12 @@ export async function runStress({ pool, tasks, workers, haltGuard, label = 'stre
 /** مفتاح إيقاف محلّي للقياس فقط: القياس يجري على نظامٍ عاملٍ لا موقوف. */
 function createLocalHaltGuard() {
   const dir = mkdtempSync(path.join(tmpdir(), 'stress-halt-'));
+  // `WL-219`: هذا النصُّ يُشغَّلُ عمليّةً فرعيّةً من اختبارٍ، فلا يَبلُغُهُ مُعِينُ
+  // `tests/helpers/tmp-roots.mjs`. **وذاكَ حدٌّ مُعلَنٌ أمسكَهُ القياسُ السلوكيُّ في CI
+  // لا تحليلُ النصِّ** — فالمحوُ مُدبَّرٌ هنا عندَ خروجِ العمليّةِ.
+  process.on('exit', () => {
+    rmSync(dir, { recursive: true, force: true });
+  });
   return new HaltSwitch(path.join(dir, 'state', 'halt.json'), new KingIdentity(), { fsync: false });
 }
 
