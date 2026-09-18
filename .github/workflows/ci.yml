@@ -5,8 +5,8 @@
 # المادة 2 من القاعدة الحاكمة: لا إنجاز بلا دليل قابل للتشغيل؛ وهذا هو الدليل الآلي.
 #
 # WL-216: نُقل المسار من GitHub-hosted (ubuntu-latest) إلى self-hosted runner
-# على جهاز المالك (Windows) لتفادي حظر فوترة GitHub Actions. خادم PostgreSQL
-# محلي بدل service container، وpwsh shell لكل الخطوات (متوافق مع Windows).
+# على جهاز المالك (WSL2 Ubuntu على Windows) لتفادي حظر فوترة GitHub Actions.
+# البيئة الآن Linux حقيقية عبر WSL2 — Docker و service containers متاحة طبيعيًا.
 
 name: CI
 
@@ -27,16 +27,26 @@ concurrency:
 jobs:
   validate:
     name: فحص الجودة الكامل
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux-wsl]
     timeout-minutes: 30
-    defaults:
-      run:
-        shell: powershell
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: state
+          POSTGRES_PASSWORD: state
+          POSTGRES_DB: state
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       DATABASE_URL: postgresql://state:state@127.0.0.1:5432/state
-      PG_DUMP: 'C:/Program Files/PostgreSQL/18/bin/pg_dump.exe'
-      PG_RESTORE: 'C:/Program Files/PostgreSQL/18/bin/pg_restore.exe'
 
     steps:
       - name: جلب المستودع
@@ -51,18 +61,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+          cache: npm
 
       - name: تثبيت التبعيات من القفل
         run: npm ci
-
-      - name: إضافة OpenSSL و Git tools إلى PATH
-        shell: powershell
-        run: |
-          "C:\Program Files\Git\usr\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          "C:\Program Files\Git\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      # WL-216: عميل PostgreSQL 18 مثبَّت محليًا على جهاز المالك — لا حاجة للتثبيت.
-      # المساران يُحدَّدان عبر PG_DUMP و PG_RESTORE في قسم env أعلاه.
 
       - name: حاجز تطابق الإصدار (WL-046) — نفس النصّ الذي يُقاس محلّياً
         run: npm run guard:version
@@ -110,10 +112,10 @@ jobs:
         # لا يكفي وجود نصّ نسخ: النسخة التي لم تُستعد ليست نسخة. فالبوابة
         # تُنشئ أرشيفاً وتتحقّق منه وتستعيده فوق قاعدة أخرى، وتطبع الزمن.
         run: |
-          $dump = Join-Path $env:RUNNER_TEMP "ci-drill.dump"
-          npm run backup -- create $dump
-          npm run backup -- verify $dump
-          npm run restore -- $dump --database state_restore_drill --force
+          dump="$RUNNER_TEMP/ci-drill.dump"
+          npm run backup -- create "$dump"
+          npm run backup -- verify "$dump"
+          npm run restore -- "$dump" --database state_restore_drill --force
 
       - name: سياسة الاحتفاظ — تقرير جاف لا يحذف شيئاً (M3.08)
         # `plan` قراءةٌ محضة: تُشغَّل في البوابة لأن سياسةً لا تُقرأ آلياً
@@ -131,7 +133,7 @@ jobs:
 
       # **العيبُ الذي تُغلقه هذه الخطوات (WL-045):** ستّةَ عشرَ حاجزاً مُعلَناً في
       # `npm run validate` لم يكن يُشغِّلها هذا المسار قطُّ — كان يُشغِّل
-      # `guard:templates` و`guard:filecount` وحدهما. فحواجزُ صِيغت خطوةً بعد خطوة
+      # `guard:templates` و`guard:filecount` وحدها. فحواجزُ صِيغت خطوةً بعد خطوة
       # لتمنع الانحراف كانت تُقاس على جهاز المطوّر إن شاء، ولا تمنع دمجاً. والبوابةُ
       # التي لا تُشغَّل آلياً ليست بوابةً بل نيّة. ولها هنا خطواتٌ مُسمَّاةٌ لا سطرٌ
       # جامعٌ واحدٌ، كي يدلَّ اسمُ الخطوة الحمراء على الحاجز الذي سقط.
@@ -278,19 +280,16 @@ jobs:
 
   gate-report:
     name: تقرير البوابتين G0 و G1
-    runs-on: self-hosted
+    runs-on: [self-hosted, linux-wsl]
     needs: validate
     if: always()
-    defaults:
-      run:
-        shell: powershell
     steps:
       - name: خلاصة النتيجة
         run: |
-          if ("${{ needs.validate.result }}" -eq "success") {
-            "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
-          } else {
-            "### ⛔ فشل الفحص: ${{ needs.validate.result }}" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
-            "لا يجوز الدمج. راجع docs/roadmap/04-execution-playbook.md §4.5" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          if [ "${{ needs.validate.result }}" = "success" ]; then
+            echo "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ⛔ فشل الفحص: ${{ needs.validate.result }}" >> "$GITHUB_STEP_SUMMARY"
+            echo "لا يجوز الدمج. راجع docs/roadmap/04-execution-playbook.md §4.5" >> "$GITHUB_STEP_SUMMARY"
             exit 1
-          }
+          fi
