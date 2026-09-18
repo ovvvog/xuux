@@ -185,7 +185,7 @@ export function auditWorkLogIds({ logText, configText, mapText = '' }) {
   for (let i = 0; i < orderedIds.length - 1; i += 1) {
     const current = orderedIds[i];
     const next = orderedIds[i + 1];
-    if (current == null || next == null) continue;
+    if (current === undefined || next === undefined) continue;
     if (current < next) {
       failures.push(
         `R6: الترتيبُ غيرُ تنازليٍّ — WL-${String(current).padStart(3, '0')} يَسبِقُ WL-${String(next).padStart(3, '0')} والمُدخلةُ الأحدثُ في الأعلى`,
