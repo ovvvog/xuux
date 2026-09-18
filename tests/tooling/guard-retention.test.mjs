@@ -359,3 +359,20 @@ test('M30: الحاجز يفشل إن استوردَ scripts/ استيرادًا
     cleanup();
   }
 });
+
+test('M31: الحاجز يفشل إن أعادتَ scripts/ تصديرَ purge من retention.mjs', () => {
+  const { dir, cleanup } = copyTree();
+  try {
+    mkdirSync(join(dir, 'scripts'), { recursive: true });
+    writeFileSync(
+      join(dir, 'scripts', 'reexport-tool.mjs'),
+      "export { purge } from '../src/persistence/retention.mjs';\n",
+    );
+    const { status, output } = runGuard(dir);
+    assert.equal(status, 1, 'إعادةُ تصديرِ purge من retention.mjs عبرَ الحاجز');
+    assert.match(output, /R8/);
+    assert.match(output, /reexport-tool\.mjs/);
+  } finally {
+    cleanup();
+  }
+});
