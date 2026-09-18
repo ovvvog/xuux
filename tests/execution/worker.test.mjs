@@ -19,11 +19,6 @@ import { createWorker } from '../../src/execution/worker.mjs';
 import { TaskLifecycle } from '../../src/execution/lifecycle.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
-import { probeIsolation } from '../../src/execution/isolation.mjs';
-
-const isolationSkip = probeIsolation().available ? false : `تخطّي معلن: ${probeIsolation().reason}`;
-
-const testSkip = skipWithoutDatabase !== false ? skipWithoutDatabase : isolationSkip;
 
 const AUTH = { decisionId: 'decision-العامل' };
 
@@ -80,7 +75,7 @@ async function enqueue(queue, key, extra = {}) {
 test(
   'العامل ينفّذ المهمة في عملية منفصلة ويُنهيها ناجحة',
   {
-    skip: testSkip,
+    skip: skipWithoutDatabase,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
@@ -109,7 +104,7 @@ test(
 test(
   'إيقاف شامل تحت حمل ⇒ صفر تقدّم، بلا فقدان، ثم استئناف يُكمل الباقي',
   {
-    skip: testSkip,
+    skip: skipWithoutDatabase,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
@@ -173,7 +168,7 @@ test(
   },
 );
 
-test('عاملٌ بلا حرس إيقاف يُرفض بناؤه', { skip: testSkip }, () => {
+test('عاملٌ بلا حرس إيقاف يُرفض بناؤه', { skip: skipWithoutDatabase }, () => {
   const queue = createTaskQueue({ pool: pool() });
   assert.throws(
     () =>
@@ -190,7 +185,7 @@ test('عاملٌ بلا حرس إيقاف يُرفض بناؤه', { skip: testSk
 test(
   'طلب الإلغاء يقتل مُعالِجاً متجمّداً ويُثبَّت الإلغاء',
   {
-    skip: testSkip,
+    skip: skipWithoutDatabase,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool(), leaseMs: 5_000 });
@@ -235,7 +230,7 @@ test(
 test(
   'انتهاء مهلة المهمة يُسجَّل رمزاً في المهمة ويُعيدها للطابور',
   {
-    skip: testSkip,
+    skip: skipWithoutDatabase,
   },
   async () => {
     const queue = createTaskQueue({ pool: pool(), leaseMs: 10_000 });
@@ -273,7 +268,7 @@ test(
 test(
   'إيقافٌ شاملٌ أثناءَ تنفيذٍ جارٍ يُجهضه ويُعيد المهمة بلا استهلاك محاولة',
   {
-    skip: testSkip,
+    skip: skipWithoutDatabase,
   },
   async () => {
     // شاهدُ الدَّينِ `D-8`: قبلَ الإصلاحِ كان الإيقافُ يَحسِبُ محاولةً على المهمّةِ

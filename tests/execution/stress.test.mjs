@@ -15,11 +15,6 @@ import { TaskLifecycle } from '../../src/execution/lifecycle.mjs';
 import { createTaskQueue } from '../../src/execution/queue.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
-import { probeIsolation } from '../../src/execution/isolation.mjs';
-
-const isolationSkip = probeIsolation().available ? false : `تخطّي معلن: ${probeIsolation().reason}`;
-
-const testSkip = skipWithoutDatabase !== false ? skipWithoutDatabase : isolationSkip;
 
 /** @type {{ pool: import('pg').Pool, drop: () => Promise<void> } | undefined} */
 let db;
@@ -52,7 +47,7 @@ test('حسبة المئين تختار قيمةً لا تقلّ عن النسب�
 test(
   'حملٌ متزامن يُصرَّف كاملاً بلا تنفيذ مزدوج ويُنتج أرقاماً مقيسة',
   {
-    skip: testSkip,
+    skip: skipWithoutDatabase,
   },
   async () => {
     const tasks = 24;

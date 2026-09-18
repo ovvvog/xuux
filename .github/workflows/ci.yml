@@ -5,8 +5,13 @@
 # المادة 2 من القاعدة الحاكمة: لا إنجاز بلا دليل قابل للتشغيل؛ وهذا هو الدليل الآلي.
 #
 # WL-216: نُقل المسار من GitHub-hosted (ubuntu-latest) إلى self-hosted runner
-# على جهاز المالك (WSL2 Ubuntu على Windows) لتفادي حظر فوترة GitHub Actions.
-# البيئة الآن Linux حقيقية عبر WSL2 — Docker و service containers متاحة طبيعيًا.
+# لتفادي حظر فوترة GitHub Actions.
+#
+# البيئة المُعتمدة: آلةٌ افتراضيّةٌ Linux أصليّةٌ على Hyper-V (الـ runner
+# `xuux-ci-linux`، الوسم `linux-vm`). ولم تُعتمد WSL2: قِيس عليها أنّ نواتَها
+# ترفض ربطَ `/usr` بـ bind mount داخلَ مساحةِ مستخدمٍ، فسقطت سبعةُ اختباراتِ
+# عزلٍ سقوطاً بيئيّاً لا شفريّاً — والعزلُ عقدٌ أمنيٌّ لا يُتخطّى ليُخضَّر مسارٌ.
+# فلا وسمَ `linux-wsl` في هذا الملفِّ، ولا شرطَ منصّةٍ في اختبارٍ.
 
 name: CI
 
@@ -27,7 +32,7 @@ concurrency:
 jobs:
   validate:
     name: فحص الجودة الكامل
-    runs-on: [self-hosted, linux-wsl]
+    runs-on: [self-hosted, linux-vm]
     timeout-minutes: 30
 
     services:
@@ -73,8 +78,15 @@ jobs:
       - name: تثبيت عميل PostgreSQL 18 المطابق للخادم
         run: |
           if command -v pg_dump >/dev/null 2>&1 && pg_dump --version | grep -q ' 18\.'; then
-            echo "postgresql-client-18 مثبت مسبقاً"
+            echo "postgresql-client-18 مثبت مسبقاً — لا تثبيت في هذه التشغيلة"
             exit 0
+          fi
+          # الـ runner الذاتي قد لا يمنح sudo بلا كلمة مرور. فيُقاس ذلك قبل
+          # المحاولة ليكون سببُ السقوط مقروءاً لا خطأً غامضاً في منتصف apt.
+          if ! sudo -n true 2>/dev/null; then
+            echo "::error::sudo يطلب كلمة مرور على هذا الـ runner، وعميل PostgreSQL 18 غير مثبَّت." >&2
+            echo "ثبِّته مرّةً واحدةً داخل الآلة الافتراضيّة ثم أعد التشغيل — التثبيت دائم فلا يتكرّر." >&2
+            exit 1
           fi
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
@@ -300,7 +312,7 @@ jobs:
 
   gate-report:
     name: تقرير البوابتين G0 و G1
-    runs-on: [self-hosted, linux-wsl]
+    runs-on: [self-hosted, linux-vm]
     needs: validate
     if: always()
     steps:

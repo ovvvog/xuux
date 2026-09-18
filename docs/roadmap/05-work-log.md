@@ -8157,20 +8157,25 @@ $ node scripts/guard-transport.mjs      # EXIT=0
 
 ---
 
-### [2026-09-18] — WL-216 — نقلُ CI إلى self-hosted runner على Windows: تفادي حظر فوترة GitHub Actions
+### [2026-09-18] — WL-216 — نقلُ CI إلى self-hosted runner على آلةٍ افتراضيّةٍ Linux أصليّةٍ: تفادي حظرِ فوترةِ GitHub Actions بلا مساسٍ بعقدِ العزلِ
 
 - **المنفِّذ:** Perplexity Computer (تفويضٌ تنفيذيٌّ كاملٌ من المالك)
 - **المسار والخطوة:** بنيةُ المستودعِ والعمليّةِ — `EXT-1` (§6) يبقى مؤجَّلاً، والخطرُ الفعليُّ مُغطَّى
 - **الحالة بعد العمل:** ✅ منجز
-- **ما تم فعلاً:** نُقل مسارُ CI من GitHub-hosted runner (`ubuntu-latest`) إلى self-hosted runner على جهازِ المالكِ (Windows، اسمُ الجهازِ `DESKTOP-NACEKNK`، labels: `self-hosted`, `Windows`, `X64`). والأسبابُ ثلاثةٌ: (1) GitHub Actions مَحظورٌ بسببِ فشلِ فوترةِ المنظّمةِ أو حدِّ الإنفاقِ؛ (2) `EXT-1` (حمايةُ الفرعِ) تتطلَّبُ ترقيةً لخطّةِ GitHub ولا ترقيةَ قريبةً؛ (3) self-hosted runner مجّانيٌّ ولا يستهلك دقائقَ Actions مدفوعةً. التعديلاتُ:
-  - **`.github/workflows/ci.yml`:** `runs-on: ubuntu-latest` → `runs-on: self-hosted` (في الوظيفتَين `validate` و`gate-report`)؛ `defaults: run: shell: bash` لكلِّ الخطوات (Git for Windows يتضمّن bash)؛ أُزيلَ `services:` (service containers لا تعمل على self-hosted runners) واستُبدِلَ بخادمِ PostgreSQL المحليِّ على `127.0.0.1:5432`؛ أُزيلَت خطوةُ تثبيتِ عميلِ PostgreSQL عبر `apt-get` (العميلُ مثبَّتٌ محلياً)؛ عُيِّنَ `PG_DUMP` و`PG_RESTORE` لمسارِ Windows `C:/Program Files/PostgreSQL/18/bin/`؛ رُفِعَ `timeout-minutes` من 20 إلى 30.
-  - **`scripts/hooks/pre-push`:** hook محليٌّ يُشغِّل `npm run validate` قبل كلِّ دفعةٍ. ضابطٌ تعويضيٌّ لحمايةِ الفرعِ (EXT-1) — يَمنعُ الكودَ المكسورَ من الوصولِ إلى المستودعِ البعيدِ أصلاً.
-  - **`scripts/install-hooks.sh`:** سكربتُ تثبيتٍ للـ hook: `sh scripts/install-hooks.sh`.
-- **الملفات المتأثرة:** `.github/workflows/ci.yml`، `scripts/hooks/pre-push` (جديد)، `scripts/install-hooks.sh` (جديد)، `docs/roadmap/05-work-log.md` (هذه المُدخلة)، `PROJECT_STATUS.md`
+- **ما تم فعلاً:** نُقل مسارُ CI من GitHub-hosted runner (`ubuntu-latest`) إلى self-hosted runner على عتادِ المالكِ. والأسبابُ ثلاثةٌ: (1) GitHub Actions مَحظورٌ بفشلِ فوترةِ المنظّمةِ أو حدِّ الإنفاقِ؛ (2) `EXT-1` (حمايةُ الفرعِ) تتطلَّبُ ترقيةَ خطّةٍ ولا ترقيةَ قريبةً؛ (3) self-hosted runner لا يستهلكُ دقائقَ Actions مدفوعةً.
+
+  **والنقلُ جرى على مرحلتَينِ، والأولى رُدَّتْ:** جُرِّبَ أوّلاً runner على **WSL2** (الجهازُ `DESKTOP-NACEKNK`، الوسمُ `linux-wsl`). فانكشفَ أنَّ نواةَ WSL2 **ترفضُ ربطَ `/usr` بـ bind mount داخلَ مساحةِ مستخدمٍ**: `mount: wrong fs type, bad option, bad superblock`. فسقطَ سبعةُ اختباراتِ عزلٍ سقوطاً بيئيّاً لا شفريّاً — ستةٌ في `tests/execution/isolation.test.mjs` وواحدٌ في `tests/execution/worker-isolation.test.mjs` (التشغيلةُ `35315306527`: `2095` اختباراً، `2052` ناجحاً، `7` ساقطةً). **ولم يُتَّخَذْ مخرجُ التخطّي:** شرطُ منصّةٍ يُخضِّرُ المسارَ بأنْ يَكُفَّ عن قياسِ الخاصيّةِ الأمنيّةِ التي وُجِدَ المشروعُ ليُثبِتَها، وسابقةُ تخطّي PostgreSQL ليست نظيرةً (تخطٍّ مشروطٌ بتبعيّةٍ غائبةٍ لا بعقدٍ أمنيٍّ واجبٍ). فرُدَّتِ البيئةُ لا الاختبارُ: نُصِبَت آلةٌ افتراضيّةٌ **Linux أصليّةٌ** على Hyper-V (الجهازُ `xuux-ci-linux`، Ubuntu 26.04.1، النواةُ `7.0.0-31-generic`، الوسمُ `linux-vm`) — لا أثرَ لـ WSL في `/proc/version`.
+
+  التعديلاتُ في هيئتِها النهائيّةِ:
+  - **`.github/workflows/ci.yml`:** `runs-on: ubuntu-latest` → `runs-on: [self-hosted, linux-vm]` في الوظيفتَينِ `validate` و`gate-report`. **وبيئةُ Linux الأصليّةُ محفوظةٌ بتمامِها:** `services:` باقيةٌ بحالِها (`postgres:18.6-alpine` عبرَ Docker) ولم تُستبدَلْ بخادمٍ محلّيٍّ، ولا `shell: bash` افتراضيٌّ لِـ Windows، ولا مسارَ ثنائيّاتٍ Windows لـ `PG_DUMP`/`PG_RESTORE`. وخطوةُ تثبيتِ عميلِ PostgreSQL 18 **مُتعادِلةٌ** (تَخرُجُ صفراً إنْ كانَ مثبَّتاً) وتَقيسُ `sudo -n` قبلَ المحاولةِ ليكونَ سببُ السقوطِ مقروءاً لا خطأً غامضاً في منتصفِ `apt`.
+  - **`package.json`:** `npm test` صارَ `--test-concurrency=1`. والسببُ عَطَبٌ حقيقيٌّ كشفَهُ الـ runner الأسرعُ: اختباراتُ `tests/readiness/` تُعدِّلُ ملفّاتِ جذرِ المستودعِ وتَستعيدُها في `finally` (لأنَّ `guard-readiness.mjs` لا يَقبلُ `--root`)، فمعَ التوازي يُفسِدُ اختبارٌ ملفّاً يَقرأُهُ آخرُ ⇒ `READINESS_REPORT_DRIFT` طيفيٌّ. كانَ كامناً على runners أبطأَ ذاتِ نواتَينِ. **وهذا إصلاحُ تسابُقٍ لا تخطٍّ:** لا اختبارَ يُستثنى ولا شرطَ منصّةٍ يُضافُ.
+  - **`scripts/hooks/pre-push`:** hook محلّيٌّ يُشغِّلُ `npm run validate` قبلَ كلِّ دفعةٍ. ضابطٌ تعويضيٌّ لحمايةِ الفرعِ (`EXT-1`) — يَمنعُ الشفرةَ المكسورةَ من بلوغِ المستودعِ البعيدِ أصلاً. ولا شيءَ فيهِ خاصٌّ بمنصّةٍ.
+  - **`scripts/install-hooks.sh`:** سكربتُ تثبيتِ الـ hook: `sh scripts/install-hooks.sh`.
+- **الملفات المتأثرة:** `.github/workflows/ci.yml`، `package.json`، `scripts/hooks/pre-push` (جديد)، `scripts/install-hooks.sh` (جديد)، `docs/roadmap/05-work-log.md` (هذه المُدخلة)، `PROJECT_STATUS.md`
 - **الـ commit:** هذا PR (WL-216)
-- **الدليل:** الـ runner مُسجَّلٌ على GitHub وidle status مؤكَّدٌ. `npm run validate` يَجتازُ محلياً. الـ hook يُشغَّلُ عبر `sh scripts/install-hooks.sh`. سيُختبرُ بدفعةٍ تجريبيةٍ على هذا الفرع.
-- **ما لم يتم ولماذا:** `EXT-1` (حمايةُ الفرعِ على مستوى GitHub) لا تزال مؤجَّلةً — تتطلَّبُ ترقيةَ خطّةِ GitHub، وهذا قرارٌ ماليٌّ للمالكِ. لكنَّ الخطرَ الفعليَّ مُغطَّى: الـ hook يَمنعُ الدفعَ بلا اجتيازِ 68 حارساً + اختبارات، والـ runner يُشغِّلُ CI على كلِّ push وPR.
-- **الأثرُ على المسارات الأخرى:** CI يعودُ للعملِ بلا ترقيةِ خطّة. `EXT-1` تبقى في §6 للمالكِ. لا خطوةُ خارطةٍ تُفتَحُ ولا نسبةُ تتغيّرُ.
+- **الدليل:** الـ runner `xuux-ci-linux` مُسجَّلٌ وحالتُهُ `Idle` مؤكَّدةٌ، ووسومُهُ `self-hosted`/`Linux`/`X64`/`linux-vm`. ومَسبارُ البيئةِ على الآلةِ نفسِها أثبتَ: نواةً أصليّةً لا WSL، وأسماءَ ملفّاتٍ بنقطتَينِ مدعومةً، و`unshare --user` ناجحاً. **ولا اختبارَ عُدِّلَ منطقُهُ:** `git diff main -- tests/execution/` ⇒ فارغٌ (كلُّ ملفّاتِ اختباراتِ التنفيذِ مطابقةٌ لـ`main` حرفاً بحرفٍ)، فلا شرطَ منصّةٍ ولا تخطٍّ أُدخِلَ على اختباراتِ العزلِ.
+- **ما لم يتم ولماذا:** `EXT-1` (حمايةُ الفرعِ على مستوى GitHub) لا تزالُ مؤجَّلةً — تتطلَّبُ ترقيةَ خطّةٍ، وهذا قرارٌ ماليٌّ للمالكِ. لكنَّ الخطرَ الفعليَّ مُغطَّى: الـ hook يَمنعُ الدفعَ بلا اجتيازِ الحُرّاسِ والاختباراتِ، والـ runner يُشغِّلُ CI على كلِّ push وPR. **وتهيئةُ الآلةِ الافتراضيّةِ على المالكِ لا على المنفِّذِ** (لا وصولَ للمنفِّذِ إلى داخلِ الآلةِ): تثبيتُ Docker Engine، ورفعُ قيدِ AppArmor على مساحاتِ المستخدمِ غيرِ المُمَيّزةِ (`kernel.apparmor_restrict_unprivileged_userns=0` — قِيسَ `1` على الآلةِ، وهو افتراضُ Ubuntu 24.04+ ويَمنعُ كتابةَ `uid_map` فيُسقِطُ `probeIsolation`)، وتثبيتُ `postgresql-client-18` و`build-essential`.
+- **الأثرُ على المسارات الأخرى:** CI يعودُ للعملِ بلا ترقيةِ خطّةٍ وعلى بيئةِ Linux أصليّةٍ تُشغِّلُ مجموعةَ الاختباراتِ كاملةً بلا استثناءٍ. `EXT-1` تبقى في §6 للمالكِ. لا خطوةَ خارطةٍ تُفتَحُ ولا نسبةَ تتغيّرُ.
 
 <!-- المُدخلات الجديدة تُضاف أعلى هذا السطر مباشرة، بعد الفاصل الأول. -->
 

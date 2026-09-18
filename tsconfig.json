@@ -31,8 +31,7 @@
     "src/**/*.mts",
     "src/**/*.mjs",
     "tests/**/*.mjs",
-    "scripts/**/*.mjs",
-    "types/**/*.ts"
+    "scripts/**/*.mjs"
   ],
   "exclude": [
     "node_modules",
