@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        shell: bash
+        shell: "C:\\Program Files\\Git\\bin\\bash.exe --noprofile --norc -e -o pipefail {0}"
 
     env:
       DATABASE_URL: postgresql://state:state@127.0.0.1:5432/state
@@ -277,7 +277,7 @@ jobs:
     if: always()
     defaults:
       run:
-        shell: bash
+        shell: "C:\\Program Files\\Git\\bin\\bash.exe --noprofile --norc -e -o pipefail {0}"
     steps:
       - name: خلاصة النتيجة
         run: |
