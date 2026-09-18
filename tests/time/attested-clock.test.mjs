@@ -14,6 +14,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
 
 import { AttestedClock, TimeWitness, loadTimePolicy, startWitness } from '../../src/time/index.mjs';
@@ -26,7 +27,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
  * @returns {{ policy: import('../../src/time/policy.mjs').TimePolicy, cleanup: () => void }}
  */
 function policyFor(sources, overrides = {}) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'xuux-time-clock-'));
+  const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'xuux-time-clock-')));
   mkdirSync(path.join(dir, 'schemas'));
   copyFileSync(
     path.join(ROOT, 'config', 'schemas', 'time.schema.json'),

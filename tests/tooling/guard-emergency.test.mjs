@@ -13,6 +13,7 @@ import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -38,7 +39,7 @@ function runGuard(guardPath) {
  * @returns {string}
  */
 function cloneTree() {
-  const target = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-emergency-'));
+  const target = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'guard-emergency-')));
   for (const relative of [
     'config/emergency-drill.yaml',
     'config/schemas/emergency-drill.schema.json',

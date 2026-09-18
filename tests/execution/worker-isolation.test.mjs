@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { createWorker } from '../../src/execution/worker.mjs';
 import { probeIsolation } from '../../src/execution/isolation.mjs';
@@ -54,7 +55,9 @@ function queueFixture() {
 
 test('العامل يمرّر المهمة إلى namespaces حقيقية ويثبت نتيجتها', { skip }, async () => {
   const queue = queueFixture();
-  const outputRoot = fs.mkdtempSync(path.join(process.cwd(), '.xuux-worker-isolation-'));
+  const outputRoot = registerTmpRoot(
+    fs.mkdtempSync(path.join(process.cwd(), '.xuux-worker-isolation-')),
+  );
   /** @type {Array<{ type: string, actor: string, payload: Record<string, unknown> }>} */
   const events = [];
   const log = {

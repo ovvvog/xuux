@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { KingIdentity, CertificateAuthority, EventLog } from '../../src/root-of-trust/index.mjs';
 import { AgentRegistry, AgentState } from '../../src/identity/agent-registry.mjs';
@@ -24,7 +25,7 @@ import { AgentRegistry, AgentState } from '../../src/identity/agent-registry.mjs
  * ما كُتبَ سابقاً.
  */
 function createFileRepository(_spec) {
-  const dir = mkdtempSync(join(tmpdir(), 'xuux-file-repo-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-file-repo-')));
   const ext = '.json';
 
   function pathFor(id) {

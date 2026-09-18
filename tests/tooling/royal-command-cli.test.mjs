@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { run } from '../../scripts/royal-command.mjs';
 import { compileCommandRoutes, createStateServer } from '../../src/transport/index.mjs';
@@ -61,7 +62,7 @@ async function door(room) {
  * @returns {{ file: string, cleanup: () => void }} المسارُ وإغلاقُه
  */
 function keyFileFor(privateKey) {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'royal-command-cli-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'royal-command-cli-')));
   const file = path.join(directory, 'king.pem');
   fs.writeFileSync(
     file,

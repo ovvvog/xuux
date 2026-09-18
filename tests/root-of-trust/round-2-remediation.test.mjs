@@ -28,6 +28,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   CommandLedger,
@@ -158,7 +159,7 @@ function productionEnv(king, extra = {}) {
  * @returns التركيبُ وجذرُه ومفتاحُه ودالةُ التنظيف
  */
 async function boot(options = {}) {
-  const root = options.root ?? mkdtempSync(join(tmpdir(), 'xuux-r2-'));
+  const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r2-')));
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
   const runtime = await createProductionRootOfTrust(
@@ -223,7 +224,7 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
   });
 
   test('مخزنُ المراسي لا يجوزُ أن يكونَ ملفَّ السجلِّ نفسَه', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'xuux-r2-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r2-')));
     try {
       const king = generateKeyPairSync('ed25519');
       const error = await caughtAsync(() =>
@@ -453,7 +454,7 @@ describe('UF-07 و UF-13 — محوُ الدفترِ والحجوزاتِ يُك
   });
 
   test('في الإنتاجِ لا يُنشأُ جذرُ الدفترِ ضِمناً بلا تهيئةٍ مُعلَنة', () => {
-    const root = mkdtempSync(join(tmpdir(), 'xuux-r2-ledger-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r2-ledger-')));
     try {
       const error = caught(
         () =>

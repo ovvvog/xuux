@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   CertificateAuthority,
@@ -22,7 +23,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 
 function tempDir() {
-  return mkdtempSync(join(tmpdir(), 'xuux-revocation-'));
+  return registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-revocation-')));
 }
 
 test('FileRevocationStore: سحبٌ قبلَ إعادةِ التشغيلِ يبقى نافذاً بعدها', () => {

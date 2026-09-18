@@ -15,6 +15,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   AnchorError,
@@ -48,7 +49,7 @@ const directories = [];
  * @returns {string} مسار المجلد
  */
 function workDir(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'anchor-'));
+  const directory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'anchor-')));
   directories.push(directory);
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;

@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const ROOT = process.cwd();
 const CLIENT = path.join(ROOT, 'clients', 'state-reader', 'read-state.mjs');
@@ -158,7 +159,7 @@ async function bootServer(input) {
 }
 
 test('مستهلِكٌ خارجيٌّ يقرأُ ويُرَدُّ برموزٍ مُسمّاةٍ — عمليّتانِ منفصلتانِ', async (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'state-reader-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'state-reader-')));
   const reader = writeKeyPair(dir, 'reader');
   const stranger = writeKeyPair(dir, 'stranger');
   const booted = await bootServer({ dir, publicFile: reader.publicFile });

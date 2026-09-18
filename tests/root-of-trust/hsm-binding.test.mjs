@@ -25,6 +25,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   EventLog,
@@ -222,7 +223,7 @@ describe('F06 — تثبيت موقَّع داخل التوكن', () => {
   });
 
   test('سجلٌ حقيقي يُثبَّت ويُطابَق عبر مخزن ملفّي منفصل', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'xuux-hsm-bind-'));
+    const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-hsm-bind-')));
     try {
       const signer = await HsmSigner.open(fakeToken(), 'kingSigning', { env: CLEAN_ENV });
       const log = new EventLog();

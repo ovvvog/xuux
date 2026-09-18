@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ISOLATION_ERRORS, probeIsolation, runIsolated } from '../../src/execution/isolation.mjs';
 
@@ -38,7 +39,7 @@ function memoryLog() {
  * @param {string} helper
  */
 function fixture(helper) {
-  const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-test-'));
+  const workdir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'isolation-test-')));
   const writableDir = path.join(workdir, 'output');
   fs.mkdirSync(writableDir);
   fs.copyFileSync(path.join(HELPERS, helper), path.join(workdir, 'payload.mjs'));
@@ -150,7 +151,9 @@ test(
   'مسار isolated-task-runner يشغّل handler فعلياً داخل العزل',
   { skip: kernelSkip },
   async () => {
-    const outputRoot = fs.mkdtempSync(path.join(process.cwd(), '.isolation-runner-output-'));
+    const outputRoot = registerTmpRoot(
+      fs.mkdtempSync(path.join(process.cwd(), '.isolation-runner-output-')),
+    );
     const log = memoryLog();
     const runner = path.resolve(HERE, '../../scripts/isolated-task-runner.mjs');
     try {

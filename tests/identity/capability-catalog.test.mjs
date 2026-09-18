@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   loadCapabilityCatalog,
   isForbidden,
@@ -18,7 +19,7 @@ import {
  * @returns {string}
  */
 function writeCatalog(body) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caps-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'caps-')));
   fs.writeFileSync(path.join(dir, 'capabilities.yaml'), body, 'utf8');
   return dir;
 }
@@ -55,7 +56,7 @@ test('every grantable capability names roles that exist in roles.yaml', () => {
 });
 
 test('a missing file fails closed instead of loading an empty catalog', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'caps-empty-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'caps-empty-')));
   assert.throws(() => loadCapabilityCatalog({ dir }), /CAPABILITY_CONFIG_MISSING/);
 });
 

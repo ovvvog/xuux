@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
@@ -23,7 +24,7 @@ import {
 function setup() {
   const log = new EventLog();
   const weights = createWeightStore({
-    root: fs.mkdtempSync(path.join(os.tmpdir(), 'model-evaluation-')),
+    root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'model-evaluation-'))),
   });
   const evaluations = new ModelEvaluationLedger({ log, experiments: experimentLedgerFor(log) });
   const registry = new ModelRegistry({
@@ -133,7 +134,7 @@ test('نجاح التقييم لا ينتقل إلى أوزان أخرى ولو 
 test('سجل التقييم الدائم يعيد ربط النجاح بالبصمة بعد عملية جديدة', () => {
   const log = new EventLog();
   const file = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), 'evaluation-ledger-')),
+    registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'evaluation-ledger-'))),
     'results.json',
   );
   const fingerprint = 'a'.repeat(64);

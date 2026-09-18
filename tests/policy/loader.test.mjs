@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
 
 import { CONFIG_DIR, loadPolicyBundle } from '../../src/policy/loader.mjs';
@@ -22,7 +23,7 @@ import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
  * @returns {{ dir: string, cleanup: () => void }}
  */
 function withMutatedConfig(mutate) {
-  const dir = mkdtempSync(join(tmpdir(), 'xuux-policy-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-policy-')));
   cpSync(CONFIG_DIR, dir, { recursive: true });
   const read = (/** @type {string} */ f) => YAML.parse(readFileSync(join(dir, f), 'utf8'));
   const docs = {
@@ -216,7 +217,7 @@ test('عتبة سيادية على فعل غير معلَن تُفشل التح�
 });
 
 test('ملف مفقود يُفشل التحميل بخطأ مُسمّى لا بمجموعة فارغة', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'xuux-policy-empty-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-policy-empty-')));
   try {
     assert.throws(() => loadPolicyBundle({ dir }), /POLICY_CONFIG_MISSING: roles\.yaml/);
   } finally {

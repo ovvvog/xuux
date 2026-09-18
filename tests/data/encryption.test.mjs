@@ -14,6 +14,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
 
 import {
@@ -402,7 +403,7 @@ test('مادة مفتاح في الإعداد تُرفض بفحص الشكل ل�
 });
 
 test('مفتاحٌ معلَن لمرتبةٍ لا تُشفَّر يُرفض عند التحميل: الملفّان لا ينحرفان', () => {
-  const dir = fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-encryption-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(REPO_ROOT, '.tmp-encryption-')));
   try {
     fs.mkdirSync(path.join(dir, 'schemas'));
     fs.copyFileSync(

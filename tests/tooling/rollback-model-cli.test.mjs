@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
@@ -29,7 +30,7 @@ function setup() {
     log,
     repository: createMemoryRepository(ModelRegistry.spec),
     weightStore: createWeightStore({
-      root: fs.mkdtempSync(path.join(os.tmpdir(), 'rollback-model-')),
+      root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'rollback-model-'))),
     }),
     evaluationLedger: evaluations,
   });

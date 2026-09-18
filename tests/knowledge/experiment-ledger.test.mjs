@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   EXPERIMENT_GENESIS,
@@ -62,7 +63,7 @@ function validRegistration(overrides = {}) {
 /** @type {string[]} */
 const temporaryDirectories = [];
 function tempDir() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge-')));
   temporaryDirectories.push(directory);
   return directory;
 }

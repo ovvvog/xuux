@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
 
 import {
@@ -147,7 +148,7 @@ test('سلّم منحرف عن تعداد الكود يُسقط التحميل �
   // انحراف البيانات عن التعداد هو **العيب الأصلي** بعينه، فيُفشل التحميل.
   // والإعداد يُكتب في دليل مؤقت لا في ملفّ ثابت: ملفّ إعدادٍ فاسد يبقى في
   // المستودع يُقرأ يوماً على أنه إعداد.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'classification-drift-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'classification-drift-')));
   fs.mkdirSync(path.join(dir, 'schemas'));
   fs.copyFileSync(
     path.join(REPO_ROOT, 'config', 'schemas', 'classification.schema.json'),
@@ -175,7 +176,7 @@ test('سلّم منحرف عن تعداد الكود يُسقط التحميل �
 });
 
 test('سلّم بلا ملفّ معلَن لا يُفترَض في الكود', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'classification-missing-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'classification-missing-')));
   try {
     assert.throws(
       () => loadClassificationLattice({ dir }),

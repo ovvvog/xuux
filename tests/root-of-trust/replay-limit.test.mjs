@@ -33,6 +33,7 @@ import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   SEAL_IV_BYTES,
@@ -125,8 +126,8 @@ function rig() {
 describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ لا يكشفُها الخاتَم', () => {
   test('استرجاعُ الجذرِ كلِّه يُعيدُ halted إلى running ويُقبَلُ أمرٌ مُثبَّتٌ سابقاً', async () => {
     const { boot, body } = rig();
-    const root = mkdtempSync(join(tmpdir(), 'xuux-replay-'));
-    const snapshot = mkdtempSync(join(tmpdir(), 'xuux-replay-snap-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-')));
+    const snapshot = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-snap-')));
     try {
       const first = await boot(root);
       first.log.close?.();
@@ -170,8 +171,8 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
 
   test('لا مرجعَ حداثةٍ خارجَ اللقطةِ: تسلسلُ الختمِ يرجعُ إلى الوراءِ بلا كشف', async () => {
     const { boot, body } = rig();
-    const root = mkdtempSync(join(tmpdir(), 'xuux-replay-'));
-    const snapshot = mkdtempSync(join(tmpdir(), 'xuux-replay-snap-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-')));
+    const snapshot = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-snap-')));
     try {
       const first = await boot(root);
       first.log.close?.();
@@ -212,7 +213,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
     // ليُثبَتَ أنّ الحدَّ المُعلَنَ في هذا الملفِّ هو **اللقطةُ الكاملةُ
     // المتّسقةُ وحدَها**، وأنّه ليس مسارَ مصادقةٍ بديلاً أوسعَ منها.
     const { boot, body } = rig();
-    const root = mkdtempSync(join(tmpdir(), 'xuux-replay-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-')));
     try {
       const first = await boot(root);
       first.log.close?.();

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   HaltSwitch,
@@ -52,7 +53,7 @@ function nodeKeyFile(directory) {
  * @returns {Promise<{ env: NodeJS.ProcessEnv, directory: string, file: string }>} البيئة
  */
 async function environment() {
-  const directory = mkdtempSync(join(tmpdir(), 'halt-cli-'));
+  const directory = registerTmpRoot(mkdtempSync(join(tmpdir(), 'halt-cli-')));
   directories.push(directory);
   const master = randomUUID();
   await provisionKingKey(new LocalEncryptedKeyProvider(directory, master), {

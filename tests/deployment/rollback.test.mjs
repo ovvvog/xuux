@@ -18,6 +18,7 @@ import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { loadDeploymentContract } from '../../src/deployment/index.mjs';
 
@@ -100,7 +101,7 @@ function readPointerFile(root) {
 
 /** @returns {string} */
 function makeRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-acceptance-'));
+  return registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-acceptance-')));
 }
 
 /**

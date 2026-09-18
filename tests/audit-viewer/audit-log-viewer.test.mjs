@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   AUDIT_VIEWER_ERRORS,
@@ -32,7 +33,7 @@ const tempDirs = [];
 
 /** @returns {string} */
 function tempDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-viewer-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'audit-viewer-')));
   tempDirs.push(dir);
   return dir;
 }

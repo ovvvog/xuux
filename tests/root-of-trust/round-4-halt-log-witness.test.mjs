@@ -48,6 +48,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   HaltError,
@@ -132,7 +133,7 @@ function fakeToken(overrides = {}) {
  * @returns التركيبُ وجذرُه وأدواتُ إغلاقِه
  */
 async function bootRuntime(options = {}) {
-  const root = options.root ?? mkdtempSync(join(tmpdir(), 'xuux-halt-witness-'));
+  const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-halt-witness-')));
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
   const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) };
@@ -283,7 +284,7 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
 
   test('لا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ بلا شاهدٍ مختومٍ خارجَ البيان', () => {
     assert.ok(HaltErrorCodes.includes('HALT_SEALED_LOG_REQUIRED_IN_PRODUCTION'));
-    const root = mkdtempSync(join(tmpdir(), 'xuux-halt-witness-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-halt-witness-')));
     try {
       let raised = null;
       try {

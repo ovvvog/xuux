@@ -160,3 +160,35 @@ test('الطفرةُ M4: إضافةُ معرّفِ بندٍ زائفٍ يُسق�
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── الطفرتانِ 5 و6: بِنيةُ صفوفِ §4.6 (‏`R4`، أُضيفَ في `WL-219`) ──
+
+test('الطفرةُ M5: صفٌّ مُلتصِقٌ بسابقِه في §4.6 يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    // ألصِقْ صفَّ `DOC-13` بسطرِ سابقِه — وهو العَطَبُ عينُه الذي وقعَ في `WL-218`.
+    const glued = register.replace('| ✅ منفِّذ |\n| ~~`DOC-13`~~', '| ✅ منفِّذ || ~~`DOC-13`~~');
+    assert.notEqual(glued, register, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(registerPath, glued);
+    assert.equal(runGuard(tmp), 1, 'صفٌّ مُلتصِقٌ ينبغي أن يُسقِطَ الحاجز');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M6: علامةُ جدولٍ داخلَ كودٍ لا تُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    // `|` داخلَ علامتَيْ كودٍ ليسَ فاصلَ خليّةٍ — وحاجزٌ يُبلِّغُ عن سليمٍ يُدرَّبُ الناسُ على تجاهُلِه.
+    const withPipeInCode = register.replace('| ⛔ منفِّذ |', '| ⛔ منفِّذ `a|b|c` |');
+    assert.notEqual(withPipeInCode, register, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(registerPath, withPipeInCode);
+    assert.equal(runGuard(tmp), 0, 'علامةٌ داخلَ كودٍ لا ينبغي أن تُسقِطَ الحاجز');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

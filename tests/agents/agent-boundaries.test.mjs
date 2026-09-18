@@ -19,6 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ModelEvaluationLedger } from '../../src/models/evaluation.mjs';
 import { ModelRegistry, ModelState } from '../../src/models/model-registry.mjs';
@@ -55,7 +56,7 @@ test('R6-A-13/R6-B-05: وثيقةُ الاحتواءِ لا تُقرُّ بغي�
   // القياسُ سلوكٌ: هل يَرفُضُ التنشيطَ بلا تقييمٍ؟ (حدُّ M6.08)
   const log = new EventLog();
   const weightStore = createWeightStore({
-    root: fs.mkdtempSync(path.join(os.tmpdir(), 'agents-boundary-')),
+    root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-boundary-'))),
   });
   const registry = new ModelRegistry({
     log,

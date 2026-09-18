@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   DB_ERRORS,
@@ -43,7 +44,7 @@ const FAKE_PEM = '-----BEGIN CERTIFICATE-----\nQUJD\n-----END CERTIFICATE-----\n
  * @returns {string}
  */
 function tempFile(contents, name = 'ca.crt') {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'db-ca-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'db-ca-')));
   const file = path.join(dir, name);
   fs.writeFileSync(file, contents, 'utf8');
   return file;

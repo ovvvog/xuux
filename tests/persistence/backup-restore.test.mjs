@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { catalogSnapshot, createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
@@ -258,7 +259,10 @@ test(
   async () => {
     const source = await createIsolatedDatabase('backsrc');
     const target = await createIsolatedDatabase('backdst');
-    const dump = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-restore-')), 'state.dump');
+    const dump = path.join(
+      registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-restore-'))),
+      'state.dump',
+    );
     try {
       await up(source.pool);
       await seedEveryTable(source.pool);
@@ -306,7 +310,10 @@ test(
   async () => {
     const source = await createIsolatedDatabase('busysrc');
     const busy = await createIsolatedDatabase('busydst');
-    const dump = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-busy-')), 'state.dump');
+    const dump = path.join(
+      registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-busy-'))),
+      'state.dump',
+    );
     try {
       await up(source.pool);
       await seedEveryTable(source.pool);
@@ -329,7 +336,10 @@ test(
 
 test('verify يرفض ملف نسخة عُدّل بعد كتابة البيان', { skip: skipWithoutDatabase }, async () => {
   const source = await createIsolatedDatabase('corrupt');
-  const dump = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-corrupt-')), 'state.dump');
+  const dump = path.join(
+    registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-corrupt-'))),
+    'state.dump',
+  );
   try {
     await up(source.pool);
     const sourceUrl = databaseUrlFor(source.name);

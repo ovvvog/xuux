@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   DETECTORS,
@@ -32,7 +33,7 @@ const scanner = join(repoRoot, 'scripts', 'scan-private-keys.mjs');
  * @param {(dir: string) => void} body - العمل داخل المجلد
  */
 function withTempDir(body) {
-  const dir = mkdtempSync(join(tmpdir(), 'scan-keys-'));
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'scan-keys-')));
   try {
     body(dir);
   } finally {

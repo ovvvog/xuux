@@ -14,6 +14,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   CertificateAuthority,
   CommandLedger,
@@ -53,7 +54,7 @@ async function captureAsync(fn) {
 }
 
 function scratch() {
-  return mkdtempSync(join(tmpdir(), 'failure-'));
+  return registerTmpRoot(mkdtempSync(join(tmpdir(), 'failure-')));
 }
 
 /** ملكية جاهزة: ملك وسلطة تصديق وسجل وبوابة. */

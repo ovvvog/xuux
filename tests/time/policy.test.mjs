@@ -10,6 +10,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
 
 import { loadTimePolicy } from '../../src/time/index.mjs';
@@ -25,7 +26,7 @@ const KEY_B = 'AW5uAoTSTDfG5NfY1bTh08GUnOqlRb+HVhbJ3ODJvsE=';
  * @returns {{ dir: string, cleanup: () => void }}
  */
 function writePolicy(overrides) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'xuux-time-policy-'));
+  const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'xuux-time-policy-')));
   mkdirSync(path.join(dir, 'schemas'));
   copyFileSync(
     path.join(ROOT, 'config', 'schemas', 'time.schema.json'),
@@ -145,7 +146,7 @@ test('لهجةٌ لا مُفكِّكَ لها تُرفَضُ في السياسة
 });
 
 test('سياسةٌ مفقودةٌ أو مخطَّطٌ مفقودٌ رفضٌ مُسمّى لا افتراضاتٌ في الكودِ', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'xuux-time-empty-'));
+  const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'xuux-time-empty-')));
   try {
     assert.equal(caught(() => loadTimePolicy({ dir })).code, 'TIME_CONFIG_INVALID');
   } finally {

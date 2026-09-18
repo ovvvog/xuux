@@ -30,6 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { CostCapacity, loadCostCapacityPolicy } from '../../src/cost-capacity/index.mjs';
 import { OperationsCenter, loadOperationsPolicy } from '../../src/operations/index.mjs';
@@ -71,7 +72,7 @@ function onDisk(logFile) {
 
 /** دفترٌ حقيقيٌّ على قرصٍ مؤقّتٍ بساعةٍ **مُقادةٍ** من الاختبار. */
 function state() {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-cost-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-cost-')));
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
 

@@ -16,6 +16,7 @@ import { generateKeyPairSync, randomBytes, sign as softwareSign } from 'node:cry
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from './tmp-roots.mjs';
 
 import {
   KingAuthenticator,
@@ -89,7 +90,7 @@ export function signingToken(kingPair, options = {}) {
  */
 export async function royalCourt(options = {}) {
   const kingPair = generateKeyPairSync('ed25519');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'sovereign-writer-'));
+  const directory = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'sovereign-writer-')));
   const logFile = path.join(directory, 'events.log');
   const log = new PersistentEventLog(logFile, { fsync: false });
   const king = new KingIdentity(kingPair);

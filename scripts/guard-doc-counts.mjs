@@ -10,6 +10,9 @@
 //   - R1: عددُ الحواجزِ في `PROJECT_STATUS.md` يُطابقُ عددَ `guard:*` في `validate`.
 //   - R2: عددُ ملفاتِ الاختبارِ في `docs/ROOT_OF_TRUST.md` يُطابقُ عددَ `*.test.mjs`.
 //   - R3: عددُ البنودِ المفتوحةِ في `PROJECT_STATUS.md` يُطابقُ عددَ البنودِ المفتوحةِ على المنفِّذ.
+//   - R4: كلُّ صفٍّ في جدولِ §4.6 من سجلِّ الدَّينِ يُطابقُ عددَ خلايا ترويستِه — أُضيفَ في `WL-219`
+//     إغلاقاً للدَّينِ `DOC-13`. **يَنزِعُ ما بينَ علامتَيْ كودٍ قبلَ العدِّ**، فـ`|` داخلَ كودٍ
+//     ليسَ فاصلَ خليّةٍ. **ونطاقُهُ §4.6 وحدَها** — انظر `DOC-14` لبقيّةِ الجداول.
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -123,6 +126,44 @@ const facts = readDocCountFacts(root);
     violations.push(
       `R3/MISSING: PROJECT_STATUS.md لا يَذكُرُ البنودَ المفتوحةَ على المنفِّذِ بمعرّفاتٍ.`,
     );
+  }
+}
+
+// ── R4: سلامةُ بِنيةِ جدولِ §4.6 في سجلِّ الدَّين ──
+// **لماذا:** دَينٌ قُيِّدَ في صفٍّ مُلتصِقٍ بسابقِه لا يُقرأُ صفّاً (‏`DOC-13`).
+{
+  const registerText = readText('docs/roadmap/06-debt-register.md');
+  const lines = registerText.split('\n');
+  const headingIndex = lines.findIndex((l) => l.startsWith('### 4.6'));
+  if (headingIndex === -1) {
+    violations.push('R4/MISSING: سجلُّ الدَّينِ لا يَحوي العنوانَ «### 4.6».');
+  } else {
+    /**
+     * عددُ الخلايا بعدَ نزعِ ما بينَ علامتَيْ كودٍ.
+     * @param {string} line
+     * @returns {number}
+     */
+    const cellCount = (line) => line.replace(/`[^`]*`/g, '§').split('|').length - 2;
+    /** @type {[number, string][]} */
+    const rows = [];
+    for (let i = headingIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (line.startsWith('|')) rows.push([i + 1, line]);
+      else if (rows.length > 0) break;
+    }
+    if (rows.length < 3) {
+      violations.push('R4/MISSING: جدولُ §4.6 لم يُعثَرْ عليه أو لا صفوفَ فيه.');
+    } else {
+      const width = cellCount(rows[0]?.[1] ?? '');
+      for (const [lineNumber, line] of rows) {
+        const count = cellCount(line);
+        if (count !== width) {
+          violations.push(
+            `R4/SHAPE: سجلُّ الدَّينِ، السطرُ ${lineNumber}: ${count} خليّةً والترويسةُ ${width}.`,
+          );
+        }
+      }
+    }
   }
 }
 

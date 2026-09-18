@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import {
   MetricsRegistry,
@@ -44,7 +45,7 @@ const tempDirs = [];
 
 /** @returns {string} */
 function tempDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'telemetry-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'telemetry-')));
   tempDirs.push(dir);
   return dir;
 }

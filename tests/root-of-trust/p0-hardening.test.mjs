@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   KingIdentity,
   CertificateAuthority,
@@ -40,7 +41,7 @@ test('policy engine limits sensitive actions', () => {
   assert.throws(() => p.authorize(cert, 'change-policy'), /POLICY_DENIED/);
 });
 test('persistent event log reloads and verifies', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'state-log-')),
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'state-log-'))),
     file = join(dir, 'events.jsonl');
   const a = new PersistentEventLog(file);
   a.append('boot', 'system', {});

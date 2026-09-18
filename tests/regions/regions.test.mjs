@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import YAML from 'yaml';
 
@@ -43,7 +44,7 @@ const contract = loadRegionsContract();
  * @returns {() => void}
  */
 function loadMutated(mutate) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'regions-contract-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'regions-contract-')));
   const source = YAML.parse(fs.readFileSync(CONTRACT_FILE, 'utf8'));
   mutate(source);
   fs.writeFileSync(path.join(dir, 'regions.yaml'), YAML.stringify(source), 'utf8');

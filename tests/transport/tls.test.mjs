@@ -25,6 +25,7 @@ import { request as httpsRequest } from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { ApiGateway, loadApiPolicy } from '../../src/api/index.mjs';
 import { MonitorAgent, loadMonitoringPolicy } from '../../src/observability/index.mjs';
@@ -155,7 +156,7 @@ async function serving(tls, work) {
 }
 
 /** مجلَّدٌ مؤقَّتٌ **خارجَ المستودعِ** لكلِّ الموادِّ، يُمحى في النهايةِ. */
-const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'state-tls-'));
+const TMP = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'state-tls-')));
 const TRUSTED = issueMaterial(TMP, 'trusted');
 const OTHER = issueMaterial(TMP, 'other');
 

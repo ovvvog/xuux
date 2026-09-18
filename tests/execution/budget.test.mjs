@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { BUDGET_ERRORS, createBudgetGate } from '../../src/execution/budget.mjs';
@@ -62,7 +63,7 @@ function ledger() {
 }
 
 function haltSwitch() {
-  const dir = mkdtempSync(path.join(tmpdir(), 'm5-budget-halt-'));
+  const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'm5-budget-halt-')));
   tempDirs.push(dir);
   return new HaltSwitch(path.join(dir, 'state', 'halt.json'), new KingIdentity(), { fsync: false });
 }

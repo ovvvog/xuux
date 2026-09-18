@@ -25,6 +25,7 @@ import { createWeightStore } from '../../src/models/weight-store.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
   experimentLedgerFor,
   registerEvaluationExperiment,
@@ -35,7 +36,9 @@ import {
  * @returns {import('../../src/models/weight-store.mjs').WeightStore}
  */
 function temporaryWeightStore() {
-  return createWeightStore({ root: fs.mkdtempSync(path.join(os.tmpdir(), 'weights-')) });
+  return createWeightStore({
+    root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'weights-'))),
+  });
 }
 
 /** سجل ونموذج معتمد ومُفعَّل، وهو الوضع الذي تُختبر عليه البوابات. */

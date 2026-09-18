@@ -15,6 +15,7 @@ import path from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { judgeDrill, loadEmergencyContract } from '../../src/emergency/index.mjs';
 
@@ -26,7 +27,7 @@ const contract = loadEmergencyContract();
 
 /** @returns {string} */
 function makeRoot() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'emergency-drill-'));
+  return registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'emergency-drill-')));
 }
 
 /**

@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { FileInferenceBudgetStore } from '../../src/inference/budget-store.mjs';
 import { INFERENCE_ERRORS, InferenceError } from '../../src/inference/inference-gate.mjs';
@@ -24,7 +25,7 @@ import { gateWithAdapter } from '../helpers/inference-gate.mjs';
 
 /** @returns {string} */
 function tempBudgetPath() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-store-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-store-')));
   return path.join(dir, 'budget.json');
 }
 
@@ -86,13 +87,16 @@ test('LIM-1: الملفُّ يُكتَبُ على قرصٍ بعدَ الاسته
 });
 
 test('LIM-1: الملفُّ الغائبُ يعني عدّاداً نظيفاً لا خطأً', () => {
-  const budgetPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-empty-')), 'nope.json');
+  const budgetPath = path.join(
+    registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-empty-'))),
+    'nope.json',
+  );
   const store = new FileInferenceBudgetStore({ filePath: budgetPath });
   assert.deepEqual(store.load(), [], 'ملفٌّ غائبٌ يعني مصفوفةً فارغة');
 });
 
 test('LIM-1: الملفُّ المعطوبُ يُرفَضُ لا يُفترَضُ صفراً', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-corrupt-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-corrupt-')));
   const budgetPath = path.join(dir, 'budget.json');
   fs.writeFileSync(budgetPath, 'ليس JSON صالح', 'utf8');
   const store = new FileInferenceBudgetStore({ filePath: budgetPath });
@@ -104,7 +108,7 @@ test('LIM-1: الملفُّ المعطوبُ يُرفَضُ لا يُفترَض�
 });
 
 test('LIM-1: المصفوفةُ المتوقَّعةُ تُقرأُ كما هي', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-read-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'lim1-read-')));
   const budgetPath = path.join(dir, 'budget.json');
   const entries = [
     { actorId: 'agent:a', startedAt: 1000, tokens: 50, cost: 2 },

@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Buffer } from 'node:buffer';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const ENABLED = process.env.XUUX_HSM_TEST === '1';
 const MODULE = process.env.XUUX_HSM_TEST_MODULE ?? '/usr/lib/softhsm/libsofthsm2.so';
@@ -35,7 +36,7 @@ function softhsmAvailable() {
 before(async () => {
   if (!ENABLED || !softhsmAvailable()) return;
   try {
-    tokenDir = mkdtempSync(join(tmpdir(), 'xuux-hsm-'));
+    tokenDir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-hsm-')));
     confPath = join(tokenDir, 'softhsm2.conf');
     writeFileSync(confPath, `directories.tokendir = ${tokenDir}\nobjectstore.backend = file\n`);
     process.env.SOFTHSM2_CONF = confPath;

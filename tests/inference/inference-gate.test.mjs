@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
@@ -47,7 +48,9 @@ function memoryLog() {
 
 /** @returns {import('../../src/models/weight-store.mjs').WeightStore} */
 function temporaryWeightStore() {
-  return createWeightStore({ root: fs.mkdtempSync(path.join(os.tmpdir(), 'inference-weights-')) });
+  return createWeightStore({
+    root: registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'inference-weights-'))),
+  });
 }
 
 /** @param {ModelRegistry} registry @param {ModelEvaluationLedger} evaluations @param {string} [purpose] */
@@ -108,7 +111,10 @@ async function setup(options = {}) {
   /** @type {Array<{ model: { id: string, purpose: string }, purpose: string, input: string }>} */
   const executions = [];
   const budgetStore = new FileInferenceBudgetStore({
-    filePath: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gate-budget-')), 'budget.json'),
+    filePath: path.join(
+      registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'gate-budget-'))),
+      'budget.json',
+    ),
   });
   const costLedger = new CostCapacity({
     policy: loadCostCapacityPolicy({ dir: CONFIG_DIR }),

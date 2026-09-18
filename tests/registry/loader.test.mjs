@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { loadRegistry, summarize, RegistryIntegrityError } from '../../src/registry/loader.mjs';
 
 const registry = loadRegistry();
@@ -100,7 +101,7 @@ test('السجل غير قابل للتعديل بعد البناء', () => {
 });
 
 test('يرفع RegistryIntegrityError عند مرجع معلّق في بذرة معطوبة', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-'));
+  const tmp = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'seed-')));
   fs.writeFileSync(
     path.join(tmp, 'domains.yaml'),
     'schema: "x"\nversion: "1.0.0"\ngenerated_by: "t"\ncount: 1\ndomains:\n  - id: "001-domain"\n    number: 1\n    name_ar: "أ"\n    path: "civilization/001-domain"\n    layers: [governance, operations, education, research, registry, safety]\n    status: "planned"\n    needs_ratification: false\n    provenance: {source: "t", ref: "t"}\n',
@@ -122,7 +123,7 @@ test('يرفع RegistryIntegrityError عند مرجع معلّق في بذرة �
 });
 
 test('يفشل بوضوح عند غياب ملف بذرة', () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'seed-empty-'));
+  const tmp = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'seed-empty-')));
   assert.throws(() => loadRegistry({ seedDir: tmp }), /ملف بذرة مفقود/);
   fs.rmSync(tmp, { recursive: true, force: true });
 });

@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const ENABLED = process.env.XUUX_HSM_TEST === '1';
 const MODULE = process.env.XUUX_HSM_TEST_MODULE ?? '/usr/lib/softhsm/libsofthsm2.so';
@@ -96,7 +97,7 @@ function probeTokenIdentity() {
 before(() => {
   if (!ENABLED) return;
   try {
-    tokenDir = mkdtempSync(join(tmpdir(), 'xuux-prod-hsm-'));
+    tokenDir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-hsm-')));
     const confPath = join(tokenDir, 'softhsm2.conf');
     writeFileSync(confPath, `directories.tokendir = ${tokenDir}\nobjectstore.backend = file\n`);
     process.env.SOFTHSM2_CONF = confPath;
@@ -148,7 +149,7 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
   it('يُقلعُ من البيئةِ وحدَها، فيَختمُ السجلَّ ويوقّعُ الدفترَ والتثبيتَ داخلَ التوكن', async () => {
     const { createProductionRootOfTrust, FileAnchorStore, anchorLogWithHsm, verifyAnchorChain } =
       await import('../../src/root-of-trust/index.mjs');
-    const root = mkdtempSync(join(tmpdir(), 'xuux-prod-state-'));
+    const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-state-')));
     const env = {
       ...process.env,
       NODE_ENV: 'production',

@@ -22,6 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { listTrackedFiles, listTrackedFilesQuoted } from '../../scripts/lib/git-files.mjs';
 
@@ -59,7 +60,7 @@ test('القراءةُ الساذجةُ تُخفي مساراتَ المستود
 });
 
 test('الإخفاءُ يُمرِّرُ مادّةَ مفاتيحَ متعقَّبةً تحتَ مسارٍ عربيٍّ — والقراءةُ الآمنةُ تُوقِفُها', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-doc11-'));
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-doc11-')));
   try {
     const run = (/** @type {string[]} */ args) =>
       execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
