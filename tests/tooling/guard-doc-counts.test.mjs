@@ -53,6 +53,12 @@ function cloneRepo() {
     path.join(ROOT, 'docs/roadmap/06-debt-register.md'),
     path.join(tmp, 'docs/roadmap/06-debt-register.md'),
   );
+  // العقدُ — يَقرأُهُ `R5` ليَستخرجَ سلطةَ الإغلاقِ (`WL-221`).
+  mkdirSync(path.join(tmp, 'config'), { recursive: true });
+  copyFileSync(
+    path.join(ROOT, 'config/external-review.yaml'),
+    path.join(tmp, 'config/external-review.yaml'),
+  );
   return tmp;
 }
 
@@ -245,6 +251,40 @@ test('الطفرةُ M9: صفٌّ فاصلٌ بعددِ خلايا يُخالِ�
     assert.notEqual(mutated, register, 'ينبغي أن تَتغيّرَ الطفرةُ');
     writeFileSync(registerPath, mutated);
     assert.equal(runGuard(tmp), 1, 'صفٌّ فاصلٌ بعرضٍ مكسورٍ ينبغي أن يُسقِطَ الحاجز');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── الطفرتانِ 10 و11: سلطةُ الإغلاقِ في §4.3 (‏`R5`، `WL-221`) ──
+
+test('الطفرةُ M10: إسنادُ إغلاقِ نتيجةِ مراجعةٍ إلى المنفِّذِ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    const mutated = register.replace(/(\| `R6-A-12` \|[^\n]*\|) مجلس \|/, '$1 منفِّذ |');
+    assert.notEqual(mutated, register, 'ينبغي أن يُعثَرَ على صفِّ `R6-A-12`');
+    writeFileSync(registerPath, mutated);
+    assert.equal(
+      runGuard(tmp),
+      1,
+      'صفٌّ يُسنِدُ إغلاقَ نتيجةِ مراجعةٍ إلى المنفِّذِ ينبغي أن يُسقِطَ الحاجز',
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M11: انحرافُ سلطةِ النتائجِ في العقدِ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const contractPath = path.join(tmp, 'config/external-review.yaml');
+    const contract = readFileSync(contractPath, 'utf8');
+    const mutated = contract.replace('resultAuthority: model-council', 'resultAuthority: executor');
+    assert.notEqual(mutated, contract, 'ينبغي أن يُعثَرَ على مفتاحِ سلطةِ النتائجِ');
+    writeFileSync(contractPath, mutated);
+    assert.equal(runGuard(tmp), 1, 'عقدٌ يُسنِدُ سلطةَ النتائجِ للمنفِّذِ ينبغي أن يُسقِطَ الحاجز');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
