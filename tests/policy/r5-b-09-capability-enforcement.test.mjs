@@ -14,9 +14,15 @@ import { composeEnforcementChain } from '../../src/core/composition-root.mjs';
 
 /** سجلُّ أحداثٍ صغيرٌ للقياس. */
 function memoryLog() {
+  /** @type {{ type: string, actor: string, payload: object }[]} */
   const events = [];
   return {
     events,
+    /**
+     * @param {string} type
+     * @param {string} actor
+     * @param {object} payload
+     */
     append(type, actor, payload) {
       events.push({ type, actor, payload });
     },

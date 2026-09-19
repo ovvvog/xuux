@@ -20,7 +20,7 @@ import { createNotificationResult } from '../dispatcher.mjs';
  *
  * @param {{
  *   getToken: () => string | undefined,
- *   egressGate?: { send: (request: object) => Promise<{ bytes: number, destination: string, policyId: string | null, result: unknown }> } | null,
+ *   egressGate?: { send: (request: { actor: { id: string }, destination: string, payload: string, classification: string, context: Record<string, unknown> }) => Promise<{ bytes: number, destination: string, policyId: string | null, result: unknown }> } | null,
  *   actor?: { id: string },
  * }} deps
  */
@@ -47,8 +47,6 @@ export function TelegramBotChannel(deps) {
         });
       }
 
-      const apiBase = process.env.TELEGRAM_API_BASE ?? 'https' + '://' + 'api.telegram.org';
-      const url = `${apiBase}/bot${token}/sendMessage`;
       const text = `${message.subject}\n\n${message.body}`;
       const payload = JSON.stringify({
         chat_id: destination,
@@ -84,8 +82,9 @@ export function TelegramBotChannel(deps) {
                 failureReason: data.description ?? 'EGRESS_TRANSPORT_FAILED',
               });
             }
+            const rawMessageId = data.result?.message_id;
             const messageId =
-              data.result?.message_id != null ? String(data.result.message_id) : null;
+              rawMessageId !== null && rawMessageId !== undefined ? String(rawMessageId) : null;
             return createNotificationResult({
               channel: 'telegram_bot',
               ownerId: message.ownerId,

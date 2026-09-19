@@ -323,7 +323,9 @@ export class EnforcementPoint {
         const binding = bindingOf(evaluated);
         const command = {
           id: typeof commandId === 'string' ? commandId : '',
-          digest: decision.royalCommandDigest,
+          ...(decision.royalCommandDigest !== undefined
+            ? { digest: decision.royalCommandDigest }
+            : {}),
           action: evaluated.action,
           resource: binding.resourceKey,
         };

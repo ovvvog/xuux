@@ -14,6 +14,9 @@ import { join } from 'node:path';
 
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 
+/**
+ * @param {{ royalCommandVerifier?: (command: Readonly<Record<string, unknown>>) => boolean }} [opts]
+ */
 function makeHaltSwitch(opts = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'halt-r5-b-07-'));
   const file = join(dir, 'directive.json');
@@ -32,7 +35,7 @@ function makeHaltSwitch(opts = {}) {
 
 test('R5-B-07: halt() بلا أمرٍ ملكيٍّ يُرفضُ حين يكون المُحقِّقُ موصولاً', () => {
   const { halt, dir } = makeHaltSwitch({
-    royalCommandVerifier: (cmd) => true,
+    royalCommandVerifier: () => true,
   });
   try {
     assert.throws(

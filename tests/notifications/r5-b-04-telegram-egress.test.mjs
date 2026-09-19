@@ -35,11 +35,15 @@ test('R5-B-04: وجهةٌ غير معتمدةٍ تُرفضُ قبلَ fetch', as
 
   const result = await channel.send(makeMessage(), '123456789');
   assert.equal(result.state, 'failed', 'الإرسالُ فشل');
+  assert.ok(result.failureReason !== null, 'سببُ الفشلِ حاضرٌ');
   assert.ok(result.failureReason.includes('EGRESS_REFUSED'), 'السببُ EGRESS_REFUSED');
 });
 
 test('R5-B-04: وجهةٌ معتمدةٌ تُنقلُ عبرَ البوابة', async () => {
   const fakeEgressGate = {
+    /**
+     * @param {{ destination: string, classification: string, payload: unknown }} request
+     */
     async send(request) {
       assert.equal(request.destination, 'telegram-api');
       assert.equal(request.classification, 'internal');
@@ -70,19 +74,39 @@ test('R5-B-04: بلا بوابةِ خروجٍ يُرفضُ الإرسالُ — 
 
   const result = await channel.send(makeMessage(), '123456789');
   assert.equal(result.state, 'failed', 'بلا بوابةٍ يفشل');
+  assert.ok(result.failureReason !== null, 'سببُ الفشلِ حاضرٌ');
   assert.ok(result.failureReason.includes('EGRESS_GATE_REQUIRED'), 'السببُ EGRESS_GATE_REQUIRED');
 });
 
-test('R5-B-04: بلا بوابةٍ لا يُستدعى fetch إطلاقاً', async () => {
+/**
+ * يركّب fetch مزيفةً ترصدُ النداءَ، ويعيد مِفتاحَ الاستطلاعِ ودالّةَ الاستعادة.
+ * القراءةُ والاستعادةُ في دالّةٍ واحدةٍ لا عبرَ `await` في الاختبارِ نفسِه.
+ * @returns {{ wasCalled: () => boolean, restore: () => void }}
+ */
+function stubFetchSpy() {
   let fetchCalled = false;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = () => {
-    fetchCalled = true;
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ ok: true, result: { message_id: 1 } }),
-    });
+  globalThis.fetch = /** @type {typeof globalThis.fetch} */ (
+    /** @type {unknown} */ (
+      () => {
+        fetchCalled = true;
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, result: { message_id: 1 } }),
+        });
+      }
+    )
+  );
+  return {
+    wasCalled: () => fetchCalled,
+    restore: () => {
+      globalThis.fetch = originalFetch;
+    },
   };
+}
+
+test('R5-B-04: بلا بوابةٍ لا يُستدعى fetch إطلاقاً', async () => {
+  const fetchSpy = stubFetchSpy();
   try {
     const channel = TelegramBotChannel({
       getToken: () => 'dummy-token',
@@ -90,8 +114,8 @@ test('R5-B-04: بلا بوابةٍ لا يُستدعى fetch إطلاقاً', as
 
     const result = await channel.send(makeMessage(), '123456789');
     assert.equal(result.state, 'failed', 'بلا بوابةٍ يفشل');
-    assert.equal(fetchCalled, false, 'fetch لم يُستدعَ إطلاقاً');
+    assert.equal(fetchSpy.wasCalled(), false, 'fetch لم يُستدعَ إطلاقاً');
   } finally {
-    globalThis.fetch = originalFetch;
+    fetchSpy.restore();
   }
 });

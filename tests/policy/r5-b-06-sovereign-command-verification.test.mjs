@@ -15,15 +15,26 @@ import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 
 function memoryLog() {
+  /** @type {{ type: string, actor: string, payload: object }[]} */
   const events = [];
   return {
     events,
+    /**
+     * @param {string} type
+     * @param {string} actor
+     * @param {object} payload
+     */
     append(type, actor, payload) {
       events.push({ type, actor, payload });
     },
   };
 }
 
+/**
+ * @param {{
+ *   royalCommandVerifier?: ((command: { id: string, action: string, resource?: string, digest?: string }) => boolean) | null,
+ * }} [opts]
+ */
 function makeEnforcementPoint({ royalCommandVerifier = null } = {}) {
   const bundle = loadPolicyBundle();
   const decisionPoint = createPolicyDecisionPoint({ bundle });
@@ -93,7 +104,7 @@ test('R5-B-06: أمرٌ ملكيٌّ موثَّقٌ يُصدرُ تذكرةً', 
 
 test('R5-B-06: بلا أمرٍ ملكيٍّ يُرفضُ قبلَ التحقّقِ من الديوان', async () => {
   const ep = makeEnforcementPoint({
-    royalCommandVerifier: (cmd) => true,
+    royalCommandVerifier: () => true,
   });
 
   const result = await ep.authorize({

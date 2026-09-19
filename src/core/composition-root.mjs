@@ -78,6 +78,7 @@ export const COMPOSITION_ERRORS = Object.freeze({
  *   withLegislation?: boolean,
  *   crown?: unknown,
  *   haltSwitch?: unknown,
+ *   royalCommandVerifier?: ((command: { id: string, digest?: string, action: string, resource?: string }) => boolean) | null,
  *   quotaLedger?: unknown,
  *   now?: () => Date,
  *   requireIdentityGate?: never,
