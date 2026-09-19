@@ -1,0 +1,47 @@
+{
+  "generatedAt": "2026-09-19T06:04:58Z",
+  "mutations": [
+    {
+      "id": "MUT-01",
+      "file": "src/authn/king-auth.mjs",
+      "change": "تعطيل فحص FACTOR_REPLAYED بـ false &&",
+      "test": "tests/authn/king-auth.test.mjs",
+      "exit": 1,
+      "stdout_tail": "4:1'\n  failureType: 'testCodeFailure'\n  error: 'رمزُ عاملٍ استُهلك مرّةً: مرّ ولم يُرفض — والمرورُ هنا هو العيبُ نفسُه.'\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  operator: 'fail'\n  stack: |-\n    refuses (file:///home/user/workspace/council-m1105-r1/member-b/xuux/tests/authn/king-auth.test.mjs:91:12)\n    async TestContext.<anonymous> (file:///home/user/workspace/council-m1105-r1/member-b/xuux/tests/authn/king-auth.test.mjs:448:5)\n    async Test.run (node:internal/test_runner/test:797:9)\n    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)\n  ...\n# Subtest: الفشلُ مغلق (المادة 9): بلا سجلٍّ ولا مزوِّدِ أسرارٍ ولا هويةِ ملكٍ لا مصادقة\nok 5 - الفشلُ مغلق (المادة 9): بلا سجلٍّ ولا مزوِّدِ أسرارٍ ولا هويةِ ملكٍ لا مصادقة\n  ---\n  duration_ms: 9.895871\n  ...\n# Subtest: الجلسةُ قصيرةٌ ولا تُمدَّد بالعملِ عليها، وتُغلَق صراحةً فلا تُقبل بعدها\nok 6 - الجلسةُ قصيرةٌ ولا تُمدَّد بالعملِ عليها، وتُغلَق صراحةً فلا تُقبل بعدها\n  ---\n  duration_ms: 4.202921\n  ...\n# Subtest: الاشتراطُ بياناتٌ في الوثيقةِ لا شرطٌ في الكود، ورمزٌ مجهولٌ يُرَدّ\nok 7 - الاشتراطُ بياناتٌ في الوثيقةِ لا شرطٌ في الكود، ورمزٌ مجهولٌ يُرَدّ\n  ---\n  duration_ms: 2.975216\n  ...\n# Subtest: حاجزُ `scripts/guard-king-auth.mjs` يمرّ على المستودعِ ويرفض تركيباً مكسوراً\nok 8 - حاجزُ `scripts/guard-king-auth.mjs` يمرّ على المستودعِ ويرفض تركيباً مكسوراً\n  ---\n  duration_ms: 1293.857332\n  ...\n1..8\n# tests 8\n# suites 0\n# pass 7\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 2176.622957\n",
+      "stderr_tail": "",
+      "after_revert_tracked": []
+    },
+    {
+      "id": "MUT-02",
+      "file": "src/egress/egress-gate.mjs",
+      "change": "تعطيل فحص DESTINATION_UNKNOWN بـ false &&",
+      "test": "tests/egress/egress-gate.test.mjs",
+      "exit": 1,
+      "stdout_tail": "لة فوق الحدّ تُرفض بلا تفويض، والقياس بالبايت لا بالمحرف\nok 6 - الحمولة فوق الحدّ تُرفض بلا تفويض، والقياس بالبايت لا بالمحرف\n  ---\n  duration_ms: 0.288734\n  ...\n# Subtest: فشل الناقل يُسجَّل بخطأ مُسمّى لا يُبلَّع\nok 7 - فشل الناقل يُسجَّل بخطأ مُسمّى لا يُبلَّع\n  ---\n  duration_ms: 0.548332\n  ...\n# Subtest: كل نقل يستهلك تذكرته: لا تذكرة تُستعمل مرّتين\nok 8 - كل نقل يستهلك تذكرته: لا تذكرة تُستعمل مرّتين\n  ---\n  duration_ms: 0.523267\n  ...\n# Subtest: البوابة ترفض الإنشاء بلا نقطة تفويض أو سجل أو ناقل\nok 9 - البوابة ترفض الإنشاء بلا نقطة تفويض أو سجل أو ناقل\n  ---\n  duration_ms: 0.302691\n  ...\n# Subtest: الرفض يُبلَّغ الحجر الصحّي إن كان موصولاً\nnot ok 10 - الرفض يُبلَّغ الحجر الصحّي إن كان موصولاً\n  ---\n  duration_ms: 0.713635\n  location: '/home/user/workspace/council-m1105-r1/member-b/xuux/tests/egress/egress-gate.test.mjs:248:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    The validation function is expected to return \"true\". Received false\n    \n    Caught error:\n    \n    TypeError: Cannot read properties of undefined (reading 'id')\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  stack: |-\n    async TestContext.<anonymous> (file:///home/user/workspace/council-m1105-r1/member-b/xuux/tests/egress/egress-gate.test.mjs:258:3)\n    async Test.run (node:internal/test_runner/test:797:9)\n    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)\n  ...\n1..10\n# tests 10\n# suites 0\n# pass 8\n# fail 2\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 401.744562\n",
+      "stderr_tail": "",
+      "after_revert_tracked": []
+    },
+    {
+      "id": "MUT-03",
+      "file": "src/policy/engine.mjs",
+      "change": "تعطيل فحص SOVEREIGN_COMMAND_REQUIRED بـ false &&",
+      "test": "tests/policy/sovereign-threshold.test.mjs + tests/core/gpt-f06-royal-command-binding.test.mjs",
+      "exit": 1,
+      "stdout_tail": "m1105-r1/member-b/xuux/tests/policy/sovereign-threshold.test.mjs:108:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    أمر ملكي فارغ قُرئ أمراً: «»\n    \n    true !== false\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: false\n  actual: true\n  operator: 'strictEqual'\n  stack: |-\n    TestContext.<anonymous> (file:///home/user/workspace/council-m1105-r1/member-b/xuux/tests/policy/sovereign-threshold.test.mjs:111:12)\n    Test.runInAsyncScope (node:async_hooks:206:9)\n    Test.run (node:internal/test_runner/test:796:25)\n    Test.processPendingSubtests (node:internal/test_runner/test:526:18)\n    Test.postRun (node:internal/test_runner/test:889:19)\n    Test.run (node:internal/test_runner/test:835:12)\n    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)\n  ...\n# Subtest: فاعلٌ دون الملك لا يبلغ العتبة أصلاً ولو حمل أمراً ملكياً\nok 12 - فاعلٌ دون الملك لا يبلغ العتبة أصلاً ولو حمل أمراً ملكياً\n  ---\n  duration_ms: 0.196707\n  ...\n# Subtest: R6-A-07: ملخصٌ لا يمكنُ أن يكونَ ملخصَ أمرٍ لا يفتحُ فعلاً سياديّاً\nok 13 - R6-A-07: ملخصٌ لا يمكنُ أن يكونَ ملخصَ أمرٍ لا يفتحُ فعلاً سياديّاً\n  ---\n  duration_ms: 0.22513\n  ...\n# Subtest: R6-A-07: الملخصُ ذو الصورةِ الصحيحةِ يبقى نافذاً — الفحصُ صورةٌ لا تشديدٌ على السلطةِ\nok 14 - R6-A-07: الملخصُ ذو الصورةِ الصحيحةِ يبقى نافذاً — الفحصُ صورةٌ لا تشديدٌ على السلطةِ\n  ---\n  duration_ms: 0.135347\n  ...\n1..14\n# tests 14\n# suites 0\n# pass 9\n# fail 5\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1323.354045\n",
+      "stderr_tail": "",
+      "after_revert_tracked": []
+    },
+    {
+      "id": "MUT-04",
+      "file": "src/policy/enforcement-point.mjs",
+      "change": "تعطيل ENFORCEMENT_IDENTITY_GATE_REQUIRED بـ false &&",
+      "test": "tests/policy/enforcement-point.test.mjs",
+      "exit": 1,
+      "stdout_tail": "19)\n    Test.run (node:internal/test_runner/test:835:12)\n    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)\n  ...\n# Subtest: الإنشاءُ مع بوابةِ هويةٍ ينجحُ عند البناءِ (M11.04-F01)\nok 13 - الإنشاءُ مع بوابةِ هويةٍ ينجحُ عند البناءِ (M11.04-F01)\n  ---\n  duration_ms: 0.210281\n  ...\n# Subtest: R5-A-02: createGovernance بلا بوابةِ هويةٍ يُرفَضُ عند البناءِ لا يُصدرُ تذاكر\nnot ok 14 - R5-A-02: createGovernance بلا بوابةِ هويةٍ يُرفَضُ عند البناءِ لا يُصدرُ تذاكر\n  ---\n  duration_ms: 0.391451\n  location: '/home/user/workspace/council-m1105-r1/member-b/xuux/tests/policy/enforcement-point.test.mjs:321:1'\n  failureType: 'testCodeFailure'\n  error: 'Missing expected exception: createGovernance بلا identityGate يجب أن يرفض البناء برمز ENFORCEMENT_IDENTITY_GATE_REQUIRED'\n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected:\n  operator: 'throws'\n  stack: |-\n    TestContext.<anonymous> (file:///home/user/workspace/council-m1105-r1/member-b/xuux/tests/policy/enforcement-point.test.mjs:324:10)\n    Test.runInAsyncScope (node:async_hooks:206:9)\n    Test.run (node:internal/test_runner/test:796:25)\n    Test.processPendingSubtests (node:internal/test_runner/test:526:18)\n    Test.postRun (node:internal/test_runner/test:889:19)\n    Test.run (node:internal/test_runner/test:835:12)\n    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)\n  ...\n1..14\n# tests 14\n# suites 0\n# pass 11\n# fail 3\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 329.186202\n",
+      "stderr_tail": "",
+      "after_revert_tracked": []
+    }
+  ],
+  "finalTrackedDirty": [],
+  "finalUntracked": ["?? docs/external-review/probes/"]
+}
