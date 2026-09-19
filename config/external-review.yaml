@@ -96,7 +96,20 @@ engagements:
     kind: external-penetration-test
     title: اختبارُ اختراقٍ خارجيٌّ على جذرِ الثقةِ والواجهاتِ وبوابةِ الخروجِ
     status: council-findings-recorded
-    executedBy: WL-226
+    executedBy:
+      kind: model-council
+      rounds: 1
+      members:
+        - id: gpt_5_6_sol
+          provider: OPENAI
+          rounds:
+            - 1
+        - id: grok_4_6
+          provider: XAI
+          rounds:
+            - 1
+      reviewedCommit: d9e094e802334407d24d07451944e4ba7adb0621
+      comparisonMatrix: docs/external-review/M11.05-round-1-comparison-matrix.md
     acceptanceCriteria: تقريرٌ **وإصلاحٌ موثَّقٌ وإعادةُ اختبارٍ ناجحةٌ** صادرةٌ عن الجهةِ نفسِها — فإعادةُ الاختبارِ شرطٌ لا مُستحسَنٌ.
     scope:
       - سطحُ الواجهةِ المُعلَنُ في `config/api.yaml` بمساراتِه ومصادقتِه.
@@ -1099,7 +1112,7 @@ findings:
       - R6-A-13
     rawReports:
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
-  - id: R5-A-01
+  - id: R5-A-06
     engagement: M11.05
     title: تفاوتٌ منخفضُ الشدّةِ في خطِّ أساسِ التخطّي (121 مقابل 126)
     origin: round-1
@@ -1114,7 +1127,8 @@ findings:
       - gpt_5_6_sol
     rawReports:
       gpt_5_6_sol: docs/external-review/reports/M11.05-round-1-model-council-report-gpt-5-6-sol.md
-  - id: R5-B-01
+    reportId: R5-A-01
+  - id: R5-B-03
     engagement: M11.05
     title: إعادةُ رمزِ العاملِ بعدَ إنشاءِ مصادقٍ جديد داخلَ نافذةِ الخطوة
     origin: round-1
@@ -1131,7 +1145,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-02
+    reportId: R5-B-01
+  - id: R5-B-04
     engagement: M11.05
     title: قناةُ Telegram تتجاوزُ بوابةَ الخروج — بايتٌ يخرجُ دونَ المرورِ بـ`EgressGate`
     origin: round-1
@@ -1148,7 +1163,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-03
+    reportId: R5-B-02
+  - id: R5-B-05
     engagement: M11.05
     title: كذبُ التصنيفِ على جهةٍ معتمدة — `sensitive` يُعلَنُ `public`
     origin: round-1
@@ -1163,7 +1179,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-04
+    reportId: R5-B-03
+  - id: R5-B-06
     engagement: M11.05
     title: ملخصٌ على صورةِ sha256 يفتحُ إذناً فوقَ العتبةِ السياديّة دونَ تحقُّقِ توقيعِ التاج
     origin: round-1
@@ -1181,7 +1198,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-05
+    reportId: R5-B-04
+  - id: R5-B-07
     engagement: M11.05
     title: '`HaltSwitch.halt` لا يشترطُ ديواناً ولا أمراً ملكيّاً'
     origin: round-1
@@ -1196,7 +1214,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-06
+    reportId: R5-B-05
+  - id: R5-B-08
     engagement: M11.05
     title: حجرُ الذاكرةِ غيرُ موصولٍ بنقطةِ الإنفاذ — وكيلٌ محجورٌ يبقى فاعلَ تفويض
     origin: round-1
@@ -1214,7 +1233,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-07
+    reportId: R5-B-06
+  - id: R5-B-09
     engagement: M11.05
     title: سقفُ القدراتِ غيرُ منفَّذٍ في سياسةِ الكتابة — وكيلٌ بلا قدراتٍ يُؤذَنُ بالكتابة
     origin: round-1
@@ -1230,7 +1250,8 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
-  - id: R5-B-08
+    reportId: R5-B-07
+  - id: R5-B-10
     engagement: M11.05
     title: '`requireIdentityGate: false` يثقُ بوصفِ الفاعل — ادّعاءُ `role:king` بلا بوابةِ هوية'
     origin: round-1
@@ -1246,3 +1267,4 @@ findings:
       - grok_4_6
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
+    reportId: R5-B-08
