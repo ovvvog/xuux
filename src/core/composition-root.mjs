@@ -94,6 +94,7 @@ export function composeEnforcementChain(deps) {
     withLegislation = false,
     crown = null,
     haltSwitch = null,
+    royalCommandVerifier = null,
     quotaLedger = null,
     now,
   } = options;
@@ -171,6 +172,12 @@ export function composeEnforcementChain(deps) {
     decisionPoint: createPolicyDecisionPoint({ bundle: resolvedBundle }),
     log: /** @type {never} */ (log),
     identityGate,
+    quarantine,
+    // R5-B-06 (تقرير: R5-B-04): التحقّقُ من الأمرِ الملكيِّ موصولٌ إن مُرِّرَ
+    // الديوانُ. الإنتاجُ يمرّرُه؛ والاختباراتُ تُمرِّرُهُ أو تتركُهُ.
+    ...(royalCommandVerifier === null || royalCommandVerifier === undefined
+      ? {}
+      : { royalCommandVerifier }),
     requireIdentityGate: true,
     ...(legislature === null ? {} : { legislationGate: enforcementGate(legislature) }),
     ...(haltSwitch === null ? {} : { haltSwitch: /** @type {never} */ (haltSwitch) }),

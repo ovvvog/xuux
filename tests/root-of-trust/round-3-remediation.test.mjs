@@ -169,7 +169,7 @@ async function boot(options = {}) {
   const token = options.token ?? fakeToken({ king });
   const runtime = await createProductionRootOfTrust(
     productionEnv(king, options.env ?? {}),
-    { root, fsync: false },
+    { root, fsync: false, royalCommandVerifier: () => true },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -305,7 +305,9 @@ describe('UF-03 مركَّبٌ — تخفيضُ عهدِ الإيقافِ مع �
     const first = await boot();
     const { root, king } = first;
     try {
-      const directive = await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      const directive = await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', {
+        id: 'test-cmd',
+      });
       assert.equal(directive.state, 'halted');
       // بعدَ التوجيهِ الموقَّعِ صارَ العهدُ **داخلَ المتنِ المختومِ** لا في دفترٍ
       // معلَّقٍ: `sealEpoch` يختمُ حيثُ يجوزُ الانتظار.
@@ -351,7 +353,9 @@ describe('استبدالُ البيانِ بنسخةٍ أقدمَ صحيحةِ �
     try {
       // لقطةٌ للبيانِ المختومِ **قبلَ** الإيقافِ: توقيعُها صحيحٌ إلى الأبد.
       copyFileSync(join(root, MANIFEST), snapshot);
-      const directive = await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      const directive = await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', {
+        id: 'test-cmd',
+      });
       first.runtime.log.close?.();
       copyFileSync(snapshot, join(root, MANIFEST));
       rmSync(snapshot, { force: true });
@@ -409,7 +413,7 @@ describe('حذفُ البيانِ والملفّاتِ التابعةِ معاً
       const command = { id: 'أمرٌ-قبلَ-المحو' };
       first.runtime.ledger.begin(command);
       await first.runtime.ledger.commitSigned(command, 'تمّ');
-      await first.runtime.haltSwitch.haltAsync('إيقافٌ قبلَ المحو');
+      await first.runtime.haltSwitch.haltAsync('إيقافٌ قبلَ المحو', { id: 'test-cmd' });
       const logFile = first.runtime.log.file;
       const headFile = first.runtime.log.headFile;
       const ledgerFile = first.runtime.ledger.file;

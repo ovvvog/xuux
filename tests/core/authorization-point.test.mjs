@@ -32,6 +32,7 @@ function setup() {
     decisionPoint: createPolicyDecisionPoint(),
     log,
     requireIdentityGate: false,
+    royalCommandVerifier: (cmd) => true,
   });
   return { king, log, crown, enforcement };
 }

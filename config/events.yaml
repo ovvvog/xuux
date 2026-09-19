@@ -777,6 +777,11 @@ channels:
       - type: policy.decision
         version: 1
         required: [action, allowed, code, policyId, policyVersion, reason, resource]
+      # R5-B-08 (تقرير: R5-B-06): فاعلٌ محجورٌ لا يصلُ إلى السياسةِ ولا يُقيَّم.
+      # الحدثُ يُسجَّلُ بعدَ الهويّةِ وقبلَ التشريع.
+      - type: policy.actor.quarantined
+        version: 1
+        required: [action]
       - type: policy.quota.debited
         # النسخةُ 2: أُضيفَ حقلٌ إلزاميٌّ (`measure`)، وإضافةُ إلزاميٍّ كسرُ توافقٍ
         # يُعلَنُ برفعِ النسخةِ لا يُمرَّرُ صامتاً (`R6-A-02`).

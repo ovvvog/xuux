@@ -452,16 +452,23 @@ policies:
   - id: pol:write-data-operators
     name: الكتابة في البيانات للمنفّذين
     owner: crown
-    version: 1
+    version: 2
     effect: allow
     priority: 200
-    reason: الكتابة تُنسب إلى منفّذٍ مسجَّل؛ والمراجع يقرأ ولا يكتب كي لا يراجع أثرَ نفسه.
+    # R5-B-09 (تقرير: R5-B-07): سقفُ القدراتِ منفَّذٌ في سياسةِ الكتابة. الدورُ
+    # وحدهُ لا يكفي: لا بدّ من حضورِ قدرةِ الكتابة في `actor.capabilities`.
+    # سياسةٌ بلا شرطٍ هنا كانت تُؤذنُ لوكيلٍ بلا قدراتٍ لأنّ الدورَ يطابق.
+    reason: الكتابة تُنسب إلى منفّذٍ مسجَّل يملكُ قدرةَ الكتابة؛ والمراجع يقرأ ولا يكتب كي لا يراجع أثرَ نفسه.
     enabled: true
     approvedBy: crown
     actors:
       roles: ['role:king', 'role:minister', 'role:operator', 'role:agent']
     actions: ['write-data']
     resources: ['data:*']
+    conditions:
+      - attribute: actor.capabilities
+        operator: includes
+        value: 'action:write-data'
 
   - id: pol:reclassify-data-owners
     name: إعادة تصنيف البيانات للوزير والمُدقِّق
