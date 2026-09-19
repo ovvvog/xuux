@@ -1,0 +1,366 @@
+{
+  "generatedAt": "2026-09-19T06:03:36.567Z",
+  "reviewTree": "/home/user/workspace/council-m1105-r1/member-b/xuux",
+  "counts": {
+    "total": 28,
+    "نجح": 8,
+    "فشل": 20,
+    "لم_يجرب": 0
+  },
+  "results": [
+    {
+      "id": "API-01",
+      "target": "سطح الواجهة",
+      "path": "نداء بلا جلسة",
+      "judgment": "فشل",
+      "refusal": "src/api/session-store.mjs:API_AUTH_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "API_AUTH_REQUIRED"
+      },
+      "ms": 5
+    },
+    {
+      "id": "API-02",
+      "target": "سطح الواجهة",
+      "path": "مسار غير معلن",
+      "judgment": "فشل",
+      "refusal": "src/api/gateway.mjs:#callChecked:API_ROUTE_UNKNOWN",
+      "note": null,
+      "extra": {
+        "code": "API_ROUTE_UNKNOWN"
+      },
+      "ms": 3
+    },
+    {
+      "id": "API-03",
+      "target": "سطح الواجهة",
+      "path": "فتح جلسة بلا إثبات حيازة والافتراض يلزم PoP",
+      "judgment": "فشل",
+      "refusal": "src/api/session-store.mjs:API_POP_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "API_POP_REQUIRED"
+      },
+      "ms": 2
+    },
+    {
+      "id": "API-04",
+      "target": "سطح الواجهة",
+      "path": "نداء بجلسة صحيحة بلا PoP على كل طلب",
+      "judgment": "فشل",
+      "refusal": "src/api/gateway.mjs:verifyPoP:API_POP_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "API_POP_REQUIRED"
+      },
+      "ms": 5
+    },
+    {
+      "id": "API-05",
+      "target": "سطح الواجهة",
+      "path": "خلط مسار بمعرّف مخترع بعد فتح جلسة",
+      "judgment": "فشل",
+      "refusal": "src/api/gateway.mjs:API_ROUTE_UNKNOWN",
+      "note": null,
+      "extra": {
+        "code": "API_ROUTE_UNKNOWN"
+      },
+      "ms": 1
+    },
+    {
+      "id": "EGRESS-01",
+      "target": "بوابة الخروج",
+      "path": "جهة غير معلنة في سجل البوابة",
+      "judgment": "فشل",
+      "refusal": "src/egress/egress-gate.mjs:EGRESS_DESTINATION_UNKNOWN",
+      "note": null,
+      "extra": {
+        "code": "EGRESS_DESTINATION_UNKNOWN",
+        "sent": 0
+      },
+      "ms": 1
+    },
+    {
+      "id": "EGRESS-02",
+      "target": "بوابة الخروج",
+      "path": "جهة في سجل البوابة وخارج سياسة السماح",
+      "judgment": "فشل",
+      "refusal": "src/egress/egress-gate.mjs:EGRESS_NOT_AUTHORIZED",
+      "note": null,
+      "extra": {
+        "code": "EGRESS_NOT_AUTHORIZED",
+        "sent": 0
+      },
+      "ms": 1
+    },
+    {
+      "id": "EGRESS-03",
+      "target": "بوابة الخروج",
+      "path": "كذب التصنيف: sensitive يُعلَن public إلى جهة معتمدة",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "البوابة نقلت بايتاً بتصنيف يعلنه المنادي لا تفحصه",
+      "extra": {
+        "bytes": 1,
+        "sent": 1
+      },
+      "ms": 0
+    },
+    {
+      "id": "EGRESS-04",
+      "target": "بوابة الخروج",
+      "path": "فاعل وكيل يُخرج إلى جهة معتمدة",
+      "judgment": "فشل",
+      "refusal": "src/egress/egress-gate.mjs:EGRESS_NOT_AUTHORIZED",
+      "note": null,
+      "extra": {
+        "code": "EGRESS_NOT_AUTHORIZED",
+        "sent": 0
+      },
+      "ms": 1
+    },
+    {
+      "id": "EGRESS-05",
+      "target": "بوابة الخروج",
+      "path": "تجاوز البوابة: fetch مباشر من قناة telegram_bot إلى منصِت محلي",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "قناة الإشعار استدعت fetch دون المرور ببوابة الخروج",
+      "extra": {
+        "state": "sent",
+        "bytes": 51
+      },
+      "ms": 24
+    },
+    {
+      "id": "EGRESS-06",
+      "target": "بوابة الخروج",
+      "path": "عزل تنفيذي: حمولة تحاول الخروج الشبكي",
+      "judgment": "فشل",
+      "refusal": "src/execution/isolation.mjs:ISOLATION_RESOURCE_LIMIT",
+      "note": null,
+      "extra": {
+        "exitCode": null,
+        "code": "ISOLATION_RESOURCE_LIMIT",
+        "ok": false
+      },
+      "ms": 60
+    },
+    {
+      "id": "KING-01",
+      "target": "مصادقة الملك",
+      "path": "إعادة استعمال رمز العامل في العملية نفسها",
+      "judgment": "فشل",
+      "refusal": "src/authn/king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
+      "note": null,
+      "extra": {
+        "code": "AUTHN_FACTOR_REPLAYED"
+      },
+      "ms": 7
+    },
+    {
+      "id": "KING-02",
+      "target": "مصادقة الملك",
+      "path": "إعادة استعمال رمز العامل بعد إنشاء مصادق جديد (محاكاة إعادة التشغيل)",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "رمز عامل مستهلك قُبل بعد إنشاء مصادق جديد داخل نافذة الخطوة",
+      "extra": {
+        "opened": true
+      },
+      "ms": 8
+    },
+    {
+      "id": "KING-03",
+      "target": "مصادقة الملك",
+      "path": "جلسة قراءة من الواجهة تُقدَّم كجلسة سيادية لأمر halt",
+      "judgment": "فشل",
+      "refusal": "src/console/royal-console.mjs:issue:CONSOLE_AUTHENTICATION_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "CONSOLE_AUTHENTICATION_REQUIRED",
+        "haltState": "running"
+      },
+      "ms": 10
+    },
+    {
+      "id": "KING-04",
+      "target": "مصادقة الملك",
+      "path": "أمر halt بلا جلسة سيادية أصلاً",
+      "judgment": "فشل",
+      "refusal": "src/console/royal-console.mjs:issue:CONSOLE_AUTHENTICATION_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "CONSOLE_AUTHENTICATION_REQUIRED",
+        "haltState": "running"
+      },
+      "ms": 4
+    },
+    {
+      "id": "KING-05",
+      "target": "مصادقة الملك",
+      "path": "مسار التعافي halt-resume بلا جلسة قوية",
+      "judgment": "فشل",
+      "refusal": "src/console/royal-console.mjs:issue:CONSOLE_AUTHENTICATION_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "CONSOLE_AUTHENTICATION_REQUIRED"
+      },
+      "ms": 2
+    },
+    {
+      "id": "KING-06",
+      "target": "مصادقة الملك",
+      "path": "إعادة أمر تعافٍ موقَّع بعد قبوله (منع الإعادة)",
+      "judgment": "فشل",
+      "refusal": "src/console/royal-console.mjs:#acceptRecovery:CONSOLE_REPLAYED_COMMAND",
+      "note": null,
+      "extra": {
+        "code": "CONSOLE_REPLAYED_COMMAND"
+      },
+      "ms": 9
+    },
+    {
+      "id": "KING-07",
+      "target": "مصادقة الملك",
+      "path": "HaltSwitch.halt مباشرة بلا ديوان ولا أمر ملكي",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "نداء HaltSwitch.halt أوقف الدولة بلا أمر ملكي عبر الديوان",
+      "extra": {
+        "before": "running",
+        "after": "halted"
+      },
+      "ms": 2
+    },
+    {
+      "id": "KING-08",
+      "target": "مصادقة الملك",
+      "path": "تفويض stop-state بلا أمر ملكي عبر نقطة الإنفاذ",
+      "judgment": "فشل",
+      "refusal": "src/policy/engine.mjs:evaluate:SOVEREIGN_COMMAND_REQUIRED",
+      "note": null,
+      "extra": {
+        "code": "SOVEREIGN_COMMAND_REQUIRED",
+        "allowed": false
+      },
+      "ms": 0
+    },
+    {
+      "id": "KING-09",
+      "target": "مصادقة الملك",
+      "path": "تفويض stop-state بملخص sha256 مزيف على صورة صحيحة",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "المحرّك قبل معرّفاً وملخصاً على صورة sha256 دون تحقق توقيع التاج",
+      "extra": {
+        "code": "POLICY_ALLOW",
+        "requiresRoyalCommand": true
+      },
+      "ms": 1
+    },
+    {
+      "id": "ISO-01",
+      "target": "عزل الوكلاء",
+      "path": "وكيل يدّعي دور الملك بلا بوابة هوية",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "فاعل وصف نفسه ملكاً ونال إذناً لأن requireIdentityGate=false",
+      "extra": {
+        "code": "POLICY_ALLOW",
+        "policyId": "pol:read-data-cleared"
+      },
+      "ms": 0
+    },
+    {
+      "id": "ISO-02",
+      "target": "عزل الوكلاء",
+      "path": "وكيل يدّعي دور الملك عبر سلسلة التركيب الرسمية",
+      "judgment": "فشل",
+      "refusal": "src/core/composition-root.mjs:identity-gate استبدلت الفاعل؛ القرار=POLICY_ALLOW",
+      "note": null,
+      "extra": {
+        "code": "POLICY_ALLOW",
+        "policyId": "pol:read-registry-authorized-roles",
+        "roleReplaced": true
+      },
+      "ms": 86
+    },
+    {
+      "id": "ISO-03",
+      "target": "عزل الوكلاء",
+      "path": "حجر في الذاكرة ثم تفويض عبر نقطة الإنفاذ الرسمية",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "الحاجب حجر الفاعل في الذاكرة ونقطة الإنفاذ أذنت لأن isQuarantined غير موصول",
+      "extra": {
+        "code": "POLICY_ALLOW",
+        "isolatedCallback": true
+      },
+      "ms": 52
+    },
+    {
+      "id": "ISO-04",
+      "target": "عزل الوكلاء",
+      "path": "وكيل بلا قدرات يكتب بيانات لأن السياسة تطابق الدور",
+      "judgment": "نجح",
+      "refusal": null,
+      "note": "السياسة pol:write-data-operators تطابق الدور ولا تفحص actor.capabilities",
+      "extra": {
+        "code": "POLICY_ALLOW",
+        "policyId": "pol:write-data-operators"
+      },
+      "ms": 0
+    },
+    {
+      "id": "ISO-05",
+      "target": "عزل الوكلاء",
+      "path": "تذكرة فاعل تُستعمل لفاعل آخر",
+      "judgment": "فشل",
+      "refusal": "src/policy/enforcement-point.mjs:verify:بلا-رمز:Error: AUTHORIZATION_DECISION_MISMATCH",
+      "note": null,
+      "extra": {
+        "code": "بلا-رمز:Error: AUTHORIZATION_DECISION_MISMATCH"
+      },
+      "ms": 1
+    },
+    {
+      "id": "ISO-06",
+      "target": "عزل الوكلاء",
+      "path": "إعادة استعمال التذكرة نفسها (تواطؤ بإعادة تقديم)",
+      "judgment": "فشل",
+      "refusal": "src/policy/enforcement-point.mjs:verify:بلا-رمز:Error: AUTHORIZATION_DECISION_REUSED",
+      "note": null,
+      "extra": {
+        "code": "بلا-رمز:Error: AUTHORIZATION_DECISION_REUSED"
+      },
+      "ms": 0
+    },
+    {
+      "id": "ISO-07",
+      "target": "عزل الوكلاء",
+      "path": "وكيل يمنح نفسه قدرات عبر وصف الطلب مع بوابة هوية",
+      "judgment": "فشل",
+      "refusal": "src/identity/identity-gate.mjs:verify استبدلت القدرات من السجل",
+      "note": null,
+      "extra": {
+        "ok": true,
+        "injectedIgnored": 2
+      },
+      "ms": 62
+    },
+    {
+      "id": "ISO-08",
+      "target": "عزل الوكلاء",
+      "path": "تواطؤ: وكيل يستهلك تذكرة وزير بعد صدورها",
+      "judgment": "فشل",
+      "refusal": "src/policy/enforcement-point.mjs:verify:بلا-رمز:Error: AUTHORIZATION_DECISION_MISMATCH",
+      "note": null,
+      "extra": {
+        "code": "بلا-رمز:Error: AUTHORIZATION_DECISION_MISMATCH"
+      },
+      "ms": 0
+    }
+  ]
+}
