@@ -14,9 +14,13 @@
 //   - R4: العددُ المُعلَنُ في الوثيقةِ يُطابقُ `attributedToDatabaseUrl` من الأثرِ —
 //     لا `skipped` ولا `skipLines`، فالجملةُ تنسبُ التخطّي إلى `DATABASE_URL` نصّاً.
 //   - R5: الوثيقةُ تُسمّي **الأمرَ** و**الكوميتَ** الذي قِيسَ عليهما — فقياسٌ بلا نسبةٍ زمنيّةٍ يَبلى صامتاً.
+//   - R6: الأثرُ يُقابَلُ **بالواقعِ** لا بالوثيقةِ وحدَها — فعددُ ملفّاتِ الاختبارِ في الأثرِ
+//     يُقابَلُ بعددِها على القرصِ، وأثرٌ قِيسَ على شجرةٍ ثمَّ نمَتْ بملفّاتٍ جديدَةٍ
+//     يَسقُطُ لا يَمُرُّ أخضرَ (LIVE-15). وكوميتُ الأثرِ يَبقى للنسبةِ الزمنيّةِ (R5) لا للقياسِ.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { countTestFiles } from './lib/doc-count-facts.mjs';
 
 const ARTIFACT = 'docs/external-review/skip-baseline.json';
 const REVIEW_DIR = 'docs/external-review';
@@ -97,6 +101,7 @@ export function checkSkipBaseline(root) {
     'skipLines',
     'topLevelSkipPoints',
     'attributedToDatabaseUrl',
+    'testFileCount',
   ];
   /** @type {Map<string, any>} */
   const byPlan = new Map();
@@ -166,6 +171,19 @@ export function checkSkipBaseline(root) {
     }
   }
 
+  // ── R6 · تقادُمُ الأثرِ ──
+  // الأثرُ يُقابَلُ بالواقعِ لا بالوثيقةِ وحدَها: عددُ ملفّاتِ الاختبارِ في الأثرِ يُقابَلُ
+  // بعددِها على القرصِ، فأثرٌ قِيسَ على شجرةٍ ثمَّ نمَتْ بملفّاتٍ جديدَةٍ يَسقُطُ لا يَمُرُّ
+  // أخضرَ (LIVE-15). وعددُ الملفّاتِ لا يَتغيّرُ بتحديثِ الأثرِ، فلا تبعيّةٌ دائريّةٌ.
+  const currentTestFileCount = countTestFiles(root);
+  for (const [i, e] of entries.entries()) {
+    if (Number.isInteger(e?.testFileCount) && e.testFileCount !== currentTestFileCount) {
+      violations.push(
+        `R6/STALE: المُدخلةُ ${i} قِيسَت على ${e.testFileCount} ملفَّ اختبارٍ والشجرةُ الحاليّةُ فيها ${currentTestFileCount} — القياسُ متقادِمٌ، أَعِدْه بـ\`npm run measure:skip-baseline\`.`,
+      );
+    }
+  }
+
   return { violations, entryCount: entries.length, docCount: declaring };
 }
 
@@ -178,7 +196,7 @@ function main() {
     process.exit(1);
   }
   process.stdout.write(
-    `✅ حاجزُ خطِّ أساسِ التخطّي: ${entryCount} مُدخلةَ قياسٍ و${docCount} وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ إلى أمرِه وكوميتِه.\n`,
+    `✅ حاجزُ خطِّ أساسِ التخطّي: ${entryCount} مُدخلةَ قياسٍ و${docCount} وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ إلى أمرِه وكوميتِه وعددِ ملفّاتِ شجرتِه.\n`,
   );
 }
 

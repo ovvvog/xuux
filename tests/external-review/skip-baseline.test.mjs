@@ -25,19 +25,35 @@ const roots = [];
 /**
  * يَبنيَ شجرةً صغيرةً تحملُ خطّةً وأثرَ قياسٍ متطابقَينِ.
  * @param {{ declared?: string, artifactPatch?: Record<string, unknown>, omitCommand?: boolean,
- *   omitCommit?: boolean, omitArtifact?: boolean }} [opts]
+ *   omitCommit?: boolean, omitArtifact?: boolean, testFileCount?: number }} [opts]
  * @returns {string}
  */
 function makeTree(opts = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'skip-baseline-'));
   roots.push(root);
   mkdirSync(path.join(root, 'docs/external-review'), { recursive: true });
+  mkdirSync(path.join(root, 'tests'), { recursive: true });
+  // أنشئ ملفَّ اختبارٍ وهميّاً ليُطابقَ testFileCount
+  const tfc = opts.testFileCount ?? 1;
+  for (let i = 0; i < tfc; i++) {
+    writeFileSync(
+      path.join(root, `tests/synthetic-${i}.test.mjs`),
+      "import {test} from 'node:test';\ntest('synthetic', () => {});\n",
+      'utf8',
+    );
+  }
   const declared = opts.declared ?? '٩٢';
   const cmd = opts.omitCommand ? 'أمرٌ آخرُ' : 'env -u DATABASE_URL npm test';
   const commit = opts.omitCommit ? 'deadbeef' : 'fba8c10f';
   writeFileSync(
     path.join(root, PLAN),
-    `# خطّةٌ مصنوعةٌ للقياسِ\n\n> بلا \`DATABASE_URL\` تتخطّى الحزمةُ ${declared} اختباراً.\n>\n> الأمرُ: \`${cmd}\` · الكوميتُ: \`${commit}\`\n`,
+    '# خطّةٌ مصنوعةٌ للقياسِ\n\n> بلا `DATABASE_URL` تتخطّى الحزمةُ ' +
+      declared +
+      ' اختباراً.\n>\n> الأمرُ: `' +
+      cmd +
+      '` · الكوميتُ: `' +
+      commit +
+      '`\n',
     'utf8',
   );
   if (!opts.omitArtifact) {
@@ -47,6 +63,7 @@ function makeTree(opts = {}) {
       command: 'env -u DATABASE_URL npm test',
       commit: 'fba8c10f000000000000000000000000000000000',
       measuredOn: '2026-09-20',
+      testFileCount: tfc,
       tests: 2127,
       pass: 2001,
       fail: 0,
@@ -59,7 +76,11 @@ function makeTree(opts = {}) {
     };
     writeFileSync(
       path.join(root, ARTIFACT),
-      `${JSON.stringify({ generatedBy: 'npm run measure:skip-baseline', measurements: [entry] }, null, 2)}\n`,
+      JSON.stringify(
+        { generatedBy: 'npm run measure:skip-baseline', measurements: [entry] },
+        null,
+        2,
+      ) + '\n',
       'utf8',
     );
   }
@@ -117,6 +138,43 @@ test('R5-A-06: حقلٌ غيرُ عددٍ صحيحٍ في الأثرِ ⇒ مر�
   assert.ok(violations.some((v) => v.startsWith('R1/FIELD')));
 });
 
+test('LIVE-15: الأثرُ بعددِ ملفّاتٍ قديمٍ والشجرةُ نَمَتْ ⇒ مردودٌ بـR6/STALE', () => {
+  const root = makeTree({ testFileCount: 3 });
+  // الأثرُ يقولُ 3 ملفّاتٍ لكنَّ الشجرةَ فيها 3 فعلاً — فلا انتهاكَ
+  let { violations } = checkSkipBaseline(root);
+  assert.ok(
+    !violations.some((v) => v.startsWith('R6/STALE')),
+    `لا ينبغي أن يكونَ R6/STALE: ${violations.join(' | ')}`,
+  );
+
+  // أضف ملفَّ اختبارٍ رابعاً — فالأثرُ يقولُ 3 والشجرةُ فيها 4
+  writeFileSync(
+    path.join(root, 'tests/extra.test.mjs'),
+    "import {test} from 'node:test';\ntest('extra', () => {});\n",
+    'utf8',
+  );
+  violations = checkSkipBaseline(root).violations;
+  const stale = violations.filter((v) => v.startsWith('R6/STALE'));
+  assert.equal(stale.length, 1, `تُوقِّعَ انتهاكٌ واحدٌ، والذي وقعَ: ${violations.join(' | ')}`);
+  assert.match(stale.join(' | '), /3.*4/);
+});
+
+test('LIVE-15: الأثرُ بعددِ ملفّاتٍ مطابِقٍ ⇒ لا انتهاكَ بـR6', () => {
+  const root = makeTree({ testFileCount: 2 });
+  const { violations } = checkSkipBaseline(root);
+  assert.ok(
+    !violations.some((v) => v.startsWith('R6/STALE')),
+    `لا ينبغي أن يكونَ R6/STALE: ${violations.join(' | ')}`,
+  );
+});
+
+test('LIVE-15: حقلُ testFileCount مفقودٌ في الأثرِ ⇒ لا انتهاكَ بـR6 (تسامحٌ مع الأثرِ القديمِ)', () => {
+  const root = makeTree({ artifactPatch: { testFileCount: undefined } });
+  const { violations } = checkSkipBaseline(root);
+  // testFileCount غيرُ موجودٍ في الأثرِ — فالحاجزُ لا يَسقُطُ (الأثرُ القديمُ لا يُعاقَبُ)
+  assert.ok(!violations.some((v) => v.startsWith('R6/STALE')));
+});
+
 test('قارئُ TAP يُفرِّقُ ثلاثةَ مقاييسَ ولا يَخلِطُها', () => {
   const tap = [
     'TAP version 13',
@@ -153,9 +211,18 @@ test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على 
   const root = mkdtempSync(path.join(tmpdir(), 'skip-baseline-proc-'));
   roots.push(root);
   mkdirSync(path.join(root, 'docs/external-review'), { recursive: true });
+  mkdirSync(path.join(root, 'tests'), { recursive: true });
   cpSync(path.join(REPO, ARTIFACT), path.join(root, ARTIFACT));
   for (const rel of [PLAN, 'docs/external-review/M11.06-round-2-plan.md']) {
     cpSync(path.join(REPO, rel), path.join(root, rel));
+  }
+  // أنشئ 218 ملفَّ اختبارٍ ليُطابقَ testFileCount في الأثرِ
+  for (let i = 0; i < 218; i++) {
+    writeFileSync(
+      path.join(root, `tests/synthetic-${i}.test.mjs`),
+      "import {test} from 'node:test';\ntest('synthetic', () => {});\n",
+      'utf8',
+    );
   }
   // الطفرةُ: إعادةُ الرقمِ إلى ما كانَ قبلَ الإصلاحِ.
   const planPath = path.join(root, PLAN);
