@@ -8,6 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -45,11 +46,21 @@ function pool() {
   return db.pool;
 }
 
-/** يُنشئ مفتاح إيقاف حقيقياً موقَّعاً بمفتاح ملك (لا صورياً). */
+/**
+ * يُنشئ مفتاح إيقاف حقيقياً موقَّعاً بمفتاح ملك (لا صورياً)، مع أمرٍ ملكيٍّ
+ * يولِّده الاختبارُ لنفسِه (R5-B-07): فالإيقافُ في `M5.08` أمرٌ لا علامةُ ذاكرةٍ.
+ *
+ * @returns {{ halt: HaltSwitch, royalCommand: { id: string } }}
+ */
 function haltSwitch() {
   const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'm5-halt-')));
   tempDirs.push(dir);
-  return new HaltSwitch(path.join(dir, 'state', 'halt.json'), new KingIdentity(), { fsync: false });
+  const royalCommand = { id: `cmd:m5-halt-${randomUUID()}` };
+  const halt = new HaltSwitch(path.join(dir, 'state', 'halt.json'), new KingIdentity(), {
+    fsync: false,
+    royalCommandVerifier: (command) => command.id === royalCommand.id,
+  });
+  return { halt, royalCommand };
 }
 
 /**
@@ -80,7 +91,7 @@ test(
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
-    const halt = haltSwitch();
+    const { halt } = haltSwitch();
     const worker = createWorker({ queue, pool: pool(), haltGuard: halt, worker: 'عامل-النجاح' });
     const task = await enqueue(queue, 'عامل-مهمة-ناجحة', { payload: { قيمة: 3 } });
 
@@ -109,7 +120,7 @@ test(
   },
   async () => {
     const queue = createTaskQueue({ pool: pool() });
-    const halt = haltSwitch();
+    const { halt, royalCommand } = haltSwitch();
     const worker = createWorker({ queue, pool: pool(), haltGuard: halt, worker: 'عامل-الإيقاف' });
 
     const total = 6;
@@ -126,7 +137,7 @@ test(
     assert.equal(succeededBefore, 2, 'لم يتقدّم العمل قبل الإيقاف فلا معنى لقياس توقّفه');
 
     // الإيقاف الشامل: موقَّع بمفتاح الملك لا بعلامة في الذاكرة.
-    halt.halt('إيقاف اختبار M5.08 تحت حمل');
+    halt.halt('إيقاف اختبار M5.08 تحت حمل', royalCommand);
     assert.equal(halt.isHalted(), true);
 
     const countsAtHalt = await queue.counts();
@@ -157,7 +168,7 @@ test(
     );
 
     // الاستئناف: العمل يُكمل ما بقي بلا فقدان ولا تكرار.
-    halt.resume('استئناف اختبار M5.08');
+    halt.resume('استئناف اختبار M5.08', royalCommand);
     const afterRun = await worker.run({ maxTasks: total, stopWhenIdle: true, pollMs: 10 });
     assert.equal(afterRun.stopped, 'idle');
 
@@ -190,7 +201,7 @@ test(
   },
   async () => {
     const queue = createTaskQueue({ pool: pool(), leaseMs: 5_000 });
-    const halt = haltSwitch();
+    const { halt } = haltSwitch();
     const worker = createWorker({
       queue,
       pool: pool(),
@@ -235,7 +246,7 @@ test(
   },
   async () => {
     const queue = createTaskQueue({ pool: pool(), leaseMs: 10_000 });
-    const halt = haltSwitch();
+    const { halt } = haltSwitch();
     const worker = createWorker({ queue, pool: pool(), haltGuard: halt, worker: 'عامل-المهلة' });
 
     const task = await enqueue(queue, 'مهلة-قصيرة', {
@@ -277,7 +288,7 @@ test(
     // الميتةِ وهي لم تُخطئ. والقياسُ هنا ثلاثيٌّ: الإجهازُ سريعٌ لا انتظارُ مهلةٍ،
     // والمحاولةُ مردودةٌ، ولا رسالةَ ميتةً.
     const queue = createTaskQueue({ pool: pool(), leaseMs: 8_000 });
-    const halt = haltSwitch();
+    const { halt, royalCommand } = haltSwitch();
     const worker = createWorker({
       queue,
       pool: pool(),
@@ -302,7 +313,7 @@ test(
         if (current?.state === TaskLifecycle.RUNNING) break;
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      halt.halt('إيقافٌ شاملٌ أثناءَ تنفيذٍ جارٍ — شاهدُ `D-8`');
+      halt.halt('إيقافٌ شاملٌ أثناءَ تنفيذٍ جارٍ — شاهدُ `D-8`', royalCommand);
     })();
     const [tick] = await Promise.all([worker.tick(), halting]);
     const elapsedMs = Date.now() - startedAt;
@@ -337,7 +348,7 @@ test(
     assert.match(last?.reason ?? '', /المحاولة لم تُستهلك/u);
 
     // ثمّ الاستئنافُ يُعيدُ المهمّةَ قابلةً للحجزِ بميزانيتِها كاملةً.
-    halt.resume('استئنافٌ بعدَ شاهدِ `D-8`');
+    halt.resume('استئنافٌ بعدَ شاهدِ `D-8`', royalCommand);
     const reclaimed = await queue.claim({ worker: 'عامل-بعد-الاستئناف', limit: 1 });
     assert.equal(reclaimed.length, 1, 'المهمّةُ لم تعُدْ قابلةً للحجزِ بعدَ الاستئنافِ');
     assert.equal(reclaimed[0]?.id, task.id);
