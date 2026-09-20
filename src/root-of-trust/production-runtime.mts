@@ -120,6 +120,12 @@ export interface ProductionRuntimeOptions {
   /** مزامنةُ القرصِ. لا تُعطَّلُ في الإنتاج، وتُعطَّلُ في الاختبارِ للسرعة. */
   fsync?: boolean;
   /**
+   * R5-B-07 (تقرير: R5-B-05): مُحقِّقُ الأمرِ الملكيِّ لمفتاحِ الإيقاف. في
+   * الإنتاجِ لا يصدرُ إيقافٌ ولا استئنافٌ إلّا بأمرٍ ملكيٍّ يُصدِّقُهُ،
+   * وغيابُهُ فشلٌ مغلقٌ لا مسارٌ احتياطيّ.
+   */
+  royalCommandVerifier?: ((command: unknown) => boolean) | null;
+  /**
    * مخزنُ التثبيتاتِ المقروءُ عندَ الإقلاعِ (‏`UF-01`). الافتراضُ
    * `XUUX_ANCHOR_STORE` ثمَّ `anchors.jsonl` داخلَ الجذر. وحقنُه للاختبارِ لا
    * لتخفيفِ الشرطِ: الفحصُ يقعُ عليه أيّاً كان.
@@ -464,6 +470,7 @@ export async function createProductionRootOfTrust(
         logAsync: log,
         epochFloor,
         sealEpoch: (): Promise<void> => manifest.checkpointAsync(),
+        royalCommandVerifier: options.royalCommandVerifier ?? null,
         env,
       },
     );

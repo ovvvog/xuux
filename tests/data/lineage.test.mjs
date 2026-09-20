@@ -93,8 +93,15 @@ async function refuses(work, code) {
 
 test('معيار القبول — استعلام النسب يُعيد السلسلة كاملة لأي أصل', async () => {
   const { catalog, gate, ledger } = setup();
-  const agent = testActor('role:agent', { id: 'agent:reader-1' });
-  const minister = testActor('role:minister', { id: 'agent:minister-1' });
+  // R5-B-09: سقفُ القدراتِ — مَن يُسجِّلُ الأصولَ يملكُ قدرةَ الكتابة.
+  const agent = testActor('role:agent', {
+    id: 'agent:reader-1',
+    capabilities: ['action:write-data'],
+  });
+  const minister = testActor('role:minister', {
+    id: 'agent:minister-1',
+    capabilities: ['action:write-data'],
+  });
 
   // طبقة 1: جذران مستقلّان. طبقة 2: فرعان من كل جذر. طبقة 3: التقاء الفرعين.
   // طبقة 4: تقريرٌ من الالتقاء. والالتقاء مقصود: هو ما يجعل الاستعلام رسماً لا خطّاً.

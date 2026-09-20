@@ -20,6 +20,9 @@ export function enforcementPointFor(log) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log: /** @type {never} */ (log),
     requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
+    // R5-B-06: مُحقِّقُ أمرٍ موصولٌ — نطاقُ هذه المجموعاتِ الوصولُ والنسبُ لا
+    // توثيقُ الأمرِ، والأمرُ في الاختبارِ صحيحٌ ببنائِه.
+    royalCommandVerifier: () => true,
   });
 }
 

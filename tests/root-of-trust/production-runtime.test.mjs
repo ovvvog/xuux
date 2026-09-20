@@ -151,7 +151,15 @@ async function buildRuntime(options = {}) {
   const token = options.token ?? fakeToken({ king });
   const runtime = await createProductionRootOfTrust(
     { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) },
-    { root, fsync: false },
+    {
+      root,
+      fsync: false,
+      ...(options.royalCommandVerifier === undefined
+        ? { royalCommandVerifier: () => true }
+        : options.royalCommandVerifier === null
+          ? {}
+          : { royalCommandVerifier: options.royalCommandVerifier }),
+    },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -356,16 +364,16 @@ describe('F06: التثبيتُ الإنتاجيُّ موقَّعٌ بمفتاح
   test('توجيهُ الإيقافِ يُصدَرُ غيرَ متزامنٍ ويُتحقَّقُ منه بالمفتاحِ العامّ وحده', async () => {
     const { runtime, cleanup } = await buildRuntime();
     try {
-      const directive = await runtime.haltSwitch.haltAsync('اختبارُ الهجرة');
+      const directive = await runtime.haltSwitch.haltAsync('اختبارُ الهجرة', { id: 'test-cmd' });
       assert.equal(directive.state, 'halted');
       const verifier = royalVerifierFromPublicKey(runtime.anchorSigner.publicKeyPem);
       const reading = runtime.haltSwitch.read();
       assert.equal(reading.state, 'halted');
       assert.equal(verifier.id.length > 0, true);
-      assert.throws(() => runtime.haltSwitch.halt('متزامن'), {
+      assert.throws(() => runtime.haltSwitch.halt('متزامن', { id: 'test-cmd' }), {
         message: 'HALT_ALREADY_HALTED',
       });
-      const resumed = await runtime.haltSwitch.resumeAsync('انتهى الاختبار');
+      const resumed = await runtime.haltSwitch.resumeAsync('انتهى الاختبار', { id: 'test-cmd' });
       assert.equal(resumed.state, 'running');
       assert.equal(resumed.epoch > directive.epoch, true);
     } finally {
@@ -376,7 +384,7 @@ describe('F06: التثبيتُ الإنتاجيُّ موقَّعٌ بمفتاح
   test('حذفُ ملفاتِ الإيقافِ الثلاثةِ لا يُعيدُ التشغيل', async () => {
     const { runtime, cleanup } = await buildRuntime();
     try {
-      await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
       // WL-094 (`UF-03`): الاختبارُ كان اسمُه «الثلاثة» ويحذفُ اثنين، فكان
       // بابُ العودةِ إلى `running` وepoch=0 مفتوحاً ولا يراه أحد. الآن
       // يُحذَفُ **الثالثُ** أيضاً: ملفُّ الحقبة.
@@ -1084,6 +1092,51 @@ test('R5-B-02: onAnchor شكليٌّ يُرفَضُ — لا بدَّ من witne
     );
     assert.equal(store.read().length, 0, 'ولا مرساةَ موقَّعةً خُلِّفت');
     assert.equal(runtime.manifest.read().anchoredCount, 0, 'والشاهدُ لم يتحرَّكْ');
+  } finally {
+    cleanup();
+  }
+});
+
+test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ haltAsync — fail-closed', async () => {
+  const { runtime, cleanup } = await buildRuntime({ royalCommandVerifier: null });
+  try {
+    await assert.rejects(
+      runtime.haltSwitch.haltAsync('إيقاف', { id: 'test-cmd' }),
+      /HALT_ROYAL_COMMAND_REQUIRED/,
+      'haltAsync بلا مُحقّقٍ موصولٍ مرفوض',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ resumeAsync على حالة موقوفة — fail-closed', async () => {
+  // ابنِ runtime بمُحقّقٍ لتمكين الإيقاف
+  const { runtime, root, king, token, cleanup } = await buildRuntime({
+    royalCommandVerifier: () => true,
+  });
+  try {
+    // أوقف النظام بأمرٍ موثَّق
+    await runtime.haltSwitch.haltAsync('إيقاف', { id: 'halt-cmd' });
+    assert.equal(runtime.haltSwitch.read().state, 'halted', 'النظام موقوف');
+
+    // أغلق السجلَّ قبل إعادة الفتح
+    runtime.log.close?.();
+
+    // أعد الفتح بنفس الجذر والمفتاح لكن بلا مُحقّق
+    const runtime2 = await createProductionRootOfTrust(
+      { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+      { root, fsync: false, royalCommandVerifier: null },
+      { openSource: async () => ({ source: token, close: async () => undefined }) },
+    );
+
+    // resumeAsync بلا مُحقّقٍ على حالة موقوفة يجب أن يُرفض بـ HALT_ROYAL_COMMAND_REQUIRED
+    await assert.rejects(
+      runtime2.haltSwitch.resumeAsync('استئناف', { id: 'resume-cmd' }),
+      /HALT_ROYAL_COMMAND_REQUIRED/,
+      'resumeAsync بلا مُحقّقٍ على حالة موقوفة مرفوض',
+    );
+    runtime2.log.close?.();
   } finally {
     cleanup();
   }

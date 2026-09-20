@@ -94,7 +94,7 @@ function bindingOf(request) {
 
 export class EnforcementPoint {
   /**
-   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, requireIdentityGate?: boolean, secret?: Buffer, now?: () => Date }} [deps]
+   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, quarantine?: { isQuarantined: (subject: string) => boolean } | null, royalCommandVerifier?: ((command: { id: string, digest?: string, action: string, resource?: string }) => boolean) | null, requireIdentityGate?: boolean, secret?: Buffer, now?: () => Date }} [deps]
    */
   constructor({
     decisionPoint,
@@ -104,6 +104,8 @@ export class EnforcementPoint {
     decisionSink = null,
     identityGate = null,
     legislationGate = null,
+    quarantine = null,
+    royalCommandVerifier = null,
     requireIdentityGate = true,
     secret,
     now,
@@ -122,6 +124,15 @@ export class EnforcementPoint {
     this.identityGate = identityGate;
     this.requireIdentityGate = requireIdentityGate;
     this.legislationGate = legislationGate;
+    // R5-B-08 (تقرير: R5-B-06): حجرُ الذاكرةِ موصولٌ بنقطةِ الإنفاذ. الفاعلُ
+    // المحجورُ لا يُقيَّمُ ولا يُخصمُ منه: الحجرُ يسبقُ السياسةَ لأنّ المحجورَ لا
+    // فاعلَ له ولو كان دورُه مأذوناً. والفحصُ بعدَ الهويّةِ وقبلَ التشريع:
+    // الهويّةُ تُستبدَلُ، والحجرُ يُقاسُ على المُستبدَلِ لا المُدَّعى.
+    this.quarantine = quarantine;
+    // R5-B-06 (تقرير: R5-B-04): التحقّقُ من الأمرِ الملكيِّ موصولٌ بنقطةِ الإنفاذ.
+    // المحرّكُ يفحصُ صورةَ الملخصِ، وهنا يُتحقَّقُ من أنّ الأمرَ موثَّقٌ في الديوان.
+    // الفصلُ مقصودٌ: المحرّكُ لا يُنشئُ مصدرَ حقيقةٍ ثانٍ، والإنفاذُ لا يثقُ بصورةٍ.
+    this.royalCommandVerifier = royalCommandVerifier;
     this.quotaLedger = quotaLedger;
     this.decisionSink = decisionSink;
     // وحداتُ القياسِ من البياناتِ لا من الشفرةِ (‏`R6-A-02`): خريطةُ
@@ -248,6 +259,27 @@ export class EnforcementPoint {
     // حاجزُ التشريع (‏M8.02): فعلٌ يقع فيه تعارضٌ تشريعيٌّ مانعٌ لا يُنفَّذ حتى
     // يُحَلَّ التعارض. والقائمةُ محسوبةٌ من البيانات في كل نداء لا مخزَّنةً:
     // قائمةٌ مخزَّنةٌ تحتاج من يُحدِّثها عند الحلّ، ومن نسي منع فعلاً لا مانعَ له.
+    // R5-B-08 (تقرير: R5-B-06): الفاعلُ المحجورُ لا يصلُ إلى السياسة. الفحصُ بعدَ
+    // الهويّةِ (حتى يُقاسَ الحجرُ على الفاعلِ المُستبدَلِ) وقبلَ التشريع.
+    if (this.quarantine !== null && this.quarantine.isQuarantined(evaluated.actor.id)) {
+      const decision = Object.freeze({
+        allowed: false,
+        effect: /** @type {const} */ ('deny'),
+        code: /** @type {const} */ ('ACTOR_QUARANTINED'),
+        reason: `الفاعل ${evaluated.actor.id} محجورٌ في الذاكرةِ فلا يُقيَّمُ ولا يُؤذَنُ له بالفعل حتى يُرفعَ الحجر.`,
+        policyId: null,
+        policyVersion: null,
+        requiresRoyalCommand: this.decisionPoint.requiresRoyalCommand(evaluated.action),
+        matched: Object.freeze([]),
+        evaluatedAt,
+      });
+      this.log.append('policy.actor.quarantined', evaluated.actor.id, {
+        action: evaluated.action,
+      });
+      await this.record(decision, evaluated);
+      return { decision, token: null, quota: null };
+    }
+
     if (this.legislationGate !== null) {
       const blocked = await this.legislationGate.blockedActions();
       if (blocked.has(evaluated.action)) {
@@ -273,6 +305,45 @@ export class EnforcementPoint {
     }
 
     let decision = this.decisionPoint.evaluate(evaluated);
+
+    // R5-B-06 (تقرير: R5-B-04): التحقّقُ من الأمرِ الملكيِّ بعدَ القرارِ وقبلَ
+    // التذكرة. المحرّكُ فحصَ الصورةَ، والإنفاذُ يتحقّقُ من الديوان. أمرٌ غيرُ
+    // موثَّقٍ لا يُصدرُ تذكرةً ولو كانت صورةُ ملخصِه صحيحة.
+    if (decision.allowed && decision.requiresRoyalCommand) {
+      if (this.royalCommandVerifier === null) {
+        decision = Object.freeze({
+          ...decision,
+          allowed: false,
+          effect: /** @type {const} */ ('deny'),
+          code: /** @type {const} */ ('SOVEREIGN_COMMAND_VERIFIER_REQUIRED'),
+          reason: `الفعل ${evaluated.action} فوق العتبة السيادية، ولا مُحقِّقَ للأمرِ الملكيِّ موصولٌ. السلطةُ السياديّةُ مغلقةٌ بلا ديوانٍ يتحقّقُ من الأمر (R5-B-06).`,
+        });
+      } else {
+        const commandId = decision.royalCommandId;
+        const binding = bindingOf(evaluated);
+        const command = {
+          id: typeof commandId === 'string' ? commandId : '',
+          ...(decision.royalCommandDigest !== undefined
+            ? { digest: decision.royalCommandDigest }
+            : {}),
+          action: evaluated.action,
+          resource: binding.resourceKey,
+        };
+        if (
+          typeof commandId !== 'string' ||
+          commandId === '' ||
+          !this.royalCommandVerifier(command)
+        ) {
+          decision = Object.freeze({
+            ...decision,
+            allowed: false,
+            effect: /** @type {const} */ ('deny'),
+            code: /** @type {const} */ ('SOVEREIGN_COMMAND_UNVERIFIED'),
+            reason: `الفعل ${evaluated.action} فوق العتبة السيادية، والأمر الملكي ${commandId ?? '—'} غير موثَّق في الديوان. فحصُ صورةِ الملخصِ لا يُغني عن تحقُّقِ التوقيع.`,
+          });
+        }
+      }
+    }
 
     /** @type {{ resource: string, subjectType: string, subjectId: string, amount: number } | null} */
     let quota = null;

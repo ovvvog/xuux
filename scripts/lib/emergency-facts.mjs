@@ -159,8 +159,14 @@ async function runHaltPhase(context) {
     requireProductionReady: false,
   });
   const king = await loadKingKeySet(new LocalEncryptedKeyProvider(context.paths.king, master));
-  const halt = new HaltSwitch(context.paths.halt, king, { fsync: false });
-  context.state.halt = halt;
+  // R5-B-07: أمرُ التمرينِ الملكيُّ يولِّدُه التمرينُ بنفسِه من مفتاحِ الملكِ
+  // الذي ولَّده للتوِّ — فلا إيقافَ ولا استئنافَ بنداءٍ مجرّدٍ حتى في التمرين.
+  const drillCommand = { id: `cmd:emergency-drill-${randomUUID()}` };
+  const halt = new HaltSwitch(context.paths.halt, king, {
+    fsync: false,
+    royalCommandVerifier: (command) => command.id === drillCommand.id,
+  });
+  Object.assign(context.state, { drillCommand, halt });
 
   // GPT-F05: عقدةُ التمرينِ لها مفتاحها (Ed25519) كأيِّ عقدةٍ في التشغيل. المفتاحُ
   // العامُّ يُسجَّل، والإقرارُ يُوقَّعُ به فوق (التجزئة، العهد، المعرّف) — فلا يُنتحَل.
@@ -175,7 +181,10 @@ async function runHaltPhase(context) {
       sign: (payload) => signHaltAck(String(drillPrivateKeyPem), payload),
     },
   });
-  const directive = halt.halt('تمرين الطوارئ M11.07 — إيقاف سيادي مقيس');
+  const directive = halt.halt(
+    'تمرين الطوارئ M11.07 — إيقاف سيادي مقيس',
+    /** @type {{ id: string }} */ (context.state.drillCommand),
+  );
   const reading = halt.read();
   if (reading.state !== 'halted' || reading.epoch <= 0) {
     return {
@@ -192,7 +201,10 @@ async function runHaltPhase(context) {
   /** @type {string} */
   let refusal = '';
   try {
-    halt.resume('محاولةُ استئنافٍ قبل الإقرارِ — يجب أن تُرَدَّ');
+    halt.resume(
+      'محاولةُ استئنافٍ قبل الإقرارِ — يجب أن تُرَدَّ',
+      /** @type {{ id: string }} */ (context.state.drillCommand),
+    );
   } catch (error) {
     refusal = errorCode(error);
   }
@@ -394,7 +406,10 @@ async function runResumePhase(context) {
     haltAckPayload(drillReading.directive?.hash ?? '', drillReading.epoch, DRILL_NODE_ID),
   );
   halt.confirmHalt(DRILL_NODE_ID, drillProof, 'تمرين الطوارئ M11.07 — إقرارُ العقدةِ بالإيقاف');
-  const directive = halt.resume('تمرين الطوارئ M11.07 — استئناف بعد إقرار العقدة');
+  const directive = halt.resume(
+    'تمرين الطوارئ M11.07 — استئناف بعد إقرار العقدة',
+    /** @type {{ id: string }} */ (context.state.drillCommand),
+  );
   const reading = halt.read();
   const historyOk = halt.verifyHistory().ok === true;
   if (reading.state !== 'running' || reading.epoch <= haltEpoch || !historyOk) {

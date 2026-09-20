@@ -121,6 +121,9 @@ async function court(options = {}) {
   const haltSwitch = new HaltSwitch(path.join(directory, 'halt.directive'), king, {
     log,
     fsync: false,
+    // R5-B-07: مُحقِّقُ الأمرِ الملكيِّ — لا يُوقفُ ولا يُستأنفُ إلّا بأمرٍ
+    // قُبل وثُبِّتَ في دفترِ الأوامرِ (التوقيعُ فُحِصَ عندَ القبول).
+    royalCommandVerifier: (command) => ledger.has(String(command.id)),
   });
   const crown = new CrownGateway(king, ca, log, { commandLedger: ledger, haltSwitch });
   const gateway =

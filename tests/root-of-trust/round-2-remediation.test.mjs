@@ -164,7 +164,7 @@ async function boot(options = {}) {
   const token = options.token ?? fakeToken({ king });
   const runtime = await createProductionRootOfTrust(
     productionEnv(king, options.env ?? {}),
-    { root, fsync: false },
+    { root, fsync: false, royalCommandVerifier: () => true },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -277,7 +277,7 @@ describe('UF-03 — محوُ ثلاثيةِ الإيقافِ لا يُعيدُ �
   test('بعدَ إيقافٍ سياديٍّ: حذفُ التوجيهِ والتاريخِ والحقبةِ يبقى مغلقاً', async () => {
     const { runtime, cleanup } = await boot();
     try {
-      const directive = await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      const directive = await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
       assert.equal(directive.state, 'halted');
       rmSync(runtime.haltSwitch.file, { force: true });
       rmSync(runtime.haltSwitch.historyFile, { force: true });
@@ -293,7 +293,7 @@ describe('UF-03 — محوُ ثلاثيةِ الإيقافِ لا يُعيدُ �
   test('حدُّ العهدِ يسكنُ خارجَ مجلَّدِ halt فلا يُمحى بمحوِه', async () => {
     const { runtime, root, cleanup } = await boot();
     try {
-      await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
       rmSync(join(root, 'halt'), { recursive: true, force: true });
       // صيغةُ البيانِ صارت مختومةً (‏`WL-098`): المتنُ تحتَ `body` والخاتَمُ
       // بجانبِه. الثابتُ المختبَرُ لم يتغيّر: العهدُ يسكنُ خارجَ `halt/`.

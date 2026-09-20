@@ -30,6 +30,7 @@
  * @property {string | null} providerResult — نتيجةُ المزوِّد (مُنظَّفة)
  * @property {string | null} failureReason
  * @property {string | null} auditRef — مرجعُ سجلِّ التدقيق
+ * @property {number | null} egressBytes — البايتاتُ المقيسةُ كما مرَّتْ عبرَ بوّابةِ الخروج (R5-B-04)؛ `null` إذا لم تُقَس
  *
  * @typedef {object} NotificationMessage
  * @property {string} ownerId
@@ -83,6 +84,7 @@ export function assertNotLoopback(destination) {
  *   providerResult?: string | null,
  *   failureReason?: string | null,
  *   auditRef?: string | null,
+ *   egressBytes?: number | null,
  * }} input
  * @returns {NotificationResult}
  */
@@ -97,6 +99,7 @@ export function createNotificationResult(input) {
     providerResult: input.providerResult ?? null,
     failureReason: input.failureReason ?? null,
     auditRef: input.auditRef ?? null,
+    egressBytes: input.egressBytes ?? null,
   });
 }
 

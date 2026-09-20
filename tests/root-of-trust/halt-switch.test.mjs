@@ -76,7 +76,12 @@ function setup() {
   const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'halt-switch-')));
   const file = join(dir, 'state', 'halt.json');
   const king = new KingIdentity();
-  return { dir, file, king, halt: new HaltSwitch(file, king, { fsync: false }) };
+  return {
+    dir,
+    file,
+    king,
+    halt: new HaltSwitch(file, king, { fsync: false, allowUnsignedTestHalt: true }),
+  };
 }
 
 /**
@@ -316,7 +321,7 @@ test('العقدة تحمل المفتاح العام وحده: تقرأ وتُ�
   const pem = king.publicKey.export({ type: 'spki', format: 'pem' });
   const verifier = royalVerifierFromPublicKey(String(pem));
   assert.equal(verifier.id, king.id);
-  const nodeSwitch = new HaltSwitch(file, verifier, { fsync: false });
+  const nodeSwitch = new HaltSwitch(file, verifier, { fsync: false, allowUnsignedTestHalt: true });
   const cannotHalt = capture(() => nodeSwitch.halt());
   assert.equal(cannotHalt instanceof HaltError ? cannotHalt.code : null, 'HALT_SIGNER_REQUIRED');
   halt.halt('إيقاف من الملك');
@@ -651,7 +656,7 @@ test('الوقائع تُثبت في سجل الأحداث: إصدار وإقر�
   const { dir, file, king } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const log = new EventLog();
-  const halt = new HaltSwitch(file, king, { fsync: false, log });
+  const halt = new HaltSwitch(file, king, { fsync: false, allowUnsignedTestHalt: true, log });
   const key = nodeKey();
   halt.registerNode('node-1', { pid: process.pid, nodeKey: key });
   halt.halt('سبب مسجَّل');
@@ -685,7 +690,7 @@ test('الخلاصة تعرض الحالة والعقد والإقرارات و�
 test('كائن آخر على نفس الملف يرى الإيقاف فوراً — القراءة من القرص لا الذاكرة', (t) => {
   const { dir, file, halt, king } = setup();
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const other = new HaltSwitch(file, king, { fsync: false });
+  const other = new HaltSwitch(file, king, { fsync: false, allowUnsignedTestHalt: true });
   assert.equal(other.isHalted(), false);
   halt.halt();
   assert.equal(other.isHalted(), true);

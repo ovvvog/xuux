@@ -39,6 +39,8 @@ function agent(id) {
     kind: 'agent',
     state: 'active',
     scope: 'org:interior',
+    // R5-B-09: سقفُ القدراتِ — الوكيلُ المُختبَرُ يملكُ قدرةَ الكتابة.
+    capabilities: ['action:write-data'],
   });
 }
 
@@ -65,6 +67,9 @@ function setup(options = {}) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
     requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
+    // R5-B-06: مُحقِّقُ أمرٍ موصولٌ — نطاقُ هذه المجموعةِ الاحتفاظُ والوصولُ
+    // لا توثيقُ الأمرِ، والأمرُ في الاختبارِ صحيحٌ ببنائِه.
+    royalCommandVerifier: () => true,
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   const { ledger } = createTestLedger({ log, assets, lattice });

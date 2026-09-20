@@ -112,7 +112,7 @@ function rig() {
   const boot = (root) =>
     createProductionRootOfTrust(
       env,
-      { root, fsync: false },
+      { root, fsync: false, royalCommandVerifier: () => true },
       {
         openSource: async () => ({
           source: stableToken(king, aeadKey, ledgerPair),
@@ -141,7 +141,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       const command = { id: 'أمرٌ-قابلٌ-للإعادة' };
       second.ledger.begin(command);
       await second.ledger.commitSigned(command, 'تمّ');
-      const directive = await second.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      const directive = await second.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
       assert.equal(directive.state, 'halted');
       assert.equal(body(root).haltEpoch >= 1, true);
       assert.equal(body(root).ledgerCommitted >= 1, true);
@@ -184,7 +184,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       const command = { id: 'أمرٌ-يُسقَط' };
       second.ledger.begin(command);
       await second.ledger.commitSigned(command, 'تمّ');
-      await second.haltSwitch.haltAsync('إيقافٌ سياديّ');
+      await second.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
       const advancedSequence = body(root).sequence;
       second.log.close?.();
       assert.equal(advancedSequence > snapshotSequence, true, 'التسلسلُ لم يتقدّمْ');

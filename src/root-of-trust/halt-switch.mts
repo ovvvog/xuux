@@ -141,6 +141,13 @@ export const HaltErrorCodes = [
   // `M11.04-F07`: ولا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ بلا شاهدٍ **خارجَ**
   // البيانِ المختوم؛ فبيانٌ وحدَه شاهدٌ يُسترجَعُ أقدمُ منه بخاتَمٍ صحيح.
   'HALT_SEALED_LOG_REQUIRED_IN_PRODUCTION',
+  // `R5-B-07` (تقرير: R5-B-05): الإيقافُ والاستئنافُ فعلٌ سياديٌّ فلا
+  // يصدرُ إلّا بأمرٍ ملكيٍّ موثَّقٍ حينَ المُحقِّقُ موصولٌ، ولا بلا تصريحِ
+  // اختبارٍ حينَ لا مُحقِّقَ — فشلٌ مغلقٌ في الحالَينِ.
+  'HALT_ROYAL_COMMAND_REQUIRED',
+  // `R5-B-07`: وتصريحُ الإيقافِ غيرِ الموقَّعِ للاختباراتِ لا يُركَّبُ في
+  // الإنتاجِ أصلًَ — يُرفضُ عندَ التركيبِ لا عندَ أوّلِ نداءٍ متجاوزٍ.
+  'HALT_UNSIGNED_HALT_FORBIDDEN_IN_PRODUCTION',
 ] as const;
 
 export type HaltErrorCode = (typeof HaltErrorCodes)[number];
@@ -384,6 +391,21 @@ export interface HaltSwitchOptions {
   sealEpoch?: (() => Promise<void>) | null;
   /** بيئةُ التشغيلِ — تُقرأُ لمعرفةِ هل الحدُّ الخارجيُّ إلزامٌ أم لا. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * R5-B-07 (تقرير: R5-B-05): مُحقِّقُ الأمرِ الملكيِّ. حينَ يُوصَلُ لا
+   * يصدرُ إيقافٌ ولا استئنافٌ إلّا بأمرٍ ملكيٍّ يُصدِّقُهُ هذا المُحقِّقُ،
+   * والنداءُ المباشرُ بلا أمرٍ ممنوعٌ حتّى معَ تصريحِ الاختبار. والأمرُ
+   * يُختمُ بعملِهِ (‏`halt`/`resume`) قبلَ التحقّقِ فلا يُعادُ تشغيلُ أمرِ
+   * إيقافٍ استئنافاً. والمُحقِّقُ يَنظُرُ في الأمرِ سجلّاً مفتوحاً يَقرأُ منه ما
+   * يشاءُ (المعرّفُ والعملُ ونحوُهما) بلا عقدِ صورةٍ مقفلة.
+   */
+  royalCommandVerifier?: ((command: Readonly<Record<string, unknown>>) => boolean) | null;
+  /**
+   * تصريحٌ للاختباراتِ المعزولةِ وحدها: يُجيزُ الإيقافَ والاستئنافَ بلا
+   * أمرٍ ملكيٍّ حينَ لا مُحقِّقَ موصولاً. يُرفضُ تركيبُهُ في الإنتاجِ فشلاً
+   * مغلقاً عندَ التركيبِ لا عندَ أوّلِ نداءٍ متجاوزٍ (‏R5-B-07).
+   */
+  allowUnsignedTestHalt?: boolean;
 }
 
 /** خلاصة تشغيلية للأداة والتدقيق. */
@@ -487,6 +509,8 @@ export class HaltSwitch implements HaltGuard {
   #epochFloor: HaltEpochFloor | null;
   #logAsync: HaltSealedEventSink | null;
   #sealEpoch: (() => Promise<void>) | null;
+  #royalCommandVerifier: ((command: Readonly<Record<string, unknown>>) => boolean) | null;
+  #allowUnsignedTestHalt: boolean;
 
   /**
    * @param file - مسار ملف التوجيه الدائم
@@ -505,6 +529,14 @@ export class HaltSwitch implements HaltGuard {
     this.#epochFloor = options.epochFloor ?? null;
     this.#logAsync = options.logAsync ?? null;
     this.#sealEpoch = options.sealEpoch ?? null;
+    this.#royalCommandVerifier = options.royalCommandVerifier ?? null;
+    this.#allowUnsignedTestHalt = options.allowUnsignedTestHalt ?? false;
+    // R5-B-07 (تقرير: R5-B-05): أوّلاً — لا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ
+    // يُجيزُ الإيقافَ غيرَ الموقَّعِ بتصريحِ اختبارٍ: فشلٌ مغلقٌ عندَ التركيبِ
+    // قبلَ كلِّ فحصٍ آخرَ، فلا يُمرَّرُ تصريحٌ ممنوعٌ إلى ما بعده.
+    if (this.#allowUnsignedTestHalt && isProductionRuntime(options.env ?? process.env)) {
+      throw new HaltError('HALT_UNSIGNED_HALT_FORBIDDEN_IN_PRODUCTION', {});
+    }
     // في الإنتاجِ لا يُركَّبُ مفتاحُ إيقافٍ شاهدُه داخلَ ما يُمحى معَه: فشلٌ
     // مغلقٌ عندَ التركيبِ لا عندَ أوّلِ محوٍ (‏`UF-03`).
     if (this.#epochFloor === null && isProductionRuntime(options.env ?? process.env)) {
@@ -611,11 +643,45 @@ export class HaltSwitch implements HaltGuard {
   }
 
   /**
+   * R5-B-07 (تقرير: R5-B-05): بوّابةُ الأمرِ الملكيِّ على الإيقافِ والاستئناف.
+   * الإيقافُ الشاملُ فعلٌ سياديٌّ فلا يصدرُ بنداءٍ مباشرٍ: حينَ المُحقِّقُ
+   * موصولٌ يُطلَبُ أمرٌ ملكيٌّ يُصدِّقُهُ، والأمرُ يُختمُ بعملِهِ (‏`halt`
+   * أو `resume`) قبلَ التحقّقِ فلا يُعادُ تشغيلُ أمرِ إيقافٍ استئنافاً. وحينَ
+   * لا مُحقِّقَ موصولاً لا يُجازُ الإيقافُ غيرُ الموقَّعِ إلّا بتصريحِ اختبارٍ
+   * صريحٍ — فالفشلُ مغلقٌ في الحالَينِ.
+   * @param command - الأمرُ الملكيُّ المُزعَمُ، إن وُجِدَ
+   * @param operation - العملُ المطلوبُ: `halt` أو `resume`
+   */
+  #requireRoyalCommand(command: unknown, operation: 'halt' | 'resume'): void {
+    if (this.#royalCommandVerifier !== null) {
+      if (typeof command !== 'object' || command === null) {
+        throw new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+          detail: `نداءٌ مباشرٌ بلا أمرٍ ملكيٍّ — العملُ المطلوبُ: ${operation}`,
+        });
+      }
+      const stamped = { ...(command as Record<string, unknown>), operation };
+      if (!this.#royalCommandVerifier(stamped)) {
+        throw new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+          detail: `أمرٌ ملكيٌّ غيرُ موثَّقٍ — العملُ المطلوبُ: ${operation}`,
+        });
+      }
+      return;
+    }
+    if (!this.#allowUnsignedTestHalt) {
+      throw new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+        detail: `لا مُحقِّقَ موصولاً ولا تصريحَ اختبارٍ — فشلٌ مغلقٌ — العملُ المطلوبُ: ${operation}`,
+      });
+    }
+  }
+
+  /**
    * يُصدر إيقافاً شاملاً: توجيهٌ موقَّع بعهدٍ جديد يمنع كل فعلٍ في كل عقدة.
    * @param reason - سبب الإيقاف، يُسجَّل ويُعاد في كل رفض
+   * @param command - الأمرُ الملكيُّ الموثِّقُ للإيقاف (‏R5-B-07)
    * @returns التوجيه الصادر
    */
-  halt(reason = 'royal sovereign halt'): HaltDirective {
+  halt(reason = 'royal sovereign halt', command?: unknown): HaltDirective {
+    this.#requireRoyalCommand(command, 'halt');
     const current = this.read();
     if (current.state === 'halted' && current.problem === undefined) {
       throw new HaltError('HALT_ALREADY_HALTED', { epoch: current.epoch, reason: current.reason });
@@ -632,9 +698,11 @@ export class HaltSwitch implements HaltGuard {
    * يستأنف التشغيل: يُرفض ما دامت عقدةٌ حيّة لم تُقرّ بالتوقف، فالاستئناف لا
    * يقع على ظنٍّ بأن الجميع توقف.
    * @param reason - سبب الاستئناف، يُسجَّل
+   * @param command - الأمرُ الملكيُّ الموثِّقُ للاستئناف (‏R5-B-07)
    * @returns التوجيه الصادر
    */
-  resume(reason = 'royal resume'): HaltDirective {
+  resume(reason = 'royal resume', command?: unknown): HaltDirective {
+    this.#requireRoyalCommand(command, 'resume');
     const current = this.read();
     if (current.state !== 'halted') {
       throw new HaltError('HALT_NOT_HALTED', { epoch: current.epoch });
@@ -663,9 +731,11 @@ export class HaltSwitch implements HaltGuard {
    * نظيرُ `halt` بتوقيعٍ داخلَ التوكن (F06). نفسُ الفحوصِ ونفسُ الترتيبِ ونفسُ
    * الأخطاء، والفرقُ الوحيدُ أن التوقيعَ نداءٌ غيرُ متزامنٍ لا استدعاءٌ محليّ.
    * @param reason - سبب الإيقاف، يُسجَّل ويُعاد في كل رفض
+   * @param command - الأمرُ الملكيُّ الموثِّقُ للإيقاف (‏R5-B-07)
    * @returns التوجيه الصادر
    */
-  async haltAsync(reason = 'royal sovereign halt'): Promise<HaltDirective> {
+  async haltAsync(reason = 'royal sovereign halt', command?: unknown): Promise<HaltDirective> {
+    this.#requireRoyalCommand(command, 'halt');
     const current = this.read();
     if (current.state === 'halted' && current.problem === undefined) {
       throw new HaltError('HALT_ALREADY_HALTED', { epoch: current.epoch, reason: current.reason });
@@ -690,9 +760,11 @@ export class HaltSwitch implements HaltGuard {
   /**
    * نظيرُ `resume` بتوقيعٍ داخلَ التوكن (F06) — بنفسِ شرطِ الإقرارِ الكامل.
    * @param reason - سبب الاستئناف، يُسجَّل
+   * @param command - الأمرُ الملكيُّ الموثِّقُ للاستئناف (‏R5-B-07)
    * @returns التوجيه الصادر
    */
-  async resumeAsync(reason = 'royal resume'): Promise<HaltDirective> {
+  async resumeAsync(reason = 'royal resume', command?: unknown): Promise<HaltDirective> {
+    this.#requireRoyalCommand(command, 'resume');
     const current = this.read();
     if (current.state !== 'halted') {
       throw new HaltError('HALT_NOT_HALTED', { epoch: current.epoch });

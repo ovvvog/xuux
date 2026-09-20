@@ -213,7 +213,9 @@ test('دفتر الأوامر والمرساة والإيقاف الشامل ك�
     assert.ok(capture(() => new FileAnchorStore(join(dir.path, 'a.jsonl')).append(record)));
     assert.ok(
       capture(() => {
-        const halt = new HaltSwitch(join(dir.path, 'halt.json'), king);
+        const halt = new HaltSwitch(join(dir.path, 'halt.json'), king, {
+          allowUnsignedTestHalt: true,
+        });
         halt.registerNode('node:one');
       }),
     );
