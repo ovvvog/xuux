@@ -117,6 +117,31 @@ test('R5-A-06: حقلٌ غيرُ عددٍ صحيحٍ في الأثرِ ⇒ مر�
   assert.ok(violations.some((v) => v.startsWith('R1/FIELD')));
 });
 
+test('LIVE-15: الأثرُ على كوميتٍ سابقٍ ورأسُ الشجرةِ غيرُه ⇒ مردودٌ بـR6/STALE', () => {
+  const root = makeTree();
+  const staleHead = 'dd87d7d400000000000000000000000000000000';
+  const { violations } = checkSkipBaseline(root, staleHead);
+  const stale = violations.filter((v) => v.startsWith('R6/STALE'));
+  assert.equal(stale.length, 1, `تُوقِّعَ انتهاكٌ واحدٌ، والذي وقعَ: ${violations.join(' | ')}`);
+  assert.match(stale.join(' | '), /fba8c10f.*dd87d7d4/);
+});
+
+test('LIVE-15: الأثرُ على رأسِ الشجرةِ نفسِه ⇒ لا انتهاكَ بـR6', () => {
+  const root = makeTree();
+  const headCommit = 'fba8c10f000000000000000000000000000000000';
+  const { violations } = checkSkipBaseline(root, headCommit);
+  assert.ok(
+    !violations.some((v) => v.startsWith('R6/STALE')),
+    `لا ينبغي أن يكونَ هناكَ انتهاكُ R6: ${violations.join(' | ')}`,
+  );
+});
+
+test('LIVE-15: رأسٌ غيرُ معروفٍ (لا مستودعَ git) ⇒ تُخطَّى R6 لا تُسقَط', () => {
+  const root = makeTree();
+  const { violations } = checkSkipBaseline(root, null);
+  assert.ok(!violations.some((v) => v.startsWith('R6/STALE')));
+});
+
 test('قارئُ TAP يُفرِّقُ ثلاثةَ مقاييسَ ولا يَخلِطُها', () => {
   const tap = [
     'TAP version 13',
