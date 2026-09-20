@@ -144,18 +144,39 @@ function realm(options = {}) {
   /** @type {Record<string, string>} */
   const vault = {};
   for (const device of policy.devices) vault[device.factorRef] = factorSecret;
+  const factorSecrets = withSecrets
+    ? {
+        /** @param {string} name */
+        read: (/** @type {string} */ name) => vault[name] ?? null,
+      }
+    : null;
   const kingAuth = new KingAuthenticator({
     policy: /** @type {never} */ (policy),
     king,
     log: withLog ? log : null,
-    factorSecrets: withSecrets
-      ? {
-          /** @param {string} name */
-          read: (name) => vault[name] ?? null,
-        }
-      : null,
+    factorSecrets,
     ...(nowMs === undefined ? {} : { nowMs }),
   });
+  /**
+   * إعادةُ تشغيلٍ حقيقيةٌ لا محاكاة: السجلُّ الدائمُ يُغلق ثم يُفتح على **الملفِّ
+   * نفسِه** (فقفلُه لا يُؤخذ مرّتين)، ويُركَّب مصادقٌ جديدٌ بالسياسةِ والهويةِ
+   * والمزوّدِ نفسِها — وهو المسلكُ الذي أثبته المجلسُ في `R5-B-03`.
+   * @returns {{ kingAuth: KingAuthenticator, log: PersistentEventLog }}
+   */
+  const restart = () => {
+    log.close?.();
+    const reopened = new PersistentEventLog(logFile, { fsync: false });
+    return {
+      kingAuth: new KingAuthenticator({
+        policy: /** @type {never} */ (policy),
+        king,
+        log: reopened,
+        factorSecrets,
+        ...(nowMs === undefined ? {} : { nowMs }),
+      }),
+      log: reopened,
+    };
+  };
   const console_ = new RoyalConsole({
     policy: CONSOLE_POLICY,
     gateway: realGateway(log),
@@ -209,6 +230,7 @@ function realm(options = {}) {
   return {
     console: console_,
     kingAuth,
+    restart,
     king,
     crown,
     haltSwitch,
@@ -452,6 +474,120 @@ test('العاملُ الثاني: شكلٌ خاطئٌ ورمزٌ خاطئٌ ي�
       () => authenticate({ factorCode: code }),
       AUTHN_ERRORS.FACTOR_REPLAYED,
       'رمزُ عاملٍ استُهلك مرّةً',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('R5-B-03: مصادقٌ جديدٌ بعد إعادةِ التشغيلِ لا يقبل رمزَ عاملٍ استُهلك', async () => {
+  // مسلكُ المجلسِ الخمسيُّ حرفاً بحرف: استهلاكٌ، ثم رفضٌ على المصادقِ عينِه، ثم
+  // مصادقٌ **جديدٌ** بالسياسةِ والمزوّدِ نفسيهما داخلَ نافذةِ الخطوةِ عينِها.
+  const realmUnderTest = realm();
+  const { authenticate, factorCode, logFile, restart, cleanup } = realmUnderTest;
+  /** @type {{ close?: () => void } | null} */
+  let reopenedLog = null;
+  try {
+    const code = factorCode();
+    const opened = await authenticate({ factorCode: code });
+    assert.ok(opened.token !== '', 'الجلسةُ الأولى تُفتح برمزٍ صحيح');
+    await refuses(
+      () => authenticate({ factorCode: code }),
+      AUTHN_ERRORS.FACTOR_REPLAYED,
+      'الإعادةُ على المصادقِ عينِه',
+    );
+
+    // والقيدُ الدائمُ مكتوبٌ على **القرصِ** قبل إعادةِ التشغيل — وهو ما كان
+    // يُكتب ولا يُقرأ، فلا يُقاس هنا وعدٌ بل ملفٌّ.
+    const consumedOnDisk = onDisk(logFile).filter(
+      (event) => event.type === AUTHN_POLICY.audit.factorConsumedEvent,
+    );
+    assert.equal(consumedOnDisk.length, 1, 'استهلاكٌ واحدٌ مقيَّدٌ على القرص');
+
+    const restarted = restart();
+    reopenedLog = restarted.log;
+    await refuses(
+      () =>
+        restarted.kingAuth.authenticate({
+          actorId: realmUnderTest.king.id,
+          deviceId: TRUSTED_DEVICE.id,
+          factorCode: code,
+        }),
+      AUTHN_ERRORS.FACTOR_REPLAYED,
+      'الإعادةُ عبرَ مصادقٍ جديدٍ داخلَ نافذةِ الخطوة',
+    );
+    // ولا قيدَ استهلاكٍ ثانيَ للرمزِ المردودِ: الرفضُ يقع **قبل** الاستهلاك.
+    assert.equal(
+      onDisk(logFile).filter((event) => event.type === AUTHN_POLICY.audit.factorConsumedEvent)
+        .length,
+      1,
+      'الرفضُ لا يُقيِّد استهلاكاً جديداً',
+    );
+
+    // وليس الإغلاقُ برفضِ كلِّ شيءٍ: رمزُ خطوةٍ لم يُستهلَك يُقبل على المصادقِ
+    // الجديدِ نفسِه — فلا تُخضَّر النتيجةُ بالكفِّ عن الفتح.
+    const fresh = await restarted.kingAuth.authenticate({
+      actorId: realmUnderTest.king.id,
+      deviceId: TRUSTED_DEVICE.id,
+      factorCode: factorCode(1),
+    });
+    assert.ok(fresh.token !== '', 'رمزٌ لم يُستهلَك يفتح جلسةً بعد إعادةِ التشغيل');
+  } finally {
+    reopenedLog?.close?.();
+    cleanup();
+  }
+});
+
+test('R5-B-03: المصادقُ الجديدُ لا يُورَّث جلسةً ولا يقبل رمزَ جلسةٍ من نسخةٍ سابقة', async () => {
+  const realmUnderTest = realm();
+  const { authenticate, restart, cleanup } = realmUnderTest;
+  /** @type {{ close?: () => void } | null} */
+  let reopenedLog = null;
+  try {
+    const opened = await authenticate();
+    const restarted = restart();
+    reopenedLog = restarted.log;
+    // الجلساتُ في ذاكرةِ النسخةِ — وأثرُ الحدِّ **مغلق**: من فقد جلستَه يُصادق
+    // من جديد، ولا يُقبل رمزُ جلسةٍ لم تفتحها هذه النسخة.
+    await refuses(
+      () => restarted.kingAuth.resolve(opened.token),
+      AUTHN_ERRORS.SESSION_INVALID,
+      'رمزُ جلسةٍ من نسخةٍ سابقة',
+    );
+    assert.equal(restarted.kingAuth.size, 0, 'المصادقُ الجديدُ يبدأ بلا جلسةٍ قائمة');
+  } finally {
+    reopenedLog?.close?.();
+    cleanup();
+  }
+});
+
+test('R5-B-03: الفشلُ مغلق — سجلٌّ يُكتب فيه ولا يُقرأ منه لا يفتح جلسةً', async () => {
+  const realmUnderTest = realm();
+  const { cleanup } = realmUnderTest;
+  try {
+    // سجلٌّ يستوفي عقدَ `append` وحدَه: لا `snapshot` فلا قيدَ استهلاكٍ يُقرأ،
+    // فلا يُدَّعى منعُ إعادةٍ يزول بإعادةِ التشغيل.
+    const appendOnly = { append: () => undefined };
+    const blind = new KingAuthenticator({
+      policy: /** @type {never} */ (AUTHN_POLICY),
+      king: realmUnderTest.king,
+      log: /** @type {never} */ (appendOnly),
+      factorSecrets: { read: () => 'a'.repeat(64) },
+    });
+    await refuses(
+      () =>
+        blind.authenticate({
+          actorId: realmUnderTest.king.id,
+          deviceId: TRUSTED_DEVICE.id,
+          factorCode: factorCodeForStep({
+            secret: 'a'.repeat(64),
+            step: Math.floor(Date.now() / 1000 / AUTHN_POLICY.secondFactor.stepSeconds),
+            digits: AUTHN_POLICY.secondFactor.digits,
+            algorithm: AUTHN_POLICY.secondFactor.algorithm,
+          }),
+        }),
+      AUTHN_ERRORS.FACTOR_LEDGER_UNREADABLE,
+      'سجلٌّ بلا قراءةِ قيدِ استهلاك',
     );
   } finally {
     cleanup();
