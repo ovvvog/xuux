@@ -25,10 +25,16 @@
  * 1. **الجلساتُ في الذاكرةِ لهذه العملية** — تزول بإعادةِ التشغيل، ولا يعرفها
  *    عنقودٌ من عدّةِ نسخ؛ والمخزنُ المشتركُ قرارُ تشغيلٍ في `M10` كحالِ جلسةِ
  *    `config/api.yaml`. وأثرُ الحدِّ **مغلق**: من فقد جلستَه يُصادق من جديد.
- * 2. **استهلاكُ رمزِ العاملِ في الذاكرةِ كذلك** — فرمزٌ استُهلك ثم أُعيد تشغيلُ
- *    العمليةِ **داخلَ نافذةِ خطوتِه** يُقبل مرّةً ثانية؛ والنافذةُ ثانيةٌ معلَنةٌ
- *    قدرُها `stepSeconds` مضروبةً في مدى الانزياحِ المقبول، ودَينُ الاستهلاكِ
- *    الدائمِ مُسنَدٌ إلى مخزنِ الجلساتِ المشتركِ نفسِه في `M10`.
+ * 2. **استهلاكُ رمزِ العاملِ يُستعاد من السجلِّ الدائمِ لا من الذاكرةِ وحدَها**
+ *    — وهذا كان دَيناً مفتوحاً كشفه المجلسُ (`R5-B-03`): نسخةٌ جديدةٌ من
+ *    المصادقِ كانت تبدأ بمجموعةِ استهلاكٍ فارغةٍ، فرمزٌ استُهلك وقُيِّد على
+ *    القرصِ يُقبل ثانيةً داخلَ نافذةِ خطوتِه. وقد أُغلق بأن تُقرأ قيودُ
+ *    `audit.factorConsumedEvent` من السجلِّ الموصولِ نفسِه عند أولِ مصادقةٍ، فلا
+ *    مخزنَ جديدٌ ولا استيرادَ طبقةٍ. **والباقي معلَنٌ:** نسختانِ تعملانِ **معاً**
+ *    على سجلٍّ واحدٍ لا ترى إحداهما ما استهلكته الأخرى بعد لحظةِ قراءتِها، لأن
+ *    السجلَّ لا يُعاد تحميلُه من الملفِّ عند كلِّ إلحاق؛ وذاك دَينُ المخزنِ
+ *    المشتركِ في `M10` لا دَينُ هذه القراءة. وسجلٌّ **لا يُقرأ منه** يُرَدُّ
+ *    بـ`AUTHN_FACTOR_LEDGER_UNREADABLE` ولا يُدَّعى معه منعُ إعادة.
  * 3. **سرُّ العاملِ يُقرأ من مزوِّدٍ خارجَ هذه الوحدة** — وهي لا تولّده ولا
  *    تُخزّنه ولا تكتبه في قيدٍ ولا رسالة؛ وربطُ المزوِّدِ بمخزنِ الأسرارِ
  *    البعيدِ (`src/root-of-trust/key-provider-remote.mts`) قرارُ تشغيلٍ لا
@@ -68,6 +74,7 @@ export const AUTHN_ERRORS = Object.freeze({
   FACTOR_REQUIRED: 'AUTHN_FACTOR_REQUIRED',
   FACTOR_INVALID: 'AUTHN_FACTOR_INVALID',
   FACTOR_REPLAYED: 'AUTHN_FACTOR_REPLAYED',
+  FACTOR_LEDGER_UNREADABLE: 'AUTHN_FACTOR_LEDGER_UNREADABLE',
   SECRET_MISSING: 'AUTHN_SECRET_MISSING',
   SESSION_INVALID: 'AUTHN_SESSION_INVALID',
   SESSION_EXPIRED: 'AUTHN_SESSION_EXPIRED',
@@ -280,6 +287,7 @@ function constantTimeEqual(left, right) {
 /**
  * @typedef {object} AuthnLogLike
  * @property {(type: string, actor: string, data: Record<string, unknown>) => unknown} append
+ * @property {(() => ReadonlyArray<{ type?: unknown, data?: unknown }>) | undefined} [snapshot]
  */
 
 /**
@@ -320,6 +328,13 @@ export class KingAuthenticator {
   #sessions = new Map();
   /** «جهاز:خطوة» لكلِّ عاملٍ استُهلك. @type {Set<string>} */
   #consumed = new Set();
+  /**
+   * هل استُعيدَ قيدُ الاستهلاكِ الدائمُ في هذه النسخةِ؟ — يُقرأ **مرّةً واحدةً**
+   * لكلِّ نسخةٍ عند أولِ مصادقةٍ، لا عند التركيبِ: التركيبُ يقع دائماً في جذرِ
+   * التركيبِ ولو لم يُصادِق أحدٌ، فقراءةُ سجلٍّ كاملٍ فيه ثمنٌ يُدفع بلا سبب.
+   * @type {boolean}
+   */
+  #consumedRestored = false;
 
   /**
    * @param {{ policy?: KingAuthPolicy, dir?: string, king?: AuthnKingLike | null, log?: AuthnLogLike | null, factorSecrets?: FactorSecretsLike | null, nowMs?: () => number }} [deps]
@@ -441,6 +456,11 @@ export class KingAuthenticator {
       );
     }
     const stamp = `${device.id}:${matchedStep}`;
+    if (this.#policy.secondFactor.singleUse) {
+      // R5-B-03: القيدُ الدائمُ يُقرأ **قبل** سؤالِ الاستهلاكِ وبالأرضيّةِ نفسِها
+      // التي يُقلِّم بها `#pruneConsumed`، وإلا اختلف ما يُحفظ عمّا يُستعاد.
+      this.#restoreConsumed(log, currentStep - acceptedSkewSteps - 1);
+    }
     if (this.#policy.secondFactor.singleUse && this.#consumed.has(stamp)) {
       throw new AuthnError(
         AUTHN_ERRORS.FACTOR_REPLAYED,
@@ -606,6 +626,54 @@ export class KingAuthenticator {
     for (const [fingerprint, session] of this.#sessions) {
       if (now >= session.expiresAtMs) this.#sessions.delete(fingerprint);
     }
+  }
+
+  /**
+   * استعادةُ قيدِ الاستهلاكِ من **السجلِّ الدائمِ نفسِه** الذي تكتبُ فيه هذه
+   * الطبقةُ كلَّ عاملٍ يُستهلَك (`audit.factorConsumedEvent` بجهازِه وخطوتِه).
+   *
+   * **العيبُ الذي يُغلقه هذا التابعُ، وقد قِيس لا افتُرض (نتيجةُ المجلسِ
+   * `R5-B-03`):** كان `#consumed` مجموعةً في ذاكرةِ النسخةِ وحدَها، فنسخةٌ
+   * جديدةٌ — بإعادةِ تشغيلِ العمليةِ أو بـ`new KingAuthenticator` بالسياسةِ
+   * والمزوّدِ نفسيهما — تبدأ بمجموعةٍ فارغةٍ، فرمزٌ استُهلك وقُيِّد **على
+   * القرصِ** يُقبل مرّةً ثانيةً داخلَ نافذةِ خطوتِه. والمِجسُّ أثبت ذلك: قيدا
+   * استهلاكٍ على القرصِ وجلستانِ بالرمزِ الواحد.
+   *
+   * ولا مخزنَ جديدٍ هنا ولا استيرادَ من طبقةٍ أخرى: القيدُ الدائمُ كان مكتوباً
+   * ولم يكن **مقروءاً**، وهذا التابعُ يقرأُه. وما لا يُغلقه معلَنٌ في حدودِ
+   * الوحدةِ: نسختانِ تعملانِ **معاً** على سجلٍّ واحدٍ لا ترى إحداهما استهلاكَ
+   * الأخرى بعد لحظةِ قراءتِها، وذاك دَينُ المخزنِ المشتركِ لا دَينُ هذا التابع.
+   *
+   * @param {AuthnLogLike} log
+   * @param {number} floorStep أدنى خطوةٍ ما زالت في نافذةِ القبول
+   * @returns {void}
+   */
+  #restoreConsumed(log, floorStep) {
+    if (this.#consumedRestored) return;
+    const reader = /** @type {{ snapshot?: unknown }} */ (log).snapshot;
+    // والفشلُ مغلقٌ (المادة 9): سجلٌّ يُكتب فيه ولا يُقرأ منه لا يمنع إعادةً عبر
+    // حدِّ العملية، فلا يُدَّعى منعُ الإعادةِ ويُرفض الفتحُ **باسمِ** الحدّ.
+    if (typeof reader !== 'function') {
+      throw new AuthnError(
+        AUTHN_ERRORS.FACTOR_LEDGER_UNREADABLE,
+        'قيدُ استهلاكِ العواملِ غيرُ مقروءٍ من السجلِّ الموصول، ومنعُ الإعادةِ بلا قراءةِ قيدٍ دائمٍ منعٌ يزول بإعادةِ التشغيل؛ فلا تُفتح جلسةٌ قويةٌ يُدَّعى لعاملِها منعُ إعادةٍ لا يُقاس.',
+      );
+    }
+    const events = /** @type {() => ReadonlyArray<{ type?: unknown, data?: unknown }>} */ (
+      reader
+    ).call(log);
+    const consumedEvent = this.#policy.audit.factorConsumedEvent;
+    for (const event of events) {
+      if (event?.type !== consumedEvent) continue;
+      const data = /** @type {{ device?: unknown, step?: unknown }} */ (event.data ?? {});
+      const { device, step } = data;
+      // والخطواتُ الخارجةُ من النافذةِ تُترك: رمزُها يُرفض بـ`FACTOR_INVALID`
+      // قبل أن يُسأل عن استهلاكِه، فحملُها نموٌّ بلا فائدةٍ كما في المُقلِّم.
+      if (typeof device === 'string' && typeof step === 'number' && step >= floorStep) {
+        this.#consumed.add(`${device}:${step}`);
+      }
+    }
+    this.#consumedRestored = true;
   }
 
   /**
