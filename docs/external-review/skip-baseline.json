@@ -1,0 +1,61 @@
+{
+  "generatedBy": "npm run measure:skip-baseline",
+  "measurements": [
+    {
+      "engagement": "M11.05",
+      "plan": "docs/external-review/M11.05-round-1-plan.md",
+      "command": "env -u DATABASE_URL npm test",
+      "commit": "fba8c10ff6255f0353ffa503496ee835f8e93648",
+      "measuredOn": "2026-09-20",
+      "tests": 2127,
+      "pass": 2001,
+      "fail": 0,
+      "skipped": 126,
+      "skipLines": 128,
+      "topLevelSkipPoints": 121,
+      "attributedToDatabaseUrl": 92,
+      "otherReasons": [
+        {
+          "reason": "swtpm/XUUX_TPM_SIM unavailable",
+          "count": 25
+        },
+        {
+          "reason": "متغيّراتٌ بيئيّةٌ غائبةٌ — الاختبارُ الخارجيُّ يتخطّى لا يفشل، لكنّ الدَّينَ لا يُغلَق",
+          "count": 1
+        },
+        {
+          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA). القناة منفذة ومختبَرة وحدويّاً.",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "engagement": "M11.06",
+      "plan": "docs/external-review/M11.06-round-2-plan.md",
+      "command": "env -u DATABASE_URL npm test",
+      "commit": "fba8c10ff6255f0353ffa503496ee835f8e93648",
+      "measuredOn": "2026-09-20",
+      "tests": 2127,
+      "pass": 2001,
+      "fail": 0,
+      "skipped": 126,
+      "skipLines": 128,
+      "topLevelSkipPoints": 121,
+      "attributedToDatabaseUrl": 92,
+      "otherReasons": [
+        {
+          "reason": "swtpm/XUUX_TPM_SIM unavailable",
+          "count": 25
+        },
+        {
+          "reason": "متغيّراتٌ بيئيّةٌ غائبةٌ — الاختبارُ الخارجيُّ يتخطّى لا يفشل، لكنّ الدَّينَ لا يُغلَق",
+          "count": 1
+        },
+        {
+          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA). القناة منفذة ومختبَرة وحدويّاً.",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}
