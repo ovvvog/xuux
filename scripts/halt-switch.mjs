@@ -137,7 +137,14 @@ export async function run(argv, env, deps = {}) {
     king = await loadKingKeySet(kingKeyProviderFromEnv(env));
   }
   try {
-    const halt = new HaltSwitch(config.file, king);
+    // R5-B-07: الإصدارُ من الأداةِ أمرٌ ملكيٌّ تُنشئُه الأداةُ وتُمرِّرُه — فلا
+    // إيقافَ بنداءٍ مجرّدٍ. والأداةُ لا تُصدِرُ إلّا لمن حملَ مفتاحَ الملكِ
+    // (التوكنَ في الإنتاجِ أو المخزنَ في التطويرِ)، وأما وضعُ المفتاحِ العامِّ
+    // فيَعبرُ البوّابةَ ويُرَدُّ عندَ التوقيعِ برمزِه المعلَن `HALT_SIGNER_REQUIRED`.
+    const royalCommand = { id: `cmd:halt-cli-${new Date().toISOString()}` };
+    const halt = new HaltSwitch(config.file, king, {
+      royalCommandVerifier: (command) => command.id === royalCommand.id,
+    });
 
     if (args.command === 'status') {
       const description = halt.describe();
@@ -148,8 +155,8 @@ export async function run(argv, env, deps = {}) {
       // في الإنتاج التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكن، ولا نظيرَ متزامنٌ له:
       // `HsmSigner.sign` يرفعُ `HSM_SYNC_SIGN_UNSUPPORTED` عن قصد.
       const directive = production
-        ? await halt.haltAsync(args.reason ?? 'royal sovereign halt')
-        : halt.halt(args.reason ?? 'royal sovereign halt');
+        ? await halt.haltAsync(args.reason ?? 'royal sovereign halt', royalCommand)
+        : halt.halt(args.reason ?? 'royal sovereign halt', royalCommand);
       return args.json
         ? JSON.stringify({ halted: true, directive }, null, 2)
         : `⛔ صدر الإيقاف في العهد ${directive.epoch} بإصدار المفتاح ${directive.keyVersion}\nالسبب: ${directive.reason}\nالتجزئة: ${directive.hash}`;
@@ -157,8 +164,8 @@ export async function run(argv, env, deps = {}) {
 
     if (args.command === 'resume') {
       const directive = production
-        ? await halt.resumeAsync(args.reason ?? 'royal resume')
-        : halt.resume(args.reason ?? 'royal resume');
+        ? await halt.resumeAsync(args.reason ?? 'royal resume', royalCommand)
+        : halt.resume(args.reason ?? 'royal resume', royalCommand);
       return args.json
         ? JSON.stringify({ resumed: true, directive }, null, 2)
         : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;

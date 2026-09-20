@@ -316,8 +316,8 @@ export function loadConsolePolicy(options = {}) {
 
 /**
  * @typedef {object} ConsoleHaltLike
- * @property {(reason?: string) => { epoch: number, reason: string, state: string }} halt
- * @property {(reason?: string) => { epoch: number, reason: string, state: string }} resume
+ * @property {(reason?: string, command?: unknown) => { epoch: number, reason: string, state: string }} halt
+ * @property {(reason?: string, command?: unknown) => { epoch: number, reason: string, state: string }} resume
  * @property {() => { state: string, epoch: number, reason: string, at: string | null }} read
  */
 
@@ -815,10 +815,12 @@ export class RoyalConsole {
             'زرُّ الإيقافِ الشاملِ غيرُ موصولٍ بالديوان؛ وإيقافٌ يُعلَن ولا يُكتب توجيهُه على القرصِ إيقافٌ في عمليةٍ واحدةٍ لا في دولة.',
           );
         }
+        // R5-B-07: الإيقافُ والاستئنافُ يُنفَّذانِ بالأمرِ الملكيِّ المقبولِ
+        // نفسِه لا بنداءٍ مجرّدٍ — فالمفتاحُ يتحقّقُ من الأمرِ بوّابتِه هو.
         const directive =
           spec.kind === 'halt'
-            ? halt.halt(reason === '' ? undefined : reason)
-            : halt.resume(reason === '' ? undefined : reason);
+            ? halt.halt(reason === '' ? undefined : reason, royal)
+            : halt.resume(reason === '' ? undefined : reason, royal);
         return { state: directive.state, epoch: directive.epoch, reason: directive.reason };
       }
       case 'veto':

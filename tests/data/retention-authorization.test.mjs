@@ -114,6 +114,9 @@ function setup(options = {}) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
     ...(withIdentityGate ? { identityGate: gate } : { requireIdentityGate: false }),
+    // R5-B-06: مُحقِّقُ أمرٍ موصولٌ — نطاقُ هذه المجموعةِ الاحتفاظُ والوصولُ
+    // لا توثيقُ الأمرِ، والأمرُ في الاختبارِ صحيحٌ ببنائِه.
+    royalCommandVerifier: () => true,
   });
   /** @type {Array<{ actorId: string, action: string }>} */
   const authorizeCalls = [];

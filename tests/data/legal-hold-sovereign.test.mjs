@@ -76,6 +76,9 @@ function setup({ withEnforcement = true } = {}) {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
     requireIdentityGate: false,
+    // R5-B-06: مُحقِّقُ أمرٍ موصولٌ — نطاقُ هذه المجموعةِ الاحتفاظُ والوصولُ
+    // لا توثيقُ الأمرِ، والأمرُ في الاختبارِ صحيحٌ ببنائِه.
+    royalCommandVerifier: () => true,
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   const { ledger } = createTestLedger({ log: /** @type {never} */ (log), assets, lattice });

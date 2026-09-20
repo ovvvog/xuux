@@ -121,6 +121,9 @@ function setup() {
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
     identityGate: /** @type {never} */ (identityGate),
+    // R5-B-06: مُحقِّقُ أمرٍ موصولٌ — نطاقُ هذه المجموعةِ الاحتفاظُ والوصولُ
+    // لا توثيقُ الأمرِ، والأمرُ في الاختبارِ صحيحٌ ببنائِه.
+    royalCommandVerifier: () => true,
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   const { ledger, repository: lineageRepository } = createTestLedger({ log, assets, lattice });

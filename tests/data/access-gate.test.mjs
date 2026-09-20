@@ -63,6 +63,9 @@ function setup({ withEnforcement = true, withQuarantine = true, withLineage = tr
     decisionPoint: createPolicyDecisionPoint({ bundle }),
     log,
     requireIdentityGate: false, // اختباراتٌ لا تُمرِّر بوابةَ هويةٍ
+    // R5-B-06: مُحقِّقُ أمرٍ موصولٌ — نطاقُ هذه المجموعةِ الاحتفاظُ والوصولُ
+    // لا توثيقُ الأمرِ، والأمرُ في الاختبارِ صحيحٌ ببنائِه.
+    royalCommandVerifier: () => true,
   });
   const assets = createMemoryRepository(DataCatalog.spec);
   // دفتر النسب شرط تركيبٍ للفهرس وللبوابة معاً بعد `M7.04`.
@@ -105,6 +108,9 @@ function actorOf(role, patch = {}) {
     kind: /** @type {const} */ ('human'),
     state: 'active',
     scope: 'org:interior',
+    // R5-B-09: سقفُ القدراتِ في سياسةِ الكتابة — الفاعلُ المُختبَرُ يملكُ
+    // قدرةَ الكتابة، والدورُ وحدهُ لم يعد يكفي.
+    capabilities: ['action:write-data'],
     ...patch,
   };
 }

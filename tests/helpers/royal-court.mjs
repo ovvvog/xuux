@@ -99,6 +99,9 @@ export async function royalCourt(options = {}) {
   const haltSwitch = new HaltSwitch(path.join(directory, 'halt.directive'), king, {
     log,
     fsync: false,
+    // R5-B-07: لا إيقافَ ولا استئنافَ إلّا بأمرٍ قُبل وثُبِّتَ في دفترِ الأوامرِ
+    // (التوقيعُ فُحِصَ عندَ القبول) — الديوانُ هو مصدرُ الأمرِ لا النداءُ المجرّد.
+    royalCommandVerifier: (command) => ledger.has(String(command.id)),
   });
   const crown = new CrownGateway(king, ca, log, { commandLedger: ledger, haltSwitch });
   const factorSecret = randomBytes(32).toString('hex');
