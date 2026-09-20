@@ -14,12 +14,13 @@
 //   - R4: العددُ المُعلَنُ في الوثيقةِ يُطابقُ `attributedToDatabaseUrl` من الأثرِ —
 //     لا `skipped` ولا `skipLines`، فالجملةُ تنسبُ التخطّي إلى `DATABASE_URL` نصّاً.
 //   - R5: الوثيقةُ تُسمّي **الأمرَ** و**الكوميتَ** الذي قِيسَ عليهما — فقياسٌ بلا نسبةٍ زمنيّةٍ يَبلى صامتاً.
-//   - R6: الأثرُ يُقابَلُ **بالواقعِ** لا بالوثيقةِ وحدَها — فكوميتُ الأثرِ يُقابَلُ برأسِ الشجرةِ،
-//     وأثرٌ قِيسَ على كوميتٍ سابقٍ ثمَّ نمَتِ الحزمةُ بعدَهُ يَسقُطُ لا يَمُرُّ أخضرَ (LIVE-15).
+//   - R6: الأثرُ يُقابَلُ **بالواقعِ** لا بالوثيقةِ وحدَها — فعددُ ملفّاتِ الاختبارِ في الأثرِ
+//     يُقابَلُ بعددِها على القرصِ، وأثرٌ قِيسَ على شجرةٍ ثمَّ نمَتْ بملفّاتٍ جديدَةٍ
+//     يَسقُطُ لا يَمُرُّ أخضرَ (LIVE-15). وكوميتُ الأثرِ يَبقى للنسبةِ الزمنيّةِ (R5) لا للقياسِ.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { countTestFiles } from './lib/doc-count-facts.mjs';
 
 const ARTIFACT = 'docs/external-review/skip-baseline.json';
 const REVIEW_DIR = 'docs/external-review';
@@ -53,10 +54,9 @@ function reviewDocs(root) {
 /**
  * يُشغِّلُ القواعدَ ويُعيدُ قائمةَ الانتهاكاتِ — دالّةٌ نقيّةٌ ليقرأَها الاختبارُ.
  * @param {string} root
- * @param {string | null} [headCommit] — رأسُ الشجرةِ لقاعدةِ R6 (يُمرَّرُ من main أو من الاختبارِ).
  * @returns {{ violations: string[], entryCount: number, docCount: number }}
  */
-export function checkSkipBaseline(root, headCommit) {
+export function checkSkipBaseline(root) {
   /** @type {string[]} */
   const violations = [];
   const artifactPath = path.join(root, ARTIFACT);
@@ -101,6 +101,7 @@ export function checkSkipBaseline(root, headCommit) {
     'skipLines',
     'topLevelSkipPoints',
     'attributedToDatabaseUrl',
+    'testFileCount',
   ];
   /** @type {Map<string, any>} */
   const byPlan = new Map();
@@ -171,15 +172,15 @@ export function checkSkipBaseline(root, headCommit) {
   }
 
   // ── R6 · تقادُمُ الأثرِ ──
-  // الأثرُ يُقابَلُ بالواقعِ لا بالوثيقةِ وحدَها: كوميتُ الأثرِ يُقابَلُ برأسِ الشجرةِ،
-  // فأثرٌ قِيسَ على كوميتٍ سابقٍ ثمَّ نمَتِ الحزمةُ بعدَهُ يَسقُطُ لا يَمُرُّ أخضرَ (LIVE-15).
-  if (headCommit) {
-    for (const [i, e] of entries.entries()) {
-      if (typeof e?.commit === 'string' && e.commit !== headCommit) {
-        violations.push(
-          `R6/STALE: المُدخلةُ ${i} قِيسَت على كوميتٍ ${e.commit.slice(0, 8)} ورأسُ الشجرةِ ${headCommit.slice(0, 8)} — القياسُ متقادِمٌ، أَعِدْه بـ\`npm run measure:skip-baseline\`.`,
-        );
-      }
+  // الأثرُ يُقابَلُ بالواقعِ لا بالوثيقةِ وحدَها: عددُ ملفّاتِ الاختبارِ في الأثرِ يُقابَلُ
+  // بعددِها على القرصِ، فأثرٌ قِيسَ على شجرةٍ ثمَّ نمَتْ بملفّاتٍ جديدَةٍ يَسقُطُ لا يَمُرُّ
+  // أخضرَ (LIVE-15). وعددُ الملفّاتِ لا يَتغيّرُ بتحديثِ الأثرِ، فلا تبعيّةٌ دائريّةٌ.
+  const currentTestFileCount = countTestFiles(root);
+  for (const [i, e] of entries.entries()) {
+    if (Number.isInteger(e?.testFileCount) && e.testFileCount !== currentTestFileCount) {
+      violations.push(
+        `R6/STALE: المُدخلةُ ${i} قِيسَت على ${e.testFileCount} ملفَّ اختبارٍ والشجرةُ الحاليّةُ فيها ${currentTestFileCount} — القياسُ متقادِمٌ، أَعِدْه بـ\`npm run measure:skip-baseline\`.`,
+      );
     }
   }
 
@@ -188,20 +189,14 @@ export function checkSkipBaseline(root, headCommit) {
 
 function main() {
   const root = process.cwd();
-  let headCommit = null;
-  try {
-    headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  } catch {
-    // ليسَ مستودعَ git — تُخطَّى R6
-  }
-  const { violations, entryCount, docCount } = checkSkipBaseline(root, headCommit);
+  const { violations, entryCount, docCount } = checkSkipBaseline(root);
   if (violations.length > 0) {
     process.stderr.write('⛔ حاجزُ خطِّ أساسِ التخطّي: عددٌ مُعلَنٌ غيرُ مقيسٍ أو غيرُ منسوبٍ.\n');
     for (const v of violations) process.stderr.write(`   - ${v}\n`);
     process.exit(1);
   }
   process.stdout.write(
-    `✅ حاجزُ خطِّ أساسِ التخطّي: ${entryCount} مُدخلةَ قياسٍ و${docCount} وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ إلى أمرِه وكوميتِه${headCommit ? ` ورأسِ شجرتِه` : ''}.\n`,
+    `✅ حاجزُ خطِّ أساسِ التخطّي: ${entryCount} مُدخلةَ قياسٍ و${docCount} وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ إلى أمرِه وكوميتِه وعددِ ملفّاتِ شجرتِه.\n`,
   );
 }
 

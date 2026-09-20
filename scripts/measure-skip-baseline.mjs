@@ -23,6 +23,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { countTestFiles } from './lib/doc-count-facts.mjs';
 
 const ARTIFACT = 'docs/external-review/skip-baseline.json';
 
@@ -151,6 +152,7 @@ function main() {
     command: flags.command,
     commit,
     measuredOn,
+    testFileCount: countTestFiles(root),
     ...measured,
   };
   const at = artifact.measurements.findIndex(
