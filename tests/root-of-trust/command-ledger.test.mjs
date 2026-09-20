@@ -327,7 +327,14 @@ test('كتابة التثبيت مُزامَنة على القرص قبل عود
       '-e',
       `import {statSync} from 'node:fs'; console.log(statSync(process.env.F).size)`,
     ],
-    { env: { ...process.env, F: file }, encoding: 'utf8' },
+    {
+      env: {
+        ...process.env,
+        F: file,
+        FORCE_COLOR: '0',
+      },
+      encoding: 'utf8',
+    },
   );
   assert.equal(Number(child.stdout.trim()), size);
   rmSync(dir, { recursive: true, force: true });
