@@ -725,9 +725,106 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
           { root, fsync: false },
           { openSource: async () => ({ source: token, close: async () => undefined }) },
         ),
-      (err) =>
-        /** @type {Error & { code?: string }} */ (err).code === 'PRODUCTION_LOG_BEHIND_ANCHOR',
+      // `WL-237`: الرمزُ صارَ رمزَ الحارسِ **الأسبقِ** — `LOG_STATE_ROOT_MISSING`.
+      // المقاسُ لم يَضعُفْ: السيناريو نفسُه لم يُمَسَّ، والإقلاعُ ما زالَ مردوداً
+      // ولا يُقرأُ نشأةً؛ لكنَّ غيابَ السجلِّ على جذرٍ قائمٍ يُرَدُّ الآنَ **قبلَ**
+      // فحصِ المراسي، لأنَّ تأخيرَ الفحصِ إلى ما بعدَ فتحِ السجلِّ كانَ يُنشئُ ملفّاً
+      // فارغاً يُمرِّرُ الهجومَ في الإقلاعِ التالي (‏`S13`). **وفاحصُ المراسي نفسُه
+      // بقيَ مقيساً بسجلٍّ حاضرٍ** في الاختبارِ الذي يَليه بمسارَيهِ كلَيهما.
+      (err) => /** @type {Error & { code?: string }} */ (err).code === 'LOG_STATE_ROOT_MISSING',
       'الإقلاعُ بعدَ محوِ السجلِّ والمرساةِ مع شاهدٍ موجبٍ يجبُ أن يُرفَض',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+// `WL-237`: فاحصُ المراسي يُقاسُ **بسجلٍّ حاضرٍ** بمسارَيهِ كلَيهما. وهذا قياسٌ
+// أدقُّ من الذي كانَ: الاختبارُ السابقُ كانَ يمحو السجلَّ فيَخلِطُ حارسَينِ في
+// رمزٍ واحدٍ، فإذا سبقَ حارسُ غيابِ السجلِّ بقيَ فاحصُ المراسي بلا قياسٍ.
+test('UF-01: شاهدُ مراسٍ موجبٌ ومخزنُ المراسي مُزيلٌ والسجلُّ حاضرٌ ⇒ يُرَدُّ الإقلاع', async () => {
+  const { runtime, root, token, king, cleanup } = await buildRuntime();
+  try {
+    await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
+    const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
+    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+      force: true,
+      witness: runtime.manifest.anchoredCountFloor(),
+    });
+    assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
+    assert.equal(runtime.manifest.read().anchoredCount > 0, true, 'الشاهدُ لم يرتفعْ');
+    runtime.log.close?.();
+
+    // المخزنُ وحدَه يُزال، **والسجلُّ ورأسُه يبقيانِ** — فلا يَسبِقُ حارسُ غيابِ السجلِّ.
+    unlinkSync(join(root, 'anchors.json'));
+    assert.equal(existsSync(runtime.log.file), true, 'السجلُّ يجبُ أن يبقى في هذا المجَسّ');
+
+    const refused = await caughtAsync(() =>
+      createProductionRootOfTrust(
+        { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+        { root, fsync: false },
+        { openSource: async () => ({ source: token, close: async () => undefined }) },
+      ),
+    );
+    assert.equal(
+      refused.code,
+      'PRODUCTION_LOG_BEHIND_ANCHOR',
+      `رمزٌ غيرُ متوقّعٍ: ${refused.code}`,
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('UF-01: سجلٌّ أقصرُ ممّا تشهدُ به مرساةٌ قائمةٌ يُرَدُّ الإقلاعُ به', async () => {
+  const { runtime, root, token, king, cleanup } = await buildRuntime();
+  try {
+    await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
+    await runtime.log.appendSealed('test.event', 'king:test', { n: 2 });
+    const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
+    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+      force: true,
+      witness: runtime.manifest.anchoredCountFloor(),
+    });
+    assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
+    const logFile = runtime.log.file;
+    const headFile = runtime.log.headFile;
+    const anchoredCount = record.count;
+    runtime.log.close?.();
+
+    // قصُّ السجلِّ إلى ما دونَ ما تشهدُ به المرساةُ، **ورأسُه يُوافَقُ معَ المقصوصِ**
+    // كي لا يَسبِقَ رمزُ قصٍّ فيَحجُبَ فاحصَ المراسي عن القياسِ.
+    const lines = readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length >= 2, true, 'المقدّمةُ ساقطةٌ: السجلُّ أقصرُ من اثنينِ');
+    const kept = lines.slice(0, lines.length - 1);
+    writeFileSync(logFile, kept.join('\n') + '\n', 'utf8');
+    const keptLast = JSON.parse(kept[kept.length - 1]);
+    writeFileSync(
+      headFile,
+      JSON.stringify({
+        count: kept.length,
+        lastHash: keptLast.hash,
+        updatedAt: new Date().toISOString(),
+      }),
+      'utf8',
+    );
+    assert.equal(
+      kept.length < anchoredCount,
+      true,
+      'المقدّمةُ ساقطةٌ: القصُّ لم يَنزلْ دونَ المرساةِ',
+    );
+
+    const refused = await caughtAsync(() =>
+      createProductionRootOfTrust(
+        { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+        { root, fsync: false },
+        { openSource: async () => ({ source: token, close: async () => undefined }) },
+      ),
+    );
+    assert.equal(
+      ['PRODUCTION_LOG_BEHIND_ANCHOR', 'PRODUCTION_ANCHOR_CHAIN_INVALID'].includes(refused.code),
+      true,
+      `رمزٌ غيرُ متوقّعٍ: ${refused.code}`,
     );
   } finally {
     cleanup();
