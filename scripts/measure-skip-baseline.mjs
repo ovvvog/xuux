@@ -106,6 +106,45 @@ export function classifyFailures(tapText) {
 }
 
 /**
+ * يَحكُمُ: هل تُسمَحُ التشغيلةُ بتحديثِ الأثرِ رغمَ إخفاقِها؟
+ * تُسمَحُ **فقط** إذا كانَ كلُّ إخفاقٍ ذاتيّاً مرجعيّاً (R6/STALE من skip-baseline)
+ * وكانَ عددُ الكتلِ المُصنَّفةِ يُساوي عددَ الإخفاقاتِ المُعلَنِ.
+ * أيُّ تبايُنٍ ⇒ مغلقٌ (فشلٌ بلا تحليلٍ، أو إخفاقٌ أجنبيٌّ، أو فجوةٌ بينَ
+ * الإخفاقاتِ المُعلَنةِ والكتلِ المُحلَّلةِ).
+ *
+ * @param {string} tapText
+ * @param {number} rawFail — عدّادُ `# fail` من TAP.
+ * @returns {{ allowed: boolean, reason: string }}
+ */
+export function allowSelfStaleOnly(tapText, rawFail) {
+  if (rawFail === 0) return { allowed: false, reason: 'لا إخفاقَ — التشغيلةُ ناجحةٌ.' };
+  const cls = classifyFailures(tapText);
+  if (cls.total === 0) {
+    return {
+      allowed: false,
+      reason: `تشغيلةٌ فيها ${rawFail} إخفاقاً ولا كتلةَ إخفاقٍ قابلةٌ للتحليلِ — لا تُصلُحُ خطَّ أساسٍ.`,
+    };
+  }
+  if (cls.other > 0) {
+    return {
+      allowed: false,
+      reason: `تشغيلةٌ فيها ${rawFail} إخفاقاً (${cls.other} أجنبيّاً و${cls.selfStale} ذاتيّاً) لا تُصلُحُ خطَّ أساسٍ — أصلِحِ الإخفاقَ الأجنبيَّ أوّلاً.`,
+    };
+  }
+  // فحصٌ مغلقٌ: عددُ الكتلِ الذاتيّةِ يجبُ أن يُساوي عددَ الإخفاقاتِ المُعلَنَ.
+  if (cls.selfStale !== rawFail || cls.total !== rawFail) {
+    return {
+      allowed: false,
+      reason: `تشغيلةٌ فيها ${rawFail} إخفاقاً لكنَّ المصنّفَ وَجَدَ ${cls.total} كتلةً (${cls.selfStale} ذاتيّاً) — تبايُنٌ يَمنَعُ التحديثَ.`,
+    };
+  }
+  return {
+    allowed: true,
+    reason: `سُمِحَ بتحديثِ الأثرِ على تشغيلةٍ إخفاقُها الوحيدُ ذاتيٌّ مرجعيٌّ (R6/STALE من guard-skip-baseline) — LIVE-16.`,
+  };
+}
+
+/**
  * يَقرأُ وسائطَ سطرِ الأمرِ بلا تبعيّةٍ خارجيّةٍ.
  * @param {string[]} argv
  * @returns {{ tap: string, flags: Record<string, string> }}
@@ -214,20 +253,8 @@ function main() {
   let selfStaleAllowed = false;
   if (rawFail !== 0) {
     const tapText = readFileSync(tap, 'utf8');
-    const cls = classifyFailures(tapText);
-    if (cls.total === 0) {
-      // فشلٌ بلا كتلِ إخفاقٍ قابلةٍ للتحليلِ — مغلقٌ.
-      fail(
-        `تشغيلةٌ فيها ${rawFail} إخفاقاً ولا كتلةَ إخفاقٍ قابلةٌ للتحليلِ — لا تُصلُحُ خطَّ أساسٍ.`,
-      );
-    }
-    if (cls.other > 0) {
-      // إخفاقٌ أجنبيٌّ — مغلقٌ.
-      fail(
-        `تشغيلةٌ فيها ${rawFail} إخفاقاً (${cls.other} أجنبيّاً و${cls.selfStale} ذاتيّاً) لا تُصلُحُ خطَّ أساسٍ — أصلِحِ الإخفاقَ الأجنبيَّ أوّلاً.`,
-      );
-    }
-    // كلُّ الإخفاقاتِ ذاتيّةٌ مرجعيّةٌ — مسموحٌ.
+    const decision = allowSelfStaleOnly(tapText, rawFail);
+    if (!decision.allowed) fail(decision.reason);
     selfStaleAllowed = true;
   }
   const commit =
