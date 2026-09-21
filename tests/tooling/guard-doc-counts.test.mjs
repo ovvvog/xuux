@@ -289,3 +289,31 @@ test('الطفرةُ M11: انحرافُ سلطةِ النتائجِ في الع
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── الطفرةُ 12: اكتمالُ جدولِ §4.3 (‏`R6`، `WL-240`) ──
+
+test('الطفرأةُ M12: حذفُ صفِّ نتيجةٍ من جدولِ §4.3 يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    const mutated = register.replace(
+      /^\| `R5-A-03` \| منخفضة \| لم تُعالَجْ بعدُ — الضماناتُ الصريحةُ تُسقَطُ في الإنتاجِ بلا شفرةٍ تُحقِّقُها \| مجلس \|$/m,
+      '',
+    );
+    assert.notEqual(mutated, register, 'ينبغي أن يُعثَرَ على صفِّ `R5-A-03`');
+    writeFileSync(registerPath, mutated);
+    assert.equal(runGuard(tmp), 1, 'حذفُ صفِّ نتيجةٍ من جدولِ §4.3 ينبغي أن يُسقِطَ الحاجزَ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('القاعدةُ R6: الجدولُ المكتملُ يَمُرُّ', () => {
+  const tmp = cloneRepo();
+  try {
+    assert.equal(runGuard(tmp), 0, 'جدولُ §4.3 المكتملُ مقابلَ العقدِ ينبغي أن يَمُرَّ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

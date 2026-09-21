@@ -17,6 +17,10 @@
 //     أُضيفَ في `WL-221` إغلاقاً للدَّينِ `DOC-15`. فالعقدُ يَنُصُّ `resultAuthority: model-council` وأنّ
 //     «إعادةَ الاختبارِ وحكمَ الإغلاقِ يُصدِرُهما المجلسُ»، والمادة 11 §1 تقضي أنّ **المنفِّذَ ليسَ المراجعَ**؛
 //     فصفٌّ يُسنِدُ إغلاقَ نتيجةٍ إلى المنفِّذِ يُخالِفُ العقدَ. **يَقرأُ العقدَ بمُفسِّرِ YAML لا بمطابقةِ نصٍّ.**
+//   - R6: كلُّ نتيجةٍ في `config/external-review.yaml` لها صفٌّ في جدولِ §4.3 من سجلِّ الدَّينِ —
+//     أُضيفَ في `WL-240` إغلاقاً للدَّينِ `DOC-17`. 17 نتيجةً (سلسلةُ `R5-*` و`UF-16`) كانت في العقدِ
+//     وغابت عن الجدولِ، فصارَ الدَّينُ غيرَ مرئيٍّ. هذه القاعدةُ تَقيسُ الاكتمالَ لا الصحّةَ: كلُّ معرِّفٍ في
+//     `findings[].id` يجبُ أن يظهرَ في عمودِ المعرِّفِ في الجدول. وتُستخرَجُ المعرّفاتُ من العقدِ بمُفسِّرِ YAML.
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -269,6 +273,52 @@ const facts = readDocCountFacts(root);
         }
         if (dataRows === 0) {
           violations.push('R5/MISSING: جدولُ §4.3 بلا صفوفِ نتائجٍ.');
+        }
+      }
+    }
+  }
+}
+
+// ── R6: اكتمالُ جدولِ §4.3 مقابلَ العقدِ ──
+// 17 نتيجةً كانت في العقدِ وغابت عن الجدولِ — فصارَ الدَّينُ غيرَ مرئيٍّ.
+// هذه القاعدةُ تَقيسُ أنّ كلَّ معرِّفٍ في `findings[].id` يظهرُ في الجدول.
+{
+  const contractText = readText('config/external-review.yaml');
+  if (contractText.trim() !== '') {
+    /** @type {unknown} */
+    let contract = null;
+    try {
+      contract = parseYaml(contractText);
+    } catch {
+      // R5 already reports parse errors
+    }
+    if (contract && typeof contract === 'object') {
+      const findings = /** @type {{findings?: unknown}} */ (contract).findings;
+      if (Array.isArray(findings)) {
+        const yamlIds = new Set();
+        for (const f of findings) {
+          if (f && typeof f === 'object' && 'id' in f) {
+            const id = /** @type {{id: unknown}} */ (f).id;
+            if (typeof id === 'string') yamlIds.add(id);
+          }
+        }
+        const lines = readText('docs/roadmap/06-debt-register.md').split('\n');
+        const start = lines.findIndex((l) => l.startsWith('### 4.3'));
+        if (start !== -1) {
+          const tableIds = new Set();
+          for (let i = start + 1; i < lines.length; i += 1) {
+            const line = lines[i] ?? '';
+            if (line.startsWith('### ')) break;
+            if (!line.startsWith('|')) continue;
+            const m = line.match(/`([A-Z0-9][A-Z0-9.-]*)`/);
+            if (m) tableIds.add(m[1]);
+          }
+          const missing = [...yamlIds].filter((id) => !tableIds.has(id));
+          if (missing.length > 0) {
+            violations.push(
+              `R6/MISSING: ${missing.length} نتيجةً في العقدِ بلا صفٍّ في جدولِ §4.3: ${missing.join('، ')}`,
+            );
+          }
         }
       }
     }
