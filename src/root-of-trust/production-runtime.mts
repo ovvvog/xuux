@@ -32,7 +32,7 @@ import {
 } from './hsm-binding.mjs';
 import type { HsmSigner } from './hsm-binding.mjs';
 import type { HsmKeySource, SealedPayload } from './hsm-binding.mjs';
-import { PersistentEventLog } from './persistent-log.mjs';
+import { LOG_HEAD_SUFFIX, PersistentEventLog, inspectEventLog } from './persistent-log.mjs';
 import type { EventDataSealer } from './persistent-log.mjs';
 import { Pkcs11HsmProvider } from './pkcs11-provider.mjs';
 import {
@@ -72,6 +72,11 @@ export const ProductionRuntimeErrorCodes = [
   // `R5-A-01`: واقعةُ التزامٍ مختومةٌ في السجلِّ لا يُفَكُّ ختمُها عندَ الإقلاعِ —
   // إفسادُ الجسمِ لا يُسقِطُ الشاهدَ بل يردُّ الإقلاعَ.
   'PRODUCTION_LEDGER_WITNESS_UNREADABLE',
+  // `S13` (الجولةُ السادسةُ، `WL-237`): جذرٌ قائمٌ — أي بيانٌ مختومٌ كانَ على
+  // القرصِ قبلَ هذا الإقلاعِ — بلا سجلِّ وقائعَ أو بلا رأسِه. غيابُ الشاهدِ
+  // الثاني على جذرٍ قائمٍ محوٌ لا نشأةٌ، فيُرَدُّ فشلاً مُغلقاً كنظيرِه
+  // `LEDGER_STATE_ROOT_MISSING` (‏`UF-13`) لا يُقرأُ «سجلاً من GENESIS».
+  'LOG_STATE_ROOT_MISSING',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -397,6 +402,9 @@ export async function createProductionRootOfTrust(
     await manifest.initJournalKey();
     // السجلُّ يُفتَحُ **بعدَ** التحقّقِ من الخاتَمِ: رفضُ الإقلاعِ لا يُنشئُ ملفَّ
     // وقائعَ جديداً، فلا يُقرأُ ملفٌّ فارغٌ خلَّفَه رفضٌ «سجلاً من GENESIS».
+    // `S13` (`WL-237`): الشاهدُ الثاني يُفتَقَدُ **قبلَ** أن يُفتَحَ السجلُّ — ولو تأخَّرَ
+    // الفحصُ لمحا فتحُ السجلِّ أثرَ المحوِ بإنشاءِ ملفٍّ فارغٍ يُقرأُ «نشأةً».
+    assertSealedLogPresentOnExistingRoot(join(options.root, 'events.log'), provisioning, env);
     const log = new PersistentEventLog(join(options.root, 'events.log'), {
       sealer,
       env,
@@ -519,6 +527,57 @@ export async function createProductionRootOfTrust(
 function resolveAnchorFile(root: string, env: NodeJS.ProcessEnv): string {
   const declared = (env.XUUX_ANCHOR_STORE ?? '').trim();
   return declared !== '' ? declared : join(root, 'anchors.jsonl');
+}
+
+/**
+ * يردُّ الإقلاعَ على **جذرٍ قائمٍ** إذا غابَ السجلُّ المختومُ أو غابَ رأسُه.
+ *
+ * `S13` (الجولةُ السادسةُ من `M11.04`، `WL-237`): خصمٌ يملكُ القرصَ كانَ يستعيدُ
+ * بياناً مختوماً أقدمَ **ويمحو السجلَّ** ورأسَه، فيُقلِعُ الجذرُ بلا شاهدٍ ثانٍ
+ * فترجعُ عدّاداتُ `ledgerCommitted`/`haltEpoch` ويُقبَلُ أمرٌ ثُبِّتَ سابقاً ثانيةً.
+ * وشواهدُ `WL-184`/`R5-A-01` تُقرأُ من السجلِّ نفسِه، فمحوُه يُسقِطُها صامتةً:
+ * **غيابُ الشاهدِ كانَ يُقرأُ صفراً لا تناقضاً.** فهذا الحارسُ يجعلُه تناقضاً
+ * مُسمّىً يَرُدُّ الإقلاعَ، على نمطِ `LEDGER_STATE_ROOT_MISSING` نفسِه (‏`UF-13`).
+ *
+ * **والرأسُ مفحوصٌ معَ الملفِّ لا بعدَه:** قِيسَ أنَّ فحصَ الوجودِ وحدَه يُتجاوَزُ
+ * بتركِ `events.log` فارغاً بلا رأسٍ بدلَ حذفِه (سيناريو «سجلٌّ فارغٌ» في
+ * `docs/external-review/evidence/M11.04-s13-fix-genesis-window-probe.mjs`).
+ *
+ * **حدُّ الشرعيّةِ مقيسٌ لا مُفترَضٌ:** التهيئةُ الأولى تكتبُ البيانَ قبلَ إنشاءِ
+ * السجلِّ، فانقطاعٌ بينهما يتركُ بياناً بلا سجلٍّ **شرعيّاً**. ولذلكَ لا يُفحَصُ
+ * إلا حينَ لم يكنِ الإقلاعُ تهيئةً أولى (‏`provisioning === false`، وهو محسوبٌ من
+ * وجودِ البيانِ **قبلَ** كتابتِه في هذا الإقلاعِ). وقِيسَ أنَّ جذرَ الانقطاعِ ذاكَ
+ * مرفوضٌ اليومَ أصلاً بـ`LEDGER_STATE_ROOT_MISSING` (مجلَّدُ الحجوزاتِ لم يُنشَأْ
+ * بعدُ)، فلا يُمنَعُ بهذا الحارسِ إقلاعٌ شرعيٌّ كانَ ينجحُ من قبلُ — يتغيَّرُ **اسمُ**
+ * الرفضِ على ذاكَ الجذرِ وحدَه لا كونُه مرفوضاً.
+ *
+ * **وحدٌّ مُعلَنٌ:** هذا يسدُّ «بياناً حاضراً بلا سجلٍّ» وحدَه. أمّا لقطةٌ كاملةٌ
+ * متّسقةٌ (بيانٌ **وسجلٌّ** أقدمُ معاً) فتبقى خارجَ هذا الحارسِ وداخلَ الحدِّ
+ * المُعلَنِ في `docs/adr/0006-state-manifest-seal-and-anti-rollback-limit.md`،
+ * فلا تُغلَقُ به `R4-K3-01`.
+ *
+ * @param file - مسارُ سجلِّ الوقائعِ المتوقَّعِ
+ * @param provisioning - هل هذا الإقلاعُ تهيئةٌ أولى؟ (لا بيانَ على القرصِ قبلَه)
+ * @param env - البيئةُ، تُمرَّرُ صريحةً لا تُستنبَطُ من العمليةِ
+ * @throws {ProductionRuntimeError} `LOG_STATE_ROOT_MISSING` على جذرٍ قائمٍ بلا سجلٍّ أو بلا رأسٍ
+ */
+export function assertSealedLogPresentOnExistingRoot(
+  file: string,
+  provisioning: boolean,
+  env: NodeJS.ProcessEnv,
+): void {
+  if (!isProductionRuntime(env)) return;
+  // تهيئةٌ أولى: السجلُّ لم يُنشَأْ بعدُ، وغيابُه هو الحالُ الطبيعيُّ لا محوٌ.
+  if (provisioning) return;
+  // قراءةٌ بلا قفلٍ ولا كتابةٍ: الفحصُ لا يكونُ تغييراً للمفحوصِ، ولا يأخذُ
+  // قفلَ الكاتبِ الواحدِ الذي يأخذُه فتحُ السجلِّ.
+  const inspection = inspectEventLog(file);
+  if (!inspection.exists) {
+    throw new ProductionRuntimeError('LOG_STATE_ROOT_MISSING', file);
+  }
+  if (inspection.head === null) {
+    throw new ProductionRuntimeError('LOG_STATE_ROOT_MISSING', file + LOG_HEAD_SUFFIX);
+  }
 }
 
 /**

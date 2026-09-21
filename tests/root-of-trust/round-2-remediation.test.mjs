@@ -198,11 +198,12 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
       rmSync(logFile, { force: true });
       rmSync(headFile, { force: true });
       const error = await caughtAsync(() => boot({ root, king }));
-      assert.equal(
-        ['PRODUCTION_LOG_BEHIND_ANCHOR', 'PRODUCTION_ANCHOR_CHAIN_INVALID'].includes(error.code),
-        true,
-        `رمزٌ غيرُ متوقّع: ${error.code}`,
-      );
+      // `WL-237`: الرمزُ صارَ رمزَ الحارسِ **الأسبقِ** `LOG_STATE_ROOT_MISSING`،
+      // وحكمٌ **مُفرَدٌ** أضيقُ من قائمةِ احتمالَينِ لا أوسعُ. وإعادةُ الإنتاجِ لم
+      // تُمَسَّ: الملفّانِ يُمحيانِ كما في التقريرَينِ، والإقلاعُ ما زالَ مردوداً
+      // ولا يُقرأُ نشأةً. وفاحصُ المراسي بقيَ مقيساً بسجلٍّ حاضرٍ في
+      // `production-runtime.test.mjs` بمسارَيهِ كلَيهما.
+      assert.equal(error.code, 'LOG_STATE_ROOT_MISSING', `رمزٌ غيرُ متوقّع: ${error.code}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
