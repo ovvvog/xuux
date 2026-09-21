@@ -1,0 +1,90 @@
+# قياس خطّ أساس التخطّي — يُشغَّل يدويّاً لإعادة قياس الأثر كاملاً.
+#
+# يَشغَلُ `env -u DATABASE_URL node --test` (بلا قاعدةٍ) لإنتاج TAP،
+# ثم يُشغِّلُ `measure:skip-baseline` لكلِّ ارتباطٍ (M11.05 و M11.06)
+# ويُحدِّثُ جميعَ الحقولِ في `skip-baseline.json`، ثم يَدفَعُ الأثرَ المُحدَّثَ.
+#
+# LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ يَسمَحُ بتحديثِ الأثرِ حتى
+# لو كانَ اختبارُ الحاجزِ ساقطاً (R6/STALE) — ما دامَ الإخفاقُ الوحيدَ.
+
+name: قياس خطّ أساس التخطّي
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  measure:
+    name: قياس خطّ أساس التخطّي الكامل
+    runs-on: [self-hosted, linux-vm]
+    timeout-minutes: 30
+
+    steps:
+      - name: جلب المستودع
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: تهيئة Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: تثبيت التبعيات
+        run: npm ci
+
+      - name: التحقّق من الوحدة الأصليّة pkcs11js
+        run: |
+          if ! node -e "require.resolve('pkcs11js')" 2>/dev/null; then
+            npm rebuild pkcs11js || npm install --no-save pkcs11js || true
+          fi
+
+      - name: بناء نواة جذر الثقة
+        run: npm run build
+
+      - name: تشغيل الاختبارات بلا DATABASE_URL لإنتاج TAP
+        run: |
+          env -u DATABASE_URL node --test --test-concurrency=1 --test-timeout=120000 tests/ > /tmp/skip-baseline-measure.tap 2>/tmp/skip-baseline-measure.stderr
+          echo "exit: $?"
+          echo "=== آخر 10 أسطر TAP ==="
+          tail -10 /tmp/skip-baseline-measure.tap
+          echo "=== عدّادات TAP ==="
+          grep -E "^# (tests|pass|fail|skipped) " /tmp/skip-baseline-measure.tap || true
+
+      - name: قياس خطّ أساس التخطّي — M11.05
+        run: |
+          node scripts/measure-skip-baseline.mjs /tmp/skip-baseline-measure.tap \
+            --engagement M11.05 \
+            --plan docs/external-review/M11.05-round-1-plan.md \
+            --command "env -u DATABASE_URL npm test"
+
+      - name: قياس خطّ أساس التخطّي — M11.06
+        run: |
+          node scripts/measure-skip-baseline.mjs /tmp/skip-baseline-measure.tap \
+            --engagement M11.06 \
+            --plan docs/external-review/M11.06-round-2-plan.md \
+            --command "env -u DATABASE_URL npm test"
+
+      - name: عرض الأثر المُحدَّث
+        run: cat docs/external-review/skip-baseline.json
+
+      - name: فحص الحاجز بعد التحديث
+        run: npm run guard:skip-baseline
+
+      - name: دفع الأثر المُحدَّث
+        run: |
+          git config --local user.name "soaav-svg"
+          git config --local user.email "320014418+soaav-svg@users.noreply.github.com"
+          git add docs/external-review/skip-baseline.json
+          git commit -m "chore: إعادةُ قياسِ خطِّ أساسِ التخطّي كاملاً (LIVE-16)
+
+          قياسٌ كاملٌ بـ\`env -u DATABASE_URL node --test\` على main@eba5afcf.
+          جميعُ الحقولِ مُحدَّثةٌ: testFileCount و tests و pass و fail و skipped
+          و skipLines و topLevelSkipPoints و attributedToDatabaseUrl و otherReasons.
+          الكوميتُ والتاريخُ مَربوطانِ بالتشغيلةِ الفعليّةِ.
+
+          WL-243" || echo "لا تغييرٍ لدفعِهِ"
+          git push
