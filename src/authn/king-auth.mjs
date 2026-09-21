@@ -288,6 +288,7 @@ function constantTimeEqual(left, right) {
  * @typedef {object} AuthnLogLike
  * @property {(type: string, actor: string, data: Record<string, unknown>) => unknown} append
  * @property {(() => ReadonlyArray<{ type?: unknown, data?: unknown }>) | undefined} [snapshot]
+ * @property {((type: string, minStep: number) => ReadonlyArray<{ type?: unknown, data?: unknown }>) | undefined} [eventsOfTypeSinceStep]
  */
 
 /**
@@ -650,25 +651,23 @@ export class KingAuthenticator {
    */
   #restoreConsumed(log, floorStep) {
     if (this.#consumedRestored) return;
-    const reader = /** @type {{ snapshot?: unknown }} */ (log).snapshot;
-    // والفشلُ مغلقٌ (المادة 9): سجلٌّ يُكتب فيه ولا يُقرأ منه لا يمنع إعادةً عبر
-    // حدِّ العملية، فلا يُدَّعى منعُ الإعادةِ ويُرفض الفتحُ **باسمِ** الحدّ.
+    const reader = /** @type {{ eventsOfTypeSinceStep?: unknown }} */ (log).eventsOfTypeSinceStep;
+    // والفشلُ مغلقٌ: القراءة المحدودة هي عقدُ الاستعادةِ؛ لا fallback إلى snapshot،
+    // لأن ذلك يعيد نسخَ كاملِ التاريخ في كل إعادة تشغيل.
     if (typeof reader !== 'function') {
       throw new AuthnError(
         AUTHN_ERRORS.FACTOR_LEDGER_UNREADABLE,
-        'قيدُ استهلاكِ العواملِ غيرُ مقروءٍ من السجلِّ الموصول، ومنعُ الإعادةِ بلا قراءةِ قيدٍ دائمٍ منعٌ يزول بإعادةِ التشغيل؛ فلا تُفتح جلسةٌ قويةٌ يُدَّعى لعاملِها منعُ إعادةٍ لا يُقاس.',
+        'قيدُ استهلاكِ العواملِ غيرُ مقروءٍ بواجهةِ القراءةِ المحدودة، ومنعُ الإعادةِ بلا قراءةٍ دائمةٍ لا يُدَّعى.',
       );
     }
-    const events = /** @type {() => ReadonlyArray<{ type?: unknown, data?: unknown }>} */ (
+    const events = /** @type {(type: string, minStep: number) => ReadonlyArray<{ type?: unknown, data?: unknown }>} */ (
       reader
-    ).call(log);
+    ).call(log, this.#policy.audit.factorConsumedEvent, floorStep);
     const consumedEvent = this.#policy.audit.factorConsumedEvent;
     for (const event of events) {
-      if (event?.type !== consumedEvent) continue;
+      if (event?.type !== undefined && event.type !== consumedEvent) continue;
       const data = /** @type {{ device?: unknown, step?: unknown }} */ (event.data ?? {});
       const { device, step } = data;
-      // والخطواتُ الخارجةُ من النافذةِ تُترك: رمزُها يُرفض بـ`FACTOR_INVALID`
-      // قبل أن يُسأل عن استهلاكِه، فحملُها نموٌّ بلا فائدةٍ كما في المُقلِّم.
       if (typeof device === 'string' && typeof step === 'number' && step >= floorStep) {
         this.#consumed.add(`${device}:${step}`);
       }
