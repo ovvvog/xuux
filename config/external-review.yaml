@@ -34,7 +34,7 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 5
+      rounds: 6
       members:
         - id: grok_4_6
           provider: XAI
@@ -70,7 +70,15 @@ engagements:
           provider: ANTHROPIC
           rounds:
             - 5
-    comparisonMatrix: docs/external-review/M11.04-round-5-comparison-matrix.md
+        - id: claude_sonnet_5_0
+          provider: ANTHROPIC
+          rounds:
+            - 6
+        - id: gpt_5_6_luna
+          provider: OPENAI
+          rounds:
+            - 6
+    comparisonMatrix: docs/external-review/M11.04-round-6-comparison-matrix.md
     acceptanceCriteria: تقريرُ مراجعةٍ صادرٌ عن جهةٍ مستقلّةٍ، **مع سجلِّ إغلاقٍ لكلِّ نتيجةٍ حرجةٍ وعاليةٍ** — لا ملخَّصٌ ولا شهادةٌ عامّةٌ.
     scope:
       - جذرُ الثقةِ وسلسلةُ التوقيعِ والتحقُّقُ من أوامرِ التاجِ.
@@ -237,6 +245,8 @@ findings:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
       gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
   - id: UF-03
     engagement: M11.04
     title: حالةُ الإيقافِ السياديّةُ تعودُ `running/epoch=0` بمحوِ ملفّاتِها
@@ -257,6 +267,8 @@ findings:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
       gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
   - id: UF-07
     engagement: M11.04
     title: أمرٌ مُثبَّتٌ يُقبَلُ مرّةً ثانيةً بعدَ محوِ الدفترِ والحجوزاتِ
@@ -276,6 +288,8 @@ findings:
       gpt_6_astra: docs/external-review/reports/M11.04-round-4-model-council-report-gpt-6-astra.md
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
       gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
   - id: M11.04-F07
     engagement: M11.04
     title: شرطا «لا تكرارَ بعدَ مسحِ الدفترِ» و«لا عودةَ من الإيقافِ» لم يكتملا
@@ -452,6 +466,8 @@ findings:
       kimi_k3: docs/external-review/reports/M11.04-round-4-model-council-report-kimi-k3.md
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
       gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
   - id: R4-K3-02
     engagement: M11.04
     title: 'دفترُ الرفعِ بلا أصالةٍ: سطرٌ متّسقُ التجزئةِ يرفعُ العدّاداتِ قسريّاً'
@@ -631,6 +647,8 @@ findings:
       - R4-K3-01
     rawReports:
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
   - id: R5-A-02
     engagement: M11.04
     title: 'انحدارٌ في المصنعِ الرسميِّ `createGovernance`: بلا بوابةِ هويّةٍ صارَ يُصدرُ تذاكرَ لفاعلٍ يصفُ دورَه بنفسِه، وكانَ يرفضُ'
@@ -1268,3 +1286,89 @@ findings:
     rawReports:
       grok_4_6: docs/external-review/reports/M11.05-round-1-model-council-report-grok-4-6.md
     reportId: R5-B-08
+  - id: R6-CS-01
+    engagement: M11.04
+    title: 'تصنيفُ `viable` الثنائيُّ في مجسِّ المنفِّذِ يُخفي تجاوزاً جزئيّاً فعليّاً: سيناريو `S13` بلا محوِ `halt/` صُنِّفَ `BLOCKED` كاملاً معَ تحقُّقِ ثلاثةِ بنودٍ من خمسةٍ (رجوعُ التسلسلِ والشاهدِ وقبولُ الأمرِ المُثبَّتِ ثانيةً)'
+    origin: round-6
+    severityAsWritten: متوسطة
+    severity: medium
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «أ» (`claude_sonnet_5_0`) — المعرِّفُ في تقريرِهِ `R6-A-01`، وقُيِّدَ في العقدِ بـ`R6-CS-01` لمنعِ التصادمِ معَ `R6-A-01` القائمةِ من `M11.06`
+    reproductionPath: '`node docs/external-review/evidence/M11.04-round-6-s13-probe.mjs` — السطرُ `[BLOCKED] S13` معَ `seq 8→4; ledgerCommitted 1→0; replay=ACCEPTED_NO_THROW`.'
+    affectedFiles:
+      - docs/external-review/evidence/M11.04-round-6-s13-probe.mjs
+    raisedBy:
+      - claude_sonnet_5_0
+    rawReports:
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+    reportId: R6-A-01
+  - id: R6-CS-02
+    engagement: M11.04
+    title: 'مسارُ استيرادٍ مُثبَّتٌ مُطلَقاً في مجسِّ المنفِّذِ يشيرُ إلى شجرةٍ خارجَ نسخةِ المُراجِعِ فيَخرِقُ حدَّ العزلِ المفروضَ عليه لو اختلفَ المحتوى بينَ النسختَينِ يوماً'
+    origin: round-6
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: 'نتيجةٌ جديدةٌ من العضوِ «أ» — المعرِّفُ في تقريرِهِ `R6-A-02`، وقُيِّدَ بـ`R6-CS-02` لمنعِ التصادمِ. والعضوُ «ب» رفعَ العلةَ نفسَها (`R6-LU-01`).'
+    reproductionPath: 'سطرا الاستيرادِ في `M11.04-round-6-s13-probe.mjs` يشيرانِ إلى شجرةٍ خارجَ نسخةِ المُراجِعِ؛ صلَّحَها كلُّ عضوٍّ إلى نسختِهِ وأثبتَ تطابقَ الناتجِ قبلَ اعتمادِهِ.'
+    affectedFiles:
+      - docs/external-review/evidence/M11.04-round-6-s13-probe.mjs
+    raisedBy:
+      - claude_sonnet_5_0
+    overlapsWith:
+      - R6-LU-01
+    rawReports:
+      claude_sonnet_5_0: docs/external-review/reports/M11.04-round-6-model-council-report-claude-sonnet-5-0.md
+    reportId: R6-A-02
+  - id: R6-LU-01
+    engagement: M11.04
+    title: 'مجسُّ المنفِّذِ لو شُغِّلَ حرفيّاً لا يَقيسُ نسخةَ المُراجِعِ — مسارُ الاستيرادِ مُثبَّتٌ على شجرةٍ ممنوعةٌ على المُراجِعِ قراءتُها'
+    origin: round-6
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب» (`gpt_5_6_luna`) — المعرِّفُ في تقريرِهِ `R6-B-01`، وقُيِّدَ في العقدِ بـ`R6-LU-01` لمنعِ التصادمِ معَ `R6-B-01` القائمةِ من `M11.06`
+    reproductionPath: 'استبدالُ مسارِ الاستيرادِ في نسخةٍ مؤقّتةٍ من المجسِّ ثمَّ تشغيلُها من داخلِ نسخةِ المُراجِعِ — ناتجٌ مطابقٌ ورمزُ خروجٍ `0`.'
+    affectedFiles:
+      - docs/external-review/evidence/M11.04-round-6-s13-probe.mjs
+    raisedBy:
+      - gpt_5_6_luna
+    overlapsWith:
+      - R6-CS-02
+    rawReports:
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
+    reportId: R6-B-01
+  - id: R6-LU-02
+    engagement: M11.04
+    title: 'التباسُ تسميةِ `S13`/`S13b` في مجسِّ المنفِّذِ: السيناريو المُسمّى `S13` لا يمحو `halt/` فأُعطي `BLOCKED` معَ أنّه أثبتَ `BOOT_OK` وقبولَ الإعادةِ — والوصفُ الكاملُ عندَ `S13b`'
+    origin: round-6
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب» — المعرِّفُ في تقريرِهِ `R6-B-02`، وقُيِّدَ بـ`R6-LU-02` لمنعِ التصادمِ. وتتقاطعُ معَ `R6-CS-01` في جوهرِها.
+    reproductionPath: 'السطرانِ الأوّلانِ من ناتجِ المجسِّ: `[BLOCKED] S13 ... halt=halted/epoch=1` ثمَّ `[VIABLE] S13b-full-wipe ... halt=running/epoch=0`.'
+    affectedFiles:
+      - docs/external-review/evidence/M11.04-round-6-s13-probe.mjs
+    raisedBy:
+      - gpt_5_6_luna
+    overlapsWith:
+      - R6-CS-01
+    rawReports:
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
+    reportId: R6-B-02
+  - id: R6-LU-03
+    engagement: M11.04
+    title: 'رمزُ خروجِ مجسِّ المنفِّذِ لا يَحرُسُ الحكمَ: يَطبَعُ `BLOCKED` لسيناريو فاشلٍ ثمَّ يَخرُجُ بصفرٍ — فلا يُقرأُ الخروجُ الصفريُّ وحدَهُ نجاحاً أمنيّاً'
+    origin: round-6
+    severityAsWritten: منخفضة
+    severity: low
+    status: open
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب» — المعرِّفُ في تقريرِهِ `R6-B-03`، وقُيِّدَ بـ`R6-LU-03` لمنعِ التصادمِ معَ `R6-B-03` القائمةِ من `M11.06`
+    reproductionPath: '`node docs/external-review/evidence/M11.04-round-6-s13-probe.mjs` ⇒ يُطبِعُ سطرَ `BLOCKED` ورمزُ الخروجِ `0`.'
+    affectedFiles:
+      - docs/external-review/evidence/M11.04-round-6-s13-probe.mjs
+    raisedBy:
+      - gpt_5_6_luna
+    rawReports:
+      gpt_5_6_luna: docs/external-review/reports/M11.04-round-6-model-council-report-gpt-5-6-luna.md
+    reportId: R6-B-03
