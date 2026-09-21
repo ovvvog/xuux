@@ -28,6 +28,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
@@ -595,18 +596,47 @@ test('R5-B-03: الفشلُ مغلق — سجلٌّ يُكتب فيه ولا ي�
   }
 });
 
-
 test('LIVE-14: القراءةُ المحدودةُ تُرجعُ الحدَّ الأدنى فقط ولا تعتمدُ على at', () => {
   const log = new EventLog();
   const floorStep = 100;
   log.events = [
-    { id: 'old', seq: 1, type: 'factor.consumed', actor: 'king', data: { device: 'd', step: floorStep - 1 }, previousHash: '', at: '2099-01-01T00:00:00.000Z', hash: '' },
-    { id: 'edge', seq: 2, type: 'factor.consumed', actor: 'king', data: { device: 'd', step: floorStep }, previousHash: '', at: '1970-01-01T00:00:00.000Z', hash: '' },
-    { id: 'other', seq: 3, type: 'other', actor: 'king', data: { step: floorStep + 1 }, previousHash: '', at: '2099-01-01T00:00:00.000Z', hash: '' },
+    {
+      id: 'old',
+      seq: 1,
+      type: 'factor.consumed',
+      actor: 'king',
+      data: { device: 'd', step: floorStep - 1 },
+      previousHash: '',
+      at: '2099-01-01T00:00:00.000Z',
+      hash: '',
+    },
+    {
+      id: 'edge',
+      seq: 2,
+      type: 'factor.consumed',
+      actor: 'king',
+      data: { device: 'd', step: floorStep },
+      previousHash: '',
+      at: '1970-01-01T00:00:00.000Z',
+      hash: '',
+    },
+    {
+      id: 'other',
+      seq: 3,
+      type: 'other',
+      actor: 'king',
+      data: { step: floorStep + 1 },
+      previousHash: '',
+      at: '2099-01-01T00:00:00.000Z',
+      hash: '',
+    },
   ];
-  /** @type {never} */ (log).buildStepIndex();
+  /** @type {{ buildStepIndex: () => void }} */ (/** @type {unknown} */ (log)).buildStepIndex();
   const events = log.eventsOfTypeSinceStep('factor.consumed', floorStep);
-  assert.deepEqual(events.map((event) => event.id), ['edge']);
+  assert.deepEqual(
+    events.map((event) => event.id),
+    ['edge'],
+  );
 });
 
 test('LIVE-14: سجلٌّ كبيرٌ لا ينسخ التاريخَ كله عند القراءةِ المحدودة', () => {
@@ -623,10 +653,53 @@ test('LIVE-14: سجلٌّ كبيرٌ لا ينسخ التاريخَ كله عن�
     at: new Date(0).toISOString(),
     hash: '',
   }));
-  /** @type {never} */ (log).buildStepIndex();
+  /** @type {{ buildStepIndex: () => void }} */ (/** @type {unknown} */ (log)).buildStepIndex();
   const result = log.eventsOfTypeSinceStep('factor.consumed', 10_000);
   assert.equal(result.length, relevant);
   assert.ok(result.length < total / 1000, 'القراءةُ المحدودةُ نسخت التاريخَ القديم كله');
+});
+
+test('LIVE-14: زمنُ القراءةِ المحدودةِ عندَ 200 ألفِ واقعةٍ ينزلُ دونَ اللقطةِ الكاملة', () => {
+  const log = new EventLog();
+  const total = 200_000;
+  const relevant = 37;
+  log.events = Array.from({ length: total }, (_, index) => ({
+    id: String(index),
+    seq: index + 1,
+    type: index >= total - relevant ? 'factor.consumed' : 'other',
+    actor: 'king',
+    data: { step: index >= total - relevant ? 10_000 + (index - (total - relevant)) : index },
+    previousHash: '',
+    at: new Date(0).toISOString(),
+    hash: '',
+  }));
+
+  // قياسُ اللقطةِ الكاملةِ (الأسلوبُ القديمُ): ينسخُ 200 ألفِ واقعةٍ ثم يُرشِّحُها
+  const fullStart = performance.now();
+  const fullEvents = log
+    .snapshot()
+    .filter(
+      (e) =>
+        e.type === 'factor.consumed' &&
+        typeof (/** @type {{ step?: unknown }} */ (e.data).step) === 'number' &&
+        /** @type {{ step?: unknown }} */ (e.data).step >= 10_000,
+    );
+  const fullMs = performance.now() - fullStart;
+
+  // بناءُ الفهرسِ مرّةً واحدةً (تكلفةُ الإقلاعِ لا تُحسَبُ على القراءةِ)
+  /** @type {{ buildStepIndex: () => void }} */ (/** @type {unknown} */ (log)).buildStepIndex();
+
+  // قياسُ القراءةِ المحدودةِ (الأسلوبُ الجديدُ): يقرأُ 37 واقعةً فقط
+  const boundedStart = performance.now();
+  const boundedEvents = log.eventsOfTypeSinceStep('factor.consumed', 10_000);
+  const boundedMs = performance.now() - boundedStart;
+
+  assert.equal(fullEvents.length, relevant);
+  assert.equal(boundedEvents.length, relevant);
+  assert.ok(
+    boundedMs < fullMs,
+    `القراءةُ المحدودةُ (${boundedMs.toFixed(2)}ms) لم تنزلْ دونَ اللقطةِ الكاملةِ (${fullMs.toFixed(2)}ms)`,
+  );
 });
 
 test('LIVE-14: المصادقُ يستعملُ القراءةَ المحدودةَ ولا يعودُ إلى snapshot', async () => {

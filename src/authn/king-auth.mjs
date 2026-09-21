@@ -660,9 +660,10 @@ export class KingAuthenticator {
         'قيدُ استهلاكِ العواملِ غيرُ مقروءٍ بواجهةِ القراءةِ المحدودة، ومنعُ الإعادةِ بلا قراءةٍ دائمةٍ لا يُدَّعى.',
       );
     }
-    const events = /** @type {(type: string, minStep: number) => ReadonlyArray<{ type?: unknown, data?: unknown }>} */ (
-      reader
-    ).call(log, this.#policy.audit.factorConsumedEvent, floorStep);
+    const events =
+      /** @type {(type: string, minStep: number) => ReadonlyArray<{ type?: unknown, data?: unknown }>} */ (
+        reader
+      ).call(log, this.#policy.audit.factorConsumedEvent, floorStep);
     const consumedEvent = this.#policy.audit.factorConsumedEvent;
     for (const event of events) {
       if (event?.type !== undefined && event.type !== consumedEvent) continue;

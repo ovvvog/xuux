@@ -150,6 +150,7 @@ export class EventLog {
       const data = this.events[i]?.data as { step?: unknown };
       if (typeof data?.step !== 'number') continue;
       const type = this.events[i]?.type;
+      if (typeof type !== 'string') continue;
       let list = this.#stepIndex.get(type);
       if (list === undefined) {
         list = [];
@@ -167,11 +168,13 @@ export class EventLog {
    */
   eventsOfTypeSinceStep(type: string, minStep: number): EventRecord[] {
     if (this.#stepIndex === null) this.buildStepIndex();
-    const indices = this.#stepIndex.get(type);
+    const index = this.#stepIndex;
+    if (index === null) return [];
+    const indices = index.get(type);
     if (indices === undefined) return [];
     const result: EventRecord[] = [];
-    for (const index of indices) {
-      const event = this.events[index];
+    for (const idx of indices) {
+      const event = this.events[idx];
       const data = event?.data as { step?: unknown };
       if (event !== undefined && typeof data?.step === 'number' && data.step >= minStep) {
         result.push({ ...event });
