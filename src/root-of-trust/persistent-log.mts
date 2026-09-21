@@ -499,6 +499,7 @@ export class PersistentEventLog extends EventLog {
     }
 
     this.events = events.map((event) => Object.freeze(event));
+    this.buildStepIndex();
     this.lastHash = chain.lastHash;
     if (this.recovery.repairedHead || this.recovery.droppedTailBytes > 0 || head === null)
       this.#writeHead();

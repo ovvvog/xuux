@@ -109,6 +109,14 @@ export class EventLog {
     };
     const event: EventRecord = { ...unsigned, hash: hashEventBody(unsigned) };
     this.events.push(Object.freeze(event));
+    if (this.#stepIndex !== null && typeof (data as { step?: unknown }).step === 'number') {
+      let list = this.#stepIndex.get(type);
+      if (list === undefined) {
+        list = [];
+        this.#stepIndex.set(type, list);
+      }
+      list.push(this.events.length - 1);
+    }
     this.lastHash = event.hash;
     return event;
   }
@@ -127,6 +135,52 @@ export class EventLog {
    */
   verifyChain(): ChainVerification {
     return verifyEventChain(this.events);
+  }
+
+  /** فهرس مواضع الأحداث ذات data.step الرقمي، مفصول حسب نوع الحدث. */
+  #stepIndex: Map<string, number[]> | null = null;
+
+  /**
+   * يبني فهرساً خطياً أثناء التحميل؛ لا ينسخ الأحداث ولا يرتبها.
+   * @returns {void}
+   */
+  protected buildStepIndex(): void {
+    this.#stepIndex = new Map();
+    for (let i = 0; i < this.events.length; i += 1) {
+      const data = this.events[i]?.data as { step?: unknown };
+      if (typeof data?.step !== 'number') continue;
+      const type = this.events[i]?.type;
+      if (typeof type !== 'string') continue;
+      let list = this.#stepIndex.get(type);
+      if (list === undefined) {
+        list = [];
+        this.#stepIndex.set(type, list);
+      }
+      list.push(i);
+    }
+  }
+
+  /**
+   * يعيد فقط أحداث نوع محدد ذات data.step ضمن الحد المطلوب، دون نسخ بقية السجل.
+   * @param type - نوع الحدث المطلوب
+   * @param minStep - أدنى خطوة مقبولة
+   * @returns نسخة سطحية من الأحداث المطابقة
+   */
+  eventsOfTypeSinceStep(type: string, minStep: number): EventRecord[] {
+    if (this.#stepIndex === null) this.buildStepIndex();
+    const index = this.#stepIndex;
+    if (index === null) return [];
+    const indices = index.get(type);
+    if (indices === undefined) return [];
+    const result: EventRecord[] = [];
+    for (const idx of indices) {
+      const event = this.events[idx];
+      const data = event?.data as { step?: unknown };
+      if (event !== undefined && typeof data?.step === 'number' && data.step >= minStep) {
+        result.push({ ...event });
+      }
+    }
+    return result;
   }
 
   /**
