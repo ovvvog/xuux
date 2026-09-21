@@ -34,6 +34,78 @@ function fail(s) {
 }
 
 /**
+ * يُصنِّفُ إخفاقاتِ TAP: أيُّها ذاتيٌّ مرجعيٌّ (R6/STALE من حاجزِ skip-baseline)
+ * وأيُّها إخفاقٌ آخرُ. **الجُمودُ الذي يَكسِرُهُ هذا التصنيفُ (LIVE-16):**
+ * R6/STALE يَسقُطُ حينَ تنمو الشجرةُ بملفِّ اختبارٍ، فيَسقُطُ اختبارُ الحاجزِ،
+ * فيَرفُضُ المقياسُ التشغيلةَ (fail ≠ 0)، فلا يُحدَّثُ الأثرُ، فيَبقى الحاجزُ
+ * ساقطاً — جُمودٌ تامٌّ. هذا التصنيفُ يُميِّزُ الإخفاقَ الذاتيَّ المرجعيَّ
+ * بعينِهِ فيَسمَحُ بتحديثِ الأثرِ **إذا كانَ الإخفاقُ الوحيدُ** هو تقادُمُ الأثرِ
+ * نفسِهِ — لا بإلغاءِ شرطِ «لا خطَّ أساسٍ من تشغيلةٍ فاشلةٍ» (ذاكَ إرخاءٌ)،
+ * بل بتمييزِ إخفاقٍ بعينِهِ يَعودُ سببُهُ إلى الأثرِ نفسِهِ لا إلى الشفرةِ.
+ *
+ * **كيفَ يُميِّزُ:** كلُّ كتلةِ إخفاقٍ (not ok + diagnostic) يُفحَصُ نصُّها — إنِ
+ * احتوى على `R6/STALE` وكانَ سياقُ `skip-baseline` حاضراً، فهوَ إخفاقٌ ذاتيٌّ.
+ * وإنِ احتوى على أيِّ إخفاقٍ آخرَ، فهوَ إخفاقٌ أجنبيٌّ يُرَدُّ.
+ *
+ * @param {string} tapText
+ * @returns {{ selfStale: number, other: number, total: number, detail: string[] }}
+ */
+export function classifyFailures(tapText) {
+  const lines = tapText.split('\n');
+  /** @type {{ name: string, diagnostic: string }[]} */
+  const failedBlocks = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? '';
+    // كتلةُ إخفاقٍ: not ok في أيِّ عمقٍ (بمسافةٍ بادئةٍ أو بلاها).
+    const m = /^\s*not ok \d+ - (.+)$/.exec(line);
+    if (m) {
+      const name = m[1] ?? '';
+      /** @type {string[]} */
+      const diag = [];
+      let j = i + 1;
+      // اجمعْ كتلةَ التشخيصِ حتى ok/not ok التالي أو ملخَّصٌ ختاميٌّ.
+      while (j < lines.length) {
+        const d = lines[j] ?? '';
+        if (/^\s*(ok|not ok) \d+/.test(d)) break;
+        if (/^\s*# (tests|pass|fail|skipped|todo|duration_ms|suites|cancelled) /.test(d)) break;
+        diag.push(d);
+        j += 1;
+      }
+      // تخطَّ كتلَ الملخّصِ الأبويّةَ — تلكَ التي تَحوي tests:/pass:/fail: بلا error:.
+      // هيَ تقاريرُ ملفِّ اختبارٍ فاشلٍ، لا إخفاقُ تأكيدٍ بعينِه.
+      const diagText = diag.join('\n');
+      if (!/error:/.test(diagText) && /^\s*(tests|pass|fail):/m.test(diagText)) {
+        i = j;
+        continue;
+      }
+      failedBlocks.push({ name, diagnostic: diagText });
+      i = j;
+    } else {
+      i += 1;
+    }
+  }
+  /** @type {string[]} */
+  const detail = [];
+  let selfStale = 0;
+  let other = 0;
+  for (const b of failedBlocks) {
+    const text = b.name + '\n' + b.diagnostic;
+    const isSelfStale =
+      text.includes('R6/STALE') &&
+      (text.includes('skip-baseline') || text.includes('guard-skip-baseline'));
+    if (isSelfStale) {
+      selfStale += 1;
+      detail.push(`ذاتيٌّ: ${b.name.slice(0, 60)}`);
+    } else {
+      other += 1;
+      detail.push(`أجنبيٌّ: ${b.name.slice(0, 60)}`);
+    }
+  }
+  return { selfStale, other, total: failedBlocks.length, detail };
+}
+
+/**
  * يَقرأُ وسائطَ سطرِ الأمرِ بلا تبعيّةٍ خارجيّةٍ.
  * @param {string[]} argv
  * @returns {{ tap: string, flags: Record<string, string> }}
@@ -133,8 +205,30 @@ function main() {
   const planRel = flags.plan ?? '';
   if (!existsSync(path.join(root, planRel))) fail(`ملفُّ الخطّةِ غيرُ موجودٍ: ${planRel}`);
   const measured = parseTap(readFileSync(tap, 'utf8'));
-  if (measured.fail !== 0) {
-    fail(`تشغيلةٌ فيها ${measured.fail} إخفاقاً لا تُصلُحُ خطَّ أساسٍ — أصلِحِ الإخفاقَ أوّلاً.`);
+  const rawFail = measured.fail;
+  // ── LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ ──
+  // التشغيلةُ التي إخفاقُها الوحيدُ هو تقادُمُ الأثرِ نفسِهِ (R6/STALE من
+  // حاجزِ skip-baseline) يُسمَحُ بتحديثِ الأثرِ عليها — لا بإلغاءِ شرطِ «لا
+  // خطَّ أساسٍ من تشغيلةٍ فاشلةٍ»، بل بتمييزِ إخفاقٍ بعينِهِ يَعودُ سببُهُ إلى
+  // الأثرِ نفسِهِ. وتشغيلةٌ فيها إخفاقٌ آخرُ ما زالت مردودةً.
+  let selfStaleAllowed = false;
+  if (rawFail !== 0) {
+    const tapText = readFileSync(tap, 'utf8');
+    const cls = classifyFailures(tapText);
+    if (cls.total === 0) {
+      // فشلٌ بلا كتلِ إخفاقٍ قابلةٍ للتحليلِ — مغلقٌ.
+      fail(
+        `تشغيلةٌ فيها ${rawFail} إخفاقاً ولا كتلةَ إخفاقٍ قابلةٌ للتحليلِ — لا تُصلُحُ خطَّ أساسٍ.`,
+      );
+    }
+    if (cls.other > 0) {
+      // إخفاقٌ أجنبيٌّ — مغلقٌ.
+      fail(
+        `تشغيلةٌ فيها ${rawFail} إخفاقاً (${cls.other} أجنبيّاً و${cls.selfStale} ذاتيّاً) لا تُصلُحُ خطَّ أساسٍ — أصلِحِ الإخفاقَ الأجنبيَّ أوّلاً.`,
+      );
+    }
+    // كلُّ الإخفاقاتِ ذاتيّةٌ مرجعيّةٌ — مسموحٌ.
+    selfStaleAllowed = true;
   }
   const commit =
     flags.commit ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -171,7 +265,11 @@ function main() {
       `   عدّادُ التخطّي الختاميُّ: ${measured.skipped} · أسطرُ # SKIP: ${measured.skipLines} · نقاطُ المستوى الأعلى: ${measured.topLevelSkipPoints}\n` +
       `   بسببِ DATABASE_URL: ${measured.attributedToDatabaseUrl} · أسبابٌ أُخرى: ${measured.otherReasons
         .map((r) => `${r.count}× ${r.reason.slice(0, 40)}`)
-        .join(' | ')}\n`,
+        .join(' | ')}\n` +
+      (selfStaleAllowed
+        ? `   ⚠️ سُمِحَ بتحديثِ الأثرِ على تشغيلةٍ إخفاقُها الوحيدُ ذاتيٌّ مرجعيٌّ (R6/STALE من guard-skip-baseline) — LIVE-16.
+`
+        : ''),
   );
 }
 

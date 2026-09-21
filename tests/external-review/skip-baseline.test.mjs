@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { checkSkipBaseline, normalizeDigits } from '../../scripts/guard-skip-baseline.mjs';
-import { parseTap } from '../../scripts/measure-skip-baseline.mjs';
+import { parseTap, classifyFailures } from '../../scripts/measure-skip-baseline.mjs';
 
 const REPO = path.resolve(import.meta.dirname, '../..');
 const GUARD = path.join(REPO, 'scripts/guard-skip-baseline.mjs');
@@ -244,4 +244,118 @@ test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على 
   }
   assert.equal(code, 1, 'حاجزٌ لا يَسقُطُ عندَ نقضِه ليسَ مُنفَذاً');
   assert.match(stderr, /R4\/DRIFT/);
+});
+
+// ── LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ ──
+
+const SELF_STALE_TAP = [
+  'TAP version 13',
+  '# Subtest: tests/external-review/skip-baseline.test.mjs',
+  '    TAP version 13',
+  '    # Subtest: الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على المستودعِ وبـ1 على شجرةٍ مُطفَّرةٍ',
+  '        1..1',
+  '        not ok 1 - assertion failed',
+  '          ---',
+  '          error: "Command failed: node scripts/guard-skip-baseline.mjs\\n' +
+    '            ⛔ حاجزُ خطِّ أساسِ التخطّي: عددٌ مُعلَنٌ غيرُ مقيسٍ.\\n' +
+    '               - R6/STALE: المُدخلةُ 0 قِيسَت على 218 ملفَّ اختبارٍ والشجرةُ الحاليّةُ فيها 219"',
+  '          ---',
+  '    1..1',
+  '    # tests 1',
+  '    # pass 0',
+  '    # fail 1',
+  'not ok 1 - tests/external-review/skip-baseline.test.mjs',
+  '  ---',
+  '  tests: 1',
+  '  pass: 0',
+  '  fail: 1',
+  '  ---',
+  '1..1',
+  '# tests 1',
+  '# pass 0',
+  '# fail 1',
+  '# skipped 0',
+].join('\n');
+
+const MIXED_FAIL_TAP = [
+  'TAP version 13',
+  '# Subtest: tests/external-review/skip-baseline.test.mjs',
+  '    TAP version 13',
+  '    # Subtest: الحاجزُ عمليّةً منفصلةٌ',
+  '        1..1',
+  '        not ok 1 - assertion failed',
+  '          ---',
+  '          error: "R6/STALE: guard-skip-baseline ..."',
+  '          ---',
+  '    1..1',
+  '    # tests 1',
+  '    # pass 0',
+  '    # fail 1',
+  'not ok 1 - tests/external-review/skip-baseline.test.mjs',
+  '  ---',
+  '  tests: 1',
+  '  pass: 0',
+  '  fail: 1',
+  '  ---',
+  '# Subtest: tests/other/other.test.mjs',
+  '    TAP version 13',
+  '    # Subtest: شيءٌ آخرُ',
+  '        1..1',
+  '        not ok 1 - assertion failed',
+  '          ---',
+  '          error: "expected 5 to equal 6"',
+  '          ---',
+  '    1..1',
+  '    # tests 1',
+  '    # pass 0',
+  '    # fail 1',
+  'not ok 2 - tests/other/other.test.mjs',
+  '  ---',
+  '  tests: 1',
+  '  pass: 0',
+  '  fail: 1',
+  '  ---',
+  '1..2',
+  '# tests 2',
+  '# pass 0',
+  '# fail 2',
+  '# skipped 0',
+].join('\n');
+
+test('LIVE-16: إخفاقٌ ذاتيٌّ مرجعيٌّ واحدٌ (R6/STALE من skip-baseline) ⇒ مصنَّفٌ ذاتيّاً', () => {
+  const cls = classifyFailures(SELF_STALE_TAP);
+  assert.equal(cls.total, 1, `تُوقِّعَ كتلةٌ واحدةٌ، والذي وَجدَ: ${cls.total}`);
+  assert.equal(cls.selfStale, 1, 'الإخفاقُ الذاتيُّ المرجعيُّ ينبغي أن يُصنَّفَ ذاتيّاً');
+  assert.equal(cls.other, 0, 'لا ينبغي أن يكونَ إخفاقٌ أجنبيٌّ');
+});
+
+test('LIVE-16: إخفاقٌ ذاتيٌّ + إخفاقٌ أجنبيٌّ ⇒ مصنَّفانِ، الأجنبيُّ يَمنَعُ', () => {
+  const cls = classifyFailures(MIXED_FAIL_TAP);
+  assert.equal(cls.total, 2, `تُوقِّعَ كتلتانِ، والذي وَجدَ: ${cls.total}`);
+  assert.equal(cls.selfStale, 1, 'كتلةٌ واحدةٌ ذاتيّةٌ');
+  assert.equal(cls.other, 1, 'كتلةٌ واحدةٌ أجنبيّةٌ — تَمنَعُ تحديثَ الأثرِ');
+});
+
+test('LIVE-16: TAP بلا إخفاقٍ ⇒ صفرُ كتلٍ وصفرُ ذاتيٍّ', () => {
+  const okTap = [
+    'TAP version 13',
+    'ok 1 - ناجحٌ',
+    '1..1',
+    '# tests 1',
+    '# pass 1',
+    '# fail 0',
+  ].join('\n');
+  const cls = classifyFailures(okTap);
+  assert.equal(cls.total, 0);
+  assert.equal(cls.selfStale, 0);
+  assert.equal(cls.other, 0);
+});
+
+test('LIVE-16: فشلٌ بلا كتلةِ not ok ⇒ مصنَّفٌ صفرٌ (فشلٌ بلا تحليلٍ)', () => {
+  // TAP يقولُ # fail 1 لكن لا يوجدُ سطرُ not ok — مغلقٌ.
+  const weirdTap = ['TAP version 13', '1..0', '# tests 0', '# pass 0', '# fail 1'].join('\n');
+  const cls = classifyFailures(weirdTap);
+  assert.equal(cls.total, 0, 'لا كتلَ إخفاقٍ قابلةٍ للتحليلِ');
+  assert.equal(cls.selfStale, 0);
+  assert.equal(cls.other, 0);
 });
