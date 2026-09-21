@@ -45,6 +45,7 @@ import { createMemoryRepositories } from '../../src/persistence/composition.mjs'
 import {
   CertificateAuthority,
   CommandLedger,
+  EventLog,
   CrownGateway,
   HaltSwitch,
   KingIdentity,
@@ -565,7 +566,7 @@ test('R5-B-03: الفشلُ مغلق — سجلٌّ يُكتب فيه ولا ي�
   const realmUnderTest = realm();
   const { cleanup } = realmUnderTest;
   try {
-    // سجلٌّ يستوفي عقدَ `append` وحدَه: لا `snapshot` فلا قيدَ استهلاكٍ يُقرأ،
+    // سجلٌّ يستوفي عقدَ `append` وحدَه: لا قراءةٌ محدودةٌ فلا قيدَ استهلاكٍ يُقرأ،
     // فلا يُدَّعى منعُ إعادةٍ يزول بإعادةِ التشغيل.
     const appendOnly = { append: () => undefined };
     const blind = new KingAuthenticator({
@@ -589,6 +590,65 @@ test('R5-B-03: الفشلُ مغلق — سجلٌّ يُكتب فيه ولا ي�
       AUTHN_ERRORS.FACTOR_LEDGER_UNREADABLE,
       'سجلٌّ بلا قراءةِ قيدِ استهلاك',
     );
+  } finally {
+    cleanup();
+  }
+});
+
+
+test('LIVE-14: القراءةُ المحدودةُ تُرجعُ الحدَّ الأدنى فقط ولا تعتمدُ على at', () => {
+  const log = new EventLog();
+  const floorStep = 100;
+  log.events = [
+    { id: 'old', seq: 1, type: 'factor.consumed', actor: 'king', data: { device: 'd', step: floorStep - 1 }, previousHash: '', at: '2099-01-01T00:00:00.000Z', hash: '' },
+    { id: 'edge', seq: 2, type: 'factor.consumed', actor: 'king', data: { device: 'd', step: floorStep }, previousHash: '', at: '1970-01-01T00:00:00.000Z', hash: '' },
+    { id: 'other', seq: 3, type: 'other', actor: 'king', data: { step: floorStep + 1 }, previousHash: '', at: '2099-01-01T00:00:00.000Z', hash: '' },
+  ];
+  /** @type {never} */ (log).buildStepIndex();
+  const events = log.eventsOfTypeSinceStep('factor.consumed', floorStep);
+  assert.deepEqual(events.map((event) => event.id), ['edge']);
+});
+
+test('LIVE-14: سجلٌّ كبيرٌ لا ينسخ التاريخَ كله عند القراءةِ المحدودة', () => {
+  const log = new EventLog();
+  const total = 200_000;
+  const relevant = 37;
+  log.events = Array.from({ length: total }, (_, index) => ({
+    id: String(index),
+    seq: index + 1,
+    type: index >= total - relevant ? 'factor.consumed' : 'other',
+    actor: 'king',
+    data: { step: index >= total - relevant ? 10_000 + (index - (total - relevant)) : index },
+    previousHash: '',
+    at: new Date(0).toISOString(),
+    hash: '',
+  }));
+  /** @type {never} */ (log).buildStepIndex();
+  const result = log.eventsOfTypeSinceStep('factor.consumed', 10_000);
+  assert.equal(result.length, relevant);
+  assert.ok(result.length < total / 1000, 'القراءةُ المحدودةُ نسخت التاريخَ القديم كله');
+});
+
+test('LIVE-14: المصادقُ يستعملُ القراءةَ المحدودةَ ولا يعودُ إلى snapshot', async () => {
+  const realmUnderTest = realm();
+  const { authenticate, factorCode, cleanup } = realmUnderTest;
+  const log = realmUnderTest.log;
+  const original = log.eventsOfTypeSinceStep.bind(log);
+  let boundedCalls = 0;
+  let snapshotCalls = 0;
+  log.eventsOfTypeSinceStep = (type, minStep) => {
+    boundedCalls += 1;
+    return original(type, minStep);
+  };
+  log.snapshot = () => {
+    snapshotCalls += 1;
+    throw new Error('snapshot() استُعمل بدل القراءة المحدودة');
+  };
+  try {
+    const code = factorCode();
+    await authenticate({ factorCode: code });
+    assert.equal(boundedCalls, 1);
+    assert.equal(snapshotCalls, 0);
   } finally {
     cleanup();
   }
