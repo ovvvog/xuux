@@ -46,6 +46,10 @@ jobs:
         run: npm run build
 
       - name: تشغيل الاختبارات بلا DATABASE_URL لإنتاج TAP
+        # R6/STALE متوقَّعٌ: الأثرُ يقولُ 218 والشجرةُ فيها 219. منفذُ LIVE-16
+        # يَسمَحُ بتحديثِ الأثرِ رغمَ ذاكَ الإخفاقِ الذاتيِّ المرجعيِّ.
+        # فلذلك نَلتقِطُ TAP ونُكملُ مهما كانَ رمزُ الخروج.
+        continue-on-error: true
         run: |
           env -u DATABASE_URL node --test --test-concurrency=1 --test-timeout=120000 tests/ > /tmp/skip-baseline-measure.tap 2>/tmp/skip-baseline-measure.stderr
           echo "exit: $?"
