@@ -29,6 +29,7 @@ import {
   git,
 } from '../helpers/skip-baseline-fixture.mjs';
 import { computeScopeDigest } from '../../scripts/lib/skip-baseline-scope.mjs';
+import { declaredReviewedCommits } from '../../scripts/fetch-reviewed-commits.mjs';
 import { allowSelfStaleOnly } from '../../scripts/measure-skip-baseline.mjs';
 import { verifyArtifact } from '../../scripts/verify-skip-baseline-artifact.mjs';
 import { checkSkipBaseline } from '../../scripts/guard-skip-baseline.mjs';
@@ -595,6 +596,110 @@ test('ط٤ — `origin/main` غيرُ مجلوبٍ: مُلاحظةُ `R8/NO-BASE
     notices.some((n) => n.startsWith('R8/NO-BASE')),
     notices.join(' | '),
   );
+});
+
+// ══════ فكُّ الجُمودِ: دَينُ `main` لا يُحمَّلُ على طلبٍ لم يُحدِثْهُ ══════
+//
+// **الجُمودُ الذي تَقيسُهُ هذه المجموعةُ** — وقد وقعَ فعلاً بعدَ دمجِ `#134`:
+// أثرُ `main` تقادَمَ عن شجرتِها، فصارَ كلُّ فرعٍ يُحاكَمُ على أساسٍ **متقادِمٍ هوَ
+// نفسُهُ**، فيَحمَرُّ كلُّ طلبٍ — ومنهُ الطلبُ الذي يُصلِحُ سببَ التقادُمِ. وذاكَ
+// نقضٌ لشرطِ المالكِ: «لا تجعل تغيير main أو إضافة ملفات جديدة ينتج آلياً deadlock
+// يمنع مسار إعادة القياس».
+//
+// **والحدُّ الفاصلُ مقيسٌ لا موصوفٌ:** إن كانَ أثرُ الفرعِ **مُطابِقاً لأثرِ الأساسِ
+// حرفاً** فالتقادُمُ دَينُ `main` ⇒ مُلاحظةٌ `BASE-STALE`، و`main` حمراءُ بهِ في
+// تشغيلتِها هيَ. وإن مَسَّ الطلبُ الأثرَ بحرفٍ ⇒ **انتهاكٌ**. فلا يُشترى صمتٌ
+// بتعديلِ أثرٍ.
+
+test('ج١ — أساسٌ متقادِمٌ وأثرٌ لم يُمَسَّ: مُلاحظةُ `BASE-STALE` لا انتهاكٌ — فلا جُمودَ', () => {
+  const { dir } = mainLikeRoot();
+  // `main` تتقدَّمُ بملفِّ اختبارٍ بلا إعادةِ قياسٍ ⇒ أثرُها متقادِمٌ.
+  const staleMain = commitFiles(dir, { 'tests/on-main.test.mjs': "import 'node:test';\n" }, 'main');
+  setOriginMain(dir, staleMain);
+  assert.ok(
+    checkSkipBaseline(dir).violations.some((v) => v.startsWith('R6/STALE')),
+    '**و`main` تبقى حمراءَ** — وهذا شرطُ ألّا يكونَ هذا تخفيفاً.',
+  );
+
+  // ثمَّ فرعٌ منها لا يَمَسُّ الأثرَ.
+  git(dir, ['checkout', '--quiet', '-b', 'fix/anything']);
+  commitFiles(dir, { 'src/unrelated.mjs': 'export const x = 1;\n' }, 'fix: لا يَمَسُّ الأثرَ');
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.deepEqual(
+    violations,
+    [],
+    `طلبٌ لا يُطالَبُ بإصلاحِ دَينٍ لم يُحدِثْهُ، وإلّا انسدَّ مسارُ إعادةِ القياسِ: ${violations.join(' | ')}`,
+  );
+  const stale = notices.find((n) => n.startsWith('BASE-STALE'));
+  assert.ok(stale !== undefined, `ولا يُسكَتُ عنهُ: يُعلَنُ مُلاحظةً. ${notices.join(' | ')}`);
+  assert.match(stale, /R6\/STALE/, 'والمُلاحظةُ تَحمِلُ نصَّ القاعدةِ كما هوَ لا مُبهَماً.');
+  assert.match(stale, /دَينُ `main`/);
+});
+
+test('ج٢ — وإن مَسَّ الطلبُ الأثرَ فالحُكمُ انتهاكٌ: لا يُشترى صمتٌ بتعديلِ أثرٍ', () => {
+  const { dir } = mainLikeRoot();
+  const staleMain = commitFiles(dir, { 'tests/on-main.test.mjs': "import 'node:test';\n" }, 'main');
+  setOriginMain(dir, staleMain);
+  git(dir, ['checkout', '--quiet', '-b', 'fix/touches']);
+
+  const parsed = JSON.parse(readFileSync(path.join(dir, ARTIFACT_REL), 'utf8'));
+  parsed.measurements[0].testFileCount = 999;
+  writeFile(dir, ARTIFACT_REL, `${JSON.stringify(parsed, null, 2)}\n`);
+
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    `أثرٌ مَسَّهُ الطلبُ يُحاكَمُ حاسماً: ${violations.join(' | ')}`,
+  );
+  assert.ok(!notices.some((n) => n.startsWith('BASE-STALE')), 'ولا مُلاحظةَ تُشترى بتعديلٍ.');
+});
+
+test('ج٣ — وعلى `main` نفسِها لا تأجيلَ ولا مُلاحظةَ: التقادُمُ انتهاكٌ يُحمِّرُها', () => {
+  const { dir } = mainLikeRoot();
+  const moved = commitFiles(dir, { 'tests/on-main.test.mjs': "import 'node:test';\n" }, 'main');
+  setOriginMain(dir, moved);
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    violations.join(' | '),
+  );
+  assert.ok(
+    !notices.some((n) => n.startsWith('BASE-STALE')),
+    '`BASE-STALE` مشروطةٌ بمُحاكمةِ أساسٍ — و`main` ليست فرعاً لأحدٍ.',
+  );
+});
+
+test('ج٤ — كوميتاتُ المراجعةِ المُعلَنةُ تُقرأُ من العقدِ ببرنامجٍ لا بنمطٍ', () => {
+  const commits = declaredReviewedCommits(REPO_ROOT);
+  assert.ok(commits.length > 0, 'العقدُ يُعلِنُ كوميتاتَ مراجعةٍ.');
+  for (const commit of commits) {
+    assert.match(commit, /^[0-9a-f]{7,40}$/, `بصمةٌ لا كلامٌ: ${commit}`);
+  }
+  assert.equal(new Set(commits).size, commits.length, 'ولا تكرارَ.');
+});
+
+test('ج٥ — ومسارا الاختبارِ كِلاهما يَجلُبانِها حاسماً قبلَ الحزمةِ (‏`R6-A-10`)', () => {
+  const suiteAnchors = {
+    'ci.yml': '- name: الاختبارات',
+    'measure-skip-baseline.yml': '- name: تشغيلُ الحزمةِ وجمعُ TAP',
+  };
+  for (const [file, anchor] of Object.entries(suiteAnchors)) {
+    const text = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', file), 'utf8');
+    const fetchIndex = text.indexOf('npm run fetch:reviewed-commits');
+    assert.ok(fetchIndex > -1, `${file}: الجلبُ قائمٌ — وبلا هذا تَخضَرُّ التشغيلةُ ببقايا مجلدٍ.`);
+    const suiteIndex = text.indexOf(anchor);
+    assert.ok(suiteIndex > -1, `${file}: خطوةُ الحزمةِ قائمةٌ باسمِها.`);
+    assert.ok(suiteIndex > fetchIndex, `${file}: الجلبُ قبلَ الحزمةِ.`);
+    const doc = parseYaml(text);
+    const step = collect(doc, 'run')
+      .map(String)
+      .find((r) => r.includes('fetch:reviewed-commits'));
+    assert.ok(step !== undefined);
+    assert.ok(
+      !/\|\|\s*true/.test(step),
+      `${file}: حاسمةٌ — كوميتٌ مُعلَنٌ لا يُقرأُ يُسقِطُ الخطوةَ ولا يُسكِتُ \`R6-A-10\`.`,
+    );
+  }
 });
 
 // ════════ مراجعةُ مرجِعِ الحُكمِ — ثمانيةُ مواضعَ مُقاسةٌ لا موصوفةٌ ════════

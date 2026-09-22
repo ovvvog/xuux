@@ -142,8 +142,11 @@ export function checkSkipBaseline(root) {
   }
   /** @type {any} */
   let artifact;
+  /** @type {string} نصُّ الأثرِ كما هوَ على القرصِ — يُقابَلُ بنصِّهِ في الأساسِ. */
+  let rawArtifact;
   try {
-    artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
+    rawArtifact = readFileSync(artifactPath, 'utf8');
+    artifact = JSON.parse(rawArtifact);
   } catch (err) {
     return {
       violations: [
@@ -264,6 +267,8 @@ export function checkSkipBaseline(root) {
   let judgedRef = 'HEAD';
   /** @type {boolean} هل الشجرةُ المُحاكَمةُ هيَ العاملةُ (لا كوميتٌ بعينِهِ)؟ */
   let judgingWorkTree = true;
+  /** @type {string | null} نصُّ الأثرِ في كوميتِ الأساسِ — لِيُعرَفَ أمَسَّهُ الطلبُ أم لا. */
+  let artifactAtBase = null;
   {
     /** @type {string | null} */
     let headSha = null;
@@ -288,11 +293,39 @@ export function checkSkipBaseline(root) {
       if (containsBase) {
         judgedRef = baseSha;
         judgingWorkTree = false;
+        // **وهل الأثرُ في هذا الفرعِ هوَ أثرُ الأساسِ نفسُهُ حرفاً؟** هذا هوَ الفرقُ
+        // بينَ **دَينِ `main`** و**جُرمِ الطلبِ**: إن لم يَمَسَّ الطلبُ الأثرَ، فتقادُمُ
+        // الأثرِ عن شجرةِ الأساسِ **حالةٌ قائمةٌ في `main` قبلَ الطلبِ** — و`main`
+        // حمراءُ بها في تشغيلتِها هيَ، فلا يُطالَبُ طلبٌ بإصلاحِ ما لم يُحدِثْهُ ولا
+        // يُسدُّ بهِ مسارُ إعادةِ القياسِ. وإن مَسَّهُ فالحُكمُ عليهِ حاسمٌ.
+        try {
+          artifactAtBase = gitRead(root, ['show', `${baseSha}:${ARTIFACT}`]);
+        } catch {
+          artifactAtBase = null;
+        }
         notices.push(
           `SCOPE/JUDGED-BASE: الجذرُ فرعٌ يَحتوي رأسَ \`main\` (${baseSha.slice(0, 8)})، فـR6 و R7 تُقاسانِ على شجرةِ \`main\` التي يَصِفُها الأثرُ لا على شجرةِ الفرعِ. وانزياحُ نطاقِ الفرعِ يُحاكَمُ على \`main\` بعدَ الدمجِ وبـ\`V5\` قبلَ النشرِ، وأساسُ الفرعِ يَحرُسُهُ R8.`,
         );
       }
     }
+  }
+
+  // **مُوجِّهُ الحُكمِ** — أهوَ جُرمُ الطلبِ أم دَينُ الأساسِ؟ يُستعمَلُ في `R6` و`R7`
+  // وحدَهُما، وهُما القاعدتانِ اللتانِ تُقابِلانِ الأثرَ بشجرةٍ. وشرطُ التحويلِ إلى
+  // مُلاحظةٍ **ضيّقٌ ومُقاسٌ**: أن يُحاكَمَ أساسٌ، وأن يُقرأَ أثرُ الأساسِ، وأن يكونَ
+  // أثرُ الفرعِ **مُطابِقاً لهُ حرفاً**. فإن مَسَّ الطلبُ الأثرَ بحرفٍ صارَ الحُكمُ
+  // عليهِ انتهاكاً كما كانَ — فلا يُشترى صمتٌ بتعديلِ أثرٍ.
+  const artifactUntouched =
+    !judgingWorkTree && artifactAtBase !== null && artifactAtBase.trim() === rawArtifact.trim();
+  /** @param {string} message */
+  function pushJudgment(message) {
+    if (artifactUntouched) {
+      notices.push(
+        `BASE-STALE: ${message} — **وهذا دَينُ \`main\` لا جُرمُ هذا الطلبِ:** الأثرُ في الفرعِ مُطابِقٌ لأثرِ الأساسِ حرفاً، فالتقادُمُ قائمٌ في \`main\` قبلَ الطلبِ و\`main\` حمراءُ بهِ في تشغيلتِها هيَ حتّى تُعادَ تشغيلةُ القياسِ. ولا يُطالَبُ طلبٌ بإصلاحِ ما لم يُحدِثْهُ، ولا يُسدُّ بهِ مسارُ إعادةِ القياسِ.`,
+      );
+      return;
+    }
+    violations.push(message);
   }
 
   // ── R6 · تقادُمُ الأثرِ ──
@@ -304,7 +337,7 @@ export function checkSkipBaseline(root) {
     : countTestFilesAtCommit(root, judgedRef);
   for (const [i, e] of entries.entries()) {
     if (Number.isInteger(e?.testFileCount) && e.testFileCount !== currentTestFileCount) {
-      violations.push(
+      pushJudgment(
         `R6/STALE: المُدخلةُ ${i} قِيسَت على ${e.testFileCount} ملفَّ اختبارٍ و${judgingWorkTree ? 'الشجرةُ الحاليّةُ' : 'شجرةُ الأساسِ ' + judgedRef.slice(0, 8)} فيها ${currentTestFileCount} — القياسُ متقادِمٌ، أَعِدْه بـ\`npm run measure:skip-baseline\`.`,
       );
     }
@@ -338,7 +371,7 @@ export function checkSkipBaseline(root) {
         for (const [i, e] of entries.entries()) {
           if (typeof e?.scopeDigest !== 'string') continue;
           if (e.scopeDigest !== currentDigest) {
-            violations.push(
+            pushJudgment(
               `R7/SCOPE-DRIFT: المُدخلةُ ${i} قِيسَت على نطاقٍ ببصمةِ ${e.scopeDigest.slice(0, 12)} و${judgingWorkTree ? 'الشجرةُ العاملةُ' : 'شجرةُ الأساسِ ' + judgedRef.slice(0, 8)} ببصمةِ ${currentDigest.slice(0, 12)} — القياسُ متقادِمٌ عن شجرتِهِ، أَعِدْهُ.`,
             );
           }
