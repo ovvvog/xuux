@@ -17,10 +17,21 @@
 //   - R6: الأثرُ يُقابَلُ **بالواقعِ** لا بالوثيقةِ وحدَها — فعددُ ملفّاتِ الاختبارِ في الأثرِ
 //     يُقابَلُ بعددِها على القرصِ، وأثرٌ قِيسَ على شجرةٍ ثمَّ نمَتْ بملفّاتٍ جديدَةٍ
 //     يَسقُطُ لا يَمُرُّ أخضرَ (LIVE-15). وكوميتُ الأثرِ يَبقى للنسبةِ الزمنيّةِ (R5) لا للقياسِ.
+//   - R7: بصمةُ **نطاقِ** الشجرةِ في الأثرِ تُقابَلُ ببصمةِ الشجرةِ العاملةِ (‏`OPS-1`).
+//     ولماذا لا يُجزِئُ `R6`: ذاكَ يُقابِلُ **عدّاداً** لا هويّةً، فدمجٌ يُعدِّلُ
+//     عشرةَ ملفّاتٍ في `src/` بلا إضافةِ ملفِّ اختبارٍ **يَمُرُّ `R6` أخضرَ**
+//     والأثرُ يَصِفُ شجرةً لم تَبقَ. وقد قِيسَ: بينَ `eba5afcf` و`54cfec25` بقيَ
+//     `testFileCount` = 219 في الشجرتَينِ معَ اختلافِ النطاقِ.
+//   - R8: الشجرةُ العاملةُ تحتوي رأسَ `origin/main` أصلاً — فطلبُ دمجٍ تحرَّكَ
+//     أساسُهُ بعدَ فتحِهِ يَسقُطُ قبلَ الدمجِ لا بعدَهُ. **ولا يُستثنى بمنفَذِ
+//     الإخفاقِ الذاتيِّ قطعاً** (‏`LIVE-16`): لا يقولُ «الأثرُ متقادِمٌ» بل «الأساسُ
+//     تحرَّكَ»، وعلاجُهُ إعادةُ قياسٍ لا استثناءٌ.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { countTestFiles } from './lib/doc-count-facts.mjs';
+import { computeScopeDigest } from './lib/skip-baseline-scope.mjs';
 
 const ARTIFACT = 'docs/external-review/skip-baseline.json';
 const REVIEW_DIR = 'docs/external-review';
@@ -53,12 +64,20 @@ function reviewDocs(root) {
 
 /**
  * يُشغِّلُ القواعدَ ويُعيدُ قائمةَ الانتهاكاتِ — دالّةٌ نقيّةٌ ليقرأَها الاختبارُ.
+ *
+ * `notices` **ليسَت انتهاكاتٍ ولا هيَ تجاهلٌ**: هيَ حالاتٌ لا تُقاسُ فيها قاعدةٌ
+ * لغيابِ مادّتِها (أثرٌ قديمٌ بلا `scopeDigest`، أو جذرٌ بلا `git`، أو `origin/main`
+ * غيرُ مجلوبٍ)، **وتُطبَعُ باسمِها في كلِّ تشغيلةٍ** فلا تَسكُنُ صامتةً. ومرحلةُ
+ * النشرِ تَرفُضُ أصلاً أثراً دونَ العقدِ `2` (‏`V7`)، فلا يُنشَرُ أثرٌ يُعطِلُ `R7`.
+ *
  * @param {string} root
- * @returns {{ violations: string[], entryCount: number, docCount: number }}
+ * @returns {{ violations: string[], notices: string[], entryCount: number, docCount: number }}
  */
 export function checkSkipBaseline(root) {
   /** @type {string[]} */
   const violations = [];
+  /** @type {string[]} */
+  const notices = [];
   const artifactPath = path.join(root, ARTIFACT);
 
   // ── R1 ──
@@ -67,6 +86,7 @@ export function checkSkipBaseline(root) {
       violations: [
         `R1/MISSING: أثرُ القياسِ ${ARTIFACT} غيرُ موجودٍ — وَلِّدْه بـ\`npm run measure:skip-baseline\`.`,
       ],
+      notices,
       entryCount: 0,
       docCount: 0,
     };
@@ -80,6 +100,7 @@ export function checkSkipBaseline(root) {
       violations: [
         `R1/UNREADABLE: ${ARTIFACT} لا يُقرأُ JSON — ${/** @type {Error} */ (err).message}`,
       ],
+      notices,
       entryCount: 0,
       docCount: 0,
     };
@@ -88,6 +109,7 @@ export function checkSkipBaseline(root) {
   if (!entries) {
     return {
       violations: [`R1/SHAPE: ${ARTIFACT} بلا مصفوفةِ \`measurements\`.`],
+      notices,
       entryCount: 0,
       docCount: 0,
     };
@@ -184,19 +206,105 @@ export function checkSkipBaseline(root) {
     }
   }
 
-  return { violations, entryCount: entries.length, docCount: declaring };
+  // ── R7 · بصمةُ النطاقِ: هويّةٌ لا عدّادٌ (‏`OPS-1`) ──
+  // `R6` يُقابِلُ عددَ ملفّاتِ الاختبارِ، وشجرتانِ مختلفتانِ لهما عددٌ
+  // واحدٌ لا يُفرَّقُ بينَهما. وهذا يُقابِلُ **كائناتِ الشجرةِ** في النطاقِ
+  // المُعلَنِ، فأيُّ تغيُّرٍ في محتوى أو صلاحيّةٍ أو اسمٍ يُبدِّلُ البصمةَ.
+  {
+    const withDigest = entries.filter((/** @type {any} */ e) => typeof e?.scopeDigest === 'string');
+    const withoutDigest = entries.length - withDigest.length;
+    if (withoutDigest > 0) {
+      notices.push(
+        `R7/PENDING-MIGRATION: ${withoutDigest} مُدخلةً بلا \`scopeDigest\` — أثرٌ بعقدٍ أقدمَ من \`contractVersion 2\`، فـR7 غيرُ مقيسٍ عليها. وأوّلُ تشغيلةِ قياسٍ تُوَلِّدُ العقدَ الجديدَ وتُفعِّلُها — ومرحلةُ النشرِ تَرفُضُ أصلاً ما دونَ العقدِ 2 (V7).`,
+      );
+    }
+    if (withDigest.length > 0) {
+      /** @type {string | null} */
+      let currentDigest = null;
+      try {
+        currentDigest = computeScopeDigest(root, 'HEAD');
+      } catch (err) {
+        // حدٌّ مُعلَنٌ: جذرٌ بلا `git` لا تُحسَبُ له بصمةُ شجرةٍ. وفي CI الجذرُ
+        // مستودَعٌ دائماً، ويُقاسُ حسمُ القاعدةِ في اختبارٍ على جذرٍ فيه `git`.
+        notices.push(
+          `R7/NO-GIT: لا تُحسَبُ بصمةُ نطاقٍ في ${root} — ${/** @type {Error} */ (err).message}`,
+        );
+      }
+      if (currentDigest !== null) {
+        for (const [i, e] of entries.entries()) {
+          if (typeof e?.scopeDigest !== 'string') continue;
+          if (e.scopeDigest !== currentDigest) {
+            violations.push(
+              `R7/SCOPE-DRIFT: المُدخلةُ ${i} قِيسَت على نطاقٍ ببصمةِ ${e.scopeDigest.slice(0, 12)} والشجرةُ العاملةُ ببصمةِ ${currentDigest.slice(0, 12)} — القياسُ متقادِمٌ عن شجرتِهِ، أَعِدْهُ.`,
+            );
+          }
+        }
+      }
+    }
+  }
+
+  // ── R8 · أساسٌ تحرَّكَ (‏`OPS-1`) ──
+  // اللحظةُ التي لا يَحرُسُها `R6` ولا `R7`: الأثرُ قِيسَ وفُتِحَ طلبُ دمجٍ،
+  // ثمَّ تحرَّكَ `main`. فـ`R7` يُقابِلُ الأثرَ بشجرةِ الفرعِ وتُطابِقُ، والفرعُ
+  // معَ ذلكَ **أساسُهُ قديمٌ**. وهذا يُقاسُ بالأصليّةِ لا بالبصمةِ: فرعٌ سليمٌ
+  // يختلفُ عن `main` في المحتوى دائماً — وهذا ليسَ عَطباً — لكنَّهُ يجبُ أن
+  // **يَحتوي** رأسَ `main`. ومقابلةُ بصمتَينِ هنا تُحمِّرُ كلَّ طلبِ دمجٍ فتُلغي
+  // نفسَها — وحاجزٌ يَسقُطُ دائماً يُرخَى ثمَّ يُلغى.
+  {
+    /** @type {string | null} */
+    let mainSha = null;
+    try {
+      mainSha = execFileSync(
+        'git',
+        ['-C', root, 'rev-parse', '--verify', 'refs/remotes/origin/main'],
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        },
+      ).trim();
+    } catch {
+      // حدٌّ مُعلَنٌ مربوطٌ بـ`EXT-1`: بلا `origin/main` مجلوباً لا مادّةَ للقياسِ.
+      // وفي CI تُجلَبُ `main` بخطوةٍ حاسمةٍ قبلَ `validate`، ففشلُ الجلبِ يُسقِطُ
+      // الخطوةَ لا يُسكِتُ القاعدةَ.
+      notices.push(
+        `R8/NO-BASE: \`refs/remotes/origin/main\` غيرُ موجودٍ في ${root} — القاعدةُ بلا مادّةٍ. اجلبْهُ بـ\`git fetch origin main\`.`,
+      );
+    }
+    if (mainSha !== null) {
+      let contained = true;
+      try {
+        execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', mainSha, 'HEAD'], {
+          stdio: 'ignore',
+        });
+      } catch {
+        contained = false;
+      }
+      if (!contained) {
+        violations.push(
+          `R8/BASE-DRIFT: الشجرةُ العاملةُ لا تحتوي رأسَ origin/main ${mainSha.slice(0, 8)} — الأساسُ تحرَّكَ بعدَ القياسِ. أَعِدِ الأساسَ (rebase) ثمَّ أَعِدِ القياسَ إن تغيَّرَ النطاقُ — **ولا استثناءَ ذاتيَّ لهذه القاعدةِ**.`,
+        );
+      }
+    }
+  }
+
+  return { violations, notices, entryCount: entries.length, docCount: declaring };
 }
 
 function main() {
   const root = process.cwd();
-  const { violations, entryCount, docCount } = checkSkipBaseline(root);
+  const { violations, notices, entryCount, docCount } = checkSkipBaseline(root);
+  // المُلاحظاتُ تُطبَعُ **قبلَ الحكمِ وفي حالَيِ النجاحِ والفشلِ** — فقاعدةٌ لا
+  // تُقاسُ ولا يُعلَنُ أنّها لا تُقاسُ هيَ سَترٌ.
+  for (const n of notices) process.stdout.write(`ℹ️  ${n}\n`);
   if (violations.length > 0) {
-    process.stderr.write('⛔ حاجزُ خطِّ أساسِ التخطّي: عددٌ مُعلَنٌ غيرُ مقيسٍ أو غيرُ منسوبٍ.\n');
+    process.stderr.write(
+      '⛔ حاجزُ خطِّ أساسِ التخطّي: عددٌ مُعلَنٌ غيرُ مقيسٍ أو غيرُ منسوبٍ أو أصلٌ غيرُ مُطابِقٍ.\n',
+    );
     for (const v of violations) process.stderr.write(`   - ${v}\n`);
     process.exit(1);
   }
   process.stdout.write(
-    `✅ حاجزُ خطِّ أساسِ التخطّي: ${entryCount} مُدخلةَ قياسٍ و${docCount} وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ إلى أمرِه وكوميتِه وعددِ ملفّاتِ شجرتِه.\n`,
+    `✅ حاجزُ خطِّ أساسِ التخطّي: ${entryCount} مُدخلةَ قياسٍ و${docCount} وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ إلى أمرِه وكوميتِه وعددِ ملفّاتِ شجرتِه وبصمةِ نطاقِه.\n`,
   );
 }
 
