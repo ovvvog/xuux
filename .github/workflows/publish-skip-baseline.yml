@@ -121,6 +121,13 @@ jobs:
           cp candidate/skip-baseline.json docs/external-review/skip-baseline.json
           git --no-pager diff --stat -- docs/external-review/skip-baseline.json
 
+      # ── تحديثُ خططِ المراجعةِ بالكوميتِ المقيسِ الجديد (S1…S6) ──
+      # الفجوةُ: الأثرُ الجديدُ يحملُ كوميتاً جديداً، وخططُ المراجعةِ تَذكُرُ القديم.
+      # الحاجزُ R5 يَرفُضُ ذلك. هذا السكربتُ يُحدِّثُ السطرَ الأخيرَ (الأحدثَ) في
+      # كلِّ خطّةٍ ليذكرَ الكوميتَ المقيسَ الجديد، ويَفشلُ مُغلَقاً إن لم يجدْه.
+      - name: تحديثُ خططِ المراجعةِ بالكوميتِ المقيسِ
+        run: node scripts/sync-plan-commits.mjs docs/external-review/skip-baseline.json .
+
       # ── الحاجزُ **حاسمٌ** — لا `continue-on-error` ──
       # النسخةُ السابقةُ كانَت تُشغِّلُهُ بـ`continue-on-error: true` أي تَقيسُ ولا
       # تَحكُمُ — وحاجزٌ يَحرُسُ وجودَ ردٍّ ولا يَحرُسُ صحّتَهُ لا يَحرُسُ.

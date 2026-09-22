@@ -11,7 +11,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
@@ -1352,4 +1352,155 @@ test('ب٣ب — مُعِينُ استخراجِ الأوامرِ مقيسٌ: ي
     shellCommands('npm rebuild pkcs11js || true').some((c) => c.includes('|| true')),
     'ولا يُسقِطُ أمراً فيهِ الشرطُ فعلاً — وإلا كانَ الاستثناءُ ثُقباً.',
   );
+});
+
+// ═══ اختباراتُ سكربتِ تحديثِ خططِ المراجعةِ بالكوميتِ المقيسِ (S1…S6) ═══
+
+function makeArtifact(commit, measuredOn, plan, command = 'env -u DATABASE_URL npm test') {
+  return JSON.stringify(
+    {
+      generatedBy: 'test',
+      measurements: [
+        {
+          engagement: 'M11.06',
+          plan,
+          command,
+          commit,
+          measuredOn,
+          testFileCount: 222,
+          tests: 2130,
+          pass: 2130,
+          fail: 0,
+          skipped: 126,
+          skipLines: 128,
+          topLevelSkipPoints: 121,
+          attributedToDatabaseUrl: 92,
+          otherReasons: [],
+        },
+      ],
+    },
+    null,
+    2,
+  );
+}
+
+function makePlan(measuredCommit, date, command = 'env -u DATABASE_URL npm test') {
+  return [
+    '# خطّةُ جولةٍ',
+    '',
+    `- **الكوميتُ المُراجَعُ:** \`734397dc\``,
+    '',
+    `> **والأمرُ الذي يُنتِجُ هذهِ الأرقامَ نصّاً:** \`${command}\` · **والكوميتُ المقيسُ:** \`${measuredCommit}\` · **والتاريخُ:** ${date}.`,
+  ].join('\n');
+}
+
+function runSync(artifactPath, root) {
+  try {
+    execFileSync('node', ['scripts/sync-plan-commits.mjs', artifactPath, root], {
+      encoding: 'utf8',
+    });
+    return { exit: 0, stdout: '' };
+  } catch (e) {
+    return { exit: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+  }
+}
+
+test('م١ — S1: خطّةٌ غيرُ موجودةٍ ⇒ فشلٌ مغلقٌ', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s1-'));
+  registerTmpRoot(dir);
+  const artifact = makeArtifact('88707820', '2026-09-22', 'docs/external-review/missing-plan.md');
+  writeFileSync(path.join(dir, 'skip-baseline.json'), artifact);
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
+  assert.ok(r.stderr.includes('S1/PLAN_MISSING'), 'يسمّي السبب.');
+});
+
+test('م٢ — S2: لا يوجدُ سطرُ «الكوميتُ المقيسُ» ⇒ فشلٌ مغلقٌ', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s2-'));
+  registerTmpRoot(dir);
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md'),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), '# خطّةٌ بلا كوميتٍ مقيسٍ\n');
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
+  assert.ok(r.stderr.includes('S2/NO_MEASURED_LINE'), 'يسمّي السبب.');
+});
+
+test('م٣ — S3: السطرُ لا يحوي الأمرَ المقيس ⇒ فشلٌ مغلقٌ', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s3-'));
+  registerTmpRoot(dir);
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact(
+      '88707820',
+      '2026-09-22',
+      'docs/external-review/plan.md',
+      'env -u DATABASE_URL npm test',
+    ),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(
+    path.join(dir, 'docs/external-review/plan.md'),
+    '# خطّةٌ\n\n> **والكوميتُ المقيسُ:** `eba5afcf` · **والتاريخُ:** 2026-09-22.\n',
+  );
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
+  assert.ok(r.stderr.includes('S3/COMMAND_MISSING'), 'يسمّي السبب.');
+});
+
+test('م٤ — S4: لا يُمَسُّ سطرُ «الكوميتُ المُراجَعُ»', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s4-'));
+  registerTmpRoot(dir);
+  const plan = makePlan('eba5afcf', '2026-09-22');
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md'),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), plan);
+  runSync(path.join(dir, 'skip-baseline.json'), dir);
+  const after = readFileSync(path.join(dir, 'docs/external-review/plan.md'), 'utf8');
+  assert.ok(after.includes('734397dc'), 'الكوميتُ المُراجَعُ لم يُمَسَّ.');
+  assert.ok(after.includes('88707820'), 'والكوميتُ المقيسُ تَحَدَّثَ.');
+});
+
+test('م٥ — السطرُ الأخيرُ هو الذي يُحدَّثُ (سجلُّ قياساتٍ متعدِّد)', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s5-'));
+  registerTmpRoot(dir);
+  const plan = [
+    '# خطّةٌ',
+    '',
+    '- **الكوميتُ المُراجَعُ:** `734397dc`',
+    '',
+    '> **والأمرُ الذي يُنتِجُ هذهِ الأرقامَ نصّاً:** `env -u DATABASE_URL npm test` · **والكوميتُ المقيسُ:** `91307a78` · **والتاريخُ:** 2026-09-21.',
+    '',
+    '> **والأمرُ الذي يُنتِجُ هذهِ الأرقامَ نصّاً:** `env -u DATABASE_URL npm test` · **والكوميتُ المقيسُ:** `eba5afcf` · **والتاريخُ:** 2026-09-22.',
+  ].join('\n');
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md'),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), plan);
+  runSync(path.join(dir, 'skip-baseline.json'), dir);
+  const after = readFileSync(path.join(dir, 'docs/external-review/plan.md'), 'utf8');
+  assert.ok(after.includes('91307a78'), 'السطرُ القديمُ لم يُمَسَّ.');
+  assert.ok(after.includes('88707820'), 'والأحدثُ تَحَدَّثَ.');
+  assert.ok(!after.includes('eba5afcf'), 'والقديمُ استُبدِلَ في السطرِ الأخيرِ.');
+});
+
+test('م٦ — S6: طفرةٌ — حذفُ خانةِ «الكوميتُ المقيسُ» يُسقِطُ السكربت', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s6-'));
+  registerTmpRoot(dir);
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md'),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), '# خطّةٌ بلا كوميتٍ مقيسٍ\n');
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'طفرٌ تُسقِطُ السكربتَ.');
 });

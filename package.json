@@ -79,6 +79,7 @@
     "guard:emergency": "node scripts/guard-emergency.mjs",
     "guard:skip-baseline": "node scripts/guard-skip-baseline.mjs",
     "fetch:reviewed-commits": "node scripts/fetch-reviewed-commits.mjs .",
+    "sync-plan-commits": "node scripts/sync-plan-commits.mjs docs/external-review/skip-baseline.json .",
     "measure:skip-baseline": "node scripts/measure-skip-baseline.mjs",
     "guard:readiness": "node scripts/guard-readiness.mjs",
     "guard:scheduling": "node scripts/guard-scheduling.mjs",
