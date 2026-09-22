@@ -1410,8 +1410,7 @@ function runSync(artifactPath, root) {
 }
 
 test('م١ — S1: خطّةٌ غيرُ موجودةٍ ⇒ فشلٌ مغلقٌ', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s1-'));
-  registerTmpRoot(dir);
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s1-')));
   const artifact = makeArtifact('88707820', '2026-09-22', 'docs/external-review/missing-plan.md');
   writeFileSync(path.join(dir, 'skip-baseline.json'), artifact);
   const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
@@ -1420,8 +1419,7 @@ test('م١ — S1: خطّةٌ غيرُ موجودةٍ ⇒ فشلٌ مغلقٌ', 
 });
 
 test('م٢ — S2: لا يوجدُ سطرُ «الكوميتُ المقيسُ» ⇒ فشلٌ مغلقٌ', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s2-'));
-  registerTmpRoot(dir);
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s2-')));
   writeFileSync(
     path.join(dir, 'skip-baseline.json'),
     makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md'),
@@ -1434,8 +1432,7 @@ test('م٢ — S2: لا يوجدُ سطرُ «الكوميتُ المقيسُ» 
 });
 
 test('م٣ — S3: السطرُ لا يحوي الأمرَ المقيس ⇒ فشلٌ مغلقٌ', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s3-'));
-  registerTmpRoot(dir);
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s3-')));
   writeFileSync(
     path.join(dir, 'skip-baseline.json'),
     makeArtifact(
@@ -1456,8 +1453,7 @@ test('م٣ — S3: السطرُ لا يحوي الأمرَ المقيس ⇒ فش
 });
 
 test('م٤ — S4: لا يُمَسُّ سطرُ «الكوميتُ المُراجَعُ»', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s4-'));
-  registerTmpRoot(dir);
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s4-')));
   const plan = makePlan('eba5afcf', '2026-09-22');
   writeFileSync(
     path.join(dir, 'skip-baseline.json'),
@@ -1472,8 +1468,7 @@ test('م٤ — S4: لا يُمَسُّ سطرُ «الكوميتُ المُرا�
 });
 
 test('م٥ — السطرُ الأخيرُ هو الذي يُحدَّثُ (سجلُّ قياساتٍ متعدِّد)', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s5-'));
-  registerTmpRoot(dir);
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s5-')));
   const plan = [
     '# خطّةٌ',
     '',
@@ -1497,8 +1492,7 @@ test('م٥ — السطرُ الأخيرُ هو الذي يُحدَّثُ (سج�
 });
 
 test('م٦ — S6: طفرةٌ — حذفُ خانةِ «الكوميتُ المقيسُ» يُسقِطُ السكربت', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'sync-s6-'));
-  registerTmpRoot(dir);
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s6-')));
   writeFileSync(
     path.join(dir, 'skip-baseline.json'),
     makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md'),
