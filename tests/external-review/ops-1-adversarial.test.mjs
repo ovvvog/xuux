@@ -597,6 +597,138 @@ test('ط٤ — `origin/main` غيرُ مجلوبٍ: مُلاحظةُ `R8/NO-BASE
   );
 });
 
+// ══════ مرجِعُ الحُكمِ: الأثرُ يُقابَلُ بالشجرةِ التي يَصِفُها (فكُّ الدورانِ) ══════
+//
+// **الدورانُ الذي تَقيسُهُ هذه المجموعةُ:** الأثرُ يَصِفُ `main`، فلو قُوبِلَ بشجرةِ
+// فرعٍ لَسقطَ في كلِّ فرعٍ يُضيفُ ملفَّ اختبارٍ — ثمَّ لا مَخرَجَ، لأنَّ إعادةَ القياسِ
+// تَشترطُ رأسَ `main` (`A4`). فالمقيسُ هنا شيئانِ لا شيءٌ: أنَّ الفرعَ لا يُحاكَمُ
+// بما لا يَصِفُهُ الأثرُ، **وأنَّ `main` لم يُخفَّفْ عنهُ حرفٌ**.
+
+/**
+ * جذرٌ على هيئةِ `main`: `HEAD === origin/main`.
+ * @returns {{ dir: string, sha: string }}
+ */
+function mainLikeRoot() {
+  const dir = makeRoot();
+  const sha = initFixtureRepo(dir);
+  writeFile(dir, ARTIFACT_REL, artifactFor(dir, sha));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '--quiet', '-m', 'أثرٌ']);
+  const head = git(dir, ['rev-parse', 'HEAD']).trim();
+  writeFile(dir, ARTIFACT_REL, artifactFor(dir, head));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '--quiet', '--amend', '--no-edit']);
+  const finalSha = git(dir, ['rev-parse', 'HEAD']).trim();
+  writeFile(dir, ARTIFACT_REL, artifactFor(dir, finalSha));
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '--quiet', '--amend', '--no-edit']);
+  setOriginMain(dir, git(dir, ['rev-parse', 'HEAD']).trim());
+  return { dir, sha: git(dir, ['rev-parse', 'HEAD']).trim() };
+}
+
+test('ح١ — فرعٌ يُضيفُ ملفَّ اختبارٍ: R6 لا يَسقُطُ، والأساسُ المُحاكَمُ مُعلَنٌ باسمِهِ', () => {
+  const { dir } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'feat/tests']);
+  commitFiles(dir, { 'tests/beta.test.mjs': "import 'node:test';\n" }, 'feat: ملفُّ اختبارٍ');
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.ok(
+    !violations.some((v) => v.startsWith('R6/')),
+    `أثرٌ يَصِفُ main لا يُحاكَمُ بشجرةِ فرعٍ — وإلّا فلا مَخرَجَ: ${violations.join(' | ')}`,
+  );
+  assert.ok(
+    notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')),
+    `ومرجِعُ الحُكمِ يُعلَنُ ولا يُضمَرُ: ${notices.join(' | ')}`,
+  );
+});
+
+test('ح٢ — فرعٌ يُغيِّرُ نطاقاً: R7 لا يَسقُطُ على الفرعِ — ويَسقُطُ على main بعدَ الدمجِ', () => {
+  const { dir } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'feat/scope']);
+  commitFiles(dir, { 'src/core.mjs': 'export const value = 77;\n' }, 'feat: نطاقٌ');
+  const onBranch = checkSkipBaseline(dir);
+  assert.ok(
+    !onBranch.violations.some((v) => v.startsWith('R7/')),
+    `على الفرعِ لا حُكمَ: ${onBranch.violations.join(' | ')}`,
+  );
+
+  // الدمجُ: يَصيرُ الفرعُ هوَ `main` — فهنا يَصيرُ الانزياحُ حقيقةً ويُحاكَمُ.
+  setOriginMain(dir, git(dir, ['rev-parse', 'HEAD']).trim());
+  const afterMerge = checkSkipBaseline(dir);
+  assert.ok(
+    afterMerge.violations.some((v) => v.startsWith('R7/SCOPE-DRIFT')),
+    `وعلى main يَسقُطُ — وإلّا كانَ التأجيلُ إلغاءً: ${afterMerge.violations.join(' | ')}`,
+  );
+});
+
+test('ح٣ — على `main` نفسِهِ: أثرٌ متقادِمٌ يُسقِطُ R6 كما كانَ، بلا حرفِ تخفيفٍ', () => {
+  const { dir } = mainLikeRoot();
+  commitFiles(dir, { 'tests/gamma.test.mjs': "import 'node:test';\n" }, 'main: ملفٌّ');
+  setOriginMain(dir, git(dir, ['rev-parse', 'HEAD']).trim());
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    `main يَسقُطُ بالتقادُمِ: ${violations.join(' | ')}`,
+  );
+  assert.ok(
+    !notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')),
+    'ولا تأجيلَ على main: الشجرةُ المُحاكَمةُ هيَ العاملةُ.',
+  );
+});
+
+test('ح٤ — وعلى `main` أيضاً: انزياحُ نطاقٍ يُسقِطُ R7 كما كانَ', () => {
+  const { dir } = mainLikeRoot();
+  commitFiles(dir, { 'src/core.mjs': 'export const value = 5;\n' }, 'main: نطاقٌ');
+  setOriginMain(dir, git(dir, ['rev-parse', 'HEAD']).trim());
+  const { violations } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R7/SCOPE-DRIFT')),
+    violations.join(' | '),
+  );
+});
+
+test('ح٥ — بلا `origin/main` مقروءٍ تُحاكَمُ الشجرةُ العاملةُ — الأشدُّ لا الأخفُّ', () => {
+  const dir = makeRoot();
+  const sha = initFixtureRepo(dir);
+  writeFile(dir, ARTIFACT_REL, artifactFor(dir, sha));
+  commitFiles(dir, { 'tests/delta.test.mjs': "import 'node:test';\n" }, 'ملفٌّ');
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    `غيابُ الأساسِ لا يُقرأُ إذناً: ${violations.join(' | ')}`,
+  );
+  assert.ok(
+    notices.some((n) => n.startsWith('R8/NO-BASE')),
+    notices.join(' | '),
+  );
+});
+
+test('ح٦ — فرعٌ أساسُهُ قديمٌ: التأجيلُ لا يُعطِّلُ R8 — الحارسُ الحقيقيُّ للفرعِ', () => {
+  const { dir, sha } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'feat/old']);
+  commitFiles(dir, { 'tests/eps.test.mjs': "import 'node:test';\n" }, 'feat: ملفٌّ');
+  git(dir, ['checkout', '--quiet', '-b', 'other', sha]);
+  const moved = commitFiles(dir, { 'src/core.mjs': 'export const value = 9;\n' }, 'main: تقدَّمَ');
+  setOriginMain(dir, moved);
+  git(dir, ['checkout', '--quiet', 'feat/old']);
+  const { violations } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R8/BASE-DRIFT')),
+    `فرعٌ لا يَحتوي رأسَ main يَسقُطُ بـR8: ${violations.join(' | ')}`,
+  );
+});
+
+test('ح٧ — عدُّ ملفّاتِ الاختبارِ في كوميتٍ يَرى المسارَ العربيَّ (‏`DOC-11`)', () => {
+  const { dir } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'feat/arabic']);
+  commitFiles(dir, { 'tests/ولاية/اختبار.test.mjs': "import 'node:test';\n" }, 'feat: عربيٌّ');
+  setOriginMain(dir, git(dir, ['rev-parse', 'HEAD']).trim());
+  const { violations } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    `ملفُّ اختبارٍ بمسارٍ عربيٍّ يُعَدُّ فعلاً — وإلّا سقطَ من العدِّ صامتاً: ${violations.join(' | ')}`,
+  );
+});
+
 // ════════════════════ بنيةُ سيرِ العملِ: ع١٨ وما معهُ ════════════════════
 
 /** @param {string} rel */
@@ -778,7 +910,12 @@ test('ب٥ — `ci.yml` يَجلِبُ `origin/main` مادّةً لـ`R8` حا�
   assert.match(text, /git fetch --no-tags origin main:refs\/remotes\/origin\/main/);
   const fetchIndex = text.indexOf('git fetch --no-tags origin main:refs/remotes/origin/main');
   const guardIndex = text.indexOf('npm run guard:skip-baseline');
+  const testIndex = text.indexOf('run: npm test');
   assert.ok(fetchIndex > -1 && guardIndex > fetchIndex, 'الجلبُ قبلَ الحاجزِ لا بعدَهُ.');
+  assert.ok(
+    testIndex > fetchIndex,
+    'والجلبُ قبلَ `npm test` أيضاً: الحزمةُ تُشغِّلُ الحاجزَ عمليّةً منفصلةً، فبلا أساسٍ مجلوبٍ يُحاكَمُ الفرعُ بأثرٍ يَصِفُ main — وذاكَ الدورانُ نفسُهُ.',
+  );
 });
 
 test('ب٦ — مرحلةُ النشرِ تُشغِّلُ الحاجزَ حاسماً والمُتحقِّقَ قبلَ أيِّ كتابةٍ', () => {

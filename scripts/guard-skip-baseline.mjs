@@ -33,6 +33,55 @@ import { execFileSync } from 'node:child_process';
 import { countTestFiles } from './lib/doc-count-facts.mjs';
 import { computeScopeDigest } from './lib/skip-baseline-scope.mjs';
 
+/**
+ * يَقرأُ من `git` في جذرٍ صريحٍ ويَرمي عندَ الفشلِ — **لا يُعيدُ قيمةً بديلةً**،
+ * فتعذُّرُ القراءةِ لا يُقرأُ جواباً.
+ *
+ * @param {string} root
+ * @param {string[]} args
+ * @returns {string}
+ */
+function gitRead(root, args) {
+  return execFileSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: 64 * 1024 * 1024,
+  }).trim();
+}
+
+/**
+ * عددُ ملفّاتِ الاختبارِ في **كوميتٍ بعينِهِ** لا على القرصِ.
+ *
+ * **ولماذا لا يَكفي `countTestFiles` هنا:** ذاكَ يَعُدُّ ما على القرصِ، وهوَ
+ * الصوابُ حينَ تُحاكَمُ الشجرةُ العاملةُ (‏فيَرى حتّى ملفّاً غيرَ متعقَّبٍ).
+ * أمّا حينَ يُحاكَمُ الأثرُ على شجرةِ الأساسِ فالسؤالُ عن تلكَ الشجرةِ، فيُقرأُ
+ * من `git`. والقراءةُ بـ`-z` و`core.quotePath=false` لأنَّ المسارَ غيرَ ASCII
+ * يُقتَبَسُ فيَسقُطُ من الأنماطِ بلا خطأٍ (‏`DOC-11`).
+ *
+ * @param {string} root
+ * @param {string} commit
+ * @returns {number}
+ */
+function countTestFilesAtCommit(root, commit) {
+  const out = execFileSync(
+    'git',
+    [
+      '-C',
+      root,
+      '-c',
+      'core.quotePath=false',
+      'ls-tree',
+      '-r',
+      '-z',
+      '--name-only',
+      commit,
+      'tests',
+    ],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 },
+  );
+  return out.split('\0').filter((p) => p.endsWith('.test.mjs')).length;
+}
+
 const ARTIFACT = 'docs/external-review/skip-baseline.json';
 const REVIEW_DIR = 'docs/external-review';
 
@@ -193,15 +242,70 @@ export function checkSkipBaseline(root) {
     }
   }
 
+  // ── تحديدُ الشجرةِ المُحاكَمةِ: الأثرُ يُقابَلُ بالشجرةِ التي **يَصِفُها** ──
+  //
+  // **هنا كانَ الدورانُ، وهذا موضعُ إصلاحِهِ.** الأثرُ في `main` يَصِفُ شجرةَ
+  // `main`. فلو قُوبِلَ بشجرةِ فرعِ عملٍ لَسقطَ بالضرورةِ في كلِّ فرعٍ يُضيفُ
+  // ملفَّ اختبارٍ أو يَلمِسُ النطاقَ — **وهذا ليسَ تقادُماً في الأثرِ بل خطأُ
+  // مرجِعٍ في السؤالِ**: يُسألُ عن شجرةٍ لا يَدَّعي وصفَها. ثمَّ لا مَخرَجَ:
+  // إعادةُ القياسِ تَشترطُ رأسَ `main` (`A4`)، فلا يُنتَجُ أثرٌ صالحٌ من فرعٍ،
+  // فيَبقى الفرعُ أحمرَ أبداً.
+  //
+  // فصارَتِ الشجرةُ المُحاكَمةُ **رأسَ `origin/main`** متى كانَ الجذرُ فرعاً
+  // يَحتويهِ، و**الشجرةَ العاملةَ** متى كانَ الجذرُ `main` نفسَهُ أو لا أساسَ
+  // مقروءاً. وعلى `main` في CI لا فرقَ: `HEAD === origin/main`، فالقاعدتانِ
+  // حاسمتانِ على شجرةِ `main` الفعليّةِ كما كانتا **بلا حرفٍ من تخفيفٍ**.
+  //
+  // **وليسَ هذا ثقباً في الفرعِ:** ما يَحرُسُ الفرعَ هوَ `R8` (أساسُهُ محتوىً)
+  // و`R1`…`R5` (شكلُ الأثرِ وأعدادُهُ المُعلَنةُ) — وكلُّها تُقاسُ على الفرعِ
+  // نفسِهِ. وانزياحُ النطاقِ الذي يُحدِثُهُ الفرعُ يُحاكَمُ حيثُ يَصيرُ حقيقةً:
+  // على `main` بعدَ الدمجِ، وفي مرحلةِ النشرِ بـ`V5` قبلَ أن يُكتَبَ أثرٌ.
+  /** @type {string} المرجِعُ الذي تُقاسُ عليهِ R6 و R7. */
+  let judgedRef = 'HEAD';
+  /** @type {boolean} هل الشجرةُ المُحاكَمةُ هيَ العاملةُ (لا كوميتٌ بعينِهِ)؟ */
+  let judgingWorkTree = true;
+  {
+    /** @type {string | null} */
+    let headSha = null;
+    /** @type {string | null} */
+    let baseSha = null;
+    try {
+      headSha = gitRead(root, ['rev-parse', 'HEAD']);
+      baseSha = gitRead(root, ['rev-parse', '--verify', 'refs/remotes/origin/main']);
+    } catch {
+      // لا أساسَ مقروءاً: تُحاكَمُ الشجرةُ العاملةُ — وهوَ الأشدُّ لا الأخفُّ.
+    }
+    if (headSha !== null && baseSha !== null && headSha !== baseSha) {
+      let containsBase;
+      try {
+        execFileSync('git', ['-C', root, 'merge-base', '--is-ancestor', baseSha, 'HEAD'], {
+          stdio: 'ignore',
+        });
+        containsBase = true;
+      } catch {
+        containsBase = false;
+      }
+      if (containsBase) {
+        judgedRef = baseSha;
+        judgingWorkTree = false;
+        notices.push(
+          `SCOPE/JUDGED-BASE: الجذرُ فرعٌ يَحتوي رأسَ \`main\` (${baseSha.slice(0, 8)})، فـR6 و R7 تُقاسانِ على شجرةِ \`main\` التي يَصِفُها الأثرُ لا على شجرةِ الفرعِ. وانزياحُ نطاقِ الفرعِ يُحاكَمُ على \`main\` بعدَ الدمجِ وبـ\`V5\` قبلَ النشرِ، وأساسُ الفرعِ يَحرُسُهُ R8.`,
+        );
+      }
+    }
+  }
+
   // ── R6 · تقادُمُ الأثرِ ──
   // الأثرُ يُقابَلُ بالواقعِ لا بالوثيقةِ وحدَها: عددُ ملفّاتِ الاختبارِ في الأثرِ يُقابَلُ
   // بعددِها على القرصِ، فأثرٌ قِيسَ على شجرةٍ ثمَّ نمَتْ بملفّاتٍ جديدَةٍ يَسقُطُ لا يَمُرُّ
   // أخضرَ (LIVE-15). وعددُ الملفّاتِ لا يَتغيّرُ بتحديثِ الأثرِ، فلا تبعيّةٌ دائريّةٌ.
-  const currentTestFileCount = countTestFiles(root);
+  const currentTestFileCount = judgingWorkTree
+    ? countTestFiles(root)
+    : countTestFilesAtCommit(root, judgedRef);
   for (const [i, e] of entries.entries()) {
     if (Number.isInteger(e?.testFileCount) && e.testFileCount !== currentTestFileCount) {
       violations.push(
-        `R6/STALE: المُدخلةُ ${i} قِيسَت على ${e.testFileCount} ملفَّ اختبارٍ والشجرةُ الحاليّةُ فيها ${currentTestFileCount} — القياسُ متقادِمٌ، أَعِدْه بـ\`npm run measure:skip-baseline\`.`,
+        `R6/STALE: المُدخلةُ ${i} قِيسَت على ${e.testFileCount} ملفَّ اختبارٍ و${judgingWorkTree ? 'الشجرةُ الحاليّةُ' : 'شجرةُ الأساسِ ' + judgedRef.slice(0, 8)} فيها ${currentTestFileCount} — القياسُ متقادِمٌ، أَعِدْه بـ\`npm run measure:skip-baseline\`.`,
       );
     }
   }
@@ -222,7 +326,7 @@ export function checkSkipBaseline(root) {
       /** @type {string | null} */
       let currentDigest = null;
       try {
-        currentDigest = computeScopeDigest(root, 'HEAD');
+        currentDigest = computeScopeDigest(root, judgedRef);
       } catch (err) {
         // حدٌّ مُعلَنٌ: جذرٌ بلا `git` لا تُحسَبُ له بصمةُ شجرةٍ. وفي CI الجذرُ
         // مستودَعٌ دائماً، ويُقاسُ حسمُ القاعدةِ في اختبارٍ على جذرٍ فيه `git`.
@@ -235,7 +339,7 @@ export function checkSkipBaseline(root) {
           if (typeof e?.scopeDigest !== 'string') continue;
           if (e.scopeDigest !== currentDigest) {
             violations.push(
-              `R7/SCOPE-DRIFT: المُدخلةُ ${i} قِيسَت على نطاقٍ ببصمةِ ${e.scopeDigest.slice(0, 12)} والشجرةُ العاملةُ ببصمةِ ${currentDigest.slice(0, 12)} — القياسُ متقادِمٌ عن شجرتِهِ، أَعِدْهُ.`,
+              `R7/SCOPE-DRIFT: المُدخلةُ ${i} قِيسَت على نطاقٍ ببصمةِ ${e.scopeDigest.slice(0, 12)} و${judgingWorkTree ? 'الشجرةُ العاملةُ' : 'شجرةُ الأساسِ ' + judgedRef.slice(0, 8)} ببصمةِ ${currentDigest.slice(0, 12)} — القياسُ متقادِمٌ عن شجرتِهِ، أَعِدْهُ.`,
             );
           }
         }
