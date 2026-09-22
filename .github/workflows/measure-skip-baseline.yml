@@ -1,16 +1,25 @@
 # قياس خطّ أساس التخطّي — يُشغَّل يدويّاً لإعادة قياس الأثر كاملاً.
 #
 # يَشغَلُ `env -u DATABASE_URL node --test` (بلا قاعدةٍ) لإنتاج TAP،
-# ثم يُشغِّلُ `measure:skip-baseline` لكلِّ ارتباطٍ (M11.05 و M11.06)
-# ويُحدِّثُ جميعَ الحقولِ في `skip-baseline.json`، ثم يَدفَعُ الأثرَ المُحدَّثَ.
+# ثم يُشغِّلُ `npm run measure:skip-baseline` لكلِّ ارتباطٍ (M11.05 و M11.06)
+# ويُحدِّثُ جميعَ الحقولِ في `skip-baseline.json`، ثم يَدفَعُ الأثرَ المُحدَّثَ
+# مباشرةً من CI قبل فحصِ الحاجزِ (فالحاجزُ قد يَسقُطُ بـR5/NO-COMMIT
+# حتى تُحدَّثَ الخططُ — وهذا يَقعُ في PRٍ منفصلٍ).
 #
 # LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ يَسمَحُ بتحديثِ الأثرِ حتى
 # لو كانَ اختبارُ الحاجزِ ساقطاً (R6/STALE) — ما دامَ الإخفاقُ الوحيدَ.
+#
+# القياسُ يَستهدفُ main@eba5afcf صراحةً (checkout ref).
 
 name: قياس خطّ أساس التخطّي
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'الكوميت الذي يُقاسُ عليه (افتراضيّاً: eba5afcf)'
+        required: false
+        default: 'eba5afcf'
 
 permissions:
   contents: write
@@ -22,9 +31,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: جلب المستودع
+      - name: جلب المستودع على الكوميت المحدَّد
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.inputs.ref || 'eba5afcf' }}
           fetch-depth: 0
 
       - name: تهيئة Node.js
@@ -48,7 +58,6 @@ jobs:
       - name: تشغيل الاختبارات بلا DATABASE_URL لإنتاج TAP
         # R6/STALE متوقَّعٌ: الأثرُ يقولُ 218 والشجرةُ فيها 219. منفذُ LIVE-16
         # يَسمَحُ بتحديثِ الأثرِ رغمَ ذاكَ الإخفاقِ الذاتيِّ المرجعيِّ.
-        # فلذلك نَلتقِطُ TAP ونُكملُ مهما كانَ رمزُ الخروج.
         continue-on-error: true
         run: |
           env -u DATABASE_URL node --test --test-concurrency=1 --test-timeout=120000 tests/ > /tmp/skip-baseline-measure.tap 2>/tmp/skip-baseline-measure.stderr
@@ -75,20 +84,24 @@ jobs:
       - name: عرض الأثر المُحدَّث
         run: cat docs/external-review/skip-baseline.json
 
-      - name: فحص الحاجز بعد التحديث
-        run: npm run guard:skip-baseline
-
-      - name: دفع الأثر المُحدَّث
+      - name: دفع الأثر المُحدَّث مباشرةً من CI
+        # الأثرُ يُدفَعُ قبل فحصِ الحاجزِ لأنّ الحاجزَ قد يَسقُطُ بـR5/NO-COMMIT
+        # (الخططُ تَحتاجُ تحديثاً منفصلاً لتَعكسَ الكوميتَ الجديد).
+        # الأثرُ مُنتَجٌ بالأداةِ في CI لا بيدٍ.
         run: |
           git config --local user.name "soaav-svg"
           git config --local user.email "320014418+soaav-svg@users.noreply.github.com"
+          git checkout -b chore/measure-skip-baseline-${{ github.run_id }}
           git add docs/external-review/skip-baseline.json
-          git commit -m "chore: إعادةُ قياسِ خطِّ أساسِ التخطّي كاملاً (LIVE-16)
+          git commit -m "chore: إعادةُ قياسِ خطِّ أساسِ التخطّي كاملاً في CI
 
-          قياسٌ كاملٌ بـ\`env -u DATABASE_URL node --test\` على main@eba5afcf.
-          جميعُ الحقولِ مُحدَّثةٌ: testFileCount و tests و pass و fail و skipped
-          و skipLines و topLevelSkipPoints و attributedToDatabaseUrl و otherReasons.
+          قياسٌ كاملٌ بـ\`env -u DATABASE_URL node --test\` على ${{ github.event.inputs.ref || 'eba5afcf' }}.
+          جميعُ الحقولِ مُحدَّثةٌ بالأداةِ لا بيدٍ.
           الكوميتُ والتاريخُ مَربوطانِ بالتشغيلةِ الفعليّةِ.
 
           WL-243" || echo "لا تغييرٍ لدفعِهِ"
-          git push
+          git push origin chore/measure-skip-baseline-${{ github.run_id }}
+
+      - name: فحص الحاجز بعد التحديث (معلوماتيٌّ)
+        continue-on-error: true
+        run: npm run guard:skip-baseline
