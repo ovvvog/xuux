@@ -7,11 +7,24 @@
 // في الرقمِ بل في **كتابةِ قياسٍ بيدٍ بلا أمرٍ يُنتِجُه ولا كوميتٍ يُنسَبُ إليه**.
 // فصارَ الرقمُ يُولَّدُ من مُخرَجِ TAP بهذا الأمرِ، ويحرسُه `guard:skip-baseline`.
 //
-// **الاستعمالُ:**
-//   env -u DATABASE_URL npm test > /tmp/nodb.tap 2>&1
-//   node scripts/measure-skip-baseline.mjs /tmp/nodb.tap \
+// **الاستعمالُ (عقدُ الهويّةِ · `OPS-1` · `WL-246`):**
+//   node scripts/measure-skip-baseline.mjs <tap> \
 //     --engagement M11.05 --plan docs/external-review/M11.05-round-1-plan.md \
-//     --command 'env -u DATABASE_URL npm test'
+//     --command 'env -u DATABASE_URL npm test' \
+//     --measured-root ./measured --artifact-root . \
+//     --expect-commit <sha40> --expect-main-head <sha40> --test-exit 0
+//
+// **ولماذا حُذِفَ `--commit` (‏`OPS-1`):** كانَ يُكتَبُ في الأثرِ **بلا تحقُّقٍ**
+// (`flags.commit ?? git rev-parse HEAD`)، فأيُّ نصٍّ يُمرَّرُ يُنسَبُ إليه قياسٌ لم
+// يَقَعْ عليه — ومنه تُشتَقُّ نسبةُ التخطّي المُعلَنةُ في وثائقِ الخطّةِ (`R4`/`R5`).
+// **والحقلُ اليومَ مُشتَقٌّ لا مُمَرَّرٌ:** يُقرأُ من رأسِ `--measured-root`،
+// ويُقابَلُ بـ`--expect-commit` توكيداً (`A2`)، وتُفحَصُ نظافةُ الشجرةِ (`A3`)
+// فلا يُنسَبُ كوميتٌ إلى شجرةٍ عُدِّلَت بعدَ استخراجِها.
+//
+// **وجذرانِ لا جذرٌ واحدٌ:** `--measured-root` **تُقرأُ ولا يُكتَبُ فيها** — وهيَ
+// شجرةُ الكودِ المقاسِ، تُعامَلُ **بياناتٍ** لا برنامجاً. و`--artifact-root` هيَ
+// الشجرةُ الموثوقةُ (من `main`) التي يُكتَبُ فيها الأثرُ. و`process.cwd()` لا
+// يُستعمَلُ — فجذرٌ ضمنيٌّ هوَ ما جَعَلَ الأداةَ تَخلِطُ المقاسَ بالموثوقِ.
 //
 // **ثلاثةُ مقاييسَ مختلفةٍ لا مقياسٌ واحدٌ** — وخلطُها هو نصفُ العطبِ:
 //   - `skipped`: عدّادُ `# skipped` الختاميُّ من node (يَعُدُّ نقاطَ الاختبارِ المتداخلةَ).
@@ -24,8 +37,18 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { countTestFiles } from './lib/doc-count-facts.mjs';
+import { computeScopeDigest } from './lib/skip-baseline-scope.mjs';
 
 const ARTIFACT = 'docs/external-review/skip-baseline.json';
+
+/**
+ * الإصدارُ العقديُّ للأثرِ. `1` (أو غيابُهُ) أثرٌ قديمٌ بلا `scopeDigest`؛ `2`
+ * أثرٌ بعقدِ الهويّةِ. والمُتحقِّقُ (`V7`) **يَرفُضُ نشرَ ما دونَ `2`**.
+ */
+export const CONTRACT_VERSION = 2;
+
+/** شكلُ مُعرِّفِ الكوميتِ المقبولِ وحدَهُ: بصمةٌ كاملةٌ أربعونَ محرفاً. */
+export const SHA40 = /^[0-9a-f]{40}$/;
 
 /** @param {string} s */
 function fail(s) {
@@ -91,8 +114,17 @@ export function classifyFailures(tapText) {
   let other = 0;
   for (const b of failedBlocks) {
     const text = b.name + '\n' + b.diagnostic;
+    // الإخفاقُ الذاتيُّ المرجعيُّ رمزانِ لا رمزٌ واحدٌ (‏`OPS-1`): `R6/STALE`
+    // يُقابِلُ عدّادَ ملفّاتِ الاختبارِ، و`R7/SCOPE-DRIFT` يُقابِلُ بصمةَ
+    // نطاقِ الشجرةِ — **وكلاهما يقولُ «الأثرُ متقادِمٌ عن نفسِهِ»** لا «الشفرةُ
+    // معطوبةٌ». ولو لم يُستثنَ `R7` لَعادَ جمودُ `LIVE-16` من بابٍ أدقَّ:
+    // تغييرُ ملفٍ في النطاقِ يُسقِطُ الحاجزَ، فتَرفُضُ الأداةُ التشغيلةَ، فلا
+    // يُحدَّثُ الأثرُ أبداً. **و`R8/BASE-DRIFT` ليسَ منهما ولا يُستثنى قطعاً**:
+    // لا يقولُ «الأثرُ متقادِمٌ» بل «الأساسُ تحرَّكَ»، وعلاجُهُ إعادةُ قياسٍ لا
+    // استثناءٌ — واستثناؤُهُ يفتحُ المنفَذَ الذي أُغلِقَ بـ`LIVE-16`.
     const isSelfStale =
-      text.includes('R6/STALE') &&
+      (text.includes('R6/STALE') || text.includes('R7/SCOPE-DRIFT')) &&
+      !text.includes('R8/BASE-DRIFT') &&
       (text.includes('skip-baseline') || text.includes('guard-skip-baseline'));
     if (isSelfStale) {
       selfStale += 1;
@@ -234,46 +266,170 @@ export function parseTap(tapText) {
   };
 }
 
+/**
+ * توكيداتُ هويّةِ الشجرةِ المقاسةِ — **موضِعُ إغلاقِ منفَذِ `--commit`**.
+ *
+ * دالّةٌ نقيّةٌ تُصدِرُ لِيُقاسَ رفضُها في الاختبارِ برمزِهِ لا بوصفِهِ — ولأنَّ
+ * حاجزاً يَحرُسُ وجودَ ردٍّ ولا يَحرُسُ صحّتَهُ لا يَحرُسُ.
+ *
+ * @param {{ measuredRoot: string, expectCommit: string, expectMainHead: string }} input
+ * @returns {{ measuredSha: string }}
+ * @throws {Error} برمزٍ مُسمًَّ: `MEASURE_SHA_MALFORMED` · `MEASURE_COMMIT_MISMATCH` ·
+ *   `MEASURE_TREE_DIRTY` · `MEASURE_NOT_MAIN_HEAD`.
+ */
+export function assertMeasuredIdentity(input) {
+  const { measuredRoot, expectCommit, expectMainHead } = input;
+  // A5 — الشكلُ أوّلاً: لا اسمَ فرعٍ ولا وسمَ ولا SHA مُختَصَراً (‏`I1`).
+  if (!SHA40.test(expectCommit)) {
+    throw new Error(`MEASURE_SHA_MALFORMED: --expect-commit ليسَ بصمةً كاملةً: ${expectCommit}`);
+  }
+  if (!SHA40.test(expectMainHead)) {
+    throw new Error(
+      `MEASURE_SHA_MALFORMED: --expect-main-head ليسَ بصمةً كاملةً: ${expectMainHead}`,
+    );
+  }
+  // A1 — الكوميتُ **يُشتَقُّ من الجذرِ** ولا يُقبَلُ من مُنادٍ.
+  const measuredSha = execFileSync('git', ['-C', measuredRoot, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+  }).trim();
+  // A2 — تصريحُ المُنادي يجبُ أن يُطابِقَ ما في الجذرِ.
+  if (measuredSha !== expectCommit) {
+    throw new Error(
+      `MEASURE_COMMIT_MISMATCH: رأسُ --measured-root ${measuredSha} والمُصرَّحُ ${expectCommit}.`,
+    );
+  }
+  // A3 — شجرةٌ مُوَسَّخةٌ لا يُنسَبُ إليها كوميتٌ: المحتوى ليسَ ما يقولُهُ.
+  const porcelain = execFileSync(
+    'git',
+    ['-C', measuredRoot, 'status', '--porcelain', '--untracked-files=all'],
+    { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
+  ).trim();
+  if (porcelain !== '') {
+    throw new Error(
+      `MEASURE_TREE_DIRTY: شجرةُ القياسِ ليسَت نقيّةً — ${porcelain.split('\n').length} مساراً.`,
+    );
+  }
+  // A4 — عقدُ رأسِ main: لا يُقاسُ كوميتٌ تاريخيٌّ ولا فرعٌ آخرُ (‏`I3`).
+  if (expectCommit !== expectMainHead) {
+    throw new Error(
+      `MEASURE_NOT_MAIN_HEAD: المقاسُ ${expectCommit} ورأسُ main ${expectMainHead} — عقدُ القياسِ رأسُ main وحدَهُ.`,
+    );
+  }
+  return { measuredSha };
+}
+
+/**
+ * `A8` — رمزُ خروجِ التشغيلةِ وعدّادُ TAP يجبُ أن يتفقا — **لا يُقرأُ نجاحٌ
+ * من مصدرٍ واحدٍ**. وهذا هوَ الحكمُ الحاسِمُ خلفَ جمعِ TAP: مرحلةُ الجمعِ
+ * تَلقُطُ الرمزَ ولا تحكُمُ، وهنا يُحكَمُ. فتشغيلةٌ خرجَت بـ`0` وTAP يقولُ
+ * `# fail 3` مردودةٌ — والعكسُ كذلكَ.
+ *
+ * @param {number} testExit
+ * @param {number} rawFail
+ * @returns {void}
+ * @throws {Error} `MEASURE_EXIT_TAP_DIVERGENT`
+ */
+export function assertExitAgreesWithTap(testExit, rawFail) {
+  const exitSaysOk = testExit === 0;
+  const tapSaysOk = rawFail === 0;
+  if (exitSaysOk !== tapSaysOk) {
+    throw new Error(
+      `MEASURE_EXIT_TAP_DIVERGENT: رمزُ الخروجِ ${testExit} وعدّادُ الإخفاقِ ${rawFail} — مصدرانِ يتناقضانِ فلا يُقرأُ منهما حكمٌ.`,
+    );
+  }
+}
+
 function main() {
   const { tap, flags } = parseArgs(process.argv.slice(2));
-  if (!existsSync(tap)) fail(`ملفُّ TAP غيرُ موجودٍ: ${tap}`);
-  for (const required of ['engagement', 'plan', 'command']) {
+  if (!existsSync(tap)) fail(`MEASURE_TAP_MISSING: ملفُّ TAP غيرُ موجودٍ: ${tap}`);
+  if (flags.commit !== undefined) {
+    fail(
+      'الوسيطُ --commit محذوفٌ (‏`OPS-1`): الكوميتُ يُشتَقُّ من --measured-root ويُوكَّدُ بـ--expect-commit.',
+    );
+  }
+  for (const required of [
+    'engagement',
+    'plan',
+    'command',
+    'measured-root',
+    'artifact-root',
+    'expect-commit',
+    'expect-main-head',
+    'test-exit',
+  ]) {
     if (!flags[required]) fail(`يلزمُ الوسيطُ --${required}.`);
   }
-  const root = process.cwd();
+  const measuredRoot = path.resolve(flags['measured-root'] ?? '');
+  const artifactRoot = path.resolve(flags['artifact-root'] ?? '');
+  const expectCommit = flags['expect-commit'] ?? '';
+  const expectMainHead = flags['expect-main-head'] ?? '';
+  const testExitRaw = flags['test-exit'] ?? '';
+  if (!/^\d+$/.test(testExitRaw)) fail(`--test-exit يجبُ أن يكونَ عدداً صحيحاً: ${testExitRaw}`);
+  const testExit = Number(testExitRaw);
+
+  // A6 — ملفُّ الخطّةِ يُفحَصُ في **الجذرِ الموثوقِ** لا في المقاسِ.
   const planRel = flags.plan ?? '';
-  if (!existsSync(path.join(root, planRel))) fail(`ملفُّ الخطّةِ غيرُ موجودٍ: ${planRel}`);
-  const measured = parseTap(readFileSync(tap, 'utf8'));
+  if (!existsSync(path.join(artifactRoot, planRel))) {
+    fail(`MEASURE_PLAN_MISSING: ملفُّ الخطّةِ غيرُ موجودٍ في الجذرِ الموثوقِ: ${planRel}`);
+  }
+
+  const tapText = readFileSync(tap, 'utf8');
+  const measured = parseTap(tapText); // A7 — يَسقُطُ بلا مُلخَّصٍ ختاميٍّ.
   const rawFail = measured.fail;
-  // ── LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ ──
-  // التشغيلةُ التي إخفاقُها الوحيدُ هو تقادُمُ الأثرِ نفسِهِ (R6/STALE من
-  // حاجزِ skip-baseline) يُسمَحُ بتحديثِ الأثرِ عليها — لا بإلغاءِ شرطِ «لا
-  // خطَّ أساسٍ من تشغيلةٍ فاشلةٍ»، بل بتمييزِ إخفاقٍ بعينِهِ يَعودُ سببُهُ إلى
-  // الأثرِ نفسِهِ. وتشغيلةٌ فيها إخفاقٌ آخرُ ما زالت مردودةً.
+
+  // A8 — الحكمُ الحاسِمُ خلفَ جمعِ TAP.
+  try {
+    assertExitAgreesWithTap(testExit, rawFail);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+
+  // ── LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ — الحكمُ لا يُمَسُّ ──
+  // التشغيلةُ التي إخفاقُها الوحيدُ هو تقادُمُ الأثرِ نفسِهِ (R6/STALE أو
+  // R7/SCOPE-DRIFT من حاجزِ skip-baseline) يُسمَحُ بتحديثِ الأثرِ عليها — لا
+  // بإلغاءِ شرطِ «لا خطَّ أساسٍ من تشغيلةٍ فاشلةٍ»، بل بتمييزِ إخفاقٍ
+  // بعينِهِ يَعودُ سببُهُ إلى الأثرِ نفسِهِ. وتشغيلةٌ فيها إخفاقٌ آخرُ — ومنهُ
+  // R8/BASE-DRIFT فهوَ **ليسَ ذاتيّاً مرجعيّاً** — ما زالت مردودةً.
   let selfStaleAllowed = false;
   if (rawFail !== 0) {
-    const tapText = readFileSync(tap, 'utf8');
     const decision = allowSelfStaleOnly(tapText, rawFail);
-    if (!decision.allowed) fail(decision.reason);
+    if (!decision.allowed) fail(`MEASURE_FOREIGN_FAILURE: ${decision.reason}`);
     selfStaleAllowed = true;
   }
-  const commit =
-    flags.commit ?? execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+
+  // A1·A2·A3·A4·A5 — هويّةُ الشجرةِ المقاسةِ.
+  /** @type {string} */
+  let commit;
+  try {
+    commit = assertMeasuredIdentity({ measuredRoot, expectCommit, expectMainHead }).measuredSha;
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+    // لا يُبلَغُ هذا: `fail` يُنهي العمليّةَ. والسببُ مُرفَقٌ لئلّا يُفقَدَ أثرُ السقوطِ
+    // إن تغيَّرَ `fail` يوماً فصارَ يَرمي بدلاً من أن يُنهيَ.
+    throw new Error('MEASURE_UNREACHABLE: سقوطٌ بعدَ نداءِ fail', { cause: error });
+  }
+
+  // A10 — البصمةُ وعدّادُ ملفّاتِ الاختبارِ من **الشجرةِ المقاسةِ** لا من الموثوقةِ.
+  const scopeDigest = computeScopeDigest(measuredRoot, commit);
   const measuredOn = flags.date ?? new Date().toISOString().slice(0, 10);
 
-  const artifactPath = path.join(root, ARTIFACT);
-  /** @type {{ generatedBy: string, measurements: any[] }} */
+  const artifactPath = path.join(artifactRoot, ARTIFACT);
+  /** @type {{ generatedBy: string, contractVersion?: number, measurements: any[] }} */
   const artifact = existsSync(artifactPath)
     ? JSON.parse(readFileSync(artifactPath, 'utf8'))
     : { generatedBy: 'npm run measure:skip-baseline', measurements: [] };
   artifact.generatedBy = 'npm run measure:skip-baseline';
+  artifact.contractVersion = CONTRACT_VERSION;
   const entry = {
     engagement: flags.engagement,
     plan: flags.plan,
     command: flags.command,
     commit,
+    mainHeadAtMeasure: expectMainHead,
+    scopeDigest,
     measuredOn,
-    testFileCount: countTestFiles(root),
+    verdict: selfStaleAllowed ? 'self-stale-only' : 'success',
+    testFileCount: countTestFiles(measuredRoot),
     ...measured,
   };
   const at = artifact.measurements.findIndex(
@@ -287,6 +443,10 @@ function main() {
   writeFileSync(artifactPath, `${JSON.stringify(artifact, null, 2)}\n`, 'utf8');
   process.stdout.write(
     `✅ خطُّ أساسِ التخطّي مُقاسٌ ومُقيَّدٌ في ${ARTIFACT}\n` +
+      `   العقدُ: contractVersion=${CONTRACT_VERSION} · الحكمُ: ${entry.verdict} · رمزُ الخروجِ: ${testExit}\n` +
+      `   المقاسُ: ${commit} · رأسُ main عندَ القياسِ: ${expectMainHead}\n` +
+      `   بصمةُ النطاقِ: ${scopeDigest}\n` +
+      `   الجذرُ المقاسُ: ${measuredRoot} · جذرُ الأثرِ: ${artifactRoot}\n` +
       `   الارتباطُ: ${entry.engagement} · الكوميتُ: ${commit.slice(0, 8)} · التاريخُ: ${measuredOn}\n` +
       `   الاختباراتُ: ${measured.tests} · الناجحُ: ${measured.pass} · الفاشلُ: ${measured.fail}\n` +
       `   عدّادُ التخطّي الختاميُّ: ${measured.skipped} · أسطرُ # SKIP: ${measured.skipLines} · نقاطُ المستوى الأعلى: ${measured.topLevelSkipPoints}\n` +
@@ -294,8 +454,7 @@ function main() {
         .map((r) => `${r.count}× ${r.reason.slice(0, 40)}`)
         .join(' | ')}\n` +
       (selfStaleAllowed
-        ? `   ⚠️ سُمِحَ بتحديثِ الأثرِ على تشغيلةٍ إخفاقُها الوحيدُ ذاتيٌّ مرجعيٌّ (R6/STALE من guard-skip-baseline) — LIVE-16.
-`
+        ? `   ⚠️ سُمِحَ بتحديثِ الأثرِ على تشغيلةٍ إخفاقُها الوحيدُ ذاتيٌّ مرجعيٌّ (R6/STALE أو R7/SCOPE-DRIFT من guard-skip-baseline) — LIVE-16.\n`
         : ''),
   );
 }

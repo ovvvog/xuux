@@ -1,0 +1,232 @@
+# نشرُ أثرِ خطِّ أساسِ التخطّي — **الحائزُ الوحيدُ لصلاحيّةِ الكتابةِ** (‏`OPS-1` · `WL-246`).
+#
+# ── لماذا ملفٌّ منفصلٌ ولماذا `workflow_run` بعينِهِ ──
+#
+# مرحلتانِ في ملفٍّ واحدٍ تُؤخَذانِ من **تعريفٍ واحدٍ**. فلو أُطلِقَ سيرُ العملِ من فرعٍ،
+# أُخِذَ تعريفُ مرحلةِ النشرِ — ذاتِ صلاحيّةِ الكتابةِ — من ذلكَ الفرعِ، فيَعودُ أصلُ
+# العَطَبِ من بابٍ آخرَ: كودٌ غيرُ موثوقٍ يَملِكُ رمزَ كتابةٍ.
+#
+# و`workflow_run` يَحسِمُ هذا **بنيةً لا باتّفاقٍ**: GitHub يَأخُذُ تعريفَ سيرِ عملٍ
+# مُحرَّكٍ بهِ **من الفرعِ الافتراضيِّ دائماً**، فلا تُوجَدُ نسخةُ نشرٍ من فرعٍ أصلاً.
+# ومعَ ذلكَ يُفحَصُ `workflow_ref` صريحاً — فحاجزٌ يَعتمِدُ على ضمانِ منصّةٍ بلا قياسٍ
+# هوَ ضمانٌ غيرُ مقيسٍ.
+#
+# ── وما يَحكُمُ هنا هوَ `V1`…`V7`، و`V5` هوَ جوابُ لحظةِ السباقِ ──
+#
+# `V5` يَقرأُ `origin/main` **الآنَ** ويُقابِلُ بصمةَ نطاقِهِ ببصمةِ الأثرِ. فدمجٌ وقعَ
+# في `main` بعدَ اكتمالِ القياسِ **يَمنعُ النشرَ هنا** ولا يُكتشَفُ بعدَ الدمجِ. ولا
+# يُعتمَدُ على `R6` وحدَهُ: ذاكَ يُقابِلُ عدّادَ ملفّاتٍ لا هويّةَ شجرةٍ.
+#
+# ── وحدٌّ مُعلَنٌ على المالكِ ──
+#
+# البيئةُ `publish-skip-baseline` مُصرَّحٌ بها هنا، **وقواعدُ حمايتِها لا يَملِكُها
+# المنفِّذُ**: على المالكِ أن يُضيفَ إليها مُراجِعاً مطلوباً أو مُهلةً في إعداداتِ
+# المستودعِ. وبلا ذلكَ هيَ بيئةٌ بلا قيدٍ — وهذا يُعلَنُ ولا يُدَّعى خلافُهُ.
+
+name: نشرُ أثرِ خطِّ أساسِ التخطّي
+
+on:
+  workflow_run:
+    workflows: ['قياسُ خطِّ أساسِ التخطّي']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-skip-baseline
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: تحقُّقٌ ونشرٌ (كودُ main وحدَهُ)
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, linux-vm]
+    timeout-minutes: 20
+    environment: publish-skip-baseline
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+    steps:
+      # ── فحصُ الأصلِ: `workflow_ref` لا `workflow_sha` ──
+      # `workflow_sha` **لا يُقابَلُ بـ`measured_sha`** — ذاكَ خطأٌ صُحِّحَ: الأوّلُ
+      # كوميتُ تعريفِ سيرِ العملِ والثاني كوميتُ الشجرةِ المقاسةِ، واختلافُهما
+      # **ليسَ عَطَباً**. والمحروسُ أنَّ تعريفَ النشرِ من `main`.
+      - name: أصلُ تعريفِ النشرِ من main
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          echo "workflow_ref = $WORKFLOW_REF"
+          case "$WORKFLOW_REF" in
+            */.github/workflows/publish-skip-baseline.yml@refs/heads/main) ;;
+            *)
+              echo "::error::PUBLISH_WORKFLOW_REF_NOT_MAIN: تعريفُ النشرِ ليسَ من refs/heads/main — لا كتابةَ."
+              exit 1
+              ;;
+          esac
+
+      - name: جلبُ الشجرةِ الموثوقةِ (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: تبعيّاتُ المُتحقِّقِ الموثوقِ
+        run: npm ci
+
+      - name: تنزيلُ الأثرِ المُرشَّحِ وبيانِ المنشأِ
+        uses: actions/download-artifact@v4
+        with:
+          name: baseline
+          path: candidate
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: قراءةُ بيانِ المنشأِ
+        id: prov
+        run: |
+          set -euo pipefail
+          test -f candidate/provenance.json || {
+            echo "::error::PUBLISH_PROVENANCE_MISSING: لا بيانَ منشأٍ — لا نشرَ."; exit 1; }
+          cat candidate/provenance.json
+          for key in measured_sha main_head_at_measure artifact_sha256 test_exit github_run_id github_run_attempt; do
+            VALUE="$(node -e "const p=require('./candidate/provenance.json');process.stdout.write(String(p['$key'] ?? ''))")"
+            if [ -z "$VALUE" ]; then
+              echo "::error::PUBLISH_PROVENANCE_FIELD: الحقلُ $key فارغٌ."; exit 1
+            fi
+            echo "$key=$VALUE" >> "$GITHUB_OUTPUT"
+          done
+
+      # ── V1…V7 · والمُتحقِّقُ يَقرأُ ويَحكُمُ ولا يَكتُبُ ──
+      - name: المُتحقِّقُ الموثوقُ (V1…V7)
+        run: |
+          set -euo pipefail
+          node scripts/verify-skip-baseline-artifact.mjs \
+            --artifact candidate/skip-baseline.json \
+            --artifact-sha256 '${{ steps.prov.outputs.artifact_sha256 }}' \
+            --measured-sha '${{ steps.prov.outputs.measured_sha }}' \
+            --main-head-at-measure '${{ steps.prov.outputs.main_head_at_measure }}' \
+            --trusted-root .
+
+      - name: وضعُ الأثرِ في الشجرةِ الموثوقةِ
+        run: |
+          set -euo pipefail
+          cp candidate/skip-baseline.json docs/external-review/skip-baseline.json
+          git --no-pager diff --stat -- docs/external-review/skip-baseline.json
+
+      # ── الحاجزُ **حاسمٌ** — لا `continue-on-error` ──
+      # النسخةُ السابقةُ كانَت تُشغِّلُهُ بـ`continue-on-error: true` أي تَقيسُ ولا
+      # تَحكُمُ — وحاجزٌ يَحرُسُ وجودَ ردٍّ ولا يَحرُسُ صحّتَهُ لا يَحرُسُ.
+      - name: حاجزُ خطِّ أساسِ التخطّي — حاسماً
+        run: npm run guard:skip-baseline
+
+      - name: حاجزُ عدّاداتِ الوثائقِ
+        run: npm run guard:doc-counts
+
+      - name: هل تغيَّرَ شيءٌ أصلاً؟
+        id: delta
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/external-review/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "الأثرُ مُطابِقٌ لِما في main — لا فرعَ ولا طلبَ دمجٍ."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # ── أوّلُ لحظةٍ يُكتَبُ فيها شيءٌ في المستودعِ ──
+      - name: فرعٌ ودفعٌ
+        if: steps.delta.outputs.changed == 'true'
+        id: branch
+        run: |
+          set -euo pipefail
+          BRANCH="chore/skip-baseline-${{ steps.prov.outputs.github_run_id }}-${{ steps.prov.outputs.github_run_attempt }}"
+          git config user.name 'soaav-svg'
+          git config user.email '320014418+soaav-svg@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git add docs/external-review/
+          git commit -m "chore: قياسُ خطِّ أساسِ التخطّي على ${{ steps.prov.outputs.measured_sha }}
+
+          عقدُ الهويّةِ (OPS-1): الأثرُ مقيسٌ على رأسِ main وحدَهُ، مُصنَّفٌ ومكتوبٌ بأداةٍ
+          موثوقةٍ من main، ومُتحقَّقٌ منهُ بـV1…V7 قبلَ أيِّ كتابةٍ.
+
+          measured_sha: ${{ steps.prov.outputs.measured_sha }}
+          main_head_at_measure: ${{ steps.prov.outputs.main_head_at_measure }}
+          artifact_sha256: ${{ steps.prov.outputs.artifact_sha256 }}
+          test_exit: ${{ steps.prov.outputs.test_exit }}
+          run: ${{ steps.prov.outputs.github_run_id }} محاولةٌ ${{ steps.prov.outputs.github_run_attempt }}
+
+          Refs: WL-246"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      # PR تلقائيٌّ — **جزءٌ من معيارِ إغلاقِ `OPS-1` (٣)**، ودفعُ فرعٍ بلا طلبِ
+      # دمجٍ هوَ ما أنتجَ `REPO-1`: ثلاثةٌ وعشرونَ فرعاً مهجوراً.
+      - name: طلبُ دمجٍ تلقائيٌّ
+        if: steps.delta.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY="$(cat <<'EOF'
+          ## دليلٌ مقيسٌ
+
+          | المقيسُ | القيمةُ |
+          | --- | --- |
+          | `measured_sha` | `__MEASURED__` |
+          | `main_head_at_measure` | `__MAINHEAD__` |
+          | `artifact_sha256` | `__ARTSHA__` |
+          | `test_exit` | `__EXIT__` |
+          | التشغيلةُ | `__RUNID__` محاولةٌ `__ATTEMPT__` |
+
+          ## ما أُثبِتَ قبلَ هذه الكتابةِ
+
+          - `I1`…`I4` في مرحلةِ القياسِ: بصمةٌ كاملةٌ · الكوميتُ موجودٌ · `requested_ref === origin/main` · الشجرةُ المستخرَجةُ نقيّةٌ ومُطابِقةٌ.
+          - `A1`…`A10` في الأداةِ الموثوقةِ: الكوميتُ **مُشتَقٌّ** من جذرِ القياسِ لا مُمَرَّرٌ · رمزُ الخروجِ يُطابِقُ عدّادَ TAP · إخفاقٌ أجنبيٌّ مردودٌ.
+          - `V1`…`V7` في المُتحقِّقِ الموثوقِ: سلامةُ نقلٍ · هويّةُ الكوميتِ ورأسِ main لكلِّ مُدخلةٍ · **`V5`: نطاقُ `main` لم يتحرَّكْ بينَ القياسِ والنشرِ** · الشكلُ والعقدُ `2` والحكمُ.
+          - `guard:skip-baseline` **حاسماً** (لا `continue-on-error`) و`guard:doc-counts`.
+
+          ## حدودٌ مُعلَنةٌ لا مستورةٌ
+
+          - **عدّاداتُ TAP لم تُتحقَّقْ عندَ النشرِ** — إنتاجُها يَقتضي تنفيذَ كودِ الشجرةِ المقاسةِ. والمُعوِّضُ عقديٌّ: المقاسُ رأسُ `main` (`V4`).
+          - **الـdigest يُثبِتُ النقلَ لا الأصالةَ.**
+          - **عزلُ العدّاءِ (`M5`) غيرُ محسومٍ**: العدّاءُ مقيمٌ و`/tmp` مشتركٌ. حاجزٌ خارجيٌّ على المالكِ.
+          - **عقدُ `pkcs11js` (`M6`) غيرُ محسومٍ**: أُزيلَ `|| true` فصارَ الفشلُ صريحاً، والاقترانُ البنيويُّ باقٍ.
+          - **حمايةُ الفرعِ غيرُ مُنفَذةٍ (`EXT-1`)**: إن تحرَّكَت `main` بعدَ فتحِ هذا الطلبِ فـ`R8/BASE-DRIFT` يَكشِفُ في أوّلِ تشغيلٍ، ولا يَمنعُ الدمجَ آليّاً.
+
+          **ولا يُعَدُّ هذا إغلاقاً لـ`OPS-1`** ما بقيَ `M5` أو `M6` محجِباً.
+          EOF
+          )"
+          BODY="${BODY//__MEASURED__/${{ steps.prov.outputs.measured_sha }}}"
+          BODY="${BODY//__MAINHEAD__/${{ steps.prov.outputs.main_head_at_measure }}}"
+          BODY="${BODY//__ARTSHA__/${{ steps.prov.outputs.artifact_sha256 }}}"
+          BODY="${BODY//__EXIT__/${{ steps.prov.outputs.test_exit }}}"
+          BODY="${BODY//__RUNID__/${{ steps.prov.outputs.github_run_id }}}"
+          BODY="${BODY//__ATTEMPT__/${{ steps.prov.outputs.github_run_attempt }}}"
+          gh pr create \
+            --repo '${{ github.repository }}' \
+            --base main \
+            --head '${{ steps.branch.outputs.branch }}' \
+            --title 'chore: قياسُ خطِّ أساسِ التخطّي على ${{ steps.prov.outputs.measured_sha }}' \
+            --body "$BODY"
+
+      - name: خلاصةٌ مقيسةٌ
+        if: always()
+        run: |
+          {
+            echo "### النشرُ"
+            echo ""
+            echo "- تغيَّرَ الأثرُ: \`${{ steps.delta.outputs.changed }}\`"
+            echo "- الفرعُ: \`${{ steps.branch.outputs.branch }}\`"
+            echo "- \`measured_sha\`: \`${{ steps.prov.outputs.measured_sha }}\`"
+            echo "- \`artifact_sha256\`: \`${{ steps.prov.outputs.artifact_sha256 }}\`"
+            echo ""
+            echo "**ولا يُعَدُّ هذا إغلاقاً لـ\`OPS-1\`** ما بقيَ \`M5\` (عزلُ العدّاءِ) أو \`M6\` (عقدُ pkcs11js) محجِباً."
+          } >> "$GITHUB_STEP_SUMMARY"

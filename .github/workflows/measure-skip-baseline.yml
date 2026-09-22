@@ -1,107 +1,342 @@
-# قياس خطّ أساس التخطّي — يُشغَّل يدويّاً لإعادة قياس الأثر كاملاً.
+# قياسُ خطِّ أساسِ التخطّي — **إنتاجُ أثرٍ بلا صلاحيّةِ كتابةٍ** (‏`OPS-1` · `WL-246`).
 #
-# يَشغَلُ `env -u DATABASE_URL node --test` (بلا قاعدةٍ) لإنتاج TAP،
-# ثم يُشغِّلُ `npm run measure:skip-baseline` لكلِّ ارتباطٍ (M11.05 و M11.06)
-# ويُحدِّثُ جميعَ الحقولِ في `skip-baseline.json`، ثم يَدفَعُ الأثرَ المُحدَّثَ
-# مباشرةً من CI قبل فحصِ الحاجزِ (فالحاجزُ قد يَسقُطُ بـR5/NO-COMMIT
-# حتى تُحدَّثَ الخططُ — وهذا يَقعُ في PRٍ منفصلٍ).
+# ── لماذا أُعيدَ بناءُ هذا الملفِّ ──
 #
-# LIVE-16: منفذُ الإخفاقِ الذاتيِّ المرجعيِّ يَسمَحُ بتحديثِ الأثرِ حتى
-# لو كانَ اختبارُ الحاجزِ ساقطاً (R6/STALE) — ما دامَ الإخفاقُ الوحيدَ.
+# النسخةُ السابقةُ (‏`WL-243`) كانَت تَجمعُ في job واحدٍ: `contents: write` +
+# `actions/checkout` على مرجعٍ **يُختارُ من مُدخلٍ اختياريٍّ** + `npm ci` و`npm run build`
+# و`node --test` من تلكَ الشجرةِ + `git push`. فكودٌ غيرُ موثوقٍ يُنفَّذُ على عدّاءٍ
+# **يَملِكُ رمزَ كتابةٍ في المستودعِ** — وذاكَ عَطَبٌ بنيويٌّ لا ترتيبُ خطواتٍ. وكانَ
+# الحاجزُ الختاميُّ `continue-on-error: true` أي **يُقاسُ ولا يَحكُمُ**.
 #
-# القياسُ يَستهدفُ main@eba5afcf صراحةً (checkout ref).
+# ── العقدُ الذي يُنفِّذُهُ هذا الملفُّ ──
+#
+#   `I1` بصمةٌ كاملةٌ أربعونَ محرفاً · `I2` الكوميتُ موجودٌ ·
+#   `I3` `requested_ref === origin/main` عندَ بدءِ القياسِ ·
+#   `I4` `measured_sha === requested_ref` بعدَ الاستخراجِ.
+#
+# و`workflow_sha` **منفصلٌ عن `measured_sha` ولا يُقابَلانِ** — فالأوّلُ كوميتُ تعريفِ
+# سيرِ العملِ والثاني كوميتُ الشجرةِ المقاسةِ، ومقابلتُهما خطأٌ صُحِّحَ في التصميمِ.
+# والمحروسُ بدلَهُ `workflow_ref` لمرحلةِ النشرِ — وهيَ في ملفٍّ آخرَ.
+#
+# ── ولا صلاحيّةَ كتابةٍ في هذا الملفِّ كلِّهِ ──
+#
+# `permissions: contents: read` في القمّةِ وفي كلِّ job. والنشرُ في
+# `publish-skip-baseline.yml` الذي يَأخُذُ GitHub تعريفَهُ من الفرعِ الافتراضيِّ حتماً.
 
-name: قياس خطّ أساس التخطّي
+name: قياسُ خطِّ أساسِ التخطّي
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'الكوميت الذي يُقاسُ عليه (افتراضيّاً: eba5afcf)'
-        required: false
-        default: 'eba5afcf7707ffa5a03e0c75a0afab66070e0551'
+        description: 'بصمةُ الكوميتِ المقاسِ — أربعونَ محرفاً كاملةً، ويجبُ أن تكونَ رأسَ main'
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: measure-skip-baseline
+  cancel-in-progress: false
 
 jobs:
-  measure:
-    name: قياس خطّ أساس التخطّي الكامل
+  # ═══ ① القرارُ: I1 · I2 · I3 — بكودِ main وحدَهُ، وبلا تنفيذٍ للكودِ المقاسِ ═══
+  resolve:
+    name: تثبيتُ الهويّةِ (I1·I2·I3)
     runs-on: [self-hosted, linux-vm]
-    timeout-minutes: 30
-
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      measured_sha: ${{ steps.contract.outputs.measured_sha }}
+      main_head_at_measure: ${{ steps.contract.outputs.main_head_at_measure }}
+      workflow_sha: ${{ github.sha }}
     steps:
-      - name: جلب المستودع على الكوميت المحدَّد
+      - name: جلبُ الشجرةِ الموثوقةِ (main)
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref || 'eba5afcf' }}
+          ref: main
           fetch-depth: 0
 
-      - name: تهيئة Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - name: تثبيت التبعيات
-        run: npm ci
-
-      - name: التحقّق من الوحدة الأصليّة pkcs11js
+      - name: I1 · I2 · I3 — عقدُ القياسِ
+        id: contract
+        env:
+          REQUESTED_REF: ${{ inputs.ref }}
         run: |
-          if ! node -e "require.resolve('pkcs11js')" 2>/dev/null; then
-            npm rebuild pkcs11js || npm install --no-save pkcs11js || true
+          set -euo pipefail
+
+          # I1 — الشكلُ أوّلاً: بصمةٌ كاملةٌ. وبهِ يَسقُطُ الاسمُ المتحرِّكُ أصلاً،
+          # فلا فرعَ ولا وسمَ ولا بصمةَ مُختصَرةً يمكنُ أن تَتحرَّكَ أثناءَ التشغيلِ.
+          if ! printf '%s' "$REQUESTED_REF" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::MEASURE_REF_NOT_FULL_SHA: المُدخَلُ '$REQUESTED_REF' ليسَ بصمةً كاملةً أربعينَ محرفاً."
+            exit 1
           fi
 
-      - name: بناء نواة جذر الثقة
+          # I2 — الكوميتُ موجودٌ فعلاً في هذا المستودعِ.
+          if ! git cat-file -e "${REQUESTED_REF}^{commit}" 2>/dev/null; then
+            echo "::error::MEASURE_REF_UNKNOWN: الكوميتُ $REQUESTED_REF غيرُ موجودٍ."
+            exit 1
+          fi
+
+          # I3 — عقدُ رأسِ main. والجلبُ الطازِجُ قبلَ المقابلةِ لا بعدَها.
+          git fetch --no-tags origin main
+          MAIN_HEAD="$(git rev-parse origin/main)"
+          if [ "$REQUESTED_REF" != "$MAIN_HEAD" ]; then
+            echo "::error::MEASURE_REF_NOT_MAIN_HEAD: المطلوبُ $REQUESTED_REF ورأسُ main $MAIN_HEAD — عقدُ القياسِ رأسُ main وحدَهُ."
+            exit 1
+          fi
+
+          echo "measured_sha=$REQUESTED_REF" >> "$GITHUB_OUTPUT"
+          echo "main_head_at_measure=$MAIN_HEAD" >> "$GITHUB_OUTPUT"
+          {
+            echo "### عقدُ القياسِ مُثبَّتٌ"
+            echo ""
+            echo "- \`measured_sha\`: \`$REQUESTED_REF\`"
+            echo "- \`main_head_at_measure\`: \`$MAIN_HEAD\`"
+            echo "- \`workflow_sha\`: \`${{ github.sha }}\` — **منفصلٌ عن المقاسِ ولا يُقابَلُ بهِ**"
+            echo "- \`github_run_id\`: \`${{ github.run_id }}\` · \`run_attempt\`: \`${{ github.run_attempt }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ═══ ② إنتاجُ TAP: الموضِعُ **الوحيدُ** الذي يُنفَّذُ فيه الكودُ المقاسُ ═══
+  # وهو بلا صلاحيّةِ كتابةٍ، وبلا أسرارٍ، ولا يَحكُمُ على شيءٍ — يَجمعُ ويُسلِّمُ.
+  produce-tap:
+    name: إنتاجُ TAP من الشجرةِ المقاسةِ (بلا كتابةٍ)
+    needs: resolve
+    runs-on: [self-hosted, linux-vm]
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      test_exit: ${{ steps.suite.outputs.test_exit }}
+      tap_sha256: ${{ steps.suite.outputs.tap_sha256 }}
+    steps:
+      - name: جلبُ الشجرةِ المقاسةِ ببصمتِها
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.measured_sha }}
+          path: measured
+          fetch-depth: 0
+
+      - name: I4 — تثبيتُ الشجرةِ المستخرَجةِ ونظافتُها
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git -C measured rev-parse HEAD)"
+          if [ "$HEAD_SHA" != "${{ needs.resolve.outputs.measured_sha }}" ]; then
+            echo "::error::MEASURE_CHECKOUT_DRIFT: الشجرةُ المستخرَجةُ على $HEAD_SHA والمطلوبُ ${{ needs.resolve.outputs.measured_sha }}."
+            exit 1
+          fi
+          DIRTY="$(git -C measured status --porcelain --untracked-files=all)"
+          if [ -n "$DIRTY" ]; then
+            echo "::error::MEASURE_TREE_DIRTY: الشجرةُ المستخرَجةُ ليسَت نقيّةً."
+            printf '%s\n' "$DIRTY"
+            exit 1
+          fi
+          echo "I4 ✓ الشجرةُ المقاسةُ $HEAD_SHA نقيّةٌ."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: measured/.nvmrc
+
+      - name: تثبيتُ التبعيّاتِ من القُفلِ وحدَهُ
+        working-directory: measured
+        run: npm ci
+
+      # ── pkcs11js: فشلٌ صريحٌ بلا سَتْرٍ (‏`M6` · `LIVE-10`) ──
+      # النسخةُ السابقةُ كانَت:
+      #   npm rebuild pkcs11js || npm install --no-save pkcs11js || true
+      # وفيها ثلاثةُ عُيوبٍ: `npm install` يُثبِّتُ **خارجَ `package-lock.json`** فيَنزاحُ
+      # المُحيطُ عن قُفلِهِ، و`--no-save` يُخفي الانزياحَ، و`|| true` يَجعلُ الفشلَ
+      # **نجاحاً كاذباً** في مسارٍ يُريدُ إنتاجَ أثرٍ يُعتمَدُ عليهِ.
+      #
+      # **وهذا لا يُغلِقُ `M6`:** الاقترانُ البنيويُّ باقٍ — تبعيّةٌ في
+      # `optionalDependencies` يَستورِدُها فحصٌ واجبٌ. ونقلُها إلى `dependencies`
+      # **قرارٌ عقديٌّ للمالكِ** لا ترقيعُ CI، فلم يُلمَسْ.
+      - name: عقدُ pkcs11js — يُقاسُ ويَحكُمُ
+        working-directory: measured
+        run: |
+          set -euo pipefail
+          if node -e "require.resolve('pkcs11js')" 2>/dev/null; then
+            echo "pkcs11js ✓ مُتاحٌ."
+            exit 0
+          fi
+          echo "pkcs11js غيرُ مُتاحٍ — محاولةُ بناءٍ واحدةٌ من القُفلِ." >&2
+          npm rebuild pkcs11js
+          node -e "require.resolve('pkcs11js')"
+
+      - name: البناءُ
+        working-directory: measured
         run: npm run build
 
-      - name: تشغيل الاختبارات بلا DATABASE_URL لإنتاج TAP
-        # R6/STALE متوقَّعٌ: الأثرُ يقولُ 218 والشجرةُ فيها 219. منفذُ LIVE-16
-        # يَسمَحُ بتحديثِ الأثرِ رغمَ ذاكَ الإخفاقِ الذاتيِّ المرجعيِّ.
-        continue-on-error: true
+      # ── جمعُ TAP: يَلقُطُ رمزَ الخروجِ ولا يَحكُمُ ──
+      # `continue-on-error` **غيرُ مستعمَلٍ**: ذاكَ يُخفي الرمزَ في حالةِ خطوةٍ
+      # لا يَقرأُها حَكَمٌ. وهنا الرمزُ **مُخرَجٌ صريحٌ** يُقابِلُهُ حكمٌ حاسمٌ في
+      # الـjob التالي (`A8`)، فلا نجاحَ يُقرأُ من مصدرٍ واحدٍ.
+      - name: تشغيلُ الحزمةِ وجمعُ TAP
+        id: suite
+        working-directory: measured
         run: |
-          env -u DATABASE_URL node --test --test-concurrency=1 --test-timeout=120000 tests/ > /tmp/skip-baseline-measure.tap 2>/tmp/skip-baseline-measure.stderr
-          echo "exit: $?"
-          echo "=== آخر 10 أسطر TAP ==="
-          tail -10 /tmp/skip-baseline-measure.tap
-          echo "=== عدّادات TAP ==="
-          grep -E "^# (tests|pass|fail|skipped) " /tmp/skip-baseline-measure.tap || true
+          set -uo pipefail
+          TAP="$RUNNER_TEMP/skip-baseline.tap"
+          ERRLOG="$RUNNER_TEMP/skip-baseline.stderr"
+          set +e
+          env -u DATABASE_URL node --test --test-concurrency=1 --test-timeout=120000 tests/ \
+            > "$TAP" 2> "$ERRLOG"
+          TEST_EXIT=$?
+          set -e
+          echo "test_exit=$TEST_EXIT" >> "$GITHUB_OUTPUT"
+          echo "tap_sha256=$(sha256sum "$TAP" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "رمزُ الخروجِ: $TEST_EXIT"
+          grep -E '^# (tests|pass|fail|skipped|todo|duration_ms) ' "$TAP" || {
+            echo "::error::MEASURE_TAP_INCOMPLETE: لا مُلخَّصَ ختاميّاً في TAP."
+            exit 1
+          }
+          cp "$TAP" "$RUNNER_TEMP/upload-skip-baseline.tap"
+          cp "$ERRLOG" "$RUNNER_TEMP/upload-skip-baseline.stderr"
 
-      - name: قياس خطّ أساس التخطّي — M11.05
+      - name: رفعُ TAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: tap
+          path: |
+            ${{ runner.temp }}/upload-skip-baseline.tap
+            ${{ runner.temp }}/upload-skip-baseline.stderr
+          retention-days: 14
+          if-no-files-found: error
+
+      # العدّاءُ **مقيمٌ** و`/tmp` يَبقى بينَ التشغيلاتِ — سابقةُ `LIVE-9`:
+      # تشغيلةٌ سقطَت بـ`EDQUOT`/`-122` بلا علاقةٍ بالشفرةِ. فالمحوُ واجبٌ ودائمٌ.
+      - name: محوُ المؤقَّتِ (العدّاءُ مقيمٌ)
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/skip-baseline.tap "$RUNNER_TEMP"/skip-baseline.stderr "$RUNNER_TEMP"/upload-skip-baseline.*
+
+  # ═══ ③ التصنيفُ والكتابةُ: **أداةٌ موثوقةٌ من main** تَقرأُ الشجرةَ المقاسةَ بياناتٍ ═══
+  # هذا هوَ موضِعُ الفجوةِ الفعليّةِ في النسخةِ السابقةِ: الأداةُ التي تُصنِّفُ TAP
+  # وتَكتُبُ الأثرَ كانَت تُؤخَذُ من **الشجرةِ المقاسةِ نفسِها**. فشجرةٌ غيرُ موثوقةٍ
+  # كانَت تُصنِّفُ إخفاقَها وتَكتُبُ حكمَها. وهنا الأداةُ من `main`، والشجرةُ المقاسةُ
+  # تُستخرَجُ **بلا `npm ci` ولا بناءٍ ولا تشغيلٍ** — تُقرأُ ملفّاتُها لا تُنفَّذُ.
+  classify-and-write:
+    name: تصنيفُ TAP وكتابةُ الأثرِ (أداةٌ من main)
+    needs: [resolve, produce-tap]
+    runs-on: [self-hosted, linux-vm]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      artifact_sha256: ${{ steps.write.outputs.artifact_sha256 }}
+    steps:
+      - name: جلبُ الشجرةِ الموثوقةِ (main) — مصدرُ الأداةِ
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          path: trusted
+
+      - name: جلبُ الشجرةِ المقاسةِ — **بياناتٌ تُقرأُ لا برنامجٌ يُنفَّذُ**
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.measured_sha }}
+          fetch-depth: 0
+          path: measured
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: trusted/.nvmrc
+
+      - name: تبعيّاتُ الأداةِ الموثوقةِ وحدَها
+        working-directory: trusted
+        run: npm ci
+
+      - name: تنزيلُ TAP
+        uses: actions/download-artifact@v4
+        with:
+          name: tap
+          path: tapdir
+
+      - name: سلامةُ نقلِ TAP
         run: |
-          node scripts/measure-skip-baseline.mjs /tmp/skip-baseline-measure.tap \
-            --engagement M11.05 \
-            --plan docs/external-review/M11.05-round-1-plan.md \
-            --command "env -u DATABASE_URL npm test"
+          set -euo pipefail
+          ACTUAL="$(sha256sum tapdir/upload-skip-baseline.tap | cut -d' ' -f1)"
+          EXPECTED='${{ needs.produce-tap.outputs.tap_sha256 }}'
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::MEASURE_TAP_DIGEST_MISMATCH: بصمةُ TAP المُنزَّلِ $ACTUAL والمتوقَّعةُ $EXPECTED."
+            exit 1
+          fi
+          echo "بصمةُ TAP ✓ $ACTUAL"
 
-      - name: قياس خطّ أساس التخطّي — M11.06
+      # A1…A10 داخلَ الأداةِ. و`--commit` محذوفٌ: الكوميتُ يُشتَقُّ من
+      # `--measured-root` ويُوكَّدُ بـ`--expect-commit`، فلا نسبةَ تُزيَّفُ.
+      - name: كتابةُ الأثرِ المُرشَّحِ (A1…A10)
+        id: write
+        env:
+          MEASURED_SHA: ${{ needs.resolve.outputs.measured_sha }}
+          MAIN_HEAD: ${{ needs.resolve.outputs.main_head_at_measure }}
+          TEST_EXIT: ${{ needs.produce-tap.outputs.test_exit }}
         run: |
-          node scripts/measure-skip-baseline.mjs /tmp/skip-baseline-measure.tap \
-            --engagement M11.06 \
-            --plan docs/external-review/M11.06-round-2-plan.md \
-            --command "env -u DATABASE_URL npm test"
+          set -euo pipefail
+          for pair in \
+            "M11.05:docs/external-review/M11.05-round-1-plan.md" \
+            "M11.06:docs/external-review/M11.06-round-2-plan.md"
+          do
+            ENGAGEMENT="${pair%%:*}"
+            PLAN="${pair#*:}"
+            node trusted/scripts/measure-skip-baseline.mjs tapdir/upload-skip-baseline.tap \
+              --engagement "$ENGAGEMENT" \
+              --plan "$PLAN" \
+              --command 'env -u DATABASE_URL npm test' \
+              --measured-root measured \
+              --artifact-root trusted \
+              --expect-commit "$MEASURED_SHA" \
+              --expect-main-head "$MAIN_HEAD" \
+              --test-exit "$TEST_EXIT"
+          done
+          ART=trusted/docs/external-review/skip-baseline.json
+          echo "artifact_sha256=$(sha256sum "$ART" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          mkdir -p out
+          cp "$ART" out/skip-baseline.json
+          echo "--- الأثرُ المُرشَّحُ ---"
+          cat out/skip-baseline.json
 
-      - name: عرض الأثر المُحدَّث
-        run: cat docs/external-review/skip-baseline.json
-
-      - name: دفع الأثر المُحدَّث مباشرةً من CI
-        # الأثرُ يُدفَعُ قبل فحصِ الحاجزِ لأنّ الحاجزَ قد يَسقُطُ بـR5/NO-COMMIT
-        # (الخططُ تَحتاجُ تحديثاً منفصلاً لتَعكسَ الكوميتَ الجديد).
-        # الأثرُ مُنتَجٌ بالأداةِ في CI لا بيدٍ.
+      # `run_id`/`run_attempt`/`workflow_sha` **بيانٌ مُصاحِبٌ لا حقلٌ في الأثرِ**:
+      # لو كُتِبَت في الأثرِ لَتَغيَّرَ الملفُّ بكلِّ تشغيلةٍ فامتنعَت مقابلةُ بايتٍ
+      # وصارَ كلُّ توليدٍ انزياحاً كاذباً.
+      - name: بيانُ المنشأِ
         run: |
-          git config --local user.name "soaav-svg"
-          git config --local user.email "320014418+soaav-svg@users.noreply.github.com"
-          git checkout -b chore/measure-skip-baseline-${{ github.run_id }}
-          git add docs/external-review/skip-baseline.json
-          git commit -m "chore: إعادةُ قياسِ خطِّ أساسِ التخطّي كاملاً في CI
+          set -euo pipefail
+          mkdir -p out
+          cat > out/provenance.json <<JSON
+          {
+            "measured_sha": "${{ needs.resolve.outputs.measured_sha }}",
+            "main_head_at_measure": "${{ needs.resolve.outputs.main_head_at_measure }}",
+            "workflow_sha": "${{ needs.resolve.outputs.workflow_sha }}",
+            "workflow_ref": "${{ github.workflow_ref }}",
+            "github_run_id": "${{ github.run_id }}",
+            "github_run_attempt": "${{ github.run_attempt }}",
+            "test_exit": "${{ needs.produce-tap.outputs.test_exit }}",
+            "tap_sha256": "${{ needs.produce-tap.outputs.tap_sha256 }}",
+            "artifact_sha256": "${{ steps.write.outputs.artifact_sha256 }}"
+          }
+          JSON
+          cat out/provenance.json
 
-          قياسٌ كاملٌ بـ\`env -u DATABASE_URL node --test\` على ${{ github.event.inputs.ref || 'eba5afcf' }}.
-          جميعُ الحقولِ مُحدَّثةٌ بالأداةِ لا بيدٍ.
-          الكوميتُ والتاريخُ مَربوطانِ بالتشغيلةِ الفعليّةِ.
+      - name: رفعُ الأثرِ المُرشَّحِ وبيانِ المنشأِ
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline
+          path: out/
+          retention-days: 14
+          if-no-files-found: error
 
-          WL-243" || echo "لا تغييرٍ لدفعِهِ"
-          git push origin chore/measure-skip-baseline-${{ github.run_id }}
-
-      - name: فحص الحاجز بعد التحديث (معلوماتيٌّ)
-        continue-on-error: true
-        run: npm run guard:skip-baseline
+      - name: خلاصةٌ مقيسةٌ
+        run: |
+          {
+            echo "### الأثرُ المُرشَّحُ جاهزٌ — **ولم يُكتَبْ في المستودعِ**"
+            echo ""
+            echo "- \`measured_sha\`: \`${{ needs.resolve.outputs.measured_sha }}\`"
+            echo "- \`main_head_at_measure\`: \`${{ needs.resolve.outputs.main_head_at_measure }}\`"
+            echo "- \`test_exit\`: \`${{ needs.produce-tap.outputs.test_exit }}\`"
+            echo "- \`tap_sha256\`: \`${{ needs.produce-tap.outputs.tap_sha256 }}\`"
+            echo "- \`artifact_sha256\`: \`${{ steps.write.outputs.artifact_sha256 }}\`"
+            echo ""
+            echo "النشرُ في سيرِ عملٍ آخرَ يَأخُذُ GitHub تعريفَهُ من الفرعِ الافتراضيِّ حتماً."
+          } >> "$GITHUB_STEP_SUMMARY"
