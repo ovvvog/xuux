@@ -1356,6 +1356,7 @@ test('ب٣ب — مُعِينُ استخراجِ الأوامرِ مقيسٌ: ي
 
 // ═══ اختباراتُ سكربتِ تحديثِ خططِ المراجعةِ بالكوميتِ المقيسِ (S1…S6) ═══
 
+/** @param {string} commit @param {string} measuredOn @param {string} plan @param {string} [command] */
 function makeArtifact(commit, measuredOn, plan, command = 'env -u DATABASE_URL npm test') {
   return JSON.stringify(
     {
@@ -1384,6 +1385,7 @@ function makeArtifact(commit, measuredOn, plan, command = 'env -u DATABASE_URL n
   );
 }
 
+/** @param {string} measuredCommit @param {string} date @param {string} [command] */
 function makePlan(measuredCommit, date, command = 'env -u DATABASE_URL npm test') {
   return [
     '# خطّةُ جولةٍ',
@@ -1394,14 +1396,16 @@ function makePlan(measuredCommit, date, command = 'env -u DATABASE_URL npm test'
   ].join('\n');
 }
 
+/** @param {string} artifactPath @param {string} root */
 function runSync(artifactPath, root) {
   try {
     execFileSync('node', ['scripts/sync-plan-commits.mjs', artifactPath, root], {
       encoding: 'utf8',
     });
-    return { exit: 0, stdout: '' };
+    return { exit: 0, stdout: '', stderr: '' };
   } catch (e) {
-    return { exit: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };
+    const err = /** @type {{ status?: number; stdout?: string; stderr?: string }} */ (e);
+    return { exit: err.status ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
   }
 }
 

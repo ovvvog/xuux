@@ -62,9 +62,10 @@ for (const m of artifact.measurements) {
 
   // S2 — ابحث عن سطر «الكوميتُ المقيسُ». قد يكونُ هناكَ أكثرُ من سطرٍ
   // (سجلُّ قياساتٍ سابقةٍ)، فيُحدَّثُ الأخيرُ (الأحدثُ) فقط.
-  const measuredIndices = [];
+  const measuredIndices = /** @type {number[]} */ ([]);
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('الكوميتُ المقيسُ')) {
+    const l = lines[i];
+    if (l && l.includes('الكوميتُ المقيسُ')) {
       measuredIndices.push(i);
     }
   }
@@ -75,7 +76,15 @@ for (const m of artifact.measurements) {
 
   // السطرُ الأخيرُ هو الأحدثُ — هو الذي يُحدَّثُ.
   const lineIdx = measuredIndices[measuredIndices.length - 1];
+  if (lineIdx === undefined) {
+    violations.push(`S2/NO_MEASURED_LINE: ${m.plan} لا يحوي سطرَ «الكوميتُ المقيسُ».`);
+    continue;
+  }
   const line = lines[lineIdx];
+  if (!line) {
+    violations.push(`S2/NO_MEASURED_LINE: ${m.plan} لا يحوي سطرَ «الكوميتُ المقيسُ».`);
+    continue;
+  }
 
   // S3 — السطرُ يحوي الأمرَ المقيس
   if (!line.includes(m.command)) {
