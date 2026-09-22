@@ -597,6 +597,308 @@ test('ط٤ — `origin/main` غيرُ مجلوبٍ: مُلاحظةُ `R8/NO-BASE
   );
 });
 
+// ════════ مراجعةُ مرجِعِ الحُكمِ — ثمانيةُ مواضعَ مُقاسةٌ لا موصوفةٌ ════════
+//
+// **هذه المجموعةُ جوابُ سؤالٍ واحدٍ:** هل نقلُ مرجِعِ `R6`/`R7` في طلبِ الدمجِ من
+// الشجرةِ العاملةِ إلى `origin/main` صوابٌ، أم ثُقبٌ مُغلَّفٌ بشرحٍ؟ ولذلكَ لا
+// يَكفي هنا أن يَمُرَّ المشهدُ السليمُ: **`م٦` و`م١ب` مُصاغانِ ليَسقُطا إن عادَ
+// الحُكمُ إلى الشجرةِ العاملةِ** — فهما كاشفا انحدارٍ لا شاهدا حالٍ.
+
+/**
+ * أثرٌ لشجرةٍ بعينِها معَ تعديلِ حقولٍ — لِيُقاسَ **أيُّ شجرةٍ حُوكِمَ عليها**.
+ *
+ * @param {string} dir
+ * @param {string} sha
+ * @param {Record<string, unknown>} overrides
+ * @returns {string}
+ */
+function artifactWith(dir, sha, overrides) {
+  const parsed = JSON.parse(artifactFor(dir, sha));
+  parsed.measurements[0] = { ...parsed.measurements[0], ...overrides };
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+test('م١ — طلبُ دمجٍ يُضيفُ ملفَّ اختبارٍ: R6 و R7 يُحاكِمانِ `origin/main`، والدورانُ لا يعودُ', () => {
+  const { dir, sha: base } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'pr/adds-test']);
+  commitFiles(dir, { 'tests/added.test.mjs': "import 'node:test';\n" }, 'pr: ملفُّ اختبارٍ');
+
+  const { violations, notices } = checkSkipBaseline(dir);
+  // و`R8` باقٍ حارساً على الفرعِ نفسِهِ: أساسٌ محتوىً ⇒ لا انتهاكَ.
+  assert.ok(!violations.some((v) => v.startsWith('R8/')), 'أساسٌ محتوىً لا يُحمِّرُ الطلبَ.');
+  assert.deepEqual(
+    violations,
+    [],
+    `الدورانُ السابقُ كانَ هنا بعينِهِ — فأيُّ انتهاكٍ عودةٌ لهُ: ${violations.join(' | ')}`,
+  );
+  const judged = notices.find((n) => n.startsWith('SCOPE/JUDGED-BASE'));
+  assert.ok(judged !== undefined, 'ولا تأجيلَ صامتاً: المرجِعُ يُعلَنُ.');
+  assert.ok(judged.includes(base.slice(0, 8)), 'والمُلاحظةُ تُسمّي بصمةَ الأساسِ نفسَها.');
+
+  assert.equal(
+    git(dir, ['merge-base', '--is-ancestor', base, 'HEAD']) || '',
+    '',
+    'وهذا هوَ ما يَقيسُهُ R8 فعلاً: الاحتواءُ.',
+  );
+});
+
+test('م١ب — كاشفُ انحدارٍ لـR6: العدُّ يقعُ على كوميتِ الأساسِ لا على القرصِ', () => {
+  const { dir, sha: base } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'pr/adds-test']);
+  commitFiles(dir, { 'tests/added.test.mjs': "import 'node:test';\n" }, 'pr: ملفُّ اختبارٍ');
+
+  // شجرةُ الأساسِ فيها ملفُّ اختبارٍ واحدٌ، والقرصُ فيهِ اثنانِ.
+  writeFile(dir, ARTIFACT_REL, artifactWith(dir, base, { testFileCount: 1 }));
+  assert.ok(
+    !checkSkipBaseline(dir).violations.some((v) => v.startsWith('R6/')),
+    'أثرٌ يَصِفُ الأساسَ (1) يَمُرُّ.',
+  );
+
+  // والعكسُ هوَ الحُجّةُ: أثرٌ يَصِفُ القرصَ (2) **يجبُ أن يَسقُطَ**، وإلّا فالحُكمُ
+  // رجعَ إلى الشجرةِ العاملةِ وعادَ الدورانُ.
+  writeFile(dir, ARTIFACT_REL, artifactWith(dir, base, { testFileCount: 2 }));
+  const { violations } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    `لو حُوكِمَ القرصُ لَمَرَّ هذا — فسقوطُهُ هوَ الدليلُ: ${violations.join(' | ')}`,
+  );
+  assert.ok(
+    (violations.find((v) => v.startsWith('R6/STALE')) ?? '').includes(base.slice(0, 8)),
+    'والرسالةُ تُسمّي شجرةَ الأساسِ التي حُوكِمَ عليها.',
+  );
+});
+
+test('م٢ — طلبٌ يُغيِّرُ نطاقاً والعدُّ ثابتٌ: لا bypass صامتٌ — والحُكمُ مُسمّىً موضِعُهُ', () => {
+  const { dir, sha: base } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'pr/scope-only']);
+  const head = commitFiles(dir, { 'src/core.mjs': 'export const value = 123;\n' }, 'pr: نطاقٌ');
+
+  // العدُّ ثابتٌ فعلاً — فـ`R6` عاجزٌ عن هذه الحالةِ بطبيعتِهِ لا بتأجيلٍ.
+  assert.equal(
+    countTestFilesAt(dir, base),
+    countTestFilesAt(dir, head),
+    'عدّادُ الملفّاتِ واحدٌ — وهذا حدُّ R6 لا ثُقبٌ أُحدِثَ.',
+  );
+  assert.notEqual(
+    computeScopeDigest(dir, base),
+    computeScopeDigest(dir, head),
+    'والبصمةُ مختلفةٌ — فالتغييرُ حقيقيٌّ لا وهميٌّ.',
+  );
+
+  const onBranch = checkSkipBaseline(dir);
+  assert.ok(!onBranch.violations.some((v) => v.startsWith('R7/')), onBranch.violations.join(' | '));
+  assert.ok(
+    onBranch.notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')),
+    '**وليسَ صامتاً:** كلُّ تشغيلةٍ على فرعٍ تُصرِّحُ بأنَّ R6/R7 قِيسَتا على الأساسِ.',
+  );
+
+  // الموضعُ الأوّلُ للحُكمِ: `main` بعدَ الدمجِ — حينَ يَصيرُ التغييرُ حقيقةً فيها.
+  setOriginMain(dir, head);
+  assert.ok(
+    checkSkipBaseline(dir).violations.some((v) => v.startsWith('R7/SCOPE-DRIFT')),
+    'على main يَسقُطُ — فالتأجيلُ زمنٌ لا إلغاءٌ.',
+  );
+});
+
+test('م٢ب — والموضعُ الثاني للحُكمِ قبلَ الدمجِ: `V5` يَرفُضُ النشرَ على النطاقِ المُنزاحِ', () => {
+  const p = publishScene();
+  const moved = commitFiles(p.trustedRoot, { 'src/core.mjs': 'export const value = 321;\n' });
+  setOriginMain(p.trustedRoot, moved);
+  const { rejections } = verify(p);
+  const drift = rejections.filter((r) => r.startsWith('PUBLISH_SCOPE_DRIFT'));
+  assert.equal(drift.length, 1, rejections.join('\n'));
+  assert.match(drift[0] ?? '', /src\/core\.mjs/, 'ويُسمّي المسارَ فلا يُخمَّنُ.');
+});
+
+test('م٣ — تغييرٌ خارجَ نطاقِ R7: لا إنذارَ كاذباً، على الفرعِ وعلى `main` معاً', () => {
+  const { dir } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'pr/outside-scope']);
+  const head = commitFiles(
+    dir,
+    { 'docs/roadmap/05-work-log.md': '## WL-999\n', 'PROJECT_STATUS.md': 'آخر تحديث: ب\n' },
+    'pr: خارجَ النطاقِ',
+  );
+  assert.ok(
+    !checkSkipBaseline(dir).violations.some((v) => v.startsWith('R7/')),
+    'على الفرعِ لا إنذارَ.',
+  );
+
+  setOriginMain(dir, head);
+  const onMain = checkSkipBaseline(dir);
+  assert.ok(
+    !onMain.violations.some((v) => v.startsWith('R7/')),
+    `**وعلى main أيضاً** — وإلّا لَما أمكنَ نشرُ أثرٍ في مستودَعٍ يُوثِّقُ كلَّ دفعةٍ: ${onMain.violations.join(' | ')}`,
+  );
+  assert.ok(
+    !onMain.notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')),
+    'ولا تأجيلَ على main: الشجرةُ المُحاكَمةُ هيَ العاملةُ.',
+  );
+});
+
+test('م٤ — `origin/main` غائبٌ: لا نجاحَ صامتٌ — الشجرةُ العاملةُ تُحاكَمُ ومُلاحظتانِ تُعلَنانِ', () => {
+  const dir = makeRoot();
+  const sha = initFixtureRepo(dir);
+  writeFile(dir, ARTIFACT_REL, artifactFor(dir, sha));
+  commitFiles(dir, { 'tests/added.test.mjs': "import 'node:test';\n" }, 'ملفٌّ');
+
+  const { violations, notices } = checkSkipBaseline(dir);
+  assert.ok(
+    violations.some((v) => v.startsWith('R6/STALE')),
+    `غيابُ الأساسِ يُغلِقُ لا يَفتحُ: تُحاكَمُ الشجرةُ العاملةُ وهيَ الأشدُّ. ${violations.join(' | ')}`,
+  );
+  assert.ok(
+    notices.some((n) => n.startsWith('R8/NO-BASE')),
+    notices.join(' | '),
+  );
+  assert.ok(
+    !notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')),
+    'ولا يُدَّعى تأجيلٌ إلى أساسٍ لا وجودَ لهُ.',
+  );
+});
+
+test('م٤ب — والمُعوِّضُ بنيويٌّ في CI: جلبُ الأساسِ خطوةٌ حاسمةٌ قبلَ الاختباراتِ وقبلَ الحاجزِ', () => {
+  const text = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  const doc = parseYaml(text);
+  const scripts = collect(doc, 'run').map(String);
+  const fetchStep = scripts.find((s) => s.includes('refs/remotes/origin/main'));
+  assert.ok(fetchStep !== undefined, 'خطوةُ الجلبِ قائمةٌ.');
+  assert.ok(
+    !/\|\|\s*true/.test(fetchStep) && !/continue-on-error/.test(fetchStep),
+    'وحاسمةٌ: فشلُ الجلبِ يُسقِطُ الخطوةَ ولا يُسكِتُ القاعدةَ.',
+  );
+  const fetchIndex = text.indexOf('git fetch --no-tags origin main:refs/remotes/origin/main');
+  assert.ok(fetchIndex > -1);
+  assert.ok(
+    text.indexOf('run: npm test') > fetchIndex,
+    'قبلَ `npm test`: الحزمةُ تُشغِّلُ الحاجزَ عمليّةً منفصلةً.',
+  );
+  assert.ok(
+    text.indexOf('npm run guard:skip-baseline') > fetchIndex,
+    'وقبلَ خطوةِ الحاجزِ نفسِها.',
+  );
+});
+
+test('م٥ — HEAD لا يَحتوي `origin/main`: R8/BASE-DRIFT يَسقُطُ، ولا استثناءَ ذاتيَّ لهُ', () => {
+  const { dir, sha: base } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'pr/stale-base']);
+  commitFiles(dir, { 'tests/added.test.mjs': "import 'node:test';\n" }, 'pr: ملفٌّ');
+  git(dir, ['checkout', '--quiet', '-b', 'other', base]);
+  const moved = commitFiles(dir, { 'src/core.mjs': 'export const value = 9;\n' }, 'main: تقدَّمَ');
+  setOriginMain(dir, moved);
+  git(dir, ['checkout', '--quiet', 'pr/stale-base']);
+
+  const { violations, notices } = checkSkipBaseline(dir);
+  const drift = violations.filter((v) => v.startsWith('R8/BASE-DRIFT'));
+  assert.equal(drift.length, 1, violations.join(' | '));
+  assert.match(drift[0] ?? '', /ولا استثناءَ ذاتيَّ/);
+  assert.ok(
+    !notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')),
+    'ولا تأجيلَ هنا: التأجيلُ مشروطٌ بالاحتواءِ، وهوَ منتفٍ.',
+  );
+
+  // ولا يُمرَّرُ R8 عبرَ منفَذِ LIVE-16 بحالٍ.
+  const decision = allowSelfStaleOnly(guardFailureBlock(1, 'R8/BASE-DRIFT').join('\n'), 1);
+  assert.equal(decision.allowed, false, 'منفَذُ LIVE-16 مسدودٌ أمامَ R8.');
+});
+
+test('م٦ — كاشفُ انحدارٍ لـR7: البصمةُ تُحسَبُ على كوميتِ `origin/main` لا على الشجرةِ العاملةِ', () => {
+  const { dir, sha: base } = mainLikeRoot();
+  git(dir, ['checkout', '--quiet', '-b', 'pr/scope']);
+  const head = commitFiles(dir, { 'src/core.mjs': 'export const value = 555;\n' }, 'pr: نطاقٌ');
+  const baseDigest = computeScopeDigest(dir, base);
+  const headDigest = computeScopeDigest(dir, head);
+  assert.notEqual(
+    baseDigest,
+    headDigest,
+    'الشجرتانِ مختلفتانِ — بلا ذلكَ لا يَقيسُ الاختبارُ شيئاً.',
+  );
+
+  // ① أثرٌ ببصمةِ الأساسِ ⇒ يَمُرُّ.
+  writeFile(dir, ARTIFACT_REL, artifactWith(dir, base, { scopeDigest: baseDigest }));
+  assert.ok(
+    !checkSkipBaseline(dir).violations.some((v) => v.startsWith('R7/')),
+    'أثرٌ يَصِفُ الأساسَ يَمُرُّ.',
+  );
+
+  // ② أثرٌ ببصمةِ الشجرةِ العاملةِ ⇒ **يجبُ أن يَسقُطَ**. ولو رجعَ الحُكمُ إلى
+  // الشجرةِ العاملةِ لَمَرَّ هذا ولَسقطَ ① — فالاختبارُ يَكشِفُ الانحدارَ في
+  // الاتّجاهَينِ معاً لا في واحدٍ.
+  writeFile(dir, ARTIFACT_REL, artifactWith(dir, base, { scopeDigest: headDigest }));
+  const { violations } = checkSkipBaseline(dir);
+  const drift = violations.filter((v) => v.startsWith('R7/SCOPE-DRIFT'));
+  assert.equal(drift.length, 1, `سقوطٌ واحدٌ مُتوقَّعٌ: ${violations.join(' | ')}`);
+  assert.ok(
+    (drift[0] ?? '').includes(base.slice(0, 8)) &&
+      (drift[0] ?? '').includes(baseDigest.slice(0, 12)),
+    `والرسالةُ تُسمّي كوميتَ الأساسِ وبصمتَهُ — وهذا دليلُ المرجِعِ نصّاً: ${drift[0]}`,
+  );
+});
+
+test('م٧ — على `main` نفسِها: العدُّ والنطاقُ يُحاكَمانِ على شجرتِها الفعليّةِ حتّى إعادةِ القياسِ', () => {
+  // عددُ ملفّاتِ الاختبارِ تغيَّرَ ⇒ أحمرُ.
+  const a = mainLikeRoot();
+  commitFiles(a.dir, { 'tests/on-main.test.mjs': "import 'node:test';\n" }, 'main: ملفٌّ');
+  setOriginMain(a.dir, git(a.dir, ['rev-parse', 'HEAD']).trim());
+  const rA = checkSkipBaseline(a.dir);
+  assert.ok(
+    rA.violations.some((v) => v.startsWith('R6/STALE')),
+    rA.violations.join(' | '),
+  );
+  assert.ok(!rA.notices.some((n) => n.startsWith('SCOPE/JUDGED-BASE')));
+
+  // النطاقُ تغيَّرَ والعدُّ ثابتٌ ⇒ أحمرُ أيضاً — وهذا ما لا يَقدِرُ عليهِ R6.
+  const b = mainLikeRoot();
+  commitFiles(b.dir, { 'src/core.mjs': 'export const value = 8;\n' }, 'main: نطاقٌ');
+  setOriginMain(b.dir, git(b.dir, ['rev-parse', 'HEAD']).trim());
+  const rB = checkSkipBaseline(b.dir);
+  assert.ok(
+    rB.violations.some((v) => v.startsWith('R7/SCOPE-DRIFT')),
+    rB.violations.join(' | '),
+  );
+  assert.ok(
+    !rB.violations.some((v) => v.startsWith('R6/')),
+    'و`R6` صامتٌ هنا — فبلا `R7` كانَ main يَمُرُّ أخضرَ على نطاقٍ مُنزاحٍ.',
+  );
+});
+
+test('م٨ — سباقٌ: قياسٌ على A ثمَّ تحرَّكَت main إلى B ⇒ V5 يَمنعُ النشرَ، ولا يُعتمَدُ على R6', () => {
+  const p = publishScene();
+  const a = p.m0;
+  const b = commitFiles(p.trustedRoot, { 'src/core.mjs': 'export const value = 2026;\n' });
+  setOriginMain(p.trustedRoot, b);
+
+  // R6 وحدَهُ أعمى في هذا السباقِ: العدُّ واحدٌ في A و B.
+  assert.equal(
+    countTestFilesAt(p.trustedRoot, a),
+    countTestFilesAt(p.trustedRoot, b),
+    'لو كانَ R6 هوَ الحارسَ لَمَرَّ النشرُ.',
+  );
+
+  const { rejections, mainHeadAtPublish } = verify(p);
+  assert.equal(mainHeadAtPublish, b, 'ورأسُ main عندَ النشرِ يُقرأُ الآنَ لا يُفترَضُ.');
+  const drift = rejections.filter((r) => r.startsWith('PUBLISH_SCOPE_DRIFT'));
+  assert.equal(drift.length, 1, rejections.join('\n'));
+  assert.ok(
+    (drift[0] ?? '').includes(a.slice(0, 12).slice(0, 8)) ||
+      (drift[0] ?? '').includes(b.slice(0, 8)),
+    'والرفضُ يُسمّي رأسَ main الجديدَ.',
+  );
+  assert.match(drift[0] ?? '', /src\/core\.mjs/);
+});
+
+/**
+ * عدُّ ملفّاتِ الاختبارِ في كوميتٍ — مُعِينٌ للقياسِ لا للحُكمِ.
+ *
+ * @param {string} dir
+ * @param {string} commit
+ * @returns {number}
+ */
+function countTestFilesAt(dir, commit) {
+  return git(dir, ['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', commit, 'tests'])
+    .split('\n')
+    .filter((l) => l.endsWith('.test.mjs')).length;
+}
+
 // ══════ مرجِعُ الحُكمِ: الأثرُ يُقابَلُ بالشجرةِ التي يَصِفُها (فكُّ الدورانِ) ══════
 //
 // **الدورانُ الذي تَقيسُهُ هذه المجموعةُ:** الأثرُ يَصِفُ `main`، فلو قُوبِلَ بشجرةِ
