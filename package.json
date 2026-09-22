@@ -78,6 +78,7 @@
     "guard:chaos": "node scripts/guard-chaos.mjs",
     "guard:emergency": "node scripts/guard-emergency.mjs",
     "guard:skip-baseline": "node scripts/guard-skip-baseline.mjs",
+    "fetch:reviewed-commits": "node scripts/fetch-reviewed-commits.mjs .",
     "measure:skip-baseline": "node scripts/measure-skip-baseline.mjs",
     "guard:readiness": "node scripts/guard-readiness.mjs",
     "guard:scheduling": "node scripts/guard-scheduling.mjs",
