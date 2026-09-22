@@ -19,7 +19,7 @@ on:
       ref:
         description: 'الكوميت الذي يُقاسُ عليه (افتراضيّاً: eba5afcf)'
         required: false
-        default: 'eba5afcf'
+        default: 'eba5afcf7707ffa5a03e0c75a0afab66070e0551'
 
 permissions:
   contents: write
