@@ -1330,7 +1330,9 @@ test('ب٦ — مرحلةُ النشرِ تُشغِّلُ الحاجزَ حاس�
   const verifyIndex = text.indexOf('verify-skip-baseline-artifact.mjs');
   const guardIndex = text.indexOf('npm run guard:skip-baseline');
   const pushIndex = text.indexOf('git push origin');
-  const prIndex = text.indexOf('gh pr create');
+  // OPS-1/RUNNER-NO-GH: استُبدِلَ `gh pr create` بنداءِ REST عبرَ `curl`
+  // إلى `/pulls` — فالعثورُ على `/pulls` يُثبِتُ إنشاءَ طلبِ الدمجِ بعدَ الدفعِ.
+  const prIndex = text.indexOf('/pulls');
   assert.ok(verifyIndex > -1 && guardIndex > verifyIndex, 'المُتحقِّقُ ثمَّ الحاجزُ.');
   assert.ok(pushIndex > guardIndex, 'ولا دفعَ قبلَ الحاجزِ.');
   assert.ok(prIndex > pushIndex, 'وطلبُ الدمجِ بعدَ الدفعِ — ودفعٌ بلا طلبٍ أنتجَ REPO-1.');
