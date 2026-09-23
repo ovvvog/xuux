@@ -217,12 +217,50 @@ jobs:
           BODY="${BODY//__EXIT__/${{ steps.prov.outputs.test_exit }}}"
           BODY="${BODY//__RUNID__/${{ steps.prov.outputs.github_run_id }}}"
           BODY="${BODY//__ATTEMPT__/${{ steps.prov.outputs.github_run_attempt }}}"
-          gh pr create \
-            --repo '${{ github.repository }}' \
-            --base main \
-            --head '${{ steps.branch.outputs.branch }}' \
-            --title 'chore: قياسُ خطِّ أساسِ التخطّي على ${{ steps.prov.outputs.measured_sha }}' \
-            --body "$BODY"
+          # إنشاءُ طلبِ الدمجِ عبرَ REST API — العدّاءُ بلا `gh` (OPS-1/RUNNER-NO-GH)
+          # `gh` غيرُ مثبَّتٍ على `xuux-ci-linux`، فالنداءُ يقعُ مباشرةً عبرَ `curl`
+          # و`node` يَبني حمولةَ JSON آمنةً من النصِّ العربيِّ متعدِّدِ الأسطرِ.
+          PAYLOAD=$(printf '%s' "$BODY" | node -e "
+            const chunks = [];
+            process.stdin.on('data', c => chunks.push(c));
+            process.stdin.on('end', () => {
+              const body = Buffer.concat(chunks).toString();
+              console.log(JSON.stringify({
+                title: process.argv[1],
+                head: process.argv[2],
+                base: 'main',
+                body
+              }));
+            });
+          " \
+            "chore: قياسُ خطِّ أساسِ التخطّي على ${{ steps.prov.outputs.measured_sha }}" \
+            "${{ steps.branch.outputs.branch }}")
+
+          HTTP_RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/${{ github.repository }}/pulls" \
+            -d "$PAYLOAD")
+
+          HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
+          RESPONSE_BODY=$(echo "$HTTP_RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" != '201' ]; then
+            echo "::error::PR_CREATE_FAILED: HTTP $HTTP_CODE"
+            echo "$RESPONSE_BODY"
+            exit 1
+          fi
+
+          echo "$RESPONSE_BODY" | node -e "
+            const chunks = [];
+            process.stdin.on('data', c => chunks.push(c));
+            process.stdin.on('end', () => {
+              const j = JSON.parse(Buffer.concat(chunks));
+              console.log('PR created: #' + j.number + ' ' + j.html_url);
+            });
+          "
 
       - name: خلاصةٌ مقيسةٌ
         if: always()
