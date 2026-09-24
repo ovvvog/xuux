@@ -17,6 +17,54 @@
    للمُدخلةِ**، والقاعدةُ مقيسةٌ بـ`R11` في `npm run guard:readiness` (الدَّين `LIVE-4`).
 
 
+### [2026-09-24] — WL-257 — مصدرٌ بديلٌ لأعدادِ الاختباراتِ في CI لا يتعلّقُ برفعِ السجلِّ (LIVE-17)
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `LIVE-17` — الشقُّ المنفِّذيُّ · **الحالةُ بعدَ العملِ:** 🟨 الكودُ مُنجَزٌ، الإغلاقُ ينتظرُ قياساً على `main`
+
+#### ما تمَّ فعلاً
+
+- **خطوةُ «الاختبارات» في `ci.yml`** صارَت `npm test | tee "$RUNNER_TEMP/ci-tests.tap"` بـ`id: tests` و`shell: bash`، و`shell: bash` يُفعِّلُ `-eo pipefail` فرمزُ الخطوةِ رمزُ `npm test` لا رمزُ `tee`. والنصُّ `run: npm test` باقٍ فقواعدُ الترتيبِ في `ops-1-adversarial` (‏`ب٥`·`ج٥`) تَقيسُه كما هو.
+- **خطوةُ «خلاصة أعداد الاختبارات (LIVE-17)»** بـ`if: always()`: تقرأُ `# tests`/`# suites`/`# pass`/`# fail`/`# cancelled`/`# skipped`/`# todo`/`# duration_ms` وكلَّ سطرِ `ok … # SKIP` بسببِه، وتكتبُها في `$GITHUB_STEP_SUMMARY` وفي `ci-tests-summary.txt`. **وحاسمةٌ عند الغيابِ:** ملفٌّ فارغٌ ⇒ `CI_TAP_MISSING`، وTAP بلا مُلخَّصٍ ⇒ `CI_TAP_INCOMPLETE`، فلا يُكتَبُ عددٌ لم يُقَسْ.
+- **خطوةُ رفعِ الأثرِ `ci-tests-tap`** (‏`actions/upload-artifact@v4`، `if: always()`، `if-no-files-found: error`، 14 يوماً) تَحملُ TAP كاملاً وخلاصتَه.
+- **اختبارُ انحدارٍ في `tests/tooling/ci-gates.test.mjs`** (ملفٌّ قائمٌ فعدّادُ ملفّاتِ الاختبارِ باقٍ `222`) يَقيسُ بنيةَ المصدرِ ببرنامجِ YAML لا بنمطٍ.
+- **وقِيسَ السلوكُ محلّيّاً لا النصُّ وحدَه**: شُغِّلَ نصُّ خطوةِ الخلاصةِ نفسُه على TAP حقيقيٍّ فيه تخطٍّ ⇒ أعدادٌ صحيحةٌ وسطرُ `# SKIP why`؛ وعلى ملفٍّ غائبٍ ⇒ `exit=1` بـ`CI_TAP_MISSING`؛ و`bash -eo pipefail` معَ اختبارٍ ساقطٍ ⇒ `exit=1` فلا يَستُرُ `tee` سقوطاً.
+- **واعتمادُ TAP مُخرَجاً افتراضيّاً** في غيرِ الطرفيّةِ على Node `20` هو ما يعتمدُه `measure-skip-baseline.yml` أصلاً (خطوةُ «تشغيلُ الحزمةِ وجمعُ TAP»)، وإن تغيَّرَ الافتراضُ سقطَت الخلاصةُ بـ`CI_TAP_INCOMPLETE` لا صمتاً.
+
+#### الملفّاتُ المُتأثِّرةُ
+
+- `.github/workflows/ci.yml` — خطوةُ الاختباراتِ وخطوتانِ جديدتانِ.
+- `tests/tooling/ci-gates.test.mjs` — اختبارُ `LIVE-17`.
+- `docs/roadmap/06-debt-register.md` — بندُ `LIVE-17`: المصدرُ مُنفَّذٌ والإغلاقُ معلَّقٌ؛ وبندٌ جديدٌ `LIVE-17/SKIP-NO-REASON`.
+- `PROJECT_STATUS.md` — سطرُ `WL-257`.
+
+#### الدليل
+
+| المقيسُ | القيمةُ |
+| --- | --- |
+| `node --test tests/tooling/ tests/external-review/` | 367 اختباراً · 367 نجاحاً · 0 سقوطٍ · 0 تخطٍّ |
+| `npm run typecheck` · `eslint` · `prettier --check` | `exit=0` |
+| 16 حاجزاً يقرأُ `ci.yml` (`guard:readiness`·`guard:emergency`·`guard:version`·…) | `exit=0` كلُّها |
+| نصُّ الخلاصةِ على TAP فيه تخطٍّ | `exit=0` — `# tests 2`·`# pass 1`·`# skipped 1` وسطرُ السببِ |
+| نصُّ الخلاصةِ على ملفٍّ غائبٍ | `exit=1` — `CI_TAP_MISSING` |
+| `pipefail` معَ اختبارٍ ساقطٍ | `exit=1` |
+| **أثرُ `ci-tests-tap` من تشغيلةِ الطلبِ نفسِه** [`35941442844`](https://github.com/ovvvog/xuux/actions/runs/35941442844) (‏`GET actions/artifacts/10785332533/zip`) | `tests_outcome: success` · `# tests 2279` · `# suites 65` · `# pass 2243` · `# fail 0` · `# cancelled 0` · `# skipped 36` · `# todo 0` · 0 سطرِ `not ok` |
+| أسطرُ `# SKIP` في الخلاصةِ | 36 — مطابقةٌ لـ`# skipped` · **9 منها بلا سببٍ مكتوبٍ** |
+| `sha256` لـ`ci-tests.tap` | `bde74192b6e798b3a7cf8aa97cfb5da1c4626b25261e3c1039068aeac5da27b8` |
+| `guard:skip-baseline` على الفرعِ | `exit=0` — يُحاكِمُ شجرةَ `main` لا الفرعَ (`SCOPE/JUDGED-BASE`)، فانزياحُ النطاقِ يَظهرُ على `main` بعدَ الدمجِ |
+
+#### ما لم يتمَّ ولماذا
+
+- **اكتُشِفَ بالقياسِ ولا يُستَرُ:** 9 تخطّياتٍ من 36 بلا سببٍ في TAP (`# SKIP` عارٍ): 4 في اختباراتِ التشفيرِ (roundtrip·التلاعب·IV·عدم الاستخراج)، و`getSigningKey` بلا EdDSA، واثنانِ في HSM (‏`XUUX_HSM_TEST`)، واثنانِ `live (XUUX_CHANNEL_POC=1)`. فشقُّ «سببُ كلِّ تخطٍّ» من معيارِ `LIVE-17` **غيرُ مستوفىً**، وقُيِّدَ `LIVE-17/SKIP-NO-REASON`. وإصلاحُه كتابةُ السببِ في نداءِ `skip` داخلَ `tests/` — في النطاقِ فيَلزمُه دورةُ قياسٍ.
+- **`LIVE-17` لم يُغلَقْ:** معيارُه قراءةُ الأعدادِ **من أثرِ تشغيلةٍ على `main` بأمرٍ**، وهذا لا يقعُ إلا بعدَ الدمجِ.
+- **`ci.yml` و`tests/` داخلَ نطاقِ البصمةِ:** فبعدَ الدمجِ يَحمَرُّ `main` بـ`R7/SCOPE-DRIFT` حتّى تُدمَجَ دورةُ القياسِ والنشرِ (‏`OPS-1/MAIN-DRIFT-WINDOW`)، ويلزمُ فيها التدخُّلُ اليدويُّ المُعلَنُ لـ`OPS-1/BOT-PR-CI`.
+- **تشخيصُ سببِ فقدِ السجلِّ** من `~/actions-runner/_diag/Worker_*.log` على الآلةِ باقٍ على المالكِ.
+- **ولم يُمَسَّ:** `config/external-review.yaml` · `version.json` · النسبةُ · عدّادُ الخطواتِ · البوّاباتُ · نتائجُ المجلسِ · حالةُ أيِّ خطوةٍ · حاويةُ `services:`.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- **`LIVE-18` (الشقُّ المنفِّذيُّ)** يأتي بعدَ إغلاقِ `LIVE-17`.
+
+
 ### [2026-09-24] — WL-256 — إغلاقُ OPS-1/RUNNER-NO-GH بقياسٍ: مسارُ النشرِ أنشأَ طلبَ الدمجِ #144 آليّاً، وقيدُ OPS-1/BOT-PR-CI
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `OPS-1/RUNNER-NO-GH` — إغلاقٌ مقيسٌ · **الحالةُ بعدَ العملِ:** 🟢 `OPS-1/RUNNER-NO-GH` مُغلَقٌ · 🟨 `OPS-1/BOT-PR-CI` مفتوحٌ
