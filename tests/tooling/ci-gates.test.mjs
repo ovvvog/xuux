@@ -209,8 +209,9 @@ test('LIVE-18 — الفحصُ المُسبَقُ يُسمّي كلَّ متطل
     tar: 'exit 0',
     sha256sum: 'exit 0',
   };
-  /** @param {Record<string, string | null>} overrides */
-  const machine = (overrides) => {
+  const ubuntu2404 = 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04.5 LTS"\n';
+  /** @param {Record<string, string | null>} overrides @param {string | null} [os] */
+  const machine = (overrides, os = ubuntu2404) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'xuux-preflight-'));
     try {
       for (const util of ['timeout', 'uname']) symlinkSync(real(util), path.join(dir, util));
@@ -220,8 +221,10 @@ test('LIVE-18 — الفحصُ المُسبَقُ يُسمّي كلَّ متطل
         writeFileSync(file, `#!${bash}\n${body}\n`);
         chmodSync(file, 0o755);
       }
+      const osRelease = path.join(dir, 'os-release');
+      if (os !== null) writeFileSync(osRelease, os);
       const r = spawnSync(bash, [script], {
-        env: { PATH: dir, HOME: dir },
+        env: { PATH: dir, HOME: dir, RUNNER_OS_RELEASE_FILE: osRelease },
         encoding: 'utf8',
       });
       return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
@@ -233,7 +236,7 @@ test('LIVE-18 — الفحصُ المُسبَقُ يُسمّي كلَّ متطل
   const full = machine({});
   assert.equal(full.status, 0, `الآلةُ التامّةُ تَمُرُّ:\n${full.out}`);
   assert.ok(!/RUNNER_/.test(full.out), 'لا رمزَ غيابٍ على التامّةِ.');
-  assert.match(full.out, /لا يُفرَضُ/, 'النظامُ يُطبَعُ ولا يُفرَضُ (قرارُ المالكِ).');
+  assert.match(full.out, /✓ النظامُ — Ubuntu 24\.04\.5 LTS/, 'الهدفُ المُقرَّرُ في WL-263 مقيسٌ.');
 
   /** @type {Array<[string, Record<string, string | null>, RegExp]>} */
   const cases = [
@@ -253,6 +256,18 @@ test('LIVE-18 — الفحصُ المُسبَقُ يُسمّي كلَّ متطل
     assert.equal(r.status, 1, `${label}: يَسقُطُ.\n${r.out}`);
     assert.match(r.out, code, `${label}: الرمزُ مُسمّىً.`);
     assert.match(r.out, /RUNNER_PREFLIGHT_FAILED: 1 /, `${label}: غائبٌ واحدٌ لا أكثرَ.`);
+  }
+
+  // `WL-263`: قضى المالكُ بـUbuntu 24.04 هدفاً، فغيرُه — ولو أحدثَ — سقوطٌ مقروءٌ.
+  for (const [label, os] of /** @type {Array<[string, string | null]>} */ ([
+    ['Ubuntu 26.04', 'ID=ubuntu\nVERSION_ID="26.04"\nPRETTY_NAME="Ubuntu 26.04 LTS"\n'],
+    ['Debian 13', 'ID=debian\nVERSION_ID="13"\nPRETTY_NAME="Debian GNU/Linux 13"\n'],
+    ['بلا os-release', null],
+  ])) {
+    const r = machine({}, os);
+    assert.equal(r.status, 1, `${label}: يَسقُطُ.\n${r.out}`);
+    assert.match(r.out, /RUNNER_OS_MISMATCH/, `${label}: الرمزُ مُسمّىً.`);
+    assert.match(r.out, /RUNNER_PREFLIGHT_FAILED: 1 /);
   }
 
   const pgViaSudo = machine({ pg_dump: null, sudo: 'exit 0' });

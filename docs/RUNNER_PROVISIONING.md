@@ -1,7 +1,7 @@
 # تجهيزُ عدّاءِ CI المقيمِ
 
 - **الحالة:** وصفٌ مقيسٌ لما تحتاجُه وظائفُ CI من الآلةِ، ويَفحصُه `scripts/runner-preflight.sh` في كلِّ تشغيلةٍ (`LIVE-18` / `WL-261`).
-- **لا يمنحُ صلاحيّةً ولا يُقرِّرُ بيئةً:** قبولُ Ubuntu 24.04 بيئةً مستهدفةً أو الترقيةُ إلى 26.04 **قرارُ المالكِ** في `LIVE-18`، وهذه الوثيقةُ تَصِفُ ولا تَختارُ.
+- **البيئةُ المستهدفةُ: Ubuntu 24.04** — قرارُ المالكِ في `LIVE-18` (2026-09-24، `WL-263`). وهذه الوثيقةُ تَصِفُ ذلك القرارَ ولا تُنشِئُه؛ وتغييرُ الهدفِ قرارُ مالكٍ يُعدَّلُ له الفحصُ والوثيقةُ معاً.
 
 ## لماذا هذه الوثيقةُ
 
@@ -28,6 +28,7 @@
 | `RUNNER_BUILD_TOOLS_MISSING` | `gcc` · `g++` · `make` · `python3` | وحدةُ `pkcs11js` الأصليّةُ تُبنى بـnode-gyp، وغيابُها يُسقِطُ فحصَ الأنواعِ برسالةٍ مُضلِّلةٍ | `build-essential` و`python3` |
 | `RUNNER_USERNS_UNAVAILABLE` | `unshare --map-root-user --net --mount --pid --fork --mount-proc -- true` يَنجحُ | اختباراتُ العزلِ (`tests/execution/`) **تتخطّى** بغيابِه فتضيعُ تغطيتُها صامتةً؛ والأمرُ نفسُه يُجريه `probeIsolation()` | `kernel.apparmor_restrict_unprivileged_userns=0` في `/etc/sysctl.d/60-xuux-userns.conf` ثمَّ `sudo sysctl --system` |
 | `RUNNER_TOOLS_MISSING` | `git` · `curl` · `tar` · `sha256sum` · `timeout` | تستدعيها خطواتُ `ci.yml` و`measure-skip-baseline.yml` و`publish-skip-baseline.yml` بأسمائِها | حزمُ النظامِ الأساسيّةُ |
+| `RUNNER_OS_MISMATCH` | Ubuntu `24.04` (`ID=ubuntu` · `VERSION_ID="24.04"` في `/etc/os-release`) | الهدفُ المُقرَّرُ في `LIVE-18`؛ وغيرُه — ولو أحدثَ — بيئةٌ لم يُقَسْ عليها المشروعُ | أعِدْ تجهيزَ العدّاءِ على Ubuntu 24.04؛ أو يَقضي المالكُ بهدفٍ آخرَ |
 
 **وما لا يُشترَطُ:** `gh` — مسارُ النشرِ يَستدعي واجهةَ GitHub بـ`curl` و`GH_TOKEN` (`WL-256`)، فلا يلزمُ على العدّاءِ. وNode.js — تُنزِّلُه `actions/setup-node` من `.nvmrc`، فتلزمُ الشبكةُ لا التثبيتُ.
 
@@ -40,13 +41,15 @@
 - `build-essential`
 - `kernel.apparmor_restrict_unprivileged_userns=0` دائماً في `/etc/sysctl.d/60-xuux-userns.conf`
 
-والآلةُ تُعلِنُ **Ubuntu 24.04.5 LTS** (نواةُ `6.8.0-142`)، لا 26.04 كما في `docs/HSM_BOTAN_BUILD.md`. والفحصُ المُسبَقُ يَطبعُ النظامَ والنواةَ **ولا يَفرضُهما** حتّى يَقضيَ المالكُ في `LIVE-18`.
+والآلةُ تُعلِنُ **Ubuntu 24.04.5 LTS** (نواةُ `6.8.0-142-generic`)، وهو الهدفُ المُقرَّرُ؛ وقد قاسَه الفحصُ المُسبَقُ على العدّاءِ في `WL-262`.
+
+**وملاحظةٌ لا تُغلِقُ شيئاً:** `docs/HSM_BOTAN_BUILD.md` مُتحقَّقٌ على Ubuntu 26.04 (بيئةِ WSL2 المحلّيّةِ لاختباراتِ التوكنِ الحقيقيِّ، ولا تُشغَّلُ في CI)، ولم يُعَدْ تحقيقُه على 24.04. فقرارُ `LIVE-18` يخصُّ عدّاءَ CI، ولا يَنقُلُ تلك الوثيقةَ إلى 24.04 بلا قياسٍ.
 
 ## الفحصُ المُسبَقُ في CI
 
 - وظيفةُ «فحص العدّاء المسبق (LIVE-18)» في `.github/workflows/ci.yml` **بلا `services:` قصداً**: غيابُ Docker يُسقِطُ الوظيفةَ ذاتَ الحاوياتِ في «Initialize containers» قبلَ أوّلِ خطوةٍ، فلا يَبلُغُها فحصٌ.
 - وظيفةُ الفحصِ الكاملِ `needs: preflight`، فآلةٌ ناقصةٌ لا تُشغِّلُها؛ وتقريرُ البوّابتَينِ يُسمّي سقوطَ الفحصِ المُسبَقِ.
-- ويُشغَّلُ محلّيّاً بالأمرِ نفسِه: `bash scripts/runner-preflight.sh`.
+- ويُشغَّلُ محلّيّاً بالأمرِ نفسِه: `bash scripts/runner-preflight.sh`. و`RUNNER_OS_RELEASE_FILE` يُبدِّلُ مسارَ `/etc/os-release` للاختبارِ وحدَه.
 
 ## حدودٌ مُعلَنةٌ
 
