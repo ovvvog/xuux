@@ -12,8 +12,10 @@
 #
 # المرجعُ المكتوبُ لكلِّ متطلَّبٍ: `docs/RUNNER_PROVISIONING.md`.
 #
-# **حدٌّ مُعلَنٌ:** إصدارُ نظامِ التشغيلِ يُطبَعُ ولا يُفرَضُ؛ فقبولُ Ubuntu 24.04
-# أو الترقيةُ إلى 26.04 قرارُ المالكِ في `LIVE-18`، لا قرارُ هذا النصِّ.
+# **نظامُ التشغيلِ شرطٌ مُقرَّرٌ لا معلومةٌ:** قضى المالكُ في `LIVE-18` (`WL-263`) بأنّ
+# Ubuntu 24.04 هو البيئةُ المستهدفةُ للعدّاءِ؛ فغيرُه يَسقُطُ بـ`RUNNER_OS_MISMATCH`.
+# وتغييرُ الهدفِ قرارُ مالكٍ يُعدَّلُ له هذا الفحصُ و`docs/RUNNER_PROVISIONING.md` معاً.
+# `RUNNER_OS_RELEASE_FILE` يُبدِّلُ مسارَ `/etc/os-release` للاختبارِ وحدَه.
 
 set -u
 
@@ -90,12 +92,26 @@ else
   ok 'أدواتُ الخطواتِ — git · curl · tar · sha256sum · timeout'
 fi
 
-# ── معلومةٌ لا شرطٌ: النظامُ والنواةُ (قرارُ `LIVE-18` للمالكِ) ──
+# ── P6 — نظامُ التشغيلِ: Ubuntu 24.04 هدفٌ مُقرَّرٌ (`LIVE-18` · `WL-263`) ──
+TARGET_OS_ID='ubuntu'
+TARGET_OS_VERSION='24.04'
+os_file="${RUNNER_OS_RELEASE_FILE:-/etc/os-release}"
+os_id=""
+os_version=""
 os_name="غيرُ معروفٍ"
-if [[ -r /etc/os-release ]]; then
-  os_name="$(. /etc/os-release && echo "${PRETTY_NAME:-غيرُ معروفٍ}")"
+if [[ -r "$os_file" ]]; then
+  os_id="$(. "$os_file" && echo "${ID:-}")"
+  os_version="$(. "$os_file" && echo "${VERSION_ID:-}")"
+  os_name="$(. "$os_file" && echo "${PRETTY_NAME:-غيرُ معروفٍ}")"
 fi
-info="النظامُ: ${os_name} · النواةُ: $(uname -r) — يُطبَعُ ولا يُفرَضُ (قرارُ LIVE-18 للمالكِ)"
+if [[ "$os_id" == "$TARGET_OS_ID" && "$os_version" == "$TARGET_OS_VERSION" ]]; then
+  ok "النظامُ — ${os_name} (الهدفُ المُقرَّرُ Ubuntu ${TARGET_OS_VERSION})"
+else
+  missing 'RUNNER_OS_MISMATCH' "النظامُ ${os_name} (ID=${os_id:-؟} VERSION_ID=${os_version:-؟}) والهدفُ المُقرَّرُ Ubuntu ${TARGET_OS_VERSION} (LIVE-18 · WL-263). أعِدْ تجهيزَ العدّاءِ على Ubuntu ${TARGET_OS_VERSION}؛ وتغييرُ الهدفِ قرارُ المالكِ."
+fi
+
+# ── معلومةٌ لا شرطٌ: النواةُ ──
+info="النواةُ: $(uname -r) — تُطبَعُ ولا تُشترَطُ"
 echo "ℹ ${info}"
 
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
