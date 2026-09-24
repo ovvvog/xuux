@@ -298,6 +298,15 @@ jobs:
             echo "${skips:-(none)}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # LIVE-17/SKIP-NO-REASON: تخطٍّ بلا سببٍ لا يُفرِّقُ قارئُ الأثرِ بينَ غيابِ بيئةٍ
+          # مشروعٍ وبينَ تعطيلٍ صامتٍ؛ فيُسقِطُ الخطوةَ بعدَ كتابةِ الخلاصةِ ليُرفَعَ الأثرُ.
+          bare=$(grep -cE '# SKIP[[:space:]]*$' "$TAP" || true)
+          echo "bare_skips: ${bare}" >> "$OUT"
+          if [ "${bare}" != "0" ]; then
+            grep -E '# SKIP[[:space:]]*$' "$TAP" >&2
+            echo "::error::CI_TAP_BARE_SKIP: ${bare} تخطٍّ بلا سببٍ مكتوبٍ في TAP." >&2
+            exit 1
+          fi
 
       - name: رفع مُخرَج TAP وخلاصته أثراً (LIVE-17)
         if: always() && steps.tests.outcome != 'skipped'

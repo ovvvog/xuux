@@ -77,8 +77,14 @@ after(async () => {
   if (tokenDir) rmSync(tokenDir, { recursive: true, force: true });
 });
 
-const skip = !ENABLED || !softhsmAvailable();
-const it = skip ? test.skip : test;
+// `LIVE-17/SKIP-NO-REASON`: التخطّي يَحملُ سببَه في TAP، فلا يَلتبِسُ غيابُ
+// بيئةٍ مشروعٌ بتعطيلٍ صامتٍ. ولا يَذكرُ `DATABASE_URL` لأنّ الحاجزَ يَنسِبُ به.
+const skipReason = !ENABLED
+  ? 'XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI'
+  : !softhsmAvailable()
+    ? `XUUX_HSM_TEST=1 مُعلَنٌ و softhsm2-util أو الموديولُ غائبٌ: ${MODULE}`
+    : false;
+const it = skipReason ? (name, fn) => test(name, { skip: skipReason }, fn) : test;
 
 describe('Pkcs11HsmProvider', () => {
   describe('فشلٌ مغلق عند غياب المكتبة/التوكن', () => {
