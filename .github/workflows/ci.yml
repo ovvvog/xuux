@@ -231,8 +231,15 @@ jobs:
       - name: جرد /tmp قبل الاختبارات (مرجعُ المقايسة)
         run: ls -A /tmp | LC_ALL=C sort > /tmp/.xuux-tmp-before.txt && wc -l < /tmp/.xuux-tmp-before.txt
 
+      # مصدرُ الأعدادِ (‏`LIVE-17` / `WL-257`): سجلُّ هذه الوظيفةِ **لا يُرفَعُ إلى
+      # GitHub** على العدّاءِ `xuux-ci-linux` (‏`BlobNotFound` مقيسٌ في ثلاثِ تشغيلاتٍ)،
+      # فأعدادُ الاختباراتِ كانت غيرَ مقيسةٍ من CI. فيُنسَخُ مُخرَجُ TAP إلى ملفٍّ
+      # ويُرفَعُ أثراً — **مصدرٌ لا يتعلّقُ برفعِ السجلِّ**. و`shell: bash` يُفعِّلُ
+      # `-eo pipefail` فرمزُ الخطوةِ رمزُ `npm test` لا رمزُ `tee`.
       - name: الاختبارات
-        run: npm test
+        id: tests
+        shell: bash
+        run: npm test | tee "$RUNNER_TEMP/ci-tests.tap"
       # يُقايَسُ الجردُ بعدَ الاختباراتِ بما قبلَها. **يَسقُطُ** إن بقيَ جديدٌ:
       # الجذورُ صارَت مُدبَّرةَ المحوِ في كلِّ موضعِ إنشاءٍ (`43` موضعاً في `29`
       # ملفّاً، `WL-219`)، فبقاءُ جديدٍ **عَطَبٌ لا ضجيجٌ**. و`.xuux-tmp-*`
@@ -251,6 +258,57 @@ jobs:
             exit 1
           fi
           echo "لا جذرٌ باقٍ — نظافةٌ مقيسةٌ سلوكاً لا نصّاً وحدَه."
+
+      # الخلاصةُ **حاسمةٌ عند الغيابِ**: ملفٌّ فارغٌ أو TAP بلا مُلخَّصٍ ختاميٍّ يُسقِطُ
+      # الخطوةَ ولا يُكتَبُ عددٌ لم يُقَسْ. وتُشغَّلُ ولو سقطَت الاختباراتُ — فعددُ
+      # السقوطِ هو أحوجُ ما يُقرأُ.
+      - name: خلاصة أعداد الاختبارات (LIVE-17) — عددٌ مقروءٌ لا يتعلّق برفع السجلّ
+        if: always() && steps.tests.outcome != 'skipped'
+        shell: bash
+        run: |
+          TAP="$RUNNER_TEMP/ci-tests.tap"
+          OUT="$RUNNER_TEMP/ci-tests-summary.txt"
+          if [ ! -s "$TAP" ]; then
+            echo "::error::CI_TAP_MISSING: لا مُخرَجَ TAP من خطوة الاختبارات." >&2
+            exit 1
+          fi
+          summary=$(grep -E '^# (tests|suites|pass|fail|cancelled|skipped|todo|duration_ms) ' "$TAP" || true)
+          if [ -z "$summary" ]; then
+            echo "::error::CI_TAP_INCOMPLETE: لا مُلخَّصَ ختاميّاً في TAP." >&2
+            exit 1
+          fi
+          skips=$(grep -E '# SKIP' "$TAP" | grep -E '^[[:space:]]*ok [0-9]+ ' || true)
+          {
+            echo "tests_outcome: ${{ steps.tests.outcome }}"
+            echo "$summary"
+            echo "--- SKIP ---"
+            echo "${skips:-(none)}"
+          } > "$OUT"
+          cat "$OUT"
+          {
+            echo "### أعداد الاختبارات — \`${{ steps.tests.outcome }}\`"
+            echo ""
+            echo '```'
+            echo "$summary"
+            echo '```'
+            echo ""
+            echo "#### التخطّيات وأسبابها"
+            echo ""
+            echo '```'
+            echo "${skips:-(none)}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: رفع مُخرَج TAP وخلاصته أثراً (LIVE-17)
+        if: always() && steps.tests.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-tests-tap
+          path: |
+            ${{ runner.temp }}/ci-tests.tap
+            ${{ runner.temp }}/ci-tests-summary.txt
+          retention-days: 14
+          if-no-files-found: error
 
       - name: التحقق من البذرة (المخططات + تماسك العدّادات)
         run: npm run validate:seed

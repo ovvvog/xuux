@@ -67,3 +67,43 @@ test('الاختبارات وفحوص الأنواع والأسلوب باقية
     assert.ok(workflow.includes(command), `الخطوة ${command} غابت عن ci.yml`);
   }
 });
+
+// `LIVE-17` / `WL-257`: سجلُّ وظيفةِ الفحصِ لا يُرفَعُ على العدّاءِ المقيمِ، فأعدادُ
+// الاختباراتِ تُقرأُ من أثرٍ لا من السجلِّ. ويُقاسُ هنا **بنيةُ** المصدرِ: خطوةُ
+// الاختباراتِ تَنسَخُ TAP بـ`pipefail` فلا يُخفي `tee` سقوطاً، والخلاصةُ حاسمةٌ عند
+// الغيابِ، والأثرُ يُرفَعُ ولو سقطَت الاختباراتُ. **وحدٌّ معلَنٌ:** صحّةُ الأعدادِ
+// نفسِها تُقاسُ بقراءةِ الأثرِ من تشغيلةٍ على `main`، لا بهذا الاختبارِ.
+test('LIVE-17 — أعدادُ الاختباراتِ أثرٌ مرفوعٌ لا يتعلّقُ برفعِ السجلِّ', async () => {
+  const { parse } = await import('yaml');
+  /** @type {Array<Record<string, any>>} */
+  const steps = parse(workflow).jobs.validate.steps;
+  const i = steps.findIndex((s) => s.id === 'tests');
+  assert.ok(i > -1, 'خطوةُ الاختباراتِ مُعرَّفةٌ بـ`id: tests`.');
+  const run = steps[i] ?? {};
+  assert.equal(
+    run.shell,
+    'bash',
+    '`shell: bash` يُفعِّلُ `-eo pipefail` فرمزُ الخطوةِ رمزُ `npm test`.',
+  );
+  assert.match(String(run.run), /^npm test \| tee "\$RUNNER_TEMP\/ci-tests\.tap"$/);
+
+  const summary = steps.find((s) => String(s.name).startsWith('خلاصة أعداد الاختبارات (LIVE-17)'));
+  assert.ok(summary, 'خطوةُ الخلاصةِ قائمةٌ.');
+  assert.ok(steps.indexOf(summary) > i, 'الخلاصةُ بعدَ الاختباراتِ.');
+  assert.match(String(summary.if), /always\(\)/, 'تُشغَّلُ ولو سقطَت الاختباراتُ.');
+  assert.match(String(summary.run), /CI_TAP_MISSING/);
+  assert.match(String(summary.run), /CI_TAP_INCOMPLETE/);
+  assert.ok(!/\|\|\s*true\s*$/m.test(String(summary.run).split('\n').at(-1) ?? ''));
+  for (const key of ['tests', 'pass', 'fail', 'skipped']) {
+    assert.ok(String(summary.run).includes(key), `الخلاصةُ تقرأُ \`# ${key}\`.`);
+  }
+
+  const upload = steps.find((s) => String(s.uses ?? '').startsWith('actions/upload-artifact@'));
+  assert.ok(upload, 'الأثرُ يُرفَعُ.');
+  assert.ok(steps.indexOf(upload) > steps.indexOf(summary));
+  assert.match(String(upload.if), /always\(\)/);
+  assert.equal(upload.with.name, 'ci-tests-tap');
+  assert.equal(upload.with['if-no-files-found'], 'error', 'غيابُ الملفِّ يُسقِطُ لا يُسكِتُ.');
+  assert.match(String(upload.with.path), /ci-tests\.tap/);
+  assert.match(String(upload.with.path), /ci-tests-summary\.txt/);
+});
