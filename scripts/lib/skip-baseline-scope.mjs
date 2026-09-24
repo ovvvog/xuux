@@ -49,21 +49,13 @@ function git(root, args) {
 }
 
 /**
- * مساراتُ الاستثناءِ المُعلَنةُ — **تُقرأُ من YAML برنامجاً**.
+ * يُحلِّلُ نصَّ الإعلانِ ويَتحقَّقُ من شكلِهِ — مشترَكٌ بينَ القراءةِ من القرصِ ومن كوميتٍ.
  *
- * @param {string} root جذرٌ فيه `config/skip-baseline-scope.yaml`.
- * @returns {string[]} بادئاتُ الاستثناءِ كما أُعلِنَت.
- * @throws {Error} إن غابَ الإعلانُ أو لم يَكُنْ YAML صالحاً أو لم يَكُنْ شكلُهُ متوقَّعاً.
+ * @param {string} text
+ * @returns {string[]}
+ * @throws {Error} إن لم يَكُنْ YAML صالحاً أو لم يَكُنْ شكلُهُ متوقَّعاً.
  */
-export function loadScopeExclusions(root) {
-  const configPath = path.join(root, SCOPE_CONFIG);
-  /** @type {string} */
-  let text;
-  try {
-    text = readFileSync(configPath, 'utf8');
-  } catch {
-    throw new Error(`SCOPE_CONFIG_MISSING: لا يمكنُ قراءةُ ${SCOPE_CONFIG} في ${root}.`);
-  }
+function parseScopeExclusions(text) {
   /** @type {unknown} */
   let parsed;
   try {
@@ -82,14 +74,67 @@ export function loadScopeExclusions(root) {
 }
 
 /**
- * هل المسارُ مُستثنىً من النطاقِ؟ — مطابقةُ بادئةٍ على المسارِ كما هوَ على القرصِ.
+ * مساراتُ الاستثناءِ المُعلَنةُ على القرصِ — **تُقرأُ من YAML برنامجاً**.
+ *
+ * @param {string} root جذرٌ فيه `config/skip-baseline-scope.yaml`.
+ * @returns {string[]} مُدخلاتُ الاستثناءِ كما أُعلِنَت.
+ * @throws {Error} إن غابَ الإعلانُ أو لم يَكُنْ YAML صالحاً أو لم يَكُنْ شكلُهُ متوقَّعاً.
+ */
+export function loadScopeExclusions(root) {
+  const configPath = path.join(root, SCOPE_CONFIG);
+  /** @type {string} */
+  let text;
+  try {
+    text = readFileSync(configPath, 'utf8');
+  } catch {
+    throw new Error(`SCOPE_CONFIG_MISSING: لا يمكنُ قراءةُ ${SCOPE_CONFIG} في ${root}.`);
+  }
+  return parseScopeExclusions(text);
+}
+
+/**
+ * مساراتُ الاستثناءِ كما هيَ **في الكوميتِ نفسِهِ** لا في الشجرةِ العاملةِ.
+ *
+ * **علّةُ وجودِها عَطَبٌ قِيسَ (‏`OPS-1/SCOPE-BLIND` · `WL-265`):** الحاجزُ على فرعٍ
+ * يَحتوي `main` يَحسُبُ بصمةَ شجرةِ `main` — وكانَ يَحسُبُها **بإعلانِ الفرعِ**.
+ * فطلبٌ يُعدِّلُ الإعلانَ جَعَلَ الحاجزَ يَقولُ إنَّ `main` متقادِمةٌ عن أثرِها
+ * (‏`ac8507fe…` مقابلَ `eef53caa…` على `63b257e6`) وهيَ مطابِقةٌ له — تشخيصٌ كاذبٌ
+ * يُرسِلُ المنفِّذَ إلى قياسٍ لا يَلزَمُ. **فبصمةُ كوميتٍ دالّةٌ في الكوميتِ وحدَهُ.**
+ *
+ * @param {string} root
+ * @param {string} commit
+ * @returns {string[]}
+ * @throws {Error} إن غابَ الإعلانُ عن الكوميتِ أو فَسَدَ.
+ */
+export function loadScopeExclusionsAt(root, commit) {
+  /** @type {string} */
+  let text;
+  try {
+    text = execFileSync('git', ['-C', root, 'show', `${commit}:${SCOPE_CONFIG}`], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    throw new Error(`SCOPE_CONFIG_MISSING: لا يُوجَدُ ${SCOPE_CONFIG} في الكوميتِ ${commit}.`);
+  }
+  return parseScopeExclusions(text);
+}
+
+/**
+ * هل المسارُ مُستثنىً من النطاقِ؟ — على المسارِ كما هوَ على القرصِ.
+ *
+ * **مُدخلةٌ تَنتهي بـ`/` بادئةُ مجلَّدٍ، وغيرُها مطابقةٌ تامّةٌ لا بادئةٌ**
+ * (‏`OPS-1/SCOPE-BLIND` · `WL-265`): مطابقةُ البادئةِ على اسمِ ملفٍّ تَستثني
+ * `PROJECT_STATUS.md.bak` معَ `PROJECT_STATUS.md` — بقعةٌ عمياءُ لم يُعلِنْها أحدٌ.
  *
  * @param {string} filePath
  * @param {string[]} exclusions
  * @returns {boolean}
  */
 export function isExcluded(filePath, exclusions) {
-  return exclusions.some((prefix) => filePath === prefix || filePath.startsWith(prefix));
+  return exclusions.some((entry) =>
+    entry.endsWith('/') ? filePath.startsWith(entry) : filePath === entry,
+  );
 }
 
 /**
@@ -97,11 +142,11 @@ export function isExcluded(filePath, exclusions) {
  *
  * @param {string} root
  * @param {string} commit مُعرِّفُ كوميتٍ أو شجرةٍ (‏`HEAD` مقبولٌ).
- * @param {string[]} [exclusions] يُقرَأُ من `root` إن لم يُعطَ.
+ * @param {string[]} [exclusions] يُقرَأُ **من الكوميتِ نفسِهِ** إن لم يُعطَ.
  * @returns {{ mode: string, type: string, object: string, path: string }[]} مرتَّبةً بايتيّاً بالمسارِ.
  */
 export function listScopeEntries(root, commit, exclusions) {
-  const excl = exclusions ?? loadScopeExclusions(root);
+  const excl = exclusions ?? loadScopeExclusionsAt(root, commit);
   const raw = git(root, ['ls-tree', '-r', '-z', commit]);
   /** @type {{ mode: string, type: string, object: string, path: string }[]} */
   const entries = [];
@@ -159,11 +204,11 @@ export function computeScopeDigest(root, commit, exclusions) {
  * @returns {string[]} مساراتٌ مرتَّبةٌ، مئةٌ كأقصى حدٍّ ثمَّ إشارةٌ إلى الباقي.
  */
 export function scopeDiff(root, commitA, commitB) {
-  const excl = loadScopeExclusions(root);
+  // كلُّ طرفٍ بإعلانِ كوميتِهِ — فمسارٌ خرجَ من الاستثناءِ أو دخلَهُ يَظهرُ `+`/`-`.
   /** @param {{ object: string, mode: string, path: string }[]} entries */
   const index = (entries) => new Map(entries.map((e) => [e.path, `${e.mode}:${e.object}`]));
-  const a = index(listScopeEntries(root, commitA, excl));
-  const b = index(listScopeEntries(root, commitB, excl));
+  const a = index(listScopeEntries(root, commitA));
+  const b = index(listScopeEntries(root, commitB));
   /** @type {string[]} */
   const differing = [];
   for (const [filePath, signature] of a) {

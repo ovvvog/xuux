@@ -21,6 +21,7 @@ import {
   computeScopeDigest,
   listScopeEntries,
   loadScopeExclusions,
+  loadScopeExclusionsAt,
   isExcluded,
   scopeDiff,
   listTreePathsQuoted,
@@ -31,6 +32,22 @@ import {
 function makeRoot() {
   return registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'xuux-scope-')));
 }
+
+const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
+
+/**
+ * الإعلانُ المُقيَّدُ — **مكتوبٌ هنا نصّاً لا مقروءاً**، فأيُّ تعديلٍ على
+ * `config/skip-baseline-scope.yaml` يُسقِطُ `و١١` حتّى يُعدَّلَ هذا معَهُ عمداً.
+ */
+const REPO_EXCLUSIONS = [
+  'PROJECT_STATUS.md',
+  'docs/READINESS_REPORT.md',
+  'docs/external-review/M11.05-round-1-plan.md',
+  'docs/external-review/M11.06-round-2-plan.md',
+  'docs/external-review/skip-baseline.json',
+  'docs/roadmap/05-work-log.md',
+  'docs/roadmap/06-debt-register.md',
+];
 
 test('و١ — البصمةُ حتميّةٌ: نداءانِ على الكوميتِ نفسِهِ يُعطيانِ بصمةً واحدةً', () => {
   const dir = makeRoot();
@@ -70,7 +87,7 @@ test('و٢ج — إعادةُ تسميةٍ بلا تغييرِ محتوىً تُ
   assert.notEqual(computeScopeDigest(dir, before), computeScopeDigest(dir, after));
 });
 
-test('و٣ — تغييرُ ملفٍّ تحتَ `docs/` **لا** يُبدِّلُ البصمةَ — الاستثناءُ المُعلَنُ نافذٌ', () => {
+test('و٣ — تغييرُ ملفِّ مُحاسَبةٍ تحتَ `docs/` **لا** يُبدِّلُ البصمةَ — الاستثناءُ المُعلَنُ نافذٌ', () => {
   const dir = makeRoot();
   const before = initFixtureRepo(dir);
   const after = commitFiles(dir, {
@@ -150,12 +167,16 @@ test('و٦ — مجلَّدٌ جديدٌ غيرُ مُستثنىً يَدخُل�
   assert.ok(listScopeEntries(dir, after).some((e) => e.path === 'engines/جديد/ملف.mjs'));
 });
 
-test('و٧ — طفرةٌ: نزعُ `docs/` من الاستثناءِ يُدخِلُها النطاقَ فتُبدِّلُ البصمةَ', () => {
+test('و٧ — طفرةٌ: نزعُ سجلِّ الأعمالِ من الاستثناءِ يُدخِلُهُ النطاقَ فتُبدِّلُ البصمةَ', () => {
   const dir = makeRoot();
   initFixtureRepo(dir);
   const sha = commitFiles(dir, { 'docs/roadmap/05-work-log.md': '## WL-999\n' });
   const declared = computeScopeDigest(dir, sha);
-  const mutated = computeScopeDigest(dir, sha, ['PROJECT_STATUS.md']);
+  const mutated = computeScopeDigest(
+    dir,
+    sha,
+    loadScopeExclusions(dir).filter((e) => e !== 'docs/roadmap/05-work-log.md'),
+  );
   assert.notEqual(
     declared,
     mutated,
@@ -166,7 +187,7 @@ test('و٧ — طفرةٌ: نزعُ `docs/` من الاستثناءِ يُدخِ
 test('و٨ — الإعلانُ يُقرأُ YAML برنامجاً، ويَسقُطُ برمزٍ مُسمَّىً إن غابَ أو فَسَدَ', () => {
   const dir = makeRoot();
   initFixtureRepo(dir);
-  assert.deepEqual(loadScopeExclusions(dir), ['docs/', 'PROJECT_STATUS.md']);
+  assert.deepEqual(loadScopeExclusions(dir), REPO_EXCLUSIONS);
 
   const broken = makeRoot();
   initFixtureRepo(broken, { scopeYaml: 'version: 1\nnonScope: "ليسَ قائمةً"\n' });
@@ -179,11 +200,14 @@ test('و٨ — الإعلانُ يُقرأُ YAML برنامجاً، ويَسق�
 });
 
 test('و٩ — `isExcluded` يُطابِقُ البادئةَ والمسارَ التامَّ ولا يُطابِقُ ما شابَهَ', () => {
-  const exclusions = ['docs/', 'PROJECT_STATUS.md'];
-  assert.equal(isExcluded('docs/roadmap/05-work-log.md', exclusions), true);
+  const exclusions = ['vendor/', 'PROJECT_STATUS.md'];
+  assert.equal(isExcluded('vendor/lib/a.mjs', exclusions), true, 'مُدخلةٌ بـ`/` بادئةُ مجلَّدٍ');
   assert.equal(isExcluded('PROJECT_STATUS.md', exclusions), true);
-  assert.equal(isExcluded('src/docs/readme.md', exclusions), false);
+  assert.equal(isExcluded('src/vendor/readme.md', exclusions), false);
   assert.equal(isExcluded('scripts/core.mjs', exclusions), false);
+  // مطابقةٌ تامّةٌ لا بادئةٌ لمُدخلةِ ملفٍّ (‏`WL-265`): البادئةُ كانت تَستثني هذينِ صامتةً.
+  assert.equal(isExcluded('PROJECT_STATUS.md.bak', exclusions), false);
+  assert.equal(isExcluded('PROJECT_STATUS.mdx/a', exclusions), false);
 });
 
 test('و١٠ — `scopeDiff` يُسمّي ما اختلفَ: هذا ما يُطبَعُ عندَ الرفضِ فلا يُخمَّنُ', () => {
@@ -192,7 +216,7 @@ test('و١٠ — `scopeDiff` يُسمّي ما اختلفَ: هذا ما يُط�
   const after = commitFiles(dir, {
     'src/core.mjs': 'export const value = 9;\n',
     'src/new.mjs': 'export const n = 1;\n',
-    'docs/ignored.md': 'لا يَظهرُ\n',
+    'docs/roadmap/05-work-log.md': '## WL-999\nلا يَظهرُ\n',
   });
   const diff = scopeDiff(dir, before, after);
   assert.ok(diff.includes('~ src/core.mjs'), JSON.stringify(diff));
@@ -203,15 +227,98 @@ test('و١٠ — `scopeDiff` يُسمّي ما اختلفَ: هذا ما يُط�
   );
 });
 
-test('و١١ — المستودَعُ الحقيقيُّ: الإعلانُ المُقيَّدُ هوَ `docs/` و`PROJECT_STATUS.md` وحدَهما', () => {
+test('و١١ — المستودَعُ الحقيقيُّ: الإعلانُ المُقيَّدُ ملفّاتُ المُحاسَبةِ السبعةُ وحدَها', () => {
   // قياسٌ على المستودَعِ نفسِهِ لا على جذرٍ مصنوعٍ: كلُّ مسارٍ يُضافُ إلى
   // الاستثناءِ بقعةٌ عمياءُ، فالتوسيعُ يجبُ أن يُسقِطَ اختباراً لا أن يَمُرَّ.
-  const repoRoot = path.resolve(import.meta.dirname, '..', '..');
-  assert.deepEqual(loadScopeExclusions(repoRoot), ['docs/', 'PROJECT_STATUS.md']);
+  assert.deepEqual(loadScopeExclusions(REPO_ROOT), REPO_EXCLUSIONS);
 });
 
 test('و١٢ — جذرٌ بلا `git` يَرمي ولا يُعيدُ بصمةً كاذبةً', () => {
   const dir = makeRoot();
   writeFile(dir, 'config/skip-baseline-scope.yaml', 'version: 1\nnonScope: []\n');
   assert.throws(() => computeScopeDigest(dir, 'HEAD'));
+});
+
+// ── `OPS-1/SCOPE-BLIND` · `WL-265`: وثيقةٌ مُعلَنةٌ تُبدِّلُ البصمةَ وسجلٌّ لا يُبدِّلُها ──
+
+test('و١٣ — معيارُ الإغلاقِ: تغييرُ وثيقةٍ تَقرأُها الاختباراتُ يُبدِّلُ البصمةَ، وتغييرُ سجلٍّ لا يُبدِّلُها', () => {
+  // الجذرُ المصنوعُ يَحمِلُ إعلانَ المستودعِ نفسَهُ (‏`DEFAULT_SCOPE_YAML` مقروءٌ منه).
+  const dir = makeRoot();
+  const base = initFixtureRepo(dir, {
+    extraFiles: {
+      'docs/ROOT_OF_TRUST.md': '# جذرُ الثقةِ\n',
+      'docs/roadmap/05-work-log.md': '## WL-001\n',
+    },
+  });
+  // وثائقُ تَقرأُها اختباراتٌ فعلاً — كانت خارجَ البصمةِ حينَ كانَ `docs/` كلُّهُ مُستثنىً.
+  /** @type {[string, string][]} */
+  const declaredDocs = [
+    ['docs/ROOT_OF_TRUST.md', '# جذرُ الثقةِ — مُعدَّلٌ\n'],
+    ['docs/adr/0099-new.md', '# قرارٌ جديدٌ\n'],
+    ['docs/API_CONTRACT.json', '{}\n'],
+  ];
+  for (const [rel, body] of declaredDocs) {
+    const d = makeRoot();
+    const before = initFixtureRepo(d, {
+      extraFiles: { 'docs/ROOT_OF_TRUST.md': '# جذرُ الثقةِ\n' },
+    });
+    const after = commitFiles(d, { [rel]: body });
+    assert.notEqual(
+      computeScopeDigest(d, before),
+      computeScopeDigest(d, after),
+      `${rel} وثيقةٌ لا سجلٌّ — تغييرُها يجبُ أن يُبدِّلَ البصمةَ، وإلا فهيَ البقعةُ العمياءُ نفسُها.`,
+    );
+  }
+  // وكلُّ ملفّاتِ المُحاسَبةِ السبعةِ معاً لا تُبدِّلُها — وإلا دارَ الأثرُ على نفسِهِ.
+  const after = commitFiles(
+    dir,
+    Object.fromEntries(REPO_EXCLUSIONS.map((rel) => [rel, `مُحاسَبةٌ بعدَ الدفعةِ: ${rel}\n`])),
+  );
+  assert.equal(computeScopeDigest(dir, base), computeScopeDigest(dir, after));
+});
+
+test('و١٤ — الإعلانُ على المستودَعِ: لا مجلَّدَ فيهِ، وكلُّ مُدخلةٍ تُسمّي ملفّاً متعقَّباً', () => {
+  const tracked = new Set(
+    git(REPO_ROOT, ['-c', 'core.quotePath=false', 'ls-files', '-z']).split('\0'),
+  );
+  for (const entry of loadScopeExclusions(REPO_ROOT)) {
+    assert.ok(
+      !entry.endsWith('/'),
+      `${entry}: مجلَّدٌ في الإعلانِ يَستثني كلَّ ما يُضافُ تحتَهُ صامتاً — وذاكَ عينُ SCOPE-BLIND.`,
+    );
+    assert.ok(
+      tracked.has(entry),
+      `${entry}: مُدخلةٌ لا تُسمّي ملفّاً متعقَّباً — استثناءٌ ميّتٌ يَستُرُ بقعةً إن عادَ الاسمُ.`,
+    );
+  }
+});
+
+test('و١٥ — بصمةُ كوميتٍ دالّةٌ فيه وحدَهُ: تُقرَأُ بإعلانِ الكوميتِ لا بإعلانِ الشجرةِ العاملةِ', () => {
+  const dir = makeRoot();
+  const before = initFixtureRepo(dir, { extraFiles: { 'docs/guide.md': '# دليلٌ\n' } });
+  const digestBefore = computeScopeDigest(dir, before);
+  // كوميتٌ لاحقٌ يُوسِّعُ الإعلانَ — ويجبُ ألّا يُغيِّرَ بصمةَ الكوميتِ السابقِ.
+  commitFiles(dir, {
+    'config/skip-baseline-scope.yaml': 'version: 1\nnonScope:\n  - docs/\n',
+  });
+  assert.deepEqual(
+    loadScopeExclusions(dir),
+    ['docs/'],
+    'الشجرةُ العاملةُ تَحمِلُ الإعلانَ الجديدَ',
+  );
+  assert.notDeepEqual(
+    loadScopeExclusionsAt(dir, before),
+    ['docs/'],
+    'والكوميتُ السابقُ يَحمِلُ إعلانَهُ',
+  );
+  assert.equal(
+    computeScopeDigest(dir, before),
+    digestBefore,
+    'بصمةُ كوميتٍ تَتغيَّرُ بإعلانِ فرعٍ لاحقٍ = تشخيصٌ كاذبٌ بتقادُمِ `main` (‏مقيسٌ في WL-265).',
+  );
+  // وكوميتٌ بلا إعلانٍ يَرمي برمزٍ مُسمَّىً لا يُعيدُ بصمةً على إعلانٍ مُستعارٍ.
+  const bare = makeRoot();
+  initFixtureRepo(bare);
+  const noConfig = removeAndCommit(bare, SCOPE_CONFIG);
+  assert.throws(() => loadScopeExclusionsAt(bare, noConfig), /SCOPE_CONFIG_MISSING/);
 });

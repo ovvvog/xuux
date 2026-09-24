@@ -13,7 +13,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 /**
@@ -30,8 +30,15 @@ export function git(dir, args) {
   });
 }
 
-/** إعلانُ النطاقِ الافتراضيُّ في الجذورِ المصنوعةِ — نسخةُ عقدِ المستودعِ. */
-export const DEFAULT_SCOPE_YAML = 'version: 1\nnonScope:\n  - docs/\n  - PROJECT_STATUS.md\n';
+/**
+ * إعلانُ النطاقِ الافتراضيُّ في الجذورِ المصنوعةِ — **عقدُ المستودعِ نفسُهُ مقروءاً
+ * لا نسخةً منسوخةً**: نسخةٌ يدويّةٌ تَنحرِفُ عن الأصلِ فتَختبِرُ الجذورُ المصنوعةُ
+ * عقداً لم يَعُدْ قائماً (‏`OPS-1/SCOPE-BLIND` · `WL-265`).
+ */
+export const DEFAULT_SCOPE_YAML = readFileSync(
+  path.resolve(import.meta.dirname, '..', '..', 'config', 'skip-baseline-scope.yaml'),
+  'utf8',
+);
 
 /**
  * يُنشئُ مستودَعاً صغيراً فيه عقدُ نطاقٍ وخطّةُ مراجعةٍ وملفُّ مصدرٍ وملفُّ اختبارٍ.
