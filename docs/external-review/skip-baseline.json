@@ -5,14 +5,14 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "3003cf471769c8e282c79262942b89334d8be177",
-      "mainHeadAtMeasure": "3003cf471769c8e282c79262942b89334d8be177",
-      "scopeDigest": "d121d5de5e919f53500869f994ec3633874e2ff67e9a303e44757b64e6b49fe1",
+      "commit": "6162625307c959c43a809624371d7fa566aefe1a",
+      "mainHeadAtMeasure": "6162625307c959c43a809624371d7fa566aefe1a",
+      "scopeDigest": "7cb92fde7d425d0498de7efda3a0ec6cd3e243c443ed66af0ac27ff5506f4f13",
       "measuredOn": "2026-09-24",
       "verdict": "self-stale-only",
       "testFileCount": 222,
-      "tests": 2263,
-      "pass": 2136,
+      "tests": 2264,
+      "pass": 2137,
       "fail": 1,
       "skipped": 126,
       "skipLines": 128,
@@ -22,6 +22,18 @@
         {
           "reason": "swtpm/XUUX_TPM_SIM unavailable",
           "count": 25
+        },
+        {
+          "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
+          "count": 5
+        },
+        {
+          "reason": "XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI",
+          "count": 2
+        },
+        {
+          "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — المسارُ الإنتاجيُّ على توكنٍ حقيقيٍّ محلّيٌّ لا CI",
+          "count": 2
         },
         {
           "reason": "متغيّراتٌ بيئيّةٌ غائبةٌ — الاختبارُ الخارجيُّ يتخطّى لا يفشل، لكنّ الدَّينَ لا يُغلَق",
@@ -37,14 +49,14 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "3003cf471769c8e282c79262942b89334d8be177",
-      "mainHeadAtMeasure": "3003cf471769c8e282c79262942b89334d8be177",
-      "scopeDigest": "d121d5de5e919f53500869f994ec3633874e2ff67e9a303e44757b64e6b49fe1",
+      "commit": "6162625307c959c43a809624371d7fa566aefe1a",
+      "mainHeadAtMeasure": "6162625307c959c43a809624371d7fa566aefe1a",
+      "scopeDigest": "7cb92fde7d425d0498de7efda3a0ec6cd3e243c443ed66af0ac27ff5506f4f13",
       "measuredOn": "2026-09-24",
       "verdict": "self-stale-only",
       "testFileCount": 222,
-      "tests": 2263,
-      "pass": 2136,
+      "tests": 2264,
+      "pass": 2137,
       "fail": 1,
       "skipped": 126,
       "skipLines": 128,
@@ -54,6 +66,18 @@
         {
           "reason": "swtpm/XUUX_TPM_SIM unavailable",
           "count": 25
+        },
+        {
+          "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
+          "count": 5
+        },
+        {
+          "reason": "XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI",
+          "count": 2
+        },
+        {
+          "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — المسارُ الإنتاجيُّ على توكنٍ حقيقيٍّ محلّيٌّ لا CI",
+          "count": 2
         },
         {
           "reason": "متغيّراتٌ بيئيّةٌ غائبةٌ — الاختبارُ الخارجيُّ يتخطّى لا يفشل، لكنّ الدَّينَ لا يُغلَق",
