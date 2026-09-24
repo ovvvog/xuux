@@ -30,6 +30,8 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const channelDir = join(__dirname, '../../sim/channel');
 const pocLive = process.env.XUUX_CHANNEL_POC === '1';
+// `LIVE-17/SKIP-NO-REASON`: التخطّي يَحملُ سببَه في TAP.
+const pocSkip = pocLive ? false : 'XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI';
 
 // ----------------------------------------------------------- سياسة الربط
 
@@ -194,7 +196,7 @@ print(vs.frame(b'py-side-parity-check', 99).hex())`,
 
 // ----------------------------------------------------------- اختبارات حية (خلف بوابة)
 
-test('live (XUUX_CHANNEL_POC=1): مستجيب/عميل TCP على loopback مع رفض malformed', { skip: !pocLive }, async () => {
+test('live (XUUX_CHANNEL_POC=1): مستجيب/عميل TCP على loopback مع رفض malformed', { skip: pocSkip }, async () => {
   const { spawn } = await import('node:child_process');
   const port = 47910 + (process.pid % 500);
   const resp = spawn('node', [
@@ -228,7 +230,7 @@ s.sendall(b'\\x00\\x01garbage'); time.sleep(0.3); s.close()`], { encoding: 'utf8
   }
 });
 
-test('live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع تقريراً منظماً', { skip: !pocLive }, async () => {
+test('live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع تقريراً منظماً', { skip: pocSkip }, async () => {
   const out = spawnSync('python3', [join(channelDir, 'vsock_probe_wsl.py')], {
     encoding: 'utf8', timeout: 35000,
   });

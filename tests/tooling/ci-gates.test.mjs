@@ -107,3 +107,55 @@ test('LIVE-17 — أعدادُ الاختباراتِ أثرٌ مرفوعٌ لا
   assert.match(String(upload.with.path), /ci-tests\.tap/);
   assert.match(String(upload.with.path), /ci-tests-summary\.txt/);
 });
+
+// `LIVE-17/SKIP-NO-REASON` / `WL-259`: أوّلُ قراءةٍ للأثرِ كشفَت 9 تخطّياتٍ بلا سببٍ.
+// ويُقاسُ هنا **السلوكُ** لا النصُّ: تُشغَّلُ خطوةُ الخلاصةِ نفسُها على TAP مُصطنَعٍ،
+// فتخطٍّ عارٍ يُسقِطُها بـ`CI_TAP_BARE_SKIP` بعدَ كتابةِ الخلاصةِ، وتخطٍّ مُسبَّبٌ يَمُرُّ.
+test('LIVE-17/SKIP-NO-REASON — تخطٍّ بلا سببٍ في TAP يُسقِطُ خطوةَ الخلاصةِ', async () => {
+  const { parse } = await import('yaml');
+  const { mkdtempSync, writeFileSync, readFileSync: read, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  /** @type {Array<Record<string, any>>} */
+  const steps = parse(workflow).jobs.validate.steps;
+  const summary = steps.find((s) => String(s.name).startsWith('خلاصة أعداد الاختبارات (LIVE-17)'));
+  assert.ok(summary, 'خطوةُ الخلاصةِ قائمةٌ.');
+  const script = String(summary.run).replaceAll('${{ steps.tests.outcome }}', 'success');
+  const tail =
+    '# tests 2\n# suites 0\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 1\n# todo 0\n# duration_ms 1\n';
+  /** @param {string} skipLine */
+  const runWith = (skipLine) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'xuux-bare-skip-'));
+    try {
+      writeFileSync(
+        path.join(dir, 'ci-tests.tap'),
+        `TAP version 13\nok 1 - a\n${skipLine}\n1..2\n${tail}`,
+      );
+      writeFileSync(path.join(dir, 'summary.md'), '');
+      const r = spawnSync('bash', ['-eo', 'pipefail', '-c', script], {
+        env: {
+          ...process.env,
+          RUNNER_TEMP: dir,
+          GITHUB_STEP_SUMMARY: path.join(dir, 'summary.md'),
+        },
+        encoding: 'utf8',
+      });
+      return {
+        status: r.status,
+        stderr: r.stderr,
+        out: read(path.join(dir, 'ci-tests-summary.txt'), 'utf8'),
+      };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const bare = runWith('ok 2 - b # SKIP');
+  assert.equal(bare.status, 1, 'تخطٍّ عارٍ يُسقِطُ الخطوةَ.');
+  assert.match(bare.stderr, /CI_TAP_BARE_SKIP/);
+  assert.match(bare.out, /^bare_skips: 1$/m, 'الخلاصةُ مكتوبةٌ قبلَ السقوطِ فيُرفَعُ الأثرُ.');
+  const bareSpaces = runWith('    ok 2 - b # SKIP   ');
+  assert.equal(bareSpaces.status, 1, 'فراغٌ بعدَ `# SKIP` ليسَ سبباً.');
+  const reasoned = runWith('ok 2 - b # SKIP XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ');
+  assert.equal(reasoned.status, 0, `تخطٍّ مُسبَّبٌ يَمُرُّ: ${reasoned.stderr}`);
+  assert.match(reasoned.out, /^bare_skips: 0$/m);
+});
