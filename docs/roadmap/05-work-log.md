@@ -34,7 +34,7 @@
 
 - `.github/workflows/ci.yml` — خطوةُ الاختباراتِ وخطوتانِ جديدتانِ.
 - `tests/tooling/ci-gates.test.mjs` — اختبارُ `LIVE-17`.
-- `docs/roadmap/06-debt-register.md` — بندُ `LIVE-17`: المصدرُ مُنفَّذٌ والإغلاقُ معلَّقٌ.
+- `docs/roadmap/06-debt-register.md` — بندُ `LIVE-17`: المصدرُ مُنفَّذٌ والإغلاقُ معلَّقٌ؛ وبندٌ جديدٌ `LIVE-17/SKIP-NO-REASON`.
 - `PROJECT_STATUS.md` — سطرُ `WL-257`.
 
 #### الدليل
@@ -47,10 +47,14 @@
 | نصُّ الخلاصةِ على TAP فيه تخطٍّ | `exit=0` — `# tests 2`·`# pass 1`·`# skipped 1` وسطرُ السببِ |
 | نصُّ الخلاصةِ على ملفٍّ غائبٍ | `exit=1` — `CI_TAP_MISSING` |
 | `pipefail` معَ اختبارٍ ساقطٍ | `exit=1` |
+| **أثرُ `ci-tests-tap` من تشغيلةِ الطلبِ نفسِه** [`35941442844`](https://github.com/ovvvog/xuux/actions/runs/35941442844) (‏`GET actions/artifacts/10785332533/zip`) | `tests_outcome: success` · `# tests 2279` · `# suites 65` · `# pass 2243` · `# fail 0` · `# cancelled 0` · `# skipped 36` · `# todo 0` · 0 سطرِ `not ok` |
+| أسطرُ `# SKIP` في الخلاصةِ | 36 — مطابقةٌ لـ`# skipped` · **9 منها بلا سببٍ مكتوبٍ** |
+| `sha256` لـ`ci-tests.tap` | `bde74192b6e798b3a7cf8aa97cfb5da1c4626b25261e3c1039068aeac5da27b8` |
 | `guard:skip-baseline` على الفرعِ | `exit=0` — يُحاكِمُ شجرةَ `main` لا الفرعَ (`SCOPE/JUDGED-BASE`)، فانزياحُ النطاقِ يَظهرُ على `main` بعدَ الدمجِ |
 
 #### ما لم يتمَّ ولماذا
 
+- **اكتُشِفَ بالقياسِ ولا يُستَرُ:** 9 تخطّياتٍ من 36 بلا سببٍ في TAP (`# SKIP` عارٍ): 4 في اختباراتِ التشفيرِ (roundtrip·التلاعب·IV·عدم الاستخراج)، و`getSigningKey` بلا EdDSA، واثنانِ في HSM (‏`XUUX_HSM_TEST`)، واثنانِ `live (XUUX_CHANNEL_POC=1)`. فشقُّ «سببُ كلِّ تخطٍّ» من معيارِ `LIVE-17` **غيرُ مستوفىً**، وقُيِّدَ `LIVE-17/SKIP-NO-REASON`. وإصلاحُه كتابةُ السببِ في نداءِ `skip` داخلَ `tests/` — في النطاقِ فيَلزمُه دورةُ قياسٍ.
 - **`LIVE-17` لم يُغلَقْ:** معيارُه قراءةُ الأعدادِ **من أثرِ تشغيلةٍ على `main` بأمرٍ**، وهذا لا يقعُ إلا بعدَ الدمجِ.
 - **`ci.yml` و`tests/` داخلَ نطاقِ البصمةِ:** فبعدَ الدمجِ يَحمَرُّ `main` بـ`R7/SCOPE-DRIFT` حتّى تُدمَجَ دورةُ القياسِ والنشرِ (‏`OPS-1/MAIN-DRIFT-WINDOW`)، ويلزمُ فيها التدخُّلُ اليدويُّ المُعلَنُ لـ`OPS-1/BOT-PR-CI`.
 - **تشخيصُ سببِ فقدِ السجلِّ** من `~/actions-runner/_diag/Worker_*.log` على الآلةِ باقٍ على المالكِ.
