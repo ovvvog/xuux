@@ -30,9 +30,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # `LIVE-18` / `WL-261`: العدّاءُ المقيمُ يُجهَّزُ خارجَ المستودعِ، فلمّا أُعيدَ تسجيلُه
+  # على آلةٍ بلا تجهيزٍ سقطَت الوظيفةُ في «Set up job» بـ`docker: command not found`.
+  # فيُفحَصُ كلُّ متطلَّبٍ هنا ويُسمّى الغائبُ برمزِه وعلاجِه. **والوظيفةُ بلا
+  # `services:` قصداً**: غيابُ Docker يُسقِطُ الوظيفةَ ذاتَ الحاوياتِ قبلَ أوّلِ خطوةٍ.
+  preflight:
+    name: فحص العدّاء المسبق (LIVE-18)
+    runs-on: [self-hosted, linux-vm]
+    timeout-minutes: 5
+    steps:
+      - name: جلب المستودع
+        uses: actions/checkout@v4
+
+      - name: فحص متطلّبات العدّاء — docs/RUNNER_PROVISIONING.md
+        run: bash scripts/runner-preflight.sh
+
   validate:
     name: فحص الجودة الكامل
     runs-on: [self-hosted, linux-vm]
+    needs: preflight
     timeout-minutes: 30
 
     services:
@@ -478,11 +494,15 @@ jobs:
   gate-report:
     name: تقرير البوابتين G0 و G1
     runs-on: [self-hosted, linux-vm]
-    needs: validate
+    needs: [preflight, validate]
     if: always()
     steps:
       - name: خلاصة النتيجة
         run: |
+          if [ "${{ needs.preflight.result }}" != "success" ]; then
+            echo "### ⛔ فحص العدّاء المسبق: ${{ needs.preflight.result }} — متطلَّبٌ غائبٌ على الآلة (LIVE-18)" >> "$GITHUB_STEP_SUMMARY"
+            echo "انظر docs/RUNNER_PROVISIONING.md؛ والرمزُ في خلاصة وظيفة الفحص المسبق." >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ "${{ needs.validate.result }}" = "success" ]; then
             echo "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
           else
