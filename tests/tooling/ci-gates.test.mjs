@@ -159,3 +159,117 @@ test('LIVE-17/SKIP-NO-REASON — تخطٍّ بلا سببٍ في TAP يُسقِ�
   assert.equal(reasoned.status, 0, `تخطٍّ مُسبَّبٌ يَمُرُّ: ${reasoned.stderr}`);
   assert.match(reasoned.out, /^bare_skips: 0$/m);
 });
+
+// `LIVE-18` / `WL-261`: العدّاءُ أُعيدَ تجهيزُه بلا وصفٍ فسقطَت الوظيفةُ بـ`docker: command
+// not found`. ويُقاسُ هنا **سلوكُ** الفحصِ المُسبَقِ على آلاتٍ مُحاكاةٍ بمسارِ `PATH` من
+// بدائلَ وحدَها: التامّةُ تَمُرُّ، وكلُّ ناقصةٍ تَسقُطُ برمزِ غائبِها، ويُسمّى كلُّ غائبٍ لا
+// أوّلُه وحدَه. **وحدٌّ معلَنٌ:** المحاكاةُ تَقيسُ النصَّ لا الآلةَ؛ والآلةُ الحقيقيّةُ
+// تُقاسُ بتشغيلِ الوظيفةِ نفسِها على العدّاءِ.
+test('LIVE-18 — الفحصُ المُسبَقُ وظيفةٌ بلا حاوياتٍ تسبقُ الفحصَ الكاملَ', async () => {
+  const { parse } = await import('yaml');
+  /** @type {Record<string, Record<string, any>>} */
+  const jobs = parse(workflow).jobs;
+  const pre = jobs.preflight ?? {};
+  assert.ok(jobs.preflight, 'وظيفةُ `preflight` قائمةٌ.');
+  assert.equal(
+    pre.services,
+    undefined,
+    'بلا `services:` — غيابُ Docker يُسقِطُ ذاتَ الحاوياتِ قبلَ خطواتِها.',
+  );
+  assert.deepEqual(pre['runs-on'], jobs.validate?.['runs-on'], 'على العدّاءِ نفسِه.');
+  /** @type {Array<Record<string, any>>} */
+  const steps = pre.steps ?? [];
+  assert.ok(steps.some((s) => String(s.run ?? '').trim() === 'bash scripts/runner-preflight.sh'));
+  assert.equal(jobs.validate?.needs, 'preflight', 'الفحصُ الكاملُ لا يُشغَّلُ على آلةٍ ناقصةٍ.');
+  assert.deepEqual(jobs['gate-report']?.needs, ['preflight', 'validate']);
+  assert.match(String(jobs['gate-report']?.steps?.[0]?.run), /needs\.preflight\.result/);
+});
+
+test('LIVE-18 — الفحصُ المُسبَقُ يُسمّي كلَّ متطلَّبٍ غائبٍ برمزِه ويَمُرُّ على الآلةِ التامّةِ', async () => {
+  const { mkdtempSync, writeFileSync, symlinkSync, chmodSync, rmSync, existsSync } =
+    await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const script = path.join(repoRoot, 'scripts', 'runner-preflight.sh');
+  const bash = ['/usr/bin/bash', '/bin/bash'].find((p) => existsSync(p)) ?? 'bash';
+  /** @param {string} name */
+  const real = (name) =>
+    ['/usr/bin', '/bin'].map((d) => path.join(d, name)).find((p) => existsSync(p)) ?? '';
+  const complete = {
+    docker: 'if [ "$1" = version ]; then echo 29.8.1; fi; exit 0',
+    pg_dump: 'echo "pg_dump (PostgreSQL) 18.6"',
+    sudo: 'exit 1',
+    gcc: 'exit 0',
+    'g++': 'exit 0',
+    make: 'exit 0',
+    python3: 'exit 0',
+    unshare: 'exit 0',
+    git: 'exit 0',
+    curl: 'exit 0',
+    tar: 'exit 0',
+    sha256sum: 'exit 0',
+  };
+  /** @param {Record<string, string | null>} overrides */
+  const machine = (overrides) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'xuux-preflight-'));
+    try {
+      for (const util of ['timeout', 'uname']) symlinkSync(real(util), path.join(dir, util));
+      for (const [name, body] of Object.entries({ ...complete, ...overrides })) {
+        if (body === null) continue;
+        const file = path.join(dir, name);
+        writeFileSync(file, `#!${bash}\n${body}\n`);
+        chmodSync(file, 0o755);
+      }
+      const r = spawnSync(bash, [script], {
+        env: { PATH: dir, HOME: dir },
+        encoding: 'utf8',
+      });
+      return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  const full = machine({});
+  assert.equal(full.status, 0, `الآلةُ التامّةُ تَمُرُّ:\n${full.out}`);
+  assert.ok(!/RUNNER_/.test(full.out), 'لا رمزَ غيابٍ على التامّةِ.');
+  assert.match(full.out, /لا يُفرَضُ/, 'النظامُ يُطبَعُ ولا يُفرَضُ (قرارُ المالكِ).');
+
+  /** @type {Array<[string, Record<string, string | null>, RegExp]>} */
+  const cases = [
+    ['بلا docker', { docker: null }, /RUNNER_DOCKER_MISSING/],
+    ['docker لا يُجيبُ', { docker: 'exit 1' }, /RUNNER_DOCKER_UNREACHABLE/],
+    [
+      'pg_dump 16 بلا sudo',
+      { pg_dump: 'echo "pg_dump (PostgreSQL) 16.4"' },
+      /RUNNER_PG_CLIENT_MISSING/,
+    ],
+    ['بلا g++', { 'g++': null }, /RUNNER_BUILD_TOOLS_MISSING: غائبٌ: g\+\+/],
+    ['النواةُ تمنعُ userns', { unshare: 'exit 1' }, /RUNNER_USERNS_UNAVAILABLE/],
+    ['بلا tar', { tar: null }, /RUNNER_TOOLS_MISSING: غائبٌ: tar/],
+  ];
+  for (const [label, overrides, code] of cases) {
+    const r = machine(overrides);
+    assert.equal(r.status, 1, `${label}: يَسقُطُ.\n${r.out}`);
+    assert.match(r.out, code, `${label}: الرمزُ مُسمّىً.`);
+    assert.match(r.out, /RUNNER_PREFLIGHT_FAILED: 1 /, `${label}: غائبٌ واحدٌ لا أكثرَ.`);
+  }
+
+  const pgViaSudo = machine({ pg_dump: null, sudo: 'exit 0' });
+  assert.equal(
+    pgViaSudo.status,
+    0,
+    'غيابُ pg_dump مع sudo بلا كلمةِ مرورٍ مقبولٌ — خطوةُ التثبيتِ تُثبِّتُه.',
+  );
+
+  const bare = machine({ docker: null, unshare: 'exit 1', gcc: null });
+  assert.equal(bare.status, 1);
+  for (const code of [
+    'RUNNER_DOCKER_MISSING',
+    'RUNNER_USERNS_UNAVAILABLE',
+    'RUNNER_BUILD_TOOLS_MISSING',
+  ]) {
+    assert.ok(bare.out.includes(code), `كلُّ غائبٍ يُسمّى لا أوّلُه وحدَه: ${code}`);
+  }
+  assert.match(bare.out, /RUNNER_PREFLIGHT_FAILED: 3 /);
+});
