@@ -13,6 +13,15 @@
 //  - فشلٌ مغلق: غياب pkcs11js/الموديول/التوكن/الآلية/فشل self-test = رفضٌ صريح.
 //  - self-test لكل قدرة قبل التسليم: EdDSA sign+verify عند طلب توقيع؛ AES-GCM
 //    encrypt+decrypt عند طلب تشفير. فشل self-test التوقيع لا يُسقط التشفير.
+//
+// المسار البديل المُعلَن (OPS-1/M6):
+//  - pkcs11js تبعيّةٌ اختياريّة (optionalDependencies) لا إلزاميّة. وغيابُها
+//    في بيئةٍ لا يسقطُ npm ci صامتاً بل يُقاسُ سقوطُه هنا: import('pkcs11js')
+//    يرمي HsmError(MODULE_MISSING) لا تخطّيٌّ ولا fallback برمجي.
+//  - والمسارُ البديلُ هو المسارُ البرمجيُّ في production-boot.mts: في التطوير
+//    والاختبار تُستعملُ KingIdentity البرمجيّة بلا HSM، وفي الإنتاج يُرفضُ كلُّ
+//    مسارٍ برمجيٍّ ويُلزَمُ HSM. فالاختبارُ يقيسُ سقوطَ الاستيرادِ لا يصفُه.
+//  - والقياسُ في tests/root-of-trust/pkcs11-module-missing.test.mjs.
 import { Buffer } from 'node:buffer';
 import { createHash, createPublicKey, verify as cryptoVerify, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
