@@ -40,6 +40,27 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '..', '..');
  * `config/skip-baseline-scope.yaml` يُسقِطُ `و١١` حتّى يُعدَّلَ هذا معَهُ عمداً.
  */
 const REPO_EXCLUSIONS = [
+  // ── تضييقُ النطاقِ (‏`OPS-1/R7-COST` · `WL-270`): أدلةٌ مصدريّةٌ وقوالبُ ──
+  'src/',
+  'scripts/',
+  '.github/',
+  'civilization/',
+  'migrations/',
+  'federation/',
+  'institutions/',
+  'knowledge/',
+  'sim/',
+  'clients/',
+  'constitution/',
+  'contracts/',
+  'data-platform/',
+  'engines/',
+  'infrastructure/',
+  'interfaces/',
+  'operations/',
+  'seed/',
+  'web/',
+  // ── ملفّاتُ المُحاسَبةِ السبعةُ (‏`WL-265`) ──
   'PROJECT_STATUS.md',
   'docs/READINESS_REPORT.md',
   'docs/external-review/M11.05-round-1-plan.md',
@@ -58,10 +79,10 @@ test('و١ — البصمةُ حتميّةٌ: نداءانِ على الكومي
   assert.match(first, /^[0-9a-f]{64}$/);
 });
 
-test('و٢ — تغييرُ ملفٍّ في `src/` يُبدِّلُ البصمةَ', () => {
+test('و٢ — تغييرُ ملفٍّ في `tests/` يُبدِّلُ البصمةَ', () => {
   const dir = makeRoot();
   const before = initFixtureRepo(dir);
-  const after = commitFiles(dir, { 'src/core.mjs': 'export const value = 2;\n' });
+  const after = commitFiles(dir, { 'tests/core.test.mjs': 'export const value = 2;\n' });
   assert.notEqual(
     computeScopeDigest(dir, before),
     computeScopeDigest(dir, after),
@@ -72,7 +93,7 @@ test('و٢ — تغييرُ ملفٍّ في `src/` يُبدِّلُ البصمة
 test('و٢ب — تغييرُ صلاحيّةِ ملفٍّ وحدَها يُبدِّلُ البصمةَ (البصمةُ تَقرأُ `mode`)', () => {
   const dir = makeRoot();
   const before = initFixtureRepo(dir);
-  git(dir, ['update-index', '--chmod=+x', 'src/core.mjs']);
+  git(dir, ['update-index', '--chmod=+x', 'tests/alpha.test.mjs']);
   git(dir, ['commit', '--quiet', '-m', 'fixture: صلاحيّةٌ']);
   const after = git(dir, ['rev-parse', 'HEAD']).trim();
   assert.notEqual(computeScopeDigest(dir, before), computeScopeDigest(dir, after));
@@ -81,7 +102,7 @@ test('و٢ب — تغييرُ صلاحيّةِ ملفٍّ وحدَها يُبد�
 test('و٢ج — إعادةُ تسميةٍ بلا تغييرِ محتوىً تُبدِّلُ البصمةَ (البصمةُ تَقرأُ المسارَ)', () => {
   const dir = makeRoot();
   const before = initFixtureRepo(dir);
-  git(dir, ['mv', 'src/core.mjs', 'src/renamed.mjs']);
+  git(dir, ['mv', 'tests/alpha.test.mjs', 'tests/renamed.test.mjs']);
   git(dir, ['commit', '--quiet', '-m', 'fixture: تسميةٌ']);
   const after = git(dir, ['rev-parse', 'HEAD']).trim();
   assert.notEqual(computeScopeDigest(dir, before), computeScopeDigest(dir, after));
@@ -123,7 +144,7 @@ test('و٤ب — الأثرُ نفسُهُ خارجُ النطاقِ: كتابة
 
 test('و٥ — مسارٌ عربيٌّ: القراءةُ الآمنةُ تراهُ والساذجةُ تُهرِّبُهُ (‏`DOC-11`)', () => {
   const dir = makeRoot();
-  const arabic = 'src/ولاية-001/وحدة.mjs';
+  const arabic = 'tests/ولاية-001/وحدة.mjs';
   const sha = initFixtureRepo(dir, { extraFiles: { [arabic]: 'export const x = 1;\n' } });
 
   const safe = listScopeEntries(dir, sha).map((e) => e.path);
@@ -145,7 +166,7 @@ test('و٥ — مسارٌ عربيٌّ: القراءةُ الآمنةُ تراه
 
 test('و٥ب — والمسارُ العربيُّ داخلٌ في البصمةِ فعلاً: تغييرُهُ يُبدِّلُها', () => {
   const dir = makeRoot();
-  const arabic = 'src/ولاية-001/وحدة.mjs';
+  const arabic = 'tests/ولاية-001/وحدة.mjs';
   const before = initFixtureRepo(dir, { extraFiles: { [arabic]: 'export const x = 1;\n' } });
   const after = commitFiles(dir, { [arabic]: 'export const x = 2;\n' });
   assert.notEqual(
@@ -158,13 +179,13 @@ test('و٥ب — والمسارُ العربيُّ داخلٌ في البصمة�
 test('و٦ — مجلَّدٌ جديدٌ غيرُ مُستثنىً يَدخُلُ النطاقَ تلقائيّاً (فائضٌ بالاستثناءِ)', () => {
   const dir = makeRoot();
   const before = initFixtureRepo(dir);
-  const after = commitFiles(dir, { 'engines/جديد/ملف.mjs': 'export const y = 1;\n' });
+  const after = commitFiles(dir, { 'tests/جديد/ملف.mjs': 'export const y = 1;\n' });
   assert.notEqual(
     computeScopeDigest(dir, before),
     computeScopeDigest(dir, after),
     'قائمةُ إذنٍ تَرهَلُ فيَخرُجُ منها ملفٌّ بلا خطأٍ — ولذلكَ النطاقُ فائضٌ بالاستثناءِ.',
   );
-  assert.ok(listScopeEntries(dir, after).some((e) => e.path === 'engines/جديد/ملف.mjs'));
+  assert.ok(listScopeEntries(dir, after).some((e) => e.path === 'tests/جديد/ملف.mjs'));
 });
 
 test('و٧ — طفرةٌ: نزعُ سجلِّ الأعمالِ من الاستثناءِ يُدخِلُهُ النطاقَ فتُبدِّلُ البصمةَ', () => {
@@ -214,13 +235,13 @@ test('و١٠ — `scopeDiff` يُسمّي ما اختلفَ: هذا ما يُط�
   const dir = makeRoot();
   const before = initFixtureRepo(dir);
   const after = commitFiles(dir, {
-    'src/core.mjs': 'export const value = 9;\n',
-    'src/new.mjs': 'export const n = 1;\n',
+    'tests/alpha.test.mjs': 'export const value = 9;\n',
+    'tests/new.test.mjs': 'export const n = 1;\n',
     'docs/roadmap/05-work-log.md': '## WL-999\nلا يَظهرُ\n',
   });
   const diff = scopeDiff(dir, before, after);
-  assert.ok(diff.includes('~ src/core.mjs'), JSON.stringify(diff));
-  assert.ok(diff.includes('+ src/new.mjs'), JSON.stringify(diff));
+  assert.ok(diff.includes('~ tests/alpha.test.mjs'), JSON.stringify(diff));
+  assert.ok(diff.includes('+ tests/new.test.mjs'), JSON.stringify(diff));
   assert.ok(
     !diff.some((d) => d.includes('docs/')),
     'المُستثنى لا يَظهرُ في الفرقِ — وإلا أَرسلَ المنفِّذَ إلى إصلاحٍ لا يَلزَمُ.',
@@ -270,26 +291,34 @@ test('و١٣ — معيارُ الإغلاقِ: تغييرُ وثيقةٍ تَق
     );
   }
   // وكلُّ ملفّاتِ المُحاسَبةِ السبعةِ معاً لا تُبدِّلُها — وإلا دارَ الأثرُ على نفسِهِ.
+  // (فقط ملفّاتُ المُحاسَبةِ، لا الأدلةُ — فالأدلةُ لا تُكتَبُ ملفّاً.)
+  const ACCOUNTING_FILES = REPO_EXCLUSIONS.filter((e) => !e.endsWith('/'));
   const after = commitFiles(
     dir,
-    Object.fromEntries(REPO_EXCLUSIONS.map((rel) => [rel, `مُحاسَبةٌ بعدَ الدفعةِ: ${rel}\n`])),
+    Object.fromEntries(ACCOUNTING_FILES.map((rel) => [rel, `مُحاسَبةٌ بعدَ الدفعةِ: ${rel}\n`])),
   );
   assert.equal(computeScopeDigest(dir, base), computeScopeDigest(dir, after));
 });
 
-test('و١٤ — الإعلانُ على المستودَعِ: لا مجلَّدَ فيهِ، وكلُّ مُدخلةٍ تُسمّي ملفّاً متعقَّباً', () => {
+test('و١٤ — الإعلانُ على المستودَعِ: كلُّ مُدخلةٍ ملفّاً متعقَّباً أو دليلاً مُسماً', () => {
   const tracked = new Set(
     git(REPO_ROOT, ['-c', 'core.quotePath=false', 'ls-files', '-z']).split('\0'),
   );
   for (const entry of loadScopeExclusions(REPO_ROOT)) {
-    assert.ok(
-      !entry.endsWith('/'),
-      `${entry}: مجلَّدٌ في الإعلانِ يَستثني كلَّ ما يُضافُ تحتَهُ صامتاً — وذاكَ عينُ SCOPE-BLIND.`,
-    );
-    assert.ok(
-      tracked.has(entry),
-      `${entry}: مُدخلةٌ لا تُسمّي ملفّاً متعقَّباً — استثناءٌ ميّتٌ يَستُرُ بقعةً إن عادَ الاسمُ.`,
-    );
+    if (entry.endsWith('/')) {
+      // دليلٌ مُسماً — تضييقُ النطاقِ (‏`OPS-1/R7-COST`): كلُّ دليلٍ بقعةٌ عمياءُ مُعلَنةٌ بعلّتِها.
+      // لا يُقبَلُ دليلٌ بلا ملفّاتٍ تتبَعُه (‏استثناءٌ ميّتٌ).
+      const prefix = entry.slice(0, -1);
+      assert.ok(
+        [...tracked].some((f) => f.startsWith(prefix + '/')),
+        `${entry}: دليلٌ بلا ملفّاتٍ متعقَّبةٍ — استثناءٌ ميّتٌ يَستُرُ بقعةً لا شيءَ فيها.`,
+      );
+    } else {
+      assert.ok(
+        tracked.has(entry),
+        `${entry}: مُدخلةٌ لا تُسمّي ملفّاً متعقَّباً — استثناءٌ ميّتٌ يَستُرُ بقعةً إن عادَ الاسمُ.`,
+      );
+    }
   }
 });
 
@@ -321,4 +350,25 @@ test('و١٥ — بصمةُ كوميتٍ دالّةٌ فيه وحدَهُ: تُ�
   initFixtureRepo(bare);
   const noConfig = removeAndCommit(bare, SCOPE_CONFIG);
   assert.throws(() => loadScopeExclusionsAt(bare, noConfig), /SCOPE_CONFIG_MISSING/);
+});
+
+test('و١٦ — تضييقُ النطاقِ: كلُّ دليلٍ مُستثنىً بقعةٌ عمياءُ مُسماّةٌ (‏`OPS-1/R7-COST`)', () => {
+  // قررَ المالكُ تضييقَ النطاقِ إلى `tests/` والمُعلَناتِ. كلُّ دليلٍ يُضافُ إلى
+  // الاستثناءِ بقعةٌ عمياءُ — ويُقاسُ ذلكَ بأنّ نزعَ الدليلِ من الاستثناءِ يُدخِلُهُ
+  // النطاقَ فتُبدِّلُ البصمةَ (كما في `و٧`).
+  const dir = makeRoot();
+  initFixtureRepo(dir);
+  const sha = commitFiles(dir, { 'src/ملف.mjs': 'export const z = 1;\n' });
+  const declared = computeScopeDigest(dir, sha);
+  // نزعُ `src/` من الاستثناءِ يُدخِلُ محتواه في البصمةِ.
+  const mutated = computeScopeDigest(
+    dir,
+    sha,
+    loadScopeExclusions(dir).filter((e) => e !== 'src/'),
+  );
+  assert.notEqual(
+    declared,
+    mutated,
+    'نزعُ `src/` من الاستثناءِ يجبُ أن يُبدِّلَ البصمةَ — وإلا فالبقعةُ العمياءُ ليست مُسماّةً.',
+  );
 });

@@ -59,9 +59,62 @@
 # كلُّ مسارٍ يُضافُ هنا يُنشئُ بقعةً عمياءَ جديدةً في عقدِ الهويّةِ، ويَحرُسُ
 # ذلكَ اختبارُ الطفرةِ في `tests/external-review/skip-baseline-scope.test.mjs`.
 
-version: 1
+version: 2
+
+# ── تضييقُ النطاقِ (‏`OPS-1/R7-COST` · `WL-270` · قرارُ مالكٍ) ──
+#
+# كانَ النطاقُ فائضاً: كلُّ مسارٍ داخلٌ إلا ملفّاتِ المُحاسَبةِ السبعة. فأيُّ
+# دفعةٍ تَلمَسُ `src/` أو `scripts/` أو `.github/` تُبدِّلُ البصمةَ فتُحمَرُّ `main`
+# حتى تُعادَ تشغيلةُ القياسِ. فقرَرَ المالكُ تضييقَ النطاقِ إلى `tests/` والمُعلَناتِ.
+#
+# **وكلُّ تضييقٍ بقعةٌ عمياءُ مُسماّةٌ لا صامتةٌ:** كلُّ دليلٍ يُضافُ هنا يُخرِجُ
+# ما تحته من البصمةِ، ويُقيَّدُ بعلّتِهِ. والبقعةُ العمياءُ ليست عيباً ما دامت
+# مُعلَنةً ومسؤولةً عنها بأثرٍ آخر يَكشِفُها (‏`tsc` · `eslint` · `npm test`).
+#
+# الأدلةُ المُستثناةُ بعللِها:
+#   - `src/` — الكودُ المصدريُّ: يُكشَفُ بـ`tsc --noEmit` و`eslint .` و`npm test`.
+#   - `scripts/` — سكربتاتُ الحواجزِ: يَقرأُها `npm test` فيُكشِفُ انحرافَها.
+#   - `.github/` — مساراتُ CI: يَقرؤُها `tests/tooling/ci-gates.test.mjs`.
+#   - `civilization/` — قوالبُ دولتِيّةٌ: لا تُقاسُ بـ`npm test` ولا تُقرأُ منه.
+#   - `migrations/` — هجراتُ قاعدةِ بياناتٍ: لا تُقاسُ بـ`npm test`.
+#   - `federation/` · `institutions/` · `knowledge/` · `sim/` — قوالبُ وبياناتٌ سياديّةٌ.
+#   - بقيةُ الأدلةِ الفرعيّةِ (`clients/` · `constitution/` · `contracts/` ·
+#     `data-platform/` · `engines/` · `infrastructure/` · `interfaces/` ·
+#     `operations/` · `seed/` · `web/`) — قوالبٌ لا تُقاسُ.
+#
+# **ولا يُوسَّعُ هذا الاستثناءُ بغيرِ قرارِ مالكٍ** — ويَحرُسُهُ اختبارُ الطفرةِ
+# في `tests/external-review/skip-baseline-scope.test.mjs`.
+#
+# ── ما بَقِيَ داخلَ النطاقِ ──
+#
+#   - `tests/` — ملفّاتُ الاختبارِ: هي ما يُقاسُ بصمَّته.
+#   - `config/` — مُعلَناتُ العقودِ والهويّةِ: ما يَقرؤُهُ `guard:skip-baseline` وحدَه.
+#   - `docs/` — ما عدا ملفّاتِ المُحاسَبةِ السبعةِ (‏الاستثناءُ الأصليُّ في الأسفلِ).
+#   - ملفّاتُ الجذرِ المُعلَنةُ (`GOVERNANCE_RULE.md` · `package.json` · `tsconfig.json`
+#     · `version.json` · `eslint.config.js` · `.prettierrc` · `.nvmrc` · `CODEOWNERS`).
 
 nonScope:
+  # ── تضييقُ النطاقِ: أدلةٌ مصدريّةٌ وقوالبُ بعللِها (‏`OPS-1/R7-COST`) ──
+  - src/
+  - scripts/
+  - .github/
+  - civilization/
+  - migrations/
+  - federation/
+  - institutions/
+  - knowledge/
+  - sim/
+  - clients/
+  - constitution/
+  - contracts/
+  - data-platform/
+  - engines/
+  - infrastructure/
+  - interfaces/
+  - operations/
+  - seed/
+  - web/
+  # ── ملفّاتُ المُحاسَبةِ السبعةُ (‏الأصلِيّةُ، `WL-265`) ──
   - PROJECT_STATUS.md
   - docs/READINESS_REPORT.md
   - docs/external-review/M11.05-round-1-plan.md
