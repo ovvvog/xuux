@@ -317,3 +317,53 @@ test('القاعدةُ R6: الجدولُ المكتملُ يَمُرُّ', () =
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── الطفراتُ S1…S3: المشطوبُ لا يُعَدُّ مفتوحاً (‏`WL-268`) ──
+//
+// كانَ العدُّ يَلتقطُ كلَّ معرِّفٍ بينَ علامتَيْ كودٍ، فعَدَّ `~~`LIVE-14`~~ 🟢`
+// مفتوحاً، فخَضِرَ الحاجزُ على «5 بنودٍ» والمفتوحُ اثنانِ.
+
+test('الطفرةُ S1: فكُّ شطبِ بندٍ مُغلَقٍ في السجلِّ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    const unstruck = register.replace('و~~`LIVE-14`~~ 🟢', 'و`LIVE-14`');
+    assert.notEqual(unstruck, register, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(registerPath, unstruck);
+    assert.equal(runGuard(tmp), 1, 'بندٌ صارَ مفتوحاً في السجلِّ ولم تَذكُرْهُ اللوحةُ ⇒ انحرافٌ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ S2: إضافةُ بندٍ **مشطوبٍ** إلى قائمةِ السجلِّ لا تُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    const added = register.replace(
+      '`R3-A-01` و~~`LIVE-14`~~',
+      '`R3-A-01` و~~`FAKE-9`~~ 🟢 و~~`LIVE-14`~~',
+    );
+    assert.notEqual(added, register, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(registerPath, added);
+    assert.equal(runGuard(tmp), 0, 'المشطوبُ مُغلَقٌ فلا يُعَدُّ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ S3: معرِّفُ فرعٍ بـ`/` يُعَدُّ — حذفُهُ من اللوحةِ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const statusPath = path.join(tmp, 'PROJECT_STATUS.md');
+    const status = readFileSync(statusPath, 'utf8');
+    const removed = status.replaceAll(' و`OPS-1/MAIN-DRIFT-WINDOW`', '');
+    assert.notEqual(removed, status, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(statusPath, removed);
+    assert.equal(runGuard(tmp), 1, 'بندٌ مفتوحٌ غابَ عن اللوحةِ ⇒ انحرافٌ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
