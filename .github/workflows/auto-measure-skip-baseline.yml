@@ -15,12 +15,24 @@
 #
 # ── ومتى يُطلَقُ ──
 #
-# بعدَ اكتمالِ CI على `main` — نجاحاً كانَ أم سقوطاً. فإن نجحَ CI فلا انزياحَ
-# مُحتملٌ إلّا إن كانَ النطاقُ تغيَّرَ بلا أن يُدخِلَ الأثرَ. وإن سقطَ CI
-# بـ`R7/SCOPE-DRIFT` فالقياسُ هو الدواءُ. **لكنَّ سقوطاً أجنبيّاً لا يُطلِقُ
-# القياسَ:** الأداةُ تَرفُضُ إن لم يَكُنْ هناكَ انزياحٌ فعلاً، فلا يُنتَجُ
-# أثرٌ على شجرةٍ مريضةٍ بلا سببِها.
+# بعدَ **سقوطِ** CI على `main` وحدَهُ: نجاحُ CI يَعني أنَّ `R7` مرَّ فلا انزياحَ.
+# ثمَّ ثلاثةُ مراشحَ قبلَ أيِّ إطلاقٍ، كلُّها في `scripts/check-scope-drift.mjs`
+# ومقيسةٌ باختباراتِها:
+#   ١. موضعُ السقوطِ: يجبُ أن يَنحصِرَ في خطوةِ الاختباراتِ أو خطوةِ حاجزِ خطِّ
+#      الأساسِ من `validate`. سقوطُ الفحصِ المُسبَقِ أو الأسلوبِ أو الأنواعِ
+#      أو أيِّ خطوةٍ أخرى أجنبيٌّ قطعاً ⇒ لا قياسَ.
+#   ٢. الرأسُ: التشغيلةُ المُحرِّكةُ يجبُ أن تَكونَ على رأسِ `main` الحاليِّ،
+#      وإلّا فتشغيلةُ الرأسِ الأحدثِ تَحكُمُ.
+#   ٣. البصمةُ: انزياحٌ فعليٌّ بينَ بصمةِ النطاقِ والأثرِ المنشورِ.
+# وسقوطٌ أجنبيٌّ داخلَ الاختباراتِ نفسِها يَبقى مُمكِناً، **ومُصنِّفُ `LIVE-16`
+# في تشغيلةِ القياسِ يَرفضُهُ** (`MEASURE_FOREIGN_FAILURE`) فلا يُنشَرُ أثرٌ عليه.
 #
+# ── ورموزُ الخروجِ ──
+#
+# `0` لا قياسَ · `1` انزياحٌ ⇒ إطلاقٌ · `2` عجزٌ عنِ الحُكمِ ⇒ يَحمَرُّ هذا المسارُ
+# ولا يُطلَقُ شيءٌ. **فالخطأُ لا يُقرَأُ انزياحاً**، ولا `continue-on-error` هنا:
+# التفرُّعُ صريحٌ على رمزِ الخروجِ، وما سوى الرمزَينِ المُعلَنَينِ يُسقِطُ الخطوةَ.
+
 # ── وحدٌّ مُعلَنٌ ──
 #
 # `OPS-1/BOT-PR-CI` لم يُغلَقْ بعدُ: طلبُ الدمجِ الذي يُنشِئُهُ مسارُ النشرِ
@@ -46,7 +58,7 @@ concurrency:
 jobs:
   check-and-dispatch:
     name: فحصُ الانزياحِ وإطلاقُ القياسِ
-    if: github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure'
+    if: github.event.workflow_run.conclusion == 'failure'
     runs-on: [self-hosted, linux-vm]
     timeout-minutes: 10
     steps:
@@ -66,30 +78,54 @@ jobs:
       - name: جلبُ رأسِ main طازجاً (مادّةُ فحصِ الانزياحِ)
         run: git fetch --no-tags origin main
 
-      - name: فحصُ انزياحِ النطاقِ
-        id: drift
-        continue-on-error: true
-        run: node scripts/check-scope-drift.mjs
-
-      - name: خلاصةُ فحصِ الانزياحِ
-        run: |
-          if [ "${{ steps.drift.outcome }}" = "success" ]; then
-            echo "### ✅ لا انزياحَ — لا قياسَ" >> "$GITHUB_STEP_SUMMARY"
-          elif [ "${{ steps.drift.outcome }}" = "failure" ]; then
-            echo "### ⚠️ انزياحٌ مُكتشَفٌ — يُطلَقُ القياسُ آليّاً" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### ⛔ تعذَّرَ فحصُ الانزياحِ" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: إطلاقُ القياسِ إن وُجِدَ انزياحٌ
-        if: steps.drift.outcome == 'failure'
+      - name: جلبُ وظائفِ التشغيلةِ المُحرِّكةِ (مادّةُ مرشحِ الموضعِ)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          MAIN_HEAD="$(git rev-parse origin/main)"
-          echo "إطلاقُ قياسِ خطِّ أساسِ التخطّي على $MAIN_HEAD"
-          PAYLOAD=$(node -e "console.log(JSON.stringify({ ref: 'main', inputs: { ref: process.argv[1] } }))" "$MAIN_HEAD")
+          curl -fsS \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/jobs?per_page=100" \
+            -o "$RUNNER_TEMP/trigger-jobs.json"
+
+      - name: فحصُ انزياحِ النطاقِ
+        id: drift
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set +e
+          node scripts/check-scope-drift.mjs --expect-head "$HEAD_SHA" --trigger-jobs "$RUNNER_TEMP/trigger-jobs.json"
+          code=$?
+          set -e
+          rm -f "$RUNNER_TEMP/trigger-jobs.json"
+          case "$code" in
+            0)
+              echo 'drifted=false' >> "$GITHUB_OUTPUT"
+              echo '### ✅ لا قياسَ — لا انزياحَ أو لا أهليّةَ' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            1)
+              echo 'drifted=true' >> "$GITHUB_OUTPUT"
+              echo '### ⚠️ انزياحٌ مُكتشَفٌ — يُطلَقُ القياسُ آليّاً' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::SCOPE_DRIFT_CHECK_ERROR: تعذَّرَ الحُكمُ (exit=$code) — لا يُطلَقُ قياسٌ"
+              echo "### ⛔ تعذَّرَ فحصُ الانزياحِ (exit=$code)" >> "$GITHUB_STEP_SUMMARY"
+              exit "$code"
+              ;;
+          esac
+
+      - name: إطلاقُ القياسِ إن وُجِدَ انزياحٌ
+        if: steps.drift.outputs.drifted == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          echo "إطلاقُ قياسِ خطِّ أساسِ التخطّي على $HEAD_SHA"
+          PAYLOAD=$(node -e "console.log(JSON.stringify({ ref: 'main', inputs: { ref: process.argv[1] } }))" "$HEAD_SHA")
           HTTP_RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST \
             -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer $GH_TOKEN" \
@@ -104,5 +140,5 @@ jobs:
             echo "$RESPONSE_BODY"
             exit 1
           fi
-          echo "✅ أُطلِقَ القياسُ على $MAIN_HEAD"
-          echo "### 🚀 أُطلِقَ القياسُ آليّاً على \`$MAIN_HEAD\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ أُطلِقَ القياسُ على $HEAD_SHA"
+          echo "### 🚀 أُطلِقَ القياسُ آليّاً على \`$HEAD_SHA\`" >> "$GITHUB_STEP_SUMMARY"
