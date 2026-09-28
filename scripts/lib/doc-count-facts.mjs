@@ -60,6 +60,23 @@ function countFilesRecursive(dir, ext) {
 }
 
 /**
+ * المعرّفاتُ **المفتوحةُ** في قائمةٍ: يُسقِطُ كلَّ ما بينَ `~~…~~` قبلَ العدِّ.
+ *
+ * **علّةُ وجودِها (`WL-268`):** كانَ العدُّ يَلتقطُ كلَّ معرِّفٍ بينَ علامتَيْ كودٍ،
+ * فعَدَّ `~~\`LIVE-14\`~~ 🟢` مفتوحاً وهوَ مُغلَقٌ بشطبِه، فقالَ الحاجزُ «5 بنودٍ
+ * مفتوحةٍ» والمفتوحُ منها اثنانِ — **حاجزٌ يَخضَرُّ على رقمٍ كاذبٍ**. والشطبُ هوَ
+ * عُرفُ الإغلاقِ في السجلِّ كلِّهِ، فالمشطوبُ لا يُعَدُّ.
+ * والمعرِّفُ قد يَحمِلُ `/` لفرعٍ (`OPS-1/MAIN-DRIFT-WINDOW`).
+ *
+ * @param {string} listBlock
+ * @returns {string[]}
+ */
+export function openIdsInList(listBlock) {
+  const unstruck = listBlock.replace(/~~[^~]*~~/g, ' ');
+  return unstruck.match(/`[A-Z0-9][A-Z0-9/-]*`/g) ?? [];
+}
+
+/**
  * يَحسُبُ عددَ البنودِ المفتوحةِ على المنفِّذِ من سجلِّ الدَّين.
  * يَعدّ المعرّفاتِ المذكورةَ في جملةِ «والمفتوحُ على المنفِّذِ ... بنودٍ: `D-5` و`LIM-1` و...».
  * @param {string} root
@@ -89,8 +106,8 @@ export function countOpenExecutorDebts(root) {
       const afterColon = afterMaftuh.slice(colonIdx + 1);
       const periodIdx = afterColon.indexOf('.');
       const listBlock = periodIdx === -1 ? afterColon : afterColon.slice(0, periodIdx);
-      const ids = listBlock.match(/`[A-Z0-9-]+`/g);
-      if (!ids) continue;
+      const ids = openIdsInList(listBlock);
+      if (ids.length === 0) continue;
       return new Set(ids).size;
     }
   }
