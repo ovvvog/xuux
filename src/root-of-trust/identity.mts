@@ -70,27 +70,50 @@ export type TimeSource = () => number;
  * بناءً على غيابِ دليلِ الإبطال.
  */
 export interface RevocationStore {
+  /**
+   * إعلانُ الثباتِ الصريحُ (‏`R5-B-01`): `'persistent'` لمخزنٍ يدومُ سحبُه عبرَ
+   * إعادةِ التشغيل، و`'volatile'` لمخزنٍ يزولُ بزوالِ العمليّة. **لا يُستنتَجُ
+   * الثباتُ من صنفِ الكائنِ** (‏`instanceof`) — فمخزنٌ متطايرٌ لا يرثُ
+   * `MemoryRevocationStore` كانَ يَعبُرُ حارسَ الإنتاجِ. والحقلُ إلزاميٌّ في
+   * العقدِ، فكلُّ تنفيذٍ يُصرِّحُ به، والإنتاجُ يرفضُ ما لم يُعلِنْ `'persistent'`.
+   * وحدُّه: إعلانٌ يُسأَلُ عنه المُنفِّذُ لا برهانٌ على القرص — فالحارسُ يرفضُ
+   * الصامتَ والمتطايرَ المُعلَنَ، ولا يَكشفُ مخزناً يَكذبُ في إعلانِه.
+   */
+  readonly durability: RevocationDurability;
   /** هل سُحبتْ هذه الشهادة؟ يُحمَّلُ من القرصِ، فلا يُفقدُ بعدَ إعادةِ تشغيل. */
   isRevoked(certificateId: string): boolean;
-  /** يسحبُ شهادةً بكتابةٍ دائمة. يُرجعُ `true` إن نجحَ الحفظُ، `false` إن فشل. */
+  /**
+   * يسحبُ شهادةً. يُرجعُ `true` **إن كُتِبَ السحبُ كتابةً دائمةً** وحدَها، و`false`
+   * إن فشلَ الحفظُ أو كانَ المخزنُ متطايراً لا يَحفظُ أصلاً (‏`R5-A-05`) — فقيمةُ
+   * الإرجاعِ خبرٌ عن الثباتِ لا عن أثرِ السحبِ داخلَ العمليّة.
+   */
   revoke(certificateId: string, revokedBy: string, reason: string): boolean;
   /** هل حُمِّلَ المخزنُ وجاهزٌ للقراءة؟ إن لم يكن، `isValid` يُرجعُ `false`. */
   ready(): boolean;
 }
 
+/** قيمتا إعلانِ الثباتِ في عقدِ `RevocationStore`. */
+export type RevocationDurability = 'persistent' | 'volatile';
+
 /**
  * مخزنُ سحبٍ في الذاكرةِ — التنفيذُ الافتراضيُّ للسلطة. يُستعملُ في الاختبارِ
- * والتطويرِ، وفيه أثرُ السحبِ ضمنَ العمليةِ الحيّةِ وحدَها. لا يَدومُ، لكنّه
- * يَحققُ نفسَ عقدِ `RevocationStore` فيُحقَنُ حيثُ لا قاعدةَ بيانات.
+ * والتطويرِ، وفيه أثرُ السحبِ ضمنَ العمليةِ الحيّةِ وحدَها. لا يَدومُ، ويُعلِنُ
+ * ذلكَ بـ`durability: 'volatile'` فيُرفَضُ في الإنتاج.
  */
 export class MemoryRevocationStore implements RevocationStore {
+  readonly durability = 'volatile' as const;
   private readonly revoked = new Set<string>();
   isRevoked(certificateId: string): boolean {
     return this.revoked.has(certificateId);
   }
+  /**
+   * يُثبِتُ السحبَ في الذاكرةِ فيَنفُذُ داخلَ العمليّةِ الحيّة، ويُرجعُ `false`
+   * دائماً (‏`R5-A-05`): لم يُكتَبْ شيءٌ كتابةً دائمةً، فلا يُقالُ `persisted: true`
+   * عن سحبٍ يزولُ بإعادةِ التشغيل.
+   */
   revoke(certificateId: string): boolean {
     this.revoked.add(certificateId);
-    return true;
+    return false;
   }
   ready(): boolean {
     return true;
@@ -110,6 +133,7 @@ export class MemoryRevocationStore implements RevocationStore {
  * يدومُ عبرَ إعادةِ التشغيل، وهذا التنفيذُ يحلُّ المشكلةَ بتخزينٍ دائمٍ على القرص.
  */
 export class FileRevocationStore implements RevocationStore {
+  readonly durability = 'persistent' as const;
   private readonly revoked = new Set<string>();
   private readonly path: string;
   private readonly fsync: boolean;
@@ -354,10 +378,12 @@ export class CertificateAuthority {
     this.revoked = options.revocationStore ?? new MemoryRevocationStore();
     // مراجعة M11.04-F03: ثباتُ الإلغاءِ غيرُ محقَّقٍ افتراضاً — مخزنُ الذاكرةِ
     // لا يدومُ عبرَ إعادةِ التشغيل، فيُقبلُ المسحوبُ بعدَ إقلاعٍ جديد. في الإنتاجِ
-    // يُرفَضُ البناءُ بـ`MemoryRevocationStore` — كما يُرفَضُ بناءُ البوابةِ بلا
+    // يُرفَضُ البناءُ بمخزنٍ لا يُعلِنُ الثباتَ — كما يُرفَضُ بناءُ البوابةِ بلا
     // دفترٍ أو ساعةٍ. ومَن أراد تركيباً بلا ثباتٍ يُصرِّحُ ببيئةٍ غيرِ إنتاجيّةٍ.
+    // `R5-B-01`: الحارسُ يقرأُ إعلانَ `durability` بمساواةٍ تامّةٍ لا صنفَ الكائنِ؛
+    // فالغائبُ و`'volatile'` وأيُّ قيمةٍ أخرى سواءٌ: رفضٌ.
     const env = options.env ?? process.env;
-    if (isProductionRuntime(env) && this.revoked instanceof MemoryRevocationStore) {
+    if (isProductionRuntime(env) && this.revoked.durability !== 'persistent') {
       throw new Error('PERSISTENT_REVOCATION_STORE_REQUIRED_IN_PRODUCTION');
     }
     this.now = options.now ?? (() => Date.now());
@@ -396,7 +422,8 @@ export class CertificateAuthority {
    * يُلغى إلّا بإصدارِ شهادةٍ جديدةٍ بمعرّفٍ مختلف.
    * @param certificateId - معرّف الشهادة المسحوبة
    * @param reason - سبب السحب المسجل
-   * @returns سجل السحب؛ `persisted: false` إن لم يُكتبْ في المخزنِ الدائم
+   * @returns سجل السحب؛ `persisted: false` إن لم يُكتبْ في مخزنٍ دائم — ومنه
+   *   مخزنُ الذاكرةِ المتطايرُ (‏`R5-A-05`) وإن نفذَ السحبُ داخلَ العمليّة
    */
   revoke(
     certificateId: string,
