@@ -30,7 +30,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml } from 'yaml';
-import { readDocCountFacts } from './lib/doc-count-facts.mjs';
+import { readDocCountFacts, openIdsInList } from './lib/doc-count-facts.mjs';
 
 const rootIndex = process.argv.indexOf('--root');
 const root = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
@@ -64,8 +64,7 @@ function countIdsInList(line) {
   const afterColon = afterMaftuh.slice(colonIdx + 1);
   const periodIdx = afterColon.indexOf('.');
   const listBlock = periodIdx === -1 ? afterColon : afterColon.slice(0, periodIdx);
-  const ids = listBlock.match(/`[A-Z0-9-]+`/g);
-  return ids ? new Set(ids).size : 0;
+  return new Set(openIdsInList(listBlock)).size;
 }
 
 const facts = readDocCountFacts(root);
