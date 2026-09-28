@@ -1,5 +1,18 @@
-// مجسّاتُ S13 وضوابطُها — خارجَ المستودعِ، على مُخرَجِ بناءِ `main@1648d450`.
-// لا تكتبُ في المستودعِ ولا تعدِّلُ ملفَّه. تنظِّفُ ما تُنشئه.
+// مجسّاتُ S13 وضوابطُها. لا تكتبُ في المستودعِ ولا تعدِّلُ ملفَّه. تنظِّفُ ما تُنشئه.
+//
+// **أُصلِحَ في `WL-278`** — النسخةُ التي قاسَها مجلسُ الجولةِ السادسةِ محفوظةٌ في
+// التاريخِ (‏الكائنُ `607daf0e` من `43a18d3c`، على مُخرَجِ `main@1648d450`)، وعيوبُها
+// الخمسةُ نتائجُ مفتوحةٌ:
+//   - `R6-CS-02`/`R6-LU-01`: الاستيرادُ كانَ مُطلَقاً (‏مسارٌ مُثبَّتٌ على نسخةِ المنفِّذِ)
+//     فمَن شغّلَه من نسختِه قاسَ شجرةً غيرَها. **الآنَ** يُحَلُّ من موضعِ الملفِّ نفسِه
+//     (`import.meta.url`)، ويُطبَعُ الجذرُ المقيسُ في أوّلِ سطرٍ.
+//   - `R6-CS-01`/`R6-LU-02`: الحكمُ كانَ ثنائيّاً (`VIABLE`/`BLOCKED`) فصُنِّفَ `S13`
+//     بلا محوِ `halt/` «محجوباً» معَ تحقُّقِ ثلاثةِ بنودٍ من خمسةٍ للخصمِ. **الآنَ**
+//     يُقاسُ كلُّ بندٍ وحدَه، والحكمُ `VIABLE` (خمسةٌ) أو `PARTIAL` (بعضُها، مُسمّاةً)
+//     أو `BLOCKED` (لا شيءَ أو رفضُ الإقلاعِ)؛ و`S13` صارَ `S13a-halt-kept` باسمِ ما يفعلُه.
+//   - `R6-LU-03`: الخروجُ كانَ صفراً أيّاً كانَ الحكمُ. **الآنَ** `0` إن كانَ كلُّ
+//     سيناريو `BLOCKED` وحدَه، و`1` إن تحقَّقَ للخصمِ شيءٌ أو أقلعَ ضابطٌ بلا رفضٍ،
+//     و`2` إن سقطَ شرطٌ مسبقٌ فلم يُقَسْ شيءٌ.
 import { Buffer } from 'node:buffer';
 import {
   createCipheriv,
@@ -19,14 +32,14 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-import {
-  SEAL_IV_BYTES,
-  createProductionRootOfTrust,
-  fingerprint,
-} from '/home/user/workspace/xuux/src/root-of-trust/index.mjs';
-
-const REPO = '/home/user/workspace/xuux';
+// R6-CS-02/R6-LU-01: الجذرُ المقيسُ هو النسخةُ التي فيها هذا الملفُّ — لا مسارٌ مُثبَّت.
+const REPO_URL = new URL('../../../', import.meta.url);
+export const REPO = fileURLToPath(REPO_URL);
+const { SEAL_IV_BYTES, createProductionRootOfTrust, fingerprint } = await import(
+  new URL('src/root-of-trust/index.mjs', REPO_URL).href
+);
 const MANIFEST = 'root-of-trust.manifest.json';
 const JOURNAL = 'root-of-trust.manifest.journal';
 const LEDGER = 'commands.ledger';
@@ -108,6 +121,47 @@ function record(name, verdict, detail) {
   console.log(`[${verdict}] ${name} :: ${detail}`);
 }
 
+/**
+ * R6-CS-01/R6-LU-02: البنودُ الخمسةُ التي يطلبُها الخصمُ تُقاسُ كلٌّ وحدَه، فلا
+ * يُخفي حكمٌ ثنائيٌّ تحقُّقَ بعضِها.
+ */
+export function gradeReplay({ haltState, advanced, after, replay }) {
+  const achieved = [];
+  if (haltState.state === 'running') achieved.push('halt-released');
+  if (haltState.epoch === 0) achieved.push('epoch-reset');
+  if (after.sequence < advanced.sequence) achieved.push('sequence-rolled-back');
+  if (after.ledgerCommitted < advanced.ledgerCommitted) achieved.push('ledger-rolled-back');
+  if (replay === 'ACCEPTED_NO_THROW') achieved.push('committed-command-replayed');
+  const verdict = achieved.length === 5 ? 'VIABLE' : achieved.length > 0 ? 'PARTIAL' : 'BLOCKED';
+  return { verdict, achieved };
+}
+
+/** R6-LU-03: رمزُ الخروجِ يَحرُسُ الحكمَ — صفرٌ إن كانَ كلُّ سيناريو `BLOCKED` وحدَه. */
+export function exitCodeFor(list) {
+  if (list.length === 0) return 2;
+  return list.every((r) => r.verdict === 'BLOCKED') ? 0 : 1;
+}
+
+async function attemptReplay(third, root, body, advanced, name) {
+  const b = body(root);
+  const haltState = third.haltSwitch.read();
+  let replay = 'REJECTED';
+  try {
+    third.ledger.begin({ id: 'repeat-me' });
+    await third.ledger.commitSigned({ id: 'repeat-me' }, 'إعادةُ تنفيذٍ');
+    replay = 'ACCEPTED_NO_THROW';
+  } catch (err) {
+    replay = `THROWN:${err.code ?? err.message}`;
+  }
+  const { verdict, achieved } = gradeReplay({ haltState, advanced, after: b, replay });
+  const detail =
+    `BOOT_OK; halt=${haltState.state}/epoch=${String(haltState.epoch)}; ` +
+    `seq ${String(advanced.sequence)}→${String(b.sequence)}; ` +
+    `ledgerCommitted ${String(advanced.ledgerCommitted)}→${String(b.ledgerCommitted)}; ` +
+    `replay=${replay}; achieved=${String(achieved.length)}/5[${achieved.join(',')}]`;
+  record(name, verdict, detail);
+}
+
 async function driveToHaltedState(boot, body, root, commandId) {
   const rt = await boot(root);
   rt.ledger.begin({ id: commandId });
@@ -118,7 +172,8 @@ async function driveToHaltedState(boot, body, root, commandId) {
 }
 
 // ————————————————————————————————————————————————
-// S13: بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ السجلِّ + دفترٌ يُستحدَثُ فارغاً
+// S13a-halt-kept (كانَ `S13`): بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ السجلِّ + دفترٌ
+// يُستحدَثُ فارغاً — **و`halt/` باقٍ**؛ والمحوُ الكاملُ في `S13b-full-wipe`.
 // ————————————————————————————————————————————————
 async function s13() {
   const { boot, body } = rig();
@@ -155,33 +210,11 @@ async function s13() {
     try {
       third = await boot(root);
     } catch (err) {
-      record('S13', 'BLOCKED', `الإقلاعُ رُفِضَ: ${err.code ?? err.message}`);
-      third?.log?.close?.();
+      record('S13a-halt-kept', 'BLOCKED', `الإقلاعُ رُفِضَ: ${err.code ?? err.message}`);
       return;
     }
     try {
-      const b = body(root);
-      const haltState = third.haltSwitch.read();
-      let replay = 'REJECTED';
-      try {
-        third.ledger.begin({ id: 'repeat-me' });
-        await third.ledger.commitSigned({ id: 'repeat-me' }, 'إعادةُ تنفيذٍ');
-        replay = 'ACCEPTED_NO_THROW';
-      } catch (err) {
-        replay = `THROWN:${err.code ?? err.message}`;
-      }
-      const detail =
-        `BOOT_OK; halt=${haltState.state}/epoch=${String(haltState.epoch)}; ` +
-        `seq ${String(advanced.sequence)}→${String(b.sequence)}; ` +
-        `ledgerCommitted ${String(advanced.ledgerCommitted)}→${String(b.ledgerCommitted)}; ` +
-        `replay=${replay}`;
-      const viable =
-        haltState.state === 'running' &&
-        haltState.epoch === 0 &&
-        b.sequence < advanced.sequence &&
-        b.ledgerCommitted === 0 &&
-        replay === 'ACCEPTED_NO_THROW';
-      record('S13', viable ? 'VIABLE' : 'BLOCKED', detail);
+      await attemptReplay(third, root, body, advanced, 'S13a-halt-kept');
     } finally {
       third.log.close?.();
     }
@@ -222,32 +255,10 @@ async function s13b() {
       third = await boot(root);
     } catch (err) {
       record('S13b-full-wipe', 'BLOCKED', `الإقلاعُ رُفِضَ: ${err.code ?? err.message}`);
-      third?.log?.close?.();
       return;
     }
     try {
-      const b = body(root);
-      const haltState = third.haltSwitch.read();
-      let replay = 'REJECTED';
-      try {
-        third.ledger.begin({ id: 'repeat-me' });
-        await third.ledger.commitSigned({ id: 'repeat-me' }, 'إعادةُ تنفيذٍ');
-        replay = 'ACCEPTED_NO_THROW';
-      } catch (err) {
-        replay = `THROWN:${err.code ?? err.message}`;
-      }
-      const detail =
-        `BOOT_OK; halt=${haltState.state}/epoch=${String(haltState.epoch)}; ` +
-        `seq ${String(advanced.sequence)}→${String(b.sequence)}; ` +
-        `ledgerCommitted ${String(advanced.ledgerCommitted)}→${String(b.ledgerCommitted)}; ` +
-        `replay=${replay}`;
-      const viable =
-        haltState.state === 'running' &&
-        haltState.epoch === 0 &&
-        b.sequence < advanced.sequence &&
-        b.ledgerCommitted === 0 &&
-        replay === 'ACCEPTED_NO_THROW';
-      record('S13b-full-wipe', viable ? 'VIABLE' : 'NOT-AS-DESCRIBED', detail);
+      await attemptReplay(third, root, body, advanced, 'S13b-full-wipe');
     } finally {
       third.log.close?.();
     }
@@ -342,11 +353,30 @@ async function controlC3() {
   }
 }
 
-const scenario = process.argv[2] ?? 'all';
-if (scenario === 'all' || scenario === 's13') await s13();
-if (scenario === 'all' || scenario === 's13b') await s13b();
-if (scenario === 'all' || scenario === 'c1') await controlC1();
-if (scenario === 'all' || scenario === 'c2') await controlC2();
-if (scenario === 'all' || scenario === 'c3') await controlC3();
-console.log('---SUMMARY---');
-for (const r of results) console.log(`${r.verdict}\t${r.name}\t${r.detail}`);
+const SCENARIOS = { s13: s13, s13b: s13b, c1: controlC1, c2: controlC2, c3: controlC3 };
+
+async function main(argv) {
+  const scenario = argv[2] ?? 'all';
+  if (scenario !== 'all' && !(scenario in SCENARIOS)) {
+    console.error(`سيناريو غيرُ معروفٍ: ${scenario}`);
+    return 2;
+  }
+  console.log(`REPO ${REPO}`);
+  try {
+    for (const [key, run] of Object.entries(SCENARIOS)) {
+      if (scenario === 'all' || scenario === key) await run();
+    }
+  } catch (err) {
+    console.error(`شرطٌ مسبقٌ سقطَ فلم يُقَسْ: ${err.message}`);
+    return 2;
+  }
+  console.log('---SUMMARY---');
+  for (const r of results) console.log(`${r.verdict}\t${r.name}\t${r.detail}`);
+  const code = exitCodeFor(results);
+  console.log(`EXIT ${String(code)}`);
+  return code;
+}
+
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+  process.exitCode = await main(process.argv);
+}
