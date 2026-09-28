@@ -327,3 +327,151 @@ test('R5-A-02: createGovernance بلا بوابةِ هويةٍ يُرفَضُ ع
     'createGovernance بلا identityGate يجب أن يرفض البناء برمز ENFORCEMENT_IDENTITY_GATE_REQUIRED',
   );
 });
+
+// ── R5-B-10 (تقرير: R5-B-08): `requireIdentityGate: false` لا يُبنى في الإنتاج ──
+//
+// مسلكُ المُراجِعِ ISO-01: نقطةٌ بلا بوابةِ هويّةٍ تُقيِّمُ فاعلاً يَصِفُ نفسَه
+// `role:king` كما وَرَدَ. والإصلاحُ: المخرجُ يبقى للاختبارِ والتطويرِ، ويُرفَضُ
+// **عندَ البناءِ** في الإنتاجِ — والإنتاجُ يُقرأُ من البيئةِ المحقونةِ ومن بيئةِ
+// العمليّةِ معاً، فحقنُ `env: {}` لا يَفتحُه.
+
+/**
+ * فاعلٌ يَصِفُ نفسَه ملكاً — عينُ مسلكِ ISO-01.
+ * @returns {import('../../src/policy/model.mjs').PolicyRequest}
+ */
+function kingClaim() {
+  return {
+    actor: { id: 'agent:liar', kind: 'autonomous', role: 'role:king', state: 'active' },
+    action: 'read-data',
+    resource: { type: 'data', id: 'registry' },
+    context: {},
+  };
+}
+
+/**
+ * يُشغِّلُ `fn` وبيئةُ العمليّةِ `STATE_ENV` مضبوطةٌ، ثمَّ يُعيدُها كما كانت.
+ * @template T
+ * @param {string | undefined} value
+ * @param {() => T} fn
+ * @returns {T}
+ */
+function withProcessStateEnv(value, fn) {
+  const had = Object.hasOwn(process.env, 'STATE_ENV');
+  const previous = process.env['STATE_ENV'];
+  if (value === undefined) delete process.env['STATE_ENV'];
+  else process.env['STATE_ENV'] = value;
+  try {
+    return fn();
+  } finally {
+    if (had) process.env['STATE_ENV'] = previous;
+    else delete process.env['STATE_ENV'];
+  }
+}
+
+test('R5-B-10: `requireIdentityGate: false` بلا بوابةٍ يُرفَضُ عندَ البناءِ في الإنتاجِ المحقونِ', () => {
+  assert.throws(
+    () =>
+      new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle }),
+        log: memoryLog(),
+        requireIdentityGate: false,
+        identityGate: null,
+        env: { STATE_ENV: 'production' },
+      }),
+    /ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION/,
+  );
+});
+
+test('R5-B-10: حقنُ `env: {}` في عمليّةٍ إنتاجيّةٍ لا يَفتحُ المخرجَ', () => {
+  withProcessStateEnv('production', () => {
+    assert.throws(
+      () =>
+        new EnforcementPoint({
+          decisionPoint: createPolicyDecisionPoint({ bundle }),
+          log: memoryLog(),
+          requireIdentityGate: false,
+          identityGate: null,
+          env: {},
+        }),
+      /ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION/,
+    );
+  });
+});
+
+test('R5-B-10: بيئةُ العمليّةِ الإنتاجيّةُ بلا حقنٍ ترفضُ المخرجَ أيضاً', () => {
+  withProcessStateEnv('production', () => {
+    assert.throws(
+      () =>
+        new EnforcementPoint({
+          decisionPoint: createPolicyDecisionPoint({ bundle }),
+          log: memoryLog(),
+          requireIdentityGate: false,
+          identityGate: null,
+        }),
+      /ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION/,
+    );
+  });
+});
+
+test('R5-B-10: خارجَ الإنتاجِ يبقى المخرجُ قائماً للاختبارِ (السلوكُ المُعلَنُ لا يُكسَرُ)', async () => {
+  const point = withProcessStateEnv(
+    undefined,
+    () =>
+      new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle }),
+        log: memoryLog(),
+        requireIdentityGate: false,
+        identityGate: null,
+        env: { STATE_ENV: 'development' },
+      }),
+  );
+  const result = await point.authorize(kingClaim());
+  assert.notEqual(result.decision.code, 'IDENTITY_GATE_REQUIRED');
+});
+
+test('R5-B-10: حقلٌ يُبدَّلُ بعدَ البناءِ إلى الإنتاجِ ⇒ الاستعمالُ يُرفَضُ بـIDENTITY_GATE_REQUIRED بلا تذكرة', async () => {
+  const log = memoryLog();
+  const point = withProcessStateEnv(
+    undefined,
+    () =>
+      new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle }),
+        log,
+        requireIdentityGate: false,
+        identityGate: null,
+        env: { STATE_ENV: 'development' },
+      }),
+  );
+  // المسارُ الذي يتجاوزُ البناءَ: تبديلُ الحقلِ بعدَه.
+  /** @type {{ env: NodeJS.ProcessEnv }} */ (/** @type {unknown} */ (point)).env = {
+    STATE_ENV: 'production',
+  };
+  const result = await point.authorize(kingClaim());
+  assert.equal(result.decision.allowed, false);
+  assert.equal(result.decision.code, 'IDENTITY_GATE_REQUIRED');
+  assert.equal(result.token, null);
+});
+
+test('R5-B-10: الرفضُ للثقةِ بالوصفِ لا للخيارِ — بوابةٌ موصولةٌ في الإنتاجِ تُبنى', () => {
+  const gate = {
+    /** @param {string} actorId */
+    async verify(actorId) {
+      return {
+        ok: true,
+        code: 'IDENTITY_OK',
+        reason: '',
+        actor: { id: actorId, kind: 'autonomous', role: 'role:agent', state: 'active' },
+      };
+    },
+  };
+  assert.doesNotThrow(
+    () =>
+      new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle }),
+        log: memoryLog(),
+        requireIdentityGate: false,
+        identityGate: /** @type {never} */ (gate),
+        env: { STATE_ENV: 'production' },
+      }),
+  );
+});

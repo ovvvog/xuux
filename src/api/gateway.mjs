@@ -410,7 +410,7 @@ export class ApiGateway {
   #now;
 
   /**
-   * @param {{ policy?: ApiPolicy, dir?: string, log?: import('./session-store.mjs').SessionLogLike | null, agents?: import('./session-store.mjs').SessionAgentsLike | null, monitor?: ApiMonitorLike | null, enforcementPoint?: ApiEnforcementLike | null, telemetry?: ApiTelemetryLike | null, now?: () => Date, requirePoP?: boolean, popWindowSeconds?: number }} [deps]
+   * @param {{ policy?: ApiPolicy, dir?: string, log?: import('./session-store.mjs').SessionLogLike | null, agents?: import('./session-store.mjs').SessionAgentsLike | null, monitor?: ApiMonitorLike | null, enforcementPoint?: ApiEnforcementLike | null, telemetry?: ApiTelemetryLike | null, now?: () => Date, requirePoP?: boolean, popWindowSeconds?: number, env?: NodeJS.ProcessEnv }} [deps]
    */
   constructor(deps = {}) {
     const policy = deps.policy ?? loadApiPolicy(deps.dir === undefined ? {} : { dir: deps.dir });
@@ -439,6 +439,7 @@ export class ApiGateway {
       log: deps.log ?? null,
       agents: deps.agents ?? null,
       requirePoP: deps.requirePoP !== false,
+      ...(deps.env !== undefined ? { env: deps.env } : {}),
       ...(deps.popWindowSeconds !== undefined ? { popWindowSeconds: deps.popWindowSeconds } : {}),
       ...clock,
     });
