@@ -22,13 +22,19 @@
  *      الخروج سجلَ النجاح فقط فلا يُرى الاعتداء.
  *
  * حدود معلنة:
- *   - البوابة لا تُشفّر الحمولة ولا تفحص محتواها؛ التصنيف يأتي من المُنادي
- *     ويُحاسَب عليه في السياسة، والتصنيف الكاذب عيبٌ في الفاعل لا في البوابة.
+ *   - البوابة لا تُشفّر الحمولة ولا تفحص محتواها. **والتصنيفُ لا يُؤخَذُ من المُنادي
+ *     وحدَه** (‏`R5-B-05`، `WL-275`): ادّعاؤه يرفعُ ولا يُخفِّضُ. فإن وُصِلَ مُصنِّفٌ
+ *     (`classifier`) قُرئَ التصنيفُ المسجَّلُ للمورد وغلبَ الادّعاءَ الأدنى، وموردٌ بلا
+ *     تسجيلٍ يُرفَضُ؛ وبلا مُصنِّفٍ لا يَنزلُ الادّعاءُ دونَ `internal`، والمُصنِّفُ
+ *     **إلزاميٌّ في الإنتاجِ** عندَ البناءِ. وتصنيفٌ لا يعرفُه السلّمُ يُرفَضُ.
  *   - عدّاد المعدّل في الذاكرة: يُصفَّر بإعادة التشغيل، فهو حدٌّ لعمليةٍ واحدة لا
  *     حدٌّ موزَّع. الحصّة الدائمة مسؤولية دفتر الحصص في نقطة التفويض.
  *   - البوابة لا تمنع وحدةً تستدعي `fetch` بنفسها؛ منعُ ذلك عزلٌ حقيقي (M6.04)
  *     وهو منفَّذٌ في WL-024. الحاجز هنا تنظيميٌّ في الشيفرة لا حاجز نواة.
  */
+
+import { loadClassificationLattice } from '../data/classification.mjs';
+import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_CALLS_PER_WINDOW = 30;
@@ -45,7 +51,20 @@ export const EGRESS_ERRORS = Object.freeze({
   NOT_AUTHORIZED: 'EGRESS_NOT_AUTHORIZED',
   TICKET_INVALID: 'EGRESS_TICKET_INVALID',
   TRANSPORT_FAILED: 'EGRESS_TRANSPORT_FAILED',
+  CLASSIFICATION_UNKNOWN: 'EGRESS_CLASSIFICATION_UNKNOWN',
+  CLASSIFICATION_UNRECORDED: 'EGRESS_CLASSIFICATION_UNRECORDED',
+  CLASSIFIER_REQUIRED_IN_PRODUCTION: 'EGRESS_CLASSIFIER_REQUIRED_IN_PRODUCTION',
+  CLASSIFICATION_SEALED: 'EGRESS_CLASSIFICATION_SEALED',
 });
+
+/**
+ * مصدرُ التصنيفِ المسجَّلِ للمورد (‏`R5-B-05`). يُعيدُ التصنيفَ كما سُجِّلَ أو `null`
+ * إن لم يُسجَّلِ المورد.
+ * @typedef {{ classificationOf: (resourceId: string) => string | null | Promise<string | null> }} EgressClassifier
+ */
+
+/** أدنى ما يُقبَلُ من ادّعاءٍ بلا مصدرٍ يؤكِّدُه: المُنادي لا يُعلِنُ ما يملكُه عامّاً. */
+const UNCONFIRMED_FLOOR = 'internal';
 
 /** خطأ مُسمّى: البوابات والأتمتة تقرأ الرمز، والنص العربي للقارئ البشري. */
 export class EgressError extends Error {
@@ -83,7 +102,7 @@ export class EgressError extends Error {
 
 export class EgressGate {
   /**
-   * @param {{ enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, transport?: (record: { destination: EgressDestination, bytes: number, payload: string | Uint8Array }) => Promise<unknown>, destinations?: readonly EgressDestination[], quarantine?: { report: (signal: object) => unknown } | null, callsPerWindow?: number, windowMs?: number, maxPayloadBytes?: number, now?: () => Date }} [deps]
+   * @param {{ enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, transport?: (record: { destination: EgressDestination, bytes: number, payload: string | Uint8Array }) => Promise<unknown>, destinations?: readonly EgressDestination[], quarantine?: { report: (signal: object) => unknown } | null, classifier?: EgressClassifier | null, lattice?: import('../data/classification.mjs').ClassificationLattice, env?: NodeJS.ProcessEnv, callsPerWindow?: number, windowMs?: number, maxPayloadBytes?: number, now?: () => Date }} [deps]
    */
   constructor({
     enforcementPoint,
@@ -91,6 +110,9 @@ export class EgressGate {
     transport,
     destinations = [],
     quarantine = null,
+    classifier = null,
+    lattice,
+    env = process.env,
     callsPerWindow = DEFAULT_CALLS_PER_WINDOW,
     windowMs = DEFAULT_WINDOW_MS,
     maxPayloadBytes = DEFAULT_MAX_PAYLOAD_BYTES,
@@ -102,6 +124,19 @@ export class EgressGate {
         'بوابة الخروج تحتاج نقطة تفويض وسجلاً وناقلاً: بوابةٌ بلا أحدها تسمح بالخروج بلا قرار أو بلا أثر.',
       );
     }
+    // R5-B-05: بلا مُصنِّفٍ يَصيرُ التصنيفُ قولَ المُنادي، فلا يُبنى ذلك في الإنتاج.
+    // والإنتاجُ من البيئةِ المحقونةِ ومن العمليّةِ معاً — الحقنُ لا يُطفِئُ حدّاً.
+    if (
+      classifier === null &&
+      (isProductionRuntime(env) || (env !== process.env && isProductionRuntime(process.env)))
+    ) {
+      throw new EgressError(
+        EGRESS_ERRORS.CLASSIFIER_REQUIRED_IN_PRODUCTION,
+        'بوابة الخروج في الإنتاج تحتاج مُصنِّفاً يقرأ التصنيف المسجَّل للمورد؛ بغيره يُخرَجُ الحسّاسُ بإعلانه عامّاً.',
+      );
+    }
+    this.classifier = classifier;
+    this.lattice = lattice ?? loadClassificationLattice();
     this.enforcementPoint = enforcementPoint;
     this.log = log;
     this.transport = transport;
@@ -162,6 +197,49 @@ export class EgressGate {
   }
 
   /**
+   * R5-B-05: التصنيفُ الفعليُّ **أعلى الاثنين** — ادّعاءُ المُنادي والمسجَّلُ للمورد —
+   * لا ادّعاءُ المُنادي وحدَه. فالادّعاءُ يرفعُ ولا يُخفِّضُ: `sensitive` مسجَّلٌ
+   * يُعلَنُ `public` يبقى `sensitive`. وبلا مُصنِّفٍ لا ينزلُ الادّعاءُ دونَ
+   * `internal`. ويُعادُ النصُّ **بهجائِه** (‏`secret` يبقى `secret`) لأنّ السياسةَ
+   * تُطابِقُ الهجاءَ؛ والرتبةُ من السلّمِ بمترادفاتِه.
+   * @param {string} claimed
+   * @param {string} resourceId
+   * @param {{ actorId: string, destination: string, bytes: number, classification: string }} facts
+   * @returns {Promise<string>}
+   */
+  async #effectiveClassification(claimed, resourceId, facts) {
+    const claimedRank = this.lattice.rank(claimed);
+    if (claimedRank < 0) {
+      this.#refuse(
+        EGRESS_ERRORS.CLASSIFICATION_UNKNOWN,
+        `التصنيف «${claimed}» غير معروف في سلّم التصنيف؛ مجهولٌ لا يُقرأ عامّاً.`,
+        facts,
+      );
+    }
+    /** @type {string} */
+    let baseline = UNCONFIRMED_FLOOR;
+    if (this.classifier !== null) {
+      const recorded = await this.classifier.classificationOf(resourceId);
+      if (recorded === null || recorded === undefined) {
+        this.#refuse(
+          EGRESS_ERRORS.CLASSIFICATION_UNRECORDED,
+          `المورد «${resourceId}» بلا تصنيفٍ مسجَّل؛ لا يُخرَجُ ما لا يُعرَف تصنيفُه بقول المُنادي.`,
+          facts,
+        );
+      }
+      if (this.lattice.rank(recorded) < 0) {
+        this.#refuse(
+          EGRESS_ERRORS.CLASSIFICATION_UNKNOWN,
+          `التصنيف المسجَّل «${String(recorded)}» للمورد «${resourceId}» غير معروف في سلّم التصنيف.`,
+          facts,
+        );
+      }
+      baseline = /** @type {string} */ (recorded);
+    }
+    return claimedRank >= this.lattice.rank(baseline) ? claimed : baseline;
+  }
+
+  /**
    * المسار الوحيد للخروج الخارجي.
    * @param {EgressRequest} request
    * @returns {Promise<{ bytes: number, destination: string, policyId: string | null, result: unknown }>}
@@ -169,9 +247,9 @@ export class EgressGate {
   async send(request) {
     const actor = /** @type {{ id?: unknown }} */ (request.actor ?? {});
     const actorId = typeof actor.id === 'string' ? actor.id : 'unknown';
-    const classification = request.classification ?? 'internal';
+    const claimed = request.classification ?? UNCONFIRMED_FLOOR;
     const bytes = EgressGate.sizeOf(request.payload);
-    const facts = { actorId, destination: request.destination, bytes, classification };
+    const facts = { actorId, destination: request.destination, bytes, classification: claimed };
 
     const destination = this.destinations.get(request.destination);
     if (destination === undefined) {
@@ -198,6 +276,8 @@ export class EgressGate {
     }
 
     const resourceId = request.resourceId ?? destination.id;
+    const classification = await this.#effectiveClassification(claimed, resourceId, facts);
+    facts.classification = classification;
     const policyRequest = {
       actor: request.actor,
       action: EGRESS_ACTION,
@@ -215,6 +295,18 @@ export class EgressGate {
       this.#refuse(
         EGRESS_ERRORS.NOT_AUTHORIZED,
         `التفويض رفض الخروج برمز ${decision.code}: ${decision.reason}`,
+        facts,
+      );
+    }
+
+    // R5-B-05: المرتبةُ المختومةُ (‏`sovereign`) لا تخرجُ ولو أذِنَت السياسة. فسياسةُ
+    // `pol:deny-egress-of-sensitive` تُطابِقُ الهجاءَ `sensitive`/`secret` لا الاسمَ
+    // القانونيَّ `sovereign`، فتصنيفٌ مسجَّلٌ باسمِه القانونيِّ كانَ يَعبُرُها. والفحصُ
+    // بعدَ القرارِ لا قبلَه ليبقى رفضُ السياسةِ هو المرئيَّ حيثُ تَرفُض.
+    if (this.lattice.isSealed(classification)) {
+      this.#refuse(
+        EGRESS_ERRORS.CLASSIFICATION_SEALED,
+        `التصنيف «${classification}» مرتبةٌ مختومة؛ لا تخرج خارج الحدود بأي إذنٍ تشغيلي.`,
         facts,
       );
     }
