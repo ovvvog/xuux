@@ -36,6 +36,7 @@
  */
 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 
 /** @typedef {import('./model.mjs').PolicyRequest} PolicyRequest */
 /** @typedef {import('./model.mjs').PolicyDecision} PolicyDecision */
@@ -92,9 +93,19 @@ function bindingOf(request) {
   };
 }
 
+/**
+ * R5-B-10: الإنتاجُ مقروءٌ من البيئةِ المحقونةِ ومن بيئةِ العمليّةِ — أيُّهما قالَ
+ * «إنتاج» كفى. فالحقنُ يُضيِّقُ ولا يُوسِّعُ: لا يُطفِئُ حدّاً إنتاجيّاً.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {boolean}
+ */
+function productionIn(env) {
+  return isProductionRuntime(env) || (env !== process.env && isProductionRuntime(process.env));
+}
+
 export class EnforcementPoint {
   /**
-   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, quarantine?: { isQuarantined: (subject: string) => boolean } | null, royalCommandVerifier?: ((command: { id: string, digest?: string, action: string, resource?: string }) => boolean) | null, requireIdentityGate?: boolean, secret?: Buffer, now?: () => Date }} [deps]
+   * @param {{ decisionPoint?: PolicyDecisionPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, haltSwitch?: { assertOperational: () => void } | null, quotaLedger?: QuotaLedgerLike | null, decisionSink?: DecisionSink | null, identityGate?: IdentityGateLike | null, legislationGate?: LegislationGateLike | null, quarantine?: { isQuarantined: (subject: string) => boolean } | null, royalCommandVerifier?: ((command: { id: string, digest?: string, action: string, resource?: string }) => boolean) | null, requireIdentityGate?: boolean, env?: NodeJS.ProcessEnv, secret?: Buffer, now?: () => Date }} [deps]
    */
   constructor({
     decisionPoint,
@@ -107,6 +118,7 @@ export class EnforcementPoint {
     quarantine = null,
     royalCommandVerifier = null,
     requireIdentityGate = true,
+    env = process.env,
     secret,
     now,
   } = {}) {
@@ -118,6 +130,16 @@ export class EnforcementPoint {
     if (requireIdentityGate && identityGate === null) {
       throw new Error('ENFORCEMENT_IDENTITY_GATE_REQUIRED');
     }
+    // R5-B-10 (تقرير: R5-B-08): `requireIdentityGate: false` مخرجُ تركيبٍ للاختبارِ
+    // يَثِقُ بوصفِ الفاعلِ كما وَرَدَ — فمن ادّعى `role:king` قُيِّمَ ملكاً. فهو في
+    // الإنتاجِ **مرفوضٌ عندَ البناءِ** لا مُنبَّهٌ عليه: الإنتاجُ يُقرأُ من البيئةِ
+    // المحقونةِ **ومن بيئةِ العمليّةِ معاً**، فحقنُ `env: {}` في عمليّةٍ إنتاجيّةٍ لا
+    // يَفتحُ المخرجَ (‏وهو النمطُ المقيسُ في `WL-272`). ولا يَسري الرفضُ على تركيبٍ
+    // موصولِ البوابةِ: ما يُرفَضُ هو الثقةُ بالوصفِ لا الخيارُ في نفسِه.
+    if (!requireIdentityGate && identityGate === null && productionIn(env)) {
+      throw new Error('ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION');
+    }
+    this.env = env;
     this.decisionPoint = decisionPoint;
     this.log = log;
     this.haltSwitch = haltSwitch;
@@ -210,7 +232,12 @@ export class EnforcementPoint {
     // وهذا الحدُّ الإضافيُّ للمساراتِ التي تتجاوزُ البناءَ (حقنٌ بمرآةٍ، بناءٌ
     // ديناميكيٌّ): الرفضُ مُسمَّى `IDENTITY_GATE_REQUIRED` لا قبولٌ صامتٌ
     // لفاعلٍ يصفه المستدعي كما يشاء.
-    if (this.requireIdentityGate && this.identityGate === null) {
+    // R5-B-10: والحدُّ نفسُه عندَ الاستعمالِ للمساراتِ التي تتجاوزُ البناءَ (‏حقلٌ
+    // يُبدَّلُ بعدَه): نقطةٌ بلا بوابةٍ في الإنتاجِ تَرفضُ ولو قيلَ لها ألّا تُلزِمَ.
+    if (
+      this.identityGate === null &&
+      (this.requireIdentityGate || productionIn(/** @type {NodeJS.ProcessEnv} */ (this.env)))
+    ) {
       const decision = Object.freeze({
         allowed: false,
         effect: /** @type {const} */ ('deny'),
