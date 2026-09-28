@@ -17,6 +17,48 @@
    للمُدخلةِ**، والقاعدةُ مقيسةٌ بـ`R11` في `npm run guard:readiness` (الدَّين `LIVE-4`).
 
 
+### [2026-09-28] — WL-276 — R5-A-03: `requirePoP: false` لا يُبنى في الإنتاجِ — إسقاطُ الضمانِ الصريحُ مرفوضٌ برمزِه في الواجهةِ كما في نقطةِ الإنفاذ
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `R5-A-03` — نتيجةُ مراجعةٍ مفتوحةٌ (§4.3) · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — الشطرانِ المُسمَّيانِ مُعالَجانِ في الشفرةِ **والنتيجةُ تبقى `open`** والإغلاقُ حكمُ مجلسٍ
+
+#### ما تمَّ فعلاً
+
+- **المصدرُ:** تقريرُ `M11.04` الجولةُ الخامسةُ (`claude_fable_5`، الصفُّ `R5-A-03`): «إسقاطُ ضماناتٍ صريحٌ يُقبَلُ في الإنتاجِ بلا رمزٍ: `EnforcementPoint({requireIdentityGate:false})` و`ApiGateway({requirePoP:false})`»، والتوصيةُ «تعميمُ نمطِ `CROWN_GUARANTEE_CANNOT_BE_DISABLED_IN_PRODUCTION` على الوحدتين». والشطرُ الأوّلُ أُصلِحَ في `WL-274`؛ وهذهِ الدفعةُ للثاني.
+- **القياسُ قبلَ الإصلاحِ:** على شفرةِ `main` — `new SessionStore({ …, requirePoP: false, env: { STATE_ENV: 'production' } })` تحتَ `STATE_ENV=production` ⇒ `BUILT requirePoP= false` (‏مجسٌّ في `/tmp` على `git archive origin/main`).
+- **الإصلاحُ:** `SessionStore` يَرفعُ `SESSION_POP_CANNOT_BE_DISABLED_IN_PRODUCTION` عندَ البناءِ حينَ `requirePoP === false` والإنتاجُ من البيئةِ المحقونةِ **أو** من العمليّةِ؛ و`ApiGateway` يُمرِّرُ `env` إليه. والرمزُ في `SESSION_CONSTRUCTION_ERRORS` لا في `SESSION_ERRORS`: رمزُ تركيبٍ لا يبلغُ مُنادياً، فلا يُعلَنُ بينَ رموزِ الردِّ في `config/api.yaml` ولا يَمَسُّ `T4` في `guard:transport`.
+- **الشواهدُ:** ثلاثةُ اختباراتٍ في `tests/api/po-p.test.mjs` (‏لا ملفَّ جديدٌ): المحقونُ · `env: {}` في عمليّةٍ إنتاجيّةٍ وعبرَ `ApiGateway` · وما لم يُكسَرْ (الافتراضيُّ يُبنى في الإنتاجِ، والإسقاطُ خارجَه باقٍ للاختباراتِ الثلاثَ عشرةَ التي تستعملُه).
+
+#### الملفّاتُ المُتأثِّرةُ
+
+- `src/api/session-store.mjs` — الرفضُ عندَ البناءِ و`SESSION_CONSTRUCTION_ERRORS` وخيارُ `env`.
+- `src/api/gateway.mjs` — تمريرُ `env`.
+- `tests/api/po-p.test.mjs` — ثلاثةُ اختباراتِ `R5-A-03`.
+- `tests/tooling/guard-doc-counts.test.mjs` — الطفرةُ `M12` كانت تُطابِقُ صفَّ `R5-A-03` **بنصِّ معالجتِه** «لم تُعالَجْ بعدُ…» فسقطَت حينَ تغيَّرَ النصُّ؛ صارَت تُطابِقُه بمعرِّفِه وشدّتِه ومالكِه، والطفرةُ نفسُها باقيةٌ (‏حذفُ الصفِّ ⇒ الحاجزُ `exit=1`) فلم يُضعَفْ تأكيدٌ.
+- `docs/roadmap/06-debt-register.md` — عمودُ المعالجةِ لـ`R5-A-03` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/READINESS_REPORT.md` (مُولَّدٌ).
+
+#### الـ commit
+
+الفرعُ `fix/r5-a-03-pop-disable-production`، مُكدَّسٌ على `fix/r5-b-05-egress-classification`.
+
+#### الدليلُ
+
+| المقيسُ | القيمةُ |
+| --- | --- |
+| مجسُّ البناءِ على شفرةِ `main` تحتَ `STATE_ENV=production` | `BUILT requirePoP= false` · `exit=1` |
+| المجسُّ نفسُه على الفرعِ | `REFUSED SESSION_POP_CANNOT_BE_DISABLED_IN_PRODUCTION` · `exit=0` |
+| `node --test tests/api/po-p.test.mjs` | `13` · `13` ناجحاً · `0` ساقطاً |
+| الملفُّ نفسُه على شفرةِ `main` | لا يُحمَّلُ (‏`SESSION_CONSTRUCTION_ERRORS` غائبٌ) ⇒ `exit=1` — فالمجسُّ أعلاه هو قياسُ السلوكِ |
+| `grep -rn "requirePoP: false" src scripts` | لا موضعَ يُمرِّرُه خارجَ التعليقاتِ — فالرفضُ لا يَكسِرُ مُركِّباً إنتاجيّاً |
+
+#### ما لم يتمَّ ولماذا
+
+- **لا إغلاقَ ولا مسَّ لـ`config/external-review.yaml`.**
+- **الشطرُ غيرُ المقيسِ في التقريرِ** — «جلساتُ أدوارِ السيادةِ عبرَ `KingAuthenticator` وحدَه» — لم يُقَسْ ولم يُعالَجْ في هذهِ الدفعةِ؛ باقٍ مُسمّىً في عمودِ المعالجةِ.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- تَلمِسُ `src/` و`tests/` ⇒ `R7/SCOPE-DRIFT` متوقَّعٌ على `main` بعدَ الدمجِ (`OPS-1/MAIN-DRIFT-WINDOW`).
+
 ### [2026-09-28] — WL-275 — R5-B-05: التصنيفُ لا يُؤخَذُ من المُنادي وحدَه في بوابةِ الخروج، ومعه `LIVE-20`: المختومُ باسمِه القانونيِّ كانَ يَعبُرُ منعَ الإخراج
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `R5-B-05` — نتيجةُ مراجعةٍ مفتوحةٌ (§4.3)، و`LIVE-20` — دَينٌ مُكتشَفٌ · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — `R5-B-05` مُعالَجةٌ في الشفرةِ **وتبقى `open`** والإغلاقُ حكمُ مجلسٍ؛ و`LIVE-20` مُغلَقٌ في البوابةِ ونصُّ السياسةِ للمالكِ

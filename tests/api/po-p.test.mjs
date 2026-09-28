@@ -2,7 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, randomUUID, createHash } from 'node:crypto';
 import { ApiGateway } from '../../src/api/gateway.mjs';
-import { SessionError, SESSION_ERRORS } from '../../src/api/session-store.mjs';
+import {
+  SessionError,
+  SessionStore,
+  SESSION_CONSTRUCTION_ERRORS,
+  SESSION_ERRORS,
+} from '../../src/api/session-store.mjs';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import { loadApiPolicy } from '../../src/api/index.mjs';
 import { loadMonitoringPolicy, MonitorAgent } from '../../src/observability/index.mjs';
@@ -316,4 +321,80 @@ test('الافتراضيُّ صارَ `requirePoP: true` — الإنشاءُ ب
     (/** @type {SessionError} */ err) => err.code === SESSION_ERRORS.POP_REQUIRED,
     'فتحُ الجلسةِ بلا إثباتِ حيازةٍ يجب أن يُرفَض',
   );
+});
+
+// ── R5-A-03 (`M11.04` الجولة 5، `claude_fable_5`) ───────────────────────────
+// المقيسُ: هل يُطفَأُ إثباتُ الحيازةِ في الإنتاجِ بخيارٍ صريحٍ بلا رمز؟ قبلَ
+// `WL-276` كانَ `requirePoP: false` يُقبَلُ في `STATE_ENV=production` فتُفتَحُ
+// الجلسةُ بمعرّفٍ عامٍّ وحدَه — خلافَ نمطِ `crown.mts` الذي يرفضُ الإسقاطَ برمزِه.
+
+const API_POLICY = loadApiPolicy({ dir: CONFIG_DIR });
+
+/**
+ * @param {Record<string, unknown>} extra
+ * @returns {SessionStore}
+ */
+function storeWith(extra) {
+  return new SessionStore({ policy: API_POLICY.session, audit: API_POLICY.audit, ...extra });
+}
+
+/**
+ * @param {string | undefined} value
+ * @param {() => void} fn
+ * @returns {void}
+ */
+function withProcessStateEnv(value, fn) {
+  const had = Object.hasOwn(process.env, 'STATE_ENV');
+  const previous = process.env['STATE_ENV'];
+  if (value === undefined) delete process.env['STATE_ENV'];
+  else process.env['STATE_ENV'] = value;
+  try {
+    fn();
+  } finally {
+    if (had) process.env['STATE_ENV'] = previous;
+    else delete process.env['STATE_ENV'];
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function popDisableRefused(error) {
+  assert.ok(error instanceof SessionError);
+  assert.equal(error.code, SESSION_CONSTRUCTION_ERRORS.POP_CANNOT_BE_DISABLED_IN_PRODUCTION);
+  return true;
+}
+
+test('R5-A-03: `requirePoP: false` يُرفَضُ عندَ البناءِ في الإنتاجِ المحقونِ', () => {
+  assert.throws(
+    () => storeWith({ requirePoP: false, env: { STATE_ENV: 'production' } }),
+    popDisableRefused,
+  );
+});
+
+test('R5-A-03: حقنُ `env: {}` في عمليّةٍ إنتاجيّةٍ لا يُطفِئُ الحدَّ — والبوابةُ تمرُّ به', () => {
+  withProcessStateEnv('production', () => {
+    assert.throws(() => storeWith({ requirePoP: false, env: {} }), popDisableRefused);
+    assert.throws(() => storeWith({ requirePoP: false }), popDisableRefused);
+    assert.throws(
+      () =>
+        new ApiGateway({
+          policy: API_POLICY,
+          log: new EventLog(),
+          requirePoP: false,
+          env: {},
+        }),
+      popDisableRefused,
+    );
+  });
+});
+
+test('R5-A-03: ما لم يُكسَرْ — الافتراضيُّ يُبنى في الإنتاجِ، والإسقاطُ خارجَه باقٍ للاختبارات', () => {
+  withProcessStateEnv('production', () => {
+    assert.equal(storeWith({ env: {} }).requirePoP, true);
+  });
+  withProcessStateEnv(undefined, () => {
+    assert.equal(storeWith({ requirePoP: false, env: {} }).requirePoP, false);
+  });
 });

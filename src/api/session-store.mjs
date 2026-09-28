@@ -29,6 +29,7 @@
 import { createHash, randomBytes, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 
 import { canonicalOpenPayload, popMessage } from './pop-canonical.mjs';
+import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 
 /**
  * **نوعُ مفتاحِ إثباتِ الحيازةِ المقبولُ — اسمٌ واحدٌ يقرأُه المُتحقِّقُ والعقدُ
@@ -52,6 +53,14 @@ export const SESSION_ERRORS = Object.freeze({
   POP_INVALID: 'API_POP_INVALID',
   POP_REPLAY: 'API_POP_REPLAY',
   POP_EXPIRED: 'API_POP_EXPIRED',
+});
+
+/**
+ * رموزُ رفضِ **التركيبِ** لا الطلبِ (‏`R5-A-03`، `WL-276`): تُرمى عندَ البناءِ فلا
+ * تبلغُ مُنادياً، ولذا لا تُعلَنُ في `config/api.yaml` بينَ رموزِ الردِّ.
+ */
+export const SESSION_CONSTRUCTION_ERRORS = Object.freeze({
+  POP_CANNOT_BE_DISABLED_IN_PRODUCTION: 'SESSION_POP_CANNOT_BE_DISABLED_IN_PRODUCTION',
 });
 
 /** خطأُ جلسةٍ برمزٍ مُعلَن. */
@@ -133,7 +142,7 @@ export class SessionStore {
   #popWindowSeconds = 300;
 
   /**
-   * @param {{ policy: SessionPolicy, audit: SessionAuditPolicy, log?: SessionLogLike | null, agents?: SessionAgentsLike | null, now?: () => Date, requirePoP?: boolean, popWindowSeconds?: number }} deps
+   * @param {{ policy: SessionPolicy, audit: SessionAuditPolicy, log?: SessionLogLike | null, agents?: SessionAgentsLike | null, now?: () => Date, requirePoP?: boolean, popWindowSeconds?: number, env?: NodeJS.ProcessEnv }} deps
    */
   constructor({
     policy,
@@ -143,7 +152,21 @@ export class SessionStore {
     now,
     requirePoP = true,
     popWindowSeconds = 300,
+    env = process.env,
   }) {
+    // R5-A-03: إسقاطُ إثباتِ الحيازةِ صراحةً في الإنتاجِ يُرفَضُ برمزِه — نمطُ
+    // `CROWN_GUARANTEE_CANNOT_BE_DISABLED_IN_PRODUCTION` في `crown.mts` — فلا يبقى
+    // الضمانُ افتراضيّاً يُطفَأُ بخيار. والإنتاجُ من البيئةِ المحقونةِ ومن العمليّةِ
+    // معاً، فحقنُ `env: {}` لا يُطفِئُ الحدَّ.
+    if (
+      requirePoP === false &&
+      (isProductionRuntime(env) || (env !== process.env && isProductionRuntime(process.env)))
+    ) {
+      throw new SessionError(
+        SESSION_CONSTRUCTION_ERRORS.POP_CANNOT_BE_DISABLED_IN_PRODUCTION,
+        '`requirePoP: false` مرفوضٌ في الإنتاج: جلسةٌ تُفتَحُ بمعرّفٍ عامٍّ وحدَه ليست جلسةَ فاعلٍ موثَّق.',
+      );
+    }
     this.#policy = policy;
     this.#audit = audit;
     this.#log = log;
