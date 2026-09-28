@@ -367,3 +367,78 @@ test('الطفرةُ S3: معرِّفُ فرعٍ بـ`/` يُعَدُّ — حذ
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── الطفراتُ 13…15: بِنيةُ الجداولِ والأقسامِ (‏`R4/NO-SEPARATOR` و`R7`، `WL-273` إغلاقاً لـ`DOC-18`) ──
+
+/**
+ * يُشغِّلُ الحاجزَ ويُعيدُ رمزَ الخروجِ ومُخرَجَ الخطأِ — ليُقاسَ **سببُ** السقوطِ لا وقوعُه وحدَه.
+ * @param {string} root
+ * @returns {{ code: number, stderr: string }}
+ */
+function runGuardWithOutput(root) {
+  try {
+    execFileSync('node', [GUARD, '--root', root], {
+      encoding: 'utf8',
+      stdio: 'pipe',
+      timeout: 15000,
+    });
+    return { code: 0, stderr: '' };
+  } catch (err) {
+    const e = /** @type {{ status?: number, stderr?: string }} */ (err);
+    return { code: e.status ?? 1, stderr: String(e.stderr ?? '') };
+  }
+}
+
+test('الطفرةُ M13: سطرُ `---` يَشطُرُ جدولَ §4.6 فيُسقِطُ الحاجزَ بـR4/NO-SEPARATOR', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    // العَطَبُ عينُه الذي أقحمَتْه `WL-227`: فاصلٌ أفقيٌّ قبلَ صفِّ `LIVE-11`.
+    const split = register.replace('\n| ~~`LIVE-11`~~', '\n---\n\n| ~~`LIVE-11`~~');
+    assert.notEqual(split, register, 'ينبغي أن يُعثَرَ على صفِّ `LIVE-11`');
+    writeFileSync(registerPath, split);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'جدولٌ بلا فاصلٍ ينبغي أن يُسقِطَ الحاجز');
+    assert.match(stderr, /R4\/NO-SEPARATOR/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M14: قسمٌ مكرَّرٌ من المستوى الثاني يُسقِطُ الحاجزَ بـR7/DUP-SECTION', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    // العَطَبُ عينُه الذي أحدثَتْه `WL-268`: نسخةٌ ثانيةٌ من §5 كاملاً.
+    const start = register.indexOf('\n## 5 —');
+    const end = register.indexOf('\n## 6 —');
+    assert.ok(start !== -1 && end > start, 'ينبغي أن يُعثَرَ على §5 و§6');
+    const section = register.slice(start, end);
+    const duplicated = register.slice(0, end) + section + register.slice(end);
+    writeFileSync(registerPath, duplicated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'قسمٌ مكرَّرٌ ينبغي أن يُسقِطَ الحاجز');
+    assert.match(stderr, /R7\/DUP-SECTION/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M15: ترويسةُ قسمٍ بلا مضمونٍ تُسقِطُ الحاجزَ بـR7/EMPTY-SECTION', () => {
+  const tmp = cloneRepo();
+  try {
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    // ترويسةُ §6 فارغةٌ قبلَ نسختِها الحقيقيّةِ — والحاجزُ يَرى الفراغَ لا التكرارَ وحدَه.
+    const emptied = register.replace('\n## 7 —', '\n## 6ب — قسمٌ فارغٌ\n\n---\n\n## 7 —');
+    assert.notEqual(emptied, register, 'ينبغي أن يُعثَرَ على §7');
+    writeFileSync(registerPath, emptied);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'قسمٌ فارغٌ ينبغي أن يُسقِطَ الحاجز');
+    assert.match(stderr, /R7\/EMPTY-SECTION/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
