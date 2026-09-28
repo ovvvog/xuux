@@ -69,7 +69,19 @@ export function parseArgs(argv) {
       continue;
     }
     const value = argv[index + 1];
-    if (value === undefined || value.startsWith('--')) {
+    // **قيمةٌ تبدأُ بـ`--` ليست بالضرورةِ علَماً:** رمزُ جلسةٍ عشوائيٌّ بترميزِ
+    // `base64url` قد يبدأُ بـ`-` فيُشبِهُ علَماً. فلا نرفضُ القيمةَ إلّا إن كانت
+    // **علَماً معروفاً** لا أيَّ سلسلةٍ تبدأُ بشرطتين.
+    const KNOWN_FLAGS = new Set([
+      '--url',
+      '--command',
+      '--reason',
+      '--session',
+      '--key',
+      '--help',
+      '-h',
+    ]);
+    if (value === undefined || KNOWN_FLAGS.has(value)) {
       throw new Error(`ROYAL_COMMAND_ARG_WITHOUT_VALUE:${String(argument)}`);
     }
     index += 1;

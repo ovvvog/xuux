@@ -170,3 +170,50 @@ test('ووسيطٌ بلا قيمةٍ أو غيرُ معروفٍ يُرَدُّ �
     'وسيطٌ غيرُ معروفٍ مرَّ بلا رفضٍ.',
   );
 });
+
+test('وقيمةٌ تبدأُ بـ`--` ليست علَماً: رمزُ جلسةٍ بترميزِ base64url قد يبدأُ بشرطةٍ', async () => {
+  // **العَطَبُ الذي يُغلِقُه هذا الشاهدُ:** كان `parseArgs` يرفضُ أيَّ قيمةٍ تبدأُ
+  // بـ`--` ظنّاً أنها علمٌ آخرُ. فرمزُ جلسةٍ عشوائيٌّ بترميزِ `base64url` قد
+  // يبدأُ بـ`-` (أحدُ حروفِ الأبجديّةِ) فيُرفَضُ زوراً بـ`ARG_WITHOUT_VALUE`.
+  // والقياسُ يُثبِتُ أنّ القيمةَ تُقبَلُ ولا تُخلَطُ بعلَمٍ.
+  const { parseArgs } = await import('../../scripts/royal-command.mjs');
+  // رمزٌ يبدأُ بشرطةٍ — صالحٌ في base64url لكنّه كان يُرفَضُ.
+  const result = parseArgs([
+    '--url',
+    'http://127.0.0.1:4179',
+    '--command',
+    'cmd:veto',
+    '--session',
+    '--AbCdEf1234567890',
+    '--key',
+    '/dev/null',
+  ]);
+  assert.equal(result.session, '--AbCdEf1234567890', 'رمزُ جلسةٍ يبدأُ بشرطةٍ رُفِضَ زوراً.');
+  // وقيمةُ `--key` التي تبدأُ بشرطةٍ كذلك تُقبَلُ.
+  const result2 = parseArgs([
+    '--url',
+    'http://127.0.0.1:4179',
+    '--command',
+    'cmd:veto',
+    '--session',
+    'token',
+    '--key',
+    '--weird-key-path',
+  ]);
+  assert.equal(result2.keyFile, '--weird-key-path', 'مسارُ مفتاحٍ يبدأُ بشرطةٍ رُفِضَ زوراً.');
+  // لكنّ علَماً معروفاً بعدَ `--session` يُرَدُّ: لا قيمةَ له.
+  assert.throws(
+    () =>
+      parseArgs([
+        '--url',
+        'http://127.0.0.1:1',
+        '--command',
+        'cmd:veto',
+        '--session',
+        '--key',
+        '/dev/null',
+      ]),
+    /ROYAL_COMMAND_ARG_WITHOUT_VALUE:--session/u,
+    'علَمٌ معروفٌ بعدَ وسيطٍ قُبِلَ كقيمةٍ.',
+  );
+});
