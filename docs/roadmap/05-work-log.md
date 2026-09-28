@@ -17,6 +17,48 @@
    للمُدخلةِ**، والقاعدةُ مقيسةٌ بـ`R11` في `npm run guard:readiness` (الدَّين `LIVE-4`).
 
 
+### [2026-09-28] — WL-278 — R6-CS-01 · R6-CS-02 · R6-LU-01 · R6-LU-02 · R6-LU-03: مجسُّ `S13` يَقيسُ نسختَه ويُدرِّجُ حكمَه ويَحرُسُ خروجُه الحكمَ
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** خمسُ نتائجِ مراجعةٍ مفتوحةٌ (§4.3) من الجولةِ السادسةِ لـ`M11.04`، كلُّها على ملفٍّ واحدٍ · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — مُعالَجةٌ في المجسِّ **والخمسُ تبقى `open`** والإغلاقُ حكمُ مجلسٍ
+
+#### ما تمَّ فعلاً
+
+- **المصدرُ:** `affectedFiles` للخمسِ في `config/external-review.yaml` (مقروءاً ببرنامجٍ): `docs/external-review/evidence/M11.04-round-6-s13-probe.mjs` وحدَه.
+- **القياسُ قبلَ الإصلاحِ:** `node docs/external-review/evidence/M11.04-round-6-s13-probe.mjs` من هذهِ النسخةِ ⇒ استوردَ من `/home/user/workspace/xuux/src` (‏نسخةُ `main@98d4b119` لا نسخةُ الفرعِ — عينُ `R6-LU-01`)، وطبعَ `BLOCKED` × 5، و`exit=0`.
+- **`R6-CS-02`/`R6-LU-01`:** الاستيرادُ صارَ من `new URL('../../../', import.meta.url)`، ويُطبَعُ `REPO <الجذر>` أوّلَ سطرٍ؛ فمَن شغّلَه من نسختِه قاسَها.
+- **`R6-CS-01`/`R6-LU-02`:** `gradeReplay` يَقيسُ البنودَ الخمسةَ (`halt-released`، `epoch-reset`، `sequence-rolled-back`، `ledger-rolled-back`، `committed-command-replayed`) كلٌّ وحدَه، والحكمُ `VIABLE`/`PARTIAL`/`BLOCKED` معَ `achieved=n/5[…]`؛ و`S13` صارَ `S13a-halt-kept`.
+- **`R6-LU-03`:** `exitCodeFor` ⇒ `0` إن كانَ كلُّ سيناريو `BLOCKED`، و`1` لغيرِه (ومنه `BOOTED` و`UNEXPECTED-BOOT` للضوابطِ)، و`2` لا شيءَ مقيسٌ أو شرطٌ مسبقٌ ساقطٌ؛ و`main()` لا يعملُ عندَ الاستيرادِ فيُختبَرُ المنطقُ بلا إقلاعٍ.
+- **النسخةُ التي قاسَها المجلسُ محفوظةٌ:** الكائنُ `607daf0e` من `43a18d3c`، ومُسمّاةٌ في ترويسةِ الملفِّ؛ فالإصلاحُ لا يمحو ما حُكِمَ عليه.
+- **الشاهدُ الأقوى — المجسُّ المُصلَحُ على الشجرةِ التي قِيسَ عليها أصلاً:** `git worktree add /tmp/w1648 1648d450` ثمّ `npm run build` ونسخُ المجسِّ المُصلَحِ إليها ⇒ `REPO /tmp/w1648/` و`PARTIAL S13a-halt-kept … achieved=3/5[sequence-rolled-back,ledger-rolled-back,committed-command-replayed]` و`VIABLE S13b-full-wipe … 5/5` و`BOOTED C3` و`EXIT 1` — فما صنّفَه المجسُّ القديمُ `BLOCKED` بخروجٍ صفريٍّ يَظهرُ الآنَ جزئيّاً بخروجٍ `1`.
+
+#### الملفّاتُ المُتأثِّرةُ
+
+- `docs/external-review/evidence/M11.04-round-6-s13-probe.mjs` — الاستيرادُ والحكمُ والتسميةُ والخروجُ.
+- `tests/external-review/s13-probe-verdicts.test.mjs` — **ملفٌّ جديدٌ**: ثلاثةُ اختباراتٍ تسقطُ كلُّها على النسخةِ `607daf0e`.
+- `docs/roadmap/06-debt-register.md` — عمودُ المعالجةِ للخمسِ (والإغلاقُ باقٍ «مجلس») · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/READINESS_REPORT.md` (مُولَّدٌ).
+
+#### الـ commit
+
+الفرعُ `fix/r6-s13-probe-verdicts`، مُكدَّسٌ على `docs/r5-a-04-adr-0006-token-condition`.
+
+#### الدليلُ
+
+| المقيسُ | القيمةُ |
+| --- | --- |
+| `node --test tests/external-review/s13-probe-verdicts.test.mjs` | `3` · `3` ناجحاً · `0` ساقطاً |
+| الملفُّ نفسُه على المجسِّ `607daf0e` | `3` · `0` · **`3` ساقطةً** |
+| المجسُّ المُصلَحُ على شجرةِ `1648d450` | `PARTIAL` · `VIABLE` · `BLOCKED` × 2 · `BOOTED` ⇒ `EXIT 1` |
+| المجسُّ المُصلَحُ على الفرعِ | `REPO /home/user/workspace/xuux-b10/` · `BLOCKED` × 5 ⇒ `EXIT 0` |
+
+#### ما لم يتمَّ ولماذا
+
+- **لا إغلاقَ ولا مسَّ لـ`config/external-review.yaml`:** الحكمُ في الخمسِ للمجلسِ، و`reproductionPath` فيها يَصِفُ النسخةَ القديمةَ كما قِيسَت.
+- **المجسُّ يبقى خارجَ `npm test`:** يُقلِعُ جذرَ ثقةٍ إنتاجيّاً بتوكنٍ محقونٍ خمسَ مرّاتٍ؛ والمُختبَرُ في `npm test` منطقُ الحكمِ والخروجِ والاستيرادِ لا السيناريوهاتُ.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- يَلمِسُ `tests/` ⇒ `R7/SCOPE-DRIFT` متوقَّعٌ على `main` بعدَ الدمجِ (`OPS-1/MAIN-DRIFT-WINDOW`).
+
 ### [2026-09-28] — WL-277 — R5-A-04: `ADR 0006` يُضيَّقُ إلى المقيسِ — لا شرطَ لحالةِ التوكنِ، و§4 لرفضِ الخاتَمِ وحدَه، و`S13` حاشيةٌ على «اللقطةِ الجزئيّةِ»
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `R5-A-04` — نتيجةُ مراجعةٍ مفتوحةٌ (§4.3)، توثيقٌ · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — الوصفُ مُصحَّحٌ **والنتيجةُ تبقى `open`** والإغلاقُ حكمُ مجلسٍ
