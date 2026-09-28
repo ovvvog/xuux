@@ -48,7 +48,7 @@ function memoryLog() {
 }
 
 /**
- * @param {{ callsPerWindow?: number, maxPayloadBytes?: number, transport?: (record: object) => Promise<unknown>, quarantine?: { report: (signal: object) => unknown } | null }} [deps]
+ * @param {{ callsPerWindow?: number, maxPayloadBytes?: number, transport?: (record: object) => Promise<unknown>, quarantine?: { report: (signal: object) => unknown } | null, classifier?: import('../../src/egress/egress-gate.mjs').EgressClassifier | null }} [deps]
  */
 function setup(deps = {}) {
   const log = memoryLog();
@@ -64,6 +64,7 @@ function setup(deps = {}) {
     log,
     destinations: DESTINATIONS,
     quarantine: deps.quarantine ?? null,
+    classifier: deps.classifier ?? null,
     callsPerWindow: deps.callsPerWindow ?? 30,
     maxPayloadBytes: deps.maxPayloadBytes ?? 1024,
     transport:
@@ -262,4 +263,164 @@ test('الرفض يُبلَّغ الحجر الصحّي إن كان موصولا
   assert.equal(signals.length, 1);
   assert.equal(signals[0]?.kind, 'egress-refused');
   assert.equal(signals[0]?.subject, 'agent:minister-1');
+});
+
+// ── R5-B-05 (`M11.05` الجولة 1، `grok_4_6`، مسلك EGRESS-03) ─────────────────
+// المقيسُ: هل يُخرَجُ مصنَّفٌ حسّاسٌ بإعلانِ المُنادي أنّه عامٌّ؟ قبلَ `WL-275`
+// كانت البوابةُ تأخذُ `classification` من الطلبِ كما وردَ، فبايتٌ مسجَّلٌ حسّاساً
+// يُعلَنُ `public` يَعبُرُ `pol:deny-egress-of-sensitive` إلى جهةٍ معتمدة.
+
+/**
+ * مُصنِّفٌ من جدولٍ ثابت: التصنيفُ المسجَّلُ لا ما يقولُه المُنادي.
+ * @param {Record<string, string>} table
+ * @returns {import('../../src/egress/egress-gate.mjs').EgressClassifier}
+ */
+function recordedAs(table) {
+  return { classificationOf: (resourceId) => table[resourceId] ?? null };
+}
+
+/**
+ * @param {string} code
+ * @returns {(error: unknown) => boolean}
+ */
+function codeIs(code) {
+  return (error) => {
+    assert.equal(/** @type {{ code: string }} */ (error).code, code);
+    return true;
+  };
+}
+
+test('R5-B-05: مسجَّلٌ حسّاسٌ يُعلَنُ `public` لا يخرج — المسجَّلُ يغلبُ الادّعاءَ الأدنى', async () => {
+  const { gate, sent, log } = setup({ classifier: recordedAs({ 'data:ledger': 'sensitive' }) });
+  await assert.rejects(
+    gate.send({
+      actor: minister(),
+      destination: 'federation:archive',
+      payload: new Uint8Array([0x2a]),
+      classification: 'public',
+      resourceId: 'data:ledger',
+    }),
+    codeIs(EGRESS_ERRORS.NOT_AUTHORIZED),
+  );
+  assert.equal(sent.length, 0, 'البايتُ الحسّاسُ لم يصلِ الناقل');
+  const decision = log.events.find((event) => event.type === 'policy.decision');
+  assert.equal(decision?.payload['policyId'], 'pol:deny-egress-of-sensitive');
+  const refusal = log.events.find((event) => event.type === 'egress.refused');
+  assert.equal(refusal?.payload['classification'], 'sensitive', 'السجلُّ يَحملُ التصنيفَ الفعليَّ');
+});
+
+test('R5-B-05: بلا مُصنِّفٍ لا ينزلُ الادّعاءُ دونَ `internal`', async () => {
+  const { gate, log } = setup();
+  await gate.send({
+    actor: minister(),
+    destination: 'federation:archive',
+    payload: 'سطر',
+    classification: 'public',
+    resourceId: 'audit:floor',
+  });
+  const record = log.events.find((event) => event.type === 'egress.sent');
+  assert.equal(record?.payload['classification'], 'internal');
+});
+
+test('R5-B-05: موردٌ بلا تصنيفٍ مسجَّلٍ يُرفَضُ قبلَ التفويضِ حينَ يُوصَلُ مُصنِّف', async () => {
+  const { gate, sent, log } = setup({ classifier: recordedAs({}) });
+  await assert.rejects(
+    gate.send({
+      actor: minister(),
+      destination: 'federation:archive',
+      payload: 'سطر',
+      classification: 'public',
+      resourceId: 'data:unrecorded',
+    }),
+    codeIs(EGRESS_ERRORS.CLASSIFICATION_UNRECORDED),
+  );
+  assert.equal(sent.length, 0);
+  assert.equal(log.events.filter((event) => event.type === 'policy.decision').length, 0);
+});
+
+test('R5-B-05: تصنيفٌ لا يعرفُه السلّمُ يُرفَضُ ولا يُقرأُ عامّاً', async () => {
+  const { gate, sent } = setup();
+  await assert.rejects(
+    gate.send({
+      actor: minister(),
+      destination: 'federation:archive',
+      payload: 'سطر',
+      classification: 'top-secret',
+      resourceId: 'audit:unknown',
+    }),
+    codeIs(EGRESS_ERRORS.CLASSIFICATION_UNKNOWN),
+  );
+  assert.equal(sent.length, 0);
+});
+
+test('R5-B-05: المرتبةُ المختومةُ باسمِها القانونيِّ `sovereign` لا تخرج ولو أذِنَت السياسة', async () => {
+  const { gate, sent } = setup({ classifier: recordedAs({ 'data:root': 'sovereign' }) });
+  await assert.rejects(
+    gate.send({
+      actor: minister(),
+      destination: 'federation:archive',
+      payload: 'جذر',
+      resourceId: 'data:root',
+    }),
+    codeIs(EGRESS_ERRORS.CLASSIFICATION_SEALED),
+  );
+  assert.equal(sent.length, 0);
+});
+
+test('R5-B-05: الادّعاءُ يرفعُ — مسجَّلٌ عامٌّ يُعلَنُ حسّاساً يُعامَلُ حسّاساً', async () => {
+  const { gate, sent } = setup({ classifier: recordedAs({ 'data:notice': 'public' }) });
+  await assert.rejects(
+    gate.send({
+      actor: minister(),
+      destination: 'federation:archive',
+      payload: 'إعلان',
+      classification: 'sensitive',
+      resourceId: 'data:notice',
+    }),
+    codeIs(EGRESS_ERRORS.NOT_AUTHORIZED),
+  );
+  assert.equal(sent.length, 0);
+});
+
+test('R5-B-05: مسجَّلٌ عامٌّ يخرجُ عامّاً — المُصنِّفُ لا يَكسِرُ المأذون', async () => {
+  const { gate, sent, log } = setup({ classifier: recordedAs({ 'data:notice': 'public' }) });
+  await gate.send({
+    actor: minister(),
+    destination: 'federation:archive',
+    payload: 'إعلان',
+    classification: 'public',
+    resourceId: 'data:notice',
+  });
+  assert.equal(sent.length, 1);
+  const record = log.events.find((event) => event.type === 'egress.sent');
+  assert.equal(record?.payload['classification'], 'public');
+});
+
+test('R5-B-05: البوابةُ بلا مُصنِّفٍ لا تُبنى في الإنتاجِ — محقوناً ومن العمليّة', () => {
+  const deps = {
+    enforcementPoint: /** @type {never} */ ({}),
+    log: memoryLog(),
+    transport: async () => ({}),
+    destinations: DESTINATIONS,
+  };
+  assert.throws(
+    () => new EgressGate({ ...deps, env: { STATE_ENV: 'production' } }),
+    codeIs(EGRESS_ERRORS.CLASSIFIER_REQUIRED_IN_PRODUCTION),
+  );
+  const had = Object.hasOwn(process.env, 'STATE_ENV');
+  const previous = process.env['STATE_ENV'];
+  process.env['STATE_ENV'] = 'production';
+  try {
+    assert.throws(
+      () => new EgressGate({ ...deps, env: {} }),
+      codeIs(EGRESS_ERRORS.CLASSIFIER_REQUIRED_IN_PRODUCTION),
+    );
+    assert.doesNotThrow(
+      () => new EgressGate({ ...deps, classifier: recordedAs({}), env: {} }),
+      'بمُصنِّفٍ موصولٍ تُبنى في الإنتاج',
+    );
+  } finally {
+    if (had) process.env['STATE_ENV'] = previous;
+    else delete process.env['STATE_ENV'];
+  }
 });
