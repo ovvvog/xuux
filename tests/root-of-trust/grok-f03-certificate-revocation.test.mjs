@@ -74,7 +74,9 @@ test('السحبُ يبقى نافذاً بعدَ إعادةِ بناءِ الس
   const cert = ca1.issue('agent:x', 'minister', ['read']);
   assert.equal(ca1.isValid(cert), true, 'قبل السحب: مقبولة');
   const result = ca1.revoke(cert.id, 'compromised');
-  assert.equal(result.persisted, true, 'السحب كُتب في المخزن الدائم');
+  // `R5-A-05`: مخزنُ الذاكرةِ لا يَكتبُ كتابةً دائمةً، فلا يُقالُ عنه `persisted: true`
+  // — وإن نفذَ السحبُ داخلَ العمليّةِ ونفذَ عندَ سلطةٍ ثانيةٍ على **الكائنِ نفسِه**.
+  assert.equal(result.persisted, false, 'مخزن الذاكرة لا يدّعي كتابة دائمة');
   assert.equal(ca1.isValid(cert), false, 'بعد السحب: مرفوضة');
   // «إعادةُ تشغيل»: سلطةٌ جديدةٌ بنفسِ الملكِ ونفسِ المخزنِ — لا مجموعةُ ذاكرةٍ
   // جديدة. لو كان السحبُ في الذاكرةِ وحدَها لكانتْ الشهادةُ عادَتْ صالحةً هنا.
@@ -86,6 +88,7 @@ test('الفشلُ المغلق: مخزنٌ غيرُ جاهزٍ يُرجعُ isV
   const { king } = setup();
   // مخزنٌ يُعلنُ أنّه غيرُ جاهزٍ للقراءة (كأنّ تحميلَ السجلِّ الدائمِ فشل).
   const unreadyStore = {
+    durability: /** @type {const} */ ('volatile'),
     isRevoked: () => false,
     revoke: () => true,
     ready: () => false,
@@ -98,6 +101,7 @@ test('الفشلُ المغلق: مخزنٌ غيرُ جاهزٍ يُرجعُ isV
 test('السحبُ على مخزنٍ غيرِ جاهزٍ لا يدَّعي النجاح (persisted: false)', () => {
   const { king } = setup();
   const unreadyStore = {
+    durability: /** @type {const} */ ('volatile'),
     isRevoked: () => false,
     revoke: () => true,
     ready: () => false,
@@ -170,8 +174,10 @@ test('Grok-F03 (M11.04-F03): الإنتاجُ بقبولِ مخزنٍ دائمٍ
   const previous = process.env.STATE_ENV;
   process.env.STATE_ENV = 'production';
   try {
-    // مخزنُ سحبٍ دائمٌ للتركيبِ — ليس `MemoryRevocationStore`، فيُقبَلُ في الإنتاجِ.
+    // مخزنُ سحبٍ يُعلِنُ `durability: 'persistent'` — يُقبَلُ في الإنتاجِ بإعلانِه
+    // لا بأنّه ليسَ `MemoryRevocationStore` (‏`R5-B-01`).
     const persistentStore = {
+      durability: /** @type {const} */ ('persistent'),
       revoked: new Set(),
       isRevoked(/** @type {string} */ id) {
         return this.revoked.has(id);
