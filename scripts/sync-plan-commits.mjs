@@ -100,10 +100,10 @@ for (const m of artifact.measurements) {
     continue;
   }
 
-  // استخرج الكوميتَ القديمَ (8 محارف hex)
-  const hexMatch = line.match(/`([0-9a-f]{8})`/);
+  // استخرج الكوميتَ القديمَ (8–40 محرف hex)
+  const hexMatch = line.match(/`([0-9a-f]{8,40})`/);
   if (!hexMatch) {
-    violations.push(`S2/NO_HEX: ${m.plan} السطرُ لا يحوي كوميتاً بـ8 محارفٍ hex.`);
+    violations.push(`S2/NO_HEX: ${m.plan} السطرُ لا يحوي كوميتاً بـ8–40 محرفٍ hex.`);
     continue;
   }
 
