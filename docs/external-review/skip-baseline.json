@@ -5,23 +5,27 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "20ddd512c503c690a9c2e66db903e7053c012802",
-      "mainHeadAtMeasure": "20ddd512c503c690a9c2e66db903e7053c012802",
-      "scopeDigest": "ae614b471c7cf19b8d96c21ba3d7fde8960732375255abbb43dd3dffa191d3a4",
-      "measuredOn": "2026-09-29",
+      "commit": "a48e82c2489896a292bc97f3ecad16d6eed9b307",
+      "mainHeadAtMeasure": "a48e82c2489896a292bc97f3ecad16d6eed9b307",
+      "scopeDigest": "1a73e0e87878a79f536ded2230bcc76db42e5156e347d33b0c671027d7fd13af",
+      "measuredOn": "2026-09-30",
       "verdict": "self-stale-only",
       "testFileCount": 225,
-      "tests": 2327,
-      "pass": 2200,
+      "tests": 2329,
+      "pass": 2195,
       "fail": 1,
-      "skipped": 126,
-      "skipLines": 128,
-      "topLevelSkipPoints": 121,
+      "skipped": 133,
+      "skipLines": 135,
+      "topLevelSkipPoints": 128,
       "attributedToDatabaseUrl": 92,
       "otherReasons": [
         {
           "reason": "swtpm/XUUX_TPM_SIM unavailable",
           "count": 25
+        },
+        {
+          "reason": "تخطٍّ معلن: تعذّر إنشاء user/mount/network/pid namespaces: unshare: write failed /proc/self/uid_map: Operation not permitted. الرفض مقصود لأن التنفيذ بلا عزل غير مقبول.",
+          "count": 6
         },
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
@@ -34,6 +38,10 @@
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — المسارُ الإنتاجيُّ على توكنٍ حقيقيٍّ محلّيٌّ لا CI",
           "count": 2
+        },
+        {
+          "reason": "العزل الحقيقي غير متاح في المضيف؛ لا يُحوّل إلى نجاح وهمي.",
+          "count": 1
         },
         {
           "reason": "متغيّراتٌ بيئيّةٌ غائبةٌ — الاختبارُ الخارجيُّ يتخطّى لا يفشل، لكنّ الدَّينَ لا يُغلَق",
@@ -49,23 +57,27 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "20ddd512c503c690a9c2e66db903e7053c012802",
-      "mainHeadAtMeasure": "20ddd512c503c690a9c2e66db903e7053c012802",
-      "scopeDigest": "ae614b471c7cf19b8d96c21ba3d7fde8960732375255abbb43dd3dffa191d3a4",
-      "measuredOn": "2026-09-29",
+      "commit": "a48e82c2489896a292bc97f3ecad16d6eed9b307",
+      "mainHeadAtMeasure": "a48e82c2489896a292bc97f3ecad16d6eed9b307",
+      "scopeDigest": "1a73e0e87878a79f536ded2230bcc76db42e5156e347d33b0c671027d7fd13af",
+      "measuredOn": "2026-09-30",
       "verdict": "self-stale-only",
       "testFileCount": 225,
-      "tests": 2327,
-      "pass": 2200,
+      "tests": 2329,
+      "pass": 2195,
       "fail": 1,
-      "skipped": 126,
-      "skipLines": 128,
-      "topLevelSkipPoints": 121,
+      "skipped": 133,
+      "skipLines": 135,
+      "topLevelSkipPoints": 128,
       "attributedToDatabaseUrl": 92,
       "otherReasons": [
         {
           "reason": "swtpm/XUUX_TPM_SIM unavailable",
           "count": 25
+        },
+        {
+          "reason": "تخطٍّ معلن: تعذّر إنشاء user/mount/network/pid namespaces: unshare: write failed /proc/self/uid_map: Operation not permitted. الرفض مقصود لأن التنفيذ بلا عزل غير مقبول.",
+          "count": 6
         },
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
@@ -78,6 +90,10 @@
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — المسارُ الإنتاجيُّ على توكنٍ حقيقيٍّ محلّيٌّ لا CI",
           "count": 2
+        },
+        {
+          "reason": "العزل الحقيقي غير متاح في المضيف؛ لا يُحوّل إلى نجاح وهمي.",
+          "count": 1
         },
         {
           "reason": "متغيّراتٌ بيئيّةٌ غائبةٌ — الاختبارُ الخارجيُّ يتخطّى لا يفشل، لكنّ الدَّينَ لا يُغلَق",
