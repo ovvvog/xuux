@@ -160,131 +160,57 @@ test('LIVE-17/SKIP-NO-REASON — تخطٍّ بلا سببٍ في TAP يُسقِ�
   assert.match(reasoned.out, /^bare_skips: 0$/m);
 });
 
-// `LIVE-18` / `WL-261`: العدّاءُ أُعيدَ تجهيزُه بلا وصفٍ فسقطَت الوظيفةُ بـ`docker: command
-// not found`. ويُقاسُ هنا **سلوكُ** الفحصِ المُسبَقِ على آلاتٍ مُحاكاةٍ بمسارِ `PATH` من
-// بدائلَ وحدَها: التامّةُ تَمُرُّ، وكلُّ ناقصةٍ تَسقُطُ برمزِ غائبِها، ويُسمّى كلُّ غائبٍ لا
-// أوّلُه وحدَه. **وحدٌّ معلَنٌ:** المحاكاةُ تَقيسُ النصَّ لا الآلةَ؛ والآلةُ الحقيقيّةُ
-// تُقاسُ بتشغيلِ الوظيفةِ نفسِها على العدّاءِ.
-test('LIVE-18 — الفحصُ المُسبَقُ وظيفةٌ بلا حاوياتٍ تسبقُ الفحصَ الكاملَ', async () => {
+// `WL-286`: نُقل CI من self-hosted runner (xuux-ci-linux) إلى GitHub-hosted runner
+// (ubuntu-latest) بقرار المالك. لا عدّاءٌ مقيمٌ بعدَ اليوم. ويُقاسُ هنا أنّ المسارَ
+// لا يَحتوي على إشارةٍ إلى العدّاءِ المحليِّ.
+test('WL-286 — لا إشارةَ إلى self-hosted أو linux-vm أو xuux-ci-linux في المسار', () => {
+  for (const token of ['self-hosted', 'linux-vm', 'xuux-ci-linux', 'runner-preflight']) {
+    assert.ok(!workflow.includes(token), `ci.yml يحوي إشارةً إلى العدّاء المحلي: ${token}`);
+  }
+});
+
+test('WL-286 — الوظائفُ كلُّها على ubuntu-latest', async () => {
   const { parse } = await import('yaml');
   /** @type {Record<string, Record<string, any>>} */
   const jobs = parse(workflow).jobs;
-  const pre = jobs.preflight ?? {};
-  assert.ok(jobs.preflight, 'وظيفةُ `preflight` قائمةٌ.');
-  assert.equal(
-    pre.services,
-    undefined,
-    'بلا `services:` — غيابُ Docker يُسقِطُ ذاتَ الحاوياتِ قبلَ خطواتِها.',
-  );
-  assert.deepEqual(pre['runs-on'], jobs.validate?.['runs-on'], 'على العدّاءِ نفسِه.');
-  /** @type {Array<Record<string, any>>} */
-  const steps = pre.steps ?? [];
-  assert.ok(steps.some((s) => String(s.run ?? '').trim() === 'bash scripts/runner-preflight.sh'));
-  assert.equal(jobs.validate?.needs, 'preflight', 'الفحصُ الكاملُ لا يُشغَّلُ على آلةٍ ناقصةٍ.');
-  assert.deepEqual(jobs['gate-report']?.needs, ['preflight', 'validate']);
-  assert.match(String(jobs['gate-report']?.steps?.[0]?.run), /needs\.preflight\.result/);
+  for (const [name, job] of Object.entries(jobs)) {
+    assert.deepEqual(job['runs-on'], 'ubuntu-latest', `الوظيفةُ ${name} ليست على ubuntu-latest`);
+  }
 });
 
-test('LIVE-18 — الفحصُ المُسبَقُ يُسمّي كلَّ متطلَّبٍ غائبٍ برمزِه ويَمُرُّ على الآلةِ التامّةِ', async () => {
-  const { mkdtempSync, writeFileSync, symlinkSync, chmodSync, rmSync, existsSync } =
-    await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { spawnSync } = await import('node:child_process');
-  const script = path.join(repoRoot, 'scripts', 'runner-preflight.sh');
-  const bash = ['/usr/bin/bash', '/bin/bash'].find((p) => existsSync(p)) ?? 'bash';
-  /** @param {string} name */
-  const real = (name) =>
-    ['/usr/bin', '/bin'].map((d) => path.join(d, name)).find((p) => existsSync(p)) ?? '';
-  const complete = {
-    docker: 'if [ "$1" = version ]; then echo 29.8.1; fi; exit 0',
-    pg_dump: 'echo "pg_dump (PostgreSQL) 18.6"',
-    sudo: 'exit 1',
-    gcc: 'exit 0',
-    'g++': 'exit 0',
-    make: 'exit 0',
-    python3: 'exit 0',
-    unshare: 'exit 0',
-    git: 'exit 0',
-    curl: 'exit 0',
-    tar: 'exit 0',
-    sha256sum: 'exit 0',
-  };
-  const ubuntu2404 = 'ID=ubuntu\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04.5 LTS"\n';
-  /** @param {Record<string, string | null>} overrides @param {string | null} [os] */
-  const machine = (overrides, os = ubuntu2404) => {
-    const dir = mkdtempSync(path.join(tmpdir(), 'xuux-preflight-'));
-    try {
-      for (const util of ['timeout', 'uname']) symlinkSync(real(util), path.join(dir, util));
-      for (const [name, body] of Object.entries({ ...complete, ...overrides })) {
-        if (body === null) continue;
-        const file = path.join(dir, name);
-        writeFileSync(file, `#!${bash}\n${body}\n`);
-        chmodSync(file, 0o755);
-      }
-      const osRelease = path.join(dir, 'os-release');
-      if (os !== null) writeFileSync(osRelease, os);
-      const r = spawnSync(bash, [script], {
-        env: { PATH: dir, HOME: dir, RUNNER_OS_RELEASE_FILE: osRelease },
-        encoding: 'utf8',
-      });
-      return { status: r.status, out: `${r.stdout}\n${r.stderr}` };
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  };
-
-  const full = machine({});
-  assert.equal(full.status, 0, `الآلةُ التامّةُ تَمُرُّ:\n${full.out}`);
-  assert.ok(!/RUNNER_/.test(full.out), 'لا رمزَ غيابٍ على التامّةِ.');
-  assert.match(full.out, /✓ النظامُ — Ubuntu 24\.04\.5 LTS/, 'الهدفُ المُقرَّرُ في WL-263 مقيسٌ.');
-
-  /** @type {Array<[string, Record<string, string | null>, RegExp]>} */
-  const cases = [
-    ['بلا docker', { docker: null }, /RUNNER_DOCKER_MISSING/],
-    ['docker لا يُجيبُ', { docker: 'exit 1' }, /RUNNER_DOCKER_UNREACHABLE/],
-    [
-      'pg_dump 16 بلا sudo',
-      { pg_dump: 'echo "pg_dump (PostgreSQL) 16.4"' },
-      /RUNNER_PG_CLIENT_MISSING/,
-    ],
-    ['بلا g++', { 'g++': null }, /RUNNER_BUILD_TOOLS_MISSING: غائبٌ: g\+\+/],
-    ['النواةُ تمنعُ userns', { unshare: 'exit 1' }, /RUNNER_USERNS_UNAVAILABLE/],
-    ['بلا tar', { tar: null }, /RUNNER_TOOLS_MISSING: غائبٌ: tar/],
-  ];
-  for (const [label, overrides, code] of cases) {
-    const r = machine(overrides);
-    assert.equal(r.status, 1, `${label}: يَسقُطُ.\n${r.out}`);
-    assert.match(r.out, code, `${label}: الرمزُ مُسمّىً.`);
-    assert.match(r.out, /RUNNER_PREFLIGHT_FAILED: 1 /, `${label}: غائبٌ واحدٌ لا أكثرَ.`);
-  }
-
-  // `WL-263`: قضى المالكُ بـUbuntu 24.04 هدفاً، فغيرُه — ولو أحدثَ — سقوطٌ مقروءٌ.
-  for (const [label, os] of /** @type {Array<[string, string | null]>} */ ([
-    ['Ubuntu 26.04', 'ID=ubuntu\nVERSION_ID="26.04"\nPRETTY_NAME="Ubuntu 26.04 LTS"\n'],
-    ['Debian 13', 'ID=debian\nVERSION_ID="13"\nPRETTY_NAME="Debian GNU/Linux 13"\n'],
-    ['بلا os-release', null],
-  ])) {
-    const r = machine({}, os);
-    assert.equal(r.status, 1, `${label}: يَسقُطُ.\n${r.out}`);
-    assert.match(r.out, /RUNNER_OS_MISMATCH/, `${label}: الرمزُ مُسمّىً.`);
-    assert.match(r.out, /RUNNER_PREFLIGHT_FAILED: 1 /);
-  }
-
-  const pgViaSudo = machine({ pg_dump: null, sudo: 'exit 0' });
-  assert.equal(
-    pgViaSudo.status,
-    0,
-    'غيابُ pg_dump مع sudo بلا كلمةِ مرورٍ مقبولٌ — خطوةُ التثبيتِ تُثبِّتُه.',
+test('WL-286 — لا وظيفةَ preflight بعدَ نقل CI إلى GitHub-hosted', async () => {
+  const { parse } = await import('yaml');
+  /** @type {Record<string, Record<string, any>>} */
+  const jobs = parse(workflow).jobs;
+  assert.ok(!jobs.preflight, 'وظيفةُ preflight أُزيلت مع نقل CI إلى GitHub-hosted.');
+  assert.ok(jobs.validate, 'وظيفةُ validate قائمةٌ.');
+  assert.ok(jobs['gate-report'], 'وظيفةُ gate-report قائمةٌ.');
+  // validate لا تحتاج preflight بعد الآن
+  assert.notEqual(jobs.validate?.needs, 'preflight', 'validate لا يحتاج preflight.');
+  // gate-report يحتاج validate وحدها
+  assert.deepEqual(jobs['gate-report']?.needs, ['validate'], 'gate-report يحتاج validate وحدها.');
+  // gate-report لا يذكر preflight
+  assert.doesNotMatch(
+    String(jobs['gate-report']?.steps?.[0]?.run ?? ''),
+    /preflight/,
+    'gate-report لا يذكر preflight.',
   );
+});
 
-  const bare = machine({ docker: null, unshare: 'exit 1', gcc: null });
-  assert.equal(bare.status, 1);
-  for (const code of [
-    'RUNNER_DOCKER_MISSING',
-    'RUNNER_USERNS_UNAVAILABLE',
-    'RUNNER_BUILD_TOOLS_MISSING',
-  ]) {
-    assert.ok(bare.out.includes(code), `كلُّ غائبٍ يُسمّى لا أوّلُه وحدَه: ${code}`);
-  }
-  assert.match(bare.out, /RUNNER_PREFLIGHT_FAILED: 3 /);
+test('WL-286 — لا خطوةَ تفريغِ /tmp خاصّةٍ بالعدّاء المقيم', async () => {
+  const { parse } = await import('yaml');
+  /** @type {Array<Record<string, any>>} */
+  const steps = parse(workflow).jobs.validate.steps;
+  // لا خطوة تفريغ بقايا التشغيلات السابقة
+  const cleanup = steps.find(
+    (s) =>
+      String(s.name ?? '').includes('تفريغ بقايا') ||
+      String(s.run ?? '').includes('rm -rf /tmp/royal-attest-*'),
+  );
+  assert.ok(!cleanup, 'لا خطوةَ تفريغِ /tmp خاصّةٍ بالعدّاء المقيم.');
+  // لكن جرد /tmp قبل/بعد الاختبارات باقٍ (سياسة محروسة — WL-219)
+  const before = steps.find((s) => String(s.run ?? '').includes('.xuux-tmp-before.txt'));
+  assert.ok(before, 'جرد /tmp قبل الاختبارات باقٍ.');
+  const after = steps.find((s) => String(s.name ?? '').includes('مقايسة /tmp بعد'));
+  assert.ok(after, 'مقايسة /tmp بعد الاختبارات باقيةٌ.');
 });
