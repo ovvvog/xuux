@@ -88,21 +88,28 @@ jobs:
           df -h /tmp / >&2
           exit 1
 
-      # الخادم أعلاه 18.6 و`pg_dump` يرفض خادماً أحدث منه. على ubuntu-latest لا يأتي
-      # عميل PostgreSQL 18 مثبتاً مسبقاً، فبدون هذه الخطوة يفشل تمرين النسخ والاستعادة.
+      # الخادم أعلاه 18.6. على ubuntu-latest يأتي postgresql-client 16 مثبّتاً مسبقاً،
+      # لكنّ pg_dump 16 يرفضه `assertClientNotOlder` في scripts/lib/pg-tools.mjs.
+      # نُثبّتُ postgresql-client-18 من مستودع PGDG. **تحديثٌ محدودٌ:** لا نُحدِّثُ كلَّ
+      # المستودعاتِ (فمرايا Azure قد تَعلقُ)، بل مستودع PGDG وحده.
       - name: تثبيت عميل PostgreSQL 18 المطابق للخادم
         run: |
           if command -v pg_dump >/dev/null 2>&1 && pg_dump --version | grep -q ' 18\.'; then
             echo "postgresql-client-18 مثبت مسبقاً — لا تثبيت في هذه التشغيلة"
             exit 0
           fi
+          echo "إضافة مستودع PGDG..."
           sudo install -d /usr/share/postgresql-common/pgdg
-          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          sudo curl -fsSL --connect-timeout 15 --max-time 30 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
             https://www.postgresql.org/media/keys/ACCC4CF8.asc
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
             | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          echo "تحديث مستودع PGDG وحده (تجنّب المرايا البطيئة)..."
+          timeout 60 sudo apt-get update \
+            -o Dir::Etc::sourceparts="-" \
+            -o Dir::Etc::sourcelist="/etc/apt/sources.list.d/pgdg.list" 2>&1 | tail -5
+          echo "تثبيت postgresql-client-18..."
+          timeout 60 sudo apt-get install -y --no-install-recommends postgresql-client-18 2>&1 | tail -10
           /usr/lib/postgresql/18/bin/pg_dump --version
           /usr/lib/postgresql/18/bin/pg_restore --version
 
