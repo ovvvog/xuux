@@ -126,7 +126,7 @@ export class StateManifestError extends Error {
 }
 
 /** الحقولُ الثلاثةُ الرتيبةُ التي لا تنزلُ. */
-export type MonotonicKey = 'anchoredCount' | 'haltEpoch' | 'ledgerCommitted';
+export type MonotonicKey = 'anchoredCount' | 'haltEpoch' | 'ledgerCommitted' | 'freshnessEpoch';
 
 /** ما يربطُ البيانَ بنظامِه: هويةٌ وسياقٌ وتوكنٌ وموديول. */
 export interface StateManifestBinding {
@@ -148,6 +148,8 @@ export interface StateManifestBody extends StateManifestBinding {
   anchoredCount: number;
   haltEpoch: number;
   ledgerCommitted: number;
+  /** عَهْدُ الحداثةِ من مصدرٍ خارجَ القرص (EXT-6). صفرٌ إن لم يُوصَلْ. */
+  freshnessEpoch: number;
   /** رأسُ دفترِ الرفعِ لحظةَ الختمِ — يمنعُ قصَّ الدفترِ إلى ما قبلَ الختم. */
   journalHead: string;
 }
@@ -466,6 +468,7 @@ export class StateManifest {
       anchoredCount: 0,
       haltEpoch: 0,
       ledgerCommitted: 0,
+      freshnessEpoch: 0,
       journalHead: 'genesis',
     };
     await this.#seal(body);
@@ -743,10 +746,12 @@ export class StateManifest {
       !Number.isSafeInteger(body.anchoredCount) ||
       !Number.isSafeInteger(body.haltEpoch) ||
       !Number.isSafeInteger(body.ledgerCommitted) ||
+      !Number.isSafeInteger(body.freshnessEpoch) ||
       (body.sequence as number) < 1 ||
       (body.anchoredCount as number) < 0 ||
       (body.haltEpoch as number) < 0 ||
-      (body.ledgerCommitted as number) < 0
+      (body.ledgerCommitted as number) < 0 ||
+      (body.freshnessEpoch as number) < 0
     ) {
       throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'حقولٌ ناقصةٌ أو غيرُ صحيحة');
     }
@@ -834,7 +839,8 @@ export class StateManifest {
       if (
         (entry.key !== 'anchoredCount' &&
           entry.key !== 'haltEpoch' &&
-          entry.key !== 'ledgerCommitted') ||
+          entry.key !== 'ledgerCommitted' &&
+          entry.key !== 'freshnessEpoch') ||
         !Number.isSafeInteger(entry.value) ||
         entry.value <= folded[entry.key]
       ) {
