@@ -165,10 +165,7 @@ test('LIVE-17/SKIP-NO-REASON — تخطٍّ بلا سببٍ في TAP يُسقِ�
 // لا يَحتوي على إشارةٍ إلى العدّاءِ المحليِّ.
 test('WL-286 — لا إشارةَ إلى self-hosted أو linux-vm أو xuux-ci-linux في المسار', () => {
   for (const token of ['self-hosted', 'linux-vm', 'xuux-ci-linux', 'runner-preflight']) {
-    assert.ok(
-      !workflow.includes(token),
-      `ci.yml يحوي إشارةً إلى العدّاء المحلي: ${token}`,
-    );
+    assert.ok(!workflow.includes(token), `ci.yml يحوي إشارةً إلى العدّاء المحلي: ${token}`);
   }
 });
 
@@ -177,11 +174,7 @@ test('WL-286 — الوظائفُ كلُّها على ubuntu-latest', async () =
   /** @type {Record<string, Record<string, any>>} */
   const jobs = parse(workflow).jobs;
   for (const [name, job] of Object.entries(jobs)) {
-    assert.deepEqual(
-      job['runs-on'],
-      'ubuntu-latest',
-      `الوظيفةُ ${name} ليست على ubuntu-latest`,
-    );
+    assert.deepEqual(job['runs-on'], 'ubuntu-latest', `الوظيفةُ ${name} ليست على ubuntu-latest`);
   }
 });
 
@@ -209,9 +202,10 @@ test('WL-286 — لا خطوةَ تفريغِ /tmp خاصّةٍ بالعدّاء
   /** @type {Array<Record<string, any>>} */
   const steps = parse(workflow).jobs.validate.steps;
   // لا خطوة تفريغ بقايا التشغيلات السابقة
-  const cleanup = steps.find((s) =>
-    String(s.name ?? '').includes('تفريغ بقايا') ||
-    String(s.run ?? '').includes('rm -rf /tmp/royal-attest-*')
+  const cleanup = steps.find(
+    (s) =>
+      String(s.name ?? '').includes('تفريغ بقايا') ||
+      String(s.run ?? '').includes('rm -rf /tmp/royal-attest-*'),
   );
   assert.ok(!cleanup, 'لا خطوةَ تفريغِ /tmp خاصّةٍ بالعدّاء المقيم.');
   // لكن جرد /tmp قبل/بعد الاختبارات باقٍ (سياسة محروسة — WL-219)
