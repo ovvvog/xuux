@@ -42,7 +42,7 @@ jobs:
   publish:
     name: تحقُّقٌ ونشرٌ (كودُ main وحدَهُ)
     if: github.event.workflow_run.conclusion == 'success'
-    runs-on: [self-hosted, linux-vm]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: publish-skip-baseline
     permissions:
@@ -217,8 +217,7 @@ jobs:
           BODY="${BODY//__EXIT__/${{ steps.prov.outputs.test_exit }}}"
           BODY="${BODY//__RUNID__/${{ steps.prov.outputs.github_run_id }}}"
           BODY="${BODY//__ATTEMPT__/${{ steps.prov.outputs.github_run_attempt }}}"
-          # إنشاءُ طلبِ الدمجِ عبرَ REST API — العدّاءُ بلا `gh` (OPS-1/RUNNER-NO-GH)
-          # `gh` غيرُ مثبَّتٍ على `xuux-ci-linux`، فالنداءُ يقعُ مباشرةً عبرَ `curl`
+          # إنشاءُ طلبِ الدمجِ عبرَ REST API — بلا اعتمادٍ على `gh` CLI
           # و`node` يَبني حمولةَ JSON آمنةً من النصِّ العربيِّ متعدِّدِ الأسطرِ.
           PAYLOAD=$(printf '%s' "$BODY" | node -e "
             const chunks = [];

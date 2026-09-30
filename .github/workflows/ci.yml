@@ -4,14 +4,9 @@
 # المرجع: docs/roadmap/03-roadmap-to-100.md — البوابتان G0 و G1
 # المادة 2 من القاعدة الحاكمة: لا إنجاز بلا دليل قابل للتشغيل؛ وهذا هو الدليل الآلي.
 #
-# WL-216: نُقل المسار من GitHub-hosted (ubuntu-latest) إلى self-hosted runner
-# لتفادي حظر فوترة GitHub Actions.
-#
-# البيئة المُعتمدة: آلةٌ افتراضيّةٌ Linux أصليّةٌ على Hyper-V (الـ runner
-# `xuux-ci-linux`، الوسم `linux-vm`). ولم تُعتمد WSL2: قِيس عليها أنّ نواتَها
-# ترفض ربطَ `/usr` بـ bind mount داخلَ مساحةِ مستخدمٍ، فسقطت سبعةُ اختباراتِ
-# عزلٍ سقوطاً بيئيّاً لا شفريّاً — والعزلُ عقدٌ أمنيٌّ لا يُتخطّى ليُخضَّر مسارٌ.
-# فلا وسمَ `linux-wsl` في هذا الملفِّ، ولا شرطَ منصّةٍ في اختبارٍ.
+# WL-286: نُقل المسار من عدّاء المالك المقيم إلى GitHub-hosted
+# runner (ubuntu-latest) بقرار المالك. لا عدّاءٌ مقيمٌ بعدَ اليوم، ولا افتراضُ حالةٍ
+# بينَ التشغيلاتِ. Docker وservice containers مدعومةٌ على ubuntu-latest.
 
 name: CI
 
@@ -30,25 +25,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # `LIVE-18` / `WL-261`: العدّاءُ المقيمُ يُجهَّزُ خارجَ المستودعِ، فلمّا أُعيدَ تسجيلُه
-  # على آلةٍ بلا تجهيزٍ سقطَت الوظيفةُ في «Set up job» بـ`docker: command not found`.
-  # فيُفحَصُ كلُّ متطلَّبٍ هنا ويُسمّى الغائبُ برمزِه وعلاجِه. **والوظيفةُ بلا
-  # `services:` قصداً**: غيابُ Docker يُسقِطُ الوظيفةَ ذاتَ الحاوياتِ قبلَ أوّلِ خطوةٍ.
-  preflight:
-    name: فحص العدّاء المسبق (LIVE-18)
-    runs-on: [self-hosted, linux-vm]
-    timeout-minutes: 5
-    steps:
-      - name: جلب المستودع
-        uses: actions/checkout@v4
-
-      - name: فحص متطلّبات العدّاء — docs/RUNNER_PROVISIONING.md
-        run: bash scripts/runner-preflight.sh
-
   validate:
     name: فحص الجودة الكامل
-    runs-on: [self-hosted, linux-vm]
-    needs: preflight
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     services:
@@ -70,29 +49,6 @@ jobs:
       DATABASE_URL: postgresql://state:state@127.0.0.1:5432/state
 
     steps:
-      # العدّاءُ الذاتيُّ **مقيمٌ لا عابرٌ**: `/tmp` يبقى بينَ التشغيلاتِ. فما يتركُه
-      # اختبارٌ من جذورٍ مؤقّتةٍ يتراكمُ حتّى تنفَدَ المساحةُ، فتسقُطَ تشغيلةٌ برمزِ
-      # `EDQUOT` (‏`-122`) بلا علاقةٍ بالشفرةِ — وقعَ في التشغيلتَينِ `35334036249`
-      # و`35336883199` (‏`LIVE-9` / `WL-217`). وإصلاحُ الاختباراتِ يمنعُ التراكُمَ من
-      # اليومِ **ولا يُفرِّغُ ما تراكمَ**، ولا وصولَ للمنفِّذِ إلى داخلِ الآلةِ —
-      # فالتفريغُ يقعُ هنا لا بيدِ المالكِ.
-      #
-      # **حدٌّ مُعلَنٌ:** يفترضُ أنْ لا وظيفةَ أخرى تُشغِّلُ اختباراتٍ على العدّاءِ
-      # نفسِه في اللحظةِ نفسِها. وهذا صحيحٌ اليومَ (عدّاءٌ واحدٌ يُشغِّلُ وظيفةً
-      # واحدةً)؛ فإن أُضيفَ عدّاءٌ ثانٍ بالوسمِ نفسِه لزمَ قيدُ تزامُنٍ أو حصرُ
-      # المحوِ بما تجاوزَ عمرَ التشغيلةِ.
-      - name: تفريغ بقايا التشغيلات السابقة على العدّاء المقيم
-        run: |
-          echo "المساحة قبل التفريغ:"
-          df -h /tmp / | sed "s/^/  /"
-          before=$(ls -d /tmp/royal-attest-* /tmp/royal-decision-* /tmp/guard-royal-* /tmp/xuux-* 2>/dev/null | wc -l)
-          echo "عدد الجذور المؤقّتة الباقية قبل التفريغ: $before"
-          rm -rf /tmp/royal-attest-* /tmp/royal-decision-* /tmp/guard-royal-* /tmp/xuux-* 2>/dev/null || true
-          after=$(ls -d /tmp/royal-attest-* /tmp/royal-decision-* /tmp/guard-royal-* /tmp/xuux-* 2>/dev/null | wc -l)
-          echo "وبعده: $after"
-          echo "المساحة بعد التفريغ:"
-          df -h /tmp / | sed "s/^/  /"
-
       - name: جلب المستودع
         uses: actions/checkout@v4
         with:
@@ -132,22 +88,13 @@ jobs:
           df -h /tmp / >&2
           exit 1
 
-      # الخادم أعلاه 18.6 و`pg_dump` يرفض خادماً أحدث منه. على الـ runner
-      # الذاتي لا يأتي عميل PostgreSQL مثبتاً مسبقاً (على عكس ubuntu-latest)،
-      # فبدون هذه الخطوة يفشل تمرين النسخ والاستعادة حتماً (WL-022).
-      # التثبيت دائم على الـ runner الذاتي فلا يُعاد في كل تشغيلة.
+      # الخادم أعلاه 18.6 و`pg_dump` يرفض خادماً أحدث منه. على ubuntu-latest لا يأتي
+      # عميل PostgreSQL 18 مثبتاً مسبقاً، فبدون هذه الخطوة يفشل تمرين النسخ والاستعادة.
       - name: تثبيت عميل PostgreSQL 18 المطابق للخادم
         run: |
           if command -v pg_dump >/dev/null 2>&1 && pg_dump --version | grep -q ' 18\.'; then
             echo "postgresql-client-18 مثبت مسبقاً — لا تثبيت في هذه التشغيلة"
             exit 0
-          fi
-          # الـ runner الذاتي قد لا يمنح sudo بلا كلمة مرور. فيُقاس ذلك قبل
-          # المحاولة ليكون سببُ السقوط مقروءاً لا خطأً غامضاً في منتصف apt.
-          if ! sudo -n true 2>/dev/null; then
-            echo "::error::sudo يطلب كلمة مرور على هذا الـ runner، وعميل PostgreSQL 18 غير مثبَّت." >&2
-            echo "ثبِّته مرّةً واحدةً داخل الآلة الافتراضيّة ثم أعد التشغيل — التثبيت دائم فلا يتكرّر." >&2
-            exit 1
           fi
           sudo install -d /usr/share/postgresql-common/pgdg
           sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
@@ -187,14 +134,9 @@ jobs:
         run: npm run scan:secrets
 
       - name: فحص مادة المفاتيح الخاصة (M2.03)
-        # بوضع الإنتاج قصداً: المستودع لا يجوز أن يحمل مادة مفتاح خاص ولو
-        # مشفَّرة. والبوابة المحلية تبقى بوضع التطوير لأن للمطوّر مخزناً
-        # محلياً مشفَّراً مشروعاً تحت مسارات التشغيل.
         run: npm run scan:keys -- --production
 
       - name: الهجرات — تقديم ثم تراجع ثم تقديم (M3.03)
-        # التراجع مُشغَّل في البوابة قصداً: هجرة لا يُجرَّب تراجعها ليست قابلة
-        # للتراجع، وإنما مكتوبٌ عنها ذلك.
         run: |
           npm run migrate -- up
           npm run migrate -- status
@@ -202,8 +144,6 @@ jobs:
           npm run migrate -- up
 
       - name: النسخ الاحتياطي والاستعادة — تمرين فعلي بزمن معلَن (M3.07)
-        # لا يكفي وجود نصّ نسخ: النسخة التي لم تُستعد ليست نسخة. فالبوابة
-        # تُنشئ أرشيفاً وتتحقّق منه وتستعيده فوق قاعدة أخرى، وتطبع الزمن.
         run: |
           dump="$RUNNER_TEMP/ci-drill.dump"
           npm run backup -- create "$dump"
@@ -211,8 +151,6 @@ jobs:
           npm run restore -- "$dump" --database state_restore_drill --force
 
       - name: سياسة الاحتفاظ — تقرير جاف لا يحذف شيئاً (M3.08)
-        # `plan` قراءةٌ محضة: تُشغَّل في البوابة لأن سياسةً لا تُقرأ آلياً
-        # سياسةٌ على الورق. والمحو الفعلي لا يُشغَّل في CI قصداً.
         run: npm run retention -- plan
 
       - name: حاجز نظافة الجذور المؤقّتة (WL-219) — سياسةٌ تمنعُ عودةَ فئةِ LIVE-9 بأسماءٍ جديدةٍ
@@ -237,9 +175,6 @@ jobs:
       # مادّةُ `R6-A-10` (‏`OPS-1`): الحارسُ يَقرأُ خطّةَ كلِّ جولةٍ **في الكوميتِ
       # الذي راجعَهُ المجلسُ**، وبعضُ تلكَ الكوميتاتِ يَسكُنُ `refs/pull/<n>/head`
       # لا فرعاً — و`fetch-depth: 0` يَجلُبُ الفروعَ والوسومَ **لا مراجعَ الطلباتِ**.
-      # فكانَ يَخضَرُّ في مجلدِ عملِ العدّاءِ المقيمِ لبقايا كائناتٍ من تشغيلةٍ
-      # سابقةٍ، ويَحمَرُّ في أيِّ خروجٍ نظيفٍ — **وخُضرةٌ تَستنِدُ إلى بقايا مجلدٍ
-      # ليست خاصيّةَ مستودَعٍ**. كشفَتْهُ تشغيلةُ القياسِ `35716702520`.
       # **وحاسمةٌ بلا `|| true`:** كوميتُ مراجعةٍ مُعلَنٌ لا يُقرأُ يُسقِطُ الخطوةَ.
       - name: جلب كوميتات المراجعة المعلَنة (R6-A-10) — قبل الاختبارات قصداً
         run: npm run fetch:reviewed-commits
@@ -247,9 +182,7 @@ jobs:
       - name: جرد /tmp قبل الاختبارات (مرجعُ المقايسة)
         run: ls -A /tmp | LC_ALL=C sort > /tmp/.xuux-tmp-before.txt && wc -l < /tmp/.xuux-tmp-before.txt
 
-      # مصدرُ الأعدادِ (‏`LIVE-17` / `WL-257`): سجلُّ هذه الوظيفةِ **لا يُرفَعُ إلى
-      # GitHub** على العدّاءِ `xuux-ci-linux` (‏`BlobNotFound` مقيسٌ في ثلاثِ تشغيلاتٍ)،
-      # فأعدادُ الاختباراتِ كانت غيرَ مقيسةٍ من CI. فيُنسَخُ مُخرَجُ TAP إلى ملفٍّ
+      # مصدرُ الأعدادِ (‏`LIVE-17` / `WL-257`): مُخرَجُ TAP يُنسَخُ إلى ملفٍّ
       # ويُرفَعُ أثراً — **مصدرٌ لا يتعلّقُ برفعِ السجلِّ**. و`shell: bash` يُفعِّلُ
       # `-eo pipefail` فرمزُ الخطوةِ رمزُ `npm test` لا رمزُ `tee`.
       - name: الاختبارات
@@ -493,16 +426,12 @@ jobs:
 
   gate-report:
     name: تقرير البوابتين G0 و G1
-    runs-on: [self-hosted, linux-vm]
-    needs: [preflight, validate]
+    runs-on: ubuntu-latest
+    needs: [validate]
     if: always()
     steps:
       - name: خلاصة النتيجة
         run: |
-          if [ "${{ needs.preflight.result }}" != "success" ]; then
-            echo "### ⛔ فحص العدّاء المسبق: ${{ needs.preflight.result }} — متطلَّبٌ غائبٌ على الآلة (LIVE-18)" >> "$GITHUB_STEP_SUMMARY"
-            echo "انظر docs/RUNNER_PROVISIONING.md؛ والرمزُ في خلاصة وظيفة الفحص المسبق." >> "$GITHUB_STEP_SUMMARY"
-          fi
           if [ "${{ needs.validate.result }}" = "success" ]; then
             echo "### ✅ البوابتان G0 و G1 — كل الفحوص خضراء" >> "$GITHUB_STEP_SUMMARY"
           else

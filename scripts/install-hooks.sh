@@ -6,7 +6,7 @@
 # يَنسخُ pre-push hook إلى .git/hooks/ ويَجعلهُ قابلاً للتنفيذ.
 # الـ hook يُشغِّل npm run validate قبل كل دفعة.
 #
-# WL-216: ضابطٌ تعويضيٌّ لحمايةِ الفرعِ (EXT-1) بعد نقل CI إلى self-hosted runner.
+# WL-216: ضابطٌ تعويضيٌّ لحمايةِ الفرعِ (EXT-1) بعد نقل CI إلى GitHub-hosted runner.
 
 set -e
 

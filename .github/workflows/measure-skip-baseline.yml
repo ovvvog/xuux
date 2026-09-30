@@ -44,7 +44,7 @@ jobs:
   # ═══ ① القرارُ: I1 · I2 · I3 — بكودِ main وحدَهُ، وبلا تنفيذٍ للكودِ المقاسِ ═══
   resolve:
     name: تثبيتُ الهويّةِ (I1·I2·I3)
-    runs-on: [self-hosted, linux-vm]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
@@ -103,7 +103,7 @@ jobs:
   produce-tap:
     name: إنتاجُ TAP من الشجرةِ المقاسةِ (بلا كتابةٍ)
     needs: resolve
-    runs-on: [self-hosted, linux-vm]
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: read
@@ -229,7 +229,7 @@ jobs:
   classify-and-write:
     name: تصنيفُ TAP وكتابةُ الأثرِ (أداةٌ من main)
     needs: [resolve, produce-tap]
-    runs-on: [self-hosted, linux-vm]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
