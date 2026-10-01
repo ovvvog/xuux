@@ -1,5 +1,29 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-01] — WL-295 — تصحيحُ LIVE-22: workflow_dispatch بدلَ repository_dispatch (يَحتاجُ actions:write فقط)
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `LIVE-22` (§4.6) · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — الإصلاحُ مرفوعٌ، لكنّ الإغلاقَ يَنتظرُ أوّلَ قياسٍ آليٍّ يُطلِقُ النشرَ بلا تدخُّلٍ يدويٍّ
+
+#### ما تمَّ فعلاً
+
+- **الخطأُ في WL-294:** استُعمِلَ `repository_dispatch` كقناةِ نشرٍ بديلةٍ، لكنّ GitHub API يَتطلَّبُ `contents: write` لإرسالِ `repository_dispatch` — وهو ما يَكسرُ عقدَ OPS-1: مسارُ القياسِ بلا صلاحيّةِ كتابةٍ. التشغيلةُ `36881954610` فشلَت في خُطوةِ `dispatch-publish` بـHTTP 403.
+- **التصحيحُ:** `workflow_dispatch` استثناءٌ موثَّقٌ يَعمَلُ بـ`GITHUB_TOKEN` ويَحتاجُ `actions: write` فقط (لا `contents: write`).auto-measure يُمرِّرُ `publish_channel: 'workflow_dispatch'`، و`dispatch-publish` يُرسِلُ `workflow_dispatch` إلى `publish-skip-baseline.yml` بـ`actions: write`.
+- **الحمايةُ مُحافظٌ عليها:** مسارُ القياسِ بلا `contents: write` في أيِّ job. الاختبارُ ب١ يَفحَصُ ذلك.
+
+#### الدليلُ
+
+| المقيسُ | القيمةُ |
+| --- | --- |
+| الخطأُ في WL-294 | `repository_dispatch` يَحتاجُ `contents: write` ⇒ HTTP 403 |
+| التصحيحُ | `workflow_dispatch` يَحتاجُ `actions: write` فقط |
+| `measure-skip-baseline` | `dispatch-publish` بـ`{ contents: read, actions: write }` |
+| `publish-skip-baseline` | `workflow_dispatch` trigger + `inputs` + تحقُّقٌ عبرَ API |
+| الاختبارُ ب١ | يَفحَصُ `dispatch-publish` بـ`{ contents: read, actions: write }` |
+| `external-review.yaml` | لم يُمَسَّ |
+
+---
+
+
 ### [2026-10-01] — WL-294 — تشخيصُ LIVE-22 وإصلاحُ مسارِ النشرِ عبرَ repository_dispatch · توثيقُ استثناءِ حمايةِ الفرعِ في PR #197
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `LIVE-22` (§4.6) · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — السببُ الجذريُّ شُخِّصَ والإصلاحُ مرفوعٌ، لكنّ الإغلاقَ ينتظرُ أوّلَ قياسٍ آليٍّ بعدَ الدمجِ يُطلِقُ النشرَ بلا تدخُّلٍ يدويٍّ

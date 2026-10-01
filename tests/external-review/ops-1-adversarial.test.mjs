@@ -1231,7 +1231,7 @@ test('ب١ — سيرُ القياسِ بلا صلاحيّةِ كتابةٍ في
   const permissionBlocks = collect(doc, 'permissions');
   assert.ok(permissionBlocks.length >= 4, 'صلاحيّةٌ مُعلَنةٌ في القمّةِ وفي كلِّ job.');
   // الوظائفُ التي تُنفِّذُ كوداً مقاساً لا تملِكُ إلّا القراءةَ.
-  // `dispatch-publish` (LIVE-22) لا يُنفِّذُ كوداً مقاساً — يُرسِلُ `repository_dispatch`
+  // `dispatch-publish` (LIVE-22) لا يُنفِّذُ كوداً مقاساً — يُرسِلُ `workflow_dispatch`
   // فقط، فـ`actions: write` مطلوبةٌ لإرسالِ الحدثِ ولا تُمكِّنُ من كتابةِ المحتوى.
   const executingJobs = ['resolve', 'produce-tap', 'classify-and-write'];
   for (const jobName of executingJobs) {
@@ -1252,7 +1252,7 @@ test('ب١ — سيرُ القياسِ بلا صلاحيّةِ كتابةٍ في
     assert.equal(
       dispatchJob.permissions?.actions,
       'write',
-      'dispatch-publish يملِكُ actions:write لإرسالِ repository_dispatch (LIVE-22).',
+      'dispatch-publish يملِكُ actions:write لإرسالِ workflow_dispatch (LIVE-22).',
     );
   }
   assert.deepEqual(Object.keys(doc.jobs ?? {}), [

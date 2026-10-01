@@ -30,15 +30,35 @@ on:
     workflows: ['قياسُ خطِّ أساسِ التخطّي']
     types: [completed]
     branches: [main]
-  repository_dispatch:
-    types: [skip-baseline-measured]
+  workflow_dispatch:
+    inputs:
+      measure_run_id:
+        description: 'معرِّفُ تشغيلةِ القياسِ'
+        required: true
+        type: string
+      measure_run_attempt:
+        description: 'محاولةُ التشغيلةِ'
+        required: true
+        type: string
+      measured_sha:
+        description: 'بصمةُ الكوميتِ المقاسِ'
+        required: true
+        type: string
+      main_head_at_measure:
+        description: 'رأسُ main عندَ القياسِ'
+        required: true
+        type: string
+      artifact_name:
+        description: 'اسمُ الأثرِ'
+        required: true
+        type: string
 
-# ── لماذا repository_dispatch إلى جانب workflow_run (LIVE-22) ──
+# ── لماذا workflow_dispatch إلى جانب workflow_run (LIVE-22) ──
 #
 # GitHub لا يُطلِقُ workflow_run للأحداثِ المُطلَقةِ بـGITHUB_TOKEN.
 # القياسُ الآلي يُطلَقُ بـworkflow_dispatch من auto-measure بـGITHUB_TOKEN،
-# فلا تُطلَقُ workflow_run للنشر. repository_dispatch استثناءٌ موثَّقٌ.
-# القياسُ اليدويّ لا يُرسِلُ repository_dispatch، فيَعتمِدُ على workflow_run — فلا ازدواجَ.
+# فلا تُطلَقُ workflow_run للنشر. workflow_dispatch استثناءٌ موثَّقٌ.
+# القياسُ اليدويّ لا يُرسِلُ workflow_dispatch، فيَعتمِدُ على workflow_run — فلا ازدواجَ.
 
 permissions:
   contents: read
@@ -52,7 +72,7 @@ jobs:
     name: تحقُّقٌ ونشرٌ (كودُ main وحدَهُ)
     if: |
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
-      github.event_name == 'repository_dispatch'
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: publish-skip-baseline
@@ -81,7 +101,7 @@ jobs:
 
       # ── حلُّ معرِّفِ التشغيلةِ المقاسةِ (LIVE-22) ──
       # workflow_run: المعرِّفُ في الحدثِ مباشرةً.
-      # repository_dispatch: المعرِّفُ في client_payload، ويجبُ التحقُّقُ عبرَ API.
+      # workflow_dispatch: المعرِّفُ في inputs، ويجبُ التحقُّقُ عبرَ API.
       - name: حلُّ معرِّفِ التشغيلةِ المقاسةِ والتحقُّقُ منها
         id: resolve-run
         env:
@@ -94,9 +114,9 @@ jobs:
             echo "measure_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
             echo "المصدرُ: workflow_run — معرِّفُ التشغيلةِ $RUN_ID"
           else
-            RUN_ID='${{ github.event.client_payload.measure_run_id }}'
-            MEASURED_SHA='${{ github.event.client_payload.measured_sha }}'
-            MAIN_HEAD='${{ github.event.client_payload.main_head_at_measure }}'
+            RUN_ID='${{ github.event.inputs.measure_run_id }}'
+            MEASURED_SHA='${{ github.event.inputs.measured_sha }}'
+            MAIN_HEAD='${{ github.event.inputs.main_head_at_measure }}'
             # التحقُّقُ عبرَ API أنَّ التشغيلةَ حقيقيّةٌ وناجحةٌ ومن مسارِ القياسِ
             RESPONSE=$(curl -fsS \
               -H 'Accept: application/vnd.github+json' \
@@ -120,7 +140,7 @@ jobs:
               exit 1
             fi
             echo "measure_run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
-            echo "المصدرُ: repository_dispatch — معرِّفُ التشغيلةِ $RUN_ID (مُتحقَّقٌ: name=$NAME status=$STATUS conclusion=$CONCLUSION branch=$BRANCH)"
+            echo "المصدرُ: workflow_dispatch — معرِّفُ التشغيلةِ $RUN_ID (مُتحقَّقٌ: name=$NAME status=$STATUS conclusion=$CONCLUSION branch=$BRANCH)"
           fi
 
       - name: جلبُ الشجرةِ الموثوقةِ (main)
