@@ -51,6 +51,12 @@ import {
 } from './state-manifest.mjs';
 import { FileRevocationStore } from './identity.mjs';
 import type { RevocationStore } from './identity.mjs';
+import type { FreshnessSocket } from './freshness-socket.mjs';
+import {
+  isNullFreshnessSocket,
+  STALE_MANIFEST_EPOCH,
+  FRESHNESS_SOURCE_UNAVAILABLE,
+} from './freshness-socket.mjs';
 
 /** أخطاءُ المصنعِ الإنتاجيّ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const ProductionRuntimeErrorCodes = [
@@ -77,6 +83,9 @@ export const ProductionRuntimeErrorCodes = [
   // الثاني على جذرٍ قائمٍ محوٌ لا نشأةٌ، فيُرَدُّ فشلاً مُغلقاً كنظيرِه
   // `LEDGER_STATE_ROOT_MISSING` (‏`UF-13`) لا يُقرأُ «سجلاً من GENESIS».
   'LOG_STATE_ROOT_MISSING',
+  // EXT-6 / R3-A-01: بيانٌ مختومٌ صحيحٌ لكنّه أقدمُ من مرجعِ الحداثةِ الخارجيِّ.
+  // لا يُدَّعى منعُ rollback حتى يصبحَ مصدرُ الحداثةِ الحقيقيُّ موصولاً.
+  'STALE_MANIFEST_EPOCH',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -142,6 +151,15 @@ export interface ProductionRuntimeOptions {
    * الإنتاج. وحقنُه للاختبارِ لا لتخفيفِ الشرطِ.
    */
   revocationStore?: RevocationStore;
+  /**
+   * مقبسُ الحداثةِ (EXT-6 / R3-A-01). إن وُجد، يُقرأُ مرجعُ الحداثةِ عندَ
+   * الإقلاعِ ويُقارَنُ بالبيانِ: إن كانَ أحدثَ من البيانِ ⇒ رفضٌ مغلقٌ
+   * `STALE_MANIFEST_EPOCH`. وإن لم يُوجَد (`null`) فالسلوكُ كما كان —
+   * الحدُّ المُعلَنُ في ADR 0006 قائمٌ. **الواجهةُ وحدَها ليست إصلاحاً:**
+   * لا يُدَّعى منعُ rollback حتى يصبحَ مصدرُ الحداثةِ الحقيقيُّ موصولاً.
+   * اختيارُ الـbackend للمالك — راجع `docs/external-review/options/`.
+   */
+  freshnessSocket?: FreshnessSocket | null;
 }
 
 /** التركيبُ الإنتاجيُّ كما يُسلَّمُ للمستهلك. */
@@ -396,6 +414,30 @@ export async function createProductionRootOfTrust(
     // ثمَّ نقطةُ ضبطٍ مختومةٌ تطوي ما رُفِعَ متزامناً منذ الإقلاعِ السابق.
     await manifest.provisionAsync(stateManifestBinding(signers.anchorSigner.id, env), env);
     manifest.assertKing(signers.anchorSigner.id);
+    // EXT-6 / R3-A-01: فحصُ الحداثةِ الخارجيِّ. إن وُجدَ مصدرُ حداثةٍ موصولٌ،
+    // يُقرأُ عَهْدُهُ ويُقارَنُ بالعَهْدِ المختومِ في البيان. إن كانَ المرجعُ
+    // أحدثَ من البيانِ ⇒ رفضٌ مغلقٌ: اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ.
+    // وإن لم يُوجَد (`null` أو `NullFreshnessSocket`) فالسلوكُ كما كان — الحدُّ
+    // المُعلَنُ في ADR 0006 قائمٌ. **الواجهةُ وحدَها ليست إصلاحاً:** لا يُدَّعى
+    // منعُ rollback حتى يصبحَ مصدرُ الحداثةِ الحقيقيُّ موصولاً ويمنعُ فعليّاً.
+    const freshnessSocket = options.freshnessSocket ?? null;
+    if (!isNullFreshnessSocket(freshnessSocket) && freshnessSocket !== null) {
+      const freshness = await freshnessSocket.read();
+      const manifestBody = manifest.read();
+      if (
+        manifestBody.freshnessEpoch > 0 &&
+        Number(freshness.epoch) > manifestBody.freshnessEpoch
+      ) {
+        throw new ProductionRuntimeError(
+          STALE_MANIFEST_EPOCH,
+          `عَهْدُ الحداثةِ الخارجيِّ ${String(freshness.epoch)} أحدثُ من البيانِ ${manifestBody.freshnessEpoch} — اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ`,
+        );
+      }
+      if (Number(freshness.epoch) === 0) {
+        // أوّلُ وصلٍ: لا رفضَ، لكنّ العَهْدَ يُرفعُ في نقطةِ الضبطِ التاليةِ.
+        void FRESHNESS_SOURCE_UNAVAILABLE;
+      }
+    }
     // R4-B-01: استخرجْ مفتاحَ مصادقةِ دفترِ الرفعِ من التوكنِ بعدَ التحقّقِ من
     // الخاتَمِ، قبلَ أيِّ رفعٍ متزامنٍ. بدونِ هذا، تبقى سطورُ الدفترِ بلا مصادقةٍ،
     // فيستطيعُ مالكُ القرصِ أن يَدُسَّ سطراً غيرَ مُصادَقٍ عليه ثم يُختَمَ في المتنِ.
@@ -415,6 +457,13 @@ export async function createProductionRootOfTrust(
     // نقطةُ ضبطٍ ثانيةٌ بعدَ فحصِ المراسي: ما يرفعُه الفحصُ (عدُّ المُثبَّتِ) يُختَمُ
     // في المتنِ الآنَ لا في الإقلاعِ التالي، فلا يبقى شاهدٌ خارجَ الخاتَم.
     await manifest.checkpointAsync();
+    // EXT-6: بعدَ نقطةِ الضبطِ الأولى، إن وُجدَ مصدرُ حداثةٍ موصولٌ، يُرفعُ
+    // عَهْدُهُ ويُخزَّنُ في البيان. فالبيانُ القادمُ يشهدُ على عَهْدٍ لا يُسترجَعُ.
+    if (!isNullFreshnessSocket(freshnessSocket) && freshnessSocket !== null) {
+      const bumped = await freshnessSocket.bump();
+      manifest.raise('freshnessEpoch', Number(bumped.epoch));
+      await manifest.checkpointAsync();
+    }
     // R5-A-01: شاهدُ العهدِ المزدوجُ — من البيانِ ومن السجلِّ المختومِ. وذاك
     // لأنّ بياناً أقدمَ صحيحَ الخاتَمِ + دفتراً فارغاً يُعيدُ قبولَ أمرٍ ثُبِّتَ،
     // لو كانَ الشاهدُ في البيانِ وحدَه. فالسجلُّ المختومُ شاهدٌ ثانٍ لا يُسترجَعُ
