@@ -125,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "إطلاقُ قياسِ خطِّ أساسِ التخطّي على $HEAD_SHA"
-          PAYLOAD=$(node -e "console.log(JSON.stringify({ ref: 'main', inputs: { ref: process.argv[1] } }))" "$HEAD_SHA")
+          PAYLOAD=$(node -e "console.log(JSON.stringify({ ref: 'main', inputs: { ref: process.argv[1], publish_channel: 'repository_dispatch' } }))" "$HEAD_SHA")
           HTTP_RESPONSE=$(curl -sS -w '\n%{http_code}' -X POST \
             -H 'Accept: application/vnd.github+json' \
             -H "Authorization: Bearer $GH_TOKEN" \
