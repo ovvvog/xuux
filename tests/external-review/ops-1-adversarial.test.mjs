@@ -1230,14 +1230,37 @@ test('ب١ — سيرُ القياسِ بلا صلاحيّةِ كتابةٍ في
   assert.equal(doc.permissions?.contents, 'read');
   const permissionBlocks = collect(doc, 'permissions');
   assert.ok(permissionBlocks.length >= 4, 'صلاحيّةٌ مُعلَنةٌ في القمّةِ وفي كلِّ job.');
-  for (const block of permissionBlocks) {
+  // الوظائفُ التي تُنفِّذُ كوداً مقاساً لا تملِكُ إلّا القراءةَ.
+  // `dispatch-publish` (LIVE-22) لا يُنفِّذُ كوداً مقاساً — يُرسِلُ `repository_dispatch`
+  // فقط، فـ`actions: write` مطلوبةٌ لإرسالِ الحدثِ ولا تُمكِّنُ من كتابةِ المحتوى.
+  const executingJobs = ['resolve', 'produce-tap', 'classify-and-write'];
+  for (let i = 0; i < executingJobs.length; i++) {
+    const job = doc.jobs?.[executingJobs[i]];
     assert.deepEqual(
-      block,
+      job?.permissions,
       { contents: 'read' },
-      'مرحلةُ القياسِ تُنفِّذُ كوداً مقاساً — فلا صلاحيّةَ كتابةٍ في أيِّ job منها.',
+      `مرحلةُ القياسِ ${executingJobs[i]} تُنفِّذُ كوداً مقاساً — فلا صلاحيّةَ كتابةٍ.`,
     );
   }
-  assert.deepEqual(Object.keys(doc.jobs ?? {}), ['resolve', 'produce-tap', 'classify-and-write']);
+  const dispatchJob = doc.jobs?.['dispatch-publish'];
+  if (dispatchJob) {
+    assert.equal(
+      dispatchJob.permissions?.contents,
+      'read',
+      'dispatch-publish لا يملِكُ صلاحيّةَ كتابةِ محتوى.',
+    );
+    assert.equal(
+      dispatchJob.permissions?.actions,
+      'write',
+      'dispatch-publish يملِكُ actions:write لإرسالِ repository_dispatch (LIVE-22).',
+    );
+  }
+  assert.deepEqual(Object.keys(doc.jobs ?? {}), [
+    'resolve',
+    'produce-tap',
+    'classify-and-write',
+    'dispatch-publish',
+  ]);
 });
 
 test('ب١ب — ومرحلةُ النشرِ وحدَها تملِكُ الكتابةَ، ولا تُنفِّذُ كوداً مقاساً', () => {
