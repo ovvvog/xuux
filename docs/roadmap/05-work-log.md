@@ -1,5 +1,48 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-01] — WL-294 — تشخيصُ LIVE-22 وإصلاحُ مسارِ النشرِ عبرَ repository_dispatch · توثيقُ استثناءِ حمايةِ الفرعِ في PR #197
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `LIVE-22` (§4.6) · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — السببُ الجذريُّ شُخِّصَ والإصلاحُ مرفوعٌ، لكنّ الإغلاقَ ينتظرُ أوّلَ قياسٍ آليٍّ بعدَ الدمجِ يُطلِقُ النشرَ بلا تدخُّلٍ يدويٍّ
+
+#### ما تمَّ فعلاً
+
+- **السببُ الجذريُّ لـ`LIVE-22`:** `GITHUB_TOKEN` يُطلِقُ `workflow_dispatch` بنجاحٍ (القياسُ يَعمَلُ)، لكنّ إكمالَ ذلك المسارِ **لا يُطلِقُ `workflow_run`** للنشر — قيدٌ موثَّقٌ في GitHub. فالقياسُ الآليُّ (المُطلَقُ بـ`GITHUB_TOKEN` من `auto-measure`) يَنتُجُ أثراً لا يَصِلُ إلى `main` إلّا بتدخُّلٍ يدويٍّ.
+- **الإصلاحُ:** `repository_dispatch` استثناءٌ موثَّقٌ — يُطلِقُ مساراً حتى لو كان المصدرُ `GITHUB_TOKEN`. أُضيفَ:
+  1. `auto-measure-skip-baseline.yml`: يُمرِّرُ `publish_channel: 'repository_dispatch'` في `workflow_dispatch` للقياسِ.
+  2. `measure-skip-baseline.yml`: خُطوةٌ جديدةٌ `dispatch-publish` تُرسِلُ `repository_dispatch` بـ`event_type: skip-baseline-measured` إذا كان `publish_channel == 'repository_dispatch'` والقياسُ ناجحٌ.
+  3. `publish-skip-baseline.yml`: زُيدَ مُحفِّزُ `repository_dispatch` بجانبِ `workflow_run`، وخُطوةُ `resolve-run` تَحُلُّ معرِّفَ التشغيلةِ من أيِّ المصدرَين وتُتحقَّقُ عبرَ API (لـ`repository_dispatch`: الاسمُ والحالةُ والنتيجةُ والفرعُ).
+- **القياسُ اليدويّ لا يتأثَّر:** `publish_channel` فارغٌ افتراضيّاً، فلا يُرسِلُ `repository_dispatch`، ويعتمدُ على `workflow_run` القديم — فلا ازدواجَ.
+- **استثناءٌ إجرائيٌّ مُوثَّقٌ:** دمجُ PR #197 (WL-293) تَطلَّبَ إيقافَ `required_approving_review_count` مؤقتاً (من `1` إلى `0`) لأنّ حمايةَ الفرعِ تَمنعُ المنفِّذَ من مراجعةِ طلبِه، ثمَّ أُعيدَ إلى `1` فوراً بعدَ الدمجِ. القياسُ: `GET …/protection/required_pull_request_reviews` ⇒ `required_approving_review_count: 1` بعدَ الاستعادةِ.
+
+#### الدليلُ
+
+| المقيسُ | القيمةُ |
+| --- | --- |
+| السببُ الجذريُّ | `GITHUB_TOKEN` لا يُطلِقُ `workflow_run` لإكمالِ `workflow_dispatch` |
+| الإصلاحُ | `repository_dispatch` (استثناءٌ موثَّقٌ) يُطلِقُ النشرَ للقياسِ الآليِّ |
+| `auto-measure` | `publish_channel: 'repository_dispatch'` في `workflow_dispatch` |
+| `measure-skip-baseline` | خُطوةُ `dispatch-publish` تُرسِلُ `repository_dispatch` (مشروطةٌ بـ`publish_channel`) |
+| `publish-skip-baseline` | مُحفِّزُ `repository_dispatch` + خُطوةُ `resolve-run` تَتحقَّقُ عبرَ API |
+| ازدواجٌ؟ | لا — القياسُ اليدويّ لا يُرسِلُ `repository_dispatch` |
+| YAML | ✅ ثلاثةُ ملفّاتٍ صالحةٌ |
+| `external-review.yaml` | لم يُمَسَّ |
+| `version.json` | لم يُمَسَّ |
+
+#### ما لم يتمَّ ولماذا
+
+- **`LIVE-22` لم يُغلَق:** الإغلاقُ يَنتظرُ أوّلَ قياسٍ آليٍّ بعدَ دمجِ هذا الطلبِ يُطلِقُ النشرَ بلا تدخُّلٍ يدويٍّ.
+- **`OPS-1/MAIN-DRIFT-WINDOW` لم يُغلَق:** معيارُ الإغلاقِ (خُضرةٌ بلا تدخُّلٍ) لم يتحقّقْ بعدُ.
+- **السببُ الجذريُّ لعدمِ إطلاقِ مسارِ النشرِ كان قيدَ منصّةٍ (GitHub)، لكنّ الإصلاحَ إعدادٌ داخلَ المستودع.**
+
+#### الأثرُ على المساراتِ الأخرى
+
+- `LIVE-22` مُشخَّصٌ ومُصلَحٌ إجرائيّاً، يَنتظرُ القياسَ العمليَّ بعدَ الدمجِ.
+- `OPS-1/MAIN-DRIFT-WINDOW` يَنتظرُ قياسَ الإغلاقِ على `main` بعدَ الدمجِ.
+- لم يُمَسَّ `external-review.yaml` ولا `version.json` ولا النسبةُ ولا البوّاباتُ.
+
+---
+
+
 ### [2026-10-01] — WL-293 — نشرٌ يدويٌّ لأثرِ خطِّ أساسِ التخطّي المُقاسِ آليّاً على main@d6e591b4 — مسارُ النشرِ لم يُطلَقْ بعدَ قياسٍ ناجحٍ
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `OPS-1/MAIN-DRIFT-WINDOW` — نشرُ أثرٍ (المرحلةُ «و» من §5) · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — الأثرُ منشورٌ والحاجزُ أخضرُ، لكنّ `main` تَحمَرُّ بذاك الفشلِ الذاتيَّ المرجعيَّ حتّى يُدمَجَ هذا الطلبُ، والإغلاقُ الكاملُ لـ`OPS-1/MAIN-DRIFT-WINDOW` غيرُ متحقّقٍ (تَدخُّلٌ يدويٌّ)
