@@ -33,7 +33,7 @@ on:
         required: true
         type: string
       publish_channel:
-        description: 'قناةُ النشر: `repository_dispatch` للقياسِ الآلي (تجاوزُ قيدِ GITHUB_TOKEN)، أو فارغٌ للقياسِ اليدويّ (workflow_run)'
+        description: 'قناةُ النشر: `workflow_dispatch` للقياسِ الآلي (تجاوزُ قيدِ GITHUB_TOKEN)، أو فارغٌ للقياسِ اليدويّ (workflow_run)'
         required: false
         type: string
         default: ''
@@ -357,17 +357,17 @@ jobs:
             echo "النشرُ في سيرِ عملٍ آخرَ يَأخُذُ GitHub تعريفَهُ من الفرعِ الافتراضيِّ حتماً."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ═══ ④ إطلاقُ النشرِ عبرَ repository_dispatch (LIVE-22) ═══
+  # ═══ ④ إطلاقُ النشرِ عبرَ workflow_dispatch (LIVE-22) ═══
   # GitHub لا يُطلِقُ workflow_run للأحداثِ المُطلَقةِ بـGITHUB_TOKEN.
   # القياسُ الآلي يُطلَقُ بـworkflow_dispatch من auto-measure بـGITHUB_TOKEN،
-  # فلا تُطلَقُ workflow_run للنشرِ. repository_dispatch استثناءٌ موثَّقٌ.
-  # القياسُ اليدويّ لا يُرسِلُ repository_dispatch (publish_channel فارغٌ)،
+  # فلا تُطلَقُ workflow_run للنشرِ. workflow_dispatch استثناءٌ موثَّقٌ.
+  # القياسُ اليدويّ لا يُرسِلُ workflow_dispatch (publish_channel فارغٌ)،
   # فيَعتمِدُ على workflow_run القديم — فلا ازدواجَ.
   dispatch-publish:
-    name: إطلاقُ النشرِ عبرَ repository_dispatch (LIVE-22)
+    name: إطلاقُ النشرِ عبرَ workflow_dispatch (LIVE-22)
     needs: [resolve, produce-tap, classify-and-write]
     if: |
-      inputs.publish_channel == 'repository_dispatch' &&
+      inputs.publish_channel == 'workflow_dispatch' &&
       needs.resolve.result == 'success' &&
       needs.produce-tap.result == 'success' &&
       needs.classify-and-write.result == 'success'
@@ -377,19 +377,18 @@ jobs:
       contents: read
       actions: write
     steps:
-      - name: إطلاقُ repository_dispatch للنشرِ
+      - name: إطلاقُ workflow_dispatch للنشرِ
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           PAYLOAD=$(node -e "console.log(JSON.stringify({
-            event_type: 'skip-baseline-measured',
-            client_payload: {
+            ref: 'main',
+            inputs: {
               measure_run_id: '${{ github.run_id }}',
               measure_run_attempt: '${{ github.run_attempt }}',
               measured_sha: '${{ needs.resolve.outputs.measured_sha }}',
               main_head_at_measure: '${{ needs.resolve.outputs.main_head_at_measure }}',
-              workflow_sha: '${{ needs.resolve.outputs.workflow_sha }}',
               artifact_name: 'baseline'
             }
           }))")
@@ -398,7 +397,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             -H 'X-GitHub-Api-Version: 2022-11-28' \
             -H 'Content-Type: application/json' \
-            "https://api.github.com/repos/${{ github.repository }}/dispatches" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/publish-skip-baseline.yml/dispatches" \
             -d "$PAYLOAD")
           HTTP_CODE=$(echo "$HTTP_RESPONSE" | tail -1)
           if [ "$HTTP_CODE" != '204' ]; then
@@ -406,5 +405,5 @@ jobs:
             echo "$HTTP_RESPONSE" | sed '$d'
             exit 1
           fi
-          echo "✅ أُطلِقَ النشرُ عبرَ repository_dispatch"
-          echo "### 🚀 أُطلِقَ النشرُ عبرَ repository_dispatch (LIVE-22)" >> "$GITHUB_STEP_SUMMARY"
+          echo "✅ أُطلِقَ النشرُ عبرَ workflow_dispatch"
+          echo "### 🚀 أُطلِقَ النشرُ عبرَ workflow_dispatch (LIVE-22)" >> "$GITHUB_STEP_SUMMARY"
