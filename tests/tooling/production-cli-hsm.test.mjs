@@ -30,6 +30,7 @@ import {
   SEAL_IV_BYTES,
   createProductionRootOfTrust,
   fingerprint,
+  InMemoryFreshnessSocket,
 } from '../../src/root-of-trust/index.mjs';
 import { run as runAnchor } from '../../scripts/anchor-log.mjs';
 import { run as runHalt } from '../../scripts/halt-switch.mjs';
@@ -40,6 +41,7 @@ import { run as runRotate } from '../../scripts/rotate-king-key.mjs';
 // وهويةُ الملكِ تُشتقُّ في `context()` من مفتاحِ البديلِ لا تُخترَع.
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
+  STATE_ENV: 'production',
   XUUX_ROOT_OF_TRUST_MODE: 'hsm',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -119,6 +121,7 @@ function context() {
       XUUX_STATE_ROOT: root,
     },
     deps: { openSource: async () => ({ source: token, close: async () => undefined }) },
+    freshnessSocket: new InMemoryFreshnessSocket(0n, 'cli'),
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
 }
@@ -129,7 +132,7 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
     try {
       const runtime = await createProductionRootOfTrust(
         ctx.env,
-        { root: ctx.root, fsync: false },
+        { root: ctx.root, fsync: false, freshnessSocket: ctx.freshnessSocket },
         ctx.deps,
       );
       await runtime.log.appendSealed('cli.status', 'مدقّق', { n: 1 });
@@ -151,7 +154,7 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
     try {
       const runtime = await createProductionRootOfTrust(
         ctx.env,
-        { root: ctx.root, fsync: false },
+        { root: ctx.root, fsync: false, freshnessSocket: ctx.freshnessSocket },
         ctx.deps,
       );
       await runtime.log.appendSealed('cli.anchor', 'مدقّق', { n: 1 });
@@ -195,7 +198,7 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
     try {
       const runtime = await createProductionRootOfTrust(
         ctx.env,
-        { root: ctx.root, fsync: false },
+        { root: ctx.root, fsync: false, freshnessSocket: ctx.freshnessSocket },
         ctx.deps,
       );
       await runtime.log.appendSealed('cli.anchor', 'مدقّق', { n: 1 });

@@ -56,12 +56,14 @@ import {
   HaltSwitch,
   SEAL_IV_BYTES,
   createProductionRootOfTrust,
+  InMemoryFreshnessSocket,
   fingerprint,
   haltEpochFromSealedLog,
 } from '../../src/root-of-trust/index.mjs';
 
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
+  STATE_ENV: 'production',
   XUUX_ROOT_OF_TRUST_MODE: 'hsm',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -137,9 +139,10 @@ async function bootRuntime(options = {}) {
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
   const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) };
+  const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'test');
   const runtime = await createProductionRootOfTrust(
     env,
-    { root, fsync: false, royalCommandVerifier: () => true },
+    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -148,6 +151,7 @@ async function bootRuntime(options = {}) {
     king,
     token,
     env,
+    freshnessSocket,
     close: () => runtime.log.close?.(),
     destroy: () => rmSync(root, { recursive: true, force: true }),
   };
@@ -162,7 +166,13 @@ async function bootRuntime(options = {}) {
 async function rebootRuntime(first) {
   const env = { ...first.env };
   delete env.XUUX_ROOT_OF_TRUST_PROVISION;
-  return bootRuntime({ root: first.root, king: first.king, token: first.token, env });
+  return bootRuntime({
+    root: first.root,
+    king: first.king,
+    token: first.token,
+    env,
+    freshnessSocket: first.freshnessSocket,
+  });
 }
 
 /**
@@ -347,7 +357,7 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
     }
   });
 
-  test('**الحدُّ المُعلَنُ مقيسٌ**: لقطةٌ كاملةٌ متّسقةٌ تُعيدُ `running`/`epoch=0` ولا يردُّها شيء', async () => {
+  test('P0 Freshness: لقطةٌ كاملةٌ متّسقةٌ تُرفَضُ الآنَ بالحداثةِ (كانت تُقبَلُ بلا مرجعٍ)', async () => {
     const first = await bootRuntime();
     const snapshot = first.root + '-snapshot';
     try {
@@ -364,17 +374,9 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
 
       rmSync(first.root, { recursive: true, force: true });
       cpSync(snapshot, first.root, { recursive: true });
-      const third = await rebootRuntime(first);
-      try {
-        const reading = third.runtime.haltSwitch.read();
-        // هذا ليس نجاحاً يُدَّعى: هو حدٌّ يُقاس كي لا يُقرأَ الضمانُ أوسعَ ممّا هو.
-        // ومنعُه يحتاجُ مرساةً خارجَ القرصِ — `R3-A-01` و`ADR 0006`.
-        assert.equal(reading.state, 'running');
-        assert.equal(reading.epoch, 0);
-        assert.equal(await haltEpochFromSealedLog(third.runtime.log), 0);
-      } finally {
-        third.close();
-      }
+      // P0 Freshness: المرجعُ الخارجيُّ تقدّمَ، فاللقطةُ القديمةُ تُرفَضُ الآنَ.
+      const third = await caughtAsync(() => rebootRuntime(first));
+      assert.equal(third.code, 'STALE_MANIFEST_EPOCH', `رمزٌ غيرُ متوقّعٍ: ${third.code}`);
     } finally {
       rmSync(snapshot, { recursive: true, force: true });
       first.destroy();

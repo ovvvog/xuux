@@ -57,6 +57,7 @@ import {
   SEAL_IV_BYTES,
   anchorLogWithHsm,
   createProductionRootOfTrust,
+  InMemoryFreshnessSocket,
   fingerprint,
 } from '../../src/root-of-trust/index.mjs';
 
@@ -146,6 +147,7 @@ function kingIdOf(pair) {
 function productionEnv(king, extra = {}) {
   return {
     NODE_ENV: 'production',
+    STATE_ENV: 'production',
     XUUX_ROOT_OF_TRUST_MODE: 'hsm',
     XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
     XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -167,15 +169,17 @@ async function boot(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r3-')));
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
+  const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'r3');
   const runtime = await createProductionRootOfTrust(
     productionEnv(king, options.env ?? {}),
-    { root, fsync: false, royalCommandVerifier: () => true },
+    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
     runtime,
     root,
     king,
+    freshnessSocket,
     cleanup: () => {
       runtime.log.close?.();
       rmSync(root, { recursive: true, force: true });
@@ -234,7 +238,12 @@ describe('R3-A-01 — بيانُ الجذرِ مختومٌ داخلَ التوك
     try {
       first.runtime.log.close?.();
       const error = await caughtAsync(() =>
-        boot({ root, king, env: { XUUX_STATE_CONTEXT: 'ثانٍ' } }),
+        boot({
+          root,
+          king,
+          freshnessSocket: first.freshnessSocket,
+          env: { XUUX_STATE_CONTEXT: 'ثانٍ' },
+        }),
       );
       assert.equal(error.code, 'STATE_MANIFEST_BINDING_MISMATCH');
       assert.equal(error.detail, 'context');
@@ -255,7 +264,9 @@ describe('R3-A-01 — بيانُ الجذرِ مختومٌ داخلَ التوك
         JSON.stringify({ version: 1, ...file.body, seal: undefined }, null, 2) + '\n',
         'utf8',
       );
-      const error = await caughtAsync(() => boot({ root, king }));
+      const error = await caughtAsync(() =>
+        boot({ root, king, freshnessSocket: first.freshnessSocket }),
+      );
       assert.equal(error.code, 'STATE_MANIFEST_SEAL_MISSING');
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -277,7 +288,7 @@ describe('UF-01 مركَّبٌ — تخفيضُ عدِّ المُثبَّتِ م
       const headFile = first.runtime.log.headFile;
       first.runtime.log.close?.();
       // إقلاعٌ ثانٍ نظيفٌ: عندَه يشهدُ البيانُ بعددِ المُثبَّتِ ويُختَمُ عليه.
-      const second = await boot({ root, king });
+      const second = await boot({ root, king, freshnessSocket: first.freshnessSocket });
       assert.equal(readManifest(root).body.anchoredCount >= 1, true, 'البيانُ لم يشهدْ بالتثبيت');
       second.runtime.log.close?.();
       // المجَسُّ المركَّبُ كما نفَّذه العضوُ «أ»: تخفيضُ الشاهدِ **ثمَّ** حذفُ
@@ -286,7 +297,9 @@ describe('UF-01 مركَّبٌ — تخفيضُ عدِّ المُثبَّتِ م
       rmSync(logFile, { force: true });
       rmSync(headFile, { force: true });
       rmSync(join(root, 'anchors.jsonl'), { force: true });
-      const error = await caughtAsync(() => boot({ root, king }));
+      const error = await caughtAsync(() =>
+        boot({ root, king, freshnessSocket: first.freshnessSocket }),
+      );
       assert.equal(
         error.code,
         'STATE_MANIFEST_SEAL_INVALID',
@@ -315,7 +328,9 @@ describe('UF-03 مركَّبٌ — تخفيضُ عهدِ الإيقافِ مع �
       first.runtime.log.close?.();
       lowerField(root, 'haltEpoch', 0);
       rmSync(join(root, 'halt'), { recursive: true, force: true });
-      const error = await caughtAsync(() => boot({ root, king }));
+      const error = await caughtAsync(() =>
+        boot({ root, king, freshnessSocket: first.freshnessSocket }),
+      );
       assert.equal(error.code, 'STATE_MANIFEST_SEAL_INVALID', `رمزٌ غيرُ متوقّع: ${error.code}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -337,7 +352,9 @@ describe('UF-07 مركَّبٌ — تخفيضُ عدِّ المُقرَّرِ م
       lowerField(root, 'ledgerCommitted', 0);
       rmSync(ledgerFile, { force: true });
       rmSync(first.runtime.ledger.claimsDir, { recursive: true, force: true });
-      const error = await caughtAsync(() => boot({ root, king }));
+      const error = await caughtAsync(() =>
+        boot({ root, king, freshnessSocket: first.freshnessSocket }),
+      );
       assert.equal(error.code, 'STATE_MANIFEST_SEAL_INVALID', `رمزٌ غيرُ متوقّع: ${error.code}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -364,7 +381,7 @@ describe('استبدالُ البيانِ بنسخةٍ أقدمَ صحيحةِ �
       let refused = null;
       let state = null;
       try {
-        const second = await boot({ root, king });
+        const second = await boot({ root, king, freshnessSocket: first.freshnessSocket });
         state = second.runtime.haltSwitch.read();
         second.runtime.log.close?.();
       } catch (error) {
@@ -424,7 +441,12 @@ describe('حذفُ البيانِ والملفّاتِ التابعةِ معاً
       rmSync(join(root, 'halt'), { recursive: true, force: true });
       rmSync(first.runtime.ledger.claimsDir, { recursive: true, force: true });
       const error = await caughtAsync(() =>
-        boot({ root, king, env: { XUUX_ROOT_OF_TRUST_PROVISION: '' } }),
+        boot({
+          root,
+          king,
+          freshnessSocket: first.freshnessSocket,
+          env: { XUUX_ROOT_OF_TRUST_PROVISION: '' },
+        }),
       );
       assert.equal(error.code, 'PRODUCTION_STATE_ROOT_UNPROVISIONED');
       assert.equal(existsSync(logFile), false, 'أُنشئ سجلٌّ جديدٌ بعدَ الرفض');
@@ -452,7 +474,9 @@ describe('دفترُ الرفعِ مُسلسَلٌ بالتجزئةِ فلا ي�
         }) + '\n',
         'utf8',
       );
-      const error = await caughtAsync(() => boot({ root, king }));
+      const error = await caughtAsync(() =>
+        boot({ root, king, freshnessSocket: first.freshnessSocket }),
+      );
       assert.equal(
         ['STATE_MANIFEST_JOURNAL_INVALID', 'STATE_MANIFEST_ROLLBACK_DETECTED'].includes(error.code),
         true,

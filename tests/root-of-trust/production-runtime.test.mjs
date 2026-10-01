@@ -47,6 +47,7 @@ import {
   anchorLogWithHsm,
   createProductionRootOfTrust,
   describeProductionBindings,
+  InMemoryFreshnessSocket,
   fingerprint,
   maybeAnchorLogWithHsm,
   royalVerifierFromPublicKey,
@@ -65,6 +66,7 @@ import {
  */
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
+  STATE_ENV: 'production',
   XUUX_ROOT_OF_TRUST_MODE: 'hsm',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -149,11 +151,13 @@ async function buildRuntime(options = {}) {
   // لا من قيمةٍ ثابتةٍ تُخترَع.
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
+  const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'prod-rt');
   const runtime = await createProductionRootOfTrust(
     { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) },
     {
       root,
       fsync: false,
+      freshnessSocket,
       ...(options.royalCommandVerifier === undefined
         ? { royalCommandVerifier: () => true }
         : options.royalCommandVerifier === null
@@ -167,6 +171,7 @@ async function buildRuntime(options = {}) {
     root,
     token,
     king,
+    freshnessSocket,
     cleanup: () => {
       runtime.log.close?.();
       rmSync(root, { recursive: true, force: true });
@@ -631,20 +636,20 @@ test('إقلاعٌ مردودٌ لا يتركُ قفلَ كاتبٍ يمنعُ �
   // بقيَ القفلُ على القرصِ والمِقبضُ مفتوحاً، فيُردُّ الإقلاعُ المُصلَحُ بعدَه
   // بـ`LOG_ALREADY_LOCKED`: تعطيلٌ ذاتيٌّ لا يُرفَعُ إلا بحذفٍ يدويٍّ.
   const first = await buildRuntime();
-  const { root, king } = first;
+  const { root, king, freshnessSocket } = first;
   const lockFile = join(root, 'events.log.lock');
   try {
     first.runtime.log.close?.();
     const claimsDir = first.runtime.ledger.claimsDir;
     rmSync(claimsDir, { recursive: true, force: true });
 
-    const refused = await caughtAsync(() => buildRuntime({ root, king }));
+    const refused = await caughtAsync(() => buildRuntime({ root, king, freshnessSocket }));
     assert.equal(refused.code, 'LEDGER_STATE_ROOT_MISSING', `رمزٌ غيرُ متوقّعٍ: ${refused.code}`);
     assert.equal(existsSync(lockFile), false, 'إقلاعٌ مردودٌ خلّفَ قفلَ كاتبٍ');
 
     // والمقصودُ أثرٌ لا شكلُ ملفٍّ: إصلاحُ السببِ يُعيدُ الإقلاعَ فعلاً.
     mkdirSync(claimsDir, { recursive: true });
-    const repaired = await buildRuntime({ root, king });
+    const repaired = await buildRuntime({ root, king, freshnessSocket });
     assert.equal(repaired.runtime.haltSwitch.read().state, 'running');
     repaired.runtime.log.close?.();
   } finally {
@@ -698,7 +703,7 @@ test('R4-B-01: سطرُ دفترِ رفعٍ بلا مصادقةٍ يُرفَضُ
 });
 
 test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يمنعُ الإقلاعَ بعدَ محوِ السجلِّ والمرساة', async () => {
-  const { runtime, root, token, king, cleanup } = await buildRuntime();
+  const { runtime, root, token, king, freshnessSocket, cleanup } = await buildRuntime();
   try {
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
@@ -722,7 +727,7 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
       () =>
         createProductionRootOfTrust(
           { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
-          { root, fsync: false },
+          { root, fsync: false, freshnessSocket },
           { openSource: async () => ({ source: token, close: async () => undefined }) },
         ),
       // `WL-237`: الرمزُ صارَ رمزَ الحارسِ **الأسبقِ** — `LOG_STATE_ROOT_MISSING`.
@@ -743,7 +748,7 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
 // أدقُّ من الذي كانَ: الاختبارُ السابقُ كانَ يمحو السجلَّ فيَخلِطُ حارسَينِ في
 // رمزٍ واحدٍ، فإذا سبقَ حارسُ غيابِ السجلِّ بقيَ فاحصُ المراسي بلا قياسٍ.
 test('UF-01: شاهدُ مراسٍ موجبٌ ومخزنُ المراسي مُزيلٌ والسجلُّ حاضرٌ ⇒ يُرَدُّ الإقلاع', async () => {
-  const { runtime, root, token, king, cleanup } = await buildRuntime();
+  const { runtime, root, token, king, freshnessSocket, cleanup } = await buildRuntime();
   try {
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
@@ -762,7 +767,7 @@ test('UF-01: شاهدُ مراسٍ موجبٌ ومخزنُ المراسي مُز
     const refused = await caughtAsync(() =>
       createProductionRootOfTrust(
         { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
-        { root, fsync: false },
+        { root, fsync: false, freshnessSocket },
         { openSource: async () => ({ source: token, close: async () => undefined }) },
       ),
     );
@@ -777,7 +782,7 @@ test('UF-01: شاهدُ مراسٍ موجبٌ ومخزنُ المراسي مُز
 });
 
 test('UF-01: سجلٌّ أقصرُ ممّا تشهدُ به مرساةٌ قائمةٌ يُرَدُّ الإقلاعُ به', async () => {
-  const { runtime, root, token, king, cleanup } = await buildRuntime();
+  const { runtime, root, token, king, freshnessSocket, cleanup } = await buildRuntime();
   try {
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     await runtime.log.appendSealed('test.event', 'king:test', { n: 2 });
@@ -817,7 +822,7 @@ test('UF-01: سجلٌّ أقصرُ ممّا تشهدُ به مرساةٌ قائ�
     const refused = await caughtAsync(() =>
       createProductionRootOfTrust(
         { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
-        { root, fsync: false },
+        { root, fsync: false, freshnessSocket },
         { openSource: async () => ({ source: token, close: async () => undefined }) },
       ),
     );
@@ -1209,7 +1214,7 @@ test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ haltAsync — fail-close
 
 test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ resumeAsync على حالة موقوفة — fail-closed', async () => {
   // ابنِ runtime بمُحقّقٍ لتمكين الإيقاف
-  const { runtime, root, king, token, cleanup } = await buildRuntime({
+  const { runtime, root, king, token, freshnessSocket, cleanup } = await buildRuntime({
     royalCommandVerifier: () => true,
   });
   try {
@@ -1223,7 +1228,7 @@ test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ resumeAsync على حا�
     // أعد الفتح بنفس الجذر والمفتاح لكن بلا مُحقّق
     const runtime2 = await createProductionRootOfTrust(
       { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
-      { root, fsync: false, royalCommandVerifier: null },
+      { root, fsync: false, royalCommandVerifier: null, freshnessSocket },
       { openSource: async () => ({ source: token, close: async () => undefined }) },
     );
 
