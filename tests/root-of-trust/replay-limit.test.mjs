@@ -56,6 +56,7 @@ import {
   createProductionRootOfTrust,
   fingerprint,
   inspectEventLog,
+  InMemoryFreshnessSocket,
 } from '../../src/root-of-trust/index.mjs';
 
 const MANIFEST = 'root-of-trust.manifest.json';
@@ -117,6 +118,7 @@ function rig() {
   const ledgerPair = generateKeyPairSync('ed25519');
   const env = {
     NODE_ENV: 'production',
+    STATE_ENV: 'production',
     XUUX_ROOT_OF_TRUST_MODE: 'hsm',
     XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
     XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -126,10 +128,11 @@ function rig() {
     XUUX_KING_ID: 'king:' + fingerprint(king.publicKey).slice(0, 24),
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
   };
+  const freshnessSocket = new InMemoryFreshnessSocket(0n, 'replay');
   const boot = (root) =>
     createProductionRootOfTrust(
       env,
-      { root, fsync: false, royalCommandVerifier: () => true },
+      { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
       {
         openSource: async () => ({
           source: stableToken(king, aeadKey, ledgerPair),
@@ -140,8 +143,8 @@ function rig() {
   return { boot, body: (root) => JSON.parse(readFileSync(join(root, MANIFEST), 'utf8')).body };
 }
 
-describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ لا يكشفُها الخاتَم', () => {
-  test('استرجاعُ الجذرِ كلِّه يُعيدُ halted إلى running ويُقبَلُ أمرٌ مُثبَّتٌ سابقاً', async () => {
+describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ لا يكشفُها الخاتَم (لكنَّ الحداثةَ تكشفُها)', () => {
+  test('استرجاعُ الجذرِ كلِّه بعدَ تقدّمِ الحداثةِ → REJECT (STALE_MANIFEST_EPOCH)', async () => {
     const { boot, body } = rig();
     const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-')));
     const snapshot = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-snap-')));
@@ -165,28 +168,22 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       second.log.close?.();
 
       // الخصمُ يملكُ القرصَ: يمحو الجذرَ ويُعيدُ اللقطةَ كلَّها معاً.
+      // P0 Freshness: الحداثةُ الخارجيّةُ تقدّمَت، فاللقطةُ القديمةُ تُرفَضُ.
       rmSync(root, { recursive: true, force: true });
       cpSync(snapshot, root, { recursive: true });
 
-      const third = await boot(root);
-      try {
-        // الحدُّ المُعلَنُ: لا رفضَ، والحالةُ رجعَت.
-        assert.equal(third.haltSwitch.read().state, 'running', 'الإيقافُ نجا من الإعادةِ');
-        assert.equal(third.haltSwitch.read().epoch, 0, 'العهدُ لم يرجعْ بالإعادةِ');
-        // والأمرُ الذي ثُبِّتَ ووُقِّعَ يُقبَلُ ثانيةً.
-        third.ledger.begin(command);
-        await third.ledger.commitSigned(command, 'إعادةُ تنفيذٍ');
-        assert.equal(body(root).ledgerCommitted >= 1, true);
-      } finally {
-        third.log.close?.();
-      }
+      await assert.rejects(
+        () => boot(root),
+        (err) => /** @type {Error & { code?: string }} */ (err).code === 'STALE_MANIFEST_EPOCH',
+        'اللقطةُ القديمةُ المتّسقةُ يجبُ أن تُرفَضَ بحداثةِ المرجعِ الخارجيِّ',
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(snapshot, { recursive: true, force: true });
     }
   });
 
-  test('لا مرجعَ حداثةٍ خارجَ اللقطةِ: تسلسلُ الختمِ يرجعُ إلى الوراءِ بلا كشف', async () => {
+  test('P0 Freshness: تسلسلُ الختمِ يرجعُ إلى الوراءِ فيُكشَفُ الآنَ بالحداثةِ', async () => {
     const { boot, body } = rig();
     const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-')));
     const snapshot = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-snap-')));
@@ -206,26 +203,23 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       second.log.close?.();
       assert.equal(advancedSequence > snapshotSequence, true, 'التسلسلُ لم يتقدّمْ');
 
+      // P0 Freshness: المرجعُ الخارجيُّ تقدّمَ، فاللقطةُ القديمةُ تُرفَضُ الآنَ.
       rmSync(root, { recursive: true, force: true });
       cpSync(snapshot, root, { recursive: true });
-      const third = await boot(root);
-      try {
-        // الشاهدُ: الجذرُ أقلعَ بمتنٍ تسلسلُه أقلُّ ممّا بلغَه فعلاً، ولا شيءَ
-        // في النظامِ يعرفُ ذلك — لأنّ كلَّ مرجعِ حداثةٍ داخلَ اللقطةِ المستعادةِ.
-        assert.equal(body(root).sequence < advancedSequence, true, 'التسلسلُ لم يرجعْ');
-        assert.equal(body(root).haltEpoch, 0, 'العهدُ لم يرجعْ');
-      } finally {
-        third.log.close?.();
-      }
+      await assert.rejects(
+        () => boot(root),
+        (err) => /** @type {Error & { code?: string }} */ (err).code === 'STALE_MANIFEST_EPOCH',
+        'اللقطةُ القديمةُ يجبُ أن تُرفَضَ الآنَ بالحداثةِ الخارجيّةِ',
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
       rmSync(snapshot, { recursive: true, force: true });
     }
   });
-  test('حدُّ الإعادةِ **لا يشملُ** اللقطةَ الجزئيّةَ: محوُ السجلِّ معَ بيانٍ أقدمَ يُرَدُّ', async () => {
+  test('حدُّ الإعادةِ **لا يشملُ** اللقطةَ الجزئيّةَ: محوُ السجلِّ معَ بيانٍ أقدمَ يُرَدُّ (الآنَ بالحداثةِ)', async () => {
     // `S13` (`WL-237`): الفرقُ بينَ هذا الاختبارِ والأولِ هو **السجلُّ وحدَه**:
-    // هناك يُستعادُ معَ البيانِ فتنجحُ الإعادةُ (الحدُّ المُعلَنُ)، وهنا يُمحى
-    // فيُرَدُّ الإقلاعُ. فالحدُّ مرسومٌ بقياسٍ من طرفيهِ لا موصوفٌ بعبارةٍ.
+    // هناك يُستعادُ معَ البيانِ فتُرفَضُ بالحداثةِ، وهنا يُمحى
+    // فيُرَدُّ الإقلاعُ — بالحداثةِ أوَّلاً ثمَّ بفحصِ السجلِّ كخطِّ دفاعٍ ثانٍ.
     const { boot, body } = rig();
     const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-replay-')));
     try {
@@ -242,6 +236,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       assert.equal(body(root).ledgerCommitted >= 1, true, 'المقدّمةُ ساقطةٌ: الشاهدُ لم يتقدّمْ');
 
       // لقطةٌ **جزئيّةٌ**: البيانُ يرجعُ والسجلُّ يُمحى — لا لقطةٌ متّسقةٌ.
+      // P0 Freshness: الحداثةُ الخارجيّةُ تقدّمَت، فالبيانُ القديمُ يُرفَضُ أوَّلاً.
       writeFileSync(join(root, MANIFEST), olderManifest);
       rmSync(join(root, 'events.log'), { force: true });
       rmSync(join(root, 'events.log.head'), { force: true });
@@ -252,8 +247,8 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
 
       await assert.rejects(
         () => boot(root),
-        (err) => /** @type {Error & { code?: string }} */ (err).code === 'LOG_STATE_ROOT_MISSING',
-        'بيانٌ حاضرٌ بلا سجلٍّ على جذرٍ قائمٍ يجبُ أن يُرَدَّ فشلاً مُغلَقاً',
+        (err) => /** @type {Error & { code?: string }} */ (err).code === 'STALE_MANIFEST_EPOCH',
+        'البيانُ القديمُ يجبُ أن يُرفَضَ بالحداثةِ الخارجيّةِ',
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -333,6 +328,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
 
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
+  STATE_ENV: 'production',
   XUUX_ROOT_OF_TRUST_MODE: 'hsm',
   XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
   XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -413,9 +409,10 @@ async function bootRuntime(options = {}) {
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
   const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) };
+  const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 's13');
   const runtime = await createProductionRootOfTrust(
     env,
-    { root, fsync: false, royalCommandVerifier: () => true },
+    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -424,6 +421,7 @@ async function bootRuntime(options = {}) {
     king,
     token,
     env,
+    freshnessSocket,
     close: () => runtime.log.close?.(),
     destroy: () => rmSync(root, { recursive: true, force: true }),
   };
@@ -435,7 +433,13 @@ async function bootRuntime(options = {}) {
  * @returns التركيبُ الثاني
  */
 async function rebootRuntime(first) {
-  return bootRuntime({ root: first.root, king: first.king, token: first.token, env: first.env });
+  return bootRuntime({
+    root: first.root,
+    king: first.king,
+    token: first.token,
+    env: first.env,
+    freshnessSocket: first.freshnessSocket,
+  });
 }
 
 /**
@@ -489,7 +493,7 @@ describe('`S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على ج�
     );
   });
 
-  test('`S13`: بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ السجلِّ ورأسِه + دفترٌ فارغٌ ⇒ يُرَدُّ الإقلاعُ', async () => {
+  test('`S13`: بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ السجلِّ ورأسِه + دفترٌ فارغٌ ⇒ يُرَدُّ الإقلاعُ (الآنَ بالحداثةِ)', async () => {
     const first = await bootRuntime();
     try {
       first.close();
@@ -499,6 +503,7 @@ describe('`S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على ج�
 
       // الخصمُ يملكُ القرصَ: بيانٌ أقدمُ، ومحوُ السجلِّ ورأسِه، ودفترٌ يُستحدَثُ
       // فارغاً بمجلَّدِ حجوزاتٍ — فلا يُرَدُّ بـ`LEDGER_STATE_ROOT_MISSING`.
+      // P0 Freshness: الحداثةُ الخارجيّةُ تقدّمَت، فالبيانُ القديمُ يُرفَضُ أوَّلاً.
       writeFileSync(join(first.root, MANIFEST), genesisManifest);
       rmSync(join(first.root, EVENTS), { force: true });
       rmSync(join(first.root, EVENTS_HEAD), { force: true });
@@ -508,7 +513,7 @@ describe('`S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على ج�
       mkdirSync(join(first.root, CLAIMS), { recursive: true });
 
       const refused = await caughtAsync(() => rebootRuntime(first));
-      assert.equal(refused.code, 'LOG_STATE_ROOT_MISSING', `رمزٌ غيرُ متوقّعٍ: ${refused.code}`);
+      assert.equal(refused.code, 'STALE_MANIFEST_EPOCH', `رمزٌ غيرُ متوقّعٍ: ${refused.code}`);
       // ولم يُنشئْ الرفضُ سجلاً فارغاً يُقرأُ في الإقلاعِ التالي «نشأةً».
       assert.equal(existsSync(join(first.root, EVENTS)), false, 'الرفضُ خلَّفَ سجلاً فارغاً');
     } finally {
@@ -516,7 +521,7 @@ describe('`S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على ج�
     }
   });
 
-  test('`S13` بصيغةِ التخفّي: سجلٌّ فارغٌ يُترَكُ مكانَ المحوِ ⇒ يُرَدُّ برأسِه المفقودِ', async () => {
+  test('`S13` بصيغةِ التخفّي: سجلٌّ فارغٌ يُترَكُ مكانَ المحوِ ⇒ يُرَدُّ بالحداثةِ', async () => {
     const first = await bootRuntime();
     try {
       first.close();
@@ -524,6 +529,7 @@ describe('`S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على ج�
       await advanceState(first, 'أمرٌ-يُرادُ-إعادتُه');
 
       // فحصُ الوجودِ وحدَه يُتجاوَزُ بهذا: ملفٌّ حاضرٌ لكنّه لا يشهدُ بشيءٍ.
+      // P0 Freshness: الحداثةُ الخارجيّةُ تقدّمَت، فالبيانُ القديمُ يُرفَضُ أوَّلاً.
       writeFileSync(join(first.root, MANIFEST), genesisManifest);
       writeFileSync(join(first.root, EVENTS), '');
       rmSync(join(first.root, EVENTS_HEAD), { force: true });
@@ -533,7 +539,7 @@ describe('`S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على ج�
       mkdirSync(join(first.root, CLAIMS), { recursive: true });
 
       const refused = await caughtAsync(() => rebootRuntime(first));
-      assert.equal(refused.code, 'LOG_STATE_ROOT_MISSING', `رمزٌ غيرُ متوقّعٍ: ${refused.code}`);
+      assert.equal(refused.code, 'STALE_MANIFEST_EPOCH', `رمزٌ غيرُ متوقّعٍ: ${refused.code}`);
     } finally {
       first.destroy();
     }

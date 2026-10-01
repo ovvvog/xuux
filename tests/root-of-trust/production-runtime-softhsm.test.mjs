@@ -151,12 +151,18 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
   });
 
   it('يُقلعُ من البيئةِ وحدَها، فيَختمُ السجلَّ ويوقّعُ الدفترَ والتثبيتَ داخلَ التوكن', async () => {
-    const { createProductionRootOfTrust, FileAnchorStore, anchorLogWithHsm, verifyAnchorChain } =
-      await import('../../src/root-of-trust/index.mjs');
+    const {
+      createProductionRootOfTrust,
+      FileAnchorStore,
+      anchorLogWithHsm,
+      verifyAnchorChain,
+      InMemoryFreshnessSocket,
+    } = await import('../../src/root-of-trust/index.mjs');
     const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-state-')));
     const env = {
       ...process.env,
       NODE_ENV: 'production',
+      STATE_ENV: 'production',
       XUUX_ROOT_OF_TRUST_MODE: 'hsm',
       XUUX_PKCS11_MODULE: MODULE,
       XUUX_PKCS11_TOKEN: TOKEN_LABEL,
@@ -169,7 +175,10 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
       XUUX_ROOT_OF_TRUST_PROVISION: '1',
     };
     // لا حقنَ هنا: المصدرُ الافتراضيُّ هو `Pkcs11HsmProvider.fromEnv`.
-    const runtime = await createProductionRootOfTrust(env, { root });
+    const runtime = await createProductionRootOfTrust(env, {
+      root,
+      freshnessSocket: new InMemoryFreshnessSocket(0n, 'softhsm'),
+    });
     try {
       const secret = 'softhsm-plaintext-canary'; // secret-scan:allow — قيمةُ شاهدٍ للاختبارِ لا سرٌّ
       await runtime.log.appendSealed('royal.command', runtime.anchorSigner.id, { plan: secret });

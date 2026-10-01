@@ -36,6 +36,7 @@ import {
   SEAL_IV_BYTES,
   assertRuntimeEnvDeclared,
   createProductionRootOfTrust,
+  InMemoryFreshnessSocket,
   fingerprint,
   isProductionRuntime,
 } from '../../src/root-of-trust/index.mjs';
@@ -141,6 +142,7 @@ function kingIdOf(pair) {
 function productionEnv(king, extra = {}) {
   return {
     NODE_ENV: 'production',
+    STATE_ENV: 'production',
     XUUX_ROOT_OF_TRUST_MODE: 'hsm',
     XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
     XUUX_PKCS11_TOKEN: 'xuux-test',
@@ -162,15 +164,17 @@ async function boot(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r2-')));
   const king = options.king ?? generateKeyPairSync('ed25519');
   const token = options.token ?? fakeToken({ king });
+  const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'r2');
   const runtime = await createProductionRootOfTrust(
     productionEnv(king, options.env ?? {}),
-    { root, fsync: false, royalCommandVerifier: () => true },
+    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
     runtime,
     root,
     king,
+    freshnessSocket,
     cleanup: () => {
       runtime.log.close?.();
       rmSync(root, { recursive: true, force: true });
@@ -197,7 +201,9 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
       // إعادةُ الإنتاجِ حرفياً كما في التقريرَين: يُمحى الملفّانِ معاً.
       rmSync(logFile, { force: true });
       rmSync(headFile, { force: true });
-      const error = await caughtAsync(() => boot({ root, king }));
+      const error = await caughtAsync(() =>
+        boot({ root, king, freshnessSocket: first.freshnessSocket }),
+      );
       // `WL-237`: الرمزُ صارَ رمزَ الحارسِ **الأسبقِ** `LOG_STATE_ROOT_MISSING`،
       // وحكمٌ **مُفرَدٌ** أضيقُ من قائمةِ احتمالَينِ لا أوسعُ. وإعادةُ الإنتاجِ لم
       // تُمَسَّ: الملفّانِ يُمحيانِ كما في التقريرَينِ، والإقلاعُ ما زالَ مردوداً
@@ -216,7 +222,12 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
       first.runtime.log.close?.();
       rmSync(join(root, 'root-of-trust.manifest.json'), { force: true });
       const error = await caughtAsync(() =>
-        boot({ root, king, env: { XUUX_ROOT_OF_TRUST_PROVISION: '' } }),
+        boot({
+          root,
+          king,
+          freshnessSocket: first.freshnessSocket,
+          env: { XUUX_ROOT_OF_TRUST_PROVISION: '' },
+        }),
       );
       assert.equal(error.code, 'PRODUCTION_STATE_ROOT_UNPROVISIONED');
     } finally {
@@ -360,7 +371,9 @@ describe('UF-05 — التوكنُ والملكُ مُثبَّتانِ فلا ا
     try {
       first.runtime.log.close?.();
       const second = generateKeyPairSync('ed25519');
-      const error = await caughtAsync(() => boot({ root, king: second }));
+      const error = await caughtAsync(() =>
+        boot({ root, king: second, freshnessSocket: first.freshnessSocket }),
+      );
       assert.equal(error.code, 'STATE_MANIFEST_KING_MISMATCH');
     } finally {
       rmSync(root, { recursive: true, force: true });

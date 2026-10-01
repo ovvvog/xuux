@@ -86,6 +86,10 @@ export const ProductionRuntimeErrorCodes = [
   // EXT-6 / R3-A-01: بيانٌ مختومٌ صحيحٌ لكنّه أقدمُ من مرجعِ الحداثةِ الخارجيِّ.
   // لا يُدَّعى منعُ rollback حتى يصبحَ مصدرُ الحداثةِ الحقيقيُّ موصولاً.
   'STALE_MANIFEST_EPOCH',
+  // P0 Freshness: الإنتاجُ بلا مقبسِ حداثةٍ فعليٍّ — لا مسارَ بلا حمايةٍ من الإعادة.
+  'PRODUCTION_FRESHNESS_SOCKET_REQUIRED',
+  // P0 Freshness: البيانُ يتقدّمُ على المرجعِ الخارجيِّ بلا رفعٍ مُصرَّحٍ — تقدّمٌ غيرُ مُشروعٍ.
+  'FRESHNESS_EPOCH_REGRESSION',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -414,26 +418,42 @@ export async function createProductionRootOfTrust(
     // ثمَّ نقطةُ ضبطٍ مختومةٌ تطوي ما رُفِعَ متزامناً منذ الإقلاعِ السابق.
     await manifest.provisionAsync(stateManifestBinding(signers.anchorSigner.id, env), env);
     manifest.assertKing(signers.anchorSigner.id);
-    // EXT-6 / R3-A-01: فحصُ الحداثةِ الخارجيِّ. إن وُجدَ مصدرُ حداثةٍ موصولٌ،
-    // يُقرأُ عَهْدُهُ ويُقارَنُ بالعَهْدِ المختومِ في البيان. إن كانَ المرجعُ
-    // أحدثَ من البيانِ ⇒ رفضٌ مغلقٌ: اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ.
-    // وإن لم يُوجَد (`null` أو `NullFreshnessSocket`) فالسلوكُ كما كان — الحدُّ
-    // المُعلَنُ في ADR 0006 قائمٌ. **الواجهةُ وحدَها ليست إصلاحاً:** لا يُدَّعى
-    // منعُ rollback حتى يصبحَ مصدرُ الحداثةِ الحقيقيُّ موصولاً ويمنعُ فعليّاً.
+    // P0 Freshness Enforcement: الإنتاجُ بلا مقبسِ حداثةٍ فعليٍّ لا يُقبَلُ.
+    // الحدُّ المُعلَنُ في ADR 0006 كان قائماً (اللقطةُ المتّسقةُ تُقبَلُ بلا مصدرِ حداثةٍ)،
+    // لكنّ المستخدمَ طلبَ تحويلَ الحداثةِ من مكوّنٍ إلى إنفاذٍ فعليّ. فالإنتاجُ الآن
+    // يَفرضُ مقبسَ حداثةٍ غيرَ فارغٍ. أمّا التطويرُ والاختبارُ فيَبقيانِ على `null`.
     const freshnessSocket = options.freshnessSocket ?? null;
+    if (production && isNullFreshnessSocket(freshnessSocket)) {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_FRESHNESS_SOCKET_REQUIRED',
+        'الإنتاجُ يَفرضُ مقبسَ حداثةٍ غيرَ فارغٍ — لا مسارَ بلا حمايةٍ من الإعادة',
+      );
+    }
+    // EXT-6 / R3-A-01: فحصُ الحداثةِ الخارجيِّ. إن وُجدَ مصدرُ حداثةٍ موصولٌ،
+    // يُقرأُ عَهْدُهُ ويُقارَنُ بالعَهْدِ المختومِ في البيان.
+    //   Case 1: البيانُ أقدمُ من المرجعِ ⇒ STALE_MANIFEST_EPOCH (لقطةٌ قديمةٌ)
+    //   Case 2: البيانُ أحدثُ من المرجعِ ⇒ FRESHNESS_EPOCH_REGRESSION (تقدّمٌ غيرُ مُشروعٍ)
+    //   Case 5: البيانُ مساوٍ للمرجعِ ⇒ قبولٌ (تقدّمٌ رتيبٌ طبيعيّ)
     if (!isNullFreshnessSocket(freshnessSocket) && freshnessSocket !== null) {
       const freshness = await freshnessSocket.read();
       const manifestBody = manifest.read();
-      if (
-        manifestBody.freshnessEpoch > 0 &&
-        Number(freshness.epoch) > manifestBody.freshnessEpoch
-      ) {
+      const externalEpoch = Number(freshness.epoch);
+      const manifestEpoch = manifestBody.freshnessEpoch;
+      if (manifestEpoch > 0 && externalEpoch > manifestEpoch) {
+        // Case 1: اللقطةُ القديمةُ المتّسقةُ تُرفَضُ
         throw new ProductionRuntimeError(
           STALE_MANIFEST_EPOCH,
-          `عَهْدُ الحداثةِ الخارجيِّ ${String(freshness.epoch)} أحدثُ من البيانِ ${manifestBody.freshnessEpoch} — اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ`,
+          `عَهْدُ الحداثةِ الخارجيِّ ${externalEpoch} أحدثُ من البيانِ ${manifestEpoch} — اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ`,
         );
       }
-      if (Number(freshness.epoch) === 0) {
+      if (manifestEpoch > 0 && manifestEpoch > externalEpoch) {
+        // Case 2: البيانُ تقدّمَ على المرجعِ بلا رفعٍ مُصرَّحٍ — تقدّمٌ غيرُ مُشروعٍ
+        throw new ProductionRuntimeError(
+          'FRESHNESS_EPOCH_REGRESSION',
+          `عَهْدُ البيانِ ${manifestEpoch} أحدثُ من المرجعِ الخارجيِّ ${externalEpoch} — تقدّمٌ غيرُ مُشروعٍ`,
+        );
+      }
+      if (externalEpoch === 0) {
         // أوّلُ وصلٍ: لا رفضَ، لكنّ العَهْدَ يُرفعُ في نقطةِ الضبطِ التاليةِ.
         void FRESHNESS_SOURCE_UNAVAILABLE;
       }
