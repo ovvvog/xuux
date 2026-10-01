@@ -1234,12 +1234,12 @@ test('ب١ — سيرُ القياسِ بلا صلاحيّةِ كتابةٍ في
   // `dispatch-publish` (LIVE-22) لا يُنفِّذُ كوداً مقاساً — يُرسِلُ `repository_dispatch`
   // فقط، فـ`actions: write` مطلوبةٌ لإرسالِ الحدثِ ولا تُمكِّنُ من كتابةِ المحتوى.
   const executingJobs = ['resolve', 'produce-tap', 'classify-and-write'];
-  for (let i = 0; i < executingJobs.length; i++) {
-    const job = doc.jobs?.[executingJobs[i]];
+  for (const jobName of executingJobs) {
+    const job = doc.jobs?.[jobName];
     assert.deepEqual(
       job?.permissions,
       { contents: 'read' },
-      `مرحلةُ القياسِ ${executingJobs[i]} تُنفِّذُ كوداً مقاساً — فلا صلاحيّةَ كتابةٍ.`,
+      `مرحلةُ القياسِ ${jobName} تُنفِّذُ كوداً مقاساً — فلا صلاحيّةَ كتابةٍ.`,
     );
   }
   const dispatchJob = doc.jobs?.['dispatch-publish'];
