@@ -1,3 +1,5 @@
+آخر تحديث: **2026-10-01** — `WL-296` — **سلسلةُ النشرِ الآليّ نَجحَت: auto-measure → measurement → dispatch-publish → workflow_dispatch → publish → PR → main أخضر. `LIVE-22` مُغلَقٌ ضيّقاً. `OPS-1/MAIN-DRIFT-WINDOW` مفتوحٌ (موافقةُ البيئةِ يدويّةٌ). فروعٌ قديمةٌ نُظِّفَت. أعمالُ المنفِّذِ من §5 استُنفِدَت — الباقي مجلسٌ أو مالكٌ.**
+
 آخر تحديث: **2026-10-01** — `WL-295` — **تصحيحُ LIVE-22: workflow_dispatch بدلَ repository_dispatch (يَحتاجُ actions:write فقط لا contents:write). الإغلاقُ يَنتظرُ قياساً عمليّاً. لم يُمَسَّ external-review.yaml ولا version.json.**
 
 آخر تحديث: **2026-10-01** — `WL-294` — **تشخيصُ LIVE-22 وإصلاحُ مسارِ النشرِ عبرَ repository_dispatch: GITHUB_TOKEN لا يُطلِقُ workflow_run لإكمالِ workflow_dispatch، فأُضيفَ repository_dispatch (استثناءٌ موثَّقٌ) كقناةِ نشرٍ بديلةٍ للقياسِ الآليِّ. الإغلاقُ يَنتظرُ قياساً عمليّاً بعدَ الدمجِ. استثناءٌ إجرائيٌّ: حمايةُ الفرعِ أُوقِفَتْ مؤقتاً لدمجِ PR #197 ثمَّ أُعيدتْ فوراً. لم يُمَسَّ external-review.yaml ولا version.json ولا البوّاباتُ.**
