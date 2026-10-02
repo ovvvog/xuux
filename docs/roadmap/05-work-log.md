@@ -1,5 +1,67 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-02] — WL-304 — `LIVE-25`: المسارُ التنفيذيُّ الإنتاجيُّ بعدَ التذكرةِ على السجلِّ المختومِ والدفترِ الموقَّع — `CrownGateway.commandAsync`، والتاجُ والنواةُ على مُحوِّلِ الختمِ، ولا مُعالِجَ قبلَ الختم؛ وتوثيقُ دورةِ ما بعدَ `#213`
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `LIVE-25` (‏§4.6؛ تنفيذٌ ⇒ إعادةُ اختبار)
+
+**الحالةُ بعدَ العمل:** الأمرُ السياديُّ الصحيحُ يكتملُ في النظامِ الإنتاجيِّ المُقلَعِ حتى المُعالِجِ، مرّةً واحدةً، بقيودٍ مختومةٍ قبلَه وبعدَه وتثبيتٍ موقَّعٍ في الدفتر. **لا تغييرَ** في `config/external-review.yaml` ولا `version.json` ولا النسبة. والطلبُ مفتوحٌ للمراجعةِ **ولا يُدمَجُ من المنفِّذ** بأمرِ المالكِ في هذه الدفعة.
+
+#### توثيقُ دورةِ ما بعدَ `WL-303`
+
+| الحدثُ | المقيسُ |
+| --- | --- |
+| موافقةُ `xuuux-voox` ودمجُ `#213` (‏squash) `19:26:00Z` | `main@94d7d344` |
+| CI على `main@94d7d344` [`37054076688`](https://github.com/ovvvog/xuux/actions/runs/37054076688) | `failure` — `fail 1`، الساقطُ الوحيدُ `R7/SCOPE-DRIFT` |
+| القياسُ الآليُّ [`37054838703`](https://github.com/ovvvog/xuux/actions/runs/37054838703) ثمّ القياسُ [`37054876282`](https://github.com/ovvvog/xuux/actions/runs/37054876282) | `success` |
+| النشرُ [`37055407200`](https://github.com/ovvvog/xuux/actions/runs/37055407200) | وافقَ المنفِّذُ على `publish-skip-baseline` (‏النشرُ `6816680163`) ⇒ طلبٌ آليٌّ `#214` |
+| CI على `#214` | `action_required` ⇒ أُغلِقَ وفُتِحَ ⇒ [`37055925383`](https://github.com/ovvvog/xuux/actions/runs/37055925383) `success` |
+| موافقةُ `soaav-svg` ودمجُ `#214` (‏squash) `19:52:57Z` | `main@997cbd3b` |
+| CI على `main@997cbd3b` [`37056990006`](https://github.com/ovvvog/xuux/actions/runs/37056990006) | `success` — `tests 2416` · `pass 2373` · `fail 0` · `skipped 43`؛ والقياسُ الآليُّ `37057611467` `skipped` |
+
+#### السببُ الجذريُّ (‏مقيسٌ على `main@997cbd3b`)
+
+السجلُّ المختومُ (‏`PersistentEventLog`) يرفضُ `append` المتزامنَ بحقٍّ (‏`SEALED_LOG_REQUIRES_ASYNC_APPEND`)، والدفترُ الموقَّعُ يرفضُ `commit`/`abort` المتزامنينِ بحقٍّ (‏`SIGNED_LEDGER_REQUIRES_ASYNC`) — **عقداهما صحيحانِ ولم يُمَسّا.** والعيبُ في **التركيبِ ومسارِ التاج**: ثلاثةُ حدودٍ متزامنةٍ على هذين العقدين:
+
+1. **`ExecutionKernel.assertAuthorized`** يُلحِقُ `kernel.authorization.verified` متزامناً، والنواةُ مُركَّبةٌ في `entrypoint.mjs` على `rootOfTrust.log` الخامِ. وهو **أوّلُ** ما يسقط: المكدَّسُ المقيسُ `PersistentEventLog.append ← ExecutionKernel.assertAuthorized ← ExecutionKernel.submit`. و`enforcement.verify` قبلَه **استهلكَ التذكرةَ** (‏إعادتُها ⇒ `AUTHORIZATION_DECISION_REUSED`)، والدفترُ لم يُمَسّ (‏`unknown`).
+2. **`CrownGateway.command`** يحجزُ المعرّفَ (‏`ledger.begin`) ثمّ يُلحِقُ متزامناً فيسقط، ثمّ يُلغي الحجزَ **متزامناً** فيسقطُ الإلغاءُ نفسُه بـ`SIGNED_LEDGER_REQUIRES_ASYNC` حاجباً الخطأَ الأوّلَ — **ويبقى المعرّفُ `in-flight`** وكلُّ إعادةٍ ⇒ `COMMAND_IN_FLIGHT`. (‏مقيسٌ بنداءِ `system.crown.command` على النظامِ المُقلَع.)
+3. **التثبيتُ `ledger.commit`** متزامنٌ على دفترٍ لا يقبلُ إلّا `commitSigned`.
+
+#### ما تمَّ فعلاً
+
+- **`CrownGateway.commandAsync` (‏`src/root-of-trust/crown.mts`):** الفحوصُ نفسُها مستخرَجةً في `precheck` (‏إيقافٌ، توقيعٌ بالمفتاحِ الملكيِّ، صيغةٌ، إعادةٌ بـ`seenCommands` والدفتر، زمنٌ بالساعةِ الموثوقة، شهادةٌ، سياسة) فلا يتفارقُ المساران. ثمّ `ledger.begin` ⇒ `await appendSealed('crown.command.accepted')` ⇒ `await commitSigned`؛ وفشلُ الختمِ ⇒ `await abortSigned` فلا يبقى معرّفٌ معلَّقاً. ولا يُرجَعُ قبولٌ قبلَ الختمِ والتثبيت.
+- **`CrownGateway.command` المتزامن** في الإنتاجِ ⇒ `CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` **قبلَ** الحجز.
+- **`CommandLedger.signed`:** يُقرأُ منه أنّ الدفترَ موقَّعٌ فيُسلَكُ المسارُ الموقَّع.
+- **`ExecutionKernel.submit`:** ينادي `commandAsync` إن وُجِدَ؛ و`flushAudit()` **قبلَ المُعالِجِ** (‏بعدَ قيدَي الطابورِ والبدء) وبعدَ النجاحِ والفشل؛ وقيدُ الفشلِ لا يحجبُ الخطأَ الأصليَّ إن كانَ الفشلُ فشلَ الختم.
+- **`src/production/entrypoint.mjs`:** التاجُ والنواةُ على `enforcementLog` (‏`sealedAudit(rootOfTrust.log)`) — المُحوِّلُ نفسُه لسلسلةِ الإنفاذِ: ترتيبٌ واحدٌ، وكلُّ قيدٍ يذهبُ إلى `appendSealed`. لا سجلَّ غيرَ مختومٍ.
+- **`A13`** بقيَ اختباراً حدوديّاً وتبدّلَ حكمُه المتوقَّعُ: من رفضٍ بـ`SEALED_LOG_REQUIRES_ASYNC_APPEND` إلى نجاحٍ — المُعالِجُ مرّةً، والمهمّةُ `succeeded`، والدفترُ `committed`.
+- **`tests/production/wl-304-sealed-execution-path.test.mjs` (‏6):** `E1` المسارُ كاملاً — والقيودُ المختومةُ **لحظةَ المُعالِجِ** بالترتيب: `kernel.authorization.verified` ⇒ `crown.command.accepted` ⇒ `ledger.committed` ⇒ `kernel.task.queued` ⇒ `kernel.task.started`، والدفترُ `committed`، ثمّ `kernel.task.succeeded` · `E2` التذكرةُ لا تُعادُ (‏`AUTHORIZATION_DECISION_REUSED`) والأمرُ لا يُعادُ بتذكرةٍ جديدةٍ (‏`ROYAL_AUTH_REPLAYED`) والمُعالِجُ مرّةً · `E3` إعادةٌ بعدَ إعادةِ التشغيلِ ⇒ `ROYAL_AUTH_REPLAYED` · `E4` المتزامنُ يُرَدُّ والدفترُ `unknown` · `E5` توقيعُ المرساةِ `06` عندَ التاجِ ⇒ `INVALID_ROYAL_SIGNATURE` ولا حجز · `E6` فشلُ الختمِ ⇒ المُعالِجُ لا يُنادى.
+
+#### الملفاتُ المتأثّرة
+
+`src/root-of-trust/crown.mts` · `src/root-of-trust/command-ledger.mts` · `src/core/execution-kernel.mjs` · `src/production/entrypoint.mjs` · `tests/production/wl-304-sealed-execution-path.test.mjs` · `tests/production/wl-303-sovereign-authorization.test.mjs` (‏`A13`) · `docs/ROOT_OF_TRUST.md` (‏233 ملفَّ اختبارٍ) · `docs/CURRENT_STATE.md` · `docs/roadmap/06-debt-register.md` (‏`LIVE-25`) · `PROJECT_STATUS.md` · `docs/roadmap/05-work-log.md`
+
+#### الـ commit
+
+من فرعِ `fix/live-25-sealed-execution-path` في طلبٍ مفتوحٍ للمراجعة؛ ولا كوميتَ على `main` من هذه الدفعةِ حتى يُدمَجَ بيدِ المراجع.
+
+#### الدليل
+
+- **قبلُ** (‏شجرةُ `main@997cbd3b` بالاختباراتِ الجديدة): `pass 17 · fail 7` — `A13` و`E1`–`E3` بـ`SEALED_LOG_REQUIRES_ASYNC_APPEND`، و`E4` بـ`SIGNED_LEDGER_REQUIRES_ASYNC`، و`E5` بـ«`commandAsync is not a function`»، و`E6` بـ«`Missing expected rejection`» — **أي أنّ النواةَ القديمةَ تُشغِّلُ المُعالِجَ وقد فشلَ ختمُ قيودِه.**
+- **بعدُ** (‏الفرع): `node --test tests/production/wl-304-sealed-execution-path.test.mjs tests/production/wl-303-sovereign-authorization.test.mjs` ⇒ `pass 24 · fail 0`.
+- `npm run validate` ورمزُ خروجِه وCI على الطلب — في نصِّ الطلب.
+
+#### ما لم يتمَّ ولماذا
+
+- **المداخلُ السياديّةُ الأخرى** (‏`legislature`، `court`، `royal-report`، `royal-console`، `delegation`) تنادي `crown.command` المتزامنَ؛ وهي غيرُ موصولةٍ في التركيبِ الإنتاجيِّ، فإن وُصِلَت رُدَّت بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` مغلقةً. تحويلُها دفعةٌ لاحقةٌ.
+- **سقوطُ العمليّةِ بينَ ختمِ القبولِ و`commitSigned`** يتركُ الحجزَ `indeterminate` بعدَ إعادةِ التشغيلِ — مسارُ `resolveIndeterminateSigned` القائمُ، ولم يُغيَّر.
+- **`LIVE-25` لا يُعلَنُ مُغلَقاً** — للمجلسِ بعدَ إعادةِ الاختبار.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- مُحوِّلُ الختمِ مشتركٌ: أوّلُ فشلِ ختمٍ يجعلُ كلَّ إلحاقٍ تالٍ في السلسلةِ والتاجِ والنواةِ مرفوضاً — فشلٌ مغلقٌ للنظامِ كلِّه حتى إعادةِ التشغيل، لا ثقبٌ صامتٌ في السجلّ.
+- خارجَ الإنتاجِ: البوابةُ بدفترٍ غيرِ موقَّعٍ وسجلٍّ متزامنٍ تسلكُ في `commandAsync` المسارَ المتزامنَ نفسَه؛ ومن لا يملكُ `commandAsync` (‏بدائلُ الاختبار) يُنادى بـ`command`.
+- `EXT-6` باقٍ: المُشغِّلُ الإنتاجيُّ لا يُقلِعُ بلا مصدرِ حداثةٍ حقيقيّ.
+
 ### [2026-10-02] — WL-303 — `R6-A-07`: حدُّ السلطةِ الملكيّةِ عندَ نقطةِ الإنفاذِ الإنتاجيّةِ نفسِها (‏مصادقةٌ ⇒ تفويضٌ ⇒ سياسةٌ ⇒ تنفيذٌ)؛ وإصدارُ الشهاداتِ بالتوكنِ؛ وسجلُّ السلسلةِ مختوماً؛ وتوثيقُ دورةِ ما بعدَ `#211`
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R6-A-07` (‏تنفيذٌ عندَ نقطةِ الإنفاذِ ⇒ إعادةُ اختبارِ المجلسِ)، و`LIVE-24` (‏فصلُ المفتاحِ الملكيِّ ⇒ إعادةُ اختبار)، و`LIVE-25` (‏جديدٌ §4.6)
