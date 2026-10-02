@@ -58,6 +58,7 @@ import {
   inspectEventLog,
   InMemoryFreshnessSocket,
 } from '../../src/root-of-trust/index.mjs';
+import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
 
 const MANIFEST = 'root-of-trust.manifest.json';
 const JOURNAL = 'root-of-trust.manifest.journal';
@@ -113,9 +114,9 @@ function stableToken(king, aeadKey, ledgerPair) {
  * @returns دالةُ الإقلاعِ ودالةُ قراءةِ المتنِ
  */
 function rig() {
-  const king = generateKeyPairSync('ed25519');
+  const king = registerTestKing(generateKeyPairSync('ed25519'));
   const aeadKey = randomBytes(32);
-  const ledgerPair = generateKeyPairSync('ed25519');
+  const ledgerPair = registerTestKing(generateKeyPairSync('ed25519'));
   const env = {
     NODE_ENV: 'production',
     STATE_ENV: 'production',
@@ -132,7 +133,7 @@ function rig() {
   const boot = (root) =>
     createProductionRootOfTrust(
       env,
-      { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
+      { root, fsync: false, freshnessSocket },
       {
         openSource: async () => ({
           source: stableToken(king, aeadKey, ledgerPair),
@@ -161,7 +162,10 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       const command = { id: 'أمرٌ-قابلٌ-للإعادة' };
       second.ledger.begin(command);
       await second.ledger.commitSigned(command, 'تمّ');
-      const directive = await second.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
+      const directive = await second.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(second.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       assert.equal(directive.state, 'halted');
       assert.equal(body(root).haltEpoch >= 1, true);
       assert.equal(body(root).ledgerCommitted >= 1, true);
@@ -198,7 +202,10 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       const command = { id: 'أمرٌ-يُسقَط' };
       second.ledger.begin(command);
       await second.ledger.commitSigned(command, 'تمّ');
-      await second.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
+      await second.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(second.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       const advancedSequence = body(root).sequence;
       second.log.close?.();
       assert.equal(advancedSequence > snapshotSequence, true, 'التسلسلُ لم يتقدّمْ');
@@ -231,7 +238,10 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       const command = { id: 'أمرٌ-مُثبَّتٌ' };
       second.ledger.begin(command);
       await second.ledger.commitSigned(command, 'تمّ');
-      await second.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
+      await second.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(second.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       second.log.close?.();
       assert.equal(body(root).ledgerCommitted >= 1, true, 'المقدّمةُ ساقطةٌ: الشاهدُ لم يتقدّمْ');
 
@@ -361,8 +371,8 @@ function kingIdOf(pair) {
 function fakeToken(overrides = {}) {
   const aesKeys = new Map([['05', overrides.aead ?? randomBytes(32)]]);
   const edKeys = new Map([
-    ['06', overrides.king ?? generateKeyPairSync('ed25519')],
-    ['07', overrides.ledger ?? generateKeyPairSync('ed25519')],
+    ['06', overrides.king ?? registerTestKing(generateKeyPairSync('ed25519'))],
+    ['07', overrides.ledger ?? registerTestKing(generateKeyPairSync('ed25519'))],
   ]);
   const aad = Buffer.from('xuux-event');
   return {
@@ -406,13 +416,13 @@ function fakeToken(overrides = {}) {
  */
 async function bootRuntime(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-s13-witness-')));
-  const king = options.king ?? generateKeyPairSync('ed25519');
+  const king = options.king ?? registerTestKing(generateKeyPairSync('ed25519'));
   const token = options.token ?? fakeToken({ king });
   const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) };
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 's13');
   const runtime = await createProductionRootOfTrust(
     env,
-    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
+    { root, fsync: false, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -471,9 +481,10 @@ async function advanceState(first, commandId) {
   try {
     second.runtime.ledger.begin({ id: commandId });
     await second.runtime.ledger.commitSigned({ id: commandId }, 'تمّ');
-    const directive = await second.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', {
-      id: 'test-cmd',
-    });
+    const directive = await second.runtime.haltSwitch.haltAsync(
+      'إيقافٌ سياديّ',
+      royalCommandFor(second.runtime.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+    );
     assert.equal(directive.state, 'halted');
   } finally {
     second.close();

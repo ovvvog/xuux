@@ -3,6 +3,7 @@ import { snapshot } from '../lib/snapshot.mjs';
 import { loadGovernedActions } from '../policy/governed.mjs';
 import { TaskLifecycle, assertTransition } from '../execution/lifecycle.mjs';
 import { royalCommandDigest } from '../root-of-trust/crown.mjs';
+import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 
 /** @typedef {import('../root-of-trust/crown.mjs').CrownGateway} CrownGateway */
 /** @typedef {import('../root-of-trust/crown.mjs').RoyalCommand} RoyalCommand */
@@ -133,15 +134,24 @@ export class ExecutionKernel {
    * **لا في الأثر**: من لم يوصلها لا يستطيع تنفيذ فعلٍ محكوم أصلاً، لأن الفعل
    * المحكوم يُرفض حينها بـ`AUTHORIZATION_POINT_REQUIRED`. وقائمة الأفعال
    * المحكومة تُقرأ من النقطة نفسها — أي من `config/*.yaml` لا من الكود.
-   * @param {{ crown?: CrownGateway, log?: EventLog, policy?: PolicyEngine | null, haltSwitch?: HaltGuard | null, enforcement?: import('../policy/enforcement-point.mjs').EnforcementPoint | null }} [deps]
+   * @param {{ crown?: CrownGateway, log?: EventLog, policy?: PolicyEngine | null, haltSwitch?: HaltGuard | null, enforcement?: import('../policy/enforcement-point.mjs').EnforcementPoint | null, env?: NodeJS.ProcessEnv }} [deps]
    */
-  constructor({ crown, log, policy = null, haltSwitch = null, enforcement = null } = {}) {
+  constructor({
+    crown,
+    log,
+    policy = null,
+    haltSwitch = null,
+    enforcement = null,
+    env = process.env,
+  } = {}) {
     if (!crown || !log) throw new Error('KERNEL_DEPENDENCY_MISSING');
     this.crown = crown;
     this.log = log;
     this.policy = policy;
     this.haltSwitch = haltSwitch;
     this.enforcement = enforcement;
+    /** `WL-302`: يُقرأُ مرّةً — في الإنتاجِ لا يُبدَّلُ الوضعُ الآمنُ بنداءِ دالّة. */
+    this.production = isProductionRuntime(env);
     /**
      * الأفعال المحكومة تُقرأ من **البيانات** لا من نقطة التفويض: لو كانت المعرفة
      * تأتي من النقطة وحدها لصار «لا تُوصل النقطة» هو المسار الجانبي نفسه.
@@ -278,6 +288,9 @@ export class ExecutionKernel {
    * @returns {void}
    */
   stop(reason = 'kernel emergency stop', actorId = 'crown') {
+    // `WL-302`: نصُّ فاعلٍ (`'crown'`) ليس سلطةً. في الإنتاجِ يُرفَضُ هذا المسارُ،
+    // والوضعُ الآمنُ يُدخَلُ بـ`enterSafeMode` بأمرٍ ملكيٍّ موقَّعٍ عبرَ `HaltSwitch`.
+    if (this.production) throw new Error('KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND');
     this.safeMode.enter(reason);
     this.log.append('kernel.safe-mode.entered', actorId, { reason });
   }
@@ -289,8 +302,58 @@ export class ExecutionKernel {
    * @returns {void}
    */
   resume(actorId = 'crown') {
+    if (this.production) throw new Error('KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND');
     this.safeMode.leave();
     this.log.append('kernel.safe-mode.left', actorId, {});
+  }
+
+  /**
+   * `WL-302`: دخولُ الوضعِ الآمنِ بسلطةٍ مُثبَتةٍ لا بنصِّ فاعل: أمرٌ ملكيٌّ
+   * موقَّعٌ يتحقّقُ منه `HaltSwitch` (‏التوقيعُ، ثمّ العملُ والعهدُ والحداثةُ
+   * والسبب)، فيصيرُ الإيقافُ توجيهاً دائماً يقرؤه `submit` قبلَ كلِّ فعلٍ ويصمدُ
+   * لإعادةِ التشغيل، وكلُّ رفضٍ يُسجَّلُ في سجلِّ المفتاح.
+   * @param {string} reason - السببُ المختومُ في الأمر
+   * @param {unknown} command - الأمرُ الملكيُّ الموقَّع
+   * @returns {Promise<unknown>} التوجيهُ الصادر
+   */
+  async enterSafeMode(reason, command) {
+    const halt = this.#sovereignHaltSwitch();
+    return halt.asyncSigner ? halt.haltAsync(reason, command) : halt.halt(reason, command);
+  }
+
+  /**
+   * `WL-302`: الخروجُ من الوضعِ الآمنِ بالشرطِ نفسِه، وبشرطِ إقرارِ العقدِ الحيّة.
+   * @param {string} reason - السببُ المختومُ في الأمر
+   * @param {unknown} command - الأمرُ الملكيُّ الموقَّع
+   * @returns {Promise<unknown>} التوجيهُ الصادر
+   */
+  async leaveSafeMode(reason, command) {
+    const halt = this.#sovereignHaltSwitch();
+    return halt.asyncSigner ? halt.resumeAsync(reason, command) : halt.resume(reason, command);
+  }
+
+  /**
+   * مفتاحُ الإيقافِ الدائمُ بمساريه غيرِ المتزامنَين — وغيابُه رفضٌ.
+   * والتوقيعُ في التوكنِ غيرُ متزامنٍ، والموقِّعُ البرمجيُّ (‏تطويرٌ) متزامن.
+   * @returns {{ asyncSigner: boolean, halt: (reason: string, command: unknown) => unknown, resume: (reason: string, command: unknown) => unknown, haltAsync: (reason: string, command: unknown) => Promise<unknown>, resumeAsync: (reason: string, command: unknown) => Promise<unknown> }}
+   */
+  #sovereignHaltSwitch() {
+    const candidate = /** @type {any} */ (this.haltSwitch);
+    if (
+      candidate === null ||
+      typeof candidate.haltAsync !== 'function' ||
+      typeof candidate.resumeAsync !== 'function'
+    ) {
+      throw new Error('KERNEL_SAFE_MODE_HALT_SWITCH_REQUIRED');
+    }
+    const asyncSigner = typeof candidate.king?.signAsync === 'function';
+    return {
+      asyncSigner,
+      halt: (reason, command) => candidate.halt(reason, command),
+      resume: (reason, command) => candidate.resume(reason, command),
+      haltAsync: (reason, command) => candidate.haltAsync(reason, command),
+      resumeAsync: (reason, command) => candidate.resumeAsync(reason, command),
+    };
   }
   /**
    * @param {string} id - معرّف المهمة

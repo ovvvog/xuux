@@ -132,6 +132,8 @@ export class CrownGateway {
   requireAttestedTime: boolean;
   veto: Veto;
   stopped: boolean;
+  /** `WL-302`: هل البوابةُ في بيئةِ إنتاجٍ — يُقرأُ مرّةً عندَ البناء. */
+  production: boolean;
   heartbeatAt: number;
   seenCommands: Set<string>;
   maxCommandAgeMs: number;
@@ -205,6 +207,7 @@ export class CrownGateway {
           'التركيبُ يلزمُ وقتاً مُبرهَناً، والساعةُ المُمرَّرةُ لا تُعلِنُ بُرهاناً؛ فلا يُبنى البابُ (D-7).',
       });
     }
+    this.production = production;
     this.veto = new Veto();
     this.stopped = false;
     this.heartbeatAt = Date.now();
@@ -336,12 +339,18 @@ export class CrownGateway {
    * @param reason - سبب الإيقاف المسجل
    */
   stop(reason = 'royal safety stop'): void {
+    // `WL-302`: في الإنتاجِ لا تُبدَّلُ حالةُ الإيقافِ بنداءِ دالّةٍ بلا أمرٍ —
+    // الإيقافُ السياديُّ هو `HaltSwitch` بأمرٍ ملكيٍّ موقَّعٍ مربوطٍ بالعهد، وهو
+    // دائمٌ عبرَ إعادةِ التشغيلِ. وعلمٌ في الذاكرةِ يُرفَعُ ويُخفَضُ بلا فاعلٍ
+    // مُصادَقٍ مسارٌ جانبيٌّ يُنسَبُ في السجلِّ إلى الملكِ وهو لم يأمرْ.
+    if (this.production) throw new Error('CROWN_SAFE_STOP_REQUIRES_HALT_SWITCH');
     this.stopped = true;
     this.log.append('crown.emergency.stop', this.king.id, { reason });
   }
 
   /** يستأنف استقبال الأوامر ويسجل الاستئناف إذا كانت البوابة موقوفة. */
   resume(): void {
+    if (this.production) throw new Error('CROWN_SAFE_STOP_REQUIRES_HALT_SWITCH');
     if (this.stopped) {
       this.stopped = false;
       this.log.append('crown.resume', this.king.id, {});

@@ -27,6 +27,7 @@ import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { createProductionSystem } from '../../src/production/entrypoint.mjs';
 import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/index.mjs';
 import { canonicalRoyalCommand } from '../../src/root-of-trust/royal-command.mjs';
+import { registerTestKing } from '../helpers/royal-halt-command.mjs';
 
 /** مقبسُ حداثةٍ للاختبارِ بلا علامةِ testFixture — يَلفُّ InMemoryFreshnessSocket. */
 class TestFreshnessSocket {
@@ -91,9 +92,9 @@ function stableToken(king, aeadKey, ledgerPair) {
 
 function fixedKeys() {
   return {
-    king: generateKeyPairSync('ed25519'),
+    king: registerTestKing(generateKeyPairSync('ed25519')),
     aeadKey: randomBytes(32),
-    ledgerPair: generateKeyPairSync('ed25519'),
+    ledgerPair: registerTestKing(generateKeyPairSync('ed25519')),
   };
 }
 
@@ -102,6 +103,8 @@ function royalCommand(keys, operation, opts = {}) {
   const body = {
     operation,
     signerId: kingId,
+    commandId: opts.commandId ?? randomBytes(16).toString('hex'),
+    targetEpoch: opts.targetEpoch ?? 0,
     reason: opts.reason ?? 'test halt',
     at: opts.at ?? new Date().toISOString(),
   };
@@ -251,7 +254,7 @@ describe('P0-A Integration — HaltSwitch مع royalCommandVerifier موصول',
         const haltCmd = royalCommand(keys, 'halt');
         await system.rootOfTrust.haltSwitch.haltAsync('test halt', haltCmd);
         // Resume with correctly signed resume command
-        const resumeCmd = royalCommand(keys, 'resume', { reason: 'test resume' });
+        const resumeCmd = royalCommand(keys, 'resume', { reason: 'test resume', targetEpoch: 1 });
         const directive = await system.rootOfTrust.haltSwitch.resumeAsync('test resume', resumeCmd);
         assert.ok(directive, 'Resume with valid royal command must succeed');
       } finally {

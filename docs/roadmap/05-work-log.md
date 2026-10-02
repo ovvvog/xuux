@@ -1,5 +1,77 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-02] — WL-302 — الأمرُ الملكيُّ على مفتاحِ الإيقافِ: حداثةٌ وعهدٌ ومنعُ إعادةٍ ونطاقُ توقيعٍ وأثرُ رفضٍ؛ وإغلاقُ مسارِ `() => true` المحقونِ؛ والوضعُ الآمنُ للنواةِ بسلطةٍ لا بنصِّ فاعلٍ؛ وحمايةُ `main` كاملةً؛ وتوثيقُ دورةِ ما بعدَ `#209`/`#210`
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R5-B-07` · `R6-A-08` · `R6-A-07` (‏جزءٌ)، و`EXT-1` (‏§6)، و`LIVE-24` (‏جديدٌ §4.6) · **الحالةُ بعدَ العملِ:** كودٌ ومقاييسُ على الفرعِ؛ **لا نتيجةَ مراجعةٍ أُغلِقَت** و`config/external-review.yaml` لم يُمَسَّ.
+
+#### توثيقُ دورةِ ما بعدَ `WL-301` (‏ما لم يكن لـ`WL-301` أن يقيِّدَه)
+
+`WL-301` كُتِبَت **قبلَ** دمجِ طلبِها، فقالت «الدمجُ يحتاجُ مراجعةً» ولم تُقيِّدْ ما جرى بعدَها. وهذا ما جرى بأوقاتِه المقروءةِ من `gh` (‏UTC)، **ولا يُنسَبُ شيءٌ منه إلى وقتٍ قبلَه**:
+
+| الوقتُ | الحدثُ | المقيسُ |
+| --- | --- | --- |
+| `15:10:05Z` | موافقةُ `xuuux-voox` (‏المالكُ) على `#209` | `reviews[0].state: APPROVED` |
+| `15:10:15Z` | دمجُ `#209` بيدِ `xuuux-voox` | كوميتُ الدمجِ `0bca3524163087065735b188f70cba020c113d59` |
+| `15:10:18Z`–`15:17:04Z` | CI على `main@0bca3524` [`37025068063`](https://github.com/ovvvog/xuux/actions/runs/37025068063) | `failure` — الساقطُ الوحيدُ `R7/SCOPE-DRIFT` (‏`2381` · `2337` · `1` · `43`): دمجٌ مسَّ النطاقَ، وهو المسارُ المصمَّمُ لا عطبٌ |
+| `15:17:07Z` | القياسُ الآليُّ [`37025879899`](https://github.com/ovvvog/xuux/actions/runs/37025879899) | `success` |
+| `15:17:28Z`–`15:21:49Z` | القياسُ [`37025921435`](https://github.com/ovvvog/xuux/actions/runs/37025921435) | `success` على `0bca3524` |
+| `15:21:47Z`–`15:26:07Z` | النشرُ [`37026436846`](https://github.com/ovvvog/xuux/actions/runs/37026436846) | انتظرَ بيئةَ `publish-skip-baseline` فوافقَ عليها المنفِّذُ (‏`soaav-svg`) بإذنِ المالكِ ⇒ `success`، وفتحَ طلبَ الآليّ `#210` |
+| — | CI على `#210` | `37026944632` ⇒ `action_required` (‏طلبُ آليٍّ)، فأُغلِقَ وفُتِحَ ⇒ `37027172199` ⇒ `success` |
+| `15:43:43Z` · `15:44:14Z` | موافقتا `xuuux-voox` ثمّ `soaav-svg` على `#210` | المالكُ قالَ: «وافقْ وادمجْ أنت» |
+| `15:44:19Z` | دمجُ `#210` (‏squash) بيدِ `soaav-svg` | `main@5222c40e396d717a78c9dae56f89a74770517a9c` |
+| `15:44:22Z`–`15:52:20Z` | CI على `main@5222c40e` [`37029083153`](https://github.com/ovvvog/xuux/actions/runs/37029083153) | `success` — `2381` · `2338` · `0` · `43`؛ والقياسُ الآليُّ `37030013793` ⇒ `skipped` (‏لا انزياح) |
+
+#### ما تمَّ فعلاً
+
+- **حمايةُ `main` (‏`EXT-1`) بأمرِ المالكِ الصريحِ في هذه الدفعةِ:** `PATCH …/protection/required_status_checks` ⇒ فحصُ «فحص الجودة الكامل» (‏`app_id 15368`) مُلزَمٌ، و`PUT …/protection` ⇒ `allow_force_pushes: false` مع إبقاءِ المراجعةِ الواحدةِ و`enforce_admins` وحلِّ المحادثاتِ و`allow_deletions: false`. **وتسجيلُ `M0.06` في اللوحةِ للمالكِ** — لم يُمَسَّ عدّادُ الخطواتِ.
+- **`src/root-of-trust/royal-command.mts` أُعيدَت كتابتُه:** جسمُ الأمرِ ستّةُ حقولٍ بأنواعٍ صارمةٍ — `operation` · `signerId` · `commandId` (‏`[A-Za-z0-9_-]{16,128}`) · `targetEpoch` (‏صحيحٌ آمنٌ ≥0) · `reason` · `at` (‏ISO بـ`Z`) — والمتنُ الموقَّعُ يبدأُ بفاصلِ نطاقٍ `xuux.royal-command.halt.v1` فلا يصلحُ توقيعُ المفتاحِ نفسِه لغرضٍ آخرَ أمراً، والحقلُ الزائدُ يُرفَضُ، و`signerId` يجبُ أن يساويَ بصمةَ المفتاحِ. وكلُّ مُحقِّقٍ يُبنى بـ`createRoyalCommandVerifier` يُعلَّمُ ببصمةِ مفتاحِه (‏`trustedRoyalVerifierFingerprint`) فيُعرَفُ المُرتجَلُ.
+- **`HaltSwitch` — التفويضُ بعدَ الأصالةِ:** ترتيبُ الفحصِ: الصيغةُ ⇒ التوقيعُ (‏`HALT_ROYAL_COMMAND_REQUIRED`) ⇒ السببُ المختومُ يساوي المُسجَّلَ (‏`…REASON_MISMATCH`) ⇒ `targetEpoch` يساوي العهدَ الحاضرَ (‏`…STALE_EPOCH`) — **وهو منعُ الإعادةِ الدائمُ: العهدُ يتقدّمُ بكلِّ إيقافٍ واستئنافٍ ويُحفَظُ على القرصِ وفي سقفِ العهدِ، فالأمرُ المنفَّذُ لا يُقبَلُ ثانيةً ولو بعدَ إعادةِ التشغيلِ** ⇒ الحداثةُ بالساعةِ الموثوقةِ (‏`…EXPIRED` بعدَ 5 دقائقَ، `…FROM_FUTURE` بعدَ 30 ثانيةً)، وفي الإنتاجِ بلا ساعةٍ موصولةٍ `HALT_TRUSTED_CLOCK_REQUIRED` — لا رجوعَ إلى ساعةِ الجهاز. وكلُّ رفضٍ يُسجَّلُ `halt.command.rejected` (‏مختوماً في الإنتاجِ) بلا توقيعٍ وبـ`signerVerified: false`، و`halt.issued`/`halt.resumed` يحملانِ `commandId`. وعُقدُها في `config/events.yaml`.
+- **`createProductionRootOfTrust`:** مُحقِّقٌ محقونٌ غيرُ مبنيٍّ بـ`createRoyalCommandVerifier` على مفتاحِ الملكِ في التوكنِ يُرَدُّ `ROYAL_COMMAND_VERIFIER_UNTRUSTED` — **كانَ `() => true` يُقبَلُ في `NODE_ENV=production`** وتستعملُه ستُّ ملفّاتِ اختبارٍ.
+- **`src/production/entrypoint.mjs`:** يُوصِلُ `AttestedClock` إلى مفتاحِ الإيقافِ (‏`useTrustedClock`) ويُمرِّرُ `env` إلى النواة. و`scripts/halt-switch.mjs` يبني الأمرَ بـ`commandId` عشوائيٍّ و`targetEpoch` الحاضرِ ويوقّعُ متنَ النطاقِ.
+- **الوضعُ الآمنُ (‏`R6-A-08`):** في الإنتاجِ `ExecutionKernel.stop/resume` ⇒ `KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND`، و`CrownGateway.stop/resume` ⇒ `CROWN_SAFE_STOP_REQUIRES_HALT_SWITCH`؛ والمسارُ الوحيدُ `kernel.enterSafeMode/leaveSafeMode(reason, command)` إلى `HaltSwitch`، فيصيرُ الوضعُ الآمنُ توجيهاً دائماً يقرؤه `submit` ويصمدُ لإعادةِ التشغيلِ. وخارجَ الإنتاجِ بقيَ المسارُ القديمُ لاختباراتِه.
+- **اختباراتٌ:** `tests/root-of-trust/wl-302-royal-command-authorization.test.mjs` (‏13) وثلاثةٌ في `production-runtime.test.mjs`، ومُساعِدٌ `tests/helpers/royal-halt-command.mjs` يوقّعُ أوامرَ حقيقيّةً بزوجِ الملكِ؛ واستُبدِلَ في سبعِ ملفّاتٍ `() => true` و`{ id: 'test-cmd' }` بأوامرَ موقَّعةٍ.
+
+#### تصنيفُ النتائجِ الثلاثينَ المفتوحةِ على `main@5222c40e` + هذه الدفعة (‏لا تغييرَ في `status`)
+
+| الصنفُ | النتائجُ | السببُ المقيسُ |
+| --- | --- | --- |
+| **محجوبٌ** (‏مصدرُ حداثةٍ خارجيٌّ، `EXT-6`) | `UF-01` · `UF-03` · `UF-07` · `M11.04-F07` · `R3-A-01` · `M11.04-F05` · `R4-K3-01` | `SUPPORTED_FRESHNESS_BACKENDS` في `scripts/production-entry.mjs` فارغةٌ فلا إقلاعَ إنتاجيٌّ؛ ورجوعُ القرصِ إلى لقطةٍ أقدمَ لا يُمنَعُ بلا مرجعٍ خارجَه — **لا يُبنى Roughtime/TPM مزيَّفٌ لإسكاتِها** |
+| **تنفيذٌ في هذه الدفعةِ ⇒ إعادةُ اختبارِ المجلسِ** | `R5-B-07` · `R6-A-08` | الأدلّةُ أدناه؛ والإغلاقُ للمجلسِ |
+| **تنفيذٌ باقٍ** | `R6-A-07` | عتبةُ المحرّكِ حضورُ نصَّينِ؛ ونقطةُ الإنفاذِ في الإنتاجِ بلا `royalCommandVerifier` فتُرَدُّ الأفعالُ السياديّةُ مغلقةً (‏`SOVEREIGN_COMMAND_VERIFIER_REQUIRED`) — فشلٌ مغلقٌ لا تفويضٌ مكتمل |
+| **إصلاحٌ قائمٌ في الكودِ والاختباراتِ ⇒ إعادةُ اختبارِ المجلسِ** (‏لم يُعَدْ قياسُ إعادةِ الإنتاجِ في هذه الدفعة) | `R5-B-03` · `R5-B-04` · `R5-B-05` · `R5-B-06` · `R5-B-08` · `R5-B-09` · `R5-B-10` · `R6-A-01` · `R6-A-03` · `R6-A-05` · `R6-A-09` · `R6-A-11` | مثلاً `scripts/retention.mjs purge` يفشلُ قبلَ أيِّ اتصالٍ (‏`R6-A-11`)، و`requireIdentityGate:false` يُرَدُّ في الإنتاجِ (‏`R5-B-10`)؛ وجولةُ `WL-292` اتّفقَت على إغلاقِ سبعٍ منها واختلفَت في خمسٍ |
+| **توثيقٌ/عمليّةٌ أو متقادمٌ** | `R6-A-10` · `R6-A-12` · `R6-B-04` · `R6-A-13` · `R6-B-05` · `R6-B-03` · `R5-A-06` · `R5-A-05` | `tests/agents/` موجودٌ اليومَ (‏`agent-boundaries.test.mjs`) فـ`R6-A-12`/`R6-B-04` متقادمتانِ بالقياسِ |
+| **قرارُ المالكِ** | تقييدُ اتفاقاتِ `WL-292` الاثنتي عشرةَ · `LIVE-24` | خطّةُ الجولةِ تشترطُ عرضَها على المالك؛ وفصلُ المفاتيحِ قرارُ إدارةِ مفاتيح |
+
+#### ما لم يتمَّ ولماذا
+
+- **`LIVE-24` (‏جديدٌ §4.6):** مفتاحُ الأمرِ الملكيِّ هو مفتاحُ المرساةِ `06` الذي توقّعُ به العُقدةُ نفسُها؛ فمن ملكَ PIN التوكنِ أصدرَ أمراً لنفسِه. **التوقيعُ إثباتُ حيازةٍ لا إثباتُ أمرِ إنسانٍ** — يحتاجُ مفتاحاً ملكيّاً مستقلّاً، قرارَ المالك.
+- **`R6-A-07`:** لم يُوصَلْ مُحقِّقُ أمرٍ سياديٍّ إلى نقطةِ الإنفاذِ في الإنتاجِ — يقتضي صيغةَ أمرٍ سياديٍّ مربوطةً بالفعلِ والموردِ وسجلَّ استهلاكٍ، وهو دفعةٌ تاليةٌ.
+- **`LIVE-23`:** لا عدّاءَ ذاتيَّ الاستضافةِ، و`userns` محجوبٌ على `ubuntu-latest` (‏`unshare: write failed /proc/self/uid_map`)؛ ولم يُجرَّبْ تثبيتُ `swtpm`/SoftHSM في `ci.yml` في هذه الدفعة. **وSoftHSM لو قِيسَ ليس HSM عتاديّاً.**
+- **`scripts/halt-switch.mjs` في الإنتاجِ** لا يُبنى أصلاً (‏`HALT_EPOCH_FLOOR_REQUIRED_IN_PRODUCTION` قبلَ هذه الدفعة، وساعةٌ موثوقةٌ بعدَها) — فالإيقافُ الإنتاجيُّ عبرَ النظامِ المُقلَعِ وحدَه، والنظامُ لا يُقلِعُ (‏`EXT-6`).
+
+#### الملفّاتُ المتأثّرةُ
+
+`src/root-of-trust/royal-command.mts` · `src/root-of-trust/halt-switch.mts` · `src/root-of-trust/production-runtime.mts` · `src/root-of-trust/crown.mts` · `src/core/execution-kernel.mjs` · `src/production/entrypoint.mjs` · `scripts/halt-switch.mjs` · `config/events.yaml` · `tests/helpers/royal-halt-command.mjs` (‏جديدٌ) · `tests/root-of-trust/wl-302-royal-command-authorization.test.mjs` (‏جديدٌ) · `tests/root-of-trust/{production-runtime,freshness-socket,replay-limit,round-2-remediation,round-3-remediation,round-4-halt-log-witness,r5-b-07-halt-royal-command}.test.mjs` · `tests/production/{halt-switch-integration,royal-command-verifier}.test.mjs` · `docs/CURRENT_STATE.md` · `README.md` · `PROJECT_STATUS.md` · `docs/roadmap/README.md` · `docs/roadmap/06-debt-register.md` · `docs/ROOT_OF_TRUST.md` · `docs/READINESS_REPORT.md` (‏مُولَّدٌ) · هذا السجلّ.
+
+#### الـ commit
+
+رأسُ الفرعِ `fix/p0-royal-command-authorization` — يُقرأُ من طلبِ الدمجِ وحكمِ CI عليه.
+
+#### الدليلُ
+
+| المقيسُ | القيمةُ |
+| --- | --- |
+| قبلَ الإصلاحِ: ملفُّ `wl-302-…test.mjs` على شجرةِ `main@5222c40e` (‏`git worktree`، بناءٌ ثمّ `node --test`) | `# pass 0` · `# fail 13` |
+| بعدَه على الفرعِ | `# pass 13` · `# fail 0` |
+| `tests/root-of-trust/` + `tests/production/` + `tests/core/` على الفرعِ | `tests 561` · `pass 554` · `fail 0` |
+| حمايةُ `main` بعدَ التغييرِ | `checks: [فحص الجودة الكامل/15368]` · `allow_force_pushes: false` · `allow_deletions: false` · `reviews: 1` · `enforce_admins: true` · `conversation_resolution: true` |
+| `config/external-review.yaml` (‏بمُفسِّرِ YAML) | 57 · 27 `closed` · 30 `open` — **لم يُمَسَّ** |
+| `npm run validate` | يُقرأُ من طلبِ الدمجِ وحكمِ CI عليه |
+
+#### الأثرُ على المساراتِ الأخرى
+
+كلُّ مُستدعٍ لـ`HaltSwitch.halt/resume` بأمرٍ صارَ يلزمُه `commandId` و`targetEpoch`؛ ومُحقِّقاتُ الاختبارِ المعزولةُ تُمرَّرُ أوامرَ بالصيغةِ الكاملةِ (‏`shapedCommandFor`). والطلبُ يمسُّ `src/` و`tests/` فيُتوقَّعُ `R7/SCOPE-DRIFT` على `main` بعدَ الدمجِ فإعادةُ القياسِ بمسارِها المصمَّمِ.
+
 ### [2026-10-02] — WL-301 — إعادةُ ضبطِ الحقيقةِ: تنظيفُ الفروعِ وطلباتِ الدمجِ، ومواءمةُ README والخارطةِ ولوحةِ الحالةِ والوثائقِ مع `main@d79cded2`، ووثيقةُ حالٍ حاليّةٍ واحدةٌ
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `DOC` · `LIVE-22` · `EXT-7` (§4.6 و§6 من سجلِّ الديونِ) — تنظيفٌ ومواءمةٌ وثائقيّةٌ بأمرِ المالكِ المؤرَّخِ 2026-10-02 · **الحالةُ بعدَ العملِ:** 🟨 جزئيٌّ — الوثائقُ الحاليّةُ تصفُ `main`، ودَينانِ أُغلِقا بالقياسِ، وأربعةٌ قُيِّدَت مفتوحةً، والدمجُ يحتاجُ مراجعةً من غيرِ صاحبِ الطلبِ

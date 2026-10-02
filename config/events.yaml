@@ -369,12 +369,18 @@ channels:
       - type: halt.confirmed
         version: 1
         required: [epoch]
+      - type: halt.command.rejected
+        version: 1
+        required: [code, epoch, operation, signerVerified]
+        optional: [commandId, targetEpoch]
       - type: halt.issued
         version: 1
         required: [epoch, reason]
+        optional: [commandId]
       - type: halt.resumed
         version: 1
         required: [epoch, reason, recoveredFrom]
+        optional: [commandId]
   - id: identity
     subject: بوابةُ الهوية وتجريدُ القدرات عند العبور
     classification: internal

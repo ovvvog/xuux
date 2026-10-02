@@ -57,6 +57,8 @@ import {
   stateManifestPath,
   stateManifestBinding,
 } from '../../src/root-of-trust/index.mjs';
+import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
+import { createRoyalCommandVerifier } from '../../src/root-of-trust/royal-command.mjs';
 
 /**
  * بيئةُ إنتاجٍ كاملةُ الشرطِ. وWL-094 (`UF-05`) شدَّت الشرطَ: الرقمُ التسلسليُّ
@@ -96,8 +98,8 @@ function kingIdOf(pair) {
 function fakeToken(overrides = {}) {
   const aesKeys = new Map([['05', overrides.aead ?? randomBytes(32)]]);
   const edKeys = new Map([
-    ['06', overrides.king ?? generateKeyPairSync('ed25519')],
-    ['07', overrides.ledger ?? generateKeyPairSync('ed25519')],
+    ['06', overrides.king ?? registerTestKing(generateKeyPairSync('ed25519'))],
+    ['07', overrides.ledger ?? registerTestKing(generateKeyPairSync('ed25519'))],
   ]);
   const aad = Buffer.from('xuux-event');
   return {
@@ -149,7 +151,7 @@ async function buildRuntime(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-prod-')));
   // `UF-05`: هويةُ الملكِ تُثبَّتُ في البيئةِ، فتُشتقُّ من مفتاحِ البديلِ نفسِه
   // لا من قيمةٍ ثابتةٍ تُخترَع.
-  const king = options.king ?? generateKeyPairSync('ed25519');
+  const king = options.king ?? registerTestKing(generateKeyPairSync('ed25519'));
   const token = options.token ?? fakeToken({ king });
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'prod-rt');
   const runtime = await createProductionRootOfTrust(
@@ -159,7 +161,7 @@ async function buildRuntime(options = {}) {
       fsync: false,
       freshnessSocket,
       ...(options.royalCommandVerifier === undefined
-        ? { royalCommandVerifier: () => true }
+        ? {}
         : options.royalCommandVerifier === null
           ? {}
           : { royalCommandVerifier: options.royalCommandVerifier }),
@@ -369,16 +371,26 @@ describe('F06: التثبيتُ الإنتاجيُّ موقَّعٌ بمفتاح
   test('توجيهُ الإيقافِ يُصدَرُ غيرَ متزامنٍ ويُتحقَّقُ منه بالمفتاحِ العامّ وحده', async () => {
     const { runtime, cleanup } = await buildRuntime();
     try {
-      const directive = await runtime.haltSwitch.haltAsync('اختبارُ الهجرة', { id: 'test-cmd' });
+      const directive = await runtime.haltSwitch.haltAsync(
+        'اختبارُ الهجرة',
+        royalCommandFor(runtime.haltSwitch, 'halt', 'اختبارُ الهجرة'),
+      );
       assert.equal(directive.state, 'halted');
       const verifier = royalVerifierFromPublicKey(runtime.anchorSigner.publicKeyPem);
       const reading = runtime.haltSwitch.read();
       assert.equal(reading.state, 'halted');
       assert.equal(verifier.id.length > 0, true);
-      assert.throws(() => runtime.haltSwitch.halt('متزامن', { id: 'test-cmd' }), {
-        message: 'HALT_ALREADY_HALTED',
-      });
-      const resumed = await runtime.haltSwitch.resumeAsync('انتهى الاختبار', { id: 'test-cmd' });
+      assert.throws(
+        () =>
+          runtime.haltSwitch.halt('متزامن', royalCommandFor(runtime.haltSwitch, 'halt', 'متزامن')),
+        {
+          message: 'HALT_ALREADY_HALTED',
+        },
+      );
+      const resumed = await runtime.haltSwitch.resumeAsync(
+        'انتهى الاختبار',
+        royalCommandFor(runtime.haltSwitch, 'resume', 'انتهى الاختبار'),
+      );
       assert.equal(resumed.state, 'running');
       assert.equal(resumed.epoch > directive.epoch, true);
     } finally {
@@ -389,7 +401,10 @@ describe('F06: التثبيتُ الإنتاجيُّ موقَّعٌ بمفتاح
   test('حذفُ ملفاتِ الإيقافِ الثلاثةِ لا يُعيدُ التشغيل', async () => {
     const { runtime, cleanup } = await buildRuntime();
     try {
-      await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
+      await runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(runtime.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       // WL-094 (`UF-03`): الاختبارُ كان اسمُه «الثلاثة» ويحذفُ اثنين، فكان
       // بابُ العودةِ إلى `running` وepoch=0 مفتوحاً ولا يراه أحد. الآن
       // يُحذَفُ **الثالثُ** أيضاً: ملفُّ الحقبة.
@@ -1214,12 +1229,13 @@ test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ haltAsync — fail-close
 
 test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ resumeAsync على حالة موقوفة — fail-closed', async () => {
   // ابنِ runtime بمُحقّقٍ لتمكين الإيقاف
-  const { runtime, root, king, token, freshnessSocket, cleanup } = await buildRuntime({
-    royalCommandVerifier: () => true,
-  });
+  const { runtime, root, king, token, freshnessSocket, cleanup } = await buildRuntime({});
   try {
     // أوقف النظام بأمرٍ موثَّق
-    await runtime.haltSwitch.haltAsync('إيقاف', { id: 'halt-cmd' });
+    await runtime.haltSwitch.haltAsync(
+      'إيقاف',
+      royalCommandFor(runtime.haltSwitch, 'halt', 'إيقاف'),
+    );
     assert.equal(runtime.haltSwitch.read().state, 'halted', 'النظام موقوف');
 
     // أغلق السجلَّ قبل إعادة الفتح
@@ -1241,5 +1257,48 @@ test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ resumeAsync على حا�
     runtime2.log.close?.();
   } finally {
     cleanup();
+  }
+});
+
+test('WL-302: مُحقِّقٌ محقونٌ `() => true` يُرَدُّ في الإنتاجِ ولا يُبنى به جذرُ الثقة', async () => {
+  const error = await caughtAsync(() => buildRuntime({ royalCommandVerifier: () => true }));
+  assert.equal(error.code, 'ROYAL_COMMAND_VERIFIER_UNTRUSTED');
+});
+
+test('WL-302: مُحقِّقٌ صحيحُ البناءِ على مفتاحٍ غيرِ مفتاحِ الملكِ في التوكن يُرَدّ', async () => {
+  const other = generateKeyPairSync('ed25519');
+  const error = await caughtAsync(() =>
+    buildRuntime({
+      royalCommandVerifier: createRoyalCommandVerifier(
+        String(other.publicKey.export({ type: 'spki', format: 'pem' })),
+      ),
+    }),
+  );
+  assert.equal(error.code, 'ROYAL_COMMAND_VERIFIER_UNTRUSTED');
+});
+
+test('WL-302: أمرٌ ملكيٌّ موقَّعٌ صحيحٌ يُعادُ بعدَ إعادةِ التشغيلِ الإنتاجيّ ⇒ يُرفَض', async () => {
+  const first = await buildRuntime({});
+  let second = null;
+  try {
+    const haltCmd = royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقاف');
+    await first.runtime.haltSwitch.haltAsync('إيقاف', haltCmd);
+    const resumeCmd = royalCommandFor(first.runtime.haltSwitch, 'resume', 'استئناف');
+    await first.runtime.haltSwitch.resumeAsync('استئناف', resumeCmd);
+    first.runtime.log.close?.();
+    second = await buildRuntime({
+      root: first.root,
+      king: first.king,
+      token: first.token,
+      freshnessSocket: first.freshnessSocket,
+    });
+    second.runtime.haltSwitch.useTrustedClock({ now: () => Date.now() });
+    await assert.rejects(second.runtime.haltSwitch.haltAsync('إيقاف', haltCmd), {
+      code: 'HALT_ROYAL_COMMAND_STALE_EPOCH',
+    });
+    assert.equal(second.runtime.haltSwitch.read().state, 'running');
+  } finally {
+    second?.runtime.log.close?.();
+    first.cleanup();
   }
 });

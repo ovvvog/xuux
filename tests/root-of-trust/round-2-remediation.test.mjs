@@ -42,6 +42,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 import { loadEnvironmentContract } from '../../src/environment/contract.mjs';
 import { resolveKeygenLogPath } from '../../scripts/pkcs11-f05-verify.mjs';
+import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
 
 const SOURCE_DIR = new URL('../../src/root-of-trust/', import.meta.url);
 
@@ -81,8 +82,8 @@ async function caughtAsync(fn) {
 function fakeToken(overrides = {}) {
   const aesKeys = new Map([['05', randomBytes(32)]]);
   const edKeys = new Map([
-    ['06', overrides.king ?? generateKeyPairSync('ed25519')],
-    ['07', generateKeyPairSync('ed25519')],
+    ['06', overrides.king ?? registerTestKing(generateKeyPairSync('ed25519'))],
+    ['07', registerTestKing(generateKeyPairSync('ed25519'))],
   ]);
   const aad = Buffer.from('xuux-event');
   return {
@@ -162,12 +163,12 @@ function productionEnv(king, extra = {}) {
  */
 async function boot(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r2-')));
-  const king = options.king ?? generateKeyPairSync('ed25519');
+  const king = options.king ?? registerTestKing(generateKeyPairSync('ed25519'));
   const token = options.token ?? fakeToken({ king });
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'r2');
   const runtime = await createProductionRootOfTrust(
     productionEnv(king, options.env ?? {}),
-    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
+    { root, fsync: false, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -238,7 +239,7 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
   test('مخزنُ المراسي لا يجوزُ أن يكونَ ملفَّ السجلِّ نفسَه', async () => {
     const root = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r2-')));
     try {
-      const king = generateKeyPairSync('ed25519');
+      const king = registerTestKing(generateKeyPairSync('ed25519'));
       const error = await caughtAsync(() =>
         boot({ root, king, env: { XUUX_ANCHOR_STORE: join(root, 'events.log') } }),
       );
@@ -251,7 +252,7 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
 
 describe('UF-02 و UF-10 — مصدرُ المفاتيحِ يُحكَمُ بعقدِ الإنتاجِ لا بادّعائِه', () => {
   test('موفّرٌ ليس pkcs11-hsm يُرفَضُ ولو أعلن canExport:false', async () => {
-    const king = generateKeyPairSync('ed25519');
+    const king = registerTestKing(generateKeyPairSync('ed25519'));
     const liar = fakeToken({
       king,
       description: { kind: 'in-memory-opaque', canExport: false },
@@ -264,7 +265,7 @@ describe('UF-02 و UF-10 — مصدرُ المفاتيحِ يُحكَمُ بعق
   });
 
   test('canExport غيرُ مُعلَنٍ يُرفَض: الفحصُ على القيمةِ نصّاً لا على صدقيّتِها', async () => {
-    const king = generateKeyPairSync('ed25519');
+    const king = registerTestKing(generateKeyPairSync('ed25519'));
     const vague = fakeToken({ king, description: { kind: 'pkcs11-hsm' } });
     const error = await caughtAsync(() => boot({ king, token: vague }));
     assert.equal(error.code, 'EXPORTABLE_PROVIDER_FORBIDDEN_IN_PRODUCTION');
@@ -289,7 +290,10 @@ describe('UF-03 — محوُ ثلاثيةِ الإيقافِ لا يُعيدُ �
   test('بعدَ إيقافٍ سياديٍّ: حذفُ التوجيهِ والتاريخِ والحقبةِ يبقى مغلقاً', async () => {
     const { runtime, cleanup } = await boot();
     try {
-      const directive = await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
+      const directive = await runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(runtime.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       assert.equal(directive.state, 'halted');
       rmSync(runtime.haltSwitch.file, { force: true });
       rmSync(runtime.haltSwitch.historyFile, { force: true });
@@ -305,7 +309,10 @@ describe('UF-03 — محوُ ثلاثيةِ الإيقافِ لا يُعيدُ �
   test('حدُّ العهدِ يسكنُ خارجَ مجلَّدِ halt فلا يُمحى بمحوِه', async () => {
     const { runtime, root, cleanup } = await boot();
     try {
-      await runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', { id: 'test-cmd' });
+      await runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(runtime.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       rmSync(join(root, 'halt'), { recursive: true, force: true });
       // صيغةُ البيانِ صارت مختومةً (‏`WL-098`): المتنُ تحتَ `body` والخاتَمُ
       // بجانبِه. الثابتُ المختبَرُ لم يتغيّر: العهدُ يسكنُ خارجَ `halt/`.
@@ -349,7 +356,7 @@ describe('UF-04 و UF-09 — إعلانُ الوضعِ يُقرأُ فشلاً �
 
 describe('UF-05 — التوكنُ والملكُ مُثبَّتانِ فلا استبدالَ صامت', () => {
   test('توكنٌ برقمٍ تسلسليٍّ آخرَ يُرفَضُ ولو حملَ الاسمَ نفسَه', async () => {
-    const king = generateKeyPairSync('ed25519');
+    const king = registerTestKing(generateKeyPairSync('ed25519'));
     const other = fakeToken({
       king,
       description: { kind: 'pkcs11-hsm', canExport: false, tokenSerial: 'AAAABBBBCCCC9999' },
@@ -359,8 +366,8 @@ describe('UF-05 — التوكنُ والملكُ مُثبَّتانِ فلا ا
   });
 
   test('ملكٌ لا يطابقُ التثبيتَ يُرفَض', async () => {
-    const king = generateKeyPairSync('ed25519');
-    const impostor = generateKeyPairSync('ed25519');
+    const king = registerTestKing(generateKeyPairSync('ed25519'));
+    const impostor = registerTestKing(generateKeyPairSync('ed25519'));
     const error = await caughtAsync(() => boot({ king, token: fakeToken({ king: impostor }) }));
     assert.equal(error.code, 'KING_IDENTITY_PIN_MISMATCH');
   });
@@ -370,7 +377,7 @@ describe('UF-05 — التوكنُ والملكُ مُثبَّتانِ فلا ا
     const { root } = first;
     try {
       first.runtime.log.close?.();
-      const second = generateKeyPairSync('ed25519');
+      const second = registerTestKing(generateKeyPairSync('ed25519'));
       const error = await caughtAsync(() =>
         boot({ root, king: second, freshnessSocket: first.freshnessSocket }),
       );
@@ -382,7 +389,7 @@ describe('UF-05 — التوكنُ والملكُ مُثبَّتانِ فلا ا
 
   test('غيابُ أيِّ متغيّرِ تثبيتٍ في الإنتاجِ يُغلِقُ الإقلاع', async () => {
     for (const name of ['XUUX_PKCS11_TOKEN_SERIAL', 'XUUX_PKCS11_MODULE_SHA256', 'XUUX_KING_ID']) {
-      const king = generateKeyPairSync('ed25519');
+      const king = registerTestKing(generateKeyPairSync('ed25519'));
       const error = await caughtAsync(() => boot({ king, env: { [name]: '' } }));
       assert.equal(error.code, 'HSM_PINNING_REQUIRED_IN_PRODUCTION', `لم يُرفض غيابُ ${name}`);
     }

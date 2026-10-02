@@ -66,6 +66,7 @@ import {
 import { dirname, join } from 'node:path';
 import { fingerprint } from './identity.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
+import { isWellFormedRoyalCommandBody } from './royal-command.mjs';
 
 /** لاحقة مجلد الإقرارات: ملفٌ لكل عقدة في كل عهد، وإنشاؤه الحصري هو ذرّيته. */
 export const HALT_ACKS_SUFFIX = '.acks';
@@ -148,7 +149,26 @@ export const HaltErrorCodes = [
   // `R5-B-07`: وتصريحُ الإيقافِ غيرِ الموقَّعِ للاختباراتِ لا يُركَّبُ في
   // الإنتاجِ أصلًَ — يُرفضُ عندَ التركيبِ لا عندَ أوّلِ نداءٍ متجاوزٍ.
   'HALT_UNSIGNED_HALT_FORBIDDEN_IN_PRODUCTION',
+  // `WL-302`: التوقيعُ يُثبِتُ مَن وقّعَ لا أنّ الأمرَ يجوزُ الآن. فبعدَ صحّةِ
+  // التوقيعِ يُرفَضُ أمرٌ ناقصُ الصيغةِ، أو صدرَ على عهدٍ غيرِ الحاضرِ (إعادةُ
+  // إرسالٍ — ولو بعدَ إعادةِ التشغيلِ)، أو قديمٌ، أو من المستقبلِ، أو بسببٍ غيرِ
+  // المختومِ فيه، أو بلا ساعةٍ موثوقةٍ في الإنتاج.
+  'HALT_ROYAL_COMMAND_STALE_EPOCH',
+  'HALT_ROYAL_COMMAND_EXPIRED',
+  'HALT_ROYAL_COMMAND_FROM_FUTURE',
+  'HALT_ROYAL_COMMAND_REASON_MISMATCH',
+  'HALT_TRUSTED_CLOCK_REQUIRED',
 ] as const;
+
+/** أقصى عمرٍ للأمرِ الملكيِّ على مفتاحِ الإيقافِ افتراضاً: خمسُ دقائق. */
+export const DEFAULT_ROYAL_COMMAND_MAX_AGE_MS = 5 * 60 * 1000;
+/** أقصى تقدُّمٍ مقبولٍ للحظةِ الإصدارِ على الساعةِ الموثوقةِ: ثلاثون ثانية. */
+export const DEFAULT_ROYAL_COMMAND_MAX_SKEW_MS = 30 * 1000;
+
+/** ساعةٌ موثوقةٌ بالحدِّ الذي يحتاجُه مفتاحُ الإيقاف: لحظةٌ بالمللي ثانية أو رفض. */
+export interface HaltTrustedClock {
+  now(): number;
+}
 
 export type HaltErrorCode = (typeof HaltErrorCodes)[number];
 
@@ -406,6 +426,16 @@ export interface HaltSwitchOptions {
    * مغلقاً عندَ التركيبِ لا عندَ أوّلِ نداءٍ متجاوزٍ (‏R5-B-07).
    */
   allowUnsignedTestHalt?: boolean;
+  /**
+   * `WL-302`: الساعةُ الموثوقةُ التي تُقاسُ بها حداثةُ الأمرِ الملكيِّ. في
+   * الإنتاجِ إلزامٌ (‏`AttestedClock`، تُوصَلُ بـ`useTrustedClock` بعدَ بنائِها)،
+   * وغيابُها رفضٌ لكلِّ أمرٍ لا رجوعٌ إلى ساعةِ الجهاز.
+   */
+  clock?: HaltTrustedClock | null;
+  /** أقصى عمرٍ للأمر (‏افتراضاً `DEFAULT_ROYAL_COMMAND_MAX_AGE_MS`). */
+  maxCommandAgeMs?: number;
+  /** أقصى تقدُّمٍ للأمرِ على الساعة (‏افتراضاً `DEFAULT_ROYAL_COMMAND_MAX_SKEW_MS`). */
+  maxCommandSkewMs?: number;
 }
 
 /** خلاصة تشغيلية للأداة والتدقيق. */
@@ -511,6 +541,10 @@ export class HaltSwitch implements HaltGuard {
   #sealEpoch: (() => Promise<void>) | null;
   #royalCommandVerifier: ((command: Readonly<Record<string, unknown>>) => boolean) | null;
   #allowUnsignedTestHalt: boolean;
+  #clock: HaltTrustedClock | null;
+  #maxCommandAgeMs: number;
+  #maxCommandSkewMs: number;
+  #production: boolean;
 
   /**
    * @param file - مسار ملف التوجيه الدائم
@@ -531,6 +565,10 @@ export class HaltSwitch implements HaltGuard {
     this.#sealEpoch = options.sealEpoch ?? null;
     this.#royalCommandVerifier = options.royalCommandVerifier ?? null;
     this.#allowUnsignedTestHalt = options.allowUnsignedTestHalt ?? false;
+    this.#clock = options.clock ?? null;
+    this.#maxCommandAgeMs = options.maxCommandAgeMs ?? DEFAULT_ROYAL_COMMAND_MAX_AGE_MS;
+    this.#maxCommandSkewMs = options.maxCommandSkewMs ?? DEFAULT_ROYAL_COMMAND_MAX_SKEW_MS;
+    this.#production = isProductionRuntime(options.env ?? process.env);
     // R5-B-07 (تقرير: R5-B-05): أوّلاً — لا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ
     // يُجيزُ الإيقافَ غيرَ الموقَّعِ بتصريحِ اختبارٍ: فشلٌ مغلقٌ عندَ التركيبِ
     // قبلَ كلِّ فحصٍ آخرَ، فلا يُمرَّرُ تصريحٌ ممنوعٌ إلى ما بعده.
@@ -652,26 +690,213 @@ export class HaltSwitch implements HaltGuard {
    * @param command - الأمرُ الملكيُّ المُزعَمُ، إن وُجِدَ
    * @param operation - العملُ المطلوبُ: `halt` أو `resume`
    */
-  #requireRoyalCommand(command: unknown, operation: 'halt' | 'resume'): void {
-    if (this.#royalCommandVerifier !== null) {
-      if (typeof command !== 'object' || command === null) {
-        throw new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
-          detail: `نداءٌ مباشرٌ بلا أمرٍ ملكيٍّ — العملُ المطلوبُ: ${operation}`,
-        });
-      }
-      const stamped = { ...(command as Record<string, unknown>), operation };
-      if (!this.#royalCommandVerifier(stamped)) {
-        throw new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
-          detail: `أمرٌ ملكيٌّ غيرُ موثَّقٍ — العملُ المطلوبُ: ${operation}`,
-        });
-      }
-      return;
-    }
-    if (!this.#allowUnsignedTestHalt) {
-      throw new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+  #requireRoyalCommand(
+    command: unknown,
+    operation: 'halt' | 'resume',
+    reason: string,
+    epoch: number,
+  ): HaltError | null {
+    if (this.#royalCommandVerifier === null) {
+      if (this.#allowUnsignedTestHalt) return null;
+      return new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
         detail: `لا مُحقِّقَ موصولاً ولا تصريحَ اختبارٍ — فشلٌ مغلقٌ — العملُ المطلوبُ: ${operation}`,
       });
     }
+    if (typeof command !== 'object' || command === null) {
+      return new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+        detail: `نداءٌ مباشرٌ بلا أمرٍ ملكيٍّ — العملُ المطلوبُ: ${operation}`,
+      });
+    }
+    // العملُ يُختَمُ من النداءِ لا من الأمرِ: أمرُ halt يُقدَّمُ لـ resume فيُتحقَّقُ
+    // منه بعملِ resume فيسقطُ توقيعُه.
+    const stamped: Record<string, unknown> = { ...(command as Record<string, unknown>), operation };
+    if (!isWellFormedRoyalCommandBody(stamped)) {
+      return new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+        detail: `ليس أمراً ملكيّاً: صيغةٌ ناقصةٌ (commandId · targetEpoch · reason · at) — العملُ المطلوبُ: ${operation}`,
+      });
+    }
+    // ١ — الأصالةُ: هل وقّعَ المفتاحُ المُثبَّتُ هذا المتنَ؟
+    if (!this.#royalCommandVerifier(stamped)) {
+      return new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+        detail: `أمرٌ ملكيٌّ غيرُ موثَّقٍ — العملُ المطلوبُ: ${operation}`,
+      });
+    }
+    // ٢ — التفويضُ على الحالةِ الحاضرةِ: التوقيعُ وحدَه لا يُجيزُ.
+    if (stamped.reason !== reason) {
+      return new HaltError('HALT_ROYAL_COMMAND_REASON_MISMATCH', {
+        epoch,
+        detail: 'السببُ المُمرَّرُ غيرُ المختومِ في الأمر',
+      });
+    }
+    if (stamped.targetEpoch !== epoch) {
+      return new HaltError('HALT_ROYAL_COMMAND_STALE_EPOCH', {
+        epoch,
+        detail: `صدرَ الأمرُ على العهدِ ${String(stamped.targetEpoch)} والعهدُ الحاضرُ ${epoch}`,
+      });
+    }
+    let nowMs: number;
+    try {
+      if (this.#clock !== null) {
+        nowMs = this.#clock.now();
+      } else if (this.#production) {
+        throw new Error('no trusted clock');
+      } else {
+        nowMs = Date.now();
+      }
+    } catch (error) {
+      return new HaltError('HALT_TRUSTED_CLOCK_REQUIRED', {
+        epoch,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!Number.isFinite(nowMs)) {
+      return new HaltError('HALT_TRUSTED_CLOCK_REQUIRED', { epoch, detail: 'لحظةٌ غيرُ عدديّة' });
+    }
+    const atMs = Date.parse(stamped.at as string);
+    if (atMs - nowMs > this.#maxCommandSkewMs) {
+      return new HaltError('HALT_ROYAL_COMMAND_FROM_FUTURE', {
+        epoch,
+        detail: stamped.at as string,
+      });
+    }
+    if (nowMs - atMs > this.#maxCommandAgeMs) {
+      return new HaltError('HALT_ROYAL_COMMAND_EXPIRED', { epoch, detail: stamped.at as string });
+    }
+    return null;
+  }
+
+  /**
+   * `WL-302`: يُوصِلُ الساعةَ الموثوقةَ بعدَ بنائِها — في الإنتاجِ تُبنى
+   * `AttestedClock` بعدَ جذرِ الثقةِ، فلا تكونُ عندَ إنشاءِ المفتاح.
+   * @param clock - الساعةُ الموثوقة
+   */
+  useTrustedClock(clock: HaltTrustedClock): void {
+    if (typeof clock?.now !== 'function') {
+      throw new HaltError('HALT_TRUSTED_CLOCK_REQUIRED', { detail: 'ساعةٌ بلا now()' });
+    }
+    this.#clock = clock;
+  }
+
+  /**
+   * بيانُ الرفضِ في الأثرِ: لا يُذكَرُ فيه التوقيعُ ولا ما لم يُتحقَّقْ منه إلّا
+   * وصفاً، فلا يصيرُ السجلُّ مخزنَ أوامرَ قابلةٍ للإعادة.
+   * @param error - الرفض
+   * @param operation - العملُ المطلوب
+   * @param command - الأمرُ المقدَّم
+   * @param epoch - العهدُ الحاضر
+   * @returns الفاعلُ والحمولة
+   */
+  #rejectionRecord(
+    error: HaltError,
+    operation: 'halt' | 'resume',
+    command: unknown,
+    epoch: number,
+  ): {
+    actor: string;
+    data: {
+      operation: 'halt' | 'resume';
+      code: string;
+      epoch: number;
+      commandId: string | null;
+      targetEpoch: number | null;
+      signerVerified: false;
+    };
+  } {
+    const cmd =
+      typeof command === 'object' && command !== null ? (command as Record<string, unknown>) : {};
+    const text = (value: unknown): string | null =>
+      typeof value === 'string' ? value.slice(0, 128) : null;
+    return {
+      actor: text(cmd.signerId) ?? 'unauthenticated',
+      data: {
+        operation,
+        code: error.code,
+        epoch,
+        commandId: text(cmd.commandId),
+        targetEpoch: typeof cmd.targetEpoch === 'number' ? cmd.targetEpoch : null,
+        signerVerified: false,
+      },
+    };
+  }
+
+  /**
+   * يُسجِّلُ الرفضَ متزامناً ثمّ يرفعُه. فشلُ التسجيلِ لا يُخفي الرفض.
+   * @param error - الرفض
+   * @param operation - العمل
+   * @param command - الأمر
+   * @param epoch - العهد
+   */
+  #rejectSync(
+    error: HaltError,
+    operation: 'halt' | 'resume',
+    command: unknown,
+    epoch: number,
+  ): never {
+    const { actor, data } = this.#rejectionRecord(error, operation, command, epoch);
+    try {
+      this.#log?.append('halt.command.rejected', actor, {
+        operation: data.operation,
+        code: data.code,
+        epoch: data.epoch,
+        commandId: data.commandId,
+        targetEpoch: data.targetEpoch,
+        signerVerified: data.signerVerified,
+      });
+    } catch {
+      /* الرفضُ يُرفَعُ ولو تعذّرَ تسجيلُه */
+    }
+    throw error;
+  }
+
+  /**
+   * يُسجِّلُ الرفضَ في السجلِّ المختومِ (‏إن وُصِلَ) ثمّ يرفعُه.
+   * @param error - الرفض
+   * @param operation - العمل
+   * @param command - الأمر
+   * @param epoch - العهد
+   */
+  async #rejectAsync(
+    error: HaltError,
+    operation: 'halt' | 'resume',
+    command: unknown,
+    epoch: number,
+  ): Promise<never> {
+    const { actor, data } = this.#rejectionRecord(error, operation, command, epoch);
+    try {
+      if (this.#logAsync !== null) {
+        await this.#logAsync.appendSealed('halt.command.rejected', actor, {
+          operation: data.operation,
+          code: data.code,
+          epoch: data.epoch,
+          commandId: data.commandId,
+          targetEpoch: data.targetEpoch,
+          signerVerified: data.signerVerified,
+        });
+      } else {
+        this.#log?.append('halt.command.rejected', actor, {
+          operation: data.operation,
+          code: data.code,
+          epoch: data.epoch,
+          commandId: data.commandId,
+          targetEpoch: data.targetEpoch,
+          signerVerified: data.signerVerified,
+        });
+      }
+    } catch {
+      /* الرفضُ يُرفَعُ ولو تعذّرَ تسجيلُه */
+    }
+    throw error;
+  }
+
+  /**
+   * معرّفُ الأمرِ المقبولِ للأثر، أو null حين لا أمرَ (‏اختبارٌ معزول).
+   * @param command - الأمر
+   * @returns المعرّف
+   */
+  #commandIdOf(command: unknown): string | null {
+    if (typeof command !== 'object' || command === null) return null;
+    const id = (command as Record<string, unknown>).commandId;
+    return typeof id === 'string' ? id : null;
   }
 
   /**
@@ -681,8 +906,9 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   halt(reason = 'royal sovereign halt', command?: unknown): HaltDirective {
-    this.#requireRoyalCommand(command, 'halt');
     const current = this.read();
+    const refused = this.#requireRoyalCommand(command, 'halt', reason, current.epoch);
+    if (refused !== null) this.#rejectSync(refused, 'halt', command, current.epoch);
     if (current.state === 'halted' && current.problem === undefined) {
       throw new HaltError('HALT_ALREADY_HALTED', { epoch: current.epoch, reason: current.reason });
     }
@@ -690,6 +916,7 @@ export class HaltSwitch implements HaltGuard {
     this.#log?.append('halt.issued', directive.kingId, {
       epoch: directive.epoch,
       reason: directive.reason,
+      commandId: this.#commandIdOf(command),
     });
     return directive;
   }
@@ -702,8 +929,9 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   resume(reason = 'royal resume', command?: unknown): HaltDirective {
-    this.#requireRoyalCommand(command, 'resume');
     const current = this.read();
+    const refused = this.#requireRoyalCommand(command, 'resume', reason, current.epoch);
+    if (refused !== null) this.#rejectSync(refused, 'resume', command, current.epoch);
     if (current.state !== 'halted') {
       throw new HaltError('HALT_NOT_HALTED', { epoch: current.epoch });
     }
@@ -723,6 +951,7 @@ export class HaltSwitch implements HaltGuard {
       epoch: directive.epoch,
       reason: directive.reason,
       recoveredFrom: current.problem ?? null,
+      commandId: this.#commandIdOf(command),
     });
     return directive;
   }
@@ -735,8 +964,9 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   async haltAsync(reason = 'royal sovereign halt', command?: unknown): Promise<HaltDirective> {
-    this.#requireRoyalCommand(command, 'halt');
     const current = this.read();
+    const refused = this.#requireRoyalCommand(command, 'halt', reason, current.epoch);
+    if (refused !== null) return this.#rejectAsync(refused, 'halt', command, current.epoch);
     if (current.state === 'halted' && current.problem === undefined) {
       throw new HaltError('HALT_ALREADY_HALTED', { epoch: current.epoch, reason: current.reason });
     }
@@ -747,11 +977,13 @@ export class HaltSwitch implements HaltGuard {
       await this.#logAsync.appendSealed('halt.issued', directive.kingId, {
         epoch: directive.epoch,
         reason: directive.reason,
+        commandId: this.#commandIdOf(command),
       });
     } else {
       this.#log?.append('halt.issued', directive.kingId, {
         epoch: directive.epoch,
         reason: directive.reason,
+        commandId: this.#commandIdOf(command),
       });
     }
     return directive;
@@ -764,8 +996,9 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   async resumeAsync(reason = 'royal resume', command?: unknown): Promise<HaltDirective> {
-    this.#requireRoyalCommand(command, 'resume');
     const current = this.read();
+    const refused = this.#requireRoyalCommand(command, 'resume', reason, current.epoch);
+    if (refused !== null) return this.#rejectAsync(refused, 'resume', command, current.epoch);
     if (current.state !== 'halted') {
       throw new HaltError('HALT_NOT_HALTED', { epoch: current.epoch });
     }
@@ -786,12 +1019,14 @@ export class HaltSwitch implements HaltGuard {
         epoch: directive.epoch,
         reason: directive.reason,
         recoveredFrom: current.problem ?? null,
+        commandId: this.#commandIdOf(command),
       });
     } else {
       this.#log?.append('halt.resumed', directive.kingId, {
         epoch: directive.epoch,
         reason: directive.reason,
         recoveredFrom: current.problem ?? null,
+        commandId: this.#commandIdOf(command),
       });
     }
     return directive;

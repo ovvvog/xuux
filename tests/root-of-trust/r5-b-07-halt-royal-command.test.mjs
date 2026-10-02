@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
+import { shapedCommandFor } from '../helpers/royal-halt-command.mjs';
 
 /**
  * @param {{ royalCommandVerifier?: (command: Readonly<Record<string, unknown>>) => boolean }} [opts]
@@ -53,7 +54,10 @@ test('R5-B-07: halt() بأمرٍ ملكيٍّ موثَّقٍ ينجح', () => {
     royalCommandVerifier: (cmd) => cmd.id === 'cmd:royal-halt-001' && cmd.operation === 'halt',
   });
   try {
-    const directive = halt.halt('إيقاف سيادي', { id: 'cmd:royal-halt-001' });
+    const directive = halt.halt('إيقاف سيادي', {
+      ...shapedCommandFor(halt, 'halt', 'إيقاف سيادي'),
+      id: 'cmd:royal-halt-001',
+    });
     assert.ok(directive, 'التوجيهُ صدر');
     assert.equal(halt.isHalted(), true, 'الحالةُ موقوفة');
   } finally {
@@ -67,7 +71,7 @@ test('R5-B-07: halt() بأمرٍ غير موثَّقٍ يُرفض', () => {
   });
   try {
     assert.throws(
-      () => halt.halt('probe', { id: 'cmd:forged' }),
+      () => halt.halt('probe', { ...shapedCommandFor(halt, 'halt', 'probe'), id: 'cmd:forged' }),
       /HALT_ROYAL_COMMAND_REQUIRED/,
       'الأمرُ غيرُ الموثَّقُ مرفوض',
     );
@@ -82,7 +86,7 @@ test('R5-B-07: resume() بلا أمرٍ ملكيٍّ يُرفضُ حين يكو�
       cmd.id === 'cmd:royal-halt-001' || cmd.id === 'cmd:royal-resume-001',
   });
   try {
-    halt.halt('إيقاف', { id: 'cmd:royal-halt-001' });
+    halt.halt('إيقاف', { ...shapedCommandFor(halt, 'halt', 'إيقاف'), id: 'cmd:royal-halt-001' });
     // استئناف بلا أمر
     assert.throws(
       () => halt.resume('probe-resume'),
@@ -90,7 +94,10 @@ test('R5-B-07: resume() بلا أمرٍ ملكيٍّ يُرفضُ حين يكو�
       'الاستئنافُ بلا أمرٍ ملكيٍّ ممنوع',
     );
     // استئناف بأمرٍ موثَّق
-    halt.resume('استئناف سيادي', { id: 'cmd:royal-resume-001' });
+    halt.resume('استئناف سيادي', {
+      ...shapedCommandFor(halt, 'resume', 'استئناف سيادي'),
+      id: 'cmd:royal-resume-001',
+    });
     assert.equal(halt.isHalted(), false, 'الحالةُ مستأنفة');
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -142,10 +149,14 @@ test('R5-B-07: أمرُ إيقافٍ لا يُجيزُ استئنافاً', () =
     royalCommandVerifier: (cmd) => cmd.id === 'cmd:halt-only' && cmd.operation === 'halt',
   });
   try {
-    halt.halt('إيقاف', { id: 'cmd:halt-only' });
+    halt.halt('إيقاف', { ...shapedCommandFor(halt, 'halt', 'إيقاف'), id: 'cmd:halt-only' });
     // أمرُ الإيقافِ لا يُجيزُ الاستئناف
     assert.throws(
-      () => halt.resume('استئناف', { id: 'cmd:halt-only' }),
+      () =>
+        halt.resume('استئناف', {
+          ...shapedCommandFor(halt, 'resume', 'استئناف'),
+          id: 'cmd:halt-only',
+        }),
       /HALT_ROYAL_COMMAND_REQUIRED/,
       'أمرُ الإيقافِ لا يُجيزُ الاستئناف',
     );
