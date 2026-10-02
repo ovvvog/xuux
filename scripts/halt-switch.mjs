@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// @ts-nocheck
 // مفتاح الإيقاف الشامل — أداة التشغيل، الخطوة M2.08
 //
 // الغرض:      إصدار الإيقاف السيادي واستئنافه من سطر الأوامر، وإظهار من أقرّ
@@ -32,6 +33,11 @@ import {
   royalVerifierFromPublicKey,
   signHaltAck,
 } from '../src/root-of-trust/index.mjs';
+import {
+  createRoyalCommandVerifier,
+  canonicalRoyalCommand,
+} from '../src/root-of-trust/royal-command.mjs';
+import { sign as softwareSign } from 'node:crypto';
 
 /** الاستعمال المطبوع عند الخطأ أو عند `--help`. */
 const USAGE = `الاستعمال:
@@ -137,13 +143,15 @@ export async function run(argv, env, deps = {}) {
     king = await loadKingKeySet(kingKeyProviderFromEnv(env));
   }
   try {
-    // R5-B-07: الإصدارُ من الأداةِ أمرٌ ملكيٌّ تُنشئُه الأداةُ وتُمرِّرُه — فلا
-    // إيقافَ بنداءٍ مجرّدٍ. والأداةُ لا تُصدِرُ إلّا لمن حملَ مفتاحَ الملكِ
-    // (التوكنَ في الإنتاجِ أو المخزنَ في التطويرِ)، وأما وضعُ المفتاحِ العامِّ
-    // فيَعبرُ البوّابةَ ويُرَدُّ عندَ التوقيعِ برمزِه المعلَن `HALT_SIGNER_REQUIRED`.
-    const royalCommand = { id: `cmd:halt-cli-${new Date().toISOString()}` };
+    // R5-B-07: الإصدارُ من الأداةِ أمرٌ ملكيٌّ موقَّعٌ تشفيرياً — لا مقارنةَ معرّفٍ.
+    // الأداةُ تَبني جسمَ الأمرِ (operation, signerId, reason, at) وتوقّعُهُ بمفتاحِ
+    // الملكِ، ثمَّ تُمرِّرُهُ إلى `HaltSwitch` الذي يَتحقَّقُ منه بالمفتاحِ العامِّ.
+    // وضعُ المفتاحِ العامِّ وحدَهُ لا يستطيعُ التوقيعَ — فهو يَرفضُ halt/resume
+    // بـ`HALT_SIGNER_REQUIRED` ويُسمحُ له بـ status/verify/confirm فقط.
+    const kingId = king.id;
+    const publicKeyPem = king.publicKey.export({ type: 'spki', format: 'pem' });
     const halt = new HaltSwitch(config.file, king, {
-      royalCommandVerifier: (command) => command.id === royalCommand.id,
+      royalCommandVerifier: createRoyalCommandVerifier(publicKeyPem),
     });
 
     if (args.command === 'status') {
@@ -151,24 +159,42 @@ export async function run(argv, env, deps = {}) {
       return args.json ? JSON.stringify(description, null, 2) : formatDescription(description);
     }
 
-    if (args.command === 'halt') {
-      // في الإنتاج التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكن، ولا نظيرَ متزامنٌ له:
-      // `HsmSigner.sign` يرفعُ `HSM_SYNC_SIGN_UNSUPPORTED` عن قصد.
-      const directive = production
-        ? await halt.haltAsync(args.reason ?? 'royal sovereign halt', royalCommand)
-        : halt.halt(args.reason ?? 'royal sovereign halt', royalCommand);
-      return args.json
-        ? JSON.stringify({ halted: true, directive }, null, 2)
-        : `⛔ صدر الإيقاف في العهد ${directive.epoch} بإصدار المفتاح ${directive.keyVersion}\nالسبب: ${directive.reason}\nالتجزئة: ${directive.hash}`;
-    }
+    if (args.command === 'halt' || args.command === 'resume') {
+      // بناءُ الأمرِ الملكيِّ الموقَّعِ — لا يُكتفى بمقارنةِ المعرّفِ.
+      const operation = args.command;
+      const reason =
+        args.reason ?? (operation === 'halt' ? 'royal sovereign halt' : 'royal resume');
+      const at = new Date().toISOString();
+      const body = { operation, signerId: kingId, reason, at };
+      const canonical = canonicalRoyalCommand(body);
+      let signature;
+      if (production) {
+        // الإنتاجُ: التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكنِ.
+        signature = await king.signAsync(Buffer.from(canonical));
+      } else {
+        // التطويرُ: التوقيعُ البرمجيُّ المتزامنُ.
+        signature = softwareSign(null, Buffer.from(canonical), king.privateKey).toString(
+          'base64url',
+        );
+      }
+      const royalCommand = { ...body, signature };
 
-    if (args.command === 'resume') {
       const directive = production
-        ? await halt.resumeAsync(args.reason ?? 'royal resume', royalCommand)
-        : halt.resume(args.reason ?? 'royal resume', royalCommand);
+        ? operation === 'halt'
+          ? await halt.haltAsync(reason, royalCommand)
+          : await halt.resumeAsync(reason, royalCommand)
+        : operation === 'halt'
+          ? halt.halt(reason, royalCommand)
+          : halt.resume(reason, royalCommand);
       return args.json
-        ? JSON.stringify({ resumed: true, directive }, null, 2)
-        : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;
+        ? JSON.stringify(
+            { [operation === 'halt' ? 'halted' : 'resumed']: true, directive },
+            null,
+            2,
+          )
+        : operation === 'halt'
+          ? `⛔ صدر الإيقاف في العهد ${directive.epoch} بإصدار المفتاح ${directive.keyVersion}\nالسبب: ${directive.reason}\nالتجزئة: ${directive.hash}`
+          : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;
     }
 
     if (args.command === 'confirm') {

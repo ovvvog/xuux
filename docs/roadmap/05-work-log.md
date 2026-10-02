@@ -1,5 +1,17 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-02] — WL-300 — توصيلُ verifier إلى HaltSwitch وإزالةُ مسار CLI المفتوح
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` (§Production Root of Trust) — إغلاقُ فجواتِ الربط · **الحالةُ بعدَ العملِ:** 🟩 `P0-ROT-Verifier-Wired` منفَّذٌ — `royalCommandVerifier` موصولٌ إلى `HaltSwitch` عندَ إنشائِه داخلَ `production-runtime`، ومسارُ `scripts/halt-switch.mjs` يَتطلَّبُ تفويضاً تشفيرياً حقيقيّاً.
+
+**العَمَلُ:**
+- **P0-A — توصيلُ verifier إلى HaltSwitch:** أُنشِئَ `src/root-of-trust/royal-command.mts` — ملفٌ مستقلٌّ يَحوي `createRoyalCommandVerifier()` و`canonicalRoyalCommand()` و`RoyalCommandBody`. `production-runtime` يَبني الـ verifier من `anchorSigner.publicKeyPem` ويُمرِّرُهُ إلى `HaltSwitch` عندَ إنشائِه — لا من callback اختياري في `entrypoint`.
+- **P0-A — اختباراتُ التكاملِ:** 5 اختباراتٍ (H1–H5) تُثبتُ أنّ `system.rootOfTrust.haltSwitch` الفعليَّ يَرفضُ halt بلا أمرٍ، ويرفضُ الأمرَ المزوَّرَ، ويُقبِلُ الأمرَ الموقَّعَ صحيحاً، ويرفضُ توقيعَ halt لـ resume، ويُقبِلُ resume الموقَّعَ بعد halt.
+- **P0-A — إصلاحُ `scripts/halt-switch.mjs`:** أُزيلَ `royalCommandVerifier: (command) => command.id === royalCommand.id` — كان يَنشأُ أمراً محليّاً ويَكتفي بمقارنةِ المعرّفِ. صار يَبني جسمَ الأمرِ (operation, signerId, reason, at) ويُوقّعُهُ تشفيرياً، ثمَّ يُمرِّرُهُ إلى `HaltSwitch` الذي يَتحقَّقُ منه بالمفتاحِ العامِّ.
+- **P0-B — توصيلُ AttestedClock:** `createProductionSystem()` يَستدعي `await attestedClock.attest()` قبلَ إعلانِ الجاهزيةِ، ويتحققُ من `attestation() !== null`. أُضيفَت آليةُ تجديدٍ قبلَ `maxAgeMs/2`. إن فشلَ النصابُ أو قدمَ البرهانُ، يَفشلُ الإقلاعُ مغلقاً.
+- **فشلُ CI على main@7ad69ef:** السببُ baseline متقادمٌ (227→228 ملفاً). لا علاقةَ له بالكود.
+- **Invariant:** لا `() => true`، ولا مقارنةَ معرّفٍ، ولا `Date.now()` كساعةٍ موثوقةٍ، ولا `InMemoryFreshnessSocket` في الإنتاجِ.
+
 ### [2026-10-02] — WL-299 — إزالةُ verifier الملكيِّ المفتوحِ وتوصيلُ AttestedClock
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` (§Production Root of Trust) — إصلاحُ ثغراتٍ أمنيّةٍ · **الحالةُ بعدَ العملِ:** 🟩 `P0-ROT-Verifier-Clock` منفَّذٌ — لا `() => true` في الإنتاجِ، التحققُ التشفيريُّ من الأوامرِ الملكيّةِ مُفعَّلٌ، و`AttestedClock` موصولٌ من سياسةِ الوقتِ.

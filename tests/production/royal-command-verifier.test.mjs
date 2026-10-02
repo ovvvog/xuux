@@ -15,7 +15,10 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign as softwareSign } from 'node:crypto';
-import { createRoyalCommandVerifier } from '../../src/production/entrypoint.mjs';
+import {
+  createRoyalCommandVerifier,
+  canonicalRoyalCommand,
+} from '../../src/root-of-trust/royal-command.mjs';
 import { fingerprint } from '../../src/root-of-trust/index.mjs';
 
 function fixedKeys() {
@@ -33,7 +36,7 @@ function royalCommand(keys, operation, opts = {}) {
   };
   const signature = softwareSign(
     null,
-    Buffer.from(JSON.stringify(body)),
+    Buffer.from(canonicalRoyalCommand(body)),
     keys.king.privateKey,
   ).toString('base64url');
   return { ...body, signature };
