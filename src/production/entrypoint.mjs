@@ -130,7 +130,8 @@ export async function createProductionSystem(env, options, deps = {}) {
   });
 
   // 7. الساعةُ الموثوقةُ — في الإنتاجِ يلزمُها `CrownGateway`.
-  //    الأولويّةُ: clock مُحقَنٌ (اختبارٌ فقط)، ثم `AttestedClock` من سياسةِ الوقتِ.
+  //    P0-C: `options.clock` مسارُ اختبارٍ فقط — مُشغِّلُ الإنتاجِ لا يُمرِّرُهُ.
+  //    إن لم يُحقَنْ، يُنشأُ `AttestedClock` من سياسةِ الوقتِ ويُطلَبُ النصابُ.
   //    `AttestedClock` يَفشلُ مغلقاً إن لم يَتحقَّقْ نصابُ المصادرَ — لا يَسقُطُ إلى `Date.now()`.
   //    إن لم تُتوفَّرْ سياسةُ وقتٍ، يَسقُطُ إلى `SovereignClock` (الذي يَفشلُ
   //    بـ`ATTESTED_TIME_REQUIRED` لأنّه بلا `attestation()`).
