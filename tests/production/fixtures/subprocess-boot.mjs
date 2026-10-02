@@ -91,6 +91,7 @@ env.XUUX_KING_ID = 'king:' + fingerprint(k.king.publicKey).slice(0, 24);
 
 const root = mkdtempSync(join(tmpdir(), 'xuux-subprocess-boot-'));
 const socket = new InMemoryFreshnessSocket(0n, 'subprocess-test');
+socket.testFixture = false;
 
 // تسجيلُ الجذرِ المؤقّتِ للمحوِ الآليِّ — سياسةُ نظافةِ الجذورِ (WL-219)
 process.on('exit', () => {

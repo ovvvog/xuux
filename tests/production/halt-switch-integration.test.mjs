@@ -28,6 +28,25 @@ import { createProductionSystem } from '../../src/production/entrypoint.mjs';
 import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/index.mjs';
 import { canonicalRoyalCommand } from '../../src/root-of-trust/royal-command.mjs';
 
+/** مقبسُ حداثةٍ للاختبارِ بلا علامةِ testFixture — يَلفُّ InMemoryFreshnessSocket. */
+class TestFreshnessSocket {
+  constructor(initial = 0n, anchorPrefix = 'test') {
+    this.inner = new InMemoryFreshnessSocket(initial, anchorPrefix);
+  }
+  read() {
+    return this.inner.read();
+  }
+  bump() {
+    return this.inner.bump();
+  }
+  advance() {
+    return this.inner.advance();
+  }
+  failNext() {
+    return this.inner.failNext();
+  }
+}
+
 function stableToken(king, aeadKey, ledgerPair) {
   const aad = Buffer.from('xuux-event');
   const ed = new Map([
@@ -141,7 +160,7 @@ describe('P0-A Integration — HaltSwitch مع royalCommandVerifier موصول',
   test('H1 — halt بلا أمرٍ ملكيٍّ يُرفَضُ مغلقاً', async () => {
     const root = tmp('no-command');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -161,7 +180,7 @@ describe('P0-A Integration — HaltSwitch مع royalCommandVerifier موصول',
   test('H2 — halt بأمرٍ مزوَّرٍ (بلا توقيعٍ) يُرفَضُ', async () => {
     const root = tmp('forged');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -181,7 +200,7 @@ describe('P0-A Integration — HaltSwitch مع royalCommandVerifier موصول',
   test('H3 — halt بأمرٍ موقَّعٍ صحيحٍ يُقبَلُ', async () => {
     const root = tmp('valid-halt');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot, keys } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -200,7 +219,7 @@ describe('P0-A Integration — HaltSwitch مع royalCommandVerifier موصول',
   test('H4 — توقيعُ halt لا يقبلُ resume', async () => {
     const root = tmp('cross-halt-resume');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot, keys } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -225,7 +244,7 @@ describe('P0-A Integration — HaltSwitch مع royalCommandVerifier موصول',
   test('H5 — resume بأمرٍ موقَّعٍ صحيحٍ بعد halt يُقبَلُ', async () => {
     const root = tmp('valid-resume');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot, keys } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {

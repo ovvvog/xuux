@@ -82,8 +82,16 @@ export async function createProductionSystem(env, options, deps = {}) {
     throw new Error('PRODUCTION_ENTRYPOINT_NOT_PRODUCTION_ENV');
   }
   // 2. مقبسُ الحداثةِ ليس null — ضمانٌ إضافيٌّ أنّ المكوّنَ الموصولَ فعليٌّ.
+  //    P0-C: لا يُقبَلُ `InMemoryFreshnessSocket` كإثباتِ حداثةٍ في الإنتاجِ —
+  //    هو تركيبيٌّ للاختبارِ لا مصدرُ حداثةٍ إنتاجيٌّ.
   if (options.freshnessSocket === null || options.freshnessSocket === undefined) {
     throw new Error('PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_NULL');
+  }
+  if (
+    'testFixture' in options.freshnessSocket &&
+    /** @type {any} */ (options.freshnessSocket).testFixture === true
+  ) {
+    throw new Error('PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_TEST_FIXTURE');
   }
 
   // 3. جذرُ الثقةِ الإنتاجيُّ — يفرضُ HSM والبيانَ المختومَ والحداثةَ.
