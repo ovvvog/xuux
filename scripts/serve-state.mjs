@@ -616,6 +616,15 @@ async function enrollDeclaredConsumers(input) {
 }
 
 async function main() {
+  // P0 Production Root of Trust Integration: هذا السكربتُ للتطويرِ وحدَه.
+  // في بيئةِ الإنتاجِ يجبَ أن يُستعمَلَ `src/production/entrypoint.mts` الذي يربطُ
+  // جذرَ الثقةِ بسلسلةِ الإنفاذِ والنواةِ. هذا السكربتُ لا يمرُّ عبر Root of Trust.
+  if (process.env.NODE_ENV === 'production' || process.env.STATE_ENV === 'production') {
+    console.error(
+      'SERVE_STATE_NOT_PRODUCTION_PATH: هذا السكربت للتطوير فقط. استخدم src/production/entrypoint.mts للإنتاج.',
+    );
+    process.exit(1);
+  }
   const apiPolicy = loadApiPolicy({ dir: CONFIG_DIR });
   const monitoringPolicy = loadMonitoringPolicy({ dir: CONFIG_DIR });
   const routes = compileRoutes({ policy: apiPolicy });
