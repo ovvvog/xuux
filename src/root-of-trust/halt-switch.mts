@@ -66,7 +66,7 @@ import {
 import { dirname, join } from 'node:path';
 import { fingerprint } from './identity.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
-import { isWellFormedRoyalCommandBody } from './royal-command.mjs';
+import { isWellFormedRoyalCommandBody, trustedRoyalVerifierFingerprint } from './royal-command.mjs';
 
 /** لاحقة مجلد الإقرارات: ملفٌ لكل عقدة في كل عهد، وإنشاؤه الحصري هو ذرّيته. */
 export const HALT_ACKS_SUFFIX = '.acks';
@@ -158,6 +158,8 @@ export const HaltErrorCodes = [
   'HALT_ROYAL_COMMAND_FROM_FUTURE',
   'HALT_ROYAL_COMMAND_REASON_MISMATCH',
   'HALT_TRUSTED_CLOCK_REQUIRED',
+  // `WL-302`: مُحقِّقٌ في الإنتاجِ غيرُ مبنيٍّ بـ`createRoyalCommandVerifier`.
+  'HALT_ROYAL_VERIFIER_UNTRUSTED',
 ] as const;
 
 /** أقصى عمرٍ للأمرِ الملكيِّ على مفتاحِ الإيقافِ افتراضاً: خمسُ دقائق. */
@@ -545,6 +547,8 @@ export class HaltSwitch implements HaltGuard {
   #maxCommandAgeMs: number;
   #maxCommandSkewMs: number;
   #production: boolean;
+  /** `WL-302`: المُحقِّقُ مبنيٌّ على مفتاحٍ عامٍّ بـ`createRoyalCommandVerifier`؟ */
+  #trustedVerifier: boolean;
 
   /**
    * @param file - مسار ملف التوجيه الدائم
@@ -569,6 +573,16 @@ export class HaltSwitch implements HaltGuard {
     this.#maxCommandAgeMs = options.maxCommandAgeMs ?? DEFAULT_ROYAL_COMMAND_MAX_AGE_MS;
     this.#maxCommandSkewMs = options.maxCommandSkewMs ?? DEFAULT_ROYAL_COMMAND_MAX_SKEW_MS;
     this.#production = isProductionRuntime(options.env ?? process.env);
+    this.#trustedVerifier =
+      this.#royalCommandVerifier !== null &&
+      trustedRoyalVerifierFingerprint(this.#royalCommandVerifier) !== null;
+    // `WL-302`: في الإنتاجِ لا يُقبَلُ مُحقِّقٌ مُرتجَلٌ (‏`() => true` أو دالّةٌ
+    // تقرأُ `command.id`): المُحقِّقُ يُبنى من مفتاحٍ عامٍّ فيُفرَضُ معه عقدُ
+    // الأمرِ كاملاً (‏الصيغةُ والعهدُ والحداثةُ والسببُ). وخارجَ الإنتاجِ يبقى
+    // المُحقِّقُ المعزولُ للاختباراتِ التي تفحصُ مساراً غيرَ التوقيع.
+    if (this.#royalCommandVerifier !== null && !this.#trustedVerifier && this.#production) {
+      throw new HaltError('HALT_ROYAL_VERIFIER_UNTRUSTED', {});
+    }
     // R5-B-07 (تقرير: R5-B-05): أوّلاً — لا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ
     // يُجيزُ الإيقافَ غيرَ الموقَّعِ بتصريحِ اختبارٍ: فشلٌ مغلقٌ عندَ التركيبِ
     // قبلَ كلِّ فحصٍ آخرَ، فلا يُمرَّرُ تصريحٌ ممنوعٌ إلى ما بعده.
@@ -710,6 +724,14 @@ export class HaltSwitch implements HaltGuard {
     // العملُ يُختَمُ من النداءِ لا من الأمرِ: أمرُ halt يُقدَّمُ لـ resume فيُتحقَّقُ
     // منه بعملِ resume فيسقطُ توقيعُه.
     const stamped: Record<string, unknown> = { ...(command as Record<string, unknown>), operation };
+    if (!this.#trustedVerifier) {
+      // مُحقِّقُ اختبارٍ معزولٌ (‏خارجَ الإنتاجِ وحدَه — رُدَّ في البناءِ غيرُه).
+      return this.#royalCommandVerifier(stamped)
+        ? null
+        : new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
+            detail: `أمرٌ ملكيٌّ غيرُ موثَّقٍ — العملُ المطلوبُ: ${operation}`,
+          });
+    }
     if (!isWellFormedRoyalCommandBody(stamped)) {
       return new HaltError('HALT_ROYAL_COMMAND_REQUIRED', {
         detail: `ليس أمراً ملكيّاً: صيغةٌ ناقصةٌ (commandId · targetEpoch · reason · at) — العملُ المطلوبُ: ${operation}`,
