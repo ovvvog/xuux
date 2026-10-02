@@ -60,7 +60,10 @@ import {
   fingerprint,
   haltEpochFromSealedLog,
 } from '../../src/root-of-trust/index.mjs';
-import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
+import { registerTestKing, royalCommandFor, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
@@ -139,7 +142,12 @@ async function bootRuntime(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-halt-witness-')));
   const king = options.king ?? registerTestKing(generateKeyPairSync('ed25519'));
   const token = options.token ?? fakeToken({ king });
-  const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) };
+  const env = {
+    ...PRODUCTION_ENV,
+    XUUX_KING_ID: kingIdOf(king),
+    ...ROYAL_KEY.env,
+    ...(options.env ?? {}),
+  };
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'test');
   const runtime = await createProductionRootOfTrust(
     env,

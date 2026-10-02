@@ -153,6 +153,20 @@ variables:
     statement: >-
       هويةُ الملكِ المُثبَّتةُ. تُقابَلُ بهويةِ الموقّعِ المفتوحِ من التوكنِ
       عندَ الإقلاع، فمفتاحٌ آخرُ في توكنٍ آخرَ يُرفَضُ ولا يُقرأُ ملكاً.
+  - id: XUUX_ROYAL_PUBLIC_KEY_PEM
+    requiredIn: [production]
+    format: '^-----BEGIN PUBLIC KEY-----[\s\S]+-----END PUBLIC KEY-----\s*$'
+    secret: false
+    statement: >-
+      المفتاحُ الملكيُّ العامُّ (‏Ed25519) — `LIVE-24`. **غيرُ** مفتاحِ المرساةِ والدفترِ في
+      التوكن، وخاصُّه عندَ الملكِ لا على العُقدة. منه وحدَه تُجازُ الأوامرُ السياديّة.
+  - id: XUUX_ROYAL_KEY_ID
+    requiredIn: [production]
+    format: '^king:[0-9a-f]{24}$'
+    secret: false
+    statement: >-
+      بصمةُ المفتاحِ الملكيِّ المُثبَّتةُ. تُقابَلُ بالمفتاحِ المُعلَنِ عندَ الإقلاع، ويُرَدُّ
+      الإقلاعُ إن طابقَ مفتاحَ المرساةِ أو الدفترِ (‏`ROYAL_KEY_NOT_SEPARATED`).
   - id: XUUX_PKCS11_PIN
     requiredIn: []
     format: '^.{4,}$'

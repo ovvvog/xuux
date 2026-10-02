@@ -65,7 +65,7 @@ export function signRoyalCommand(pair, fields) {
 
 /**
  * أمرٌ موقَّعٌ على العهدِ الحاضرِ لمفتاحِ إيقافٍ بعينِه، بمفتاحِ ملكِه المسجَّل.
- * @param {{ king: { id: string }, read: () => { epoch: number }, useTrustedClock?: (clock: { now(): number }) => void }} haltSwitch
+ * @param {{ king: { id: string }, royalKeyId?: string | null, read: () => { epoch: number }, useTrustedClock?: (clock: { now(): number }) => void }} haltSwitch
  * @param {'halt' | 'resume'} operation
  * @param {string} reason
  * @param {{ at?: string, commandId?: string, targetEpoch?: number }} [overrides]
@@ -78,8 +78,10 @@ export function royalCommandFor(haltSwitch, operation, reason, overrides = {}) {
   if (typeof haltSwitch.useTrustedClock === 'function') {
     haltSwitch.useTrustedClock({ now: () => Date.now() });
   }
-  const pair = KINGS.get(haltSwitch.king.id);
-  if (pair === undefined) throw new Error(`TEST_KING_NOT_REGISTERED: ${haltSwitch.king.id}`);
+  // `LIVE-24`: الأمرُ يُوقَّعُ بالمفتاحِ الملكيِّ الذي بُنيَ عليه المُحقِّقُ، لا بمفتاحِ التوجيه.
+  const signerKeyId = haltSwitch.royalKeyId ?? haltSwitch.king.id;
+  const pair = KINGS.get(signerKeyId);
+  if (pair === undefined) throw new Error(`TEST_KING_NOT_REGISTERED: ${signerKeyId}`);
   return signRoyalCommand(pair, {
     operation,
     reason,
@@ -108,5 +110,22 @@ export function shapedCommandFor(haltSwitch, operation, reason, overrides = {}) 
     at: new Date().toISOString(),
     signature: 'test-signature',
     ...overrides,
+  };
+}
+
+/**
+ * `LIVE-24`: بيئةُ المفتاحِ الملكيِّ المستقلِّ للإقلاعِ الإنتاجيِّ في الاختبار — يُسجَّلُ
+ * الزوجُ ليُوقَّعَ به، ويُعادُ مفتاحُه العامُّ وبصمتُه المُثبَّتة.
+ * @param {import('node:crypto').KeyPairKeyObjectResult} [pair]
+ * @returns {{ pair: import('node:crypto').KeyPairKeyObjectResult, env: { XUUX_ROYAL_PUBLIC_KEY_PEM: string, XUUX_ROYAL_KEY_ID: string } }}
+ */
+export function royalKeyEnv(pair = generateKeyPairSync('ed25519')) {
+  registerTestKing(pair);
+  return {
+    pair,
+    env: {
+      XUUX_ROYAL_PUBLIC_KEY_PEM: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      XUUX_ROYAL_KEY_ID: kingIdOfPublicKey(pair.publicKey),
+    },
   };
 }

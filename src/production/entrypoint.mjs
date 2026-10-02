@@ -31,6 +31,9 @@ import { createProductionRootOfTrust } from '../root-of-trust/production-runtime
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
+import { loadPolicyBundle } from '../policy/loader.mjs';
+import { createRoyalAuthorization } from '../root-of-trust/royal-authorization.mjs';
+import { sealedAudit } from '../root-of-trust/sealed-audit.mjs';
 import { kingIdentityFromPublicKey, CertificateAuthority } from '../root-of-trust/identity.mjs';
 import { SovereignClock } from '../root-of-trust/clock.mjs';
 import { AttestedClock } from '../time/attested-clock.mjs';
@@ -111,22 +114,17 @@ export async function createProductionSystem(env, options, deps = {}) {
 
   // 4. هويةُ الملكِ من HSM — المفتاحُ العامُّ وحدَه، بلا مفتاحٍ خاصٍّ في الذاكرةِ.
   const kingIdentity = kingIdentityFromPublicKey(rootOfTrust.anchorSigner.publicKeyPem);
+  // `LIVE-24` (‏`WL-303`): هويّةُ العُقدةِ (‏مفتاحُ المرساةِ `06`) تُصدِرُ شهاداتِ الوكلاءِ،
+  // و**الهويّةُ الملكيّةُ** (‏مفتاحٌ عامٌّ مُثبَّتٌ لا خاصَّ له على العُقدة) وحدَها تُجيزُ
+  // الأوامرَ السياديّةَ عندَ التاجِ وحدِّ التفويض. فلا يُقبَلُ توقيعُ العُقدةِ أمراً.
+  const royalIdentity = kingIdentityFromPublicKey(rootOfTrust.royalPublicKeyPem);
 
   // 5. سلطةُ التصديقِ من جذرِ الثقةِ — مخزنُ سحبٍ دائمٌ لا ذاكرةٌ.
   const authority = new CertificateAuthority(kingIdentity, {
     revocationStore: rootOfTrust.revocationStore,
     env,
-  });
-
-  // 6. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ.
-  //    `royalCommandVerifier` لا يُمرَّرُ هنا — هو موصولٌ داخلَ `rootOfTrust.haltSwitch`.
-  const chain = composeEnforcementChain({
-    log: rootOfTrust.log,
-    withLegislation: false,
-    crown: null,
-    haltSwitch: rootOfTrust.haltSwitch,
-    kingIdentity,
-    authority,
+    // `WL-303`: الإصدارُ عبرَ التوكنِ — لا مفتاحَ خاصَّ في الذاكرة.
+    signer: rootOfTrust.anchorSigner,
   });
 
   // 7. الساعةُ الموثوقةُ — في الإنتاجِ يلزمُها `CrownGateway`.
@@ -169,12 +167,37 @@ export async function createProductionSystem(env, options, deps = {}) {
     }
   }
 
+  // 6. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ، وحدُّ السلطةِ الملكيّة.
+  //    `R6-A-07` (‏`WL-303`): كانت نقطةُ الإنفاذِ الإنتاجيّةُ بلا مُحقِّقٍ فتُرَدُّ كلُّ
+  //    الأفعالِ السياديّةِ مغلقةً بلا مسارٍ مشروعٍ، وكانَ أيُّ مُحقِّقٍ يُحقَنُ
+  //    (‏ولو `() => true`) يُقبَلُ. الآنَ الحدُّ الواحدُ: المفتاحُ الملكيُّ المُثبَّتُ
+  //    (‏مصادقة) ← الربطُ والعتبةُ والحداثةُ بالساعةِ الموثوقةِ ومنعُ الإعادةِ
+  //    بالدفترِ الدائمِ (‏تفويض) ← ثمّ السياسةُ قبلَه والتنفيذُ بعدَه.
+  // سجلُّ السلسلةِ: الإلحاقُ مختومٌ مرتَّبٌ، والتذكرةُ تنتظرُ ختمَ قيدِها.
+  const enforcementLog = sealedAudit(/** @type {never} */ (rootOfTrust.log));
+  const royalAuthorization = createRoyalAuthorization({
+    king: royalIdentity,
+    clock: /** @type {{ now(): number }} */ (clock),
+    commandLedger: rootOfTrust.ledger,
+    sovereignActions: loadPolicyBundle().threshold.map((entry) => entry.action),
+    log: enforcementLog,
+  });
+  const chain = composeEnforcementChain({
+    log: /** @type {never} */ (enforcementLog),
+    withLegislation: false,
+    crown: null,
+    haltSwitch: rootOfTrust.haltSwitch,
+    kingIdentity,
+    authority,
+    royalCommandVerifier: /** @type {never} */ (royalAuthorization),
+  });
+
   // 7ب. `WL-302`: حداثةُ الأمرِ الملكيِّ على مفتاحِ الإيقافِ تُقاسُ بالساعةِ
   //     الموثوقةِ نفسِها لا بساعةِ الجهاز — وبلاها يُرفَضُ كلُّ أمرٍ في الإنتاج.
   rootOfTrust.haltSwitch.useTrustedClock(/** @type {{ now(): number }} */ (clock));
 
   // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
-  const crown = new CrownGateway(kingIdentity, authority, rootOfTrust.log, {
+  const crown = new CrownGateway(royalIdentity, authority, rootOfTrust.log, {
     commandLedger: rootOfTrust.ledger,
     haltSwitch: rootOfTrust.haltSwitch,
     clock,

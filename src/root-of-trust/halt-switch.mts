@@ -555,6 +555,17 @@ export class HaltSwitch implements HaltGuard {
    * @param king - الملك: متحقّقٌ للعقد، وموقّعٌ لمن يُصدر
    * @param options - المزامنة وسجل الأحداث
    */
+  /**
+   * `LIVE-24`: معرّفُ المفتاحِ الملكيِّ الذي بُنيَ عليه المُحقِّقُ (‏`king:<بصمة>`)، أو `null`.
+   * يُقرأُ للتدقيقِ وللاختبارِ: مفتاحُ الأمرِ غيرُ مفتاحِ التوجيهِ (‏`this.king`).
+   * @returns المعرّف أو `null`
+   */
+  get royalKeyId(): string | null {
+    if (this.#royalCommandVerifier === null) return null;
+    const fp = trustedRoyalVerifierFingerprint(this.#royalCommandVerifier);
+    return fp === null ? null : 'king:' + fp.slice(0, 24);
+  }
+
   constructor(file: string, king: HaltVerifier, options: HaltSwitchOptions = {}) {
     this.file = file;
     this.acksDir = file + HALT_ACKS_SUFFIX;

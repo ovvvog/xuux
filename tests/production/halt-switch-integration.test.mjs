@@ -27,7 +27,10 @@ import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { createProductionSystem } from '../../src/production/entrypoint.mjs';
 import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/index.mjs';
 import { canonicalRoyalCommand } from '../../src/root-of-trust/royal-command.mjs';
-import { registerTestKing } from '../helpers/royal-halt-command.mjs';
+import { registerTestKing, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 /** مقبسُ حداثةٍ للاختبارِ بلا علامةِ testFixture — يَلفُّ InMemoryFreshnessSocket. */
 class TestFreshnessSocket {
@@ -99,7 +102,9 @@ function fixedKeys() {
 }
 
 function royalCommand(keys, operation, opts = {}) {
-  const kingId = 'king:' + fingerprint(keys.king.publicKey).slice(0, 24);
+  // `LIVE-24`: الأمرُ يُوقَّعُ بالمفتاحِ الملكيِّ المستقلِّ لا بمفتاحِ المرساة.
+  void keys;
+  const kingId = ROYAL_KEY.env.XUUX_ROYAL_KEY_ID;
   const body = {
     operation,
     signerId: kingId,
@@ -111,7 +116,7 @@ function royalCommand(keys, operation, opts = {}) {
   const signature = softwareSign(
     null,
     Buffer.from(canonicalRoyalCommand(body)),
-    keys.king.privateKey,
+    ROYAL_KEY.pair.privateKey,
   ).toString('base64url');
   return { ...body, signature };
 }
@@ -128,6 +133,7 @@ function rig({ freshnessSocket = null, keys } = {}) {
     XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
     XUUX_PKCS11_PIN: 'unused-by-injected-source',
     XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+    ...ROYAL_KEY.env,
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
   };
   const testClock = {

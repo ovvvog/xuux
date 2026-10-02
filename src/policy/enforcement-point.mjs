@@ -37,6 +37,7 @@
 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
+import { trustedRoyalAuthorizationKeyId } from '../root-of-trust/royal-authorization.mjs';
 
 /** @typedef {import('./model.mjs').PolicyRequest} PolicyRequest */
 /** @typedef {import('./model.mjs').PolicyDecision} PolicyDecision */
@@ -154,6 +155,16 @@ export class EnforcementPoint {
     // R5-B-06 (تقرير: R5-B-04): التحقّقُ من الأمرِ الملكيِّ موصولٌ بنقطةِ الإنفاذ.
     // المحرّكُ يفحصُ صورةَ الملخصِ، وهنا يُتحقَّقُ من أنّ الأمرَ موثَّقٌ في الديوان.
     // الفصلُ مقصودٌ: المحرّكُ لا يُنشئُ مصدرَ حقيقةٍ ثانٍ، والإنفاذُ لا يثقُ بصورةٍ.
+    // `R6-A-07` (‏`WL-303`): في الإنتاجِ لا يُقبَلُ مُحقِّقٌ مُرتجَلٌ (‏`() => true` أو
+    // دالّةٌ تقرأُ معرّفاً): الحدُّ الوحيدُ هو `createRoyalAuthorization` المبنيُّ على
+    // المفتاحِ الملكيِّ المُثبَّتِ والساعةِ الموثوقةِ والدفترِ الدائم.
+    if (
+      royalCommandVerifier !== null &&
+      productionIn(/** @type {NodeJS.ProcessEnv} */ (env)) &&
+      trustedRoyalAuthorizationKeyId(royalCommandVerifier) === null
+    ) {
+      throw new Error('ENFORCEMENT_ROYAL_AUTHORIZATION_UNTRUSTED');
+    }
     this.royalCommandVerifier = royalCommandVerifier;
     this.quotaLedger = quotaLedger;
     this.decisionSink = decisionSink;
@@ -348,25 +359,47 @@ export class EnforcementPoint {
       } else {
         const commandId = decision.royalCommandId;
         const binding = bindingOf(evaluated);
+        // `R6-A-07` (‏`WL-303`): يُقدَّمُ للحدِّ **الأمرُ الموقَّعُ نفسُه** بتوقيعِه
+        // (‏`request.royalCommand`) مع ربطِ الطلب — لا المعرّفُ والملخّصُ وحدَهما،
+        // فهما نصّانِ يكتبُهما المستدعي.
+        const signed =
+          /** @type {{ royalCommand?: { command?: unknown, signature?: unknown } }} */ (evaluated)
+            .royalCommand;
         const command = {
           id: typeof commandId === 'string' ? commandId : '',
-          ...(decision.royalCommandDigest !== undefined
-            ? { digest: decision.royalCommandDigest }
+          // الملخّصُ من ربطِ الطلبِ نفسِه (‏القرارُ لا يحملُه)، فيُقاسُ على الأمرِ الموقَّع.
+          ...(binding.royalCommandDigest !== undefined
+            ? { digest: binding.royalCommandDigest }
             : {}),
           action: evaluated.action,
           resource: binding.resourceKey,
+          ...(signed !== undefined && signed !== null
+            ? { command: signed.command, signature: signed.signature }
+            : {}),
         };
-        if (
-          typeof commandId !== 'string' ||
-          commandId === '' ||
-          !this.royalCommandVerifier(command)
-        ) {
+        /** @type {string | null} */
+        let refusal = null;
+        if (typeof commandId !== 'string' || commandId === '') {
+          refusal = 'ROYAL_COMMAND_ID_MISSING';
+        } else {
+          const verdict = await /** @type {(c: object) => unknown} */ (this.royalCommandVerifier)(
+            command,
+          );
+          if (typeof verdict === 'boolean') {
+            if (!verdict) refusal = 'ROYAL_COMMAND_UNVERIFIED';
+          } else {
+            const v = /** @type {{ ok?: unknown, code?: unknown }} */ (verdict ?? {});
+            if (v.ok !== true)
+              refusal = typeof v.code === 'string' ? v.code : 'ROYAL_COMMAND_UNVERIFIED';
+          }
+        }
+        if (refusal !== null) {
           decision = Object.freeze({
             ...decision,
             allowed: false,
             effect: /** @type {const} */ ('deny'),
             code: /** @type {const} */ ('SOVEREIGN_COMMAND_UNVERIFIED'),
-            reason: `الفعل ${evaluated.action} فوق العتبة السيادية، والأمر الملكي ${commandId ?? '—'} غير موثَّق في الديوان. فحصُ صورةِ الملخصِ لا يُغني عن تحقُّقِ التوقيع.`,
+            reason: `الفعل ${evaluated.action} فوق العتبة السيادية، والأمر الملكي ${commandId ?? '—'} غير مُجازٍ (${refusal}). فحصُ صورةِ الملخصِ لا يُغني عن تحقُّقِ التوقيعِ والتفويض.`,
           });
         }
       }
@@ -538,6 +571,10 @@ export class EnforcementPoint {
       policyVersion: decision.policyVersion,
       reason: decision.reason,
     });
+    // `WL-303`: على السجلِّ المختومِ (‏`sealedAudit`) لا تُصدَرُ تذكرةٌ قبلَ أن يُختَمَ
+    // قيدُ قرارِها — فشلُ الختمِ يرفعُ هنا فلا تذكرة.
+    const sealed = /** @type {{ flush?: () => Promise<void> }} */ (this.log);
+    if (typeof sealed.flush === 'function') await sealed.flush();
     if (this.decisionSink !== null) await this.decisionSink({ decision, request });
   }
 

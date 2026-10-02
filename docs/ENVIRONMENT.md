@@ -86,6 +86,8 @@
 | `XUUX_PKCS11_TOKEN` | اسمٌ غيرُ فارغ | `production` | لا |
 | `XUUX_PKCS11_TOKEN_SERIAL` | رقمٌ غيرُ فارغٍ بلا فراغات | `production` | لا |
 | `XUUX_KING_ID` | `^king:[0-9a-f]{24}$` | `production` | لا |
+| `XUUX_ROYAL_PUBLIC_KEY_PEM` | مفتاحٌ عامٌّ SPKI PEM (‏Ed25519) | `production` | لا |
+| `XUUX_ROYAL_KEY_ID` | `^king:[0-9a-f]{24}$` | `production` | لا |
 | `XUUX_PKCS11_PIN` | أربعةُ محارفَ فأكثر | لا شيء (بديلُه الملفّ) | نعم |
 | `XUUX_PKCS11_PIN_FILE` | مسارٌ مطلقٌ بصلاحيةِ 600 | لا شيء (بديلُه المتغيّر) | لا |
 | `XUUX_ROOT_OF_TRUST_PROVISION` | `^1$` | لا شيء (إذنُ تهيئةٍ صريح) | لا |

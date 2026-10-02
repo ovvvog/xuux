@@ -42,7 +42,10 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 import { loadEnvironmentContract } from '../../src/environment/contract.mjs';
 import { resolveKeygenLogPath } from '../../scripts/pkcs11-f05-verify.mjs';
-import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
+import { registerTestKing, royalCommandFor, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 const SOURCE_DIR = new URL('../../src/root-of-trust/', import.meta.url);
 
@@ -151,6 +154,7 @@ function productionEnv(king, extra = {}) {
     XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
     XUUX_PKCS11_PIN: 'fake-pin-not-used-by-injected-source', // secret-scan:allow
     XUUX_KING_ID: kingIdOf(king),
+    ...ROYAL_KEY.env,
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
     ...extra,
   };

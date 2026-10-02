@@ -25,6 +25,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
+import { royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 const ENABLED = process.env.XUUX_HSM_TEST === '1';
 const MODULE = process.env.XUUX_HSM_TEST_MODULE ?? '/usr/lib/softhsm/libsofthsm2.so';
@@ -171,6 +175,7 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
       XUUX_PKCS11_TOKEN_SERIAL: identity.serial,
       XUUX_PKCS11_MODULE_SHA256: createHash('sha256').update(readFileSync(MODULE)).digest('hex'),
       XUUX_KING_ID: identity.kingId,
+      ...ROYAL_KEY.env,
       XUUX_PKCS11_PIN: PIN,
       XUUX_ROOT_OF_TRUST_PROVISION: '1',
     };

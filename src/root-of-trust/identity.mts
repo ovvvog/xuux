@@ -386,11 +386,17 @@ export interface CertificateAuthorityOptions {
    * لأنّه لا يدومُ عبرَ إعادةِ التشغيل.
    */
   env?: NodeJS.ProcessEnv;
+  /**
+   * `WL-303`: موقِّعٌ غيرُ متزامنٍ في التوكن (‏`HsmSigner`) لإصدارِ الشهاداتِ في
+   * الإنتاجِ حيثُ لا مفتاحَ خاصَّ في الذاكرة. ويلزمُ أن يكونَ معرّفُه معرّفَ `king`.
+   */
+  signer?: { id: string; signAsync(payload: object): Promise<string> };
 }
 
 export class CertificateAuthority {
   king: KingIdentity;
   private readonly revoked: RevocationStore;
+  private readonly asyncSigner: { id: string; signAsync(payload: object): Promise<string> } | null;
   private readonly now: TimeSource;
   private readonly defaultTtlMs: number;
   private readonly allowLegacy: boolean;
@@ -415,6 +421,38 @@ export class CertificateAuthority {
     this.now = options.now ?? (() => Date.now());
     this.defaultTtlMs = options.defaultTtlMs ?? DEFAULT_CERTIFICATE_TTL_MS;
     this.allowLegacy = options.allowLegacyCertificatesWithoutExpiry ?? false;
+    this.asyncSigner = options.signer ?? null;
+    if (this.asyncSigner !== null && this.asyncSigner.id !== king.id) {
+      throw new Error('CERTIFICATE_SIGNER_KEY_MISMATCH');
+    }
+  }
+
+  /**
+   * `WL-303`: الإصدارُ نفسُه بموقِّعِ التوكنِ غيرِ المتزامن إن وُصِلَ، وإلّا `issue`.
+   * @param subject - معرّف الموضوع
+   * @param role - الدور
+   * @param capabilities - القدرات
+   * @param ttlMs - مدّةُ الصلاحيّة
+   * @returns الشهادة الموقّعة
+   */
+  async issueAsync(
+    subject: string,
+    role: string,
+    capabilities: string[] = [],
+    ttlMs?: number,
+  ): Promise<Certificate> {
+    if (this.asyncSigner === null) return this.issue(subject, role, capabilities, ttlMs);
+    const issuedAt = this.now();
+    const body: CertificateBody = {
+      id: randomUUID(),
+      subject,
+      issuer: this.king.id,
+      role,
+      capabilities,
+      issuedAt: new Date(issuedAt).toISOString(),
+      notAfter: new Date(issuedAt + (ttlMs ?? this.defaultTtlMs)).toISOString(),
+    };
+    return { ...body, signature: await this.asyncSigner.signAsync(body) };
   }
 
   /**

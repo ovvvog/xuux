@@ -40,6 +40,8 @@ import {
   assertProductionKeyProviderAllowed,
   describeRootOfTrustBoot,
   isProductionRuntime,
+  loadPinnedRoyalPublicKey,
+  ProductionBootError,
 } from './production-boot.mjs';
 import { FileAnchorStore, verifyAnchoredLog } from './anchor.mjs';
 import type { MonotonicFloor } from './state-manifest.mjs';
@@ -187,6 +189,11 @@ export interface ProductionRootOfTrust {
   anchorSigner: HsmSigner;
   /** موقّعُ قراراتِ الدفتر (F07). */
   ledgerSigner: HsmSigner & LedgerDecisionSigner;
+  /**
+   * `LIVE-24`: المفتاحُ الملكيُّ العامُّ — **غيرُ** مفتاحِ المرساةِ والدفترِ، ولا خاصَّ له
+   * على العُقدة. منه وحدَه يُبنى مُحقِّقُ أوامرِ الإيقافِ وهويّةُ التاجِ وحدُّ التفويض.
+   */
+  royalPublicKeyPem: string;
   /** خلاصةُ الإقلاعِ للتدقيقِ — بلا أيِّ سرٍّ فيها. */
   boot: ReturnType<typeof describeRootOfTrustBoot>;
   /** بيانُ جذرِ الحالةِ المختومُ — مرجعُ الشواهدِ الرتيبةِ للمثبَّتِ والعهدِ والقرار. */
@@ -550,7 +557,20 @@ export async function createProductionRootOfTrust(
     // `WL-302`: والمُحقِّقُ المحقونُ لا يُقبَلُ دالّةً مُرتجَلةً (‏`() => true`):
     // يلزمُ أن يكونَ مبنيّاً بـ`createRoyalCommandVerifier` **على مفتاحِ الملكِ
     // نفسِه في التوكن** — وإلّا فالحقنُ مسارٌ جانبيٌّ إلى السلطةِ السياديّة.
-    const anchorFingerprint = royalKeyFingerprint(signers.anchorSigner.publicKeyPem);
+    // `LIVE-24` (‏`WL-303`): المفتاحُ الملكيُّ مصدرُه مُعلَنٌ مثبَّتٌ خارجَ التوكن، ويُرَدُّ
+    // الإقلاعُ إن كانَ هو مفتاحَ المرساةِ أو الدفترِ — فلا تأمرُ العُقدةُ نفسَها بمفتاحِها.
+    // وخارجَ الإنتاجِ وحدَه يُسقَطُ إلى مفتاحِ المرساةِ (‏التركيبُ القديمُ للاختبارات).
+    const pinnedRoyalPem = loadPinnedRoyalPublicKey(env);
+    const royalPublicKeyPem = pinnedRoyalPem ?? signers.anchorSigner.publicKeyPem;
+    const royalFingerprint = royalKeyFingerprint(royalPublicKeyPem);
+    if (
+      pinnedRoyalPem !== null &&
+      (royalFingerprint === royalKeyFingerprint(signers.anchorSigner.publicKeyPem) ||
+        royalFingerprint === royalKeyFingerprint(signers.ledgerSigner.publicKeyPem))
+    ) {
+      throw new ProductionBootError('ROYAL_KEY_NOT_SEPARATED', 'XUUX_ROYAL_PUBLIC_KEY_PEM');
+    }
+    const anchorFingerprint = royalFingerprint;
     if (options.royalCommandVerifier !== undefined && options.royalCommandVerifier !== null) {
       const injected = trustedRoyalVerifierFingerprint(options.royalCommandVerifier);
       if (injected === null || injected !== anchorFingerprint) {
@@ -558,12 +578,12 @@ export async function createProductionRootOfTrust(
           'ROYAL_COMMAND_VERIFIER_UNTRUSTED',
           injected === null
             ? 'مُحقِّقٌ محقونٌ غيرُ مبنيٍّ بـcreateRoyalCommandVerifier'
-            : 'مُحقِّقٌ محقونٌ على مفتاحٍ غيرِ مفتاحِ الملكِ في التوكن',
+            : 'مُحقِّقٌ محقونٌ على مفتاحٍ غيرِ المفتاحِ الملكيِّ المُثبَّت',
         );
       }
     }
     const royalCommandVerifier =
-      options.royalCommandVerifier ?? createRoyalCommandVerifier(signers.anchorSigner.publicKeyPem);
+      options.royalCommandVerifier ?? createRoyalCommandVerifier(royalPublicKeyPem);
     const haltSwitch = new HaltSwitch(
       join(options.root, 'halt', 'directive.json'),
       signers.anchorSigner as unknown as HaltAsyncSigner,
@@ -584,6 +604,7 @@ export async function createProductionRootOfTrust(
       sealer,
       anchorSigner: signers.anchorSigner,
       ledgerSigner: signers.ledgerSigner,
+      royalPublicKeyPem,
       boot: signers.boot,
       manifest,
       raiseAnchorWitness: (count: number) => manifest.raise('anchoredCount', count),

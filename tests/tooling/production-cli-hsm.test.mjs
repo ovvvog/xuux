@@ -35,6 +35,10 @@ import {
 import { run as runAnchor } from '../../scripts/anchor-log.mjs';
 import { run as runHalt } from '../../scripts/halt-switch.mjs';
 import { run as runRotate } from '../../scripts/rotate-king-key.mjs';
+import { royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 /** بيئةُ إنتاجٍ كاملةُ الشرط: وضعٌ ووحدةٌ وتوكنٌ وPIN. */
 // WL-094 (`UF-05`): التثبيتُ صارَ جزءاً من شرطِ الإنتاج، فبيئةُ الأدواتِ تحملُه.
@@ -113,6 +117,7 @@ function context() {
     env: {
       ...PRODUCTION_ENV,
       XUUX_KING_ID: 'king:' + fingerprint(king.publicKey).slice(0, 24),
+      ...ROYAL_KEY.env,
       EVENT_LOG_FILE: join(root, 'events.log'),
       ANCHOR_STORE_FILE: join(root, 'anchors.jsonl'),
       HALT_SWITCH_FILE: join(root, 'halt', 'directive.json'),
