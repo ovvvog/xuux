@@ -82,6 +82,8 @@ export const COMPOSITION_ERRORS = Object.freeze({
  *   quotaLedger?: unknown,
  *   now?: () => Date,
  *   requireIdentityGate?: never,
+ *   kingIdentity?: import('../root-of-trust/identity.mjs').KingIdentity,
+ *   authority?: import('../root-of-trust/identity.mjs').CertificateAuthority,
  * }} deps
  * @returns {EnforcementChain}
  */
@@ -98,6 +100,8 @@ export function composeEnforcementChain(deps) {
     royalCommandVerifier = null,
     quotaLedger = null,
     now,
+    kingIdentity: injectedKingIdentity,
+    authority: injectedAuthority,
   } = options;
 
   if (
@@ -115,8 +119,8 @@ export function composeEnforcementChain(deps) {
 
   const clock = now ?? (() => new Date());
   const catalogOptions = configDir === undefined ? undefined : { dir: configDir };
-  const kingIdentity = new KingIdentity();
-  const authority = new CertificateAuthority(kingIdentity);
+  const kingIdentity = injectedKingIdentity ?? new KingIdentity();
+  const authority = injectedAuthority ?? new CertificateAuthority(kingIdentity);
   const catalog = loadCapabilityCatalog(catalogOptions);
   const incidents = new IncidentRegister({ log: /** @type {never} */ (log) });
   const grants = new CapabilityGrantLedger({

@@ -8,6 +8,7 @@ import {
   verify,
   randomUUID,
   createHash,
+  createPublicKey,
   type KeyObject,
 } from 'node:crypto';
 import {
@@ -337,6 +338,31 @@ export class KingIdentity {
       purpose: 'sovereign-authority',
     };
   }
+}
+
+/**
+ * هويةُ ملكٍ للتحقُّقِ فقط من مفتاحٍ عامٍّ — بلا مفتاحٍ خاصٍّ في الذاكرةِ.
+ *
+ * تستعمل في الإنتاجِ حين يكون المفتاحُ الخاصُّ في HSM ولا يُصدَّر. التحقُّقُ
+ * يقعُ بالمفتاحِ العامِّ وحدَه، والتوقيعُ يَفشلُ مغلقاً لأنّ المسارَ الإنتاجيَّ
+ * للتوقيعِ يمرُّ عبر `HsmSigner.signAsync` لا عبر هذه الهوية.
+ *
+ * @param publicKeyPem - المفتاحُ العامُّ بترميز PEM (SPKI)
+ * @returns هويةٌ تُحقِّقُ وتُرفضُ التوقيعَ — لا تُصدِّرُ مادّةً خاصّةً.
+ */
+export function kingIdentityFromPublicKey(publicKeyPem: string): KingIdentity {
+  const publicKey = createPublicKey(publicKeyPem);
+  const id = 'king:' + fingerprint(publicKey).slice(0, 24);
+  // التحقُّقُ فقط — لا مفتاحَ خاصَّ ولا توقيعَ برمجيّاً.
+  const identity = Object.create(KingIdentity.prototype) as KingIdentity;
+  identity.id = id;
+  identity.publicKey = publicKey;
+  identity.privateKey = null as never;
+  // التوقيعُ البرمجيُّ ممنوعٌ — المسارُ الإنتاجيُّ يمرُّ عبر HSM.
+  identity.sign = () => {
+    throw new Error('SOFTWARE_SIGN_NOT_AVAILABLE_USE_HSM');
+  };
+  return identity;
 }
 
 export interface CertificateAuthorityOptions {
