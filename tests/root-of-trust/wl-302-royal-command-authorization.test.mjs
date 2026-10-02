@@ -300,3 +300,22 @@ test('WL-302: الوضعُ الآمنُ للنواةِ يمرُّ بمفتاحِ
     r.cleanup();
   }
 });
+
+test('WL-302: مفتاحُ إيقافٍ في الإنتاجِ بمُحقِّقٍ مُرتجَلٍ يُرَدُّ عندَ البناء', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wl302-untrusted-'));
+  try {
+    assert.throws(
+      () =>
+        new HaltSwitch(join(dir, 'd.json'), new KingIdentity(), {
+          fsync: false,
+          env: PROD,
+          royalCommandVerifier: () => true,
+          epochFloor: { read: () => 0, raise: () => undefined },
+          logAsync: { appendSealed: async () => undefined },
+        }),
+      { code: 'HALT_ROYAL_VERIFIER_UNTRUSTED' },
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -29,7 +29,7 @@
 - **`createProductionRootOfTrust`:** مُحقِّقٌ محقونٌ غيرُ مبنيٍّ بـ`createRoyalCommandVerifier` على مفتاحِ الملكِ في التوكنِ يُرَدُّ `ROYAL_COMMAND_VERIFIER_UNTRUSTED` — **كانَ `() => true` يُقبَلُ في `NODE_ENV=production`** وتستعملُه ستُّ ملفّاتِ اختبارٍ.
 - **`src/production/entrypoint.mjs`:** يُوصِلُ `AttestedClock` إلى مفتاحِ الإيقافِ (‏`useTrustedClock`) ويُمرِّرُ `env` إلى النواة. و`scripts/halt-switch.mjs` يبني الأمرَ بـ`commandId` عشوائيٍّ و`targetEpoch` الحاضرِ ويوقّعُ متنَ النطاقِ.
 - **الوضعُ الآمنُ (‏`R6-A-08`):** في الإنتاجِ `ExecutionKernel.stop/resume` ⇒ `KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND`، و`CrownGateway.stop/resume` ⇒ `CROWN_SAFE_STOP_REQUIRES_HALT_SWITCH`؛ والمسارُ الوحيدُ `kernel.enterSafeMode/leaveSafeMode(reason, command)` إلى `HaltSwitch`، فيصيرُ الوضعُ الآمنُ توجيهاً دائماً يقرؤه `submit` ويصمدُ لإعادةِ التشغيلِ. وخارجَ الإنتاجِ بقيَ المسارُ القديمُ لاختباراتِه.
-- **اختباراتٌ:** `tests/root-of-trust/wl-302-royal-command-authorization.test.mjs` (‏13) وثلاثةٌ في `production-runtime.test.mjs`، ومُساعِدٌ `tests/helpers/royal-halt-command.mjs` يوقّعُ أوامرَ حقيقيّةً بزوجِ الملكِ؛ واستُبدِلَ في سبعِ ملفّاتٍ `() => true` و`{ id: 'test-cmd' }` بأوامرَ موقَّعةٍ.
+- **اختباراتٌ:** `tests/root-of-trust/wl-302-royal-command-authorization.test.mjs` (‏14) وثلاثةٌ في `production-runtime.test.mjs`، ومُساعِدٌ `tests/helpers/royal-halt-command.mjs` يوقّعُ أوامرَ حقيقيّةً بزوجِ الملكِ؛ واستُبدِلَ في سبعِ ملفّاتٍ `() => true` و`{ id: 'test-cmd' }` بأوامرَ موقَّعةٍ.
 
 #### تصنيفُ النتائجِ الثلاثينَ المفتوحةِ على `main@5222c40e` + هذه الدفعة (‏لا تغييرَ في `status`)
 
@@ -63,7 +63,7 @@
 | المقيسُ | القيمةُ |
 | --- | --- |
 | قبلَ الإصلاحِ: ملفُّ `wl-302-…test.mjs` على شجرةِ `main@5222c40e` (‏`git worktree`، بناءٌ ثمّ `node --test`) | `# pass 0` · `# fail 13` |
-| بعدَه على الفرعِ | `# pass 13` · `# fail 0` |
+| بعدَه على الفرعِ | `# pass 14` · `# fail 0` (‏الرابعَ عشرَ أُضيفَ بعدَ القياسِ على `main` للمُحقِّقِ المُرتجَلِ في الإنتاج) |
 | `tests/root-of-trust/` + `tests/production/` + `tests/core/` على الفرعِ | `tests 561` · `pass 554` · `fail 0` |
 | حمايةُ `main` بعدَ التغييرِ | `checks: [فحص الجودة الكامل/15368]` · `allow_force_pushes: false` · `allow_deletions: false` · `reviews: 1` · `enforce_admins: true` · `conversation_resolution: true` |
 | `config/external-review.yaml` (‏بمُفسِّرِ YAML) | 57 · 27 `closed` · 30 `open` — **لم يُمَسَّ** |
