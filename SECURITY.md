@@ -52,7 +52,7 @@
 ## 3. الإبلاغ عن ثغرة
 
 - **لا تُفتح مسألة عامة (issue) بثغرة أمنية.** استعمل تقرير الأمان الخاص في GitHub
-  (‏`Security` ⇒ `Report a vulnerability`) على مستودع `soaav-svg/xuux`، أو راسل مالك
+  (‏`Security` ⇒ `Report a vulnerability`) على مستودع `ovvvog/xuux` (‏نُقلَ من `soaav-svg/xuux`)، أو راسل مالك
   المستودع مباشرةً.
 - ما يُفيد في التقرير: الإصدار من `version.json`، والخطوات التي تُعيد إظهار الخلل،
   وأثرها على أحد الأصول A1–A7 في `docs/THREAT_MODEL.md`، ودرجة الخصم المفترضة X1–X4.
