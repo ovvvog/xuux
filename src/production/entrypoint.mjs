@@ -33,6 +33,9 @@ import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
 import { kingIdentityFromPublicKey, CertificateAuthority } from '../root-of-trust/identity.mjs';
 import { SovereignClock } from '../root-of-trust/clock.mjs';
+import { AttestedClock } from '../time/attested-clock.mjs';
+import { loadTimePolicy } from '../time/policy.mjs';
+import { createHash, verify as cryptoVerify, createPublicKey } from 'node:crypto';
 
 /**
  * أخطاءُ نقطةِ الدخولِ الإنتاجيّةِ — كلُّ رمزٍ مُختومٌ في العقدِ.
@@ -40,7 +43,61 @@ import { SovereignClock } from '../root-of-trust/clock.mjs';
 export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
   'PRODUCTION_ENTRYPOINT_NOT_PRODUCTION_ENV',
   'PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_NULL',
+  'PRODUCTION_ROYAL_COMMAND_VERIFIER_REQUIRED',
+  'PRODUCTION_ROYAL_COMMAND_SIGNATURE_INVALID',
 ]);
+
+/**
+ * يَبني مُتحقِّقاً تشفيرياً للأوامرِ الملكيّةِ على halt/resume.
+ *
+ * يرفضُ كلَّ أمرٍ بلا توقيعٍ، ويتحققُ من التوقيعِ بالمفتاحِ العامِّ للملكِ.
+ * يربطُ `operation` بجسمِ الأمرِ فلا يقبلُ توقيعَ halt لـ resume أو العكس.
+ * لا يثقُ بوجودِ objectٍ أو اسمِ callbackٍ — التحققُ تشفيرياً فقط.
+ *
+ * @param {string} kingPublicKeyPem - المفتاحُ العامُّ للملكِ بترميز PEM
+ * @returns {(command: unknown) => boolean} مُتحقِّقٌ تشفيريٌّ للأوامرِ الملكيّةِ
+ */
+export function createRoyalCommandVerifier(kingPublicKeyPem) {
+  const publicKey = createPublicKey(kingPublicKeyPem);
+  const kingId =
+    'king:' +
+    createHash('sha256')
+      .update(publicKey.export({ type: 'spki', format: 'der' }))
+      .digest('hex')
+      .slice(0, 24);
+
+  return (command) => {
+    if (typeof command !== 'object' || command === null) return false;
+    const cmd = /** @type {Record<string, unknown>} */ (command);
+    // التوقيعُ إلزاميٌّ — لا يُقبلُ أمرٌ بلا توقيعٍ
+    if (typeof cmd.signature !== 'string' || cmd.signature === '') return false;
+    // operation إلزاميٌّ ومُختومٌ في الجسمِ — لا يُفكُّ توقيعُ halt لـ resume
+    if (
+      typeof cmd.operation !== 'string' ||
+      (cmd.operation !== 'halt' && cmd.operation !== 'resume')
+    )
+      return false;
+    // signerId إلزاميٌّ — يجبُ أن يطابقَ الملكَ
+    if (typeof cmd.signerId !== 'string' || cmd.signerId !== kingId) return false;
+    // بناءُ الجسمِ الأساسيِّ للتحققِ — كلُّ الحقولِ ما عدا التوقيعِ
+    const body = {
+      operation: cmd.operation,
+      signerId: cmd.signerId,
+      reason: cmd.reason ?? '',
+      at: cmd.at ?? '',
+    };
+    try {
+      return cryptoVerify(
+        null,
+        Buffer.from(JSON.stringify(body)),
+        publicKey,
+        Buffer.from(cmd.signature, 'base64url'),
+      );
+    } catch {
+      return false;
+    }
+  };
+}
 
 /**
  * التركيبُ الإنتاجيُّ الكاملُ — كلُّ ما تحتاجُه نقطةُ الدخولِ من مكوّناتٍ.
@@ -59,7 +116,7 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  * @property {string} root
  * @property {import('../root-of-trust/freshness-socket.mjs').FreshnessSocket | null} freshnessSocket
  * @property {((command: unknown) => boolean) | null} [royalCommandVerifier]
- * @property {{ now(): number, assertTrusted(): void, attestation(): { atMs: number, radiusMs: number, ageMs: number, sources: string[], localSkewMs: number } | null } | null} [clock]
+ * @property {{ now(): number, assertTrusted(): void, attestation(): { atMs: number, radiusMs: number, ageMs: number, sources: readonly string[], localSkewMs: number } | null } | null} [clock]
  */
 
 /**
@@ -82,16 +139,25 @@ export async function createProductionSystem(env, options, deps = {}) {
   }
 
   // 3. جذرُ الثقةِ الإنتاجيُّ — يفرضُ HSM والبيانَ المختومَ والحداثةَ.
+  //    لا يُمرَّرُ `royalCommandVerifier` إلى `production-runtime` هنا —
+  //    يُشتَقُّ بعدَ فتحِ الجذرِ من مفتاحِ HSM العامِّ في الخطوةِ التاليةِ.
   const rootOfTrust = await createProductionRootOfTrust(
     env,
     {
       root: options.root,
       fsync: true,
       freshnessSocket: options.freshnessSocket,
-      royalCommandVerifier: options.royalCommandVerifier ?? (() => true),
+      royalCommandVerifier: null,
     },
     deps,
   );
+
+  // 4. مُتحقِّقُ الأمرِ الملكيِّ — تشفيريٌّ، مُشتَقٌّ من مفتاحِ HSM العامِّ.
+  //    لا يُمرَّرُ `() => true` إطلاقاً — التحققُ تشفيريٌّ أو الفشلُ مغلقٌ.
+  //    يُحقَنُ في `composeEnforcementChain` التي تُمرِّرُهُ إلى `HaltSwitch`.
+  const royalCommandVerifier =
+    options.royalCommandVerifier ??
+    createRoyalCommandVerifier(rootOfTrust.anchorSigner.publicKeyPem);
 
   // 4. هويةُ الملكِ من HSM — المفتاحُ العامُّ وحدَه، بلا مفتاحٍ خاصٍّ في الذاكرةِ.
   //    `anchorSigner` هو موقّعُ F06 من التوكنِ، وعامُّه يُصدَّرُ للتحقُّقِ.
@@ -111,16 +177,28 @@ export async function createProductionSystem(env, options, deps = {}) {
     withLegislation: false,
     crown: null,
     haltSwitch: rootOfTrust.haltSwitch,
-    royalCommandVerifier: options.royalCommandVerifier ?? null,
+    royalCommandVerifier,
     kingIdentity,
     authority,
   });
 
   // 7. الساعةُ الموثوقةُ — في الإنتاجِ يلزمُها `CrownGateway`.
-  //    في الإنتاجِ الحقيقيِّ يأتي من HSM أو مصدرٍ موقَّعٍ؛ في CI يُحقَنُ clockٌ اختباريٌّ.
-  //    إن غابَت، يُرفَضُ البناءُ بـ`ATTESTED_TIME_REQUIRED`.
-  const clock =
-    options.clock ?? new SovereignClock({ statePath: options.root + '/clock-state.json' });
+  //    الأولويّةُ: clock مُحقَنٌ (اختبارٌ)، ثم `AttestedClock` من سياسةِ الوقتِ،
+  //    ثم `SovereignClock` (الذي يَفشلُ في الإنتاجِ لأنّه بلا `attestation()`).
+  //    `AttestedClock` يَفشلُ مغلقاً إن لم يَتحقَّقْ نصابُ المصادرَ — لا يَسقُطُ إلى `Date.now()`.
+  let clock = options.clock ?? null;
+  if (clock === null) {
+    try {
+      const timePolicy = loadTimePolicy({ dir: 'config' });
+      clock = new AttestedClock({ policy: timePolicy });
+    } catch {
+      // لا توجد سياسةُ وقتٍ — الساعةُ غيرُ موثوقةٍ، والـ CrownGateway سيرفضُها.
+      // SovereignClock لا يملك attestation() — CrownGateway سيرفضه بـ ATTESTED_TIME_REQUIRED
+      clock = /** @type {never} */ (
+        new SovereignClock({ statePath: options.root + '/clock-state.json' })
+      );
+    }
+  }
 
   // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
   const crown = new CrownGateway(kingIdentity, authority, rootOfTrust.log, {
