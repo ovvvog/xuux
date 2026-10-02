@@ -65,7 +65,7 @@ export function signRoyalCommand(pair, fields) {
 
 /**
  * أمرٌ موقَّعٌ على العهدِ الحاضرِ لمفتاحِ إيقافٍ بعينِه، بمفتاحِ ملكِه المسجَّل.
- * @param {{ king: { id: string }, read: () => { epoch: number }, useTrustedClock?: (clock: { now(): number }) => void }} haltSwitch
+ * @param {{ king: { id: string }, royalKeyId?: string | null, read: () => { epoch: number }, useTrustedClock?: (clock: { now(): number }) => void }} haltSwitch
  * @param {'halt' | 'resume'} operation
  * @param {string} reason
  * @param {{ at?: string, commandId?: string, targetEpoch?: number }} [overrides]
