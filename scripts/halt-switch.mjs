@@ -134,8 +134,10 @@ export async function run(argv, env, deps = {}) {
   // فصار الإصدارُ يقعُ بمفتاحِ F06 داخلَ التوكن. ثم المخزنُ البرمجيُّ للتطوير.
   let signers = null;
   let king;
+  let publicKeyPem = null;
   if (config.publicKeyFile) {
-    king = royalVerifierFromPublicKey(readFileSync(config.publicKeyFile, 'utf8'));
+    publicKeyPem = readFileSync(config.publicKeyFile, 'utf8');
+    king = royalVerifierFromPublicKey(publicKeyPem);
   } else if (production) {
     signers = await openProductionSigners(env, deps);
     king = signers.anchorSigner;
@@ -149,9 +151,10 @@ export async function run(argv, env, deps = {}) {
     // وضعُ المفتاحِ العامِّ وحدَهُ لا يستطيعُ التوقيعَ — فهو يَرفضُ halt/resume
     // بـ`HALT_SIGNER_REQUIRED` ويُسمحُ له بـ status/verify/confirm فقط.
     const kingId = king.id;
-    const publicKeyPem = king.publicKey.export({ type: 'spki', format: 'pem' });
+    const pem =
+      publicKeyPem ?? king.publicKeyPem ?? king.publicKey.export({ type: 'spki', format: 'pem' });
     const halt = new HaltSwitch(config.file, king, {
-      royalCommandVerifier: createRoyalCommandVerifier(publicKeyPem),
+      royalCommandVerifier: createRoyalCommandVerifier(pem),
     });
 
     if (args.command === 'status') {
@@ -160,6 +163,11 @@ export async function run(argv, env, deps = {}) {
     }
 
     if (args.command === 'halt' || args.command === 'resume') {
+      // إن لم يكن الموقِّعُ قادراً على التوقيع (مفتاحٌ عامٌّ فقط)، فالإصدارُ مستحيلٌ.
+      const canSign = production ? typeof king.signAsync === 'function' : Boolean(king.privateKey);
+      if (!canSign) {
+        throw new Error('HALT_SIGNER_REQUIRED');
+      }
       // بناءُ الأمرِ الملكيِّ الموقَّعِ — لا يُكتفى بمقارنةِ المعرّفِ.
       const operation = args.command;
       const reason =
@@ -169,10 +177,11 @@ export async function run(argv, env, deps = {}) {
       const canonical = canonicalRoyalCommand(body);
       let signature;
       if (production) {
-        // الإنتاجُ: التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكنِ.
-        signature = await king.signAsync(Buffer.from(canonical));
+        // الإنتاجُ: التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكنِ — يُمرَّر الجسمُ لا Buffer.
+        // `signAsync` يُسلسِلُ الجسمَ داخليّاً، فيُطابقُ `canonicalRoyalCommand`.
+        signature = await king.signAsync(body);
       } else {
-        // التطويرُ: التوقيعُ البرمجيُّ المتزامنُ.
+        // التطويرُ: التوقيعُ البرمجيُّ المتزامنُ على الجسمِ الأساسيِّ المتسلسَلِ.
         signature = softwareSign(null, Buffer.from(canonical), king.privateKey).toString(
           'base64url',
         );
