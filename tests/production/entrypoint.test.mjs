@@ -101,10 +101,23 @@ function rig({ freshnessSocket = null, keys } = {}) {
     XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
   };
+  // CI test clock — provides attestation() as required by CrownGateway in production.
+  // This is CI-proven only; real production needs HSM-backed attestation.
+  const testClock = {
+    now: () => Date.now(),
+    assertTrusted: () => undefined,
+    attestation: () => ({
+      atMs: Date.now(),
+      radiusMs: 1000,
+      ageMs: 0,
+      sources: ['ci-test'],
+      localSkewMs: 0,
+    }),
+  };
   const boot = (root) =>
     createProductionSystem(
       env,
-      { root, freshnessSocket },
+      { root, freshnessSocket, clock: testClock },
       {
         openSource: async () => ({
           source: stableToken(k.king, k.aeadKey, k.ledgerPair),
@@ -112,7 +125,7 @@ function rig({ freshnessSocket = null, keys } = {}) {
         }),
       },
     );
-  return { boot, keys: k, env };
+  return { boot, keys: k, env, testClock };
 }
 
 function tmp(label) {
@@ -415,6 +428,87 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         stderr.includes('SERVE_STATE_NOT_PRODUCTION_PATH'),
         `Production bypass via serve-state.mjs must be closed, got: ${stderr}`,
       );
+    }
+  });
+
+  // Test I — Production rejects missing trusted clock (fail-closed)
+  test('I — الإنتاجُ يرفضُ غيابَ الساعةِ الموثوقةِ (فشلٌ مغلقٌ)', async () => {
+    const root = tmp('no-clock');
+    try {
+      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const k = fixedKeys();
+      const env = {
+        NODE_ENV: 'production',
+        STATE_ENV: 'production',
+        XUUX_ROOT_OF_TRUST_MODE: 'hsm',
+        XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
+        XUUX_PKCS11_TOKEN: 'xuux-test',
+        XUUX_PKCS11_TOKEN_SERIAL: 'DEADBEEFCAFE0001',
+        XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
+        XUUX_PKCS11_PIN: 'unused-by-injected-source',
+        XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        XUUX_ROOT_OF_TRUST_PROVISION: '1',
+      };
+      // No clock provided — should fail with ATTESTED_TIME_REQUIRED
+      await assert.rejects(
+        () =>
+          createProductionSystem(
+            env,
+            { root, freshnessSocket: socket, clock: null },
+            {
+              openSource: async () => ({
+                source: stableToken(k.king, k.aeadKey, k.ledgerPair),
+                close: async () => undefined,
+              }),
+            },
+          ),
+        (err) =>
+          err.code === 'ATTESTED_TIME_REQUIRED' || err.code === 'CLOCK_REQUIRED_IN_PRODUCTION',
+        'Production without trusted clock must fail closed',
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // Test J — No software KingIdentity in production (fail-closed)
+  test('J — لا تُنشَأُ هويةُ ملكٍ برمجيّةٌ في الإنتاجِ', async () => {
+    const root = tmp('no-software-king');
+    try {
+      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const { boot, keys } = rig({ freshnessSocket: socket });
+      const system = await boot(root);
+      try {
+        // The king identity must NOT be a software KingIdentity
+        // It should be created from HSM public key via kingIdentityFromPublicKey
+        const king = system.crown.king;
+        assert.ok(king, 'King identity must be present');
+        // King ID must match the HSM anchor signer's key fingerprint
+        const expectedId = 'king:' + fingerprint(keys.king.publicKey).slice(0, 24);
+        assert.strictEqual(king.id, expectedId, 'King ID must match HSM public key fingerprint');
+        // King certificate must expose the HSM public key, not a generated one
+        const cert = king.certificate();
+        assert.strictEqual(
+          cert.publicKey,
+          keys.king.publicKey.export({ type: 'spki', format: 'pem' }),
+          'King certificate must match HSM public key',
+        );
+        // Verify it's from the HSM public key, not a generated key pair
+        assert.doesNotThrow(
+          () => king.verify({ test: true }, 'invalid-signature'),
+          'Verify must work (returns false for bad sig, not throw)',
+        );
+        // Sign must fail — no private key in memory
+        assert.throws(
+          () => king.sign({ test: true }),
+          /SOFTWARE_SIGN_NOT_AVAILABLE/,
+          'Sign must fail in production (no private key)',
+        );
+      } finally {
+        await system.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

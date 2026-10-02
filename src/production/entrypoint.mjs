@@ -31,6 +31,8 @@ import { createProductionRootOfTrust } from '../root-of-trust/production-runtime
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
+import { kingIdentityFromPublicKey, CertificateAuthority } from '../root-of-trust/identity.mjs';
+import { SovereignClock } from '../root-of-trust/clock.mjs';
 
 /**
  * أخطاءُ نقطةِ الدخولِ الإنتاجيّةِ — كلُّ رمزٍ مُختومٌ في العقدِ.
@@ -57,6 +59,7 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  * @property {string} root
  * @property {import('../root-of-trust/freshness-socket.mjs').FreshnessSocket | null} freshnessSocket
  * @property {((command: unknown) => boolean) | null} [royalCommandVerifier]
+ * @property {{ now(): number, assertTrusted(): void, attestation(): { atMs: number, radiusMs: number, ageMs: number, sources: string[], localSkewMs: number } | null } | null} [clock]
  */
 
 /**
@@ -90,20 +93,41 @@ export async function createProductionSystem(env, options, deps = {}) {
     deps,
   );
 
-  // 4. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ.
-  //    السجلُّ المختومُ من جذرِ الثقةِ هو سجلُّ الحوادثِ الموثوقُ.
+  // 4. هويةُ الملكِ من HSM — المفتاحُ العامُّ وحدَه، بلا مفتاحٍ خاصٍّ في الذاكرةِ.
+  //    `anchorSigner` هو موقّعُ F06 من التوكنِ، وعامُّه يُصدَّرُ للتحقُّقِ.
+  //    لا يُستدعى `new KingIdentity()` هنا إطلاقاً — ذاك يَرفضُ الإنتاجَ.
+  const kingIdentity = kingIdentityFromPublicKey(rootOfTrust.anchorSigner.publicKeyPem);
+
+  // 5. سلطةُ التصديقِ من جذرِ الثقةِ — مخزنُ سحبٍ دائمٌ لا ذاكرةٌ.
+  const authority = new CertificateAuthority(kingIdentity, {
+    revocationStore: rootOfTrust.revocationStore,
+    env,
+  });
+
+  // 6. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ.
+  //    الهويّةُ والسلطةُ مُحقَنتانِ من جذرِ الثقةِ، لا مُولَّدتانِ برمجيّاً.
   const chain = composeEnforcementChain({
     log: rootOfTrust.log,
     withLegislation: false,
     crown: null,
     haltSwitch: rootOfTrust.haltSwitch,
     royalCommandVerifier: options.royalCommandVerifier ?? null,
+    kingIdentity,
+    authority,
   });
 
-  // 5. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ.
-  const crown = new CrownGateway(chain.kingIdentity, chain.authority, rootOfTrust.log, {
+  // 7. الساعةُ الموثوقةُ — في الإنتاجِ يلزمُها `CrownGateway`.
+  //    في الإنتاجِ الحقيقيِّ يأتي من HSM أو مصدرٍ موقَّعٍ؛ في CI يُحقَنُ clockٌ اختباريٌّ.
+  //    إن غابَت، يُرفَضُ البناءُ بـ`ATTESTED_TIME_REQUIRED`.
+  const clock =
+    options.clock ?? new SovereignClock({ statePath: options.root + '/clock-state.json' });
+
+  // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
+  const crown = new CrownGateway(kingIdentity, authority, rootOfTrust.log, {
     commandLedger: rootOfTrust.ledger,
     haltSwitch: rootOfTrust.haltSwitch,
+    clock,
+    env,
     requireCommandLedger: true,
     requireHaltSwitch: true,
   });
