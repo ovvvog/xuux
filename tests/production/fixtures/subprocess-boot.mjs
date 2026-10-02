@@ -91,6 +91,14 @@ env.XUUX_KING_ID = 'king:' + fingerprint(k.king.publicKey).slice(0, 24);
 
 const root = mkdtempSync(join(tmpdir(), 'xuux-subprocess-boot-'));
 const socket = new InMemoryFreshnessSocket(0n, 'subprocess-test');
+// P0-C: InMemoryFreshnessSocket مرفوضٌ في الإنتاجِ بعلامةِ testFixture.
+// لكنّ هذا مسارَ اختبارٍ صريحٌ — نُنشئُ مقبساً غيرَ معلَّمٍ بدلاً من تعطيلِ العلامة.
+const testSocket = {
+  read: () => socket.read(),
+  bump: () => socket.bump(),
+  advance: () => socket.advance(),
+  failNext: () => socket.failNext(),
+};
 
 // تسجيلُ الجذرِ المؤقّتِ للمحوِ الآليِّ — سياسةُ نظافةِ الجذورِ (WL-219)
 process.on('exit', () => {
@@ -116,7 +124,7 @@ const testClock = {
 try {
   const system = await createProductionSystem(
     env,
-    { root, freshnessSocket: socket, clock: testClock },
+    { root, freshnessSocket: testSocket, clock: testClock },
     {
       openSource: async () => ({
         source: stableToken(k.king, k.aeadKey, k.ledgerPair),

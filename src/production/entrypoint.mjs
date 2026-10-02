@@ -16,9 +16,9 @@
  * بلا جذرِ ثقةٍ. فكان مسارُ الإنتاجِ قادراً على تجاوزِ جذرِ الثقةِ بالكاملِ.
  *
  * **الحدُّ المُعلَنُ:** هذا الملفُّ **لا يُكملُ Royal Cryptographic Auth**.
- * يُحدِّدُ موضعَ الدمجِ ويُوثِّقُه (`royalCommandVerifier` موصولٌ من التوكنِ،
- * لكنّ التوقيعَ الكاملَ للسلوكِ الملكيِّ خطوةٌ لاحقةٌ). وكذلك Safe-mode
- * Authorization وDurability وLegal Hold — لاحقةٌ لا تُدَّعى هنا.
+ * يُحدِّدُ موضعَ الدمجِ ويُوثِّقُه (`royalCommandVerifier` موصولٌ من التوكنِ
+ * داخلَ `production-runtime`، لكنّ التوقيعَ الكاملَ للسلوكِ الملكيِّ خطوةٌ لاحقةٌ).
+ * وكذلك Safe-mode Authorization وDurability وLegal Hold — لاحقةٌ لا تُدَّعى هنا.
  *
  * **Invariant:**
  *   No production-sensitive operation can execute unless it has passed
@@ -33,6 +33,8 @@ import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
 import { kingIdentityFromPublicKey, CertificateAuthority } from '../root-of-trust/identity.mjs';
 import { SovereignClock } from '../root-of-trust/clock.mjs';
+import { AttestedClock } from '../time/attested-clock.mjs';
+import { loadTimePolicy } from '../time/policy.mjs';
 
 /**
  * أخطاءُ نقطةِ الدخولِ الإنتاجيّةِ — كلُّ رمزٍ مُختومٌ في العقدِ.
@@ -40,6 +42,7 @@ import { SovereignClock } from '../root-of-trust/clock.mjs';
 export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
   'PRODUCTION_ENTRYPOINT_NOT_PRODUCTION_ENV',
   'PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_NULL',
+  'PRODUCTION_ENTRYPOINT_ATTESTED_TIME_REQUIRED',
 ]);
 
 /**
@@ -59,7 +62,9 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  * @property {string} root
  * @property {import('../root-of-trust/freshness-socket.mjs').FreshnessSocket | null} freshnessSocket
  * @property {((command: unknown) => boolean) | null} [royalCommandVerifier]
- * @property {{ now(): number, assertTrusted(): void, attestation(): { atMs: number, radiusMs: number, ageMs: number, sources: string[], localSkewMs: number } | null } | null} [clock]
+ *   اختبارٌ فقط — لا يُمرَّرُ في الإنتاج. `production-runtime` يَشتقُّه من HSM.
+ * @property {{ now(): number, assertTrusted(): void, attestation(): { atMs: number, radiusMs: number, ageMs: number, sources: readonly string[], localSkewMs: number } | null } | null} [clock]
+ *   اختبارٌ فقط — لا يُمرَّرُ في الإنتاج. الإنتاج يَبني `AttestedClock` من السياسة.
  */
 
 /**
@@ -69,7 +74,7 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  * @param {ProductionEntrypointOptions} options - جذرُ الحالةِ ومقبسُ الحداثةِ
  * @param {import('../root-of-trust/production-runtime.mjs').ProductionRuntimeDeps} [deps] - بدائلُ الحقنِ للاختبارِ
  * @returns {Promise<ProductionSystem>}
- * @throws {Error} إن لم تكن البيئةُ إنتاجاً، أو غابَ مقبسُ الحداثةِ
+ * @throws {Error} إن لم تكن البيئةُ إنتاجاً، أو غابَ مقبسُ الحداثةِ، أو غابَ النصابُ الزمنيُّ
  */
 export async function createProductionSystem(env, options, deps = {}) {
   // 1. البيئةُ إنتاجٌ — هذا الملفُّ لا يخدمُ التطويرَ.
@@ -77,25 +82,34 @@ export async function createProductionSystem(env, options, deps = {}) {
     throw new Error('PRODUCTION_ENTRYPOINT_NOT_PRODUCTION_ENV');
   }
   // 2. مقبسُ الحداثةِ ليس null — ضمانٌ إضافيٌّ أنّ المكوّنَ الموصولَ فعليٌّ.
+  //    P0-C: لا يُقبَلُ `InMemoryFreshnessSocket` كإثباتِ حداثةٍ في الإنتاجِ —
+  //    هو تركيبيٌّ للاختبارِ لا مصدرُ حداثةٍ إنتاجيٌّ.
   if (options.freshnessSocket === null || options.freshnessSocket === undefined) {
     throw new Error('PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_NULL');
   }
+  if (
+    'testFixture' in options.freshnessSocket &&
+    /** @type {any} */ (options.freshnessSocket).testFixture === true
+  ) {
+    throw new Error('PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_TEST_FIXTURE');
+  }
 
   // 3. جذرُ الثقةِ الإنتاجيُّ — يفرضُ HSM والبيانَ المختومَ والحداثةَ.
+  //    `royalCommandVerifier` يُشتَقُّ داخلَ `production-runtime` من مفتاحِ HSM
+  //    العامِّ ويُوصَلُ إلى `HaltSwitch` عندَ إنشائِه — لا من callback اختياري.
+  //    إن وُجدَ `options.royalCommandVerifier` (اختبارٌ) يُمرَّرُ بدلاً منه.
   const rootOfTrust = await createProductionRootOfTrust(
     env,
     {
       root: options.root,
       fsync: true,
       freshnessSocket: options.freshnessSocket,
-      royalCommandVerifier: options.royalCommandVerifier ?? (() => true),
+      royalCommandVerifier: options.royalCommandVerifier ?? null,
     },
     deps,
   );
 
   // 4. هويةُ الملكِ من HSM — المفتاحُ العامُّ وحدَه، بلا مفتاحٍ خاصٍّ في الذاكرةِ.
-  //    `anchorSigner` هو موقّعُ F06 من التوكنِ، وعامُّه يُصدَّرُ للتحقُّقِ.
-  //    لا يُستدعى `new KingIdentity()` هنا إطلاقاً — ذاك يَرفضُ الإنتاجَ.
   const kingIdentity = kingIdentityFromPublicKey(rootOfTrust.anchorSigner.publicKeyPem);
 
   // 5. سلطةُ التصديقِ من جذرِ الثقةِ — مخزنُ سحبٍ دائمٌ لا ذاكرةٌ.
@@ -105,22 +119,55 @@ export async function createProductionSystem(env, options, deps = {}) {
   });
 
   // 6. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ.
-  //    الهويّةُ والسلطةُ مُحقَنتانِ من جذرِ الثقةِ، لا مُولَّدتانِ برمجيّاً.
+  //    `royalCommandVerifier` لا يُمرَّرُ هنا — هو موصولٌ داخلَ `rootOfTrust.haltSwitch`.
   const chain = composeEnforcementChain({
     log: rootOfTrust.log,
     withLegislation: false,
     crown: null,
     haltSwitch: rootOfTrust.haltSwitch,
-    royalCommandVerifier: options.royalCommandVerifier ?? null,
     kingIdentity,
     authority,
   });
 
   // 7. الساعةُ الموثوقةُ — في الإنتاجِ يلزمُها `CrownGateway`.
-  //    في الإنتاجِ الحقيقيِّ يأتي من HSM أو مصدرٍ موقَّعٍ؛ في CI يُحقَنُ clockٌ اختباريٌّ.
-  //    إن غابَت، يُرفَضُ البناءُ بـ`ATTESTED_TIME_REQUIRED`.
-  const clock =
-    options.clock ?? new SovereignClock({ statePath: options.root + '/clock-state.json' });
+  //    P0-C: `options.clock` مسارُ اختبارٍ فقط — مُشغِّلُ الإنتاجِ لا يُمرِّرُهُ.
+  //    إن لم يُحقَنْ، يُنشأُ `AttestedClock` من سياسةِ الوقتِ ويُطلَبُ النصابُ.
+  //    `AttestedClock` يَفشلُ مغلقاً إن لم يَتحقَّقْ نصابُ المصادرَ — لا يَسقُطُ إلى `Date.now()`.
+  //    إن لم تُتوفَّرْ سياسةُ وقتٍ، يَسقُطُ إلى `SovereignClock` (الذي يَفشلُ
+  //    بـ`ATTESTED_TIME_REQUIRED` لأنّه بلا `attestation()`).
+  let clock = options.clock ?? null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let attestationRenewalTimer = null;
+
+  if (clock === null) {
+    try {
+      const timePolicy = loadTimePolicy({ dir: 'config' });
+      const attestedClock = new AttestedClock({ policy: timePolicy });
+      // P0-B: اطلب النصابَ قبلَ إعلانِ الجاهزيةِ — لا تَعُدْ ناجحاً بلا بُرهانِ وقتٍ.
+      await attestedClock.attest();
+      // تحقق من أنّ البرهانَ فعليٌّ — attest() قد يَرجعُ بلا خطأٍ لكنّ attestation() null
+      if (attestedClock.attestation() === null) {
+        throw new Error('PRODUCTION_ENTRYPOINT_ATTESTED_TIME_REQUIRED');
+      }
+      clock = attestedClock;
+      // آليةُ تجديدٍ قبلَ انتهاءِ البرهانِ: نِصفُ maxAgeMs.
+      const renewalMs = Math.max(1000, Math.floor(timePolicy.maxAgeMs / 2));
+      attestationRenewalTimer = setInterval(() => {
+        attestedClock.attest().catch(() => {
+          // فشلَ التجديدُ — attestation() سيُرجعُ null فتُرفَضُ الأوامرُ مغلقاً.
+          // لا يُستبدَلُ بساعةِ الجهازِ.
+        });
+      }, renewalMs);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'PRODUCTION_ENTRYPOINT_ATTESTED_TIME_REQUIRED') {
+        throw err;
+      }
+      // لا توجد سياسةُ وقتٍ — الساعةُ غيرُ موثوقةٍ.
+      clock = /** @type {never} */ (
+        new SovereignClock({ statePath: options.root + '/clock-state.json' })
+      );
+    }
+  }
 
   // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
   const crown = new CrownGateway(kingIdentity, authority, rootOfTrust.log, {
@@ -132,7 +179,7 @@ export async function createProductionSystem(env, options, deps = {}) {
     requireHaltSwitch: true,
   });
 
-  // 6. نواةُ التنفيذِ — من بوابةِ التاجِ والسلسلةِ والسجلِّ المختومِ.
+  // 9. نواةُ التنفيذِ — من بوابةِ التاجِ والسلسلةِ والسجلِّ المختومِ.
   const kernel = new ExecutionKernel({
     crown,
     log: rootOfTrust.log,
@@ -147,6 +194,9 @@ export async function createProductionSystem(env, options, deps = {}) {
     kernel,
     auditLog: rootOfTrust.log,
     close: async () => {
+      if (attestationRenewalTimer !== null) {
+        clearInterval(attestationRenewalTimer);
+      }
       rootOfTrust.log.close?.();
       await rootOfTrust.close();
     },

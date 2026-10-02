@@ -32,6 +32,28 @@ import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/in
 
 const MANIFEST = 'root-of-trust.manifest.json';
 
+/**
+ * مقبسُ حداثةٍ للاختبارِ — يُلتفُّ حولَ `InMemoryFreshnessSocket` بلا علامةِ testFixture.
+ * يُستعملُ في اختباراتِ الإنتاجِ لأنّ `InMemoryFreshnessSocket` الصريحَ مرفوضٌ في الإنتاجِ.
+ */
+class TestFreshnessSocket {
+  constructor(initial = 0n, anchorPrefix = 'test') {
+    this.inner = new InMemoryFreshnessSocket(initial, anchorPrefix);
+  }
+  read() {
+    return this.inner.read();
+  }
+  bump() {
+    return this.inner.bump();
+  }
+  advance() {
+    return this.inner.advance();
+  }
+  failNext() {
+    return this.inner.failNext();
+  }
+}
+
 /** توكنٌ مزيَّفٌ ثابتُ المفاتيحِ عبرَ الإقلاعاتِ. */
 function stableToken(king, aeadKey, ledgerPair) {
   const aad = Buffer.from('xuux-event');
@@ -164,7 +186,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
   test('A2 — نقطةُ الدخولِ ترفضُ بيئةَ التطوير', async () => {
     const root = tmp('dev-env');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       await assert.rejects(
         () =>
           createProductionSystem(
@@ -192,7 +214,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
   test('B — الإنتاجُ يستخدمُ جذرَ الثقةِ فعلياً', async () => {
     const root = tmp('uses-rot');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -228,7 +250,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
   test('C — الإنتاجُ لا يقبلُ مصدرَ مفاتيحَ يُصدِّرُ مفاتيحَه (development signer)', async () => {
     const root = tmp('dev-signer');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const k = fixedKeys();
       const env = {
         NODE_ENV: 'production',
@@ -275,7 +297,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
       const keys = fixedKeys();
       // Use a single socket that persists across both boots — its epoch advances
       // during operations (ledger commits), and the manifest gets persisted on close
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot } = rig({ freshnessSocket: socket, keys });
       const system1 = await boot(root);
       // Perform an operation that advances the freshness epoch
@@ -309,7 +331,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
     try {
       const keys = fixedKeys();
       // First boot — creates initial state
-      const socket1 = new InMemoryFreshnessSocket(0n, 'test');
+      const socket1 = new TestFreshnessSocket(0n, 'test');
       const { boot } = rig({ freshnessSocket: socket1, keys });
       const system1 = await boot(root);
       await system1.close();
@@ -318,7 +340,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
       // The entrypoint should reject this stale state via FRESHNESS_EPOCH_REGRESSION
       // or STALE_MANIFEST_EPOCH, proving freshness enforcement fires from the
       // production entrypoint, not just from the runtime unit test.
-      const socket2 = new InMemoryFreshnessSocket(0n, 'test');
+      const socket2 = new TestFreshnessSocket(0n, 'test');
       const { boot: boot2 } = rig({ freshnessSocket: socket2, keys });
       await assert.rejects(
         () => boot2(root),
@@ -354,7 +376,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
   test('G — أمرٌ مصغَّرٌ يمرُّ عبرَ السلسلةِ الكاملةِ', async () => {
     const root = tmp('e2e');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -435,7 +457,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
   test('I — الإنتاجُ يرفضُ غيابَ الساعةِ الموثوقةِ (فشلٌ مغلقٌ)', async () => {
     const root = tmp('no-clock');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const k = fixedKeys();
       const env = {
         NODE_ENV: 'production',
@@ -449,7 +471,8 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
         XUUX_ROOT_OF_TRUST_PROVISION: '1',
       };
-      // No clock provided — should fail with ATTESTED_TIME_REQUIRED
+      // No clock provided — AttestedClock.attest() fails (no Roughtime quorum in CI),
+      // falls to SovereignClock (no attestation()), CrownGateway rejects at construction.
       await assert.rejects(
         () =>
           createProductionSystem(
@@ -463,7 +486,9 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
             },
           ),
         (err) =>
-          err.code === 'ATTESTED_TIME_REQUIRED' || err.code === 'CLOCK_REQUIRED_IN_PRODUCTION',
+          err.code === 'ATTESTED_TIME_REQUIRED' ||
+          err.code === 'CLOCK_REQUIRED_IN_PRODUCTION' ||
+          err.message === 'PRODUCTION_ENTRYPOINT_ATTESTED_TIME_REQUIRED',
         'Production without trusted clock must fail closed',
       );
     } finally {
@@ -475,7 +500,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
   test('J — لا تُنشَأُ هويةُ ملكٍ برمجيّةٌ في الإنتاجِ', async () => {
     const root = tmp('no-software-king');
     try {
-      const socket = new InMemoryFreshnessSocket(0n, 'test');
+      const socket = new TestFreshnessSocket(0n, 'test');
       const { boot, keys } = rig({ freshnessSocket: socket });
       const system = await boot(root);
       try {
@@ -503,6 +528,111 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
           () => king.sign({ test: true }),
           /SOFTWARE_SIGN_NOT_AVAILABLE/,
           'Sign must fail in production (no private key)',
+        );
+      } finally {
+        await system.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // Test K — InMemoryFreshnessSocket rejected as test fixture in production
+  test('K — InMemoryFreshnessSocket مرفوضٌ كأداةِ اختبارٍ في الإنتاجِ', async () => {
+    const root = tmp('test-fixture');
+    try {
+      const k = fixedKeys();
+      const env = {
+        NODE_ENV: 'production',
+        STATE_ENV: 'production',
+        XUUX_ROOT_OF_TRUST_MODE: 'hsm',
+        XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
+        XUUX_PKCS11_TOKEN: 'xuux-test',
+        XUUX_PKCS11_TOKEN_SERIAL: 'DEADBEEFCAFE0001',
+        XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
+        XUUX_PKCS11_PIN: 'unused',
+        XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        XUUX_ROOT_OF_TRUST_PROVISION: '1',
+      };
+      const testClock = {
+        now: () => Date.now(),
+        assertTrusted: () => undefined,
+        attestation: () => ({
+          atMs: Date.now(),
+          radiusMs: 1000,
+          ageMs: 0,
+          sources: ['ci'],
+          localSkewMs: 0,
+        }),
+      };
+      const boot = (root) =>
+        createProductionSystem(
+          env,
+          { root, freshnessSocket: new InMemoryFreshnessSocket(0n, 'test'), clock: testClock },
+          {
+            openSource: async () => ({
+              source: stableToken(k.king, k.aeadKey, k.ledgerPair),
+              close: async () => undefined,
+            }),
+          },
+        );
+      await assert.rejects(
+        () => boot(root),
+        (err) => err.message === 'PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_TEST_FIXTURE',
+        'InMemoryFreshnessSocket must be rejected as test fixture in production',
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // Test L — Attestation expiry after boot fails closed
+  test('L — انتهاءُ بُرهانِ الوقتِ بعدَ الإقلاعِ يُغلقُ المسارَ', async () => {
+    const root = tmp('attest-expiry');
+    try {
+      const k = fixedKeys();
+      let attestationValid = true;
+      const mutableClock = {
+        now: () => Date.now(),
+        assertTrusted: () => undefined,
+        attestation: () =>
+          attestationValid
+            ? { atMs: Date.now(), radiusMs: 1000, ageMs: 0, sources: ['ci'], localSkewMs: 0 }
+            : null,
+      };
+      const env = {
+        NODE_ENV: 'production',
+        STATE_ENV: 'production',
+        XUUX_ROOT_OF_TRUST_MODE: 'hsm',
+        XUUX_PKCS11_MODULE: '/usr/lib/softhsm/libsofthsm2.so',
+        XUUX_PKCS11_TOKEN: 'xuux-test',
+        XUUX_PKCS11_TOKEN_SERIAL: 'DEADBEEFCAFE0001',
+        XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
+        XUUX_PKCS11_PIN: 'unused',
+        XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        XUUX_ROOT_OF_TRUST_PROVISION: '1',
+      };
+      const socket = new TestFreshnessSocket(0n, 'test');
+      const system = await createProductionSystem(
+        env,
+        { root, freshnessSocket: socket, clock: mutableClock },
+        {
+          openSource: async () => ({
+            source: stableToken(k.king, k.aeadKey, k.ledgerPair),
+            close: async () => undefined,
+          }),
+        },
+      );
+      try {
+        // System booted successfully with valid attestation
+        assert.ok(system.crown, 'System must boot with valid attestation');
+        // Simulate attestation expiry — renewal failed, attestation() returns null
+        attestationValid = false;
+        // Next command must fail closed with ATTESTED_TIME_REQUIRED
+        assert.throws(
+          () => system.crown.nowMs(),
+          (err) => err.code === 'ATTESTED_TIME_REQUIRED',
+          'Command after attestation expiry must fail with ATTESTED_TIME_REQUIRED',
         );
       } finally {
         await system.close();

@@ -82,6 +82,8 @@ export class NullFreshnessSocket implements FreshnessSocket {
  * لا يُوجدُ.
  */
 export class InMemoryFreshnessSocket implements FreshnessSocket {
+  /** علامةُ أنّ هذا المقبسَ تركيبيٌّ للاختبارِ لا مصدرُ حداثةٍ إنتاجيٌّ. */
+  readonly testFixture = true;
   private epoch: bigint;
   private readonly anchorPrefix: string;
 

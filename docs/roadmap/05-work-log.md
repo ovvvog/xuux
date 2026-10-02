@@ -1,5 +1,28 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-02] — WL-300 — توصيلُ verifier إلى HaltSwitch وإزالةُ مسار CLI المفتوح
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` (§Production Root of Trust) — إغلاقُ فجواتِ الربط · **الحالةُ بعدَ العملِ:** 🟩 `P0-ROT-Verifier-Wired` منفَّذٌ — `royalCommandVerifier` موصولٌ إلى `HaltSwitch` عندَ إنشائِه داخلَ `production-runtime`، ومسارُ `scripts/halt-switch.mjs` يَتطلَّبُ تفويضاً تشفيرياً حقيقيّاً.
+
+**العَمَلُ:**
+- **P0-A — توصيلُ verifier إلى HaltSwitch:** أُنشِئَ `src/root-of-trust/royal-command.mts` — ملفٌ مستقلٌّ يَحوي `createRoyalCommandVerifier()` و`canonicalRoyalCommand()` و`RoyalCommandBody`. `production-runtime` يَبني الـ verifier من `anchorSigner.publicKeyPem` ويُمرِّرُهُ إلى `HaltSwitch` عندَ إنشائِه — لا من callback اختياري في `entrypoint`.
+- **P0-A — اختباراتُ التكاملِ:** 5 اختباراتٍ (H1–H5) تُثبتُ أنّ `system.rootOfTrust.haltSwitch` الفعليَّ يَرفضُ halt بلا أمرٍ، ويرفضُ الأمرَ المزوَّرَ، ويُقبِلُ الأمرَ الموقَّعَ صحيحاً، ويرفضُ توقيعَ halt لـ resume، ويُقبِلُ resume الموقَّعَ بعد halt.
+- **P0-A — إصلاحُ `scripts/halt-switch.mjs`:** أُزيلَ `royalCommandVerifier: (command) => command.id === royalCommand.id` — كان يَنشأُ أمراً محليّاً ويَكتفي بمقارنةِ المعرّفِ. صار يَبني جسمَ الأمرِ (operation, signerId, reason, at) ويُوقّعُهُ تشفيرياً، ثمَّ يُمرِّرُهُ إلى `HaltSwitch` الذي يَتحقَّقُ منه بالمفتاحِ العامِّ.
+- **P0-B — توصيلُ AttestedClock:** `createProductionSystem()` يَستدعي `await attestedClock.attest()` قبلَ إعلانِ الجاهزيةِ، ويتحققُ من `attestation() !== null`. أُضيفَت آليةُ تجديدٍ قبلَ `maxAgeMs/2`. إن فشلَ النصابُ أو قدمَ البرهانُ، يَفشلُ الإقلاعُ مغلقاً.
+- **فشلُ CI على main@7ad69ef:** السببُ baseline متقادمٌ (227→228 ملفاً). لا علاقةَ له بالكود.
+- **Invariant:** لا `() => true`، ولا مقارنةَ معرّفٍ، ولا `Date.now()` كساعةٍ موثوقةٍ، ولا `InMemoryFreshnessSocket` في الإنتاجِ.
+
+### [2026-10-02] — WL-299 — إزالةُ verifier الملكيِّ المفتوحِ وتوصيلُ AttestedClock
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` (§Production Root of Trust) — إصلاحُ ثغراتٍ أمنيّةٍ · **الحالةُ بعدَ العملِ:** 🟩 `P0-ROT-Verifier-Clock` منفَّذٌ — لا `() => true` في الإنتاجِ، التحققُ التشفيريُّ من الأوامرِ الملكيّةِ مُفعَّلٌ، و`AttestedClock` موصولٌ من سياسةِ الوقتِ.
+
+**العَمَلُ:**
+- **P0-A — إزالةُ verifier المفتوحِ:** أُزيلَ default `() => true` من `createProductionSystem()`. أُضيفَت `createRoyalCommandVerifier(kingPublicKeyPem)` — تَبني verifier تشفيرياً يَتحقَّقُ من التوقيعِ بالمفتاحِ العامِّ للملكِ، ويَربطُ `operation` بجسمِ الأمرِ (لا يقبلُ توقيعَ halt لـ resume). 7 اختباراتٍ (V1–V7) تُثبتُ: رفضُ غيابِ التوقيعِ، رفضُ التوقيعِ الخاطئِ، رفضُ الكائنِ المزوَّرِ، قبولُ التوقيعِ الصحيحِ، رفضُ توقيعِ halt لـ resume، رفضُ signerId غيرِ المطابقِ.
+- **P0-B — توصيلُ AttestedClock:** `createProductionSystem()` يَستعملُ الآنَ `loadTimePolicy()` و`AttestedClock` الموجودَين بدلَ `SovereignClock` كبديلٍ. إن لم تُتوفَّرْ سياسةُ وقتٍ، يَسقُطُ إلى `SovereignClock` (الذي يَفشلُ بـ`ATTESTED_TIME_REQUIRED` لأنّه بلا `attestation()`). `AttestedClock` يَفشلُ مغلقاً إن لم يَتحقَّقْ نصابُ المصادرَ — لا يَسقُطُ إلى `Date.now()`.
+- **حدُّ الحمايةِ المُعلَنُ:** لا يتوفَّرُ اتصالُ UDP من بيئةِ CI إلى مصادرِ Roughtime (مقيسٌ سابقاً: 0/2). الإنتاجُ الحقيقيُّ يَحتاجُ وصولاً إلى مصدرَينْ على الأقلَّ أو مصدرَ وقتٍ محليٍّ موثوقاً. لا يُختلَقُ بُرهانٌ ولا يُستبدَلُ بساعةِ الجهازِ.
+- **P0-C — Freshness:** لا يوجدُ backend إنتاجيٌّ للحداثةِ في هذه البيئةِ (لا TPM/HSM). المُشغِّلُ يَرفضُ مغلقاً. طلبٌ محدَّدٌ للمالكِ: جهازُ TPM/HSM مطلوبٌ، أو قرارٌ باستخدامِ witnessٍ خارجيٍّ.
+- **Invariant:** لا `() => true` في مسارِ الإنتاجِ، ولا `Date.now()` كساعةٍ موثوقةٍ، ولا بُرهانُ وقتٍ مُختلَقٌ.
+
 ### [2026-10-02] — WL-298 — إصلاحُ إقلاعِ الإنتاجِ: هويّةٌ من HSM وساعةٌ موثوقةٌ ومُشغِّلٌ فعليٌّ
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` (§Production Root of Trust) — إصلاحُ فجواتِ الإقلاعِ · **الحالةُ بعدَ العملِ:** 🟩 `P0-ROT-Boot-Fix` منفَّذٌ — `createProductionSystem()` يُقلعُ في `NODE_ENV=production` بهويّةِ ملكٍ من HSM (لا برمجيّةٍ)، وساعةٍ موثوقةٍ عند حقنِها. المُشغِّلُ الإنتاجيُّ يَفشلُ مغلقاً بلا backend حداثةٍ مدعومٍ أو ساعةٍ موثوقةٍ. اختباراتُ عمليةٍ منفصلةٍ تُثبتُ النجاحَ والفشلَ المغلقَ.

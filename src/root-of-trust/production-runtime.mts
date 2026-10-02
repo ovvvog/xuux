@@ -57,6 +57,7 @@ import {
   STALE_MANIFEST_EPOCH,
   FRESHNESS_SOURCE_UNAVAILABLE,
 } from './freshness-socket.mjs';
+import { createRoyalCommandVerifier } from './royal-command.mjs';
 
 /** أخطاءُ المصنعِ الإنتاجيّ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const ProductionRuntimeErrorCodes = [
@@ -538,6 +539,10 @@ export async function createProductionRootOfTrust(
     // والسجلُّ المختومُ يُوصَلُ بمسارَيه غيرِ المتزامنين وحدَهما (‏`logAsync`):
     // `append` المتزامنُ يرفضُه السجلُّ المختومُ بحقٍّ، و`appendSealed` يُنتظَرُ
     // حيثُ يجوزُ الانتظار. وتاريخُ التوجيهاتِ موقَّعٌ ومسلسلٌ في ملفِّه أيضاً.
+    // R5-B-07: مُتحقِّقُ الأمرِ الملكيِّ يُشتَقُّ من مفتاحِ HSM العامِّ،
+    // لا من callback اختياري. لا يُمرَّرُ `() => true` إطلاقاً.
+    const royalCommandVerifier =
+      options.royalCommandVerifier ?? createRoyalCommandVerifier(signers.anchorSigner.publicKeyPem);
     const haltSwitch = new HaltSwitch(
       join(options.root, 'halt', 'directive.json'),
       signers.anchorSigner as unknown as HaltAsyncSigner,
@@ -547,7 +552,7 @@ export async function createProductionRootOfTrust(
         logAsync: log,
         epochFloor,
         sealEpoch: (): Promise<void> => manifest.checkpointAsync(),
-        royalCommandVerifier: options.royalCommandVerifier ?? null,
+        royalCommandVerifier,
         env,
       },
     );
