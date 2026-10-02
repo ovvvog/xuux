@@ -8,7 +8,7 @@
  *
  * هذا ملفُ اختبارٍ لا مُشغِّلُ إنتاجٍ — يُستعملُ من subprocess.test.mjs وحدَه.
  */
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -91,6 +91,15 @@ env.XUUX_KING_ID = 'king:' + fingerprint(k.king.publicKey).slice(0, 24);
 
 const root = mkdtempSync(join(tmpdir(), 'xuux-subprocess-boot-'));
 const socket = new InMemoryFreshnessSocket(0n, 'subprocess-test');
+
+// تسجيلُ الجذرِ المؤقّتِ للمحوِ الآليِّ — سياسةُ نظافةِ الجذورِ (WL-219)
+process.on('exit', () => {
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    // تجاهلُ أخطاءِ المحوِ عندَ الخروجِ
+  }
+});
 
 const testClock = {
   now: () => Date.now(),
