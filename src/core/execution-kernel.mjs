@@ -179,7 +179,16 @@ export class ExecutionKernel {
     // التفويض يُفحص **قبل** قبول التاج: أمرٌ لن يُنفَّذ لا يجوز أن يُحرق معرّفه
     // في دفتر الأوامر، فيبقى قابلاً للإصدار من جديد بعد الحصول على تذكرة.
     this.assertAuthorized(command, authorization);
-    const accepted = this.crown.command(command, signature);
+    // `LIVE-25` (‏`WL-304`): البوابةُ ذاتُ المسارِ غيرِ المتزامنِ تُنادى به — يُختَمُ قيدُ
+    // القبولِ ويُثبَّتُ الحجزُ موقَّعاً قبلَ أن يُرجَعَ القبول. والمتزامنُ لمن لا يملكُ غيرَه.
+    const crown =
+      /** @type {{ commandAsync?: (c: RoyalCommand, s: string) => Promise<AcceptedRoyalCommand> }} */ (
+        this.crown
+      );
+    const accepted =
+      typeof crown.commandAsync === 'function'
+        ? await crown.commandAsync(command, signature)
+        : this.crown.command(command, signature);
     /** @type {Task} */
     const task = {
       id: randomUUID(),
@@ -200,6 +209,9 @@ export class ExecutionKernel {
       transitionKernelTask(task, TaskState.RUNNING);
       task.startedAt = new Date().toISOString();
       this.log.append('kernel.task.started', accepted.target, { taskId: task.id });
+      // `LIVE-25`: على السجلِّ المختومِ (‏`sealedAudit`) لا يُنادى المُعالِجُ قبلَ أن تُختَمَ
+      // قيودُ التفويضِ والقبولِ والطابورِ والبدء — الأثرُ يسبقُ الفعلَ لا يلحقُه.
+      await this.flushAudit();
       // **تحويلٌ إلى اللاتزامن (`M5.01`)**: كانت النواة تنتظر مُعالِجاً متزامناً
       // وحده، فمُعالِجٌ يُعيد وعداً كان «ينجح» قبل أن يعمل، وفشلُه بعد ذلك يقع
       // خارج المهمة فلا يُسجَّل ولا يُقرأ. والانتظار هنا هو ما يجعل حالة المهمة
@@ -209,6 +221,7 @@ export class ExecutionKernel {
       task.result = result;
       task.finishedAt = new Date().toISOString();
       this.log.append('kernel.task.succeeded', accepted.target, { taskId: task.id });
+      await this.flushAudit();
       return snapshot(task);
     } catch (error) {
       // الفشل يُسجَّل من أي حالة سابقة مشروعة؛ ولو كان الانتقال إلى «فاشلة» نفسه
@@ -221,13 +234,32 @@ export class ExecutionKernel {
       }
       task.error = error instanceof Error ? error.message : String(error);
       task.finishedAt = new Date().toISOString();
-      this.log.append('kernel.task.failed', accepted.target, {
-        taskId: task.id,
-        error: task.error,
-      });
+      // على السجلِّ المختومِ قد يكونُ الفشلُ هو فشلَ الختمِ نفسِه، فيرفضُ الإلحاقُ التالي:
+      // يُحاوَلُ قيدُ الفشلِ ولا يحجبُ رفضُه الخطأَ الأصليّ.
+      try {
+        this.log.append('kernel.task.failed', accepted.target, {
+          taskId: task.id,
+          error: task.error,
+        });
+        await this.flushAudit();
+      } catch {
+        /* الخطأُ الأصليُّ أولى بالإرجاع */
+      }
       throw error;
     }
   }
+  /**
+   * `LIVE-25`: ينتظرُ ختمَ ما أُلحِقَ إن كانَ السجلُّ مختوماً مؤجَّلاً (‏`sealedAudit`)،
+   * ويرفعُ أوّلَ فشلِ ختمٍ. وعلى السجلِّ المتزامنِ لا عملَ له.
+   * @returns {Promise<void>}
+   */
+  async flushAudit() {
+    const sealed = /** @type {{ flush?: () => Promise<void> }} */ (
+      /** @type {unknown} */ (this.log)
+    );
+    if (typeof sealed.flush === 'function') await sealed.flush();
+  }
+
   /**
    * يمنع المسار الجانبي: كل فعل محكوم يلزمه تذكرة قرار صادرة من نقطة التفويض
    * ومربوطة بنفس الفاعل والفعل والمورد. وغيابُ النقطة رفضٌ لا استثناء.

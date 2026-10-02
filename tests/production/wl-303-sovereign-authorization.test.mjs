@@ -395,9 +395,9 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
     );
   });
 
-  test('A13 — حدُّ التنفيذِ: التذكرةُ الصحيحةُ لا تُشغِّلُ المُعالِجَ ما دامَ التاجُ لا يختمُ في الإنتاج', async () => {
-    // قياسٌ لا تزيين: المرحلةُ الأخيرةُ (‏`CrownGateway.command` المتزامنُ على سجلٍّ مختومٍ
-    // ودفترٍ موقَّعٍ) ما زالت تُغلَقُ في الإنتاج — دَينٌ مسجَّلٌ، والمُعالِجُ لا يُنادى.
+  test('A13 — حدُّ التنفيذِ: التذكرةُ الصحيحةُ تُشغِّلُ المُعالِجَ مرّةً على السجلِّ المختوم (‏`LIVE-25`، `WL-304`)', async () => {
+    // كانَ الحكمُ قبلَ `WL-304` فشلاً مغلقاً (‏`SEALED_LOG_REQUIRES_ASYNC_APPEND` في
+    // `ExecutionKernel.assertAuthorized`) والمُعالِجُ لا يُنادى. بعدَ الإصلاحِ: المسارُ يكتمل.
     await withSystem(async ({ system }) => {
       const agent = await system.chain.registry.register({ name: 'e2e', role: 'role:king' });
       const command = {
@@ -417,15 +417,13 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
         requestFor(agent.id, { command, signature }),
       );
       assert.equal(decision.allowed, true, decision.reason);
-      let ran = false;
-      await assert.rejects(
-        () =>
-          system.kernel.submit(command, signature, async () => (ran = true), {
-            decisionToken: token,
-          }),
-        /SEALED_LOG_REQUIRES_ASYNC_APPEND/,
-      );
-      assert.equal(ran, false);
+      let ran = 0;
+      const task = await system.kernel.submit(command, signature, async () => (ran += 1), {
+        decisionToken: token,
+      });
+      assert.equal(ran, 1);
+      assert.equal(task.state, 'succeeded');
+      assert.equal(system.rootOfTrust.ledger.state(command.id), 'committed');
     });
   });
 });

@@ -197,7 +197,10 @@ export async function createProductionSystem(env, options, deps = {}) {
   rootOfTrust.haltSwitch.useTrustedClock(/** @type {{ now(): number }} */ (clock));
 
   // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
-  const crown = new CrownGateway(royalIdentity, authority, rootOfTrust.log, {
+  //    `LIVE-25` (‏`WL-304`): التاجُ والنواةُ على **السجلِّ المختومِ نفسِه** عبرَ مُحوِّلِ
+  //    السلسلةِ (‏`enforcementLog`): ترتيبٌ واحدٌ للقيود، والقبولُ يُختَمُ قبلَ أن يُرجَع،
+  //    والمُعالِجُ لا يُنادى قبلَ الختم. لا سجلَّ غيرَ مختومٍ في الإنتاج.
+  const crown = new CrownGateway(royalIdentity, authority, /** @type {never} */ (enforcementLog), {
     commandLedger: rootOfTrust.ledger,
     haltSwitch: rootOfTrust.haltSwitch,
     clock,
@@ -209,7 +212,7 @@ export async function createProductionSystem(env, options, deps = {}) {
   // 9. نواةُ التنفيذِ — من بوابةِ التاجِ والسلسلةِ والسجلِّ المختومِ.
   const kernel = new ExecutionKernel({
     crown,
-    log: rootOfTrust.log,
+    log: /** @type {never} */ (enforcementLog),
     enforcement: chain.enforcementPoint,
     haltSwitch: rootOfTrust.haltSwitch,
     env,

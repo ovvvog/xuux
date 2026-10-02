@@ -274,12 +274,13 @@ export class CrownGateway {
   }
 
   /**
-   * يتحقق من الأمر الملكي ثم يثبته قبل إرجاع نسخته المقبولة.
+   * فحوصُ القبولِ كلُّها قبلَ أيِّ أثرٍ (‏إيقافٌ، توقيعٌ، صيغةٌ، إعادةٌ، زمنٌ، شهادةٌ،
+   * سياسة) — مشتركةٌ بين المسارَين المتزامنِ وغيرِ المتزامنِ فلا يتفارقان.
    * @param command - الأمر الملكي الموقع
    * @param signature - توقيع الملك للأمر
-   * @returns الأمر بعد ختم القبول
+   * @returns الأمر بعد ختم القبول (‏لم يُثبَّتْ بعدُ)
    */
-  command(command: RoyalCommand, signature: string): AcceptedRoyalCommand {
+  private precheck(command: RoyalCommand, signature: string): AcceptedRoyalCommand {
     // أول فحصٍ على الإطلاق، وقبل التوقيع والمنع: أمرٌ يصل والدولة موقوفة يُرفض
     // ولا يُسجَّل في الدفتر ولا يُستهلك معرّفه، كي يبقى قابلاً للإصدار بعد
     // الاستئناف بلا اصطدام بمنع الإعادة.
@@ -314,6 +315,22 @@ export class CrownGateway {
       ...command,
       acceptedAt: new Date(nowMs).toISOString(),
     };
+    return accepted;
+  }
+
+  /**
+   * يتحقق من الأمر الملكي ثم يثبته قبل إرجاع نسخته المقبولة.
+   * @param command - الأمر الملكي الموقع
+   * @param signature - توقيع الملك للأمر
+   * @returns الأمر بعد ختم القبول
+   */
+  command(command: RoyalCommand, signature: string): AcceptedRoyalCommand {
+    // `LIVE-25` (‏`WL-304`): في الإنتاجِ السجلُّ مختومٌ والدفترُ موقَّعٌ في التوكن، ولا
+    // يقبلُ أيٌّ منهما مساراً متزامناً. كانَ هذا المسارُ يحجزُ المعرّفَ ثمّ يسقطُ عندَ
+    // الإلحاقِ، ويسقطُ الإلغاءُ المتزامنُ بعدَه (‏`SIGNED_LEDGER_REQUIRES_ASYNC`) فيبقى
+    // المعرّفُ «قيدَ التنفيذ» أبداً (‏`COMMAND_IN_FLIGHT`). فيُرفَضُ هنا **قبلَ** الحجز.
+    if (this.production) throw new Error('CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION');
+    const accepted = this.precheck(command, signature);
     // مرحلتان لا واحدة (M2.07): يُحجز المعرّف، ثم يُثبَّت السجل، ثم يُثبَّت
     // الحجز. فلو فشل تخزين السجل أُلغي الحجز بسببه، فالأمر **لم يُنفَّذ ولم
     // يُحرق معرّفه** ويجوز إعادة إرساله؛ ولو ثُبّت الحجز أولاً لصار فشلُ
@@ -330,6 +347,45 @@ export class CrownGateway {
     // المعرّف يُستهلك في الذاكرة **بعد** ثبوت القبول لا قبله: كان يُستهلك قبل
     // السياسة والدفتر، فأمرٌ رُفض بالسياسة أو سقط بفشل تخزين كان يصير غير
     // قابل لإعادة الإرسال أبداً وإن لم يقع له أثر.
+    this.seenCommands.add(command.id);
+    return accepted;
+  }
+
+  /**
+   * `LIVE-25` (‏`WL-304`): المسارُ نفسُه بحدودٍ غيرِ متزامنةٍ — الفحوصُ نفسُها
+   * (‏`precheck`)، ثمّ حجزُ المعرّفِ، ثمّ **ختمُ** قيدِ القبولِ في السجلِّ المختومِ
+   * (‏`appendSealed` يُنتظَر)، ثمّ تثبيتُ الحجزِ **موقَّعاً** في التوكن (‏`commitSigned`).
+   * فشلُ الختمِ يُلغي الحجزَ إلغاءً موقَّعاً (‏`abortSigned`) فلا يبقى المعرّفُ معلَّقاً
+   * ويجوزُ إعادةُ إرسالِه؛ ولا يُرجَعُ قبولٌ قبلَ أن يُختَمَ ويُثبَّت.
+   * @param command - الأمر الملكي الموقع
+   * @param signature - توقيع الملك للأمر
+   * @returns الأمر بعد ختم القبول وتثبيتِه
+   */
+  async commandAsync(command: RoyalCommand, signature: string): Promise<AcceptedRoyalCommand> {
+    const accepted = this.precheck(command, signature);
+    const ledger = this.commandLedger;
+    const signedLedger = ledger !== null && ledger.signed;
+    const sealed = this.log as unknown as {
+      appendSealed?: (type: string, actor: string, data: object) => Promise<unknown>;
+    };
+    if (ledger) ledger.begin(command);
+    try {
+      if (typeof sealed.appendSealed === 'function') {
+        await sealed.appendSealed('crown.command.accepted', this.king.id, accepted);
+      } else {
+        this.log.append('crown.command.accepted', this.king.id, accepted);
+      }
+    } catch (error) {
+      if (ledger) {
+        if (signedLedger) await ledger.abortSigned(command, 'LOG_APPEND_FAILED');
+        else ledger.abort(command, 'LOG_APPEND_FAILED');
+      }
+      throw error;
+    }
+    if (ledger) {
+      if (signedLedger) await ledger.commitSigned(command);
+      else ledger.commit(command);
+    }
     this.seenCommands.add(command.id);
     return accepted;
   }
