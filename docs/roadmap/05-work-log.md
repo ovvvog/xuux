@@ -1,5 +1,59 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-03] — WL-306 — `LIVE-27`: لا نافذةَ فقدٍ بينَ الإبلاغِ عن الحجرِ وختمِ قيدِه — `QuarantineWarden.reportSealed`، و`report` المتزامنُ يُرَدُّ على السجلِّ المختوم؛ وتوثيقُ دمجِ `#215` و`#216`
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `LIVE-27` (‏§4.6؛ تنفيذٌ ⇒ مراجعة)
+
+**الحالةُ بعدَ العمل:** على السجلِّ المختومِ لا يُرجِعُ الإبلاغُ عن الحجرِ قبلَ ختمِ قيدَيه، فما يقعُ بعدَ رجوعِه لا يُطلِقُ المحجورَ بالإقلاعِ التالي. **لا تغييرَ** في `config/external-review.yaml` ولا `version.json` ولا النسبة، و`LIVE-27` لا يُعلَنُ مُغلَقاً.
+
+#### توثيقُ الدمج (‏بأمرِ المالكِ «ادمج كل طلبات الدمج واصلح التعارضات»)
+
+| الحدثُ | المقيسُ |
+| --- | --- |
+| موافقةُ `xuuux-voox` على `#215` (‏`9dfa4a53`) `21:08:34Z` ودمجُه (‏squash) `21:40:41Z` | `main@cad1bda4` |
+| CI على `main@cad1bda4` [`37068247982`](https://github.com/ovvvog/xuux/actions/runs/37068247982) | `failure` — `fail 1`، الساقطُ `R7/SCOPE-DRIFT` وحدَه |
+| القياسُ الآليُّ [`37068958015`](https://github.com/ovvvog/xuux/actions/runs/37068958015) والقياسُ [`37068989057`](https://github.com/ovvvog/xuux/actions/runs/37068989057) | `success`؛ والنشرُ [`37069550494`](https://github.com/ovvvog/xuux/actions/runs/37069550494) `waiting` — لم يُوافَقْ عليه لأنّ `main` تقدّمَ بعدَه |
+| `#216` أُعيدَ تأسيسُه على `cad1bda4` وحُلَّت التعارضاتُ ⇒ `f7b37f2e`؛ CI [`37068407618`](https://github.com/ovvvog/xuux/actions/runs/37068407618) | `success` |
+| موافقةُ `xuuux-voox` على `#216` `21:37:40Z` (‏لا إسقاطَ للموافقاتِ القديمةِ في الحماية) ودمجُه `21:54:33Z` | `main@555d1f10` |
+
+**دَينٌ أدخلَه المنفِّذُ في حلِّ التعارضِ ومُصلَحٌ هنا:** حُلَّ تعارضُ `docs/CURRENT_STATE.md` في `#216` بنسخةِ `main` كاملةً، فسقطَ بندُ `WL-305` (‏إعادةُ الحجرِ من السجلّ، `LIVE-26`). أُعيدَ في هذه الدفعةِ مع تحديثِ `LIVE-27`.
+
+#### النافذةُ المقيسةُ والسببُ الجذريّ (‏على `main@555d1f10`)
+
+- **المسار:** `system.chain.quarantine` هو `QuarantineWarden` الذي يبنيه `composeEnforcementChain` على `enforcementLog = sealedAudit(rootOfTrust.log)`. و`report` متزامنٌ: يضعُ الحالةَ في الذاكرةِ ويُلحِقُ `quarantine.signal` ثمّ `quarantine.isolated` بـ`this.log.append` — وهو في المُحوِّلِ **إدراجٌ في الطابورِ** (‏`enqueue` ⇒ `tail.then(() => appendSealed(...))`) لا ختم.
+- **النافذة:** من رجوعِ `report` إلى أن يُنتظَرَ `flush` (‏في `record` نقطةِ الإنفاذ أو في `close`). سقوطُ العمليّةِ أو غيابُ التوكنِ فيها يُسقِطُ القيدَين، فلا يجدُ `quarantineFromSealedLog` شاهداً بالإقلاعِ التالي.
+- **إعادةُ الإنتاج** (‏`L1` في `tests/production/wl-306-quarantine-report-sealed.test.mjs`، والتوكنُ يكفُّ عن الختمِ بعدَ رجوعِ الإبلاغِ مباشرةً): على شجرةِ `#216` قبلَ الإصلاح ⇒ بعدَ الإقلاعِ `isQuarantined` **`false`** (‏`expected: true · actual: false`).
+
+#### ما تمَّ فعلاً
+
+- `src/governance/quarantine.mjs`: جسمُ الإبلاغِ صارَ خاصّاً (‏`#record`) بلا تغييرٍ في منطقِه ولا قيودِه؛ و`reportSealed(signal)` يُنادِيه ثمّ **ينتظرُ `flush` المُحوِّلِ** قبلَ أن يُرجِع، وفشلُ الختمِ يُرفَعُ والمحجورُ يبقى محجوراً في الذاكرة؛ و`report` على سجلٍّ مختومٍ مؤجَّلٍ (‏`flush` و`appendSealed`) يُرَدُّ **قبلَ أيِّ أثرٍ** بـ`QUARANTINE_REPORT_REQUIRES_SEALED` — نمطُ `CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` في `WL-304`. وخارجَ السجلِّ المختومِ `report` كما كان.
+- لم يُمَسَّ `sealedAudit` ولا صيغةُ الشاهدِ ولا `quarantineFromSealedLog` ولا `release`.
+- `tests/production/wl-305-quarantine-restart.test.mjs`: يُبلِّغُ بـ`reportSealed` (‏المتزامنُ صارَ مردوداً في الإنتاج).
+
+#### الملفاتُ المتأثّرة
+
+`src/governance/quarantine.mjs` · `tests/production/wl-306-quarantine-report-sealed.test.mjs` · `tests/production/wl-305-quarantine-restart.test.mjs` · `docs/ROOT_OF_TRUST.md` (‏235) · `docs/CURRENT_STATE.md` · `docs/roadmap/06-debt-register.md` (‏`LIVE-27`) · `PROJECT_STATUS.md` · `docs/roadmap/05-work-log.md`
+
+#### الـ commit
+
+من فرعِ `fix/live-27-sealed-quarantine-report` في طلبٍ مفتوحٍ للمراجعة.
+
+#### الدليل
+
+- **قبلُ** (‏شجرةُ `#216` = `main@555d1f10` بالاختبارِ الجديد): `pass 0 · fail 3` — `L1` `actual: false`، `L2` «`Missing expected exception`»، `L3` «`reportSealed is not a function`».
+- **بعدُ:** `node --test tests/production/wl-306-quarantine-report-sealed.test.mjs tests/production/wl-305-quarantine-restart.test.mjs tests/governance/` ⇒ `pass 23 · fail 0`. `L1`: الترتيبُ في السجلِّ بعدَ الإقلاع `quarantine.signal` ⇒ `quarantine.isolated` ⇒ `quarantine.restored`. `L3`: فشلُ الختمِ ⇒ `TOKEN_GONE` مرفوعٌ، والمحجورُ محجورٌ، ونقطةُ الإنفاذِ تُرفَضُ بعدَه لا تسمح.
+- `npm run validate` وCI على الطلب — في نصِّ الطلب.
+
+#### ما لم يتمَّ ولماذا
+
+- **المُبلِّغونَ الآخرون** (‏`egress-gate`، `access-gate`، `memory-store`، `isolation`، `model-registry`، `inference-gate`) ينادونَ `report` المتزامنَ وليسوا مركَّبينَ في الإنتاج؛ فإن رُكِّبوا على الحاجبِ الإنتاجيِّ رُدَّ إبلاغُهم مغلقاً حتى يُحوَّلوا إلى `reportSealed`.
+- **`release`** متزامنٌ كما هو: فقدُ قيدِ إخراجٍ بسقوطٍ يُعيدُ الموضوعَ إلى الحجرِ بالإقلاعِ التالي — اتجاهٌ مغلق، ولم يُغيَّر بحسبِ الأمر.
+- **`LIVE-26`** باقٍ لقرارِ المالك.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- لا مسارَ متزامنَ أُعيدَ: التاجُ والنواةُ والتذكرةُ والدفترُ لم تُمَسّ.
+
 ### [2026-10-03] — WL-305 — `R6-A-05`: حالةُ الحجرِ في النظامِ الإنتاجيِّ تدومُ عبرَ إعادةِ التشغيلِ — تُعادُ من السجلِّ المختومِ قبلَ أيِّ طلب، والإغلاقُ يختمُ طابورَ القيود؛ واكتشافُ `LIVE-26`/`LIVE-27`
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R6-A-05` (‏بعدَ `LIVE-25`؛ تنفيذٌ ⇒ إعادةُ اختبار)

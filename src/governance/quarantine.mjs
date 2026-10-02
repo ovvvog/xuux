@@ -36,6 +36,7 @@ export const QUARANTINE_ERRORS = Object.freeze({
   SUBJECT_REQUIRED: 'QUARANTINE_SUBJECT_REQUIRED',
   RELEASE_REASON_REQUIRED: 'QUARANTINE_RELEASE_REASON_REQUIRED',
   NOT_QUARANTINED: 'QUARANTINE_SUBJECT_NOT_QUARANTINED',
+  REPORT_REQUIRES_SEALED: 'QUARANTINE_REPORT_REQUIRES_SEALED',
 });
 
 /** خطأ مُسمّى: الرمز للأتمتة والنص للقارئ. */
@@ -114,6 +115,12 @@ export class QuarantineWarden {
     this.quarantined = new Map();
     /** @type {Set<string>} محجورونَ أُعيدوا من السجلِّ المختومِ (‏`R6-A-05`) */
     this.restoredSubjects = new Set();
+    /** `LIVE-27`: سجلٌّ مختومٌ مؤجَّلٌ (‏`sealedAudit`) — الإبلاغُ فيه يُنتظَرُ ختمُه. */
+    const candidate = /** @type {{ flush?: unknown, appendSealed?: unknown }} */ (
+      /** @type {unknown} */ (log)
+    );
+    this.sealedLog =
+      typeof candidate.flush === 'function' && typeof candidate.appendSealed === 'function';
     /** @type {Promise<unknown>[]} أعمال العزل الجارية؛ تُنتظر بـ`settle` */
     this.pending = [];
   }
@@ -147,7 +154,43 @@ export class QuarantineWarden {
    * @param {{ kind: string, subject: string, detail?: Record<string, unknown> }} signal
    * @returns {{ kind: string, subject: string, count: number, threshold: number, isolated: boolean, incidentId: string | null }}
    */
-  report({ kind, subject, detail = {} }) {
+  report(signal) {
+    // `LIVE-27` (‏`WL-306`): على السجلِّ المختومِ (‏مُحوِّلُ `sealedAudit` في الإنتاج) يُرجِعُ الإبلاغُ
+    // المتزامنُ قبلَ أن يُختَمَ قيدُ `quarantine.isolated`، فما يقعُ بعدَ رجوعِه (‏سقوطُ العمليّةِ،
+    // فقدُ التوكن) يُسقِطُ القيدَ ويُطلِقُ المحجورَ بالإقلاعِ التالي. فيُرَدُّ هنا قبلَ أيِّ أثرٍ،
+    // والمسارُ في الإنتاجِ `reportSealed` — كما رُدَّ `CrownGateway.command` في `WL-304`.
+    if (this.sealedLog) {
+      throw new QuarantineError(
+        QUARANTINE_ERRORS.REPORT_REQUIRES_SEALED,
+        'السجلُّ مختومٌ: الإبلاغُ يُنتظَرُ ختمُه (`reportSealed`) ولا يُرجَعُ قبلَه.',
+      );
+    }
+    return this.#record(signal);
+  }
+
+  /**
+   * `LIVE-27` (‏`WL-306`): الإبلاغُ نفسُه (‏العتبةُ والحادثةُ والحالةُ في الذاكرةِ فوراً)، ثمّ
+   * **ينتظرُ ختمَ** قيودِه بالترتيب (‏`quarantine.signal` ثمّ `quarantine.isolated`) قبلَ أن يُرجِع.
+   * وفشلُ الختمِ يُرفَعُ ولا يُخرِجُ أحداً: المحجورُ يبقى محجوراً في الذاكرة، والمُحوِّلُ يرفضُ
+   * كلَّ إلحاقٍ بعدَه (‏فشلٌ مغلقٌ للنظام).
+   * @param {{ kind: string, subject: string, detail?: Record<string, unknown> }} signal
+   * @returns {Promise<{ kind: string, subject: string, count: number, threshold: number, isolated: boolean, incidentId: string | null }>}
+   */
+  async reportSealed(signal) {
+    const result = this.#record(signal);
+    const sealed = /** @type {{ flush?: () => Promise<void> }} */ (
+      /** @type {unknown} */ (this.log)
+    );
+    if (typeof sealed.flush === 'function') await sealed.flush();
+    return result;
+  }
+
+  /**
+   * جسمُ الإبلاغِ المشتركُ بين المسارَين.
+   * @param {{ kind: string, subject: string, detail?: Record<string, unknown> }} signal
+   * @returns {{ kind: string, subject: string, count: number, threshold: number, isolated: boolean, incidentId: string | null }}
+   */
+  #record({ kind, subject, detail = {} }) {
     if (typeof subject !== 'string' || subject.trim() === '') {
       throw new QuarantineError(
         QUARANTINE_ERRORS.SUBJECT_REQUIRED,

@@ -172,7 +172,10 @@ async function lifecycle(steps) {
 const quarantineAgent = async (system, shared) => {
   const agent = await system.chain.registry.register({ name: 'q', role: 'role:king' });
   shared.id = agent.id;
-  system.chain.quarantine.report({ kind: 'model-fingerprint-mismatch', subject: agent.id });
+  await system.chain.quarantine.reportSealed({
+    kind: 'model-fingerprint-mismatch',
+    subject: agent.id,
+  });
   assert.equal(system.chain.quarantine.isQuarantined(agent.id), true);
 };
 
