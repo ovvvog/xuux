@@ -117,7 +117,7 @@ function context() {
     env: {
       ...PRODUCTION_ENV,
       XUUX_KING_ID: 'king:' + fingerprint(king.publicKey).slice(0, 24),
-    ...ROYAL_KEY.env,
+      ...ROYAL_KEY.env,
       EVENT_LOG_FILE: join(root, 'events.log'),
       ANCHOR_STORE_FILE: join(root, 'anchors.jsonl'),
       HALT_SWITCH_FILE: join(root, 'halt', 'directive.json'),
