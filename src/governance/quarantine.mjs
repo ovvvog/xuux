@@ -19,8 +19,9 @@
  *   4. **الإخراج من الحجر بسبب مسجَّل وبيدٍ بشرية**: لا يخرج المحجور تلقائياً
  *      بمرور الوقت، وإلا صار الحجر تأجيلاً لا قراراً.
  *
- * حدود معلنة: العدّادات وحالة الحجر في الذاكرة، فتُصفَّر بإعادة التشغيل؛ الدوام
- * موكولٌ إلى حالة الهوية في القاعدة (`suspended`/`quarantined`) وإلى سجل الأحداث.
+ * حدود معلنة: العدّادات وحالة الحجر في الذاكرة. وحالةُ الحجرِ في الإنتاجِ تُعادُ عندَ
+ * الإقلاعِ من السجلِّ المختومِ (‏`quarantineFromSealedLog` ثمّ `restore`، `R6-A-05`،
+ * `WL-305`)؛ والعدّاداتُ دونَ العتبةِ تُصفَّرُ بإعادةِ التشغيلِ عمداً (‏نافذةٌ زمنيّة).
  * والحاجب لا يقطع اتصالاً جارياً ولا يقتل عملية — ذلك عزلٌ حقيقي (M6.04) وهو غير
  * منفَّذ.
  */
@@ -111,6 +112,8 @@ export class QuarantineWarden {
     this.signals = new Map();
     /** @type {Map<string, { incidentId: string, kind: string, at: string }>} */
     this.quarantined = new Map();
+    /** @type {Set<string>} محجورونَ أُعيدوا من السجلِّ المختومِ (‏`R6-A-05`) */
+    this.restoredSubjects = new Set();
     /** @type {Promise<unknown>[]} أعمال العزل الجارية؛ تُنتظر بـ`settle` */
     this.pending = [];
   }
@@ -235,7 +238,19 @@ export class QuarantineWarden {
         'الإخراج من الحجر بلا سبب مسجَّل لا يُراجع.',
       );
     }
-    this.incidents.close(current.incidentId, reason);
+    // `R6-A-05` (‏`WL-305`): محجورٌ أُعيدَ من السجلِّ المختومِ بعدَ إعادةِ التشغيلِ حادثتُه
+    // في السجلِّ لا في سجلِّ الحوادثِ الحيِّ؛ فلا يُحبَسُ أبداً لغيابِها — يُخرَجُ بالسببِ
+    // المسجَّلِ نفسِه، وإغلاقُ ما في الذاكرةِ يبقى لمن لم يُستعَد.
+    if (this.restoredSubjects.has(subject)) {
+      try {
+        this.incidents.close(current.incidentId, reason);
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== 'INCIDENT_NOT_FOUND') throw error;
+      }
+      this.restoredSubjects.delete(subject);
+    } else {
+      this.incidents.close(current.incidentId, reason);
+    }
     this.quarantined.delete(subject);
     for (const key of [...this.signals.keys()]) {
       if (key.endsWith(`|${subject}`)) this.signals.delete(key);
@@ -278,6 +293,7 @@ export class QuarantineWarden {
     for (const entry of entries) {
       if (!entry || typeof entry.subject !== 'string' || typeof entry.kind !== 'string') continue;
       if (this.quarantined.has(entry.subject)) continue;
+      this.restoredSubjects.add(entry.subject);
       this.quarantined.set(entry.subject, {
         incidentId: entry.incidentId ?? '',
         kind: entry.kind,
