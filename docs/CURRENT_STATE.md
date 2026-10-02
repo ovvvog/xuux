@@ -84,6 +84,11 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
   (‏`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION`). مقيسٌ في `tests/production/wl-304-sealed-execution-path.test.mjs`
   و`A13`. **والمداخلُ السياديّةُ الأخرى** (‏التشريعُ، القضاءُ، التقاريرُ، الديوانُ، التفويضُ الفدراليّ)
   تنادي `crown.command` المتزامنَ — وليست موصولةً في التركيبِ الإنتاجيِّ (‏`withLegislation: false`).
+- حالةُ الحجرِ في الإنتاجِ تُعادُ عندَ الإقلاعِ من السجلِّ المختومِ (‏`quarantineFromSealedLog` ⇒
+  `QuarantineWarden.restore`، `R6-A-05`، `WL-305`)، والإغلاقُ يختمُ طابورَ `sealedAudit` قبلَ إغلاقِ الجذر.
+  والإبلاغُ عن الحجرِ على السجلِّ المختومِ `reportSealed` يُنتظَرُ ختمُه قبلَ رجوعِه، و`report` المتزامنُ
+  يُرَدُّ (‏`QUARANTINE_REPORT_REQUIRES_SEALED`، `LIVE-27`، `WL-306`). **وسجلُّ الوكلاءِ نفسُه في الذاكرة**
+  (‏`createMemoryRepository`): الوكلاءُ يُمحَونَ بإعادةِ التشغيلِ (‏`LIVE-26`، قرارُ المالك).
 - `scripts/serve-state.mjs` (‏`npm run serve`) مسارُ تطويرٍ **يرفضُ الإنتاجَ** (‏`WL-297`).
 - PostgreSQL تخدمُ طبقةَ الاستمراريّةِ (‏`src/persistence/`) والطابورَ والعاملَ (‏`src/execution/`)،
   **ولا يستعملُها المسارُ الإنتاجيُّ أعلاه** — تدقيقُه في سجلٍّ ملفّيٍّ مختومٍ.
