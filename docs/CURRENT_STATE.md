@@ -1,9 +1,10 @@
 # الحالةُ الحاليّةُ المقيسةُ — مصدرُ الحقيقةِ الواحدُ لوصفِ المستودعِ
 
-> **آخرُ تحقُّقٍ:** `main@5222c40e396d717a78c9dae56f89a74770517a9c` (‏2026-10-02، بعدَ دمجِ `#209`
-> و`#210`) — CI على `main` التشغيلةُ [`37029083153`](https://github.com/ovvvog/xuux/actions/runs/37029083153) ناجحةٌ.
+> **آخرُ تحقُّقٍ:** `main@23d07212` (‏2026-10-02، بعدَ دمجِ `#211` و`#212`) — CI على `main` التشغيلةُ
+> [`37044233977`](https://github.com/ovvvog/xuux/actions/runs/37044233977) ناجحةٌ.
 > كُتِبَت هذه الوثيقةُ في `WL-301` من الكودِ والاختباراتِ وسجلِّ CI لا من تقاريرَ سابقةٍ، وحُدِّثَت
-> لقطتُها الزمنيّةُ وحالُ الحمايةِ والأمرُ الملكيُّ في `WL-302` وحدَها.
+> لقطتُها الزمنيّةُ وحالُ الحمايةِ والأمرُ الملكيُّ في `WL-302`، ثمّ اللقطةُ وحدُّ السلطةِ الملكيّةِ عندَ نقطةِ
+> الإنفاذِ (‏`R6-A-07`) في `WL-303` وحدَها.
 > **ما يتغيّرُ بكلِّ دفعةٍ لا يُنسَخُ هنا رقماً حاكماً** (‏`DOC-7`): نسبةُ الإنجازِ من
 > `version.json`، والمفتوحُ من [سجلِّ الديونِ](roadmap/06-debt-register.md)، وعددُ الاختباراتِ
 > من مخرَجِ `npm test`. والأرقامُ أدناه **لقطةٌ مؤرَّخةٌ بالكوميتِ أعلاه** لا عدّادٌ حيٌّ.
@@ -52,8 +53,12 @@ production-entry.mjs
             · مفتاحُ إيقافٍ (HaltSwitch) بمُتحقِّقِ أوامرَ ملكيّةٍ مشتقٍّ من مفتاحِ HSM العامِّ
        4. هويّةُ الملكِ من المفتاحِ العامِّ وحدَه (kingIdentityFromPublicKey)
        5. CertificateAuthority بمخزنِ السحبِ الدائمِ
-       6. composeEnforcementChain — هويّةٌ ← سياسةٌ ← حَجرٌ ← نقطةُ إنفاذٍ (src/core/composition-root.mjs)
-       7. AttestedClock — نصابُ مصادرِ Roughtime موقَّعةٍ (config/time.yaml)، ولا سقوطَ إلى Date.now()
+       6. AttestedClock — نصابُ مصادرِ Roughtime موقَّعةٍ (config/time.yaml)، ولا سقوطَ إلى Date.now()
+       7. composeEnforcementChain — هويّةٌ ← حَجرٌ ← سياسةٌ ← حدُّ السلطةِ الملكيّةِ ← تذكرةٌ
+            · royalCommandVerifier = createRoyalAuthorization (src/root-of-trust/royal-authorization.mts)
+              مفتاحُ الملكِ في التوكنِ ⇒ ربطُ المعرّفِ والملخّصِ والفعلِ والموردِ ⇒ العتبةُ السياديّةُ
+              ⇒ الحداثةُ بالساعةِ الموثوقةِ ⇒ منعُ الإعادةِ بالدفترِ الدائمِ ⇒ أثرٌ مختومٌ (WL-303)
+            · السجلُّ عبرَ sealedAudit: لا تذكرةَ قبلَ أن يُختَمَ قيدُ قرارِها
        8. CrownGateway — يلزمُه دفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ الموثوقةُ
        9. ExecutionKernel — بوابةُ التاجِ + نقطةُ الإنفاذِ + SafeMode + السجلُّ المختومُ (تدقيقٌ)
 ```
@@ -69,8 +74,10 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 - `SUPPORTED_FRESHNESS_BACKENDS` في `scripts/production-entry.mjs` مجموعةٌ فارغةٌ، و`freshnessSocket`
   يُمرَّرُ `null` — **فالمُشغِّلُ الإنتاجيُّ لا يُقلِعُ في أيِّ بيئةٍ اليومَ**. والمقبسُ الوحيدُ المنفَّذُ
   `InMemoryFreshnessSocket` موسومٌ `testFixture` ومرفوضٌ في الإنتاجِ.
-- إصدارُ الشهاداتِ (`CertificateAuthority.issue()`) متزامنُ التوقيعِ، ومسارُ HSM غيرُ متزامنٍ —
-  **فإصدارُ الشهاداتِ معطَّلٌ في الإنتاجِ** بإعلانِ ترويسةِ المُشغِّلِ.
+- إصدارُ الشهاداتِ في الإنتاجِ عبرَ `CertificateAuthority.issueAsync` بموقِّعِ التوكنِ (‏`WL-303`)،
+  و`AgentRegistry.register` يستعملُه. **والتنفيذُ بعدَ التذكرةِ ما زالَ مغلقاً في الإنتاجِ:**
+  `CrownGateway.command` متزامنٌ على سجلٍّ مختومٍ ودفترٍ موقَّعٍ فيسقطُ بـ`SEALED_LOG_REQUIRES_ASYNC_APPEND`
+  قبلَ المُعالِجِ (‏مقيسٌ: `A13` في `tests/production/wl-303-sovereign-authorization.test.mjs`).
 - `scripts/serve-state.mjs` (‏`npm run serve`) مسارُ تطويرٍ **يرفضُ الإنتاجَ** (‏`WL-297`).
 - PostgreSQL تخدمُ طبقةَ الاستمراريّةِ (‏`src/persistence/`) والطابورَ والعاملَ (‏`src/execution/`)،
   **ولا يستعملُها المسارُ الإنتاجيُّ أعلاه** — تدقيقُه في سجلٍّ ملفّيٍّ مختومٍ.
@@ -115,8 +122,8 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 - **المنصّةُ:** كلُّ مساراتِ العملِ الأربعةِ (‏`ci.yml` · `measure-skip-baseline.yml` ·
   `publish-skip-baseline.yml` · `auto-measure-skip-baseline.yml`) على `ubuntu-latest` المستضافِ
   منذ `WL-286`، وقاعدةُ البياناتِ حاويةُ خدمةٍ `postgres:18.6-alpine`. **لا عدّاءَ ذاتيَّ الاستضافةِ.**
-- **لقطةُ `main@5222c40e`** (‏التشغيلةُ `37029083153`، خطوةُ «الاختبارات»): `tests 2381` ·
-  `pass 2338` · `fail 0` · `skipped 43`.
+- **لقطةُ `main@23d07212`** (‏التشغيلةُ `37044233977`، خطوةُ «الاختبارات»، مقروءةٌ من سجلِّها):
+  `tests 2398` · `pass 2355` · `fail 0` · `skipped 43`.
 - **أسبابُ التخطّي الـ43 كما طُبِعَت:** محاكي TPM (‏`swtpm`/`XUUX_TPM_SIM`) **25** · `userns`
   (‏`unshare: write failed /proc/self/uid_map`) **6** · توكنُ SoftHSM حقيقيٌّ (‏`XUUX_HSM_TEST`) **7** ·
   قناةٌ حيّةٌ (‏`XUUX_CHANNEL_POC`) **2** · عزلٌ حقيقيٌّ غيرُ متاحٍ **1** · متغيّراتُ بيئةٍ خارجيّةٌ **1** ·

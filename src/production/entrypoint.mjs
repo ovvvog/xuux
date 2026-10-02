@@ -31,6 +31,9 @@ import { createProductionRootOfTrust } from '../root-of-trust/production-runtime
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
+import { loadPolicyBundle } from '../policy/loader.mjs';
+import { createRoyalAuthorization } from '../root-of-trust/royal-authorization.mjs';
+import { sealedAudit } from '../root-of-trust/sealed-audit.mjs';
 import { kingIdentityFromPublicKey, CertificateAuthority } from '../root-of-trust/identity.mjs';
 import { SovereignClock } from '../root-of-trust/clock.mjs';
 import { AttestedClock } from '../time/attested-clock.mjs';
@@ -116,17 +119,8 @@ export async function createProductionSystem(env, options, deps = {}) {
   const authority = new CertificateAuthority(kingIdentity, {
     revocationStore: rootOfTrust.revocationStore,
     env,
-  });
-
-  // 6. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ.
-  //    `royalCommandVerifier` لا يُمرَّرُ هنا — هو موصولٌ داخلَ `rootOfTrust.haltSwitch`.
-  const chain = composeEnforcementChain({
-    log: rootOfTrust.log,
-    withLegislation: false,
-    crown: null,
-    haltSwitch: rootOfTrust.haltSwitch,
-    kingIdentity,
-    authority,
+    // `WL-303`: الإصدارُ عبرَ التوكنِ — لا مفتاحَ خاصَّ في الذاكرة.
+    signer: rootOfTrust.anchorSigner,
   });
 
   // 7. الساعةُ الموثوقةُ — في الإنتاجِ يلزمُها `CrownGateway`.
@@ -168,6 +162,31 @@ export async function createProductionSystem(env, options, deps = {}) {
       );
     }
   }
+
+  // 6. سلسلةُ الإنفاذِ — هويّةٌ وسياسةٌ وحَجرٌ ونقطةُ تفويضٍ، وحدُّ السلطةِ الملكيّة.
+  //    `R6-A-07` (‏`WL-303`): كانت نقطةُ الإنفاذِ الإنتاجيّةُ بلا مُحقِّقٍ فتُرَدُّ كلُّ
+  //    الأفعالِ السياديّةِ مغلقةً بلا مسارٍ مشروعٍ، وكانَ أيُّ مُحقِّقٍ يُحقَنُ
+  //    (‏ولو `() => true`) يُقبَلُ. الآنَ الحدُّ الواحدُ: المفتاحُ الملكيُّ المُثبَّتُ
+  //    (‏مصادقة) ← الربطُ والعتبةُ والحداثةُ بالساعةِ الموثوقةِ ومنعُ الإعادةِ
+  //    بالدفترِ الدائمِ (‏تفويض) ← ثمّ السياسةُ قبلَه والتنفيذُ بعدَه.
+  // سجلُّ السلسلةِ: الإلحاقُ مختومٌ مرتَّبٌ، والتذكرةُ تنتظرُ ختمَ قيدِها.
+  const enforcementLog = sealedAudit(/** @type {never} */ (rootOfTrust.log));
+  const royalAuthorization = createRoyalAuthorization({
+    king: kingIdentity,
+    clock: /** @type {{ now(): number }} */ (clock),
+    commandLedger: rootOfTrust.ledger,
+    sovereignActions: loadPolicyBundle().threshold.map((entry) => entry.action),
+    log: enforcementLog,
+  });
+  const chain = composeEnforcementChain({
+    log: /** @type {never} */ (enforcementLog),
+    withLegislation: false,
+    crown: null,
+    haltSwitch: rootOfTrust.haltSwitch,
+    kingIdentity,
+    authority,
+    royalCommandVerifier: /** @type {never} */ (royalAuthorization),
+  });
 
   // 7ب. `WL-302`: حداثةُ الأمرِ الملكيِّ على مفتاحِ الإيقافِ تُقاسُ بالساعةِ
   //     الموثوقةِ نفسِها لا بساعةِ الجهاز — وبلاها يُرفَضُ كلُّ أمرٍ في الإنتاج.

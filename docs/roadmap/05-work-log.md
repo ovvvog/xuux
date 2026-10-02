@@ -1,5 +1,66 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-02] — WL-303 — `R6-A-07`: حدُّ السلطةِ الملكيّةِ عندَ نقطةِ الإنفاذِ الإنتاجيّةِ نفسِها (‏مصادقةٌ ⇒ تفويضٌ ⇒ سياسةٌ ⇒ تنفيذٌ)؛ وإصدارُ الشهاداتِ بالتوكنِ؛ وسجلُّ السلسلةِ مختوماً؛ وتوثيقُ دورةِ ما بعدَ `#211`
+
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R6-A-07` (‏تنفيذٌ عندَ نقطةِ الإنفاذِ ⇒ إعادةُ اختبارِ المجلسِ)، و`LIVE-25` (‏جديدٌ §4.6)
+
+**الحالةُ بعدَ العمل:** حدُّ التفويضِ الملكيِّ موصولٌ بـ`system.chain.enforcementPoint` في `createProductionSystem` ومقيسٌ بثلاثةَ عشرَ اختباراً على النظامِ الإنتاجيِّ المُقلَعِ. **لا تغييرَ** في `config/external-review.yaml` ولا في `version.json` ولا في النسبة. ومرحلةُ التنفيذِ بعدَ التذكرةِ ما زالت مغلقةً في الإنتاجِ (‏`LIVE-25`).
+
+#### توثيقُ دورةِ ما بعدَ `WL-302`
+
+| الحدثُ | المقيسُ |
+| --- | --- |
+| دمجُ `#211` (‏squash) `17:30:30Z` | `main@6dcb6ff5` |
+| CI على `main@6dcb6ff5` [`37041179010`](https://github.com/ovvvog/xuux/actions/runs/37041179010) | `failure` — الساقطُ الوحيدُ `R7/SCOPE-DRIFT` (‏خطُّ أساسِ التخطّي) |
+| القياسُ الآليُّ [`37041773325`](https://github.com/ovvvog/xuux/actions/runs/37041773325) ثمّ القياسُ [`37041807304`](https://github.com/ovvvog/xuux/actions/runs/37041807304) | `success` |
+| النشرُ [`37042419841`](https://github.com/ovvvog/xuux/actions/runs/37042419841) | وافقَ المنفِّذُ على بيئةِ `publish-skip-baseline` (‏النشرُ `6814525021`) ⇒ طلبٌ آليٌّ `#212` |
+| CI على `#212` | `action_required` ⇒ أُغلِقَ وفُتِحَ ⇒ [`37043259006`](https://github.com/ovvvog/xuux/actions/runs/37043259006) `success` |
+| موافقةُ `soaav-svg` ودمجُ `#212` (‏squash) `17:57:41Z` | `main@23d07212` |
+| CI على `main@23d07212` [`37044233977`](https://github.com/ovvvog/xuux/actions/runs/37044233977) | `success` — `tests 2398` · `pass 2355` · `fail 0` · `skipped 43`؛ والقياسُ الآليُّ `37045023677` `skipped` |
+
+#### السلسلةُ كما هي في الكودِ قبلَ هذه الدفعةِ (‏مقيسةٌ لا موصوفةٌ)
+
+- **أين المصادقةُ والتفويضُ وقرارُ السياسة؟** `EnforcementPoint.authorize`: إيقافٌ ⇒ بوابةُ الهويّةِ (‏تستبدلُ الفاعلَ بشهادتِه) ⇒ حَجرٌ ⇒ `decisionPoint.evaluate` (‏السياسةُ؛ وعتبتُها السياديّةُ تفحصُ **حضورَ** `royalCommandId`/`royalCommandDigest` نصَّينِ) ⇒ إن كان الفعلُ سياديّاً فـ`royalCommandVerifier({ id, digest?, action, resource })`. **لا توقيعَ ولا جسمَ أمرٍ في تلك الواجهةِ** — فلم تكن مصادقةٌ ممكنةً بنيةً، و`digest` كان يُقرأُ من القرارِ الذي لا يحملُه فيغيبُ دائماً.
+- **هل يصلُ المُحقِّقُ في الإنتاجِ؟** لا: `createProductionSystem` كان يستدعي `composeEnforcementChain` **بلا** `royalCommandVerifier`، فكلُّ فعلٍ سياديٍّ ⇒ `SOVEREIGN_COMMAND_VERIFIER_REQUIRED`. فشلٌ مغلقٌ — لا تفويضٌ منفَّذٌ.
+- **مسارُ التجاوزِ (‏قبلُ):** `EnforcementPoint` في بيئةِ إنتاجٍ بمُحقِّقٍ مُرتجَلٍ `() => true` ونصَّينِ `cmd:fake`/`'a'×64` بلا أمرٍ موقَّعٍ — `node /tmp/bypass-probe.mjs` على شجرةِ `main@23d07212` ⇒ `BYPASS true POLICY_ALLOW TOKEN_ISSUED` (‏رمزُ الخروجِ `0`). **وبعدُ** على الفرعِ ⇒ `CONSTRUCT_REJECTED ENFORCEMENT_ROYAL_AUTHORIZATION_UNTRUSTED`.
+- **وكان المسارُ الإنتاجيُّ كلُّه يسقطُ قبلَ السياسةِ:** الاختباراتُ الثلاثةَ عشرَ نفسُها على شجرةِ `main@23d07212` ⇒ `pass 0 · fail 13` — اثنا عشرَ بـ`SOFTWARE_SIGN_NOT_AVAILABLE_USE_HSM` (‏لا يُسجَّلُ وكيلٌ: الإصدارُ متزامنُ التوقيعِ) و`A12` بـ«`Missing expected exception`» (‏المُرتجَلُ يُقبَلُ). وبعدَ إصلاحِ الإصدارِ ظهرَ الطبقُ الثاني: `SEALED_LOG_REQUIRES_ASYNC_APPEND` في الهويّةِ ونقطةِ الإنفاذِ.
+- **هل يكفي `actorId` أو `signerId` أو المعرّفُ أو الملخّصُ؟** لا بعدَ هذه الدفعة: `A3` (‏المعرّفُ والملخّصُ بلا أمرٍ) و`A10` (‏`actor.id = 'crown'` ودورٌ مُدَّعى) ⇒ رفضٌ.
+
+#### ما تمَّ فعلاً
+
+- **`src/root-of-trust/royal-authorization.mts` (‏جديدٌ):** `createRoyalAuthorization({ king, clock, commandLedger, sovereignActions, log })` — **الحدُّ الواحدُ** لا مُحقِّقٌ موازٍ: يأخذُ **الأمرَ الموقَّعَ نفسَه** ويفحصُ بالترتيبِ: الحضورُ (‏`ROYAL_AUTH_COMMAND_MISSING`) ⇒ الصيغةُ ⇒ التوقيعُ بمفتاحِ الملكِ المُثبَّتِ (‏`ROYAL_AUTH_SIGNATURE_INVALID`) ⇒ الربطُ بالمعرّفِ و`royalCommandDigest` والفعلِ والموردِ (‏`ROYAL_AUTH_BINDING_MISMATCH`) ⇒ العتبةُ السياديّةُ من `config/royal-authority.yaml` (‏`ROYAL_AUTH_ACTION_NOT_SOVEREIGN`) ⇒ الحداثةُ بالساعةِ الموثوقةِ (‏`EXPIRED`/`FROM_FUTURE`/`CLOCK_UNAVAILABLE`) ⇒ منعُ الإعادةِ بالدفترِ الدائمِ وحجزٍ في العمليّةِ (‏`ROYAL_AUTH_REPLAYED`). وأثرٌ `crown.authorization.accepted`/`rejected` بلا توقيعٍ؛ والقبولُ الذي لا يُختَمُ أثرُه ⇒ `ROYAL_AUTH_AUDIT_FAILED`. والمبنيُّ هنا معلَّمٌ (‏`trustedRoyalAuthorizationKeyId`).
+- **`EnforcementPoint`:** تُمرِّرُ `request.royalCommand` (‏الأمرَ وتوقيعَه) إلى الحدِّ وتنتظرُ حكمَه وتكتبُ رمزَه في القرارِ؛ والملخّصُ من ربطِ الطلبِ لا من القرارِ. وفي الإنتاجِ مُحقِّقٌ غيرُ معلَّمٍ ⇒ `ENFORCEMENT_ROYAL_AUTHORIZATION_UNTRUSTED` عندَ البناءِ. ولا تذكرةَ قبلَ `flush()` السجلِّ المختوم.
+- **`src/root-of-trust/sealed-audit.mts` (‏جديدٌ):** إلحاقٌ مختومٌ مرتَّبٌ لسلسلةِ الإنفاذِ، وأوّلُ فشلٍ يرفضُ ما بعدَه.
+- **`CertificateAuthority.issueAsync`** بموقِّعِ التوكنِ (‏ومعرّفُه يجبُ أن يطابقَ الملكَ ⇒ وإلّا `CERTIFICATE_SIGNER_KEY_MISMATCH`)، و`AgentRegistry.register` يستعملُه وينتظرُ ختمَ قيدِه.
+- **`src/production/entrypoint.mjs`:** الساعةُ المُبرهَنةُ قبلَ السلسلةِ، والحدُّ مبنيٌّ على `kingIdentity` والساعةِ و`rootOfTrust.ledger` والعتبةِ، والسلسلةُ على `sealedAudit(rootOfTrust.log)`.
+- **`config/events.yaml`:** عقدا `crown.authorization.accepted`/`rejected`.
+- **`tests/production/wl-303-sovereign-authorization.test.mjs` (‏13):** `A1` الحدُّ هو مُحقِّقُ `system.chain.enforcementPoint` نفسِها، وهي نقطةُ النواةِ (‏`kernel.enforcement`)، ومعرّفُه معرّفُ `anchorSigner` — لا `HaltSwitch` ولا مُساعِد · `A2` صحيحٌ مأذونٌ ⇒ تذكرةٌ وقبولٌ مختومٌ · `A3` بلا أمرٍ · `A4` مزوَّرٌ وبمفتاحِ الدفترِ `07` وبمفتاحٍ غريبٍ · `A5` أمرُ `resume-state` لـ`stop-state` ومورِدٌ آخرُ · `A6` فعلٌ خارجَ العتبةِ · `A7` قديمٌ ومستقبليٌّ · `A8` إعادةٌ · `A9` إعادةٌ بعدَ إعادةِ التشغيلِ (‏مُثبَّتٌ بـ`commitSigned`) · `A10` `crown` نصّاً · `A11` الرفضُ مختومٌ بلا توقيعٍ · `A12` المُرتجَلُ يُرَدُّ · `A13` التنفيذُ مغلقٌ (‏`LIVE-25`).
+
+#### الملفاتُ المتأثّرة
+
+`src/root-of-trust/royal-authorization.mts` · `src/root-of-trust/sealed-audit.mts` · `src/root-of-trust/identity.mts` · `src/policy/enforcement-point.mjs` · `src/identity/agent-registry.mjs` · `src/production/entrypoint.mjs` · `config/events.yaml` · `tests/production/wl-303-sovereign-authorization.test.mjs` · `docs/ROOT_OF_TRUST.md` (‏232 ملفَّ اختبارٍ) · `docs/CURRENT_STATE.md` · `docs/roadmap/06-debt-register.md` (‏`LIVE-25`) · `PROJECT_STATUS.md` · `docs/roadmap/05-work-log.md`
+
+#### الـ commit
+
+الدمجُ بـ squash من فرعِ `fix/r6-a-07-royal-authorization-enforcement`؛ والكوميتُ على `main` يُقرأُ من الطلبِ بعدَ دمجِه (‏لا يُكتَبُ قبلَ وجودِه).
+
+#### الدليل
+
+- `node --test tests/production/wl-303-sovereign-authorization.test.mjs` ⇒ `pass 13 · fail 0` (‏على الفرعِ) و`pass 0 · fail 13` (‏على `main@23d07212`).
+- `node /tmp/bypass-probe.mjs` قبلُ/بعدُ كما أعلاه.
+- `npm run validate` ورمزُ خروجِه، وCI على الطلبِ — في نصِّ الطلب.
+
+#### ما لم يتمَّ ولماذا
+
+- **التنفيذُ بعدَ التذكرةِ في الإنتاجِ (‏`LIVE-25`):** `CrownGateway.command` متزامنٌ على سجلٍّ مختومٍ ودفترٍ موقَّعٍ. تحويلُه غيرَ متزامنٍ يمسُّ النواةَ وكلَّ مُستدعيها — دفعةٌ تاليةٌ لا تُخلَطُ بهذه.
+- **`LIVE-24`:** الحدُّ مبنيٌّ على مفتاحِ `06` نفسِه (‏مفتاحِ المرساةِ). فصلُ المفتاحِ الملكيِّ دفعةٌ تاليةٌ.
+- **`R6-A-07` لا يُغلَقُ هنا:** الإغلاقُ للمجلسِ بعدَ إعادةِ الاختبار.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- كلُّ مُستدعٍ لنقطةِ الإنفاذِ بفعلٍ سياديٍّ في الإنتاجِ يلزمُه أن يحملَ `royalCommand: { command, signature }`؛ وخارجَ الإنتاجِ يبقى المُحقِّقُ المنطقيُّ القديمُ مقبولاً (‏حكمُه `boolean`).
+- `EXT-6` باقٍ: المُشغِّلُ الإنتاجيُّ لا يُقلِعُ بلا مصدرِ حداثةٍ حقيقيٍّ؛ والاختباراتُ هنا تحقنُ الساعةَ والمقبسَ.
+
 ### [2026-10-02] — WL-302 — الأمرُ الملكيُّ على مفتاحِ الإيقافِ: حداثةٌ وعهدٌ ومنعُ إعادةٍ ونطاقُ توقيعٍ وأثرُ رفضٍ؛ وإغلاقُ مسارِ `() => true` المحقونِ؛ والوضعُ الآمنُ للنواةِ بسلطةٍ لا بنصِّ فاعلٍ؛ وحمايةُ `main` كاملةً؛ وتوثيقُ دورةِ ما بعدَ `#209`/`#210`
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R5-B-07` · `R6-A-08` · `R6-A-07` (‏جزءٌ)، و`EXT-1` (‏§6)، و`LIVE-24` (‏جديدٌ §4.6) · **الحالةُ بعدَ العملِ:** كودٌ ومقاييسُ على الفرعِ؛ **لا نتيجةَ مراجعةٍ أُغلِقَت** و`config/external-review.yaml` لم يُمَسَّ.

@@ -155,7 +155,11 @@ export class AgentRegistry {
       throw new Error('FORBIDDEN_CAPABILITY');
     }
     const id = 'agent:' + randomUUID();
-    const certificate = this.ca.issue(id, role, capabilities);
+    // `WL-303`: في الإنتاجِ لا مفتاحَ خاصَّ في الذاكرة، فالإصدارُ عبرَ التوكن.
+    const certificate =
+      typeof (/** @type {{ issueAsync?: unknown }} */ (this.ca).issueAsync) === 'function'
+        ? await /** @type {any} */ (this.ca).issueAsync(id, role, capabilities)
+        : this.ca.issue(id, role, capabilities);
     const row = await this.repository.insert({
       id,
       name,
@@ -169,6 +173,9 @@ export class AgentRegistry {
       state: AgentState.ACTIVE,
     });
     this.log.append('agent.registered', owner, { id, role, capabilities });
+    // `WL-303`: على السجلِّ المختومِ يُنتظَرُ ختمُ القيدِ قبلَ إعلانِ الوكيل.
+    const sealed = /** @type {{ flush?: () => Promise<void> }} */ (this.log);
+    if (typeof sealed.flush === 'function') await sealed.flush();
     return toAgent(row);
   }
 

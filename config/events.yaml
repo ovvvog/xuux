@@ -251,6 +251,14 @@ channels:
       - type: crown.resume
         version: 1
         required: []
+      - type: crown.authorization.accepted
+        version: 1
+        required: [action, commandId, resource]
+        optional: [code]
+      - type: crown.authorization.rejected
+        version: 1
+        required: [action, code]
+        optional: [commandId, resource]
   - id: data
     subject: أصولُ البيانات وتصنيفاتُها واعتماداتُها ونسبُها
     classification: sensitive
