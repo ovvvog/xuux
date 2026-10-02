@@ -1,3 +1,5 @@
+آخر تحديث: **2026-10-02** — `WL-297` — **P0 Production Root of Trust Integration: نقطةُ دخولٍ إنتاجيّةٍ موثوقةٌ تربطُ جذرَ الثقةِ بسلسلةِ الإنفاذِ والنواةِ. `serve-state.mjs` يرفضُ الإنتاجَ. 9 اختباراتِ تكاملٍ تُثبتُ السلسلةَ الكاملةَ. Royal Cryptographic Auth وSafe-mode Auth لاحقةٌ.**
+
 آخر تحديث: **2026-10-01** — `WL-296` — **سلسلةُ النشرِ الآليّ نَجحَت: auto-measure → measurement → dispatch-publish → workflow_dispatch → publish → PR → main أخضر. `LIVE-22` مُغلَقٌ ضيّقاً. `OPS-1/MAIN-DRIFT-WINDOW` مفتوحٌ (موافقةُ البيئةِ يدويّةٌ). فروعٌ قديمةٌ نُظِّفَت. أعمالُ المنفِّذِ من §5 استُنفِدَت — الباقي مجلسٌ أو مالكٌ.**
 
 آخر تحديث: **2026-10-01** — `WL-295` — **تصحيحُ LIVE-22: workflow_dispatch بدلَ repository_dispatch (يَحتاجُ actions:write فقط لا contents:write). الإغلاقُ يَنتظرُ قياساً عمليّاً. لم يُمَسَّ external-review.yaml ولا version.json.**
