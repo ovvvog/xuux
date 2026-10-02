@@ -27,7 +27,15 @@ import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/in
 import { royalCommandDigest } from '../../src/root-of-trust/crown.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/index.mjs';
-import { registerTestKing } from '../helpers/royal-halt-command.mjs';
+import {
+  kingIdOfPublicKey,
+  registerTestKing,
+  royalKeyEnv,
+  signRoyalCommand,
+} from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 /** مقبسُ حداثةٍ للاختبارِ بلا علامةِ testFixture — يَلفُّ InMemoryFreshnessSocket. */
 class TestFreshnessSocket {
@@ -98,7 +106,7 @@ function fixedKeys() {
   };
 }
 
-function rig({ freshnessSocket = null, keys } = {}) {
+function rig({ freshnessSocket = null, keys, env: extraEnv = {} } = {}) {
   const k = keys ?? fixedKeys();
   const env = {
     NODE_ENV: 'production',
@@ -110,7 +118,9 @@ function rig({ freshnessSocket = null, keys } = {}) {
     XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
     XUUX_PKCS11_PIN: 'unused-by-injected-source',
     XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+    ...ROYAL_KEY.env,
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
+    ...extraEnv,
   };
   const testClock = {
     now: () => Date.now(),
@@ -196,20 +206,21 @@ function sealedTypes(system) {
 }
 
 describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقطةِ الإنفاذِ الإنتاجيّة', () => {
-  test('A1 — الحدُّ موصولٌ بالنقطةِ الفعليّةِ نفسِها ومبنيٌّ على مفتاحِ التوكن', async () => {
+  test('A1 — الحدُّ موصولٌ بالنقطةِ الفعليّةِ نفسِها ومبنيٌّ على المفتاحِ الملكيِّ المُثبَّت', async () => {
     await withSystem(async ({ system }) => {
       const verifier = system.chain.enforcementPoint.royalCommandVerifier;
       assert.equal(typeof verifier, 'function');
       assert.strictEqual(system.kernel.enforcement, system.chain.enforcementPoint);
       const { trustedRoyalAuthorizationKeyId } =
         await import('../../src/root-of-trust/royal-authorization.mjs');
-      assert.equal(trustedRoyalAuthorizationKeyId(verifier), system.rootOfTrust.anchorSigner.id);
+      assert.equal(trustedRoyalAuthorizationKeyId(verifier), ROYAL_KEY.env.XUUX_ROYAL_KEY_ID);
+      assert.notEqual(trustedRoyalAuthorizationKeyId(verifier), system.rootOfTrust.anchorSigner.id);
     });
   });
 
   test('A2 — أمرٌ صحيحُ التوقيعِ مربوطٌ بالفعلِ والموردِ ⇒ تذكرة، وقبولُه في السجلِّ المختوم', async () => {
-    await withSystem(async ({ system, keys, actorId }) => {
-      const signed = signedCommand(keys.king);
+    await withSystem(async ({ system, actorId }) => {
+      const signed = signedCommand(ROYAL_KEY.pair);
       const { decision, token } = await system.chain.enforcementPoint.authorize(
         requestFor(actorId, signed),
       );
@@ -220,8 +231,8 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   });
 
   test('A3 — فعلٌ سياديٌّ بلا أمرٍ موقَّعٍ (معرّفٌ وملخّصٌ وحدَهما) ⇒ رفض', async () => {
-    await withSystem(async ({ system, keys, actorId }) => {
-      const signed = signedCommand(keys.king);
+    await withSystem(async ({ system, actorId }) => {
+      const signed = signedCommand(ROYAL_KEY.pair);
       const { decision, token } = await system.chain.enforcementPoint.authorize(
         requestFor(actorId, signed, { noCommand: true }),
       );
@@ -233,7 +244,7 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
 
   test('A4 — توقيعٌ مزوَّرٌ أو بمفتاحٍ آخرَ (ولو مفتاحُ الدفترِ في التوكنِ نفسِه) ⇒ رفض', async () => {
     await withSystem(async ({ system, keys, actorId }) => {
-      const signed = signedCommand(keys.king);
+      const signed = signedCommand(ROYAL_KEY.pair);
       const forged = { ...signed, signature: 'A'.repeat(86) };
       const r1 = await system.chain.enforcementPoint.authorize(
         requestFor(actorId, signed, { royalCommand: forged }),
@@ -249,14 +260,14 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   });
 
   test('A5 — أمرٌ موقَّعٌ للفعلِ A يُقدَّمُ للفعلِ B، أو لموردٍ آخر ⇒ رفض', async () => {
-    await withSystem(async ({ system, keys, actorId }) => {
-      const forResume = signedCommand(keys.king, { action: 'resume-state' });
+    await withSystem(async ({ system, actorId }) => {
+      const forResume = signedCommand(ROYAL_KEY.pair, { action: 'resume-state' });
       const r1 = await system.chain.enforcementPoint.authorize(
         requestFor(actorId, forResume, { action: 'stop-state' }),
       );
       assert.equal(r1.decision.allowed, false);
       assert.match(r1.decision.reason, /ROYAL_AUTH_BINDING_MISMATCH/);
-      const signed = signedCommand(keys.king);
+      const signed = signedCommand(ROYAL_KEY.pair);
       const r2 = await system.chain.enforcementPoint.authorize(
         requestFor(actorId, signed, { target: 'state:other' }),
       );
@@ -266,9 +277,9 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   });
 
   test('A6 — أمرٌ صحيحُ التوقيعِ لفعلٍ خارجَ العتبةِ السياديّةِ لا يُجيزُ شيئاً', async () => {
-    await withSystem(async ({ system, keys }) => {
+    await withSystem(async ({ system }) => {
       const verifier = system.chain.enforcementPoint.royalCommandVerifier;
-      const signed = signedCommand(keys.king, { action: 'read-dashboard', target: 'dash:x' });
+      const signed = signedCommand(ROYAL_KEY.pair, { action: 'read-dashboard', target: 'dash:x' });
       const verdict = await verifier({
         id: signed.command.id,
         digest: royalCommandDigest(signed.command),
@@ -281,11 +292,11 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   });
 
   test('A7 — أمرٌ قديمٌ وأمرٌ من المستقبلِ ⇒ رفض', async () => {
-    await withSystem(async ({ system, keys, actorId }) => {
-      const old = signedCommand(keys.king, { issuedAt: '2020-01-01T00:00:00.000Z' });
+    await withSystem(async ({ system, actorId }) => {
+      const old = signedCommand(ROYAL_KEY.pair, { issuedAt: '2020-01-01T00:00:00.000Z' });
       const r1 = await system.chain.enforcementPoint.authorize(requestFor(actorId, old));
       assert.match(r1.decision.reason, /ROYAL_AUTH_EXPIRED/);
-      const future = signedCommand(keys.king, {
+      const future = signedCommand(ROYAL_KEY.pair, {
         issuedAt: new Date(Date.now() + 3_600_000).toISOString(),
       });
       const r2 = await system.chain.enforcementPoint.authorize(requestFor(actorId, future));
@@ -294,8 +305,8 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   });
 
   test('A8 — الأمرُ نفسُه يُقدَّمُ مرّتين ⇒ الثانيةُ رفض', async () => {
-    await withSystem(async ({ system, keys, actorId }) => {
-      const signed = signedCommand(keys.king);
+    await withSystem(async ({ system, actorId }) => {
+      const signed = signedCommand(ROYAL_KEY.pair);
       const first = await system.chain.enforcementPoint.authorize(requestFor(actorId, signed));
       assert.equal(first.decision.allowed, true, first.decision.reason);
       const second = await system.chain.enforcementPoint.authorize(requestFor(actorId, signed));
@@ -307,8 +318,8 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   test('A9 — أمرٌ ثُبِّتَ في الدفترِ الدائمِ يُعادُ بعدَ إعادةِ التشغيلِ ⇒ رفض', async () => {
     const root = tmpRoot();
     const socket = new TestFreshnessSocket(0n, 'wl303');
-    const { boot, keys } = rig({ freshnessSocket: socket });
-    const signed = signedCommand(keys.king);
+    const { boot } = rig({ freshnessSocket: socket });
+    const signed = signedCommand(ROYAL_KEY.pair);
     let system = await boot(root);
     try {
       // التثبيتُ في الدفترِ الدائمِ بمسارِه الإنتاجيِّ (‏موقَّعاً بمفتاحِ `07`).
@@ -354,8 +365,8 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   });
 
   test('A11 — الرفضُ في السجلِّ المختومِ بلا توقيعٍ ولا مادّةِ مفتاح', async () => {
-    await withSystem(async ({ system, keys, actorId }) => {
-      const signed = signedCommand(keys.king);
+    await withSystem(async ({ system, actorId }) => {
+      const signed = signedCommand(ROYAL_KEY.pair);
       const forged = { ...signed, signature: 'B'.repeat(86) };
       await system.chain.enforcementPoint.authorize(
         requestFor(actorId, signed, { royalCommand: forged }),
@@ -387,7 +398,7 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
   test('A13 — حدُّ التنفيذِ: التذكرةُ الصحيحةُ لا تُشغِّلُ المُعالِجَ ما دامَ التاجُ لا يختمُ في الإنتاج', async () => {
     // قياسٌ لا تزيين: المرحلةُ الأخيرةُ (‏`CrownGateway.command` المتزامنُ على سجلٍّ مختومٍ
     // ودفترٍ موقَّعٍ) ما زالت تُغلَقُ في الإنتاج — دَينٌ مسجَّلٌ، والمُعالِجُ لا يُنادى.
-    await withSystem(async ({ system, keys }) => {
+    await withSystem(async ({ system }) => {
       const agent = await system.chain.registry.register({ name: 'e2e', role: 'role:king' });
       const command = {
         id: 'cmd:' + randomUUID(),
@@ -400,7 +411,7 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
       const signature = softwareSign(
         null,
         Buffer.from(JSON.stringify(command)),
-        keys.king.privateKey,
+        ROYAL_KEY.pair.privateKey,
       ).toString('base64url');
       const { decision, token } = await system.chain.enforcementPoint.authorize(
         requestFor(agent.id, { command, signature }),
@@ -416,5 +427,97 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
       );
       assert.equal(ran, false);
     });
+  });
+});
+
+describe('WL-303 — LIVE-24: المفتاحُ الملكيُّ غيرُ مفتاحِ المرساة', () => {
+  test('L1 — المعرّفاتُ الثلاثةُ مختلفةٌ، ومُحقِّقُ الإيقافِ على المفتاحِ الملكيِّ لا على `06`', async () => {
+    await withSystem(async ({ system }) => {
+      const royal = ROYAL_KEY.env.XUUX_ROYAL_KEY_ID;
+      const anchor = system.rootOfTrust.anchorSigner.id;
+      const ledger = system.rootOfTrust.ledgerSigner.id;
+      assert.equal(new Set([royal, anchor, ledger.replace(/^ledger:/, 'king:')]).size, 3);
+      assert.equal(system.rootOfTrust.haltSwitch.royalKeyId, royal);
+      assert.equal(system.rootOfTrust.haltSwitch.king.id, anchor);
+    });
+  });
+
+  test('L2 — أمرٌ سياديٌّ موقَّعٌ بمفتاحِ المرساةِ (‏`06`) يُرفَضُ عندَ نقطةِ الإنفاذ', async () => {
+    await withSystem(async ({ system, keys, actorId }) => {
+      const byAnchor = signedCommand(keys.king);
+      const r = await system.chain.enforcementPoint.authorize(requestFor(actorId, byAnchor));
+      assert.equal(r.decision.allowed, false);
+      assert.match(r.decision.reason, /ROYAL_AUTH_SIGNATURE_INVALID/);
+    });
+  });
+
+  test('L3 — أمرُ إيقافٍ موقَّعٌ بمفتاحِ المرساةِ يُرفَضُ، وبالمفتاحِ الملكيِّ يُقبَل', async () => {
+    await withSystem(async ({ system, keys }) => {
+      registerTestKing(keys.king);
+      const halt = system.rootOfTrust.haltSwitch;
+      const forged = signRoyalCommand(keys.king, {
+        operation: 'halt',
+        targetEpoch: halt.read().epoch,
+        reason: 'مفتاحُ العُقدة',
+      });
+      await assert.rejects(
+        () => halt.haltAsync('مفتاحُ العُقدة', forged),
+        /HALT_ROYAL_COMMAND_REQUIRED/,
+      );
+      const genuine = signRoyalCommand(ROYAL_KEY.pair, {
+        operation: 'halt',
+        targetEpoch: halt.read().epoch,
+        reason: 'أمرُ الملك',
+      });
+      await halt.haltAsync('أمرُ الملك', genuine);
+      assert.equal(halt.isHalted(), true);
+    });
+  });
+
+  test('L4 — توقيعُ المفتاحِ الملكيِّ لا يُقبَلُ توقيعَ مرساةٍ أو توجيه', async () => {
+    await withSystem(async ({ system }) => {
+      const payload = { kind: 'anchor', at: new Date().toISOString() };
+      const byRoyal = softwareSign(
+        null,
+        Buffer.from(JSON.stringify(payload)),
+        ROYAL_KEY.pair.privateKey,
+      ).toString('base64url');
+      assert.equal(system.rootOfTrust.anchorSigner.verify(payload, byRoyal), false);
+    });
+  });
+
+  test('L5 — الإقلاعُ يُرَدُّ إن كانَ المفتاحُ الملكيُّ مفتاحَ المرساةِ أو الدفترِ أو غابَ أو خالفَ تثبيتَه', async () => {
+    const keys = fixedKeys();
+    const pemOf = (pair) => pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const cases = [
+      [
+        {
+          XUUX_ROYAL_PUBLIC_KEY_PEM: pemOf(keys.king),
+          XUUX_ROYAL_KEY_ID: kingIdOfPublicKey(keys.king.publicKey),
+        },
+        /ROYAL_KEY_NOT_SEPARATED/,
+      ],
+      [
+        {
+          XUUX_ROYAL_PUBLIC_KEY_PEM: pemOf(keys.ledgerPair),
+          XUUX_ROYAL_KEY_ID: kingIdOfPublicKey(keys.ledgerPair.publicKey),
+        },
+        /ROYAL_KEY_NOT_SEPARATED/,
+      ],
+      [
+        { XUUX_ROYAL_PUBLIC_KEY_PEM: '', XUUX_ROYAL_KEY_ID: '' },
+        /ROYAL_KEY_REQUIRED_IN_PRODUCTION/,
+      ],
+      [{ XUUX_ROYAL_KEY_ID: 'king:' + '0'.repeat(24) }, /ROYAL_KEY_PIN_MISMATCH/],
+    ];
+    for (const [env, expected] of cases) {
+      const root = tmpRoot();
+      try {
+        const { boot } = rig({ freshnessSocket: new TestFreshnessSocket(0n, 'wl303'), keys, env });
+        await assert.rejects(() => boot(root), expected);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
   });
 });

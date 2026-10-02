@@ -31,7 +31,10 @@ import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { createProductionRootOfTrust, fingerprint } from '../../src/root-of-trust/index.mjs';
 import { InMemoryFreshnessSocket } from '../../src/root-of-trust/index.mjs';
-import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
+import { registerTestKing, royalCommandFor, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 const MANIFEST = 'root-of-trust.manifest.json';
 
@@ -103,6 +106,7 @@ function rig({ freshnessSocket = null, production = true, keys } = {}) {
     XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
     XUUX_PKCS11_PIN: 'unused-by-injected-source',
     XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+    ...ROYAL_KEY.env,
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
   };
   const boot = (root) =>

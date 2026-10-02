@@ -29,6 +29,10 @@ import { tmpdir } from 'node:os';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { createProductionSystem } from '../../src/production/entrypoint.mjs';
 import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/index.mjs';
+import { royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 const MANIFEST = 'root-of-trust.manifest.json';
 
@@ -121,6 +125,7 @@ function rig({ freshnessSocket = null, keys } = {}) {
     XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
     XUUX_PKCS11_PIN: 'unused-by-injected-source',
     XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+    ...ROYAL_KEY.env,
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
   };
   // CI test clock — provides attestation() as required by CrownGateway in production.
@@ -262,6 +267,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
         XUUX_PKCS11_PIN: 'unused-by-injected-source',
         XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        ...ROYAL_KEY.env,
         XUUX_ROOT_OF_TRUST_PROVISION: '1',
       };
       // A source that exports keys — should be rejected
@@ -469,6 +475,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
         XUUX_PKCS11_PIN: 'unused-by-injected-source',
         XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        ...ROYAL_KEY.env,
         XUUX_ROOT_OF_TRUST_PROVISION: '1',
       };
       // No clock provided — AttestedClock.attest() fails (no Roughtime quorum in CI),
@@ -508,15 +515,21 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         // It should be created from HSM public key via kingIdentityFromPublicKey
         const king = system.crown.king;
         assert.ok(king, 'King identity must be present');
-        // King ID must match the HSM anchor signer's key fingerprint
-        const expectedId = 'king:' + fingerprint(keys.king.publicKey).slice(0, 24);
-        assert.strictEqual(king.id, expectedId, 'King ID must match HSM public key fingerprint');
+        // `LIVE-24` (‏`WL-303`): هويّةُ التاجِ هي المفتاحُ الملكيُّ المُثبَّتُ، **لا** مفتاحُ
+        // المرساةِ في التوكن — وما زالت من مفتاحٍ عامٍّ لا من مادّةٍ برمجيّة.
+        const expectedId = ROYAL_KEY.env.XUUX_ROYAL_KEY_ID;
+        assert.strictEqual(king.id, expectedId, 'King ID must match the pinned royal key');
+        assert.notStrictEqual(
+          king.id,
+          'king:' + fingerprint(keys.king.publicKey).slice(0, 24),
+          'Crown king must not be the HSM anchor key',
+        );
         // King certificate must expose the HSM public key, not a generated one
         const cert = king.certificate();
         assert.strictEqual(
           cert.publicKey,
-          keys.king.publicKey.export({ type: 'spki', format: 'pem' }),
-          'King certificate must match HSM public key',
+          ROYAL_KEY.env.XUUX_ROYAL_PUBLIC_KEY_PEM,
+          'King certificate must match the pinned royal public key',
         );
         // Verify it's from the HSM public key, not a generated key pair
         assert.doesNotThrow(
@@ -552,6 +565,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
         XUUX_PKCS11_PIN: 'unused',
         XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        ...ROYAL_KEY.env,
         XUUX_ROOT_OF_TRUST_PROVISION: '1',
       };
       const testClock = {
@@ -610,6 +624,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
         XUUX_PKCS11_MODULE_SHA256: 'f'.repeat(64),
         XUUX_PKCS11_PIN: 'unused',
         XUUX_KING_ID: 'king:' + fingerprint(k.king.publicKey).slice(0, 24),
+        ...ROYAL_KEY.env,
         XUUX_ROOT_OF_TRUST_PROVISION: '1',
       };
       const socket = new TestFreshnessSocket(0n, 'test');

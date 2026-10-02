@@ -22,6 +22,7 @@ import { Buffer } from 'node:buffer';
 
 import { createProductionSystem } from '../../../src/production/entrypoint.mjs';
 import { InMemoryFreshnessSocket, fingerprint } from '../../../src/root-of-trust/index.mjs';
+import { royalKeyEnv } from '../../helpers/royal-halt-command.mjs';
 
 function stableToken(king, aeadKey, ledgerPair) {
   const aad = Buffer.from('xuux-event');
@@ -88,6 +89,8 @@ const env = {
 
 const k = fixedKeys();
 env.XUUX_KING_ID = 'king:' + fingerprint(k.king.publicKey).slice(0, 24);
+// `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساة.
+Object.assign(env, royalKeyEnv().env);
 
 const root = mkdtempSync(join(tmpdir(), 'xuux-subprocess-boot-'));
 const socket = new InMemoryFreshnessSocket(0n, 'subprocess-test');
@@ -137,8 +140,9 @@ try {
   const result = {
     ok: true,
     kingId: king?.id ?? null,
-    expectedKingId: env.XUUX_KING_ID,
-    kingIdMatches: king?.id === env.XUUX_KING_ID,
+    // `LIVE-24`: هويّةُ التاجِ هي المفتاحُ الملكيُّ المُثبَّتُ لا مفتاحُ المرساة.
+    expectedKingId: env.XUUX_ROYAL_KEY_ID,
+    kingIdMatches: king?.id === env.XUUX_ROYAL_KEY_ID && king?.id !== env.XUUX_KING_ID,
     signThrows: false,
     verifyWorks: false,
   };

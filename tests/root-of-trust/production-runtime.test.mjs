@@ -57,8 +57,11 @@ import {
   stateManifestPath,
   stateManifestBinding,
 } from '../../src/root-of-trust/index.mjs';
-import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
+import { registerTestKing, royalCommandFor, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
 import { createRoyalCommandVerifier } from '../../src/root-of-trust/royal-command.mjs';
+
+/** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
+const ROYAL_KEY = royalKeyEnv();
 
 /**
  * بيئةُ إنتاجٍ كاملةُ الشرطِ. وWL-094 (`UF-05`) شدَّت الشرطَ: الرقمُ التسلسليُّ
@@ -77,6 +80,7 @@ const PRODUCTION_ENV = Object.freeze({
   // هويةٌ نائبةٌ صحيحةُ الصيغةِ لاختباراتِ ما قبلَ فتحِ التوكن؛ و`buildRuntime`
   // يستبدلُها بهويةِ مفتاحِ البديلِ الحقيقيةِ فلا يمرُّ إقلاعٌ بهويةٍ لا تُقابَل.
   XUUX_KING_ID: 'king:' + '0'.repeat(24),
+  ...ROYAL_KEY.env,
   XUUX_PKCS11_PIN: 'fake-pin-not-used-by-injected-source', // secret-scan:allow
   XUUX_ROOT_OF_TRUST_PROVISION: '1',
 });
@@ -155,7 +159,7 @@ async function buildRuntime(options = {}) {
   const token = options.token ?? fakeToken({ king });
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'prod-rt');
   const runtime = await createProductionRootOfTrust(
-    { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) },
+    { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...ROYAL_KEY.env, ...(options.env ?? {}) },
     {
       root,
       fsync: false,
@@ -741,7 +745,7 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
     await assert.rejects(
       () =>
         createProductionRootOfTrust(
-          { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+          { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...ROYAL_KEY.env },
           { root, fsync: false, freshnessSocket },
           { openSource: async () => ({ source: token, close: async () => undefined }) },
         ),
@@ -781,7 +785,7 @@ test('UF-01: شاهدُ مراسٍ موجبٌ ومخزنُ المراسي مُز
 
     const refused = await caughtAsync(() =>
       createProductionRootOfTrust(
-        { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+        { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...ROYAL_KEY.env },
         { root, fsync: false, freshnessSocket },
         { openSource: async () => ({ source: token, close: async () => undefined }) },
       ),
@@ -836,7 +840,7 @@ test('UF-01: سجلٌّ أقصرُ ممّا تشهدُ به مرساةٌ قائ�
 
     const refused = await caughtAsync(() =>
       createProductionRootOfTrust(
-        { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+        { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...ROYAL_KEY.env },
         { root, fsync: false, freshnessSocket },
         { openSource: async () => ({ source: token, close: async () => undefined }) },
       ),
@@ -1243,7 +1247,7 @@ test('R5-B-07: runtime بلا مُحقّقٍ يرفضُ resumeAsync على حا�
 
     // أعد الفتح بنفس الجذر والمفتاح لكن بلا مُحقّق
     const runtime2 = await createProductionRootOfTrust(
-      { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) },
+      { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...ROYAL_KEY.env },
       { root, fsync: false, royalCommandVerifier: null, freshnessSocket },
       { openSource: async () => ({ source: token, close: async () => undefined }) },
     );

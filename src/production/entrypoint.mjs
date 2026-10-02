@@ -114,6 +114,10 @@ export async function createProductionSystem(env, options, deps = {}) {
 
   // 4. هويةُ الملكِ من HSM — المفتاحُ العامُّ وحدَه، بلا مفتاحٍ خاصٍّ في الذاكرةِ.
   const kingIdentity = kingIdentityFromPublicKey(rootOfTrust.anchorSigner.publicKeyPem);
+  // `LIVE-24` (‏`WL-303`): هويّةُ العُقدةِ (‏مفتاحُ المرساةِ `06`) تُصدِرُ شهاداتِ الوكلاءِ،
+  // و**الهويّةُ الملكيّةُ** (‏مفتاحٌ عامٌّ مُثبَّتٌ لا خاصَّ له على العُقدة) وحدَها تُجيزُ
+  // الأوامرَ السياديّةَ عندَ التاجِ وحدِّ التفويض. فلا يُقبَلُ توقيعُ العُقدةِ أمراً.
+  const royalIdentity = kingIdentityFromPublicKey(rootOfTrust.royalPublicKeyPem);
 
   // 5. سلطةُ التصديقِ من جذرِ الثقةِ — مخزنُ سحبٍ دائمٌ لا ذاكرةٌ.
   const authority = new CertificateAuthority(kingIdentity, {
@@ -172,7 +176,7 @@ export async function createProductionSystem(env, options, deps = {}) {
   // سجلُّ السلسلةِ: الإلحاقُ مختومٌ مرتَّبٌ، والتذكرةُ تنتظرُ ختمَ قيدِها.
   const enforcementLog = sealedAudit(/** @type {never} */ (rootOfTrust.log));
   const royalAuthorization = createRoyalAuthorization({
-    king: kingIdentity,
+    king: royalIdentity,
     clock: /** @type {{ now(): number }} */ (clock),
     commandLedger: rootOfTrust.ledger,
     sovereignActions: loadPolicyBundle().threshold.map((entry) => entry.action),
@@ -193,7 +197,7 @@ export async function createProductionSystem(env, options, deps = {}) {
   rootOfTrust.haltSwitch.useTrustedClock(/** @type {{ now(): number }} */ (clock));
 
   // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
-  const crown = new CrownGateway(kingIdentity, authority, rootOfTrust.log, {
+  const crown = new CrownGateway(royalIdentity, authority, rootOfTrust.log, {
     commandLedger: rootOfTrust.ledger,
     haltSwitch: rootOfTrust.haltSwitch,
     clock,

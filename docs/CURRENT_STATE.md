@@ -52,6 +52,8 @@ production-entry.mjs
             · دفترُ أوامرَ موقَّعٌ (CommandLedger) ومخزنُ سحبٍ دائمٌ (FileRevocationStore)
             · مفتاحُ إيقافٍ (HaltSwitch) بمُتحقِّقِ أوامرَ ملكيّةٍ مشتقٍّ من مفتاحِ HSM العامِّ
        4. هويّةُ الملكِ من المفتاحِ العامِّ وحدَه (kingIdentityFromPublicKey)
+          · وهويّةُ التاجِ والأمرِ السياديِّ من المفتاحِ الملكيِّ المُثبَّتِ (XUUX_ROYAL_PUBLIC_KEY_PEM/XUUX_ROYAL_KEY_ID)
+            لا من مفتاحِ المرساةِ 06 — وتطابقُهما يُرَدُّ ROYAL_KEY_NOT_SEPARATED (LIVE-24، WL-303)
        5. CertificateAuthority بمخزنِ السحبِ الدائمِ
        6. AttestedClock — نصابُ مصادرِ Roughtime موقَّعةٍ (config/time.yaml)، ولا سقوطَ إلى Date.now()
        7. composeEnforcementChain — هويّةٌ ← حَجرٌ ← سياسةٌ ← حدُّ السلطةِ الملكيّةِ ← تذكرةٌ

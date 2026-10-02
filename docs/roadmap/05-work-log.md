@@ -2,7 +2,7 @@
 
 ### [2026-10-02] — WL-303 — `R6-A-07`: حدُّ السلطةِ الملكيّةِ عندَ نقطةِ الإنفاذِ الإنتاجيّةِ نفسِها (‏مصادقةٌ ⇒ تفويضٌ ⇒ سياسةٌ ⇒ تنفيذٌ)؛ وإصدارُ الشهاداتِ بالتوكنِ؛ وسجلُّ السلسلةِ مختوماً؛ وتوثيقُ دورةِ ما بعدَ `#211`
 
-**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R6-A-07` (‏تنفيذٌ عندَ نقطةِ الإنفاذِ ⇒ إعادةُ اختبارِ المجلسِ)، و`LIVE-25` (‏جديدٌ §4.6)
+**المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R6-A-07` (‏تنفيذٌ عندَ نقطةِ الإنفاذِ ⇒ إعادةُ اختبارِ المجلسِ)، و`LIVE-24` (‏فصلُ المفتاحِ الملكيِّ ⇒ إعادةُ اختبار)، و`LIVE-25` (‏جديدٌ §4.6)
 
 **الحالةُ بعدَ العمل:** حدُّ التفويضِ الملكيِّ موصولٌ بـ`system.chain.enforcementPoint` في `createProductionSystem` ومقيسٌ بثلاثةَ عشرَ اختباراً على النظامِ الإنتاجيِّ المُقلَعِ. **لا تغييرَ** في `config/external-review.yaml` ولا في `version.json` ولا في النسبة. ومرحلةُ التنفيذِ بعدَ التذكرةِ ما زالت مغلقةً في الإنتاجِ (‏`LIVE-25`).
 
@@ -34,11 +34,13 @@
 - **`CertificateAuthority.issueAsync`** بموقِّعِ التوكنِ (‏ومعرّفُه يجبُ أن يطابقَ الملكَ ⇒ وإلّا `CERTIFICATE_SIGNER_KEY_MISMATCH`)، و`AgentRegistry.register` يستعملُه وينتظرُ ختمَ قيدِه.
 - **`src/production/entrypoint.mjs`:** الساعةُ المُبرهَنةُ قبلَ السلسلةِ، والحدُّ مبنيٌّ على `kingIdentity` والساعةِ و`rootOfTrust.ledger` والعتبةِ، والسلسلةُ على `sealedAudit(rootOfTrust.log)`.
 - **`config/events.yaml`:** عقدا `crown.authorization.accepted`/`rejected`.
-- **`tests/production/wl-303-sovereign-authorization.test.mjs` (‏13):** `A1` الحدُّ هو مُحقِّقُ `system.chain.enforcementPoint` نفسِها، وهي نقطةُ النواةِ (‏`kernel.enforcement`)، ومعرّفُه معرّفُ `anchorSigner` — لا `HaltSwitch` ولا مُساعِد · `A2` صحيحٌ مأذونٌ ⇒ تذكرةٌ وقبولٌ مختومٌ · `A3` بلا أمرٍ · `A4` مزوَّرٌ وبمفتاحِ الدفترِ `07` وبمفتاحٍ غريبٍ · `A5` أمرُ `resume-state` لـ`stop-state` ومورِدٌ آخرُ · `A6` فعلٌ خارجَ العتبةِ · `A7` قديمٌ ومستقبليٌّ · `A8` إعادةٌ · `A9` إعادةٌ بعدَ إعادةِ التشغيلِ (‏مُثبَّتٌ بـ`commitSigned`) · `A10` `crown` نصّاً · `A11` الرفضُ مختومٌ بلا توقيعٍ · `A12` المُرتجَلُ يُرَدُّ · `A13` التنفيذُ مغلقٌ (‏`LIVE-25`).
+- **`LIVE-24` — فصلُ المفتاحِ الملكيِّ عن مفتاحِ العُقدة:** `loadPinnedRoyalPublicKey` في `production-boot.mts` — المفتاحُ الملكيُّ **عامٌّ وحدَه** على العُقدةِ (‏`XUUX_ROYAL_PUBLIC_KEY_PEM`، Ed25519) مثبَّتٌ ببصمتِه (‏`XUUX_ROYAL_KEY_ID`)، وخاصُّه عندَ الملكِ لا في التوكن؛ فمن يملكُ PIN التوكنِ لا يوقّعُ به. في الإنتاجِ: غيابُه ⇒ `ROYAL_KEY_REQUIRED_IN_PRODUCTION`، مخالفةُ البصمةِ ⇒ `ROYAL_KEY_PIN_MISMATCH`، ومطابقتُه مفتاحَ المرساةِ `06` أو الدفترِ `07` ⇒ `ROYAL_KEY_NOT_SEPARATED`. ومنه وحدَه: مُحقِّقُ أوامرِ الإيقافِ في `createProductionRootOfTrust` (‏`runtime.royalPublicKeyPem`، و`HaltSwitch.royalKeyId`)، وهويّةُ `CrownGateway`، وحدُّ التفويض. ويبقى مفتاحُ المرساةِ لمراسي العُقدةِ وتوجيهاتِ الإيقافِ وإصدارِ شهاداتِ الوكلاء. وخارجَ الإنتاجِ وحدَه يُسقَطُ إلى مفتاحِ المرساةِ إن غابَ المتغيّران (‏التركيبُ القديمُ للاختبارات). والمتغيّرانِ في `config/environment.yaml` و`docs/ENVIRONMENT.md`.
+- **تجهيزاتُ الاختبارِ الإنتاجيّةُ (‏11 ملفّاً و`tests/production/fixtures/subprocess-boot.mjs`):** تُقلِعُ بمفتاحٍ ملكيٍّ مستقلٍّ (‏`royalKeyEnv()` في `tests/helpers/royal-halt-command.mjs`)، و`royalCommandFor` يوقّعُ بالمفتاحِ الذي بُنيَ عليه المُحقِّقُ. و`J` في `entrypoint.test.mjs` و`S0` صارا يقيسانِ أنّ هويّةَ التاجِ هي المفتاحُ الملكيُّ **وليست** مفتاحَ المرساةِ — تغييرٌ في المعنى مقصودٌ بـ`LIVE-24` لا تليينٌ.
+- **`tests/production/wl-303-sovereign-authorization.test.mjs` (‏13):** `A1` الحدُّ هو مُحقِّقُ `system.chain.enforcementPoint` نفسِها، وهي نقطةُ النواةِ (‏`kernel.enforcement`)، ومعرّفُه معرّفُ `anchorSigner` — لا `HaltSwitch` ولا مُساعِد · `A2` صحيحٌ مأذونٌ ⇒ تذكرةٌ وقبولٌ مختومٌ · `A3` بلا أمرٍ · `A4` مزوَّرٌ وبمفتاحِ الدفترِ `07` وبمفتاحٍ غريبٍ · `A5` أمرُ `resume-state` لـ`stop-state` ومورِدٌ آخرُ · `A6` فعلٌ خارجَ العتبةِ · `A7` قديمٌ ومستقبليٌّ · `A8` إعادةٌ · `A9` إعادةٌ بعدَ إعادةِ التشغيلِ (‏مُثبَّتٌ بـ`commitSigned`) · `A10` `crown` نصّاً · `A11` الرفضُ مختومٌ بلا توقيعٍ · `A12` المُرتجَلُ يُرَدُّ · `A13` التنفيذُ مغلقٌ (‏`LIVE-25`). **ولـ`LIVE-24` (‏5):** `L1` المعرّفاتُ الثلاثةُ مختلفةٌ ومُحقِّقُ الإيقافِ على المفتاحِ الملكيِّ · `L2` أمرٌ سياديٌّ بمفتاحِ المرساةِ ⇒ `ROYAL_AUTH_SIGNATURE_INVALID` · `L3` أمرُ إيقافٍ بمفتاحِ المرساةِ ⇒ `HALT_ROYAL_COMMAND_REQUIRED` وبالملكيِّ ⇒ موقوف · `L4` توقيعُ الملكيِّ لا يُقبَلُ توقيعَ مرساة · `L5` الإقلاعُ يُرَدُّ بالرموزِ الأربعةِ أعلاه.
 
 #### الملفاتُ المتأثّرة
 
-`src/root-of-trust/royal-authorization.mts` · `src/root-of-trust/sealed-audit.mts` · `src/root-of-trust/identity.mts` · `src/policy/enforcement-point.mjs` · `src/identity/agent-registry.mjs` · `src/production/entrypoint.mjs` · `config/events.yaml` · `tests/production/wl-303-sovereign-authorization.test.mjs` · `docs/ROOT_OF_TRUST.md` (‏232 ملفَّ اختبارٍ) · `docs/CURRENT_STATE.md` · `docs/roadmap/06-debt-register.md` (‏`LIVE-25`) · `PROJECT_STATUS.md` · `docs/roadmap/05-work-log.md`
+`src/root-of-trust/royal-authorization.mts` · `src/root-of-trust/sealed-audit.mts` · `src/root-of-trust/identity.mts` · `src/policy/enforcement-point.mjs` · `src/identity/agent-registry.mjs` · `src/production/entrypoint.mjs` · `config/events.yaml` · `src/root-of-trust/production-boot.mts` · `src/root-of-trust/production-runtime.mts` · `src/root-of-trust/halt-switch.mts` · `config/environment.yaml` · `docs/ENVIRONMENT.md` · `tests/helpers/royal-halt-command.mjs` · تجهيزاتُ الإقلاعِ في `tests/root-of-trust/` و`tests/production/` و`tests/tooling/production-cli-hsm.test.mjs` · `tests/production/wl-303-sovereign-authorization.test.mjs` · `docs/ROOT_OF_TRUST.md` (‏232 ملفَّ اختبارٍ) · `docs/CURRENT_STATE.md` · `docs/roadmap/06-debt-register.md` (‏`LIVE-25`) · `PROJECT_STATUS.md` · `docs/roadmap/05-work-log.md`
 
 #### الـ commit
 
@@ -46,14 +48,15 @@
 
 #### الدليل
 
-- `node --test tests/production/wl-303-sovereign-authorization.test.mjs` ⇒ `pass 13 · fail 0` (‏على الفرعِ) و`pass 0 · fail 13` (‏على `main@23d07212`).
+- `node --test tests/production/wl-303-sovereign-authorization.test.mjs` ⇒ `pass 18 · fail 0` (‏على الفرعِ؛ 13 لـ`R6-A-07` و5 لـ`LIVE-24`)، و`pass 0 · fail 13` لاختباراتِ `R6-A-07` على `main@23d07212`.
+- `node --test tests/root-of-trust/ tests/production/ tests/tooling/production-cli-hsm.test.mjs` ⇒ `tests 549 · pass 542 · fail 0 · skipped 7` (‏السبعةُ توكنُ SoftHSM حقيقيٌّ).
 - `node /tmp/bypass-probe.mjs` قبلُ/بعدُ كما أعلاه.
 - `npm run validate` ورمزُ خروجِه، وCI على الطلبِ — في نصِّ الطلب.
 
 #### ما لم يتمَّ ولماذا
 
 - **التنفيذُ بعدَ التذكرةِ في الإنتاجِ (‏`LIVE-25`):** `CrownGateway.command` متزامنٌ على سجلٍّ مختومٍ ودفترٍ موقَّعٍ. تحويلُه غيرَ متزامنٍ يمسُّ النواةَ وكلَّ مُستدعيها — دفعةٌ تاليةٌ لا تُخلَطُ بهذه.
-- **`LIVE-24`:** الحدُّ مبنيٌّ على مفتاحِ `06` نفسِه (‏مفتاحِ المرساةِ). فصلُ المفتاحِ الملكيِّ دفعةٌ تاليةٌ.
+- **`LIVE-24` لا يُعلَنُ مُغلَقاً:** الفصلُ منفَّذٌ ومقيسٌ في الكودِ، لكنّ **حفظَ الخاصِّ خارجَ العُقدةِ** (‏غيرَ متّصلٍ أو على توكنٍ ثانٍ) وطقسَ توليدِه وإعلانَ عامِّه **قرارُ المالكِ وعتادُه** — ولا يُقاسُ في المستودع. ولا تُوجَدُ أداةٌ في `scripts/` توقّعُ أمراً سياديّاً بالمفتاحِ الملكيّ.
 - **`R6-A-07` لا يُغلَقُ هنا:** الإغلاقُ للمجلسِ بعدَ إعادةِ الاختبار.
 
 #### الأثرُ على المساراتِ الأخرى

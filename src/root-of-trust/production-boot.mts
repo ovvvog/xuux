@@ -32,6 +32,8 @@
 // ذاك عملُ `pkcs11-provider.mts` عند فتحِ الجلسةِ وعملُ `hsm-binding.mts` عند
 // ربطِ الأدوار. ما تُثبته هنا: **لا مسارَ برمجيّاً مفتوحاً في الإنتاج**.
 
+import { createHash, createPublicKey, type KeyObject } from 'node:crypto';
+
 /**
  * متغيّراتُ البيئةِ التي تُعلن وضعَ التشغيل، بترتيبِ الأولويّة: `STATE_ENV`
  * يسبق `NODE_ENV` كما في `src/persistence/db.mjs` و`src/data/encryption.mjs`،
@@ -118,6 +120,10 @@ export const ProductionBootErrorCodes = [
   'RUNTIME_ENV_INVALID',
   'HSM_PINNING_REQUIRED_IN_PRODUCTION',
   'KING_IDENTITY_PIN_MISMATCH',
+  'ROYAL_KEY_REQUIRED_IN_PRODUCTION',
+  'ROYAL_KEY_INVALID',
+  'ROYAL_KEY_PIN_MISMATCH',
+  'ROYAL_KEY_NOT_SEPARATED',
 ] as const;
 
 export type ProductionBootErrorCode = (typeof ProductionBootErrorCodes)[number];
@@ -275,6 +281,48 @@ export function assertKingIdentityPinned(
     // تُقرأُ في سجلٍّ فلا يُضاف إليها ما لا يلزمُ التشخيص.
     throw new ProductionBootError('KING_IDENTITY_PIN_MISMATCH', 'XUUX_KING_ID');
   }
+}
+
+/**
+ * `LIVE-24` (‏`WL-303`): **المفتاحُ الملكيُّ غيرُ مفتاحِ العُقدة.** مفتاحُ المرساةِ (‏`06`)
+ * في التوكنِ توقّعُ به العُقدةُ مراسيَها وتوجيهاتِها، ومن يملكُ رقمَ PIN التوكنِ يوقّعُ
+ * به. فلو كانَ هو مفتاحَ الأمرِ الملكيِّ لأمرَت العُقدةُ نفسَها. فالمفتاحُ الملكيُّ
+ * **عامٌّ وحدَه هنا** — خاصُّه عندَ الملكِ لا على العُقدة — ومصدرُه مُعلَنٌ مثبَّتٌ:
+ *   • `XUUX_ROYAL_PUBLIC_KEY_PEM` — المفتاحُ العامُّ (‏Ed25519، SPKI PEM).
+ *   • `XUUX_ROYAL_KEY_ID` — بصمتُه المنتظرةُ `king:<sha256(spki)[0..24]>`.
+ * في الإنتاجِ كلاهما لازمٌ ويتطابقان؛ وخارجَه يُرجِعُ `null` إن غابا.
+ * @param env - البيئة
+ * @returns PEM المفتاحِ الملكيِّ العامِّ أو `null`
+ */
+export function loadPinnedRoyalPublicKey(env: NodeJS.ProcessEnv = process.env): string | null {
+  const pem = env.XUUX_ROYAL_PUBLIC_KEY_PEM;
+  const pinned = env.XUUX_ROYAL_KEY_ID;
+  if (!present(pem) || !present(pinned)) {
+    if (!isProductionRuntime(env) && !present(pem) && !present(pinned)) return null;
+    throw new ProductionBootError(
+      'ROYAL_KEY_REQUIRED_IN_PRODUCTION',
+      present(pem) ? 'XUUX_ROYAL_KEY_ID' : 'XUUX_ROYAL_PUBLIC_KEY_PEM',
+    );
+  }
+  let key: KeyObject;
+  try {
+    key = createPublicKey(pem as string);
+  } catch {
+    throw new ProductionBootError('ROYAL_KEY_INVALID', 'XUUX_ROYAL_PUBLIC_KEY_PEM');
+  }
+  if (key.type !== 'public' || key.asymmetricKeyType !== 'ed25519') {
+    throw new ProductionBootError('ROYAL_KEY_INVALID', 'XUUX_ROYAL_PUBLIC_KEY_PEM');
+  }
+  const id =
+    'king:' +
+    createHash('sha256')
+      .update(key.export({ type: 'spki', format: 'der' }))
+      .digest('hex')
+      .slice(0, 24);
+  if ((pinned as string).trim() !== id) {
+    throw new ProductionBootError('ROYAL_KEY_PIN_MISMATCH', 'XUUX_ROYAL_KEY_ID');
+  }
+  return key.export({ type: 'spki', format: 'pem' }).toString();
 }
 
 /**
