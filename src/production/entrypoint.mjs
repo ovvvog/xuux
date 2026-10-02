@@ -27,7 +27,10 @@
  */
 
 import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
-import { createProductionRootOfTrust } from '../root-of-trust/production-runtime.mjs';
+import {
+  createProductionRootOfTrust,
+  quarantineFromSealedLog,
+} from '../root-of-trust/production-runtime.mjs';
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
@@ -192,6 +195,11 @@ export async function createProductionSystem(env, options, deps = {}) {
     royalCommandVerifier: /** @type {never} */ (royalAuthorization),
   });
 
+  // 7أ. `R6-A-05` (‏`WL-305`): حالةُ الحجرِ تُعادُ من السجلِّ المختومِ **قبلَ** أن يُقبَلَ أيُّ
+  //     طلب — فإعادةُ التشغيلِ لا تُخرجُ محجوراً من حجرِه. ويُنتظَرُ ختمُ قيودِ الإعادة.
+  chain.quarantine.restore(await quarantineFromSealedLog(rootOfTrust.log));
+  await enforcementLog.flush();
+
   // 7ب. `WL-302`: حداثةُ الأمرِ الملكيِّ على مفتاحِ الإيقافِ تُقاسُ بالساعةِ
   //     الموثوقةِ نفسِها لا بساعةِ الجهاز — وبلاها يُرفَضُ كلُّ أمرٍ في الإنتاج.
   rootOfTrust.haltSwitch.useTrustedClock(/** @type {{ now(): number }} */ (clock));
@@ -228,8 +236,18 @@ export async function createProductionSystem(env, options, deps = {}) {
       if (attestationRenewalTimer !== null) {
         clearInterval(attestationRenewalTimer);
       }
+      // `R6-A-05` (‏`WL-305`): ما أُدرِجَ في طابورِ الختمِ يُختَمُ قبلَ الإغلاق — كانَ الإغلاقُ
+      // يُسقِطُ قيداً مُدرَجاً لم يُختَمْ (‏مثلاً `quarantine.isolated`) فيُطلَقُ المحجورُ بالإقلاعِ
+      // التالي. وفشلُ الختمِ يُرفَعُ بعدَ إغلاقِ الجذرِ لا يُبتلَع.
+      let flushError = null;
+      try {
+        await enforcementLog.flush();
+      } catch (error) {
+        flushError = error;
+      }
       rootOfTrust.log.close?.();
       await rootOfTrust.close();
+      if (flushError !== null) throw flushError;
     },
   };
 }

@@ -85,6 +85,7 @@ export const ProductionRuntimeErrorCodes = [
   // `R5-A-01`: واقعةُ التزامٍ مختومةٌ في السجلِّ لا يُفَكُّ ختمُها عندَ الإقلاعِ —
   // إفسادُ الجسمِ لا يُسقِطُ الشاهدَ بل يردُّ الإقلاعَ.
   'PRODUCTION_LEDGER_WITNESS_UNREADABLE',
+  'PRODUCTION_QUARANTINE_WITNESS_UNREADABLE',
   // `S13` (الجولةُ السادسةُ، `WL-237`): جذرٌ قائمٌ — أي بيانٌ مختومٌ كانَ على
   // القرصِ قبلَ هذا الإقلاعِ — بلا سجلِّ وقائعَ أو بلا رأسِه. غيابُ الشاهدِ
   // الثاني على جذرٍ قائمٍ محوٌ لا نشأةٌ، فيُرَدُّ فشلاً مُغلقاً كنظيرِه
@@ -768,6 +769,82 @@ export async function ledgerCommittedFromSealedLog(log: PersistentEventLog): Pro
     if (typeof count === 'number' && Number.isInteger(count) && count > highest) highest = count;
   }
   return highest;
+}
+
+/** محجورٌ كما يُعادُ بناؤه من السجلِّ المختوم (‏شكلُ `QuarantineWarden.restore`). */
+export interface WitnessedQuarantine {
+  subject: string;
+  kind: string;
+  incidentId: string;
+  at: string;
+}
+
+/**
+ * يُعيدُ بناءَ **حالةِ الحجرِ القائمةِ** من السجلِّ المختومِ (‏`R6-A-05`، `WL-305`).
+ *
+ * الثابتُ المنتهَكُ قبلَ الإصلاح: الحاجبُ يحفظُ المحجورينَ في الذاكرةِ، و`restore`
+ * موجودٌ ولا يناديه التركيبُ الإنتاجيُّ — فإعادةُ التشغيلِ تُخرجُ المحجورَ من الحجرِ
+ * بلا قرارٍ ولا سببٍ مسجَّل، والسجلُّ المختومُ نفسُه يشهدُ بـ`quarantine.isolated`.
+ * فيُقرأُ الشاهدُ بترتيبِه: `quarantine.isolated`/`quarantine.restored` يُدخِلُ،
+ * و`quarantine.released` يُخرِج. والفاعلُ في السجلِّ هو الموضوعُ المحجور.
+ *
+ * فشلُ فكِّ ختمِ واقعةِ حجرٍ يُرفَعُ برمزٍ نطاقيٍّ: واقعةُ حجرٍ لا يُقرأُ جسمُها لا
+ * تُسقَطُ فيُطلَقَ صاحبُها.
+ * **حدٌّ مُعلَنٌ:** من استرجعَ السجلَّ كلَّه إلى لقطةٍ أقدمَ متّسقةٍ لا يردُّه هذا
+ * الفحصُ — ذاك `EXT-6`.
+ * @param log - السجلُّ المحمَّلُ من القرص
+ * @returns المحجورونَ الآن بحسبِ السجلّ، مرتّبينَ بأوّلِ دخول
+ */
+export async function quarantineFromSealedLog(
+  log: PersistentEventLog,
+): Promise<WitnessedQuarantine[]> {
+  const current = new Map<string, WitnessedQuarantine>();
+  for (const event of log.events) {
+    const type = (event as { type?: unknown }).type;
+    if (
+      type !== 'quarantine.isolated' &&
+      type !== 'quarantine.restored' &&
+      type !== 'quarantine.released'
+    ) {
+      continue;
+    }
+    const subject = (event as { actor?: unknown }).actor;
+    if (typeof subject !== 'string' || subject === '') {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_QUARANTINE_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    if (type === 'quarantine.released') {
+      current.delete(subject);
+      continue;
+    }
+    let body: unknown;
+    try {
+      body = log.sealed ? await log.openEvent(event) : (event as { data?: unknown }).data;
+    } catch {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_QUARANTINE_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    const record = (body ?? {}) as { kind?: unknown; incidentId?: unknown };
+    if (typeof record.kind !== 'string' || record.kind === '') {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_QUARANTINE_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    if (current.has(subject)) continue;
+    const at = (event as { at?: unknown; timestamp?: unknown }).at;
+    current.set(subject, {
+      subject,
+      kind: record.kind,
+      incidentId: typeof record.incidentId === 'string' ? record.incidentId : '',
+      at: typeof at === 'string' ? at : '',
+    });
+  }
+  return [...current.values()];
 }
 
 /**
