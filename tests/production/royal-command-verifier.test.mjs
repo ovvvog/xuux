@@ -14,7 +14,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, sign as softwareSign } from 'node:crypto';
+import { generateKeyPairSync, randomBytes, sign as softwareSign } from 'node:crypto';
 import {
   createRoyalCommandVerifier,
   canonicalRoyalCommand,
@@ -31,6 +31,8 @@ function royalCommand(keys, operation, opts = {}) {
   const body = {
     operation,
     signerId: kingId,
+    commandId: opts.commandId ?? randomBytes(16).toString('hex'),
+    targetEpoch: opts.targetEpoch ?? 0,
     reason: opts.reason ?? 'test',
     at: opts.at ?? new Date().toISOString(),
   };

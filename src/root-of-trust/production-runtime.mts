@@ -57,7 +57,11 @@ import {
   STALE_MANIFEST_EPOCH,
   FRESHNESS_SOURCE_UNAVAILABLE,
 } from './freshness-socket.mjs';
-import { createRoyalCommandVerifier } from './royal-command.mjs';
+import {
+  createRoyalCommandVerifier,
+  royalKeyFingerprint,
+  trustedRoyalVerifierFingerprint,
+} from './royal-command.mjs';
 
 /** أخطاءُ المصنعِ الإنتاجيّ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
 export const ProductionRuntimeErrorCodes = [
@@ -91,6 +95,8 @@ export const ProductionRuntimeErrorCodes = [
   'PRODUCTION_FRESHNESS_SOCKET_REQUIRED',
   // P0 Freshness: البيانُ يتقدّمُ على المرجعِ الخارجيِّ بلا رفعٍ مُصرَّحٍ — تقدّمٌ غيرُ مُشروعٍ.
   'FRESHNESS_EPOCH_REGRESSION',
+  // `WL-302`: مُحقِّقُ أمرٍ ملكيٍّ محقونٌ ليس مبنيّاً على مفتاحِ الملكِ في التوكن.
+  'ROYAL_COMMAND_VERIFIER_UNTRUSTED',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -541,6 +547,21 @@ export async function createProductionRootOfTrust(
     // حيثُ يجوزُ الانتظار. وتاريخُ التوجيهاتِ موقَّعٌ ومسلسلٌ في ملفِّه أيضاً.
     // R5-B-07: مُتحقِّقُ الأمرِ الملكيِّ يُشتَقُّ من مفتاحِ HSM العامِّ،
     // لا من callback اختياري. لا يُمرَّرُ `() => true` إطلاقاً.
+    // `WL-302`: والمُحقِّقُ المحقونُ لا يُقبَلُ دالّةً مُرتجَلةً (‏`() => true`):
+    // يلزمُ أن يكونَ مبنيّاً بـ`createRoyalCommandVerifier` **على مفتاحِ الملكِ
+    // نفسِه في التوكن** — وإلّا فالحقنُ مسارٌ جانبيٌّ إلى السلطةِ السياديّة.
+    const anchorFingerprint = royalKeyFingerprint(signers.anchorSigner.publicKeyPem);
+    if (options.royalCommandVerifier !== undefined && options.royalCommandVerifier !== null) {
+      const injected = trustedRoyalVerifierFingerprint(options.royalCommandVerifier);
+      if (injected === null || injected !== anchorFingerprint) {
+        throw new ProductionRuntimeError(
+          'ROYAL_COMMAND_VERIFIER_UNTRUSTED',
+          injected === null
+            ? 'مُحقِّقٌ محقونٌ غيرُ مبنيٍّ بـcreateRoyalCommandVerifier'
+            : 'مُحقِّقٌ محقونٌ على مفتاحٍ غيرِ مفتاحِ الملكِ في التوكن',
+        );
+      }
+    }
     const royalCommandVerifier =
       options.royalCommandVerifier ?? createRoyalCommandVerifier(signers.anchorSigner.publicKeyPem);
     const haltSwitch = new HaltSwitch(

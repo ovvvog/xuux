@@ -60,6 +60,7 @@ import {
   fingerprint,
   haltEpochFromSealedLog,
 } from '../../src/root-of-trust/index.mjs';
+import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
 
 const PRODUCTION_ENV = Object.freeze({
   NODE_ENV: 'production',
@@ -91,8 +92,8 @@ function kingIdOf(pair) {
 function fakeToken(overrides = {}) {
   const aesKeys = new Map([['05', overrides.aead ?? randomBytes(32)]]);
   const edKeys = new Map([
-    ['06', overrides.king ?? generateKeyPairSync('ed25519')],
-    ['07', overrides.ledger ?? generateKeyPairSync('ed25519')],
+    ['06', overrides.king ?? registerTestKing(generateKeyPairSync('ed25519'))],
+    ['07', overrides.ledger ?? registerTestKing(generateKeyPairSync('ed25519'))],
   ]);
   const aad = Buffer.from('xuux-event');
   return {
@@ -136,13 +137,13 @@ function fakeToken(overrides = {}) {
  */
 async function bootRuntime(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-halt-witness-')));
-  const king = options.king ?? generateKeyPairSync('ed25519');
+  const king = options.king ?? registerTestKing(generateKeyPairSync('ed25519'));
   const token = options.token ?? fakeToken({ king });
   const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king), ...(options.env ?? {}) };
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'test');
   const runtime = await createProductionRootOfTrust(
     env,
-    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
+    { root, fsync: false, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -210,7 +211,10 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
       const olderJournal = existsSync(paths.journal) ? readFileSync(paths.journal) : null;
       assert.equal(first.runtime.manifest.read().haltEpoch, 0);
 
-      await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديٌّ مقيس', { id: 'test-cmd' });
+      await first.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديٌّ مقيس',
+        royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقافٌ سياديٌّ مقيس'),
+      );
       assert.equal(first.runtime.haltSwitch.read().state, 'halted');
       assert.equal(first.runtime.haltSwitch.read().epoch, 1);
       assert.equal(first.runtime.manifest.read().haltEpoch, 1);
@@ -244,7 +248,10 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
   test('الإيقافُ السياديُّ يُخلِّفُ واقعةً **مختومةً** في السجلِّ، ويُقرأُ عهدُها من التوكن', async () => {
     const first = await bootRuntime();
     try {
-      await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديٌّ مقيس', { id: 'test-cmd' });
+      await first.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديٌّ مقيس',
+        royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقافٌ سياديٌّ مقيس'),
+      );
       const events = first.runtime.log.events.filter((event) => event.type === 'halt.issued');
       assert.equal(events.length, 1);
       // الجسمُ مختومٌ لا صريحٌ: لا `epoch` مقروءٌ من القرصِ بلا توكن.
@@ -263,10 +270,16 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
     const first = await bootRuntime();
     try {
       const paths = manifestPaths(first.root);
-      await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديٌّ مقيس', { id: 'test-cmd' });
+      await first.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديٌّ مقيس',
+        royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقافٌ سياديٌّ مقيس'),
+      );
       const manifestAtEpochOne = readFileSync(paths.manifest);
       const journalAtEpochOne = existsSync(paths.journal) ? readFileSync(paths.journal) : null;
-      await first.runtime.haltSwitch.resumeAsync('استئنافٌ ملكيٌّ', { id: 'test-cmd' });
+      await first.runtime.haltSwitch.resumeAsync(
+        'استئنافٌ ملكيٌّ',
+        royalCommandFor(first.runtime.haltSwitch, 'resume', 'استئنافٌ ملكيٌّ'),
+      );
       assert.equal(first.runtime.haltSwitch.read().state, 'running');
       assert.equal(first.runtime.haltSwitch.read().epoch, 2);
       assert.equal(await haltEpochFromSealedLog(first.runtime.log), 2);
@@ -321,7 +334,10 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
   test('العبثُ بجسمِ الواقعةِ المختومِ أو قصُّ سطرِها يردُّ الإقلاعَ فشلاً مغلقاً', async () => {
     const tampered = await bootRuntime();
     try {
-      await tampered.runtime.haltSwitch.haltAsync('إيقافٌ سياديٌّ مقيس', { id: 'test-cmd' });
+      await tampered.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديٌّ مقيس',
+        royalCommandFor(tampered.runtime.haltSwitch, 'halt', 'إيقافٌ سياديٌّ مقيس'),
+      );
       tampered.close();
       const logFile = join(tampered.root, 'events.log');
       const lines = readFileSync(logFile, 'utf8').trimEnd().split('\n');
@@ -341,7 +357,10 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
 
     const truncated = await bootRuntime();
     try {
-      await truncated.runtime.haltSwitch.haltAsync('إيقافٌ سياديٌّ مقيس', { id: 'test-cmd' });
+      await truncated.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديٌّ مقيس',
+        royalCommandFor(truncated.runtime.haltSwitch, 'halt', 'إيقافٌ سياديٌّ مقيس'),
+      );
       truncated.close();
       const logFile = join(truncated.root, 'events.log');
       const kept = readFileSync(logFile, 'utf8')
@@ -368,7 +387,10 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
       cpSync(first.root, snapshot, { recursive: true });
 
       const second = await rebootRuntime(first);
-      await second.runtime.haltSwitch.haltAsync('إيقافٌ سياديٌّ مقيس', { id: 'test-cmd' });
+      await second.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديٌّ مقيس',
+        royalCommandFor(second.runtime.haltSwitch, 'halt', 'إيقافٌ سياديٌّ مقيس'),
+      );
       assert.equal(second.runtime.haltSwitch.read().state, 'halted');
       second.close();
 

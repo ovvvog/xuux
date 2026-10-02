@@ -31,6 +31,7 @@ import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 import { createProductionRootOfTrust, fingerprint } from '../../src/root-of-trust/index.mjs';
 import { InMemoryFreshnessSocket } from '../../src/root-of-trust/index.mjs';
+import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
 
 const MANIFEST = 'root-of-trust.manifest.json';
 
@@ -80,9 +81,9 @@ function stableToken(king, aeadKey, ledgerPair) {
 /** مفاتيحُ ثابتةٌ للاختبار. */
 function fixedKeys() {
   return {
-    king: generateKeyPairSync('ed25519'),
+    king: registerTestKing(generateKeyPairSync('ed25519')),
     aeadKey: randomBytes(32),
-    ledgerPair: generateKeyPairSync('ed25519'),
+    ledgerPair: registerTestKing(generateKeyPairSync('ed25519')),
   };
 }
 
@@ -107,7 +108,7 @@ function rig({ freshnessSocket = null, production = true, keys } = {}) {
   const boot = (root) =>
     createProductionRootOfTrust(
       env,
-      { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
+      { root, fsync: false, freshnessSocket },
       {
         openSource: async () => ({
           source: stableToken(k.king, k.aeadKey, k.ledgerPair),
@@ -223,7 +224,7 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
       const first = await boot(root);
       first.ledger.begin({ id: 'replay-cmd' });
       await first.ledger.commitSigned({ id: 'replay-cmd' }, 'ok');
-      await first.haltSwitch.haltAsync('halt', { id: 'halt-1' });
+      await first.haltSwitch.haltAsync('halt', royalCommandFor(first.haltSwitch, 'halt', 'halt'));
       first.log.close?.();
       const firstEpoch = body(root).freshnessEpoch;
       assert.ok(firstEpoch >= 1);

@@ -22,7 +22,7 @@
 // العام وحده، فتُقرّ ويُرفض عليها الإصدار برمز `HALT_SIGNER_REQUIRED`.
 
 import { readFileSync } from 'node:fs';
-import { createPublicKey } from 'node:crypto';
+import { createPublicKey, randomBytes } from 'node:crypto';
 import {
   HaltSwitch,
   haltAckPayload,
@@ -36,6 +36,7 @@ import {
 import {
   createRoyalCommandVerifier,
   canonicalRoyalCommand,
+  royalCommandSigningBody,
 } from '../src/root-of-trust/royal-command.mjs';
 import { sign as softwareSign } from 'node:crypto';
 
@@ -173,13 +174,23 @@ export async function run(argv, env, deps = {}) {
       const reason =
         args.reason ?? (operation === 'halt' ? 'royal sovereign halt' : 'royal resume');
       const at = new Date().toISOString();
-      const body = { operation, signerId: kingId, reason, at };
+      // `WL-302`: الأمرُ يُختَمُ بالعهدِ الحاضرِ وبمعرّفٍ عشوائيٍّ — فيُنفَّذُ مرّةً
+      // واحدةً على هذا العهدِ ولا يُعادُ بعدَه، ولو بعدَ إعادةِ التشغيل.
+      const body = {
+        operation,
+        signerId: kingId,
+        commandId: randomBytes(16).toString('hex'),
+        targetEpoch: halt.read().epoch,
+        reason,
+        at,
+      };
       const canonical = canonicalRoyalCommand(body);
       let signature;
       if (production) {
-        // الإنتاجُ: التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكنِ — يُمرَّر الجسمُ لا Buffer.
-        // `signAsync` يُسلسِلُ الجسمَ داخليّاً، فيُطابقُ `canonicalRoyalCommand`.
-        signature = await king.signAsync(body);
+        // الإنتاجُ: التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكنِ — يُمرَّر متنُ التوقيعِ
+        // (‏بفاصلِ النطاقِ) و`signAsync` يُسلسِلُه بـ`JSON.stringify` فيُطابقُ
+        // `canonicalRoyalCommand` حرفاً بحرف.
+        signature = await king.signAsync(royalCommandSigningBody(body));
       } else {
         // التطويرُ: التوقيعُ البرمجيُّ المتزامنُ على الجسمِ الأساسيِّ المتسلسَلِ.
         signature = softwareSign(null, Buffer.from(canonical), king.privateKey).toString(

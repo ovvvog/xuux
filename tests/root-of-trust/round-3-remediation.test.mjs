@@ -60,6 +60,7 @@ import {
   InMemoryFreshnessSocket,
   fingerprint,
 } from '../../src/root-of-trust/index.mjs';
+import { registerTestKing, royalCommandFor } from '../helpers/royal-halt-command.mjs';
 
 const MANIFEST = 'root-of-trust.manifest.json';
 const JOURNAL = 'root-of-trust.manifest.journal';
@@ -86,8 +87,8 @@ async function caughtAsync(fn) {
 function fakeToken(overrides = {}) {
   const aesKeys = new Map([['05', randomBytes(32)]]);
   const edKeys = new Map([
-    ['06', overrides.king ?? generateKeyPairSync('ed25519')],
-    ['07', generateKeyPairSync('ed25519')],
+    ['06', overrides.king ?? registerTestKing(generateKeyPairSync('ed25519'))],
+    ['07', registerTestKing(generateKeyPairSync('ed25519'))],
   ]);
   const aad = Buffer.from('xuux-event');
   return {
@@ -167,12 +168,12 @@ function productionEnv(king, extra = {}) {
  */
 async function boot(options = {}) {
   const root = options.root ?? registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-r3-')));
-  const king = options.king ?? generateKeyPairSync('ed25519');
+  const king = options.king ?? registerTestKing(generateKeyPairSync('ed25519'));
   const token = options.token ?? fakeToken({ king });
   const freshnessSocket = options.freshnessSocket ?? new InMemoryFreshnessSocket(0n, 'r3');
   const runtime = await createProductionRootOfTrust(
     productionEnv(king, options.env ?? {}),
-    { root, fsync: false, royalCommandVerifier: () => true, freshnessSocket },
+    { root, fsync: false, freshnessSocket },
     { openSource: async () => ({ source: token, close: async () => undefined }) },
   );
   return {
@@ -318,9 +319,10 @@ describe('UF-03 مركَّبٌ — تخفيضُ عهدِ الإيقافِ مع �
     const first = await boot();
     const { root, king } = first;
     try {
-      const directive = await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', {
-        id: 'test-cmd',
-      });
+      const directive = await first.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       assert.equal(directive.state, 'halted');
       // بعدَ التوجيهِ الموقَّعِ صارَ العهدُ **داخلَ المتنِ المختومِ** لا في دفترٍ
       // معلَّقٍ: `sealEpoch` يختمُ حيثُ يجوزُ الانتظار.
@@ -370,9 +372,10 @@ describe('استبدالُ البيانِ بنسخةٍ أقدمَ صحيحةِ �
     try {
       // لقطةٌ للبيانِ المختومِ **قبلَ** الإيقافِ: توقيعُها صحيحٌ إلى الأبد.
       copyFileSync(join(root, MANIFEST), snapshot);
-      const directive = await first.runtime.haltSwitch.haltAsync('إيقافٌ سياديّ', {
-        id: 'test-cmd',
-      });
+      const directive = await first.runtime.haltSwitch.haltAsync(
+        'إيقافٌ سياديّ',
+        royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقافٌ سياديّ'),
+      );
       first.runtime.log.close?.();
       copyFileSync(snapshot, join(root, MANIFEST));
       rmSync(snapshot, { force: true });
@@ -430,7 +433,10 @@ describe('حذفُ البيانِ والملفّاتِ التابعةِ معاً
       const command = { id: 'أمرٌ-قبلَ-المحو' };
       first.runtime.ledger.begin(command);
       await first.runtime.ledger.commitSigned(command, 'تمّ');
-      await first.runtime.haltSwitch.haltAsync('إيقافٌ قبلَ المحو', { id: 'test-cmd' });
+      await first.runtime.haltSwitch.haltAsync(
+        'إيقافٌ قبلَ المحو',
+        royalCommandFor(first.runtime.haltSwitch, 'halt', 'إيقافٌ قبلَ المحو'),
+      );
       const logFile = first.runtime.log.file;
       const headFile = first.runtime.log.headFile;
       const ledgerFile = first.runtime.ledger.file;

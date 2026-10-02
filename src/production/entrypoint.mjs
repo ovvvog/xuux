@@ -169,6 +169,10 @@ export async function createProductionSystem(env, options, deps = {}) {
     }
   }
 
+  // 7ب. `WL-302`: حداثةُ الأمرِ الملكيِّ على مفتاحِ الإيقافِ تُقاسُ بالساعةِ
+  //     الموثوقةِ نفسِها لا بساعةِ الجهاز — وبلاها يُرفَضُ كلُّ أمرٍ في الإنتاج.
+  rootOfTrust.haltSwitch.useTrustedClock(/** @type {{ now(): number }} */ (clock));
+
   // 8. بوابةُ التاجِ — من جذرِ الثقةِ: السجلُّ المختومُ ودفترُ الأوامرِ ومفتاحُ الإيقافِ والساعةُ.
   const crown = new CrownGateway(kingIdentity, authority, rootOfTrust.log, {
     commandLedger: rootOfTrust.ledger,
@@ -185,6 +189,7 @@ export async function createProductionSystem(env, options, deps = {}) {
     log: rootOfTrust.log,
     enforcement: chain.enforcementPoint,
     haltSwitch: rootOfTrust.haltSwitch,
+    env,
   });
 
   return {
