@@ -3,10 +3,17 @@
  *
  * كل دليل يستعمل قاعدة معزولة: المحو الحقيقي لا يُختبر بمحاكاة، ولا يجوز أن يلمس
  * قاعدة مطوّر أو اختباراً موازياً. عند غياب الوصلة يظهر سبب التخطّي من المساعد.
+ *
+ * **ومنذ `R6-A-11`** لا تحذفُ هذه الوحدةُ صفّاً: `purge` بلا `dryRun` و`eraseById`
+ * تُرفَضانِ برمزِ `RETENTION_PURGE_UNAUTHORIZED`، إذ كانتا مسارَ محوٍ خارجَ سلطةِ
+ * `purge-data` وبلا سجلِّ محوٍ. فالأدلّةُ التي كانت تقيسُ «المحوَ الخامَ يقع»
+ * صارت تقيسُ «الرفضَ يقعُ والصفُّ باقٍ»، والعدُّ (`plan`) يبقى مقيساً كما كان.
+ * والمحوُ مع السلطةِ مقيسٌ على المسارِ المحكومِ وحدَه: `RetentionCycle.run`
+ * في `tests/data/retention-authorization.test.mjs` و`tests/data/retention-cycle.test.mjs`.
  */
 
 import assert from 'node:assert/strict';
-import test, { after, before } from 'node:test';
+import test, { after, afterEach, before } from 'node:test';
 import { up } from '../../src/persistence/migrator.mjs';
 import { eraseById, plan, purge, RETENTION_ERRORS } from '../../src/persistence/retention.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
@@ -33,6 +40,14 @@ before(async () => {
 
 after(async () => {
   if (db !== null) await db.drop();
+});
+
+// **منذُ `R6-A-11`** لا يمحو اختبارٌ صفوفَه بـ`purge`، فما يُدرِجُه دليلٌ كانَ يبقى في
+// القاعدةِ المعزولةِ ويُشوِّشُ عدَّ الدليلِ التالي (‏`eligible`). فتُفرَّغُ جداولُ
+// المادّةِ بعدَ كلِّ دليلٍ بـ`TRUNCATE` — تهيئةُ اختبارٍ لا مسارُ محوٍ في المنتج.
+afterEach(async () => {
+  if (db === null) return;
+  await db.pool.query('TRUNCATE state.memories, state.data_assets CASCADE');
 });
 
 /** @returns {import('pg').Pool} */
@@ -99,6 +114,18 @@ async function insertExpiredMemory(id) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function unauthorized(error) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    /** @type {Record<string, unknown>} */ (error)['code'] === RETENTION_ERRORS.PURGE_UNAUTHORIZED
+  );
+}
+
+/**
  * @param {string} id
  * @returns {Promise<number>}
  */
@@ -114,7 +141,7 @@ async function rowCount(id) {
 }
 
 test(
-  'أصل بيانات انتهى احتفاظه يُمحى، وغير المنتهي لا يُمس',
+  'أصل بيانات انتهى احتفاظه يُعَدّ مستحقّاً، ومحوُه الخامُ بلا سلطةٍ يُرفَض ولا يمسّ صفّاً (R6-A-11)',
   { skip: skipWithoutDatabase },
   async () => {
     await insertExpiredAsset('asset-expired-001');
@@ -125,22 +152,28 @@ test(
       ['asset-fresh-001', 'أصل حديث', 30, RECENT],
     );
 
-    const result = await purge(pool(), { now: NOW, tables: ['data_assets'] });
-    assert.deepEqual(result.tables, [
+    const simulated = await purge(pool(), { now: NOW, tables: ['data_assets'], dryRun: true });
+    assert.deepEqual(simulated.tables, [
       {
         table: 'state.data_assets',
         eligible: 1,
         legalHoldProtected: 0,
-        deleted: 1,
+        deleted: 0,
       },
     ]);
-    assert.equal(await rowCount('asset-expired-001'), 0, 'الأصل المنتهي اختفى فعلاً.');
+    await assert.rejects(() => purge(pool(), { now: NOW, tables: ['data_assets'] }), unauthorized);
+    await assert.rejects(() => eraseById(pool(), 'data_assets', 'asset-expired-001'), unauthorized);
+    assert.equal(
+      await rowCount('asset-expired-001'),
+      1,
+      'الأصل المنتهي باقٍ: المحوُ الخامُ رُفِض، والمحوُ المحكومُ عبرَ RetentionCycle.',
+    );
     assert.equal(await rowCount('asset-fresh-001'), 1, 'الأصل غير المنتهي بقي.');
   },
 );
 
 test(
-  'الحفظ القانوني يمنع المحو الدوري والموجّه برمز مسمّى',
+  'الحفظ القانوني يُعَدّ محميّاً، والمحو الدوري والموجّه الخامُ مرفوضانِ برمز مسمّى (R6-A-11)',
   { skip: skipWithoutDatabase },
   async () => {
     await pool().query(
@@ -155,61 +188,61 @@ test(
     assert.ok(assetReport !== undefined);
     assert.equal(assetReport.legalHoldProtected, 1);
 
-    const periodic = await purge(pool(), { now: NOW, tables: ['data_assets'] });
+    const periodic = await purge(pool(), { now: NOW, tables: ['data_assets'], dryRun: true });
     assert.equal(periodic.tables[0]?.deleted, 0);
+    assert.equal(periodic.tables[0]?.legalHoldProtected, 1);
+    await assert.rejects(() => purge(pool(), { now: NOW, tables: ['data_assets'] }), unauthorized);
     assert.equal(await rowCount('asset-hold-001'), 1);
-    await assert.rejects(
-      () => eraseById(pool(), 'data_assets', 'asset-hold-001'),
-      (error) =>
-        typeof error === 'object' &&
-        error !== null &&
-        /** @type {Record<string, unknown>} */ (error)['code'] === RETENTION_ERRORS.LEGAL_HOLD,
-    );
+    await assert.rejects(() => eraseById(pool(), 'data_assets', 'asset-hold-001'), unauthorized);
     assert.equal(await rowCount('asset-hold-001'), 1);
   },
 );
 
-test('ذاكرة منتهية تُمحى وذاكرة الحفظ القانوني لا تمس', { skip: skipWithoutDatabase }, async () => {
-  await insertExpiredMemory('memory-expired-001');
-  await insertLongLivedAsset('dataset-memory-hold-001');
-  // ومحتوى ذاكرةِ الحفظ القانوني مغلَّفٌ كذلك: نفسُ القيد ونفسُ السبب (`WL-045`).
-  const hold = await createTestEncryptor();
-  try {
-    await pool().query(
-      `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, created_at)
+test(
+  'ذاكرة منتهية تُعَدّ مستحقّةً، ومحوُها الخامُ يُرفَض ولا يمسّ صفّاً (R6-A-11)',
+  { skip: skipWithoutDatabase },
+  async () => {
+    await insertExpiredMemory('memory-expired-001');
+    await insertLongLivedAsset('dataset-memory-hold-001');
+    // ومحتوى ذاكرةِ الحفظ القانوني مغلَّفٌ كذلك: نفسُ القيد ونفسُ السبب (`WL-045`).
+    const hold = await createTestEncryptor();
+    try {
+      await pool().query(
+        `INSERT INTO state.memories (id, agent_id, dataset_id, kind, content, legal_hold, created_at)
        VALUES ($1, 'agent-retention-001', 'dataset-memory-hold-001', 'semantic', $3::jsonb, TRUE, $2)`,
-      [
-        'memory-hold-001',
-        OLD,
-        JSON.stringify(
-          await hold.encryptor.seal({
-            value: { note: 'ذاكرةٌ محفوظةٌ قانوناً' },
-            classification: 'internal',
-            binding: {
-              id: 'memory-hold-001',
-              agentId: 'agent-retention-001',
-              datasetId: 'dataset-memory-hold-001',
-            },
-          }),
-        ),
-      ],
-    );
-  } finally {
-    hold.cleanup();
-  }
+        [
+          'memory-hold-001',
+          OLD,
+          JSON.stringify(
+            await hold.encryptor.seal({
+              value: { note: 'ذاكرةٌ محفوظةٌ قانوناً' },
+              classification: 'internal',
+              binding: {
+                id: 'memory-hold-001',
+                agentId: 'agent-retention-001',
+                datasetId: 'dataset-memory-hold-001',
+              },
+            }),
+          ),
+        ],
+      );
+    } finally {
+      hold.cleanup();
+    }
 
-  const result = await purge(pool(), { now: NOW, tables: ['memories'] });
-  assert.equal(result.tables[0]?.deleted, 1);
-  assert.equal(await rowCount('memory-expired-001'), 0);
-  assert.equal(await rowCount('memory-hold-001'), 1);
-  await assert.rejects(
-    () => eraseById(pool(), 'memories', 'memory-hold-001'),
-    (error) =>
-      typeof error === 'object' &&
-      error !== null &&
-      /** @type {Record<string, unknown>} */ (error)['code'] === RETENTION_ERRORS.LEGAL_HOLD,
-  );
-});
+    const simulated = await purge(pool(), { now: NOW, tables: ['memories'], dryRun: true });
+    // ذاكرةُ الحفظِ بلا `expires_at` فلا تُعَدُّ منتهيةً ولا محميّةً — العدُّ للمنتهي وحدَه.
+    assert.equal(simulated.tables[0]?.eligible, 1);
+    assert.equal(simulated.tables[0]?.deleted, 0);
+    await assert.rejects(() => purge(pool(), { now: NOW, tables: ['memories'] }), unauthorized);
+    assert.equal(await rowCount('memory-expired-001'), 1, 'المحوُ الخامُ رُفِض والصفُّ باقٍ.');
+    assert.equal(await rowCount('memory-hold-001'), 1);
+    await assert.rejects(() => eraseById(pool(), 'memories', 'memory-expired-001'), unauthorized);
+    await assert.rejects(() => eraseById(pool(), 'memories', 'memory-hold-001'), unauthorized);
+    assert.equal(await rowCount('memory-expired-001'), 1);
+    assert.equal(await rowCount('memory-hold-001'), 1);
+  },
+);
 
 test('التقرير الجاف لا يحذف أي صف', { skip: skipWithoutDatabase }, async () => {
   await insertExpiredAsset('asset-dry-run-001');
@@ -232,7 +265,7 @@ test('التقرير الجاف لا يحذف أي صف', { skip: skipWithoutDat
 });
 
 test(
-  'إخفاق المحو في منتصفه يتراجع كاملاً بلا حالة جزئية',
+  'المحو الخام متعدّد الجداول يُرفَض قبل أي حذف فلا حالة جزئية (R6-A-11)',
   { skip: skipWithoutDatabase },
   async () => {
     await insertExpiredAsset('asset-atomic-001');
@@ -249,8 +282,11 @@ test(
      FOR EACH ROW EXECUTE FUNCTION state.retention_fail_memory_delete()`,
     );
     try {
-      await assert.rejects(() => purge(pool(), { now: NOW, tables: ['data_assets', 'memories'] }));
-      assert.equal(await rowCount('asset-atomic-001'), 1, 'حذف الأصل تراجع بعد فشل الذاكرة.');
+      await assert.rejects(
+        () => purge(pool(), { now: NOW, tables: ['data_assets', 'memories'] }),
+        unauthorized,
+      );
+      assert.equal(await rowCount('asset-atomic-001'), 1, 'الأصل باقٍ: لم يُحذَف شيءٌ قبل الرفض.');
       assert.equal(await rowCount('memory-atomic-001'), 1, 'صف الفشل بقي.');
     } finally {
       await pool().query('DROP TRIGGER IF EXISTS retention_fail_memory_delete ON state.memories');
