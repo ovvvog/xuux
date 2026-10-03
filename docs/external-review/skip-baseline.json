@@ -5,17 +5,17 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "f6a3a808f6a280c2d5f83086087654511b48c172",
-      "mainHeadAtMeasure": "f6a3a808f6a280c2d5f83086087654511b48c172",
-      "scopeDigest": "0745ea36328033114ff0a99e89457df1b9ab66252b6bcd26aa9acf1f17dd859f",
+      "commit": "cb78d67d51f699e95a464d70700bc1ecf2bf73f0",
+      "mainHeadAtMeasure": "cb78d67d51f699e95a464d70700bc1ecf2bf73f0",
+      "scopeDigest": "3e70df7d7b076b029a958c9b27bb5bf4ec16a398fa6c51902e869fbd617f06ab",
       "measuredOn": "2026-10-03",
       "verdict": "self-stale-only",
-      "testFileCount": 235,
-      "tests": 2416,
-      "pass": 2282,
+      "testFileCount": 236,
+      "tests": 2426,
+      "pass": 2291,
       "fail": 1,
-      "skipped": 133,
-      "skipLines": 135,
+      "skipped": 134,
+      "skipLines": 136,
       "topLevelSkipPoints": 128,
       "attributedToDatabaseUrl": 92,
       "otherReasons": [
@@ -25,7 +25,7 @@
         },
         {
           "reason": "تخطٍّ معلن: تعذّر إنشاء user/mount/network/pid namespaces: unshare: write failed /proc/self/uid_map: Operation not permitted. الرفض مقصود لأن التنفيذ بلا عزل غير مقبول.",
-          "count": 6
+          "count": 7
         },
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
@@ -57,17 +57,17 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "f6a3a808f6a280c2d5f83086087654511b48c172",
-      "mainHeadAtMeasure": "f6a3a808f6a280c2d5f83086087654511b48c172",
-      "scopeDigest": "0745ea36328033114ff0a99e89457df1b9ab66252b6bcd26aa9acf1f17dd859f",
+      "commit": "cb78d67d51f699e95a464d70700bc1ecf2bf73f0",
+      "mainHeadAtMeasure": "cb78d67d51f699e95a464d70700bc1ecf2bf73f0",
+      "scopeDigest": "3e70df7d7b076b029a958c9b27bb5bf4ec16a398fa6c51902e869fbd617f06ab",
       "measuredOn": "2026-10-03",
       "verdict": "self-stale-only",
-      "testFileCount": 235,
-      "tests": 2416,
-      "pass": 2282,
+      "testFileCount": 236,
+      "tests": 2426,
+      "pass": 2291,
       "fail": 1,
-      "skipped": 133,
-      "skipLines": 135,
+      "skipped": 134,
+      "skipLines": 136,
       "topLevelSkipPoints": 128,
       "attributedToDatabaseUrl": 92,
       "otherReasons": [
@@ -77,7 +77,7 @@
         },
         {
           "reason": "تخطٍّ معلن: تعذّر إنشاء user/mount/network/pid namespaces: unshare: write failed /proc/self/uid_map: Operation not permitted. الرفض مقصود لأن التنفيذ بلا عزل غير مقبول.",
-          "count": 6
+          "count": 7
         },
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
