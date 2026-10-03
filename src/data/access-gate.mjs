@@ -51,6 +51,8 @@
 /** @typedef {import('../policy/enforcement-point.mjs').EnforcementPoint} EnforcementPoint */
 /** @typedef {import('../root-of-trust/event-log.mjs').EventLog} AccessEventLog */
 
+import { reportAwaitingSeal } from '../governance/quarantine.mjs';
+
 /** فعل القراءة كما هو معلَن في كتالوج الأفعال. */
 export const READ_ACTION = 'read-data';
 
@@ -92,7 +94,7 @@ export class DataAccessError extends Error {
 
 export class DataAccessGate {
   /**
-   * @param {{ log?: AccessEventLog, catalog?: { get: (id: string) => Promise<{ id: string, owner: string, classification: AccessTier } | null> }, lattice?: AccessLattice, enforcementPoint?: EnforcementPoint | null, quarantine?: { report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, lineage?: import('./lineage.mjs').LineageLedger | null }} [deps]
+   * @param {{ log?: AccessEventLog, catalog?: { get: (id: string) => Promise<{ id: string, owner: string, classification: AccessTier } | null> }, lattice?: AccessLattice, enforcementPoint?: EnforcementPoint | null, quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null, lineage?: import('./lineage.mjs').LineageLedger | null }} [deps]
    */
   constructor({
     log,
@@ -112,7 +114,7 @@ export class DataAccessGate {
     /**
      * الحاجب اختياري في التركيب: بلاغُ الحجر تشديدٌ لا شرطُ صحة، وغيابُه لا يجعل
      * الرفض سماحاً. أما نقطةُ التفويض فغيابها رفضٌ.
-     * @type {{ report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null}
+     * @type {import('../governance/quarantine.mjs').QuarantineReporter | null}
      */
     this.quarantine = quarantine;
     /**
@@ -173,9 +175,11 @@ export class DataAccessGate {
    * أصلَ بعد فلا `assetId`)، وهي وجهُ «لا كتابة إلى الأسفل» عند الإنشاء.
    * @param {Actor} actor
    * @param {unknown} classification
-   * @returns {AccessTier}
+   * `LIVE-27` / `R10-F-04` (‏`WL-309`): غيرُ متزامنةٍ — إشارةُ الحجرِ تُنتظَرُ حتّى يُختَمَ قيدُها
+   * قبلَ رفعِ الرفض.
+   * @returns {Promise<AccessTier>}
    */
-  assertNoWriteDown(actor, classification) {
+  async assertNoWriteDown(actor, classification) {
     const clearance = this.clearanceOf(actor);
     const target = this.lattice.tier(classification).id;
     if (this.lattice.rank(target) < this.lattice.rank(clearance)) {
@@ -185,7 +189,7 @@ export class DataAccessGate {
         mode: 'create',
         code: ACCESS_ERRORS.WRITE_DOWN_REFUSED,
       });
-      this.#raise(actor?.id ?? 'unknown', { ...detail, mode: 'create' });
+      await this.#raise(actor?.id ?? 'unknown', { ...detail, mode: 'create' });
       throw new DataAccessError(
         ACCESS_ERRORS.WRITE_DOWN_REFUSED,
         `فاعلٌ بتخليص «${clearance}» يُنشئ مادةً مصنّفة «${target}» أدنى من تخليصه؛ هذا هو طريقُ نقل المادة إلى الأسفل بلا إعادة تصنيف ولا اعتماد.`,
@@ -196,12 +200,15 @@ export class DataAccessGate {
   }
 
   /**
+   * `LIVE-27` / `R10-F-04` (‏`WL-309`): الإشارةُ بـ`reportAwaitingSeal` وتُنتظَرُ حتّى يُختَمَ قيدُها؛
+   * وكانت `report` المتزامنةُ تُرَدُّ على الحاجبِ الإنتاجيِّ فيبتلعُ الردَّ هذا الحارسُ فلا يُعزَلُ أحد.
    * @param {{ kind: string, subject: string, detail: Record<string, unknown> }} input
+   * @returns {Promise<void>}
    */
-  #signal({ kind, subject, detail }) {
+  async #signal({ kind, subject, detail }) {
     if (this.quarantine === null) return;
     try {
-      this.quarantine.report({ kind, subject, detail });
+      await reportAwaitingSeal(this.quarantine, { kind, subject, detail });
     } catch {
       // فشلُ الحاجب لا يحوّل رفضاً إلى سماح، ولا يُخفي الخطأ الأصلي عن المُنادي.
     }
@@ -210,9 +217,10 @@ export class DataAccessGate {
   /**
    * @param {string} subject
    * @param {Record<string, unknown>} detail
+   * @returns {Promise<void>}
    */
-  #raise(subject, detail) {
-    this.#signal({ kind: ACCESS_ANOMALY, subject, detail });
+  async #raise(subject, detail) {
+    await this.#signal({ kind: ACCESS_ANOMALY, subject, detail });
   }
 
   /**
@@ -229,31 +237,35 @@ export class DataAccessGate {
      * @param {string} code
      * @param {string} message
      * @param {Record<string, unknown>} [detail]
-     * @returns {never}
+     * يُعيدُ الخطأَ والمُنادي يرميه (‏`throw await refuse(…)`): الإشارةُ تُنتظَرُ قبلَ الرفع (‏`WL-309`).
+     * @returns {Promise<DataAccessError>}
      */
-    const refuse = (code, message, detail = {}) => {
+    const refuse = async (code, message, detail = {}) => {
       this.log.append('data.access.refused', actorId, { assetId, mode, action, code, ...detail });
-      this.#raise(actorId, { assetId, mode, code, ...detail });
-      throw new DataAccessError(code, message, { assetId, mode, ...detail });
+      await this.#raise(actorId, { assetId, mode, code, ...detail });
+      return new DataAccessError(code, message, { assetId, mode, ...detail });
     };
 
     if (typeof effect !== 'function') {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.EFFECT_REQUIRED,
         `طلبُ ${mode === 'read' ? 'قراءة' : 'كتابة'} بلا أثرٍ قابل للتنفيذ؛ بوابةٌ تُصدر قراراً ثم لا تُنفّذ شيئاً تُنتج تذاكر لا آثاراً.`,
       );
     }
     if (typeof actor?.id !== 'string' || actor.id.trim() === '') {
-      refuse(ACCESS_ERRORS.ACTOR_REQUIRED, 'وصولٌ بلا فاعلٍ مُعرَّف: لا يُنسب ولا يُدقَّق.');
+      throw await refuse(
+        ACCESS_ERRORS.ACTOR_REQUIRED,
+        'وصولٌ بلا فاعلٍ مُعرَّف: لا يُنسب ولا يُدقَّق.',
+      );
     }
     if (this.enforcementPoint === null) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.ENFORCEMENT_REQUIRED,
         'بوابة الوصول بلا نقطة تفويض لا تُنفّذ قراءةً ولا كتابة؛ الغياب رفضٌ لا تجاوز.',
       );
     }
     if (this.lineage === null) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.LINEAGE_REQUIRED,
         'بوابة الوصول بلا دفتر نسب لا تُنفّذ قراءةً ولا كتابة: وصولٌ لا يُكتب في النسب يجعل سؤال «من قرأ هذا الأصل» بلا جواب، فالغياب رفضٌ لا تجاوز.',
       );
@@ -261,7 +273,7 @@ export class DataAccessGate {
 
     const asset = await this.catalog.get(assetId);
     if (asset === null) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.ASSET_UNKNOWN,
         `أصل البيانات «${assetId}» غير مفهرس؛ وصولٌ إلى ما لا تصنيف له يُرفض بدل أن يُعامَل عامّاً.`,
       );
@@ -275,7 +287,7 @@ export class DataAccessGate {
       context: { classification, purpose, mode },
     });
     if (!decision.allowed) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.NOT_AUTHORIZED,
         `التفويض رفض ${mode === 'read' ? 'القراءة' : 'الكتابة'} برمز ${decision.code}: ${decision.reason}`,
         { classification, policyCode: decision.code },
@@ -292,21 +304,21 @@ export class DataAccessGate {
     } catch (error) {
       const code =
         error instanceof DataAccessError ? error.code : ACCESS_ERRORS.CLEARANCE_UNDECLARED;
-      refuse(code, error instanceof Error ? error.message : String(error), {
+      throw await refuse(code, error instanceof Error ? error.message : String(error), {
         classification,
         role: actor?.role ?? null,
       });
     }
 
     if (mode === 'read' && !this.lattice.dominates(clearance, classification)) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.CLEARANCE_INSUFFICIENT,
         `تخليص «${clearance}» لا يبلغ تصنيف «${classification}»؛ القراءة مرفوضة ومسجَّلة.`,
         { classification, clearance },
       );
     }
     if (mode === 'write' && this.lattice.rank(classification) < this.lattice.rank(clearance)) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.WRITE_DOWN_REFUSED,
         `كتابةٌ إلى الأسفل: تخليص «${clearance}» في أصلٍ مصنّف «${classification}». هذا الطريق يُخرج المادة من مرتبتها بلا إعادة تصنيف ولا اعتماد، فيُرفض.`,
         { classification, clearance },
@@ -320,7 +332,7 @@ export class DataAccessGate {
         resourceKey: `data:${assetId}`,
       });
     } catch (error) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.TICKET_INVALID,
         `تذكرة القرار غير مقبولة: ${error instanceof Error ? error.message : String(error)}`,
         { classification, clearance },
@@ -340,7 +352,7 @@ export class DataAccessGate {
         asset: /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (asset)),
       });
     } catch (error) {
-      refuse(
+      throw await refuse(
         ACCESS_ERRORS.LINEAGE_REQUIRED,
         `تعذّر كتابة قيد النسب فمُنع الأثر: ${error instanceof Error ? error.message : String(error)}`,
         { classification, clearance },

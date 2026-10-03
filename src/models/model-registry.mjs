@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { MODEL_SPEC } from '../persistence/entities.mjs';
 import { ExperimentLedger } from '../knowledge/experiment-ledger.mjs';
 import { ModelEvaluationError, ModelEvaluationLedger } from './evaluation.mjs';
+import { reportAwaitingSeal } from '../governance/quarantine.mjs';
 
 /**
  * سجل النماذج — صار **دائماً** في الخطوة `M3.05`.
@@ -94,7 +95,7 @@ export class ModelRegistry {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MODEL_REGISTRY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: ModelRepository, maxModels?: number, transaction?: import('../persistence/composition.mjs').StateTransaction | null, weightStore?: import('./weight-store.mjs').WeightStore | null, evaluationLedger?: import('./evaluation.mjs').ModelEvaluationLedger | null, quarantine?: { report: (signal: object) => unknown } | null }} [deps]
+   * @param {{ log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: ModelRepository, maxModels?: number, transaction?: import('../persistence/composition.mjs').StateTransaction | null, weightStore?: import('./weight-store.mjs').WeightStore | null, evaluationLedger?: import('./evaluation.mjs').ModelEvaluationLedger | null, quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null }} [deps]
    */
   constructor({
     log,
@@ -127,7 +128,7 @@ export class ModelRegistry {
     this.evaluationLedger =
       evaluationLedger ??
       new ModelEvaluationLedger({ log, experiments: new ExperimentLedger({ log }) });
-    /** @type {{ report: (signal: object) => unknown } | null} */
+    /** @type {import('../governance/quarantine.mjs').QuarantineReporter | null} */
     this.quarantine = quarantine;
     /** @type {ModelRepository} */
     this.repository = repository;
@@ -307,7 +308,7 @@ export class ModelRegistry {
     if (row === null) throw new Error('MODEL_NOT_APPROVED');
     const model = toModel(row);
     if (model.state !== ModelState.APPROVED) throw new Error('MODEL_NOT_APPROVED');
-    this.#verifyFingerprintOrRefuse(model);
+    await this.#verifyFingerprintOrRefuse(model);
     this.#verifyEvaluationOrRefuse(model);
     return model;
   }
@@ -363,9 +364,12 @@ export class ModelRegistry {
    * لحظةً، ولحظةٌ واحدة تكفي لاستدلالات. والرفض يُسجَّل ويُبلَّغ الحجر الصحّي
    * (M6.09): تبدّل أوزانٍ بعد الاعتماد شذوذٌ لا خطأ مستخدم.
    * @param {ModelRecord} model
-   * @returns {void}
+   * `LIVE-27` / `R10-F-04` (‏`WL-309`): غيرُ متزامنةٍ — إشارةُ تبدّلِ البصمةِ تُنتظَرُ حتّى يُختَمَ
+   * قيدُها (‏`reportAwaitingSeal`) قبلَ رفعِ الرفض، فلا يحلُّ ردُّ الحاجبِ الإنتاجيِّ محلَّ
+   * `MODEL_FINGERPRINT_MISMATCH`.
+   * @returns {Promise<void>}
    */
-  #verifyFingerprintOrRefuse(model) {
+  async #verifyFingerprintOrRefuse(model) {
     if (this.weightStore === null) {
       this.log.append('model.activation-refused', 'crown', {
         id: model.id,
@@ -388,7 +392,7 @@ export class ModelRegistry {
         fingerprint: model.fingerprint,
       });
       if (this.quarantine !== null) {
-        this.quarantine.report({
+        await reportAwaitingSeal(this.quarantine, {
           kind: 'model-fingerprint-mismatch',
           subject: model.id,
           detail: { code, fingerprint: model.fingerprint },

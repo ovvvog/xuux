@@ -35,6 +35,7 @@
 
 import { loadClassificationLattice } from '../data/classification.mjs';
 import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
+import { reportAwaitingSeal } from '../governance/quarantine.mjs';
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_CALLS_PER_WINDOW = 30;
@@ -102,7 +103,7 @@ export class EgressError extends Error {
 
 export class EgressGate {
   /**
-   * @param {{ enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, transport?: (record: { destination: EgressDestination, bytes: number, payload: string | Uint8Array }) => Promise<unknown>, destinations?: readonly EgressDestination[], quarantine?: { report: (signal: object) => unknown } | null, classifier?: EgressClassifier | null, lattice?: import('../data/classification.mjs').ClassificationLattice, env?: NodeJS.ProcessEnv, callsPerWindow?: number, windowMs?: number, maxPayloadBytes?: number, now?: () => Date }} [deps]
+   * @param {{ enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, transport?: (record: { destination: EgressDestination, bytes: number, payload: string | Uint8Array }) => Promise<unknown>, destinations?: readonly EgressDestination[], quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null, classifier?: EgressClassifier | null, lattice?: import('../data/classification.mjs').ClassificationLattice, env?: NodeJS.ProcessEnv, callsPerWindow?: number, windowMs?: number, maxPayloadBytes?: number, now?: () => Date }} [deps]
    */
   constructor({
     enforcementPoint,
@@ -182,18 +183,22 @@ export class EgressGate {
    * @param {string} code
    * @param {string} message
    * @param {{ actorId: string, destination: string, bytes: number, classification: string }} facts
-   * @returns {never}
+   * `LIVE-27` / `R10-F-04` (‏`WL-309`): الإشارةُ تُنتظَرُ حتّى يُختَمَ قيدُها (‏`reportAwaitingSeal`)
+   * قبلَ رفعِ الرفض، فلا يُرَدُّ الإبلاغُ على الحاجبِ الإنتاجيِّ ولا يحلُّ محلَّ الرفضِ الأصليّ.
+   * يُعيدُ الخطأَ المُسمّى ولا يرميه، والمُنادي يرميه (‏`throw await this.#refuse(…)`)، كي يبقى
+   * الرفضُ `throw` ظاهراً في موضعِه ويُضيِّقُ النوعَ بعدَه.
+   * @returns {Promise<EgressError>}
    */
-  #refuse(code, message, facts) {
+  async #refuse(code, message, facts) {
     this.log.append('egress.refused', facts.actorId, { code, reason: message, ...facts });
     if (this.quarantine !== null) {
-      this.quarantine.report({
+      await reportAwaitingSeal(this.quarantine, {
         kind: 'egress-refused',
         subject: facts.actorId,
         detail: { code, destination: facts.destination, bytes: facts.bytes },
       });
     }
-    throw new EgressError(code, message, facts);
+    return new EgressError(code, message, facts);
   }
 
   /**
@@ -210,7 +215,7 @@ export class EgressGate {
   async #effectiveClassification(claimed, resourceId, facts) {
     const claimedRank = this.lattice.rank(claimed);
     if (claimedRank < 0) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.CLASSIFICATION_UNKNOWN,
         `التصنيف «${claimed}» غير معروف في سلّم التصنيف؛ مجهولٌ لا يُقرأ عامّاً.`,
         facts,
@@ -221,14 +226,14 @@ export class EgressGate {
     if (this.classifier !== null) {
       const recorded = await this.classifier.classificationOf(resourceId);
       if (recorded === null || recorded === undefined) {
-        this.#refuse(
+        throw await this.#refuse(
           EGRESS_ERRORS.CLASSIFICATION_UNRECORDED,
           `المورد «${resourceId}» بلا تصنيفٍ مسجَّل؛ لا يُخرَجُ ما لا يُعرَف تصنيفُه بقول المُنادي.`,
           facts,
         );
       }
       if (this.lattice.rank(recorded) < 0) {
-        this.#refuse(
+        throw await this.#refuse(
           EGRESS_ERRORS.CLASSIFICATION_UNKNOWN,
           `التصنيف المسجَّل «${String(recorded)}» للمورد «${resourceId}» غير معروف في سلّم التصنيف.`,
           facts,
@@ -253,14 +258,14 @@ export class EgressGate {
 
     const destination = this.destinations.get(request.destination);
     if (destination === undefined) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.DESTINATION_UNKNOWN,
         `الجهة «${request.destination}» غير معلَنة في سجل الجهات؛ الخروج إلى جهة غير معلَنة ممنوع ولو كان الفاعل مأذوناً بالخروج.`,
         facts,
       );
     }
     if (bytes > this.maxPayloadBytes) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.PAYLOAD_TOO_LARGE,
         `الحمولة ${bytes} بايت وحدّ الحِزمة ${this.maxPayloadBytes}؛ حِزمةٌ فوق الحدّ تُرفض قبل التفويض فلا تُخصم حصّة على مرفوض.`,
         facts,
@@ -268,7 +273,7 @@ export class EgressGate {
     }
     const attempts = this.#countAttempt(actorId);
     if (attempts > this.callsPerWindow) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.RATE_LIMIT_EXCEEDED,
         `تجاوز الفاعل ${actorId} حدّ المعدّل: ${attempts} محاولة في ${this.windowMs} مللي ثانية والحدّ ${this.callsPerWindow}.`,
         facts,
@@ -292,7 +297,7 @@ export class EgressGate {
       measured: { bytes },
     });
     if (!decision.allowed) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.NOT_AUTHORIZED,
         `التفويض رفض الخروج برمز ${decision.code}: ${decision.reason}`,
         facts,
@@ -304,7 +309,7 @@ export class EgressGate {
     // القانونيَّ `sovereign`، فتصنيفٌ مسجَّلٌ باسمِه القانونيِّ كانَ يَعبُرُها. والفحصُ
     // بعدَ القرارِ لا قبلَه ليبقى رفضُ السياسةِ هو المرئيَّ حيثُ تَرفُض.
     if (this.lattice.isSealed(classification)) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.CLASSIFICATION_SEALED,
         `التصنيف «${classification}» مرتبةٌ مختومة؛ لا تخرج خارج الحدود بأي إذنٍ تشغيلي.`,
         facts,
@@ -319,7 +324,7 @@ export class EgressGate {
         resourceKey: `data:${resourceId}`,
       });
     } catch (error) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.TICKET_INVALID,
         `تذكرة القرار غير مقبولة: ${error instanceof Error ? error.message : String(error)}`,
         facts,
@@ -330,7 +335,7 @@ export class EgressGate {
     try {
       result = await this.transport({ destination, bytes, payload: request.payload });
     } catch (error) {
-      this.#refuse(
+      throw await this.#refuse(
         EGRESS_ERRORS.TRANSPORT_FAILED,
         `فشل النقل إلى ${destination.id}: ${error instanceof Error ? error.message : String(error)}`,
         facts,
