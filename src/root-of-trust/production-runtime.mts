@@ -100,6 +100,8 @@ export const ProductionRuntimeErrorCodes = [
   'FRESHNESS_EPOCH_REGRESSION',
   // `WL-302`: مُحقِّقُ أمرٍ ملكيٍّ محقونٌ ليس مبنيّاً على مفتاحِ الملكِ في التوكن.
   'ROYAL_COMMAND_VERIFIER_UNTRUSTED',
+  // `LIVE-28` (‏`WL-321`): المرجعُ رُفِعَ إلى غيرِ العهدِ المحجوزِ في البيانِ — كاتبٌ آخرُ.
+  'FRESHNESS_RESERVATION_MISMATCH',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -458,14 +460,23 @@ export async function createProductionRootOfTrust(
       // خارجيٌّ `> 0` تناقضٌ مُسمّىً لا «أوّلُ وصلٍ»: المرجعُ لا يتقدّمُ إلا بطيٍّ بعدَ
       // نقطةِ ضبطٍ مختومةٍ، فبيانٌ صفريٌّ معَ مرجعٍ متقدّمٍ لقطةٌ من نافذةِ الإقلاعِ الأوّلِ
       // أو من قبلِ أوّلِ طيٍّ. أوّلُ وصلٍ مشروعٌ هو `0 = 0` وحدَه (Case 5 أدناه).
-      if (externalEpoch > manifestEpoch) {
+      // LIVE-28 (WL-321): سقوطٌ بينَ رفعِ المرجعِ وختمِ العهدِ يتركُ في البيانِ المختومِ
+      // حجزاً `manifestEpoch + 1` ومرجعاً مساوياً له بالضبط — فيُتَمُّ الطيُّ ولا يُرَدُّ
+      // الجذرُ. ولا شيءَ غيرُ هذه الحالِ بعينِها: مرجعٌ أبعدُ من المحجوزِ لقطةٌ قديمةٌ تُرَدُّ
+      // بـ`STALE_MANIFEST_EPOCH` أدناه، وبيانٌ بلا حجزٍ لا يُعفى (‏`R10-F-01`).
+      if (
+        manifestBody.freshnessReserved !== undefined &&
+        manifestBody.freshnessReserved === manifestEpoch + 1 &&
+        externalEpoch === manifestBody.freshnessReserved
+      ) {
+        await manifest.completeFreshnessAsync(externalEpoch);
+      } else if (externalEpoch > manifestEpoch) {
         // Case 1: اللقطةُ القديمةُ المتّسقةُ تُرفَضُ
         throw new ProductionRuntimeError(
           STALE_MANIFEST_EPOCH,
           `عَهْدُ الحداثةِ الخارجيِّ ${externalEpoch} أحدثُ من البيانِ ${manifestEpoch} — اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ`,
         );
-      }
-      if (manifestEpoch > externalEpoch) {
+      } else if (manifestEpoch > externalEpoch) {
         // Case 2: البيانُ تقدّمَ على المرجعِ بلا رفعٍ مُصرَّحٍ — تقدّمٌ غيرُ مُشروعٍ
         throw new ProductionRuntimeError(
           'FRESHNESS_EPOCH_REGRESSION',
@@ -498,10 +509,21 @@ export async function createProductionRootOfTrust(
     await manifest.checkpointAsync();
     // EXT-6: بعدَ نقطةِ الضبطِ الأولى، إن وُجدَ مصدرُ حداثةٍ موصولٌ، يُرفعُ
     // عَهْدُهُ ويُخزَّنُ في البيان. فالبيانُ القادمُ يشهدُ على عَهْدٍ لا يُسترجَعُ.
+    // LIVE-28 (WL-321): الطيُّ ذو مرحلتَين — حجزٌ مختومٌ ثمَّ رفعُ المرجعِ ثمَّ إتمامٌ مختوم.
+    // كانَ الرفعُ يسبقُ الختمَ، فسقوطُ العمليّةِ بينَهما يتركُ المرجعَ متقدّماً على البيانِ
+    // بواحدٍ فيُرَدُّ كلُّ إقلاعٍ تالٍ بـ`STALE_MANIFEST_EPOCH` أبداً. ورفعٌ لا يُساوي المحجوزَ
+    // (‏كاتبٌ آخرُ على المرجعِ) يُرَدُّ ولا يُختَم.
     if (!isNullFreshnessSocket(freshnessSocket) && freshnessSocket !== null) {
+      const next = manifest.read().freshnessEpoch + 1;
+      await manifest.reserveFreshnessAsync(next);
       const bumped = await freshnessSocket.bump();
-      manifest.raise('freshnessEpoch', Number(bumped.epoch));
-      await manifest.checkpointAsync();
+      if (Number(bumped.epoch) !== next) {
+        throw new ProductionRuntimeError(
+          'FRESHNESS_RESERVATION_MISMATCH',
+          `المرجعُ رُفِعَ إلى ${String(bumped.epoch)} والمحجوزُ ${String(next)}`,
+        );
+      }
+      await manifest.completeFreshnessAsync(next);
     }
     // R5-A-01: شاهدُ العهدِ المزدوجُ — من البيانِ ومن السجلِّ المختومِ. وذاك
     // لأنّ بياناً أقدمَ صحيحَ الخاتَمِ + دفتراً فارغاً يُعيدُ قبولَ أمرٍ ثُبِّتَ،

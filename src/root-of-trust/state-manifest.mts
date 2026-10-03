@@ -104,6 +104,7 @@ export const StateManifestErrorCodes = [
   'STATE_MANIFEST_ROLLBACK_DETECTED',
   'STATE_MANIFEST_SEALER_REQUIRED',
   'STATE_MANIFEST_JOURNAL_LOCKED',
+  'STATE_MANIFEST_FRESHNESS_RESERVATION_INVALID',
 ] as const;
 
 export type StateManifestErrorCode = (typeof StateManifestErrorCodes)[number];
@@ -150,6 +151,12 @@ export interface StateManifestBody extends StateManifestBinding {
   ledgerCommitted: number;
   /** عَهْدُ الحداثةِ من مصدرٍ خارجَ القرص (EXT-6). صفرٌ إن لم يُوصَلْ. */
   freshnessEpoch: number;
+  /**
+   * `LIVE-28` (‏`WL-321`): حجزُ العهدِ التالي قبلَ رفعِ المرجعِ الخارجيِّ — المرحلةُ
+   * الأولى من الطيِّ ذي المرحلتَين. غائبٌ إلا بينَ الحجزِ والإتمام، وحاضراً لا يكونُ
+   * إلا `freshnessEpoch + 1` بالضبط.
+   */
+  freshnessReserved?: number;
   /** رأسُ دفترِ الرفعِ لحظةَ الختمِ — يمنعُ قصَّ الدفترِ إلى ما قبلَ الختم. */
   journalHead: string;
 }
@@ -498,13 +505,59 @@ export class StateManifest {
    * عندَ كلِّ إقلاعٍ، فنافذةُ الإعادةِ المُعلَنةُ ما بينَ إقلاعينِ لا أكثر.
    */
   async checkpointAsync(): Promise<void> {
+    await this.#sealTransition((body) => body);
+  }
+
+  /**
+   * `LIVE-28` (‏`WL-321`) — المرحلةُ الأولى من الطيِّ: يُختَمُ في البيانِ حجزُ العهدِ
+   * التالي **قبلَ** رفعِ المرجعِ الخارجيِّ. فإن سقطَت العمليّةُ بعدَ الرفعِ وقبلَ الإتمامِ
+   * بقيَ في البيانِ المختومِ شاهدٌ على أنَّ المرجعَ رُفِعَ بإذنِه. والحجزُ يُعادُ متساوياً
+   * بلا خطأٍ (‏سقوطٌ بينَ الحجزِ والرفعِ)، ولا يُقبَلُ لغيرِ `freshnessEpoch + 1`.
+   * @param next - العهدُ المحجوز
+   */
+  async reserveFreshnessAsync(next: number): Promise<void> {
+    await this.#sealTransition((body) => {
+      if (!Number.isSafeInteger(next) || next !== body.freshnessEpoch + 1) {
+        throw new StateManifestError(
+          'STATE_MANIFEST_FRESHNESS_RESERVATION_INVALID',
+          `حجزُ ${String(next)} على عهدٍ ${String(body.freshnessEpoch)}`,
+        );
+      }
+      return { ...body, freshnessReserved: next };
+    });
+  }
+
+  /**
+   * `LIVE-28` (‏`WL-321`) — المرحلةُ الثانيةُ: يُختَمُ العهدُ المحجوزُ عهداً ويُزالُ الحجز.
+   * ولا إتمامَ بلا حجزٍ مختومٍ مساوٍ — فلا يُرفَعُ العهدُ بهذا المسارِ إلى ما لم يُحجَز.
+   * @param epoch - العهدُ المحجوزُ نفسُه
+   */
+  async completeFreshnessAsync(epoch: number): Promise<void> {
+    await this.#sealTransition((body) => {
+      if (body.freshnessReserved !== epoch) {
+        throw new StateManifestError(
+          'STATE_MANIFEST_FRESHNESS_RESERVATION_INVALID',
+          `إتمامُ ${String(epoch)} والمحجوزُ ${String(body.freshnessReserved ?? 'غائب')}`,
+        );
+      }
+      const { freshnessReserved: _reserved, ...rest } = body;
+      void _reserved;
+      return { ...rest, freshnessEpoch: epoch };
+    });
+  }
+
+  /**
+   * نقطةُ ضبطٍ بتحويلٍ على المتنِ المطويِّ — داخلَ القفلِ ومن القرصِ (‏`WL-165`).
+   * @param transform - ما يُبدَّلُ في المتنِ قبلَ ختمِه
+   */
+  async #sealTransition(transform: (body: StateManifestBody) => StateManifestBody): Promise<void> {
     // WL-165: الطيُّ يحذفُ الدفترَ، فلو وقعَ رفعٌ من عمليةٍ أخرى بينَ الختمِ
     // والحذفِ لَضاعَ شاهدٌ مرفوعٌ بلا أثرٍ — وهو عينُ ما تقولُه `R4-B-03`:
     // شاهدٌ يبقى خارجَ الخاتَمِ. فالطيُّ داخلَ القفلِ والقراءةُ من القرصِ داخلَه.
     this.#acquireJournalLock();
     try {
       this.#verified = null;
-      const body = this.#verify(null);
+      const body = transform(this.#verify(null));
       const next: StateManifestBody = {
         ...body,
         sequence: body.sequence + 1,
@@ -751,7 +804,11 @@ export class StateManifest {
       (body.anchoredCount as number) < 0 ||
       (body.haltEpoch as number) < 0 ||
       (body.ledgerCommitted as number) < 0 ||
-      (body.freshnessEpoch as number) < 0
+      (body.freshnessEpoch as number) < 0 ||
+      // LIVE-28 (WL-321): الحجزُ غائبٌ أو `freshnessEpoch + 1` بالضبطِ — لا غيرُه.
+      (body.freshnessReserved !== undefined &&
+        (!Number.isSafeInteger(body.freshnessReserved) ||
+          body.freshnessReserved !== (body.freshnessEpoch as number) + 1))
     ) {
       throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'حقولٌ ناقصةٌ أو غيرُ صحيحة');
     }
