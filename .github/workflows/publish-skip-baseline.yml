@@ -83,6 +83,10 @@ jobs:
       contents: write
       pull-requests: write
       actions: write
+    outputs:
+      changed: ${{ steps.delta.outputs.changed }}
+      pr_number: ${{ steps.pr.outputs.number }}
+      ci_run_id: ${{ steps.ci-dispatch.outputs.run_id }}
     steps:
       # ── فحصُ الأصلِ: `workflow_ref` لا `workflow_sha` ──
       # `workflow_sha` **لا يُقابَلُ بـ`measured_sha`** — ذاكَ خطأٌ صُحِّحَ: الأوّلُ
@@ -257,6 +261,7 @@ jobs:
       # دمجٍ هوَ ما أنتجَ `REPO-1`: ثلاثةٌ وعشرونَ فرعاً مهجوراً.
       - name: طلبُ دمجٍ تلقائيٌّ
         if: steps.delta.outputs.changed == 'true'
+        id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -337,6 +342,7 @@ jobs:
             process.stdin.on('end', () => {
               const j = JSON.parse(Buffer.concat(chunks));
               console.log('PR created: #' + j.number + ' ' + j.html_url);
+              require('node:fs').appendFileSync(process.env.GITHUB_OUTPUT, 'number=' + j.number + '\\n');
             });
           "
 
@@ -410,3 +416,52 @@ jobs:
             echo ""
             echo "**ولا يُعَدُّ هذا إغلاقاً لـ\`OPS-1\`** ما بقيَ \`M5\` (عزلُ العدّاءِ) أو \`M6\` (عقدُ pkcs11js) محجِباً."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── حكمُ CI على طلبِ النشرِ الآليِّ (‏`OPS-1/BOT-PR-CI` · `WL-315`) ──
+  #
+  # `ci-dispatch` يَحكُمُ بـ«ظهرت تشغيلةٌ»، لا بـ«وَقَعَ الحكمُ على رأسِ الطلبِ».
+  # فنجحَ النشرُ في `#230`…`#233` ولم يُقَسْ مرّةً هل حملَ رأسُ الطلبِ «فحص الجودة
+  # الكامل» ناجحاً **من تشغيلةٍ آليّةٍ** قبلَ أيِّ تدخُّلٍ — وأُعيدَ فتحُ كلِّها قبلَ
+  # انتهاءِ التشغيلةِ الآليّةِ. فهذه الوظيفةُ تنتظرُ اكتمالَ تشغيلةِ الإرسالِ بعينِها
+  # ثمَّ تَحكُمُ بـ`scripts/verify-bot-pr-ci.mjs` على رأسِ الطلبِ: فحصٌ ناجحٌ من مجموعةِ
+  # تشغيلةٍ أطلقَها `github-actions[bot]` بـ`workflow_dispatch`، وأحدثُ فحصٍ بالاسمِ
+  # ناجحٌ. **راسبةٌ إن لم يقعِ الحكمُ** — فالنشرُ الأخضرُ يعني طلباً مُحاكَماً لا طلباً
+  # مفتوحاً فحسب.
+  #
+  # **وما لا تَفعلُه:** بلا بيئةٍ (لا تَكتُبُ شيئاً، فلا موافقةَ تَلزمُها)، وصلاحيّاتُها
+  # قراءةٌ وحدَها، وبلا سرٍّ غيرِ `GITHUB_TOKEN`، ولا تَدمجُ — الدمجُ يبقى بيدٍ.
+  bot-pr-verdict:
+    name: حكمُ CI على طلبِ النشرِ الآليِّ
+    needs: publish
+    if: needs.publish.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      pull-requests: read
+    steps:
+      - name: جلبُ الشجرةِ الموثوقةِ (main)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: انتظارُ تشغيلةِ الإرسالِ ثمَّ الحكمُ على رأسِ الطلبِ
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ needs.publish.outputs.pr_number }}
+          CI_RUN_ID: ${{ needs.publish.outputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          test -n "$PR_NUMBER" || { echo "::error::BOT_PR_NUMBER_MISSING: لا رقمَ طلبٍ من النشرِ."; exit 1; }
+          test -n "$CI_RUN_ID" || { echo "::error::BOT_PR_RUN_ID_MISSING: لا تشغيلةَ CI من النشرِ."; exit 1; }
+          node scripts/verify-bot-pr-ci.mjs \
+            --repo '${{ github.repository }}' \
+            --pr "$PR_NUMBER" \
+            --wait-run "$CI_RUN_ID" \
+            --timeout-sec 2400

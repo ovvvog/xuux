@@ -1,0 +1,259 @@
+#!/usr/bin/env node
+/**
+ * شاهدُ «طلبُ النشرِ الآليُّ يُحاكَمُ آليّاً» — `OPS-1/BOT-PR-CI` · `WL-315`.
+ *
+ * **علّةُ وجودِه:** `WL-311` أضافَ إلى مسارِ النشرِ إرسالَ `workflow_dispatch` إلى
+ * `ci.yml` على فرعِ النشرِ، لكنَّ الخطوةَ تَحكُمُ بـ«ظهرت تشغيلةٌ» لا بـ«وَقَعَ الحكمُ
+ * على رأسِ الطلبِ». فنجحَ النشرُ أربعَ مرّاتٍ (‏`#230`…`#233`) ولم يُقَسْ مرّةً واحدةً
+ * هل حملَ رأسُ الطلبِ «فحص الجودة الكامل» ناجحاً **من تشغيلةٍ آليّةٍ** قبلَ أيِّ
+ * تدخُّلٍ يدويٍّ — وأُعيدَ فتحُ الطلبِ في كلِّها قبلَ أن تنتهيَ التشغيلةُ الآليّةُ.
+ * فمعيارُ الإغلاقِ بقيَ ادّعاءً.
+ *
+ * **ما يَحكُمُ به:** على بصمةِ رأسِ الطلبِ، فحصٌ باسمِ السياقِ المطلوبِ من تطبيقِ
+ * `github-actions`، ناجحٌ، **ومجموعتُه تخصُّ تشغيلةً أطلقَها `github-actions[bot]`
+ * بـ`workflow_dispatch`** — لا تشغيلةَ `pull_request` أطلقَها إنسانٌ بإعادةِ فتحٍ.
+ * وأحدثُ فحصٍ بذلكَ الاسمِ على البصمةِ ناجحٌ أيضاً (‏حمايةُ الفرعِ تقرأُ الأحدثَ).
+ * وتشغيلاتُ `pull_request` الشبحيّةُ (‏`action_required` بصفرِ وظائفَ) تُسمّى ولا
+ * تُحتسَبُ: لا تحملُ فحصاً فلا تحجبُ، ولا تُخفى.
+ *
+ * رموزُ الخروجِ: `0` حكمٌ ناجحٌ · `1` حكمٌ راسبٌ · `2` عجزٌ عن الحكم (‏لا يُقرَأُ نجاحاً).
+ * يَقرأُ ولا يَكتُبُ.
+ *
+ * @module verify-bot-pr-ci
+ */
+
+import { pathToFileURL } from 'node:url';
+
+/** السياقُ المطلوبُ في حمايةِ `main` — اسمُ وظيفةِ `validate` في `ci.yml`. */
+export const REQUIRED_CONTEXT = 'فحص الجودة الكامل';
+
+/** أصلُ واجهةِ GitHub — يُضبَطُ في Actions بـ`GITHUB_API_URL`. */
+const API_ROOT = process.env.GITHUB_API_URL ?? 'https://api.github.com';
+
+/** فاعلُ `GITHUB_TOKEN`. */
+export const BOT_ACTOR = 'github-actions[bot]';
+
+/**
+ * @typedef {{ id: number, event: string, status: string, conclusion: string | null,
+ *   triggering_actor: string, check_suite_id: number, head_sha: string, path: string }} RunInfo
+ * @typedef {{ name: string, status: string, conclusion: string | null, app: string,
+ *   check_suite_id: number, head_sha: string, started_at: string | null }} CheckInfo
+ * @typedef {{ ok: boolean, code: string, detail: string, automaticRunIds: number[],
+ *   phantomRunIds: number[] }} Verdict
+ */
+
+/**
+ * الحكمُ الخالصُ — بلا شبكةٍ، فيُقاسُ على شواهدَ مسجَّلةٍ.
+ *
+ * @param {{ headSha: string, runs: RunInfo[], checks: CheckInfo[], requiredContext?: string }} input
+ * @returns {Verdict}
+ */
+export function judgeBotPrCi({ headSha, runs, checks, requiredContext = REQUIRED_CONTEXT }) {
+  if (!/^[0-9a-f]{40}$/.test(headSha)) {
+    return {
+      ok: false,
+      code: 'BOT_PR_CI_BAD_SHA',
+      detail: `بصمةُ الرأسِ ليست كاملةً: ${headSha}`,
+      automaticRunIds: [],
+      phantomRunIds: [],
+    };
+  }
+  const onHead = runs.filter((r) => r.head_sha === headSha && r.path.endsWith('ci.yml'));
+  const automatic = onHead.filter(
+    (r) => r.event === 'workflow_dispatch' && r.triggering_actor === BOT_ACTOR,
+  );
+  const suitesWithChecks = new Set(checks.map((c) => c.check_suite_id));
+  const phantom = onHead.filter(
+    (r) =>
+      r.event === 'pull_request' &&
+      r.triggering_actor === BOT_ACTOR &&
+      !suitesWithChecks.has(r.check_suite_id),
+  );
+  const base = {
+    automaticRunIds: automatic.map((r) => r.id),
+    phantomRunIds: phantom.map((r) => r.id),
+  };
+  if (automatic.length === 0) {
+    return {
+      ...base,
+      ok: false,
+      code: 'BOT_PR_CI_NO_AUTOMATIC_RUN',
+      detail: `لا تشغيلةَ CI أطلقَها ${BOT_ACTOR} بـworkflow_dispatch على ${headSha}.`,
+    };
+  }
+  const automaticSuites = new Set(automatic.map((r) => r.check_suite_id));
+  const named = checks.filter(
+    (c) => c.head_sha === headSha && c.name === requiredContext && c.app === 'github-actions',
+  );
+  const automaticPass = named.find(
+    (c) =>
+      automaticSuites.has(c.check_suite_id) &&
+      c.status === 'completed' &&
+      c.conclusion === 'success',
+  );
+  if (!automaticPass) {
+    const states = named
+      .filter((c) => automaticSuites.has(c.check_suite_id))
+      .map((c) => `${c.status}/${c.conclusion}`);
+    return {
+      ...base,
+      ok: false,
+      code: states.length === 0 ? 'BOT_PR_CHECK_MISSING' : 'BOT_PR_CI_RUN_NOT_SUCCESS',
+      detail:
+        states.length === 0
+          ? `لا فحصَ «${requiredContext}» من تشغيلةٍ آليّةٍ على ${headSha}.`
+          : `فحصُ «${requiredContext}» الآليُّ ليس ناجحاً: ${states.join(', ')}.`,
+    };
+  }
+  const latest = [...named].sort((a, b) =>
+    String(b.started_at ?? '').localeCompare(String(a.started_at ?? '')),
+  )[0];
+  if (latest && !(latest.status === 'completed' && latest.conclusion === 'success')) {
+    return {
+      ...base,
+      ok: false,
+      code: 'BOT_PR_CHECK_SUPERSEDED',
+      detail: `أحدثُ فحصٍ «${requiredContext}» على ${headSha} حالُه ${latest.status}/${latest.conclusion} — حمايةُ الفرعِ تقرأُ الأحدث.`,
+    };
+  }
+  return {
+    ...base,
+    ok: true,
+    code: 'BOT_PR_CI_OK',
+    detail: `«${requiredContext}» ناجحٌ على ${headSha} من مجموعةِ تشغيلةٍ آليّةٍ (${automatic
+      .map((r) => r.id)
+      .join(', ')}) بلا تدخُّلٍ.`,
+  };
+}
+
+/**
+ * @param {string} token
+ * @param {string} url
+ * @returns {Promise<any>}
+ */
+async function gh(token, url) {
+  const res = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+  if (!res.ok) throw new Error(`GET ${url} ⇒ HTTP ${res.status}`);
+  return res.json();
+}
+
+/**
+ * يَجمعُ الشواهدَ من GitHub لطلبٍ بعينِه.
+ *
+ * @param {{ token: string, repo: string, pr: number }} opts
+ */
+export async function collect({ token, repo, pr }) {
+  const api = `${API_ROOT}/repos/${repo}`;
+  const pull = await gh(token, `${api}/pulls/${pr}`);
+  const headSha = String(pull.head.sha);
+  const runsJson = await gh(token, `${api}/actions/runs?head_sha=${headSha}&per_page=100`);
+  /** @type {RunInfo[]} */
+  const runs = (runsJson.workflow_runs ?? []).map((/** @type {any} */ r) => ({
+    id: r.id,
+    event: r.event,
+    status: r.status,
+    conclusion: r.conclusion,
+    triggering_actor: r.triggering_actor?.login ?? '',
+    check_suite_id: r.check_suite_id,
+    head_sha: r.head_sha,
+    path: r.path ?? '',
+  }));
+  const checksJson = await gh(token, `${api}/commits/${headSha}/check-runs?per_page=100`);
+  /** @type {CheckInfo[]} */
+  const checks = (checksJson.check_runs ?? []).map((/** @type {any} */ c) => ({
+    name: c.name,
+    status: c.status,
+    conclusion: c.conclusion,
+    app: c.app?.slug ?? '',
+    check_suite_id: c.check_suite?.id,
+    head_sha: c.head_sha,
+    started_at: c.started_at,
+  }));
+  return { headSha, author: String(pull.user?.login ?? ''), runs, checks };
+}
+
+/**
+ * ينتظرُ اكتمالَ تشغيلةٍ بعينِها.
+ *
+ * @param {{ token: string, repo: string, runId: number, timeoutSec: number, intervalSec?: number }} opts
+ * @returns {Promise<any>}
+ */
+export async function waitForRun({ token, repo, runId, timeoutSec, intervalSec = 20 }) {
+  const deadline = Date.now() + timeoutSec * 1000;
+  for (;;) {
+    const run = await gh(token, `${API_ROOT}/repos/${repo}/actions/runs/${runId}`);
+    if (run.status === 'completed') return run;
+    if (Date.now() > deadline) return null;
+    console.log(`التشغيلةُ ${runId}: ${run.status} — انتظار…`);
+    await new Promise((r) => setTimeout(r, intervalSec * 1000));
+  }
+}
+
+/** @param {string[]} argv */
+function parseArgs(argv) {
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (let i = 0; i < argv.length; i += 2) {
+    const k = argv[i];
+    const v = argv[i + 1];
+    if (!k?.startsWith('--') || v === undefined) throw new Error(`وسيطٌ غيرُ صالحٍ: ${k}`);
+    out[k.slice(2)] = v;
+  }
+  return out;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const token = process.env.GH_TOKEN ?? '';
+  const repo = args.repo ?? process.env.GITHUB_REPOSITORY ?? '';
+  const pr = Number(args.pr);
+  if (!token || !repo || !Number.isInteger(pr) || pr <= 0) {
+    console.error(
+      'الاستعمال: GH_TOKEN=… node scripts/verify-bot-pr-ci.mjs --repo o/r --pr N [--wait-run ID --timeout-sec S]',
+    );
+    process.exit(2);
+  }
+  if (args['wait-run']) {
+    const done = await waitForRun({
+      token,
+      repo,
+      runId: Number(args['wait-run']),
+      timeoutSec: Number(args['timeout-sec'] ?? 1800),
+    });
+    if (!done) {
+      console.error(
+        `::error::BOT_PR_CI_TIMEOUT: لم تكتمل التشغيلةُ ${args['wait-run']} في المهلة.`,
+      );
+      process.exit(1);
+    }
+    console.log(`التشغيلةُ ${done.id}: ${done.status}/${done.conclusion}`);
+  }
+  const evidence = await collect({ token, repo, pr });
+  const verdict = judgeBotPrCi(evidence);
+  console.log(
+    JSON.stringify({ pr, author: evidence.author, headSha: evidence.headSha, ...verdict }, null, 2),
+  );
+  if (verdict.phantomRunIds.length > 0) {
+    console.log(
+      `::notice::تشغيلاتُ pull_request شبحيّةٌ بلا فحوصٍ (لا تحجبُ): ${verdict.phantomRunIds.join(', ')}`,
+    );
+  }
+  if (!verdict.ok) {
+    console.error(`::error::${verdict.code}: ${verdict.detail}`);
+    process.exit(1);
+  }
+  console.log(`✅ ${verdict.code}: ${verdict.detail}`);
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  main().catch((err) => {
+    console.error(`::error::BOT_PR_CI_ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(2);
+  });
+}
