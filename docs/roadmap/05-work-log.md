@@ -52,6 +52,52 @@
 
 ---
 
+### [2026-10-03] — WL-310 — `R10-F-06`: `npm run validate` يَجلُبُ كوميتاتِ المراجعةِ قبلَ `npm test` كمسارَي CI، فلا يَسقُطُ `R6-A-10` على استنساخٍ كاملٍ لـ`main`؛ ورسالةُ الحارسِ تُسمّي العلاجَ الصحيحَ
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** `P0` — `R10-F-06` (‏نتيجةُ مجلسٍ جديدةٌ من `WL-307`، تقريرُ `M11.06` ج5 من `claude_fable_5_1`، غيرُ مُقيَّدةٍ في العقد) · `EXT-1` (‏الضابطُ التعويضيُّ: hook ‏`pre-push`)
+
+**الحالةُ بعدَ العمل:** 🟨 جزئيٌّ — المساراتُ الثلاثةُ التي تُشغِّلُ الحزمةَ (‏`ci.yml` · `measure-skip-baseline.yml` · `npm run validate`) تَجلُبُ كوميتاتِ المراجعةِ المُعلَنةَ حاسمةً قبلَ `npm test`، وحارسُ `R6-A-10` لم يُرْخَ. والحكمُ في `R10-F-06` للمجلس. **لا تغييرَ** في `config/external-review.yaml` ولا `version.json` ولا النسبةِ ولا البوّابات.
+
+#### السببُ الجذريُّ (‏على `main@081ef86d`)
+
+- `tests/docs/external-review-pack.test.mjs` (‏`R6-A-10: خطّةُ الجولةِ موجودةٌ في الكوميتِ الذي راجعَه المجلسُ`) يَقرأُ `engagements[*].executedBy.reviewedCommit` ويطلبُ قراءةَ الكوميتِ بـ`git cat-file`. وكوميتُ `M11.05` ‏`d9e094e8…` يَسكُنُ `refs/pull/<n>/head` لا فرعاً ولا وسماً، فلا يُبلِّغُه استنساخٌ كاملٌ لـ`main` ولا `fetch-depth: 0`.
+- مسارا CI يُناديانِ `npm run fetch:reviewed-commits` قبلَ الحزمةِ (‏`OPS-1/RESIDENT-OBJECTS`، ويحرسُه `ج٥`)، **أمّا `npm run validate` فكانَ يُشغِّلُ `npm test` بلا جلبٍ** — وهوَ الضابطُ التعويضيُّ لـ`EXT-1` في hook ‏`pre-push`. فالحزمةُ لا تَخرُجُ `0` محلّيّاً على شجرةٍ سليمة.
+- ورسالةُ التوكيدِ كانت تُحيلُ على `fetch-depth: 0` وهوَ ليسَ السبب.
+
+#### ما تمَّ فعلاً
+
+- `package.json`: `npm run fetch:reviewed-commits` قبلَ `npm test` مباشرةً في سلسلةِ `validate` (‏بـ`&&`، فتعذُّرُ الجلبِ يُسقِطُ السلسلةَ بـ`REVIEWED_COMMIT_UNREADABLE` ولا يُقرأُ نجاحاً). **لا آليّةَ جديدةٌ**: الأمرُ نفسُه الذي يُناديه CI.
+- `tests/external-review/ops-1-adversarial.test.mjs`: الاختبارُ `ج٦` — في سلسلةِ `validate` المُحلَّلةِ الجلبُ قائمٌ وقبلَ `npm test` مباشرةً، والأمرُ المجلوبُ هوَ أمرُ CI بعينِه.
+- `tests/docs/external-review-pack.test.mjs`: رسالةُ التوكيدِ تُسمّي `refs/pull/<n>/head` و`npm run fetch:reviewed-commits`. **ولم يُمَسَّ منطقُ التوكيدِ ولا شرطُه.**
+
+#### الملفاتُ المتأثّرة
+
+`package.json` · `tests/external-review/ops-1-adversarial.test.mjs` · `tests/docs/external-review-pack.test.mjs` · `config/work-log-ids.yaml` و`docs/audit/work-log-id-map.md` (‏رُفِعَ إعلانُ فجوةِ `WL-310` الذي قيَّدَه `WL-311` لأنّ هذه الدفعةَ دُمِجَت بعدَه) · `PROJECT_STATUS.md` · `docs/READINESS_REPORT.md` · `docs/roadmap/05-work-log.md`
+
+#### الـ commit
+
+`f073ce80` — `fix(validate): يَجلُبُ كوميتاتِ المراجعةِ قبلَ npm test كمساري CI (R10-F-06)`، ثمّ كوميتُ التوثيقِ، من فرعِ `fix/wl-310-validate-reviewed-commits` في طلبِ دمجٍ.
+
+#### الدليل
+
+- **إعادةُ الإنتاجِ:** استنساخٌ كاملٌ لـ`main` بـ`gh repo clone` ⇒ `git cat-file -t d9e094e8` ⇒ `fatal: Not a valid object name`؛ و`npm run validate` على فرعِ `WL-309` ⇒ `tests 2424 · pass 2297 · fail 1 · skipped 126`، والساقطُ الوحيدُ `not ok 340 - R6-A-10: خطّةُ الجولةِ موجودةٌ في الكوميتِ الذي راجعَه المجلسُ`.
+- **قبلُ/بعدُ على الحارسِ:** `node --test --test-name-pattern=R6-A-10 tests/docs/external-review-pack.test.mjs` ⇒ `pass 4 · fail 1`؛ ثمّ `npm run fetch:reviewed-commits` ⇒ «كوميتاتُ المراجعةِ المُعلَنةُ: 2 — مجلوبٌ الآنَ: 1» وخروجٌ `0`؛ ثمّ الأمرُ نفسُه ⇒ `pass 5 · fail 0`.
+- **طفرةٌ:** `ج٦` على `package.json` من `main` ⇒ `pass 0 · fail 1`، وعلى الملفِّ الجديدِ ⇒ `pass 1 · fail 0`.
+- **بعدُ على الاستنساخِ نفسِه:** `npm run validate` على رأسِ الفرعِ ⇒ `tests 2425 · pass 2299 · fail 0 · skipped 126` (‏المتروكُ بيئيٌّ محلّيّاً: لا `DATABASE_URL` ولا SoftHSM/TPM؛ وCI يُشغِّلُ شطرَ القاعدةِ على حاويةِ `postgres`).
+- CI على الطلبِ `#226` ⇒ «فحص الجودة الكامل» و«تقرير البوابتين» `success`.
+
+#### ما لم يتمَّ ولماذا
+
+- **`validate` صارَ يحتاجُ وصولاً إلى `origin`** حينَ يغيبُ كوميتُ مراجعةٍ محلّيّاً — وهوَ حدٌّ مُعلَنٌ لا مستورٌ: بلا وصولٍ يَسقُطُ بسببٍ مقروءٍ (‏`REVIEWED_COMMIT_UNREADABLE`) بدلَ أن يَسقُطَ `R6-A-10` بإحالةٍ خاطئة. وإبلاغُ الكوميتِ من `main` نفسِه (‏وسمٌ أو دمجُه في التاريخ) قرارُ تاريخٍ لا يُتَّخَذُ هنا.
+- `R10-F-06` لا يُقيَّدُ ولا يُغلَقُ في العقد: التقييدُ للمالكِ والحكمُ للمجلس.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- `EXT-1`: hook ‏`pre-push` (‏`npm run validate`) صارَ يُحاكِمُ ما يُحاكِمُه CI في هذا الشقِّ.
+- يمسُّ `tests/` فيُغيِّرُ بصمةَ النطاقِ: `R7/SCOPE-DRIFT` على `main` بعدَ الدمجِ حتّى دورةِ القياسِ (‏`OPS-1/MAIN-DRIFT-WINDOW`).
+
+---
+
 ### [2026-10-03] — WL-309 — `LIVE-27` / `R10-F-04`: المُبلِّغونَ الستّةُ عن الحجرِ ينتظرونَ ختمَ إشارتِهم (‏`reportAwaitingSeal`)، واكتشافُ `LIVE-29` وإغلاقُه (‏`memory-isolation-breach` غيرُ معلَنٍ للحاجب)
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** `P0` — `LIVE-27` (‏§4.6؛ تنفيذٌ ⇒ مراجعة)، ونتيجةُ المجلسِ `R10-F-04` (‏`WL-307`)، و`LIVE-29` (‏§4.6، مُكتشَفٌ هنا)
