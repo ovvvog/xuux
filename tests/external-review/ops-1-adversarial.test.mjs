@@ -1361,6 +1361,58 @@ test('ب٦ — مرحلةُ النشرِ تُشغِّلُ الحاجزَ حاس�
   assert.ok(prIndex > pushIndex, 'وطلبُ الدمجِ بعدَ الدفعِ — ودفعٌ بلا طلبٍ أنتجَ REPO-1.');
 });
 
+test('ب٧ — مسارُ النشرِ يُطلِقُ CI على فرعِهِ بـ`workflow_dispatch` حاسماً (OPS-1/BOT-PR-CI · WL-311)', () => {
+  // طلبُ الدمجِ المُنشَأُ بـ`GITHUB_TOKEN` لا يُشغِّلُ `pull_request` بوظائفَ (‏`37085393507`)،
+  // و`workflow_dispatch` هوَ الاستثناءُ الموثَّقُ. فالمقيسُ: خطوةٌ تُرسِلُهُ إلى `ci.yml`
+  // على الفرعِ المدفوعِ، بعدَ طلبِ الدمجِ، وتَسقُطُ على غيرِ `204` وعلى غيابِ التشغيلةِ.
+  const doc = workflowDoc('publish-skip-baseline.yml');
+  const job = doc.jobs?.publish;
+  assert.equal(
+    job?.permissions?.actions,
+    'write',
+    'إرسالُ workflow_dispatch يَحتاجُ actions:write.',
+  );
+  assert.equal(
+    job?.environment,
+    'publish-skip-baseline',
+    'والبيئةُ باقيةٌ: لا تجاوزَ لموافقةِ المالكِ.',
+  );
+  /** @type {Array<{ id?: string, if?: string, run?: string, env?: Record<string, string> }>} */
+  const steps = job?.steps ?? [];
+  const dispatchIndex = steps.findIndex((s) => s.id === 'ci-dispatch');
+  const prIndex = steps.findIndex((s) => String(s.run ?? '').includes('/pulls'));
+  assert.ok(dispatchIndex > -1, 'خطوةُ ci-dispatch قائمةٌ.');
+  assert.ok(prIndex > -1 && dispatchIndex > prIndex, 'والإطلاقُ بعدَ إنشاءِ طلبِ الدمجِ.');
+  const step = steps[dispatchIndex];
+  assert.equal(step?.if, "steps.delta.outputs.changed == 'true'");
+  assert.equal(
+    step?.env?.BRANCH,
+    '${{ steps.branch.outputs.branch }}',
+    'المرجعُ فرعُ النشرِ لا main.',
+  );
+  assert.equal(step?.env?.HEAD_SHA, '${{ steps.branch.outputs.head_sha }}');
+  assert.equal(
+    step?.env?.GH_TOKEN,
+    '${{ secrets.GITHUB_TOKEN }}',
+    'بلا سرٍّ جديدٍ ولا PAT — GITHUB_TOKEN وحدَهُ.',
+  );
+  const commands = shellCommands(String(step?.run ?? '')).join('\n');
+  assert.match(commands, /actions\/workflows\/ci\.yml/);
+  assert.match(commands, /\/dispatches/);
+  assert.match(commands, /"\$HTTP_CODE" != '204'/, 'غيرُ 204 يُسقِطُ الخطوةَ.');
+  assert.match(commands, /CI_DISPATCH_NO_RUN/, 'وإرسالٌ بلا تشغيلةٍ مرئيّةٍ يُسقِطُها.');
+  assert.match(commands, /head_sha=\$HEAD_SHA/, 'والتشغيلةُ على البصمةِ المدفوعةِ بعينِها.');
+  const branchStep = steps.find((s) => s.id === 'branch');
+  assert.match(String(branchStep?.run ?? ''), /head_sha=\$\(git rev-parse HEAD\)/);
+  // والسرُّ الوحيدُ في الملفِّ GITHUB_TOKEN: الإصلاحُ لا يَستدعي سرَّ مالكٍ.
+  const secrets = workflow('publish-skip-baseline.yml').match(/secrets\.[A-Za-z_]+/g) ?? [];
+  assert.deepEqual([...new Set(secrets)], ['secrets.GITHUB_TOKEN']);
+  // و`ci.yml` يَقبلُ `workflow_dispatch`، ووظيفتُهُ المطلوبةُ باسمِها الذي يُطابِقُهُ الفحصُ.
+  const ci = workflowDoc('ci.yml');
+  assert.ok(ci.on && 'workflow_dispatch' in ci.on, 'ci.yml يَقبلُ workflow_dispatch.');
+  assert.equal(ci.jobs?.validate?.name, 'فحص الجودة الكامل');
+});
+
 test('ب٣ب — مُعِينُ استخراجِ الأوامرِ مقيسٌ: يُسقِطُ الجسدَ ولا يُسقِطُ أمراً', () => {
   const script = [
     'set -euo pipefail',
