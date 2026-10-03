@@ -7,9 +7,12 @@
  * **حدٌّ معلن:** `state.events` مرآة سجل تجزئة متصل. حذف حدث، حتى من البادئة،
  * يجعل أول صف باقٍ يشير إلى `prev_hash` غير موجود في الجدول، فلا تبقى السلسلة
  * قابلة للتحقق من داخل المرآة. لذلك لا يوجد محو آلي أو موجّه للأحداث هنا.
+ *
+ * **ولا محوَ خاماً لغيرِ الأحداثِ كذلك** (نتيجةُ `R6-A-11`): هذه الوحدةُ تقرأُ
+ * وتعدُّ فقط. المحوُ فعلٌ محكومٌ (`purge-data`) يقعُ عبرَ `RetentionCycle.run` في
+ * `src/data/retention-cycle.mjs` وحدَه؛ و`purge` بلا `dryRun` و`eraseById` تُرفَضانِ
+ * برمزِ `RETENTION_PURGE_UNAUTHORIZED` قبلَ أيِّ اتصالٍ بالقاعدة.
  */
-
-import { withTransaction } from './db.mjs';
 
 export const RETENTION_ERRORS = Object.freeze({
   INVALID_NOW: 'RETENTION_INVALID_NOW',
@@ -18,6 +21,7 @@ export const RETENTION_ERRORS = Object.freeze({
   NOT_FOUND: 'RETENTION_NOT_FOUND',
   EVENTS_IMMUTABLE: 'RETENTION_EVENTS_IMMUTABLE',
   DEPENDENTS_PRESENT: 'RETENTION_DEPENDENTS_PRESENT',
+  PURGE_UNAUTHORIZED: 'RETENTION_PURGE_UNAUTHORIZED',
 });
 
 /** خطأ سياسة احتفاظ يحمل رمزاً ثابتاً للمستدعي وأداة سطر الأوامر. */
@@ -272,37 +276,36 @@ export async function plan(pool, { now }) {
 }
 
 /**
- * @param {RetentionPolicy} policy
- * @param {import('pg').PoolClient} client
- * @param {Date} now
- * @returns {Promise<number>}
+ * رفضُ المحوِ الخامِ — نتيجةُ `R6-A-11` (مجلسُ النماذجِ).
+ *
+ * **العيبُ المُقاسُ:** كانت `purge` و`eraseById` تُصدِرانِ `DELETE` على
+ * `state.memories` و`state.data_assets` مباشرةً — بلا نداءٍ إلى
+ * `EnforcementPoint.authorize` على الفعلِ `purge-data` (وهو فوقَ العتبةِ
+ * السياديّةِ)، وبلا سجلِّ محوٍ في دفترِ المحوِ. وإغلاقُ سطرِ الأوامرِ وحاجزُ
+ * `scripts/` لا يُغلقانِ الدالّتينِ نفسَيهما: كلُّ مستوردٍ للوحدةِ كان يمحو.
+ *
+ * **والإصلاحُ إزالةٌ لا سلطةٌ ثانية:** لا مستهلِكَ إنتاجيّاً لهما في `src/` ولا
+ * `scripts/`، والمسارُ المحكومُ قائمٌ: `RetentionCycle.run` في
+ * `src/data/retention-cycle.mjs` يُفوِّضُ عبرَ نقطةِ التفويضِ ويستهلكُ تذكرةَ
+ * القرارِ ويشهدُ في دفترِ المحوِ قبلَ الحذفِ (`R6-A-01`). وتذكرتُه تُستهلَكُ
+ * داخلَ الدورةِ فلا تخرجُ منها أثراً يُمرَّرُ إلى هنا؛ فاشتراطُ «سلطةٍ» في هذه
+ * الوحدةِ كان يعني اختراعَ آليّةٍ ثانيةٍ تفترقُ عن الأولى. فالحذفُ أُزيلَ من
+ * هذه الوحدةِ، وما بقيَ قراءةٌ (`plan` و`purge({ dryRun: true })`).
+ * @param {string} target ما طُلِبَ محوُه، ليُسمّى في الرفض.
+ * @returns {RetentionError}
  */
-async function deletePolicy(policy, client, now) {
-  const conditions = eligibilityConditions(policy);
-  if (conditions === null) {
-    throw new RetentionError(
-      RETENTION_ERRORS.EVENTS_IMMUTABLE,
-      'محو state.events مرفوض: أي حذف يقطع مرآة سلسلة التجزئة المتصلة.',
-    );
-  }
-  try {
-    const result = await client.query(
-      `DELETE FROM ${quoteRelation(policy.table)} WHERE ${conditions.eligible}`,
-      [now],
-    );
-    return result.rowCount ?? 0;
-  } catch (error) {
-    // خطأ المرجع يُسمّى ولا يُبتلع: المعاملة تتراجع كما كانت، والفرق أنّ المستدعي
-    // يقرأ رفضاً معه الفعل المطلوب لا خللاً في قاعدة.
-    const named = dependentFault(error, policy.table);
-    if (named === null) throw error;
-    throw named;
-  }
+function rawPurgeRefused(target) {
+  return new RetentionError(
+    RETENTION_ERRORS.PURGE_UNAUTHORIZED,
+    `محوُ ${target} مرفوضٌ من هذه الوحدة: المحوُ فعلٌ محكومٌ («purge-data») فوقَ العتبةِ السياديّةِ، ولا يقعُ إلا عبرَ دورةِ الاحتفاظِ المحكومةِ (RetentionCycle.run في src/data/retention-cycle.mjs) بقرارٍ من نقطةِ التفويضِ وشاهدٍ في دفترِ المحو (R6-A-11).`,
+  );
 }
 
 /**
- * امحُ الصفوف المنتهية في معاملة واحدة. الافتراضي يتجاهل `events` لأن سياسته
- * المعلنة تمنع المحو، أما طلبه صراحةً فيفشل مغلقاً قبل بدء أي حذف.
+ * التقريرُ الجافُّ للمحوِ الدوريِّ. بلا `dryRun: true` يُرفَضُ الطلبُ برمزِ
+ * `RETENTION_PURGE_UNAUTHORIZED` **قبلَ أيِّ اتصالٍ بالقاعدة** (`R6-A-11`)؛
+ * والتحقّقُ من المُدخلِ يسبقُ الرفضَ فتبقى رموزُه كما هي: طلبُ `events` صراحةً
+ * يفشلُ بـ`RETENTION_EVENTS_IMMUTABLE`.
  * @param {import('pg').Pool} pool
  * @param {{ now: Date, tables?: readonly string[], dryRun?: boolean }} options
  * @returns {Promise<PurgeReport>}
@@ -317,35 +320,27 @@ export async function purge(pool, { now, tables, dryRun = false }) {
       'محو state.events مرفوض: أي حذف يقطع مرآة سلسلة التجزئة المتصلة.',
     );
   }
-  if (dryRun) {
-    const report = await Promise.all(selected.map((policy) => countPolicy(policy, pool, now)));
-    return {
-      now: new Date(now.getTime()),
-      dryRun: true,
-      tables: report.map((row) => ({ ...row, deleted: 0 })),
-    };
+  if (!dryRun) {
+    throw rawPurgeRefused(selected.map((policy) => policy.table).join(', '));
   }
-  return withTransaction(pool, async (client) => {
-    /** @type {PurgeReportRow[]} */
-    const rows = [];
-    for (const policy of selected) {
-      const counted = await countPolicy(policy, client, now);
-      const deleted = await deletePolicy(policy, client, now);
-      rows.push({ ...counted, deleted });
-    }
-    return { now: new Date(now.getTime()), dryRun: false, tables: rows };
-  });
+  const report = await Promise.all(selected.map((policy) => countPolicy(policy, pool, now)));
+  return {
+    now: new Date(now.getTime()),
+    dryRun: true,
+    tables: report.map((row) => ({ ...row, deleted: 0 })),
+  };
 }
 
 /**
- * محو موجّه داخل معاملة. يُقفل الصف قبل فحص الحفظ القانوني كي لا يُتجاوز قرار
- * حفظ متزامن بين القراءة والحذف.
- * @param {import('pg').Pool} pool
+ * المحوُ الموجَّهُ مرفوضٌ من هذه الوحدةِ (`R6-A-11`): يُتحقَّقُ من مفتاحِ السياسةِ
+ * ثمّ يُرفَضُ برمزِ `RETENTION_PURGE_UNAUTHORIZED` قبلَ أيِّ اتصالٍ بالقاعدة.
+ * والمحوُ الموجَّهُ المحكومُ هو `RetentionCycle` في `src/data/retention-cycle.mjs`.
+ * @param {import('pg').Pool} _pool
  * @param {string} table مفتاح سياسة معلن، لا اسم SQL.
  * @param {string} id
  * @returns {Promise<void>}
  */
-export async function eraseById(pool, table, id) {
+export async function eraseById(_pool, table, id) {
   const policies = selectPolicies([table], false);
   const policy = policies[0];
   if (policy === undefined) {
@@ -357,42 +352,5 @@ export async function eraseById(pool, table, id) {
       'محو state.events مرفوض: أي حذف يقطع مرآة سلسلة التجزئة المتصلة.',
     );
   }
-  await withTransaction(pool, async (client) => {
-    const result = await client.query(
-      `SELECT ${quoteIdentifier('legal_hold')} FROM ${quoteRelation(policy.table)}
-       WHERE ${quoteIdentifier('id')} = $1 FOR UPDATE`,
-      [id],
-    );
-    const row = /** @type {Record<string, unknown> | undefined} */ (result.rows[0]);
-    if (row === undefined) {
-      throw new RetentionError(
-        RETENTION_ERRORS.NOT_FOUND,
-        `لا صف بالمعرّف ${id} في ${policy.table}.`,
-      );
-    }
-    if (policy.legalHoldProtected && row['legal_hold'] === true) {
-      throw new RetentionError(
-        RETENTION_ERRORS.LEGAL_HOLD,
-        `محو ${policy.table} بالمعرّف ${id} مرفوض: الصف محفوظ قانوناً.`,
-      );
-    }
-    /** @type {import('pg').QueryResult} */
-    let deleted;
-    try {
-      deleted = await client.query(
-        `DELETE FROM ${quoteRelation(policy.table)} WHERE ${quoteIdentifier('id')} = $1`,
-        [id],
-      );
-    } catch (error) {
-      const named = dependentFault(error, policy.table);
-      if (named === null) throw error;
-      throw named;
-    }
-    if (deleted.rowCount !== 1) {
-      throw new RetentionError(
-        RETENTION_ERRORS.NOT_FOUND,
-        `تعذّر محو ${policy.table} بالمعرّف ${id}: لم يعد الصف موجوداً.`,
-      );
-    }
-  });
+  throw rawPurgeRefused(`${policy.table} بالمعرّف ${id}`);
 }
