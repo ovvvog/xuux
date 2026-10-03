@@ -1,5 +1,48 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-03] — WL-313 — `R6-A-11`: الوحدةُ `src/persistence/retention.mjs` لا تملكُ قدرةَ حذفٍ بعدَ اليومِ — `purge` و`eraseById` يرفضانِ بـ`RETENTION_PURGE_UNAUTHORIZED` قبلَ لمسِ الوصلةِ؛ واكتشافُ `DOC-22` وإغلاقُه
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`؛ الشفرةُ والاختبارُ بوكيلٍ فرعيٍّ في فرعٍ معزولٍ، والمراجعةُ والتوثيقُ بالمنفِّذِ) · **المسارُ والخطوةُ:** `P0` — `R6-A-11` (‏§4.3؛ العضوانِ في `WL-307` على `open`، وبندُ `R10-F-07`) · `DOC-22` (‏§4.6، مُكتشَفٌ هنا)
+
+**الحالةُ بعدَ العمل:** 🟨 جزئيٌّ — مسارُ الإعادةِ المُسجَّلُ في العقدِ (‏عميلٌ وهميٌّ ⇒ `DELETE FROM "state"."memories" …`، `deleted: 1`) لم يَعُدْ يُعادُ إنتاجُه: لا SQL يُرسَلُ ولا اتصالَ يُفتَحُ بلا سلطة. والحكمُ في `R6-A-11` للمجلس. **لا تغييرَ** في `config/external-review.yaml` ولا `version.json` ولا النسبةِ ولا البوّابات.
+
+#### السببُ الجذريُّ (‏على `main`)
+
+- `purge` (‏L310) يُنادي `deletePolicy` (‏L280) فيُنفِّذُ `DELETE FROM … WHERE <eligible>` (‏L290)، و`eraseById` (‏L348) يُنفِّذُ `DELETE FROM … WHERE id = $1` (‏L383) — **بلا نداءٍ إلى `EnforcementPoint.authorize` بالفعلِ `purge-data` وبلا قيدِ محو**.
+- `WL-215` أغلقَ مدخلَ سطرِ الأوامرِ (‏`RETENTION_PURGE_CLI_FORBIDDEN`) وحارسُ `scripts/guard-retention.mjs` يمنعُ `scripts/` من استيرادِ `purge`، **لكنّ الدالّتَينِ المُصدَّرتَينِ بقيتا مسارَ حذفٍ** لأيِّ مستورِدٍ في `src/` — وهذا ما قاسَه العضوانِ (‏`R10-F-07`: «سُدَّتِ الأداةُ ولم تُسَدَّ الوحدةُ»).
+- `rg` ⇒ **لا مستهلِكَ إنتاجيٌّ** لـ`purge`/`eraseById` في `src/` ولا `scripts/`؛ والمسارُ المحكومُ (‏`RetentionCycle.run` في `src/data/retention-cycle.mjs`) يحذفُ بمسارِه ويستهلكُ تذكرتَه في `#authorizeSweep` فلا أثرَ يُمرَّرُ إليهما.
+
+#### ما تمَّ فعلاً
+
+- `src/persistence/retention.mjs`: **أُزيلت قدرةُ الحذفِ** ولم تُصنَعْ آليّةُ تفويضٍ ثانيةٌ: `RETENTION_ERRORS.PURGE_UNAUTHORIZED = 'RETENTION_PURGE_UNAUTHORIZED'`؛ `purge` بلا `dryRun` و`eraseById` يرميانِه **قبلَ لمسِ الوصلةِ** وبعدَ فحوصِ المُدخلاتِ القائمةِ (‏`EVENTS_IMMUTABLE` · `UNKNOWN_TABLE` · `INVALID_NOW` كما كانت). وحُذِفَ `deletePolicy` واستيرادُ `withTransaction` غيرُ المستعمَل. و`plan` و`purge({ dryRun: true })` جافّانِ كما كانا.
+- `tests/persistence/r6-a-11-raw-purge-authority.test.mjs` (‏جديدٌ): عميلٌ وهميٌّ يُسجِّلُ كلَّ SQL — لا SQL ولا اتصالَ بلا سلطة، و`plan`/`dryRun` يعملانِ، والرموزُ القائمةُ لم تتبدّل.
+- `tests/persistence/retention.test.mjs` (‏اختباراتُ القاعدةِ): ما كانَ يتوقّعُ حذفاً خاماً صارَ يتوقّعُ `PURGE_UNAUTHORIZED` **ويتحقّقُ أنّ الصفَّ باقٍ**، والأعدادُ (‏`eligible`/`legalHoldProtected`) تُقاسُ بـ`dryRun`. **لم يُحذَفْ توكيدٌ**؛ وتوقُّعاتُ `LEGAL_HOLD` الأربعةُ صارَت `PURGE_UNAUTHORIZED` لأنّ الرفضَ صارَ يسبقُ فحصَ الحجزِ القانونيِّ.
+- **`DOC-22` (‏مُكتشَفٌ في المراجعة):** `docs/RETENTION.md` §«الأوامر» كانَ يُعلِّمُ `node scripts/retention.mjs purge --table …` ويقولُ «`purge` بلا `--dry-run` ينفذ محو الجداول» — **والأمرُ مُغلَقٌ منذُ `WL-215`**. صُحِّحَ القسمُ ليُطابِقَ الشفرةَ (‏السطرُ والوحدةُ مُغلَقانِ، والمسارُ المحكومُ `RetentionCycle.run`)، وقُيِّدَ في §4.6 مُغلَقاً في الدفعةِ نفسِها.
+
+#### الملفاتُ المتأثّرة
+
+`src/persistence/retention.mjs` · `tests/persistence/r6-a-11-raw-purge-authority.test.mjs` · `tests/persistence/retention.test.mjs` · `docs/RETENTION.md` · `docs/ROOT_OF_TRUST.md` (‏237 ملفَّ اختبار) · `docs/roadmap/06-debt-register.md` (‏`DOC-22`) · `PROJECT_STATUS.md` · `docs/READINESS_REPORT.md` · `docs/roadmap/05-work-log.md`
+
+#### الـ commit
+
+`fix(retention): رفضُ المحوِ الخامِ في purge وeraseById بلا سلطةِ purge-data (R6-A-11)` و`docs(retention): …`، ثمّ كوميتُ التوثيقِ، من فرعِ `fix/r6-a-11-retention-raw-purge` في طلبِ دمجٍ.
+
+#### الدليل
+
+- **قبلُ** (‏الاختبارُ الجديدُ على الشفرةِ القديمةِ): `node --test --test-concurrency=1 tests/persistence/r6-a-11-raw-purge-authority.test.mjs` ⇒ خروج `1`، `tests 4 · pass 2 · fail 2` («Missing expected rejection»)، والمِجسُّ التقطَ `DELETE FROM "state"."memories" WHERE "id" = $1` و`deleted: 1`.
+- **بعدُ:** الأمرُ نفسُه ⇒ خروج `0`، `tests 4 · pass 4 · fail 0`.
+- `node --test --test-concurrency=1 tests/persistence tests/data tests/tooling/guard-retention.test.mjs` ⇒ خروج `0`، `tests 239 · pass 184 · fail 0 · skipped 55` — كلُّ المتروكِ بعلّةِ «`DATABASE_URL` غير معلَنة» محلّيّاً، وCI يُشغِّلُها على حاويةِ `postgres` في `services:`.
+- `npm run guard:retention` · `npm run lint` · `npm run typecheck` ⇒ `0`. و`npm run validate` وCI على الطلب — في نصِّ الطلب.
+
+#### ما لم يتمَّ ولماذا
+
+- **لا اختبارَ جديدٌ للحذفِ بسلطةٍ في `tests/persistence`:** المسارُ المحكومُ `RetentionCycle.run` مقيسٌ في `tests/data/retention-authorization.test.mjs`، ولم يُمَسّ.
+- **ضيقُ الوصفِ قرارُ مالكٍ** (‏`R10-F-07`): هذا الإصلاحُ يسدُّ المسارَ المسجَّلَ والعنوانَ معاً، ولا يُعدِّلُ نصَّ النتيجةِ.
+- `R6-A-11` لا يُعلَنُ مُغلَقاً: الحكمُ للمجلس.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- لا مُنادٍ إنتاجيٌّ تأثّرَ (‏`rg`). ويمسُّ `src/` و`tests/` ⇒ `R7/SCOPE-DRIFT` على `main` بعدَ الدمجِ حتّى دورةِ القياس.
 ### [2026-10-03] — WL-312 — `R10-F-03`: انقلابُ شاهدِ حدِّ الإعادةِ بمقبسِ الحداثةِ يُوثَّقُ في `ADR 0006` وفي رأسِ الشاهدِ وفي `ROOT_OF_TRUST.md` §5 — بحدِّه في الإنتاجِ مُعلَناً
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** `P0` — `R10-F-03` (‏نتيجةُ مجلسٍ جديدةٌ من `WL-307`، تقريرُ `M11.04` ج10 من `claude_fable_5_1`، غيرُ مُقيَّدةٍ في العقد) · `R3-A-01`/`EXT-6` (‏سياقٌ لا إغلاق)
