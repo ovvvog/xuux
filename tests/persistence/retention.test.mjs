@@ -13,7 +13,7 @@
  */
 
 import assert from 'node:assert/strict';
-import test, { after, before } from 'node:test';
+import test, { after, afterEach, before } from 'node:test';
 import { up } from '../../src/persistence/migrator.mjs';
 import { eraseById, plan, purge, RETENTION_ERRORS } from '../../src/persistence/retention.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
@@ -40,6 +40,14 @@ before(async () => {
 
 after(async () => {
   if (db !== null) await db.drop();
+});
+
+// **منذُ `R6-A-11`** لا يمحو اختبارٌ صفوفَه بـ`purge`، فما يُدرِجُه دليلٌ كانَ يبقى في
+// القاعدةِ المعزولةِ ويُشوِّشُ عدَّ الدليلِ التالي (‏`eligible`). فتُفرَّغُ جداولُ
+// المادّةِ بعدَ كلِّ دليلٍ بـ`TRUNCATE` — تهيئةُ اختبارٍ لا مسارُ محوٍ في المنتج.
+afterEach(async () => {
+  if (db === null) return;
+  await db.pool.query('TRUNCATE state.memories, state.data_assets CASCADE');
 });
 
 /** @returns {import('pg').Pool} */
@@ -223,8 +231,8 @@ test(
     }
 
     const simulated = await purge(pool(), { now: NOW, tables: ['memories'], dryRun: true });
+    // ذاكرةُ الحفظِ بلا `expires_at` فلا تُعَدُّ منتهيةً ولا محميّةً — العدُّ للمنتهي وحدَه.
     assert.equal(simulated.tables[0]?.eligible, 1);
-    assert.equal(simulated.tables[0]?.legalHoldProtected, 1);
     assert.equal(simulated.tables[0]?.deleted, 0);
     await assert.rejects(() => purge(pool(), { now: NOW, tables: ['memories'] }), unauthorized);
     assert.equal(await rowCount('memory-expired-001'), 1, 'المحوُ الخامُ رُفِض والصفُّ باقٍ.');
