@@ -1,5 +1,67 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-03] — WL-309 — `LIVE-27` / `R10-F-04`: المُبلِّغونَ الستّةُ عن الحجرِ ينتظرونَ ختمَ إشارتِهم (‏`reportAwaitingSeal`)، واكتشافُ `LIVE-29` وإغلاقُه (‏`memory-isolation-breach` غيرُ معلَنٍ للحاجب)
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** `P0` — `LIVE-27` (‏§4.6؛ تنفيذٌ ⇒ مراجعة)، ونتيجةُ المجلسِ `R10-F-04` (‏`WL-307`)، و`LIVE-29` (‏§4.6، مُكتشَفٌ هنا)
+
+**الحالةُ بعدَ العمل:** 🟨 جزئيٌّ — كلُّ مُبلِّغٍ في الشفرةِ يُبلِّغُ بالمسارِ الذي ينتظرُ الختمَ، فلا يُرَدُّ إبلاغُه على الحاجبِ الإنتاجيِّ ولا يحلُّ الردُّ محلَّ رفضِه الأصليّ؛ وإغلاقُ `LIVE-27` و`R10-F-04` بعدَ المراجعة. **لا تغييرَ** في `config/external-review.yaml` ولا `version.json` ولا النسبةِ ولا البوّابات.
+
+#### النافذةُ المقيسةُ والسببُ الجذريّ (‏على `main@077ff730`)
+
+- **السبب:** `WL-306` جعلَ `QuarantineWarden.report` المتزامنَ يرمي `QUARANTINE_REPORT_REQUIRES_SEALED` على السجلِّ المختومِ (‏حاجبُ `createProductionSystem`)، والمسارُ الإنتاجيُّ `reportSealed`. وبقيَ ستّةُ مُبلِّغينَ ينادونَ `report` (‏`R10-F-04` في تقريرِ `M11.06` ج5 من `claude_fable_5_1`).
+- **الأثرُ المقيسُ لكلٍّ منهم** بتركيبِه على `system.chain.quarantine` ثمّ «وفاةِ» العمليّةِ بعدَ رجوعِ البوابةِ مباشرةً ثمّ الإقلاع (‏`tests/production/wl-309-quarantine-reporters-sealed.test.mjs`):
+
+| المُبلِّغ | قبلَ الإصلاح (‏`main@077ff730`) |
+| --- | --- |
+| `egress-gate` (‏`E1`) | الرفضُ يصيرُ `QUARANTINE_REPORT_REQUIRES_SEALED` بدلَ `EGRESS_DESTINATION_UNKNOWN`، ولا حجر |
+| `access-gate` (‏`A1`) | الردُّ يُبتلَعُ في `#signal`؛ بعدَ الإقلاعِ `isQuarantined` ‏`false` |
+| `memory-store` (‏`M1`) | الردُّ يُبتلَعُ في `#refuseIsolation`؛ `false` |
+| `model-registry` (‏`R1`) | `QuarantineError` بدلَ `MODEL_FINGERPRINT_MISMATCH`، ولا حجر |
+| `inference-gate` (‏`I1`) | `QUARANTINE_REPORT_REQUIRES_SEALED` بدلَ `INFERENCE_BUDGET_EXCEEDED` |
+| `isolation` (‏`S1`) | الردُّ يُرمى داخلَ مستمعِ `close` لعمليّةٍ فرعيّة ⇒ `uncaughtException` |
+
+- **`LIVE-29` (‏مُكتشَفٌ في القياس):** نوعُ إشارةِ المخزنِ `memory-isolation-breach` (‏`config/memory.yaml`) **غيرُ معلَنٍ في `ANOMALY_KINDS`**، فحتى على حاجبٍ غيرِ مختومٍ يُرَدُّ كلُّ إبلاغٍ منه بـ`QUARANTINE_SIGNAL_KIND_UNKNOWN` ويُبتلَع — فلا يُحجَرُ عابرُ الذاكرةِ أبداً (‏`M2`: `isQuarantined` ‏`false`). وما كشفَه اختبارٌ لأنّ `tests/data/memory-limits.test.mjs` يُمرِّرُ حاجباً بديلاً يقبلُ كلَّ نوع.
+
+#### ما تمَّ فعلاً
+
+- `src/governance/quarantine.mjs`: `reportAwaitingSeal(warden, signal)` — **لا آليّةَ جديدةً**: تُنادي `reportSealed` القائمَ (‏`WL-306`) وتنتظرُه حيثُ وُجِدَ، ولا تسقطُ إلى `report` إلّا لحاجبٍ لا يعرفُه (‏بدائلُ الاختبارِ القائمة)؛ وفشلُ الختمِ يُرفَعُ كما هو. والنوعانِ `QuarantineSignal` و`QuarantineReporter`. وأُعلِنَ `memory-isolation-breach` في `ANOMALY_KINDS` بعتبةِ `1` (‏العدُّ في مراقبِ العزلِ بعتبةِ السياسةِ `crossAgentAttemptsBeforeSignal`، فلا تُضاعَف) وخطورةِ `HIGH` (‏`LIVE-29`).
+- `src/egress/egress-gate.mjs` و`src/inference/inference-gate.mjs`: `#refuse` غيرُ متزامنٍ — يُسجِّلُ ثمّ ينتظرُ الإشارةَ ثمّ **يُعيدُ** الخطأَ المُسمّى، وكلُّ موضعِ رفضٍ صارَ `throw await this.#refuse(…)` (‏10 في الخروج، 16 في الاستدلال) فيبقى `throw` ظاهراً ويُضيِّقُ النوعَ بعدَه.
+- `src/data/access-gate.mjs`: `#signal` و`#raise` و`assertNoWriteDown` غيرُ متزامنةٍ، والرفضُ في `#decide` ‏`throw await refuse(…)` (‏12 موضعاً)؛ وابتلاعُ فشلِ الحاجبِ باقٍ كما كان (‏الرفضُ الأصليُّ لا يُخفى).
+- `src/data/memory-store.mjs`: `#refuseIsolation` و`#ownerFor` غيرُ متزامنتَين ومُنتظَرتانِ في `remember`/`recall`/`forget`/`list`، و`assertNoWriteDown` مُنتظَرٌ في `remember`.
+- `src/models/model-registry.mjs`: `#verifyFingerprintOrRefuse` غيرُ متزامنةٍ ومُنتظَرةٌ في `assertActivatable`.
+- `src/execution/isolation.mjs`: في مستمعِ `close` تُنتظَرُ الإشارةُ ثمّ تُعادُ النتيجة، وفشلُ الختمِ **يرفضُ الوعدَ** لا يصيرُ استثناءً غيرَ ملتقَط.
+- لم يُمَسَّ `sealedAudit` ولا `reportSealed` ولا `report` ولا `release` ولا `quarantineFromSealedLog` ولا التركيبُ الإنتاجيّ.
+
+#### الملفاتُ المتأثّرة
+
+`src/governance/quarantine.mjs` · `src/egress/egress-gate.mjs` · `src/data/access-gate.mjs` · `src/data/memory-store.mjs` · `src/execution/isolation.mjs` · `src/models/model-registry.mjs` · `src/inference/inference-gate.mjs` · `tests/production/wl-309-quarantine-reporters-sealed.test.mjs` · `docs/ROOT_OF_TRUST.md` (‏236) · `docs/CURRENT_STATE.md` · `docs/roadmap/06-debt-register.md` (‏`LIVE-27`، `LIVE-29`) · `PROJECT_STATUS.md` · `config/work-log-ids.yaml` · `docs/audit/work-log-id-map.md` · `docs/roadmap/05-work-log.md`
+
+#### الـ commit
+
+`0208ee13` — `fix(quarantine): المُبلِّغونَ الستّةُ ينتظرونَ ختمَ إشارةِ الحجرِ (LIVE-27/R10-F-04) وإعلانُ memory-isolation-breach (LIVE-29)`، وكوميتُ التوثيقِ بعدَه، من فرعِ `fix/wl-309-async-reporters` في طلبٍ مفتوحٍ للمراجعة.
+
+#### الدليل
+
+- **قبلُ** (‏`src/` من `main@077ff730` والاختبارُ الجديد): `node --test tests/production/wl-309-quarantine-reporters-sealed.test.mjs` ⇒ `pass 0 · fail 7` — كما في الجدولِ أعلاه، و`M2` ‏`actual: false`.
+- **بعدُ:** الملفُّ نفسُه ⇒ `pass 7 · fail 0 · skipped 0` (‏`S1` يعملُ في العزلِ الحقيقيِّ حيثُ تتاحُ مساحاتُ الأسماء، ويُتخطّى بسببٍ مُعلَنٍ حيثُ لا تتاح — `LIVE-23`).
+- **الوحداتُ المجاورة:** `node --test --test-concurrency=1 tests/egress tests/data tests/inference tests/models tests/execution tests/governance tests/production` ⇒ `tests 376 · pass 350 · fail 0 · skipped 26` — بدائلُ الاختبارِ القائمةُ (‏`report` وحدَه) تمرُّ بلا تعديل.
+- `npm run lint` (‏0 أخطاء) · `npm run typecheck` ⇒ نظيف. و`npm run readiness:report` لا يُغيِّرُ `docs/READINESS_REPORT.md` (‏لا إسنادَ خطوةٍ جديد). و`npm run validate` وCI على الطلب — في نصِّ الطلب.
+
+#### ما لم يتمَّ ولماذا
+
+- **المُبلِّغونَ ليسوا موصولينَ في `createProductionSystem`**: الإصلاحُ يجعلُ توصيلَهم آمناً ولا يُوصِلُهم — التوصيلُ قرارُ تركيبٍ خارجَ هذا الدَّين.
+- **فشلُ الختمِ في `egress-gate` و`inference-gate` و`model-registry` و`isolation`** يُرفَعُ بدلَ الرفضِ الأصليِّ — وهو فشلٌ أشدُّ (‏المُحوِّلُ مسمومٌ ويرفضُ كلَّ إلحاقٍ بعدَه، `WL-306` ‏`L3`)، والفاعلُ محجورٌ في الذاكرة. وفي `access-gate` و`memory-store` يُبتلَعُ كما كانَ قبلَ هذا العمل.
+- **`release`** متزامنٌ كما هو (‏اتجاهٌ مغلق، `WL-306`). و**`LIVE-26`** باقٍ لقرارِ المالك.
+- لا يُعلَنُ `LIVE-27` ولا `R10-F-04` مُغلَقاً: الحكمُ للمجلس (‏المادة 11).
+- **`WL-308`** دُمِجَ قبلَ هذه الدفعةِ (‏`#224`، `90266e77`) فلا فجوةَ تُعلَن؛ ومعرِّفُ الدَّينِ المُكتشَفِ هنا `LIVE-29` لا `LIVE-28` لأنّ `#224` قيَّدَ `LIVE-28`.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- `AgentMemoryStore.remember` و`DataAccessGate.assertNoWriteDown` صارا يُنتظَرانِ داخلياً؛ لا مُنادٍ خارجيَّ لـ`assertNoWriteDown` غيرُ المخزن.
+- لا مسارَ متزامنَ أُعيد: التاجُ والنواةُ والتذكرةُ والدفترُ ومُحوِّلُ السجلِّ لم تُمَسّ. ولم يُمَسَّ `src/root-of-trust/production-runtime.mts` (‏`WL-308`) ولا `.github/`.
+
+---
+
 ### [2026-10-03] — WL-308 — `R10-F-01`: البيانُ المختومُ صفريُّ العهدِ لا يُعفى من مقارنتِه بمرجعِ الحداثةِ الخارجيِّ — رُفِعَ شرطُ `manifestEpoch > 0` من فحصَي الإقلاع؛ وقُيِّدَ `LIVE-28`
 
 **المنفِّذُ:** Perplexity Computer · **المسارُ والخطوةُ:** `P0` — `R10-F-01` (‏نتيجةُ مجلسٍ جديدةٌ من `WL-307`، غيرُ مُقيَّدةٍ في العقد) · `EXT-6`/`R3-A-01` (‏فحصُ الحداثةِ القائمُ)
