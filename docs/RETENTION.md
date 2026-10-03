@@ -38,16 +38,16 @@
 export DATABASE_URL="postgresql://postgres@127.0.0.1:55432/postgres"
 node scripts/retention.mjs
 node scripts/retention.mjs plan
-node scripts/retention.mjs purge --dry-run
-node scripts/retention.mjs purge --table data_assets
-node scripts/retention.mjs purge --table memories
 ```
 
-الأمر بلا وسائط هو `plan` آمن وجاف. `purge` بلا `--dry-run` ينفذ محو الجداول
-ذات السياسة القابلة للمحو (`data_assets` و`memories`) في معاملة واحدة؛ ففشل
-حذف أي جدول يرجع ما سبقه. `--table` يقبل مفتاحاً معلناً فقط:
-`data_assets` أو `memories` أو `events`. طلب `events` يفشل مغلقاً بالرمز
-المذكور أعلاه.
+الأمر بلا وسائط هو `plan` آمن وجاف. **و`purge` من سطرِ الأوامرِ مُغلَقٌ** (‏`R6-A-11`،
+`WL-215`): يفشلُ فوراً قبلَ أيِّ اتصالٍ بالرمزِ `RETENTION_PURGE_CLI_FORBIDDEN` —
+ولو مع `--dry-run`. **وفي الوحدةِ نفسِها** (‏`src/persistence/retention.mjs`، `WL-313`)
+لم يبقَ للدالّتَينِ `purge` و`eraseById` قدرةُ حذفٍ: كلاهما يَرفضُ بـ
+`RETENTION_PURGE_UNAUTHORIZED` قبلَ لمسِ الوصلةِ، و`purge({ dryRun: true })` و`plan`
+جافّانِ كما كانا. **والمسارُ المحكومُ الوحيدُ للمحوِ** هو `RetentionCycle.run` في
+`src/data/retention-cycle.mjs`: بوابةُ هويّةٍ ثمّ نقطةُ تفويضٍ بالفعلِ `purge-data` ثمّ
+تذكرةٌ تُستهلَكُ قبلَ أوّلِ حذفٍ ثمّ شاهدٌ.
 
 تطبق الهجرة الموجودة قبل التشغيل على قاعدة جديدة:
 
