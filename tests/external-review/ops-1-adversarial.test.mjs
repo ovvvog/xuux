@@ -702,6 +702,31 @@ test('ج٥ — ومسارا الاختبارِ كِلاهما يَجلُبانِ
   }
 });
 
+test('ج٦ — والمسارُ الثالثُ `npm run validate` يَجلُبُها قبلَ `npm test` كذلكَ (‏`R10-F-06`)', () => {
+  // `R10-F-06` (‏`WL-310`): مَسارا CI يَجلُبانِ كوميتاتِ المراجعةِ قبلَ الحزمةِ (‏`ج٥`)، أمّا
+  // `npm run validate` — وهوَ الضابطُ التعويضيُّ لـ`EXT-1` في hook ‏`pre-push` — فكانَ
+  // يُشغِّلُ `npm test` بلا جلبٍ، فيَسقُطُ `R6-A-10` على كلِّ استنساخٍ كاملٍ لـ`main` لأنّ
+  // كوميتَ `M11.05` يَسكُنُ `refs/pull/<n>/head`. فالحزمةُ لا تَخرُجُ `0` محلّيّاً على شجرةٍ
+  // سليمةٍ. **والإصلاحُ يُوحِّدُ المساراتِ الثلاثةَ ولا يُرخي الحارسَ.**
+  const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  const chain = String(pkg.scripts?.validate ?? '')
+    .split('&&')
+    .map((part) => part.trim());
+  const fetchIndex = chain.indexOf('npm run fetch:reviewed-commits');
+  const suiteIndex = chain.indexOf('npm test');
+  assert.ok(
+    fetchIndex > -1,
+    'validate يَجلُبُ كوميتاتِ المراجعةِ — وبلا هذا يَسقُطُ `R6-A-10` محلّيّاً.',
+  );
+  assert.ok(suiteIndex > -1, 'validate يُشغِّلُ الحزمةَ.');
+  assert.equal(fetchIndex, suiteIndex - 1, 'الجلبُ قبلَ الحزمةِ مباشرةً، حاسماً بـ`&&` لا بـ`;`.');
+  assert.equal(
+    String(pkg.scripts?.['fetch:reviewed-commits'] ?? ''),
+    'node scripts/fetch-reviewed-commits.mjs .',
+    'والأمرُ المَجلوبُ هوَ نفسُه الذي يُناديه CI.',
+  );
+});
+
 // ════════ مراجعةُ مرجِعِ الحُكمِ — ثمانيةُ مواضعَ مُقاسةٌ لا موصوفةٌ ════════
 //
 // **هذه المجموعةُ جوابُ سؤالٍ واحدٍ:** هل نقلُ مرجِعِ `R6`/`R7` في طلبِ الدمجِ من
