@@ -523,7 +523,8 @@ test('R6-A-10: خطّةُ الجولةِ موجودةٌ في الكوميتِ ا
     assert.ok(
       existsAtCommit(engagement.reviewedCommit, 'package.json'),
       `كوميتُ المراجعةِ ${engagement.reviewedCommit} غيرُ مقروءٍ هنا — ` +
-        'الحارسُ يحتاجُ تاريخاً كاملاً (‏`fetch-depth: 0`)، ولا يُقرأُ تعذُّرُ القراءةِ نجاحاً',
+        'بعضُ كوميتاتِ المراجعةِ يَسكُنُ `refs/pull/<n>/head` لا فرعاً، فلا يُبلِّغُه استنساخٌ كاملٌ لـ`main` ' +
+        'ولا `fetch-depth: 0` — يُجلَبُ بـ`npm run fetch:reviewed-commits` (‏`R10-F-06`)، ولا يُقرأُ تعذُّرُ القراءةِ نجاحاً',
     );
     for (const round of engagement.rounds) {
       const path = `docs/external-review/${engagement.id}-round-${String(round)}-plan.md`;
