@@ -9,6 +9,12 @@
 // و`flush()` ينتظرُ آخرَها ويرفعُ أوّلَ فشلٍ. ومن يُصدِرُ أثراً (‏تذكرةَ قرار) **ينتظرُ
 // `flush()` قبلَ الإصدار**: لا أثرَ قبلَ أن يُختَمَ قيدُه. وبعدَ أوّلِ فشلٍ يُرفَضُ
 // كلُّ إلحاقٍ تالٍ — فلا يمضي السجلُّ بثقبٍ صامت.
+//
+// `WL-316`: والرفضُ يُفحَصُ **عندَ الكتابةِ** لا عندَ الإدراجِ وحدَه. كانَ قيدٌ أُدرِجَ قبلَ أن
+// يُعرَفَ فشلُ سابقِه (‏`append` متتابعٌ بلا انتظار — `kernel.task.queued` ثمّ
+// `kernel.task.started`، `quarantine.signal` ثمّ `quarantine.isolated`) يُختَمُ ويُكتَبُ
+// بعدَه، فيصيرُ على القرصِ الثاني بلا الأوّلِ وسلسلةُ التجزئةِ صحيحةٌ (‏مقيسٌ: `S1`–`S5` في
+// `tests/root-of-trust/sealed-audit-ordering.test.mjs`).
 
 export interface SealedLogLike {
   appendSealed(type: string, actor: string, data: object): Promise<unknown>;
@@ -32,7 +38,11 @@ export function sealedAudit(log: SealedLogLike): SealedAudit {
   let failure: unknown = null;
   const enqueue = (type: string, actor: string, data: object): Promise<unknown> => {
     if (failure !== null) return Promise.reject(failure);
-    const write = tail.then(() => log.appendSealed(type, actor, data));
+    const write = tail.then(() => {
+      // فشلٌ وقعَ بعدَ إدراجِ هذا القيدِ وقبلَ دورِه: لا يُكتَبُ بعدَ ثقب.
+      if (failure !== null) throw failure;
+      return log.appendSealed(type, actor, data);
+    });
     tail = write.then(
       () => undefined,
       (error: unknown) => {
