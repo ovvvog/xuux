@@ -319,4 +319,49 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // R10-F-01 (WL-308): بيانٌ مختومٌ عهدُه `0` لا يُعفى من مقارنتِه بالمرجعِ الخارجيِّ.
+  // يُلتقَطُ البيانُ الصفريُّ المختومُ في نافذةِ الإقلاعِ الأوّلِ (المسارُ (أ) في تقريرِ
+  // المجلسِ): نقطةُ الضبطِ تُختَمُ قبلَ طيِّ العهدِ، فنَسخُ الجذرِ لحظةَ `bump()` الأولى
+  // يُعطي لقطةً صحيحةَ الخاتَمِ عهدُها `0`.
+  test('R10-F-01: لقطةٌ مختومةٌ صفريّةُ العهدِ بعدَ تقدُّمِ المرجعِ → REJECT (STALE_MANIFEST_EPOCH)', async () => {
+    const keys = fixedKeys();
+    const inner = new InMemoryFreshnessSocket(0n, 'test');
+    const root = tmp('r10f01');
+    const snap = tmp('r10f01-snap');
+    let captured = false;
+    const socket = {
+      read: () => inner.read(),
+      bump: async () => {
+        if (!captured) {
+          captured = true;
+          rmSync(snap, { recursive: true, force: true });
+          cpSync(root, snap, { recursive: true });
+        }
+        return inner.bump();
+      },
+    };
+    const { boot, body } = rig({ freshnessSocket: socket, production: true, keys });
+    try {
+      const first = await boot(root);
+      first.ledger.begin({ id: 'r10-cmd' });
+      await first.ledger.commitSigned({ id: 'r10-cmd' }, 'ok');
+      first.log.close?.();
+      assert.ok(captured, 'النافذةُ لم تُلتقَطْ');
+      assert.equal(body(snap).freshnessEpoch, 0, 'اللقطةُ الملتقَطةُ ليست صفريّةَ العهدِ');
+      assert.ok(body(root).freshnessEpoch >= 1);
+      assert.ok(Number((await inner.read()).epoch) >= 1);
+
+      rmSync(root, { recursive: true, force: true });
+      cpSync(snap, root, { recursive: true });
+      await assert.rejects(
+        () => boot(root),
+        (err) => err.code === 'STALE_MANIFEST_EPOCH',
+        'اللقطةُ الصفريّةُ المختومةُ بعدَ تقدُّمِ المرجعِ يجبُ أن تُرفَضَ',
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(snap, { recursive: true, force: true });
+    }
+  });
 });
