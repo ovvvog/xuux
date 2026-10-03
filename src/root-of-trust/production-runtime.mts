@@ -454,14 +454,18 @@ export async function createProductionRootOfTrust(
       const manifestBody = manifest.read();
       const externalEpoch = Number(freshness.epoch);
       const manifestEpoch = manifestBody.freshnessEpoch;
-      if (manifestEpoch > 0 && externalEpoch > manifestEpoch) {
+      // R10-F-01 (WL-308): لا إعفاءَ للعهدِ الصفريِّ. بيانٌ مختومٌ عهدُه `0` ومرجعٌ
+      // خارجيٌّ `> 0` تناقضٌ مُسمّىً لا «أوّلُ وصلٍ»: المرجعُ لا يتقدّمُ إلا بطيٍّ بعدَ
+      // نقطةِ ضبطٍ مختومةٍ، فبيانٌ صفريٌّ معَ مرجعٍ متقدّمٍ لقطةٌ من نافذةِ الإقلاعِ الأوّلِ
+      // أو من قبلِ أوّلِ طيٍّ. أوّلُ وصلٍ مشروعٌ هو `0 = 0` وحدَه (Case 5 أدناه).
+      if (externalEpoch > manifestEpoch) {
         // Case 1: اللقطةُ القديمةُ المتّسقةُ تُرفَضُ
         throw new ProductionRuntimeError(
           STALE_MANIFEST_EPOCH,
           `عَهْدُ الحداثةِ الخارجيِّ ${externalEpoch} أحدثُ من البيانِ ${manifestEpoch} — اللقطةُ القديمةُ المتّسقةُ لا تُقبَلُ`,
         );
       }
-      if (manifestEpoch > 0 && manifestEpoch > externalEpoch) {
+      if (manifestEpoch > externalEpoch) {
         // Case 2: البيانُ تقدّمَ على المرجعِ بلا رفعٍ مُصرَّحٍ — تقدّمٌ غيرُ مُشروعٍ
         throw new ProductionRuntimeError(
           'FRESHNESS_EPOCH_REGRESSION',
