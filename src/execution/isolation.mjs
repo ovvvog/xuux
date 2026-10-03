@@ -35,6 +35,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { reportAwaitingSeal } from '../governance/quarantine.mjs';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 // يحتاج Node في بيئة المشروع حجز مساحة عناوين أولية تقارب 768MB؛ حدّ أصغر يفشل
@@ -250,7 +251,7 @@ function escapeKind(stderr) {
  * تعبر حدّ العملية، وقبولها يوهم بعزلٍ لا يحدث. يستعمل `handler` مرادفاً لفظياً
  * لمسار أمر كي يدعم مستدعي سجلّ المعالجات.
  *
- * @param {{ command?: string, handler?: string, args?: readonly string[], workdir: string, writableDir: string, timeoutMs?: number, memoryLimitMb?: number, maxFileSizeMb?: number, processLimit?: number, actor?: string, signal?: AbortSignal, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: { report: (signal: object) => unknown } | null }} request
+ * @param {{ command?: string, handler?: string, args?: readonly string[], workdir: string, writableDir: string, timeoutMs?: number, memoryLimitMb?: number, maxFileSizeMb?: number, processLimit?: number, actor?: string, signal?: AbortSignal, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null }} request
  * @returns {Promise<IsolatedRun>}
  */
 export async function runIsolated(request) {
@@ -384,7 +385,7 @@ export async function runIsolated(request) {
     writableDir: '/workspace/output',
   });
 
-  return await new Promise((resolve) => {
+  return await new Promise((resolve, reject) => {
     const child = spawn(
       'unshare',
       [
@@ -536,12 +537,16 @@ export async function runIsolated(request) {
             durationMs,
           });
           if (request.quarantine !== null && request.quarantine !== undefined) {
-            request.quarantine.report({
+            // `LIVE-27` / `R10-F-04` (‏`WL-309`): كانَ `report` المتزامنُ يُرَدُّ على الحاجبِ
+            // الإنتاجيِّ **داخلَ مستمعِ `close`** فيصيرُ استثناءً غيرَ ملتقَطٍ لا رفضاً. فالإشارةُ
+            // تُنتظَرُ حتّى يُختَمَ قيدُها ثمّ تُعادُ النتيجة، وفشلُ الختمِ يُرفَضُ به الوعدُ ولا يُبتلَع.
+            reportAwaitingSeal(request.quarantine, {
               // نوع قائم في QuarantineWarden: محاولة الخروج المحجوبة إشارة خروج مرفوض.
               kind: 'egress-refused',
               subject: actor,
               detail: { source: 'isolation', escape: blocked, code: result.code },
-            });
+            }).then(() => resolve(result), reject);
+            return;
           }
         }
       }

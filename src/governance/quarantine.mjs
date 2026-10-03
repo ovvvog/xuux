@@ -89,6 +89,17 @@ export const ANOMALY_KINDS = Object.freeze({
     severity: IncidentSeverity.MEDIUM,
     reason: 'تجاوز ميزانية التنفيذ مرّات متتابعة',
   }),
+  // `LIVE-29` (‏`WL-309`): النوعُ الذي يُبلِّغُ به `AgentMemoryStore` (‏`config/memory.yaml`
+  // ‏`anomaly.signalKind`) لم يكن معلَناً هنا، فكانَ كلُّ إبلاغٍ منه يُرَدُّ بـ`SIGNAL_KIND_UNKNOWN`
+  // ويبتلعُه المخزنُ — فلا يُحجَرُ عابرُ الذاكرةِ أبداً على حاجبٍ حقيقيّ. والعدُّ يقعُ في مراقبِ
+  // العزلِ في المخزنِ (‏`crossAgentAttemptsBeforeSignal`)، فالإشارةُ لا تُرسَلُ إلّا عندَ العتبة:
+  // عتبتُها هنا واحدةٌ كي لا تُضاعَفَ العتبةُ المعلَنةُ في السياسة.
+  'memory-isolation-breach': Object.freeze({
+    threshold: 1,
+    severity: IncidentSeverity.HIGH,
+    reason:
+      'محاولاتُ عبورٍ متكرّرةٌ إلى ذاكرةِ وكيلٍ آخرَ بلغت عتبةَ config/memory.yaml — تكرارُها قصدٌ لا خطأ',
+  }),
 });
 
 export class QuarantineWarden {
@@ -350,6 +361,36 @@ export class QuarantineWarden {
     }
     return count;
   }
+}
+
+/** @typedef {{ kind: string, subject: string, detail?: Record<string, unknown> }} QuarantineSignal */
+/**
+ * ما يحتاجُه المُبلِّغُ من الحاجب: `reportSealed` (‏المسارُ الإنتاجيّ) أو `report` (‏بدائلُ الاختبار).
+ * @typedef {{ report?: (signal: QuarantineSignal) => unknown, reportSealed?: (signal: QuarantineSignal) => Promise<unknown> }} QuarantineReporter
+ */
+
+/**
+ * `LIVE-27` / `R10-F-04` (‏`WL-309`): مسارُ الإبلاغِ الواحدُ لكلِّ مُبلِّغٍ في الشفرة.
+ *
+ * بعدَ `WL-306` صارَ `report` المتزامنُ يُرَدُّ على السجلِّ المختومِ، والمسارُ الإنتاجيُّ
+ * `reportSealed`. وكانَ المُبلِّغونَ (‏`egress-gate` · `access-gate` · `memory-store` ·
+ * `isolation` · `model-registry` · `inference-gate`) ينادونَ `report` فيُرَدّونَ على الحاجبِ
+ * الإنتاجيِّ: يحلُّ الردُّ محلَّ الرفضِ الأصليِّ، أو يُبتلَعُ فلا يُعزَلُ أحد. فهذه الدالّةُ
+ * **لا آليّةَ جديدةً فيها**: تُنادي `reportSealed` حيثُ وُجِدَ (‏كلُّ `QuarantineWarden`،
+ * مختوماً كانَ سجلُّه أو لا) وتنتظرُه، فلا يُرجِعُ المُبلِّغُ قبلَ ختمِ قيودِ الإشارة؛
+ * ولا تسقطُ إلى `report` إلّا لحاجبٍ لا يعرفُ `reportSealed` (‏بدائلُ الاختبارِ القائمة).
+ * وفشلُ الختمِ يُرفَعُ كما هو — لا يُقرأُ إذناً.
+ * @param {QuarantineReporter} warden
+ * @param {QuarantineSignal} signal
+ * @returns {Promise<unknown>}
+ */
+export async function reportAwaitingSeal(warden, signal) {
+  if (typeof warden.reportSealed === 'function') return await warden.reportSealed(signal);
+  if (typeof warden.report === 'function') return warden.report(signal);
+  throw new QuarantineError(
+    QUARANTINE_ERRORS.DEPENDENCY_MISSING,
+    'حاجبٌ بلا `reportSealed` ولا `report`: إشارةٌ لا تبلغُ أحداً.',
+  );
 }
 
 /**

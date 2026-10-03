@@ -38,6 +38,7 @@
 import { createHash } from 'node:crypto';
 import { loadClassificationLattice } from '../data/classification.mjs';
 import { inferenceCostItem, loadInferenceTokenQuota } from './quota.mjs';
+import { reportAwaitingSeal } from '../governance/quarantine.mjs';
 
 const DEFAULT_WINDOW_MS = 60_000;
 const DEFAULT_CALLS_PER_WINDOW = 30;
@@ -150,7 +151,7 @@ function nonNegativeNumber(value, fallback) {
 
 export class InferenceGate {
   /**
-   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: { isQuarantined?: (subject: string) => boolean, report?: (signal: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown }, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
+   * @param {{ modelRegistry?: { getActive: (purpose: string) => Promise<{ id: string, purpose: string } | null> }, enforcementPoint?: import('../policy/enforcement-point.mjs').EnforcementPoint, log?: { append: (type: string, actor: string, payload: object) => unknown }, execute?: (request: { model: { id: string, purpose: string }, purpose: string, input: string }) => Promise<InferenceExecution>, quarantine?: ({ isQuarantined?: (subject: string) => boolean } & import('../governance/quarantine.mjs').QuarantineReporter) | null, safetyRules?: readonly { id: string, target: 'input' | 'output', terms: readonly string[], reason: string }[], callsPerWindow?: number, windowMs?: number, tokensPerWindow?: number, budgetWindowMs?: number, budgetStore?: { load: () => unknown, save: (entries: Array<{ actorId: string, startedAt: number, tokens: number, cost: number }>) => unknown }, quota?: Readonly<import('./quota.mjs').InferenceTokenQuota>, costPerWindow?: number, costLedger?: { record: (usage: { item: string, quantity: number, institution: string, agent: string, model: string }, context?: { actor?: string }) => unknown }, costInstitution?: string, maxLoggedTextChars?: number, lattice?: import('../data/classification.mjs').ClassificationLattice | null, now?: () => Date }} [deps]
    */
   constructor({
     modelRegistry,
@@ -482,9 +483,13 @@ export class InferenceGate {
    * @param {string} code
    * @param {string} message
    * @param {{ actorId: string, purpose: string, modelId: string | null, input: string, inputClassification: string, output?: string, outputClassification: string, [key: string]: unknown }} facts
-   * @returns {never}
+   * `LIVE-27` / `R10-F-04` (‏`WL-309`): إشارةُ الميزانيةِ تُنتظَرُ حتّى يُختَمَ قيدُها
+   * (‏`reportAwaitingSeal`) قبلَ رفعِ الرفض، فلا يحلُّ ردُّ الحاجبِ الإنتاجيِّ محلَّ `BUDGET_EXCEEDED`.
+   * يُعيدُ الخطأَ المُسمّى ولا يرميه، والمُنادي يرميه (‏`throw await this.#refuse(…)`)، كي يبقى
+   * الرفضُ `throw` ظاهراً في موضعِه ويُضيِّقُ النوعَ بعدَه.
+   * @returns {Promise<InferenceError>}
    */
-  #refuse(code, message, facts) {
+  async #refuse(code, message, facts) {
     const { input, inputClassification, output, outputClassification, ...safeFacts } = facts;
     this.log.append('inference.refused', facts.actorId, {
       code,
@@ -493,14 +498,19 @@ export class InferenceGate {
       input: this.#auditText(input, inputClassification),
       ...(output === undefined ? {} : { output: this.#auditText(output, outputClassification) }),
     });
-    if (code === INFERENCE_ERRORS.BUDGET_EXCEEDED && this.quarantine?.report !== undefined) {
-      this.quarantine.report({
+    if (
+      code === INFERENCE_ERRORS.BUDGET_EXCEEDED &&
+      this.quarantine !== null &&
+      this.quarantine !== undefined &&
+      (this.quarantine.reportSealed !== undefined || this.quarantine.report !== undefined)
+    ) {
+      await reportAwaitingSeal(this.quarantine, {
         kind: 'budget-exceeded',
         subject: facts.actorId,
         detail: { code, purpose: facts.purpose, modelId: facts.modelId },
       });
     }
-    throw new InferenceError(code, message, safeFacts);
+    return new InferenceError(code, message, safeFacts);
   }
 
   /**
@@ -526,21 +536,21 @@ export class InferenceGate {
     };
 
     if (purpose === '') {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.PURPOSE_REQUIRED,
         'الاستدلال بلا غرض معلَن مرفوض؛ الغرض هو مفتاح توجيه النموذج ولا يُخمن.',
         facts,
       );
     }
     if (typeof input !== 'string') {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.INPUT_INVALID,
         'مُدخل الاستدلال يجب أن يكون نصاً؛ تحويل قيمة مجهولة إلى نص قد يخفي بيانات أو يغيّر معناها.',
         facts,
       );
     }
     if (this.quarantine?.isQuarantined?.(actorId) === true) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.QUARANTINED,
         `الفاعل ${actorId} محجور؛ الحجر يوقف الاستدلال ولا يؤجله إلى ما بعد التحقق.`,
         facts,
@@ -551,14 +561,14 @@ export class InferenceGate {
     try {
       model = await this.modelRegistry.getActive(purpose);
     } catch (error) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.MODEL_REGISTRY_FAILED,
         `تعذّر قراءة النموذج النشط للغرض ${purpose}: ${error instanceof Error ? error.message : String(error)}. لا يُختار بديل صامت.`,
         facts,
       );
     }
     if (model === null) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.ACTIVE_MODEL_MISSING,
         `لا نموذج نشط للغرض ${purpose}؛ رفض الطلب أأمن من اختيار نموذج احتياطي غير معلَن.`,
         facts,
@@ -568,7 +578,7 @@ export class InferenceGate {
 
     const attempts = this.#countAttempt(actorId);
     if (attempts > this.callsPerWindow) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.RATE_LIMIT_EXCEEDED,
         `تجاوز الفاعل ${actorId} حد المعدل: ${attempts} طلبات في ${this.windowMs} مللي ثانية والحد ${this.callsPerWindow}.`,
         { ...facts, attemptsInWindow: attempts },
@@ -585,7 +595,7 @@ export class InferenceGate {
       budget.tokens + estimatedInputTokens > this.tokensPerWindow ||
       budget.cost + estimatedInputCost > this.costPerWindow
     ) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.BUDGET_EXCEEDED,
         `تقدير مُدخل الاستدلال يتجاوز الميزانية قبل التنفيذ؛ المتاح ${this.tokensPerWindow - budget.tokens} رمزاً و${this.costPerWindow - budget.cost} كلفة.`,
         {
@@ -600,7 +610,7 @@ export class InferenceGate {
 
     const blockedInput = this.#blockedBySafetyRule(input, 'input');
     if (blockedInput !== null) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.INPUT_BLOCKED,
         `مُدخل الاستدلال حُجب بقاعدة السلامة ${blockedInput.id}: ${blockedInput.reason}`,
         { ...facts, safetyRule: blockedInput.id },
@@ -624,7 +634,7 @@ export class InferenceGate {
       { measured: { tokens: estimatedInputTokens } },
     );
     if (!decision.allowed) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.NOT_AUTHORIZED,
         `التفويض رفض الاستدلال برمز ${decision.code}: ${decision.reason}`,
         facts,
@@ -639,7 +649,7 @@ export class InferenceGate {
         resourceKey: `model:${resourceId}`,
       });
     } catch (error) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.TICKET_INVALID,
         `تذكرة قرار الاستدلال غير مقبولة: ${error instanceof Error ? error.message : String(error)}`,
         facts,
@@ -650,7 +660,7 @@ export class InferenceGate {
     try {
       execution = await this.execute({ model, purpose, input });
     } catch (error) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.EXECUTION_FAILED,
         `فشل منفذ الاستدلال للنموذج ${model.id}: ${error instanceof Error ? error.message : String(error)}`,
         facts,
@@ -658,7 +668,7 @@ export class InferenceGate {
     }
     const output = execution.output;
     if (typeof output !== 'string') {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.OUTPUT_INVALID,
         'منفذ الاستدلال أعاد مُخرجاً غير نصي؛ لا يُعاد كائن مجهول للمستدعي ولا يُسجّل كنص.',
         facts,
@@ -683,7 +693,7 @@ export class InferenceGate {
       try {
         await this.enforcementPoint.settleQuota(debitedQuota, totalTokens, actorId);
       } catch (error) {
-        this.#refuse(
+        throw await this.#refuse(
           INFERENCE_ERRORS.NOT_AUTHORIZED,
           `الحصّةُ استُنفدت عندَ تسويةِ الاستهلاكِ الفعليِّ (${totalTokens} رمزاً): ${error instanceof Error ? error.message : String(error)}. ولا يُعادُ مُخرَجٌ استُهلكَ فوقَ الحصّةِ.`,
           { ...facts, totalTokens },
@@ -692,7 +702,7 @@ export class InferenceGate {
     }
 
     if (budget.tokens > this.tokensPerWindow || budget.cost > this.costPerWindow) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.BUDGET_EXCEEDED,
         'الاستهلاك الفعلي بعد التنفيذ تجاوز الميزانية؛ يُسجَّل ويُحجب المُخرج وتُوقف الطلبات التالية في النافذة.',
         {
@@ -710,7 +720,7 @@ export class InferenceGate {
 
     const blockedOutput = this.#blockedBySafetyRule(output, 'output');
     if (blockedOutput !== null) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.OUTPUT_BLOCKED,
         `مُخرج الاستدلال حُجب بقاعدة السلامة ${blockedOutput.id}: ${blockedOutput.reason}`,
         {
@@ -744,7 +754,7 @@ export class InferenceGate {
         { actor: actorId },
       );
     } catch (error) {
-      this.#refuse(
+      throw await this.#refuse(
         INFERENCE_ERRORS.USAGE_UNRECORDED,
         `تعذّر تقييدُ استهلاكِ الاستدلالِ في دفترِ التكلفةِ: ${error instanceof Error ? error.message : String(error)}. ولا يُعادُ مُخرَجٌ استُهلِكَ له موردٌ بلا قيدٍ.`,
         { ...facts, output, inputTokens, outputTokens, totalTokens, cost },

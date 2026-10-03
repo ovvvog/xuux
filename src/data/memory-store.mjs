@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { snapshot } from '../lib/snapshot.mjs';
 import { MEMORY_SPEC } from '../persistence/entities.mjs';
+import { reportAwaitingSeal } from '../governance/quarantine.mjs';
 import {
   MEMORY_KINDS,
   MEMORY_LIMIT_ERRORS,
@@ -100,7 +101,7 @@ export class AgentMemoryStore {
   /**
    * الاعتماديات اختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط ويردّ
    * بخطأ مُسمّى `MEMORY_DEPENDENCY_MISSING`؛ التحقّق بعده يضيّق النوع.
-   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null, encryptor?: import('./encryption.mjs').DataEncryptor | null, policy?: import('./memory-limits.mjs').MemoryPolicy | null, quarantine?: { report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null, authorizer?: { authorize: (request: import('../policy/model.mjs').PolicyRequest, measurement?: { measured?: Record<string, unknown> }) => Promise<{ decision: { allowed: boolean, code: string, reason: string }, token: string | null }>, verify: (token: string | undefined, expected: { actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }) => unknown, identityGate?: unknown } | null, purgeAuthority?: import('./purge-authority.mjs').PurgeAuthority | null }} [deps]
+   * @param {{ catalog?: import('./data-catalog.mjs').DataCatalog, log?: import('../root-of-trust/event-log.mjs').EventLog, repository?: MemoryRepository, maxEntries?: number, transaction?: TransactionRunner | null, accessGate?: import('./access-gate.mjs').DataAccessGate | null, encryptor?: import('./encryption.mjs').DataEncryptor | null, policy?: import('./memory-limits.mjs').MemoryPolicy | null, quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null, authorizer?: { authorize: (request: import('../policy/model.mjs').PolicyRequest, measurement?: { measured?: Record<string, unknown> }) => Promise<{ decision: { allowed: boolean, code: string, reason: string }, token: string | null }>, verify: (token: string | undefined, expected: { actorId: string, action: string, resourceKey: string, royalCommandId?: string, royalCommandDigest?: string }) => unknown, identityGate?: unknown } | null, purgeAuthority?: import('./purge-authority.mjs').PurgeAuthority | null }} [deps]
    */
   constructor({
     catalog,
@@ -164,7 +165,7 @@ export class AgentMemoryStore {
     this.maxEntries = maxEntries ?? this.policy.quotas.globalEntries;
     /**
      * مبلِّغ الحجر: محاولةُ عبورٍ واحدة قد تكون معرّفاً خاطئاً، وتكرارُها قصدٌ.
-     * @type {{ report: (input: { kind: string, subject: string, detail?: Record<string, unknown> }) => unknown } | null}
+     * @type {import('../governance/quarantine.mjs').QuarantineReporter | null}
      */
     this.quarantine = quarantine;
     /** @type {MemoryIsolationMonitor} */
@@ -206,11 +207,11 @@ export class AgentMemoryStore {
     if (actor === undefined || typeof actor.role !== 'string') {
       throw new Error('MEMORY_ACTOR_REQUIRED');
     }
-    this.accessGate.assertNoWriteDown(actor, options.classification ?? 'internal');
+    await this.accessGate.assertNoWriteDown(actor, options.classification ?? 'internal');
     // المالك يُشتقّ من الفاعل ولا يُقبل ادّعاءً (‏`M7.05`): وكيلٌ يذكر معرّف وكيلٍ
     // آخر كان **يزرع** ذاكرةً في وعاء غيره، وهو تسريبٌ بالاتجاه المعاكس: يُقرأ
     // لاحقاً بوصفه ذاكرةَ صاحبه ويُصدَّق.
-    const owner = this.#ownerFor(agentId, actor);
+    const owner = await this.#ownerFor(agentId, actor);
     // كتابتان: عقد بيانات ثم ذاكرة تحيل إليه. إن أخفقت الثانية بقي عقدٌ بلا
     // ذاكرة — أثرٌ لا يقوله أحد. فحين يوجد مُشغّل معاملة تُلَفّان معاً.
     if (this.transaction === null) return this.#write(owner, content, options);
@@ -227,13 +228,13 @@ export class AgentMemoryStore {
    * بنيابتها فلا تُقرأ لاحقاً كأنّ الوكيل كتبها بنفسه.
    * @param {string} claimed
    * @param {import('../policy/model.mjs').PolicyActor} actor
-   * @returns {string}
+   * @returns {Promise<string>}
    */
-  #ownerFor(claimed, actor) {
+  async #ownerFor(claimed, actor) {
     const requested = typeof claimed === 'string' ? claimed.trim() : '';
     if (this.policy.isOwnerRole(actor.role)) {
       if (requested !== '' && requested !== actor.id) {
-        this.#refuseIsolation({
+        await this.#refuseIsolation({
           actor,
           subject: requested,
           reason: 'remember',
@@ -259,9 +260,11 @@ export class AgentMemoryStore {
   /**
    * يسجّل رفض عزلٍ: حدثٌ في السجل دائماً، وإشارةُ حجرٍ عند بلوغ العتبة.
    * @param {{ actor: import('../policy/model.mjs').PolicyActor, subject: string, reason: string }} input
-   * @returns {void}
+   * `LIVE-27` / `R10-F-04` (‏`WL-309`): الإشارةُ بـ`reportAwaitingSeal` وتُنتظَرُ حتّى يُختَمَ قيدُها
+   * قبلَ رفعِ الرفض؛ وكانت `report` المتزامنةُ تُرَدُّ على الحاجبِ الإنتاجيِّ فيُبتلَعُ الردُّ هنا.
+   * @returns {Promise<void>}
    */
-  #refuseIsolation({ actor, subject, reason }) {
+  async #refuseIsolation({ actor, subject, reason }) {
     const { count, reached } = this.isolationMonitor.attempt(String(actor.id));
     this.log.append('memory.isolation.refused', String(actor.id), {
       subject,
@@ -271,7 +274,7 @@ export class AgentMemoryStore {
     });
     if (!reached || this.quarantine === null) return;
     try {
-      this.quarantine.report({
+      await reportAwaitingSeal(this.quarantine, {
         kind: this.policy.anomaly.signalKind,
         subject: String(actor.id),
         detail: { attempts: count, lastSubject: subject, reason },
@@ -418,7 +421,7 @@ export class AgentMemoryStore {
       // الرفض يُسجّل ويُعدّ (‏`M7.05`)، ويبقى رمزه `MEMORY_NOT_FOUND` لا «ليس لك»:
       // التمييز بين الرمزين يعطي وجود المدخل لمن ليس له، فيصير الرفض نفسه قناةً
       // تُجيب عن «هل يملك فلانٌ مدخلاً بهذا المعرّف؟».
-      this.#refuseIsolation({ actor, subject: String(row['id']), reason: 'recall' });
+      await this.#refuseIsolation({ actor, subject: String(row['id']), reason: 'recall' });
       throw new Error('MEMORY_NOT_FOUND');
     }
     // ذاكرةٌ انتهت مدّتها لا تُعاد ولو بقي صفّها إلى أن يمرّ المطهِّر: الفجوة
@@ -481,7 +484,7 @@ export class AgentMemoryStore {
     const row = await this.repository.findById(id);
     if (row === null) throw new Error('MEMORY_NOT_FOUND');
     if (this.policy.isOwnerRole(actor.role) && row['agentId'] !== actor.id) {
-      this.#refuseIsolation({ actor, subject: String(row['id']), reason: 'forget' });
+      await this.#refuseIsolation({ actor, subject: String(row['id']), reason: 'forget' });
       throw new Error('MEMORY_NOT_FOUND');
     }
     const owner = String(row['agentId']);
@@ -550,7 +553,7 @@ export class AgentMemoryStore {
     let owner = agentId;
     if (this.policy.isOwnerRole(actor.role)) {
       if (agentId !== undefined && agentId !== actor.id) {
-        this.#refuseIsolation({ actor, subject: String(agentId), reason: 'list' });
+        await this.#refuseIsolation({ actor, subject: String(agentId), reason: 'list' });
         throw new MemoryLimitError(
           MEMORY_LIMIT_ERRORS.ISOLATION_REFUSED,
           `الوكيل «${actor.id}» طلب سرد مداخل «${agentId}»: الوكيل محصورٌ في ذاكرته، وحتّى وصفُ مداخل غيره يقول متى عمل وعلى ماذا.`,
