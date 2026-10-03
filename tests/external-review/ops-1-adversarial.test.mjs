@@ -1387,17 +1387,13 @@ test('ب٦ — مرحلةُ النشرِ تُشغِّلُ الحاجزَ حاس�
   assert.ok(prIndex > pushIndex, 'وطلبُ الدمجِ بعدَ الدفعِ — ودفعٌ بلا طلبٍ أنتجَ REPO-1.');
 });
 
-test('ب٧ — مسارُ النشرِ يُطلِقُ CI على فرعِهِ بـ`workflow_dispatch` حاسماً (OPS-1/BOT-PR-CI · WL-311)', () => {
-  // طلبُ الدمجِ المُنشَأُ بـ`GITHUB_TOKEN` لا يُشغِّلُ `pull_request` بوظائفَ (‏`37085393507`)،
-  // و`workflow_dispatch` هوَ الاستثناءُ الموثَّقُ. فالمقيسُ: خطوةٌ تُرسِلُهُ إلى `ci.yml`
-  // على الفرعِ المدفوعِ، بعدَ طلبِ الدمجِ، وتَسقُطُ على غيرِ `204` وعلى غيابِ التشغيلةِ.
+test('ب٧ — مسارُ النشرِ يُقِرُّ تشغيلةَ `pull_request` المحجوزةَ على طلبِه حاسماً (OPS-1/BOT-PR-CI · WL-318)', () => {
+  // `WL-311` أرسلَ `workflow_dispatch` إلى الفرعِ؛ وقِيسَ في `WL-318` أنَّ فحصَه لا يدخلُ
+  // `statusCheckRollup` للطلبِ (‏`#237` بقيَ `BLOCKED`). فالمقيسُ الآنَ: خطوةٌ تَجِدُ تشغيلةَ
+  // `pull_request` على البصمةِ المدفوعةِ بعينِها وتُقِرُّها بـ`GITHUB_TOKEN`، حاسمةً.
   const doc = workflowDoc('publish-skip-baseline.yml');
   const job = doc.jobs?.publish;
-  assert.equal(
-    job?.permissions?.actions,
-    'write',
-    'إرسالُ workflow_dispatch يَحتاجُ actions:write.',
-  );
+  assert.equal(job?.permissions?.actions, 'write', 'الإقرارُ يَحتاجُ actions:write.');
   assert.equal(
     job?.environment,
     'publish-skip-baseline',
@@ -1405,48 +1401,47 @@ test('ب٧ — مسارُ النشرِ يُطلِقُ CI على فرعِهِ ب�
   );
   /** @type {Array<{ id?: string, if?: string, run?: string, env?: Record<string, string> }>} */
   const steps = job?.steps ?? [];
-  const dispatchIndex = steps.findIndex((s) => s.id === 'ci-dispatch');
+  assert.equal(
+    steps.findIndex((s) => s.id === 'ci-dispatch'),
+    -1,
+    'إرسالُ workflow_dispatch أُزيلَ: فحصُه لا تراه الحماية.',
+  );
+  const approveIndex = steps.findIndex((s) => s.id === 'ci-approve');
   const prIndex = steps.findIndex((s) => String(s.run ?? '').includes('/pulls'));
-  assert.ok(dispatchIndex > -1, 'خطوةُ ci-dispatch قائمةٌ.');
-  assert.ok(prIndex > -1 && dispatchIndex > prIndex, 'والإطلاقُ بعدَ إنشاءِ طلبِ الدمجِ.');
-  const step = steps[dispatchIndex];
+  assert.ok(approveIndex > -1, 'خطوةُ ci-approve قائمةٌ.');
+  assert.ok(prIndex > -1 && approveIndex > prIndex, 'والإقرارُ بعدَ إنشاءِ طلبِ الدمجِ.');
+  const step = steps[approveIndex];
   assert.equal(step?.if, "steps.delta.outputs.changed == 'true'");
-  assert.equal(
-    step?.env?.BRANCH,
-    '${{ steps.branch.outputs.branch }}',
-    'المرجعُ فرعُ النشرِ لا main.',
-  );
   assert.equal(step?.env?.HEAD_SHA, '${{ steps.branch.outputs.head_sha }}');
-  assert.equal(
-    step?.env?.GH_TOKEN,
-    '${{ secrets.GITHUB_TOKEN }}',
-    'بلا سرٍّ جديدٍ ولا PAT — GITHUB_TOKEN وحدَهُ.',
-  );
+  assert.equal(step?.env?.GH_TOKEN, '${{ secrets.GITHUB_TOKEN }}', 'بلا سرٍّ جديدٍ ولا PAT.');
   const commands = shellCommands(String(step?.run ?? '')).join('\n');
-  assert.match(commands, /actions\/workflows\/ci\.yml/);
-  assert.match(commands, /\/dispatches/);
-  assert.match(commands, /"\$HTTP_CODE" != '204'/, 'غيرُ 204 يُسقِطُ الخطوةَ.');
-  assert.match(commands, /CI_DISPATCH_NO_RUN/, 'وإرسالٌ بلا تشغيلةٍ مرئيّةٍ يُسقِطُها.');
-  assert.match(commands, /head_sha=\$HEAD_SHA/, 'والتشغيلةُ على البصمةِ المدفوعةِ بعينِها.');
+  assert.match(
+    commands,
+    /runs\?event=pull_request&head_sha=\$HEAD_SHA/,
+    'التشغيلةُ على البصمةِ المدفوعةِ بعينِها وبحدثِ pull_request.',
+  );
+  assert.match(commands, /endsWith\('ci\.yml'\)/, 'وتشغيلةُ ci.yml لا غيرُها.');
+  assert.match(commands, /\/runs\/\$RUN_ID\/approve/);
+  assert.match(commands, /"\$HTTP_CODE" != '201'/, 'غيرُ 201 يُسقِطُ الخطوةَ.');
+  assert.match(commands, /BOT_PR_APPROVE_FAILED/);
+  assert.match(commands, /BOT_PR_RUN_NOT_FOUND/, 'وغيابُ التشغيلةِ يُسقِطُها.');
+  assert.doesNotMatch(commands, /\|\| true/);
   const branchStep = steps.find((s) => s.id === 'branch');
   assert.match(String(branchStep?.run ?? ''), /head_sha=\$\(git rev-parse HEAD\)/);
-  // والسرُّ الوحيدُ في الملفِّ GITHUB_TOKEN: الإصلاحُ لا يَستدعي سرَّ مالكٍ.
   const secrets = workflow('publish-skip-baseline.yml').match(/secrets\.[A-Za-z_]+/g) ?? [];
   assert.deepEqual([...new Set(secrets)], ['secrets.GITHUB_TOKEN']);
-  // و`ci.yml` يَقبلُ `workflow_dispatch`، ووظيفتُهُ المطلوبةُ باسمِها الذي يُطابِقُهُ الفحصُ.
+  // و`ci.yml` يَجري على `pull_request` إلى `main`، ووظيفتُهُ المطلوبةُ باسمِها.
   const ci = workflowDoc('ci.yml');
-  assert.ok(ci.on && 'workflow_dispatch' in ci.on, 'ci.yml يَقبلُ workflow_dispatch.');
+  assert.ok(ci.on && 'pull_request' in ci.on, 'ci.yml يَجري على pull_request.');
   assert.equal(ci.jobs?.validate?.name, 'فحص الجودة الكامل');
 });
 
-test('ب٨ — النشرُ لا يَخضرُّ حتّى يقعَ حكمُ CI الآليُّ على رأسِ طلبِه (OPS-1/BOT-PR-CI · WL-315)', () => {
-  // `ci-dispatch` يَحكُمُ بـ«ظهرت تشغيلةٌ» فحسب. فالمقيسُ هنا وظيفةٌ تاليةٌ تنتظرُ
-  // تشغيلةَ الإرسالِ بعينِها وتَحكُمُ على رأسِ الطلبِ — قراءةً وحدَها، بلا بيئةٍ.
+test('ب٨ — النشرُ لا يَخضرُّ حتّى يقعَ حكمُ CI الآليُّ على رأسِ طلبِه (OPS-1/BOT-PR-CI · WL-315 · WL-318)', () => {
   const doc = workflowDoc('publish-skip-baseline.yml');
   assert.deepEqual(Object.keys(doc.jobs ?? {}), ['publish', 'bot-pr-verdict']);
   const publish = doc.jobs.publish;
   assert.equal(publish.outputs?.pr_number, '${{ steps.pr.outputs.number }}');
-  assert.equal(publish.outputs?.ci_run_id, '${{ steps.ci-dispatch.outputs.run_id }}');
+  assert.equal(publish.outputs?.ci_run_id, '${{ steps.ci-approve.outputs.run_id }}');
   assert.equal(publish.outputs?.changed, '${{ steps.delta.outputs.changed }}');
   /** @type {Array<{ id?: string, run?: string }>} */
   const steps = publish.steps ?? [];
@@ -1461,6 +1456,7 @@ test('ب٨ — النشرُ لا يَخضرُّ حتّى يقعَ حكمُ CI ا
     contents: 'read',
     actions: 'read',
     checks: 'read',
+    statuses: 'read',
     'pull-requests': 'read',
   });
   assert.equal(verdict.steps?.[0]?.with?.ref, 'main', 'الأداةُ من الشجرةِ الموثوقةِ.');
@@ -1470,26 +1466,24 @@ test('ب٨ — النشرُ لا يَخضرُّ حتّى يقعَ حكمُ CI ا
   assert.ok(run, 'خطوةُ الحكمِ قائمةٌ.');
   assert.equal(run.env?.GH_TOKEN, '${{ secrets.GITHUB_TOKEN }}');
   const commands = shellCommands(String(run.run)).join('\n');
-  assert.match(commands, /--wait-run "\$CI_RUN_ID"/, 'تنتظرُ تشغيلةَ الإرسالِ بعينِها.');
+  assert.match(commands, /--wait-run "\$CI_RUN_ID"/, 'تنتظرُ التشغيلةَ المُقَرَّةَ بعينِها.');
   assert.match(commands, /--pr "\$PR_NUMBER"/);
   assert.doesNotMatch(commands, /\|\| true|continue-on-error/, 'الحكمُ حاسمٌ.');
   assert.equal(run['continue-on-error'], undefined);
-  const secrets = workflow('publish-skip-baseline.yml').match(/secrets\.[A-Za-z_]+/g) ?? [];
-  assert.deepEqual([...new Set(secrets)], ['secrets.GITHUB_TOKEN']);
 });
 
-// شواهدُ مسجَّلةٌ من GitHub (‏قُرِئت بـ`scripts/verify-bot-pr-ci.mjs` في `WL-315`).
+// شواهدُ مسجَّلةٌ من GitHub (‏قُرِئت بـ`scripts/verify-bot-pr-ci.mjs` في `WL-315` و`WL-318`).
 const SHA_221 = 'b2522ae8feb0b733a4ac6fcae7546249fd8b0e5c';
-const SHA_231 = '950a924d1470b923c36f13f9cadebeca4d0ea05f';
+const SHA_237 = '554846707758e7d8ca4cdf7b6aec543c0bf4a64e';
 /** @param {Partial<import('../../scripts/verify-bot-pr-ci.mjs').RunInfo>} o */
 const run = (o) => ({
   id: 1,
-  event: 'workflow_dispatch',
+  event: 'pull_request',
   status: 'completed',
   conclusion: 'success',
   triggering_actor: BOT_ACTOR,
   check_suite_id: 10,
-  head_sha: SHA_231,
+  head_sha: SHA_237,
   path: '.github/workflows/ci.yml',
   ...o,
 });
@@ -1500,114 +1494,123 @@ const check = (o) => ({
   conclusion: 'success',
   app: 'github-actions',
   check_suite_id: 10,
-  head_sha: SHA_231,
-  started_at: '2026-10-03T07:53:45Z',
+  head_sha: SHA_237,
+  started_at: '2026-10-03T11:51:30Z',
   ...o,
 });
+/** @param {Partial<import('../../scripts/verify-bot-pr-ci.mjs').RollupInfo>} o */
+const roll = (o) => ({ name: REQUIRED_CONTEXT, conclusion: 'SUCCESS', check_suite_id: 10, ...o });
 
-test('ب٩ — حكمُ BOT-PR-CI يَرسبُ على شكلِ `#221` ويَنجحُ على شكلِ `#231` (WL-315)', () => {
-  // `#221` قبلَ `WL-311`: شبحُ `pull_request` بلا وظائفَ، ثمَّ تشغيلةُ إعادةِ الفتحِ بيدِ إنسانٍ.
+test('ب٩ — حكمُ BOT-PR-CI على شواهدَ مسجَّلةٍ: `#221` و`#236` يرسبانِ، و`#237` قبلَ الإقرارِ يرسبُ (WL-318)', () => {
+  // `#221`: شبحُ `pull_request` ثمَّ تشغيلةُ إعادةِ الفتحِ بيدِ إنسانٍ — الـrollup منها.
   const v221 = judgeBotPrCi({
     headSha: SHA_221,
     runs: [
-      run({
-        id: 37085393507,
-        event: 'pull_request',
-        conclusion: 'action_required',
-        check_suite_id: 1,
-        head_sha: SHA_221,
-      }),
-      run({
-        id: 37085458411,
-        event: 'pull_request',
-        triggering_actor: 'soaav-svg',
-        check_suite_id: 2,
-        head_sha: SHA_221,
-      }),
+      run({ id: 37085393507, conclusion: 'action_required', check_suite_id: 1, head_sha: SHA_221 }),
+      run({ id: 37085458411, triggering_actor: 'soaav-svg', check_suite_id: 2, head_sha: SHA_221 }),
     ],
     checks: [check({ check_suite_id: 2, head_sha: SHA_221 })],
+    rollup: [roll({ check_suite_id: 2 })],
   });
-  assert.equal(v221.ok, false);
   assert.equal(
     v221.code,
     'BOT_PR_CI_NO_AUTOMATIC_RUN',
-    'فحصٌ ناجحٌ بإعادةِ فتحٍ يدويّةٍ لا يُحتسَبُ آليّاً.',
+    'فحصٌ بإعادةِ فتحٍ يدويّةٍ لا يُحتسَبُ آليّاً.',
   );
   assert.deepEqual(v221.phantomRunIds, [37085393507]);
 
-  // `#231` بعدَ `WL-311`: تشغيلةُ الإرسالِ الآليّةِ حملت الفحصَ ناجحاً.
-  const v231 = judgeBotPrCi({
-    headSha: SHA_231,
+  // `#237` قبلَ الإقرارِ: فحصُ `workflow_dispatch` ناجحٌ على البصمةِ، والـrollup فارغٌ
+  // (‏`null`) والطلبُ `BLOCKED` — هذا هو الإيجابُ الكاذبُ الذي أسقطَ حكمَ `WL-315`.
+  const v237before = judgeBotPrCi({
+    headSha: SHA_237,
     runs: [
-      run({ id: 37107862749, check_suite_id: 100514045701 }),
-      run({
-        id: 37107863232,
-        event: 'pull_request',
-        conclusion: 'failure',
-        check_suite_id: 100514047033,
-      }),
+      run({ id: 37120429484, event: 'workflow_dispatch', check_suite_id: 100547277360 }),
+      run({ id: 37120430426, conclusion: 'action_required', check_suite_id: 100547280012 }),
     ],
-    checks: [check({ check_suite_id: 100514045701 })],
+    checks: [check({ check_suite_id: 100547277360 })],
+    rollup: null,
   });
-  assert.equal(v231.ok, true, v231.detail);
-  assert.equal(v231.code, 'BOT_PR_CI_OK');
-  assert.deepEqual(v231.automaticRunIds, [37107862749]);
-  assert.deepEqual(v231.phantomRunIds, [37107863232]);
+  assert.equal(v237before.ok, false);
+  assert.equal(v237before.code, 'BOT_PR_ROLLUP_MISSING');
+  assert.deepEqual(
+    v237before.automaticRunIds,
+    [],
+    'تشغيلةُ workflow_dispatch ليست حكماً على الطلب.',
+  );
+
+  // `#236`: إنسانٌ (‏`xuuux-voox`) أقرَّ الشبحَ فدخلَ فحصُه الـrollup — نجاحٌ لكنْ ليس آليّاً.
+  const v236 = judgeBotPrCi({
+    headSha: SHA_237,
+    runs: [run({ id: 37117916632, triggering_actor: 'xuuux-voox', check_suite_id: 100540456499 })],
+    checks: [check({ check_suite_id: 100540456499 })],
+    rollup: [roll({ check_suite_id: 100540456499 })],
+  });
+  assert.equal(v236.code, 'BOT_PR_CI_NO_AUTOMATIC_RUN');
 });
 
-test('ب٩ب — حكمُ BOT-PR-CI حاسمٌ على الحالاتِ الحدّيّة (WL-315)', () => {
-  const base = { headSha: SHA_231, runs: [run({})] };
-  // تشغيلةٌ آليّةٌ بلا فحصٍ باسمِ السياقِ المطلوبِ.
-  assert.equal(judgeBotPrCi({ ...base, checks: [] }).code, 'BOT_PR_CHECK_MISSING');
-  assert.equal(
-    judgeBotPrCi({ ...base, checks: [check({ name: 'تقرير البوابتين G0 و G1' })] }).code,
-    'BOT_PR_CHECK_MISSING',
-  );
-  // فحصٌ آليٌّ راسبٌ أو جارٍ.
-  assert.equal(
-    judgeBotPrCi({ ...base, checks: [check({ conclusion: 'failure' })] }).code,
-    'BOT_PR_CI_RUN_NOT_SUCCESS',
-  );
-  assert.equal(
-    judgeBotPrCi({ ...base, checks: [check({ status: 'in_progress', conclusion: null })] }).code,
-    'BOT_PR_CI_RUN_NOT_SUCCESS',
-  );
-  // فحصٌ من تطبيقٍ آخرَ لا يُحتسَبُ (‏الحمايةُ مقيّدةٌ بـapp_id 15368).
-  assert.equal(
-    judgeBotPrCi({ ...base, checks: [check({ app: 'other-app' })] }).code,
-    'BOT_PR_CHECK_MISSING',
-  );
-  // فحصٌ على بصمةٍ أخرى لا يُحتسَبُ.
-  assert.equal(
-    judgeBotPrCi({ ...base, checks: [check({ head_sha: SHA_221 })] }).code,
-    'BOT_PR_CHECK_MISSING',
-  );
-  // تشغيلةُ workflow_dispatch بيدِ إنسانٍ ليست آليّةً.
+test('ب٩ب — حكمُ BOT-PR-CI حاسمٌ على الحالاتِ الحدّيّة، وينجحُ على الإقرارِ الآليِّ (WL-318)', () => {
+  const ok = {
+    headSha: SHA_237,
+    runs: [run({ id: 37120430426, check_suite_id: 100547280012 })],
+    checks: [check({ check_suite_id: 100547280012 })],
+    rollup: [roll({ check_suite_id: 100547280012 })],
+  };
+  const v = judgeBotPrCi(ok);
+  assert.equal(v.ok, true, v.detail);
+  assert.equal(v.code, 'BOT_PR_CI_OK');
+  assert.deepEqual(v.automaticRunIds, [37120430426]);
+  // الـrollup بلا السياقِ المطلوبِ.
+  assert.equal(judgeBotPrCi({ ...ok, rollup: [] }).code, 'BOT_PR_ROLLUP_MISSING');
   assert.equal(
     judgeBotPrCi({
-      headSha: SHA_231,
-      runs: [run({ triggering_actor: 'soaav-svg' })],
-      checks: [check({})],
+      ...ok,
+      rollup: [roll({ name: 'تقرير البوابتين G0 و G1', check_suite_id: 100547280012 })],
+    }).code,
+    'BOT_PR_ROLLUP_MISSING',
+  );
+  // فحصٌ آليٌّ في الـrollup راسبٌ أو جارٍ.
+  assert.equal(
+    judgeBotPrCi({ ...ok, rollup: [roll({ conclusion: 'FAILURE', check_suite_id: 100547280012 })] })
+      .code,
+    'BOT_PR_CI_RUN_NOT_SUCCESS',
+  );
+  assert.equal(
+    judgeBotPrCi({ ...ok, rollup: [roll({ conclusion: null, check_suite_id: 100547280012 })] })
+      .code,
+    'BOT_PR_CI_RUN_NOT_SUCCESS',
+  );
+  // حالةُ commit status بالاسمِ نفسِه (‏بلا مجموعةٍ) لا تُحتسَبُ آليّةً.
+  assert.equal(
+    judgeBotPrCi({ ...ok, rollup: [roll({ check_suite_id: null })] }).code,
+    'BOT_PR_CI_NO_AUTOMATIC_RUN',
+  );
+  // تشغيلةٌ على بصمةٍ أخرى أو سيرِ عملٍ آخرَ لا تُحتسَب.
+  assert.equal(
+    judgeBotPrCi({ ...ok, runs: [run({ check_suite_id: 100547280012, head_sha: SHA_221 })] }).code,
+    'BOT_PR_CI_NO_AUTOMATIC_RUN',
+  );
+  assert.equal(
+    judgeBotPrCi({
+      ...ok,
+      runs: [run({ check_suite_id: 100547280012, path: '.github/workflows/other.yml' })],
     }).code,
     'BOT_PR_CI_NO_AUTOMATIC_RUN',
   );
-  // أحدثُ فحصٍ بالاسمِ راسبٌ ⇒ الحمايةُ تقرأُ الأحدثَ.
+  // أحدثُ فحصٍ بالاسمِ ملغىً ⇒ الحمايةُ تقرأُ الأحدثَ.
   assert.equal(
     judgeBotPrCi({
-      headSha: SHA_231,
-      runs: [
-        run({}),
-        run({ id: 2, event: 'pull_request', triggering_actor: 'x', check_suite_id: 11 }),
-      ],
+      ...ok,
       checks: [
-        check({}),
-        check({ check_suite_id: 11, conclusion: 'cancelled', started_at: '2026-10-03T08:47:21Z' }),
+        check({ check_suite_id: 100547280012 }),
+        check({ check_suite_id: 11, conclusion: 'cancelled', started_at: '2026-10-03T12:30:00Z' }),
       ],
     }).code,
     'BOT_PR_CHECK_SUPERSEDED',
   );
-  // بصمةٌ غيرُ كاملةٍ.
-  assert.equal(judgeBotPrCi({ headSha: 'abc', runs: [], checks: [] }).code, 'BOT_PR_CI_BAD_SHA');
+  assert.equal(
+    judgeBotPrCi({ headSha: 'abc', runs: [], checks: [], rollup: null }).code,
+    'BOT_PR_CI_BAD_SHA',
+  );
 });
 
 test('ب٣ب — مُعِينُ استخراجِ الأوامرِ مقيسٌ: يُسقِطُ الجسدَ ولا يُسقِطُ أمراً', () => {

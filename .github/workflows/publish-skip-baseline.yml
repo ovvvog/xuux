@@ -76,8 +76,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: publish-skip-baseline
-    # `actions: write` (‏`OPS-1/BOT-PR-CI` · `WL-311`): لإرسالِ `workflow_dispatch` إلى
-    # `ci.yml` على فرعِ النشرِ وحدَهُ — لا يَكتُبُ محتوىً ولا يَتجاوزُ البيئةَ، فهوَ
+    # `actions: write` (‏`OPS-1/BOT-PR-CI` · `WL-318`): لإقرارِ تشغيلةِ `pull_request`
+    # المحجوزةِ على طلبِ النشرِ وحدَهُ — لا يَكتُبُ محتوىً ولا يَتجاوزُ البيئةَ، فهوَ
     # يُنفَّذُ **بعدَ** موافقتِها. ويَشملُ `actions: read` الذي يَحتاجُهُ تنزيلُ الأثرِ.
     permissions:
       contents: write
@@ -86,7 +86,7 @@ jobs:
     outputs:
       changed: ${{ steps.delta.outputs.changed }}
       pr_number: ${{ steps.pr.outputs.number }}
-      ci_run_id: ${{ steps.ci-dispatch.outputs.run_id }}
+      ci_run_id: ${{ steps.ci-approve.outputs.run_id }}
     steps:
       # ── فحصُ الأصلِ: `workflow_ref` لا `workflow_sha` ──
       # `workflow_sha` **لا يُقابَلُ بـ`measured_sha`** — ذاكَ خطأٌ صُحِّحَ: الأوّلُ
@@ -346,58 +346,68 @@ jobs:
             });
           "
 
-      # ── إطلاقُ CI على فرعِ النشرِ (‏`OPS-1/BOT-PR-CI` · `WL-311`) ──
+      # ── إقرارُ تشغيلةِ `pull_request` المحجوزةِ (‏`OPS-1/BOT-PR-CI` · `WL-318`) ──
       #
-      # طلبُ الدمجِ المُنشَأُ بـ`GITHUB_TOKEN` **لا يُشغِّلُ** `pull_request` بوظائفَ:
-      # قِيسَ في `35932954388` (‏`#144`) ثمَّ في `37085393507` (‏`#221`) — صفرُ وظائفَ،
-      # `triggering_actor: github-actions[bot]` — فكانَ يُعادُ فتحُ الطلبِ يدويّاً
-      # (‏`37085458411`). و`workflow_dispatch` **هوَ الاستثناءُ الموثَّقُ** من قيدِ
-      # `GITHUB_TOKEN`، وهوَ نفسُهُ ما يُطلِقُ القياسَ من `auto-measure` (‏`37084688315`،
-      # `triggering_actor: github-actions[bot]`، نجحَ). فيُرسَلُ إلى `ci.yml` على **فرعِ
-      # النشرِ**؛ وفحوصُهُ — ومنها «فحص الجودة الكامل» — تُقيَّدُ على **رأسِ الفرعِ**
-      # وهوَ رأسُ الطلبِ نفسُهُ، فيَظهرُ الحكمُ على الطلبِ بلا إعادةِ فتحٍ.
+      # طلبُ الدمجِ المُنشَأُ بـ`GITHUB_TOKEN` **يُنشئُ** تشغيلةَ `pull_request` لكنَّ GitHub
+      # يحجزُها `action_required` بصفرِ وظائفَ (‏`37085393507` · `37105451227` · `37120430426`).
+      # و`WL-311` التفَّ بـ`workflow_dispatch` على الفرعِ، **وقِيسَ في `WL-318` أنَّ فحصَه لا
+      # يدخلُ `statusCheckRollup` للطلبِ** فبقيَ `#237` `BLOCKED` بعدَ الموافقةِ وفحصُ
+      # الإرسالِ ناجحٌ — والحمايةُ تقرأُ الـrollup. **والمقيسُ أيضاً** أنَّ `GITHUB_TOKEN`
+      # بـ`actions: write` يُقِرُّ التشغيلةَ المحجوزةَ (‏`POST …/approve` ⇒ `201`، تجربةُ
+      # `37120971215`) فتجري **تشغيلةُ الطلبِ نفسُها** بحدثِ `pull_request` وفاعلِ
+      # `github-actions[bot]` (‏`37120430426` المحاولةُ 2) ويدخلُ فحصُها الـrollup.
       #
-      # **وما لا يَفعلُهُ:** لا سرَّ جديداً ولا PAT ولا تطبيقَ، ولا يَمسُّ حمايةَ الفرعِ،
-      # ولا يَتجاوزُ موافقةَ البيئةِ (يُنفَّذُ بعدَها)، ولا يَدمجُ — الدمجُ يَبقى بيدٍ.
-      # **وحاسمٌ مرّتينِ:** `204` من الإرسالِ، ثمَّ تشغيلةٌ مرئيّةٌ على البصمةِ المدفوعةِ
-      # بعينِها — فإرسالٌ قُبِلَ ولم تَظهرْ لهُ تشغيلةٌ لا يُعَدُّ إطلاقاً.
-      - name: إطلاقُ CI على فرعِ النشرِ (OPS-1/BOT-PR-CI)
+      # فهذه الخطوةُ تَجِدُ تشغيلةَ `ci.yml` بحدثِ `pull_request` على البصمةِ المدفوعةِ
+      # بعينِها وتُقِرُّها. **حاسمةٌ:** غيابُ التشغيلةِ خلالَ 120 ثانيةً ⇒ `BOT_PR_RUN_NOT_FOUND`،
+      # وغيرُ `201` ⇒ `BOT_PR_APPROVE_FAILED`. وإن وُجِدَت جاريةً بلا حجزٍ (‏تغيَّرَ سلوكُ
+      # GitHub) مضَت بلا إقرار. **ولا** سرَّ جديداً ولا PAT ولا تطبيقَ، ولا مساسَ بالحمايةِ،
+      # ولا تجاوزَ للبيئةِ (‏بعدَها)، ولا دمجَ — الدمجُ والمراجعةُ يبقيانِ بيدٍ. والإقرارُ
+      # يقعُ على **محتوىً كتبَته هذه الوظيفةُ نفسُها** بكودِ `main` بعدَ `V1`…`V7`.
+      - name: إقرارُ تشغيلةِ CI على طلبِ النشرِ (OPS-1/BOT-PR-CI)
         if: steps.delta.outputs.changed == 'true'
-        id: ci-dispatch
+        id: ci-approve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BRANCH: ${{ steps.branch.outputs.branch }}
           HEAD_SHA: ${{ steps.branch.outputs.head_sha }}
         run: |
           set -euo pipefail
-          API="https://api.github.com/repos/${{ github.repository }}/actions/workflows/ci.yml"
-          PAYLOAD=$(node -e "console.log(JSON.stringify({ ref: process.argv[1] }))" "$BRANCH")
-          HTTP_CODE=$(curl -sS -o "$RUNNER_TEMP/ci-dispatch.json" -w '%{http_code}' -X POST \
-            -H 'Accept: application/vnd.github+json' \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            -H 'Content-Type: application/json' \
-            "$API/dispatches" -d "$PAYLOAD")
-          if [ "$HTTP_CODE" != '204' ]; then
-            echo "::error::CI_DISPATCH_FAILED: HTTP $HTTP_CODE — لم يُطلَقْ CI على $BRANCH."
-            cat "$RUNNER_TEMP/ci-dispatch.json"
-            exit 1
-          fi
+          API="https://api.github.com/repos/${{ github.repository }}/actions"
           RUN_ID=''
+          RUN_CONCLUSION=''
           for attempt in $(seq 1 12); do
             sleep 10
-            RUN_ID=$(curl -fsS \
+            FOUND=$(curl -fsS \
               -H 'Accept: application/vnd.github+json' \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'X-GitHub-Api-Version: 2022-11-28' \
-              "$API/runs?event=workflow_dispatch&branch=$BRANCH&head_sha=$HEAD_SHA&per_page=5" \
-              | node -e "const c=[];process.stdin.on('data',d=>c.push(d));process.stdin.on('end',()=>{const j=JSON.parse(Buffer.concat(c));const r=(j.workflow_runs||[]).find(x=>x.head_sha===process.argv[1]);process.stdout.write(r?String(r.id):'')})" "$HEAD_SHA")
-            if [ -n "$RUN_ID" ]; then break; fi
-            echo "محاولةٌ $attempt: لم تَظهرْ تشغيلةُ CI بعدُ على $HEAD_SHA"
+              "$API/runs?event=pull_request&head_sha=$HEAD_SHA&per_page=10" \
+              | node -e "const c=[];process.stdin.on('data',d=>c.push(d));process.stdin.on('end',()=>{const j=JSON.parse(Buffer.concat(c));const r=(j.workflow_runs||[]).find(x=>x.head_sha===process.argv[1]&&String(x.path).endsWith('ci.yml'));process.stdout.write(r?r.id+' '+(r.conclusion||r.status):'')})" "$HEAD_SHA")
+            if [ -n "$FOUND" ]; then
+              RUN_ID="${FOUND%% *}"
+              RUN_CONCLUSION="${FOUND#* }"
+              break
+            fi
+            echo "محاولةٌ $attempt: لم تَظهرْ تشغيلةُ pull_request على $HEAD_SHA بعدُ"
           done
           if [ -z "$RUN_ID" ]; then
-            echo "::error::CI_DISPATCH_NO_RUN: قُبِلَ الإرسالُ ولم تَظهرْ تشغيلةُ CI على $HEAD_SHA خلالَ 120 ثانيةً."
+            echo "::error::BOT_PR_RUN_NOT_FOUND: لا تشغيلةَ pull_request لـci.yml على $HEAD_SHA خلالَ 120 ثانيةً."
             exit 1
+          fi
+          if [ "$RUN_CONCLUSION" = 'action_required' ]; then
+            HTTP_CODE=$(curl -sS -o "$RUNNER_TEMP/ci-approve.json" -w '%{http_code}' -X POST \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$API/runs/$RUN_ID/approve")
+            if [ "$HTTP_CODE" != '201' ]; then
+              echo "::error::BOT_PR_APPROVE_FAILED: HTTP $HTTP_CODE — لم تُقَرَّ التشغيلةُ $RUN_ID."
+              cat "$RUNNER_TEMP/ci-approve.json"
+              exit 1
+            fi
+            echo "أُقِرَّت التشغيلةُ $RUN_ID (‏كانت action_required)."
+          else
+            echo "::notice::التشغيلةُ $RUN_ID حالُها $RUN_CONCLUSION — لا حجزَ فلا إقرار."
           fi
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "✅ CI على $BRANCH @ $HEAD_SHA: التشغيلةُ $RUN_ID"
@@ -410,23 +420,21 @@ jobs:
             echo ""
             echo "- تغيَّرَ الأثرُ: \`${{ steps.delta.outputs.changed }}\`"
             echo "- الفرعُ: \`${{ steps.branch.outputs.branch }}\`"
-            echo "- تشغيلةُ CI على الفرعِ: \`${{ steps.ci-dispatch.outputs.run_id }}\`"
+            echo "- تشغيلةُ CI على الطلبِ: \`${{ steps.ci-approve.outputs.run_id }}\`"
             echo "- \`measured_sha\`: \`${{ steps.prov.outputs.measured_sha }}\`"
             echo "- \`artifact_sha256\`: \`${{ steps.prov.outputs.artifact_sha256 }}\`"
             echo ""
             echo "**ولا يُعَدُّ هذا إغلاقاً لـ\`OPS-1\`** ما بقيَ \`M5\` (عزلُ العدّاءِ) أو \`M6\` (عقدُ pkcs11js) محجِباً."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ── حكمُ CI على طلبِ النشرِ الآليِّ (‏`OPS-1/BOT-PR-CI` · `WL-315`) ──
+  # ── حكمُ CI على طلبِ النشرِ الآليِّ (‏`OPS-1/BOT-PR-CI` · `WL-315` · `WL-318`) ──
   #
-  # `ci-dispatch` يَحكُمُ بـ«ظهرت تشغيلةٌ»، لا بـ«وَقَعَ الحكمُ على رأسِ الطلبِ».
-  # فنجحَ النشرُ في `#230`…`#233` ولم يُقَسْ مرّةً هل حملَ رأسُ الطلبِ «فحص الجودة
-  # الكامل» ناجحاً **من تشغيلةٍ آليّةٍ** قبلَ أيِّ تدخُّلٍ — وأُعيدَ فتحُ كلِّها قبلَ
-  # انتهاءِ التشغيلةِ الآليّةِ. فهذه الوظيفةُ تنتظرُ اكتمالَ تشغيلةِ الإرسالِ بعينِها
-  # ثمَّ تَحكُمُ بـ`scripts/verify-bot-pr-ci.mjs` على رأسِ الطلبِ: فحصٌ ناجحٌ من مجموعةِ
-  # تشغيلةٍ أطلقَها `github-actions[bot]` بـ`workflow_dispatch`، وأحدثُ فحصٍ بالاسمِ
-  # ناجحٌ. **راسبةٌ إن لم يقعِ الحكمُ** — فالنشرُ الأخضرُ يعني طلباً مُحاكَماً لا طلباً
-  # مفتوحاً فحسب.
+  # النشرُ الأخضرُ يعني طلباً **مُحاكَماً** لا طلباً مفتوحاً فحسب. فهذه الوظيفةُ تنتظرُ
+  # تشغيلةَ `pull_request` التي أقرَّها `ci-approve` بعينِها، ثمَّ تَحكُمُ بـ
+  # `scripts/verify-bot-pr-ci.mjs` على **`statusCheckRollup` للطلبِ** — ما تقرأُه الحمايةُ
+  # نفسُها: «فحص الجودة الكامل» ناجحٌ فيه من تشغيلةِ `pull_request` فاعلُها
+  # `github-actions[bot]`، وأحدثُ فحصٍ بالاسمِ ناجحٌ. **وتصحيحُ `WL-318`:** حكمُ `WL-315`
+  # الأوّلُ قرأَ فحوصَ البصمةِ لا الـrollup فنجحَ على `#237` والطلبُ `BLOCKED`.
   #
   # **وما لا تَفعلُه:** بلا بيئةٍ (لا تَكتُبُ شيئاً، فلا موافقةَ تَلزمُها)، وصلاحيّاتُها
   # قراءةٌ وحدَها، وبلا سرٍّ غيرِ `GITHUB_TOKEN`، ولا تَدمجُ — الدمجُ يبقى بيدٍ.
@@ -440,6 +448,7 @@ jobs:
       contents: read
       actions: read
       checks: read
+      statuses: read
       pull-requests: read
     steps:
       - name: جلبُ الشجرةِ الموثوقةِ (main)
