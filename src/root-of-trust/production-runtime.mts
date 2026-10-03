@@ -955,8 +955,10 @@ export function createSealedEventSink(log: PersistentEventLog): SealedEventSink 
     append(type: string, actor: string, data: object): void {
       pending += 1;
       chain = chain.then(async () => {
-        if (failures.length > 0) return;
+        // LIVE-32 (WL-320): الإرجاعُ المبكّرُ بعدَ الفشلِ كانَ يتخطّى `finally`
+        // فيبقى `pending` يتضخّمُ بكلِّ قيدٍ تالٍ. صارَ `finally` يُغطّي كلا المسارين.
         try {
+          if (failures.length > 0) return;
           await log.appendSealed(type, actor, data);
         } catch (error) {
           failures.push(error);
