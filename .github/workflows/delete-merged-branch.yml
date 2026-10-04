@@ -1,0 +1,53 @@
+# حذفُ فرعِ الطلبِ بعدَ دمجِه والتحقّقُ من زوالِه (‏`WL-329`).
+#
+# **لماذا سيرُ عملٍ والمستودعُ يَحذِفُ بإعدادِه:** `delete_branch_on_merge` إعدادٌ يُطفأُ بلا أثرٍ في
+# الشفرةِ ولا يُخبِرُ إن فشل. وهذا السيرُ **يتحقّقُ** أنّ الفرعَ زالَ (‏ويحذفُه إن بقيَ)، ويَسقُطُ أحمرَ
+# إن بقيَ — فلا يُدّعى إتمامٌ لم يقع.
+#
+# **ما لا يُحذَفُ أبداً** (‏`scripts/lib/merged-branch.mjs`، محروسٌ بـ`tests/tooling/delete-merged-branch.test.mjs`):
+# طلبٌ أُغلِقَ بلا دمجٍ · فرعٌ من نسخةٍ أخرى · الفرعُ الافتراضيُّ و`main` · فرعٌ محميٌّ · فرعٌ تقدَّمَ رأسُه
+# بعدَ الدمجِ · فرعٌ يستعملُه طلبٌ مفتوحٌ آخر. والدمجُ يُقرأُ من الواجهةِ (‏`GET /pulls/N/merge`) لا من
+# حمولةِ الحدثِ وحدَها.
+#
+# **`pull_request_target` قصداً:** التعريفُ والشفرةُ من `main` لا من الفرعِ، ولا يُجلَبُ كودُ الطلبِ ولا
+# يُنفَّذُ — فرمزُ الكتابةِ لا يَلمسُ كوداً غيرَ موثوق.
+
+name: حذفُ الفرعِ المدموج
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delete-merged-branch-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  delete:
+    name: حذفُ فرعِ الطلبِ المدموجِ والتحقّقُ من زوالِه
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: جلبُ الشجرةِ الموثوقةِ (main) — لا كودَ الطلب
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: تهيئة Node.js من .nvmrc
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: الحذفُ والتحقّقُ
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/delete-merged-branch.mjs
