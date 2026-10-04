@@ -167,8 +167,13 @@ export async function createProductionSystem(env, options, deps = {}) {
         throw err;
       }
       // لا توجد سياسةُ وقتٍ — الساعةُ غيرُ موثوقةٍ.
+      // `LIVE-37` (‏`WL-331`): حالةُ الساعةِ (‏P13) داخلَ بصمةِ الحالةِ، وكتابتُها لا تقعُ
+      // إلّا عبرَ حاجزِ الالتزامِ (‏معاملةُ `clock.persist`) — لا كاتبٌ ثانٍ في الجذر.
       clock = /** @type {never} */ (
-        new SovereignClock({ statePath: options.root + '/clock-state.json' })
+        new SovereignClock({
+          statePath: options.root + '/clock-state.json',
+          commitBarrier: rootOfTrust.commitBarrier,
+        })
       );
     }
   }
