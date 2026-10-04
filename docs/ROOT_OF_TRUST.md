@@ -164,7 +164,7 @@
 
 ```bash
 npm run validate   # الحواجزُ مقيسةٌ من `package.json` ثم كل الاختبارات
-npm test           # 243 ملف اختبار
+npm test           # 241 ملف اختبار
 ```
 
 والأدلة موضعية لا مجمَلة: `tests/root-of-trust/` لكل وحدة، و

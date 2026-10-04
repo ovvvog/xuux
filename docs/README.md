@@ -13,9 +13,6 @@
 | الوثيقةُ | دورُها |
 | --- | --- |
 | [`GOVERNANCE_RULE.md`](../GOVERNANCE_RULE.md) | الدستورُ الإجرائيُّ — يغلبُ عندَ التعارضِ |
-| [`AGENTS.md`](../AGENTS.md) | نقطةُ دخولِ كلِّ وكيلٍ: ترتيبُ القراءةِ ودورتا ما قبلَ الدفعِ وما بعدَ الدمج (‏`WL-329`) |
-| [`HANDOFF.md`](HANDOFF.md) | ملخّصُ التسليمِ — **مولَّدٌ** بـ`npm run handoff:report` ومحروسٌ بـ`guard:project-state` |
-| [`../config/project-state.yaml`](../config/project-state.yaml) | عقدُ ذاكرةِ المشروعِ: ما يحملُ الحالةَ، وما يتأثّرُ بماذا، وما هو محايد |
 | [`README.md`](../README.md) | واجهةُ المشروعِ |
 | [`CURRENT_STATE.md`](CURRENT_STATE.md) | المعماريّةُ والقدراتُ والأدلّةُ والفجواتُ كما هي في الكودِ |
 | [`PROJECT_STATUS.md`](../PROJECT_STATUS.md) | سطورُ «آخر تحديث» ولوحةُ الحالةِ (‏يحرسُها `guard:status-freshness`) |

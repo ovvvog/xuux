@@ -133,14 +133,9 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 
 ## 6 — ما يقيسُه CI وما لا يقيسُه
 
-- **المنصّةُ:** كلُّ مساراتِ العملِ الخمسةِ (‏`ci.yml` · `measure-skip-baseline.yml` ·
-  `publish-skip-baseline.yml` · `auto-measure-skip-baseline.yml` · `delete-merged-branch.yml`) على
-  `ubuntu-latest` المستضافِ منذ `WL-286` (‏والخامسُ منذ `WL-329`)، وقاعدةُ البياناتِ حاويةُ خدمةٍ
-  `postgres:18.6-alpine`. **لا عدّاءَ ذاتيَّ الاستضافةِ.**
-- **ذاكرةُ المشروعِ (‏`WL-329`):** «فحص الجودة الكامل» — الفحصُ المُلزَمُ — يُشغِّلُ
-  `npm run guard:project-state` على فرقِ الطلبِ (‏أو الدفعِ) مع `main`: تغييرٌ تنفيذيٌّ بلا مُدخلةٍ
-  وسطرِ لوحةٍ وملفّاتٍ متأثّرةٍ مُسمّاةٍ في الحزمةِ نفسِها يُرَدُّ. و`delete-merged-branch.yml` يتحقّقُ
-  بعدَ كلِّ دمجٍ أنّ فرعَ الطلبِ زالَ ويَسقُطُ إن بقيَ. **يقيسُ الاقترانَ لا صدقَ المكتوب.**
+- **المنصّةُ:** كلُّ مساراتِ العملِ الأربعةِ (‏`ci.yml` · `measure-skip-baseline.yml` ·
+  `publish-skip-baseline.yml` · `auto-measure-skip-baseline.yml`) على `ubuntu-latest` المستضافِ
+  منذ `WL-286`، وقاعدةُ البياناتِ حاويةُ خدمةٍ `postgres:18.6-alpine`. **لا عدّاءَ ذاتيَّ الاستضافةِ.**
 - **لقطةُ `main@23d07212`** (‏التشغيلةُ `37044233977`، خطوةُ «الاختبارات»، مقروءةٌ من سجلِّها):
   `tests 2398` · `pass 2355` · `fail 0` · `skipped 43`.
 - **أسبابُ التخطّي الـ43 كما طُبِعَت:** محاكي TPM (‏`swtpm`/`XUUX_TPM_SIM`) **25** · `userns`
