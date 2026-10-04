@@ -14,6 +14,7 @@ import path from 'node:path';
 import { parse } from 'yaml';
 import {
   classifyPath,
+  affectedFilesSection,
   declaredPaths,
   evaluateProjectState,
   parseManifest,
@@ -453,4 +454,27 @@ test('المستودعُ نفسُه: العقدُ يُقرأ، ونقطةُ ال
   const pkg = JSON.parse(readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   assert.equal(pkg.scripts['guard:project-state'], 'node scripts/guard-project-state.mjs');
   assert.equal(pkg.scripts.prepare, 'node scripts/install-hooks.mjs');
+});
+
+test('القسمُ يُقرأُ من ترويستِه لا من ذكرِه في نصِّ بندٍ (‏انكشفَ بتطبيقِ الحاجزِ على مُدخلتِه نفسِها)', () => {
+  const body = [
+    '#### ما تمَّ فعلاً',
+    '',
+    '- `PS4` ملفٌّ لا تُسمّيه «الملفات المتأثرة» — و`origin/main` أساسٌ.',
+    '',
+    '#### الملفاتُ المتأثّرة',
+    '',
+    '`src/a.mjs`',
+    '',
+    '#### الدليل',
+    '',
+    '`src/not-a-claim.mjs`',
+  ].join('\n');
+  assert.deepEqual(declaredPaths(String(affectedFilesSection(body))), ['src/a.mjs']);
+  assert.deepEqual(
+    declaredPaths(
+      String(affectedFilesSection('**الملفات المتأثرة:** `x/y.mjs`\n\n**الدليل:** `z/w.mjs`')),
+    ),
+    ['x/y.mjs'],
+  );
 });

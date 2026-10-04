@@ -234,7 +234,11 @@ export function newWorkLogEntries(baseLog, headLog) {
  */
 export function affectedFilesSection(body) {
   const lines = String(body).split('\n');
-  const start = lines.findIndex((line) => /الملفات المتأثرة/u.test(normalizeArabic(line)));
+  // ترويسةٌ أو تسميةٌ عريضةٌ في أوّلِ السطرِ وحدَهما — لا ذكرُ القسمِ في نصِّ بندٍ (‏«تُسمّيه «الملفات المتأثرة»»).
+  const start = lines.findIndex((line) => {
+    const norm = normalizeArabic(line);
+    return /^#{2,6}\s+الملفات المتأثرة/u.test(norm) || /^(?:-\s+)?\*\*الملفات المتأثرة/u.test(norm);
+  });
   if (start === -1) return null;
   /** @type {string[]} */
   const out = [];
