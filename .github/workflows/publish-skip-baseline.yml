@@ -65,7 +65,7 @@ permissions:
 
 concurrency:
   group: publish-skip-baseline
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   publish:
