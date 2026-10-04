@@ -13,11 +13,11 @@
 
 - `.github/workflows/publish-skip-baseline.yml`: `cancel-in-progress: false` ⇐ `cancel-in-progress: true`. سطرٌ واحدٌ لا غيرُه.
 - **السلامةُ:** مسارُ النشرِ يبدأُ بـ`checkout` نظيفٍ وتحقُّقٍ كاملٍ (V1…V7)، وكلُّ كتابةٍ تَحدثُ بعدَ التحقُّقِ. فإلغاءُ تشغيلةٍ منتظرةٍ أو جاريةٍ لا يُترُكُ أثراً: لا فرعَ يُنشَأُ ولا طلبَ دمجٍ يُفتَحُ إلّا بعدَ اجتيازِ الحاجزِ الحاسمِ. وإن أُلغِيَت تشغيلةٌ بعدَ دفعِ فرعٍ، فالفرعُ يتيمٌ لا يَضرُّ، والتشغيلةُ التاليةُ تُنشئُ فرعاً جديداً.
-- `PROJECT_STATUS.md` و`docs/READINESS_REPORT.md`: سطرُ «آخر تحديث» وإعادةُ توليدِ التقرير.
+- `tests/tooling/ci-gates.test.mjs`: اختبارُ انحدارٍ للإعداد. `docs/roadmap/06-debt-register.md`: صفُّ `OPS-1/MAIN-DRIFT-WINDOW` يذكرُ `WL-327`. `PROJECT_STATUS.md`: سطرُ «آخر تحديث» جديدٌ فوقَ ما سبقَه. (‏`npm run readiness:report` شُغِّلَ ولم يتغيّرِ التقرير.)
 
 #### الملفاتُ المتأثّرة
 
-`.github/workflows/publish-skip-baseline.yml` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/READINESS_REPORT.md`
+`.github/workflows/publish-skip-baseline.yml` · `tests/tooling/ci-gates.test.mjs` · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md`
 
 #### الـ commit
 
@@ -26,8 +26,9 @@
 #### الدليلُ
 
 - `grep 'cancel-in-progress' .github/workflows/publish-skip-baseline.yml` ⇒ `cancel-in-progress: true`.
-- `npx tsc --noEmit` ⇒ `0`. `npx eslint .github/workflows/` ⇒ `0`.
-- `npm run guard:skip-baseline` و`npm run guard:doc-counts` و`npm run guard:status-freshness` و`npm run guard:readiness` ⇒ كلُّها `0`. (الحكمُ النهائيُّ لـCI.)
+- `node --test tests/tooling/ci-gates.test.mjs` ⇒ `# tests 11 · # pass 11 · # fail 0` — اختبارُ الانحدارِ الجديدُ «WL-327 — مسارُ النشرِ cancel-in-progress: true» يقرأُ `publish-skip-baseline.yml` بمحلِّلِ YAML ويَرسبُ إن لم تكن المجموعةُ `publish-skip-baseline` و`cancel-in-progress` ‏`true`.
+- `npx tsc --noEmit` ⇒ `0`. (‏`eslint` لا يَفحصُ ملفّاتِ `.github/workflows/` — مُستثناةٌ في إعدادِه — فلا دعوى له هنا.)
+- `npm run guard:work-log-ids` و`guard:status-freshness` و`guard:doc-counts` و`guard:readiness` و`guard:progress` و`guard:skip-baseline` ⇒ كلُّها `0`. (الحكمُ النهائيُّ لـCI.)
 
 #### ما لم يتمَّ ولماذا
 
