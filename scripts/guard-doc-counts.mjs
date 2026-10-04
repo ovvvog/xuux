@@ -376,6 +376,44 @@ const facts = readDocCountFacts(root);
   }
 }
 
+// ── R8: توحيدُ علامةِ الإغلاقِ — أُضيفَ في `WL-330` إغلاقاً للدَّين `DOC-23`.
+//   كلُّ صفٍّ مُغلَقٍ في جداولِ §4 (‏4.1…4.6) يجبُ أن يحملَ في خليّةِ المعرِّفِ: ~~`ID`~~ + 🟢.
+//   والصفُّ المُغلَقُ هو ما يَذكُرُ «مُغلَق» أو «مسدَّد» أو يحملُ 🟢 في أيِّ خليّةٍ. والقاعدةُ تَرفُضُ
+//   ما دونَ ذلك بلا استثناءٍ — فبعضُ الصفوفِ المُغلَقةِ كانَ يُشطَبُ معرِّفُها وحدَه، وبعضُها
+//   يحملُ 🟢 وحدَها، وبعضُها لا علامةَ له.
+{
+  const debtText = readText('docs/roadmap/06-debt-register.md');
+  const debtLines = debtText.split('\n');
+  const tableStart = debtLines.findIndex((l) => l.startsWith('## 4 —'));
+  if (tableStart !== -1) {
+    const tableEnd = debtLines.findIndex((l, i) => i > tableStart && l.startsWith('## 5 —'));
+    const sectionEnd = tableEnd === -1 ? debtLines.length : tableEnd;
+    for (let i = tableStart; i < sectionEnd; i += 1) {
+      const line = debtLines[i] ?? '';
+      if (!line.startsWith('|')) continue;
+      if (line.includes('| ---')) continue;
+      const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
+      if (cells.length < 2) continue;
+      const idCell = cells[0];
+      const fullRow = line;
+      // تحديدُ ما إذا كانَ الصفُّ مُغلَقاً: المعرِّفُ مشطوبٌ بـ~~
+      const isClosed = idCell.includes('~~');
+      if (!isClosed) continue;
+      // تخطّي صفوفِ الترويسةِ والملخصِ
+      if (idCell.startsWith('الديون') || idCell.startsWith('الحدود') || idCell.startsWith('نتائج') || idCell.startsWith('ديون') || idCell.startsWith('المعرِّف')) continue;
+      const hasStrikethrough = idCell.includes('~~');
+      const hasEmoji = idCell.includes('🟢');
+      if (!hasStrikethrough || !hasEmoji) {
+        const idMatch = idCell.match(/`([^`]+)`/);
+        const idName = idMatch ? idMatch[1] : idCell.slice(0, 30);
+        violations.push(
+          `R8/UNMARKED: الصفُّ «${idName}» مُغلَقٌ بلا علامةِ إغلاقٍ موحَّدةٍ (~~ID~~ + 🟢) في خليّةِ المعرِّفِ — سطر ${i + 1}.`,
+        );
+      }
+    }
+  }
+}
+
 if (violations.length > 0) {
   console.error('⛔ حاجزُ عدّاداتِ الوثائق: انحرافٌ عن المصدر.');
   for (const v of violations) {
