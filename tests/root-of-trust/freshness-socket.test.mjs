@@ -174,7 +174,7 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
       cpSync(root, snap, { recursive: true });
 
       const second = await boot(root);
-      second.ledger.begin({ id: 'cmd-1' });
+      await second.ledger.beginAsync({ id: 'cmd-1' });
       await second.ledger.commitSigned({ id: 'cmd-1' }, 'ok');
       second.log.close?.();
 
@@ -226,7 +226,7 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
     const snap = tmp('case3-snap');
     try {
       const first = await boot(root);
-      first.ledger.begin({ id: 'replay-cmd' });
+      await first.ledger.beginAsync({ id: 'replay-cmd' });
       await first.ledger.commitSigned({ id: 'replay-cmd' }, 'ok');
       await first.haltSwitch.haltAsync('halt', royalCommandFor(first.haltSwitch, 'halt', 'halt'));
       first.log.close?.();
@@ -237,7 +237,7 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
       cpSync(root, snap, { recursive: true });
 
       const second = await boot(root);
-      second.ledger.begin({ id: 'cmd-2' });
+      await second.ledger.beginAsync({ id: 'cmd-2' });
       await second.ledger.commitSigned({ id: 'cmd-2' }, 'ok');
       second.log.close?.();
       assert.ok(body(root).freshnessEpoch > firstEpoch);
@@ -270,7 +270,7 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
       cpSync(root, snap, { recursive: true });
 
       const second = await boot(root);
-      second.ledger.begin({ id: 'pre-crash' });
+      await second.ledger.beginAsync({ id: 'pre-crash' });
       await second.ledger.commitSigned({ id: 'pre-crash' }, 'ok');
       second.log.close?.();
       assert.ok(body(root).freshnessEpoch > firstEpoch);
@@ -296,21 +296,21 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
     const root = tmp('case5');
     try {
       const first = await boot(root);
-      first.ledger.begin({ id: 'p1' });
+      await first.ledger.beginAsync({ id: 'p1' });
       await first.ledger.commitSigned({ id: 'p1' }, 'ok');
       first.log.close?.();
       const e1 = body(root).freshnessEpoch;
       assert.ok(e1 >= 1);
 
       const second = await boot(root);
-      second.ledger.begin({ id: 'p2' });
+      await second.ledger.beginAsync({ id: 'p2' });
       await second.ledger.commitSigned({ id: 'p2' }, 'ok');
       second.log.close?.();
       const e2 = body(root).freshnessEpoch;
       assert.ok(e2 > e1, 'العَهْدُ لم يتقدّمْ في الإقلاعِ الثاني');
 
       const third = await boot(root);
-      third.ledger.begin({ id: 'p3' });
+      await third.ledger.beginAsync({ id: 'p3' });
       await third.ledger.commitSigned({ id: 'p3' }, 'ok');
       third.log.close?.();
       const e3 = body(root).freshnessEpoch;
@@ -344,7 +344,7 @@ describe('P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضاد�
     const { boot, body } = rig({ freshnessSocket: socket, production: true, keys });
     try {
       const first = await boot(root);
-      first.ledger.begin({ id: 'r10-cmd' });
+      await first.ledger.beginAsync({ id: 'r10-cmd' });
       await first.ledger.commitSigned({ id: 'r10-cmd' }, 'ok');
       first.log.close?.();
       assert.ok(captured, 'النافذةُ لم تُلتقَطْ');

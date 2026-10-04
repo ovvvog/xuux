@@ -362,7 +362,9 @@ describe('F06: التثبيتُ الإنتاجيُّ موقَّعٌ بمفتاح
     try {
       await runtime.log.appendSealed('royal.command', 'king:test', { a: 1 });
       const store = new FileAnchorStore(join(root, 'anchors.jsonl'));
-      const record = await anchorLogWithHsm(store, runtime.anchorSigner, runtime.log);
+      const record = await runtime.commitBarrier.run('anchor', () =>
+        anchorLogWithHsm(store, runtime.anchorSigner, runtime.log),
+      );
       assert.equal(record.count, 1);
       assert.equal(verifyAnchorChain(store.read(), runtime.anchorSigner).ok, true);
       assert.equal(runtime.anchorSigner.keyId, '06');
@@ -632,7 +634,7 @@ describe('مصنعُ البوابةِ: الدفترُ ومفتاحُ الإيق�
 test('UF-07: محوُ ملفِّ الدفترِ مع شاهدٍ موجبٍ يُرفَضُ لا يُقبَلُ كنشأةٍ', async () => {
   const { runtime, cleanup } = await buildRuntime();
   try {
-    runtime.ledger.begin({ id: 'cmd-uf-07' });
+    await runtime.ledger.beginAsync({ id: 'cmd-uf-07' });
     await runtime.ledger.commitSigned({ id: 'cmd-uf-07' });
     assert.equal(runtime.ledger.has('cmd-uf-07'), true);
     assert.equal(runtime.manifest.read().ledgerCommitted, 1);
@@ -728,10 +730,12 @@ test('UF-01: رفعُ شاهدِ المرساةِ عندَ الإنجازِ يم
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
     // R5-B-02: الشاهدُ الموثوقُ يُحقَنُ لا callbackٌ عامٌّ. الرفعُ يقعُ داخلَ
     // المسارِ نفسِه، والتحقّقُ بعدَهُ يمنعُ مرساةً موقَّعةً بلا شاهدٍ.
-    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
-      force: true,
-      witness: runtime.manifest.anchoredCountFloor(),
-    });
+    const record = await runtime.commitBarrier.run('anchor', () =>
+      maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+        force: true,
+        witness: runtime.manifest.anchoredCountFloor(),
+      }),
+    );
     assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
     assert.equal(runtime.manifest.read().anchoredCount, record.count);
 
@@ -771,10 +775,12 @@ test('UF-01: شاهدُ مراسٍ موجبٌ ومخزنُ المراسي مُز
   try {
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
-    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
-      force: true,
-      witness: runtime.manifest.anchoredCountFloor(),
-    });
+    const record = await runtime.commitBarrier.run('anchor', () =>
+      maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+        force: true,
+        witness: runtime.manifest.anchoredCountFloor(),
+      }),
+    );
     assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
     assert.equal(runtime.manifest.read().anchoredCount > 0, true, 'الشاهدُ لم يرتفعْ');
     runtime.log.close?.();
@@ -806,10 +812,12 @@ test('UF-01: سجلٌّ أقصرُ ممّا تشهدُ به مرساةٌ قائ�
     await runtime.log.appendSealed('test.event', 'king:test', { n: 1 });
     await runtime.log.appendSealed('test.event', 'king:test', { n: 2 });
     const store = new FileAnchorStore(join(root, 'anchors.json'), { fsync: false });
-    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
-      force: true,
-      witness: runtime.manifest.anchoredCountFloor(),
-    });
+    const record = await runtime.commitBarrier.run('anchor', () =>
+      maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+        force: true,
+        witness: runtime.manifest.anchoredCountFloor(),
+      }),
+    );
     assert.ok(record, 'المرساةُ يجبُ أن تُنجَز');
     const logFile = runtime.log.file;
     const headFile = runtime.log.headFile;
@@ -931,10 +939,23 @@ test('R4-K3-02: سطرٌ متّسقُ التجزئةِ لا يرفعُ العد�
 });
 
 test('R4-K3-02: دفترٌ مُصادَقٌ يُقرأُ بلا مفتاحٍ يُرفَضُ تخفيضاً في كلِّ البيئاتِ', async () => {
-  const { runtime, root, cleanup } = await buildRuntime();
+  const { runtime, root, king, cleanup } = await buildRuntime();
   try {
-    // رفعٌ حقيقيٌّ عبرَ المسارِ الإنتاجيِّ: يكتبُ سطراً يحملُ `mac`.
-    runtime.manifest.raise('anchoredCount', 3);
+    // `WL-326`: بعدَ الإقلاعِ لا رفعَ خارجَ حاجزِ الالتزامِ في الجذرِ نفسِه (‏`D6`)...
+    assert.equal(
+      caught(() => runtime.manifest.raise('anchoredCount', 3)).code,
+      'STATE_WRITE_OUTSIDE_BARRIER',
+    );
+    // ...فالسطرُ المُصادَقُ يُكتَبُ بمسارِ دفترِ الرفعِ نفسِه في نسخةِ بيانٍ إنتاجيّةٍ (‏مسارُ
+    // الإقلاع): رفعٌ حقيقيٌّ يكتبُ سطراً يحملُ `mac`.
+    const prodEnv = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) };
+    const writer = new StateManifest(stateManifestPath(root), {
+      fsync: false,
+      sealer: runtime.anchorSigner,
+      env: prodEnv,
+    });
+    await writer.openAsync(stateManifestBinding(runtime.anchorSigner.id, prodEnv));
+    writer.raise('anchoredCount', 3);
     const journalPath = join(root, 'root-of-trust.manifest.journal');
     const written = JSON.parse(readFileSync(journalPath, 'utf8').trim().split('\n')[0]);
     assert.equal(typeof written.mac, 'string', 'السطرُ المكتوبُ يجبُ أن يكونَ مُصادَقاً');
@@ -960,25 +981,23 @@ test('R4-K3-02: دفترٌ مُصادَقٌ يُقرأُ بلا مفتاحٍ ي�
 test('R4-B-03: maybeAnchorLogWithHsm يرفعُ شاهدَ البيانِ عبرَ witness (R5-B-02)', async () => {
   const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
   const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');
-  const { StateManifest, stateManifestPath } =
-    await import('../../src/root-of-trust/state-manifest.mjs');
   const { runtime, root, cleanup } = await buildRuntime();
   try {
     const store = new FileAnchorStore(join(root, 'anchors.jsonl'), { fsync: false });
     // أضفْ وقعةً للسجلِّ قبلَ التثبيتِ — لا يُثبَّتُ سجلٌّ فارغٌ.
     await runtime.log.appendSealed('test.event', runtime.anchorSigner.id, { n: 1 });
-    const manifest = new StateManifest(stateManifestPath(root), {
-      fsync: false,
-      sealer: runtime.anchorSigner,
-    });
+    // `WL-326` (‏`D6`): الشاهدُ شاهدُ الجذرِ نفسِه — لا نسخةَ بيانٍ ثانيةً تكتبُ دفترَ الرفع.
+    const manifest = runtime.manifest;
     // البيانُ أُنشئَ بالفعلِ في `buildRuntime` — نقرأُهُ فقط.
     const witnessed = manifest.read().anchoredCount;
     assert.equal(witnessed, 0, 'قبلَ التثبيت: صفرٌ');
     // R5-B-02: الشاهدُ الموثوقُ يُحقَنُ لا callbackٌ عامٌّ.
-    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
-      force: true,
-      witness: manifest.anchoredCountFloor(),
-    });
+    const record = await runtime.commitBarrier.run('anchor', () =>
+      maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+        force: true,
+        witness: manifest.anchoredCountFloor(),
+      }),
+    );
     assert.notEqual(record, null, 'التثبيتُ وقع');
     assert.equal(
       manifest.read().anchoredCount,
@@ -1020,7 +1039,10 @@ describe('المصنعُ الإنتاجيُّ يُسلِّمُ مخزنَ سحب
       const ca = new CertificateAuthority(kingId, { revocationStore: store });
       const cert = ca.issue('agent:x', 'minister', ['read']);
       assert.equal(ca.isValid(cert), true, 'قبل السحب: مقبولة');
-      const result = ca.revoke(cert.id, 'compromised');
+      // `WL-326`: السحبُ كتابةُ حالةٍ — عبرَ حاجزِ الالتزامِ وحدَه في الجذرِ الإنتاجيّ.
+      const result = await runtime.commitBarrier.run('revoke', () =>
+        ca.revoke(cert.id, 'compromised'),
+      );
       assert.equal(result.persisted, true, 'السحب كُتب في المخزن');
       assert.equal(ca.isValid(cert), false, 'بعد السحب: مرفوضة');
 
@@ -1083,9 +1105,10 @@ describe('WL-165: مصرفُ شاهدِ المرساةِ شرطٌ، ودفترُ
       // لكُتِبَ سطرٌ غيرُ صاعدٍ بعدَ سطرِ الأداةِ، فيُرفَضُ الدفترُ عندَ الإقلاعِ
       // التالي — منعُ خدمةٍ بذاتِها. والقراءةُ من القرصِ داخلَ القفلِ تجعلُه
       // لا عملاً بلا ضررٍ.
-      runtime.raiseAnchorWitness(7);
+      // `WL-326`: رفعُ الخدمةِ داخلَ حاجزِ الالتزامِ يُختَمُ في الترقيةِ بعدَ طيِّ ما على القرص.
+      await runtime.commitBarrier.run('anchor', () => runtime.raiseAnchorWitness(7));
       assert.equal(runtime.manifest.read().anchoredCount, 9, 'الحدُّ من القرصِ لا من الذاكرةِ');
-      runtime.raiseAnchorWitness(11);
+      await runtime.commitBarrier.run('anchor', () => runtime.raiseAnchorWitness(11));
       // ثالثةٌ نظيفةُ الذاكرةِ تُطوي الدفترَ: لو انقطعتِ السلسلةُ لرُفِعَ رمزٌ.
       const reader = new StateManifest(stateManifestPath(root), {
         fsync: false,
@@ -1101,16 +1124,25 @@ describe('WL-165: مصرفُ شاهدِ المرساةِ شرطٌ، ودفترُ
   });
 
   test('قفلٌ لعمليةٍ حيّةٍ أخرى يمنعُ الرفعَ رفضاً مغلقاً برمزِه', async () => {
-    const { runtime, cleanup } = await buildRuntime();
+    const { runtime, root, king, cleanup } = await buildRuntime();
     try {
+      // `WL-326`: الرفعُ خارجَ الحاجزِ في الجذرِ ممنوعٌ أصلاً؛ وقفلُ الدفترِ يُقاسُ على مسارِ
+      // دفترِ الرفعِ نفسِه (‏نسخةُ بيانٍ إنتاجيّةٌ)، وعلى ختمِ الحاجزِ الذي يأخذُ القفلَ نفسَه.
+      const env = { ...PRODUCTION_ENV, XUUX_KING_ID: kingIdOf(king) };
+      const writer = new StateManifest(stateManifestPath(root), {
+        fsync: false,
+        sealer: runtime.anchorSigner,
+        env,
+      });
+      await writer.openAsync(stateManifestBinding(runtime.anchorSigner.id, env));
       // العمليةُ 1 حيّةٌ في كلِّ نظامٍ يعملُ عليه هذا الاختبارُ، وليست هذه العمليةَ.
       writeFileSync(runtime.manifest.journalLockFile, JSON.stringify({ pid: 1, at: 'x' }));
-      const error = caught(() => runtime.raiseAnchorWitness(3));
+      const error = caught(() => writer.raise('anchoredCount', 3));
       assert.equal(error.code, 'STATE_MANIFEST_JOURNAL_LOCKED', 'رفضٌ مغلقٌ لا كتابةٌ متوازيةٌ');
       assert.equal(runtime.manifest.read().anchoredCount, 0, 'ولا شاهدَ ارتفعَ');
       rmSync(runtime.manifest.journalLockFile, { force: true });
-      runtime.raiseAnchorWitness(3);
-      assert.equal(runtime.manifest.read().anchoredCount, 3, 'وبزوالِ القفلِ يقعُ الرفعُ');
+      writer.raise('anchoredCount', 3);
+      assert.equal(writer.read().anchoredCount, 3, 'وبزوالِ القفلِ يقعُ الرفعُ');
     } finally {
       cleanup();
     }
@@ -1124,7 +1156,8 @@ describe('WL-165: مصرفُ شاهدِ المرساةِ شرطٌ، ودفترُ
         runtime.manifest.journalLockFile,
         JSON.stringify({ pid: 4194305, at: 'stale' }),
       );
-      runtime.raiseAnchorWitness(5);
+      // `WL-326`: الرفعُ عبرَ الحاجز؛ ختمُ الترقيةِ يأخذُ قفلَ الدفترِ نفسَه فينتزعُ الميت.
+      await runtime.commitBarrier.run('anchor', () => runtime.raiseAnchorWitness(5));
       assert.equal(runtime.manifest.read().anchoredCount, 5, 'قفلٌ ميتٌ لا يُعطِّلُ جذرَ الثقةِ');
       assert.equal(existsSync(runtime.manifest.journalLockFile), false, 'والقفلُ فُكَّ بعدَه');
     } finally {
@@ -1138,23 +1171,21 @@ describe('WL-165: مصرفُ شاهدِ المرساةِ شرطٌ، ودفترُ
 test('R5-B-02: witness موثوقٌ يرفعُ ويُتحقَّقُ، وonAnchor شكليٌّ لا يكفي', async () => {
   const { maybeAnchorLogWithHsm } = await import('../../src/root-of-trust/production-runtime.mjs');
   const { FileAnchorStore } = await import('../../src/root-of-trust/anchor.mjs');
-  const { StateManifest, stateManifestPath } =
-    await import('../../src/root-of-trust/state-manifest.mjs');
   const { runtime, root, cleanup } = await buildRuntime();
   try {
     await runtime.log.appendSealed('test.event', runtime.anchorSigner.id, { n: 1 });
     const store = new FileAnchorStore(join(root, 'anchors-r5b02.jsonl'), { fsync: false });
-    const manifest = new StateManifest(stateManifestPath(root), {
-      fsync: false,
-      sealer: runtime.anchorSigner,
-    });
+    // `WL-326` (‏`D6`): الشاهدُ شاهدُ الجذرِ نفسِه — لا نسخةَ بيانٍ ثانيةً تكتبُ دفترَ الرفع.
+    const manifest = runtime.manifest;
     const witnessed = manifest.read().anchoredCount;
     assert.equal(witnessed, 0, 'قبلَ التثبيت: صفرٌ');
     // الشاهدُ الموثوقُ يُرفَعُ ويُتحقَّقُ منه بعدَ التوقيع.
-    const record = await maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
-      force: true,
-      witness: manifest.anchoredCountFloor(),
-    });
+    const record = await runtime.commitBarrier.run('anchor', () =>
+      maybeAnchorLogWithHsm(store, runtime.anchorSigner, runtime.log, {
+        force: true,
+        witness: manifest.anchoredCountFloor(),
+      }),
+    );
     assert.ok(record, 'التثبيتُ وقع');
     assert.equal(
       manifest.read().anchoredCount,
@@ -1179,7 +1210,7 @@ test('R5-A-01: ledgerCommittedFromSealedLog يقرأُ أعلى عدٍّ من ا
     const before = await ledgerCommittedFromSealedLog(runtime.log);
     assert.equal(before, 0, 'قبلَ أيِّ التزامٍ: صفرٌ');
     // بعدَ التزامٍ موقَّعٍ: يُكتبُ واقعةٌ مختومةٌ في السجلِّ.
-    runtime.ledger.begin({ id: 'cmd:r5a01-test' });
+    await runtime.ledger.beginAsync({ id: 'cmd:r5a01-test' });
     await runtime.ledger.commitSigned({ id: 'cmd:r5a01-test' });
     const after = await ledgerCommittedFromSealedLog(runtime.log);
     assert.equal(after, 1, 'بعدَ التزامٍ واحدٍ: واحدٌ');

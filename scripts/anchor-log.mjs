@@ -26,13 +26,15 @@ import {
   FileAnchorStore,
   LogAnchorer,
   StateManifest,
+  anchorIntentSigningBody,
+  awaitRootIntentResult,
+  newRootIntentId,
+  submitRootIntent,
   inspectEventLog,
   isProductionRuntime,
   kingKeyProviderFromEnv,
   loadKingKeySet,
-  maybeAnchorLogWithHsm,
   openProductionSigners,
-  stateManifestBinding,
   stateManifestPath,
   verifyAnchoredLog,
 } from '../src/root-of-trust/index.mjs';
@@ -48,7 +50,9 @@ const USAGE = `الاستعمال:
   ANCHOR_STORE_FILE         ملف التثبيتات المنفصل (إلزامي)
   ANCHOR_INTERVAL_MINUTES   الفترة بين تثبيتين بالدقائق (افتراضها 60)
   XUUX_STATE_ROOT           جذر الحالة — إلزامي للتثبيت في الإنتاج: المرساة
-                            الموقَّعة ترفع شاهد البيان المختوم (WL-165)
+                            الموقَّعة ترفع شاهد البيان المختوم (WL-165). وفي الإنتاج
+                            الأداةُ تُودِعُ قصدَ تثبيتٍ موقَّعاً بـ06 في صندوقِ عمليةِ
+                            الجذرِ ولا تكتبُ الحالة (D6، WL-326) [--timeout-ms N]
   مخزن المفاتيح:            KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER
                             (في الإنتاج: لا مخزنَ برمجيّاً — التوقيع داخل التوكن عبر
                              XUUX_PKCS11_MODULE/TOKEN وXUUX_PKCS11_PIN أو PIN_FILE)`;
@@ -56,15 +60,21 @@ const USAGE = `الاستعمال:
 /**
  * يفكّ وسائط سطر الأوامر إلى أمرٍ وخيارات.
  * @param {string[]} argv - الوسائط بعد اسم السكربت
- * @returns {{ command: string, json: boolean, force: boolean }}
+ * @returns {{ command: string, json: boolean, force: boolean, timeoutMs: number }}
  */
 export function parseArgs(argv) {
-  const parsed = { command: argv[0] ?? 'status', json: false, force: false };
+  const parsed = { command: argv[0] ?? 'status', json: false, force: false, timeoutMs: 30_000 };
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--json') parsed.json = true;
     else if (argument === '--force') parsed.force = true;
-    else throw new Error(`وسيط غير معروف: ${argument}`);
+    else if (argument === '--timeout-ms') {
+      const value = Number(argv[index + 1]);
+      if (!Number.isSafeInteger(value) || value <= 0)
+        throw new Error('--timeout-ms بلا قيمة صحيحة');
+      parsed.timeoutMs = value;
+      index += 1;
+    } else throw new Error(`وسيط غير معروف: ${argument}`);
   }
   return parsed;
 }
@@ -108,7 +118,7 @@ export function formatVerification(result) {
  * المسارُ الإنتاجيُّ: نفسُ الأوامرِ الثلاثةِ بتوقيعِ F06 داخلَ التوكن. جلسةُ
  * التوكنِ تُغلقُ دائماً في `finally`: أداةٌ دوريةٌ تتركُ جلسةً مفتوحةً بعدَ كلِّ
  * تشغيلٍ تُنهِكُ التوكنَ وتُبقي دخولاً لا حاجةَ إليه.
- * @param {{command: string, json: boolean, force: boolean}} args - الأمرُ وخياراته
+ * @param {{command: string, json: boolean, force: boolean, timeoutMs?: number}} args - الأمرُ وخياراته
  * @param {{logFile: string, storeFile: string, intervalMs: number}} config - إعدادُ البيئة
  * @param {NodeJS.ProcessEnv} env - البيئة
  * @param {import('../src/root-of-trust/index.mjs').ProductionRuntimeDeps} deps - حقنُ مصدرِ المفاتيحِ للاختبار
@@ -157,11 +167,11 @@ async function runOnHsm(args, config, env, deps) {
 
     if (args.command === 'anchor') {
       if (inspection.problem) throw new Error(`لا يُثبَّت سجل معطوب: ${inspection.problem}`);
-      // WL-165 (`R4-B-03`/`M11.04-F05`): كانت الأداة تُوقِّع مرساةً ولا ترفع
-      // شاهدَ البيان المختوم، فتبقى مرساةٌ موقَّعةٌ لا أثرَ لها في الخاتَم —
-      // وهذا نصُّ النتيجة المفتوحة. والإصلاحُ لا يُنشئ مصدرَ حقيقةٍ ثانياً:
-      // الأداة ترفع في البيان نفسِه داخلَ قفل دفتر الرفع، فالكاتبُ يبقى واحداً
-      // في اللحظة. وغيابُ جذر الحالة رفضٌ مغلق: لا تثبيتَ بلا شاهد.
+      // `D6` (‏`WL-326`): الأداةُ ليست كاتباً للحالة. كانت ترفعُ شاهدَ البيانِ وتكتبُ مخزنَ
+      // المراسي من عمليتِها (‏كاتبٌ ثانٍ — `WL-165` جعلَه «واحداً في اللحظة» بالقفلِ لا واحداً).
+      // الآن تُودِعُ قصدَ تثبيتٍ موقَّعاً بمفتاحِ المرساةِ (‏`06`) في صندوقِ الجذر، فيُثبِّتُ
+      // الكاتبُ الواحدُ عبرَ الحاجزِ ويرفعُ الشاهدَ في المعاملةِ نفسِها. وغيابُ جذرِ الحالةِ
+      // رفضٌ مغلق: لا تثبيتَ بلا شاهد.
       const root = env['XUUX_STATE_ROOT'];
       if (!root) {
         throw new Error(
@@ -169,21 +179,24 @@ async function runOnHsm(args, config, env, deps) {
             'المرساة الموقَّعة يجب أن ترفع شاهد البيان المختوم، ولا تثبيتَ بلا ذلك',
         );
       }
-      const manifest = new StateManifest(stateManifestPath(root), { sealer: signer, env });
-      if (!manifest.exists()) {
+      if (!new StateManifest(stateManifestPath(root), { sealer: signer, env }).exists()) {
         throw new Error(`ANCHOR_WITNESS_STATE_ROOT_MISSING: ${stateManifestPath(root)}`);
       }
-      // التحقّقُ من الخاتَم والرِباط واستخراجُ مفتاح مصادقة دفتر الرفع قبل أي
-      // رفعٍ — الأداةُ لا تكتب في بيانٍ لم تتحقّق منه.
-      await manifest.openAsync(stateManifestBinding(signer.id, env));
-      const record = await maybeAnchorLogWithHsm(store, signer, log, {
-        intervalMs: config.intervalMs,
-        force: args.force,
-        witness: manifest.anchoredCountFloor(),
-      });
-      // الرفعُ يُطوى في متنٍ مختومٍ الآن لا في الإقلاع التالي، فلا يبقى شاهدٌ
-      // خارجَ الخاتَم بين تشغيل الأداة وإقلاع الخدمة.
-      if (record !== null) await manifest.checkpointAsync();
+      const id = newRootIntentId();
+      const at = new Date().toISOString();
+      const signature = await signer.signAsync(
+        anchorIntentSigningBody({ id, at, force: args.force }),
+      );
+      submitRootIntent(root, 'anchor', { force: args.force, signature }, { id, at });
+      const outcome = await awaitRootIntentResult(
+        root,
+        id,
+        args.timeoutMs === undefined ? {} : { timeoutMs: args.timeoutMs },
+      );
+      if (!outcome.ok) throw new Error(`${outcome.code}: ${outcome.detail ?? ''}`);
+      const record = /** @type {import('../src/root-of-trust/anchor.mjs').AnchorRecord | null} */ (
+        outcome.result ?? null
+      );
       if (record === null) {
         const message = 'لم يقع تثبيت: الفترة لم تنقضِ أو لا جديد. استعمل --force للتثبيت الآن.';
         return args.json

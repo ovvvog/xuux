@@ -60,6 +60,7 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  * @property {InstanceType<typeof ExecutionKernel>} kernel
  * @property {import('../root-of-trust/persistent-log.mjs').PersistentEventLog} auditLog
  * @property {() => Promise<void>} close
+ * @property {unknown} intentDrainError آخرُ خطأٍ في تفريغِ صندوقِ القصود (‏`WL-326`)
  */
 
 /**
@@ -125,6 +126,8 @@ export async function createProductionSystem(env, options, deps = {}) {
   // 5. سلطةُ التصديقِ من جذرِ الثقةِ — مخزنُ سحبٍ دائمٌ لا ذاكرةٌ.
   const authority = new CertificateAuthority(kingIdentity, {
     revocationStore: rootOfTrust.revocationStore,
+    // `D6` (‏`WL-326`): السحبُ كتابةُ حالةٍ في الجذر — عبرَ الكاتبِ الواحدِ وحاجزِه.
+    commitBarrier: rootOfTrust.commitBarrier,
     env,
     // `WL-303`: الإصدارُ عبرَ التوكنِ — لا مفتاحَ خاصَّ في الذاكرة.
     signer: rootOfTrust.anchorSigner,
@@ -226,16 +229,38 @@ export async function createProductionSystem(env, options, deps = {}) {
     env,
   });
 
+  // 10. `D6` (‏`WL-326`): صندوقُ القصودِ — عمليةُ الجذرِ هي الكاتبُ الإنتاجيُّ الواحد، وأداةُ
+  //     الإيقافِ وأداةُ التثبيتِ والعقدُ تُودِعُ قصوداً مُصادَقةً يُطبِّقُها هنا عبرَ الحاجز.
+  //     فشلُ التفريغِ لا يُبتلَعُ صامتاً: يُحفَظُ آخرُه ويُقرأُ (‏والحاجزُ المعطوبُ يرفضُ كلَّ
+  //     كتابةٍ تاليةٍ مغلقاً).
+  /** @type {unknown} */
+  let intentDrainError = null;
+  const drainIntents = () =>
+    rootOfTrust.drainIntentsAsync().then(
+      () => undefined,
+      (error) => {
+        intentDrainError = error;
+      },
+    );
+  await drainIntents();
+  const intentTimer = setInterval(drainIntents, 250);
+  intentTimer.unref?.();
+
   return {
     rootOfTrust,
     chain,
     crown,
     kernel,
     auditLog: rootOfTrust.log,
+    get intentDrainError() {
+      return intentDrainError;
+    },
     close: async () => {
       if (attestationRenewalTimer !== null) {
         clearInterval(attestationRenewalTimer);
       }
+      clearInterval(intentTimer);
+      await drainIntents();
       // `R6-A-05` (‏`WL-305`): ما أُدرِجَ في طابورِ الختمِ يُختَمُ قبلَ الإغلاق — كانَ الإغلاقُ
       // يُسقِطُ قيداً مُدرَجاً لم يُختَمْ (‏مثلاً `quarantine.isolated`) فيُطلَقُ المحجورُ بالإقلاعِ
       // التالي. وفشلُ الختمِ يُرفَعُ بعدَ إغلاقِ الجذرِ لا يُبتلَع.

@@ -364,8 +364,31 @@ export class CrownGateway {
   async commandAsync(command: RoyalCommand, signature: string): Promise<AcceptedRoyalCommand> {
     const accepted = this.precheck(command, signature);
     const ledger = this.commandLedger;
+    // `D3` (‏`WL-326`): الحجزُ وختمُ القبولِ والتثبيتُ معاملةٌ واحدةٌ عبرَ حاجزِ الالتزامِ إن
+    // رُكِّب — فلا يُرجَعُ قبولٌ قبلَ أن يدومَ الثلاثةُ ويتقدّمَ المرجعُ فوقَها.
+    const transact = ledger?.transactAsync?.bind(ledger);
+    if (transact !== undefined) {
+      // سجلٌّ مُرتَّبٌ (‏`sealedAudit`) يُفرَّغُ قبلَ المعاملة: ما أُدرِجَ قبلَها يُختَمُ قبلَها،
+      // وداخلَها يُكتَبُ القبولُ على السجلِّ المختومِ نفسِه لا خلفَ ذيلِ الطابور — وإلّا انتظرَ
+      // ذيلٌ ينتظرُ الحاجزَ معاملةً تمسكُه (‏قفلٌ ميّتٌ مقيسٌ في `WL-326`).
+      const ordered = this.log as unknown as { flush?: () => Promise<void>; sealed?: unknown };
+      if (typeof ordered.flush === 'function') await ordered.flush();
+      return transact('crown.command', () =>
+        this.#commandBody(command, accepted, ordered.sealed ?? null),
+      );
+    }
+    return this.#commandBody(command, accepted);
+  }
+
+  /** جسمُ `commandAsync` بعدَ الفحوص. */
+  async #commandBody(
+    command: RoyalCommand,
+    accepted: AcceptedRoyalCommand,
+    raw: unknown = null,
+  ): Promise<AcceptedRoyalCommand> {
+    const ledger = this.commandLedger;
     const signedLedger = ledger !== null && ledger.signed;
-    const sealed = this.log as unknown as {
+    const sealed = (raw ?? this.log) as unknown as {
       appendSealed?: (type: string, actor: string, data: object) => Promise<unknown>;
     };
     if (ledger) ledger.begin(command);

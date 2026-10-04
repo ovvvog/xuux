@@ -212,7 +212,7 @@ describe('`M11.04-F07`: لا رجوعَ من الحَجزِ باسترجاعِ �
       // أمرٌ يُثبَّتُ ثمَّ نقطةُ ضبطٍ: اللقطةُ تُلقَطُ **بعدَ** آخرِ تثبيتٍ، فلا
       // يُخالِفُها الدفترُ فيُكشَفَ الاسترجاعُ بفحصٍ آخرَ (‏`LEDGER_AHEAD_OF_WITNESS`)
       // ويُقاسَ ضمانٌ لم يُبنَ بعد.
-      first.runtime.ledger.begin({ id: 'cmd-p14' });
+      await first.runtime.ledger.beginAsync({ id: 'cmd-p14' });
       await first.runtime.ledger.commitSigned({ id: 'cmd-p14' });
       await first.runtime.manifest.checkpointAsync();
       const olderManifest = readFileSync(paths.manifest);

@@ -53,12 +53,30 @@ import {
 } from './state-manifest.mjs';
 import { FileRevocationStore } from './identity.mjs';
 import type { RevocationStore } from './identity.mjs';
-import type { FreshnessSocket } from './freshness-socket.mjs';
+import type { FreshnessSocket, StateBoundFreshnessSocket } from './freshness-socket.mjs';
 import {
+  FRESHNESS_GENESIS_ANCHOR,
   isNullFreshnessSocket,
+  isStateBoundFreshnessSocket,
   STALE_MANIFEST_EPOCH,
   FRESHNESS_SOURCE_UNAVAILABLE,
 } from './freshness-socket.mjs';
+import {
+  CommitCoordinator,
+  computeStateDigest,
+  inCommitTransaction,
+  releaseCommitBarriersFor,
+  stateAnchor,
+  type StateLayout,
+} from './commit-barrier.mjs';
+import {
+  HALT_ACKS_SUFFIX,
+  HALT_EPOCH_SUFFIX,
+  HALT_HISTORY_SUFFIX,
+  HALT_NODES_SUFFIX,
+} from './halt-switch.mjs';
+import { LEDGER_CLAIMS_SUFFIX } from './command-ledger.mjs';
+import { RootIntentProcessor, type IntentHaltSwitch } from './root-intents.mjs';
 import {
   createRoyalCommandVerifier,
   royalKeyFingerprint,
@@ -100,6 +118,11 @@ export const ProductionRuntimeErrorCodes = [
   'FRESHNESS_EPOCH_REGRESSION',
   // `WL-302`: مُحقِّقُ أمرٍ ملكيٍّ محقونٌ ليس مبنيّاً على مفتاحِ الملكِ في التوكن.
   'ROYAL_COMMAND_VERIFIER_UNTRUSTED',
+  // `LIVE-28` (‏`WL-326`، الوضعُ المربوطُ بالحالة): رموزُ الإقلاعِ المسمّاة (‏§5).
+  'FRESHNESS_SOURCE_UNAVAILABLE',
+  'FRESHNESS_SAME_EPOCH_FORK',
+  'FRESHNESS_STATE_DIGEST_MISMATCH',
+  'FRESHNESS_BINDING_UNDECLARED',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -173,7 +196,7 @@ export interface ProductionRuntimeOptions {
    * لا يُدَّعى منعُ rollback حتى يصبحَ مصدرُ الحداثةِ الحقيقيُّ موصولاً.
    * اختيارُ الـbackend للمالك — راجع `docs/external-review/options/`.
    */
-  freshnessSocket?: FreshnessSocket | null;
+  freshnessSocket?: FreshnessSocket | StateBoundFreshnessSocket | null;
 }
 
 /** التركيبُ الإنتاجيُّ كما يُسلَّمُ للمستهلك. */
@@ -206,8 +229,220 @@ export interface ProductionRootOfTrust {
    * الإنتاجِ كي يدومَ السحبُ عبرَ إعادةِ التشغيل.
    */
   revocationStore: RevocationStore;
-  /** يُغلقُ جلسةَ التوكن. */
+  /**
+   * `D6`/`D3` (‏`WL-326`): حاجزُ الالتزامِ — الكاتبُ الإنتاجيُّ الواحد. كلُّ تغييرٍ في
+   * الحالةِ يمرُّ عبرَ `run()`، ولا يُرجَعُ نجاحٌ قبلَ الدوامِ والترقية.
+   */
+  commitBarrier: CommitCoordinator;
+  /**
+   * سحبُ شهادةٍ عبرَ الحاجز — المسارُ الإنتاجيُّ لـ`revocationStore.revoke`.
+   * @returns هل كُتِبَ السحب
+   */
+  revokeAsync(certificateId: string, revokedBy: string, reason: string): Promise<boolean>;
+  /** تثبيتُ السجلِّ عبرَ الحاجز — المسارُ الإنتاجيُّ لـ`maybeAnchorLogWithHsm`. */
+  anchorAsync(options?: {
+    force?: boolean;
+    intervalMs?: number;
+    at?: Date;
+  }): Promise<AnchorRecord | null>;
+  /**
+   * `D6`: يُطبِّقُ قصودَ العملياتِ الأخرى المُودَعةَ في صندوقِ الجذرِ (‏`root-intents.mts`)
+   * عبرَ الحاجز — فلا كاتبَ ثانياً لـ`nodes/` و`acks/` ومخزنِ المراسي.
+   * @returns عددُ القصودِ المُعالَجة
+   */
+  drainIntentsAsync(): Promise<number>;
+  /**
+   * حكمُ الإقلاعِ في الوضعِ المربوطِ بالحالة (‏`B1`/`B2`/`B3`/`B10`)، أو `null` في الوضعِ
+   * القديمِ (‏`bump`). للتدقيقِ وإعادةِ القياس.
+   */
+  freshnessBoot: 'B1' | 'B2' | 'B3' | 'B10' | null;
+  /** يُغلقُ الحاجزَ والسجلَّ وجلسةَ التوكن. */
   close(): Promise<void>;
+}
+
+/** قصدُ الربطِ الأوّلِ بالمرجعِ المربوطِ بالحالة (‏`B10`). */
+const FRESHNESS_BIND_INTENT = 'freshness.bind';
+
+/** إعلانُ ربطِ جذرٍ قائمٍ بمرجعٍ مربوطٍ لأوّلِ مرّة — إعلانٌ لا استنباط (‏كإذنِ التهيئة). */
+export const FRESHNESS_BIND_DECLARED_ENV = 'XUUX_FRESHNESS_BIND_DECLARED';
+
+/**
+ * مكوّناتُ بصمةِ الحالة `V` (‏§2 من التصميم بعدَ تصحيحِ افتراضِ `WL-325` الرابع): السجلُّ
+ * والدفترُ وحجوزاتُه والإيقافُ بعهدِه وتاريخِه وعُقدِه وإقراراتِه (‏`P8`/`P9` **داخلَ**
+ * البصمة) والتثبيتاتُ والسحب. ومستثنى: البيانُ ودفترُه (‏آليّةُ الختمِ نفسُها)، والأقفالُ،
+ * ورأسُ السجلِّ (‏مشتقٌّ يُعادُ بناؤه، ويُسترجَعُ معَ السجلّ)، وصندوقُ القصود، و`clock-state.json`
+ * (‏`P13`: أرضيّةُ وقتٍ لا حالةٌ تُقَرّ — مُعلَنٌ في الدَّين).
+ * @param root - جذرُ الحالة
+ * @param anchorFile - مخزنُ التثبيتات
+ * @returns المكوّنات
+ */
+export function productionStateLayout(root: string, anchorFile: string): StateLayout {
+  const halt = join(root, 'halt', 'directive.json');
+  const ledger = join(root, 'commands.ledger');
+  return {
+    files: [
+      join(root, 'events.log'),
+      ledger,
+      halt,
+      halt + HALT_EPOCH_SUFFIX,
+      halt + HALT_HISTORY_SUFFIX,
+      anchorFile,
+      join(root, 'revoked.jsonl'),
+    ],
+    dirs: [ledger + LEDGER_CLAIMS_SUFFIX, halt + HALT_NODES_SUFFIX, halt + HALT_ACKS_SUFFIX],
+  };
+}
+
+/**
+ * حكمُ الإقلاعِ في الوضعِ المربوطِ بالحالة (‏§5: `B0`–`B10`). يقعُ **قبلَ** فتحِ السجلِّ
+ * والدفتر: الاسترجاعُ يقصُّ ما كُتِبَ بعدَ آخرِ ترقية، فلا يُقرأُ شيءٌ قبلَه.
+ * @param manifest - البيانُ المفتوح
+ * @param socket - المرجع
+ * @param coordinator - الحاجزُ (‏للربطِ الأوّل)
+ * @param context - الجذرُ والمزامنةُ والتهيئةُ والبيئة
+ * @returns ما وقع — للتدقيق
+ */
+export async function decideStateBoundBoot(
+  manifest: StateManifest,
+  socket: StateBoundFreshnessSocket,
+  coordinator: CommitCoordinator,
+  context: {
+    root: string;
+    fsync: boolean;
+    provisioning: boolean;
+    env: NodeJS.ProcessEnv;
+    layout: StateLayout;
+  },
+): Promise<'B1' | 'B2' | 'B3' | 'B10'> {
+  let reference: { epoch: bigint; anchor: string };
+  try {
+    reference = await socket.read();
+  } catch {
+    // B0
+    throw new ProductionRuntimeError('FRESHNESS_SOURCE_UNAVAILABLE', 'تعذّرت قراءةُ المرجع');
+  }
+  const body = manifest.read();
+  const staged = body.staged ?? null;
+  if (staged !== null) {
+    const fromEpoch = BigInt(staged.fromEpoch);
+    if (reference.epoch === fromEpoch && reference.anchor === staged.fromAnchor) {
+      // B2: المرجعُ لم يتقدّمْ فوقَ المعاملة ⇒ لم يُقَرَّ بها ⇒ استرجاعٌ دقيق.
+      await CommitCoordinator.rollbackStagedAsync(
+        context.root,
+        manifest,
+        staged.txn,
+        context.fsync,
+      );
+      if (staged.intent === FRESHNESS_BIND_INTENT) {
+        // ربطٌ أوّلُ انقطعَ قبلَ الانتقال: الترحيلُ المختومُ نفسُه هو الإعلان. الحكمُ `B2`
+        // (‏استرجاعٌ دقيقٌ إلى ما قبلَ الربط) ثمَّ يُعادُ الربطُ فوقَ الحالةِ نفسِها.
+        await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+        return 'B2';
+      }
+      assertDigestMatches(manifest.read(), context.layout);
+      return 'B2';
+    }
+    if (reference.epoch === fromEpoch) {
+      throw new ProductionRuntimeError(
+        'FRESHNESS_SAME_EPOCH_FORK',
+        `المرجعُ في العهدِ ${String(fromEpoch)} بمرساةٍ غيرِ مرساةِ الترحيل`,
+      );
+    }
+    if (reference.epoch === fromEpoch + 1n) {
+      const digest = computeStateDigest(context.layout);
+      const anchor = stateAnchor(body.instanceId, Number(reference.epoch), digest);
+      if (anchor === reference.anchor) {
+        // B3: المرجعُ تقدّمَ فوقَ عينِ هذه الحالة ⇒ تُرقّى.
+        await manifest.promoteAsync({ epoch: Number(reference.epoch), anchor, digest });
+        return 'B3';
+      }
+      // B4: المرجعُ تقدّمَ فوقَ حالةٍ غيرِ التي على القرص.
+      throw new ProductionRuntimeError(
+        'FRESHNESS_SAME_EPOCH_FORK',
+        `المرجعُ في ${String(reference.epoch)} يشهدُ على حالةٍ غيرِ التي على القرص`,
+      );
+    }
+    if (reference.epoch > fromEpoch + 1n) {
+      throw new ProductionRuntimeError(
+        STALE_MANIFEST_EPOCH,
+        `المرجعُ ${String(reference.epoch)} أحدثُ من الترحيلِ ${String(fromEpoch)}`,
+      );
+    }
+    throw new ProductionRuntimeError(
+      'FRESHNESS_EPOCH_REGRESSION',
+      `الترحيلُ من ${String(fromEpoch)} والمرجعُ ${String(reference.epoch)}`,
+    );
+  }
+  const manifestEpoch = BigInt(body.freshnessEpoch);
+  if (body.freshnessAnchor === undefined || body.stateDigest === undefined) {
+    // B10: لم يُربَطْ بعد. الربطُ الأوّلُ **مُعلَنٌ** لا مُستنبَط: تهيئةٌ جديدةٌ، أو إعلانٌ صريح.
+    const declared = context.provisioning || context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+    // والمرجعُ في النشأةِ وحدَها: مرجعٌ تقدّمَ لا يُربَطُ به جذرٌ غيرُ مربوط. وعهدُ البيانِ
+    // القديمُ (‏مقبسُ `bump`) لا يُشترَطُ صفراً عندَ الإعلان: المرجعُ المربوطُ سلسلةٌ جديدة،
+    // ولقطةٌ قديمةٌ غيرُ مربوطةٍ بعدَ الربطِ تُرَدُّ هنا نفسِه (‏المرجعُ لم يعُدْ في النشأة).
+    if (
+      (manifestEpoch === 0n || declared) &&
+      reference.epoch === 0n &&
+      reference.anchor === FRESHNESS_GENESIS_ANCHOR &&
+      declared
+    ) {
+      await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+      return 'B10';
+    }
+    if (reference.epoch > manifestEpoch) {
+      throw new ProductionRuntimeError(
+        STALE_MANIFEST_EPOCH,
+        `المرجعُ ${String(reference.epoch)} والبيانُ غيرُ مربوطٍ في ${String(manifestEpoch)}`,
+      );
+    }
+    throw new ProductionRuntimeError(
+      'FRESHNESS_BINDING_UNDECLARED',
+      `${FRESHNESS_BIND_DECLARED_ENV}=1 مطلوبٌ لربطِ جذرٍ قائم`,
+    );
+  }
+  if (reference.epoch > manifestEpoch) {
+    // B5
+    throw new ProductionRuntimeError(
+      STALE_MANIFEST_EPOCH,
+      `المرجعُ ${String(reference.epoch)} أحدثُ من البيانِ ${String(manifestEpoch)}`,
+    );
+  }
+  if (manifestEpoch > reference.epoch) {
+    // B7
+    throw new ProductionRuntimeError(
+      'FRESHNESS_EPOCH_REGRESSION',
+      `البيانُ ${String(manifestEpoch)} أحدثُ من المرجعِ ${String(reference.epoch)}`,
+    );
+  }
+  if (reference.anchor !== body.freshnessAnchor) {
+    // B6: العهدُ نفسُه ومرساةٌ أخرى — لقطةٌ من فرعٍ آخر.
+    throw new ProductionRuntimeError(
+      'FRESHNESS_SAME_EPOCH_FORK',
+      `العهدُ ${String(manifestEpoch)} بمرساتينِ مختلفتين`,
+    );
+  }
+  // B8
+  assertDigestMatches(body, context.layout);
+  return 'B1';
+}
+
+/**
+ * `B8`: الحالةُ على القرصِ عينُ ما خُتِمَ — بالبصمةِ الكاملةِ لا بالأعداد.
+ * @param body - المتن
+ * @param layout - المكوّنات
+ */
+function assertDigestMatches(
+  body: { stateDigest?: string | undefined },
+  layout: StateLayout,
+): void {
+  if (body.stateDigest === undefined) return;
+  const digest = computeStateDigest(layout);
+  if (digest !== body.stateDigest) {
+    throw new ProductionRuntimeError(
+      'FRESHNESS_STATE_DIGEST_MISMATCH',
+      'الحالةُ على القرصِ غيرُ ما يشهدُ عليه البيانُ والمرجع',
+    );
+  }
 }
 
 /**
@@ -444,12 +679,43 @@ export async function createProductionRootOfTrust(
         'الإنتاجُ يَفرضُ مقبسَ حداثةٍ غيرَ فارغٍ — لا مسارَ بلا حمايةٍ من الإعادة',
       );
     }
+    // `WL-326`: إقلاعٌ جديدٌ لهذا الجذرِ في هذه العمليةِ يأخذُ الكتابةَ من كلِّ حاجزٍ سبقَه.
+    releaseCommitBarriersFor(options.root);
+    const stateBoundSocket = isStateBoundFreshnessSocket(freshnessSocket) ? freshnessSocket : null;
+    const anchorFile = resolveAnchorFile(options.root, env);
+    const layout = productionStateLayout(options.root, anchorFile);
+    let fenceLog: () => void = () => undefined;
+    const coordinator = new CommitCoordinator({
+      root: options.root,
+      extraFiles: [anchorFile],
+      manifest,
+      layout,
+      fsync,
+      socket: stateBoundSocket,
+      onFence: () => fenceLog(),
+    });
+    let freshnessBoot: 'B1' | 'B2' | 'B3' | 'B10' | null = null;
+    if (stateBoundSocket !== null) {
+      // `LIVE-28` الخيارُ ب: الحكمُ بالمرجعِ المربوطِ بالحالة، والاسترجاعُ قبلَ أيِّ فتح.
+      await manifest.initJournalKey();
+      freshnessBoot = await decideStateBoundBoot(manifest, stateBoundSocket, coordinator, {
+        root: options.root,
+        fsync,
+        provisioning,
+        env,
+        layout,
+      });
+    }
     // EXT-6 / R3-A-01: فحصُ الحداثةِ الخارجيِّ. إن وُجدَ مصدرُ حداثةٍ موصولٌ،
     // يُقرأُ عَهْدُهُ ويُقارَنُ بالعَهْدِ المختومِ في البيان.
     //   Case 1: البيانُ أقدمُ من المرجعِ ⇒ STALE_MANIFEST_EPOCH (لقطةٌ قديمةٌ)
     //   Case 2: البيانُ أحدثُ من المرجعِ ⇒ FRESHNESS_EPOCH_REGRESSION (تقدّمٌ غيرُ مُشروعٍ)
     //   Case 5: البيانُ مساوٍ للمرجعِ ⇒ قبولٌ (تقدّمٌ رتيبٌ طبيعيّ)
-    if (!isNullFreshnessSocket(freshnessSocket) && freshnessSocket !== null) {
+    if (
+      stateBoundSocket === null &&
+      !isNullFreshnessSocket(freshnessSocket) &&
+      freshnessSocket !== null
+    ) {
       const freshness = await freshnessSocket.read();
       const manifestBody = manifest.read();
       const externalEpoch = Number(freshness.epoch);
@@ -477,6 +743,16 @@ export async function createProductionRootOfTrust(
         void FRESHNESS_SOURCE_UNAVAILABLE;
       }
     }
+    // `LIVE-36`/`LIVE-35` في الوضعِ القديم (‏`WL-326`): معاملةٌ مُرحَّلةٌ بلا مرجعٍ مربوطٍ لم
+    // يُقَرَّ بها قطّ (‏لا انتقالَ في الوضعِ القديم) ⇒ تُسترجَعُ قبلَ فتحِ السجلِّ والدفتر.
+    // فلا يُقرأُ دفترٌ أمامَ شاهدِه (‏`LEDGER_AHEAD_OF_WITNESS`) بعدَ انقطاعٍ في منتصفِ تثبيت.
+    if (stateBoundSocket === null) {
+      const staged = manifest.read().staged ?? null;
+      if (staged !== null) {
+        await manifest.initJournalKey();
+        await CommitCoordinator.rollbackStagedAsync(options.root, manifest, staged.txn, fsync);
+      }
+    }
     // R4-B-01: استخرجْ مفتاحَ مصادقةِ دفترِ الرفعِ من التوكنِ بعدَ التحقّقِ من
     // الخاتَمِ، قبلَ أيِّ رفعٍ متزامنٍ. بدونِ هذا، تبقى سطورُ الدفترِ بلا مصادقةٍ،
     // فيستطيعُ مالكُ القرصِ أن يَدُسَّ سطراً غيرَ مُصادَقٍ عليه ثم يُختَمَ في المتنِ.
@@ -485,21 +761,36 @@ export async function createProductionRootOfTrust(
     // وقائعَ جديداً، فلا يُقرأُ ملفٌّ فارغٌ خلَّفَه رفضٌ «سجلاً من GENESIS».
     // `S13` (`WL-237`): الشاهدُ الثاني يُفتَقَدُ **قبلَ** أن يُفتَحَ السجلُّ — ولو تأخَّرَ
     // الفحصُ لمحا فتحُ السجلِّ أثرَ المحوِ بإنشاءِ ملفٍّ فارغٍ يُقرأُ «نشأةً».
-    assertSealedLogPresentOnExistingRoot(join(options.root, 'events.log'), provisioning, env);
+    // في الوضعِ المربوطِ بالحالةِ حكمُ الإقلاعِ (‏`B1`/`B2`/`B3`) تحقّقَ أنّ ما على القرصِ —
+    // والسجلُّ منه — عينُ الحالةِ المُقَرّة؛ فغيابُ السجلِّ حينئذٍ هو الحالةُ المُقَرّةُ نفسُها
+    // (‏تهيئةٌ سقطت قبلَ إنشائِه — `C11`) لا محوٌ، ومحوُه بعدَ وجودِه يُرَدُّ هناك برمزِ البصمة.
+    const verifiedState =
+      freshnessBoot === 'B1' || freshnessBoot === 'B2' || freshnessBoot === 'B3';
+    assertSealedLogPresentOnExistingRoot(
+      join(options.root, 'events.log'),
+      provisioning || verifiedState,
+      env,
+    );
     const log = new PersistentEventLog(join(options.root, 'events.log'), {
       sealer,
       env,
       fsync,
     });
     openedOnBoot.push((): void => log.close());
+    // التسييجُ يُغلِقُ السجلَّ فيُفلِتُ قفلَه: إقلاعٌ مُستعيدٌ في العمليةِ نفسِها لا يُحجَب.
+    fenceLog = (): void => log.close();
     assertLogNotBehindAnchors(manifest, log, signers.anchorSigner, options, fsync, env);
     // نقطةُ ضبطٍ ثانيةٌ بعدَ فحصِ المراسي: ما يرفعُه الفحصُ (عدُّ المُثبَّتِ) يُختَمُ
     // في المتنِ الآنَ لا في الإقلاعِ التالي، فلا يبقى شاهدٌ خارجَ الخاتَم.
     await manifest.checkpointAsync();
     // EXT-6: بعدَ نقطةِ الضبطِ الأولى، إن وُجدَ مصدرُ حداثةٍ موصولٌ، يُرفعُ
     // عَهْدُهُ ويُخزَّنُ في البيان. فالبيانُ القادمُ يشهدُ على عَهْدٍ لا يُسترجَعُ.
-    if (!isNullFreshnessSocket(freshnessSocket) && freshnessSocket !== null) {
-      const bumped = await freshnessSocket.bump();
+    if (
+      stateBoundSocket === null &&
+      !isNullFreshnessSocket(freshnessSocket) &&
+      freshnessSocket !== null
+    ) {
+      const bumped = await (freshnessSocket as FreshnessSocket).bump();
       manifest.raise('freshnessEpoch', Number(bumped.epoch));
       await manifest.checkpointAsync();
     }
@@ -523,14 +814,17 @@ export async function createProductionRootOfTrust(
       signer: signers.ledgerSigner,
       fsync,
       witness: ledgerFloor,
-      sealWitness: (): Promise<void> => manifest.checkpointAsync(),
+      // داخلَ معاملةٍ تختمُ الترقيةُ الشاهدَ معَ الحالةِ؛ فالختمُ المنفصلُ هناك لا يلزم.
+      sealWitness: (): Promise<void> =>
+        inCommitTransaction(coordinator) ? Promise.resolve() : manifest.checkpointAsync(),
       onCommitSink: async (entry): Promise<void> => {
         await log.appendSealed('ledger.committed', signers.ledgerSigner.keyId, {
           id: entry.id,
           count: ledgerFloor.read(),
         });
       },
-      provisioning,
+      // كالسجلّ: حالةٌ تحقّقَ حكمُ الإقلاعِ أنّها المُقَرّةُ لا يُقرأُ غيابُ مجلّدِها محواً.
+      provisioning: provisioning || verifiedState,
       env,
     });
     // `M11.04-F07`: شاهدُ العهدِ يُقرأُ من **مصدرين** لا من واحدٍ — البيانُ
@@ -597,15 +891,51 @@ export async function createProductionRootOfTrust(
         log: null,
         logAsync: log,
         epochFloor,
-        sealEpoch: (): Promise<void> => manifest.checkpointAsync(),
+        sealEpoch: (): Promise<void> =>
+          inCommitTransaction(coordinator) ? Promise.resolve() : manifest.checkpointAsync(),
+        commitBarrier: coordinator,
         royalCommandVerifier,
         env,
       },
     );
+    const revocationStore =
+      options.revocationStore ??
+      new FileRevocationStore(join(options.root, 'revoked.jsonl'), { fsync });
+    const anchorStore = options.anchorStore ?? new FileAnchorStore(anchorFile, { fsync });
+    log.useCommitBarrier(coordinator);
+    ledger.useCommitBarrier(coordinator);
+    // آخرُ خطوةٍ في الإقلاع: بعدَها لا كتابةَ حالةٍ إلّا عبرَ الحاجز (‏`D6`).
+    coordinator.activate();
+    const anchorAsync = (anchorOptions: { force?: boolean; intervalMs?: number; at?: Date } = {}) =>
+      coordinator.run('anchor', () => {
+        const request: {
+          witness: MonotonicFloor;
+          force?: boolean;
+          intervalMs?: number;
+          at?: Date;
+        } = { witness: manifest.anchoredCountFloor() };
+        if (anchorOptions.force !== undefined) request.force = anchorOptions.force;
+        if (anchorOptions.intervalMs !== undefined) request.intervalMs = anchorOptions.intervalMs;
+        if (anchorOptions.at !== undefined) request.at = anchorOptions.at;
+        return maybeAnchorLogWithHsm(anchorStore, signers.anchorSigner, log, request);
+      });
+    const intents = new RootIntentProcessor({
+      root: options.root,
+      haltSwitch: haltSwitch as unknown as IntentHaltSwitch,
+      anchor: ({ force }) => anchorAsync({ force }),
+      anchorVerifier: signers.anchorSigner,
+      fsync: options.fsync ?? true,
+    });
     return {
       log,
       ledger,
       haltSwitch,
+      commitBarrier: coordinator,
+      revokeAsync: (certificateId: string, revokedBy: string, reason: string) =>
+        coordinator.run('revoke', () => revocationStore.revoke(certificateId, revokedBy, reason)),
+      anchorAsync,
+      drainIntentsAsync: () => intents.drainAsync(),
+      freshnessBoot,
       sealer,
       anchorSigner: signers.anchorSigner,
       ledgerSigner: signers.ledgerSigner,
@@ -616,10 +946,12 @@ export async function createProductionRootOfTrust(
       // R4-K3-03: مخزنُ سحبٍ دائمٌ على القرص — يُبنى من `FileRevocationStore`
       // ليُمرَّرَ إلى سلطةِ التصديقِ في الإنتاج. لا يُقبلُ `MemoryRevocationStore`
       // في الإنتاج، وهذا التنفيذُ يدومُ عبرَ إعادةِ التشغيل.
-      revocationStore:
-        options.revocationStore ??
-        new FileRevocationStore(join(options.root, 'revoked.jsonl'), { fsync }),
-      close: signers.close,
+      revocationStore,
+      close: async (): Promise<void> => {
+        coordinator.close();
+        log.close();
+        await signers.close();
+      },
     };
   } catch (error) {
     // فشلٌ بعدَ فتحِ الجلسةِ يُغلقُها: توكنٌ يبقى مسجَّلَ الدخولِ بعدَ فشلِ

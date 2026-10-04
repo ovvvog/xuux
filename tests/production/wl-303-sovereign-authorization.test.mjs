@@ -323,7 +323,7 @@ describe('WL-303 — R6-A-07: التفويضُ الملكيُّ عندَ نقط�
     let system = await boot(root);
     try {
       // التثبيتُ في الدفترِ الدائمِ بمسارِه الإنتاجيِّ (‏موقَّعاً بمفتاحِ `07`).
-      system.rootOfTrust.ledger.begin(signed.command);
+      await system.rootOfTrust.ledger.beginAsync(signed.command);
       await system.rootOfTrust.ledger.commitSigned(signed.command, 'ok');
     } finally {
       await system.close();

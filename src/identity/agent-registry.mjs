@@ -207,7 +207,12 @@ export class AgentRegistry {
       stateChangedAt: new Date(),
     });
     if (state === AgentState.REVOKED) {
-      this.ca.revoke(current.certificate.id, reason ?? 'agent revoked');
+      // `D6` (‏`WL-326`): في جذرِ الإنتاجِ السحبُ عبرَ الحاجزِ ويُنتظَرُ دوامُه.
+      if (typeof this.ca.revokeAsync === 'function') {
+        await this.ca.revokeAsync(current.certificate.id, reason ?? 'agent revoked');
+      } else {
+        this.ca.revoke(current.certificate.id, reason ?? 'agent revoked');
+      }
     }
     // إبطال الهوية أو تعليقها يسحب المنح المؤقّتة معها (‏M6.01/‏M6.02): وإلا بقيت
     // قدرةٌ ممنوحة لهويةٍ لا تعمل، تعود بمجرّد إعادة تفعيلها بلا قرار جديد.

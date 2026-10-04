@@ -55,6 +55,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ledgerEntryBody } from './hsm-binding.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import { basename, dirname, join } from 'node:path';
+import { beforeDurableWrite } from './commit-barrier.mjs';
 
 /** لاحقة مجلد الحجوزات: مفتاحٌ لكل أمر، وإنشاؤه الحصري هو الذرّية نفسها. */
 export const LEDGER_CLAIMS_SUFFIX = '.claims';
@@ -142,6 +143,11 @@ export interface LedgerRecovery {
 }
 
 /** خيارات الدفتر. */
+/** أقلُّ ما يلزمُ من حاجزِ الالتزام (‏`WL-326`). */
+export interface LedgerCommitBarrier {
+  run<T>(intent: string, fn: () => Promise<T> | T): Promise<T>;
+}
+
 export interface CommandLedgerOptions {
   /** مزامنة القرص بعد كل تثبيت. تعطيلها يُسرّع ويُضعف الضمان. */
   fsync?: boolean;
@@ -252,6 +258,7 @@ export class CommandLedger {
   readonly #witness: LedgerWitness | null;
   readonly #sealWitness: (() => Promise<void>) | null;
   readonly #onCommitSink: ((entry: SignedLedgerEntryRecord) => Promise<void>) | null;
+  #barrier: LedgerCommitBarrier | null = null;
 
   /**
    * @param file - مسار دفتر المعرّفات الدائم
@@ -395,6 +402,12 @@ export class CommandLedger {
     this.load();
     if (this.ids.has(id)) throw new CommandLedgerError('REPLAYED_COMMAND', { id });
     const path = this.#claimPath(id);
+    // `WL-326`: حجزٌ قائمٌ يُرَدُّ بسببِه قبلَ أيِّ كتابة — فلا يُطلَبُ الحاجزُ لرفضٍ لا يكتب.
+    // والوصلةُ الصلبةُ أدناه تبقى هي الحَكَمَ في السباق؛ هذا مسارٌ أقصرُ لا بديل.
+    if (existsSync(path)) {
+      this.#rejectExistingClaim(id);
+      throw new CommandLedgerError('REPLAYED_COMMAND', { id });
+    }
     const claim: ClaimFile = { id, pid: process.pid, at: new Date().toISOString() };
     // الترتيب مقصود: **يُكتب المحتوى كاملاً ويُزامَن ثم يُنشر الاسم** بوصلة صلبة.
     // ولو أُنشئ الاسم أولاً ثم كُتب فيه (وهو ما فعلتُه أولاً) لرأى المتسابقُ ملفاً
@@ -409,6 +422,8 @@ export class CommandLedger {
     }
     try {
       // `link` ذرية: تفشل بـEEXIST إن سبقنا غيرُنا، فينجح واحد فقط لا أكثر.
+      // `WL-326`: الحجزُ حالةٌ — يمرُّ بحاجزِ الالتزامِ قبلَ أن يُنشَر.
+      beforeDurableWrite(path, 'replace');
       linkSync(temporary, path);
     } catch (error) {
       if ((error as { code?: string }).code !== 'EEXIST') throw error;
@@ -505,6 +520,43 @@ export class CommandLedger {
    * @returns السطرُ الموقَّعُ كما كُتب
    */
   async commitSigned(command: RecordedCommand, reason?: string): Promise<SignedLedgerEntryRecord> {
+    return this.transactAsync('ledger.commit', () => this.#commitSignedInner(command, reason));
+  }
+
+  /**
+   * `D3`/`D6` (‏`WL-326`): ينفّذُ فعلاً على الدفترِ معاملةً واحدةً عبرَ حاجزِ الالتزامِ إن
+   * رُكِّب، وإلّا ينفّذُه كما هو. والنداءُ من داخلِ معاملةٍ جاريةٍ يُضَمُّ إليها — فتاجٌ
+   * يحجزُ ويختمُ ويُثبِّتُ في معاملةٍ واحدةٍ لا يُقَرُّ له بشيءٍ قبلَ دوامِ الكلّ.
+   * @param intent - القصدُ المُعلَن
+   * @param fn - الفعل
+   * @returns نتيجتُه
+   */
+  async transactAsync<T>(intent: string, fn: () => Promise<T> | T): Promise<T> {
+    if (this.#barrier === null) return await fn();
+    return this.#barrier.run(intent, fn);
+  }
+
+  /**
+   * يُركِّبُ حاجزَ الالتزامِ — من الجذرِ الإنتاجيِّ بعدَ الإقلاع.
+   * @param barrier - الحاجز
+   */
+  useCommitBarrier(barrier: LedgerCommitBarrier | null): void {
+    this.#barrier = barrier;
+  }
+
+  /**
+   * `begin` عبرَ الحاجز — مسارُ الحجزِ الإنتاجيُّ خارجَ معاملةٍ أكبر.
+   * @param command - الأمر
+   * @returns رقمُ العملية الحاجزة
+   */
+  async beginAsync(command: RecordedCommand): Promise<number> {
+    return this.transactAsync('ledger.begin', () => this.begin(command));
+  }
+
+  async #commitSignedInner(
+    command: RecordedCommand,
+    reason?: string,
+  ): Promise<SignedLedgerEntryRecord> {
     const signer = this.#assertSigner();
     const id = this.#assertId(command);
     if (!existsSync(this.#claimPath(id))) throw new CommandLedgerError('UNCLAIMED_COMMAND', { id });
@@ -523,11 +575,19 @@ export class CommandLedger {
     command: RecordedCommand,
     reason = 'aborted by executor',
   ): Promise<SignedLedgerEntryRecord> {
+    return this.transactAsync('ledger.abort', () => this.#abortSignedInner(command, reason));
+  }
+
+  async #abortSignedInner(
+    command: RecordedCommand,
+    reason: string,
+  ): Promise<SignedLedgerEntryRecord> {
     const signer = this.#assertSigner();
     const id = this.#assertId(command);
     this.load();
     if (this.ids.has(id)) throw new CommandLedgerError('REPLAYED_COMMAND', { id });
     const entry = await this.#appendSignedEntry(signer, id, 'aborted', reason);
+    beforeDurableWrite(this.#claimPath(id), 'replace');
     rmSync(this.#claimPath(id), { force: true });
     this.#fsyncDir();
     return entry;
@@ -539,8 +599,10 @@ export class CommandLedger {
    * @returns السطرُ الموقَّع
    */
   async recordSigned(command: RecordedCommand): Promise<SignedLedgerEntryRecord> {
-    this.begin(command);
-    return this.commitSigned(command);
+    return this.transactAsync('ledger.record', async () => {
+      this.begin(command);
+      return this.commitSigned(command);
+    });
   }
 
   /**
@@ -705,6 +767,10 @@ export class CommandLedger {
     if (this.#pidAlive(claim.pid)) {
       throw new CommandLedgerError('COMMAND_IN_FLIGHT', { id, pid: claim.pid });
     }
+    // `WL-326`: صاحبُ الحجزِ ربّما ثبّتَ ثمَّ خرجَ بينَ قراءتِنا للدفترِ وفحصِنا لحياته —
+    // فيُعادُ الفحصُ بعدَ رؤيةِ موتِه: المثبَّتُ إعادةٌ لا غموض.
+    this.load();
+    if (this.ids.has(id)) throw new CommandLedgerError('REPLAYED_COMMAND', { id });
     throw new CommandLedgerError('INDETERMINATE_COMMAND', {
       id,
       pid: claim.pid,
@@ -732,6 +798,7 @@ export class CommandLedger {
   #writeEntry(entry: LedgerEntry | SignedLedgerEntryRecord): void {
     const state = entry.state;
     const id = entry.id;
+    beforeDurableWrite(this.file, 'append');
     const fd = openSync(this.file, 'a');
     try {
       this.#writeAll(fd, JSON.stringify(entry) + '\n');

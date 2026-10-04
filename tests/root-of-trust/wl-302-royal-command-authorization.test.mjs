@@ -228,7 +228,7 @@ test('WL-302: في الإنتاجِ بلا ساعةٍ موثوقةٍ موصول�
   const dir = mkdtempSync(join(tmpdir(), 'wl302-prod-'));
   try {
     const pair = generateKeyPairSync('ed25519');
-    const halt = new HaltSwitch(join(dir, 'd.json'), new KingIdentity(), {
+    const options = {
       fsync: false,
       env: PROD,
       royalCommandVerifier: createRoyalCommandVerifier(
@@ -236,6 +236,16 @@ test('WL-302: في الإنتاجِ بلا ساعةٍ موثوقةٍ موصول�
       ),
       epochFloor: { read: () => 0, raise: () => undefined },
       logAsync: { appendSealed: async () => undefined },
+    };
+    // `WL-326` (‏`D6`): كاتبٌ إنتاجيٌّ بلا حاجزِ التزامِ الجذرِ يُرَدُّ عندَ التركيب.
+    assert.throws(() => new HaltSwitch(join(dir, 'd.json'), new KingIdentity(), options), {
+      code: 'HALT_SECONDARY_WRITER_FORBIDDEN',
+    });
+    // وهذا الاختبارُ يقيسُ الساعةَ لا الحاجز: حاجزٌ مُمرِّرٌ يكفي لبلوغِ فحصِها (‏المسارُ
+    // المتزامنُ لا يمرُّ بالحاجزِ أصلاً).
+    const halt = new HaltSwitch(join(dir, 'd.json'), new KingIdentity(), {
+      ...options,
+      commitBarrier: { run: async (_intent, fn) => fn() },
     });
     assert.throws(() => halt.halt('x', cmd(pair, halt, 'halt', 'x')), {
       code: 'HALT_TRUSTED_CLOCK_REQUIRED',

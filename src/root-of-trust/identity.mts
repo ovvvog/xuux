@@ -21,6 +21,7 @@ import {
   fsyncSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
+import { beforeDurableWrite } from './commit-barrier.mjs';
 
 import { assertSoftwareKingIdentityAllowed, isProductionRuntime } from './production-boot.mjs';
 
@@ -211,6 +212,8 @@ export class FileRevocationStore implements RevocationStore {
 
   revoke(certificateId: string, revokedBy: string, reason: string): boolean {
     if (!this.loaded) return false;
+    // `WL-326`: خارجَ الحاجزِ في جذرٍ إنتاجيٍّ يُرفَعُ ولا يُبتلَعُ «false» صامتاً.
+    beforeDurableWrite(this.path, 'append');
     try {
       const dir = dirname(this.path);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
@@ -366,6 +369,11 @@ export function kingIdentityFromPublicKey(publicKeyPem: string): KingIdentity {
 }
 
 export interface CertificateAuthorityOptions {
+  /**
+   * `D6` (‏`WL-326`): حاجزُ الالتزامِ في جذرِ الإنتاج. السحبُ كتابةُ حالةٍ فيمرُّ به
+   * (‏`revokeAsync`)، والسحبُ المتزامنُ خارجَه يُرَدُّ في الجذرِ برمزِ الحاجز.
+   */
+  commitBarrier?: { run<T>(intent: string, fn: () => Promise<T> | T): Promise<T> } | null;
   /** مخزنُ سحبٍ دائم؛ إن غاب فالذاكرة (في العمليةِ الحيّةِ وحدَها). */
   revocationStore?: RevocationStore;
   /** مصدرُ الزمنِ؛ إن غاب فـ`Date.now`. يُعزلُ ليُحقَنَ الموثوقُ لاحقاً. */
@@ -400,6 +408,9 @@ export class CertificateAuthority {
   private readonly now: TimeSource;
   private readonly defaultTtlMs: number;
   private readonly allowLegacy: boolean;
+  private readonly barrier: {
+    run<T>(intent: string, fn: () => Promise<T> | T): Promise<T>;
+  } | null;
 
   /**
    * @param king - هوية الملك التي توقع الشهادات
@@ -422,6 +433,7 @@ export class CertificateAuthority {
     this.defaultTtlMs = options.defaultTtlMs ?? DEFAULT_CERTIFICATE_TTL_MS;
     this.allowLegacy = options.allowLegacyCertificatesWithoutExpiry ?? false;
     this.asyncSigner = options.signer ?? null;
+    this.barrier = options.commitBarrier ?? null;
     if (this.asyncSigner !== null && this.asyncSigner.id !== king.id) {
       throw new Error('CERTIFICATE_SIGNER_KEY_MISMATCH');
     }
@@ -511,6 +523,21 @@ export class CertificateAuthority {
       revokedAt: new Date(this.now()).toISOString(),
       persisted,
     };
+  }
+
+  /**
+   * `D6`/`D3` (‏`WL-326`): السحبُ عبرَ حاجزِ الالتزامِ إن وُصِل — لا يُرجَعُ قبلَ أن يدومَ ويتقدّمَ
+   * المرجعُ فوقَه. وبلا حاجزٍ هو `revoke` نفسُه.
+   * @param certificateId - معرّف الشهادة
+   * @param reason - سبب السحب
+   * @returns سجلُّ السحب
+   */
+  async revokeAsync(
+    certificateId: string,
+    reason: string,
+  ): Promise<{ certificateId: string; reason: string; revokedAt: string; persisted: boolean }> {
+    if (this.barrier === null) return this.revoke(certificateId, reason);
+    return this.barrier.run('revoke', () => this.revoke(certificateId, reason));
   }
 
   /**

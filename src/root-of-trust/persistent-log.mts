@@ -51,7 +51,8 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { beforeDurableWrite } from './commit-barrier.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import {
   EventLog,
@@ -319,6 +320,36 @@ export function inspectEventLog(file: string): EventLogInspection {
   return inspection;
 }
 
+/** أقلُّ ما يلزمُ من حاجزِ الالتزام. */
+export interface LogCommitBarrier {
+  run<T>(intent: string, fn: () => Promise<T> | T): Promise<T>;
+}
+
+/**
+ * أقفالُ الكاتبِ التي تحملُها نُسَخٌ حيّةٌ **في هذه العملية** (‏`WL-326`). بها يُفرَّقُ بينَ
+ * قفلٍ يحملُ رقمَ عمليّتِنا لأنَّ نسخةً حيّةً منّا تملكُه، وقفلٍ يحملُه لأنَّ حاويةً
+ * أُعيدَ تشغيلُها فأخذت العمليةُ الجديدةُ الرقمَ نفسَه (‏`pid 1`). الثاني أثرُ تعطُّلٍ —
+ * كان يُقرأُ `LOG_ALREADY_LOCKED` فيحجبُ مسارَ الاستعادةِ كلَّه.
+ */
+const heldLocks = new Set<string>();
+
+/**
+ * لحظةُ بدءِ عمليةٍ بنبضاتِ النواةِ (‏الحقلُ ٢٢ من `/proc/<pid>/stat`)، أو `null`
+ * حيثُ لا تُقرأ. بها يُكشَفُ رقمُ عمليةٍ أُعيدَ استعمالُه لعمليةٍ أخرى.
+ * @param pid - رقمُ العملية
+ * @returns لحظةُ البدءِ أو `null`
+ */
+export function processStartTicks(pid: number): string | null {
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    const start = fields[19];
+    return typeof start === 'string' && start !== '' ? start : null;
+  } catch {
+    return null;
+  }
+}
+
 export class PersistentEventLog extends EventLog {
   file: string;
   headFile: string;
@@ -335,6 +366,7 @@ export class PersistentEventLog extends EventLog {
   #fsync: boolean;
   #closed = false;
   readonly #sealer: EventDataSealer | null;
+  #barrier: LogCommitBarrier | null = null;
 
   /**
    * @param file - مسار ملف الأحداث المتسلسل
@@ -375,14 +407,22 @@ export class PersistentEventLog extends EventLog {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const fd = openSync(this.lockFile, 'wx');
-        writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+        writeSync(
+          fd,
+          JSON.stringify({
+            pid: process.pid,
+            start: processStartTicks(process.pid),
+            at: new Date().toISOString(),
+          }),
+        );
         closeSync(fd);
         this.#locked = true;
+        heldLocks.add(resolve(this.lockFile));
         return;
       } catch (error) {
         if ((error as { code?: string }).code !== 'EEXIST') throw error;
         const owner = this.#lockOwner();
-        if (owner !== null && this.#pidAlive(owner))
+        if (owner !== null && this.#lockHeldByLiveOwner(owner))
           throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: `العملية ${owner}` });
         // قفلٌ لعملية ميتة (أو قفل تالف) أثرُ تعطُّل لا ملكية: يُنتزع ويُعلَن.
         rmSync(this.lockFile, { force: true });
@@ -396,6 +436,31 @@ export class PersistentEventLog extends EventLog {
    * يقرأ رقم العملية المالكة للقفل.
    * @returns رقم العملية أو `null` إن كان القفل غير مقروء
    */
+  /**
+   * هل مالكُ القفلِ حيٌّ فعلاً؟ رقمُ عمليّتِنا حيٌّ دائماً عندَ النظام، فيُسألُ سجلُّ
+   * الأقفالِ في العملية؛ ورقمُ غيرِنا يُقابَلُ بلحظةِ بدئِه المُسجَّلةِ إن وُجِدت.
+   * @param owner - رقمُ العمليةِ المالكة
+   * @returns حياتُه مالكاً
+   */
+  #lockHeldByLiveOwner(owner: number): boolean {
+    if (owner === process.pid) return heldLocks.has(resolve(this.lockFile));
+    if (!this.#pidAlive(owner)) return false;
+    const recorded = this.#lockStart();
+    if (recorded === null) return true;
+    const current = processStartTicks(owner);
+    return current === null || current === recorded;
+  }
+
+  /** لحظةُ بدءِ المالكِ كما سُجِّلت في القفل. */
+  #lockStart(): string | null {
+    try {
+      const parsed = JSON.parse(readFileSync(this.lockFile, 'utf8')) as { start?: unknown };
+      return typeof parsed.start === 'string' ? parsed.start : null;
+    } catch {
+      return null;
+    }
+  }
+
   #lockOwner(): number | null {
     try {
       const parsed = JSON.parse(readFileSync(this.lockFile, 'utf8')) as { pid?: unknown };
@@ -423,6 +488,7 @@ export class PersistentEventLog extends EventLog {
   #releaseLock(): void {
     if (!this.#locked) return;
     rmSync(this.lockFile, { force: true });
+    heldLocks.delete(resolve(this.lockFile));
     this.#locked = false;
   }
 
@@ -516,6 +582,7 @@ export class PersistentEventLog extends EventLog {
     // اسمٌ ثابت لا يحمل رقم عملية: الكاتب واحد بالقفل، فبقاءُ مؤقتٍ من تعطُّل
     // سابق يُكتب فوقه ولا يتكاثر في المجلد.
     const temp = `${this.headFile}.tmp`;
+    beforeDurableWrite(this.headFile, 'replace');
     writeFileSync(temp, JSON.stringify(head) + '\n', { encoding: 'utf8', mode: 0o600 });
     if (this.#fsync) {
       const fd = openSync(temp, 'r+');
@@ -553,6 +620,24 @@ export class PersistentEventLog extends EventLog {
    * @returns الحدث كما أُلحق بالسجل (جسمُه مختومٌ)
    */
   async appendSealed(type: string, actor: string, data: object): Promise<EventRecord> {
+    // `D3` (‏`WL-326`): في الجذرِ الإنتاجيِّ لا يُرجَعُ حدثٌ قبلَ أن يدومَ ويُرقّى.
+    if (this.#barrier !== null) {
+      const barrier = this.#barrier;
+      return barrier.run('log.append', () => this.#appendSealedInner(type, actor, data));
+    }
+    return this.#appendSealedInner(type, actor, data);
+  }
+
+  /**
+   * يُركِّبُ حاجزَ الالتزامِ (‏`WL-326`) — يُنادى من الجذرِ الإنتاجيِّ بعدَ الإقلاع.
+   * @param barrier - الحاجز
+   */
+  useCommitBarrier(barrier: LogCommitBarrier | null): void {
+    this.#barrier = barrier;
+  }
+
+  /** جسمُ `appendSealed`. */
+  async #appendSealedInner(type: string, actor: string, data: object): Promise<EventRecord> {
     if (this.#sealer === null) throw new PersistentLogError('EVENT_LOG_SEALER_MISSING');
     if (this.#closed || this.#fd === null) throw new PersistentLogError('LOG_CLOSED');
     const sealed = await this.#sealer.seal(data);
@@ -585,6 +670,8 @@ export class PersistentEventLog extends EventLog {
    */
   #appendRecord(type: string, actor: string, data: object): EventRecord {
     if (this.#closed || this.#fd === null) throw new PersistentLogError('LOG_CLOSED');
+    // `WL-326`: قبلَ أن يتقدّمَ أيُّ شيءٍ في الذاكرة — رفضُ الحاجزِ لا يتركُ حدثاً بلا قرص.
+    beforeDurableWrite(this.file, 'append');
     const event = super.append(type, actor, data);
     try {
       const buffer = Buffer.from(JSON.stringify(event) + '\n', 'utf8');
