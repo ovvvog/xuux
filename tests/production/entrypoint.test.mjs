@@ -28,7 +28,14 @@ import { tmpdir } from 'node:os';
 
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { createProductionSystem } from '../../src/production/entrypoint.mjs';
-import { InMemoryFreshnessSocket, fingerprint } from '../../src/root-of-trust/index.mjs';
+import {
+  InMemoryFreshnessSocket,
+  awaitRootIntentResult,
+  fingerprint,
+  registerPossessionPayload,
+  signHaltAck,
+  submitRootIntent,
+} from '../../src/root-of-trust/index.mjs';
 import { royalKeyEnv } from '../helpers/royal-halt-command.mjs';
 
 /** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
@@ -296,6 +303,43 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
     }
   });
 
+  // `WL-326` (‏`D6`): مدخلُ الإنتاجِ هو الكاتبُ الواحد — مؤقّتُه يُفرِّغُ صندوقَ القصودِ عبرَ الحاجز،
+  // والعمليةُ الأخرى (‏هنا: الاختبارُ نفسُه) تُودِعُ وتنتظرُ ولا تكتبُ الحالة.
+  test('E — صندوقُ القصود: المدخلُ يُطبِّقُ قصدَ تسجيلِ عقدةٍ مُصادَقاً ويرُدُّ المزوَّر', async () => {
+    const root = tmp('intents');
+    try {
+      const keys = fixedKeys();
+      const { boot } = rig({ freshnessSocket: new TestFreshnessSocket(0n, 'test'), keys });
+      const system = await boot(root);
+      try {
+        const node = generateKeyPairSync('ed25519');
+        const privatePem = node.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+        const publicPem = node.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+        const genuine = submitRootIntent(root, 'register', {
+          nodeId: 'entry-node',
+          publicKeyPem: publicPem,
+          possession: signHaltAck(privatePem, registerPossessionPayload('entry-node', publicPem)),
+        });
+        const result = await awaitRootIntentResult(root, genuine.id, { timeoutMs: 10_000 });
+        assert.equal(result.ok, true, JSON.stringify(result));
+        assert.equal(system.rootOfTrust.haltSwitch.nodes()[0].nodeId, 'entry-node');
+        const forged = submitRootIntent(root, 'register', {
+          nodeId: 'entry-node-2',
+          publicKeyPem: publicPem,
+          possession: 'AAAA',
+        });
+        const rejected = await awaitRootIntentResult(root, forged.id, { timeoutMs: 10_000 });
+        assert.equal(rejected.ok, false);
+        assert.equal(rejected.code, 'ROOT_INTENT_UNAUTHENTICATED');
+        assert.equal(system.intentDrainError, null);
+      } finally {
+        await system.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // Test D — State survives reload/restart
   test('D — الحالةُ تدومُ عبرَ إعادةِ التشغيل', async () => {
     const root = tmp('persistence');
@@ -307,7 +351,7 @@ describe('P0 Production Root of Trust Integration — السلسلةُ الكا�
       const { boot } = rig({ freshnessSocket: socket, keys });
       const system1 = await boot(root);
       // Perform an operation that advances the freshness epoch
-      system1.rootOfTrust.ledger.begin({ id: 'persist-cmd' });
+      await system1.rootOfTrust.ledger.beginAsync({ id: 'persist-cmd' });
       await system1.rootOfTrust.ledger.commitSigned({ id: 'persist-cmd' }, 'ok');
       // Close the log to persist the manifest with the advanced epoch
       system1.rootOfTrust.log.close?.();

@@ -20,7 +20,7 @@ import {
   randomBytes,
   sign as softwareSign,
 } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { describe } from 'node:test';
@@ -35,7 +35,29 @@ import {
 import { run as runAnchor } from '../../scripts/anchor-log.mjs';
 import { run as runHalt } from '../../scripts/halt-switch.mjs';
 import { run as runRotate } from '../../scripts/rotate-king-key.mjs';
-import { royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+import { royalCommandFor, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+
+/**
+ * `D6` (‏`WL-326`): الأداةُ تُودِعُ قصداً وتنتظر، وعمليةُ الجذرِ (‏هنا في الاختبارِ نفسِه) تُفرِّغُ
+ * الصندوقَ عبرَ حاجزِها — كما يفعلُ مؤقّتُ المدخلِ الإنتاجيّ. لا مُحاكاةَ للكاتب: هو
+ * `createProductionRootOfTrust` الحقيقيُّ بحاجزِه.
+ * @param {{ drainIntentsAsync(): Promise<number> }} runtime - جذرُ الثقةِ المفتوح
+ * @param {Promise<string>} pending - نداءُ الأداة
+ * @returns {Promise<string>} مخرجُ الأداة
+ */
+async function withRootDrain(runtime, pending) {
+  let settled = false;
+  const tracked = pending.finally(() => {
+    settled = true;
+  });
+  // الرفضُ يُرفَعُ للمُنادي بعدَ الحلقة؛ لا يُترَكُ بلا معالِجٍ في أثنائها.
+  tracked.catch(() => undefined);
+  while (!settled) {
+    await runtime.drainIntentsAsync();
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+  }
+  return tracked;
+}
 
 /** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
 const ROYAL_KEY = royalKeyEnv();
@@ -163,11 +185,12 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
         ctx.deps,
       );
       await runtime.log.appendSealed('cli.anchor', 'مدقّق', { n: 1 });
-      await runtime.close();
-
+      // `D6` (‏`WL-326`): الأداةُ لا تكتبُ المخزنَ ولا البيان — تُودِعُ قصداً موقَّعاً بـ`06`
+      // ويُثبِّتُ الجذرُ المفتوحُ عبرَ حاجزِه.
       const anchored = JSON.parse(
-        await runAnchor(['anchor', '--force', '--json'], ctx.env, ctx.deps),
+        await withRootDrain(runtime, runAnchor(['anchor', '--force', '--json'], ctx.env, ctx.deps)),
       );
+      await runtime.close();
       assert.equal(anchored.anchored, true);
       assert.equal(anchored.mode, 'hsm');
       assert.equal(anchored.anchor.count, 1);
@@ -226,25 +249,107 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
     }
   });
 
-  test('halt-switch: الإيقاف والاستئناف يُوقَّعان داخل التوكن', async () => {
+  test('halt-switch: الإيقاف والاستئناف قصدٌ يُطبِّقُه الكاتبُ الواحدُ بأمرٍ ملكيٍّ (D6، WL-326)', async () => {
     const ctx = context();
     try {
-      const halted = JSON.parse(
-        await runHalt(['halt', '--reason', 'تمرين إنتاجي', '--json'], ctx.env, ctx.deps),
+      const runtime = await createProductionRootOfTrust(
+        ctx.env,
+        { root: ctx.root, fsync: false, freshnessSocket: ctx.freshnessSocket },
+        ctx.deps,
       );
-      assert.equal(halted.halted, true);
-      assert.equal(halted.directive.state, 'halted');
-      assert.ok(halted.directive.signature.length > 0);
+      try {
+        // الأمرُ موقَّعٌ بالمفتاحِ الملكيِّ (‏`LIVE-24`) لا بمفتاحِ المرساةِ في الأداة.
+        const haltFile = join(ctx.root, 'halt-command.json');
+        writeFileSync(
+          haltFile,
+          JSON.stringify(royalCommandFor(runtime.haltSwitch, 'halt', 'تمرين إنتاجي')),
+        );
+        const halted = JSON.parse(
+          await withRootDrain(
+            runtime,
+            runHalt(['halt', '--command-file', haltFile, '--json'], ctx.env, ctx.deps),
+          ),
+        );
+        assert.equal(halted.halted, true);
+        assert.equal(halted.directive.state, 'halted');
+        assert.ok(halted.directive.signature.length > 0);
 
-      const verified = JSON.parse(await runHalt(['verify', '--json'], ctx.env, ctx.deps));
-      assert.equal(verified.ok, true);
+        const verified = JSON.parse(await runHalt(['verify', '--json'], ctx.env, ctx.deps));
+        assert.equal(verified.ok, true);
 
-      const resumed = JSON.parse(
-        await runHalt(['resume', '--reason', 'انتهى التمرين', '--json'], ctx.env, ctx.deps),
+        const resumeFile = join(ctx.root, 'resume-command.json');
+        writeFileSync(
+          resumeFile,
+          JSON.stringify(royalCommandFor(runtime.haltSwitch, 'resume', 'انتهى التمرين')),
+        );
+        const resumed = JSON.parse(
+          await withRootDrain(
+            runtime,
+            runHalt(['resume', '--command-file', resumeFile, '--json'], ctx.env, ctx.deps),
+          ),
+        );
+        assert.equal(resumed.resumed, true);
+        assert.equal(resumed.directive.state, 'running');
+        assert.equal(resumed.directive.epoch, halted.directive.epoch + 1);
+
+        // إعادةُ القصدِ نفسِه (‏الأمرُ مُستهلَك) تُرَدُّ برمزٍ من الجذرِ ولا تُبدِّلُ الحالة.
+        await assert.rejects(
+          () =>
+            withRootDrain(
+              runtime,
+              runHalt(['halt', '--command-file', haltFile, '--json'], ctx.env, ctx.deps),
+            ),
+          /HALT_ROYAL_COMMAND_/,
+        );
+        assert.equal(runtime.haltSwitch.read().state, 'running');
+      } finally {
+        await runtime.close();
+      }
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('halt-switch: بلا عمليةِ جذرٍ لا كتابةَ من الأداة — القصدُ يبقى مُودَعاً ولا يُقرأُ نجاحاً (LIVE-34)', async () => {
+    const ctx = context();
+    try {
+      const runtime = await createProductionRootOfTrust(
+        ctx.env,
+        { root: ctx.root, fsync: false, freshnessSocket: ctx.freshnessSocket },
+        ctx.deps,
       );
-      assert.equal(resumed.resumed, true);
-      assert.equal(resumed.directive.state, 'running');
-      assert.equal(resumed.directive.epoch, halted.directive.epoch + 1);
+      const commandFile = join(ctx.root, 'halt-command.json');
+      writeFileSync(
+        commandFile,
+        JSON.stringify(royalCommandFor(runtime.haltSwitch, 'halt', 'بلا جذر')),
+      );
+      await runtime.close();
+      const directiveBefore = existsSync(ctx.env.HALT_SWITCH_FILE)
+        ? readFileSync(ctx.env.HALT_SWITCH_FILE, 'utf8')
+        : null;
+      await assert.rejects(
+        () =>
+          runHalt(
+            ['halt', '--command-file', commandFile, '--timeout-ms', '300', '--json'],
+            ctx.env,
+            ctx.deps,
+          ),
+        /ROOT_INTENT_TIMEOUT/,
+      );
+      const directiveAfter = existsSync(ctx.env.HALT_SWITCH_FILE)
+        ? readFileSync(ctx.env.HALT_SWITCH_FILE, 'utf8')
+        : null;
+      assert.equal(directiveAfter, directiveBefore, 'الأداةُ لم تكتبِ التوجيه');
+      assert.equal(
+        readdirSync(join(ctx.root, 'root-of-trust.intents', 'requests')).length,
+        1,
+        'القصدُ مُودَعٌ ينتظرُ الكاتبَ الواحد',
+      );
+      // وبلا ملفِّ أمرٍ ملكيٍّ لا تُوقِّعُ الأداةُ بمفتاحِ المرساة.
+      await assert.rejects(
+        () => runHalt(['halt', '--reason', 'س', '--json'], ctx.env, ctx.deps),
+        /HALT_ROYAL_COMMAND_FILE_REQUIRED/,
+      );
     } finally {
       ctx.cleanup();
     }

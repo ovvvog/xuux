@@ -288,7 +288,9 @@ describe('UF-01 مركَّبٌ — تخفيضُ عدِّ المُثبَّتِ م
         plan: 'أمرٌ أوّل',
       });
       const anchors = new FileAnchorStore(join(root, 'anchors.jsonl'), { fsync: false });
-      await anchorLogWithHsm(anchors, first.runtime.anchorSigner, first.runtime.log);
+      await first.runtime.commitBarrier.run('anchor', () =>
+        anchorLogWithHsm(anchors, first.runtime.anchorSigner, first.runtime.log),
+      );
       const logFile = first.runtime.log.file;
       const headFile = first.runtime.log.headFile;
       first.runtime.log.close?.();
@@ -350,7 +352,7 @@ describe('UF-07 مركَّبٌ — تخفيضُ عدِّ المُقرَّرِ م
     const { root, king } = first;
     try {
       const command = { id: 'أمرٌ-مكرَّر' };
-      first.runtime.ledger.begin(command);
+      await first.runtime.ledger.beginAsync(command);
       await first.runtime.ledger.commitSigned(command, 'تمّ');
       assert.equal(readManifest(root).body.ledgerCommitted >= 1, true);
       const ledgerFile = first.runtime.ledger.file;
@@ -435,7 +437,7 @@ describe('حذفُ البيانِ والملفّاتِ التابعةِ معاً
         plan: 'أمرٌ أوّل',
       });
       const command = { id: 'أمرٌ-قبلَ-المحو' };
-      first.runtime.ledger.begin(command);
+      await first.runtime.ledger.beginAsync(command);
       await first.runtime.ledger.commitSigned(command, 'تمّ');
       await first.runtime.haltSwitch.haltAsync(
         'إيقافٌ قبلَ المحو',

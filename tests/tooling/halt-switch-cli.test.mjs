@@ -105,18 +105,24 @@ test('فكّ الوسائط يقبل المعروف ويرفض المجهول و
     json: true,
     reason: 'سبب',
     nodeKeyFile: null,
+    commandFile: null,
+    timeoutMs: 30_000,
   });
   assert.deepEqual(parseArgs([]), {
     command: 'status',
     json: false,
     reason: null,
     nodeKeyFile: null,
+    commandFile: null,
+    timeoutMs: 30_000,
   });
   assert.deepEqual(parseArgs(['confirm', '--node-key', '/k.pem']), {
     command: 'confirm',
     json: false,
     reason: null,
     nodeKeyFile: '/k.pem',
+    commandFile: null,
+    timeoutMs: 30_000,
   });
   assert.throws(() => parseArgs(['halt', '--force']), /وسيط غير معروف/);
   assert.throws(() => parseArgs(['halt', '--reason']), /--reason بلا قيمة/);

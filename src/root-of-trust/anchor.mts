@@ -48,6 +48,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
+import { beforeDurableWrite } from './commit-barrier.mjs';
 import { verifyEventChain, type EventRecord } from './event-log.mjs';
 import { LOG_HEAD_SUFFIX, LOG_LOCK_SUFFIX } from './persistent-log.mjs';
 
@@ -442,6 +443,7 @@ export class FileAnchorStore implements AnchorStore {
    * @param record - التثبيت
    */
   append(record: AnchorRecord): void {
+    beforeDurableWrite(this.location, 'append');
     const fd = openSync(this.location, 'a');
     try {
       const line = Buffer.from(JSON.stringify(record) + '\n', 'utf8');

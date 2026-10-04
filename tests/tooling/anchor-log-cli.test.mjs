@@ -91,11 +91,17 @@ test.after(() => {
 });
 
 test('فكّ الوسائط والإعداد: ما ينقص يُرفض ولا يُخترع مسار افتراضي لسجل دولة', () => {
-  assert.deepEqual(parseArgs([]), { command: 'status', json: false, force: false });
+  assert.deepEqual(parseArgs([]), {
+    command: 'status',
+    json: false,
+    force: false,
+    timeoutMs: 30_000,
+  });
   assert.deepEqual(parseArgs(['anchor', '--force', '--json']), {
     command: 'anchor',
     json: true,
     force: true,
+    timeoutMs: 30_000,
   });
   assert.throws(() => parseArgs(['status', '--nope']), /وسيط غير معروف/);
 

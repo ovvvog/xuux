@@ -23,7 +23,11 @@
 
 import { readFileSync } from 'node:fs';
 import { createPublicKey, randomBytes } from 'node:crypto';
+import { join, resolve } from 'node:path';
 import {
+  awaitRootIntentResult,
+  registerPossessionPayload,
+  submitRootIntent,
   HaltSwitch,
   haltAckPayload,
   isProductionRuntime,
@@ -36,7 +40,6 @@ import {
 import {
   createRoyalCommandVerifier,
   canonicalRoyalCommand,
-  royalCommandSigningBody,
 } from '../src/root-of-trust/royal-command.mjs';
 import { sign as softwareSign } from 'node:crypto';
 
@@ -47,6 +50,11 @@ const USAGE = `الاستعمال:
   node scripts/halt-switch.mjs resume  [--reason "سبب"] [--json]
   node scripts/halt-switch.mjs confirm --node-key <pem> [--json]
   node scripts/halt-switch.mjs verify  [--json]
+
+الإنتاج (‏\`D6\`، \`WL-326\`): الأداةُ ليست كاتباً للحالة. halt/resume/confirm تُودِعُ قصداً
+مُصادَقاً في صندوقِ عمليةِ الجذرِ (‏XUUX_STATE_ROOT) وتنتظرُ نتيجتَها بعدَ الدوام:
+  halt|resume --command-file <أمرٌ ملكيٌّ موقَّعٌ JSON> [--timeout-ms N]
+  confirm     --node-key <pem>                      [--timeout-ms N]
 
 البيئة:
   HALT_SWITCH_FILE      ملف التوجيه الدائم (إلزامي)
@@ -62,7 +70,14 @@ const USAGE = `الاستعمال:
  */
 export function parseArgs(argv) {
   /** @type {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null }} */
-  const parsed = { command: argv[0] ?? 'status', json: false, reason: null, nodeKeyFile: null };
+  const parsed = {
+    command: argv[0] ?? 'status',
+    json: false,
+    reason: null,
+    nodeKeyFile: null,
+    commandFile: null,
+    timeoutMs: 30_000,
+  };
   for (let index = 1; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--json') parsed.json = true;
@@ -70,6 +85,17 @@ export function parseArgs(argv) {
       const value = argv[index + 1];
       if (!value) throw new Error('--reason بلا قيمة');
       parsed.reason = value;
+      index += 1;
+    } else if (argument === '--command-file') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('--command-file بلا قيمة');
+      parsed.commandFile = value;
+      index += 1;
+    } else if (argument === '--timeout-ms') {
+      const value = Number(argv[index + 1]);
+      if (!Number.isSafeInteger(value) || value <= 0)
+        throw new Error('--timeout-ms بلا قيمة صحيحة');
+      parsed.timeoutMs = value;
       index += 1;
     } else if (argument === '--node-key') {
       const value = argv[index + 1];
@@ -118,6 +144,135 @@ export function formatDescription(description) {
 }
 
 /**
+ * يُودِعُ قصداً وينتظرُ نتيجتَه؛ رفضُ الجذرِ يُرفَعُ برمزِه.
+ * @param {string} root - جذرُ الحالة
+ * @param {string} kind - نوعُ القصد
+ * @param {object} payload - الحمولة
+ * @param {number} timeoutMs - المهلة
+ * @returns {Promise<unknown>} نتيجةُ الجذر
+ */
+async function submitAndAwait(root, kind, payload, timeoutMs) {
+  const intent = submitRootIntent(root, /** @type {never} */ (kind), payload);
+  const outcome = await awaitRootIntentResult(root, intent.id, { timeoutMs });
+  if (!outcome.ok) {
+    const error = new Error(`${outcome.code}: ${outcome.detail ?? ''}`);
+    /** @type {Error & { code?: string }} */ (error).code = outcome.code;
+    throw error;
+  }
+  return outcome.result;
+}
+
+/**
+ * المسارُ الإنتاجيّ (‏`D6`، `WL-326`، `LIVE-34`): الأداةُ **قارئةٌ** — `HaltSwitch` بـ`readOnly`
+ * وبالبيئةِ المُعطاةِ نفسِها (‏كانت تُركَّبُ ببيئةِ العمليةِ فتكتبُ بلا حدٍّ ولا سجلٍّ مختوم) —
+ * وكلُّ تبديلٍ قصدٌ مُصادَقٌ يُودَعُ في صندوقِ الجذرِ فيُطبِّقُه الكاتبُ الواحدُ عبرَ الحاجز.
+ * والأمرُ الملكيُّ لا يُوقَّعُ هنا بمفتاحِ المرساة: يُعطى موقَّعاً بالمفتاحِ الملكيِّ، ويتحقّقُ
+ * منه مُحقِّقُ الجذرِ لا مُحقِّقٌ تبنيه الأداةُ من مفتاحِها.
+ * @param {ReturnType<typeof parseArgs>} args - الأمرُ وخياراته
+ * @param {ReturnType<typeof readConfig>} config - الإعداد
+ * @param {NodeJS.ProcessEnv} env - البيئة
+ * @param {object} deps - حقنُ مصدرِ المفاتيح
+ * @returns {Promise<string>} المخرج
+ */
+async function runProduction(args, config, env, deps) {
+  const root = env['XUUX_STATE_ROOT'];
+  if (!root) throw new Error('HALT_STATE_ROOT_REQUIRED: XUUX_STATE_ROOT غير معلَن');
+  if (resolve(config.file) !== resolve(join(root, 'halt', 'directive.json'))) {
+    throw new Error('HALT_SWITCH_FILE_NOT_ROOT_DIRECTIVE: HALT_SWITCH_FILE ليس توجيهَ جذرِ الحالة');
+  }
+  let signers = null;
+  let king;
+  if (config.publicKeyFile) {
+    king = royalVerifierFromPublicKey(readFileSync(config.publicKeyFile, 'utf8'));
+  } else {
+    signers = await openProductionSigners(env, deps);
+    king = signers.anchorSigner;
+  }
+  try {
+    const halt = new HaltSwitch(config.file, king, { env, readOnly: true });
+    if (args.command === 'status') {
+      const description = halt.describe();
+      return args.json ? JSON.stringify(description, null, 2) : formatDescription(description);
+    }
+    if (args.command === 'verify') {
+      const result = halt.verifyHistory();
+      if (args.json) return JSON.stringify(result, null, 2);
+      return result.ok ? '✅ سلسلة التوجيهات متصلة وموقَّعة' : `❌ ${result.problem}`;
+    }
+    if (args.command === 'halt' || args.command === 'resume') {
+      if (!args.commandFile) {
+        throw new Error(
+          'HALT_ROYAL_COMMAND_FILE_REQUIRED: في الإنتاجِ يُعطى الأمرُ موقَّعاً بالمفتاحِ الملكيِّ (‏--command-file)',
+        );
+      }
+      const royalCommand = JSON.parse(readFileSync(args.commandFile, 'utf8'));
+      if (royalCommand?.operation !== args.command) {
+        throw new Error(`HALT_ROYAL_COMMAND_OPERATION_MISMATCH: ${royalCommand?.operation}`);
+      }
+      const reason = args.reason ?? royalCommand.reason;
+      const directive = await submitAndAwait(
+        root,
+        args.command,
+        { royalCommand, reason },
+        args.timeoutMs,
+      );
+      return args.json
+        ? JSON.stringify(
+            { [args.command === 'halt' ? 'halted' : 'resumed']: true, directive },
+            null,
+            2,
+          )
+        : args.command === 'halt'
+          ? `⛔ صدر الإيقاف في العهد ${directive.epoch}\nالسبب: ${directive.reason}`
+          : `✅ استُؤنف التشغيل في العهد ${directive.epoch}\nالسبب: ${directive.reason}`;
+    }
+    if (args.command === 'confirm') {
+      if (!config.nodeId) throw new Error('HALT_NODE_ID غير معلَن');
+      const nodeKeyFile = args.nodeKeyFile ?? config.nodeKeyFile;
+      if (!nodeKeyFile)
+        throw new Error('HALT_NODE_KEY_FILE غير معلَن (مطلوب لأمر confirm — GPT-F05)');
+      const privateKeyPem = readFileSync(nodeKeyFile, 'utf8');
+      const publicKeyPem = String(
+        createPublicKey(privateKeyPem).export({ type: 'spki', format: 'pem' }),
+      );
+      const registered = halt.nodes().find((node) => node.nodeId === config.nodeId);
+      if (registered?.nodeKeyPem !== publicKeyPem) {
+        await submitAndAwait(
+          root,
+          'register',
+          {
+            nodeId: config.nodeId,
+            publicKeyPem,
+            possession: signHaltAck(
+              privateKeyPem,
+              registerPossessionPayload(config.nodeId, publicKeyPem),
+            ),
+          },
+          args.timeoutMs,
+        );
+      }
+      const reading = halt.read();
+      const proof = signHaltAck(
+        privateKeyPem,
+        haltAckPayload(reading.directive?.hash ?? '', reading.epoch, config.nodeId),
+      );
+      const confirmation = await submitAndAwait(
+        root,
+        'confirm',
+        { nodeId: config.nodeId, proof, detail: 'إقرار من أداة التشغيل' },
+        args.timeoutMs,
+      );
+      return args.json
+        ? JSON.stringify({ confirmed: true, confirmation }, null, 2)
+        : `✅ أقرّت العقدة ${confirmation.nodeId} بالتوقف في العهد ${confirmation.epoch}`;
+    }
+    throw new Error(`أمر غير معروف: ${args.command}\n\n${USAGE}`);
+  } finally {
+    if (signers) await signers.close();
+  }
+}
+
+/**
  * ينفّذ الأمر ويرجع ما يُطبع، بلا مسّ `process`، كي يُختبر نداءً لا عملية.
  * @param {string[]} argv - الوسائط
  * @param {NodeJS.ProcessEnv} env - البيئة
@@ -129,19 +284,17 @@ export async function run(argv, env, deps = {}) {
   if (args.command === '--help' || args.command === 'help') return USAGE;
   const config = readConfig(env);
   const production = isProductionRuntime(env);
+  if (production) return runProduction(args, config, env, deps);
   // ترتيبُ الاختيارِ مقصود: وضعُ «القراءةِ والإقرار» بمفتاحٍ عامٍّ أولاً — فمن
   // أعطى مفتاحاً عامّاً طلبَ عقدةً لا مُصدِراً. ثم الإنتاجُ على التوكن
   // (WL-092): كانت الأداةُ تفشلُ هنا لأن المخزنَ البرمجيَّ مرفوضٌ في الإنتاج،
   // فصار الإصدارُ يقعُ بمفتاحِ F06 داخلَ التوكن. ثم المخزنُ البرمجيُّ للتطوير.
-  let signers = null;
+  // ما بعدَ هذا مسارُ التطويرِ وحدَه: الإنتاجُ رجعَ أعلاه إلى مسارِ القصود (‏`D6`).
   let king;
   let publicKeyPem = null;
   if (config.publicKeyFile) {
     publicKeyPem = readFileSync(config.publicKeyFile, 'utf8');
     king = royalVerifierFromPublicKey(publicKeyPem);
-  } else if (production) {
-    signers = await openProductionSigners(env, deps);
-    king = signers.anchorSigner;
   } else {
     king = await loadKingKeySet(kingKeyProviderFromEnv(env));
   }
@@ -165,7 +318,7 @@ export async function run(argv, env, deps = {}) {
 
     if (args.command === 'halt' || args.command === 'resume') {
       // إن لم يكن الموقِّعُ قادراً على التوقيع (مفتاحٌ عامٌّ فقط)، فالإصدارُ مستحيلٌ.
-      const canSign = production ? typeof king.signAsync === 'function' : Boolean(king.privateKey);
+      const canSign = Boolean(king.privateKey);
       if (!canSign) {
         throw new Error('HALT_SIGNER_REQUIRED');
       }
@@ -185,27 +338,14 @@ export async function run(argv, env, deps = {}) {
         at,
       };
       const canonical = canonicalRoyalCommand(body);
-      let signature;
-      if (production) {
-        // الإنتاجُ: التوقيعُ نداءٌ غيرُ متزامنٍ إلى التوكنِ — يُمرَّر متنُ التوقيعِ
-        // (‏بفاصلِ النطاقِ) و`signAsync` يُسلسِلُه بـ`JSON.stringify` فيُطابقُ
-        // `canonicalRoyalCommand` حرفاً بحرف.
-        signature = await king.signAsync(royalCommandSigningBody(body));
-      } else {
-        // التطويرُ: التوقيعُ البرمجيُّ المتزامنُ على الجسمِ الأساسيِّ المتسلسَلِ.
-        signature = softwareSign(null, Buffer.from(canonical), king.privateKey).toString(
-          'base64url',
-        );
-      }
+      // التطويرُ: التوقيعُ البرمجيُّ المتزامنُ على الجسمِ الأساسيِّ المتسلسَلِ.
+      const signature = softwareSign(null, Buffer.from(canonical), king.privateKey).toString(
+        'base64url',
+      );
       const royalCommand = { ...body, signature };
 
-      const directive = production
-        ? operation === 'halt'
-          ? await halt.haltAsync(reason, royalCommand)
-          : await halt.resumeAsync(reason, royalCommand)
-        : operation === 'halt'
-          ? halt.halt(reason, royalCommand)
-          : halt.resume(reason, royalCommand);
+      const directive =
+        operation === 'halt' ? halt.halt(reason, royalCommand) : halt.resume(reason, royalCommand);
       return args.json
         ? JSON.stringify(
             { [operation === 'halt' ? 'halted' : 'resumed']: true, directive },
@@ -259,9 +399,7 @@ export async function run(argv, env, deps = {}) {
 
     throw new Error(`أمر غير معروف: ${args.command}\n\n${USAGE}`);
   } finally {
-    // جلسةُ التوكنِ تُغلقُ دائماً: أداةُ إيقافٍ تُنادى في لحظةِ أزمةٍ لا تصحُّ
-    // أن تتركَ دخولاً مفتوحاً على المفتاحِ السياديّ.
-    if (signers) await signers.close();
+    // لا جلسةَ توكنٍ في مسارِ التطوير؛ جلسةُ الإنتاجِ تُغلَقُ في `runProduction`.
   }
 }
 

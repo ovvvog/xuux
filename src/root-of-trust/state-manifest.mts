@@ -50,12 +50,13 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   writeSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { isProductionRuntime } from './production-boot.mjs';
 
@@ -104,6 +105,7 @@ export const StateManifestErrorCodes = [
   'STATE_MANIFEST_ROLLBACK_DETECTED',
   'STATE_MANIFEST_SEALER_REQUIRED',
   'STATE_MANIFEST_JOURNAL_LOCKED',
+  'STATE_MANIFEST_STAGED_INVALID',
 ] as const;
 
 export type StateManifestErrorCode = (typeof StateManifestErrorCodes)[number];
@@ -152,6 +154,30 @@ export interface StateManifestBody extends StateManifestBinding {
   freshnessEpoch: number;
   /** رأسُ دفترِ الرفعِ لحظةَ الختمِ — يمنعُ قصَّ الدفترِ إلى ما قبلَ الختم. */
   journalHead: string;
+  /**
+   * `LIVE-28` (‏`WL-326`): بصمةُ الحالةِ `V_e` التي يشهدُ عليها المرجعُ الخارجيُّ في
+   * العهدِ `freshnessEpoch`. لا تُوجدُ إلّا في الوضعِ المربوطِ بالحالة.
+   */
+  stateDigest?: string;
+  /** `A_e = H(domain ‖ instanceId ‖ e ‖ V_e)` — ما يحملُه المرجعُ الخارجيُّ في العهدِ `e`. */
+  freshnessAnchor?: string;
+  /**
+   * التزامٌ مُرحَّلٌ لم يُرَقَّ (‏`S2`): وجودُه عندَ الإقلاعِ يعني أنّ ما بعدَه على القرصِ
+   * **غيرُ مُقَرٍّ به**، فيُحسَمُ بالمرجعِ (‏استرجاعٌ أو ترقية) قبلَ أيِّ قبول.
+   */
+  staged?: StagedCommit | null;
+}
+
+/** سجلُّ التزامٍ مُرحَّلٍ داخلَ المتنِ المختوم. */
+export interface StagedCommit {
+  /** معرّفُ المعاملة — يطابقُ رأسَ سجلِّ التراجعِ وإلّا فلا يُوثَقُ بالسجلّ. */
+  txn: string;
+  /** القصدُ المُعلَنُ (‏`halt`، `ledger.commit`، `log.append`، …) للتدقيق. */
+  intent: string;
+  /** العهدُ والمرساةُ اللذانِ بدأت منهما المعاملة. */
+  fromEpoch: number;
+  fromAnchor: string;
+  at: string;
 }
 
 /** البيانُ كما يُكتَبُ: متنٌ وخاتَمُه. */
@@ -267,6 +293,26 @@ function writeAtomic(file: string, text: string, fsync: boolean): void {
     closeSync(fd);
   }
   renameSync(temporary, file);
+  // `WL-326` (‏`D3`): الترقيةُ لا تدومُ بالمحتوى وحدَه بل بالاسم؛ فالمجلّدُ يُزامَن.
+  fsyncDirectory(dirname(file), fsync);
+}
+
+/**
+ * يُزامِنُ مجلّداً كي يدومَ الاسمُ نفسُه (‏إعادةُ تسميةٍ أو حذف) لا المحتوى وحدَه.
+ * @param dir - المجلّد
+ * @param fsync - هل المزامنةُ مفعّلة
+ */
+function fsyncDirectory(dir: string, fsync: boolean): void {
+  if (!fsync) return;
+  let fd: number | null = null;
+  try {
+    fd = openSync(dir, 'r');
+    fsyncSync(fd);
+  } catch {
+    /* بعضُ الأنظمةِ لا تُزامِنُ مجلّداً؛ المحتوى مُزامَنٌ على كلِّ حال */
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }
 
 /** إلحاقٌ كاملٌ لا جزئيٌّ صامتٌ — سطرُ دفترِ رفعٍ ناقصٌ يُقرأُ عبثاً بحقٍّ. */
@@ -312,6 +358,38 @@ function pidAlive(pid: number): boolean {
 }
 
 /**
+ * هل الحقولُ الاختياريّةُ لـ`WL-326` صحيحةُ الشكلِ إن وُجِدت؟
+ * @param body - المتنُ المقروء
+ * @returns صحّتُها
+ */
+function optionalFieldsValid(body: Partial<StateManifestBody>): boolean {
+  if (body.stateDigest !== undefined && typeof body.stateDigest !== 'string') return false;
+  if (body.freshnessAnchor !== undefined && typeof body.freshnessAnchor !== 'string') return false;
+  const staged = body.staged;
+  if (staged === undefined || staged === null) return true;
+  return (
+    typeof staged === 'object' &&
+    typeof staged.txn === 'string' &&
+    staged.txn !== '' &&
+    typeof staged.intent === 'string' &&
+    Number.isSafeInteger(staged.fromEpoch) &&
+    staged.fromEpoch >= 0 &&
+    typeof staged.fromAnchor === 'string' &&
+    typeof staged.at === 'string'
+  );
+}
+
+/** ملفُّ الطيِّ الجاري: `journal.sealing-<K>` حيثُ `K` تسلسلُ الختمِ الذي يطويه. */
+const SEALING_SUFFIX = '.sealing-';
+
+/**
+ * موجِّهُ الرفعِ (‏`WL-326`): يقولُ لكلِّ رفعٍ أين يذهب. داخلَ معاملةِ الحاجزِ يُرجِعُ
+ * `'buffer'` فيُختَمُ الرفعُ في الترقيةِ معَ الحالةِ التي يشهدُ عليها لا قبلَها؛
+ * وخارجَها يُرجِعُ `'journal'`، أو يرفعُ إن كانت الكتابةُ خارجَ الحاجزِ ممنوعة.
+ */
+export type RaiseRouter = (key: MonotonicKey, value: number) => 'buffer' | 'journal';
+
+/**
  * بيانُ جذرِ الحالةِ المختومُ: يُقرأُ بعدَ التحقّقِ، ويُرفَعُ ولا يُخفَض.
  *
  * دورةُ الحياةِ: `provisionAsync` مرّةً واحدةً ⇒ `openAsync` عندَ كلِّ إقلاعٍ
@@ -339,6 +417,10 @@ export class StateManifest {
    * **إلزاماً** لا خياراً.
    */
   readonly #env: NodeJS.ProcessEnv;
+  /** موجِّهُ الرفعِ — يُركِّبُه حاجزُ الالتزامِ بعدَ الإقلاع (‏`WL-326`). */
+  #router: RaiseRouter | null = null;
+  /** رفوعٌ داخلَ معاملةٍ لم تُختَمْ بعد — تُقرأُ فوقَ المتنِ ولا تُكتَبُ في الدفتر. */
+  readonly #pending = new Map<MonotonicKey, number>();
 
   /**
    * @param file - مسارُ ملفِّ البيان
@@ -498,6 +580,24 @@ export class StateManifest {
    * عندَ كلِّ إقلاعٍ، فنافذةُ الإعادةِ المُعلَنةُ ما بينَ إقلاعينِ لا أكثر.
    */
   async checkpointAsync(): Promise<void> {
+    await this.#sealWith((body) => body, false);
+  }
+
+  /**
+   * ختمٌ مطويٌّ عامٌّ: نقطةُ ضبطٍ، أو ترحيلٌ، أو ترقية.
+   *
+   * `LIVE-35` (‏`WL-326`): كان الختمُ ثمَّ حذفُ الدفترِ خطوتينِ بلا ربط، فانقطاعٌ
+   * بينَهما يتركُ متناً جديداً تحتَ دفترٍ قديمٍ يُقرأُ `STATE_MANIFEST_ROLLBACK_DETECTED`.
+   * الآنَ يُعادُ تسميةُ الدفترِ أوّلاً إلى `journal.sealing-<K>` (‏`K` تسلسلُ الختمِ
+   * الجديد)، ثمَّ يُختَم، ثمَّ يُحذَف. فعندَ القراءةِ: `K ≤ sequence` ⇒ طُويَ فعلاً
+   * فيُهمَل؛ `K = sequence+1` ⇒ لم يُختَمْ فيُطوى قبلَ الدفتر.
+   * @param mutate - تحويلُ المتنِ المطويِّ قبلَ الختم
+   * @param applyPending - هل تُختَمُ الرفوعُ المعلَّقةُ في هذا الختم (‏الترقيةُ وحدَها)
+   */
+  async #sealWith(
+    mutate: (body: StateManifestBody) => StateManifestBody,
+    applyPending: boolean,
+  ): Promise<void> {
     // WL-165: الطيُّ يحذفُ الدفترَ، فلو وقعَ رفعٌ من عمليةٍ أخرى بينَ الختمِ
     // والحذفِ لَضاعَ شاهدٌ مرفوعٌ بلا أثرٍ — وهو عينُ ما تقولُه `R4-B-03`:
     // شاهدٌ يبقى خارجَ الخاتَمِ. فالطيُّ داخلَ القفلِ والقراءةُ من القرصِ داخلَه.
@@ -505,18 +605,84 @@ export class StateManifest {
     try {
       this.#verified = null;
       const body = this.#verify(null);
+      const target = this.journalFile + SEALING_SUFFIX + String(body.sequence + 1);
+      this.#removeStaleSealing(body.sequence);
+      if (existsSync(this.journalFile)) {
+        if (existsSync(target)) {
+          appendLine(target, readFileSync(this.journalFile, 'utf8'), this.#fsync);
+          rmSync(this.journalFile, { force: true });
+        } else {
+          renameSync(this.journalFile, target);
+        }
+        fsyncDirectory(dirname(this.journalFile), this.#fsync);
+      }
+      let folded = body;
+      if (applyPending) {
+        folded = { ...body };
+        for (const [key, value] of this.#pending) folded[key] = Math.max(folded[key], value);
+      }
       const next: StateManifestBody = {
-        ...body,
+        ...mutate(folded),
         sequence: body.sequence + 1,
         sealedAt: new Date().toISOString(),
         journalHead: 'checkpoint:' + String(body.sequence + 1),
       };
       await this.#seal(next);
-      rmSync(this.journalFile, { force: true });
+      if (applyPending) this.#pending.clear();
+      rmSync(target, { force: true });
       this.#verified = next;
     } finally {
       this.#releaseJournalLock();
     }
+  }
+
+  /**
+   * ملفُّ طيٍّ جارٍ لم يُختَمْ بعدُ (‏`K = sequence+1`)، أو `null`.
+   * @param sequence - تسلسلُ المتنِ المختومِ المقروء
+   * @returns مسارُه
+   */
+  #pendingSealing(sequence: number): string | null {
+    const target = this.journalFile + SEALING_SUFFIX + String(sequence + 1);
+    return existsSync(target) ? target : null;
+  }
+
+  /**
+   * يحذفُ ملفّاتِ طيٍّ طُويَت فعلاً (‏`K ≤ sequence`) — أثرُ انقطاعٍ بعدَ الختم.
+   * @param sequence - تسلسلُ المتنِ المختوم
+   */
+  #removeStaleSealing(sequence: number): void {
+    const dir = dirname(this.journalFile);
+    const prefix = basename(this.journalFile) + SEALING_SUFFIX;
+    let names: string[];
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (!name.startsWith(prefix)) continue;
+      const k = Number(name.slice(prefix.length));
+      if (Number.isSafeInteger(k) && k <= sequence) rmSync(join(dir, name), { force: true });
+    }
+  }
+
+  /**
+   * سطورُ الدفترِ غيرُ المطويّةِ بترتيبِها: ملفُّ طيٍّ جارٍ ثمَّ الدفتر.
+   * @param body - المتنُ المختوم
+   * @returns السطور
+   */
+  #journalLines(body: StateManifestBody): string[] {
+    const files: string[] = [];
+    const sealing = this.#pendingSealing(body.sequence);
+    if (sealing !== null) files.push(sealing);
+    if (existsSync(this.journalFile)) files.push(this.journalFile);
+    const lines: string[] = [];
+    for (const file of files) {
+      for (const line of readFileSync(file, 'utf8').split('\n')) {
+        if (line.trim() !== '') lines.push(line);
+      }
+    }
+    return lines;
   }
 
   /**
@@ -566,7 +732,66 @@ export class StateManifest {
    * @returns المتنُ الفعّال
    */
   read(): StateManifestBody {
-    return this.#verified ?? this.#verify(null);
+    const base = this.#verified ?? this.#verify(null);
+    if (this.#pending.size === 0) return base;
+    const overlay: StateManifestBody = { ...base };
+    for (const [key, value] of this.#pending) overlay[key] = Math.max(overlay[key], value);
+    return overlay;
+  }
+
+  /**
+   * يُركِّبُ موجِّهَ الرفعِ (‏`WL-326`). يُنادى مرّةً بعدَ الإقلاعِ من حاجزِ الالتزام.
+   * @param router - الموجِّه، أو `null` لفكِّه
+   */
+  useRaiseRouter(router: RaiseRouter | null): void {
+    this.#router = router;
+  }
+
+  /** هل في الذاكرةِ رفوعٌ لم تُختَمْ؟ */
+  get hasPendingRaises(): boolean {
+    return this.#pending.size > 0;
+  }
+
+  /**
+   * `S2`: يختمُ سجلَّ التزامٍ مُرحَّلٍ في المتن. بعدَه كلُّ أثرٍ على القرصِ غيرُ مُقَرٍّ
+   * به حتى الترقية.
+   * @param staged - السجلُّ المُرحَّل
+   */
+  async stageAsync(staged: StagedCommit): Promise<void> {
+    await this.#sealWith((body) => ({ ...body, staged }), false);
+  }
+
+  /**
+   * `S5`: الترقيةُ — تُختَمُ الرفوعُ المعلَّقةُ والعهدُ الجديدُ وبصمةُ الحالةِ معاً،
+   * ويُمحى السجلُّ المُرحَّل. في الوضعِ القديمِ (‏بلا مرجعٍ مربوطٍ) يبقى العهدُ كما هو.
+   * @param binding - العهدُ والمرساةُ والبصمةُ الجديدةُ، أو `null` في الوضعِ القديم
+   */
+  async promoteAsync(
+    binding: { epoch: number; anchor: string; digest: string } | null,
+  ): Promise<void> {
+    await this.#sealWith((body) => {
+      const next: StateManifestBody = { ...body, staged: null };
+      if (binding !== null) {
+        next.freshnessEpoch = binding.epoch;
+        next.freshnessAnchor = binding.anchor;
+        next.stateDigest = binding.digest;
+      }
+      return next;
+    }, true);
+  }
+
+  /**
+   * يمحو السجلَّ المُرحَّلَ بلا ترقيةٍ — بعدَ استرجاعٍ (‏`B2`) أو معاملةٍ لم تمسَّ شيئاً.
+   * الرفوعُ المعلَّقةُ تُسقَطُ: لم تقعْ حالةٌ تشهدُ عليها.
+   */
+  async clearStagedAsync(): Promise<void> {
+    this.#pending.clear();
+    await this.#sealWith((body) => ({ ...body, staged: null }), false);
+  }
+
+  /** يُسقِطُ الرفوعَ المعلَّقةَ من الذاكرة — عندَ تسييجِ الحاجز. */
+  dropPendingRaises(): void {
+    this.#pending.clear();
   }
 
   /**
@@ -589,6 +814,13 @@ export class StateManifest {
   raise(key: MonotonicKey, value: number): void {
     if (!Number.isSafeInteger(value) || value < 0) {
       throw new StateManifestError('STATE_MANIFEST_REGRESSION', `${key}=${String(value)}`);
+    }
+    // `WL-326`: داخلَ معاملةِ الحاجزِ لا يُكتَبُ الرفعُ في الدفترِ قبلَ أن تدومَ الحالةُ
+    // التي يشهدُ عليها: يُعلَّقُ في الذاكرةِ ويُختَمُ في الترقيةِ معَها. ولو كُتِبَ في
+    // الدفترِ لطواه الإقلاعُ التالي قبلَ استرجاعِ الحالةِ فبقيَ شاهدٌ بلا مشهود.
+    if (this.#router !== null && this.#router(key, value) === 'buffer') {
+      if (value > this.read()[key]) this.#pending.set(key, value);
+      return;
     }
     // R4-K3-02: لا يُكتَبُ سطرٌ غيرُ مُصادَقٍ عليه في الإنتاجِ أصلاً. ولو كُتِبَ
     // لصارَ في الدفترِ سطرٌ لا يفرقُ عن سطرِ المهاجمِ، فيُختَمُ معه في المتن.
@@ -755,6 +987,9 @@ export class StateManifest {
     ) {
       throw new StateManifestError('STATE_MANIFEST_CORRUPT', 'حقولٌ ناقصةٌ أو غيرُ صحيحة');
     }
+    if (!optionalFieldsValid(body)) {
+      throw new StateManifestError('STATE_MANIFEST_STAGED_INVALID', 'حقولُ الالتزامِ المُرحَّلِ');
+    }
     const sealedBody = body as StateManifestBody;
     // ترتيبٌ مقصودٌ: الهويةُ والرِباطُ **يُرفَضانِ قبلَ** التحقّقِ من الخاتَمِ، كي
     // يبقى الرمزُ المُبلَّغُ دقيقاً (بيانُ ملكٍ آخرَ = `KING_MISMATCH` لا خاتَمٌ
@@ -778,10 +1013,8 @@ export class StateManifest {
 
   /** يقرأُ دفترَ الرفعِ ويتحقّقُ من سلسلتِه ثمَّ يطويه في المتن. */
   #foldJournal(body: StateManifestBody): { body: StateManifestBody; head: string } {
-    if (!existsSync(this.journalFile)) return { body, head: body.journalHead };
-    const lines = readFileSync(this.journalFile, 'utf8')
-      .split('\n')
-      .filter((line) => line.trim() !== '');
+    const lines = this.#journalLines(body);
+    if (lines.length === 0) return { body, head: body.journalHead };
     // R4-K3-02: دفترٌ غيرُ فارغٍ بلا مفتاحِ مصادقةٍ في الإنتاجِ لا يُطوى: طيُّه
     // بتجزئةٍ عاريّةٍ يجعلُ كلَّ سطرٍ يحسبُه مالكُ القرصِ سطراً «صحيحاً».
     if (lines.length > 0 && this.#journalKey === null) {
@@ -854,10 +1087,7 @@ export class StateManifest {
 
   /** رأسُ دفترِ الرفعِ الحاليُّ — من الدفترِ إن وُجِدَ، وإلا من المتنِ المختوم. */
   #journalHead(body: StateManifestBody): string {
-    if (!existsSync(this.journalFile)) return body.journalHead;
-    const lines = readFileSync(this.journalFile, 'utf8')
-      .split('\n')
-      .filter((line) => line.trim() !== '');
+    const lines = this.#journalLines(body);
     const last = lines[lines.length - 1];
     if (last === undefined) return body.journalHead;
     try {

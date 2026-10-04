@@ -188,6 +188,14 @@ variables:
     statement: >-
       إذنُ تهيئةِ جذرِ الحالةِ لأوّلِ مرّة. بلا إعلانِه يُرفَضُ جذرٌ إنتاجيٌّ
       بلا بيانٍ (‏`UF-01`)، فلا يُقرأُ محوُ القرصِ «نشأةً جديدة».
+  - id: XUUX_FRESHNESS_BIND_DECLARED
+    requiredIn: []
+    format: '^1$'
+    secret: false
+    statement: >-
+      إعلانُ ربطِ جذرِ حالةٍ قائمٍ بمرجعِ حداثةٍ مربوطٍ بالحالةِ لأوّلِ مرّة
+      (‏`LIVE-28`، `WL-326`). بلا إعلانِه يُرفَضُ الإقلاعُ برمزِ
+      `FRESHNESS_BINDING_UNDECLARED`، فلا يُستنبَطُ «أوّلُ وصلٍ» من مرجعٍ في النشأة.
   - id: XUUX_STATE_CONTEXT
     requiredIn: []
     format: '^[A-Za-z0-9._:-]{0,64}$'

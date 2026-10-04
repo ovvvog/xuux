@@ -196,7 +196,9 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
       assert.equal(runtime.ledger.auditSignatures().ok, true);
 
       const store = new FileAnchorStore(join(root, 'anchors.jsonl'));
-      const record = await anchorLogWithHsm(store, runtime.anchorSigner, runtime.log);
+      const record = await runtime.commitBarrier.run('anchor', () =>
+        anchorLogWithHsm(store, runtime.anchorSigner, runtime.log),
+      );
       assert.equal(record.count, 1);
       assert.equal(verifyAnchorChain(store.read(), runtime.anchorSigner).ok, true);
 

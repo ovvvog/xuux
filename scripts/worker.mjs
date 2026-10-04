@@ -74,7 +74,10 @@ async function main() {
       'مفتاح الملك العام مطلوب (--halt-public-key أو HALT_PUBLIC_KEY): مفتاح إيقافٍ غير مُتحقَّق منه ليس حرساً.',
     );
   }
-  const halt = new HaltSwitch(options.haltFile, royalVerifierFromPublicKey(options.publicKey));
+  // `D6` (‏`WL-326`): العاملُ قارئٌ لمفتاحِ الإيقافِ لا كاتب — الكاتبُ الواحدُ عمليةُ الجذر.
+  const halt = new HaltSwitch(options.haltFile, royalVerifierFromPublicKey(options.publicKey), {
+    readOnly: true,
+  });
   const pool = createPool();
   const queue = createTaskQueue({ pool });
   const isolationLogFile = process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl';

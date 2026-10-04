@@ -199,7 +199,9 @@ describe('UF-01 — لا إقلاعَ من GENESIS بلا مرساةٍ موثو�
       const { FileAnchorStore, anchorLogWithHsm } =
         await import('../../src/root-of-trust/index.mjs');
       const anchors = store ?? new FileAnchorStore(join(root, 'anchors.jsonl'), { fsync: false });
-      await anchorLogWithHsm(anchors, first.runtime.anchorSigner, first.runtime.log);
+      await first.runtime.commitBarrier.run('anchor', () =>
+        anchorLogWithHsm(anchors, first.runtime.anchorSigner, first.runtime.log),
+      );
       const logFile = first.runtime.log.file;
       const headFile = first.runtime.log.headFile;
       first.runtime.log.close?.();

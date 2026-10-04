@@ -169,7 +169,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
       // تقدّمُ الحالةِ: أمرٌ موقَّعٌ ثمَّ إيقافٌ سياديٌّ موقَّع.
       const second = await boot(root);
       const command = { id: 'أمرٌ-قابلٌ-للإعادة' };
-      second.ledger.begin(command);
+      await second.ledger.beginAsync(command);
       await second.ledger.commitSigned(command, 'تمّ');
       const directive = await second.haltSwitch.haltAsync(
         'إيقافٌ سياديّ',
@@ -209,7 +209,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
 
       const second = await boot(root);
       const command = { id: 'أمرٌ-يُسقَط' };
-      second.ledger.begin(command);
+      await second.ledger.beginAsync(command);
       await second.ledger.commitSigned(command, 'تمّ');
       await second.haltSwitch.haltAsync(
         'إيقافٌ سياديّ',
@@ -245,7 +245,7 @@ describe('حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ �
 
       const second = await boot(root);
       const command = { id: 'أمرٌ-مُثبَّتٌ' };
-      second.ledger.begin(command);
+      await second.ledger.beginAsync(command);
       await second.ledger.commitSigned(command, 'تمّ');
       await second.haltSwitch.haltAsync(
         'إيقافٌ سياديّ',
@@ -493,7 +493,7 @@ const bodyOf = (root) => JSON.parse(readFileSync(join(root, MANIFEST), 'utf8')).
 async function advanceState(first, commandId) {
   const second = await rebootRuntime(first);
   try {
-    second.runtime.ledger.begin({ id: commandId });
+    await second.runtime.ledger.beginAsync({ id: commandId });
     await second.runtime.ledger.commitSigned({ id: commandId }, 'تمّ');
     const directive = await second.runtime.haltSwitch.haltAsync(
       'إيقافٌ سياديّ',

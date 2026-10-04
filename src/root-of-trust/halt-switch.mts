@@ -64,6 +64,7 @@ import {
   verify as verifySignature,
 } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { beforeDurableWrite } from './commit-barrier.mjs';
 import { fingerprint } from './identity.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import { isWellFormedRoyalCommandBody, trustedRoyalVerifierFingerprint } from './royal-command.mjs';
@@ -142,6 +143,8 @@ export const HaltErrorCodes = [
   // `M11.04-F07`: ولا يُركَّبُ في الإنتاجِ مفتاحُ إيقافٍ بلا شاهدٍ **خارجَ**
   // البيانِ المختوم؛ فبيانٌ وحدَه شاهدٌ يُسترجَعُ أقدمُ منه بخاتَمٍ صحيح.
   'HALT_SEALED_LOG_REQUIRED_IN_PRODUCTION',
+  'HALT_SECONDARY_WRITER_FORBIDDEN',
+  'HALT_READ_ONLY',
   // `R5-B-07` (تقرير: R5-B-05): الإيقافُ والاستئنافُ فعلٌ سياديٌّ فلا
   // يصدرُ إلّا بأمرٍ ملكيٍّ موثَّقٍ حينَ المُحقِّقُ موصولٌ، ولا بلا تصريحِ
   // اختبارٍ حينَ لا مُحقِّقَ — فشلٌ مغلقٌ في الحالَينِ.
@@ -387,6 +390,11 @@ export interface HaltEpochFloor {
 }
 
 /** خيارات المفتاح: مزامنة القرص، وسجل أحداث اختياري للتدقيق. */
+/** أقلُّ ما يلزمُ من حاجزِ الالتزامِ — يوافقُ `CommitCoordinator` بلا اقترانٍ بوحدتِه. */
+export interface HaltCommitBarrier {
+  run<T>(intent: string, fn: () => Promise<T> | T): Promise<T>;
+}
+
 export interface HaltSwitchOptions {
   /** مزامنة القرص بعد كل كتابة. تعطيلها يُسرّع ويُضعف الضمان. */
   fsync?: boolean;
@@ -413,6 +421,14 @@ export interface HaltSwitchOptions {
   sealEpoch?: (() => Promise<void>) | null;
   /** بيئةُ التشغيلِ — تُقرأُ لمعرفةِ هل الحدُّ الخارجيُّ إلزامٌ أم لا. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * `D6` (‏`WL-326`): حاجزُ الالتزامِ للكاتبِ الإنتاجيِّ الواحد. في الإنتاجِ لا يُركَّبُ
+   * مفتاحُ إيقافٍ قابلٌ للكتابةِ بلاه: العمليّاتُ الخارجيّةُ تقرأُ (‏`readOnly`) وتُرسِلُ
+   * قصداً مُصادَقاً (‏`halt-intents`) ولا تكتبُ الملفّات.
+   */
+  commitBarrier?: HaltCommitBarrier | null;
+  /** قارئٌ لا يكتبُ أبداً — لكلِّ عمليةٍ غيرِ عمليةِ الجذرِ في الإنتاج. */
+  readOnly?: boolean;
   /**
    * R5-B-07 (تقرير: R5-B-05): مُحقِّقُ الأمرِ الملكيِّ. حينَ يُوصَلُ لا
    * يصدرُ إيقافٌ ولا استئنافٌ إلّا بأمرٍ ملكيٍّ يُصدِّقُهُ هذا المُحقِّقُ،
@@ -547,6 +563,10 @@ export class HaltSwitch implements HaltGuard {
   #maxCommandAgeMs: number;
   #maxCommandSkewMs: number;
   #production: boolean;
+  /** حاجزُ الكاتبِ الواحد (‏`WL-326`) أو `null` خارجَ الإنتاج. */
+  #barrier: HaltCommitBarrier | null;
+  /** قارئٌ لا يكتب. */
+  #readOnly: boolean;
   /** `WL-302`: المُحقِّقُ مبنيٌّ على مفتاحٍ عامٍّ بـ`createRoyalCommandVerifier`؟ */
   #trustedVerifier: boolean;
 
@@ -584,6 +604,8 @@ export class HaltSwitch implements HaltGuard {
     this.#maxCommandAgeMs = options.maxCommandAgeMs ?? DEFAULT_ROYAL_COMMAND_MAX_AGE_MS;
     this.#maxCommandSkewMs = options.maxCommandSkewMs ?? DEFAULT_ROYAL_COMMAND_MAX_SKEW_MS;
     this.#production = isProductionRuntime(options.env ?? process.env);
+    this.#barrier = options.commitBarrier ?? null;
+    this.#readOnly = options.readOnly ?? false;
     this.#trustedVerifier =
       this.#royalCommandVerifier !== null &&
       trustedRoyalVerifierFingerprint(this.#royalCommandVerifier) !== null;
@@ -602,6 +624,8 @@ export class HaltSwitch implements HaltGuard {
     }
     // في الإنتاجِ لا يُركَّبُ مفتاحُ إيقافٍ شاهدُه داخلَ ما يُمحى معَه: فشلٌ
     // مغلقٌ عندَ التركيبِ لا عندَ أوّلِ محوٍ (‏`UF-03`).
+    // القارئُ (‏`readOnly`) لا يُنشئُ شيئاً ولا يكتب — ولا يُطلَبُ منه حدٌّ ولا سجلٌّ لأنّه لا يكتب.
+    if (this.#readOnly) return;
     if (this.#epochFloor === null && isProductionRuntime(options.env ?? process.env)) {
       throw new HaltError('HALT_EPOCH_FLOOR_REQUIRED_IN_PRODUCTION', {});
     }
@@ -609,6 +633,12 @@ export class HaltSwitch implements HaltGuard {
     // فشلٌ مغلقٌ عندَ التركيبِ لا عندَ أوّلِ استرجاعِ بيانٍ أقدم.
     if (this.#logAsync === null && isProductionRuntime(options.env ?? process.env)) {
       throw new HaltError('HALT_SEALED_LOG_REQUIRED_IN_PRODUCTION', {});
+    }
+    // `D6` (‏`WL-326`): في الإنتاجِ كاتبٌ واحدٌ هو عمليةُ الجذرِ بحاجزِها. غيرُها قارئٌ
+    // (‏`readOnly`) يُرسِلُ قصداً ولا يكتب — ولا يُركَّبُ كاتبٌ ثانٍ ولو حملَ الحدَّ والسجلَّ
+    // (‏`LIVE-34`). الفحصُ بعدَ فحوصِ التركيبِ الأخرى كي تبقى رموزُها كما هي.
+    if (this.#production && this.#barrier === null) {
+      throw new HaltError('HALT_SECONDARY_WRITER_FORBIDDEN', {});
     }
     mkdirSync(dirname(file), { recursive: true });
     mkdirSync(this.acksDir, { recursive: true });
@@ -939,6 +969,7 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   halt(reason = 'royal sovereign halt', command?: unknown): HaltDirective {
+    this.#assertWritable();
     const current = this.read();
     const refused = this.#requireRoyalCommand(command, 'halt', reason, current.epoch);
     if (refused !== null) this.#rejectSync(refused, 'halt', command, current.epoch);
@@ -962,6 +993,7 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   resume(reason = 'royal resume', command?: unknown): HaltDirective {
+    this.#assertWritable();
     const current = this.read();
     const refused = this.#requireRoyalCommand(command, 'resume', reason, current.epoch);
     if (refused !== null) this.#rejectSync(refused, 'resume', command, current.epoch);
@@ -997,6 +1029,17 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   async haltAsync(reason = 'royal sovereign halt', command?: unknown): Promise<HaltDirective> {
+    this.#assertWritable();
+    // `D3`/`D6` (‏`WL-326`): الإيقافُ كلُّه — التوجيهُ والعهدُ والتاريخُ وشاهدُه المختومُ،
+    // أو قيدُ رفضِه — معاملةٌ واحدةٌ عبرَ الحاجز، فلا يُرجَعُ قبلَ أن يدومَ ويُرقّى.
+    if (this.#barrier !== null) {
+      return this.#barrier.run('halt', () => this.#haltAsyncInner(reason, command));
+    }
+    return this.#haltAsyncInner(reason, command);
+  }
+
+  /** جسمُ `haltAsync` بلا حاجز. */
+  async #haltAsyncInner(reason: string, command?: unknown): Promise<HaltDirective> {
     const current = this.read();
     const refused = this.#requireRoyalCommand(command, 'halt', reason, current.epoch);
     if (refused !== null) return this.#rejectAsync(refused, 'halt', command, current.epoch);
@@ -1029,6 +1072,15 @@ export class HaltSwitch implements HaltGuard {
    * @returns التوجيه الصادر
    */
   async resumeAsync(reason = 'royal resume', command?: unknown): Promise<HaltDirective> {
+    this.#assertWritable();
+    if (this.#barrier !== null) {
+      return this.#barrier.run('resume', () => this.#resumeAsyncInner(reason, command));
+    }
+    return this.#resumeAsyncInner(reason, command);
+  }
+
+  /** جسمُ `resumeAsync` بلا حاجز. */
+  async #resumeAsyncInner(reason: string, command?: unknown): Promise<HaltDirective> {
     const current = this.read();
     const refused = this.#requireRoyalCommand(command, 'resume', reason, current.epoch);
     if (refused !== null) return this.#rejectAsync(refused, 'resume', command, current.epoch);
@@ -1082,6 +1134,7 @@ export class HaltSwitch implements HaltGuard {
     nodeId: string,
     options: { pid?: number; nodeKey?: HaltNodeKey } = {},
   ): HaltNodeRecord {
+    this.#assertWritable();
     const id = this.#assertNodeId(nodeId);
     const pid = options.pid ?? process.pid;
     const record: HaltNodeRecord = { nodeId: id, pid, at: new Date().toISOString() };
@@ -1098,6 +1151,8 @@ export class HaltSwitch implements HaltGuard {
    */
   unregisterNode(nodeId: string): void {
     const id = this.#assertNodeId(nodeId);
+    this.#assertWritable();
+    beforeDurableWrite(join(this.nodesDir, this.#key(id) + '.json'), 'replace');
     rmSync(join(this.nodesDir, this.#key(id) + '.json'), { force: true });
   }
 
@@ -1107,6 +1162,7 @@ export class HaltSwitch implements HaltGuard {
    */
   nodes(): (HaltNodeRecord & { alive: boolean })[] {
     const records: (HaltNodeRecord & { alive: boolean })[] = [];
+    if (!existsSync(this.nodesDir)) return records;
     for (const name of readdirSync(this.nodesDir)) {
       if (name.startsWith('.')) continue;
       const record = this.#readJson<HaltNodeRecord>(join(this.nodesDir, name));
@@ -1114,6 +1170,56 @@ export class HaltSwitch implements HaltGuard {
       records.push({ ...record, alive: this.#pidAlive(record.pid) });
     }
     return records.sort((left, right) => left.nodeId.localeCompare(right.nodeId));
+  }
+
+  /**
+   * `registerNode` عبرَ الحاجز (‏`WL-326`) — المسارُ الإنتاجيُّ لتسجيلِ عقدة.
+   * @param nodeId - المعرّف
+   * @param options - رقمُ العمليةِ ومفتاحُ العقدة
+   * @returns السجلّ
+   */
+  async registerNodeAsync(
+    nodeId: string,
+    options: { pid?: number; nodeKey?: HaltNodeKey } = {},
+  ): Promise<HaltNodeRecord> {
+    this.#assertWritable();
+    if (this.#barrier === null) return this.registerNode(nodeId, options);
+    return this.#barrier.run('halt.register', () => this.registerNode(nodeId, options));
+  }
+
+  /**
+   * `unregisterNode` عبرَ الحاجز.
+   * @param nodeId - المعرّف
+   */
+  async unregisterNodeAsync(nodeId: string): Promise<void> {
+    this.#assertWritable();
+    if (this.#barrier === null) {
+      this.unregisterNode(nodeId);
+      return;
+    }
+    await this.#barrier.run('halt.unregister', () => this.unregisterNode(nodeId));
+  }
+
+  /**
+   * `confirmHalt` عبرَ الحاجز — والإقرارُ لا يُرجَعُ قبلَ أن يدوم (‏`D3`).
+   * @param nodeId - المعرّف
+   * @param proof - إثباتُ العقدة
+   * @param detail - تفصيل
+   * @returns الإقرار
+   */
+  async confirmHaltAsync(
+    nodeId: string,
+    proof?: string,
+    detail?: string,
+  ): Promise<HaltConfirmation> {
+    this.#assertWritable();
+    if (this.#barrier === null) return this.confirmHalt(nodeId, proof, detail);
+    return this.#barrier.run('halt.confirm', () => this.confirmHalt(nodeId, proof, detail));
+  }
+
+  /** قارئٌ لا يكتب: كلُّ فعلٍ يمسُّ القرصَ مرفوضٌ برمزِه (‏`D6`). */
+  #assertWritable(): void {
+    if (this.#readOnly) throw new HaltError('HALT_READ_ONLY', {});
   }
 
   /**
@@ -1133,6 +1239,7 @@ export class HaltSwitch implements HaltGuard {
    * @returns الإقرار المحفوظ
    */
   confirmHalt(nodeId: string, proof?: string, detail?: string): HaltConfirmation {
+    this.#assertWritable();
     const id = this.#assertNodeId(nodeId);
     const reading = this.read();
     if (reading.state !== 'halted') {
@@ -1203,6 +1310,7 @@ export class HaltSwitch implements HaltGuard {
    */
   confirmations(epoch: number = this.read().epoch): HaltConfirmation[] {
     const found: HaltConfirmation[] = [];
+    if (!existsSync(this.acksDir)) return found;
     for (const name of readdirSync(this.acksDir)) {
       if (name.startsWith('.')) continue;
       const record = this.#readJson<HaltConfirmation>(join(this.acksDir, name));
@@ -1594,6 +1702,7 @@ export class HaltSwitch implements HaltGuard {
    * @param text - المحتوى
    */
   #writeAtomic(path: string, text: string): void {
+    beforeDurableWrite(path, 'replace');
     const temporary = `${path}.writing-${process.pid}-${randomUUID()}`;
     const fd = openSync(temporary, 'wx');
     try {
@@ -1612,6 +1721,7 @@ export class HaltSwitch implements HaltGuard {
    * @param text - السطر بنهايته
    */
   #appendLine(path: string, text: string): void {
+    beforeDurableWrite(path, 'append');
     const fd = openSync(path, 'a');
     try {
       this.#writeAll(fd, text);
