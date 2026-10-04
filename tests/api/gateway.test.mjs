@@ -329,6 +329,7 @@ test('حدُّ المعدَّلِ يَعُدُّ النداءَ المرفوضَ
   /** @type {string[]} */
   const codes = [];
   for (let attempt = 0; attempt < limit.maxCalls + 1; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
     await gateway.call({ route, token: session.token }).catch((error) => {
       codes.push(codeOf(error));
     });
@@ -349,6 +350,7 @@ test('حدُّ كلِّ مسارٍ مستقلٌّ عن غيرِه', async () => 
   const limit = gateway.routes().find((entry) => entry.id === route)?.limit;
   assert.ok(limit !== undefined);
   for (let attempt = 0; attempt < limit.maxCalls; attempt += 1) {
+    // eslint-disable-next-line no-await-in-loop
     await gateway.call({ route, token: session.token }).catch(() => {});
   }
   // المسارُ نفسُه استُنفد؛ ومسارٌ آخرُ يجب أن يبقى مفتوحاً وإلا صار مُنادٍ واحدٌ

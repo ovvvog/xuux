@@ -111,6 +111,7 @@ export class InMemoryFreshnessSocket implements FreshnessSocket {
     const original = this.read.bind(this);
     this.read = async () => {
       throw new Error('FRESHNESS_SOURCE_UNAVAILABLE');
+      // eslint-disable-next-line no-unreachable
       void original;
     };
   }
