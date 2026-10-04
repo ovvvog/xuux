@@ -214,3 +214,25 @@ test('WL-286 — لا خطوةَ تفريغِ /tmp خاصّةٍ بالعدّاء
   const after = steps.find((s) => String(s.name ?? '').includes('مقايسة /tmp بعد'));
   assert.ok(after, 'مقايسة /tmp بعد الاختبارات باقيةٌ.');
 });
+
+test('WL-327 — مسارُ النشرِ cancel-in-progress: true', async () => {
+  const { parse } = await import('yaml');
+  const publishWorkflow = readFileSync(
+    path.join(repoRoot, '.github', 'workflows', 'publish-skip-baseline.yml'),
+    'utf8',
+  );
+  /** @type {Record<string, any>} */
+  const parsed = parse(publishWorkflow);
+  const concurrency = parsed.concurrency;
+  assert.ok(concurrency, 'مسارُ النشرِ بلا مجموعةِ تزامنٍ.');
+  assert.equal(
+    concurrency.group,
+    'publish-skip-baseline',
+    'مجموعةُ التزامنِ ليست publish-skip-baseline.',
+  );
+  assert.equal(
+    concurrency['cancel-in-progress'],
+    true,
+    'cancel-in-progress ليس true — تشغيلةٌ منتظرةٌ قد تحجبُ ما بعدها (OPS-1/MAIN-DRIFT-WINDOW لمسة (ج)).',
+  );
+});
