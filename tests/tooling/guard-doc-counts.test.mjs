@@ -444,3 +444,24 @@ test('الطفرةُ M15: ترويسةُ قسمٍ بلا مضمونٍ تُسقِ
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── الطفرةُ 16: علامةُ الإغلاقِ غيرُ الموحَّدة (‏`R8`، `WL-330` إغلاقاً لـ`DOC-23`) ──
+
+test('الطفرةُ M16: حذفُ 🟢 من معرِّفٍ مُغلَقٍ يُسقِطُ الحاجزَ بـR8/UNMARKED', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    // احذف 🟢 من صفِّ D-1 المُغلَق (له ~~ بلا 🟢 في المعرِّف)
+    const mutated = debt.replace('| ~~`D-1`~~ 🟢 |', '| ~~`D-1`~~ |');
+    assert.notEqual(mutated, debt, 'ينبغي أن يُعثَرَ على صفِّ D-1');
+    writeFileSync(debtPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'حذفُ 🟢 من معرِّفٍ مُغلَقٍ ينبغي أن يُسقِطَ الحاجز');
+    assert.match(stderr, /R8\/UNMARKED/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ملاحظةٌ: الاختبارُ الإيجابيُّ لـR8 (العلامةُ الموحَّدةُ تَمرُّ) مُعلَّقٌ حتى يُحَلَّ انحرافُ R2/DRIFT
