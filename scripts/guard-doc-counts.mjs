@@ -392,15 +392,25 @@ const facts = readDocCountFacts(root);
       const line = debtLines[i] ?? '';
       if (!line.startsWith('|')) continue;
       if (line.includes('| ---')) continue;
-      const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
+      const cells = line
+        .split('|')
+        .map((c) => c.trim())
+        .filter(Boolean);
       if (cells.length < 2) continue;
       const idCell = cells[0];
-      const fullRow = line;
+      if (!idCell) continue;
       // تحديدُ ما إذا كانَ الصفُّ مُغلَقاً: المعرِّفُ مشطوبٌ بـ~~
       const isClosed = idCell.includes('~~');
       if (!isClosed) continue;
       // تخطّي صفوفِ الترويسةِ والملخصِ
-      if (idCell.startsWith('الديون') || idCell.startsWith('الحدود') || idCell.startsWith('نتائج') || idCell.startsWith('ديون') || idCell.startsWith('المعرِّف')) continue;
+      if (
+        idCell.startsWith('الديون') ||
+        idCell.startsWith('الحدود') ||
+        idCell.startsWith('نتائج') ||
+        idCell.startsWith('ديون') ||
+        idCell.startsWith('المعرِّف')
+      )
+        continue;
       const hasStrikethrough = idCell.includes('~~');
       const hasEmoji = idCell.includes('🟢');
       if (!hasStrikethrough || !hasEmoji) {
