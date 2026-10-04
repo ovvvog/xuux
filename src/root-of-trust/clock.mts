@@ -53,6 +53,9 @@ import {
 import { dirname } from 'node:path';
 import { hrtime } from 'node:process';
 
+import { beforeDurableWrite, inCommitTransaction } from './commit-barrier.mjs';
+import type { CommitCoordinator } from './commit-barrier.mjs';
+
 /** الصيغة المثبَّتة لملف حالة الساعة؛ تُرفض أي صيغة أخرى ولا تُخمَّن. */
 export const CLOCK_STATE_VERSION = 1;
 
@@ -162,6 +165,14 @@ export interface SovereignClockOptions {
   wallClock?: () => number;
   /** العدّاد الرتيب بالنانو ثانية. يُحقن في الاختبار وحده. */
   monotonic?: () => bigint;
+  /**
+   * حاجزُ الالتزامِ للجذرِ الذي تقيمُ فيه الحالة (‏`LIVE-37`، `WL-331`). إن وُجد، فالكتابةُ
+   * لا تقعُ إلّا عبرَه: داخلَ معاملةٍ جاريةٍ تُضمُّ الكتابةُ إليها، وخارجَها تُودَعُ معاملةً
+   * خاصّةً بها (‏`clock.persist`) لا تُكتبُ إلّا أن تُقَرّ. وفشلُ تلك المعاملة يُبطلُ الثقةَ
+   * كما يُبطلُها فشلُ الكتابةِ المباشرة. وإن غاب فالكتابةُ مباشرةٌ كما كانت — وضعُ التطويرِ
+   * والاختبارِ بلاِ حاجزٍ.
+   */
+  commitBarrier?: CommitCoordinator | null;
 }
 
 /** يكتب ملفاً ذرياً: مؤقت ⇒ مزامنة ⇒ إحلال ⇒ مزامنة المجلد. */
@@ -193,6 +204,7 @@ export class SovereignClock implements TrustedClock {
 
   private readonly wall: () => number;
   private readonly mono: () => bigint;
+  private readonly barrier: CommitCoordinator | null;
 
   private anchorWallMs: number;
   private anchorMonoNs: bigint;
@@ -215,6 +227,7 @@ export class SovereignClock implements TrustedClock {
     this.persistEveryMs = options.persistEveryMs ?? 1000;
     this.wall = options.wallClock ?? (() => Date.now());
     this.mono = options.monotonic ?? (() => hrtime.bigint());
+    this.barrier = options.commitBarrier ?? null;
 
     const state = this.readState();
     this.highWaterMs = state?.highWaterMs ?? 0;
@@ -268,17 +281,58 @@ export class SovereignClock implements TrustedClock {
     };
   }
 
-  /** يكتب الحدّ الأعلى. فشلُ الكتابة يُبطل الثقة ولا يُتجاوز بصمت. */
+  /**
+   * يكتب الحدّ الأعلى. فشلُ الكتابة يُبطل الثقة ولا يُتجاوز بصمت.
+   *
+   * `LIVE-37` (‏`WL-331`): مع حاجزِ التزامٍ، الكتابةُ حالةٌ في الجذرِ فلا تقعُ إلّا داخلَ
+   * معاملةٍ — داخلَ معاملةٍ جاريةٍ تُضمُّ إليها، وخارجَها معاملةً خاصّةً بها تُودَعُ في
+   * طابورِ الحاجزِ ولا تُنتظَر (‏`now()` متزامنةٌ لا تستطيعُ الانتظار). ومضمونُها أنّها لا
+   * تُرجِعُ نجاحاً إلا بعدَ الدوامِ والترقيةِ (‏`D3`)، وأنّ أيَّ كتابةٍ لها بغيرِ معاملةٍ
+   * يُرفضُها الحاجزُ (‏`D6`).
+   */
   private persist(): void {
     if (!this.statePath) return;
-    const state: ClockState = {
-      version: CLOCK_STATE_VERSION,
-      highWaterMs: this.highWaterMs,
-      updatedAt: new Date(this.highWaterMs).toISOString(),
-      attestations: this.attestationCount,
+    const statePath = this.statePath;
+    const write = (): void => {
+      // قبلَ أن يمسَّ القرصَ: داخلَ معاملةٍ يُحفَظُ ما قبلَها في سجلِّ التراجع.
+      beforeDurableWrite(statePath, 'replace');
+      const state: ClockState = {
+        version: CLOCK_STATE_VERSION,
+        highWaterMs: this.highWaterMs,
+        updatedAt: new Date(this.highWaterMs).toISOString(),
+        attestations: this.attestationCount,
+      };
+      writeAtomic(statePath, `${JSON.stringify(state)}\n`);
     };
+    if (this.barrier !== null) {
+      if (inCommitTransaction(this.barrier)) {
+        // معاملةٌ جاريةٌ: الكتابةُ تُضمُّ إليها فتُختمُ معها في بصمةٍ واحدة.
+        this.attemptPersist(write);
+        return;
+      }
+      // خارجَ معاملةٍ: كتابةُ حالةٍ لا تمرُّ بغيرِ الحاجز. تُودَعُ معاملةً خاصّةً بها،
+      // وفشلُها يُبطلُ الثقةَ كما يُبطلُها فشلُ الكتابةِ المباشرة. ولا يُعلَنُ الحدُّ
+      // الأعلىُ مكتوباً قبلَ أن يُقَرَّ به.
+      this.persistedHighWaterMs = this.highWaterMs;
+      void this.barrier
+        .run('clock.persist', write)
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          this.invalidate(
+            'CLOCK_STATE_UNWRITABLE',
+            null,
+            (error as { code?: string }).code ?? 'commit barrier rejected clock.persist',
+          );
+        });
+      return;
+    }
+    this.attemptPersist(write);
+  }
+
+  /** كتابةٌ مباشرةٌ بلا حاجزٍ، أو من داخلِ معاملةٍ: الفشلُ يُبطلُ الثقةَ فوراً. */
+  private attemptPersist(write: () => void): void {
     try {
-      writeAtomic(this.statePath, `${JSON.stringify(state)}\n`);
+      write();
     } catch (error) {
       // حدٌّ أعلى لا يُكتب يعني أن رجوع الساعة بعد إعادة التشغيل لن يُكشف؛
       // فتُبطل الثقة الآن بدل أن يُكتشف الأمر بعد وقوعه.
