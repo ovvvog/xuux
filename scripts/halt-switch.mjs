@@ -27,6 +27,7 @@ import { join, resolve } from 'node:path';
 import {
   awaitRootIntentResult,
   registerPossessionPayload,
+  registerRotationPayload,
   submitRootIntent,
   HaltSwitch,
   haltAckPayload,
@@ -55,26 +56,31 @@ const USAGE = `الاستعمال:
 مُصادَقاً في صندوقِ عمليةِ الجذرِ (‏XUUX_STATE_ROOT) وتنتظرُ نتيجتَها بعدَ الدوام:
   halt|resume --command-file <أمرٌ ملكيٌّ موقَّعٌ JSON> [--timeout-ms N]
   confirm     --node-key <pem>                      [--timeout-ms N]
+  confirm     --node-key <pem> --old-node-key <pem> [--timeout-ms N]
+    تدويرُ مفتاحِ عقدةٍ قائمةٍ (‏\`LIVE-40\` أ): المفتاحُ الجديدُ يُثبتُ الحيازةَ،
+    والمفتاحُ القديمُ المسجَّلُ يُوقّعُ إذنَ التدوير — فلا يُقبَلُ بأحدهما وحدَه.
 
 البيئة:
-  HALT_SWITCH_FILE      ملف التوجيه الدائم (إلزامي)
-  HALT_NODE_ID          معرّف العقدة (إلزامي لأمر confirm)
-  HALT_NODE_KEY_FILE    مفتاح العقدة الخاص (إلزامي لأمر confirm — GPT-F05)
-  HALT_PUBLIC_KEY_FILE  مفتاح الملك العام: قراءة وإقرار بلا قدرة إصدار
-  مخزن المفاتيح:        KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER`;
+  HALT_SWITCH_FILE       ملف التوجيه الدائم (إلزامي)
+  HALT_NODE_ID           معرّف العقدة (إلزامي لأمر confirm)
+  HALT_NODE_KEY_FILE     مفتاح العقدة الخاص (إلزامي لأمر confirm — GPT-F05)
+  HALT_OLD_NODE_KEY_FILE مفتاح العقدة القديم (تدويرُ مفتاحِ عقدةٍ قائمة — LIVE-40)
+  HALT_PUBLIC_KEY_FILE   مفتاح الملك العام: قراءة وإقرار بلا قدرة إصدار
+  مخزن المفاتيح:         KING_KEY_STORE_ENDPOINT/TOKEN أو KING_KEY_DIR/KING_KEY_MASTER`;
 
 /**
  * يفكّ وسائط سطر الأوامر إلى أمرٍ وخيارات.
  * @param {string[]} argv - الوسائط بعد اسم السكربت
- * @returns {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null }} الأمر وخياراته
+ * @returns {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null, oldNodeKeyFile: string | null }} الأمر وخياراته
  */
 export function parseArgs(argv) {
-  /** @type {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null }} */
+  /** @type {{ command: string, json: boolean, reason: string | null, nodeKeyFile: string | null, oldNodeKeyFile: string | null }} */
   const parsed = {
     command: argv[0] ?? 'status',
     json: false,
     reason: null,
     nodeKeyFile: null,
+    oldNodeKeyFile: null,
     commandFile: null,
     timeoutMs: 30_000,
   };
@@ -102,6 +108,11 @@ export function parseArgs(argv) {
       if (!value) throw new Error('--node-key بلا قيمة');
       parsed.nodeKeyFile = value;
       index += 1;
+    } else if (argument === '--old-node-key') {
+      const value = argv[index + 1];
+      if (!value) throw new Error('--old-node-key بلا قيمة');
+      parsed.oldNodeKeyFile = value;
+      index += 1;
     } else throw new Error(`وسيط غير معروف: ${argument}`);
   }
   return parsed;
@@ -110,7 +121,7 @@ export function parseArgs(argv) {
 /**
  * يقرأ الإعداد من البيئة ويرفض ما ينقص، فلا يُخترع مسار افتراضي لزرّ إيقاف.
  * @param {NodeJS.ProcessEnv} env - البيئة
- * @returns {{ file: string, nodeId: string | null, publicKeyFile: string | null, nodeKeyFile: string | null }} الإعداد
+ * @returns {{ file: string, nodeId: string | null, publicKeyFile: string | null, nodeKeyFile: string | null, oldNodeKeyFile: string | null }} الإعداد
  */
 export function readConfig(env) {
   const file = env['HALT_SWITCH_FILE'];
@@ -120,6 +131,7 @@ export function readConfig(env) {
     nodeId: env['HALT_NODE_ID'] ?? null,
     publicKeyFile: env['HALT_PUBLIC_KEY_FILE'] ?? null,
     nodeKeyFile: env['HALT_NODE_KEY_FILE'] ?? null,
+    oldNodeKeyFile: env['HALT_OLD_NODE_KEY_FILE'] ?? null,
   };
 }
 
@@ -237,19 +249,31 @@ async function runProduction(args, config, env, deps) {
       );
       const registered = halt.nodes().find((node) => node.nodeId === config.nodeId);
       if (registered?.nodeKeyPem !== publicKeyPem) {
-        await submitAndAwait(
-          root,
-          'register',
-          {
-            nodeId: config.nodeId,
-            publicKeyPem,
-            possession: signHaltAck(
-              privateKeyPem,
-              registerPossessionPayload(config.nodeId, publicKeyPem),
-            ),
-          },
-          args.timeoutMs,
-        );
+        const registerPayload = {
+          nodeId: config.nodeId,
+          publicKeyPem,
+          possession: signHaltAck(
+            privateKeyPem,
+            registerPossessionPayload(config.nodeId, publicKeyPem),
+          ),
+        };
+        // `LIVE-40` (أ): عقدةٌ قائمةٌ بمفتاحٍ آخرَ: التسجيلُ لا يُقبَلُ بالمفتاحِ
+        // الجديدِ وحدَه، بل بإذنٍ من المفتاحِ **القديمِ المسجَّلِ** فوقَ مادةِ التدوير.
+        // غيابُه رفضٌ مغلقٌ بذكرِ سببِه لا بصمتٍ يُدّعي نجاحاً.
+        if (registered !== undefined) {
+          const oldNodeKeyFile = args.oldNodeKeyFile ?? config.oldNodeKeyFile;
+          if (!oldNodeKeyFile) {
+            throw new Error(
+              'HALT_NODE_KEY_ROTATION_OLD_KEY_REQUIRED: العقدةُ مسجَّلةٌ بمفتاحٍ آخرَ — ' +
+                'تدويرُ مفتاحِها يلزمُه مفتاحُها القديمُ المسجَّلُ (--old-node-key أو HALT_OLD_NODE_KEY_FILE)',
+            );
+          }
+          registerPayload.rotation = signHaltAck(
+            readFileSync(oldNodeKeyFile, 'utf8'),
+            registerRotationPayload(config.nodeId, publicKeyPem),
+          );
+        }
+        await submitAndAwait(root, 'register', registerPayload, args.timeoutMs);
       }
       const reading = halt.read();
       const proof = signHaltAck(

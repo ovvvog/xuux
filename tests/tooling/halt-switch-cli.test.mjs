@@ -105,6 +105,7 @@ test('فكّ الوسائط يقبل المعروف ويرفض المجهول و
     json: true,
     reason: 'سبب',
     nodeKeyFile: null,
+    oldNodeKeyFile: null,
     commandFile: null,
     timeoutMs: 30_000,
   });
@@ -113,6 +114,7 @@ test('فكّ الوسائط يقبل المعروف ويرفض المجهول و
     json: false,
     reason: null,
     nodeKeyFile: null,
+    oldNodeKeyFile: null,
     commandFile: null,
     timeoutMs: 30_000,
   });
@@ -121,12 +123,24 @@ test('فكّ الوسائط يقبل المعروف ويرفض المجهول و
     json: false,
     reason: null,
     nodeKeyFile: '/k.pem',
+    oldNodeKeyFile: null,
+    commandFile: null,
+    timeoutMs: 30_000,
+  });
+  // `LIVE-40` (أ): مفتاحُ العقدةِ القديمُ لتدويرِ مفتاحِ عقدةٍ قائمة.
+  assert.deepEqual(parseArgs(['confirm', '--node-key', '/new.pem', '--old-node-key', '/old.pem']), {
+    command: 'confirm',
+    json: false,
+    reason: null,
+    nodeKeyFile: '/new.pem',
+    oldNodeKeyFile: '/old.pem',
     commandFile: null,
     timeoutMs: 30_000,
   });
   assert.throws(() => parseArgs(['halt', '--force']), /وسيط غير معروف/);
   assert.throws(() => parseArgs(['halt', '--reason']), /--reason بلا قيمة/);
   assert.throws(() => parseArgs(['confirm', '--node-key']), /--node-key بلا قيمة/);
+  assert.throws(() => parseArgs(['confirm', '--old-node-key']), /--old-node-key بلا قيمة/);
 });
 
 test('الإعداد يُقرأ من البيئة ولا يُخترع مسار افتراضي لزرّ إيقاف', () => {
@@ -136,8 +150,14 @@ test('الإعداد يُقرأ من البيئة ولا يُخترع مسار �
   assert.equal(config.nodeId, 'node-1');
   assert.equal(config.publicKeyFile, null);
   assert.equal(config.nodeKeyFile, null);
+  assert.equal(config.oldNodeKeyFile, null);
   const withKey = readConfig({ HALT_SWITCH_FILE: '/tmp/halt.json', HALT_NODE_KEY_FILE: '/k.pem' });
   assert.equal(withKey.nodeKeyFile, '/k.pem');
+  const withOldKey = readConfig({
+    HALT_SWITCH_FILE: '/tmp/halt.json',
+    HALT_OLD_NODE_KEY_FILE: '/old.pem',
+  });
+  assert.equal(withOldKey.oldNodeKeyFile, '/old.pem');
 });
 
 test('التقرير النصي يُظهر الحالة والعهد والعقد التي لم تُقرّ', () => {

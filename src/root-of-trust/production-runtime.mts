@@ -930,7 +930,7 @@ export async function createProductionRootOfTrust(
     const intents = new RootIntentProcessor({
       root: options.root,
       haltSwitch: haltSwitch as unknown as IntentHaltSwitch,
-      anchor: ({ force }) => anchorAsync({ force }),
+      anchor: ({ force, intervalMs }) => anchorAsync({ force, intervalMs }),
       anchorVerifier: signers.anchorSigner,
       fsync: options.fsync ?? true,
     });

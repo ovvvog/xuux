@@ -10,9 +10,12 @@
 // المصادقةُ لكلِّ نوعٍ بما يملكُه صاحبُه لا بما يدّعيه:
 //   halt/resume   أمرٌ ملكيٌّ موقَّعٌ يتحقّقُ منه مُحقِّقُ الجذرِ الملكيُّ (‏لا مفتاحُ `06`).
 //   confirm       إقرارٌ موقَّعٌ بمفتاحِ العقدةِ المسجَّلِ (‏`GPT-F05`).
-//   register      إثباتُ حيازةِ المفتاحِ المُسجَّل؛ وعقدةٌ قائمةٌ بمفتاحٍ آخرَ تُرَدّ.
+//   register      إثباتُ حيازةِ المفتاحِ الجديد؛ وعقدةٌ قائمةٌ بمفتاحٍ آخرَ لا
+//                 يُقبَلُ تسجيلُها إلا بتوقيعِ المفتاحَينِ معاً: القديمِ المسجَّلِ
+//                 (‏إذنُ التدوير) والجديد (‏إثباتُ الحيازة) — `LIVE-40` (أ).
 //   unregister    توقيعُ العقدةِ نفسِها على شطبِها في العهدِ الحاضر.
-//   anchor        توقيعٌ بمفتاحِ المرساةِ (‏`06`) على القصدِ بنطاقٍ مستقلّ.
+//   anchor        توقيعٌ بمفتاحِ المرساةِ (‏`06`) على القصدِ بنطاقٍ مستقلّ،
+//                 وفترةُ التثبيتِ جزءٌ من مادتِهِ الموقَّعة — `LIVE-40` (ب).
 //
 // الصندوقُ ليس حالةً: لا يدخلُ بصمةَ الحالة، ولا يُقرأُ منه شيءٌ إلّا بعدَ التحقّق. وقصدٌ
 // طُبِّقَ ثمَّ تعطّلَ الجذرُ قبلَ كتابةِ نتيجتِه يُعادُ عرضُه، فيُرَدُّ بحمايةِ الإعادةِ في
@@ -114,6 +117,19 @@ export function registerPossessionPayload(nodeId: string, publicKeyPem: string):
 }
 
 /**
+ * مادةُ إذنِ تدويرِ مفتاحِ عقدةٍ قائمةٍ (‏`LIVE-40` أ): يوقّعها المفتاحُ **القديمُ
+ * المسجَّلُ** فيُثبتُ مالكُ العهدةِ السابقةِ تسليمَهُ العقدةَ إلى المفتاحِ الجديد.
+ * ربطُها بـ(‏المعرّف، المفتاحِ الجديد) هو ما يجعلُ إعادةَ عرضِها بعدَ تدويرٍ لاحقٍ
+ * بلا أثر: المسجَّلَ حينها مفتاحٌ آخرُ فلا يَصِحُّ توقيعُها ضدَّه.
+ * @param nodeId - معرّفُ العقدة
+ * @param newPublicKeyPem - المفتاحُ العامُّ الجديدُ المطلوبُ التدويرُ إليه
+ * @returns المادةُ الموقَّعة
+ */
+export function registerRotationPayload(nodeId: string, newPublicKeyPem: string): object {
+  return ['xuux/halt/rotate/v1', nodeId, newPublicKeyPem];
+}
+
+/**
  * مادةُ توقيعِ العقدةِ على شطبِها.
  * @param nodeId - معرّفُ العقدة
  * @param epoch - العهدُ الحاضر
@@ -125,23 +141,28 @@ export function unregisterProofPayload(nodeId: string, epoch: number): object {
 
 /**
  * مادةُ توقيعِ قصدِ التثبيتِ بمفتاحِ المرساة — نطاقٌ مستقلٌّ (‏`purpose`) فلا يُقرأُ
- * توقيعُ مرساةٍ أو مفتاحُ دفترِ رفعٍ قصداً، ولا العكس.
+ * توقيعُ مرساةٍ أو مفتاحُ دفترِ رفعٍ قصداً، ولا العكس. وفترةُ التثبيتِ (‏`intervalMs`)
+ * جزءٌ من المادةِ الموقَّعةِ (‏`LIVE-40` ب): فلا يأخذَ الجذرُ فترتَهُ الافتراضيّةَ
+ * مكانَ فترةِ الأداةِ إلا أن تكونَ موقَّعةً بها.
  * @param intent - القصدُ بلا توقيعِه
  * @param intent.id - معرّفُه
  * @param intent.at - وقتُه
  * @param intent.force - تثبيتٌ قسريّ
+ * @param intent.intervalMs - فترةُ التثبيتِ الموقَّعةُ بالمللي ثانية
  * @returns المادةُ الموقَّعة
  */
 export function anchorIntentSigningBody(intent: {
   id: string;
   at: string;
   force: boolean;
+  intervalMs: number;
 }): object {
   return {
     purpose: 'xuux/root-intent/anchor/v1',
     id: intent.id,
     at: intent.at,
     force: intent.force,
+    intervalMs: intent.intervalMs,
   };
 }
 
@@ -266,7 +287,7 @@ export interface IntentHaltSwitch {
 export interface RootIntentProcessorOptions {
   root: string;
   haltSwitch: IntentHaltSwitch;
-  anchor: (options: { force: boolean }) => Promise<unknown>;
+  anchor: (options: { force: boolean; intervalMs: number }) => Promise<unknown>;
   anchorVerifier: { verify(payload: object, signature: string): boolean };
   fsync?: boolean;
 }
@@ -410,8 +431,20 @@ export class RootIntentProcessor {
         }
         const existing = halt.nodes().find((node) => node.nodeId === nodeId);
         if (existing?.nodeKeyPem !== undefined && existing.nodeKeyPem !== publicKeyPem) {
-          // تدويرُ مفتاحِ عقدةٍ ليس قصداً يُقبَلُ بمفتاحٍ جديدٍ وحدَه.
-          throw new RootIntentError('ROOT_INTENT_NODE_KEY_CONFLICT', nodeId);
+          // `LIVE-40` (أ): تدويرُ مفتاحِ عقدةٍ قائمة. لا يُقبَلُ بالمفتاحِ الجديدِ
+          // وحدَه (‏إثباتُ الحيازةِ أعلاه)، بل بإذنِ المفتاحِ **القديمِ المسجَّلِ**
+          // فوقَ مادةِ التدويرِ معه. غيابُ الإذنِ أو فسادُه يُبقيانِ الرفضَ كما كان.
+          const rotation = payload['rotation'];
+          if (
+            !isString(rotation) ||
+            !verifyHaltAckProof(
+              existing.nodeKeyPem,
+              registerRotationPayload(nodeId, publicKeyPem),
+              rotation,
+            )
+          ) {
+            throw new RootIntentError('ROOT_INTENT_NODE_KEY_CONFLICT', nodeId);
+          }
         }
         const pid = typeof payload['pid'] === 'number' ? (payload['pid'] as number) : undefined;
         const options: { pid?: number; nodeKey: { publicKeyPem: string; sign(): string } } = {
@@ -447,14 +480,24 @@ export class RootIntentProcessor {
       case 'anchor': {
         const signature = payload['signature'];
         const force = payload['force'] === true;
+        const intervalMs = payload['intervalMs'];
         if (!isString(signature)) {
           throw new RootIntentError('ROOT_INTENT_INVALID', 'anchor: توقيعٌ ناقص');
         }
-        const body = anchorIntentSigningBody({ id: intent.id, at: intent.at, force });
+        // `LIVE-40` (ب): فترةُ التثبيتِ جزءٌ من القصدِ الموقَّعِ — لا افتراضَ للجذرِ
+        // مكانَ فترةِ الأداةِ، ولا تثبيتَ بفترةٍ لم تُوقَّعْ.
+        if (
+          typeof intervalMs !== 'number' ||
+          !Number.isSafeInteger(intervalMs) ||
+          intervalMs <= 0
+        ) {
+          throw new RootIntentError('ROOT_INTENT_INVALID', 'anchor: فترةُ التثبيتِ ناقصة');
+        }
+        const body = anchorIntentSigningBody({ id: intent.id, at: intent.at, force, intervalMs });
         if (!this.#options.anchorVerifier.verify(body, signature)) {
           throw new RootIntentError('ROOT_INTENT_UNAUTHENTICATED', 'anchor');
         }
-        const record = await this.#options.anchor({ force });
+        const record = await this.#options.anchor({ force, intervalMs });
         return record ?? null;
       }
       default:

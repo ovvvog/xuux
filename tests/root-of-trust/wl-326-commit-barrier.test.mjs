@@ -229,7 +229,7 @@ describe('D6 — كاتبٌ إنتاجيٌّ واحدٌ لـP8/P9 والمخزن
       submitRootIntent(
         ws.root,
         'anchor',
-        { force: true, signature: await fakeSigner.signAsync() },
+        { force: true, intervalMs: 60_000, signature: await fakeSigner.signAsync() },
         { id: badId, at, fsync: false },
       );
       const goodId = newRootIntentId();
@@ -238,8 +238,9 @@ describe('D6 — كاتبٌ إنتاجيٌّ واحدٌ لـP8/P9 والمخزن
         'anchor',
         {
           force: true,
+          intervalMs: 60_000,
           signature: await runtime.anchorSigner.signAsync(
-            anchorIntentSigningBody({ id: goodId, at, force: true }),
+            anchorIntentSigningBody({ id: goodId, at, force: true, intervalMs: 60_000 }),
           ),
         },
         { id: goodId, at, fsync: false },
