@@ -227,6 +227,105 @@ export function newWorkLogEntries(baseLog, headLog) {
 }
 
 /**
+ * نصُّ المُدخلةِ كاملاً كما يُقارَنُ: العنوانُ ثمّ المتنُ — بايتاً ببايتٍ بلا تطبيعٍ،
+ * فإعادةُ صياغةٍ أو تنسيقٍ تغييرٌ لا تطابق.
+ *
+ * @param {WorkLogEntry} entry
+ * @returns {string}
+ */
+export function entryText(entry) {
+  return `### [${entry.date}] — ${entry.id} — ${entry.title}${entry.body}`;
+}
+
+/**
+ * يتحقّقُ من إعلاناتِ الاستعادةِ (‏`restored_entries` في `config/work-log-ids.yaml`، `WL-332`).
+ *
+ * **ما الاستعادةُ وما ليست:** مُدخلةٌ كانت على تاريخِ `main` ثمّ سقطَت، فأُعيدَت **حرفيّاً**.
+ * هي ليست عملاً جديداً فلا تُحاكَمُ بـ`PS4`/`PS5`/`PS7` (‏ملفّاتُها تغيَّرَت يومَ قُيِّدَت لا اليوم)،
+ * **ولا هي بابُ توثيقٍ لاحقٍ**: النصُّ يجبُ أن يطابقَ بايتاً ببايتٍ نصَّه في كوميتٍ هو **سلفٌ
+ * للأساس** — أي قُيِّدَ في وقتِه ودُمِجَ — وأن يُعلِنَها مُدخلةٌ جديدةٌ في الحزمةِ نفسِها.
+ *
+ * والإعلانُ عن مُدخلةٍ موجودةٍ على الأساسِ **سجلٌّ تاريخيٌّ خاملٌ** لا يُعفي شيئاً.
+ *
+ * @param {{
+ *   declarations: readonly { id?: unknown, from?: unknown, by?: unknown, reason?: unknown }[],
+ *   baseWorkLog: string,
+ *   headWorkLog: string,
+ *   workLogAt: (commit: string) => string | null,
+ *   isAncestorOfBase: (commit: string) => boolean,
+ * }} input
+ * @returns {{ restored: Set<string>, violations: Violation[] }}
+ */
+export function verifyRestorations(input) {
+  /** @type {Violation[]} */
+  const violations = [];
+  /** @type {Set<string>} */
+  const restored = new Set();
+  const baseIds = new Set(parseWorkLog(input.baseWorkLog).map((e) => e.id));
+  const headEntries = parseWorkLog(input.headWorkLog);
+  const fresh = headEntries.filter((e) => !baseIds.has(e.id));
+  /** @type {{ id: string, by: string }[]} */
+  const active = [];
+  for (const raw of input.declarations) {
+    const id = String(raw?.id ?? '');
+    const from = String(raw?.from ?? '');
+    const by = String(raw?.by ?? '');
+    const reason = String(raw?.reason ?? '').trim();
+    if (!/^WL-\d{3}$/u.test(id) || !/^WL-\d{3}$/u.test(by) || from === '' || reason === '') {
+      violations.push({
+        code: 'PS10/RESTORE-MALFORMED',
+        message: `إعلانُ استعادةٍ ناقصٌ (‏\`id\` و\`from\` و\`by\` و\`reason\` شرطٌ): ${JSON.stringify(raw)}`,
+      });
+      continue;
+    }
+    if (baseIds.has(id)) continue; // سجلٌّ تاريخيٌّ خاملٌ: المُدخلةُ على الأساسِ فلا إعفاء.
+    const head = headEntries.filter((e) => e.id === id);
+    if (head.length !== 1) {
+      violations.push({
+        code: 'PS10/RESTORE-ABSENT',
+        message: `\`${id}\` مُعلَنةٌ مُستعادةً وليست في السجلِّ مرّةً واحدةً (‏المقيسُ ${head.length}).`,
+      });
+      continue;
+    }
+    if (!input.isAncestorOfBase(from)) {
+      violations.push({
+        code: 'PS10/RESTORE-NOT-HISTORY',
+        message: `مصدرُ استعادةِ \`${id}\` (‏\`${from}\`) ليس سلفاً للأساسِ — لا يُستعادُ إلّا ما دُمِجَ في وقتِه، وإلّا كانَ توثيقاً لاحقاً.`,
+      });
+      continue;
+    }
+    const then = parseWorkLog(input.workLogAt(from) ?? '').filter((e) => e.id === id);
+    const [was] = then;
+    const [now] = head;
+    if (
+      then.length !== 1 ||
+      was === undefined ||
+      now === undefined ||
+      entryText(was) !== entryText(now)
+    ) {
+      violations.push({
+        code: 'PS10/RESTORE-ALTERED',
+        message: `\`${id}\` المُستعادةُ لا تطابقُ نصَّها في \`${from}\` بايتاً ببايتٍ — الاستعادةُ نسخٌ لا إعادةُ كتابة.`,
+      });
+      continue;
+    }
+    restored.add(id);
+    active.push({ id, by });
+  }
+  const owners = new Set(fresh.filter((e) => !restored.has(e.id)).map((e) => e.id));
+  for (const { id, by } of active) {
+    if (!owners.has(by)) {
+      violations.push({
+        code: 'PS10/RESTORE-UNOWNED',
+        message: `استعادةُ \`${id}\` تُعلِنُها \`${by}\` وليست مُدخلةً جديدةً في هذه الحزمة — الاستعادةُ حدثٌ يُقيَّدُ بمُدخلتِه.`,
+      });
+      restored.delete(id);
+    }
+  }
+  return { restored, violations };
+}
+
+/**
  * يستخرجُ قسمَ «الملفات المتأثرة» من متنِ مُدخلةٍ: من العنوانِ حتّى العنوانِ التالي.
  *
  * @param {string} body
@@ -406,6 +505,8 @@ export function unaffectedDeclarations(body) {
  *   - `PS5/PHANTOM-CLAIM`: مسارٌ تُسمّيه «الملفات المتأثرة» ولا أثرَ له في الفرق.
  *   - `PS6/NO-AFFECTED-SECTION`: مُدخلةٌ جديدةٌ بلا قسمِ «الملفات المتأثرة».
  *   - `PS7/DEBT-ROW-STALE`: دَينٌ في عنوانِ المُدخلةِ وصفُّه لا يذكرُها (‏الحالُ «معلَّقٌ» والعملُ تمّ).
+ *   - (‏`PS10/RESTORE-*` يُصدِرُها `verifyRestorations`: مُدخلةٌ مُستعادةٌ تُستثنى من هذه القواعدِ
+ *     بشرطِ مطابقتِها نصَّها في سلفٍ للأساسِ وإعلانِها بمُدخلةٍ جديدة.)
  *   - `PS8/AFFECTED-DOC-STALE`: وثيقةُ ذاكرةٍ يتأثّرُ ما تصفُه ولم تُحدَّثْ ولم يُعلَنْ أنّها غيرُ متأثّرة.
  *
  * @param {{
@@ -415,6 +516,7 @@ export function unaffectedDeclarations(body) {
  *   baseWorkLog: string,
  *   headWorkLog: string,
  *   headDebtRegister: string,
+ *   restored?: ReadonlySet<string>,
  * }} input
  * @returns {{ violations: Violation[], triggered: boolean, executive: string[], memory: string[], newEntries: string[] }}
  */
@@ -441,7 +543,11 @@ export function evaluateProjectState(input) {
   // تغييرٌ في سجلِّ الأعمالِ وحدَه أو في المولَّداتِ وحدَها لا يُطلِقُ القاعدةَ: هو القيدُ نفسُه.
   const memoryBeyondRecords = memory.filter((p) => !manifest.selfRecords.includes(p));
   const triggered = executive.length > 0 || memoryBeyondRecords.length > 0;
-  const entries = newWorkLogEntries(input.baseWorkLog, input.headWorkLog);
+  // المُستعادةُ المُتحقَّقةُ (‏`verifyRestorations`) ليست عملاً جديداً: قُيِّدَت يومَ عُمِلَت.
+  const restored = input.restored ?? new Set();
+  const entries = newWorkLogEntries(input.baseWorkLog, input.headWorkLog).filter(
+    (e) => !restored.has(e.id),
+  );
 
   if (!triggered) {
     return { violations, triggered, executive, memory, newEntries: entries.map((e) => e.id) };
