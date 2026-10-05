@@ -791,3 +791,266 @@ test('التاريخ — إعلانٌ قديمٌ على الأساسِ لا يُ
   assert.equal(r.status, 1, r.out);
   assert.match(r.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/u);
 });
+
+// ═══ `DOC-25` (‏`WL-335`) — فقودٌ حقيقيّةٌ على `main` تُكتشَفُ ثمّ تُستعادُ حرفيّاً ═══
+//
+// لكلِّ حادثةٍ: النصُّ الأصلُ والنصُّ التالفُ منسوخانِ بايتاً ببايتٍ من الكوميتَين الحقيقيَّين
+// (‏`tests/fixtures/project-memory/doc-25/README.md`). يُقيَّدُ الأصلُ على `main`، ثمّ يُطبَّقُ التلفُ
+// كما وقع، فيُشترَطُ أن يُرَدّ؛ ثمّ تُستعادُ النسخةُ الأصلُ بإعلانٍ ومُدخلةٍ مالكةٍ فتمرّ.
+
+const DOC25 = path.join(REPO, 'tests', 'fixtures', 'project-memory', 'doc-25');
+/** @param {string} name */
+const doc25 = (name) => readFileSync(path.join(DOC25, name), 'utf8');
+const DOC25_IDS = ['wl-283', 'wl-282', 'wl-222', 'wl-115'];
+
+/**
+ * @param {string} root
+ * @param {'original' | 'damaged'} from
+ * @param {'original' | 'damaged'} to
+ * @param {string[]} [ids]
+ */
+function swapEntries(root, from, to, ids = DOC25_IDS) {
+  let log = readFileSync(path.join(root, LOG), 'utf8');
+  for (const id of ids) {
+    const was = doc25(`${id}.${from}.txt`);
+    assert.ok(log.includes(was), `شرطُ الاستنساخ: نصُّ ${id} (${from}) في السجلّ`);
+    log = log.replace(was, doc25(`${id}.${to}.txt`));
+  }
+  write(root, LOG, log);
+}
+
+/**
+ * `main`: الأصولُ مُقيَّدةٌ (‏كوميتُ `src`) ثمّ التلفُ كما وقعَ على `main` (‏كوميتُ `damage`).
+ *
+ * @returns {{ root: string, src: string }}
+ */
+function doc25Repo() {
+  const root = fixture();
+  git(root, ['checkout', '-q', 'main']);
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  const originals = DOC25_IDS.map((id) => `${doc25(`${id}.original.txt`)}\n---\n\n`).join('');
+  write(root, LOG, log.replace('### [2026-10-01]', `${originals}### [2026-10-01]`));
+  const status = readFileSync(path.join(root, 'PROJECT_STATUS.md'), 'utf8');
+  write(root, 'PROJECT_STATUS.md', `${doc25('wl-291.status.txt')}${status}`);
+  regenerateHandoff(root);
+  commit(root, 'history as merged');
+  const src = git(root, ['rev-parse', 'HEAD']).trim();
+  return { root, src };
+}
+
+/**
+ * يُطبِّقُ التلفَ الحقيقيَّ: المتونُ التالفةُ، وسطرُ `WL-292` مكانَ سطرِ `WL-291` (‏`d6e591b4`).
+ *
+ * @param {string} root
+ */
+function applyDoc25Damage(root) {
+  swapEntries(root, 'original', 'damaged');
+  const status = readFileSync(path.join(root, 'PROJECT_STATUS.md'), 'utf8');
+  write(
+    root,
+    'PROJECT_STATUS.md',
+    status.replace(doc25('wl-291.status.txt'), doc25('wl-292.status.txt')),
+  );
+  // سطرُ `WL-292` جديدٌ فمصدرُه مُدخلتُه — كما في الكوميتِ الحقيقيّ.
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(
+    root,
+    LOG,
+    `${log.replace('### [', '### [2026-10-01] — WL-292 — جولةُ مجلس\n\n- **الملفات المتأثرة:** `PROJECT_STATUS.md`\n\n---\n\n### [')}`,
+  );
+}
+
+/**
+ * @param {string} root
+ * @param {string} src
+ * @param {{ entries?: string[], status?: boolean, by?: string }} [opts]
+ */
+function declareDoc25(root, src, opts = {}) {
+  const by = opts.by ?? 'WL-335';
+  const entries = (opts.entries ?? DOC25_IDS).map(
+    (id) => `  - id: ${id.toUpperCase()}\n    from: ${src}\n    by: ${by}\n    reason: DOC-25\n`,
+  );
+  const status =
+    opts.status === false
+      ? ''
+      : `restored_status_lines:\n  - id: WL-291\n    from: ${src}\n    by: ${by}\n    reason: DOC-25\n`;
+  write(root, 'config/work-log-ids.yaml', `restored_entries:\n${entries.join('')}${status}`);
+}
+
+/** @param {string} root */
+function restoreStatusLine(root) {
+  const status = readFileSync(path.join(root, 'PROJECT_STATUS.md'), 'utf8');
+  write(
+    root,
+    'PROJECT_STATUS.md',
+    status.replace(
+      doc25('wl-292.status.txt'),
+      `${doc25('wl-292.status.txt')}${doc25('wl-291.status.txt')}`,
+    ),
+  );
+}
+
+/**
+ * `main` تالفٌ (‏كما هو اليومَ) وفرعُ `work` منه.
+ *
+ * @returns {{ root: string, src: string }}
+ */
+function damagedMain() {
+  const { root, src } = doc25Repo();
+  applyDoc25Damage(root);
+  regenerateHandoff(root);
+  commit(root, 'damage as it happened');
+  git(root, ['checkout', '-qB', 'work']);
+  return { root, src };
+}
+
+test('DOC-25 — التلفُ الحقيقيُّ يُكتشَفُ قبلَ الاستعادةِ: بترُ WL-282/WL-283 وتعديلُ WL-222 وWL-115 (‏عنوانٌ قديم) وسقوطُ سطرِ WL-291', () => {
+  const { root, src } = doc25Repo();
+  git(root, ['checkout', '-qb', 'damage']);
+  applyDoc25Damage(root);
+  regenerateHandoff(root);
+  commit(root, 'damage');
+  const r = runGuard(root, src);
+  assert.equal(r.status, 1, r.out);
+  for (const id of ['WL-283', 'WL-282', 'WL-222', 'WL-115']) {
+    assert.match(r.out, new RegExp(`PS12/HISTORY-REWRITTEN: مُدخلةُ \`${id}\``, 'u'));
+  }
+  // النسبةُ صحيحةٌ: تعديلُ `WL-115` لا يُنسَبُ إلى مُدخلةٍ قبلَها (‏`DOC-27`).
+  assert.doesNotMatch(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-001`/u);
+  assert.match(r.out, /PS11\/STATUS-HISTORY-LOST: سطرُ «آخر تحديث» لـ`WL-291`/u);
+});
+
+test('DOC-25 — الاستعادةُ الحرفيّةُ بإعلانٍ ومُدخلةٍ مالكةٍ تمرّ، والمُستعادُ ليس عملاً جديداً', () => {
+  const { root, src } = damagedMain();
+  swapEntries(root, 'damaged', 'original');
+  restoreStatusLine(root);
+  addEntry(root, {
+    id: 'WL-335',
+    title: 'DOC-25',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  declareDoc25(root, src);
+  regenerateHandoff(root);
+  commit(root, 'restore');
+  const r = runGuard(root);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /مُستعادٌ: WL-283 WL-282 WL-222 WL-115 \+ 1 سطرَ لوحة/u);
+  assert.match(r.out, /مُدخلاتٌ جديدةٌ: WL-335 /u);
+  assert.doesNotMatch(r.out, /PS4|PS5|PS10|PS11|PS12/u);
+});
+
+test('DOC-25 — بلا إعلانٍ تُرَدُّ الاستعادةُ نفسُها (‏PS12)، وسطرُ اللوحةِ بلا مصدرٍ يُرَدُّ (‏PS10/STATUS-UNSOURCED)', () => {
+  const { root } = damagedMain();
+  swapEntries(root, 'damaged', 'original');
+  restoreStatusLine(root);
+  addEntry(root, { id: 'WL-335', title: 'DOC-25', files: ['PROJECT_STATUS.md'] });
+  regenerateHandoff(root);
+  commit(root, 'restore undeclared');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-283`/u);
+  assert.match(r.out, /PS10\/STATUS-UNSOURCED: سطرُ «آخر تحديث» لـ`WL-291`/u);
+});
+
+test('DOC-25 — «استعادةُ» نصٍّ جديدٍ ليس في التاريخِ تُرَدُّ (‏PS10/RESTORE-ALTERED): مُدخلةٌ بجملةٍ زائدةٍ، وسطرُ لوحةٍ مُختلَق', () => {
+  const { root, src } = damagedMain();
+  swapEntries(root, 'damaged', 'original');
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  const original = doc25('wl-283.original.txt');
+  write(
+    root,
+    LOG,
+    log.replace(original, original.replace(/\n$/u, '\n- **أُضيفَ لاحقاً:** دليلٌ لم يُقيَّد.\n')),
+  );
+  const status = readFileSync(path.join(root, 'PROJECT_STATUS.md'), 'utf8');
+  write(
+    root,
+    'PROJECT_STATUS.md',
+    status.replace(
+      doc25('wl-292.status.txt'),
+      `${doc25('wl-292.status.txt')}${doc25('wl-291.status.txt').replace('**2026-10-01**', '**2026-10-02**')}`,
+    ),
+  );
+  addEntry(root, {
+    id: 'WL-335',
+    title: 'DOC-25',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  declareDoc25(root, src);
+  regenerateHandoff(root);
+  commit(root, 'restore with invented text');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS10\/RESTORE-ALTERED: `WL-283`/u);
+  assert.match(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-283`/u, 'لا إعفاءَ لنصٍّ لم يُتحقَّق.');
+  assert.match(r.out, /PS10\/RESTORE-ALTERED: سطرُ «آخر تحديث» المُستعادُ لـ`WL-291`/u);
+  assert.match(r.out, /PS10\/STATUS-UNSOURCED: سطرُ «آخر تحديث» لـ`WL-291`/u);
+  assert.doesNotMatch(r.out, /`WL-282`|`WL-222`|`WL-115`/u, 'الاستعاداتُ الصحيحةُ لا تُرَدّ.');
+});
+
+test('DOC-25 — والإعلانُ نفسُه لا يصيرُ إعفاءً عامّاً: بلا مُدخلةٍ مالكةٍ يُرَدُّ، ولا يُعفي من PS4/PS5', () => {
+  const { root, src } = damagedMain();
+  swapEntries(root, 'damaged', 'original');
+  restoreStatusLine(root);
+  write(root, 'src/app.mjs', 'export const v = 9;\n');
+  addEntry(root, {
+    id: 'WL-335',
+    title: 'DOC-25',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  declareDoc25(root, src, { by: 'WL-001' });
+  regenerateHandoff(root);
+  commit(root, 'unowned restore + undeclared code change');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS10\/RESTORE-UNOWNED: استعادةُ WL-283/u);
+  assert.match(r.out, /PS10\/RESTORE-UNOWNED: استعادةُ سطر WL-291/u);
+  assert.match(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-283`/u);
+  assert.match(
+    r.out,
+    /PS4\/[A-Z-]+: .*src\/app\.mjs/u,
+    'كودٌ لم تُسمِّه المُدخلةُ يُرَدُّ رغمَ الاستعادة.',
+  );
+});
+
+test('DOC-25 — حذفٌ جديدٌ متخفٍّ خلفَ allowed_gaps لا يمرّ (‏PS11) ولو أُعلِنَ معرِّفُه فجوةً', () => {
+  const { root } = damagedMain();
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, log.replace(`${doc25('wl-283.damaged.txt')}\n---\n\n`, ''));
+  assert.doesNotMatch(readFileSync(path.join(root, LOG), 'utf8'), /— WL-283 —/u, 'شرطُ الاستنساخ');
+  write(
+    root,
+    'config/work-log-ids.yaml',
+    'allowed_gaps:\n  - id: WL-283\n    reason: >-\n      محجوزٌ لطلبٍ مفتوح\n',
+  );
+  addEntry(root, {
+    id: 'WL-335',
+    title: 'عمل',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  regenerateHandoff(root);
+  commit(root, 'drop WL-283 behind a gap');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-283`/u);
+});
+
+test('التاريخ — سطرٌ فارغٌ أو فاصلٌ في وسطِ مُدخلةٍ قديمةٍ تغييرٌ (‏DOC-27: البصمةُ تُهمِلُ الذيلَ وحدَه)', () => {
+  const root = fixture();
+  addEntry(root, { files: ['src/app.mjs', 'PROJECT_STATUS.md'] });
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(
+    root,
+    LOG,
+    log.replace(
+      '**المنفِّذُ:** اختبار · **الحالةُ بعدَ العملِ:** ✅\n\n#### الملفات المتأثرة',
+      '**المنفِّذُ:** اختبار · **الحالةُ بعدَ العملِ:** ✅\n#### الملفات المتأثرة',
+    ),
+  );
+  regenerateHandoff(root);
+  commit(root, 'drop a blank line inside WL-001');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-001`/u);
+});
