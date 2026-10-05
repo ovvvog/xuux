@@ -192,17 +192,44 @@ const restoreDeclarations = declaredList(headIdsText, 'restored_entries', 'ال�
 const headWorkLogText = existsSync(path.join(repoRoot, manifest.workLog))
   ? readHead(manifest.workLog)
   : '';
+const baseStatusText = readBase(manifest.status);
+const headStatusText = existsSync(path.join(repoRoot, manifest.status))
+  ? readHead(manifest.status)
+  : '';
+const baseAmendments = declaredList(baseIdsText, 'history_amendments', 'الأساس');
+const headAmendments = declaredList(headIdsText, 'history_amendments', 'الرأس');
+/**
+ * @param {string} rel
+ * @returns {(commit: string) => string | null}
+ */
+const fileAt = (rel) => (commit) => {
+  try {
+    return git(['show', `${commit}:${rel}`]);
+  } catch {
+    return null;
+  }
+};
+// `amend` المُعلَنُ جديداً يُعفي سطرَ لوحةٍ مُعدَّلاً من `PS10/STATUS-UNSOURCED` — يُقرأُ قبلَ الاستعادة.
+const amendedIds = new Set(
+  verifyHistoryPreserved({
+    baseWorkLog: '',
+    headWorkLog: headWorkLogText,
+    baseStatus: '',
+    headStatus: '',
+    baseAmendments,
+    headAmendments,
+  }).amended,
+);
 const restoration = verifyRestorations({
-  declarations: /** @type {any[]} */ (restoreDeclarations),
+  declarations: restoreDeclarations,
+  statusDeclarations: declaredList(headIdsText, 'restored_status_lines', 'الرأس'),
   baseWorkLog: readBase(manifest.workLog),
   headWorkLog: headWorkLogText,
-  workLogAt: (commit) => {
-    try {
-      return git(['show', `${commit}:${manifest.workLog}`]);
-    } catch {
-      return null;
-    }
-  },
+  baseStatus: baseStatusText,
+  headStatus: headStatusText,
+  amendedIds,
+  workLogAt: fileAt(manifest.workLog),
+  statusAt: fileAt(manifest.status),
   isAncestorOfBase: (commit) =>
     spawnSync('git', ['merge-base', '--is-ancestor', commit, baseSha], { cwd: repoRoot }).status ===
     0,
@@ -225,10 +252,11 @@ const result = evaluateProjectState({
 const preservation = verifyHistoryPreserved({
   baseWorkLog: readBase(manifest.workLog),
   headWorkLog: headWorkLogText,
-  baseStatus: readBase(manifest.status),
-  headStatus: existsSync(path.join(repoRoot, manifest.status)) ? readHead(manifest.status) : '',
-  baseAmendments: declaredList(baseIdsText, 'history_amendments', 'الأساس'),
-  headAmendments: declaredList(headIdsText, 'history_amendments', 'الرأس'),
+  baseStatus: baseStatusText,
+  headStatus: headStatusText,
+  baseAmendments,
+  headAmendments,
+  restoredRewrites: restoration.rewritten,
 });
 
 const violations = [...preservation.violations, ...restoration.violations, ...result.violations];
@@ -246,7 +274,13 @@ console.log(`  الأساسُ: ${base} = ${baseSha.slice(0, 12)} · ملفّات
 console.log(
   `  التاريخُ: ${preservation.violations.length === 0 ? 'كلُّ مُدخلةٍ وسطرِ لوحةٍ على الأساسِ باقٍ في المرشَّح' : 'ساقطٌ'}${
     preservation.amended.length > 0 ? ` · تعديلٌ مُعلَنٌ: ${preservation.amended.join(' ')}` : ''
-  }${restoration.restored.size > 0 ? ` · مُستعادٌ: ${[...restoration.restored].join(' ')}` : ''}`,
+  }${
+    restoration.restored.size + restoration.rewritten.size + restoration.statusLines.size > 0
+      ? ` · مُستعادٌ: ${[...restoration.restored, ...restoration.rewritten].join(' ')}${
+          restoration.statusLines.size > 0 ? ` + ${restoration.statusLines.size} سطرَ لوحة` : ''
+        }`
+      : ''
+  }`,
 );
 console.log(
   `  تنفيذيٌّ: ${result.executive.length} · ذاكرةٌ: ${result.memory.length} · مُدخلاتٌ جديدةٌ: ${

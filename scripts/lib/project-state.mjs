@@ -238,105 +238,60 @@ export function entryText(entry) {
 }
 
 /**
- * يتحقّقُ من إعلاناتِ الاستعادةِ (‏`restored_entries` في `config/work-log-ids.yaml`، `WL-332`).
+ * عناوينُ المُدخلاتِ **بكلِّ صيغِها** على تاريخِ السجلِّ — نفسُ قاعدتَي `guard:work-log-ids`:
+ * `### [YYYY-MM-DD] — WL-NNN` متبوعةً بأيِّ فاصلٍ (‏`—` أو `:`)، أو عنوانٌ قديمٌ ينتهي بـ`(WL-NNN)`.
  *
- * **ما الاستعادةُ وما ليست:** مُدخلةٌ كانت على تاريخِ `main` ثمّ سقطَت، فأُعيدَت **حرفيّاً**.
- * هي ليست عملاً جديداً فلا تُحاكَمُ بـ`PS4`/`PS5`/`PS7` (‏ملفّاتُها تغيَّرَت يومَ قُيِّدَت لا اليوم)،
- * **ولا هي بابُ توثيقٍ لاحقٍ**: النصُّ يجبُ أن يطابقَ بايتاً ببايتٍ نصَّه في كوميتٍ هو **سلفٌ
- * للأساس** — أي قُيِّدَ في وقتِه ودُمِجَ — وأن يُعلِنَها مُدخلةٌ جديدةٌ في الحزمةِ نفسِها.
- *
- * والإعلانُ عن مُدخلةٍ موجودةٍ على الأساسِ **سجلٌّ تاريخيٌّ خاملٌ** لا يُعفي شيئاً.
- *
- * @param {{
- *   declarations: readonly { id?: unknown, from?: unknown, by?: unknown, reason?: unknown }[],
- *   baseWorkLog: string,
- *   headWorkLog: string,
- *   workLogAt: (commit: string) => string | null,
- *   isAncestorOfBase: (commit: string) => boolean,
- * }} input
- * @returns {{ restored: Set<string>, violations: Violation[] }}
+ * **لماذا لا يكفي `parseWorkLog` هنا** (‏`DOC-27`، `WL-335`): ذاك يعرفُ صيغةَ المادة 6 وحدَها لأنّه
+ * يحكمُ على **المُدخلاتِ الجديدة**. أمّا التاريخُ ففيه صيغٌ أقدم (‏`— WL-128:` و`… (WL-115)`)، فكانَ
+ * نصُّها يُحسَبُ متنَ مُدخلةٍ قبلَها: تعديلُ `WL-115` في `d61742ac` نُسِبَ إلى `WL-129`.
  */
-export function verifyRestorations(input) {
-  /** @type {Violation[]} */
-  const violations = [];
-  /** @type {Set<string>} */
-  const restored = new Set();
-  const baseIds = new Set(parseWorkLog(input.baseWorkLog).map((e) => e.id));
-  const headEntries = parseWorkLog(input.headWorkLog);
-  const fresh = headEntries.filter((e) => !baseIds.has(e.id));
-  /** @type {{ id: string, by: string }[]} */
-  const active = [];
-  for (const raw of input.declarations) {
-    const id = String(raw?.id ?? '');
-    const from = String(raw?.from ?? '');
-    const by = String(raw?.by ?? '');
-    const reason = String(raw?.reason ?? '').trim();
-    if (!/^WL-\d{3}$/u.test(id) || !/^WL-\d{3}$/u.test(by) || from === '' || reason === '') {
-      violations.push({
-        code: 'PS10/RESTORE-MALFORMED',
-        message: `إعلانُ استعادةٍ ناقصٌ (‏\`id\` و\`from\` و\`by\` و\`reason\` شرطٌ): ${JSON.stringify(raw)}`,
-      });
-      continue;
-    }
-    if (baseIds.has(id)) continue; // سجلٌّ تاريخيٌّ خاملٌ: المُدخلةُ على الأساسِ فلا إعفاء.
-    const head = headEntries.filter((e) => e.id === id);
-    if (head.length !== 1) {
-      violations.push({
-        code: 'PS10/RESTORE-ABSENT',
-        message: `\`${id}\` مُعلَنةٌ مُستعادةً وليست في السجلِّ مرّةً واحدةً (‏المقيسُ ${head.length}).`,
-      });
-      continue;
-    }
-    if (!input.isAncestorOfBase(from)) {
-      violations.push({
-        code: 'PS10/RESTORE-NOT-HISTORY',
-        message: `مصدرُ استعادةِ \`${id}\` (‏\`${from}\`) ليس سلفاً للأساسِ — لا يُستعادُ إلّا ما دُمِجَ في وقتِه، وإلّا كانَ توثيقاً لاحقاً.`,
-      });
-      continue;
-    }
-    const then = parseWorkLog(input.workLogAt(from) ?? '').filter((e) => e.id === id);
-    const [was] = then;
-    const [now] = head;
-    if (
-      then.length !== 1 ||
-      was === undefined ||
-      now === undefined ||
-      entryText(was) !== entryText(now)
-    ) {
-      violations.push({
-        code: 'PS10/RESTORE-ALTERED',
-        message: `\`${id}\` المُستعادةُ لا تطابقُ نصَّها في \`${from}\` بايتاً ببايتٍ — الاستعادةُ نسخٌ لا إعادةُ كتابة.`,
-      });
-      continue;
-    }
-    restored.add(id);
-    active.push({ id, by });
+const HISTORY_HEADING = /^### \[\d{4}-\d{2}-\d{2}\] — (WL-\d{3})\b/u;
+const HISTORY_LEGACY_TAIL = /\((WL-\d{3})\)\s*$/u;
+
+/**
+ * يُفكِّكُ السجلَّ إلى مُدخلاتٍ تاريخيّةٍ: كلُّ عنوانٍ يحملُ معرِّفاً بإحدى الصيغِ يبدأُ مُدخلةً،
+ * ونصُّها خامٌ حتّى العنوانِ التالي (‏عنوانٌ بلا معرِّفٍ يبقى من متنِ ما قبلَه — فلا يسقطُ من القياس).
+ *
+ * @param {string} text
+ * @returns {{ id: string, text: string }[]}
+ */
+export function historyEntries(text) {
+  /** @type {{ id: string, lines: string[] }[]} */
+  const out = [];
+  for (const line of String(text).split('\n')) {
+    const match = line.startsWith('### ')
+      ? (HISTORY_HEADING.exec(line) ?? HISTORY_LEGACY_TAIL.exec(line))
+      : null;
+    if (match) out.push({ id: String(match[1]), lines: [line] });
+    else out.at(-1)?.lines.push(line);
   }
-  const owners = new Set(fresh.filter((e) => !restored.has(e.id)).map((e) => e.id));
-  for (const { id, by } of active) {
-    if (!owners.has(by)) {
-      violations.push({
-        code: 'PS10/RESTORE-UNOWNED',
-        message: `استعادةُ \`${id}\` تُعلِنُها \`${by}\` وليست مُدخلةً جديدةً في هذه الحزمة — الاستعادةُ حدثٌ يُقيَّدُ بمُدخلتِه.`,
-      });
-      restored.delete(id);
-    }
-  }
-  return { restored, violations };
+  return out.map((e) => ({ id: e.id, text: e.lines.join('\n') }));
 }
 
 /**
- * صورةُ المُدخلةِ للمقارنةِ عبرَ الزمن: نصُّها كاملاً **إلّا ذيلَها** — الفراغُ والفاصلُ `---`
- * اللذانِ يتغيّرانِ حينَ تُضافُ مُدخلةٌ مجاورةٌ (‏قيسَ في إعادةِ تشغيلِ التاريخ: `WL-271` في
- * `75b39aa7`). كلُّ ما سواهما — حرفٌ أو سطرٌ أو ترتيبٌ — تغييرٌ.
+ * صورةُ المُدخلةِ للمقارنةِ عبرَ الزمن: نصُّها كاملاً **إلّا ذيلَها** — الأسطرُ الفارغةُ وسطورُ `---`
+ * في **آخرِها** وحدَها، لأنّها تتغيّرُ حينَ تُضافُ مُدخلةٌ مجاورةٌ (‏`WL-271` في `75b39aa7`).
+ * كلُّ ما سواها — حرفٌ أو سطرٌ فارغٌ في الوسطِ أو فاصلٌ في الوسطِ أو ترتيبٌ — تغييرٌ.
  *
+ * (‏`DOC-27`: الصيغةُ في `WL-334` كانت `/(?:\s|^-{3,}$)+$/gmu`، وبعلمِ `m` تُطبَّقُ عند كلِّ نهايةِ
+ * سطرٍ فتمحو الأسطرَ الفارغةَ والفواصلَ والمسافاتِ اللاحقةَ **في كلِّ المُدخلة** — قيسَ: متنانِ
+ * يختلفانِ في ذلك فقط كانا متطابقَين.)
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function historyFingerprint(text) {
+  const lines = String(text).split('\n');
+  while (lines.length > 0 && /^\s*(?:-{3,}\s*)?$/u.test(lines.at(-1) ?? '')) lines.pop();
+  return lines.join('\n').trimEnd();
+}
+
+/**
  * @param {WorkLogEntry} entry
  * @returns {string}
  */
 export function entryFingerprint(entry) {
-  return entryText(entry)
-    .replace(/(?:\s|^-{3,}$)+$/gmu, '')
-    .trimEnd();
+  return historyFingerprint(entryText(entry));
 }
 
 /**
@@ -353,17 +308,214 @@ export function statusRecords(text) {
 }
 
 /**
- * **عدمُ فقدانِ التاريخِ** (‏`WL-334`، `DOC-24`): كلُّ مُدخلةِ سجلٍّ وكلُّ سطرِ «آخر تحديث»
- * على **الأساسِ** يجبُ أن يبقى في **المرشَّحِ** بايتاً ببايتٍ.
+ * @param {{ id: string, text: string }[]} entries
+ * @returns {Map<string, string[]>}
+ */
+function fingerprintsById(entries) {
+  /** @type {Map<string, string[]>} */
+  const map = new Map();
+  for (const e of entries) map.set(e.id, [...(map.get(e.id) ?? []), historyFingerprint(e.text)]);
+  return map;
+}
+
+/**
+ * يتحقّقُ من إعلاناتِ الاستعادةِ في `config/work-log-ids.yaml`.
+ *
+ * **ما الاستعادةُ:** نصٌّ كانَ على تاريخِ `main` ثمّ سقطَ أو بُتِرَ، فأُعيدَ **حرفيّاً**. وهي **ليست
+ * بابَ توثيقٍ لاحقٍ ولا إعفاءً عامّاً**: النصُّ المُستعادُ يطابقُ — بعدَ إهمالِ الذيلِ وحدَه — نصَّه في
+ * كوميتٍ هو **سلفٌ للأساس** (‏قُيِّدَ ودُمِجَ في وقتِه)، وتُعلِنُه **مُدخلةٌ جديدةٌ في الحزمةِ نفسِها**.
+ *
+ * - `restored_entries` (‏`WL-332`): مُدخلةٌ **غائبةٌ** عن الأساسِ تعودُ ⇒ تُستثنى من `PS4`/`PS5`/`PS7`
+ *   لأنّها ليست عملاً جديداً. أو (‏`WL-335`، `DOC-25`) مُدخلةٌ **على الأساسِ مبتورةٌ أو مُعدَّلةٌ**
+ *   تعودُ إلى نصِّها السابق ⇒ يُعفى ذلك التغييرُ من `PS12` وحدَه؛ ولا تُستثنى من أيِّ قاعدةٍ أخرى.
+ * - `restored_status_lines` (‏`WL-335`): سطرُ «آخر تحديث» سقطَ والمُدخلةُ باقيةٌ ⇒ يعودُ حرفيّاً.
+ * - **`PS10/STATUS-UNSOURCED`:** كلُّ سطرِ «آخر تحديث» جديدٍ على الأساسِ مصدرُه مُدخلةٌ جديدةٌ في
+ *   الحزمة، أو استعادةٌ مُتحقَّقةٌ (‏السطرُ نفسُه في لوحةِ `from`)، أو `amend` مُعلَنٌ. فلا يُختلَقُ
+ *   سطرُ حالةٍ لمُدخلةٍ قديمةٍ.
+ *
+ * والإعلانُ عن نصٍّ مطابقٍ للأساسِ **سجلٌّ تاريخيٌّ خاملٌ** لا يُعفي شيئاً.
+ *
+ * @param {{
+ *   declarations: readonly unknown[],
+ *   statusDeclarations?: readonly unknown[],
+ *   baseWorkLog: string,
+ *   headWorkLog: string,
+ *   baseStatus?: string,
+ *   headStatus?: string,
+ *   amendedIds?: ReadonlySet<string>,
+ *   workLogAt: (commit: string) => string | null,
+ *   statusAt?: (commit: string) => string | null,
+ *   isAncestorOfBase: (commit: string) => boolean,
+ * }} input
+ * @returns {{ restored: Set<string>, rewritten: Set<string>, statusLines: Set<string>, violations: Violation[] }}
+ */
+export function verifyRestorations(input) {
+  /** @type {Violation[]} */
+  const violations = [];
+  /** @type {Set<string>} */ const restored = new Set();
+  /** @type {Set<string>} */ const rewritten = new Set();
+  /** @type {Set<string>} */ const statusLines = new Set();
+  /** @type {Map<string, string>} */ const fromOf = new Map();
+  const statusAt = input.statusAt ?? (() => null);
+  const base = fingerprintsById(historyEntries(input.baseWorkLog));
+  const head = fingerprintsById(historyEntries(input.headWorkLog));
+  const fresh = new Set(
+    parseWorkLog(input.headWorkLog)
+      .map((e) => e.id)
+      .filter((id) => !base.has(id)),
+  );
+
+  /**
+   * @param {unknown} raw
+   * @param {string} kind
+   */
+  const parseDecl = (raw, kind) => {
+    const item = /** @type {{ id?: unknown, from?: unknown, by?: unknown, reason?: unknown }} */ (
+      raw ?? {}
+    );
+    const decl = {
+      id: String(item.id ?? ''),
+      from: String(item.from ?? ''),
+      by: String(item.by ?? ''),
+      reason: String(item.reason ?? '').trim(),
+    };
+    if (
+      !/^WL-\d{3}$/u.test(decl.id) ||
+      !/^WL-\d{3}$/u.test(decl.by) ||
+      decl.from === '' ||
+      decl.reason === ''
+    ) {
+      violations.push({
+        code: 'PS10/RESTORE-MALFORMED',
+        message: `إعلانُ استعادةٍ (‏${kind}) ناقصٌ (‏\`id\` و\`from\` و\`by\` و\`reason\` شرطٌ): ${JSON.stringify(raw)}`,
+      });
+      return null;
+    }
+    return decl;
+  };
+  /** @type {{ id: string, by: string, what: string }[]} */
+  const active = [];
+
+  for (const raw of input.declarations) {
+    const decl = parseDecl(raw, 'restored_entries');
+    if (decl === null) continue;
+    const { id, from } = decl;
+    const was = base.get(id) ?? [];
+    const now = head.get(id) ?? [];
+    if (was.length > 0 && was.length === now.length && was.every((fp, i) => fp === now[i]))
+      continue; // خاملٌ.
+    if (now.length !== 1) {
+      violations.push({
+        code: 'PS10/RESTORE-ABSENT',
+        message: `\`${id}\` مُعلَنةٌ مُستعادةً وليست في السجلِّ مرّةً واحدةً (‏المقيسُ ${now.length}).`,
+      });
+      continue;
+    }
+    if (!input.isAncestorOfBase(from)) {
+      violations.push({
+        code: 'PS10/RESTORE-NOT-HISTORY',
+        message: `مصدرُ استعادةِ \`${id}\` (‏\`${from}\`) ليس سلفاً للأساسِ — لا يُستعادُ إلّا ما دُمِجَ في وقتِه، وإلّا كانَ توثيقاً لاحقاً.`,
+      });
+      continue;
+    }
+    const then = fingerprintsById(historyEntries(input.workLogAt(from) ?? '')).get(id) ?? [];
+    if (then.length !== 1 || then[0] !== now[0]) {
+      violations.push({
+        code: 'PS10/RESTORE-ALTERED',
+        message: `\`${id}\` المُستعادةُ لا تطابقُ نصَّها في \`${from}\` (‏المقيسُ هناكَ ${then.length} نسخةً) — الاستعادةُ نسخٌ لا إعادةُ كتابة.`,
+      });
+      continue;
+    }
+    (was.length > 0 ? rewritten : restored).add(id);
+    fromOf.set(id, from);
+    active.push({ id, by: decl.by, what: id });
+  }
+
+  const baseLines = new Set(statusRecords(input.baseStatus ?? '').map((r) => r.line));
+  const headRecords = statusRecords(input.headStatus ?? '');
+  const newLines = headRecords.filter((r) => !baseLines.has(r.line));
+  for (const raw of input.statusDeclarations ?? []) {
+    const decl = parseDecl(raw, 'restored_status_lines');
+    if (decl === null) continue;
+    const { id, from } = decl;
+    const mine = newLines.filter((r) => r.id === id);
+    if (mine.length === 0 && [...baseLines].some((l) => /WL-\d{3}/u.exec(l)?.[0] === id)) continue; // خاملٌ.
+    if (mine.length !== 1) {
+      violations.push({
+        code: 'PS10/RESTORE-ABSENT',
+        message: `سطرُ «آخر تحديث» لـ\`${id}\` مُعلَنٌ مُستعاداً وليس في اللوحةِ سطراً جديداً واحداً (‏المقيسُ ${mine.length}).`,
+      });
+      continue;
+    }
+    if (!input.isAncestorOfBase(from)) {
+      violations.push({
+        code: 'PS10/RESTORE-NOT-HISTORY',
+        message: `مصدرُ استعادةِ سطرِ \`${id}\` (‏\`${from}\`) ليس سلفاً للأساس.`,
+      });
+      continue;
+    }
+    const [line] = mine;
+    if (
+      line === undefined ||
+      !statusRecords(statusAt(from) ?? '').some((r) => r.line === line.line)
+    ) {
+      violations.push({
+        code: 'PS10/RESTORE-ALTERED',
+        message: `سطرُ «آخر تحديث» المُستعادُ لـ\`${id}\` ليس في لوحةِ \`${from}\` بايتاً ببايت.`,
+      });
+      continue;
+    }
+    statusLines.add(line.line);
+    active.push({ id, by: decl.by, what: `سطر ${id}` });
+  }
+
+  const owners = new Set([...fresh].filter((id) => !restored.has(id)));
+  for (const { id, by, what } of active) {
+    if (owners.has(by)) continue;
+    violations.push({
+      code: 'PS10/RESTORE-UNOWNED',
+      message: `استعادةُ ${what} تُعلِنُها \`${by}\` وليست مُدخلةً جديدةً في هذه الحزمة — الاستعادةُ حدثٌ يُقيَّدُ بمُدخلتِه.`,
+    });
+    if (what === id) {
+      restored.delete(id);
+      rewritten.delete(id);
+      fromOf.delete(id);
+    } else {
+      for (const r of newLines) if (r.id === id) statusLines.delete(r.line);
+    }
+  }
+
+  const amended = input.amendedIds ?? new Set();
+  for (const r of newLines) {
+    if (r.id !== null && owners.has(r.id)) continue;
+    if (statusLines.has(r.line)) continue;
+    if (r.id !== null && amended.has(r.id)) continue;
+    const from = r.id === null ? undefined : fromOf.get(r.id);
+    if (from !== undefined && statusRecords(statusAt(from) ?? '').some((x) => x.line === r.line)) {
+      continue;
+    }
+    violations.push({
+      code: 'PS10/STATUS-UNSOURCED',
+      message:
+        `سطرُ «آخر تحديث»${r.id === null ? ' بلا معرِّف' : ` لـ\`${r.id}\``} جديدٌ وليس لمُدخلةٍ جديدةٍ في الحزمةِ ولا استعادةً مُتحقَّقةً ` +
+        `ولا \`amend\` مُعلَناً: «${r.line.slice(0, 90)}…»`,
+    });
+  }
+
+  return { restored, rewritten, statusLines, violations };
+}
+
+/**
+ * **عدمُ فقدانِ التاريخِ** (‏`WL-334`، `DOC-24`): كلُّ مُدخلةِ سجلٍّ — **بأيِّ صيغةِ عنوانٍ** (‏`WL-335`) —
+ * وكلُّ سطرِ «آخر تحديث» على **الأساسِ** يجبُ أن يبقى في **المرشَّحِ** (‏بعدَ إهمالِ الذيلِ وحدَه).
  *
  * **لماذا الأساسُ لا الشجرةُ:** `guard:work-log-ids` يقيسُ اتّصالَ الترقيمِ في شجرةٍ واحدةٍ، فإن
  * سقطَت مُدخلةٌ وأُعلِنَ معرِّفُها فجوةً مرَّ (‏هكذا سقطَت `WL-330` في `#255`). هنا السؤالُ: هل
  * يمحو هذا التغييرُ شيئاً كانَ مُثبَتاً قبلَه؟ — والجوابُ لا يتوقّفُ على ملفِّ الاستثناءات.
  *
- * **الإعفاءُ الوحيدُ** إعلانٌ في `history_amendments` (‏`id` · `action: remove|amend` · `by` ·
- * `reason`) **جديدٌ في هذه الحزمةِ** (‏غائبٌ عن ملفِّ الأساس — فإعلانٌ قديمٌ لا يُعفي حذفاً
- * جديداً)، و`by` مُدخلةٌ جديدةٌ فيها. فالحذفُ أو التعديلُ مقصودٌ ومُقيَّدٌ ومُراجَعٌ، لا أثرُ
- * إعادةِ قاعدةٍ أو توليدٍ أو نسخةٍ قديمةٍ من الملفّ.
+ * **الإعفاءُ:** إعلانٌ في `history_amendments` (‏`id` · `action: remove|amend` · `by` · `reason`)
+ * **جديدٌ في هذه الحزمةِ** و`by` مُدخلةٌ جديدةٌ فيها؛ أو استعادةٌ مُتحقَّقةٌ لنصٍّ سابقٍ
+ * (‏`restoredRewrites` من `verifyRestorations`) تُعفي من `PS12` وحدَها.
  *
  * @param {{
  *   baseWorkLog: string,
@@ -372,16 +524,18 @@ export function statusRecords(text) {
  *   headStatus: string,
  *   baseAmendments: readonly unknown[],
  *   headAmendments: readonly unknown[],
+ *   restoredRewrites?: ReadonlySet<string>,
  * }} input
  * @returns {{ violations: Violation[], amended: string[] }}
  */
 export function verifyHistoryPreserved(input) {
   /** @type {Violation[]} */
   const violations = [];
-  const baseEntries = parseWorkLog(input.baseWorkLog);
-  const headEntries = parseWorkLog(input.headWorkLog);
+  const baseEntries = historyEntries(input.baseWorkLog);
+  const headEntries = historyEntries(input.headWorkLog);
   const baseIds = new Set(baseEntries.map((e) => e.id));
   const fresh = new Set(headEntries.filter((e) => !baseIds.has(e.id)).map((e) => e.id));
+  const restoredRewrites = input.restoredRewrites ?? new Set();
 
   /** @param {unknown} raw */
   const key = (raw) => JSON.stringify(raw);
@@ -422,11 +576,7 @@ export function verifyHistoryPreserved(input) {
     allowed.set(id, set);
   }
 
-  /** @type {Map<string, string[]>} */
-  const headTexts = new Map();
-  for (const e of headEntries) {
-    headTexts.set(e.id, [...(headTexts.get(e.id) ?? []), entryFingerprint(e)]);
-  }
+  const headTexts = fingerprintsById(headEntries);
   /** @type {Map<string, number>} */
   const baseCounts = new Map();
   for (const e of baseEntries) baseCounts.set(e.id, (baseCounts.get(e.id) ?? 0) + 1);
@@ -445,14 +595,14 @@ export function verifyHistoryPreserved(input) {
   for (const e of baseEntries) {
     const now = headTexts.get(e.id) ?? [];
     if (now.length === 0) continue; // حُكِمَ عليه فقداً أعلاه.
-    if (!now.includes(entryFingerprint(e)) && !allowed.get(e.id)?.has('amend')) {
-      violations.push({
-        code: 'PS12/HISTORY-REWRITTEN',
-        message:
-          `مُدخلةُ \`${e.id}\` أُعيدَت كتابتُها (‏نصُّها على الأساسِ ليس في المرشَّحِ بايتاً ببايتٍ) — ` +
-          'المادة 6: التصحيحُ بمُدخلةٍ جديدةٍ، أو إعلانُ `amend` في `history_amendments`.',
-      });
-    }
+    if (now.includes(historyFingerprint(e.text))) continue;
+    if (allowed.get(e.id)?.has('amend') || restoredRewrites.has(e.id)) continue;
+    violations.push({
+      code: 'PS12/HISTORY-REWRITTEN',
+      message:
+        `مُدخلةُ \`${e.id}\` أُعيدَت كتابتُها (‏نصُّها على الأساسِ ليس في المرشَّحِ) — ` +
+        'المادة 6: التصحيحُ بمُدخلةٍ جديدةٍ، أو إعلانُ `amend` في `history_amendments`، أو استعادةُ نصِّها السابقِ حرفيّاً في `restored_entries`.',
+    });
   }
 
   const headLines = new Set(statusRecords(input.headStatus).map((r) => r.line));
