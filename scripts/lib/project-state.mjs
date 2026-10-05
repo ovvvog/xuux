@@ -326,6 +326,149 @@ export function verifyRestorations(input) {
 }
 
 /**
+ * صورةُ المُدخلةِ للمقارنةِ عبرَ الزمن: نصُّها كاملاً **إلّا ذيلَها** — الفراغُ والفاصلُ `---`
+ * اللذانِ يتغيّرانِ حينَ تُضافُ مُدخلةٌ مجاورةٌ (‏قيسَ في إعادةِ تشغيلِ التاريخ: `WL-271` في
+ * `75b39aa7`). كلُّ ما سواهما — حرفٌ أو سطرٌ أو ترتيبٌ — تغييرٌ.
+ *
+ * @param {WorkLogEntry} entry
+ * @returns {string}
+ */
+export function entryFingerprint(entry) {
+  return entryText(entry)
+    .replace(/(?:\s|^-{3,}$)+$/gmu, '')
+    .trimEnd();
+}
+
+/**
+ * سطورُ «آخر تحديث» في لوحةِ الحالةِ — كلُّ سطرٍ قيدُ حدثٍ، ومعرِّفُه أوّلُ `WL-NNN` فيه.
+ *
+ * @param {string} text
+ * @returns {{ id: string | null, line: string }[]}
+ */
+export function statusRecords(text) {
+  return String(text)
+    .split('\n')
+    .filter((line) => line.startsWith('آخر تحديث:'))
+    .map((line) => ({ id: /WL-\d{3}/u.exec(line)?.[0] ?? null, line }));
+}
+
+/**
+ * **عدمُ فقدانِ التاريخِ** (‏`WL-334`، `DOC-24`): كلُّ مُدخلةِ سجلٍّ وكلُّ سطرِ «آخر تحديث»
+ * على **الأساسِ** يجبُ أن يبقى في **المرشَّحِ** بايتاً ببايتٍ.
+ *
+ * **لماذا الأساسُ لا الشجرةُ:** `guard:work-log-ids` يقيسُ اتّصالَ الترقيمِ في شجرةٍ واحدةٍ، فإن
+ * سقطَت مُدخلةٌ وأُعلِنَ معرِّفُها فجوةً مرَّ (‏هكذا سقطَت `WL-330` في `#255`). هنا السؤالُ: هل
+ * يمحو هذا التغييرُ شيئاً كانَ مُثبَتاً قبلَه؟ — والجوابُ لا يتوقّفُ على ملفِّ الاستثناءات.
+ *
+ * **الإعفاءُ الوحيدُ** إعلانٌ في `history_amendments` (‏`id` · `action: remove|amend` · `by` ·
+ * `reason`) **جديدٌ في هذه الحزمةِ** (‏غائبٌ عن ملفِّ الأساس — فإعلانٌ قديمٌ لا يُعفي حذفاً
+ * جديداً)، و`by` مُدخلةٌ جديدةٌ فيها. فالحذفُ أو التعديلُ مقصودٌ ومُقيَّدٌ ومُراجَعٌ، لا أثرُ
+ * إعادةِ قاعدةٍ أو توليدٍ أو نسخةٍ قديمةٍ من الملفّ.
+ *
+ * @param {{
+ *   baseWorkLog: string,
+ *   headWorkLog: string,
+ *   baseStatus: string,
+ *   headStatus: string,
+ *   baseAmendments: readonly unknown[],
+ *   headAmendments: readonly unknown[],
+ * }} input
+ * @returns {{ violations: Violation[], amended: string[] }}
+ */
+export function verifyHistoryPreserved(input) {
+  /** @type {Violation[]} */
+  const violations = [];
+  const baseEntries = parseWorkLog(input.baseWorkLog);
+  const headEntries = parseWorkLog(input.headWorkLog);
+  const baseIds = new Set(baseEntries.map((e) => e.id));
+  const fresh = new Set(headEntries.filter((e) => !baseIds.has(e.id)).map((e) => e.id));
+
+  /** @param {unknown} raw */
+  const key = (raw) => JSON.stringify(raw);
+  const inherited = new Set(input.baseAmendments.map(key));
+  /** @type {Map<string, Set<string>>} */
+  const allowed = new Map();
+  for (const raw of input.headAmendments) {
+    const item = /** @type {{ id?: unknown, action?: unknown, by?: unknown, reason?: unknown }} */ (
+      raw ?? {}
+    );
+    const id = String(item.id ?? '');
+    const action = String(item.action ?? '');
+    const by = String(item.by ?? '');
+    const reason = String(item.reason ?? '').trim();
+    if (
+      !/^WL-\d{3}$/u.test(id) ||
+      !/^WL-\d{3}$/u.test(by) ||
+      !['remove', 'amend'].includes(action) ||
+      reason === ''
+    ) {
+      violations.push({
+        code: 'PS13/AMENDMENT-MALFORMED',
+        message: `إعلانُ تعديلِ تاريخٍ ناقصٌ (‏\`id\` و\`action: remove|amend\` و\`by\` و\`reason\` شرطٌ): ${key(raw)}`,
+      });
+      continue;
+    }
+    if (inherited.has(key(raw))) continue; // إعلانٌ قديمٌ: سجلٌّ لا إعفاءٌ لحذفٍ جديد.
+    if (!fresh.has(by)) {
+      violations.push({
+        code: 'PS13/AMENDMENT-UNOWNED',
+        message: `تعديلُ تاريخِ \`${id}\` يُعلِنُه \`${by}\` وليست مُدخلةً جديدةً في هذه الحزمة.`,
+      });
+      continue;
+    }
+    const set = allowed.get(id) ?? new Set();
+    set.add(action);
+    if (action === 'remove') set.add('amend');
+    allowed.set(id, set);
+  }
+
+  /** @type {Map<string, string[]>} */
+  const headTexts = new Map();
+  for (const e of headEntries) {
+    headTexts.set(e.id, [...(headTexts.get(e.id) ?? []), entryFingerprint(e)]);
+  }
+  /** @type {Map<string, number>} */
+  const baseCounts = new Map();
+  for (const e of baseEntries) baseCounts.set(e.id, (baseCounts.get(e.id) ?? 0) + 1);
+
+  for (const [id, count] of baseCounts) {
+    const now = headTexts.get(id) ?? [];
+    if (now.length < count && !allowed.get(id)?.has('remove')) {
+      violations.push({
+        code: 'PS11/HISTORY-LOST',
+        message:
+          `مُدخلةُ \`${id}\` على الأساسِ (‏${count}) غائبةٌ عن المرشَّحِ (‏${now.length}) — ` +
+          'تغييرٌ يمحو تقدّماً مُثبَتاً. أعِدْها حرفيّاً، أو أعلِنِ الحذفَ في `history_amendments` بمُدخلةٍ جديدة.',
+      });
+    }
+  }
+  for (const e of baseEntries) {
+    const now = headTexts.get(e.id) ?? [];
+    if (now.length === 0) continue; // حُكِمَ عليه فقداً أعلاه.
+    if (!now.includes(entryFingerprint(e)) && !allowed.get(e.id)?.has('amend')) {
+      violations.push({
+        code: 'PS12/HISTORY-REWRITTEN',
+        message:
+          `مُدخلةُ \`${e.id}\` أُعيدَت كتابتُها (‏نصُّها على الأساسِ ليس في المرشَّحِ بايتاً ببايتٍ) — ` +
+          'المادة 6: التصحيحُ بمُدخلةٍ جديدةٍ، أو إعلانُ `amend` في `history_amendments`.',
+      });
+    }
+  }
+
+  const headLines = new Set(statusRecords(input.headStatus).map((r) => r.line));
+  for (const r of statusRecords(input.baseStatus)) {
+    if (headLines.has(r.line)) continue;
+    if (r.id !== null && allowed.has(r.id)) continue;
+    violations.push({
+      code: 'PS11/STATUS-HISTORY-LOST',
+      message: `سطرُ «آخر تحديث»${r.id === null ? '' : ` لـ\`${r.id}\``} على الأساسِ غائبٌ أو مُعدَّلٌ في المرشَّح: «${r.line.slice(0, 90)}…»`,
+    });
+  }
+
+  return { violations, amended: [...allowed.keys()] };
+}
+
+/**
  * يستخرجُ قسمَ «الملفات المتأثرة» من متنِ مُدخلةٍ: من العنوانِ حتّى العنوانِ التالي.
  *
  * @param {string} body
