@@ -29,7 +29,7 @@
 
 #### الملفاتُ المتأثّرة
 
-`src/root-of-trust/root-intents.mts` · `tests/root-of-trust/live-41-intent-ordering.test.mjs` · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
+`src/root-of-trust/root-intents.mts` · `tests/root-of-trust/live-41-intent-ordering.test.mjs` · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` · `docs/ROOT_OF_TRUST.md`
 
 #### الـ commit
 
