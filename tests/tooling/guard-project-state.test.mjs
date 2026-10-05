@@ -18,6 +18,8 @@ import {
   declaredPaths,
   evaluateProjectState,
   parseManifest,
+  parseWorkLog,
+  entryText,
 } from '../../scripts/lib/project-state.mjs';
 
 const REPO = process.cwd();
@@ -477,4 +479,147 @@ test('القسمُ يُقرأُ من ترويستِه لا من ذكرِه في 
     ),
     ['x/y.mjs'],
   );
+});
+
+// ═══ الاستعادةُ (‏`WL-332`، `DOC-24`) ═══
+//
+// الحادثةُ: مُدخلةٌ دُمِجَت على `main` (‏`WL-330` في `#254`) ثمّ أسقطَها دمجٌ لاحقٌ (‏`#255`).
+// فاستعادتُها حرفيّاً كانت تُرَدُّ بـ`PS5` لأنّ الحاجزَ يراها عملاً جديداً يدّعي ملفّاتٍ لا أثرَ
+// لها في الفرق — فكانَ الحاجزُ يدفعُ إلى إعادةِ حذفِها. هنا: الاستعادةُ المُعلَنةُ المُطابِقةُ
+// تمرُّ، وكلُّ صورةٍ تجعلُها باباً للتوثيقِ اللاحقِ تُرَدّ.
+
+/**
+ * `main`: مُدخلةُ `WL-002` مع كودِها تُدمَجُ (‏A)، ثمّ تسقطُ في دمجٍ لاحقٍ (‏B). يعيدُ جذرَ
+ * المستودعِ على فرعِ `work` من B، وكوميتَ A، ونصَّ المُدخلةِ كما دُمِجَت.
+ *
+ * @returns {{ root: string, mergedSha: string, lost: string }}
+ */
+function lostEntryFixture() {
+  const root = fixture();
+  git(root, ['checkout', '-q', 'main']);
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  addEntry(root, {
+    id: 'WL-002',
+    title: 'عملٌ دُمِجَ',
+    files: ['src/app.mjs', 'PROJECT_STATUS.md'],
+  });
+  regenerateHandoff(root);
+  commit(root, 'PR A: WL-002');
+  const mergedSha = git(root, ['rev-parse', 'HEAD']).trim();
+  const log = readFileSync(path.join(root, 'docs/roadmap/05-work-log.md'), 'utf8');
+  const lost = entryText(parseWorkLog(log).find((e) => e.id === 'WL-002') ?? assert.fail('WL-002'));
+  write(root, 'docs/roadmap/05-work-log.md', log.replace(lost, ''));
+  regenerateHandoff(root);
+  commit(root, 'PR B: rewrites the log and drops WL-002');
+  git(root, ['checkout', '-qB', 'work']);
+  return { root, mergedSha, lost };
+}
+
+/**
+ * @param {string} root
+ * @param {string} text
+ */
+function reinsert(root, text) {
+  const rel = 'docs/roadmap/05-work-log.md';
+  const log = readFileSync(path.join(root, rel), 'utf8');
+  write(root, rel, log.replace('### [2026-10-01]', `${text}### [2026-10-01]`));
+}
+
+/**
+ * @param {string} root
+ * @param {Record<string, string>} decl
+ */
+function declareRestore(root, decl) {
+  const lines = Object.entries(decl).map(([k, v]) => `    ${k}: ${v}`);
+  lines[0] = `  - ${String(lines[0]).trimStart()}`;
+  write(root, 'config/work-log-ids.yaml', `restored_entries:\n${lines.join('\n')}\n`);
+}
+
+test('استعادة — مُدخلةٌ دُمِجَت ثمّ سقطَت تُستعادُ حرفيّاً بإعلانٍ ومُدخلةٍ مالكةٍ فتمرّ', () => {
+  const { root, mergedSha, lost } = lostEntryFixture();
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'استعادةُ WL-002',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  reinsert(root, lost);
+  declareRestore(root, { id: 'WL-002', from: mergedSha, by: 'WL-003', reason: 'سقطَت في PR B' });
+  regenerateHandoff(root);
+  commit(root, 'restore');
+  const r = runGuard(root);
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.out, /PS5|PS10/u);
+  assert.match(r.out, /مُدخلاتٌ جديدةٌ: WL-003 /u, 'المُستعادةُ ليست عملاً جديداً.');
+});
+
+test('استعادة — بلا إعلانٍ تُحاكَمُ عملاً جديداً فتُرَدُّ بادّعاءِ ملفّاتٍ لا أثرَ لها (‏PS5)', () => {
+  const { root, lost } = lostEntryFixture();
+  addEntry(root, { id: 'WL-003', title: 'استعادة', files: ['PROJECT_STATUS.md'] });
+  reinsert(root, lost);
+  regenerateHandoff(root);
+  commit(root, 'restore undeclared');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS5\/PHANTOM-CLAIM: .*src\/app\.mjs/u);
+});
+
+test('استعادة — نصٌّ مُعدَّلٌ ولو بحرفٍ يُرَدُّ (‏PS10/RESTORE-ALTERED): الاستعادةُ نسخٌ لا إعادةُ كتابة', () => {
+  const { root, mergedSha, lost } = lostEntryFixture();
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'استعادة',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  reinsert(root, lost.replace('تعديلٌ.', 'تعديلٌ مُحسَّنٌ.'));
+  declareRestore(root, { id: 'WL-002', from: mergedSha, by: 'WL-003', reason: 'سقطَت' });
+  regenerateHandoff(root);
+  commit(root, 'restore altered');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS10\/RESTORE-ALTERED/u);
+});
+
+test('استعادة — من كوميتٍ ليس سلفاً للأساسِ تُرَدُّ (‏PS10/RESTORE-NOT-HISTORY): لا توثيقَ لاحقاً متنكِّراً', () => {
+  const root = fixture();
+  // فرعٌ جانبيٌّ لم يُدمَج كتبَ مُدخلةً لكودٍ دُمِجَ على main وحدَه — ثمّ يُدّعى أنّها «مُستعادة».
+  git(root, ['checkout', '-q', 'main']);
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  commit(root, 'code only on main');
+  git(root, ['checkout', '-qb', 'side']);
+  addEntry(root, {
+    id: 'WL-002',
+    title: 'توثيقٌ لاحق',
+    files: ['src/app.mjs', 'PROJECT_STATUS.md'],
+  });
+  commit(root, 'side entry');
+  const sideSha = git(root, ['rev-parse', 'HEAD']).trim();
+  git(root, ['checkout', '-q', 'main']);
+  git(root, ['checkout', '-qB', 'work']);
+  const sideLog = git(root, ['show', `${sideSha}:docs/roadmap/05-work-log.md`]);
+  const text = entryText(parseWorkLog(sideLog).find((e) => e.id === 'WL-002') ?? assert.fail());
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'ادّعاءُ استعادة',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  reinsert(root, text);
+  declareRestore(root, { id: 'WL-002', from: sideSha, by: 'WL-003', reason: 'ادّعاء' });
+  regenerateHandoff(root);
+  commit(root, 'disguised late docs');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS10\/RESTORE-NOT-HISTORY/u);
+});
+
+test('استعادة — إعلانٌ بلا مُدخلةٍ مالكةٍ جديدةٍ يُرَدُّ (‏PS10/RESTORE-UNOWNED)', () => {
+  const { root, mergedSha, lost } = lostEntryFixture();
+  reinsert(root, lost);
+  declareRestore(root, { id: 'WL-002', from: mergedSha, by: 'WL-001', reason: 'سقطَت' });
+  const status = readFileSync(path.join(root, 'PROJECT_STATUS.md'), 'utf8');
+  write(root, 'PROJECT_STATUS.md', `آخر تحديث: **2026-10-03** — استعادة.\n${status}`);
+  regenerateHandoff(root);
+  commit(root, 'restore without owner entry');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS10\/RESTORE-UNOWNED/u);
 });

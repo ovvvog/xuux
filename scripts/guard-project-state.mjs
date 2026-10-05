@@ -22,7 +22,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { parse } from 'yaml';
-import { evaluateProjectState, parseManifest, renderHandoff } from './lib/project-state.mjs';
+import {
+  evaluateProjectState,
+  parseManifest,
+  renderHandoff,
+  verifyRestorations,
+} from './lib/project-state.mjs';
 
 const args = process.argv.slice(2);
 /**
@@ -156,18 +161,50 @@ function readBase(rel) {
   }
 }
 
+const WORK_LOG_IDS = 'config/work-log-ids.yaml';
+/** @type {unknown[]} */
+let restoreDeclarations = [];
+if (existsSync(path.join(repoRoot, WORK_LOG_IDS))) {
+  try {
+    const declared = parse(readHead(WORK_LOG_IDS))?.restored_entries ?? [];
+    if (!Array.isArray(declared)) throw new Error('`restored_entries` ليست قائمة');
+    restoreDeclarations = declared;
+  } catch (error) {
+    unmeasurable(`\`${WORK_LOG_IDS}\`: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+const headWorkLogText = existsSync(path.join(repoRoot, manifest.workLog))
+  ? readHead(manifest.workLog)
+  : '';
+const restoration = verifyRestorations({
+  declarations: /** @type {any[]} */ (restoreDeclarations),
+  baseWorkLog: readBase(manifest.workLog),
+  headWorkLog: headWorkLogText,
+  workLogAt: (commit) => {
+    try {
+      return git(['show', `${commit}:${manifest.workLog}`]);
+    } catch {
+      return null;
+    }
+  },
+  isAncestorOfBase: (commit) =>
+    spawnSync('git', ['merge-base', '--is-ancestor', commit, baseSha], { cwd: repoRoot }).status ===
+    0,
+});
+
 const result = evaluateProjectState({
+  restored: restoration.restored,
   manifest,
   changed,
   headExists: (rel) => existsSync(path.join(repoRoot, rel)),
   baseWorkLog: readBase(manifest.workLog),
-  headWorkLog: existsSync(path.join(repoRoot, manifest.workLog)) ? readHead(manifest.workLog) : '',
+  headWorkLog: headWorkLogText,
   headDebtRegister: existsSync(path.join(repoRoot, manifest.debtRegister))
     ? readHead(manifest.debtRegister)
     : '',
 });
 
-const violations = [...result.violations];
+const violations = [...restoration.violations, ...result.violations];
 const handoffPath = path.join(repoRoot, manifest.handoff);
 const expectedHandoff = handoffText(manifest);
 if (!existsSync(handoffPath) || readFileSync(handoffPath, 'utf8') !== expectedHandoff) {
