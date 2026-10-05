@@ -15,6 +15,11 @@
 // **رموزُ الخروجِ:** `0` الحزمةُ متّسقةٌ · `1` رفضٌ (‏تُطبَعُ القواعدُ) · `2` عجزٌ عن القياسِ
 // (‏لا أساسَ، عقدٌ معطوبٌ) — **والعجزُ رفضٌ لا مرور**: الصمتُ لا يُقرأُ نجاحاً.
 //
+// **ولا يمحو تغييرٌ تاريخاً مُثبَتاً** (‏`WL-334`، `PS11`–`PS13`): كلُّ مُدخلةٍ في السجلِّ وكلُّ سطرِ
+// «آخر تحديث» على الأساسِ يبقى في المرشَّحِ، إلّا بإعلانٍ جديدٍ في `history_amendments` تملكُه
+// مُدخلةٌ جديدة. وفي CI لطلبِ دمجٍ المرشَّحُ هو **كوميتُ الدمجِ** (‏`refs/pull/N/merge`) والأساسُ
+// `origin/main` — أي ما سيصيرُ عليه `main` فعلاً، لا الفرعُ وحدَه.
+//
 // **حدٌّ معلَنٌ:** يقيسُ الاقترانَ والأثرَ المُدّعى لا صدقَ الوصفِ (‏المادة 1).
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -26,6 +31,7 @@ import {
   evaluateProjectState,
   parseManifest,
   renderHandoff,
+  verifyHistoryPreserved,
   verifyRestorations,
 } from './lib/project-state.mjs';
 
@@ -162,17 +168,27 @@ function readBase(rel) {
 }
 
 const WORK_LOG_IDS = 'config/work-log-ids.yaml';
-/** @type {unknown[]} */
-let restoreDeclarations = [];
-if (existsSync(path.join(repoRoot, WORK_LOG_IDS))) {
+/**
+ * @param {string} text
+ * @param {string} field
+ * @param {string} where
+ * @returns {unknown[]}
+ */
+function declaredList(text, field, where) {
+  if (text === '') return [];
   try {
-    const declared = parse(readHead(WORK_LOG_IDS))?.restored_entries ?? [];
-    if (!Array.isArray(declared)) throw new Error('`restored_entries` ليست قائمة');
-    restoreDeclarations = declared;
+    const list = parse(text)?.[field] ?? [];
+    if (!Array.isArray(list)) throw new Error(`\`${field}\` ليست قائمة`);
+    return list;
   } catch (error) {
-    unmeasurable(`\`${WORK_LOG_IDS}\`: ${error instanceof Error ? error.message : String(error)}`);
+    return unmeasurable(
+      `\`${WORK_LOG_IDS}\` (${where}): ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
+const headIdsText = existsSync(path.join(repoRoot, WORK_LOG_IDS)) ? readHead(WORK_LOG_IDS) : '';
+const baseIdsText = readBase(WORK_LOG_IDS);
+const restoreDeclarations = declaredList(headIdsText, 'restored_entries', 'الرأس');
 const headWorkLogText = existsSync(path.join(repoRoot, manifest.workLog))
   ? readHead(manifest.workLog)
   : '';
@@ -204,7 +220,18 @@ const result = evaluateProjectState({
     : '',
 });
 
-const violations = [...restoration.violations, ...result.violations];
+// WL-334: عدمُ فقدانِ التاريخِ — يُقاسُ **دائماً**، لا حينَ يكونُ التغييرُ «حاملاً للحالةِ» وحدَه:
+// حذفُ مُدخلةٍ أو سطرِ لوحةٍ يقعُ غالباً في حزمةٍ تُعدِّلُ السجلَّ وحدَه أو تُعيدُ توليدَه.
+const preservation = verifyHistoryPreserved({
+  baseWorkLog: readBase(manifest.workLog),
+  headWorkLog: headWorkLogText,
+  baseStatus: readBase(manifest.status),
+  headStatus: existsSync(path.join(repoRoot, manifest.status)) ? readHead(manifest.status) : '',
+  baseAmendments: declaredList(baseIdsText, 'history_amendments', 'الأساس'),
+  headAmendments: declaredList(headIdsText, 'history_amendments', 'الرأس'),
+});
+
+const violations = [...preservation.violations, ...restoration.violations, ...result.violations];
 const handoffPath = path.join(repoRoot, manifest.handoff);
 const expectedHandoff = handoffText(manifest);
 if (!existsSync(handoffPath) || readFileSync(handoffPath, 'utf8') !== expectedHandoff) {
@@ -216,6 +243,11 @@ if (!existsSync(handoffPath) || readFileSync(handoffPath, 'utf8') !== expectedHa
 
 console.log('═══ حاجزُ ذاكرةِ المشروعِ التنفيذيّةِ (project-state) ═══');
 console.log(`  الأساسُ: ${base} = ${baseSha.slice(0, 12)} · ملفّاتٌ متغيّرةٌ: ${changed.length}`);
+console.log(
+  `  التاريخُ: ${preservation.violations.length === 0 ? 'كلُّ مُدخلةٍ وسطرِ لوحةٍ على الأساسِ باقٍ في المرشَّح' : 'ساقطٌ'}${
+    preservation.amended.length > 0 ? ` · تعديلٌ مُعلَنٌ: ${preservation.amended.join(' ')}` : ''
+  }${restoration.restored.size > 0 ? ` · مُستعادٌ: ${[...restoration.restored].join(' ')}` : ''}`,
+);
 console.log(
   `  تنفيذيٌّ: ${result.executive.length} · ذاكرةٌ: ${result.memory.length} · مُدخلاتٌ جديدةٌ: ${
     result.newEntries.join(' ') || '—'

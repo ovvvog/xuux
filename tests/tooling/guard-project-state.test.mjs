@@ -623,3 +623,171 @@ test('استعادة — إعلانٌ بلا مُدخلةٍ مالكةٍ جدي�
   assert.equal(r.status, 1, r.out);
   assert.match(r.out, /PS10\/RESTORE-UNOWNED/u);
 });
+
+// ═══ عدمُ فقدانِ التاريخِ (‏`WL-334`، `DOC-24`) — الحادثةُ الحقيقيّةُ أوّلاً ═══
+//
+// `#254` أدخلَ `WL-330`، وفرعُ `#255` بُنِيَ من حالةٍ أقدمَ وحجزَ `WL-330` فجوةً، ثمّ أُعيدَ
+// تأسيسُه بحلِّ التعارضِ لصالحِه فسقطَت `WL-330` وسطرُ لوحتِها **وبقيَت الحواجزُ خضراءَ**.
+// المُدخلاتُ وسطورُ اللوحةِ واستثناءُ الفجوةِ منسوخةٌ بايتاً ببايتٍ من الكوميتاتِ الحقيقيّة.
+
+const INCIDENT = path.join(REPO, 'tests', 'fixtures', 'project-memory', 'incident-255');
+/** @param {string} name */
+const incident = (name) => readFileSync(path.join(INCIDENT, name), 'utf8');
+const LOG = 'docs/roadmap/05-work-log.md';
+
+/**
+ * يُدرِجُ مُدخلةً في أعلى السجلِّ وسطرَها في أعلى اللوحة — كما يفعلُ كلُّ عملٍ.
+ *
+ * @param {string} root
+ * @param {string} entry
+ * @param {string} statusLine
+ */
+function recordOnTop(root, entry, statusLine) {
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, log.replace('### [', `${entry}### [`));
+  const status = readFileSync(path.join(root, 'PROJECT_STATUS.md'), 'utf8');
+  write(root, 'PROJECT_STATUS.md', `${statusLine}\n${status}`);
+}
+
+/**
+ * أثرُ `#255` في الشجرةِ: الملفّاتُ التي تُسمّيها مُدخلتُه الحقيقيّةُ تتغيّرُ، واستثناءُ الفجوةِ.
+ *
+ * @param {string} root
+ */
+function applyPr255Work(root) {
+  for (const rel of [
+    'src/root-of-trust/clock.mts',
+    'src/root-of-trust/production-runtime.mts',
+    'src/production/entrypoint.mjs',
+    'tests/root-of-trust/wl-331-clock-state.test.mjs',
+    'docs/ROOT_OF_TRUST.md',
+    'docs/audit/work-log-id-map.md',
+  ]) {
+    write(root, rel, `// ${rel} — LIVE-37\n`);
+  }
+  const debt = readFileSync(path.join(root, 'docs/roadmap/06-debt-register.md'), 'utf8');
+  write(root, 'docs/roadmap/06-debt-register.md', `${debt}<!-- WL-331 -->\n`);
+  write(root, 'config/work-log-ids.yaml', incident('wl-330.gap.yaml.txt'));
+  recordOnTop(root, incident('wl-331.entry.txt'), incident('wl-331.status.txt').trimEnd());
+}
+
+/**
+ * `main` بعدَ `#254`، وفرعُ `pr-255` مبنيٌّ من الأساسِ الأقدم.
+ *
+ * @returns {string}
+ */
+function incidentRepo() {
+  const root = fixture();
+  git(root, ['checkout', '-q', 'main']);
+  git(root, ['checkout', '-qb', 'pr-255']);
+  applyPr255Work(root);
+  regenerateHandoff(root);
+  commit(root, 'WL-331 on the older base');
+  git(root, ['checkout', '-q', 'main']);
+  recordOnTop(root, incident('wl-330.entry.txt'), incident('wl-330.status.txt').trimEnd());
+  regenerateHandoff(root);
+  commit(root, 'PR #254: WL-330');
+  return root;
+}
+
+test('الحادثةُ #255 — إعادةُ تأسيسٍ بحلِّ التعارضِ لصالحِ الفرعِ تُسقِطُ WL-330 فيُرَدُّ الطلب (‏PS11) رغمَ استثناءِ الفجوة', () => {
+  const root = incidentRepo();
+  git(root, ['checkout', '-q', 'pr-255']);
+  git(root, ['rebase', '-q', '-X', 'theirs', 'main']);
+  regenerateHandoff(root);
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '--allow-empty', '-m', 'regenerate handoff after rebase']);
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  assert.doesNotMatch(log, /— WL-330 —/u, 'شرطُ الاستنساخ: العمليّةُ نفسُها أسقطَت المُدخلة.');
+  assert.match(log, /— WL-331 —/u);
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-330`/u);
+  assert.match(r.out, /PS11\/STATUS-HISTORY-LOST: سطرُ «آخر تحديث» لـ`WL-330`/u);
+  assert.doesNotMatch(
+    r.out,
+    /PS(4|5|6|7|8|9)\//u,
+    'السقوطُ وحدَه سببُ الردّ — سائرُ الحزمةِ متّسق.',
+  );
+});
+
+test('الحادثةُ #255 — الطلبُ نفسُه بحلٍّ يُبقي WL-330 وسطرَها يمرّ', () => {
+  const root = incidentRepo();
+  git(root, ['checkout', '-qb', 'pr-255-kept', 'main']);
+  applyPr255Work(root);
+  // الحلُّ الصحيحُ: الفجوةُ لم يبقَ لها محلٌّ (‏صارَ لـ`WL-330` عنوانٌ) فلا تُنسَخ.
+  write(root, 'config/work-log-ids.yaml', 'allowed_gaps: []\n');
+  regenerateHandoff(root);
+  commit(root, 'WL-331 rebased with WL-330 kept');
+  const r = runGuard(root);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /كلُّ مُدخلةٍ وسطرِ لوحةٍ على الأساسِ باقٍ في المرشَّح/u);
+  assert.match(r.out, /مُدخلاتٌ جديدةٌ: WL-331 /u);
+});
+
+test('التاريخ — إعادةُ كتابةِ مُدخلةٍ قديمةٍ تُرَدُّ (‏PS12)، وتغيُّرُ ذيلِها وحدَه حينَ تُضافُ جارتُها لا يُرَدّ', () => {
+  const root = fixture();
+  addEntry(root, { files: ['src/app.mjs', 'PROJECT_STATUS.md'] });
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  // ذيلُ WL-001 (‏الفاصلُ) يتغيّرُ — ليس تعديلاً.
+  write(root, LOG, log.replace(/\n---\n$/u, '\n'));
+  regenerateHandoff(root);
+  commit(root, 'tail only');
+  assert.equal(runGuard(root).status, 0);
+  const now = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, now.replace('— البداية', '— البدايةُ المُصحَّحة'));
+  regenerateHandoff(root);
+  commit(root, 'rewrite WL-001 title');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-001`/u);
+});
+
+test('التاريخ — حذفٌ مقصودٌ يمرُّ بإعلانٍ جديدٍ تملكُه مُدخلةٌ جديدة؛ وبلا مالكٍ يُرَدُّ (‏PS13)', () => {
+  const root = fixture();
+  addEntry(root, {
+    id: 'WL-002',
+    title: 'حذفُ WL-001 مقصوداً',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, log.replace(/### \[2026-10-01\][\s\S]*$/u, ''));
+  const decl = (/** @type {string} */ by) =>
+    `history_amendments:\n  - id: WL-001\n    action: remove\n    by: ${by}\n    reason: مُدخلةٌ مكرَّرةٌ مقيسة\n`;
+  write(root, 'config/work-log-ids.yaml', decl('WL-001'));
+  regenerateHandoff(root);
+  commit(root, 'remove with unowned declaration');
+  const bad = runGuard(root);
+  assert.equal(bad.status, 1, bad.out);
+  assert.match(bad.out, /PS13\/AMENDMENT-UNOWNED/u);
+  assert.match(bad.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/u);
+  write(root, 'config/work-log-ids.yaml', decl('WL-002'));
+  regenerateHandoff(root);
+  commit(root, 'owned declaration');
+  const ok = runGuard(root);
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /تعديلٌ مُعلَنٌ: WL-001/u);
+});
+
+test('التاريخ — إعلانٌ قديمٌ على الأساسِ لا يُعفي حذفاً جديداً', () => {
+  const root = fixture();
+  git(root, ['checkout', '-q', 'main']);
+  addEntry(root, { id: 'WL-002', title: 'عمل', files: ['src/app.mjs', 'PROJECT_STATUS.md'] });
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  write(
+    root,
+    'config/work-log-ids.yaml',
+    'history_amendments:\n  - id: WL-001\n    action: remove\n    by: WL-002\n    reason: إعلانٌ قديم\n',
+  );
+  regenerateHandoff(root);
+  commit(root, 'old declaration on main');
+  git(root, ['checkout', '-qB', 'work']);
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, log.replace(/### \[2026-10-01\][\s\S]*$/u, ''));
+  regenerateHandoff(root);
+  commit(root, 'silent removal under an old declaration');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/u);
+});
