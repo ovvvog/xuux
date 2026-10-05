@@ -465,3 +465,39 @@ test('الطفرةُ M16: حذفُ 🟢 من معرِّفٍ مُغلَقٍ يُ�
 });
 
 // ملاحظةٌ: الاختبارُ الإيجابيُّ لـR8 (العلامةُ الموحَّدةُ تَمرُّ) مُعلَّقٌ حتى يُحَلَّ انحرافُ R2/DRIFT
+
+// ── الطفرةُ 17: صفٌّ مكرَّرٌ في الجدولِ الواحدِ (‏`R9`، `WL-336` لـ`DOC-28`) ──
+
+test('الطفرةُ M17: صفُّ `LIVE-40` مكرَّراً في §4.6 (‏حادثةُ `#256`) يُسقِطُ الحاجزَ بـR9/DUP-ROW', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    const lines = debt.split('\n');
+    const i = lines.findIndex((line) => line.startsWith('| `LIVE-40` |'));
+    assert.ok(i !== -1, 'ينبغي أن يُعثَرَ على صفِّ LIVE-40');
+    // كما وقعَ: النسخةُ الأخرى من الصفِّ بعدَ صفٍّ آخرَ، بعرضٍ صحيحٍ فلا يراها `R4`.
+    lines.splice(i + 2, 0, lines[i] ?? '');
+    writeFileSync(debtPath, lines.join('\n'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'صفٌّ مكرَّرٌ ينبغي أن يُسقِطَ الحاجز');
+    assert.match(stderr, /R9\/DUP-ROW/);
+    assert.match(stderr, /«LIVE-40»/);
+    assert.doesNotMatch(stderr, /R4\/SHAPE/, 'النسخةُ بعرضٍ صحيحٍ — السببُ التكرارُ لا الشكل');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R9: معرِّفٌ في جدولَينِ مختلفَينِ (‏§4.5 و§6: `REPO-4`) لا يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const debt = readFileSync(path.join(tmp, 'docs/roadmap/06-debt-register.md'), 'utf8');
+    const rows = debt.split('\n').filter((line) => /^\| (?:~~)?`REPO-4`/.test(line));
+    assert.equal(rows.length, 2, 'شرطُ القياس: `REPO-4` صفٌّ في جدولَين');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, stderr);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
