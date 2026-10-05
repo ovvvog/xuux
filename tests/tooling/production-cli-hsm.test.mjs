@@ -310,6 +310,81 @@ describe('أدوات التشغيل في الإنتاج تعمل على التو
     }
   });
 
+  test('halt-switch: تدويرُ مفتاحِ عقدةٍ قائمةٍ في confirm — بالمفتاحَينِ القديمِ والجديد (LIVE-40 أ)', async () => {
+    const ctx = context();
+    try {
+      const runtime = await createProductionRootOfTrust(
+        ctx.env,
+        { root: ctx.root, fsync: false, freshnessSocket: ctx.freshnessSocket },
+        ctx.deps,
+      );
+      try {
+        const env = { ...ctx.env, HALT_NODE_ID: 'node-cli' };
+        const oldPair = generateKeyPairSync('ed25519');
+        const newPair = generateKeyPairSync('ed25519');
+        const oldKeyFile = join(ctx.root, 'node-old.pem');
+        const newKeyFile = join(ctx.root, 'node-new.pem');
+        writeFileSync(
+          oldKeyFile,
+          oldPair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+        );
+        writeFileSync(
+          newKeyFile,
+          newPair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+        );
+        const oldPublicPem = oldPair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+        const newPublicPem = newPair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+        await runtime.haltSwitch.registerNodeAsync('node-cli', {
+          nodeKey: { publicKeyPem: oldPublicPem, sign: () => 'x' },
+        });
+
+        const haltFile = join(ctx.root, 'halt-command.json');
+        writeFileSync(
+          haltFile,
+          JSON.stringify(royalCommandFor(runtime.haltSwitch, 'halt', 'تدويرٌ في الإنتاج')),
+        );
+        const halted = JSON.parse(
+          await withRootDrain(
+            runtime,
+            runHalt(['halt', '--command-file', haltFile, '--json'], env, ctx.deps),
+          ),
+        );
+        assert.equal(halted.halted, true);
+
+        // مفتاحٌ جديدٌ بلا مفتاحِ العقدةِ القديم: رفضٌ مغلقٌ بذكرِ سببِه لا صمتٌ.
+        await assert.rejects(
+          () =>
+            withRootDrain(
+              runtime,
+              runHalt(['confirm', '--node-key', newKeyFile, '--json'], env, ctx.deps),
+            ),
+          /HALT_NODE_KEY_ROTATION_OLD_KEY_REQUIRED/,
+        );
+        assert.equal(runtime.haltSwitch.nodes()[0].nodeKeyPem, oldPublicPem, 'لم يتغيّر المفتاح');
+
+        // بالمفتاحَين: حيازةُ الجديدِ وإذنُ القديم — فيُقبلُ التدويرُ والإقرارُ معاً.
+        const confirmed = JSON.parse(
+          await withRootDrain(
+            runtime,
+            runHalt(
+              ['confirm', '--node-key', newKeyFile, '--old-node-key', oldKeyFile, '--json'],
+              env,
+              ctx.deps,
+            ),
+          ),
+        );
+        assert.equal(confirmed.confirmed, true);
+        assert.equal(confirmed.confirmation.nodeId, 'node-cli');
+        assert.equal(runtime.haltSwitch.nodes()[0].nodeKeyPem, newPublicPem, 'المفتاحُ دُوِّر');
+        assert.deepEqual(runtime.haltSwitch.describe().confirmed, ['node-cli']);
+      } finally {
+        await runtime.close();
+      }
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
   test('halt-switch: بلا عمليةِ جذرٍ لا كتابةَ من الأداة — القصدُ يبقى مُودَعاً ولا يُقرأُ نجاحاً (LIVE-34)', async () => {
     const ctx = context();
     try {

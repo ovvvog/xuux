@@ -184,10 +184,18 @@ async function runOnHsm(args, config, env, deps) {
       }
       const id = newRootIntentId();
       const at = new Date().toISOString();
+      // `LIVE-40` (ب): فترةُ التثبيتِ (‏`ANCHOR_INTERVAL_MINUTES`) جزءٌ من مادةِ
+      // التوقيعِ ومن الحمولةِ معاً، فيُطبّقُ الجذرُ فترةَ الأداةِ الموقَّعةَ لا
+      // فترتَهُ الافتراضيّة.
       const signature = await signer.signAsync(
-        anchorIntentSigningBody({ id, at, force: args.force }),
+        anchorIntentSigningBody({ id, at, force: args.force, intervalMs: config.intervalMs }),
       );
-      submitRootIntent(root, 'anchor', { force: args.force, signature }, { id, at });
+      submitRootIntent(
+        root,
+        'anchor',
+        { force: args.force, signature, intervalMs: config.intervalMs },
+        { id, at },
+      );
       const outcome = await awaitRootIntentResult(
         root,
         id,
