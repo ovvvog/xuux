@@ -22,6 +22,7 @@ import {
   entryText,
   parseDebtRows,
   renderHandoff,
+  splitTableCells,
 } from '../../scripts/lib/project-state.mjs';
 
 const REPO = process.cwd();
@@ -1206,5 +1207,69 @@ test('DOC-30 — المستودعُ نفسُه: DOC-23 لا يُحكَمُ بإ�
     opsR6.closed,
     true,
     'OPS-1/R6-REMEASURE المشطوبُ لا يُحكَمُ مُغلَقاً — وهو خطأٌ في الانحدار',
+  );
+});
+
+// ── `DOC-31` (‏`WL-342`): الخليّةُ بتعريفِ `R4` — `|` داخلَ كودٍ لا يُقسَم ──
+
+/** تعريفُ `R4` في `scripts/guard-doc-counts.mjs` حرفاً: عددُ الخلايا بعدَ نزعِ الكود. */
+const r4CellCount = (/** @type {string} */ line) =>
+  line.replace(/`[^`]*`/g, '§').split('|').length - 2;
+
+const DOC31_TABLE = [
+  '### 4.6 ديونٌ مكتشفةٌ حيّةٌ لم تُصلَحْ',
+  '',
+  '| المعرِّفُ | الدَينُ (مقيسٌ) | معيارُ الإغلاقِ | مَن |',
+  '| --- | --- | --- | --- |',
+  "| `LIVE-96` | كودٌ مُهرَّبٌ: `a === 'x' \\|\\| b` في الوصف | يُغلَقُ بالإصلاح | منفِّذ |",
+  '| `LIVE-95` | كودٌ غيرُ مُهرَّبٍ: `/(?:\\s|^-{3,}$)+$/` في الوصف | معيارٌ بـ`x|y` | مالك |',
+  '',
+].join('\n');
+
+test('DOC-31 — `|` داخلَ كودٍ (‏مُهرَّباً أو لا) لا يُقسَمُ، والمالكُ عمودُ «مَن» لا نصُّ الوصف', () => {
+  const rows = parseDebtRows(DOC31_TABLE);
+  const live96 = rows.find((r) => r.id === 'LIVE-96');
+  const live95 = rows.find((r) => r.id === 'LIVE-95');
+  assert.ok(live96 && live95, 'الصفّانِ غائبانِ');
+  // كانَ يُقرأُ `b` في الوصفِ مالكاً لـ`LIVE-96`، و`^-{3,}$)+$/` لـ`LIVE-95` — الخللُ الذي يُصلِحُه DOC-31.
+  assert.equal(live96.owner, 'منفِّذ');
+  assert.equal(live95.owner, 'مالك');
+  // والكودُ يُعادُ حرفاً كما كُتِب.
+  assert.deepEqual(splitTableCells(DOC31_TABLE.split('\n')[4] ?? ''), [
+    '`LIVE-96`',
+    "كودٌ مُهرَّبٌ: `a === 'x' \\|\\| b` في الوصف",
+    'يُغلَقُ بالإصلاح',
+    'منفِّذ',
+  ]);
+});
+
+test('DOC-31 — `splitTableCells` وتعريفُ `R4` متطابقانِ عدداً في كلِّ صفٍّ من كلِّ جدولٍ في السجلِّ', () => {
+  const debt = readFileSync(path.join(REPO, manifest.debtRegister), 'utf8');
+  const rows = debt.split('\n').filter((l) => l.startsWith('|'));
+  assert.ok(rows.length > 100, 'السجلُّ بلا صفوف');
+  const differ = rows.filter((l) => splitTableCells(l).length !== r4CellCount(l));
+  assert.deepEqual(differ, [], 'تعريفانِ للخليّةِ يفترقانِ — وهو الخللُ الذي يُصلِحُه DOC-31');
+});
+
+test('DOC-31 — المستودعُ نفسُه: مالكا DOC-30 وDOC-27 من عمودِ «مَن»، ولا مالكَ في §2 من HANDOFF نصُّ كود', () => {
+  const debt = readFileSync(path.join(REPO, manifest.debtRegister), 'utf8');
+  const rows = parseDebtRows(debt);
+  const doc30 = rows.find((r) => r.id === 'DOC-30');
+  const doc27 = rows.find((r) => r.id === 'DOC-27');
+  assert.ok(doc30 && doc27, 'DOC-30 أو DOC-27 غائبٌ');
+  assert.equal(doc30.owner, 'منفِّذ', 'مالكُ DOC-30 نصٌّ من وصفِه');
+  assert.match(doc27.owner, /^منفِّذ/u, 'مالكُ DOC-27 نصٌّ من معيارِه');
+  for (const r of rows) {
+    assert.doesNotMatch(
+      r.owner,
+      /line\.includes|اختبارٌ يُثبِتُ النسبةَ/u,
+      `${r.id}: مالكٌ من نصِّ الوصف`,
+    );
+  }
+  const handoff = readFileSync(path.join(REPO, 'docs', 'HANDOFF.md'), 'utf8');
+  assert.doesNotMatch(
+    handoff,
+    /\| line\.includes|\| اختبارٌ يُثبِتُ النسبةَ/u,
+    'HANDOFF يعرضُ نصّاً من وصفِ DOC-30 مالكاً',
   );
 });
