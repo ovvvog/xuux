@@ -42,7 +42,7 @@
 
 #### الأثر
 
-- **أربعةُ نداءاتٍ سياديّةٍ متبقّية** (judiciary×2 · reports×1 · federation×1) صارت `commandAsync`. و`WL-345` (‏#276) حوّلَ نداءَي `legislature` ودُمِجَ على `main@a40a299d`؛ فعلى شجرةِ هذا الطلبِ المحدَّثةِ لا يبقى في `src/` نداءٌ سياديٌّ لـ`crown.command` المتزامن (‏مقيسٌ بـ`rg`).
+- **أربعةُ نداءاتٍ سياديّةٍ متبقّية** (judiciary×2 · reports×1 · federation×1) صارت `commandAsync`. و`WL-345` (‏#276) حوّلَ نداءَي `legislature` ودُمِجَ على `main@a40a299d`؛ وقياسُ `rg -n 'crown\.command\(' src/` على الشجرةِ المحدَّثةِ يُظهِرُ موضعينِ باقيينِ: `src/core/execution-kernel.mjs:191` (‏احتياطٌ لا يُنادى إلّا إن غابَ `commandAsync` عن البوابة — `LIVE-25`)، و**`src/console/royal-console.mjs:690` (‏`#acceptThroughCrown`) متزامنٌ فعلاً** ولم يُحصَ في عدِّ «الستّة» السابق — فالعدُّ كانَ ناقصاً، ومعالجتُه خارجَ نطاقِ هذا الطلبِ وتُفرَدُ بمُدخلةٍ لاحقة.
 - `withLegislation: false` لا يزالُ يمنعُ ربطَ السلطةِ بالتركيبِ الإنتاجيِّ — هذه خطوةٌ لاحقة.
 
 ### [2026-10-06] — WL-345 — `legislature.mjs` ينادي `crown.commandAsync` لا `crown.command` المتزامن
