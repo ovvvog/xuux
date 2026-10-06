@@ -600,3 +600,117 @@ test('تركيبُ السجلاتِ يمرّر بوابةَ التاجِ إلى 
   });
   assert.equal(law['state'], LawState.ENACTED);
 });
+
+/**
+ * `WL-345`: السلطةُ التشريعيّةُ تستعملُ `crown.commandAsync` لا `crown.command` المتزامن.
+ * المسارُ المتزامنُ مرفوضٌ في الإنتاجِ بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION`،
+ * فأيُّ وحدةٍ سياديّةٍ تنادي `crown.command` لا تعملُ في الإنتاج. هذا الاختبارُ يُثبِتُ أنّ
+ * `enact` و`resolve` يناديان `commandAsync` فعلاً لا `command`.
+ */
+
+/** بوابةُ تاجٍ تُسجِّل نداءاتِها. */
+class TrackingCrown {
+  /** @param {InstanceType<typeof CrownGateway>} inner */
+  constructor(inner) {
+    this.inner = inner;
+    this.commandCalls = 0;
+    this.commandAsyncCalls = 0;
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  command(command, signature) {
+    this.commandCalls++;
+    return this.inner.command(command, signature);
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  async commandAsync(command, signature) {
+    this.commandAsyncCalls++;
+    return this.inner.commandAsync(command, signature);
+  }
+  get production() {
+    return this.inner.production;
+  }
+  get seenCommands() {
+    return this.inner.seenCommands;
+  }
+  get king() {
+    return this.inner.king;
+  }
+  get ca() {
+    return this.inner.ca;
+  }
+  get policy() {
+    return this.inner.policy;
+  }
+  get log() {
+    return this.inner.log;
+  }
+  get commandLedger() {
+    return this.inner.commandLedger;
+  }
+  get haltSwitch() {
+    return this.inner.haltSwitch;
+  }
+  get clock() {
+    return this.inner.clock;
+  }
+}
+
+test('WL-345: enact ينادي commandAsync لا command المتزامن', async () => {
+  const s = state([policyRecord({ id: 'pol:a' })]);
+  const tracking = new TrackingCrown(s.crown);
+  s.legislature.crown = tracking;
+  const id = await proposed(s.laws, 'قانونُ النفاذ غير المتزامن');
+  const cmd = createRoyalCommand(LEGISLATION_POLICY.binding.enactAction, id);
+  await s.legislature.enact({
+    lawId: id,
+    articleId: 'art:05',
+    policyIds: ['pol:a'],
+    command: cmd,
+    signature: s.king.sign(cmd),
+  });
+  assert.equal(tracking.commandAsyncCalls, 1, 'enact يجب أن ينادي commandAsync مرة واحدة');
+  assert.equal(tracking.commandCalls, 0, 'enact يجب ألا ينادي command المتزامن');
+});
+
+test('WL-345: resolve ينادي commandAsync لا command المتزامن', async () => {
+  const s = state([
+    policyRecord({ id: 'pol:allow', resources: ['task'] }),
+    policyRecord({ id: 'pol:deny', effect: 'deny', resources: ['report'] }),
+  ]);
+  const tracking = new TrackingCrown(s.crown);
+  s.legislature.crown = tracking;
+  const first = await proposed(s.laws, 'قانونُ التشغيل');
+  await s.legislature.enact({
+    lawId: first,
+    articleId: 'art:05',
+    policyIds: ['pol:allow'],
+    ...command(s.king, 'enact-law', first),
+  });
+  const second = await proposed(s.laws, 'قانونُ التقارير');
+  await s.legislature.enact({
+    lawId: second,
+    articleId: 'art:06',
+    policyIds: ['pol:deny'],
+    ...command(s.king, 'enact-law', second),
+  });
+  // إنشاء تعارض: توسيع مورد السياسة الثانية
+  const widened = s.bundle.policies.map((entry) =>
+    entry.id === 'pol:deny' ? policyRecord({ ...entry, resources: ['task'] }) : entry,
+  );
+  s.legislature.bundle = bundleOf(widened);
+  const resolveCmd = createRoyalCommand(LEGISLATION_POLICY.binding.resolveAction, second);
+  await s.legislature.resolve({
+    lawId: second,
+    reason: 'يُعلَّق قانونُ التقارير حتى يُعاد صوغُ سياسته بلا تقاطعٍ مع قانون التشغيل.',
+    command: resolveCmd,
+    signature: s.king.sign(resolveCmd),
+  });
+  assert.equal(
+    tracking.commandAsyncCalls,
+    3,
+    'resolve يجب أن ينادي commandAsync (مرتان enact + مرة resolve)',
+  );
+  assert.equal(tracking.commandCalls, 0, 'resolve يجب ألا ينادي command المتزامن');
+});

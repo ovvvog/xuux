@@ -466,6 +466,7 @@ test('الطفرةُ M16: حذفُ 🟢 من معرِّفٍ مُغلَقٍ يُ�
 });
 
 // ملاحظةٌ: الاختبارُ الإيجابيُّ لـR8 (العلامةُ الموحَّدةُ تَمرُّ) مُعلَّقٌ حتى يُحَلَّ انحرافُ R2/DRIFT
+// ‏`WL-344`: أُضيفَ الاختبارُ الإيجابيُّ لـ`R8/UNMARKED` على السجلِّ الحقيقيِّ (‏§4 و§6) في آخرِ هذا الملفّ.
 
 // ── الطفرةُ 17: صفٌّ مكرَّرٌ في الجدولِ الواحدِ (‏`R9`، `WL-336` لـ`DOC-28`) ──
 
@@ -565,6 +566,42 @@ test('R8 (‏§4.3): السجلُّ الحاليُّ يطابقُ العقدَ �
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 0, stderr);
     assert.doesNotMatch(stderr, /R8\/YAML/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── الطفرةُ M21 وانحدارُها: `R8/UNMARKED` يشملُ §6 لا §4 وحدَه (‏`WL-344`، الشقُّ الثالثُ من `DOC-30`) ──
+//   كانَ `R8/UNMARKED` يقرأُ من `## 4 —` إلى `## 5 —`، فصفٌّ في §6 معرِّفُه مشطوبٌ بلا 🟢 لا يراه أحد —
+//   وهو حالُ `OPS-1/R6-REMEASURE` الذي حملَ 🟢 في وصفِه لا في خليّةِ معرِّفِه.
+
+test('الطفرةُ M21: حذفُ 🟢 من معرِّفٍ مُغلَقٍ في §6 (‏`EXT-4`) يُسقِطُ الحاجزَ بـR8/UNMARKED', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    const mutated = debt.replace('| ~~`EXT-4`~~ 🟢 |', '| ~~`EXT-4`~~ |');
+    assert.notEqual(mutated, debt, 'ينبغي أن يُعثَرَ على صفِّ EXT-4 في §6');
+    writeFileSync(debtPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'معرِّفٌ مشطوبٌ بلا 🟢 في §6 ينبغي أن يُسقِطَ الحاجز');
+    assert.match(stderr, /R8\/UNMARKED: الصفُّ «EXT-4»/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/UNMARKED: السجلُّ الحاليُّ يمرُّ — كلُّ معرِّفٍ مشطوبٍ في §4 و§6 يحملُ 🟢 في خليّتِه (‏ومنه `OPS-1/R6-REMEASURE`)', () => {
+  const tmp = cloneRepo();
+  try {
+    const debt = readFileSync(path.join(tmp, 'docs/roadmap/06-debt-register.md'), 'utf8');
+    assert.ok(
+      debt.includes('| ~~`OPS-1/R6-REMEASURE`~~ 🟢 |'),
+      'OPS-1/R6-REMEASURE بلا 🟢 في خليّةِ معرِّفِه',
+    );
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, stderr);
+    assert.doesNotMatch(stderr, /R8\/UNMARKED/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

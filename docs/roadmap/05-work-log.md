@@ -10,7 +10,7 @@
   - `src/judiciary/court.mjs` — `execute` (سطر 658) و`reverse` (سطر 731).
   - `src/reports/royal-report.mjs` — `publish` (سطر 954).
   - `src/federation/delegation.mjs` — `#royal` (سطر 548)، وصارَ `async #royal`، ومُستدعاياه (`activate` و`revoke`) صارا `await this.#royal(...)`.
-- **أنواعُ `CrownLike`** في `reports` و`federation`، ونوعُ `crown` في `judiciary` (`@param` و`@returns`)، ونوعُ `crown` في `composition.mjs` — كلُّها صارت تشمل `commandAsync`.
+- **أنواعُ `CrownLike`** في `reports` و`federation`، ونوعُ `crown` في `judiciary` (`@param` و`@returns`) — كلُّها صارت تشمل `commandAsync`. ونوعُ `crown` في `composition.mjs` حملَه `WL-345` (‏#276) المدموجُ قبلَه، فلا فرقَ له هنا.
 - **ثلاثةُ اختباراتٍ جديدة** (واحدٌ في كلِّ وحدة) تُثبتُ أنّ `commandAsyncCalls > 0` و`commandCalls === 0`.
 - **الاختباراتُ القائمةُ** كلُّها مرّت: judiciary 15/15 · reports 17/17 · federation 15/15.
 
@@ -20,11 +20,11 @@
 
 #### الملفاتُ المتأثّرة
 
-`src/judiciary/court.mjs` · `src/reports/royal-report.mjs` · `src/federation/delegation.mjs` · `src/persistence/composition.mjs` · `scripts/guard-reports.mjs` · `tests/judiciary/court.test.mjs` · `tests/reports/royal-report.test.mjs` · `tests/federation/delegation.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` · `config/work-log-ids.yaml` · `docs/audit/work-log-id-map.md`
+`src/judiciary/court.mjs` · `src/reports/royal-report.mjs` · `src/federation/delegation.mjs` · `scripts/guard-reports.mjs` · `tests/judiciary/court.test.mjs` · `tests/reports/royal-report.test.mjs` · `tests/federation/delegation.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
 
 #### الـ commit
 
-يُملأُ بالدمج — الفرعُ `fix/wl-346-sovereign-async-remaining-modules` من `main@73e3a802`.
+يُملأُ بالدمج — الفرعُ `fix/wl-346-sovereign-async-remaining-modules` من `main@73e3a802`، ومُحدَّثٌ بدمجِ `main@a40a299d` (‏#274 + #276).
 
 #### الدليل
 
@@ -42,8 +42,89 @@
 
 #### الأثر
 
-- **أربعةُ نداءاتٍ سياديّةٍ متبقّية** (judiciary×2 · reports×1 · federation×1) صارت `commandAsync`. و`WL-345` (طلبُ الدمجِ #276) يحوّلُ نداءَي `legislature` منفصلاً؛ فبدمجِهما معاً تغطّي الحزمةُ النداءاتِ الستّة، ولا تدّعي شجرةُ هذا الطلبِ وحدَها أكثرَ من الأربعة.
+- **أربعةُ نداءاتٍ سياديّةٍ متبقّية** (judiciary×2 · reports×1 · federation×1) صارت `commandAsync`. و`WL-345` (‏#276) حوّلَ نداءَي `legislature` ودُمِجَ على `main@a40a299d`؛ فعلى شجرةِ هذا الطلبِ المحدَّثةِ لا يبقى في `src/` نداءٌ سياديٌّ لـ`crown.command` المتزامن (‏مقيسٌ بـ`rg`).
 - `withLegislation: false` لا يزالُ يمنعُ ربطَ السلطةِ بالتركيبِ الإنتاجيِّ — هذه خطوةٌ لاحقة.
+
+### [2026-10-06] — WL-345 — `legislature.mjs` ينادي `crown.commandAsync` لا `crown.command` المتزامن
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** بنيةٌ أساسيّةٌ — ربطُ وحدةٍ سياديّةٍ بالمسارِ الإنتاجيِّ المختوم · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
+
+#### لماذا هذه المهمّةُ دونَ غيرِها
+
+- **المسارُ الإنتاجيُّ موصولٌ ويرفضُ الإقلاعَ مغلقاً** لأنّ مصدرَ الحداثةِ (`R3-A-01`/`EXT-6`) غيرُ موجودٍ — وهذا محجوبٌ بقرارِ المالكِ. **لكنّ هناك عائقاً داخليّاً ثانياً:** المداخلُ السياديّةُ (`legislation` · `judiciary` · `reports` · `federation`) تنادي `crown.command` المتزامنَ، وهو مرفوضٌ في الإنتاجِ بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` (‏`WL-304`/`LIVE-25`). فحتى لو وُجِدَ مصدرُ حداثةٍ، لا تعملُ هذه الوحداتُ في الإنتاج.
+- **`legislation` أوّلُها:** هي الأعمقُ في البنيةِ (‏ربطُ القانونِ بسياسته ونفاذُه بأمرٍ ملكيٍّ) وأوسعُها استعمالاً في سلسلةِ الإنفاذِ (‏`enforcementGate`).
+- **التحويلُ داخليٌّ صرفٌ:** الطريقتان `enact` و`resolve` كلاهما `async` بالفعل، و`commandAsync` يعملُ في التطويرِ كما `command` (‏يستعملُ `log.append` إن لم يكن `appendSealed`). فلا تتكسّرُ واجهةٌ ولا يتغيّرُ سلوكٌ في التطوير.
+
+#### ما تمَّ فعلاً
+
+- **موضعا النداءِ الاثنانِ** في `src/legislation/legislature.mjs` (‏سطرا 278 و333): `this.crown.command(command, signature)` ⇐ `await this.crown.commandAsync(command, signature)`. والتعليقُ يُعلِنُ سببَ التحويلِ ومرجعَه.
+- **اختبارانِ جديدانِ** في `tests/legislation/legislature.test.mjs`: `TrackingCrown` يَلفُّ بوابةَ التاجِ الحقيقيّةَ ويَعُدُّ نداءاتِ `command` و`commandAsync`. الاختبارُ الأوّلُ يُثبِتُ أنّ `enact` ينادي `commandAsync` مرةً ولا ينادي `command`. والثاني يُثبِتُ أنّ `resolve` ينادي `commandAsync` ثلاثَ مرّاتٍ (‏مرّتانِ `enact` + مرة `resolve`) ولا ينادي `command`.
+- **الاختباراتُ العشرةُ القائمةُ** مرّت بلا تغييرٍ — التحويلُ متوافقٌ مع التطوير.
+
+#### الملفاتُ المتأثّرة
+
+`src/legislation/legislature.mjs` · `tests/legislation/legislature.test.mjs` · `src/persistence/composition.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-345-legislature-async-sovereign-command` من `main@73e3a802`.
+
+#### الدليلُ
+
+- `node --test tests/legislation/legislature.test.mjs` ⇒ `12/12` ناجحٌ (‏10 قائمة + 2 جديدتانِ).
+- `TrackingCrown.commandCalls === 0` و`TrackingCrown.commandAsyncCalls > 0` في الاختبارَينِ.
+
+#### ما لم يتمَّ ولماذا
+
+- **`withLegislation: false` في `src/production/entrypoint.mjs` لم يُقلَب:** ربطُ السلطةِ التشريعيّةِ بالتركيبِ الإنتاجيِّ خطوةٌ لاحقةٌ — قد تُشفِلُ تبعيّاتٌ أخرى (‏مستودعُ قوانينَ دائمٌ، ساعةٌ موثوقةٌ) لا تُحَلُّ بتحويلِ النداءِ وحدَه.
+- **الوحداتُ السياديّةُ الأخرى** (`judiciary` · `reports` · `federation`) لها المواضعُ نفسُها (‏6 نداءاتٍ `crown.command` متزامنةٍ) — تُحوَّلُ في WLs لاحقةٍ بنفسِ النمط.
+- **مصدرُ الحداثةِ الإنتاجيُّ** (`R3-A-01`/`EXT-6`) محجوبٌ بقرارِ المالكِ — لا يُدَّعى إغلاقُه.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- لا أثرَ على العقدِ ولا `version.json` ولا الخطوات. والتغييرُ في `src/` و`tests/` داخلَ نطاقِ بصمةِ خطِّ الأساس، فالقياسُ يُعادُ بعدَ الدمج (‏`OPS-1/MAIN-DRIFT-WINDOW`).
+
+### [2026-10-06] — WL-344 — `DOC-30` (‏شقُّه الثالث): `R8/UNMARKED` يقرأُ §6 مع §4، فمعرِّفٌ مشطوبٌ بلا 🟢 في جدولِ «ما لا يملكُ المنفِّذُ إغلاقَه» لا يمرُّ؛ و`OPS-1/R6-REMEASURE` يُوسَمُ بعلامتِه الموحَّدة
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** دَينٌ `DOC-30` (‏§4.6) — الشقُّ الثالثُ المُعلَنُ غيرَ منفَّذٍ في `WL-340` · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ؛ **`DOC-30` غيرُ مُغلَقٍ** — الإغلاقُ بعدَ المراجعة
+
+#### لماذا هذه المهمّةُ دونَ غيرِها
+
+- **مُستبعَدٌ بقرارِ مالكٍ أو مجلسٍ أو مُعطًى خارجيٍّ:** `M0.06` · `M11.04`–`M11.06` · `EXT-6`/`LIVE-23` · `LIVE-28` · `LIVE-24`/`LIVE-26`/`LIVE-38` · `DOC-19`/`20`/`21` · `LIVE-40` (‏ج) · لمستا `OPS-1/MAIN-DRIFT-WINDOW` (‏إقرارُ البيئةِ والمراجعة).
+- **صفوفُ المنفِّذِ المفتوحةُ في `docs/HANDOFF.md` §2 مقروءةً واحداً واحداً:** `LIVE-32`/`33`/`35`/`36`/`41` و`DOC-24`/`28`/`29` و`LIVE-40` (‏أ)(ب) منفَّذةٌ ومقيسةٌ ويبقى حكمُ المراجعة — لا عملَ للمنفِّذ. و`LIVE-39` (‏دوامُ `D3` أمامَ انقطاعِ الطاقة) يحتاجُ قرصاً يُسقِطُ ما لم يُزامَن: **قِيسَ في البيئةِ** `dmsetup targets` ⇒ «Failure to communicate with kernel device-mapper driver»، و`modprobe dm-flakey` ⇒ «Module dm-flakey not found» — فلا يُثبَتُ هنا باختبار.
+- **و`DOC-30` شقُّه الثالثُ مُعلَنٌ غيرَ منفَّذٍ في `WL-340` نصّاً** («حكمُ `OPS-1/R6-REMEASURE` ونطاقِ `R8` لم يُنفَّذ»)، مالكُه المنفِّذُ، ويُثبَتُ بطفرة.
+
+#### ما تمَّ فعلاً
+
+- **القياسُ قبلَ الإصلاح:** `R8/UNMARKED` في `scripts/guard-doc-counts.mjs` يقرأُ من `## 4 —` إلى `## 5 —` وحدَه. و§6 جدولُ معرِّفاتٍ بالعلامةِ نفسِها؛ وفيه صفٌّ واحدٌ معرِّفُه مشطوبٌ بلا 🟢 في خليّتِه: `OPS-1/R6-REMEASURE` (‏🟢 في وصفِه). و§5 و§7 بلا جداول.
+- **الإصلاحُ:** نطاقُ `R8/UNMARKED` صارَ §4 و§6 (‏حلقةٌ على مدَيَين، والقاعدةُ نفسُها بلا تغيير). وبعدَه على السجلِّ الحقيقيِّ قبلَ الوسم ⇒ **مخالفةٌ واحدةٌ** مُسمّاة: `R8/UNMARKED: الصفُّ «OPS-1/R6-REMEASURE» … سطر 332`.
+- **الوسمُ:** خليّةُ معرِّفِ `OPS-1/R6-REMEASURE` صارت `~~ID~~ 🟢`. صفُّه يُعلِنُ نصّاً «أُغلِقَ بنيةً في `WL-247`» ومعرِّفُه مشطوبٌ منذ ذلك — **توحيدُ علامةٍ لا حكمُ إغلاقٍ جديد**، ولم يُمَسَّ نصُّه.
+- **الاختباراتُ (‏`tests/tooling/guard-doc-counts.test.mjs`):** `M21` — حذفُ 🟢 من `EXT-4` في §6 ⇒ `R8/UNMARKED: الصفُّ «EXT-4»`؛ واختبارٌ إيجابيٌّ — السجلُّ الحقيقيُّ يمرُّ بلا `R8/UNMARKED` و`OPS-1/R6-REMEASURE` موسومٌ. **أحمرُ مقيسٌ قبلَ الإصلاح:** الاثنانِ يسقطان؛ وبعدَه ⇒ ناجحان، ومع ملفِّ `guard-project-state` ⇒ `73/73`.
+- **وصفُّ `DOC-30`** أُلحِقَ به حالُ الشقِّ الثالث، ولم يُعلَّمْ مُغلَقاً.
+- **ثلاثةُ إخفاقاتٍ في أثناءِ التحقّقِ، كلُّها قبلَ أيِّ دفعٍ ناجحٍ، تُعلَن:** خطّافُ الدفعِ ردَّ الدفعةَ الأولى بـ`typecheck` (‏`TS2345`: مصفوفةُ المدَيَينِ تُستنتَجُ `string | undefined`) فأُضيفَ نوعٌ صريحٌ `[string, string][]` بلا تعطيلِ المدقِّقِ ولا `--no-verify`؛ وكشفَ `guard:project-state` (١) `PS4/UNRECORDED-FILE: node_modules` — رابطٌ رمزيٌّ أنشأَه المنفِّذُ لشجرةِ عملٍ ثانيةٍ (‏`git worktree`) دخلَ الكوميتَ المحلّيَّ لأنّ `.gitignore` يطابقُ المجلّدَ لا الرابط؛ أُخرِجَ قبلَ أيِّ دفعٍ واستُبعِدَ في `info/exclude` المحلّيّ. (٢) `PS7/DEBT-ROW-STALE` — صفُّ `OPS-1/R6-REMEASURE` تغيَّرَ ولا يذكرُ `WL-344`؛ أُلحِقَ به سطرُ الوسم.
+
+#### الملفاتُ المتأثّرة
+
+`scripts/guard-doc-counts.mjs` · `tests/tooling/guard-doc-counts.test.mjs` · `docs/roadmap/06-debt-register.md` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-344-doc-30-r8-section-6`، أُعيدَ استهدافُه إلى `main` بعدَ دمجِ `#273` وحذفِ فرعِه، فصارَت تغييراتُ `WL-344` وحدَها فوقَ `main@73e3a802`.
+
+#### الدليلُ
+
+- `node scripts/guard-doc-counts.mjs` بالنطاقِ الجديدِ قبلَ الوسم ⇒ `R8/UNMARKED` لـ`OPS-1/R6-REMEASURE` وحدَه؛ وبعدَه ⇒ `0`.
+- `node --test tests/tooling/guard-doc-counts.test.mjs tests/tooling/guard-project-state.test.mjs` ⇒ `73/73`.
+
+#### ما لم يتمَّ ولماذا
+
+- **`DOC-30` لا يُغلَقُ هنا** — شقوقُه الثلاثةُ منفَّذةٌ، والإغلاقُ بعدَ المراجعة.
+- **`DOC-23` لم يُمَسّ:** الاختبارُ الإيجابيُّ الذي كانَ معلَّقاً له صارَ موجوداً لـ`R8/UNMARKED`، وبقيَ معيارُه الآخرُ (‏صفوفٌ مُغلَقةٌ بشطبِ معيارِها لا معرِّفِها) كما هو.
+- **`docs/CURRENT_STATE.md` غيرُ متأثِّرٍ:** حاجزُ عدّاداتِ الوثائقِ أداةُ ذاكرةٍ لا مسارٌ إنتاجيٌّ ولا جذرُ ثقة؛ وتغييراتُ `#273` عليه صارَت في `main` فلا يلمسُه هذا الطلب. — أُعلِنَ هنا لا في «الملفاتِ المتأثّرة» لئلّا يَرَاهُ `PS5/PHANTOM-CLAIM` ادّعاءً بلا أثرٍ بعدَ الاستهداف.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- لا أثرَ على العقدِ ولا `version.json` ولا الخطوات. والحاجزُ والاختبارُ داخلَ نطاقِ بصمةِ خطِّ الأساس، فالقياسُ يُعادُ بعدَ الدمج.
 
 ### [2026-10-06] — WL-343 — مصالحةٌ وثائقيّةٌ بعدَ `#272`: ما تركَه `WL-341` يصفُ `0e123878` و`#270` حاضراً صارَ لقطةً تاريخيّةً، والحاضرُ `main@35753f0c` بـCI ناجحٍ
 
