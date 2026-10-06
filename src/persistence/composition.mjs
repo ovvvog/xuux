@@ -312,7 +312,7 @@ export function createPostgresRepositories(pool) {
  *   طبقةِ الواجهةِ الداخلية (M9.02): مساراتُها المُعلَنةُ وأفعالُها ومشاهدُها،
  *   ومهلةُ جلستِها، وحدُّ معدَّلِها، وأحداثُ تدقيقِها، ورموزُ رفضِها وضماناتُها.
  *   تُحمَّل من `config/api.yaml` إن لم تُمرَّر.
- * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown } | null} [deps.crown] بوابةُ
+ * @param {{ command: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown; commandAsync: (command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => Promise<unknown> } | null} [deps.crown] بوابةُ
  *   التاج. من لم يمرّرها حصل على قضاءٍ يسمع ويحكم ويستأنف، و**يرفض** تنفيذَ الحكم
  *   والتراجعَ عنه برمز `JUDICIARY_ROYAL_COMMAND_REQUIRED`؛ فالفرقُ معلَنٌ لا مخفيّ.
  * @param {import('../console/royal-console.mjs').ConsolePolicy | null} [deps.consolePolicy] وثيقةُ
