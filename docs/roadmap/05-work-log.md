@@ -1,5 +1,48 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-06] — WL-341 — مصالحةُ ذاكرةِ المشروعِ بحقيقةِ `main@0e123878` وGitHub: إغلاقُ `#269` المُستبدَل، وتصحيحُ حمايةِ `main` وإصدارِ الشهاداتِ وCI في `PROJECT_STATUS.md` و`README.md` و`docs/CURRENT_STATE.md` والخارطة
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** مصالحةُ الحالة (‏المادة 4 والمادة 12) — بلا خطوةٍ ولا دَينٍ مُغلَق · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة — **لا يُدَّعى إغلاقٌ ولا تُبدَّلُ رموزُ خطوات**
+
+#### ما تمَّ فعلاً
+
+- **حالُ GitHub مقيساً (‏2026-10-06):** `origin/main` = `0e1238783dae` (‏`#268`)؛ الفروعُ البعيدةُ: `main` و`chore/skip-baseline-37418297886-1` (‏`#269`) و`chore/skip-baseline-37436704412-1` (‏`#270`).
+- **`#269` أُغلِقَ بلا دمجٍ وحُذِفَ فرعُه:** أساسُه `a40cc1f2` وقياسُه عليه (‏بصمةُ النطاقِ `81670743cb51`) — هو قياسُ `#267` المدموجِ نفسُه، و`main` تقدَّمَ بعدَه بـ`#266` و`#268`. والتعليقُ على الطلبِ يُسمّي `#270` بديلاً.
+- **`#270` مُتحقَّقٌ منه ولم يُدمَج:** أساسُه `0e123878`؛ و`commit` = `mainHeadAtMeasure` = `0e1238783dae…` في المُدخلتَين؛ و`scopeDigest` = `47620aaece9e…` = `computeScopeDigest('.', 'origin/main')`؛ وفرقُه ثلاثةُ ملفّاتٍ كلُّها في `nonScope`. **و`test_exit: 1` / `verdict: self-stale-only` هو العقدُ لا عيبٌ:** `scripts/measure-skip-baseline.mjs` يقبلُ تشغيلةً إخفاقُها الوحيدُ `R6/STALE` أو `R7/SCOPE-DRIFT` من `guard-skip-baseline` (‏`LIVE-16`) ويَرُدُّ كلَّ إخفاقٍ آخرَ بـ`MEASURE_FOREIGN_FAILURE`؛ وسجلُّ التشغيلةِ `37436704412` يطبعُ «سُمِحَ بتحديثِ الأثرِ على تشغيلةٍ إخفاقُها الوحيدُ ذاتيٌّ مرجعيٌّ».
+- **CI على `main@0e123878` أحمرُ ومُصنَّفٌ:** التشغيلةُ `37435831393` — `tests 2579` · `pass 2534` · `fail 1` · `skipped 44`، والسقوطُ الوحيدُ `not ok 662` في `tests/external-review/skip-baseline.test.mjs:207` بـ`R7/SCOPE-DRIFT` (‏`81670743` ⇐ `47620aae`). وهي نافذةُ `OPS-1/MAIN-DRIFT-WINDOW` المُقيَّدةُ في §6؛ وآخرُ تشغيلةٍ ناجحةٍ على `main` هي `37398768311` على `6e4c83fe` (‏`#264`).
+- **الحواجزُ على `main@0e123878` محلّيّاً قبلَ أيِّ تعديل:** `guard:project-state` · `guard:status-freshness` · `guard:doc-counts` ⇒ `0`؛ `guard:skip-baseline` ⇒ `1` بـ`R7/SCOPE-DRIFT` وحدَه؛ و`readiness:report` و`handoff:report` يُعيدانِ توليدَ ما في `main` بايتاً ببايت.
+- **تصحيحُ حقائقَ متقادمةٍ مقيسةٍ (‏لا إعادةُ كتابة):**
+  1. **حمايةُ `main`** — `GET …/branches/main/protection` ⇒ `contexts: [«فحص الجودة الكامل»]` · `enforce_admins: true` · `allow_force_pushes: false` · `allow_deletions: false` · مراجعةٌ واحدةٌ · حلُّ المحادثات. وكانَ صفُّ `PROJECT_STATUS.md` يقولُ «بلا فحصِ CI مُلزَمٍ · الدفعُ القسريُّ مسموحٌ» ويُناقضُ صفَّ CI فوقَه؛ وبندُ «ما لم يُنجز» 5، وفجواتُ `README.md`، وفقرةُ `M0.06` في الخارطة كذلك. صُحِّحَت بالشطبِ أو بسطرِ قياسٍ مؤرَّخٍ، **ولم يُبدَّلْ رمزُ `M0.06`** (‏للمالك، `EXT-1`).
+  2. **إصدارُ الشهاداتِ في الإنتاج** — `src/root-of-trust/identity.mts` (‏`issueAsync` بـ`asyncSigner`) و`src/identity/agent-registry.mjs:160` يستعملُه، منذ `WL-303`. وكانَ `README.md` يقولُ «معطَّلٌ في الإنتاج»، و`PROJECT_STATUS.md` (‏«ما لم يُنجز» 3) و`docs/CURRENT_STATE.md` (‏§9 البند 6، مُناقِضاً §3 نفسَه) والخارطةُ («متبقٍّ تقنيّاً») تقولُ «يلزمُه توقيعٌ غيرُ متزامن».
+  3. **سطرُ «آخر تحقُّق» وCI** في `README.md` و`docs/CURRENT_STATE.md` وصفُّ CI في `PROJECT_STATUS.md`: كانت لقطاتِ `5222c40e`/`23d07212` الناجحةَ؛ صارت `0e123878` **حمراءَ** بسببِها، مع إبقاءِ اللقطةِ القديمةِ مُعلَنةً تاريخيّة.
+  4. **§7 في `docs/CURRENT_STATE.md`:** الفروعُ وطلباتُ الدمجِ المفتوحةُ كما قِيسَت.
+- **أرقامٌ مُتحقَّقٌ أنّها ما زالت صحيحةً فلم تُمَسّ:** `config/external-review.yaml` بمُفسِّرِ YAML ⇒ 57 نتيجةً: 27 `closed` · 30 `open`؛ و51 حاجزاً `guard:*` في `npm run validate`؛ وخمسةُ مساراتِ عملٍ في `.github/workflows/`.
+- **اكتشافٌ يُقيَّدُ في `WL-342`:** عمودُ «المالك» في `docs/HANDOFF.md` §2 يعرضُ نصّاً من الوصفِ لـ`DOC-30` و`DOC-27` — خللُ تقسيمِ خلايا الجدول (‏`DOC-31`).
+
+#### الملفاتُ المتأثّرة
+
+`README.md` · `PROJECT_STATUS.md` · `docs/CURRENT_STATE.md` · `docs/roadmap/03-roadmap-to-100.md` · `docs/roadmap/05-work-log.md` · `docs/HANDOFF.md`
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-341-342-state-sync-doc-31-table-cells` من `main@0e123878`.
+
+#### الدليلُ
+
+- `git fetch --all --prune && git log -5 --oneline origin/main` ⇒ رأسُه `0e123878`؛ و`gh pr list --state open` ⇒ `#270` وحدَه بعدَ إغلاقِ `#269`.
+- `gh api repos/ovvvog/xuux/branches/main/protection` (‏القيمُ أعلاه) · `gh run view 37435831393 --log-failed` · `gh run view 37436704412 --log`.
+- `node -e "import('./scripts/lib/skip-baseline-scope.mjs').then(m=>console.log(m.computeScopeDigest('.', 'origin/main')))"` ⇒ `47620aaece9e…`.
+
+#### ما لم يتمَّ ولماذا
+
+- **`#270` لم يُدمَج:** الدمجُ لم يُطلَبْ في هذه الدورة؛ وهو مُوافَقٌ عليه وCI عليه ناجح. ودمجُه يُعيدُ `main` أخضرَ ما لم يُدمَجْ قبلَه ما يُغيِّرُ النطاق.
+- **§3 و§5 من `docs/CURRENT_STATE.md` لم يُعَدْ تدقيقُهما سطراً سطراً** — والسطرُ الأعلى يقولُ ذلك نصّاً؛ وما دخلَ `src/root-of-trust/` بعدَ `23d07212` (‏`WL-326` · `WL-331` · `WL-333` · `WL-337`) في مُدخلاتِه.
+- **لا مساسَ** بـ`config/external-review.yaml` ولا `version.json` ولا رموزِ الخطواتِ ولا النسبةِ ولا خطِّ الأساس.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- **لا أثرَ تنفيذيّاً.** والملفّاتُ الأربعةُ داخلَ نطاقِ بصمةِ خطِّ أساسِ التخطّي إلّا السجلَّ واللوحة (‏`config/skip-baseline-scope.yaml`)، فدمجُ هذا الطلبِ يُعيدُ فتحَ نافذةِ `OPS-1/MAIN-DRIFT-WINDOW` كما يفعلُ كلُّ دمج.
+
 ### [2026-10-06] — WL-340 — `DOC-30`: علامةُ الإغلاقِ من خليّةِ المعرِّفِ لا من السطرِ كلِّه — `parseDebtRows` كانَ يحكمُ بالإغلاقِ من 🟢 في أيِّ موضعٍ
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** `P0` — `DOC-30` (‏§4.6) · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ في الاختبارِ، مفتوحٌ للمراجعة — **لا يُدَّعى إغلاقٌ**
