@@ -81,7 +81,7 @@ export class Judiciary {
    * @param {import('../governance/law-system.mjs').LawRegistry} deps.laws
    * @param {import('../root-of-trust/event-log.mjs').EventLog} deps.log
    * @param {{ insert: (record: CaseRow) => Promise<CaseRow>, findById: (id: string) => Promise<CaseRow | null>, list: (query?: { filter?: Record<string, unknown>, limit?: number }) => Promise<CaseRow[]>, update: (id: string, expectedVersion: number, patch: CaseRow) => Promise<CaseRow> }} deps.repository
-   * @param {{ command: (command: RoyalCommand, signature: string) => unknown } | null} [deps.crown]
+   * @param {{ command: (command: RoyalCommand, signature: string) => unknown; commandAsync: (command: RoyalCommand, signature: string) => Promise<unknown> } | null} [deps.crown]
    * @param {ReadonlyMap<string, JudgmentExecutor>} [deps.executors]
    * @param {import('./interests.mjs').AgentLookup | null} [deps.agents] - سجلُ الهويات؛ ومنه
    *   تُقرأ الملكيةُ في فحص المصالح وبشريةُ المراجع. وتركُه **لا يُرخّص التجاوز**:
@@ -207,7 +207,7 @@ export class Judiciary {
    * @param {unknown} signature
    * @param {string} expectedAction
    * @param {string} caseId
-   * @returns {{ command: (command: RoyalCommand, signature: string) => unknown }}
+   * @returns {{ command: (command: RoyalCommand, signature: string) => unknown; commandAsync: (command: RoyalCommand, signature: string) => Promise<unknown> }}
    */
   assertRoyalCommand(command, signature, expectedAction, caseId) {
     const crown = this.crown;
@@ -655,7 +655,7 @@ export class Judiciary {
     }
     const target = String(row['respondent']);
     const before = await executor.fingerprint(target);
-    crown.command(command, signature);
+    await crown.commandAsync(command, signature);
     await this.attempt(
       () => executor.apply({ target, caseId, reason: String(row['reason'] ?? '') }),
       caseId,
@@ -728,7 +728,7 @@ export class Judiciary {
     }
     const target = String(row['respondent']);
     const expected = String(row['executionFingerprintBefore']);
-    crown.command(command, signature);
+    await crown.commandAsync(command, signature);
     await this.attempt(
       () => executor.revert({ target, caseId, reason: written }),
       caseId,

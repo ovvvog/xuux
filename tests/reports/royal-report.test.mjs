@@ -763,3 +763,49 @@ test('ثوابتُ مواصفةِ التقريرِ ترفض صفّاً يخال�
   const ok = await s.repositories.royalReports.insert(base);
   assert.equal(field(ok, 'reportId'), 'report:manual');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WL-346: publish ينادي commandAsync لا command.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** بوابةُ تاجٍ تُسجِّل نداءاتِها. */
+class TrackingCrown {
+  /** @param {InstanceType<typeof CrownGateway>} inner */
+  constructor(inner) {
+    this.inner = inner;
+    this.commandCalls = 0;
+    this.commandAsyncCalls = 0;
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  command(command, signature) {
+    this.commandCalls++;
+    return this.inner.command(command, signature);
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  async commandAsync(command, signature) {
+    this.commandAsyncCalls++;
+    return this.inner.commandAsync(command, signature);
+  }
+}
+
+test('WL-346: publish ينادي commandAsync لا command', async () => {
+  const s = state();
+  const tracking = new TrackingCrown(s.crown);
+  s.generator.crown = tracking;
+
+  const row = await generated(s);
+  const reportId = String(field(row, 'reportId'));
+  await s.generator.review({
+    reportId,
+    reviewer: 'human:auditor-1',
+    decision: 'accept',
+    reason: REASON,
+  });
+  const order = s.order(reportId);
+  await s.generator.publish({ reportId, ...order });
+
+  assert.equal(tracking.commandCalls, 0, 'publish ينادي command لا commandAsync');
+  assert.ok(tracking.commandAsyncCalls > 0, 'publish لم ينادِ commandAsync');
+});

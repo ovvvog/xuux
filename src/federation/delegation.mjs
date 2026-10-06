@@ -164,7 +164,7 @@ export class FederationError extends Error {
  */
 
 /**
- * @typedef {{ command: (command: RoyalCommandLike, signature: string) => unknown }} CrownLike
+ * @typedef {{ command: (command: RoyalCommandLike, signature: string) => unknown; commandAsync: (command: RoyalCommandLike, signature: string) => Promise<unknown> }} CrownLike
  */
 
 /**
@@ -516,9 +516,9 @@ export class RegionalDelegation {
    * @param {string} territoryKey
    * @param {RoyalCommandLike | undefined} command
    * @param {string | undefined} signature
-   * @returns {{ issuedAt: Date, acceptedAt: Date, commandId: string, action: string }}
+   * @returns {Promise<{ issuedAt: Date, acceptedAt: Date, commandId: string, action: string }>}
    */
-  #royal(act, territoryKey, command, signature) {
+  async #royal(act, territoryKey, command, signature) {
     if (this.crown === null) {
       throw new FederationError(
         FEDERATION_ERRORS.ROYAL_COMMAND_REQUIRED,
@@ -545,7 +545,7 @@ export class RegionalDelegation {
       );
     }
     const accepted = /** @type {{ acceptedAt?: unknown }} */ (
-      this.crown.command(command, signature)
+      await this.crown.commandAsync(command, signature)
     );
     const issuedAt = new Date(String(command.issuedAt));
     const acceptedAt =
@@ -640,7 +640,7 @@ export class RegionalDelegation {
     }
     // البوابةُ **آخرَ** الشروطِ المقروءةِ من الحالة: أمرٌ يُقبل ثم يُردّ لانكسارِ
     // سلسلةٍ أمرٌ أُحرِق معرّفُه بلا أثر، فلا يُعاد استعمالُه ولو كان الردُّ صحيحاً.
-    const royal = this.#royal('activate', territoryKey, command, signature);
+    const royal = await this.#royal('activate', territoryKey, command, signature);
     const at = this.now();
     const record = await this.delegations.insert({
       id: `delegation:${territoryKey}`,
@@ -713,7 +713,7 @@ export class RegionalDelegation {
         `تفويضُ ${territoryKey} مسحوبٌ سلفاً؛ وسحبٌ ثانٍ يمحو لحظةَ السحبِ الأولى وهي مادّةُ المراجعة.`,
       );
     }
-    const royal = this.#royal('revoke', territoryKey, command, signature);
+    const royal = await this.#royal('revoke', territoryKey, command, signature);
     const deadlineMs = this.policy.sovereignty.revocation.deadlineMs;
     const at = this.now();
     const age = at.getTime() - royal.issuedAt.getTime();

@@ -221,11 +221,11 @@ if (source === '') {
   violations.push('R6: `src/reports/royal-report.mjs` غائب.');
 } else {
   const publishAt = source.indexOf('async publish(');
-  const crownAt = source.indexOf('this.crown.command(');
+  const crownAt = source.search(/this\.crown\.command(?:Async)?\(/);
   const updateAt = source.indexOf('this.reports.update(', publishAt >= 0 ? publishAt : 0);
   if (crownAt < 0) {
     violations.push(
-      'R6: `this.crown.command(` غيرُ موجودٍ — نشرٌ بلا نداءِ بوابةِ التاجِ فعلٌ بلا أمرٍ ملكيّ.',
+      'R6: `this.crown.command` (`command` أو `commandAsync`) غيرُ موجودٍ — نشرٌ بلا نداءِ بوابةِ التاجِ فعلٌ بلا أمرٍ ملكيّ.',
     );
   } else if (updateAt >= 0 && crownAt > updateAt) {
     violations.push(
