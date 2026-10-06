@@ -73,7 +73,7 @@ export class Legislature {
    * @param {readonly { id: string, lawRef: string }[]} deps.articles - موادُّ الدستور القائمة
    * @param {import('../governance/law-system.mjs').LawRegistry} deps.laws
    * @param {import('../root-of-trust/event-log.mjs').EventLog} deps.log
-   * @param {{ command: (command: RoyalCommand, signature: string) => unknown } | null} [deps.crown]
+   * @param {{ command: (command: RoyalCommand, signature: string) => unknown; commandAsync: (command: RoyalCommand, signature: string) => Promise<unknown> } | null} [deps.crown]
    */
   constructor({ policy, bundle, articles, laws, log, crown = null }) {
     if (!policy || !bundle || !articles || !laws || !log) {
@@ -275,7 +275,10 @@ export class Legislature {
     }
     // الأمرُ الملكيُّ يُقبل بعد ثبوت صلاحية النصِّ وخلوِّه من التعارض: أمرٌ
     // يُحرَق معرّفُه على قانونٍ مرفوضٍ يمنع إعادةَ إصداره بعد التصحيح.
-    this.crown.command(command, signature);
+    // `WL-345`: المسارُ غيرُ المتزامنُ — في الإنتاجِ السجلُّ مختومٌ والدفترُ موقَّعٌ في التوكن،
+    // فالمسارُ المتزامنُ `crown.command` مرفوضٌ بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION`.
+    // `commandAsync` يعملُ في التطويرِ كما كان (يستعملُ `log.append` إن لم يكن هناك `appendSealed`).
+    await this.crown.commandAsync(command, signature);
     const updated = await this.laws.repository.update(lawId, Number(row['version']), {
       state: LawState.ENACTED,
       articleId,
@@ -330,7 +333,8 @@ export class Legislature {
         'لا تعارضَ مانعاً قائماً؛ وتعليقُ قانونٍ بلا تعارضٍ إسقاطٌ لنافذٍ باسم الحلّ.',
       );
     }
-    this.crown.command(command, signature);
+    // `WL-345`: المسارُ غيرُ المتزامنُ — نفسُ سببِ `enact`.
+    await this.crown.commandAsync(command, signature);
     await this.laws.transition(lawId, LawState.SUSPENDED, 'crown');
     const after = conflictFingerprint(await this.conflicts());
     if (after === before) {

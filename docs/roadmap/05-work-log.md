@@ -1,5 +1,44 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-06] — WL-345 — `legislature.mjs` ينادي `crown.commandAsync` لا `crown.command` المتزامن
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** بنيةٌ أساسيّةٌ — ربطُ وحدةٍ سياديّةٍ بالمسارِ الإنتاجيِّ المختوم · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
+
+#### لماذا هذه المهمّةُ دونَ غيرِها
+
+- **المسارُ الإنتاجيُّ موصولٌ ويرفضُ الإقلاعَ مغلقاً** لأنّ مصدرَ الحداثةِ (`R3-A-01`/`EXT-6`) غيرُ موجودٍ — وهذا محجوبٌ بقرارِ المالكِ. **لكنّ هناك عائقاً داخليّاً ثانياً:** المداخلُ السياديّةُ (`legislation` · `judiciary` · `reports` · `federation`) تنادي `crown.command` المتزامنَ، وهو مرفوضٌ في الإنتاجِ بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` (‏`WL-304`/`LIVE-25`). فحتى لو وُجِدَ مصدرُ حداثةٍ، لا تعملُ هذه الوحداتُ في الإنتاج.
+- **`legislation` أوّلُها:** هي الأعمقُ في البنيةِ (‏ربطُ القانونِ بسياسته ونفاذُه بأمرٍ ملكيٍّ) وأوسعُها استعمالاً في سلسلةِ الإنفاذِ (‏`enforcementGate`).
+- **التحويلُ داخليٌّ صرفٌ:** الطريقتان `enact` و`resolve` كلاهما `async` بالفعل، و`commandAsync` يعملُ في التطويرِ كما `command` (‏يستعملُ `log.append` إن لم يكن `appendSealed`). فلا تتكسّرُ واجهةٌ ولا يتغيّرُ سلوكٌ في التطوير.
+
+#### ما تمَّ فعلاً
+
+- **موضعا النداءِ الاثنانِ** في `src/legislation/legislature.mjs` (‏سطرا 278 و333): `this.crown.command(command, signature)` ⇐ `await this.crown.commandAsync(command, signature)`. والتعليقُ يُعلِنُ سببَ التحويلِ ومرجعَه.
+- **اختبارانِ جديدانِ** في `tests/legislation/legislature.test.mjs`: `TrackingCrown` يَلفُّ بوابةَ التاجِ الحقيقيّةَ ويَعُدُّ نداءاتِ `command` و`commandAsync`. الاختبارُ الأوّلُ يُثبِتُ أنّ `enact` ينادي `commandAsync` مرةً ولا ينادي `command`. والثاني يُثبِتُ أنّ `resolve` ينادي `commandAsync` ثلاثَ مرّاتٍ (‏مرّتانِ `enact` + مرة `resolve`) ولا ينادي `command`.
+- **الاختباراتُ العشرةُ القائمةُ** مرّت بلا تغييرٍ — التحويلُ متوافقٌ مع التطوير.
+
+#### الملفاتُ المتأثّرة
+
+`src/legislation/legislature.mjs` · `tests/legislation/legislature.test.mjs` · `src/persistence/composition.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` · `config/work-log-ids.yaml` · `docs/audit/work-log-id-map.md`
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-345-legislature-async-sovereign-command` من `main@73e3a802`.
+
+#### الدليلُ
+
+- `node --test tests/legislation/legislature.test.mjs` ⇒ `12/12` ناجحٌ (‏10 قائمة + 2 جديدتانِ).
+- `TrackingCrown.commandCalls === 0` و`TrackingCrown.commandAsyncCalls > 0` في الاختبارَينِ.
+
+#### ما لم يتمَّ ولماذا
+
+- **`withLegislation: false` في `src/production/entrypoint.mjs` لم يُقلَب:** ربطُ السلطةِ التشريعيّةِ بالتركيبِ الإنتاجيِّ خطوةٌ لاحقةٌ — قد تُشفِلُ تبعيّاتٌ أخرى (‏مستودعُ قوانينَ دائمٌ، ساعةٌ موثوقةٌ) لا تُحَلُّ بتحويلِ النداءِ وحدَه.
+- **الوحداتُ السياديّةُ الأخرى** (`judiciary` · `reports` · `federation`) لها المواضعُ نفسُها (‏6 نداءاتٍ `crown.command` متزامنةٍ) — تُحوَّلُ في WLs لاحقةٍ بنفسِ النمط.
+- **مصدرُ الحداثةِ الإنتاجيُّ** (`R3-A-01`/`EXT-6`) محجوبٌ بقرارِ المالكِ — لا يُدَّعى إغلاقُه.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- لا أثرَ على العقدِ ولا `version.json` ولا الخطوات. والتغييرُ في `src/` و`tests/` داخلَ نطاقِ بصمةِ خطِّ الأساس، فالقياسُ يُعادُ بعدَ الدمج (‏`OPS-1/MAIN-DRIFT-WINDOW`).
+
 ### [2026-10-06] — WL-343 — مصالحةٌ وثائقيّةٌ بعدَ `#272`: ما تركَه `WL-341` يصفُ `0e123878` و`#270` حاضراً صارَ لقطةً تاريخيّةً، والحاضرُ `main@35753f0c` بـCI ناجحٍ
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** مصالحةُ الحالة (‏المادة 4) — بلا خطوةٍ ولا دَين · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
