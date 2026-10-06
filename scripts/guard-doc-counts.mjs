@@ -412,10 +412,12 @@ const facts = readDocCountFacts(root);
   const debtLines = debtText.split('\n');
   // ‏`WL-344` (‏الشقُّ الثالثُ من `DOC-30`): §6 جدولُ معرِّفاتٍ كـ§4 — كانَ النطاقُ §4 وحدَه، فبقيَ
   // `OPS-1/R6-REMEASURE` مشطوباً بلا 🟢 في خليّتِه لا يراه أحد. §5 و§7 بلا جداول.
-  for (const [from, to] of [
+  /** @type {[string, string][]} */
+  const ranges = [
     ['## 4 —', '## 5 —'],
     ['## 6 —', '## 7 —'],
-  ]) {
+  ];
+  for (const [from, to] of ranges) {
     const tableStart = debtLines.findIndex((l) => l.startsWith(from));
     if (tableStart === -1) continue;
     const tableEnd = debtLines.findIndex((l, i) => i > tableStart && l.startsWith(to));
