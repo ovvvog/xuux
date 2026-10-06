@@ -23,7 +23,7 @@
 //     `findings[].id` يجبُ أن يظهرَ في عمودِ المعرِّفِ في الجدول. وتُستخرَجُ المعرّفاتُ من العقدِ بمُفسِّرِ YAML.
 //   - R7: أقسامُ سجلِّ الدَّينِ من المستوى الثاني (`## `) فريدةٌ وغيرُ فارغةٍ، ولكلِّ جدولٍ صفٌّ فاصلٌ
 //     بعدَ ترويستِه (`R4/NO-SEPARATOR`) — أُضيفا في `WL-273` إغلاقاً لـ`DOC-18`.
-//   - R8: علامةُ الإغلاقِ الموحَّدةُ (‏`~~ID~~` + 🟢) — أُضيفَ في `WL-330` لـ`DOC-23`. ووُسِّعَ في `WL-338`
+//   - R8: علامةُ الإغلاقِ الموحَّدةُ (‏`~~ID~~` + 🟢) — أُضيفَ في `WL-330` لـ`DOC-23`. ونطاقُه §4 و§6 منذ `WL-344`. ووُسِّعَ في `WL-338`
 //     لـ`DOC-29`: في §4.3 **مصدرُ الحالةِ هو `config/external-review.yaml` لا الصفُّ** — نتيجةٌ `closed`
 //     في العقدِ بلا علامةٍ في صفِّها ⇒ `R8/YAML-CLOSED-UNMARKED`، ونتيجةٌ غيرُ `closed` بعلامةِ إغلاقٍ
 //     ⇒ `R8/YAML-OPEN-MARKED`. فالحاجزُ يقيسُ الصفَّ بالعقدِ ولا يُغيِّرُ العقد.
@@ -410,9 +410,17 @@ const facts = readDocCountFacts(root);
 {
   const debtText = readText('docs/roadmap/06-debt-register.md');
   const debtLines = debtText.split('\n');
-  const tableStart = debtLines.findIndex((l) => l.startsWith('## 4 —'));
-  if (tableStart !== -1) {
-    const tableEnd = debtLines.findIndex((l, i) => i > tableStart && l.startsWith('## 5 —'));
+  // ‏`WL-344` (‏الشقُّ الثالثُ من `DOC-30`): §6 جدولُ معرِّفاتٍ كـ§4 — كانَ النطاقُ §4 وحدَه، فبقيَ
+  // `OPS-1/R6-REMEASURE` مشطوباً بلا 🟢 في خليّتِه لا يراه أحد. §5 و§7 بلا جداول.
+  /** @type {[string, string][]} */
+  const ranges = [
+    ['## 4 —', '## 5 —'],
+    ['## 6 —', '## 7 —'],
+  ];
+  for (const [from, to] of ranges) {
+    const tableStart = debtLines.findIndex((l) => l.startsWith(from));
+    if (tableStart === -1) continue;
+    const tableEnd = debtLines.findIndex((l, i) => i > tableStart && l.startsWith(to));
     const sectionEnd = tableEnd === -1 ? debtLines.length : tableEnd;
     for (let i = tableStart; i < sectionEnd; i += 1) {
       const line = debtLines[i] ?? '';
