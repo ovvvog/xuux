@@ -289,7 +289,38 @@ function constantTimeEqual(left, right) {
  * @property {(type: string, actor: string, data: Record<string, unknown>) => unknown} append
  * @property {(() => ReadonlyArray<{ type?: unknown, data?: unknown }>) | undefined} [snapshot]
  * @property {((type: string, minStep: number) => ReadonlyArray<{ type?: unknown, data?: unknown }>) | undefined} [eventsOfTypeSinceStep]
+ * @property {(type: string, actor: string, data: Record<string, unknown>) => Promise<unknown>} [appendSealed]
+ *   (‏`WL-348`) إلحاقٌ يُنتظَرُ ختمُه — يُستعمَلُ حيثُ يختمُ السجلُّ فعلاً (‏`sealingLog`).
+ * @property {() => Promise<void>} [flush]
+ * @property {unknown} [sealed]
  */
+
+/**
+ * `WL-348`: هل يختمُ هذا السجلُّ ما يُلحَقُ به؟ — القاعدةُ نفسُها في `royal-console.mjs`:
+ * `PersistentEventLog` يحملُ `appendSealed` دائماً ويردُّه بلا خاتم، فالحضورُ وحدَه لا يكفي.
+ * @param {AuthnLogLike} log
+ * @returns {boolean}
+ */
+function sealingLog(log) {
+  if (typeof log.appendSealed !== 'function') return false;
+  return log.sealed === true || typeof log.flush === 'function';
+}
+
+/**
+ * قيدٌ يُنتظَرُ ختمُه حيثُ يختمُ السجلّ، وإلحاقٌ عاديٌّ حيثُ لا يختم.
+ * @param {AuthnLogLike} log
+ * @param {string} type
+ * @param {string} actor
+ * @param {Record<string, unknown>} data
+ * @returns {Promise<void>}
+ */
+async function recordSealed(log, type, actor, data) {
+  if (sealingLog(log) && typeof log.appendSealed === 'function') {
+    await log.appendSealed(type, actor, data);
+    return;
+  }
+  log.append(type, actor, data);
+}
 
 /**
  * مزوِّدُ أسرارِ العوامل: يُسأل **باسمِ** السرِّ المُعلَنِ في الوثيقة، ولا تعرف
@@ -470,7 +501,10 @@ export class KingAuthenticator {
     }
     this.#consumed.add(stamp);
     this.#pruneConsumed(currentStep);
-    log.append(this.#policy.audit.factorConsumedEvent, actorId, {
+    // `WL-348`: منعُ إعادةِ الرمزِ بعدَ إعادةِ التشغيلِ يُقرأُ من هذا القيدِ (‏`#restoreConsumed`)،
+    // فلا جلسةَ تُفتَحُ قبلَ أن يُختَمَ — وإلّا سقطَت العمليّةُ بعدَ الجلسةِ وقبلَ الختمِ فعادَ
+    // الرمزُ نفسُه صالحاً. والبصمةُ تبقى مستهلَكةً في الذاكرةِ ولو سقطَ الختمُ (‏فشلٌ مغلق).
+    await recordSealed(log, this.#policy.audit.factorConsumedEvent, actorId, {
       device: device.id,
       // خطوةُ الزمنِ تُسجَّل ولا يُسجَّل الرمز: من قرأ السجلَّ يعرف **أنّ** عاملاً
       // استُهلك ومتى، ولا يستخرج منه ما يُنتحل به.
@@ -485,12 +519,18 @@ export class KingAuthenticator {
     const sessionRef = randomBytes(8).toString('hex');
     this.#prune();
     this.#sessions.set(fingerprint, { actorId, deviceId: device.id, sessionRef, expiresAtMs });
-    log.append(this.#policy.audit.sessionOpenedEvent, actorId, {
-      device: device.id,
-      sessionRef,
-      expiresAt: new Date(expiresAtMs).toISOString(),
-      ttlSeconds,
-    });
+    try {
+      await recordSealed(log, this.#policy.audit.sessionOpenedEvent, actorId, {
+        device: device.id,
+        sessionRef,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        ttlSeconds,
+      });
+    } catch (error) {
+      // جلسةٌ لم يُختَم قيدُ فتحِها لا تُسلَّم: تُحذَفُ ويُرفَعُ الخطأ.
+      this.#sessions.delete(fingerprint);
+      throw error;
+    }
     return Object.freeze({
       token,
       actorId,
