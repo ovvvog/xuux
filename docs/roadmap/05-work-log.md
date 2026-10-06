@@ -1,5 +1,46 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-06] — WL-347 — الديوانُ الملكيُّ (`royal-console`) يقبلُ الأمرَ بـ`crown.commandAsync`: آخرُ نداءٍ سياديٍّ متزامنٍ في `src/`، وخريطةُ ما يمنعُ `withLegislation` في الإنتاج
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** تنفيذٌ جوهريٌّ — المداخلُ السياديّةُ على المسارِ الإنتاجيِّ المختوم (‏تتمّةُ `WL-345`/`WL-346`) · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
+
+#### ما تمَّ فعلاً
+
+- `src/console/royal-console.mjs` — `#acceptThroughCrown` صارَ `async` وينادي `await crown.commandAsync(...)` بدلَ `crown.command(...)`، ومُستدعيه في `#issueChecked` (‏غيرُ متزامنٍ أصلاً) صارَ `await`. ونوعُ `ConsoleCrownLike` يُعلِنُ `commandAsync`.
+- `tests/console/royal-console.test.mjs` — خيارُ `wrapCrown` في `court()`، واختبارٌ جديدٌ: البوابةُ الحقيقيّةُ خلفَ غلافٍ يعدُّ النداءاتِ ويردُّ المسارَ المتزامنَ بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` كما تردُّه البوابةُ في الإنتاج؛ ويُثبِتُ `command === 0` و`commandAsync > 0` وأنّ الأثرَ وقعَ على القرصِ وقيدَ القبولِ مكتوب.
+- `docs/CURRENT_STATE.md` — الجملةُ القائلةُ إنّ المداخلَ السياديّةَ «تنادي `crown.command` المتزامنَ» صارت متقادمةً بعدَ `WL-345`/`WL-346`/`WL-347`؛ صُحِّحت، وأُضيفت خريطةُ ما يمنعُ `withLegislation` في التركيبِ الإنتاجيّ.
+
+#### لماذا
+
+بعدَ `WL-346` أظهرَ `rg -n 'crown\.command\(' src/` أنّ الديوانَ ما زالَ ينادي المسارَ المتزامن. والقياسُ الأحمرُ قبلَ الإصلاح: الاختبارُ الجديدُ على الكودِ القديمِ يسقطُ بـ`بوابةُ التاجِ ردَّت الأمر cmd:halt: CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` — أي أنّ الديوانَ لم يكن ليُنفِّذَ أيَّ أمرٍ على مسارِ التاجِ في عُقدةٍ إنتاجيّة.
+
+#### الملفاتُ المتأثّرة
+
+`src/console/royal-console.mjs` · `tests/console/royal-console.test.mjs` · `docs/CURRENT_STATE.md` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-347-royal-console-async-crown` من `main@23642ce8`.
+
+#### الدليل
+
+- `node --test tests/console/royal-console.test.mjs` ⇒ `9/9`؛ و`tests/authn/king-auth.test.mjs` و`tests/crisis/crisis-room.test.mjs` (‏مستهلِكا الديوان) ناجحان.
+- أحمرُ قبلَ الإصلاح: الاختبارُ نفسُه على `royal-console.mjs` من `main@23642ce8` ⇒ `not ok` بالرمزِ أعلاه.
+- `rg -n 'crown\.command\(' src/` بعدَ الإصلاح ⇒ موضعٌ واحد: `src/core/execution-kernel.mjs:191`، احتياطٌ لا يُنادى إلّا إن غابَ `commandAsync` عن البوابة (‏`LIVE-25`)، والبوابةُ الإنتاجيّةُ تملكُه.
+- `npx tsc --noEmit` ⇒ `0`.
+
+#### ما لم يتمَّ — `withLegislation: false` لم يُقلَب، وهذه تبعيّاتُه المقيسة
+
+1. **الإقلاعُ نفسُه محجوبٌ (‏`EXT-6`/`R3-A-01`):** `createProductionSystem` يردُّ `PRODUCTION_ENTRYPOINT_FRESHNESS_SOCKET_NULL` و`_TEST_FIXTURE`؛ فلا تركيبَ إنتاجيٌّ يعملُ اليومَ بأيِّ قيمةٍ لـ`withLegislation`. لم يُلتَفَّ على الحجبِ ولم يُستعمَل مقبسٌ وهميٌّ.
+2. **مستودعُ قوانينَ دائمٌ غائبٌ عن التركيبِ الإنتاجيّ:** `composeEnforcementChain` يردُّ `COMPOSITION_LAW_REPOSITORY_MISSING` بلا `lawRepository`، والمُشغِّلُ الإنتاجيُّ لا يملكُ مستودعاً دائماً (‏المتاحُ `createPostgresRepositories(pool)` ولا `pool` في المُشغِّل) — ومستودعُ ذاكرةٍ يُضيِّعُ القوانينَ عندَ إعادةِ التشغيلِ فلا يجوزُ للإنتاج.
+3. **ترتيبُ التركيب:** `composeEnforcementChain({ withLegislation: false, crown: null })` يُنادى قبلَ إنشاءِ `CrownGateway`؛ والتاجُ لا يعتمدُ على السلسلةِ فيجوزُ تقديمُه — لكنّه لا يُستعمَلُ في السلسلةِ إلّا للتشريع، فتقديمُه وحدَه بلا (2) لا أثرَ له، ولم يُنفَّذ.
+4. **`legislature.blocked()` غيرُ متزامن**، و`enforcementGate` يُسلِّمُه للسلسلةِ كما هو — يلزمُ قياسٌ في اختبارِ تركيبٍ إنتاجيٍّ أنّ نقطةَ الإنفاذِ تنتظرُه قبلَ القلب.
+5. **ما صارَ مثبتاً:** لا وحدةٌ سياديّةٌ في `src/` تنادي `command` المتزامنَ بلا شرط؛ فالمانعُ الباقي ليس مسارَ القبولِ بل (1) و(2).
+
+#### الأثر
+
+- المداخلُ السياديّةُ الستُّ في `src/` (‏التشريع، القضاء، التقارير، التفويض الفدراليّ، الديوان، والنواةُ بالاحتياط) على `commandAsync`. وهذا لا يجعلُ النظامَ يعملُ في الإنتاج: `EXT-6` مفتوحٌ، ولا نتيجةَ مراجعةٍ خارجيّةٍ أُغلِقت.
+
 ### [2026-10-06] — WL-346 — المداخلُ السياديّةُ المتبقّيةُ (`judiciary` · `reports` · `federation`) تنادي `crown.commandAsync` لا `crown.command` المتزامن
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** تنفيذٌ جوهريٌّ — ربطُ المداخل السياديّة بالمسار الإنتاجيّ · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة

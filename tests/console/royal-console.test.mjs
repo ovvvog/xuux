@@ -103,6 +103,8 @@ async function refuses(work, expected, what) {
  * @param {boolean} [options.withKing]
  * @param {boolean} [options.withGateway]
  * @param {{ call: (request: { route: string, token?: string, params?: Record<string, unknown> }) => Promise<{ route: string, policyId: string | null, session: string, data: unknown }> } | null} [options.gateway]
+ * @param {(crown: CrownGateway) => import('../../src/console/royal-console.mjs').ConsoleCrownLike} [options.wrapCrown]
+ *   (‏`WL-347`) لفُّ البوابةِ الحقيقيّةِ قبلَ تسليمِها للديوان — لقياسِ أيِّ مساريها يُنادى.
  */
 async function court(options = {}) {
   const {
@@ -157,7 +159,7 @@ async function court(options = {}) {
   const console_ = new RoyalConsole({
     policy: CONSOLE_POLICY,
     gateway,
-    crown: withCrown ? crown : null,
+    crown: withCrown ? (options.wrapCrown ? options.wrapCrown(crown) : crown) : null,
     haltSwitch: withHalt ? haltSwitch : null,
     king: withKing ? king : null,
     kingAuth,
@@ -594,6 +596,61 @@ test('الديوانُ يوصف بياناتٍ مجمَّدةً لا مِقبض�
       ['authority', 'commands', 'views'].join(','),
       'الوصفُ يُصدِّر أكثرَ من بياناتٍ تُقرأ.',
     );
+  } finally {
+    cleanup();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WL-347: الديوانُ يقبلُ الأمرَ بـ`commandAsync` لا بـ`command` المتزامن.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('WL-347: مسارُ التاجِ في الديوانِ ينادي commandAsync، ويُنفِّذُ ولو رفضَت البوابةُ المسارَ المتزامنَ كما ترفضُه في الإنتاج', async () => {
+  const calls = { command: 0, commandAsync: 0 };
+  const {
+    console: royal,
+    haltSwitch,
+    signed,
+    logFile,
+    cleanup,
+  } = await court({
+    // البوابةُ الحقيقيّةُ نفسُها خلفَ غلافٍ يعدُّ النداءات، ومسارُها المتزامنُ يُرَدُّ
+    // بالرمزِ الذي تردُّه به البوابةُ في الإنتاجِ (‏`crown.mjs`، `WL-304`) — فلو نادى
+    // الديوانُ `command` لسقطَ الأمرُ هنا كما يسقطُ على العُقدةِ الإنتاجيّة.
+    wrapCrown: (crown) => ({
+      command: () => {
+        calls.command++;
+        throw new Error('CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION');
+      },
+      commandAsync: async (command, signature) => {
+        calls.commandAsync++;
+        return crown.commandAsync(command, signature);
+      },
+      get veto() {
+        return crown.veto;
+      },
+      get stopped() {
+        return crown.stopped;
+      },
+    }),
+  });
+  try {
+    const { royalCommand, signature, sovereignSession } = signed('stop-state', 'state:sovereign', {
+      reason: 'قياسُ WL-347',
+    });
+    const result = await royal.issue({
+      command: 'cmd:halt',
+      royalCommand,
+      signature,
+      sovereignSession,
+    });
+    assert.equal(result.status, 'executed');
+    assert.equal(result.path, 'crown');
+    assert.equal(calls.command, 0, 'الديوانُ نادى المسارَ المتزامنَ المرفوضَ في الإنتاج.');
+    assert.ok(calls.commandAsync > 0, 'الديوانُ لم ينادِ commandAsync.');
+    // والأثرُ وقعَ والقبولُ مكتوبٌ على القرصِ قبلَ التنفيذ — لا قبولٌ في الذاكرةِ وحدَها.
+    assert.equal(haltSwitch.read().state, 'halted');
+    assert.ok(loggedOnDisk(logFile, 'crown.command.accepted'));
   } finally {
     cleanup();
   }
