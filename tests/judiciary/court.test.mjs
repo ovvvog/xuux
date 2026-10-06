@@ -646,3 +646,48 @@ test('ثوابتُ CASE_SPEC ترفض الكتابةَ المباشرةَ الت
   const ok = await repository.insert(base);
   assert.equal(ok['state'], 'opened');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WL-346: execute وreverse يناديان commandAsync لا command.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** بوابةُ تاجٍ تُسجِّل نداءاتِها. */
+class TrackingCrown {
+  /** @param {{ command: (command: import('../../src/root-of-trust/crown.mjs').RoyalCommand, signature: string) => unknown; commandAsync: (command: import('../../src/root-of-trust/crown.mjs').RoyalCommand, signature: string) => Promise<unknown> }} inner */
+  constructor(inner) {
+    this.inner = inner;
+    this.commandCalls = 0;
+    this.commandAsyncCalls = 0;
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  command(command, signature) {
+    this.commandCalls++;
+    return this.inner.command(command, signature);
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  async commandAsync(command, signature) {
+    this.commandAsyncCalls++;
+    return this.inner.commandAsync(command, signature);
+  }
+}
+
+test('WL-346: execute وreverse يناديان commandAsync لا command', async () => {
+  const s = state();
+  const tracking = new TrackingCrown(s.gateway);
+  s.judiciary.crown = tracking;
+
+  const { caseId } = await judged(s);
+  const execution = command(s.king, POLICY.procedure.executeAction, caseId);
+  await s.judiciary.execute({ caseId, effect: 'suspend-respondent-agent', ...execution });
+
+  assert.equal(tracking.commandCalls, 0, 'execute ينادي command لا commandAsync');
+  assert.ok(tracking.commandAsyncCalls > 0, 'execute لم ينادِ commandAsync');
+
+  const reversal = command(s.king, POLICY.procedure.reverseAction, caseId);
+  await s.judiciary.reverse({ caseId, ...reversal, reason: REVERSAL_REASON });
+
+  assert.equal(tracking.commandCalls, 0, 'reverse ينادي command لا commandAsync');
+  assert.ok(tracking.commandAsyncCalls > 1, 'reverse لم ينادِ commandAsync');
+});

@@ -1,5 +1,50 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-06] — WL-346 — المداخلُ السياديّةُ المتبقّيةُ (`judiciary` · `reports` · `federation`) تنادي `crown.commandAsync` لا `crown.command` المتزامن
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** تنفيذٌ جوهريٌّ — ربطُ المداخل السياديّة بالمسار الإنتاجيّ · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
+
+#### ما تمَّ فعلاً
+
+- **أربعةُ مواضعَ للنداءِ المتزامنِ** حُوِّلَت إلى `await crown.commandAsync(...)`:
+  - `src/judiciary/court.mjs` — `execute` (سطر 658) و`reverse` (سطر 731).
+  - `src/reports/royal-report.mjs` — `publish` (سطر 954).
+  - `src/federation/delegation.mjs` — `#royal` (سطر 548)، وصارَ `async #royal`، ومُستدعاياه (`activate` و`revoke`) صارا `await this.#royal(...)`.
+- **أنواعُ `CrownLike`** في `reports` و`federation`، ونوعُ `crown` في `judiciary` (`@param` و`@returns`) — كلُّها صارت تشمل `commandAsync`. ونوعُ `crown` في `composition.mjs` حملَه `WL-345` (‏#276) المدموجُ قبلَه، فلا فرقَ له هنا.
+- **ثلاثةُ اختباراتٍ جديدة** (واحدٌ في كلِّ وحدة) تُثبتُ أنّ `commandAsyncCalls > 0` و`commandCalls === 0`.
+- **الاختباراتُ القائمةُ** كلُّها مرّت: judiciary 15/15 · reports 17/17 · federation 15/15.
+
+#### لماذا
+
+`crown.command` المتزامنُ مرفوضٌ في الإنتاجِ بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` (‏`WL-304`/`LIVE-25`). بعدَ `WL-345` (الذي حوّل `legislature`)، بقيت هذه الوحداتُ السياديّةُ الأربعُ تنادي المسارَ المتزامنَ المرفوضَ، فلا تعملُ في الإنتاجِ حتى لو وُجِدَ مصدرُ حداثةٍ.
+
+#### الملفاتُ المتأثّرة
+
+`src/judiciary/court.mjs` · `src/reports/royal-report.mjs` · `src/federation/delegation.mjs` · `scripts/guard-reports.mjs` · `tests/judiciary/court.test.mjs` · `tests/reports/royal-report.test.mjs` · `tests/federation/delegation.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-346-sovereign-async-remaining-modules` من `main@73e3a802`، ومُحدَّثٌ بدمجِ `main@a40a299d` (‏#274 + #276).
+
+#### الدليل
+
+- `node --test tests/judiciary/court.test.mjs` ⇒ `15/15` ناجح.
+- `node --test tests/reports/royal-report.test.mjs` ⇒ `17/17` ناجح.
+- `node --test tests/federation/delegation.test.mjs` ⇒ `15/15` ناجح.
+- `npx tsc --noEmit` ⇒ خروجٌ `0`.
+- `TrackingCrown.commandCalls === 0` و`commandAsyncCalls > 0` في كلِّ وحدة.
+
+#### ما لم يتمَّ
+
+- `withLegislation: false` في `src/production/entrypoint.mjs` لم يُقلَب — ربطُ السلطةِ بالتركيبِ الإنتاجيِّ خطوةٌ لاحقة.
+- مصدرُ الحداثةِ (`R3-A-01`/`EXT-6`) محجوبٌ بقرارِ المالكِ.
+- هذا الطلبُ لا يدّعي أنّ النظامَ يعملُ في الإنتاجِ بلا مصدرِ حداثةٍ.
+
+#### الأثر
+
+- **أربعةُ نداءاتٍ سياديّةٍ متبقّية** (judiciary×2 · reports×1 · federation×1) صارت `commandAsync`. و`WL-345` (‏#276) حوّلَ نداءَي `legislature` ودُمِجَ على `main@a40a299d`؛ وقياسُ `rg -n 'crown\.command\(' src/` على الشجرةِ المحدَّثةِ يُظهِرُ موضعينِ باقيينِ: `src/core/execution-kernel.mjs:191` (‏احتياطٌ لا يُنادى إلّا إن غابَ `commandAsync` عن البوابة — `LIVE-25`)، و**`src/console/royal-console.mjs:690` (‏`#acceptThroughCrown`) متزامنٌ فعلاً** ولم يُحصَ في عدِّ «الستّة» السابق — فالعدُّ كانَ ناقصاً، ومعالجتُه خارجَ نطاقِ هذا الطلبِ وتُفرَدُ بمُدخلةٍ لاحقة.
+- `withLegislation: false` لا يزالُ يمنعُ ربطَ السلطةِ بالتركيبِ الإنتاجيِّ — هذه خطوةٌ لاحقة.
+
 ### [2026-10-06] — WL-345 — `legislature.mjs` ينادي `crown.commandAsync` لا `crown.command` المتزامن
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** بنيةٌ أساسيّةٌ — ربطُ وحدةٍ سياديّةٍ بالمسارِ الإنتاجيِّ المختوم · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة

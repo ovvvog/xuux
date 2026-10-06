@@ -568,3 +568,54 @@ test('صلاحيةٌ محجوزةٌ للمركزِ لا تُفوَّض ولو أ
   }
   assert.ok(POLICY.reserved.powers.length >= 1);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WL-346: activate وrevoke يناديان commandAsync لا command.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** بوابةُ تاجٍ تُسجِّل نداءاتِها. */
+class TrackingCrown {
+  /** @param {InstanceType<typeof CrownGateway>} inner */
+  constructor(inner) {
+    this.inner = inner;
+    this.commandCalls = 0;
+    this.commandAsyncCalls = 0;
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  command(command, signature) {
+    this.commandCalls++;
+    return this.inner.command(command, signature);
+  }
+  /** @param {import('../../src/root-of-trust/crown.mjs').RoyalCommand} command
+   *  @param {string} signature */
+  async commandAsync(command, signature) {
+    this.commandAsyncCalls++;
+    return this.inner.commandAsync(command, signature);
+  }
+}
+
+test('WL-346: activate وrevoke يناديان commandAsync لا command', async () => {
+  const s = state();
+  const tracking = new TrackingCrown(s.crown);
+  s.federation.crown = tracking;
+
+  await s.federation.activate({
+    territoryKey: REGION_KEY,
+    actorRole: KING,
+    ...s.order(POLICY.sovereignty.commands.activate, REGION_KEY),
+  });
+
+  assert.equal(tracking.commandCalls, 0, 'activate ينادي command لا commandAsync');
+  assert.ok(tracking.commandAsyncCalls > 0, 'activate لم ينادِ commandAsync');
+
+  await s.federation.revoke({
+    territoryKey: REGION_KEY,
+    actorRole: POLICY.acts.revoke,
+    reason: REASON,
+    ...s.order(POLICY.sovereignty.commands.revoke, REGION_KEY),
+  });
+
+  assert.equal(tracking.commandCalls, 0, 'revoke ينادي command لا commandAsync');
+  assert.ok(tracking.commandAsyncCalls > 1, 'revoke لم ينادِ commandAsync');
+});

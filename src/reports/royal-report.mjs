@@ -324,7 +324,7 @@ function readDeclaredRoles(dir, fallbackDir) {
  */
 
 /**
- * @typedef {{ command: (command: RoyalCommandLike, signature: string) => unknown }} CrownLike
+ * @typedef {{ command: (command: RoyalCommandLike, signature: string) => unknown; commandAsync: (command: RoyalCommandLike, signature: string) => Promise<unknown> }} CrownLike
  */
 
 /**
@@ -951,7 +951,7 @@ export class RoyalReportGenerator {
       );
     }
     // البوابةُ **قبل** لمسِ الحال: أمرٌ مرفوضٌ لا يُغيّر صفّاً.
-    this.crown.command(command, signature);
+    await this.crown.commandAsync(command, signature);
 
     const row = await this.reports.findById(reportId);
     if (row === null) {
