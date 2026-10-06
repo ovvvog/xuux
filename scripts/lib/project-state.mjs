@@ -702,12 +702,12 @@ export function splitTableCells(line) {
   const spans = [];
   const masked = String(line).replace(/`[^`]*`/gu, (span) => {
     spans.push(span);
-    return `\u0000${spans.length - 1}\u0000`;
+    return `\uE000${spans.length - 1}\uE000`;
   });
   return masked
     .split('|')
     .slice(1, -1)
-    .map((cell) => cell.replace(/\u0000(\d+)\u0000/gu, (_, n) => spans[Number(n)] ?? '').trim());
+    .map((cell) => cell.replace(/\uE000(\d+)\uE000/gu, (_, n) => spans[Number(n)] ?? '').trim());
 }
 
 /**
