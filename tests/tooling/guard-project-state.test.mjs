@@ -1134,3 +1134,77 @@ test('DOC-29 — ملخّصُ التسليمِ: المفتوحتانِ بنقط�
     new RegExp(`مفتوحةٌ \\*\\*${openCount}\\*\\* من \\*\\*${findings.length}\\*\\*`, 'u'),
   );
 });
+
+// ── `DOC-30` (‏`WL-340`): علامةُ الإغلاقِ من خليّةِ المعرِّفِ لا من السطرِ كلِّه ──
+
+const DOC30_TABLE = [
+  '### 4.6 ديونٌ مكتشفةٌ حيّةٌ لم تُصلَحْ',
+  '',
+  '| المعرِّفُ | الدَينُ (مقيسٌ) | معيارُ الإغلاقِ | مَن |',
+  '| --- | --- | --- | --- |',
+  '| `LIVE-99` | دَينٌ مفتوحٌ — وصفُه يذكرُ 🟢 في متنِه | يُغلَقُ بالإصلاح | منفِّذ |',
+  '| ~~`LIVE-98`~~ | دَينٌ مُغلَقٌ بالشطبِ وحدَه — وصفُه بلا رمزٍ | — | منفِّذ |',
+  '| ~~`LIVE-97`~~ 🟢 | دَينٌ مُغلَقٌ بالشطبِ والرمزِ معاً | — | منفِّذ |',
+  '| `DOC-99` | دَينٌ بلا علامةٍ في المعرِّفِ و🟢 في عمودٍ آخر | — | منفِّذ |',
+  '',
+].join('\n');
+
+test('DOC-30 — 🟢 في الوصفِ أو أيِّ خليّةٍ أخرى لا يُغلقُ الصفَّ، وكانَ يُغلقُه', () => {
+  const rows = parseDebtRows(DOC30_TABLE);
+  // `LIVE-99`: 🟢 في الوصفِ فقط — لا يُغلَقُ.
+  const live99 = rows.find((r) => r.id === 'LIVE-99');
+  assert.ok(live99, 'LIVE-99 غائبٌ');
+  assert.equal(live99.closed, false, '🟢 في الوصفِ أغلقَ الصفَّ — وهو الخللُ الذي يُصلِحُه DOC-30');
+  // `LIVE-98`: مشطوبٌ بلا 🟢 — يُغلَقُ بالشطبِ.
+  const live98 = rows.find((r) => r.id === 'LIVE-98');
+  assert.ok(live98, 'LIVE-98 غائبٌ');
+  assert.equal(live98.closed, true, 'الشطبُ وحدَه لا يُغلقُ — وهو خطأٌ');
+  // `LIVE-97`: مشطوبٌ وفيه 🟢 في خليّةِ المعرِّفِ — يُغلَقُ.
+  const live97 = rows.find((r) => r.id === 'LIVE-97');
+  assert.ok(live97, 'LIVE-97 غائبٌ');
+  assert.equal(live97.closed, true, 'الشطبُ والرمزُ في المعرِّفِ لا يُغلقُ — وهو خطأٌ');
+  // `DOC-99`: 🟢 في عمودٍ آخر لا المعرِّف — لا يُغلَقُ.
+  const doc99 = rows.find((r) => r.id === 'DOC-99');
+  assert.ok(doc99, 'DOC-99 غائبٌ');
+  assert.equal(
+    doc99.closed,
+    false,
+    '🟢 في عمودٍ آخر أغلقَ الصفَّ — وهو الخللُ الذي يُصلِحُه DOC-30',
+  );
+});
+
+test('DOC-30 — الشطبُ في خليّةِ المعرِّفِ يُغلقُ الصفَّ بلا 🟢 (‏انحدارُ OPS-1/R6-REMEASURE)', () => {
+  const table = [
+    '### 6 — ما لا يملكُ المنفِّذُ إغلاقَه — يُرفَعُ إلى المالكِ',
+    '',
+    '| المعرِّفُ | الدَينُ | لماذا | كيفَ |',
+    '| --- | --- | --- | --- |',
+    '| ~~`OPS-1/R6-REMEASURE`~~ | ~~جُمودٌ مقيسٌ~~ 🟢 **أُغلِقَ في `WL-247`** | — | — |',
+    '',
+  ].join('\n');
+  const rows = parseDebtRows(table);
+  const row = rows.find((r) => r.id === 'OPS-1/R6-REMEASURE');
+  assert.ok(row, 'OPS-1/R6-REMEASURE غائبٌ');
+  assert.equal(row.closed, true, 'المعرِّفُ المشطوبُ لا يُغلقُ — وهو خطأٌ في الانحدار');
+});
+
+test('DOC-30 — المستودعُ نفسُه: DOC-23 لا يُحكَمُ بإغلاقٍ من 🟢 في وصفِه، وOPS-1/R6-REMEASURE يبقى مُغلَقاً', () => {
+  const debt = readFileSync(path.join(REPO, manifest.debtRegister), 'utf8');
+  const rows = parseDebtRows(debt);
+  // DOC-23: معرِّفُه غيرُ مشطوبٍ ووصفُه يذكرُ 🟢 — كانَ يُحكَمُ مُغلَقاً بالخللِ.
+  const doc23 = rows.find((r) => r.id === 'DOC-23');
+  assert.ok(doc23, 'DOC-23 غائبٌ عن السجلِّ');
+  assert.equal(
+    doc23.closed,
+    false,
+    'DOC-23 يُحكَمُ مُغلَقاً من 🟢 في وصفِه — وهو الخللُ الذي يُصلِحُه DOC-30',
+  );
+  // OPS-1/R6-REMEASURE: معرِّفُه مشطوبٌ — يبقى مُغلَقاً بالشطبِ.
+  const opsR6 = rows.find((r) => r.id === 'OPS-1/R6-REMEASURE');
+  assert.ok(opsR6, 'OPS-1/R6-REMEASURE غائبٌ عن السجلِّ');
+  assert.equal(
+    opsR6.closed,
+    true,
+    'OPS-1/R6-REMEASURE المشطوبُ لا يُحكَمُ مُغلَقاً — وهو خطأٌ في الانحدار',
+  );
+});
