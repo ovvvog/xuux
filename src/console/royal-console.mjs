@@ -320,6 +320,10 @@ export function loadConsolePolicy(options = {}) {
  * @property {(reason?: string, command?: unknown) => { epoch: number, reason: string, state: string }} halt
  * @property {(reason?: string, command?: unknown) => { epoch: number, reason: string, state: string }} resume
  * @property {() => { state: string, epoch: number, reason: string, at: string | null }} read
+ * @property {(reason?: string, command?: unknown) => Promise<{ epoch: number, reason: string, state: string }>} [haltAsync]
+ *   (‏`WL-348`) نظيرُ `halt` بتوقيعٍ داخلَ التوكن — والمفتاحُ الإنتاجيُّ لا يملكُ غيرَه.
+ * @property {(reason?: string, command?: unknown) => Promise<{ epoch: number, reason: string, state: string }>} [resumeAsync]
+ * @property {unknown} [king]
  */
 
 /**
@@ -343,12 +347,34 @@ export function loadConsolePolicy(options = {}) {
  * @property {(command: { id: string }) => unknown} begin
  * @property {(command: { id: string }) => unknown} commit
  * @property {(command: { id: string }, reason?: string) => unknown} abort
+ * @property {boolean} [signed] (‏`WL-348`) دفترٌ موقَّعٌ في التوكن يرفضُ `commit`/`abort` المتزامنَين
+ * @property {(command: { id: string }, reason?: string) => Promise<unknown>} [commitSigned]
+ * @property {(command: { id: string }, reason?: string) => Promise<unknown>} [abortSigned]
+ * @property {<T>(intent: string, fn: () => Promise<T> | T) => Promise<T>} [transactAsync]
  */
 
 /**
  * @typedef {object} ConsoleLogLike
  * @property {(type: string, actor: string, data: Record<string, unknown>) => unknown} append
+ * @property {(type: string, actor: string, data: Record<string, unknown>) => Promise<unknown>} [appendSealed]
+ *   (‏`WL-348`) إلحاقٌ يُنتظَرُ ختمُه — والسجلُّ الإنتاجيُّ المختومُ يرفضُ `append` الخامَ
+ *   (‏`SEALED_LOG_REQUIRES_ASYNC_APPEND`)، ومُحوِّلُه (‏`sealedAudit`) يُدرِجُه بلا انتظار.
+ * @property {() => Promise<void>} [flush]
+ * @property {unknown} [sealed] السجلُّ المختومُ الخامُ تحتَ المُحوِّل (‏`sealedAudit.sealed`)؛ و`PersistentEventLog` يحملُ
+ *   الاسمَ نفسَه قيمةً منطقيّةً، فلا يُستعمَلُ إلّا كائناً يحملُ `appendSealed`.
  */
+
+/**
+ * `WL-348`: هل يختمُ هذا السجلُّ ما يُلحَقُ به؟ حضورُ `appendSealed` وحدَه لا يكفي — فـ`PersistentEventLog`
+ * يحملُه دائماً ويردُّه بـ`EVENT_LOG_SEALER_MISSING` إن لم يُركَّب له خاتم. فالسجلُّ يختمُ إن أعلنَ
+ * `sealed === true` (‏سجلٌّ دائمٌ بخاتم)، أو كانَ مُحوِّلَ `sealedAudit` (‏`flush` و`appendSealed` معاً).
+ * @param {ConsoleLogLike} log
+ * @returns {boolean}
+ */
+function sealingLog(log) {
+  if (typeof log.appendSealed !== 'function') return false;
+  return log.sealed === true || typeof log.flush === 'function';
+}
 
 /**
  * الديوانُ: مِقبضُ قراءةٍ واحدٌ (`view`) ومِقبضُ كتابةٍ واحدٌ (`issue`)، ولا
@@ -518,7 +544,7 @@ export class RoyalConsole {
    * و`sovereignSession` رمزُ **جلسةٍ قويةٍ** من `src/authn/king-auth.mjs` لا رمزُ
    * جلسةِ القراءةِ في `config/api.yaml`: تلك تقرأ وهذه تُوقف دولةً — وخلطُهما
    * يجعل العاملَ الثانيَ زينة.
-   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string }} request
+   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string, haltCommand?: Record<string, unknown> }} request
    * @returns {Promise<{ command: string, action: string, kind: string, path: string, commandId: string, acceptedAt: string, status: 'executed', effect: Record<string, unknown> }>}
    */
   async issue(request) {
@@ -541,7 +567,7 @@ export class RoyalConsole {
   }
 
   /**
-   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string }} request
+   * @param {{ command: string, royalCommand: Record<string, unknown>, signature: string, sovereignSession?: string, haltCommand?: Record<string, unknown> }} request
    * @param {string} commandKey
    * @param {ConsoleLogLike} log
    * @returns {Promise<{ command: string, action: string, kind: string, path: string, commandId: string, acceptedAt: string, status: 'executed', effect: Record<string, unknown> }>}
@@ -614,13 +640,16 @@ export class RoyalConsole {
       );
     }
 
+    // ── (3ب) `WL-348`: سندُ مفتاحِ الإيقافِ يُربَطُ بالأمرِ **قبلَ** القبول ──
+    const haltCommand = this.#haltAuthorityFor(spec, royal, commandId, request.haltCommand);
+
     // ── (4) إثباتُ السلطةِ ثم (5) قيدُ القبولِ في السجلِّ الدائمِ قبل الأثر ──
     /** @type {string} */
     let acceptedAt;
     if (spec.path === 'crown') {
       acceptedAt = await this.#acceptThroughCrown(spec, royal, signature);
     } else if (spec.path === 'sovereign-recovery') {
-      acceptedAt = this.#acceptRecovery(spec, royal, signature, log, commandId);
+      acceptedAt = await this.#acceptRecovery(spec, royal, signature, log, commandId);
     } else {
       throw new ConsoleError(
         CONSOLE_ERRORS.PATH_UNDECLARED,
@@ -632,7 +661,7 @@ export class RoyalConsole {
     /** @type {Record<string, unknown>} */
     let effect;
     try {
-      effect = this.#applyEffect(spec, royal);
+      effect = await this.#applyEffect(spec, royal, haltCommand);
     } catch (error) {
       throw new ConsoleError(
         CONSOLE_ERRORS.EFFECT_REFUSED,
@@ -642,7 +671,8 @@ export class RoyalConsole {
     }
 
     // ── (7) قيدُ التنفيذِ: يُميّز «نُفِّذ» من «قُبل ولم يُنفَّذ» ──
-    log.append(this.#policy.audit.commandExecutedEvent, this.#actorId(), {
+    // `WL-348`: يُنتظَرُ ختمُه قبلَ أن يُرجَعَ «نُفِّذ» — فلا إقرارَ بتنفيذٍ لم يدُم قيدُه.
+    await this.#recordSealed(log, this.#policy.audit.commandExecutedEvent, this.#actorId(), {
       command: spec.id,
       commandId,
       action: spec.action,
@@ -723,9 +753,9 @@ export class RoyalConsole {
    * @param {string} signature
    * @param {ConsoleLogLike} log
    * @param {string} commandId
-   * @returns {string}
+   * @returns {Promise<string>}
    */
-  #acceptRecovery(spec, royal, signature, log, commandId) {
+  async #acceptRecovery(spec, royal, signature, log, commandId) {
     if (!RECOVERY_KINDS.includes(spec.kind)) {
       throw new ConsoleError(
         CONSOLE_ERRORS.PATH_UNDECLARED,
@@ -773,26 +803,168 @@ export class RoyalConsole {
       );
     }
     const acceptedAt = new Date(this.#nowMs()).toISOString();
-    if (ledger !== null) ledger.begin({ ...royal, id: commandId });
-    try {
-      log.append(this.#policy.audit.recoveryEvent, this.#actorId(), {
-        command: spec.id,
-        commandId,
-        action: spec.action,
-        kind: spec.kind,
-        target: spec.target,
-        acceptedAt,
-        // ومسارُ التعافي يُسجَّل باسمِه لا كأمرٍ عاديّ: من قرأ السجلَّ يجب أن
-        // يرى **أنّ** أمراً تجاوز بوابةَ التاجِ ولماذا جاز له ذلك.
-        via: 'sovereign-recovery',
-      });
-    } catch (error) {
-      if (ledger !== null) ledger.abort({ ...royal, id: commandId }, 'LOG_APPEND_FAILED');
-      throw error;
+    const entry = {
+      command: spec.id,
+      commandId,
+      action: spec.action,
+      kind: spec.kind,
+      target: spec.target,
+      acceptedAt,
+      // ومسارُ التعافي يُسجَّل باسمِه لا كأمرٍ عاديّ: من قرأ السجلَّ يجب أن
+      // يرى **أنّ** أمراً تجاوز بوابةَ التاجِ ولماذا جاز له ذلك.
+      via: 'sovereign-recovery',
+    };
+    const record = { ...royal, id: commandId };
+    // `WL-348`: المسارُ نفسُه الذي تسلكُه البوابةُ في `commandAsync` (‏`crown.mts`): حجزٌ، ثمّ
+    // ختمُ القيدِ يُنتظَر، ثمّ تثبيتُ الحجزِ — **موقَّعاً** إن كانَ الدفترُ موقَّعاً (‏الدفترُ
+    // الإنتاجيُّ يرفضُ `commit`/`abort` المتزامنَين بـ`SIGNED_LEDGER_REQUIRES_ASYNC`)، والثلاثةُ
+    // معاملةٌ واحدةٌ عبرَ حاجزِ الالتزامِ إن رُكِّب (‏`D3`، `WL-326`). والسجلُّ المُرتَّبُ يُفرَّغُ
+    // قبلَ المعاملةِ ويُكتَبُ داخلَها على السجلِّ المختومِ نفسِه — وإلّا انتظرَ ذيلُ الطابورِ
+    // حاجزاً تمسكُه المعاملةُ (‏القفلُ الميّتُ المقيسُ في `WL-326`).
+    const transact = ledger?.transactAsync?.bind(ledger);
+    if (transact !== undefined) {
+      if (typeof log.flush === 'function') await log.flush();
+      const raw = /** @type {{ appendSealed?: unknown } | null | undefined} */ (log.sealed);
+      const inner =
+        typeof log.flush === 'function' &&
+        raw !== null &&
+        typeof raw === 'object' &&
+        typeof raw.appendSealed === 'function'
+          ? /** @type {ConsoleLogLike} */ (raw)
+          : log;
+      await transact('console.recovery', () => this.#recoveryBody(ledger, inner, record, entry));
+    } else {
+      await this.#recoveryBody(ledger, log, record, entry);
     }
-    if (ledger !== null) ledger.commit({ ...royal, id: commandId });
     this.#seen.add(commandId);
     return acceptedAt;
+  }
+
+  /**
+   * جسمُ مسارِ التعافي بعدَ الفحوص: حجزٌ ⇒ ختمُ القيد ⇒ تثبيتٌ؛ وفشلُ الختمِ يُلغي الحجزَ
+   * (‏موقَّعاً في الدفترِ الموقَّع) فيبقى الأمرُ قابلاً لإعادةِ الإصدار.
+   * @param {ConsoleLedgerLike | null} ledger
+   * @param {ConsoleLogLike} log
+   * @param {{ id: string }} record
+   * @param {Record<string, unknown>} entry
+   * @returns {Promise<void>}
+   */
+  async #recoveryBody(ledger, log, record, entry) {
+    const signed = ledger !== null && ledger.signed === true;
+    if (ledger !== null) ledger.begin(record);
+    try {
+      await this.#recordSealed(log, this.#policy.audit.recoveryEvent, this.#actorId(), entry);
+    } catch (error) {
+      if (ledger !== null) {
+        if (signed && typeof ledger.abortSigned === 'function') {
+          await ledger.abortSigned(record, 'LOG_APPEND_FAILED');
+        } else {
+          ledger.abort(record, 'LOG_APPEND_FAILED');
+        }
+      }
+      throw error;
+    }
+    if (ledger !== null) {
+      if (signed) {
+        if (typeof ledger.commitSigned !== 'function') {
+          throw new ConsoleError(
+            CONSOLE_ERRORS.COMMAND_REJECTED,
+            'دفترُ الأوامرِ موقَّعٌ ولا يحملُ `commitSigned`؛ وتثبيتٌ متزامنٌ على دفترٍ موقَّعٍ يُرفَضُ فيبقى المعرّفُ محجوزاً بلا تثبيت.',
+          );
+        }
+        await ledger.commitSigned(record);
+      } else {
+        ledger.commit(record);
+      }
+    }
+  }
+
+  /**
+   * `WL-348`: سندُ مفتاحِ الإيقافِ لأمرَي `halt` و`halt-resume`.
+   *
+   * مفتاحُ الإيقافِ الإنتاجيُّ يتحقّقُ من أمرٍ **بصيغتِه هو** (‏R5-B-07: `operation` · `commandId` ·
+   * `targetEpoch` · `reason` · `at` · توقيعٌ بالمفتاحِ الملكيّ)، لا من صيغةِ بوابةِ التاج — فالأمرُ
+   * الملكيُّ وحدَه يُقبَلُ ثمّ يُرَدُّ أثرُه بعدَ أن يُحرَقَ معرّفُه. فيحملُ الطلبُ السندَ، ويُربَطُ
+   * هنا قبلَ القبول: المعرّفُ نفسُه، والعملُ المطابقُ للنوع، والسببُ نفسُه — فلا يُنفَّذُ سندٌ
+   * وُقِّعَ لأمرٍ آخر. والمفتاحُ نفسُه يفحصُ بعدَها التوقيعَ والعهدَ والحداثة.
+   * وبلا سندٍ على مفتاحٍ يوقِّعُ في التوكنِ (‏الإنتاج) يُرَدُّ الأمرُ قبلَ القبولِ لا بعدَه.
+   * @param {ConsoleCommandSpec} spec
+   * @param {Record<string, unknown>} royal
+   * @param {string} commandId
+   * @param {unknown} supplied
+   * @returns {Record<string, unknown> | null}
+   */
+  #haltAuthorityFor(spec, royal, commandId, supplied) {
+    if (spec.kind !== 'halt' && spec.kind !== 'halt-resume') {
+      if (supplied !== undefined) {
+        throw new ConsoleError(
+          CONSOLE_ERRORS.COMMAND_REJECTED,
+          `الأمر ${spec.id} من نوع «${spec.kind}» لا يحملُ سندَ مفتاحِ إيقاف؛ وسندٌ زائدٌ لا يُتجاهَل.`,
+        );
+      }
+      return null;
+    }
+    if (supplied === undefined) {
+      const halt = this.#haltSwitch;
+      const tokenSigned =
+        halt !== null &&
+        typeof (/** @type {{ signAsync?: unknown } | undefined} */ (halt.king)?.signAsync) ===
+          'function';
+      if (tokenSigned) {
+        throw new ConsoleError(
+          CONSOLE_ERRORS.COMMAND_REJECTED,
+          `الأمر ${spec.id} بلا سندِ مفتاحِ الإيقاف (‏\`haltCommand\`)، والمفتاحُ يوقِّعُ في التوكنِ ويتحقّقُ من أمرٍ بصيغتِه هو؛ فيُرَدُّ قبلَ القبولِ ولا يُحرَقُ معرّفُه.`,
+        );
+      }
+      return null;
+    }
+    if (supplied === null || typeof supplied !== 'object' || Array.isArray(supplied)) {
+      throw new ConsoleError(
+        CONSOLE_ERRORS.COMMAND_REJECTED,
+        `سندُ مفتاحِ الإيقافِ للأمر ${spec.id} ليس كائناً.`,
+      );
+    }
+    const authority = /** @type {Record<string, unknown>} */ (supplied);
+    const operation = spec.kind === 'halt' ? 'halt' : 'resume';
+    const payload = /** @type {Record<string, unknown>} */ (
+      royal['payload'] !== null && typeof royal['payload'] === 'object' ? royal['payload'] : {}
+    );
+    const reason = typeof payload['reason'] === 'string' ? payload['reason'].trim() : '';
+    if (authority['commandId'] !== commandId) {
+      throw new ConsoleError(
+        CONSOLE_ERRORS.COMMAND_REJECTED,
+        `سندُ مفتاحِ الإيقافِ معرّفُه «${String(authority['commandId'])}» والأمرُ ${commandId}؛ وسندٌ لأمرٍ آخرَ لا يُنفِّذُ هذا.`,
+      );
+    }
+    if (authority['operation'] !== operation) {
+      throw new ConsoleError(
+        CONSOLE_ERRORS.ACTION_MISMATCH,
+        `سندُ مفتاحِ الإيقافِ عملُه «${String(authority['operation'])}» والأمر ${spec.id} يطلبُ «${operation}».`,
+      );
+    }
+    if (authority['reason'] !== reason) {
+      throw new ConsoleError(
+        CONSOLE_ERRORS.COMMAND_REJECTED,
+        `سببُ سندِ مفتاحِ الإيقافِ غيرُ سببِ الأمر ${spec.id}؛ والسببُ المختومُ في التوجيهِ هو ما وقّعَه الملكُ لا ما يُكتَبُ بعدَه.`,
+      );
+    }
+    return authority;
+  }
+
+  /**
+   * `WL-348`: قيدٌ يُنتظَرُ ختمُه حيثُ يملكُ السجلُّ الختم، وإلحاقٌ عاديٌّ حيثُ لا يملكُه.
+   * @param {ConsoleLogLike} log
+   * @param {string} type
+   * @param {string} actor
+   * @param {Record<string, unknown>} data
+   * @returns {Promise<void>}
+   */
+  async #recordSealed(log, type, actor, data) {
+    if (sealingLog(log) && typeof log.appendSealed === 'function') {
+      await log.appendSealed(type, actor, data);
+      return;
+    }
+    log.append(type, actor, data);
   }
 
   /**
@@ -800,9 +972,10 @@ export class RoyalConsole {
    * يُرفض ولا يُهمَل صامتاً.
    * @param {ConsoleCommandSpec} spec
    * @param {Record<string, unknown>} royal
-   * @returns {Record<string, unknown>}
+   * @param {Record<string, unknown> | null} haltCommand سندُ مفتاحِ الإيقافِ المربوطُ (‏`WL-348`)
+   * @returns {Promise<Record<string, unknown>>}
    */
-  #applyEffect(spec, royal) {
+  async #applyEffect(spec, royal, haltCommand) {
     const payload = /** @type {Record<string, unknown>} */ (
       royal['payload'] !== null && typeof royal['payload'] === 'object'
         ? royal['payload']
@@ -821,10 +994,33 @@ export class RoyalConsole {
         }
         // R5-B-07: الإيقافُ والاستئنافُ يُنفَّذانِ بالأمرِ الملكيِّ المقبولِ
         // نفسِه لا بنداءٍ مجرّدٍ — فالمفتاحُ يتحقّقُ من الأمرِ بوّابتِه هو.
-        const directive =
-          spec.kind === 'halt'
-            ? halt.halt(reason === '' ? undefined : reason, royal)
-            : halt.resume(reason === '' ? undefined : reason, royal);
+        // `WL-348`: مفتاحُ الإيقافِ الإنتاجيُّ يوقِّعُ التوجيهَ داخلَ التوكن (‏`signAsync`) ولا
+        // يملكُ `sign` المتزامن، فـ`halt`/`resume` يُرَدّانِ عليه بـ`HALT_SIGNER_REQUIRED`. والكشفُ
+        // هو كشفُ النواةِ نفسُه (‏`execution-kernel.mjs`، `WL-302`): موقِّعٌ غيرُ متزامنٍ ⇒ المسارُ
+        // غيرُ المتزامن، وإلّا فالمتزامن.
+        const why = reason === '' ? undefined : reason;
+        const asyncSigner =
+          typeof (/** @type {{ signAsync?: unknown } | undefined} */ (halt.king)?.signAsync) ===
+            'function' &&
+          typeof halt.haltAsync === 'function' &&
+          typeof halt.resumeAsync === 'function';
+        // وسندُ المفتاحِ أمرُه هو (‏R5-B-07) إن حُمِل، وإلّا الأمرُ الملكيُّ نفسُه كما كان.
+        const authority = haltCommand ?? royal;
+        /** @type {{ epoch: number, reason: string, state: string }} */
+        let directive;
+        if (asyncSigner && spec.kind === 'halt') {
+          directive = await /** @type {NonNullable<ConsoleHaltLike['haltAsync']>} */ (
+            halt.haltAsync
+          ).call(halt, why, authority);
+        } else if (asyncSigner) {
+          directive = await /** @type {NonNullable<ConsoleHaltLike['resumeAsync']>} */ (
+            halt.resumeAsync
+          ).call(halt, why, authority);
+        } else if (spec.kind === 'halt') {
+          directive = halt.halt(why, authority);
+        } else {
+          directive = halt.resume(why, authority);
+        }
         return { state: directive.state, epoch: directive.epoch, reason: directive.reason };
       }
       case 'veto':

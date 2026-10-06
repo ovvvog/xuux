@@ -33,6 +33,7 @@ import {
 } from '../root-of-trust/production-runtime.mjs';
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
+import { composeSovereignConsole } from './sovereign-console.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
 import { loadPolicyBundle } from '../policy/loader.mjs';
 import { createRoyalAuthorization } from '../root-of-trust/royal-authorization.mjs';
@@ -59,6 +60,10 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  * @property {InstanceType<typeof CrownGateway>} crown
  * @property {InstanceType<typeof ExecutionKernel>} kernel
  * @property {import('../root-of-trust/persistent-log.mjs').PersistentEventLog} auditLog
+ * @property {import('../authn/king-auth.mjs').KingAuthenticator} kingAuth
+ *   (‏`WL-348`) مصادقةُ الملكِ القويّةُ — بلا `options.factorSecrets` تُرَدُّ كلُّ مصادقةٍ مغلقاً.
+ * @property {import('../console/royal-console.mjs').RoyalConsole} royalConsole
+ *   (‏`WL-348`) الديوانُ على مكوّناتِ الإنتاج: الإيقافُ والاستئنافُ والنقضُ بأمرٍ موقَّعٍ وجلسةٍ قويّة.
  * @property {() => Promise<void>} close
  * @property {unknown} intentDrainError آخرُ خطأٍ في تفريغِ صندوقِ القصود (‏`WL-326`)
  */
@@ -72,6 +77,9 @@ export const PRODUCTION_ENTRYPOINT_ERRORS = Object.freeze([
  *   اختبارٌ فقط — لا يُمرَّرُ في الإنتاج. `production-runtime` يَشتقُّه من HSM.
  * @property {{ now(): number, assertTrusted(): void, attestation(): { atMs: number, radiusMs: number, ageMs: number, sources: readonly string[], localSkewMs: number } | null } | null} [clock]
  *   اختبارٌ فقط — لا يُمرَّرُ في الإنتاج. الإنتاج يَبني `AttestedClock` من السياسة.
+ * @property {import('../authn/king-auth.mjs').FactorSecretsLike | null} [factorSecrets]
+ *   (‏`WL-348`) مزوِّدُ أسرارِ العاملِ الثاني. **لا مصدرَ إنتاجيٌّ له في المستودعِ اليوم** (‏تبعيّةٌ
+ *   مُعلَنة)؛ وبغيابِه يُركَّبُ الديوانُ ويُرَدُّ كلُّ أمرٍ بـ`AUTHN_SECRET_MISSING` — لا عاملَ مُعطَّل.
  */
 
 /**
@@ -234,6 +242,20 @@ export async function createProductionSystem(env, options, deps = {}) {
     env,
   });
 
+  // 9أ. `WL-348`: الديوانُ ومصادقةُ الملكِ على مكوّناتِ الإنتاجِ نفسِها — التاجُ ودفترُ الأوامرِ
+  //     الموقَّعُ ومفتاحُ الإيقافِ والسجلُّ المختومُ عبرَ مُحوِّلِه والساعةُ الموثوقة. وشهودُ
+  //     استهلاكِ العاملِ الثاني تُفتَحُ من السجلِّ المختومِ هنا، قبلَ أيِّ طلب.
+  const { kingAuth, royalConsole } = await composeSovereignConsole({
+    enforcementLog: /** @type {never} */ (enforcementLog),
+    sealedLog: /** @type {never} */ (rootOfTrust.log),
+    crown: /** @type {never} */ (crown),
+    haltSwitch: /** @type {never} */ (rootOfTrust.haltSwitch),
+    commandLedger: /** @type {never} */ (rootOfTrust.ledger),
+    king: royalIdentity,
+    clock: /** @type {{ now(): number }} */ (clock),
+    factorSecrets: options.factorSecrets ?? null,
+  });
+
   // 10. `D6` (‏`WL-326`): صندوقُ القصودِ — عمليةُ الجذرِ هي الكاتبُ الإنتاجيُّ الواحد، وأداةُ
   //     الإيقافِ وأداةُ التثبيتِ والعقدُ تُودِعُ قصوداً مُصادَقةً يُطبِّقُها هنا عبرَ الحاجز.
   //     فشلُ التفريغِ لا يُبتلَعُ صامتاً: يُحفَظُ آخرُه ويُقرأُ (‏والحاجزُ المعطوبُ يرفضُ كلَّ
@@ -257,6 +279,8 @@ export async function createProductionSystem(env, options, deps = {}) {
     crown,
     kernel,
     auditLog: rootOfTrust.log,
+    kingAuth,
+    royalConsole,
     get intentDrainError() {
       return intentDrainError;
     },
