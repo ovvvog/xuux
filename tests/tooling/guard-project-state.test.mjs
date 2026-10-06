@@ -20,6 +20,8 @@ import {
   parseManifest,
   parseWorkLog,
   entryText,
+  parseDebtRows,
+  renderHandoff,
 } from '../../scripts/lib/project-state.mjs';
 
 const REPO = process.cwd();
@@ -1053,4 +1055,82 @@ test('التاريخ — سطرٌ فارغٌ أو فاصلٌ في وسطِ مُ�
   const r = runGuard(root);
   assert.equal(r.status, 1, r.out);
   assert.match(r.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-001`/u);
+});
+
+// ── `DOC-29` (‏`WL-338`): معرِّفٌ بنقطةٍ، وحالةُ §4.3 من العقدِ في ملخّصِ التسليم ──
+
+const DOC29_TABLE = [
+  '### 4.3 نتائجُ المراجعةِ المستقلّة',
+  '',
+  '| المعرِّفُ | الشدّةُ | المعالجةُ المُقيَّدةُ | الإغلاقُ |',
+  '| --- | --- | --- | --- |',
+  '| `M11.04-F05` | عالية | مُعالَجةٌ | مجلس |',
+  '| ~~`M11.04-F01`~~ 🟢 | عالية | مُعالَجةٌ · مُغلَقةٌ في العقد | مجلس |',
+  '| `R4-B-01` | متوسطة | مُعالَجةٌ | مجلس |',
+  '',
+].join('\n');
+
+test('DOC-29 — parseDebtRows يقرأُ معرِّفاً بنقطةٍ (‏`M11.04-F05`) ولا يُسقِطُه، وكانَ يُسقِطُه', () => {
+  const rows = parseDebtRows(DOC29_TABLE);
+  const ids = rows.map((r) => r.id);
+  assert.deepEqual(ids, ['M11.04-F05', 'M11.04-F01', 'R4-B-01']);
+  // المفتوحُ يبقى مفتوحاً: الإصلاحُ يُضيفُ المعرِّفَ ولا يُغيِّرُ حكمَ علامتِه.
+  assert.equal(rows.find((r) => r.id === 'M11.04-F05')?.closed, false);
+  // المُعلَّمُ بالشطبِ و🟢 مُغلَقٌ ولو كانَ بنقطة.
+  assert.equal(rows.find((r) => r.id === 'M11.04-F01')?.closed, true);
+  // والنمطُ القديمُ (‏بلا نقطةٍ) كانَ يُسقِطُ الصفَّين — شاهدُ الانحدار.
+  const oldPattern = /^(~~)?`([A-Z][A-Z0-9]*(?:[-/][A-Za-z0-9]+)*)`(~~)?/u;
+  assert.equal(oldPattern.exec('`M11.04-F05`'), null);
+});
+
+test('DOC-29 — المستودعُ نفسُه: كلُّ صفٍّ في §4.3 يحملُ علامةَ إغلاقٍ بقدرِ ما في العقدِ لا أكثر', () => {
+  const debt = readFileSync(path.join(REPO, manifest.debtRegister), 'utf8');
+  const contract = parse(readFileSync(path.join(REPO, 'config', 'external-review.yaml'), 'utf8'));
+  /** @type {Array<{id: string, status: string}>} */
+  const findings = contract.findings;
+  const rows = parseDebtRows(debt).filter((r) => r.section.startsWith('4.3'));
+  assert.equal(rows.length, findings.length, 'كلُّ نتيجةٍ في العقدِ صفٌّ في §4.3 تقرؤُه الدالّة');
+  for (const f of findings) {
+    const row = rows.find((r) => r.id === f.id);
+    assert.ok(row, `«${f.id}» غائبٌ عن قراءةِ §4.3`);
+    assert.equal(
+      row.closed,
+      f.status === 'closed',
+      `«${f.id}»: علامةُ الصفِّ تُخالِفُ \`${f.status}\``,
+    );
+  }
+  assert.ok(rows.some((r) => r.id === 'M11.04-F05' && !r.closed));
+  assert.ok(rows.some((r) => r.id === 'M11.04-F07' && !r.closed));
+});
+
+test('DOC-29 — ملخّصُ التسليمِ: المفتوحتانِ بنقطةٍ تظهرانِ، والمُغلَقُ في العقدِ لا يُعرَضُ بلا علامة، والعددُ المفتوحُ من العقدِ', () => {
+  const read = (/** @type {string} */ f) => readFileSync(path.join(REPO, f), 'utf8');
+  const contract = parse(read('config/external-review.yaml'));
+  const handoff = renderHandoff({
+    manifest,
+    workLog: read(manifest.workLog),
+    status: read(manifest.status),
+    debtRegister: read(manifest.debtRegister),
+    externalReview: contract,
+    version: JSON.parse(read('version.json')),
+  });
+  assert.equal(handoff, read(manifest.handoff), 'الملخّصُ المُلتزَمُ مولَّدٌ من مصادرِه الحاليّة');
+  const section2 = handoff.split('## 2 —')[1]?.split('## 3 —')[0] ?? '';
+  const section3 = handoff.split('## 3 —')[1]?.split('## 4 —')[0] ?? '';
+  for (const id of ['M11.04-F05', 'M11.04-F07']) {
+    assert.ok(section2.includes(`\`${id}\``), `«${id}» مفتوحةٌ ويجبُ أن تظهرَ في §2`);
+  }
+  /** @type {Array<{id: string, status: string}>} */
+  const findings = contract.findings;
+  for (const f of findings.filter((x) => x.status === 'closed')) {
+    assert.ok(
+      !section2.includes(`\`${f.id}\``),
+      `«${f.id}» مُغلَقةٌ في العقدِ وتُعرَضُ في §2 بلا علامة`,
+    );
+  }
+  const openCount = findings.filter((x) => x.status !== 'closed').length;
+  assert.match(
+    section3,
+    new RegExp(`مفتوحةٌ \\*\\*${openCount}\\*\\* من \\*\\*${findings.length}\\*\\*`, 'u'),
+  );
 });

@@ -23,6 +23,10 @@
 //     `findings[].id` يجبُ أن يظهرَ في عمودِ المعرِّفِ في الجدول. وتُستخرَجُ المعرّفاتُ من العقدِ بمُفسِّرِ YAML.
 //   - R7: أقسامُ سجلِّ الدَّينِ من المستوى الثاني (`## `) فريدةٌ وغيرُ فارغةٍ، ولكلِّ جدولٍ صفٌّ فاصلٌ
 //     بعدَ ترويستِه (`R4/NO-SEPARATOR`) — أُضيفا في `WL-273` إغلاقاً لـ`DOC-18`.
+//   - R8: علامةُ الإغلاقِ الموحَّدةُ (‏`~~ID~~` + 🟢) — أُضيفَ في `WL-330` لـ`DOC-23`. ووُسِّعَ في `WL-338`
+//     لـ`DOC-29`: في §4.3 **مصدرُ الحالةِ هو `config/external-review.yaml` لا الصفُّ** — نتيجةٌ `closed`
+//     في العقدِ بلا علامةٍ في صفِّها ⇒ `R8/YAML-CLOSED-UNMARKED`، ونتيجةٌ غيرُ `closed` بعلامةِ إغلاقٍ
+//     ⇒ `R8/YAML-OPEN-MARKED`. فالحاجزُ يقيسُ الصفَّ بالعقدِ ولا يُغيِّرُ العقد.
 //   - R9: معرِّفُ الدَّينِ يرِدُ صفّاً مرّةً واحدةً في الجدولِ الواحدِ (`R9/DUP-ROW`) — أُضيفَ في
 //     `WL-336` لـ`DOC-28`.
 //
@@ -398,9 +402,11 @@ const facts = readDocCountFacts(root);
 
 // ── R8: توحيدُ علامةِ الإغلاقِ — أُضيفَ في `WL-330` إغلاقاً للدَّين `DOC-23`.
 //   كلُّ صفٍّ مُغلَقٍ في جداولِ §4 (‏4.1…4.6) يجبُ أن يحملَ في خليّةِ المعرِّفِ: ~~`ID`~~ + 🟢.
-//   والصفُّ المُغلَقُ هو ما يَذكُرُ «مُغلَق» أو «مسدَّد» أو يحملُ 🟢 في أيِّ خليّةٍ. والقاعدةُ تَرفُضُ
-//   ما دونَ ذلك بلا استثناءٍ — فبعضُ الصفوفِ المُغلَقةِ كانَ يُشطَبُ معرِّفُها وحدَه، وبعضُها
-//   يحملُ 🟢 وحدَها، وبعضُها لا علامةَ له.
+//   **ما يُنفِذُه هذا الشطرُ فعلاً (‏تصحيحُ وصفٍ في `WL-338`، `DOC-29`):** صفٌّ معرِّفُه مشطوبٌ بلا 🟢
+//   يُرَدُّ (‏`R8/UNMARKED`). وكانَ هذا التعليقُ يَعِدُ بأنّ «المُغلَقَ ما يذكرُ مُغلَق أو يحملُ 🟢 في أيِّ
+//   خليّة»، والشفرةُ لا تقرأُ إلّا الشطبَ — فصفٌّ مُغلَقٌ بلا شطبٍ لم يكنْ يراه أحد. **حدٌّ معلَنٌ:**
+//   خارجَ §4.3 لا مصدرَ آليّاً للحالةِ غيرُ الصفِّ نفسِه، فلا يُستدَلُّ على الإغلاقِ من نصِّ خليّة.
+//   وفي §4.3 المصدرُ هو العقدُ — الشطرُ التالي.
 {
   const debtText = readText('docs/roadmap/06-debt-register.md');
   const debtLines = debtText.split('\n');
@@ -439,6 +445,63 @@ const facts = readDocCountFacts(root);
         violations.push(
           `R8/UNMARKED: الصفُّ «${idName}» مُغلَقٌ بلا علامةِ إغلاقٍ موحَّدةٍ (~~ID~~ + 🟢) في خليّةِ المعرِّفِ — سطر ${i + 1}.`,
         );
+      }
+    }
+  }
+}
+
+// ── R8 (‏§4.3): حالةُ النتيجةِ من العقدِ لا من الصفِّ — `WL-338` لـ`DOC-29` ──
+//   **الحادثةُ:** 21 نتيجةً `closed` في `config/external-review.yaml` (‏بحكمِ المجلسِ وسجلِّ إغلاقِها)
+//   كانت صفوفُها في §4.3 بلا علامةٍ، فعرضَها `docs/HANDOFF.md` «بلا علامةِ إغلاقٍ» تحتَ المجلس،
+//   والحاجزُ أخضر. فالقاعدةُ هنا تقرأُ `findings[].status` بمُفسِّرِ YAML وتُقابِلُ به خليّةَ المعرِّف:
+//   `closed` ⇐ `~~ID~~ 🟢` لزاماً، وما سواه ⇐ لا شطبَ ولا 🟢. **لا تكتبُ في العقدِ ولا تُغلِقُ شيئاً.**
+{
+  const contractText = readText('config/external-review.yaml');
+  /** @type {unknown} */
+  let contract = null;
+  try {
+    contract = contractText.trim() === '' ? null : parseYaml(contractText);
+  } catch {
+    // R5 يُبلِّغُ عن عطبِ التفسير.
+  }
+  const findings =
+    contract && typeof contract === 'object'
+      ? /** @type {{findings?: unknown}} */ (contract).findings
+      : undefined;
+  if (Array.isArray(findings)) {
+    /** @type {Map<string, string>} */
+    const statusOf = new Map();
+    for (const f of findings) {
+      if (f && typeof f === 'object' && 'id' in f) {
+        const { id, status } = /** @type {{id: unknown, status?: unknown}} */ (f);
+        if (typeof id === 'string') statusOf.set(id, String(status ?? ''));
+      }
+    }
+    const lines = readText('docs/roadmap/06-debt-register.md').split('\n');
+    const start = lines.findIndex((l) => l.startsWith('### 4.3'));
+    if (start !== -1) {
+      for (let i = start + 1; i < lines.length; i += 1) {
+        const line = lines[i] ?? '';
+        if (line.startsWith('### ') || line.startsWith('## ')) break;
+        if (!line.startsWith('|') || line.includes('| ---')) continue;
+        const idCell = (line.split('|')[1] ?? '').trim();
+        const m = /^(~~)?`([^`]+)`(~~)?\s*(🟢)?\s*$/u.exec(idCell);
+        if (m === null) continue;
+        const id = String(m[2]);
+        const status = statusOf.get(id);
+        if (status === undefined) continue; // غيابُه عن العقدِ ليس حكماً هنا (‏`R6` للاتّجاهِ الآخر).
+        const struck = m[1] === '~~' && m[3] === '~~';
+        const marked = struck && m[4] === '🟢';
+        const anyMark = m[1] === '~~' || m[3] === '~~' || m[4] === '🟢';
+        if (status === 'closed' && !marked) {
+          violations.push(
+            `R8/YAML-CLOSED-UNMARKED: «${id}» حالتُها \`closed\` في \`config/external-review.yaml\` وصفُّها في §4.3 بلا علامةِ الإغلاقِ الموحَّدةِ (~~ID~~ + 🟢) — سطر ${i + 1}.`,
+          );
+        } else if (status !== 'closed' && anyMark) {
+          violations.push(
+            `R8/YAML-OPEN-MARKED: «${id}» حالتُها \`${status}\` في \`config/external-review.yaml\` وصفُّها في §4.3 يحملُ علامةَ إغلاقٍ — لا تُغلَقُ نتيجةٌ في السجلِّ وهي مفتوحةٌ في العقد — سطر ${i + 1}.`,
+          );
+        }
       }
     }
   }

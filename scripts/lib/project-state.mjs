@@ -728,7 +728,9 @@ export function parseDebtRows(text) {
       continue;
     }
     if (!inTable) continue;
-    const match = /^(~~)?`([A-Z][A-Z0-9]*(?:[-/][A-Za-z0-9]+)*)`(~~)?/u.exec(cells[0] ?? '');
+    // ‏`DOC-29` (‏`WL-338`): المعرِّفُ قد يحملُ نقطةً (‏`M11.04-F05`) كما يحملُ `-` و`/` —
+    // كانَ النمطُ بلا نقطةٍ فتسقطُ صفوفُ `M11.04-*` من الملخّصِ كلِّه بصمت.
+    const match = /^(~~)?`([A-Z][A-Z0-9]*(?:[-/.][A-Za-z0-9]+)*)`(~~)?/u.exec(cells[0] ?? '');
     if (match === null) continue;
     const last = cells[cells.length - 1] ?? '';
     // صفٌّ يضعُ مالكَه في آخرِ خليّةٍ قصيرةٍ يُقرأُ كما كتبَه، ولو خالفَ ترويسةَ قسمِه.
