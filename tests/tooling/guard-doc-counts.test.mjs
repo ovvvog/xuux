@@ -299,8 +299,9 @@ test('الطفرأةُ M12: حذفُ صفِّ نتيجةٍ من جدولِ §4.3
     const register = readFileSync(registerPath, 'utf8');
     const mutated = register.replace(
       // الصفُّ يُطابَقُ بمعرِّفِه وعمودِ مالكِه لا بنصِّ معالجتِه: نصُّ العمودِ يتغيّرُ
-      // بكلِّ دفعةٍ تُعالِجُ النتيجةَ (‏`WL-276`)، والطفرةُ تحذفُ الصفَّ أيّاً كانَ نصُّه.
-      /^\| `R5-A-03` \| منخفضة \| [^\n]* \| مجلس \|$/m,
+      // بكلِّ دفعةٍ تُعالِجُ النتيجةَ (‏`WL-276`)، والطفرةُ تحذفُ الصفَّ أيّاً كانَ نصُّه — ولا
+      // بعلامةِ إغلاقِه: صارَ `~~ID~~ 🟢` لأنّ العقدَ يقولُ `closed` (‏`WL-338`، `DOC-29`).
+      /^\| (?:~~)?`R5-A-03`(?:~~)?(?: 🟢)? \| منخفضة \| [^\n]* \| مجلس \|$/m,
       '',
     );
     assert.notEqual(mutated, register, 'ينبغي أن يُعثَرَ على صفِّ `R5-A-03`');
@@ -497,6 +498,73 @@ test('R9: معرِّفٌ في جدولَينِ مختلفَينِ (‏§4.5 و§
     assert.equal(rows.length, 2, 'شرطُ القياس: `REPO-4` صفٌّ في جدولَين');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 0, stderr);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── الطفراتُ 18–20: حالةُ §4.3 من العقدِ (‏`R8`، `WL-338` لـ`DOC-29`) ──
+
+test('الطفرةُ M18: إزالةُ علامةِ نتيجةٍ مُغلَقةٍ في العقدِ (‏`R4-B-01`) تُسقِطُ الحاجزَ بـR8/YAML-CLOSED-UNMARKED — الحادثةُ نفسُها', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    const mutated = debt.replace('| ~~`R4-B-01`~~ 🟢 |', '| `R4-B-01` |');
+    assert.notEqual(mutated, debt, 'ينبغي أن يُعثَرَ على صفِّ R4-B-01 مُعلَّماً');
+    writeFileSync(debtPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/YAML-CLOSED-UNMARKED: «R4-B-01»/);
+    // ولا يراه `R8/UNMARKED` القديمُ — المعرِّفُ غيرُ مشطوبٍ؛ فالكشفُ من العقدِ لا من الشطب.
+    assert.doesNotMatch(stderr, /R8\/UNMARKED/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M19: تعليمُ نتيجةٍ مفتوحةٍ بنقطةٍ في معرِّفِها (‏`M11.04-F05`) مُغلَقةً يُسقِطُ الحاجزَ بـR8/YAML-OPEN-MARKED', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    const mutated = debt.replace('| `M11.04-F05` |', '| ~~`M11.04-F05`~~ 🟢 |');
+    assert.notEqual(mutated, debt, 'ينبغي أن يُعثَرَ على صفِّ M11.04-F05');
+    writeFileSync(debtPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/YAML-OPEN-MARKED: «M11.04-F05»/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M20: الحاجزُ يقرأُ الحالةَ من العقدِ — `M11.04-F07` تُجعَلُ `closed` في نسخةِ العقدِ وحدَها فيُرَدُّ صفُّها غيرُ المُعلَّم', () => {
+  const tmp = cloneRepo();
+  try {
+    const yamlPath = path.join(tmp, 'config/external-review.yaml');
+    const text = readFileSync(yamlPath, 'utf8');
+    const lines = text.split('\n');
+    const at = lines.findIndex((l) => /^\s*- id: ['"]?M11\.04-F07['"]?\s*$/.test(l));
+    assert.ok(at !== -1, 'ينبغي أن يُعثَرَ على M11.04-F07 في العقد');
+    const rel = lines.slice(at + 1).findIndex((l) => /^\s*status: open\s*$/.test(l));
+    assert.ok(rel !== -1, 'ينبغي أن يُعثَرَ على حالتِها');
+    lines[at + 1 + rel] = (lines[at + 1 + rel] ?? '').replace('open', 'closed');
+    writeFileSync(yamlPath, lines.join('\n'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/YAML-CLOSED-UNMARKED: «M11.04-F07»/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8 (‏§4.3): السجلُّ الحاليُّ يطابقُ العقدَ — لا علامةَ زائدةً ولا ناقصة', () => {
+  const tmp = cloneRepo();
+  try {
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, stderr);
+    assert.doesNotMatch(stderr, /R8\/YAML/);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
