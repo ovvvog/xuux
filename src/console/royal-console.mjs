@@ -310,6 +310,7 @@ export function loadConsolePolicy(options = {}) {
 /**
  * @typedef {object} ConsoleCrownLike
  * @property {(command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => { acceptedAt?: unknown }} command
+ * @property {(command: import('../root-of-trust/crown.mjs').RoyalCommand, signature: string) => Promise<{ acceptedAt?: unknown }>} commandAsync
  * @property {{ block: (reason?: string) => void, clear: () => void, enabled: boolean, reason: string | null }} veto
  * @property {boolean} stopped
  */
@@ -617,7 +618,7 @@ export class RoyalConsole {
     /** @type {string} */
     let acceptedAt;
     if (spec.path === 'crown') {
-      acceptedAt = this.#acceptThroughCrown(spec, royal, signature);
+      acceptedAt = await this.#acceptThroughCrown(spec, royal, signature);
     } else if (spec.path === 'sovereign-recovery') {
       acceptedAt = this.#acceptRecovery(spec, royal, signature, log, commandId);
     } else {
@@ -671,9 +672,9 @@ export class RoyalConsole {
    * @param {ConsoleCommandSpec} spec
    * @param {Record<string, unknown>} royal
    * @param {string} signature
-   * @returns {string}
+   * @returns {Promise<string>}
    */
-  #acceptThroughCrown(spec, royal, signature) {
+  async #acceptThroughCrown(spec, royal, signature) {
     const crown = this.#crown;
     if (crown === null) {
       throw new ConsoleError(
@@ -687,7 +688,10 @@ export class RoyalConsole {
       // وعقدُ البوابةِ يطلب أمراً مكتملَ الحقول، والديوانُ قد فحص فعلَه وهدفَه
       // ومعرّفَه قبلَ هذا الموضع؛ وما بقي تفحصُه البوابةُ نفسُها فتردُّه برمزِه
       // (`INVALID_COMMAND`) لا يُفترَض هنا صحيحاً.
-      accepted = crown.command(
+      // `WL-347`: المسارُ غيرُ المتزامنِ وحدَه — `command` المتزامنُ مرفوضٌ في الإنتاجِ
+      // بـ`CROWN_COMMAND_REQUIRES_ASYNC_IN_PRODUCTION` (‏`WL-304`/`LIVE-25`)، فديوانٌ يناديه
+      // لا يُنفِّذُ أمراً واحداً على العُقدةِ الإنتاجيّة. والقبولُ يُختَمُ قبلَ أن يُرجَع.
+      accepted = await crown.commandAsync(
         /** @type {import('../root-of-trust/crown.mjs').RoyalCommand} */ (
           /** @type {unknown} */ (royal)
         ),
