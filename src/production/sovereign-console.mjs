@@ -11,15 +11,57 @@
 //     في `options.factorSecrets`، وبغيابِها تُرَدُّ كلُّ مصادقةٍ بـ`AUTHN_SECRET_MISSING` فلا
 //     يُنفَّذُ أمرٌ (‏فشلٌ مغلق) — ولا يُستبدَلُ بها سرٌّ ثابتٌ ولا عاملٌ مُعطَّل.
 //   • **طبقةُ الواجهةِ** للمشاهد — غيرُ مركَّبةٍ في الإنتاج؛ فالمشاهدُ تُرَدُّ بـ`CONSOLE_GATEWAY_REQUIRED`.
-//   • **النقضُ** (‏`crown.veto`) في ذاكرةِ العمليّة — لا يصمدُ لإعادةِ التشغيل؛ والإيقافُ الشاملُ هو
-//     الحدُّ الدائم (‏`HaltSwitch`).
+//
+// `WL-349`: **النقضُ** (‏`crown.veto`) كانَ في ذاكرةِ العمليّةِ وحدَها فيسقطُ بإعادةِ التشغيل. صارَ
+// الديوانُ يختمُ حالتَه الجديدةَ (‏`console.veto.state`) قبلَ أن يُغيِّرَها، ويُعيدُها الإقلاعُ هنا من
+// آخرِ قيدٍ مختومٍ قبلَ تركيبِ الديوانِ وقبلَ أيِّ أمر (‏`vetoFromSealedLog`).
 
 import { KingAuthenticator, loadKingAuthPolicy } from '../authn/king-auth.mjs';
 import { RoyalConsole, loadConsolePolicy } from '../console/royal-console.mjs';
 
 export const SOVEREIGN_CONSOLE_ERRORS = Object.freeze({
   FACTOR_WITNESS_UNREADABLE: 'PRODUCTION_FACTOR_WITNESS_UNREADABLE',
+  VETO_RECORD_UNREADABLE: 'PRODUCTION_VETO_RECORD_UNREADABLE',
 });
+
+/**
+ * `WL-349`: حالةُ النقضِ من السجلِّ المختومِ عندَ الإقلاع — **آخرُ** قيدِ حالةٍ هو الحاكم
+ * (‏السجلُّ مرتَّبٌ بالإلحاق، والقيدُ يُختَمُ قبلَ الأثرِ في الديوان).
+ *
+ * قيدٌ لا يُفتَحُ، أو جسمٌ بلا `vetoed` منطقيٍّ، أو نقضٌ بلا سببٍ نصّيّ: رفضٌ مُسمّى يمنعُ
+ * الإقلاع — لا «لا نقض» صامتاً؛ فقيدٌ تالفٌ قد يكونُ نقضاً قائماً، وفتحُ البوابةِ عليه فشلٌ مفتوح.
+ * @param {SealedLogReader} log
+ * @param {string} type
+ * @returns {Promise<{ vetoed: boolean, reason: string | null, commandId: string } | null>} `null` إن لم يُختَم نقضٌ قطّ
+ */
+export async function vetoFromSealedLog(log, type) {
+  /** @type {{ vetoed: boolean, reason: string | null, commandId: string } | null} */
+  let last = null;
+  for (const event of log.events) {
+    if (event?.type !== type) continue;
+    const unreadable = () =>
+      new Error(`${SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNREADABLE}: ${String(event.id ?? '')}`);
+    /** @type {unknown} */
+    let body;
+    try {
+      body = log.sealed ? await log.openEvent(event) : event.data;
+    } catch {
+      throw unreadable();
+    }
+    if (body === null || typeof body !== 'object') throw unreadable();
+    const record = /** @type {Record<string, unknown>} */ (body);
+    if (typeof record['vetoed'] !== 'boolean') throw unreadable();
+    if (record['vetoed'] && (typeof record['reason'] !== 'string' || record['reason'] === '')) {
+      throw unreadable();
+    }
+    last = {
+      vetoed: record['vetoed'],
+      reason: record['vetoed'] ? /** @type {string} */ (record['reason']) : null,
+      commandId: typeof record['commandId'] === 'string' ? record['commandId'] : '',
+    };
+  }
+  return last;
+}
 
 /**
  * @typedef {object} SealedLogReader
@@ -77,7 +119,7 @@ export async function factorWitnessesFromSealedLog(log, type) {
  * @param {{ id: string, verify: (payload: object, signature: string) => boolean }} deps.king الهويّةُ الملكيّةُ (‏المفتاحُ العامّ)
  * @param {{ now(): number }} deps.clock
  * @param {import('../authn/king-auth.mjs').FactorSecretsLike | null} [deps.factorSecrets]
- * @returns {Promise<{ kingAuth: KingAuthenticator, royalConsole: RoyalConsole }>}
+ * @returns {Promise<{ kingAuth: KingAuthenticator, royalConsole: RoyalConsole, restoredVeto: { vetoed: boolean, reason: string | null, commandId: string } | null }>}
  */
 export async function composeSovereignConsole(deps) {
   const authnPolicy = loadKingAuthPolicy();
@@ -107,6 +149,14 @@ export async function composeSovereignConsole(deps) {
         (w) => w.type === type && typeof w.data.step === 'number' && w.data.step >= minStep,
       ),
   };
+  // `WL-349`: النقضُ المختومُ يعودُ قبلَ تركيبِ الديوان — فلا أمرَ يمرُّ من بوابةٍ نقضَها الملك.
+  const consolePolicy = loadConsolePolicy();
+  const restoredVeto = await vetoFromSealedLog(deps.sealedLog, consolePolicy.audit.vetoStateEvent);
+  if (restoredVeto !== null && restoredVeto.vetoed) {
+    deps.crown.veto.block(/** @type {string} */ (restoredVeto.reason));
+  } else if (restoredVeto !== null) {
+    deps.crown.veto.clear();
+  }
   const nowMs = () => deps.clock.now();
   const kingAuth = new KingAuthenticator({
     policy: authnPolicy,
@@ -116,7 +166,7 @@ export async function composeSovereignConsole(deps) {
     nowMs,
   });
   const royalConsole = new RoyalConsole({
-    policy: loadConsolePolicy(),
+    policy: consolePolicy,
     gateway: null,
     crown: deps.crown,
     haltSwitch: deps.haltSwitch,
@@ -128,5 +178,5 @@ export async function composeSovereignConsole(deps) {
     ),
     nowMs,
   });
-  return { kingAuth, royalConsole };
+  return { kingAuth, royalConsole, restoredVeto };
 }

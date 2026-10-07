@@ -16,6 +16,7 @@
         "commandExecutedEvent",
         "commandRefusedEvent",
         "recoveryEvent",
+        "vetoStateEvent",
         "statement"
       ],
       "properties": {
@@ -23,6 +24,7 @@
         "commandExecutedEvent": { "type": "string", "minLength": 3 },
         "commandRefusedEvent": { "type": "string", "minLength": 3 },
         "recoveryEvent": { "type": "string", "minLength": 3 },
+        "vetoStateEvent": { "type": "string", "minLength": 3 },
         "statement": { "type": "string", "minLength": 40 }
       }
     },
