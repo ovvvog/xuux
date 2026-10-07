@@ -96,7 +96,9 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
   (‏مسارُ التعافي بـ`commitSigned` داخلَ حاجزِ الالتزام) مقيسانِ في `tests/production/wl-348-sovereign-console.test.mjs`،
   وأمرُ الإيقافِ يحملُ سندَ المفتاحِ بصيغتِه (‏`haltCommand`، R5-B-07) مربوطاً بالمعرّفِ والعملِ والسبب. **وما يبقى
   تبعيّةً:** لا مصدرَ إنتاجيٌّ لأسرارِ العاملِ الثاني (‏`options.factorSecrets` يُحقَن، وبغيابِه تُرَدُّ كلُّ مصادقةٍ
-  `AUTHN_SECRET_MISSING`)؛ والمشاهدُ بلا طبقةِ واجهةٍ إنتاجيّة (‏`CONSOLE_GATEWAY_REQUIRED`)؛ والنقضُ في ذاكرةِ العمليّة.
+  `AUTHN_SECRET_MISSING`)؛ والمشاهدُ بلا طبقةِ واجهةٍ إنتاجيّة (‏`CONSOLE_GATEWAY_REQUIRED`). والنقضُ **دائمٌ** منذ `WL-349`:
+  حالتُه تُختَمُ (‏`console.veto.state`) قبلَ أن تتغيّرَ في الذاكرة، ويُعيدُها الإقلاعُ من آخرِ قيدٍ مختومٍ قبلَ تركيبِ
+  الديوان، وقيدٌ تالفٌ يمنعُ الإقلاعَ (‏`PRODUCTION_VETO_RECORD_UNREADABLE`).
   والإقلاعُ نفسُه ما زالَ محجوباً بـ`EXT-6`.
 - حالةُ الحجرِ في الإنتاجِ تُعادُ عندَ الإقلاعِ من السجلِّ المختومِ (‏`quarantineFromSealedLog` ⇒
   `QuarantineWarden.restore`، `R6-A-05`، `WL-305`)، والإغلاقُ يختمُ طابورَ `sealedAudit` قبلَ إغلاقِ الجذر.

@@ -166,7 +166,7 @@ function codeOf(error) {
  * @typedef {object} ConsolePolicy
  * @property {number} version
  * @property {string} statement
- * @property {{ viewEvent: string, commandExecutedEvent: string, commandRefusedEvent: string, recoveryEvent: string, statement: string }} audit
+ * @property {{ viewEvent: string, commandExecutedEvent: string, commandRefusedEvent: string, recoveryEvent: string, vetoStateEvent: string, statement: string }} audit
  * @property {readonly string[]} refusalCodes
  * @property {readonly ConsoleViewSpec[]} views
  * @property {readonly ConsoleCommandSpec[]} commands
@@ -1032,8 +1032,25 @@ export class RoyalConsole {
             'بوابةُ التاجِ غيرُ موصولةٍ بالديوان، والنقضُ يقع عليها؛ فلا نقضَ على بوابةٍ غائبة.',
           );
         }
-        if (spec.kind === 'veto') {
-          crown.veto.block(reason === '' ? undefined : reason);
+        // `WL-349`: القيدُ قبلَ الأثر — حالةُ النقضِ الجديدةُ تُختَمُ في السجلِّ الدائمِ وتُنتظَر،
+        // ثمّ تُطبَّقُ في الذاكرة. فإن أخفقَ الختمُ لم يتغيّر شيء، وإن انقطعت العمليّةُ بعدَه
+        // أعادَ الإقلاعُ ما ختمَه الملكُ (‏`vetoFromSealedLog`)؛ فلا نقضَ يسقطُ بإعادةِ التشغيل.
+        const vetoed = spec.kind === 'veto';
+        const vetoReason = vetoed ? (reason === '' ? 'blocked by crown' : reason) : null;
+        const log = this.#log;
+        if (log === null) {
+          throw new ConsoleError(
+            CONSOLE_ERRORS.AUDIT_REQUIRED,
+            'لا سجلَّ دائماً يُختَمُ فيه النقض؛ ونقضٌ لا يُقيَّدُ يسقطُ بإعادةِ التشغيل.',
+          );
+        }
+        await this.#recordSealed(log, this.#policy.audit.vetoStateEvent, this.#actorId(), {
+          vetoed,
+          reason: vetoReason,
+          commandId: String(royal['id'] ?? ''),
+        });
+        if (vetoed) {
+          crown.veto.block(/** @type {string} */ (vetoReason));
         } else {
           crown.veto.clear();
         }

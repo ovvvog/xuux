@@ -30,6 +30,8 @@ audit:
   commandExecutedEvent: console.command.executed
   commandRefusedEvent: console.command.refused
   recoveryEvent: console.recovery.executed
+  # `WL-349`: حالةُ النقضِ تُختَمُ قبلَ أن تتغيّرَ في الذاكرة، وآخرُ قيدٍ منها يُعيدُها عندَ الإقلاع.
+  vetoStateEvent: console.veto.state
   statement: >-
     قيدُ القبولِ يسبق الأثرَ ويكتبه التاجُ في السجلِّ الدائم، وقيدُ التنفيذِ
     يتبعه ويكتبه الديوان، وكلُّ رفضٍ قيدٌ ثالثٌ برمزِه. وما لا يُثبَّت في
