@@ -7,7 +7,8 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { rmSync } from 'node:fs';
+import { rmSync, statSync, truncateSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
   SOVEREIGN_CONSOLE_ERRORS,
@@ -183,5 +184,47 @@ describe('WL-349 — النقضُ الملكيُّ الدائم', () => {
       rmSync(root, { recursive: true, force: true });
     }
     assert.match(String(closeError?.message), /TEST_SEAL_FAILURE/, 'الإغلاقُ ابتلعَ فشلَ الختم.');
+  });
+
+  test('V5 — الاستعادةُ لا تنشئُ أثرًا ثانيًا أو event مكررًا', async () => {
+    const { root, keys, secret, factorSecrets } = rig();
+    const reason = 'نقضٌ يُختَمُ ولا يُكرَّرُ';
+    const first = await boot(root, { keys, factorSecrets });
+    try {
+      const { opened } = await session(first, secret);
+      await issueVeto(first, opened.token, reason);
+    } finally {
+      await first.close();
+    }
+    const second = await boot(root, { keys, factorSecrets });
+    try {
+      // قبلَ أيِّ أمرٍ جديدٍ: عددُ قيودِ حالةِ النقضِ ما زالَ ١ — الاستعادةُ تقرأُ ولا تكتبُ.
+      const vetoEvents = second.auditLog.events.filter((event) => event.type === VETO_EVENT);
+      assert.equal(vetoEvents.length, 1, 'الاستعادةُ أنشأتْ قيدًا مكررًا.');
+      assert.equal(second.crown.veto.enabled, false);
+      assert.equal(second.crown.veto.reason, reason);
+    } finally {
+      await second.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('V6 — سجلٌّ مبتورٌ لا يؤدي إلى استعادةِ حالةٍ كاذبة', async () => {
+    const { root, keys, secret, factorSecrets } = rig();
+    const first = await boot(root, { keys, factorSecrets });
+    try {
+      const { opened } = await session(first, secret);
+      await issueVeto(first, opened.token, 'نقضٌ قبلَ البتر');
+    } finally {
+      await first.close();
+    }
+    // بترُ آخرِ ١٠ بايتاتٍ من السجلِّ الدائم — لا يُقرأُ النقضُ المختومُ ولا يُستعاد.
+    const logPath = join(root, 'events.log');
+    const size = statSync(logPath).size;
+    truncateSync(logPath, Math.max(0, size - 10));
+    await assert.rejects(boot(root, { keys, factorSecrets }), (error) =>
+      /TRUNCATED_EVENT_LOG|CORRUPT_EVENT_LOG|PRODUCTION_VETO_RECORD_UNREADABLE/.test(String(error)),
+    );
+    rmSync(root, { recursive: true, force: true });
   });
 });
