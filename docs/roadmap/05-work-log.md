@@ -1,5 +1,40 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-08] — WL-350 — جولةُ مجلسِ النماذجِ المستقلِّ: M11.04 ج11 · M11.06 ج6 على main@b1c6e4aa
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** المرحلةُ هـ — ما يُغلَقُ بحكمِ مجلسٍ · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
+
+#### ما تمَّ فعلاً
+
+- **حزمةُ التفويضِ:** `docs/external-review/delegation/2026-10-08-retest-round-launch-brief.md` — موجزُ إطلاقٍ يستهدفُ `main@b1c6e4aa`.
+- **خطّتانِ:** `docs/external-review/M11.04-round-11-plan.md` و`docs/external-review/M11.06-round-6-plan.md` — نطاقُ 21 نتيجةً مفتوحةً (8 لـM11.04 و13 لـM11.06).
+- **إطلاقُ المجلسِ:** عضوانِ مستقلّانِ من مزوّدينِ مختلفينِ: `gpt_6_1_sol` (OPENAI) و`claude_opus_5_5` (ANTHROPIC). كلاهما صرّحَ باستقلالِه وعدمِ قراءتِه لتقريرِ الآخر.
+- **4 تقاريرَ خامَّة:** ملفّانِ لكلِّ عضوٍ (واحدٌ لكلِّ ارتباطٍ) في `docs/external-review/reports/`.
+- **مصفوفةُ مقارنةٍ:** `docs/external-review/M11.04-M11.06-round-comparison-matrix.md` — 19/21 اتّفاقٌ تامٌّ (11 مفتوحةٌ · 8 مغلقةٌ)، اختلافانِ (`R6-A-03` و`R6-B-03`).
+- **4 نتائجَ جديدة** اكتشفها الأعضاءُ — خامَّةٌ في تقاريرِهم، لم يُغلِقها المنفِّذُ.
+
+#### ما لم يُفعَل (ولم يُدَّعَ)
+
+- **لم يُعدَّلْ `config/external-review.yaml`** ولا حالةُ أيِّ نتيجةٍ.
+- **لم يُغلَقْ أيُّ نتيجةٍ** — حكمُ الإغلاقِ للمجلسِ وحدَه.
+- **لم تُرفعْ نسبةٌ** ولا خُطوةٌ أُغلِقتْ.
+- **لم يُصدرِ المنفِّذُ حكمَ إعادةِ اختبارٍ.**
+
+#### الملفّاتُ المتأثّرة
+
+`docs/external-review/delegation/2026-10-08-retest-round-launch-brief.md` · `docs/external-review/M11.04-round-11-plan.md` · `docs/external-review/M11.06-round-6-plan.md` · `docs/external-review/reports/M11.04-round-11-model-council-report-gpt-6-1-sol.md` · `docs/external-review/reports/M11.04-round-11-model-council-report-claude-opus-5-5.md` · `docs/external-review/reports/M11.06-round-6-model-council-report-gpt-6-1-sol.md` · `docs/external-review/reports/M11.06-round-6-model-council-report-claude-opus-5-5.md` · `docs/external-review/M11.04-M11.06-round-comparison-matrix.md` · `config/work-log-ids.yaml` · `docs/audit/work-log-id-map.md` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md`
+
+#### الدليل
+
+- `env -u DATABASE_URL npm test` ⇒ `2453 pass · 0 fail · 126 skipped` (كلاهما شغّلهُ مستقلًّا).
+- 4 تقاريرَ خامَّةٌ على القرصِ، ومصفوفةُ مقارنةٍ بايتًا ببايتٍ.
+- `npm run guard:project-state` ⇒ ✅.
+
+#### الأثرُ على المساراتِ الأخرى
+
+- `M11.04` و`M11.06` تبقيانِ `⬜` — لا إغلاقَ يُدَّعى.
+- نتائجُ جديدةٌ 4 قُيِّدَتْ في المصفوفةِ خامَّةً ولم تُدرَجْ بعدُ في `config/external-review.yaml` — ذلك قرارُ المراجعةِ التالية.
+
 ### [2026-10-06] — WL-348 — الديوانُ الملكيُّ ومصادقةُ الملكِ القويّةُ في التركيبِ الإنتاجيّ: إيقافٌ واستئنافٌ ونقضٌ بأمرٍ موقَّعٍ وجلسةٍ قويّةٍ على مكوّناتِ الإنتاجِ نفسِها
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** تنفيذٌ جوهريٌّ — وظيفةٌ تشغيليّةٌ جديدةٌ في التركيبِ الإنتاجيّ (‏تتمّةُ `WL-345`…`WL-347`) · **الحالةُ بعدَ العملِ:** 🟨 منفَّذٌ ومقيسٌ، مفتوحٌ للمراجعة
