@@ -1,0 +1,7 @@
+# branch fix/wl-352 (base 284f74d0, working tree with fix) cmd: REPO=$PWD env -u DATABASE_URL node astra-01-variants.mjs
+V0 control      : reboot vetoed=true reason=v0
+V1 no commandId : reboot REFUSED PRODUCTION_VETO_RECORD_UNAUTHORIZED: 59ef8e4b-e6f2-45a0-a47a-73d91074bd87 — لا أمرَ ملكيَّ في القيد
+V2 reused id    : reboot REFUSED PRODUCTION_VETO_RECORD_UNAUTHORIZED: ccc530d6-520d-4a2f-ab2f-f07db978f119 — لا أمرَ ملكيَّ في القيد
+  V3 replayed body = {"vetoed":false,"reason":null,"commandId":"f5fc276417776b33802a95866d216679","royalCommand":{"id":"f5fc276417776b33802a95866d216679","action":"clear-veto","target":"crown:gateway","payload":{"reason":"v3-clear"},"issuedAt":"2026-10-08T02:25:54.794Z"},"signature":"TPmRJtF4GYi4Vm6C69yLUEz7WEdjfNANCX77PVWz7A7R6oA2BRKH6-UKNPez7Q2R5QNdDC1FK8FRFHiIXANYDg"}
+V3 replayed clear: reboot REFUSED PRODUCTION_VETO_RECORD_UNAUTHORIZED: 98fd0b10-92dd-4650-998e-c69a448f8534 — قيدُ حالةٍ مُعادٌ لأمرٍ ورَدَ قبلَه
+exit=0

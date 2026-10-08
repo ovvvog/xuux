@@ -661,7 +661,7 @@ export class RoyalConsole {
     /** @type {Record<string, unknown>} */
     let effect;
     try {
-      effect = await this.#applyEffect(spec, royal, haltCommand);
+      effect = await this.#applyEffect(spec, royal, haltCommand, signature);
     } catch (error) {
       throw new ConsoleError(
         CONSOLE_ERRORS.EFFECT_REFUSED,
@@ -973,9 +973,10 @@ export class RoyalConsole {
    * @param {ConsoleCommandSpec} spec
    * @param {Record<string, unknown>} royal
    * @param {Record<string, unknown> | null} haltCommand سندُ مفتاحِ الإيقافِ المربوطُ (‏`WL-348`)
+   * @param {string} signature توقيعُ الملكِ على `royal` — يُحمَلُ في قيدِ حالةِ النقضِ (‏`WL-352`)
    * @returns {Promise<Record<string, unknown>>}
    */
-  async #applyEffect(spec, royal, haltCommand) {
+  async #applyEffect(spec, royal, haltCommand, signature) {
     const payload = /** @type {Record<string, unknown>} */ (
       royal['payload'] !== null && typeof royal['payload'] === 'object'
         ? royal['payload']
@@ -1048,6 +1049,10 @@ export class RoyalConsole {
           vetoed,
           reason: vetoReason,
           commandId: String(royal['id'] ?? ''),
+          // `WL-352` (‏`R12-ASTRA-01`): الأمرُ الموقَّعُ وتوقيعُه في القيد — فالإقلاعُ يستعيدُ الحالةَ
+          // من سلطةٍ يتحقّقُ منها بالمفتاحِ العامّ، لا من حقلٍ يكتبُه أيُّ حاملٍ للسجلّ.
+          royalCommand: royal,
+          signature,
         });
         if (vetoed) {
           crown.veto.block(/** @type {string} */ (vetoReason));

@@ -1,0 +1,5 @@
+# branch fix/wl-352 (base 284f74d0, working tree with fix) cmd: REPO=$PWD env -u DATABASE_URL node r12-01-variants.mjs
+A veto, socket not rewound: before-restore {"veto":true,"halt":"running"} -> REFUSED STALE_MANIFEST_EPOCH
+B veto, socket rewound    : before-restore {"veto":true,"halt":"running"} -> BOOTED vetoed=false halt=running
+C halt, socket rewound    : before-restore {"veto":false,"halt":"halted"} -> BOOTED vetoed=false halt=running
+exit=0

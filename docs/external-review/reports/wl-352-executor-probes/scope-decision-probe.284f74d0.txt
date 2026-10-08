@@ -1,0 +1,10 @@
+# HEAD=284f74d0b2803cbe909ced0114144f6e1f814ccd cmd: REPO=$PWD env -u DATABASE_URL node scope-decision-probe.mjs
+{
+  "R5-A-05 P valid before revoke": true,
+  "R5-A-05 P createProductionSystem: revoked cert valid after reboot": false,
+  "R5-A-05 R production-runtime.mts builds FileRevocationStore": true,
+  "R5-A-05 R production-runtime.mts itself calls isRevoked": false,
+  "R6-A-08 P production kernel.stop() without command": "REFUSED KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND",
+  "R6-A-08 N non-production kernel.stop()/resume() without command": "ACCEPTED stop->true resume->false"
+}
+exit=0
