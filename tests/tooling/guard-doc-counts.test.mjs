@@ -263,7 +263,8 @@ test('الطفرةُ M10: إسنادُ إغلاقِ نتيجةِ مراجعةٍ 
   try {
     const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
     const register = readFileSync(registerPath, 'utf8');
-    const mutated = register.replace(/(\| `R6-A-12` \|[^\n]*\|) مجلس \|/, '$1 منفِّذ |');
+    // الصفّ قد يكون مَشطوباً مُعلَماً بالإغلاقِ (`~~`R6-A-12`~~ 🟢`، `WL-354`) أو بلا شطبٍ.
+    const mutated = register.replace(/(\| (?:~~)?`R6-A-12`(?:~~)?[^\n]*\|) مجلس \|/, '$1 منفِّذ |');
     assert.notEqual(mutated, register, 'ينبغي أن يُعثَرَ على صفِّ `R6-A-12`');
     writeFileSync(registerPath, mutated);
     assert.equal(

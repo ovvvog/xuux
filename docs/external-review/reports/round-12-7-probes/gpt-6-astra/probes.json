@@ -1,0 +1,10 @@
+{
+  "name": "probes",
+  "command": "env -u DATABASE_URL node /tmp/council-gpt-6-astra/probes.mjs",
+  "start": "2026-10-08T01:29:07.076Z",
+  "end": "2026-10-08T01:29:07.988Z",
+  "exit": 0,
+  "signal": null,
+  "stdout": "R6-A-03 {\"action\":\"write-data\",\"capabilities\":[],\"allowed\":false,\"code\":\"POLICY_NO_MATCH\"}\nR6-A-03 {\"action\":\"write-data\",\"capabilities\":[\"action:write-data\"],\"allowed\":true,\"code\":\"POLICY_ALLOW\"}\nR6-A-03 {\"action\":\"create-agent\",\"capabilities\":[\"action:create-agent\"],\"allowed\":false,\"code\":\"POLICY_NO_MATCH\"}\nR6-A-07 direct PDP shaped strings {\"allowed\":true,\"code\":\"POLICY_ALLOW\"}\nR6-A-08 stop KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND\nR6-A-08 resume KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND\nR6-B-03 config ENCRYPTION_TRANSPORT_INSECURE\nR6-B-03 config {\"tls\":true,\"ssl\":{\"rejectUnauthorized\":true,\"ca\":\"-----BEGIN CERTIFICATE-----\\nprobe-only-not-used-for-connect\\n-----END CERTIFICATE-----\"},\"removedSslmode\":true}\nR6-A-05 grant before 1\nR6-A-05 proposals before 1\nR6-A-05 child grants 0\nR6-A-05 child proposals 0\n  CHILD_EXIT=0\n",
+  "stderr": ""
+}

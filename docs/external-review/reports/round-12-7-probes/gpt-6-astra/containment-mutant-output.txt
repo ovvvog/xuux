@@ -1,0 +1,147 @@
+TAP version 13
+# Subtest: R6-B-02: وثيقةُ الاحتواءِ لا تُقرُّ بغيابِ حارسٍ قائمٍ في الشفرةِ
+ok 1 - R6-B-02: وثيقةُ الاحتواءِ لا تُقرُّ بغيابِ حارسٍ قائمٍ في الشفرةِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 1.079331
+  ...
+# Subtest: R6-B-02: قسمُ الحدودِ المعلنةِ يذكرُ الحدَّ القائمَ في سندِ التقييمِ لا ينفيه
+ok 2 - R6-B-02: قسمُ الحدودِ المعلنةِ يذكرُ الحدَّ القائمَ في سندِ التقييمِ لا ينفيه # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.115307
+  ...
+# Subtest: R6-A-13/R6-B-05: مُنتِجُ budget-exceeded قائمٌ في الشفرةِ بالسلوكِ لا بالنصِّ
+ok 3 - R6-A-13/R6-B-05: مُنتِجُ budget-exceeded قائمٌ في الشفرةِ بالسلوكِ لا بالنصِّ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.08341
+  ...
+# Subtest: R6-A-13/R6-B-05: وثيقةُ الاحتواءِ لا تُقرُّ بغيابِ مُنتِجِ budget-exceeded وهو قائمٌ
+not ok 4 - R6-A-13/R6-B-05: وثيقةُ الاحتواءِ لا تُقرُّ بغيابِ مُنتِجِ budget-exceeded وهو قائمٌ
+  ---
+  duration_ms: 199.823909
+  location: '/tmp/council-gpt-6-astra/containment-mutant.test.mjs:309:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    الوثيقةُ تُقرُّ غيابَ مُنتِجٍ قائمٍ في الشفرةِ
+    + actual - expected
+    
+    + [
+    +   'بندُ M6.07 يُقرُّ غياباً «بلا منتج»: **بوابة الاستدلال (`M6.07`) منفَّذةٌ جزئيّاً، و`budget-exceeded` بلا مُنتِجٍ.** حدُّ الميزانيّةِ على الاستدلالِ قائمٌ وإشارةُ `budget-exceeded` تُنتَجُ فعلاً في `src/inference/inference-gate.mjs` عندَ تجاوزِ الميزانيّةِ، وتُبلَّغُ إلى حجرِ الوكيلِ إذا كان موصولاً.',
+    +   'جملةٌ تُقرُّ غيابَ المُنتِجِ «بلا منتج»: **بوابة الاستدلال (`M6.07`) منفَّذةٌ جزئيّاً، و`budget-exceeded` بلا مُنتِجٍ.** حدُّ الميزانيّةِ على الاستدلالِ قائمٌ وإشارةُ `budget-exceeded` تُنتَجُ فعلاً في `src/inference/inference-gate.mjs` عندَ تجاوزِ الميزانيّةِ، وتُبلَّغُ إلى حجرِ الوكيلِ إذا كان موصولاً.'
+    + ]
+    - []
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+    0: 'بندُ M6.07 يُقرُّ غياباً «بلا منتج»: **بوابة الاستدلال (`M6.07`) منفَّذةٌ جزئيّاً، و`budget-exceeded` بلا مُنتِجٍ.** حدُّ الميزانيّةِ على الاستدلالِ قائمٌ وإشارةُ `budget-exceeded` تُنتَجُ فعلاً في `src/inference/inference-gate.mjs` عندَ تجاوزِ الميزانيّةِ، وتُبلَّغُ إلى حجرِ الوكيلِ إذا كان موصولاً.'
+    1: 'جملةٌ تُقرُّ غيابَ المُنتِجِ «بلا منتج»: **بوابة الاستدلال (`M6.07`) منفَّذةٌ جزئيّاً، و`budget-exceeded` بلا مُنتِجٍ.** حدُّ الميزانيّةِ على الاستدلالِ قائمٌ وإشارةُ `budget-exceeded` تُنتَجُ فعلاً في `src/inference/inference-gate.mjs` عندَ تجاوزِ الميزانيّةِ، وتُبلَّغُ إلى حجرِ الوكيلِ إذا كان موصولاً.'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/council-gpt-6-astra/containment-mutant.test.mjs:311:10)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R6-A-13/R6-B-05: قسمُ الحدودِ المعلنةِ يذكرُ مُنتِجَ budget-exceeded لا ينفيه
+ok 5 - R6-A-13/R6-B-05: قسمُ الحدودِ المعلنةِ يذكرُ مُنتِجَ budget-exceeded لا ينفيه # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.138402
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M3: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 6 - R6-A-13/R6-B-05 طفرة M3: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.089144
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M4-لا-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 7 - R6-A-13/R6-B-05 طفرة M4-لا-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.139092
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M4-غير-موجود: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 8 - R6-A-13/R6-B-05 طفرة M4-غير-موجود: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.097029
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M4-لم-ينفذ: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 9 - R6-A-13/R6-B-05 طفرة M4-لم-ينفذ: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.176981
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M4-غائب: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 10 - R6-A-13/R6-B-05 طفرة M4-غائب: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.20283
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M4-مفقود: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 11 - R6-A-13/R6-B-05 طفرة M4-مفقود: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.109354
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة M4-بلا-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 12 - R6-A-13/R6-B-05 طفرة M4-بلا-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.086251
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-ليس-لها-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 13 - R6-A-13/R6-B-05 طفرة X-ليس-لها-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.080464
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-لا-تنتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 14 - R6-A-13/R6-B-05 طفرة X-لا-تنتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.137474
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-معدوم: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 15 - R6-A-13/R6-B-05 طفرة X-معدوم: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.081947
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-دون-مصدر: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 16 - R6-A-13/R6-B-05 طفرة X-دون-مصدر: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.144494
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-ولا-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 17 - R6-A-13/R6-B-05 طفرة X-ولا-منتج: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.086679
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-إنجليزي: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 18 - R6-A-13/R6-B-05 طفرة X-إنجليزي: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.163419
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-خارج-القسم: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 19 - R6-A-13/R6-B-05 طفرة X-خارج-القسم: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.092187
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة K-غير-منفذ: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 20 - R6-A-13/R6-B-05 طفرة K-غير-منفذ: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.113073
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة K-حذف-الرمز: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 21 - R6-A-13/R6-B-05 طفرة K-حذف-الرمز: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.101719
+  ...
+# Subtest: R6-A-13/R6-B-05 طفرة X-حذف-الإسناد: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ
+ok 22 - R6-A-13/R6-B-05 طفرة X-حذف-الإسناد: الحارسُ يرفضُ إعادةَ إقرارِ الغيابِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.063278
+  ...
+# Subtest: R6-A-13/R6-B-05: النفيُ الصادقُ في البندِ (حدودٌ معلنةٌ) لا يُقرأُ نفياً للمُنتِجِ
+ok 23 - R6-A-13/R6-B-05: النفيُ الصادقُ في البندِ (حدودٌ معلنةٌ) لا يُقرأُ نفياً للمُنتِجِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.053018
+  ...
+1..23
+# tests 23
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 22
+# todo 0
+# duration_ms 455.065101

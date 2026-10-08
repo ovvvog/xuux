@@ -459,6 +459,13 @@ const PLAN_DEFICIENCIES = [
     kind: 'absent-from-reviewed-commit',
     reason: 'الخطّةُ وُجدتْ في استنساخِ العضوينِ لا في الكوميتِ المُراجَعِ — نفسُ عينِ `R6-A-10`',
   },
+  {
+    engagement: 'M11.06',
+    round: 7,
+    kind: 'absent-from-reviewed-commit',
+    reason:
+      'خطّةُ الجولةِ السابعةِ وصلَتِ الأعضاءَ عبرَ حزمةِ الإطلاقِ (‏`delegation/2026-10-08-round-12-7-launch-brief.md`) لا في كوميتِ الجولةِ الأولى — عينُ النتيجةِ `R6-A-10` نفسُها، وحُكِمَت `open` بإجماعِ الجولةِ',
+  },
 ];
 
 /** @param {string} engagement @param {number} round @param {string} kind */
