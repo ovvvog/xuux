@@ -91,6 +91,10 @@ engagements:
           provider: GOOGLE
           rounds:
             - 8
+        - id: gpt_5_5
+          provider: OPENAI
+        - id: gemini_3_1_pro_preview
+          provider: GOOGLE
     comparisonMatrix: docs/external-review/M11.04-round-7-comparison-matrix.md
     acceptanceCriteria: تقريرُ مراجعةٍ صادرٌ عن جهةٍ مستقلّةٍ، **مع سجلِّ إغلاقٍ لكلِّ نتيجةٍ حرجةٍ وعاليةٍ** — لا ملخَّصٌ ولا شهادةٌ عامّةٌ.
     scope:
@@ -1557,3 +1561,27 @@ findings:
         - gemini_3_8_flash
       retestRound: 8
       retestEvidence: الخروجُ `0` لكلِّ `BLOCKED` وحدَه، و`1` للجزئيِّ، و`2` لشرطٍ مسبقٍ ساقطٍ. كلاهما قاسَه العضوانِ.
+  - id: R12-ASTRA-01
+    engagement: M11.04
+    title: حاملُ السجلِّ لا يرفعُ النقضَ عندَ الإقلاعِ بلا سلطةٍ ملكيّةٍ صحيحة
+    origin: round-12
+    severityAsWritten: medium
+    severity: medium
+    status: closed
+    agreement: اتّفقَ عضوا المجلسِ المستقلّانِ على إجازةِ إصلاحِ WL-352 وإغلاقِ هذه النتيجةِ وحدَها.
+    reproductionPath: 'الأصلُ: `docs/external-review/2026-10-08-wl-352-triage-round-12-7.md`، §2؛ التقريرُ الخامُّ المُنشِئُ في PR #286: `docs/external-review/reports/M11.04-round-12-model-council-report-gpt-6-astra.md` عندَ commit `21a94181201d6b6daf4844aad2cf3e7d9728543f`؛ إعادةُ الاختبارِ على `bae7d47cfe643a8a792a272af20151a48901c99f`.'
+    affectedFiles:
+      - src/production/sovereign-console.mjs
+      - tests/production/wl-349-durable-veto.test.mjs
+    raisedBy:
+      - gpt_6_astra
+    rawReports:
+      gpt_5_5: docs/external-review/reports/R12-ASTRA-01-retest-model-council-report-gpt-5-5.md
+      gemini_3_1_pro_preview: docs/external-review/reports/R12-ASTRA-01-retest-model-council-report-gemini-3-1-pro-preview.md
+    reportId: R12-ASTRA-01
+    closure:
+      fixCommit: b9d706ad0121d12b5ba3ddb0af30dbf284f31c15
+      retestedBy:
+        - gpt_5_5
+        - gemini_3_1_pro_preview
+      retestEvidence: 'إعادةُ اختبارٍ مستقلّةٌ على `bae7d47cfe643a8a792a272af20151a48901c99f`: ‏V0–V3 اجتازتْ، واختباراتُ WL-352 ‏14/14، وكلُّ طفرةٍ من شروطِ التحقّقِ التسعةِ أسقطتْ الاختبارَ المناسبَ في نسختينِ معزولتَينِ؛ وأجازَ العضوانِ الإغلاقَ. كوميتُ الإصلاحِ المدموجُ في `main`: `b9d706ad0121d12b5ba3ddb0af30dbf284f31c15`.'
