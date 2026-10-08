@@ -272,6 +272,54 @@ describe('WL-352 — R12-ASTRA-01: قيدُ النقضِ لا يُستعادُ �
       await system.auditLog.appendSealed(VETO_EVENT, 'agent:log-writer', { vetoed: false });
     });
     await bootRefusedUnauthorized(ctx);
+
+    // ضابطُ عزلٍ: التوقيعُ صالحٌ لأمرٍ حقيقيٍّ ومُثبَّتٍ، لكنّ القيدَ يحذفُ royalCommand وحدَه.
+    // ينبغي أن يرفضَ حارسُ غيابِ الأمر قبل استدعاءِ المتحقِّق؛ وإذا عُطِّل هذا الحارسُ يصلُ التنفيذُ
+    // إلى فحصِ التوقيع، فيختلفُ سببُ الرفضِ ويفشلُ هذا الاختبارُ بدلاً من أن يُخفي الطفرةَ.
+    const { root, keys, factorSecrets } = rig();
+    const system = await boot(root, { keys, factorSecrets });
+    try {
+      const signed = crownCommand({
+        action: 'clear-veto',
+        target: 'crown:gateway',
+        reason: 'أمرٌ موقَّعٌ صالحٌ لا يُدرَجُ في القيد',
+      });
+      const verify = system.crown.king.verify.bind(system.crown.king);
+      let verifierCalls = 0;
+      const authority = {
+        ...authorityOf(system),
+        king: {
+          verify(command, signature) {
+            verifierCalls += 1;
+            return verify(command, signature);
+          },
+        },
+        ledger: { has: () => true },
+      };
+      const log = {
+        sealed: false,
+        events: [
+          {
+            id: 'a1-missing-royal-command',
+            type: VETO_EVENT,
+            data: {
+              vetoed: false,
+              reason: null,
+              commandId: signed.command.id,
+              signature: signed.signature,
+            },
+          },
+        ],
+      };
+      await assert.rejects(vetoFromSealedLog(log, VETO_EVENT, authority), (error) => {
+        assert.match(error.message, /— لا أمرَ ملكيَّ في القيد$/);
+        return true;
+      });
+      assert.equal(verifierCalls, 0, 'غيابُ الأمرِ يجبُ أن يُرفَضَ قبلَ فحصِ التوقيع');
+    } finally {
+      await system.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('A2 — قيدُ رفعٍ بمعرّفِ أمرِ نقضٍ مُثبَّتٍ وتوقيعِه مقلوبَ الحالةِ يُرفَض', async () => {
