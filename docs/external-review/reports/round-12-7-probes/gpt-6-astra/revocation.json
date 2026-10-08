@@ -1,0 +1,10 @@
+{
+  "name": "revocation",
+  "command": "env -u DATABASE_URL node /tmp/council-gpt-6-astra/revocation-probe.mjs",
+  "start": "2026-10-08T01:29:36.560Z",
+  "end": "2026-10-08T01:29:37.303Z",
+  "exit": 0,
+  "signal": null,
+  "stdout": "R5-A-05 revoke {\"certificateId\":\"a6dec53f-72ac-4b82-aacd-b722ab248abb\",\"reason\":\"probe\",\"revokedAt\":\"2026-10-08T01:29:37.148Z\",\"persisted\":true}\nR5-A-05 live authority after reboot false\nroot /tmp/council-gpt-6-astra/revocation-bTcKia\n",
+  "stderr": ""
+}
