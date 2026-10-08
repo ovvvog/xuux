@@ -34,7 +34,7 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 8
+      rounds: 12
       members:
         - id: grok_4_6
           provider: XAI
@@ -66,6 +66,7 @@ engagements:
           provider: OPENAI
           rounds:
             - 4
+            - 12
         - id: claude_fable_5
           provider: ANTHROPIC
           rounds:
@@ -91,11 +92,18 @@ engagements:
           provider: GOOGLE
           rounds:
             - 8
+            - 12
+        - id: grok_4_7
+          provider: XAI
+          rounds:
+            - 12
         - id: gpt_5_5
           provider: OPENAI
         - id: gemini_3_1_pro_preview
           provider: GOOGLE
     comparisonMatrix: docs/external-review/M11.04-round-7-comparison-matrix.md
+    round12ComparisonMatrix: docs/external-review/M11.04-round-12-M11.06-round-7-comparison-matrix.md
+    round12ReviewedCommit: 284f74d0b2803cbe909ced0114144f6e1f814ccd
     acceptanceCriteria: تقريرُ مراجعةٍ صادرٌ عن جهةٍ مستقلّةٍ، **مع سجلِّ إغلاقٍ لكلِّ نتيجةٍ حرجةٍ وعاليةٍ** — لا ملخَّصٌ ولا شهادةٌ عامّةٌ.
     scope:
       - جذرُ الثقةِ وسلسلةُ التوقيعِ والتحقُّقُ من أوامرِ التاجِ.
@@ -161,7 +169,7 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 3
+      rounds: 7
       members:
         - id: claude_fable_5_1
           provider: ANTHROPIC
@@ -179,10 +187,24 @@ engagements:
           provider: XAI
           rounds:
             - 2
+        - id: gemini_3_8_flash
+          provider: GOOGLE
+          rounds:
+            - 7
+        - id: gpt_6_astra
+          provider: OPENAI
+          rounds:
+            - 7
+        - id: grok_4_7
+          provider: XAI
+          rounds:
+            - 7
       reviewedCommit: a705f2d485961bfcfb01f98d598f1b9714998f79
       round2ReviewedCommit: 734397dc854383ce614be62cb362ec31cd35dd78
+      round7ReviewedCommit: 284f74d0b2803cbe909ced0114144f6e1f814ccd
       comparisonMatrix: docs/external-review/M11.06-round-1-comparison-matrix.md
       round2ComparisonMatrix: docs/external-review/M11.06-round-2-comparison-matrix.md
+      round7ComparisonMatrix: docs/external-review/M11.04-round-12-M11.06-round-7-comparison-matrix.md
       councilReservation: العضوانِ صرّحا بأنّهما ليسا مراجِعَينِ بشريَّينِ، ونوعُ الارتباطِ `human-legal-ethical-review`. مُقيَّدٌ بلفظِه في §4 من مصفوفةِ المقارنةِ.
       executorPreparationDefects:
         - خطّةُ الجولةِ كُتِبتْ بعدَ الاستنساخِ فلم تصلْ إلى العضوينِ؛ و«أ» بنى أقسامَه من هذا العقدِ وصرّحَ بذلكَ (`R6-A-10`).
@@ -250,7 +272,7 @@ findings:
     severityAsWritten: high
     severity: high
     status: open
-    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» (`gpt_6_sol`) حكمَ `closed` و«ب» (`gemini_3_8_flash`) حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ'
+    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» (`gpt_6_sol`) حكمَ `closed` و«ب» (`gemini_3_8_flash`) حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)'
     reproductionPath: عندَ «أ» `S10`/`S4b`/`S13`؛ وعندَ «ب» `P12`/`P13`/`P14`.
     affectedFiles:
       - src/root-of-trust/production-runtime.mts
@@ -269,6 +291,7 @@ findings:
       gpt_5_6_terra: docs/external-review/reports/M11.04-round-7-model-council-report-gpt-5-6-terra.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: UF-03
     engagement: M11.04
     title: حالةُ الإيقافِ السياديّةُ تعودُ `running/epoch=0` بمحوِ ملفّاتِها
@@ -276,7 +299,7 @@ findings:
     severityAsWritten: high
     severity: high
     status: open
-    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `closed` و«ب» حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ'
+    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `closed` و«ب» حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)'
     reproductionPath: '`S10`/`S4b`/`S13` عندَ «أ»؛ `P12`/`P13`/`P14` عندَ «ب»'
     affectedFiles:
       - src/root-of-trust/halt-switch.mts
@@ -295,6 +318,7 @@ findings:
       gpt_5_6_terra: docs/external-review/reports/M11.04-round-7-model-council-report-gpt-5-6-terra.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: UF-07
     engagement: M11.04
     title: أمرٌ مُثبَّتٌ يُقبَلُ مرّةً ثانيةً بعدَ محوِ الدفترِ والحجوزاتِ
@@ -302,7 +326,7 @@ findings:
     severityAsWritten: medium
     severity: medium
     status: open
-    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `closed` و«ب» حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ'
+    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `closed` و«ب» حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)'
     reproductionPath: '`S10`/`S4b`/`S13` عندَ «أ»؛ `P12` عندَ «ب»'
     affectedFiles:
       - src/root-of-trust/command-ledger.mts
@@ -320,6 +344,7 @@ findings:
       gpt_5_6_terra: docs/external-review/reports/M11.04-round-7-model-council-report-gpt-5-6-terra.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: M11.04-F07
     engagement: M11.04
     title: شرطا «لا تكرارَ بعدَ مسحِ الدفترِ» و«لا عودةَ من الإيقافِ» لم يكتملا
@@ -327,7 +352,7 @@ findings:
     severityAsWritten: high
     severity: high
     status: open
-    agreement: 'اتّفاقٌ على `open` في الجولةِ الثامنةِ — الشطرُ الباقي صراحةً: استرجاعُ لقطةٍ كاملةٍ متّسقةٍ'
+    agreement: 'اتّفاقٌ على `open` في الجولةِ الثامنةِ — الشطرُ الباقي صراحةً: استرجاعُ لقطةٍ كاملةٍ متّسقةٍ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)'
     reproductionPath: يتبعُ إعادةَ إنتاجِ `UF-07` و`UF-03`
     affectedFiles:
       - src/root-of-trust/command-ledger.mts
@@ -343,6 +368,7 @@ findings:
       gpt_5_6_terra: docs/external-review/reports/M11.04-round-7-model-council-report-gpt-5-6-terra.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: M11.04-F03
     engagement: M11.04
     title: إلغاءُ الشهاداتِ — ساقُ الانتهاءِ وساقُ ثباتِ الإلغاءِ
@@ -380,7 +406,7 @@ findings:
     severityAsWritten: high
     severity: high
     status: open
-    agreement: اتّفاقٌ على `open` في الجولةِ الثامنةِ — لا مرجعَ حداثةٍ خارجَ القرصِ (`EXT-6`)
+    agreement: اتّفاقٌ على `open` في الجولةِ الثامنةِ — لا مرجعَ حداثةٍ خارجَ القرصِ (`EXT-6`) ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)
     disagreement: «أ» حدّدَ النتيجةَ بما تصفُه (ختمُ البيانِ وربطُه بالهويّةِ والسياقِ والإصدارِ) فأغلقَها، وأحالَ منعَ الاستبدالِ إلى بابِ `UF`. و«ب» أبقاها `open` لمسارِ مصادقةٍ بديلٍ قاسَه (`P10`).
     reproductionPath: '`P10` عندَ «ب»؛ وتحليلُ `state-manifest.mts` عندَ «أ»'
     affectedFiles:
@@ -396,6 +422,7 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: M11.04-F05
     engagement: M11.04
     title: تحقُّقُ مادةِ المفاتيحِ واستمراريّةُ السجلِّ والمرساةِ
@@ -403,7 +430,7 @@ findings:
     severityAsWritten: high
     severity: high
     status: open
-    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `open` (HSM لم يُقَسْ) و«ب» حكمَ `closed` — يُعرَضُ على المالكِ'
+    agreement: 'اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `open` (HSM لم يُقَسْ) و«ب» حكمَ `closed` — يُعرَضُ على المالكِ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)'
     disagreement: «ب» أدخلَ في شرطِ الإغلاقِ الأصليِّ رفضَ تاريخِ `GENESIS` المُعادِ بلا مرساةٍ ووجدَه منقوضاً بـ`P13`؛ و«أ» أغلقَها على نطاقِ مادةِ المفاتيحِ وحدَه.
     reproductionPath: '`npm run hsm:verify:f05` (خرجُ 0 عندَ كليهما)؛ و`P13` عندَ «ب»'
     affectedFiles:
@@ -420,6 +447,7 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.04-round-5-model-council-report-gpt-5-6-sol.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: M11.04-F01
     engagement: M11.04
     title: الإنشاءُ الخامُّ لـ`EnforcementPoint` لا يُلزِمُ بوابةَ الهويّةِ
@@ -510,7 +538,7 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: open
-    agreement: اتّفاقٌ على `open` في الجولةِ الثامنةِ — استبدالُ لقطةٍ كاملةٍ صحيحةِ الخاتَمِ ينجحُ
+    agreement: اتّفاقٌ على `open` في الجولةِ الثامنةِ — استبدالُ لقطةٍ كاملةٍ صحيحةِ الخاتَمِ ينجحُ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ الثانيةَ عشرةَ (`WL-351`، ثلاثةُ مزوِّدين)
     reproductionPath: '`S10`/`S4b`/`S13` — خرجُ 0 وحالةٌ منجَزةٌ، ثلاثُ تجاربَ قابلةٍ للتكرارِ على توكنٍ حقيقيٍّ'
     affectedFiles:
       - src/root-of-trust/state-manifest.mts
@@ -528,6 +556,8 @@ findings:
       gpt_5_6_terra: docs/external-review/reports/M11.04-round-7-model-council-report-gpt-5-6-terra.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-12-model-council-report-gpt-6-astra.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: R4-K3-02
     engagement: M11.04
     title: 'دفترُ الرفعِ بلا أصالةٍ: سطرٌ متّسقُ التجزئةِ يرفعُ العدّاداتِ قسريّاً'
@@ -819,7 +849,7 @@ findings:
     severityAsWritten: منخفضة
     severity: low
     status: open
-    agreement: اتّفاقٌ على `open` في الجولةِ الثامنةِ — شطرُ «بلا مستهلكٍ حيٍّ» باقٍ
+    agreement: 'اتّفاقٌ على `open` في الجولةِ الثامنةِ — شطرُ «بلا مستهلكٍ حيٍّ» باقٍ؛ واختلافٌ في الجولةِ الثانيةَ عشرةَ (`WL-351`): «أ» (`gpt_6_astra`) و«ج» (`grok_4_7`) حكما `closed` — المخزنُ موصولٌ بسلطةِ التصديقِ ويُستهلك (`entrypoint.mjs` يمرّره إلى `CertificateAuthority` و`isValid` يقرأُ `isRevoked`) — و«ب» (`gemini_3_8_flash`) حكمَ `open` — مبنيٌّ في المصنعِ غيرَ موصولٍ بمسارٍ تشغيلي. القيدُ `open` بالأضعفِ.'
     reproductionPath: قراءةُ `src/root-of-trust/production-runtime.mts` — `FileRevocationStore` يُبنى ولا يُوصَلُ بسلطةِ التصديقِ في مسارٍ إنتاجيٍّ
     affectedFiles:
       - src/root-of-trust/production-runtime.mts
@@ -831,6 +861,8 @@ findings:
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
+      gpt_6_astra: docs/external-review/reports/M11.04-round-12-model-council-report-gpt-6-astra.md
+      grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
   - id: R5-B-01
     engagement: M11.04
     title: الحارسُ الإنتاجيُّ يقبلُ أيَّ `RevocationStore` متطايرٍ ما دام ليس مثيلاً لـ`MemoryRevocationStore`
@@ -887,8 +919,8 @@ findings:
     origin: round-1
     severityAsWritten: عالية
     severity: high
-    status: open
-    agreement: نتيجةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: '`node probes/probe-retention-sweeper-identity.mjs; echo $?` ⇒ `3` (فاعلٌ غيرُ مسجَّلٍ بدورٍ نصّيٍّ يمحو مادّتينِ وصفرُ نداءاتٍ إلى `EnforcementPoint.authorize`)؛ و`grep -rn purge-data src/ -l; echo $?` ⇒ `1` (لا مستهلِكَ في `src/`).'
     affectedFiles:
       - src/data/retention-cycle.mjs
@@ -900,6 +932,17 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: 98e88fbe
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ دورةَ المحوِ بلا مفوِّضٍ تُرَدُّ بـ`RETENTION_AUTHORIZER_REQUIRED` قبلَ أيِّ حذفٍ، وأنّ `purge-data` صارَ مستهلَكاً في `src/` (`src/data/retention-cycle.mjs` و`memory-store.mjs`)، وأنّ `AgentMemoryStore.sweepExpired` يمرُّ بسلسلةِ الرفضِ ويستهلكُ التذكرةَ قبلَ الحذفِ (المسارُ الثاني أُغلِقَ في `c4897638`). المسابرُ محفوظةٌ في `reports/round-12-7-probes/`.'
   - id: R6-A-02
     engagement: M11.06
     title: حصصُ الكمِّ (بايتاتٌ/رموزٌ) تُخصمُ «1» لكلِّ نداءٍ والمقدارُ يملأُه الطالبُ
@@ -933,8 +976,8 @@ findings:
     origin: round-1
     severityAsWritten: متوسطة
     severity: medium
-    status: open
-    agreement: نتيجةٌ من العضوِ «أ»
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: '`node probes/probe-capabilities-ignored.mjs` — `role:agent` بقدراتٍ `[]` يُؤذَنُ له بـ`write-data`، وبقدرةٍ ممنوحةٍ `action:create-agent` يُمنَعُ بـ`POLICY_NO_MATCH`؛ و`grep -rn "capabilities.has\|capabilities.includes" src/policy src/core` ⇒ لا شيءَ.'
     affectedFiles:
       - src/policy/engine.mjs
@@ -946,6 +989,17 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: b062bd94
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ مسارَ «الدورُ وحدَه يكتب» مسدودٌ — فاعلَ `role:agent` بقدراتٍ `[]` يُمنَعُ `write-data` بـ`POLICY_NO_MATCH`، وبقدرةِ `action:write-data` يُؤذَن، ومنحٌ ذاتيٌّ يُرَدُّ؛ وسياسةُ `pol:write-data-operators` تشترطُ `actor.capabilities` بعاملِ `includes` في المحرّكِ. المسابرُ محفوظةٌ في `reports/round-12-7-probes/`.'
   - id: R6-A-04
     engagement: M11.06
     title: لا جذرَ تركيبٍ يصلُ سلسلةَ الإنفاذِ في عمليّةٍ واحدةٍ
@@ -979,7 +1033,7 @@ findings:
     severityAsWritten: متوسطة
     severity: medium
     status: open
-    agreement: اختلافٌ — «أ» أثبتَها قراءةً (بتصريحِه أنّها **قراءةٌ لا قياسٌ**)، و«ب» كتبَ «نعم» في عمودِ البقاءِ بعدَ إعادةِ التشغيلِ لكلِّ صفوفِه الثلاثينَ. والقيدُ `open` بالأضعفِ.
+    agreement: اختلافٌ — «أ» أثبتَها قراءةً (بتصريحِه أنّها **قراءةٌ لا قياسٌ**)، و«ب» كتبَ «نعم» في عمودِ البقاءِ بعدَ إعادةِ التشغيلِ لكلِّ صفوفِه الثلاثينَ. والقيدُ `open` بالأضعفِ. ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ السابعةِ (`WL-351`، ثلاثةُ مزوِّدين)
     disagreement: لم يقسْ أيُّ عضوٍ إعادةَ تشغيلِ عمليّةٍ فعلاً؛ «أ» استندَ إلى أسطرِ الذاكرةِ (`quarantine.mjs` L22–23، `capability-grants.mjs`، `inference-gate.mjs` L237) وإلى حدودٍ مُعلَنةٍ في الوثائقِ، و«ب» لم يذكرْ هذه المواضعَ. والمنفِّذُ لا يُرجِّحُ.
     reproductionPath: قراءةُ `src/governance/quarantine.mjs` L22–23، و`src/identity/capability-grants.mjs`، و`src/inference/inference-gate.mjs` L237، و`docs/CONSTITUTION.md`.
     affectedFiles:
@@ -993,6 +1047,9 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
   - id: R6-A-06
     engagement: M11.06
     title: '`docs/AGENT_CONTAINMENT.md` تُناقضُ الشفرةَ في `M6.07`/`M6.08` وإشارةِ `budget-exceeded`'
@@ -1028,7 +1085,7 @@ findings:
     severityAsWritten: منخفضة
     severity: low
     status: open
-    agreement: نتيجةٌ من العضوِ «أ»؛ و«ب» أثبتَ العتبةَ عندَ `engine.mjs:297` بلا هذا التحفّظِ
+    agreement: نتيجةٌ من العضوِ «أ»؛ و«ب» أثبتَ العتبةَ عندَ `engine.mjs:297` بلا هذا التحفّظِ ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ السابعةِ (`WL-351`، ثلاثةُ مزوِّدين)
     reproductionPath: "`sed -n 300,310p src/policy/engine.mjs` (L306: `hasCommand = royalCommandId !== '' && royalCommandDigest !== ''`)؛ والطفرتانِ `M03`/`M04` كُشِفتا (1 و3 إخفاقاتٍ)."
     affectedFiles:
       - src/policy/engine.mjs
@@ -1040,6 +1097,9 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
   - id: R6-A-08
     engagement: M11.06
     title: الوضعُ الآمنُ المحلّيُّ للنواةِ يُدخَلُ ويُخرَجُ منه بنداءِ دالّةٍ بلا فاعلٍ ولا أمرٍ
@@ -1047,7 +1107,7 @@ findings:
     severityAsWritten: منخفضة
     severity: low
     status: open
-    agreement: نتيجةٌ من العضوِ «أ»
+    agreement: 'نتيجةٌ من العضوِ «أ»؛ و«ب» أثبتَ العتبةَ عندَ `engine.mjs:297` بلا هذا التحفّظِ؛ **واختلافٌ في الجولةِ السابعةِ (`WL-351`):** «أ» (`gpt_6_astra`) حكمَ `closed` على مسارِ الإنتاجِ وحدَه (`KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND` يُرَدُّ في الإنتاج)، و«ب» (`gemini_3_8_flash`) و«ج» (`grok_4_7`) حكما `open` — الشطرُ غيرُ الإنتاجيِّ نافذٌ. القيدُ `open` بالأضعفِ.'
     reproductionPath: قراءةُ `ExecutionKernel.stop()` و`resume()` في `src/core/execution-kernel.mjs`
     affectedFiles:
       - src/core/execution-kernel.mjs
@@ -1058,6 +1118,9 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
   - id: R6-A-09
     engagement: M11.06
     title: الاحتفاظُ — لا جدولةَ آليّةً ولا موافقةَ سياديّةً على الحفظِ القانونيِّ (حدّانِ مُعلَنانِ)
@@ -1065,7 +1128,7 @@ findings:
     severityAsWritten: منخفضة
     severity: low
     status: open
-    agreement: نتيجةٌ من العضوِ «أ»، وهو صرّحَ أنّه **اكتفى بالقراءةِ**
+    agreement: نتيجةٌ من العضوِ «أ»، وهو صرّحَ أنّه **اكتفى بالقراءةِ** ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ السابعةِ (`WL-351`، ثلاثةُ مزوِّدين)
     reproductionPath: 'قراءةُ `docs/RETENTION.md` L64 و`config/retention.yaml` (`minHoursBetweenRuns: 1`، `maxErasuresPerRun: 500`) — يحدّانِ الوتيرةَ لا الآمرَ.'
     affectedFiles:
       - docs/RETENTION.md
@@ -1079,6 +1142,9 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
   - id: R6-A-10
     engagement: M11.06
     title: ملاحظةُ عمليّةٍ — خطّةُ الجولةِ غائبةٌ عن الكوميتِ، و`validate` يعتمدُ على وجودِ تقاريرَ سابقةٍ
@@ -1086,7 +1152,7 @@ findings:
     severityAsWritten: منخفضة
     severity: low
     status: open
-    agreement: نتيجةٌ من العضوِ «أ» على **تجهيزِ المنفِّذِ** لا على الشفرةِ؛ والمنفِّذُ يُقرُّ بها في `executorPreparationDefects` أعلاه وفي §5 من مصفوفةِ المقارنةِ.
+    agreement: نتيجةٌ من العضوِ «أ» على **تجهيزِ المنفِّذِ** لا على الشفرةِ؛ والمنفِّذُ يُقرُّ بها في `executorPreparationDefects` أعلاه وفي §5 من مصفوفةِ المقارنةِ. ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ السابعةِ (`WL-351`، ثلاثةُ مزوِّدين)
     reproductionPath: '`git ls-tree -r a705f2d4 --name-only | grep M11.06` ⇒ لا نتيجةَ (رمزُ الخروجِ `1`)؛ و`npm run validate` = `1` في شجرةِ المراجعةِ المحذوفِ منها، و`0` في شجرةٍ نقيّةٍ.'
     affectedFiles:
       - docs/external-review/M11.06-round-1-plan.md
@@ -1098,6 +1164,9 @@ findings:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
   - id: R6-B-01
     engagement: M11.06
     title: إشارةُ تجاوزِ ميزانيّةِ الاستدلالِ مُعلَنةٌ نظريّاً بلا مُنتِجٍ ولا إنفاذٍ فعليٍّ
@@ -1157,8 +1226,8 @@ findings:
     origin: round-2
     severityAsWritten: عالية
     severity: high
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: '`node probes/probe-raw-purge-no-authority.mjs` من جذرِ الاستنساخِ؛ خرجُ `0` وسجلُ `DELETE FROM "state"."memories"...` و`deleted: 1` باستخدامِ عميلٍ وهميٍّ، بلا مساسٍ بقاعدةٍ حقيقيّةٍ.'
     affectedFiles:
       - scripts/retention.mjs
@@ -1170,14 +1239,25 @@ findings:
     rawReports:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: ea1fe046
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ `purge` و`eraseById` في `src/persistence/retention.mjs` يرفضانِ بـ`RETENTION_PURGE_UNAUTHORIZED` قبلَ لمسِ الوصلةِ، وأنّ `node scripts/retention.mjs purge` يخرجُ `1` بـ`RETENTION_PURGE_CLI_FORBIDDEN` قبلَ أيِّ اتصالٍ، وأنّ المحوَ المحكومَ الوحيدَ هو دورةُ `RetentionCycle.run`. المسابرُ محفوظةٌ في `reports/round-12-7-probes/`.'
   - id: R6-A-12
     engagement: M11.06
     title: أمرُ الاختباراتِ الملزمُ يشيرُ إلى مسارٍ غيرِ موجودٍ (`tests/agents/`)
     origin: round-2
     severityAsWritten: منخفضة
     severity: low
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: '`node --test tests/agents/` ⇒ `Could not find .../tests/agents`، رمزُ الخروجِ `1`.'
     affectedFiles:
       - docs/external-review/M11.06-round-2-plan.md
@@ -1188,14 +1268,25 @@ findings:
     rawReports:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: daa3443c
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ مسارَ `tests/agents/` موجودٌ (`agent-boundaries.test.mjs`) وأنّ `node --test tests/agents/` يخرجُ `0` بفحصينِ ناجحينِ — سببُ الإخفاقِ الأصليِّ غيرُ قائمٍ.'
   - id: R6-A-13
     engagement: M11.06
     title: حارسُ وثيقةِ الاحتواءِ لا يغطّي ادعاءَ `M6.07` (منتجُ `budget-exceeded`)
     origin: round-2
     severityAsWritten: منخفضة
     severity: low
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «أ»
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: طفرةُ `M2A-CONTAINMENT-DOC` أعادتْ عبارةَ الغيابِ في بندِ `M6.07`؛ `node --test tests/docs/agent-containment-claims.test.mjs` خرجَ `0` بـ`2/2`.
     affectedFiles:
       - tests/docs/agent-containment-claims.test.mjs
@@ -1207,6 +1298,17 @@ findings:
     rawReports:
       gpt_5_6_sol: docs/external-review/reports/M11.06-round-2-model-council-report-gpt-5-6-sol.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: 31029e3c
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ حارسَ صدقِ الوثيقةِ يقتلُ طفرةَ إقرارِ الغيابِ («`budget-exceeded` بلا مُنتِجٍ») داخلَ `tests/docs/agent-containment-claims.test.mjs` (اختبارُ الطفرةِ يخرجُ `1` بالكشفِ والأصلُ `0`)، بعدَ تمديدهِ في `WL-212` وتقويتهِ في `WL-314`.'
   - id: R6-B-03
     engagement: M11.06
     title: وصلةُ `DATABASE_URL` المُعلَنةُ للجولةِ لا تعبرُ `guard:encryption` فـ`validate` يخرجُ `1` قبلَ الاختباراتِ
@@ -1214,7 +1316,7 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «ب» — وأشارَ إليها العضوُ «أ» في حدودِه
+    agreement: نتيجةٌ جديدةٌ من العضوِ «ب» — وأشارَ إليها العضوُ «أ» في حدودِه ؛ واتّفاقٌ تامٌّ على `open` في الجولةِ السابعةِ (`WL-351`، ثلاثةُ مزوِّدين)
     reproductionPath: "`export DATABASE_URL='postgresql://…:5432/postgres'` ثمّ `npm run validate` ⇒ `ENCRYPTION_TRANSPORT_INSECURE` في `src/data/encryption.mjs`. مع `sslmode=require` ⇒ `SELF_SIGNED_CERT_IN_CHAIN`."
     affectedFiles:
       - src/data/encryption.mjs
@@ -1226,14 +1328,17 @@ findings:
     rawReports:
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
   - id: R6-B-04
     engagement: M11.06
     title: الخطّةُ تطلبُ `tests/agents/` والمسارُ غيرُ موجودٍ
     origin: round-2
     severityAsWritten: منخفضة
     severity: low
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: '`ls tests/agents` ⇒ خروجُ `2`؛ `node --test tests/agents/` ⇒ خروجُ `1`.'
     affectedFiles:
       - docs/external-review/M11.06-round-2-plan.md
@@ -1244,14 +1349,25 @@ findings:
     rawReports:
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: daa3443c
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ المجلّدَ موجودٌ (`ls tests/agents` خرجَ `0`) وأنّ `node --test tests/agents/` يخرجُ `0` — المسارُ الذي كانت الخطّةُ تطلبُه صارَ قائماً ويعملُ.'
   - id: R6-B-05
     engagement: M11.06
     title: حارسُ صدقِ وثيقةِ الاحتواءِ لا يسقطُ إن أُعيدَ إقرارُ «`budget-exceeded` بلا مُنتِجٍ»
     origin: round-2
     severityAsWritten: منخفضة
     severity: low
-    status: open
-    agreement: نتيجةٌ جديدةٌ من العضوِ «ب»
+    status: closed
+    agreement: 'اتّفاقٌ تامٌّ من الأعضاءِ الثلاثةِ في الجولةِ السابعةِ (‏`WL-351`، ثلاثةُ مزوِّدين) على الإغلاقِ'
     reproductionPath: الطفرةُ `M-A06` على `docs/AGENT_CONTAINMENT.md` ثمّ `node --test tests/docs/agent-containment-claims.test.mjs` ⇒ خروجُ `0` (`SURVIVED`).
     affectedFiles:
       - tests/docs/agent-containment-claims.test.mjs
@@ -1263,6 +1379,17 @@ findings:
     rawReports:
       grok_4_6: docs/external-review/reports/M11.06-round-2-model-council-report-grok-4-6.md
       gpt_6_sol: docs/external-review/reports/M11.06-round-3-model-council-report-gpt-6-sol.md
+      gpt_6_astra: docs/external-review/reports/M11.06-round-7-model-council-report-gpt-6-astra.md
+      gemini_3_8_flash: docs/external-review/reports/M11.06-round-7-model-council-report-gemini-3-8-flash.md
+      grok_4_7: docs/external-review/reports/M11.06-round-7-model-council-report-grok-4-7.md
+    closure:
+      fixCommit: 31029e3c
+      retestedBy:
+        - gpt_6_astra
+        - gemini_3_8_flash
+        - grok_4_7
+      retestRound: 7
+      retestEvidence: 'إعادةُ اختبارِ الجولةِ السابعةِ على `284f74d0b2803cbe909ced0114144f6e1f814ccd`: الأعضاءُ الثلاثةُ قاسوا أنّ حارسَ صدقِ الوثيقةِ يسقطُ فعلاً — الطفرةُ `M3`/`M-A06` التي تُعيدُ إقرارَ «`budget-exceeded` بلا مُنتِجٍ» تُكتَشَفُ وتُرفَضُ داخلَ الاختبارِ، بعدَ تقويةِ الحارسِ في `WL-314`.'
   - id: R5-A-06
     engagement: M11.05
     title: تفاوتٌ منخفضُ الشدّةِ في خطِّ أساسِ التخطّي (121 مقابل 126)

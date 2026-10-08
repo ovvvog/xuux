@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {mkdtempSync} from 'node:fs';
+import {TestFreshnessSocket,boot,fixedKeys} from '/home/user/workspace/xuux-review-284f74d0/tests/helpers/production-sovereign-rig.mjs';
+const root=mkdtempSync('/tmp/council-gpt-6-astra/revocation-');
+const keys={...fixedKeys(),socket:new TestFreshnessSocket(0n,'revocation')};
+const first=await boot(root,{keys});
+const cert=await first.chain.authority.issueAsync('agent:revocation-probe','role:agent',[]);
+assert.equal(first.chain.authority.isValid(cert),true);
+const result=await first.chain.authority.revokeAsync(cert.id,'probe');
+console.log('R5-A-05 revoke',JSON.stringify(result));
+assert.equal(first.chain.authority.isValid(cert),false);
+await first.close();
+const second=await boot(root,{keys});
+console.log('R5-A-05 live authority after reboot',second.chain.authority.isValid(cert));
+assert.equal(second.chain.authority.isValid(cert),false);
+await second.close();
+console.log('root',root);

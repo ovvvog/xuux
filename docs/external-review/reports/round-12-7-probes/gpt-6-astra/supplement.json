@@ -1,0 +1,10 @@
+{
+  "name": "supplement",
+  "command": "env -u DATABASE_URL node --test tests/production/wl-303-sovereign-authorization.test.mjs tests/production/halt-switch-integration.test.mjs tests/persistence/r6-a-11-raw-purge-authority.test.mjs tests/data/legal-hold-sovereign.test.mjs tests/persistence/db.test.mjs",
+  "start": "2026-10-08T01:29:05.732Z",
+  "end": "2026-10-08T01:29:05.810Z",
+  "exit": 1,
+  "signal": null,
+  "stdout": "",
+  "stderr": "Could not find '/home/user/workspace/xuux-review-284f74d0/tests/persistence/db.test.mjs'\n"
+}

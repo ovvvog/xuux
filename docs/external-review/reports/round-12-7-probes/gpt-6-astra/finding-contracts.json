@@ -1,0 +1,207 @@
+[
+  {
+    "id": "UF-01",
+    "engagement": "M11.04",
+    "reproductionPath": "عندَ «أ» `S10`/`S4b`/`S13`؛ وعندَ «ب» `P12`/`P13`/`P14`.",
+    "affectedFiles": [
+      "src/root-of-trust/production-runtime.mts",
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "UF-03",
+    "engagement": "M11.04",
+    "reproductionPath": "`S10`/`S4b`/`S13` عندَ «أ»؛ `P12`/`P13`/`P14` عندَ «ب»",
+    "affectedFiles": [
+      "src/root-of-trust/halt-switch.mts",
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "UF-07",
+    "engagement": "M11.04",
+    "reproductionPath": "`S10`/`S4b`/`S13` عندَ «أ»؛ `P12` عندَ «ب»",
+    "affectedFiles": [
+      "src/root-of-trust/command-ledger.mts",
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "M11.04-F07",
+    "engagement": "M11.04",
+    "reproductionPath": "يتبعُ إعادةَ إنتاجِ `UF-07` و`UF-03`",
+    "affectedFiles": [
+      "src/root-of-trust/command-ledger.mts",
+      "src/root-of-trust/halt-switch.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R3-A-01",
+    "engagement": "M11.04",
+    "reproductionPath": "`P10` عندَ «ب»؛ وتحليلُ `state-manifest.mts` عندَ «أ»",
+    "affectedFiles": [
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "M11.04-F05",
+    "engagement": "M11.04",
+    "reproductionPath": "`npm run hsm:verify:f05` (خرجُ 0 عندَ كليهما)؛ و`P13` عندَ «ب»",
+    "affectedFiles": [
+      "src/root-of-trust/persistent-log.mts",
+      "src/root-of-trust/production-runtime.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R4-K3-01",
+    "engagement": "M11.04",
+    "reproductionPath": "`S10`/`S4b`/`S13` — خرجُ 0 وحالةٌ منجَزةٌ، ثلاثُ تجاربَ قابلةٍ للتكرارِ على توكنٍ حقيقيٍّ",
+    "affectedFiles": [
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R5-A-05",
+    "engagement": "M11.04",
+    "reproductionPath": "قراءةُ `src/root-of-trust/production-runtime.mts` — `FileRevocationStore` يُبنى ولا يُوصَلُ بسلطةِ التصديقِ في مسارٍ إنتاجيٍّ",
+    "affectedFiles": [
+      "src/root-of-trust/production-runtime.mts"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-01",
+    "engagement": "M11.06",
+    "reproductionPath": "`node probes/probe-retention-sweeper-identity.mjs; echo $?` ⇒ `3` (فاعلٌ غيرُ مسجَّلٍ بدورٍ نصّيٍّ يمحو مادّتينِ وصفرُ نداءاتٍ إلى `EnforcementPoint.authorize`)؛ و`grep -rn purge-data src/ -l; echo $?` ⇒ `1` (لا مستهلِكَ في `src/`).",
+    "affectedFiles": [
+      "src/data/retention-cycle.mjs",
+      "config/royal-authority.yaml"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-03",
+    "engagement": "M11.06",
+    "reproductionPath": "`node probes/probe-capabilities-ignored.mjs` — `role:agent` بقدراتٍ `[]` يُؤذَنُ له بـ`write-data`، وبقدرةٍ ممنوحةٍ `action:create-agent` يُمنَعُ بـ`POLICY_NO_MATCH`؛ و`grep -rn \"capabilities.has\\|capabilities.includes\" src/policy src/core` ⇒ لا شيءَ.",
+    "affectedFiles": [
+      "src/policy/engine.mjs",
+      "docs/POLICY_MODEL.md"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-05",
+    "engagement": "M11.06",
+    "reproductionPath": "قراءةُ `src/governance/quarantine.mjs` L22–23، و`src/identity/capability-grants.mjs`، و`src/inference/inference-gate.mjs` L237، و`docs/CONSTITUTION.md`.",
+    "affectedFiles": [
+      "src/governance/quarantine.mjs",
+      "src/identity/capability-grants.mjs",
+      "src/inference/inference-gate.mjs"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-07",
+    "engagement": "M11.06",
+    "reproductionPath": "`sed -n 300,310p src/policy/engine.mjs` (L306: `hasCommand = royalCommandId !== '' && royalCommandDigest !== ''`)؛ والطفرتانِ `M03`/`M04` كُشِفتا (1 و3 إخفاقاتٍ).",
+    "affectedFiles": [
+      "src/policy/engine.mjs",
+      "src/core/execution-kernel.mjs"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-08",
+    "engagement": "M11.06",
+    "reproductionPath": "قراءةُ `ExecutionKernel.stop()` و`resume()` في `src/core/execution-kernel.mjs`",
+    "affectedFiles": [
+      "src/core/execution-kernel.mjs"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-09",
+    "engagement": "M11.06",
+    "reproductionPath": "قراءةُ `docs/RETENTION.md` L64 و`config/retention.yaml` (`minHoursBetweenRuns: 1`، `maxErasuresPerRun: 500`) — يحدّانِ الوتيرةَ لا الآمرَ.",
+    "affectedFiles": [
+      "docs/RETENTION.md",
+      "config/retention.yaml"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-10",
+    "engagement": "M11.06",
+    "reproductionPath": "`git ls-tree -r a705f2d4 --name-only | grep M11.06` ⇒ لا نتيجةَ (رمزُ الخروجِ `1`)؛ و`npm run validate` = `1` في شجرةِ المراجعةِ المحذوفِ منها، و`0` في شجرةٍ نقيّةٍ.",
+    "affectedFiles": [
+      "docs/external-review/M11.06-round-1-plan.md",
+      "tests/docs/external-review-pack.test.mjs"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-11",
+    "engagement": "M11.06",
+    "reproductionPath": "`node probes/probe-raw-purge-no-authority.mjs` من جذرِ الاستنساخِ؛ خرجُ `0` وسجلُ `DELETE FROM \"state\".\"memories\"...` و`deleted: 1` باستخدامِ عميلٍ وهميٍّ، بلا مساسٍ بقاعدةٍ حقيقيّةٍ.",
+    "affectedFiles": [
+      "scripts/retention.mjs",
+      "src/persistence/retention.mjs"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-12",
+    "engagement": "M11.06",
+    "reproductionPath": "`node --test tests/agents/` ⇒ `Could not find .../tests/agents`، رمزُ الخروجِ `1`.",
+    "affectedFiles": [
+      "docs/external-review/M11.06-round-2-plan.md"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-A-13",
+    "engagement": "M11.06",
+    "reproductionPath": "طفرةُ `M2A-CONTAINMENT-DOC` أعادتْ عبارةَ الغيابِ في بندِ `M6.07`؛ `node --test tests/docs/agent-containment-claims.test.mjs` خرجَ `0` بـ`2/2`.",
+    "affectedFiles": [
+      "tests/docs/agent-containment-claims.test.mjs",
+      "docs/AGENT_CONTAINMENT.md"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-B-03",
+    "engagement": "M11.06",
+    "reproductionPath": "`export DATABASE_URL='postgresql://…:5432/postgres'` ثمّ `npm run validate` ⇒ `ENCRYPTION_TRANSPORT_INSECURE` في `src/data/encryption.mjs`. مع `sslmode=require` ⇒ `SELF_SIGNED_CERT_IN_CHAIN`.",
+    "affectedFiles": [
+      "src/data/encryption.mjs",
+      "scripts/guard-encryption.mjs"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-B-04",
+    "engagement": "M11.06",
+    "reproductionPath": "`ls tests/agents` ⇒ خروجُ `2`؛ `node --test tests/agents/` ⇒ خروجُ `1`.",
+    "affectedFiles": [
+      "docs/external-review/M11.06-round-2-plan.md"
+    ],
+    "closure": null
+  },
+  {
+    "id": "R6-B-05",
+    "engagement": "M11.06",
+    "reproductionPath": "الطفرةُ `M-A06` على `docs/AGENT_CONTAINMENT.md` ثمّ `node --test tests/docs/agent-containment-claims.test.mjs` ⇒ خروجُ `0` (`SURVIVED`).",
+    "affectedFiles": [
+      "tests/docs/agent-containment-claims.test.mjs",
+      "docs/AGENT_CONTAINMENT.md"
+    ],
+    "closure": null
+  }
+]

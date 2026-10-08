@@ -1,0 +1,64 @@
+{
+  "start": "2026-10-08T01:25:58Z",
+  "head": {
+    "command": "git rev-parse HEAD",
+    "exit": 0,
+    "stdout": "284f74d0b2803cbe909ced0114144f6e1f814ccd\n",
+    "stderr": ""
+  },
+  "node": {
+    "command": "node --version",
+    "exit": 0,
+    "stdout": "v20.20.2\n",
+    "stderr": ""
+  },
+  "npm": {
+    "command": "npm --version",
+    "exit": 0,
+    "stdout": "10.8.2\n",
+    "stderr": ""
+  },
+  "os": {
+    "command": "uname -a",
+    "exit": 0,
+    "stdout": "Linux space-sandbox 6.1.155 #1 SMP PREEMPT_DYNAMIC @1760348006 x86_64 GNU/Linux\n",
+    "stderr": ""
+  },
+  "status": {
+    "command": "git status --porcelain",
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "diff": {
+    "command": "git diff --stat b1c6e4aa 284f74d0",
+    "exit": 0,
+    "stdout": " PROJECT_STATUS.md                                  |   2 +\n config/royal-console.yaml                          |   2 +\n config/schemas/royal-console.schema.json           |   2 +\n docs/CURRENT_STATE.md                              |   4 +-\n docs/HANDOFF.md                                    |   6 +-\n docs/ROOT_OF_TRUST.md                              |   2 +-\n docs/external-review/M11.05-round-1-plan.md        |   2 +-\n docs/external-review/M11.06-round-2-plan.md        |   2 +-\n docs/external-review/skip-baseline.json            |  28 +--\n docs/roadmap/05-work-log.md                        |  56 +++++\n src/console/royal-console.mjs                      |  23 ++-\n src/production/sovereign-console.mjs               |  60 +++++-\n tests/helpers/production-sovereign-rig.mjs         | 201 ++++++++++++++++++\n tests/production/wl-348-sovereign-console.test.mjs | 209 ++-----------------\n tests/production/wl-349-durable-veto.test.mjs      | 230 +++++++++++++++++++++\n 15 files changed, 605 insertions(+), 224 deletions(-)\n",
+    "stderr": ""
+  },
+  "changed": {
+    "command": "git diff --name-only b1c6e4aa 284f74d0 -- src/ scripts/",
+    "exit": 0,
+    "stdout": "src/console/royal-console.mjs\nsrc/production/sovereign-console.mjs\n",
+    "stderr": ""
+  },
+  "affectedChanged": [],
+  "plan": {
+    "command": "git ls-tree -r 284f74d0 --name-only | rg '^docs/external-review/M11\\.06.*plan\\.md$'",
+    "exit": 0,
+    "stdout": "docs/external-review/M11.06-round-1-plan.md\ndocs/external-review/M11.06-round-2-plan.md\ndocs/external-review/M11.06-round-3-plan.md\ndocs/external-review/M11.06-round-4-plan.md\n",
+    "stderr": ""
+  },
+  "currentPlan": {
+    "command": "git cat-file -e HEAD:docs/external-review/M11.06-round-7-plan.md",
+    "exit": 128,
+    "stdout": "",
+    "stderr": "fatal: path 'docs/external-review/M11.06-round-7-plan.md' does not exist in 'HEAD'\n"
+  },
+  "end": {
+    "command": "date -u +%Y-%m-%dT%H:%M:%SZ",
+    "exit": 0,
+    "stdout": "2026-10-08T01:30:39Z\n",
+    "stderr": ""
+  }
+}

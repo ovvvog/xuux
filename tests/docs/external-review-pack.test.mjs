@@ -459,6 +459,13 @@ const PLAN_DEFICIENCIES = [
     kind: 'absent-from-reviewed-commit',
     reason: 'الخطّةُ وُجدتْ في استنساخِ العضوينِ لا في الكوميتِ المُراجَعِ — نفسُ عينِ `R6-A-10`',
   },
+  {
+    engagement: 'M11.06',
+    round: 7,
+    kind: 'absent-from-reviewed-commit',
+    reason:
+      'خطّةُ الجولةِ السابعةِ غائبةٌ عن كوميتَيِ الجولتينِ المقيسَينِ معاً: كوميتِ الجولةِ الأولى `a705f2d4` (‏`reviewedCommit` الذي يقرأُه هذا الاختبارُ) وكوميتِ الجولةِ السابعةِ المُعلَنِ `284f74d0` (‏`round7ReviewedCommit`) — وصلَتِ الأعضاءَ خارجَ الشجرةِ عبرَ حزمةِ الإطلاقِ (‏`delegation/2026-10-08-round-12-7-launch-brief.md`) كما تُقرِّرُ عباراتُ الاستقلالِ، وبهذا القصورِ نفسِه حَكَمَ المجلسُ `R6-A-10` `open` بإجماعِ ثلاثةٍ؛ فالاستثناءُ توثيقُ نقصٍ لا تجاوزُ فحصٍ',
+  },
 ];
 
 /** @param {string} engagement @param {number} round @param {string} kind */

@@ -1,0 +1,312 @@
+{
+  "UF-01": {
+    "id": "UF-01",
+    "engagement": "M11.04",
+    "title": "إقلاعٌ إنتاجيٌّ يُقبَلُ بعدَ خفضِ `anchoredCount` وحذفِ السجلِّ والرأسِ والمراسي",
+    "severity": "high",
+    "status": "open",
+    "agreement": "اختلافٌ في الجولةِ الثامنةِ: «أ» (`gpt_6_sol`) حكمَ `closed` و«ب» (`gemini_3_8_flash`) حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ",
+    "reproductionPath": "عندَ «أ» `S10`/`S4b`/`S13`؛ وعندَ «ب» `P12`/`P13`/`P14`.",
+    "affectedFiles": [
+      "src/root-of-trust/production-runtime.mts",
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "UF-03": {
+    "id": "UF-03",
+    "engagement": "M11.04",
+    "title": "حالةُ الإيقافِ السياديّةُ تعودُ `running/epoch=0` بمحوِ ملفّاتِها",
+    "severity": "high",
+    "status": "open",
+    "agreement": "اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `closed` و«ب» حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ",
+    "reproductionPath": "`S10`/`S4b`/`S13` عندَ «أ»؛ `P12`/`P13`/`P14` عندَ «ب»",
+    "affectedFiles": [
+      "src/root-of-trust/halt-switch.mts",
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "UF-07": {
+    "id": "UF-07",
+    "engagement": "M11.04",
+    "title": "أمرٌ مُثبَّتٌ يُقبَلُ مرّةً ثانيةً بعدَ محوِ الدفترِ والحجوزاتِ",
+    "severity": "medium",
+    "status": "open",
+    "agreement": "اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `closed` و«ب» حكمَ `open` — اللقطةُ الكاملةُ باقيةٌ",
+    "reproductionPath": "`S10`/`S4b`/`S13` عندَ «أ»؛ `P12` عندَ «ب»",
+    "affectedFiles": [
+      "src/root-of-trust/command-ledger.mts",
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "M11.04-F07": {
+    "id": "M11.04-F07",
+    "engagement": "M11.04",
+    "title": "شرطا «لا تكرارَ بعدَ مسحِ الدفترِ» و«لا عودةَ من الإيقافِ» لم يكتملا",
+    "severity": "high",
+    "status": "open",
+    "agreement": "اتّفاقٌ على `open` في الجولةِ الثامنةِ — الشطرُ الباقي صراحةً: استرجاعُ لقطةٍ كاملةٍ متّسقةٍ",
+    "reproductionPath": "يتبعُ إعادةَ إنتاجِ `UF-07` و`UF-03`",
+    "affectedFiles": [
+      "src/root-of-trust/command-ledger.mts",
+      "src/root-of-trust/halt-switch.mts"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R3-A-01": {
+    "id": "R3-A-01",
+    "engagement": "M11.04",
+    "title": "البيانُ المحليُّ مصدرَ حقيقةٍ بلا مرجعٍ خارجَ القرصِ",
+    "severity": "high",
+    "status": "open",
+    "agreement": "اتّفاقٌ على `open` في الجولةِ الثامنةِ — لا مرجعَ حداثةٍ خارجَ القرصِ (`EXT-6`)",
+    "reproductionPath": "`P10` عندَ «ب»؛ وتحليلُ `state-manifest.mts` عندَ «أ»",
+    "affectedFiles": [
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null,
+    "origin": "round-3"
+  },
+  "M11.04-F05": {
+    "id": "M11.04-F05",
+    "engagement": "M11.04",
+    "title": "تحقُّقُ مادةِ المفاتيحِ واستمراريّةُ السجلِّ والمرساةِ",
+    "severity": "high",
+    "status": "open",
+    "agreement": "اختلافٌ في الجولةِ الثامنةِ: «أ» حكمَ `open` (HSM لم يُقَسْ) و«ب» حكمَ `closed` — يُعرَضُ على المالكِ",
+    "reproductionPath": "`npm run hsm:verify:f05` (خرجُ 0 عندَ كليهما)؛ و`P13` عندَ «ب»",
+    "affectedFiles": [
+      "src/root-of-trust/persistent-log.mts",
+      "src/root-of-trust/production-runtime.mts"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R4-K3-01": {
+    "id": "R4-K3-01",
+    "engagement": "M11.04",
+    "title": "رجوعٌ حرٌّ بينَ أختامٍ صحيحةٍ: استبدالُ البيانِ بلقطةٍ أقدمَ نفسِ التوكنِ يُتجاوزُ به `UF-01`/`03`/`07` معاً",
+    "severity": "high",
+    "status": "open",
+    "agreement": "اتّفاقٌ على `open` في الجولةِ الثامنةِ — استبدالُ لقطةٍ كاملةٍ صحيحةِ الخاتَمِ ينجحُ",
+    "reproductionPath": "`S10`/`S4b`/`S13` — خرجُ 0 وحالةٌ منجَزةٌ، ثلاثُ تجاربَ قابلةٍ للتكرارِ على توكنٍ حقيقيٍّ",
+    "affectedFiles": [
+      "src/root-of-trust/state-manifest.mts"
+    ],
+    "closure": null,
+    "origin": "round-4"
+  },
+  "R5-A-05": {
+    "id": "R5-A-05",
+    "engagement": "M11.04",
+    "title": "مخزنُ سحبٍ دائمٌ بلا مستهلكٍ حيٍّ يَقرأُه في الإنتاج",
+    "severity": "low",
+    "status": "open",
+    "agreement": "اتّفاقٌ على `open` في الجولةِ الثامنةِ — شطرُ «بلا مستهلكٍ حيٍّ» باقٍ",
+    "reproductionPath": "قراءةُ `src/root-of-trust/production-runtime.mts` — `FileRevocationStore` يُبنى ولا يُوصَلُ بسلطةِ التصديقِ في مسارٍ إنتاجيٍّ",
+    "affectedFiles": [
+      "src/root-of-trust/production-runtime.mts"
+    ],
+    "closure": null,
+    "origin": "round-5"
+  },
+  "R6-A-01": {
+    "id": "R6-A-01",
+    "engagement": "M11.06",
+    "title": "المحوُ الفعليُّ لا يمرُّ بعتبةِ `purge-data` ولا بأيِّ هويّةٍ ولا بأمرٍ ملكيٍّ",
+    "severity": "high",
+    "status": "open",
+    "agreement": "نتيجةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ",
+    "reproductionPath": "`node probes/probe-retention-sweeper-identity.mjs; echo $?` ⇒ `3` (فاعلٌ غيرُ مسجَّلٍ بدورٍ نصّيٍّ يمحو مادّتينِ وصفرُ نداءاتٍ إلى `EnforcementPoint.authorize`)؛ و`grep -rn purge-data src/ -l; echo $?` ⇒ `1` (لا مستهلِكَ في `src/`).",
+    "affectedFiles": [
+      "src/data/retention-cycle.mjs",
+      "config/royal-authority.yaml"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-03": {
+    "id": "R6-A-03",
+    "engagement": "M11.06",
+    "title": "«القدراتُ الفعّالةُ» والمنحُ لا تدخلُ قرارَ المحرّكِ؛ الدورُ وحدَه يقرِّرُ",
+    "severity": "medium",
+    "status": "open",
+    "agreement": "نتيجةٌ من العضوِ «أ»",
+    "reproductionPath": "`node probes/probe-capabilities-ignored.mjs` — `role:agent` بقدراتٍ `[]` يُؤذَنُ له بـ`write-data`، وبقدرةٍ ممنوحةٍ `action:create-agent` يُمنَعُ بـ`POLICY_NO_MATCH`؛ و`grep -rn \"capabilities.has\\|capabilities.includes\" src/policy src/core` ⇒ لا شيءَ.",
+    "affectedFiles": [
+      "src/policy/engine.mjs",
+      "docs/POLICY_MODEL.md"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-05": {
+    "id": "R6-A-05",
+    "engagement": "M11.06",
+    "title": "أربعُ حالاتِ نقضٍ/احتواءٍ تُفقَدُ بإعادةِ التشغيلِ (حجرٌ، منحٌ، ميزانيّةُ استدلالٍ، مقترحاتٌ دستوريّةٌ)",
+    "severity": "medium",
+    "status": "open",
+    "agreement": "اختلافٌ — «أ» أثبتَها قراءةً (بتصريحِه أنّها **قراءةٌ لا قياسٌ**)، و«ب» كتبَ «نعم» في عمودِ البقاءِ بعدَ إعادةِ التشغيلِ لكلِّ صفوفِه الثلاثينَ. والقيدُ `open` بالأضعفِ.",
+    "reproductionPath": "قراءةُ `src/governance/quarantine.mjs` L22–23، و`src/identity/capability-grants.mjs`، و`src/inference/inference-gate.mjs` L237، و`docs/CONSTITUTION.md`.",
+    "affectedFiles": [
+      "src/governance/quarantine.mjs",
+      "src/identity/capability-grants.mjs",
+      "src/inference/inference-gate.mjs"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-07": {
+    "id": "R6-A-07",
+    "engagement": "M11.06",
+    "title": "العتبةُ السياديّةُ في المحرّكِ حضورُ نصَّينِ لا توقيعٌ (حدٌّ مُعلَنٌ ومعوَّضٌ)",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ من العضوِ «أ»؛ و«ب» أثبتَ العتبةَ عندَ `engine.mjs:297` بلا هذا التحفّظِ",
+    "reproductionPath": "`sed -n 300,310p src/policy/engine.mjs` (L306: `hasCommand = royalCommandId !== '' && royalCommandDigest !== ''`)؛ والطفرتانِ `M03`/`M04` كُشِفتا (1 و3 إخفاقاتٍ).",
+    "affectedFiles": [
+      "src/policy/engine.mjs",
+      "src/core/execution-kernel.mjs"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-08": {
+    "id": "R6-A-08",
+    "engagement": "M11.06",
+    "title": "الوضعُ الآمنُ المحلّيُّ للنواةِ يُدخَلُ ويُخرَجُ منه بنداءِ دالّةٍ بلا فاعلٍ ولا أمرٍ",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ من العضوِ «أ»",
+    "reproductionPath": "قراءةُ `ExecutionKernel.stop()` و`resume()` في `src/core/execution-kernel.mjs`",
+    "affectedFiles": [
+      "src/core/execution-kernel.mjs"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-09": {
+    "id": "R6-A-09",
+    "engagement": "M11.06",
+    "title": "الاحتفاظُ — لا جدولةَ آليّةً ولا موافقةَ سياديّةً على الحفظِ القانونيِّ (حدّانِ مُعلَنانِ)",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ من العضوِ «أ»، وهو صرّحَ أنّه **اكتفى بالقراءةِ**",
+    "reproductionPath": "قراءةُ `docs/RETENTION.md` L64 و`config/retention.yaml` (`minHoursBetweenRuns: 1`، `maxErasuresPerRun: 500`) — يحدّانِ الوتيرةَ لا الآمرَ.",
+    "affectedFiles": [
+      "docs/RETENTION.md",
+      "config/retention.yaml"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-10": {
+    "id": "R6-A-10",
+    "engagement": "M11.06",
+    "title": "ملاحظةُ عمليّةٍ — خطّةُ الجولةِ غائبةٌ عن الكوميتِ، و`validate` يعتمدُ على وجودِ تقاريرَ سابقةٍ",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ من العضوِ «أ» على **تجهيزِ المنفِّذِ** لا على الشفرةِ؛ والمنفِّذُ يُقرُّ بها في `executorPreparationDefects` أعلاه وفي §5 من مصفوفةِ المقارنةِ.",
+    "reproductionPath": "`git ls-tree -r a705f2d4 --name-only | grep M11.06` ⇒ لا نتيجةَ (رمزُ الخروجِ `1`)؛ و`npm run validate` = `1` في شجرةِ المراجعةِ المحذوفِ منها، و`0` في شجرةٍ نقيّةٍ.",
+    "affectedFiles": [
+      "docs/external-review/M11.06-round-1-plan.md",
+      "tests/docs/external-review-pack.test.mjs"
+    ],
+    "closure": null,
+    "origin": "round-1"
+  },
+  "R6-A-11": {
+    "id": "R6-A-11",
+    "engagement": "M11.06",
+    "title": "أداةُ المحوِ القديمةُ مسارُ حذفٍ خارجَ سلطةِ `purge-data`",
+    "severity": "high",
+    "status": "open",
+    "agreement": "نتيجةٌ جديدةٌ من العضوِ «أ» — لم يحكمْ عليها العضوُ «ب» بهذا المعرِّفِ",
+    "reproductionPath": "`node probes/probe-raw-purge-no-authority.mjs` من جذرِ الاستنساخِ؛ خرجُ `0` وسجلُ `DELETE FROM \"state\".\"memories\"...` و`deleted: 1` باستخدامِ عميلٍ وهميٍّ، بلا مساسٍ بقاعدةٍ حقيقيّةٍ.",
+    "affectedFiles": [
+      "scripts/retention.mjs",
+      "src/persistence/retention.mjs"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "R6-A-12": {
+    "id": "R6-A-12",
+    "engagement": "M11.06",
+    "title": "أمرُ الاختباراتِ الملزمُ يشيرُ إلى مسارٍ غيرِ موجودٍ (`tests/agents/`)",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ جديدةٌ من العضوِ «أ»",
+    "reproductionPath": "`node --test tests/agents/` ⇒ `Could not find .../tests/agents`، رمزُ الخروجِ `1`.",
+    "affectedFiles": [
+      "docs/external-review/M11.06-round-2-plan.md"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "R6-A-13": {
+    "id": "R6-A-13",
+    "engagement": "M11.06",
+    "title": "حارسُ وثيقةِ الاحتواءِ لا يغطّي ادعاءَ `M6.07` (منتجُ `budget-exceeded`)",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ جديدةٌ من العضوِ «أ»",
+    "reproductionPath": "طفرةُ `M2A-CONTAINMENT-DOC` أعادتْ عبارةَ الغيابِ في بندِ `M6.07`؛ `node --test tests/docs/agent-containment-claims.test.mjs` خرجَ `0` بـ`2/2`.",
+    "affectedFiles": [
+      "tests/docs/agent-containment-claims.test.mjs",
+      "docs/AGENT_CONTAINMENT.md"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "R6-B-03": {
+    "id": "R6-B-03",
+    "engagement": "M11.06",
+    "title": "وصلةُ `DATABASE_URL` المُعلَنةُ للجولةِ لا تعبرُ `guard:encryption` فـ`validate` يخرجُ `1` قبلَ الاختباراتِ",
+    "severity": "high",
+    "status": "open",
+    "agreement": "نتيجةٌ جديدةٌ من العضوِ «ب» — وأشارَ إليها العضوُ «أ» في حدودِه",
+    "reproductionPath": "`export DATABASE_URL='postgresql://…:5432/postgres'` ثمّ `npm run validate` ⇒ `ENCRYPTION_TRANSPORT_INSECURE` في `src/data/encryption.mjs`. مع `sslmode=require` ⇒ `SELF_SIGNED_CERT_IN_CHAIN`.",
+    "affectedFiles": [
+      "src/data/encryption.mjs",
+      "scripts/guard-encryption.mjs"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "R6-B-04": {
+    "id": "R6-B-04",
+    "engagement": "M11.06",
+    "title": "الخطّةُ تطلبُ `tests/agents/` والمسارُ غيرُ موجودٍ",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ جديدةٌ من العضوِ «ب»",
+    "reproductionPath": "`ls tests/agents` ⇒ خروجُ `2`؛ `node --test tests/agents/` ⇒ خروجُ `1`.",
+    "affectedFiles": [
+      "docs/external-review/M11.06-round-2-plan.md"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  },
+  "R6-B-05": {
+    "id": "R6-B-05",
+    "engagement": "M11.06",
+    "title": "حارسُ صدقِ وثيقةِ الاحتواءِ لا يسقطُ إن أُعيدَ إقرارُ «`budget-exceeded` بلا مُنتِجٍ»",
+    "severity": "low",
+    "status": "open",
+    "agreement": "نتيجةٌ جديدةٌ من العضوِ «ب»",
+    "reproductionPath": "الطفرةُ `M-A06` على `docs/AGENT_CONTAINMENT.md` ثمّ `node --test tests/docs/agent-containment-claims.test.mjs` ⇒ خروجُ `0` (`SURVIVED`).",
+    "affectedFiles": [
+      "tests/docs/agent-containment-claims.test.mjs",
+      "docs/AGENT_CONTAINMENT.md"
+    ],
+    "closure": null,
+    "origin": "round-2"
+  }
+}
