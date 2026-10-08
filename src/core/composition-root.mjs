@@ -84,6 +84,7 @@ export const COMPOSITION_ERRORS = Object.freeze({
  *   requireIdentityGate?: never,
  *   kingIdentity?: import('../root-of-trust/identity.mjs').KingIdentity,
  *   authority?: import('../root-of-trust/identity.mjs').CertificateAuthority,
+ *   grantsStore?: { load(): unknown, save(entries: import('../identity/capability-grants.mjs').CapabilityGrant[]): void } | null,
  * }} deps
  * @returns {EnforcementChain}
  */
@@ -102,6 +103,7 @@ export function composeEnforcementChain(deps) {
     now,
     kingIdentity: injectedKingIdentity,
     authority: injectedAuthority,
+    grantsStore = null,
   } = options;
 
   if (
@@ -128,6 +130,7 @@ export function composeEnforcementChain(deps) {
     log: /** @type {never} */ (log),
     incidents,
     now: clock,
+    store: grantsStore,
   });
   const registry = new AgentRegistry({
     ca: authority,

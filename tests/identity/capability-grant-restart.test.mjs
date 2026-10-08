@@ -1,0 +1,416 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { EventLog } from '../../src/root-of-trust/index.mjs';
+import { loadCapabilityCatalog } from '../../src/identity/capability-catalog.mjs';
+import { CapabilityGrantLedger } from '../../src/identity/capability-grants.mjs';
+import { FileCapabilityGrantStore } from '../../src/identity/capability-grant-store.mjs';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+const base = {
+  agentId: 'agent:worker',
+  capability: 'action:read-registry',
+  reason: 'تدقيق حادثة رقم 7',
+  principal: { id: 'agent:minister', role: 'role:minister', state: 'active' },
+  ttlSeconds: 3600,
+};
+
+/**
+ * دفترٌ بساعةٍ متحكَّمٍ بها ومخزنٍ ملفيٍّ في دليلٍ مؤقّتٍ.
+ * @param {string} dir
+ */
+function setup(dir) {
+  const log = new EventLog();
+  const store = new FileCapabilityGrantStore({
+    filePath: path.join(dir, 'grants.json'),
+  });
+  const ledger = new CapabilityGrantLedger({
+    catalog: loadCapabilityCatalog(),
+    log,
+    store,
+  });
+  return { ledger, store };
+}
+
+test('الملفُّ الغائبُ إقلاعٌ نظيفٌ: لا منحَ ولا خطأ', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-clean-'));
+  try {
+    const { ledger } = setup(dir);
+    assert.equal(ledger.capabilitiesOf('agent:worker').size, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('إعادةُ تشغيلِ عمليّةٍ فعليةٍ تُبقي المنحَ الساريةَ وتُخفي المنتهيَ وتحفظَ المسحوبَ', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-restart-'));
+  try {
+    // العمليةُ الأولى: ساعةٌ متحكَّمٌ بها تمنحُ ثلاثاً — ساريةً ومنتهيةً ومسحوبةً.
+    const log = new EventLog();
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    const grantedAtMs = Date.now() - 120_000; // قبل دقيقتين
+    const ledger = new CapabilityGrantLedger({
+      catalog: loadCapabilityCatalog(),
+      log,
+      store,
+      now: () => new Date(grantedAtMs),
+    });
+    const live = ledger.grant({ ...base, ttlSeconds: 3600 });
+    const expired = ledger.grant({
+      ...base,
+      reason: 'منحة انقضت مدتها قبل الإقلاع الثاني',
+      ttlSeconds: 60,
+    });
+    const revoked = ledger.grant({
+      ...base,
+      reason: 'منحة سُحبت قبل الإقلاع الثاني',
+      ttlSeconds: 3600,
+    });
+    ledger.revoke(revoked.id, 'حادثة اختراق مشتبهة');
+    assert.equal(fs.existsSync(store.filePath), true, 'المنحُ تُكتبُ اللقطةَ فورَ كلِّ منحٍ وسحبٍ');
+    const snapshot = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
+    assert.equal(snapshot.length, 3, 'المنحُ الثلاثُ في اللقطةِ: الساريةُ والمنتهيةُ والمسحوبةُ');
+
+    // العملليّةُ الجديدةُ (ابنةٌ حقيقيةٌ): تعيدَ بناءَ الدفترِ من القرصِ وحدها.
+    const childScript = path.join(dir, 'child.mjs');
+    // نكتبُ النصَّ كاستيرادٍ صريحٍ لا كتوليدٍ نصيٍّ هشٍّ:
+    fs.writeFileSync(
+      childScript,
+      [
+        `import { CapabilityGrantLedger } from ${JSON.stringify(pathToFileURL(path.join(REPO_ROOT, 'src/identity/capability-grants.mjs')).href)};`,
+        `import { FileCapabilityGrantStore } from ${JSON.stringify(pathToFileURL(path.join(REPO_ROOT, 'src/identity/capability-grant-store.mjs')).href)};`,
+        `import { loadCapabilityCatalog } from ${JSON.stringify(pathToFileURL(path.join(REPO_ROOT, 'src/identity/capability-catalog.mjs')).href)};`,
+        `const store = new FileCapabilityGrantStore({ filePath: ${JSON.stringify(store.filePath)} });`,
+        `const ledger = new CapabilityGrantLedger({`,
+        `  catalog: loadCapabilityCatalog(),`,
+        `  log: { append: () => {} },`,
+        `  store,`,
+        `});`,
+        `const grants = [...ledger.grants.values()].map((g) => ({`,
+        `  id: g.id,`,
+        `  expiresAt: g.expiresAt,`,
+        `  revokedAt: g.revokedAt,`,
+        `  active: ledger.capabilitiesOf(${JSON.stringify(base.agentId)}).size > 0 && ledger.activeGrants(${JSON.stringify(base.agentId)}).some((x) => x.id === g.id),`,
+        `}));`,
+        `console.log(JSON.stringify({ count: grants.length, grants }));`,
+      ].join('\n'),
+      'utf8',
+    );
+    const run = spawnSync(process.execPath, [childScript], { encoding: 'utf8' });
+    assert.equal(run.status, 0, `العملليّةُ الابنةُ فشلت: ${run.stderr}`);
+    const seen =
+      /** @type {{ count: number, grants: Array<{ id: string, active: boolean, revokedAt: string | null }> }} */ (
+        JSON.parse(run.stdout.trim())
+      );
+    assert.equal(seen.count, 3, 'المنحُ الثلاثُ نجت من إعادةِ التشغيلِ الفعليةِ');
+    const liveAfter = seen.grants.find((g) => g.id === live.id);
+    const expiredAfter = seen.grants.find((g) => g.id === expired.id);
+    const revokedAfter = seen.grants.find((g) => g.id === revoked.id);
+    assert.ok(liveAfter, 'المنحةُ الساريةُ موجودةٌ في العمليّةِ الابنةِ');
+    assert.equal(liveAfter.active, true, 'الساريةُ تبقى ساريةً في العمليّةِ الجديدةِ');
+    assert.ok(expiredAfter, 'المنحةُ المنتهيةُ موجودةٌ في العمليّةِ الابنةِ');
+    assert.equal(
+      expiredAfter.active,
+      false,
+      'المنتهيةُ لا تعودُ ساريةً بإعادةِ التشغيلِ — الانتهاءُ يُحسبُ وقتَ القراءةِ',
+    );
+    assert.ok(revokedAfter, 'المنحةُ المسحوبةُ موجودةٌ في العمليّةِ الابنةِ');
+    assert.notEqual(revokedAfter.revokedAt, null, 'السحبُ يبقى بعدَ إعادةِ التشغيلِ');
+    assert.equal(revokedAfter.active, false, 'والمسحوبةُ لا تعودُ فعّالةً');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('لقطةٌ معطوبةٌ تُرفعُ بخطأٍ مسمّى لا تُفترضُ فارغة', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-corrupt-'));
+  try {
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    fs.writeFileSync(store.filePath, '{ليست JSON', 'utf8');
+    assert.throws(
+      () =>
+        new CapabilityGrantLedger({
+          catalog: loadCapabilityCatalog(),
+          log: new EventLog(),
+          store,
+        }),
+      /CAPABILITY_GRANT_STORE_UNREADABLE/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('مدخلٌ مُسترجَعٌ ناقصُ الحقولِ أو فاسدُ التاريخِ أو متناقضُ السحبِ يُرفضُ', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-invalid-'));
+  try {
+    const valid = {
+      id: 'grant:x',
+      agentId: 'agent:worker',
+      capability: 'action:read-registry',
+      reason: 'سبب مكتوب',
+      grantedBy: 'agent:minister',
+      grantorRole: 'role:minister',
+      grantedAt: '2026-10-08T10:00:00.000Z',
+      expiresAt: '2026-10-08T11:00:00.000Z',
+      revokedAt: null,
+      revokedReason: null,
+    };
+    /** @type {Array<[string, Record<string, unknown>]>} */
+    const cases = [
+      ['ناقصُ حقلٍ نصيٍّ', { ...valid, reason: '' }],
+      ['تاريخٌ غيرُ مقروءٍ', { ...valid, expiresAt: 'ليست تاريخاً' }],
+      ['سحبٌ بلا سببٍ', { ...valid, revokedAt: '2026-10-08T10:30:00.000Z', revokedReason: null }],
+      ['سببُ سحبٍ بلا ختمٍ', { ...valid, revokedReason: 'سبب بلا ختم' }],
+    ];
+    for (const [label, entry] of cases) {
+      const store = new FileCapabilityGrantStore({
+        filePath: path.join(dir, 'grants.json'),
+      });
+      store.save([entry]);
+      assert.throws(
+        () =>
+          new CapabilityGrantLedger({
+            catalog: loadCapabilityCatalog(),
+            log: new EventLog(),
+            store,
+          }),
+        /CAPABILITY_GRANT_STORE_INVALID/,
+        label,
+      );
+    }
+    // ومعرِّفٌ مكرَّرٌ مرفوضٌ كذلك:
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    store.save([valid, { ...valid }]);
+    assert.throws(
+      () =>
+        new CapabilityGrantLedger({
+          catalog: loadCapabilityCatalog(),
+          log: new EventLog(),
+          store,
+        }),
+      /CAPABILITY_GRANT_STORE_INVALID/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('فشلُ كتابةِ المنحِ يتركُ الحالةَ كما كانتْ: لا أثرَ في الذاكرةِ ولا في القرصِ', () => {
+  const log = new EventLog();
+  const failingStore = {
+    load: () => null,
+    save: () => {
+      throw new Error('disk full');
+    },
+  };
+  const ledger = new CapabilityGrantLedger({
+    catalog: loadCapabilityCatalog(),
+    log,
+    store: failingStore,
+  });
+  assert.throws(
+    () => ledger.grant({ ...base, ttlSeconds: 60 }),
+    /CAPABILITY_GRANT_STORE_WRITE_FAILED/,
+    'منحٌ لم يُلتزمْ يُرفعُ لا يُمرُّ صامتاً',
+  );
+  assert.equal(
+    ledger.grants.size,
+    0,
+    'الخريطةُ تابعةٌ للقرصِ: منحٌ فشلَ التزامُه لا يظهرُ في الذاكرةِ',
+  );
+  assert.equal(ledger.capabilitiesOf('agent:worker').size, 0);
+  // وإعادةُ المحاولةِ على مخزنٍ سليمٍ تنجحُ — الفشلُ لم يسمِّمِ الحالةَ.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-retry-'));
+  try {
+    const goodStore = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    ledger.store = goodStore;
+    ledger.grant({ ...base, ttlSeconds: 60 });
+    assert.equal(ledger.grants.size, 1);
+    assert.equal(
+      JSON.parse(fs.readFileSync(goodStore.filePath, 'utf8')).length,
+      1,
+      'وبعدَ النجاحِ اللقطةُ على القرصِ',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('فشلُ كتابةِ السحبِ لا يُوسّعُ صلاحيةً: المسحوبُ يبقى سارياً في الذاكرةِ والقرصِ معاً', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-revoke-fail-'));
+  try {
+    const log = new EventLog();
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    const ledger = new CapabilityGrantLedger({
+      catalog: loadCapabilityCatalog(),
+      log,
+      store,
+    });
+    const granted = ledger.grant({ ...base, ttlSeconds: 3600 });
+
+    // المخزنُ يتعطّلُ بعدَ المنحِ: السحبُ يفشلُ فلا يقعَ أصلاً.
+    ledger.store = {
+      load: () => null,
+      save: () => {
+        throw new Error('disk full');
+      },
+    };
+    assert.throws(
+      () => ledger.revoke(granted.id, 'سبب إداري'),
+      /CAPABILITY_GRANT_STORE_WRITE_FAILED/,
+    );
+    assert.equal(
+      ledger.capabilitiesOf('agent:worker').size,
+      1,
+      'سحبٌ فشلَ التزامُه لا يُنفَّذُ في الذاكرةِ — فلا تتقدّمَ الذاكرةُ على القرصِ',
+    );
+    const onDisk = /** @type {Array<{ id: string, revokedAt: string | null }>} */ (
+      JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
+    );
+    const onDiskGranted = onDisk.find((g) => g.id === granted.id);
+    assert.ok(onDiskGranted, 'المنحةُ على القرصِ');
+    assert.equal(
+      onDiskGranted.revokedAt,
+      null,
+      'والقرصُ ما زالَ يقولُ سارياً — الحالتانِ متّسقتانِ',
+    );
+
+    // وإعادةُ المحاولةِ بمخزنٍ سليمٍ تنجحُ (لا مأزقَ «مُسحوبٌ في الذاكرةِ فقط»).
+    ledger.store = store;
+    ledger.revoke(granted.id, 'سبب إداري');
+    assert.equal(ledger.capabilitiesOf('agent:worker').size, 0);
+    const afterRetry = /** @type {Array<{ id: string, revokedAt: string | null }>} */ (
+      JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
+    );
+    const retried = afterRetry.find((g) => g.id === granted.id);
+    assert.ok(retried, 'المنحةُ بعدَ إعادةِ المحاولةِ على القرصِ');
+    assert.notEqual(retried.revokedAt, null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('السحبُ والتفريغُ يُدمانِ اللقطةَ أيضاً لا المنحُ وحدَه', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-persist-'));
+  try {
+    const { ledger, store } = setup(dir);
+    const granted = ledger.grant({ ...base, ttlSeconds: 60 });
+    const afterGrant = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
+    assert.equal(afterGrant.length, 1);
+
+    ledger.revoke(granted.id, 'سبب إداري');
+    const afterRevoke = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
+    assert.notEqual(afterRevoke[0].revokedAt, null, 'السحبُ مُدوَّمٌ في اللقطةِ');
+
+    // التفريغُ يُدوِمُ الحذفَ: لقطةٌ بعدَ انتهاءِ المدةِ تصيرُ فارغةً.
+    const pruned = ledger.prune();
+    assert.equal(pruned, 1);
+    const afterPrune = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
+    assert.deepEqual(afterPrune, [], 'التفريغُ مُدوَّمٌ لا ذاكرةٌ تعودُ بما حُذفَ');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('حذفُ حقلي السحبِ من لقطةٍ يُرفضُ: المسحوبَ لا يُبعثُ سارياً', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-norevoke-'));
+  try {
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    const revokedGrant = {
+      id: 'grant:r',
+      agentId: 'agent:worker',
+      capability: 'action:read-registry',
+      reason: 'سبب مكتوب',
+      grantedBy: 'agent:minister',
+      grantorRole: 'role:minister',
+      grantedAt: '2026-10-08T10:00:00.000Z',
+      expiresAt: '2027-10-08T10:00:00.000Z',
+      revokedAt: '2026-10-08T10:30:00.000Z',
+      revokedReason: 'حادثة',
+    };
+    const { revokedAt: _a, revokedReason: _b, ...withoutFields } = revokedGrant;
+    store.save([withoutFields]);
+    assert.throws(
+      () =>
+        new CapabilityGrantLedger({
+          catalog: loadCapabilityCatalog(),
+          log: new EventLog(),
+          store,
+        }),
+      /CAPABILITY_GRANT_STORE_INVALID/,
+      'غيابُ حقلي السحبِ رفضٌ لا صفرٌ — وإلا صارَ حذفُ الحقلينِ طريقَ إحياءِ مسحوبٍ',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('لقطةٌ تُحيي قدرةً محرَّمةً تُرفضُ: الاسترجاعُ لا يلتفُّ حولَ المحرَّمِ', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-forbidden-'));
+  try {
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    store.save([
+      {
+        id: 'grant:f',
+        agentId: 'agent:worker',
+        capability: 'sovereign:root',
+        reason: 'محاولة إحياء محرَّم عبر اللقطة',
+        grantedBy: 'agent:minister',
+        grantorRole: 'role:minister',
+        grantedAt: '2026-10-08T10:00:00.000Z',
+        expiresAt: '2027-10-08T10:00:00.000Z',
+        revokedAt: null,
+        revokedReason: null,
+      },
+    ]);
+    assert.throws(
+      () =>
+        new CapabilityGrantLedger({
+          catalog: loadCapabilityCatalog(),
+          log: new EventLog(),
+          store,
+        }),
+      /CAPABILITY_GRANT_STORE_INVALID/,
+      'ما يرفضُه المسارُ الحيُّ يرفضُه الاسترجاعُ',
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('جذرُ التركيبِ يمرِّرُ المخزنَ إلى الدفترِ لا يبنيهُ في الخفاءِ', async () => {
+  const { composeEnforcementChain } = await import('../../src/core/composition-root.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-compose-'));
+  try {
+    const store = new FileCapabilityGrantStore({
+      filePath: path.join(dir, 'grants.json'),
+    });
+    const chain = composeEnforcementChain({
+      log: new EventLog(),
+      grantsStore: store,
+    });
+    assert.equal(chain.grants.store, store, 'المخزنُ الذي مرَّرَهُ المُركِّبُ هو الذي يعيشُ');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

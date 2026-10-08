@@ -17,10 +17,15 @@
  *   2. **المدة لها سقف من البيانات**: `maxDurationSeconds` في الكتالوج، فمن طلب
  *      أطول رُفض — والسقف يُقرأ من الملف لا من الكود.
  *   3. **المانح غير المستفيد**: من منح نفسه قدرةً صار سقفه سقف رغبته.
- *
- * **حدٌّ معلن:** الدفتر في الذاكرة، فالمنح يُمحى بإعادة التشغيل — وهذا **أقل
- * القيود ضرراً** لأن سقوط منحٍ بإعادة التشغيل يضيّق الصلاحية ولا يوسّعها.
- * إدامته مؤجَّلة إلى `M7`، ومسجَّلة في `docs/AGENT_CONTAINMENT.md §6`.
+ * **دوامُ المنحِ عقدٌ على المُركِّبِ (شطرُ «المنح» من `R6-A-05`، `WL-355`):** الدفترُ
+ * يقبلُ مخزناً بعقدِ `load`/`save` — إن مُرِّرَ استرجعَ المنحَ عندَ البناءِ وأدامَ
+ * كلَّ تغييرٍ (منحٌ وسحبٌ وتفريغٌ) فورَ وقوعِه، وإن لم يُمَرَّر بقيَ في الذاكرةِ
+ * كما كانَ (تركيبٌ يختارُ عدمَ الدوامِ يُضيّقُ الصلاحيةَ عندَ الإقلاعِ لا
+ * يُوسّعُها). والاسترجاعُ **مُتحقَّقٌ لا مُصدَّقٌ**: كلُّ مُدخلٍ يُفحصُ حقلاً
+ * حقلاً (نصوصٌ غيرُ فارغةٍ وتواريخُ مقروءةٌ واتّساقُ السحبِ)، ولقطةٌ معطوبةٌ
+ * تُرفَعُ بخطأٍ مُسمّى لا تُفترَضُ سليمةً. وحدٌّ مُعلَنٌ: اللقطةُ الملفّيةُ ليست
+ * مختومةً — حمايةُ ملفّاتِها من العبثِ شأنُ التركيبِ الذي يختارُ موضعَها (جذرُ
+ * حالةٍ مختومٍ في الإنتاجِ)، وهذا عينُ عقدِ مخزنِ ميزانيةِ الاستدلالِ (`LIM-1`).
  */
 
 import { randomUUID } from 'node:crypto';
@@ -52,16 +57,140 @@ import { IncidentSeverity } from './incident-register.mjs';
 
 export class CapabilityGrantLedger {
   /**
-   * @param {{ catalog?: CapabilityCatalog, log?: { append: (type: string, actor: string, payload: object) => unknown }, incidents?: import('./incident-register.mjs').IncidentRegister | null, now?: () => Date }} [deps]
+   * @param {{ catalog?: CapabilityCatalog, log?: { append: (type: string, actor: string, payload: object) => unknown }, incidents?: import('./incident-register.mjs').IncidentRegister | null, now?: () => Date, store?: { load(): unknown, save(entries: CapabilityGrant[]): void } | null }} [deps]
    */
-  constructor({ catalog, log, incidents = null, now } = {}) {
+  constructor({ catalog, log, incidents = null, now, store = null } = {}) {
     if (!catalog || !log) throw new Error('CAPABILITY_LEDGER_DEPENDENCY_MISSING');
     this.catalog = catalog;
     this.log = log;
     this.incidents = incidents;
     this.now = now ?? (() => new Date());
+    /**
+     * عقدُ الدوامِ: من يملكُ اللقطةَ يملكُ أينَ تعيشُ، والدفترُ يطلبُ الواجهةَ.
+     * @type {{ load(): unknown, save(entries: CapabilityGrant[]): void } | null}
+     */
+    this.store = store;
     /** @type {Map<string, CapabilityGrant>} */
     this.grants = new Map();
+    if (this.store !== null) {
+      this.#restoreFromStore();
+    }
+  }
+
+  /**
+   * استرجاعُ المنحِ من المخزنِ عندَ البناءِ. اللقطةُ **مُتحقَّقٌ منها** لا
+   * مُصدَّقٌ عليها: كلُّ مُدخلٍ يُفحصُ حقلاً حقلاً، وكلُّ خللٍ يُرفَعُ بخطأٍ
+   * مُسمّى — فمنحٌ مجهولُ الحالةِ لا يُفترَضُ سليماً ولا معدوماً. والملفُّ
+   * الغائبُ إقلاعٌ نظيفٌ لا خطأٌ.
+   * @returns {void}
+   */
+  #restoreFromStore() {
+    const store = this.store;
+    if (store === null) return;
+    /** @type {unknown} */
+    let snapshot;
+    try {
+      snapshot = store.load();
+    } catch (error) {
+      throw new Error('CAPABILITY_GRANT_STORE_UNREADABLE', { cause: error });
+    }
+    if (snapshot === null || snapshot === undefined) return;
+    if (!Array.isArray(snapshot)) {
+      throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+    }
+    const seen = new Set();
+    for (const entry of snapshot) {
+      const grant = this.#validatedGrant(entry);
+      if (seen.has(grant.id)) throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+      seen.add(grant.id);
+      this.grants.set(grant.id, grant);
+    }
+  }
+
+  /**
+   * فحصُ مُدخلٍ مُسترجَعٍ حقلاً حقلاً. النصوصُ غيرُ الفارغةِ، والتواريخُ
+   * مقروءةٌ، والسحبُ متّسقٌ (ختمٌ معَ سببٍ أو لا شيءَ معَ لا شيءَ). والمُدخلُ
+   * السليمُ يُجمَّدُ كما تُجمَّدُ المنحُ المُنشأةُ في المسارِ الحيّ.
+   * @param {unknown} entry
+   * @returns {CapabilityGrant}
+   */
+  #validatedGrant(entry) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+    }
+    const record = /** @type {Record<string, unknown>} */ (entry);
+    for (const field of ['id', 'agentId', 'capability', 'reason', 'grantedBy', 'grantorRole']) {
+      const value = record[field];
+      if (typeof value !== 'string' || value.trim() === '') {
+        throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+      }
+    }
+    for (const field of ['grantedAt', 'expiresAt']) {
+      const value = record[field];
+      if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
+        throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+      }
+    }
+    // حذفُ حقلي السحبِ من لقطةٍ لا يجعلُ المسحوبَ سارياً: الغيابُ رفضٌ لا صفرٌ
+    // — فالحقلانِ مطلوبانِ حاضرينِ (قيمةً أو `null`).
+    if (!('revokedAt' in record) || !('revokedReason' in record)) {
+      throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+    }
+    // والقدرةُ المحرَّمةُ لا يُبعثُها مخزنٌ: ما يرفضُه المسارُ الحيُّ يرفضُه
+    // الاسترجاعُ، وإلا صارتِ اللقطةُ طريقاً حولَ المحرَّمِ.
+    if (this.catalog.forbidden.has(String(record.capability))) {
+      throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+    }
+    const revokedAt = record.revokedAt;
+    const revokedReason = record.revokedReason;
+    if (revokedAt === null) {
+      if (revokedReason !== null && revokedReason !== undefined) {
+        throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+      }
+    } else {
+      if (typeof revokedAt !== 'string' || !Number.isFinite(Date.parse(revokedAt))) {
+        throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+      }
+      if (typeof revokedReason !== 'string' || revokedReason.trim() === '') {
+        throw new Error('CAPABILITY_GRANT_STORE_INVALID');
+      }
+    }
+    return Object.freeze({
+      id: String(record.id),
+      agentId: String(record.agentId),
+      capability: String(record.capability),
+      reason: String(record.reason),
+      grantedBy: String(record.grantedBy),
+      grantorRole: String(record.grantorRole),
+      grantedAt: String(record.grantedAt),
+      expiresAt: String(record.expiresAt),
+      revokedAt: revokedAt === null || revokedAt === undefined ? null : String(revokedAt),
+      revokedReason:
+        revokedReason === null || revokedReason === undefined ? null : String(revokedReason),
+    });
+  }
+
+  /**
+   * الالتزامُ **قبلَ الأثرِ**: اللقطةُ الجديدةُ تُكتبُ إلى المخزنِ أوّلاً، فإذا
+   * نجحتْ حلّتْ محلَّ الخريطةِ، وإذا فشلتْ رُفعَ الخطأُ **والخريطةُ كما كانت** —
+   * فلا منحةً في الذاكرةِ بلا أثرٍ على القرصِ، ولا سحباً في الذاكرةِ يعودُ
+   * سارياً بإعادةِ التشغيلِ. بهذا لا يقعَ بعدَ فشلِ كتابةٍ إلا حالٌ متّسقٌ:
+   * ما لم يُلتزمْ لم يقعْ، والمُنفِّذُ يُخبَرُ بصوتٍ فيُعيدُ المحاولةَ.
+   *
+   * **لماذا الالتزامُ قبلَ الأثرِ لا بعده:** فاقدُ السحبِ يُوسّعُ الصلاحيةَ لا
+   * يُضيّقُها (سحبٌ رُفعَ من القرصِ يعودُ بثقلِه)، وفاقدُ المنحِ يُضيّقُها —
+   * فالخريطةُ تابعةٌ للقرصِ لا العكسُ، والذاكرةُ لا تسبقُ الالتزامَ أبداً.
+   * @param {Map<string, CapabilityGrant>} next
+   * @returns {void}
+   */
+  #commit(next) {
+    if (this.store === null) return;
+    try {
+      this.store.save([...next.values()]);
+    } catch (error) {
+      throw new Error('CAPABILITY_GRANT_STORE_WRITE_FAILED', { cause: error });
+    }
+    this.grants = next;
   }
 
   /**
@@ -165,7 +294,13 @@ export class CapabilityGrantLedger {
       revokedAt: null,
       revokedReason: null,
     });
-    this.grants.set(record.id, record);
+    if (this.store !== null) {
+      const next = new Map(this.grants);
+      next.set(record.id, record);
+      this.#commit(next);
+    } else {
+      this.grants.set(record.id, record);
+    }
     this.log.append('capability.granted', verifiedGrantedBy, {
       id: record.id,
       agentId,
@@ -228,7 +363,13 @@ export class CapabilityGrantLedger {
       revokedAt: this.now().toISOString(),
       revokedReason: reason,
     });
-    this.grants.set(id, revoked);
+    if (this.store !== null) {
+      const next = new Map(this.grants);
+      next.set(id, revoked);
+      this.#commit(next);
+    } else {
+      this.grants.set(id, revoked);
+    }
     this.log.append('capability.revoked', current.grantedBy, {
       id,
       agentId: current.agentId,
@@ -262,12 +403,23 @@ export class CapabilityGrantLedger {
   prune() {
     const atMs = this.now().getTime();
     let count = 0;
+    /** @type {Set<string>} */
+    const expired = new Set();
     for (const [id, grant] of this.grants) {
       if (grant.revokedAt === null && Date.parse(grant.expiresAt) > atMs) continue;
-      this.grants.delete(id);
+      expired.add(id);
       count += 1;
     }
-    if (count > 0) this.log.append('capability.grants.pruned', 'crown', { count });
+    if (count > 0) {
+      if (this.store !== null) {
+        const next = new Map(this.grants);
+        for (const id of expired) next.delete(id);
+        this.#commit(next);
+      } else {
+        for (const id of expired) this.grants.delete(id);
+      }
+      this.log.append('capability.grants.pruned', 'crown', { count });
+    }
     return count;
   }
 }
