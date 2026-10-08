@@ -1,0 +1,7 @@
+# HEAD=284f74d0b2803cbe909ced0114144f6e1f814ccd cmd: REPO=$PWD env -u DATABASE_URL node astra-01-variants.mjs
+V0 control      : reboot vetoed=true reason=v0
+V1 no commandId : reboot vetoed=false reason=null
+V2 reused id    : reboot vetoed=false reason=null
+  V3 replayed body = {"vetoed":false,"reason":null,"commandId":"4d647ccbe886f9e442099c31c93faa4f"}
+V3 replayed clear: reboot vetoed=false reason=null
+exit=0

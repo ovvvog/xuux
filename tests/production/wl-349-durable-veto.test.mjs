@@ -35,6 +35,15 @@ function rig() {
   return { root, keys, secret, factorSecrets };
 }
 
+/** ما تتحقّقُ به الاستعادةُ من سلطةِ القيد (‏`WL-352`): المفتاحُ العامُّ ودفترُ الأوامرِ والأوامرُ المُعلَنة. */
+function authorityOf(system) {
+  return {
+    king: system.crown.king,
+    ledger: system.rootOfTrust.ledger,
+    commands: loadConsolePolicy().commands,
+  };
+}
+
 async function issueVeto(system, token, reason) {
   const signed = crownCommand({ action: 'veto-commands', target: 'crown:gateway', reason });
   return system.royalConsole.issue({
@@ -124,7 +133,7 @@ describe('WL-349 — النقضُ الملكيُّ الدائم', () => {
     const third = await boot(root, { keys, factorSecrets });
     try {
       assert.equal(third.crown.veto.enabled, true, 'عادَ النقضُ بعدَ رفعِه.');
-      const restored = await vetoFromSealedLog(third.auditLog, VETO_EVENT);
+      const restored = await vetoFromSealedLog(third.auditLog, VETO_EVENT, authorityOf(third));
       assert.deepEqual(
         { vetoed: restored?.vetoed, reason: restored?.reason },
         { vetoed: false, reason: null },
@@ -226,5 +235,282 @@ describe('WL-349 — النقضُ الملكيُّ الدائم', () => {
       /TRUNCATED_EVENT_LOG|CORRUPT_EVENT_LOG|PRODUCTION_VETO_RECORD_UNREADABLE/.test(String(error)),
     );
     rmSync(root, { recursive: true, force: true });
+  });
+});
+
+// `WL-352` (‏`R12-ASTRA-01`): مُحوِّلُ السجلِّ يحملُه كلُّ مكوِّنٍ مركَّبٍ في الإنتاج (‏التاجُ والنواةُ والسلسلةُ
+// والمصادقةُ والديوان) ويُرجَعُ `auditLog` لحاملِ النظام. فقيدُ حالةٍ يكتبُه أيُّ حاملٍ لا يرفعُ نقضاً:
+// السلطةُ من الأمرِ الموقَّعِ المحمولِ في القيدِ والمُثبَّتِ في الدفتر، والإعادةُ لا تُعيدُ أمراً.
+describe('WL-352 — R12-ASTRA-01: قيدُ النقضِ لا يُستعادُ بلا سلطةٍ ملكيّة', () => {
+  async function vetoThenForge(forge) {
+    const { root, keys, secret, factorSecrets } = rig();
+    const first = await boot(root, { keys, factorSecrets });
+    try {
+      const { opened } = await session(first, secret);
+      await forge(first, opened.token);
+    } finally {
+      await first.close();
+    }
+    return { root, keys, factorSecrets };
+  }
+  async function bootRefusedUnauthorized(ctx) {
+    await assert.rejects(
+      boot(ctx.root, { keys: ctx.keys, factorSecrets: ctx.factorSecrets }),
+      new RegExp(SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED),
+    );
+    rmSync(ctx.root, { recursive: true, force: true });
+  }
+  async function lastVetoBody(system) {
+    await system.rootOfTrust.log.flush?.();
+    const events = system.auditLog.events.filter((event) => event.type === VETO_EVENT);
+    return system.auditLog.openEvent(events[events.length - 1]);
+  }
+
+  test('A1 — قيدُ رفعٍ بلا أمرٍ موقَّعٍ (‏مسارُ المسبار) يمنعُ الإقلاعَ ولا يرفعُ النقض', async () => {
+    const ctx = await vetoThenForge(async (system, token) => {
+      await issueVeto(system, token, 'نقضٌ قبلَ قيدٍ مُصطنَع');
+      await system.auditLog.appendSealed(VETO_EVENT, 'agent:log-writer', { vetoed: false });
+    });
+    await bootRefusedUnauthorized(ctx);
+
+    // ضابطُ عزلٍ: التوقيعُ صالحٌ لأمرٍ حقيقيٍّ ومُثبَّتٍ، لكنّ القيدَ يحذفُ royalCommand وحدَه.
+    // ينبغي أن يرفضَ حارسُ غيابِ الأمر قبل استدعاءِ المتحقِّق؛ وإذا عُطِّل هذا الحارسُ يصلُ التنفيذُ
+    // إلى فحصِ التوقيع، فيختلفُ سببُ الرفضِ ويفشلُ هذا الاختبارُ بدلاً من أن يُخفي الطفرةَ.
+    const { root, keys, factorSecrets } = rig();
+    const system = await boot(root, { keys, factorSecrets });
+    try {
+      const signed = crownCommand({
+        action: 'clear-veto',
+        target: 'crown:gateway',
+        reason: 'أمرٌ موقَّعٌ صالحٌ لا يُدرَجُ في القيد',
+      });
+      const verify = system.crown.king.verify.bind(system.crown.king);
+      let verifierCalls = 0;
+      const authority = {
+        ...authorityOf(system),
+        king: {
+          verify(command, signature) {
+            verifierCalls += 1;
+            return verify(command, signature);
+          },
+        },
+        ledger: { has: () => true },
+      };
+      const log = {
+        sealed: false,
+        events: [
+          {
+            id: 'a1-missing-royal-command',
+            type: VETO_EVENT,
+            data: {
+              vetoed: false,
+              reason: null,
+              commandId: signed.command.id,
+              signature: signed.signature,
+            },
+          },
+        ],
+      };
+      await assert.rejects(vetoFromSealedLog(log, VETO_EVENT, authority), (error) => {
+        assert.match(error.message, /— لا أمرَ ملكيَّ في القيد$/);
+        return true;
+      });
+      assert.equal(verifierCalls, 0, 'غيابُ الأمرِ يجبُ أن يُرفَضَ قبلَ فحصِ التوقيع');
+    } finally {
+      await system.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('A2 — قيدُ رفعٍ بمعرّفِ أمرِ نقضٍ مُثبَّتٍ وتوقيعِه مقلوبَ الحالةِ يُرفَض', async () => {
+    const ctx = await vetoThenForge(async (system, token) => {
+      await issueVeto(system, token, 'نقضٌ يُنسَخُ أمرُه');
+      const genuine = await lastVetoBody(system);
+      await system.auditLog.appendSealed(VETO_EVENT, 'agent:log-writer', {
+        ...genuine,
+        vetoed: false,
+        reason: null,
+      });
+    });
+    await bootRefusedUnauthorized(ctx);
+  });
+
+  test('A3 — إعادةُ قيدِ رفعٍ صحيحٍ بعدَ نقضٍ أحدثَ تُرفَض (‏لا يُعادُ أمرٌ)', async () => {
+    const ctx = await vetoThenForge(async (system, token) => {
+      await issueVeto(system, token, 'نقضٌ أوّل');
+      await issueClear(system, token, 'رفعٌ صحيح');
+      const genuineClear = await lastVetoBody(system);
+      assert.equal(genuineClear.vetoed, false);
+      await issueVeto(system, token, 'نقضٌ أحدث');
+      await system.auditLog.appendSealed(VETO_EVENT, 'agent:log-writer', genuineClear);
+    });
+    await bootRefusedUnauthorized(ctx);
+  });
+
+  test('A4 — أمرُ رفعٍ موقَّعٌ صحيحاً لم يُقبَل في الدفترِ قطّ لا يرفعُ النقض', async () => {
+    const ctx = await vetoThenForge(async (system, token) => {
+      await issueVeto(system, token, 'نقضٌ قبلَ أمرٍ لم يُقبَل');
+      const signed = crownCommand({
+        action: 'clear-veto',
+        target: 'crown:gateway',
+        reason: 'لم يُقبَل',
+      });
+      await system.auditLog.appendSealed(VETO_EVENT, 'agent:log-writer', {
+        vetoed: false,
+        reason: null,
+        commandId: signed.command.id,
+        royalCommand: signed.command,
+        signature: signed.signature,
+      });
+    });
+    await bootRefusedUnauthorized(ctx);
+  });
+
+  test('A5 — قيدُ نقضٍ بسببٍ غيرِ سببِ الأمرِ الموقَّعِ يُرفَض، وبسببِه يُقبَل', async () => {
+    // على سجلٍّ اصطناعيٍّ: قيدٌ بسببٍ مُبدَّلٍ لا يبلغُه مسارٌ مشروعٌ (‏كلُّ أمرٍ مقبولٍ يُختَمُ قيدُه
+    // مرّةً، والإعادةُ مرفوضةٌ في A3)؛ فيُقاسُ ربطُ السببِ وحدَه، والمفتاحُ مفتاحُ الإنتاجِ نفسُه.
+    const { root, keys, factorSecrets } = rig();
+    const system = await boot(root, { keys, factorSecrets });
+    try {
+      const signed = crownCommand({
+        action: 'veto-commands',
+        target: 'crown:gateway',
+        reason: 'السببُ الموقَّع',
+      });
+      const logOf = (reason) => ({
+        sealed: false,
+        openEvent: async () => ({}),
+        events: [
+          {
+            id: 'e1',
+            type: VETO_EVENT,
+            data: {
+              vetoed: true,
+              reason,
+              commandId: signed.command.id,
+              royalCommand: signed.command,
+              signature: signed.signature,
+            },
+          },
+        ],
+      });
+      const authority = { ...authorityOf(system), ledger: { has: () => true } };
+      await assert.rejects(
+        vetoFromSealedLog(logOf('سببٌ مُبدَّل'), VETO_EVENT, authority),
+        new RegExp(SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED),
+      );
+      const restored = await vetoFromSealedLog(logOf('السببُ الموقَّع'), VETO_EVENT, authority);
+      assert.deepEqual(restored, {
+        vetoed: true,
+        reason: 'السببُ الموقَّع',
+        commandId: signed.command.id,
+      });
+    } finally {
+      await system.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('A8 — توقيعُ أمرٍ آخرَ على أمرِ رفعٍ مُصطنَعٍ لا يُقبَل، والفعلُ غيرُ فعلِ الحالةِ لا يُقبَل', async () => {
+    // سجلٌّ اصطناعيٌّ ودفترٌ يُثبِتُ كلَّ معرّف: يُعزَلُ فحصا التوقيعِ والفعلِ عن فحصِ الدفتر.
+    const { root, keys, factorSecrets } = rig();
+    const system = await boot(root, { keys, factorSecrets });
+    try {
+      const authority = { ...authorityOf(system), ledger: { has: () => true } };
+      const record = (royalCommand, signature) => ({
+        sealed: false,
+        openEvent: async () => ({}),
+        events: [
+          {
+            id: 'e1',
+            type: VETO_EVENT,
+            data: {
+              vetoed: false,
+              reason: null,
+              commandId: royalCommand.id,
+              royalCommand,
+              signature,
+            },
+          },
+        ],
+      });
+      const halt = crownCommand({
+        action: 'stop-state',
+        target: 'state:sovereign',
+        reason: 'إيقاف',
+      });
+      // (أ) أمرُ رفعٍ لم يوقّعه الملكُ يحملُ توقيعَ أمرٍ آخرَ صحيحاً.
+      const forged = { ...halt.command, action: 'clear-veto', target: 'crown:gateway' };
+      await assert.rejects(
+        vetoFromSealedLog(record(forged, halt.signature), VETO_EVENT, authority),
+        new RegExp(SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED),
+      );
+      // (ب) أمرٌ موقَّعٌ صحيحاً لكنّه ليس أمرَ رفعِ النقض.
+      await assert.rejects(
+        vetoFromSealedLog(record(halt.command, halt.signature), VETO_EVENT, authority),
+        new RegExp(SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED),
+      );
+      const rejects = (log) =>
+        assert.rejects(
+          vetoFromSealedLog(log, VETO_EVENT, authority),
+          new RegExp(SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED),
+        );
+      // (ج) الهدفُ صحيحٌ والفعلُ فعلُ النقضِ لا رفعِه: الفعلُ وحدَه يُفرِّق.
+      const veto = crownCommand({
+        action: 'veto-commands',
+        target: 'crown:gateway',
+        reason: 'نقض',
+      });
+      await rejects(record(veto.command, veto.signature));
+      // (د) الفعلُ فعلُ الرفعِ والهدفُ غيرُ البوابة: الهدفُ وحدَه يُفرِّق.
+      const elsewhere = crownCommand({
+        action: 'clear-veto',
+        target: 'state:sovereign',
+        reason: 'رفع',
+      });
+      await rejects(record(elsewhere.command, elsewhere.signature));
+      // (هـ) أمرُ رفعٍ صحيحٌ وقيدُه يُسمّي معرّفاً غيرَه: المعرّفُ وحدَه يُفرِّق.
+      const named = crownCommand({ action: 'clear-veto', target: 'crown:gateway', reason: 'رفع' });
+      const misnamed = record(named.command, named.signature);
+      misnamed.events[0].data.commandId = 'another-committed-command-id';
+      await rejects(misnamed);
+      // والضابطُ: أمرُ رفعٍ موقَّعٌ يُقبَلُ على السجلِّ نفسِه.
+      const clear = crownCommand({ action: 'clear-veto', target: 'crown:gateway', reason: 'رفع' });
+      const restored = await vetoFromSealedLog(
+        record(clear.command, clear.signature),
+        VETO_EVENT,
+        authority,
+      );
+      assert.equal(restored?.vetoed, false);
+    } finally {
+      await system.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('A6 — الاستعادةُ بلا مُتحقِّقٍ من السلطةِ رفضٌ مُسمّى لا قراءةٌ صامتة', async () => {
+    await assert.rejects(
+      vetoFromSealedLog({ events: [], sealed: false, openEvent: async () => ({}) }, VETO_EVENT),
+      new RegExp(SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED),
+    );
+  });
+
+  test('A7 — المسارُ المشروعُ باقٍ: نقضٌ ثمّ رفعٌ ثمّ نقضٌ بأوامرَ مُثبَّتةٍ يعودُ آخرُها بعدَ الإقلاع', async () => {
+    const reason = 'النقضُ الأخيرُ المشروع';
+    const ctx = await vetoThenForge(async (system, token) => {
+      await issueVeto(system, token, 'نقضٌ أوّل');
+      await issueClear(system, token, 'رفعٌ مشروع');
+      await issueVeto(system, token, reason);
+    });
+    const second = await boot(ctx.root, { keys: ctx.keys, factorSecrets: ctx.factorSecrets });
+    try {
+      assert.equal(second.crown.veto.enabled, false);
+      assert.equal(second.crown.veto.reason, reason);
+      const restored = await vetoFromSealedLog(second.auditLog, VETO_EVENT, authorityOf(second));
+      assert.equal(restored?.vetoed, true);
+    } finally {
+      await second.close();
+      rmSync(ctx.root, { recursive: true, force: true });
+    }
   });
 });

@@ -22,6 +22,7 @@ import { RoyalConsole, loadConsolePolicy } from '../console/royal-console.mjs';
 export const SOVEREIGN_CONSOLE_ERRORS = Object.freeze({
   FACTOR_WITNESS_UNREADABLE: 'PRODUCTION_FACTOR_WITNESS_UNREADABLE',
   VETO_RECORD_UNREADABLE: 'PRODUCTION_VETO_RECORD_UNREADABLE',
+  VETO_RECORD_UNAUTHORIZED: 'PRODUCTION_VETO_RECORD_UNAUTHORIZED',
 });
 
 /**
@@ -30,17 +31,45 @@ export const SOVEREIGN_CONSOLE_ERRORS = Object.freeze({
  *
  * قيدٌ لا يُفتَحُ، أو جسمٌ بلا `vetoed` منطقيٍّ، أو نقضٌ بلا سببٍ نصّيّ: رفضٌ مُسمّى يمنعُ
  * الإقلاع — لا «لا نقض» صامتاً؛ فقيدٌ تالفٌ قد يكونُ نقضاً قائماً، وفتحُ البوابةِ عليه فشلٌ مفتوح.
+ *
+ * `WL-352` (‏`R12-ASTRA-01`): القيدُ وحدَه ليس سلطة. ختمُ السجلِّ يُثبِتُ سلامةَ التخزين، لا أنَّ كاتبَ
+ * القيدِ يملكُ مفتاحَ الملك؛ وكلُّ مكوِّنٍ يحملُ مُحوِّلَ السجلِّ يستطيعُ إلحاقَ `{ vetoed: false }`.
+ * فالحالةُ لا تُقرأُ من حقولِ القيدِ بل من **الأمرِ الملكيِّ الموقَّعِ المحمولِ فيه**: يُتحقَّقُ من توقيعِه
+ * بالمفتاحِ العامِّ، ومن أنَّ فعلَه وهدفَه فعلُ النقضِ أو رفعِه المُعلَنُ في `config/royal-console.yaml`،
+ * ومن أنَّ معرّفَه مُثبَّتٌ في دفترِ الأوامر (‏قُبِلَ فعلاً)، ومن أنّه لم يَرِد في قيدِ حالةٍ قبلَه (‏فإعادةُ
+ * قيدِ رفعٍ صحيحٍ بعدَ نقضٍ أحدثَ لا تُسقِطُه). وأيُّ إخلالٍ رفضٌ مُسمّى يمنعُ الإقلاع — كالقيدِ التالف.
  * @param {SealedLogReader} log
  * @param {string} type
+ * @param {VetoAuthority} authority
  * @returns {Promise<{ vetoed: boolean, reason: string | null, commandId: string } | null>} `null` إن لم يُختَم نقضٌ قطّ
  */
-export async function vetoFromSealedLog(log, type) {
+export async function vetoFromSealedLog(log, type, authority) {
+  if (
+    authority === null ||
+    typeof authority !== 'object' ||
+    typeof authority.king?.verify !== 'function' ||
+    typeof authority.ledger?.has !== 'function' ||
+    !Array.isArray(authority.commands)
+  ) {
+    // بلا متحقِّقٍ لا استعادة: استعادةٌ لا تتحقّقُ من السلطةِ هي الثغرةُ نفسُها.
+    throw new Error(
+      `${SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED}: لا مُتحقِّقَ من سلطةِ قيدِ النقض`,
+    );
+  }
+  const vetoSpec = authority.commands.find((c) => c.kind === 'veto');
+  const clearSpec = authority.commands.find((c) => c.kind === 'veto-clear');
+  /** @type {Set<string>} */
+  const seen = new Set();
   /** @type {{ vetoed: boolean, reason: string | null, commandId: string } | null} */
   let last = null;
   for (const event of log.events) {
     if (event?.type !== type) continue;
     const unreadable = () =>
       new Error(`${SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNREADABLE}: ${String(event.id ?? '')}`);
+    const unauthorized = (/** @type {string} */ why) =>
+      new Error(
+        `${SOVEREIGN_CONSOLE_ERRORS.VETO_RECORD_UNAUTHORIZED}: ${String(event.id ?? '')} — ${why}`,
+      );
     /** @type {unknown} */
     let body;
     try {
@@ -54,14 +83,62 @@ export async function vetoFromSealedLog(log, type) {
     if (record['vetoed'] && (typeof record['reason'] !== 'string' || record['reason'] === '')) {
       throw unreadable();
     }
-    last = {
-      vetoed: record['vetoed'],
-      reason: record['vetoed'] ? /** @type {string} */ (record['reason']) : null,
-      commandId: typeof record['commandId'] === 'string' ? record['commandId'] : '',
-    };
+    const royal = record['royalCommand'];
+    const signature = record['signature'];
+    if (royal === null || typeof royal !== 'object' || Array.isArray(royal)) {
+      throw unauthorized('لا أمرَ ملكيَّ في القيد');
+    }
+    if (typeof signature !== 'string' || signature === '') throw unauthorized('لا توقيع');
+    const command = /** @type {Record<string, unknown>} */ (royal);
+    /** @type {boolean} */
+    let verified;
+    try {
+      verified = authority.king.verify(command, signature) === true;
+    } catch {
+      verified = false;
+    }
+    if (!verified) throw unauthorized('توقيعٌ لا يُقبَلُ بمفتاحِ الملك');
+    const spec = record['vetoed'] ? vetoSpec : clearSpec;
+    if (
+      spec === undefined ||
+      command['action'] !== spec.action ||
+      command['target'] !== spec.target
+    ) {
+      throw unauthorized('الأمرُ الموقَّعُ ليس أمرَ هذه الحالة');
+    }
+    const commandId = typeof command['id'] === 'string' ? command['id'].trim() : '';
+    if (commandId === '' || record['commandId'] !== commandId) {
+      throw unauthorized('معرّفُ القيدِ لا يطابقُ الأمرَ الموقَّع');
+    }
+    if (!authority.ledger.has(commandId))
+      throw unauthorized('الأمرُ غيرُ مُثبَّتٍ في دفترِ الأوامر');
+    if (seen.has(commandId)) throw unauthorized('قيدُ حالةٍ مُعادٌ لأمرٍ ورَدَ قبلَه');
+    seen.add(commandId);
+    const payload =
+      command['payload'] !== null && typeof command['payload'] === 'object'
+        ? /** @type {Record<string, unknown>} */ (command['payload'])
+        : {};
+    const signedReason = typeof payload['reason'] === 'string' ? payload['reason'].trim() : '';
+    const reason = record['vetoed']
+      ? signedReason === ''
+        ? 'blocked by crown'
+        : signedReason
+      : null;
+    if (record['vetoed'] && record['reason'] !== reason) {
+      throw unauthorized('سببُ القيدِ غيرُ سببِ الأمرِ الموقَّع');
+    }
+    last = { vetoed: record['vetoed'], reason, commandId };
   }
   return last;
 }
+
+/**
+ * ما تتحقّقُ به استعادةُ النقضِ من سلطةِ القيد (‏`WL-352`).
+ * @typedef {object} VetoAuthority
+ * @property {{ verify: (payload: object, signature: string) => boolean }} king المفتاحُ العامُّ للملك
+ * @property {{ has: (id: string) => boolean }} ledger دفترُ الأوامرِ المُحمَّل
+ * @property {ReadonlyArray<{ kind: string, action: string, target: string }>} commands أوامرُ الديوانِ المُعلَنة
+ */
 
 /**
  * @typedef {object} SealedLogReader
@@ -151,7 +228,13 @@ export async function composeSovereignConsole(deps) {
   };
   // `WL-349`: النقضُ المختومُ يعودُ قبلَ تركيبِ الديوان — فلا أمرَ يمرُّ من بوابةٍ نقضَها الملك.
   const consolePolicy = loadConsolePolicy();
-  const restoredVeto = await vetoFromSealedLog(deps.sealedLog, consolePolicy.audit.vetoStateEvent);
+  const restoredVeto = await vetoFromSealedLog(deps.sealedLog, consolePolicy.audit.vetoStateEvent, {
+    king: deps.king,
+    ledger: /** @type {{ has: (id: string) => boolean }} */ (
+      /** @type {unknown} */ (deps.commandLedger)
+    ),
+    commands: consolePolicy.commands,
+  });
   if (restoredVeto !== null && restoredVeto.vetoed) {
     deps.crown.veto.block(/** @type {string} */ (restoredVeto.reason));
   } else if (restoredVeto !== null) {
