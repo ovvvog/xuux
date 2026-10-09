@@ -65,11 +65,11 @@ import(process.argv[1]).then(({ makeKeys }) => {
   const config = {
     keys,
     ops: {
-      provision: { mode: "provision", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, dm: process.argv[4] },
-      "transact-pos": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, id: "cmd-pos", mark: "ack-pos", dm: process.argv[4] },
-      "transact-neg": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: false, id: "cmd-neg", mark: "ack-neg", dm: process.argv[4] },
-      "verify-pos": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-pos", fsync: true, dm: process.argv[4] },
-      "verify-neg": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-neg", fsync: true, dm: process.argv[4] },
+      provision: { mode: "provision", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, dm: process.argv[3] },
+      "transact-pos": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, id: "cmd-pos", mark: "ack-pos", dm: process.argv[3] },
+      "transact-neg": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: false, id: "cmd-neg", mark: "ack-neg", dm: process.argv[3] },
+      "verify-pos": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-pos", fsync: true, dm: process.argv[3] },
+      "verify-neg": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-neg", fsync: true, dm: process.argv[3] },
     },
   };
   writeFileSync(`${temp}/lw39-config.json`, JSON.stringify(config));
