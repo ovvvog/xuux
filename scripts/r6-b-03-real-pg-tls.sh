@@ -40,8 +40,10 @@ issueMaterial(process.argv[2], 'foreign');
 NODE
 
 # مِلكيّةُ المفتاحِ: `postgres` داخلَ الصورةِ (uid 70) هو مَن يقرأُه، بلا قراءةٍ للغيرِ.
-sudo chown 70:70 "${cert_dir}/pg-server.key"
+# والترتيبُ حاسمٌ: `chmod` قبلَ `chown` — فبعدَ نقلِ المِلكيّةِ لا يملكُ المُشغِّلُ
+# تغييرَ نمطِ الملفِّ (قِيسَ في التشغيلةِ `37937442805`: Operation not permitted).
 chmod 600 "${cert_dir}/pg-server.key"
+sudo chown 70:70 "${cert_dir}/pg-server.key"
 
 # ── الخادمُ الحقيقيُّ: postgres مُشغَّلٌ بـTLS على منفذٍ منفصلٍ عن قاعدةِ الخدمةِ ──
 docker run -d --name "${NAME}" \
