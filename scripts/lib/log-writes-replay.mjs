@@ -113,6 +113,7 @@ export async function replayLogWrites({ logPath, imagePath, endMark, sizeBytes }
     ftruncateSync(image, sizeBytes);
     /** صفرٌ لكتابةِ التصفيرِ والإسقاطِ. */
     const zeros = Buffer.alloc(64 * 1024);
+    /** @param {number} start @param {number} length */
     const zeroRange = (start, length) => {
       let done = 0;
       while (done < length) {
