@@ -253,8 +253,8 @@ export async function main(argv = process.argv.slice(2)) {
   try {
     const endMark = args['end-mark'] ?? '';
     const result = await replayLogWrites({
-      logPath: args['log'],
-      imagePath: args['image'],
+      logPath: args['log'] ?? '',
+      imagePath: args['image'] ?? '',
       endMark,
       sizeBytes: Number(args['size']),
     });
