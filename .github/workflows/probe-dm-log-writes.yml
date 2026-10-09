@@ -87,6 +87,10 @@ jobs:
           sudo losetup -d "$LOOP_DATA" "$LOOP_LOG" "$LOOP_IMAGE"
           echo VALIDATION_DONE
 
+      - name: القياسُ الإنتاجيُّ — المعاملةُ المُقرُّ بها أمامَ فقدِ الطاقةِ (LIVE-39)
+        if: always()
+        run: bash scripts/live-39-power-loss.sh
+
       - name: محاكاةٌ مصغَّرةٌ — جهازٌ مُسجَّلٌ وعلاماتُ mark فيه
         if: always()
         run: |
