@@ -5,17 +5,17 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "2601621413f988dac1adfc51f85223f2cf856e30",
-      "mainHeadAtMeasure": "2601621413f988dac1adfc51f85223f2cf856e30",
-      "scopeDigest": "032242322c1dbd28cf2a7dbe611d6bbfd7c63cfbc429649e3451301a9528445f",
+      "commit": "cd13799c800937d0bacffef976b7dae40c7a3957",
+      "mainHeadAtMeasure": "cd13799c800937d0bacffef976b7dae40c7a3957",
+      "scopeDigest": "b20c49c863547cfb00abd9379543e165dcbbb28457330bfa84ff5d3719448832",
       "measuredOn": "2026-10-09",
       "verdict": "self-stale-only",
-      "testFileCount": 250,
-      "tests": 2608,
+      "testFileCount": 251,
+      "tests": 2613,
       "pass": 2473,
       "fail": 1,
-      "skipped": 134,
-      "skipLines": 136,
+      "skipped": 139,
+      "skipLines": 141,
       "topLevelSkipPoints": 128,
       "attributedToDatabaseUrl": 92,
       "otherReasons": [
@@ -29,6 +29,10 @@
         },
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
+          "count": 5
+        },
+        {
+          "reason": "XUUX_REAL_PG_TLS=1 غيرُ مُعلَنٍ — يحتاجُ خادمَ PostgreSQL حقيقيّاً مُشغَّلاً بـTLS (خطوةُ CI المخصّصةُ، لا بيئةَ المنفِّذِ)",
           "count": 5
         },
         {
@@ -57,17 +61,17 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "2601621413f988dac1adfc51f85223f2cf856e30",
-      "mainHeadAtMeasure": "2601621413f988dac1adfc51f85223f2cf856e30",
-      "scopeDigest": "032242322c1dbd28cf2a7dbe611d6bbfd7c63cfbc429649e3451301a9528445f",
+      "commit": "cd13799c800937d0bacffef976b7dae40c7a3957",
+      "mainHeadAtMeasure": "cd13799c800937d0bacffef976b7dae40c7a3957",
+      "scopeDigest": "b20c49c863547cfb00abd9379543e165dcbbb28457330bfa84ff5d3719448832",
       "measuredOn": "2026-10-09",
       "verdict": "self-stale-only",
-      "testFileCount": 250,
-      "tests": 2608,
+      "testFileCount": 251,
+      "tests": 2613,
       "pass": 2473,
       "fail": 1,
-      "skipped": 134,
-      "skipLines": 136,
+      "skipped": 139,
+      "skipLines": 141,
       "topLevelSkipPoints": 128,
       "attributedToDatabaseUrl": 92,
       "otherReasons": [
@@ -81,6 +85,10 @@
         },
         {
           "reason": "XUUX_HSM_TEST=1 غيرُ مُعلَنٍ — اختباراتُ التوكنِ الحقيقيِّ (SoftHSM) محلّيّةٌ لا CI",
+          "count": 5
+        },
+        {
+          "reason": "XUUX_REAL_PG_TLS=1 غيرُ مُعلَنٍ — يحتاجُ خادمَ PostgreSQL حقيقيّاً مُشغَّلاً بـTLS (خطوةُ CI المخصّصةُ، لا بيئةَ المنفِّذِ)",
           "count": 5
         },
         {
