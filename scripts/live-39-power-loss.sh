@@ -27,7 +27,6 @@ set -euo pipefail
 
 readonly NAME='lw39'
 readonly MNT='/mnt/lw39'
-readonly IMG_MNT='/mnt/lw39-replay'
 readonly SIZE_BYTES='268435456'
 readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly CHILD="${REPO_ROOT}/tests/helpers/wl-360-crash-child.mjs"
@@ -37,7 +36,6 @@ readonly SOCKET_SNAPSHOT="${RUNNER_TEMP:-/tmp}/lw39-socket-snapshot.json"
 
 cleanup() {
   sudo umount "${MNT}" >/dev/null 2>&1 || true
-  sudo umount "${IMG_MNT}" >/dev/null 2>&1 || true
   sudo dmsetup remove "${NAME}" >/dev/null 2>&1 || true
   sudo losetup -D >/dev/null 2>&1 || true
   rm -f "${CONFIG}" "${SOCKET}" "${SOCKET_SNAPSHOT}" \
@@ -70,12 +68,12 @@ import(process.argv[1]).then(({ makeKeys }) => {
       provision: { mode: "provision", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, dm: process.argv[4] },
       "transact-pos": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, id: "cmd-pos", mark: "ack-pos", dm: process.argv[4] },
       "transact-neg": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: false, id: "cmd-neg", mark: "ack-neg", dm: process.argv[4] },
-      "verify-pos": { mode: "verify", root: process.argv[3], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-pos", fsync: true, dm: process.argv[4] },
-      "verify-neg": { mode: "verify", root: process.argv[3], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-neg", fsync: true, dm: process.argv[4] },
+      "verify-pos": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-pos", fsync: true, dm: process.argv[4] },
+      "verify-neg": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-neg", fsync: true, dm: process.argv[4] },
     },
   };
   writeFileSync(`${temp}/lw39-config.json`, JSON.stringify(config));
-});' "${REPO_ROOT}/tests/helpers/wl-326-root.mjs" "${MNT}/root" "${IMG_MNT}/root" "${NAME}"
+});' "${REPO_ROOT}/tests/helpers/wl-326-root.mjs" "${MNT}/root" "${NAME}"
 
 # ══ المرحلةُ 1: إقلاعٌ متينٌ (‏خطُّ الأساسِ) ══
 node "${CHILD}" "${CONFIG}" provision | tee /dev/stderr | grep -qx BOOTED
@@ -102,14 +100,14 @@ sudo node "${REPO_ROOT}/scripts/lib/log-writes-replay.mjs" \
   --log "${LOOP_LOG}" --image "${RUNNER_TEMP:-/tmp}/lw39-image-pos.dev" \
   --end-mark ack-pos --size "${SIZE_BYTES}"
 LOOP_POS="$(sudo losetup -f --show "${RUNNER_TEMP:-/tmp}/lw39-image-pos.dev")"
-sudo mkdir -p "${IMG_MNT}"
-sudo mount "${LOOP_POS}" "${IMG_MNT}"
-sudo chmod 0777 "${IMG_MNT}"
+# الصورةُ تُحمَّلُ في MNT نفسِها: بصمةُ الحالةِ تُحسَبُ من المساراتِ المطلقةِ، فالإقلاعُ
+# من مسارٍ آخرَ يُكسِرُ المطابقةَ بلا علاقةٍ بالدوامِ (قِيسَ في 37967226716).
+sudo mount "${LOOP_POS}" "${MNT}"
 POSITIVE_OUT="$(node "${CHILD}" "${CONFIG}" verify-pos)"
 echo "${POSITIVE_OUT}"
 echo "${POSITIVE_OUT}" | grep -qx BOOT_OK
 echo "${POSITIVE_OUT}" | grep -qx 'STATE:committed'
-sudo umount "${IMG_MNT}"
+sudo umount "${MNT}"
 sudo losetup -d "${LOOP_POS}"
 echo LIVE39_POSITIVE_OK
 
@@ -119,14 +117,13 @@ sudo node "${REPO_ROOT}/scripts/lib/log-writes-replay.mjs" \
   --log "${LOOP_LOG}" --image "${RUNNER_TEMP:-/tmp}/lw39-image-neg.dev" \
   --end-mark ack-neg --size "${SIZE_BYTES}"
 LOOP_NEG="$(sudo losetup -f --show "${RUNNER_TEMP:-/tmp}/lw39-image-neg.dev")"
-sudo mount "${LOOP_NEG}" "${IMG_MNT}"
-sudo chmod 0777 "${IMG_MNT}"
+sudo mount "${LOOP_NEG}" "${MNT}"
 NEGATIVE_OUT="$(node "${CHILD}" "${CONFIG}" verify-neg)"
 echo "${NEGATIVE_OUT}"
 # الشاهدُ السلبيُّ حسّاسٌ: الإقرارُ الغيرُ مُزامَنِ ساقطٌ، والإقلاعُ منَ الصورةِ نظيفٌ.
 echo "${NEGATIVE_OUT}" | grep -qx BOOT_OK
 echo "${NEGATIVE_OUT}" | grep -qx 'STATE:unknown'
-sudo umount "${IMG_MNT}"
+sudo umount "${MNT}"
 sudo losetup -d "${LOOP_NEG}"
 echo LIVE39_NEGATIVE_OK
 echo LIVE39_DONE
