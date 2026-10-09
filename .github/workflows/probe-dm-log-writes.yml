@@ -25,22 +25,67 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+
       - name: جردُ العدّاءِ ونواتِهِ
         run: |
           set -x
           uname -r
           head -2 /etc/os-release
-          dmsetup version
+          sudo dmsetup version || true
           grep device-mapper /proc/devices || true
           ls /lib/modules/"$(uname -r)"/kernel/drivers/md/ 2>/dev/null | head -20 || echo NO_MODULES_DIR
 
       - name: تحميلُ وحداتِ device-mapper وlog-writes
+        if: always()
         run: |
           set -x
           sudo modprobe dm_mod || true
           sudo modprobe dm_log_writes || true
           sudo dmsetup targets
           sudo dmsetup targets | grep -i log-writes && echo TARGET_OK || echo TARGET_MISSING
+
+      - name: تجربةُ التحقّقِ — كاتبُ إعادةِ التشغيلِ المملوكِ أمامَ سجلِّ نواةٍ حقيقيٍّ
+        if: always()
+        run: |
+          set -x
+          # جهازُ بياناتٍ وجهازُ سجلٍّ فوقَ loop، وext4 فوقَ dm-log-writes — و«نموذجُ
+          # الانهيارِ» معلَنٌ في المدخلةِ: commit=600 يقلّلُ ضجيجَ مجلةِ ext4 الخلفيَّ لا
+          # حواجزَ الدوامِ (تبقى كما هي).
+          sudo truncate -s 256M "$RUNNER_TEMP/v-data.dev"
+          sudo truncate -s 256M "$RUNNER_TEMP/v-log.dev"
+          LOOP_DATA=$(sudo losetup -f --show "$RUNNER_TEMP/v-data.dev")
+          LOOP_LOG=$(sudo losetup -f --show "$RUNNER_TEMP/v-log.dev")
+          echo "loops: $LOOP_DATA $LOOP_LOG"
+          SIZE=$(sudo blockdev --getsz "$LOOP_DATA")
+          sudo dmsetup create vlw --table "0 $SIZE log-writes $LOOP_DATA $LOOP_LOG"
+          sudo mkfs.ext4 -F -E nodiscard /dev/mapper/vlw
+          sudo mkdir -p /mnt/vlw
+          sudo mount -o commit=600 /dev/mapper/vlw /mnt/vlw
+          # إنشاءٌ مُزامَنٌ (بياناتُ الملفِّ ومجلّدُهُ) ثمّ علامةُ القطعِ ثمّ إنشاءٌ بلا مزامنةٍ
+          sudo sh -c 'echo durable > /mnt/vlw/synced.txt'
+          sudo sync
+          sudo dmsetup message vlw 0 mark cut
+          sudo sh -c 'echo volatile > /mnt/vlw/volatile.txt'
+          sudo dmsetup message vlw 0 mark after-cut
+          sudo umount /mnt/vlw
+          sudo dmsetup remove vlw
+          sudo sync
+          # إعادةُ التشغيلِ بكاتبِنا المملوكِ حتّى علامةِ القطعِ — فصورةُ القرصِ كما كانت عندَها
+          sudo truncate -s 256M "$RUNNER_TEMP/v-image.dev"
+          sudo node scripts/lib/log-writes-replay.mjs \
+            --log "$LOOP_LOG" --image "$RUNNER_TEMP/v-image.dev" \
+            --end-mark cut --size 268435456
+          LOOP_IMAGE=$(sudo losetup -f --show "$RUNNER_TEMP/v-image.dev")
+          sudo mkdir -p /mnt/vreplay
+          sudo mount "$LOOP_IMAGE" /mnt/vreplay
+          echo '--- المُتوقَّعُ: synced.txt موجودٌ وvolatile.txt غائبٌ ---'
+          sudo ls -la /mnt/vreplay
+          sudo test -f /mnt/vreplay/synced.txt && echo SYNCED_SURVIVES || { echo SYNCED_LOST; exit 1; }
+          if sudo test -f /mnt/vreplay/volatile.txt; then echo VOLATILE_LEAKED; exit 1; else echo VOLATILE_LOST; fi
+          sudo umount /mnt/vreplay
+          sudo losetup -d "$LOOP_DATA" "$LOOP_LOG" "$LOOP_IMAGE"
+          echo VALIDATION_DONE
 
       - name: محاكاةٌ مصغَّرةٌ — جهازٌ مُسجَّلٌ وعلاماتُ mark فيه
         if: always()
