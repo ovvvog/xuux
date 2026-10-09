@@ -25,6 +25,11 @@ cert_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/r6-b-03-pg-tls.XXXXXX")"
 # يَسردُ مَن لا يعرفُه.
 chmod 711 "${cert_dir}"
 
+# السلسلةُ كاملةً كما يُقدِّمُها مزوِّدٌ مُدارٌ: الورقةُ ثمّ جهةُ الإصدارِ — فالخادمُ
+# بورقةٍ وحدها يُنتِجُ عندَ العميلِ بلا مِرساةٍ `UNABLE_TO_VERIFY_LEAF_SIGNATURE` لا
+# `SELF_SIGNED_CERT_IN_CHAIN` بحرفِ النتيجةِ (قِيسَ في التشغيلةِ `37940816665`).
+cat "${cert_dir}/pg-server.crt" "${cert_dir}/pg-ca.crt" > "${cert_dir}/pg-chain.crt"
+
 cleanup() {
   docker rm -f "${NAME}" >/dev/null 2>&1 || true
   sudo rm -rf "${cert_dir}" || rm -rf "${cert_dir}" || true
@@ -58,7 +63,7 @@ docker run -d --name "${NAME}" \
   -v "${cert_dir}":/certs:ro \
   postgres:18.6-alpine \
   -c ssl=on \
-  -c ssl_cert_file=/certs/pg-server.crt \
+  -c ssl_cert_file=/certs/pg-chain.crt \
   -c ssl_key_file=/certs/pg-server.key
 
 ready=0

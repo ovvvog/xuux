@@ -77,6 +77,21 @@ function isolateCaEnv() {
 }
 
 /**
+ * يُبدِّلُ المِرساةَ المُعلَنةَ مؤقّتاً ويُعيدُ البيئةَ كما كانت — لإحاكاةِ الوصلةِ
+ * بجهةِ إصدارٍ أجنبيّةٍ دونَ مساسٍ ببقيّةِ البيئةِ.
+ * @param {string} file
+ * @returns {() => void}
+ */
+function swapCaFile(file) {
+  const saved = process.env['DATABASE_CA_FILE'];
+  process.env['DATABASE_CA_FILE'] = file;
+  return () => {
+    if (saved === undefined) delete process.env['DATABASE_CA_FILE'];
+    else process.env['DATABASE_CA_FILE'] = saved;
+  };
+}
+
+/**
  * يُعيدُ رمزَ خطأِ الوصلةِ أوّلَ استعلامٍ — أو `null` إن نجح.
  * @param {import('pg').Pool} pool
  * @returns {Promise<string | null>}
@@ -129,10 +144,15 @@ describe('R6-B-03 على قاعدةِ PostgreSQL حقيقيّةٍ عبرَ TLS (
       );
       // القناةُ المُعمّاةُ تُقرأُ من القاعدةِ نفسِها لا من تفسيرِ العميلِ: عمودُ `ssl`
       // في `pg_stat_ssl` لوصلتِنا هو شهادةُ الخادمِ على أنّ التشفيرَ وقعَ فعلاً.
-      const ssl = /** @type {{ rows: { ssl: string }[] }} */ (
+      // (‏`pg` يُعيدُ العمودَ البوليانيَّ `true` لا الحرفَ `'t'` — يُقبلُ الاثنانِ فلا
+      // يعتمدُ القياسُ على تمثيلِ المُشغِّلِ.)
+      const ssl = /** @type {{ rows: { ssl: string | boolean }[] }} */ (
         await pool.query('SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()')
       );
-      assert.equal(ssl.rows[0]?.ssl, 't', 'القناةُ ليست مُعمّاةً في رأيِ القاعدةِ نفسِها');
+      assert.ok(
+        ssl.rows[0]?.ssl === 't' || ssl.rows[0]?.ssl === true,
+        'القناةُ ليست مُعمّاةً في رأيِ القاعدةِ نفسِها',
+      );
     } finally {
       await pool.end();
     }
@@ -153,8 +173,14 @@ describe('R6-B-03 على قاعدةِ PostgreSQL حقيقيّةٍ عبرَ TLS (
     // (تشغيلٌ يدويٌّ ناقصُ التجهيزِ) فالاختبارُ يسقُطُ باسمِه لا يتخطّى.
     const foreign = process.env.DATABASE_FOREIGN_CA_FILE ?? '';
     assert.notEqual(foreign, '', 'DATABASE_FOREIGN_CA_FILE غائبٌ — لا قياسَ للرفضِ بجهةٍ أجنبيّةٍ');
-    const code = await firstQueryError(createPool());
-    assert.notEqual(code, null, 'اتصالٌ بجهةِ إصدارٍ أجنبيّةٍ لم يُرفَض');
+    // المِرساةُ تُبدَّلُ فعلاً لا يُكتفَى بوجودِها: فالوصلةُ تُحاكَمُ بالأجنبيّةِ.
+    const restoreCa = swapCaFile(foreign);
+    try {
+      const code = await firstQueryError(createPool());
+      assert.notEqual(code, null, 'اتصالٌ بجهةِ إصدارٍ أجنبيّةٍ لم يُرفَض');
+    } finally {
+      restoreCa();
+    }
   });
 
   it('guard:encryption عمليّةً منفصلةً: بالشهادةِ يخرجُ 0 ويقرأُ المخازنَ عبرَ القناةِ، وبلاها يسقُطُ بالرمزِ نفسِه', async () => {
