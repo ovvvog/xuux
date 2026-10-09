@@ -63,8 +63,13 @@ if (op.mode === 'verify') {
   // الإقلاعُ نفسُهُ حكمٌ: رفضُ `STATE_MANIFEST_ROLLBACK_DETECTED` أو
   // `LEDGER_AHEAD_OF_WITNESS` سقوطٌ مقيسٌ لا نجاحٌ صامتٌ.
   process.stdout.write('BOOT_OK\n');
-  const state = runtime.ledger.state(op.id);
-  process.stdout.write(`STATE:${state}\n`);
+  // الشاهدُ السلبيُّ يقيسُ **اثنينِ**: الإقرارُ الغيرُ مُزامَنِ ساقطٌ، والإقرارُ
+  // المُزامَنُ **باقٍ** — فلو أغرقتِ الصورةُ كلَّ شيءٍ أو أفرغتْهُ لكانَ السقوطُ
+  // الأعمى نجاحاً كاذباً. والسردُ في "verify" للاثنينِ ولا يُقرِرُ حكمَ القياسِ.
+  for (const id of op.ids ?? [op.id]) {
+    const state = runtime.ledger.state(id);
+    process.stdout.write(`STATE:${id}=${state}\n`);
+  }
   await runtime.close();
   process.exit(0);
 }

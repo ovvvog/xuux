@@ -21,8 +21,12 @@
 # حواجزُ الدوامِ كما هي، والقرصُ المُختبرُ `ext4` فوقَ جهازٍ حقيقيٍّ.
 #
 # **حدٌّ معلَنٌ:** مرجعُ الحداثةِ (`FileStateBoundSocket`) خارجَ القرصِ المُختبرِ عمداً
-# (‏عونُ `WL-326`)، ولقطةُ منهُ تُؤخَذُ عندَ حدِّ القطعِ للتحققِ — فتقدُّمُهُ الذاتيُّ
-# الدائمُ خارجَ الصورةِ ليسَ موضوعَ القياسِ هنا.
+# (‏عونُ `WL-326`)، ولقطةُ منقولةٌ محصَّنةٌ (‏للقراءةِ فقطِ) عندَ حدِّ القطعِ تُستعمَلُ
+# للتحقّقِ كمرجعٍ مُثبَّتٍ — عزلٌ لدوامِ ملفاتِ الجذرِ عن تغيُّراتِ المرجعِ الذاتيّةِ
+# (ضربٌ منَ الإقلاعِ من فورةِ ذاكرةٍ محفوظةٍ عندَ حدِّ القطعِ، لا إعادةُ بناءٍ كاملةٍ
+# لحالةِ الجهازِ عندَ فقدِ طاقةٍ) — فتقدُّمُهُ الذاتيُّ الدائمُ خارجَ الصورةِ ليسَ موضوعَ
+# القياسِ هنا. وهذا قياسُ **دوامِ ملفاتِ الجذرِ** على جهازِ حلقةٍ في عدّاءٍ مستضافٍ —
+# لا فقدُ طاقةٍ فعليٌّ ولا برهانُ TPM/HSM ولا جاهزيّةُ إنتاجٍ (وهذا نصٌّ في `WL-360`).
 set -euo pipefail
 
 readonly NAME='lw39'
@@ -37,7 +41,12 @@ readonly SOCKET_SNAPSHOT="${RUNNER_TEMP:-/tmp}/lw39-socket-snapshot.json"
 cleanup() {
   sudo umount "${MNT}" >/dev/null 2>&1 || true
   sudo dmsetup remove "${NAME}" >/dev/null 2>&1 || true
-  sudo losetup -D >/dev/null 2>&1 || true
+  # تحييدٌ محصورٌ: لا `losetup -D` الشاملةُ — أجهزةُ الحلقةِ التي أنشأها هذا
+  # السكربتُ وحدَها تُفصَلُ (‏`sudo losetup -d` على كلِّ مقبضٍ؛ و`sudo losetup -D`
+  # كانت تفصلُ أجهزةَ العدّاءِ كلَّها فتضرُّ بمساراتِ عملٍ أخرى).
+  for loop in "${LOOP_DATA:-}" "${LOOP_LOG:-}" "${LOOP_POS:-}" "${LOOP_NEG:-}"; do
+    if [ -n "${loop}" ]; then sudo losetup -d "${loop}" >/dev/null 2>&1 || true; fi
+  done
   rm -f "${CONFIG}" "${SOCKET}" "${SOCKET_SNAPSHOT}" \
     "${RUNNER_TEMP:-/tmp}/lw39-data.dev" "${RUNNER_TEMP:-/tmp}/lw39-log.dev" \
     "${RUNNER_TEMP:-/tmp}/lw39-image-pos.dev" "${RUNNER_TEMP:-/tmp}/lw39-image-neg.dev"
@@ -69,7 +78,7 @@ import(process.argv[1]).then(({ makeKeys }) => {
       "transact-pos": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: true, id: "cmd-pos", mark: "ack-pos", dm: process.argv[3] },
       "transact-neg": { mode: "transact", root: process.argv[2], socketFile: `${temp}/lw39-socket.json`, fsync: false, id: "cmd-neg", mark: "ack-neg", dm: process.argv[3] },
       "verify-pos": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-pos", fsync: true, dm: process.argv[3] },
-      "verify-neg": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, id: "cmd-neg", fsync: true, dm: process.argv[3] },
+      "verify-neg": { mode: "verify", root: process.argv[2], socketFile: `${temp}/lw39-socket-snapshot.json`, ids: ["cmd-neg", "cmd-pos"], fsync: true, dm: process.argv[3] },
     },
   };
   writeFileSync(`${temp}/lw39-config.json`, JSON.stringify(config));
@@ -85,6 +94,10 @@ node "${CHILD}" "${CONFIG}" transact-pos | tee /dev/stderr | grep -qx ACK
 
 # لقطةُ المرجعِ عندَ حدِّ القطعِ (قبلَ السلبيِّ): العلامةُ والصورةُ تتحاكمان معاً.
 cp "${SOCKET}" "${SOCKET_SNAPSHOT}"
+# لقطةُ المرجعِ مُثبَّتةٌ لعزلِ دوامِ ملفاتِ الجذرِ عن تغيُّراتِهِ الذاتيّةِ الدائمةِ
+# (ضربٌ منَ الإقلاعِ من فورةِ ذاكرةٍ محفوظةٍ عندَ حدِّ القطعِ، لا إعادةُ بناءٍ كاملةٍ
+# لحالةِ الجهازِ عندَ فقدِ طاقةٍ). نسخةٌ للقراءةِ فقطِ فلا يعدّلها تحقّقٌ.
+chmod 0444 "${SOCKET_SNAPSHOT}"
 
 # ══ المرحلةُ 3: معاملةٌ غيرُ مُزامَنةٍ (الشاهدُ السلبيُّ) ══
 node "${CHILD}" "${CONFIG}" transact-neg | tee /dev/stderr | grep -qx ACK
@@ -106,7 +119,7 @@ sudo mount "${LOOP_POS}" "${MNT}"
 POSITIVE_OUT="$(node "${CHILD}" "${CONFIG}" verify-pos)"
 echo "${POSITIVE_OUT}"
 echo "${POSITIVE_OUT}" | grep -qx BOOT_OK
-echo "${POSITIVE_OUT}" | grep -qx 'STATE:committed'
+echo "${POSITIVE_OUT}" | grep -qx 'STATE:cmd-pos=committed'
 sudo umount "${MNT}"
 sudo losetup -d "${LOOP_POS}"
 echo LIVE39_POSITIVE_OK
@@ -122,7 +135,8 @@ NEGATIVE_OUT="$(node "${CHILD}" "${CONFIG}" verify-neg)"
 echo "${NEGATIVE_OUT}"
 # الشاهدُ السلبيُّ حسّاسٌ: الإقرارُ الغيرُ مُزامَنِ ساقطٌ، والإقلاعُ منَ الصورةِ نظيفٌ.
 echo "${NEGATIVE_OUT}" | grep -qx BOOT_OK
-echo "${NEGATIVE_OUT}" | grep -qx 'STATE:unknown'
+echo "${NEGATIVE_OUT}" | grep -qx 'STATE:cmd-neg=unknown'
+echo "${NEGATIVE_OUT}" | grep -qx 'STATE:cmd-pos=committed'
 sudo umount "${MNT}"
 sudo losetup -d "${LOOP_NEG}"
 echo LIVE39_NEGATIVE_OK
