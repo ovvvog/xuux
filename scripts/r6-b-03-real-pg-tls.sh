@@ -25,11 +25,6 @@ cert_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/r6-b-03-pg-tls.XXXXXX")"
 # يَسردُ مَن لا يعرفُه.
 chmod 711 "${cert_dir}"
 
-# السلسلةُ كاملةً كما يُقدِّمُها مزوِّدٌ مُدارٌ: الورقةُ ثمّ جهةُ الإصدارِ — فالخادمُ
-# بورقةٍ وحدها يُنتِجُ عندَ العميلِ بلا مِرساةٍ `UNABLE_TO_VERIFY_LEAF_SIGNATURE` لا
-# `SELF_SIGNED_CERT_IN_CHAIN` بحرفِ النتيجةِ (قِيسَ في التشغيلةِ `37940816665`).
-cat "${cert_dir}/pg-server.crt" "${cert_dir}/pg-ca.crt" > "${cert_dir}/pg-chain.crt"
-
 cleanup() {
   docker rm -f "${NAME}" >/dev/null 2>&1 || true
   sudo rm -rf "${cert_dir}" || rm -rf "${cert_dir}" || true
@@ -49,6 +44,11 @@ node --input-type=module - "$cert_dir" <<'NODE'
 import { issueMaterial } from './tests/helpers/tls-material.mjs';
 issueMaterial(process.argv[2], 'foreign');
 NODE
+
+# السلسلةُ كاملةً كما يُقدِّمُها مزوِّدٌ مُدارٌ: الورقةُ ثمّ جهةُ الإصدارِ — فالخادمُ
+# بورقةٍ وحدها يُنتِجُ عندَ العميلِ بلا مِرساةٍ `UNABLE_TO_VERIFY_LEAF_SIGNATURE` لا
+# `SELF_SIGNED_CERT_IN_CHAIN` بحرفِ النتيجةِ (قِيسَ في التشغيلةِ `37940816665`).
+cat "${cert_dir}/pg-server.crt" "${cert_dir}/pg-ca.crt" > "${cert_dir}/pg-chain.crt"
 
 # مِلكيّةُ المفتاحِ: `postgres` داخلَ الصورةِ (uid 70) هو مَن يقرأُه، بلا قراءةٍ للغيرِ.
 # والترتيبُ حاسمٌ: `chmod` قبلَ `chown` — فبعدَ نقلِ المِلكيّةِ لا يملكُ المُشغِّلُ
