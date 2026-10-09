@@ -25,7 +25,7 @@
 
 #### الملفاتُ المتأثّرة
 
-`.github/workflows/probe-dm-log-writes.yml` (‏جديد) · `scripts/lib/log-writes-replay.mjs` (‏جديد) · `tests/tooling/log-writes-replay.test.mjs` (‏جديد) · `scripts/live-39-power-loss.sh` (‏جديد) · `tests/helpers/wl-360-crash-child.mjs` (‏جديد) · `docs/ROOT_OF_TRUST.md` (‏عدّادُ ملفاتِ الاختبارِ 251⇒252) · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (‏مولَّد)
+`.github/workflows/probe-dm-log-writes.yml` (‏جديد) · `scripts/lib/log-writes-replay.mjs` (‏جديد) · `tests/tooling/log-writes-replay.test.mjs` (‏جديد) · `scripts/live-39-power-loss.sh` (‏جديد) · `tests/helpers/wl-360-crash-child.mjs` (‏جديد) · `.github/workflows/ci.yml` (‏خطوةُ القياسِ بعدَ خطوةِ `WL-359`) · `docs/CURRENT_STATE.md` (‏§6 وصفُ ما يقيسُه CI) · `docs/ROOT_OF_TRUST.md` (‏عدّادُ ملفاتِ الاختبارِ 251⇒252) · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (‏مولَّد)
 
 #### الـ commit
 
