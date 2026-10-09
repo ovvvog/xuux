@@ -87,6 +87,18 @@ jobs:
           sudo losetup -d "$LOOP_DATA" "$LOOP_LOG" "$LOOP_IMAGE"
           echo VALIDATION_DONE
 
+      - name: تهيئةُ Node.js وبناءُ النواةِ (مخرجاتُ البناءِ لا تُستوفَى من الشجرةِ)
+        if: always()
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: تثبيتُ التبعياتِ وبناءُ النواةِ
+        if: always()
+        run: |
+          npm ci
+          npm run build
+
       - name: القياسُ الإنتاجيُّ — المعاملةُ المُقرُّ بها أمامَ فقدِ الطاقةِ (LIVE-39)
         if: always()
         run: bash scripts/live-39-power-loss.sh
