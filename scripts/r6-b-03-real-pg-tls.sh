@@ -19,6 +19,12 @@ readonly URL="postgresql://state:state@127.0.0.1:${PORT}/state?sslmode=require"
 
 cert_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/r6-b-03-pg-tls.XXXXXX")"
 
+# `mktemp -d` ينشئُ المجلّدَ 700 لمالكِهِ وحدَه، فلا يستطيعُ `postgres` داخلَ الحاويةِ
+# **عبورَه** لقراءةِ الشهادةِ والمفتاحِ (قِيسَ في التشغيلةِ `37939265355`: Permission
+# denied على `pg-server.crt` نفسِه). 711 = عبورٌ بلا سردٍ: يدخلُ من يعرفُ الاسمَ ولا
+# يَسردُ مَن لا يعرفُه.
+chmod 711 "${cert_dir}"
+
 cleanup() {
   docker rm -f "${NAME}" >/dev/null 2>&1 || true
   sudo rm -rf "${cert_dir}" || rm -rf "${cert_dir}" || true
