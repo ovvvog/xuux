@@ -210,6 +210,8 @@ export function resolveDatabaseConfig(options = {}) {
  * @param {object} [options]
  * @param {string | undefined} [options.url]
  * @param {string | undefined} [options.environment]
+ * @param {string | undefined} [options.caFile] مسارُ شهادةِ جهةِ الإصدارِ — يُمرَّرُ إلى `resolveDatabaseConfig` كما هو.
+ * @param {string | undefined} [options.ca] شهادةُ جهةِ الإصدارِ نصّاً (PEM).
  * @param {number} [options.max]
  * @returns {import('pg').Pool}
  */
