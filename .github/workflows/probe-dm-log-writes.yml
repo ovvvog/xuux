@@ -1,0 +1,71 @@
+# probe مؤقّت (LIVE-39): فحصُ قدرةِ العدّاءِ على dm-log-writes — لا يُدمَجُ في main.
+#
+# الغرضُ: جوابٌ نعم/لا مسجَّلٌ على ثلاثةِ أسئلةٍ قبلَ بناءِ أيِّ دفعةِ قياسِ فقدِ طاقةٍ:
+#   1. هل تتوافرُ وحدةُ `dm_log_writes` (والهدفُ `log-writes`) على نواةِ العدّاءِ؟
+#   2. هل تعملُ loop device + dmsetup + mount بلا قيودٍ خارجةٍ عنّا؟
+#   3. هل تُسجَّلُ علاماتُ `mark` في سجلِّ الجهازِ وتُقرأُ إشاراتُها؟
+#
+# (إعادةُ التشغيلِ نفسُها بأداةِ `replay-log` الخارجيّةِ **ليست هنا** — بناءُ شفرةٍ من
+# مستودعٍ خارجيٍّ على العدّاءِ قرارُ مالكٍ لا يُتّخَذُ بلا إذنٍ. هذا الجزءُ يكتفي
+# بأسئلةِ القدرةِ التي تُجيبُ عنها أدواتُ النظامِ وحدَها.)
+#
+# النتيجةُ تُقرأُ من سجلِّ التشغيلةِ حصراً؛ هذا الفرعُ يُحذَفُ بعدَ القراءةِ ولا يلمسُ main.
+
+name: Probe dm-log-writes (LIVE-39)
+
+on:
+  push:
+    branches: [probe/live-39-dm-log-writes]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: جردُ العدّاءِ ونواتِهِ
+        run: |
+          set -x
+          uname -r
+          head -2 /etc/os-release
+          dmsetup version
+          grep device-mapper /proc/devices || true
+          ls /lib/modules/"$(uname -r)"/kernel/drivers/md/ 2>/dev/null | head -20 || echo NO_MODULES_DIR
+
+      - name: تحميلُ وحداتِ device-mapper وlog-writes
+        run: |
+          set -x
+          sudo modprobe dm_mod || true
+          sudo modprobe dm_log_writes || true
+          sudo dmsetup targets
+          sudo dmsetup targets | grep -i log-writes && echo TARGET_OK || echo TARGET_MISSING
+
+      - name: محاكاةٌ مصغَّرةٌ: جهازٌ مُسجَّلٌ وعلاماتُ mark فيه
+        if: always()
+        run: |
+          set -x
+          sudo truncate -s 256M "$RUNNER_TEMP/data.dev"
+          sudo truncate -s 256M "$RUNNER_TEMP/log.dev"
+          LOOP_DATA=$(sudo losetup -f --show "$RUNNER_TEMP/data.dev")
+          LOOP_LOG=$(sudo losetup -f --show "$RUNNER_TEMP/log.dev")
+          echo "loops: $LOOP_DATA $LOOP_LOG"
+          SIZE=$(sudo blockdev --getsz "$LOOP_DATA")
+          sudo dmsetup create lw --table "0 $SIZE log-writes $LOOP_DATA $LOOP_LOG"
+          sudo mkfs.ext4 -F /dev/mapper/lw
+          sudo mkdir -p /mnt/lw
+          sudo mount /dev/mapper/lw /mnt/lw
+          sudo sh -c 'echo durable-data > /mnt/lw/before-mark.txt; sync /mnt/lw/before-mark.txt'
+          sudo dmsetup message lw 0 mark pre-ack && echo MARK_RECORDED
+          sudo sh -c 'echo volatile-data > /mnt/lw/after-mark.txt'
+          sudo dmsetup message lw 0 mark post-ack
+          sudo sh -c 'sync /mnt/lw/after-mark.txt'
+          sudo dmsetup message lw 0 mark synced
+          sudo dmsetup status lw
+          sudo umount /mnt/lw
+          sudo dmsetup remove lw
+          echo '--- سجلُّ الجهازِ (أولُ 64 بايتاً سداسيّاً — غيرُ فارغٍ ⇐ التسجيلُ يجري) ---'
+          sudo head -c 64 "$RUNNER_TEMP/log.dev" | od -An -tx1 | head -4
+          sudo losetup -d "$LOOP_DATA" "$LOOP_LOG"
+          echo PROBE_DONE
