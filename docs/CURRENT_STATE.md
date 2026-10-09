@@ -157,6 +157,12 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
   `publish-skip-baseline.yml` · `auto-measure-skip-baseline.yml` · `delete-merged-branch.yml`) على
   `ubuntu-latest` المستضافِ منذ `WL-286` (‏والخامسُ منذ `WL-329`)، وقاعدةُ البياناتِ حاويةُ خدمةٍ
   `postgres:18.6-alpine`. **لا عدّاءَ ذاتيَّ الاستضافةِ.**
+- **قياسُ `R6-B-03` على قاعدةٍ حقيقيّةٍ عبرَ TLS (‏`WL-359`):** خطوةٌ مخصّصةٌ في «فحص الجودة
+  الكامل» تُشغِّلُ حاويةَ `postgres:18.6` حقيقيّةً بـ`ssl=on` وشهادةٍ موقَّعةٍ من جهةِ إصدارٍ
+  مولَّدةٍ في التشغيلةِ، وتُجري عليها الهجراتِ ثمّ اختبارَ `db-real-pg-tls` (‏`XUUX_REAL_PG_TLS=1`
+  عقدٌ لا رغبةٌ): المصافحةُ مقروءةٌ من `pg_stat_ssl` نفسِها، والرفضُ بلا `DATABASE_CA_FILE`
+  بـ`SELF_SIGNED_CERT_IN_CHAIN` وبجهةٍ أجنبيّةٍ، و`guard:encryption` عمليّةً منفصلةً ⇒ `0`.
+  وقياسُ `WL-357` على مُحاكي البروتوكولِ باقٍ (بيئةِ المنفِّذِ بلا Docker).
 - **ذاكرةُ المشروعِ (‏`WL-329`):** «فحص الجودة الكامل» — الفحصُ المُلزَمُ — يُشغِّلُ
   `npm run guard:project-state` على فرقِ الطلبِ (‏أو الدفعِ) مع `main`: تغييرٌ تنفيذيٌّ بلا مُدخلةٍ
   وسطرِ لوحةٍ وملفّاتٍ متأثّرةٍ مُسمّاةٍ في الحزمةِ نفسِها يُرَدُّ. و`delete-merged-branch.yml` يتحقّقُ
