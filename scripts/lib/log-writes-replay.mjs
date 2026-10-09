@@ -37,19 +37,6 @@
 import { openSync, readSync, writeSync, ftruncateSync, closeSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// تشغيلٌ مباشرٌ كسطرٍ أمريٍّ: node scripts/lib/log-writes-replay.mjs --log … --image …
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  void main().then(
-    (code) => {
-      process.exitCode = code;
-    },
-    (error) => {
-      process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
-      process.exitCode = 1;
-    },
-  );
-}
-
 /** سحرُ السوبربلوك — `WRITE_LOG_MAGIC` من مصدرِ النواةِ. */
 const WRITE_LOG_MAGIC = 0x6a736677736872n;
 /** إصدارُ الصيغةِ — `WRITE_LOG_VERSION`. */
@@ -270,4 +257,19 @@ export async function main(argv = process.argv.slice(2)) {
     }
     throw error;
   }
+}
+
+// تشغيلٌ مباشرٌ كسطرٍ أمريٍّ: node scripts/lib/log-writes-replay.mjs --log … --image …
+// في أسفلِ الملفِ قُصداً: الاستدعاءُ المتزامنُ في الأعلى كانَ يسبقُ تهيئةَ الثوابتِ
+// (‏منطقةُ الرفضِ الزمنيِّ) فيسقُطُ بالمرجعِ قبلَ أن يعملَ شيءٌ.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  void main().then(
+    (code) => {
+      process.exitCode = code;
+    },
+    (error) => {
+      process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+      process.exitCode = 1;
+    },
+  );
 }
