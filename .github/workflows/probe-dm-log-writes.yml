@@ -42,7 +42,7 @@ jobs:
           sudo dmsetup targets
           sudo dmsetup targets | grep -i log-writes && echo TARGET_OK || echo TARGET_MISSING
 
-      - name: محاكاةٌ مصغَّرةٌ: جهازٌ مُسجَّلٌ وعلاماتُ mark فيه
+      - name: محاكاةٌ مصغَّرةٌ — جهازٌ مُسجَّلٌ وعلاماتُ mark فيه
         if: always()
         run: |
           set -x
