@@ -153,8 +153,9 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 
 ## 6 — ما يقيسُه CI وما لا يقيسُه
 
-- **المنصّةُ:** كلُّ مساراتِ العملِ الخمسةِ (‏`ci.yml` · `measure-skip-baseline.yml` ·
-  `publish-skip-baseline.yml` · `auto-measure-skip-baseline.yml` · `delete-merged-branch.yml`) على
+- **المنصّةُ:** كلُّ مساراتِ العملِ الستّةِ (‏`ci.yml` · `measure-skip-baseline.yml` ·
+  `publish-skip-baseline.yml` · `auto-measure-skip-baseline.yml` · `delete-merged-branch.yml` ·
+  `probe-dm-log-writes.yml` — مسارُ فحصِ قدرةِ العدّاءِ لمحاكاةِ فقدِ الطاقةِ) على
   `ubuntu-latest` المستضافِ منذ `WL-286` (‏والخامسُ منذ `WL-329`)، وقاعدةُ البياناتِ حاويةُ خدمةٍ
   `postgres:18.6-alpine`. **لا عدّاءَ ذاتيَّ الاستضافةِ.**
 - **قياسُ `R6-B-03` على قاعدةٍ حقيقيّةٍ عبرَ TLS (‏`WL-359`):** خطوةٌ مخصّصةٌ في «فحص الجودة
