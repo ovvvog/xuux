@@ -49,7 +49,7 @@ function buildLog(entries) {
   superBlock.writeBigUInt64LE(MAGIC, 0);
   superBlock.writeBigUInt64LE(1n, 8); // version
   superBlock.writeBigUInt64LE(0n, 16); // nr_entries — لا يُعتمَدُ عليه
-  superBlock.writeUInt32LE(SECTOR, 28);
+  superBlock.writeUInt32LE(SECTOR, 24);
   const parts = [superBlock];
   for (const entry of entries) {
     const meta = Buffer.alloc(SECTOR);
@@ -173,7 +173,7 @@ test('السوبربلوكُ المعطوبُ مرفوضٌ: سحرٌ وإصدا�
     );
 
     const badSectorSize = Buffer.from(buildLog([{ mark: 'cut' }]));
-    badSectorSize.writeUInt32LE(1024, 28);
+    badSectorSize.writeUInt32LE(1024, 24);
     writeFileSync(ws.log, badSectorSize);
     assert.equal(
       await rejectionCode(() =>
