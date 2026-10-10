@@ -24,6 +24,21 @@ import { registerTestKing, royalKeyEnv, signRoyalCommand } from './royal-halt-co
 export const ROYAL_KEY = royalKeyEnv();
 export const AUTHN_POLICY = loadKingAuthPolicy();
 
+/**
+ * **ساعةٌ رتيبةٌ للاختبارِ (‏WL-364):** ساعةُ الجدارِ في العدّاءِ المُحمَلِ قد تَخطو إلى
+ * الوراءِ (‏slew)، فإذا وقعَتْ نداءتانِ من `session()` في خطوتَينِ متتاليتَينِ وقد خطتِ
+ * الساعةُ خطوةً بينَهما **قدّمَتِ الثانيةُ الرمزَ نفسَهُ الذي استُهلَكَ في الأولى** —
+ * ورفضُ الإعادةِ (‏`AUTHN_FACTOR_REPLAYED`) سلوكٌ إنتاجيٌّ صحيحٌ لا يُعطَّل؛ العطلُ في
+ * الحزامِ الذي قدّمَ الرمزَ المستهلَكَ. الحزامُ هنا يُقدِّمُ ساعةً لا تتراجعُ: كلُّ قراءةٍ
+ * ≥ سابقتِها، فلا يُولَّدَ رمزُ خطوةٍ قد استُهلَكتْ.
+ */
+let monotonicNow = 0;
+export function monotonicDateNow() {
+  const wall = Date.now();
+  if (wall > monotonicNow) monotonicNow = wall;
+  return monotonicNow;
+}
+
 /** مقبسُ حداثةٍ للاختبارِ بلا علامةِ testFixture — الحزامُ نفسُه في `WL-304`. */
 export class TestFreshnessSocket {
   constructor(initial = 0n, anchorPrefix = 'test') {
@@ -117,7 +132,7 @@ export function boot(root, { keys, factorSecrets = null }) {
     XUUX_ROOT_OF_TRUST_PROVISION: '1',
   };
   const testClock = {
-    now: () => Date.now(),
+    now: () => monotonicDateNow(),
     assertTrusted: () => undefined,
     attestation: () => ({
       atMs: Date.now(),
@@ -183,7 +198,7 @@ export async function session(system, secret, stepOffset = 0) {
   const device = AUTHN_POLICY.devices[0];
   assert.ok(device !== undefined);
   const { stepSeconds, digits, algorithm } = AUTHN_POLICY.secondFactor;
-  const step = Math.floor(Date.now() / 1000 / stepSeconds) + stepOffset;
+  const step = Math.floor(monotonicDateNow() / 1000 / stepSeconds) + stepOffset;
   const factorCode = factorCodeForStep({ secret, step, digits, algorithm });
   return {
     factorCode,
