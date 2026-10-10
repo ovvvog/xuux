@@ -231,6 +231,11 @@ export async function createProductionSystem(env, options, deps = {}) {
     royalCommandVerifier: /** @type {never} */ (royalAuthorization),
     grantsStore,
     grantWitness,
+    // **WL-363 (‏قرارُ المالكِ):** معاملةُ حاجزِ الالتزامِ للمنحِ — منحٌ وسحبٌ
+    // كتلةٌ واحدةٌ معَ ختمِ الشاهدِ وهضمِ الحالةِ وترقيةِ البيانِ، فلا نجاحَ قبلَ
+    // دوامِ الحالةِ والشاهدِ معاً. ولا كاتبَ ثانٍ في الجذرِ: الكتابةُ خارجَ معاملةٍ
+    // يرفضُها الحاجزُ (`STATE_WRITE_OUTSIDE_BARRIER`) بعدَ تنشيطِهِ.
+    grantsTxn: (intent, fn) => rootOfTrust.commitBarrier.run(intent, fn),
   });
 
   // 7أ. `R6-A-05` (‏`WL-305`): حالةُ الحجرِ تُعادُ من السجلِّ المختومِ **قبلَ** أن يُقبَلَ أيُّ
@@ -317,7 +322,16 @@ export async function createProductionSystem(env, options, deps = {}) {
       // يُرفعُ بعدَ إغلاقِ الجذرِ لا يُبتلَعُ: لا يُغلقُ النظامُ ومنحٌ مُشهَدٌ لهُ بلا لقطةٍ.
       let grantsPersistError = null;
       try {
-        await chain.grants.persist();
+        // **WL-363:** صرفُ ما تبقّى من حفظٍ معلَّقٍ **داخلَ معاملةٍ** — لا كاتبَ ثانٍ في
+        // الجذرِ بعدَ تنشيطِ الحاجزِ. والمنحُ والسحبُ الطبيعيّانِ يَصرِفانِ حفظَهما في
+        // معاملتِهما، فهذا للمتبقّي من فشلٍ سابقٍ أو تعليقِ اختبارٍ.
+        if (chain.grants.runTxn !== null) {
+          await chain.grants.runTxn('grants.persist', async () => {
+            await chain.grants.persist();
+          });
+        } else {
+          await chain.grants.persist();
+        }
       } catch (error) {
         grantsPersistError = error;
       }

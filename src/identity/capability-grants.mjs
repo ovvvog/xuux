@@ -35,6 +35,13 @@
  * capability.granted`) في السجلِّ الذي يملكُ الحقيقةَ، ولا تُقبَلُ منحةٌ بلا شاهدٍ
  * مطابقٍ (`CAPABILITY_GRANT_UNWITNESSED`). والسحبُ يُقرأُ من الشاهدِ أيضاً: منحٌ
  * تُركَ في اللقطةِ غيرَ مسحوبٍ وأُشهدَ بسحبِهِ يُبعثُ **مسحوباً** لا سارياً.
+ *
+ * **WL-363 (‏قرارُ المالكِ، تتمّةُ «المنح»): المنحُ والسحبُ داخلَ معاملةِ حاجزِ
+ * الالتزامِ.** لقطةُ المنحِ صارتْ منَ مكوّناتِ بصمةِ الحالةِ المختومةِ، فكتابتُها
+ * لا تقعُ إلا داخلَ معاملةٍ (`runTxn`) يُسجِّلُ حاجزُ الالتزامِ تراجعَها ويُحدِّثُ
+ * هضمَ الحالةِ ويرفَعُ البيانَ معَ ختمِ الشاهدِ في السجلِّ — كتلةً واحدةً أو لا شيء.
+ * والمسارُ المتزامنُ (`grant`/`revoke`) يَرفُضُ العملَ تحتَ حاجزٍ مُنشَّطٍ (`CAPABILITY_GRANT_TXN_REQUIRED`):
+ * لا نجاحَ قبلَ دوامِ الحالةِ والشاهدِ معاً، ولا كاتبَ ثانٍ في الجذرِ يُقبَلُ صامتاً.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -66,14 +73,30 @@ import { IncidentSeverity } from './incident-register.mjs';
 
 export class CapabilityGrantLedger {
   /**
-   * @param {{ catalog?: CapabilityCatalog, log?: { append: (type: string, actor: string, payload: object) => unknown }, incidents?: import('./incident-register.mjs').IncidentRegister | null, now?: () => Date, store?: { load(): unknown, save(entries: CapabilityGrant[]): void } | null, grantWitness?: Map<string, { granted: object, revoked: object | null }> | null }} [deps]
+   * @param {{ catalog?: CapabilityCatalog, log?: { append: (type: string, actor: string, payload: object) => unknown, flush?: () => Promise<void> }, incidents?: import('./incident-register.mjs').IncidentRegister | null, now?: () => Date, store?: { load(): unknown, save(entries: CapabilityGrant[]): void } | null, grantWitness?: Map<string, { granted: object, revoked: object | null }> | null, runTxn?: ((intent: string, fn: () => unknown) => Promise<unknown>) | null }} [deps]
    */
-  constructor({ catalog, log, incidents = null, now, store = null, grantWitness = null } = {}) {
+  constructor({
+    catalog,
+    log,
+    incidents = null,
+    now,
+    store = null,
+    grantWitness = null,
+    runTxn = null,
+  } = {}) {
     if (!catalog || !log) throw new Error('CAPABILITY_LEDGER_DEPENDENCY_MISSING');
     this.catalog = catalog;
     this.log = log;
     this.incidents = incidents;
     this.now = now ?? (() => new Date());
+    /**
+     * مسارُ المعاملةِ (`WL-363`): من يملكُ حاجزَ الالتزامِ يُمرِّرُهُ هنا، فتقعُ
+     * منحٌ وسحبٌ داخلَ معاملةٍ واحدةٍ معَ ختمِ الشاهدِ في السجلِّ المختومِ — فلا
+     * نجاحَ قبلَ دوامِ الحالةِ والشاهدِ معاً. وإن لم يُمَرَّرْ (تركيباتٌ واختباراتٌ)
+     * بقيَ المسارُ المتزامنُ كما كانَ.
+     * @type {((intent: string, fn: () => unknown) => Promise<unknown>) | null}
+     */
+    this.runTxn = runTxn;
     /**
      * عقدُ الدوامِ: من يملكُ اللقطةَ يملكُ أينَ تعيشُ، والدفترُ يطلبُ الواجهةَ.
      * @type {{ load(): unknown, save(entries: CapabilityGrant[]): void } | null}
@@ -223,6 +246,22 @@ export class CapabilityGrantLedger {
    * @param {() => void} persist
    * @returns {void}
    */
+  /**
+   * صرفُ سلسلةِ الإلحاقاتِ المختومةِ داخلَ المعاملةِ قبلَ نهايةِ جسمِها.
+   * @returns {Promise<void>}
+   */
+  async #drainLogAppends() {
+    const log =
+      /** @type {{ append: (type: string, actor: string, payload: object) => unknown, flush?: () => Promise<void> }} */ (
+        this.log
+      );
+    if (typeof log.flush !== 'function') return;
+    await log.flush();
+  }
+
+  /**
+   * @param {() => void} persist
+   */
   #persistAfterWitness(persist) {
     // كلُّ عمليةٍ تُصرِّفُ اللقطةَ من الحالةِ الراهنةِ، فإعادةُ صرفِها بعدَ فشلٍ سابقٍ بلا ضررٍ
     // (idempotent): آخرُ لقطةٍ تكسبُ. والفشلُ لا يُبتلَعُ: يُحفَظُ ويُرفعُ عندَ `persist()`، وعمليةٌ
@@ -259,6 +298,55 @@ export class CapabilityGrantLedger {
       this.persistError = null;
       throw error;
     }
+  }
+
+  /**
+   * يمنحُ منحاً **داخلَ معاملةِ حاجزِ الالتزامِ** (`WL-363`): ختمُ الشاهدِ في السجلِّ
+   * المختومِ وحفظُ اللقطةِ الملفّيةِ وهضمُ الحالةِ وترقيةُ البيانِ — كتلةٌ واحدةٌ
+   * تُنفَّذُ أو تُسترجَعُ كلُّها. لا نجاحَ قبلَ دوامِ الحالةِ والشاهدِ معاً، فالانقطاعُ
+   * بينَ الخطواتِ يُسترجَعُ ولا يُنتِجُ نصفَ حالةٍ. وبلا `runTxn` يَسقُطُ إلى المسارِ
+   * المتزامنِ نفسِهِ (تركيباتٌ واختباراتٌ).
+   * @param {Parameters<CapabilityGrantLedger['grant']>[0]} spec
+   * @returns {Promise<CapabilityGrant>}
+   */
+  async grantAsync(spec) {
+    if (this.runTxn === null) return this.grant(spec);
+    const runTxn = this.runTxn;
+    return /** @type {Promise<CapabilityGrant>} */ (
+      runTxn('grants.grant', async () => {
+        const granted = this.#grant(spec);
+        // ختمُ الشاهدِ داخلَ المعاملةِ نفسِها (`WL-363`): لا تنتهي `S3` قبلَ أن يُختَمَ
+        // قيدُ المنحِ في السجلِّ — فالكتلةُ واحدةٌ: شاهدٌ ولقطةٌ وهضمٌ وبيانٌ أو لا شيء.
+        await this.#drainLogAppends();
+        // وحفظُ اللقطةِ الملفّيةِ داخلَ المعاملةِ أيضاً: الكتابةُ للحاجزِ (`beforeDurableWrite`)
+        // فتُدرِجُ التراجعَ وتُحدِّثُ الهضمَ معَ ختمِ الشاهدِ.
+        await this.persist();
+        return granted;
+      })
+    );
+  }
+
+  /**
+   * يسحبُ منحاً **داخلَ معاملةِ حاجزِ الالتزامِ** (`WL-363`): ختمُ شاهدِ السحبِ وحفظُ
+   * اللقطةِ وهضمُ الحالةِ وترقيةُ البيانِ — كتلةٌ واحدةٌ. والانقطاعُ يُسترجَعُ ولا
+   * يُبعِثُ منحاً سارياً بعدَ سحبٍ مُشهَدٍ لهُ.
+   * @param {string} id
+   * @param {string} reason
+   * @returns {Promise<CapabilityGrant>}
+   */
+  async revokeAsync(id, reason) {
+    if (this.runTxn === null) return this.revoke(id, reason);
+    const runTxn = this.runTxn;
+    return /** @type {Promise<CapabilityGrant>} */ (
+      runTxn('grants.revoke', async () => {
+        const revoked = this.#revoke(id, reason);
+        // ختمُ شاهدِ السحبِ داخلَ المعاملةِ نفسِها (`WL-363`) — الكتلةُ الواحدةُ.
+        await this.#drainLogAppends();
+        // وحفظُ اللقطةِ داخلَ المعاملةِ أيضاً — الكتابةُ للحاجزِ.
+        await this.persist();
+        return revoked;
+      })
+    );
   }
 
   /**
@@ -373,7 +461,21 @@ export class CapabilityGrantLedger {
    * @param {{ agentId: string, capability: string, reason: string, principal?: VerifiedPrincipal, ttlSeconds: number, grantedBy?: string, grantorRole?: string }} spec
    * @returns {CapabilityGrant}
    */
-  grant({ agentId, capability, reason, principal, ttlSeconds, grantedBy, grantorRole }) {
+  grant(spec) {
+    // **WL-363:** تحتَ حاجزِ التزامٍ مُنشَّطٍ لا مسارَ متزامناً — الكتابةُ للجذرِ
+    // معاملةٌ (`grantAsync`) أو لا شيء: لا نجاحَ قبلَ دوامِ الحالةِ والشاهدِ معاً.
+    if (this.runTxn !== null) {
+      throw new Error('CAPABILITY_GRANT_TXN_REQUIRED');
+    }
+    return this.#grant(spec);
+  }
+
+  /**
+   * جسمُ المنحِ المشتركُ بينَ المسارَينِ (`grant` المتزامنِ و`grantAsync` المعامَليِّ).
+   * @param {Parameters<CapabilityGrantLedger['grant']>[0]} spec
+   * @returns {CapabilityGrant}
+   */
+  #grant({ agentId, capability, reason, principal, ttlSeconds, grantedBy, grantorRole }) {
     for (const [field, value] of Object.entries({
       agentId,
       capability,
@@ -538,6 +640,20 @@ export class CapabilityGrantLedger {
    * @returns {CapabilityGrant}
    */
   revoke(id, reason) {
+    // **WL-363:** مثلُ المنحِ — لا سحبَ متزامناً تحتَ حاجزٍ مُنشَّطٍ (`revokeAsync`).
+    if (this.runTxn !== null) {
+      throw new Error('CAPABILITY_GRANT_TXN_REQUIRED');
+    }
+    return this.#revoke(id, reason);
+  }
+
+  /**
+   * جسمُ السحبِ المشتركُ بينَ المسارَينِ (`revoke` المتزامنِ و`revokeAsync` المعامَليِّ).
+   * @param {string} id
+   * @param {string} reason
+   * @returns {CapabilityGrant}
+   */
+  #revoke(id, reason) {
     const current = this.grants.get(id);
     if (current === undefined) throw new Error('CAPABILITY_GRANT_NOT_FOUND');
     if (typeof reason !== 'string' || reason.trim() === '') {

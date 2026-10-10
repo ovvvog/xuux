@@ -86,6 +86,7 @@ export const COMPOSITION_ERRORS = Object.freeze({
  *   authority?: import('../root-of-trust/identity.mjs').CertificateAuthority,
  *   grantsStore?: { load(): unknown, save(entries: import('../identity/capability-grants.mjs').CapabilityGrant[]): void } | null,
  *   grantWitness?: Map<string, { granted: object, revoked: object | null }> | null,
+ *   grantsTxn?: ((intent: string, fn: () => unknown) => Promise<unknown>) | null,
  * }} deps
  * @returns {EnforcementChain}
  */
@@ -106,6 +107,7 @@ export function composeEnforcementChain(deps) {
     authority: injectedAuthority,
     grantsStore = null,
     grantWitness = null,
+    grantsTxn = null,
   } = options;
 
   if (
@@ -138,6 +140,10 @@ export function composeEnforcementChain(deps) {
     // بلا إنتاجٍ)، وبهِ فالاسترجاعُ لا يَقبَلُ منحاً لم يُشهَدْ لها (رفضٌ مُغلقٌ لا
     // تساهلٌ).
     grantWitness,
+    // **WL-363 (‏قرارُ المالكِ):** معاملةُ حاجزِ الالتزامِ — منحٌ وسحبٌ داخلَ كتلةٍ
+    // واحدةٍ معَ ختمِ الشاهدِ وهضمِ الحالةِ وترقيةِ البيانِ. والإنتاجُ يُمرِّرُها؛
+    // والتركيباتُ بلا حاجزٍ تعملُ بالمسارِ المتزامنِ نفسِهِ.
+    runTxn: grantsTxn,
   });
   const registry = new AgentRegistry({
     ca: authority,
