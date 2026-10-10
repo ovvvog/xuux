@@ -26,6 +26,15 @@
  * تُرفَعُ بخطأٍ مُسمّى لا تُفترَضُ سليمةً. وحدٌّ مُعلَنٌ: اللقطةُ الملفّيةُ ليست
  * مختومةً — حمايةُ ملفّاتِها من العبثِ شأنُ التركيبِ الذي يختارُ موضعَها (جذرُ
  * حالةٍ مختومٍ في الإنتاجِ)، وهذا عينُ عقدِ مخزنِ ميزانيةِ الاستدلالِ (`LIM-1`).
+ *
+ * **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): الاسترجاعُ الآن **مُقيدٌ بشاهدٍ مختومٍ**
+ * لا مجرد فحصِ شكلٍ.** من يفحصُ شكلَ مُدخلٍ لا يثبتُ أصالتَهُ: ملفٌّ صالحُ
+ * البنيةِ (‏JSON سليمٌ، الحقولُ كلُّها موجودةٌ) بيدِ صاحبِ القرصِ قد يَحمِلُ منحاً
+ * لم يُصدرها المانحُ الحقيقيُّ أبداً — `grantedBy`/`grantorRole` داخلَ الملفِّ
+ * ادّعاءٌ لا برهانٌ. فالاسترجاعُ اليومَ يقارنُ كلَّ منحةٍ بحدثٍ مختومٍ (`
+ * capability.granted`) في السجلِّ الذي يملكُ الحقيقةَ، ولا تُقبَلُ منحةٌ بلا شاهدٍ
+ * مطابقٍ (`CAPABILITY_GRANT_UNWITNESSED`). والسحبُ يُقرأُ من الشاهدِ أيضاً: منحٌ
+ * تُركَ في اللقطةِ غيرَ مسحوبٍ وأُشهدَ بسحبِهِ يُبعثُ **مسحوباً** لا سارياً.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -57,9 +66,9 @@ import { IncidentSeverity } from './incident-register.mjs';
 
 export class CapabilityGrantLedger {
   /**
-   * @param {{ catalog?: CapabilityCatalog, log?: { append: (type: string, actor: string, payload: object) => unknown }, incidents?: import('./incident-register.mjs').IncidentRegister | null, now?: () => Date, store?: { load(): unknown, save(entries: CapabilityGrant[]): void } | null }} [deps]
+   * @param {{ catalog?: CapabilityCatalog, log?: { append: (type: string, actor: string, payload: object) => unknown }, incidents?: import('./incident-register.mjs').IncidentRegister | null, now?: () => Date, store?: { load(): unknown, save(entries: CapabilityGrant[]): void } | null, grantWitness?: Map<string, { granted: object, revoked: object | null }> | null }} [deps]
    */
-  constructor({ catalog, log, incidents = null, now, store = null } = {}) {
+  constructor({ catalog, log, incidents = null, now, store = null, grantWitness = null } = {}) {
     if (!catalog || !log) throw new Error('CAPABILITY_LEDGER_DEPENDENCY_MISSING');
     this.catalog = catalog;
     this.log = log;
@@ -70,8 +79,29 @@ export class CapabilityGrantLedger {
      * @type {{ load(): unknown, save(entries: CapabilityGrant[]): void } | null}
      */
     this.store = store;
+    /**
+     * شاهدُ الحقيقةِ المختومُ للمنحِ (`WL-361`): إن مُرِّرَ فالاسترجاعُ لا يَقبَلُ
+     * منحاً لا يُطابِقُهُ. خريطةٌ من مُعرّفِ المنحةِ إلى الحدثِ المختومِ الذي
+     * أَشهَدَ بمنحِها (وسحبِها إن وُجدَ) — بُنيتَ من السجلِّ المختومِ قبلَ البناءِ
+     * بـ`grantsFromSealedLog`، لا من اللقطةِ الملفّيةِ.
+     * @type {Map<string, { granted: object, revoked: object | null }> | null}
+     */
+    this.grantWitness = grantWitness;
     /** @type {Map<string, CapabilityGrant>} */
     this.grants = new Map();
+    /**
+     * منحٌ أُنشئت في الذاكرة ولم يُختَم شاهدُها بعدُ (`WL-361`): لا تدخلُ اللقطةَ الملفّيةَ
+     * قبلَ ختمِ شاهدِها — فالملفُّ **دائماً** مجموعةٌ جزئيّةٌ ممّا يشهدُ به السجلُّ المختومُ، وانقطاعٌ
+     * بينَ المنحِ والختمِ يُضيّقُ (تضيعُ المنحةُ) ولا يُنتجُ ملفّاً بمنحٍ بلا دليل.
+     * @type {Set<string>}
+     */
+    this.pendingGrantIds = new Set();
+    /** @type {Array<() => void>} عملياتُ حفظٍ مُعلَّقةٌ تُصرَّفُ تباعاً وتُعادُ عندَ الفشلِ. */
+    this.pendingPersists = [];
+    /** @type {unknown} */
+    this.persistError = null;
+    /** اختبارٌ فقط: تعليقُ الحفظِ صامتاً. */
+    this.persistSuspended = false;
     if (this.store !== null) {
       this.#restoreFromStore();
     }
@@ -101,10 +131,150 @@ export class CapabilityGrantLedger {
     const seen = new Set();
     for (const entry of snapshot) {
       const grant = this.#validatedGrant(entry);
+      let restored = grant;
+      // **لا منحَ بلا شاهدٍ مختومٍ.** فحصُ الحقولِ يثبتُ البنيةَ لا الأصالةَ: ملفٌّ سليمُ البنيةِ بيدِ
+      // صاحبِ القرصِ قد يحملُ منحاً لم يُصدرْها مانحٌ حقيقيٌّ، و`grantedBy`/`grantorRole` داخلَه ادّعاءٌ.
+      // الشاهدُ المختومُ هو من يُثبتُ؛ واللقطةُ المُعدَّلةُ يدويّاً تُرفَضُ لا تُقبَلُ صامتةً.
+      if (this.grantWitness !== null) {
+        const witness = this.grantWitness.get(grant.id);
+        if (witness === undefined) {
+          throw new Error(`CAPABILITY_GRANT_UNWITNESSED: ${grant.id}`);
+        }
+        const w = /** @type {Record<string, unknown>} */ (witness.granted);
+        // والمقابلةُ حقلاً حقلاً: شاهدٌ لا يُطابقُ لا يَشمَلُ المنحةَ. وحقلا `grantedAt`/`grantorRole`
+        // مطلوبانِ في الشاهدِ (غيابُهما رفضٌ لا تساهلٌ).
+        if (
+          w.agentId !== grant.agentId ||
+          w.capability !== grant.capability ||
+          w.grantedBy !== grant.grantedBy ||
+          w.grantorRole !== grant.grantorRole ||
+          w.grantedAt !== grant.grantedAt ||
+          w.expiresAt !== grant.expiresAt ||
+          w.reason !== grant.reason
+        ) {
+          throw new Error(`CAPABILITY_GRANT_WITNESS_MISMATCH: ${grant.id}`);
+        }
+        // السحبُ: الاتجاهُ الأضيقُ يفوزُ. سحبٌ شهدَ به السجلُّ المختومُ ولم يبلغِ اللقطةَ (انقطاعٌ بينَ
+        // ختمِ السحبِ وحفظِه) يُطبَّقُ من الشاهدِ — فلا تعودُ منحةٌ مسحوبةٌ سارية. وسحبٌ في اللقطةِ بلا
+        // شاهدِ سحبٍ (انقطاعٌ قبلَ ختمِهِ) يبقى مسحوباً: السحبُ لا يُوسِّعُ صلاحيةً أبداً.
+        // سحبٌ مُزوَّرٌ: الملفُّ يدّعي سحباً والشاهدُ لا يعرفُ سحباً — من حرَّفَ الملفَّ ليُخفيَ
+        // سحباً من الشاهدِ يُكشَفُ، ومن حرَّفَهُ ليُدّعيَ سحباً لم يقعْ يُكذَبُ: السحبُ يُقاسُ على
+        // الشاهدِ المختومِ لا على قولِ الملفّ.
+        if (witness.revoked === null && grant.revokedAt !== null) {
+          throw new Error(`CAPABILITY_GRANT_WITNESS_REVOKE_UNPROVEN: ${grant.id}`);
+        }
+        if (witness.revoked !== null && grant.revokedAt === null) {
+          const r = /** @type {Record<string, unknown>} */ (witness.revoked);
+          restored = Object.freeze({
+            ...grant,
+            revokedAt:
+              typeof r.revokedAt === 'string' && Number.isFinite(Date.parse(r.revokedAt))
+                ? r.revokedAt
+                : this.now().toISOString(),
+            revokedReason:
+              typeof r.reason === 'string' && r.reason.trim() !== ''
+                ? r.reason
+                : 'revoked (sealed)',
+          });
+        }
+      }
+      // **قواعدُ الكتالوجِ تُعادُ عندَ الاسترجاعِ** (`WL-361`): ما يرفضُهُ المسارُ الحيُّ يرفضُهُ الاسترجاعُ —
+      // قدرةٌ غيرُ قابلةٍ للمنحِ، أو مانحٌ بدورٍ غيرِ مخوَّلٍ، أو ذاتُ المانحِ والمستفيدِ، أو مدّةٌ
+      // فوقَ السقفِ أو غيرُ موجبةٍ، وإلا صارتِ اللقطةُ طريقاً حولَ قواعدِ المنحِ. وتأتي **بعدَ** فحصِ
+      // الشاهدِ: منحٌ بلا شاهدٍ تُرفَضُ بلا كشفِ قواعدِ الكتالوجِ، ومنحٌ شُهِدَ لها تُقاسُ عليها.
+      this.#assertCatalogRules(grant);
       if (seen.has(grant.id)) throw new Error('CAPABILITY_GRANT_STORE_INVALID');
       seen.add(grant.id);
-      this.grants.set(grant.id, grant);
+      this.grants.set(grant.id, restored);
     }
+  }
+
+  /**
+   * قواعدُ الكتالوجِ على منحةٍ مُسترجَعةٍ — المسارُ الحيُّ نفسُهُ (`WL-361`): ما يرفضُهُ الإنشاءُ
+   * يرفضُهُ الاسترجاعُ، وإلا صارتِ اللقطةُ الملفّيةُ طريقاً حولَ قواعدِ المنحِ: قدرةٌ غيرُ قابلةٍ، أو
+   * مانحٌ بدورٍ غيرِ مخوَّلٍ، أو منحٌ للذاتِ، أو مدّةٌ فوقَ سقفِ البياناتِ أو غيرِ موجبةٍ.
+   * @param {CapabilityGrant} grant
+   * @returns {void}
+   */
+  #assertCatalogRules(grant) {
+    const definition = this.catalog.grantable.get(grant.capability);
+    if (definition === undefined) {
+      throw new Error(`CAPABILITY_NOT_GRANTABLE: ${grant.id}`);
+    }
+    if (grant.grantedBy === grant.agentId) {
+      throw new Error(`CAPABILITY_SELF_GRANT_FORBIDDEN: ${grant.id}`);
+    }
+    if (!definition.grantorRoles.has(grant.grantorRole)) {
+      throw new Error(`CAPABILITY_GRANTOR_NOT_AUTHORIZED: ${grant.id}`);
+    }
+    const ttlSeconds = (Date.parse(grant.expiresAt) - Date.parse(grant.grantedAt)) / 1000;
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0) {
+      throw new Error(`CAPABILITY_GRANT_TTL_INVALID: ${grant.id}`);
+    }
+    if (ttlSeconds > definition.maxDurationSeconds) {
+      throw new Error(`CAPABILITY_GRANT_TTL_ABOVE_MAX: ${grant.id}`);
+    }
+  }
+
+  /**
+   * **الشاهدُ المختومُ أوّلاً ثمّ الملفُّ** (`WL-361`، تتمّةُ «المنح»): ترتيبُ العمليةِ. المنحُ الحيُّ
+   * يُسجِّلُ قيدَهُ في السجلِّ المختومِ **قبلَ** أن يدخلَ اللقطةَ الملفّيةَ، والسحبُ كذلكَ — فالشاهدُ هو
+   * الحقيقةُ والملفُّ ذاكرةُ الوصولِ، وانقطاعٌ بينَ الخطوتَينِ يُضيّقُ لا يُوسّعُ.
+   * @param {() => void} persist
+   * @returns {void}
+   */
+  #persistAfterWitness(persist) {
+    // كلُّ عمليةٍ تُصرِّفُ اللقطةَ من الحالةِ الراهنةِ، فإعادةُ صرفِها بعدَ فشلٍ سابقٍ بلا ضررٍ
+    // (idempotent): آخرُ لقطةٍ تكسبُ. والفشلُ لا يُبتلَعُ: يُحفَظُ ويُرفعُ عندَ `persist()`، وعمليةٌ
+    // جديدةٌ تُعادُ أيضاً — فالذاكرةُ لا تتقدّمُ على القرصِ إلا بنجاحِ الحفظِ الأخيرِ.
+    this.pendingPersists.push(persist);
+    if (this.persistError !== null) throw this.persistError;
+  }
+
+  /**
+   * ينتظرُ حتى تُكتَبَ آخرُ عمليةِ منحٍ/سحبٍ إلى الملفّ. للتركيبِ الإنتاجيِّ الذي يُغلقُ بنظامٍ
+   * وباختباراتِ الاستمراريّةِ. يرفعُ أوّلَ فشلٍ حفظٍ ويُخليهُ — فالرفضُ صوتٌ لا سُمٌّ، وإعادةُ
+   * المحاولةِ على مخزنٍ سليمٍ تنجحُ.
+   * @returns {Promise<void>}
+   */
+  async persist() {
+    // يَصرِفُ كلَّ عملياتِ الحفظِ المعلَّقةِ (وإعادةَ صرفِ ما فشلَ سابقاً)، ويرفعُ أوّلَ فشلٍ
+    // ويُخلّيهِ — فالرفضُ صوتٌ لا سُمٌّ، وإعادةُ المحاولةِ على مخزنٍ سليمٍ تنجحُ.
+    while (this.pendingPersists.length > 0) {
+      const persist = this.pendingPersists.shift();
+      if (persist === undefined || this.persistSuspended === true) continue;
+      try {
+        persist();
+      } catch (error) {
+        // الفاشلُ يُعادُ إلى مقدّمةِ الطابورِ: عملياتٌ أخرى قد تصرّفُ بعدهُ فتكتبُ الحالةَ كلَّها.
+        this.pendingPersists.unshift(persist);
+        const e =
+          this.persistError ?? new Error('CAPABILITY_GRANT_STORE_WRITE_FAILED', { cause: error });
+        this.persistError = null;
+        throw e;
+      }
+    }
+    if (this.persistError !== null) {
+      const error = this.persistError;
+      this.persistError = null;
+      throw error;
+    }
+  }
+
+  /**
+   * تعليقُ الحفظِ أثناءَ الاختبارِ — لا يُستعملُ في الإنتاجِ: يُغلقُ عملُ الحفظِ صامتاً.
+   * @returns {void}
+   */
+  suspendPersistForTest() {
+    this.persistSuspended = true;
+  }
+
+  /**
+   * استئنافُ الحفظِ بعدَ الاختبارِ.
+   * @returns {void}
+   */
+  resumePersist() {
+    this.persistSuspended = false;
   }
 
   /**
@@ -294,21 +464,38 @@ export class CapabilityGrantLedger {
       revokedAt: null,
       revokedReason: null,
     });
-    if (this.store !== null) {
-      const next = new Map(this.grants);
-      next.set(record.id, record);
-      this.#commit(next);
-    } else {
-      this.grants.set(record.id, record);
-    }
+    // **الشاهدُ أوّلاً** (`WL-361`): المنحُ يُقيَّدُ في السجلِّ المختومِ قبلَ أن يدخلَ اللقطةَ الملفّيةَ —
+    // فالشاهدُ المختومُ هو الحقيقةُ، والملفُّ ذاكرةُ الوصولِ. من انقطعَ قبلَ ختمِ الشاهدِ فمنحُهُ لم يقعْ
+    // (لا منحَ في الملفِّ بلا شاهدٍ يَشمَلُهُ)؛ ومن انقطعَ بعدَ الشاهدِ فمنحُهُ باقٍ (لا حاجةَ لإعادةِ
+    // نداءٍ): الاسترجاعُ يُصدِّقُهُ من الشاهدِ وإن فاتَ حفظُ الملفّ. ولا يُدخلُ الملفُّ منحاً بلا شاهدٍ
+    // مختومٍ أبداً.
     this.log.append('capability.granted', verifiedGrantedBy, {
       id: record.id,
       agentId,
       capability,
       ttlSeconds,
+      // الحقولُ الكاملةُ في الشاهدِ (`WL-361`): المقابلةُ عندَ الاسترجاعِ حقلاً حقلاً تطلبُ المُنشئَ
+      // نفسَهُ الذي جازَ الإنشاءَ — فالمانحُ والدورُ والزمنُ في القيدِ المختومِ لا في الملفِّ وحدَهُ.
+      grantedBy: verifiedGrantedBy,
+      grantorRole: verifiedGrantorRole,
+      grantedAt: record.grantedAt,
       expiresAt: record.expiresAt,
       reason,
     });
+    if (this.store !== null) {
+      this.grants.set(record.id, record);
+      this.pendingGrantIds.add(record.id);
+      const persist = () => {
+        if (this.persistSuspended === true) return;
+        const next = new Map(this.grants);
+        next.set(record.id, record);
+        this.#commit(next);
+        this.pendingGrantIds.delete(record.id);
+      };
+      this.#persistAfterWitness(persist);
+    } else {
+      this.grants.set(record.id, record);
+    }
     return record;
   }
 
@@ -363,19 +550,29 @@ export class CapabilityGrantLedger {
       revokedAt: this.now().toISOString(),
       revokedReason: reason,
     });
-    if (this.store !== null) {
-      const next = new Map(this.grants);
-      next.set(id, revoked);
-      this.#commit(next);
-    } else {
-      this.grants.set(id, revoked);
-    }
+    // **الشاهدُ أوّلاً** (`WL-361`): السحبُ يُقيَّدُ في السجلِّ المختومِ قبلَ أن يدخلَ اللقطةَ الملفّيةَ.
+    // انقطاعٌ بينَ ختمِ السحبِ وحفظِهِ يُضيّقُ: الاسترجاعُ يعرفُ من الشاهدِ أنّ المنحةَ مسحوبةٌ فيرفضُ
+    // إعادتَها ساريةً. ولا يُوسّعُ السحبُ صلاحيةً أبداً.
     this.log.append('capability.revoked', current.grantedBy, {
       id,
       agentId: current.agentId,
       capability: current.capability,
+      // الشاهدُ الكاملُ للسحبِ (`WL-361`): عندَ المقابلةِ بعدَ الإقلاعِ يُطبَّقُ من الشاهدِ لا من الملفّ.
+      revokedAt: revoked.revokedAt,
       reason,
     });
+    if (this.store !== null) {
+      this.grants.set(id, revoked);
+      const persist = () => {
+        if (this.persistSuspended === true) return;
+        const next = new Map(this.grants);
+        next.set(id, revoked);
+        this.#commit(next);
+      };
+      this.#persistAfterWitness(persist);
+    } else {
+      this.grants.set(id, revoked);
+    }
     return revoked;
   }
 
@@ -413,7 +610,12 @@ export class CapabilityGrantLedger {
     if (count > 0) {
       if (this.store !== null) {
         const next = new Map(this.grants);
-        for (const id of expired) next.delete(id);
+        for (const id of expired) {
+          // **المنحُ الراعي** (`pendingGrantIds`) لا يُفرَّغُ قبلَ ختمِ شاهدِها (`WL-361`): من لم
+          // يُشهدْ لهُ بعدُ لا يُحذفُ من اللقطةِ — فالحذفُ هنا تخطٍّ لعمليةٍ لم تكتملْ لا تنظيفٌ.
+          if (this.pendingGrantIds.has(id)) continue;
+          next.delete(id);
+        }
         this.#commit(next);
       } else {
         for (const id of expired) this.grants.delete(id);

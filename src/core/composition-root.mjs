@@ -85,6 +85,7 @@ export const COMPOSITION_ERRORS = Object.freeze({
  *   kingIdentity?: import('../root-of-trust/identity.mjs').KingIdentity,
  *   authority?: import('../root-of-trust/identity.mjs').CertificateAuthority,
  *   grantsStore?: { load(): unknown, save(entries: import('../identity/capability-grants.mjs').CapabilityGrant[]): void } | null,
+ *   grantWitness?: Map<string, { granted: object, revoked: object | null }> | null,
  * }} deps
  * @returns {EnforcementChain}
  */
@@ -104,6 +105,7 @@ export function composeEnforcementChain(deps) {
     kingIdentity: injectedKingIdentity,
     authority: injectedAuthority,
     grantsStore = null,
+    grantWitness = null,
   } = options;
 
   if (
@@ -131,6 +133,11 @@ export function composeEnforcementChain(deps) {
     incidents,
     now: clock,
     store: grantsStore,
+    // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»):** من يَملِكُ الحقيقةَ المختومةَ للمنحِ
+    // يُمرِّرُها هنا — بلا شاهدٍ فالدفترُ يَعمَلُ بلا دليلٍ (اختباراتٌ وتركيباتٌ
+    // بلا إنتاجٍ)، وبهِ فالاسترجاعُ لا يَقبَلُ منحاً لم يُشهَدْ لها (رفضٌ مُغلقٌ لا
+    // تساهلٌ).
+    grantWitness,
   });
   const registry = new AgentRegistry({
     ca: authority,

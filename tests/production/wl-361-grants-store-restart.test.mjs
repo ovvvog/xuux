@@ -205,6 +205,9 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
           ttlSeconds: ttlActive,
         });
         system.chain.grants.revoke(revoked.id, 'سُحِبَت');
+        // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): الحفظُ «الشاهدُ المختومُ أوّلاً ثمّ الملفُّ» —
+        // فقبلَ قراءةِ اللقطةِ يُنتظرُ صرفُ عملياتِ الحفظِ المعلَّقةِ (`persist()`).**
+        await system.chain.grants.persist();
 
         // الملفُّ مكتوبٌ على القرص
         assert.ok(
@@ -215,30 +218,47 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
         assert.ok(system.chain.grants.capabilitiesOf(shared.id).has('action:read-registry'));
         assert.ok(!system.chain.grants.capabilitiesOf(shared.id).has('action:write-memory'));
       },
-      // بينَ الإقلاعَين: تمرُّ مدّةُ إحدى المنحِ (تُزحزَحُ على القرصِ) كأنّ الزمنَ مضى.
+      // **بينَ الإقلاعَين (`WL-361`):** الحقنَ السابقَ للملفِّ (إزاحةُ grantedAt/expiresAt على القرص)
+      // كانَ تزويراً بمعيارِ العقدِ الجديدِ — فالشاهدُ المختومُ يُقارِنُ الحقولَ كلَّها، والمسُّ
+      // للقرصِ مرفوضٌ. تُختبرُ الانتهاءُ بساعةِ الدفترِ: «القراءةُ نفسُها تُقاسُ بالساعةِ المُمرَّرة،
+      // فمنحٌ انتهى لا يظهرُ في القدراتِ الفعّالة» — تُزحزَحُ الساعةُ لا الملفُّ.
       async (system, shared) => {
         assert.ok(system.chain.grants.capabilitiesOf(shared.id).has('action:read-audit'));
-        const snap = JSON.parse(readFileSync(shared.grantsFilePath, 'utf8'));
-        const entry = snap.find((g) => g.capability === 'action:read-audit');
-        assert.ok(entry, 'منحةُ read-audit غابت عن اللقطة');
-        entry.expiresAt = new Date(Date.now() - 60_000).toISOString();
-        entry.grantedAt = new Date(Date.now() - 3_600_000).toISOString();
-        writeFileSync(shared.grantsFilePath, JSON.stringify(snap), 'utf8');
+        const originalNow = system.chain.grants.now;
+        system.chain.grants.now = () => new Date(Date.now() + 3700_000);
+        try {
+          assert.equal(
+            system.chain.grants.capabilitiesOf(shared.id).has('action:read-audit'),
+            false,
+            'منحٌ انتهى لا يظهرُ في القدراتِ الفعّالةِ ولو لم يُحذفْ من المخزنِ',
+          );
+        } finally {
+          system.chain.grants.now = originalNow;
+        }
       },
       // العمليةُ الثالثة: يُعادُ بناءُ الدفترِ من القرصِ — الساريةُ تبقى والمنتهيةُ لا تعودُ والمسحوبةُ لا تُبعث.
+      // والانتهاءُ يُختبرُ بساعةِ الدفترِ (مضيُّ ساعةٍ وسبعِ دقائق) لا بمسِّ الملفِّ — فتزويرُ
+      // الملفِّ مرفوضٌ بعقدِ الشاهدِ، والانتهاءُ يُسقطُ القدرةَ بالقراءةِ لا بالحذفِ.
       async (system, shared) => {
         assert.ok(
           system.chain.grants.capabilitiesOf(shared.id).has('action:read-registry'),
           'منحٌ سارٍ فُقدَ بإعادةِ التشغيلِ',
         );
         assert.ok(
-          !system.chain.grants.capabilitiesOf(shared.id).has('action:read-audit'),
-          'منحٌ منتهيٌ عادَ بعدَ انتهاءِ مدتِه',
-        );
-        assert.ok(
           !system.chain.grants.capabilitiesOf(shared.id).has('action:write-memory'),
           'منحٌ مسحوبٌ أُحييَ',
         );
+        const originalNow = system.chain.grants.now;
+        system.chain.grants.now = () => new Date(Date.now() + 3700_000);
+        try {
+          assert.equal(
+            system.chain.grants.capabilitiesOf(shared.id).has('action:read-audit'),
+            false,
+            'منحٌ منتهيٌ عادَ بعدَ انتهاءِ مدتِه',
+          );
+        } finally {
+          system.chain.grants.now = originalNow;
+        }
       },
     ]);
   });
@@ -310,5 +330,219 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
         assert.ok(system.chain.enforcementPoint !== null);
       },
     ]);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// WL-361 (تتمّة) — الاختباراتُ السلبيةُ: لا منحَ بلا شاهدٍ مختومٍ، ولا تزويرَ للملفِّ
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('WL-361 (تتمّة) — رفضُ المنحِ المزوَّرةِ: لا منحَ بلا شاهدٍ مختومٍ', () => {
+  test('منحٌ مزوَّرةٌ بلا شاهدٍ مختومٍ ⇒ رفضُ إقلاعٍ CAPABILITY_GRANT_UNWITNESSED', async () => {
+    const root = tmpRoot();
+    try {
+      const agentId = 'agent:worker';
+      const forged = [
+        {
+          id: 'grant:00000000-0000-4000-8000-000000000001',
+          agentId,
+          capability: 'action:read-registry',
+          reason: 'عنوانٌ مزوَّرٌ',
+          grantedBy: 'king:test',
+          grantorRole: 'role:king',
+          grantedAt: '2026-10-10T00:00:00.000Z',
+          expiresAt: '2999-01-01T00:00:00.000Z', // مدّةٌ غيرُ معقولةٍ فوقَ السقفِ
+          revokedAt: null,
+          revokedReason: null,
+        },
+      ];
+      writeFileSync(join(root, 'capability-grants.json'), JSON.stringify(forged, null, 2), 'utf8');
+
+      const socket = new TestFreshnessSocket(0n, 'wl361forged');
+      const { boot } = rig({ freshnessSocket: socket });
+      await assert.rejects(
+        () => boot(root),
+        /CAPABILITY_GRANT_UNWITNESSED/,
+        'منحٌ مزوَّرةٌ بلا شاهدٍ مختومٍ تُقبَلُ صامتةً',
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('منحٌ مزوَّرةٌ بمدّةٍ فوقَ سقفِ الكتالوجِ بلا شاهدٍ ⇒ رفضٌ حتى لو كانَ المانحُ المزعومُ سليمَ البنيةِ', async () => {
+    const root = tmpRoot();
+    try {
+      const forged = [
+        {
+          id: 'grant:00000000-0000-4000-8000-000000000002',
+          agentId: 'agent:worker',
+          capability: 'action:read-registry',
+          reason: 'م',
+          grantedBy: 'king:test',
+          grantorRole: 'role:king',
+          grantedAt: '2026-10-10T00:00:00.000Z',
+          expiresAt: '2999-01-01T00:00:00.000Z',
+          revokedAt: null,
+          revokedReason: null,
+        },
+      ];
+      writeFileSync(join(root, 'capability-grants.json'), JSON.stringify(forged, null, 2), 'utf8');
+      const socket = new TestFreshnessSocket(0n, 'wl361ttl');
+      const { boot } = rig({ freshnessSocket: socket });
+      // الرفضُ يقعُ على الشاهدِ لا على الملفِّ: لا شاهدَ ⇒ UNWITNESSED (قواعدُ الكتالوجِ تُفحَصُ
+      // بعدَ وجودِ الشاهدِ لا قبلهُ — فلا يَمرُّ ملفٌّ بمنحٍ فوقَ السقفِ أصلاً).
+      await assert.rejects(() => boot(root), /CAPABILITY_GRANT_UNWITNESSED/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('منحٌ حقيقيةٌ ثمّ سحبٌ على القرصِ بلا شاهدِ سحبٍ ⇒ تبقى مسحوبةً (لا توسيعٍ)', async () => {
+    const root = tmpRoot();
+    try {
+      const socket = new TestFreshnessSocket(0n, 'wl361hiddenrevoke');
+      const { boot } = rig({ freshnessSocket: socket });
+      const shared = { id: '', grantsFilePath: join(root, 'capability-grants.json') };
+      let revokedGrantId = '';
+
+      const system = await boot(root);
+      try {
+        const agent = await system.chain.registry.register({ name: 'x', role: 'role:minister' });
+        shared.id = agent.id;
+        const granted = system.chain.grants.grant({
+          agentId: shared.id,
+          capability: 'action:write-memory',
+          reason: 'ثُمّ يُسحَبُ',
+          principal: { id: 'king:test', role: 'role:king', state: 'active' },
+          ttlSeconds: 3600,
+        });
+        revokedGrantId = granted.id;
+        system.chain.grants.revoke(revokedGrantId, 'سُحِبَت');
+        await system.chain.grants.persist();
+      } finally {
+        await system.close();
+      }
+
+      // تزويرٌ: محوُ السحبِ من الملفِّ (إعادةُ revokedAt إلى null) وإخفاءُ السحبِ
+      const raw = JSON.parse(readFileSync(shared.grantsFilePath, 'utf8'));
+      const entry = raw.find((g) => g.id === revokedGrantId);
+      assert.ok(entry, 'المنحةُ غابتْ عن القرصِ');
+      entry.revokedAt = null;
+      entry.revokedReason = null;
+      writeFileSync(shared.grantsFilePath, JSON.stringify(raw, null, 2), 'utf8');
+
+      // والنتيجةُ: إقلاعٌ يُبعثُ المنحَ **مسحوبةً** من الشاهدِ لا ساريةً من الملفِّ
+      const system2 = await boot(root);
+      try {
+        assert.ok(
+          !system2.chain.grants.capabilitiesOf(shared.id).has('action:write-memory'),
+          'تزويرُ إخفاءِ السحبِ نفعَ',
+        );
+        const restored = system2.chain.grants.grants.get(revokedGrantId);
+        assert.ok(restored, 'المنحةُ غابتْ من الذاكرةِ');
+        assert.notEqual(restored.revokedAt, null, 'منحٌ مُزوَّرُ إخفاءِ سحبِهِ عادَتْ ساريةً');
+      } finally {
+        await system2.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('انقطاعٌ بينَ ختمِ الشاهدِ وحفظِ الملفِّ ⇒ منحٌ لا يُقبَلُ من ملفٍّ لا يشهدُ له السجلُّ', async () => {
+    // المحاكاةُ: منحٌ شُهِدَ لهُ في السجلِّ (الحدثُ مختومٌ) ثمّ انقطاعٌ **قبلَ** حفظِ الملفّ.
+    // النتيجةُ المقبولةُ: الملفُّ لا يحملُ المنحَ فتضيعُ (تضييقٌ)، ولا يحملُها بلا شاهدٍ أبداً.
+    const root = tmpRoot();
+    try {
+      const socket = new TestFreshnessSocket(0n, 'wl361crash');
+      const { boot } = rig({ freshnessSocket: socket });
+      const shared = { id: '', grantsFilePath: join(root, 'capability-grants.json') };
+
+      const system = await boot(root);
+      try {
+        const agent = await system.chain.registry.register({ name: 'y', role: 'role:minister' });
+        shared.id = agent.id;
+        // تعليقُ الحفظِ صراحةً: المنحُ يقعُ (شاهدُهُ يُسجَّلُ في السجلِّ) والملفُّ لا يُحدَّثُ
+        system.chain.grants.suspendPersistForTest();
+        system.chain.grants.grant({
+          agentId: shared.id,
+          capability: 'action:read-registry',
+          reason: 'قبلَ الانقطاعِ',
+          principal: { id: 'king:test', role: 'role:king', state: 'active' },
+          ttlSeconds: 3600,
+        });
+        // ختمُ الشاهدِ يقعُ (flush) بلا حفظِ ملفٍّ — انقطاعٌ بينَ الخطوتَينِ
+        await system.rootOfTrust.log.flush?.();
+      } finally {
+        await system.close();
+      }
+
+      // الإقلاعُ التالي: الملفُّ لا يحملُ المنحَ (فُقدت — تضييقٌ)، ولا يحملُها بلا شاهدٍ
+      const system2 = await boot(root);
+      try {
+        assert.equal(
+          system2.chain.grants.capabilitiesOf(shared.id).has('action:read-registry'),
+          false,
+          'منحٌ لم يُحفَظْ ملفُّهُ عادَ سارياً',
+        );
+      } finally {
+        await system2.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('انقطاعٌ بينَ ختمِ السحبِ وحفظِهِ ⇒ المنحةُ تُبعَثُ **مسحوبةً** من الشاهدِ لا ساريةً', async () => {
+    const root = tmpRoot();
+    try {
+      const socket = new TestFreshnessSocket(0n, 'wl361crashrevoke');
+      const { boot } = rig({ freshnessSocket: socket });
+      const shared = { id: '', grantsFilePath: join(root, 'capability-grants.json') };
+      let revokedGrantId = '';
+
+      const system = await boot(root);
+      try {
+        const agent = await system.chain.registry.register({ name: 'z', role: 'role:minister' });
+        shared.id = agent.id;
+        const granted = system.chain.grants.grant({
+          agentId: shared.id,
+          capability: 'action:read-registry',
+          reason: 'تُسحَبُ بعدَها',
+          principal: { id: 'king:test', role: 'role:king', state: 'active' },
+          ttlSeconds: 3600,
+        });
+        revokedGrantId = granted.id;
+        await system.chain.grants.persist();
+        // السحبُ يقعُ بشاهدِهِ (الحدثُ يُسجَّلُ) ثمّ انقطاعٌ **قبلَ** حفظِ الملفّ:
+        system.chain.grants.suspendPersistForTest();
+        system.chain.grants.revoke(revokedGrantId, 'سُحِبَت');
+        await system.rootOfTrust.log.flush?.();
+      } finally {
+        await system.close();
+      }
+
+      // الإقلاعُ التالي: الملفُّ لا يعرفُ السحبَ، والشاهدُ المختومُ يعرفُهُ — فالمنحةُ
+      // تُبعَثُ **مسحوبةً** (الاتجاهُ الأضيقُ يفوزُ) لا ساريةً.
+      const system2 = await boot(root);
+      try {
+        const restored = system2.chain.grants.grants.get(revokedGrantId);
+        assert.ok(restored, 'المنحةُ فُقدتْ من الذاكرةِ');
+        assert.notEqual(
+          restored.revokedAt,
+          null,
+          'انقطاعٌ بينَ ختمِ السحبِ وحفظِهِ أعادَ المنحَ ساريةً',
+        );
+        assert.ok(
+          !system2.chain.grants.capabilitiesOf(shared.id).has('action:read-registry'),
+          'القدرةُ المسحوبةُ عادتْ',
+        );
+      } finally {
+        await system2.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

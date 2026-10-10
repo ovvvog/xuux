@@ -30,6 +30,7 @@ import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 import {
   createProductionRootOfTrust,
   quarantineFromSealedLog,
+  grantsFromSealedLog,
 } from '../root-of-trust/production-runtime.mjs';
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
@@ -213,6 +214,13 @@ export async function createProductionSystem(env, options, deps = {}) {
   const grantsStore = new FileCapabilityGrantStore({
     filePath: options.root + '/capability-grants.json',
   });
+  // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): شاهدُ الحقيقةِ المختومُ للمنحِ.** اللقطةُ
+  // الملفّيةُ سليمةُ البنيةِ لا يعني أنّها صادرةٌ عن مانحٍ مخوّلٍ — صاحبُ القرصِ
+  // يَملِكُ الملفَّ ولا يَملِكُ المانحَ. فكلُّ منحةٍ لا تُقبَلُ إلا إن أَشهَدَ لها
+  // السجلُّ المختومُ (`capability.granted`) بحقائِها، والسحبُ يُقرأُ من الشاهدِ
+  // (`capability.revoked`) لا من الملفِّ. ومن استرجعَ السجلَّ إلى لقطةٍ أقدمَ
+  // متّسقةٍ فذاكَ حدٌّ مُعلَنٌ (`EXT-6`) لا يُعالِجُهُ هذا المسارُ.
+  const grantWitness = await grantsFromSealedLog(rootOfTrust.log);
   const chain = composeEnforcementChain({
     log: /** @type {never} */ (enforcementLog),
     withLegislation: false,
@@ -222,6 +230,7 @@ export async function createProductionSystem(env, options, deps = {}) {
     authority,
     royalCommandVerifier: /** @type {never} */ (royalAuthorization),
     grantsStore,
+    grantWitness,
   });
 
   // 7أ. `R6-A-05` (‏`WL-305`): حالةُ الحجرِ تُعادُ من السجلِّ المختومِ **قبلَ** أن يُقبَلَ أيُّ
@@ -303,6 +312,15 @@ export async function createProductionSystem(env, options, deps = {}) {
       }
       clearInterval(intentTimer);
       await drainIntents();
+      // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): صرفُ عملياتِ حفظِ المنحِ المعلَّقةِ قبلَ الإغلاق** —
+      // منحٌ شُهِدَ لهُ في السجلِّ المختومِ ولم يُصرَفْ حفظُهُ إلى اللقطةِ يُصرَفُ هنا، وفشلُهُ
+      // يُرفعُ بعدَ إغلاقِ الجذرِ لا يُبتلَعُ: لا يُغلقُ النظامُ ومنحٌ مُشهَدٌ لهُ بلا لقطةٍ.
+      let grantsPersistError = null;
+      try {
+        await chain.grants.persist();
+      } catch (error) {
+        grantsPersistError = error;
+      }
       // `R6-A-05` (‏`WL-305`): ما أُدرِجَ في طابورِ الختمِ يُختَمُ قبلَ الإغلاق — كانَ الإغلاقُ
       // يُسقِطُ قيداً مُدرَجاً لم يُختَمْ (‏مثلاً `quarantine.isolated`) فيُطلَقُ المحجورُ بالإقلاعِ
       // التالي. وفشلُ الختمِ يُرفَعُ بعدَ إغلاقِ الجذرِ لا يُبتلَع.
@@ -315,6 +333,7 @@ export async function createProductionSystem(env, options, deps = {}) {
       rootOfTrust.log.close?.();
       await rootOfTrust.close();
       if (flushError !== null) throw flushError;
+      if (grantsPersistError !== null) throw grantsPersistError;
     },
   };
 }

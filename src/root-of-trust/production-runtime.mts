@@ -104,6 +104,7 @@ export const ProductionRuntimeErrorCodes = [
   // إفسادُ الجسمِ لا يُسقِطُ الشاهدَ بل يردُّ الإقلاعَ.
   'PRODUCTION_LEDGER_WITNESS_UNREADABLE',
   'PRODUCTION_QUARANTINE_WITNESS_UNREADABLE',
+  'PRODUCTION_GRANTS_WITNESS_UNREADABLE',
   // `S13` (الجولةُ السادسةُ، `WL-237`): جذرٌ قائمٌ — أي بيانٌ مختومٌ كانَ على
   // القرصِ قبلَ هذا الإقلاعِ — بلا سجلِّ وقائعَ أو بلا رأسِه. غيابُ الشاهدِ
   // الثاني على جذرٍ قائمٍ محوٌ لا نشأةٌ، فيُرَدُّ فشلاً مُغلقاً كنظيرِه
@@ -1189,6 +1190,112 @@ export async function quarantineFromSealedLog(
     });
   }
   return [...current.values()];
+}
+/** شاهدُ منحٍ مُعادُ بناؤُهُ من السجلِّ المختومِ: قيدُ الشاهدِ لكلِّ معرفِ منحٍ. */
+export interface WitnessedCapabilityGrant {
+  granted: {
+    id: string;
+    agentId: string;
+    capability: string;
+    grantedBy: string;
+    grantorRole: string;
+    grantedAt: string;
+    expiresAt: string;
+    reason: string;
+  };
+  revoked: { revokedAt: string; reason: string } | null;
+}
+
+/**
+ * يعيدُ بناءَ شاهدِ منحِ القدراتِ من السجلِّ المختومِ (`WL-361`، تتمّةُ `R6-A-05`).
+ *
+ * **الدافعةُ:** ملفُّ `capability-grants.json` على القرصِ كانَ خارجَ بصمةِ الحالةِ المختومةِ،
+ * فاسترجاعُهُ لم يُثبِتْ أنّ كلَّ منحةٍ صدرتْ فعلاً عن مانحٍ مخوَّلٍ — كانَ بالإمكانِ تعديلُ
+ * الملفِّ يدوياً وإدخالُ منحةٍ مزوَّرةٍ سليمةِ البنيةِ. الآنَ كلُّ منحٍ لا تُقبَلُ بعدَ
+ * الإقلاعِ إلا بشاهدٍ مختومٍ يقولُها.
+ *
+ * يُقرأُ الترتيبُ `capability.granted`/`capability.revoked` من `log.events` ويُفكُّ جسمُ المختومِ
+ * بـ`openEvent`. الفشلُ في فكِّ ختمِ واقعةِ منحٍ أو عدمُ صلاحيةِ حقولِها يُرفَعُ برمزٍ نطاقيٍّ
+ * (`PRODUCTION_GRANTS_WITNESS_UNREADABLE`) — لا يُسقَطُ القيدُ فيُقبَلَ ملفٌّ بلا شاهدٍ.
+ *
+ * **حدٌّ مُعلَنٌ:** من استرجعَ السجلَّ كلَّهُ إلى لقطةٍ أقدمَ متّسقةٍ لا يردُّهُ هذا الفحصُ —
+ * ذاك `EXT-6` (انظر `docs/THREAT_MODEL.md`).
+ * @param log - السجلُّ المحمَّلُ من القرص
+ * @returns شاهدُ كلِّ منحةٍ قيدها في السجلّ
+ */
+export async function grantsFromSealedLog(
+  log: PersistentEventLog,
+): Promise<Map<string, WitnessedCapabilityGrant>> {
+  const current = new Map<string, WitnessedCapabilityGrant>();
+  for (const event of log.events) {
+    const type = (event as { type?: unknown }).type;
+    if (type !== 'capability.granted' && type !== 'capability.revoked') {
+      continue;
+    }
+    const subject = (event as { actor?: unknown }).actor;
+    if (typeof subject !== 'string' || subject === '') {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_GRANTS_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    let body: unknown;
+    try {
+      body = log.sealed ? await log.openEvent(event) : (event as { data?: unknown }).data;
+    } catch {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_GRANTS_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    const record = (body ?? {}) as Record<string, unknown>;
+    const grantId = record.id;
+    if (typeof grantId !== 'string' || grantId === '') {
+      throw new ProductionRuntimeError(
+        'PRODUCTION_GRANTS_WITNESS_UNREADABLE',
+        String((event as { id?: unknown }).id ?? ''),
+      );
+    }
+    if (type === 'capability.revoked') {
+      const witnessed = current.get(grantId);
+      if (witnessed === undefined) {
+        // سحبٌ بلا منحٍ سابقٍ في السجلِّ: تزويرٌ — لا يُوسِّعُ ولا يُضيِّقُ سوى الرفضِ.
+        throw new ProductionRuntimeError('PRODUCTION_GRANTS_WITNESS_UNREADABLE', grantId);
+      }
+      witnessed.revoked = {
+        revokedAt: typeof record.revokedAt === 'string' ? record.revokedAt : '',
+        reason: typeof record.reason === 'string' ? record.reason : '',
+      };
+      continue;
+    }
+    if (current.has(grantId)) {
+      throw new ProductionRuntimeError('PRODUCTION_GRANTS_WITNESS_UNREADABLE', grantId);
+    }
+    const grantedAt = record.grantedAt;
+    const expiresAt = record.expiresAt;
+    if (
+      typeof grantedAt !== 'string' ||
+      typeof expiresAt !== 'string' ||
+      grantedAt === '' ||
+      expiresAt === ''
+    ) {
+      throw new ProductionRuntimeError('PRODUCTION_GRANTS_WITNESS_UNREADABLE', grantId);
+    }
+    current.set(grantId, {
+      granted: {
+        id: grantId,
+        agentId: typeof record.agentId === 'string' ? record.agentId : '',
+        capability: typeof record.capability === 'string' ? record.capability : '',
+        grantedBy: typeof record.grantedBy === 'string' ? record.grantedBy : '',
+        grantorRole: typeof record.grantorRole === 'string' ? record.grantorRole : '',
+        grantedAt,
+        expiresAt,
+        reason: typeof record.reason === 'string' ? record.reason : '',
+      },
+      revoked: null,
+    });
+  }
+  return current;
 }
 
 /**
