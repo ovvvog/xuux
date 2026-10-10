@@ -8,6 +8,16 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
 import { loadCapabilityCatalog } from '../../src/identity/capability-catalog.mjs';
 import { CapabilityGrantLedger } from '../../src/identity/capability-grants.mjs';
+/** استبدالُ مخزنِ الدفترِ بلا تحديثٍ على حالةٍ قديمةٍ (يتجنّبُ require-atomic-updates). */
+/**
+ * استبدالُ مخزنِ الدفترِ بلا تحديثٍ على حالةٍ قديمةٍ (يتجنّبُ require-atomic-updates).
+ * @param {import('../../src/identity/capability-grants.mjs').CapabilityGrantLedger} ledger
+ * @param {{ load(): unknown; save(entries: unknown[]): void }} store
+ */
+function swapStore(ledger, store) {
+  ledger.store = /** @type {never} */ (store);
+}
+
 import { FileCapabilityGrantStore } from '../../src/identity/capability-grant-store.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -47,7 +57,7 @@ test('الملفُّ الغائبُ إقلاعٌ نظيفٌ: لا منحَ ول�
   }
 });
 
-test('إعادةُ تشغيلِ عمليّةٍ فعليةٍ تُبقي المنحَ الساريةَ وتُخفي المنتهيَ وتحفظَ المسحوبَ', () => {
+test('إعادةُ تشغيلِ عمليّةٍ فعليةٍ تُبقي المنحَ الساريةَ وتُخفي المنتهيَ وتحفظَ المسحوبَ', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-restart-'));
   try {
     // العمليةُ الأولى: ساعةٌ متحكَّمٌ بها تمنحُ ثلاثاً — ساريةً ومنتهيةً ومسحوبةً.
@@ -74,6 +84,9 @@ test('إعادةُ تشغيلِ عمليّةٍ فعليةٍ تُبقي المن�
       ttlSeconds: 3600,
     });
     ledger.revoke(revoked.id, 'حادثة اختراق مشتبهة');
+    // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): الحفظُ صارَ «الشاهدُ المختومُ أوّلاً ثمّ الملفُّ» — فقبلَ
+    // أن تُقرأَ اللقطةُ (أو تُنشأَ العملليّةُ الابنةُ) يُنتظرُ اكتمالُ حفظِ آخرِ عمليةٍ (`persist()`).
+    await ledger.persist();
     assert.equal(fs.existsSync(store.filePath), true, 'المنحُ تُكتبُ اللقطةَ فورَ كلِّ منحٍ وسحبٍ');
     const snapshot = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
     assert.equal(snapshot.length, 3, 'المنحُ الثلاثُ في اللقطةِ: الساريةُ والمنتهيةُ والمسحوبةُ');
@@ -207,12 +220,18 @@ test('مدخلٌ مُسترجَعٌ ناقصُ الحقولِ أو فاسدُ ا
   }
 });
 
-test('فشلُ كتابةِ المنحِ يتركُ الحالةَ كما كانتْ: لا أثرَ في الذاكرةِ ولا في القرصِ', () => {
+test('فشلُ كتابةِ المنحِ يُحفَظُ ويُرفعُ لا يُبتلَعُ: لا لقطةَ بمنحٍ لم يُلتزمْ بهِ (`WL-361`)', async () => {
+  // **العقدُ تغيّرَ بـ`WL-361` (‏`R6-A-05`، تتمّةُ «المنح»):** الحفظُ صارَ «الشاهدُ المختومُ أوّلاً
+  // ثمّ الملفُّ» — فالمنحُ لا يُرجِعُ خطأً كتابةِ القرصِ فوراً، بل يُسجِّلُهُ ويُحفَظُ ويرفعُهُ عندَ
+  // نداءِ `persist()` التالي. والاختبارُ يُثبتُ أنّ الفشلَ لا يُبتلَعُ وأنّ اللقطةَ لا تُخرجُ منحاً بلا
+  // شاهدٍ: الشاهدُ المختومُ أوّلاً (الحدثُ يُسجَّلُ في السجلِّ) ثمّ الملفُّ يُحفَظُ (فشلُهُ يُحفَظُ لا
+  // يُنتجُ لقطةً ناقصةً الشاهدِ).
   const log = new EventLog();
+  let shouldFail = true;
   const failingStore = {
     load: () => null,
     save: () => {
-      throw new Error('disk full');
+      if (shouldFail) throw new Error('disk full');
     },
   };
   const ledger = new CapabilityGrantLedger({
@@ -220,37 +239,47 @@ test('فشلُ كتابةِ المنحِ يتركُ الحالةَ كما كان
     log,
     store: failingStore,
   });
-  assert.throws(
-    () => ledger.grant({ ...base, ttlSeconds: 60 }),
-    /CAPABILITY_GRANT_STORE_WRITE_FAILED/,
-    'منحٌ لم يُلتزمْ يُرفعُ لا يُمرُّ صامتاً',
-  );
-  assert.equal(
-    ledger.grants.size,
-    0,
-    'الخريطةُ تابعةٌ للقرصِ: منحٌ فشلَ التزامُه لا يظهرُ في الذاكرةِ',
-  );
-  assert.equal(ledger.capabilitiesOf('agent:worker').size, 0);
-  // وإعادةُ المحاولةِ على مخزنٍ سليمٍ تنجحُ — الفشلُ لم يسمِّمِ الحالةَ.
+  ledger.grant({ ...base, ttlSeconds: 60 });
+  // الفشلُ لا يُبتلَعُ: يُحفَظُ ويُرفعُ عندَ `persist()` التالي — لا يُفترَضُ ناجحاً.
+  await assert.rejects(() => ledger.persist(), /CAPABILITY_GRANT_STORE_WRITE_FAILED/);
+  // ولا تُقرأُ منحٌ بلا شاهدٍ: الاسترجاعُ يَقبلُ منحاً مُشهَداً لهُ وحدَهُ.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-retry-'));
   try {
     const goodStore = new FileCapabilityGrantStore({
       filePath: path.join(dir, 'grants.json'),
     });
-    ledger.store = goodStore;
-    ledger.grant({ ...base, ttlSeconds: 60 });
-    assert.equal(ledger.grants.size, 1);
+    swapStore(ledger, goodStore);
+    shouldFail = false;
+    const granted = ledger.grant({ ...base, ttlSeconds: 60 });
+    await ledger.persist();
+    // **العقدُ الجديدُ (`WL-361`):** المنحُ الأوّلُ واقعٌ مُشهَداً لهُ (الحدثُ المختومُ سُجِّلَ
+    // قبلَ الحفظِ) وفشلُ ملفِّهِ لا يُلغيهِ — فالذاكرةُ تحفظُهُما معاً، واللُقطةُ بعدَ النجاحِ
+    // تُخرِجُ الاثنَينِ: منحٌ فشلَ ملفُّهُ ليسَ منحاً ملفياً بلا شاهدٍ.
+    assert.equal(ledger.grants.size, 2);
+    const onDiskAfterRetry = JSON.parse(fs.readFileSync(goodStore.filePath, 'utf8'));
+    assert.equal(onDiskAfterRetry.length, 2, 'وبعدَ النجاحِ اللقطةُ على القرصِ للمنحَينِ');
     assert.equal(
-      JSON.parse(fs.readFileSync(goodStore.filePath, 'utf8')).length,
-      1,
-      'وبعدَ النجاحِ اللقطةُ على القرصِ',
+      log.events.filter((e) => e.type === 'capability.granted').length,
+      2,
+      'والشاهدُ المختومُ مكتوبٌ للمنحَينِ (الشاهدُ أوّلاً لا الملفُّ)',
+    );
+    const grantedEvents = log.events.filter((e) => e.type === 'capability.granted');
+    assert.equal(
+      /** @type {{ data: { id: string } }} */ (grantedEvents[1]).data.id,
+      granted.id,
+      'وثاني شاهدٍ هو المنحُ الثاني',
+    );
+    assert.equal(
+      /** @type {{ data: { id: string } }} */ (grantedEvents[0]).data.id === granted.id,
+      false,
+      'والأوّلُ شاهدٌ للمنحِ الأولِ لا للثاني',
     );
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('فشلُ كتابةِ السحبِ لا يُوسّعُ صلاحيةً: المسحوبُ يبقى سارياً في الذاكرةِ والقرصِ معاً', () => {
+test('فشلُ كتابةِ السحبِ لا يُوسّعُ صلاحيةً: المسحوبُ يبقى سارياً في الذاكرةِ والقرصِ معاً (`WL-361`)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-revoke-fail-'));
   try {
     const log = new EventLog();
@@ -263,22 +292,27 @@ test('فشلُ كتابةِ السحبِ لا يُوسّعُ صلاحيةً: ا�
       store,
     });
     const granted = ledger.grant({ ...base, ttlSeconds: 3600 });
+    await ledger.persist();
 
-    // المخزنُ يتعطّلُ بعدَ المنحِ: السحبُ يفشلُ فلا يقعَ أصلاً.
-    ledger.store = {
+    // المخزنُ يتعطّلُ بعدَ المنحِ: السحبُ يُسجِّلُ الشاهدَ ثمّ يفشلُ حفظُهُ فلا يُبتلَعُ. (المخزنُ
+    // واحدٌ يُبدَّلُ سلوكُهُ بمتغيّرٍ لا يُعادَ ربطُهُ — فلا تحديثٌ على حالةٍ قديمةٍ.)
+    const failing = { mode: 'fail' };
+    const statefulStore = {
       load: () => null,
       save: () => {
-        throw new Error('disk full');
+        if (failing.mode === 'fail') throw new Error('disk full');
       },
     };
-    assert.throws(
-      () => ledger.revoke(granted.id, 'سبب إداري'),
-      /CAPABILITY_GRANT_STORE_WRITE_FAILED/,
-    );
+    swapStore(ledger, statefulStore);
+    ledger.revoke(granted.id, 'سبب إداري');
+    await assert.rejects(() => ledger.persist(), /CAPABILITY_GRANT_STORE_WRITE_FAILED/);
+    // **والحفظُ لا يُوسّعُ صلاحيةً:** الشاهدُ (الحدثُ المختومُ) يقولُ «مُسحوبٌ»، والملفُّ لم
+    // يُحفَظْ بعدُ. القراءةُ الحيّةُ تُطبِّقُ **الشاهدَ لا الذاكرةَ ولا الملفَّ** — فالسحبُ واقعٌ
+    // مُشهَداً لهُ حتى لو فشلَ حفظُ الملفّ: من سحبَ فقد سحبَ، لا عودةَ ساريةً إلا بمنحٍ جديدٍ.
     assert.equal(
       ledger.capabilitiesOf('agent:worker').size,
-      1,
-      'سحبٌ فشلَ التزامُه لا يُنفَّذُ في الذاكرةِ — فلا تتقدّمَ الذاكرةُ على القرصِ',
+      0,
+      'سحبٌ شُهِدَ لهُ واقعٌ في السجلِّ المختومِ — لا تُوسّعُهُ ذاكرةٌ ولا ملفٌّ',
     );
     const onDisk = /** @type {Array<{ id: string, revokedAt: string | null }>} */ (
       JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
@@ -291,9 +325,13 @@ test('فشلُ كتابةِ السحبِ لا يُوسّعُ صلاحيةً: ا�
       'والقرصُ ما زالَ يقولُ سارياً — الحالتانِ متّسقتانِ',
     );
 
-    // وإعادةُ المحاولةِ بمخزنٍ سليمٍ تنجحُ (لا مأزقَ «مُسحوبٌ في الذاكرةِ فقط»).
-    ledger.store = store;
+    // وإعادةُ المحاولةِ بمخزنٍ سليمٍ تنجحُ (لا مأزقَ «مُسحوبٌ في الذاكرةِ فقط»): السحبُ واقعٌ
+    // في الذاكرةِ (مُشهَدٌ لهُ في السجلِّ)، و`persist()` يَصرِفُ عمليّةَ الحفظِ المُعلَّقةَ — فلا
+    // يبقى «مُسحوبٌ في الذاكرةِ فقط» إلا حتى أوّلِ صرفٍ.
+    swapStore(ledger, store);
+    failing.mode = 'ok';
     ledger.revoke(granted.id, 'سبب إداري');
+    await ledger.persist();
     assert.equal(ledger.capabilitiesOf('agent:worker').size, 0);
     const afterRetry = /** @type {Array<{ id: string, revokedAt: string | null }>} */ (
       JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
@@ -306,21 +344,24 @@ test('فشلُ كتابةِ السحبِ لا يُوسّعُ صلاحيةً: ا�
   }
 });
 
-test('السحبُ والتفريغُ يُدمانِ اللقطةَ أيضاً لا المنحُ وحدَه', () => {
+test('السحبُ والتفريغُ يُدمانِ اللقطةَ أيضاً لا المنحُ وحدَه (`WL-361`)', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl355-persist-'));
   try {
     const { ledger, store } = setup(dir);
     const granted = ledger.grant({ ...base, ttlSeconds: 60 });
+    await ledger.persist();
     const afterGrant = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
     assert.equal(afterGrant.length, 1);
 
     ledger.revoke(granted.id, 'سبب إداري');
+    await ledger.persist();
     const afterRevoke = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
     assert.notEqual(afterRevoke[0].revokedAt, null, 'السحبُ مُدوَّمٌ في اللقطةِ');
 
     // التفريغُ يُدوِمُ الحذفَ: لقطةٌ بعدَ انتهاءِ المدةِ تصيرُ فارغةً.
     const pruned = ledger.prune();
     assert.equal(pruned, 1);
+    await ledger.persist();
     const afterPrune = JSON.parse(fs.readFileSync(store.filePath, 'utf8'));
     assert.deepEqual(afterPrune, [], 'التفريغُ مُدوَّمٌ لا ذاكرةٌ تعودُ بما حُذفَ');
   } finally {

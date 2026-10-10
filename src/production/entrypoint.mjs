@@ -30,11 +30,13 @@ import { isProductionRuntime } from '../root-of-trust/production-boot.mjs';
 import {
   createProductionRootOfTrust,
   quarantineFromSealedLog,
+  grantsFromSealedLog,
 } from '../root-of-trust/production-runtime.mjs';
 import { CrownGateway } from '../root-of-trust/crown.mjs';
 import { ExecutionKernel } from '../core/execution-kernel.mjs';
 import { composeSovereignConsole } from './sovereign-console.mjs';
 import { composeEnforcementChain } from '../core/composition-root.mjs';
+import { FileCapabilityGrantStore } from '../identity/capability-grant-store.mjs';
 import { loadPolicyBundle } from '../policy/loader.mjs';
 import { createRoyalAuthorization } from '../root-of-trust/royal-authorization.mjs';
 import { sealedAudit } from '../root-of-trust/sealed-audit.mjs';
@@ -201,6 +203,24 @@ export async function createProductionSystem(env, options, deps = {}) {
     sovereignActions: loadPolicyBundle().threshold.map((entry) => entry.action),
     log: enforcementLog,
   });
+  // WL-361 — `R6-A-05` (شطرُ «المنح»): دفترُ منحِ القدراتِ في الإنتاجِ لا يعيشُ في
+  // الذاكرةِ وحدَها. المخزنُ الملفيُّ (`FileCapabilityGrantStore`، `WL-355`) مقبولٌ
+  // في جذرِ التركيبِ (`composeEnforcementChain`)، والمسارُ الإنتاجيُّ هو المُركِّبُ —
+  // فالإنتاجُ يمرِّرُهُ صراحةً كقرارِ تركيبٍ لا كافتراضٍ. المسارُ الملفيُّ داخلَ الجذرِ
+  // (ك`clock-state.json`) لكنّهُ **خارجَ بصمةِ الحالةِ المختومةِ** (`productionStateLayout`):
+  // منحٌ فُقدَ لا يفتحُ صلاحيةً ولا يُعدِّلُ بصمةً ختمَها الكاتبُ الواحدُ، والفاقدُ يُضيّقُ
+  // الصلاحيةَ (اتجاهٌ آمنٌ). فسادُ اللقطةِ رفعٌ (`CAPABILITY_GRANT_STORE_UNREADABLE`) لا
+  // افتراضُ صفرٍ — منحٌ مجهولُ الحالةِ لا يُفترضُ سليماً.
+  const grantsStore = new FileCapabilityGrantStore({
+    filePath: options.root + '/capability-grants.json',
+  });
+  // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): شاهدُ الحقيقةِ المختومُ للمنحِ.** اللقطةُ
+  // الملفّيةُ سليمةُ البنيةِ لا يعني أنّها صادرةٌ عن مانحٍ مخوّلٍ — صاحبُ القرصِ
+  // يَملِكُ الملفَّ ولا يَملِكُ المانحَ. فكلُّ منحةٍ لا تُقبَلُ إلا إن أَشهَدَ لها
+  // السجلُّ المختومُ (`capability.granted`) بحقائِها، والسحبُ يُقرأُ من الشاهدِ
+  // (`capability.revoked`) لا من الملفِّ. ومن استرجعَ السجلَّ إلى لقطةٍ أقدمَ
+  // متّسقةٍ فذاكَ حدٌّ مُعلَنٌ (`EXT-6`) لا يُعالِجُهُ هذا المسارُ.
+  const grantWitness = await grantsFromSealedLog(rootOfTrust.log);
   const chain = composeEnforcementChain({
     log: /** @type {never} */ (enforcementLog),
     withLegislation: false,
@@ -209,6 +229,8 @@ export async function createProductionSystem(env, options, deps = {}) {
     kingIdentity,
     authority,
     royalCommandVerifier: /** @type {never} */ (royalAuthorization),
+    grantsStore,
+    grantWitness,
   });
 
   // 7أ. `R6-A-05` (‏`WL-305`): حالةُ الحجرِ تُعادُ من السجلِّ المختومِ **قبلَ** أن يُقبَلَ أيُّ
@@ -290,6 +312,15 @@ export async function createProductionSystem(env, options, deps = {}) {
       }
       clearInterval(intentTimer);
       await drainIntents();
+      // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): صرفُ عملياتِ حفظِ المنحِ المعلَّقةِ قبلَ الإغلاق** —
+      // منحٌ شُهِدَ لهُ في السجلِّ المختومِ ولم يُصرَفْ حفظُهُ إلى اللقطةِ يُصرَفُ هنا، وفشلُهُ
+      // يُرفعُ بعدَ إغلاقِ الجذرِ لا يُبتلَعُ: لا يُغلقُ النظامُ ومنحٌ مُشهَدٌ لهُ بلا لقطةٍ.
+      let grantsPersistError = null;
+      try {
+        await chain.grants.persist();
+      } catch (error) {
+        grantsPersistError = error;
+      }
       // `R6-A-05` (‏`WL-305`): ما أُدرِجَ في طابورِ الختمِ يُختَمُ قبلَ الإغلاق — كانَ الإغلاقُ
       // يُسقِطُ قيداً مُدرَجاً لم يُختَمْ (‏مثلاً `quarantine.isolated`) فيُطلَقُ المحجورُ بالإقلاعِ
       // التالي. وفشلُ الختمِ يُرفَعُ بعدَ إغلاقِ الجذرِ لا يُبتلَع.
@@ -302,6 +333,7 @@ export async function createProductionSystem(env, options, deps = {}) {
       rootOfTrust.log.close?.();
       await rootOfTrust.close();
       if (flushError !== null) throw flushError;
+      if (grantsPersistError !== null) throw grantsPersistError;
     },
   };
 }

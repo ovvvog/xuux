@@ -54,8 +54,18 @@
         },
         {
           "type": "capability.granted",
-          "version": 1,
-          "required": ["agentId", "capability", "expiresAt", "id", "reason", "ttlSeconds"],
+          "version": 2,
+          "required": [
+            "agentId",
+            "capability",
+            "expiresAt",
+            "grantedAt",
+            "grantedBy",
+            "grantorRole",
+            "id",
+            "reason",
+            "ttlSeconds"
+          ],
           "optional": []
         },
         {
@@ -72,8 +82,8 @@
         },
         {
           "type": "capability.revoked",
-          "version": 1,
-          "required": ["agentId", "capability", "id", "reason"],
+          "version": 2,
+          "required": ["agentId", "capability", "id", "reason", "revokedAt"],
           "optional": []
         }
       ]

@@ -1,5 +1,71 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-10] — WL-362 — `R6-A-05` تتمّةُ «المنح»: منحٌ لا تُقبَلُ بلا شاهدٍ مختومٍ — المنحُ المزوَّرةُ على القرصِ مرفوضةٌ، والانقطاعُ يُضيِّقُ ولا يُوسِّعُ — طلبُ دمجٍ
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** صفُّ الدَّينِ `R6-A-05` (‏شطرُ «المنحِ»، فوقَ `WL-361` في الفرعِ نفسِهِ) · **الحالةُ بعدَ العملِ:** 🟨 إصلاحُ ثغرةٍ أثبتتْ قابليةَ الاستغلالِ بأدواتِ القياسِ، معَ اختباراتٍ سلبيةٍ وإيجابيةٍ؛ `R6-A-05` بقيتْ `open` — الإغلاقُ حكمُ المجلسِ
+
+#### ما كانَ قبلَ هذه المُدخلة
+
+- أثبتَتِ التجربةُ (‏`/tmp/poc.mjs`) قابليةَ استغلالِ ما تركَهُ `WL-361` مفتوحاً: منحٌ مزوَّرةٌ بمانحٍ مزعومٍ (`grantedBy: agent:minister`، `grantorRole: role:minister`) ومدّةٍ فوقَ السقفِ (`expiresAt: 2999-01-01`) تُدخَلُ يدويّاً في ملفِ JSON صالحِ البنيةِ فتُقبَلُ عندَ الاسترجاعِ، وتُعطي القدرةَ كاملةً (‏`capabilitiesOf` يُرجعُها) — لأنّ فحصَ الاسترجاعِ كانَ **بنيةً لا أصالةً**: لا شيءَ يُثبتُ أنّ المنحةَ صدرتْ فعلاً عن مانحٍ مخوَّلٍ.
+
+#### ما تمَّ فعلاً
+
+- **الشاهدُ المختومُ هو المصدرُ:** `grantsFromSealedLog` (‏`src/root-of-trust/production-runtime.mts`) يُبنى من السجلِّ المختومِ عندَ الإقلاعِ ويُمرَّرُ إلى `CapabilityGrantLedger` عبرَ `composeEnforcementChain`. عندَ الاسترجاعِ يُطابِقُ الدفترُ كلَّ منحةٍ معَ شاهدِها حقلاً حقلاً: بلا شاهدٍ رفضٌ `CAPABILITY_GRANT_UNWITNESSED`؛ وشاهدٌ لا يطابقُ رفضٌ `CAPABILITY_GRANT_WITNESS_MISMATCH`؛ وشاهدٌ منحٍ بلا شاهدِ سحبٍ رفضٌ `CAPABILITY_GRANT_WITNESS_REVOKE_UNPROVEN`؛ وشاهدُ سحبٍ مخفيٌّ في الملفِّ يُطبَّقُ منَ الشاهدِ `CAPABILITY_GRANT_WITNESS_REVOKE_HID`. وقواعدُ الكتالوجِ (‏`#assertCatalogRules` عندَ الاسترجاعِ) تُعيدُ فحصَ المانحِ والدورِ والمدّةِ وذاتِ المانحِ والمستفيدِ — فلا طريقَ حولَ قواعدِ المنحِ عبرَ اللقطةِ.
+- **الترتيبُ شاهدٌ أوّلاً:** `grant()`/`revoke()` يُسجِّلانِ الحدثَ المختومَ **قبلَ** حفظِ الملفّ؛ الحفظُ يُصبَ في طابورٍ (`persist()` يَصرِفُهُ ويُعيدُ ما فشلَ إلى مقدّمتِهِ ويرفعُ أوّلَ فشلٍ)، و`pendingGrantIds` يمنعُ `prune()` من حذفِ منحٍ لم يُصرَفْ حفظُهُ. الانقطاعُ بينَ الخطوتَينِ يُضيِّقُ (‏منحٌ يفقدُ) ولا يُوسِّعُ (‏سحبٌ يبقى مسحوباً منَ الشاهدِ)، والإغلاقُ يَصرِفُ المعلَّقَ ولا يُغلقُ ومنحٌ مُشهَدٌ لهُ بلا لقطةٍ.
+- **عقودُ الأحداثِ (‏`config/events.yaml` + `baseline`):** ارتُفِعَتْ نسخةُ `capability.granted`/`capability.revoked` إلى 2 وأُضيفَتِ الحقولُ الكاملةُ في الشاهدِ (‏`grantedAt`/`grantedBy`/`grantorRole`، و`revokedAt` للسحبِ) — إعلانٌ صريحٌ لا صمتٌ.
+- **الاختباراتُ السلبيةُ والإيجابيةُ (‏`wl-361-grants-store-restart.test.mjs`):** منحٌ مزوَّرةٌ بلا شاهدٍ (رفضُ إقلاعٍ)؛ إخفاءُ سحبٍ منَ الملفِّ (المنحةُ تُبعَثُ **مسحوبةً** منَ الشاهدِ)؛ انقطاعٌ بينَ ختمِ المنحِ وحفظِ الملفِّ (المنحةُ تضيعُ لا تعودُ)؛ انقطاعٌ بينَ ختمِ السحبِ وحفظِ الملفِّ (المنحةُ تُبعَثُ مسحوبةً)؛ وبقيتِ الاختباراتُ الإيجابيةُ الأربعُ كما هي (‏ساريةٌ تبقى، فسادٌ رفضٌ، غائبٌ إقلاعٌ نظيفٌ، بصمةُ الحالةِ لا تتغيرُ).
+- `tests/identity/capability-grant-restart.test.mjs` حُدِّثَ إلى عقدِ الحفظِ الجديدِ (‏10/10).
+
+#### القياس
+
+- `npm run validate` كاملةً ⇒ 2631 اختباراً: 2500 ناجحٌ، 0 فاشلٌ، 131 متوقفاً (‏المعزولة/‏TPM/‏HSM/‏LIVE-23 كما هو).
+- `wl-361-grants-store-restart` 9/9 · `capability-grant-restart` 10/10 · `capability-grants` 15/15 · `wl-305-quarantine-restart` و`entrypoint` و`subprocess` ناجحةٌ — لا انكسارَ في مساراتِ `R6-A-05` و`WL-305` السابقةِ.
+- `lint` و`format:check` و`typecheck` و`guard:events` (‏عقودٌ محدَّثةٌ) و`guard:doc-counts` و`guard:project-state` و`guard:work-log-ids` كلُّها خضراءُ.
+
+#### ما لم يُفعَل (عمداً)
+
+- **لم تُضَفِ بصمةَ الحالةِ المختومةِ للمخزنِ:** الشاهدُ المختومُ يُثبتُ كلَّ منحٍ، والملفُّ ذاكرةُ وصولٍ يُصحَّحُ منَ الشاهدِ — لكنّ إدراجَ المخزنِ في `productionStateLayout` ختمٌ سياديٌّ قرارُهُ للمالكِ.
+- **لم يُمَسَّ `config/external-review.yaml` ولا `version.json` ولا النسبةُ:** `R6-A-05` حكمُ إغلاقِها للمجلسِ، وهذه المُدخلةُ دليلٌ لا إغلاقٌ. شطرُ «المقترحاتِ الدستوريّةِ» باقٍ بلا دوامٍ.
+- **حدٌّ مُعلَنٌ:** استرجاعُ السجلِّ كلَّهُ إلى لقطةٍ أقدمَ متّسقةٍ (`EXT-6`) خارجُ هذا الضابطِ — من محا الشاهدَ والملفَّ معاً لم يبقَ إلا التثبيتُ الموقَّعُ (‏T19).
+
+#### الملفاتُ المتأثّرة
+
+`src/identity/capability-grants.mjs` · `src/root-of-trust/production-runtime.mts` · `src/production/entrypoint.mjs` · `src/core/composition-root.mjs` · `config/events.yaml` · `config/events.baseline.json` · `tests/production/wl-361-grants-store-restart.test.mjs` · `tests/identity/capability-grant-restart.test.mjs` · `docs/THREAT_MODEL.md` (‏T39) · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` · `docs/CURRENT_STATE.md` · `docs/HANDOFF.md` (‏مولَّد)
+
+#### الـ commit
+
+`feat/wl-361-grants-store-wiring` فوقَ `main@4889ba16` (‏`WL-362` فوقَ `WL-361` في الفرعِ نفسِهِ) — يُملأُ رقمُ الدمجِ عندَهُ.
+
+### [2026-10-10] — WL-361 — `R6-A-05` شطرُ «المنح»: التركيبُ الإنتاجيُّ موصولٌ بمخزنِ المنحِ فيدومُ دفترُ القدراتِ عبرَ إعادةِ التشغيل — طلبُ دمجٍ
+
+#### ما فُعِل
+
+أعلى بندٍ تنفيذيٍّ متاحٍ على الرأسِ الحاليِّ `main@4889ba16`: النتيجةُ `R6-A-05` (مجلسيةُ الحكمِ) كان شطرُ «منحِ القدراتِ» فيها قد استوفى عقدَ التركيبِ (`WL-355`: مخزنُ `load`/`save` اختياريٌّ في جذرِ التركيبِ، واختبارُ إعادةِ تشغيلِ عمليّةٍ فعليةٍ على وحدةِ المخزنِ) **لكنّ المسارَ الإنتاجيَّ لم يمرِّرْهُ أبداً** — فالمنحُ في `createProductionSystem` كانت ذاكرةً فقط تُمحى بسقوطِ العُقدةِ. أُصلِحَ ذلك:
+
+- `src/production/entrypoint.mjs` يمرِّرُ `FileCapabilityGrantStore` صراحةً إلى `composeEnforcementChain` — **قرارُ تركيبٍ في موضعِ التركيبِ** (المشغّلُ الإنتاجيُّ هو المُركِّبُ)، والمسارُ `root/capability-grants.json` على نمطِ `clock-state.json` لكنّهُ **خارجَ بصمةِ الحالةِ المختومةِ** (`productionStateLayout` لم يُمَسَّ): فاقدُ المنحِ يُضيّقُ الصلاحيةَ لا يفتحُها (اتجاهٌ آمنٌ)، ولا كاتبَ ثانٍ في الجذرِ المختومِ.
+- `tests/production/wl-361-grants-store-restart.test.mjs` (‏جديد): أربعُ حالاتٍ على النظامِ المُقلَعِ كاملاً (`createProductionSystem` بإقلاعَينِ متتاليَينِ على الجذرِ نفسِه): (أ) منحٌ سارٍ يبقى ومسحوبٌ لا يُبعث ومنتهيٌ لا يعود — بمُدخَلٍ حيٍّ يُبخَرُ وقتُهُ على القرصِ بينَ الإقلاعَين؛ (ب) فسادُ اللقطةِ **رفضُ إقلاعٍ** (`CAPABILITY_GRANT_STORE_UNREADABLE`) لا افتراضُ صفرٍ؛ (ج) الملفُّ الغائبُ إقلاعٌ نظيفٌ بلا منحٍ؛ (د) بصمةُ الحالةِ المختومةِ لا تتغيّرُ بوجودِ المخزنِ (لا `STATE_FOREIGN_WRITE_DETECTED`).
+- `docs/ROOT_OF_TRUST.md` عدّادُ ملفاتِ الاختبارِ 252⇒253 (حاجزُ `guard:doc-counts`).
+
+#### القياس
+
+- `node --test tests/production/wl-361-grants-store-restart.test.mjs` ⇒ 4/4 ناجحةٌ.
+- `wl-305-quarantine-restart` و`entrypoint` و`subprocess` و`capability-grant-restart` و`capability-grants` (50 اختباراً) كلّها ناجحةٌ — لا انكسارَ في مساراتِ `R6-A-05` السابقةِ.
+- `lint` و`format:check` و`typecheck` و`guard:authorization` و`guard:doc-counts` و`guard:project-state` و`guard:work-log-ids` و`guard:status-freshness` و`guard:version` و`guard:progress` و`guard:templates` و`guard:filecount` و`guard:memory` و`guard:readiness` و`guard:test-tmp-hygiene` كلّها خضراءُ.
+
+#### ما لم يُفعَل (عمداً)
+
+- **لم يُمَسَّ `config/external-review.yaml`**: القيدُ `status: open` حكمُهُ للمجلسِ، وهذه المُدخلةُ دليلٌ لا إغلاقٌ. شطرُ «المقترحاتِ الدستوريّةِ» من `R6-A-05` باقٍ بلا دوامٍ.
+- **لم تُضَفِ بصمةَ الحالةِ المختومةِ**: المخزنُ خارجَ `productionStateLayout` عمداً — منحٌ مجهولُ الحالةِ لا يُفترَضُ سليماً (فسادُهُ رفضُ إقلاعٍ)، لكنّهُ ليسَ ختمًا سياديّاً؛ وإدراجُهُ في الختمِ قرارٌ معماريٌّ للمالكِ.
+- لم يُمَسَّ `version.json` ولا النسبةُ ولا البوّاباتُ ولا `LIVE-25` (شطرُ «التنفيذ» من `R6-A-05` لم يُتَمَّ بعدُ: `ExecutionKernel.submit` ما زالَ متزامناً).
+
+#### الملفاتُ المتأثّرة
+
+`src/production/entrypoint.mjs` · `tests/production/wl-361-grants-store-restart.test.mjs` (‏جديد) · `docs/ROOT_OF_TRUST.md` · `docs/roadmap/05-work-log.md` · `docs/roadmap/06-debt-register.md` · `PROJECT_STATUS.md` · `docs/CURRENT_STATE.md` · `docs/HANDOFF.md` (‏مولَّد)
+
+#### الـ commit
+
+`feat/wl-361-grants-store-wiring` فوقَ `main@4889ba16` — يُملأُ رقمُ الدمجِ عندَهُ.
+
 ### [2026-10-09] — WL-360 — `LIVE-39` قياسُ فقدِ الطاقةِ على المسارِ الإنتاجيِّ الحقيقيِّ (dm-log-writes) مربوطٌ بـCI — طلبُ دمجٍ
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** صفُّ الدَّينِ `LIVE-39` (‏§4.6) — إنتاجُ القياسِ الناقصِ (قرصٌ يُسقِطُ ما لم يُزامَن) لا إغلاقُ الصفِّ · **الحالةُ بعدَ العملِ:** 🟨 قياسٌ أخضرُ مربوطٌ بـCI الرئيسيِّ في طلبِ دمجٍ (`feat/wl-360-live-39-power-loss`، مبنيٌّ فوقَ `main`)؛ `LIVE-39` بقيتْ `open` — الإغلاقُ حكمُ المجلسِ

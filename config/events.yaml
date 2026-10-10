@@ -127,8 +127,19 @@ channels:
         version: 1
         required: [beneficiary, capability, reason]
       - type: capability.granted
-        version: 1
-        required: [agentId, capability, expiresAt, id, reason, ttlSeconds]
+        version: 2
+        required:
+          [
+            agentId,
+            capability,
+            expiresAt,
+            grantedAt,
+            grantedBy,
+            grantorRole,
+            id,
+            reason,
+            ttlSeconds,
+          ]
       - type: capability.grants.pruned
         version: 1
         required: [count]
@@ -136,8 +147,8 @@ channels:
         version: 1
         required: [capabilities, role]
       - type: capability.revoked
-        version: 1
-        required: [agentId, capability, id, reason]
+        version: 2
+        required: [agentId, capability, id, reason, revokedAt]
   - id: constitution
     subject: 'مسارُ التعديل الدستوريّ: من طرح تعديلاً على أيّ مادةٍ وبأيّ سببٍ، ومن راجعه، ومتى أُبرم، وما رُفض وبأيّ رمز'
     classification: sovereign
