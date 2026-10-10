@@ -492,6 +492,7 @@ describe('C — مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ ع�
       spec: { id: grantId, reason: 'سُحِبَت' },
       kill: { stage: 'S4' }, // بعدَ تطبيقِ المرجعِ: السحبُ مُقرٌّ في الغالبِ.
     });
+    assert.equal(revokeChild.signal, 'SIGKILL', 'طفلُ السحبِ لم يُقتَلْ');
     // الحكمُ من اللقطةِ المُعادِ تركيبِها بالشاهدِ لا من مخرجِ عمليّةٍ مقتولةٍ — فقدانُ
     // المخرجِ لا يَعني فقدانَ الإقرارِ ولا عكسَهُ.
     const booted = await bootWithGrants(ws.root, keys, socket);
