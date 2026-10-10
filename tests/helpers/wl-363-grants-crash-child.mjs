@@ -35,6 +35,10 @@ const { FileStateBoundSocket, bootRoot } = await import('./wl-326-root.mjs');
 const socket = new FileStateBoundSocket(config.socketFile);
 const runtime = await bootRoot(config.root, config.keys, socket);
 if (kill.socket) socket.faults.push(kill.socket);
+// شاهدُ المنحِ من السجلِّ المختومِ (عقدُ الإنتاجِ: `grantsFromSealedLog`) — لا يُمرَّر
+// بلاهُ فلا تُفحصُ أصالةُ أيِّ منحةٍ تُعيدُها التشغيلةُ اللاحقةُ.
+const { grantsFromSealedLog } = await import('../../src/root-of-trust/production-runtime.mjs');
+const grantWitness = await grantsFromSealedLog(runtime.log);
 
 // سلسلةُ الإنفاذِ فوقَ الجذرِ الحقيقيّ: الدفترُ موصولٌ بالحاجزِ (grantsTxn) كما في
 // `createProductionSystem` — نفسُ العقدِ لا محاكاةٍ.
@@ -52,6 +56,7 @@ const chain = composeEnforcementChain({
   grantsStore: new FileCapabilityGrantStore({
     filePath: config.root + '/capability-grants.json',
   }),
+  grantWitness,
   grantsTxn: (intent, fn) => runtime.commitBarrier.run(intent, fn),
 });
 const grants = chain.grants;
