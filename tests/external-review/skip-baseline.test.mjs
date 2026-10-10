@@ -204,10 +204,12 @@ test('مُحوِّلُ الأرقامِ العربيّةِ الشرقيّةِ ي
   assert.equal(normalizeDigits('126'), '126');
 });
 
-test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على المستودعِ وبـ1 على شجرةٍ مُطفَّرةٍ', () => {
-  const clean = execFileSync('node', [GUARD], { cwd: REPO, encoding: 'utf8' });
-  assert.match(clean, /✅ حاجزُ خطِّ أساسِ التخطّي/);
-
+test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على جذرٍ سليمٍ وبـ1 على شجرةٍ مُطفَّرةٍ', () => {
+  // **حدٌّ مُعلَنٌ (‏WL-364):** «الجذرُ السليمُ» هنا **جذرٌ مُركَّبٌ** لا المستودعَ نفسَهُ —
+  // فالمستودعُ الحقيقيّ يَعتمدُ حداثةَ أثرِهِ (‏R6/R7) على دورةِ القياسِ، والاختبارُ لا
+  // يَملكُ تثبيتَها؛ فاختبارُ «النظافةِ» على المستودعِ يَسقطُ **بجرمِ دورةِ القياسِ لا
+  // بجرمِ الحاجزِ**. الجذرُ المُركَّبُ يَحملُ الأثرَ والخطّةَ وعددَ الملفّاتِ المطابقَ —
+  // فالحكمُ على الحاجزِ نفسِهِ لا على حداثةِ المستودعِ.
   const root = mkdtempSync(path.join(tmpdir(), 'skip-baseline-proc-'));
   roots.push(root);
   mkdirSync(path.join(root, 'docs/external-review'), { recursive: true });
@@ -216,14 +218,21 @@ test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على 
   for (const rel of [PLAN, 'docs/external-review/M11.06-round-2-plan.md']) {
     cpSync(path.join(REPO, rel), path.join(root, rel));
   }
-  // أنشئ 218 ملفَّ اختبارٍ ليُطابقَ testFileCount في الأثرِ
-  for (let i = 0; i < 218; i++) {
+  // أنشئ بعددِ الملفّاتِ الذي يَقولُهُ الأثرُ نفسُهُ — لا عدداً مُصلَّحاً يَنكسرُ عندَ
+  // كلِّ دورةِ قياسٍ (‏254 اليومَ، والدورةُ تُحدّثُهُ).
+  const artifact = JSON.parse(readFileSync(path.join(root, ARTIFACT), 'utf8'));
+  const declaredCount = Number(artifact.measurements?.[0]?.testFileCount ?? 218);
+  assert.ok(Number.isInteger(declaredCount) && declaredCount > 0, 'الأثرُ لا يقولُ عدداً');
+  for (let i = 0; i < declaredCount; i++) {
     writeFileSync(
       path.join(root, `tests/synthetic-${i}.test.mjs`),
       "import {test} from 'node:test';\ntest('synthetic', () => {});\n",
       'utf8',
     );
   }
+  // الجذرُ السليمُ: الحاجزُ يخرُجُ بـ0 عليهِ (‏بلا git فلا R6/R7/R8 تُقاسانِ).
+  const clean = execFileSync('node', [GUARD], { cwd: root, encoding: 'utf8' });
+  assert.match(clean, /✅ حاجزُ خطِّ أساسِ التخطّي/);
   // الطفرةُ: إعادةُ الرقمِ إلى ما كانَ قبلَ الإصلاحِ.
   const planPath = path.join(root, PLAN);
   const mutated = readFileSync(planPath, 'utf8').replace(
