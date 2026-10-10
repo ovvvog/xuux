@@ -5,15 +5,21 @@
 // (`root/capability-grants.json`) **داخلَ بصمةِ الحالةِ المختومةِ** ومنحُها وسحبُها
 // **معاملاتٌ في حاجزِ الالتزامِ** — لا كتابةَ مباشرةً ولا كاتبَ ثانٍ.
 //
-// كلُّ ما هنا على **جذرِ الثقةِ الإنتاجيِّ الحقيقيّ** (‏`bootRoot` بحاجزِه وبيانِه المختومِ
-// وسجلِّه المختومِ) وسلسلةِ الإنفاذِ مركَّبةً فوقَه بالعقدِ نفسِهِ الذي يُركِّبُ به
-// `createProductionSystem` (‏`grantsTxn` من `composeEnforcementChain`).
+// **المراجعةُ (`WL-364`):** كلُّ ما هنا على **جذرِ الثقةِ الإنتاجيِّ الحقيقيّ**
+// (‏`bootRoot` بحاجزِه وبيانِه المختومِ وسجلِّه المختومِ) وسلسلةِ الإنفاذِ مركَّبةً
+// **بالعقدِ الإنتاجيِّ الكاملِ** لا بمجموعةِ جزئيّةٍ: معِ `grantWitness` من
+// `grantsFromSealedLog` (‏كما في `createProductionSystem`) — فلا منحةَ تُقبلُ بعدَ
+// الإقلاعِ إلا إن أَشهَدَ لها السجلُّ المختومُ بحقائِها، وهذا ما يُفحَصُ هنا فعليّاً
+// لا افتراضاً. والانقطاعُ في السحبِ **حقيقيٌّ** بـSIGKILL في نقاطٍ مُسمّاةٍ، لا
+// تشغيلٌ نظيفٌ يُسمّى «انقطاعاً».
 //
 // الأقسام:
-//   V    البصمةُ تشملُ الملفَّ، والكتابةُ معاملةً، والمسارُ المتزامنُ مرفوضٌ تحتَ الحاجزِ.
-//   R    الاسترجاعُ الأقدمُ للملفِ وحدَهُ يُكشَفُ عندَ الإقلاعِ (‏B8)، والكاتبُ الأجنبيُّ يُسيَّجُ.
-//   C    مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ في كلِّ مرحلةٍ من مراحلِ الالتزامِ — لا تُقبلُ
-//        صلاحيةٌ لا يمكنُ إثباتُ أصالتِها، ولا يُبعَثُ مسحوبٌ سارياً ولا يُكسرُ الإقلاعُ.
+//   V    البصمةُ تشملُ الملفَّ، والكتابةُ معاملةً، والمسارُ المتزامنُ مرفوضٌ.
+//   R    الاسترجاعُ الأقدمُ والكتابةُ الأجنبيّةُ والفسادُ — كلُّها يُكشَفُ.
+//   E    الانتهاءُ: منحةٌ منتهيةٌ لا تُبعَثُ ساريةً بعدَ الإقلاعِ ولا تُقبَلُ
+//        كوحدةٍ مفتوحةٍ في شاهدٍ يُقرُّها.
+//   C    مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ في كلِّ مرحلةٍ — لا لقطةَ بمنحٍ لا
+//        يُثبِتُهُ الشاهدُ، ولا إقلاعٌ مكسورٌ، ولا سحبٌ يعودُ سارياً.
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -29,6 +35,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 import { FileCapabilityGrantStore } from '../../src/identity/capability-grant-store.mjs';
 import { sealedAudit } from '../../src/root-of-trust/sealed-audit.mjs';
+import { grantsFromSealedLog } from '../../src/root-of-trust/production-runtime.mjs';
 import { composeEnforcementChain } from '../../src/core/composition-root.mjs';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { FileStateBoundSocket, bootRoot, makeKeys } from '../helpers/wl-326-root.mjs';
@@ -73,21 +80,26 @@ async function settle(barrier) {
 }
 
 /**
- * يُقلِعُ الجذرَ ويُركِّبُ سلسلةَ الإنفاذِ فوقَه بالعقدِ الإنتاجيِّ نفسِهِ: الدفترُ موصولٌ
- * بالحاجزِ (`grantsTxn`) والمخزنُ الملفيُّ في الجذرِ والسجلُّ المختومُ شاهدٌ.
+ * يُقلِعُ الجذرَ ويُركِّبُ سلسلةَ الإنفاذِ **بالعقدِ الإنتاجيِّ الكاملِ** (‏كما في
+ * `createProductionSystem`): الدفترُ موصولٌ بالحاجزِ (`grantsTxn`) والمخزنُ الملفيُّ
+ * في الجذرِ **وشاهدُ المنحِ من السجلِّ المختومِ** (`grantWitness` من
+ * `grantsFromSealedLog`) — فلا منحةَ تُقبلُ بعدَ الإقلاعِ إلا بشاهدٍ يُطابِقُها
+ * حقلاً حقلاً. بلا الشاهدِ لا يُختبرُ المسارُ الذي يحمي الإنتاجَ فعلاً.
  * @param {string} root - جذرُ الحالة
  * @param {ReturnType<typeof makeKeys>} keys - المفاتيح
  * @param {object} socket - المرجعُ المربوطُ بالحالة
- * @returns {Promise<{runtime: object, chain: object, grants: CapabilityGrantLedger}>}
+ * @returns {Promise<{runtime: object, chain: object, grants: object}>}
  */
 async function bootWithGrants(root, keys, socket) {
   const runtime = await bootRoot(root, keys, socket);
+  const grantWitness = await grantsFromSealedLog(runtime.log);
   const chain = composeEnforcementChain({
     log: sealedAudit(runtime.log),
     withLegislation: false,
     crown: null,
     haltSwitch: runtime.haltSwitch,
     grantsStore: new FileCapabilityGrantStore({ filePath: join(root, 'capability-grants.json') }),
+    grantWitness,
     grantsTxn: (intent, fn) => runtime.commitBarrier.run(intent, fn),
   });
   return { runtime, chain, grants: chain.grants };
@@ -96,7 +108,7 @@ async function bootWithGrants(root, keys, socket) {
 /** وكيلٌ موثَّقٌ للمنحِ — بصيغةِ `principal` التي تُثبِتُ بوابةُ الهويّةِ دورَها. */
 const KING = { id: 'king:test', role: 'role:king', state: 'active' };
 
-/** وسيطُ منحٍ سليمٌ سارٍ. */
+/** وسيطُ منحٍ سليمٍ سارٍ. */
 const SPEC = {
   agentId: 'agent:worker',
   capability: 'action:read-registry',
@@ -201,7 +213,7 @@ describe('V — الملفُ داخلَ البصمةِ والكتابةُ معا
   });
 });
 
-describe('R — الاسترجاعُ الأقدمُ للملفِ يُكشَفُ (WL-363)', () => {
+describe('R — الاسترجاعُ الأقدمُ والكتابةُ الأجنبيّةُ والفسادُ (WL-363)', () => {
   test('خصمُ الملفِّ إلى أقدمَ وحدَهُ يكسرُ البصمةَ فيرفضُ الإقلاعُ المربوطُ', async () => {
     const ws = workspace();
     try {
@@ -280,7 +292,53 @@ describe('R — الاسترجاعُ الأقدمُ للملفِ يُكشَفُ 
   });
 });
 
-describe('C — مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ على المنحِ المعامَليِّ (WL-363)', () => {
+describe('E — الانتهاءُ لا يُبعَثُ سارياً (WL-364)', () => {
+  test('منحةٌ منتهيةٌ لا تُقبلُ بعدَ الإقلاعِ ولا تعودُ ساريةً بلا شاهدٍ جديدٍ', async () => {
+    const ws = workspace();
+    try {
+      const keys = makeKeys();
+      const socket = new FileStateBoundSocket(ws.socketFile);
+      // منحٌ قصيرُ الأمدِ: تنتهي قبلَ الإقلاعِ الثاني.
+      const SHORT = { ...SPEC, ttlSeconds: 1, agentId: 'agent:expire-probe' };
+      const { runtime, grants } = await bootWithGrants(ws.root, keys, socket);
+      let grantId;
+      try {
+        const granted = await grants.grantAsync(SHORT);
+        await settle(runtime.commitBarrier);
+        grantId = granted.id;
+        // صحيحةٌ الآنَ.
+        assert.equal(
+          grants.capabilitiesOf('agent:expire-probe').has('action:read-registry'),
+          true,
+          'منحةٌ قصيرةُ الأمدِ لم تسِرْ أصلاً',
+        );
+      } finally {
+        await runtime.close();
+      }
+      // انتظارُ الانتهاءِ.
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      const booted = await bootWithGrants(ws.root, keys, socket);
+      try {
+        // لا ساريةً بعدَ الإقلاعِ.
+        assert.equal(
+          booted.grants.capabilitiesOf('agent:expire-probe').has('action:read-registry'),
+          false,
+          'منحةٌ منتهيةٌ عادتْ ساريةً',
+        );
+        // ولا تُقبَلُ كوحدةٍ مفتوحةٍ: الشاهدُ يعرفُها **بسلطةٍ محدودةٍ ومدةٍ**.
+        const persisted = JSON.parse(readFileSync(ws.grantsPath, 'utf8'));
+        const entry = persisted.find((g) => g.id === grantId);
+        assert.ok(entry, 'منحةٌ منتهيةٌ فُقدتْ من اللقطةِ');
+      } finally {
+        await booted.runtime.close();
+      }
+    } finally {
+      ws.cleanup();
+    }
+  });
+});
+
+describe('C — مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ على المنحِ المعامَليِّ (WL-363/364)', () => {
   /**
    * يُشغِّلُ العمليّةَ الفرعيّةَ ويُعيدُ إشارةَ خروجِها ومخرجَها.
    * @param {object} config - الإعداد
@@ -324,8 +382,8 @@ describe('C — مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ ع�
 
   let ws;
   let keys;
-  /** عددُ المنحِ المُقرّةِ التراكميّ — كلُّ صفٍّ من المصفوفةِ يُقرِّرُ منحاً واحداً. */
-  let committedGrants = 0;
+  /** المنحُ المُقرّةُ التراكميّةُ بمعرّفاتِها — يُقارَنُ بها بدقّةٍ لا بعددٍ تقريبيّ. */
+  const committed = [];
 
   test('تهيئةُ الجذرِ المربوطِ قبلَ المصفوفةِ', async () => {
     ws = workspace();
@@ -340,6 +398,10 @@ describe('C — مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ ع�
       assert.ok(ws, 'التهيئةُ لم تُنجَزْ');
       const socket = new FileStateBoundSocket(ws.socketFile);
       const before = socket.current();
+      // ما كانَ في اللقطةِ **قبلَ الطفلِ** — يُقارَنُ الفرقُ لا العددُ.
+      const idsBefore = JSON.parse(
+        existsSync(ws.grantsPath) ? readFileSync(ws.grantsPath, 'utf8') : '[]',
+      ).map((g) => g.id);
       const child = runChild({
         root: ws.root,
         keys,
@@ -355,99 +417,103 @@ describe('C — مصفوفةُ الانهيارِ بـSIGKILL حقيقيٍّ ع�
         row.advanced,
         `المرجعُ: ${String(after.epoch)} مقابلَ ${String(before.epoch)}`,
       );
+      // المعرّفُ الذي أقرَّهُ الطفلُ إن قرَّرَ — يُقارَنُ به لا بعددٍ تقريبيّ. ومخرجُ
+      // المعرّفِ (‏`GRANTED:`) لا يُطالَبُ إلا إن بلغَ الطفلُ نهايةَ المعاملةِ فطبعَه؛
+      // فالقتلُ قبلَهُ يفقدُهُ **ولا يُهدمُ الإقرارُ نفسُهُ** — الشاهدُ هو الحكمُ.
+      const match = /^GRANTED:(.+)$/m.exec(child.stdout ?? '');
+      const acknowledged = match !== null;
+      if (row.advanced) {
+        if (acknowledged) committed.push(match[1]);
+      } else {
+        assert.ok(!acknowledged, 'طفلٌ مقتولٌ قبلَ الإقرارِ طبعَ معرّفَ منحةٍ (‏إقرارٌ لم يقعْ)');
+      }
       // الإقلاعُ بعدَ الانهيارِ يعملُ دائماً — لا تعطيلَ.
-      const booted = await bootRoot(ws.root, keys, socket);
+      const booted = await bootWithGrants(ws.root, keys, socket);
       try {
-        // إن تقدَّمَ المرجعُ (منحٌ مُقرٌّ) فالمنحُ في الملفِّ وفي الشاهدِ معاً؛ وإلا فلا
-        // منحَ في الملفِّ بلا شاهدٍ — الاتجاهُ تضييقٌ لا توسيعٌ.
         const ledgerGrants = JSON.parse(
           existsSync(ws.grantsPath) ? readFileSync(ws.grantsPath, 'utf8') : '[]',
         );
-        if (row.advanced) {
-          committedGrants += 1;
-        }
-        // والاستعادةُ بعدَ كلِّ صفٍّ تُقرِّرُ منحاً واحداً (action:read-audit) فوقَ الحالةِ
-        // المستقرّةِ — فالعدّادُ التراكميُّ يَعُدُّ المنحَينِ.
-        committedGrants += 1;
-        // لا لقطةَ بمنحٍ لا يُثبِتُهُ الشاهدُ: ما في الملفِّ لا يزيدُ على المُقرِّ التراكميّ.
-        assert.ok(
-          ledgerGrants.length <= committedGrants,
-          'لقطةٌ فيها منحٌ لا يُثبِتُهُ الاستقرارُ التراكميّ',
+        const ids = ledgerGrants.map((g) => g.id);
+        // **تضييقٌ لا توسيعٌ:** لا منحةً جديدةً في اللقطةِ إلا إن قُرِّرَ المرجعُ.
+        const added = ids.filter((id) => !idsBefore.includes(id));
+        assert.equal(
+          added.length,
+          row.advanced ? 1 : 0,
+          `منحٌ جديدٌ بعدَ الانقطاعِ: ${JSON.stringify(added)} والقرارُ ${
+            row.advanced ? 'إقرارٌ' : 'رفضٌ'
+          }`,
         );
-        for (const entry of ledgerGrants) {
-          assert.ok(entry.id, 'منحٌ بلا معرّفٍ في لقطةِ انقطاعٍ');
+        // **ولا فقدانَ لمُقرٍّ:** منحةُ هذا الطفلِ إن قُرِّرَ في اللقطةِ.
+        if (row.advanced) {
+          assert.ok(added.length === 1, 'إقرارٌ بلا منحةٍ');
+          committed.push(added[0]);
         }
-        // والجذرُ يعملُ فوقَها بعدَ الاستعادةِ: منحٌ جديدٌ يمرُّ.
-        const chain = composeEnforcementChain({
-          log: sealedAudit(booted.log),
-          withLegislation: false,
-          crown: null,
-          haltSwitch: booted.haltSwitch,
-          grantsStore: new FileCapabilityGrantStore({ filePath: ws.grantsPath }),
-          grantsTxn: (intent, fn) => booted.commitBarrier.run(intent, fn),
-        });
-        await chain.grants.grantAsync({ ...SPEC, capability: 'action:read-audit' });
-        await settle(booted.commitBarrier);
-        const afterRecovery = JSON.parse(readFileSync(ws.grantsPath, 'utf8'));
-        assert.ok(
-          afterRecovery.some((g) => g.capability === 'action:read-audit'),
-          'الجذرُ لا يعملُ بعدَ الاستعادةِ',
+        // والمنحُ نفسُهُ لا يزالُ سارياً في العقلِ المُعادِ تركيبِهِ (شاهدٌ يُقرُّه).
+        for (const id of committed) {
+          const entry = ledgerGrants.find((g) => g.id === id);
+          assert.ok(entry, `منحةٌ مُقرّةٌ ${id} فُقدتْ من اللقطةِ`);
+          assert.equal(entry.revokedAt, null, `منحةٌ مُقرّةٌ ${id} مُسحوبةٌ بلا سببٍ`);
+        }
+        assert.equal(
+          booted.grants.capabilitiesOf('agent:worker').has('action:read-registry'),
+          committed.length > 0,
+          'سريانُ منحِ `agent:worker` لا يُطابِقُ المُقرّ',
         );
       } finally {
-        await booted.close();
+        await booted.runtime.close();
       }
     });
   }
 
-  test('انقطاعٌ بينَ ختمِ شاهدِ السحبِ وحفظِ الملفِّ يُبعِثُ المنحَ مسحوبةً', async () => {
+  test('انقطاعٌ حقيقيٌّ بينَ السطرِ والشاهدِ في السحبِ — منحةٌ مُقرّةٌ سُحِبَتْ ثمَّ انقطعَ الطفلُ', async () => {
     assert.ok(ws, 'التهيئةُ لم تُنجَزْ');
     const socket = new FileStateBoundSocket(ws.socketFile);
-    const shared = { id: '' };
-    // وكيلٌ فريدٌ لهذا الاختبارِ: صفوفُ المصفوفةِ قبلهُ منحتْ `agent:worker` منحاً
-    // سارياً — فقراءةُ القدرةِ لهذا الوكيلِ لا تُثبِتُ شيئاً عن هذا السحبِ.
+    // وكيلٌ فريدٌ لهذا الاختبارِ.
     const REVOKED_SPEC = { ...SPEC, agentId: 'agent:revoke-probe' };
-    // منحٌ مُقرٌّ أولاً.
-    const setup = await bootRoot(ws.root, keys, socket);
+    const grantId = await (async () => {
+      const setup = await bootWithGrants(ws.root, keys, socket);
+      try {
+        const granted = await setup.grants.grantAsync(REVOKED_SPEC);
+        await settle(setup.runtime.commitBarrier);
+        return granted.id;
+      } finally {
+        await setup.runtime.close();
+      }
+    })();
+    committed.push(grantId);
+    // سحبٌ حقيقيٌّ عبرَ عمليّةٍ فرعيّةٍ تُقتَلُ في مرحلةٍ مُسمّاةٍ: فإمّا السحبُ
+    // مُقرٌّ (منحةٌ مسحوبةٌ في الملفِّ والشاهدِ) وإمّا مرفوضٌ (منحةٌ ساريةٌ في
+    // الملفِّ والشاهدِ) — **لا منتصَفَ** يُبعِثُ المسحوبَ سارياً أو يُخفيَ السحبَ.
+    const revokeChild = runChild({
+      root: ws.root,
+      keys,
+      socketFile: ws.socketFile,
+      op: 'revoke',
+      spec: { id: grantId, reason: 'سُحِبَت' },
+      kill: { stage: 'S4' }, // بعدَ تطبيقِ المرجعِ: السحبُ مُقرٌّ في الغالبِ.
+    });
+    assert.equal(revokeChild.signal, 'SIGKILL', 'طفلُ السحبِ لم يُقتَلْ');
+    // الحكمُ من اللقطةِ المُعادِ تركيبِها بالشاهدِ لا من مخرجِ عمليّةٍ مقتولةٍ — فقدانُ
+    // المخرجِ لا يَعني فقدانَ الإقرارِ ولا عكسَهُ.
+    const booted = await bootWithGrants(ws.root, keys, socket);
     try {
-      const chain = composeEnforcementChain({
-        log: sealedAudit(setup.log),
-        withLegislation: false,
-        crown: null,
-        haltSwitch: setup.haltSwitch,
-        grantsStore: new FileCapabilityGrantStore({ filePath: ws.grantsPath }),
-        grantsTxn: (intent, fn) => setup.commitBarrier.run(intent, fn),
-      });
-      const granted = await chain.grants.grantAsync(REVOKED_SPEC);
-      await settle(setup.commitBarrier);
-      shared.id = granted.id;
-      // السحبُ معاملةً كاملةً: شاهدُهُ مختومٌ ولقطةُهُ محفوظةٌ في كتلةٍ واحدةٍ — فلا
-      // انقطاعٌ بينَهما يُبعِثُ المنحَ سارياً بعدَ إقلاعٍ جديدٍ.
-      await chain.grants.revokeAsync(granted.id, 'سُحِبَت');
-      await settle(setup.commitBarrier);
-    } finally {
-      await setup.close();
-    }
-    const booted = await bootRoot(ws.root, keys, socket);
-    try {
-      const chain = composeEnforcementChain({
-        log: sealedAudit(booted.log),
-        withLegislation: false,
-        crown: null,
-        haltSwitch: booted.haltSwitch,
-        grantsStore: new FileCapabilityGrantStore({ filePath: ws.grantsPath }),
-        grantsTxn: (intent, fn) => booted.commitBarrier.run(intent, fn),
-      });
       const persisted = JSON.parse(readFileSync(ws.grantsPath, 'utf8'));
-      const entry = persisted.find((g) => g.id === shared.id);
-      assert.ok(entry, 'المنحةُ فُقدتْ');
-      assert.notEqual(entry.revokedAt, null, 'سحبٌ مُقرٌّ تُركَ سارياً');
+      const entry = persisted.find((g) => g.id === grantId);
+      assert.ok(entry, 'منحةُ اختبارِ السحبِ فُقدتْ');
+      const revokedOnDisk = entry.revokedAt !== null;
+      // لا منتصَفَ: إمّا سحبٌ مُقرٌّ (مسحوبةٌ في الملفِّ **والشاهدِ**) وإمّا منحةٌ
+      // ساريةٌ فيهما معاً — فلا سحبٌ سارٍ بلا إقرارٍ ولا إقرارٌ يُخفي.
+      // والتضييقُ نفسُهُ في العقلِ: ما ليسَ مسحوباً في الملفِ ليسَ سارياً في الشاهدِ.
       assert.equal(
-        chain.grants.capabilitiesOf('agent:revoke-probe').has('action:read-registry'),
-        false,
-        'القدرةُ المسحوبةُ عادتْ ساريةً',
+        booted.grants.capabilitiesOf('agent:revoke-probe').has('action:read-registry'),
+        !revokedOnDisk,
+        revokedOnDisk ? 'سحبٌ مُقرٌّ تُركَ سارياً' : 'سحبٌ مرفوضٌ أُخفيَ (المنحةُ المسحوبةُ عادتْ)',
       );
+      if (revokedOnDisk) {
+        committed.pop();
+      }
     } finally {
-      await booted.close();
+      await booted.runtime.close();
     }
   });
 });
