@@ -178,7 +178,7 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
 
         const ttlActive = 3600; // ساعةٌ من الآن
 
-        const active = system.chain.grants.grant({
+        const active = await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:read-registry',
           reason: 'تدقيقُ حادثةٍ رقم 361',
@@ -188,7 +188,7 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
         assert.ok(typeof active.id === 'string' && active.id.trim() !== '', 'منحةٌ بلا معرّف');
 
         // منحةٌ ستنتهي مدتُها بينَ الإقلاعَين: تُقدَّمُ لقطتُها على القرصِ إلى الماضي أدناه.
-        const expired = system.chain.grants.grant({
+        const expired = await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:read-audit',
           reason: 'انتهتْ مدتُها',
@@ -197,14 +197,14 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
         });
         assert.ok(typeof expired.id === 'string');
         // منحةٌ تُسحبُ فوراً
-        const revoked = system.chain.grants.grant({
+        const revoked = await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:write-memory',
           reason: 'تُسحبُ فوراً',
           principal: { id: 'king:test', role: 'role:king', state: 'active' },
           ttlSeconds: ttlActive,
         });
-        system.chain.grants.revoke(revoked.id, 'سُحِبَت');
+        await system.chain.grants.revokeAsync(revoked.id, 'سُحِبَت');
         // **WL-361 (‏`R6-A-05`، تتمّةُ «المنح»): الحفظُ «الشاهدُ المختومُ أوّلاً ثمّ الملفُّ» —
         // فقبلَ قراءةِ اللقطةِ يُنتظرُ صرفُ عملياتِ الحفظِ المعلَّقةِ (`persist()`).**
         await system.chain.grants.persist();
@@ -274,7 +274,7 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
       try {
         const agent = await system.chain.registry.register({ name: 'c', role: 'role:minister' });
         shared.id = agent.id;
-        system.chain.grants.grant({
+        await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:read-registry',
           reason: 'قبلَ الفساد',
@@ -314,7 +314,7 @@ describe('WL-361 — دوامُ منحِ القدراتِ في الإنتاجِ 
       async (system, shared) => {
         const agent = await system.chain.registry.register({ name: 'f', role: 'role:minister' });
         shared.id = agent.id;
-        system.chain.grants.grant({
+        await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:read-registry',
           reason: 'قياسُ بصمةِ الحالةِ',
@@ -410,7 +410,7 @@ describe('WL-361 (تتمّة) — رفضُ المنحِ المزوَّرةِ: ل
       try {
         const agent = await system.chain.registry.register({ name: 'x', role: 'role:minister' });
         shared.id = agent.id;
-        const granted = system.chain.grants.grant({
+        const granted = await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:write-memory',
           reason: 'ثُمّ يُسحَبُ',
@@ -418,7 +418,7 @@ describe('WL-361 (تتمّة) — رفضُ المنحِ المزوَّرةِ: ل
           ttlSeconds: 3600,
         });
         revokedGrantId = granted.id;
-        system.chain.grants.revoke(revokedGrantId, 'سُحِبَت');
+        await system.chain.grants.revokeAsync(revokedGrantId, 'سُحِبَت');
         await system.chain.grants.persist();
       } finally {
         await system.close();
@@ -465,7 +465,7 @@ describe('WL-361 (تتمّة) — رفضُ المنحِ المزوَّرةِ: ل
         shared.id = agent.id;
         // تعليقُ الحفظِ صراحةً: المنحُ يقعُ (شاهدُهُ يُسجَّلُ في السجلِّ) والملفُّ لا يُحدَّثُ
         system.chain.grants.suspendPersistForTest();
-        system.chain.grants.grant({
+        await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:read-registry',
           reason: 'قبلَ الانقطاعِ',
@@ -506,7 +506,7 @@ describe('WL-361 (تتمّة) — رفضُ المنحِ المزوَّرةِ: ل
       try {
         const agent = await system.chain.registry.register({ name: 'z', role: 'role:minister' });
         shared.id = agent.id;
-        const granted = system.chain.grants.grant({
+        const granted = await system.chain.grants.grantAsync({
           agentId: shared.id,
           capability: 'action:read-registry',
           reason: 'تُسحَبُ بعدَها',
@@ -517,7 +517,7 @@ describe('WL-361 (تتمّة) — رفضُ المنحِ المزوَّرةِ: ل
         await system.chain.grants.persist();
         // السحبُ يقعُ بشاهدِهِ (الحدثُ يُسجَّلُ) ثمّ انقطاعٌ **قبلَ** حفظِ الملفّ:
         system.chain.grants.suspendPersistForTest();
-        system.chain.grants.revoke(revokedGrantId, 'سُحِبَت');
+        await system.chain.grants.revokeAsync(revokedGrantId, 'سُحِبَت');
         await system.rootOfTrust.log.flush?.();
       } finally {
         await system.close();

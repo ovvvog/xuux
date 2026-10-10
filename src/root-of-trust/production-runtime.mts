@@ -297,6 +297,10 @@ export function productionStateLayout(root: string, anchorFile: string): StateLa
       anchorFile,
       join(root, 'revoked.jsonl'),
       join(root, 'clock-state.json'),
+      // **WL-363 (‏قرارُ المالكِ):** لقطةُ منحِ القدراتِ داخلَ بصمةِ الحالةِ المختومةِ.
+      // مسارُ الكتابةِ صارَ موافقَ الحاجزِ (`beforeDurableWrite` في المخزنِ) فكتابتُها
+      // تُحدِّثُ الهضمَ وترفَعُ البيانَ معَ ختمِ الشاهدِ — كتلةً واحدةً.
+      join(root, 'capability-grants.json'),
     ],
     dirs: [ledger + LEDGER_CLAIMS_SUFFIX, halt + HALT_NODES_SUFFIX, halt + HALT_ACKS_SUFFIX],
   };

@@ -22,6 +22,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { beforeDurableWrite } from '../root-of-trust/commit-barrier.mjs';
+
 /**
  * مخزنُ منحِ قدراتٍ على ملفِّ JSON.
  *
@@ -62,6 +64,11 @@ export class FileCapabilityGrantStore {
    * يكتبُ اللقطةَ إلى القرصِ كتابةً ذرّيّةً (‏مؤقّتٌ ثمّ إعادةُ تسميةٍ)، والفشلُ
    * يُرفَعُ لا يُبتلَعُ: منحٌ وقعَ ولم يُدَمْ هو العيبُ نفسُه.
    *
+   * **داخلَ حاجزِ الالتزامِ (`WL-363`):** الكتابةُ للمسارِ النهائيِّ تُسجَّلُ قبلَها
+   * (`beforeDurableWrite`) فتُصبحَ منَ المعاملةِ — تُدرِجُ تراجعَها وتُحدِّثُ هضمَ
+   * الحالةِ وترفَعُ البيانَ. وخارجَ معاملةٍ بعدَ التنشيطِ تُرفَضُ (`STATE_WRITE_OUTSIDE_BARRIER`)
+   * لا تُقبَلُ صامتةً: لا كاتبَ ثانٍ في الجذرِ.
+   *
    * @param {unknown} entries
    * @returns {void}
    */
@@ -70,6 +77,7 @@ export class FileCapabilityGrantStore {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
+    beforeDurableWrite(this.filePath, 'replace');
     const tmp = `${this.filePath}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(entries, null, 2), 'utf8');
     fs.renameSync(tmp, this.filePath);
