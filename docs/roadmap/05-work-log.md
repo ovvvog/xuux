@@ -34,7 +34,7 @@
 
 #### الملفاتُ المتأثّرة
 
-`sim/tpm/manifest_seal_sim.mjs` · `tests/sim/tpm-tear-states.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md`
+`sim/tpm/manifest_seal_sim.mjs` · `tests/sim/tpm-tear-states.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `config/work-log-ids.yaml` · `docs/audit/work-log-id-map.md` · `scripts/hooks/pre-push` · `docs/HANDOFF.md`
 
 #### الـ commit
 
