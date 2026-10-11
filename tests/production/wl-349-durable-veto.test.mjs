@@ -17,13 +17,16 @@ import {
 import { CONSOLE_ERRORS, loadConsolePolicy } from '../../src/console/index.mjs';
 import {
   TestFreshnessSocket,
+  AUTHN_POLICY,
   boot,
   crownCommand,
   fixedKeys,
+  freezeMonotonicNow,
   haltAuthority,
   session,
   testVault,
   tmpRoot,
+  unfreezeMonotonicNow,
 } from '../helpers/production-sovereign-rig.mjs';
 
 const VETO_EVENT = loadConsolePolicy().audit.vetoStateEvent;
@@ -511,6 +514,69 @@ describe('WL-352 — R12-ASTRA-01: قيدُ النقضِ لا يُستعادُ �
     } finally {
       await second.close();
       rmSync(ctx.root, { recursive: true, force: true });
+    }
+  });
+
+  test('عبورُ حدِّ الخطوةِ لا يعيدُ رمزًا مستهلَكًا — الحزامُ حتميٌّ لا انتظارَ جدارٍ (‏WL-367)', async () => {
+    // **تأسيسُ الحتميّةِ:** الفشلُ الذي رُئيَ في CI (تشغيلةُ 38090807348، المُدخلةُ 1230)
+    // كانَ نداءانِ من `session()` وقعا في الخطوةِ نفسِها بعدَ أن تقدَّمَتِ الساعةُ خطوةً
+    // بينَهما (إزاحةٌ 0 عندَ S ثمّ إزاحةٌ -1 عندَ S+1 ⇐ كلاهُما S). هذا الاختبارُ يُثبِتُ
+    // المسارَ **حتميّاً**: ساعةٌ مضبوطةٌ يراها مولِّدُ الرمزِ والمصادِقُ معاً، وعبورُ حدٍّ
+    // مقصودٌ، لا انتظارُ جدارٍ أو حسنُ حظٍّ في التوقيتِ.
+    const { stepSeconds } = AUTHN_POLICY.secondFactor;
+    const { root, keys, secret, factorSecrets } = rig();
+    // بدايةُ خطوةٍ بعيدةٌ عنَ الجدارِ الحقيقيّ — كي لا يتساربَ جدارُ العدّاءِ.
+    const stepMs = Math.ceil(Date.now() / 1000 / stepSeconds) * stepSeconds * 1000 + 60_000;
+    const first = await boot(root, { keys, factorSecrets });
+    try {
+      freezeMonotonicNow(stepMs); // داخلَ الخطوةِ S
+      const firstOpened = await session(first, secret);
+      assert.ok(typeof firstOpened.opened.token === 'string', 'لم تُفتَحْ الجلسةُ الأولى.');
+      // تقدُّمٌ مقصودٌ إلى الخطوةِ S+1 (عبورُ الحدِّ) — إعادةُ تشغيلٍ بينَ النداءَينِ.
+      await first.close();
+    } finally {
+      unfreezeMonotonicNow();
+    }
+    freezeMonotonicNow(stepMs + stepSeconds * 1000); // الخطوةُ S+1
+    try {
+      const second = await boot(root, { keys, factorSecrets });
+      try {
+        // بإزاحةٍ -1: المطلوبُ S — وقد استُهلَكَ في الجولةِ الأولى. الحزامُ يجبُ أن
+        // يختارَ خطوةً أُخرى غيرَ مستهلَكةٍ داخلَ نافذةِ القبولِ (S أو S+1 من S+1)
+        // ويُمرِّرَ المصادقةَ، لا أن يُقدِّمَ رمزَ S المستهلَكَ فيُرفَضَ بالإعادةِ.
+        const secondOpened = await session(second, secret, -1);
+        assert.ok(typeof secondOpened.opened.token === 'string', 'لم تُفتَحْ الجلسةُ الثانية.');
+      } finally {
+        await second.close();
+      }
+    } finally {
+      unfreezeMonotonicNow();
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('نافذةُ القبولِ إذا استُهلَكَت كلُّها فالبندُ صريحٌ لا رمزٌ خارجَها (‏WL-367)', async () => {
+    // الحزامُ لا يولِّدُ رمزًا لخطوةٍ خارجَ نافذةِ المصادِقِ (وإلّا رُدَّ بـ
+    // `AUTHN_FACTOR_INVALID` وصارَ الاختبارُ أعمى عن عطلِهِ) — بل يفشلُ بنصٍّ صريحٍ.
+    const { stepSeconds } = AUTHN_POLICY.secondFactor;
+    const { root, keys, secret, factorSecrets } = rig();
+    const stepMs = Math.ceil(Date.now() / 1000 / stepSeconds) * stepSeconds * 1000 + 60_000;
+    freezeMonotonicNow(stepMs); // الخطوةُ S
+    try {
+      const system = await boot(root, { keys, factorSecrets });
+      try {
+        // استهلِكْ كلَّ خطواتِ النافذةِ [S-1..S+1] بالإزاحاتِ -1 و0 و+1.
+        await session(system, secret, -1);
+        await session(system, secret, 0);
+        await session(system, secret, 1);
+        // الرابعةُ لا خطوةً لها داخلَ النافذةِ — رفضٌ صريحٌ لا رمزٌ خارجُها.
+        await assert.rejects(session(system, secret, 0), /نافذةُ القبولِ \[.*\] كلُّها مستهلَكةٌ/);
+      } finally {
+        await system.close();
+      }
+    } finally {
+      unfreezeMonotonicNow();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

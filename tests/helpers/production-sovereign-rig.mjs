@@ -33,11 +33,41 @@ export const AUTHN_POLICY = loadKingAuthPolicy();
  * ≥ سابقتِها، فلا يُولَّدَ رمزُ خطوةٍ قد استُهلَكتْ.
  */
 let monotonicNow = 0;
+let monotonicOverride = null;
+/**
+ * **ساعةٌ مضبوطةٌ للاختبارِ (‏WL-367):** تُثبِّتُ الساعةَ الرتيبةَ على قيمةٍ يختارُها
+ * الاختبارُ — يراها مولِّدُ الرمزِ والمصادِقُ معاً (‏كلاهُما يمرُّانِ عبرَ
+ * `monotonicDateNow` عبرَ `testClock`)، فتُختبرُ عبوراتُ حدِّ الخطوةِ حتميّاً لا
+ * انتظاراً للجدارِ. الاستعمالُ داخلَ `try`/`finally` مع `unfreezeMonotonicNow()`.
+ */
+export function freezeMonotonicNow(ms) {
+  monotonicOverride = ms;
+  if (monotonicOverride > monotonicNow) monotonicNow = monotonicOverride;
+}
+export function unfreezeMonotonicNow() {
+  monotonicOverride = null;
+}
 /** خطواتُ الرموزِ المُستعمَلةُ لكلِّ جذرِ (المفتاحُ مسارُ الجذرِ) — الاستهلاكُ لكلِّ جذرٍ. */
 const usedStepsByRoot = new Map();
+/** تتابعٌ صاعدٌ [from..to] أو فارغٌ إن كانَ from > to. */
+function rangeUp(from, to) {
+  const out = [];
+  for (let v = from; v <= to; v += 1) out.push(v);
+  return out;
+}
+/** تتابعٌ هابطٌ [from..to] أو فارغٌ إن كانَ from < to. */
+function rangeDown(from, to) {
+  const out = [];
+  for (let v = from; v >= to; v -= 1) out.push(v);
+  return out;
+}
 /** مفتاحٌ خفيٌّ يحملُ مسارَ الجذرِ على النظامِ المُقلَعِ (‏يَضَعُهُ `boot`). */
 export const TEST_ROOT_KEY = Symbol('xuux.testRoot');
 export function monotonicDateNow() {
+  if (monotonicOverride !== null) {
+    if (monotonicOverride > monotonicNow) monotonicNow = monotonicOverride;
+    return monotonicNow;
+  }
   const wall = Date.now();
   if (wall > monotonicNow) monotonicNow = wall;
   return monotonicNow;
@@ -213,12 +243,27 @@ export async function session(system, secret, stepOffset = 0) {
   const rootKey = String(system[TEST_ROOT_KEY] ?? 'default');
   const usedSteps = usedStepsByRoot.get(rootKey) ?? new Set();
   usedStepsByRoot.set(rootKey, usedSteps);
-  let step = wallStep + stepOffset;
+  // ابحث في نافذةِ القبولِ **فقط** — لا يُولَّدُ رمزٌ لخطوةٍ خارجِها وإلّا رُدَّ بـ
+  // `AUTHN_FACTOR_INVALID` وصار الاختبارُ أعمى عن عطلِهِ. والبحثُ في الاتجاهَينِ لا صعوداً
+  // وحدهُ: أقربُ خطوةٍ غيرِ مستهلَكةٍ إلى المطلوبةِ (‏فوقَها ثمّ تحتَها) ضمنَ النافذةِ.
+  const requested = wallStep + stepOffset;
+  const minStep = wallStep - acceptedSkewSteps;
   const maxStep = wallStep + acceptedSkewSteps;
-  while (usedSteps.has(step) && step <= maxStep) step += 1;
-  if (usedSteps.has(step)) {
+  let step = null;
+  for (const candidate of [
+    requested,
+    ...rangeUp(requested + 1, maxStep),
+    ...rangeDown(requested - 1, minStep),
+  ]) {
+    if (candidate < minStep || candidate > maxStep) continue;
+    if (!usedSteps.has(candidate)) {
+      step = candidate;
+      break;
+    }
+  }
+  if (step === null) {
     throw new Error(
-      `session(): لا خطوةً غيرَ مستهلَكةٍ ضمنَ نافذةِ القبولِ (‏طلبَ الخطوةَ ${wallStep + stepOffset} وكلُّ ما حتى ${maxStep} مستهلَكٌ).`,
+      `session(): نافذةُ القبولِ [${minStep}..${maxStep}] كلُّها مستهلَكةٌ في هذا الجذرِ — انتظرْ خطوةً جديدةً أو وسّعِ الاختبارَ.`,
     );
   }
   usedSteps.add(step);
