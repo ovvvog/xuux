@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
 import * as tpm from '../../sim/tpm/tpm_client.mjs';
 import { FreshnessAnchorSim } from '../../sim/tpm/manifest_seal_sim.mjs';
-import { writeFileSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const sim = isSimEnabled();
@@ -256,4 +256,60 @@ simTest('tear 14: توكنٌ لا يطابقُ المتنَ ⇒ TORN (token-mani
   assert.equal(rec2.state, 'halted');
   assert.equal(rec2.error, 'STATE_MANIFEST_TPM_TORN');
   assert.equal(rec2.torn, 'token-manifest-inconsistent');
+});
+
+// 15) (WL-370 — شاهدُ الفجوةِ الأولى) ملفُّ الإيقافِ المكتوبُ (halt.json يقول halted)
+//     معَ قرصٍ متّسقٍ (متنٌ وتوكنٌ وعدّادٌ كلُّها عندَ C) ⇒ recover() يُقاسُ لا يُفترَض:
+//     هل يُبقي الإيقافَ أم يفتحُ الجذرَ؟ القياسُ الفعليُّ (محاكي swtpm): **يفتحُهُ —
+//     recover() يكتبُ RUNNING فوقَ halt مكتوبٍ متّسقِ القرصِ**. هذا **فجوةُ دلالةٍ في
+//     المحاكيِ لا في الإنتاجِ** (الإنتاجُ يُديرُ الإيقافَ بـHaltSwitch المستقلِّ في
+//     src/root-of-trust/ لا بهذا الملفِّ)؛ تُوثَّق هنا كشاهدِ قياسٍ لا كادّعاءِ عيبٍ في
+//     العتادِ. محاكيُّ swtpm فقط — لا يَعني شيئاً عن TPM حقيقيٍّ.
+simTest('tear 15: halt.json متّسقُ القرصِ ⇒ recover() يفتحهُ (فجوةُ دلالةٍ مقيسةٌ في المحاكيِ)', async () => {
+  const { a, root } = await setup();
+  const s = await a.seal();
+  assert.equal(s.ok, true);
+  // كلُّ شيءٍ متّسقٌ: المتنُ والتوكنُ والعدّادُ كلُّها عندَ C0+1، لا staged —
+  // ما عدا ملفَّ الإيقافِ الذي يقولُ halted.
+  writeFileSync(join(root, 'halt.json'), JSON.stringify({ state: 'halted', epoch: 1 }));
+  const rec = await a.recover();
+  assert.equal(rec.state, 'running'); // القياسُ: الفجوةُ موجودةٌ — يُوثَّقُ لا يُخفى
+  // وملفُّ الإيقافِ نفسُهُ انقلبَ إلى running
+  const haltAfter = JSON.parse(readFileSync(join(root, 'halt.json'), 'utf8'));
+  assert.equal(haltAfter.state, 'running');
+  assert.equal(haltAfter.epoch, 0);
+});
+
+// 16) (WL-370 — شاهدُ الفجوةِ الثانية) انقطاعٌ بعدَ زيادةِ العدّادِ قبلَ الإتمامِ ثمّ
+//     recover() مرتينِ ⇒ التوكنُ (token-state.json) **لا يُحدَّثُ** على مسارِ
+//     الإتمامِ في recover(): ختمُ التوكنِ يقعُ في seal() فقط لا في recover(). فبعدَ
+//     recover() الأولى (recertify-complete: المتنُ صارَ عندَ C+1) يبقى التوكنُ عندَ C —
+//     وتُدخِلُهُ recover() الثانيةُ في **إغلاقٍ زائفٍ** STATE_MANIFEST_TPM_TORN
+//     (token-manifest-inconsistent) رغمَ أنّ القرصَ بعدَ الأولى كانَ متّسقاً. فجوةُ
+//     تعافٍ مزدوجٍ مقيسةٌ في المحاكيِ — لا يُدَّعى أنها تُثبتُ شيئاً عن العتادِ.
+simTest('tear 16: تعافٍ مزدوجٌ بعدَ انقطاعٍ ⇒ التوكنُ يُبقي الإغلاقَ الزائفَ (فجوةٌ مقيسةٌ)', async () => {
+  const { a, root } = await setup();
+  const s0 = await a.seal();
+  assert.equal(s0.ok, true);
+  // انقطاعٌ بعدَ الزيادةِ قبلَ الإتمامِ
+  await assert.rejects(
+    () => a.seal({ beforeCertify() { throw new Error('TEAR_BEFORE_CERTIFY_2'); } }),
+    /TEAR_BEFORE_CERTIFY_2/,
+  );
+  const C = await a.readCounter();
+  const tokenBefore = JSON.parse(readFileSync(join(root, TOKEN), 'utf8'));
+  assert.equal(tokenBefore.lastSealedCounter, C - 1); // التوكنُ لم يُحدَّثْ بعدَ الزيادةِ
+  // الأولى: الإتمامُ ينجحُ — المتنُ صارَ عندَ C لكنّ التوكنَ ما زالَ عندَ C-1
+  const r1 = await a.recover();
+  assert.equal(r1.state, 'running');
+  assert.equal(r1.recovered, 'recertify-complete');
+  const tokenAfter1 = JSON.parse(readFileSync(join(root, TOKEN), 'utf8'));
+  assert.equal(tokenAfter1.lastSealedCounter, C - 1); // الفجوةُ: لم يُختمِ التوكنُ في recover()
+  // الثانية: تُغلقُ زيفاً — توكنٌ لا يطابقُ متنّاً
+  const r2 = await a.recover();
+  assert.equal(r2.state, 'halted');
+  assert.equal(r2.error, 'STATE_MANIFEST_TPM_TORN');
+  assert.equal(r2.torn, 'token-manifest-inconsistent');
+  assert.equal(r2.tokenSealedCounter, C - 1);
+  assert.equal(r2.bodyCounter, C);
 });
