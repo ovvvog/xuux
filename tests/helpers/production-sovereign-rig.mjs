@@ -33,6 +33,10 @@ export const AUTHN_POLICY = loadKingAuthPolicy();
  * ≥ سابقتِها، فلا يُولَّدَ رمزُ خطوةٍ قد استُهلَكتْ.
  */
 let monotonicNow = 0;
+/** خطواتُ الرموزِ المُستعمَلةُ لكلِّ جذرِ (المفتاحُ مسارُ الجذرِ) — الاستهلاكُ لكلِّ جذرٍ. */
+const usedStepsByRoot = new Map();
+/** مفتاحٌ خفيٌّ يحملُ مسارَ الجذرِ على النظامِ المُقلَعِ (‏يَضَعُهُ `boot`). */
+export const TEST_ROOT_KEY = Symbol('xuux.testRoot');
 export function monotonicDateNow() {
   const wall = Date.now();
   if (wall > monotonicNow) monotonicNow = wall;
@@ -117,7 +121,7 @@ export function testVault() {
   return { secret, factorSecrets: { read: (/** @type {string} */ name) => vault[name] ?? null } };
 }
 
-export function boot(root, { keys, factorSecrets = null }) {
+export async function boot(root, { keys, factorSecrets = null }) {
   const env = {
     NODE_ENV: 'production',
     STATE_ENV: 'production',
@@ -142,7 +146,7 @@ export function boot(root, { keys, factorSecrets = null }) {
       localSkewMs: 0,
     }),
   };
-  return createProductionSystem(
+  const system = await createProductionSystem(
     env,
     {
       root,
@@ -157,6 +161,9 @@ export function boot(root, { keys, factorSecrets = null }) {
       }),
     },
   );
+  // مسارُ الجذرِ على النظامِ — يَقرأُهُ `session()` ليعرفَ مخزنَ الطوابعِ المستهلَكةِ.
+  Object.defineProperty(system, TEST_ROOT_KEY, { value: root, enumerable: false });
+  return system;
 }
 
 export function tmpRoot() {
@@ -197,8 +204,24 @@ export function haltAuthority(halt, operation, reason, commandId) {
 export async function session(system, secret, stepOffset = 0) {
   const device = AUTHN_POLICY.devices[0];
   assert.ok(device !== undefined);
-  const { stepSeconds, digits, algorithm } = AUTHN_POLICY.secondFactor;
-  const step = Math.floor(monotonicDateNow() / 1000 / stepSeconds) + stepOffset;
+  const { stepSeconds, digits, algorithm, acceptedSkewSteps } = AUTHN_POLICY.secondFactor;
+  // خطواتُ الرموزِ المُستعمَلةُ في هذهِ العمليّةِ — تُمنَعُ إعادةُ تقديمِ رمزِ خطوةٍ
+  // استُهلَكَتْ (‏سلوكٌ إنتاجيٌّ صحيحٌ لا يُعطَّلُ). الحزامُ يَختارُ أقربَ خطوةٍ غيرِ
+  // مستهلَكةٍ ضمنَ نافذةِ القبولِ، فلا يقعَ تصادمٌ إذا تقدَّمَتِ الساعةُ بينَ النداءاتِ
+  // (‏مثلاً: نداءٌ بإزاحةٍ 0 ثمّ نداءٌ بإزاحةٍ -1 بعدَ عبورِ الحدِّ يقعانِ في الخطوةِ نفسِها).
+  const wallStep = Math.floor(monotonicDateNow() / 1000 / stepSeconds);
+  const rootKey = String(system[TEST_ROOT_KEY] ?? 'default');
+  const usedSteps = usedStepsByRoot.get(rootKey) ?? new Set();
+  usedStepsByRoot.set(rootKey, usedSteps);
+  let step = wallStep + stepOffset;
+  const maxStep = wallStep + acceptedSkewSteps;
+  while (usedSteps.has(step) && step <= maxStep) step += 1;
+  if (usedSteps.has(step)) {
+    throw new Error(
+      `session(): لا خطوةً غيرَ مستهلَكةٍ ضمنَ نافذةِ القبولِ (‏طلبَ الخطوةَ ${wallStep + stepOffset} وكلُّ ما حتى ${maxStep} مستهلَكٌ).`,
+    );
+  }
+  usedSteps.add(step);
   const factorCode = factorCodeForStep({ secret, step, digits, algorithm });
   return {
     factorCode,
