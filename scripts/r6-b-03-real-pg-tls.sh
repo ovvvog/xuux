@@ -66,13 +66,31 @@ docker run -d --name "${NAME}" \
   -c ssl_cert_file=/certs/pg-chain.crt \
   -c ssl_key_file=/certs/pg-server.key
 
+# WL-373: الجاهزيّةُ تُقاسُ عبرَ **TCP** لا عبرَ مقبسِ Unix. مُدخِلُ صورةِ `postgres` يُشغِّلُ
+# أثناءَ التهيئةِ خادماً **مؤقّتاً** بـ`listen_addresses=''` (‏مقبسُ Unix وحدَه)، ثمّ يُطفئُه
+# ويُقلِعُ الخادمَ النهائيَّ. فـ`pg_isready` بلا `-h` يُجيبُ «جاهز» من الخادمِ المؤقّتِ،
+# فتصلُ الهجراتُ عبرَ المنفذِ المنشورِ في فترةِ إعادةِ التشغيلِ فتُقطَعُ (‏قِيسَ في التشغيلةِ
+# `38154876380` على `main@a0f59456`: `⛔ [ECONNRESET] read ECONNRESET` بعدَ ~1.3 ثانيةٍ من
+# `docker run`). والخادمُ المؤقّتُ لا يستمعُ على TCP أصلاً، فـ`-h 127.0.0.1` لا يُجيبُ إلّا
+# الخادمُ النهائيُّ. ثمّ فحصٌ ثانٍ من **المُضيفِ** عبرَ المنفذِ المنشورِ نفسِه الذي تستعملُه
+# الهجراتُ — فلا يُعلَنُ الجاهزُ إلّا بما يراه العميلُ فعلاً.
 ready=0
-for _ in $(seq 1 60); do
-  if docker exec "${NAME}" pg_isready -U state -d state -q; then ready=1; break; fi
+for _ in $(seq 1 90); do
+  if docker exec "${NAME}" pg_isready -h 127.0.0.1 -p 5432 -U state -d state -q \
+    && node -e "
+      const s = require('node:net').connect(${PORT}, '127.0.0.1');
+      s.setTimeout(2000);
+      // طلبُ SSLRequest (‏8 بايتاتٍ) — الخادمُ الحقيقيُّ يردُّ بايتاً واحداً 'S' أو 'N'.
+      s.on('connect', () => s.write(Buffer.from([0,0,0,8,4,210,22,47])));
+      s.on('data', (b) => { s.destroy(); process.exit(b.length === 1 && (b[0] === 83 || b[0] === 78) ? 0 : 1); });
+      s.on('error', () => process.exit(1));
+      s.on('timeout', () => process.exit(1));
+      s.on('close', () => process.exit(1));
+    "; then ready=1; break; fi
   sleep 1
 done
 if [ "${ready}" != 1 ]; then
-  echo "::error::خادمُ PostgreSQL بـTLS لم يُصبِح جاهزاً في 60 ثانيةً" >&2
+  echo "::error::خادمُ PostgreSQL بـTLS لم يُصبِح جاهزاً عبرَ TCP في 90 ثانيةً" >&2
   docker logs "${NAME}" >&2 || true
   exit 1
 fi
