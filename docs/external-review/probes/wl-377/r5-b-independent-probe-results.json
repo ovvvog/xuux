@@ -1,10 +1,10 @@
 {
   "probe": "r5-b-independent-probe",
-  "testedCommit": "bd9b706a8e919c73d168008198b5509899e550d8",
-  "testedShortSha": "bd9b706a",
+  "testedCommit": "6a786f88db4d0bf43bd4b09fa819d563c6fb5565",
+  "testedShortSha": "6a786f88",
   "testedBranch": "work/fix-probe-wl380",
-  "uncommittedChanges": true,
-  "executedAt": "2026-10-12T20:49:58.946Z",
+  "uncommittedChanges": false,
+  "executedAt": "2026-10-12T20:50:04.526Z",
   "environment": {
     "node": "v20.20.2",
     "platform": "linux",
@@ -22,7 +22,7 @@
       "result": "PASS",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-A code=AUTHN_FACTOR_REPLAYED",
-      "ms": 79
+      "ms": 81
     },
     {
       "id": "R5-B-03-same-log-new-authenticator",
@@ -32,7 +32,7 @@
       "result": "PASS",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-B code=AUTHN_FACTOR_REPLAYED",
-      "ms": 65
+      "ms": 41
     },
     {
       "id": "R5-B-03-fresh-empty-log",
@@ -42,7 +42,7 @@
       "result": "FAIL",
       "refusal": null,
       "evidence": "V-D fresh-empty-log:opened",
-      "ms": 56
+      "ms": 29
     },
     {
       "id": "R5-B-04-no-egress-gate",
@@ -62,7 +62,7 @@
       "result": "PASS",
       "refusal": "egress-gate.mjs:send:EGRESS_NOT_AUTHORIZED",
       "evidence": "code=EGRESS_NOT_AUTHORIZED",
-      "ms": 105
+      "ms": 102
     },
     {
       "id": "R5-B-05-no-classifier",
@@ -72,7 +72,7 @@
       "result": "FAIL",
       "refusal": null,
       "evidence": "code=PASSED",
-      "ms": 97
+      "ms": 111
     },
     {
       "id": "R5-B-06-forged-command",
@@ -82,7 +82,7 @@
       "result": "PASS",
       "refusal": "enforcement-point.mjs:authorize:SOVEREIGN_COMMAND_VERIFIER_REQUIRED",
       "evidence": "code=SOVEREIGN_COMMAND_VERIFIER_REQUIRED;policy=pol:king-sovereign-acts",
-      "ms": 57
+      "ms": 63
     },
     {
       "id": "R5-B-07-direct-halt",
@@ -92,7 +92,7 @@
       "result": "PASS",
       "refusal": "halt-switch.mts:halt:HALT_ROYAL_COMMAND_REQUIRED",
       "evidence": "code=HALT_ROYAL_COMMAND_REQUIRED;state=running",
-      "ms": 2
+      "ms": 1
     },
     {
       "id": "R5-B-08-quarantined-actor",
@@ -102,7 +102,7 @@
       "result": "PASS",
       "refusal": "enforcement-point.mjs:authorize:ACTOR_QUARANTINED",
       "evidence": "code=ACTOR_QUARANTINED;policy=null",
-      "ms": 65
+      "ms": 100
     },
     {
       "id": "R5-B-09-no-capability-write",
@@ -112,7 +112,7 @@
       "result": "PASS",
       "refusal": "engine.mjs:evaluate:POLICY_NO_MATCH",
       "evidence": "allowed=false;code=POLICY_NO_MATCH;policy=null;control=POLICY_ALLOW",
-      "ms": 43
+      "ms": 41
     },
     {
       "id": "R5-B-09-no-capability-write-via-enforcement-point",
@@ -122,7 +122,7 @@
       "result": "NOT_TESTED",
       "refusal": "enforcement-point.mjs:authorize:IDENTITY_UNVERIFIED",
       "evidence": "code=IDENTITY_UNVERIFIED",
-      "ms": 65
+      "ms": 71
     },
     {
       "id": "R5-B-10-false-identity-gate",
@@ -132,7 +132,7 @@
       "result": "PASS",
       "refusal": "enforcement-point.mjs:constructor:ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION",
       "evidence": "code=ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION;control=IDENTITY_UNVERIFIED",
-      "ms": 90
+      "ms": 87
     },
     {
       "id": "R5-B-10-false-identity-gate-non-prod",
@@ -142,7 +142,7 @@
       "result": "FAIL",
       "refusal": null,
       "evidence": "allowed=true;code=POLICY_ALLOW;policy=pol:read-data-cleared;control=IDENTITY_UNVERIFIED;env=NODE_ENV=test;requireIdentityGate=false",
-      "ms": 77
+      "ms": 78
     }
   ]
 }
