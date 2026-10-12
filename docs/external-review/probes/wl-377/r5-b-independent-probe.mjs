@@ -11,7 +11,7 @@
  * رفضُهُ (الإصلاحُ ناجحٌ)؛ **نجح** = المسلكُ وقعَ أثرُهُ (أي عيبٌ ناجزٌ).
  */
 import { Buffer } from 'node:buffer';
-import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -19,14 +19,23 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import { KingAuthenticator, factorCodeForStep, loadKingAuthPolicy } from '../../../../src/authn/index.mjs';
+import {
+  KingAuthenticator,
+  factorCodeForStep,
+  loadKingAuthPolicy,
+} from '../../../../src/authn/index.mjs';
 import { composeEnforcementChain } from '../../../../src/core/composition-root.mjs';
 import { createEgressGate } from '../../../../src/egress/egress-gate.mjs';
 import { TelegramBotChannel } from '../../../../src/notifications/channels/telegram-bot.mjs';
 import { createPolicyDecisionPoint } from '../../../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../../../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../../../../src/policy/loader.mjs';
-import { EventLog, HaltSwitch, KingIdentity, PersistentEventLog } from '../../../../src/root-of-trust/index.mjs';
+import {
+  EventLog,
+  HaltSwitch,
+  KingIdentity,
+  PersistentEventLog,
+} from '../../../../src/root-of-trust/index.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../../../..');
@@ -41,7 +50,9 @@ function codeOf(error) {
       return String(/** @type {{ code: unknown }} */ (error).code);
     }
     // اقرأ الرمزَ من نصِّ الرسالةِ إذا لم يكن حقلًا
-    const m = /^([A-Z][A-Z0-9_]{3,})\b/.exec(String(/** @type {{ message?: unknown }} */ (error).message ?? ''));
+    const m = /^([A-Z][A-Z0-9_]{3,})\b/.exec(
+      String(/** @type {{ message?: unknown }} */ (error).message ?? ''),
+    );
     if (m) return m[1];
   }
   return `بلا-رمز:${String(error)}`;
@@ -108,7 +119,12 @@ await probe('R5-B-03-same-authenticator', async () => {
     deviceId: trusted.id,
     factorCode: code,
   });
-  if (!opened.token) return { finding: 'R5-B-03', scenario: 'V-A الضابط: رمز الخطوة لم يفتح الجلسة', judgment: 'لم_يجرب' };
+  if (!opened.token)
+    return {
+      finding: 'R5-B-03',
+      scenario: 'V-A الضابط: رمز الخطوة لم يفتح الجلسة',
+      judgment: 'لم_يجرب',
+    };
   try {
     await ka.authenticate({ actorId: king.id, deviceId: trusted.id, factorCode: code });
     return {
@@ -156,7 +172,12 @@ await probe('R5-B-03-same-log-new-authenticator', async () => {
     deviceId: trusted.id,
     factorCode: code,
   });
-  if (!opened.token) return { finding: 'R5-B-03', scenario: 'V-B الضابط: رمز الخطوة لم يفتح الجلسة', judgment: 'لم_يجرب' };
+  if (!opened.token)
+    return {
+      finding: 'R5-B-03',
+      scenario: 'V-B الضابط: رمز الخطوة لم يفتح الجلسة',
+      judgment: 'لم_يجرب',
+    };
   log1.close?.();
   const log2 = new PersistentEventLog(logFile, { fsync: false });
   const ka2 = new KingAuthenticator({
@@ -166,7 +187,7 @@ await probe('R5-B-03-same-log-new-authenticator', async () => {
     factorSecrets: { read: (name) => vault[name] ?? null },
   });
   try {
-    const replayed = await ka2.authenticate({
+    await ka2.authenticate({
       actorId: king.id,
       deviceId: trusted.id,
       factorCode: code,
@@ -217,7 +238,12 @@ await probe('R5-B-03-fresh-empty-log', async () => {
     deviceId: trusted.id,
     factorCode: code,
   });
-  if (!opened.token) return { finding: 'R5-B-03', scenario: 'V-D الضابط: رمز الخطوة لم يفتح الجلسة', judgment: 'لم_يجرب' };
+  if (!opened.token)
+    return {
+      finding: 'R5-B-03',
+      scenario: 'V-D الضابط: رمز الخطوة لم يفتح الجلسة',
+      judgment: 'لم_يجرب',
+    };
   const ka2 = new KingAuthenticator({
     policy: /** @type {never} */ (AUTHN_POLICY),
     king: /** @type {never} */ (king),
@@ -225,14 +251,15 @@ await probe('R5-B-03-fresh-empty-log', async () => {
     factorSecrets: { read: (name) => vault[name] ?? null },
   });
   try {
-    const replayed = await ka2.authenticate({
+    await ka2.authenticate({
       actorId: king.id,
       deviceId: trusted.id,
       factorCode: code,
     });
     return {
       finding: 'R5-B-03',
-      scenario: 'V-D: مصادقٌ جديدٌ بسجلٍّ فارغٍ جديدٍ — الرمزُ المستهلَكُ يُقبلُ (متغيرٌ مستقلٌّ، ليس السيناريو الأصليَّ)',
+      scenario:
+        'V-D: مصادقٌ جديدٌ بسجلٍّ فارغٍ جديدٍ — الرمزُ المستهلَكُ يُقبلُ (متغيرٌ مستقلٌّ، ليس السيناريو الأصليَّ)',
       judgment: 'نجح',
       evidence: 'V-D fresh-empty-log:opened',
     };
@@ -326,16 +353,20 @@ await probe('R5-B-05-with-classifier-control', async () => {
     });
     return {
       finding: 'R5-B-05',
-      scenario: 'بوابةٌ بمُصنِّفٍ يقرأُ `sensitive` مسجَّلاً — الكذبُ `public` مُعلَنًا — يمرُّ البايتُ (المُصنِّفُ لا يعمل)',
+      scenario:
+        'بوابةٌ بمُصنِّفٍ يقرأُ `sensitive` مسجَّلاً — الكذبُ `public` مُعلَنًا — يمرُّ البايتُ (المُصنِّفُ لا يعمل)',
       judgment: 'نجح',
       evidence: `code=PASSED`,
     };
   } catch (controlError) {
     const cCode = codeOf(controlError);
-    const refusedByClassification = cCode === 'EGRESS_NOT_AUTHORIZED' || cCode === 'EGRESS_CLASSIFICATION_REQUIRED';
+    const refusedByClassification =
+      cCode === 'EGRESS_NOT_AUTHORIZED' || cCode === 'EGRESS_CLASSIFICATION_REQUIRED';
     return {
       finding: 'R5-B-05',
-      scenario: refusedByClassification ? 'بوابةٌ بمُصنِّفٍ يقرأُ `sensitive` مسجَّلاً — الكذبُ `public` مُعلَنًا — يُرفَضُ عندَ ضابطِ التصنيف' : 'بوابةٌ بمُصنِّفٍ — رفضٌ غيرُ ضابطِ التصنيفِ (لم يصل المسبارُ إلى ضابطِ التصنيف)',
+      scenario: refusedByClassification
+        ? 'بوابةٌ بمُصنِّفٍ يقرأُ `sensitive` مسجَّلاً — الكذبُ `public` مُعلَنًا — يُرفَضُ عندَ ضابطِ التصنيف'
+        : 'بوابةٌ بمُصنِّفٍ — رفضٌ غيرُ ضابطِ التصنيفِ (لم يصل المسبارُ إلى ضابطِ التصنيف)',
       judgment: refusedByClassification ? 'فشل' : 'لم_يجرب',
       refusal: refusedByClassification ? `egress-gate.mjs:send:${cCode}` : null,
       evidence: `code=${cCode}`,
@@ -422,19 +453,23 @@ await probe('R5-B-06-forged-command', async () => {
       resource: { type: 'state', id: 'sovereign' },
       royalCommandId: 'cmd:forged-probe',
       royalCommandDigest: 'a'.repeat(64),
-      royalCommand: { command: { id: 'cmd:forged-probe', action: 'stop-state' }, signature: 'forged-signature' },
+      royalCommand: {
+        command: { id: 'cmd:forged-probe', action: 'stop-state' },
+        signature: 'forged-signature',
+      },
       context: {},
     });
     if (
       !decision.allowed &&
       (decision.code === 'SOVEREIGN_COMMAND_REQUIRED' ||
-       decision.code === 'SOVEREIGN_COMMAND_VERIFIER_REQUIRED' ||
-       decision.code === 'ROYAL_COMMAND_UNVERIFIED' ||
-       decision.code === 'ROYAL_COMMAND_ID_MISSING')
+        decision.code === 'SOVEREIGN_COMMAND_VERIFIER_REQUIRED' ||
+        decision.code === 'ROYAL_COMMAND_UNVERIFIED' ||
+        decision.code === 'ROYAL_COMMAND_ID_MISSING')
     ) {
       return {
         finding: 'R5-B-06',
-        scenario: 'معرّفُ أمرٍ وملخصُ SHA-256 صحيحُ الشكلِ بلا تحقّقِ توقيعِ التاج — رفضٌ مُسمّىً عندَ ضابطِ التوقيعِ الملكيّ',
+        scenario:
+          'معرّفُ أمرٍ وملخصُ SHA-256 صحيحُ الشكلِ بلا تحقّقِ توقيعِ التاج — رفضٌ مُسمّىً عندَ ضابطِ التوقيعِ الملكيّ',
         judgment: 'فشل',
         refusal: `enforcement-point.mjs:authorize:${decision.code}`,
         evidence: `code=${decision.code};policy=${decision.policyId}`,
@@ -543,7 +578,9 @@ await probe('R5-B-08-quarantined-actor', async () => {
     const hitQuarantine = after.decision.code === 'ACTOR_QUARANTINED';
     return {
       finding: 'R5-B-08',
-      scenario: hitQuarantine ? 'وكيلٌ محجورٌ — يُرفضُ برمزِ الحجرِ' : 'وكيلٌ محجورٌ — رفضٌ عامّ (لم يصل إلى ضابطِ الحجر)',
+      scenario: hitQuarantine
+        ? 'وكيلٌ محجورٌ — يُرفضُ برمزِ الحجرِ'
+        : 'وكيلٌ محجورٌ — رفضٌ عامّ (لم يصل إلى ضابطِ الحجر)',
       judgment: hitQuarantine ? 'فشل' : 'لم_يجرب',
       refusal: `enforcement-point.mjs:authorize:${after.decision.code}`,
       evidence: `code=${after.decision.code};policy=${after.decision.policyId}`,
@@ -567,7 +604,13 @@ await probe('R5-B-09-no-capability-write', async () => {
   const pdp = createPolicyDecisionPoint({ bundle });
   // الضابطُ الأولُ: وكيلٌ مسجَّلٌ بقدرةِ كتابةٍ — يُؤذَنُ بالكتابةِ.
   const withCap = pdp.evaluate({
-    actor: { id: 'minister:1', kind: 'human', role: 'role:minister', state: 'active', capabilities: ['action:write-data'] },
+    actor: {
+      id: 'minister:1',
+      kind: 'human',
+      role: 'role:minister',
+      state: 'active',
+      capabilities: ['action:write-data'],
+    },
     action: 'write-data',
     resource: { id: 'doc:1', type: 'data' },
   });
@@ -582,7 +625,13 @@ await probe('R5-B-09-no-capability-write', async () => {
   }
   // السيناريو الأصليُّ: بلا قدرةِ كتابةٍ.
   const decision = pdp.evaluate({
-    actor: { id: 'minister:2', kind: 'human', role: 'role:minister', state: 'active', capabilities: [] },
+    actor: {
+      id: 'minister:2',
+      kind: 'human',
+      role: 'role:minister',
+      state: 'active',
+      capabilities: [],
+    },
     action: 'write-data',
     resource: { id: 'doc:1', type: 'data' },
   });
@@ -604,7 +653,13 @@ await probe('R5-B-10-false-identity-gate', async () => {
   // المسلكُ الأصليُّ هنا هو `new EnforcementPoint({requireIdentityGate:false})` مباشرةً.
   // الضابطُ الأولُ: الطلبُ عبرَ السلسلةِ الرسميةِ (IdentityGate مطلوب) — يُرفضُ.
   const control = await chain.enforcementPoint.authorize({
-    actor: { id: 'attacker:1', kind: 'human', role: 'role:king', state: 'active', capabilities: [] },
+    actor: {
+      id: 'attacker:1',
+      kind: 'human',
+      role: 'role:king',
+      state: 'active',
+      capabilities: [],
+    },
     action: 'read-data',
     resource: { type: 'data', id: 'cleared:1' },
     context: {},
@@ -615,13 +670,14 @@ await probe('R5-B-10-false-identity-gate', async () => {
   const log = new EventLog();
   // `requireIdentityGate: false` مسموحٌ خارجَ الإنتاجِ (بيئةُ الاختبارِ/التطويرِ)،
   // ومرفوضٌ عندَ البناءِ في الإنتاجِ. المسبارُ هنا يفحصُ الاثنين معاً.
-  const prodEp = () => new EnforcementPoint({
-    decisionPoint,
-    log,
-    identityGate: null,
-    requireIdentityGate: false,
-    env: { NODE_ENV: 'production' }, // ← من يريدُ هذا التركيبَ في الإنتاجِ يُرفضُ عندَ البناءِ
-  });
+  const prodEp = () =>
+    new EnforcementPoint({
+      decisionPoint,
+      log,
+      identityGate: null,
+      requireIdentityGate: false,
+      env: { NODE_ENV: 'production' }, // ← من يريدُ هذا التركيبَ في الإنتاجِ يُرفضُ عندَ البناءِ
+    });
   // الضابطُ الثاني: التركيبُ في الإنتاجِ (NODE_ENV=production) — يُرفضُ عندَ البناءِ.
   const constructionError = (() => {
     try {
@@ -634,7 +690,8 @@ await probe('R5-B-10-false-identity-gate', async () => {
   if (constructionError !== null) {
     return {
       finding: 'R5-B-10',
-      scenario: 'ادّعاءُ `role:king` مع `requireIdentityGate: false` في الإنتاجِ — يُرفضُ عندَ البناءِ',
+      scenario:
+        'ادّعاءُ `role:king` مع `requireIdentityGate: false` في الإنتاجِ — يُرفضُ عندَ البناءِ',
       judgment: 'فشل',
       refusal: `enforcement-point.mjs:constructor:${codeOf(constructionError)}`,
       evidence: `code=${codeOf(constructionError)};control=${controlCode}`,
@@ -644,14 +701,22 @@ await probe('R5-B-10-false-identity-gate', async () => {
   const ep = prodEp();
   try {
     const { decision } = await ep.authorize({
-      actor: { id: 'attacker:1', kind: 'human', role: 'role:king', state: 'active', capabilities: [] },
+      actor: {
+        id: 'attacker:1',
+        kind: 'human',
+        role: 'role:king',
+        state: 'active',
+        capabilities: [],
+      },
       action: 'read-data',
       resource: { type: 'data', id: 'cleared:1' },
       context: {},
     });
     return {
       finding: 'R5-B-10',
-      scenario: 'ادّعاءُ `role:king` مع `requireIdentityGate: false` — الضابطُ عبرَ السلسلةِ الرسميةِ: ' + controlCode,
+      scenario:
+        'ادّعاءُ `role:king` مع `requireIdentityGate: false` — الضابطُ عبرَ السلسلةِ الرسميةِ: ' +
+        controlCode,
       judgment: decision.allowed ? 'نجح' : 'فشل',
       evidence: `allowed=${decision.allowed};code=${decision.code};policy=${decision.policyId};control=${controlCode}`,
     };
@@ -667,17 +732,24 @@ await probe('R5-B-10-false-identity-gate', async () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════
-fs.writeFileSync(OUT, JSON.stringify({
-  probe: 'r5-b-independent-probe',
-  testedCommit: '705919230e7817b4c90137b491fdf4a52c25c49e',
-  testedBranch: 'main',
-  executedAt: new Date().toISOString(),
-  environment: `node=${process.version}`,
-  note: 'حكمُ «فشل» يعني المسلكَ قُيِّدَ رفضُهُ (الإصلاحُ ناجحٌ). حكمُ «نجح» يعني العيبَ وقعَ أثرُهُ. «لم_يجرب» يعني المسلكَ تعذَّرَ تشغيلُهُ هنا.',
-  results,
-}, null, 2));
+fs.writeFileSync(
+  OUT,
+  JSON.stringify(
+    {
+      probe: 'r5-b-independent-probe',
+      testedCommit: '705919230e7817b4c90137b491fdf4a52c25c49e',
+      testedBranch: 'main',
+      executedAt: new Date().toISOString(),
+      environment: `node=${process.version}`,
+      note: 'حكمُ «فشل» يعني المسلكَ قُيِّدَ رفضُهُ (الإصلاحُ ناجحٌ). حكمُ «نجح» يعني العيبَ وقعَ أثرُهُ. «لم_يجرب» يعني المسلكَ تعذَّرَ تشغيلُهُ هنا.',
+      results,
+    },
+    null,
+    2,
+  ),
+);
 
-console.log(`مسبارُ R5-B: كُتِبَتِ النتائجُ إلى ${OUT}`);
+process.stdout.write(`مسبارُ R5-B: كُتِبَتِ النتائجُ إلى ${OUT}\n`);
 for (const r of results) {
-  console.log(`  ${r.id} — ${r.judgment} — ${r.refusal ?? r.evidence}`);
+  process.stdout.write(`  ${r.id} — ${r.judgment} — ${r.refusal ?? r.evidence}\n`);
 }

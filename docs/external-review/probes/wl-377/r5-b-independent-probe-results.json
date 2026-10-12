@@ -2,7 +2,7 @@
   "probe": "r5-b-independent-probe",
   "testedCommit": "705919230e7817b4c90137b491fdf4a52c25c49e",
   "testedBranch": "main",
-  "executedAt": "2026-10-12T09:21:03.468Z",
+  "executedAt": "2026-10-12T09:37:55.394Z",
   "environment": "node=v20.20.2",
   "note": "حكمُ «فشل» يعني المسلكَ قُيِّدَ رفضُهُ (الإصلاحُ ناجحٌ). حكمُ «نجح» يعني العيبَ وقعَ أثرُهُ. «لم_يجرب» يعني المسلكَ تعذَّرَ تشغيلُهُ هنا.",
   "results": [
@@ -13,7 +13,7 @@
       "judgment": "فشل",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-A code=AUTHN_FACTOR_REPLAYED",
-      "ms": 76
+      "ms": 71
     },
     {
       "id": "R5-B-03-same-log-new-authenticator",
@@ -22,7 +22,7 @@
       "judgment": "فشل",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-B code=AUTHN_FACTOR_REPLAYED",
-      "ms": 49
+      "ms": 50
     },
     {
       "id": "R5-B-03-fresh-empty-log",
@@ -31,7 +31,7 @@
       "judgment": "نجح",
       "refusal": null,
       "evidence": "V-D fresh-empty-log:opened",
-      "ms": 67
+      "ms": 50
     },
     {
       "id": "R5-B-04-no-egress-gate",
@@ -49,7 +49,7 @@
       "judgment": "فشل",
       "refusal": "egress-gate.mjs:send:EGRESS_NOT_AUTHORIZED",
       "evidence": "code=EGRESS_NOT_AUTHORIZED",
-      "ms": 97
+      "ms": 105
     },
     {
       "id": "R5-B-05-no-classifier",
@@ -58,7 +58,7 @@
       "judgment": "نجح",
       "refusal": null,
       "evidence": "code=PASSED",
-      "ms": 98
+      "ms": 82
     },
     {
       "id": "R5-B-06-forged-command",
@@ -67,7 +67,7 @@
       "judgment": "فشل",
       "refusal": "enforcement-point.mjs:authorize:SOVEREIGN_COMMAND_VERIFIER_REQUIRED",
       "evidence": "code=SOVEREIGN_COMMAND_VERIFIER_REQUIRED;policy=pol:king-sovereign-acts",
-      "ms": 47
+      "ms": 55
     },
     {
       "id": "R5-B-07-direct-halt",
@@ -85,7 +85,7 @@
       "judgment": "فشل",
       "refusal": "enforcement-point.mjs:authorize:ACTOR_QUARANTINED",
       "evidence": "code=ACTOR_QUARANTINED;policy=null",
-      "ms": 111
+      "ms": 84
     },
     {
       "id": "R5-B-09-no-capability-write",
@@ -94,7 +94,7 @@
       "judgment": "فشل",
       "refusal": "engine.mjs:evaluate:POLICY_NO_MATCH",
       "evidence": "allowed=false;code=POLICY_NO_MATCH;policy=null;control=POLICY_ALLOW",
-      "ms": 49
+      "ms": 35
     },
     {
       "id": "R5-B-10-false-identity-gate",
@@ -103,7 +103,7 @@
       "judgment": "فشل",
       "refusal": "enforcement-point.mjs:constructor:ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION",
       "evidence": "code=ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION;control=IDENTITY_UNVERIFIED",
-      "ms": 109
+      "ms": 98
     }
   ]
 }
