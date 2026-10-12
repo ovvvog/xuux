@@ -80,6 +80,7 @@ audit-report.json
 sim/tpm/_replay/
 sim/tpm/_tear/
 sim/tpm/_snap/
+sim/tpm/_sovereign/
 
 # بقايا بايثون لأدوات قناة PoC
 sim/channel/__pycache__/

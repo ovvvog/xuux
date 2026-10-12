@@ -18,6 +18,7 @@ export const STATE_TPM_INDEX_MISSING = 'STATE_TPM_INDEX_MISSING';
 export const STATE_TPM_UNAVAILABLE = 'STATE_TPM_UNAVAILABLE';
 export const HALT = 'halted';
 export const RUNNING = 'running';
+export const STATE_HALT_SOVEREIGN = 'STATE_HALT_SOVEREIGN';
 
 const MANIFEST = 'root-of-trust.manifest.json';
 const STAGED = 'root-of-trust.manifest.staged.json';
@@ -154,11 +155,32 @@ export class FreshnessAnchorSim {
   }
   // (WL-372) الإيقافُ صنفانِ: سياديٌّ (قرارُ مالكٍ — epoch=1) لا يُفتحُهُ recover()
   //، وسياديُّ الانقطاعِ/العطبِ (epoch=0) يُعادُ بعدَ إصلاحِ السببِ.
+  //
+  // (WL-374) ولا يُخفَّضُ إيقافٌ سياديٌّ بكتابةِ إغلاقِ عطبٍ فوقَه: مسارُ
+  // `STATE_TPM_INDEX_MISSING` كانَ يكتبُ `epoch: 0` فوقَ `epoch: 1` فيُفتَحُ الإيقافُ
+  // عندَ عودةِ TPM. فكلُّ `writeHalt(HALT)` يحملُ الصنفَ السياديَّ إن وُجِدَ دليلُه.
+  // والكتابةُ إلى `RUNNING` لا تُبلَغُ وثمّةَ دليلٌ سياديٌّ (‏`recover()` يعودُ قبلَها).
   writeHalt(state, sovereign = false) {
+    const keepSovereign = state === HALT && (sovereign || this.sovereignEvidence());
     writeFileSync(this.haltPath(), JSON.stringify({
       state,
-      epoch: sovereign ? 1 : 0,
+      epoch: keepSovereign ? 1 : 0,
     }));
+  }
+  /**
+   * (WL-374) دليلُ الإيقافِ السياديِّ: المتنُ الملتزمُ المختومُ (‏`halted: true`) — وهو
+   * المرجعُ لأنّه داخلَ الختمِ ويتقدّمُ معه العدّادُ — أو صيغةُ `halt.json` القديمةُ
+   * (‏`epoch: 1`، WL-372) تُحترَمُ إغلاقاً لا فتحاً. أيُّ دليلٍ يكفي للإبقاءِ؛ غيابُ
+   * الملفِّ لا يكفي للفتحِ. والمتنُ هنا غيرُ متحقَّقٍ عمداً: ادّعاءُ إيقافٍ في متنٍ
+   * مزوَّرٍ لا يُنتِجُ إلّا إيقافاً (‏رفضٌ آمنٌ)، ولا يُفتَحُ به شيءٌ.
+   */
+  sovereignEvidence() {
+    let file = null;
+    try { file = existsSync(this.haltPath()) ? JSON.parse(readFileSync(this.haltPath(), 'utf8')) : null; } catch { file = { state: HALT, epoch: 1 }; }
+    if (file && file.state === HALT && file.epoch === 1) return true;
+    let body = null;
+    try { body = this.readManifest(); } catch { body = null; }
+    return Boolean(body && body.halted === true);
   }
   readHalt() {
     if (!existsSync(this.haltPath())) return { state: RUNNING, epoch: 0 };
@@ -205,19 +227,24 @@ export class FreshnessAnchorSim {
    * مسار الختم الذرّي (ADR 0007 §4.4). يرفض العمل بعد إغلاق النظام.
    * @param {{beforeIncrement?: Function, beforeCertify?: Function, beforeRename?: Function, beforeUnlinkStaged?: Function}} [hooks]
    */
-  async seal(hooks = {}) {
+  async seal(hooks = {}, mutate = null) {
     if (this.readHalt().state === HALT) {
       throw new Error('HALTED: system halted, seal refused');
     }
     const current = this.readManifest();
     if (!current) throw new Error('UNPROVISIONED');
+    // (WL-374) المتنُ المختومُ موقوفاً يرفضُ الختمَ ولو حُذِفَ `halt.json` أو كُتِبَ فوقَه.
+    if (current.halted === true) {
+      throw new Error('HALTED: sovereign halt sealed in manifest, seal refused');
+    }
     const C = current.tpm.counter;
-    const body = {
+    const base = {
       ...current,
       sequence: current.sequence + 1,
       journalHead: 'checkpoint:' + String(current.sequence + 1),
       tpm: { akName: this.akName, nvIndexName: this.nvIndexName, counter: C + 1, certify: null },
     };
+    const body = mutate ? { ...mutate(base), tpm: base.tpm, sequence: base.sequence, instanceId: base.instanceId } : base;
     // 1+2: staged بلا شهادة
     writeFileSync(this.stagedPath(), JSON.stringify(body));
     if (hooks.beforeIncrement) hooks.beforeIncrement();
@@ -246,6 +273,30 @@ export class FreshnessAnchorSim {
   }
 
   /**
+   * (WL-374) الإيقافُ السياديُّ **التزامٌ مختومٌ** لا علامةٌ: متنٌ جديدٌ بـ`halted: true`
+   * و`haltEpoch + 1` يمرُّ بمسارِ الختمِ الذرّيِّ نفسِه (‏staged ← زيادةُ العدّادِ ← شهادةٌ
+   * ← rename) فيتقدّمُ عدّادُ TPM. فلا يفتحُه حذفُ `halt.json`، ولا تفتحُه استعادةُ لقطةِ
+   * ما قبلَه (‏المتنُ القديمُ يتخلّفُ عن العدّادِ ⇒ `STATE_TPM_COUNTER_MISMATCH`).
+   *
+   * **حدودٌ مُعلَنةٌ:** (1) نجاحٌ لا يُعادُ إلّا بعدَ الالتزامِ؛ انقطاعٌ قبلَ الزيادةِ يُسقِطُ
+   * الطلبَ (‏staged يُهمَلُ) ولطالبِه أن يُعيدَه. (2) مرفوضٌ فوقَ إغلاقِ عطبٍ (‏`HALTED`):
+   * لا يُختَمُ متنٌ لم يُتحقَّقْ منه بعد. (3) لا مسارَ فتحٍ في المحاكي — الاستئنافُ قرارُ
+   * مالكٍ بسلطةٍ (‏`HaltSwitch`/الأمرُ الملكيُّ في الإنتاجِ) لا يُحاكى هنا.
+   * @param {string} reason
+   * @param {object} [hooks] نقاطُ انقطاعِ seal() نفسِها
+   */
+  async haltSovereign(reason, hooks = {}) {
+    const r = await this.seal(hooks, (b) => ({
+      ...b,
+      halted: true,
+      haltEpoch: (b.haltEpoch ?? 0) + 1,
+      haltReason: String(reason ?? ''),
+    }));
+    if (r.ok) this.writeHalt(HALT, true);
+    return r;
+  }
+
+  /**
    * قواعد التعافي عند الإقلاع (ADR 0007 §4.4). كل ما لا يطابق ⇒ إغلاق.
    * @returns {Promise<{state: string, error?: string, counter?: number, bodyCounter?: number}>}
    */
@@ -264,10 +315,26 @@ export class FreshnessAnchorSim {
     // انقطاعٍ؛ recover() لا يفتحُهُ. تُستأنفُ العمليةُ بقرارٍ صريحٍ (ownerAuth أو
     // رفعِ الملفِّ بإذنٍ) لا بإعادةِ إقلاعٍ. كلُّ ما دونَ epoch=1 (0 أو غيابٌ)
     // فهو تركُ إقلاعٍ عاديٌّ ويُعادُ إلى RUNNING بعدَ نجاحِ التعافي.
+    //
+    // (WL-374) الدليلُ السياديُّ يُقرأُ من المتنِ المختومِ أيضاً لا من الملفِّ وحدَه —
+    // لكنْ **بعدَ** فحصِ العدّادِ: متنٌ موقوفٌ مُستعادٌ من لقطةٍ أقدمَ من العدّادِ هو إعادةٌ
+    // (‏MISMATCH) قبلَ أن يكونَ إيقافاً. فهنا الملفُّ والمتنُ الملتزمُ المطابقُ للعدّادِ.
     const haltState = this.readHalt();
-    const sovereignHalt = haltState && haltState.state === HALT && haltState.epoch === 1;
-    if (sovereignHalt) {
-      return { state: HALT, error: 'STATE_HALT_SOVEREIGN' };
+    const sovereignFile = haltState && haltState.state === HALT && haltState.epoch === 1;
+    const sovereignBody = committed.halted === true && B === C && !staged;
+    if (sovereignFile || sovereignBody) {
+      if (sovereignBody && committed.tpm.certify) {
+        const bodyForQd = { ...committed, tpm: { ...committed.tpm, certify: null } };
+        const v = this.certify.verify(committed.tpm.certify, {
+          akName: this.akName, nvIndexName: this.nvIndexName, counter: C, body: bodyForQd,
+        });
+        if (!v.ok) {
+          this.writeHalt(HALT);
+          return { state: HALT, error: STATE_TPM_ATTEST_INVALID, verifyError: v.error, counter: C };
+        }
+      }
+      this.writeHalt(HALT, true);
+      return { state: HALT, error: STATE_HALT_SOVEREIGN };
     }
 
     // اتساقُ التوكنِ البرمجيِّ معَ المتنِ: آخرُ عدّادٍ مختومٍ داخلَ التوكنِ يجبُ
@@ -285,10 +352,31 @@ export class FreshnessAnchorSim {
 
     if (staged) {
       const S = staged.tpm.counter;
+      // (WL-374) متنٌ ملتزمٌ موقوفاً لا يُستبدَلُ بـstaged غيرِ موقوفٍ بأيِّ مسارٍ: seal()
+      // يرفضُ فوقَ المتنِ الموقوفِ، فـstaged كهذا لم يُنتِجْه مسارُ الختمِ — رفضٌ آمنٌ.
+      if (committed.halted === true && staged.halted !== true) {
+        this.writeHalt(HALT, true);
+        return { state: HALT, error: STATE_HALT_SOVEREIGN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-would-lift-sovereign-halt' };
+      }
+      // (WL-374) B === C === S: الإعادةُ الشرعيّةُ الوحيدةُ هنا انقطاعٌ بعدَ rename قبلَ حذفِ
+      // staged، فـstaged **يطابقُ** المتنَ الملتزمَ (‏دونَ الشهادةِ). staged يختلفُ عنه عندَ
+      // العدّادِ نفسِه لا يفسّرُه مسارُ ختمٍ ⇒ تمزّقٌ، لا إعادةُ شهادةٍ تستبدلُ المتنَ الملتزمَ.
+      if (S === C && B === C) {
+        const strip = (b) => JSON.stringify(sortKeys({ ...b, tpm: { ...b.tpm, certify: null } }));
+        if (strip(staged) !== strip(committed)) {
+          this.writeHalt(HALT);
+          return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-differs-from-committed' };
+        }
+      }
       // الانقطاع قبل الزيادة: staged.counter == C+1 والمتن الملتزم B == C
       if (S === C + 1 && B === C) {
         // يُهمَل staged، المتن القديم صالح (B==C)
         if (existsSync(this.stagedPath())) rmSync(this.stagedPath());
+        // (WL-374) المتنُ الباقي هو الحكمُ: إن كانَ موقوفاً بقيَ موقوفاً.
+        if (committed.halted === true) {
+          this.writeHalt(HALT, true);
+          return { state: HALT, error: STATE_HALT_SOVEREIGN, counter: C, bodyCounter: B, recovered: 'discard-staged' };
+        }
         this.writeHalt(RUNNING);
         return { state: RUNNING, counter: C, bodyCounter: B, recovered: 'discard-staged' };
       }
@@ -311,6 +399,12 @@ export class FreshnessAnchorSim {
         } else {
           // توكنٌ غائبٌ على مسارِ التعافي: إنشاءٌ بنفسِ صيغةِ provision().
           this.writeTokenState({ tokenSerial: 'sim-token-' + finalBody.instanceId, sealEpoch: 1, lastSealedCounter: C });
+        }
+        // (WL-374) إيقافٌ سياديٌّ انقطعَ بعدَ زيادةِ العدّادِ: العدّادُ تقدّمَ فالالتزامُ وقعَ،
+        // والإتمامُ يُتمُّه **موقوفاً** — لا يُكتبُ RUNNING فوقَ إيقافٍ مُلتزَمٍ.
+        if (finalBody.halted === true) {
+          this.writeHalt(HALT, true);
+          return { state: HALT, error: STATE_HALT_SOVEREIGN, counter: C, bodyCounter: C, recovered: 'recertify-complete' };
         }
         this.writeHalt(RUNNING);
         return { state: RUNNING, counter: C, bodyCounter: C, recovered: 'recertify-complete' };
