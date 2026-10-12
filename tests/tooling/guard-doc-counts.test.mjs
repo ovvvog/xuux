@@ -197,16 +197,17 @@ function injectFakeIdIntoGuardedList(status, fakeId) {
   const afterMaftuh = line.slice(maftuhIdx);
   const colonIdx = afterMaftuh.indexOf(':');
   assert.ok(colonIdx !== -1, 'سطرُ R3 ينبغي أن يحملَ نقطتَيْنِ بعدَ «المفتوح»');
-  const afterColon = afterMaftuh.slice(colonIdx + 1);
-  const periodIdx = afterColon.indexOf('.');
-  const listBlock = periodIdx === -1 ? afterColon : afterColon.slice(0, periodIdx);
-  assert.ok(listBlock.length > 0, 'ينبغي أن توجدَ كتلةُ قائمةٍ بعدَ النقطتَيْن');
-  const mutated =
-    line.slice(0, maftuhIdx + afterMaftuh.indexOf(':') + 1) + ' ' + fakeId + ' ' + listBlock;
-  return status
-    .split('\n')
-    .map((l) => (l === line ? mutated : l))
-    .join('\n');
+  const insertAt = maftuhIdx + colonIdx + 1;
+  // إدراجٌ فقط — لا يُحذَفُ شيءٌ من السطرِ (لا النقطةُ ولا ما بعدَها).
+  const mutatedLine = line.slice(0, insertAt) + ` ${fakeId} ` + line.slice(insertAt);
+  // التوثيقُ العكسيُّ: إزالةُ النصِّ المُدرَجِ تُعيدُ السطرَ الأصليَّ بايتاً ببايت.
+  const reversed = mutatedLine.slice(0, insertAt) + mutatedLine.slice(insertAt + fakeId.length + 2);
+  assert.equal(reversed, line, 'إزالةُ المُدرَجِ ينبغي أن تُعيدَ السطرَ الأصليَّ بايتاً ببايت');
+  const lines = status.split('\n');
+  const idx = lines.indexOf(line);
+  assert.ok(idx !== -1, 'ينبغي أن يُوجَدَ سطرُ R3 في الملفِ');
+  lines.splice(idx, 1, mutatedLine);
+  return lines.join('\n');
 }
 
 test('الطفرةُ M4: إضافةُ معرّفِ بندٍ زائفٍ إلى كتلةِ القائمةِ التي يقرأُها R3 تُسقِطُ الحاجز', () => {
