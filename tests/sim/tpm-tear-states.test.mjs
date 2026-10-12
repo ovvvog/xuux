@@ -35,8 +35,11 @@ function writeMan(dir, b) { writeFileSync(join(dir, MAN), JSON.stringify(b)); }
 function writeStaged(dir, b) { writeFileSync(join(dir, STAGED), JSON.stringify(b)); }
 // حالةُ التوكنِ البرمجيِّ المُحاكى على القرص: التوكنُ يختمُ المتنَ الملتزمَ،
 // فآخرُ عدّادٍ مختومٍ داخلَهُ يطابقُ عدّادَ المتنِ المكتوبِ في كل بناءٍ يدويّ.
-function writeToken(dir, counter) {
-  writeFileSync(join(dir, TOKEN), JSON.stringify({ tokenSerial: 'sim-token-inst-tear', sealEpoch: 1, lastSealedCounter: counter }));
+// (WL-376) عندَ بناءِ حالةِ «انقطاعٍ بعدَ الزيادةِ» يدويّاً يجبُ أن يُكتَبَ التزامُ
+// staged في التوكنِ أيضًا — كما يفعلُ seal() الحقيقيُّ — وإلّا رفضَ recover()
+// الحالةَ بـstaged-commit-missing.
+function writeToken(dir, counter, stagedCommit = null) {
+  writeFileSync(join(dir, TOKEN), JSON.stringify({ tokenSerial: 'sim-token-inst-tear', sealEpoch: 1, lastSealedCounter: counter, stagedCommit }));
 }
 
 async function setup() {
@@ -76,9 +79,10 @@ simTest('tear 3: staged بعد الزيادة ⇒ recertify-complete', async () 
   // أدِّ العدّاد إلى C، والمتن الملتزم عند C-1، وstaged عند C.
   await a.seal(); // now body == TPM == C0+1
   const C = await a.readCounter();
+  const stagedBody = body(a, C);
   writeMan(root, body(a, C - 1));           // المتن الملتزم متخلّف
-  writeToken(root, C - 1);                  // التوكنُ ختمَ آخرَ متنٍ مكتملٍ (C-1)
-  writeStaged(root, body(a, C));            // staged عند C (بعد الزيادة)
+  writeToken(root, C - 1, FreshnessAnchorSim.stagedCommitHash(stagedBody));  // الالتزامُ كُتِبَ كما يفعلُ seal()
+  writeStaged(root, stagedBody);            // staged عند C (بعد الزيادة)
   const rec = await a.recover();
   assert.equal(rec.state, 'running');
   assert.equal(rec.recovered, 'recertify-complete');
