@@ -51,21 +51,30 @@ function testedCommit() {
 }
 function testedBranch() {
   try {
-    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    }).trim();
   } catch {
     return null;
   }
 }
 function testedShortSha() {
   try {
-    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    }).trim();
   } catch {
     return null;
   }
 }
 function uncommittedChanges() {
   try {
-    const status = execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }).trim();
+    const status = execFileSync('git', ['status', '--porcelain'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+    }).trim();
     return status.length > 0 ? true : false;
   } catch {
     return null;
@@ -164,12 +173,16 @@ await probe('R5-B-03-same-authenticator', async () => {
       judgment: 'لم_يجرب',
     };
   try {
-    const opened = await ka.authenticate({ actorId: king.id, deviceId: trusted.id, factorCode: code });
+    const opened = await ka.authenticate({
+      actorId: king.id,
+      deviceId: trusted.id,
+      factorCode: code,
+    });
     return {
       finding: 'R5-B-03',
       scenario: 'V-A: الرمزُ المستهلَكُ يُقبلُ على المصادقِ نفسِهِ',
       judgment: 'نجح',
-      evidence: `V-A replayed-same-authenticator:opened;logEvents=${ka.log?.events?.length ?? 'unknown'}`,
+      evidence: `V-A replayed-same-authenticator:opened;logEvents=${opened.token ? (ka.log?.events?.length ?? 'unknown') : 'no-token'}`,
       note: 'هذا السيناريو هو السيناريو الأصليّ كما ورد في تقرير المجلس',
     };
   } catch (error) {
@@ -721,7 +734,9 @@ await probe('R5-B-09-no-capability-write-via-enforcement-point', async () => {
     finding: 'R5-B-09',
     scenario: 'فاعلٌ بـ`capabilities: []` يطلبُ `write-data` عبرَ نقطةِ الإنفاذِ الرسميةِ',
     judgment: decision.decision.allowed ? 'نجح' : 'فشل',
-    refusal: decision.decision.allowed ? null : `enforcement-point.mjs:authorize:${decision.decision.code}`,
+    refusal: decision.decision.allowed
+      ? null
+      : `enforcement-point.mjs:authorize:${decision.decision.code}`,
     evidence: `allowed=${decision.decision.allowed};code=${decision.decision.code};policy=${decision.decision.policyId};control=${withCap.decision.code}`,
     note: 'الرفضُ الحاصلُ هنا هو رفضُ ضابطِ الهويةِ لا رفضُ ضابطِ القدرةِ. ضابطُ القدرةِ مُعزَّلٌ بهذا المُسارِ. المُسارُ المُطلوبُ لضابطِ القدرةِ مبنيٌّ مُباشرةً عبرَ محركِ السياساتِ. هذا هو الحدُّ المُوثَّقُ.',
   };
@@ -918,5 +933,6 @@ process.stdout.write(`مسبارُ R5-B: كُتِبَتِ النتائجُ إل�
 for (const r of results) {
   process.stdout.write(`  ${r.id} — ${r.judgment} — ${r.refusal ?? r.evidence}\n`);
 }
-process.stdout.write(`  المسبارُ ينتهيُ حسبَ الحكمِ الإجماليّ: ${results.some((r) => r.judgment === 'نجح') ? 'فشل' : 'نجح'}
+process.stdout
+  .write(`  المسبارُ ينتهيُ حسبَ الحكمِ الإجماليّ: ${results.some((r) => r.judgment === 'نجح') ? 'فشل' : 'نجح'}
 `);
