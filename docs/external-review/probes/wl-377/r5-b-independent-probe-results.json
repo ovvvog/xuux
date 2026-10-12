@@ -1,9 +1,17 @@
 {
   "probe": "r5-b-independent-probe",
-  "testedCommit": "705919230e7817b4c90137b491fdf4a52c25c49e",
-  "testedBranch": "main",
-  "executedAt": "2026-10-12T09:37:55.394Z",
-  "environment": "node=v20.20.2",
+  "testedCommit": "bd9b706a8e919c73d168008198b5509899e550d8",
+  "testedShortSha": "bd9b706a",
+  "testedBranch": "work/fix-probe-wl380",
+  "uncommittedChanges": true,
+  "executedAt": "2026-10-12T20:49:58.946Z",
+  "environment": {
+    "node": "v20.20.2",
+    "platform": "linux",
+    "arch": "x64",
+    "nodeEnv": null,
+    "telegraph": null
+  },
   "note": "حكمُ «فشل» يعني المسلكَ قُيِّدَ رفضُهُ (الإصلاحُ ناجحٌ). حكمُ «نجح» يعني العيبَ وقعَ أثرُهُ. «لم_يجرب» يعني المسلكَ تعذَّرَ تشغيلُهُ هنا.",
   "results": [
     {
@@ -11,42 +19,47 @@
       "finding": "R5-B-03",
       "scenario": "V-A: الرمزُ المستهلَكُ على المصادقِ نفسِهِ",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-A code=AUTHN_FACTOR_REPLAYED",
-      "ms": 71
+      "ms": 79
     },
     {
       "id": "R5-B-03-same-log-new-authenticator",
       "finding": "R5-B-03",
       "scenario": "V-B: مصادقٌ جديدٌ على السجلِّ نفسِه — الرمزُ المستهلَكُ يُرفَضُ",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-B code=AUTHN_FACTOR_REPLAYED",
-      "ms": 50
+      "ms": 65
     },
     {
       "id": "R5-B-03-fresh-empty-log",
       "finding": "R5-B-03",
-      "scenario": "V-D: مصادقٌ جديدٌ بسجلٍّ فارغٍ جديدٍ — الرمزُ المستهلَكُ يُقبلُ (متغيرٌ مستقلٌّ، ليس السيناريو الأصليَّ)",
+      "scenario": "V-D: مصادقٌ جديدٌ بسجلٍّ فارغٍ جديدٍ — الرمزُ المستهلَكُ يُقبلُ (استبدالُ سجلِ الاستهلاكِ بسجلٍ فارغٍ — متغيرٌ مستقلٌّ، ليس السيناريو الأصليَّ)",
       "judgment": "نجح",
+      "result": "FAIL",
       "refusal": null,
       "evidence": "V-D fresh-empty-log:opened",
-      "ms": 50
+      "ms": 56
     },
     {
       "id": "R5-B-04-no-egress-gate",
       "finding": "R5-B-04",
       "scenario": "قناةُ Telegram بلا `EgressGate` — يخرجُ البايتُ دونَ البوابة",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": null,
       "evidence": "state=failed;local-requests=0;failureReason=EGRESS_GATE_REQUIRED: لا يمكنُ الإرسالُ الخارجيُّ بلا بوابةِ خروجٍ موصولةٍ (R5-B-04)",
-      "ms": 4
+      "ms": 3
     },
     {
       "id": "R5-B-05-with-classifier-control",
       "finding": "R5-B-05",
       "scenario": "بوابةٌ بمُصنِّفٍ يقرأُ `sensitive` مسجَّلاً — الكذبُ `public` مُعلَنًا — يُرفَضُ عندَ ضابطِ التصنيف",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "egress-gate.mjs:send:EGRESS_NOT_AUTHORIZED",
       "evidence": "code=EGRESS_NOT_AUTHORIZED",
       "ms": 105
@@ -56,54 +69,80 @@
       "finding": "R5-B-05",
       "scenario": "`sensitive` يُعلَنُ `public` بلا مُصنِّفٍ — يمرُّ البايتُ (خارجَ الإنتاجِ)",
       "judgment": "نجح",
+      "result": "FAIL",
       "refusal": null,
       "evidence": "code=PASSED",
-      "ms": 82
+      "ms": 97
     },
     {
       "id": "R5-B-06-forged-command",
       "finding": "R5-B-06",
       "scenario": "معرّفُ أمرٍ وملخصُ SHA-256 صحيحُ الشكلِ بلا تحقّقِ توقيعِ التاج — رفضٌ مُسمّىً عندَ ضابطِ التوقيعِ الملكيّ",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "enforcement-point.mjs:authorize:SOVEREIGN_COMMAND_VERIFIER_REQUIRED",
       "evidence": "code=SOVEREIGN_COMMAND_VERIFIER_REQUIRED;policy=pol:king-sovereign-acts",
-      "ms": 55
+      "ms": 57
     },
     {
       "id": "R5-B-07-direct-halt",
       "finding": "R5-B-07",
       "scenario": "`halt()` مباشرةً بلا توقيعٍ ولا ديوانٍ",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "halt-switch.mts:halt:HALT_ROYAL_COMMAND_REQUIRED",
       "evidence": "code=HALT_ROYAL_COMMAND_REQUIRED;state=running",
-      "ms": 1
+      "ms": 2
     },
     {
       "id": "R5-B-08-quarantined-actor",
       "finding": "R5-B-08",
       "scenario": "وكيلٌ محجورٌ — يُرفضُ برمزِ الحجرِ",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "enforcement-point.mjs:authorize:ACTOR_QUARANTINED",
       "evidence": "code=ACTOR_QUARANTINED;policy=null",
-      "ms": 84
+      "ms": 65
     },
     {
       "id": "R5-B-09-no-capability-write",
       "finding": "R5-B-09",
       "scenario": "فاعلٌ مأذونٌ بدورِهِ في السياسةِ بـ`capabilities: []` يطلبُ `write-data`",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "engine.mjs:evaluate:POLICY_NO_MATCH",
       "evidence": "allowed=false;code=POLICY_NO_MATCH;policy=null;control=POLICY_ALLOW",
-      "ms": 35
+      "ms": 43
+    },
+    {
+      "id": "R5-B-09-no-capability-write-via-enforcement-point",
+      "finding": "R5-B-09",
+      "scenario": "الضابطُ: فاعلٌ بقدرةِ كتابةٍ لا يُؤذَنُ عبرَ السلسلةِ الرسميةِ",
+      "judgment": "لم_يجرب",
+      "result": "NOT_TESTED",
+      "refusal": "enforcement-point.mjs:authorize:IDENTITY_UNVERIFIED",
+      "evidence": "code=IDENTITY_UNVERIFIED",
+      "ms": 65
     },
     {
       "id": "R5-B-10-false-identity-gate",
       "finding": "R5-B-10",
       "scenario": "ادّعاءُ `role:king` مع `requireIdentityGate: false` في الإنتاجِ — يُرفضُ عندَ البناءِ",
       "judgment": "فشل",
+      "result": "PASS",
       "refusal": "enforcement-point.mjs:constructor:ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION",
       "evidence": "code=ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION;control=IDENTITY_UNVERIFIED",
-      "ms": 98
+      "ms": 90
+    },
+    {
+      "id": "R5-B-10-false-identity-gate-non-prod",
+      "finding": "R5-B-10",
+      "scenario": "ادّعاءُ `role:king` بلا بوابةِ هويةٍ — خارجَ الإنتاجِ (`NODE_ENV: test`)",
+      "judgment": "نجح",
+      "result": "FAIL",
+      "refusal": null,
+      "evidence": "allowed=true;code=POLICY_ALLOW;policy=pol:read-data-cleared;control=IDENTITY_UNVERIFIED;env=NODE_ENV=test;requireIdentityGate=false",
+      "ms": 77
     }
   ]
 }
