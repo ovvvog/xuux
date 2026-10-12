@@ -23,6 +23,9 @@ export const STATE_HALT_SOVEREIGN = 'STATE_HALT_SOVEREIGN';
 const MANIFEST = 'root-of-trust.manifest.json';
 const STAGED = 'root-of-trust.manifest.staged.json';
 const HALT_FILE = 'halt.json';
+// (WL-376) التزامُ staged قبلَ الزيادةِ — يُحتَّمُ على الانتشارِ لا الاستئنافِ.
+// يحاكي ختمَ HSM للمتنِ داخلَ التوكنِ (‏ADR 0007 §10 حدٌّ 2، WL-098): في الإنتاجِ
+// يمنعُ المهاجمَ من تعويضَ staged بمحتوى آخرَ بعدَ الزيادةِ لأنّ الختمَ في التوكنِ لا القرصِ.
 // حالةُ التوكنِ البرمجيِّ المُحاكى (مقابلُ tokenSerial + الختمِ داخلَ التوكنِ في
 // النظامِ الحقيقيِّ — WL-098). تدخلُ في اللقطةِ والاستعادةِ كاملةً حتى يُثبَتَ أنّ
 // تراجعَ التوكنِ نفسِهِ لا ينفعُ ما دامَ عدّادُ TPM متقدّماً.
@@ -143,6 +146,15 @@ export class FreshnessAnchorSim {
     if (!existsSync(this.tokenStatePath())) return null;
     return JSON.parse(readFileSync(this.tokenStatePath(), 'utf8'));
   }
+  // (WL-376) التزامُ staged: SHA-256 للمتنِ المرجعيِّ للمحتوى المُلزَمِ قبلَ الزيادةِ.
+  // يُحسَبُ على المتنِ بلا `certify` (نفسُ شكلِ qualifyingData). يُكتبُ في التوكنِ
+  // قبلَ الزيادةِ ويُتحقَّقُ منه في التعافي — التزامٌ لا استئناف.
+  static stagedCommitHash(body) {
+    const { tpm: { certify: _ignored, ...restTpm } = {}, ...restBody } = body;
+    return createHash('sha256')
+      .update(canonical({ ...restBody, tpm: restTpm }))
+      .digest('hex');
+  }
   writeTokenState(state) { writeFileSync(this.tokenStatePath(), JSON.stringify(state)); }
 
   readManifest() {
@@ -247,6 +259,11 @@ export class FreshnessAnchorSim {
     const body = mutate ? { ...mutate(base), tpm: base.tpm, sequence: base.sequence, instanceId: base.instanceId } : base;
     // 1+2: staged بلا شهادة
     writeFileSync(this.stagedPath(), JSON.stringify(body));
+    // (WL-376) التزامُ staged في التوكنِ قبلَ الزيادةِ: SHA-256 للمتنِ المرجعيِّ
+    // (بلا certify). يمنعُ تعويضَ staged بمحتوى آخرَ بعدَ الزيادةِ في التعافي.
+    const stagedCommit = FreshnessAnchorSim.stagedCommitHash(body);
+    const ts = this.readTokenState();
+    this.writeTokenState({ ...(ts ?? { tokenSerial: 'sim-token-unknown', sealEpoch: 0 }), lastSealedCounter: ts?.lastSealedCounter ?? 0, stagedCommit });
     if (hooks.beforeIncrement) hooks.beforeIncrement();
     // 3: زيادة العدّاد
     const inc = await this.tpm.nvIncrement(this.nvIndex);
@@ -264,8 +281,9 @@ export class FreshnessAnchorSim {
     writeFileSync(tmp, JSON.stringify(finalBody));
     renameSync(tmp, this.manifestPath());
     // 5 (تتمّتُهُ): الختمُ داخلَ التوكنِ جزءٌ من كتابةِ المتنِ النهائيِّ —
-    // آخرُ عدّادٍ مختومٍ داخلَ التوكنِ صارَ C+1 معَ rename نفسِهِ.
-    this.writeTokenState({ ...(this.readTokenState() ?? { tokenSerial: 'sim-token-unknown', sealEpoch: 0 }), lastSealedCounter: C + 1 });
+    // آخرُ عدّادٍ مختومٍ داخلَ التوكنِ صارَ C+1 معَ rename نفسِهِ. staged مُلتزَمٌ
+    // فالتزامُهُ في التوكنِ يُستهلَكُ (لا يُبقي على staged مُتأكّدٍ).
+    this.writeTokenState({ ...(this.readTokenState() ?? { tokenSerial: 'sim-token-unknown', sealEpoch: 0 }), lastSealedCounter: C + 1, stagedCommit: null });
     if (hooks.beforeUnlinkStaged) hooks.beforeUnlinkStaged();
     // 6: حذف staged
     if (existsSync(this.stagedPath())) rmSync(this.stagedPath());
@@ -382,6 +400,19 @@ export class FreshnessAnchorSim {
       }
       // الانقطاع بعد الزيادة قبل الإتمام: staged.counter == C
       if (S === C && (B === C - 1 || B === C)) {
+        // (WL-376) تحقّقُ التزامِ staged: محتوى staged يجبُ أن يُطابِقَ ما أُلزِمَ
+        // في التوكنِ قبلَ الزيادةِ (SHA-256 للمتنِ بلا certify). عيّنٌ مُلفَّقٌ بعدَ
+        // الزيادةِ — أو غيابُ الالتزامِ كليّاً — ⇒ تمزّقٌ لا إعادةَ شهادةٍ.
+        // (‏لا يُستَعملُ هذا المسارُ إلّا في المحاكي؛ في الإنتاجِ ختمُ HSM داخلَ التوكنِ.)
+        const ts = this.readTokenState();
+        if (!ts?.stagedCommit) {
+          this.writeHalt(HALT);
+          return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-commit-missing' };
+        }
+        if (FreshnessAnchorSim.stagedCommitHash(staged) !== ts.stagedCommit) {
+          this.writeHalt(HALT);
+          return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-modified-after-commit' };
+        }
         // إعادة شهادة فقط (بلا زيادة) وإتمام الكتابة — خاملة التكرار
         const qd = CertifySim.qualifyingData(staged);
         const certify = this.certify.attest(C, qd);
@@ -395,10 +426,10 @@ export class FreshnessAnchorSim {
         // فالتعافيُ المزدوجُ بعدَ الانقطاعِ كانَ يُدخِلُ الإغلاقَ الزائفَ.
         const tokenState = this.readTokenState();
         if (tokenState) {
-          this.writeTokenState({ ...tokenState, lastSealedCounter: C });
+          this.writeTokenState({ ...tokenState, lastSealedCounter: C, stagedCommit: null });
         } else {
           // توكنٌ غائبٌ على مسارِ التعافي: إنشاءٌ بنفسِ صيغةِ provision().
-          this.writeTokenState({ tokenSerial: 'sim-token-' + finalBody.instanceId, sealEpoch: 1, lastSealedCounter: C });
+          this.writeTokenState({ tokenSerial: 'sim-token-' + finalBody.instanceId, sealEpoch: 1, lastSealedCounter: C, stagedCommit: null });
         }
         // (WL-374) إيقافٌ سياديٌّ انقطعَ بعدَ زيادةِ العدّادِ: العدّادُ تقدّمَ فالالتزامُ وقعَ،
         // والإتمامُ يُتمُّه **موقوفاً** — لا يُكتبُ RUNNING فوقَ إيقافٍ مُلتزَمٍ.

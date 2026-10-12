@@ -1,5 +1,58 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-12] — WL-376 — فجوةُ التعافي من staged بعدَ زيادةِ العدّادِ: التزامُ staged في التوكنِ قبلَ الزيادةِ مع تحقّقٍ قبلَ إعادةِ الشهادةِ — طلبُ دمجٍ
+
+**المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** ADR 0007 §9 البند 4 (‏تعافيٌ خامِلُ التكرارِ مُتَحقَّقٌ) — إغلاقُ فجوةِ الإيقافِ السياديِّ الموصوفةِ في الأمرِ التنفيذيِّ · **الحالةُ بعدَ العملِ:** ✅ مُعاد إنتاجُهُ + إصلاحٌ + شواهدَ — على المحاكي (‏لا عتاد، لا TPM2_NV_\*)
+
+#### ما كانَ قبلَ هذه المُدخلة
+
+- الأمرُ التنفيذيُّ قالَ صريحاً: «انقطاعًا حقيقيًّا بعدَ زيادةِ العدادِ قد يؤدي إلى إعادةِ اعتمادِ ملفٍ staged أيًّا كانَ محتواه». ADR 0007 §10 (سطرٌ 291) وثّقَ هذا كعائقٍ: «المحاكي مفتاحُها في الذاكرةِ، فـstaged عندَ `B = C − 1` يُعادُ شهادتُه» — فلم يكن إلّا وصفاً، لا إصلاحاً.
+- شاهدُ الإصلاحِ: مسارُ `S === C && B === C-1` في `sim/tpm/manifest_seal_sim.mjs::recover()` كانَ يَستدعي `this.certify.attest(C, qd)` على `staged` دون أي تحقّقٍ من أنّه ما كتبَهُ `seal()` — فأي ملفٍّ staged مُعدَّلٍ يُقبلُ ويُلتزَمُ.
+
+#### ما تمَّ فعلاً
+
+- **إعادةُ إنتاجٍ موثَّقةٌ:** مُتغيّرٌ `gap-test` على نسخةٍ من `main` — بَعدَ زيادةٍ شرعيةٍ، ملفُ staged مُعدَّلٌ (`journalHead` مُستبدَلٌ بـ`attacker-injected-head`) يُلتزَمُ كالمتنِ الجديدِ، والحالةُ `running` مع `recertify-complete`. **النتيجةُ: مُسقِطٌ حقيقياً.**
+- **الإصلاحُ:** `FreshnessAnchorSim.stagedCommitHash(body)` — SHA-256 للمتنِ المرجعيِّ (بلا `certify`). `seal()` يَكتبُهُ في `token-state.json` كـ`stagedCommit` **قبلَ `nvIncrement`**. `recover()` في مسارِ `S === C` يَتحقّقُ من مطابقةِ `staged` لذلك الالتزامِ قبلَ إعادةِ الشهادةِ — نتيجةً مختلفةً `torn: 'staged-modified-after-commit'` أو `'staged-commit-missing'`.
+- **الالتزامُ يُستهلَكُ:** بَعدَ إتمامِ الختمِ (‏`seal()` و`recover()`)، يُضبَطُ `stagedCommit: null` فلا يُبقي على staged مُتأكَّدٍ.
+- **لا عتاد، لا `TPM2_NV_DefineSpace`/`TPM2_NV_Increment`/`TPM clear`/`ownerAuth`/`.wslconfig`/إعادة تشغيل WSL.** المُحاكاةُ تُحاكي ختمَ HSM للمتنِ داخلَ التوكنِ (ADR 0007 §10 حدٌّ 2) — لا تَدَّعي مقاومةَ TPM حقيقية.
+
+#### الشواهدُ (‏`tests/sim/tpm-sealed-sovereign-halt.test.mjs`)
+
+- `sovereign 12` (سالب): انقطاعٌ بعدَ الزيادةِ + staged مُعدَّلٌ ⇒ `TORN` بـ`staged-modified-after-commit`، والمحتوى المُلفَّقُ لم يُلتزَمْ.
+- `sovereign 13` (إيجابي): انقطاعٌ بعدَ الزيادةِ وstaged سليمٌ ⇒ `running` مع `recertify-complete`، والالتزامُ استُهلِكَ.
+- `sovereign 14` (سالب): staged بلا التزامٍ في التوكنِ ⇒ `TORN` بـ`staged-commit-missing`.
+- `mockTest` — لا تحتاجُ `swtpm` ولا `XUUX_TPM_SIM`. تُشغَّلُ دائماً.
+- `node --test --test-name-pattern='sovereign 1[234]'` ⇒ 3/3.
+
+#### القياس
+
+- `node --test tests/sim/tpm-sealed-sovereign-halt.test.mjs` ⇒ 14 اختباراً · 3 ناجحاً · 0 فاشلاً · 11 متخطَّياً (swtpm غير متاحٍ محليًّا).
+- `npm run handoff:report` ⇒ `docs/HANDOFF.md` مُولَّد.
+- `npm run guard:project-state` ⇒ `EXIT=0` · ستّةُ حواجزِ اتّساقٍ ناجحة.
+
+#### ما لم يُفعَل (عمداً)
+
+- لم يُثبَّت `xuux-tpmd` للإنتاجِ ولا فهرسُ NV على العتادِ ولا `TPM clear` ولا `ownerAuth` ولا `.wslconfig`.
+- لم يُمسَّ `config/external-review.yaml` ولا بندُ `R3-A-01` ولا `EXT-6` ولا `version.json` ولا النسبةُ.
+- لم يُغيَّر سلوكُ الحاجزِ `staged-differs-from-committed` (‏`B === C`) — الأصلُ سليمٌ.
+
+#### الملفاتُ المتأثّرة
+
+`sim/tpm/manifest_seal_sim.mjs` · `tests/sim/tpm-sealed-sovereign-halt.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (‏مولَّد)
+
+#### الـ commit
+
+يُملأُ بالدمج — الفرعُ `fix/wl-376-staged-recovery-gap` من `main@71ac619b`.
+
+#### الدليل
+
+- إعادةُ الإنتاجِ (قبلَ الإصلاحِ): `GAP-RESULT: { state: 'running', recovered: 'recertify-complete' }` و`MANIFEST AFTER: journalHead: 'attacker-injected-head'`.
+- بعدَ الإصلاحِ: `torn: 'staged-modified-after-commit'` و`journalHead` لم يُستبدَلْ.
+
+#### الأثر على المسارات الأخرى
+
+- لا فتحَ ولا إغلاقَ بندِ مراجعةٍ ولا بوّابةً ولا نسبةً. `R3-A-01` و`EXT-6` باقيانِ مفتوحينِ.
+
 ### [2026-10-12] — WL-375 — M4: طفرةُ عدّادِ `R3/DRIFT` صارت تستهدفُ القائمةَ التي يقرأُها الحارسُ لا أوّلَ ظهورٍ للمعرّفِ، مع شاهدِ حدٍّ إيجابيٍّ وشاهدِ رجوعٍ — طلبُ دمجٍ
 
 **المنفِّذُ:** Perplexity Computer (‏`soaav-svg`) · **المسارُ والخطوةُ:** تعزيزُ قياسِ الحاجزِ (اختبارُ طفرةٍ لا تغييرٌ في سلوكِ الحاجزِ نفسِه) · **الحالةُ بعدَ العملِ:** ✅ منجزٌ ومقيسٌ على 31/31

@@ -50,6 +50,32 @@ const tpmDown = Object.freeze({
 
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 
+/**
+ * (WL-376) اختباراتُ stagedCommit تَعملُ على mock TPM خالص — لا تحتاجُ swtpm ولا
+ * XUUX_TPM_SIM. تُشغَّلُ دائمًا (لا يُتخطَّى إلا في CI الذي يَحظرُها صراحةً).
+ */
+const mockTest = (name, fn) => test(name, fn);
+
+/** (WL-376) نسخةٌ mock من setup() لاختباراتِ stagedCommit — لا تَحتاجُ swtpm.
+ * تُنشِئُ FreshnessAnchorSim مع عدّادٍ برمجيٍّ خالصٍ (‏كائنُ TPM بسيطٌ).
+ */
+async function setupMock(name) {
+  const root = join(BASE, name);
+  rmSync(root, { recursive: true, force: true });
+  let c = 0;
+  const tpmMock = {
+    nvDefineCounter: async () => ({ rc: 0 }),
+    nvUndefine: async () => ({ rc: 0 }),
+    nvIncrement: async () => ({ rc: 0, counter: ++c }),
+    nvReadCounter: async () => ({ rc: 0, counter: c }),
+  };
+  const a = new FreshnessAnchorSim(root, tpmMock, 'ak-mock', 'nv-mock', NV);
+  await a.provision('inst-mock');
+  const s = await a.seal();
+  assert.equal(s.ok, true, 'seal failed: ' + JSON.stringify(s));
+  return { a, root };
+}
+
 simTest('sovereign 1: haltSovereign() يختمُ الإيقافَ في المتنِ ويُقدِّمُ العدّادَ', async (t) => {
   const { a, root } = await setup('s1');
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -204,4 +230,100 @@ simTest('sovereign 11: staged بالعدّادِ نفسِه (‏B === C) يخت�
   assert.equal(r.error, 'STATE_MANIFEST_TPM_TORN');
   assert.equal(r.torn, 'staged-differs-from-committed');
   assert.equal(readJson(join(root, MAN)).journalHead, committed.journalHead, 'المتنُ الملتزمُ لم يُستبدَلْ');
+});
+
+// ── WL-376: فجوةُ التعافي من staged بعدَ زيادةِ العدّادِ ──
+//
+// ما قِيسَ قبلَ هذه الدفعةِ: انقطاعٌ حقيقيٌّ بعدَ `nvIncrement` وقبلَ `rename`
+// كانَ يَسمحُ بإعادةِ اعتمادِ ملفِّ staged أيًّا كانَ محتواه — فالمهاجمُ يَستبدلُ
+// staged بمتنٍ مُلفَّقٍ (journalHead آخرَ مثلًا) فيُعيدُ `recover()` شهادتَه
+// وَيُلتزِمُه كالمتنِ الجديدِ. الأصلُ: التحققُ من مطابقةِ staged للمتنِ الملتزمِ
+// (‏staged-differs-from-committed) لا يَعملُ إلّا عندَ B === C، فإذا كانَ B === C-1
+// (‏الانقطاعُ بعدَ الزيادةِ) فلا شاهِدَ على أنّ staged هو ما كتبَهُ الختمُ الأصليُّ.
+//
+// الإصلاحُ: يُكتَبُ في `token-state.json` قبلَ الزيادةِ التزامٌ لِstaged
+// (SHA-256 للمتنِ بلا certify — `stagedCommit`). عندَ التعافي، يُتحقَّقُ من
+// مطابقةِ محتوى staged لذلك الالتزامِ قبلَ إعادةِ الشهادةِ. يُستهلَكُ الالتزامُ
+// بعدَ إتمامِ الختمِ (stagedCommit: null) فلا يُبقي على staged مُتأكَّدٍ.
+// يُحاكي هذا ختمَ HSM للمتنِ داخلَ التوكنِ في الإنتاجِ (ADR 0007 §10 حدٌّ 2).
+
+mockTest('sovereign 12: انقطاعٌ بعدَ الزيادةِ + staged مُعدَّلٌ من المهاجمِ ⇒ TORN لا إعادةَ اعتماد', async (t) => {
+  const { a, root } = await setupMock('s12');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const committedBefore = readJson(join(root, MAN));
+  const C_before = committedBefore.tpm.counter;
+
+  // محاكاةُ انقطاعٍ بعدَ الزيادةِ: العدّادُ تقدّمَ (C+1)، وstaged وُجِدَ في التوكنِ
+  // التزامُهُ (stagedCommit مكتوبٌ) ولا rename وقعَ.
+  await a.tpm.nvIncrement();
+  const ts = readJson(join(root, 'token-state.json'));
+  ts.stagedCommit = FreshnessAnchorSim.stagedCommitHash({
+    ...committedBefore,
+    journalHead: 'checkpoint:' + (committedBefore.sequence + 1),
+    tpm: { ...committedBefore.tpm, counter: C_before + 1, certify: null },
+  });
+  writeFileSync(join(root, 'token-state.json'), JSON.stringify(ts));
+
+  // المهاجمُ يَستبدلُ staged بمحتوى مُلفَّقٍ.
+  const forged = {
+    ...committedBefore,
+    journalHead: 'attacker-injected-head',
+    tpm: { akName: a.akName, nvIndexName: a.nvIndexName, counter: C_before + 1, certify: null },
+  };
+  writeFileSync(join(root, STAGED), JSON.stringify(forged));
+
+  const r = await a.recover();
+  assert.equal(r.state, 'halted');
+  assert.equal(r.error, 'STATE_MANIFEST_TPM_TORN');
+  assert.equal(r.torn, 'staged-modified-after-commit');
+  assert.equal(readJson(join(root, MAN)).journalHead, committedBefore.journalHead, 'المحتوى المُلفَّقُ لم يُلتزَمْ');
+});
+
+mockTest('sovereign 13: انقطاعٌ بعدَ الزيادةِ وstaged سليمٌ ⇒ يُتمُّهُ التعافي (إيجابيّ)', async (t) => {
+  const { a, root } = await setupMock('s13');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const committedBefore = readJson(join(root, MAN));
+  const C_before = committedBefore.tpm.counter;
+
+  // انقطاعٌ حقيقيٌّ: staged سليمٌ + التزامُهُ في التوكنِ + زيادةٌ وقعت.
+  const stagedBody = {
+    ...committedBefore,
+    sequence: committedBefore.sequence + 1,
+    journalHead: 'checkpoint:' + (committedBefore.sequence + 1),
+    tpm: { akName: a.akName, nvIndexName: a.nvIndexName, counter: C_before + 1, certify: null },
+  };
+  writeFileSync(join(root, STAGED), JSON.stringify(stagedBody));
+  const ts = readJson(join(root, 'token-state.json'));
+  ts.stagedCommit = FreshnessAnchorSim.stagedCommitHash(stagedBody);
+  writeFileSync(join(root, 'token-state.json'), JSON.stringify(ts));
+  await a.tpm.nvIncrement();
+
+  const r = await a.recover();
+  assert.equal(r.state, 'running');
+  assert.equal(r.recovered, 'recertify-complete');
+  assert.equal(readJson(join(root, MAN)).journalHead, stagedBody.journalHead, 'staged السليمُ التُزِمَ');
+  // الالتزامُ يُستهلَكُ — لا يُبقي على staged مُتأكَّدٍ.
+  assert.equal(readJson(join(root, 'token-state.json')).stagedCommit, null, 'الالتزامُ استُهلِكَ');
+});
+
+mockTest('sovereign 14: staged بلا التزامٍ في التوكنِ ⇒ TORN بـstaged-commit-missing', async (t) => {
+  const { a, root } = await setupMock('s14');
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const committedBefore = readJson(join(root, MAN));
+  const C_before = committedBefore.tpm.counter;
+
+  // لا التزامَ في التوكنِ (حُذِفَ الالتزامُ أو لم يُكتبْ)، وstaged مُلفَّقٌ.
+  const forged = {
+    ...committedBefore,
+    journalHead: 'forged-head',
+    tpm: { akName: a.akName, nvIndexName: a.nvIndexName, counter: C_before + 1, certify: null },
+  };
+  writeFileSync(join(root, STAGED), JSON.stringify(forged));
+  await a.tpm.nvIncrement();
+
+  const r = await a.recover();
+  assert.equal(r.state, 'halted');
+  assert.equal(r.error, 'STATE_MANIFEST_TPM_TORN');
+  assert.equal(r.torn, 'staged-commit-missing');
+  assert.equal(readJson(join(root, MAN)).journalHead, committedBefore.journalHead, 'المحتوى المُلفَّقُ لم يُلتزَمْ');
 });
