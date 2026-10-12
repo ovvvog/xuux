@@ -152,7 +152,14 @@ export class FreshnessAnchorSim {
     if (!existsSync(this.stagedPath())) return null;
     return JSON.parse(readFileSync(this.stagedPath(), 'utf8'));
   }
-  writeHalt(state) { writeFileSync(this.haltPath(), JSON.stringify({ state, epoch: state === HALT ? 1 : 0 })); }
+  // (WL-372) الإيقافُ صنفانِ: سياديٌّ (قرارُ مالكٍ — epoch=1) لا يُفتحُهُ recover()
+  //، وسياديُّ الانقطاعِ/العطبِ (epoch=0) يُعادُ بعدَ إصلاحِ السببِ.
+  writeHalt(state, sovereign = false) {
+    writeFileSync(this.haltPath(), JSON.stringify({
+      state,
+      epoch: sovereign ? 1 : 0,
+    }));
+  }
   readHalt() {
     if (!existsSync(this.haltPath())) return { state: RUNNING, epoch: 0 };
     return JSON.parse(readFileSync(this.haltPath(), 'utf8'));
@@ -253,6 +260,16 @@ export class FreshnessAnchorSim {
     const B = committed.tpm.counter;
     const staged = this.readStaged();
 
+    // (WL-372) الإيقافُ السياديُّ (state: halted, epoch: 1) قرارٌ مالكٍ لا خللُ
+    // انقطاعٍ؛ recover() لا يفتحُهُ. تُستأنفُ العمليةُ بقرارٍ صريحٍ (ownerAuth أو
+    // رفعِ الملفِّ بإذنٍ) لا بإعادةِ إقلاعٍ. كلُّ ما دونَ epoch=1 (0 أو غيابٌ)
+    // فهو تركُ إقلاعٍ عاديٌّ ويُعادُ إلى RUNNING بعدَ نجاحِ التعافي.
+    const haltState = this.readHalt();
+    const sovereignHalt = haltState && haltState.state === HALT && haltState.epoch === 1;
+    if (sovereignHalt) {
+      return { state: HALT, error: 'STATE_HALT_SOVEREIGN' };
+    }
+
     // اتساقُ التوكنِ البرمجيِّ معَ المتنِ: آخرُ عدّادٍ مختومٍ داخلَ التوكنِ يجبُ
     // أن يطابقَ عدّادَ المتنِ الملتزمِ. توكنٌ أقدمُ أو أحدثُ منَ المتنِ = تمزّقٌ
     // لا إقلاعَ معهُ (القاعدةُ: كلُّ ما لا يطابقُ ⇒ إغلاق).
@@ -285,6 +302,16 @@ export class FreshnessAnchorSim {
         writeFileSync(tmp, JSON.stringify(finalBody));
         renameSync(tmp, this.manifestPath());
         if (existsSync(this.stagedPath())) rmSync(this.stagedPath());
+        // (WL-372) ختمُ التوكنِ على المتنِ المُستكمَلِ: التعافيُ المكتملُ لا
+        // يُبقي فجوةً بينَ المتنِ والتوكنِ. كانَ seal() وحدهُ يَختمُ التوكنَ،
+        // فالتعافيُ المزدوجُ بعدَ الانقطاعِ كانَ يُدخِلُ الإغلاقَ الزائفَ.
+        const tokenState = this.readTokenState();
+        if (tokenState) {
+          this.writeTokenState({ ...tokenState, lastSealedCounter: C });
+        } else {
+          // توكنٌ غائبٌ على مسارِ التعافي: إنشاءٌ بنفسِ صيغةِ provision().
+          this.writeTokenState({ tokenSerial: 'sim-token-' + finalBody.instanceId, sealEpoch: 1, lastSealedCounter: C });
+        }
         this.writeHalt(RUNNING);
         return { state: RUNNING, counter: C, bodyCounter: C, recovered: 'recertify-complete' };
       }

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
 import * as tpm from '../../sim/tpm/tpm_client.mjs';
 import { FreshnessAnchorSim } from '../../sim/tpm/manifest_seal_sim.mjs';
-import { writeFileSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, existsSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const sim = isSimEnabled();
@@ -256,4 +256,105 @@ simTest('tear 14: توكنٌ لا يطابقُ المتنَ ⇒ TORN (token-mani
   assert.equal(rec2.state, 'halted');
   assert.equal(rec2.error, 'STATE_MANIFEST_TPM_TORN');
   assert.equal(rec2.torn, 'token-manifest-inconsistent');
+});
+
+// 15) (WL-372 — إصلاحُ الفجوةِ الأولى) الإيقافُ السياديُّ (halt.json: halted/epoch=1)
+//     لا يُفتَحُهُ recover() — يبقى halted ويُعادُ رمزُ STATE_HALT_SOVEREIGN. انقلابُ الشاهدِ:
+//     قبلَ WL-372 كانَ recover() يفتحُهُ ويكتبُ RUNNING فوقَهُ (الفجوةُ المُقاسةُ في WL-370).
+simTest('tear 15: إيقافٌ سياديٌّ ⇒ recover() يُبقيهُ halted (أُصلِحَ في WL-372)', async () => {
+  const { a, root } = await setup();
+  const s = await a.seal();
+  assert.equal(s.ok, true);
+  // كلُّ شيءٍ متّسقٌ: المتنُ والتوكنُ والعدّادُ كلُّها عندَ C0+1، لا staged —
+  // ما عدا ملفَّ الإيقافِ الذي يقولُ halted بepoch=1 (إيقافٌ سياديٌّ).
+  writeFileSync(join(root, 'halt.json'), JSON.stringify({ state: 'halted', epoch: 1 }));
+  const rec = await a.recover();
+  // الإصلاحُ: يبقى halted، لا RUNNING
+  assert.equal(rec.state, 'halted');
+  assert.equal(rec.error, 'STATE_HALT_SOVEREIGN');
+  // وملفُّ الإيقافِ نفسُهُ بقيَ كما هو
+  const haltAfter = JSON.parse(readFileSync(join(root, 'halt.json'), 'utf8'));
+  assert.equal(haltAfter.state, 'halted');
+  assert.equal(haltAfter.epoch, 1);
+  // وseal() يظلُّ مرفوضاً
+  await assert.rejects(() => a.seal(), /HALTED/);
+  // تكرارُ recover() لا يفتحُهُ أيضاً (خمولُ التكرارِ)
+  const rec2 = await a.recover();
+  assert.equal(rec2.state, 'halted');
+  assert.equal(rec2.error, 'STATE_HALT_SOVEREIGN');
+});
+
+// 16) (WL-372 — إصلاحُ الفجوةِ الثانية) انقطاعٌ بعدَ زيادةِ العدّادِ قبلَ الإتمامِ ثمّ
+//     recover() مرتينِ ⇒ التعافيُ المكتملُ يَختمُ التوكنَ على المتنِ المستكمَلِ،
+//     فالتعافيُ المزدوجُ **خاملٌ** لا يُدخِلُ الإغلاقَ الزائفَ. انقلابُ الشاهدِ: قبلَ WL-372
+//     كانَ recover() لا يُحدِّثُ التوكنَ، فالتعافيُ المزدوجُ كانَ يُدخِلُ STATE_MANIFEST_TPM_TORN
+//     زيفاً (الفجوةُ المُقاسةُ في WL-370).
+simTest('tear 16: تعافٍ مزدوجٌ بعدَ انقطاعٍ ⇒ خاملٌ بلا إغلاقٍ زائفٍ (أُصلِحَ في WL-372)', async () => {
+  const { a, root } = await setup();
+  const s0 = await a.seal();
+  assert.equal(s0.ok, true);
+  // انقطاعٌ بعدَ الزيادةِ قبلَ الإتمامِ
+  await assert.rejects(
+    () => a.seal({ beforeCertify() { throw new Error('TEAR_BEFORE_CERTIFY_2'); } }),
+    /TEAR_BEFORE_CERTIFY_2/,
+  );
+  const C = await a.readCounter();
+  const tokenBefore = JSON.parse(readFileSync(join(root, TOKEN), 'utf8'));
+  assert.equal(tokenBefore.lastSealedCounter, C - 1); // التوكنُ لم يُحدَّثْ بعدَ الزيادةِ
+  // الأولى: الإتمامُ ينجحُ — المتنُ صارَ عندَ C **والتوكنُ خُتِمَ عندَ C**
+  const r1 = await a.recover();
+  assert.equal(r1.state, 'running');
+  assert.equal(r1.recovered, 'recertify-complete');
+  const tokenAfter1 = JSON.parse(readFileSync(join(root, TOKEN), 'utf8'));
+  assert.equal(tokenAfter1.lastSealedCounter, C); // الإصلاحُ: ختمُ التوكنِ في recover()
+  // الثانية: خاملة التكرارِ — لا إغلاقَ زائفاً
+  const r2 = await a.recover();
+  assert.equal(r2.state, 'running');
+  assert.equal(r2.counter, r2.bodyCounter);
+  const tokenAfter2 = JSON.parse(readFileSync(join(root, TOKEN), 'utf8'));
+  assert.equal(tokenAfter2.lastSealedCounter, C);
+  // الثالثةُ أيضاً: خمولُ التكرارِ
+  const r3 = await a.recover();
+  assert.equal(r3.state, 'running');
+  assert.equal(r3.counter, r3.bodyCounter);
+});
+
+// 17) (WL-372 — شاهدُ الانقلابِ للفجوةِ الأولى) نفسُ شروطِ tear 15 لكن بالمصنوعِ القديمِ:
+//     قبلَ WL-372 كانَ recover() يفتحُ الإيقافَ السياديَّ ويكتبُ RUNNING. هذا الاختبارُ
+//     يُظهرُ أنّ الإصلاحَ **غيّرَ السلوكَ**: لو رُدَّ النصُّ إلى ما قبلَ WL-372 فسيفشلُ
+//     هذا الشاهدُ (يُطالبُ بـ'running') ويكشفُ الإرجاعَ.
+simTest('tear 17: شاهدُ الانقلابِ — إيقافٌ سياديٌّ على المتنِ المُصلَحِ لا يُفتَحُ (لو رُدَّ WL-372 فسيفشلُ)', async () => {
+  const { a, root } = await setup();
+  const s = await a.seal();
+  assert.equal(s.ok, true);
+  writeFileSync(join(root, 'halt.json'), JSON.stringify({ state: 'halted', epoch: 1 }));
+  const rec = await a.recover();
+  // الشاهدُ يطالبُ بالإصلاحِ: لو رُدَّت الشفرةُ فسيكونُ rec.state='running' ويَسقُطُ
+  assert.equal(rec.state, 'halted');
+  assert.equal(rec.error, 'STATE_HALT_SOVEREIGN');
+  assert.equal(rec.state, 'halted');
+});
+
+// 18) (WL-372 — شاهدُ الانقلابِ للفجوةِ الثانية) نفسُ شروطِ tear 16 لكن بالمصنوعِ القديمِ:
+//     قبلَ WL-372 كانَ التعافيُ المزدوجُ يُدخِلُ إغلاقاً زائفاً. هذا الاختبارُ
+//     يُظهرُ أنّ الإصلاحَ **غيّرَ السلوكَ**: لو رُدَّ النصُّ فسيفشلُ هذا الشاهدُ.
+simTest('tear 18: شاهدُ الانقلابِ — تعافٍ مزدوجٌ لا يُدخِلُ إغلاقاً زائفاً (لو رُدَّ WL-372 فسيفشلُ)', async () => {
+  const { a, root } = await setup();
+  const s0 = await a.seal();
+  assert.equal(s0.ok, true);
+  await assert.rejects(
+    () => a.seal({ beforeCertify() { throw new Error('TEAR_BEFORE_CERTIFY_3'); } }),
+    /TEAR_BEFORE_CERTIFY_3/,
+  );
+  const C = await a.readCounter();
+  // التعافيُ المزدوجُ لا يُدخِلُ إغلاقاً زائفاً — الإصلاحُ ألغى الفجوةَ
+  const r1 = await a.recover();
+  assert.equal(r1.state, 'running');
+  assert.equal(r1.recovered, 'recertify-complete');
+  const r2 = await a.recover();
+  assert.equal(r2.state, 'running');
+  assert.equal(r2.counter, r2.bodyCounter);
+  // التوكنُ مُختومٌ على المتنِ المستكمَلِ
+  const tokenAfter = JSON.parse(readFileSync(join(root, TOKEN), 'utf8'));
+  assert.equal(tokenAfter.lastSealedCounter, C);
 });
