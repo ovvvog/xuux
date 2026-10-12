@@ -153,15 +153,110 @@ test('الطفرةُ M3: حذفُ ذِكرِ عددِ ملفاتِ الاختب�
 });
 
 // ── الطفرةُ 4: تغييرُ عددِ البنودِ المفتوحةِ في PROJECT_STATUS.md ──
+// (WL-375) كان الاستبدالُ يُصيبُ **أوّلَ** ظهورٍ لـ`R3-A-01` في الملفِ لا القائمةَ
+// التي يَقرأُها الحارسُ — فإن أُضيفَ ذكرٌ مبكّرٌ شرعيٌّ لمعرِّفٍ في أعلى الملفِ انزلقَت
+// الطفرةُ إلى سطرٍ غيرِ محروسٍ وخَضِرَ الحارسُ خطأً. الآنَ تستهدفُ القائمةَ التي يقرأُها R3
+// فعلًا: السطرُ الأوّلُ الذي يَجمعُ (المفتوح · بنود · معرّفًا ببادئةٍ محروسةٍ) بعدَ نقطتَيْهِ.
 
-test('الطفرةُ M4: إضافةُ معرّفِ بندٍ زائفٍ يُسقِطُ الحاجز', () => {
+/**
+ * يُعِيدُ سطرَ R3 الذي يقرأُه الحارسُ وحدَه من ملفِّ الحالةِ — أي السطرَ الذي يَجمعُ
+ * (المفتوح · بنود · معرّفاً ببادئةٍ محروسةٍ) فيوجدُ بذاتِه دونَ سِقامٍ. (WL-375)
+ * @param {string} status
+ * @returns {string|null}
+ */
+function guardedR3Line(status) {
+  const lines = status.split('\n');
+  for (const line of lines) {
+    if (
+      line.includes('المفتوح') &&
+      line.includes('بنود') &&
+      (line.includes('`D-') ||
+        line.includes('`LIM-') ||
+        line.includes('`REPO-') ||
+        line.includes('`LIVE-') ||
+        line.includes('`R3-A-'))
+    ) {
+      return line;
+    }
+  }
+  return null;
+}
+
+/**
+ * يُدرِجُ معرّفاً داخلَ كتلةِ القائمةِ التي يَعُدُّها الحارسُ في سطرِ R3 — بعدَ النقطتَيْنِ
+ * اللاحقتَيْنِ لآخرِ «المفتوح» وقبلَ أوّلِ نقطةٍ بعدَهما. يَفشلُ إن لم يوجد سطرٌ ولا كتلةٌ.
+ * @param {string} status
+ * @param {string} fakeId
+ * @returns {string}
+ */
+function injectFakeIdIntoGuardedList(status, fakeId) {
+  const line = guardedR3Line(status);
+  assert.ok(line, 'ينبغي أن يوجدَ سطرٌ يَقرأُه الحارسُ لـR3');
+  const maftuhIdx = line.lastIndexOf('المفتوح');
+  assert.ok(maftuhIdx !== -1);
+  const afterMaftuh = line.slice(maftuhIdx);
+  const colonIdx = afterMaftuh.indexOf(':');
+  assert.ok(colonIdx !== -1, 'سطرُ R3 ينبغي أن يحملَ نقطتَيْنِ بعدَ «المفتوح»');
+  const insertAt = maftuhIdx + colonIdx + 1;
+  // إدراجٌ فقط — لا يُحذَفُ شيءٌ من السطرِ (لا النقطةُ ولا ما بعدَها).
+  const mutatedLine = line.slice(0, insertAt) + ` ${fakeId} ` + line.slice(insertAt);
+  // التوثيقُ العكسيُّ: إزالةُ النصِّ المُدرَجِ تُعيدُ السطرَ الأصليَّ بايتاً ببايت.
+  const reversed = mutatedLine.slice(0, insertAt) + mutatedLine.slice(insertAt + fakeId.length + 2);
+  assert.equal(reversed, line, 'إزالةُ المُدرَجِ ينبغي أن تُعيدَ السطرَ الأصليَّ بايتاً ببايت');
+  const lines = status.split('\n');
+  const idx = lines.indexOf(line);
+  assert.ok(idx !== -1, 'ينبغي أن يُوجَدَ سطرُ R3 في الملفِ');
+  lines.splice(idx, 1, mutatedLine);
+  return lines.join('\n');
+}
+
+test('الطفرةُ M4: إضافةُ معرّفِ بندٍ زائفٍ إلى كتلةِ القائمةِ التي يقرأُها R3 تُسقِطُ الحاجز', () => {
   const tmp = cloneRepo();
   try {
     const statusPath = path.join(tmp, 'PROJECT_STATUS.md');
     const status = readFileSync(statusPath, 'utf8');
-    // أضِف معرّفاً زائفاً إلى القائمة
-    writeFileSync(statusPath, status.replace('`R3-A-01`', '`R3-A-01` و`FAKE-1`'));
-    assert.equal(runGuard(tmp), 1, 'إضافةُ معرّفٍ زائفٍ ينبغي أن يُسقِطَ الحاجز');
+    // أضِف معرّفاً زائفاً إلى كتلةِ القائمةِ التي يقرأُها R3 — لا إلى أوّلِ ظهورٍ للمعرّفِ.
+    const mutated = injectFakeIdIntoGuardedList(status, '`FAKE-1`');
+    assert.notEqual(mutated, status, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(statusPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'إضافةُ معرّفٍ زائفٍ إلى القائمةِ المحروسةِ ينبغي أن تُسقِطَ الحاجز');
+    assert.match(stderr, /R3\/DRIFT/, 'سببُ السقوطِ ينبغي أن يكونَ R3/DRIFT');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('M4 — الحدُّ الإيجابيُّ: ذكرٌ مبكّرٌ مشروعٌ لـ`R3-A-01` خارجَ القائمةِ لا يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const statusPath = path.join(tmp, 'PROJECT_STATUS.md');
+    const status = readFileSync(statusPath, 'utf8');
+    // سطرٌ تمهيديٌّ يذكرُ المعرّفَ قبلَ القائمةِ — لا يُغيّرُ ما يقرأُه الحارسُ.
+    const withEarlyMention =
+      '> ملاحظةٌ تاريخيّةٌ: `R3-A-01` بندٌ سياديٌّ للمراجعةِ الخارجيّةِ.\n' + status;
+    writeFileSync(statusPath, withEarlyMention);
+    const { code } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, 'الذكرُ المبكّرُ خارجَ القائمةِ ينبغي أن يبقى الحارسُ أخضرَ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('M4 — اختبارُ رجوعٍ: ذكرٌ مبكّرٌ ثمّ طفرةٌ داخلَ القائمةِ المحروسةِ تُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const statusPath = path.join(tmp, 'PROJECT_STATUS.md');
+    const status = readFileSync(statusPath, 'utf8');
+    // هذا هو الجوابُ الذي كانَ يُخدعُ النسخةَ القديمةَ من M4: ذكرٌ مبكّرٌ + طفرةٌ داخلَ القائمةِ.
+    const withEarlyMention =
+      '> ملاحظةٌ تاريخيّةٌ: `R3-A-01` بندٌ سياديٌّ للمراجعةِ الخارجيّةِ.\n' + status;
+    const mutated = injectFakeIdIntoGuardedList(withEarlyMention, '`FAKE-1`');
+    assert.notEqual(mutated, withEarlyMention, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(statusPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, 'الطفرةُ داخلَ القائمةِ ينبغي أن تُسقِطَ الحاجز رغمَ الذكرِ المبكّرِ');
+    assert.match(stderr, /R3\/DRIFT/, 'سببُ السقوطِ ينبغي أن يكونَ R3/DRIFT');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
