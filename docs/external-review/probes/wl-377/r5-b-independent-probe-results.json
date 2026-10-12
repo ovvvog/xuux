@@ -1,0 +1,109 @@
+{
+  "probe": "r5-b-independent-probe",
+  "testedCommit": "705919230e7817b4c90137b491fdf4a52c25c49e",
+  "testedBranch": "main",
+  "executedAt": "2026-10-12T09:37:55.394Z",
+  "environment": "node=v20.20.2",
+  "note": "حكمُ «فشل» يعني المسلكَ قُيِّدَ رفضُهُ (الإصلاحُ ناجحٌ). حكمُ «نجح» يعني العيبَ وقعَ أثرُهُ. «لم_يجرب» يعني المسلكَ تعذَّرَ تشغيلُهُ هنا.",
+  "results": [
+    {
+      "id": "R5-B-03-same-authenticator",
+      "finding": "R5-B-03",
+      "scenario": "V-A: الرمزُ المستهلَكُ على المصادقِ نفسِهِ",
+      "judgment": "فشل",
+      "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
+      "evidence": "V-A code=AUTHN_FACTOR_REPLAYED",
+      "ms": 71
+    },
+    {
+      "id": "R5-B-03-same-log-new-authenticator",
+      "finding": "R5-B-03",
+      "scenario": "V-B: مصادقٌ جديدٌ على السجلِّ نفسِه — الرمزُ المستهلَكُ يُرفَضُ",
+      "judgment": "فشل",
+      "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
+      "evidence": "V-B code=AUTHN_FACTOR_REPLAYED",
+      "ms": 50
+    },
+    {
+      "id": "R5-B-03-fresh-empty-log",
+      "finding": "R5-B-03",
+      "scenario": "V-D: مصادقٌ جديدٌ بسجلٍّ فارغٍ جديدٍ — الرمزُ المستهلَكُ يُقبلُ (متغيرٌ مستقلٌّ، ليس السيناريو الأصليَّ)",
+      "judgment": "نجح",
+      "refusal": null,
+      "evidence": "V-D fresh-empty-log:opened",
+      "ms": 50
+    },
+    {
+      "id": "R5-B-04-no-egress-gate",
+      "finding": "R5-B-04",
+      "scenario": "قناةُ Telegram بلا `EgressGate` — يخرجُ البايتُ دونَ البوابة",
+      "judgment": "فشل",
+      "refusal": null,
+      "evidence": "state=failed;local-requests=0;failureReason=EGRESS_GATE_REQUIRED: لا يمكنُ الإرسالُ الخارجيُّ بلا بوابةِ خروجٍ موصولةٍ (R5-B-04)",
+      "ms": 4
+    },
+    {
+      "id": "R5-B-05-with-classifier-control",
+      "finding": "R5-B-05",
+      "scenario": "بوابةٌ بمُصنِّفٍ يقرأُ `sensitive` مسجَّلاً — الكذبُ `public` مُعلَنًا — يُرفَضُ عندَ ضابطِ التصنيف",
+      "judgment": "فشل",
+      "refusal": "egress-gate.mjs:send:EGRESS_NOT_AUTHORIZED",
+      "evidence": "code=EGRESS_NOT_AUTHORIZED",
+      "ms": 105
+    },
+    {
+      "id": "R5-B-05-no-classifier",
+      "finding": "R5-B-05",
+      "scenario": "`sensitive` يُعلَنُ `public` بلا مُصنِّفٍ — يمرُّ البايتُ (خارجَ الإنتاجِ)",
+      "judgment": "نجح",
+      "refusal": null,
+      "evidence": "code=PASSED",
+      "ms": 82
+    },
+    {
+      "id": "R5-B-06-forged-command",
+      "finding": "R5-B-06",
+      "scenario": "معرّفُ أمرٍ وملخصُ SHA-256 صحيحُ الشكلِ بلا تحقّقِ توقيعِ التاج — رفضٌ مُسمّىً عندَ ضابطِ التوقيعِ الملكيّ",
+      "judgment": "فشل",
+      "refusal": "enforcement-point.mjs:authorize:SOVEREIGN_COMMAND_VERIFIER_REQUIRED",
+      "evidence": "code=SOVEREIGN_COMMAND_VERIFIER_REQUIRED;policy=pol:king-sovereign-acts",
+      "ms": 55
+    },
+    {
+      "id": "R5-B-07-direct-halt",
+      "finding": "R5-B-07",
+      "scenario": "`halt()` مباشرةً بلا توقيعٍ ولا ديوانٍ",
+      "judgment": "فشل",
+      "refusal": "halt-switch.mts:halt:HALT_ROYAL_COMMAND_REQUIRED",
+      "evidence": "code=HALT_ROYAL_COMMAND_REQUIRED;state=running",
+      "ms": 1
+    },
+    {
+      "id": "R5-B-08-quarantined-actor",
+      "finding": "R5-B-08",
+      "scenario": "وكيلٌ محجورٌ — يُرفضُ برمزِ الحجرِ",
+      "judgment": "فشل",
+      "refusal": "enforcement-point.mjs:authorize:ACTOR_QUARANTINED",
+      "evidence": "code=ACTOR_QUARANTINED;policy=null",
+      "ms": 84
+    },
+    {
+      "id": "R5-B-09-no-capability-write",
+      "finding": "R5-B-09",
+      "scenario": "فاعلٌ مأذونٌ بدورِهِ في السياسةِ بـ`capabilities: []` يطلبُ `write-data`",
+      "judgment": "فشل",
+      "refusal": "engine.mjs:evaluate:POLICY_NO_MATCH",
+      "evidence": "allowed=false;code=POLICY_NO_MATCH;policy=null;control=POLICY_ALLOW",
+      "ms": 35
+    },
+    {
+      "id": "R5-B-10-false-identity-gate",
+      "finding": "R5-B-10",
+      "scenario": "ادّعاءُ `role:king` مع `requireIdentityGate: false` في الإنتاجِ — يُرفضُ عندَ البناءِ",
+      "judgment": "فشل",
+      "refusal": "enforcement-point.mjs:constructor:ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION",
+      "evidence": "code=ENFORCEMENT_IDENTITY_GATE_BYPASS_FORBIDDEN_IN_PRODUCTION;control=IDENTITY_UNVERIFIED",
+      "ms": 98
+    }
+  ]
+}
