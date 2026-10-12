@@ -400,18 +400,20 @@ export class FreshnessAnchorSim {
       }
       // الانقطاع بعد الزيادة قبل الإتمام: staged.counter == C
       if (S === C && (B === C - 1 || B === C)) {
-        // (WL-376) تحقّقُ التزامِ staged: محتوى staged يجبُ أن يُطابِقَ ما أُلزِمَ
-        // في التوكنِ قبلَ الزيادةِ (SHA-256 للمتنِ بلا certify). عيّنٌ مُلفَّقٌ بعدَ
-        // الزيادةِ — أو غيابُ الالتزامِ كليّاً — ⇒ تمزّقٌ لا إعادةَ شهادةٍ.
-        // (‏لا يُستَعملُ هذا المسارُ إلّا في المحاكي؛ في الإنتاجِ ختمُ HSM داخلَ التوكنِ.)
-        const ts = this.readTokenState();
-        if (!ts?.stagedCommit) {
-          this.writeHalt(HALT);
-          return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-commit-missing' };
-        }
-        if (FreshnessAnchorSim.stagedCommitHash(staged) !== ts.stagedCommit) {
-          this.writeHalt(HALT);
-          return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-modified-after-commit' };
+        // (WL-376) تحقّقُ التزامِ staged — يُطبّقُ عندَ B === C-1 فقط:
+        // حيثُ لا شاهِدَ مطابقةٍ للمتنِ الملتزمِ. عندَ B === C المسارُ الملتزمُ
+        // موجودٌ ويَحرُسُهُ `staged-differs-from-committed` (WL-374) — والالتزامُ
+        // استُهلِكَ بعدَ rename فلا يُنظَرُ إليه (tear 11: انقطاعٌ بعدَ rename قبلَ حذفِ staged).
+        if (B === C - 1) {
+          const ts = this.readTokenState();
+          if (!ts?.stagedCommit) {
+            this.writeHalt(HALT);
+            return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-commit-missing' };
+          }
+          if (FreshnessAnchorSim.stagedCommitHash(staged) !== ts.stagedCommit) {
+            this.writeHalt(HALT);
+            return { state: HALT, error: STATE_MANIFEST_TPM_TORN, counter: C, bodyCounter: B, stagedCounter: S, torn: 'staged-modified-after-commit' };
+          }
         }
         // إعادة شهادة فقط (بلا زيادة) وإتمام الكتابة — خاملة التكرار
         const qd = CertifySim.qualifyingData(staged);

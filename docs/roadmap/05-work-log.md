@@ -38,11 +38,17 @@
 
 #### الملفاتُ المتأثّرة
 
-`sim/tpm/manifest_seal_sim.mjs` · `tests/sim/tpm-sealed-sovereign-halt.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (‏مولَّد)
+`sim/tpm/manifest_seal_sim.mjs` · `tests/sim/tpm-sealed-sovereign-halt.test.mjs` · `tests/sim/tpm-tear-states.test.mjs` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (‏مولَّد)
 
 #### الـ commit
 
 يُملأُ بالدمج — الفرعُ `fix/wl-376-staged-recovery-gap` من `main@71ac619b`.
+
+#### تصحيحٌ بعدَ رصدِ CI (‏`b48a2250`)
+
+- رَصدَ CI شاهِدَينِ من `tests/sim/tpm-tear-states.test.mjs` (`tear 3` و`tear 11`) يَفشلانِ بسببيّةِ التحققِ الجديدِ. **السببُ:** `tear 3` يَبني الحالةَ يدويًّا (لا عبرَ `seal()`) فلا يَكتبُ `stagedCommit`؛ و`tear 11` يَستعملُ hook `beforeUnlinkStaged` فيَقعُ الانقطاعُ **بعدَ rename** فيَكونُ `B === C` والالتزامُ مُستهلَكًا فلا يَصحُّ فحصُه.
+- **التصحيحُ:** يُطبَّقُ التحققُ عندَ `B === C-1` فقط (‏حيثُ لا شاهِدَ مطابقةٍ للمتنِ الملتزمِ). عندَ `B === C` يَحرُسُهُ `staged-differs-from-committed` (‏WL-374) والالتزامُ استُهلِكَ بعدَ rename. وشاهدُ `tear 3` صارَ يَكتبُ `stagedCommit` كما يفعلُ `seal()` الحقيقيُّ.
+- أُعيدَ قياسُ الشاهِدَينِ (mock) ⇒ `running` مع `recertify-complete` في الحالتَينِ.
 
 #### الدليل
 
