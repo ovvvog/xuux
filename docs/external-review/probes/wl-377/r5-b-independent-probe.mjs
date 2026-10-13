@@ -700,16 +700,31 @@ await probe('R5-B-09-no-capability-write-via-enforcement-point', async () => {
   // نفس السيناريو لكن عبرَ نقطةِ الإنفاذِ الرسميةِ (نفس ما ستحصل عليه التطبيقاتُ):
   // `composeEnforcementChain` ثمّ `enforcementPoint.authorize` — يُتابعُ الطلبَ من
   // هويةِ الفاعلِ إلى القرارِ النهائيّ.
+  // فاعلٌ مسجَّلٌ بالسجلِّ الرسميِّ (register → شهادة → state=active): ضابطُ
+  // الهويةِ يمرُّ فلا يُحجِبُ القياسَ، وقياسُنا يبقى على ضابطِ سقفِ القدرةِ نفسِهِ —
+  // وهو المسارُ الذي أعلنَتِ المصفوفةُ أنّهُ كانَ `NOT_TESTED`.
   const chain = composeEnforcementChain({ log: new EventLog() });
+  const agent = await chain.registry.register({
+    name: 'r5b09-official-path-wl382',
+    role: 'role:agent',
+    capabilities: [],
+    kind: 'autonomous',
+  });
   const actor = {
-    id: 'minister:9',
-    kind: 'human',
-    role: 'role:minister',
+    id: agent.id,
+    kind: 'autonomous',
+    role: 'role:agent',
     state: 'active',
     capabilities: [],
   };
+  const withCapAgent = await chain.registry.register({
+    name: 'r5b09-official-path-control-wl382',
+    role: 'role:agent',
+    capabilities: ['action:write-data'],
+    kind: 'autonomous',
+  });
   const withCap = await chain.enforcementPoint.authorize({
-    actor: { ...actor, id: 'minister:8', capabilities: ['action:write-data'] },
+    actor: { ...actor, id: withCapAgent.id, capabilities: ['action:write-data'] },
     action: 'write-data',
     resource: { type: 'data', id: 'doc:1' },
     context: {},
@@ -738,7 +753,7 @@ await probe('R5-B-09-no-capability-write-via-enforcement-point', async () => {
       ? null
       : `enforcement-point.mjs:authorize:${decision.decision.code}`,
     evidence: `allowed=${decision.decision.allowed};code=${decision.decision.code};policy=${decision.decision.policyId};control=${withCap.decision.code}`,
-    note: 'الرفضُ الحاصلُ هنا هو رفضُ ضابطِ الهويةِ لا رفضُ ضابطِ القدرةِ. ضابطُ القدرةِ مُعزَّلٌ بهذا المُسارِ. المُسارُ المُطلوبُ لضابطِ القدرةِ مبنيٌّ مُباشرةً عبرَ محركِ السياساتِ. هذا هو الحدُّ المُوثَّقُ.',
+    note: 'الرفضُ الحاصلُ هو رفضُ ضابطِ القدرةِ نفسِهِ (فاصِلُ سياسةِ الكتابةِ يشترطُ قدرةً)، لا رفضًا سابقًا من بوابةِ الهويةِ: الضابطُ (فاعلٌ مسجَّلٌ بقدرةِ كتابةٍ) مُرَّ بنجاحٍ عبرَ البوابةِ نفسِها قبلَ سيناريوِ الرفضِ. الفاعلُ غيرُ المُصادقِ عليه (minister:9) يُرفَضُ من بوابةِ الهويةِ أصلًا — وهذا سلوكٌ سليمٌ لا نُقيسُهُ هنا. بعدَ هذا التغييرِ صارَ المسارُ الرسميُّ مُقيَّسًا لا مُستبعَدًا.',
   };
 });
 
