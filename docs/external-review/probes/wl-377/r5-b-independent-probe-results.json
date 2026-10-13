@@ -1,10 +1,10 @@
 {
   "probe": "r5-b-independent-probe",
-  "testedCommit": "3f5c2fbac427a302112a7d2f4211a32edbfea7bf",
-  "testedShortSha": "3f5c2fba",
-  "testedBranch": "work/fix-probe-wl380",
-  "uncommittedChanges": false,
-  "executedAt": "2026-10-12T21:12:28.359Z",
+  "testedCommit": "4b9818db082b2b3058c1ca810a0f268864a00105",
+  "testedShortSha": "4b9818db",
+  "testedBranch": "work/wl-382-r5b09-official-path",
+  "uncommittedChanges": true,
+  "executedAt": "2026-10-13T01:57:14.586Z",
   "environment": {
     "node": "v20.20.2",
     "platform": "linux",
@@ -22,7 +22,7 @@
       "result": "PASS",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-A code=AUTHN_FACTOR_REPLAYED",
-      "ms": 74
+      "ms": 76
     },
     {
       "id": "R5-B-03-same-log-new-authenticator",
@@ -32,7 +32,7 @@
       "result": "PASS",
       "refusal": "king-auth.mjs:authenticate:AUTHN_FACTOR_REPLAYED",
       "evidence": "V-B code=AUTHN_FACTOR_REPLAYED",
-      "ms": 37
+      "ms": 39
     },
     {
       "id": "R5-B-03-fresh-empty-log",
@@ -42,7 +42,7 @@
       "result": "FAIL",
       "refusal": null,
       "evidence": "V-D fresh-empty-log:opened",
-      "ms": 51
+      "ms": 29
     },
     {
       "id": "R5-B-04-no-egress-gate",
@@ -62,7 +62,7 @@
       "result": "PASS",
       "refusal": "egress-gate.mjs:send:EGRESS_NOT_AUTHORIZED",
       "evidence": "code=EGRESS_NOT_AUTHORIZED",
-      "ms": 100
+      "ms": 110
     },
     {
       "id": "R5-B-05-no-classifier",
@@ -72,7 +72,7 @@
       "result": "FAIL",
       "refusal": null,
       "evidence": "code=PASSED",
-      "ms": 96
+      "ms": 102
     },
     {
       "id": "R5-B-06-forged-command",
@@ -82,7 +82,7 @@
       "result": "PASS",
       "refusal": "enforcement-point.mjs:authorize:SOVEREIGN_COMMAND_VERIFIER_REQUIRED",
       "evidence": "code=SOVEREIGN_COMMAND_VERIFIER_REQUIRED;policy=pol:king-sovereign-acts",
-      "ms": 43
+      "ms": 66
     },
     {
       "id": "R5-B-07-direct-halt",
@@ -92,7 +92,7 @@
       "result": "PASS",
       "refusal": "halt-switch.mts:halt:HALT_ROYAL_COMMAND_REQUIRED",
       "evidence": "code=HALT_ROYAL_COMMAND_REQUIRED;state=running",
-      "ms": 1
+      "ms": 2
     },
     {
       "id": "R5-B-08-quarantined-actor",
@@ -102,7 +102,7 @@
       "result": "PASS",
       "refusal": "enforcement-point.mjs:authorize:ACTOR_QUARANTINED",
       "evidence": "code=ACTOR_QUARANTINED;policy=null",
-      "ms": 67
+      "ms": 91
     },
     {
       "id": "R5-B-09-no-capability-write",
@@ -112,17 +112,17 @@
       "result": "PASS",
       "refusal": "engine.mjs:evaluate:POLICY_NO_MATCH",
       "evidence": "allowed=false;code=POLICY_NO_MATCH;policy=null;control=POLICY_ALLOW",
-      "ms": 34
+      "ms": 41
     },
     {
       "id": "R5-B-09-no-capability-write-via-enforcement-point",
       "finding": "R5-B-09",
-      "scenario": "الضابطُ: فاعلٌ بقدرةِ كتابةٍ لا يُؤذَنُ عبرَ السلسلةِ الرسميةِ",
-      "judgment": "لم_يجرب",
-      "result": "NOT_TESTED",
-      "refusal": "enforcement-point.mjs:authorize:IDENTITY_UNVERIFIED",
-      "evidence": "code=IDENTITY_UNVERIFIED",
-      "ms": 60
+      "scenario": "فاعلٌ بـ`capabilities: []` يطلبُ `write-data` عبرَ نقطةِ الإنفاذِ الرسميةِ",
+      "judgment": "فشل",
+      "result": "PASS",
+      "refusal": "enforcement-point.mjs:authorize:POLICY_NO_MATCH",
+      "evidence": "allowed=false;code=POLICY_NO_MATCH;policy=null;control=POLICY_ALLOW",
+      "ms": 65
     },
     {
       "id": "R5-B-10-false-identity-gate",
@@ -142,7 +142,7 @@
       "result": "FAIL",
       "refusal": null,
       "evidence": "allowed=true;code=POLICY_ALLOW;policy=pol:read-data-cleared;control=IDENTITY_UNVERIFIED;env=NODE_ENV=test;requireIdentityGate=false",
-      "ms": 75
+      "ms": 71
     }
   ]
 }
