@@ -141,6 +141,14 @@ engagements:
           provider: XAI
           rounds:
             - 1
+        - id: gpt_6_1_sol
+          provider: OPENAI
+          rounds:
+            - 5
+        - id: claude_opus_5_5
+          provider: ANTHROPIC
+          rounds:
+            - 5
       reviewedCommit: d9e094e802334407d24d07451944e4ba7adb0621
       comparisonMatrix: docs/external-review/M11.05-round-1-comparison-matrix.md
     acceptanceCriteria: تقريرٌ **وإصلاحٌ موثَّقٌ وإعادةُ اختبارٍ ناجحةٌ** صادرةٌ عن الجهةِ نفسِها — فإعادةُ الاختبارِ شرطٌ لا مُستحسَنٌ.
@@ -848,8 +856,12 @@ findings:
     origin: round-5
     severityAsWritten: منخفضة
     severity: low
-    status: open
-    agreement: 'اتّفاقٌ على `open` في الجولةِ الثامنةِ — شطرُ «بلا مستهلكٍ حيٍّ» باقٍ؛ واختلافٌ في الجولةِ الثانيةَ عشرةَ (`WL-351`): «أ» (`gpt_6_astra`) و«ج» (`grok_4_7`) حكما `closed` — المخزنُ موصولٌ بسلطةِ التصديقِ ويُستهلك (`entrypoint.mjs` يمرّره إلى `CertificateAuthority` و`isValid` يقرأُ `isRevoked`) — و«ب» (`gemini_3_8_flash`) حكمَ `open` — مبنيٌّ في المصنعِ غيرَ موصولٍ بمسارٍ تشغيلي. القيدُ `open` بالأضعفِ.'
+    status: closed
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوَينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ (WL-383 / PR رقم 340) على الإغلاقِ بدليلِ الإعادةِ على
+      main@e0ded6f5 — العضوانِ حكما closed مع تنبيهِ أنّ العقدَ يُدرِجُها engagement: M11.04 بينما الحزمةُ تُضعُها في M11.05،
+      وحُكِمَت اتباعاً للحزمة. الجولةُ السابقةُ (WL-351، ثلاثةُ مزوّدين) أظهرت اختلافاً؛ لكن العضوَينِ المستقلَّينِ في
+      الجولةِ الخامسةِ (جولةِ WL-383) حكما closed.
     reproductionPath: قراءةُ `src/root-of-trust/production-runtime.mts` — `FileRevocationStore` يُبنى ولا يُوصَلُ بسلطةِ التصديقِ في مسارٍ إنتاجيٍّ
     affectedFiles:
       - src/root-of-trust/production-runtime.mts
@@ -857,12 +869,25 @@ findings:
       - claude_fable_5
     overlapsWith:
       - R4-K3-03
+    closure:
+      fixCommit: 3f5319f2
+      retestedBy:
+        - gpt_6_1_sol
+        - claude_opus_5_5
+      retestRound: 5
+      retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383 / PR رقم 340) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1: العضوُ «gpt-6-1-sol» حكمَ closed
+        (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5» حكمَ closed
+        (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md).
     rawReports:
       claude_fable_5: docs/external-review/reports/M11.04-round-5-model-council-report-claude-fable-5.md
       gpt_6_sol: docs/external-review/reports/M11.04-round-8-model-council-report-gpt-6-sol.md
       gemini_3_8_flash: docs/external-review/reports/M11.04-round-8-model-council-report-gemini-3-8-flash.md
       gpt_6_astra: docs/external-review/reports/M11.04-round-12-model-council-report-gpt-6-astra.md
       grok_4_7: docs/external-review/reports/M11.04-round-12-model-council-report-grok-4-7.md
+      gpt_6_1_sol: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md
+      claude_opus_5_5: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md
   - id: R5-B-01
     engagement: M11.04
     title: الحارسُ الإنتاجيُّ يقبلُ أيَّ `RevocationStore` متطايرٍ ما دام ليس مثيلاً لـ`MemoryRevocationStore`
@@ -1414,7 +1439,8 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: closed
-    agreement: اتّفاقٌ صريحٌ من العضوينِ (gpt_6_1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على `main@e0ded6f5` (WL-383 / PR #340)
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على main@e0ded6f5 (WL-383 / PR رقم 340).
     reproductionPath: 1. `new KingAuthenticator` بسرِّ عاملٍ مولَّدٍ وقتَ التشغيل. 2. `authenticate` برمزِ الخطوة ⇒ تُفتحُ جلسة. 3. `authenticate` بالرمزِ نفسه على المصادقِ عينه ⇒ `AUTHN_FACTOR_REPLAYED`. 4. `new KingAuthenticator` بالسياسةِ والمزوّدِ نفسيهما. 5. `authenticate` بالرمزِ المستهلَك داخلَ النافذة ⇒ تُفتحُ جلسة.
     affectedFiles:
       - src/authn/king-auth.mjs
@@ -1433,7 +1459,10 @@ findings:
         - claude_opus_5_5
       retestRound: 5
       retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
-      retestEvidence: PR #340 / WL-383 — جولةُ مجلسِ النماذجِ المستقلِّ على `main@e0ded6f5`: العضوُ «gpt_6_1-sol» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md» · العضوُ «claude-opus-5-5» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md».
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1:
+        العضوُ «gpt-6-1-sol» حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5»
+        حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md) · الإصلاحُ بكوميتِ fba8c10f (R5-B-03) أو 180ed3c4 (البقية).
   - id: R5-B-04
     engagement: M11.05
     title: قناةُ Telegram تتجاوزُ بوابةَ الخروج — بايتٌ يخرجُ دونَ المرورِ بـ`EgressGate`
@@ -1441,7 +1470,8 @@ findings:
     severityAsWritten: حرجة
     severity: high
     status: closed
-    agreement: اتّفاقٌ صريحٌ من العضوينِ (gpt_6_1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على `main@e0ded6f5` (WL-383 / PR #340)
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على main@e0ded6f5 (WL-383 / PR رقم 340).
     reproductionPath: "1. منصِتُ HTTP محليٌّ على `127.0.0.1`. 2. ضبطُ `TELEGRAM_API_BASE` إلى ذلك المنصِت. 3. `TelegramBotChannel({ getToken: () => 'dummy-token' }).send(...)`. 4. المنصِتُ تلقّى طلباً؛ النتيجة `state: sent` و`bytes: 51`."
     affectedFiles:
       - src/notifications/channels/telegram-bot.mjs
@@ -1460,7 +1490,10 @@ findings:
         - claude_opus_5_5
       retestRound: 5
       retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
-      retestEvidence: PR #340 / WL-383 — جولةُ مجلسِ النماذجِ المستقلِّ على `main@e0ded6f5`: العضوُ «gpt_6_1-sol» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md» · العضوُ «claude-opus-5-5» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md».
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1:
+        العضوُ «gpt-6-1-sol» حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5»
+        حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md) · الإصلاحُ بكوميتِ fba8c10f (R5-B-03) أو 180ed3c4 (البقية).
   - id: R5-B-05
     engagement: M11.05
     title: كذبُ التصنيفِ على جهةٍ معتمدة — `sensitive` يُعلَنُ `public`
@@ -1485,7 +1518,8 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: closed
-    agreement: اتّفاقٌ صريحٌ من العضوينِ (gpt_6_1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على `main@e0ded6f5` (WL-383 / PR #340)
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على main@e0ded6f5 (WL-383 / PR رقم 340).
     reproductionPath: "`EnforcementPoint` بـ`requireIdentityGate: false`، فاعل `role:king`، فعل `stop-state` على `state:sovereign`. بلا أمر ⇒ `SOVEREIGN_COMMAND_REQUIRED`. مع `royalCommandId: 'cmd:forged-probe'` وملخص `'a'.repeat(64)` ⇒ `POLICY_ALLOW`."
     affectedFiles:
       - src/policy/engine.mjs
@@ -1505,7 +1539,10 @@ findings:
         - claude_opus_5_5
       retestRound: 5
       retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
-      retestEvidence: PR #340 / WL-383 — جولةُ مجلسِ النماذجِ المستقلِّ على `main@e0ded6f5`: العضوُ «gpt_6_1-sol» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md» · العضوُ «claude-opus-5-5» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md».
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1:
+        العضوُ «gpt-6-1-sol» حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5»
+        حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md) · الإصلاحُ بكوميتِ fba8c10f (R5-B-03) أو 180ed3c4 (البقية).
   - id: R5-B-07
     engagement: M11.05
     title: '`HaltSwitch.halt` لا يشترطُ ديواناً ولا أمراً ملكيّاً'
@@ -1513,7 +1550,8 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: closed
-    agreement: اتّفاقٌ صريحٌ من العضوينِ (gpt_6_1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على `main@e0ded6f5` (WL-383 / PR #340)
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على main@e0ded6f5 (WL-383 / PR رقم 340).
     reproductionPath: "`new HaltSwitch(...)` ثمّ `haltSwitch.halt('probe-direct')`. قبل: `running`. بعد: `halted`."
     affectedFiles:
       - src/root-of-trust/halt-switch.mjs
@@ -1532,7 +1570,10 @@ findings:
         - claude_opus_5_5
       retestRound: 5
       retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
-      retestEvidence: PR #340 / WL-383 — جولةُ مجلسِ النماذجِ المستقلِّ على `main@e0ded6f5`: العضوُ «gpt_6_1-sol» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md» · العضوُ «claude-opus-5-5» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md».
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1:
+        العضوُ «gpt-6-1-sol» حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5»
+        حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md) · الإصلاحُ بكوميتِ fba8c10f (R5-B-03) أو 180ed3c4 (البقية).
   - id: R5-B-08
     engagement: M11.05
     title: حجرُ الذاكرةِ غيرُ موصولٍ بنقطةِ الإنفاذ — وكيلٌ محجورٌ يبقى فاعلَ تفويض
@@ -1540,7 +1581,8 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: closed
-    agreement: اتّفاقٌ صريحٌ من العضوينِ (gpt_6_1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على `main@e0ded6f5` (WL-383 / PR #340)
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على main@e0ded6f5 (WL-383 / PR رقم 340).
     reproductionPath: "1. `composeEnforcementChain`. 2. تسجيلُ وكيل `role:agent`. 3. `quarantine.report({ kind: 'model-fingerprint-mismatch', subject })`. 4. `isQuarantined === true`. 5. `enforcementPoint.authorize` لـ`read-registry` ⇒ `POLICY_ALLOW`."
     affectedFiles:
       - src/core/composition-root.mjs
@@ -1560,7 +1602,10 @@ findings:
         - claude_opus_5_5
       retestRound: 5
       retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
-      retestEvidence: PR #340 / WL-383 — جولةُ مجلسِ النماذجِ المستقلِّ على `main@e0ded6f5`: العضوُ «gpt_6_1-sol» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md» · العضوُ «claude-opus-5-5» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md».
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1:
+        العضوُ «gpt-6-1-sol» حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5»
+        حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md) · الإصلاحُ بكوميتِ fba8c10f (R5-B-03) أو 180ed3c4 (البقية).
   - id: R5-B-09
     engagement: M11.05
     title: سقفُ القدراتِ غيرُ منفَّذٍ في سياسةِ الكتابة — وكيلٌ بلا قدراتٍ يُؤذَنُ بالكتابة
@@ -1568,7 +1613,8 @@ findings:
     severityAsWritten: عالية
     severity: high
     status: closed
-    agreement: اتّفاقٌ صريحٌ من العضوينِ (gpt_6_1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على `main@e0ded6f5` (WL-383 / PR #340)
+    agreement: >-
+      اتّفاقٌ صريحٌ من العضوينِ (gpt-6-1-sol · claude_opus_5_5) في الجولةِ الخامسةِ على الإغلاقِ بدليلِ الإعادةِ على main@e0ded6f5 (WL-383 / PR رقم 340).
     reproductionPath: 'فاعل `role:agent` و`capabilities: []` يطلب `write-data` على `data:doc:1`. القرار `POLICY_ALLOW` / `pol:write-data-operators`.'
     affectedFiles:
       - config/policies.yaml
@@ -1588,7 +1634,10 @@ findings:
         - claude_opus_5_5
       retestRound: 5
       retestCommit: e0ded6f56a4bb94bb6e136469d089cbc083b75a1
-      retestEvidence: PR #340 / WL-383 — جولةُ مجلسِ النماذجِ المستقلِّ على `main@e0ded6f5`: العضوُ «gpt_6_1-sol» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md» · العضوُ «claude-opus-5-5» والتقريرُ الخامُّ «docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md».
+      retestEvidence: >-
+        جولةُ مجلسِ النماذجِ المستقلِّ الخامسةُ (WL-383) على main@e0ded6f56a4bb94bb6e136469d089cbc083b75a1:
+        العضوُ «gpt-6-1-sol» حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md) · العضوُ «claude-opus-5-5»
+        حكمَ closed (التقريرُ الخامُّ: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md) · الإصلاحُ بكوميتِ fba8c10f (R5-B-03) أو 180ed3c4 (البقية).
   - id: R5-B-10
     engagement: M11.05
     title: '`requireIdentityGate: false` يثقُ بوصفِ الفاعل — ادّعاءُ `role:king` بلا بوابةِ هوية'
