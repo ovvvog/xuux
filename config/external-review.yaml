@@ -870,7 +870,7 @@ findings:
     overlapsWith:
       - R4-K3-03
     closure:
-      fixCommit: 3f5319f2
+      fixCommit: d63868d2
       retestedBy:
         - gpt_6_1_sol
         - claude_opus_5_5
