@@ -33,6 +33,7 @@ import { runIsolated } from './isolation.mjs';
 import { LIMIT_ERRORS, runWithLimits } from './limits.mjs';
 import { TaskLifecycle } from './lifecycle.mjs';
 import { QUEUE_ERRORS, QueueError } from './queue.mjs';
+import { TICK_PHASES, WorkerDatabaseFault, classifyDatabaseFault } from './db-recovery.mjs';
 
 /** رموز العامل. */
 export const WORKER_ERRORS = Object.freeze({
@@ -185,6 +186,147 @@ export function createWorker({
     }
   }
 
+  /**
+   * دورةٌ واحدة تُقيّد مرحلتَها في `cursor` قبل كلِّ نداءٍ للقاعدة، فيُعرف حتمياً
+   * — لا تخميناً من رسالة — أين وقع العطبُ وما الفعلُ الذي كان يُكتب (`WL-387`).
+   * @param {{ phase: string, taskId: string | null, pending: import('./db-recovery.mjs').PendingOutcome | null }} cursor
+   * @returns {Promise<WorkerTick>}
+   */
+  async function tickOnce(cursor) {
+    const startedAt = Date.now();
+    /** @param {WorkerTick['outcome']} outcome @param {string | null} taskId @param {string | null} code */
+    const finish = (outcome, taskId, code) => ({
+      outcome,
+      taskId,
+      code,
+      durationMs: Date.now() - startedAt,
+    });
+
+    // (1) الإيقاف قبل الحجز: لا مهمة تُحجز بعد الإيقاف.
+    if (isHalted()) return finish('halted', null, 'HALTED');
+
+    const claimed = await queue.claim({ worker, limit: 1 });
+    const task = claimed[0];
+    if (task === undefined) return finish('idle', null, null);
+    cursor.phase = TICK_PHASES.PRE_RUN;
+    cursor.taskId = task.id;
+
+    // (3) الإيقاف بعد الحجز وقبل التشغيل: تُعاد المهمة بلا تنفيذ ولا فقدان.
+    if (isHalted()) {
+      const reason =
+        'أُوقف النظام إيقافاً شاملاً بعد الحجز وقبل التشغيل؛ أُعيدت المهمة إلى الطابور بلا تنفيذ.';
+      cursor.pending = { op: 'release-halt', reason };
+      await queue.releaseForHalt({ taskId: task.id, worker, reason });
+      return finish('halted', task.id, 'TASK_HALTED');
+    }
+
+    // (4) الميزانية قبل التشغيل: من نفدت ميزانيته لا يبدأ.
+    if (budget !== null) {
+      const decision = await budget.chargeBeforeStart(task);
+      if (!decision.allowed) {
+        const code = decision.code ?? 'TASK_BUDGET_EXHAUSTED';
+        const message = decision.message ?? 'رفضت الميزانية تشغيل المهمة.';
+        cursor.pending = { op: 'fail', code, message, retryable: false };
+        await queue.fail({
+          taskId: task.id,
+          worker,
+          code,
+          message,
+          // نفاد الميزانية ليس عطباً عارضاً يُرجى زواله بإعادة المحاولة: يُنهى
+          // نهائياً وتُسجَّل رسالته الميتة كي يراها بشر.
+          retryable: false,
+        });
+        return finish('budget-denied', task.id, decision.code ?? null);
+      }
+    }
+
+    // (6) نبضة القلب: تمدّ العقد وتنقل طلب الإلغاء إلى قتلٍ قسري.
+    const controller = new AbortController();
+    const beat = setInterval(() => {
+      void (async () => {
+        try {
+          const reading = await queue.heartbeat({ taskId: task.id, worker });
+          // فقدُ العقد أو طلب الإلغاء أو الإيقاف الشامل: ثلاثتها تُوقف التنفيذ.
+          if (reading.cancelRequested || !reading.extended || isHalted()) controller.abort();
+        } catch {
+          // خطأ نبضة قلب لا يُترك يُسقط العامل، لكنه لا يُبتلع أثره: يُقطع
+          // التنفيذ لأن عاملاً لا يستطيع تمديد عقده لا يجوز أن يستمرّ.
+          controller.abort();
+        }
+      })();
+    }, heartbeatMs);
+    beat.unref();
+
+    try {
+      // (5) التنفيذ بحدوده في عملية منفصلة.
+      const run = await runTask({ task, signal: controller.signal });
+      // من هنا وقع الأثر: كلُّ عطبٍ بعده يُسوّى بكتابةِ الحصيلةِ لا بإعادةِ التشغيل.
+      cursor.phase = TICK_PHASES.RECORD;
+      cursor.pending = { op: 'interrupted' };
+      onRun?.(run);
+
+      if (run.ok) {
+        cursor.pending = { op: 'succeed', result: run.result ?? {} };
+        await queue.succeed({ taskId: task.id, worker, result: run.result ?? {} });
+        return finish('done', task.id, null);
+      }
+
+      if (run.code === LIMIT_ERRORS.CANCELLED) {
+        const current = await queue.get(task.id);
+        if (current?.cancelRequested === true) {
+          cursor.pending = { op: 'confirm-cancel' };
+          await queue.confirmCancelled({ taskId: task.id, worker });
+          return finish('cancelled', task.id, LIMIT_ERRORS.CANCELLED);
+        }
+        // أُلغي التنفيذ بلا طلب إلغاء على المهمة ⇒ السبب إيقافٌ شامل أو فقدُ
+        // عقد. تُعاد إلى الطابور بلا فقدان، ولا تُعلن ملغاة كذباً.
+        //
+        // والفرقُ بين السببَين فرقٌ في الحساب لا في اللفظ (الدَّينُ `D-8`):
+        // الإيقافُ فعلُ سلطةٍ فلا يُحمَّل على ميزانيةِ محاولاتِ المهمّة، فيُفرَجُ
+        // عنها بـ`releaseForHalt`. وأمّا فقدُ العقدِ أو تعذُّرُ النبضةِ فعطبُ
+        // سياقِ تنفيذٍ **تُحسَبُ** محاولتُه، وإلّا صارت المهمّةُ التي تُعطِّل
+        // عاملَها تُحجَزُ إلى الأبدِ بلا أن تستنفدَ محاولاتِها.
+        const halted = isHalted();
+        try {
+          if (halted) {
+            const reason = 'أُوقف النظام إيقافاً شاملاً أثناء تنفيذٍ جارٍ فأُجهض وأُعيدت المهمة.';
+            cursor.pending = { op: 'release-halt', reason };
+            await queue.releaseForHalt({ taskId: task.id, worker, reason });
+          } else {
+            const code = 'TASK_EXECUTION_INTERRUPTED';
+            const message = 'قُطع التنفيذ (فقدُ عقد أو تعذُّر نبضة) فأُعيدت المهمة إلى الطابور.';
+            cursor.pending = { op: 'fail', code, message, retryable: true };
+            await queue.fail({ taskId: task.id, worker, code, message, retryable: true });
+          }
+          return finish('requeued', task.id, halted ? 'TASK_HALTED' : 'TASK_EXECUTION_INTERRUPTED');
+        } catch (error) {
+          // فقدُ العقد يعني أن غيره استعادها: لا خبر أصدق من ذلك ولا فقدان.
+          if (error instanceof QueueError && error.code === QUEUE_ERRORS.LEASE_LOST) {
+            return finish('requeued', task.id, QUEUE_ERRORS.LEASE_LOST);
+          }
+          throw error;
+        }
+      }
+
+      const failureCode = run.code ?? LIMIT_ERRORS.HANDLER_FAILED;
+      const failureMessage = run.message ?? 'فشل بلا رسالة';
+      cursor.pending = { op: 'fail', code: failureCode, message: failureMessage, retryable: true };
+      await queue.fail({
+        taskId: task.id,
+        worker,
+        code: failureCode,
+        message: failureMessage,
+        // تجاوز الحدّ ليس عطباً عارضاً: إعادةُ نفس المهمة بنفس حدّها ستتجاوزه
+        // مرّة أخرى. فتُعاد لأن الحمل قد يكون عارضاً، وهذا حدٌّ معلن يُراجَع
+        // بقرار مالك لا بتخمين منفّذ.
+        retryable: true,
+      });
+      return finish('failed', task.id, run.code);
+    } finally {
+      clearInterval(beat);
+    }
+  }
+
   return Object.freeze({
     /**
      * دورة واحدة: حجزٌ واحد وتنفيذه إن جاز. تُعيد حصيلتها ولا ترمي عند الإيقاف
@@ -192,135 +334,24 @@ export function createWorker({
      * @returns {Promise<WorkerTick>}
      */
     async tick() {
-      const startedAt = Date.now();
-      /** @param {WorkerTick['outcome']} outcome @param {string | null} taskId @param {string | null} code */
-      const finish = (outcome, taskId, code) => ({
-        outcome,
-        taskId,
-        code,
-        durationMs: Date.now() - startedAt,
-      });
-
-      // (1) الإيقاف قبل الحجز: لا مهمة تُحجز بعد الإيقاف.
-      if (isHalted()) return finish('halted', null, 'HALTED');
-
-      const claimed = await queue.claim({ worker, limit: 1 });
-      const task = claimed[0];
-      if (task === undefined) return finish('idle', null, null);
-
-      // (3) الإيقاف بعد الحجز وقبل التشغيل: تُعاد المهمة بلا تنفيذ ولا فقدان.
-      if (isHalted()) {
-        await queue.releaseForHalt({
-          taskId: task.id,
-          worker,
-          reason:
-            'أُوقف النظام إيقافاً شاملاً بعد الحجز وقبل التشغيل؛ أُعيدت المهمة إلى الطابور بلا تنفيذ.',
-        });
-        return finish('halted', task.id, 'TASK_HALTED');
-      }
-
-      // (4) الميزانية قبل التشغيل: من نفدت ميزانيته لا يبدأ.
-      if (budget !== null) {
-        const decision = await budget.chargeBeforeStart(task);
-        if (!decision.allowed) {
-          await queue.fail({
-            taskId: task.id,
-            worker,
-            code: decision.code ?? 'TASK_BUDGET_EXHAUSTED',
-            message: decision.message ?? 'رفضت الميزانية تشغيل المهمة.',
-            // نفاد الميزانية ليس عطباً عارضاً يُرجى زواله بإعادة المحاولة: يُنهى
-            // نهائياً وتُسجَّل رسالته الميتة كي يراها بشر.
-            retryable: false,
-          });
-          return finish('budget-denied', task.id, decision.code ?? null);
-        }
-      }
-
-      // (6) نبضة القلب: تمدّ العقد وتنقل طلب الإلغاء إلى قتلٍ قسري.
-      const controller = new AbortController();
-      const beat = setInterval(() => {
-        void (async () => {
-          try {
-            const reading = await queue.heartbeat({ taskId: task.id, worker });
-            // فقدُ العقد أو طلب الإلغاء أو الإيقاف الشامل: ثلاثتها تُوقف التنفيذ.
-            if (reading.cancelRequested || !reading.extended || isHalted()) controller.abort();
-          } catch {
-            // خطأ نبضة قلب لا يُترك يُسقط العامل، لكنه لا يُبتلع أثره: يُقطع
-            // التنفيذ لأن عاملاً لا يستطيع تمديد عقده لا يجوز أن يستمرّ.
-            controller.abort();
-          }
-        })();
-      }, heartbeatMs);
-      beat.unref();
-
+      /** @type {{ phase: string, taskId: string | null, pending: import('./db-recovery.mjs').PendingOutcome | null }} */
+      const cursor = { phase: TICK_PHASES.CLAIM, taskId: null, pending: null };
       try {
-        // (5) التنفيذ بحدوده في عملية منفصلة.
-        const run = await runTask({ task, signal: controller.signal });
-        onRun?.(run);
-
-        if (run.ok) {
-          await queue.succeed({ taskId: task.id, worker, result: run.result ?? {} });
-          return finish('done', task.id, null);
-        }
-
-        if (run.code === LIMIT_ERRORS.CANCELLED) {
-          const current = await queue.get(task.id);
-          if (current?.cancelRequested === true) {
-            await queue.confirmCancelled({ taskId: task.id, worker });
-            return finish('cancelled', task.id, LIMIT_ERRORS.CANCELLED);
-          }
-          // أُلغي التنفيذ بلا طلب إلغاء على المهمة ⇒ السبب إيقافٌ شامل أو فقدُ
-          // عقد. تُعاد إلى الطابور بلا فقدان، ولا تُعلن ملغاة كذباً.
-          //
-          // والفرقُ بين السببَين فرقٌ في الحساب لا في اللفظ (الدَّينُ `D-8`):
-          // الإيقافُ فعلُ سلطةٍ فلا يُحمَّل على ميزانيةِ محاولاتِ المهمّة، فيُفرَجُ
-          // عنها بـ`releaseForHalt`. وأمّا فقدُ العقدِ أو تعذُّرُ النبضةِ فعطبُ
-          // سياقِ تنفيذٍ **تُحسَبُ** محاولتُه، وإلّا صارت المهمّةُ التي تُعطِّل
-          // عاملَها تُحجَزُ إلى الأبدِ بلا أن تستنفدَ محاولاتِها.
-          const halted = isHalted();
-          try {
-            if (halted) {
-              await queue.releaseForHalt({
-                taskId: task.id,
-                worker,
-                reason: 'أُوقف النظام إيقافاً شاملاً أثناء تنفيذٍ جارٍ فأُجهض وأُعيدت المهمة.',
-              });
-            } else {
-              await queue.fail({
-                taskId: task.id,
-                worker,
-                code: 'TASK_EXECUTION_INTERRUPTED',
-                message: 'قُطع التنفيذ (فقدُ عقد أو تعذُّر نبضة) فأُعيدت المهمة إلى الطابور.',
-                retryable: true,
-              });
-            }
-            return finish(
-              'requeued',
-              task.id,
-              halted ? 'TASK_HALTED' : 'TASK_EXECUTION_INTERRUPTED',
-            );
-          } catch (error) {
-            // فقدُ العقد يعني أن غيره استعادها: لا خبر أصدق من ذلك ولا فقدان.
-            if (error instanceof QueueError && error.code === QUEUE_ERRORS.LEASE_LOST) {
-              return finish('requeued', task.id, QUEUE_ERRORS.LEASE_LOST);
-            }
-            throw error;
-          }
-        }
-
-        await queue.fail({
-          taskId: task.id,
+        return await tickOnce(cursor);
+      } catch (error) {
+        // عطبُ قاعدةٍ يُرفع مُعرَّفاً بمرحلته وما كان يُكتب، لا خاماً يُميت الحلقة
+        // ويُضيّع معه ما يلزم للتسوية. وما ليس عطبَ قاعدةٍ يُرفع كما هو.
+        const fault = classifyDatabaseFault(error);
+        if (fault === null) throw error;
+        throw new WorkerDatabaseFault({
           worker,
-          code: run.code ?? LIMIT_ERRORS.HANDLER_FAILED,
-          message: run.message ?? 'فشل بلا رسالة',
-          // تجاوز الحدّ ليس عطباً عارضاً: إعادةُ نفس المهمة بنفس حدّها ستتجاوزه
-          // مرّة أخرى. فتُعاد لأن الحمل قد يكون عارضاً، وهذا حدٌّ معلن يُراجَع
-          // بقرار مالك لا بتخمين منفّذ.
-          retryable: true,
+          phase: cursor.phase,
+          taskId: cursor.taskId,
+          pending: cursor.pending,
+          fault,
+          cause: error,
+          at: new Date(),
         });
-        return finish('failed', task.id, run.code);
-      } finally {
-        clearInterval(beat);
       }
     },
 
