@@ -52,6 +52,10 @@ import {
 } from '../../src/execution/db-recovery.mjs';
 import { QueueError } from '../../src/execution/queue.mjs';
 import { createPool } from '../../src/persistence/db.mjs';
+import { BUDGET_ERRORS } from '../../src/execution/budget.mjs';
+import { HALT_RELEASE_CODE } from '../../src/execution/queue.mjs';
+import { createQuotaLedger } from '../../src/policy/quota.mjs';
+import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, databaseUrl, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
@@ -1113,5 +1117,362 @@ test(
     const verdict = run.events().find((event) => event.type === 'kernel.worker.db-recovery');
     assert.equal(verdict?.data['verdict'], RECOVERY_VERDICTS.UNVERIFIED);
     assert.equal(verdict?.data['reason'], RECOVERY_REASONS.STOPPED);
+  },
+);
+
+// ─── (8) حدُّ رفضِ الميزانية: القرارُ الملتزَمُ لا يُقلَب بضياعِ ردِّه ──────────
+
+/** موردٌ معلنٌ في `config/quotas.yaml`؛ حدُّه من السياسة لا رقمٌ مُختلق. */
+const BUDGET_RESOURCE = 'task-executions';
+/** رسالةُ الرفضِ الميتةُ تُكتب في معاملةِ `queue.fail()` نفسِها ولا تُكتب في غيرها. */
+const DEAD_LETTER_SQL = 'INSERT INTO state.task_dead_letters';
+/** خصمُ الدفتر: استعلامٌ ذاتيُّ الالتزام بعد علامةِ الخصم على المهمّة. */
+const QUOTA_DEBIT_SQL = 'INSERT INTO state.quotas';
+const BUDGET_ACTOR = 'actor-db-recovery-budget';
+
+/**
+ * بيئةُ ميزانيةٍ حقيقيّة: دفترُ حصصٍ على القاعدةِ نفسِها بساعةٍ يُحرّكها الاختبار،
+ * وفاعلٌ استُهلك من حصّته حتى لا يبقى إلا وحدةٌ واحدة — فمهمّةٌ بوحدتين تُرفض الآن
+ * وتُقبل لو أُعيدت بعد انقضاءِ النافذة. هذا هو الخطرُ لا افتراضه.
+ * @param {Awaited<ReturnType<typeof environment>>} env
+ */
+async function budgetSetup(env) {
+  const definitions = loadPolicyBundle().quotas;
+  const declared = definitions.find((entry) => entry.resource === BUDGET_RESOURCE);
+  assert.ok(declared !== undefined, `المورد ${BUDGET_RESOURCE} غير معلن`);
+  const clock = { at: new Date() };
+  const now = () => clock.at;
+  const workerLedger = createQuotaLedger({ pool: env.workerPool, definitions, now });
+  const adminLedger = createQuotaLedger({ pool: env.admin, definitions, now });
+  await adminLedger.debit({
+    subjectType: 'agent',
+    subjectId: BUDGET_ACTOR,
+    resource: BUDGET_RESOURCE,
+    amount: declared.limit - 1,
+  });
+  return { clock, declared, workerLedger, windowMs: declared.windowSeconds * 1000 };
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof environment>>} env
+ * @param {string} name
+ * @param {{ debit: Function, read: Function }} ledger
+ * @param {{ assertOperational(): void }} [haltGuard]
+ */
+function budgetWorker(env, name, ledger, haltGuard = noHalt) {
+  const runs = { count: 0 };
+  const worker = createWorker({
+    queue: env.queue,
+    pool: env.workerPool,
+    haltGuard,
+    ledger,
+    worker: name,
+    onRun: () => {
+      runs.count += 1;
+    },
+  });
+  return { worker, runs };
+}
+
+/**
+ * الشهادةُ الماليّةُ والقراريّةُ من القاعدة مباشرةً.
+ * @param {import('pg').Pool} admin
+ * @param {string} taskId
+ */
+async function budgetEvidence(admin, taskId) {
+  const task = await admin.query(
+    `SELECT state, lease_owner, attempts, error_code, budget_debited_at FROM state.tasks WHERE id = $1`,
+    [taskId],
+  );
+  const dead = await admin.query(
+    `SELECT error_code FROM state.task_dead_letters WHERE task_id = $1`,
+    [taskId],
+  );
+  const failed = await admin.query(
+    `SELECT count(*)::int AS n FROM state.task_transitions WHERE task_id = $1 AND to_state = 'failed'`,
+    [taskId],
+  );
+  const quota = await admin.query(
+    `SELECT consumed FROM state.quotas WHERE subject_id = $1 AND resource = $2`,
+    [BUDGET_ACTOR, BUDGET_RESOURCE],
+  );
+  const t0 = /** @type {Record<string, unknown>} */ (task.rows[0]);
+  return {
+    state: t0['state'],
+    leaseOwner: t0['lease_owner'],
+    attempts: Number(t0['attempts']),
+    errorCode: t0['error_code'],
+    budgetDebitedAt: t0['budget_debited_at'],
+    deadLetters: dead.rows.map((entry) => entry['error_code']),
+    failedTransitions: Number(/** @type {{ n: number }} */ (failed.rows[0]).n),
+    consumed: Number(/** @type {Record<string, unknown>} */ (quota.rows[0])['consumed']),
+  };
+}
+
+/**
+ * @param {Awaited<ReturnType<typeof environment>>} env
+ * @param {string} name
+ */
+function recoveryFor(env, name) {
+  return createDatabaseRecovery({
+    pool: env.workerPool,
+    queue: env.queue,
+    worker: name,
+    haltGuard: noHalt,
+    log: memoryLog(),
+    policy: FAST_POLICY,
+  });
+}
+
+/**
+ * الحالةُ النهائيّةُ الوحيدةُ المقبولة لمهمّةٍ رُفضت ميزانيتُها: فشلٌ نهائيٌّ برمزِ النفاد،
+ * رسالةٌ ميتةٌ واحدة، انتقالٌ واحدٌ إلى `failed`، لا علامةَ خصم، والدفترُ لم يتحرّك.
+ * @param {Awaited<ReturnType<typeof budgetEvidence>>} evidence
+ * @param {number} consumedBefore
+ */
+function assertDeniedOnce(evidence, consumedBefore) {
+  const context = JSON.stringify(evidence);
+  assert.equal(evidence.state, TaskLifecycle.FAILED, context);
+  assert.equal(evidence.errorCode, BUDGET_ERRORS.EXHAUSTED, context);
+  assert.deepEqual(
+    evidence.deadLetters,
+    [BUDGET_ERRORS.EXHAUSTED],
+    `رسالةٌ ميتةٌ واحدة: ${context}`,
+  );
+  assert.equal(evidence.failedTransitions, 1, `انتقالُ رفضٍ واحد: ${context}`);
+  assert.equal(evidence.budgetDebitedAt, null, `لا علامةَ خصمٍ على مرفوضة: ${context}`);
+  assert.equal(evidence.consumed, consumedBefore, `لا أثرَ ماليٌّ إضافيّ: ${context}`);
+  assert.equal(evidence.leaseOwner, null, context);
+}
+
+test(
+  'رفضُ ميزانيةٍ التُزم وضاع ردُّه (وسيطٌ عند ردِّ COMMIT) ⇒ يُعرف من القاعدة بلا كتابةٍ ثانية ولا تشغيل',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const budget = await budgetSetup(env);
+    const task = await enqueue(env.adminQueue, 'رفض-ملتزم', {
+      actorId: BUDGET_ACTOR,
+      budgetResource: BUDGET_RESOURCE,
+      budgetAmount: 2,
+    });
+    const name = 'عامل-رفض-ملتزم';
+    const { worker, runs } = budgetWorker(env, name, budget.workerLedger);
+    // المُستردُّ يُنشأ عند الإقلاع كما في `scripts/worker.mjs`: حدُّه الزمنيُّ قبل كلِّ حجز.
+    const recovery = recoveryFor(env, name);
+    const severed = env.proxy.severOn(DEAD_LETTER_SQL, { mode: 'after-commit', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault, String(fault));
+    assert.equal(fault.phase, TICK_PHASES.PRE_RUN);
+    assert.equal(fault.pending?.op, 'fail');
+    // الحدُّ حتميّ: القاعدةُ التزمت الرفضَ قبل أن يضيع ردُّه.
+    const committed = await budgetEvidence(env.admin, task.id);
+    assertDeniedOnce(committed, budget.declared.limit - 1);
+
+    // تمضي النافذة: لو أُعيدت المهمّةُ «حجزاً لم يبدأ» لقُبلت الآن وشُغّلت.
+    budget.clock.at = new Date(budget.clock.at.getTime() + budget.windowMs + 1_000);
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.RECOVERED, JSON.stringify(outcome));
+    assert.equal(outcome.reconciled[0]?.outcome, 'already-committed');
+    assert.equal(outcome.reconciled[0]?.verified, true);
+
+    assert.equal((await worker.tick()).outcome, 'idle', 'المرفوضةُ لا تعود قابلةً للحجز');
+    assertDeniedOnce(await budgetEvidence(env.admin, task.id), budget.declared.limit - 1);
+    assert.equal(runs.count, 0, 'مُعالِجُ مهمّةٍ مرفوضةٍ لم يُشغَّل');
+  },
+);
+
+test(
+  'رفضُ ميزانيةٍ لم يُلتزَم (قطعٌ قبل الكتابة) ⇒ يُكمَل القرارُ نفسُه بعقدِ العامل، لا إفراجَ ولا تشغيل',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const budget = await budgetSetup(env);
+    const task = await enqueue(env.adminQueue, 'رفض-غير-ملتزم', {
+      actorId: BUDGET_ACTOR,
+      budgetResource: BUDGET_RESOURCE,
+      budgetAmount: 2,
+    });
+    const name = 'عامل-رفض-غير-ملتزم';
+    const { worker, runs } = budgetWorker(env, name, budget.workerLedger);
+    // المُستردُّ يُنشأ عند الإقلاع كما في `scripts/worker.mjs`: حدُّه الزمنيُّ قبل كلِّ حجز.
+    const recovery = recoveryFor(env, name);
+    const severed = env.proxy.severOn(DEAD_LETTER_SQL, { mode: 'before', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault, String(fault));
+    assert.equal(fault.phase, TICK_PHASES.PRE_RUN);
+    assert.deepEqual(
+      { op: fault.pending?.op, code: /** @type {{ code?: string }} */ (fault.pending).code },
+      { op: 'fail', code: BUDGET_ERRORS.EXHAUSTED },
+    );
+    const before = await budgetEvidence(env.admin, task.id);
+    assert.equal(before.state, TaskLifecycle.RUNNING, 'المعاملةُ لم تُلتزَم');
+    assert.equal(before.leaseOwner, name);
+    assert.deepEqual(before.deadLetters, []);
+
+    budget.clock.at = new Date(budget.clock.at.getTime() + budget.windowMs + 1_000);
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.RECOVERED, JSON.stringify(outcome));
+    assert.equal(outcome.reconciled[0]?.outcome, 'rewritten');
+    assert.equal(outcome.reconciled[0]?.verified, true);
+
+    assert.equal((await worker.tick()).outcome, 'idle', 'المرفوضةُ لا تعود قابلةً للحجز');
+    const after = await budgetEvidence(env.admin, task.id);
+    assertDeniedOnce(after, budget.declared.limit - 1);
+    assert.equal(after.attempts, 1, 'محاولةٌ واحدةٌ رُفضت، لا ثانية');
+    assert.equal(runs.count, 0, 'مُعالِجُ مهمّةٍ مرفوضةٍ لم يُشغَّل');
+  },
+);
+
+test(
+  'رفضٌ ملتزَمٌ تخالفه القاعدةُ عند العودة ⇒ failed (عدمُ تطابقِ القرار) برمز 65 بلا كتابة',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const budget = await budgetSetup(env);
+    const task = await enqueue(env.adminQueue, 'رفض-مخالف', {
+      actorId: BUDGET_ACTOR,
+      budgetResource: BUDGET_RESOURCE,
+      budgetAmount: 2,
+    });
+    const name = 'عامل-رفض-مخالف';
+    const { worker, runs } = budgetWorker(env, name, budget.workerLedger);
+    // المُستردُّ يُنشأ عند الإقلاع كما في `scripts/worker.mjs`: حدُّه الزمنيُّ قبل كلِّ حجز.
+    const recovery = recoveryFor(env, name);
+    const severed = env.proxy.severOn(DEAD_LETTER_SQL, { mode: 'after-commit', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault);
+    // القاعدةُ عادت تحمل خروجاً بيدِ العامل لا يطابق ما كتبه: لا يُثبَتُ القرار.
+    await env.admin.query(`UPDATE state.tasks SET error_code = 'SOMETHING_ELSE' WHERE id = $1`, [
+      task.id,
+    ]);
+    const tampered = await budgetEvidence(env.admin, task.id);
+
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.FAILED, JSON.stringify(outcome));
+    assert.equal(outcome.reason, RECOVERY_REASONS.DECISION_MISMATCH);
+    assert.equal(outcome.exitCode, RECOVERY_EXIT_CODES.DB_INTEGRITY);
+    assert.deepEqual(
+      await budgetEvidence(env.admin, task.id),
+      tampered,
+      'لا كتابةَ فوق ما لا يُثبَت',
+    );
+    assert.equal(runs.count, 0);
+  },
+);
+
+test(
+  'انقطاعٌ داخلَ خصمِ الدفتر بعد علامتِه ⇒ failed (الخصمُ لا يُثبَت) برمز 65: لا إفراجَ ولا خصمَ ولا تشغيل',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const budget = await budgetSetup(env);
+    // وحدةٌ واحدةٌ تتّسع لها الحصّة: لو مرّت لخُصمت وشُغّلت.
+    const task = await enqueue(env.adminQueue, 'خصم-لا-يثبت', {
+      actorId: BUDGET_ACTOR,
+      budgetResource: BUDGET_RESOURCE,
+      budgetAmount: 1,
+    });
+    const name = 'عامل-خصم-لا-يثبت';
+    const { worker, runs } = budgetWorker(env, name, budget.workerLedger);
+    // المُستردُّ يُنشأ عند الإقلاع كما في `scripts/worker.mjs`: حدُّه الزمنيُّ قبل كلِّ حجز.
+    const recovery = recoveryFor(env, name);
+    const severed = env.proxy.severOn(QUOTA_DEBIT_SQL, { mode: 'before', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault, String(fault));
+    assert.equal(fault.phase, TICK_PHASES.PRE_RUN);
+    assert.equal(fault.pending?.op, 'charge');
+    const before = await budgetEvidence(env.admin, task.id);
+    assert.notEqual(before.budgetDebitedAt, null, 'العلامةُ التُزمت والخصمُ لم يصل');
+    assert.equal(before.consumed, budget.declared.limit - 1);
+
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.FAILED, JSON.stringify(outcome));
+    assert.equal(outcome.reason, RECOVERY_REASONS.BUDGET_UNPROVABLE);
+    assert.equal(outcome.exitCode, RECOVERY_EXIT_CODES.DB_INTEGRITY);
+    assert.equal(outcome.reconciled[0]?.outcome, 'budget-unprovable');
+    const after = await budgetEvidence(env.admin, task.id);
+    assert.deepEqual(after, before, 'لا كتابة: المهمّةُ بعقدِ العامل حتى يحكمَ مخوَّل');
+    assert.equal(runs.count, 0, 'لا تشغيلَ بلا خصمٍ مُثبَت');
+  },
+);
+
+test(
+  'رفضُ ميزانيةٍ لم يُلتزَم وعقدُه انتقل لعاملٍ آخر ⇒ unverified بلا كتابةٍ فوق حالته',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const budget = await budgetSetup(env);
+    const task = await enqueue(env.adminQueue, 'رفض-عقد-مفقود', {
+      actorId: BUDGET_ACTOR,
+      budgetResource: BUDGET_RESOURCE,
+      budgetAmount: 2,
+    });
+    const name = 'عامل-رفض-عقد-مفقود';
+    const { worker, runs } = budgetWorker(env, name, budget.workerLedger);
+    // المُستردُّ يُنشأ عند الإقلاع كما في `scripts/worker.mjs`: حدُّه الزمنيُّ قبل كلِّ حجز.
+    const recovery = recoveryFor(env, name);
+    const severed = env.proxy.severOn(DEAD_LETTER_SQL, { mode: 'before', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault);
+    await env.admin.query(`UPDATE state.tasks SET lease_owner = 'عامل-آخر' WHERE id = $1`, [
+      task.id,
+    ]);
+    const taken = await budgetEvidence(env.admin, task.id);
+
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.UNVERIFIED, JSON.stringify(outcome));
+    assert.equal(outcome.reconciled[0]?.outcome, 'lease-lost');
+    assert.deepEqual(await budgetEvidence(env.admin, task.id), taken);
+    assert.equal(runs.count, 0);
+  },
+);
+
+test(
+  'إفراجُ إيقافٍ سياديٍّ لم يُلتزَم بعد الحجز ⇒ يُكمَل إفراجَ إيقاف (TASK_HALTED) لا إفراجاً عامّاً',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const task = await enqueue(env.adminQueue, 'إيقاف-بعد-الحجز');
+    // يعمل قبل الحجز، ثم يُوقَف قبل التشغيل: المسارُ (3) في العامل.
+    let checks = 0;
+    const haltAfterClaim = {
+      assertOperational() {
+        checks += 1;
+        if (checks > 1) throw new Error('موقوف');
+      },
+    };
+    const name = 'عامل-إيقاف-بعد-الحجز';
+    const { worker, runs } = countingWorker(env, name, haltAfterClaim);
+    // المُستردُّ يُنشأ عند الإقلاع كما في `scripts/worker.mjs`: حدُّه الزمنيُّ قبل كلِّ حجز.
+    const recovery = recoveryFor(env, name);
+    const severed = env.proxy.severOn('attempts = $3', { mode: 'before', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault, String(fault));
+    assert.equal(fault.phase, TICK_PHASES.PRE_RUN);
+    assert.equal(fault.pending?.op, 'release-halt');
+    assert.equal((await row(env.admin, task.id)).state, TaskLifecycle.RUNNING);
+
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.RECOVERED, JSON.stringify(outcome));
+    assert.equal(outcome.reconciled[0]?.outcome, 'rewritten');
+    const after = await row(env.admin, task.id);
+    assert.equal(after.state, TaskLifecycle.SCHEDULED);
+    assert.equal(after.error_code, HALT_RELEASE_CODE, 'دلالةُ الإيقافِ محفوظة');
+    assert.notEqual(after.error_code, UNSTARTED_RELEASE_CODE);
+    assert.equal(after.attempts, 0, 'الإيقافُ لا يستهلك محاولة');
+    assert.equal(runs.count, 0);
   },
 );

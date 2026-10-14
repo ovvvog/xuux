@@ -60,7 +60,7 @@
 
 import { createHash } from 'node:crypto';
 
-import { QUEUE_ERRORS, QueueError, UNSTARTED_RELEASE_CODE } from './queue.mjs';
+import { HALT_RELEASE_CODE, QUEUE_ERRORS, QueueError, UNSTARTED_RELEASE_CODE } from './queue.mjs';
 
 export { UNSTARTED_RELEASE_CODE };
 import { TaskLifecycle } from './lifecycle.mjs';
@@ -104,6 +104,10 @@ export const RECOVERY_REASONS = Object.freeze({
   RESIDUAL_CLAIMS: 'DB_RECOVERY_RESIDUAL_CLAIMS',
   RESULT_MISMATCH: 'DB_RECOVERY_RESULT_MISMATCH',
   TASK_MISSING: 'DB_RECOVERY_TASK_MISSING',
+  /** القاعدةُ تحمل خروجاً من `running` بيدِ العامل لا يطابق القرارَ الذي كان يُكتب. */
+  DECISION_MISMATCH: 'DB_RECOVERY_DECISION_MISMATCH',
+  /** انقطاعٌ أثناء خصمِ الميزانية بعد وضعِ علامتِه: لا يُثبَتُ أوقع الخصمُ أم لا. */
+  BUDGET_UNPROVABLE: 'DB_RECOVERY_BUDGET_UNPROVABLE',
 });
 
 /**
@@ -113,6 +117,18 @@ export const RECOVERY_REASONS = Object.freeze({
 export const RECOVERY_EXIT_CODES = Object.freeze({
   DB_UNAVAILABLE: 75,
   DB_INTEGRITY: 65,
+});
+
+/**
+ * حصائلُ تسويةٍ توقفُ العاملَ عند حدٍّ آمن (`failed`، خروجُ `65`): لا تسويةَ بعدها ولا
+ * إفراجَ عن يتيم، فقاعدةٌ لا تُثبت ما كُتب فيها لا يُبنى عليها.
+ * @type {Readonly<Record<string, string>>}
+ */
+const STOPPING_OUTCOMES = Object.freeze({
+  missing: RECOVERY_REASONS.TASK_MISSING,
+  'result-mismatch': RECOVERY_REASONS.RESULT_MISMATCH,
+  'decision-mismatch': RECOVERY_REASONS.DECISION_MISMATCH,
+  'budget-unprovable': RECOVERY_REASONS.BUDGET_UNPROVABLE,
 });
 
 /**
@@ -226,6 +242,7 @@ export class WorkerDatabaseFault extends Error {
  *   | { op: 'fail', code: string, message: string, retryable: boolean }
  *   | { op: 'release-halt', reason: string }
  *   | { op: 'confirm-cancel' }
+ *   | { op: 'charge' }
  *   | { op: 'interrupted' }} PendingOutcome
  */
 
@@ -387,7 +404,71 @@ export function createDatabaseRecovery(input) {
   }
 
   /**
-   * يسوّي المهمّةَ التي كانت في يدِ العاملِ حين انقطعت القاعدة.
+   * هل يطابقُ ما التزمته القاعدةُ **القرارَ نفسَه** الذي كان العاملُ يكتبه؟ انتقالٌ ما
+   * بيدِ العاملِ لا يكفي: رفضُ ميزانيةٍ التُزم يُعرَف بحالةِ `failed` ورمزِ الرفضِ ورسالتِه
+   * الميتة، وإفراجُ إيقافٍ برمزِ `TASK_HALTED` — لا بأيِّ خروجٍ من `running`.
+   * @param {import('./queue.mjs').TaskRecord} task
+   * @param {PendingOutcome} pending
+   */
+  async function decisionCommitted(task, pending) {
+    if (pending.op === 'fail') {
+      if (task.errorCode !== pending.code) return false;
+      if (task.state === TaskLifecycle.FAILED) {
+        const dead = await pool.query(
+          `SELECT error_code FROM state.task_dead_letters WHERE task_id = $1`,
+          [task.id],
+        );
+        const row = /** @type {{ error_code?: unknown } | undefined} */ (dead.rows[0]);
+        return row?.error_code === pending.code;
+      }
+      // فشلٌ قابلٌ للإعادة يُرجع المهمّةَ مجدولةً؛ غيرُ القابلِ لا يُرجعها أبداً.
+      return pending.retryable && task.state === TaskLifecycle.SCHEDULED;
+    }
+    if (pending.op === 'release-halt') {
+      return task.state === TaskLifecycle.SCHEDULED && task.errorCode === HALT_RELEASE_CODE;
+    }
+    if (pending.op === 'confirm-cancel') return task.state === TaskLifecycle.CANCELLED;
+    // `interrupted`: لا قرارَ مسمّى يُطابَق؛ الانتقالُ بيدِ العامل هو كلُّ الدليل.
+    return pending.op === 'interrupted';
+  }
+
+  /**
+   * يُكمل القرارَ المعلّقَ **نفسَه** على مهمّةٍ ما زالت جاريةً بعقدِ العامل.
+   * @param {import('./queue.mjs').TaskRecord} task
+   * @param {PendingOutcome} pending
+   */
+  async function completeDecision(task, pending) {
+    const taskId = task.id;
+    if (pending.op === 'fail') {
+      await queue.fail({
+        taskId,
+        worker,
+        code: pending.code,
+        message: pending.message,
+        retryable: pending.retryable,
+      });
+    } else if (pending.op === 'release-halt') {
+      await queue.releaseForHalt({ taskId, worker, reason: pending.reason });
+    } else if (pending.op === 'confirm-cancel') {
+      await queue.confirmCancelled({ taskId, worker });
+    } else if (task.cancelRequested) {
+      await queue.confirmCancelled({ taskId, worker });
+    } else {
+      // إجهاضٌ بلا سببٍ مقروء (فقدُ عقدٍ أو نبضة): كما يفعل العاملُ في دورته.
+      await queue.fail({
+        taskId,
+        worker,
+        code: 'TASK_EXECUTION_INTERRUPTED',
+        message: 'قُطع التنفيذ وانقطعت القاعدة قبل تسجيله؛ سُوّي بعد عودتها.',
+        retryable: true,
+      });
+    }
+  }
+
+  /**
+   * يسوّي المهمّةَ التي كانت في يدِ العاملِ حين انقطعت القاعدة. القرارُ يُقرأ من
+   * القاعدة ويُطابَق بما كان يُكتب؛ ولا يُفرَج عن حجزٍ «لم يبدأ» إلا حين لا قرارَ
+   * معلّقاً عليه أصلاً — فرفضُ ميزانيةٍ أو إفراجُ إيقافٍ ليسا حجزاً لم يبدأ.
    * @param {WorkerDatabaseFault} fault
    * @returns {Promise<{ taskId: string, outcome: string, verified: boolean }>}
    */
@@ -400,18 +481,41 @@ export function createDatabaseRecovery(input) {
     const mine = task.state === TaskLifecycle.RUNNING && task.leaseOwner === worker;
     const pending = fault.pending;
 
-    // المُعالِجُ لم يبدأ: يُفرَج عن الحجزِ ولا تُحسَب محاولة.
-    if (fault.phase !== TICK_PHASES.RECORD || pending === null) {
-      if (!mine) {
-        // فعلٌ قبل التشغيل (إفراجُ إيقافٍ أو رفضُ ميزانية) التزمته القاعدةُ وضاع ردُّه.
-        const done = await committedByMe(taskId);
-        return { taskId, outcome: done ? 'already-committed' : 'lease-lost', verified: done };
-      }
+    // (أ) حجزٌ لا قرارَ عليه: المُعالِجُ لم يبدأ ولا شيءَ كان يُكتب ⇒ إفراجٌ بلا احتساب.
+    if (pending === null) {
+      if (!mine) return { taskId, outcome: 'lease-lost', verified: false };
       await queue.releaseUnstarted({
         taskId,
         worker,
         claimedAfter: bootAt,
         reason: `انقطعت القاعدة (${fault.fault.code}) في مرحلة ${fault.phase} قبل بدء المُعالِج.`,
+      });
+      const after = await queue.get(taskId);
+      return {
+        taskId,
+        outcome: 'released-unstarted',
+        verified: after?.state === TaskLifecycle.SCHEDULED && after.leaseOwner === null,
+      };
+    }
+
+    // (ب) انقطاعٌ داخلَ خصمِ الميزانية: العلامةُ تُقرأ، والدفترُ لا يُنسَب إلى مهمّة.
+    if (pending.op === 'charge') {
+      if (!mine) return { taskId, outcome: 'lease-lost', verified: false };
+      const marked = await pool.query(`SELECT budget_debited_at FROM state.tasks WHERE id = $1`, [
+        taskId,
+      ]);
+      const markedAt = /** @type {{ budget_debited_at?: unknown } | undefined} */ (marked.rows[0])
+        ?.budget_debited_at;
+      if (markedAt !== null && markedAt !== undefined) {
+        // علامةٌ بلا دليلِ خصم: الإفراجُ يُشغّلها لاحقاً بلا محاسبة، وإعادةُ الخصمِ قد تُكرّره.
+        // لا يُكتب شيء؛ المهمّةُ تبقى بعقدِ العامل حتى يحكمَ مخوَّل.
+        return { taskId, outcome: 'budget-unprovable', verified: false };
+      }
+      await queue.releaseUnstarted({
+        taskId,
+        worker,
+        claimedAfter: bootAt,
+        reason: `انقطعت القاعدة (${fault.fault.code}) قبل التزامِ علامةِ الخصم؛ لا خصمَ ولا تشغيل.`,
       });
       const after = await queue.get(taskId);
       return {
@@ -448,47 +552,24 @@ export function createDatabaseRecovery(input) {
       };
     }
 
+    // (ج) قرارٌ مسمّى (رفضٌ، إفراجُ إيقاف، إلغاء، إجهاض) في أيِّ مرحلة.
     if (!mine) {
-      const done = await committedByMe(taskId);
+      if (!(await committedByMe(taskId))) return { taskId, outcome: 'lease-lost', verified: false };
+      // خرجت المهمّةُ من `running` بيدِنا: إمّا القرارُ نفسُه، وإمّا قاعدةٌ لا تطابق ما كتبنا.
+      const same = await decisionCommitted(task, pending);
       return {
         taskId,
-        outcome: done ? 'already-committed' : 'lease-lost',
-        verified: done,
+        outcome: same ? 'already-committed' : 'decision-mismatch',
+        verified: same,
       };
     }
-
-    if (pending.op === 'fail') {
-      await queue.fail({
-        taskId,
-        worker,
-        code: pending.code,
-        message: pending.message,
-        retryable: pending.retryable,
-      });
-    } else if (pending.op === 'release-halt') {
-      await queue.releaseForHalt({ taskId, worker, reason: pending.reason });
-    } else if (pending.op === 'confirm-cancel') {
-      await queue.confirmCancelled({ taskId, worker });
-    } else {
-      // إجهاضٌ بلا سببٍ مقروء (فقدُ عقدٍ أو نبضة): كما يفعل العاملُ في دورته.
-      if (task.cancelRequested) {
-        await queue.confirmCancelled({ taskId, worker });
-      } else {
-        await queue.fail({
-          taskId,
-          worker,
-          code: 'TASK_EXECUTION_INTERRUPTED',
-          message: 'قُطع التنفيذ وانقطعت القاعدة قبل تسجيله؛ سُوّي بعد عودتها.',
-          retryable: true,
-        });
-      }
-    }
+    await completeDecision(task, pending);
     const after = await queue.get(taskId);
-    return {
-      taskId,
-      outcome: 'rewritten',
-      verified: !(after?.state === TaskLifecycle.RUNNING && after.leaseOwner === worker),
-    };
+    const landed =
+      after !== null &&
+      !(after.state === TaskLifecycle.RUNNING && after.leaseOwner === worker) &&
+      (await decisionCommitted(after, pending));
+    return { taskId, outcome: 'rewritten', verified: landed };
   }
 
   /**
@@ -621,15 +702,9 @@ export function createDatabaseRecovery(input) {
             const known = await reconcileKnown(fault);
             reconciled.push(known);
             // لا تسويةَ بعدَ دليلِ فساد: قاعدةٌ لا تحمل ما كُتب فيها لا يُفرَج فيها عن شيء.
-            if (known.outcome === 'missing' || known.outcome === 'result-mismatch') {
-              return verdictOf(
-                fault,
-                RECOVERY_VERDICTS.FAILED,
-                known.outcome === 'missing'
-                  ? RECOVERY_REASONS.TASK_MISSING
-                  : RECOVERY_REASONS.RESULT_MISMATCH,
-                detail(),
-              );
+            const stop = STOPPING_OUTCOMES[known.outcome];
+            if (stop !== undefined) {
+              return verdictOf(fault, RECOVERY_VERDICTS.FAILED, stop, detail());
             }
           }
           for (const id of await ownRunningSince(boundary)) {

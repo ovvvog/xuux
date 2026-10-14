@@ -1,5 +1,54 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-14] — WL-388 — مانعُ دمجِ PR #348: تسويةُ `pre-run` تحفظُ القرارَ الملتزَم — رفضُ الميزانيةِ لا يُعادُ «حجزاً لم يبدأ»
+
+**المنفِّذُ:** Perplexity Computer (`soaav-svg`) · **المسارُ والخطوةُ:** إصلاحُ عيبٍ في `WL-387` على فرعِ PR #348 نفسِه (`feat/wl-387-worker-db-outage-recovery`)، بلا تدقيقٍ عامٍّ ولا إعادةِ تنفيذ
+
+#### الاستلام
+
+- متحقَّقٌ منه مباشرةً من GitHub: PR #348 مفتوح، رأسُه `f9dd63a91ef1edddcf105acdb1b2a53b5e04ccd3` (لم يتغيّر بعد المراجعةِ المعروفة)، وفحصا CI ناجحان عليه، و`main` على `0aabb28fd6f47cb63d0bea2d2193168b17421ff6`. **المراجعةُ المسجَّلةُ على GitHub موافقةٌ بلا نصٍّ ولا تعليقاتِ مراجعة** — فالعيبُ لم يُقرأ من GitHub بل من أمرِ المالك، وأُثبتَ في الشفرةِ قبل أيِّ تعديل.
+
+#### العيبُ (مقيسٌ في الشفرةِ والاختبار)
+
+في `reconcileKnown()` كان الشرطُ `fault.phase !== TICK_PHASES.RECORD || pending === null` يُدخلُ **كلَّ** عطبٍ في `pre-run` — ومنه `pending.op === 'fail'` (رفضُ الميزانية) و`'release-halt'` — في مسارِ `releaseUnstarted` متى بقيت المهمّةُ بعقدِ العامل؛ وحين لا تبقى يكفيه «آخرُ انتقالٍ من `running` بيدِ العامل» أيّاً كان. فثلاثةُ أخطاءٍ مقيسة على الشفرةِ السابقة (`f9dd63a9`) بالاختباراتِ الجديدة:
+
+1. رفضُ ميزانيةٍ لم يُلتزَم ⇒ `released-unstarted`: المهمّةُ المرفوضةُ تعودُ إلى الطابور، وتُقبلُ لو انقضت النافذةُ فتُشغَّل.
+2. إفراجُ إيقافٍ سياديٍّ لم يُلتزَم ⇒ `released-unstarted` برمزِ `TASK_RELEASED_UNSTARTED_DB_OUTAGE` بدل `TASK_HALTED`.
+3. خروجٌ ملتزَمٌ بيدِ العامل يخالفُ القرار (رمزٌ آخر) ⇒ `recovered` — نجاحٌ زائف.
+
+**وفجوةٌ أعمق كشفها الاختبار (`LIVE-45` ج):** انقطاعٌ داخلَ `chargeBeforeStart` بعد التزامِ `budget_debited_at` وقبل الخصم كان يبلغُ المُستردَّ بلا فعلٍ معلّق ⇒ `releaseUnstarted` ⇒ الحجزُ التالي يرى العلامةَ فيمرُّ **بلا خصمٍ** ويُشغَّل.
+
+#### ما تغيّر فعلاً
+
+- **`src/execution/db-recovery.mjs`:** `reconcileKnown` يُفرِّقُ أربعَ حالاتٍ صراحةً: (أ) لا فعلَ معلّق ⇒ `releaseUnstarted` بعقدِ العاملِ وحده، وإلا `lease-lost`؛ (ب) `charge` ⇒ علامةٌ فارغةٌ تُفرَج، وعلامةٌ قائمةٌ ⇒ `budget-unprovable` بلا كتابة؛ (ج) `succeed` كما كان؛ (د) قرارٌ مسمّى (`fail`/`release-halt`/`confirm-cancel`/`interrupted`) في أيِّ مرحلة ⇒ إن بقي بعقدِ العامل `completeDecision` يُعيدُ **القرارَ نفسَه** (`queue.fail` بالرمزِ والرسالةِ وقابليّةِ الإعادة، أو `releaseForHalt`، أو `confirmCancelled`) ثم يتحقّقُ بالقراءة؛ وإن لم يبقَ ⇒ `committedByMe` ثم `decisionCommitted` يطابقُ الحالةَ والرمزَ (ورسالةَ الرفضِ الميتةَ للرفضِ النهائيّ) ⇒ `already-committed` أو `decision-mismatch`. وحصيلتا `decision-mismatch` و`budget-unprovable` توقفانِ العاملَ عند حدٍّ آمن (`failed`، خروجٌ `65`) عبر `STOPPING_OUTCOMES` مع `missing` و`result-mismatch`.
+- **`src/execution/worker.mjs`:** `cursor.pending = { op: 'charge' }` قبل `budget.chargeBeforeStart` ويُصفَّرُ بعد عودتِه؛ فالانقطاعُ داخلَ الخصمِ يُعرفُ حتمياً.
+- **لم يُمسّ:** `queue.mjs` وبوابةُ الميزانيةِ والدفتر، والمصادقةُ والتفويضُ والإيقافُ السياديّ، و`config/external-review.yaml` وحمايةُ الفروع؛ ولا اختبارٌ أُضعف ولا تخطٍّ أُضيف.
+
+#### الاختبارُ الحقيقيُّ والنتيجة
+
+ستّةُ اختباراتٍ جديدةٍ في `tests/execution/db-outage-recovery.test.mjs` بدفترِ حصصٍ حقيقيٍّ (`createQuotaLedger`، المورد `task-executions` من `config/quotas.yaml`) استُهلك فيه حتى `limit − 1`، ومهمّةٌ بوحدتين تُرفض؛ والقطعُ بوسيطِ TCP عند `INSERT INTO state.task_dead_letters` — داخلَ معاملةِ `queue.fail()` نفسِها:
+
+1. **ملتزَمٌ وضاع ردُّه** (`after-commit`: يُقطعُ عند ردِّ الخادمِ على `COMMIT`) ⇒ `already-committed`، و`recovered`؛ مع تقديمِ الساعةِ ما بعد النافذة.
+2. **غيرُ ملتزَم** (`before`) ⇒ `rewritten` بالقرارِ نفسِه، و`recovered`، و`attempts = 1`.
+   وفي كليهما: `failed` برمزِ `TASK_BUDGET_EXHAUSTED`، ورسالةٌ ميتةٌ **واحدة**، وانتقالٌ **واحدٌ** إلى `failed`، و`budget_debited_at` فارغ، و`consumed` في الدفتر **لم يتحرّك**، ومُعالِجٌ شُغّل **0** مرّة، والدورةُ التاليةُ `idle`.
+3. **قرارٌ ملتزَمٌ تخالفه القاعدة** ⇒ `failed` (`DB_RECOVERY_DECISION_MISMATCH`، `65`) بلا كتابة.
+4. **انقطاعٌ عند `INSERT INTO state.quotas`** بعد العلامة ⇒ `failed` (`DB_RECOVERY_BUDGET_UNPROVABLE`، `65`)، والمهمّةُ والدفترُ كما هما، وتشغيلٌ 0.
+5. **عقدٌ انتقل لعاملٍ آخر** ⇒ `unverified` بلا كتابة.
+6. **إفراجُ إيقافٍ لم يُلتزَم** ⇒ `releaseForHalt` نفسُه: `scheduled` برمز `TASK_HALTED` و`attempts = 0`.
+
+**شاهدُ الانقلاب:** على `db-recovery.mjs`/`worker.mjs` من `f9dd63a9` ⇒ **4/6 ساقطة** (2 ⇒ `released-unstarted`؛ 3 ⇒ `recovered` زائف؛ 4 ⇒ لا فعلَ معلّقٌ يُعرف؛ 6 ⇒ `released-unstarted`)، والاثنانِ الباقيانِ حارسانِ لسلوكٍ كان صحيحاً. وبعد الإصلاح الملفُّ **26/26**.
+
+#### ما بقي مفتوحاً
+
+- **`LIVE-45` (ج) لم يُغلق:** صار للاسترداد حدٌّ آمنٌ عند خصمٍ لا يُثبَت، لكنّ **الذرّيّةَ نفسَها** (علامةٌ وخصمٌ في معاملةٍ واحدة، أو خصمٌ منسوبٌ إلى المهمّة في الدفتر) قرارٌ أوسعُ لم يُتّخذ، والمهمّةُ المتوقّفةُ تبقى بعقدِ العامل حتى يحكمَ مخوَّل. وكذلك انقطاعٌ في إرجاعِ العلامةِ بعد رفضٍ يُعرَضُ الحدَّ الآمنَ نفسَه.
+- بقيّةُ `LIVE-45` (أ، ب، د، هـ) كما قُيِّدت في `WL-387`.
+
+غيرُ متأثِّرٍ: `docs/CURRENT_STATE.md` — الدفعةُ لم تمسَّ أيَّ مسارٍ من قائمةِ «affectedBy» (الإنتاجُ وجذرُ الثقةِ ونقطةُ الدخولِ الإنتاجيّةُ وسيرُ العمل).
+
+#### الملفاتُ المتأثّرة
+
+`src/execution/db-recovery.mjs` · `src/execution/worker.mjs` · `tests/execution/db-outage-recovery.test.mjs` · `docs/EXECUTION_RUNTIME.md` · `docs/roadmap/06-debt-register.md` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md`
+
 ### [2026-10-14] — WL-387 — الاستردادُ الذاتيُّ للعاملِ من انقطاعِ قاعدةِ البيانات: اكتشافٌ وتصنيفٌ وتسويةٌ بلا تكرارٍ وحكمٌ مقيَّد
 
 **المنفِّذُ:** Perplexity Computer (`soaav-svg`) · **المسارُ والخطوةُ:** تطويرُ الاسترداد الذاتي — مسارٌ واحدٌ من البداية إلى النهاية: فقدُ اتصالِ العاملِ بـPostgreSQL (`LIVE-44` يُفتح ويُغلق، `LIVE-45` يُفتح)
