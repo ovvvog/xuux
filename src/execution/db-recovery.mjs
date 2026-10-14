@@ -61,6 +61,7 @@
 import { createHash } from 'node:crypto';
 
 import { HALT_RELEASE_CODE, QUEUE_ERRORS, QueueError, UNSTARTED_RELEASE_CODE } from './queue.mjs';
+import { BudgetOutcomeUnknown } from './budget-errors.mjs';
 
 export { UNSTARTED_RELEASE_CODE };
 import { TaskLifecycle } from './lifecycle.mjs';
@@ -173,13 +174,31 @@ const UNAVAILABLE_MESSAGES = [
 /**
  * يصنّفُ خطأً من القاعدة. يُعيد `null` إن لم يكن خطأَ قاعدةٍ أصلاً — فخطأُ طابورٍ
  * مسمّى أو خطأٌ برمجيٌّ لا يُبتلع في مسارِ الاسترداد بل يُرفع كما كان.
+ *
+ * `BudgetOutcomeUnknown` يُمرَّر إلى هنا كعطلٍ مُصنَّفٍ لا كخطأٍ مُغفَل: البوابةُ
+ * ترميه لتحفظَ العلامةَ وترفعَه إلى العاملِ، والعاملُ يحوّلُه إلى
+ * `WorkerDatabaseFault` فيستردُّ مسارُ الاستردادِ بدلَ رميِه خارجَ دورةِ العامل.
+ * لكن هذا الملفُ لا يُصنِّفُ هذا النوعَ بنفسه: تصنيفُه من السببِ الأصليِّ (في
+ * `cause`) لا من رسالةٍ تخمينية. إن لم يكن السببُ عطلَ قاعدةٍ مُصنَّفاً فلا
+ * يُخفى النتيجةُ المجهولةُ خلفَ اسمٍ يوحي بتعافٍ آليّ؛ يُرمى كما هو ليتوقفَ
+ * العاملُ عند حدٍّ آمنٍ لا أن يفترضَ خصماً لم يُثبَت.
+ *
  * @param {unknown} error
  * @returns {{ kind: string, code: string } | null}
  */
 export function classifyDatabaseFault(error) {
   if (error === null || typeof error !== 'object') return null;
   if (error instanceof QueueError) return null;
-  const record = /** @type {{ code?: unknown, message?: unknown, errors?: unknown }} */ (error);
+  const record =
+    /** @type {{ code?: unknown, message?: unknown, errors?: unknown, cause?: unknown }} */ (error);
+  if (error instanceof BudgetOutcomeUnknown) {
+    // السببُ الأصليُّ في `cause`: إن كانَ عطلَ قاعدةٍ مُصنَّفاً (انقطاع، صلةٌ
+    // بعمليةٍ ميتة، …) فذلك هو المسارُ الآليُّ للاسترداد. وإلا فالنتيجةُ مجهولةٌ
+    // ولا يُرمى كعطلٍ عابرٍ عاديّ.
+    const inner = classifyDatabaseFault(record.cause);
+    if (inner !== null) return inner;
+    return { kind: DB_FAULT_KINDS.UNKNOWN, code: 'BUDGET_OUTCOME_UNKNOWN' };
+  }
   const code = typeof record.code === 'string' ? record.code : '';
   const message = typeof record.message === 'string' ? record.message : '';
 

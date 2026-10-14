@@ -224,6 +224,7 @@ export function createWorker({
     if (budget !== null) {
       // الخصمُ استعلامانِ لا معاملةٌ واحدة (علامةٌ ثم دفتر — `LIVE-45` ج): انقطاعٌ بينهما
       // لا يُثبَتُ من القاعدةِ أيُّهما التُزم، فيُعلَّمُ ليرفضَ المُستردُّ الإفراجَ حينها.
+      cursor.phase = TICK_PHASES.PRE_RUN;
       cursor.pending = { op: 'charge' };
       const decision = await budget.chargeBeforeStart(task);
       cursor.pending = null;

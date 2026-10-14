@@ -1368,7 +1368,7 @@ test(
 );
 
 test(
-  'انقطاعٌ داخلَ خصمِ الدفتر بعد علامتِه ⇒ failed (الخصمُ لا يُثبَت) برمز 65: لا إفراجَ ولا خصمَ ولا تشغيل',
+  'انقطاعٌ داخلَ خصمِ الدفتر قبلَ التزامه ⇒ المعاملةُ تتراجعُ بالكاملِ (لا علامةَ ولا خصمَ): recovered (إفراجُ حجزٍ لم يبدأ) بلا تشغيل',
   { skip: skipWithoutDatabase },
   async (t) => {
     const env = await environment(t);
@@ -1390,8 +1390,58 @@ test(
     assert.equal(fault.phase, TICK_PHASES.PRE_RUN);
     assert.equal(fault.pending?.op, 'charge');
     const before = await budgetEvidence(env.admin, task.id);
-    assert.notEqual(before.budgetDebitedAt, null, 'العلامةُ التُزمت والخصمُ لم يصل');
-    assert.equal(before.consumed, budget.declared.limit - 1);
+    // الحلُّ الجذريُّ: العلامةُ والخصمُ في معاملةٍ واحدة، فانقطاعٌ قبل الخصمِ يُلغي
+    // المعاملةَ بالكاملِ — لا علامةَ ولا خصم. لا حالةَ وسيطةَ "علامةٌ بلا خصم".
+    assert.equal(before.budgetDebitedAt, null, 'المعاملةُ تراجعت: لا علامةَ بلا خصم');
+    assert.equal(before.consumed, budget.declared.limit - 1, 'لا خصمَ تراجعت المعاملة');
+
+    env.later(() => env.proxy.up(), 80);
+    const outcome = await recovery.recover(fault);
+    // الحلُّ الجذريُّ: المعاملةُ تراجعت (لا علامةَ ولا خصم)، فالمُستردُّ يُفرجُ عن
+    // المهمّةِ «حجزاً لم يبدأ» بلا محاسبةٍ ولا تشغيل. لا حالةَ وسيطةَ مجهولة.
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.RECOVERED, JSON.stringify(outcome));
+    assert.equal(outcome.reason, RECOVERY_REASONS.RECONCILED);
+    assert.equal(outcome.reconciled[0]?.outcome, 'released-unstarted');
+    const after = await budgetEvidence(env.admin, task.id);
+    assert.equal(after.state, TaskLifecycle.SCHEDULED, 'المهمّةُ أُفرجت بلا محاسبة');
+    assert.equal(after.consumed, budget.declared.limit - 1, 'لا خصمَ تراجعت المعاملة');
+    assert.equal(after.budgetDebitedAt, null, 'لا علامةَ خصم');
+    assert.equal(runs.count, 0, 'لا تشغيلَ بلا خصمٍ مُثبَت');
+  },
+);
+
+test(
+  'خصمٌ التُزم وضاعَ ردُّه (وسيطٌ عند ردِّ COMMIT بعد علامةِ الخصم) ⇒ المعاملةُ ذرّيّةٌ: العلامةُ تُثبتُ الخصم، فالمُستردُّ يرفضُ الإفراجَ ولا يُخصّمُ ثانياً',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const budget = await budgetSetup(env);
+    // وحدةٌ واحدةٌ تتّسعُ لها الحصّة: لو مُرِّرت لخُصمت وشُغّلت.
+    const task = await enqueue(env.adminQueue, 'خصم-ملتزم-ضاع-ردّه', {
+      actorId: BUDGET_ACTOR,
+      budgetResource: BUDGET_RESOURCE,
+      budgetAmount: 1,
+    });
+    const name = 'عامل-خصم-ملتزم';
+    const { worker, runs } = budgetWorker(env, name, budget.workerLedger);
+    const recovery = recoveryFor(env, name);
+    // القطعُ عند ردِّ `COMMIT` لاستعلامِ الخصم: التزامٌ حتميٌّ (الخادمُ لا يردُّ قبل التزامه)
+    // وضياعُ ردٍّ يمنعُ العاملَ من إثباتِ نتيجةِ الخصمِ أو عدمه.
+    const severed = env.proxy.severOn(QUOTA_DEBIT_SQL, { mode: 'after-commit', thenDown: true });
+    const fault = await rejection(() => worker.tick());
+    await severed;
+    assert.ok(fault instanceof WorkerDatabaseFault, String(fault));
+    assert.equal(fault.phase, TICK_PHASES.PRE_RUN);
+    assert.equal(fault.pending?.op, 'charge');
+
+    // إثباتُ الالتزامِ من اتصالٍ إداريٍّ مستقل: الدفترُ تحرّكَ فعلًا.
+    const committed = await budgetEvidence(env.admin, task.id);
+    assert.notEqual(committed.budgetDebitedAt, null, 'العلامةُ التُزمت قبل ضياعِ ردِّ الخصم');
+    assert.equal(
+      committed.consumed,
+      budget.declared.limit,
+      'الخصمُ التُزم في الدفتر (من اتصالٍ إداريٍّ مستقل)',
+    );
 
     env.later(() => env.proxy.up(), 80);
     const outcome = await recovery.recover(fault);
@@ -1399,9 +1449,22 @@ test(
     assert.equal(outcome.reason, RECOVERY_REASONS.BUDGET_UNPROVABLE);
     assert.equal(outcome.exitCode, RECOVERY_EXIT_CODES.DB_INTEGRITY);
     assert.equal(outcome.reconciled[0]?.outcome, 'budget-unprovable');
+
     const after = await budgetEvidence(env.admin, task.id);
-    assert.deepEqual(after, before, 'لا كتابة: المهمّةُ بعقدِ العامل حتى يحكمَ مخوَّل');
-    assert.equal(runs.count, 0, 'لا تشغيلَ بلا خصمٍ مُثبَت');
+    assert.equal(after.state, TaskLifecycle.RUNNING, 'لا إفراجَ عن مهمّةٍ خصمُها مجهولُ النتيجة');
+    assert.equal(after.leaseOwner, name, 'العقدُ يبقى للعامل حتى يحكمَ مخوَّل');
+    assert.equal(after.consumed, budget.declared.limit, 'لا خصمَ ثانٍ');
+    assert.notEqual(after.budgetDebitedAt, null, 'دليلُ الخصمِ لا يُمحى');
+    assert.equal(runs.count, 0, 'لا تشغيلَ للمعالجِ ونتيجةُ الخصمِ مجهولة');
+
+    // إعادةُ دورةِ العاملِ بعد الاسترداد: العلامةُ قائمةٌ (دليلُ خصمٍ ذرّيٍّ ملتزم)،
+    // فلا يُخصّمُ مرّةً ثانيةً. المعالجُ يُشغّلُ لأنّ الخصمَ مُثبَتٌ بالعلامةِ لا
+    // يُنكرُه أحد. هذه هي ذرّيةُ الميزانية: خاصيةٌ من التصميمِ لا اتفاقٌ بين دوالّ.
+    await worker.tick();
+    // لا خصمَ ثانياً: العلامةُ تمنعُ إعادةَ الخصمِ للمعاملةِ نفسِها.
+    const afterSecond = await budgetEvidence(env.admin, task.id);
+    assert.equal(afterSecond.consumed, budget.declared.limit, 'إعادةُ الدورةِ لا تُخصّمُ ثانياً');
+    assert.notEqual(afterSecond.budgetDebitedAt, null, 'دليلُ الخصمِ لا يُمحى');
   },
 );
 

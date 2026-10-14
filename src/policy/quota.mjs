@@ -223,7 +223,13 @@ export function createQuotaLedger({ pool, definitions, now = () => new Date() })
   const declared = indexDefinitions(definitions);
 
   return Object.freeze({
-    async debit({ subjectType, subjectId, resource, amount }) {
+    /**
+     * يخصم من الدفتر. يقبلُ `client` اختياريّاً: اتصالٌ محجوزٌ داخل معاملةٍ (`withTransaction`)
+     * كي يلتزمَ الخصمُ مع عملياتٍ أخرى (مثل علامةِ الميزانيةِ على المهمّةِ) ذرّيّاً —
+     * وإلا استعملَ المجمّعُ (`pool`) واتصالاً مستقلّاً بلا معاملةٍ خارجية.
+     * @param {{ subjectType: string, subjectId: string, resource: string, amount: number, client?: import('pg').PoolClient }} request
+     */
+    async debit({ subjectType, subjectId, resource, amount, client }) {
       assertSubject(subjectType, subjectId, resource);
       const definition = declaredDefinition(declared, subjectType, resource);
       if (!isSupportedDecimal(amount)) {
@@ -241,7 +247,7 @@ export function createQuotaLedger({ pool, definitions, now = () => new Date() })
       }
 
       try {
-        const result = await pool.query(DEBIT_SQL, [
+        const result = await (client ?? pool).query(DEBIT_SQL, [
           `quota:${randomUUID()}`,
           subjectType,
           subjectId,
