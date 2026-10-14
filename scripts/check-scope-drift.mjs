@@ -113,7 +113,7 @@ export const SELF_STALE_STEPS = Object.freeze({
  * - وما سوى ذلكَ ⇒ `eligible: false` بسببٍ مُسمّىً.
  *
  * @param {unknown} jobsPayload
- * @returns {{ eligible: boolean, reason: string }}
+ * @returns {{ eligible: boolean, reason: string, retryable?: boolean }}
  */
 export function classifyTriggerJobs(jobsPayload) {
   const jobs =
@@ -126,6 +126,7 @@ export function classifyTriggerJobs(jobsPayload) {
   /** @type {string[]} */
   const foreign = [];
   let selfCandidate = 0;
+  let unknownState = false;
   for (const raw of jobs) {
     const job = /** @type {{ name?: unknown, conclusion?: unknown, steps?: unknown }} */ (raw);
     const name = typeof job.name === 'string' ? job.name : '';
@@ -135,7 +136,16 @@ export function classifyTriggerJobs(jobsPayload) {
       foreign.push(`وظيفةٌ: ${name} (${String(job.conclusion)})`);
       continue;
     }
+    // ── WL-386: وظيفةٌ سقطتْ وخُطواتُها غائبةٌ أو فارغةٌ = حالةٌ غيرُ محسومةٍ لا نفيٌ للسقوطِ الذاتيِّ ──
+    // إذا سقطتِ الوظيفةُ «فحص الجودة الكامل» ولم تُرجِعِ الـAPI خطواتِها (اتساقٌ متأخرٌ)،
+    // فلا يجوزُ اعتبارُ ذلكَ «لا خطوةَ ساقطةً» (NO_SELF_FAILURE) لأنّها سقوطٌ غيرُ مُفسَّرٍ لا نجاحاً.
+    // عالجَ عطلُ الاستردادِ الذاتيِّ بعدَ PR #344: التشغيلةُ 38476610258 حكمَتْ NO_SELF_FAILURE
+    // لأنّ الخطواتِ كانتْ فارغةً في استجابةِ API عندَ لحظةِ الفحصِ، فلم يُطلَقِ القياسُ آليّاً.
     const steps = Array.isArray(job.steps) ? job.steps : [];
+    if (steps.length === 0 && (job.conclusion === 'failure' || job.conclusion === 'cancelled')) {
+      unknownState = true;
+      continue;
+    }
     for (const rawStep of steps) {
       const step = /** @type {{ name?: unknown, conclusion?: unknown }} */ (rawStep);
       if (step.conclusion !== 'failure' && step.conclusion !== 'cancelled') continue;
@@ -154,6 +164,15 @@ export function classifyTriggerJobs(jobsPayload) {
     return {
       eligible: false,
       reason: `SCOPE_DRIFT_FOREIGN_TRIGGER: سقوطٌ خارجَ موضعَيِ الإخفاقِ الذاتيِّ — ${foreign.join(' · ')}`,
+    };
+  }
+  // ── WL-386: حالةٌ غيرُ محسومةٍ (وظيفةٌ سقطتْ بلا خطواتٍ مقروءةٍ) تُعادُ المحاولةُ لا النجاحُ الافتراضيُّ ──
+  if (unknownState) {
+    return {
+      eligible: false,
+      retryable: true,
+      reason:
+        'SCOPE_DRIFT_STEPS_UNAVAILABLE: وظيفةُ «فحص الجودة الكامل» سقطتْ وخُطواتُها غيرُ مقروءةٍ (اتساقٌ متأخرٌ في API) — حالةٌ غيرُ محسومةٍ تُعادُ محاولتُها لا أن تُحكَمَ لا-سقوطاً ذاتيّاً.',
     };
   }
   if (selfCandidate === 0) {
@@ -267,15 +286,39 @@ function parseArgs(argv) {
  *
  * @param {string} [root] جذرُ المستودعِ. `process.cwd()` إن لم يُعطَ.
  */
-function main(root = process.cwd()) {
+async function main(root = process.cwd()) {
+  /** رمزُ الخروجِ يُجمَعُ في متغيّرٍ محليٍّ ويُنسَبُ مرّةً واحدةً في النهايةِ. */
+  let exitCode;
   try {
     const args = parseArgs(process.argv.slice(2));
     if (args.triggerJobs) {
-      const verdict = classifyTriggerJobs(JSON.parse(readFileSync(args.triggerJobs, 'utf8')));
+      let verdict = classifyTriggerJobs(JSON.parse(readFileSync(args.triggerJobs, 'utf8')));
       console.error(verdict.reason);
+      // ── WL-386: حالةٌ غيرُ محسومةٍ (خطواتٌ غيرُ مقروءةٍ) تُعادُ محاولتُها لا أن تُحكَمَ لا-سقوطاً ──
+      // التشغيلةُ 38476610258 حكمَتْ NO_SELF_FAILURE لأنّ الخطواتِ كانتْ فارغةً في لحظةِ الفحصِ.
+      if (verdict.retryable === true) {
+        const MAX_RETRIES = 3;
+        const RETRY_DELAY_MS = 5000;
+        for (let attempt = 2; attempt <= MAX_RETRIES; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+          console.error(`إعادةُ محاولةٍ ${attempt}/${MAX_RETRIES} — الحالةُ غيرُ محسومةٍ...`);
+          verdict = classifyTriggerJobs(JSON.parse(readFileSync(args.triggerJobs, 'utf8')));
+          console.error(verdict.reason);
+          if (verdict.retryable !== true) break;
+        }
+        if (verdict.retryable === true) {
+          // استنفدتِ المحاولاتُ: الحالةُ غيرُ محسومةٍ — لا نجاحَ افتراضيّاً ولا إطلاقَ قياسٍ أعمى.
+          // الـAPI قد تكذبُ في اللحظةِ الأولى لكنّه لن يصيرَ أصدقَ بالانتظارِ إلى ما لا نهاية.
+          console.error(
+            '⛔ استنفدتِ محاولاتُ إعادةِ القراءةِ — الحالةُ غيرُ محسومةٍ. راجعِ التشغيلةَ يدويّاً.',
+          );
+          exitCode = EXIT.error;
+          return exitCode;
+        }
+      }
       if (!verdict.eligible) {
-        process.exitCode = EXIT.clean;
-        return;
+        exitCode = EXIT.clean;
+        return exitCode;
       }
     }
     const result = checkScopeDrift(root, { expectHead: args.expectHead });
@@ -284,14 +327,19 @@ function main(root = process.cwd()) {
     if (result.currentDigest)
       console.error(`بصمةُ نطاقِ ${result.mainHead}: ${result.currentDigest}`);
     console.error(result.reason);
-    process.exitCode = EXIT[result.decision];
+    exitCode = EXIT[result.decision];
   } catch (err) {
     console.error(`⛔ ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = EXIT.error;
+    exitCode = EXIT.error;
   }
+  return exitCode;
 }
 
 // لا تُشغِّلْ `main` إلا حينَ يُستدعى الملفُّ مباشرةً لا حينَ يُستورَدُ للاختبارِ.
+// والنسْبُ إلى `process.exitCode` يقعُ هنا — خارجَ دالّةِ `async` — فلا يَرِثَ الـ`await`
+// حالةً مُتقادِمةً (قاعدةُ `require-atomic-updates`).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  main().then((code) => {
+    process.exitCode = code;
+  });
 }

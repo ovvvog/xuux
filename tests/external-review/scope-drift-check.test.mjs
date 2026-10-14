@@ -233,6 +233,21 @@ describe('مرشحُ موضعِ السقوطِ (classifyTriggerJobs)', () => {
     assert.match(v.reason, /SCOPE_DRIFT_NO_SELF_FAILURE/);
   });
 
+  it('م٦ب — وظيفةٌ سقطتْ وخُطواتُها غائبةٌ ⇒ حالةٌ غيرُ محسومةٍ قابلةٌ لإعادةِ المحاولةِ (WL-386)', () => {
+    // عطلُ الاستردادِ الذاتيِّ بعدَ PR #344: التشغيلةُ 38476610258 حكمَتْ NO_SELF_FAILURE
+    // لأنّ الخطواتِ كانتْ فارغةً في استجابةِ API عندَ لحظةِ الفحصِ (اتساقٌ متأخرٌ).
+    const v = classifyTriggerJobs(jobs([]));
+    assert.equal(v.eligible, false);
+    assert.equal(v.retryable, true);
+    assert.match(v.reason, /SCOPE_DRIFT_STEPS_UNAVAILABLE/);
+  });
+
+  it('م٦ج — وظيفةٌ نجحتْ وخُطواتُها غائبةٌ ⇒ لا حالةَ غيرَ محسومةٍ (النجاحُ واضحٌ)', () => {
+    const v = classifyTriggerJobs(jobs([], { validate: 'success' }));
+    assert.equal(v.eligible, false);
+    assert.match(v.reason, /SCOPE_DRIFT_NO_SELF_FAILURE/);
+  });
+
   it('م٧ — حمولةٌ بلا وظائفَ ⇒ خطأٌ مُسمّىً', () => {
     assert.throws(() => classifyTriggerJobs({}), /SCOPE_DRIFT_TRIGGER_JOBS_INVALID/);
     assert.throws(() => classifyTriggerJobs(null), /SCOPE_DRIFT_TRIGGER_JOBS_INVALID/);

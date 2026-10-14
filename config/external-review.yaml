@@ -1821,3 +1821,82 @@ findings:
         - gpt_5_5
         - gemini_3_1_pro_preview
       retestEvidence: 'إعادةُ اختبارٍ مستقلّةٌ على `bae7d47cfe643a8a792a272af20151a48901c99f`: ‏V0–V3 اجتازتْ، واختباراتُ WL-352 ‏14/14، وكلُّ طفرةٍ من شروطِ التحقّقِ التسعةِ أسقطتْ الاختبارَ المناسبَ في نسختينِ معزولتَينِ؛ وأجازَ العضوانِ الإغلاقَ. كوميتُ الإصلاحِ المدموجُ في `main`: `b9d706ad0121d12b5ba3ddb0af30dbf284f31c15`.'
+  - id: CO55-M11.05-R3-01
+    engagement: M11.05
+    title: >-
+      قناةُ Email تُرسِلُ إلى الخارجِ بلا بوابةِ خروج (المسارُ البديلُ لـR5-B-04)
+    origin: round-5
+    severityAsWritten: high
+    severity: high
+    status: open
+    agreement: >-
+      اكتشافٌ جديدٌ من العضوِ claude-opus-5-5 في جولةِ WL-383 — لم يُقيَّدْ بعدُ في
+      العقدِ حتى WL-386.
+    reproductionPath: >-
+      بناءُ EmailChannel بـgetSmtpConfig يُشيرُ إلى خادمِ SMTP محليٍّ وهميٍّ بلا
+      egressGate: يُرسِلُ EHLO ثمّ STARTTLS ثمّ AUTH/MAIL/RCPT/DATA. المُتوقَّعُ إن
+      كانت مُغلَقةً: فشلٌ قبلَ أيِّ اتصالٍ برمزٍ كـEGRESS_GATE_REQUIRED كما في
+      TelegramBotChannel. المُقيس: state=sent والبايتُ يغادرُ الحدَّ بلا بوابةٍ.
+      تخفيفٌ مقيسٌ: لا يُركَّبُ EmailChannel في createProductionSystem — الأثرُ على
+      كلِّ مُركِّبٍ يبني القناةَ.
+    affectedFiles:
+      - src/notifications/channels/email.mjs
+      - src/notifications/index.mjs
+      - src/notifications/dispatcher.mjs
+    raisedBy:
+      - claude_opus_5_5
+    rawReports:
+      claude_opus_5_5: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md
+  - id: CO55-M11.05-R3-02
+    engagement: M11.05
+    title: >-
+      نسختانِ حيّتانِ من KingAuthenticator على سجلٍّ واحدٍ تقبلانِ الرمزَ نفسَه
+    origin: round-5
+    severityAsWritten: low
+    severity: low
+    status: open
+    agreement: >-
+      اكتشافٌ جديدٌ من العضوِ claude-opus-5-5 في جولةِ WL-383 — أُعيدَ إنتاجُه في
+      WL-386 على main@fad7cec (b1:s-1 SESSION · b2:s+1 SESSION · b1:s0 SESSION ·
+      b2:s0 SESSION — جلستانِ برمزٍ واحدٍ).
+    reproductionPath: >-
+      نسختانِ KingAuthenticator على PersistentEventLog واحدٍ: كلٌّ يُصادِقُ أوّلاً
+      برمزِ خطوةٍ مختلفةٍ (currentStep-1، currentStep+1) فتُستَعادُ مرّةً واحدةً،
+      ثمّ رمزُ الخطوةِ الحاليةِ نفسُه يُقبلُ من الاثنتَينِ (جلستانِ برمزٍ واحدٍ).
+      المُتوقَّعُ إن كانت مُغلَقةً: AUTHN_FACTOR_REPLAYED للثانية. الحدُّ مُعلَنٌ في
+      تعليقِ الشفرةِ (king-auth.mjs ~686) لا في العقدِ.
+    affectedFiles:
+      - src/authn/king-auth.mjs
+      - src/root-of-trust/persistent-log.mjs
+    raisedBy:
+      - claude_opus_5_5
+    rawReports:
+      claude_opus_5_5: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md
+  - id: CO55-M11.05-R3-03
+    engagement: M11.05
+    title: >-
+      عقدُ M11.05 يُعلِنُ executedBy.rounds: 2 بينما 5 جولاتٍ لها تقاريرُ خامّةٌ على
+      القرصِ — وعنوانُ «الجولة 3» داخلَ ملفَّيِ الجولةِ الخامسةِ خطأٌ
+    origin: round-5
+    severityAsWritten: medium
+    severity: medium
+    status: open
+    agreement: >-
+      اكتشافٌ جديدٌ من العضوِ claude-opus-5-5 في جولةِ WL-383 — تَمَّ التحقّقُ في
+      WL-386: لا استبدالَ للملفاتِ (round-3 وround-5 ملفّانِ مستقلّانِ) لكنّ العدَّ
+      في العقدِ (rounds: 2) يخالفُ الواقعَ (5 جولاتٍ لها تقاريرٌ) وعنوانَيِ الجولةِ
+      الخامسةِ يقولانِ «الجولة 3» خطأً.
+    reproductionPath: >-
+      git ls-tree -r e0ded6f5 --name-only | grep M11\.05-round-3 ⇒ ملفّاتُ الجولةِ 3
+      (5babed13/WL-292)؛ ls docs/external-review/reports | grep ^M11\.05-round |
+      sed s/-model-council-report.*// | sort | uniq -c ⇒ round-1 · round-2 · round-3 ·
+      round-4 · round-5 (5 جولاتٍ)؛ العقدُ يقولُ rounds: 2؛ وملفّا الجولةِ الخامسةِ
+      يحملانِ عنوانَ «الجولة 3» خطأً (تقريرٌ خامٌّ لا يُعدَّلُ).
+    affectedFiles:
+      - config/external-review.yaml
+      - docs/external-review/reports/M11.05-round-5-model-council-report-gpt-6-1-sol.md
+      - docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md
+    raisedBy:
+      - claude_opus_5_5
+    rawReports:
+      claude_opus_5_5: docs/external-review/reports/M11.05-round-5-model-council-report-claude-opus-5-5.md
