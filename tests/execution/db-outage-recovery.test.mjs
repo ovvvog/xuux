@@ -37,6 +37,7 @@ import {
 import { UNSTARTED_RELEASE_CODE, createTaskQueue } from '../../src/execution/queue.mjs';
 import { createWorker } from '../../src/execution/worker.mjs';
 import { TaskLifecycle } from '../../src/execution/lifecycle.mjs';
+import { probeIsolation } from '../../src/execution/isolation.mjs';
 import {
   DB_FAULT_KINDS,
   RECOVERY_EXIT_CODES,
@@ -934,6 +935,24 @@ function spawnWorker(env, king, haltFile, args) {
   };
 }
 
+/**
+ * المهمّةُ عولجت بعد الاسترداد مرّةً واحدة — وحكمُ العزلِ يتبعُ المضيفَ المقيس لا يُفترض:
+ * مضيفٌ بمساحاتِ أسماءٍ ⇒ نجاح؛ ومضيفٌ بلاها (مُشغِّلُ CI) ⇒ رفضٌ مغلقٌ `ISOLATION_UNSUPPORTED`
+ * يُعيدُ المهمّةَ إلى الطابور. كلاهما دليلُ أنّ العاملَ عاد يحجزُ ويُعالج؛ ولا نجاحَ يُخترع
+ * حيث العزلُ غائب، ولا تخطٍّ يُخفي الاختبار.
+ * @param {Awaited<ReturnType<typeof row>>} final
+ * @param {string} context
+ */
+function assertProcessedOnce(final, context) {
+  assert.equal(final.attempts, 1, context);
+  if (probeIsolation().available) {
+    assert.equal(final.state, TaskLifecycle.SUCCEEDED, context);
+  } else {
+    assert.equal(final.state, TaskLifecycle.SCHEDULED, context);
+    assert.equal(final.error_code, 'ISOLATION_UNSUPPORTED', context);
+  }
+}
+
 /** @param {() => boolean} predicate @param {number} timeoutMs */
 async function until(predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
@@ -978,12 +997,7 @@ test(
     assert.equal(result.code, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
     assert.match(result.stdout, /db-recovery \| recovered/);
     const final = await row(env.admin, task.id);
-    assert.equal(
-      final.state,
-      TaskLifecycle.SUCCEEDED,
-      `${result.stdout}\n${JSON.stringify(final)}`,
-    );
-    assert.equal(final.attempts, 1);
+    assertProcessedOnce(final, `${result.stdout}\n${JSON.stringify(final)}`);
     const types = run.events().map((event) => event.type);
     assert.ok(types.includes('kernel.worker.db-fault'), types.join(','));
     const verdict = run.events().find((event) => event.type === 'kernel.worker.db-recovery');
@@ -1032,7 +1046,8 @@ test(
     halt.resume('استئنافٌ سياديّ', royalCommand);
     const result = await run.exited();
     assert.equal(result.code, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
-    assert.equal((await row(env.admin, task.id)).state, TaskLifecycle.SUCCEEDED);
+    const final = await row(env.admin, task.id);
+    assertProcessedOnce(final, `${result.stdout}\n${JSON.stringify(final)}`);
   },
 );
 
