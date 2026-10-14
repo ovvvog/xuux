@@ -618,6 +618,16 @@ channels:
       - type: kernel.task.succeeded
         version: 1
         required: [taskId]
+      # الاستردادُ الذاتيُّ للعامل من انقطاعِ القاعدة (`WL-387`): واقعةٌ عند الاكتشاف
+      # وواقعةٌ بالحكم (`recovered` | `unverified` | `failed`). النتيجةُ لا تُقيَّد بل
+      # بصمتُها (`pendingDigest`)، فالسجلُّ يُثبت التطابقَ بلا حمولةٍ قد تكون حسّاسة.
+      - type: kernel.worker.db-fault
+        version: 1
+        required: [code, kind, pendingOp, phase, taskId, worker]
+      - type: kernel.worker.db-recovery
+        version: 1
+        required:
+          [durationMs, pendingDigest, phase, probes, reason, reconciled, taskId, verdict, worker]
   - id: knowledge
     subject: 'سجلُّ التجارب: من سجّل تجربةً وبأيّ فرضيةٍ ومقاييسَ ومتى ثُبّتت ومن راجعها (واصفاتٌ بلا مادّة)'
     classification: internal

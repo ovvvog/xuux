@@ -12,6 +12,12 @@
  * وفي الإنتاج (‏WL-092): سجلُّ وقائعِ العزلِ **مختومٌ** بمفتاح التوكن، فلا يبقى
  * على القرصِ نصٌّ ظاهرٌ عمّا نُفِّذ ولا عمّن حاول الهرب. والعاملُ يبقى مالكاً
  * لمفتاحٍ عامٍّ وحدَه للإيقاف: عقدةٌ تنفيذٍ تُقرُّ بالتوقفِ ولا تستأنفُ الدولة.
+ *
+ * وانقطاعُ القاعدة (‏WL-387) لا يُميت العامل: يُصنَّف ويُنتظَر بميزانيةٍ معلنة
+ * (`--db-recovery-max-probes`، `--db-recovery-base-ms`، `--db-recovery-max-ms`)
+ * ثم يُسوّى ما كان معلّقاً بلا إعادةِ تشغيلِ مُعالِج، ويُقيَّد الحكمُ في سجلِّ العامل
+ * نفسِه (مختومٌ في الإنتاج). ورموزُ الخروجِ عند التوقّف الآمن: `75` قاعدةٌ لم تعُد
+ * ضمن الميزانية، و`65` عطبٌ ليس تعذّراً (فسادٌ، مخطّطٌ غائب، نتيجةٌ لا تطابق).
  */
 
 import process from 'node:process';
@@ -25,13 +31,20 @@ import {
 } from '../src/root-of-trust/index.mjs';
 import { createTaskQueue } from '../src/execution/queue.mjs';
 import { createWorker } from '../src/execution/worker.mjs';
+import {
+  RECOVERY_EXIT_CODES,
+  RECOVERY_VERDICTS,
+  WorkerDatabaseFault,
+  abortableSleep,
+  createDatabaseRecovery,
+} from '../src/execution/db-recovery.mjs';
 import { createQuotaLedger } from '../src/policy/quota.mjs';
 import { loadPolicyBundle } from '../src/policy/loader.mjs';
 import { createPool } from '../src/persistence/db.mjs';
 
 /**
  * @param {readonly string[]} argv
- * @returns {{ worker: string, once: boolean, maxTasks: number, pollMs: number, haltFile: string, publicKey: string | null }}
+ * @returns {{ worker: string, once: boolean, maxTasks: number, pollMs: number, haltFile: string, publicKey: string | null, recoveryPolicy: { maxProbes?: number, baseDelayMs?: number, maxDelayMs?: number } }}
  */
 function parseArguments(argv) {
   /** @type {Record<string, string>} */
@@ -64,7 +77,34 @@ function parseArguments(argv) {
     pollMs: Number(flags['poll-ms'] ?? '200'),
     haltFile: flags['halt-file'] ?? process.env['HALT_FILE'] ?? 'state/halt.json',
     publicKey: flags['halt-public-key'] ?? process.env['HALT_PUBLIC_KEY'] ?? null,
+    recoveryPolicy: recoveryPolicyFrom(flags),
   };
+}
+
+/**
+ * سياسةُ الانتظارِ من الأعلام. قيمةٌ غيرُ صالحةٍ تُرفض لا تُستبدل صامتةً بالافتراضي:
+ * ميزانيةٌ لا يعرف مُشغّلُها مقدارَها ليست ميزانية.
+ * @param {Record<string, string>} flags
+ */
+function recoveryPolicyFrom(flags) {
+  /** @type {{ maxProbes?: number, baseDelayMs?: number, maxDelayMs?: number }} */
+  const policy = {};
+  /** @type {Array<[string, 'maxProbes' | 'baseDelayMs' | 'maxDelayMs', number]>} */
+  const fields = [
+    ['db-recovery-max-probes', 'maxProbes', 1],
+    ['db-recovery-base-ms', 'baseDelayMs', 1],
+    ['db-recovery-max-ms', 'maxDelayMs', 1],
+  ];
+  for (const [flag, key, min] of fields) {
+    const raw = flags[flag];
+    if (raw === undefined) continue;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < min) {
+      throw new Error(`العلَم --${flag} يحتاج عدداً صحيحاً ≥ ${min}، لا «${raw}».`);
+    }
+    policy[key] = value;
+  }
+  return policy;
 }
 
 async function main() {
@@ -101,24 +141,82 @@ async function main() {
     },
   });
 
+  // المُستردّ يقيّد في سجلّ العامل نفسه — المختوم في الإنتاج — لا في ملفٍّ جانبيٍّ
+  // ظاهر: ما يكشفه قيدُ الاسترداد (مهمّةٌ ومرحلةٌ وبصمةُ نتيجة) يستحقّ الختمَ ذاته.
+  const recovery = createDatabaseRecovery({
+    pool,
+    queue,
+    worker: options.worker,
+    haltGuard: halt,
+    log: isolationSink,
+    policy: options.recoveryPolicy,
+  });
+
   let stopping = false;
+  const stopper = new AbortController();
   const stop = () => {
     stopping = true;
+    stopper.abort();
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
 
   process.stdout.write(`عاملٌ أُقلع: ${options.worker} (ملف الإيقاف: ${options.haltFile})\n`);
   let handled = 0;
+  /** @type {WorkerDatabaseFault | null} */
+  let fault = null;
+  /** @type {number | undefined} */
+  let exitCode;
+  let lastRecoveryLine = '';
   try {
     while (!stopping && handled < options.maxTasks) {
-      const tick = await worker.tick();
+      if (fault !== null) {
+        const outcome = await recovery.recover(fault, { signal: stopper.signal });
+        // التأجيلُ تحت الإيقاف يُطبع مرّةً لا في كلِّ دورة (كما يُقيَّد في السجلّ مرّة).
+        const line = `${outcome.verdict}|${outcome.reason}`;
+        if (line !== lastRecoveryLine) {
+          process.stdout.write(
+            `${new Date().toISOString()} | db-recovery | ${outcome.verdict} | ${outcome.reason} | ${outcome.probes} مسبار | ${outcome.durationMs}ms\n`,
+          );
+        }
+        lastRecoveryLine = outcome.retry ? line : '';
+        if (sealed !== null) await sealed.sink.drain();
+        if (outcome.verdict === RECOVERY_VERDICTS.FAILED) {
+          process.stderr.write(
+            `توقّف العامل عند حدٍّ آمن: ${outcome.reason} — يحتاج تدخّلاً مخوَّلاً؛ لم يُعَد تشغيلُ شيءٍ ولم يُكتب شيء.\n`,
+          );
+          exitCode = outcome.exitCode ?? RECOVERY_EXIT_CODES.DB_INTEGRITY;
+          break;
+        }
+        if (outcome.retry) {
+          // الإيقاف السياديّ يؤجّل التسوية: لا كتابة حتى يُستأنف، ولا حجز جديد.
+          await abortableSleep(options.pollMs, stopper.signal);
+          continue;
+        }
+        if (outcome.verdict === RECOVERY_VERDICTS.UNVERIFIED && stopping) {
+          exitCode = RECOVERY_EXIT_CODES.DB_UNAVAILABLE;
+          break;
+        }
+        fault = null;
+        continue;
+      }
+      let tick;
+      try {
+        tick = await worker.tick();
+      } catch (error) {
+        if (!(error instanceof WorkerDatabaseFault)) throw error;
+        process.stdout.write(
+          `${new Date().toISOString()} | db-fault | ${error.fault.kind}/${error.fault.code} | ${error.phase} | ${error.taskId ?? '—'}\n`,
+        );
+        fault = error;
+        continue;
+      }
       process.stdout.write(
         `${new Date().toISOString()} | ${tick.outcome} | ${tick.taskId ?? '—'} | ${tick.code ?? '—'} | ${tick.durationMs}ms\n`,
       );
       if (tick.outcome === 'idle' || (tick.outcome === 'halted' && tick.taskId === null)) {
         if (options.once) break;
-        await new Promise((resolve) => setTimeout(resolve, options.pollMs));
+        await abortableSleep(options.pollMs, stopper.signal);
         continue;
       }
       handled += 1;
@@ -126,6 +224,8 @@ async function main() {
       // ولا تُمرَّرُ مهمةٌ تالية — سجلٌّ ناقصٌ أخطرُ من عاملٍ متوقف.
       if (sealed !== null) await sealed.sink.drain();
     }
+    // توقّفٌ وعطبٌ معلّقٌ لم يُسوَّ: لا يُعلَن خروجاً سليماً.
+    if (fault !== null && exitCode === undefined) exitCode = RECOVERY_EXIT_CODES.DB_UNAVAILABLE;
   } finally {
     if (sealed !== null) {
       try {
@@ -140,6 +240,7 @@ async function main() {
     await pool.end();
   }
   process.stdout.write(`عاملٌ توقّف: ${options.worker} — مهام مُعالَجة: ${handled}\n`);
+  if (exitCode !== undefined) process.exitCode = exitCode;
 }
 
 main().catch((error) => {

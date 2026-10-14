@@ -48,6 +48,12 @@ export const QUEUE_ERRORS = Object.freeze({
  */
 export const HALT_RELEASE_CODE = 'TASK_HALTED';
 
+/**
+ * رمزُ الإفراجِ عن حجزٍ لم يبدأ مُعالِجُه بسببِ انقطاعِ القاعدة (`WL-387`). مُعلَنٌ
+ * هنا كرمزِ الإيقاف، فمن قرأ صفَّ المهمّةِ عرفَ أنَّ عودتَها انقطاعٌ لا خطأ.
+ */
+export const UNSTARTED_RELEASE_CODE = 'TASK_RELEASED_UNSTARTED_DB_OUTAGE';
+
 /** خطأ طابور مسمّى برمز يُفرَّق به آلياً. */
 export class QueueError extends Error {
   /**
@@ -633,6 +639,72 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
           from: TaskLifecycle.RUNNING,
           to: TaskLifecycle.SCHEDULED,
           reason: `إيقاف شامل (${HALT_RELEASE_CODE}) — أُجهض التنفيذ وأُعيدت المهمة والمحاولة لم تُستهلك (${restored}/${current.maxAttempts}): ${reason}`,
+          actor: request.worker,
+          attempt: current.attempts,
+          at,
+        });
+        return {
+          task: toTask(/** @type {Record<string, unknown>} */ (released.rows[0])),
+          attemptRestored: restored < current.attempts,
+        };
+      });
+    },
+
+    /**
+     * **يُفرج** عن حجزٍ لم يبدأ مُعالِجُه لأن قاعدةَ البيانات انقطعت في ما بين
+     * الحجز والتشغيل (`WL-387`). المحاولةُ لا تُحسَب: ما لم يُحاوَل لا يُخصَم من
+     * ميزانيّةِ محاولاتِه، وإلّا ذهبت مهمّةٌ سقفُها محاولةٌ واحدةٌ إلى الرسائلِ الميتة
+     * وهي لم تُنفَّذ — وهو بعينه ما كان `reclaimExpired` سيفعله بها.
+     *
+     * وما يجعل «لم يبدأ» حقيقةً لا ظنّاً شرطانِ في الاستعلام نفسِه:
+     *   1. العقدُ لهذا العاملِ والمهمّةُ جارية (كما في `releaseForHalt`).
+     *   2. الحجزُ وقع **بعد** `claimedAfter` — لحظةِ إقلاعِ العمليةِ الحاضرة. فحجزٌ
+     *      من حياةٍ سابقةٍ للعامل نفسِه (قُتل أثناء تشغيل) لا يُفرَج عنه هنا أبداً:
+     *      ذاك قد بدأ، ومكانُه `reclaimExpired` الذي يحسب المحاولة.
+     * والعاملُ لا يُشغّل إلّا ما أعاده `claim` إليه، ويحملُ مهمّةً واحدةً في كلِّ
+     * دورة؛ فالمُستردُّ (`db-recovery.mjs`) لا ينادي هذا إلّا لما لم يبلغه المُعالِج.
+     * @param {{ taskId: string, worker: string, reason: string, claimedAfter: Date }} request
+     * @returns {Promise<{ task: TaskRecord, attemptRestored: boolean }>}
+     */
+    async releaseUnstarted(request) {
+      const at = now();
+      const reason = requireText(request.reason, 'reason');
+      if (!(request.claimedAfter instanceof Date) || Number.isNaN(request.claimedAfter.getTime())) {
+        throw new QueueError(
+          QUEUE_ERRORS.FIELD_INVALID,
+          'الإفراج عن حجزٍ لم يبدأ يحتاج `claimedAfter`: بلا حدٍّ زمنيٍّ يُفرَج عمّا بدأ.',
+        );
+      }
+      return withTransaction(pool, async (client) => {
+        const locked = await client.query(
+          `SELECT ${SELECT_COLUMNS} FROM state.tasks
+            WHERE id = $1 AND lease_owner = $2 AND state = 'running'
+              AND state_changed_at >= $3
+            FOR UPDATE`,
+          [request.taskId, request.worker, request.claimedAfter],
+        );
+        const lockedRow = locked.rows[0];
+        if (lockedRow === undefined) {
+          throw new QueueError(
+            QUEUE_ERRORS.LEASE_LOST,
+            `العقد ليس لك أو المهمة ليست جارية أو حُجزت قبل هذه العملية: ${request.taskId}`,
+          );
+        }
+        const current = toTask(/** @type {Record<string, unknown>} */ (lockedRow));
+        const restored = Math.max(0, current.attempts - 1);
+        const released = await client.query(
+          `UPDATE state.tasks
+              SET state = 'scheduled', available_at = $2, attempts = $3,
+                  error_code = $4, error_message = $5,
+                  lease_owner = NULL, lease_expires_at = NULL, state_changed_at = $2
+            WHERE id = $1 RETURNING ${SELECT_COLUMNS}`,
+          [current.id, at, restored, UNSTARTED_RELEASE_CODE, reason],
+        );
+        await recordTransition(client, {
+          taskId: current.id,
+          from: TaskLifecycle.RUNNING,
+          to: TaskLifecycle.SCHEDULED,
+          reason: `انقطاع قاعدة (${UNSTARTED_RELEASE_CODE}) — المُعالِج لم يبدأ والمحاولة لم تُستهلك (${restored}/${current.maxAttempts}): ${reason}`,
           actor: request.worker,
           attempt: current.attempts,
           at,
