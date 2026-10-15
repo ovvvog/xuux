@@ -63,20 +63,33 @@ test('`--self-check` يُخرِجُ براهينَه مقيسةً ويخرجُ �
 
 test('`--once` يُطلِقُ الأعمالَ المستحقّةَ فعلاً ويُعلِنُ مصدرَ دفترِه', () => {
   const { status, output } = run(['--once', '--json']);
-  assert.equal(status, 0, `النبضةُ الواحدةُ سقطت: ${output}`);
+  // الحاصدُ في واجهةِ الذاكرةِ **يُعلَنُ فاشلاً لا يَدَّعي نجاحاً صفراً** (`WL-391`):
+  // بلا قاعدةٍ لا عقدَ يُقرأُ، فرفضٌ مُسمّىً لا صمتٌ يُقرأُ «لا شيءَ مستحقٌّ».
+  // فالمُشغِّلُ يُعلِنُ مصدرَهُ صراحةً ولا يُدّعى أنّ ما فشلَ هو ما نجحَ.
+  assert.equal(status, 74, `النبضةُ الواحدةُ لم تُعلِنْ فشلَ الحاصدِ: ${output}`);
   const parsed =
-    /** @type {{ source: string, dispatched: Array<{ jobId: string, outcome: string }>, refused: unknown[] }} */ (
+    /** @type {{ source: string, dispatched: Array<{ jobId: string, outcome: string, detail?: Record<string, unknown> }>, refused: unknown[] }} */ (
       JSON.parse(output)
     );
   assert.equal(parsed.source, 'memory');
-  assert.deepEqual(parsed.refused, []);
-  assert.ok(parsed.dispatched.length >= 1, 'لم يُطلَقْ عملٌ مستحقٌّ');
-  for (const entry of parsed.dispatched) {
-    assert.equal(entry.outcome, 'completed', `عملٌ لم يكتملْ: ${JSON.stringify(entry)}`);
-  }
   // والأعمالُ المُعلَنةُ في القيودِ كلُّها أُطلِقت: عملٌ مُعلَنٌ لا يُطلَقُ في
   // نبضةٍ على دفترٍ فارغٍ إمّا بلا مُنفِّذٍ أو بلا سياسةٍ تمنحُه — وكلاهما جدولةٌ
   // على الورقِ.
-  const ids = parsed.dispatched.map((entry) => entry.jobId).sort();
+  const completed = parsed.dispatched.filter((entry) => entry.outcome === 'completed');
+  assert.ok(completed.length >= 1, 'لم يُطلَقْ عملٌ مستحقٌّ');
+  for (const entry of completed) {
+    assert.equal(entry.outcome, 'completed', `عملٌ لم يكتملْ: ${JSON.stringify(entry)}`);
+  }
+  const ids = completed.map((entry) => entry.jobId).sort();
   assert.deepEqual(ids, ['job:readiness-report', 'job:recovery-drill']);
+  // والحاصدُ فشلَ بمُنفِّذِهِ الحقيقيّ لا بجسمٍ صامتٍ: التذكرةُ والقرارُ لا يُدّعى
+  // لهما «نجاحٌ صفرٌ» بلا قاعدةٍ يُقرأُ منها عقدٌ.
+  const reaper = parsed.dispatched.find((entry) => entry.jobId === 'job:reclaim-expired-leases');
+  assert.ok(reaper !== undefined, 'الحاصدُ لم يُطلَق في نبضةِ الذاكرةِ');
+  assert.equal(reaper.outcome, 'failed', 'الحاصدُ في الذاكرةِ لم يُعلَنْ فاشلاً');
+  assert.match(
+    String(reaper.detail?.['message'] ?? ''),
+    /DATABASE_URL/u,
+    'فشلُ الحاصدِ بلا قاعدةٍ لم يُسَمَّ سببُه',
+  );
 });

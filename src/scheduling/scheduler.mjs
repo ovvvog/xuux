@@ -286,7 +286,7 @@ export class Scheduler {
    * نبضةٌ واحدةٌ: تقرأُ الاستحقاقَ من الدفترِ وتُطلِقُ ما استحقَّ حتى السقفِ
    * المُعلَنِ. وهي **المسارُ الوحيدُ** للإطلاقِ الدوريِّ، تُنادى من المؤقِّتِ.
    * @param {{ now?: number, actor: SchedulerActor }} input
-   * @returns {Promise<{ now: string, dispatched: Array<{ jobId: string, slotAt: number, outcome: string }>, refused: Array<{ jobId: string, code: string }>, missed: Array<{ jobId: string, slotAt: string }>, skipped: string[] }>}
+   * @returns {Promise<{ now: string, dispatched: Array<{ jobId: string, slotAt: number, outcome: string, detail?: Record<string, unknown> }>, refused: Array<{ jobId: string, code: string }>, missed: Array<{ jobId: string, slotAt: string }>, skipped: string[] }>}
    */
   async tick({ now = this.clock(), actor }) {
     if (actor === undefined || typeof actor.id !== 'string' || typeof actor.role !== 'string') {
@@ -296,7 +296,7 @@ export class Scheduler {
       );
     }
     const dueness = await this.dueJobs({ now });
-    /** @type {Array<{ jobId: string, slotAt: number, outcome: string }>} */
+    /** @type {Array<{ jobId: string, slotAt: number, outcome: string, detail?: Record<string, unknown> }>} */
     const dispatched = [];
     /** @type {Array<{ jobId: string, code: string }>} */
     const refused = [];
@@ -325,7 +325,12 @@ export class Scheduler {
       const job = this.policy.job(entry.jobId);
       try {
         const result = await this.dispatch({ job, slotAt: entry.slotAt, now, actor });
-        dispatched.push({ jobId: result.jobId, slotAt: result.slotAt, outcome: result.outcome });
+        dispatched.push({
+          jobId: result.jobId,
+          slotAt: result.slotAt,
+          outcome: result.outcome,
+          detail: result.detail,
+        });
       } catch (error) {
         refused.push({
           jobId: entry.jobId,

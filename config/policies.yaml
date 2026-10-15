@@ -128,6 +128,12 @@ actions:
   - id: run-scheduled-job
     description: إطلاق عمل مُجدوَل في موعده المُعلَن (تقرير أو تمرين).
     sensitive: true
+  # حصادُ عقودِ العمّالِ الميتين — إغلاقُ الدَينِ `LIVE-45` (أ) (`WL-391`).
+  # فعلٌ حسّاسٌ لأنّه يُعدّلُ حالتَ المهامّ (قد يُعلِنُها فاشلةً ويُنقِلُها إلى
+  # الرسائلِ الميتةِ) لا يقرأُ فقط؛ ولا ينفَّذُ إلّا عبرَ نقطةِ التفويضِ.
+  - id: reclaim-expired-leases
+    description: استعادة مهام انتهت عقود عمالها الميتين وإعادتها إلى الطابور أو فشلها.
+    sensitive: true
 
 policies:
   # ── الممنوع منعاً مطلقاً: أولوية 1000 فلا سماح يعلو عليه ──
@@ -497,6 +503,23 @@ policies:
       roles: ['role:king', 'role:operator']
     actions: ['run-scheduled-job']
     resources: ['job:*']
+
+  # الحصادُ المُجدوَلُ لعقودِ العمّالِ الميتين — إغلاقُ الدَينِ `LIVE-45` (أ) (`WL-391`).
+  # فعلٌ مُسندٌ إلى المشغّلِ حصراً: مَن يحصدُ عقودَ عمالٍ ماتوا **يُعدّلُ مهامّ**،
+  # فليسَ لمَن هو دونَ المشغّلِ أن يُعيدَها إلى الطابورِ أو يُعلِنَها فاشلةً.
+  - id: pol:reaper-reclaim-leases
+    name: حصاد عقود العمّال الميتين للمشغّل
+    owner: crown
+    version: 1
+    effect: allow
+    priority: 200
+    reason: عقودُ العمّالِ الموتى مهمّاتٌ معلّقةٌ لا تُحلُّ نفسَها؛ ومن لا يملكُها لا يحصدُها.
+    enabled: true
+    approvedBy: crown
+    actors:
+      roles: ['role:operator']
+    actions: ['reclaim-expired-leases']
+    resources: ['task:*']
 
   - id: pol:submit-case-to-court
     name: رفع القضايا إلى المحكمة
