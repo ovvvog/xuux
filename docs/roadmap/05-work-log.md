@@ -1,5 +1,35 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-15] — WL-390 — دورةُ قياسِ خطِّ أساسِ التخطّي على `main@e5f1cebd` (بعد دمج PR #348) + إصلاحُ عيوبِ السقفِ في نشرِ الأثرِ
+
+- **المنفِّذ:** Perplexity Computer (`soaav-svg`)
+- **المسار والخطوة:** عمليةُ قياسِ `OPS-1` الرسميةِ (لا اختبارَ تغييراً) على `main@e5f1cebd4730168b7c9c346ce19350d24f755014` بعد دمج PR #348 الذي أضاف ملفَّ اختبارٍ (257 ملفاً لا 256)
+- **الحالة بعد العمل:** ✅ منجز
+
+#### ما تم فعلاً (من فحص GitHub + تشغيل السير المُعرَّف في المستودع)
+
+1. **حالة GitHub عند الاستلام:** PR #348 مدموج بالفعل (`7e864e1f54265ea94fc1edb2f5ef942cc5bf60cf` دمج في `e5f1cebd`). لا طلبات دمج مفتوحة. CI على `main@e5f1cebd` فاشلٌ في فحصين («فحص الجودة الكامل» و«تقرير البوابتين G0 و G1») بسبب تقادم أثر خط أساس التخطي (R6/STALE و R7/SCOPE-DRIFT) — الأثر القائم مقيس على `6b30da20` (256 ملف اختبار)، لكن دمج PR #348 أضاف ملف اختبار واحد (`tests/execution/db-outage-recovery.test.mjs` و`tests/helpers/pg-fault-proxy.mjs`) فصارت الشجرة 257 ملفًا. عولج عبر تشغيل `gh workflow run "قياسُ خطِّ أساسِ التخطّي"` على `main@e5f1cebd` (التشغيلة `38666484381` — ناجحة).
+2. **فشلان متكرران في مرحلة النشر (`نشرُ أثرِ خطِّ أساسِ التخطّي`):** اكتُشفت عيوبان في تصميم السير، وأُصلحا في هذه الحزمة:
+   - **(أ) اختبارُ رجوعِ الحاجزِ يبحثُ عن رقمِ دورةٍ سابقة (`tests/external-review/skip-baseline.test.mjs`):** الاختبار كان يستبدل «تتخطّى الحزمةُ ٩٢ اختباراً» بطفرةٍ — لكنّ `attributedToDatabaseUrl` في الأثر الجديد (على `main@e5f1cebd`) صار **117 لا 92** (دمج PR #348 أضاف اختبارات قاعدة بيانات جديدة)، فلم تُطبَّق الطفرة وسقط الاختبار بجرم دورة القياس لا بجرم الحاجز — وهذا عين ما حذّر منه `WL-364` و`WL-366`. صار الاختبار يبحث عن ١١٧ (الرقم المقيس من الأثر الجديد) ويبني طفرة ١٢١ فوقه.
+   - **(ب) تثبيتُ الرقمِ في ملفَّي الخطّة (`M11.05-round-1-plan.md` و`M11.06-round-2-plan.md`):** نصّ الخطّة كان يذكر «٩٢ اختباراً» كقيمةٍ مكتوبةٍ يدويًّا — أُصلح ليعكس القيمة المقيسة الجديدة (١١٧) من الأثر، مع تحديث «الكوميت المقيس» إلى `e5f1cebd` عبر السكربت الرسمي `scripts/sync-plan-commits.mjs` (كما يفعل سير النشر) — لا يدويًّا.
+3. **الأثرُ الجديد (`docs/external-review/skip-baseline.json`):** استُبدل بأثر القياس من التشغيلة `38666484381` (مستخرج من أرشيف GitHub Actions للمستودع نفسه) — مقيس على `main@e5f1cebd` · `testFileCount: 257` · `tests: 2703` · `pass: 2524` · `fail: 0` · `skipped: 179` · `attributedToDatabaseUrl: 117` · `scopeDigest: f467772cb7b9…` · `verdict: success`.
+
+#### الدليل
+
+- `gh run view 38666484381 --repo ovvvog/xuux` ⇒ `success` (قياس خط أساس التخطي على `main@e5f1cebd`).
+- `node scripts/guard-skip-baseline.mjs` ⇒ **✅ ناجح** — «2 مُدخلةَ قياسٍ و2 وثيقةً مُعلِنةً — كلُّ عددٍ مُعلَنٍ مقيسٌ ومنسوبٌ».
+- `node scripts/verify-skip-baseline-artifact.mjs --artifact /tmp/baseline/skip-baseline.json --artifact-sha256 c6f3c9aa… --measured-sha e5f1cebd… --main-head-at-measure e5f1cebd… --trusted-root .` ⇒ **✅ الأثرُ مُتحقَّقٌ منهُ** (V1…V7).
+- `env -u DATABASE_URL node --test tests/external-review/skip-baseline.test.mjs` ⇒ **14/14 ناجح** (كان 13/14 — الاختبار 14 ساقط قبل الإصلاح).
+- خطاف ما قبل الدفع (`guard:project-state` + `validate`) رُصد سقوطه السابق (اختبار 690) قبل الإصلاح — وسيُعاد تشغيله في CI.
+
+#### ما لم يتم ولماذا
+
+- **دمج هذه الحزمة متوقف على CI:** خطاف الدفع يستوجب `npm run validate` كاملًا محليًّا قبل الدفع — وهو بطيء (~8 دقائق). يُتوقع أن يمر إذا نجح CI على GitHub. لا شيء آخر مُعلَّق.
+
+**الملفات المتأثرة:** `docs/external-review/skip-baseline.json`، `docs/external-review/M11.05-round-1-plan.md`، `docs/external-review/M11.06-round-2-plan.md`، `tests/external-review/skip-baseline.test.mjs`، `docs/roadmap/05-work-log.md` (هذه المُدخلة)، `PROJECT_STATUS.md`
+
+---
+
 ### [2026-10-14] — WL-389 — ذرّيةُ الميزانيةِ (`LIVE-45` ج): علامةُ الخصمِ والخصمُ في معاملةٍ واحدة، و`BudgetOutcomeUnknown` يُفرّقُ النتيجةَ المجهولة
 
 **المنفِّذُ:** Perplexity Computer (`soaav-svg`) · **المسارُ والخطوةُ:** الحلُّ الجذريُّ لفقدانِ نتيجةِ الخصمِ في `chargeBeforeStart` (`budget.mjs`) على فرعِ PR #348 نفسِه (`feat/wl-387-worker-db-outage-recovery`)
