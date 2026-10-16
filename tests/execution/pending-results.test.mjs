@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,7 +23,7 @@ import test from 'node:test';
 
 import { PersistentEventLog } from '../../src/root-of-trust/persistent-log.mjs';
 import { createSealedEventSink } from '../../src/root-of-trust/production-runtime.mjs';
-import { KingIdentity } from '../../src/root-of-trust/index.mjs';
+import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { createBudgetGate } from '../../src/execution/budget.mjs';
 import { createQuotaLedger } from '../../src/policy/quota.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
@@ -32,9 +32,11 @@ import { TaskLifecycle } from '../../src/execution/lifecycle.mjs';
 import {
   PENDING_RESULT_RESOLVED_EVENT,
   PENDING_RESULT_STAGED_EVENT,
+  PendingResultConflict,
   createPendingResultStore,
   settlePendingResults,
 } from '../../src/execution/pending-results.mjs';
+import { createWorker } from '../../src/execution/worker.mjs';
 import { probeIsolation } from '../../src/execution/isolation.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { createIsolatedDatabase, databaseUrl, skipWithoutDatabase } from '../helpers/pg.mjs';
@@ -563,69 +565,78 @@ test(
 
 // ─── (8) المخزنُ المختومُ: الجسمُ المصونُ يُفكُّ عندَ القراءة ─────────────────
 
-test('المخزنُ المختومُ: القيمةُ تدومُ على القرصِ جسمًا مصونًا لا نصًّا ظاهرًا، وتُقرأُ بالخاتمِ لا بدونه', async (t) => {
-  const dir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'wl392-sealed-')));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
-  /** خاتمُ اختبارٍ على نمطِ خاتمِ الإنتاج: ختمٌ وفكٌّ، والجسمُ على القرصِ نصٌّ مصون. */
-  const sealer = {
-    keyId: '05',
-    seal: async (/** @type {unknown} */ data) => ({ sealed: JSON.stringify(data) }),
-    open: async (/** @type {unknown} */ sealed) =>
-      JSON.parse(/** @type {{ sealed: string }} */ (sealed).sealed),
-  };
-  const file = path.join(dir, 'pending-sealed.jsonl');
-  const log = new PersistentEventLog(file, { sealer, fsync: false, env: {} });
-  log.load();
-  const sink = createSealedEventSink(log);
-  const store = createPendingResultStore({ reader: log, writer: sink, worker: 'عامل-الختم' });
-  await store.stage({
-    taskId: 'مهمة-مختومة',
-    attempt: 1,
-    claimId: '22222222-2222-4222-8222-222222222222',
-    result: { القيمة: 'مصونة' },
-  });
-  // الجسمُ على القرصِ مصونٌ لا نصٌّ ظاهر: مفتاحُ الحدثِ لا يظهرُ في الجسمِ الخامّ.
-  const rawEvent = log.events.find((event) => event.type === PENDING_RESULT_STAGED_EVENT);
-  assert.ok(rawEvent !== undefined);
-  assert.equal(
-    typeof (/** @type {Record<string, unknown>} */ (rawEvent.data)?.['sealed']),
-    'string',
-    'الجسمُ على القرصِ نصٌّ ظاهر — والختمَ في الإنتاجِ واجبُ دوامٍ لا زينة',
-  );
-  assert.equal(/** @type {Record<string, unknown>} */ (rawEvent.data)?.['taskId'], undefined);
-  log.close();
+test(
+  'المخزنُ المختومُ: القيمةُ تدومُ على القرصِ جسمًا مصونًا لا نصًّا ظاهرًا، وتُقرأُ بالخاتمِ لا بدونه',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    /** خاتمُ اختبارٍ على نمطِ خاتمِ الإنتاج: ختمٌ وفكٌّ، والجسمُ على القرصِ نصٌّ مصون. */
+    const sealer = {
+      keyId: '05',
+      seal: async (/** @type {unknown} */ data) => ({ sealed: JSON.stringify(data) }),
+      open: async (/** @type {unknown} */ sealed) =>
+        JSON.parse(/** @type {{ sealed: string }} */ (sealed).sealed),
+    };
+    const file = path.join(env.dir, 'pending-sealed.jsonl');
+    // هويةٌ حقيقيةٌ من الطابورِ: التسويةُ بعدَ الفتحِ تمضي على المسارِ الحقيقيِّ
+    // كاملًا (`settlePendingResults` بطابورٍ حيٍّ) لا بفكِّّ يدويٍّ للقيدِ فقط.
+    const task = await enqueue(env.queue, 'مختومة-بالهوية-الحقيقية');
+    const claimed = await env.queue.claim({ worker: 'عامل-الختم' });
+    assert.equal(claimed.length, 1);
+    const claimId = claimed[0]?.claimId;
+    assert.ok(claimId !== null && claimId !== undefined);
+    const log = new PersistentEventLog(file, { sealer, fsync: false, env: {} });
+    log.load();
+    const sink = createSealedEventSink(log);
+    const store = createPendingResultStore({ reader: log, writer: sink, worker: 'عامل-الختم' });
+    await store.stage({
+      taskId: task.id,
+      attempt: 1,
+      claimId,
+      result: { القيمة: 'مصونة' },
+    });
+    // الجسمُ على القرصِ مصونٌ لا نصٌّ ظاهر: مفتاحُ الحدثِ لا يظهرُ في الجسمِ الخامّ.
+    const rawEvent = log.events.find((event) => event.type === PENDING_RESULT_STAGED_EVENT);
+    assert.ok(rawEvent !== undefined);
+    assert.equal(
+      typeof (/** @type {Record<string, unknown>} */ (rawEvent.data)?.['sealed']),
+      'string',
+      'الجسمُ على القرصُ نصٌّ ظاهر — والختمَ في الإنتاجِ واجبُ دوامٍ لا زينة',
+    );
+    assert.equal(/** @type {Record<string, unknown>} */ (rawEvent.data)?.['taskId'], undefined);
+    log.close();
 
-  // حياةٌ جديدة: القراءةُ تُفكُّ الختمَ حدثاً حدثاً — القارئُ بلا خاتمٍ أعمى.
-  const reopened = new PersistentEventLog(file, { sealer, fsync: false, env: {} });
-  reopened.load();
-  const second = createPendingResultStore({
-    reader: reopened,
-    writer: createSealedEventSink(reopened),
-    worker: 'عامل-الختم',
-  });
-  const pending = await second.unresolved();
-  assert.equal(pending.length, 1, 'القيمةُ المصونةُ لم تُقرأ بعدَ إعادةِ الفتح');
-  assert.deepEqual(pending[0]?.result, { القيمة: 'مصونة' });
-  assert.equal(pending[0]?.claimId, '22222222-2222-4222-8222-222222222222');
-  // والقيدُ يُخزَنُ مصونًا كذلك ويُقرأُ بعدَه.
-  await second.resolve({
-    taskId: 'مهمة-مختومة',
-    attempt: 1,
-    claimId: '22222222-2222-4222-8222-222222222222',
-    outcome: 'settled',
-    reason: 'اختبارُ الختم',
-  });
-  reopened.close();
-  const third = new PersistentEventLog(file, { sealer, fsync: false, env: {} });
-  third.load();
-  const thirdStore = createPendingResultStore({
-    reader: third,
-    writer: createSealedEventSink(third),
-    worker: 'عامل-الختم',
-  });
-  assert.deepEqual(await thirdStore.unresolved(), [], 'قيدُ التسويةِ المصونُ لم يُقرأ');
-  third.close();
-});
+    // حياةٌ جديدة: القراءةُ تُفكُّ الختمَ حدثاً حدثاً — القارئُ بلا خاتمٍ أعمى.
+    const reopened = new PersistentEventLog(file, { sealer, fsync: false, env: {} });
+    reopened.load();
+    const second = createPendingResultStore({
+      reader: reopened,
+      writer: createSealedEventSink(reopened),
+      worker: 'عامل-الختم',
+    });
+    const pending = await second.unresolved();
+    assert.equal(pending.length, 1, 'القيمةُ المصونةُ لم تُقرأ بعدَ إعادةِ الفتح');
+    assert.deepEqual(pending[0]?.result, { القيمة: 'مصونة' });
+    assert.equal(pending[0]?.claimId, claimId);
+    // والقيدُ يُكتبُ مصونًا **عبرَ التسويةِ الحقيقيةِ نفسِها** — لا بيدٍ يدويةٍ
+    // تحاكيها: `settlePendingResults` بطابورٍ حيٍّ يستهلكُ الهويةَ ويقيدُ الحكمَ.
+    const counts = await settlePendingResults({ store: second, queue: env.queue });
+    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    reopened.close();
+    const settled = await env.queue.get(task.id);
+    assert.equal(settled?.state, TaskLifecycle.SUCCEEDED, 'التسويةُ فوقَ الجسمِ المصونِ لم تمضِ');
+    assert.deepEqual(settled?.result, { القيمة: 'مصونة' });
+    const third = new PersistentEventLog(file, { sealer, fsync: false, env: {} });
+    third.load();
+    const thirdStore = createPendingResultStore({
+      reader: third,
+      writer: createSealedEventSink(third),
+      worker: 'عامل-الختم',
+    });
+    assert.deepEqual(await thirdStore.unresolved(), [], 'قيدُ التسويةِ المصونُ لم يُقرأ');
+    third.close();
+  },
+);
 
 // ─── (9) التخزينُ المزدوجُ: الخمولُ والتضادُّ المُسمّى ───────────────────────
 
@@ -652,8 +663,12 @@ test('التخزينُ المزدوجُ: القيمةُ المطابقةُ خم�
     1,
     'التخزينُ المطابِقُ زادَ دليلًا — وهو خمولٌ لا واقعة',
   );
-  // قيمةٌ مخالفةٌ للهويةِ نفسِها: تضادٌّ يُقيَّدُ في الحالِ ولا يُختارُ منهما شيء.
-  await first.store.stage({ ...identity, result: { القيمة: 'المخالفة' } });
+  // قيمةٌ مخالفةٌ للهويةِ نفسِها: تضادٌّ يُقيَّدُ في الحالِ ولا يُختارُ منهما شيء —
+  // وخطأٌ مسمّى يُرمى لا يُعطى إذنًا باستكمالِ النجاحِ بالقيمةِ الثانية.
+  await assert.rejects(
+    first.store.stage({ ...identity, result: { القيمة: 'المخالفة' } }),
+    (error) => error instanceof PendingResultConflict,
+  );
   assert.deepEqual(
     await first.store.unresolved(),
     [],
@@ -935,7 +950,23 @@ test(
       TaskLifecycle.SUCCEEDED,
       'النجاحُ لم يلتزم — والمشهدَ افترضَ التزامَه',
     );
-    assert.equal(committed['result']?.['نُفِّذ'], true);
+    // القيمةُ المُلتزمةُ **كاملةً** هي بعينِها ما خُزِّنَ قبلَ الالتزامِ: القتلُ
+    // في نافذةِ ما بعدَه لا يبدّلُ الجوابَ ولا يُفلِتُ منه شيئًا.
+    const stagedReader = new PersistentEventLog(logFile, {
+      env: { NODE_ENV: 'test' },
+      lock: false,
+    });
+    let stagedResult;
+    try {
+      const staged = stagedReader.events
+        .map((event) => ({ type: event.type, data: event.data }))
+        .find((event) => event.type === PENDING_RESULT_STAGED_EVENT);
+      assert.ok(staged !== undefined, 'القيمةُ لم تُخزَّن قبلَ الالتزام');
+      stagedResult = /** @type {Record<string, unknown>} */ (staged.data)?.['result'];
+    } finally {
+      stagedReader.close();
+    }
+    assert.deepEqual(committed['result'], stagedResult);
 
     // القاعدةُ تعودُ والحياةُ الجديدةُ تُقلعُ: التسويةُ تقرأُ النجاحَ القائمَ
     // بالملاحظةِ (بصمةٌ مطابقةٌ من الحياةِ نفْسِها) — قيدٌ لا كتابةٌ ولا انتقالٌ جديد.
@@ -949,7 +980,9 @@ test(
     assert.ok(after !== null);
     assert.equal(after.state, TaskLifecycle.SUCCEEDED);
     assert.equal(after.attempts, 1);
-    assert.deepEqual(after.result?.['نُفِّذ'], true);
+    // والجوابُ الباقي بعدَ التسويةِ هو بعينِه المُلتزَمُ والمخزَّنُ — قيدٌ لا تنفيذ.
+    assert.deepEqual(after.result, committed['result']);
+    assert.deepEqual(after.result, stagedResult);
     const transitions = await env.queue.transitions(task.id);
     assert.equal(
       transitions.filter((entry) => entry.to === TaskLifecycle.SUCCEEDED).length,
@@ -1041,5 +1074,520 @@ test(
       markBefore,
       'علامةُ الخصمِ تُعيدُ نفسَها أو تُمحى — وكلاهما محاسبةٌ زائفة',
     );
+  },
+);
+
+// ─── (15) التضادُّ يُكتشَفُ عندَ القراءةِ ويوقفُ المسارَ لا يختار ────────────────
+
+test(
+  'تضادٌّ بلا حكمٍ بينَهما (قتلٌ بينَ التخزينِ الثاني والقيد): القراءةُ نفسُها تكتشفُهُ وتمنعُ التسويةَ الآلية — ولا يُختارُ الأخيرُ صامتاً',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const identity = {
+      taskId: 'مهمة-تضاد-القراءة',
+      attempt: 1,
+      claimId: '44444444-4444-4444-8444-444444444444',
+    };
+    // الحياةُ الأولىُ خزّنت قيمةً ثمّ قُتلت قبلَّ القيدِ؛ والحياةُ الثانيةُ خزّنت
+    // **مخالفةً** ثمّ قُتلت قبلَّ قيدِ التضادِّ — لا حكمَ في السجلِّ بينَهما.
+    const first = openStore(env.dir, 'عامل-القراءة', 'conflict.jsonl');
+    await first.store.stage({ ...identity, result: { القيمة: 'الأولى' } });
+    // التخزينُ الثاني يُكتبُ مباشرةً في السجلِّ (قتلٌ بينَ appendStaged وappendResolved):
+    const raw = new PersistentEventLog(first.file, { env: { NODE_ENV: 'test' }, lock: false });
+    raw.append(PENDING_RESULT_STAGED_EVENT, 'worker:عامل-القراءة', {
+      taskId: identity.taskId,
+      worker: 'عامل-القراءة',
+      attempt: identity.attempt,
+      claimId: identity.claimId,
+      result: { القيمة: 'المخالفة' },
+    });
+    raw.close();
+    first.close();
+
+    // القراءةُ تكتشفُ التضادَّ وتُعلِّمُه — لا اختيارَ للأخيرِ ولا للأول.
+    const second = openStore(env.dir, 'عامل-القراءة', 'conflict.jsonl');
+    const pending = await second.store.unresolved();
+    assert.equal(pending.length, 1);
+    assert.equal(pending[0]?.conflict, true, 'القراءةُ لم تكتشفِ التضادَّ — وسيُختارُ صامتاً');
+    // والتسويةُ تُسمّيهِ ولا تكتبُ قيمةً في القاعدةِ (المهمّةُ غيرُ موجودةٍ أصلاً —
+    // والمسارُ المصروفُ للقاعدةِ ما كانَ ليُمسَّ).
+    const counts = await settlePendingResults({ store: second.store, queue: env.queue });
+    assert.deepEqual(counts, { examined: 1, settled: 0, superseded: 0, conflicts: 1 });
+    const verdicts = second
+      .events()
+      .filter((event) => event.type === PENDING_RESULT_RESOLVED_EVENT);
+    second.close();
+    assert.equal(
+      /** @type {Record<string, unknown> | undefined} */ (verdicts[0]?.data)?.['outcome'],
+      'conflict',
+      'حكمُ التضادِّ لم يُقيَّد',
+    );
+  },
+);
+
+test(
+  'مسارُ العاملِ الكاملُ عندَ التضادِّ: لا تُكتبُ أيٌّ من القيمتَينِ في القاعدةِ — خطأٌ مسمّى يوقفُ لا التهامٌ يُمرِّر',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    // مهمّةٌ منتظرةٌ لا محجوزةً: العاملُ نفسُهُ يحجزُها في `tick` ويُشغّلُ مُعالِجَها.
+    const task = await enqueue(env.queue, 'تضاد-مسار-العامل');
+
+    // مخزنٌ يواجهُ التضادَّ: التخزينُ يرمي `PendingResultConflict` كما يفعلُ المخزنُ
+    // الحقيقيُّ عندَ قيمةٍ مخالفةٍ لهويةٍ لها قيمةٌ معلّقة.
+    const store = createPendingResultStore({
+      /** قارئٌ صوريٌّ لا يُقرأ منه — التخزينُ مُبدَّلٌ أسفلَه ليرميَ التضادَّ. */
+      reader:
+        /** @type {import('../../src/root-of-trust/persistent-log.mjs').PersistentEventLog} */ (
+          /** @type {unknown} */ ({ events: [], sealed: false })
+        ),
+      writer: {
+        append: () => {},
+        drain: async () => {},
+      },
+      worker: 'عامل-التضاد',
+    });
+    store.stage = async () => {
+      throw new PendingResultConflict(task.id, 'mock-claim');
+    };
+
+    const worker = createWorker({
+      queue: env.queue,
+      pool: env.db.pool,
+      haltGuard: { assertOperational: () => {} },
+      worker: 'عامل-التضاد',
+      pendingResults: store,
+    });
+    // المُعالِجُ أنتجَ قيمةً (مُعالِجُ الاختبارِ الحقيقيُّ)، والتخزينُ رفضَها تضادًّا:
+    // المسارُ يرمي الخطأَ المسمّى ولا يُكتبُ شيءٌ في القاعدةِ.
+    await assert.rejects(
+      () => worker.tick(),
+      (error) => error instanceof PendingResultConflict,
+    );
+    const after = await env.queue.get(task.id);
+    assert.equal(after?.state, TaskLifecycle.RUNNING, 'قيمةٌ كُتبت في القاعدةِ رغمَ التضادّ');
+    assert.equal(after?.result, null);
+  },
+);
+
+// ─── (16) الهجرةُ على قاعدةٍ قائمةٍ فيها صفوفٌ جارية ──────────────────────────
+
+test(
+  'الهجرةُ 0022 على قاعدةٍ من الإصدارِ 21 فيها مهماتٌ جاريةٌ ومنتظرةٌ ونهائية: كلُّ جاريةٍ تأخذُ معرِّفاً مستقلاً والقيدَ يقومُ',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const db = await createIsolatedDatabase('wl392mig');
+    t.after(async () => {
+      await db.drop();
+    });
+    // قاعدةٌ على الإصدارِ 21 بالضبطِ — كما كانت قواعدُ الإنتاجِ قبلَ هذه الهجرة.
+    await up(db.pool, { to: 21 });
+    const base = new URL(/** @type {string} */ (databaseUrl()));
+    void base;
+    /**
+     * إدراجُ صفوفٍ بأدنى الأعمدةِ اللازمةِ: جاريتانِ ومنتظرةٌ ونهائية. والجاريةُ
+     * تلزمُها أعمدةُ العقدِ (`tasks_running_needs_lease` من `0004`).
+     * @param {string} id
+     * @param {'running' | 'scheduled' | 'succeeded'} state
+     */
+    const insert = (id, state) =>
+      db.pool.query(
+        `INSERT INTO state.tasks (id, idempotency_key, action, target, actor_id, root_id, state, attempts, max_attempts, available_at, timeout_ms, memory_limit_mb, budget_amount, created_at, state_changed_at, lease_owner, lease_expires_at, started_at, finished_at)
+         VALUES ($1, $2, 'اختبار.نجاح', 'موضوع/هجرة', 'actor-mig', $1, $3, 1, 3, now(), 10000, 96, 0, now(), now(),
+                 CASE WHEN $4 THEN 'عامل-هجرة' ELSE NULL END,
+                 CASE WHEN $4 THEN now() + interval '60 seconds' ELSE NULL END,
+                 CASE WHEN $4 THEN now() ELSE NULL END,
+                 CASE WHEN $5 THEN now() ELSE NULL END)`,
+        [id, `mig-${id}`, state, state === 'running', state === 'succeeded'],
+      );
+    await insert('11111111-1111-4111-8111-111111111111', 'running');
+    await insert('12222222-2222-4222-8222-222222222222', 'running');
+    await insert('13333333-3333-4333-8333-333333333333', 'scheduled');
+    await insert('14444444-4444-4444-8444-444444444444', 'succeeded');
+
+    // الهجرةُ 22 على قاعدةٍ قائمةٍ: لا فشلَ في القيدِ، وكلُّ جاريةٍ معرِّفٌ مستقل.
+    await up(db.pool);
+    const rows = await db.pool.query(`SELECT id, state, claim_id FROM state.tasks ORDER BY id`);
+    const byState = new Map(rows.rows.map((row) => [row['state'], row]));
+    const runningIds = rows.rows
+      .filter((row) => row['state'] === 'running')
+      .map((row) => String(row['claim_id']));
+    assert.equal(runningIds.length, 2);
+    assert.ok(
+      runningIds.every((id) => id !== null),
+      'مهمةٌ جاريةٌ بقيت بلا معرِّفِ حجزٍ بعدَ الهجرةِ — والقيدَ يرفضُها',
+    );
+    assert.notEqual(runningIds[0], runningIds[1], 'حجزانِ تشاطرا معرِّفاً واحداً');
+    assert.equal(byState.get('scheduled')?.['claim_id'], null);
+    assert.equal(byState.get('succeeded')?.['claim_id'], null);
+  },
+);
+
+// ─── (17) عطبُ قاعدةٍ عندَ إقلاعِ التسويةِ يؤجّلُ الحجزَ ثمّ يُسوّي قبلَه ───────
+
+test(
+  'القاعدةُ مقطوعةٌ عندَ الإقلاعِ ونتيجةٌ معلّقةٌ وشقٌّ جديدٌ منتظر: التسويةُ تُستوفى قبلَ حجزِ الشقِّ الجديدِ لا بعده',
+  {
+    skip: skipWithoutDatabase || !probeIsolation().available,
+    timeout: 90_000,
+  },
+  async (t) => {
+    const env = await environment(t, { proxy: true });
+    // نتيجةٌ معلّقةٌ من حياةٍ ماتت (تُخزَّن بيدِ الاختبارِ كما خزّنها العاملُ الحقيقيُّ
+    // في حياتِهِ الأولى) وشقٌّ جديدٌ منتظرٌ يُحجزُ متى سُمح.
+    const first = await enqueue(env.queue, 'تسوية-قبل-الحجز');
+    const claimed = await env.queue.claim({ worker: 'عامل-الإقلاع-المقطوع' });
+    assert.equal(claimed.length, 1);
+    const claimId = claimed[0]?.claimId;
+    assert.ok(claimId !== null && claimId !== undefined);
+    const store = openStore(env.dir, 'عامل-الإقلاع-المقطوع', 'worker-log.jsonl');
+    await store.store.stage({
+      taskId: first.id,
+      attempt: 1,
+      claimId,
+      result: { القيمة: 'من-الحياة-الميتة' },
+    });
+    store.close();
+    // الشقُّ الجديدُ سيُنفَّذَ فعلاً في العزلِ داخلَ العمليةِ الحيّةِ: سقفُ ذاكرةٍ يتّسعُ لـNode.
+    const second = await enqueue(env.queue, 'شق-جديد-بعد-التسوية', ISOLATED_TASK);
+
+    const logFile = path.join(env.dir, 'worker-log.jsonl');
+    const king = new KingIdentity();
+    const haltFile = path.join(env.dir, 'state', 'halt.json');
+    const publicKey = String(king.publicKey.export({ type: 'spki', format: 'pem' }));
+    const outputRoot = path.join(ROOT, '.isolation-output', `wl392c-${Date.now()}`);
+    t.after(() => {
+      rmSync(outputRoot, { recursive: true, force: true });
+    });
+
+    // القاعدةُ مقطوعةٌ من قبلَ الإقلاعِ: التسويةُ تعجزُ فتُدخلُ الحلقةَ في حالةِ
+    // العطبِ (لا حجزَ حتى عودتِها)، لا أن تُبتلَعَ فيمرَّرُ الكاسبُ فوقَ الحقِّ.
+    await env.proxy?.down();
+    const child = spawn(
+      process.execPath,
+      [
+        WORKER_SCRIPT,
+        '--worker',
+        'عامل-الإقلاع-المقطوع',
+        '--max-tasks',
+        '1',
+        '--poll-ms',
+        '50',
+        '--db-recovery-max-probes',
+        '400',
+        '--db-recovery-base-ms',
+        '20',
+        '--db-recovery-max-ms',
+        '100',
+      ],
+      {
+        cwd: ROOT,
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          STATE_ENV: 'ci',
+          DATABASE_URL: env.url,
+          HALT_FILE: haltFile,
+          HALT_PUBLIC_KEY: publicKey,
+          ISOLATION_LOG_FILE: logFile,
+          ISOLATION_OUTPUT_ROOT: outputRoot,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    const exited = new Promise((resolve) =>
+      child.on('exit', (code) => resolve({ code, stdout, stderr })),
+    );
+    t.after(() => {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    });
+    await until(() => stdout.includes('pending-results | عَطِلةُ قاعدةٍ عندَ التسويةِ'), 30_000);
+
+    // القاعدةُ تعودُ: الاستردادُ يمضّي ثمّ **التسويةُ قبلَ أولِ حجزٍ جديدٍ**.
+    await env.proxy?.up();
+    const result = await exited;
+    assert.equal(result.code, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+
+    const settleAt = result.stdout.indexOf('pending-results | سُوّيت: 1');
+    assert.ok(settleAt >= 0, `التسويةُ لم تُطبع:\n${result.stdout}`);
+    const settled = await env.queue.get(first.id);
+    assert.equal(
+      settled?.state,
+      TaskLifecycle.SUCCEEDED,
+      'النتيجةُ المعلّقةُ لم تُسوَّ بعدَ عودةِ القاعدة',
+    );
+    assert.deepEqual(settled?.result, { القيمة: 'من-الحياة-الميتة' });
+    assert.equal(settled?.attempts, 1, 'التسويةُ أُعيدت تشغيلاً — وهي استيفاءٌ لا تنفيذ');
+    // والشقُّ الجديدُ حُجز ونُفِّذ — والدليلُ أنَّ التسويةَ سبقتهُ في المخرجاتِ.
+    const after = await env.queue.get(second.id);
+    assert.equal(
+      after?.state,
+      TaskLifecycle.SUCCEEDED,
+      `الشقُّ الجديدُ لم يُنفَّذ\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+    const doneAt = result.stdout.indexOf(`done | ${second.id}`);
+    assert.ok(doneAt > settleAt, 'حُجز الشقُّ الجديدُ قبلَّ تسويةِ المعلّقةِ — والحقَّ أحقُّ');
+  },
+);
+
+test(
+  'خطأُ قراءةٍ لا يعودُ للقاعدةِ عندَ الإقلاعِ يوقفُ العاملَ لا يُمرَّر: خروجٌ غيرُ صفريٍّ ولا حجزَ ولا تسويةً صامتة',
+  {
+    skip: skipWithoutDatabase || !probeIsolation().available,
+    timeout: 60_000,
+  },
+  async (t) => {
+    const env = await environment(t);
+    const first = await enqueue(env.queue, 'قراءة-مكسورة');
+    const claimed = await env.queue.claim({ worker: 'عامل-القراءة-المكسورة' });
+    assert.equal(claimed.length, 1);
+    const claimId = claimed[0]?.claimId;
+    assert.ok(claimId !== null && claimId !== undefined);
+    const store = openStore(env.dir, 'عامل-القراءة-المكسورة', 'worker-log.jsonl');
+    await store.store.stage({
+      taskId: first.id,
+      attempt: 1,
+      claimId,
+      result: { القيمة: 'دائمة' },
+    });
+    store.close();
+
+    // السجلُ الدائمُ يُصبحُ غيرَ قابلٍ للكتابةِ: أولُ محاولةِ إلحاقٍ (قيدُ
+    // التسويةِ نفسِهِ) ترمي خطأَ نظامِ ملفاتٍ لا عطبَ قاعدةٍ — فالتصنيفُ يرميهِ
+    // كما هو لا أن يُبتلَعَ فيمرَّرَ الكاسبُ فوقَه.
+    chmodSync(store.file, 0o444);
+    // تنظيفُ الصلاحيةِ دفاعيٌّ: تنظيفُ الجذرِ المؤقّتِ (المسجَّلُ قبلَ هذا الخطّافِ)
+    // قد يسبقُه في الترتيبِ فيحذفُ الملفَ — والمقصودُ من الخطّافِ استعادةُ قابليةِ
+    // الكتابةِ للملفِ الباقي لا الإخلالُ بالتنظيفِ نفسِه.
+    t.after(() => {
+      if (existsSync(store.file)) chmodSync(store.file, 0o644);
+    });
+
+    const logFile = path.join(env.dir, 'worker-log.jsonl');
+    const king = new KingIdentity();
+    const haltFile = path.join(env.dir, 'state', 'halt.json');
+    const publicKey = String(king.publicKey.export({ type: 'spki', format: 'pem' }));
+    const outputRoot = path.join(ROOT, '.isolation-output', `wl392d-${Date.now()}`);
+    t.after(() => {
+      rmSync(outputRoot, { recursive: true, force: true });
+    });
+    const child = spawn(
+      process.execPath,
+      [WORKER_SCRIPT, '--worker', 'عامل-القراءة-المكسورة', '--max-tasks', '5', '--poll-ms', '50'],
+      {
+        cwd: ROOT,
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          STATE_ENV: 'ci',
+          DATABASE_URL: env.url,
+          HALT_FILE: haltFile,
+          HALT_PUBLIC_KEY: publicKey,
+          ISOLATION_LOG_FILE: logFile,
+          ISOLATION_OUTPUT_ROOT: outputRoot,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+    t.after(() => {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    });
+    const code = await exited;
+    assert.notEqual(code, 0, 'خطأٌ غيرُ عطبِ قاعدةٍ مرَّ صامتاً — والعاملَ كانَ يجبُ أن يقف');
+    // ولا حجزَ ولا تسويةً: المهمّةُ كما كانت والشقُّ بلا كتابةٍ.
+    const after = await env.queue.get(first.id);
+    assert.equal(after?.state, TaskLifecycle.RUNNING);
+    assert.equal(after?.result, null);
+  },
+);
+
+// ─── (18) إقلاعٌ موقوفٌ ثمّ استئناف: التسويةُ قبلَ أولِ حجزٍ ────────────────────
+
+test(
+  'إقلاعٌ تحتَ الإيقافِ السياديّ معَ نتيجةٍ معلّقةٍ وشقٍّ منتظرٍ، ثمّ استئناف: التسويةُ تُقضى قبلَ حجزِ الشقِّ الجديدِ لا بعده',
+  {
+    skip: skipWithoutDatabase || !probeIsolation().available,
+    timeout: 90_000,
+  },
+  async (t) => {
+    const env = await environment(t);
+    const first = await enqueue(env.queue, 'إيقاف-ثم-استئناف');
+    const claimed = await env.queue.claim({ worker: 'عامل-الإيقاف' });
+    assert.equal(claimed.length, 1);
+    const claimId = claimed[0]?.claimId;
+    assert.ok(claimId !== null && claimId !== undefined);
+    const store = openStore(env.dir, 'عامل-الإيقاف', 'worker-log.jsonl');
+    await store.store.stage({
+      taskId: first.id,
+      attempt: 1,
+      claimId,
+      result: { القيمة: 'مؤجَّلة-بالإيقاف' },
+    });
+    store.close();
+    // الشقُّ الجديدُ سيُنفَّذَ فعلاً في العزلِ بعدَ الاستئنافِ: سقفُ ذاكرةٍ يتّسعُ لـNode.
+    const second = await enqueue(env.queue, 'شق-بعد-الاستئناف', ISOLATED_TASK);
+
+    const logFile = path.join(env.dir, 'worker-log.jsonl');
+    const king = new KingIdentity();
+    const haltFile = path.join(env.dir, 'state', 'halt.json');
+    const publicKey = String(king.publicKey.export({ type: 'spki', format: 'pem' }));
+    // مفتاحُ إيقافٍ حقيقيٌّ موقَّعٌ بملكٍ: العاملُ قارئٌ له والملكُ كاتبُه.
+    const royalCommand = { id: `cmd:wl392-${Date.now()}` };
+    const halt = new HaltSwitch(haltFile, king, {
+      fsync: false,
+      royalCommandVerifier: (command) => command.id === royalCommand.id,
+    });
+    halt.halt('اختبارُ إيقافٍ عندَ الإقلاعِ', royalCommand);
+    const outputRoot = path.join(ROOT, '.isolation-output', `wl392e-${Date.now()}`);
+    t.after(() => {
+      rmSync(outputRoot, { recursive: true, force: true });
+    });
+
+    const child = spawn(
+      process.execPath,
+      [WORKER_SCRIPT, '--worker', 'عامل-الإيقاف', '--max-tasks', '1', '--poll-ms', '50'],
+      {
+        cwd: ROOT,
+        env: {
+          ...process.env,
+          NODE_ENV: 'test',
+          STATE_ENV: 'ci',
+          DATABASE_URL: env.url,
+          HALT_FILE: haltFile,
+          HALT_PUBLIC_KEY: publicKey,
+          ISOLATION_LOG_FILE: logFile,
+          ISOLATION_OUTPUT_ROOT: outputRoot,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+    const exited = new Promise((resolve) =>
+      child.on('exit', (code) => resolve({ code, stdout, stderr })),
+    );
+    t.after(() => {
+      if (child.exitCode === null) child.kill('SIGKILL');
+    });
+
+    // تحتَ الإيقافِ: لا حجزَ للشقِّ الجديدِ ولا تسويةً ولا كتابةَ — التأجيلُ لا
+    // الإلغاءُ ولا التجاوز.
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    assert.ok(!stdout.includes('سُوّيت'), `تسويةٌ تحتَ الإيقاف:\n${stdout}`);
+    let after = await env.queue.get(second.id);
+    assert.equal(after?.state, TaskLifecycle.SCHEDULED, 'حُجز شقٌّ جديدٌ تحتَ الإيقاف');
+    assert.equal((await env.queue.get(first.id))?.state, TaskLifecycle.RUNNING);
+
+    // الاستئنافُ: التسويةُ المُؤجَّلةُ تُقضى قبلَ أولِ حجزٍ جديدٍ — فالقيمةُ
+    // المعلّقةُ أحقُّ من شقٍّ جديد.
+    halt.resume('استئنافٌ بعدَ إيقافِ الإقلاعِ', royalCommand);
+    const result = await exited;
+    assert.equal(result.code, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    const settleAt = result.stdout.indexOf('pending-results | سُوّيت: 1');
+    assert.ok(settleAt >= 0, `التسويةُ المؤجَّلةُ لم تُقضَ بعدَ الاستئناف:\n${result.stdout}`);
+    const settled = await env.queue.get(first.id);
+    assert.equal(settled?.state, TaskLifecycle.SUCCEEDED);
+    assert.deepEqual(settled?.result, { القيمة: 'مؤجَّلة-بالإيقاف' });
+    assert.equal(settled?.attempts, 1, 'الاستئنافُ أعادَ تشغيلَ المُعالِج');
+    after = await env.queue.get(second.id);
+    assert.equal(after?.state, TaskLifecycle.SUCCEEDED, 'الشقُّ الجديدُ لم يُنفَّذ بعدَ الاستئناف');
+    const doneAt = result.stdout.indexOf(`done | ${second.id}`);
+    assert.ok(doneAt > settleAt, 'حُجز الشقُّ الجديدُ قبلَّ تسويةِ المعلّقةِ بعدَ الاستئناف');
+  },
+);
+
+// ─── (19) سباقُ الإلغاءِ معَ التسويةِ تحتَ قفلِ الصفِّ ────────────────────────
+
+test(
+  'سباقُ الإلغاءِ معَ التسويةِ تحتَ قفلِ الصفِّ بالترتيبَينِ: القيمةُ التي وُلدت تقومُ — والإشارةُ المتأخّرةُ لا تُبطلُها (كالمسارِ المباشرِ)',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+
+    /**
+     * يُقيسُ ترتيبًا حتميًّا واحدًا من السباقِ: وصلةٌ تمسكُ قفلَ الصفِّ وتُنفِّذُ
+     * إشارتَها، والتسويةُ تنتظرُ القفلَ ثمّ تمضي — لا صدفةَ توقيتٍ.
+     * @param {'cancel-first' | 'settle-first'} order
+     */
+    const race = async (order) => {
+      const task = await enqueue(env.queue, `سباق-الإلغاء-${order}`);
+      const claimed = await env.queue.claim({ worker: 'عامل-السباق' });
+      assert.equal(claimed.length, 1);
+      const claimId = claimed[0]?.claimId;
+      assert.ok(claimId !== null && claimId !== undefined);
+      const value = { القيمة: `وُلدت-قبل-الإشارة-${order}` };
+      const store = openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`);
+      await store.store.stage({ taskId: task.id, attempt: 1, claimId, result: value });
+      store.close();
+
+      if (order === 'settle-first') {
+        // التسويةُ تلتزمُ أولًا؛ ثمّ الإشارةُ تصلُ إلى مهمّةٍ نجحت فتتجاوزُها.
+        const counts = await settlePendingResults({
+          store: openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`).store,
+          queue: env.queue,
+        });
+        assert.equal(counts.settled, 1);
+        await env.queue.cancelTree({ taskId: task.id, reason: 'إشارة متأخّرة' });
+      } else {
+        // الإشارةُ تلتزمُ ذرّيًّا تحتَ قفلِ الصفِّ بينما التسويةُ تنتظرُ القفلَ
+        // نفسَه: `cancelTree` من وصلةٍ أخرى كانت ستقفَ على هذا القفلِ (انسدادٌ
+        // ذاتيٌّ لا تنتهي منه)، فالإشارةُ تُكتَبُ داخلَ معاملةِ القفلِ ذاتِها —
+        // وهو عينُ أثرِ إشارةٍ التزمتْ قبلَ أن تمضيَ التسويةُ فوقَها، كما يفعلُ
+        // المسارُ المباشرُ (نجاحٌ بلا فحصِ إلغاءٍ بعدَ ولادةِ القيمة).
+        const client = await env.db.pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(`SELECT id FROM state.tasks WHERE id = $1 FOR UPDATE`, [task.id]);
+          // التسويةُ تنطلقُ الآن؛ قيدُ `succeed` فيها يمسُّ الصفَّ فيقفُ على القفلِ.
+          const settling = settlePendingResults({
+            store: openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`).store,
+            queue: env.queue,
+          });
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          // الإشارةُ تلتزمُ والقفلُ بيدِ هذه المعاملةِ — فتبدو للتسويةِ عندَ فكِّهِ.
+          await client.query(
+            `UPDATE state.tasks SET cancel_requested = true, cancel_reason = $2 WHERE id = $1`,
+            [task.id, 'إشارة تحت القفل'],
+          );
+          await client.query('COMMIT');
+          const counts = await settling;
+          assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+        } finally {
+          client.release();
+        }
+      }
+
+      const after = await env.queue.get(task.id);
+      return { after, value };
+    };
+
+    // الترتيبُ الأولُ: الإشارةُ تلتزمُ تحتَ القفلِ ثمّ التسويةُ — القيمةُ تقومُ
+    // والإشارةُ باقيةٌ دليلًا (لا تُمحى) لكنها لا تُبطلُ ما وُلد.
+    const first = await race('cancel-first');
+    assert.equal(first.after?.state, TaskLifecycle.SUCCEEDED);
+    assert.deepEqual(first.after?.result, first.value);
+    assert.equal(first.after?.cancelRequested, true, 'الإشارةُ ضاعت — وهي دليلٌ لا يُمحى');
+
+    // الترتيبُ الثاني: التسويةُ تلتزمُ أولًا ثمّ الإشارةُ — النجاحُ لا يُبطلُ
+    // بالإشارةِ المتأخّرةِ (المسارُ المباشرُ كذلك) والقيمةُ كما وُلدت.
+    const second = await race('settle-first');
+    assert.equal(second.after?.state, TaskLifecycle.SUCCEEDED);
+    assert.deepEqual(second.after?.result, second.value);
   },
 );

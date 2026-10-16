@@ -78,14 +78,38 @@ function recordKey(taskId, attempt, claimId) {
  */
 
 /**
- * سجلٌّ معلّقٌ لم يُسوَّ بعد: القيمةُ نفسُها مع هويةِ حجزِها.
+ * سجلٌّ معلّقٌ لم يُسوَّ بعد: القيمةُ نفسُها مع هويةِ حجزِها. وحين يقرأُ القارئُ
+ * قيمتَينِ مختلفتَينِ للهويةِ نفْسِها بلا حكمٍ بينَهما (قتلٌ بينَ التخزينِ الثاني
+ * وقيدِ التضادِّ) يُعلَّمُ `conflict` — والتسويةُ تُسمّيهِ ولا تختارُ منهما شيئاً.
  * @typedef {object} UnresolvedPendingResult
  * @property {string} taskId
  * @property {string} worker
  * @property {number} attempt
  * @property {string} claimId
  * @property {Record<string, unknown>} result
+ * @property {boolean} conflict
  */
+
+/**
+ * تضادُّ تخزينٍ صريحٌ يُرمى من `stage` حين تُخزَّنُ قيمةٌ مخالفةٌ لهويةٍ لها قيمةٌ
+ * معلّقة: لا يُعطى إذنًا باستكمالِ النجاحِ بالقيمةِ الثانيةِ (ذاك اختيارٌ صامت)،
+ * بل يُرمى ليوقفَ المسارَ عندَ حدٍّ آمنٍ — والقيدُ في السجلِّ يُسمّي التضادَّ
+ * وقرارُهُ لمالكٍ مخوَّلٍ.
+ */
+export class PendingResultConflict extends Error {
+  /**
+   * @param {string} taskId
+   * @param {string} claimId
+   */
+  constructor(taskId, claimId) {
+    super(
+      `تضادُّ تخزينٍ للمهمّةِ ${taskId} (حجزُ ${claimId}): قيمتانِ مختلفتانِ للهويةِ نفْسِها — لا يُختارُ منهما شيءٌ ويُرمى لا يُبتلَع`,
+    );
+    this.name = 'PendingResultConflict';
+    this.taskId = taskId;
+    this.claimId = claimId;
+  }
+}
 
 /**
  * شكلُ مخزنِ النتائجِ المعلّقةِ كما يستهلكهُ العامل — يُصدَّر لِتَعليقِ الأنواعِ
@@ -175,13 +199,23 @@ export function createPendingResultStore({ reader, writer, worker }) {
       ) {
         continue;
       }
-      pending.set(key, {
+      const incoming = {
         taskId: data['taskId'],
         worker: data['worker'],
         attempt: data['attempt'],
         claimId: data['claimId'],
         result: /** @type {Record<string, unknown>} */ (data['result']),
-      });
+        conflict: false,
+      };
+      const earlier = pending.get(key);
+      if (earlier !== undefined && resultDigest(earlier.result) !== resultDigest(incoming.result)) {
+        // قيمتانِ مختلفتانِ للهويةِ نفْسِها بلا حكمٍ بينَهما (قتلٌ بينَ التخزينِ
+        // الثاني وقيدِ التضادِّ): لا اختيارَ للأخيرِ ولا للأول — تضادٌّ يُكتشفُ
+        // عندَ القراءةِ نفسِها ويمنعُ التسويةَ الآليةَ حتى يُقيَّدَ الحكمُ.
+        earlier.conflict = true;
+        continue;
+      }
+      pending.set(key, incoming);
     }
     return [...pending.values()];
   }
@@ -270,14 +304,20 @@ export function createPendingResultStore({ reader, writer, worker }) {
         if (same) return;
         // تضادُّ تخزينٍ مُسمّى: القيمةُ الثانيةُ **دليلٌ يُخزَّنُ لا يُخفى** — ثمّ
         // يُقيَّدُ الحكمُ تضادًّا فورًا. لا اختيارَ للأحدثِ ولا إخفاءً للأقدمِ؛
-        // قرارُ التضادِّ لمالكٍ مخوَّلٍ لا لقارئٍ صامت.
-        await appendStaged(record);
+        // قرارُ التضادِّ لمالكٍ مخوَّلٍ لا لقارئٍ صامت. **ويُرمى خطأٌ مسمّى**: لا
+        // يُعطى إذنًا باستكمالِ النجاحِ بالقيمةِ الثانيةِ (ذاك اختيارٌ صامت) —
+        // العاملُ يتوقّفُ عندَ حدٍّ آمنٍ والقيدُ في السجلِّ يُسمّي التضادَّ.
+        // (إن كانَ التضادُّ مكتشفاً من قبلُ عندَ القراءةِ فالدليلانِ باقيانِ — لا
+        // يُكرَّرُ التخزينُ.)
+        if (existing.conflict !== true) {
+          await appendStaged(record);
+        }
         await appendResolved(
           record,
           'conflict',
           'قيمتانِ مختلفتانِ للحجزِ نفسِهِ: تضادٌّ يُقيَّدُ ولا يُختارُ منهما شيء',
         );
-        return;
+        throw new PendingResultConflict(record.taskId, record.claimId);
       }
       await appendStaged(record);
     },
@@ -341,6 +381,20 @@ export async function settlePendingResults({
       }
     }
     counts.examined += 1;
+    if (record.conflict === true) {
+      // تضادٌّ اكتشفتهُ القراءةُ نفسُها (قيمتانِ للهويةِ بلا حكمٍ بينَهما): يُقيَّدُ
+      // الحكمُ تضادًّا ولا تُكتبُ قيمةٌ في القاعدةِ — لا اختيارَ صامتَ ولا
+      // استبدال، وقرارُ التضادِّ لمالكٍ مخوَّلٍ.
+      await store.resolve({
+        taskId: record.taskId,
+        attempt: record.attempt,
+        claimId: record.claimId,
+        outcome: 'conflict',
+        reason: 'قيمتانِ مختلفتانِ للهويةِ نفْسِها في السجلِّ: تضادٌّ يُسمّى ولا يُختار',
+      });
+      counts.conflicts += 1;
+      continue;
+    }
     const task = await queue.get(record.taskId);
     if (task === null) {
       await store.resolve({

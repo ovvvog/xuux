@@ -123,101 +123,147 @@ async function main() {
   const halt = new HaltSwitch(options.haltFile, royalVerifierFromPublicKey(options.publicKey), {
     readOnly: true,
   });
-  const pool = createPool();
-  const queue = createTaskQueue({ pool });
-  const isolationLogFile = process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl';
-  // في الإنتاج يُفتحُ السجلُّ مختوماً بمفتاحِ التوكن، ويُلبَسُ مصرِفاً مرتَّباً
-  // لأن عقدَ `log.append` عندَ العزلِ متزامنٌ والختمُ ليس كذلك. التصريفُ يقعُ
-  // عندَ حدودِ المهامِّ وقبلَ الإغلاق، فإن فشلَ ختمُ واقعةٍ توقّفَ العامل.
-  const production = isProductionRuntime(process.env);
-  const sealed = production ? await openProductionEventLog(process.env, isolationLogFile) : null;
-  const isolationLog = sealed === null ? new PersistentEventLog(isolationLogFile) : sealed.log;
-  const isolationSink = sealed === null ? isolationLog : sealed.sink;
-  // مخزنُ النتائجِ المعلّقةِ (‏`WL-392`): يكتبُ في سجلِّ العاملِ الدائمِ نفسِهِ —
-  // القيمةُ تدومُ على القرصِ قبلَ أولِ كتابةٍ للقاعدةِ، وتُسوّى عندَ إقلاعٍ جديدٍ
-  // من الحياةِ السابقةِ للعمليةِ بلا إعادةِ تشغيلِ المُعالِج.
-  const pendingResults = createPendingResultStore({
-    reader: isolationLog,
-    writer: isolationSink,
-    worker: options.worker,
-  });
-  const worker = createWorker({
-    queue,
-    pool,
-    haltGuard: halt,
-    ledger: createQuotaLedger({ pool, definitions: loadPolicyBundle().quotas }),
-    worker: options.worker,
-    pendingResults,
-    isolation: {
-      workdir: process.cwd(),
-      outputRoot: process.env['ISOLATION_OUTPUT_ROOT'] ?? '.isolation-output',
-      log: isolationSink,
-    },
-  });
-
-  // المُستردّ يقيّد في سجلّ العامل نفسه — المختوم في الإنتاج — لا في ملفٍّ جانبيٍّ
-  // ظاهر: ما يكشفه قيدُ الاسترداد (مهمّةٌ ومرحلةٌ وبصمةُ نتيجة) يستحقّ الختمَ ذاته.
-  const recovery = createDatabaseRecovery({
-    pool,
-    queue,
-    worker: options.worker,
-    haltGuard: halt,
-    log: isolationSink,
-    policy: options.recoveryPolicy,
-  });
-
-  let stopping = false;
-  const stopper = new AbortController();
-  const stop = () => {
-    stopping = true;
-    stopper.abort();
-  };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
-
-  process.stdout.write(`عاملٌ أُقلع: ${options.worker} (ملف الإيقاف: ${options.haltFile})\n`);
-  // تسويةُ النتائجِ المعلّقةِ من حياةٍ سابقةٍ للعمليةِ **قبلَ أيِّ حجزٍ جديدٍ** —
-  // لا يُحجزُ شقٌّ جديدَ وما زالَ للقيمةِ المُنتَجةِ حقٌّ لم يُستوفَ. والقاعدةُ
-  // متوقّفة؟ **يُؤجَّلُ الحجزُ الجديدُ نفسُهُ** كما يُؤجَّلُ الاستردادُ: تُرمى العَطِلةُ
-  // وتدخل الحلقةَ في حالةِ العطبِ فلا حجزَ حتى تعودَ القاعدةُ ثمّ تُعادُ المحاولةُ.
-  // وما ليسَ عطبَ قاعدةٍ (فسادٌ، عقدٌ غائبٌ) يُرمى كما هو: توقّفٌ عندَ حدٍّ آمنٍ
-  // لا التهامٌ الصامتُ الذي يمرّرُ الكاسبَ الجديدَ فوقَ حقٍّ لم يُستوفَ.
-  // والإيقافُ السياديّ يؤجّلُ التسويةَ كلَّها: السجلاتُ تنتظرُ الاستئنافَ ولا كتابةَ تحته.
-  const settlePending = async () => {
-    try {
-      const counts = await settlePendingResults({ store: pendingResults, queue, haltGuard: halt });
-      if (counts.examined > 0) {
-        process.stdout.write(
-          `${new Date().toISOString()} | pending-results | سُوّيت: ${counts.settled} | عُلّقت: ${counts.superseded} | تضادّت: ${counts.conflicts}\n`,
-        );
-      }
-      return null;
-    } catch (error) {
-      const fault = classifyDatabaseFault(error);
-      if (fault === null) throw error;
-      return new WorkerDatabaseFault({
-        worker: options.worker,
-        phase: 'settle-pending',
-        taskId: null,
-        pending: null,
-        fault,
-        cause: error,
-        at: new Date(),
-      });
-    }
-  };
-  let handled = 0;
-  /** @type {WorkerDatabaseFault | null} */
-  let fault;
-  /** @type {number | undefined} */
-  let exitCode;
-  let lastRecoveryLine = '';
+  // فشلُ الإقلاعِ نفسِهِ (قبلَ الحلقةِ) كانَ يُعلِّقُ العمليةَ: مجمّعُ الوصلاتِ
+  // يُبقي حلقةَ الأحداثِ حيّةً و`main().catch` لا يُغلقُه — فكلُّ موردٍ يُفتحُ في
+  // الإقلاعِ يُسجَّلُ هنا ليُغلقَ في `finally` ولو رُميَ خطأٌ قبلَ الحلقةِ.
+  /** @type {Array<() => Promise<void> | void>} */
+  const bootCleanup = [];
   try {
+    const pool = createPool();
+    bootCleanup.push(() => pool.end());
+    const queue = createTaskQueue({ pool });
+    const isolationLogFile = process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl';
+    // في الإنتاج يُفتحُ السجلُّ مختوماً بمفتاحِ التوكن، ويُلبَسُ مصرِفاً مرتَّباً
+    // لأن عقدَ `log.append` عندَ العزلِ متزامنٌ والختمُ ليس كذلك. التصريفُ يقعُ
+    // عندَ حدودِ المهامِّ وقبلَ الإغلاق، فإن فشلَ ختمُ واقعةٍ توقّفَ العامل.
+    const production = isProductionRuntime(process.env);
+    const sealed = production ? await openProductionEventLog(process.env, isolationLogFile) : null;
+    const isolationLog = sealed === null ? new PersistentEventLog(isolationLogFile) : sealed.log;
+    const isolationSink = sealed === null ? isolationLog : sealed.sink;
+    bootCleanup.push(async () => {
+      if (sealed !== null) await sealed.close();
+      isolationLog.close();
+    });
+    // مخزنُ النتائجِ المعلّقةِ (‏`WL-392`): يكتبُ في سجلِّ العاملِ الدائمِ نفسِهِ —
+    // القيمةُ تدومُ على القرصِ قبلَ أولِ كتابةٍ للقاعدةِ، وتُسوّى عندَ إقلاعٍ جديدٍ
+    // من الحياةِ السابقةِ للعمليةِ بلا إعادةِ تشغيلِ المُعالِج.
+    const pendingResults = createPendingResultStore({
+      reader: isolationLog,
+      writer: isolationSink,
+      worker: options.worker,
+    });
+    const worker = createWorker({
+      queue,
+      pool,
+      haltGuard: halt,
+      ledger: createQuotaLedger({ pool, definitions: loadPolicyBundle().quotas }),
+      worker: options.worker,
+      pendingResults,
+      isolation: {
+        workdir: process.cwd(),
+        outputRoot: process.env['ISOLATION_OUTPUT_ROOT'] ?? '.isolation-output',
+        log: isolationSink,
+      },
+    });
+
+    // المُستردّ يقيّد في سجلّ العامل نفسه — المختوم في الإنتاج — لا في ملفٍّ جانبيٍّ
+    // ظاهر: ما يكشفه قيدُ الاسترداد (مهمّةٌ ومرحلةٌ وبصمةُ نتيجة) يستحقّ الختمَ ذاته.
+    const recovery = createDatabaseRecovery({
+      pool,
+      queue,
+      worker: options.worker,
+      haltGuard: halt,
+      log: isolationSink,
+      policy: options.recoveryPolicy,
+    });
+
+    let stopping = false;
+    const stopper = new AbortController();
+    const stop = () => {
+      stopping = true;
+      stopper.abort();
+    };
+    process.on('SIGINT', stop);
+    process.on('SIGTERM', stop);
+
+    process.stdout.write(`عاملٌ أُقلع: ${options.worker} (ملف الإيقاف: ${options.haltFile})\n`);
+    // تسويةُ النتائجِ المعلّقةِ من حياةٍ سابقةٍ للعمليةِ **قبلَ أيِّ حجزٍ جديدٍ** —
+    // لا يُحجزُ شقٌّ جديدَ وما زالَ للقيمةِ المُنتَجةِ حقٌّ لم يُستوفَ. والقاعدةُ
+    // متوقّفة؟ **يُؤجَّلُ الحجزُ الجديدُ نفسُهُ** كما يُؤجَّلُ الاستردادُ: تُرمى العَطِلةُ
+    // وتدخل الحلقةَ في حالةِ العطبِ فلا حجزَ حتى تعودَ القاعدةُ ثمّ تُعادُ المحاولةُ.
+    // وما ليسَ عطبَ قاعدةٍ (فسادٌ، عقدٌ غائبٌ) يُرمى كما هو: توقّفٌ عندَ حدٍّ آمنٍ
+    // لا التهامٌ الصامتُ الذي يمرّرُ الكاسبَ الجديدَ فوقَ حقٍّ لم يُستوفَ.
+    // والإيقافُ السياديّ يؤجّلُ التسويةَ كلَّها: السجلاتُ تنتظرُ الاستئنافَ ولا كتابةَ تحته.
+    const settlePending = async () => {
+      try {
+        const counts = await settlePendingResults({
+          store: pendingResults,
+          queue,
+          haltGuard: halt,
+        });
+        if (counts.examined > 0) {
+          process.stdout.write(
+            `${new Date().toISOString()} | pending-results | سُوّيت: ${counts.settled} | عُلّقت: ${counts.superseded} | تضادّت: ${counts.conflicts}\n`,
+          );
+        }
+        return null;
+      } catch (error) {
+        const fault = classifyDatabaseFault(error);
+        if (fault === null) throw error;
+        process.stdout.write(
+          `${new Date().toISOString()} | pending-results | عَطِلةُ قاعدةٍ عندَ التسويةِ (${fault.kind}/${fault.code}): الحجزُ الجديدُ مؤجَّلٌ حتى عودتِها\n`,
+        );
+        return new WorkerDatabaseFault({
+          worker: options.worker,
+          phase: 'settle-pending',
+          taskId: null,
+          pending: null,
+          fault,
+          cause: error,
+          at: new Date(),
+        });
+      }
+    };
+    let handled = 0;
+    /** @type {WorkerDatabaseFault | null} */
+    let fault;
+    /** @type {number | undefined} */
+    let exitCode;
+    let lastRecoveryLine = '';
     // تسويةُ الإقلاعِ: عَطِلةٌ هنا تُدخلُ الحلقةَ في حالةِ العطبِ فتُؤجّلُ الحجزَ
     // الجديدَ حتى تعودَ القاعدةُ ثمّ تُعادُ المحاولةُ — لا يُمرَّرُ كاسبٌ جديدٌ فوقَ
-    // قيمةٍ معلّقةٍ لم يُحسَمْ حقُّها.
+    // قيمةٍ معلّقةٍ لم يُحسَمْ حقُّها. والإيقافُ السياديُّ **يؤجّلُها ولا يُلغيها**:
+    // لا يُحجزُ شقٌّ جديدٌ قبلَ أن تُسوّى النتيجةُ المعلّقةُ التي كانت قبلَه.
     fault = await settlePending();
+    // الإيقافُ السياديُّ **يؤجّلُ التسويةَ ولا يُلغيها**: لا يُحجزُ شقٌّ جديدٌ قبلَ
+    // أن تُسوّى النتيجةُ المعلّقةُ التي كانت قبلَه — وعَطِلةُ قاعدةٍ عندَها
+    // تدخلُ الحلقةَ في حالةِ العطبِ (استردادٌ ينتظرُ لا دورانٌ فارغٌ).
+    const isHalted = () => {
+      try {
+        halt.assertOperational();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    let settlementDeferred = isHalted();
     while (!stopping && handled < options.maxTasks) {
+      // الاستئنافُ بعدَ إيقافٍ عندَ الإقلاعِ: التسويةُ المؤجَّلةُ تُقضى قبلَ أولِ
+      // حجزٍ جديدٍ لا بعده — فالقيمةُ المعلّقةُ أحقُّ من شقٍّ جديد. وإن عطِبَتِ
+      // القاعدةُ عندَها فالأمرُ إلى الاستردادِ (ينتظرُ بميزانيتِه) لا إلى إعادةِ
+      // نداءٍ فارغةٍ تدورُ بلا انتظار.
+      if (fault === null && settlementDeferred) {
+        if (isHalted()) {
+          await abortableSleep(options.pollMs, stopper.signal);
+          continue;
+        }
+        const deferredFault = await settlePending();
+        if (deferredFault !== null) {
+          fault = deferredFault;
+          continue;
+        }
+        settlementDeferred = false;
+      }
       if (fault !== null) {
         const outcome = await recovery.recover(fault, { signal: stopper.signal });
         // التأجيلُ تحت الإيقاف يُطبع مرّةً لا في كلِّ دورة (كما يُقيَّد في السجلّ مرّة).
@@ -249,6 +295,7 @@ async function main() {
           fault = settleFault;
           continue;
         }
+        settlementDeferred = false;
         if (outcome.verdict === RECOVERY_VERDICTS.UNVERIFIED && stopping) {
           exitCode = RECOVERY_EXIT_CODES.DB_UNAVAILABLE;
           break;
@@ -282,21 +329,13 @@ async function main() {
     }
     // توقّفٌ وعطبٌ معلّقٌ لم يُسوَّ: لا يُعلَن خروجاً سليماً.
     if (fault !== null && exitCode === undefined) exitCode = RECOVERY_EXIT_CODES.DB_UNAVAILABLE;
+    process.stdout.write(`عاملٌ توقّف: ${options.worker} — مهام مُعالَجة: ${handled}\n`);
+    if (exitCode !== undefined) process.exitCode = exitCode;
   } finally {
-    if (sealed !== null) {
-      try {
-        await sealed.sink.drain();
-      } finally {
-        isolationLog.close();
-        await sealed.close();
-      }
-    } else {
-      isolationLog.close();
+    for (const cleanup of bootCleanup.reverse()) {
+      await cleanup();
     }
-    await pool.end();
   }
-  process.stdout.write(`عاملٌ توقّف: ${options.worker} — مهام مُعالَجة: ${handled}\n`);
-  if (exitCode !== undefined) process.exitCode = exitCode;
 }
 
 main().catch((error) => {

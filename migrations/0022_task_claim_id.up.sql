@@ -29,6 +29,14 @@
 
 ALTER TABLE state.tasks ADD COLUMN claim_id uuid;
 
+-- صفوفٌ جاريةٌ قائمةٌ قبلَ هذه الهجرةِ: العمودُ وُلدَ فارغاً لها، والقيدَ أدناهِ
+-- يرفضُها فوراً لو لم تُعالَج. فكلُّ حجزٍ قائمٍ يُعطى معرِّفاً مستقلاً — لا
+-- يُشتركُ فيه حجزانِ ولا يُفترضُ أحدُها — وهذا لا يُنسبُ إلى حياةٍ ماضيةٍ ولا
+-- يزعمُ معرِّفَها (النتائجُ المعلّقةُ لم تكن موجودةً قبلَ هذه الهجرةِ أصلاً، فلا
+-- سجلَّ يُقارَنُ به). وهذا إصلاحُ الهجرةِ على قاعدةٍ قائمةٍ واختبارُه محليٌّ —
+-- لا تفويضٌ لتطبيقِها على إنتاجٍ حيٍّ (ذاك مسارُ التفويضِ الخاصُّ به).
+UPDATE state.tasks SET claim_id = gen_random_uuid() WHERE claim_id IS NULL AND state = 'running';
+
 ALTER TABLE state.tasks
   ADD CONSTRAINT tasks_running_needs_claim CHECK (
     state <> 'running' OR claim_id IS NOT NULL

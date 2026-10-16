@@ -34,6 +34,7 @@ import { LIMIT_ERRORS, runWithLimits } from './limits.mjs';
 import { TaskLifecycle } from './lifecycle.mjs';
 import { QUEUE_ERRORS, QueueError } from './queue.mjs';
 import { TICK_PHASES, WorkerDatabaseFault, classifyDatabaseFault } from './db-recovery.mjs';
+import { PendingResultConflict } from './pending-results.mjs';
 
 /** رموز العامل. */
 export const WORKER_ERRORS = Object.freeze({
@@ -301,10 +302,19 @@ export function createWorker({
               result,
             });
             staged = true;
-          } catch {
+          } catch (error) {
+            if (error instanceof PendingResultConflict) {
+              // تضادُّ تخزينٍ صريحٌ: لا يُبتلَعُ ولا يُعطى إذنًا باستكمالِ النجاحِ
+              // بالقيمةِ الثانيةِ (ذاك اختيارٌ صامت) — يُرمى ليوقفَ المسارَ عندَ
+              // حدٍّ آمنٍ، والقيدُ في السجلِّ يُسمّي التضادَّ وقرارُهُ لمالكٍ.
+              throw error;
+            }
             // الخزنُ الدائمُ تعذّر: القيمةُ لا تزالُ بينَ يديِ العمليةِ والتسجيلُ
             // المباشرُ يلي؛ إن نجحَ فالقيمةُ دائمةٌ في القاعدةِ، وإن فشلَ رُميَ
-            // العطلُ صريحاً — لا يُخفى فشلُ الخزنِ خلفَ صمتٍ يُوهمُ الدوامَ.
+            // العطلُ صريحاً — لا يُخفى فشلُ الخزنِ خلفَ صمتٍ يُوهمُ الدوامَ. وهذا
+            // **لا يُلغي نافذةَ القتلِ**: إن قُتلتِ العمليةُ قبلَّ التزامِ التسجيلِ
+            // المباشرِ فالقيمةُ لم تدُم بعدُ — الضمانُ لنتيجةٍ اكتملَ خزنُها
+            // الدائمُ، لا لكلِّ نتيجةٍ في يدِ عمليةٍ.
           }
         }
         await queue.succeed({
