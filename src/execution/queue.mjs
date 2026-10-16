@@ -88,6 +88,7 @@ export class QueueError extends Error {
  * @property {number} memoryLimitMb
  * @property {string | null} budgetResource
  * @property {number} budgetAmount
+ * @property {string | null} claimId معرِّفُ الحجزِ الحيِّ (‏`WL-392`): هويةٌ لا تُعادُ لا بالاسمِ ولا بالعدّادِ.
  * @property {string | null} leaseOwner
  * @property {Date | null} leaseExpiresAt
  * @property {boolean} cancelRequested
@@ -103,7 +104,7 @@ export class QueueError extends Error {
 const SELECT_COLUMNS = `
   id, idempotency_key, action, target, actor_id, payload, parent_id, root_id, priority,
   state, attempts, max_attempts, available_at, timeout_ms, memory_limit_mb,
-  budget_resource, budget_amount, lease_owner, lease_expires_at, cancel_requested,
+  budget_resource, budget_amount, claim_id, lease_owner, lease_expires_at, cancel_requested,
   cancel_reason, result, error_code, error_message, created_at, started_at, finished_at
 `;
 
@@ -162,6 +163,7 @@ function toTask(row) {
     memoryLimitMb: Number(row['memory_limit_mb']),
     budgetResource: row['budget_resource'] === null ? null : String(row['budget_resource']),
     budgetAmount: Number(row['budget_amount']),
+    claimId: row['claim_id'] === null ? null : String(row['claim_id']),
     leaseOwner: row['lease_owner'] === null ? null : String(row['lease_owner']),
     leaseExpiresAt: /** @type {Date | null} */ (row['lease_expires_at'] ?? null),
     cancelRequested: row['cancel_requested'] === true,
@@ -382,6 +384,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
       const expires = new Date(at.getTime() + lease);
 
       return withTransaction(pool, async (client) => {
+        const claimId = randomUUID();
         const claimed = await client.query(
           `WITH candidate AS (
              SELECT id FROM state.tasks
@@ -394,6 +397,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
            )
            UPDATE state.tasks t
               SET state = 'running',
+                  claim_id = $5,
                   lease_owner = $3,
                   lease_expires_at = $4,
                   started_at = COALESCE(t.started_at, $1),
@@ -402,7 +406,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
              FROM candidate c
             WHERE t.id = c.id
             RETURNING ${qualifiedColumns('t')}`,
-          [at, limit, worker, expires],
+          [at, limit, worker, expires, claimId],
         );
         /** @type {TaskRecord[]} */
         const tasks = [];
@@ -460,19 +464,44 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
     /**
      * يُنهي مهمة بنجاح. مشروطٌ بملكية العقد: من فقد عقده لا يكتب نتيجة، وإلا
      * كتب عاملٌ بطيء نتيجةً على مهمةٍ يُنفّذها غيره الآن.
-     * @param {{ taskId: string, worker: string, result?: Record<string, unknown> }} request
+     *
+     * وشرطا `attempt` و`claimId` (‏`WL-392`) يُقيّدانِ الكتابةَ بهويةِ حجزٍ بعينها:
+     * تسويةُ نتيجةٍ معلّقةٍ من حياةٍ سابقةٍ للعمليةِ لا تُقبلُ إلّا على المهمّةِ
+     * الجاريةِ نفسِها التي خُزّنت عندَ حجزِها — والمعرِّفُ الذي وُلدَ عندَ الحجزِ
+     * حكمٌ لا اسمً: حجزٌ جديدٌ بالاسمِ والعدّادِ نفْسِها معرِّفُهُ جديدٌ فتُرفَضُ
+     * عليه نتيجةُ الحياةِ السابقةِ.
+     * @param {{ taskId: string, worker: string, result?: Record<string, unknown>, attempt?: number, claimId?: string | undefined, reason?: string }} request
      * @returns {Promise<TaskRecord>}
      */
     async succeed(request) {
       const at = now();
       return withTransaction(pool, async (client) => {
+        // شرطُ المحاولةِ (`WL-392`): تسويةُ نتيجةٍ معلّقةٍ من حياةٍ سابقةٍ للعمليةِ
+        // تُقيَّدُ بهويةِ حجزِها — (المهمّة، العامل، العدّادُ عندَ التخزين) — لا باسمِ
+        // العاملِ وحدَه: محاولةٌ أحدثُ باسمٍ واحدٍ عدّادُها أكبرُ فلا تُقبلُ عليها
+        // نتيجةُ الحياةِ السابقة.
+        /** @type {Array<string | Date | number>} */
+        const params = [request.taskId, request.worker, JSON.stringify(request.result ?? {}), at];
+        // شرطُ المحاولةِ وشرطُ معرِّفِ الحجزِ (`WL-392`): تسويةُ نتيجةٍ معلّقةٍ من
+        // حياةٍ سابقةٍ للعمليةِ تُقيَّدُ بهويةِ حجزِها — المعرِّفُ الذي وُلدَ عندَ
+        // الحجزِ وحدَه — لا باسمِ العاملِ وعدّادِهِ القابلَينِ لإعادةِ الاستعمالِ
+        // بعدَ مساراتِ الإرجاعِ (`releaseUnstarted`/`releaseForHalt`).
+        let identityGuard = '';
+        if (typeof request.attempt === 'number') {
+          params.push(request.attempt);
+          identityGuard += ` AND attempts = $${params.length}`;
+        }
+        if (typeof request.claimId === 'string' && request.claimId !== '') {
+          params.push(request.claimId);
+          identityGuard += ` AND claim_id = $${params.length}`;
+        }
         const updated = await client.query(
           `UPDATE state.tasks
               SET state = 'succeeded', result = $3, finished_at = $4, state_changed_at = $4,
                   lease_owner = NULL, lease_expires_at = NULL
-            WHERE id = $1 AND lease_owner = $2 AND state = 'running'
+            WHERE id = $1 AND lease_owner = $2 AND state = 'running'${identityGuard}
             RETURNING ${SELECT_COLUMNS}`,
-          [request.taskId, request.worker, JSON.stringify(request.result ?? {}), at],
+          params,
         );
         const row = updated.rows[0];
         if (row === undefined) {
@@ -486,7 +515,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
           taskId: task.id,
           from: TaskLifecycle.RUNNING,
           to: TaskLifecycle.SUCCEEDED,
-          reason: 'انتهى المُعالِج بنجاح',
+          reason: request.reason ?? 'انتهى المُعالِج بنجاح',
           actor: request.worker,
           attempt: task.attempts,
           at,
@@ -527,7 +556,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
           const requeued = await client.query(
             `UPDATE state.tasks
                 SET state = 'scheduled', available_at = $2, error_code = $3, error_message = $4,
-                    lease_owner = NULL, lease_expires_at = NULL, state_changed_at = $5
+                    lease_owner = NULL, claim_id = NULL, lease_expires_at = NULL, state_changed_at = $5
               WHERE id = $1 RETURNING ${SELECT_COLUMNS}`,
             [current.id, availableAt, code, message, at],
           );
@@ -630,7 +659,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
           `UPDATE state.tasks
               SET state = 'scheduled', available_at = $2, attempts = $3,
                   error_code = $4, error_message = $5,
-                  lease_owner = NULL, lease_expires_at = NULL, state_changed_at = $2
+                  lease_owner = NULL, claim_id = NULL, lease_expires_at = NULL, state_changed_at = $2
             WHERE id = $1 RETURNING ${SELECT_COLUMNS}`,
           [current.id, at, restored, HALT_RELEASE_CODE, reason],
         );
@@ -696,7 +725,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
           `UPDATE state.tasks
               SET state = 'scheduled', available_at = $2, attempts = $3,
                   error_code = $4, error_message = $5,
-                  lease_owner = NULL, lease_expires_at = NULL, state_changed_at = $2
+                  lease_owner = NULL, claim_id = NULL, lease_expires_at = NULL, state_changed_at = $2
             WHERE id = $1 RETURNING ${SELECT_COLUMNS}`,
           [current.id, at, restored, UNSTARTED_RELEASE_CODE, reason],
         );
@@ -750,7 +779,7 @@ export function createTaskQueue({ pool, now = () => new Date(), leaseMs = 30_000
             const updated = await client.query(
               `UPDATE state.tasks
                   SET state = 'scheduled', available_at = $2, error_code = $3, error_message = $4,
-                      lease_owner = NULL, lease_expires_at = NULL, state_changed_at = $5
+                      lease_owner = NULL, claim_id = NULL, lease_expires_at = NULL, state_changed_at = $5
                 WHERE id = $1 RETURNING ${SELECT_COLUMNS}`,
               [task.id, availableAt, code, message, at],
             );

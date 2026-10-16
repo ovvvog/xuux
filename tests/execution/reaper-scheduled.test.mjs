@@ -46,6 +46,9 @@ import { up } from '../../src/persistence/migrator.mjs';
 import { createTaskQueue } from '../../src/execution/queue.mjs';
 import { TaskLifecycle } from '../../src/execution/lifecycle.mjs';
 import { runReclaimLeasesJob } from '../../src/execution/reaper.mjs';
+import { createBudgetGate } from '../../src/execution/budget.mjs';
+import { createQuotaLedger } from '../../src/policy/quota.mjs';
+import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { Scheduler, ScheduledRunLedger, loadSchedulePolicy } from '../../src/scheduling/index.mjs';
 import { createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { EventLog } from '../../src/root-of-trust/index.mjs';
@@ -396,6 +399,115 @@ test(
 );
 
 test(
+  'إطلاقُ الحصادِ يمرُّ ورفضُ الحصادِ يقعُ داخلَ المُنفّذِ نفسِه: مَن يملكُ الإطلاقَ (`run-scheduled-job`) لا يملكُ الحصادَ (`reclaim-expired-leases`)',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const created = await createIsolatedDatabase('reaperking');
+    const { pool, name } = created;
+    try {
+      await up(pool);
+      const url = new URL(String(process.env.DATABASE_URL));
+      url.pathname = `/${name}`;
+      const queue = createTaskQueue({ pool, leaseMs: LEASE_MS });
+      const AUTH = { decisionId: 'decision-reaper-king-test' };
+      const { task } = await queue.enqueue(
+        {
+          action: 'اختبار.حصاد-إطلاق-بلا-حصاد',
+          target: 'موضوع/الحصاد-إطلاق-بلا-حصاد',
+          actorId: 'actor-الحصاد-إطلاق-بلا-حصاد',
+          idempotencyKey: 'مفتاح-حصاد-إطلاق-بلا-حصاد',
+          payload: { حمولة: 'الإطلاقُ يمرُّ والحصادُ يُرفض' },
+          maxAttempts: 3,
+        },
+        AUTH,
+      );
+      const { child } = await spawnHangingWorker(url.toString(), 'عامل-الإطلاق-بلا-حصاد');
+      const exited = new Promise((resolve) => child.once('exit', resolve));
+      child.kill('SIGKILL');
+      await exited;
+      await new Promise((resolve) => setTimeout(resolve, LEASE_MS + 300));
+
+      const log = new EventLog();
+      const repositories = createPostgresRepositories(pool);
+      const chain = composeEnforcementChain({
+        log: /** @type {never} */ (log),
+        configDir: CONFIG_DIR,
+        withLegislation: false,
+        lawRepository: null,
+        crown: null,
+      });
+      const policy = loadSchedulePolicy({ dir: CONFIG_DIR, bundle: chain.bundle });
+      // فاعلٌ **يملكُ الإطلاقَ** (‏`run-scheduled-job` على `job:*` مُسندٌ للملكِ
+      // والمشغّلِ) **ولا يملكُ الحصادَ** (‏`reclaim-expired-leases` مشغّلٌ حصراً):
+      // الإطلاقُ يمرُّ فيصلُ المُنفّذُ، فيُرفضُ الحصادُ **داخلَ المُنفّذِ** قبلَ أيِّ
+      // كتابةٍ — لا رفضاً عندَ الإطلاقِ يُخفي المُنفّذَ عن القياس.
+      const agent = await chain.registry.register({
+        name: `reaper-launcher-${Math.random().toString(36).slice(2, 8)}`,
+        role: 'role:king',
+        capabilities: [],
+        kind: 'autonomous',
+      });
+      const launcher = { id: agent.id, role: agent.role, kind: 'autonomous' };
+      const ledger = new ScheduledRunLedger({
+        repository: /** @type {never} */ (repositories['scheduledRuns']),
+        log: /** @type {never} */ (log),
+      });
+      const now = Date.UTC(2026, 9, 16, 0, 0, 0);
+      const scheduler = new Scheduler({
+        policy,
+        ledger,
+        authorizer: /** @type {never} */ (chain.enforcementPoint),
+        log: /** @type {never} */ (log),
+        clock: () => now,
+      });
+      const launcherQueue = createTaskQueue({ pool, leaseMs: LEASE_MS });
+      scheduler.register('job:readiness-report', () => ({ proof: 'reaper-test' }));
+      scheduler.register('job:recovery-drill', () => ({ proof: 'reaper-test' }));
+      scheduler.register('job:reclaim-expired-leases', () =>
+        runReclaimLeasesJob({
+          queue: launcherQueue,
+          actor: launcher,
+          log,
+          enforcementPoint: chain.enforcementPoint,
+        }),
+      );
+      const ticked = await scheduler.tick({ actor: launcher });
+
+      // الإطلاقُ مرَّ: الرافضُ ليسَ الجدولةَ بل المُنفّذَ نفسُه.
+      assert.ok(
+        ticked.refused.every((entry) => entry.jobId !== 'job:reclaim-expired-leases'),
+        `رُفض الإطلاقُ نفسُه — والمطلوبُ إثباتُ الرفضِ داخلَ المُنفّذ: ${JSON.stringify(ticked.refused)}`,
+      );
+      const reaperEntry = ticked.dispatched.find(
+        (entry) => entry.jobId === 'job:reclaim-expired-leases',
+      );
+      assert.ok(reaperEntry !== undefined, 'لم يُطلَق عملُ الحصادِ — والمُنفّذُ لم يُبلَغ');
+      assert.equal(reaperEntry.outcome, 'failed');
+      assert.equal(reaperEntry.detail?.['code'], 'HANDLER_THREW');
+      assert.match(
+        String(reaperEntry.detail?.['message'] ?? ''),
+        /رُفض بقرارٍ/u,
+        'الرفضُ داخلَ المُنفّذِ لم يُسَمَّ بالقرارِ: ' +
+          String(reaperEntry.detail?.['message'] ?? ''),
+      );
+
+      // **ولا كتابةَ في القاعدةِ**: الرفضُ وقعَ قبلَ أولِ كتابةٍ، فالمهمّةُ تبقى
+      // `running` بعقدِ العاملِ الميتِ لا تُستعادُ بقرارٍ مرفوضٍ.
+      const after = await queue.get(task.id);
+      assert.ok(after !== null, 'المهمّةُ ضاعت');
+      assert.equal(
+        after.state,
+        TaskLifecycle.RUNNING,
+        'استُعيدت مهمّةٌ بقرارٍ مرفوضٍ — والرفضُ لا يُنفّذُ بعدَ الفعلِ',
+      );
+      assert.equal(after.leaseOwner, 'عامل-الإطلاق-بلا-حصاد');
+    } finally {
+      await created.drop();
+    }
+  },
+);
+
+test(
   'الحصادُ لا يُصدِرُ حكماً على نتيجةِ خصمٍ مُعلّقة: المهمّةُ التي خُصمت ميزانيتُها تُستعادُ كما هي لا إفراجًا لم يبدأ',
   { skip: skipWithoutDatabase },
   async () => {
@@ -412,7 +524,9 @@ test(
         {
           action: 'اختبار.حصاد-خصم-معلّق',
           target: 'موضوع/الحصاد-خصم-معلّق',
-          actorId: 'actor-الحصاد-خصم-معلّق',
+          // معرّفُ فاعلٍ ASCII: مجالُ `state.n` في القاعدةِ يرفضُ العربيةَ، والخصمُ
+          // يُسجّلُ صاحبَ الحصةِ بهذا المعرّفِ في الدفتر.
+          actorId: 'actor-reaper-budget-pending',
           idempotencyKey: 'مفتاح-حصاد-خصم-معلّق',
           payload: { حمولة: 'خصمٌ مُلتزَمٌ لا يُفرَجُ عنه' },
           maxAttempts: 3,
@@ -426,16 +540,23 @@ test(
       // ذرّيّاً (`WL-389` — العلامةُ والخصمُ في معاملةٍ واحدةٍ). فالخصمُ وقعَ، ولا
       // يُعادُ ولا يُفرَجُ عنه هنا.
       const { child } = await spawnHangingWorker(url.toString(), 'عامل-الحصاد-خصم-معلّق');
+
+      // الخصمُ **حقيقيٌّ ذرّيّ** من مسارِ الإنتاجِ نفسِهِ (`createBudgetGate` +
+      // `chargeBeforeStart`): العلامةُ والخصمُ يُلتزمانِ في معاملةٍ واحدةٍ — لا
+      // علامةٌ توضعُ بيدٍ فتُدّعى خصماً. فالمُقاسُ بعدها سلوكُ الحاصدِ تجاهَ خصمٍ
+      // وقعَ فعلاً بدليلِ الدفترِ لا علامةٍ يدوية.
+      const claimedFull = await queue.get(task.id);
+      assert.ok(claimedFull !== null, 'المهمّةُ ضاعت بعد الحجز');
+      const gate = createBudgetGate({
+        pool,
+        ledger: createQuotaLedger({ pool, definitions: loadPolicyBundle().quotas }),
+      });
+      const decision = await gate.chargeBeforeStart(claimedFull);
+      assert.equal(decision.allowed, true, `رفضُ الخصمِ: ${JSON.stringify(decision)}`);
+      assert.equal(decision.debited, true, 'الخصمُ لم يقع — والعلامةَ بلا خصمٍ لا تُقاس');
       const exited = new Promise((resolve) => child.once('exit', resolve));
       child.kill('SIGKILL');
       await exited;
-
-      // ضعِ العلامةَ يدويّاً كأنّ خصماً وقعَ (الاستقلالُ عن تنفيذِ العاملِ):
-      // ما يُقاسُ هنا سلوكُ الحاصدِ لا تنفيذُ العاملِ.
-      await pool.query(`UPDATE state.tasks SET budget_debited_at = $2 WHERE id = $1`, [
-        task.id,
-        new Date(),
-      ]);
       await new Promise((resolve) => setTimeout(resolve, LEASE_MS + 300));
 
       const ticked = await tickReaper(harnessResult.scheduler, harnessResult.actor);

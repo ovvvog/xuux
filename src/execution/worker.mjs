@@ -38,6 +38,7 @@ import { TICK_PHASES, WorkerDatabaseFault, classifyDatabaseFault } from './db-re
 /** رموز العامل. */
 export const WORKER_ERRORS = Object.freeze({
   DEPENDENCY_MISSING: 'WORKER_DEPENDENCY_MISSING',
+  CLAIM_ID_MISSING: 'WORKER_CLAIM_ID_MISSING',
   ISOLATION_CONFIG_INVALID: 'WORKER_ISOLATION_CONFIG_INVALID',
   ISOLATION_RESULT_INVALID: 'WORKER_ISOLATION_RESULT_INVALID',
 });
@@ -76,6 +77,7 @@ export class WorkerError extends Error {
  * @param {number} [dependencies.heartbeatMs]
  * @param {(run: import('./limits.mjs').LimitedRun) => void} [dependencies.onRun]
  * @param {{ workdir?: string, outputRoot?: string, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: { report: (signal: object) => unknown } | null }} [dependencies.isolation]
+ * @param {import('./pending-results.mjs').PendingResultStoreLike} [dependencies.pendingResults] مخزنُ النتائجِ المعلّقةِ الدائم (‏`WL-392`): القيمةُ تُخزّنُ على القرصِ قبلَ أولِ كتابةٍ للقاعدة.
  */
 export function createWorker({
   queue,
@@ -86,6 +88,7 @@ export function createWorker({
   heartbeatMs = 500,
   onRun,
   isolation,
+  pendingResults,
 }) {
   if (queue === undefined || pool === undefined || haltGuard === undefined) {
     throw new WorkerError(
@@ -271,8 +274,60 @@ export function createWorker({
       onRun?.(run);
 
       if (run.ok) {
-        cursor.pending = { op: 'succeed', result: run.result ?? {} };
-        await queue.succeed({ taskId: task.id, worker, result: run.result ?? {} });
+        const result = run.result ?? {};
+        // مهمّةٌ جاريةٌ بلا معرِّفِ حجزٍ مستحيلٌ بحكمِ القاعدةِ
+        // (‏`tasks_running_needs_claim`) — ورفضُهُ صريحٌ لا تجاهلٌ يُوثِّقُ نتيجةً
+        // بلا هويةٍ تُقاسُ بها.
+        if (task.claimId === null) {
+          throw new WorkerError(WORKER_ERRORS.CLAIM_ID_MISSING, 'مهمّة جارية بلا معرّف حجز');
+        }
+        const claimId = task.claimId;
+        cursor.pending = { op: 'succeed', result };
+        // (‏`WL-392`) القيمةُ تُخزّنُ دائماً على القرصِ **قبلَ أولِ كتابةٍ للقاعدةِ:
+        // قتلُ العمليةِ في نافذةِ التسجيلِ لا يُفقدُ القيمةَ — تسويتُها عندَ إقلاعٍ
+        // جديدٍ بلا إعادةِ تشغيلِ المُعالِج. وفشلُ الخزنِ **لا يُبتلعُ القيمةَ ولا
+        // يُبتلعُ فشلُهُ**: التسجيلُ المباشرُ يستمرّ بعده، فإن نجحَ فالقيمةُ في
+        // القاعدةِ (خسارةُ المخزنِ خسارةُ الدليلِ الأصليِّ لا القيمةِ)، وإن تعذّرا
+        // معاً فالعطلُ صريحٌ يُرمى (‏`queue.succeed` خارجَ الالتهامِ) فلا يُمرَّرُ شقٌّ
+        // جديدٌ فوقَ قيمةٍ بلا ضمانٍ — لا نافذةَ قتلٍ تُفقدُ شيئاً.
+        let staged = false;
+        const pendingStore = pendingResults ?? null;
+        if (pendingStore !== null) {
+          try {
+            await pendingStore.stage({
+              taskId: task.id,
+              attempt: task.attempts,
+              claimId,
+              result,
+            });
+            staged = true;
+          } catch {
+            // الخزنُ الدائمُ تعذّر: القيمةُ لا تزالُ بينَ يديِ العمليةِ والتسجيلُ
+            // المباشرُ يلي؛ إن نجحَ فالقيمةُ دائمةٌ في القاعدةِ، وإن فشلَ رُميَ
+            // العطلُ صريحاً — لا يُخفى فشلُ الخزنِ خلفَ صمتٍ يُوهمُ الدوامَ.
+          }
+        }
+        await queue.succeed({
+          taskId: task.id,
+          worker,
+          result,
+          attempt: task.attempts,
+          claimId,
+        });
+        if (staged && pendingStore !== null) {
+          try {
+            await pendingStore.resolve({
+              taskId: task.id,
+              attempt: task.attempts,
+              claimId,
+              outcome: 'settled',
+              reason: 'سُجّلت في القاعدةِ فورَ التنفيذِ',
+            });
+          } catch {
+            // القيمةُ مسجّلةٌ في القاعدةِ؛ قيدُ المخزنِ يُستوفى عندَ الإقلاعِ من
+            // القرضِ بالمطابقةِ (بصمةٌ مطابقةٌ ⇒ استيفاءٌ بلا انتقالٍ جديد).
+          }
+        }
         return finish('done', task.id, null);
       }
 

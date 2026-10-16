@@ -32,10 +32,15 @@ import {
 import { createTaskQueue } from '../src/execution/queue.mjs';
 import { createWorker } from '../src/execution/worker.mjs';
 import {
+  createPendingResultStore,
+  settlePendingResults,
+} from '../src/execution/pending-results.mjs';
+import {
   RECOVERY_EXIT_CODES,
   RECOVERY_VERDICTS,
   WorkerDatabaseFault,
   abortableSleep,
+  classifyDatabaseFault,
   createDatabaseRecovery,
 } from '../src/execution/db-recovery.mjs';
 import { createQuotaLedger } from '../src/policy/quota.mjs';
@@ -128,12 +133,21 @@ async function main() {
   const sealed = production ? await openProductionEventLog(process.env, isolationLogFile) : null;
   const isolationLog = sealed === null ? new PersistentEventLog(isolationLogFile) : sealed.log;
   const isolationSink = sealed === null ? isolationLog : sealed.sink;
+  // مخزنُ النتائجِ المعلّقةِ (‏`WL-392`): يكتبُ في سجلِّ العاملِ الدائمِ نفسِهِ —
+  // القيمةُ تدومُ على القرصِ قبلَ أولِ كتابةٍ للقاعدةِ، وتُسوّى عندَ إقلاعٍ جديدٍ
+  // من الحياةِ السابقةِ للعمليةِ بلا إعادةِ تشغيلِ المُعالِج.
+  const pendingResults = createPendingResultStore({
+    reader: isolationLog,
+    writer: isolationSink,
+    worker: options.worker,
+  });
   const worker = createWorker({
     queue,
     pool,
     haltGuard: halt,
     ledger: createQuotaLedger({ pool, definitions: loadPolicyBundle().quotas }),
     worker: options.worker,
+    pendingResults,
     isolation: {
       workdir: process.cwd(),
       outputRoot: process.env['ISOLATION_OUTPUT_ROOT'] ?? '.isolation-output',
@@ -162,13 +176,47 @@ async function main() {
   process.on('SIGTERM', stop);
 
   process.stdout.write(`عاملٌ أُقلع: ${options.worker} (ملف الإيقاف: ${options.haltFile})\n`);
+  // تسويةُ النتائجِ المعلّقةِ من حياةٍ سابقةٍ للعمليةِ **قبلَ أيِّ حجزٍ جديدٍ** —
+  // لا يُحجزُ شقٌّ جديدَ وما زالَ للقيمةِ المُنتَجةِ حقٌّ لم يُستوفَ. والقاعدةُ
+  // متوقّفة؟ **يُؤجَّلُ الحجزُ الجديدُ نفسُهُ** كما يُؤجَّلُ الاستردادُ: تُرمى العَطِلةُ
+  // وتدخل الحلقةَ في حالةِ العطبِ فلا حجزَ حتى تعودَ القاعدةُ ثمّ تُعادُ المحاولةُ.
+  // وما ليسَ عطبَ قاعدةٍ (فسادٌ، عقدٌ غائبٌ) يُرمى كما هو: توقّفٌ عندَ حدٍّ آمنٍ
+  // لا التهامٌ الصامتُ الذي يمرّرُ الكاسبَ الجديدَ فوقَ حقٍّ لم يُستوفَ.
+  // والإيقافُ السياديّ يؤجّلُ التسويةَ كلَّها: السجلاتُ تنتظرُ الاستئنافَ ولا كتابةَ تحته.
+  const settlePending = async () => {
+    try {
+      const counts = await settlePendingResults({ store: pendingResults, queue, haltGuard: halt });
+      if (counts.examined > 0) {
+        process.stdout.write(
+          `${new Date().toISOString()} | pending-results | سُوّيت: ${counts.settled} | عُلّقت: ${counts.superseded} | تضادّت: ${counts.conflicts}\n`,
+        );
+      }
+      return null;
+    } catch (error) {
+      const fault = classifyDatabaseFault(error);
+      if (fault === null) throw error;
+      return new WorkerDatabaseFault({
+        worker: options.worker,
+        phase: 'settle-pending',
+        taskId: null,
+        pending: null,
+        fault,
+        cause: error,
+        at: new Date(),
+      });
+    }
+  };
   let handled = 0;
   /** @type {WorkerDatabaseFault | null} */
-  let fault = null;
+  let fault;
   /** @type {number | undefined} */
   let exitCode;
   let lastRecoveryLine = '';
   try {
+    // تسويةُ الإقلاعِ: عَطِلةٌ هنا تُدخلُ الحلقةَ في حالةِ العطبِ فتُؤجّلُ الحجزَ
+    // الجديدَ حتى تعودَ القاعدةُ ثمّ تُعادُ المحاولةُ — لا يُمرَّرُ كاسبٌ جديدٌ فوقَ
+    // قيمةٍ معلّقةٍ لم يُحسَمْ حقُّها.
+    fault = await settlePending();
     while (!stopping && handled < options.maxTasks) {
       if (fault !== null) {
         const outcome = await recovery.recover(fault, { signal: stopper.signal });
@@ -191,6 +239,14 @@ async function main() {
         if (outcome.retry) {
           // الإيقاف السياديّ يؤجّل التسوية: لا كتابة حتى يُستأنف، ولا حجز جديد.
           await abortableSleep(options.pollMs, stopper.signal);
+          continue;
+        }
+        // القاعدةُ عادت: أُعيدت المحاولةُ على ما دامَ معلّقاً في السجلّ الدائمِ
+        // من الحياةِ السابقةِ — والقيمةُ لا تُفقدُ بانقطاعِ القاعدةِ عندَ التسجيلِ.
+        // وعادت العَطِلةُ عندَ التسويةِ؟ يُعادُ تأجيلُ الحجزِ لا الالتهامُ.
+        const settleFault = await settlePending();
+        if (settleFault !== null) {
+          fault = settleFault;
           continue;
         }
         if (outcome.verdict === RECOVERY_VERDICTS.UNVERIFIED && stopping) {
