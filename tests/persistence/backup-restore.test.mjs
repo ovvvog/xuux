@@ -354,3 +354,73 @@ test('verify يرفض ملف نسخة عُدّل بعد كتابة البيان'
     await source.drop();
   }
 });
+
+test(
+  'البيانُ والنسخةُ لقطةٌ واحدة: كتاباتٌ متزامنةٌ أثناءَ النسخِ لا تفصلُ بينَهما (`WL-398`)',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const source = await createIsolatedDatabase('concurrentsrc');
+    const target = await createIsolatedDatabase('concurrentdst');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-concurrent-')));
+    const dump = path.join(dir, 'state.dump');
+    try {
+      await up(source.pool);
+      await seedEveryTable(source.pool);
+      const sourceUrl = databaseUrlFor(source.name);
+
+      // كاتبٌ متزامنٌ: صفٌّ كلَّ ٢٥ مللي ثانيةً في `state.events` طوالَ النسخِ —
+      // فلا سكونَ يُخفي الانفصالَ إن وُجدَ: اللقطةُ تقعُ في وسطِ كتابةٍ حيّةٍ.
+      let stop = false;
+      const writer = (async () => {
+        for (let n = 0; !stop; n += 1) {
+          await source.pool
+            .query(
+              `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
+               VALUES ($1, 'backup.concurrent', 'agent-001', '{}'::jsonb, $2, now())`,
+              [`concurrent-${n}`, 'c'.repeat(64)],
+            )
+            .catch(() => undefined);
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      })();
+
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+      stop = true;
+      await writer;
+      assert.equal(backup.code, 0, backup.stderr);
+      assert.match(backup.stdout, /\[BACKUP_CREATED\]/);
+
+      // استعادةٌ إلى نظيفةٍ تنجحُ: عدّاداتُ البيانِ تطابقُ المُستعادَ لأنّهما
+      // اللقطةُ نفسُها — بلا هذا الربطِ كانت كتابةٌ واحدةٌ بينَ قراءةِ العدّاداتِ
+      // وانطلاقِ النسخِ تُسقِطُ استعادةَ نسخةٍ سليمةٍ (`RESTORE_ROW_COUNT_MISMATCH`).
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+      assert.deepEqual(
+        await stateRowCounts(target.pool),
+        manifest.rowCounts,
+        'البيانُ والاستعادةُ لقطةٌ واحدةٌ متّسقةٌ',
+      );
+
+      // والكتاباتُ استمرّت بعدَ اللقطةِ فعلًا: الحيُّ أكثرُ من اللقطةِ — الدليلُ أنّ
+      // الاتّساقَ مقيسٌ في وسطِ حركةٍ لا مصادفةَ سكونٍ.
+      await source.pool.query(
+        `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
+         VALUES ('after-backup', 'backup.concurrent', 'agent-001', '{}'::jsonb, ${'$'}1, now())`,
+        ['d'.repeat(64)],
+      );
+      const live = await source.pool.query('SELECT count(*)::int AS n FROM state.events');
+      const liveCount = Number(
+        /** @type {Record<string, unknown> | undefined} */ (live.rows[0])?.['n'],
+      );
+      assert.ok(
+        liveCount > manifest.rowCounts['events'],
+        `القاعدةُ الحيّةُ (${liveCount}) أكثرُ من اللقطةِ (${manifest.rowCounts['events']}) — الكتابةُ المتزامنةُ وقعت فعلًا`,
+      );
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);

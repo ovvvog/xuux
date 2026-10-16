@@ -20,6 +20,13 @@ import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-t
 
 const STATE_SCHEMA = 'state';
 const MIGRATION_LEDGER = 'schema_migrations';
+/**
+ * الجدولُ المرحليُّ الذي يحملُ دفترَ الهجراتِ داخلَ الأرشيفِ — يُستثنى من عدّاداتِ
+ * البيانِ: هو عضوُ الأرشيفِ لا عضوَ الحالةِ، يُنقلُ عندَ الاستعادةِ إلى
+ * `public.schema_migrations` فلا يكونُ للمستعادِ حقيقةً قابلةً للعدِّ. ولولا
+ * الاستثناءُ لَفشلَ تحقّقُ الاستعادةِ (عدّاداتُ بيانٍ لا يُجدِّدُها المستعادُ).
+ */
+const BACKUP_STAGING_TABLE = /^__backup_schema_migrations_[0-9a-f]{12}$/;
 // المسار لا يُثبَّت نصّاً: عميلٌ أقدم من الخادم يرفض القراءة، وقد أسقط ذلك بوابة
 // الفحص كلها في WL-022. فالأداة تُختار من أعلى إصدار مثبَّت فعلاً.
 const pgDump = () => resolvePgTool('pg_dump');
@@ -74,7 +81,7 @@ function quoteIdent(identifier) {
 /**
  * لا يمكن تعليم اسم الجدول في PostgreSQL؛ لذلك لا يُقبل إلا ما أعاده كتالوج
  * القاعدة، ثم يُقتبس دائماً. لا يدخل نص مستخدم في هذا الاستعلام.
- * @param {import('pg').Pool} pool
+ * @param {import('pg').Pool | import('pg').PoolClient} pool
  * @returns {Promise<string[]>}
  */
 async function stateTables(pool) {
@@ -90,11 +97,11 @@ async function stateTables(pool) {
 }
 
 /**
- * @param {import('pg').Pool} pool
+ * @param {import('pg').Pool | import('pg').PoolClient} pool
  * @returns {Promise<Record<string, number>>}
  */
 async function readRowCounts(pool) {
-  const names = await stateTables(pool);
+  const names = (await stateTables(pool)).filter((name) => !BACKUP_STAGING_TABLE.test(name));
   /** @type {Record<string, number>} */
   const counts = {};
   for (const name of names) {
@@ -108,7 +115,7 @@ async function readRowCounts(pool) {
 }
 
 /**
- * @param {import('pg').Pool} pool
+ * @param {import('pg').Pool | import('pg').PoolClient} pool
  * @returns {Promise<{ databaseVersion: string, migrationVersion: number, rowCounts: Record<string, number> }>}
  */
 async function inspectDatabase(pool) {
@@ -264,6 +271,15 @@ export async function resolveVerifiedDumpTool(serverVersion) {
 
 /**
  * أنشئ نسخة بصيغة PostgreSQL المخصّصة وبيانها المجاور.
+ *
+ * **البيانُ والنسخةُ لقطةٌ واحدةٌ (`WL-398`):** عدّاداتُ البيانِ تُقرأُ من معاملةٍ
+ * واحدةٍ بمستوى عزلٍ `REPEATABLE READ` تُصدِّرُ لقطتَها بـ`pg_export_snapshot()`،
+ * ثمّ يستعملُ `pg_dump` اللقطةَ نفسَها بـ`--snapshot`. فلولا هذا الربطُ كانت
+ * أرقامُ البيانِ تُقرأُ قبلَ انطلاقِ النسخِ — فكتابةٌ متزامنةٌ بينَهما تُنتِجُ بيانًا
+ * لا يطابقُ محتوى الملفِّ، وتُسقِطُ استعادةَ نسخةٍ سليمةٍ عندَ تحقُّقِ العدّاداتِ
+ * (`RESTORE_ROW_COUNT_MISMATCH`) — عطلٌ في لحظةِ التعافي هي أسوأُ لحظةٍ لعطلٍ.
+ * والقراءةُ داخلَ المعاملةِ مقصودةٌ: في `READ COMMITTED` تأخذُ كلُّ عبارةٍ
+ * لقطةً جديدةً فيعودَ الانفصالُ من الشباكِ الآخرِ.
  * @param {string} dumpPath
  * @param {string} databaseUrl
  * @returns {Promise<BackupManifest>}
@@ -272,15 +288,23 @@ export async function createBackup(dumpPath, databaseUrl) {
   const startedAt = new Date().toISOString();
   const pool = new pg.Pool({ connectionString: requireDatabaseUrl(databaseUrl), max: 1 });
   try {
-    const before = await inspectDatabase(pool);
-    const dumpTool = await resolveVerifiedDumpTool(before.databaseVersion);
     fs.mkdirSync(path.dirname(dumpPath), { recursive: true });
     const ledgerStagingTable = `__backup_schema_migrations_${crypto.randomBytes(6).toString('hex')}`;
     await stageMigrationLedger(pool, ledgerStagingTable);
     const started = process.hrtime.bigint();
     /** @type {{ code: number, stderr: string }} */
     let result;
+    /** @type {{ databaseVersion: string, migrationVersion: number, rowCounts: Record<string, number> }} */
+    let snapshot;
+    const client = await pool.connect();
     try {
+      await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+      const exported = await client.query('SELECT pg_export_snapshot() AS snapshot');
+      const snapshotId = String(
+        /** @type {Record<string, unknown> | undefined} */ (exported.rows[0])?.['snapshot'],
+      );
+      snapshot = await inspectDatabase(client);
+      const dumpTool = await resolveVerifiedDumpTool(snapshot.databaseVersion);
       result = await run(dumpTool, [
         '--format=custom',
         '--file',
@@ -289,9 +313,15 @@ export async function createBackup(dumpPath, databaseUrl) {
         STATE_SCHEMA,
         '--no-owner',
         '--no-privileges',
+        '--snapshot',
+        snapshotId,
         databaseUrl,
       ]);
+      // معاملةُ قراءةٍ لا كتابةَ فيها: تُلغى بلا أثرٍ — واللقطاتُ المُصدَّرةُ تموتُ
+      // بنهايةِ معاملتِها، فلا يبقى للنسخةِ أثرٌ حيٌّ في القاعدةِ بعدَ انتهائها.
+      await client.query('ROLLBACK');
     } finally {
+      client.release();
       await pool.query(`DROP TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(ledgerStagingTable)}`);
     }
     const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
@@ -304,10 +334,10 @@ export async function createBackup(dumpPath, databaseUrl) {
     const manifest = {
       startedAt,
       durationMs,
-      databaseVersion: before.databaseVersion,
-      migrationVersion: before.migrationVersion,
+      databaseVersion: snapshot.databaseVersion,
+      migrationVersion: snapshot.migrationVersion,
       sha256: sha256File(dumpPath),
-      rowCounts: before.rowCounts,
+      rowCounts: snapshot.rowCounts,
       dumpFile: path.basename(dumpPath),
       ledgerStagingTable,
     };
