@@ -1,0 +1,150 @@
+TCTI=swtpm:host=127.0.0.1,port=2341
+===== manufacturer / revision / nv counters max =====
+TPM2_PT_FAMILY_INDICATOR:
+  raw: 0x322E3000
+  value: "2.0"
+TPM2_PT_LEVEL:
+  raw: 0
+TPM2_PT_REVISION:
+  raw: 0xB7
+  value: 1.83
+TPM2_PT_DAY_OF_YEAR:
+TPM2_PT_MANUFACTURER:
+  raw: 0x49424D00
+  value: "IBM"
+TPM2_PT_VENDOR_STRING_1:
+  raw: 0x53572020
+  value: "SW"
+TPM2_PT_VENDOR_STRING_2:
+  raw: 0x2054504D
+  value: "TPM"
+TPM2_PT_VENDOR_STRING_3:
+  raw: 0x0
+  value: ""
+TPM2_PT_VENDOR_STRING_4:
+  raw: 0x0
+  value: ""
+TPM2_PT_VENDOR_TPM_TYPE:
+TPM2_PT_FIRMWARE_VERSION_1:
+  raw: 0x20240125
+TPM2_PT_FIRMWARE_VERSION_2:
+  raw: 0x120000
+TPM2_PT_INPUT_BUFFER:
+TPM2_PT_NV_COUNTERS_MAX:
+  raw: 0x0
+TPM2_PT_NV_INDEX_MAX:
+  raw: 0x800
+TPM2_PT_MEMORY:
+TPM2_PT_MAX_COMMAND_SIZE:
+  raw: 0x1000
+TPM2_PT_MAX_RESPONSE_SIZE:
+TPM2_PT_NV_BUFFER_MAX:
+  raw: 0x400
+TPM2_PT_MODES:
+===== command presence =====
+1:TPM2_CC_NV_UndefineSpaceSpecial:
+34:TPM2_CC_NV_UndefineSpace:
+111:TPM2_CC_NV_DefineSpace:
+210:TPM2_CC_NV_Increment:
+254:TPM2_CC_NV_WriteLock:
+485:TPM2_CC_NV_Read:
+749:TPM2_CC_NV_ReadPublic:
+1024:TPM2_CC_NV_Certify:
+===== define owner-range counter 0x01800020 =====
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Failed to read the public part of NV index 0x1800020
+ERROR: Unable to run tpm2_nvundefine
+define_rc:0
+nv-index: 0x1800020
+define_rc:0
+===== read before any increment =====
+WARN: Reading full size of the NV index
+WARNING:esys:src/tss2-esys/api/Esys_NV_Read.c:315:Esys_NV_Read_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_NV_Read.c:105:Esys_NV_Read() Esys Finish ErrorCode (0x0000014a) 
+ERROR: Esys_NV_Read(0x14A) - tpm:error(2.0): an NV Index is used before being initialized or the state saved by TPM2_ShutdownSTATE could not be restored
+ERROR: Failed to read NVRAM area at index 0x1800020
+ERROR: Unable to run tpm2_nvread
+read_before_inc_rc:1
+===== public before increment =====
+0x1800020:
+  name: 000b48a1330f4a9f10205342f16dc954a4dcc78a2c9ac0083e71f3755a837525717e
+  hash algorithm:
+    friendly: sha256
+    value: 0xB
+  attributes:
+    friendly: ownerwrite|nt=0x1|ownerread
+    value: 0x20012
+  size: 8
+
+===== three increments =====
+inc1:0
+inc2:0
+inc3:0
+WARN: Reading full size of the NV index
+read_after3_rc:0
+00000000: 0000 0000 0000 0003                      ........
+after3_len 8 value 3
+===== undefine + redefine SAME attrs =====
+undef:0
+nv-index: 0x1800020
+redef:0
+===== read immediately after redefine, before increment =====
+WARN: Reading full size of the NV index
+WARNING:esys:src/tss2-esys/api/Esys_NV_Read.c:315:Esys_NV_Read_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_NV_Read.c:105:Esys_NV_Read() Esys Finish ErrorCode (0x0000014a) 
+ERROR: Esys_NV_Read(0x14A) - tpm:error(2.0): an NV Index is used before being initialized or the state saved by TPM2_ShutdownSTATE could not be restored
+ERROR: Failed to read NVRAM area at index 0x1800020
+ERROR: Unable to run tpm2_nvread
+read_redef_rc:1
+===== first increment after redefine =====
+reinc:0
+WARN: Reading full size of the NV index
+read_reinc_rc:0
+00000000: 0000 0000 0000 0004                      ........
+after_redef_inc_value 4
+===== undefine + redefine DIFFERENT attrs (noda) =====
+ERROR: Unknown token: "noda" found.
+ERROR: Could not convert NV attribute to number or keyword, got: "ownerread"
+def_noda:1
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Failed to read the public part of NV index 0x1800021
+ERROR: Unable to run tpm2_nvreadpublic
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Failed to increment NV counter at index 0x1800021
+ERROR: Unable to run tpm2_nvincrement
+inc_noda:1
+WARN: Reading full size of the NV index
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Unable to run tpm2_nvread
+read_noda:1
+noda_exists False value None
+===== nvcertify without signing key =====
+ERROR: Must specify file path to save attestation '--attestation'
+Usage: tpm2_nvcertify [<options>] <arguments>
+Where <options> are:
+    [ -C | --signingkey-context=<value>] [ -P | --signingkey-auth=<value>] [ -c | --nvauthobj-context=<value>] [ -p | --nvauthobj-auth=<value>]
+    [ -g | --hash-algorithm=<value>] [ -s | --scheme=<value>] [ -f | --format=<value>] [ -o | --signature=<value>]
+    [ -q | --qualification=<value>] [ --size=<value>] [ --offset=<value>] [ --attestation=<value>]
+    [ --cphash=<value>] [ --rphash=<value>] [ -S | --session=<value>] [ -n | --name=<value>]
+    [ --signer-name=<value>]
+nvcertify_rc:2
+===== policywrite define =====
+ERROR: Unknown token: "noda" found.
+ERROR: Could not convert NV attribute to number or keyword, got: "ownerread"
+def_policy:1
+===== platform-range index used by tests 0x0150000F owner hierarchy =====
+nv-index: 0x150000f
+def_platform_range_as_owner:0
+===== DONE =====

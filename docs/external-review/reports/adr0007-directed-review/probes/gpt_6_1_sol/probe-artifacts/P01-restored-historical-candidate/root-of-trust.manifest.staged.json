@@ -1,0 +1,1 @@
+{"version":3,"instanceId":"inst-historical-staged","sequence":3,"anchoredCount":0,"haltEpoch":0,"ledgerCommitted":0,"journalHead":"checkpoint:3","tpm":{"akName":"ak-historical-staged","nvIndexName":"nv-historical-staged","counter":3,"certify":null}}

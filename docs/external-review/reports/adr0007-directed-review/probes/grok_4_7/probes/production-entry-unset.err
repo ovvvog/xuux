@@ -1,0 +1,3 @@
+ERROR: XUUX_FRESHNESS_BACKEND not set.
+  Production requires a durable freshness backend (not InMemoryFreshnessSocket).
+  No backend is supported in this environment — production boot is refused closed.

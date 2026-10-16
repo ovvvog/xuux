@@ -1,0 +1,1 @@
+{"version":3,"instanceId":"inst-parallel-seals","sequence":3,"anchoredCount":0,"haltEpoch":0,"ledgerCommitted":0,"journalHead":"checkpoint:3","tpm":{"akName":"ak-parallel-seals","nvIndexName":"nv-parallel-seals","counter":3,"certify":null}}

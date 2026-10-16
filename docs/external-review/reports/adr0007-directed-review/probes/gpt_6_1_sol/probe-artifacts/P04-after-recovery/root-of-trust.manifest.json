@@ -1,0 +1,24 @@
+{
+  "version": 3,
+  "instanceId": "inst-invalid-committed",
+  "sequence": 2,
+  "anchoredCount": 0,
+  "haltEpoch": 0,
+  "ledgerCommitted": 0,
+  "journalHead": "checkpoint:2",
+  "tpm": {
+    "akName": "ak-invalid-committed",
+    "nvIndexName": "nv-invalid-committed",
+    "counter": 2,
+    "certify": {
+      "attest": {
+        "magic": "TPM_SIM_ATTEST",
+        "qualifiedSigner": "ak-invalid-committed",
+        "name": "nv-invalid-committed",
+        "counterValue": 2,
+        "qualifyingData": "3393196809af2fe7f9a37552b8e4b65aeec2bb2e04b7db8cac8234dfdb8d7fc2"
+      },
+      "signature": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

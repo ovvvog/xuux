@@ -1,0 +1,46 @@
+[
+  {
+    "id": "root-freshness-tests",
+    "command": [
+      "/usr/local/bin/node",
+      "--test",
+      "--test-concurrency=1",
+      "tests/root-of-trust/replay-limit.test.mjs",
+      "tests/root-of-trust/freshness-socket.test.mjs",
+      "tests/root-of-trust/wl-326-commit-barrier.test.mjs"
+    ],
+    "cwd": "/home/user/workspace/xuux-review-a76c8478",
+    "start": "2026-10-16T21:36:17.131Z",
+    "end": "2026-10-16T21:36:35.657Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  },
+  {
+    "id": "vsock-local-capability",
+    "command": [
+      "python3",
+      "/home/user/workspace/council-adr0007/gpt_6_1_sol/harness/sim/channel/vsock_probe_wsl.py"
+    ],
+    "cwd": "/home/user/workspace/xuux-review-a76c8478",
+    "start": "2026-10-16T21:36:35.659Z",
+    "end": "2026-10-16T21:36:35.736Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  },
+  {
+    "id": "tree-status-after-all-execution",
+    "command": [
+      "bash",
+      "-c",
+      "git rev-parse HEAD && git status --porcelain=v1 && git diff --exit-code && git diff --cached --exit-code; date -u +%Y-%m-%dT%H:%M:%SZ"
+    ],
+    "cwd": "/home/user/workspace/xuux-review-a76c8478",
+    "start": "2026-10-16T21:36:35.741Z",
+    "end": "2026-10-16T21:36:35.970Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "id": "P11-child-signal-exit-classified-zero",
+  "start": "2026-10-16T21:36:57.602Z",
+  "end": "2026-10-16T21:36:57.649Z",
+  "scope": "local executable fixture sleeps; no TPM command or network",
+  "command": {
+    "rc": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  "capability": {
+    "rc": 0,
+    "stdout": "",
+    "stderr": "",
+    "argv": [
+      "tpm2",
+      "getcap",
+      "properties-fixed"
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+a76c8478b720e6fd44d6f4fb988fe90a471718dd
+2026-10-16T21:31:28Z
+v20.20.2
+10.8.2
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+tool="tpm2" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device
+Linux 6.1.155 x86_64 GNU/Linux

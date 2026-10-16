@@ -1,0 +1,145 @@
+===== attribute keywords =====
+/bin/bash: line 7: col: command not found
+----- try tokens -----
+-- token noda --
+ERROR: Unknown token: "noda" found.
+ERROR: Could not convert NV attribute to number or keyword, got: "ownerread"
+-- token no_da --
+nv-index: 0x1800030
+-- token no-da --
+ERROR: Unknown token: "no-da" found.
+ERROR: Could not convert NV attribute to number or keyword, got: "ownerread"
+-- token NO_DA --
+ERROR: Unknown token: "NO_DA" found.
+ERROR: Could not convert NV attribute to number or keyword, got: "ownerread"
+-- token nt=counter --
+nv-index: 0x1800030
+-- token policywrite --
+nv-index: 0x1800030
+-- token writedefine --
+nv-index: 0x1800030
+-- token writelocked --
+WARNING:esys:src/tss2-esys/api/Esys_NV_DefineSpace.c:345:Esys_NV_DefineSpace_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_NV_DefineSpace.c:121:Esys_NV_DefineSpace() Esys Finish ErrorCode (0x000002c2) 
+ERROR: Failed to define NV area at index 0x1800030
+ERROR: Esys_NV_DefineSpace(0x2C2) - tpm:parameter(2):inconsistent attributes
+===== same handle, different attributes, first increment =====
+WARN: Reading full size of the NV index
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Unable to run tpm2_nvread
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+  File "/usr/local/lib/python3.14/pathlib/__init__.py", line 777, in read_bytes
+    with self.open(mode='rb', buffering=0) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.14/pathlib/__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/home/user/workspace/council-adr0007/grok_4_7/probes/cur.bin'
+name_before:
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Failed to read the public part of NV index 0x1800020
+ERROR: Unable to run tpm2_nvreadpublic
+WARNING:esys:src/tss2-esys/api/Esys_NV_ReadPublic.c:309:Esys_NV_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:243:Esys_TR_FromTPMPublic_Finish() Error NV_ReadPublic ErrorCode (0x0000018b) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x0000018b) 
+ERROR: Esys_TR_FromTPMPublic(0x18B) - tpm:handle(1):the handle is not correct for the use
+ERROR: Failed to read the public part of NV index 0x1800020
+ERROR: Unable to run tpm2_nvundefine
+undef:1
+nv-index: 0x1800020
+redef_diff_attr:0
+name_after:
+  name: 000bd608e4813103139d06400c84b528f58b5d4b310145076ac5def25d6751f96716
+  attributes:
+inc_diff:0
+WARN: Reading full size of the NV index
+diff_attr_first_inc_value 5
+===== nvcertify with ephemeral signing key on emulator =====
+name-alg:
+  value: sha256
+  raw: 0xb
+attributes:
+  value: fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt
+  raw: 0x30072
+type:
+  value: ecc
+  raw: 0x23
+curve-id:
+  value: NIST p256
+  raw: 0x3
+kdfa-alg:
+  value: null
+  raw: 0x10
+kdfa-halg:
+  value: (null)
+  raw: 0x0
+scheme:
+  value: null
+  raw: 0x10
+scheme-halg:
+  value: (null)
+  raw: 0x0
+sym-alg:
+  value: aes
+  raw: 0x6
+sym-mode:
+  value: cfb
+  raw: 0x43
+sym-keybits: 128
+x: 5a4d563b2d7d59dc4aa25c4fae50c2f16d1960d640ddce44e5c53c4f082926d7
+y: acb762bbabbcb92f970844d7dd12e2163a20bee7eb7e62d1b9d4dadbe347d441
+createprimary:0
+name-alg:
+  value: sha256
+  raw: 0xb
+attributes:
+  value: fixedtpm|fixedparent|sensitivedataorigin|userwithauth|sign
+  raw: 0x40072
+type:
+  value: ecc
+  raw: 0x23
+curve-id:
+  value: NIST p256
+  raw: 0x3
+kdfa-alg:
+  value: null
+  raw: 0x10
+kdfa-halg:
+  value: (null)
+  raw: 0x0
+scheme:
+  value: ecdsa
+  raw: 0x18
+scheme-halg:
+  value: sha256
+  raw: 0xb
+sym-alg:
+  value: null
+  raw: 0x10
+sym-mode:
+  value: (null)
+  raw: 0x0
+sym-keybits: 0
+x: 6eb93ae91719781a0311c45ee2a8403b0770b1fed16e73d6dd07fd096b8118b7
+y: 73e07ec9d10892a8139be2ea3f1f0e6663f36ea856dec295bc2bd4fb9a45fea7
+create:0
+WARNING:esys:src/tss2-esys/api/Esys_Load.c:324:Esys_Load_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_Load.c:112:Esys_Load() Esys Finish ErrorCode (0x00000902) 
+ERROR: Esys_Load(0x902) - tpm:warn(2.0): out of memory for object contexts
+ERROR: Unable to run tpm2_load
+load:1
+WARNING:esys:src/tss2-esys/api/Esys_ReadPublic.c:320:Esys_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:278:Esys_TR_FromTPMPublic_Finish() Error ReadPublic ErrorCode (0x00000184) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x00000184) 
+ERROR: Esys_TR_FromTPMPublic(0x184) - tpm:handle(1):value is out of range or is not correct for the context
+ERROR: Failed to access NVRAM public area at index 0x0
+ERROR: Unable to run tpm2_nvcertify
+nvcertify:1
+===== DONE =====

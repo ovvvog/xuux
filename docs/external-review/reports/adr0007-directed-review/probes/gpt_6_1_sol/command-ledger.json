@@ -1,0 +1,56 @@
+[
+  {
+    "id": "identity",
+    "command": [
+      "bash",
+      "-c",
+      "git rev-parse HEAD; git status --porcelain=v1; date -u +%Y-%m-%dT%H:%M:%SZ; node --version; npm --version; swtpm --version; tpm2 --version; uname -srmo; command -v pwsh || true; command -v docker || true"
+    ],
+    "cwd": "/home/user/workspace/xuux-review-a76c8478",
+    "start": "2026-10-16T21:31:28.371Z",
+    "end": "2026-10-16T21:31:28.624Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  },
+  {
+    "id": "sim-suite",
+    "command": [
+      "bash",
+      "scripts/tpm-sim-ci-isolated.sh"
+    ],
+    "cwd": "/home/user/workspace/council-adr0007/gpt_6_1_sol/harness",
+    "start": "2026-10-16T21:31:28.626Z",
+    "end": "2026-10-16T21:31:36.330Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  },
+  {
+    "id": "independent-probes",
+    "command": [
+      "bash",
+      "/home/user/workspace/council-adr0007/gpt_6_1_sol/run-probes.sh"
+    ],
+    "cwd": "/home/user/workspace/council-adr0007/gpt_6_1_sol",
+    "start": "2026-10-16T21:31:36.332Z",
+    "end": "2026-10-16T21:31:37.180Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  },
+  {
+    "id": "final-tree-status",
+    "command": [
+      "bash",
+      "-c",
+      "git rev-parse HEAD; git status --porcelain=v1; git diff --exit-code; git diff --cached --exit-code; date -u +%Y-%m-%dT%H:%M:%SZ"
+    ],
+    "cwd": "/home/user/workspace/xuux-review-a76c8478",
+    "start": "2026-10-16T21:31:37.181Z",
+    "end": "2026-10-16T21:31:37.355Z",
+    "exit": 0,
+    "signal": null,
+    "error": null
+  }
+]
