@@ -208,12 +208,20 @@ export function createPendingResultStore({ reader, writer, worker }) {
         conflict: false,
       };
       const earlier = pending.get(key);
-      if (earlier !== undefined && resultDigest(earlier.result) !== resultDigest(incoming.result)) {
+      if (earlier !== undefined) {
         // قيمتانِ مختلفتانِ للهويةِ نفْسِها بلا حكمٍ بينَهما (قتلٌ بينَ التخزينِ
         // الثاني وقيدِ التضادِّ): لا اختيارَ للأخيرِ ولا للأول — تضادٌّ يُكتشفُ
         // عندَ القراءةِ نفسِها ويمنعُ التسويةَ الآليةَ حتى يُقيَّدَ الحكمُ.
-        earlier.conflict = true;
-        continue;
+        // **والتضادُ لاصقٌ:** ما وُسِمَ متضادًّا لا يُمحى وسمُه بتخزينٍ ثالثٍ
+        // مطابقٍ للمحتجَزةِ — فإحياءُ القيمةِ الأولى بيدٍ لاحقةٍ لا يُعيدُ
+        // الإذنَ بها بعدَ أن قامتِ الثانيةُ دليلًا على التضادّ.
+        if (
+          resultDigest(earlier.result) !== resultDigest(incoming.result) ||
+          earlier.conflict === true
+        ) {
+          earlier.conflict = true;
+          continue;
+        }
       }
       pending.set(key, incoming);
     }
@@ -300,6 +308,17 @@ export function createPendingResultStore({ reader, writer, worker }) {
           pending.claimId === record.claimId,
       );
       if (existing !== undefined) {
+        if (existing.conflict === true) {
+          // التضادُّ قائمٌ ولم يُقضَ: إعادةُ تخزينٍ — ولو مطابقةً للمحتجَزةِ —
+          // لا تُعيدُ الإذنَ بمواصلةِ النجاحِ بالقيمةِ المحتجزةِ، فقد قامتِ
+          // المخالفةُ دليلًا والقرارَ لمالكٍ مخوَّلٍ لا لمُعيدِ التخزينِ.
+          await appendResolved(
+            record,
+            'conflict',
+            'تضادٌّ قائمٌ لم يُقضَ: لا إذنَ باستكمالِ النجاحِ بقيمةٍ محتجزةٍ',
+          );
+          throw new PendingResultConflict(record.taskId, record.claimId);
+        }
         const same = resultDigest(existing.result) === resultDigest(record.result);
         if (same) return;
         // تضادُّ تخزينٍ مُسمّى: القيمةُ الثانيةُ **دليلٌ يُخزَّنُ لا يُخفى** — ثمّ
@@ -309,9 +328,9 @@ export function createPendingResultStore({ reader, writer, worker }) {
         // العاملُ يتوقّفُ عندَ حدٍّ آمنٍ والقيدُ في السجلِّ يُسمّي التضادَّ.
         // (إن كانَ التضادُّ مكتشفاً من قبلُ عندَ القراءةِ فالدليلانِ باقيانِ — لا
         // يُكرَّرُ التخزينُ.)
-        if (existing.conflict !== true) {
-          await appendStaged(record);
-        }
+        // (التضادُّ القائمُ رُميَ في الفرعِ أعلاه — فها هنا التضادُّ حديثُ العهدِ
+        // بهذا التخزينِ: الدليلانِ يُخزَّنانِ معًا.)
+        await appendStaged(record);
         await appendResolved(
           record,
           'conflict',

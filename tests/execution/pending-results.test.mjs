@@ -1126,6 +1126,85 @@ test(
   },
 );
 
+// ─── (16) التضادُّ اللاصقُ: وسمٌ لا يسقطُ بإعادةِ تخزينٍ مطابقةٍ ───────────────
+
+test(
+  'التضادُّ لاصقٌ: قيمةٌ ثالثةٌ مطابقةٌ للمحتجَزةِ لا تمحو وسمَ التضادِّ ولا تُعيدُ الإذنَ — والقرارُ لمالكٍ لا لمُعيدِ التخزينِ',
+  { skip: skipWithoutDatabase },
+  async (t) => {
+    const env = await environment(t);
+    const task = await enqueue(env.queue, 'تضاد-لاصق');
+    const claimed = await env.queue.claim({ worker: 'عامل-اللاصق' });
+    assert.equal(claimed.length, 1);
+    const claimId = claimed[0]?.claimId;
+    assert.ok(claimId !== null && claimId !== undefined);
+
+    // النافذةُ القاتلةُ بعينِها: تخزينانِ (أ ثمّ ب) **بلا قيدِ حكمٍ بينَهما** —
+    // قتلٌ بينَ التخزينِ الثاني وقيدِ التضادِّ. ثمّ حياةٌ جديدةٌ تُعيدُ تخزينَ
+    // الأولى (أ) مطابقةً للمحتجَزةِ: الوسمُ لا يسقطُ ولا يُعادُ الإذنُ بها.
+    const stickyDir = registerTmpRoot(mkdtempSync(path.join(tmpdir(), 'wl392-sticky-')));
+    t.after(() => rmSync(stickyDir, { recursive: true, force: true }));
+    const rawLog = new PersistentEventLog(path.join(stickyDir, 'sticky.jsonl'), {
+      env: { NODE_ENV: 'test' },
+    });
+    /** @param {Record<string, unknown>} result */
+    const appendStaged = (result) =>
+      rawLog.append(PENDING_RESULT_STAGED_EVENT, 'عامل-اللاصق', {
+        taskId: task.id,
+        worker: 'عامل-اللاصق',
+        attempt: 1,
+        claimId,
+        result,
+      });
+    appendStaged({ القيمة: 'أ' });
+    appendStaged({ القيمة: 'ب' }); // قُتلَ العاملُ قبلَ قيدِ الحكمِ
+    appendStaged({ القيمة: 'أ' }); // وحياةٌ ثالثةٌ أعادتِ الأولى مطابقةً — ثمّ قُتلتْ قبلَ الحكمِ
+    rawLog.close();
+    // فالسجلُ نفسُهُ صارَ: أ، ب، أ — بلا قيدِ حكمٍ بينَها. والقراءةُ هي الحكمُ:
+    // التخزينُ الثالثُ المطابقُ **لا يمحو الوسمَ** — فالقيمتانِ المختلفتانِ
+    // قامتا دليلًا ولا اختيارَ لأطرافِ السجلِّ في محوِ التضادِّ.
+
+    const reopened = openStore(stickyDir, 'عامل-اللاصق', 'sticky.jsonl');
+    // القراءةُ نفسُها تكتشفُ التضادَّ (دليلانِ بلا حكمٍ) وتمسكُ المحتجَزةَ (أ)
+    const first = await reopened.store.unresolved();
+    assert.equal(first.length, 1);
+    assert.equal(first[0]?.conflict, true, 'التضادُّ لم يُكتشف عندَ القراءة');
+    assert.deepEqual(first[0]?.result, { القيمة: 'أ' });
+    // إعادةُ تخزينِ المطابقةِ (أ) **لا تُعيدُ الإذنَ**: التضادُّ قائمٌ لم يُقضَ
+    // فلا استكمالُ نجاحٍ بالقيمةِ المحتجَزةِ بعدَ أن قامتِ المخالفةُ دليلًا.
+    await assert.rejects(
+      () =>
+        reopened.store.stage({
+          taskId: task.id,
+          attempt: 1,
+          claimId,
+          result: { القيمة: 'أ' },
+        }),
+      (error) => error instanceof PendingResultConflict,
+    );
+    // والوسمُ لا يسقطُ صامتاً: إعادةُ التخزينِ قيّدتِ التضادَّ **حكمًا مُسمّى**
+    // (لا اختيارَ للقيمةِ) فلم يعدْ للمعلّقةِ وجودٌ كقيدٍ مفتوحٍ — الحكمُ دليلٌ
+    // يُقرأُ لا محوٌ للتضادّ. والتسويةُ بعدها لا تجدُ معلّقًا ولا تكتبُ شيئاً.
+    const second = await reopened.store.unresolved();
+    assert.deepEqual(second, [], 'التضادُّ تُركَ بلا حكمٍ بعدَ إعادةِ التخزينِ');
+    const verdicts = reopened
+      .events()
+      .filter((event) => event.type === PENDING_RESULT_RESOLVED_EVENT);
+    assert.equal(verdicts.length, 1, 'حكمُ التضادِّ لم يُقيَّد عندَ إعادةِ التخزينِ');
+    assert.equal(
+      /** @type {Record<string, unknown> | undefined} */ (verdicts[0]?.data)?.['outcome'],
+      'conflict',
+      'الحكمُ المقيَّدُ ليسَ تضادًّا',
+    );
+    const counts = await settlePendingResults({ store: reopened.store, queue: env.queue });
+    assert.deepEqual(counts, { examined: 0, settled: 0, superseded: 0, conflicts: 0 });
+    const after = await env.queue.get(task.id);
+    assert.equal(after?.state, TaskLifecycle.RUNNING, 'كُتب في القاعدةِ فوقَ تضادٍّ لم يُقضَ');
+    assert.equal(after?.result, null);
+    reopened.close();
+  },
+);
+
 test(
   'مسارُ العاملِ الكاملُ عندَ التضادِّ: لا تُكتبُ أيٌّ من القيمتَينِ في القاعدةِ — خطأٌ مسمّى يوقفُ لا التهامٌ يُمرِّر',
   { skip: skipWithoutDatabase },
@@ -1261,9 +1340,13 @@ test(
       rmSync(outputRoot, { recursive: true, force: true });
     });
 
-    // القاعدةُ مقطوعةٌ من قبلَ الإقلاعِ: التسويةُ تعجزُ فتُدخلُ الحلقةَ في حالةِ
-    // العطبِ (لا حجزَ حتى عودتِها)، لا أن تُبتلَعَ فيمرَّرُ الكاسبُ فوقَ الحقِّ.
-    await env.proxy?.down();
+    // **قطعٌ انتقائيٌّ لا إطفاءٌ كاملٌ:** يُقطعُ استعلامُ قراءةِ المهمّةِ نفسُه
+    // (`SELECT … FROM state.tasks WHERE id = $1` — أولُ ما تقرأُهُ التسويةُ عندَ
+    // الإقلاعِ) **قبلَّ تمريرِهِ** والوسيطُ باقٍ: فالقاعدةُ متاحةٌ لكلِّ ما عدا
+    // قراءةَ التسويةِ. وبهذا يُقاسُ أنَّ عطبَ التسويةِ **وحدَهُ** — لا عطبُ حجزٍ
+    // لاحقٌ يُشبهُه — يُؤجّلُ الحجزَ: لو ابتُلِعَ عطبُ التسويةِ لحُجزَ الشقُّ
+    // الجديدُ فورًا (القاعدةُ متاحةٌ) ولم تُطبعْ تسويةٌ قطعًا.
+    env.proxy?.severOn('FROM state.tasks WHERE id = $1', { mode: 'before', thenDown: false });
     const child = spawn(
       process.execPath,
       [
@@ -1311,9 +1394,13 @@ test(
       if (child.exitCode === null) child.kill('SIGKILL');
     });
     await until(() => stdout.includes('pending-results | عَطِلةُ قاعدةٍ عندَ التسويةِ'), 30_000);
+    // والمرحلةُ المسؤولةُ هي `settle-pending` بعينِها: هذا الخطُّ لا يُطبعُ إلا
+    // من مسارِ تصنيفِ عطبِ التسويةِ (لا من مسارِ الحجزِ)، والاستردادُ بعدهُ
+    // يمضّي على الميزانيةِ لا بدورانٍ فارغٍ.
+    await until(() => stdout.includes('db-recovery | recovered'), 30_000);
 
-    // القاعدةُ تعودُ: الاستردادُ يمضّي ثمّ **التسويةُ قبلَ أولِ حجزٍ جديدٍ**.
-    await env.proxy?.up();
+    // القاعدةُ لم تنقطعْ قطعًا كاملًا: الاستردادُ عاجزٌ عن قراءةِ التسويةِ
+    // وحدها ثمّ **التسويةُ قبلَ أولِ حجزٍ جديدٍ** — والشقُّ الجديدُ لا يُحجزُ قبلها.
     const result = await exited;
     assert.equal(result.code, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
 
@@ -1537,29 +1624,61 @@ test(
       store.close();
 
       if (order === 'settle-first') {
-        // التسويةُ تلتزمُ أولًا؛ ثمّ الإشارةُ تصلُ إلى مهمّةٍ نجحت فتتجاوزُها.
-        const counts = await settlePendingResults({
-          store: openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`).store,
-          queue: env.queue,
-        });
-        assert.equal(counts.settled, 1);
-        await env.queue.cancelTree({ taskId: task.id, reason: 'إشارة متأخّرة' });
-      } else {
-        // الإشارةُ تلتزمُ ذرّيًّا تحتَ قفلِ الصفِّ بينما التسويةُ تنتظرُ القفلَ
-        // نفسَه: `cancelTree` من وصلةٍ أخرى كانت ستقفَ على هذا القفلِ (انسدادٌ
-        // ذاتيٌّ لا تنتهي منه)، فالإشارةُ تُكتَبُ داخلَ معاملةِ القفلِ ذاتِها —
-        // وهو عينُ أثرِ إشارةٍ التزمتْ قبلَ أن تمضيَ التسويةُ فوقَها، كما يفعلُ
-        // المسارُ المباشرُ (نجاحٌ بلا فحصِ إلغاءٍ بعدَ ولادةِ القيمة).
-        const client = await env.db.pool.connect();
+        // **ترتيبٌ متتابعٌ لا تداخلٌ قسريٌّ:** التسويةُ تكتملُ أوّلًا ثمّ تصلُ
+        // الإشارةُ إلى مهمّةٍ نجحت فتتجاوزُها — هذا نصفُ المشهدِ متتابعًا بطبيعته
+        // (الإشارةُ «متأخّرة» وقعت بعد اكتمالِ كلّ شيء)، والتداخلُ القسريُّ
+        // مقيسٌ في الشقِّ الآخرِ أدناه.
+        const settleStore = openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`);
         try {
-          await client.query('BEGIN');
-          await client.query(`SELECT id FROM state.tasks WHERE id = $1 FOR UPDATE`, [task.id]);
-          // التسويةُ تنطلقُ الآن؛ قيدُ `succeed` فيها يمسُّ الصفَّ فيقفُ على القفلِ.
-          const settling = settlePendingResults({
-            store: openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`).store,
+          const counts = await settlePendingResults({
+            store: settleStore.store,
             queue: env.queue,
           });
-          await new Promise((resolve) => setTimeout(resolve, 150));
+          assert.equal(counts.settled, 1);
+        } finally {
+          settleStore.close();
+        }
+        await env.queue.cancelTree({ taskId: task.id, reason: 'إشارة متأخّرة' });
+      } else {
+        // **تداخلٌ قسريٌّ مُثبَتٌ لا مُفترَضٌ:** وصلةٌ تمسكُ قفلَ الصفِّ
+        // (`FOR UPDATE`) وتلتزمُ إشارتَها ذرّيًّا داخلَ معاملتِها، بينما التسويةُ
+        // انطلقتْ و**يُثبَتُ من `pg_locks` أنّها بلغتِ الـ`UPDATE` ووقفتْ على
+        // القفلِ نفسِهِ** قبلَ فكِّهِ — لا مهلةَ زمنيةً تُفترضُ فيها البلاغةُ.
+        // و`cancelTree` من وصلةٍ أخرى كانت ستقفُ على هذا القفلِ (انسدادٌ ذاتيٌّ
+        // لا تنتهي منه)، فالإشارةُ تُكتَبُ داخلَ معاملةِ القفلِ ذاتِها — وهو عينُ
+        // أثرِ إشارةٍ التزمتْ قبلَ أن تمضيَ التسويةُ فوقَها، كما يفعلُ المسارُ
+        // المباشرُ (نجاحٌ بلا فحصِ إلغاءٍ بعدَ ولادةِ القيمة).
+        const client = await env.db.pool.connect();
+        const settleStore = openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`);
+        try {
+          await client.query('BEGIN');
+          const holderPid = Number(
+            (await client.query('SELECT pg_backend_pid() AS pid')).rows[0]?.['pid'],
+          );
+          await client.query(`SELECT id FROM state.tasks WHERE id = $1 FOR UPDATE`, [task.id]);
+          const settling = settlePendingResults({
+            store: settleStore.store,
+            queue: env.queue,
+          });
+          // لا يُفترضُ أنّ التسويةَ بلغتِ القيدَ: يُقاسُ من القاعدةِ نفسِها أنّ
+          // جلسةً تنتظرُ قفلَ هذا الصفِّ (وبلغتِ الـ`UPDATE` في مسارِها) — مهلةٌ
+          // محدودةٌ وإلّا فشلَ الاختبارُ بنفسِهِ لا بمهلةٍ صامتة.
+          const blockedDeadline = Date.now() + 10_000;
+          for (;;) {
+            const blocked = await env.db.pool.query(
+              `SELECT count(*)::int AS n FROM pg_stat_activity
+                 WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()
+                   AND pid <> $1`,
+              [holderPid],
+            );
+            if (Number(blocked.rows[0]?.['n'] ?? 0) > 0) break;
+            if (Date.now() > blockedDeadline) {
+              throw new Error(
+                'التسويةُ لم تبلغِ القيدَ المُقفلَ خلالَ المهلةِ — لا تداخلَ أُثبتَ.',
+              );
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
           // الإشارةُ تلتزمُ والقفلُ بيدِ هذه المعاملةِ — فتبدو للتسويةِ عندَ فكِّهِ.
           await client.query(
             `UPDATE state.tasks SET cancel_requested = true, cancel_reason = $2 WHERE id = $1`,
@@ -1569,6 +1688,7 @@ test(
           const counts = await settling;
           assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
         } finally {
+          settleStore.close();
           client.release();
         }
       }
