@@ -1,7 +1,14 @@
 // موصلُ البريد — قناةُ إشعارٍ حقيقيّةٌ تُرسِلُ عبرَ SMTP.
 //
+// **R5-B-04 (CO55-M11.05-R3-01): القناةُ تمرُّ عبرَ بوابةِ الخروجِ لا تفتحُ
+// اتصالًا مباشرةً.** بلا بوابةِ خروجٍ موصولةٍ يُرفضُ الإرسالُ قبلَ أيِّ اتصالٍ
+// بـ`EGRESS_GATE_REQUIRED` — لا يخرجُ بايتٌ. والإرسالُ الخارجيُّ بلا بوابةٍ
+// مسارٌ ممنوعٌ لا مسارٌ احتياطيٌّ (كما في `TelegramBotChannel`). والنقلُ نفسُهُ
+// يقومُ به نقلُ البوابةِ (المركِّبُ يوصِلُهُ بـ`sendSmtp`) فتبقى القناةُ
+// «اللمسَ» لا الناقلَ.
+//
 // **حدٌّ معلَنٌ — لا سرَّ في الكود:** كلمةُ السرِّ تُقرأُ من متغيّرٍ بيئيٍّ
-// (SMTP_PASSWORD) ولا تُكتبُ في الكودِ ولا السجل.
+// (SMTP_PASSWORD) ولا تُكتبُ في الكودِ ولا السجلّ.
 //
 // **حدٌّ معلَنٌ — القبولُ ليس التسليم:** SMTP يُعيدُ قبولَ الرسالةِ للإرسال
 // (250 OK) وهذا دليلُ قبولٍ لا دليلُ قراءة. فالحالةُ `sent` لا `delivered`.
@@ -15,6 +22,8 @@ import net from 'node:net';
  *
  * @param {{
  *   getSmtpConfig: () => { host: string, port: number, user: string, password: string } | null,
+ *   egressGate?: { send: (request: { actor: { id: string }, destination: string, payload: string, classification: string, context: Record<string, unknown> }) => Promise<{ bytes: number, destination: string, policyId: string | null, result: unknown }> } | null,
+ *   actor?: { id: string },
  * }} deps
  */
 export function EmailChannel(deps) {
@@ -40,27 +49,76 @@ export function EmailChannel(deps) {
         });
       }
 
-      try {
-        const result = await sendSmtp(config, message, destination);
-        return createNotificationResult({
-          channel: 'email',
-          ownerId: message.ownerId,
-          maskedDestination: maskEmail(destination),
-          state: 'sent',
-          attemptedAtMs: message.sentAtMs,
-          providerMessageId: result.messageId,
-          providerResult: '250 OK',
-        });
-      } catch (/** @type {unknown} */ error) {
-        return createNotificationResult({
-          channel: 'email',
-          ownerId: message.ownerId,
-          maskedDestination: maskEmail(destination),
-          state: 'failed',
-          attemptedAtMs: message.sentAtMs,
-          failureReason: error instanceof Error ? error.message : 'SMTP خطأٌ غيرُ معروف',
-        });
+      // R5-B-04 (CO55-M11.05-R3-01): القناةُ تمرُّ عبرَ بوابةِ الخروجِ لا تفتحُ
+      // اتصالًا. البوابةُ تفحصُ الجهةَ (مضيفُ SMTP) والحمولةَ (الرسالةُ كاملةً)
+      // والتصنيفَ قبلَ النقلِ، ونقلُها هو من يُرسِل.
+      const egressGate = deps.egressGate;
+      const actor = deps.actor ?? { id: 'system:notifications' };
+
+      if (egressGate) {
+        try {
+          const payload = JSON.stringify({
+            to: destination,
+            subject: message.subject,
+            body: message.body,
+          });
+          const egressResult = await egressGate.send({
+            actor,
+            destination: config.host,
+            payload,
+            classification: 'internal',
+            context: { channel: 'email', port: config.port },
+          });
+          const result = /** @type {unknown} */ (egressResult.result);
+          if (result !== null && typeof result === 'object' && 'messageId' in result) {
+            const data = /** @type {{ messageId?: unknown }} */ (result);
+            const messageId =
+              data.messageId !== null && data.messageId !== undefined
+                ? String(data.messageId)
+                : null;
+            return createNotificationResult({
+              channel: 'email',
+              ownerId: message.ownerId,
+              maskedDestination: maskEmail(destination),
+              state: 'sent',
+              attemptedAtMs: message.sentAtMs,
+              providerMessageId: messageId,
+              providerResult: '250 OK',
+              egressBytes: egressResult.bytes,
+            });
+          }
+          // النتيجةُ ليست ما يتوقّعُه عقدُ النقلِ
+          return createNotificationResult({
+            channel: 'email',
+            ownerId: message.ownerId,
+            maskedDestination: maskEmail(destination),
+            state: 'failed',
+            attemptedAtMs: message.sentAtMs,
+            failureReason: 'EGRESS_TRANSPORT_FAILED: نتيجة غير متوقعة',
+          });
+        } catch (/** @type {unknown} */ error) {
+          return createNotificationResult({
+            channel: 'email',
+            ownerId: message.ownerId,
+            maskedDestination: maskEmail(destination),
+            state: 'failed',
+            attemptedAtMs: message.sentAtMs,
+            failureReason: `EGRESS_REFUSED: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
       }
+
+      // R5-B-04: بلا بوابةِ خروجٍ لا يخرجُ بايتٌ — لا اتصالَ يُفتَحُ أصلاً.
+      // الإرسالُ الخارجيُّ بلا بوابةٍ مسارٌ ممنوعٌ لا مسارٌ احتياطيٌّ.
+      return createNotificationResult({
+        channel: 'email',
+        ownerId: message.ownerId,
+        maskedDestination: maskEmail(destination),
+        state: 'failed',
+        attemptedAtMs: message.sentAtMs,
+        failureReason:
+          'EGRESS_GATE_REQUIRED: لا يمكنُ الإرسالُ الخارجيُّ بلا بوابةِ خروجٍ موصولةٍ (R5-B-04)',
+      });
     },
   });
 }
@@ -87,7 +145,7 @@ function maskEmail(email) {
  * @param {string} to
  * @returns {Promise<{ messageId: string | null }>}
  */
-function sendSmtp(config, message, to) {
+export function sendSmtp(config, message, to) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(config.port, config.host);
     /** @type {import('node:tls').TLSSocket | null} */
