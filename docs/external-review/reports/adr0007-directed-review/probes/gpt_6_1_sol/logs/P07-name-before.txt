@@ -1,0 +1,10 @@
+0x1500066:
+  name: 000b5baec109e5acff8e7f6e1245aebed8333fb9de71caf8c516eec66cbb6aea1ec9
+  hash algorithm:
+    friendly: sha256
+    value: 0xB
+  attributes:
+    friendly: ownerwrite|nt=0x1|ownerread
+    value: 0x20012
+  size: 8
+

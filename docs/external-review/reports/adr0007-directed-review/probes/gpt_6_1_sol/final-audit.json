@@ -1,0 +1,55 @@
+{
+  "time": "2026-10-16T21:44:32.323Z",
+  "reportPath": "/home/user/workspace/council-adr0007/gpt_6_1_sol/report.md",
+  "sourceLinks": 272,
+  "missing": [],
+  "copiedFiles": 30,
+  "differingCopies": [],
+  "commands": [
+    {
+      "argv": [
+        "git",
+        "rev-parse",
+        "HEAD"
+      ],
+      "cwd": "/home/user/workspace/xuux-review-a76c8478",
+      "exit": 0,
+      "stdout": "a76c8478b720e6fd44d6f4fb988fe90a471718dd\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "status",
+        "--porcelain=v1"
+      ],
+      "cwd": "/home/user/workspace/xuux-review-a76c8478",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--exit-code"
+      ],
+      "cwd": "/home/user/workspace/xuux-review-a76c8478",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--cached",
+        "--exit-code"
+      ],
+      "cwd": "/home/user/workspace/xuux-review-a76c8478",
+      "exit": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

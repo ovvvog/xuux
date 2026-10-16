@@ -1,0 +1,12 @@
+{
+  "id": "P09-independent-stateless-signature-model",
+  "scope": "software Ed25519 fixture only, not HSM execution",
+  "aCounter": 3,
+  "bCounter": 3,
+  "aDigest": "7fc3942ce18cbd598369a519ff20b856e32894c1e507a7b6bd5d15f6321528af",
+  "bDigest": "caf6f5e070947fd6afa53abd6ff8dcaee9f63230a96399867d7794417ed90e93",
+  "originalASignatureStillValid": true,
+  "bSignatureValid": true,
+  "aHalted": false,
+  "bHalted": true
+}

@@ -1,0 +1,1 @@
+PROBE_RESULT {"tool": "vsock_probe_wsl", "dev_vsock": true, "family_supported": true, "bind_listen": true, "connect_host": null, "verdict": "available", "notes": ["bind+listen(cid=ANY,port=60600) ok ثم إغلاق فوري", "متاح على مستوى النواة؛ إثبات التبادل الفعلي مع نظير (مستجيب Windows) يحتاج خطوة لاحقة — لا يُدّعى قبل حدوثه."], "self_deadline_s": 30}

@@ -1,0 +1,2 @@
+POC_READY {"tool":"tcp_responder","bind":"127.0.0.1","port":29331,"lifetime_ms":12000,"kill_file":"/home/user/workspace/council-adr0007/gpt_6_1_sol/runtime/channel-kill","protocol":"XU-frame/tcp","max_payload":65536,"tpm":"none (no-TPM-write diagnostic PoC)"}
+POC_EXIT {"tool":"tcp_responder","bind":"127.0.0.1","port":29331,"bind_kind":"loopback","lifetime_ms":12000,"rate_limit_per_s":100,"connections":2,"messages_ok":2,"rejected":{"RATE_LIMITED":0,"REPLAY":0,"MALFORMED":0,"OVERSIZE":0},"exit_reason":"SIGTERM","duration_ms":12}

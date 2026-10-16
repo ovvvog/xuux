@@ -1,0 +1,477 @@
+TAP version 13
+# Subtest: bind policy: يرفض البدائل وغير Loopback
+ok 1 - bind policy: يرفض البدائل وغير Loopback
+  ---
+  duration_ms: 1.6964
+  ...
+# Subtest: bind policy: يسمح بـloopback دائماً
+ok 2 - bind policy: يسمح بـloopback دائماً
+  ---
+  duration_ms: 0.17976
+  ...
+# Subtest: bind policy: 172.16/12 يتطلب الشارة الصريحة وواجهة فعلية
+ok 3 - bind policy: 172.16/12 يتطلب الشارة الصريحة وواجهة فعلية
+  ---
+  duration_ms: 0.200704
+  ...
+# Subtest: static: أدوات sim/channel لا تستورد عميل TPM ولا أوامر TPM
+ok 4 - static: أدوات sim/channel لا تستورد عميل TPM ولا أوامر TPM
+  ---
+  duration_ms: 2.442843
+  ...
+# Subtest: static: مستجيبات TCP/vsock تفرض timeout إلزامياً وkill switch وتنظيفاً
+ok 5 - static: مستجيبات TCP/vsock تفرض timeout إلزامياً وkill switch وتنظيفاً
+  ---
+  duration_ms: 0.563101
+  ...
+# Subtest: static: أوامر التنظيف والتحقق موجودة للجهتين
+ok 6 - static: أوامر التنظيف والتحقق موجودة للجهتين
+  ---
+  duration_ms: 0.223397
+  ...
+# Subtest: docs: عقد TORN/MISMATCH ومصفوفة الأدلة موثّقة
+ok 7 - docs: عقد TORN/MISMATCH ومصفوفة الأدلة موثّقة
+  ---
+  duration_ms: 0.31432
+  ...
+# Subtest: parity: تأطير XU متطابق بايتاً-بايتاً بين python وnode
+ok 8 - parity: تأطير XU متطابق بايتاً-بايتاً بين python وnode
+  ---
+  duration_ms: 89.474486
+  ...
+# Subtest: live (XUUX_CHANNEL_POC=1): مستجيب/عميل TCP على loopback مع رفض malformed
+ok 9 - live (XUUX_CHANNEL_POC=1): مستجيب/عميل TCP على loopback مع رفض malformed # SKIP XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI
+  ---
+  duration_ms: 0.196299
+  ...
+# Subtest: live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع تقريراً منظماً
+ok 10 - live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع تقريراً منظماً # SKIP XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI
+  ---
+  duration_ms: 0.172831
+  ...
+# Subtest: static: سكربتات PowerShell تحشو البايت إلى [int] قبل الإزاحة في CRC
+ok 11 - static: سكربتات PowerShell تحشو البايت إلى [int] قبل الإزاحة في CRC
+  ---
+  duration_ms: 0.68837
+  ...
+# Subtest: attest 1: akName خاطئ ⇒ رفض
+ok 12 - attest 1: akName خاطئ ⇒ رفض
+  ---
+  duration_ms: 2.433092
+  ...
+# Subtest: attest 2: nvIndexName خاطئ ⇒ رفض
+ok 13 - attest 2: nvIndexName خاطئ ⇒ رفض
+  ---
+  duration_ms: 0.366047
+  ...
+# Subtest: attest 3: qualifyingData خاطئة (بصمة متن مختلفة) ⇒ رفض
+ok 14 - attest 3: qualifyingData خاطئة (بصمة متن مختلفة) ⇒ رفض
+  ---
+  duration_ms: 0.408864
+  ...
+# Subtest: attest 4: instanceId مختلف ⇒ qualifyingData مختلفة ⇒ رفض
+ok 15 - attest 4: instanceId مختلف ⇒ qualifyingData مختلفة ⇒ رفض
+  ---
+  duration_ms: 0.455831
+  ...
+# Subtest: attest 5: توقيع مُلبّد ⇒ رفض
+ok 16 - attest 5: توقيع مُلبّد ⇒ رفض
+  ---
+  duration_ms: 0.593588
+  ...
+# Subtest: attest 6: شهادة قديمة مع متن أحدث ⇒ counter mismatch ⇒ رفض
+ok 17 - attest 6: شهادة قديمة مع متن أحدث ⇒ counter mismatch ⇒ رفض
+  ---
+  duration_ms: 0.363134
+  ...
+# Subtest: attest 7: شهادة غائبة/مشوّهة ⇒ رفض
+ok 18 - attest 7: شهادة غائبة/مشوّهة ⇒ رفض
+  ---
+  duration_ms: 0.389526
+  ...
+# Subtest: attest 8: manifest digest مختلف (محتوىً لا هويةً) ⇒ qualifyingData_mismatch
+ok 19 - attest 8: manifest digest مختلف (محتوىً لا هويةً) ⇒ qualifyingData_mismatch
+  ---
+  duration_ms: 1.176278
+  ...
+# Subtest: attest 9: شهادة أحدث مع manifest أقدم ⇒ counter_mismatch
+ok 20 - attest 9: شهادة أحدث مع manifest أقدم ⇒ counter_mismatch
+  ---
+  duration_ms: 0.442351
+  ...
+# Subtest: attest 10: شهادة قديمة مع manifest أحدث ⇒ counter_mismatch (الاتجاهانِ مرفوضانِ)
+ok 21 - attest 10: شهادة قديمة مع manifest أحدث ⇒ counter_mismatch (الاتجاهانِ مرفوضانِ)
+  ---
+  duration_ms: 0.436464
+  ...
+# Subtest: attest: شهادة صالحة ⇒ قبول
+ok 22 - attest: شهادة صالحة ⇒ قبول
+  ---
+  duration_ms: 0.500537
+  ...
+# Subtest: framing: round-trip ناجح
+ok 23 - framing: round-trip ناجح
+  ---
+  duration_ms: 1.660402
+  ...
+# Subtest: framing: round-trip بـpayload فارغ
+ok 24 - framing: round-trip بـpayload فارغ
+  ---
+  duration_ms: 0.187442
+  ...
+# Subtest: max-size: payload فوق الحد يُرفض عند التأطير
+ok 25 - max-size: payload فوق الحد يُرفض عند التأطير
+  ---
+  duration_ms: 0.369873
+  ...
+# Subtest: max-size: len مُزوّر فوق الحد يُرفض عند التحليل
+ok 26 - max-size: len مُزوّر فوق الحد يُرفض عند التحليل
+  ---
+  duration_ms: 0.177773
+  ...
+# Subtest: malformed: magic خاطئ ⇒ رفض
+ok 27 - malformed: magic خاطئ ⇒ رفض
+  ---
+  duration_ms: 0.206471
+  ...
+# Subtest: malformed: crc تالفة ⇒ رفض
+ok 28 - malformed: crc تالفة ⇒ رفض
+  ---
+  duration_ms: 0.155405
+  ...
+# Subtest: malformed: رسالة مبتورة ⇒ INCOMPLETE
+ok 29 - malformed: رسالة مبتورة ⇒ INCOMPLETE
+  ---
+  duration_ms: 0.141876
+  ...
+# Subtest: replay: counter قديم يُرفض
+ok 30 - replay: counter قديم يُرفض
+  ---
+  duration_ms: 0.420458
+  ...
+# Subtest: rate-limit: تجاوز المعدّل يُرفض
+ok 31 - rate-limit: تجاوز المعدّل يُرفض
+  ---
+  duration_ms: 0.372448
+  ...
+# Subtest: mid-message disconnect: جزء ثم بقيّة ⇒ يكتمل
+ok 32 - mid-message disconnect: جزء ثم بقيّة ⇒ يكتمل
+  ---
+  duration_ms: 0.457436
+  ...
+# Subtest: mid-message disconnect: رسالتان متتاليتان في تدفّق واحد
+ok 33 - mid-message disconnect: رسالتان متتاليتان في تدفّق واحد
+  ---
+  duration_ms: 0.260436
+  ...
+# Subtest: timeout: رسالة غير مكتملة لا تُخرج (تنتظر المزيد)
+ok 34 - timeout: رسالة غير مكتملة لا تُخرج (تنتظر المزيد)
+  ---
+  duration_ms: 0.870938
+  ...
+# Subtest: crc: دالة crc16 متّسقة
+ok 35 - crc: دالة crc16 متّسقة
+  ---
+  duration_ms: 0.163938
+  ...
+# Subtest: static: ALLOWED_CAPS مجمّد ولا يحوي أوامر كتابة
+ok 36 - static: ALLOWED_CAPS مجمّد ولا يحوي أوامر كتابة
+  ---
+  duration_ms: 1.120559
+  ...
+# Subtest: static: القائمة تحتوي فقط قدرات GetCapability المعروفة
+ok 37 - static: القائمة تحتوي فقط قدرات GetCapability المعروفة
+  ---
+  duration_ms: 1.512642
+  ...
+# Subtest: runtime: cap خارج القائمة يُرفض قبل أي تنفيذ
+ok 38 - runtime: cap خارج القائمة يُرفض قبل أي تنفيذ
+  ---
+  duration_ms: 0.542153
+  ...
+# Subtest: runtime: حقن shell/وسائط إضافية مستحيل — cap محصور بنص واحد
+ok 39 - runtime: حقن shell/وسائط إضافية مستحيل — cap محصور بنص واحد
+  ---
+  duration_ms: 0.169431
+  ...
+# Subtest: runtime: استعلام algorithms ناجح ويُرجع stdout
+ok 40 - runtime: استعلام algorithms ناجح ويُرجع stdout
+  ---
+  duration_ms: 12.369163
+  ...
+# Subtest: runtime: properties-fixed يحوي NV_INDEX_MAX
+ok 41 - runtime: properties-fixed يحوي NV_INDEX_MAX
+  ---
+  duration_ms: 5.300396
+  ...
+# Subtest: runtime: handles-nv-index يسرد فهارس NV
+ok 42 - runtime: handles-nv-index يسرد فهارس NV
+  ---
+  duration_ms: 4.98739
+  ...
+# Subtest: static: NV_COUNTERS_MAX=0 تعني «لا حدّ أقصى ثابتاً» لا «عدم دعم»
+ok 43 - static: NV_COUNTERS_MAX=0 تعني «لا حدّ أقصى ثابتاً» لا «عدم دعم»
+  ---
+  duration_ms: 1.251333
+  ...
+# Subtest: static: قيمة غير قابلة للتحليل في NV_COUNTERS_MAX ⇒ فشل مغلق
+ok 44 - static: قيمة غير قابلة للتحليل في NV_COUNTERS_MAX ⇒ فشل مغلق
+  ---
+  duration_ms: 0.14424
+  ...
+# Subtest: static: moreData صريحة تُقرأ، والغياب/الغريب ⇒ unknown (فشل مغلق)
+ok 45 - static: moreData صريحة تُقرأ، والغياب/الغريب ⇒ unknown (فشل مغلق)
+  ---
+  duration_ms: 0.227999
+  ...
+# Subtest: static: parseHandlesNvIndex يجرد المقابض ويتحمّل الفارغ والغريب
+ok 46 - static: parseHandlesNvIndex يجرد المقابض ويتحمّل الفارغ والغريب
+  ---
+  duration_ms: 0.649157
+  ...
+# Subtest: static: parsePropertyRaw يستخرج raw ولا يخمّن عند الغياب
+ok 47 - static: parsePropertyRaw يستخرج raw ولا يخمّن عند الغياب
+  ---
+  duration_ms: 0.317161
+  ...
+#   [raw] TPM2_PT_NV_COUNTERS_MAX = 0x0 ⇒ no-fixed-maximum
+# Subtest: runtime: properties-fixed يعطي NV_COUNTERS_MAX خام ويُفسَّر صفرها صحيحاً
+ok 48 - runtime: properties-fixed يعطي NV_COUNTERS_MAX خام ويُفسَّر صفرها صحيحاً
+  ---
+  duration_ms: 16.214785
+  ...
+# Subtest: runtime: properties-variable يعمل ويحوي خصائص NV حيّة
+ok 49 - runtime: properties-variable يعمل ويحوي خصائص NV حيّة
+  ---
+  duration_ms: 5.404013
+  ...
+# Subtest: runtime: جرد handles-nv-index يُظهر فهرساً معرَّفاً ثم يزول بعد حذفه
+ok 50 - runtime: جرد handles-nv-index يُظهر فهرساً معرَّفاً ثم يزول بعد حذفه
+  ---
+  duration_ms: 40.493823
+  ...
+# Subtest: runtime: جرد commands يحوي الأوامر المطلوبة لمسار العدّاد
+ok 51 - runtime: جرد commands يحوي الأوامر المطلوبة لمسار العدّاد
+  ---
+  duration_ms: 6.981514
+  ...
+# Subtest: runtime: moreData تُفسَّر فقط إن وُجدت صريحة، وإلا unknown
+ok 52 - runtime: moreData تُفسَّر فقط إن وُجدت صريحة، وإلا unknown
+  ---
+  duration_ms: 4.933866
+  ...
+#   [raw] before=3 (0x3) after=4 (0x4)
+# Subtest: nv-counter: حذف + إعادة تعريف يبدأ فوق الحد الأقصى السابق (قيم خام)
+ok 53 - nv-counter: حذف + إعادة تعريف يبدأ فوق الحد الأقصى السابق (قيم خام)
+  ---
+  duration_ms: 100.899876
+  ...
+# Subtest: nv-counter: readPublic يرجع اسم الفهرس بعد التعريف
+ok 54 - nv-counter: readPublic يرجع اسم الفهرس بعد التعريف
+  ---
+  duration_ms: 25.563442
+  ...
+# Subtest: replay: لقطة قديمة فوق عدّاد متقدّم ⇒ MISMATCH + إغلاق دائم + رفض
+ok 55 - replay: لقطة قديمة فوق عدّاد متقدّم ⇒ MISMATCH + إغلاق دائم + رفض
+  ---
+  duration_ms: 115.410021
+  ...
+# Subtest: sovereign 1: haltSovereign() يختمُ الإيقافَ في المتنِ ويُقدِّمُ العدّادَ
+ok 56 - sovereign 1: haltSovereign() يختمُ الإيقافَ في المتنِ ويُقدِّمُ العدّادَ
+  ---
+  duration_ms: 128.193028
+  ...
+# Subtest: sovereign 2: حذفُ halt.json لا يفتحُ الإيقافَ السياديَّ المختومَ
+ok 57 - sovereign 2: حذفُ halt.json لا يفتحُ الإيقافَ السياديَّ المختومَ
+  ---
+  duration_ms: 170.676219
+  ...
+# Subtest: sovereign 3: الكتابةُ فوقَ halt.json بـrunning لا تفتحُ الإيقافَ المختومَ
+ok 58 - sovereign 3: الكتابةُ فوقَ halt.json بـrunning لا تفتحُ الإيقافَ المختومَ
+  ---
+  duration_ms: 171.53601
+  ...
+# Subtest: sovereign 4: غيابُ TPM أثناءَ الإيقافِ لا يُخفِّضُه — وعودتُه لا تفتحُه
+ok 59 - sovereign 4: غيابُ TPM أثناءَ الإيقافِ لا يُخفِّضُه — وعودتُه لا تفتحُه
+  ---
+  duration_ms: 101.316148
+  ...
+# Subtest: sovereign 5: غيابُ TPM مع إيقافٍ مختومٍ ثمّ حذفُ الملفِّ ⇒ يبقى موقوفاً
+ok 60 - sovereign 5: غيابُ TPM مع إيقافٍ مختومٍ ثمّ حذفُ الملفِّ ⇒ يبقى موقوفاً
+  ---
+  duration_ms: 110.538793
+  ...
+# Subtest: sovereign 6: استعادةُ لقطةِ ما قبلَ الإيقافِ كاملةً ⇒ MISMATCH لا running (‏ADR 0007 §4.8)
+ok 61 - sovereign 6: استعادةُ لقطةِ ما قبلَ الإيقافِ كاملةً ⇒ MISMATCH لا running (‏ADR 0007 §4.8)
+  ---
+  duration_ms: 111.111598
+  ...
+# Subtest: sovereign 7: انقطاعٌ بعدَ زيادةِ العدّادِ قبلَ إتمامِ الإيقافِ ⇒ التعافي يُتمُّه موقوفاً لا running
+ok 62 - sovereign 7: انقطاعٌ بعدَ زيادةِ العدّادِ قبلَ إتمامِ الإيقافِ ⇒ التعافي يُتمُّه موقوفاً لا running
+  ---
+  duration_ms: 124.463704
+  ...
+# Subtest: sovereign 8: انقطاعٌ قبلَ زيادةِ العدّادِ ⇒ الإيقافُ لم يُلتزَمْ ولم يُعلَنْ نجاحُه
+ok 63 - sovereign 8: انقطاعٌ قبلَ زيادةِ العدّادِ ⇒ الإيقافُ لم يُلتزَمْ ولم يُعلَنْ نجاحُه
+  ---
+  duration_ms: 143.79963
+  ...
+# Subtest: sovereign 9: haltSovereign() مرفوضٌ فوقَ إغلاقِ عطبٍ — لا يُختَمُ متنٌ غيرُ متحقَّقٍ
+ok 64 - sovereign 9: haltSovereign() مرفوضٌ فوقَ إغلاقِ عطبٍ — لا يُختَمُ متنٌ غيرُ متحقَّقٍ
+  ---
+  duration_ms: 75.117818
+  ...
+# Subtest: sovereign 10: staged مصطنعٌ بالعدّادِ نفسِه بلا halted لا يستبدلُ المتنَ الموقوفَ
+ok 65 - sovereign 10: staged مصطنعٌ بالعدّادِ نفسِه بلا halted لا يستبدلُ المتنَ الموقوفَ
+  ---
+  duration_ms: 114.232027
+  ...
+# Subtest: sovereign 11: staged بالعدّادِ نفسِه (‏B === C) يختلفُ عن المتنِ الملتزمِ ⇒ TORN لا إعادةَ شهادة
+ok 66 - sovereign 11: staged بالعدّادِ نفسِه (‏B === C) يختلفُ عن المتنِ الملتزمِ ⇒ TORN لا إعادةَ شهادة
+  ---
+  duration_ms: 83.911441
+  ...
+# Subtest: sovereign 12: انقطاعٌ بعدَ الزيادةِ + staged مُعدَّلٌ من المهاجمِ ⇒ TORN لا إعادةَ اعتماد
+ok 67 - sovereign 12: انقطاعٌ بعدَ الزيادةِ + staged مُعدَّلٌ من المهاجمِ ⇒ TORN لا إعادةَ اعتماد
+  ---
+  duration_ms: 2.163032
+  ...
+# Subtest: sovereign 13: انقطاعٌ بعدَ الزيادةِ وstaged سليمٌ ⇒ يُتمُّهُ التعافي (إيجابيّ)
+ok 68 - sovereign 13: انقطاعٌ بعدَ الزيادةِ وstaged سليمٌ ⇒ يُتمُّهُ التعافي (إيجابيّ)
+  ---
+  duration_ms: 2.111273
+  ...
+# Subtest: sovereign 14: staged بلا التزامٍ في التوكنِ ⇒ TORN بـstaged-commit-missing
+ok 69 - sovereign 14: staged بلا التزامٍ في التوكنِ ⇒ TORN بـstaged-commit-missing
+  ---
+  duration_ms: 1.639919
+  ...
+# Subtest: guard: swtpm TCTI مقبول
+ok 70 - guard: swtpm TCTI مقبول
+  ---
+  duration_ms: 1.178349
+  ...
+# Subtest: guard: TCTI جهازي حقيقي مرفوض
+ok 71 - guard: TCTI جهازي حقيقي مرفوض
+  ---
+  duration_ms: 0.390435
+  ...
+# Subtest: guard: TCTI فارغ أو غير محاكٍ مرفوض
+ok 72 - guard: TCTI فارغ أو غير محاكٍ مرفوض
+  ---
+  duration_ms: 0.207494
+  ...
+# Subtest: guard: محاولة حقن shell عبر TCTI مرفوضة
+ok 73 - guard: محاولة حقن shell عبر TCTI مرفوضة
+  ---
+  duration_ms: 0.155471
+  ...
+# Subtest: gate: isSimEnabled يعيد boolean
+ok 74 - gate: isSimEnabled يعيد boolean
+  ---
+  duration_ms: 5.69312
+  ...
+# Subtest: gate: في غياب XUUX_TPM_SIM يعيد false (مسار CI الافتراضي)
+ok 75 - gate: في غياب XUUX_TPM_SIM يعيد false (مسار CI الافتراضي)
+  ---
+  duration_ms: 0.157118
+  ...
+# Subtest: tear 1: HEALTHY ⇒ RUNNING
+ok 76 - tear 1: HEALTHY ⇒ RUNNING
+  ---
+  duration_ms: 147.10171
+  ...
+# Subtest: tear 2: staged قبل الزيادة ⇒ تجاهل staged
+ok 77 - tear 2: staged قبل الزيادة ⇒ تجاهل staged
+  ---
+  duration_ms: 86.367601
+  ...
+# Subtest: tear 3: staged بعد الزيادة ⇒ recertify-complete
+ok 78 - tear 3: staged بعد الزيادة ⇒ recertify-complete
+  ---
+  duration_ms: 107.733049
+  ...
+# Subtest: tear 4: staged غير مطابق ⇒ TORN
+ok 79 - tear 4: staged غير مطابق ⇒ TORN
+  ---
+  duration_ms: 85.188071
+  ...
+# Subtest: tear 5: body يتقدّم على العدّاد ⇒ MISMATCH
+ok 80 - tear 5: body يتقدّم على العدّاد ⇒ MISMATCH
+  ---
+  duration_ms: 76.545136
+  ...
+# Subtest: tear 6: replay ⇒ MISMATCH
+ok 81 - tear 6: replay ⇒ MISMATCH
+  ---
+  duration_ms: 100.311889
+  ...
+# Subtest: tear 7: شهادة تالفة ⇒ ATTEST_INVALID
+ok 82 - tear 7: شهادة تالفة ⇒ ATTEST_INVALID
+  ---
+  duration_ms: 82.847924
+  ...
+# Subtest: tear 8: انقطاع قبل زيادة العدّاد (hook) ⇒ تجاهل staged والمتابعة
+ok 83 - tear 8: انقطاع قبل زيادة العدّاد (hook) ⇒ تجاهل staged والمتابعة
+  ---
+  duration_ms: 66.812489
+  ...
+# Subtest: tear 9: انقطاع بعد الزيادة وقبل certify (hook) ⇒ recertify-complete
+ok 84 - tear 9: انقطاع بعد الزيادة وقبل certify (hook) ⇒ recertify-complete
+  ---
+  duration_ms: 81.905605
+  ...
+# Subtest: tear 10: انقطاع بعد certify وقبل rename (hook) ⇒ recertify-complete
+ok 85 - tear 10: انقطاع بعد certify وقبل rename (hook) ⇒ recertify-complete
+  ---
+  duration_ms: 90.209309
+  ...
+# Subtest: tear 11: انقطاع بعد rename وقبل حذف staged (hook) ⇒ إتمام خامد التكرار
+ok 86 - tear 11: انقطاع بعد rename وقبل حذف staged (hook) ⇒ إتمام خامد التكرار
+  ---
+  duration_ms: 92.806713
+  ...
+# Subtest: tear 12: إعادة recover بعد تعافٍ ناجح ⇒ نفس الحالة بلا تغيير
+ok 87 - tear 12: إعادة recover بعد تعافٍ ناجح ⇒ نفس الحالة بلا تغيير
+  ---
+  duration_ms: 181.177235
+  ...
+# Subtest: tear 13: العدّاد متقدّم بأكثر من واحد بلا staged ⇒ إغلاق MISMATCH
+ok 88 - tear 13: العدّاد متقدّم بأكثر من واحد بلا staged ⇒ إغلاق MISMATCH
+  ---
+  duration_ms: 145.969316
+  ...
+# Subtest: tear 14: توكنٌ لا يطابقُ المتنَ ⇒ TORN (token-manifest-inconsistent)
+ok 89 - tear 14: توكنٌ لا يطابقُ المتنَ ⇒ TORN (token-manifest-inconsistent)
+  ---
+  duration_ms: 92.746877
+  ...
+# Subtest: tear 15: إيقافٌ سياديٌّ ⇒ recover() يُبقيهُ halted (أُصلِحَ في WL-372)
+ok 90 - tear 15: إيقافٌ سياديٌّ ⇒ recover() يُبقيهُ halted (أُصلِحَ في WL-372)
+  ---
+  duration_ms: 102.886147
+  ...
+# Subtest: tear 16: تعافٍ مزدوجٌ بعدَ انقطاعٍ ⇒ خاملٌ بلا إغلاقٍ زائفٍ (أُصلِحَ في WL-372)
+ok 91 - tear 16: تعافٍ مزدوجٌ بعدَ انقطاعٍ ⇒ خاملٌ بلا إغلاقٍ زائفٍ (أُصلِحَ في WL-372)
+  ---
+  duration_ms: 151.47611
+  ...
+# Subtest: tear 17: شاهدُ الانقلابِ — إيقافٌ سياديٌّ على المتنِ المُصلَحِ لا يُفتَحُ (لو رُدَّ WL-372 فسيفشلُ)
+ok 92 - tear 17: شاهدُ الانقلابِ — إيقافٌ سياديٌّ على المتنِ المُصلَحِ لا يُفتَحُ (لو رُدَّ WL-372 فسيفشلُ)
+  ---
+  duration_ms: 99.416308
+  ...
+# Subtest: tear 18: شاهدُ الانقلابِ — تعافٍ مزدوجٌ لا يُدخِلُ إغلاقاً زائفاً (لو رُدَّ WL-372 فسيفشلُ)
+ok 93 - tear 18: شاهدُ الانقلابِ — تعافٍ مزدوجٌ لا يُدخِلُ إغلاقاً زائفاً (لو رُدَّ WL-372 فسيفشلُ)
+  ---
+  duration_ms: 133.485554
+  ...
+1..93
+# tests 93
+# suites 0
+# pass 91
+# fail 0
+# cancelled 0
+# skipped 2
+# todo 0
+# duration_ms 4721.596529

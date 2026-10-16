@@ -1,0 +1,152 @@
+[
+  {
+    "path": "sim/channel/README.md",
+    "original": "42635029a134d9226e9794ea80ca0ffc4a5bc5c814859bb255593b621238a7c8",
+    "copy": "42635029a134d9226e9794ea80ca0ffc4a5bc5c814859bb255593b621238a7c8"
+  },
+  {
+    "path": "sim/channel/__pycache__/vsock_lib.cpython-314.pyc",
+    "original": "168a8c24dcf38a3c5cf32a5669041b57862371914c602d2bcaecf51ec0091ecc",
+    "copy": "168a8c24dcf38a3c5cf32a5669041b57862371914c602d2bcaecf51ec0091ecc"
+  },
+  {
+    "path": "sim/channel/bind_policy.mjs",
+    "original": "ce956608a04f6c452d079620bdba8cc6dae04c02b05c281d3bd33a81ff381b93",
+    "copy": "ce956608a04f6c452d079620bdba8cc6dae04c02b05c281d3bd33a81ff381b93"
+  },
+  {
+    "path": "sim/channel/tcp_probe.mjs",
+    "original": "b99e8b2bcc4e2062ddd4c783ad740e131967fe501adc524cd57722da03f565ac",
+    "copy": "b99e8b2bcc4e2062ddd4c783ad740e131967fe501adc524cd57722da03f565ac"
+  },
+  {
+    "path": "sim/channel/tcp_responder.mjs",
+    "original": "d216edaf693730112eef183074145be2b820fb4450c0a1b1a55af2ba2a1994f8",
+    "copy": "d216edaf693730112eef183074145be2b820fb4450c0a1b1a55af2ba2a1994f8"
+  },
+  {
+    "path": "sim/channel/vsock_lib.py",
+    "original": "2bd8d880eaab22c2c27fe72867c72d2decb1b9987246fa9f4d632e4c7d289184",
+    "copy": "2bd8d880eaab22c2c27fe72867c72d2decb1b9987246fa9f4d632e4c7d289184"
+  },
+  {
+    "path": "sim/channel/vsock_probe_wsl.py",
+    "original": "f54e2f54f99c5323e8100c687587b4007665cf768fffcffdde2c513c4b3315b1",
+    "copy": "f54e2f54f99c5323e8100c687587b4007665cf768fffcffdde2c513c4b3315b1"
+  },
+  {
+    "path": "sim/channel/vsock_responder.py",
+    "original": "ebdf755b0ab43e6a76d1a41b085759c40c834fbe6ba3a9e6714739d5a8128f30",
+    "copy": "ebdf755b0ab43e6a76d1a41b085759c40c834fbe6ba3a9e6714739d5a8128f30"
+  },
+  {
+    "path": "sim/channel/win_cleanup_verify.ps1",
+    "original": "d4da8b46d2b972a7a33d1a1675198f4a4fab51c3a723f5eceac66fe6ba00207c",
+    "copy": "d4da8b46d2b972a7a33d1a1675198f4a4fab51c3a723f5eceac66fe6ba00207c"
+  },
+  {
+    "path": "sim/channel/win_hvsock_listener.ps1",
+    "original": "fa8e5eb5010358270753098ff94db8a56565f8171ad88add8188317b8ae4c5f0",
+    "copy": "fa8e5eb5010358270753098ff94db8a56565f8171ad88add8188317b8ae4c5f0"
+  },
+  {
+    "path": "sim/channel/win_preflight.ps1",
+    "original": "339975675d86834ab7474ce0c86f094a5a1cafb8a3463ba63d183b41e277ee6c",
+    "copy": "339975675d86834ab7474ce0c86f094a5a1cafb8a3463ba63d183b41e277ee6c"
+  },
+  {
+    "path": "sim/channel/win_responder.ps1",
+    "original": "d356631371defb6aaf0972b97b3c1b568b97d4e8de36f3bb24974b148f94caf9",
+    "copy": "d356631371defb6aaf0972b97b3c1b568b97d4e8de36f3bb24974b148f94caf9"
+  },
+  {
+    "path": "sim/channel/win_tcp_probe.ps1",
+    "original": "6751daf684863f290699348458f38bea77aaf4afc31d2948a213d4c353fa077f",
+    "copy": "6751daf684863f290699348458f38bea77aaf4afc31d2948a213d4c353fa077f"
+  },
+  {
+    "path": "sim/channel/wsl_cleanup_verify.sh",
+    "original": "ccbffef534a4c59af15ab94340ce005b9ad28f5b1780205ea3ac42a3ead8c4e9",
+    "copy": "ccbffef534a4c59af15ab94340ce005b9ad28f5b1780205ea3ac42a3ead8c4e9"
+  },
+  {
+    "path": "sim/tpm/README.md",
+    "original": "a0b092d02e3876b6cbdb42714c81d8facfe1d9075505faa1c4a9997db90c056b",
+    "copy": "a0b092d02e3876b6cbdb42714c81d8facfe1d9075505faa1c4a9997db90c056b"
+  },
+  {
+    "path": "sim/tpm/channel_protocol.mjs",
+    "original": "37788104bc4905680477baa6d9d18d82920cb32c8a38b16828d72dcfdf848ce4",
+    "copy": "37788104bc4905680477baa6d9d18d82920cb32c8a38b16828d72dcfdf848ce4"
+  },
+  {
+    "path": "sim/tpm/getcap.mjs",
+    "original": "aa46f294df11e719b62de49e9ac7d8446043fd6fdb21609466f4f19a663dc079",
+    "copy": "aa46f294df11e719b62de49e9ac7d8446043fd6fdb21609466f4f19a663dc079"
+  },
+  {
+    "path": "sim/tpm/manifest_seal_sim.mjs",
+    "original": "15aa8d3ae6daab3c2b0b8921dbaa30e74fc2cdb4cfb78fed9e48ec89752a4adf",
+    "copy": "15aa8d3ae6daab3c2b0b8921dbaa30e74fc2cdb4cfb78fed9e48ec89752a4adf"
+  },
+  {
+    "path": "sim/tpm/tcti_guard.mjs",
+    "original": "add791924edab16121c07c439ab2a2814402670ff52145c084f75c4066287411",
+    "copy": "add791924edab16121c07c439ab2a2814402670ff52145c084f75c4066287411"
+  },
+  {
+    "path": "sim/tpm/tpm_client.mjs",
+    "original": "23fc523abdacc144242478b9af81bbe8720424cdb180e0bd87d9e3720b15ae11",
+    "copy": "23fc523abdacc144242478b9af81bbe8720424cdb180e0bd87d9e3720b15ae11"
+  },
+  {
+    "path": "tests/sim/channel-poc.test.mjs",
+    "original": "803c25710ad6a2ac44cabac2c25ee2d5d10d0bc42a7c9ecef048cc1f35ca98e0",
+    "copy": "803c25710ad6a2ac44cabac2c25ee2d5d10d0bc42a7c9ecef048cc1f35ca98e0"
+  },
+  {
+    "path": "tests/sim/tpm-attestation.test.mjs",
+    "original": "44759e9f3ed6bebcc9d2f8adb3837394e79cd699355dd21e550de82ddd7781bc",
+    "copy": "44759e9f3ed6bebcc9d2f8adb3837394e79cd699355dd21e550de82ddd7781bc"
+  },
+  {
+    "path": "tests/sim/tpm-channel-protocol.test.mjs",
+    "original": "bcaeb07ebd2d2758a18c88a83c08272581c320aff2d01974eaee3862626a78c2",
+    "copy": "bcaeb07ebd2d2758a18c88a83c08272581c320aff2d01974eaee3862626a78c2"
+  },
+  {
+    "path": "tests/sim/tpm-getcap-allowlist.test.mjs",
+    "original": "7a97187e704058eed75512bffe51b4e0255f8461c4b0c3bc2a1e60c28a4363ac",
+    "copy": "7a97187e704058eed75512bffe51b4e0255f8461c4b0c3bc2a1e60c28a4363ac"
+  },
+  {
+    "path": "tests/sim/tpm-getcap-capabilities.test.mjs",
+    "original": "68689d81b9b58b7bf97a522e07acdadaa6f8c8a53760d0fc33531744d7825234",
+    "copy": "68689d81b9b58b7bf97a522e07acdadaa6f8c8a53760d0fc33531744d7825234"
+  },
+  {
+    "path": "tests/sim/tpm-nv-counter.test.mjs",
+    "original": "11e08d4ebcc9b7ae9fefc7627d39404755ae62d1033264469a865438b2ee07a6",
+    "copy": "11e08d4ebcc9b7ae9fefc7627d39404755ae62d1033264469a865438b2ee07a6"
+  },
+  {
+    "path": "tests/sim/tpm-replay.test.mjs",
+    "original": "996fbecf6bbd277ca596666cee2e7bc1396a664f2710286fc7916554d2362745",
+    "copy": "996fbecf6bbd277ca596666cee2e7bc1396a664f2710286fc7916554d2362745"
+  },
+  {
+    "path": "tests/sim/tpm-sealed-sovereign-halt.test.mjs",
+    "original": "f6f9e41e2f5633c1f28b1af1dff5b64215bc1d058182e9333650729fd9c4d685",
+    "copy": "f6f9e41e2f5633c1f28b1af1dff5b64215bc1d058182e9333650729fd9c4d685"
+  },
+  {
+    "path": "tests/sim/tpm-sim-gate.test.mjs",
+    "original": "71bf6e41a4c53d6dbcaf8b6ad39bedbf3a09975b60a4c825878448238f406fa9",
+    "copy": "71bf6e41a4c53d6dbcaf8b6ad39bedbf3a09975b60a4c825878448238f406fa9"
+  },
+  {
+    "path": "tests/sim/tpm-tear-states.test.mjs",
+    "original": "a8445d41c9e6441bcd39eb8bd00b26a47559d55615ba78e7f8147ec949ecf0a5",
+    "copy": "a8445d41c9e6441bcd39eb8bd00b26a47559d55615ba78e7f8147ec949ecf0a5"
+  }
+]

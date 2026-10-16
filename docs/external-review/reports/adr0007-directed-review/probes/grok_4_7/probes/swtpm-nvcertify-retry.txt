@@ -1,0 +1,93 @@
+name-alg:
+  value: sha256
+  raw: 0xb
+attributes:
+  value: fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|decrypt
+  raw: 0x30072
+type:
+  value: ecc
+  raw: 0x23
+curve-id:
+  value: NIST p256
+  raw: 0x3
+kdfa-alg:
+  value: null
+  raw: 0x10
+kdfa-halg:
+  value: (null)
+  raw: 0x0
+scheme:
+  value: null
+  raw: 0x10
+scheme-halg:
+  value: (null)
+  raw: 0x0
+sym-alg:
+  value: aes
+  raw: 0x6
+sym-mode:
+  value: cfb
+  raw: 0x43
+sym-keybits: 128
+x: 5a4d563b2d7d59dc4aa25c4fae50c2f16d1960d640ddce44e5c53c4f082926d7
+y: acb762bbabbcb92f970844d7dd12e2163a20bee7eb7e62d1b9d4dadbe347d441
+primary:0
+name-alg:
+  value: sha256
+  raw: 0xb
+attributes:
+  value: fixedtpm|fixedparent|sensitivedataorigin|userwithauth|sign
+  raw: 0x40072
+type:
+  value: ecc
+  raw: 0x23
+curve-id:
+  value: NIST p256
+  raw: 0x3
+kdfa-alg:
+  value: null
+  raw: 0x10
+kdfa-halg:
+  value: (null)
+  raw: 0x0
+scheme:
+  value: ecdsa
+  raw: 0x18
+scheme-halg:
+  value: sha256
+  raw: 0xb
+sym-alg:
+  value: null
+  raw: 0x10
+sym-mode:
+  value: (null)
+  raw: 0x0
+sym-keybits: 0
+x: 1197641ff85994054df151e22e7a2c9e5b623af1494dadf68f706e7f647477b4
+y: ebaf6aedb0d93fcc5f68649af4fa4e28547a1431607026c55ce22cdb0662fa71
+create:0
+name: 000b393e571451b7a086b5ad73bcf6723d83b30c9903914db0cd96908e98b45ec62f
+load:0
+  name: 000bd4e61fedbe1ba562901c39ac9aaca23c1ac9d3f779c8d170c61d7a7f29b1c814
+  attributes:
+  size: 8
+WARNING:esys:src/tss2-esys/api/Esys_ReadPublic.c:320:Esys_ReadPublic_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/esys_tr.c:278:Esys_TR_FromTPMPublic_Finish() Error ReadPublic ErrorCode (0x00000184) 
+ERROR:esys:src/tss2-esys/esys_tr.c:402:Esys_TR_FromTPMPublic() Error TR FromTPMPublic ErrorCode (0x00000184) 
+ERROR: Esys_TR_FromTPMPublic(0x184) - tpm:handle(1):value is out of range or is not correct for the context
+ERROR: Failed to access NVRAM public area at index 0x0
+ERROR: Unable to run tpm2_nvcertify
+nvcertify:1
+===== vsock node =====
+  File: /dev/vsock
+  size: 0         	Blocks: 0          IO Block: 4096   character special file
+Device: 0,5	Inode: 108         Links: 1     Device Type: a,7b
+Access: (0600/crw-------)  Uid: (    0/    root)   Gid: (    0/    root)
+Access: 2026-10-16 06:50:23.114593865 +0000
+Modify: 2026-10-16 06:50:23.114593865 +0000
+Change: 2026-10-16 06:50:23.114593865 +0000
+ Birth: 2026-10-16 06:50:23.114593865 +0000
+AF_VSOCK None
+exists True
+DONE
+swtpm stopped

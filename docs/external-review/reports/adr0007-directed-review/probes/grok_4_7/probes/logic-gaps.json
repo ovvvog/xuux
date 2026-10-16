@@ -1,0 +1,76 @@
+[
+  {
+    "name": "provision-certify-field",
+    "certify": null,
+    "counter": 1,
+    "tpm": 1
+  },
+  {
+    "name": "missing-certify-after-provision",
+    "state": "running",
+    "error": null,
+    "halted": false
+  },
+  {
+    "name": "strip-certify-counter-match",
+    "sealOk": true,
+    "state": "running",
+    "error": null,
+    "bodyCounter": 2,
+    "tpmCounter": 2
+  },
+  {
+    "name": "sovereign-file-plus-counter-ahead",
+    "haltOk": true,
+    "counterAfterHalt": 2,
+    "tpmNow": 4,
+    "state": "halted",
+    "error": "STATE_HALT_SOVEREIGN",
+    "direction": null,
+    "classifiedAsMismatch": false,
+    "classifiedAsSovereign": true
+  },
+  {
+    "name": "concurrent-extra-increment",
+    "body": 1,
+    "staged": 2,
+    "tpm": 3,
+    "state": "halted",
+    "error": "STATE_MANIFEST_TPM_TORN",
+    "torn": null,
+    "direction": null
+  },
+  {
+    "name": "seal-when-already-ahead",
+    "before": 1,
+    "afterExternalBump": 2,
+    "afterSealAttempt": 3,
+    "incrementedDuringFailedSeal": true,
+    "seal": {
+      "ok": false,
+      "error": "STATE_TPM_COUNTER_MISMATCH"
+    }
+  },
+  {
+    "name": "unreadable-manifest",
+    "thrown": "Expected property name or '}' in JSON at position 1",
+    "rec": null
+  },
+  {
+    "name": "channel-no-auth",
+    "first": {
+      "ok": true,
+      "counter": 1
+    },
+    "forgedAccepted": true,
+    "replayRejected": true,
+    "macFieldPresent": false
+  },
+  {
+    "name": "seal-durability-calls",
+    "fsync": false,
+    "writeFileSync": true,
+    "renameSync": true,
+    "lock": false
+  }
+]

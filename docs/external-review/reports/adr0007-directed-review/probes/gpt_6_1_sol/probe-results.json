@@ -1,0 +1,135 @@
+[
+  {
+    "id": "P01-historical-staged-snapshot-lifts-acknowledged-halt",
+    "layer": "unchanged simulator logic with live swtpm counter",
+    "initialCounter": 2,
+    "discard": {
+      "state": "running",
+      "counter": 2,
+      "bodyCounter": 2,
+      "recovered": "discard-staged"
+    },
+    "haltAck": {
+      "ok": true,
+      "counter": 3
+    },
+    "haltedBody": {
+      "sequence": 3,
+      "counter": 3,
+      "halted": true,
+      "haltEpoch": 1
+    },
+    "physicalCounterBeforeRestore": 3,
+    "physicalCounterAfterRecovery": 3,
+    "result": {
+      "state": "running",
+      "counter": 3,
+      "bodyCounter": 3,
+      "recovered": "recertify-complete"
+    },
+    "recoveredBody": {
+      "sequence": 3,
+      "counter": 3,
+      "halted": false,
+      "haltEpoch": 0
+    }
+  },
+  {
+    "id": "P02-replayed-read-with-genuine-old-certificate",
+    "layer": "read-response fault injection, genuine existing simulated signature",
+    "oldCounter": 2,
+    "physical": 3,
+    "viaReplayedRead": {
+      "state": "running",
+      "counter": 2,
+      "bodyCounter": 2
+    },
+    "viaLiveRead": {
+      "state": "halted",
+      "error": "STATE_TPM_COUNTER_MISMATCH",
+      "counter": 3,
+      "bodyCounter": 2,
+      "direction": "replay"
+    }
+  },
+  {
+    "id": "P03-new-object-with-same-pinned-names",
+    "sameObject": {
+      "state": "running",
+      "counter": 2,
+      "bodyCounter": 2
+    },
+    "newObject": {
+      "state": "halted",
+      "error": "STATE_TPM_ATTEST_INVALID",
+      "verifyError": "signature_invalid",
+      "counter": 2
+    }
+  },
+  {
+    "id": "P04-preincrement-staged-skips-invalid-committed-attestation",
+    "layer": "simulated verification branch only; no HSM seal modeled",
+    "rejectedWithoutStaged": {
+      "state": "halted",
+      "error": "STATE_TPM_ATTEST_INVALID",
+      "verifyError": "signature_invalid",
+      "counter": 2
+    },
+    "acceptedWithStaged": {
+      "state": "running",
+      "counter": 2,
+      "bodyCounter": 2,
+      "recovered": "discard-staged"
+    }
+  },
+  {
+    "id": "P05-parallel-seals-with-deterministic-increment-barrier",
+    "layer": "live swtpm increments, scheduling barrier only",
+    "initial": 2,
+    "physical": 4,
+    "seals": [
+      {
+        "ok": false,
+        "error": "STATE_TPM_COUNTER_MISMATCH"
+      },
+      {
+        "ok": false,
+        "error": "STATE_TPM_COUNTER_MISMATCH"
+      }
+    ],
+    "recovery": {
+      "state": "halted",
+      "error": "STATE_MANIFEST_TPM_TORN",
+      "counter": 4,
+      "bodyCounter": 2,
+      "stagedCounter": 3
+    }
+  },
+  {
+    "id": "P06-tcp-identical-frame-on-new-connection",
+    "first": {
+      "ok": true,
+      "counter": 1,
+      "payload": "diag:ok:counter=1:len=12:no-tpm"
+    },
+    "second": {
+      "ok": true,
+      "counter": 1,
+      "payload": "diag:ok:counter=1:len=12:no-tpm"
+    },
+    "sameWireBytes": "585500000000000000010000000c73616d652d72657175657374b48a"
+  },
+  {
+    "id": "P07-nv-name-before-and-after-first-increment",
+    "before": {
+      "rc": 0,
+      "stdout": "0x1500066:\n  name: 000b5baec109e5acff8e7f6e1245aebed8333fb9de71caf8c516eec66cbb6aea1ec9\n  hash algorithm:\n    friendly: sha256\n    value: 0xB\n  attributes:\n    friendly: ownerwrite|nt=0x1|ownerread\n    value: 0x20012\n  size: 8\n\n",
+      "stderr": ""
+    },
+    "after": {
+      "rc": 0,
+      "stdout": "0x1500066:\n  name: 000b3984efc03641ae400fc5f8da09bb054c59865e96a0436245560227db4d927c57\n  hash algorithm:\n    friendly: sha256\n    value: 0xB\n  attributes:\n    friendly: ownerwrite|nt=0x1|ownerread|written\n    value: 0x20020012\n  size: 8\n\n",
+      "stderr": ""
+    }
+  }
+]

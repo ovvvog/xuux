@@ -1,0 +1,4 @@
+WARNING:esys:src/tss2-esys/api/Esys_CreatePrimary.c:401:Esys_CreatePrimary_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_CreatePrimary.c:135:Esys_CreatePrimary() Esys Finish ErrorCode (0x000002d6) 
+ERROR: Esys_CreatePrimary(0x2D6) - tpm:parameter(2):unsupported symmetric algorithm or key size or not appropriate for instance
+ERROR: Unable to run createprimary

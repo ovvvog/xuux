@@ -1,0 +1,6 @@
+ERROR: Incorrect handle value, got: "ak.ctx", expected a handle number
+ERROR: Unable to read as BIO file
+ERROR: Unable to fetch public/private portions of TSS PRIVKEY
+ERROR: Cannot make sense of object context "ak.ctx"
+ERROR: Invalid signing key/ authorization.
+ERROR: Unable to run tpm2_nvcertify

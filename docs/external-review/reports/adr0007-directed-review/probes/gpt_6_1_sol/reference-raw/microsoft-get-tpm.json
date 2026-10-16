@@ -1,0 +1,20 @@
+{
+  "pages": [
+    {
+      "url": "https://learn.microsoft.com/en-us/powershell/module/trustedplatformmodule/get-tpm?view=windowsserver2025-ps",
+      "title": "Get-Tpm (TrustedPlatformModule) - Microsoft Learn",
+      "content": "Get-Tpm (TrustedPlatformModule) | Microsoft Learn\n\n## Microsoft Ignite\n\nNovember 17–20, 2026\n\n- Windows 2025 PowerShell modules\n- PowerShell 7 compatibility in Windows Server 2025\n  - ReFsDedup.Commands\n  - ServerCore.SConfig\n  - Windows.Bcd.Cmdlets\n  - Windows.ServerManager.Migration\n\n1. Learn\n2. Windows\n3. PowerShell\n4. TrustedPlatformModule\n\n1. Learn\n2. Windows\n3. PowerShell\n4. TrustedPlatformModule\n\n# Get-Tpm\n\n- **Module:**\n  TrustedPlatformModule Module\n\n1. Related Links\n\nGets an object that contains information about a TPM.\n\n## Syntax\n\n### Default (Default)\n\n```\nGet-Tpm\n\n```\n\n## Description\n\nThe **Get-Tpm** cmdlet gets a **TpmObject**. This object contains information about the Trusted Platform Module (TPM) on the current computer.\n\nFor more information on TPM, see the Trusted Platform Module Technology Overview in the Technet library.\n\n## Examples\n\n### Example 1: Display TPM information\n\n```\nPS C:\\> Get-Tpm\n\n```\n\nOutput\n\n```\n\nTpmPresent : True\nTpmReady : True\nTpmEnabled : True\nTpmActivated : True\nTpmOwned : True\nRestartPending : True\nManufacturerId : 1229870147\nManufacturerIdTxt : INTC\nManufacturerVersion : 402.1.0.0\nManufacturerVersionFull20 : 402.1.0.0\n\nManagedAuthLevel : Full\nOwnerAuth :\nOwnerClearDisabled : False\nAutoProvisioning : Enabled\nLockedOut : False\nLockoutHealTime : 10 minutes\nLockoutCount : 0\nLockoutMax : 31\nSelfTest : {}\n\n```\n\nThis command displays information about the TPM of the current computer.\n\n## Outputs\n\n### Tpm Object\n\nThis cmdlet returns a **TpmObject** object that contains the following information:\n\n- TpmReady. Whether a TPM complies with Windows Server 2012 standards.\n- TpmPresent. Whether there is a TPM on the current computer\n- ManagedAuthLevel. The level at which the operating system manages the owner authorization. Possible values are Legacy, Balanced, and Full.\n- OwnerAuth. Current owner authorization value of the Trusted Platform Module (TPM).\n\n- OwnerClearDisabled. Whether TPM can be reset. If this value is True, the TPM cannot be reset through the operating system by using the owner authorization value. If this value is False, the TPM can be reset through the operating system.\n- AutoProvisioning. Whether the computer can use auto-provisioning. Possible values are NotDefined, Enabled, Disabled, and DisabledForNextBoot.\n\n- LockedOut. Whether a TPM is locked out.\n- LockoutHealTime. The time that has to pass until you can unlock the TPM.\n- LockoutCount. Number of failed attempts.\n- LockoutMax. Limit of failed attempts.\n- SelfTest. Information returned by a test that TPM runs.\n\n## Related Links\n- Clear-Tpm\n- Initialize-Tpm\n- Unblock-Tpm",
+      "error": null,
+      "description": "Use this topic to help manage Windows and Windows Server technologies with Windows PowerShell.",
+      "hostname": "MicrosoftLearn",
+      "is_cached": true,
+      "is_paywall": false,
+      "published_date": "2016-12-20",
+      "trust": {
+        "description": "is trusted for first-party Microsoft technical documentation and training",
+        "level": 2,
+        "name": "trusted"
+      }
+    }
+  ]
+}

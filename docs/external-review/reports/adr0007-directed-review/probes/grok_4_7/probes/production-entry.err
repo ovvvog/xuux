@@ -1,0 +1,3 @@
+ERROR: XUUX_FRESHNESS_BACKEND="tpm-nv" is not supported.
+  Supported backends: (none in this environment)
+  Production requires a durable freshness backend with proven anti-rollback properties.

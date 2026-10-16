@@ -1,0 +1,15 @@
+[
+  {
+    "id": "real-nv-certify-simulator",
+    "command": [
+      "bash",
+      "/home/user/workspace/council-adr0007/gpt_6_1_sol/run-nv-certify.sh"
+    ],
+    "cwd": "/home/user/workspace/council-adr0007/gpt_6_1_sol",
+    "start": "2026-10-16T21:33:57.885Z",
+    "end": "2026-10-16T21:33:57.943Z",
+    "exit": 1,
+    "signal": null,
+    "error": null
+  }
+]
