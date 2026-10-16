@@ -236,10 +236,10 @@ test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على 
   // الطفرةُ: إعادةُ الرقمِ إلى ما كانَ قبلَ الإصلاحِ.
   const planPath = path.join(root, PLAN);
   const mutated = readFileSync(planPath, 'utf8').replace(
-    'تتخطّى الحزمةُ ١٤١ اختباراً',
-    'تتخطّى الحزمةُ ١٤٥ اختباراً',
+    'تتخطّى الحزمةُ ١٤٧ اختباراً',
+    'تتخطّى الحزمةُ ١٥١ اختباراً',
   );
-  assert.ok(mutated.includes('١٤٥ اختباراً'), 'الطفرةُ لم تُطبَّقْ — راجِعْ نصَّ الخطّةِ');
+  assert.ok(mutated.includes('١٥١ اختباراً'), 'الطفرةُ لم تُطبَّقْ — راجِعْ نصَّ الخطّةِ');
   writeFileSync(planPath, mutated, 'utf8');
 
   let code = 0;
