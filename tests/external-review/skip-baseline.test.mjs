@@ -233,13 +233,26 @@ test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على 
   // الجذرُ السليمُ: الحاجزُ يخرُجُ بـ0 عليهِ (‏بلا git فلا R6/R7/R8 تُقاسانِ).
   const clean = execFileSync('node', [GUARD], { cwd: root, encoding: 'utf8' });
   assert.match(clean, /✅ حاجزُ خطِّ أساسِ التخطّي/);
-  // الطفرةُ: إعادةُ الرقمِ إلى ما كانَ قبلَ الإصلاحِ.
+  // الطفرةُ لا ترتبطُ برقمٍ حيٍّ ثابتٍ: الرقمُ المعلنُ يُقرأُ من الأثرِ نفسِهِ
+  // وتزيدهُ الطفرةُ أربعةً — فيصمدُ الاختبارُ عندَ كلِّ دورةِ قياسٍ جديدةٍ دونَ
+  // تحريرٍ يدويٍّ (عينُ جذرِ تكرارِ R4/DRIFT: رقمٌ مثبَّتٌ في الاختبارِ يُعدَّلُ
+  // يدًا كلَّ دورةٍ).
   const planPath = path.join(root, PLAN);
-  const mutated = readFileSync(planPath, 'utf8').replace(
-    'تتخطّى الحزمةُ ١٤٧ اختباراً',
-    'تتخطّى الحزمةُ ١٥١ اختباراً',
+  const artifactJson = JSON.parse(readFileSync(path.join(root, ARTIFACT), 'utf8'));
+  const declared = Number(artifactJson.measurements?.[0]?.attributedToDatabaseUrl);
+  assert.ok(Number.isInteger(declared) && declared > 0, 'الأثرُ لا يقولُ رقمًا');
+  /** @param {number} v */
+  const toArabic = (v) =>
+    String(v)
+      .split('')
+      .map((d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)] ?? d)
+      .join('');
+  const planText = readFileSync(planPath, 'utf8');
+  const mutated = planText.replace(
+    `تتخطّى الحزمةُ ${toArabic(declared)} اختباراً`,
+    `تتخطّى الحزمةُ ${toArabic(declared + 4)} اختباراً`,
   );
-  assert.ok(mutated.includes('١٥١ اختباراً'), 'الطفرةُ لم تُطبَّقْ — راجِعْ نصَّ الخطّةِ');
+  assert.notEqual(mutated, planText, 'الطفرةُ لم تُطبَّقْ — راجِعْ نصَّ الخطّةِ');
   writeFileSync(planPath, mutated, 'utf8');
 
   let code = 0;

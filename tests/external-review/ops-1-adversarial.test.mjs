@@ -1633,8 +1633,19 @@ test('ب٣ب — مُعِينُ استخراجِ الأوامرِ مقيسٌ: ي
 
 // ═══ اختباراتُ سكربتِ تحديثِ خططِ المراجعةِ بالكوميتِ المقيسِ (S1…S6) ═══
 
-/** @param {string} commit @param {string} measuredOn @param {string} plan @param {string} [command] */
-function makeArtifact(commit, measuredOn, plan, command = 'env -u DATABASE_URL npm test') {
+/**
+ * @param {string} commit @param {string} measuredOn @param {string} plan
+ * @param {string} [command]
+ * @param {Partial<Record<string, unknown>>} [extra] تجاوزاتٌ فوقَ القيمِ الافتراضيّةِ
+ * للمُدخلةِ (أرقامُ الأثرِ وأسبابُهُ) في اختباراتِ فقرةِ الأرقامِ.
+ */
+function makeArtifact(
+  commit,
+  measuredOn,
+  plan,
+  command = 'env -u DATABASE_URL npm test',
+  extra = {},
+) {
   return JSON.stringify(
     {
       generatedBy: 'test',
@@ -1654,6 +1665,7 @@ function makeArtifact(commit, measuredOn, plan, command = 'env -u DATABASE_URL n
           topLevelSkipPoints: 121,
           attributedToDatabaseUrl: 92,
           otherReasons: [],
+          ...extra,
         },
       ],
     },
@@ -1778,4 +1790,98 @@ test('م٦ — S6: طفرةٌ — حذفُ خانةِ «الكوميتُ الم�
   writeFileSync(path.join(dir, 'docs/external-review/plan.md'), '# خطّةٌ بلا كوميتٍ مقيسٍ\n');
   const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
   assert.equal(r.exit, 1, 'طفرٌ تُسقِطُ السكربتَ.');
+});
+// ═══ اختباراتُ توليدِ فقرةِ الأرقامِ من الأثرِ (S7…S9) ═══
+
+/** علامةُ فقرةِ الأرقامِ كما في الخططِ الحقيقيّةِ. */
+const NUMBERS_MARK = 'ملاحظةُ بيئةٍ مُقاسةٌ لا مُقدَّرةٌ';
+
+/**
+ * خطّةٌ قصيرةٌ بسطرِ الكوميتِ المقيسِ **وفقرةِ أرقامٍ قديمةٍ**: الرقمُ المعلنُ فيها
+ * لا يطابقُ الأثرَ — وهذا عينُ ما يُسقِطُ الحاجزَ `R4/DRIFT` كلَّ دورةِ قياسٍ.
+ * @param {string} measuredCommit
+ */
+function makePlanWithNumbers(measuredCommit) {
+  return [
+    '# خطّةٌ',
+    '',
+    '- **الكوميتُ المُراجَعُ:** `734397dc`',
+    '',
+    `> **والأمرُ الذي يُنتِجُ هذهِ الأرقامَ نصّاً:** \`env -u DATABASE_URL npm test\` · **والكوميتُ المقيسُ:** \`${measuredCommit}\` · **والتاريخُ:** 2026-09-22.`,
+    '',
+    `> **${NUMBERS_MARK} (\u200fمُصحَّحةٌ في \`WL-232\` بالنتيجةِ \`R5-A-06\`):** بلا \`DATABASE_URL\` تتخطّى الحزمةُ ٩٠ اختباراً **بسببِ غيابِ القاعدةِ وحدَه**. وعدّادُ التخطّي الختاميُّ **١٢٠** لأنَّ بقيّتَهُ أسبابٌ أُخرى مُسمّاةٌ (\u200f٣٦ لغيابِ \`swtpm/XUUX_TPM_SIM\`)، وأسطرُ \`# SKIP\` كافّةً **١٢٦**، ونقاطُ التخطّي في المستوى الأعلى **١١٩**. **وهذهِ ثلاثةُ مقاييسَ مختلفةٍ لا رقمٌ واحدٌ** — فالعضوُ يُصرِّحُ بأيِّها قاسَ ولا يَخلِطُها.`,
+  ].join('\n');
+}
+
+test('م٧ — S7: فقرةُ الأرقامِ تُوَلَّدُ من الأثرِ لا تُنسخُ يدًا', () => {
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s7-')));
+  const others = [{ reason: 'swtpm/XUUX_TPM_SIM unavailable', count: 36 }];
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md', undefined, {
+      otherReasons: others,
+    }),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), makePlanWithNumbers('eba5afcf'));
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 0, `التوليدُ لا يفشلُ: ${r.stderr}`);
+  const after = readFileSync(path.join(dir, 'docs/external-review/plan.md'), 'utf8');
+  assert.ok(after.includes('تتخطّى الحزمةُ ٩٢ اختباراً'), 'المنسوبُ للقاعدةِ من الأثرِ.');
+  assert.ok(after.includes('الختاميُّ **١٢٦**'), 'والعدّادُ الختاميُّ من الأثرِ.');
+  assert.ok(after.includes('كافّةً **١٢٨**'), 'وأسطرُ التخطّي من الأثرِ.');
+  assert.ok(after.includes('الأعلى **١٢١**'), 'والنقاطُ العليا من الأثرِ.');
+  assert.ok(after.includes('٣٦ لغيابِ `swtpm/XUUX_TPM_SIM`'), 'وتفصيلُ الأسبابِ من الأثرِ.');
+  assert.ok(!after.includes('٩٠ اختباراً'), 'والرقمُ القديمُ زالَ.');
+  assert.ok(after.includes('88707820'), 'وسطرُ الكوميتِ تَحَدَّثَ أيضًا.');
+});
+
+test('م٨ — S8: سببٌ لا يعرفهُ القالبُ يُسقِطُ السكربتَ لا يُبتلَعُ', () => {
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s8-')));
+  const others = [{ reason: 'سببٌ جديدٌ تمامًا لا يعرفهُ القالبُ', count: 36 }];
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md', undefined, {
+      otherReasons: others,
+    }),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), makePlanWithNumbers('eba5afcf'));
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
+  assert.ok(r.stderr.includes('S8/UNKNOWN_REASON'), 'يسمّي السببَ والسببَ المجهولَ.');
+});
+
+test('م٩ — S9: تفصيلٌ لا يُسوّي الأسطرَ الباقيةَ يُسقِطُ السكربتَ لا يكتبُ فقرةً كاذبةً', () => {
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s9-')));
+  // المجموعُ ٣٠ لا ٣٦ = ١٢٨ − ٩٢: حسابٌ لا يسوّي.
+  const others = [{ reason: 'swtpm/XUUX_TPM_SIM unavailable', count: 30 }];
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md', undefined, {
+      otherReasons: others,
+    }),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), makePlanWithNumbers('eba5afcf'));
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
+  assert.ok(r.stderr.includes('S9/ACCOUNTING'), 'يسمّي الخللَ الحسابيَّ.');
+});
+
+test('م١٠ — S7: فقرتا أرقامٍ في خطّةٍ واحدةٍ غموضٌ يُغلقُ السكربتَ', () => {
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s7b-')));
+  const others = [{ reason: 'swtpm/XUUX_TPM_SIM unavailable', count: 36 }];
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md', undefined, {
+      otherReasons: others,
+    }),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  const plan = makePlanWithNumbers('eba5afcf') + '\n' + makePlanWithNumbers('eba5afcf');
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), plan);
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
+  assert.ok(r.stderr.includes('S7/AMBIGUOUS'), 'يسمّي الغموضَ.');
 });

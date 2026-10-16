@@ -36,6 +36,7 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 import { UNSTARTED_RELEASE_CODE, createTaskQueue } from '../../src/execution/queue.mjs';
 import { createWorker } from '../../src/execution/worker.mjs';
+import { createWorkerRegistry } from '../../src/execution/worker-registry.mjs';
 import { TaskLifecycle } from '../../src/execution/lifecycle.mjs';
 import { probeIsolation } from '../../src/execution/isolation.mjs';
 import {
@@ -1537,5 +1538,157 @@ test(
     assert.notEqual(after.error_code, UNSTARTED_RELEASE_CODE);
     assert.equal(after.attempts, 0, 'الإيقافُ لا يستهلك محاولة');
     assert.equal(runs.count, 0);
+  },
+);
+
+test(
+  'بوابةُ الملكيّةِ على التسويةِ (`WL-396`): المالكُ السابقُ بعدَ فقدِ اسمِهِ لا يُفرِجُ عن عقودِ المالكِ الجديدِ',
+  { skip: skipWithoutDatabase, timeout: 60_000 },
+  async (t) => {
+    const env = await environment(t);
+    const name = 'عامل-الملكية';
+    const firstBoot = randomUUID();
+    const secondBoot = randomUUID();
+    // سجلُّ إقلاعاتٍ بساعةٍ قابلةٍ للتقديمِ: فقدُ الاسمِ يُقاس بإرجاعِ الساعةِ لا بانتظارِ العتبةِ.
+    let clock = new Date();
+    const registry = createWorkerRegistry({
+      pool: env.admin,
+      ttlMs: 5_000,
+      now: () => clock,
+      log: { append: () => undefined },
+    });
+    const first = await enqueue(env.adminQueue, 'ملكية-الأول');
+    const second = await enqueue(env.adminQueue, 'ملكية-الثاني');
+
+    // الإقلاعُ الأولُ يملكُ الاسمَ ويحجزُ المهمّةَ الأولى ولم يبدأ مُعالِجُها بعدُ.
+    await registry.register({ worker: name, bootId: firstBoot });
+    const claimsA = await env.adminQueue.claim({ worker: name, limit: 1 });
+    assert.equal(claimsA.length, 1, 'حجزٌ واحدٌ متاحٌ في نافذةِ الاختبارِ');
+    const claimA = claimsA[0];
+    assert.ok(claimA !== undefined);
+    assert.equal(claimA.id, first.id, 'الأولى حُجزت قبلَ الثانية');
+
+    /** عطبُ قاعدةٍ متاحٌ على حجزٍ لم يبدأ مُعالِجُهُ: مسارُ التسويةِ الحسّاسِ. */
+    const faultOf = () =>
+      new WorkerDatabaseFault({
+        worker: name,
+        phase: TICK_PHASES.CLAIM,
+        taskId: first.id,
+        pending: null,
+        fault: { kind: DB_FAULT_KINDS.UNAVAILABLE, code: '08006' },
+        cause: null,
+        at: new Date(),
+      });
+
+    // (١) القياسُ قبلَ البوابةِ — الثقبُ بحرفِهِ: انقطاعٌ أطولُ من عتبةِ الحياةِ،
+    // إقلاعٌ أحدثُ يأخذُ الاسمَ ويحجزُ الثانيةَ، ثمّ استردادُ المالكِ السابقِ **بلا
+    // بوابةِ ملكيّةٍ** يُفرِجُ عن عقدينِ: عقدِهِ هو (مُبرَّرٌ) وعقدِ المالكِ الجديدِ
+    // (خطأٌ — تسويةٌ بيدِ من لا يملكُ الاسمَ بعدُ).
+    clock = new Date(clock.getTime() + 6_000);
+    const takeover = await registry.register({ worker: name, bootId: secondBoot });
+    assert.equal(takeover.tookOver, true, 'الاسمُ أُخِذَ فوقَ العتبةِ بإقلاعٍ أحدثَ');
+    const claimsB = await env.adminQueue.claim({ worker: name, limit: 1 });
+    assert.equal(claimsB.length, 1);
+    const claimB = claimsB[0];
+    assert.ok(claimB !== undefined);
+    assert.equal(claimB.id, second.id, 'المالكُ الجديدُ حازَ الثانيةَ بالاسمِ نفسِهِ');
+
+    const unguarded = createDatabaseRecovery({
+      pool: env.workerPool,
+      queue: env.queue,
+      worker: name,
+      haltGuard: noHalt,
+      log: memoryLog(),
+      policy: FAST_POLICY,
+      bootAt: new Date(Date.now() - 30_000),
+    });
+    const hole = await unguarded.recover(faultOf());
+    assert.equal(hole.verdict, RECOVERY_VERDICTS.RECOVERED, JSON.stringify(hole));
+    assert.deepEqual(
+      hole.reconciled.map((entry) => entry.outcome).sort(),
+      ['released-orphan-claim', 'released-unstarted'],
+      'بلا بوابةٍ: التسويةُ تفرِجُ حتى عن عقدِ المالكِ الجديدِ',
+    );
+    const secondAfterHole = await row(env.admin, second.id);
+    assert.equal(
+      secondAfterHole.state,
+      TaskLifecycle.SCHEDULED,
+      'الثقبُ مقيسٌ: عقدُ المالكِ الجديدِ أُفرِجَ بيدِ المالكِ السابقِ',
+    );
+    assert.equal(secondAfterHole.attempts, 0, 'والإفراجُ ردَّ المحاولةَ كأنّها لم تكن');
+
+    // (٢) الإصلاحُ: المالكُ الجديدُ يعيدُ حجزَ الثانيةِ، ثمّ استردادُ مالكٍ سابقٍ
+    // **مربوطٌ بالبوابةِ** — بوابةٌ تقرأُ الملكيّةَ من سجلِّ الإقلاعاتِ على القاعدةِ
+    // (لا من ذاكرةِ العمليةِ) بعدَ عودةِ القاعدةِ وقبلَ أيِّ كتابةِ تسويةٍ.
+    const claimsB2 = await env.adminQueue.claim({ worker: name, limit: 1 });
+    assert.equal(claimsB2.length, 1);
+    const claimB2 = claimsB2[0];
+    assert.ok(claimB2 !== undefined);
+    // الحكمُ على المهمّةِ التي حازها المالكُ الجديدُ أيُّها كانتْ: ترتيبُ الحجزِ ليسَ
+    // بترتيبِ الإدراجِ، فالافتراضُ فيهِ يكسرُ الاختبارَ على قاعدةٍ حقيقيّةٍ.
+    const reClaimedId = claimB2.id;
+    assert.ok(
+      reClaimedId === first.id || reClaimedId === second.id,
+      'الاستئنافُ حازَ إحدى المهمّتَينِ المتاحتَينِ',
+    );
+
+    const gateLog = memoryLog();
+    const guarded = createDatabaseRecovery({
+      pool: env.workerPool,
+      queue: env.queue,
+      worker: name,
+      haltGuard: noHalt,
+      log: gateLog,
+      policy: FAST_POLICY,
+      bootAt: new Date(Date.now() - 30_000),
+      ownsName: async () => {
+        const entry = await registry.readEntry(name);
+        return entry !== null && entry.bootId === firstBoot;
+      },
+    });
+    const outcome = await guarded.recover(faultOf());
+    assert.equal(outcome.verdict, RECOVERY_VERDICTS.FAILED, JSON.stringify(outcome));
+    assert.equal(
+      outcome.reason,
+      RECOVERY_REASONS.REGISTRATION_LOST,
+      'فقدُ الاسمِ سببٌ مُسمّى لا فشلٌ غامضٌ',
+    );
+    assert.deepEqual(outcome.reconciled, [], 'ولا تسويةَ بيدِ من لا يملكُ الاسمَ');
+    assert.equal(
+      outcome.exitCode,
+      RECOVERY_EXIT_CODES.DB_INTEGRITY,
+      'توقّفٌ عندَ حدٍّ آمنٍ لا إعادةُ تشغيلٍ عمياء',
+    );
+
+    // عقودُ المالكِ الجديدِ لم تُمسّ — والدليلُ الأقوى لقطةٌ قبلَ/بعدَ: البوابةُ
+    // لا تكتبُ شيئًا فالقاعدةُ كما كانتْها حرفيًا. (المهمّةُ التي حازها المالكُ
+    // الجديدُ جاريةٌ بعقدِهِ، والأخرى كما تركتها تسويةُ القياسِ في القسمِ الأولِ —
+    // البوابةُ لا تُغيّرُ لا هذا ولا ذاك.)
+    const beforeGate = {
+      first: await row(env.admin, first.id),
+      second: await row(env.admin, second.id),
+    };
+    const reClaimedRow = reClaimedId === first.id ? beforeGate.first : beforeGate.second;
+    assert.equal(reClaimedRow?.state, TaskLifecycle.RUNNING, 'عقدُ المالكُ الجديدِ سليمٌ');
+    // والحكمُ مُقيَّدٌ في السجلِّ بالسببِ المُسمّى: يقرأُهُ مُشغّلٌ فيعرفُ أنّ
+    // الاسمَ أُخِذَ لا أنّ القاعدةَ فسدت.
+    const afterGate = {
+      first: await row(env.admin, first.id),
+      second: await row(env.admin, second.id),
+    };
+    assert.deepEqual(
+      afterGate.first,
+      beforeGate.first,
+      'البوابةُ لم تمسّ الأولى: لا كتابةَ بلا ملكيّةٍ',
+    );
+    assert.deepEqual(
+      afterGate.second,
+      beforeGate.second,
+      'البوابةُ لم تمسّ الثانية: لا كتابةَ بلا ملكيّةٍ',
+    );
+    const recoveryEvents = gateLog.events.filter((e) => e.type === 'kernel.worker.db-recovery');
+    assert.equal(recoveryEvents.length, 1);
+    assert.equal(recoveryEvents[0]?.data['reason'], RECOVERY_REASONS.REGISTRATION_LOST);
+    assert.equal(recoveryEvents[0]?.data['verdict'], RECOVERY_VERDICTS.FAILED);
   },
 );
