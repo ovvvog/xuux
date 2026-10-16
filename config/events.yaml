@@ -638,6 +638,19 @@ channels:
       - type: kernel.worker.result-resolved
         version: 1
         required: [taskId, attempt, claimId, outcome, reason]
+      # تفرُّدُ اسمِ العاملِ الحيّ (‏`LIVE-45`/د — `WL-394`): واقعةُ أخذِ الاسمِ
+      # عندَ الإقلاعِ، وواقعةُ رفضِهِ لعملٍّ حيٍّ آخرَ، وواقعةُ فقدِهِ بعدَ أخذِهِ
+      # من إقلاعٍ أحدثَ. الجسمُ لا يحملُ أسرارًا: مُعرِّفُ الإقلاعِ وعتبةُ النبضةِ
+      # وعمرُها — ما يَحكُمُ بهِ مُشغّلٌ يقرأُ لماذا رُفضَ إقلاعُهُ.
+      - type: kernel.worker.boot-registered
+        version: 1
+        required: [bootId, tookOver, ttlMs]
+      - type: kernel.worker.boot-rejected
+        version: 1
+        required: [heartbeatAgeMs, holderBootId]
+      - type: kernel.worker.registration-lost
+        version: 1
+        required: [bootId]
   - id: knowledge
     subject: 'سجلُّ التجارب: من سجّل تجربةً وبأيّ فرضيةٍ ومقاييسَ ومتى ثُبّتت ومن راجعها (واصفاتٌ بلا مادّة)'
     classification: internal

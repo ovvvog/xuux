@@ -47,10 +47,16 @@ import {
 import { createQuotaLedger } from '../src/policy/quota.mjs';
 import { loadPolicyBundle } from '../src/policy/loader.mjs';
 import { createPool } from '../src/persistence/db.mjs';
+import {
+  WORKER_REGISTRY_ERRORS,
+  WorkerRegistryError,
+  createWorkerRegistry,
+} from '../src/execution/worker-registry.mjs';
+import { randomUUID } from 'node:crypto';
 
 /**
  * @param {readonly string[]} argv
- * @returns {{ worker: string, once: boolean, maxTasks: number, pollMs: number, haltFile: string, publicKey: string | null, recoveryPolicy: { maxProbes?: number, baseDelayMs?: number, maxDelayMs?: number } }}
+ * @returns {{ worker: string, once: boolean, maxTasks: number, pollMs: number, haltFile: string, publicKey: string | null, registrationTtlMs: number, recoveryPolicy: { maxProbes?: number, baseDelayMs?: number, maxDelayMs?: number } }}
  */
 function parseArguments(argv) {
   /** @type {Record<string, string>} */
@@ -76,13 +82,29 @@ function parseArguments(argv) {
   if (worker.trim() === '') {
     throw new Error('اسم العامل مطلوب: --worker <اسم>. عقدٌ بلا صاحب لا يُحاسَب.');
   }
+  const pollMs = Number(flags['poll-ms'] ?? '200');
+  // عتبةُ تقادُمِ نبضةِ ملكيّةِ الاسمِ (‏`LIVE-45`/د): فوقَها يُفتَحُ الاسمُ لإقلاعٍ
+  // جديدٍ. والتحققُ صارمٌ لا استبدالٌ صامتٌ بالافتراضيّ: عتبةٌ لا يعرفُ مُشغّلُها
+  // مقدارَها عقدٌ مبتورٌ، وعتبةٌ أضيقُ من دورةِ الانتظارِ تفتحُ الاسمَ لغيرِ
+  // صاحبهِ وهوَ حيٌّ ينبضُ — فتُرفَضُ لا تُمرَّرَ.
+  const registrationTtlMs = Number(
+    flags['registration-ttl-ms'] ?? process.env['WORKER_REGISTRATION_TTL_MS'] ?? '60000',
+  );
+  if (!Number.isInteger(registrationTtlMs) || registrationTtlMs <= pollMs) {
+    throw new Error(
+      `عتبةُ ملكيّةِ الاسمِ (‏--registration-ttl-ms) مطلوبةٌ عددًا صحيحًا أكبرَ من دورةِ الانتظارِ (‏${pollMs}ms) لا «${String(
+        flags['registration-ttl-ms'] ?? process.env['WORKER_REGISTRATION_TTL_MS'] ?? '',
+      )}»: عتبةٌ أضيقُ تفتحُ اسمَ عاملٍ حيٍّ لغيرهِ.`,
+    );
+  }
   return {
     worker,
     once,
     maxTasks: Number(flags['max-tasks'] ?? (once ? '1' : '0')) || (once ? 1 : Infinity),
-    pollMs: Number(flags['poll-ms'] ?? '200'),
+    pollMs,
     haltFile: flags['halt-file'] ?? process.env['HALT_FILE'] ?? 'state/halt.json',
     publicKey: flags['halt-public-key'] ?? process.env['HALT_PUBLIC_KEY'] ?? null,
+    registrationTtlMs,
     recoveryPolicy: recoveryPolicyFrom(flags),
   };
 }
@@ -167,6 +189,25 @@ async function main() {
     policy: options.recoveryPolicy,
   });
 
+  // تفرُّدُ اسمِ العاملِ الحيِّ (‏`LIVE-45`/د — `WL-394`): الإقلاعُ يُثبِتُ ملكيّتَه
+  // للاسمِ **قبلَ أيِّ حجزٍ** بمعاملةٍ ذرّيّةٍ على القاعدةِ، فعمليّتانِ بالاسمِ
+  // نفسِه لا تمرّانِ: الثانيةُ تُرفَضُ برمزٍ مُسمّى وخروجٍ غيرِ صفريّ قبلَ أن
+  // تلمسَ طابورًا — لأنّ عاملَينِ بالاسمِ نفسِه يُبطلانَ ضمانَ «لم يبدأ» في
+  // `releaseUnstarted`: الثاني يُفرِجُ حجزَ الأوّلِ وقد بدأهُ مُعالِجُه فعلًا.
+  // والملكيّةُ عهدةُ قاعدةٍ لا ذاكرةِ عمليةٍ: النبضةُ تُمدَّدُ في الحلقةِ، وإن
+  // أخذَ الاسمَ إقلاعٌ أحدثُ (بعدَ تقادُمِ النبضةِ فوقَ العتبةِ) توقّفَ هذا
+  // قبلَ أيِّ حجزٍ جديدٍ — فلا يعملُ اثنانِ بالاسمِ نفسِه ولو طالَ انقطاعُ القاعدةِ.
+  const bootId = randomUUID();
+  const registry = createWorkerRegistry({
+    pool,
+    ttlMs: options.registrationTtlMs,
+    log: isolationSink,
+  });
+  // التسجيلُ يقعُ أولَ الدورةِ لا هنا: عطبُ القاعدةِ عندَ الإقلاعِ يُصنَّفُ عطبَ
+  // دورةٍ (استردادٌ ينتظرُ) لا قتلًا للعاملِ — فلا يُدفنُ عاملٌ حيٌّ لأنّ القاعدةَ
+  // كانت متوقفةً عندَ إقلاعِه. والرفضُ إن وقعَ يقعُ **قبلَ أيِّ حجزٍ** دائمًا.
+  let registered = false;
+
   let stopping = false;
   const stopper = new AbortController();
   const stop = () => {
@@ -244,6 +285,50 @@ async function main() {
     };
     let settlementDeferred = bootSettlement.deferred;
     while (!stopping && handled < options.maxTasks) {
+      // نبضةُ ملكيّةِ الاسمِ (‏`LIVE-45`/د): قبلَ أيِّ حجزٍ في الدورةِ. فإن أخذَ
+      // الاسمَ إقلاعٌ أحدثُ توقّفَ هذا هنا **قبلَ الحجزِ** بخروجٍ غيرِ صفريّ — لا
+      // بعدهُ: عاملٌ لا يملكُ اسمهُ لا يضمنُ أنّ ما يُفرِجُهُ لم يبدأهُ غيرُهُ. وعطبُ
+      // القاعدةِ عندَ النبضةِ يُصنَّفُ كعطبِ دورةٍ (استردادٌ ينتظرُ) لا يُرمى —
+      // فانتظارُ العتبةِ أرحمُ من دفنِ العاملِ الحيّ.
+      // لا نبضةَ فوقَ عطبٍ قائمٍ: العطبُ المعلَّقُ يُسلَّمُ للاستردادِ في مكانهِ لا
+      // يُعادُ اكتشافُه في كلِّ دورةٍ فتدورَ الحلقةُ بلا بلوغِ الاستردادِ أبدًا.
+      if (fault === null) {
+        try {
+          if (!registered) {
+            await registry.register({ worker: options.worker, bootId });
+            registered = true;
+          } else {
+            await registry.heartbeat({ worker: options.worker, bootId });
+          }
+        } catch (error) {
+          if (
+            error instanceof WorkerRegistryError &&
+            (error.code === WORKER_REGISTRY_ERRORS.NAME_TAKEN ||
+              error.code === WORKER_REGISTRY_ERRORS.REGISTRATION_LOST)
+          ) {
+            process.stderr.write(`توقّف العامل عند حدٍّ آمن: ${error.message}\n`);
+            exitCode = 1;
+            break;
+          }
+          const fault2 = classifyDatabaseFault(error);
+          if (fault2 === null) throw error;
+          process.stdout.write(
+            `${new Date().toISOString()} | db-fault | ${fault2.kind}/${fault2.code} | ${
+              registered ? 'registry-heartbeat' : 'boot-registration'
+            } | —\n`,
+          );
+          fault = new WorkerDatabaseFault({
+            worker: options.worker,
+            phase: registered ? 'registry-heartbeat' : 'boot-registration',
+            taskId: null,
+            pending: null,
+            fault: fault2,
+            cause: error,
+            at: new Date(),
+          });
+          continue;
+        }
+      }
       // بوابةُ الحجزِ (مستخرجةٌ لتُقاضى وتُختبرَ): قرارٌ واحدٌ في رأسِ كلِّ
       // دورةٍ — والعلمُ المُقاضى **المحمولُ من حصيلةِ آخرِّ تسويةٍ** لا عيّنةً
       // لاحقةً لحالةِ الإيقافِ. فالاستئنافُ بعدَ إيقافٍ عندَ الإقلاعِ: التسويةُ
@@ -336,6 +421,17 @@ async function main() {
     // توقّفٌ وعطبٌ معلّقٌ لم يُسوَّ: لا يُعلَن خروجاً سليماً.
     if (fault !== null && exitCode === undefined) exitCode = RECOVERY_EXIT_CODES.DB_UNAVAILABLE;
   } finally {
+    // إخلاءُ الاسمِ عندَ التوقّفِ السليمِ (‏`LIVE-45`/د): فورًا لا انتظارَ العتبةِ —
+    // فالمشغّلُ الذي يُريدُ إقلاعًا جديدًا بالاسمِ نفسِه بعدَ توقّفٍ سليمٍ لا ينتظرُ.
+    // والفشلُ هنا لا يُدفنُ صامتًا (يُعلَن) ولا يُدفنُ العملُ الذي وقعَ (الخروجُ يُحفَظ):
+    // الإخلاءُ عهدةُ توقّفٍ لا شرطُ نجاحٍ.
+    try {
+      await registry.deregister({ worker: options.worker, bootId });
+    } catch (error) {
+      process.stderr.write(
+        `تعذّرَ إخلاءُ اسمِ العاملِ ${options.worker} عند التوقّفِ (${error instanceof Error ? error.message : String(error)}) — الاسمُ يُفتَحُ بعدَ العتبةِ لا فورًا.\n`,
+      );
+    }
     if (sealed !== null) {
       try {
         await sealed.sink.drain();
