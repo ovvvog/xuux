@@ -33,6 +33,7 @@ import {
   PENDING_RESULT_RESOLVED_EVENT,
   PENDING_RESULT_STAGED_EVENT,
   PendingResultConflict,
+  claimAdmission,
   createPendingResultStore,
   settlePendingResults,
 } from '../../src/execution/pending-results.mjs';
@@ -862,7 +863,63 @@ test(
   },
 );
 
-// ─── (12) الإلغاءُ المتأخّرُ لا يُبطلُ قيمةً وُلدت ───────────────────────────
+// ─── (12) بوابةُ الحجزِ تستهلكُ حصيلةَ التسويةِ لا عيّنتَها ───────────────────
+
+test('بوابةُ الحجزِ: الحجزُ لا يقعُ ما دامتْ آخرُ تسويةٍ تقولُ «مؤجَّلةٌ» — ولو رُفعَ الإيقافُ بينَ المحاولتين، والاستئنافُ العائدُ أثناءَ المحاولةِ يعيدُ المنعَ لا القبولَ', async () => {
+  // المشهدُ الذي لا يُصادُ خارجيًّا بميكروثانيةٍ: التسويةُ تقعُ تحتَ إيقافٍ
+  // فتحملُ حصيلتُها `deferred: true`، ثمّ **يُستأنفُ الإيقافُ قبلَ أن تُسألَ
+  // البوابةُ** — فلو بُنيَ القبولُ على عيّنةِ الإيقافِ اللاحقةِ لا على الحصيلةِ
+  // لحُجزَ فوقَ معلّقةٍ لم تُقضَ. البوابةُ مستخرجةٌ (`claimAdmission`)
+  // فيُقاضى هذا الحدُّ عليها مباشرةً — بنمطِ الاستهلاكِ نفسِهِ الذي يدورُ
+  // به العاملُ: العلمُ يُحملُ من الحصيلةِ ويعودُ للبوابةِ في الدورةِ التاليةِ.
+  /** @type {Array<'wait-halted' | 'settle' | 'claim' | 'recover'>} */
+  const steps = [];
+  // إقلاعٌ تحتَ إيقافٍ: التسويةُ الأولى قالتْ «مؤجَّلةٌ» (لا كتابةَ تحتَه).
+  let settlementDeferred = true;
+  let halted = true;
+  let attempts = 0;
+  const settle = () => {
+    attempts += 1;
+    // محاولتانِ تعودانِ مؤجَّلتينِ (إيقافٌ عائدٌ أثناءَ المحاولةِ) ثمّ انقضاء.
+    return attempts < 3 ? { fault: null, deferred: true } : { fault: null, deferred: false };
+  };
+  let claimed = false;
+  let laps = 0;
+  while (!claimed) {
+    laps += 1;
+    assert.ok(laps < 100, 'البوابةُ تدورُ بلا نهايةٍ — الحجزُ لا يُبلَغُ');
+    const admission = claimAdmission({ fault: null, settlementDeferred, halted });
+    steps.push(admission);
+    if (admission === 'wait-halted') {
+      // الاستئنافُ يقعُ **بعدَ حصيلةٍ مؤجَّلةٍ وقبلَ سؤالِ البوابةِ** — عينُ
+      // النافذةِ التي كانَتِ العيّنةُ اللاحقةُ تُبنى عليها.
+      halted = false;
+      continue;
+    }
+    if (admission === 'settle') {
+      const deferredResult = settle();
+      settlementDeferred = deferredResult.deferred;
+      continue;
+    }
+    if (admission === 'claim') claimed = true;
+  }
+  // الحجزُ لم يُبلَغْ إلا بعدَ حصيلةٍ تقولُ «انقضى التأجيلُ» — والمحاولتانِ
+  // العائدتانِ المؤجَّلتانِ أعادتا المنعَ لا القبولَ.
+  assert.deepEqual(steps, ['wait-halted', 'settle', 'settle', 'settle', 'claim']);
+  assert.equal(attempts, 3, 'الحجزُ قُبلَ قبلَ انقضاءِ التأجيلِ');
+
+  // والعطبُ أولى من كلِّ بوابةٍ: لا انتظارَ ولا تسويةً فوقَ عطبٍ قائمةٍ.
+  assert.equal(
+    claimAdmission({ fault: { kind: 'x' }, settlementDeferred: false, halted: false }),
+    'recover',
+  );
+  assert.equal(
+    claimAdmission({ fault: { kind: 'x' }, settlementDeferred: true, halted: true }),
+    'recover',
+  );
+});
+
+// ─── (13) الإلغاءُ المتأخّرُ لا يُبطلُ قيمةً وُلدت ───────────────────────────
 
 test(
   'إلغاءٌ طلُبَ بعدَ ولادةِ القيمة: التسويةُ تُسجّلُ النجاحَ كما يفعلُ المسارُ المباشرُ — الإشارةُ خسرتِ السباق',
@@ -1496,9 +1553,9 @@ test(
     const doneAt = result.stdout.indexOf(`done | ${second.id}`);
     assert.ok(doneAt > settleAt, 'حُجز الشقُّ الجديدُ قبلَّ تسويةِ المعلّقةِ — والحقَّ أحقُّ');
     // **حدُّ الحجزِ لا حدُّ الإنجازِ:** الإنجازُ (`done`) نهايةُ التنفيذِ لا
-    // لحظةُ الحجزِ. الحدُّ المحسوسُ هو انتقالُ الشقِّ الثاني إلى `running`
-    // (الحجزُ) مقابلَ انتقالِ المعلّقةِ إلى `succeeded` (التسويةُ) — من
-    // `state.task_transitions` ذاتِها لا من ترتيبِ سطورِ المخرجاتِ.
+    // لحظةُ الحجزِ. الحدُّ المحسوسُ هو **حجزُ الشقِّ الثاني لا يسبقُ تسويةَ
+    // المعلّقةِ** (انتقالُهُ إلى `running` لا يسبقُ انتقالَها إلى `succeeded`) —
+    // من `state.task_transitions` ذاتِها لا من ترتيبِ سطورِ المخرجاتِ.
     const firstTrail = await env.queue.transitions(first.id);
     const secondTrail = await env.queue.transitions(second.id);
     const firstSettledAt = firstTrail.find((entry) => entry['to'] === TaskLifecycle.SUCCEEDED)?.[
@@ -1711,8 +1768,8 @@ test(
     const doneAt = result.stdout.indexOf(`done | ${second.id}`);
     assert.ok(doneAt > settleAt, 'حُجز الشقُّ الجديدُ قبلَّ تسويةِ المعلّقةِ بعدَ الاستئناف');
     // **حدُّ الحجزِ من سجلِّ الانتقالاتِ ذاتِهِ** (لا من ترتيبِ سطورِ
-    // المخرجاتِ): انتقالُ المعلّقةِ إلى `succeeded` (التسويةُ) لا يسبقُ انتقالَ
-    // الشقِّ الجديدِ إلى `running` (الحجزُ) — وهو الحدُّ الذي يحملُهُ العاملُ
+    // المخرجاتِ): **حجزُ الشقِّ الجديدِ لا يسبقُ تسويةَ المعلّقةِ** (انتقالُهُ
+    // إلى `running` لا يسبقُ انتقالَها إلى `succeeded`) — وهو الحدُّ الذي يحملُهُ العاملُ
     // **من حصيلةِ التسويةِ نفسِها** (`deferred`) لا من عيّنةٍ لاحقةٍ لحالةِ
     // الإيقافِ (فلو بُنيَ العلمُ من العيّنةِ لا من الحصيلةِ لا افتُرضَ القبولُ
     // حينَ يُستأنفُ الإيقافُ بينَ التسويةِ والعيّنةِ — وحُجزَ فوقَ معلّقةٍ).
@@ -1785,13 +1842,19 @@ test(
         // المباشرُ (نجاحٌ بلا فحصِ إلغاءٍ بعدَ ولادةِ القيمة).
         const client = await env.db.pool.connect();
         const settleStore = openStore(env.dir, 'عامل-السباق', `race-${order}.jsonl`);
+        // الوعدُ **خارجَ `try`** ليجدَهَا التنظيفُ في كلِّ حالٍ: أيُّ فشلٍ في
+        // الطريقِ (استعلامُ الإثباتِ، تحديثُ الإشارةِ، الالتزامُ) لا يُغلقُ
+        // المخزنَ فوقَ تسويةٍ ما زالت تجري — يُفكُّ القفلُ أوّلًا ثمّ يُجمعُ
+        // مصيرُها ثمّ يُغلقُ كلُّ شيءٍ.
+        /** @type {Promise<Record<string, number | boolean>> | null} */
+        let settling = null;
         try {
           await client.query('BEGIN');
           const holderPid = Number(
             (await client.query('SELECT pg_backend_pid() AS pid')).rows[0]?.['pid'],
           );
           await client.query(`SELECT id FROM state.tasks WHERE id = $1 FOR UPDATE`, [task.id]);
-          const settling = settlePendingResults({
+          settling = settlePendingResults({
             store: settleStore.store,
             queue: env.queue,
           });
@@ -1814,10 +1877,9 @@ test(
             );
             if (blocked.rows[0]?.['blocked'] === true) break;
             if (Date.now() > blockedDeadline) {
-              // لا يُتركُ القفلُ معلقًا ولا وعدُ التسويةِ بلا مصيرٍ: التراجعُ
-              // يفكُّ القفلَ وتُجمعُ التسويةُ (تُنجزُ أو تُخطئ) قبلَ الفشلِ.
-              await client.query('ROLLBACK').catch(() => {});
-              await settling.catch(() => {});
+              // التنظيفُ في `finally` يفكُّ القفلَ ويجمعُ مصيرَ التسويةِ
+              // (تُنجزُ أو تُخطئ) قبلَ إغلاقِ كلِّ شيءٍ — ثمّ يفشلُ الاختبارُ
+              // بنفسِهِ لا بمهلةٍ صامتةٍ.
               throw new Error(
                 'التسويةُ لم تبلغِ القيدَ المُقفلَ خلالَ المهلةِ — لا تداخلَ أُثبتَ.',
               );
@@ -1839,9 +1901,13 @@ test(
             deferred: false,
           });
         } finally {
-          // وإن أخطأَ الاختبارُ قبلَ فكِّ القفلِ فالتراجعُ يفكُّه لا الإفلاتُ
-          // (إفلاتُ وصلةٍ بمعاملةٍ مفتوحةٍ يتركُ القفلَ معلقًا على مَن بعدها).
+          // التنظيفُ على كلِّ حالٍ وبالترتيبِ: (1) التراجعُ يفكُّ القفلَ لا
+          // الإفلاتُ (إفلاتُ وصلةٍ بمعاملةٍ مفتوحةٍ يتركُ القفلَ معلقًا على مَن
+          // بعدها)، (2) مصيرُ التسويةِ يُجمعُ (خطؤُها في المسارِ السليمِ مرئيٌّ
+          // لأنّه رميٌ لا ابتلاعٌ — أمّا هنا فيُجمعُ صامتًا لأنّ فشلَ الاختبارِ
+          // نفسِهِ هو الخبرُ)، (3) ثمّ الإغلاقُ والإفلاتُ.
           await client.query('ROLLBACK').catch(() => {});
+          if (settling !== null) await settling.catch(() => {});
           settleStore.close();
           client.release();
         }

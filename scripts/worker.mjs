@@ -33,6 +33,7 @@ import { createTaskQueue } from '../src/execution/queue.mjs';
 import { createWorker } from '../src/execution/worker.mjs';
 import {
   createPendingResultStore,
+  claimAdmission,
   settlePendingResults,
 } from '../src/execution/pending-results.mjs';
 import {
@@ -243,23 +244,30 @@ async function main() {
     };
     let settlementDeferred = bootSettlement.deferred;
     while (!stopping && handled < options.maxTasks) {
-      // الاستئنافُ بعدَ إيقافٍ عندَ الإقلاعِ: التسويةُ المؤجَّلةُ تُقضى قبلَ أولِ
-      // حجزٍ جديدٍ لا بعده — فالقيمةُ المعلّقةُ أحقُّ من شقٍّ جديد. وإن عطِبَتِ
-      // القاعدةُ عندَها فالأمرُ إلى الاستردادِ (ينتظرُ بميزانيتِه) لا إلى إعادةِ
-      // نداءٍ فارغةٍ تدورُ بلا انتظار.
-      if (fault === null && settlementDeferred) {
-        if (isHalted()) {
-          await abortableSleep(options.pollMs, stopper.signal);
-          continue;
-        }
+      // بوابةُ الحجزِ (مستخرجةٌ لتُقاضى وتُختبرَ): قرارٌ واحدٌ في رأسِ كلِّ
+      // دورةٍ — والعلمُ المُقاضى **المحمولُ من حصيلةِ آخرِّ تسويةٍ** لا عيّنةً
+      // لاحقةً لحالةِ الإيقافِ. فالاستئنافُ بعدَ إيقافٍ عندَ الإقلاعِ: التسويةُ
+      // المؤجَّلةُ تُقضى قبلَ أولِ حجزٍ جديدٍ لا بعده — فالقيمةُ المعلّقةُ أحقُّ
+      // من شقٍّ جديد. وإن عطِبَتِ القاعدةُ عندَها فالأمرُ إلى الاستردادِ
+      // (ينتظرُ بميزانيتِه) لا إلى إعادةِ نداءٍ فارغةٍ تدورُ بلا انتظار.
+      const admission = claimAdmission({
+        fault,
+        settlementDeferred,
+        halted: isHalted(),
+      });
+      if (admission === 'wait-halted') {
+        await abortableSleep(options.pollMs, stopper.signal);
+        continue;
+      }
+      if (admission === 'settle') {
         const deferredResult = await settlePending();
-        if (deferredResult.fault !== null) {
-          fault = deferredResult.fault;
-          continue;
-        }
-        // وإن أُجِّلتْ ثانيةً (إيقافٌ عائدٌ أثناءَ المحاولةِ) بقيَ العلمُ محمولًا
-        // من الحصيلةِ — لا يُبنى على عيّنةٍ تسبقُ المحاولةَ ولا تليها.
+        fault = deferredResult.fault;
         settlementDeferred = deferredResult.deferred;
+        // **والحجزُ لا يقعُ في الدورةِ نفسِها التي حاولتِ التسويةَ**: إن عادَ
+        // التأجيلُ (إيقافٌ عائدٌ أثناءَ المحاولةِ) عادتِ البوابةُ تمنعُه في
+        // الدورةِ التاليةِ — فلا يُبنى القبولُ على عيّنةٍ تسبقُ المحاولةَ ولا
+        // تليها، حتى تعلنَ الحصيلةُ نفسُها انقضاءَ التأجيلِ.
+        continue;
       }
       if (fault !== null) {
         const outcome = await recovery.recover(fault, { signal: stopper.signal });
