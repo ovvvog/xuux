@@ -326,10 +326,8 @@ export function createPendingResultStore({ reader, writer, worker }) {
         // قرارُ التضادِّ لمالكٍ مخوَّلٍ لا لقارئٍ صامت. **ويُرمى خطأٌ مسمّى**: لا
         // يُعطى إذنًا باستكمالِ النجاحِ بالقيمةِ الثانيةِ (ذاك اختيارٌ صامت) —
         // العاملُ يتوقّفُ عندَ حدٍّ آمنٍ والقيدُ في السجلِّ يُسمّي التضادَّ.
-        // (إن كانَ التضادُّ مكتشفاً من قبلُ عندَ القراءةِ فالدليلانِ باقيانِ — لا
-        // يُكرَّرُ التخزينُ.)
         // (التضادُّ القائمُ رُميَ في الفرعِ أعلاه — فها هنا التضادُّ حديثُ العهدِ
-        // بهذا التخزينِ: الدليلانِ يُخزَّنانِ معًا.)
+        // بهذا التخزينِ: الدليلانِ يُخزَّنانِ معًا ولا يُكرَّرُ شيء.)
         await appendStaged(record);
         await appendResolved(
           record,
@@ -381,14 +379,14 @@ export function createPendingResultStore({ reader, writer, worker }) {
  * @param {ReturnType<typeof createPendingResultStore>} input.store
  * @param {ReturnType<typeof import('./queue.mjs').createTaskQueue>} input.queue
  * @param {{ assertOperational: () => void }} [input.haltGuard] حرسُ الإيقافِ الشامل: التسويةُ تحتَه تأجيلٌ لا كتابة.
- * @returns {Promise<{ examined: number, settled: number, superseded: number, conflicts: number }>}
+ * @returns {Promise<{ examined: number, settled: number, superseded: number, conflicts: number, deferred: boolean }>} حصيلةُ التسويةِ تحملُ تأجيلَها بنفسِها: `deferred` صادقةٌ إن أُجِّلتْ تحتَ الإيقافِ ولم تُكتبْ — لا يُستنبَطُ التأجيلُ من حالةِ الإيقافِ لاحقًا.
  */
 export async function settlePendingResults({
   store,
   queue,
   haltGuard = { assertOperational: () => {} },
 }) {
-  const counts = { examined: 0, settled: 0, superseded: 0, conflicts: 0 };
+  const counts = { examined: 0, settled: 0, superseded: 0, conflicts: 0, deferred: false };
   for (const record of await store.unresolved()) {
     // الإيقافُ السياديُّ يؤجّلُ التسويةَ كلَّها: لا كتابةَ تحتَهُ ولا قيدَ،
     // والسجلاتُ تنتظرُ الاستئنافَ كما ينتظرُ الاستردادُ.
@@ -396,6 +394,7 @@ export async function settlePendingResults({
       try {
         haltGuard.assertOperational();
       } catch {
+        counts.deferred = true;
         return counts;
       }
     }

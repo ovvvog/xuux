@@ -183,6 +183,11 @@ async function main() {
   // وما ليسَ عطبَ قاعدةٍ (فسادٌ، عقدٌ غائبٌ) يُرمى كما هو: توقّفٌ عندَ حدٍّ آمنٍ
   // لا التهامٌ الصامتُ الذي يمرّرُ الكاسبَ الجديدَ فوقَ حقٍّ لم يُستوفَ.
   // والإيقافُ السياديّ يؤجّلُ التسويةَ كلَّها: السجلاتُ تنتظرُ الاستئنافَ ولا كتابةَ تحته.
+  // والحصيلةُ تحملُ **تأجيلَها بنفسِها** (`deferred`): لا يُعادُ بناءُ «هل
+  // أُجِّلتِ التسويةُ؟» من عيّنةٍ لاحقةٍ لحالةِ الإيقافِ — فالاستئنافُ قد يقعُ
+  // بينَ التسويةِ والعيّنةِ فيُبنى العلمُ على العدمِ ويُحجزُ شقٌّ فوقَ معلّقةٍ
+  // لم تُقضَ. العلمُ يُحملُ من التسويةِ نفسِها.
+  /** @returns {Promise<{ fault: WorkerDatabaseFault | null, deferred: boolean }>} */
   const settlePending = async () => {
     try {
       const counts = await settlePendingResults({ store: pendingResults, queue, haltGuard: halt });
@@ -191,22 +196,25 @@ async function main() {
           `${new Date().toISOString()} | pending-results | سُوّيت: ${counts.settled} | عُلّقت: ${counts.superseded} | تضادّت: ${counts.conflicts}\n`,
         );
       }
-      return null;
+      return { fault: null, deferred: counts.deferred === true };
     } catch (error) {
       const fault = classifyDatabaseFault(error);
       if (fault === null) throw error;
       process.stdout.write(
         `${new Date().toISOString()} | pending-results | عَطِلةُ قاعدةٍ عندَ التسويةِ (${fault.kind}/${fault.code}): الحجزُ الجديدُ مؤجَّلٌ حتى عودتِها\n`,
       );
-      return new WorkerDatabaseFault({
-        worker: options.worker,
-        phase: 'settle-pending',
-        taskId: null,
-        pending: null,
-        fault,
-        cause: error,
-        at: new Date(),
-      });
+      return {
+        fault: new WorkerDatabaseFault({
+          worker: options.worker,
+          phase: 'settle-pending',
+          taskId: null,
+          pending: null,
+          fault,
+          cause: error,
+          at: new Date(),
+        }),
+        deferred: false,
+      };
     }
   };
   let handled = 0;
@@ -219,10 +227,12 @@ async function main() {
     // تسويةُ الإقلاعِ: عَطِلةٌ هنا تُدخلُ الحلقةَ في حالةِ العطبِ فتُؤجّلُ الحجزَ
     // الجديدَ حتى تعودَ القاعدةُ ثمّ تُعادُ المحاولةُ — لا يُمرَّرُ كاسبٌ جديدٌ فوقَ
     // قيمةٍ معلّقةٍ لم يُحسَمْ حقُّها.
-    fault = await settlePending();
+    const bootSettlement = await settlePending();
+    fault = bootSettlement.fault;
     // الإيقافُ السياديُّ **يؤجّلُ التسويةَ ولا يُلغيها**: لا يُحجزُ شقٌّ جديدٌ قبلَ
     // أن تُسوّى النتيجةُ المعلّقةُ التي كانت قبلَه — وعَطِلةُ قاعدةٍ عندَها
     // تدخلُ الحلقةَ في حالةِ العطبِ (استردادٌ ينتظرُ بميزانيتِهِ لا دورانٌ فارغٌ).
+    // والتأجيلُ يُحملُ من حصيلةِ التسويةِ نفسِها لا من عيّنةٍ لاحقةٍ.
     const isHalted = () => {
       try {
         halt.assertOperational();
@@ -231,7 +241,7 @@ async function main() {
         return true;
       }
     };
-    let settlementDeferred = isHalted();
+    let settlementDeferred = bootSettlement.deferred;
     while (!stopping && handled < options.maxTasks) {
       // الاستئنافُ بعدَ إيقافٍ عندَ الإقلاعِ: التسويةُ المؤجَّلةُ تُقضى قبلَ أولِ
       // حجزٍ جديدٍ لا بعده — فالقيمةُ المعلّقةُ أحقُّ من شقٍّ جديد. وإن عطِبَتِ
@@ -242,12 +252,14 @@ async function main() {
           await abortableSleep(options.pollMs, stopper.signal);
           continue;
         }
-        const deferredFault = await settlePending();
-        if (deferredFault !== null) {
-          fault = deferredFault;
+        const deferredResult = await settlePending();
+        if (deferredResult.fault !== null) {
+          fault = deferredResult.fault;
           continue;
         }
-        settlementDeferred = false;
+        // وإن أُجِّلتْ ثانيةً (إيقافٌ عائدٌ أثناءَ المحاولةِ) بقيَ العلمُ محمولًا
+        // من الحصيلةِ — لا يُبنى على عيّنةٍ تسبقُ المحاولةَ ولا تليها.
+        settlementDeferred = deferredResult.deferred;
       }
       if (fault !== null) {
         const outcome = await recovery.recover(fault, { signal: stopper.signal });
@@ -275,11 +287,12 @@ async function main() {
         // القاعدةُ عادت: أُعيدت المحاولةُ على ما دامَ معلّقاً في السجلّ الدائمِ
         // من الحياةِ السابقةِ — والقيمةُ لا تُفقدُ بانقطاعِ القاعدةِ عندَ التسجيلِ.
         // وعادت العَطِلةُ عندَ التسويةِ؟ يُعادُ تأجيلُ الحجزِ لا الالتهامُ.
-        const settleFault = await settlePending();
-        if (settleFault !== null) {
-          fault = settleFault;
+        const settleResult = await settlePending();
+        if (settleResult.fault !== null) {
+          fault = settleResult.fault;
           continue;
         }
+        settlementDeferred = settleResult.deferred;
         if (outcome.verdict === RECOVERY_VERDICTS.UNVERIFIED && stopping) {
           exitCode = RECOVERY_EXIT_CODES.DB_UNAVAILABLE;
           break;

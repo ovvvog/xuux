@@ -206,7 +206,13 @@ test(
     // الحياةُ الجديدة: لا `fault.pending` في الذاكرة — التسويةُ من القرصِ وحدَه.
     const second = openStore(env.dir, 'عامل-س');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 1,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
 
     const after = await env.queue.get(task.id);
     assert.ok(after !== null);
@@ -316,7 +322,13 @@ test(
 
     const second = openStore(env.dir, 'عامل-الأول');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 0, superseded: 1, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 0,
+      superseded: 1,
+      conflicts: 0,
+      deferred: false,
+    });
 
     // النتيجةُ الأحدثُ باقيةٌ — لم تُستبدلْ صامتاً — والأدلةُ لم تُمحَ.
     const after = await env.queue.get(task.id);
@@ -366,7 +378,13 @@ test(
 
     const second = openStore(env.dir, 'عامل-س');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 0, superseded: 0, conflicts: 1 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 0,
+      superseded: 0,
+      conflicts: 1,
+      deferred: false,
+    });
     const after = await env.queue.get(task.id);
     assert.deepEqual(after?.result, { القيمة: 'المسجّلة' }, 'استُبدلت نتيجةٌ مسجّلةٌ صامتاً');
     assert.equal((await second.store.unresolved()).length, 0);
@@ -413,7 +431,13 @@ test(
 
     const second = openStore(env.dir, 'عامل-س');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 1,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
     const after = await env.queue.get(task.id);
     assert.equal(after?.state, TaskLifecycle.SUCCEEDED);
     assert.deepEqual(after?.result, { القيمة: 'المطابقة' });
@@ -621,7 +645,13 @@ test(
     // والقيدُ يُكتبُ مصونًا **عبرَ التسويةِ الحقيقيةِ نفسِها** — لا بيدٍ يدويةٍ
     // تحاكيها: `settlePendingResults` بطابورٍ حيٍّ يستهلكُ الهويةَ ويقيدُ الحكمَ.
     const counts = await settlePendingResults({ store: second, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 1,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
     reopened.close();
     const settled = await env.queue.get(task.id);
     assert.equal(settled?.state, TaskLifecycle.SUCCEEDED, 'التسويةُ فوقَ الجسمِ المصونِ لم تمضِ');
@@ -730,7 +760,13 @@ test(
     // تسويةُ نتيجةِ الحياةِ الأولى فوقَ حجزِ الحياةِ الثانية: تعليقٌ لا كتابة.
     const second = openStore(env.dir, 'عامل-س');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 0, superseded: 1, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 0,
+      superseded: 1,
+      conflicts: 0,
+      deferred: false,
+    });
     const after = await env.queue.get(task.id);
     assert.equal(after?.state, TaskLifecycle.RUNNING, 'تسويةُ حياةٍ سابقةٍ كتبت فوقَ حجزٍ أحدث');
     assert.equal(after?.claimId, reclaimed[0]?.claimId, 'حجزُ الحياةِ الثانيةِ استُبدل');
@@ -773,7 +809,13 @@ test(
       queue: env.queue,
       haltGuard: halted,
     });
-    assert.deepEqual(deferred, { examined: 0, settled: 0, superseded: 0, conflicts: 0 });
+    assert.deepEqual(deferred, {
+      examined: 0,
+      settled: 0,
+      superseded: 0,
+      conflicts: 0,
+      deferred: true,
+    });
     let after = await env.queue.get(task.id);
     assert.equal(after?.state, TaskLifecycle.RUNNING, 'تسويةٌ وقعت تحتَ الإيقاف');
     assert.equal(
@@ -795,7 +837,13 @@ test(
       queue: env.queue,
       haltGuard: resumed,
     });
-    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 1,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
     after = await env.queue.get(task.id);
     assert.equal(after?.state, TaskLifecycle.SUCCEEDED);
     assert.deepEqual(after?.result, { القيمة: 'مؤجّلة' });
@@ -845,7 +893,13 @@ test(
 
     const second = openStore(env.dir, 'عامل-س');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 1,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
     const after = await env.queue.get(task.id);
     assert.equal(
       after?.state,
@@ -1052,7 +1106,13 @@ test(
 
     const second = openStore(env.dir, 'عامل-س');
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 1,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
     second.close();
 
     const after = await env.queue.get(task.id);
@@ -1113,7 +1173,13 @@ test(
     // والتسويةُ تُسمّيهِ ولا تكتبُ قيمةً في القاعدةِ (المهمّةُ غيرُ موجودةٍ أصلاً —
     // والمسارُ المصروفُ للقاعدةِ ما كانَ ليُمسَّ).
     const counts = await settlePendingResults({ store: second.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 1, settled: 0, superseded: 0, conflicts: 1 });
+    assert.deepEqual(counts, {
+      examined: 1,
+      settled: 0,
+      superseded: 0,
+      conflicts: 1,
+      deferred: false,
+    });
     const verdicts = second
       .events()
       .filter((event) => event.type === PENDING_RESULT_RESOLVED_EVENT);
@@ -1197,7 +1263,13 @@ test(
       'الحكمُ المقيَّدُ ليسَ تضادًّا',
     );
     const counts = await settlePendingResults({ store: reopened.store, queue: env.queue });
-    assert.deepEqual(counts, { examined: 0, settled: 0, superseded: 0, conflicts: 0 });
+    assert.deepEqual(counts, {
+      examined: 0,
+      settled: 0,
+      superseded: 0,
+      conflicts: 0,
+      deferred: false,
+    });
     const after = await env.queue.get(task.id);
     assert.equal(after?.state, TaskLifecycle.RUNNING, 'كُتب في القاعدةِ فوقَ تضادٍّ لم يُقضَ');
     assert.equal(after?.result, null);
@@ -1423,6 +1495,48 @@ test(
     );
     const doneAt = result.stdout.indexOf(`done | ${second.id}`);
     assert.ok(doneAt > settleAt, 'حُجز الشقُّ الجديدُ قبلَّ تسويةِ المعلّقةِ — والحقَّ أحقُّ');
+    // **حدُّ الحجزِ لا حدُّ الإنجازِ:** الإنجازُ (`done`) نهايةُ التنفيذِ لا
+    // لحظةُ الحجزِ. الحدُّ المحسوسُ هو انتقالُ الشقِّ الثاني إلى `running`
+    // (الحجزُ) مقابلَ انتقالِ المعلّقةِ إلى `succeeded` (التسويةُ) — من
+    // `state.task_transitions` ذاتِها لا من ترتيبِ سطورِ المخرجاتِ.
+    const firstTrail = await env.queue.transitions(first.id);
+    const secondTrail = await env.queue.transitions(second.id);
+    const firstSettledAt = firstTrail.find((entry) => entry['to'] === TaskLifecycle.SUCCEEDED)?.[
+      'at'
+    ];
+    const secondClaimedAt = secondTrail.find((entry) => entry['to'] === TaskLifecycle.RUNNING)?.[
+      'at'
+    ];
+    assert.ok(firstSettledAt !== undefined, 'لا انتقالَ نجاحٍ للمعلّقةِ');
+    assert.ok(secondClaimedAt !== undefined, 'لا انتقالَ حجزٍ للشقِّ الجديدِ');
+    assert.ok(
+      firstSettledAt <= secondClaimedAt,
+      'حُجزَ الشقُّ الجديدُ قبلَ تسويةِ المعلّقةِ (من سجلِّ الانتقالاتِ نفسِهِ)',
+    );
+    // **والمرحلةُ المسؤولةُ تُقرأُ من القيدِ لا من خطِّ المخرجاتِ:** واقعةُ
+    // `kernel.worker.db-recovery` في سجلِّ العاملِ الدائمِ تحملُ في جسمِها
+    // `phase: 'settle-pending'` — العقدُ الذي وقَّعَهُ مصنِّفُ العطبِ على
+    // القاعدةِ (خطُّ المخرجاتِ يطبعُهُ لكنّ القيدَ هو الحجة).
+    const workerLog = new PersistentEventLog(logFile, { env: { NODE_ENV: 'test' } });
+    try {
+      workerLog.load({ acceptMissingHead: true });
+      const recoveryEvents = workerLog.events.filter(
+        (event) => event.type === 'kernel.worker.db-recovery',
+      );
+      assert.ok(recoveryEvents.length > 0, 'لا واقعةَ استردادٍ في سجلِّ العاملِ');
+      // السجلُّ هنا غيرُ مختومٍ (بيئةُ اختبارٍ) فالجسمُ يُقرأُ من `data` مباشرةً —
+      // أما المختومُ فيُفتحُ بخاتمِهِ وهذا عينُ عقدِ القراءةِ المختومةِ.
+      /** @type {Array<Record<string, unknown>>} */
+      const bodies = recoveryEvents.map(
+        (event) => /** @type {Record<string, unknown>} */ (event.data),
+      );
+      assert.ok(
+        bodies.some((body) => body['phase'] === 'settle-pending'),
+        'لا واقعةَ استردادٍ بمرحلةِ settle-pending — الحجزُ لم يُؤجَّلْ لعطبِ التسويةِ',
+      );
+    } finally {
+      workerLog.close();
+    }
   },
 );
 
@@ -1596,6 +1710,26 @@ test(
     assert.equal(after?.state, TaskLifecycle.SUCCEEDED, 'الشقُّ الجديدُ لم يُنفَّذ بعدَ الاستئناف');
     const doneAt = result.stdout.indexOf(`done | ${second.id}`);
     assert.ok(doneAt > settleAt, 'حُجز الشقُّ الجديدُ قبلَّ تسويةِ المعلّقةِ بعدَ الاستئناف');
+    // **حدُّ الحجزِ من سجلِّ الانتقالاتِ ذاتِهِ** (لا من ترتيبِ سطورِ
+    // المخرجاتِ): انتقالُ المعلّقةِ إلى `succeeded` (التسويةُ) لا يسبقُ انتقالَ
+    // الشقِّ الجديدِ إلى `running` (الحجزُ) — وهو الحدُّ الذي يحملُهُ العاملُ
+    // **من حصيلةِ التسويةِ نفسِها** (`deferred`) لا من عيّنةٍ لاحقةٍ لحالةِ
+    // الإيقافِ (فلو بُنيَ العلمُ من العيّنةِ لا من الحصيلةِ لا افتُرضَ القبولُ
+    // حينَ يُستأنفُ الإيقافُ بينَ التسويةِ والعيّنةِ — وحُجزَ فوقَ معلّقةٍ).
+    const firstTrail = await env.queue.transitions(first.id);
+    const secondTrail = await env.queue.transitions(second.id);
+    const firstSettledAt = firstTrail.find((entry) => entry['to'] === TaskLifecycle.SUCCEEDED)?.[
+      'at'
+    ];
+    const secondClaimedAt = secondTrail.find((entry) => entry['to'] === TaskLifecycle.RUNNING)?.[
+      'at'
+    ];
+    assert.ok(firstSettledAt !== undefined, 'لا انتقالَ نجاحٍ للمعلّقةِ');
+    assert.ok(secondClaimedAt !== undefined, 'لا انتقالَ حجزٍ للشقِّ الجديدِ');
+    assert.ok(
+      firstSettledAt <= secondClaimedAt,
+      'حُجزَ الشقُّ الجديدُ قبلَ تسويةِ المعلّقةِ (من سجلِّ الانتقالاتِ نفسِهِ)',
+    );
   },
 );
 
@@ -1642,8 +1776,9 @@ test(
       } else {
         // **تداخلٌ قسريٌّ مُثبَتٌ لا مُفترَضٌ:** وصلةٌ تمسكُ قفلَ الصفِّ
         // (`FOR UPDATE`) وتلتزمُ إشارتَها ذرّيًّا داخلَ معاملتِها، بينما التسويةُ
-        // انطلقتْ و**يُثبَتُ من `pg_locks` أنّها بلغتِ الـ`UPDATE` ووقفتْ على
-        // القفلِ نفسِهِ** قبلَ فكِّهِ — لا مهلةَ زمنيةً تُفترضُ فيها البلاغةُ.
+        // انطلقتْ و**يُثبَتُ من القاعدةِ نفسِها أنّها بلغتِ الـ`UPDATE` ووقفتْ على
+        // قفلِ هذه المعاملةِ بعينِها** قبلَ فكِّهِ — لا مهلةَ زمنيةً تُفترضُ فيها
+        // البلاغةُ.
         // و`cancelTree` من وصلةٍ أخرى كانت ستقفُ على هذا القفلِ (انسدادٌ ذاتيٌّ
         // لا تنتهي منه)، فالإشارةُ تُكتَبُ داخلَ معاملةِ القفلِ ذاتِها — وهو عينُ
         // أثرِ إشارةٍ التزمتْ قبلَ أن تمضيَ التسويةُ فوقَها، كما يفعلُ المسارُ
@@ -1661,18 +1796,28 @@ test(
             queue: env.queue,
           });
           // لا يُفترضُ أنّ التسويةَ بلغتِ القيدَ: يُقاسُ من القاعدةِ نفسِها أنّ
-          // جلسةً تنتظرُ قفلَ هذا الصفِّ (وبلغتِ الـ`UPDATE` في مسارِها) — مهلةٌ
+          // جلسةً **يحجبُها حاملُ هذا القفلِ بعينِهِ** وبيانُها `UPDATE
+          // state.tasks` (أي: تسويتُنا هذه وصلتِ القيدَ ووقفتْ عليه) — عبرَّ
+          // `pg_blocking_pids` لا بِعدِّ كلِّ منتظرٍ أيَّ قفلٍ كان (فذاك يُعطي
+          // إيجابًا كاذبًا من انسدادٍ أجنبيٍّ لا صلةَ له بهذا الاختبار). مهلةٌ
           // محدودةٌ وإلّا فشلَ الاختبارُ بنفسِهِ لا بمهلةٍ صامتة.
           const blockedDeadline = Date.now() + 10_000;
           for (;;) {
             const blocked = await env.db.pool.query(
-              `SELECT count(*)::int AS n FROM pg_stat_activity
-                 WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid()
-                   AND pid <> $1`,
+              `SELECT EXISTS (
+                 SELECT 1 FROM pg_stat_activity a
+                 WHERE a.datname = current_database()
+                   AND $1::integer = ANY(pg_blocking_pids(a.pid))
+                   AND a.query LIKE '%UPDATE state.tasks%'
+               ) AS blocked`,
               [holderPid],
             );
-            if (Number(blocked.rows[0]?.['n'] ?? 0) > 0) break;
+            if (blocked.rows[0]?.['blocked'] === true) break;
             if (Date.now() > blockedDeadline) {
+              // لا يُتركُ القفلُ معلقًا ولا وعدُ التسويةِ بلا مصيرٍ: التراجعُ
+              // يفكُّ القفلَ وتُجمعُ التسويةُ (تُنجزُ أو تُخطئ) قبلَ الفشلِ.
+              await client.query('ROLLBACK').catch(() => {});
+              await settling.catch(() => {});
               throw new Error(
                 'التسويةُ لم تبلغِ القيدَ المُقفلَ خلالَ المهلةِ — لا تداخلَ أُثبتَ.',
               );
@@ -1686,8 +1831,17 @@ test(
           );
           await client.query('COMMIT');
           const counts = await settling;
-          assert.deepEqual(counts, { examined: 1, settled: 1, superseded: 0, conflicts: 0 });
+          assert.deepEqual(counts, {
+            examined: 1,
+            settled: 1,
+            superseded: 0,
+            conflicts: 0,
+            deferred: false,
+          });
         } finally {
+          // وإن أخطأَ الاختبارُ قبلَ فكِّ القفلِ فالتراجعُ يفكُّه لا الإفلاتُ
+          // (إفلاتُ وصلةٍ بمعاملةٍ مفتوحةٍ يتركُ القفلَ معلقًا على مَن بعدها).
+          await client.query('ROLLBACK').catch(() => {});
           settleStore.close();
           client.release();
         }
