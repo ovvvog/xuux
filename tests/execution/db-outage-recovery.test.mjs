@@ -1632,6 +1632,17 @@ test(
       'الاستئنافُ حازَ إحدى المهمّتَينِ المتاحتَينِ',
     );
 
+    // لقطةُ الصفّينِ **قبلَ** الاستدعاءِ المحروسِ: المقارنةُ الحرفيّةُ بعدهُ هي
+    // الدليلُ أنّ البوابةَ لم تكتبْ شيئًا. (لو أُخِذَت اللقطةُ بعدَ الاستدعاء
+    // لَصارَت المقارنةُ بينَ قراءتينِ متتاليينِ بلا فاعلٍ بينَهما — دليلًا على
+    // لا شيءٍ.)
+    const beforeGate = {
+      first: await row(env.admin, first.id),
+      second: await row(env.admin, second.id),
+    };
+    const reClaimedRow = reClaimedId === first.id ? beforeGate.first : beforeGate.second;
+    assert.equal(reClaimedRow?.state, TaskLifecycle.RUNNING, 'عقدُ المالكُ الجديدُ سليمٌ');
+
     const gateLog = memoryLog();
     const guarded = createDatabaseRecovery({
       pool: env.workerPool,
@@ -1660,16 +1671,9 @@ test(
       'توقّفٌ عندَ حدٍّ آمنٍ لا إعادةُ تشغيلٍ عمياء',
     );
 
-    // عقودُ المالكِ الجديدِ لم تُمسّ — والدليلُ الأقوى لقطةٌ قبلَ/بعدَ: البوابةُ
-    // لا تكتبُ شيئًا فالقاعدةُ كما كانتْها حرفيًا. (المهمّةُ التي حازها المالكُ
-    // الجديدُ جاريةٌ بعقدِهِ، والأخرى كما تركتها تسويةُ القياسِ في القسمِ الأولِ —
-    // البوابةُ لا تُغيّرُ لا هذا ولا ذاك.)
-    const beforeGate = {
-      first: await row(env.admin, first.id),
-      second: await row(env.admin, second.id),
-    };
-    const reClaimedRow = reClaimedId === first.id ? beforeGate.first : beforeGate.second;
-    assert.equal(reClaimedRow?.state, TaskLifecycle.RUNNING, 'عقدُ المالكُ الجديدِ سليمٌ');
+    // عقودُ المالكِ الجديدِ لم تُمسّ — والقاعدةُ كما كانتْها قبلَ الاستدعاءِ
+    // حرفيًا: البوابةُ لا تكتبُ شيئًا. (المهمّةُ التي حازها المالكُ الجديدُ جاريةٌ
+    // بعقدِهِ، والأخرى كما تركتها تسويةُ القياسِ في القسمِ الأولِ.)
     // والحكمُ مُقيَّدٌ في السجلِّ بالسببِ المُسمّى: يقرأُهُ مُشغّلٌ فيعرفُ أنّ
     // الاسمَ أُخِذَ لا أنّ القاعدةَ فسدت.
     const afterGate = {
