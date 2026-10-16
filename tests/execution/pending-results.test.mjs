@@ -33,9 +33,9 @@ import {
   PENDING_RESULT_RESOLVED_EVENT,
   PENDING_RESULT_STAGED_EVENT,
   PendingResultConflict,
-  claimAdmission,
   createPendingResultStore,
   settlePendingResults,
+  settleUntilAdmitted,
 } from '../../src/execution/pending-results.mjs';
 import { createWorker } from '../../src/execution/worker.mjs';
 import { probeIsolation } from '../../src/execution/isolation.mjs';
@@ -867,56 +867,50 @@ test(
 
 test('بوابةُ الحجزِ: الحجزُ لا يقعُ ما دامتْ آخرُ تسويةٍ تقولُ «مؤجَّلةٌ» — ولو رُفعَ الإيقافُ بينَ المحاولتين، والاستئنافُ العائدُ أثناءَ المحاولةِ يعيدُ المنعَ لا القبولَ', async () => {
   // المشهدُ الذي لا يُصادُ خارجيًّا بميكروثانيةٍ: التسويةُ تقعُ تحتَ إيقافٍ
-  // فتحملُ حصيلتُها `deferred: true`، ثمّ **يُستأنفُ الإيقافُ قبلَ أن تُسألَ
-  // البوابةُ** — فلو بُنيَ القبولُ على عيّنةِ الإيقافِ اللاحقةِ لا على الحصيلةِ
-  // لحُجزَ فوقَ معلّقةٍ لم تُقضَ. البوابةُ مستخرجةٌ (`claimAdmission`)
-  // فيُقاضى هذا الحدُّ عليها مباشرةً — بنمطِ الاستهلاكِ نفسِهِ الذي يدورُ
-  // به العاملُ: العلمُ يُحملُ من الحصيلةِ ويعودُ للبوابةِ في الدورةِ التاليةِ.
-  /** @type {Array<'wait-halted' | 'settle' | 'claim' | 'recover'>} */
-  const steps = [];
-  // إقلاعٌ تحتَ إيقافٍ: التسويةُ الأولى قالتْ «مؤجَّلةٌ» (لا كتابةَ تحتَه).
-  let settlementDeferred = true;
-  let halted = true;
+  // فتحملُ حصيلتُها `deferred: true`، ثمّ **يُستأنفُ الإيقافُ قبلَ أن يُسألَ
+  // القبولُ** — فلو بُنيَ القبولُ على عيّنةِ الإيقافِ اللاحقةِ لا على الحصيلةِ
+  // لحُجزَ فوقَ معلّقةٍ لم تُقضَ. والدورةُ المستخرجةُ (`settleUntilAdmitted`)
+  // هي **العزفُ نفسُهُ الذي تدورُ به حلقةُ العاملِ** لا قرارٌ صرفٌ يُختبرُ
+  // وحدَهُ: الحصيلةُ المؤجَّلةُ تعيدُ الدورةَ، والعطبُ إلى الاستردادِ،
+  // والقبولُ لا يقعُ إلا بعدَ حصيلةٍ تقولُ الانقضاءَ.
+  let haltedNow = true;
   let attempts = 0;
-  const settle = () => {
-    attempts += 1;
-    // محاولتانِ تعودانِ مؤجَّلتينِ (إيقافٌ عائدٌ أثناءَ المحاولةِ) ثمّ انقضاء.
-    return attempts < 3 ? { fault: null, deferred: true } : { fault: null, deferred: false };
-  };
-  let claimed = false;
-  let laps = 0;
-  while (!claimed) {
-    laps += 1;
-    assert.ok(laps < 100, 'البوابةُ تدورُ بلا نهايةٍ — الحجزُ لا يُبلَغُ');
-    const admission = claimAdmission({ fault: null, settlementDeferred, halted });
-    steps.push(admission);
-    if (admission === 'wait-halted') {
-      // الاستئنافُ يقعُ **بعدَ حصيلةٍ مؤجَّلةٍ وقبلَ سؤالِ البوابةِ** — عينُ
+  let waits = 0;
+  const outcome = await settleUntilAdmitted({
+    halted: () => haltedNow,
+    settle: async () => {
+      attempts += 1;
+      // محاولتانِ تعودانِ مؤجَّلتينِ (إيقافٌ عائدٌ أثناءَ المحاولةِ) ثمّ انقضاء.
+      return attempts < 3 ? { fault: null, deferred: true } : { fault: null, deferred: false };
+    },
+    wait: async () => {
+      waits += 1;
+      // الاستئنافُ يقعُ **بعدَ حصيلةٍ مؤجَّلةٍ وقبلَ سؤالِ القبولِ** — عينُ
       // النافذةِ التي كانَتِ العيّنةُ اللاحقةُ تُبنى عليها.
-      halted = false;
-      continue;
-    }
-    if (admission === 'settle') {
-      const deferredResult = settle();
-      settlementDeferred = deferredResult.deferred;
-      continue;
-    }
-    if (admission === 'claim') claimed = true;
-  }
-  // الحجزُ لم يُبلَغْ إلا بعدَ حصيلةٍ تقولُ «انقضى التأجيلُ» — والمحاولتانِ
-  // العائدتانِ المؤجَّلتانِ أعادتا المنعَ لا القبولَ.
-  assert.deepEqual(steps, ['wait-halted', 'settle', 'settle', 'settle', 'claim']);
+      haltedNow = false;
+    },
+    stopped: () => false,
+  });
+  assert.equal(outcome.verdict, 'admitted', 'القبولُ لم يُبلَغْ بعدَ انقضاءِ التأجيلِ');
   assert.equal(attempts, 3, 'الحجزُ قُبلَ قبلَ انقضاءِ التأجيلِ');
-
-  // والعطبُ أولى من كلِّ بوابةٍ: لا انتظارَ ولا تسويةً فوقَ عطبٍ قائمةٍ.
-  assert.equal(
-    claimAdmission({ fault: { kind: 'x' }, settlementDeferred: false, halted: false }),
-    'recover',
-  );
-  assert.equal(
-    claimAdmission({ fault: { kind: 'x' }, settlementDeferred: true, halted: true }),
-    'recover',
-  );
+  assert.equal(waits, 1);
+  // والدورةُ نفسُها: العطبُ إلى الاستردادِ لا إلى حجزٍ أو انتظارٍ.
+  const faultOutcome = await settleUntilAdmitted({
+    halted: () => false,
+    settle: async () => ({ fault: { kind: 'connection' }, deferred: false }),
+    wait: async () => {},
+    stopped: () => false,
+  });
+  assert.equal(faultOutcome.verdict, 'fault');
+  assert.deepEqual(faultOutcome.fault, { kind: 'connection' });
+  // والتوقفُ يقطعُ الدورةَ لا يُدوّرُها.
+  const stoppedOutcome = await settleUntilAdmitted({
+    halted: () => true,
+    settle: async () => ({ fault: null, deferred: true }),
+    wait: async () => {},
+    stopped: () => true,
+  });
+  assert.equal(stoppedOutcome.verdict, 'stopped');
 });
 
 // ─── (13) الإلغاءُ المتأخّرُ لا يُبطلُ قيمةً وُلدت ───────────────────────────
@@ -1858,6 +1852,11 @@ test(
             store: settleStore.store,
             queue: env.queue,
           });
+          // ردُّ الرفضِ **يُسجَّلُ فورَ الإنشاءِ** لا يُنتظرُ التنظيفُ: رفضٌ
+          // يقعُ أثناءَ الاستقصاءِ قد يصيرُ وعدًا بلا معالجٍ قبلَ أن يبلغَهُ
+          // `finally` — والمسارُ السليمُ يبقى يرمي (الانتظارُ الآتي يُظهرُ
+          // خطأَهُ لا يبتلعُهُ).
+          void settling.catch(() => {});
           // لا يُفترضُ أنّ التسويةَ بلغتِ القيدَ: يُقاسُ من القاعدةِ نفسِها أنّ
           // جلسةً **يحجبُها حاملُ هذا القفلِ بعينِهِ** وبيانُها `UPDATE
           // state.tasks` (أي: تسويتُنا هذه وصلتِ القيدَ ووقفتْ عليه) — عبرَّ

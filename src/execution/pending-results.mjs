@@ -540,3 +540,39 @@ export function claimAdmission({ fault, settlementDeferred, halted }) {
   if (settlementDeferred !== true) return 'claim';
   return halted === true ? 'wait-halted' : 'settle';
 }
+
+/**
+ * دورةُ القبولِ قبلَ الحجزِ — **العزفُ نفسُهُ لا النوتةُ وحدَها**: هذه هي
+ * التنسيقيةُ التي كانَتْ في حلقةِ العاملِ (حتى لا يُختبرَ قرارٌ صرفٌ وتُتركَ
+ * الحلقةُ بلا شاهدٍ). التسويةُ تُحاولُ فلا يُحجزُ **في الدورةِ نفسِها** مهما
+ * كانتْ حصيلتُها: مؤجَّلةٌ ⇒ دورةٌ جديدةٌ (انتظارٌ إن كانَ الإيقافُ قائمًا،
+ * وإلّا فمحاولةٌ أخرى)، وعطبٌ ⇒ إلى الاستردادِ، وانقضاءٌ ⇒ القبولُ. فلو
+ * استُؤنفَ الإيقافُ بينَ حصيلةٍ مؤجَّلةٍ وسؤالِ القبولِ لم يُفتحِ الحجزُ فوقَ
+ * معلّقةٍ لم تُقضَ — العلمُ من الحصيلةِ لا من العيّنةِ.
+ *
+ * @param {object} input
+ * @param {() => boolean} input.halted عيّنةُ الإيقافِ (للانتظارِ لا للقبولِ).
+ * @param {() => Promise<{ fault: unknown, deferred: boolean }>} input.settle محاولةُ التسويةِ تحملُ حصيلتَها.
+ * @param {() => Promise<void>} input.wait انتظارٌ قابلٌ للإلغاءِ تحتَ الإيقافِ.
+ * @param {() => boolean} input.stopped توقفُ العاملِ يقطعُ الدورةَ.
+ * @returns {Promise<{ verdict: 'admitted' | 'stopped' | 'fault', fault?: unknown }>}
+ */
+export async function settleUntilAdmitted({ halted, settle, wait, stopped }) {
+  for (;;) {
+    if (stopped()) return { verdict: 'stopped' };
+    const admission = claimAdmission({ fault: null, settlementDeferred: true, halted: halted() });
+    if (admission === 'wait-halted') {
+      await wait();
+      continue;
+    }
+    const result = await settle();
+    if (result.fault !== null && result.fault !== undefined) {
+      return { verdict: 'fault', fault: result.fault };
+    }
+    // **والحجزُ لا يقعُ في الدورةِ نفسِها التي حاولتِ التسويةَ**: إن عادَ
+    // التأجيلُ (إيقافٌ عائدٌ أثناءَ المحاولةِ) عادتِ الدورةُ تمنعُه — حتى
+    // تعلنَ الحصيلةُ نفسُها انقضاءَ التأجيلِ.
+    if (result.deferred === true) continue;
+    return { verdict: 'admitted' };
+  }
+}

@@ -33,8 +33,8 @@ import { createTaskQueue } from '../src/execution/queue.mjs';
 import { createWorker } from '../src/execution/worker.mjs';
 import {
   createPendingResultStore,
-  claimAdmission,
   settlePendingResults,
+  settleUntilAdmitted,
 } from '../src/execution/pending-results.mjs';
 import {
   RECOVERY_EXIT_CODES,
@@ -250,23 +250,24 @@ async function main() {
       // المؤجَّلةُ تُقضى قبلَ أولِ حجزٍ جديدٍ لا بعده — فالقيمةُ المعلّقةُ أحقُّ
       // من شقٍّ جديد. وإن عطِبَتِ القاعدةُ عندَها فالأمرُ إلى الاستردادِ
       // (ينتظرُ بميزانيتِه) لا إلى إعادةِ نداءٍ فارغةٍ تدورُ بلا انتظار.
-      const admission = claimAdmission({
-        fault,
-        settlementDeferred,
-        halted: isHalted(),
-      });
-      if (admission === 'wait-halted') {
-        await abortableSleep(options.pollMs, stopper.signal);
-        continue;
-      }
-      if (admission === 'settle') {
-        const deferredResult = await settlePending();
-        fault = deferredResult.fault;
-        settlementDeferred = deferredResult.deferred;
-        // **والحجزُ لا يقعُ في الدورةِ نفسِها التي حاولتِ التسويةَ**: إن عادَ
-        // التأجيلُ (إيقافٌ عائدٌ أثناءَ المحاولةِ) عادتِ البوابةُ تمنعُه في
-        // الدورةِ التاليةِ — فلا يُبنى القبولُ على عيّنةٍ تسبقُ المحاولةَ ولا
-        // تليها، حتى تعلنَ الحصيلةُ نفسُها انقضاءَ التأجيلِ.
+      if (fault === null && settlementDeferred) {
+        // **العزفُ المستخرجُ نفسُهُ** الذي يُختبرُ (`settleUntilAdmitted`): لا
+        // حجزَ في الدورةِ التي حاولتِ التسويةَ — التأجيلُ العائدُ يعيدُ المنعَ
+        // والعطبُ إلى الاستردادِ، حتى تعلنَ الحصيلةُ نفسُها انقضاءَ التأجيلِ.
+        const outcome = await settleUntilAdmitted({
+          halted: isHalted,
+          settle: settlePending,
+          wait: async () => {
+            await abortableSleep(options.pollMs, stopper.signal);
+          },
+          stopped: () => stopping,
+        });
+        if (outcome.verdict === 'stopped') break;
+        if (outcome.verdict === 'fault') {
+          fault = /** @type {WorkerDatabaseFault} */ (outcome.fault);
+          continue;
+        }
+        settlementDeferred = false;
         continue;
       }
       if (fault !== null) {
