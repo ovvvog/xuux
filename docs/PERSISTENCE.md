@@ -125,6 +125,7 @@ npm test                                               # اختبارات الق
 | `tasks.error_message` | لا خطأ فلا رسالة | **حدٌّ مُعلن**: لا قيد قاعدة يلزمها — `queue.fail` هي من تكتبها مع الرمز |
 | `tasks.cancel_reason` | لم يُطلب إلغاؤها | `tasks_cancelled_needs_reason` |
 | `tasks.lease_owner` | مهمة غير محجوزة، أو أُطلق عقدها بعد النهاية | `tasks_running_needs_lease` |
+| `tasks.claim_id` | مهمة لم تُحجز بعد، أو فُكّ حجزها بلا حصيلة نهائية (إرجاع)؛ والحصيلة النهائية تحتفظ به دليلا | `tasks_running_needs_claim` (‏`WL-392`) — هويةُ حجزٍ لا تُعادُ لا بالاسمِ ولا بالعدّادِ؛ تُقارنُ بها التسويةُ نتيجةَ الحياةِ السابقة |
 | `tasks.lease_expires_at` | لا عقد فلا انتهاء له | `tasks_running_needs_lease` — مهمةٌ جارية لا تكون بلا عقد |
 | `tasks.budget_resource` | مهمة لا ميزانية عليها | `tasks_budget_amount_needs_resource` — لا مبلغ بلا مورد |
 | `tasks.budget_debited_at` | لم تُخصم: لا ميزانية عليها أو رُفضت قبل البدء | هو نفسه **قيد «مرّة واحدة»**: الخصم يُسجَّل مرّة فلا تُحاسَب إعادةُ المحاولة ثانياً (`M5.06`) |

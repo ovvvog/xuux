@@ -628,6 +628,16 @@ channels:
         version: 1
         required:
           [durationMs, pendingDigest, phase, probes, reason, reconciled, taskId, verdict, worker]
+      # النتائجُ المعلّقةُ الدائمةُ (`WL-392` — إغلاقُ `LIVE-45`/ب): القيمةُ نفسُها
+      # تُخزّنُ هنا لا بصمتُها وحدَها — فهذا عينُ ما كان مفقوداً: قتلُ العمليةِ في
+      # نافذةِ التسجيلِ كان يُفقدُ القيمةَ ويُعيدُ تشغيلَ المُعالِج. والجسمُ مختومٌ
+      # في الإنتاجِ (لا نصٌّ صريحٌ على القرص)، والحكمُ بعدَ التسويةِ قيدٌ لا حذف.
+      - type: kernel.worker.result-staged
+        version: 1
+        required: [taskId, worker, attempt, claimId, result]
+      - type: kernel.worker.result-resolved
+        version: 1
+        required: [taskId, attempt, claimId, outcome, reason]
   - id: knowledge
     subject: 'سجلُّ التجارب: من سجّل تجربةً وبأيّ فرضيةٍ ومقاييسَ ومتى ثُبّتت ومن راجعها (واصفاتٌ بلا مادّة)'
     classification: internal
