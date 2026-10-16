@@ -109,6 +109,8 @@ export const RECOVERY_REASONS = Object.freeze({
   DECISION_MISMATCH: 'DB_RECOVERY_DECISION_MISMATCH',
   /** انقطاعٌ أثناء خصمِ الميزانية بعد وضعِ علامتِه: لا يُثبَتُ أوقع الخصمُ أم لا. */
   BUDGET_UNPROVABLE: 'DB_RECOVERY_BUDGET_UNPROVABLE',
+  /** فقدَ العاملُ اسمَه لإقلاعٍ أحدثَ: لا تسويةَ بيدِ مالكٍ سابقٍ (`WL-396`). */
+  REGISTRATION_LOST: 'DB_RECOVERY_REGISTRATION_LOST',
 });
 
 /**
@@ -327,11 +329,12 @@ export function abortableSleep(ms, signal) {
  * @param {{ append(type: string, actor: string, data: Record<string, unknown>): unknown }} input.log
  * @param {Partial<RecoveryPolicy>} [input.policy]
  * @param {Date} [input.bootAt] لحظةُ إقلاعِ هذه العملية: حدُّ ما يُنسب إليها من حجوز
+ * @param {() => Promise<boolean>} [input.ownsName] بوابةُ ملكيّةِ الاسمِ من سجلِّ الإقلاعاتِ: تُستنطقُ بعدَ عودةِ القاعدةِ وقبلَ أيِّ كتابةِ تسويةٍ — كاذبةٌ تعني أنّ إقلاعًا أحدثَ أخذَ الاسمَ فلا تسويةَ بيدِ المالكِ السابقِ (`WL-396`).
  * @param {() => Date} [input.now]
  * @param {(ms: number, signal?: AbortSignal) => Promise<boolean>} [input.sleep]
  */
 export function createDatabaseRecovery(input) {
-  const { pool, queue, worker, haltGuard, log } = input;
+  const { pool, queue, worker, haltGuard, log, ownsName } = input;
   if (!pool || !queue || !haltGuard || !log || typeof log.append !== 'function') {
     throw new Error('المُستردّ يحتاج المجمّع والطابور ومفتاح الإيقاف وسجلاً يُقيَّد فيه.');
   }
@@ -715,6 +718,21 @@ export function createDatabaseRecovery(input) {
         }
 
         try {
+          // تفرُّدُ الاسمِ يحرسُ التسويةَ كما يحرسُ الحجزَ (`WL-396`): تسويةُ الاسترداد
+          // تكتبُ بالمفتاحِ الاسميِّ (`releaseUnstarted` على `lease_owner`)، فلو فقدَ
+          // هذا الإقلاعُ اسمَه لإقلاعٍ أحدثَ بعدَ تقادُمِ النبضةِ كان إجراؤُها إفراجاً
+          // عن عقودِ المالكِ الجديدِ. فتحُ البوابةِ هنا — بعدَ عودةِ القاعدةِ وقبلَ أيِّ
+          // كتابةٍ — يُثبتُ الملكيّةَ من القاعدةِ نفسِها (لا من ذاكرةِ العمليةِ)، فإن
+          // رُدَّت كاذبةً توقّفَ العاملُ بلا تسويةٍ لا يملكُها. والفحصُ نفسُهُ عطبُ قاعدةٍ؟
+          // يعودُ إلى المسابيرِ ضمنَ الميزانيّةِ ذاتِها — لا يُقرَّر الفقدُ من عطبٍ.
+          if (ownsName !== null && typeof ownsName === 'function' && !(await ownsName())) {
+            return verdictOf(
+              fault,
+              RECOVERY_VERDICTS.FAILED,
+              RECOVERY_REASONS.REGISTRATION_LOST,
+              detail(),
+            );
+          }
           reconciled.length = 0;
           const boundary = now();
           if (fault.taskId !== null) {
