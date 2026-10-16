@@ -45,6 +45,16 @@ import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+/**
+ * سببُ تخطٍّ معلَنٌ حينَ لا تتوفّرُ مساحاتُ أسماءِ النواة: فحصُ البوابةِ (‏`ci.yml`)
+ * يُسقِطُ كلَّ تخطٍّ عارٍ بلا سببٍ مكتوبٍ في TAP (‏`CI_TAP_BARE_SKIP`)، فالتخطّي
+ * بلا سببٍ نصٍّ لا يمرّ. والنمطُ هوَ نمطُ `kernelSkip` في `tests/execution/isolation.test.mjs`.
+ */
+const isolationProbe = probeIsolation();
+const isolationUnavailable = isolationProbe.available
+  ? false
+  : `تخطٍّ معلَن: ${isolationProbe.reason}`;
 const WORKER_SCRIPT = path.join(ROOT, 'scripts/worker.mjs');
 const AUTH = { decisionId: 'decision-نتائج-معلقة' };
 /** مهمّةٌ تعبرُ العزلَ الحقيقيَّ في العملية: سقفُ ذاكرةٍ يتّسعُ لـNode داخل الحدود. */
@@ -456,7 +466,7 @@ test(
 test(
   'العمليةُ الحقيقية: القيمةُ تُقتلُ في نافذةِ تسجيلِها فتنجو على القرصِ وتُسوّى من حياةٍ جديدة',
   {
-    skip: skipWithoutDatabase || !probeIsolation().available,
+    skip: skipWithoutDatabase || isolationUnavailable,
     timeout: 90_000,
   },
   async (t) => {
@@ -967,7 +977,7 @@ test(
 test(
   'النجاحُ التزمَ في القاعدةِ وضاعَ الجوابُ: قتلٌ ثمّ إقلاعٌ جديدٌ يُسوّي بالملاحظةِ — قيدٌ بلا انتقالٍ جديدٍ ولا استبدال',
   {
-    skip: skipWithoutDatabase || !probeIsolation().available,
+    skip: skipWithoutDatabase || isolationUnavailable,
     timeout: 90_000,
   },
   async (t) => {
@@ -1431,7 +1441,7 @@ test(
 test(
   'القاعدةُ مقطوعةٌ عندَ الإقلاعِ ونتيجةٌ معلّقةٌ وشقٌّ جديدٌ منتظر: التسويةُ تُستوفى قبلَ حجزِ الشقِّ الجديدِ لا بعده',
   {
-    skip: skipWithoutDatabase || !probeIsolation().available,
+    skip: skipWithoutDatabase || isolationUnavailable,
     timeout: 90_000,
   },
   async (t) => {
@@ -1594,7 +1604,7 @@ test(
 test(
   'خطأُ قراءةٍ لا يعودُ للقاعدةِ عندَ الإقلاعِ يوقفُ العاملَ لا يُمرَّر: خروجٌ غيرُ صفريٍّ ولا حجزَ ولا تسويةً صامتة',
   {
-    skip: skipWithoutDatabase || !probeIsolation().available,
+    skip: skipWithoutDatabase || isolationUnavailable,
     timeout: 60_000,
   },
   async (t) => {
@@ -1668,7 +1678,7 @@ test(
 test(
   'إقلاعٌ تحتَ الإيقافِ السياديّ معَ نتيجةٍ معلّقةٍ وشقٍّ منتظرٍ، ثمّ استئناف: التسويةُ تُقضى قبلَ حجزِ الشقِّ الجديدِ لا بعده',
   {
-    skip: skipWithoutDatabase || !probeIsolation().available,
+    skip: skipWithoutDatabase || isolationUnavailable,
     timeout: 90_000,
   },
   async (t) => {
