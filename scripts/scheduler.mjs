@@ -40,6 +40,8 @@ import {
   createPostgresRepositories,
 } from '../src/persistence/composition.mjs';
 import { createPool } from '../src/persistence/db.mjs';
+import { createTaskQueue } from '../src/execution/queue.mjs';
+import { runReclaimLeasesJob } from '../src/execution/reaper.mjs';
 import { loadDeferrals, loadReadinessContract } from '../src/readiness/contract.mjs';
 import { EventLog } from '../src/root-of-trust/index.mjs';
 import {
@@ -140,7 +142,7 @@ async function runRecoveryJob() {
 async function compose() {
   const url = process.env['DATABASE_URL'] ?? '';
   const log = new EventLog();
-  /** @type {{ repositories: Record<string, unknown>, source: string, close: () => Promise<void> }} */
+  /** @type {{ repositories: Record<string, unknown>, source: string, pool: import('pg').Pool | null, close: () => Promise<void> }} */
   const wiring =
     url === ''
       ? {
@@ -148,6 +150,7 @@ async function compose() {
             /** @type {unknown} */ (createMemoryRepositories())
           ),
           source: 'memory',
+          pool: null,
           close: async () => {},
         }
       : (() => {
@@ -157,6 +160,7 @@ async function compose() {
               /** @type {unknown} */ (createPostgresRepositories(pool))
             ),
             source: 'postgres',
+            pool,
             close: async () => {
               await pool.end();
             },
@@ -183,6 +187,16 @@ async function compose() {
     kind: 'service',
   });
   const actor = { id: agent.id, role: agent.role, kind: 'service' };
+  // الطابورُ الذي يحصدُه المُجدوِلُ — إغلاقُ الدَينِ `LIVE-45` (أ) (`WL-391`).
+  // **مجمّعٌ واحدٌ لا مجمّعٌ لكلِّ حصادٍ**: الحاصدُ لا يفتحُ اتصالاً مستقلاً في
+  // كلِّ شقٍّ، بل يشاركُ مجمّعَ التركيبِ. وعندَ غيابِ PostgreSQL لا يُحصَّلُ عَلى
+  // **فراغٍ يوهمُ النجاحَ** — يُرفَضُ من أصلِه (لا يعني «لا عقود منتهية» بل
+  // «لا قاعدةَ لِيُقرأَ منها»).
+  /** @type {ReturnType<typeof createTaskQueue> | null} */
+  let reaperQueue = null;
+  if (wiring.source === 'postgres' && wiring.pool !== null) {
+    reaperQueue = createTaskQueue({ pool: wiring.pool });
+  }
   const scheduler = new Scheduler({
     policy,
     ledger: new ScheduledRunLedger({
@@ -194,6 +208,14 @@ async function compose() {
   });
   scheduler.register('job:readiness-report', () => runReadinessJob());
   scheduler.register('job:recovery-drill', () => runRecoveryJob());
+  scheduler.register('job:reclaim-expired-leases', () =>
+    runReclaimLeasesJob({
+      queue: reaperQueue,
+      actor,
+      log,
+      enforcementPoint: chain.enforcementPoint,
+    }),
+  );
   return { scheduler, actor, log, source: wiring.source, close: wiring.close };
 }
 

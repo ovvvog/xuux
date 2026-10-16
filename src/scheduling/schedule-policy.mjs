@@ -57,7 +57,7 @@ const MS_PER_HOUR = 3600000;
  * @typedef {object} ScheduledJobShape
  * @property {string} id
  * @property {string} subject
- * @property {'report' | 'drill'} kind
+ * @property {'report' | 'drill' | 'reap'} kind
  * @property {{ everyHours: number, graceHours: number }} cadence
  * @property {string} actorRole
  * @property {string[]} performs
