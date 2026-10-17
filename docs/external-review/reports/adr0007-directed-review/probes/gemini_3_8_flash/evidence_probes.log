@@ -1,0 +1,258 @@
+=== START PROBES: 2026-10-16 21:32:53 UTC ===
+--- PROBE 1: git rev-parse HEAD in review tree ---
+a76c8478b720e6fd44d6f4fb988fe90a471718dd
+EXIT: 0
+--- PROBE 2: Environment versions ---
+node: v20.20.2
+npm: 10.8.2
+swtpm: TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+tpm2_getcap: tool="tpm2_getcap" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device
+openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+psql: psql (PostgreSQL) 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1)
+EXIT: 0
+--- PROBE 3: scripts/tpm-sim-ci.sh from repo directory ---
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+# tests 93
+# pass 91
+# fail 0
+# skipped 2
+# todo 0
+اختباراتُ محاكي TPM نجحَت على swtpm — دليلُ محاكاةٍ لا دليلُ عتاد.
+EXIT: 0
+--- PROBE 3b: scripts/tpm-sim-ci.sh from external directory (/home/user/workspace) ---
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+::error::اختباراتُ محاكي TPM سقطَت (rc=1)
+EXIT: 1
+--- PROBE 4: tests/sim/channel-poc.test.mjs with XUUX_CHANNEL_POC=1 ---
+TAP version 13
+# Subtest: bind policy: يرفض البدائل وغير Loopback
+ok 1 - bind policy: يرفض البدائل وغير Loopback
+  ---
+  duration_ms: 4.045355
+  ...
+# Subtest: bind policy: يسمح بـloopback دائماً
+ok 2 - bind policy: يسمح بـloopback دائماً
+  ---
+  duration_ms: 0.173404
+  ...
+# Subtest: bind policy: 172.16/12 يتطلب الشارة الصريحة وواجهة فعلية
+ok 3 - bind policy: 172.16/12 يتطلب الشارة الصريحة وواجهة فعلية
+  ---
+  duration_ms: 0.204098
+  ...
+# Subtest: static: أدوات sim/channel لا تستورد عميل TPM ولا أوامر TPM
+ok 4 - static: أدوات sim/channel لا تستورد عميل TPM ولا أوامر TPM
+  ---
+  duration_ms: 2.310325
+  ...
+# Subtest: static: مستجيبات TCP/vsock تفرض timeout إلزامياً وkill switch وتنظيفاً
+ok 5 - static: مستجيبات TCP/vsock تفرض timeout إلزامياً وkill switch وتنظيفاً
+  ---
+  duration_ms: 0.561166
+  ...
+# Subtest: static: أوامر التنظيف والتحقق موجودة للجهتين
+ok 6 - static: أوامر التنظيف والتحقق موجودة للجهتين
+  ---
+  duration_ms: 0.225731
+  ...
+# Subtest: docs: عقد TORN/MISMATCH ومصفوفة الأدلة موثّقة
+ok 7 - docs: عقد TORN/MISMATCH ومصفوفة الأدلة موثّقة
+  ---
+  duration_ms: 0.313525
+  ...
+# Subtest: parity: تأطير XU متطابق بايتاً-بايتاً بين python وnode
+ok 8 - parity: تأطير XU متطابق بايتاً-بايتاً بين python وnode
+  ---
+  duration_ms: 107.413603
+  ...
+# Subtest: live (XUUX_CHANNEL_POC=1): مستجيب/عميل TCP على loopback مع رفض malformed
+ok 9 - live (XUUX_CHANNEL_POC=1): مستجيب/عميل TCP على loopback مع رفض malformed
+  ---
+  duration_ms: 1020.953529
+  ...
+# Subtest: live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع تقريراً منظماً
+ok 10 - live (XUUX_CHANNEL_POC=1): فحص توافر vsock يعمل ويطبع تقريراً منظماً
+  ---
+  duration_ms: 72.311456
+  ...
+# Subtest: static: سكربتات PowerShell تحشو البايت إلى [int] قبل الإزاحة في CRC
+ok 11 - static: سكربتات PowerShell تحشو البايت إلى [int] قبل الإزاحة في CRC
+  ---
+  duration_ms: 0.824834
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3275.873216
+EXIT: 0
+--- PROBE 5: tests/root-of-trust/replay-limit.test.mjs ---
+TAP version 13
+# Subtest: حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ لا يكشفُها الخاتَم (لكنَّ الحداثةَ تكشفُها)
+    # Subtest: استرجاعُ الجذرِ كلِّه بعدَ تقدّمِ الحداثةِ → REJECT (STALE_MANIFEST_EPOCH)
+    ok 1 - استرجاعُ الجذرِ كلِّه بعدَ تقدّمِ الحداثةِ → REJECT (STALE_MANIFEST_EPOCH)
+      ---
+      duration_ms: 38.887641
+      ...
+    # Subtest: P0 Freshness: تسلسلُ الختمِ يرجعُ إلى الوراءِ فيُكشَفُ الآنَ بالحداثةِ
+    ok 2 - P0 Freshness: تسلسلُ الختمِ يرجعُ إلى الوراءِ فيُكشَفُ الآنَ بالحداثةِ
+      ---
+      duration_ms: 37.207866
+      ...
+    # Subtest: حدُّ الإعادةِ **لا يشملُ** اللقطةَ الجزئيّةَ: محوُ السجلِّ معَ بيانٍ أقدمَ يُرَدُّ (الآنَ بالحداثةِ)
+    ok 3 - حدُّ الإعادةِ **لا يشملُ** اللقطةَ الجزئيّةَ: محوُ السجلِّ معَ بيانٍ أقدمَ يُرَدُّ (الآنَ بالحداثةِ)
+      ---
+      duration_ms: 27.47822
+      ...
+    # Subtest: حدُّ الإعادةِ لا يمتدُّ إلى ما هو أضيقُ: سطرُ دفترٍ مدسوسٌ بتجزئةٍ عامّةٍ يُرفَضُ
+    ok 4 - حدُّ الإعادةِ لا يمتدُّ إلى ما هو أضيقُ: سطرُ دفترٍ مدسوسٌ بتجزئةٍ عامّةٍ يُرفَضُ
+      ---
+      duration_ms: 6.938306
+      ...
+    1..4
+ok 1 - حدُّ الإعادةِ — لقطةٌ كاملةٌ متّسقةٌ لا يكشفُها الخاتَم (لكنَّ الحداثةَ تكشفُها)
+  ---
+  duration_ms: 111.72371
+  type: 'suite'
+  ...
+# Subtest: `S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على جذرٍ قائمٍ ⇒ فشلٌ مُغلَقٌ
+    # Subtest: الرمزُ مُثبَّتٌ نصّاً في عقدِ المصنعِ فيُختبَرُ ولا يُخمَّنُ من رسالةٍ
+    ok 1 - الرمزُ مُثبَّتٌ نصّاً في عقدِ المصنعِ فيُختبَرُ ولا يُخمَّنُ من رسالةٍ
+      ---
+      duration_ms: 0.22395
+      ...
+    # Subtest: `S13`: بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ السجلِّ ورأسِه + دفترٌ فارغٌ ⇒ يُرَدُّ الإقلاعُ (الآنَ بالحداثةِ)
+    ok 2 - `S13`: بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ السجلِّ ورأسِه + دفترٌ فارغٌ ⇒ يُرَدُّ الإقلاعُ (الآنَ بالحداثةِ)
+      ---
+      duration_ms: 25.108054
+      ...
+    # Subtest: `S13` بصيغةِ التخفّي: سجلٌّ فارغٌ يُترَكُ مكانَ المحوِ ⇒ يُرَدُّ بالحداثةِ
+    ok 3 - `S13` بصيغةِ التخفّي: سجلٌّ فارغٌ يُترَكُ مكانَ المحوِ ⇒ يُرَدُّ بالحداثةِ
+      ---
+      duration_ms: 28.031136
+      ...
+    # Subtest: إقلاعٌ شرعيٌّ على جذرٍ قائمٍ لا يمسُّه الحارسُ — ولو كانَ السجلُّ بلا واقعةٍ بعدُ
+    ok 4 - إقلاعٌ شرعيٌّ على جذرٍ قائمٍ لا يمسُّه الحارسُ — ولو كانَ السجلُّ بلا واقعةٍ بعدُ
+      ---
+      duration_ms: 10.01091
+      ...
+    # Subtest: الحارسُ لا يُطبَّقُ على تهيئةٍ أولى: النشأةُ تكتبُ البيانَ قبلَ السجلِّ فغيابُه حالُها
+    ok 5 - الحارسُ لا يُطبَّقُ على تهيئةٍ أولى: النشأةُ تكتبُ البيانَ قبلَ السجلِّ فغيابُه حالُها
+      ---
+      duration_ms: 0.54559
+      ...
+    # Subtest: الحارسُ إنتاجيٌّ وحدَه: خارجَ الإنتاجِ لا يُرَدُّ غيابُ السجلِّ
+    ok 6 - الحارسُ إنتاجيٌّ وحدَه: خارجَ الإنتاجِ لا يُرَدُّ غيابُ السجلِّ
+      ---
+      duration_ms: 0.312705
+      ...
+    1..6
+ok 2 - `S13`: بيانٌ مختومٌ حاضرٌ بلا سجلٍّ على جذرٍ قائمٍ ⇒ فشلٌ مُغلَقٌ
+  ---
+  duration_ms: 64.640413
+  type: 'suite'
+  ...
+1..2
+# tests 10
+# suites 2
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 333.191868
+EXIT: 0
+--- PROBE 6: tests/root-of-trust/freshness-socket.test.mjs ---
+TAP version 13
+# Subtest: P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضادِّ الإعادة
+    # Subtest: الإنتاجُ بلا مقبسِ حداثةٍ → REJECT (PRODUCTION_FRESHNESS_SOCKET_REQUIRED)
+    ok 1 - الإنتاجُ بلا مقبسِ حداثةٍ → REJECT (PRODUCTION_FRESHNESS_SOCKET_REQUIRED)
+      ---
+      duration_ms: 9.519725
+      ...
+    # Subtest: التطويرُ بلا مقبسِ حداثةٍ → قبولٌ (ADR 0006)
+    ok 2 - التطويرُ بلا مقبسِ حداثةٍ → قبولٌ (ADR 0006)
+      ---
+      duration_ms: 36.674153
+      ...
+    # Subtest: Case 1: لقطةٌ قديمةٌ متّسقةٌ → REJECT (STALE_MANIFEST_EPOCH)
+    ok 3 - Case 1: لقطةٌ قديمةٌ متّسقةٌ → REJECT (STALE_MANIFEST_EPOCH)
+      ---
+      duration_ms: 103.193601
+      ...
+    # Subtest: Case 2: لقطةٌ أحدثُ من المرجعِ بلا إذنٍ → REJECT (FRESHNESS_EPOCH_REGRESSION)
+    ok 4 - Case 2: لقطةٌ أحدثُ من المرجعِ بلا إذنٍ → REJECT (FRESHNESS_EPOCH_REGRESSION)
+      ---
+      duration_ms: 24.09988
+      ...
+    # Subtest: Case 3: إعادةُ لقطةٍ سابقةٍ → REJECT (STALE_MANIFEST_EPOCH)
+    ok 5 - Case 3: إعادةُ لقطةٍ سابقةٍ → REJECT (STALE_MANIFEST_EPOCH)
+      ---
+      duration_ms: 42.115845
+      ...
+    # Subtest: Case 4: استعادةٌ بعدَ عطلٍ → لا تُقبَلُ حالةٌ قديمةٌ
+    ok 6 - Case 4: استعادةٌ بعدَ عطلٍ → لا تُقبَلُ حالةٌ قديمةٌ
+      ---
+      duration_ms: 28.744407
+      ...
+    # Subtest: Case 5: تقدّمٌ رتيبٌ ناجحٌ → ACCEPT
+    ok 7 - Case 5: تقدّمٌ رتيبٌ ناجحٌ → ACCEPT
+      ---
+      duration_ms: 31.026001
+      ...
+    # Subtest: R10-F-01: لقطةٌ مختومةٌ صفريّةُ العهدِ بعدَ تقدُّمِ المرجعِ → REJECT (STALE_MANIFEST_EPOCH)
+    ok 8 - R10-F-01: لقطةٌ مختومةٌ صفريّةُ العهدِ بعدَ تقدُّمِ المرجعِ → REJECT (STALE_MANIFEST_EPOCH)
+      ---
+      duration_ms: 11.716634
+      ...
+    1..8
+ok 1 - P0 Freshness Enforcement — إنفاذُ الحداثةِ ومضادِّ الإعادة
+  ---
+  duration_ms: 299.969159
+  type: 'suite'
+  ...
+1..1
+# tests 8
+# suites 1
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 534.605319
+EXIT: 0
+--- PROBE 7: scripts/production-entry.mjs fail-closed behavior ---
+ERROR: XUUX_FRESHNESS_BACKEND not set.
+  Production requires a durable freshness backend (not InMemoryFreshnessSocket).
+  No backend is supported in this environment — production boot is refused closed.
+EXIT: 1
+--- PROBE 7b: scripts/production-entry.mjs with unsupported backend ---
+ERROR: XUUX_FRESHNESS_BACKEND="tpm_nv" is not supported.
+  Supported backends: (none in this environment)
+  Production requires a durable freshness backend with proven anti-rollback properties.
+EXIT: 1
+--- PROBE 8: Direct TPM2 NV counter redefinition test on swtpm ---
+Defining counter at 0x01800001...
+nv-index: 0x1800001
+Incrementing counter...
+WARN: Reading full size of the NV index
+Counter hex after 2 increments: 0000000000000002
+Undefining counter...
+Redefining counter at 0x01800001...
+nv-index: 0x1800001
+WARN: Reading full size of the NV index
+WARNING:esys:src/tss2-esys/api/Esys_NV_Read.c:315:Esys_NV_Read_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_NV_Read.c:105:Esys_NV_Read() Esys Finish ErrorCode (0x0000014a) 
+ERROR: Esys_NV_Read(0x14A) - tpm:error(2.0): an NV Index is used before being initialized or the state saved by TPM2_ShutdownSTATE could not be restored
+ERROR: Failed to read NVRAM area at index 0x1800001
+ERROR: Unable to run tpm2_nvread
+Counter hex after redefinition (before increment): 
+Incrementing redefined counter...
+WARN: Reading full size of the NV index
+Counter hex after increment: 0000000000000003
+EXIT: 0
+=== END PROBES: 2026-10-16 21:33:04 UTC ===

@@ -1,0 +1,17 @@
+nvdefine rc=0
+nvincrement rc=0
+createprimary(ecdsa signing) rc=0
+## size=8 offset=0
+nvcertify rc=0
+type: 8014
+qualifiedSigner: 000bc5ce24927fb6660f40fce251808f1acac476f02ce0298d477cbbbca82dfb3b4d
+extraData: 51442d70726f62652d636c617564655f6661626c655f355f31
+    indexName: 000bf6dd1af93f3202563084f4a55c9490537d1f23218b1b9c1599bccfbfc290550e
+    offset:  0
+    nvContents: 0000000000000084
+## size=0 offset=0 (digest form — TPMS_NV_DIGEST_CERTIFY_INFO since rev 1.53)
+nvcertify(size=0) rc=0
+ERROR:marshal:src/tss2-mu/tpmu-types.c:502:Tss2_MU_TPMU_ATTEST_Unmarshal() wrong selector 0x801c return error 
+## uint64 precision (corrected example): 2^53 vs 2^53+1
+Number(2^53)===Number(2^53+1): true | bigint equal: false
+cleanup rc=0
