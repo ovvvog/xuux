@@ -66,7 +66,9 @@ export function decodeNvPublic(hex) {
   return { index, nameAlg, attributes, authPolicy, dataSize };
 }
 
-/** قيودُ ADR 0007 §4.1 على فهرسِ المرساة، مفحوصةً بتاً بتاً. تُعيدُ قائمةَ المخالفات (فارغةٌ = مطابق). */
+/** قيودُ ADR 0007 §4.1 على فهرسِ المرساة، مفحوصةً بتاً بتاً. تُعيدُ قائمةَ المخالفات (فارغةٌ = مطابق).
+ *  البتاتُ المحجوزةُ (8 و9 و20–24) يجبُ أن تكونَ صفرًا (Part 2 r1.38 Table 204) — وُسّعَت في
+ *  WL-413 إغلاقًا لـSOL-05: الفحصُ يُسمّيها الآن فلا يُقالُ إنّه يفحصُ «كلَّ البتات» وهو لا يفعل. */
 export function anchorAttributeViolations(attributes, { written } = { written: false }) {
   const a = attributes >>> 0;
   const v = [];
@@ -77,6 +79,9 @@ export function anchorAttributeViolations(attributes, { written } = { written: f
     'WRITE_STCLEAR', 'GLOBALLOCK', 'PPREAD', 'OWNERREAD', 'POLICYREAD', 'CLEAR_STCLEAR', 'READ_STCLEAR',
     'PLATFORMCREATE', 'WRITELOCKED', 'READLOCKED']) {
     if (has(TPMA_NV[k])) v.push(k + '=1');
+  }
+  for (const bit of [8, 9, 20, 21, 22, 23, 24]) {
+    if (has(1 << bit)) v.push('RESERVED_BIT_' + bit + '=1');
   }
   if (!has(TPMA_NV.AUTHREAD)) v.push('AUTHREAD=0');
   if (!has(TPMA_NV.NO_DA)) v.push('NO_DA=0');
