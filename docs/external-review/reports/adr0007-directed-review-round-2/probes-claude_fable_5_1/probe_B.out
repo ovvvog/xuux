@@ -1,0 +1,18 @@
+combos total = 5760
+outcomes = {"STATE_TPM_ATTEST_INVALID":2272,"STATE_TPM_COUNTER_MISMATCH":8,"running":2,"STATE_RETIRED":2,"STATE_HALT_SOVEREIGN":4,"STATE_MANIFEST_TPM_TORN":16,"STATE_TPM_CHANNEL_FAILED":1152,"STATE_TPM_UNAVAILABLE":1152,"STATE_TPM_INDEX_MISSING":1152}
+running combos = 2 (expected = anchor ok × present × sealOk × certify ok × attestEqB × delta0 × !halted × !retired × staged(2) = 2)
+invariant-2 violations (running without full verification / staged influences result) = 0
+stage-3 double-match (halted && retired both true, delta==0, fully checked) = 2 — the matrix text gives no priority rule; the written rows are not mutually exclusive inside stage 3
+[S1 halt acknowledged (B_halt==C), boot] stage=3 => STATE_HALT_SOVEREIGN
+[S2 restore snapshot immediately before halt (B=C-1)] stage=2 => STATE_MANIFEST_TPM_TORN (C==B+1 (no idle completion))
+[S3 restore older snapshot (B<C-1)] stage=2 => STATE_MANIFEST_TPM_TORN (C>B+1)
+[S4 torn between increment and durable commit (B=C-1, staged present)] stage=2 => STATE_MANIFEST_TPM_TORN (C==B+1 (no idle completion))
+[S5 P01: cut before increment then halt then restore (committed B=C-1; no sealed envelope for C exists)] stage=2 => STATE_MANIFEST_TPM_TORN (C==B+1 (no idle completion))
+[S6 forward forgery / other device body (B>C)] stage=2 => STATE_TPM_COUNTER_MISMATCH
+[S7 body without certify at matching counter] stage=1 => STATE_TPM_ATTEST_INVALID (certify absent)
+[S8 unparseable manifest] stage=1 => STATE_TPM_ATTEST_INVALID (manifest unparseable)
+[S9 retired device booted] stage=3 => STATE_RETIRED
+[S10 retired + halted both set] stage=3 => STATE_HALT_SOVEREIGN (AMBIGUOUS: halted&&retired both true — matrix lists two matching rows; priority not stated)
+[S11 retirement seal torn between increment and commit on OLD device (B_pre=C-1)] stage=2 => STATE_MANIFEST_TPM_TORN (C==B+1 (no idle completion))
+NOTE S11: old device is TORN (not RETIRED). TORN is resumable by the sovereign resume path (§د الاستئناف); the matrix has no input representing an issued-but-uncommitted retirement record, so "retired row prevents dual running" holds only if the retirement commit succeeded.
+NOTE resume: the only halted→running transition is the sovereign resume path, which is outside the matrix inputs; its binding to the specific halt (counter/digest) is not specified in §د/§ج.

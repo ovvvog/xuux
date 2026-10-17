@@ -1,0 +1,151 @@
+{
+  "combinations": 1200,
+  "running_cells": 2,
+  "running_only_expected": true,
+  "running_unexpected": [],
+  "both_flag_results": [
+    {
+      "staged": false,
+      "r": {
+        "stage": 3,
+        "code": "STATE_HALT_SOVEREIGN",
+        "cls": "halt",
+        "rel": 0
+      }
+    },
+    {
+      "staged": true,
+      "r": {
+        "stage": 3,
+        "code": "STATE_HALT_SOVEREIGN",
+        "cls": "halt",
+        "rel": 0
+      }
+    }
+  ],
+  "scenarios": [
+    {
+      "label": "restore older snapshot after acknowledged halt (C=B+1, old body not halted)",
+      "result": {
+        "stage": 2,
+        "code": "STATE_MANIFEST_TPM_TORN",
+        "cls": "close",
+        "rel": 1
+      }
+    },
+    {
+      "label": "restore much older snapshot (C>B+1)",
+      "result": {
+        "stage": 2,
+        "code": "STATE_MANIFEST_TPM_TORN",
+        "cls": "close",
+        "rel": 4
+      }
+    },
+    {
+      "label": "staged present, C==B+1, committed older",
+      "result": {
+        "stage": 2,
+        "code": "STATE_MANIFEST_TPM_TORN",
+        "cls": "close",
+        "rel": 1
+      }
+    },
+    {
+      "label": "crash after increment before commit, committed not halted",
+      "result": {
+        "stage": 2,
+        "code": "STATE_MANIFEST_TPM_TORN",
+        "cls": "close",
+        "rel": 1
+      }
+    },
+    {
+      "label": "halt body restored but counter ahead of body (F03 shape)",
+      "result": {
+        "stage": 2,
+        "code": "STATE_MANIFEST_TPM_TORN",
+        "cls": "close",
+        "rel": 2
+      }
+    },
+    {
+      "label": "acknowledged halt still on disk, C==B",
+      "result": {
+        "stage": 3,
+        "code": "STATE_HALT_SOVEREIGN",
+        "cls": "halt",
+        "rel": 0
+      }
+    },
+    {
+      "label": "retired committed, C==B",
+      "result": {
+        "stage": 3,
+        "code": "STATE_RETIRED",
+        "cls": "retired",
+        "rel": 0
+      }
+    },
+    {
+      "label": "halt AND retired, C==B",
+      "result": {
+        "stage": 3,
+        "code": "STATE_HALT_SOVEREIGN",
+        "cls": "halt",
+        "rel": 0
+      }
+    },
+    {
+      "label": "forward forgery C<B",
+      "result": {
+        "stage": 2,
+        "code": "STATE_TPM_COUNTER_MISMATCH",
+        "cls": "close",
+        "rel": -2
+      }
+    },
+    {
+      "label": "consistent running",
+      "result": {
+        "stage": 3,
+        "code": "running",
+        "cls": "running",
+        "rel": 0
+      }
+    },
+    {
+      "label": "body absent",
+      "result": {
+        "stage": 1,
+        "code": "STATE_TPM_ATTEST_INVALID",
+        "cls": "close"
+      }
+    },
+    {
+      "label": "unparseable body",
+      "result": {
+        "stage": 1,
+        "code": "STATE_TPM_ATTEST_INVALID",
+        "cls": "close"
+      }
+    },
+    {
+      "label": "cert absent/bad, C==B",
+      "result": {
+        "stage": 1,
+        "code": "STATE_TPM_ATTEST_INVALID",
+        "cls": "close"
+      }
+    },
+    {
+      "label": "timeout but increment did not land (C==B) — matrix does not see the attempt",
+      "result": {
+        "stage": 3,
+        "code": "running",
+        "cls": "running",
+        "rel": 0
+      }
+    }
+  ]
+}

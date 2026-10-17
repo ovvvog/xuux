@@ -1,0 +1,38 @@
+## ORDERLY count / revision
+TPM2_PT_REVISION:
+  raw: 0xB7
+--
+TPM2_PT_ORDERLY_COUNT:
+  raw: 0xFF
+## define counter (policywrite-less, owner auth) + increment x3 + read
+nvdefine rc=0
+nvincrement rc=0
+counter after 3 inc = 0x0000000000000082 (130)
+## nvreadpublic name (WRITTEN set):
+  name: 000b2b5d90311c8cf409e53fce968db77d78f686b7ada03c421115e2bee00dcba310
+  attributes:
+## undefine + redefine + 1 increment + read
+nvundefine rc=0
+nvdefine rc=0
+## name BEFORE first write (WRITTEN clear):
+  name: 000b62316e4298a1883c969989c3a294084665541779bcf0cf194ede109434c5c3ec
+nvincrement rc=0
+## name AFTER first write:
+  name: 000b2b5d90311c8cf409e53fce968db77d78f686b7ada03c421115e2bee00dcba310
+counter after redefine+1 inc = 0x0000000000000083 (131)  monotonic_over_redefine=yes
+## NV_Certify size=8 offset=0 with ECDSA-P256 signing key (owner hierarchy)
+WARNING:esys:src/tss2-esys/api/Esys_CreatePrimary.c:401:Esys_CreatePrimary_Finish() Received TPM Error 
+ERROR:esys:src/tss2-esys/api/Esys_CreatePrimary.c:135:Esys_CreatePrimary() Esys Finish ErrorCode (0x000002c2) 
+ERROR: Esys_CreatePrimary(0x2C2) - tpm:parameter(2):inconsistent attributes
+ERROR: Unable to run tpm2_createprimary
+createprimary rc=1
+ERROR: Unexpected handle - TPM2_RH_OWNER
+ERROR: Unknown or unsupported handle, got: "o"
+ERROR: Unable to read as BIO file
+nvcertify rc=141
+## attestation decode (tpm2_print):
+## NV_Certify size=0 offset=0 (digest form, rev>=1.53) on swtpm:
+nvcertify(size=0) rc=1
+## uint64 precision in JS Number:
+Number(2^53+1)==Number(2^53+2): false | bigint equal: false
+cleanup nvundefine rc=0

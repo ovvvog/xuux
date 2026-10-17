@@ -1,0 +1,18 @@
+nvdefine rc= 0 
+provision: B= 125
+seal#1: { ok: true, counter: 126 }
+state before attempt: B= 126 C= 126 halted= false
+attempt interrupted: CUT_BEFORE_INCREMENT
+snapshot has staged? true
+recover after cut: {
+  state: 'running',
+  counter: 126,
+  bodyCounter: 126,
+  recovered: 'discard-staged'
+}
+haltSovereign: { ok: true, counter: 127 }
+recover after halt: { state: 'halted', error: 'STATE_HALT_SOVEREIGN' } | C= 127 B= 127
+after restore: C= 127 B= 126 C-B= 1 staged.counter= 127
+RECOVER AFTER HISTORICAL RESTORE => {"state":"running","counter":127,"bodyCounter":127,"recovered":"recertify-complete"}
+manifest now: halted= false counter= 127 halt.json= {"state":"running","epoch":0}
+MEASURED: simulator returned RUNNING from a historical candidate after an acknowledged sovereign halt (counter NOT lowered) — contradicts revised §د (expects STATE_MANIFEST_TPM_TORN).
