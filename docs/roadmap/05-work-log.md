@@ -1,5 +1,36 @@
 # 5 — سجل الأعمال 
 
+### [2026-10-17] — WL-410 — أداةُ جردِ TPM على مُضيفِ Windows للقراءةِ فقط (`sim/tpm-host/`) — مقيسةٌ على المحاكي وتنتظرُ تشغيلَ المالك
+
+- **المنفِّذ:** Perplexity Computer (`soaav-svg`)
+- **المسار والخطوة:** ADR 0007 §9 البند 5 (جردُ فهارسِ NV والسعةِ على المُضيفِ) — الانتقالُ من محاكاةِ TPM إلى فحصِ العتادِ الحقيقيِّ، **للقراءةِ فقط**. الكوميتُ الأب: `main@ca134f8939eafb4d77e5eb537775e7b113ce0d26`.
+- **الحالة بعد العمل:** 🟡 الأداةُ والمُفسِّرُ والاختباراتُ منجزةٌ على المحاكي — **والتشغيلُ على المُضيفِ لم يحدثْ**؛ `R3-A-01` و`EXT-6` مفتوحانِ كما هما.
+
+#### ما تم فعلاً
+
+- **`sim/tpm-host/win_tpm_inventory.ps1`:** أداةُ مضيفٍ منفصلةٌ (لا `tpm2-tools` ولا TCTI ولا WSL). تقرأُ `Get-Tpm` بقائمةِ حقولٍ مغلقةٍ بلا `OwnerAuth`، و`Tbsi_GetDeviceInfo`، ثمّ عبرَ TBS: `TPM2_GetCapability` (خصائصُ ثابتةٌ ومتغيّرةٌ كلٌّ على حدة، مقابضُ فهارسِ NV، الأوامرُ المنفَّذةُ، الخوارزمياتُ، منحنياتُ ECC) و`TPM2_NV_ReadPublic` لكلِّ فهرسٍ موجود. لكلِّ استعلامٍ رمزُ TBS ورمزُ TPM والطلبُ والردُّ خامّينِ وسببُ الفشل. رموزُ خروجٍ 0..4 (`COMPLETE`/`PARTIAL`/`NOT_WINDOWS`/`TBS_CONTEXT_UNAVAILABLE`/`TOOL_ERROR`)، وملفُّ JSON واحدٌ أثراً وحيداً.
+- **`sim/tpm-host/TpmInventoryCore.cs`:** نواةٌ بـC# 5 (تُترجَمُ بـ`Add-Type` في Windows PowerShell 5.1 بلا تثبيت). `TpmGuard` يرفضُ قبلَ النداءِ الأصليِّ كلَّ ما ليس `GetCapability` (22 بايتاً، خمسُ قدراتٍ، مقابضُ NV فقط) أو `NV_ReadPublic` (14 بايتاً، مقبضُ NV) بوسمِ `TPM_ST_NO_SESSIONS`؛ و`GuardedTransport.Submit` غيرُ قابلٍ للتجاوز.
+- **`sim/tpm-host/decode_inventory.mjs`:** مُفسِّرٌ يعيدُ تفسيرَ كلِّ ردٍّ من بايتاتِه، ويعيدُ حسابَ الاكتمال، ويصنّفُ الدليلَ `hardware-tbs` فقط إن كانَ النقلُ `tbs`، ويكشفُ أيَّ طلبٍ خارجَ قائمةِ السماح، ويُميِّزُ «منفَّذٌ في الشريحة» من «مسموحٌ في TBS»، ولا يُساوي الحدَّ الأقصى بالسعةِ الحرّة، ويربطُ دلالةَ صفرِ `NV_COUNTERS_MAX` بـ`TPM_PT_REVISION` (NOTE 2 في r1.59 غائبةٌ عن r1.38).
+- **الاختبارات:** `tests/sim/tpm-host-decode.test.mjs` (12) على ملفِّ محاكٍ ثابتٍ `tests/fixtures/tpm-host/swtpm-inventory.json` وحالاتٍ مفقودةٍ/تالفةٍ/مجهولة؛ `tests/sim/tpm-host-guard.test.mjs` (8): فحصٌ نصّيٌّ لرموزِ تغييرِ الحالةِ والسياسات، ونقاطُ دخولِ `tbs.dll` الأربع، والنواةُ الحقيقيةُ في `pwsh` ترفضُ 744 حالةً (كلَّ كودِ أمرٍ في `0x11F..0x1A0` بأشكالٍ ثلاثةٍ ووسمَين + أشكالٌ تالفة) ولا يبلغُ النقلَ إلا الشكلان، والأداةُ على غيرِ Windows ⇒ 2 بلا ملفّ، وتشغيلٌ حيٌّ على `swtpm` بعدَ `assertSimulatorTcti`. النقلُ إلى المحاكي في `tests/helpers/` وحدَه.
+- **`LIVE-46` قُيِّدَ مفتوحاً:** تعليقُ `sim/tpm/getcap.mjs` يُطلقُ دلالةَ r1.59 على الصفرِ بلا مراجعة — لم يُعدَّلْ (`sim/tpm` لم يُمَسّ).
+
+**الملفات المتأثرة:** `sim/tpm-host/win_tpm_inventory.ps1` (جديد)، `sim/tpm-host/TpmInventoryCore.cs` (جديد)، `sim/tpm-host/decode_inventory.mjs` (جديد)، `sim/tpm-host/README.md` (جديد)، `tests/sim/tpm-host-decode.test.mjs` (جديد)، `tests/sim/tpm-host-guard.test.mjs` (جديد)، `tests/helpers/TpmHostSimTransport.cs` (جديد)، `tests/helpers/tpm-host-sim-harness.ps1` (جديد)، `tests/fixtures/tpm-host/swtpm-inventory.json` (جديد)، `docs/adr/0007-tpm-nv-counter-freshness-anchor-design.md` (§11)، `docs/roadmap/05-work-log.md` (هذه المُدخلة)، `docs/roadmap/06-debt-register.md` (صفّا `R3-A-01` و`EXT-6` + `LIVE-46`)، `PROJECT_STATUS.md` (سطرُ آخرِ تحديث)، `config/work-log-ids.yaml` (استثناءُ فجوةِ `WL-409` المحجوزِ لـ#375)، `docs/audit/work-log-id-map.md` (صفُّه)، `docs/ROOT_OF_TRUST.md` (عدّادُ ملفّاتِ الاختبار 263→265)، `docs/HANDOFF.md` (مولَّدٌ بـ`handoff:report`)
+
+**الـ commit:** يُحدَّدُ في طلبِ الدمجِ (فرع `wl-410-tpm-host-inventory`).
+
+**الدليل:** `__EVIDENCE__`
+
+#### ما لم يتم ولماذا
+
+- **التشغيلُ على المُضيف:** يتطلّبُ اللابتوب — أمرٌ واحدٌ للمالكِ في `sim/tpm-host/README.md`؛ ولا يُدَّعى أيُّ نتيجةٍ للعتادِ قبلَه.
+- **قياسُ سماحِ TBS لـ`NV_DefineSpace`/`NV_Increment`/`NV_Certify`:** لا يُقاسُ إلا بإرسالِها، وهي ممنوعةٌ في هذه المهمّة (§9 البند 4).
+- **السعةُ الحرّةُ لفهرسٍ جديد:** لا خاصيّةَ تكشفُها؛ تُثبَتُ بمحاولةِ تعريفٍ فقط — ممنوعة.
+- **`R3-A-01`/`EXT-6`:** مفتوحانِ؛ `config/external-review.yaml` و`SUPPORTED_FRESHNESS_BACKENDS` و`sim/tpm/tcti_guard.mjs` لم تُمَسّ؛ ولا `xuux-tpmd`.
+
+#### الأثر على المسارات الأخرى
+
+- لا أثرَ على الإنتاجِ ولا على `sim/tpm` ولا `sim/channel`. خطوةُ `tpm-sim-ci` تُشغِّلُ الاختبارَينِ الجديدَين (تتطلّبُ `pwsh`، وهو مثبَّتٌ على `ubuntu-latest`).
+
 ### [2026-10-17] — WL-408 — تصحيحُ عقودِ جولاتِ المجالسِ الثلاثةِ لتطابقَ التقاريرَ الخامّةَ على القرصِ (CO55-M11.05-R3-03) — بلا مساسٍ بالتقاريرِ
 
 - **المنفِّذ:** Perplexity Computer (`soaav-svg`)
