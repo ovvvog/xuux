@@ -1,0 +1,11 @@
+UTC=2026-10-17T10:17:35Z
+HEAD=50518cf64572e5462b4ce616a491878a1cb426df
+node=v20.20.2
+pwsh=7.4.6
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+Mono C# compiler version 6.14.1.0
+tool="tpm2_getcap" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device
+OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+93a94957b207217f1450242f4d908f9741dea42ed342ab8cbb62d6964063d025  part1-r138.pdf
+d3b495d2cb03aa3957bfa52498556c7d176249aa8c87ca18501fad879a790f5f  part2-r138.pdf
+fe3c6e3bd62d6aa08cb476bd83880eed7d1bb3ffbabaf7be5a11c41ebf0fec30  part3-r138.pdf
