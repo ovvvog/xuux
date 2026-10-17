@@ -1,0 +1,3 @@
+R2Probe.cs(18,20): warning CS0219: The variable `raw0' is assigned but its value is never used
+R2Probe.cs(28,37): warning CS0219: The variable `r' is assigned but its value is never used
+Compilation succeeded - 2 warning(s)

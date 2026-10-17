@@ -1,0 +1,2 @@
+{"mode":"plant-same-public","status":"FAILED_CLOSED","failure":"OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: PROBE_PLANTED_MATCHING_INDEX_BEFORE_OUR_DEFINE)","steps":15,"changes":1,"forwarded":14,"undefineForwards":1,"createForwards":0,"policySignedForwards":0,"planted":"0x01b162c6","leftovers":[],"reconciliation":["nv-define 0x01b162c6: executed; ownership proven by publicArea match"],"notes":["plant-rc=00000000 handle=01b162c6"],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"none"}
+exit:0

@@ -1,0 +1,53 @@
+{
+  "name": "000bb926e54b993896daf74253219565606981812379c74a893d89e175dc895dad54",
+  "first": "c33df0c4cb1b745d2fda323a71c05f543aea891d5fdf4d07c17e5292345a4f0a",
+  "signed": "6416779473d445059d6b8f3a0a7b5fbf42332015629c873ce22df435cc902392",
+  "final": "a9a0a8c3e208bb5739fc0dc336539db163fedeec5c7507e8414123d92af1ed19",
+  "wrong": "bcc15e25261b561db342bc172fbd375f0ec631b9a1511cda78e74dbeb5f18584",
+  "reserved": [
+    {
+      "bit": 8,
+      "violations": [
+        "RESERVED_BIT_8=1"
+      ]
+    },
+    {
+      "bit": 9,
+      "violations": [
+        "RESERVED_BIT_9=1"
+      ]
+    },
+    {
+      "bit": 20,
+      "violations": [
+        "RESERVED_BIT_20=1"
+      ]
+    },
+    {
+      "bit": 21,
+      "violations": [
+        "RESERVED_BIT_21=1"
+      ]
+    },
+    {
+      "bit": 22,
+      "violations": [
+        "RESERVED_BIT_22=1"
+      ]
+    },
+    {
+      "bit": 23,
+      "violations": [
+        "RESERVED_BIT_23=1"
+      ]
+    },
+    {
+      "bit": 24,
+      "violations": [
+        "RESERVED_BIT_24=1"
+      ]
+    }
+  ],
+  "rawCommandFields": false
+}
+summarized 59 probes
