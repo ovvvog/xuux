@@ -1,0 +1,88 @@
+[
+  {
+    "version": "baseline",
+    "pidflag": false,
+    "exit": 0,
+    "bytesForwarded": 703,
+    "status": "COMPLETE",
+    "failure": null,
+    "steps": 28,
+    "command": [
+      "pwsh",
+      "-NoProfile",
+      "-File",
+      "/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/transport/baseline/rehearse.ps1",
+      "-SimHost",
+      "127.0.0.1",
+      "-SimPort",
+      "2103",
+      "-Stages",
+      "S1"
+    ]
+  },
+  {
+    "version": "baseline",
+    "pidflag": true,
+    "exit": 0,
+    "bytesForwarded": 703,
+    "status": "COMPLETE",
+    "failure": null,
+    "steps": 28,
+    "command": [
+      "pwsh",
+      "-NoProfile",
+      "-File",
+      "/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/transport/baseline/rehearse.ps1",
+      "-SimHost",
+      "127.0.0.1",
+      "-SimPort",
+      "2103",
+      "-Stages",
+      "S1",
+      "-SimPidFile",
+      "/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/transport/pid"
+    ]
+  },
+  {
+    "version": "current",
+    "pidflag": false,
+    "exit": 4,
+    "bytesForwarded": 0,
+    "status": "TOOL_ERROR",
+    "failure": "simulator context mismatch: SIMULATOR_LISTENER_NOT_SWTPM: node",
+    "command": [
+      "pwsh",
+      "-NoProfile",
+      "-File",
+      "/home/user/workspace/xuux-review-dbaf6104/sim/tpm-ceremony/rehearse.ps1",
+      "-SimHost",
+      "127.0.0.1",
+      "-SimPort",
+      "2103",
+      "-Stages",
+      "S1"
+    ]
+  },
+  {
+    "version": "current",
+    "pidflag": true,
+    "exit": 4,
+    "bytesForwarded": 0,
+    "status": "TOOL_ERROR",
+    "failure": "simulator context mismatch: SIMULATOR_LISTENER_NOT_SWTPM: node",
+    "command": [
+      "pwsh",
+      "-NoProfile",
+      "-File",
+      "/home/user/workspace/xuux-review-dbaf6104/sim/tpm-ceremony/rehearse.ps1",
+      "-SimHost",
+      "127.0.0.1",
+      "-SimPort",
+      "2103",
+      "-Stages",
+      "S1",
+      "-SimPidFile",
+      "/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/transport/pid"
+    ]
+  }
+]

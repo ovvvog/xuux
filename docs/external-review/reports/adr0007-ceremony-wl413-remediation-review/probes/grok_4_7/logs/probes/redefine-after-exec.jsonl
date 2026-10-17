@@ -1,0 +1,2 @@
+{"mode":"redefine-after-exec","status":"FAILED_CLOSED","failure":"OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: PROBE_REDEFINED_IDENTICAL_PUBLIC_AFTER_EXEC)","steps":15,"changes":1,"forwarded":14,"undefineForwards":1,"createForwards":0,"policySignedForwards":0,"planted":"0x01aee2fb","leftovers":[],"reconciliation":["nv-define 0x01aee2fb: executed; ownership proven by publicArea match"],"notes":["redefine-rc=00000000"],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"none"}
+exit:0

@@ -1,0 +1,122 @@
+[
+  {
+    "Id": "SOL-01(tag)",
+    "Description": "Invalid tag rejected before state change",
+    "Outcome": "REMEDIED",
+    "Detail": "RESPONSE_TAG_MISMATCH: expected=0x8001 got=0x9988 rc=0x00000000"
+  },
+  {
+    "Id": "SOL-01(auth)",
+    "Description": "Missing response auth area rejected",
+    "Outcome": "REMEDIED",
+    "Detail": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED)"
+  },
+  {
+    "Id": "SOL-02(exec)",
+    "Description": "Lost define response after execution reconciled and cleaned up",
+    "Outcome": "REMEDIED",
+    "Detail": "nv-define 0x01b0f494: executed; ownership proven by publicArea match"
+  },
+  {
+    "Id": "SOL-02(not-exec)",
+    "Description": "Lost define response before execution verified absent",
+    "Outcome": "REMEDIED",
+    "Detail": "nv-define 0x01a833ec: not-executed (verified absent by read-only inventory)"
+  },
+  {
+    "Id": "SOL-03",
+    "Description": "Flush refusal keeps session handle declared in leftovers",
+    "Outcome": "REMEDIED",
+    "Detail": "transient 0x03000000: BLOCKED_FAIL_CLOSED: cleanup:FlushContext; transient 0x80000001: BLOCKED_FAIL_CLOSED: cleanup:FlushContext; transient 0x80000000: BLOCKED_FAIL_CLOSED: cleanup:FlushContext"
+  },
+  {
+    "Id": "SOL-04",
+    "Description": "Generic RC (0x101) rejected as NEGATIVE_WRONG_RC",
+    "Outcome": "REMEDIED",
+    "Detail": "NEGATIVE_WRONG_RC: s2v.replay:PolicySigned(old-signature) expected=0x000005db got=0x00000101 rc=0x00000101"
+  },
+  {
+    "Id": "G47-1(spacefold)",
+    "Description": "Spacefold vendor strings rejected raw",
+    "Outcome": "REMEDIED",
+    "Detail": "SIMULATOR_IDENTITY_REQUIRED: manufacturer=IBM vendor=0x53205720,0x5420504d,0x00000000,0x00000000 rc=0x00000000"
+  },
+  {
+    "Id": "G47-1(extra)",
+    "Description": "Extra vendor strings (EVIL/XXXX) rejected",
+    "Outcome": "REMEDIED",
+    "Detail": "SIMULATOR_IDENTITY_REQUIRED: manufacturer=IBM vendor=0x53572020,0x2054504d,0x4556494c,0x58585858 rc=0x00000000"
+  },
+  {
+    "Id": "G47-2",
+    "Description": "Persistent undefine blocking declares residual NV handle in leftovers",
+    "Outcome": "REMEDIED",
+    "Detail": "nv 0x01a3380f: BLOCKED_FAIL_CLOSED: cleanup:NV_UndefineSpace"
+  },
+  {
+    "Id": "R2-01",
+    "Description": "Third party write after lost define detected: ownership undetermined, not deleted",
+    "Outcome": "REMEDIED",
+    "Detail": "nv-define 0x01ae309a: exists with matching definition but TPMA_NV_WRITTEN is set although this run never wrote it; written by another party; ownership undetermined; left in place"
+  },
+  {
+    "Id": "R2-02",
+    "Description": "Negative increment response loss reconciled and counter state observed",
+    "Outcome": "REMEDIED",
+    "Detail": "nv-increment 0x01ae3235: not-executed (counter still uninitialized)"
+  },
+  {
+    "Id": "R2-03(trailing)",
+    "Description": "ResponseSchema caught trailing bytes in NV_ReadPublic response",
+    "Outcome": "REMEDIED",
+    "Detail": "RESPONSE_PARAMS_TRAILING_BYTES: NV_ReadPublic extra=4 rc=0x00000000"
+  },
+  {
+    "Id": "R2-03(sig-alg)",
+    "Description": "ResponseSchema caught unexpected signature algorithm in Sign response",
+    "Outcome": "REMEDIED",
+    "Detail": "RESPONSE_SIGNATURE_ALG_UNEXPECTED: 0x0014 rc=0x00000000"
+  },
+  {
+    "Id": "R2-04(clean)",
+    "Description": "Post-run inventory verified true with empty residual sets on clean run",
+    "Outcome": "REMEDIED",
+    "Detail": "verified=True, nvCount=0"
+  },
+  {
+    "Id": "R2-04(dead)",
+    "Description": "Dead transport marks postRunInventory unverified with residual state unknown",
+    "Outcome": "REMEDIED",
+    "Detail": "WL413R2_TRANSPORT_DEAD"
+  },
+  {
+    "Id": "R2-05(valid)",
+    "Description": "Assert-SimulatorListener passed on port 2111 with PID 12864",
+    "Outcome": "PASS",
+    "Detail": "pid=12864 comm=swtpm"
+  },
+  {
+    "Id": "R2-05(pid-mismatch)",
+    "Description": "PID mismatch rejected with SIMULATOR_LISTENER_PID_MISMATCH",
+    "Outcome": "PASS",
+    "Detail": "SIMULATOR_LISTENER_PID_MISMATCH: listener=12864 pidfile=22863"
+  },
+  {
+    "Id": "R2-05(absent)",
+    "Description": "Absent listener rejected with SIMULATOR_LISTENER_ABSENT",
+    "Outcome": "PASS",
+    "Detail": "SIMULATOR_LISTENER_ABSENT"
+  },
+  {
+    "Id": "R2-05(proxy)",
+    "Description": "Proxy on loopback rejected before connection (SIMULATOR_LISTENER_NOT_SWTPM: node)",
+    "Outcome": "PASS",
+    "Detail": "SIMULATOR_LISTENER_NOT_SWTPM: node"
+  },
+  {
+    "Id": "R2-05(rehearse-proxy)",
+    "Description": "rehearse.ps1 rejected proxy port with exit code 4 and TOOL_ERROR",
+    "Outcome": "PASS",
+    "Detail": "exitCode=4"
+  }
+]

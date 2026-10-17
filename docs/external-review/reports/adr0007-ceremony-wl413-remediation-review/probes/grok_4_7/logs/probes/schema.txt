@@ -1,0 +1,43 @@
+SCHEMA getcap-original accepted
+SCHEMA getcap-trailing CeremonyFailedException:RESPONSE_PARAMS_TRAILING_BYTES: GetCapability extra=1
+SCHEMA createprimary-parse handles=80000000 paramsLen=291
+SCHEMA createprimary-check accepted
+WALK-SPEC createprimary FAIL RESPONSE_TRUNCATED
+WALK-CODE createprimary b1=90 b2=55 b3=32 u16=8021 u32=40000001 b2b=64 name=34 nameHead=000b remain=0
+SCHEMA createprimary-flip-last accepted
+SCHEMA createprimary-trailing CeremonyFailedException:RESPONSE_PARAMS_TRAILING_BYTES: CreatePrimary extra=2
+SCHEMA createprimary-first-b2b-len-plus1 CeremonyFailedException:RESPONSE_TRUNCATED firstLenWas=90
+SCHEMA create-check accepted paramsLen=441
+SCHEMA create-trailing CeremonyFailedException:RESPONSE_PARAMS_TRAILING_BYTES: Create extra=1
+SCHEMA create-walk b0=126 b1=88 b2=115 b3=32 tag=8021 hier=40000001 dig=64 remain=0
+SCHEMA load-check accepted
+SCHEMA load-short-name CeremonyFailedException:RESPONSE_NAME_MALFORMED: Load len=2
+SCHEMA sign-check accepted
+SCHEMA sign-hashalg-sha1 accepted
+SCHEMA startsession-check accepted nonceLen=32
+SCHEMA startsession-nonce1 accepted
+SCHEMA policygetdigest-check accepted digLen=32
+SCHEMA policygetdigest-short accepted
+SCHEMA policycc-check accepted
+SCHEMA policycc-trailing CeremonyFailedException:RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1
+SCHEMA flush-check accepted rc=00000000
+SCHEMA define-check accepted parsed rc=00000000 tag=8002 params=0 handles=0
+SCHEMA define-empty-params-plus-byte CeremonyFailedException:RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1
+SCHEMA increment-check accepted
+SCHEMA nvread-check accepted dataLen=8
+SCHEMA nvread-7bytes accepted
+SCHEMA readpublic-check accepted
+SCHEMA readpublic-walk pub=14 name=34 idx=01a10001 alg=000b attr=22040014 pol=0 data=8 pubRemain=0 outerRemain=0
+SCHEMA undefine-check accepted
+SCHEMA policysigned-check accepted rc=00000000
+SCHEMA policysigned-walk timeout=0 tag=8025 hier=40000007 dig=0 remain=0
+SCHEMA policysigned-flip-after-timeout-len accepted
+PARSE truncated CeremonyFailedException:RESPONSE_TRUNCATED_HEADER
+PARSE size-mismatch CeremonyFailedException:RESPONSE_SIZE_MISMATCH
+PARSE error-body CeremonyFailedException:RESPONSE_ERROR_BODY_MALFORMED
+PARSE error-tag CeremonyFailedException:RESPONSE_ERROR_TAG_MALFORMED
+PARSE bad-success-tag CeremonyFailedException:RESPONSE_TAG_MISMATCH: expected=0x8001 got=0x1234
+PARSE paramsize-ffffffff OutOfMemoryException:Insufficient memory to continue the execution of the program.
+PARSE missing-auth CeremonyFailedException:RESPONSE_AUTH_AREA_MALFORMED
+SCHEMA readpublic-extra-handle-bytes CeremonyFailedException:RESPONSE_PARAMS_TRAILING_BYTES: NV_ReadPublic extra=51
+schema_exit:0
