@@ -238,6 +238,7 @@ function realm(options = {}) {
     haltSwitch,
     log,
     logFile,
+    factorSecrets,
     factorCode,
     authenticate,
     signed,
@@ -559,6 +560,184 @@ test('R5-B-03: المصادقُ الجديدُ لا يُورَّث جلسةً و
     assert.equal(restarted.kingAuth.size, 0, 'المصادقُ الجديدُ يبدأ بلا جلسةٍ قائمة');
   } finally {
     reopenedLog?.close?.();
+    cleanup();
+  }
+});
+
+test('CO55-M11.05-R3-02: نسختانِ حيّتانِ على سجلٍّ واحدٍ لا تقبلانِ الرمزَ نفسَه', async () => {
+  // مسلكُ المجلسِ في جولةِ إعادةِ الاختبارِ الخامسةِ (2026-10-17): نسختانِ من
+  // المصادقِ على السجلِّ الدائمِ نفسِه — كما تُركَّبُ المواضعُ المستقلّةُ كلٌّ
+  // منها بمصادقِها (`scripts/serve-state.mjs` و`src/production/sovereign-console.mjs`
+  // و`src/persistence/composition.mjs`) — كلٌّ منهما تستعيدُ قيودَ الاستهلاكِ
+  // مرّةً واحدةً عندَ أولِ مصادقةٍ ثم لا تُعيدُ القراءةَ. فكانَ الرمزُ نفسُه
+  // يُقبَلُ في النسختينِ: جلستانِ سياديتانِ برمزٍ واحدٍ. المُتوقَّعُ بعدَ الإغلاقِ:
+  // `AUTHN_FACTOR_REPLAYED` للثانيةِ دائماً، أيّاً كانَتِ النسخةُ التي فتحت أولاً.
+  const realmUnderTest = realm();
+  const { king, log, logFile, factorSecrets, factorCode, cleanup } = realmUnderTest;
+  try {
+    const second = new KingAuthenticator({
+      policy: /** @type {never} */ (AUTHN_POLICY),
+      king,
+      log,
+      factorSecrets,
+    });
+
+    // مسلكُ الاستئنافِ حرفاً: كلُّ نسخةٍ تُصادِقُ أولاً برمزِ خطوةٍ مختلفةٍ داخلَ
+    // نافذةِ القبولِ — فتستعيدُ كلٌّ منهما القيودَ (مرّتَها الواحدةَ) وبينَهما
+    // رمزُ الخطوةِ الحاضرةِ لم يُستهلَك بعدُ.
+    const firstOpen = await realmUnderTest.authenticate({ factorCode: factorCode(-1) });
+    const secondOpen = await second.authenticate({
+      actorId: king.id,
+      deviceId: TRUSTED_DEVICE.id,
+      factorCode: factorCode(1),
+    });
+    assert.ok(firstOpen.token !== '', 'النسخةُ الأولى تفتح برمزِ خطوتِها');
+    assert.ok(secondOpen.token !== '', 'النسخةُ الثانية تفتح برمزِ خطوتِها');
+
+    // ثم الرمزُ نفسُه على النسختينِ: الأولى تفتحُ والثانيةُ تُرَدُّ.
+    const code = factorCode();
+    const opened = await realmUnderTest.authenticate({ factorCode: code });
+    assert.ok(opened.token !== '', 'النسخةُ الأولى تفتح الجلسةَ الأولى بالرمز');
+    await refuses(
+      () =>
+        second.authenticate({ actorId: king.id, deviceId: TRUSTED_DEVICE.id, factorCode: code }),
+      AUTHN_ERRORS.FACTOR_REPLAYED,
+      'النسخةُ الثانيةُ على السجلِّ نفسِه تقبلُ الرمزَ المستهلَك',
+    );
+
+    // وعلى القرصِ ثلاثةُ قيودِ استهلاكٍ لا أكثرُ — فالرفضُ يقعُ قبلَ الاستهلاكِ
+    // لا بعده، ولا يُقيَّدُ للرمزِ المردودِ قيدٌ ثانٍ.
+    assert.equal(
+      onDisk(logFile).filter((event) => event.type === AUTHN_POLICY.audit.factorConsumedEvent)
+        .length,
+      3,
+      'ثلاثةُ قيودِ استهلاكٍ على القرصِ: اثنانِ للاستئنافِ وواحدٌ للرمزِ المقيَّسِ',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('CO55-M11.05-R3-02: والعكسُ — النسخةُ الثانيةُ تفتحُ والأولىَ تُرَدُّ بالرمزِ نفسِه', async () => {
+  // الاتجاهُ الآخرُ في عالمٍ جديدٍ (سجلٌّ آخرَ على القرصِ) كي لا تُستهلَكَ خطواتُ
+  // نافذةِ القبولِ كلُّها في الاتجاهِ الأول: من فتحَ أولاً لا يُحكَمُ عليهِ بأنَّهُ
+  // الأولىَ دائماً — فالحكمُ على القيدِ المشتركِ لا على ترتيبِ الفتح.
+  const realmUnderTest = realm();
+  const { king, log, factorSecrets, factorCode, cleanup } = realmUnderTest;
+  try {
+    const second = new KingAuthenticator({
+      policy: /** @type {never} */ (AUTHN_POLICY),
+      king,
+      log,
+      factorSecrets,
+    });
+    const code = factorCode();
+    const secondOpened = await second.authenticate({
+      actorId: king.id,
+      deviceId: TRUSTED_DEVICE.id,
+      factorCode: code,
+    });
+    assert.ok(secondOpened.token !== '', 'النسخةُ الثانيةُ تفتح الجلسةَ الأولىَ بالرمز');
+    await refuses(
+      () => realmUnderTest.authenticate({ factorCode: code }),
+      AUTHN_ERRORS.FACTOR_REPLAYED,
+      'النسخةُ الأولىَ على السجلِّ نفسِه تقبلُ الرمزَ المستهلَك',
+    );
+  } finally {
+    cleanup();
+  }
+});
+
+test('CO55-M11.05-R3-02: نداءانِ متزامنانِ بالرمزِ نفسِه على نسختينِ — فتحٌ واحدٌ لا اثنان', async () => {
+  // التنافسُ يُقاسُ لا يُفترَض: نداءانِ متزامنانِ (Promise.all) بالرمزِ نفسِه
+  // على نسختينِ مختلفتينِ على السجلِّ نفسِه، ولا يعتمدُ الحكمُ على أيِّهما
+  // سبقَ — فالمقطعُ المتزامنُ للفحصِ والإلحاقِ يَحسمُ الأمرَ قبلَ أيِّ `await`.
+  const realmUnderTest = realm();
+  const { king, log, factorSecrets, factorCode, cleanup } = realmUnderTest;
+  try {
+    const second = new KingAuthenticator({
+      policy: /** @type {never} */ (AUTHN_POLICY),
+      king,
+      log,
+      factorSecrets,
+    });
+    const code = factorCode();
+    const results = await Promise.allSettled([
+      realmUnderTest.authenticate({ factorCode: code }),
+      second.authenticate({ actorId: king.id, deviceId: TRUSTED_DEVICE.id, factorCode: code }),
+    ]);
+    const opened = results.filter((result) => result.status === 'fulfilled');
+    const rejected = results.filter((result) => result.status === 'rejected');
+    assert.equal(opened.length, 1, 'فتحٌ واحدٌ بالرمزِ الواحدِ مهما تزاحمَ النداءان');
+    assert.equal(rejected.length, 1, 'رفضٌ واحدٌ حاسمٌ للنداءِ المتزاحمِ');
+    for (const result of rejected) {
+      assert.equal(
+        codeOf(result.reason),
+        AUTHN_ERRORS.FACTOR_REPLAYED,
+        'المتزاحمُ يُرَدُّ بأنَّ الرمزَ مستهلَكٌ لا بخطأٍ آخر',
+      );
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test('CO55-M11.05-R3-02: إخفاقُ ختمِ قيدِ الاستهلاكِ فشلٌ مغلق — لا جلسةَ ورمزٌ لا يعودُ صالحاً', async () => {
+  // عطلُ التخزينِ عندَ ختمِ قيدِ الاستهلاكِ: لا تُفتحُ جلسةٌ (الفشلُ قبلَها)،
+  // والرمزُ يبقى مستهلَكاً في سجلِ القيودِ المشتركِ — مفتاحُه الملفُّ نفسُه —
+  // فلا يعودُ صالحاً على السجلِّ الصالحِ في العمليةِ نفسِها. فشلٌ مغلقٌ لا
+  // يعودُ على صاحبِه بإلغاءِ الاستهلاكِ.
+  const realmUnderTest = realm();
+  const { king, log, factorSecrets, factorCode, cleanup } = realmUnderTest;
+  try {
+    // سجلٌّ يختمُ الكتابةُ فيه بإخفاقٍ: يفوّضُ القراءةَ والإلحاقَ العاديَّ إلى
+    // السجلِّ الحقيقيِّ ويُخفِقُ **الختمُ** وحدَه (عطلُ تخزينٍ). ولا يُصطنعُ بوراثةِ
+    // جسمِ السجلِّ (private fields تَكسِرُه)، بل بتفويضٍ صريحٍ — ومفتاحُ القيدِ
+    // المشتركِ ملفُّ السجلِّ نفسُه فتُدركُ النسختينِ القيدَ واحداً.
+    /**
+     * @type {{
+     *   file: string,
+     *   append: (type: string, actor: string, data: Record<string, unknown>) => void,
+     *   appendSealed: (type: string, actor: string, data: Record<string, unknown>) => Promise<void>,
+     *   eventsOfTypeSinceStep: (
+     *     type: string,
+     *     minStep: number,
+     *   ) => ReadonlyArray<{ type?: unknown, data?: unknown }>,
+     *   flush: () => Promise<void>,
+     * }}
+     */
+    const failing = {
+      file: log.file,
+      append: (type, actor, data) => log.append(type, actor, data),
+      appendSealed: async () => {
+        throw new Error('STORAGE_WRITE_FAILED');
+      },
+      eventsOfTypeSinceStep: (type, minStep) => log.eventsOfTypeSinceStep(type, minStep),
+      flush: async () => undefined,
+    };
+    const failingAuth = new KingAuthenticator({
+      policy: /** @type {never} */ (AUTHN_POLICY),
+      king,
+      log: /** @type {never} */ (failing),
+      factorSecrets,
+    });
+    const code = factorCode();
+    await assert.rejects(
+      () =>
+        failingAuth.authenticate({
+          actorId: king.id,
+          deviceId: TRUSTED_DEVICE.id,
+          factorCode: code,
+        }),
+      /STORAGE_WRITE_FAILED/,
+      'إخفاقُ الختمِ يمنعُ الجلسةَ',
+    );
+    await refuses(
+      () => realmUnderTest.authenticate({ factorCode: code }),
+      AUTHN_ERRORS.FACTOR_REPLAYED,
+      'الرمزُ الذي أخفقَ ختمُه لا يعودُ صالحاً على السجلِّ الصالحِ في العمليةِ نفسِها',
+    );
+  } finally {
     cleanup();
   }
 });
