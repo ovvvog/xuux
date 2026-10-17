@@ -1,0 +1,8 @@
+gpt-probe-define-response-loss.jsonl       FAILED_CLOSED | OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: INDEPENDENT_RES | leftovers= 0 | residual= [] verified= True
+gpt-probe-flush-refusal.jsonl              BLOCKED_FAIL_CLOSED | BLOCKED_FAIL_CLOSED: s2.trial:FlushContext rc=0x80280400 | leftovers= 0 | residual= [] verified= True
+gpt-probe-invalid-tag.jsonl                FAILED_CLOSED | RESPONSE_TAG_MISMATCH: expected=0x8001 got=0x1234 rc=0x00000000 | leftovers= 0 | residual= [] verified= False
+gpt-probe-missing-response-auth.jsonl      FAILED_CLOSED | OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RES | leftovers= 1 | residual= [] verified= True
+gpt-probe-unexpected-negative.jsonl        FAILED_CLOSED | NEGATIVE_WRONG_RC: s2v.replay:PolicySigned(old-signature) expected=0x0 | leftovers= 0 | residual= [] verified= True
+r2-probe-neg-increment-loss.jsonl          FAILED_CLOSED | OUTCOME_UNKNOWN: s2v:NV_Increment(password-auth) (IOException: R2_LOSS | leftovers= 0 | residual= [] verified= True
+r2-probe-trailing-params.jsonl             FAILED_CLOSED | RESPONSE_PARAMS_TRAILING_BYTES: NV_ReadPublic extra=3 rc=0x00000000 | leftovers= 1 | residual= ['0x01a37fbe'] verified= True
+r2-probe-written-before-reconcile.jsonl    FAILED_CLOSED | OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: R2_RESPONSE_LOS | leftovers= 1 | residual= ['0x01b2f7b4'] verified= True
