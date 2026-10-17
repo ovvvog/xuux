@@ -142,9 +142,22 @@ test('حد الذاكرة يوقف حمولة تستنزف الكومة', { skip
   const spec = fixture('isolation-memory-hog.mjs');
   const { run } = execute(spec, { timeoutMs: 6_000, memoryLimitMb: 768 });
   const result = await run;
-  assert.equal(result.ok, false);
-  assert.equal(result.code, ISOLATION_ERRORS.RESOURCE_LIMIT);
-  assert.match(result.stderr, /out of memory|fatal process oom|cannot allocate memory/i);
+  assert.equal(result.ok, false, `ok=${result.ok} code=${result.code}`);
+  assert.equal(
+    result.code,
+    ISOLATION_ERRORS.RESOURCE_LIMIT,
+    `code=${result.code} signal=${result.signal} stderr=${JSON.stringify(result.stderr)}`,
+  );
+  // وفاةُ الحدِّ صورتانِ: رسالةُ OOM على stderr، أو قتلٌ إشاريٌّ بلا رسالةٍ (نفادُ
+  // مساحةِ العناوينِ يقتلُ طابعةَ الرسالةِ نفسِها — قِيسَ على عدّاء CI حقيقيٍّ).
+  const resourceSignal =
+    result.exitCode === null &&
+    /^(SIGSEGV|SIGBUS|SIGKILL|SIGXCPU|SIGXFSZ)$/.test(result.signal ?? '');
+  if (result.stderr.trim()) {
+    assert.match(result.stderr, /out of memory|fatal process oom|cannot allocate memory/i);
+  } else {
+    assert.ok(resourceSignal, `signal=${result.signal}`);
+  }
 });
 
 test(

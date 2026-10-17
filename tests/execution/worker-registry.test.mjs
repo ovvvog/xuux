@@ -252,7 +252,10 @@ test(
         actorId: 'actor-فرادة',
         idempotencyKey: 'فرادة-الاسم',
         timeoutMs: 10_000,
-        memoryLimitMb: 96,
+        // حدُّ ذاكرةٍ يُقلعُ فيهِ Node داخلَ العزلِ فعلًا: 96 ميغابايتًا تُسقطُ إقلاعَ
+        // المشغّلِ (حجوزاتُ V8 وخيوطُهُ لا تسعُ) — وهوَ ما ظهرَ حينَ صارَ العزلُ
+        // متاحًا في CI (LIVE-23) بعدَ أن كانَ الاختبارُ يُقاسُ في فرعِ «غيرِ متاحٍ».
+        memoryLimitMb: 1_024,
         availableAt,
       },
       { decisionId: 'decision-فرادة-الاسم' },
@@ -302,7 +305,13 @@ test(
             HALT_FILE: haltFile,
             HALT_PUBLIC_KEY: publicKey,
             ISOLATION_LOG_FILE: path.join(dir, `worker-log-${++spawnCount}.jsonl`),
-            ISOLATION_OUTPUT_ROOT: path.join(dir, '.isolation-output'),
+            // جذرُ المخرجاتِ تحتَ جذرِ العملِ (cwd=ROOT) لا في /tmp: عزلُ المهمّةِ
+            // يشترطُ writableDir ابناً منَ workdir — وإلّا رفضَ العزلُ الإقلاعَ نفسَهُ.
+            ISOLATION_OUTPUT_ROOT: path.join(
+              ROOT,
+              '.isolation-output',
+              `wl394-${Date.now()}-${++spawnCount}`,
+            ),
           },
           stdio: ['ignore', 'pipe', 'pipe'],
         },

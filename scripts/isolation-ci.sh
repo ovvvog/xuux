@@ -43,7 +43,9 @@ rc=$?
 set -e
 grep -E '^# (tests|pass|fail|skipped|todo)' "${TAP_FILE}" || true
 if [ "${rc}" -ne 0 ]; then
-  grep -E '^not ok' "${TAP_FILE}" >&2 || true
+  # كاملُ تفاصيلِ الاختباراتِ الساقطةِ (رسائلُ التأكيدِ وأسبابُها) لا سطورُ العناوينِ وحدَها —
+  # التشخيصُ جزءٌ من القياسِ: سقوطٌ بلا سببٍ مكتوبٍ يعاد قياسُهُ بلا دليل.
+  sed -n '/^not ok/,$p' "${TAP_FILE}" >&2 || true
   echo "::error::اختباراتُ العزلِ الحقيقيِّ سقطَت (rc=${rc})" >&2
   exit "${rc}"
 fi

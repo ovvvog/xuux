@@ -509,7 +509,19 @@ export async function runIsolated(request) {
         });
       } else {
         const blocked = escapeKind(stderr);
+        // وفاةُ الموردِ قد تصلُ إشارةً لا رسالةً: نفادُ مساحةِ العناوين (RLIMIT_AS) يقتلُ
+        // الحمولةَ غالبًا بـSIGSEGV وstderr فارغٍ (طابعةُ رسالةِ OOM نفسُها تحتاجُ ذاكرةً
+        // فتفشل)، وسقفُ المعالجِ بـSIGXCPU وسقفُ الملفِّ بـSIGXFSZ. الإشاراتُ القاتلةُ
+        // بلا مخرجٍ لا تُصنَّفُ فشلَ أمرٍ وهيَ منَ الحدودِ المفروضةِ — والصنفُ يبقى
+        // إغلاقًا محكومًا (ok=false) والفرقُ تشخيصيٌّ لا أمنيٌّ.
+        const killedByResourceSignal =
+          exitCode === null &&
+          (signal === 'SIGXCPU' ||
+            signal === 'SIGXFSZ' ||
+            ((signal === 'SIGSEGV' || signal === 'SIGBUS' || signal === 'SIGKILL') &&
+              stderr.trim() === ''));
         const resource =
+          killedByResourceSignal ||
           /out of memory|fatal process oom|cannot allocate memory|file size limit exceeded|\bEFBIG\b|\bSIGXFSZ\b/i.test(
             stderr,
           );
