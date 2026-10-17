@@ -34,7 +34,7 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 12
+      rounds: 13
       members:
         - id: grok_4_6
           provider: XAI
@@ -83,6 +83,16 @@ engagements:
           provider: GOOGLE
           rounds:
             - 7
+            - 9
+        - id: gpt_6_1_sol
+          provider: OPENAI
+          rounds:
+            - 9
+            - 13
+        - id: claude_fable_5_1
+          provider: ANTHROPIC
+          rounds:
+            - 10
         - id: gpt_5_6_terra
           provider: OPENAI
           rounds:
@@ -96,7 +106,12 @@ engagements:
         - id: grok_4_7
           provider: XAI
           rounds:
+            - 10
             - 12
+        - id: claude_opus_5_5
+          provider: ANTHROPIC
+          rounds:
+            - 13
         - id: gpt_5_5
           provider: OPENAI
         - id: gemini_3_1_pro_preview
@@ -131,7 +146,7 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 2
+      rounds: 5
       members:
         - id: gpt_5_6_sol
           provider: OPENAI
@@ -141,10 +156,27 @@ engagements:
           provider: XAI
           rounds:
             - 1
+        - id: gpt_6_sol
+          provider: OPENAI
+          rounds:
+            - 2
+        - id: gemini_3_7_flash
+          provider: GOOGLE
+          rounds:
+            - 3
         - id: gpt_6_1_sol
           provider: OPENAI
           rounds:
+            - 3
             - 5
+        - id: claude_fable_5_1
+          provider: ANTHROPIC
+          rounds:
+            - 4
+        - id: grok_4_7
+          provider: XAI
+          rounds:
+            - 4
         - id: claude_opus_5_5
           provider: ANTHROPIC
           rounds:
@@ -177,12 +209,13 @@ engagements:
     status: council-findings-recorded
     executedBy:
       kind: model-council
-      rounds: 7
+      rounds: 8
       members:
         - id: claude_fable_5_1
           provider: ANTHROPIC
           rounds:
             - 1
+            - 5
         - id: gemini_3_1_pro
           provider: GOOGLE
           rounds:
@@ -191,10 +224,23 @@ engagements:
           provider: OPENAI
           rounds:
             - 2
+        - id: gpt_6_sol
+          provider: OPENAI
+          rounds:
+            - 3
         - id: grok_4_6
           provider: XAI
           rounds:
             - 2
+        - id: gemini_3_7_flash
+          provider: GOOGLE
+          rounds:
+            - 4
+        - id: gpt_6_1_sol
+          provider: OPENAI
+          rounds:
+            - 4
+            - 8
         - id: gemini_3_8_flash
           provider: GOOGLE
           rounds:
@@ -206,7 +252,12 @@ engagements:
         - id: grok_4_7
           provider: XAI
           rounds:
+            - 5
             - 7
+        - id: claude_opus_5_5
+          provider: ANTHROPIC
+          rounds:
+            - 8
       reviewedCommit: a705f2d485961bfcfb01f98d598f1b9714998f79
       round2ReviewedCommit: 734397dc854383ce614be62cb362ec31cd35dd78
       round7ReviewedCommit: 284f74d0b2803cbe909ced0114144f6e1f814ccd
