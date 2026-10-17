@@ -124,7 +124,7 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 | لا أمرَ مؤثِّرَ إلا عبرَ التاجِ | `crown.mts` · `execution-kernel.mjs` · `guard:authorization` | المساراتُ خارجَ `ExecutionKernel` تُقاسُ بالحاجزِ نصّاً لا زمنَ تشغيلٍ |
 | منعُ الرجوعِ بالحالةِ | `state-manifest.mts` (‏ADR 0006) | **حدٌّ معلَنٌ:** الختمُ على القرصِ نفسِه؛ مرجعُ حداثةٍ خارجَ القرصِ غيرُ منفَّذٍ (‏`R3-A-01`/`EXT-6`، ADR 0007 تصميمٌ بلا تنفيذٍ) |
 | الوقتُ المُبرهَنُ | `src/time/attested-clock.mjs` · `config/time.yaml` | يحتاجُ وصولَ UDP إلى خوادمِ Roughtime في بيئةِ التشغيلِ |
-| العزلُ التنفيذيُّ | `src/execution/isolation.mjs` (‏`unshare` + `prlimit`) | لا حاوياتٍ ولا cgroups؛ **ولا يُختبَرُ في CI** (§6) |
+| العزلُ التنفيذيُّ | `src/execution/isolation.mjs` (‏`unshare` + `prlimit`) | لا حاوياتٍ ولا cgroups؛ **يُقاسُ في CI منذ `WL-405`** بخطوةِ تهيئةِ المضيفِ (§6) |
 | الخروجُ إلى الشبكةِ | `src/egress/` | قنواتُ الإبلاغِ الحيّةُ (‏SMTP/Telegram) تُتخطّى في CI بلا بياناتِ اعتمادٍ |
 
 والتفصيلُ في [نموذجِ التهديدِ](THREAT_MODEL.md) و[جذرِ الثقةِ](ROOT_OF_TRUST.md) و[`SECURITY.md`](../SECURITY.md).
@@ -136,9 +136,9 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 
 | القدرةُ | المصدرُ | الاختبارُ | CI | آخرُ كوميتٍ على `main` يمسُّ المصدرَ | الحالُ |
 | --- | --- | --- | --- | --- | --- |
-| نقطةُ دخولٍ إنتاجيّةٌ تفشلُ مغلقةً | `src/production/entrypoint.mjs` · `scripts/production-entry.mjs` | `tests/production/entrypoint.test.mjs` · `subprocess.test.mjs` | يُشغَّلُ (‏حالاتُ SoftHSM الحقيقيّةُ تُتخطّى) | `2876cb58` (‏#207) · `7ad69efc` (‏#206) · `810e59ce` (‏#204) | منفَّذٌ وموصولٌ؛ **لا يُقلِعُ إنتاجاً** (§3) |
-| تركيبُ جذرِ الثقةِ الإنتاجيِّ على HSM | `src/root-of-trust/production-runtime.mts` | `tests/root-of-trust/production-runtime.test.mjs` · `production-runtime-softhsm.test.mjs` | الأوّلُ بتوكنٍ مزيَّفٍ يُشغَّلُ؛ الثاني يُتخطّى (‏`XUUX_HSM_TEST`) | `2876cb58` | منفَّذٌ؛ مقيسٌ على SoftHSM محلّيّاً |
-| موفِّرُ PKCS#11 (‏AES-GCM · Ed25519 غيرُ قابلٍ للاستخراجِ) | `src/root-of-trust/pkcs11-provider.mts` · `scripts/pkcs11-*.mjs` | `tests/root-of-trust/pkcs11-*.test.mjs` | اختباراتُ العقدِ تُشغَّلُ؛ التوكنُ الحقيقيُّ يُتخطّى | `61f5c668` | منفَّذٌ؛ لا HSM عتاديَّ؛ عقدُ `pkcs11js` غيرُ محسومٍ (‏`OPS-1/M6`) |
+| نقطةُ دخولٍ إنتاجيّةٌ تفشلُ مغلقةً | `src/production/entrypoint.mjs` · `scripts/production-entry.mjs` | `tests/production/entrypoint.test.mjs` · `subprocess.test.mjs` | يُشغَّلُ (‏وحالاتُ SoftHSM الحقيقيّةُ تُقاسُ في CI منذ `WL-405` بخطوةٍ مستقلةٍ) | `2876cb58` (‏#207) · `7ad69efc` (‏#206) · `810e59ce` (‏#204) | منفَّذٌ وموصولٌ؛ **لا يُقلِعُ إنتاجاً** (§3) |
+| تركيبُ جذرِ الثقةِ الإنتاجيِّ على HSM | `src/root-of-trust/production-runtime.mts` | `tests/root-of-trust/production-runtime.test.mjs` · `production-runtime-softhsm.test.mjs` | الأوّلُ بتوكنٍ مزيَّفٍ يُشغَّلُ؛ الثاني **يُقاسُ في CI منذ `WL-405`** (‏خطوةُ SoftHSM) | `2876cb58` | منفَّذٌ؛ مقيسٌ على SoftHSM (‏توكنُ برنامجٍ لا عتادُ HSM) |
+| موفِّرُ PKCS#11 (‏AES-GCM · Ed25519 غيرُ قابلٍ للاستخراجِ) | `src/root-of-trust/pkcs11-provider.mts` · `scripts/pkcs11-*.mjs` | `tests/root-of-trust/pkcs11-*.test.mjs` | اختباراتُ العقدِ تُشغَّلُ؛ التوكنُ الحقيقيُّ **يُقاسُ في CI منذ `WL-405`** (‏خطوةُ SoftHSM) | `61f5c668` | منفَّذٌ؛ لا HSM عتاديَّ؛ عقدُ `pkcs11js` غيرُ محسومٍ (‏`OPS-1/M6`) |
 | مُتحقِّقُ الأوامرِ الملكيّةِ في مفتاحِ الإيقافِ | `src/root-of-trust/royal-command.mts` · `halt-switch.mts` · `scripts/halt-switch.mjs` | `tests/production/royal-command-verifier.test.mjs` · `halt-switch-integration.test.mjs` | يُشغَّلُ | `2876cb58` (‏#207، `WL-299`/`WL-300`) | منفَّذٌ وموصولٌ؛ نتائجُ المجلسِ عليه مفتوحةٌ (§8) |
 | بوابةُ التاجِ ودفترُ الأوامرِ | `crown.mts` · `command-ledger.mts` | `tests/root-of-trust/command-ledger.test.mjs` · `root-of-trust.test.mjs` | يُشغَّلُ | `d08c1cd3` · `734397dc` (‏#96) | منفَّذٌ وموصولٌ |
 | سجلُّ أحداثٍ دائمٌ مختومٌ وتثبيتٌ دوريٌّ موقَّعٌ | `persistent-log.mts` · `anchor.mts` | `tests/root-of-trust/persistent-log.test.mjs` · `anchor.test.mjs` | يُشغَّلُ | `1648d450` · `3fa38868` | منفَّذٌ؛ العبثُ يُكشَفُ ولا يُمنَعُ على القرصِ |
@@ -150,7 +150,7 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
 | نواةُ التنفيذِ والوضعُ الآمنُ | `src/core/execution-kernel.mjs` | `tests/core/execution-kernel.test.mjs` · `safe-mode-persistence.test.mjs` | يُشغَّلُ | `50ee266e` (‏#57) | منفَّذٌ وموصولٌ |
 | الاستمراريّةُ على PostgreSQL والهجراتُ | `src/persistence/` · `migrations/` | `tests/persistence/*.test.mjs` | يُشغَّلُ على حاويةِ `postgres` في CI | `2f06f6a1` | منفَّذٌ؛ غيرُ موصولٍ بالمسارِ الإنتاجيِّ أعلاه |
 | الحجزُ القانونيُّ والاحتفاظُ | `src/data/retention-cycle.mjs` · `scripts/retention.mjs` | `tests/data/legal-hold-sovereign.test.mjs` | يُشغَّلُ | `98e88fbe` | منفَّذٌ |
-| العزلُ التنفيذيُّ الحقيقيُّ | `src/execution/isolation.mjs` · `scripts/isolated-task-runner.mjs` | `tests/execution/isolation.test.mjs` · `worker-isolation.test.mjs` | **حالاتُ العزلِ الحقيقيِّ تُتخطّى** (‏`userns` محظورٌ على المضيفِ) | `64d07258` | منفَّذٌ؛ **غيرُ مقيسٍ في CI منذ `WL-286`** (‏`LIVE-23`) |
+| العزلُ التنفيذيُّ الحقيقيُّ | `src/execution/isolation.mjs` · `scripts/isolated-task-runner.mjs` | `tests/execution/isolation.test.mjs` · `worker-isolation.test.mjs` | **يُقاسُ في CI منذ `WL-405`** (‏خطوةُ تهيئةِ المضيفِ — `userns`) | `64d07258` | منفَّذٌ؛ **مقيسٌ في CI منذ `WL-405` (`LIVE-23` مُغلَقةٌ)** |
 | تمارينُ التعافي والفوضى والطوارئِ | `src/recovery/` · `src/chaos/` · `src/emergency/` | `tests/recovery/` · `tests/chaos/` · `tests/emergency/` | يُشغَّلُ | — | منفَّذٌ محلّيّاً في العمليّةِ والقرصِ؛ لا شبكةَ حقيقيّةَ ولا سحابةَ |
 
 ## 6 — ما يقيسُه CI وما لا يقيسُه
@@ -197,8 +197,12 @@ manifest · sealed log · ledger · halt) → King identity (HSM public key) →
   (‏`unshare: write failed /proc/self/uid_map`) **6** · توكنُ SoftHSM حقيقيٌّ (‏`XUUX_HSM_TEST`) **7** ·
   قناةٌ حيّةٌ (‏`XUUX_CHANNEL_POC`) **2** · عزلٌ حقيقيٌّ غيرُ متاحٍ **1** · متغيّراتُ بيئةٍ خارجيّةٌ **1** ·
   SMTP **1**.
-- **فالأخضرُ لا يعني:** أنّ HSM الحقيقيَّ أو TPM أو العزلَ بمساحاتِ الأسماءِ أو القنواتِ الحيّةَ
-  مقيسةٌ في CI. هي مقيسةٌ (‏إن قِيسَت) على جهازِ المالكِ بأدلّةٍ في سجلِّ الأعمالِ.
+- **حدَّثَ `WL-405` معنى هذه اللقطةِ:** هذه أسبابُ تخطّي خطوةِ `npm test` وحدَها — وقد صارَ العزلُ الحقيقيُّ
+  (‏`userns`) والتوكنُ الحقيقيُّ (‏`SoftHSM`) ومحاكي TPM تُقاسُ كلُّها في CI **في خطواتٍ مستقلةٍ** لا
+  تتخطّى (‏`scripts/isolation-ci.sh` · `scripts/hsm-softhsm-ci.sh` · `scripts/tpm-sim-ci.sh`)، فبقيت هذه الأعدادُ
+  وصفًا لخطوةِ `npm test` فقط لا دليلًا على غيابِ القياسِ.
+- **فالأخضرُ لا يعني:** أنّ HSM عتاديًّا أو TPM عتاديًّا أو القنواتِ الحيّةَ مقيسةٌ في CI — فالمقيسُ
+  محاكاةٌ وتوكنُ برنامجٍ **بحدٍّ معلَنٍ**، والعتادُ الحقيقيُّ يبقى خارجَ CI (‏`R3-A-01`/`EXT-6` مفتوحانِ).
 
 ## 7 — حالُ GitHub المقيسُ
 

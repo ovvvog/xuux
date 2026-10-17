@@ -25,7 +25,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
-import { royalKeyEnv } from '../helpers/royal-halt-command.mjs';
+import { royalCommandFor, royalKeyEnv } from '../helpers/royal-halt-command.mjs';
 
 /** `LIVE-24`: مفتاحٌ ملكيٌّ مستقلٌّ عن مفتاحِ المرساةِ في التوكن. */
 const ROYAL_KEY = royalKeyEnv();
@@ -199,10 +199,22 @@ describe('المسارُ الإنتاجيُّ على توكنٍ حقيقيّ (So
       const record = await runtime.commitBarrier.run('anchor', () =>
         anchorLogWithHsm(store, runtime.anchorSigner, runtime.log),
       );
-      assert.equal(record.count, 1);
+      // WL-405/LIVE-23: التأكيدُ القديمُ `count === 1` تقادَمَ منذ WL-326 — onCommitSink
+      // يضيفُ حدثَ `ledger.committed` للسجلِّ المختومِ عندَ كلِّ دفترٍ يُقرُّ، فالمرساةُ
+      // تُغطِّي السلسلةَ كاملةً لا حدثًا واحدًا. اللازمُ هو «المرساةُ تغطِّي كلَّ الأحداثِ»
+      // لا رقمٌ مجمَّدٌ يتكسَّرُ بكلِّ حدثٍ مشروعٍ جديد. هذا الاختبارُ لا يعملُ في CI
+      // (لا SoftHSM فيها قبل WL-405) فبقيَ الانكسارُ غيرَ مرئيٍّ — وهو عينُ LIVE-23.
+      assert.equal(record.count, runtime.log.events.length);
+      assert.ok(record.count >= 1);
       assert.equal(verifyAnchorChain(store.read(), runtime.anchorSigner).ok, true);
 
-      const directive = await runtime.haltSwitch.haltAsync('اختبارُ توكنٍ حقيقيّ');
+      // WL-405/LIVE-23: منذ WL-303 الإيقافُ السياديُّ لا يصدرُ بنداءٍ مباشرٍ — يُطلَبُ
+      // أمرٌ ملكيٌّ موثَّقٌ (`royalCommandFor` يوقّعُ بمفتاحِ الملكِ الذي بُنيَ عليه
+      // المُحقّقُ). الاختبارُ كانَ يُتخطّى في CI فبقيَ على الواجهةِ القديمةِ.
+      const directive = await runtime.haltSwitch.haltAsync(
+        'اختبارُ توكنٍ حقيقيّ',
+        royalCommandFor(runtime.haltSwitch, 'halt', 'اختبارُ توكنٍ حقيقيّ'),
+      );
       assert.equal(directive.state, 'halted');
       assert.equal(runtime.haltSwitch.read().state, 'halted');
     } finally {
