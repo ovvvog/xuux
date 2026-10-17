@@ -84,7 +84,33 @@ namespace Xuux.TpmCeremony.Tests
         public uint LostSession;
         public readonly List<string> Forwarded = new List<string>();
 
+        public uint ThirdPartyRc = 0xFFFFFFFF;
+        private int _increments;
+        private bool _dead;
+
         public CeremonyFaultTransport(ICeremonyTransport inner, string mode) { _inner = inner; _mode = mode; }
+
+        public delegate byte[] ParamRewrite(byte[] oldParams);
+
+        // يُلحِقُ بايتاتٍ بنهايةِ ردٍّ بلا جلساتٍ ويصحّحُ الحجمَ المعلن (الترويسةُ متّسقة؛ البنيةُ الداخليّةُ لا).
+        private static byte[] Append(byte[] raw, byte[] extra)
+        {
+            byte[] n = new byte[raw.Length + extra.Length];
+            Buffer.BlockCopy(raw, 0, n, 0, raw.Length); Buffer.BlockCopy(extra, 0, n, raw.Length, extra.Length);
+            byte[] sz = new Wr().U32((uint)n.Length).Bytes(); Buffer.BlockCopy(sz, 0, n, 2, 4);
+            return n;
+        }
+
+        // يعيدُ كتابةَ معاملاتِ ردِّ ST_SESSIONS مع تصحيحِ parameterSize والحجمِ الكلّيِّ (منطقةُ التفويضِ كما هي).
+        private static byte[] RewriteParams(byte[] raw, int handles, ParamRewrite f)
+        {
+            Rd r = new Rd(raw); r.U16(); r.U32(); r.U32();
+            byte[] hs = r.Raw(4 * handles);
+            uint ps = r.U32(); byte[] prm = r.Raw((int)ps); byte[] auth = r.Raw(r.Remaining);
+            byte[] np = f(prm);
+            byte[] body = new Wr().Raw(hs).U32((uint)np.Length).Raw(np).Raw(auth).Bytes();
+            return new Wr().U16(Tpm.ST_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
+        }
 
         public string Kind { get { return "test:wl413-" + _mode; } }
 
@@ -160,6 +186,32 @@ namespace Xuux.TpmCeremony.Tests
                 byte[] body = p.Bytes();
                 return new Wr().U16(Tpm.ST_NO_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
             }
+            if (_dead) throw new System.IO.IOException("WL413R2_TRANSPORT_DEAD");
+            if (_mode == "written-before-reconcile" && cc == Tpm.CC_NV_DefineSpace && Changes == 0)
+            {
+                // يُنفَّذُ التعريفُ، ثمّ «طرفٌ آخرُ» يكتبُ الفهرسَ (زيادةٌ بتفويضٍ فارغٍ يسمحُ بها شكلُ S1)،
+                // ثمّ يضيعُ ردُّ التعريف. الفهرسُ يطابقُ تعريفَنا عدا WRITTEN — ليس مُثبَتَ الملكيّة.
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); uint authSize = c.U32(); c.Raw((int)authSize); c.B2B();
+                DefinedPublic = c.B2B(); DefinedHandle = new Rd(DefinedPublic).U32();
+                _inner.Transmit(command);
+                byte[] inc = _inner.Transmit(Cmd.NvIncrement(DefinedHandle, Cmd.PasswordAuth(new byte[0])));
+                Rd ih = new Rd(inc); ih.U16(); ih.U32(); ThirdPartyRc = ih.U32();
+                Changes++;
+                throw new System.IO.IOException("WL413R2_RESPONSE_LOSS_AFTER_DEFINE_AND_THIRD_PARTY_WRITE");
+            }
+            if (_mode == "neg-increment-loss" && cc == Tpm.CC_NV_Increment)
+            {
+                // الزيادةُ الرابعةُ هي s2v:NV_Increment(password-auth) — مرفوضةٌ على المحاكي، وردُّها يضيع.
+                _increments++;
+                if (_increments == 4) { _inner.Transmit(command); Changes++; throw new System.IO.IOException("WL413R2_LOSS_AFTER_NEGATIVE_INCREMENT"); }
+            }
+            if (_mode == "transport-dead-after-define" && cc == Tpm.CC_NV_DefineSpace && Changes == 0)
+            {
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); uint authSize = c.U32(); c.Raw((int)authSize); c.B2B();
+                DefinedPublic = c.B2B(); DefinedHandle = new Rd(DefinedPublic).U32();
+                _inner.Transmit(command); Changes++; _dead = true;
+                throw new System.IO.IOException("WL413R2_TRANSPORT_DIED_AFTER_DEFINE");
+            }
             byte[] raw = _inner.Transmit(command);
             Rd header = new Rd(raw);
             ushort tag = header.U16(); header.U32(); uint rc = header.U32();
@@ -168,6 +220,30 @@ namespace Xuux.TpmCeremony.Tests
                 Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); uint authSize = c.U32(); c.Raw((int)authSize); c.B2B();
                 DefinedPublic = c.B2B(); DefinedHandle = new Rd(DefinedPublic).U32(); Changes++;
                 throw new System.IO.IOException("WL413_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION");
+            }
+            if (rc == 0 && _mode == "trailing-readpublic" && cc == Tpm.CC_NV_ReadPublic)
+            {
+                Changes++; return Append(raw, new byte[] { 0xde, 0xad, 0x01 });
+            }
+            if (rc == 0 && _mode == "define-params-extra" && cc == Tpm.CC_NV_DefineSpace && Changes == 0)
+            {
+                // ردُّ نجاحٍ لأمرٍ مُغيِّرٍ معاملاتُه يجبُ أن تكونَ فارغةً، وقد حُشيَت ببايتين (الأحجامُ متّسقة).
+                if (DefinedHandle == 0)
+                {
+                    Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); uint authSize = c.U32(); c.Raw((int)authSize); c.B2B();
+                    DefinedPublic = c.B2B(); DefinedHandle = new Rd(DefinedPublic).U32();
+                }
+                Changes++; return RewriteParams(raw, 0, delegate(byte[] p) { return new byte[] { 0x00, 0x00 }; });
+            }
+            if (rc == 0 && _mode == "getcap-wrong-cap" && cc == Tpm.CC_GetCapability && Changes == 0)
+            {
+                // ردُّ الهويّةِ يعلنُ قدرةً غيرَ المسؤولِ عنها (HANDLES بدلَ TPM_PROPERTIES) — بنيةٌ صالحةٌ ومعنى خاطئ.
+                Changes++; raw[11] = 0x00; raw[12] = 0x00; raw[13] = 0x00; raw[14] = 0x01; // الحقلُ capability عندَ الإزاحةِ 11
+                return raw;
+            }
+            if (rc == 0 && _mode == "load-name-short" && cc == Tpm.CC_Load && Changes == 0)
+            {
+                Changes++; return RewriteParams(raw, 1, delegate(byte[] p) { return new byte[] { 0x00, 0x02, 0x00, 0x0b }; });
             }
             if (_mode == "invalid-tag" && tag == Tpm.ST_NO_SESSIONS)
             {
