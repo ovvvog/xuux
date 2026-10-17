@@ -5,14 +5,14 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "6d8dadb0692de2cafa4afb2e2dffd50905a95484",
-      "mainHeadAtMeasure": "6d8dadb0692de2cafa4afb2e2dffd50905a95484",
-      "scopeDigest": "43a7711515a6e1edabda61397cbec47c7542e81cf57c620265eaf83a1e2355a8",
+      "commit": "336511a734c152beb53ff7ac03173d4ec5aadd64",
+      "mainHeadAtMeasure": "336511a734c152beb53ff7ac03173d4ec5aadd64",
+      "scopeDigest": "19f817c90528ff8daa0c0db52712343788bb91f8c782610de4717002d15b2dff",
       "measuredOn": "2026-10-17",
       "verdict": "success",
-      "testFileCount": 262,
-      "tests": 2754,
-      "pass": 2543,
+      "testFileCount": 263,
+      "tests": 2766,
+      "pass": 2555,
       "fail": 0,
       "skipped": 211,
       "skipLines": 213,
@@ -52,7 +52,7 @@
           "count": 1
         },
         {
-          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA). القناة منفذة ومختبَرة وحدويّاً.",
+          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.",
           "count": 1
         }
       ]
@@ -61,14 +61,14 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "6d8dadb0692de2cafa4afb2e2dffd50905a95484",
-      "mainHeadAtMeasure": "6d8dadb0692de2cafa4afb2e2dffd50905a95484",
-      "scopeDigest": "43a7711515a6e1edabda61397cbec47c7542e81cf57c620265eaf83a1e2355a8",
+      "commit": "336511a734c152beb53ff7ac03173d4ec5aadd64",
+      "mainHeadAtMeasure": "336511a734c152beb53ff7ac03173d4ec5aadd64",
+      "scopeDigest": "19f817c90528ff8daa0c0db52712343788bb91f8c782610de4717002d15b2dff",
       "measuredOn": "2026-10-17",
       "verdict": "success",
-      "testFileCount": 262,
-      "tests": 2754,
-      "pass": 2543,
+      "testFileCount": 263,
+      "tests": 2766,
+      "pass": 2555,
       "fail": 0,
       "skipped": 211,
       "skipLines": 213,
@@ -108,7 +108,7 @@
           "count": 1
         },
         {
-          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA). القناة منفذة ومختبَرة وحدويّاً.",
+          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.",
           "count": 1
         }
       ]
