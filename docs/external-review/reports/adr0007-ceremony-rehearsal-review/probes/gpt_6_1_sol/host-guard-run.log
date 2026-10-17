@@ -1,0 +1,3 @@
+host_guard_compile_exit=0
+host_guard_probe_exit=0
+{"guardAccepted":["GetCapability","NV_ReadPublic"],"recordingSubmittedCount":2,"recordingReachedCount":2}

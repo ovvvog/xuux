@@ -1,0 +1,100 @@
+TAP version 13
+# Subtest: static: لا مسارَ إلى TBS أو جهازٍ أو أسرارِ المالكِ في أداةِ البروفة
+ok 1 - static: لا مسارَ إلى TBS أو جهازٍ أو أسرارِ المالكِ في أداةِ البروفة
+  ---
+  duration_ms: 4.786569
+  ...
+# Subtest: static: النقلُ الوحيدُ swtpm على loopback، والنواةُ C\# 5، والتقريرُ بلا بايتاتِ أوامر
+ok 2 - static: النقلُ الوحيدُ swtpm على loopback، والنواةُ C\# 5، والتقريرُ بلا بايتاتِ أوامر
+  ---
+  duration_ms: 1.825426
+  ...
+# Subtest: static: سماتُ المرساةِ في النواةِ تطابقُ §4.1 (ORDERLY=0، NO_DA، بلا POLICY_DELETE ولا AUTHWRITE)
+ok 3 - static: سماتُ المرساةِ في النواةِ تطابقُ §4.1 (ORDERLY=0، NO_DA، بلا POLICY_DELETE ولا AUTHWRITE)
+  ---
+  duration_ms: 0.511157
+  ...
+# Subtest: pwsh: المُشغِّلُ يرفضُ أيَّ مضيفٍ غيرِ loopback قبلَ الاتصال
+ok 4 - pwsh: المُشغِّلُ يرفضُ أيَّ مضيفٍ غيرِ loopback قبلَ الاتصال
+  ---
+  duration_ms: 2252.341622
+  ...
+# Subtest: pwsh: نقلُ المحاكي نفسُه يرفضُ غيرَ loopback بـSIMULATOR_TRANSPORT_LOOPBACK_ONLY
+ok 5 - pwsh: نقلُ المحاكي نفسُه يرفضُ غيرَ loopback بـSIMULATOR_TRANSPORT_LOOPBACK_ONLY
+  ---
+  duration_ms: 991.421731
+  ...
+# Subtest: pwsh: شريحةٌ غيرُ المحاكي (IFX) ⇒ FAILED_CLOSED بعدَ استعلامِ الهويّةِ وحدَه، بلا أيِّ أمرٍ مُغيِّر
+ok 6 - pwsh: شريحةٌ غيرُ المحاكي (IFX) ⇒ FAILED_CLOSED بعدَ استعلامِ الهويّةِ وحدَه، بلا أيِّ أمرٍ مُغيِّر
+  ---
+  duration_ms: 853.243685
+  ...
+# Subtest: pwsh: كلُّ أمرٍ تبنيه البروفةُ يرفضُه حارسُ أداةِ المضيف (TpmGuard) ولا يبلغُ النقل
+ok 7 - pwsh: كلُّ أمرٍ تبنيه البروفةُ يرفضُه حارسُ أداةِ المضيف (TpmGuard) ولا يبلغُ النقل
+  ---
+  duration_ms: 940.583454
+  ...
+# Subtest: static: حارسُ المحاكي القائمُ وبوابةُ الحداثةِ الإنتاجيةُ وعقدُ المراجعةِ لم تُمَسّ في هذه الدفعة
+ok 8 - static: حارسُ المحاكي القائمُ وبوابةُ الحداثةِ الإنتاجيةُ وعقدُ المراجعةِ لم تُمَسّ في هذه الدفعة
+  ---
+  duration_ms: 42.186289
+  ...
+# Subtest: sim: البروفةُ الكاملة (S1 ثمّ S2 ثمّ التحقّقُ من السمات) ⇒ COMPLETE، بلا بقايا، والفهارسُ كما كانت
+ok 9 - sim: البروفةُ الكاملة (S1 ثمّ S2 ثمّ التحقّقُ من السمات) ⇒ COMPLETE، بلا بقايا، والفهارسُ كما كانت
+  ---
+  duration_ms: 1094.145145
+  ...
+# Subtest: sim: بصمةُ سياسةِ الزيادة — جلسةُ تجربةِ الـTPM = نواةُ C\# = حسابُ Node المستقلّ
+ok 10 - sim: بصمةُ سياسةِ الزيادة — جلسةُ تجربةِ الـTPM = نواةُ C\# = حسابُ Node المستقلّ
+  ---
+  duration_ms: 1.173145
+  ...
+# Subtest: sim: نصفُ PolicyCommandCode(NV_Increment) يطابقُ tpm2-tools (تنفيذٌ ثالث)
+ok 11 - sim: نصفُ PolicyCommandCode(NV_Increment) يطابقُ tpm2-tools (تنفيذٌ ثالث)
+  ---
+  duration_ms: 18.77615
+  ...
+# Subtest: sim: السماتُ والأسماءُ والأحجامُ (§4.1) مفحوصةٌ في Node بتاً بتاً
+ok 12 - sim: السماتُ والأسماءُ والأحجامُ (§4.1) مفحوصةٌ في Node بتاً بتاً
+  ---
+  duration_ms: 0.663124
+  ...
+# Subtest: sim: النتائجُ السلبيةُ والإيجابيةُ المقيسة (لا تعميمَ على العتاد)
+ok 13 - sim: النتائجُ السلبيةُ والإيجابيةُ المقيسة (لا تعميمَ على العتاد)
+  ---
+  duration_ms: 0.315835
+  ...
+# Subtest: sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ NV_DefineSpace ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+ok 14 - sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ NV_DefineSpace ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+  ---
+  duration_ms: 868.298491
+  ...
+# Subtest: sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ NV_Increment ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+ok 15 - sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ NV_Increment ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+  ---
+  duration_ms: 900.655675
+  ...
+# Subtest: sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ PolicySigned ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+ok 16 - sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ PolicySigned ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+  ---
+  duration_ms: 949.927868
+  ...
+# Subtest: sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ NV_UndefineSpace ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+ok 17 - sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ NV_UndefineSpace ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+  ---
+  duration_ms: 961.646447
+  ...
+# Subtest: sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ CreatePrimary ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+ok 18 - sim: حقنُ TPM_E_COMMAND_BLOCKED عندَ CreatePrimary ⇒ توقّفٌ مغلقٌ بلا بديلٍ ولا إعادة
+  ---
+  duration_ms: 917.247819
+  ...
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 11568.653121

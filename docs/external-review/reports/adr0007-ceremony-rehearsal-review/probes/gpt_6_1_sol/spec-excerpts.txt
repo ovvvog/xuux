@@ -1,0 +1,613 @@
+Part 1 r1.38 §16 and §19.4
+Level 00 Revision 01.38             Copyright © TCG 2006-2016                      September 29, 2016
+Part 1: Architecture                                                           Trusted Platform Module Library
+
+
+     Names
+
+The Name of an entity is its unique identifier. The handle associated with an object may change due to
+context management (TPM2_ContextSave() / TPM2_ContextLoad()), but the Name of an object remains
+constant. The Name associated with an NV Index will change based on changes to the attributes of the
+Index.
+
+EXAMPLE            When an NV Index is initially defined, it will have a Name for an Index with TPMA_NV_WRITTEN
+                   CLEAR. After the Index is written, the Name will change to reflect that TPMA_NV_WRITTEN is SET
+                   for the Index.
+
+When an NV Index becomes locked (TPMA_NV_WRITELOCKED or TPMA_NV_READLOCKED is SET),
+the Name of the NV Index changes. This has two implications:
+
+The caller should use its copy of the NV public area and calculate the Name before using it in an HMAC
+authorization calculation. Otherwise, an invalid authorization may trigger the dictionary attack protection
+depending on TPMA_NV_NO_DA.
+
+The TPM must check access control before checking authorization. For example, it should reject a read to
+a read locked NV Index before doing an authorization check that might trigger the dictionary attack
+protection.
+
+The method of computing the Name for an entity varies according to the entity type that is the MSO of the
+handle. Table 3 shows the method and the handle’s MSO for different entity types.
+
+When the computation of a Name uses a hash algorithm, the algorithm identifier is included in the Name
+structure. If the Name is a handle, the Name is only the handle value.
+
+                              Table 3 — Equations for Computing Entity Names
+ MSO of
+ Handle      Entity Type             Equation for Computing the Name
+
+ 0016        PCR
+ 0216        HMAC Session                               Name ≔ handle
+                                     No hash is performed on the handle to produce the name and the name is only
+ 0316        Policy Session          the size of the handle.
+ 4016        Permanent Values
+
+                                                        Name ≔ nameAlg || HnameAlg (handle→nvPublicArea)
+                                     where
+                                          nameAlg             algorithm used to compute Name
+ 0116        NV Index                     HnameAlg            hash using the nameAlg parameter in the NV Index
+                                                              location associated with handle
+                                          nvPublicArea        contents of the TPMS_NV_PUBLIC associated with
+                                                              handle
+                                                        Name ≔ nameAlg || HnameAlg (handle→publicArea)
+ 8016        Transient Objects(1)    where
+                                          nameAlg             algorithm used to compute Name
+                                          HnameAlg            hash using the nameAlg parameter in the object
+ 8116        Persistent Objects                               associated with handle
+                                          publicArea          contents of the TPMT_PUBLIC associated with handle
+ NOTE 1) The Name of a sequence object is an Empty Buffer (see 32.4.5).
+
+
+When an object is created, a "template" for the public area is used to define the properties for the new
+object. That template has the structure of an object's public area. The Name of a public area template is
+computed in the same way as the Name of a Transient Object.
+Family “2.0”                                      TCG Published                                           Page 79
+Level 00 Revision 01.38                   Copyright © TCG 2006-2016                         September 29, 2016
+19.4     Password Authorizations
+
+A plaintext password value may be used to authorize an action when use of an authValue is allowed. A
+plaintext password may be appropriate for cases in which the path between the caller and the TPM is
+trusted or when the authorization value is well known. For these instances, encryption of parameters or
+the hiding of authorization values in an HMAC is not required.
+
+NOTE 1          While it may seem relatively easy for a caller to perform an HMAC, there are situations where the
+                caller is resource-constrained and unable to do so. This is especially true when the calling software
+                does not support the hash algorithms implemented in the TPM. Additionally, authentication using a
+                cryptographic protocol makes it difficult to provide operating system abstractions.
+
+A reserved authorization handle (TPM_RS_PW) indicates that the authorization is a password.
+
+TPM_RS_PW is always available, and a separate action to create an authorization session is not
+required. A password authorization does not use nonces. sessionAttributes→continueSession is ignored.
+
+A password authorization lets the caller send more or fewer octets than are present in the object’s
+authorization field. The TPM truncates any octets of zero on either of the two values before they are
+compared.
+
+If present, a password authorization is always associated with a command handle that requires
+authorization as there is no session context associated with a password that would allow it to be used for
+encryption or command audit.
+
+Unlike other handles for other session types, the TPM_RS_PW session handle may be used for more
+than one authorization.
+
+Password authorization data sent to the TPM has the format shown in Table 12.
+
+                           Table 12 — Password Authorization of Command
+ Type                           Name                      Description
+
+                                                          required to be the reserved authorization session
+ TPMI_SH_AUTH_SESSION           authHandle
+                                                          handle TPM_RS_PW
+ TPM2B_NONCE                    nonceCaller               required to be an Empty Buffer
+ TPMA_SESSION                   sessionAttributes         only continueSession may be SET
+                                                          authorization compared to the authValue of the TPM
+ TPM2B_AUTH                     password
+                                                          entity
+
+
+Table 13 illustrates the format of a password authorization in a response. This structure is provided to
+ensure a one-to-one correspondence between the sessions in the command and in the response.
+
+                         Table 13 — Password Acknowledgment in Response
+ Type                           Name                      Description
+
+ TPM2B_NONCE                    nonceTPM                  zero-length for a password authorization
+                                                          copy of the flags from the password authorization in the
+ TPMA_SESSION                   sessionAttributes
+                                                          command, continueSession will be SET
+ TPM2B_AUTH                     hmac                      zero-length buffer for a password authorization
+
+
+Part 2 r1.38 §§10.13,12.2.3.6,12.2.4,13.4,13.5
+attestationData[size]{:sizeof(TPMS_ATTEST)}    BYTE                       the signed structure
+
+
+10.13 Authorization Structures
+
+10.13.1 Introduction
+
+The structures in 10.13 are used for all authorizations. One or more of these structures will be present in
+a command or response that has a tag of TPM_ST_SESSIONS.
+
+10.13.2 TPMS_AUTH_COMMAND
+
+This is the format used for each of the authorizations in the session area of a command.
+
+                    Table 124 — Definition of TPMS_AUTH_COMMAND Structure <IN>
+Parameter              Type                             Description
+
+sessionHandle          TPMI_SH_AUTH_SESSION+            the session handle
+nonce                  TPM2B_NONCE                      the session nonce, may be the Empty Buffer
+sessionAttributes      TPMA_SESSION                     the session attributes
+hmac                   TPM2B_AUTH                       either an HMAC, a password, or an EmptyAuth
+
+
+10.13.3 TPMS_AUTH_RESPONSE
+
+This is the format for each of the authorizations in the session area of the response. If the TPM returns
+TPM_RC_SUCCESS, then the session area of the response contains the same number of authorizations
+as the command and the authorizations are in the same order.
+
+                Table 125 — Definition of TPMS_AUTH_RESPONSE Structure <OUT>
+Parameter              Type                             Description
+
+nonce                  TPM2B_NONCE                      the session nonce, may be the Empty Buffer
+sessionAttributes      TPMA_SESSION                     the session attributes
+
+hmac                   TPM2B_AUTH                       either an HMAC or an EmptyAuth
+
+
+
+12.2.3.6      TPMS_ECC_PARMS
+
+This structure contains the parameters for prime modulus ECC.
+
+                        Table 187 — Definition of {ECC} TPMS_ECC_PARMS Structure
+Parameter             Type                                      Description
+
+symmetric             TPMT_SYM_DEF_OBJECT+                      for a restricted decryption key, shall be set to a supported
+                                                                symmetric algorithm, key size. and mode.
+                                                                if the key is not a restricted decryption key, this field shall be
+                                                                set to TPM_ALG_NULL.
+scheme                TPMT_ECC_SCHEME+                          If the sign attribute of the key is SET, then this shall be a valid
+                                                                signing scheme.
+                                                                NOTE         If the sign parameter in curveID indicates a mandatory
+                                                                             scheme, then this field shall have the same value.
+                                                                If the decrypt attribute of the key is SET, then this shall be a
+                                                                valid key exchange scheme or TPM_ALG_NULL.
+                                                                If the key is a Storage Key, then this field shall be
+                                                                TPM_ALG_NULL.
+curveID               TPMI_ECC_CURVE                            ECC curve ID
+kdf                   TPMT_KDF_SCHEME+                          an optional key derivation scheme for generating a symmetric
+                                                                key from a Z value
+                                                                If the kdf     parameter associated with curveID is not
+                                                                TPM_ALG_NULL then this is required to be NULL.
+                                                                NOTE        There are currently no commands where this parameter
+                                                                has effect and, in the reference code, this field needs to be set to
+                                                                TPM_ALG_NULL.
+
+
+
+12.2.3.7      TPMU_PUBLIC_PARMS
+12.2.4 TPMT_PUBLIC
+
+Table 190 defines the public area structure. The Name of the object is nameAlg concatenated with the
+digest of this structure using nameAlg.
+
+                          Table 190 — Definition of TPMT_PUBLIC Structure
+Parameter          Type                    Description
+
+type               TPMI_ALG_PUBLIC         “algorithm” associated with this object
+nameAlg            +TPMI_ALG_HASH          algorithm used for computing the Name of the object
+                                           NOTE       The "+" indicates that the instance of a TPMT_PUBLIC may have
+                                                      a "+" to indicate that the nameAlg may be TPM_ALG_NULL.
+
+objectAttributes   TPMA_OBJECT             attributes that, along with type, determine the manipulations of this
+                                           object
+authPolicy         TPM2B_DIGEST            optional policy for using this key
+                                           The policy is computed using the nameAlg of the object.
+                                           NOTE       Shall be the Empty Policy if no authorization policy is present.
+
+[type]parameters TPMU_PUBLIC_PARMS the algorithm or structure details
+[type]unique       TPMU_PUBLIC_ID          the unique identifier of the structure
+                                           For an asymmetric key, this would be the public key.
+
+
+12.2.5 TPM2B_PUBLIC
+
+This sized buffer is used to embed a TPMT_PUBLIC in a load command and in any response that returns
+a public area.
+
+                          Table 191 — Definition of TPM2B_PUBLIC Structure
+Parameter                         Type                Description
+
+size=                             UINT16              size of publicArea
+                                                      NOTE         The “=” will force the TPM to try to unmarshal a
+                                                                   TPMT_PUBLIC and check that the unmarshaled size
+                                                                   matches the value of size. If all the required fields of
+                                                                   a TPMT_PUBLIC are not present, the TPM will return
+                                                                   an error (generally TPM_RC_SIZE) when attempting
+                                                                   to unmarshal the TPMT_PUBLIC.
+
+publicArea                        +TPMT_PUBLIC        the public area
+                                                      NOTE      The “+” indicates that the caller may specify that use
+
+        0   TPMA_NV_PPWRITE            SET (1): The Index data can be written if Platform Authorization is
+                                       provided.
+                                       CLEAR (0): Writing of the Index data cannot be authorized with
+                                       Platform Authorization.
+        1   TPMA_NV_OWNERWRITE         SET (1): The Index data can be written if Owner Authorization is
+                                       provided.
+                                       CLEAR (0): Writing of the Index data cannot be authorized with
+                                       Owner Authorization.
+        2   TPMA_NV_AUTHWRITE          SET (1): Authorizations to change the Index contents that require
+                                       USER role may be provided with an HMAC session or password.
+                                       CLEAR (0): Authorizations to change the Index contents that require
+                                       USER role may not be provided with an HMAC session or password.
+        3   TPMA_NV_POLICYWRITE        SET (1): Authorizations to change the Index contents that require
+                                       USER role may be provided with a policy session.
+                                       CLEAR (0): Authorizations to change the Index contents that require
+                                       USER role may not be provided with a policy session.
+                                       NOTE      TPM2_NV_ChangeAuth() always requires that authorization be
+                                                 provided in a policy session.
+
+   7:4      TPM_NT                     The type of the index.
+                                       NOTE      A TPM is not required to support all TPM_NT values
+
+   9:8      Reserved                   shall be zero
+                                       reserved for future use
+    10      TPMA_NV_POLICY_DELETE      SET (1): Index may not be deleted unless the authPolicy is satisfied
+                                       using TPM2_NV_UndefineSpaceSpecial().
+                                       CLEAR (0): Index may be deleted with proper platform or owner
+                                       authorization using TPM2_NV_UndefineSpace().
+                                       NOTE An Index with this attribute and a policy that cannot be
+                                       satisfied (e.g., an Empty Policy) cannot be deleted.
+    11      TPMA_NV_WRITELOCKED        SET (1): Index cannot be written.
+                                       CLEAR (0): Index can be written.
+    12      TPMA_NV_WRITEALL           SET (1): A partial write of the Index data is not allowed. The write
+                                       size shall match the defined space size.
+                                       CLEAR (0): Partial writes are allowed. This setting is required if the
+                                       .dataSize of the Index is larger than NV_MAX_BUFFER_SIZE for the
+                                       implementation.
+    13      TPMA_NV_WRITEDEFINE        SET (1): TPM2_NV_WriteLock() may be used to prevent further
+                                       writes to this location.
+                                       CLEAR (0): TPM2_NV_WriteLock() does not block subsequent
+                                       writes if TPMA_NV_WRITE_STCLEAR is also CLEAR.
+    14      TPMA_NV_WRITE_STCLEAR      SET (1): TPM2_NV_WriteLock() may be used to prevent further
+                                       writes to this location until the next TPM Reset or TPM Restart.
+                                       CLEAR (0): TPM2_NV_WriteLock() does not block subsequent
+                                       writes if TPMA_NV_WRITEDEFINE is also CLEAR.
+    15      TPMA_NV_GLOBALLOCK         SET (1): If TPM2_NV_GlobalWriteLock() is successful, then further
+                                       writes to this location are not permitted until the next TPM Reset or
+                                       TPM Restart.
+                                       CLEAR (0): TPM2_NV_GlobalWriteLock() has no effect on the
+                                       writing of the data at this Index.
+
+
+
+
+Family “2.0”                              TCG Published                                               Page 143
+Level 00 Revision 01.38             Copyright © TCG 2006-2016                          September 29, 2016
+Part 2: Structures                                                 Trusted Platform Module Library
+
+
+  Bit    Name                      Description
+
+    16   TPMA_NV_PPREAD            SET (1): The Index data can be read if Platform Authorization is
+                                   provided.
+                                   CLEAR (0): Reading of the Index data cannot be authorized with
+                                   Platform Authorization.
+    17   TPMA_NV_OWNERREAD         SET (1): The Index data can be read if Owner Authorization is
+                                   provided.
+                                   CLEAR (0): Reading of the Index data cannot be authorized with
+                                   Owner Authorization.
+    18   TPMA_NV_AUTHREAD          SET (1): The Index data may be read if the authValue is provided.
+                                   CLEAR (0): Reading of the Index data cannot be authorized with the
+                                   Index authValue.
+    19   TPMA_NV_POLICYREAD        SET (1): The Index data may be read if the authPolicy is satisfied.
+                                   CLEAR (0): Reading of the Index data cannot be authorized with the
+                                   Index authPolicy.
+ 24:20   Reserved                  shall be zero
+                                   reserved for future use
+    25   TPMA_NV_NO_DA             SET (1): Authorization failures of the Index do not affect the DA logic
+                                   and authorization of the Index is not blocked when the TPM is in
+                                   Lockout mode.
+                                   CLEAR (0): Authorization failures of the Index will increment the
+                                   authorization failure counter and authorizations of this Index are not
+                                   allowed when the TPM is in Lockout mode.
+    26   TPMA_NV_ORDERLY           SET (1): NV Index state is only required to be saved when the TPM
+                                   performs an orderly shutdown (TPM2_Shutdown()).
+                                   CLEAR (0): NV Index state is required to be persistent after the
+                                   command to update the Index completes successfully (that is, the NV
+                                   update is synchronous with the update command).
+                                   NOTE       If TPMA_NV_ORDERLY is SET, TPMA_NV_WRITTEN will be
+                                              CLEAR by TPM Reset.
+
+    27   TPMA_NV_CLEAR_STCLEAR     SET (1): TPMA_NV_WRITTEN for the Index is CLEAR by TPM
+                                   Reset or TPM Restart.
+                                   CLEAR (0): TPMA_NV_WRITTEN is not changed by TPM Restart.
+                                   NOTE       This attribute may    only   be   SET   if   TPM_NT   is   not
+                                              TPM_NT_COUNTER.
+
+    28   TPMA_NV_READLOCKED        SET (1): Reads of the Index are blocked until the next TPM Reset or
+                                   TPM Restart.
+                                   CLEAR (0): Reads of the Index are allowed if proper authorization is
+                                   provided.
+    29   TPMA_NV_WRITTEN           SET (1): Index has been written.
+                                   CLEAR (0): Index has not been written.
+    30   TPMA_NV_PLATFORMCREATE    SET (1): This Index may be undefined with Platform Authorization but
+                                   not with Owner Authorization.
+                                   CLEAR (0): This Index may be undefined using Owner Authorization
+                                   but not with Platform Authorization.
+                                   The TPM will validate that this attribute is SET when the Index is
+                                   defined using Platform Authorization and will validate that this
+                                   attribute is CLEAR when the Index is defined using Owner
+                                   Authorization.
+    31   TPMA_NV_READ_STCLEAR      SET (1): TPM2_NV_ReadLock() may be used to SET
+                                   TPMA_NV_READLOCKED for this Index.
+                                   CLEAR (0): TPM2_NV_ReadLock() has no effect on this Index.
+
+
+Family “2.0”                          TCG Published                                            Page 144
+Level 00 Revision 01.38         Copyright © TCG 2006-2016                         September 29, 2016
+Part 2: Structures                                                   Trusted Platform Module Library
+
+13.5      TPMS_NV_PUBLIC
+
+This structure describes an NV Index.
+
+                       Table 205 — Definition of TPMS_NV_PUBLIC Structure
+Name                              Type                 Description
+
+nvIndex                           TPMI_RH_NV_INDEX     the handle of the data area
+nameAlg                           TPMI_ALG_HASH        hash algorithm used to compute the name of the
+                                                       Index and used for the authPolicy. For an extend
+                                                       index, the hash algorithm used for the extend.
+attributes                        TPMA_NV              the Index attributes
+authPolicy                        TPM2B_DIGEST         optional access policy for the Index
+                                                       The policy is computed using the nameAlg
+                                                       NOTE     Shall be the Empty Policy if no authorization
+                                                                policy is present.
+
+dataSize{:MAX_NV_INDEX_SIZE}      UINT16               the size of the data area
+                                                       The     maximum       size is implementation-
+                                                       dependent. The minimum maximum size is
+                                                       platform-specific.
+#TPM_RC_SIZE                                           response code returned when the requested size
+                                                       is too large for the implementation
+
+
+13.6      TPM2B_NV_PUBLIC
+
+
+Part 3 r1.38 §§4.3,5.9,6.1,23.2.3,23.3,23.11,28.4,31.2
+
+4.3     AuthorizationSize and ParameterSize
+
+Authorization sessions are not shown in the command or response schematics. When the tag of a
+command or response is TPM_ST_SESSIONS, then a 32-bit value will be present in the
+command/response buffer to indicate the size of the authorization field or the parameter field. This value
+shall immediately follow the handle area (which may contain no handles). For a command, this value
+(authorizationSize) indicates the size of the Authorization Area and shall have a value of 9 or more. For a
+response, this value (parameterSize) indicates the size of the parameter area and may have a value of
+zero.
+If the authorizationSize field is present in the command, parameterSize will be present in the response,
+but only if the responseCode is TPM_RC_SUCCESS.
+When authorization is required to use the TPM entity associated with a handle, then at least one session
+will be present. To indicate this, the command tag Description field contains TPM_ST_SESSIONS.
+Addional sessions for audit, encrypt, and decrypt may be present.
+When the command tag Description field contains TPM_ST_NO_SESSIONS, then no sessions are
+allowed and the authorizationSize field is not present.
+When a command allows use of sessions when not required, the command tag Description field will
+indicate the types of sessions that may be used with the command.
+
+5.9      Command Post Processing
+
+When the code that implements the detailed actions of the command completes, it returns a response
+code. If that code is not TPM_RC_SUCCESS, the post processing code will not update any session or
+audit data and will return a 10-octet response packet.
+If the command completes successfully, the tag of the command determines if any authorization sessions
+will be in the response. If so, the TPM will encrypt the first parameter of the response if indicated by the
+authorization attributes. The TPM will then generate a new nonce value for each session and, if
+appropriate, generate an HMAC.
+If authorization HMAC computations are performed on the response, the HMAC keys used in the
+response will be the same as the HMAC keys used in processing the HMAC in the command.
+
+NOTE 1          This primarily affects authorizations associated with a first write to an NV Index using a bound
+                session. The computation of the HMAC in the response is performed as if the Name of the Ind ex did
+                not change as a consequence of the command actions. The session binding to the NV Index will not
+                persist to any subsequent command.
+
+NOTE 2          The authorization attributes were validated during the session area validation to ensure that only
+                one session was used for parameter encryption of the response and that the command allowed
+                encryption in the response.
+
+NOTE 3          No session nonce value is used for a password authorization but the session data is present.
+6.1    Tag
+
+When a command completes successfully, the tag parameter in the response shall have the same value
+as the tag parameter in the command (TPM_ST_SESSIONS or TPM_ST_NO_SESSIONS). When a
+command fails (the responseCode is not TPM_RC_SUCCESS), then the tag parameter in the response
+shall be TPM_ST_NO_SESSIONS.
+A special case exists when the command tag parameter is not an allowed value (TPM_ST_SESSIONS or
+TPM_ST_NO_SESSIONS). For this case, it is assumed that the system software is attempting to send a
+command formatted for a TPM 1.2 but the TPM is not capable of executing TPM 1.2 commands. So that
+the TPM 1.2 compatible software will have a recognizable response, the TPM sets tag to
+TPM_ST_RSP_COMMAND, responseSize to 00 00 00 0A16 and responseCode to TPM_RC_BAD_TAG.
+This is the same response as the TPM 1.2 fatal error for TPM_BADTAG.
+           Policy Digest Update Function (PolicyUpdate())
+
+This is the update process for policySession→policyDigest used by TPM2_PolicySigned(),
+TPM2_PolicySecret(), TPM2_PolicyTicket(), and TPM2_PolicyAuthorize(). The function prototype for the
+update function is:
+                                   PolicyUpdate(commandCode, arg2, arg3)                                           (9)
+where
+         arg2                                 a TPM2B_NAME
+         arg3                                 a TPM2B
+These parameters are used to update policySession→policyDigest by
+                 policyDigestnew ≔ HpolicyAlg(policyDigestold || commandCode || arg2.name)                       (10)
+followed by
+                          policyDigestnew+1 ≔ HpolicyAlg(policyDigestnew || arg3.buffer)                         (11)
+where
+         HpolicyAlg()                         the hash algorithm chosen when the policy session was started
+
+NOTE 1             If arg3 is a TPM2B_NAME, then arg3.buffer will actually be an arg3.name.
+
+NOTE 2             The arg2.size and arg3.size fields are not included in the hashes.
+
+NOTE 3             PolicyUpdate() uses two hash operations because arg2 and arg3 are variable-sized and the
+                   concatenation of arg2 and arg3 in a single hash could produce the same digest even though arg2
+                   and arg3 are different. For example, arg2 = 1 2 3 and arg3 = 4 5 6 would produce the same digest
+                   as arg2 = 1 2 and arg3 = 3 4 5 6. Processing of the arguments separately in different Extend
+                   operation insures that the digest produced by PolicyUpdate() will be different if arg2 and arg3 are
+                   different.
+
+
+
+23.3    TPM2_PolicySigned
+
+          General Description
+
+This command includes a signed authorization in a policy. The command ties the policy to a signing key
+by including the Name of the signing key in the policyDigest
+If policySession is a trial session, the TPM will not check the signature and will update
+policySession→policyDigest as described in 23.2.3 as if a properly signed authorization was received, but
+no ticket will be produced.
+If policySession is not a trial session, the TPM will validate auth and only perform the update if it is a valid
+signature over the fields of the command.
+The authorizing entity will sign a digest of the authorization qualifiers: nonceTPM, expiration, cpHashA,
+and policyRef. The digest is computed as:
+                     aHash ≔ HauthAlg(nonceTPM || expiration || cpHashA || policyRef)                        (13)
+where
+        HauthAlg()                           the hash associated with the auth parameter of this command
+
+        NOTE 1            Each signature and key combination indicates the scheme and each scheme has an
+                          associated hash.
+
+
+        nonceTPM                             the nonceTPM parameter from the TPM2_StartAuthSession()
+                                             response. If the authorization is not limited to this session, the
+                                             size of this value is zero.
+
+        NOTE 2                     This parameter must be present if expiration is non-zero.
+
+
+        expiration                           time limit on authorization set by authorizing object. This 32-bit
+                                             value is set to zero if the expiration time is not being set.
+        cpHashA                              digest of the command parameters for the command being
+                                             approved using the hash algorithm of the policy session. Set to
+                                             an EmptyAuth if the authorization is not limited to a specific
+                                             command.
+
+        NOTE 3            This is not the cpHash of this TPM2_PolicySigned() command.
+
+
+        policyRef                            an opaque value determined by the authorizing entity. Set to the
+                                             Empty Buffer if no value is present.
+
+EXAMPLE          The computation for an aHash if there are no restrictions is:
+
+
+                                       aHash ≔ HauthAlg(00 00 00 0016)
+                 which is the hash of an expiration time of zero.
+
+The aHash is signed by the key associated with a key whose handle is authObject. The signature and
+signing parameters are combined to create the auth parameter.
+The TPM will perform the parameter checks listed in 23.2.2
+If the parameter checks succeed, the TPM will construct a test digest (tHash) over the provided
+When all validations have succeeded, policySession→policyDigest is updated by PolicyUpdate() (see
+23.2.3).
+                 PolicyUpdate(TPM_CC_PolicySigned, authObject→Name, policyRef)                       (14)
+policySession is updated as described in 23.2.4. The TPM will optionally produce a ticket as described in
+23.2.5.
+Authorization to use authObject is not required.
+
+23.11 TPM2_PolicyCommandCode
+
+          General Description
+
+This command indicates that the authorization will be limited to a specific command code.
+If policySession→commandCode has its default value, then it will be set to code. If
+policySession→commandCode does not have its default value, then the TPM will return
+TPM_RC_VALUE if the two values are not the same.
+If code is not implemented, the TPM will return TPM_RC_POLICY_CC.
+If the TPM does not return an error, it will update policySession→policyDigest by
+          policyDigestnew ≔ HpolicyAlg(policyDigestold || TPM_CC_PolicyCommandCode || code)                    (26)
+
+NOTE 1          If a previous TPM2_PolicyCommandCode() had been executed, then it is probable that the policy
+                expression is improperly formed but the TPM does not return an error.
+
+NOTE 2          A TPM2_PolicyOR() would be used to allow an authorization to be used for multiple commands .
+
+When the policy session is used to authorize a command, the TPM will fail the command if the
+commandCode of that command does not match policySession→commandCode.
+This command, or TPM2_PolicyDuplicationSelect(), is required to enable the policy to be used for ADMIN
+role authorization.
+
+EXAMPLE         Before TPM2_Certify() can     be   executed,   TPM2_PolicyCommandCode()      with   code   set   to
+                TPM_CC_Certify is required.
+28.4   TPM2_FlushContext
+
+         General Description
+
+This command causes all context associated with a loaded object, sequence object, or session to be
+removed from TPM memory.
+This command may not be used to remove a persistent object from the TPM.
+A session does not have to be loaded in TPM memory to have its context flushed. The saved session
+context associated with the indicated handle is invalidated.
+No sessions of any type are allowed with                   this   command      and    tag   is   required    to   be
+TPM_ST_NO_SESSIONS (see note in 28.2.1).
+If the handle is for a Transient Object and the handle is not associated with a loaded object, then the TPM
+shall return TPM_RC_HANDLE.
+If the handle is for an authorization session and the handle does not reference a loaded or active session,
+then the TPM shall return TPM_RC_HANDLE.
+
+NOTE            flushHandle is a parameter and not a handle. If it were in the handle area, the TPM would validate
+                that the context for the referenced entity is in the TPM. When a TPM2_FlushContext references a
+                saved session context, it is not necessary for the context to be in the TPM . When the flushHandle is
+                in the parameter area, the TPM does not validate that associated context is actually in the TPM.
+
+
+
+
+Family “2.0”                                    TCG Published                                            Page 324
+Level 00 Revision 01.38                Copyright © TCG 2006-2016                            September 29, 2016
+Trusted Platform Module Library                                                        Part 3: Commands
+
+
+31.2     NV Counters
+
+When an Index has the TPM_NT_COUNTER attribute, it behaves as a monotonic counter and may only
+be updated using TPM2_NV_Increment().
+When an NV counter is created, the TPM shall initialize the 8-octet counter value with a number that is
+greater than any count value for any NV counter on the TPM since the time of TPM manufacture.
+An NV counter may be defined with the TPMA_NV_ORDERLY attribute to indicate that the NV Index is
+expected to be modified at a high frequency and that the data is only required to persist when the TPM
+goes through an orderly shutdown process. The TPM may update the counter value in RAM and
+occasionally update the non-volatile version of the counter. An orderly shutdown is one occasion to
+update the non-volatile count. If the difference between the volatile and non-volatile version of the counter
+becomes as large as MAX_ORDERLY_COUNT, this shall be another occasion for updating the non-
+volatile count.
+Before an NV counter can be used, the TPM shall validate that the count is not less than a previously
+reported value. If the TPMA_NV_ORDERLY attribute is not SET, or if the TPM experienced an orderly
+shutdown, then the count is assumed to be correct. If the TPMA_NV_ORDERLY attribute is SET, and the
+TPM shutdown was not orderly, then the TPM shall OR MAX_ORDERLY_COUNT to the contents of the
+non-volatile counter and set that as the current count.
+
+NOTE 1          Because the TPM would have updated the NV Index if the difference between the count values was
+                equal to MAX_ORDERLY_COUNT + 1, the highest value that could have been in the NV Index is
+                MAX_ORDERLY_COUNT so it is safe to restore that value.
+
+NOTE 2          The TPM may implement the RAM portion of the counter such that the effective value of the NV
+                counter is the sum of both the volatile and non-volatile parts. If so, then the TPM may initialize the
+                RAM version of the counter to MAX_ORDERLY_COUNT and no update of NV is necessary.
+
+NOTE 3          When a new NV counter is created, the TPM may search all the counters to determine wh ich has the
+                highest value. In this search, the TPM would use the sum of the non -volatile and RAM portions of
+                the counter. The RAM portion of the counter shall be properly initialized to reflect shutdown process
+                (orderly or not) of the TPM.
+
+
+
+
+Family “2.0”                                    TCG Published                                             Page 351
