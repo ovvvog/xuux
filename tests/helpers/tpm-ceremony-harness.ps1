@@ -79,7 +79,7 @@ if ($Mode -eq 'fault') {
     $sessionsAfter = Get-HandleList -Transport $inner -Start 0x02000000
     $res = [ordered]@{
       report = ($r.ToJson() | ConvertFrom-Json)
-      fault = [ordered]@{ mode = $Fault; changes = $t.Changes; definedHandle = ('0x{0:x8}' -f $t.DefinedHandle); lostSession = ('0x{0:x8}' -f $t.LostSession) }
+      fault = [ordered]@{ mode = $Fault; changes = $t.Changes; definedHandle = ('0x{0:x8}' -f $t.DefinedHandle); lostSession = ('0x{0:x8}' -f $t.LostSession); thirdPartyRc = ('0x{0:x8}' -f $t.ThirdPartyRc) }
       nvBefore = $nvBefore; nvAfter = $nvAfter; sessionsBefore = $sessionsBefore; sessionsAfter = $sessionsAfter
     }
     [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 8 -Compress))

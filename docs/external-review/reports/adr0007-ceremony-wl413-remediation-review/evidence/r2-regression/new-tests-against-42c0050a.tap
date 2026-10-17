@@ -1,0 +1,266 @@
+TAP version 13
+# Subtest: R2-01: فهرسٌ كتبَه طرفٌ آخرُ بعدَ ضياعِ ردِّ التعريف ⇒ غيرُ محسومِ الملكيّة، لا يُحذَف، ويُعلَن
+not ok 1 - R2-01: فهرسٌ كتبَه طرفٌ آخرُ بعدَ ضياعِ ردِّ التعريف ⇒ غيرُ محسومِ الملكيّة، لا يُحذَف، ويُعلَن
+  ---
+  duration_ms: 1141.690068
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: '["nv-define 0x01bec8fa: executed; ownership proven by publicArea match"]'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:103:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    node:internal/test_runner/harness:255:12
+    node:internal/process/task_queues:140:7
+    AsyncResource.runInAsyncScope (node:async_hooks:206:9)
+    AsyncResource.runMicrotask (node:internal/process/task_queues:137:8)
+  ...
+# Subtest: R2-02: زيادةٌ سلبيّةٌ ضاعَ ردُّها ⇒ تُجرَدُ قيمةُ العدّاد (لم تُنفَّذ) ولا تبقى صامتة
+not ok 2 - R2-02: زيادةٌ سلبيّةٌ ضاعَ ردُّها ⇒ تُجرَدُ قيمةُ العدّاد (لم تُنفَّذ) ولا تبقى صامتة
+  ---
+  duration_ms: 967.295312
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: '[]'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:123:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-03a: بايتاتٌ زائدةٌ في معاملاتِ ردِّ NV_ReadPublic ⇒ فشلٌ مغلقٌ مسمّى، والبقيّةُ معلَنةٌ ومثبتةٌ بالجرد
+not ok 3 - R2-03a: بايتاتٌ زائدةٌ في معاملاتِ ردِّ NV_ReadPublic ⇒ فشلٌ مغلقٌ مسمّى، والبقيّةُ معلَنةٌ ومثبتةٌ بالجرد
+  ---
+  duration_ms: 958.746664
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'COMPLETE'
+    - 'FAILED_CLOSED'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'FAILED_CLOSED'
+  actual: 'COMPLETE'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:140:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-03b: معاملاتٌ غيرُ فارغةٍ في ردِّ نجاحِ NV_DefineSpace ⇒ نتيجةٌ مجهولةٌ تُجرَدُ ثمّ تنظيفٌ بملكيّةٍ مُثبَتة
+not ok 4 - R2-03b: معاملاتٌ غيرُ فارغةٍ في ردِّ نجاحِ NV_DefineSpace ⇒ نتيجةٌ مجهولةٌ تُجرَدُ ثمّ تنظيفٌ بملكيّةٍ مُثبَتة
+  ---
+  duration_ms: 973.492685
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'COMPLETE'
+    - 'FAILED_CLOSED'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'FAILED_CLOSED'
+  actual: 'COMPLETE'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:158:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-03c: ردُّ GetCapability بقدرةٍ غيرِ المسؤولِ عنها ⇒ فشلٌ قبلَ أيِّ أمرٍ مُغيِّر
+not ok 5 - R2-03c: ردُّ GetCapability بقدرةٍ غيرِ المسؤولِ عنها ⇒ فشلٌ قبلَ أيِّ أمرٍ مُغيِّر
+  ---
+  duration_ms: 922.155359
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /^RESPONSE_CAPABILITY_MISMATCH: asked=0x00000006 got=0x00000001/. Input:
+    
+    'SIMULATOR_IDENTITY_UNREADABLE rc=0x00000000'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'SIMULATOR_IDENTITY_UNREADABLE rc=0x00000000'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:175:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-03d: اسمٌ قصيرٌ في ردِّ Load ⇒ نتيجةٌ مجهولةٌ؛ الكائنُ العابرُ الظاهرُ غيرُ محسومٍ ويُعلَن
+not ok 6 - R2-03d: اسمٌ قصيرٌ في ردِّ Load ⇒ نتيجةٌ مجهولةٌ؛ الكائنُ العابرُ الظاهرُ غيرُ محسومٍ ويُعلَن
+  ---
+  duration_ms: 904.967018
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /^OUTCOME_UNKNOWN: s2:Load\(service-key\) .*RESPONSE_NAME_MALFORMED: Load len=2/. Input:
+    
+    'OBJECT_NAME_MISMATCH rc=0x00000000'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'OBJECT_NAME_MISMATCH rc=0x00000000'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:189:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-04: نقلٌ ماتَ بعدَ تنفيذِ التعريف ⇒ لا ادّعاءَ نظافة: الحالةُ المتبقّيةُ مجهولةٌ معلَنة، والفهرسُ باقٍ فعلًا
+not ok 7 - R2-04: نقلٌ ماتَ بعدَ تنفيذِ التعريف ⇒ لا ادّعاءَ نظافة: الحالةُ المتبقّيةُ مجهولةٌ معلَنة، والفهرسُ باقٍ فعلًا
+  ---
+  duration_ms: 996.494223
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: "Cannot read properties of undefined (reading 'verified')"
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:207:37)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-04: تشغيلٌ نظيفٌ يحملُ جردًا نهائيًّا مُتحقَّقًا فارغًا
+not ok 8 - R2-04: تشغيلٌ نظيفٌ يحملُ جردًا نهائيًّا مُتحقَّقًا فارغًا
+  ---
+  duration_ms: 889.287167
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: "Cannot read properties of undefined (reading 'verified')"
+  code: 'ERR_TEST_FAILURE'
+  name: 'TypeError'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:221:37)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-05: وسيطٌ على loopback يُرفَضُ قبلَ أيِّ أمرٍ — بلا ملفِّ PID ومع ملفِّ PID لـswtpm الحقيقيّ
+not ok 9 - R2-05: وسيطٌ على loopback يُرفَضُ قبلَ أيِّ أمرٍ — بلا ملفِّ PID ومع ملفِّ PID لـswtpm الحقيقيّ
+  ---
+  duration_ms: 908.88708
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"schema":"xuux.tpm-ceremony-rehearsal/1","transport":"simulator:swtpm-tcp","stages":"S1","status":"COMPLETE","failure":null,"steps":[{"stage":"identity","name":"identity:GetCapability(TPM_PT_MANUFACTURER..VENDOR_STRING_4)","commandCode":"0x0000017a","commandSha256":"25db9270d6a7486d9253b750fbea5e2f1365a2fcd70aad7261a26bfcd4c5e76e","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"identity","name":"inventory:GetCapability(HANDLES,0x01000000)","commandCode":"0x0000017a","commandSha256":"b6f89235eea23feb03c87a41c6cbc4430013c2bcce2c2cefd0fb84e5f382fd3f","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"identity","name":"inventory:GetCapability(HANDLES,0x80000000)","commandCode":"0x0000017a","commandSha256":"98ae924b6eb233523a6171a130062b442cab177cec9a5ab31716323a9679c2c3","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"identity","name":"inventory:GetCapability(HANDLES,0x02000000)","commandCode":"0x0000017a","commandSha256":"cdf77f090b1cb8efbb4444c1e02b14c18e9a4d8eb3214f323328fcd90fc86451","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"inventory:GetCapability(HANDLES,0x01000000)","commandCode":"0x0000017a","commandSha256":"b6f89235eea23feb03c87a41c6cbc4430013c2bcce2c2cefd0fb84e5f382fd3f","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"inventory:GetCapability(0x00000116)","commandCode":"0x0000017a","commandSha256":"e958e3e5613fda71db51119ac072e6fdb2c8866ae3234b7e147f1ffc714ad888","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"inventory:GetCapability(0x0000020a)","commandCode":"0x0000017a","commandSha256":"924353b995fcea5cfabc2d7dc250b45621bce4e561f7a2a9ee55356ad40a8411","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_DefineSpace","commandCode":"0x0000012a","commandSha256":"4dcf2d8d6479d830c943b70949f8f1ed2cdf591a55cb2cfa9ff8e358574790ab","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_ReadPublic(after-define)","commandCode":"0x00000169","commandSha256":"8855ed17c721cb6ed74441b4da01f0b74f0e2da5a8e71847445d3c9b5b2a8425","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_Read(before-first-increment)","commandCode":"0x0000014e","commandSha256":"ed1a8060be267ab02016143ef867988c9d938ae1266df17f4b3762f91045f451","responseCode":"0x0000014a","expectation":"failure:0x0000014a","outcome":"rejected-as-expected"},{"stage":"S1","name":"s1.probe:NV_Increment#1","commandCode":"0x00000134","commandSha256":"3ce325aacf115d65f23301d481d44d8ed4fbdf7e780ebbb008dc6a03e2115e58","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_Read#1","commandCode":"0x0000014e","commandSha256":"ed1a8060be267ab02016143ef867988c9d938ae1266df17f4b3762f91045f451","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_Increment#2","commandCode":"0x00000134","commandSha256":"3ce325aacf115d65f23301d481d44d8ed4fbdf7e780ebbb008dc6a03e2115e58","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_Read#2","commandCode":"0x0000014e","commandSha256":"ed1a8060be267ab02016143ef867988c9d938ae1266df17f4b3762f91045f451","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_ReadPublic(after-write)","commandCode":"0x00000169","commandSha256":"8855ed17c721cb6ed74441b4da01f0b74f0e2da5a8e71847445d3c9b5b2a8425","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_ReadPublic(ownership-check)","commandCode":"0x00000169","commandSha256":"8855ed17c721cb6ed74441b4da01f0b74f0e2da5a8e71847445d3c9b5b2a8425","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_UndefineSpace","commandCode":"0x00000122","commandSha256":"604b9f59654fb41e3e300621d9847e8feb07281a0834999535a2047309f01cfb","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.probe:NV_ReadPublic(after-undefine)","commandCode":"0x00000169","commandSha256":"8855ed17c721cb6ed74441b4da01f0b74f0e2da5a8e71847445d3c9b5b2a8425","responseCode":"0x0000018b","expectation":"failure:0x0000018b","outcome":"rejected-as-expected"},{"stage":"S1","name":"inventory:GetCapability(HANDLES,0x01000000)","commandCode":"0x0000017a","commandSha256":"b6f89235eea23feb03c87a41c6cbc4430013c2bcce2c2cefd0fb84e5f382fd3f","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"inventory:GetCapability(0x00000116)","commandCode":"0x0000017a","commandSha256":"e958e3e5613fda71db51119ac072e6fdb2c8866ae3234b7e147f1ffc714ad888","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"inventory:GetCapability(0x0000020a)","commandCode":"0x0000017a","commandSha256":"924353b995fcea5cfabc2d7dc250b45621bce4e561f7a2a9ee55356ad40a8411","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_DefineSpace","commandCode":"0x0000012a","commandSha256":"67526e980138c9291abbadcc7a90dc40b4d6ff0c46996bdf37536bafc4dc6bc9","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_ReadPublic(after-define)","commandCode":"0x00000169","commandSha256":"4f062a2f43c4df58f9e543368f4ff42389bf61002a41fdb29ed6283614dd3fb7","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_Increment#1","commandCode":"0x00000134","commandSha256":"caed61bf73ea16a260ed9524c9d83664ca5d022af336a992c8f8aedab925d38b","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_Read#1","commandCode":"0x0000014e","commandSha256":"7ae61798171a1ecc433f72bb7e7a434238e6192dcac9f3706a5abc1085330048","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_ReadPublic(ownership-check)","commandCode":"0x00000169","commandSha256":"4f062a2f43c4df58f9e543368f4ff42389bf61002a41fdb29ed6283614dd3fb7","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_UndefineSpace","commandCode":"0x00000122","commandSha256":"06e686ad9e05957c53bc1b651a37c69d07db8b82016347ed1dddef697b12d4fe","responseCode":"0x00000000","expectation":"success","outcome":"ok"},{"stage":"S1","name":"s1.redefine:NV_ReadPublic(after-undefine)","commandCode":"0x00000169","commandSha256":"4f062a2f43c4df58f9e543368f4ff42389bf61002a41fdb29ed6283614dd3fb7","responseCode":"0x0000018b","expectation":"failure:0x0000018b","outcome":"rejected-as-expected"}],"facts":{"tpm.manufacturer":"IBM","tpm.vendorString":"SW   TPM","tpm.vendorString3":"","tpm.vendorString4":"","baseline.nvHandles":"0","baseline.transients":"0","baseline.sessions":"0","s1.probe.nvHandlesBefore":"0","s1.probe.nvCountersBefore":"0","s1.probe.nvCountersMax":"0","s1.probe.handle":"0x01b01130","s1.probe.nvPublicHex(after-define)":"01b01130000b0204001400000008","s1.probe.nvName(after-define)":"000b0edac0eb4f1f6258fb86300664f56dac10132ef4081bd1e694386a09b1e01a67","s1.probe.value1":"1","s1.probe.value2":"2","s1.probe.nvPublicHex(after-write)":"01b01130000b2204001400000008","s1.probe.nvName(after-write)":"000b78804a2000ed3f2fd4410a05628f5f491f0c7a1e3ad33a0bd5e3839a6ab47843","s1.redefine.nvHandlesBefore":"0","s1.redefine.nvCountersBefore":"0","s1.redefine.nvCountersMax":"0","s1.redefine.handle":"0x01bbd114","s1.redefine.nvPublicHex(after-define)":"01bbd114000b0204001400000008","s1.redefine.nvName(after-define)":"000b977af4660e6b4d9800b85c42d1336687bceb8676b1e48b8ea61982ff5dcb830c","s1.redefine.value1":"3","s1.redefine.aboveProbe":"true"},"cleanupLeftovers":[],"reconciliation":[]}
+    
+    
+    0 !== 4
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 4
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:246:14)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.run (node:internal/test_runner/test:797:9)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-05: ملفُّ PID لعمليةٍ أخرى ⇒ PID_MISMATCH؛ مستمعٌ غيرُ loopback ⇒ NOT_LOOPBACK
+not ok 10 - R2-05: ملفُّ PID لعمليةٍ أخرى ⇒ PID_MISMATCH؛ مستمعٌ غيرُ loopback ⇒ NOT_LOOPBACK
+  ---
+  duration_ms: 453.547885
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /SIMULATOR_LISTENER_PID_MISMATCH: listener=3981 pidfile=3736/. Input:
+    
+    'simulator context mismatch: process name node'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'simulator context mismatch: process name node'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:262:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: R2-05: منفذٌ بلا مستمعٍ ⇒ SIMULATOR_LISTENER_ABSENT (لا اتصالَ ولا افتراض)
+not ok 11 - R2-05: منفذٌ بلا مستمعٍ ⇒ SIMULATOR_LISTENER_ABSENT (لا اتصالَ ولا افتراض)
+  ---
+  duration_ms: 993.477541
+  location: '/home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:35:3'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /SIMULATOR_LISTENER_ABSENT/. Input:
+    
+    'simulator transport unavailable'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'simulator transport unavailable'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/wt-fix/tests/sim/tpm-ceremony-wl413-r2.test.mjs:277:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 0
+# fail 11
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10486.702356

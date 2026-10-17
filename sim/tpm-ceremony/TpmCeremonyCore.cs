@@ -490,6 +490,76 @@ namespace Xuux.TpmCeremony
         }
     }
 
+    // ── مخططُ بنيةِ معاملاتِ الردِّ الناجحِ لكلِّ أمرٍ (WL-413 الدفعة الثانية / R2-03): يُستهلَكُ كلُّ
+    // حقلٍ ويُتحقَّقُ من الأحجامِ الداخليّةِ ومن انعدامِ البايتاتِ الزائدةِ. أمرٌ بلا مخطّطٍ يُرفَضُ — لا
+    // يُفسَّرُ ردٌّ لا يُعرَفُ شكلُه. البنى من TPM 2.0 Part 3 (ردودُ الأوامر) وPart 2 (الأنواع). ──
+    public static class ResponseSchema
+    {
+        private static void End(Rd r, string what)
+        {
+            if (r.Remaining != 0) throw new CeremonyFailedException("RESPONSE_PARAMS_TRAILING_BYTES: " + what + " extra=" + r.Remaining, 0);
+        }
+
+        private static void Name(byte[] n, string what)
+        {
+            // TPM2B_NAME لكائنٍ/فهرسٍ بخوارزميّةِ SHA-256: nameAlg(2) || digest(32).
+            if (n.Length != 34 || n[0] != 0x00 || n[1] != 0x0B) throw new CeremonyFailedException("RESPONSE_NAME_MALFORMED: " + what + " len=" + n.Length, 0);
+        }
+
+        public static void Check(uint cc, byte[] cmd, byte[] prm)
+        {
+            Rd r = new Rd(prm);
+            switch (cc)
+            {
+                case Tpm.CC_NV_DefineSpace:
+                case Tpm.CC_NV_Increment:
+                case Tpm.CC_NV_UndefineSpace:
+                case Tpm.CC_FlushContext:
+                case Tpm.CC_PolicyCommandCode:
+                    End(r, "empty-params"); return;
+                case Tpm.CC_NV_ReadPublic:
+                {
+                    byte[] pub = r.B2B(); byte[] nm = r.B2B(); End(r, "NV_ReadPublic");
+                    if (pub.Length < 14) throw new CeremonyFailedException("RESPONSE_NV_PUBLIC_MALFORMED len=" + pub.Length, 0);
+                    Name(nm, "NV_ReadPublic"); return;
+                }
+                case Tpm.CC_NV_Read:
+                case Tpm.CC_StartAuthSession:
+                case Tpm.CC_PolicyGetDigest:
+                    r.B2B(); End(r, Hex.U32(cc)); return;
+                case Tpm.CC_Load:
+                    Name(r.B2B(), "Load"); End(r, "Load"); return;
+                case Tpm.CC_Create:
+                    r.B2B(); r.B2B(); r.B2B(); r.B2B(); r.U16(); r.U32(); r.B2B(); End(r, "Create"); return;
+                case Tpm.CC_CreatePrimary:
+                    r.B2B(); r.B2B(); r.B2B(); r.U16(); r.U32(); r.B2B(); Name(r.B2B(), "CreatePrimary"); End(r, "CreatePrimary"); return;
+                case Tpm.CC_Sign:
+                {
+                    ushort alg = r.U16();
+                    if (alg != Tpm.ALG_ECDSA) throw new CeremonyFailedException("RESPONSE_SIGNATURE_ALG_UNEXPECTED: 0x" + alg.ToString("x4"), 0);
+                    r.U16(); r.B2B(); r.B2B(); End(r, "Sign"); return;
+                }
+                case Tpm.CC_PolicySigned:
+                    r.B2B(); r.U16(); r.U32(); r.B2B(); End(r, "PolicySigned"); return;
+                case Tpm.CC_GetCapability:
+                {
+                    Rd c = new Rd(cmd); c.Raw(10); uint askedCap = c.U32();
+                    byte more = r.U8();
+                    if (more > 1) throw new CeremonyFailedException("RESPONSE_CAPABILITY_MORE_MALFORMED", 0);
+                    uint cap = r.U32();
+                    if (cap != askedCap) throw new CeremonyFailedException("RESPONSE_CAPABILITY_MISMATCH: asked=" + Hex.U32(askedCap) + " got=" + Hex.U32(cap), 0);
+                    uint n = r.U32();
+                    if (n > 256) throw new CeremonyFailedException("RESPONSE_CAPABILITY_COUNT_IMPLAUSIBLE: " + n, 0);
+                    int width = cap == 1 ? 4 : cap == 6 ? 8 : -1;
+                    if (width < 0) throw new CeremonyFailedException("RESPONSE_CAPABILITY_UNSUPPORTED: " + Hex.U32(cap), 0);
+                    r.Raw((int)n * width); End(r, "GetCapability"); return;
+                }
+                default:
+                    throw new CeremonyFailedException("RESPONSE_SCHEMA_UNKNOWN_COMMAND: " + Hex.U32(cc), 0);
+            }
+        }
+    }
+
     public sealed class Step
     {
         public string Stage;
@@ -513,6 +583,13 @@ namespace Xuux.TpmCeremony
         public readonly List<string> CleanupLeftovers = new List<string>();
         // جردُ المصالحةِ بعدَ نتيجةٍ مجهولةٍ (WL-413): مشاهداتٌ قرائيّةٌ وملكيّةٌ وإجراءٌ — لا حكمَ سلامةٍ.
         public readonly List<string> Reconciliation = new List<string>();
+        // الجردُ القرائيُّ النهائيُّ بعدَ التنظيفِ (WL-413 الدفعة الثانية / R2-04): هو المرجعُ للحالةِ الفعليّةِ
+        // على المحاكي. verified=false يعني أنّ الحالةَ المتبقّيةَ مجهولةٌ (لا ادّعاءَ نظافةٍ بلا دليل).
+        public bool PostRunVerified;
+        public string PostRunError;
+        public readonly List<string> ResidualNv = new List<string>();
+        public readonly List<string> ResidualSessions = new List<string>();
+        public readonly List<string> ResidualTransients = new List<string>();
 
         public void Fact(string k, string v) { Facts.Add(new KeyValuePair<string, string>(k, v)); }
 
@@ -528,6 +605,13 @@ namespace Xuux.TpmCeremony
                 else sb.Append(c);
             }
             return sb.Append('\"').ToString();
+        }
+
+        private static string Arr(List<string> xs)
+        {
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < xs.Count; i++) { if (i > 0) sb.Append(','); sb.Append(S(xs[i])); }
+            return sb.Append(']').ToString();
         }
 
         public string ToJson()
@@ -560,7 +644,12 @@ namespace Xuux.TpmCeremony
             for (int i = 0; i < CleanupLeftovers.Count; i++) { if (i > 0) sb.Append(','); sb.Append(S(CleanupLeftovers[i])); }
             sb.Append("],\"reconciliation\":[");
             for (int i = 0; i < Reconciliation.Count; i++) { if (i > 0) sb.Append(','); sb.Append(S(Reconciliation[i])); }
-            sb.Append("]}");
+            sb.Append("],\"postRunInventory\":{\"verified\":").Append(PostRunVerified ? "true" : "false");
+            sb.Append(",\"error\":").Append(S(PostRunError));
+            sb.Append(",\"residualNv\":").Append(Arr(ResidualNv));
+            sb.Append(",\"residualSessions\":").Append(Arr(ResidualSessions));
+            sb.Append(",\"residualTransients\":").Append(Arr(ResidualTransients));
+            sb.Append("}}");
             return sb.ToString();
         }
     }
@@ -632,6 +721,7 @@ namespace Xuux.TpmCeremony
             {
                 byte[] raw = _t.Transmit(cmd);
                 p = Resp.Parse(raw, respHandles, TagOf(cmd), authCount);
+                if (p.Rc == 0) ResponseSchema.Check(CommandCodeOf(cmd), cmd, p.Params);
             }
             catch (CeremonyUnknownOutcomeException) { throw; }
             catch (Exception e)
@@ -686,6 +776,26 @@ namespace Xuux.TpmCeremony
 
         private Resp Refused(string name, byte[] cmd, uint expectedRc, int authCount)
         { return Send(name, cmd, 0, "failure:0x" + expectedRc.ToString("x8"), authCount); }
+
+        // زيادةٌ يُتوقَّعُ رفضُها (WL-413 الدفعة الثانية / R2-02): تُقيَّدُ في دفترِ المواردِ كأيِّ أمرٍ مُغيِّرٍ،
+        // فإن ضاعَ ردُّها تُجرَدُ قيمةُ العدّادِ قرائيًّا (لم يُنفَّذْ / نُفِّذَ) ولا يبقى أثرُها صامتًا في التقرير.
+        private void RefusedIncrement(string name, uint index, byte[] auth, uint expectedRc, ulong? before)
+        {
+            Pending pending = Tracked("nv-increment", index, null, before);
+            _pending.Add(pending);
+            try
+            {
+                Refused(name, Cmd.NvIncrement(index, auth), expectedRc, 1);
+                _pending.Remove(pending);
+            }
+            catch (CeremonyUnknownOutcomeException) { throw; }
+            catch
+            {
+                // رمزٌ آخرُ أو نجاحٌ غيرُ متوقَّعٍ: النتيجةُ معلومةٌ ومسمّاةٌ في الفشلِ — لا جردَ مطلوب.
+                _pending.Remove(pending);
+                throw;
+            }
+        }
 
         // إرسالُ أمرٍ مُغيِّرٍ مع قيدِهِ في دفترِ المواردِ: النتيجةُ المعلومةُ (نجاحٌ أو ردُّ خطأٍ من الـTPM)
         // تُخرِجُهُ من الدفترِ؛ المجهولةُ تُبقيهِ للجردِ.
@@ -852,6 +962,16 @@ namespace Xuux.TpmCeremony
         {
             public uint Index; public ushort NameAlg; public uint Attributes; public byte[] AuthPolicy; public ushort DataSize;
             public byte[] PublicArea; public byte[] Name;
+        }
+
+        // نسخةٌ من TPMS_NV_PUBLIC ببتِّ WRITTEN مُصفَّرًا — للمقارنةِ التشخيصيّةِ فقط.
+        private static byte[] PublicWithoutWritten(byte[] pub)
+        {
+            byte[] c = (byte[])pub.Clone();
+            uint a = ((uint)c[6] << 24) | ((uint)c[7] << 16) | ((uint)c[8] << 8) | c[9];
+            a &= ~Tpm.NV_WRITTEN;
+            c[6] = (byte)(a >> 24); c[7] = (byte)(a >> 16); c[8] = (byte)(a >> 8); c[9] = (byte)a;
+            return c;
         }
 
         private NvPub ReadPublic(string name, uint index)
@@ -1057,7 +1177,7 @@ namespace Xuux.TpmCeremony
             uint h = PickVacantHandle("s2v.anchorShape");
             Define("s2v.anchorShape", h, Tpm.ANCHOR_ATTRIBUTES, _policy);
 
-            Refused("s2v:NV_Increment(password-auth)", Cmd.NvIncrement(h, Cmd.PasswordAuth(new byte[0])), 0x0000012F, 1);
+            RefusedIncrement("s2v:NV_Increment(password-auth)", h, Cmd.PasswordAuth(new byte[0]), 0x0000012F, null);
 
             byte[] nonce;
             uint ps = StartSession("s2v.policy", Tpm.SE_POLICY, out nonce);
@@ -1095,7 +1215,7 @@ namespace Xuux.TpmCeremony
             SignAHash("s2v.otherkey", other, nonce4, out fr, out fs);
             PolicySignedStep("s2v.otherkey", other, ps4, nonce4, fr, fs);
             PolicyCommandCodeStep("s2v.otherkey", ps4, Tpm.CC_NV_Increment);
-            Refused("s2v.otherkey:NV_Increment(policy-of-other-key)", Cmd.NvIncrement(h, Cmd.PolicyAuth(ps4, Random(32))), 0x0000099D, 1);
+            RefusedIncrement("s2v.otherkey:NV_Increment(policy-of-other-key)", h, Cmd.PolicyAuth(ps4, Random(32)), 0x0000099D, v1);
             Flush("s2v.otherkey", ps4);
             Flush("s2v.foreign", other);
 
@@ -1105,7 +1225,7 @@ namespace Xuux.TpmCeremony
             SignAHash("s2v.wrongcc", _serviceKey, nonce5, out sr, out ss);
             PolicySignedStep("s2v.wrongcc", _serviceKey, ps5, nonce5, sr, ss);
             PolicyCommandCodeStep("s2v.wrongcc", ps5, Tpm.CC_NV_Read);
-            Refused("s2v.wrongcc:NV_Increment(policy-for-NV_Read)", Cmd.NvIncrement(h, Cmd.PolicyAuth(ps5, Random(32))), 0x0000099D, 1);
+            RefusedIncrement("s2v.wrongcc:NV_Increment(policy-for-NV_Read)", h, Cmd.PolicyAuth(ps5, Random(32)), 0x0000099D, v1);
             Flush("s2v.wrongcc", ps5);
 
             ulong v2 = ReadCounter("s2v:NV_Read(empty-auth)#2", h);
@@ -1144,10 +1264,16 @@ namespace Xuux.TpmCeremony
                     _r.Reconciliation.Add("nv-define " + Hex.U32(p.Handle) + ": not-executed (verified absent by read-only inventory)");
                     return;
                 }
-                Rd q = new Rd(p.ExpectedPublic);
-                uint oi = q.U32(); ushort oa = q.U16(); uint oat = q.U32(); byte[] op = q.B2B(); ushort os = q.U16();
-                bool ours = n.Index == oi && n.NameAlg == oa && (n.Attributes & ~Tpm.NV_WRITTEN) == oat
-                    && Hex.Of(n.AuthPolicy) == Hex.Of(op) && n.DataSize == os;
+                // WL-413 الدفعة الثانية (R2-01): هذه البروفةُ لم تكتبْ الفهرسَ قطُّ قبلَ ضياعِ ردِّ تعريفِهِ،
+                // فالمنطقةُ العامّةُ لفهرسٍ نحن أنشأناه يجبُ أن تطابقَ ما أُرسِلَ بايتًا ببايتٍ — WRITTEN صفرٌ.
+                // بتُّ WRITTEN مرفوعٌ يعني أنّ طرفًا آخرَ كتبَهُ: الملكيّةُ (أو على الأقلِّ حصريّتُها) غيرُ مُثبَتةٍ.
+                if ((n.Attributes & Tpm.NV_WRITTEN) != 0 && Hex.Of(PublicWithoutWritten(n.PublicArea)) == Hex.Of(p.ExpectedPublic))
+                {
+                    _r.Reconciliation.Add("nv-define " + Hex.U32(p.Handle) + ": exists with matching definition but TPMA_NV_WRITTEN is set although this run never wrote it; written by another party; ownership undetermined; left in place");
+                    _r.CleanupLeftovers.Add("nv " + Hex.U32(p.Handle) + ": ownership-undetermined (written by another party after lost define reply); left in place");
+                    return;
+                }
+                bool ours = Hex.Of(n.PublicArea) == Hex.Of(p.ExpectedPublic);
                 if (!ours)
                 {
                     // موجودٌ لكنّهُ ليس منطقتَنا: لا يُحذَفُ لمجردِ وجودِهِ في المقبضِ المتوقَّعِ.
@@ -1241,6 +1367,53 @@ namespace Xuux.TpmCeremony
             throw new CeremonyFailedException("RECONCILE_UNKNOWN_KIND: " + p.Kind, 0);
         }
 
+        // جردٌ قرائيٌّ نهائيٌّ مقابلَ خطِّ الأساس (WL-413 الدفعة الثانية / R2-04). كلُّ مقبضٍ جديدٍ باقٍ يُعلَنُ في
+        // البقايا إن لم يكن معلَنًا؛ وكلُّ بقيّةٍ معلَنةٍ ثبتَ غيابُها تُوثَّقُ في المصالحةِ (البقيّةُ المعلَنةُ لا تُمحى).
+        // تعذُّرُ الجردِ (نقلٌ مقطوعٌ مثلًا) ⇒ الحالةُ المتبقّيةُ مجهولةٌ ⇒ بقيّةٌ معلَنةٌ وفشلٌ مغلق.
+        private void PostRunInventory()
+        {
+            if (_baselineNv == null)
+            {
+                _r.PostRunError = "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)";
+                return;
+            }
+            _cleanup = false;
+            _stage = "post-run";
+            try
+            {
+                HashSet<uint> nv = NvHandles();
+                HashSet<uint> se = HandleSet(0x02000000, true);
+                HashSet<uint> tr = HandleSet(0x80000000, false);
+                foreach (uint h in nv) if (!_baselineNv.Contains(h)) _r.ResidualNv.Add(Hex.U32(h));
+                foreach (uint h in se) if (!_baselineSessions.Contains(h)) _r.ResidualSessions.Add(Hex.U32(h));
+                foreach (uint h in tr) if (!_baselineTransients.Contains(h)) _r.ResidualTransients.Add(Hex.U32(h));
+                _r.PostRunVerified = true;
+            }
+            catch (Exception e)
+            {
+                _r.PostRunVerified = false;
+                _r.PostRunError = e.Message;
+                _r.CleanupLeftovers.Add("post-run inventory unavailable: residual state unknown (" + e.Message + ")");
+                return;
+            }
+            List<string> residual = new List<string>();
+            residual.AddRange(_r.ResidualNv); residual.AddRange(_r.ResidualSessions); residual.AddRange(_r.ResidualTransients);
+            foreach (string h in residual)
+            {
+                bool declared = false;
+                foreach (string l in _r.CleanupLeftovers) if (l.IndexOf(h, StringComparison.Ordinal) >= 0) { declared = true; break; }
+                if (!declared) _r.CleanupLeftovers.Add("residual " + h + ": present after run, absent from baseline; not removed");
+            }
+            foreach (string l in new List<string>(_r.CleanupLeftovers))
+            {
+                int i = l.IndexOf("0x", StringComparison.Ordinal);
+                if (i < 0 || i + 10 > l.Length) continue;
+                string h = l.Substring(i, 10);
+                if (!residual.Contains(h) && (l.StartsWith("nv ") || l.StartsWith("transient ") || l.StartsWith("session ")))
+                    _r.Reconciliation.Add("post-run: " + h + " declared as leftover above but verified absent by final inventory");
+            }
+        }
+
         private void Cleanup()
         {
             _cleanup = true;
@@ -1298,6 +1471,7 @@ namespace Xuux.TpmCeremony
                 try { ReconcileUnknownOutcomes(); }
                 catch (Exception e) { _r.CleanupLeftovers.Add("reconcile-after-cleanup aborted: " + e.Message); }
             }
+            PostRunInventory();
             if (_r.CleanupLeftovers.Count > 0 && _r.Status == "COMPLETE") _r.Status = "FAILED_CLOSED";
             return _r;
         }
