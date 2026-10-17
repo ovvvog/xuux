@@ -19,6 +19,11 @@ import {
   EmailChannel,
   isLoopbackDestination,
 } from '../../src/notifications/index.mjs';
+import { createSmtpEgressTransport } from '../../src/notifications/channels/email.mjs';
+import { createEgressGate } from '../../src/egress/egress-gate.mjs';
+import { loadPolicyBundle } from '../../src/policy/loader.mjs';
+import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
+import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -75,20 +80,53 @@ test(
 test(
   'Email — إرسالٌ حقيقيٌّ وقبولُ المزوِّد',
   {
-    skip: 'يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA). القناة منفذة ومختبَرة وحدويّاً.',
+    skip: 'يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.',
   },
   async () => {
-    const dispatcher = new NotificationDispatcher({
-      channels: [
-        EmailChannel({
-          getSmtpConfig: () => ({
-            host: /** @type {string} */ (SMTP_HOST),
-            port: parseInt(/** @type {string} */ (SMTP_PORT), 10),
-            user: /** @type {string} */ (SMTP_USER),
-            password: /** @type {string} */ (SMTP_PASSWORD),
-          }),
-        }),
+    const smtpConfig = {
+      host: /** @type {string} */ (SMTP_HOST),
+      port: parseInt(/** @type {string} */ (SMTP_PORT), 10),
+      user: /** @type {string} */ (SMTP_USER),
+      password: /** @type {string} */ (SMTP_PASSWORD),
+    };
+    // R5-B-04: القناةُ تمرُّ عبرَ بوابةِ الخروجِ لا اتصالًا مباشرًا — حتى في
+    // التسليمِ الحيِّ. البوابةُ حقيقيةٌ بحزمةِ السياساتِ الحقيقيةِ، والوجهةُ
+    // (مضيفُ SMTP) مسجَّلةٌ، والنقلُ عبرَ `createSmtpEgressTransport`. تشغيلُ هذا
+    // الاختبارِ يحتاجُ أيضًا سياسةً تأذنُ للفاعلِ بالخروجِ إلى المضيفِ — وهذا
+    // قرارُ مالكٍ لا يُفتَحُ هنا.
+    const gateLog = {
+      /** @type {{ type: string }[]} */
+      events: [],
+      /**
+       * @param {string} type
+       * @param {string} _actor
+       * @param {object} _payload
+       */
+      append(type, _actor, _payload) {
+        this.events.push({ type });
+      },
+    };
+    const egressGate = createEgressGate({
+      enforcementPoint: new EnforcementPoint({
+        decisionPoint: createPolicyDecisionPoint({ bundle: loadPolicyBundle() }),
+        log: gateLog,
+        requireIdentityGate: false,
+      }),
+      log: gateLog,
+      destinations: [
+        {
+          id: smtpConfig.host,
+          uri: `smtp://${smtpConfig.host}:${smtpConfig.port}`,
+          purpose: 'إشعارات خارجية',
+        },
       ],
+      transport: createSmtpEgressTransport({ getSmtpConfig: () => smtpConfig }),
+      classifier: null,
+      callsPerWindow: 30,
+      maxPayloadBytes: 65536,
+    });
+    const dispatcher = new NotificationDispatcher({
+      channels: [EmailChannel({ getSmtpConfig: () => smtpConfig, egressGate })],
       clock: () => sentAtMs,
       forbidLoopback: true,
     });

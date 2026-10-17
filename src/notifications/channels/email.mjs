@@ -4,8 +4,17 @@
 // اتصالًا مباشرةً.** بلا بوابةِ خروجٍ موصولةٍ يُرفضُ الإرسالُ قبلَ أيِّ اتصالٍ
 // بـ`EGRESS_GATE_REQUIRED` — لا يخرجُ بايتٌ. والإرسالُ الخارجيُّ بلا بوابةٍ
 // مسارٌ ممنوعٌ لا مسارٌ احتياطيٌّ (كما في `TelegramBotChannel`). والنقلُ نفسُهُ
-// يقومُ به نقلُ البوابةِ (المركِّبُ يوصِلُهُ بـ`sendSmtp`) فتبقى القناةُ
+// يقومُ به نقلُ البوابةِ (المركِّبُ يوصِلُهُ بـ`createSmtpEgressTransport`) فتبقى القناةُ
 // «اللمسَ» لا الناقلَ.
+//
+// **جولةُ إعادةِ الاختبارِ 2026-10-17 (حكمُ المجلسِ: النتيجةُ باقيةٌ مفتوحةً):**
+// كانَ `sendSmtp` مُصدَّرًا خامًا من هذهِ الوحدةِ — فأيُّ مُركِّبٍ يستورِدُهُ يُرسِلُ
+// بلا بوابةٍ (قِيسَ في الجولةِ: اتصالٌ واحدٌ و484 بايتًا). عولِجَ: **لم تعد الوحدةُ
+// تُصدِّرُ أيَّ دالةِ إرسالٍ خامَةٍ** — بروتوكولُ SMTP صارَ إغلاقًا داخلَ الوحدةِ،
+// والوحيدُ المُتاحُ للمُركِّبِ هو `createSmtpEgressTransport` الذي يُنتِجُ **نقلَ
+// بوابةٍ** (توقيعُهُ سجلُ البوابةِ لا «أرسِلْ هذهِ الرسالةَ») يُمرَّرُ للبوابةِ نفسِها
+// في تركيبِها — وهو عقدُ الوحداتِ الموثوقةِ مثلَ نقلِ Telegram المكتوبِ في موقعِ
+// التركيبِ لا مُصدَّرًا من وحدةِ القناةِ.
 //
 // **حدٌّ معلَنٌ — لا سرَّ في الكود:** كلمةُ السرِّ تُقرأُ من متغيّرٍ بيئيٍّ
 // (SMTP_PASSWORD) ولا تُكتبُ في الكودِ ولا السجلّ.
@@ -22,8 +31,8 @@ import net from 'node:net';
  *
  * @param {{
  *   getSmtpConfig: () => { host: string, port: number, user: string, password: string } | null,
- *   egressGate?: { send: (request: { actor: { id: string }, destination: string, payload: string, classification: string, context: Record<string, unknown> }) => Promise<{ bytes: number, destination: string, policyId: string | null, result: unknown }> } | null,
- *   actor?: { id: string },
+ *   egressGate?: { send: (request: import('../../egress/egress-gate.mjs').EgressRequest) => Promise<{ bytes: number, destination: string, policyId: string | null, result: unknown }> } | null,
+ *   actor?: import('../../policy/model.mjs').PolicyActor,
  * }} deps
  */
 export function EmailChannel(deps) {
@@ -53,7 +62,7 @@ export function EmailChannel(deps) {
       // اتصالًا. البوابةُ تفحصُ الجهةَ (مضيفُ SMTP) والحمولةَ (الرسالةُ كاملةً)
       // والتصنيفَ قبلَ النقلِ، ونقلُها هو من يُرسِل.
       const egressGate = deps.egressGate;
-      const actor = deps.actor ?? { id: 'system:notifications' };
+      const actor = deps.actor ?? { id: 'system:notifications', role: 'system', state: 'active' };
 
       if (egressGate) {
         try {
@@ -61,6 +70,7 @@ export function EmailChannel(deps) {
             to: destination,
             subject: message.subject,
             body: message.body,
+            sentAtMs: message.sentAtMs,
           });
           const egressResult = await egressGate.send({
             actor,
@@ -97,13 +107,25 @@ export function EmailChannel(deps) {
             failureReason: 'EGRESS_TRANSPORT_FAILED: نتيجة غير متوقعة',
           });
         } catch (/** @type {unknown} */ error) {
+          // م-3 (جولةُ 2026-10-17): رفضُ البوابةِ وفشلُ النقلِ رمزانِ مختلفانِ —
+          // خطأُ البوابةِ يحملُ `code` من `EGRESS_ERRORS` فلا يُلَفُّ كلُّ خطأٍ
+          // برمزِ الرفضِ. فشلُ النقلِ الحقيقيِّ يظهرُ في نتيجةِ القناةِ كما وُصِفَ.
+          const code =
+            error !== null && typeof error === 'object' && 'code' in error
+              ? String(/** @type {{ code?: unknown }} */ (error).code)
+              : '';
+          const isRefusal = code.startsWith('EGRESS_') && code !== 'EGRESS_TRANSPORT_FAILED';
+          // الرفضُ يبقى برمزِهِ المستقرِّ (`EGRESS_REFUSED`) معَ ظهورِ رمزِ البوابةِ
+          // المحدَّدِ في الرسالةِ — لا رمزًا مُلَفَّقًا يُخفي سببَ الرفضِ.
+          const prefix = isRefusal ? 'EGRESS_REFUSED' : 'EGRESS_TRANSPORT_FAILED';
+          const detail = isRefusal && code ? ` (${code})` : '';
           return createNotificationResult({
             channel: 'email',
             ownerId: message.ownerId,
             maskedDestination: maskEmail(destination),
             state: 'failed',
             attemptedAtMs: message.sentAtMs,
-            failureReason: `EGRESS_REFUSED: ${error instanceof Error ? error.message : String(error)}`,
+            failureReason: `${prefix}${detail}: ${error instanceof Error ? error.message : String(error)}`,
           });
         }
       }
@@ -135,6 +157,49 @@ function maskEmail(email) {
 }
 
 /**
+ * مصنعُ نقلِ بوابةِ الخروجِ لقناةِ البريد (R5-B-04 — جولةُ 2026-10-17).
+ *
+ * **هذا ليسَ دالةَ إرسالٍ خامَةً بل نقلُ بوابةٍ:** توقيعُهُ سجلُ البوابةِ
+ * (‏`{ destination, bytes, payload }`) لا «أرسِلْ هذهِ الرسالةَ»، ولا يُستدعى
+ * إلّا منَ البوابةِ نفسِها بعدَ التفويضِ — المُركِّبُ يُمرِّرُهُ في `transport`
+ * عندَ تركيبِ البوابةِ (عقدُ الوحداتِ الموثوقةِ مثلَ نقلِ Telegram المكتوبِ في
+ * موقعِ التركيبِ). بروتوكولُ SMTP نفسُهُ (`sendSmtp`) إغلاقٌ داخلَ الوحدةِ لا
+ * يُصدَّرُ — فلا مسارَ إرسالٍ خارجَ البوابةِ على سطحِ الوحدةِ.
+ *
+ * @param {{ getSmtpConfig: () => { host: string, port: number, user: string, password: string } | null }} deps
+ * @returns {(record: { destination: unknown, bytes: number, payload: string | Uint8Array }) => Promise<{ messageId: string | null }>}
+ */
+export function createSmtpEgressTransport(deps) {
+  return async function smtpEgressTransport(record) {
+    const config = deps.getSmtpConfig();
+    if (!config) {
+      throw new Error('SMTP غيرُ مُعدّ');
+    }
+    const raw =
+      typeof record.payload === 'string'
+        ? record.payload
+        : Buffer.from(record.payload).toString('utf8');
+    /** @type {{ to?: unknown, subject?: unknown, body?: unknown, sentAtMs?: unknown }} */
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed.to !== 'string' ||
+      typeof parsed.subject !== 'string' ||
+      typeof parsed.body !== 'string'
+    ) {
+      throw new Error('EGRESS_TRANSPORT_FAILED: حمولةُ النقلِ ليست رسالةَ بريدٍ متوقعةً');
+    }
+    const message = {
+      ownerId: 'owner:egress-transport',
+      channel: 'email',
+      subject: parsed.subject,
+      body: parsed.body,
+      sentAtMs: typeof parsed.sentAtMs === 'number' ? parsed.sentAtMs : Date.now(),
+    };
+    return sendSmtp(config, message, parsed.to);
+  };
+}
+
+/**
  * يُرسِلُ رسالةً عبرَ SMTP باستخدام STARTTLS و AUTH LOGIN.
  *
  * يعالج ردودَ SMTP متعددةَ الأسطر: الردُّ الأخيرُ له مسافةٌ بعد الرمزِ (250 OK)
@@ -145,7 +210,7 @@ function maskEmail(email) {
  * @param {string} to
  * @returns {Promise<{ messageId: string | null }>}
  */
-export function sendSmtp(config, message, to) {
+function sendSmtp(config, message, to) {
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(config.port, config.host);
     /** @type {import('node:tls').TLSSocket | null} */
