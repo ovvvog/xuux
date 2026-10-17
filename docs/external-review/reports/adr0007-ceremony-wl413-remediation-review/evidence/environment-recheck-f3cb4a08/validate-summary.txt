@@ -1,0 +1,7 @@
+# tests 2827
+# pass 2593
+# fail 0
+# skipped 234
+# todo 0
+# duration_ms 419066.375858
+f34338c8a50519f9de887ee2f72719f62045f00e59733bc6e3ff5b4d45ba9dcc  /tmp/validate.log
