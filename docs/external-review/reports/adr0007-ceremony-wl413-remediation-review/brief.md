@@ -1,8 +1,8 @@
 # حزمةُ مراجعةٍ مستقلّة — معالجةُ عوائقِ مراجعةِ WL-412 لبروفةِ مراسمِ ADR 0007 (`WL-413`)
 
 **التاريخ:** 2026-10-17 (توقيتُ الرياض)
-**الكوميتُ المُراجَع:** `__PIN_SHA__` — رأسُ الدفعةِ الثانيةِ على الفرع `wl-413-review-remediation` (PR #378، **غيرُ مدموج**)، مكدَّسٌ فوقَ `42c0050a` (الدفعةُ الأولى) فوقَ `1ca1668e` (رأسُ PR #377، بروفةُ WL-412). ليس رأسَ `main`.
-**شجرةُ المراجعة:** `/home/user/workspace/xuux-review-__PIN_SHORT__` — نسخةٌ منفصلةٌ مثبَّتةٌ على الكوميت (`git rev-parse HEAD` يجبُ أن يطبعَه؛ وإلّا فتوقّفْ وأعلِنْ ذلك). `npm ci` و`npm run build` منفَّذانِ فيها مسبقاً.
+**الكوميتُ المُراجَع:** `dbaf61049bbdb9b2b93cab6c7605d439c1c465b3` — رأسُ الدفعةِ الثانيةِ على الفرع `wl-413-review-remediation` (PR #378، **غيرُ مدموج**)، مكدَّسٌ فوقَ `42c0050a` (الدفعةُ الأولى) فوقَ `1ca1668e` (رأسُ PR #377، بروفةُ WL-412). ليس رأسَ `main`.
+**شجرةُ المراجعة:** `/home/user/workspace/xuux-review-dbaf6104` — نسخةٌ منفصلةٌ مثبَّتةٌ على الكوميت (`git rev-parse HEAD` يجبُ أن يطبعَه؛ وإلّا فتوقّفْ وأعلِنْ ذلك). `npm ci` و`npm run build` منفَّذانِ فيها مسبقاً.
 **البيئة:** Node 20+، `pwsh` 7.4، `swtpm` 0.10.1، `tpm2-tools` 5.7، `mcs` (mono). **لا TPM حقيقيّ ولا مضيفُ Windows.**
 **ملاحظةُ سجلٍّ:** نسخةٌ سابقةٌ من هذا التكليفِ (كوميت `e38f40b8`، مثبَّتةٌ على `42c0050a`) **لم تُطلَقْ قطّ** ولا تقريرَ لها؛ وهذه النسخةُ تحلُّ محلَّها.
 
@@ -35,7 +35,7 @@
 
 **الدفعةُ الأولى (`42c0050a`):** تحقّقٌ بنيويٌّ من الردِّ مربوطٌ بشكلِ الطلب؛ دفترُ مواردَ ومصالحةٌ قرائيّةٌ بعدَ فقدِ ردِّ أمرٍ مُغيِّر؛ تتبّعُ الجلساتِ حتّى نجاحِ التحرير؛ رموزُ رفضٍ محدّدةٌ لكلِّ اختبارٍ سلبيّ؛ هويّةٌ بالخصائصِ الخمسِ خامّةً؛ بتّاتٌ محجوزةٌ مسمّاة.
 
-**الدفعةُ الثانية (`__PIN_SHORT__`)** — يقولُ المنفِّذُ إنّه أعادَ إنتاجَ خمسةِ عيوبٍ على `42c0050a` (الأدلّةُ الخامُّ في `evidence/r2-baseline-42c0050a/` من هذه الحزمة، وسجلُّ اختباراتِ الرجوعِ على الشيفرةِ القديمةِ في `evidence/r2-regression/`):
+**الدفعةُ الثانية (`dbaf6104`)** — يقولُ المنفِّذُ إنّه أعادَ إنتاجَ خمسةِ عيوبٍ على `42c0050a` (الأدلّةُ الخامُّ في `evidence/r2-baseline-42c0050a/` من هذه الحزمة، وسجلُّ اختباراتِ الرجوعِ على الشيفرةِ القديمةِ في `evidence/r2-regression/`):
 
 | المعرّف | العيبُ المزعومُ على `42c0050a` | التغييرُ المزعوم |
 | --- | --- | --- |
@@ -61,7 +61,7 @@
 ```
 swtpm socket --tpm2 --tpmstate dir=<مجلّدُك>/st --server type=tcp,port=P,bindaddr=127.0.0.1 \
   --ctrl type=tcp,port=P+1,bindaddr=127.0.0.1 --flags not-need-init,startup-clear --pid file=<مجلّدُك>/pid --daemon
-cd /home/user/workspace/xuux-review-__PIN_SHORT__
+cd /home/user/workspace/xuux-review-dbaf6104
 XUUX_TPM_SIM=1 TPM2TOOLS_TCTI=swtpm:host=127.0.0.1,port=P node --test --test-concurrency=1 \
   tests/sim/tpm-ceremony-rehearsal.test.mjs tests/sim/tpm-ceremony-guard.test.mjs \
   tests/sim/tpm-ceremony-remediation.test.mjs tests/sim/tpm-ceremony-wl413-r2.test.mjs
