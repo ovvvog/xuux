@@ -625,10 +625,12 @@ simTest('CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd
   const dir = mkdtempSync(join(tmpdir(), 'xuux-wl416-channel-'));
   const fakeScript = join(dir, 'fake-swtpm.js');
   const readyMarker = join(dir, 'term-handler-ready');
+  const termReceived = join(dir, 'term-received');
   writeFileSync(
     fakeScript,
-    `process.on("SIGTERM", () => {}); require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
-      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);',
+    `process.on("SIGTERM", () => { require('node:fs').writeFileSync(${JSON.stringify(termReceived)}, '1'); });` +
+      `require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
+      `setTimeout(() => {}, 60000);`,
   );
   const origKill = process.kill.bind(process);
   let nonzeroKillCalls = 0;
@@ -663,6 +665,10 @@ simTest('CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd
     // المقبضةِ — المسارُ الكاملُ بالإشارتَينِ داخلَ pidfd.
     const r = killSim(fakePid, { dir, graceMs: 300 });
     assert.equal(r, true, 'killSim must stop the simulator through the pidfd channel alone');
+    assert.ok(
+      existsSync(termReceived),
+      'the fake must PROVE it received SIGTERM while alive (handler writes the witness) — a wrong signal number (e.g. SIGKILL) would kill it without ever running the handler',
+    );
     assert.equal(nonzeroKillCalls, 0, 'no nonzero process.kill may be used by killSim');
     assert.ok(pidProvenDead(fakePid), 'the fake simulator must be provably dead (ESRCH only)');
   } finally {
@@ -683,22 +689,99 @@ simTest('CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd
   }
 });
 
+// CHANNEL2: الحالةُ المستجيبةُ — SIGTERM وحدها تُنهي المحاكيَ (معالجُهُ يكتبُ شاهدَ استلامٍ ثمّ
+// يخرجُ نظيفًا) فلا تصعيدَ أصلًا: killSim يعودُ true داخلَ المهلةِ الكريمةِ، وشاهدُ الاستلامِ يُثبِتُ
+// أنّ الإشارةَ كانت 15 فعلًا (معالجُ الزائفِ لا يعملُ بغيرِها) — فلو تُرجمتْ إلى 9 لماتَ بلا معالجٍ
+// ولا شاهدِ استلامٍ وفشلَ الاختبارُ. الرقعةُ على process.kill باقيةٌ: لا إشارةَ غيرَ صفريةٍ إطلاقًا.
+simTest('CHANNEL2: SIGTERM وحدها تُنهي المحاكيَ المستجيبَ — لا تصعيدَ ولا process.kill غيرَ صفريٍ', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xuux-wl416-channel2-'));
+  const fakeScript = join(dir, 'fake-swtpm.js');
+  const readyMarker = join(dir, 'term-handler-ready');
+  const termReceived = join(dir, 'term-received');
+  writeFileSync(
+    fakeScript,
+    `process.on("SIGTERM", () => { require('node:fs').writeFileSync(${JSON.stringify(termReceived)}, '1'); process.exit(0); });` +
+      `require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
+      `setTimeout(() => {}, 60000);`,
+  );
+  const origKill = process.kill.bind(process);
+  let nonzeroKillCalls = 0;
+  try {
+    spawn(
+      'bash',
+      ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x &`],
+      { stdio: 'ignore' },
+    );
+    let fakePid = null;
+    for (let i = 0; i < 250; i++) {
+      const found = discoverSimPids(dir);
+      if (found.length === 1) {
+        fakePid = found[0];
+        if (existsSync(readyMarker)) break;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(fakePid !== null, 'fake swtpm must be discoverable by its state dir');
+    assert.ok(existsSync(readyMarker), 'fake swtpm must have its SIGTERM handler armed');
+    process.kill = (pid, sig) => {
+      const s = typeof sig === 'number' ? sig : ({ SIGTERM: 15, SIGKILL: 9, SIGINT: 2 }[sig] ?? -1);
+      if (s !== 0) {
+        nonzeroKillCalls++;
+        throw new Error(`WITNESS: nonzero process.kill attempted (${sig})`);
+      }
+      return origKill(pid, sig);
+    };
+    // مهلةٌ كريمةٌ: المستجيبُ يموتُ من SIGTERM وحدها داخلَها — عودةُ true قبلَ التصعيدِ أصلًا.
+    const r = killSim(fakePid, { dir, graceMs: 5000 });
+    assert.equal(r, true, 'killSim must stop a SIGTERM-responsive simulator via SIGTERM alone');
+    assert.ok(
+      existsSync(termReceived),
+      'the responsive fake must PROVE it received SIGTERM (handler ran and wrote the witness) — a wrong signal would kill it without the handler',
+    );
+    assert.equal(nonzeroKillCalls, 0, 'no nonzero process.kill may be used by killSim');
+    assert.ok(pidProvenDead(fakePid), 'the fake simulator must be provably dead (ESRCH only)');
+  } finally {
+    process.kill = origKill;
+    let allStopped = true;
+    for (const pid of discoverSimPids(dir)) {
+      try {
+        allStopped = killSim(pid, { dir, graceMs: 60 }) && allStopped;
+      } catch {
+        /* زالت سلفًا */
+      }
+    }
+    try {
+      if (allStopped && discoverSimPids(dir).length === 0) rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* أفضلُ جهدٍ */
+    }
+  }
+});
+
 // ZOMBIE: زومبيُّ خرجَ ولم يُلقَّ أثرُهُ، وملفُّ PID مفقودٌ، ورقمُها محفوظٌ لدى الشاهدِ — تخطّيها في
 // المسحِ لا يجوزُ أن يُنتجَ stopped=true: ESRCH وحدها دليلُ الزوالِ، والزومبيُّ ليست ESRCH (جولةُ 5).
 // الوالدُ الحارسُ (python) لا يُلقّيها عمدًا فتبقى زومبيًّا قابلةً للقياسِ حتى نهايةِ الشاهدِ.
-simTest('ZOMBIE: زومبيٌ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ', () => {
+simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'xuux-wl416-zomb-'));
   const fakeScript = join(dir, 'fake-swtpm.js');
+  const childPidFile = join(dir, 'guardian-child.pid');
   writeFileSync(fakeScript, 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);');
+  // الوالدُ الحارسُ (python) يُطلقُ الابنَ الزائفَ ويكتبُ رقمَهُ في ملفٍّ فورَ الولادةِ ثمّ ينامُ —
+  // لا يُلقّيه عمدًا فتبقى زومبيًّا قابلةً للقياسِ، ورقمُهُ لا يضيعُ منّا ولو أخفقَ الاكتشافُ.
   const parent = spawn(
     'python3',
     [
       '-c',
-      `import subprocess, time; p = subprocess.Popen(['swtpm', ${JSON.stringify(fakeScript)}, '--tpmstate', 'dir=' + ${JSON.stringify(dir)}], executable=${JSON.stringify(process.execPath)}); time.sleep(120)`,
+      'import subprocess, time\n' +
+        `p = subprocess.Popen(['swtpm', ${JSON.stringify(fakeScript)}, '--tpmstate', 'dir=' + ${JSON.stringify(dir)}], executable=${JSON.stringify(process.execPath)})\n` +
+        `open(${JSON.stringify(childPidFile)}, 'w').write(str(p.pid))\n` +
+        'time.sleep(120)',
     ],
     { stdio: 'ignore' },
   );
   let zombiePid = null;
+  let bodyError = null;
+  let cleanupFailed = null;
   try {
     // العمليّةُ حيّةٌ وتُكتشَفُ بهويّتِها (swtpm يملكُ مسارَ الحالةِ) ثمّ تُقتَلُ من الشاهدِ نفسِهِ —
     // فتبقى زومبيًّا بلا مُلقّي (الوالدُ الحارسُ لا ينتظرُها) وملفُّ PID لا وجودَ لهُ أصلًا.
@@ -711,6 +794,26 @@ simTest('ZOMBIE: زومبيٌ بلا ملفِ PID لا يُعلَنُ معها �
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
     assert.ok(zombiePid !== null, 'fake swtpm must be discoverable before it becomes a zombie');
+    // اتساقُ الإسنادِ: رقمُ الابنِ المسجَّلُ لدى الحارسِ فورَ ولادتِهِ هو نفسُهُ المكتشَفُ من الوسائطِ.
+    let guardianRecorded = null;
+    for (let i = 0; i < 250; i++) {
+      try {
+        guardianRecorded = Number(readFileSync(childPidFile, 'utf8').trim());
+        if (Number.isInteger(guardianRecorded)) break;
+      } catch {
+        /* لم يُكتَبْ بعدُ */
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(
+      Number.isInteger(guardianRecorded),
+      'guardian must record the child pid at birth (attribution survives discovery failure)',
+    );
+    assert.equal(
+      guardianRecorded,
+      zombiePid,
+      'guardian-recorded child pid must equal the discovered fake swtpm pid',
+    );
     process.kill(zombiePid, 'SIGKILL'); // الشاهدُ يقتلُها بنفسِهِ — الإسنادُ عندَ الموتِ يضيعُ (لا سطرَ أوامرَ)
     let becameZombie = false;
     for (let i = 0; i < 250; i++) {
@@ -722,7 +825,7 @@ simTest('ZOMBIE: زومبيٌ بلا ملفِ PID لا يُعلَنُ معها �
           break;
         }
       } catch {
-        break; // زالت كليًّا — لا زومبيَ (فشلُ إعدادِ الشاهدِ)
+        break; // زالت كليًا — لا زومبيَ (فشلُ إعدادِ الشاهدِ)
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
@@ -731,26 +834,89 @@ simTest('ZOMBIE: زومبيٌ بلا ملفِ PID لا يُعلَنُ معها �
     const r = terminateAttempt({ pidFile: join(dir, 'swtpm.pid'), dir });
     assert.equal(r.stopped, false, 'a lingering zombie must never allow stopped=true (ESRCH only)');
     assert.equal(r.identityUnknown, true, 'the unattributable zombie must keep the state undecided');
+  } catch (e) {
+    bodyError = e;
+    throw e;
   } finally {
-    // التنظيفُ: الوالدُ الحارسُ يُقتَلُ فتُودَعُ الزومبيُّ لعملِ init فيُلقّاها ويُقاسُ زوالُها بـESRCH.
+    // التنظيفُ المُثبَتُ لا الافتراضيُّ (جولةُ 6): الوالدُ الحارسُ أوّلًا — هويّتُهُ تُثبَتُ من سطرِ
+    // أوامرِهِ (يحملُ مسارَ ملفِ رقمِ الابنِ الفريدَ) قبلَ أيِّ إشارةٍ — فموتُهُ يُودِعُ الابنَ لعملِ
+    // init؛ والابنُ إن بقيَ حيًّا يُنهى عبرَ القناةِ بهويّتِهِ المُثبَتةِ، وإن كانَ زومبيًّا فيُلقّاهُ
+    // init بعدَ موتِ والدِهِ. وزوالُ كليهما مُثبَتٌ بـESRCH وإلّا فشلَ التنظيفُ الاختبارَ كلَّهُ ولا
+    // يُحذَفُ المجلّدُ بلا برهانٍ — ولا قيمةَ زائفةً (كـ -1) في أيِّ إثباتٍ.
     try {
-      process.kill(parent.pid, 'SIGKILL');
-    } catch {
-      /* زال سلفًا */
-    }
-    if (zombiePid !== null) {
-      for (let i = 0; i < 250; i++) {
-        if (pidProvenDead(zombiePid)) break;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      const guardianPid = parent.pid;
+      let guardianOurs = false;
+      try {
+        guardianOurs = readFileSync(`/proc/${guardianPid}/cmdline`, 'utf8').includes(childPidFile);
+      } catch {
+        /* زال سلفًا */
       }
-    }
-    try {
-      if (pidProvenDead(zombiePid === null ? -1 : zombiePid) && discoverSimPids(dir).length === 0)
+      if (!guardianOurs && !pidProvenDead(guardianPid)) {
+        cleanupFailed = `guardian identity not provable before signalling (pid ${guardianPid})`;
+      } else if (!pidProvenDead(guardianPid)) {
+        // الحصادُ الفعليُّ للوالدِ: حدثُ exit يُطلقُهُ libuv بعدَ waitpid — انتظارٌ يُديرُ حلقةَ
+        // الأحداثِ (الإشارةُ المتزامنةُ الحاجبةُ تُؤجّلُ الحصادَ فلا يُثبَتُ الزوالُ أبدًا).
+        const exited = new Promise((resolve) => {
+          parent.once('exit', resolve);
+        });
+        process.kill(guardianPid, 'SIGKILL');
+        await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+        for (let i = 0; i < 250; i++) {
+          if (pidProvenDead(guardianPid)) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        if (!pidProvenDead(guardianPid))
+          cleanupFailed = `guardian not provably dead after SIGKILL (pid ${guardianPid})`;
+      }
+      // الابنُ: رقمُهُ عندَنا من الاكتشافِ أو من ملفِ الحارسِ — لا يُفتَرَضُ ولا يُزيَّفُ.
+      let childPid = zombiePid;
+      if (childPid === null) {
+        try {
+          childPid = Number(readFileSync(childPidFile, 'utf8').trim());
+        } catch {
+          /* لا ملفَ */
+        }
+      }
+      if (!Number.isInteger(childPid)) {
+        cleanupFailed = cleanupFailed ?? 'child pid unprovable (no discovery, no guardian record)';
+      } else if (!pidProvenDead(childPid)) {
+        // حيٌّ (لم يصرْ زومبيًّا) ⇒ يُنهى عبرَ القناةِ بهويّتِهِ؛ زومبي ⇒ init يُلقّيهِ بعدَ والدهِ.
+        let st = null;
+        try {
+          const s = readFileSync(`/proc/${childPid}/stat`, 'utf8');
+          const c = s.lastIndexOf(')');
+          if (c >= 0) st = s.slice(c + 2).split(' ')[0];
+        } catch {
+          /* زالت */
+        }
+        if (st !== 'Z') {
+          if (!killSim(childPid, { dir, graceMs: 500 }))
+            cleanupFailed = cleanupFailed ?? `child not stopped via the channel (pid ${childPid})`;
+        }
+        for (let i = 0; i < 250; i++) {
+          if (pidProvenDead(childPid)) break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        if (!pidProvenDead(childPid))
+          cleanupFailed = cleanupFailed ?? `child not provably dead (pid ${childPid})`;
+      }
+      // الحذفُ لا يقعُ إلّا ببرهانٍ كاملٍ: لا فشلَ تنظيفٍ ولا عمليّةَ تملكُ المسارَ بعدَ التنظيفِ.
+      if (cleanupFailed === null && discoverSimPids(dir).length === 0) {
         rmSync(dir, { recursive: true, force: true });
-    } catch {
-      /* أفضلُ جهدٍ */
+      }
+    } catch (e) {
+      cleanupFailed = cleanupFailed ?? `cleanup threw: ${e && e.message}`;
+    }
+    // فشلُ التنظيفِ مع فشلِ الجسمِ: يُسجَّلُ صراحةً في الخرجِ (الاختبارُ فاشلٌ أصلًا باستثناءِ
+    // الجسمِ فلا يُحجبُ)؛ ومع نجاحِ الجسمِ يُفشِلُ التنظيفُ الاختبارَ صراحةً بعدَ finally.
+    if (cleanupFailed !== null && bodyError !== null) {
+      console.error(`ZOMBIE cleanup also failed — state dir preserved: ${dir} — ${cleanupFailed}`);
     }
   }
+  if (cleanupFailed !== null) {
+    throw new Error(`ZOMBIE cleanup failed — state dir preserved: ${dir} — ${cleanupFailed}`);
+  }
 });
+
 
 // خاتمةُ الملفِ: كلُّ اختبارٍ يُنهي محاكيَه في finally — لا يتامى.
