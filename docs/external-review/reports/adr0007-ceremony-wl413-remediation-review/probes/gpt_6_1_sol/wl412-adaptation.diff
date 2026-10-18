@@ -1,0 +1,39 @@
+--- docs/external-review/reports/adr0007-ceremony-rehearsal-review/probes/gpt_6_1_sol/IndependentProbe.cs	2026-10-17 22:30:45.079942310 +0000
++++ /home/user/workspace/council-wl413/gpt_6_1_sol/WL412Probe.cs	2026-10-17 22:37:11.679942310 +0000
+@@ -60,7 +60,7 @@
+     {
+         private static string Handles(ICeremonyTransport t, uint start)
+         {
+-            Resp p = Resp.Parse(t.Transmit(Cmd.GetCapability(1, start, 64)), 0);
++            Resp p = Resp.Parse(t.Transmit(Cmd.GetCapability(1, start, 64)), 0, Tpm.ST_NO_SESSIONS, 0);
+             Rd r = new Rd(p.Params); r.U8(); r.U32(); uint count = r.U32();
+             List<string> hs = new List<string>();
+             for (int i = 0; i < count; i++) hs.Add("\"" + Hex.U32(r.U32()) + "\"");
+@@ -69,7 +69,7 @@
+         public static int Main(string[] args)
+         {
+             string mode = args[0];
+-            using (SwtpmLoopbackTransport inner = new SwtpmLoopbackTransport("127.0.0.1", 2341))
++            using (SwtpmLoopbackTransport inner = new SwtpmLoopbackTransport("127.0.0.1", 2101))
+             {
+                 string beforeNv = Handles(inner, 0x01000000);
+                 string beforeSessions = Handles(inner, 0x02000000);
+@@ -85,15 +85,15 @@
+                 // Restore only the object created by this probe, after collecting observations.
+                 if (fault.DefinedHandle != 0)
+                 {
+-                    Resp p = Resp.Parse(inner.Transmit(Cmd.NvReadPublic(fault.DefinedHandle)), 0);
++                    Resp p = Resp.Parse(inner.Transmit(Cmd.NvReadPublic(fault.DefinedHandle)), 0, Tpm.ST_NO_SESSIONS, 0);
+                     byte[] actual = new Rd(p.Params).B2B();
+                     if (Hex.Of(actual) != Hex.Of(fault.DefinedPublic)) throw new Exception("OWN_PUBLIC_MISMATCH");
+-                    Resp u = Resp.Parse(inner.Transmit(Cmd.NvUndefineSpace(new byte[0], fault.DefinedHandle)), 0);
++                    Resp u = Resp.Parse(inner.Transmit(Cmd.NvUndefineSpace(new byte[0], fault.DefinedHandle)), 0, Tpm.ST_SESSIONS, 1);
+                     if (u.Rc != 0) throw new Exception("OWN_NV_RESTORE_ERROR");
+                 }
+                 if (fault.LostSession != 0)
+                 {
+-                    Resp f = Resp.Parse(inner.Transmit(Cmd.FlushContext(fault.LostSession)), 0);
++                    Resp f = Resp.Parse(inner.Transmit(Cmd.FlushContext(fault.LostSession)), 0, Tpm.ST_NO_SESSIONS, 0);
+                     if (f.Rc != 0) throw new Exception("OWN_SESSION_RESTORE_ERROR");
+                 }
+                 Console.WriteLine("{\"probe\":\"" + mode + "\",\"afterIndependentRestoreNv\":"

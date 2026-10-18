@@ -1,0 +1,12 @@
+{"case":"short-header","result":"CeremonyFailedException: RESPONSE_TRUNCATED_HEADER"}
+{"case":"declared-size-mismatch","result":"CeremonyFailedException: RESPONSE_SIZE_MISMATCH"}
+{"case":"invalid-tag","result":"CeremonyFailedException: RESPONSE_TAG_MISMATCH: expected=0x8001 got=0x1234"}
+{"case":"missing-response-handle","result":"CeremonyFailedException: RESPONSE_TRUNCATED"}
+{"case":"missing-auth","result":"CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED"}
+{"case":"parameterSize-exceeds-body","result":"CeremonyFailedException: RESPONSE_TRUNCATED"}
+{"case":"parameterSize-u32-overflow","result":"OutOfMemoryException: Insufficient memory to continue the execution of the program."}
+{"case":"truncated-auth-nonce","result":"CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED"}
+{"case":"extra-auth-entry","result":"CeremonyFailedException: RESPONSE_TRAILING_BYTES"}
+{"case":"error-with-sessions-tag","result":"CeremonyFailedException: RESPONSE_ERROR_TAG_MALFORMED"}
+{"case":"error-with-body","result":"CeremonyFailedException: RESPONSE_ERROR_BODY_MALFORMED"}
+{"case":"wrong-class-response-handle","result":"accepted"}

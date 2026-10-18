@@ -1,0 +1,2 @@
+{"mode":"hmac-nonzero","status":"COMPLETE","failure":null,"steps":81,"changes":1,"forwarded":80,"undefineForwards":3,"createForwards":2,"policySignedForwards":6,"planted":"0x00000000","leftovers":[],"reconciliation":[],"notes":[],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"no-failed-step"}
+exit:0

@@ -1,0 +1,412 @@
+diff --git a/sim/tpm-ceremony/TpmCeremonyCore.cs b/sim/tpm-ceremony/TpmCeremonyCore.cs
+index 42388f6c..49d2f5a9 100644
+--- a/sim/tpm-ceremony/TpmCeremonyCore.cs
++++ b/sim/tpm-ceremony/TpmCeremonyCore.cs
+@@ -490,6 +490,76 @@ namespace Xuux.TpmCeremony
+         }
+     }
+ 
++    // ── مخططُ بنيةِ معاملاتِ الردِّ الناجحِ لكلِّ أمرٍ (WL-413 الدفعة الثانية / R2-03): يُستهلَكُ كلُّ
++    // حقلٍ ويُتحقَّقُ من الأحجامِ الداخليّةِ ومن انعدامِ البايتاتِ الزائدةِ. أمرٌ بلا مخطّطٍ يُرفَضُ — لا
++    // يُفسَّرُ ردٌّ لا يُعرَفُ شكلُه. البنى من TPM 2.0 Part 3 (ردودُ الأوامر) وPart 2 (الأنواع). ──
++    public static class ResponseSchema
++    {
++        private static void End(Rd r, string what)
++        {
++            if (r.Remaining != 0) throw new CeremonyFailedException("RESPONSE_PARAMS_TRAILING_BYTES: " + what + " extra=" + r.Remaining, 0);
++        }
++
++        private static void Name(byte[] n, string what)
++        {
++            // TPM2B_NAME لكائنٍ/فهرسٍ بخوارزميّةِ SHA-256: nameAlg(2) || digest(32).
++            if (n.Length != 34 || n[0] != 0x00 || n[1] != 0x0B) throw new CeremonyFailedException("RESPONSE_NAME_MALFORMED: " + what + " len=" + n.Length, 0);
++        }
++
++        public static void Check(uint cc, byte[] cmd, byte[] prm)
++        {
++            Rd r = new Rd(prm);
++            switch (cc)
++            {
++                case Tpm.CC_NV_DefineSpace:
++                case Tpm.CC_NV_Increment:
++                case Tpm.CC_NV_UndefineSpace:
++                case Tpm.CC_FlushContext:
++                case Tpm.CC_PolicyCommandCode:
++                    End(r, "empty-params"); return;
++                case Tpm.CC_NV_ReadPublic:
++                {
++                    byte[] pub = r.B2B(); byte[] nm = r.B2B(); End(r, "NV_ReadPublic");
++                    if (pub.Length < 14) throw new CeremonyFailedException("RESPONSE_NV_PUBLIC_MALFORMED len=" + pub.Length, 0);
++                    Name(nm, "NV_ReadPublic"); return;
++                }
++                case Tpm.CC_NV_Read:
++                case Tpm.CC_StartAuthSession:
++                case Tpm.CC_PolicyGetDigest:
++                    r.B2B(); End(r, Hex.U32(cc)); return;
++                case Tpm.CC_Load:
++                    Name(r.B2B(), "Load"); End(r, "Load"); return;
++                case Tpm.CC_Create:
++                    r.B2B(); r.B2B(); r.B2B(); r.B2B(); r.U16(); r.U32(); r.B2B(); End(r, "Create"); return;
++                case Tpm.CC_CreatePrimary:
++                    r.B2B(); r.B2B(); r.B2B(); r.U16(); r.U32(); r.B2B(); Name(r.B2B(), "CreatePrimary"); End(r, "CreatePrimary"); return;
++                case Tpm.CC_Sign:
++                {
++                    ushort alg = r.U16();
++                    if (alg != Tpm.ALG_ECDSA) throw new CeremonyFailedException("RESPONSE_SIGNATURE_ALG_UNEXPECTED: 0x" + alg.ToString("x4"), 0);
++                    r.U16(); r.B2B(); r.B2B(); End(r, "Sign"); return;
++                }
++                case Tpm.CC_PolicySigned:
++                    r.B2B(); r.U16(); r.U32(); r.B2B(); End(r, "PolicySigned"); return;
++                case Tpm.CC_GetCapability:
++                {
++                    Rd c = new Rd(cmd); c.Raw(10); uint askedCap = c.U32();
++                    byte more = r.U8();
++                    if (more > 1) throw new CeremonyFailedException("RESPONSE_CAPABILITY_MORE_MALFORMED", 0);
++                    uint cap = r.U32();
++                    if (cap != askedCap) throw new CeremonyFailedException("RESPONSE_CAPABILITY_MISMATCH: asked=" + Hex.U32(askedCap) + " got=" + Hex.U32(cap), 0);
++                    uint n = r.U32();
++                    if (n > 256) throw new CeremonyFailedException("RESPONSE_CAPABILITY_COUNT_IMPLAUSIBLE: " + n, 0);
++                    int width = cap == 1 ? 4 : cap == 6 ? 8 : -1;
++                    if (width < 0) throw new CeremonyFailedException("RESPONSE_CAPABILITY_UNSUPPORTED: " + Hex.U32(cap), 0);
++                    r.Raw((int)n * width); End(r, "GetCapability"); return;
++                }
++                default:
++                    throw new CeremonyFailedException("RESPONSE_SCHEMA_UNKNOWN_COMMAND: " + Hex.U32(cc), 0);
++            }
++        }
++    }
++
+     public sealed class Step
+     {
+         public string Stage;
+@@ -513,6 +583,13 @@ namespace Xuux.TpmCeremony
+         public readonly List<string> CleanupLeftovers = new List<string>();
+         // جردُ المصالحةِ بعدَ نتيجةٍ مجهولةٍ (WL-413): مشاهداتٌ قرائيّةٌ وملكيّةٌ وإجراءٌ — لا حكمَ سلامةٍ.
+         public readonly List<string> Reconciliation = new List<string>();
++        // الجردُ القرائيُّ النهائيُّ بعدَ التنظيفِ (WL-413 الدفعة الثانية / R2-04): هو المرجعُ للحالةِ الفعليّةِ
++        // على المحاكي. verified=false يعني أنّ الحالةَ المتبقّيةَ مجهولةٌ (لا ادّعاءَ نظافةٍ بلا دليل).
++        public bool PostRunVerified;
++        public string PostRunError;
++        public readonly List<string> ResidualNv = new List<string>();
++        public readonly List<string> ResidualSessions = new List<string>();
++        public readonly List<string> ResidualTransients = new List<string>();
+ 
+         public void Fact(string k, string v) { Facts.Add(new KeyValuePair<string, string>(k, v)); }
+ 
+@@ -530,6 +607,13 @@ namespace Xuux.TpmCeremony
+             return sb.Append('\"').ToString();
+         }
+ 
++        private static string Arr(List<string> xs)
++        {
++            StringBuilder sb = new StringBuilder("[");
++            for (int i = 0; i < xs.Count; i++) { if (i > 0) sb.Append(','); sb.Append(S(xs[i])); }
++            return sb.Append(']').ToString();
++        }
++
+         public string ToJson()
+         {
+             StringBuilder sb = new StringBuilder();
+@@ -560,7 +644,12 @@ namespace Xuux.TpmCeremony
+             for (int i = 0; i < CleanupLeftovers.Count; i++) { if (i > 0) sb.Append(','); sb.Append(S(CleanupLeftovers[i])); }
+             sb.Append("],\"reconciliation\":[");
+             for (int i = 0; i < Reconciliation.Count; i++) { if (i > 0) sb.Append(','); sb.Append(S(Reconciliation[i])); }
+-            sb.Append("]}");
++            sb.Append("],\"postRunInventory\":{\"verified\":").Append(PostRunVerified ? "true" : "false");
++            sb.Append(",\"error\":").Append(S(PostRunError));
++            sb.Append(",\"residualNv\":").Append(Arr(ResidualNv));
++            sb.Append(",\"residualSessions\":").Append(Arr(ResidualSessions));
++            sb.Append(",\"residualTransients\":").Append(Arr(ResidualTransients));
++            sb.Append("}}");
+             return sb.ToString();
+         }
+     }
+@@ -632,6 +721,7 @@ namespace Xuux.TpmCeremony
+             {
+                 byte[] raw = _t.Transmit(cmd);
+                 p = Resp.Parse(raw, respHandles, TagOf(cmd), authCount);
++                if (p.Rc == 0) ResponseSchema.Check(CommandCodeOf(cmd), cmd, p.Params);
+             }
+             catch (CeremonyUnknownOutcomeException) { throw; }
+             catch (Exception e)
+@@ -687,6 +777,26 @@ namespace Xuux.TpmCeremony
+         private Resp Refused(string name, byte[] cmd, uint expectedRc, int authCount)
+         { return Send(name, cmd, 0, "failure:0x" + expectedRc.ToString("x8"), authCount); }
+ 
++        // زيادةٌ يُتوقَّعُ رفضُها (WL-413 الدفعة الثانية / R2-02): تُقيَّدُ في دفترِ المواردِ كأيِّ أمرٍ مُغيِّرٍ،
++        // فإن ضاعَ ردُّها تُجرَدُ قيمةُ العدّادِ قرائيًّا (لم يُنفَّذْ / نُفِّذَ) ولا يبقى أثرُها صامتًا في التقرير.
++        private void RefusedIncrement(string name, uint index, byte[] auth, uint expectedRc, ulong? before)
++        {
++            Pending pending = Tracked("nv-increment", index, null, before);
++            _pending.Add(pending);
++            try
++            {
++                Refused(name, Cmd.NvIncrement(index, auth), expectedRc, 1);
++                _pending.Remove(pending);
++            }
++            catch (CeremonyUnknownOutcomeException) { throw; }
++            catch
++            {
++                // رمزٌ آخرُ أو نجاحٌ غيرُ متوقَّعٍ: النتيجةُ معلومةٌ ومسمّاةٌ في الفشلِ — لا جردَ مطلوب.
++                _pending.Remove(pending);
++                throw;
++            }
++        }
++
+         // إرسالُ أمرٍ مُغيِّرٍ مع قيدِهِ في دفترِ المواردِ: النتيجةُ المعلومةُ (نجاحٌ أو ردُّ خطأٍ من الـTPM)
+         // تُخرِجُهُ من الدفترِ؛ المجهولةُ تُبقيهِ للجردِ.
+         private Resp SendTracked(string name, byte[] cmd, int respHandles, int authCount, Pending pending)
+@@ -854,6 +964,16 @@ namespace Xuux.TpmCeremony
+             public byte[] PublicArea; public byte[] Name;
+         }
+ 
++        // نسخةٌ من TPMS_NV_PUBLIC ببتِّ WRITTEN مُصفَّرًا — للمقارنةِ التشخيصيّةِ فقط.
++        private static byte[] PublicWithoutWritten(byte[] pub)
++        {
++            byte[] c = (byte[])pub.Clone();
++            uint a = ((uint)c[6] << 24) | ((uint)c[7] << 16) | ((uint)c[8] << 8) | c[9];
++            a &= ~Tpm.NV_WRITTEN;
++            c[6] = (byte)(a >> 24); c[7] = (byte)(a >> 16); c[8] = (byte)(a >> 8); c[9] = (byte)a;
++            return c;
++        }
++
+         private NvPub ReadPublic(string name, uint index)
+         {
+             Resp p = Ok(name, Cmd.NvReadPublic(index), 0, 0);
+@@ -1057,7 +1177,7 @@ namespace Xuux.TpmCeremony
+             uint h = PickVacantHandle("s2v.anchorShape");
+             Define("s2v.anchorShape", h, Tpm.ANCHOR_ATTRIBUTES, _policy);
+ 
+-            Refused("s2v:NV_Increment(password-auth)", Cmd.NvIncrement(h, Cmd.PasswordAuth(new byte[0])), 0x0000012F, 1);
++            RefusedIncrement("s2v:NV_Increment(password-auth)", h, Cmd.PasswordAuth(new byte[0]), 0x0000012F, null);
+ 
+             byte[] nonce;
+             uint ps = StartSession("s2v.policy", Tpm.SE_POLICY, out nonce);
+@@ -1095,7 +1215,7 @@ namespace Xuux.TpmCeremony
+             SignAHash("s2v.otherkey", other, nonce4, out fr, out fs);
+             PolicySignedStep("s2v.otherkey", other, ps4, nonce4, fr, fs);
+             PolicyCommandCodeStep("s2v.otherkey", ps4, Tpm.CC_NV_Increment);
+-            Refused("s2v.otherkey:NV_Increment(policy-of-other-key)", Cmd.NvIncrement(h, Cmd.PolicyAuth(ps4, Random(32))), 0x0000099D, 1);
++            RefusedIncrement("s2v.otherkey:NV_Increment(policy-of-other-key)", h, Cmd.PolicyAuth(ps4, Random(32)), 0x0000099D, v1);
+             Flush("s2v.otherkey", ps4);
+             Flush("s2v.foreign", other);
+ 
+@@ -1105,7 +1225,7 @@ namespace Xuux.TpmCeremony
+             SignAHash("s2v.wrongcc", _serviceKey, nonce5, out sr, out ss);
+             PolicySignedStep("s2v.wrongcc", _serviceKey, ps5, nonce5, sr, ss);
+             PolicyCommandCodeStep("s2v.wrongcc", ps5, Tpm.CC_NV_Read);
+-            Refused("s2v.wrongcc:NV_Increment(policy-for-NV_Read)", Cmd.NvIncrement(h, Cmd.PolicyAuth(ps5, Random(32))), 0x0000099D, 1);
++            RefusedIncrement("s2v.wrongcc:NV_Increment(policy-for-NV_Read)", h, Cmd.PolicyAuth(ps5, Random(32)), 0x0000099D, v1);
+             Flush("s2v.wrongcc", ps5);
+ 
+             ulong v2 = ReadCounter("s2v:NV_Read(empty-auth)#2", h);
+@@ -1144,10 +1264,16 @@ namespace Xuux.TpmCeremony
+                     _r.Reconciliation.Add("nv-define " + Hex.U32(p.Handle) + ": not-executed (verified absent by read-only inventory)");
+                     return;
+                 }
+-                Rd q = new Rd(p.ExpectedPublic);
+-                uint oi = q.U32(); ushort oa = q.U16(); uint oat = q.U32(); byte[] op = q.B2B(); ushort os = q.U16();
+-                bool ours = n.Index == oi && n.NameAlg == oa && (n.Attributes & ~Tpm.NV_WRITTEN) == oat
+-                    && Hex.Of(n.AuthPolicy) == Hex.Of(op) && n.DataSize == os;
++                // WL-413 الدفعة الثانية (R2-01): هذه البروفةُ لم تكتبْ الفهرسَ قطُّ قبلَ ضياعِ ردِّ تعريفِهِ،
++                // فالمنطقةُ العامّةُ لفهرسٍ نحن أنشأناه يجبُ أن تطابقَ ما أُرسِلَ بايتًا ببايتٍ — WRITTEN صفرٌ.
++                // بتُّ WRITTEN مرفوعٌ يعني أنّ طرفًا آخرَ كتبَهُ: الملكيّةُ (أو على الأقلِّ حصريّتُها) غيرُ مُثبَتةٍ.
++                if ((n.Attributes & Tpm.NV_WRITTEN) != 0 && Hex.Of(PublicWithoutWritten(n.PublicArea)) == Hex.Of(p.ExpectedPublic))
++                {
++                    _r.Reconciliation.Add("nv-define " + Hex.U32(p.Handle) + ": exists with matching definition but TPMA_NV_WRITTEN is set although this run never wrote it; written by another party; ownership undetermined; left in place");
++                    _r.CleanupLeftovers.Add("nv " + Hex.U32(p.Handle) + ": ownership-undetermined (written by another party after lost define reply); left in place");
++                    return;
++                }
++                bool ours = Hex.Of(n.PublicArea) == Hex.Of(p.ExpectedPublic);
+                 if (!ours)
+                 {
+                     // موجودٌ لكنّهُ ليس منطقتَنا: لا يُحذَفُ لمجردِ وجودِهِ في المقبضِ المتوقَّعِ.
+@@ -1241,6 +1367,53 @@ namespace Xuux.TpmCeremony
+             throw new CeremonyFailedException("RECONCILE_UNKNOWN_KIND: " + p.Kind, 0);
+         }
+ 
++        // جردٌ قرائيٌّ نهائيٌّ مقابلَ خطِّ الأساس (WL-413 الدفعة الثانية / R2-04). كلُّ مقبضٍ جديدٍ باقٍ يُعلَنُ في
++        // البقايا إن لم يكن معلَنًا؛ وكلُّ بقيّةٍ معلَنةٍ ثبتَ غيابُها تُوثَّقُ في المصالحةِ (البقيّةُ المعلَنةُ لا تُمحى).
++        // تعذُّرُ الجردِ (نقلٌ مقطوعٌ مثلًا) ⇒ الحالةُ المتبقّيةُ مجهولةٌ ⇒ بقيّةٌ معلَنةٌ وفشلٌ مغلق.
++        private void PostRunInventory()
++        {
++            if (_baselineNv == null)
++            {
++                _r.PostRunError = "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)";
++                return;
++            }
++            _cleanup = false;
++            _stage = "post-run";
++            try
++            {
++                HashSet<uint> nv = NvHandles();
++                HashSet<uint> se = HandleSet(0x02000000, true);
++                HashSet<uint> tr = HandleSet(0x80000000, false);
++                foreach (uint h in nv) if (!_baselineNv.Contains(h)) _r.ResidualNv.Add(Hex.U32(h));
++                foreach (uint h in se) if (!_baselineSessions.Contains(h)) _r.ResidualSessions.Add(Hex.U32(h));
++                foreach (uint h in tr) if (!_baselineTransients.Contains(h)) _r.ResidualTransients.Add(Hex.U32(h));
++                _r.PostRunVerified = true;
++            }
++            catch (Exception e)
++            {
++                _r.PostRunVerified = false;
++                _r.PostRunError = e.Message;
++                _r.CleanupLeftovers.Add("post-run inventory unavailable: residual state unknown (" + e.Message + ")");
++                return;
++            }
++            List<string> residual = new List<string>();
++            residual.AddRange(_r.ResidualNv); residual.AddRange(_r.ResidualSessions); residual.AddRange(_r.ResidualTransients);
++            foreach (string h in residual)
++            {
++                bool declared = false;
++                foreach (string l in _r.CleanupLeftovers) if (l.IndexOf(h, StringComparison.Ordinal) >= 0) { declared = true; break; }
++                if (!declared) _r.CleanupLeftovers.Add("residual " + h + ": present after run, absent from baseline; not removed");
++            }
++            foreach (string l in new List<string>(_r.CleanupLeftovers))
++            {
++                int i = l.IndexOf("0x", StringComparison.Ordinal);
++                if (i < 0 || i + 10 > l.Length) continue;
++                string h = l.Substring(i, 10);
++                if (!residual.Contains(h) && (l.StartsWith("nv ") || l.StartsWith("transient ") || l.StartsWith("session ")))
++                    _r.Reconciliation.Add("post-run: " + h + " declared as leftover above but verified absent by final inventory");
++            }
++        }
++
+         private void Cleanup()
+         {
+             _cleanup = true;
+@@ -1298,6 +1471,7 @@ namespace Xuux.TpmCeremony
+                 try { ReconcileUnknownOutcomes(); }
+                 catch (Exception e) { _r.CleanupLeftovers.Add("reconcile-after-cleanup aborted: " + e.Message); }
+             }
++            PostRunInventory();
+             if (_r.CleanupLeftovers.Count > 0 && _r.Status == "COMPLETE") _r.Status = "FAILED_CLOSED";
+             return _r;
+         }
+diff --git a/sim/tpm-ceremony/rehearse.ps1 b/sim/tpm-ceremony/rehearse.ps1
+index 0885b8c2..8f2c2c83 100644
+--- a/sim/tpm-ceremony/rehearse.ps1
++++ b/sim/tpm-ceremony/rehearse.ps1
+@@ -6,9 +6,13 @@
+ # (بصماتُ الأوامرِ لا بايتاتُها). لا TBS، ولا TPM حقيقيّ، ولا سقوطَ إلى بديل: أيُّ فشلٍ ⇒ توقّفٌ مغلق
+ # ثمّ جردُ مصالحةٍ قرائيٌّ للنتائجِ المجهولةِ وحذفُ ما أنشأَته البروفةُ وحدَه.
+ #
+-# عزلُ النقلِ (WL-413): ‏-SimPidFile إن مُرِّرَ تحقَّقَ أنّ المُستمِعَ على المنفذِ عمليةُ swtpm نفسُها
+-# (سياقُ تشغيلِ المحاكي)، لا مجردَ إقرارِ الطرفِ المقابلِ. وهذا تحقّقُ عمليّةٍ لا مصادقةٌ تشفيريّة؛
+-# حدودُ الثقةِ في المضيفِ المحليِّ موثّقةٌ في نموذجِ التهديدِ (§7 البند 11).
++# عزلُ النقلِ (WL-413، الدفعة الثانية / R2-05): قبلَ أيِّ أمرٍ وبعدَ البروفةِ يُحدَّدُ مالكُ مقبسِ الاستماعِ
++# على المنفذِ من جدولِ مقابسِ النظامِ نفسِهِ (Linux: ‏/proc/net/tcp{,6} ثمّ /proc/<pid>/fd؛ Windows:
++# Get-NetTCPConnection)، ويُشترَطُ: كلُّ مستمعٍ على المنفذِ مربوطٌ بـloopback، ومالكٌ واحدٌ، اسمُ عمليّتِهِ
++# ‏`swtpm` تمامًا، وسطرُ أوامرِهِ `swtpm socket --tpm2 ... --server type=tcp,port=<المنفذ>,bindaddr=<loopback>`،
++# ويطابقُ ‏-SimPidFile إن مُرِّر. وسيطٌ (proxy) على المنفذِ — حتّى مع ملفِّ PID لـswtpm حقيقيٍّ — يُرفَضُ.
++# تعذُّرُ تحديدِ المالكِ ⇒ رفضٌ (لا افتراضَ). وهذا تحقّقُ سياقِ عمليّةٍ لا مصادقةٌ تشفيريّة؛ حدودُ الثقةِ
++# في المضيفِ المحليِّ موثّقةٌ في نموذجِ التهديدِ (§7 البند 11).
+ #
+ # الاستعمال (داخلَ بيئةِ المحاكاةِ فقط):
+ #   pwsh -NoProfile -File sim/tpm-ceremony/rehearse.ps1 -SimHost 127.0.0.1 -SimPort 2321 -Stages ALL -SimPidFile /run/swtpm.pid
+@@ -30,16 +34,84 @@ function Write-ToolError {
+   exit 4
+ }
+ 
++$expectedPid = 0
+ if ($SimPidFile) {
+   if (-not (Test-Path -LiteralPath $SimPidFile)) { Write-ToolError 'simulator pid file absent' }
+   $simPidText = (Get-Content -LiteralPath $SimPidFile -ErrorAction Stop | Select-Object -First 1).Trim()
+-  $simPid = 0
+-  if (-not [int]::TryParse($simPidText, [ref]$simPid)) { Write-ToolError 'simulator pid file unreadable' }
+-  $simProc = $null
+-  try { $simProc = Get-Process -Id $simPid -ErrorAction Stop } catch { Write-ToolError 'simulator process not running' }
+-  if ($simProc.ProcessName -notmatch 'swtpm') { Write-ToolError ('simulator context mismatch: process name ' + $simProc.ProcessName) }
++  if (-not [int]::TryParse($simPidText, [ref]$expectedPid) -or $expectedPid -le 0) { Write-ToolError 'simulator pid file unreadable' }
+ }
+ 
++# يُعيدُ وصفَ المستمعِ المتحقَّقِ منه أو يرمي استثناءً باسمِ السبب. لا مسارَ يقبلُ مستمعًا مجهولَ المالك.
++function Assert-SimulatorListener {
++  param([int]$Port, [int]$ExpectedPid)
++  $owners = @{}
++  $isLinuxHost = $false
++  if (Test-Path variable:IsLinux) { $isLinuxHost = [bool]$IsLinux }
++  if ($isLinuxHost) {
++    $inodes = @{}
++    foreach ($table in @('/proc/net/tcp', '/proc/net/tcp6')) {
++      if (-not (Test-Path -LiteralPath $table)) { continue }
++      foreach ($line in (Get-Content -LiteralPath $table | Select-Object -Skip 1)) {
++        $c = @($line.Trim() -split '\s+')
++        if ($c.Count -lt 10 -or $c[3] -ne '0A') { continue }
++        $parts = $c[1].Split(':')
++        if ([Convert]::ToInt32($parts[1], 16) -ne $Port) { continue }
++        $loop = ($parts[0] -eq '0100007F') -or ($parts[0] -eq '00000000000000000000000001000000')
++        if (-not $loop) { throw ('SIMULATOR_LISTENER_NOT_LOOPBACK: ' + $parts[0]) }
++        $inodes[$c[9]] = $true
++      }
++    }
++    if ($inodes.Count -eq 0) { throw 'SIMULATOR_LISTENER_ABSENT' }
++    foreach ($procDir in [System.IO.Directory]::GetDirectories('/proc')) {
++      $leaf = [System.IO.Path]::GetFileName($procDir)
++      $procId = 0
++      if (-not [int]::TryParse($leaf, [ref]$procId)) { continue }
++      try { $fds = [System.IO.Directory]::GetFiles($procDir + '/fd') } catch { continue }
++      foreach ($fd in $fds) {
++        $target = $null
++        try { $target = (New-Object System.IO.FileInfo($fd)).LinkTarget } catch { continue }
++        if ($target -and $target -match '^socket:\[(\d+)\]$' -and $inodes.ContainsKey($Matches[1])) { $owners[$procId] = $true }
++      }
++    }
++    if ($owners.Count -eq 0) { throw 'SIMULATOR_LISTENER_OWNER_UNVERIFIABLE' }
++    if ($owners.Count -ne 1) { throw ('SIMULATOR_LISTENER_MULTIPLE_OWNERS: ' + (($owners.Keys | Sort-Object) -join ',')) }
++    $ownerPid = @($owners.Keys)[0]
++    $comm = ([System.IO.File]::ReadAllText('/proc/' + $ownerPid + '/comm')).Trim()
++    $argv = @(([System.IO.File]::ReadAllText('/proc/' + $ownerPid + '/cmdline')).Split([char]0) | Where-Object { $_ -ne '' })
++  } elseif (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
++    # Windows — لم يُقَسْ في هذه البروفة (المحاكي يعمل على Linux)؛ المنطقُ نفسُه: لا مالكَ مؤكَّدٌ ⇒ رفض.
++    $conns = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
++    if ($conns.Count -eq 0) { throw 'SIMULATOR_LISTENER_ABSENT' }
++    foreach ($cn in $conns) {
++      if ($cn.LocalAddress -ne '127.0.0.1' -and $cn.LocalAddress -ne '::1') { throw ('SIMULATOR_LISTENER_NOT_LOOPBACK: ' + $cn.LocalAddress) }
++      $owners[[int]$cn.OwningProcess] = $true
++    }
++    if ($owners.Count -ne 1) { throw 'SIMULATOR_LISTENER_MULTIPLE_OWNERS' }
++    $ownerPid = @($owners.Keys)[0]
++    $comm = (Get-Process -Id $ownerPid -ErrorAction Stop).ProcessName
++    $cl = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $ownerPid) -ErrorAction Stop).CommandLine
++    if (-not $cl) { throw 'SIMULATOR_LISTENER_CMDLINE_UNREADABLE' }
++    $argv = @($cl -split '\s+' | Where-Object { $_ -ne '' })
++  } else {
++    throw 'SIMULATOR_LISTENER_OWNER_UNVERIFIABLE: no socket table available'
++  }
++  if ($comm -ne 'swtpm') { throw ('SIMULATOR_LISTENER_NOT_SWTPM: ' + $comm) }
++  if ($ExpectedPid -gt 0 -and $ownerPid -ne $ExpectedPid) { throw ('SIMULATOR_LISTENER_PID_MISMATCH: listener=' + $ownerPid + ' pidfile=' + $ExpectedPid) }
++  if ($argv.Count -lt 3 -or $argv[1] -ne 'socket' -or ($argv -notcontains '--tpm2')) { throw 'SIMULATOR_LISTENER_CMDLINE_UNEXPECTED' }
++  $serverOk = $false
++  for ($i = 0; $i -lt $argv.Count - 1; $i++) {
++    if ($argv[$i] -eq '--server') {
++      $opts = @($argv[$i + 1].Split(','))
++      if (($opts -contains 'type=tcp') -and ($opts -contains ('port=' + $Port)) -and (($opts -contains 'bindaddr=127.0.0.1') -or ($opts -contains 'bindaddr=::1'))) { $serverOk = $true }
++    }
++  }
++  if (-not $serverOk) { throw 'SIMULATOR_LISTENER_CMDLINE_PORT_OR_BIND_MISMATCH' }
++  return ('pid=' + $ownerPid + ' comm=' + $comm)
++}
++
++try { $listenerBefore = Assert-SimulatorListener -Port $SimPort -ExpectedPid $expectedPid }
++catch { Write-ToolError ('simulator context mismatch: ' + $_.Exception.Message) }
++
+ try {
+   Add-Type -Path (Join-Path $PSScriptRoot 'TpmCeremonyCore.cs') -IgnoreWarnings
+ } catch {
+@@ -55,6 +127,15 @@ try {
+ } finally {
+   if ($null -ne $t) { $t.Dispose() }
+ }
++# إعادةُ التحقّقِ بعدَ البروفة: تبدُّلُ المالكِ أثناءَ التشغيلِ يُبطِلُ ادّعاءَ أنّ الأوامرَ ذهبت إلى المحاكي.
++$listenerAfter = $null
++try { $listenerAfter = Assert-SimulatorListener -Port $SimPort -ExpectedPid $expectedPid } catch { $listenerAfter = 'unverifiable: ' + $_.Exception.Message }
++$report.Fact('transport.listener.before', $listenerBefore)
++$report.Fact('transport.listener.after', $listenerAfter)
++if ($listenerAfter -ne $listenerBefore) {
++  $report.CleanupLeftovers.Add('transport context changed or unverifiable after run: before=' + $listenerBefore + ' after=' + $listenerAfter)
++  if ($report.Status -eq 'COMPLETE') { $report.Status = 'FAILED_CLOSED' }
++}
+ [Console]::Out.WriteLine($report.ToJson())
+ if ($report.Status -eq 'COMPLETE') { exit 0 }
+ if ($report.Status -eq 'TOOL_ERROR') { exit 4 }

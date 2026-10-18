@@ -149,7 +149,18 @@ for (const [label, cc] of [['NV_DefineSpace', '0x12A'], ['NV_Increment', '0x134'
     const idx = r.steps.findIndex((s) => s.outcome === 'blocked');
     assert.ok(idx >= 0);
     assert.equal(r.steps[idx].commandCode, '0x' + cc.slice(2).toLowerCase().padStart(8, '0'));
-    const after = r.steps.slice(idx + 1);
+    const all = r.steps.slice(idx + 1);
+    // WL-413 الدفعة الثانية (R2-04): بعدَ التنظيفِ جردٌ نهائيٌّ قرائيٌّ — GetCapability وحده، بعدَ آخرِ خطوةِ
+    // تنظيف، ولا يُعَدُّ تنظيفًا. يُستثنى من فحصِ أوامرِ التنظيفِ بشرطِه هذا لا غير، ويُشترَطُ أنّه متحقِّقٌ وفارغ.
+    const firstPost = all.findIndex((s) => s.stage === 'post-run');
+    assert.ok(firstPost >= 0, 'post-run inventory present');
+    for (const s of all.slice(firstPost)) {
+      assert.equal(s.stage, 'post-run', 'only post-run after post-run starts: ' + s.name);
+      assert.equal(s.commandCode, '0x0000017a', 'post-run is read-only GetCapability: ' + s.name);
+    }
+    assert.equal(r.postRunInventory.verified, true);
+    assert.deepEqual([...[r.postRunInventory.residualNv, r.postRunInventory.residualSessions, r.postRunInventory.residualTransients].flat()].filter(Boolean), []);
+    const after = all.slice(0, firstPost);
     // بعدَ الرفضِ: أوامرُ التنظيفِ وحدَها، ولا محاولةَ ثانيةَ للأمرِ المرفوضِ إلا حذفُ ما أنشأته البروفة.
     for (const s of after) {
       assert.equal(s.stage, 'cleanup', 'non-cleanup command after block: ' + s.name);

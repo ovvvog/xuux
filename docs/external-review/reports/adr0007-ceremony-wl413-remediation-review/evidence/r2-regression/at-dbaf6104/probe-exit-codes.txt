@@ -1,0 +1,8 @@
+gpt_6_1_sol/invalid-tag exit=0
+gpt_6_1_sol/missing-response-auth exit=0
+gpt_6_1_sol/define-response-loss exit=1
+gpt_6_1_sol/flush-refusal exit=1
+gpt_6_1_sol/unexpected-negative exit=0
+r2/written-before-reconcile exit=0
+r2/neg-increment-loss exit=0
+r2/trailing-params exit=0

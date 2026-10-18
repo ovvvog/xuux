@@ -1,0 +1,2 @@
+{"mode":"io-before-increment","status":"FAILED_CLOSED","failure":"OUTCOME_UNKNOWN: s1.probe:NV_Increment#1 (IOException: PROBE_IO_BEFORE_INCREMENT_WRITE)","steps":19,"changes":1,"forwarded":18,"undefineForwards":1,"createForwards":0,"policySignedForwards":0,"planted":"0x00000000","leftovers":[],"reconciliation":["nv-increment 0x01a9574a: not-executed (counter still uninitialized)"],"notes":[],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"none"}
+exit:0

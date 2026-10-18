@@ -1,0 +1,23 @@
+sim pid=9712 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-5wN0jI rc=0
+helper:define-not-executed exit=0
+sim pid=9733 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-HbNiay rc=0
+helper:transport-dead-after-define exit=0
+sim pid=9741 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-Y2utzP rc=0
+helper:getcap-wrong-cap exit=0
+sim pid=9749 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-uVmPm3 rc=0
+helper:load-name-short exit=0
+sim pid=9757 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-ktfzmw rc=0
+helper:define-params-extra exit=0
+sim pid=9765 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-8va9ek rc=0
+baseline old:missing-response-auth exit=0
+sim pid=9773 state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/extra-state-lMeEZ3 rc=0
+direct S1 exit=0
+direct S2 exit=0
+policyRef build exit=0
+policyRef run exit=0
+properties-fixed exit=0
+final handles-nv-index exit=0 bytes=0
+final handles-loaded-session exit=0 bytes=0
+final handles-transient exit=0 bytes=0
+2026-10-17T22:57:13Z
+State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess

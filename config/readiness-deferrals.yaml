@@ -47,7 +47,7 @@ deferrals:
     declaredIn: WL-065
     recheck:
       cadence: P3M
-      lastReviewedOn: '2026-09-17'
+      lastReviewedOn: '2026-10-17'
       decidedIn: WL-204
   - id: M11.04
     kind: step
@@ -65,7 +65,7 @@ deferrals:
     declaredIn: WL-076
     recheck:
       cadence: P1M
-      lastReviewedOn: '2026-09-17'
+      lastReviewedOn: '2026-10-17'
       decidedIn: WL-204
   - id: M11.05
     kind: step
@@ -83,7 +83,7 @@ deferrals:
     declaredIn: WL-076
     recheck:
       cadence: P1M
-      lastReviewedOn: '2026-09-17'
+      lastReviewedOn: '2026-10-17'
       decidedIn: WL-204
   - id: M11.06
     kind: step
@@ -101,7 +101,7 @@ deferrals:
     declaredIn: WL-076
     recheck:
       cadence: P1M
-      lastReviewedOn: '2026-09-17'
+      lastReviewedOn: '2026-10-17'
       decidedIn: WL-204
   - id: M11.09
     kind: step
