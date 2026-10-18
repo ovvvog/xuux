@@ -158,7 +158,7 @@ simPwshTest('sim: وسمُّ ردٍّ مشوَّهٌ ⇒ FAILED_CLOSED برمز�
 });
 
 // ── 6) الردُّ المشوَّهُ: حذفُ منطقةِ تفويضِ الردِّ (SOL-01) — أمرٌ مُغيِّرٌ فالأثرُ مجهولٌ يُجرد. ──
-simPwshTest('sim: حذفُ منطقةِ تفويضِ الردِّ ⇒ فشلٌ مغلقٌ مسمّى وجردُ مصالحةٍ يُثبتُ التنفيذَ والملكيّةَ', () => {
+simPwshTest('sim: حذفُ منطقةِ تفويضِ الردِّ ⇒ فشلٌ مغلقٌ مسمّى وجردُ مصالحةِ يكشفُ الفهرسَ متروكًا بملكيّةِ غيرِ مثبتةِ', () => {
   const s = startSim();
   try {
     const res = fault(s, 'missing-response-auth');
@@ -166,15 +166,16 @@ simPwshTest('sim: حذفُ منطقةِ تفويضِ الردِّ ⇒ فشلٌ �
     assert.equal(r.status, 'FAILED_CLOSED');
     assert.match(r.failure, /OUTCOME_UNKNOWN: s1\.probe:NV_DefineSpace/);
     assert.match(r.failure, /RESPONSE_AUTH_AREA_MALFORMED/);
-    // الجردُ يُثبتُ: عُرِّفَ الفهرسُ وملكيّتُهُ مثبتةٌ بمطابقةِ المنطقةِ العامّةِ، والحذفُ وقعَ وتحقّقَ غيابُه.
-    assert.ok(r.reconciliation.some((x) => x.includes('nv-define') && x.includes('executed; ownership proven by publicArea match')), JSON.stringify(r.reconciliation));
-    assert.ok(r.reconciliation.some((x) => x.includes('nv-undefine') && x.includes('verified absent')), JSON.stringify(r.reconciliation));
-    assert.deepEqual(sortedDiff(res.nvBefore, res.nvAfter), []);
+    // الردُّ فقدَ/تعذّرَ فهو غيرُ قابلِ للاستخدامِ: الفهرسُ عُرّفَ فعلًا على المحاكي لكنَّ ملكيّتهُ غيرُ قابلةِ لإثباتِ — يُتركُ ويُعلَن ولا يُحذَف (قرار المراجع G47-413-1 / WL-413 R3).
+    assert.ok(r.reconciliation.some((x) => x.includes('nv-define') && x.includes('the define reply was lost or unusable so execution and ownership cannot be proven')), JSON.stringify(r.reconciliation));
+    assert.ok(!r.reconciliation.some((x) => x.includes('ownership proven')));
+    assert.ok(r.reconciliation.some((x) => x.includes('nv-define') && x.includes('left in place')), JSON.stringify(r.reconciliation));
+    assert.equal(sortedDiff(res.nvBefore, res.nvAfter).length, 1, 'the defined index remains as evidence');
   } finally { stopSim(s); }
 });
 
 // ── 7) فقدُ ردِّ التعريفِ بعدَ التنفيذِ (SOL-02 — النتيجةُ الأولى): الأثرُ وقعَ فيُكتشفُ ويُملَكُ ويُحذَف. ──
-simPwshTest('sim: فقدُ ردِّ NV_DefineSpace بعدَ التنفيذِ ⇒ مجهولٌ يُجردُ: التنفيذُ مثبتٌ والملكيّةُ مثبتةٌ والفهرسُ يُحذَفُ', () => {
+simPwshTest('sim: فقدُ ردِّ NV_DefineSpace بعدَ التنفيذِ (SOL-02 — النتيجةُ الأولى): الفهرسُ يكشفُ ويُعلَن بملكيّةِ غيرِ قابلةِ للإثباتِ ولا يُحذَف', () => {
   const s = startSim();
   try {
     const res = fault(s, 'define-response-loss');
@@ -182,10 +183,12 @@ simPwshTest('sim: فقدُ ردِّ NV_DefineSpace بعدَ التنفيذِ ⇒
     assert.equal(r.status, 'FAILED_CLOSED');
     assert.match(r.failure, /OUTCOME_UNKNOWN: s1\.probe:NV_DefineSpace/);
     assert.match(r.failure, /WL413_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION/);
-    assert.ok(r.reconciliation.some((x) => x.includes('nv-define') && x.includes('executed; ownership proven by publicArea match')), JSON.stringify(r.reconciliation));
-    // لا فهرسَ يبقى على المحاكي ولا بقايَا معلنةً — التقريرُ لا يدّعي نجاحًا (الحالةُ مغلفةٌ بفشلٍ).
-    assert.deepEqual(sortedDiff(res.nvBefore, res.nvAfter), []);
-    assert.deepEqual(r.cleanupLeftovers.filter((x) => x.startsWith('nv ')), []);
+    // قرار المراجع G47-413-1 (WL-413 R3): فهرسٌ مطابقٌ سابقُ الوجودِ لا يُميّز من فهرسِ هذهِ المراسمِ — لا حذفَ بعد ردِّ تعريفِ مفقودٖ: يُتركُ كدليلٖ مادًّا ويُعلَن في البقايا.
+    assert.ok(r.reconciliation.some((x) => x.includes('nv-define') && x.includes('the define reply was lost or unusable so execution and ownership cannot be proven')), JSON.stringify(r.reconciliation));
+    assert.ok(!r.reconciliation.some((x) => x.includes('ownership proven')));
+    assert.ok(!r.steps.some((x) => x.commandCode === '0x00000122'), 'no NV_UndefineSpace sent');
+    assert.equal(sortedDiff(res.nvBefore, res.nvAfter).length, 1, 'index remains on the simulator');
+    assert.ok(r.cleanupLeftovers.filter((x) => x.startsWith('nv ')).some((x) => x.includes('ownership-undetermined')), JSON.stringify(r.cleanupLeftovers));
   } finally { stopSim(s); }
 });
 

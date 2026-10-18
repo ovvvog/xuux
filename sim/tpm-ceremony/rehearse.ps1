@@ -98,6 +98,19 @@ function Assert-SimulatorListener {
   if ($comm -ne 'swtpm') { throw ('SIMULATOR_LISTENER_NOT_SWTPM: ' + $comm) }
   if ($ExpectedPid -gt 0 -and $ownerPid -ne $ExpectedPid) { throw ('SIMULATOR_LISTENER_PID_MISMATCH: listener=' + $ownerPid + ' pidfile=' + $ExpectedPid) }
   if ($argv.Count -lt 3 -or $argv[1] -ne 'socket' -or ($argv -notcontains '--tpm2')) { throw 'SIMULATOR_LISTENER_CMDLINE_UNEXPECTED' }
+  # الملفُ التنفيذيُّ للمالكِ (WL-413 الدفعة الثالثة / G47-413-7): انتحالُ comm وcmdline مُقاسٌ ومُتجاوَزٌ؛
+  # فحصُ exe يرفعُ الكلفةَ — يجبُ أن يكونَ ملفَّ swtpm نفسَهُ الذي يحلُّهُ المسارُ. حدُّهُ (ملفٌّ مُستبدَلٌ بذاتِ
+  # الاسمِ عبرَ bind-mount من ذاتِ المستخدمِ) موثّقٌ في نموذجِ التهديدِ.
+  if ($IsLinux) {
+    $exe = $null
+    try { $exe = (New-Object System.IO.FileInfo('/proc/' + $ownerPid + '/exe')).LinkTarget } catch { }
+    if (-not $exe) { throw 'SIMULATOR_LISTENER_EXE_UNREADABLE' }
+    $swtpmPath = (Get-Command swtpm -ErrorAction Stop).Source
+    $exeResolved = $exe; $swtpmResolved = $swtpmPath
+    try { $exeResolved = (Resolve-Path -LiteralPath $exe -ErrorAction Stop).Path } catch { }
+    try { $swtpmResolved = (Resolve-Path -LiteralPath $swtpmPath -ErrorAction Stop).Path } catch { }
+    if ($exeResolved -ne $swtpmResolved) { throw ('SIMULATOR_LISTENER_EXE_MISMATCH: exe=' + $exe + ' path-swtpm=' + $swtpmPath) }
+  }
   $serverOk = $false
   for ($i = 0; $i -lt $argv.Count - 1; $i++) {
     if ($argv[$i] -eq '--server') {
@@ -106,6 +119,18 @@ function Assert-SimulatorListener {
     }
   }
   if (-not $serverOk) { throw 'SIMULATOR_LISTENER_CMDLINE_PORT_OR_BIND_MISMATCH' }
+  # منفذُ التحكّمِ (WL-413 الدفعة الثالثة / G47-413-8): إن كانَ TCP فلا بدَّ أن يكونَ على loopback —
+  # منفذُ تحكّمٍ مكشوفٌ قناةُ تحكّمٍ بالحالةِ بلا مصادقةٍ. ctrl من نوعٍ آخر أو غيابُهُ مقبولٌ.
+  for ($i = 0; $i -lt $argv.Count - 1; $i++) {
+    if ($argv[$i] -eq '--ctrl') {
+      $opts = @($argv[$i + 1].Split(','))
+      if ($opts -contains 'type=tcp') {
+        if (-not (($opts -contains 'bindaddr=127.0.0.1') -or ($opts -contains 'bindaddr=::1'))) {
+          throw 'SIMULATOR_LISTENER_CTRL_PORT_NOT_LOOPBACK'
+        }
+      }
+    }
+  }
   return ('pid=' + $ownerPid + ' comm=' + $comm)
 }
 
