@@ -679,13 +679,15 @@ namespace Xuux.TpmCeremony.Tests
             }
             // nv-appear-midrun: عندَ طلبِ جردِ NV الثاني يُعرّفُ النقلُ فهرسًا حقيقيًّا داخلَ مجالِ المالك
             // (طرفٌ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ) قبلَ تمريرِ الطلبِ — الردُّ يشملُهُ فيوقفُهُ الحاجزُ.
-            if (_mode == "nv-appear-midrun" && cc == Tpm.CC_GetCapability)
+            if ((_mode == "nv-appear-midrun" || _mode == "nv-appear-late") && cc == Tpm.CC_GetCapability)
             {
                 Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); uint cap = c.U32(); uint prop = c.U32();
                 if (cap == 1 && prop >= 0x01000000u && prop < 0x02000000u)
                 {
                     _nvInvCount++;
-                    if (_nvInvCount == 2)
+                    // nv-appear-midrun: الجردُ الثاني (حاجزُ ما بعدِ خطِّ الأساسِ)؛ nv-appear-late: الجردُ الثالث
+                    // (حاجزُ PickVacantHandle المتكرّرُ قبلَ كلِّ تعريفٍ) — كلاهُما ظهورٌ من طرفٍ ثالثٍ يوقفُهُ الحاجزُ.
+                    if ((_mode == "nv-appear-midrun" && _nvInvCount == 2) || (_mode == "nv-appear-late" && _nvInvCount == 3))
                     {
                         Changes++;
                         Resp d = Resp.Parse(_inner.Transmit(Cmd.NvDefineSpace(new byte[0], new byte[0], PlantedNvPublic(0x01807777))), 0, Tpm.ST_SESSIONS, 1, new bool[] { true });
