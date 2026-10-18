@@ -525,6 +525,94 @@ namespace Xuux.TpmCeremony
     // ── مخططُ بنيةِ معاملاتِ الردِّ الناجحِ لكلِّ أمرٍ (WL-413 الدفعة الثانية / R2-03): يُستهلَكُ كلُّ
     // حقلٍ ويُتحقَّقُ من الأحجامِ الداخليّةِ ومن انعدامِ البايتاتِ الزائدةِ. أمرٌ بلا مخطّطٍ يُرفَضُ — لا
     // يُفسَّرُ ردٌّ لا يُعرَفُ شكلُه. البنى من TPM 2.0 Part 3 (ردودُ الأوامر) وPart 2 (الأنواع). ──
+    // سياقُ الردودِ المُتحقَّقِ منها (WL-414 دورةُ المعالجةِ / FUP-SOL-01/02/05): يسجّلُ — بعدَ نجاحِ فحصِ
+    // المخطّطِ فقط — اسمَ كلِّ كائنٍ أنشأتْه البروفةُ أو حمّلتْه، وهرميّتَه، واسمَه المؤهَّلَ، ونوعَ كلِّ جلسةٍ
+    // بدأتْها. فحوصُ الردودِ التي تعتمدُ على حالةٍ سابقةٍ (اسمُ الأصلِ في بياناتِ الإنشاءِ، وتذكرةُ PolicySigned
+    // الحقيقيّةُ عندَ expiration سالبٍ) تُربَطُ به؛ مقبضٌ غيرُ مسجّلٍ ⇒ فشلٌ مغلقٌ مسمّى لا قبولٌ بنيويٌّ.
+    public sealed class ResponseContext
+    {
+        private readonly Dictionary<uint, byte[]> _names = new Dictionary<uint, byte[]>();
+        private readonly Dictionary<uint, byte[]> _qualified = new Dictionary<uint, byte[]>();
+        private readonly Dictionary<uint, uint> _hierarchy = new Dictionary<uint, uint>();
+        private readonly Dictionary<uint, byte> _sessionType = new Dictionary<uint, byte>();
+
+        public bool TryObject(uint h, out byte[] name, out byte[] qualifiedName, out uint hierarchy)
+        {
+            name = null; qualifiedName = null; hierarchy = 0;
+            if (!_names.ContainsKey(h)) return false;
+            name = _names[h]; qualifiedName = _qualified[h]; hierarchy = _hierarchy[h];
+            return true;
+        }
+
+        public bool TrySessionType(uint h, out byte type)
+        {
+            type = 0;
+            if (!_sessionType.ContainsKey(h)) return false;
+            type = _sessionType[h];
+            return true;
+        }
+
+        // الاسمُ المؤهَّلُ (Part 1 §16): QN(B) = nameAlg || H(QN(أصلِ B) || Name(B))، وQN للهرميّةِ = مقبضُها (4 بايتات).
+        // قياسُ swtpm 2026-10-18: parentQualifiedName في ردِّ Create = 000B || SHA256(40000001 || Name(primary)).
+        public static byte[] Qualified(byte[] parentQn, byte[] name)
+        {
+            byte[] cat = new byte[parentQn.Length + name.Length];
+            Array.Copy(parentQn, 0, cat, 0, parentQn.Length);
+            Array.Copy(name, 0, cat, parentQn.Length, name.Length);
+            byte[] d = Sha.H(cat);
+            byte[] q = new byte[2 + d.Length];
+            q[0] = 0x00; q[1] = 0x0B;
+            Array.Copy(d, 0, q, 2, d.Length);
+            return q;
+        }
+
+        private static uint U32At(byte[] b, int o) { return ((uint)b[o] << 24) | ((uint)b[o + 1] << 16) | ((uint)b[o + 2] << 8) | b[o + 3]; }
+
+        public static byte[] HierarchyName(uint h) { return new byte[] { (byte)(h >> 24), (byte)(h >> 16), (byte)(h >> 8), (byte)h }; }
+
+        // يُستدعى بعدَ ResponseSchema.Check الناجحِ فقط (ردُّ رمزِه صفرٌ ومخطّطُه صالح).
+        public void Record(uint cc, byte[] cmd, uint[] handles, byte[] prm)
+        {
+            switch (cc)
+            {
+                case Tpm.CC_CreatePrimary:
+                {
+                    uint hier = U32At(cmd, 10);
+                    Rd r = new Rd(prm); r.B2B(); r.B2B(); r.B2B(); r.U16(); r.U32(); r.B2B();
+                    byte[] nm = r.B2B();
+                    Put(handles[0], nm, Qualified(HierarchyName(hier), nm), hier);
+                    return;
+                }
+                case Tpm.CC_Load:
+                {
+                    uint parent = U32At(cmd, 10);
+                    byte[] pn, pq; uint ph;
+                    if (!TryObject(parent, out pn, out pq, out ph)) return; // أصلٌ غيرُ معروفٍ ⇒ لا يُسجَّلُ الابنُ فتُرفضُ فحوصُه لاحقًا
+                    byte[] nm = new Rd(prm).B2B();
+                    Put(handles[0], nm, Qualified(pq, nm), ph);
+                    return;
+                }
+                case Tpm.CC_StartAuthSession:
+                {
+                    Rd c = new Rd(cmd); c.Raw(10 + 8); c.B2B(); c.B2B();
+                    _sessionType[handles[0]] = c.U8();
+                    return;
+                }
+                case Tpm.CC_FlushContext:
+                {
+                    uint h = U32At(cmd, 10);
+                    _names.Remove(h); _qualified.Remove(h); _hierarchy.Remove(h); _sessionType.Remove(h);
+                    return;
+                }
+            }
+        }
+
+        private void Put(uint h, byte[] name, byte[] qn, uint hier)
+        {
+            _names[h] = name; _qualified[h] = qn; _hierarchy[h] = hier; _sessionType.Remove(h);
+        }
+    }
+
     public static class ResponseSchema
     {
         private static void End(Rd r, string what)
@@ -614,17 +702,49 @@ namespace Xuux.TpmCeremony
                 throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: " + what + " " + Hex.U32(hierarchy), 0);
         }
 
-        // تذكرةُ تفويضٍ (TPMT_TK_AUTH) في ردِّ PolicySigned: الوسمانِ المسموحانِ (0x8023 AUTH_SIGNED و
-        // 0x8025 AUTH_SECRET — قياسُ swtpm عند expiration=0: 0x8025 مع RH_NULL) والهرميّةُ مقبضٌ ثابتٌ صالح.
-        private static void AuthTicket(ushort tag, uint hierarchy, string what)
+        // طولُ بصمةِ التذكرةِ الحقيقيّةِ (HMAC بمفتاحِ سلامةِ السياقِ) في swtpm/libtpms: 64 — القياسُ نفسُه
+        // لتذكرةِ الإنشاءِ (Create/CreatePrimary) ولتذكرةِ PolicySigned عندَ expiration سالبٍ في جلسةِ سياسةٍ
+        // (قياسُ 2026-10-18، probes/TicketShape.cs). تذكرةُ NULL بصمتُها فارغةٌ (Part 2 §10.7.5).
+        private const int TicketDigestLen = 64;
+
+        // تذكرةُ تفويضٍ (TPMT_TK_AUTH) في ردِّ PolicySigned (WL-414 FUP-SOL-01/05 + ربطُ طولِ البصمةِ): الوسمُ
+        // TPM_ST_AUTH_SIGNED = 0x8025 حصرًا (Part 2 جدولُ 19؛ 0x8023 هو AUTH_SECRET لـPolicySecret — كان يُقبلُ
+        // خطأً بتعليقٍ عكسَ الوسمينِ). شكلُ التذكرةِ يُستنتَجُ من الطلبِ لا من الردِّ (Part 3 §23.3 + قياسُ swtpm):
+        //   expiration ≥ 0، أو جلسةُ تجربةٍ ⇒ تذكرةُ NULL: timeout فارغٌ، hierarchy = RH_NULL، بصمةٌ فارغةٌ.
+        //   expiration < 0 في جلسةِ سياسةٍ ⇒ تذكرةٌ حقيقيّةٌ: timeout بـ8 بايتاتٍ (UINT64)، hierarchy = هرميّةُ
+        //   authObject المسجّلةُ، بصمةٌ بـTicketDigestLen.
+        // سابقًا: كانت أيُّ هرميّةٍ من الأربعِ وأيُّ بصمةٍ ≤64 تُقبلُ عندَ الصفرِ، وكان الردُّ الصحيحُ عندَ
+        // expiration موجبٍ (timeout فارغٌ) يُرفضُ.
+        private static void PolicySignedTicket(byte[] cmd, byte[] to, ushort tag, uint hierarchy, byte[] digest, ResponseContext ctx)
         {
-            if (tag != 0x8023 && tag != 0x8025)
-                throw new ResponseMalformedException("RESPONSE_TICKET_TAG_MALFORMED: " + what + " 0x" + tag.ToString("x4"), 0);
-            // قيمُ TPMI_RH_HIERARCHY الأربعُ حصرًا (Part 2 جدولُ 29/51/28: المالكُ 0x40000001،
-            // NULL 0x40000007، التأييدُ 0x4000000B، المنصّةُ 0x4000000C) — نطاقٌ عدديٌّ متصلٌ يقبلُ
-            // مقابضَ ليست هرميّةً (R3SOL-03/قياسُ المراجعينَ) ويَرفضُ هرميّةً صالحةً أعلى.
-            if (hierarchy != 0x40000001u && hierarchy != 0x40000007u && hierarchy != 0x4000000Bu && hierarchy != 0x4000000Cu)
-                throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: " + what + " " + Hex.U32(hierarchy), 0);
+            if (tag != 0x8025)
+                throw new ResponseMalformedException("RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x" + tag.ToString("x4"), 0);
+            Rd cp = new Rd(CmdParams(cmd)); cp.B2B(); cp.B2B(); cp.B2B(); int expiration = (int)cp.U32();
+            bool realTicket = false;
+            uint expectedHierarchy = Tpm.RH_NULL;
+            if (expiration < 0)
+            {
+                uint authObject = ((uint)cmd[10] << 24) | ((uint)cmd[11] << 16) | ((uint)cmd[12] << 8) | cmd[13];
+                uint session = ((uint)cmd[14] << 24) | ((uint)cmd[15] << 16) | ((uint)cmd[16] << 8) | cmd[17];
+                byte type; byte[] n, q; uint h;
+                if (ctx == null || !ctx.TrySessionType(session, out type))
+                    throw new ResponseMalformedException("RESPONSE_POLICY_CONTEXT_UNKNOWN: session " + Hex.U32(session) + " at expiration=" + expiration, 0);
+                if (type == Tpm.SE_POLICY)
+                {
+                    if (!ctx.TryObject(authObject, out n, out q, out h))
+                        throw new ResponseMalformedException("RESPONSE_POLICY_CONTEXT_UNKNOWN: authObject " + Hex.U32(authObject), 0);
+                    realTicket = true;
+                    expectedHierarchy = h;
+                }
+            }
+            int expectedTimeout = realTicket ? 8 : 0;
+            int expectedDigest = realTicket ? TicketDigestLen : 0;
+            if (to.Length != expectedTimeout)
+                throw new ResponseMalformedException("RESPONSE_POLICY_TIMEOUT_MALFORMED: len=" + to.Length + " expected=" + expectedTimeout + " at expiration=" + expiration, 0);
+            if (hierarchy != expectedHierarchy)
+                throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned " + Hex.U32(hierarchy) + " expected=" + Hex.U32(expectedHierarchy), 0);
+            if (digest.Length != expectedDigest)
+                throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=" + digest.Length + " expected=" + expectedDigest, 0);
         }
 
         // منطقةٌ عامّةٌ لمفتاحِ ECC-P256 (SOL413-04): رأسُها (كلُّ حقولِ TPMT_PUBLIC عدا unique) يطابقُ القالبَ
@@ -644,7 +764,7 @@ namespace Xuux.TpmCeremony
 
         // TPMS_CREATION_DATA (SOL413-04) كما يُعلّمُها swtpm/libtpms (قياسُ 2026-10-18): تحديدُ PCR بعددٍ
         // ومداخلَ محدودةٍ، ثمّ بصمةٌ بحجمِ 32، ثمّ locality وparentNameAlg ثمّ حقولُ B2B محدودةٌ تُستهلَكُ كاملةً.
-        private static void CreationData(byte[] cd, string what)
+        private static void CreationData(byte[] cd, string what, byte[] cmd, ResponseContext ctx)
         {
             try
             {
@@ -672,12 +792,40 @@ namespace Xuux.TpmCeremony
                 ushort pna = q.U16();
                 if (pna != Tpm.ALG_NULL && pna != Tpm.ALG_SHA256)
                     throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " parentNameAlg=0x" + pna.ToString("x4"), 0);
-                // ثلاثةُ حقولِ B2B ذيليّةٍ حصرًا (outsideInfo وparentName وparentQualifiedName — Part 2
-                // جدولُ 212): حقولٌ ناقصةٌ (صفرٌ) أو رابعٌ زائدٌ كان يُقبلُ (قياسُ المراجعينَ).
+                // ثلاثةُ حقولِ B2B ذيليّةٍ حصرًا بترتيبِ Part 2 جدولِ 212: parentName ثمّ parentQualifiedName
+                // ثمّ outsideInfo — حقولٌ ناقصةٌ أو رابعٌ زائدٌ كان يُقبلُ (قياسُ المراجعينَ).
+                byte[][] tail = new byte[3][];
                 int fields = 0;
-                while (q.Remaining >= 2 && fields < 3) { q.B2B(); fields++; }
+                while (q.Remaining >= 2 && fields < 3) { tail[fields] = q.B2B(); fields++; }
                 if (fields != 3 || q.Remaining != 0)
                     throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " tailFields=" + fields + " tail=" + q.Remaining, 0);
+                // ربطُ الحقولِ الذيليّةِ بالطلبِ وبالأصلِ المعروفِ (WL-414 FUP-SOL-02): كانت تُستهلَكُ بنيويًّا
+                // فقط، فقُبلَ outsideInfo مختلفٌ واسمُ أصلٍ مقلوبٌ (قياسُ المراجعِ على 3e67d362 وa3272058).
+                Rd cp = new Rd(CmdParams(cmd)); cp.B2B(); cp.B2B(); byte[] askedOutside = cp.B2B();
+                if (Hex.Of(tail[2]) != Hex.Of(askedOutside))
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " outsideInfo differs from request", 0);
+                uint parent = ((uint)cmd[10] << 24) | ((uint)cmd[11] << 16) | ((uint)cmd[12] << 8) | cmd[13];
+                byte[] expName, expQn; ushort expAlg;
+                if (CommandCodeOfCmd(cmd) == Tpm.CC_CreatePrimary)
+                {
+                    // Primary: لا أصلَ كائنيًّا ⇒ parentNameAlg = ALG_NULL، والاسمُ والاسمُ المؤهَّلُ = مقبضُ الهرميّةِ (قياسُ swtpm).
+                    expAlg = Tpm.ALG_NULL;
+                    expName = ResponseContext.HierarchyName(parent);
+                    expQn = expName;
+                }
+                else
+                {
+                    uint ph;
+                    if (ctx == null || !ctx.TryObject(parent, out expName, out expQn, out ph))
+                        throw new ResponseMalformedException("RESPONSE_CREATION_PARENT_UNKNOWN: " + what + " parent " + Hex.U32(parent), 0);
+                    expAlg = Tpm.ALG_SHA256;
+                }
+                if (pna != expAlg)
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " parentNameAlg=0x" + pna.ToString("x4") + " expected=0x" + expAlg.ToString("x4"), 0);
+                if (Hex.Of(tail[0]) != Hex.Of(expName))
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " parentName differs from known parent", 0);
+                if (Hex.Of(tail[1]) != Hex.Of(expQn))
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " parentQualifiedName differs from known parent", 0);
             }
             catch (ResponseMalformedException) { throw; }
             catch (Exception)
@@ -686,7 +834,13 @@ namespace Xuux.TpmCeremony
             }
         }
 
-        public static void Check(uint cc, byte[] cmd, byte[] prm)
+        private static uint CommandCodeOfCmd(byte[] cmd) { return ((uint)cmd[6] << 24) | ((uint)cmd[7] << 16) | ((uint)cmd[8] << 8) | cmd[9]; }
+
+        // بلا سياقٍ: الفحوصُ المعتمدةُ على حالةٍ سابقةٍ (اسمُ أصلِ Create، وتذكرةُ PolicySigned عندَ expiration سالبٍ)
+        // تفشلُ مغلقةً باسمٍ. البروفةُ تستدعي الصيغةَ ذاتَ السياقِ دائمًا.
+        public static void Check(uint cc, byte[] cmd, byte[] prm) { Check(cc, cmd, prm, null); }
+
+        public static void Check(uint cc, byte[] cmd, byte[] prm, ResponseContext ctx)
         {
             Rd r = new Rd(prm);
             switch (cc)
@@ -747,11 +901,11 @@ namespace Xuux.TpmCeremony
                     ushort ttag = r.U16(); uint h = r.U32(); byte[] tdg = r.B2B();
                     End(r, "Create");
                     EccPublic(pub, CmdTemplate(cmd), "Create");
-                    CreationData(cd, "Create");
+                    CreationData(cd, "Create", cmd, ctx);
                     if (ch.Length != 32) throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MALFORMED: len=" + ch.Length, 0);
                     // بصمةُ تذكرةِ الإنشاءِ بطولِها المقيسِ 64 (قياسُ swtpm؛ المراجعونَ قاسوا قبولَ بايتٍ واحدٍ
                     // و100) — فحصُ الطولِ الآن مسمّى (R3SOL-03).
-                    if (tdg.Length != 64) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: Create len=" + tdg.Length, 0);
+                    if (tdg.Length != TicketDigestLen) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: Create len=" + tdg.Length, 0);
                     if (Hex.Of(Sha.H(cd)) != Hex.Of(ch))
                         throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MISMATCH: Create", 0);
                     CreationTicket(ttag, h, "Create");
@@ -766,10 +920,10 @@ namespace Xuux.TpmCeremony
                     byte[] nm = r.B2B();
                     End(r, "CreatePrimary");
                     EccPublic(pub, CmdTemplate(cmd), "CreatePrimary");
-                    CreationData(cd, "CreatePrimary");
+                    CreationData(cd, "CreatePrimary", cmd, ctx);
                     if (ch.Length != 32) throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MALFORMED: len=" + ch.Length, 0);
                     // بصمةُ تذكرةِ الإنشاءِ وفحصُ اتساقِ creationHash مع بياناتِ الإنشاءِ (R3SOL-03).
-                    if (tdg.Length != 64) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=" + tdg.Length, 0);
+                    if (tdg.Length != TicketDigestLen) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=" + tdg.Length, 0);
                     if (Hex.Of(Sha.H(cd)) != Hex.Of(ch))
                         throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MISMATCH: CreatePrimary", 0);
                     CreationTicket(ttag, h, "CreatePrimary");
@@ -791,19 +945,10 @@ namespace Xuux.TpmCeremony
                 }
                 case Tpm.CC_PolicySigned:
                 {
-                    byte[] to = r.B2B(); // timeout: فارغٌ عند expiration=0 (قياسُ swtpm) — وبصمةُ التذكرةِ
+                    byte[] to = r.B2B();
                     ushort ttag = r.U16(); uint h = r.U32(); byte[] td = r.B2B();
                     End(r, "PolicySigned");
-                    // ربطُ timeout بـexpiration المُرسَلِ في الطلبِ (R3SOL-03/قياسُ المراجعينَ): عندَ الصفرِ
-                    // لا قيدَ توقيتَ فلا timeoutَ (Part 3 §23.3 جدولُ 118)، وعندَ غيرِهِ فحجمُهُ 8 كحدٍّ أعلى
-                    // (TPM2B_TIMEOUT — Part 2 جدولُ 88). القبولُ السابقُ لغيرِ الفارغِ عندَ الصفرِ كان مقيسًا.
-                    Rd cp = new Rd(CmdParams(cmd)); cp.B2B(); cp.B2B(); cp.B2B(); int expiration = (int)cp.U32();
-                    if (expiration == 0 && to.Length != 0)
-                        throw new ResponseMalformedException("RESPONSE_POLICY_TIMEOUT_MALFORMED: len=" + to.Length + " at expiration=0", 0);
-                    if (expiration != 0 && (to.Length == 0 || to.Length > 8))
-                        throw new ResponseMalformedException("RESPONSE_POLICY_TIMEOUT_MALFORMED: len=" + to.Length, 0);
-                    AuthTicket(ttag, h, "PolicySigned");
-                    if (td.Length > 64) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: len=" + td.Length, 0);
+                    PolicySignedTicket(cmd, to, ttag, h, td, ctx);
                     return;
                 }
                 case Tpm.CC_GetCapability:
@@ -983,6 +1128,23 @@ namespace Xuux.TpmCeremony
         // لا إعادةً غيرَ محدودةٍ ولا تخفيفُ سياسةٍ لتجاوزِ رفضٍ.
         private const int MaxCleanupAttemptsPerResource = 1;
 
+        // سياقُ الردودِ المُتحقَّقِ منها (WL-414 FUP-SOL-01/02/05) — يُغذّى من Send بعدَ نجاحِ فحصِ المخطّطِ.
+        private readonly ResponseContext _ctx = new ResponseContext();
+
+        // جولةُ التنظيفِ الوحيدةُ انتهتْ (WL-414 FUP-SOL-04): بعدَها لا محاولةَ تنظيفٍ لاحقةً، فنصُّ المصالحةِ
+        // يصفُ الميزانيّةَ المستنفدةَ ويُعلِنُ البقيّةَ صراحةً — لا «متروكٌ لمحاولةِ التنظيفِ» بلا محاولةٍ تالية.
+        private bool _cleanupDone;
+
+        // نصُّ المصالحةِ لموردٍ باقٍ بعدَ نتيجةٍ مجهولةٍ: قبلَ التنظيفِ يُترَكُ لمحاولتِه الوحيدةِ؛ بعدَه تُعلَنُ البقيّةُ.
+        private string LeftForCleanup(string leftoverKey, string leftoverText)
+        {
+            if (!_cleanupDone) return "left for the bounded cleanup attempt (declared as leftover if it remains)";
+            bool declared = false;
+            foreach (string l in _r.CleanupLeftovers) if (l.StartsWith(leftoverKey + ":")) { declared = true; break; }
+            if (!declared) _r.CleanupLeftovers.Add(leftoverKey + ": " + leftoverText);
+            return "cleanup attempt budget already spent (" + MaxCleanupAttemptsPerResource + " per resource; no further attempt); declared as leftover";
+        }
+
         public CeremonyRehearsal(ICeremonyTransport transport)
         {
             if (transport == null) throw new ArgumentNullException("transport");
@@ -1020,7 +1182,11 @@ namespace Xuux.TpmCeremony
             {
                 byte[] raw = _t.Transmit(cmd);
                 p = Resp.Parse(raw, respHandles, TagOf(cmd), authCount, ResponseSchema.ExpectedPasswordSessions(cmd, authCount));
-                if (p.Rc == 0) ResponseSchema.Check(CommandCodeOf(cmd), cmd, p.Params);
+                if (p.Rc == 0)
+                {
+                    ResponseSchema.Check(CommandCodeOf(cmd), cmd, p.Params, _ctx);
+                    _ctx.Record(CommandCodeOf(cmd), cmd, p.Handles, p.Params);
+                }
                 // فحصُ تبنّي المقبضِ داخلَ الإرسالِ نفسه (إصلاحٌ R3): مقبضٌ من خطِّ الأساسِ في ردِّ إنشاءٍ يُرمى هنا — فيُغلّفُ الفشلُ للأمرِ
                 // المُغيّرِ بنتيجةٍ مجهولةٍ ويُجرَدُ كسائرِهَا (SOL413-01)، لا فشلٌ مجردًا يفقدُ التسميةَ.
                 for (int i = 0; i < p.Handles.Length; i++) AdoptHandle(p.Handles[i], NameSuffix(name));
@@ -1700,7 +1866,8 @@ namespace Xuux.TpmCeremony
                     _definedByRun.Remove(p.Handle); // الغيابُ محقَّقٌ: لا يُحذَفُ ما ليس موجودًا في التنظيفِ.
                     return;
                 }
-                _r.Reconciliation.Add("nv-undefine " + Hex.U32(p.Handle) + ": still present; deletion outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)");
+                _r.Reconciliation.Add("nv-undefine " + Hex.U32(p.Handle) + ": still present; deletion outcome unknown; " +
+                    LeftForCleanup("nv " + Hex.U32(p.Handle), "still present after lost undefine reply; cleanup budget spent"));
                 return;
             }
             if (p.Kind == "flush")
@@ -1713,7 +1880,8 @@ namespace Xuux.TpmCeremony
                     _transients.Remove(p.Handle);
                     return;
                 }
-                _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)");
+                _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; " +
+                    LeftForCleanup("transient " + Hex.U32(p.Handle), "still present after lost flush reply; cleanup budget spent"));
                 return;
             }
             if (p.Kind == "object-create" || p.Kind == "session-create")
@@ -1746,7 +1914,8 @@ namespace Xuux.TpmCeremony
                     _transients.Remove(p.Handle);
                     return;
                 }
-                _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session still present; policy state unverifiable after lost response; left for bounded cleanup");
+                _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session still present; policy state unverifiable after lost response; " +
+                    (_cleanupDone ? LeftForCleanup("transient " + Hex.U32(p.Handle), "session still present after lost policy response; cleanup budget spent") : "left for bounded cleanup"));
                 return;
             }
             throw new CeremonyFailedException("RECONCILE_UNKNOWN_KIND: " + p.Kind, 0);
@@ -1859,6 +2028,7 @@ namespace Xuux.TpmCeremony
             }
             try { Cleanup(); }
             catch (Exception e) { _r.CleanupLeftovers.Add("cleanup aborted: " + e.Message); }
+            _cleanupDone = true;
             // نتيجةٌ مجهولةٌ وقعت أثناءَ التنظيفِ نفسِه (فقدُ ردِّ حذفٍ مثلًا): جردٌ قرائيٌّ ثانٍ محدودٌ
             // يُثبتُ الأثرَ أو غيابَهُ ويُسجَّلُ في المصالحةِ — البقايا المعلَنةُ لا تُمحى، والتحققُ يُوثّق.
             if (_pending.Count > 0)

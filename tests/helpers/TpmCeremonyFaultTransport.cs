@@ -277,6 +277,26 @@ namespace Xuux.TpmCeremony.Tests
                 Changes++; _defineLost = true;
                 throw new System.IO.IOException("WL413R3_DEFINE_DROPPED_THEN_MALFORMED_ABSENCE");
             }
+            // WL-414 FUP-SOL-04 (مسبرُ gpt_6_1_sol نفسُه): فشلُ TPM مُحقَنٌ على أولِ NV_Increment يُدخِلُ التنظيفَ
+            // قبلَ أيِّ حذفٍ، ثمّ يُسقَطُ حذفُ التنظيفِ نفسُه قبلَ الإرسالِ — لا محاولةَ تنظيفٍ تاليةً بعدها.
+            if (_mode == "fup-cleanup-undefine-before" && cc == Tpm.CC_NV_Increment && Changes == 0)
+            {
+                Changes++;
+                return RcOnly(0x101);
+            }
+            if (_mode == "fup-cleanup-undefine-before" && cc == Tpm.CC_NV_UndefineSpace && Changes == 1)
+            {
+                Changes++;
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); DefinedHandle = c.U32();
+                throw new System.IO.IOException("WL414_FUP_CLEANUP_UNDEFINE_DROPPED_BEFORE_SEND");
+            }
+            // ضابطُ FUP-SOL-04: إسقاطُ حذفِ المرحلةِ (قبلَ التنظيفِ) — نصُّ «متروكٌ لمحاولةِ التنظيفِ» صحيحٌ هنا.
+            if (_mode == "fup-undefine-drop-before" && cc == Tpm.CC_NV_UndefineSpace && Changes == 0)
+            {
+                Changes++;
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); DefinedHandle = c.U32();
+                throw new System.IO.IOException("WL414_FUP_UNDEFINE_DROPPED_BEFORE_SEND");
+            }
             byte[] raw = _inner.Transmit(command);
             Rd header = new Rd(raw);
             ushort tag = header.U16(); header.U32(); uint rc = header.U32();
@@ -515,6 +535,54 @@ namespace Xuux.TpmCeremony.Tests
                     return new Wr().B2B(pub).B2B(ncd).B2B(nch).U16(ttag).U32(hh).B2B(td).Raw(nm).Bytes();
                 });
             }
+            // WL-414 FUP-SOL-01 + ربطُ طولِ البصمةِ: تشويهُ تذكرةِ PolicySigned عندَ expiration=0 (طلبُ تذكرةِ NULL):
+            //   fup-ps-digest-<N>     بصمةٌ بطولِ N (1/32/64 كانت تُقبلُ؛ 65 وحدَها كانت تُرفضُ)
+            //   fup-ps-hierarchy-<h>  هرميّةٌ غيرُ RH_NULL (المالكُ/التأييدُ/المنصّةُ كانت تُقبلُ)
+            //   fup-ps-tag-<t>        وسمٌ غيرُ AUTH_SIGNED (0x8023 AUTH_SECRET كان يُقبلُ)
+            if (rc == 0 && cc == Tpm.CC_PolicySigned && Changes == 0 && _mode.StartsWith("fup-ps-"))
+            {
+                Changes++;
+                string arg = _mode.Substring(_mode.LastIndexOf('-') + 1);
+                return RewriteNoSessionsParams(raw, 0, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); byte[] to = q.B2B(); ushort tt = q.U16(); uint hh = q.U32(); byte[] td = q.B2B();
+                    if (_mode.StartsWith("fup-ps-digest-")) td = new byte[int.Parse(arg)];
+                    else if (_mode.StartsWith("fup-ps-hierarchy-")) hh = Convert.ToUInt32(arg, 16);
+                    else if (_mode.StartsWith("fup-ps-tag-")) tt = Convert.ToUInt16(arg, 16);
+                    return new Wr().B2B(to).U16(tt).U32(hh).B2B(td).Bytes();
+                });
+            }
+            // WL-414 FUP-SOL-02: تشويهُ الحقولِ الذيليّةِ لبياناتِ الإنشاءِ (parentName، parentQualifiedName،
+            // outsideInfo) أو parentNameAlg مع إعادةِ حسابِ creationHash — فلا يكشفُها إلا الربطُ بالطلبِ/بالأصل.
+            //   fup-cd-*   على Create (أوّلُ Create: s2:Create(service-key))؛ fup-cdp-* على CreatePrimary.
+            if (rc == 0 && Changes == 0 && ((_mode.StartsWith("fup-cd-") && cc == Tpm.CC_Create) || (_mode.StartsWith("fup-cdp-") && cc == Tpm.CC_CreatePrimary)))
+            {
+                Changes++;
+                bool primary = cc == Tpm.CC_CreatePrimary;
+                string what = _mode.Substring(primary ? 8 : 7);
+                return RewriteParams(raw, primary ? 1 : 0, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm);
+                    byte[] priv = primary ? null : q.B2B();
+                    byte[] pub = q.B2B(); byte[] cd = q.B2B(); q.B2B();
+                    ushort ttag = q.U16(); uint hh = q.U32(); byte[] td = q.B2B(); byte[] rest = q.Raw(q.Remaining);
+                    Rd c = new Rd(cd); uint n = c.U32(); Wr head = new Wr().U32(n);
+                    for (uint i = 0; i < n; i++) { head.U16(c.U16()); byte sz = c.U8(); head.U8(sz).Raw(c.Raw(sz)); }
+                    byte[] pd = c.B2B(); byte loc = c.U8(); ushort pna = c.U16();
+                    byte[] pn = c.B2B(); byte[] pq = c.B2B(); byte[] oi = c.B2B();
+                    if (what == "parentname") { pn = (byte[])pn.Clone(); pn[pn.Length - 1] ^= 0x01; }
+                    else if (what == "parentqn") { pq = (byte[])pq.Clone(); pq[pq.Length - 1] ^= 0x01; }
+                    else if (what == "outsideinfo") { oi = new byte[] { 0x42 }; }
+                    else if (what == "pna-null") { pna = Tpm.ALG_NULL; }
+                    else if (what == "pna-sha256") { pna = Tpm.ALG_SHA256; }
+                    else if (what == "identity") { }
+                    else throw new InvalidOperationException("unknown creation-data fault " + _mode);
+                    byte[] ncd = head.B2B(pd).U8(loc).U16(pna).B2B(pn).B2B(pq).B2B(oi).Bytes();
+                    Wr w = new Wr();
+                    if (!primary) w.B2B(priv);
+                    return w.B2B(pub).B2B(ncd).B2B(Sha.H(ncd)).U16(ttag).U32(hh).B2B(td).Raw(rest).Bytes();
+                });
+            }
             if (rc == 0 && _mode == "schema-policysigned-digest" && cc == Tpm.CC_PolicySigned && Changes == 0)
             {
                 // PolicySigned: B2B timeout + وسمٌ + هرمٌ + B2B بصمةُ التذكرةِ — 65 بايتًا يتجاوزُ الحدَّ.
@@ -652,6 +720,88 @@ namespace Xuux.TpmCeremony.Tests
         private static void Add(List<KeyValuePair<string, string>> l, string n, byte[] b)
         {
             l.Add(new KeyValuePair<string, string>(n, Hex.Of(b)));
+        }
+    }
+}
+
+namespace Xuux.TpmCeremony.Tests
+{
+    // WL-414 FUP-SOL-01/05 + ربطُ طولِ البصمةِ — حالاتٌ إيجابيّةٌ على ردودِ swtpm الحقيقيّةِ (بلا تشويهٍ):
+    // لكلِّ (جلسةِ سياسةٍ/تجربةٍ × expiration ∈ {0, 3600, -3600}) يُرسَلُ PolicySigned حقيقيٌّ ويُعرَضُ ردُّه على
+    // ResponseSchema.Check. البروفةُ نفسُها ترسلُ expiration=0 فقط، فلا يغطّي تشغيلُها 3600 ولا السالبَ.
+    // السياقُ (ResponseContext) يُستعمَلُ بالانعكاسِ إن وُجد — لتعملَ الأداةُ نفسُها على خطِّ أساسٍ قديمٍ بلا سياقٍ
+    // فيظهرُ سلوكُه (الرفضُ) بدلَ فشلِ ترجمةٍ؛ هذه أداةُ قياسٍ للاختبارِ، لا مسارَ البروفة.
+    public static class PolicySignedShapes
+    {
+        private static uint U32(byte[] b, int o) { return ((uint)b[o] << 24) | ((uint)b[o + 1] << 16) | ((uint)b[o + 2] << 8) | b[o + 3]; }
+
+        private static byte[] Params(byte[] r, int handles)
+        {
+            int o = 10 + 4 * handles;
+            if (r[1] == 2) { int n = (int)U32(r, o); byte[] p = new byte[n]; Array.Copy(r, o + 4, p, 0, n); return p; }
+            byte[] q = new byte[r.Length - o]; Array.Copy(r, o, q, 0, q.Length); return q;
+        }
+
+        public static List<string> Run(ICeremonyTransport t)
+        {
+            List<string> lines = new List<string>();
+            Type ctxType = typeof(ResponseSchema).Assembly.GetType("Xuux.TpmCeremony.ResponseContext");
+            object ctx = ctxType == null ? null : Activator.CreateInstance(ctxType);
+            System.Reflection.MethodInfo record = ctxType == null ? null : ctxType.GetMethod("Record");
+            System.Reflection.MethodInfo check = ctxType == null
+                ? typeof(ResponseSchema).GetMethod("Check", new Type[] { typeof(uint), typeof(byte[]), typeof(byte[]) })
+                : typeof(ResponseSchema).GetMethod("Check", new Type[] { typeof(uint), typeof(byte[]), typeof(byte[]), ctxType });
+            Func<byte[], int, byte[]> send = delegate(byte[] c, int handles)
+            {
+                byte[] r = t.Transmit(c);
+                if (U32(r, 6) != 0) throw new InvalidOperationException("TPM rc=" + Hex.U32(U32(r, 6)));
+                uint[] hs = new uint[handles];
+                for (int i = 0; i < handles; i++) hs[i] = U32(r, 10 + 4 * i);
+                if (record != null) record.Invoke(ctx, new object[] { U32(c, 6), c, hs, Params(r, handles) });
+                return r;
+            };
+            uint primary = U32(send(Cmd.CreatePrimary(new byte[0], Templates.StoragePrimary()), 1), 10);
+            Rd cr = new Rd(Params(send(Cmd.Create(primary, new byte[0], Templates.ServiceSigningKey()), 0), 0));
+            byte[] priv = cr.B2B(), pub = cr.B2B();
+            uint key = U32(send(Cmd.Load(primary, new byte[0], priv, pub), 1), 10);
+            try
+            {
+                foreach (byte st in new byte[] { Tpm.SE_POLICY, Tpm.SE_TRIAL })
+                    foreach (int exp in new int[] { 0, 3600, -3600 })
+                    {
+                        byte[] sr = send(Cmd.StartAuthSession(st, new byte[32]), 1);
+                        uint session = U32(sr, 10);
+                        byte[] nonce = new Rd(Params(sr, 1)).B2B();
+                        try
+                        {
+                            Rd sig = new Rd(Params(send(Cmd.Sign(key, new byte[0], Policy.AHash(nonce, exp)), 0), 0));
+                            sig.U16(); sig.U16(); byte[] r = sig.B2B(), s = sig.B2B();
+                            byte[] cmd = Cmd.PolicySigned(key, session, nonce, exp, r, s);
+                            byte[] reply = t.Transmit(cmd);
+                            string line = "session=" + (st == Tpm.SE_POLICY ? "policy" : "trial") + " expiration=" + exp + " rc=" + Hex.U32(U32(reply, 6));
+                            if (U32(reply, 6) == 0)
+                            {
+                                byte[] p = Params(reply, 0);
+                                Rd q = new Rd(p); byte[] to = q.B2B(); ushort tag = q.U16(); uint h = q.U32(); byte[] td = q.B2B();
+                                line += " timeoutLen=" + to.Length + " tag=0x" + tag.ToString("x4") + " hierarchy=" + Hex.U32(h) + " digestLen=" + td.Length;
+                                try
+                                {
+                                    check.Invoke(null, ctxType == null ? new object[] { Tpm.CC_PolicySigned, cmd, p } : new object[] { Tpm.CC_PolicySigned, cmd, p, ctx });
+                                    line += " SCHEMA_ACCEPT";
+                                }
+                                catch (System.Reflection.TargetInvocationException e) { line += " SCHEMA_REJECT " + e.InnerException.Message; }
+                            }
+                            lines.Add(line);
+                        }
+                        finally { send(Cmd.FlushContext(session), 0); }
+                    }
+            }
+            finally
+            {
+                send(Cmd.FlushContext(key), 0);
+                send(Cmd.FlushContext(primary), 0);
+            }
+            return lines;
         }
     }
 }

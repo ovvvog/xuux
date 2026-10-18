@@ -1,0 +1,16 @@
+repro-a3272058/creation-outsideinfo exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/creation-parentname exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/loss-create exit=0 status=FAILED_CLOSED steps=35 failure=OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: FOLLOWUP_CREATE_RESPONSE_LOSS) 
+repro-a3272058/normal exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-digest-1 exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-digest-32 exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-digest-64 exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-digest-65 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: len=65) 
+repro-a3272058/policy-hierarchy-40000001 exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-hierarchy-40000007 exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-hierarchy-4000000b exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058/policy-hierarchy-4000000c exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058-extra/cleanup-undefine-before exit=0 status=FAILED_CLOSED steps=17 failure=TPM_ERROR: s1.probe:NV_Increment#1 rc=0x00000101 | nv-undefine 0x01acbae9: still present; deletion outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)
+repro-a3272058-extra/policy-tag-8023 exit=0 status=COMPLETE steps=81 failure=None 
+repro-a3272058-extra/policy-tag-8024 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_TAG_MALFORMED: PolicySigne 
+repro-a3272058-extra/undefine-drop-before exit=0 status=FAILED_CLOSED steps=24 failure=OUTCOME_UNKNOWN: s1.probe:NV_UndefineSpace (IOException: FOLLOWUP_UNDEFINE_BEFORE_SEND) | nv-undefine 0x018b08ce: still present; deletion outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)

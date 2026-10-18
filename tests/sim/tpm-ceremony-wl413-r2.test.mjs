@@ -18,11 +18,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
+import { startSim as startSimShared, stopSim as stopSimShared } from '../helpers/ceremony-swtpm.mjs';
 import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -36,33 +37,14 @@ const simPwshTest = (name, fn) =>
 
 const STATE_CHANGING = new Set(['0x0000012a', '0x00000134', '0x00000122', '0x00000131', '0x00000153', '0x00000157', '0x00000176', '0x00000160', '0x0000016c', '0x00000165']);
 
+// WL-414 FUP-SOL-03: التشغيلُ والإيقافُ من المساعدِ المشتركِ — محاكٍ أُطلِقَ ولم يجهزْ يُنهى قبلَ حذفِ
+// مجلّدِه، وstopSim تنتظرُ زوالَ العمليّةِ (كانت الدالةُ المنسوخةُ هنا تتركُ يتيمًا عندَ فشلِ الجاهزيّة).
 function startSim(bindaddr = '127.0.0.1') {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const dir = mkdtempSync(join(tmpdir(), 'xuux-wl413r2-'));
-    const port = 2700 + 2 * Math.floor(Math.random() * 150);
-    const pidFile = join(dir, 'swtpm.pid');
-    const r = spawnSync('swtpm', ['socket', '--tpm2',
-      '--tpmstate', `dir=${dir}`, '--server', `type=tcp,port=${port},bindaddr=${bindaddr}`,
-      '--ctrl', `type=tcp,port=${port + 1},bindaddr=127.0.0.1`, '--flags', 'not-need-init,startup-clear',
-      '--pid', `file=${pidFile}`, '--daemon'], { encoding: 'utf8' });
-    if (r.status !== 0) { rmSync(dir, { recursive: true, force: true }); continue; }
-    let ready = false;
-    for (let i = 0; i < 10; i++) {
-      try {
-        execFileSync('tpm2_getcap', ['--tcti=swtpm:host=127.0.0.1,port=' + port, 'properties-fixed'], { stdio: 'ignore' });
-        ready = true; break;
-      } catch { /* لم يجهز بعد */ }
-      execFileSync('sleep', ['1']);
-    }
-    if (!ready || !existsSync(pidFile)) { rmSync(dir, { recursive: true, force: true }); continue; }
-    return { dir, port, pidFile, pid: Number(readFileSync(pidFile, 'utf8').trim()) };
-  }
-  throw new Error('WL-413/R2: تعذّرَ تشغيلُ محاكٍ معزول');
+  return startSimShared({ prefix: 'xuux-wl413r2-', portBase: 2700, bindaddr, label: 'WL-413/R2' });
 }
 
 function stopSim(s) {
-  try { process.kill(s.pid, 'SIGTERM'); } catch { /* انتهى */ }
-  try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* أفضلُ جهد */ }
+  stopSimShared(s);
 }
 
 function fault(s, mode) {

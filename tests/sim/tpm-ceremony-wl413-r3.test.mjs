@@ -18,11 +18,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { startSim as startSimShared, stopSim as stopSimShared } from '../helpers/ceremony-swtpm.mjs';
 import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -35,35 +34,14 @@ const simPwshTest = (name, fn) =>
 
 const STATE_CHANGING = new Set(['0x0000012a', '0x00000134', '0x00000122', '0x00000131', '0x00000153', '0x00000157', '0x00000176', '0x00000160', '0x0000016c', '0x00000165']);
 
+// WL-414 FUP-SOL-03: التشغيلُ والإيقافُ من المساعدِ المشتركِ — محاكٍ أُطلِقَ ولم يجهزْ يُنهى قبلَ حذفِ
+// مجلّدِه، وstopSim تنتظرُ زوالَ العمليّةِ (كانت الدالةُ المنسوخةُ هنا تتركُ يتيمًا عندَ فشلِ الجاهزيّة).
 function startSim() {
-  for (let attempt = 0; attempt < 8; attempt++) {
-    const dir = mkdtempSync(join(tmpdir(), 'xuux-wl413r3-'));
-    const port = 2700 + 2 * Math.floor(Math.random() * 150);
-    const pidFile = join(dir, 'swtpm.pid');
-    const r = spawnSync('swtpm', ['socket', '--tpm2',
-      '--tpmstate', `dir=${dir}`, '--server', `type=tcp,port=${port},bindaddr=127.0.0.1`,
-      '--ctrl', `type=tcp,port=${port + 1},bindaddr=127.0.0.1`, '--flags', 'not-need-init,startup-clear',
-      '--pid', `file=${pidFile}`, '--daemon'], { encoding: 'utf8' });
-    if (r.status !== 0) { rmSync(dir, { recursive: true, force: true }); continue; }
-    let ready = false;
-    for (let i = 0; i < 10; i++) {
-      try {
-        execFileSync('tpm2_getcap', ['--tcti=swtpm:host=127.0.0.1,port=' + port, 'properties-fixed'], { stdio: 'ignore' });
-        ready = true; break;
-      } catch { /* لم يجهز بعد */ }
-      execFileSync('sleep', ['1']);
-    }
-    if (!ready || !existsSync(pidFile)) { rmSync(dir, { recursive: true, force: true }); continue; }
-    return { dir, port, pidFile, pid: Number(readFileSync(pidFile, 'utf8').trim()) };
-  }
-  throw new Error('WL-413/R3: تعذّرَ تشغيلُ محاكٍ معزول');
+  return startSimShared({ prefix: 'xuux-wl413r3-', portBase: 2700, label: 'WL-413/R3' });
 }
 
 function stopSim(s) {
-  // قتلُ عمليةِ المحاكيِ قبلَ حذفِ مجلدِ الحالةِ (قياسُ المراجعينَ الثلاثةِ: الحذفُ وحدهُ تركَ 21
-  // عمليةً يتيمةً بعدَ خروجِ الاختباراتِ — كما في دالةِ R2 نفسِها).
-  try { process.kill(s.pid, 'SIGTERM'); } catch { /* انتهى */ }
-  try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* أفضلُ جهد */ }
+  stopSimShared(s);
 }
 
 function fault(s, mode) {
@@ -320,7 +298,8 @@ simPwshTest('R3-11: PolicySigned ناجحٌ ببصمةِ تذكرةٍ تتجاو
     const r = o.report;
     assert.equal(r.status, 'FAILED_CLOSED');
     assert.match(r.failure, /^OUTCOME_UNKNOWN: s2\.trial:PolicySigned/);
-    assert.match(r.failure, /RESPONSE_TICKET_DIGEST_MALFORMED: len=65/);
+    // WL-414: الطولُ مربوطٌ بالطلبِ — expiration=0 يطلبُ تذكرةَ NULL ببصمةٍ فارغة.
+    assert.match(r.failure, /RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=65 expected=0/);
     assertNoLaterStage(r, 's2.trial:PolicySigned');
   } finally { stopSim(s); }
 });
@@ -333,7 +312,7 @@ const r3cRejectCases = [
   ['auth-cross-policy-on-password', 's1.probe:NV_DefineSpace', 'RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=32 attrs=0x00 hmacLen=0 expected=password'],
   ['ticket-hierarchy-revoke', 's2:CreatePrimary(storage,ECC-P256)', 'RESPONSE_TICKET_HIERARCHY_MALFORMED: CreatePrimary 0x40000002'],
   ['ticket-digest-short', 's2:CreatePrimary(storage,ECC-P256)', 'RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=1'],
-  ['policysigned-timeout-nonempty', 's2.trial:PolicySigned', 'RESPONSE_POLICY_TIMEOUT_MALFORMED: len=8 at expiration=0'],
+  ['policysigned-timeout-nonempty', 's2.trial:PolicySigned', 'RESPONSE_POLICY_TIMEOUT_MALFORMED: len=8 expected=0 at expiration=0'],
   ['load-alias-live', 's2:Load(service-key)', 'RESPONSE_HANDLE_REISSUED: Load(service-key) 0x80000000 still live in this run'],
 ];
 

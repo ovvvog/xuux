@@ -67,6 +67,17 @@ pwsh -NoProfile -File sim/tpm-ceremony/rehearse.ps1 -SimHost 127.0.0.1 -SimPort 
   المنطقةَ العامّةَ المُرسَلةَ، ومقبضٌ حيٌّ يعودُ في ردِّ أمرٍ لاحقٍ يُرفضُ (`RESPONSE_HANDLE_REISSUED`)، وفئةُ
   مقبضِ جلسةِ الإنشاءِ 0x03، وخطُّ أساسٍ جزئيٌّ لا يُدَّعى تحقيقُ جردهِ (`partial baseline`)، وترميزُ بصمةِ PCR
   الفارغةِ السائغُ (count=0 وdigest=0) يُقبلُ، ودالّةُ `stopSim` في الاختباراتِ تقتلُ المحاكيَ لا تتركُهُ يتيمًا.
+- **دورةُ المعالجةِ بعدَ متابعةِ WL-414 (`WL-415`، ADR 0007 §12.5):** سياقُ ردودٍ (`ResponseContext`) يُغذّى من
+  الإرسالِ بعدَ نجاحِ المخطّطِ (أسماءُ الكائناتِ وهرميّاتُها وأسماؤها المؤهَّلةُ وأنواعُ الجلسات). تذكرةُ
+  `PolicySigned` وسمُها 0x8025 (AUTH_SIGNED) حصرًا وشكلُها من الطلبِ: `expiration≥0` أو جلسةُ تجربةٍ ⇒ تذكرةُ NULL
+  (timeout فارغٌ، RH_NULL، بصمةٌ فارغة)، و`expiration<0` في جلسةِ سياسةٍ ⇒ تذكرةٌ حقيقيّة (timeout 8، هرميّةُ
+  مفتاحِ التوقيعِ، بصمةٌ 64) — قياسُ swtpm؛ فكانَ الردُّ الصحيحُ عندَ 3600 يُرفضُ وبصمةٌ 1/32/64 وهرميّةٌ غيرُ NULL
+  و0x8023 تُقبلُ عندَ الصفر. وفي بياناتِ الإنشاءِ `outsideInfo` = الطلبُ، و`parentNameAlg`/`parentName`/
+  `parentQualifiedName` = الأصلُ المعروفُ (الهرميّةُ لـCreatePrimary). ونصُّ المصالحةِ بعدَ جولةِ التنظيفِ يصفُ
+  الميزانيّةَ المستنفدةَ ويُعلِنُ البقيّة. و`startSim` المشتركةُ (`tests/helpers/ceremony-swtpm.mjs`) تُنهي محاكيًا
+  أُطلِقَ ولم يجهزْ. إثباتُ الرجوعِ: `tests/sim/tpm-ceremony-wl414-fup.test.mjs` (26 اختبارًا)؛ وأدلّةُ إعادةِ الإنتاجِ
+  على `a3272058` في `docs/external-review/reports/adr0007-ceremony-wl415-fup-remediation/`. خارجَ الدورةِ صراحةً:
+  ربطُ `pcrSelect`/`pcrDigest`/`locality` بالطلب.
 - **الجردُ النهائيُّ (R2-04):** بعدَ التنظيفِ جردٌ قرائيٌّ (`GetCapability` وحدَه) مقابلَ خطِّ الأساس ⇒ `postRunInventory`
   (`verified` و`residualNv`/`residualSessions`/`residualTransients`). كلُّ مقبضٍ باقٍ يُعلَنُ في البقايا، وكلُّ بقيّةٍ معلَنةٍ
   ثبتَ غيابُها تُوثَّقُ في المصالحةِ ولا تُمحى؛ وتعذُّرُ الجردِ ⇒ «residual state unknown» وفشلٌ مغلق — لا ادّعاءَ نظافةٍ بلا دليل.
