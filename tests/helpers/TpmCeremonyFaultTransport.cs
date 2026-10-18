@@ -90,6 +90,16 @@ namespace Xuux.TpmCeremony.Tests
         private uint _livePrimary; // مقبضُـ CreatePrimary الحيّ (وضعُ load-alias-live)
         private uint _decoySession;
         private bool _defineLost;
+        private uint _plantedNv;       // فهرسُ NV المزروعُ فعليًّا على المحاكي (WL-416) — منشئُ النقلِ لا البروفة.
+        private int _nvInvCount;      // عددُ طلباتِ جردِ NV المُعالجة (وضعُ nv-appear-midrun).
+
+        // فهرسٌ حقيقيٌّ مزروعٌ على المحاكي بأمرِ NV_DefineSpace عبرَ النقلِ الداخليّ (قبلَ بدءِ البروفةِ):
+        // النقلُ هو مَن يعرّفُه ويملكُه في هذهِ الجولةِ — البروفةُ نفسُها لم تُنشئهُ ولا تعرفُهُ. يستعملُ
+        // تفويضَ مالكٍ فارغًا (سلوكُ المحاكي المُعلَن) فلا يُطلَبُ سرٌّ، والفهرسُ بسيطٌ (AUTHREAD|AUTHWRITE).
+        private static byte[] PlantedNvPublic(uint index)
+        {
+            return new Wr().U32(index).U16(Tpm.ALG_SHA256).U32(Tpm.NV_AUTHREAD | Tpm.NV_AUTHWRITE).B2B(new byte[0]).U16(0).Bytes();
+        }
 
         public CeremonyFaultTransport(ICeremonyTransport inner, string mode) : this(inner, mode, false) { }
 
@@ -103,6 +113,15 @@ namespace Xuux.TpmCeremony.Tests
                 byte[] z = new byte[32]; new System.Random(4).NextBytes(z);
                 Resp p = Resp.Parse(inner.Transmit(Cmd.StartAuthSession(Tpm.SE_POLICY, z)), 1, Tpm.ST_NO_SESSIONS, 0, new bool[0]);
                 _decoySession = p.Handles[0];
+            }
+            // WL-416: زرعُ فهرسٍ حقيقيّ قبلَ البروفةِ (inventory-more0-hide خارجَ مجالِ المالكِ؛
+            // nv-preseed-unattributable داخلَهُ) — التعريفُ من النقلِ لا من خطواتِ البروفةِ.
+            if (mode == "inventory-more0-hide") _plantedNv = 0x01000001;
+            if (mode == "nv-preseed-unattributable") _plantedNv = 0x01807777;
+            if (_plantedNv != 0)
+            {
+                Resp d = Resp.Parse(inner.Transmit(Cmd.NvDefineSpace(new byte[0], new byte[0], PlantedNvPublic(_plantedNv))), 0, Tpm.ST_SESSIONS, 1, new bool[] { true });
+                if (d.Rc != 0) throw new InvalidOperationException("planted NV define failed rc=" + Hex.U32(d.Rc));
             }
         }
 
@@ -632,6 +651,48 @@ namespace Xuux.TpmCeremony.Tests
                 byte[] forged = (byte[])raw.Clone(); forged[0] = 0x12; forged[1] = 0x34;
                 return forged;
             }
+            // ── WL-416: أوضاعُ قراراتِ المالكِ (more=0) وحاجزِ ملكيّةِ مجالِ المالكِ ──
+            // inventory-more0-hide: يُحجبُ الفهرسُ المزروعُ وحدهُ من صفحاتِ جردِ NV — بقيةُ الصفحةِ كما ردّها
+            // المحاكي (المقابضُ الأخرى و more كما هي)؛ فالردُّ الصحيحُ البنيةِ الذي يُعلنُ more=0 ليس برهانَ
+            // خلوٍّ: الاختبارُ يُثبتُ وجودَ الفهرسِ بجردٍ مباشرٍ بعدَ البروفةِ.
+            if (rc == 0 && _mode == "inventory-more0-hide" && cc == Tpm.CC_GetCapability)
+            {
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); uint cap = c.U32(); uint prop = c.U32();
+                if (cap == 1 && prop >= 0x01000000u && prop < 0x02000000u)
+                {
+                    Changes++;
+                    // إعادةُ كتابةِ الردّ: تحليلُ المعاملاتِ وإسقاطُ الفهرسِ المزروعِ فقطْ وحفظُ more كما ردّ.
+                    return RewriteNoSessionsParams(raw, 0, delegate(byte[] prm)
+                    {
+                        Rd r = new Rd(prm); byte more = r.U8(); uint rcap = r.U32(); uint cnt = r.U32();
+                        List<uint> keep = new List<uint>();
+                        for (uint i = 0; i < cnt; i++)
+                        {
+                            uint h = r.U32();
+                            if (h != _plantedNv) keep.Add(h);
+                        }
+                        Wr w = new Wr().U8(more).U32(rcap).U32((uint)keep.Count);
+                        foreach (uint h in keep) w.U32(h);
+                        return w.Bytes();
+                    });
+                }
+            }
+            // nv-appear-midrun: عندَ طلبِ جردِ NV الثاني يُعرّفُ النقلُ فهرسًا حقيقيًّا داخلَ مجالِ المالك
+            // (طرفٌ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ) قبلَ تمريرِ الطلبِ — الردُّ يشملُهُ فيوقفُهُ الحاجزُ.
+            if (_mode == "nv-appear-midrun" && cc == Tpm.CC_GetCapability)
+            {
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); uint cap = c.U32(); uint prop = c.U32();
+                if (cap == 1 && prop >= 0x01000000u && prop < 0x02000000u)
+                {
+                    _nvInvCount++;
+                    if (_nvInvCount == 2)
+                    {
+                        Changes++;
+                        Resp d = Resp.Parse(_inner.Transmit(Cmd.NvDefineSpace(new byte[0], new byte[0], PlantedNvPublic(0x01807777))), 0, Tpm.ST_SESSIONS, 1, new bool[] { true });
+                        if (d.Rc != 0) throw new InvalidOperationException("midrun NV define failed rc=" + Hex.U32(d.Rc));
+                    }
+                }
+            }
             if (rc == 0x18B && _mode == "readpublic-malformed-18b" && cc == Tpm.CC_NV_ReadPublic && _defineLost)
             {
                 Changes++;
@@ -801,6 +862,193 @@ namespace Xuux.TpmCeremony.Tests
                 send(Cmd.FlushContext(key), 0);
                 send(Cmd.FlushContext(primary), 0);
             }
+            return lines;
+        }
+    }
+}
+
+namespace Xuux.TpmCeremony.Tests
+{
+    // WL-416: مسبارُ دورةِ حياةِ سياقِ الردّ (ResponseContext) على swtpm حقيقيّ — قياسٌ مباشرٌ بالانعكاسِ.
+    // الحالاتُ المقيسةُ:
+    //   1. فقدُ ردِّ التحريرِ + إثباتُ الغيابِ بجردٍ قرائيّ + إعادةُ استخدامِ المقبضِ بلا تسجيلٍ (طرفٌ ثالثٍ)
+    //      ⇒ لا وراثةَ للسياقِ، ورفضٌ مسمّى (RESPONSE_CREATION_PARENT_UNKNOWN) لا ادّعاءُ تلفٍ.
+    //   2. إعادةُ الاستخدامِ معَ تسجيلٍ ⇒ مقبولٌ، والاسمُ الجديدُ لا يرثُ الاسمَ القديم.
+    //   3. فقدُ الردِّ والمقبضُ ما زالَ حاضرًا (جردٌ قرائيّ) ⇒ السياقُ محفوظٌ (لا EndOfLife).
+    //   4. استهلاكُ جلسةِ السياسةِ يُقاسُ مباشرةً: الجلسةُ تختفي فورَ الأمرِ المُفوِّزِ الناجحِ (قبلَ التنظيفِ
+    //      وقبلَ تحريرِ غيرِها) ثمّ EndOfLife يزيلُ نوعَها المسجّل.
+    // السياقُ يُستعمَلُ بالانعكاسِ — هذه أداةُ قياسٍ للاختبارِ لا مسارَ البروفةِ.
+    public static class ContextLifetimeProbe
+    {
+        private static uint U32(byte[] b, int o) { return ((uint)b[o] << 24) | ((uint)b[o + 1] << 16) | ((uint)b[o + 2] << 8) | b[o + 3]; }
+
+        private static byte[] Params(byte[] r, int handles)
+        {
+            int o = 10 + 4 * handles;
+            if (r[1] == 2) { int n = (int)U32(r, o); byte[] p = new byte[n]; Array.Copy(r, o + 4, p, 0, n); return p; }
+            byte[] q = new byte[r.Length - o]; Array.Copy(r, o, q, 0, q.Length); return q;
+        }
+
+        // جردٌ قرائيّ للمقابضِ (صفحاتُ 64) — إثباتُ حضورٍ/غيابٍ لا مساسَ بالحالةِ.
+        private static bool HandlePresent(ICeremonyTransport t, uint start, uint handle)
+        {
+            for (int page = 0; page < 16; page++)
+            {
+                byte[] r = t.Transmit(Cmd.GetCapability(1, start, 64));
+                if (U32(r, 6) != 0) throw new InvalidOperationException("inventory rc=" + Hex.U32(U32(r, 6)));
+                Rd q = new Rd(Params(r, 0)); byte more = q.U8(); q.U32(); uint n = q.U32(); uint last = 0;
+                for (uint i = 0; i < n; i++) { uint h = q.U32(); if (h == handle) return true; last = h; }
+                if (more == 0 || n == 0) return false;
+                start = last + 1;
+            }
+            throw new InvalidOperationException("inventory incomplete");
+        }
+
+        private static byte[] RequireOk(ICeremonyTransport t, byte[] cmd, string what)
+        {
+            byte[] r = t.Transmit(cmd);
+            if (U32(r, 6) != 0) throw new InvalidOperationException(what + " rc=" + Hex.U32(U32(r, 6)));
+            return r;
+        }
+
+        public static List<string> Run(ICeremonyTransport t)
+        {
+            List<string> lines = new List<string>();
+            Type ctxType = typeof(ResponseSchema).Assembly.GetType("Xuux.TpmCeremony.ResponseContext");
+            object ctx = ctxType == null ? null : Activator.CreateInstance(ctxType);
+            System.Reflection.MethodInfo record = ctxType == null ? null : ctxType.GetMethod("Record");
+            System.Reflection.MethodInfo endOfLife = ctxType == null ? null : ctxType.GetMethod("EndOfLife");
+            System.Reflection.MethodInfo tryObject = ctxType == null ? null : ctxType.GetMethod("TryObject");
+            System.Reflection.MethodInfo trySessionType = ctxType == null ? null : ctxType.GetMethod("TrySessionType");
+            System.Reflection.MethodInfo check = ctxType == null
+                ? typeof(ResponseSchema).GetMethod("Check", new Type[] { typeof(uint), typeof(byte[]), typeof(byte[]) })
+                : typeof(ResponseSchema).GetMethod("Check", new Type[] { typeof(uint), typeof(byte[]), typeof(byte[]), ctxType });
+            if (ctxType == null)
+            {
+                lines.Add("constraint: ResponseContext type absent on this baseline; lifetime cases not measurable here");
+                return lines;
+            }
+            // الحالةُ 1+2: فقدُ ردِّ التحريرِ، إثباتُ الغيابِ، إعادةُ الاستخدامِ (بلا تسجيلٍ ثمّ بهِ).
+            byte[] primaryCmd = Cmd.CreatePrimary(new byte[0], Templates.StoragePrimary());
+            byte[] primaryReply = RequireOk(t, primaryCmd, "primary");
+            uint primary = U32(primaryReply, 10);
+            record.Invoke(ctx, new object[] { Tpm.CC_CreatePrimary, primaryCmd, new uint[] { primary }, Params(primaryReply, 1) });
+            object[] oa = new object[] { primary, null, null, null };
+            bool known = (bool)tryObject.Invoke(ctx, oa);
+            byte[] oldName = (byte[])oa[1]; byte[] oldQn = (byte[])oa[2]; uint oldHier = (uint)oa[3];
+            lines.Add("record: known=" + known + " hier=" + Hex.U32(oldHier) + " nameLen=" + oldName.Length);
+            // فقدُ ردِّ التحريرِ: يُرسَلُ الأمرُ ويُهمَلُ الردُّ (لا تسجيلَ ولا فحصَ) — نتيجةٌ مجهولةٌ للبروفةِ.
+            RequireOk(t, Cmd.FlushContext(primary), "flush-loss");
+            bool presentAfterLoss = HandlePresent(t, 0x80000000, primary);
+            lines.Add("flush-loss: presentAfterLoss=" + presentAfterLoss);
+            // إثباتُ الغيابِ بجردٍ قرائيّ ⇒ مسارُ الإنتاجِ (ReconcileOne) يستدعي EndOfLife:
+            endOfLife.Invoke(ctx, new object[] { primary });
+            object[] ra = new object[] { primary, null, null, null };
+            bool stillKnown = (bool)tryObject.Invoke(ctx, ra);
+            lines.Add("endoflife: contextRemoved=" + (!stillKnown));
+            // إعادةُ استخدامٍ من طرفٍ ثالثٍ بلا تسجيلٍ: المقبضُ يعودُ كائنًا جديدًا (swtpm يعيدُ مقبضَ Primary المحرّر).
+            byte[] pr2Cmd = Cmd.CreatePrimary(new byte[0], Templates.StoragePrimary());
+            byte[] pr2 = RequireOk(t, pr2Cmd, "reuse");
+            uint reused = U32(pr2, 10);
+            object[] ua = new object[] { reused, null, null, null };
+            bool inherited = (bool)tryObject.Invoke(ctx, ua);
+            lines.Add("reuse-unrecorded: handle=" + Hex.U32(reused) + " inheritedContext=" + inherited);
+            // ردُّ Create على الأصلِ المعادِ بلا سياقٍ ⇒ رفضٌ مسمّى (CONTEXT_UNKNOWN) لا ادّعاءُ تلفٍ:
+            byte[] cc = Cmd.Create(reused, new byte[0], Templates.ServiceSigningKey());
+            byte[] cr = RequireOk(t, cc, "create-on-reused");
+            string unrecordedVerdict;
+            try
+            {
+                check.Invoke(null, new object[] { Tpm.CC_Create, cc, Params(cr, 0), ctx });
+                unrecordedVerdict = "ACCEPT";
+            }
+            catch (System.Reflection.TargetInvocationException e) { unrecordedVerdict = "REJECT " + e.InnerException.Message; }
+            lines.Add("reuse-unrecorded: createCheck=" + unrecordedVerdict);
+            // الحالةُ 2: التسجيلُ بعدَ إعادةِ الاستخدامِ ⇒ مقبولٌ بلا وراثةِ الأسماءِ القديمةِ.
+            record.Invoke(ctx, new object[] { Tpm.CC_CreatePrimary, pr2Cmd, new uint[] { reused }, Params(pr2, 1) });
+            object[] na = new object[] { reused, null, null, null };
+            bool reKnown = (bool)tryObject.Invoke(ctx, na);
+            byte[] newName = (byte[])na[1]; byte[] newQn = (byte[])na[2];
+            lines.Add("reuse-recorded: known=" + reKnown + " newNameLen=" + newName.Length +
+                " nameChanged=" + (Hex.Of(newName) != Hex.Of(oldName)) + " qnChanged=" + (Hex.Of(newQn) != Hex.Of(oldQn)));
+            byte[] cc2 = Cmd.Create(reused, new byte[0], Templates.ServiceSigningKey());
+            byte[] cr2 = RequireOk(t, cc2, "create-on-recorded");
+            string recordedVerdict;
+            try
+            {
+                check.Invoke(null, new object[] { Tpm.CC_Create, cc2, Params(cr2, 0), ctx });
+                recordedVerdict = "ACCEPT";
+            }
+            catch (System.Reflection.TargetInvocationException e) { recordedVerdict = "REJECT " + e.InnerException.Message; }
+            lines.Add("reuse-recorded: createCheck=" + recordedVerdict);
+            // تنظيفُ الكائنِ المعادِ استخدامِهِ قبلَ الحالةِ التاليةِ (تحريرٌ ناجحٌ يُسجَّلُ كالإنتاجِ).
+            byte[] reusedFlushCmd = Cmd.FlushContext(reused);
+            RequireOk(t, reusedFlushCmd, "cleanup-reused");
+            record.Invoke(ctx, new object[] { Tpm.CC_FlushContext, reusedFlushCmd, new uint[0], new byte[0] });
+
+            // الحالةُ 3: فقدُ ردِّ التحريرِ والمقبضُ ما زالَ حاضرًا ⇒ السياقُ محفوظٌ.
+            byte[] p2Cmd = Cmd.CreatePrimary(new byte[0], Templates.StoragePrimary());
+            byte[] p2r = RequireOk(t, p2Cmd, "p2");
+            uint p2 = U32(p2r, 10);
+            record.Invoke(ctx, new object[] { Tpm.CC_CreatePrimary, p2Cmd, new uint[] { p2 }, Params(p2r, 1) });
+            // تحريرٌ لمقبضٍ غيرِ موجودٍ ⇒ خطأٌ؛ المقبضُ الحيّ باقٍ والسياقُ لا يُمسّ.
+            byte[] fr = t.Transmit(Cmd.FlushContext(0x81234567));
+            bool flushFailed = U32(fr, 6) != 0;
+            bool p2Present = HandlePresent(t, 0x80000000, p2);
+            object[] pa = new object[] { p2, null, null, null };
+            bool p2Known = (bool)tryObject.Invoke(ctx, pa);
+            lines.Add("still-present: flushFailed=" + flushFailed + " present=" + p2Present + " contextKept=" + p2Known);
+            RequireOk(t, Cmd.FlushContext(p2), "cleanup-p2");
+
+            // الحالةُ 4: استهلاكُ جلسةِ السياسةِ يُقاسُ مباشرةً (سياسةُ المرساةِ بمفتاحِ الخدمةِ).
+            byte[] primCmd = Cmd.CreatePrimary(new byte[0], Templates.StoragePrimary());
+            uint prim = U32(RequireOk(t, primCmd, "prim"), 10);
+            byte[] pcrCmd = Cmd.Create(prim, new byte[0], Templates.ServiceSigningKey());
+            byte[] pcr = RequireOk(t, pcrCmd, "svc-create");
+            Rd k = new Rd(Params(pcr, 0));
+            byte[] priv = k.B2B(); byte[] pub = k.B2B();
+            byte[] ldCmd = Cmd.Load(prim, new byte[0], priv, pub);
+            byte[] ldr = RequireOk(t, ldCmd, "svc-load");
+            uint key = U32(ldr, 10);
+            record.Invoke(ctx, new object[] { Tpm.CC_Create, pcrCmd, new uint[0], Params(pcr, 0) });
+            record.Invoke(ctx, new object[] { Tpm.CC_Load, ldCmd, new uint[] { key }, Params(ldr, 1) });
+            try
+            {
+                byte[] keyName = Policy.Name(pub);
+                byte[] policy = Policy.AnchorIncrementPolicy(keyName);
+                byte[] nvPub = new Wr().U32(0x01807700).U16(Tpm.ALG_SHA256).U32(Tpm.ANCHOR_ATTRIBUTES).B2B(policy).U16(8).Bytes();
+                RequireOk(t, Cmd.NvDefineSpace(new byte[0], new byte[0], nvPub), "anchor-define");
+                try
+                {
+                    byte[] scmd = Cmd.StartAuthSession(Tpm.SE_POLICY, new byte[32]);
+                    byte[] sr = RequireOk(t, scmd, "policy-session");
+                    uint ps = U32(sr, 10);
+                    byte[] nonce = new Rd(Params(sr, 1)).B2B();
+                    record.Invoke(ctx, new object[] { Tpm.CC_StartAuthSession, scmd, new uint[] { ps }, Params(sr, 1) });
+                    object[] sa = new object[] { ps, null };
+                    bool sessionKnown = (bool)trySessionType.Invoke(ctx, sa);
+                    lines.Add("policy-session: known=" + sessionKnown + " type=" + (byte)sa[1]);
+                    byte[] sg = RequireOk(t, Cmd.Sign(key, new byte[0], Policy.AHash(nonce, 0)), "sign-ahash");
+                    Rd sig = new Rd(Params(sg, 0)); sig.U16(); sig.U16(); byte[] r = sig.B2B(); byte[] s = sig.B2B();
+                    RequireOk(t, Cmd.PolicySigned(key, ps, nonce, 0, r, s), "policysigned");
+                    RequireOk(t, Cmd.PolicyCommandCode(ps, Tpm.CC_NV_Increment), "policycommandcode");
+                    // الأمرُ المُفوِّزُ الناجحُ يستهلكُ الجلسةَ (continueSession=0 في PolicyAuth):
+                    RequireOk(t, Cmd.NvIncrement(0x01807700, Cmd.PolicyAuth(ps, new byte[32])), "authorized-increment");
+                    // قياسٌ مباشرٌ فوريّ: الجلسةُ اختفت قبلَ التنظيفِ وقبلَ تحريرِ المفتاحِ.
+                    bool sessionGone = !HandlePresent(t, 0x02000000, ps);
+                    endOfLife.Invoke(ctx, new object[] { ps });
+                    object[] ca = new object[] { ps, null };
+                    bool sessionTypeRemoved = !((bool)trySessionType.Invoke(ctx, ca));
+                    lines.Add("consumed: sessionGoneImmediately=" + sessionGone + " contextRemoved=" + sessionTypeRemoved);
+                }
+                finally { RequireOk(t, Cmd.NvUndefineSpace(new byte[0], 0x01807700), "anchor-undefine"); }
+            }
+            finally
+            {
+                RequireOk(t, Cmd.FlushContext(key), "cleanup-key");
+                RequireOk(t, Cmd.FlushContext(prim), "cleanup-prim");
+            }
+            lines.Add("probe: done");
             return lines;
         }
     }

@@ -51,8 +51,8 @@ test('static: النقلُ الوحيدُ swtpm على loopback، والنواة
   const transports = [...cs.matchAll(/class\s+(\w+)\s*:\s*ICeremonyTransport/g)].map((m) => m[1]);
   assert.deepEqual(transports, ['SwtpmLoopbackTransport']);
   assert.match(cs, /host != "127\.0\.0\.1" && host != "::1"\) throw new CeremonyFailedException\("SIMULATOR_TRANSPORT_LOOPBACK_ONLY"/);
-  // الهويّةُ الكاملةُ ثمّ خطُّ الأساسِ ثمّ المراحلُ — لا أمرٍ مُغيّرٍ قبلَ الهويّةِ والجردِ (WL-413).
-  assert.match(cs, /AssertSimulatorIdentity\(\);\s*\n\s*SnapshotBaseline\(\);\s*\n\s*if \(stages == "S1"/);
+  // الهويّةُ الكاملةُ ثمّ خطُّ الأساسِ ثمّ حاجزُ ملكيّةِ فهارسِ NV ثمّ المراحلُ — لا أمرٍ مُغيّرٍ قبلَ الهويّةِ والجردِ (WL-413؛ WL-416).
+  assert.match(cs, /AssertSimulatorIdentity\(\);\s*\n\s*SnapshotBaseline\(\);\s*\n\s*AssertNvRangeOwnership\(\);\s*\n\s*if \(stages == "S1"/);
   for (const re of [/\$"/, /\?\./, /\bnameof\b/, /out var\b/, /\)\s*=>/]) assert.equal(re.test(cs), false, `C# 5 violation ${re}`);
   // المُسلسِلُ: بصمةُ الأمرِ لا بايتاتُه.
   const toJson = cs.slice(cs.indexOf('public string ToJson()'));
