@@ -37,16 +37,15 @@ function procArgs(pid) {
   }
 }
 
-// هل العمليّةُ حيّةٌ؟ ESRCH وحدها غيابٌ مؤكَّدٌ؛ رفضُ الصلاحيّةِ (EPERM) يعني وجودَها؛ والزومبي (Z)
-// منتهيةٌ فعليًا وإن بقي مدخلُها في /proc — «حيّةٌ» تعني عاملةً لا حاضرةَ الرقمُ فحسبُ.
+// هل العمليّةُ حيّةٌ؟ ESRCH وحدها غيابٌ مؤكَّدٌ؛ رفضُ الصلاحيّةِ (EPERM) يعني وجودَها. لا يُدَّعى موتٌ
+// بحالةِ الزومبي (Z) — فشلٌ واضحُ الحدِّ (ESRCH) هو الدليلُ الوحيدُ المقبولُ (حسمُ المراجعة 3، WL-416).
 function alive(pid) {
   try {
     process.kill(pid, 0);
   } catch (e) {
     return e && e.code === 'ESRCH' ? false : true;
   }
-  const st = procState(pid);
-  return !(st !== null && st.state === 'Z');
+  return true;
 }
 
 // حالةُ العمليّةِ من /proc/<pid>/stat: الزومبي (Z) منتهيةٌ عمليًا فلا تُحسَبُ حيّةً عليلا، وخيوطُ النواةِ
@@ -123,7 +122,7 @@ export function killSim(
   pid,
   { graceMs = 3000, dir = null, injectKillFailure = false, readCmdline = procArgs } = {},
 ) {
-  if (!Number.isInteger(pid) || pid <= 1) return true;
+  if (!Number.isInteger(pid) || pid <= 1) return false; // رقمٌ غيرُ صالحٍ ليس دليلَ زوالٍ ولا إذنَ تنظيفٍ (حسمُ المراجعةِ 3)
   // هويةُ العمليّةِ قابلةٌ للقراءةِ: إن لم تربطها بمسارِ حالتِنا فهي ليست مِلكَنا — لا تُمسّ.
   const args = readCmdline(pid);
   if (args !== null && args.length > 0) {

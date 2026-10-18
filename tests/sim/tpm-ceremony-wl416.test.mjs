@@ -21,7 +21,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   startSim as startSimShared,
@@ -76,15 +76,9 @@ function withSim(fn) {
 function pidProvenDead(pid) {
   try {
     process.kill(pid, 0);
+    return false; // العمليّةُ موجودةٌ: ليس دليلَ موتٍ — ESRCH وحدها الدليلُ المقبولُ (حسمُ المراجعةِ 3)
   } catch (e) {
     return e && e.code === 'ESRCH';
-  }
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const close = stat.lastIndexOf(')');
-    return stat.slice(close + 2, close + 3) === 'Z';
-  } catch {
-    return false; // تعذّرَتِ القراءةُ: ليست دليلَ غيابٍ
   }
 }
 const list = (x) => (x === null || x === undefined ? [] : Array.isArray(x) ? x : [x]);
@@ -250,18 +244,19 @@ simTest('L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا �
   assert.match(String(threw.message), /not proven stopped/);
   assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
   const a = abandoned[0];
-  assert.equal(a.stopped, false, 'EPERM is not proof of death: stopped must stay false');
-  assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence when death is unproven');
-  assert.ok(discoverSimPids(a.dir).length >= 1, 'the unproven simulator must still be alive');
-  // التنظيفُ مضمونٌ حتى عندَ فشلِ تأكيدٍ: لا يُتركَ المحاكيُّ الذي تعمّدَ الاختبارُ إبقاءَهُ حيًّا يتيمًا.
+  // التنظيفُ مضمونٌ حتى عندَ فشلِ تأكيدٍ: لا يُتركَ المحاكيُّ الذي تعمّدَ الاختبارُ إبقاءَهُ حيًّا يتيمًا —
+  // والحمايةُ تغطّي كلَّ ما بعدَ الاستحواذِ لا آخرَّ تأكيدٍ فقط (حسمُ المراجعةِ 3).
   try {
+    assert.equal(a.stopped, false, 'EPERM is not proof of death: stopped must stay false');
+    assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence when death is unproven');
+    assert.ok(discoverSimPids(a.dir).length >= 1, 'the unproven simulator must still be alive');
     assert.equal(killSim(a.pid, { dir: a.dir }), true);
     assert.equal(stateDirExists(a.dir), true, 'dir remains until the caller decides after honest report');
     assert.equal(stopSim({ pid: a.pid, dir: a.dir }), true);
     assert.equal(stateDirExists(a.dir), false);
   } finally {
     if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
-      killSim(a.pid, { dir: a.dir }); // أفضلُ جهدٍ — لا يتيمَ
+      try { killSim(a.pid, { dir: a.dir }); } catch { /* زالت سلفًا */ }
     }
   }
 });
@@ -287,19 +282,20 @@ simTest('L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ �
   assert.ok(threw);
   assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
   const a = abandoned[0];
-  assert.equal(a.stopped, true, 'the real simulator (state-dir-bound) is terminated by discovery');
-  assert.equal(discoverSimPids(a.dir).length, 0, 'no orphan swtpm');
-  assert.equal(stateDirExists(a.dir), false);
-  let sleeperAlive;
   try {
-    process.kill(sleeperPid, 0);
-    sleeperAlive = true;
-  } catch {
-    sleeperAlive = false;
-  }
-  try {
+    assert.equal(a.stopped, true, 'the real simulator (state-dir-bound) is terminated by discovery');
+    assert.equal(discoverSimPids(a.dir).length, 0, 'no orphan swtpm');
+    assert.equal(stateDirExists(a.dir), false);
+    let sleeperAlive;
+    try {
+      process.kill(sleeperPid, 0);
+      sleeperAlive = true;
+    } catch {
+      sleeperAlive = false;
+    }
     assert.equal(sleeperAlive, true, 'the innocent sleeper pointed at by the pid file must not be killed');
   } finally {
+    // حمايةُ النائمِ البريءِ تغطّي كلَّ ما بعدَ الاستحواذِ لا آخرَّ تأكيدٍ فقط (حسمُ المراجعةِ 3).
     try {
       process.kill(sleeperPid, 'SIGKILL');
     } catch {
@@ -368,6 +364,41 @@ simPwshTest('CTX: فقدُ ردِّ التحريرِ وإثباتُ الغياب
 });
 
 // ── (ج) قرارُ المالكِ (more=0): السلوكُ باقٍ وحدُّهُ موثَّقٌ بالقياسِ ──
+
+// CTX2: شاهدُ المسارِ الحقيقيّ لا القياسَ اليدويّ فحسب: فقدُ ردِّ FlushContext داخلَ دورةِ البروفةِ نفسِها
+// يُفعّلُ المصالحةَ القرائيّةَ التي تُثبِتُ الغيابَ فتُزيلُ السياقَ من المسارِ الإنتاجيّ (ReconcileOne→EndOfLife)،
+// ورفضُ التحريرِ (المقبضُ باقٍ) لا يُزيلُ شيئًا — والفرقُ بينَ الحالتَينِ مُثبَتٌ في حقائقِ التقرير.
+simPwshTest('CTX2: فقدُ ردِّ التحريرِ داخلَ البروفةِ يُزيلُ السياقَ عبرَ مسارِ المصالحةِ الحقيقيّ', () => {
+  withSim((s) => {
+    const o = fault(s, 'flush-response-loss');
+    const r = o.report;
+    // المصالحةُ جرتْ وأثبتَتِ الغيابَ فمُسِحَ السياقُ من المسارِ الحقيقيّ (facts خريطةٌ: القيمةُ سلسلةٌ):
+    const eol = String(r.facts['ctx.endOfLife.flush'] || '');
+    assert.match(
+      eol,
+      /verified-absent 0x/i,
+      'the real reconciliation path must prove context end-of-life after flush response loss: ' + JSON.stringify(r.facts['ctx.endOfLife.flush']),
+    );
+    const rec = list(r.reconciliation);
+    assert.ok(
+      rec.some((x) => /verified absent \(release took effect\)/.test(String(x))),
+      'reconciliation must record the read-only proof of absence: ' + JSON.stringify(rec),
+    );
+    // وبفقدِ الردّ دون تنفيذٍ (المقبضُ باقٍ بحقٍّ): لا إزالةَ ولا شاهدَ — والفرقُ بينَ الحالتَينِ مُقاسٌ
+    // بجردٍ قرائيّ لا مُدّعى: العَرَضُ الخارجيُّ واحدٌ والحقيقةُ مُتمايزةٌ بالقراءةِ وحدَها:
+    const o2 = fault(s, 'flush-response-loss-noexec');
+    const r2 = o2.report;
+    assert.doesNotMatch(
+      String(r2.facts['ctx.endOfLife.flush'] || ''),
+      /verified-absent/,
+      'a flush whose response was lost without execution (handle still present) must not claim context end-of-life',
+    );
+    assert.ok(
+      list(r2.reconciliation).some((x) => /still present; release outcome unknown/.test(String(x))),
+      'reconciliation must honestly record the unknown release outcome: ' + JSON.stringify(list(r2.reconciliation)),
+    );
+  });
+});
 
 simPwshTest('M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا', () => {
   withSim((s) => {
@@ -465,18 +496,21 @@ simTest('R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُ�
   assert.match(String(threw.message), /not proven stopped/);
   assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
   const a = abandoned[0];
-  assert.equal(a.stopped, false, 'empty discovery is not proof of death: stopped must stay false');
-  assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence');
-  assert.ok(!pidProvenDead(launchedPid), 'the alive unreadable simulator must not be declared dead');
-  assert.ok(discoverSimPids(a.dir).length >= 1, 'the simulator is really still alive (real read)');
-  // تنظيفٌ مضمونٌ بالقارئِ الحقيقيّ وبالمقبضِ المحفوظِ (a.pid قد يكون null لأنّ ملفَ PID حُذفَ قبلَ
-  // قراءتِهِ — التنظيفُ لا يعتمدُ على ملفٍّ قد يزولَ، بل على الهويّةِ المُعلَنةِ عندَ الإطلاقِ):
+  // الحمايةُ تغطّي كلَّ ما بعدَ الاستحواذِ (لا التأكيداتُ قبلَ try فحسب) — حسمُ المراجعةِ 3.
   try {
+    assert.equal(a.stopped, false, 'empty discovery is not proof of death: stopped must stay false');
+    assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence');
+    assert.ok(!pidProvenDead(launchedPid), 'the alive unreadable simulator must not be declared dead');
+    assert.ok(discoverSimPids(a.dir).length >= 1, 'the simulator is really still alive (real read)');
+    // تنظيفٌ مضمونٌ بالقارئِ الحقيقيّ وبالمقبضِ المحفوظِ (a.pid قد يكون null لأنّ ملفَ PID حُذفَ قبلَ
+    // قراءتِهِ — التنظيفُ لا يعتمدُ على ملفٍّ قد يزولَ، بل على الهويّةِ المُعلَنةِ عندَ الإطلاقِ):
     assert.equal(killSim(launchedPid, { dir: a.dir }), true);
     assert.equal(stopSim({ pid: launchedPid, dir: a.dir }), true);
     assert.equal(stateDirExists(a.dir), false);
   } finally {
-    if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) killSim(launchedPid, { dir: a.dir });
+    if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
+      try { killSim(launchedPid, { dir: a.dir }); } catch { /* زالت سلفًا */ }
+    }
   }
 });
 
@@ -493,12 +527,14 @@ simTest('R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنع
     `process.on("SIGTERM", () => {}); require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
       'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);',
   );
-  const fake = spawn(
+  spawn(
     'bash',
-    ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x`],
-    { stdio: 'ignore', detached: true },
+    ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x &`],
+    { stdio: 'ignore' },
   );
-  fake.unref();
+  // الوسمُ بـ & يجعلُ الوالدَ (bash) يخرجُ سريعًا فيُودَعُ المحاكيُّ الزائفُ لعملِ init (ppid=1)
+  // فيُلقَّ عندَ موتِهِ — تمامًا كسلوكِ swtpm-daemon الحقيقيّ — ويتحقّقُ زوالُهُ بـ ESRCH دونَ توسيعِ
+  // معيارِ الموتِ (حسمُ المراجعةِ 3): لا يُدّعى موتُ زومبيٍّ لم يُلقَّ بعدُ.
   // انتظارُ ظهورِ الوسائطِ في /proc وانتظارِ جاهزيّةِ معالجِ SIGTERM (سباقٌ مُقاسٌ: الاكتشافُ قد يسبقُ
   // تسجيلَ المعالجِ فيُميتُ الإشارةُ الأولى العمليةَ البريئةَ عن سباقٍ لا عن قصدٍ):
   let fakePid = null;
@@ -529,13 +565,15 @@ simTest('R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنع
     assert.equal(killSim(fakePid, { dir, graceMs: 60 }), true);
     assert.ok(pidProvenDead(fakePid), 'the fake simulator must be dead after honest escalation');
   } finally {
+    // الإيقافُ أولًا ثمّ الحذفُ — ولا يُحذَفُ المجلّدُ إلّا بعدَ إثباتِ زوالِ كلِّ عمليّةٍ تملكُهُ (حسمُ المراجعةِ 3).
+    let stopped = false;
     try {
-      killSim(fakePid, { dir, graceMs: 60 });
+      stopped = killSim(fakePid, { dir, graceMs: 60 });
     } catch {
       /* زالت سلفًا */
     }
     try {
-      rmSync(dir, { recursive: true, force: true });
+      if (stopped && discoverSimPids(dir).length === 0) rmSync(dir, { recursive: true, force: true });
     } catch {
       /* أفضلُ جهدٍ */
     }
