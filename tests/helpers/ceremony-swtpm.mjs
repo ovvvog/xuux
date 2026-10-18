@@ -112,10 +112,14 @@ const PIDFD_SIGNAL_SCRIPT = [
 function pidfdSignal(pid, sig, dir) {
   let r;
   try {
-    r = spawnSync('python3', ['-c', PIDFD_SIGNAL_SCRIPT, String(pid), String(sig), dir === null ? '' : dir], {
-      encoding: 'utf8',
-      timeout: 10000,
-    });
+    r = spawnSync(
+      'python3',
+      ['-c', PIDFD_SIGNAL_SCRIPT, String(pid), String(sig), dir === null ? '' : dir],
+      {
+        encoding: 'utf8',
+        timeout: 10000,
+      },
+    );
   } catch {
     return 'unsupported';
   }
@@ -223,7 +227,8 @@ export function killSim(
   // التصعيدُ (SIGKILL) عبرَ المقبضةِ كذلك: الإشارةُ لا تقعُ على الرقمِ وحدَهُ أبدًا حيثُ تيسّرتِ القناةُ.
   const killViaPidfd = pidfdSignal(pid, 'SIGKILL', dir);
   if (killViaPidfd === 'mismatch') return false; // الهويّةُ لم تُثبَتْ عبرَ المقبضةِ: لا تصعيدَ
-  if (killViaPidfd !== 'esrch' && killViaPidfd !== 'ok' && killViaPidfd !== 'unsupported') return false;
+  if (killViaPidfd !== 'esrch' && killViaPidfd !== 'ok' && killViaPidfd !== 'unsupported')
+    return false;
   if (killViaPidfd === 'unsupported') {
     try {
       process.kill(pid, 'SIGKILL');
