@@ -409,3 +409,21 @@ simPwshTest('R3-17: \u0645\u0642\u0628\u0636\u064f \u0631\u062f\u0651\u0650 \u06
     assert.ok(r.cleanupLeftovers.some((x) => /residual 0x03000000/.test(x)), JSON.stringify(r.cleanupLeftovers));
   } finally { stopSim(s); }
 });
+// ── R3SOL-04: خطُّ الأساسِ الجزئيُّ لا يُدَّى جردُهُ الموثوقُ (اختبارُ الحقنِ المخصّصِ) ──
+
+// قيدُ الجولةِ الثالثةِ المُعلَنُ في تقريرِ gpt_6_1_sol: سلوكُ الجردِ بعدَ خطِّ أساسِ جزئيٍّ قيسَ فيما بعدُ مسبرٍ لا باختبارِ حقنٍ منشورٍ في الحزمةِ. هذا الاختبارُ يُثبّتُهُ في الحزمةِ لا في مسبرٍ خارجيٍّ فقط.
+simPwshTest('R3-18: خطُّ الأساسِ الجزئيُّ ⇒ فشلٌ مسمّى ولا يُدَّى جردٌ موثوقٌ ولا تُقارَنُ البقايا', () => {
+  const s = startSim();
+  try {
+    const o = fault(s, 'baseline-partial');
+    const r = o.report;
+    assert.equal(o.fault.changes >= 1, true, 'probe fired');
+    assert.equal(r.status, 'FAILED_CLOSED');
+    assert.match(r.failure, /RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: 0x01000001 asked=0x80000000/);
+    assert.ok(!r.steps.some((x) => STATE_CHANGING.has(x.commandCode)), 'no state-changing command before the named failure');
+    assert.equal(r.postRunInventory.verified, false);
+    assert.match(r.postRunInventory.error, /partial baseline/);
+    assert.equal(list(r.cleanupLeftovers).join(' '), 'post-run inventory not comparable: partial baseline; residual state unknown');
+  } finally { stopSim(s); }
+});
+
