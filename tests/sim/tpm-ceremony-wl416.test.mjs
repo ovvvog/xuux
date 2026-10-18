@@ -865,42 +865,55 @@ simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها
         if (childPid === null) await new Promise((r) => setTimeout(r, 20));
       }
     }
-    // (1) الحارسُ — مسارٌ مستقلٌّ: فشلُهُ لا يمنعُ تنظيفَ الابنِ.
+    // (1) الحارسُ — مسارٌ مستقلٌّ: فشلُهُ لا يمنعُ تنظيفَ الابنِ. بوابةٌ صريحةٌ (جولةُ 9):
+    // لا تُنهى الحارسَ إلا بإسنادٍ مُثبَتٍ للابنِ (childPid صالحٌ) — انقضاءُ الانتظارِ ليسَ
+    // تحققًا للشرطِ: قتلُ الحارسِ بلا إسنادٍ يتيمُ الابنَ ويُضيعُهُ للأبدِ. عندَ تعذُّرِ الإسنادِ:
+    // رفضٌ معلَنٌ لإنهاءِ الحارسِ وفشلٌ معلَنٌ ومجلّدٌ محفوظٌ — لا إشارةَ غيرَ مشروطةٍ أبدًا.
     if (parent !== null) {
       const guardianPid = parent.pid;
       if (!pidProvenDead(guardianPid)) {
-        try {
-          let guardianOurs = false;
+        if (childPid === null) {
+          // تحريرُ مقبضةِ الحارسِ الحيِّ (unref): الرفضُ لا يجوزُ أن يُعلّقَ حلقةَ أحداثِ
+          // المشغّلِ حتى موتِهِ الطبيعيِّ — الاختبارُ يُبلّغُ الفشلَ برقمِهِ ويخرجُ،
+          // والتنظيفُ المُسنَدُ يتمُّ بعدَ توفرِ الإسنادِ (السجلُ يُنشرُ بعدَ تأخيرِهِ).
+          parent.unref();
+          cleanupFailures.push(
+            `guardian termination REFUSED: child pid unprovable — killing the guardian now would orphan the child and lose its attribution forever (pid ${guardianPid})`,
+          );
+        } else {
           try {
-            guardianOurs = readFileSync(`/proc/${guardianPid}/cmdline`, 'utf8').includes(childPidFile);
-          } catch {
-            /* زال سلفًا */
-          }
-          if (!guardianOurs) {
-            cleanupFailures.push(`guardian identity not provable before signalling (pid ${guardianPid})`);
-          } else {
-            // الحصادُ الفعليُّ للوالدِ: حدثُ exit يُطلقُهُ libuv بعدَ waitpid — انتظارٌ يُديرُ حلقةَ
-            // الأحداثِ (الإشارةُ المتزامنةُ الحاجبةُ تُؤجّلُ الحصادَ فلا يُثبَتُ الزوالُ أبدًا).
-            const exited = new Promise((resolve) => {
-              parent.once('exit', resolve);
-            });
-            process.kill(guardianPid, 'SIGKILL');
-            await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
-          }
-        } catch (e) {
-          cleanupFailures.push(`guardian cleanup threw: ${e && e.message}`);
-        }
-        if (!pidProvenDead(guardianPid)) {
-          try {
-            for (let i = 0; i < 250; i++) {
-              if (pidProvenDead(guardianPid)) break;
-              await new Promise((r) => setTimeout(r, 20));
+            let guardianOurs = false;
+            try {
+              guardianOurs = readFileSync(`/proc/${guardianPid}/cmdline`, 'utf8').includes(childPidFile);
+            } catch {
+              /* زال سلفًا */
+            }
+            if (!guardianOurs) {
+              cleanupFailures.push(`guardian identity not provable before signalling (pid ${guardianPid})`);
+            } else {
+              // الحصادُ الفعليُّ للوالدِ: حدثُ exit يُطلقُهُ libuv بعدَ waitpid — انتظارٌ يُديرُ حلقةَ
+              // الأحداثِ (الإشارةُ المتزامنةُ الحاجبةُ تُؤجّلُ الحصادَ فلا يُثبَتُ الزوالُ أبدًا).
+              const exited = new Promise((resolve) => {
+                parent.once('exit', resolve);
+              });
+              process.kill(guardianPid, 'SIGKILL');
+              await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
             }
           } catch (e) {
-            cleanupFailures.push(`guardian wait threw: ${e && e.message}`);
+            cleanupFailures.push(`guardian cleanup threw: ${e && e.message}`);
           }
-          if (!pidProvenDead(guardianPid))
-            cleanupFailures.push(`guardian not provably dead after SIGKILL (pid ${guardianPid})`);
+          if (!pidProvenDead(guardianPid)) {
+            try {
+              for (let i = 0; i < 250; i++) {
+                if (pidProvenDead(guardianPid)) break;
+                await new Promise((r) => setTimeout(r, 20));
+              }
+            } catch (e) {
+              cleanupFailures.push(`guardian wait threw: ${e && e.message}`);
+            }
+            if (!pidProvenDead(guardianPid))
+              cleanupFailures.push(`guardian not provably dead after SIGKILL (pid ${guardianPid})`);
+          }
         }
       }
     }
