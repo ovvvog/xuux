@@ -87,8 +87,23 @@ namespace Xuux.TpmCeremony.Tests
         public uint ThirdPartyRc = 0xFFFFFFFF;
         private int _increments;
         private bool _dead;
+        private uint _decoySession;
+        private bool _defineLost;
 
-        public CeremonyFaultTransport(ICeremonyTransport inner, string mode) { _inner = inner; _mode = mode; }
+        public CeremonyFaultTransport(ICeremonyTransport inner, string mode) : this(inner, mode, false) { }
+
+        // جلسةُ فخٍّ تنشأُ قبلَ بدءِ البروفةِ (وضعُ session-alias): مقبضٌ موجودٌ في خطِّ الأساسِ يُعادُ في ردِّ
+        // StartAuthSession فيُرفَضُ تبنّيه (RESPONSE_HANDLE_PREEXISTING) — إعادةُ إنتاجِ SOL413-01.
+        public CeremonyFaultTransport(ICeremonyTransport inner, string mode, bool decoySession)
+        {
+            _inner = inner; _mode = mode;
+            if (decoySession)
+            {
+                byte[] z = new byte[32]; new System.Random(4).NextBytes(z);
+                Resp p = Resp.Parse(inner.Transmit(Cmd.StartAuthSession(Tpm.SE_POLICY, z)), 1, Tpm.ST_NO_SESSIONS, 0);
+                _decoySession = p.Handles[0];
+            }
+        }
 
         public delegate byte[] ParamRewrite(byte[] oldParams);
 
@@ -102,6 +117,29 @@ namespace Xuux.TpmCeremony.Tests
         }
 
         // يعيدُ كتابةَ معاملاتِ ردِّ ST_SESSIONS مع تصحيحِ parameterSize والحجمِ الكلّيِّ (منطقةُ التفويضِ كما هي).
+        // يعيدُ كتابةَ منطقةِ تفويضِ ردِّ ST_SESSIONS (مسابرُ الدفعةِ الثالثةِ): البنيةُ الكلّيّةُ متّسقةٌ والمحتوى
+        // مخالفٌ لملفِّ التفويضِ المتوقّعِ — فشلٌ مسمّى لا افتراضات.
+        // يعيدُ كتابةَ معاملاتِ ردِّ ST_NO_SESSIONS (بلا حقلِ parameterSize): المعاملاتُ تلي المقابضَ مباشرةً.
+        // ردودُ StartAuthSession وPolicySigned على swtpm بهذا الشكلِ — والمسابرُ تحتاجُ تعديلَها (SOL413-04).
+        private static byte[] RewriteNoSessionsParams(byte[] raw, int handles, ParamRewrite f)
+        {
+            Rd r = new Rd(raw); r.U16(); r.U32(); r.U32();
+            byte[] hs = r.Raw(4 * handles);
+            byte[] np = f(r.Raw(r.Remaining));
+            byte[] body = new Wr().Raw(hs).Raw(np).Bytes();
+            return new Wr().U16(Tpm.ST_NO_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
+        }
+
+        private static byte[] RewriteAuth(byte[] raw, int handles, ParamRewrite f)
+        {
+            Rd r = new Rd(raw); r.U16(); r.U32(); r.U32();
+            byte[] hs = r.Raw(4 * handles);
+            uint ps = r.U32(); byte[] prm = r.Raw((int)ps); byte[] auth = r.Raw(r.Remaining);
+            byte[] na = f(auth);
+            byte[] body = new Wr().Raw(hs).U32((uint)prm.Length).Raw(prm).Raw(na).Bytes();
+            return new Wr().U16(Tpm.ST_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
+        }
+
         private static byte[] RewriteParams(byte[] raw, int handles, ParamRewrite f)
         {
             Rd r = new Rd(raw); r.U16(); r.U32(); r.U32();
@@ -187,6 +225,7 @@ namespace Xuux.TpmCeremony.Tests
                 return new Wr().U16(Tpm.ST_NO_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
             }
             if (_dead) throw new System.IO.IOException("WL413R2_TRANSPORT_DEAD");
+            // ── مسابرُ الدفعةِ الثالثةِ (WL-413 R3) ──
             if (_mode == "written-before-reconcile" && cc == Tpm.CC_NV_DefineSpace && Changes == 0)
             {
                 // يُنفَّذُ التعريفُ، ثمّ «طرفٌ آخرُ» يكتبُ الفهرسَ (زيادةٌ بتفويضٍ فارغٍ يسمحُ بها شكلُ S1)،
@@ -212,9 +251,186 @@ namespace Xuux.TpmCeremony.Tests
                 _inner.Transmit(command); Changes++; _dead = true;
                 throw new System.IO.IOException("WL413R2_TRANSPORT_DIED_AFTER_DEFINE");
             }
+            if (_mode == "create-response-loss" && cc == Tpm.CC_Create && Changes == 0)
+            {
+                Changes++; _inner.Transmit(command);
+                throw new System.IO.IOException("WL413R3_CREATE_RESPONSE_LOSS");
+            }
+            if (_mode == "policysigned-neg-loss" && cc == Tpm.CC_PolicySigned)
+            {
+                // الرفضُ الثاني هو s2v.replay (old-signature) — مُغيّرٌ ومرفوضٌ ويضيعُ ردُّه (SOL413-06).
+                Changes++;
+                if (Changes == 3) { _inner.Transmit(command); throw new System.IO.IOException("WL413R3_NEGATIVE_POLICYSIGNED_LOSS"); }
+            }
+            if (_mode == "readcounter-malformed-14a" && cc == Tpm.CC_NV_Increment)
+            {
+                // الزيادةُ الرابعةُ هي s2v:NV_Increment(password-auth) — مرفوضةٌ على المحاكي ويضيعُ ردُّها،
+                // ثمّ يُشوّهُ ردُّ القراءةِ 0x14A في المصالحةِ — كان يُبتلَعُ دليلًا للعدمِ (SOL413-05).
+                _increments++;
+                if (_increments == 4) { _inner.Transmit(command); Changes++; throw new System.IO.IOException("WL413R3_NEG_INCREMENT_LOSS_THEN_MALFORMED_14A"); }
+            }
+            if (_mode == "readpublic-malformed-18b" && cc == Tpm.CC_NV_DefineSpace && Changes == 0)
+            {
+                // يُسقَطُ التعريفُ قبلَ التنفيذِ، ثمّ يُشوّهُ ردُّ الغيابِ 0x18B في المصالحةِ — كان يُبتلَعُ
+                // دليلًا للغيابِ فيُعلَنُ «not-executed (verified absent)» من ردٍّ مشوّهٍ (SOL413-05).
+                Changes++; _defineLost = true;
+                throw new System.IO.IOException("WL413R3_DEFINE_DROPPED_THEN_MALFORMED_ABSENCE");
+            }
             byte[] raw = _inner.Transmit(command);
             Rd header = new Rd(raw);
             ushort tag = header.U16(); header.U32(); uint rc = header.U32();
+            if (_mode == "session-alias" && cc == Tpm.CC_StartAuthSession && rc == 0)
+            {
+                Changes++;
+                byte[] forged = (byte[])raw.Clone();
+                forged[10] = (byte)(_decoySession >> 24); forged[11] = (byte)(_decoySession >> 16);
+                forged[12] = (byte)(_decoySession >> 8); forged[13] = (byte)_decoySession;
+                return forged;
+            }
+            if (rc == 0 && _mode == "auth-nonce-byte" && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Changes++; return RewriteAuth(raw, 0, delegate(byte[] a)
+                {
+                    return new byte[] { 0x00, 0x01, 0xAB, 0x01, 0x00, 0x00 }; // nonce بايتٌ واحدٌ
+                });
+            }
+            if (rc == 0 && _mode == "auth-hmac-byte" && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Changes++; return RewriteAuth(raw, 0, delegate(byte[] a)
+                {
+                    return new byte[] { 0x00, 0x00, 0x01, 0x00, 0x01, 0xFF }; // hmac بايتٌ واحدٌ
+                });
+            }
+            if (rc == 0 && _mode == "auth-attrs-ff" && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Changes++; return RewriteAuth(raw, 0, delegate(byte[] a)
+                {
+                    return new byte[] { 0x00, 0x00, 0xFF, 0x00, 0x00 }; // سماتٌ محفوظةٌ كلّها
+                });
+            }
+            if (rc == 0 && _mode == "auth-attrs-clear" && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Changes++; return RewriteAuth(raw, 0, delegate(byte[] a)
+                {
+                    return new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00 }; // continueSession مُصفّرةٌ
+                });
+            }
+            // ── مسابرُ المخطّطِ الداخليِّ (SOL413-04/G47-413-3) ──
+            // CreatePrimary: B2B pub + B2B creationData + B2B creationHash + تذكرةٌ (وسمٌ/هرمٌ/B2B) + B2B اسم.
+            if (rc == 0 && _mode == "schema-public-empty" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++; return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); q.B2B();
+                    return new Wr().B2B(new byte[0]).Raw(q.Raw(q.Remaining)).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-creationdata-short" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++; return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); byte[] pub = q.B2B(); q.B2B();
+                    return new Wr().B2B(pub).B2B(new byte[1]).Raw(q.Raw(q.Remaining)).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-creationhash-short" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++; return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); byte[] pub = q.B2B(); byte[] cd = q.B2B(); q.B2B();
+                    return new Wr().B2B(pub).B2B(cd).B2B(new byte[0]).Raw(q.Raw(q.Remaining)).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-ticket-tag-flip" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                // تذكرةُ الإنشاءِ: الوسمُ 0x8021 وفقَ القياسِ — قلبُهُ فشلٌ مسمّى لا نجاحٌ بصحةٍ زائفةٍ.
+                Changes++; return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm);
+                    byte[] pub = q.B2B(); byte[] cd = q.B2B(); byte[] ch = q.B2B();
+                    ushort ttag = q.U16(); uint h = q.U32(); byte[] td = q.B2B(); byte[] nm = q.Raw(q.Remaining);
+                    return new Wr().B2B(pub).B2B(cd).B2B(ch).U16((ushort)(ttag ^ 0x0001)).U32(h).B2B(td).Raw(nm).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-nonce-empty" && cc == Tpm.CC_StartAuthSession && Changes == 0)
+            {
+                Changes++; return RewriteNoSessionsParams(raw, 1, delegate(byte[] prm)
+                {
+                    return new Wr().B2B(new byte[0]).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-nvread-short" && cc == Tpm.CC_NV_Read && Changes == 0)
+            {
+                Changes++; return RewriteParams(raw, 0, delegate(byte[] prm)
+                {
+                    return new Wr().B2B(new byte[1]).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-sign-short" && cc == Tpm.CC_Sign && Changes == 0)
+            {
+                // Sign: U16 alg + U16 hash + B2B r + B2B s — r بايتٌ واحدٌ.
+                Changes++; return RewriteParams(raw, 0, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); ushort a = q.U16(); ushort hh = q.U16(); q.B2B(); byte[] ss2 = q.Raw(q.Remaining);
+                    return new Wr().U16(a).U16(hh).B2B(new byte[1]).Raw(ss2).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "schema-policysigned-digest" && cc == Tpm.CC_PolicySigned && Changes == 0)
+            {
+                // PolicySigned: B2B timeout + وسمٌ + هرمٌ + B2B بصمةُ التذكرةِ — 65 بايتًا يتجاوزُ الحدَّ.
+                Changes++; return RewriteNoSessionsParams(raw, 0, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); q.B2B(); ushort tt = q.U16(); uint hh = q.U32();
+                    return new Wr().B2B(new byte[0]).U16(tt).U32(hh).B2B(new byte[65]).Bytes();
+                });
+            }
+            if (rc == 0 && _mode == "paramsize-huge" && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Changes++;
+                byte[] forged = (byte[])raw.Clone();
+                int handles = cc == Tpm.CC_CreatePrimary || cc == Tpm.CC_Load ? 1 : 0;
+                int off = 10 + 4 * handles;
+                forged[off] = 0x7F; forged[off + 1] = 0xFF; forged[off + 2] = 0xFF; forged[off + 3] = 0xF0; // ps > المتبقّي
+                return forged;
+            }
+            if (rc == 0 && _mode == "inventory-no-progress" && cc == Tpm.CC_GetCapability && Changes == 0)
+            {
+                // جردُ مقابضَ يعيد more=1 مع count=0: تقدّمٌ مزعومٌ بلا أثرٍ — كان يُقبلُ كنهايةٍ صامتةٍ (SOL413-02).
+                Rd q = new Rd(raw); q.U16(); q.U32(); q.U32();
+                byte more = q.U8(); uint cap = q.U32(); uint cnt = q.U32();
+                if (cap == 1 && more == 0 && cnt == 0)
+                {
+                    Changes++;
+                    byte[] forged = (byte[])raw.Clone();
+                    forged[10] = 0x01; // more=1 مع count=0
+                    return forged;
+                }
+            }
+            if (rc == 0 && _mode == "inventory-wrong-class" && cc == Tpm.CC_GetCapability && Changes == 0)
+            {
+                // جردُ الجلساتِ يعيدُ مقبضاً عابراً (0x80...): كان يوقفُ الجردَ صامتاً فيبدو فارغاً (SOL413-02).
+                Rd q = new Rd(raw); q.U16(); q.U32(); q.U32();
+                byte more = q.U8(); uint cap = q.U32(); uint cnt = q.U32();
+                if (cap == 1 && more == 0 && cnt == 0)
+                {
+                    Changes++;
+                    byte[] body = new Wr().U8(0).U32(1).U32(1).U32(0x80000001).Bytes();
+                    return new Wr().U16(Tpm.ST_NO_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
+                }
+            }
+            if (rc == 0x14A && _mode == "readcounter-malformed-14a" && cc == Tpm.CC_NV_Read && _increments >= 4)
+            {
+                Changes++;
+                byte[] forged = (byte[])raw.Clone(); forged[0] = 0x12; forged[1] = 0x34;
+                return forged;
+            }
+            if (rc == 0x18B && _mode == "readpublic-malformed-18b" && cc == Tpm.CC_NV_ReadPublic && _defineLost)
+            {
+                Changes++;
+                byte[] forged = (byte[])raw.Clone(); forged[0] = 0x12; forged[1] = 0x34;
+                return forged;
+            }
+
             if (_mode == "define-response-loss" && cc == Tpm.CC_NV_DefineSpace && rc == 0 && Changes == 0)
             {
                 Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); uint authSize = c.U32(); c.Raw((int)authSize); c.B2B();

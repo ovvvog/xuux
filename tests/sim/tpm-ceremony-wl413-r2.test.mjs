@@ -149,7 +149,7 @@ simPwshTest('R2-03a: بايتاتٌ زائدةٌ في معاملاتِ ردِّ 
   } finally { stopSim(s); }
 });
 
-simPwshTest('R2-03b: معاملاتٌ غيرُ فارغةٍ في ردِّ نجاحِ NV_DefineSpace ⇒ نتيجةٌ مجهولةٌ تُجرَدُ ثمّ تنظيفٌ بملكيّةٍ مُثبَتة', () => {
+simPwshTest('R2-03b: معاملاتٌ غيرُ فارغةٍ في ردِّ نجاحِ NV_DefineSpace ⇒ نتيجةٌ مجهولةٌ تُجرَدُ ثمَّ تُتركُ بملكيّةِ غيرِ قابلةِ للإثباتِ', () => {
   const s = startSim();
   try {
     const o = fault(s, 'define-params-extra');
@@ -157,11 +157,13 @@ simPwshTest('R2-03b: معاملاتٌ غيرُ فارغةٍ في ردِّ نجا
     const h = o.fault.definedHandle;
     assert.equal(r.status, 'FAILED_CLOSED');
     assert.match(r.failure, /^OUTCOME_UNKNOWN: s1\.probe:NV_DefineSpace .*RESPONSE_PARAMS_TRAILING_BYTES: empty-params/);
-    assert.ok(list(r.reconciliation).includes('nv-define ' + h + ': executed; ownership proven by publicArea match'), JSON.stringify(r.reconciliation));
-    assert.deepEqual(list(r.cleanupLeftovers), []);
+    // قرار المراجع G47-413-1 (WL-413 R3): ردٌّ غيرُ قابلِ للاستخدامِ ⇒ لا حذفَ ولو طابقتُ المنطقةُ العامّةُ: يُتركُ ويُعلَن.
+    assert.ok(list(r.reconciliation).some((x) => x.startsWith('nv-define ' + h) && x.includes('the define reply was lost or unusable so execution and ownership cannot be proven')), JSON.stringify(r.reconciliation));
+    assert.ok(!list(r.reconciliation).some((x) => /ownership proven/.test(x)));
+    assert.ok(list(r.cleanupLeftovers).some((x) => x === 'nv ' + h + ': ownership-undetermined (define reply lost; matching publicArea is not proof); left in place'), JSON.stringify(r.cleanupLeftovers));
     assert.equal(r.postRunInventory.verified, true);
-    assert.deepEqual(list(r.postRunInventory.residualNv), []);
-    assert.ok(!list(o.nvAfter).includes(h));
+    assert.deepEqual(list(r.postRunInventory.residualNv), [h]);
+    assert.ok(list(o.nvAfter).includes(h));
     assertNoLaterStage(r, 's1.probe:NV_DefineSpace');
   } finally { stopSim(s); }
 });

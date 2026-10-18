@@ -73,7 +73,12 @@ if ($Mode -eq 'fault') {
   try {
     $nvBefore = Get-HandleList -Transport $inner -Start 0x01000000
     $sessionsBefore = Get-HandleList -Transport $inner -Start 0x02000000
-    $t = New-Object Xuux.TpmCeremony.Tests.CeremonyFaultTransport($inner, $Fault)
+    # session-alias (WL-413 R3 / SOL413-01): جلسةُ فخٍّ قبلَ البروفةِ لتكونَ في خطِّ الأساسِ.
+    if ($Fault -eq 'session-alias') {
+      $t = New-Object Xuux.TpmCeremony.Tests.CeremonyFaultTransport($inner, $Fault, $true)
+    } else {
+      $t = New-Object Xuux.TpmCeremony.Tests.CeremonyFaultTransport($inner, $Fault)
+    }
     $r = (New-Object Xuux.TpmCeremony.CeremonyRehearsal($t)).Run($Stages)
     $nvAfter = Get-HandleList -Transport $inner -Start 0x01000000
     $sessionsAfter = Get-HandleList -Transport $inner -Start 0x02000000
