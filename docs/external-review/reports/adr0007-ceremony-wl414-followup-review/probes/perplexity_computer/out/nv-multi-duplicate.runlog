@@ -1,0 +1,1 @@
+mode=nv-multi-duplicate pwsh_exit=0 swtpm_baseline=0 swtpm_after_exit=1 swtpm_after_cleanup=0

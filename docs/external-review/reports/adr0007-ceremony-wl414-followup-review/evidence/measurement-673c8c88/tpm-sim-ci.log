@@ -1,0 +1,8 @@
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+# tests 185
+# pass 183
+# fail 0
+# skipped 2
+# todo 0
+اختباراتُ محاكي TPM نجحَت على swtpm — دليلُ محاكاةٍ لا دليلُ عتاد.
+exit=0

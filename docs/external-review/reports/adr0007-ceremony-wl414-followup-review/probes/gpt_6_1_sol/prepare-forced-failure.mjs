@@ -1,0 +1,16 @@
+import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
+import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
+const w='/tmp/wl414-followup/reviewers/gpt_6_1_sol';
+const r=join(w,'repo');
+const out=join(w,'forced-failure');
+mkdirSync(join(out,'tmp'),{recursive:true});
+let s=readFileSync(join(r,'tests/sim/tpm-ceremony-wl413-r3.test.mjs'),'utf8');
+s=s.replace("'../../sim/tpm/tcti_guard.mjs'",JSON.stringify(pathToFileURL(join(r,'sim/tpm/tcti_guard.mjs')).href));
+s=s.replace("const root = fileURLToPath(new URL('../../', import.meta.url));",`const root = ${JSON.stringify(r)};`);
+s=s.replace('const port = 2700 + 2 * Math.floor(Math.random() * 150);','const port = 7100;');
+const marker="const o = fault(s, 'baseline-partial');";
+if(!s.includes(marker))throw new Error('expected R3-18 marker absent');
+s=s.replace(marker,"assert.fail('FOLLOWUP_FORCED_ASSERTION_AFTER_START');\n    "+marker);
+writeFileSync(join(out,'forced-r3.test.mjs'),s);
+console.log('Copied native R3 tests outside tree; changed import/root, port7100, injected one assertion failure in R3-18.');

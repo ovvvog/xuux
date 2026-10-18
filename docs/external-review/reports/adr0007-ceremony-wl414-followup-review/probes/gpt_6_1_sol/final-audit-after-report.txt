@@ -1,0 +1,6 @@
+2026-10-18T07:38:14Z
+3e67d362dc4f30ec35f73957fd5542be47a3a875
+protected_exit=0
+  PID  PPID STAT COMMAND
+10834     1 S    swtpm socket --tpm2 --tpmstate dir=/tmp/wl414-followup/swtpm-shared2 --server type=tcp,port=2321,bindaddr=127.0.0.1 --ctrl type=tcp,port=2322,bindaddr=127.0.0.1 --flags not-need-init,startup-clear --daemon
+State Recv-Q Send-Q Local Address:Port Peer Address:Port
