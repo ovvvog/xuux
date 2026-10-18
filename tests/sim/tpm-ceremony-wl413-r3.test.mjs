@@ -18,7 +18,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,13 +53,16 @@ function startSim() {
       } catch { /* لم يجهز بعد */ }
       execFileSync('sleep', ['1']);
     }
-    if (!ready) { rmSync(dir, { recursive: true, force: true }); continue; }
-    return { dir, port, pidFile };
+    if (!ready || !existsSync(pidFile)) { rmSync(dir, { recursive: true, force: true }); continue; }
+    return { dir, port, pidFile, pid: Number(readFileSync(pidFile, 'utf8').trim()) };
   }
   throw new Error('WL-413/R3: تعذّرَ تشغيلُ محاكٍ معزول');
 }
 
 function stopSim(s) {
+  // قتلُ عمليةِ المحاكيِ قبلَ حذفِ مجلدِ الحالةِ (قياسُ المراجعينَ الثلاثةِ: الحذفُ وحدهُ تركَ 21
+  // عمليةً يتيمةً بعدَ خروجِ الاختباراتِ — كما في دالةِ R2 نفسِها).
+  try { process.kill(s.pid, 'SIGTERM'); } catch { /* انتهى */ }
   try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* أفضلُ جهد */ }
 }
 
@@ -218,7 +221,7 @@ simPwshTest('R3-06a: فقدُ ردِّ Create ⇒ نتيجةٌ مجهولةٌ م
     const r = o.report;
     assert.equal(r.status, 'FAILED_CLOSED');
     assert.match(r.failure, /^OUTCOME_UNKNOWN: s2:Create\(service-key,ECDSA-P256\)/);
-    assert.ok(list(r.reconciliation).some((x) => x === 'object-create: no new handle since baseline (likely not executed)'), JSON.stringify(r.reconciliation));
+    assert.ok(list(r.reconciliation).some((x) => x.startsWith('object-create: no new handle since baseline (execution undetermined')), JSON.stringify(r.reconciliation));
     // المفتاحُ الأوّليُّ عُرِّفَ بردٍّ سليمٍ فتحريرُهُ في التنظيفِ مسموحٌ ومُتحقَّقٌ.
     assert.deepEqual(list(r.postRunInventory.residualTransients), []);
     assert.deepEqual(o.sessionsAfter, o.sessionsBefore);
@@ -319,5 +322,90 @@ simPwshTest('R3-11: PolicySigned ناجحٌ ببصمةِ تذكرةٍ تتجاو
     assert.match(r.failure, /^OUTCOME_UNKNOWN: s2\.trial:PolicySigned/);
     assert.match(r.failure, /RESPONSE_TICKET_DIGEST_MALFORMED: len=65/);
     assertNoLaterStage(r, 's2.trial:PolicySigned');
+  } finally { stopSim(s); }
+});
+
+// ── الجولةُ الثالثةُ على de099aa8 (تقاريرُ المراجعينَ الثلاثةِ: gpt_6_1_sol وgemini_3_8_flash وgrok_4_7) ──
+// فجواتٌ قِيست في تحليلِ الردودِ والنقلِ والتنظيفِ فقُبلت ثمّ عولجت: لكلِّ فجوةٍ مسبرُ حقنٍ يُثبتُ
+// الرفضَ المسمّى (أو القبولَ المشروعَ) — لا ادّعاءً بلا تشويهٍ، ولا تشويهًا بلا اسمٍ.
+
+const r3cRejectCases = [
+  ['auth-cross-policy-on-password', 's1.probe:NV_DefineSpace', 'RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=32 attrs=0x00 hmacLen=0 expected=password'],
+  ['ticket-hierarchy-revoke', 's2:CreatePrimary(storage,ECC-P256)', 'RESPONSE_TICKET_HIERARCHY_MALFORMED: CreatePrimary 0x40000002'],
+  ['ticket-digest-short', 's2:CreatePrimary(storage,ECC-P256)', 'RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=1'],
+  ['policysigned-timeout-nonempty', 's2.trial:PolicySigned', 'RESPONSE_POLICY_TIMEOUT_MALFORMED: len=8 at expiration=0'],
+  ['load-alias-live', 's2:Load(service-key)', 'RESPONSE_HANDLE_REISSUED: Load(service-key) 0x80000000 still live in this run'],
+];
+
+for (const [mode, step, err] of r3cRejectCases) {
+  simPwshTest('R3-12: \u0641\u062c\u0648\u0629\u064c \u0645\u0642\u064a\u0633\u0629\u064c \u0645\u0646 \u062c\u0648\u0644\u0629\u0650 R3 \u0639\u0644\u0649 de099aa8 (' + mode + ') \u21d2 \u0641\u0634\u0644\u064c \u0645\u063a\u0644\u0642\u064c \u0645\u0633\u0645\u0651\u0649', () => {
+    const s = startSim();
+    try {
+      const o = fault(s, mode);
+      const r = o.report;
+      assert.equal(r.status, 'FAILED_CLOSED');
+      assert.ok(r.failure.startsWith('OUTCOME_UNKNOWN: ' + step + ' '), 'prefix: ' + r.failure);
+      assert.ok(r.failure.includes(err), 'error name: ' + r.failure);
+      assertNoLaterStage(r, step);
+    } finally { stopSim(s); }
+  });
+}
+
+simPwshTest('R3-13: \u0645\u0644\u0641\u0651\u064f \u062a\u0641\u0648\u064a\u0636\u0650 \u0631\u062f\u0651\u064d \u064a\u0631\u062a\u0628\u0637 \u0628\u0646\u0648\u0639\u0650 \u062c\u0644\u0633\u0629\u0650 \u0627\u0644\u0637\u0644\u0628\u0650 \u2014 \u0645\u0644\u0641\u064f \u0633\u064a\u0627\u0633\u0629\u064d \u0635\u063a\u0651\u0631\u064e \u0625\u0644\u0649 16 \u0641\u064a \u0631\u062f\u0651\u0650 \u062c\u0644\u0633\u0629\u0650 \u0633\u064a\u0627\u0633\u0629\u064d \u21d2 \u0645\u0631\u0641\u0648\u0636\u064c \u0645\u0633\u0645\u0651\u0649 \u0644\u0627 \u0642\u0628\u0648\u0644\u064c \u0635\u0645\u062a\u064c', () => {
+  const s = startSim();
+  try {
+    const o = fault(s, 'auth-policy-nonce16');
+    const r = o.report;
+    assert.equal(r.status, 'FAILED_CLOSED');
+    assert.match(r.failure, /^OUTCOME_UNKNOWN: s2v\.policy:NV_Increment\(policy-session\)/);
+    assert.match(r.failure, /RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=16 attrs=0x00 hmacLen=0 expected=policy/);
+    assertNoLaterStage(r, 's2v.policy:NV_Increment(policy-session)');
+  } finally { stopSim(s); }
+});
+
+simPwshTest('R3-14: \u0627\u0644\u0628\u062a\u0651\u064f \u0627\u0644\u0645\u062d\u062c\u0648\u0632\u064f 3 \u0641\u064a \u0631\u062f\u0651\u0650 \u062a\u0641\u0648\u064a\u0636\u0650 \u062c\u0644\u0633\u0629\u0650 \u0633\u064a\u0627\u0633\u0629\u064d \u21d2 \u0645\u0631\u0641\u0648\u0636\u064c \u0645\u0633\u0645\u0651\u0649', () => {
+  const s = startSim();
+  try {
+    const o = fault(s, 'auth-policy-attrs08');
+    const r = o.report;
+    assert.equal(r.status, 'FAILED_CLOSED');
+    assert.match(r.failure, /^OUTCOME_UNKNOWN: s2v\.policy:NV_Increment\(policy-session\)/);
+    assert.match(r.failure, /RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=32 attrs=0x08 hmacLen=0 expected=policy/);
+    assertNoLaterStage(r, 's2v.policy:NV_Increment(policy-session)');
+  } finally { stopSim(s); }
+});
+
+simPwshTest('R3-15: \u0635\u0641\u062d\u0629\u064f \u062c\u0631\u062f\u064d \u0628\u0645\u0642\u0628\u0636\u064d \u0645\u0643\u0631\u0651\u0631\u064d \u21d2 \u0641\u0634\u0644\u064c \u0645\u0633\u0645\u0651\u0649 \u0642\u0628\u0644 \u0643\u0644\u0651\u0650 \u0623\u0645\u0631\u0651\u0650 \u0645\u064f\u063a\u064a\u0651\u0631\u064d \u0648\u062e\u0637\u0651\u064f \u0623\u0633\u0627\u0633\u064d \u0643\u0627\u0630\u0628\u064c \u0644\u0627 \u064a\u064f\u062f\u0651\u0639\u0649 \u0627\u0644\u062a\u062d\u0642\u064a\u0642', () => {
+  const s = startSim();
+  try {
+    const o = fault(s, 'inventory-duplicate');
+    const r = o.report;
+    assert.equal(r.status, 'FAILED_CLOSED');
+    assert.match(r.failure, /RESPONSE_CAPABILITY_(HANDLE_ORDER|DUPLICATE_HANDLE)_MALFORMED/);
+    assert.ok(!r.steps.some((x) => STATE_CHANGING.has(x.commandCode)), 'no state-changing command before the named failure');
+    assert.equal(r.postRunInventory.verified, false);
+  } finally { stopSim(s); }
+});
+
+simPwshTest('R3-16: \u062a\u0631\u0645\u064a\u0632\u064f \u0628\u064a\u0627\u0646\u0627\u062a\u0650 \u0627\u0644\u0625\u0646\u0634\u0627\u0621\u0650 \u0633\u0627\u0626\u063a\u064c \u0639\u0646\u062f \u0639\u062f\u0651\u064d \u0644\u0640PCR \u0635\u0641\u0631\u064c (\u062c\u0645\u0644\u0629\u064f \u0627\u0644\u062c\u062f\u0648\u0644\u0650 222) \u21d2 \u0642\u0628\u0648\u0644\u064c \u0644\u0627 \u0631\u0641\u0636\u064c \u0644\u0644\u062a\u0631\u0645\u064a\u0632\u0650 \u0627\u0644\u0633\u0627\u0626\u063a', () => {
+  const s = startSim();
+  try {
+    const o = fault(s, 'creationdata-empty-pcrdigest');
+    const r = o.report;
+    assert.equal(r.status, 'COMPLETE');
+    assert.equal(r.failure, null);
+  } finally { stopSim(s); }
+});
+
+simPwshTest('R3-17: \u0645\u0642\u0628\u0636\u064f \u0631\u062f\u0651\u0650 \u0625\u0646\u0634\u0627\u0621\u0650 \u062c\u0644\u0633\u0629\u064d \u0628\u0641\u0626\u0629\u0650 \u0643\u0627\u0626\u0646\u064d \u0639\u0627\u0628\u0631\u064d \u0644\u064a\u0633\u062a\u0652 \u062c\u0644\u0633\u0629\u064b \u21d2 \u0645\u0631\u0641\u0648\u0636\u064c \u0645\u0633\u0645\u0651\u0649 \u0645\u0639 \u062a\u062a\u0628\u0651\u0639\u0650 \u0627\u0644\u0645\u0642\u0628\u0636\u0650 \u0644\u0644\u062a\u0646\u0637\u064a\u0641', () => {
+  const s = startSim();
+  try {
+    const o = fault(s, 'startsession-wrongclass');
+    const r = o.report;
+    assert.equal(r.status, 'FAILED_CLOSED');
+    assert.match(r.failure, /RESPONSE_SESSION_HANDLE_CLASS_MALFORMED: StartAuthSession 0x80000005/);
+    // \u0627\u0644\u0645\u0642\u0628\u0636\u064f \u0627\u0644\u0645\u0632\u064a\u0641\u064f \u0645\u062a\u0628\u0651\u0639\u064c \u0648\u0641\u0634\u0644\u064f \u062a\u062d\u0631\u064a\u0631\u0647\u0650 \u0645\u0639\u0644\u0646\u064c\u060c \u0648\u0627\u0644\u062c\u0644\u0633\u0629\u064f \u0627\u0644\u062d\u0642\u064a\u0642\u064a\u0629\u064f \u0627\u0644\u062a\u064a \u0623\u0646\u0634\u0623\u0647\u0627 \u0627\u0644\u0640TPM \u0645\u0639\u0644\u0646\u0629\u064c \u0643\u0628\u0642\u064a\u0629\u064d \u0644\u0627 \u0645\u062e\u0641\u064a\u0629\u064d \u0635\u0645\u062a\u064b.
+    assert.ok(r.cleanupLeftovers.some((x) => /0x80000005/.test(x)), JSON.stringify(r.cleanupLeftovers));
+    assert.ok(r.cleanupLeftovers.some((x) => /residual 0x03000000/.test(x)), JSON.stringify(r.cleanupLeftovers));
   } finally { stopSim(s); }
 });
