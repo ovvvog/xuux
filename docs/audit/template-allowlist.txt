@@ -122,3 +122,11 @@ institutions/001-الديوان-الملكي/safety.md
 institutions/001-الديوان-الملكي/staffing.yaml
 institutions/001-الديوان-الملكي/test.spec.ts
 institutions/001-الديوان-الملكي/workflows.md
+
+# ── استثناء أدلة المراجعة الخارجية (WL-414، جولة R3 على de099aa8) ──
+# ملفات مخرجات خام من مسابر المراجع gpt_6_1_sol فارغة بايتيًّا لأن الأمر الذي أنتجها
+# لم يكتب شيئًا (مخرج أمر ناجح بلا نص) — حذفها يُفقد دليلًا خامًّا وتغيير محتواها تزييف.
+# قرار المنفّذ ضمن حزمة الجولة الثالثة (COLLECTION.md: «الملفات الصفرية البايتات نُسِخَت»):
+docs/external-review/reports/adr0007-ceremony-wl413-r3-remediation-review/probes/gpt_6_1_sol/accumulation/launch.txt
+docs/external-review/reports/adr0007-ceremony-wl413-r3-remediation-review/probes/gpt_6_1_sol/accumulation/nv-initial.txt
+docs/external-review/reports/adr0007-ceremony-wl413-r3-remediation-review/probes/gpt_6_1_sol/after-daemon-shutdown.txt
