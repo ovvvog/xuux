@@ -478,6 +478,19 @@ namespace Xuux.TpmCeremony.Tests
                 forged[12] = (byte)(_livePrimary >> 8); forged[13] = (byte)_livePrimary;
                 return forged;
             }
+            // خطُّ الأساسِ الجزئيُّ (قيدُ الجولةِ الثالثةِ R3SOL-04): أولُ جردِ للمتحوّلاتِ العابرةِ
+            // يُعادُ بمقبضٍِ من فئةِ NV ⇒ فشلٌ مسمّى داخلَ SnapshotBaseline ⇒ خطُّ أساسٍِ جزئيًّ: لا
+            // يُدَّى جردٌ موثوقٌ بعده (الجردُ من قابليةِ المقارنةِ برسالةِ partial baseline) ولا تُقارَنُ البقايا.
+            if (rc == 0 && _mode == "baseline-partial" && cc == Tpm.CC_GetCapability && Changes == 0)
+            {
+                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); uint cap = c.U32(); uint prop = c.U32();
+                if (cap == 1 && prop == 0x80000000u)
+                {
+                    Changes++;
+                    byte[] body = new Wr().U8(0).U32(1).U32(1).U32(0x01000001).Bytes();
+                    return new Wr().U16(Tpm.ST_NO_SESSIONS).U32((uint)(10 + body.Length)).U32(0).Raw(body).Bytes();
+                }
+            }
             // قياسُ المراجعينَ: مقبضُ ردِّ StartAuthSession بفئةِ كائنٍ عابرٍ (0x80) — يُرفضُ باسمٍ.
             if (rc == 0 && _mode == "startsession-wrongclass" && cc == Tpm.CC_StartAuthSession && Changes == 0)
             {
