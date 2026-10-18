@@ -240,13 +240,13 @@ simTest('L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا �
   } catch (e) {
     threw = e;
   }
-  assert.ok(threw);
-  assert.match(String(threw.message), /not proven stopped/);
-  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
-  const a = abandoned[0];
-  // التنظيفُ مضمونٌ حتى عندَ فشلِ تأكيدٍ: لا يُتركَ المحاكيُّ الذي تعمّدَ الاختبارُ إبقاءَهُ حيًّا يتيمًا —
-  // والحمايةُ تغطّي كلَّ ما بعدَ الاستحواذِ لا آخرَّ تأكيدٍ فقط (حسمُ المراجعةِ 3).
+  // الحمايةُ تغطّي **جسمَ الاختبارِ كلَّهُ بعدَ الاستحواذِ** (كلَّ تأكيدٍ بما فيها threw وabandoned —
+  // حسمُ الجولتَينِ 3 و4): فشلُ أيِّ تأكيدٍ لا يتجاوزُ التنظيفَ.
   try {
+    assert.ok(threw);
+    assert.match(String(threw.message), /not proven stopped/);
+    assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+    const a = abandoned[0];
     assert.equal(a.stopped, false, 'EPERM is not proof of death: stopped must stay false');
     assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence when death is unproven');
     assert.ok(discoverSimPids(a.dir).length >= 1, 'the unproven simulator must still be alive');
@@ -255,7 +255,8 @@ simTest('L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا �
     assert.equal(stopSim({ pid: a.pid, dir: a.dir }), true);
     assert.equal(stateDirExists(a.dir), false);
   } finally {
-    if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
+    const a = abandoned[0];
+    if (a && stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
       try { killSim(a.pid, { dir: a.dir }); } catch { /* زالت سلفًا */ }
     }
   }
@@ -279,10 +280,11 @@ simTest('L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ �
   } catch (e) {
     threw = e;
   }
-  assert.ok(threw);
-  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
-  const a = abandoned[0];
+  // الحمايةُ تغطّي جسمَ الاختبارِ كلَّهُ بعدَ الاستحواذِ — والنائمُ البريءُ يُحمى من أولِ تأكيدٍ (جولتا 3 و4).
   try {
+    assert.ok(threw);
+    assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+    const a = abandoned[0];
     assert.equal(a.stopped, true, 'the real simulator (state-dir-bound) is terminated by discovery');
     assert.equal(discoverSimPids(a.dir).length, 0, 'no orphan swtpm');
     assert.equal(stateDirExists(a.dir), false);
@@ -295,7 +297,6 @@ simTest('L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ �
     }
     assert.equal(sleeperAlive, true, 'the innocent sleeper pointed at by the pid file must not be killed');
   } finally {
-    // حمايةُ النائمِ البريءِ تغطّي كلَّ ما بعدَ الاستحواذِ لا آخرَّ تأكيدٍ فقط (حسمُ المراجعةِ 3).
     try {
       process.kill(sleeperPid, 'SIGKILL');
     } catch {
@@ -372,12 +373,13 @@ simPwshTest('CTX2: فقدُ ردِّ التحريرِ داخلَ البروفة�
   withSim((s) => {
     const o = fault(s, 'flush-response-loss');
     const r = o.report;
-    // المصالحةُ جرتْ وأثبتَتِ الغيابَ فمُسِحَ السياقُ من المسارِ الحقيقيّ (facts خريطةٌ: القيمةُ سلسلةٌ):
+    // المصالحةُ جرتْ وأثبتَتِ الغيابَ فمُسِحَ السياقُ من المسارِ الحقيقيِّ — والشاهدُ **حالةُ السياقِ نفسُهُ**
+    // (contextGone تُشتَقُّ من الخرائطِ بعدَ الاستدعاءِ: حذفُ EndOfLife مع إبقاءِ الحقيقةِ يُسقطُ الشاهدَ — جولةُ 4):
     const eol = String(r.facts['ctx.endOfLife.flush'] || '');
     assert.match(
       eol,
-      /verified-absent 0x/i,
-      'the real reconciliation path must prove context end-of-life after flush response loss: ' + JSON.stringify(r.facts['ctx.endOfLife.flush']),
+      /verified-absent 0x[0-9a-f]+ contextGone=True/i,
+      'the real path must prove context end-of-life (state, not adjacency) after flush response loss: ' + JSON.stringify(r.facts['ctx.endOfLife.flush']),
     );
     const rec = list(r.reconciliation);
     assert.ok(
@@ -392,6 +394,12 @@ simPwshTest('CTX2: فقدُ ردِّ التحريرِ داخلَ البروفة�
       String(r2.facts['ctx.endOfLife.flush'] || ''),
       /verified-absent/,
       'a flush whose response was lost without execution (handle still present) must not claim context end-of-life',
+    );
+    // والشاهدُ الموجبُ للحفظِ: حالةُ السياقِ نفسُهُ (contextKnown=True من الخرائطِ — جولةُ 4):
+    assert.match(
+      String(r2.facts['ctx.endOfLife.flushKept'] || ''),
+      /present contextKnown=True/i,
+      'the still-present handle must provably keep its context (state, not adjacency)',
     );
     assert.ok(
       list(r2.reconciliation).some((x) => /still present; release outcome unknown/.test(String(x))),
@@ -492,23 +500,23 @@ simTest('R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُ�
   } catch (e) {
     threw = e;
   }
-  assert.ok(threw, 'unreadable identity must not be declared stopped');
-  assert.match(String(threw.message), /not proven stopped/);
-  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
-  const a = abandoned[0];
-  // الحمايةُ تغطّي كلَّ ما بعدَ الاستحواذِ (لا التأكيداتُ قبلَ try فحسب) — حسمُ المراجعةِ 3.
+  // الحمايةُ تغطّي جسمَ الاختبارِ كلَّهُ بعدَ الاستحواذِ — والمقبضُ المحفوظُ عندَ الإطلاقِ هو المرجعُ
+  // للتنظيفِ لا ملفٌّ قد يزولَ (جولتا 3 و4).
   try {
+    assert.ok(threw, 'unreadable identity must not be declared stopped');
+    assert.match(String(threw.message), /not proven stopped/);
+    assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+    const a = abandoned[0];
     assert.equal(a.stopped, false, 'empty discovery is not proof of death: stopped must stay false');
     assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence');
     assert.ok(!pidProvenDead(launchedPid), 'the alive unreadable simulator must not be declared dead');
     assert.ok(discoverSimPids(a.dir).length >= 1, 'the simulator is really still alive (real read)');
-    // تنظيفٌ مضمونٌ بالقارئِ الحقيقيّ وبالمقبضِ المحفوظِ (a.pid قد يكون null لأنّ ملفَ PID حُذفَ قبلَ
-    // قراءتِهِ — التنظيفُ لا يعتمدُ على ملفٍّ قد يزولَ، بل على الهويّةِ المُعلَنةِ عندَ الإطلاقِ):
     assert.equal(killSim(launchedPid, { dir: a.dir }), true);
     assert.equal(stopSim({ pid: launchedPid, dir: a.dir }), true);
     assert.equal(stateDirExists(a.dir), false);
   } finally {
-    if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
+    const a = abandoned[0];
+    if (a && stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
       try { killSim(launchedPid, { dir: a.dir }); } catch { /* زالت سلفًا */ }
     }
   }
@@ -527,28 +535,31 @@ simTest('R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنع
     `process.on("SIGTERM", () => {}); require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
       'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);',
   );
-  spawn(
-    'bash',
-    ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x &`],
-    { stdio: 'ignore' },
-  );
-  // الوسمُ بـ & يجعلُ الوالدَ (bash) يخرجُ سريعًا فيُودَعُ المحاكيُّ الزائفُ لعملِ init (ppid=1)
-  // فيُلقَّ عندَ موتِهِ — تمامًا كسلوكِ swtpm-daemon الحقيقيّ — ويتحقّقُ زوالُهُ بـ ESRCH دونَ توسيعِ
-  // معيارِ الموتِ (حسمُ المراجعةِ 3): لا يُدّعى موتُ زومبيٍّ لم يُلقَّ بعدُ.
-  // انتظارُ ظهورِ الوسائطِ في /proc وانتظارِ جاهزيّةِ معالجِ SIGTERM (سباقٌ مُقاسٌ: الاكتشافُ قد يسبقُ
-  // تسجيلَ المعالجِ فيُميتُ الإشارةُ الأولى العمليةَ البريئةَ عن سباقٍ لا عن قصدٍ):
-  let fakePid = null;
-  for (let i = 0; i < 250; i++) {
-    const found = discoverSimPids(dir);
-    if (found.length === 1) {
-      fakePid = found[0];
-      if (existsSync(readyMarker)) break;
-    }
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-  }
-  assert.ok(fakePid !== null, 'fake swtpm must be discoverable by its state dir');
-  assert.ok(existsSync(readyMarker), 'fake swtpm must have its SIGTERM handler armed before the kill test');
+  // الحمايةُ تغطّي **جسمَ الاختبارِ كلَّهُ بعدَ الإطلاقِ** (اكتشافًا وتأكيداتٍ — جولتا 3 و4): فشلُ أيِّ
+  // تأكيدٍ — بما فيها تأكيدا الاكتشافِ قبلَ try سابقًا — لا يتجاوزُ التنظيفَ، والتنظيفُ يعيدُ الاكتشافَ
+  // بنفسِهِ فلا يعتمدُ على متغيّرٍ قد يبقى null.
   try {
+    spawn(
+      'bash',
+      ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x &`],
+      { stdio: 'ignore' },
+    );
+    // الوسمُ بـ & يجعلُ الوالدَ (bash) يخرجُ سريعًا فيُودَعُ المحاكيُّ الزائفُ لعملِ init (ppid=1)
+    // فيُلقَّ عندَ موتِهِ — تمامًا كسلوكِ swtpm-daemon الحقيقيّ — ويتحقّقُ زوالُهُ بـ ESRCH دونَ توسيعِ
+    // معيارِ الموتِ (حسمُ المراجعةِ 3): لا يُدّعى موتُ زومبيٍّ لم يُلقَّ بعدُ.
+    // انتظارُ ظهورِ الوسائطِ في /proc وانتظارِ جاهزيّةِ معالجِ SIGTERM (سباقٌ مُقاسٌ: الاكتشافُ قد يسبقُ
+    // تسجيلَ المعالجِ فيُميتُ الإشارةُ الأولى العمليةَ البريئةَ عن سباقٍ لا عن قصدٍ):
+    let fakePid = null;
+    for (let i = 0; i < 250; i++) {
+      const found = discoverSimPids(dir);
+      if (found.length === 1) {
+        fakePid = found[0];
+        if (existsSync(readyMarker)) break;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(fakePid !== null, 'fake swtpm must be discoverable by its state dir');
+    assert.ok(existsSync(readyMarker), 'fake swtpm must have its SIGTERM handler armed before the kill test');
     // القراءةُ الأولى (قبلَ SIGTERM) سليمةٌ؛ وعندَ التصعيدِ تغيّرَتِ الهويّةُ (رقمٌ أُعيدَ استخدامُهُ):
     let readCount = 0;
     const statefulRead = (_pid) => {
@@ -565,15 +576,18 @@ simTest('R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنع
     assert.equal(killSim(fakePid, { dir, graceMs: 60 }), true);
     assert.ok(pidProvenDead(fakePid), 'the fake simulator must be dead after honest escalation');
   } finally {
-    // الإيقافُ أولًا ثمّ الحذفُ — ولا يُحذَفُ المجلّدُ إلّا بعدَ إثباتِ زوالِ كلِّ عمليّةٍ تملكُهُ (حسمُ المراجعةِ 3).
-    let stopped = false;
-    try {
-      stopped = killSim(fakePid, { dir, graceMs: 60 });
-    } catch {
-      /* زالت سلفًا */
+    // الإيقافُ أولًا ثمّ الحذفُ — ولا يُحذَفُ المجلّدُ إلّا بعدَ إثباتِ زوالِ كلِّ عمليّةٍ تملكُهُ. والاكتشافُ
+    // يُعادُ هنا بنفسِهِ فلا يتيمَ حتى لو فشلَ تأكيدُ الاكتشافِ أعلاهُ (جولتا 3 و4).
+    let allStopped = true;
+    for (const pid of discoverSimPids(dir)) {
+      try {
+        allStopped = killSim(pid, { dir, graceMs: 60 }) && allStopped;
+      } catch {
+        /* زالت سلفًا */
+      }
     }
     try {
-      if (stopped && discoverSimPids(dir).length === 0) rmSync(dir, { recursive: true, force: true });
+      if (allStopped && discoverSimPids(dir).length === 0) rmSync(dir, { recursive: true, force: true });
     } catch {
       /* أفضلُ جهدٍ */
     }
