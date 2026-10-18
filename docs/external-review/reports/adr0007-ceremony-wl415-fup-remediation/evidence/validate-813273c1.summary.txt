@@ -1,0 +1,10 @@
+813273c1dd8a2e4cc73ca163ac2fef24a0e29e69
+# tests 2885
+# suites 101
+# pass 2593
+# fail 0
+# cancelled 0
+# skipped 292
+# todo 0
+real	8m31.942s
+validate_exit=0

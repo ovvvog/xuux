@@ -1,0 +1,9 @@
+813273c1dd8a2e4cc73ca163ac2fef24a0e29e69
+# tests 212
+# pass 210
+# fail 0
+# skipped 2
+# todo 0
+real	1m52.729s
+tpm_sim_ci_exit=0
+swtpm_after=0
