@@ -70,6 +70,60 @@ function ownsStateDir(args, dir) {
   return false;
 }
 
+// ── إشارةٌ مرتبطةٌ بهويّةٍ مستقرةٍ (pidfd) — إغلاقُ نافذةِ التحقّقِ-ثمّ-الإشارةِ (جولةُ المراجعةِ الرابعةِ) ──
+// نافذةُ «تحقّقٌ من الهويّةِ ثمّ kill بالرقمِ» غيرُ ذرّيّةٍ: قد يموتُ الهدفُ ويُعادُ استخدامُ رقمِهِ بينَهما
+// فتُصيبُ الإشارةُ بريئًا. الإغلاقُ: تُفتَحُ مقبضةُ العمليّةِ (pidfd) أولًا فتتعلّقُ بالعمليّةِ نفسِها لا برقمِها،
+// ثمّ يُعادُ إثباتُ الهويّةِ من /proc/<pid>/cmdline (سطرُ أوامرٍ كاملٌ + مسارُ الحالةِ)، ثمّ تُرسَلُ الإشارةُ
+// عبرَ المقبضةِ وحدَها — فأيُّ إعادةِ استخدامٍ للرقمِ بعدَ الفتحِ لا تُلامسُها الإشارةُ (ESRCH على الأصلِ).
+// القناةُ عبرَ python3 المتاحِ (os.pidfd_open وsignal.pidfd_send_signal — لينكس 5.3+)؛ وإن تعذّرتْ
+// (بيئةٌ بلا python3 أو بلا pidfd) فالرجوعُ إلى process.kill بالرقمِ **بنافذةٍ معلَنةٍ لا مُدّعى إغلاقُها**.
+const PIDFD_SIGNAL_SCRIPT = [
+  'import os, signal, sys',
+  'pid = int(sys.argv[1]); sig = int(sys.argv[2]); want_dir = sys.argv[3] if len(sys.argv) > 3 else None',
+  'try:',
+  '    fd = os.pidfd_open(pid)',
+  'except ProcessLookupError:',
+  "    print('esrch'); sys.exit(0)",
+  'except (AttributeError, OSError):',
+  "    print('unsupported'); sys.exit(0)",
+  'try:',
+  "    with open('/proc/%d/cmdline' % pid, 'rb') as f:",
+  '        raw = f.read()',
+  "    args = [a.decode('utf-8', 'replace') for a in raw.split(b'\0') if a]",
+  "    if not args or 'swtpm' not in args[0]:",
+  "        print('mismatch'); sys.exit(0)",
+  '    if want_dir is not None:',
+  "        ok = any(args[i] == '--tpmstate' and i + 1 < len(args) and args[i+1] == 'dir=' + want_dir for i in range(len(args)))",
+  '        if not ok:',
+  "            print('mismatch'); sys.exit(0)",
+  '    signal.pidfd_send_signal(fd, sig)',
+  "    print('ok')",
+  'except ProcessLookupError:',
+  "    print('esrch')",
+  'except (AttributeError, OSError):',
+  "    print('unsupported')",
+  'finally:',
+  '    try: os.close(fd)',
+  '    except OSError: pass',
+].join('\n');
+
+// تُعيدُ 'ok' (أُرسِلَتْ عبرَ المقبضةِ) أو 'esrch' (زالتْ قبلَها) أو 'mismatch' (الهويّةُ لم تُثبَتْ عبرَ
+// المقبضةِ — لا إشارةَ) أو 'unsupported' (القناةُ غيرُ متاحةٍ: بديلُ الرقمِ بنافذتِهِ المعلَنةِ).
+function pidfdSignal(pid, sig, dir) {
+  let r;
+  try {
+    r = spawnSync('python3', ['-c', PIDFD_SIGNAL_SCRIPT, String(pid), String(sig), dir === null ? '' : dir], {
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+  } catch {
+    return 'unsupported';
+  }
+  if (!r || r.status !== 0 || r.error) return 'unsupported';
+  const out = String(r.stdout || '').trim();
+  return out === 'ok' || out === 'esrch' || out === 'mismatch' ? out : 'unsupported';
+}
+
 // عمليّاتُ swtpm الحيّةُ المرتبطةُ بمسارِ حالةٍ بعينِهِ (هويةً كاملةً من الوسائطِ، لا مطابقةَ نصٍّ جزئيٍّ).
 export function discoverSimPids(dir) {
   return scanStateDir(dir).matches;
@@ -88,7 +142,10 @@ function scanStateDir(dir, { readCmdline = procArgs } = {}) {
     if (pid <= 1) continue;
     const args = readCmdline(pid);
     if (args === null || args.length === 0) {
-      // لا هويةَ مقروءةً: الزومبي منتهيةٌ، وخيطُ النواةِ ليسَ عمليّةَ مستخدمٍ؛ وما عدا ذلك حيّةٌ غيرُ محسومةِ الهويّةِ.
+      // لا هويةَ مقروءةً: الزومبي منتهيةٌ (خرجَتْ فعلًا ولم يُلقَّ أثرُها بعدُ) فلا تُشاوَهُ — تخطّيها في
+      // المسحِ لا يقتلُ شيئًا ولا يحذفُ مِلكَ حيٍّ (لا سطرَ أوامرَ لها أصلًا)، ومسارُ ملفِ PID يُبقيها غيرَ
+      // محسومةٍ (قراءةٌ فارغةٌ ⇒ identityUnknown ⇒ stopped=false). التحقّقُ موثَّقٌ في سجلِّ الأعمالِ (جولةُ 4).
+      // وخيطُ النواةِ ليسَ عمليّةَ مستخدمٍ؛ وما عدا ذلك حيّةٌ غيرُ محسومةِ الهويّةِ.
       const st = procState(pid);
       if (st === null) {
         if (alive(pid)) unresolved.push(pid);
@@ -133,16 +190,19 @@ export function killSim(
   } else {
     return true; // لا عمليّةَ بهذا الرقمِ: زالت.
   }
-  try {
-    if (injectKillFailure) {
-      const e = new Error('EPERM: simulated signal-permission failure (test injection)');
-      e.code = 'EPERM';
-      throw e;
+  // الإشارةُ الأولى (SIGTERM) عبرَ المقبضةِ المرتبطةِ بالهويّةِ إن تيسّرتْ، وإلّا فبالرقمِ مع نافذةٍ معلَنةٍ:
+  if (injectKillFailure) return false; // فشلُ إرسالٍ محقونٌ: ليسَ إثباتَ زوالٍ (كما كانَ يُرمى ويُلتقطُ)
+  const viaPidfd = pidfdSignal(pid, 'SIGTERM', dir);
+  if (viaPidfd === 'mismatch') return false; // الهويّةُ لم تُثبَتْ عبرَ المقبضةِ: لا إشارةَ
+  if (viaPidfd !== 'esrch' && viaPidfd !== 'ok' && viaPidfd !== 'unsupported') return false;
+  if (viaPidfd === 'unsupported') {
+    // بديلُ الرقمِ: تحقّقٌ سابقٌ ثمّ إشارةٌ — نافذةٌ غيرُ ذرّيّةٍ معلَنةٌ لا مُغلَقةٌ (قيدُ البيئةِ).
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch (e) {
+      if (e && e.code === 'ESRCH') return true; // زالت قبلَ الإشارةِ
+      return false; // رفضُ صلاحيّةٍ أو خطأٌ آخر: ليسَ إثباتَ زوالٍ
     }
-    process.kill(pid, 'SIGTERM');
-  } catch (e) {
-    if (e && e.code === 'ESRCH') return true; // زالت قبلَ الإشارةِ
-    return false; // رفضُ صلاحيّةٍ أو خطأٌ آخر: ليسَ إثباتَ زوالٍ
   }
   for (let waited = 0; waited < graceMs; waited += 20) {
     if (!alive(pid)) return true;
@@ -159,16 +219,18 @@ export function killSim(
   ) {
     return false; // الهويّةُ لم تُثبَتْ عندَ التصعيدِ: لا قتلَ لعمليّةٍ قد لا تكونَ مِلكَنا
   }
-  try {
-    if (injectKillFailure) {
-      const e = new Error('EPERM: simulated signal-permission failure (test injection)');
-      e.code = 'EPERM';
-      throw e;
+  if (injectKillFailure) return false; // فشلُ إرسالٍ محقونٌ عندَ التصعيدِ: ليسَ إثباتَ زوالٍ
+  // التصعيدُ (SIGKILL) عبرَ المقبضةِ كذلك: الإشارةُ لا تقعُ على الرقمِ وحدَهُ أبدًا حيثُ تيسّرتِ القناةُ.
+  const killViaPidfd = pidfdSignal(pid, 'SIGKILL', dir);
+  if (killViaPidfd === 'mismatch') return false; // الهويّةُ لم تُثبَتْ عبرَ المقبضةِ: لا تصعيدَ
+  if (killViaPidfd !== 'esrch' && killViaPidfd !== 'ok' && killViaPidfd !== 'unsupported') return false;
+  if (killViaPidfd === 'unsupported') {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch (e) {
+      if (e && e.code === 'ESRCH') return true;
+      return false;
     }
-    process.kill(pid, 'SIGKILL');
-  } catch (e) {
-    if (e && e.code === 'ESRCH') return true;
-    return false;
   }
   for (let waited = 0; waited < 1000; waited += 20) {
     if (!alive(pid)) return true;

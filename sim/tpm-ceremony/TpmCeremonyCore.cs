@@ -552,6 +552,13 @@ namespace Xuux.TpmCeremony
             return true;
         }
 
+        // هل بقيَ للعمليّةِ سياقٌ مسجَّلٌ؟ — شاهدُ الحالةِ الفعليّةِ لا مجاوَرةِ النداءِ: القيمةُ تُشتَقُّ من
+        // الخرائطِ نفسِها بعدَ استدعاءاتِ الإزالةِ، فحذفُ EndOfLife مع إبقاءِ الحقيقةِ يُسقطُ الشاهدَ (جولةُ 4).
+        public bool Knows(uint h)
+        {
+            return _names.ContainsKey(h) || _sessionType.ContainsKey(h);
+        }
+
         // الاسمُ المؤهَّلُ (Part 1 §16): QN(B) = nameAlg || H(QN(أصلِ B) || Name(B))، وQN للهرميّةِ = مقبضُها (4 بايتات).
         // قياسُ swtpm 2026-10-18: parentQualifiedName في ردِّ Create = 000B || SHA256(40000001 || Name(primary)).
         public static byte[] Qualified(byte[] parentQn, byte[] name)
@@ -1663,7 +1670,7 @@ namespace Xuux.TpmCeremony
                 throw new ResponseMalformedException("RESPONSE_HANDLE_PREEXISTING: " + what + " " + Hex.U32(h) + " existed in baseline sessions inventory", 0);
         }
 
-        private void SessionConsumed(uint h) { _transients.Remove(h); _ctx.EndOfLife(h); _r.Fact("ctx.endOfLife.sessionConsumed", "session-consumed " + Hex.U32(h)); } // استهلاكُ الجلسةِ زوالُ عمرٍ مُثبَتٌ: يُزالُ السياقُ — وشاهدُ المسارِ الحقيقيّ (WL-416، حسمُ المراجعةِ 3)
+        private void SessionConsumed(uint h) { _transients.Remove(h); _ctx.EndOfLife(h); _r.Fact("ctx.endOfLife.sessionConsumed", "session-consumed " + Hex.U32(h) + " contextGone=" + (!_ctx.Knows(h))); } // شاهدُ الحالةِ الفعلّيّةِ بعدَ الإزالةِ (جولتا 3 و4)
 
         private void SignAHash(string label, uint key, byte[] nonceTpm, out byte[] r, out byte[] s)
         {
@@ -1930,9 +1937,10 @@ namespace Xuux.TpmCeremony
                     _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": verified absent (release took effect)");
                     _transients.Remove(p.Handle);
                     _ctx.EndOfLife(p.Handle); // انتهاءُ عمرٍ مُثبَتٌ بجردٍ قرائيّ: يُزالُ السياقُ المسجَّلُ (WL-416)
-                    _r.Fact("ctx.endOfLife.flush", "verified-absent " + Hex.U32(p.Handle)); // شاهدُ المسارِ الحقيقيّ (حسمُ المراجعةِ 3)
+                    _r.Fact("ctx.endOfLife.flush", "verified-absent " + Hex.U32(p.Handle) + " contextGone=" + (!_ctx.Knows(p.Handle))); // شاهدُ الحالةِ الفعلّيّةِ بعدَ الإزالةِ (جولتا 3 و4)
                     return;
                 }
+                _r.Fact("ctx.endOfLife.flushKept", "present contextKnown=" + _ctx.Knows(p.Handle)); // المقبضُ الباقي: السياقُ محفوظٌ — والقيمةُ من الخرائطِ لا من الجوارِ (جولةُ 4)
                 _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; " +
                     LeftForCleanup("transient " + Hex.U32(p.Handle), "still present after lost flush reply; cleanup budget spent"));
                 return;
@@ -1966,9 +1974,10 @@ namespace Xuux.TpmCeremony
                     _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session gone; effect unverifiable and moot");
                     _transients.Remove(p.Handle);
                     _ctx.EndOfLife(p.Handle); // الجلسةُ اختفت فعلًا ⇒ زوالُ عمرٍ مُثبَتٌ (WL-416)
-                    _r.Fact("ctx.endOfLife.policyMutation", "session-gone " + Hex.U32(p.Handle)); // شاهدُ المسارِ الحقيقيّ (حسمُ المراجعةِ 3)
+                    _r.Fact("ctx.endOfLife.policyMutation", "session-gone " + Hex.U32(p.Handle) + " contextGone=" + (!_ctx.Knows(p.Handle))); // شاهدُ الحالةِ الفعلّيّةِ (جولتا 3 و4)
                     return;
                 }
+                _r.Fact("ctx.endOfLife.policyMutationKept", "present contextKnown=" + _ctx.Knows(p.Handle)); // الجلسةُ الباقيةُ: السياقُ محفوظٌ (جولةُ 4)
                 _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session still present; policy state unverifiable after lost response; " +
                     (_cleanupDone ? LeftForCleanup("transient " + Hex.U32(p.Handle), "session still present after lost policy response; cleanup budget spent") : "left for bounded cleanup"));
                 return;
