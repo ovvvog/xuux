@@ -75,13 +75,37 @@ function ownsStateDir(args, dir) {
 // فتُصيبُ الإشارةُ بريئًا. الإغلاقُ: تُفتَحُ مقبضةُ العمليّةِ (pidfd) أولًا فتتعلّقُ بالعمليّةِ نفسِها لا برقمِها،
 // ثمّ يُعادُ إثباتُ الهويّةِ من /proc/<pid>/cmdline (سطرُ أوامرٍ كاملٌ + مسارُ الحالةِ)، ثمّ تُرسَلُ الإشارةُ
 // عبرَ المقبضةِ وحدَها — فأيُّ إعادةِ استخدامٍ للرقمِ بعدَ الفتحِ لا تُلامسُها الإشارةُ (ESRCH على الأصلِ).
-// القناةُ عبرَ python3 المتاحِ (os.pidfd_open وsignal.pidfd_send_signal — لينكس 5.3+)؛ وإن تعذّرتْ
-// (بيئةٌ بلا python3 أو بلا pidfd) فالرجوعُ إلى process.kill بالرقمِ **بنافذةٍ معلَنةٍ لا مُدّعى إغلاقُها**.
+// القناةُ عبرَ python3 المتاحِ: os.pidfd_open/signal.pidfd_send_signal إن وُجدا، وإلّا فاستدعاءُ
+// النظامِ الخامُّ عبرَ ctypes (SYS_pidfd_open=434 وSYS_pidfd_send_signal=424 — أرقامٌ موحّدةٌ على
+// معماريّاتِ 64-بتِ لينكس 5.3+)؛ وإن تعذّرَ كلٌّ ذلكَ (بيئةٌ بلا python3 أو بلا pidfd أصلًا) فالرجوعُ
+// إلى process.kill بالرقمِ **بنافذةٍ معلَنةٍ لا مُدّعى إغلاقُها**.
 const PIDFD_SIGNAL_SCRIPT = [
   'import os, signal, sys',
   'pid = int(sys.argv[1]); sig = int(sys.argv[2]); want_dir = sys.argv[3] if len(sys.argv) > 3 else None',
+  "SYSCALLS = {'x86_64': (434, 424), 'aarch64': (434, 424), 'arm64': (434, 424)}",
+  'def raw_syscall(num, *a):',
+  '    import ctypes',
+  '    libc = ctypes.CDLL(None, use_errno=True)',
+  '    rc = libc.syscall(num, *a)',
+  '    if rc == -1:',
+  '        e = ctypes.get_errno()',
+  '        if e == 3: raise ProcessLookupError()',
+  '        raise OSError(e, os.strerror(e))',
+  '    return rc',
+  'def do_pidfd_open(pid):',
+  '    if hasattr(os, "pidfd_open"): return os.pidfd_open(pid)',
+  '    import platform',
+  '    nums = SYSCALLS.get(platform.machine())',
+  '    if nums is None: raise AttributeError("pidfd_open")',
+  '    return raw_syscall(nums[0], pid, 0)',
+  'def do_pidfd_send(fd, sig):',
+  '    if hasattr(signal, "pidfd_send_signal"): return signal.pidfd_send_signal(fd, sig)',
+  '    import platform',
+  '    nums = SYSCALLS.get(platform.machine())',
+  '    if nums is None: raise AttributeError("pidfd_send_signal")',
+  '    return raw_syscall(nums[1], fd, sig, 0, 0)',
   'try:',
-  '    fd = os.pidfd_open(pid)',
+  '    fd = do_pidfd_open(pid)',
   'except ProcessLookupError:',
   "    print('esrch'); sys.exit(0)",
   'except (AttributeError, OSError):',
@@ -96,7 +120,7 @@ const PIDFD_SIGNAL_SCRIPT = [
   "        ok = any(args[i] == '--tpmstate' and i + 1 < len(args) and args[i+1] == 'dir=' + want_dir for i in range(len(args)))",
   '        if not ok:',
   "            print('mismatch'); sys.exit(0)",
-  '    signal.pidfd_send_signal(fd, sig)',
+  '    do_pidfd_send(fd, sig)',
   "    print('ok')",
   'except ProcessLookupError:',
   "    print('esrch')",
