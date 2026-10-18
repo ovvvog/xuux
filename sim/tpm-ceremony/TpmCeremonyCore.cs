@@ -1663,7 +1663,7 @@ namespace Xuux.TpmCeremony
                 throw new ResponseMalformedException("RESPONSE_HANDLE_PREEXISTING: " + what + " " + Hex.U32(h) + " existed in baseline sessions inventory", 0);
         }
 
-        private void SessionConsumed(uint h) { _transients.Remove(h); _ctx.EndOfLife(h); } // استهلاكُ الجلسةِ زوالُ عمرٍ مُثبَتٌ (WL-416)
+        private void SessionConsumed(uint h) { _transients.Remove(h); _ctx.EndOfLife(h); _r.Fact("ctx.endOfLife.sessionConsumed", "session-consumed " + Hex.U32(h)); } // استهلاكُ الجلسةِ زوالُ عمرٍ مُثبَتٌ: يُزالُ السياقُ — وشاهدُ المسارِ الحقيقيّ (WL-416، حسمُ المراجعةِ 3)
 
         private void SignAHash(string label, uint key, byte[] nonceTpm, out byte[] r, out byte[] s)
         {
@@ -1930,6 +1930,7 @@ namespace Xuux.TpmCeremony
                     _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": verified absent (release took effect)");
                     _transients.Remove(p.Handle);
                     _ctx.EndOfLife(p.Handle); // انتهاءُ عمرٍ مُثبَتٌ بجردٍ قرائيّ: يُزالُ السياقُ المسجَّلُ (WL-416)
+                    _r.Fact("ctx.endOfLife.flush", "verified-absent " + Hex.U32(p.Handle)); // شاهدُ المسارِ الحقيقيّ (حسمُ المراجعةِ 3)
                     return;
                 }
                 _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; " +
@@ -1965,6 +1966,7 @@ namespace Xuux.TpmCeremony
                     _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session gone; effect unverifiable and moot");
                     _transients.Remove(p.Handle);
                     _ctx.EndOfLife(p.Handle); // الجلسةُ اختفت فعلًا ⇒ زوالُ عمرٍ مُثبَتٌ (WL-416)
+                    _r.Fact("ctx.endOfLife.policyMutation", "session-gone " + Hex.U32(p.Handle)); // شاهدُ المسارِ الحقيقيّ (حسمُ المراجعةِ 3)
                     return;
                 }
                 _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session still present; policy state unverifiable after lost response; " +

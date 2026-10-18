@@ -276,6 +276,20 @@ namespace Xuux.TpmCeremony.Tests
                 Changes++; _inner.Transmit(command);
                 throw new System.IO.IOException("WL413R3_CREATE_RESPONSE_LOSS");
             }
+            if (_mode == "flush-response-loss-noexec" && cc == Tpm.CC_FlushContext)
+            {
+                // الردُّ يضيعُ والأمرُ لم يُنفَّذ أصلًا: نتيجةٌ مجهولةٌ والمقبضُ باقٍ بحقٍّ — المصالحةُ القرائيّةُ
+                // تُبقي السياقَ ولا تدّعي زوالًا (الزوجُ الصادقُ لـ flush-response-loss — حسمُ المراجعةِ 3).
+                Changes++;
+                throw new System.IO.IOException("WL416_FLUSH_RESPONSE_LOSS_NOEXEC");
+            }
+            if (_mode == "flush-response-loss" && cc == Tpm.CC_FlushContext)
+            {
+                // الأمرُ يُنفَّذُ على الناقلِ الداخليّ لكنّ ردّهُ يضيعُ: نتيجةٌ مجهولةٌ تُفعّلُ المصالحةَ القرائيّةَ —
+                // الجردُ يُثبِتُ غيابَ المقبضِ فيُزالُ السياقُ من المسارِ الحقيقيّ (WL-416، حسمُ المراجعةِ 3).
+                Changes++; _inner.Transmit(command);
+                throw new System.IO.IOException("WL416_FLUSH_RESPONSE_LOSS");
+            }
             if (_mode == "policysigned-neg-loss" && cc == Tpm.CC_PolicySigned)
             {
                 // الرفضُ الثاني هو s2v.replay (old-signature) — مُغيّرٌ ومرفوضٌ ويضيعُ ردُّه (SOL413-06).
