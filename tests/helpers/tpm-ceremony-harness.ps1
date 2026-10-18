@@ -8,13 +8,15 @@
 #   -Mode fault          : مسابرُ WL-413 (‏-Fault): تشويهُ ردودٍ، فقدُ ردِّ تعريفٍ بعدَ/قبلَ التنفيذ، رفضُ تحريرٍ،
 #                          رمزٌ عامٌّ مكانَ رفضٍ سلبيٍّ، حجبُ حذفٍ دائم، وهوياتُ محاكٍ محرَّفة — مع جردِ
 #                          المواردِ قبلَ التشغيلِ وبعدَهُ (فهارسُ NV والجلساتُ) لإثباتِ البقايا على المحاكي.
+#   -Mode policysigned-shapes: (WL-414 FUP-SOL-01/05) PolicySigned حقيقيٌّ على swtpm لكلِّ (سياسة/تجربة × expiration
+#                          0/3600/-3600) وحكمُ ResponseSchema.Check على الردِّ غيرِ المشوَّه — حالاتٌ إيجابيّة.
 #   -Mode host-guard     : أوامرُ المراسمِ بالمنشئِ نفسِه تُعرَضُ على حارسِ أداةِ المضيف (TpmGuard) عبرَ
 #                           RecordingTransport ⇒ أوامرُ التغييرِ تُرفَضُ، واستعلاما الجرد يبلغان النقل.
 # يُستدعى من tests/sim/tpm-ceremony-*.test.mjs فقط، بعدَ assertSimulatorTcti في جهةِ Node.
 
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)][ValidateSet('inject-blocked', 'foreign-identity', 'fault', 'host-guard')][string]$Mode,
+  [Parameter(Mandatory = $true)][ValidateSet('inject-blocked', 'foreign-identity', 'fault', 'host-guard', 'policysigned-shapes')][string]$Mode,
   [ValidateSet('127.0.0.1', '::1')][string]$SimHost = '127.0.0.1',
   [int]$SimPort = 2321,
   [string]$BlockCc,
@@ -64,6 +66,15 @@ if ($Mode -eq 'foreign-identity') {
   $r = (New-Object Xuux.TpmCeremony.CeremonyRehearsal($t)).Run($Stages)
   $res = [ordered]@{ report = ($r.ToJson() | ConvertFrom-Json); received = @($t.Received) }
   [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 8 -Compress))
+  exit 0
+}
+
+if ($Mode -eq 'policysigned-shapes') {
+  $inner = New-Object Xuux.TpmCeremony.SwtpmLoopbackTransport($SimHost, $SimPort)
+  try {
+    $lines = [Xuux.TpmCeremony.Tests.PolicySignedShapes]::Run($inner)
+    [Console]::Out.WriteLine((@{ shapes = @($lines) } | ConvertTo-Json -Depth 4 -Compress))
+  } finally { $inner.Dispose() }
   exit 0
 }
 

@@ -1,0 +1,8 @@
+session=policy expiration=0 rc=0x00000000 timeoutLen=0 tag=0x8025 hierarchy=0x40000007 digestLen=0 SCHEMA_ACCEPT
+session=policy expiration=3600 rc=0x00000000 timeoutLen=0 tag=0x8025 hierarchy=0x40000007 digestLen=0 SCHEMA_REJECT RESPONSE_POLICY_TIMEOUT_MALFORMED: len=0
+session=policy expiration=-3600 rc=0x00000000 timeoutLen=8 tag=0x8025 hierarchy=0x40000001 digestLen=64 SCHEMA_ACCEPT
+session=trial expiration=0 rc=0x00000000 timeoutLen=0 tag=0x8025 hierarchy=0x40000007 digestLen=0 SCHEMA_ACCEPT
+session=trial expiration=3600 rc=0x00000000 timeoutLen=0 tag=0x8025 hierarchy=0x40000007 digestLen=0 SCHEMA_REJECT RESPONSE_POLICY_TIMEOUT_MALFORMED: len=0
+session=trial expiration=-3600 rc=0x00000000 timeoutLen=0 tag=0x8025 hierarchy=0x40000007 digestLen=0 SCHEMA_REJECT RESPONSE_POLICY_TIMEOUT_MALFORMED: len=0
+probe_exit=0
+swtpm_after_stop_with_dir=0
