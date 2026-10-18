@@ -77,8 +77,10 @@ function ownsStateDir(args, dir) {
 // عبرَ المقبضةِ وحدَها — فأيُّ إعادةِ استخدامٍ للرقمِ بعدَ الفتحِ لا تُلامسُها الإشارةُ (ESRCH على الأصلِ).
 // القناةُ عبرَ python3 المتاحِ: os.pidfd_open/signal.pidfd_send_signal إن وُجدا، وإلّا فاستدعاءُ
 // النظامِ الخامُّ عبرَ ctypes (SYS_pidfd_open=434 وSYS_pidfd_send_signal=424 — أرقامٌ موحّدةٌ على
-// معماريّاتِ 64-بتِ لينكس 5.3+)؛ وإن تعذّرَ كلٌّ ذلكَ (بيئةٌ بلا python3 أو بلا pidfd أصلًا) فالرجوعُ
-// إلى process.kill بالرقمِ **بنافذةٍ معلَنةٍ لا مُدّعى إغلاقُها**.
+// معماريّاتِ 64-بتِ لينكس 5.3+). وتمثيلُ الإشارةِ **رقمٌ** (SIGTERM=15 وSIGKILL=9): القناةَ لا تُمرَّرُ
+// الأسماءُ (عقدُ int(sys.argv[2]) في الطرفِ الآخرِ — حسمُ جولةِ المراجعةِ الخامسةِ). وإن تعذّرَ كلٌّ
+// ذلكَ (بيئةٌ بلا python3 أو بلا pidfd أصلًا) فلا رجوعَ إلى process.kill بالرقمِ أبدًا: الفشلُ
+// مغلَقٌ — لا إشارةَ ولا حذفَ ولا توقّفًا يُعلَنُ (LIVE-47: القيدُ البيئيُّ لا نافذةَ أمانَ).
 const PIDFD_SIGNAL_SCRIPT = [
   'import os, signal, sys',
   'pid = int(sys.argv[1]); sig = int(sys.argv[2]); want_dir = sys.argv[3] if len(sys.argv) > 3 else None',
@@ -113,7 +115,7 @@ const PIDFD_SIGNAL_SCRIPT = [
   'try:',
   "    with open('/proc/%d/cmdline' % pid, 'rb') as f:",
   '        raw = f.read()',
-  "    args = [a.decode('utf-8', 'replace') for a in raw.split(b'\0') if a]",
+  "    args = [a.decode('utf-8', 'replace') for a in raw.split(bytes([0])) if a]",
   "    if not args or 'swtpm' not in args[0]:",
   "        print('mismatch'); sys.exit(0)",
   '    if want_dir is not None:',
@@ -132,13 +134,17 @@ const PIDFD_SIGNAL_SCRIPT = [
 ].join('\n');
 
 // تُعيدُ 'ok' (أُرسِلَتْ عبرَ المقبضةِ) أو 'esrch' (زالتْ قبلَها) أو 'mismatch' (الهويّةُ لم تُثبَتْ عبرَ
-// المقبضةِ — لا إشارةَ) أو 'unsupported' (القناةُ غيرُ متاحةٍ: بديلُ الرقمِ بنافذتِهِ المعلَنةِ).
+// المقبضةِ — لا إشارةَ) أو 'unsupported' (القناةُ غيرُ متاحةٍ: لا رجوعَ بالرقمِ — الفشلُ مغلَقٌ عندَ
+// المتصلِ). تمثيلُ الإشارةِ رقمٌ: الأسماءُ تُترجَمُ هنا (عقدُ int() في الطرفِ الآخرِ — جولةُ 5).
+const SIGNAL_NUMBERS = { SIGTERM: 15, SIGKILL: 9, SIGINT: 2 };
 function pidfdSignal(pid, sig, dir) {
+  const sigNum = typeof sig === 'number' ? sig : SIGNAL_NUMBERS[sig];
+  if (!Number.isInteger(sigNum) || sigNum < 0) return 'unsupported';
   let r;
   try {
     r = spawnSync(
       'python3',
-      ['-c', PIDFD_SIGNAL_SCRIPT, String(pid), String(sig), dir === null ? '' : dir],
+      ['-c', PIDFD_SIGNAL_SCRIPT, String(pid), String(sigNum), dir === null ? '' : dir],
       {
         encoding: 'utf8',
         timeout: 10000,
@@ -158,28 +164,33 @@ export function discoverSimPids(dir) {
 }
 
 // مسحٌ قرائيٌّ لمسارِ حالةٍ: matches = عمليّاتٌ مُثبَتٌ أنها swtpm يملكُ مسارَ الحالةِ؛ unresolved = عمليّةٌ
-// حيّةٌ لا يمكنُ قراءةُ هويّتِها (سطرُ أوامرٍ غيرُ مقروءٍ لعمليّةٍ ليست زومبي ولا خيطَ نواةٍ) — لا يجوزُ
-// أن يُعلَنَ التوقّفُ مع بقائِها (WL-416 جولةُ المراجعةِ الثانيةِ: الاكتشافُ الفارغُ ليسَ إثباتَ موتٍ).
+// حيّةٌ لا يمكنُ قراءةُ هويّتِها (سطرُ أوامرٍ غيرُ مقروءٍ لعمليّةٍ ليست زومبي ولا خيطَ نواةٍ)؛ zombies =
+// عمليّةٌ خرجَتْ ولم يُلقَّ أثرُها بعدُ — لا يمكنُ إسنادُها (لا سطرَ أوامرَ) فقد تكونُ محاكينا الذي لم
+// يُلقَّ — فلا يجوزُ أن يُعلَنَ التوقّفُ مع بقائِها (حسمُ جولةِ المراجعةِ الخامسةِ: ESRCH وحدها، والزومبيُّ
+// ليست ESRCH). لا يُقتَلُ شيءٌ من هذا المسحِ: قراءةٌ فقط.
 // readCmdline: حقنةُ اختبارٍ لمحاكاةِ قراءةٍ غيرِ مقروءةٍ (الافتراضيُّ قراءةُ /proc الحقيقيّةُ).
 function scanStateDir(dir, { readCmdline = procArgs } = {}) {
   const matches = [];
   const unresolved = [];
+  const zombies = [];
   for (const entry of readdirSync('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
     const pid = Number(entry);
     if (pid <= 1) continue;
     const args = readCmdline(pid);
     if (args === null || args.length === 0) {
-      // لا هويةَ مقروءةً: الزومبي منتهيةٌ (خرجَتْ فعلًا ولم يُلقَّ أثرُها بعدُ) فلا تُشاوَهُ — تخطّيها في
-      // المسحِ لا يقتلُ شيئًا ولا يحذفُ مِلكَ حيٍّ (لا سطرَ أوامرَ لها أصلًا)، ومسارُ ملفِ PID يُبقيها غيرَ
-      // محسومةٍ (قراءةٌ فارغةٌ ⇒ identityUnknown ⇒ stopped=false). التحقّقُ موثَّقٌ في سجلِّ الأعمالِ (جولةُ 4).
-      // وخيطُ النواةِ ليسَ عمليّةَ مستخدمٍ؛ وما عدا ذلك حيّةٌ غيرُ محسومةِ الهويّةِ.
+      // لا هويةَ مقروءةً: الزومبي خرجَتْ فعلًا لكنّ أثرَها باقٍ وغيرُ مُسنَدٍ — تُسجَّلُ (لا يُعلَنُ معها
+      // توقّفٌ) ولا يُشارُ إليها ولا يُقتَلُ شيءٌ؛ ومسارُ ملفِ PID يُبقيها غيرَ محسومةٍ (قراءةٌ فارغةٌ ⇒
+      // identityUnknown ⇒ stopped=false). وخيطُ النواةِ ليسَ عمليّةَ مستخدمٍ؛ وما عدا ذلك حيّةٌ غيرُ محسومةِ الهويّةِ.
       const st = procState(pid);
       if (st === null) {
         if (alive(pid)) unresolved.push(pid);
         continue;
       }
-      if (st.state === 'Z') continue;
+      if (st.state === 'Z') {
+        zombies.push(pid); // غيرُ قابلةٍ للإسنادِ: قد تكونُ محاكينا — التوقّفُ لا يُثبَتُ معها
+        continue;
+      }
       if (st.ppid === 2 || st.ppid === 0) continue;
       if (alive(pid)) unresolved.push(pid);
       continue;
@@ -187,7 +198,7 @@ function scanStateDir(dir, { readCmdline = procArgs } = {}) {
     if (!args[0].includes('swtpm')) continue;
     if (dir === null || ownsStateDir(args, dir)) matches.push(pid);
   }
-  return { matches, unresolved };
+  return { matches, unresolved, zombies };
 }
 
 function sleepMs(ms) {
@@ -218,20 +229,11 @@ export function killSim(
   } else {
     return true; // لا عمليّةَ بهذا الرقمِ: زالت.
   }
-  // الإشارةُ الأولى (SIGTERM) عبرَ المقبضةِ المرتبطةِ بالهويّةِ إن تيسّرتْ، وإلّا فبالرقمِ مع نافذةٍ معلَنةٍ:
+  // الإشارةُ الأولى (SIGTERM) عبرَ المقبضةِ المرتبطةِ بالهويّةِ وحدَها — لا مسارَ آخرَ: تعذّرَتِ القناةُ
+  // (unsupported) فالإيقافُ يفشلُ مغلقًا (لا إشارةَ بالرقمِ البحتِ — حسمُ جولةِ المراجعةِ الخامسةِ):
   if (injectKillFailure) return false; // فشلُ إرسالٍ محقونٌ: ليسَ إثباتَ زوالٍ (كما كانَ يُرمى ويُلتقطُ)
   const viaPidfd = pidfdSignal(pid, 'SIGTERM', dir);
-  if (viaPidfd === 'mismatch') return false; // الهويّةُ لم تُثبَتْ عبرَ المقبضةِ: لا إشارةَ
-  if (viaPidfd !== 'esrch' && viaPidfd !== 'ok' && viaPidfd !== 'unsupported') return false;
-  if (viaPidfd === 'unsupported') {
-    // بديلُ الرقمِ: تحقّقٌ سابقٌ ثمّ إشارةٌ — نافذةٌ غيرُ ذرّيّةٍ معلَنةٌ لا مُغلَقةٌ (قيدُ البيئةِ).
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch (e) {
-      if (e && e.code === 'ESRCH') return true; // زالت قبلَ الإشارةِ
-      return false; // رفضُ صلاحيّةٍ أو خطأٌ آخر: ليسَ إثباتَ زوالٍ
-    }
-  }
+  if (viaPidfd !== 'esrch' && viaPidfd !== 'ok') return false; // mismatch/unsupported وغيرُهما: لا إشارةَ ولا زوالًا يُعلَن
   for (let waited = 0; waited < graceMs; waited += 20) {
     if (!alive(pid)) return true;
     sleepMs(20);
@@ -248,19 +250,9 @@ export function killSim(
     return false; // الهويّةُ لم تُثبَتْ عندَ التصعيدِ: لا قتلَ لعمليّةٍ قد لا تكونَ مِلكَنا
   }
   if (injectKillFailure) return false; // فشلُ إرسالٍ محقونٌ عندَ التصعيدِ: ليسَ إثباتَ زوالٍ
-  // التصعيدُ (SIGKILL) عبرَ المقبضةِ كذلك: الإشارةُ لا تقعُ على الرقمِ وحدَهُ أبدًا حيثُ تيسّرتِ القناةُ.
+  // التصعيدُ (SIGKILL) عبرَ المقبضةِ كذلك — لا مسارَ آخرَ: تعذّرَتِ القناةُ فالإيقافُ يفشلُ مغلقًا.
   const killViaPidfd = pidfdSignal(pid, 'SIGKILL', dir);
-  if (killViaPidfd === 'mismatch') return false; // الهويّةُ لم تُثبَتْ عبرَ المقبضةِ: لا تصعيدَ
-  if (killViaPidfd !== 'esrch' && killViaPidfd !== 'ok' && killViaPidfd !== 'unsupported')
-    return false;
-  if (killViaPidfd === 'unsupported') {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch (e) {
-      if (e && e.code === 'ESRCH') return true;
-      return false;
-    }
-  }
+  if (killViaPidfd !== 'esrch' && killViaPidfd !== 'ok') return false; // mismatch/unsupported: لا تصعيدَ
   for (let waited = 0; waited < 1000; waited += 20) {
     if (!alive(pid)) return true;
     sleepMs(20);
@@ -289,8 +281,9 @@ function defaultProbe(port) {
 }
 
 // إنهاءُ محاولةٍ: العمليّةُ المقصودةُ هي ما يربطُهُ سطرُ أوامرِهِ بمسارِ الحالةِ. لا يُقتَلُ ما لا يُثبَتُ
-// ملكُهُ، ولا يُعلَنَ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (إعادةُ مسحٍ قرائيةٍ بعدَ الإنهاءِ).
-function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline = procArgs }) {
+// ملكُهُ، ولا يُعلَنُ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (إعادةُ مسحٍ قرائيةٍ بعدَ الإنهاءِ)
+// وبانعدامِ كلِّ عمليّةٍ غيرِ محسومةِ الهويّةِ وكلِّ زومبي غيرِ مُلقّاةٍ (غيرِ قابلةٍ للإسنادِ — جولةُ 5).
+export function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline = procArgs }) {
   const pidFromFile = readPid(pidFile);
   let identityUnknown = false;
   let usedPidFile = false;
@@ -306,19 +299,26 @@ function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline = procA
     // وإلا: الملفُّ يشيرُ إلى عمليّةٍ لا تربطُها بمسارِ حالتِنا — ليست مِلكَ هذا التشغيلِ فلا تُمسّ.
   }
   // غيابُ ملفِ PID ليسَ دليلَ توقّفٍ: الاكتشافُ البديلُ من /proc يربطُ العمليّةَ بمسارِ الحالةِ الفعليّ.
-  // والاكتشافُ الفارغُ ليسَ إثباتَ موتٍ: عمليّةٌ حيّةٌ لا تُقرأُ هويّتُها تُبقي الحالةَ غيرَ محسومةٍ.
+  // والاكتشافُ الفارغُ ليسَ إثباتَ موتٍ: عمليّةٌ حيّةٌ لا تُقرأُ هويّتُها تُبقي الحالةَ غيرَ محسومةٍ،
+  // والزومبيُّ غيرُ المُلقّاةِ كذلك — لا سطرَ أوامرَ لها فلا إسنادَ، وقد تكونُ محاكينا (جولةُ 5).
   const scan = scanStateDir(dir, { readCmdline });
   if (scan.unresolved.length > 0) identityUnknown = true;
+  if (scan.zombies.length > 0) identityUnknown = true;
   const discovered = scan.matches;
-  const discoveryUsed = discovered.length > 0 || scan.unresolved.length > 0;
+  const discoveryUsed =
+    discovered.length > 0 || scan.unresolved.length > 0 || scan.zombies.length > 0;
   for (const p of discovered) {
     if (!killSim(p, { dir, injectKillFailure, readCmdline })) identityUnknown = true;
   }
-  // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ ولا عمليّةً غيرَ محسومةِ.
+  // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ، ولا عمليّةً غيرَ محسومةٍ،
+  // ولا زومبيً غيرَ مُلقّاةٍ (ESRCH وحدها دليلُ الزوالِ — لا يُكتفى بخروجٍ لم يُلقَ أثرُهُ).
   const remaining = scanStateDir(dir, { readCmdline });
   return {
     stopped:
-      !identityUnknown && remaining.matches.length === 0 && remaining.unresolved.length === 0,
+      !identityUnknown &&
+      remaining.matches.length === 0 &&
+      remaining.unresolved.length === 0 &&
+      remaining.zombies.length === 0,
     identityUnknown,
     discoveryUsed,
     usedPidFile,
