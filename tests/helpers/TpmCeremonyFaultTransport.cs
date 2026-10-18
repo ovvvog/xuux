@@ -87,6 +87,7 @@ namespace Xuux.TpmCeremony.Tests
         public uint ThirdPartyRc = 0xFFFFFFFF;
         private int _increments;
         private bool _dead;
+        private uint _livePrimary; // مقبضُـ CreatePrimary الحيّ (وضعُ load-alias-live)
         private uint _decoySession;
         private bool _defineLost;
 
@@ -100,7 +101,7 @@ namespace Xuux.TpmCeremony.Tests
             if (decoySession)
             {
                 byte[] z = new byte[32]; new System.Random(4).NextBytes(z);
-                Resp p = Resp.Parse(inner.Transmit(Cmd.StartAuthSession(Tpm.SE_POLICY, z)), 1, Tpm.ST_NO_SESSIONS, 0);
+                Resp p = Resp.Parse(inner.Transmit(Cmd.StartAuthSession(Tpm.SE_POLICY, z)), 1, Tpm.ST_NO_SESSIONS, 0, new bool[0]);
                 _decoySession = p.Handles[0];
             }
         }
@@ -373,6 +374,132 @@ namespace Xuux.TpmCeremony.Tests
                 {
                     Rd q = new Rd(prm); ushort a = q.U16(); ushort hh = q.U16(); q.B2B(); byte[] ss2 = q.Raw(q.Remaining);
                     return new Wr().U16(a).U16(hh).B2B(new byte[1]).Raw(ss2).Bytes();
+                });
+            }
+            // ── مسابرُ جولةِ المراجعةِ الثالثةِ R3 (تقاريرُ المراجعينَ الثلاثةِ على de099aa8) ──
+            // R3SOL-02/PC-R3-4: ملفُّ سياسةٍ كاملٌ (nonce بطولِ 32 وattrs=0x00) في ردِّ أمرٍ بكلمةِ سرٍّ —
+            // الفاحصُ كانَ يقبلُ أحدَ الملفينِ بلا ربطٍ بنوعِ الجلسةِ في الطلبِ.
+            if (rc == 0 && _mode == "auth-cross-policy-on-password" && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Changes++;
+                return RewriteAuth(raw, 0, delegate(byte[] a)
+                {
+                    byte[] nonce = new byte[32]; for (int i = 0; i < 32; i++) nonce[i] = (byte)i;
+                    return new Wr().B2B(nonce).U8(0x00).B2B(new byte[0]).Bytes();
+                });
+            }
+            // R3SOL-02: أولُ ردٍّ بتفويضِ جلسةِ سياسةٍ (nonce بطولِ 32 في الأصلِ) يُصغّرُ إلى 16 —
+            // أولُ ردٍّ من هذا النوعِ في البروفةِ هوَ s2.trial:PolicyGetDigest (قرائيٌّ فقط).
+            if (rc == 0 && _mode == "auth-policy-nonce16" && cc == Tpm.CC_NV_Increment && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                // أولُ ردِّ تفويضِ جلسةِ سياسةٍ: NV_Increment بالجلسةِ (صفرُ مقابضٍَ في الردّ؛ nonceTPM=32)
+                Rd a = new Rd(raw); a.U16(); a.U32(); a.U32(); uint ps = a.U32(); a.Raw((int)ps);
+                if (a.B2B().Length == 32)
+                {
+                    Changes++;
+                    return RewriteAuth(raw, 0, delegate(byte[] x)
+                    {
+                        return new Wr().B2B(new byte[16]).U8(0x00).B2B(new byte[0]).Bytes();
+                    });
+                }
+            }
+            // R3SOL-02: البتُّ المحجوزُ 3 (attrs=0x08) في ردِّ تفويضِ جلسةِ سياسةٍ.
+            if (rc == 0 && _mode == "auth-policy-attrs08" && cc == Tpm.CC_NV_Increment && tag == Tpm.ST_SESSIONS && Changes == 0)
+            {
+                Rd a = new Rd(raw); a.U16(); a.U32(); a.U32(); uint ps = a.U32(); a.Raw((int)ps);
+                if (a.B2B().Length == 32)
+                {
+                    Changes++;
+                    return RewriteAuth(raw, 0, delegate(byte[] x)
+                    {
+                        return new Wr().B2B(new byte[32]).U8(0x08).B2B(new byte[0]).Bytes();
+                    });
+                }
+            }
+            // R3SOL-03/PC-R3-1: timeout بطولِ 8 في ردِّ PolicySigned ناجحٍ عندَ expiration=0.
+            if (rc == 0 && _mode == "policysigned-timeout-nonempty" && cc == Tpm.CC_PolicySigned && Changes == 0)
+            {
+                Changes++;
+                return RewriteNoSessionsParams(raw, 0, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); q.B2B(); // الـtimeout الأصليُّ الفارغُ يُستبدلُ
+                    return new Wr().B2B(new byte[8]).Raw(q.Raw(q.Remaining)).Bytes();
+                });
+            }
+            // R3SOL-03: هرميةُ تذكرةِ الإنشاءِ 0x40000002 (ليست هرميةً) في ردِّ CreatePrimary.
+            if (rc == 0 && _mode == "ticket-hierarchy-revoke" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++;
+                return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); byte[] pub = q.B2B(); byte[] cd = q.B2B(); byte[] ch = q.B2B();
+                    ushort ttag = q.U16(); uint hh = q.U32(); byte[] td = q.B2B(); byte[] nm = q.Raw(q.Remaining);
+                    return new Wr().B2B(pub).B2B(cd).B2B(ch).U16(ttag).U32(0x40000002u).B2B(td).Raw(nm).Bytes();
+                });
+            }
+            // R3SOL-03: بصمةُ تذكرةِ الإنشاءِ بطولِ بايتٍ واحدٍ في ردِّ CreatePrimary.
+            if (rc == 0 && _mode == "ticket-digest-short" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++;
+                return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); byte[] pub = q.B2B(); byte[] cd = q.B2B(); byte[] ch = q.B2B();
+                    ushort ttag = q.U16(); uint hh = q.U32(); byte[] td = q.B2B(); byte[] nm = q.Raw(q.Remaining);
+                    return new Wr().B2B(pub).B2B(cd).B2B(ch).U16(ttag).U32(hh).B2B(new byte[1]).Raw(nm).Bytes();
+                });
+            }
+            // R3SOL-01/PC-R3-2: صفحةُ جردٍ بمقبضٍ واحدٍ مكرّرٍ (تصنيعٌ على أولِ صفحةٍ فارغةٍ) —
+            // الترتيبُ الصاعدُ الصارمُ (والتكرارُ) يُرفضُ باسمٍ مسمّى.
+            if (rc == 0 && _mode == "inventory-duplicate" && cc == Tpm.CC_GetCapability && Changes == 0)
+            {
+                Rd r0 = new Rd(raw); r0.U16(); r0.U32(); r0.U32(); byte more = r0.U8(); uint cap = r0.U32(); uint cnt = r0.U32();
+                if (cap == 1 && more == 0 && cnt == 0)
+                {
+                    Changes++;
+                    return RewriteNoSessionsParams(raw, 0, delegate(byte[] prm)
+                    {
+                        return new Wr().U8(0).U32(1).U32(2).U32(0x01000001u).U32(0x01000001u).Bytes();
+                    });
+                }
+            }
+            // PC-R3-3/قياسُ grok: ردُّ Load يعيدُ مقبضَ CreatePrimary الحيّ (لم يُحرّر) — التبنيَ
+            // يرفضُهُ الآنَ باسمٍ مسمّى (كانَ يقارنُ خطَّ الأساسِ فقطْ فيفشلُ مغلقًا لاحقًا برمزٍ عامٍّ).
+            if (rc == 0 && _mode == "load-alias-live" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++;
+                Rd q = new Rd(raw); q.U16(); q.U32(); q.U32(); _livePrimary = q.U32();
+                return raw;
+            }
+            if (rc == 0 && _mode == "load-alias-live" && cc == Tpm.CC_Load && Changes == 1 && _livePrimary != 0)
+            {
+                Changes++;
+                byte[] forged = (byte[])raw.Clone();
+                forged[10] = (byte)(_livePrimary >> 24); forged[11] = (byte)(_livePrimary >> 16);
+                forged[12] = (byte)(_livePrimary >> 8); forged[13] = (byte)_livePrimary;
+                return forged;
+            }
+            // قياسُ المراجعينَ: مقبضُ ردِّ StartAuthSession بفئةِ كائنٍ عابرٍ (0x80) — يُرفضُ باسمٍ.
+            if (rc == 0 && _mode == "startsession-wrongclass" && cc == Tpm.CC_StartAuthSession && Changes == 0)
+            {
+                Changes++;
+                byte[] forged = (byte[])raw.Clone();
+                forged[10] = 0x80; forged[11] = 0x00; forged[12] = 0x00; forged[13] = 0x05; // مقبضٌ غيرُ حيّّ بفئةِ كائنٍ عابرٍ
+                return forged;
+            }
+            // R3SOL-05 (قبولٌ مشروعٌ): بياناتُ إنشاءٍ بعددِ PCR صفرٍ وبصمةِ PCR فارغةٍ (جملةُ الجدولِ 222
+            // في Part 2) معَ إعادةِ حسابِ creationHash — كانَ الرفضُ السابقُ لهذا الترميزِ السائغِ انحسارًا.
+            if (rc == 0 && _mode == "creationdata-empty-pcrdigest" && cc == Tpm.CC_CreatePrimary && Changes == 0)
+            {
+                Changes++;
+                return RewriteParams(raw, 1, delegate(byte[] prm)
+                {
+                    Rd q = new Rd(prm); byte[] pub = q.B2B(); byte[] cd = q.B2B(); q.B2B();
+                    ushort ttag = q.U16(); uint hh = q.U32(); byte[] td = q.B2B(); byte[] nm = q.Raw(q.Remaining);
+                    Rd c = new Rd(cd); c.U32(); ushort dlen = c.U16(); c.Raw(dlen); byte locality = c.U8(); ushort pna = c.U16();
+                    byte[] f1 = c.B2B(); byte[] f2 = c.B2B(); byte[] f3 = c.B2B();
+                    byte[] ncd = new Wr().U32(0).U16(0).U8(locality).U16(pna).B2B(f1).B2B(f2).B2B(f3).Bytes();
+                    byte[] nch = Sha.H(ncd);
+                    return new Wr().B2B(pub).B2B(ncd).B2B(nch).U16(ttag).U32(hh).B2B(td).Raw(nm).Bytes();
                 });
             }
             if (rc == 0 && _mode == "schema-policysigned-digest" && cc == Tpm.CC_PolicySigned && Changes == 0)

@@ -457,7 +457,7 @@ namespace Xuux.TpmCeremony
         // تدقيقٌ صارمٌ مربوطٌ بشكلِ الطلبِ (WL-413/SOL-01): وسمُ الردِّ عندَ النجاحِ يطابقُ وسمَ الطلبِ،
         // وردُّ الخطأِ رأسٌ فقط (10 بايتاتٍ) بوسمِ بلا جلساتٍ، ومناطقُ تفويضِ الردِّ بعددِ جلساتِ الطلبِ
         // تُفكُّ وتُستهلَكُ كاملةً — أيُّ تشويهٍ يُفشِلُ مغلقًا برمزٍ مسمّى، لا يُتجاوَزُ إلى الافتراضات.
-        public static Resp Parse(byte[] raw, int handleCount, ushort expectedTag, int authCount)
+        public static Resp Parse(byte[] raw, int handleCount, ushort expectedTag, int authCount, bool[] passwordSessions)
         {
             if (raw == null || raw.Length < 10) throw new CeremonyFailedException("RESPONSE_TRUNCATED_HEADER", 0);
             Rd r = new Rd(raw);
@@ -501,9 +501,10 @@ namespace Xuux.TpmCeremony
                         byte attrs = r.U8();
                         byte[] hmac = r.B2B();
                         bool passwordProfile = nonce.Length == 0 && hmac.Length == 0 && attrs == 0x01;
-                        bool policyProfile = nonce.Length >= 16 && nonce.Length <= 64 && hmac.Length == 0 && (attrs & 0xF0) == 0x00;
-                        if (!passwordProfile && !policyProfile)
-                            throw new ResponseMalformedException("RESPONSE_AUTH_CONTENT_MALFORMED: auth#" + i + " nonceLen=" + nonce.Length + " attrs=0x" + attrs.ToString("x2") + " hmacLen=" + hmac.Length, 0);
+                        bool policyProfile = nonce.Length == 32 && hmac.Length == 0 && attrs == 0x00; // قياسُ swtpm: بلا continueSession
+                        bool expectPassword = passwordSessions != null && i < passwordSessions.Length && passwordSessions[i];
+                        if (expectPassword ? !passwordProfile : !policyProfile)
+                            throw new ResponseMalformedException("RESPONSE_AUTH_CONTENT_MALFORMED: auth#" + i + " nonceLen=" + nonce.Length + " attrs=0x" + attrs.ToString("x2") + " hmacLen=" + hmac.Length + " expected=" + (expectPassword ? "password" : "policy"), 0);
                     }
                 }
                 catch (ResponseMalformedException) { throw; }
@@ -538,6 +539,28 @@ namespace Xuux.TpmCeremony
         }
 
         // عددُ مقابضِ الطلبِ لكلِّ أمرٍ تستعملُه البروفةُ (Part 3) — لاستخراجِ منطقةِ معاملاتِ الطلبِ.
+        // نوعُ كلِّ جلسةٍ في طلبٍ ما: RS_PW (كلمةُ سرٍّ) أم مقبضُ جلسةٍ (سياسة/تجريبية) — من بايتاتِ الطلبِ
+        // نفسِه. يُربَطُ ملفُّ تفويضِ الردِّ بنوعِ الجلسةِ المُرسَلةِ (R3SOL-02/قياسُ المراجعينَ الثلاثةِ):
+        // ملفُّ السياسةِ في ردِّ أمرٍ بكلمةِ سرٍّ — والعكسُ — كان يُقبلُ لأنّ الفاحصَ يقبلُ أحدَ الملفينِ
+        // على أيِّ منطقةِ تفويضٍ. attrs=0x01 (continueSession وحده) للملفينِ، وnonceTPM للسياسةِ = 32
+        // (حجمُ nonceCaller في هذهِ البروفةِ؛ nonceTPM يُحفظُ من أولِّ nonceCaller — Part 1 §19.6.3.2).
+        public static bool[] ExpectedPasswordSessions(byte[] cmd, int authCount)
+        {
+            bool[] kinds = new bool[authCount];
+            ushort tag = (ushort)((cmd[0] << 8) | cmd[1]);
+            if (tag != Tpm.ST_SESSIONS || authCount == 0) return kinds;
+            Rd c = new Rd(cmd);
+            c.U16(); c.U32(); uint cc = c.U32();
+            c.Raw(4 * HandleCountOf(cc));
+            c.U32(); // حجمُ منطقةِ التفويضِ
+            for (int i = 0; i < authCount; i++)
+            {
+                kinds[i] = c.U32() == Tpm.RS_PW;
+                c.B2B(); c.U8(); c.B2B(); // nonce، السماتُ، hmac للطلبِ
+            }
+            return kinds;
+        }
+
         private static int HandleCountOf(uint cc)
         {
             switch (cc)
@@ -584,7 +607,10 @@ namespace Xuux.TpmCeremony
         private static void CreationTicket(ushort tag, uint hierarchy, string what)
         {
             if (tag != 0x8021) throw new ResponseMalformedException("RESPONSE_TICKET_TAG_MALFORMED: " + what + " 0x" + tag.ToString("x4"), 0);
-            if (hierarchy < 0x40000001u || hierarchy > 0x40000007u)
+            // قيمُ TPMI_RH_HIERARCHY الأربعُ حصرًا (Part 2 جدولُ 29/51/28: المالكُ 0x40000001،
+            // NULL 0x40000007، التأييدُ 0x4000000B، المنصّةُ 0x4000000C) — نطاقٌ عدديٌّ متصلٌ يقبلُ
+            // مقابضَ ليست هرميّةً (R3SOL-03/قياسُ المراجعينَ) ويَرفضُ هرميّةً صالحةً أعلى.
+            if (hierarchy != 0x40000001u && hierarchy != 0x40000007u && hierarchy != 0x4000000Bu && hierarchy != 0x4000000Cu)
                 throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: " + what + " " + Hex.U32(hierarchy), 0);
         }
 
@@ -594,7 +620,10 @@ namespace Xuux.TpmCeremony
         {
             if (tag != 0x8023 && tag != 0x8025)
                 throw new ResponseMalformedException("RESPONSE_TICKET_TAG_MALFORMED: " + what + " 0x" + tag.ToString("x4"), 0);
-            if (hierarchy < 0x40000001u || hierarchy > 0x40000007u)
+            // قيمُ TPMI_RH_HIERARCHY الأربعُ حصرًا (Part 2 جدولُ 29/51/28: المالكُ 0x40000001،
+            // NULL 0x40000007، التأييدُ 0x4000000B، المنصّةُ 0x4000000C) — نطاقٌ عدديٌّ متصلٌ يقبلُ
+            // مقابضَ ليست هرميّةً (R3SOL-03/قياسُ المراجعينَ) ويَرفضُ هرميّةً صالحةً أعلى.
+            if (hierarchy != 0x40000001u && hierarchy != 0x40000007u && hierarchy != 0x4000000Bu && hierarchy != 0x4000000Cu)
                 throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: " + what + " " + Hex.U32(hierarchy), 0);
         }
 
@@ -619,7 +648,7 @@ namespace Xuux.TpmCeremony
         {
             try
             {
-                if (cd.Length < 38 || cd.Length > 512)
+                if (cd.Length < 13 || cd.Length > 512)
                     throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " len=" + cd.Length, 0);
                 Rd q = new Rd(cd);
                 uint count = q.U32();
@@ -631,13 +660,24 @@ namespace Xuux.TpmCeremony
                     if (sz > 16) throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " pcrSelect size=" + sz, 0);
                     q.Raw(sz);
                 }
-                if (q.U16() != 32) throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " pcrDigest not 32", 0);
-                q.Raw(32);
+                // بصمةُ PCR: 32 (قياسُ swtpm عندَ قائمةٍ فارغةٍ) أو 0 عندَ قائمةٍ فارغةٍ (جملةُ الجدولِ
+                // 222 في Part 2: pcrDigest.size صفرٌ عندَ قائمةٍ فارغةٍ) — كلا الترميزينِ سائغٌ (R3SOL-05).
+                ushort dlen = q.U16();
+                if (dlen != 32 && !(count == 0 && dlen == 0))
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " pcrDigest len=" + dlen, 0);
+                q.Raw(dlen);
                 q.U8();  // locality
-                q.U16(); // parentNameAlg
+                // خوارزميّةُ اسمِ الأصلِ: ALG_NULL لإنشاءِ Primary بلا أصلٍ (قياسُ swtpm)، أو SHA-256
+                // لإنشاءِ مفتاحٍ ابنٍ — ما عدا هذينِ فشلٌ مسمّى (قياسُ المراجعينَ: 0xffff كان يُقبلُ).
+                ushort pna = q.U16();
+                if (pna != Tpm.ALG_NULL && pna != Tpm.ALG_SHA256)
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " parentNameAlg=0x" + pna.ToString("x4"), 0);
+                // ثلاثةُ حقولِ B2B ذيليّةٍ حصرًا (outsideInfo وparentName وparentQualifiedName — Part 2
+                // جدولُ 212): حقولٌ ناقصةٌ (صفرٌ) أو رابعٌ زائدٌ كان يُقبلُ (قياسُ المراجعينَ).
                 int fields = 0;
-                while (q.Remaining >= 2 && fields < 4) { q.B2B(); fields++; }
-                if (q.Remaining != 0) throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " tail=" + q.Remaining, 0);
+                while (q.Remaining >= 2 && fields < 3) { q.B2B(); fields++; }
+                if (fields != 3 || q.Remaining != 0)
+                    throw new ResponseMalformedException("RESPONSE_CREATION_DATA_MALFORMED: " + what + " tailFields=" + fields + " tail=" + q.Remaining, 0);
             }
             catch (ResponseMalformedException) { throw; }
             catch (Exception)
@@ -688,18 +728,32 @@ namespace Xuux.TpmCeremony
                     return;
                 }
                 case Tpm.CC_Load:
-                    Name(r.B2B(), "Load"); End(r, "Load"); return;
+                {
+                    // اسمُ الكائنِ المحمَّلِ يطابقُ المنطقةَ العامّةَ المُرسَلةَ في الطلبِ (R3SOL-03/قياسُ
+                    // المراجعينَ): قلبُ بايتٍ في Name كان يُقبلُ لأنّ الفحصَ بنيويٌّ فقط.
+                    byte[] nm = r.B2B(); End(r, "Load");
+                    Name(nm, "Load");
+                    Rd cp = new Rd(CmdParams(cmd)); cp.B2B(); byte[] pub = cp.B2B(); // outPrivate ثمّ المنطقةُ العامّةُ
+                    if (Hex.Of(nm) != Hex.Of(Policy.Name(pub)))
+                        throw new ResponseMalformedException("RESPONSE_NAME_HASH_MISMATCH: Load", 0);
+                    return;
+                }
                 case Tpm.CC_Create:
                 {
                     r.B2B(); // outPrivate
                     byte[] pub = r.B2B();
                     byte[] cd = r.B2B();
                     byte[] ch = r.B2B();
-                    ushort ttag = r.U16(); uint h = r.U32(); r.B2B();
+                    ushort ttag = r.U16(); uint h = r.U32(); byte[] tdg = r.B2B();
                     End(r, "Create");
                     EccPublic(pub, CmdTemplate(cmd), "Create");
                     CreationData(cd, "Create");
                     if (ch.Length != 32) throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MALFORMED: len=" + ch.Length, 0);
+                    // بصمةُ تذكرةِ الإنشاءِ بطولِها المقيسِ 64 (قياسُ swtpm؛ المراجعونَ قاسوا قبولَ بايتٍ واحدٍ
+                    // و100) — فحصُ الطولِ الآن مسمّى (R3SOL-03).
+                    if (tdg.Length != 64) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: Create len=" + tdg.Length, 0);
+                    if (Hex.Of(Sha.H(cd)) != Hex.Of(ch))
+                        throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MISMATCH: Create", 0);
                     CreationTicket(ttag, h, "Create");
                     return;
                 }
@@ -708,12 +762,16 @@ namespace Xuux.TpmCeremony
                     byte[] pub = r.B2B();
                     byte[] cd = r.B2B();
                     byte[] ch = r.B2B();
-                    ushort ttag = r.U16(); uint h = r.U32(); r.B2B();
+                    ushort ttag = r.U16(); uint h = r.U32(); byte[] tdg = r.B2B();
                     byte[] nm = r.B2B();
                     End(r, "CreatePrimary");
                     EccPublic(pub, CmdTemplate(cmd), "CreatePrimary");
                     CreationData(cd, "CreatePrimary");
                     if (ch.Length != 32) throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MALFORMED: len=" + ch.Length, 0);
+                    // بصمةُ تذكرةِ الإنشاءِ وفحصُ اتساقِ creationHash مع بياناتِ الإنشاءِ (R3SOL-03).
+                    if (tdg.Length != 64) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=" + tdg.Length, 0);
+                    if (Hex.Of(Sha.H(cd)) != Hex.Of(ch))
+                        throw new ResponseMalformedException("RESPONSE_CREATION_HASH_MISMATCH: CreatePrimary", 0);
                     CreationTicket(ttag, h, "CreatePrimary");
                     Name(nm, "CreatePrimary");
                     if (Hex.Of(nm) != Hex.Of(Policy.Name(pub)))
@@ -733,22 +791,33 @@ namespace Xuux.TpmCeremony
                 }
                 case Tpm.CC_PolicySigned:
                 {
-                    r.B2B(); // timeout (فارغٌ عند expiration=0 — قياسُ swtpm)
+                    byte[] to = r.B2B(); // timeout: فارغٌ عند expiration=0 (قياسُ swtpm) — وبصمةُ التذكرةِ
                     ushort ttag = r.U16(); uint h = r.U32(); byte[] td = r.B2B();
                     End(r, "PolicySigned");
+                    // ربطُ timeout بـexpiration المُرسَلِ في الطلبِ (R3SOL-03/قياسُ المراجعينَ): عندَ الصفرِ
+                    // لا قيدَ توقيتَ فلا timeoutَ (Part 3 §23.3 جدولُ 118)، وعندَ غيرِهِ فحجمُهُ 8 كحدٍّ أعلى
+                    // (TPM2B_TIMEOUT — Part 2 جدولُ 88). القبولُ السابقُ لغيرِ الفارغِ عندَ الصفرِ كان مقيسًا.
+                    Rd cp = new Rd(CmdParams(cmd)); cp.B2B(); cp.B2B(); cp.B2B(); int expiration = (int)cp.U32();
+                    if (expiration == 0 && to.Length != 0)
+                        throw new ResponseMalformedException("RESPONSE_POLICY_TIMEOUT_MALFORMED: len=" + to.Length + " at expiration=0", 0);
+                    if (expiration != 0 && (to.Length == 0 || to.Length > 8))
+                        throw new ResponseMalformedException("RESPONSE_POLICY_TIMEOUT_MALFORMED: len=" + to.Length, 0);
                     AuthTicket(ttag, h, "PolicySigned");
                     if (td.Length > 64) throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: len=" + td.Length, 0);
                     return;
                 }
                 case Tpm.CC_GetCapability:
                 {
-                    Rd c = new Rd(cmd); c.Raw(10); uint askedCap = c.U32(); uint askedProp = c.U32(); c.U32();
+                    Rd c = new Rd(cmd); c.Raw(10); uint askedCap = c.U32(); uint askedProp = c.U32(); uint askedCount = c.U32();
                     byte more = r.U8();
                     if (more > 1) throw new CeremonyFailedException("RESPONSE_CAPABILITY_MORE_MALFORMED", 0);
                     uint cap = r.U32();
                     if (cap != askedCap) throw new CeremonyFailedException("RESPONSE_CAPABILITY_MISMATCH: asked=" + Hex.U32(askedCap) + " got=" + Hex.U32(cap), 0);
                     uint n = r.U32();
                     if (n > 256) throw new CeremonyFailedException("RESPONSE_CAPABILITY_COUNT_IMPLAUSIBLE: " + n, 0);
+                    // عددٌ يفوقُ المطلوبَ في الطلبِ فشلٌ مسمّى (R3SOL-01/فحصُ الحدودِ المباشر): الردُّ
+                    // يعيدُ أكثرَ ممّا طُلب (65 لطلبِ 64) — الطلبُ هو المرجعُ (Part 3 §30.2).
+                    if (n > askedCount) throw new ResponseMalformedException("RESPONSE_CAPABILITY_COUNT_MALFORMED: " + n + " > requested " + askedCount, 0);
                     // تقدّمٌ مزعومٌ بلا أثرٍ (SOL413-02): more=1 مع count=0 فشلٌ مسمّى لا نهايةٌ صامتةٌ للجردِ.
                     if (more == 1 && n == 0) throw new ResponseMalformedException("RESPONSE_CAPABILITY_NO_PROGRESS: more=1 count=0", 0);
                     int width = cap == 1 ? 4 : cap == 6 ? 8 : -1;
@@ -757,6 +826,9 @@ namespace Xuux.TpmCeremony
                     {
                         // فئةُ المقابضِ المعادةِ تطابقُ فئةَ property المطلوبِ (SOL413-02): مقبضٌ من فئةٍ أخرى
                         // في جردِ الجلساتِ/العابرةِ/NV فشلٌ مسمّى — لا إيقافٌ صامتٌ يجعلُ الجردَ ناقصًا.
+                        // صعودٌ صارمٌ من قيمةِ الطلبِ (R3SOL-01/فحصُ الحدودِ): المقابضُ تعودُ تصاعديًا من
+                        // property فلا مقبضَ دونَه ولا ترتيبًا تنازليًا ولا تكرارًا (Part 3 §30.2).
+                        uint prev = 0;
                         for (uint i = 0; i < n; i++)
                         {
                             uint hd = r.U32();
@@ -764,9 +836,21 @@ namespace Xuux.TpmCeremony
                             byte want = (byte)(askedProp >> 24);
                             bool ok = (want == 0x02 || want == 0x03) ? (cls == 0x02 || cls == 0x03) : cls == want;
                             if (!ok) throw new ResponseMalformedException("RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: " + Hex.U32(hd) + " asked=" + Hex.U32(askedProp), 0);
+                            if (hd < askedProp || (i > 0 && hd <= prev))
+                                throw new ResponseMalformedException("RESPONSE_CAPABILITY_HANDLE_ORDER_MALFORMED: " + Hex.U32(hd) + " after " + Hex.U32(prev) + " from " + Hex.U32(askedProp), 0);
+                            prev = hd;
                         }
                     }
-                    else r.Raw((int)n * width);
+                    else
+                    {
+                        // خاصيّةٌ تعودُ دونَ قيمةِ الطلبِ فشلٌ مسمّى (فحصُ الحدودِ المباشر): الاستئنافُ
+                        // يبدأُ عندَ property أو أعلى (Part 3 §30.2).
+                        for (uint i = 0; i < n; i++)
+                        {
+                            uint prop = r.U32(); r.U32();
+                            if (prop < askedProp) throw new ResponseMalformedException("RESPONSE_CAPABILITY_PROPERTY_MALFORMED: " + Hex.U32(prop) + " < " + Hex.U32(askedProp), 0);
+                        }
+                    }
                     End(r, "GetCapability"); return;
                 }
                 default:
@@ -935,7 +1019,7 @@ namespace Xuux.TpmCeremony
             try
             {
                 byte[] raw = _t.Transmit(cmd);
-                p = Resp.Parse(raw, respHandles, TagOf(cmd), authCount);
+                p = Resp.Parse(raw, respHandles, TagOf(cmd), authCount, ResponseSchema.ExpectedPasswordSessions(cmd, authCount));
                 if (p.Rc == 0) ResponseSchema.Check(CommandCodeOf(cmd), cmd, p.Params);
                 // فحصُ تبنّي المقبضِ داخلَ الإرسالِ نفسه (إصلاحٌ R3): مقبضٌ من خطِّ الأساسِ في ردِّ إنشاءٍ يُرمى هنا — فيُغلّفُ الفشلُ للأمرِ
                 // المُغيّرِ بنتيجةٍ مجهولةٍ ويُجرَدُ كسائرِهَا (SOL413-01)، لا فشلٌ مجردًا يفقدُ التسميةَ.
@@ -1123,7 +1207,10 @@ namespace Xuux.TpmCeremony
                     // اكتمالُهُ ولا يُبنى عليهِ خطُّ أساسٍ أو جردٌ نهائيٌّ.
                     if ((h >> 24) != 0x01)
                         throw new ResponseMalformedException("RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: " + Hex.U32(h) + " in NV enumeration", 0);
-                    set.Add(h);
+                    // مقبضٌ مكرّرٌ في صفحةِ جردٍ فشلٌ مسمّى (R3SOL-01/قياسُ المراجعينَ): التكرارُ يخفي
+                    // كائنًا من خطِّ الأساسِ ويتيحُ التفافَ التبنّي — لا يُقبلُ إذن صفحةً بمقبضٍ واحدٍ مرتينِ.
+                    if (!set.Add(h))
+                        throw new ResponseMalformedException("RESPONSE_CAPABILITY_DUPLICATE_HANDLE: " + Hex.U32(h) + " in NV enumeration", 0);
                     last = h;
                 }
                 if (more == 1 && n == 0)
@@ -1162,7 +1249,8 @@ namespace Xuux.TpmCeremony
                         if ((h >> 24) != 0x80)
                             throw new ResponseMalformedException("RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: " + Hex.U32(h) + " in transient enumeration", 0);
                     }
-                    set.Add(h);
+                    if (!set.Add(h))
+                        throw new ResponseMalformedException("RESPONSE_CAPABILITY_DUPLICATE_HANDLE: " + Hex.U32(h) + " in session/transient enumeration", 0);
                     last = h;
                 }
                 if (more == 1 && n == 0)
@@ -1309,6 +1397,14 @@ namespace Xuux.TpmCeremony
             Resp p = SendTracked(label + ":StartAuthSession", Cmd.StartAuthSession(type, Random(32)), 1, 0,
                 Tracked("session-create", 0, null, null));
             nonceTpm = new Rd(p.Params).B2B();
+            // فئةُ مقبضِ الجلسةِ المُنشأةِ: 0x03 (جلسةُ سياسةٍ أو تجريبيةٍ — Part 1 §15.3–15.6، جدولُ 16
+            // Part 3 §11.1: TPMI_SH_AUTH_SESSION). مقبضٌ بفئةِ كائنٍ عابرٍ كان يُقبلُ ثمّ يرفضُهُ TPM
+            // لاحقًا برمزٍ عامٍّ (قياسُ المراجعينَ) — يُرفضُ الآنَ باسمٍ معَ تتبُّعِهِ للتنظيفِ.
+            if ((p.Handles[0] >> 24) != 0x03)
+            {
+                _transients.Add(p.Handles[0]);
+                throw new ResponseMalformedException("RESPONSE_SESSION_HANDLE_CLASS_MALFORMED: StartAuthSession " + Hex.U32(p.Handles[0]), 0);
+            }
             AdoptHandle(p.Handles[0], "StartAuthSession");
             _transients.Add(p.Handles[0]);
             return p.Handles[0];
@@ -1335,6 +1431,13 @@ namespace Xuux.TpmCeremony
 
         private void AdoptHandle(uint h, string what)
         {
+            // مقبضٌ يعودُ من ردِّ أمرٍ وهو ما يزالُ حيًّا في هذهِ الجولةِ (لم يُحرَّر) فشلٌ مسمّى (قياسُ
+            // المراجعينَ): ردُّ Load يعيدُ مقبضَ CreatePrimary الحيّ — التبنيَ كان يقارنُ خطَّ الأساسِ فقط
+            // فلا يسمّي الالتفافَ داخلَ الجولةِ (يُفشِلُ مغلقًا لاحقًا عندَ الاستعمالِ برمزٍ عامٍّ). أما إعادةُ
+            // المقابضِ بعدَ التحريرِ فسلوكُ المحاكي المشروعُ (0x80000000 يعودُ لـPrimary جديدٍ بعدَ تحريرِ
+            // سابقِهِ) ولا يُرفضُ — المقياسُ هو الحياةُ اللحظيّةُ لا العودةُ التاريخيّةُ.
+            if (_transients.Contains(h))
+                throw new ResponseMalformedException("RESPONSE_HANDLE_REISSUED: " + what + " " + Hex.U32(h) + " still live in this run (not flushed)", 0);
             if (_baselineNv != null && _baselineNv.Contains(h))
                 throw new ResponseMalformedException("RESPONSE_HANDLE_PREEXISTING: " + what + " " + Hex.U32(h) + " existed in baseline NV inventory", 0);
             if (_baselineTransients != null && _baselineTransients.Contains(h))
@@ -1597,7 +1700,7 @@ namespace Xuux.TpmCeremony
                     _definedByRun.Remove(p.Handle); // الغيابُ محقَّقٌ: لا يُحذَفُ ما ليس موجودًا في التنظيفِ.
                     return;
                 }
-                _r.Reconciliation.Add("nv-undefine " + Hex.U32(p.Handle) + ": still present; deletion outcome unknown; cleanup attempt budget already spent (no further attempt); declared as leftover");
+                _r.Reconciliation.Add("nv-undefine " + Hex.U32(p.Handle) + ": still present; deletion outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)");
                 return;
             }
             if (p.Kind == "flush")
@@ -1610,7 +1713,7 @@ namespace Xuux.TpmCeremony
                     _transients.Remove(p.Handle);
                     return;
                 }
-                _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; cleanup attempt budget already spent (no further attempt); declared as leftover");
+                _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)");
                 return;
             }
             if (p.Kind == "object-create" || p.Kind == "session-create")
@@ -1622,7 +1725,7 @@ namespace Xuux.TpmCeremony
                 foreach (uint h in now) if (!baseline.Contains(h) && !_transients.Contains(h)) appeared.Add(h);
                 if (appeared.Count == 0)
                 {
-                    _r.Reconciliation.Add(p.Kind + ": no new handle since baseline (likely not executed)");
+                    _r.Reconciliation.Add(p.Kind + ": no new handle since baseline (execution undetermined from handle inventory; Create returns no object handle and a created object may have been flushed by another party)");
                     return;
                 }
                 foreach (uint h in appeared)
@@ -1657,6 +1760,16 @@ namespace Xuux.TpmCeremony
             if (_baselineNv == null)
             {
                 _r.PostRunError = "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)";
+                return;
+            }
+            // خطُّ أساسٍ جزئيٌّ لا يُقارَنُ إليه جردٌ (R3SOL-04/قياسُ المراجعينَ): توقّفُ الجولةِ أثناءَ
+            // الالتقاطِ بعدَ اكتمالِ جردِ NV يتركُ خطَّ أساسِ الجلساتِ/العابرةِ معدومًا؛ فجردٌ نهائيٌّ
+            // بقوائمَ فارغةٍ كان يحملُ verified=true — الآن يُعلَنُ التعذُّرُ ولا يُدَّعى التحقيقُ.
+            if (_baselineTransients == null || _baselineSessions == null)
+            {
+                _r.PostRunVerified = false;
+                _r.PostRunError = "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)";
+                _r.CleanupLeftovers.Add("post-run inventory not comparable: partial baseline; residual state unknown");
                 return;
             }
             _cleanup = false;

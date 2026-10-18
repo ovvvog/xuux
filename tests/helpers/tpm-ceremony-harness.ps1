@@ -32,7 +32,7 @@ $helper = Join-Path $PSScriptRoot 'TpmCeremonyFaultTransport.cs'
 
 function Get-HandleList {
   param([Xuux.TpmCeremony.ICeremonyTransport]$Transport, [uint32]$Start)
-  $p = [Xuux.TpmCeremony.Resp]::Parse($Transport.Transmit([Xuux.TpmCeremony.Cmd]::GetCapability(1, $Start, 64)), 0, 0x8001, 0)
+  $p = [Xuux.TpmCeremony.Resp]::Parse($Transport.Transmit([Xuux.TpmCeremony.Cmd]::GetCapability(1, $Start, 64)), 0, 0x8001, 0, [bool[]]@())
   $r = New-Object Xuux.TpmCeremony.Rd -ArgumentList (,$p.Params)
   [void]$r.U8(); [void]$r.U32(); $count = $r.U32()
   $hs = @()
