@@ -1,0 +1,37 @@
+30.2     TPM2_GetCapability
+
+          General Description
+
+This command returns various information regarding the TPM and its current state.
+The capability parameter determines the category of data returned. The property parameter selects the
+first value of the selected category to be returned. If there is no property that corresponds to the value of
+property, the next higher value is returned, if it exists.
+
+EXAMPLE 1       The list of handles of transient objects currently loaded in the TPM may be read one at a time. On
+                the first read, set the property to TRANSIENT_FIRST and propertyCount to one. If a transient object
+                is present, the lowest numbered handle is returned and moreData will be YES if transient objects
+                with higher handles are loaded. On the subsequent call, use returned handle value plus 1 in order to
+                access the next higher handle.
+
+The propertyCount parameter indicates the number of capabilities in the indicated group that are
+requested. The TPM will return no more than the number of requested values (propertyCount) or until the
+last property of the requested type has been returned.
+
+NOTE 1          The type of the capability is derived from a combination of capability and property.
+
+NOTE 2          If the property selects an unimplemented property, the next higher implemented property is returned.
+
+When all of the properties of the requested type have been returned, the moreData parameter in the
+response will be set to NO. Otherwise, it will be set to YES.
+
+NOTE 3          The moreData parameter will be YES if there are more properties even if the requested number of
+                capabilities has been returned.
+
+The TPM is not required to return more than one value at a time. It is not required to provide the same
+number of values in response to subsequent requests.
+
+EXAMPLE 2       A TPM may return 4 properties in response to a TPM2_GetCapability( capability =
+                TPM_CAP_TPM_PROPERTY, property = TPM_PT_MANUFACTURER, propertyCount = 8 ) and for a
+                latter request with the same parameters, the TPM may return as few as one and as many as 8
+                values.
+

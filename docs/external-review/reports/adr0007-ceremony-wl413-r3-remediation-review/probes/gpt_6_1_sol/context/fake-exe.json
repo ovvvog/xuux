@@ -1,0 +1,1 @@
+{"schema":"xuux.tpm-ceremony-rehearsal/1","status":"TOOL_ERROR","failure":"simulator context mismatch: SIMULATOR_LISTENER_EXE_MISMATCH: exe=/home/user/workspace/council-wl413-r3/gpt_6_1_sol/context/bin/swtpm path-swtpm=/usr/bin/swtpm"}

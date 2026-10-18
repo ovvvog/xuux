@@ -1,0 +1,1 @@
+{"kind":"enum","session":"0x03000000","tag":"0x8001","respLen":48,"from02":{"start":"0x0x02000000","more":0,"cap":1,"count":1,"handles":["0x03000000"],"tag":"0x8001","respLen":48},"from03":{"start":"0x0x03000000","more":0,"cap":1,"count":0,"handles":[],"tag":"0x8001","respLen":48}}

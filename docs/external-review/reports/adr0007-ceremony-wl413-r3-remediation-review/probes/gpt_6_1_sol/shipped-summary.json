@@ -1,0 +1,729 @@
+[
+  {
+    "file": "auth-attrs-clear.json",
+    "mode": "auth-attrs-clear",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=0 attrs=0x00 hmacLen=0)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01b16d78: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01b16d78: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01b16d78"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01b16d78"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "auth-attrs-ff.json",
+    "mode": "auth-attrs-ff",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=0 attrs=0xff hmacLen=0)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01917e53: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01917e53: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01917e53"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01917e53"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "auth-hmac-byte.json",
+    "mode": "auth-hmac-byte",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=0 attrs=0x01 hmacLen=1)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01a9a77c: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01a9a77c: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01a9a77c"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01a9a77c"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "auth-nonce-byte.json",
+    "mode": "auth-nonce-byte",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=1 attrs=0x01 hmacLen=0)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01b6a609: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01b6a609: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01b6a609"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01b6a609"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "blocked-forever-undefine.json",
+    "mode": "blocked-forever-undefine",
+    "status": "BLOCKED_FAIL_CLOSED",
+    "failure": "BLOCKED_FAIL_CLOSED: s1.probe:NV_UndefineSpace rc=0x80280400",
+    "changes": 2,
+    "steps": 22,
+    "reconciliation": [],
+    "leftovers": [
+      "nv 0x01847617: BLOCKED_FAIL_CLOSED: cleanup:NV_UndefineSpace"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01847617"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01847617"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "create-response-loss.json",
+    "mode": "create-response-loss",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: WL413R3_CREATE_RESPONSE_LOSS)",
+    "changes": 1,
+    "steps": 35,
+    "reconciliation": [
+      "object-create: no new handle since baseline (likely not executed)"
+    ],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "define-not-executed.json",
+    "mode": "define-not-executed",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413_DEFINE_DROPPED_BEFORE_EXECUTION)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01ac09fc: not-executed (verified absent by read-only inventory)"
+    ],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "define-params-extra.json",
+    "mode": "define-params-extra",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=2)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01921a18: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01921a18: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01921a18"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01921a18"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "define-response-loss.json",
+    "mode": "define-response-loss",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01a6b034: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01a6b034: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01a6b034"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01a6b034"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "flush-refusal.json",
+    "mode": "flush-refusal",
+    "status": "BLOCKED_FAIL_CLOSED",
+    "failure": "BLOCKED_FAIL_CLOSED: s2.trial:FlushContext rc=0x80280400",
+    "changes": 4,
+    "steps": 43,
+    "reconciliation": [],
+    "leftovers": [
+      "transient 0x03000000: BLOCKED_FAIL_CLOSED: cleanup:FlushContext",
+      "transient 0x80000001: BLOCKED_FAIL_CLOSED: cleanup:FlushContext",
+      "transient 0x80000000: BLOCKED_FAIL_CLOSED: cleanup:FlushContext"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [
+        "0x03000000"
+      ],
+      "residualTransients": [
+        "0x80000000",
+        "0x80000001"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": [
+      "0x03000000"
+    ]
+  },
+  {
+    "file": "inventory-no-progress.json",
+    "mode": "inventory-no-progress",
+    "status": "FAILED_CLOSED",
+    "failure": "RESPONSE_CAPABILITY_NO_PROGRESS: more=1 count=0 rc=0x00000000",
+    "changes": 1,
+    "steps": 2,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": false,
+      "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "inventory-wrong-class.json",
+    "mode": "inventory-wrong-class",
+    "status": "FAILED_CLOSED",
+    "failure": "RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: 0x80000001 asked=0x01000000 rc=0x00000000",
+    "changes": 1,
+    "steps": 2,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": false,
+      "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "missing-response-auth.json",
+    "mode": "missing-response-auth",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01bd8b0a: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01bd8b0a: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01bd8b0a"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01bd8b0a"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "paramsize-huge.json",
+    "mode": "paramsize-huge",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (ResponseMalformedException: RESPONSE_PARAMETER_SIZE_INVALID: 2147483632 > remaining 5)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01b887ca: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01b887ca: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01b887ca"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01b887ca"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "policysigned-neg-loss.json",
+    "mode": "policysigned-neg-loss",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2v.replay:PolicySigned(old-signature) (IOException: WL413R3_NEGATIVE_POLICYSIGNED_LOSS)",
+    "changes": 3,
+    "steps": 61,
+    "reconciliation": [
+      "policy-mutation 0x03000000: session still present; policy state unverifiable after lost response; left for bounded cleanup"
+    ],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "readcounter-malformed-14a.json",
+    "mode": "readcounter-malformed-14a",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2v:NV_Increment(password-auth) (IOException: WL413R3_NEG_INCREMENT_LOSS_THEN_MALFORMED_14A)",
+    "changes": 2,
+    "steps": 53,
+    "reconciliation": [],
+    "leftovers": [
+      "reconcile nv-increment 0x0183270b unverifiable: RESPONSE_ERROR_TAG_MALFORMED"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "readpublic-malformed-18b.json",
+    "mode": "readpublic-malformed-18b",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413R3_DEFINE_DROPPED_THEN_MALFORMED_ABSENCE)",
+    "changes": 2,
+    "steps": 12,
+    "reconciliation": [],
+    "leftovers": [
+      "reconcile nv-define 0x01acf367 unverifiable: RESPONSE_ERROR_TAG_MALFORMED"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-creationdata-short.json",
+    "mode": "schema-creationdata-short",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary len=1)",
+    "changes": 1,
+    "steps": 33,
+    "reconciliation": [
+      "object-create 0x80000000: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "transient 0x80000000: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000000"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-creationhash-short.json",
+    "mode": "schema-creationhash-short",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_HASH_MALFORMED: len=0)",
+    "changes": 1,
+    "steps": 33,
+    "reconciliation": [
+      "object-create 0x80000000: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "transient 0x80000000: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000000"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-nonce-empty.json",
+    "mode": "schema-nonce-empty",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2.trial:StartAuthSession (ResponseMalformedException: RESPONSE_SESSION_NONCE_MALFORMED: len=0 nonceCaller=32)",
+    "changes": 1,
+    "steps": 38,
+    "reconciliation": [
+      "session-create 0x03000000: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "session 0x03000000: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [
+        "0x03000000"
+      ],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": [
+      "0x03000000"
+    ]
+  },
+  {
+    "file": "schema-nvread-short.json",
+    "mode": "schema-nvread-short",
+    "status": "FAILED_CLOSED",
+    "failure": "RESPONSE_NV_READ_SIZE_MALFORMED: len=1 asked=8 rc=0x00000000",
+    "changes": 1,
+    "steps": 18,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-policysigned-digest.json",
+    "mode": "schema-policysigned-digest",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: len=65)",
+    "changes": 1,
+    "steps": 41,
+    "reconciliation": [
+      "policy-mutation 0x03000000: session still present; policy state unverifiable after lost response; left for bounded cleanup"
+    ],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-public-empty.json",
+    "mode": "schema-public-empty",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_PUBLIC_AREA_MALFORMED: CreatePrimary len=0 template=26)",
+    "changes": 1,
+    "steps": 33,
+    "reconciliation": [
+      "object-create 0x80000000: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "transient 0x80000000: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000000"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-sign-short.json",
+    "mode": "schema-sign-short",
+    "status": "FAILED_CLOSED",
+    "failure": "RESPONSE_SIGNATURE_COMPONENT_MALFORMED: r=1 s=32 rc=0x00000000",
+    "changes": 1,
+    "steps": 39,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "schema-ticket-tag-flip.json",
+    "mode": "schema-ticket-tag-flip",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_TAG_MALFORMED: CreatePrimary 0x8020)",
+    "changes": 1,
+    "steps": 33,
+    "reconciliation": [
+      "object-create 0x80000000: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "transient 0x80000000: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000000"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "session-alias.json",
+    "mode": "session-alias",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2.trial:StartAuthSession (ResponseMalformedException: RESPONSE_HANDLE_PREEXISTING: StartAuthSession 0x03000000 existed in baseline sessions inventory)",
+    "changes": 1,
+    "steps": 38,
+    "reconciliation": [
+      "session-create 0x03000001: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "session 0x03000001: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [
+        "0x03000001"
+      ],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": [
+      "0x03000000",
+      "0x03000001"
+    ]
+  },
+  {
+    "file": "transport-dead-after-define.json",
+    "mode": "transport-dead-after-define",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413R2_TRANSPORT_DIED_AFTER_DEFINE)",
+    "changes": 1,
+    "steps": 10,
+    "reconciliation": [],
+    "leftovers": [
+      "reconcile nv-define 0x01bfa679 unverifiable: WL413R2_TRANSPORT_DEAD",
+      "post-run inventory unavailable: residual state unknown (WL413R2_TRANSPORT_DEAD)"
+    ],
+    "post": {
+      "verified": false,
+      "error": "WL413R2_TRANSPORT_DEAD",
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01bfa679"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "unexpected-negative.json",
+    "mode": "unexpected-negative",
+    "status": "FAILED_CLOSED",
+    "failure": "NEGATIVE_WRONG_RC: s2v.replay:PolicySigned(old-signature) expected=0x000005db got=0x00000101 rc=0x00000101",
+    "changes": 3,
+    "steps": 60,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "sessionsAfter": []
+  },
+  {
+    "file": "written-before-reconcile.json",
+    "mode": "written-before-reconcile",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413R2_RESPONSE_LOSS_AFTER_DEFINE_AND_THIRD_PARTY_WRITE)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01b94a30: exists with matching definition but TPMA_NV_WRITTEN is set although this run never wrote it; written by another party; ownership undetermined; left in place"
+    ],
+    "leftovers": [
+      "nv 0x01b94a30: ownership-undetermined (written by another party after lost define reply); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01b94a30"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01b94a30"
+    ],
+    "sessionsAfter": []
+  }
+]

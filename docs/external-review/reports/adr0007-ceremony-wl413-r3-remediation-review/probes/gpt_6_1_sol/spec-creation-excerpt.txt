@@ -1,0 +1,45 @@
+15.1       TPMS_CREATION_DATA
+
+This structure provides information relating to the creation environment for the object. The creation data
+includes the parent Name, parent Qualified Name, and the digest of selected PCR. These values
+represent the environment in which the object was created. Creation data allows a relying party to
+determine if an object was created when some appropriate protections were present.
+When the object is created, the structure shown in Table 212 is generated and a ticket is computed over
+this data.
+If    the   parent    is    a   permanent    handle    (TPM_RH_OWNER, TPM_RH_PLATFORM,
+TPM_RH_ENDORSEMENT, or TPM_RH_NULL), then parentName and parentQualifiedName will be set
+to the parent handle value and parentNameAlg will be TPM_ALG_NULL.
+
+                Table 212 — Definition of TPMS_CREATION_DATA Structure <OUT>
+Parameter             Type                      Description
+
+pcrSelect             TPML_PCR_SELECTION        list indicating the PCR included in pcrDigest
+pcrDigest             TPM2B_DIGEST              digest of the selected PCR using nameAlg of the object for
+                                                which this structure is being created
+                                                pcrDigest.size shall be zero if the pcrSelect list is empty.
+locality              TPMA_LOCALITY             the locality at which the object was created
+parentNameAlg         TPM_ALG_ID                nameAlg of the parent
+parentName            TPM2B_NAME                Name of the parent at time of creation
+                                                The size will match digest size associated with parentNameAlg
+                                                unless it is TPM_ALG_NULL, in which case the size will be 4
+                                                and parentName will be the hierarchy handle.
+parentQualifiedName   TPM2B_NAME                Qualified Name of the parent at the time of creation
+                                                Size is the same as parentName.
+outsideInfo           TPM2B_DATA                association with additional information added by the key
+                                                creator
+                                                This will be the contents of the outsideInfo parameter in
+                                                TPM2_Create() or TPM2_CreatePrimary().
+
+
+15.2       TPM2B_CREATION_DATA
+
+This structure is created by TPM2_Create() and TPM2_CreatePrimary(). It is never entered into the TPM
+and never has a size of zero.
+
+                Table 213 — Definition of TPM2B_CREATION_DATA Structure <OUT>
+Parameter             Type                      Description
+
+size=                 UINT16                    size of the creation data
+creationData          TPMS_CREATION_DATA
+
+

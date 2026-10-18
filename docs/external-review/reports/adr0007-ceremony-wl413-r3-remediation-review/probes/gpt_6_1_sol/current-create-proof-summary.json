@@ -1,0 +1,29 @@
+[
+  {
+    "file": "create-loss-proof.json",
+    "mode": "create-loss-proof",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: INDEPENDENT_CREATE_SUCCESS_RESPONSE_DISCARDED)",
+    "changes": 1,
+    "steps": 35,
+    "reconciliation": [
+      "object-create: no new handle since baseline (likely not executed)"
+    ],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x80000000"
+    ]
+  }
+]
