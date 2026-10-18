@@ -1,0 +1,115 @@
+[
+  {
+    "file": "cd-empty-pcr-digest.json",
+    "mode": "cd-empty-pcr-digest",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary len=23)",
+    "changes": 1,
+    "steps": 33,
+    "reconciliation": [
+      "object-create 0x80000000: appeared during run; ownership not provable; left in place"
+    ],
+    "leftovers": [
+      "transient 0x80000000: ownership-undetermined (appeared during run); not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000000"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [
+      "0x80000000"
+    ],
+    "sessionsAfter": [],
+    "flushed": []
+  },
+  {
+    "file": "create-cd-missing.json",
+    "mode": "create-cd-missing",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "post-inventory-no-progress.json",
+    "mode": "post-inventory-no-progress",
+    "status": "FAILED_CLOSED",
+    "failure": null,
+    "changes": 1,
+    "steps": 29,
+    "reconciliation": [],
+    "leftovers": [
+      "post-run inventory unavailable: residual state unknown (RESPONSE_CAPABILITY_NO_PROGRESS: more=1 count=0)"
+    ],
+    "post": {
+      "verified": false,
+      "error": "RESPONSE_CAPABILITY_NO_PROGRESS: more=1 count=0",
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": []
+  },
+  {
+    "file": "post-inventory-wrong-class.json",
+    "mode": "post-inventory-wrong-class",
+    "status": "FAILED_CLOSED",
+    "failure": null,
+    "changes": 1,
+    "steps": 29,
+    "reconciliation": [],
+    "leftovers": [
+      "post-run inventory unavailable: residual state unknown (RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: 0x80000001 asked=0x01000000)"
+    ],
+    "post": {
+      "verified": false,
+      "error": "RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: 0x80000001 asked=0x01000000",
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": []
+  }
+]

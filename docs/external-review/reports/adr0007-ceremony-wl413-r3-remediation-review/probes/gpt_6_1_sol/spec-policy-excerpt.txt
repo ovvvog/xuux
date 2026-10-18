@@ -1,0 +1,26 @@
+                                                   time when authorization will expire, measured in
+                                                   seconds from the time that nonceTPM was generated
+INT32                       expiration
+                                                   If expiration is non-negative, a NULL Ticket is returned.
+                                                   See 23.2.5.
+TPMT_SIGNATURE              auth                   signed authorization (not optional)
+
+
+                          Table 118 — TPM2_PolicySigned Response
+Type                        Name                   Description
+
+TPM_ST                      tag                    see clause 6
+UINT32                      responseSize
+TPM_RC                      responseCode
+
+                                                   implementation-specific time value, used to indicate to
+                                                   the TPM when the ticket expires
+TPM2B_TIMEOUT               timeout
+                                                   NOTE            If policyTicket is a NULL Ticket, then this shall
+                                                                   be the Empty Buffer.
+
+                                                   produced if the command succeeds and expiration in
+TPMT_TK_AUTH                policyTicket           the command was non-zero; this ticket will use the
+                                                   TPMT_ST_AUTH_SIGNED structure tag. See 23.2.5
+
+

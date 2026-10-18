@@ -1,0 +1,54 @@
+launch primary-alias 0
+mono IndependentR3-v2.exe primary-alias 0
+launch inventory-duplicate-alias 0
+mono IndependentR3-v2.exe inventory-duplicate-alias 0
+launch baseline-transient-badclass 0
+mono IndependentR3-v2.exe baseline-transient-badclass 0
+launch auth-pw-nonce16 0
+mono IndependentR3-v2.exe auth-pw-nonce16 0
+launch auth-pw-nonce32 0
+mono IndependentR3-v2.exe auth-pw-nonce32 0
+launch auth-pw-nonce64 0
+mono IndependentR3-v2.exe auth-pw-nonce64 0
+launch auth-pw-reserved3 0
+mono IndependentR3-v2.exe auth-pw-reserved3 0
+launch auth-pw-audit2 0
+mono IndependentR3-v2.exe auth-pw-audit2 0
+launch auth-policy-password 0
+mono IndependentR3-v2.exe auth-policy-password 0
+launch auth-policy-short 0
+mono IndependentR3-v2.exe auth-policy-short 0
+launch auth-policy-continue 0
+mono IndependentR3-v2.exe auth-policy-continue 0
+launch auth-policy-reserved3 0
+mono IndependentR3-v2.exe auth-policy-reserved3 0
+launch cd-missing 0
+mono IndependentR3-v2.exe cd-missing 0
+launch cd-extra 0
+mono IndependentR3-v2.exe cd-extra 0
+launch cd-parentalg 0
+mono IndependentR3-v2.exe cd-parentalg 0
+launch cd-locality 0
+mono IndependentR3-v2.exe cd-locality 0
+launch creationhash-flip 0
+mono IndependentR3-v2.exe creationhash-flip 0
+launch creation-ticket-hierarchy 0
+mono IndependentR3-v2.exe creation-ticket-hierarchy 0
+launch creation-ticket-digest 0
+mono IndependentR3-v2.exe creation-ticket-digest 0
+launch primary-name-flip 0
+mono IndependentR3-v2.exe primary-name-flip 0
+launch session-policy-empty 0
+mono IndependentR3-v2.exe session-policy-empty 0
+launch session-handle-wrongclass 0
+mono IndependentR3-v2.exe session-handle-wrongclass 0
+launch foreign-load-name 0
+mono IndependentR3-v2.exe foreign-load-name 0
+launch policy-ticket-timeout 0
+mono IndependentR3-v2.exe policy-ticket-timeout 0
+launch policy-ticket-hierarchy 0
+mono IndependentR3-v2.exe policy-ticket-hierarchy 0
+launch policy-ticket-digest 0
+mono IndependentR3-v2.exe policy-ticket-digest 0
+launch cleanup-undefine-loss 0
+mono IndependentR3-v2.exe cleanup-undefine-loss 0

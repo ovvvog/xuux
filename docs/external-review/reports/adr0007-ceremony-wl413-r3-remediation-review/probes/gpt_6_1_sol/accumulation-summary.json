@@ -1,0 +1,109 @@
+[
+  {
+    "file": "lost-1.json",
+    "mode": "define-response-loss",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01a0f699: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01a0f699: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01a0f699"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [
+      "0x01a0f699"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "lost-2.json",
+    "mode": "define-response-loss",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x01b7cd77: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x01b7cd77: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x01b7cd77"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [
+      "0x01a0f699"
+    ],
+    "nvAfter": [
+      "0x01a0f699",
+      "0x01b7cd77"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "lost-3.json",
+    "mode": "define-response-loss",
+    "status": "FAILED_CLOSED",
+    "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION)",
+    "changes": 1,
+    "steps": 12,
+    "reconciliation": [
+      "nv-define 0x0199eefd: exists with definition matching this run's request; the define reply was lost or unusable so execution and ownership cannot be proven (an identical pre-existing index is indistinguishable); left in place"
+    ],
+    "leftovers": [
+      "nv 0x0199eefd: ownership-undetermined (define reply lost; matching publicArea is not proof); left in place"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [
+        "0x0199eefd"
+      ],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [
+      "0x01a0f699",
+      "0x01b7cd77"
+    ],
+    "nvAfter": [
+      "0x0199eefd",
+      "0x01a0f699",
+      "0x01b7cd77"
+    ],
+    "sessionsAfter": []
+  },
+  {
+    "file": "subsequent-normal.json",
+    "status": "COMPLETE",
+    "failure": null,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    }
+  }
+]

@@ -1,0 +1,5 @@
+accumulation launch exit=0
+fault define-response-loss 1 exit=0
+fault define-response-loss 2 exit=0
+fault define-response-loss 3 exit=0
+subsequent normal exit=0

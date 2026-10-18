@@ -1,0 +1,854 @@
+[
+  {
+    "file": "auth-policy-continue.json",
+    "mode": "auth-policy-continue",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "00000134:tag=8002:auth:0020651914e3a8166a1cd399e1a586f7b22b6cc4d163822f633038b884a4380b520a000000=>0020651914e3a8166a1cd399e1a586f7b22b6cc4d163822f633038b884a4380b520a010000"
+  },
+  {
+    "file": "auth-policy-password.json",
+    "mode": "auth-policy-password",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "00000134:tag=8002:auth:00208aa0f893709b2dc227f9c8165279752eb837489d43b41ffcdad106ac1d9d2d7e000000=>0000010000"
+  },
+  {
+    "file": "auth-policy-reserved3.json",
+    "mode": "auth-policy-reserved3",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "00000134:tag=8002:auth:0020d03705ee98c61a1523894aab41af7332f91247291e40964a8048162e0c840ca0000000=>0020d03705ee98c61a1523894aab41af7332f91247291e40964a8048162e0c840ca0080000"
+  },
+  {
+    "file": "auth-policy-short.json",
+    "mode": "auth-policy-short",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "00000134:tag=8002:auth:00208da78ddb4223c2a626cafccc684d5091d0aa8495a0c5536eb43b02f67a576a44000000=>001000000000000000000000000000000000010000"
+  },
+  {
+    "file": "auth-pw-audit2.json",
+    "mode": "auth-pw-audit2",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "0000012a:tag=8002:auth:0000010000=>00200000000000000000000000000000000000000000000000000000000000000000020000"
+  },
+  {
+    "file": "auth-pw-nonce16.json",
+    "mode": "auth-pw-nonce16",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "0000012a:tag=8002:auth:0000010000=>001000000000000000000000000000000000000000"
+  },
+  {
+    "file": "auth-pw-nonce32.json",
+    "mode": "auth-pw-nonce32",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "0000012a:tag=8002:auth:0000010000=>00200000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "file": "auth-pw-nonce64.json",
+    "mode": "auth-pw-nonce64",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "0000012a:tag=8002:auth:0000010000=>004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    "file": "auth-pw-reserved3.json",
+    "mode": "auth-pw-reserved3",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ],
+    "authMutation": "0000012a:tag=8002:auth:0000010000=>00200000000000000000000000000000000000000000000000000000000000000000080000"
+  },
+  {
+    "file": "baseline-transient-badclass.json",
+    "mode": "baseline-transient-badclass",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "cd-extra.json",
+    "mode": "cd-extra",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "cd-locality.json",
+    "mode": "cd-locality",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "cd-missing.json",
+    "mode": "cd-missing",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "cd-parentalg.json",
+    "mode": "cd-parentalg",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "creation-ticket-digest.json",
+    "mode": "creation-ticket-digest",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "creation-ticket-hierarchy.json",
+    "mode": "creation-ticket-hierarchy",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "creationhash-flip.json",
+    "mode": "creationhash-flip",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "foreign-load-name.json",
+    "mode": "foreign-load-name",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "inventory-duplicate-alias.json",
+    "mode": "inventory-duplicate-alias",
+    "status": "FAILED_CLOSED",
+    "failure": "TPM_ERROR: s2:Create(service-key,ECDSA-P256) rc=0x00000902",
+    "changes": 2,
+    "steps": 34,
+    "reconciliation": [],
+    "leftovers": [
+      "residual 0x80000002: present after run, absent from baseline; not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000002"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [
+      "0x80000000",
+      "0x80000001"
+    ],
+    "transientsAfter": [
+      "0x80000000",
+      "0x80000002"
+    ],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x80000001"
+    ]
+  },
+  {
+    "file": "policy-ticket-digest.json",
+    "mode": "policy-ticket-digest",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "policy-ticket-hierarchy.json",
+    "mode": "policy-ticket-hierarchy",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "policy-ticket-timeout.json",
+    "mode": "policy-ticket-timeout",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "primary-alias.json",
+    "mode": "primary-alias",
+    "status": "FAILED_CLOSED",
+    "failure": "TPM_ERROR: s2v.foreign:Create(other-key) rc=0x00000902",
+    "changes": 1,
+    "steps": 61,
+    "reconciliation": [],
+    "leftovers": [
+      "residual 0x80000001: present after run, absent from baseline; not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": [
+        "0x80000001"
+      ]
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [
+      "0x80000000"
+    ],
+    "transientsAfter": [
+      "0x80000001"
+    ],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "primary-name-flip.json",
+    "mode": "primary-name-flip",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "session-handle-wrongclass.json",
+    "mode": "session-handle-wrongclass",
+    "status": "FAILED_CLOSED",
+    "failure": "TPM_ERROR: s2.trial:PolicySigned rc=0x00000284",
+    "changes": 1,
+    "steps": 40,
+    "reconciliation": [
+      "post-run: 0x800000ff declared as leftover above but verified absent by final inventory"
+    ],
+    "leftovers": [
+      "transient 0x800000ff: TPM_ERROR: cleanup:FlushContext",
+      "residual 0x03000000: present after run, absent from baseline; not removed"
+    ],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [
+        "0x03000000"
+      ],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [
+      "0x03000000"
+    ],
+    "flushed": [
+      "0x800000ff",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "session-policy-empty.json",
+    "mode": "session-policy-empty",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  }
+]

@@ -1,0 +1,48 @@
+994:        private Resp Ok(string name, byte[] cmd, int respHandles, int authCount)
+997:        private Resp Refused(string name, byte[] cmd, uint expectedRc, int authCount)
+1002:        private void RefusedIncrement(string name, uint index, byte[] auth, uint expectedRc, ulong? before)
+1004:            Pending pending = Tracked("nv-increment", index, null, before);
+1008:                Refused(name, Cmd.NvIncrement(index, auth), expectedRc, 1);
+1024:        private void RefusedTracked(string name, byte[] cmd, uint expectedRc, int authCount, Pending pending)
+1029:                Refused(name, cmd, expectedRc, authCount);
+1040:        private Resp SendTracked(string name, byte[] cmd, int respHandles, int authCount, Pending pending)
+1058:        private Pending Tracked(string kind, uint handle, byte[] expectedPublic, ulong? beforeValue)
+1069:            Resp p = Ok("identity:GetCapability(TPM_PT_MANUFACTURER..VENDOR_STRING_4)", Cmd.GetCapability(6, 0x105, 5), 0, 0);
+1099:            Resp p = Ok("inventory:GetCapability(" + Hex.U32(pt) + ")", Cmd.GetCapability(6, pt, 1), 0, 0);
+1113:                Resp p = Ok("inventory:GetCapability(HANDLES," + Hex.U32(next) + ")", Cmd.GetCapability(1, next, 64), 0, 0);
+1144:                Resp p = Ok("inventory:GetCapability(HANDLES," + Hex.U32(next) + ")", Cmd.GetCapability(1, next, 64), 0, 0);
+1225:            Resp p = Ok(name, Cmd.NvReadPublic(index), 0, 0);
+1252:            SendTracked(label + ":NV_DefineSpace", Cmd.NvDefineSpace(_ownerAuth, new byte[0], pub), 0, 1,
+1253:                Tracked("nv-define", index, pub, null));
+1268:            SendTracked(label, Cmd.NvIncrement(index, authEntry), 0, 1, Tracked("nv-increment", index, null, before));
+1273:            Resp p = Ok(label, Cmd.NvRead(index, Cmd.PasswordAuth(new byte[0]), 8, 0), 0, 1);
+1301:            SendTracked(label + ":NV_UndefineSpace", Cmd.NvUndefineSpace(_ownerAuth, index), 0, 1,
+1302:                Tracked("nv-undefine", index, null, null));
+1304:            Refused(label + ":NV_ReadPublic(after-undefine)", Cmd.NvReadPublic(index), Tpm.RC_HANDLE, 0);
+1309:            Resp p = SendTracked(label + ":StartAuthSession", Cmd.StartAuthSession(type, Random(32)), 1, 0,
+1310:                Tracked("session-create", 0, null, null));
+1322:            SendTracked(label + ":FlushContext", Cmd.FlushContext(h), 0, 0, Tracked("flush", h, null, null));
+1350:            Resp p = Ok(label + ":Sign(aHash)", Cmd.Sign(key, new byte[0], Policy.AHash(nonceTpm, 0)), 0, 1);
+1358:            SendTracked(label + ":PolicySigned", Cmd.PolicySigned(key, session, nonce, 0, r, s), 0, 0,
+1359:                Tracked("policy-mutation", session, null, null));
+1364:            SendTracked(label + ":PolicyCommandCode", Cmd.PolicyCommandCode(session, code), 0, 0,
+1365:                Tracked("policy-mutation", session, null, null));
+1378:            Refused("s1.probe:NV_Read(before-first-increment)", Cmd.NvRead(h, Cmd.PasswordAuth(new byte[0]), 8, 0), Tpm.RC_NV_UNINITIALIZED, 1);
+1407:            Resp pp = SendTracked("s2:CreatePrimary(storage,ECC-P256)", Cmd.CreatePrimary(_ownerAuth, Templates.StoragePrimary()), 1, 1,
+1408:                Tracked("object-create", 0, null, null));
+1413:            Resp cr = SendTracked("s2:Create(service-key,ECDSA-P256)", Cmd.Create(_primary, new byte[0], Templates.ServiceSigningKey()), 0, 1,
+1414:                Tracked("object-create", 0, null, null));
+1418:            Resp ld = SendTracked("s2:Load(service-key)", Cmd.Load(_primary, new byte[0], priv, pub), 1, 1,
+1419:                Tracked("object-create", 0, null, null));
+1434:            Resp dg = Ok("s2.trial:PolicyGetDigest", Cmd.PolicyGetDigest(trial), 0, 0);
+1452:            RefusedIncrement("s2v:NV_Increment(password-auth)", h, Cmd.PasswordAuth(new byte[0]), 0x0000012F, null);
+1469:            RefusedTracked("s2v.replay:PolicySigned(old-signature)", Cmd.PolicySigned(_serviceKey, ps2, nonce2, 0, sr, ss), 0x000005DB, 0,
+1470:                Tracked("policy-mutation", ps2, null, null));
+1474:            Resp cr = SendTracked("s2v.foreign:Create(other-key)", Cmd.Create(_primary, new byte[0], Templates.ServiceSigningKey()), 0, 1,
+1475:                Tracked("object-create", 0, null, null));
+1478:            Resp ld = SendTracked("s2v.foreign:Load(other-key)", Cmd.Load(_primary, new byte[0], priv, pub), 1, 1,
+1479:                Tracked("object-create", 0, null, null));
+1487:            RefusedTracked("s2v.foreign:PolicySigned(foreign-signature)", Cmd.PolicySigned(_serviceKey, ps3, nonce3, 0, fr, fs), 0x000005DB, 0,
+1488:                Tracked("policy-mutation", ps3, null, null));
+1496:            RefusedIncrement("s2v.otherkey:NV_Increment(policy-of-other-key)", h, Cmd.PolicyAuth(ps4, Random(32)), 0x0000099D, v1);
+1506:            RefusedIncrement("s2v.wrongcc:NV_Increment(policy-for-NV_Read)", h, Cmd.PolicyAuth(ps5, Random(32)), 0x0000099D, v1);
