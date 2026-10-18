@@ -21,12 +21,13 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
   startSim as startSimShared,
   stopSim,
   killSim,
+  terminateAttempt,
   discoverSimPids,
   stateDirExists,
 } from '../helpers/ceremony-swtpm.mjs';
@@ -613,3 +614,143 @@ simPwshTest('NV3: فهرسٌ يظهرُ بعدَ اجتيازِ الحاجزِ �
 });
 
 // الإيقافُ النهائيُّ للمحاكي المشتركِ ليسَ من هذا الملفِ: كلُّ اختبارٍ يملكُ محاكيَه وينهيه في finally.
+
+// ── جولةُ المراجعةِ الخامسةِ ──
+
+// CHANNEL: شاهدُ القناةِ على killSim نفسِهِ — الإشارتانِ (SIGTERM ثمّ التصعيدُ SIGKILL) تمرّانِ عبرَ
+// مقبضةِ pidfd وحدَها: يُرقَّعُ process.kill فيُسمَحُ باستعلاماتِ الوجودِ (الإشارةُ 0) فقط، وأيُّ إشارةٍ
+// غيرِ صفريةٍ عبرَهُ تُفشلُ الاختبارَ (قبلَ إصلاحِ عقدِ تمثيلِ الإشارةِ كانَ الاسمُ 'SIGTERM' يُفشلُ int()
+// في طرفِ python فتتحوّلُ القناةُ إلى unsupported ويقعُ الرجوعُ إلى process.kill — فيفشلُ هذا الشاهدُ).
+simTest('CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd وحدَها — لا process.kill غيرَ صفريٍ', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xuux-wl416-channel-'));
+  const fakeScript = join(dir, 'fake-swtpm.js');
+  const readyMarker = join(dir, 'term-handler-ready');
+  writeFileSync(
+    fakeScript,
+    `process.on("SIGTERM", () => {}); require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
+      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);',
+  );
+  const origKill = process.kill.bind(process);
+  let nonzeroKillCalls = 0;
+  try {
+    spawn(
+      'bash',
+      ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x &`],
+      { stdio: 'ignore' },
+    );
+    let fakePid = null;
+    for (let i = 0; i < 250; i++) {
+      const found = discoverSimPids(dir);
+      if (found.length === 1) {
+        fakePid = found[0];
+        if (existsSync(readyMarker)) break;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(fakePid !== null, 'fake swtpm must be discoverable by its state dir');
+    assert.ok(existsSync(readyMarker), 'fake swtpm must have its SIGTERM handler armed');
+    // الرقعةُ: استعلامُ الوجودِ (0) يمرُّ؛ أيُّ إشارةٍ غيرِ صفريةٍ عبرَ process.kill تُسجَّلُ وتُرمي —
+    // فلو رجعَ killSim إلى الرقمِ البحتِ لَفَشَلَ (لا true ولا إيقافٌ مُثبَتٌ).
+    process.kill = (pid, sig) => {
+      const s = typeof sig === 'number' ? sig : ({ SIGTERM: 15, SIGKILL: 9, SIGINT: 2 }[sig] ?? -1);
+      if (s !== 0) {
+        nonzeroKillCalls++;
+        throw new Error(`WITNESS: nonzero process.kill attempted (${sig})`);
+      }
+      return origKill(pid, sig);
+    };
+    // الهويّةُ لا تتغيّرُ: SIGTERM يُتجاهَلُ (معالجٌ مسلّحٌ) فينتظرُ killSim ثمّ يُصعّدُ SIGKILL عبرَ
+    // المقبضةِ — المسارُ الكاملُ بالإشارتَينِ داخلَ pidfd.
+    const r = killSim(fakePid, { dir, graceMs: 300 });
+    assert.equal(r, true, 'killSim must stop the simulator through the pidfd channel alone');
+    assert.equal(nonzeroKillCalls, 0, 'no nonzero process.kill may be used by killSim');
+    assert.ok(pidProvenDead(fakePid), 'the fake simulator must be provably dead (ESRCH only)');
+  } finally {
+    process.kill = origKill; // تُعادُ الرقعةُ مهما حدثَ — لا تتسرّبُ إلى اختبارٍ آخرَ
+    let allStopped = true;
+    for (const pid of discoverSimPids(dir)) {
+      try {
+        allStopped = killSim(pid, { dir, graceMs: 60 }) && allStopped;
+      } catch {
+        /* زالت سلفًا */
+      }
+    }
+    try {
+      if (allStopped && discoverSimPids(dir).length === 0) rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* أفضلُ جهدٍ */
+    }
+  }
+});
+
+// ZOMBIE: زومبيُّ خرجَ ولم يُلقَّ أثرُهُ، وملفُّ PID مفقودٌ، ورقمُها محفوظٌ لدى الشاهدِ — تخطّيها في
+// المسحِ لا يجوزُ أن يُنتجَ stopped=true: ESRCH وحدها دليلُ الزوالِ، والزومبيُّ ليست ESRCH (جولةُ 5).
+// الوالدُ الحارسُ (python) لا يُلقّيها عمدًا فتبقى زومبيًّا قابلةً للقياسِ حتى نهايةِ الشاهدِ.
+simTest('ZOMBIE: زومبيٌ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xuux-wl416-zomb-'));
+  const fakeScript = join(dir, 'fake-swtpm.js');
+  writeFileSync(fakeScript, 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);');
+  const parent = spawn(
+    'python3',
+    [
+      '-c',
+      `import subprocess, time; p = subprocess.Popen(['swtpm', ${JSON.stringify(fakeScript)}, '--tpmstate', 'dir=' + ${JSON.stringify(dir)}], executable=${JSON.stringify(process.execPath)}); time.sleep(120)`,
+    ],
+    { stdio: 'ignore' },
+  );
+  let zombiePid = null;
+  try {
+    // العمليّةُ حيّةٌ وتُكتشَفُ بهويّتِها (swtpm يملكُ مسارَ الحالةِ) ثمّ تُقتَلُ من الشاهدِ نفسِهِ —
+    // فتبقى زومبيًّا بلا مُلقّي (الوالدُ الحارسُ لا ينتظرُها) وملفُّ PID لا وجودَ لهُ أصلًا.
+    for (let i = 0; i < 250; i++) {
+      const found = discoverSimPids(dir);
+      if (found.length === 1) {
+        zombiePid = found[0];
+        break;
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(zombiePid !== null, 'fake swtpm must be discoverable before it becomes a zombie');
+    process.kill(zombiePid, 'SIGKILL'); // الشاهدُ يقتلُها بنفسِهِ — الإسنادُ عندَ الموتِ يضيعُ (لا سطرَ أوامرَ)
+    let becameZombie = false;
+    for (let i = 0; i < 250; i++) {
+      try {
+        const stat = readFileSync(`/proc/${zombiePid}/stat`, 'utf8');
+        const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+        if (state === 'Z') {
+          becameZombie = true;
+          break;
+        }
+      } catch {
+        break; // زالت كليًّا — لا زومبيَ (فشلُ إعدادِ الشاهدِ)
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(becameZombie, 'the killed fake must remain a zombie (guardian parent does not reap)');
+    // ملفُّ PID مفقودٌ (لا يُكتبُ أصلًا) والرقمُ محفوظٌ لدى الشاهدِ: قرارُ الإيقافِ من المسحِ وحدَهُ.
+    const r = terminateAttempt({ pidFile: join(dir, 'swtpm.pid'), dir });
+    assert.equal(r.stopped, false, 'a lingering zombie must never allow stopped=true (ESRCH only)');
+    assert.equal(r.identityUnknown, true, 'the unattributable zombie must keep the state undecided');
+  } finally {
+    // التنظيفُ: الوالدُ الحارسُ يُقتَلُ فتُودَعُ الزومبيُّ لعملِ init فيُلقّاها ويُقاسُ زوالُها بـESRCH.
+    try {
+      process.kill(parent.pid, 'SIGKILL');
+    } catch {
+      /* زال سلفًا */
+    }
+    if (zombiePid !== null) {
+      for (let i = 0; i < 250; i++) {
+        if (pidProvenDead(zombiePid)) break;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    try {
+      if (pidProvenDead(zombiePid === null ? -1 : zombiePid) && discoverSimPids(dir).length === 0)
+        rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* أفضلُ جهدٍ */
+    }
+  }
+});
+
+// خاتمةُ الملفِ: كلُّ اختبارٍ يُنهي محاكيَه في finally — لا يتامى.
