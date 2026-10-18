@@ -1,47 +1,124 @@
 // @ts-nocheck
 // tests/helpers/ceremony-swtpm.mjs
 //
-// WL-414 دورةُ المعالجةِ / FUP-SOL-03 — تشغيلُ محاكيِ swtpm معزولٍ لاختباراتِ البروفةِ وإيقافُه.
+// WL-414 FUP-SOL-03 ثمّ WL-416 — تشغيلُ محاكيِ swtpm معزولٍ لاختباراتِ البروفةِ وإيقافُه.
 // كانت startSim منسوخةً في ثلاثةِ ملفّاتِ اختبارٍ، وعندَ نجاحِ إطلاقِ swtpm مع فشلِ استعلامِ الجاهزيّةِ كانت
 // تحذفُ مجلّدَ الحالةِ وتنتقلُ للمحاولةِ التاليةِ دونَ إيقافِ العمليّةِ — فيبقى محاكٍ يتيمٌ (PPID=1) بعدَ
-// خروجِ الاختبارِ (قياسُ gpt_6_1_sol على 3e67d362، وإعادةُ إنتاجِه على a3272058). الآن: كلُّ محاكٍ أُطلِقَ ولم
-// يُسلَّمْ للاختبارِ يُنهى وتُنتظَرُ نهايتُه قبلَ حذفِ مجلّدِه، وstopSim تنتظرُ النهايةَ كذلك (SIGTERM ثمّ SIGKILL).
+// خروجِ الاختبارِ (قياسُ gpt_6_1_sol على 3e67d362، وإعادةُ إنتاجِه على a3272058). ثمّ أثبتَ مراجعا e23bd431
+// فجوتَينِ باقيتَينِ (WL-416): غيابُ ملفِ PID كان يُعلَنُ توقّفًا (stopped=true) بلا قرينةٍ على زوالِ العمليّةِ،
+// واستثناءُ probe/onAbandon كان يتجاوزُ التنظيفَ. الآن:
+//   - هويةُ العمليّةِ تُربَطُ بمسارِ الحالةِ الفعليِّ من سطرِ أوامرِها (تفكيكُ وسائطِ /proc/<pid>/cmdline على
+//     الفواصلِ الصفريةِ ومطابقةُ الوسمِ `--tpmstate` ومعاملِهِ `dir=<مسار>` كاملًا) — لا برقمِ منفذٍ ولا
+//     بمطابقةِ نصٍّ جزئيٍّ، ولا تُقتَلُ عمليّةٌ لا يُثبَتُ أنها التي أنشأها هذا التشغيلُ.
+//   - استثناءُ إرسالِ الإشارةِ ليسَ إثباتَ زوالٍ: ESRCH وحدها دليلُ غيابٍ؛ وغيرُها (EPERM مثلًا) حالةٌ مجهولةٌ
+//     لا تُعلَنَ نجاحًا.
+//   - غيابُ ملفِ PID لا يُعَدُّ توقّفًا: الاكتشافُ البديلُ يربطُ العمليّةَ بمجلّدِ الحالةِ ويُنهيها؛ وتعذّرَ إثباتُ
+//     الهويّةِ أو الإيقافُ ⇒ stopped=false صادقةٌ ويُحفَظُ مجلّدُ الحالةِ دليلًا ولا يُحذَفُ ولا تُعادُ المحاولةُ.
+//   - كلُّ مسارِ خروجٍ بعدَ الإطلاقِ (رميُ probe أو afterSpawn، رميُ onAbandon، فشلُ الإيقافِ نفسِه) يمرُّ عبرَ
+//     تنظيفٍ مضمونٍ: لا يتجاوزُ أيُّ استثناءٍ مرحلةَ الإنهاءِ، ولا يُحذفُ مجلّدُ الحالةِ قبلَ إثباتِ زوالِ العمليّةِ
+//     المقصودةِ (المراقبُ يُستدعى بعدَ الإنهاءِ وقبلَ الحذفِ، فشاهِدُ الترتيبِ داخلَه).
 // لا TBS، ولا /dev/tpm*، ولا عتاد: محاكٍ على 127.0.0.1 أو ::1 فقط.
 
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
 
+// ── قراءةُ /proc: هويةُ العمليّةِ وحيواتُها ──
+
+// سطرُ أوامرِ العمليّةِ مفكوكًا على الفواصلِ الصفريةِ (وسائطٌ كاملةٌ لا نصٌّ واحدٌ).
+function procArgs(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+      .split('\0')
+      .filter((s) => s.length > 0);
+  } catch {
+    return null; // تعذّرَتِ القراءةُ: ليست دليلَ غيابٍ ولا دليلَ هويّةٍ
+  }
+}
+
+// هل العمليّةُ حيّةٌ؟ ESRCH وحدها غيابٌ مؤكَّدٌ؛ رفضُ الصلاحيّةِ (EPERM) يعني وجودَها.
 function alive(pid) {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    return e && e.code === 'ESRCH' ? false : true;
   }
+}
+
+// عمليّةُ swtpm تملكُ هذهِ الجلسةَ: وسمُ `--tpmstate` ومعاملُهُ `dir=<dir>` كاملًا بينَ وسائطِها.
+function ownsStateDir(args, dir) {
+  for (let i = 0; i + 1 < args.length; i++) {
+    if (args[i] === '--tpmstate' && args[i + 1] === `dir=${dir}`) return true;
+  }
+  return false;
+}
+
+// عمليّاتُ swtpm الحيّةُ المرتبطةُ بمسارِ حالةٍ بعينِهِ (هويةً كاملةً من الوسائطِ، لا مطابقةَ نصٍّ جزئيٍّ).
+export function discoverSimPids(dir) {
+  const found = [];
+  for (const entry of readdirSync('/proc')) {
+    if (!/^\d+$/.test(entry)) continue;
+    const pid = Number(entry);
+    if (pid <= 1) continue;
+    const args = procArgs(pid);
+    if (args === null || args.length === 0 || !args[0].includes('swtpm')) continue;
+    if (ownsStateDir(args, dir)) found.push(pid);
+  }
+  return found;
 }
 
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
-// يُنهي عمليّةَ المحاكي وينتظرُ زوالَها: SIGTERM ثمّ انتظارٌ محدودٌ ثمّ SIGKILL. يعيدُ true إن زالت.
-export function killSim(pid, { graceMs = 3000 } = {}) {
+// ── إنهاءُ عمليّةِ المحاكي وانتظارُ زوالِها ──
+//
+// يعيدَ true فقط عندَ قرينةٍ صحيحةٍ على زوالِ العمليّةِ المقصودةِ (ESRCH عندَ الإشارةِ أو بعدها، أو زوالُ
+// /proc/<pid>). أمّا تعذّرُ قراءةِ الهويّةِ، أو عدمُ مطابقةِ سطرِ الأوامرِ لمسارِ الحالةِ (إعادةُ استخدامِ PID
+// لعمليّةٍ أخرى)، أو رفضُ إرسالِ الإشارةِ بصلاحيّةٍ — فكلُّها حالاتٌ مجهولةٌ تُعيدُ false ولا تُقتَلُ فيها عمليّةٌ
+// لا يُثبَتُ أنها العمليّةُ التي أنشأها هذا التشغيلُ.
+// opts.dir: مسارُ الحالةِ للتحقّقِ من ملكيّةِ العمليّةِ قبلَ أيِّ إشارةٍ.
+// opts.injectKillFailure: حقنٌ محدودٌ للاختبارِ — يُمحاكي فشلَ إرسالِ الإشارةِ بصلاحيّةٍ (EPERM) فلا يُعلَنَ
+// التوقّفُ كذبًا ولا يُحذَفُ المجلّدُ.
+export function killSim(pid, { graceMs = 3000, dir = null, injectKillFailure = false } = {}) {
   if (!Number.isInteger(pid) || pid <= 1) return true;
+  // هويةُ العمليّةِ قابلةٌ للقراءةِ: إن لم تربطها بمسارِ حالتِنا فهي ليست مِلكَنا — لا تُمسّ.
+  const args = procArgs(pid);
+  if (args !== null && args.length > 0) {
+    if (!args[0].includes('swtpm') || (dir !== null && !ownsStateDir(args, dir))) return false;
+  } else if (alive(pid)) {
+    // سطرُ أوامرِها غيرُ مقروءٍ لكنّها حيّةٌ: الهويّةُ غيرُ قابلةٍ للإثباتِ — لا قتلَ بلا قرينةٍ.
+    return false;
+  } else {
+    return true; // لا عمليّةَ بهذا الرقمِ: زالت.
+  }
   try {
+    if (injectKillFailure) {
+      const e = new Error('EPERM: simulated signal-permission failure (test injection)');
+      e.code = 'EPERM';
+      throw e;
+    }
     process.kill(pid, 'SIGTERM');
-  } catch {
-    return true;
+  } catch (e) {
+    if (e && e.code === 'ESRCH') return true; // زالت قبلَ الإشارةِ
+    return false; // رفضُ صلاحيّةٍ أو خطأٌ آخر: ليسَ إثباتَ زوالٍ
   }
   for (let waited = 0; waited < graceMs; waited += 20) {
     if (!alive(pid)) return true;
     sleepMs(20);
   }
   try {
+    if (injectKillFailure) {
+      const e = new Error('EPERM: simulated signal-permission failure (test injection)');
+      e.code = 'EPERM';
+      throw e;
+    }
     process.kill(pid, 'SIGKILL');
-  } catch {
-    return true;
+  } catch (e) {
+    if (e && e.code === 'ESRCH') return true;
+    return false;
   }
   for (let waited = 0; waited < 1000; waited += 20) {
     if (!alive(pid)) return true;
@@ -70,8 +147,43 @@ function defaultProbe(port) {
   }
 }
 
+// إنهاءُ محاولةٍ: العمليّةُ المقصودةُ هي ما يربطُهُ سطرُ أوامرِهِ بمسارِ الحالةِ. لا يُقتَلُ ما لا يُثبَتُ
+// ملكُهُ، ولا يُعلَنَ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (إعادةُ مسحٍ قرائيةٍ بعدَ الإنهاءِ).
+function terminateAttempt({ pidFile, dir, injectKillFailure }) {
+  const pidFromFile = readPid(pidFile);
+  let identityUnknown = false;
+  let usedPidFile = false;
+  if (pidFromFile !== null && alive(pidFromFile)) {
+    usedPidFile = true;
+    const args = procArgs(pidFromFile);
+    if (args === null || args.length === 0) {
+      identityUnknown = true; // حيّةٌ ولا يُقرأُ سطرُ أوامرِها: الهويّةُ غيرُ قابلةٍ للإثباتِ
+    } else if (args[0].includes('swtpm') && (dir === null || ownsStateDir(args, dir))) {
+      // مِلكُنا المُعلَنُ من ملفِ PID ومربوطٌ بمسارِ الحالةِ: يُنهى ويُنتظرُ زوالُهُ.
+      if (!killSim(pidFromFile, { dir, injectKillFailure })) identityUnknown = true;
+    }
+    // وإلا: الملفُّ يشيرُ إلى عمليّةٍ لا تربطُها بمسارِ حالتِنا — ليست مِلكَ هذا التشغيلِ فلا تُمسّ.
+  }
+  // غيابُ ملفِ PID ليسَ دليلَ توقّفٍ: الاكتشافُ البديلُ من /proc يربطُ العمليّةَ بمسارِ الحالةِ الفعليِّ.
+  const discovered = discoverSimPids(dir);
+  const discoveryUsed = discovered.length > 0;
+  for (const p of discovered) {
+    if (!killSim(p, { dir, injectKillFailure })) identityUnknown = true;
+  }
+  // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ.
+  const remaining = discoverSimPids(dir);
+  return {
+    stopped: !identityUnknown && remaining.length === 0,
+    identityUnknown,
+    discoveryUsed,
+    usedPidFile,
+  };
+}
+
 // opts: prefix (بادئةُ مجلّدِ الحالةِ)، portBase، bindaddr، attempts (8)، readyTries (10)، readyDelayMs (1000)،
-// probe(port) ⇒ boolean (افتراضيًّا tpm2_getcap)، onAbandon({pid, dir, port, stopped}) لمراقبةِ الاختبارِ، label للخطأ.
+// probe(port) ⇒ boolean (افتراضيًّا tpm2_getcap)، onAbandon({pid, dir, port, stopped, reason}) لمراقبةِ الاختبارِ،
+// label للخطأ، afterSpawn({pid, dir, pidFile}) بعدَ الإطلاقِ وقبلَ الجاهزيّةِ (للاختباراتِ)،
+// injectKillFailure (للاختبارِ: محاكاةُ فشلِ الإشارةِ).
 export function startSim(opts = {}) {
   const {
     prefix = 'xuux-ceremony-',
@@ -83,68 +195,123 @@ export function startSim(opts = {}) {
     probe = defaultProbe,
     onAbandon = null,
     label = 'WL-413',
+    afterSpawn = null,
+    injectKillFailure = false,
   } = opts;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const dir = mkdtempSync(join(tmpdir(), prefix));
     const port = portBase + 2 * Math.floor(Math.random() * 150);
     const pidFile = join(dir, 'swtpm.pid');
-    const r = spawnSync(
-      'swtpm',
-      [
-        'socket',
-        '--tpm2',
-        '--tpmstate',
-        `dir=${dir}`,
-        '--server',
-        `type=tcp,port=${port},bindaddr=${bindaddr}`,
-        '--ctrl',
-        `type=tcp,port=${port + 1},bindaddr=127.0.0.1`,
-        '--flags',
-        'not-need-init,startup-clear',
-        '--pid',
-        `file=${pidFile}`,
-        '--daemon',
-      ],
-      { encoding: 'utf8' },
-    );
-    // حتى عندَ خروجٍ غيرِ صفريٍّ قد يكونُ ملفُّ pid كُتب: يُنهى ما وُجدَ قبلَ حذفِ المجلّد.
-    if (r.status !== 0) {
-      const pid = readPid(pidFile);
-      const stopped = pid ? killSim(pid) : true;
-      if (onAbandon) onAbandon({ pid, dir, port, stopped, reason: 'spawn-failed' });
-      rmSync(dir, { recursive: true, force: true });
-      continue;
+    let launchError = null;
+    let abandonReason = null;
+    let r = null;
+    try {
+      r = spawnSync(
+        'swtpm',
+        [
+          'socket',
+          '--tpm2',
+          '--tpmstate',
+          `dir=${dir}`,
+          '--server',
+          `type=tcp,port=${port},bindaddr=${bindaddr}`,
+          '--ctrl',
+          `type=tcp,port=${port + 1},bindaddr=127.0.0.1`,
+          '--flags',
+          'not-need-init,startup-clear',
+          '--pid',
+          `file=${pidFile}`,
+          '--daemon',
+        ],
+        { encoding: 'utf8' },
+      );
+    } catch (e) {
+      launchError = e;
+      abandonReason = 'spawn-threw';
     }
-    let ready = false;
-    for (let i = 0; i < readyTries; i++) {
-      if (probe(port)) {
-        ready = true;
-        break;
+    if (launchError === null) {
+      // حتى عندَ خروجٍ غيرِ صفريٍّ قد يكونُ ملفُّ pid كُتب: يُنهى ما وُجدَ قبلَ أيِّ قرارٍ على المجلّدِ.
+      if (r.status !== 0) abandonReason = 'spawn-failed';
+      else {
+        try {
+          if (afterSpawn) afterSpawn({ pid: readPid(pidFile), dir, pidFile });
+          let ready = false;
+          // رميُ probe استثناءً لا يتجاوزُ التنظيفَ: كلُّ ما بعدَ الإطلاقِ يمرُّ عبرَ مسارِ الإنهاءِ نفسِهِ.
+          for (let i = 0; i < readyTries; i++) {
+            if (probe(port)) {
+              ready = true;
+              break;
+            }
+            if (i + 1 < readyTries) sleepMs(readyDelayMs);
+          }
+          const pid = readPid(pidFile);
+          if (!ready) abandonReason = 'not-ready';
+          else if (pid === null) abandonReason = 'no-pid';
+          else return { dir, port, pidFile, pid };
+        } catch (e) {
+          launchError = e;
+          abandonReason = 'exception-after-launch';
+        }
       }
-      if (i + 1 < readyTries) sleepMs(readyDelayMs);
     }
-    const pid = readPid(pidFile);
-    if (!ready || pid === null) {
-      const stopped = pid ? killSim(pid) : true;
-      if (onAbandon) onAbandon({ pid, dir, port, stopped, reason: ready ? 'no-pid' : 'not-ready' });
-      rmSync(dir, { recursive: true, force: true });
-      continue;
+    // ── مسارُ الإنهاءِ الموحّدُ لكلِّ محاولةٍ لم تُسلَّمْ: إثباتُ الزوالِ أولًا، ثمّ المراقبُ، ثمّ الحذفُ ──
+    // المقبضُ يُقرأُ قبلَ الإنهاءِ: swtpm يحذفُ ملفَ PID بنفسِهِ عندَ توقّفِهِ الرشيقِ فلا يُقرأُ بعدهُ.
+    const pidBeforeTermination = readPid(pidFile);
+    let stopped = false;
+    let cleanupError = null;
+    let callbackError = null;
+    try {
+      stopped = terminateAttempt({ pidFile, dir, injectKillFailure }).stopped;
+    } catch (e) {
+      cleanupError = e; // فشلُ الإنهاءِ نفسِه: يُحفَظُ ولا يُعلَنَ نجاحًا
     }
-    return { dir, port, pidFile, pid };
+    // المراقبُ بعدَ الإنهاءِ وقبلَ الحذفِ: فشلُهُ لا يتجاوزُ التنظيفَ ولا يُخفيهِ.
+    if (onAbandon) {
+      try {
+        onAbandon({ pid: pidBeforeTermination, dir, port, stopped, reason: abandonReason });
+      } catch (e) {
+        callbackError = e;
+      }
+    }
+    // الحذفَ بعدَ إثباتِ الزوالِ وحدَهُ: بقيّةُ عمليّةٍ أو هويّةٍ غيرِ مثبَتةٍ ⇒ يُحفَظُ المجلّدُ دليلًا ويُوقَفُ
+    // المسارُ مغلقًا — لا محاولةً تاليةً تُطلقُ محاكياتٍ فوقَ عمليّةٍ لم يُثبَتْ زوالُها.
+    if (stopped) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch (e) {
+        cleanupError = cleanupError || e;
+      }
+    } else {
+      cleanupError =
+        cleanupError ||
+        new Error(
+          `${label}: simulator process not proven stopped (state dir kept as evidence: ${dir}); refusing to retry or delete`,
+        );
+    }
+    if (cleanupError) throw cleanupError; // فشلُ التنظيفِ لا يُبتلَعُ خلفَ خطأٍ أصليٍّ ولا يجاورُهُ صامتًا
+    if (callbackError) throw callbackError; // وفشلُ المراقبِ يظهرُ بعدَ اكتمالِ التنظيفِ
+    if (launchError) throw launchError; // الاستثناءُ الأصليُّ يُعادُ رميُهُ بعدَ تنظيفٍ مضمونٍ
   }
   throw new Error(label + ': تعذّرَ تشغيلُ محاكٍ معزول');
 }
 
 // قتلُ عمليّةِ المحاكي وانتظارُ زوالِها قبلَ حذفِ مجلّدِ الحالةِ (الحذفُ وحدَه ترك 21 يتيمًا — WL-413 R3).
+// الحذفَ بعدَ إثباتِ الزوالِ فقط: تعذّرَ الإيقافُ أو تعذّرَ إثباتُ الهويّةِ ⇒ يُحفَظُ المجلّدُ ويُعادَ false.
 export function stopSim(s) {
   if (!s) return true;
-  const stopped = killSim(s.pid);
+  const stopped = killSim(s.pid, { dir: s.dir });
+  if (stopped !== true) return false;
   try {
     rmSync(s.dir, { recursive: true, force: true });
   } catch {
-    /* أفضلُ جهد */
+    /* أفضلُ جهدٍ — الزوالُ مثبتٌ فلا يتيمَ */
   }
-  return stopped;
+  return true;
+}
+
+// للاختبار: هل مجلّدُ الحالةِ ما زالَ على القرصِ؟ (شاهدُ ترتيبِ الحذفِ بعدَ زوالِ العمليّةِ)
+export function stateDirExists(dir) {
+  return existsSync(dir);
 }
 
 // للاختبار: هل توجدُ عمليّةُ swtpm حيّةٌ تحملُ هذا المسارَ في سطرِ أوامرِها؟ (قراءةُ /proc فقط)

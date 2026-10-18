@@ -595,6 +595,9 @@ namespace Xuux.TpmCeremony
                 case Tpm.CC_StartAuthSession:
                 {
                     Rd c = new Rd(cmd); c.Raw(10 + 8); c.B2B(); c.B2B();
+                    // مقبضٌ كان كائنًا ثمّ عادَ جلسةً: سياقُ الكائنِ لا يُورَّثُ للجلسةِ (WL-416) — دورةُ حياةِ
+                    // السياقِ تتبعُ دورةَ حياةِ المقبضِ، والعكسُ موجودٌ سلفًا في Put (إزالةُ نوعِ الجلسةِ).
+                    _names.Remove(handles[0]); _qualified.Remove(handles[0]); _hierarchy.Remove(handles[0]);
                     _sessionType[handles[0]] = c.U8();
                     return;
                 }
@@ -610,6 +613,19 @@ namespace Xuux.TpmCeremony
         private void Put(uint h, byte[] name, byte[] qn, uint hier)
         {
             _names[h] = name; _qualified[h] = qn; _hierarchy[h] = hier; _sessionType.Remove(h);
+        }
+
+        // ── إزالةُ السياقِ عندَ إثباتِ انتهاءِ العمرِ (WL-416) ──
+        // تُربطُ بالحدثِ الذي يُثبتُ زوالَ المقبضِ أو الجلسةِ فعلًا، لا بمجردِ نتيجةٍ مجهولةٍ:
+        //   1. نجاحُ FlushContext المؤكَّد (عبرَ Record عندَ رمزِ صفرٍ).
+        //   2. جردٌ قرائيٌّ يُثبتُ غيابَ المقبضِ بعدَ فقدِ ردِّ التحريرِ (مسارُ المصالحةِ).
+        //   3. نجاحُ العمليةِ التي تستهلكُ الجلسةَ (جلسةُ السياسةِ تُستهلَكُ بأمرِ التفويضِ الناجحِ —
+        //      سلوكُ المحاكي المُثبَتُ: الجردُ النهائيّ لا يُبقي جلساتٍ مستعملةً).
+        // المقبضُ الحيّ أو الجردُ غيرُ المحسومِ لا يُزيلُ السياقَ — الفشلُ المغلقُ باقٍ، والسياقُ المفقودُ لا
+        // يتحوّلُ قبولًا افتراضيًّا: فحوصُ الكائناتِ والجلساتِ المجهولةِ تظلُّ مسمّاةً (CONTEXT_UNKNOWN).
+        public void EndOfLife(uint h)
+        {
+            _names.Remove(h); _qualified.Remove(h); _hierarchy.Remove(h); _sessionType.Remove(h);
         }
     }
 
@@ -1436,12 +1452,45 @@ namespace Xuux.TpmCeremony
             _r.Fact("baseline.nvHandles", _baselineNv.Count.ToString());
             _r.Fact("baseline.transients", _baselineTransients.Count.ToString());
             _r.Fact("baseline.sessions", _baselineSessions.Count.ToString());
+            // حاجزُ ملكيةِ فهارسِ NV (قرارُ المالكِ — WL-416): بعدَ اكتمالِ الجردِ القرائيّ وقبلَ أيِّ أمرٍ مُغيِّرٍ.
+        }
+
+        // ── حاجزُ إرهاقِ فهارسِ NV: قرارُ المالكِ المحافِظ (WL-416) ──
+        // أيُّ فهرسٍ NV داخلَ مجالِ المالكِ المُعلَن (0x01800000–0x01BFFFFF) لا يمكنُ إثباتُ أنّ هذه البروفةَ
+        // أنشأتهُ وتملكُ حقَّ تنظيفه ⇒ إيقافُ البروفةِ (فشلٌ مسمّى) قبلَ أيِّ أمرٍ مُغيِّرٍ. لا يُحذَفُ شىءٌ،
+        // ولا يُغَطّي الفحصُ سوى مجالِ المالك (الرقابةُ على حقّ المالكِ لا الحذفَ). عتبةُ الإيقاف: فهرسٌ واحدٌ
+        // غيرُ محسومٍ (السياسةُ المحافِظةُ: لا يوجدُ دليلٌ كافٍ لتبريرِ عتبةٍ أعلى).
+        private const int UnresolvedNvStopThreshold = 1;
+
+        private void AssertNvRangeOwnership()
+        {
+            HashSet<uint> present = NvHandles();
+            List<uint> unresolved = new List<uint>();
+            foreach (uint h in present)
+            {
+                if (h >= Tpm.OWNER_INDEX_FIRST && h <= Tpm.OWNER_INDEX_LAST && !_definedByRun.ContainsKey(h))
+                    unresolved.Add(h);
+            }
+            if (unresolved.Count >= UnresolvedNvStopThreshold)
+            {
+                _r.Fact("nvOwnershipGuard.ownerRange",
+                    string.Format("0x{0:X8}-0x{1:X8}", Tpm.OWNER_INDEX_FIRST, Tpm.OWNER_INDEX_LAST));
+                _r.Fact("nvOwnershipGuard.unresolvedCount", unresolved.Count.ToString());
+                _r.Fact("nvOwnershipGuard.stopThreshold", UnresolvedNvStopThreshold.ToString());
+                throw new CeremonyFailedException(
+                    "NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED: NV index(es) inside the declared XUUX owner range " +
+                    "cannot be proven as created-by-this-run and safely deletable; rehearsal halted before any state-changing " +
+                    "command. Matching the public area to the request is not proof of ownership. " +
+                    "Owner review of the recorded index list is required before any cleanup.", 0);
+            }
         }
 
         // جردٌ فوريٌّ قبلَ كلِّ تعريف ⇒ مقبضٌ عشوائيٌّ خالٍ في مجالِ المالك. لا مقبضَ ثابتٌ ولا إعادةُ محاولة.
+        // حاجزُ ملكيةِ مجالِ المالكِ يُفحَصُ هنا أيضًا: ظهورُ فهرسٍ من طرفٍ ثالثٍ بعدَ الأساسِ لا يُمرَّرُ.
         private uint PickVacantHandle(string purpose)
         {
             HashSet<uint> used = NvHandles();
+            AssertNvRangeOwnership();
             uint countersMax = Property(0x116);
             uint counters = Property(0x20A);
             _r.Fact(purpose + ".nvHandlesBefore", used.Count.ToString());
@@ -1612,7 +1661,7 @@ namespace Xuux.TpmCeremony
                 throw new ResponseMalformedException("RESPONSE_HANDLE_PREEXISTING: " + what + " " + Hex.U32(h) + " existed in baseline sessions inventory", 0);
         }
 
-        private void SessionConsumed(uint h) { _transients.Remove(h); }
+        private void SessionConsumed(uint h) { _transients.Remove(h); _ctx.EndOfLife(h); } // استهلاكُ الجلسةِ زوالُ عمرٍ مُثبَتٌ (WL-416)
 
         private void SignAHash(string label, uint key, byte[] nonceTpm, out byte[] r, out byte[] s)
         {
@@ -1878,6 +1927,7 @@ namespace Xuux.TpmCeremony
                 {
                     _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": verified absent (release took effect)");
                     _transients.Remove(p.Handle);
+                    _ctx.EndOfLife(p.Handle); // انتهاءُ عمرٍ مُثبَتٌ بجردٍ قرائيّ: يُزالُ السياقُ المسجَّلُ (WL-416)
                     return;
                 }
                 _r.Reconciliation.Add("flush " + Hex.U32(p.Handle) + ": still present; release outcome unknown; " +
@@ -1912,6 +1962,7 @@ namespace Xuux.TpmCeremony
                 {
                     _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session gone; effect unverifiable and moot");
                     _transients.Remove(p.Handle);
+                    _ctx.EndOfLife(p.Handle); // الجلسةُ اختفت فعلًا ⇒ زوالُ عمرٍ مُثبَتٌ (WL-416)
                     return;
                 }
                 _r.Reconciliation.Add("policy-mutation " + Hex.U32(p.Handle) + ": session still present; policy state unverifiable after lost response; " +
@@ -2011,6 +2062,8 @@ namespace Xuux.TpmCeremony
             {
                 AssertSimulatorIdentity();
                 SnapshotBaseline();
+                // الحاجزُ المحافِظُ بعدَ اكتمالِ خطِّ الأساسِ القرائيّ وقبلَ أيِّ أمرٍ مُغيِّرٍ (قرارُ المالكِ — WL-416).
+                AssertNvRangeOwnership();
                 if (stages == "S1" || stages == "ALL") StageS1();
                 if (stages == "S2" || stages == "ALL") StageS2();
                 if (stages == "ALL") StageS2Validation();

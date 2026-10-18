@@ -16,7 +16,7 @@
 
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)][ValidateSet('inject-blocked', 'foreign-identity', 'fault', 'host-guard', 'policysigned-shapes')][string]$Mode,
+  [Parameter(Mandatory = $true)][ValidateSet('inject-blocked', 'foreign-identity', 'fault', 'host-guard', 'policysigned-shapes', 'ctx-lifetime')][string]$Mode,
   [ValidateSet('127.0.0.1', '::1')][string]$SimHost = '127.0.0.1',
   [int]$SimPort = 2321,
   [string]$BlockCc,
@@ -74,6 +74,17 @@ if ($Mode -eq 'policysigned-shapes') {
   try {
     $lines = [Xuux.TpmCeremony.Tests.PolicySignedShapes]::Run($inner)
     [Console]::Out.WriteLine((@{ shapes = @($lines) } | ConvertTo-Json -Depth 4 -Compress))
+  } finally { $inner.Dispose() }
+  exit 0
+}
+
+# WL-416: قياسُ دورةِ حياةِ سياقِ الردّ (ResponseContext) على swtpm حقيقيّ — حالاتُ فقدِ ردِّ التحريرِ
+# وإثباتِ الغيابِ وإعادةِ الاستخدامِ واستهلاكِ جلسةِ السياسةِ (انظر ContextLifetimeProbe).
+if ($Mode -eq 'ctx-lifetime') {
+  $inner = New-Object Xuux.TpmCeremony.SwtpmLoopbackTransport($SimHost, $SimPort)
+  try {
+    $lines = [Xuux.TpmCeremony.Tests.ContextLifetimeProbe]::Run($inner)
+    [Console]::Out.WriteLine((@{ cases = @($lines) } | ConvertTo-Json -Depth 4 -Compress))
   } finally { $inner.Dispose() }
   exit 0
 }
