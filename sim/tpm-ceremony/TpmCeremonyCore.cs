@@ -1476,6 +1476,8 @@ namespace Xuux.TpmCeremony
                 _r.Fact("nvOwnershipGuard.ownerRange",
                     string.Format("0x{0:X8}-0x{1:X8}", Tpm.OWNER_INDEX_FIRST, Tpm.OWNER_INDEX_LAST));
                 _r.Fact("nvOwnershipGuard.unresolvedCount", unresolved.Count.ToString());
+                // قائمةُ الفهارسِ غيرِ المنسوبةِ للمراجعةِ (سجلٌّ كاملٌ لا عددًا وحدَهُ — WL-416 جولةُ المراجعةِ الثانيةِ):
+                _r.Fact("nvOwnershipGuard.unresolvedIndices", string.Join(",", unresolved.ConvertAll(h => "0x" + h.ToString("X8")).ToArray()));
                 _r.Fact("nvOwnershipGuard.stopThreshold", UnresolvedNvStopThreshold.ToString());
                 throw new CeremonyFailedException(
                     "NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED: NV index(es) inside the declared XUUX owner range " +

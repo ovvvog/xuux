@@ -37,13 +37,29 @@ function procArgs(pid) {
   }
 }
 
-// هل العمليّةُ حيّةٌ؟ ESRCH وحدها غيابٌ مؤكَّدٌ؛ رفضُ الصلاحيّةِ (EPERM) يعني وجودَها.
+// هل العمليّةُ حيّةٌ؟ ESRCH وحدها غيابٌ مؤكَّدٌ؛ رفضُ الصلاحيّةِ (EPERM) يعني وجودَها؛ والزومبي (Z)
+// منتهيةٌ فعليًا وإن بقي مدخلُها في /proc — «حيّةٌ» تعني عاملةً لا حاضرةَ الرقمُ فحسبُ.
 function alive(pid) {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (e) {
     return e && e.code === 'ESRCH' ? false : true;
+  }
+  const st = procState(pid);
+  return !(st !== null && st.state === 'Z');
+}
+
+// حالةُ العمليّةِ من /proc/<pid>/stat: الزومبي (Z) منتهيةٌ عمليًا فلا تُحسَبُ حيّةً عليلا، وخيوطُ النواةِ
+// (ppid=2 أو 0) ليست عمليّاتِ مستخدمٍ أصلًا. تعذّرَتِ القراءةُ ⇒ null (لا دليلَ غيابٍ ولا دليلَ هويّةٍ).
+function procState(pid) {
+  try {
+    const s = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const close = s.lastIndexOf(')');
+    if (close < 0) return null;
+    const rest = s.slice(close + 2).split(' ');
+    return { state: rest[0], ppid: Number(rest[1]) };
+  } catch {
+    return null;
   }
 }
 
@@ -57,16 +73,37 @@ function ownsStateDir(args, dir) {
 
 // عمليّاتُ swtpm الحيّةُ المرتبطةُ بمسارِ حالةٍ بعينِهِ (هويةً كاملةً من الوسائطِ، لا مطابقةَ نصٍّ جزئيٍّ).
 export function discoverSimPids(dir) {
-  const found = [];
+  return scanStateDir(dir).matches;
+}
+
+// مسحٌ قرائيٌّ لمسارِ حالةٍ: matches = عمليّاتٌ مُثبَتٌ أنها swtpm يملكُ مسارَ الحالةِ؛ unresolved = عمليّةٌ
+// حيّةٌ لا يمكنُ قراءةُ هويّتِها (سطرُ أوامرٍ غيرُ مقروءٍ لعمليّةٍ ليست زومبي ولا خيطَ نواةٍ) — لا يجوزُ
+// أن يُعلَنَ التوقّفُ مع بقائِها (WL-416 جولةُ المراجعةِ الثانيةِ: الاكتشافُ الفارغُ ليسَ إثباتَ موتٍ).
+// readCmdline: حقنةُ اختبارٍ لمحاكاةِ قراءةٍ غيرِ مقروءةٍ (الافتراضيُّ قراءةُ /proc الحقيقيّةُ).
+function scanStateDir(dir, { readCmdline = procArgs } = {}) {
+  const matches = [];
+  const unresolved = [];
   for (const entry of readdirSync('/proc')) {
     if (!/^\d+$/.test(entry)) continue;
     const pid = Number(entry);
     if (pid <= 1) continue;
-    const args = procArgs(pid);
-    if (args === null || args.length === 0 || !args[0].includes('swtpm')) continue;
-    if (ownsStateDir(args, dir)) found.push(pid);
+    const args = readCmdline(pid);
+    if (args === null || args.length === 0) {
+      // لا هويةَ مقروءةً: الزومبي منتهيةٌ، وخيطُ النواةِ ليسَ عمليّةَ مستخدمٍ؛ وما عدا ذلك حيّةٌ غيرُ محسومةِ الهويّةِ.
+      const st = procState(pid);
+      if (st === null) {
+        if (alive(pid)) unresolved.push(pid);
+        continue;
+      }
+      if (st.state === 'Z') continue;
+      if (st.ppid === 2 || st.ppid === 0) continue;
+      if (alive(pid)) unresolved.push(pid);
+      continue;
+    }
+    if (!args[0].includes('swtpm')) continue;
+    if (dir === null || ownsStateDir(args, dir)) matches.push(pid);
   }
-  return found;
+  return { matches, unresolved };
 }
 
 function sleepMs(ms) {
@@ -82,10 +119,13 @@ function sleepMs(ms) {
 // opts.dir: مسارُ الحالةِ للتحقّقِ من ملكيّةِ العمليّةِ قبلَ أيِّ إشارةٍ.
 // opts.injectKillFailure: حقنٌ محدودٌ للاختبارِ — يُمحاكي فشلَ إرسالِ الإشارةِ بصلاحيّةٍ (EPERM) فلا يُعلَنَ
 // التوقّفُ كذبًا ولا يُحذَفُ المجلّدُ.
-export function killSim(pid, { graceMs = 3000, dir = null, injectKillFailure = false } = {}) {
+export function killSim(
+  pid,
+  { graceMs = 3000, dir = null, injectKillFailure = false, readCmdline = procArgs } = {},
+) {
   if (!Number.isInteger(pid) || pid <= 1) return true;
   // هويةُ العمليّةِ قابلةٌ للقراءةِ: إن لم تربطها بمسارِ حالتِنا فهي ليست مِلكَنا — لا تُمسّ.
-  const args = procArgs(pid);
+  const args = readCmdline(pid);
   if (args !== null && args.length > 0) {
     if (!args[0].includes('swtpm') || (dir !== null && !ownsStateDir(args, dir))) return false;
   } else if (alive(pid)) {
@@ -108,6 +148,17 @@ export function killSim(pid, { graceMs = 3000, dir = null, injectKillFailure = f
   for (let waited = 0; waited < graceMs; waited += 20) {
     if (!alive(pid)) return true;
     sleepMs(20);
+  }
+  // التصعيدُ (SIGKILL) لا يقعُ على الرقمِ وحدَهُ: الهويّةُ يُعادُ إثباتُها قبلَهُ — انتظارُنا فحصُ وجودٍ
+  // بالرقمِ فقط، وقد يُعادُ استخدامُهُ لعمليّةٍ أخرى بينَ الإشارتَينِ (WL-416 جولةُ المراجعةِ الثانيةِ).
+  const argsAtEscalation = readCmdline(pid);
+  if (
+    argsAtEscalation === null ||
+    argsAtEscalation.length === 0 ||
+    !argsAtEscalation[0].includes('swtpm') ||
+    (dir !== null && !ownsStateDir(argsAtEscalation, dir))
+  ) {
+    return false; // الهويّةُ لم تُثبَتْ عندَ التصعيدِ: لا قتلَ لعمليّةٍ قد لا تكونَ مِلكَنا
   }
   try {
     if (injectKillFailure) {
@@ -149,31 +200,35 @@ function defaultProbe(port) {
 
 // إنهاءُ محاولةٍ: العمليّةُ المقصودةُ هي ما يربطُهُ سطرُ أوامرِهِ بمسارِ الحالةِ. لا يُقتَلُ ما لا يُثبَتُ
 // ملكُهُ، ولا يُعلَنَ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (إعادةُ مسحٍ قرائيةٍ بعدَ الإنهاءِ).
-function terminateAttempt({ pidFile, dir, injectKillFailure }) {
+function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline = procArgs }) {
   const pidFromFile = readPid(pidFile);
   let identityUnknown = false;
   let usedPidFile = false;
   if (pidFromFile !== null && alive(pidFromFile)) {
     usedPidFile = true;
-    const args = procArgs(pidFromFile);
+    const args = readCmdline(pidFromFile);
     if (args === null || args.length === 0) {
       identityUnknown = true; // حيّةٌ ولا يُقرأُ سطرُ أوامرِها: الهويّةُ غيرُ قابلةٍ للإثباتِ
     } else if (args[0].includes('swtpm') && (dir === null || ownsStateDir(args, dir))) {
       // مِلكُنا المُعلَنُ من ملفِ PID ومربوطٌ بمسارِ الحالةِ: يُنهى ويُنتظرُ زوالُهُ.
-      if (!killSim(pidFromFile, { dir, injectKillFailure })) identityUnknown = true;
+      if (!killSim(pidFromFile, { dir, injectKillFailure, readCmdline })) identityUnknown = true;
     }
     // وإلا: الملفُّ يشيرُ إلى عمليّةٍ لا تربطُها بمسارِ حالتِنا — ليست مِلكَ هذا التشغيلِ فلا تُمسّ.
   }
-  // غيابُ ملفِ PID ليسَ دليلَ توقّفٍ: الاكتشافُ البديلُ من /proc يربطُ العمليّةَ بمسارِ الحالةِ الفعليِّ.
-  const discovered = discoverSimPids(dir);
-  const discoveryUsed = discovered.length > 0;
+  // غيابُ ملفِ PID ليسَ دليلَ توقّفٍ: الاكتشافُ البديلُ من /proc يربطُ العمليّةَ بمسارِ الحالةِ الفعليّ.
+  // والاكتشافُ الفارغُ ليسَ إثباتَ موتٍ: عمليّةٌ حيّةٌ لا تُقرأُ هويّتُها تُبقي الحالةَ غيرَ محسومةٍ.
+  const scan = scanStateDir(dir, { readCmdline });
+  if (scan.unresolved.length > 0) identityUnknown = true;
+  const discovered = scan.matches;
+  const discoveryUsed = discovered.length > 0 || scan.unresolved.length > 0;
   for (const p of discovered) {
-    if (!killSim(p, { dir, injectKillFailure })) identityUnknown = true;
+    if (!killSim(p, { dir, injectKillFailure, readCmdline })) identityUnknown = true;
   }
-  // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ.
-  const remaining = discoverSimPids(dir);
+  // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ ولا عمليّةً غيرَ محسومةِ.
+  const remaining = scanStateDir(dir, { readCmdline });
   return {
-    stopped: !identityUnknown && remaining.length === 0,
+    stopped:
+      !identityUnknown && remaining.matches.length === 0 && remaining.unresolved.length === 0,
     identityUnknown,
     discoveryUsed,
     usedPidFile,
@@ -197,6 +252,7 @@ export function startSim(opts = {}) {
     label = 'WL-413',
     afterSpawn = null,
     injectKillFailure = false,
+    readCmdline = null,
   } = opts;
   for (let attempt = 0; attempt < attempts; attempt++) {
     const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -261,7 +317,12 @@ export function startSim(opts = {}) {
     let cleanupError = null;
     let callbackError = null;
     try {
-      stopped = terminateAttempt({ pidFile, dir, injectKillFailure }).stopped;
+      stopped = terminateAttempt({
+        pidFile,
+        dir,
+        injectKillFailure,
+        readCmdline: readCmdline || procArgs,
+      }).stopped;
     } catch (e) {
       cleanupError = e; // فشلُ الإنهاءِ نفسِه: يُحفَظُ ولا يُعلَنَ نجاحًا
     }

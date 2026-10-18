@@ -7,7 +7,7 @@
 //        لا تُثبَتُ ملكيّتُها؛ والتوقّفُ لا يُعلَنُ بلا قرينةٍ.
 //   (ب) دورةُ حياةِ سياقِ الردّ (ResponseContext): إزالةٌ مسمّاةٌ عندَ إثباتِ انتهاءِ العمرِ (تحريرٌ مؤكَّدٌ،
 //        غيابٌ مُثبَتٌ بجردٍ قرائيّ، استهلاكُ جلسةِ السياسةِ)؛ لا وراثةَ لمقابضَ أُعيدَ استخدامُها؛ والسياقُ
-//        المفقودُ لا يتحوّلُ قبولًا افتراضيًّا (فشلٌ مسمّى CONTEXT_UNKNOWN).
+//        المفقودُ لا يتحوّلُ قبولًا افتراضيًّا (رفضٌ مسمّى: RESPONSE_CREATION_PARENT_UNKNOWN للفحصِ وRESPONSE_POLICY_CONTEXT_UNKNOWN لفحوصِ الجلساتِ).
 //   (ج) قرارُ المالكِ (more=0): الإبقاءُ على السلوكِ الحاليّ مع توثيقِ حدِّهِ — الردُّ الصحيحُ البنيةِ الذي
 //        يُعلنُ more=0 نهايةُ جردٍ بحسبِ العقدِ لا برهانَ خلوٍّ: فهرسٌ حقيقيٌّ يُحجبُ من الصفحاتِ والبروفةُ
 //        تكتملُ، والجردُ المباشرُ يُثبتُ وجودَهُ بعدَها.
@@ -21,7 +21,8 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import {
   startSim as startSimShared,
   stopSim,
@@ -56,6 +57,36 @@ function harnessRun(s, args) {
 }
 
 const fault = (s, mode) => harnessRun(s, ['-Mode', 'fault', '-Fault', mode]);
+
+// كلُّ اختبارٍ يملكُ محاكيَه وينهيهِ في finally — وفشلُ الإيقافِ يُفشلُ الاختبارَ بعدَ نجاحِ الجسمِ (لا يُبتلَعُ).
+function withSim(fn) {
+  const s = startSim();
+  let ok = false;
+  try {
+    fn(s);
+    ok = true;
+  } finally {
+    const st = stopSim(s);
+    if (ok) assert.equal(st, true, 'stopSim must prove termination and remove the state dir');
+  }
+}
+
+// ESRCH وحدها غيابٌ مؤكَّدٌ لرقمِ مقبضٍ معروفٍ: أيُّ خطأٍ آخر (EPERM مثلًا) حالةٌ مجهولةٌ لا دليلَ موتٍ.
+// والزومبي (Z) منتهيةٌ فعليًا وإن بقي مدخلُها في /proc حتى يُلقَّ — «ميّتةٌ» لا «حيّةٌ».
+function pidProvenDead(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    return e && e.code === 'ESRCH';
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const close = stat.lastIndexOf(')');
+    return stat.slice(close + 2, close + 3) === 'Z';
+  } catch {
+    return false; // تعذّرَتِ القراءةُ: ليست دليلَ غيابٍ
+  }
+}
 const list = (x) => (x === null || x === undefined ? [] : Array.isArray(x) ? x : [x]);
 
 // أوامرُ البروفةِ المُغيِّرةُ للحالةِ (مثلُ wl413-r3): لا يجوزُ ظهورُها قبلَ الفشلِ المسمّى.
@@ -84,6 +115,7 @@ function pgrepSwtpmCount() {
 // L1: غيابُ ملفِ PID ليسَ برهانَ توقّفٍ — الاكتشافُ البديلُ يربطُ العمليّةَ بمسارِ الحالةِ ويُنهيها.
 simTest('L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ توقّفًا والاكتشافُ البديلُ يُنهي المحاكي', () => {
   const abandoned = [];
+  let launchedPid = null;
   let threw = null;
   try {
     startSimShared({
@@ -92,7 +124,10 @@ simTest('L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ
       label: 'WL-416/L1',
       attempts: 1,
       probe: () => false,
-      afterSpawn: ({ pidFile }) => unlinkSync(pidFile), // الملفُّ يختفي: الهويّةُ من /proc فقط
+      afterSpawn: ({ pid, pidFile }) => {
+        launchedPid = pid; // المقبضُ يُقرأُ قبلَ الحذفِ: هويةٌ محفوظةٌ للتحققِ المستقلِّ
+        unlinkSync(pidFile); // الملفُّ يختفي: الهويّةُ من /proc فقط
+      },
       onAbandon: (a) => abandoned.push(a),
     });
   } catch (e) {
@@ -103,8 +138,9 @@ simTest('L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ
   const a = abandoned[0];
   assert.equal(a.reason, 'not-ready');
   assert.equal(a.stopped, true, 'discovery-bound termination must prove the stop');
-  // المقبضُ قُرئ من ملفٍ حذفهُ الاختبارُ نفسُهُ: لا يُفترَضُ وجودُهُ — الإنهاءُ لا يعتمدُ عليهِ.
-  assert.equal(discoverSimPids(a.dir).length, 0, 'no orphan swtpm for the abandoned state dir');
+  // تحقّقٌ مستقلٌّ عن آليةِ الاكتشافِ التي يُختبرُ سلوكُها: العمليّةُ المُطلَقةُ نفسُها زالت (ESRCH وحدَها).
+  assert.ok(launchedPid !== null, 'afterSpawn must hand over the pid before the pid file is deleted');
+  assert.ok(pidProvenDead(launchedPid), 'the launched swtpm must be provably dead (ESRCH only)');
   assert.equal(stateDirExists(a.dir), false, 'state dir removed only after proven termination');
 });
 
@@ -189,15 +225,8 @@ simTest('L4: المجلّدُ لا يُحذفُ إلّا بعدَ زوالِ ا�
   const o = observations[0];
   assert.equal(o.dirStillOnDisk, true, 'state dir must still exist when the monitor runs');
   assert.equal(o.simGone, true, 'the intended process must already be gone when the monitor runs');
-  // pid الذي رآه المراقبُ (قُرئ قبلَ الإنهاءِ) لم يبقَ حيًّا:
-  let pidAlive;
-  try {
-    process.kill(o.pid, 0);
-    pidAlive = true;
-  } catch {
-    pidAlive = false;
-  }
-  assert.equal(pidAlive, false, 'the launched swtpm pid must be dead before dir deletion');
+  // pid الذي رآه المراقبُ (قُرئ قبلَ الإنهاءِ) لم يبقَ حيًّا — وESRCH وحدها الغيابُ المؤكَّدُ:
+  assert.ok(pidProvenDead(o.pid), 'the launched swtpm pid must be provably dead (ESRCH only) before dir deletion');
 });
 
 // L5: فشلُ الإشارةِ (EPERM محقونٌ) ليسَ إثباتَ موتٍ: stopped=false صادقةٌ والمجلّدُ يُحفَظُ دليلًا.
@@ -224,11 +253,17 @@ simTest('L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا �
   assert.equal(a.stopped, false, 'EPERM is not proof of death: stopped must stay false');
   assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence when death is unproven');
   assert.ok(discoverSimPids(a.dir).length >= 1, 'the unproven simulator must still be alive');
-  // تنظيفٌ يدويٌّ بعدَ التحقّقِ (الاختبارُ يملكُ العمليّةَ التي أنشأها):
-  assert.equal(killSim(a.pid, { dir: a.dir }), true);
-  assert.equal(stateDirExists(a.dir), true, 'dir remains until the caller decides after honest report');
-  stopSim({ pid: a.pid, dir: a.dir });
-  assert.equal(stateDirExists(a.dir), false);
+  // التنظيفُ مضمونٌ حتى عندَ فشلِ تأكيدٍ: لا يُتركَ المحاكيُّ الذي تعمّدَ الاختبارُ إبقاءَهُ حيًّا يتيمًا.
+  try {
+    assert.equal(killSim(a.pid, { dir: a.dir }), true);
+    assert.equal(stateDirExists(a.dir), true, 'dir remains until the caller decides after honest report');
+    assert.equal(stopSim({ pid: a.pid, dir: a.dir }), true);
+    assert.equal(stateDirExists(a.dir), false);
+  } finally {
+    if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) {
+      killSim(a.pid, { dir: a.dir }); // أفضلُ جهدٍ — لا يتيمَ
+    }
+  }
 });
 
 // L5b: ملفُّ PID يشيرُ إلى عمليّةٍ بريئةٍ (نائمةٍ) — لا تُقتَلُ، والمحاكيُّ الحقيقيُّ يُنهى بالاكتشافِ.
@@ -301,8 +336,7 @@ simTest('L6: ثلاثُ إخفاقاتِ جاهزيّةٍ متتاليةٍ تن�
 // ── (ب) دورةُ حياةِ سياقِ الردّ (ResponseContext) — قياسٌ مباشرٌ على swtpm ──
 
 simPwshTest('CTX: فقدُ ردِّ التحريرِ وإثباتُ الغيابِ وإعادةُ الاستخدامِ واستهلاكُ الجلسةِ كما قِيسَ', () => {
-  const s = startSim();
-  try {
+  withSim((s) => {
     const o = harnessRun(s, ['-Mode', 'ctx-lifetime']);
     const cases = list(o.cases);
     assert.ok(cases.includes('probe: done'), JSON.stringify(cases));
@@ -320,7 +354,7 @@ simPwshTest('CTX: فقدُ ردِّ التحريرِ وإثباتُ الغياب
     assert.match(
       line('reuse-unrecorded: createCheck='),
       /createCheck=REJECT RESPONSE_CREATION_PARENT_UNKNOWN/,
-      'unrecorded reuse must fail with the named CONTEXT_UNKNOWN failure',
+      'unrecorded reuse must fail with the named missing-context failure (RESPONSE_CREATION_PARENT_UNKNOWN), not default-accept',
     );
     // الحالةُ 2: إعادةُ الاستخدامِ معَ التسجيلِ ⇒ مقبولٌ (الاسمُ يُبنى من الردِّ الجديدِ لا يُورَّثُ).
     assert.match(line('reuse-recorded: known='), /known=True/);
@@ -330,16 +364,13 @@ simPwshTest('CTX: فقدُ ردِّ التحريرِ وإثباتُ الغياب
     // الحالةُ 4: جلسةُ السياسةِ تُستهلَكُ بالأمرِ المُفوِّزِ الناجحِ (قياسٌ مباشرٌ فوريّ) ثمّ يزولُ سياقُها.
     assert.match(line('policy-session:'), /known=True type=1/);
     assert.match(line('consumed:'), /sessionGoneImmediately=True contextRemoved=True/);
-  } finally {
-    stopSim(s);
-  }
+  });
 });
 
 // ── (ج) قرارُ المالكِ (more=0): السلوكُ باقٍ وحدُّهُ موثَّقٌ بالقياسِ ──
 
 simPwshTest('M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا', () => {
-  const s = startSim();
-  try {
+  withSim((s) => {
     const o = fault(s, 'inventory-more0-hide');
     const r = o.report;
     // البروفةُ تكتملُ: الجردُ المحجوبُ لا يُفسدُ العقدَ (نهايةُ الجردِ more=0 عقدُ ردٍّ لا برهانَ خلوٍّ).
@@ -353,16 +384,13 @@ simPwshTest('M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا ب�
     );
     // وحدودُ القرارِ: الردودُ المُشوَّهةُ و more=1/count=0 تبقى فشلًا مغلقًا (تُغطّيها اختباراتُ wl413-r3
     // على الأوضاعِ inventory-no-progress و inventory-wrong-class — لا يُكرَّر قياسُها هنا).
-  } finally {
-    stopSim(s);
-  }
+  });
 });
 
 // ── (د) حاجزُ ملكيّةِ مجالِ المالكِ (قرارُ المالكِ المحافِظ: عتبةُ فهرسٍ واحدٍ) ──
 
 simPwshTest('NV1: فهرسٌ داخلَ مجالِ المالكِ قبلَ البروفةِ يُوقفُها مسمّىً بلا أيِّ أمرٍ مُغيِّرٍ ولا حذفٍ', () => {
-  const s = startSim();
-  try {
+  withSim((s) => {
     const o = fault(s, 'nv-preseed-unattributable');
     const r = o.report;
     assert.equal(r.status, 'FAILED_CLOSED');
@@ -383,14 +411,13 @@ simPwshTest('NV1: فهرسٌ داخلَ مجالِ المالكِ قبلَ ال�
     assert.equal(r.facts['nvOwnershipGuard.stopThreshold'], '1');
     assert.ok(Number(r.facts['nvOwnershipGuard.unresolvedCount']) >= 1);
     assert.match(r.facts['nvOwnershipGuard.ownerRange'], /^0x01800000-0x01bfffff$/i);
-  } finally {
-    stopSim(s);
-  }
+    // قائمةُ الفهارسِ غيرِ المنسوبةِ مسجَّلةٌ للمراجعةِ (سجلٌّ كاملٌ لا عددًا وحدَهُ):
+    assert.match(r.facts['nvOwnershipGuard.unresolvedIndices'] || '', /0x01807777/i);
+  });
 });
 
 simPwshTest('NV2: فهرسٌ من طرفٍ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ يُوقفُ البروفةَ قبلَ أيِّ تعريفٍ', () => {
-  const s = startSim();
-  try {
+  withSim((s) => {
     const o = fault(s, 'nv-appear-midrun');
     const r = o.report;
     assert.equal(r.status, 'FAILED_CLOSED');
@@ -403,9 +430,134 @@ simPwshTest('NV2: فهرسٌ من طرفٍ ثالثٍ يظهرُ بعدَ خطِ
     assert.ok(nvAfter.includes('0x01807777'), 'the third-party index must not be deleted by the rehearsal');
     // الحاجزُ قامَ بعدَ جردٍ كاملٍ لخطِّ الأساسِ (قياسُ more يُوثَّقُ في الحقائقِ):
     assert.equal(r.facts['nvOwnershipGuard.stopThreshold'], '1');
-  } finally {
-    stopSim(s);
+  });
+});
+
+// ── (هـ) جولةُ المراجعةِ الثانيةِ (WL-416-R2): عائقانِ عاليانِ — الاكتشافُ الفارغُ ليسَ إثباتَ موتٍ،
+// والتصعيدُ لا يقعُ على رقمِ PID وحدَهُ. الشاهدانِ بحقنٍ مضبوطٍ كما طلَبَ المراجعُ (القراءةُ غيرُ المقروءةِ
+// وتغيّرُ الهويّةِ بينَ الإشارتَينِ لا يحدثانِ طبيعيًا في بيئةِ الاختبارِ — قيدٌ موثَّقٌ في سجلِّ العملِ).
+
+// R2-01: عمليّةُ محاكٍ حيّةٌ لا تُقرأُ هويّتُها (سطرُ أوامرٍ غيرُ مقروءٍ) — لا يُعلَنَ التوقّفُ ولا يُحذَفُ
+// المجلّدُ، ويُرفَضُ التقدّمُ (بدلَ الاكتشافِ الفارغِ الزائفِ الذي كانَ يُعلِنُ التوقّفَ).
+simTest('R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُبقي الحالةَ غيرَ محسومةٍ — لا توقّفَ ولا حذفَ', () => {
+  const abandoned = [];
+  let launchedPid = null;
+  let threw = null;
+  try {
+    startSimShared({
+      prefix: 'xuux-wl416-r201-',
+      portBase: 3480,
+      label: 'WL-416/R2-01',
+      attempts: 1,
+      probe: () => false,
+      afterSpawn: ({ pid, pidFile }) => {
+        launchedPid = pid;
+        unlinkSync(pidFile); // ملفُّ PID مفقودٌ والهويّةُ غيرُ مقروءةٍ: أسوأ حالةِ مجهولةٍ
+      },
+      // حقنُ قراءةٍ غيرِ مقروءةٍ للمحاكي المُطلَقِ وحدَهُ؛ وسائطُ سليمةٌ لغيرِهِ (أجانبُ لا يُمسّونَ):
+      readCmdline: (pid) => (pid === launchedPid ? null : ['bash', '-lc', 'innocent']),
+      onAbandon: (a) => abandoned.push(a),
+    });
+  } catch (e) {
+    threw = e;
   }
+  assert.ok(threw, 'unreadable identity must not be declared stopped');
+  assert.match(String(threw.message), /not proven stopped/);
+  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+  const a = abandoned[0];
+  assert.equal(a.stopped, false, 'empty discovery is not proof of death: stopped must stay false');
+  assert.equal(stateDirExists(a.dir), true, 'state dir kept as evidence');
+  assert.ok(!pidProvenDead(launchedPid), 'the alive unreadable simulator must not be declared dead');
+  assert.ok(discoverSimPids(a.dir).length >= 1, 'the simulator is really still alive (real read)');
+  // تنظيفٌ مضمونٌ بالقارئِ الحقيقيّ وبالمقبضِ المحفوظِ (a.pid قد يكون null لأنّ ملفَ PID حُذفَ قبلَ
+  // قراءتِهِ — التنظيفُ لا يعتمدُ على ملفٍّ قد يزولَ، بل على الهويّةِ المُعلَنةِ عندَ الإطلاقِ):
+  try {
+    assert.equal(killSim(launchedPid, { dir: a.dir }), true);
+    assert.equal(stopSim({ pid: launchedPid, dir: a.dir }), true);
+    assert.equal(stateDirExists(a.dir), false);
+  } finally {
+    if (stateDirExists(a.dir) && discoverSimPids(a.dir).length > 0) killSim(launchedPid, { dir: a.dir });
+  }
+});
+
+// R2-02: تغيّرُ الهويّةِ بينَ SIGTERM والتصعيدِ (إعادةُ استخدامِ PID لعمليّةٍ أخرى) — لا يصلُ SIGKILLُ
+// إلى الهويّةِ البديلةِ، وتُعادُ false بصدقٍ ويبقى التنظيفُ بيدِ المتصلِ.
+simTest('R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنعُ SIGKILL ويُعيدُ فشلًا صادقًا', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xuux-wl416-r202-'));
+  // محاكٍ زائفٌ يتجاهلُ SIGTERM (كما قد يفعلُ محاكٍ معلّقٌ) ويمتلكُ مسارَ الحالةِ في وسائطِهِ: ملفُّ
+  // سكربتٍ مؤقتٌ (وسائطُ node بعدَ -e تُفسَّرُ كخياراتِ node لا كوسائطِ السكربتِ — قيدٌ مُقاسٌ):
+  const fakeScript = join(dir, 'fake-swtpm.js');
+  const readyMarker = join(dir, 'term-handler-ready');
+  writeFileSync(
+    fakeScript,
+    `process.on("SIGTERM", () => {}); require('node:fs').writeFileSync(${JSON.stringify(readyMarker)}, '1');` +
+      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);',
+  );
+  const fake = spawn(
+    'bash',
+    ['-c', `exec -a swtpm ${process.execPath} ${fakeScript} --tpmstate dir=${dir} x`],
+    { stdio: 'ignore', detached: true },
+  );
+  fake.unref();
+  // انتظارُ ظهورِ الوسائطِ في /proc وانتظارِ جاهزيّةِ معالجِ SIGTERM (سباقٌ مُقاسٌ: الاكتشافُ قد يسبقُ
+  // تسجيلَ المعالجِ فيُميتُ الإشارةُ الأولى العمليةَ البريئةَ عن سباقٍ لا عن قصدٍ):
+  let fakePid = null;
+  for (let i = 0; i < 250; i++) {
+    const found = discoverSimPids(dir);
+    if (found.length === 1) {
+      fakePid = found[0];
+      if (existsSync(readyMarker)) break;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+  assert.ok(fakePid !== null, 'fake swtpm must be discoverable by its state dir');
+  assert.ok(existsSync(readyMarker), 'fake swtpm must have its SIGTERM handler armed before the kill test');
+  try {
+    // القراءةُ الأولى (قبلَ SIGTERM) سليمةٌ؛ وعندَ التصعيدِ تغيّرَتِ الهويّةُ (رقمٌ أُعيدَ استخدامُهُ):
+    let readCount = 0;
+    const statefulRead = (_pid) => {
+      readCount++;
+      if (readCount === 1) return ['swtpm', '--tpmstate', `dir=${dir}`];
+      return ['bash', '-lc', 'reused-pid-innocent']; // الهويّةُ البديلةُ عندَ التصعيدِ
+    };
+    const r = killSim(fakePid, { dir, graceMs: 60, readCmdline: statefulRead });
+    assert.equal(r, false, 'escalation must be refused when identity changed');
+    assert.ok(readCount >= 2, 'identity must be re-proven at escalation');
+    // الهويّةُ البديلةُ لم تُقتَلْ — العمليّةُ ما زالت حيّةً (SIGKILL لم يُرسَلْ):
+    assert.ok(!pidProvenDead(fakePid), 'the identity-changed process must not have been SIGKILLed');
+    // وبالقارئِ الحقيقيّ: الهويّةُ ما زالت مطابقةً فيقتلهُ SIGKILLُ بعدَ إعادةِ إثباتِها — المسارُ السليمُ:
+    assert.equal(killSim(fakePid, { dir, graceMs: 60 }), true);
+    assert.ok(pidProvenDead(fakePid), 'the fake simulator must be dead after honest escalation');
+  } finally {
+    try {
+      killSim(fakePid, { dir, graceMs: 60 });
+    } catch {
+      /* زالت سلفًا */
+    }
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* أفضلُ جهدٍ */
+    }
+  }
+});
+
+// NV3: الحاجزُ المتكرّرُ داخلَ PickVacantHandle — فهرسٌ يظهرُ بعدَ اجتيازِ حاجزِ ما بعدِ الأساسِ
+// (الجردُ الثالثُ هو جردُ PickVacantHandle نفسِهِ) يُوقفُ البروفةَ قبلَ أيِّ تعريفٍ.
+simPwshTest('NV3: فهرسٌ يظهرُ بعدَ اجتيازِ الحاجزِ الأولِ يُوقفُ البروفةَ عندَ حاجزِ التعريفِ المتكرّرِ', () => {
+  withSim((s) => {
+    const o = fault(s, 'nv-appear-late');
+    const r = o.report;
+    assert.equal(r.status, 'FAILED_CLOSED');
+    assert.match(r.failure, /^NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED/);
+    assert.ok(
+      !r.steps.some((x) => STATE_CHANGING.has(x.commandCode)),
+      'no state-changing command before the named failure',
+    );
+    const nvAfter = list(o.nvAfter).map((h) => h.toLowerCase());
+    assert.ok(nvAfter.includes('0x01807777'), 'third-party index must survive untouched');
+    assert.match(r.facts['nvOwnershipGuard.unresolvedIndices'] || '', /0x01807777/i);
+  });
 });
 
 // الإيقافُ النهائيُّ للمحاكي المشتركِ ليسَ من هذا الملفِ: كلُّ اختبارٍ يملكُ محاكيَه وينهيه في finally.
