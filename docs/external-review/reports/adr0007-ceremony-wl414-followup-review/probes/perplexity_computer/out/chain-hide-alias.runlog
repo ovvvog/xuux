@@ -1,0 +1,1 @@
+mode=chain-hide-alias pwsh_exit=0 swtpm_live_during=1 swtpm_left_after_kill=0

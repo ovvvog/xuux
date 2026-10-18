@@ -1,0 +1,23 @@
+WL-414 follow-up reviewer gpt_6_1_sol, target 3e67d362dc4f30ec35f73957fd5542be47a3a875
+
+Initial setup invocation, cwd /tmp/wl414-followup/reviewers/gpt_6_1_sol:
+git clone /home/user/workspace/repo /tmp/wl414-followup/reviewers/gpt_6_1_sol/repo &&
+git checkout 3e67d362dc4f30ec35f73957fd5542be47a3a875 && npm ci && npm run build
+
+Raw output:
+Cloning into '/tmp/wl414-followup/reviewers/gpt_6_1_sol/repo'...
+done.
+fatal: not a git repository (or any of the parent directories): .git
+Exit: 128.
+
+Cause: checkout ran from the reviewer directory, not its cloned repo subdirectory.
+Recovery: run checkout / npm ci / npm run build with cwd set to the cloned repo.
+Recovery exit: 0. Setup and build were repeated with retained output in static/preflight.txt.
+No commands were executed with cwd /home/user/workspace/repo; only the required read-only clone used that path.
+
+Specification retrieval:
+fetch_url of https://cdn.trustedcomputinggroup.org/production/TPM_Rev_2_0_Part_3_Commands_01_38_f1ed38ee7e.pdf
+returned a robots-policy parsing error (no shell exit code; tool error).
+Used https://trustedcomputinggroup.org/wp-content/uploads/TCG_TPM2_r1p59_Part3_Commands_pub.pdf instead.
+Full successful fetch results and extracted text are retained in static/tcg-part{2,3}.{json,txt}.
+No remaining build or specification-access obstacle.

@@ -1,0 +1,2785 @@
+{
+  "head": "3e67d362dc4f30ec35f73957fd5542be47a3a875",
+  "runs": [
+    {
+      "directory": "independent",
+      "mode": "auth-password-on-policy",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v.policy:NV_Increment(policy-session) (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=0 attrs=0x01 hmacLen=0 expected=policy)",
+      "steps": 59,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x0182da1c",
+        "0x0189e3f5",
+        "0x0196e993"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "RS_PW profile on policy command"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "auth-policy-attrs08",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v.policy:NV_Increment(policy-session) (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=32 attrs=0x08 hmacLen=0 expected=policy)",
+      "steps": 59,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01ac8a4d",
+        "0x01a00b4b",
+        "0x01bb8520"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy reserved bit"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "auth-policy-nonce16",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v.policy:NV_Increment(policy-session) (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=16 attrs=0x00 hmacLen=0 expected=policy)",
+      "steps": 59,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01bf3951",
+        "0x01ad21f3",
+        "0x01b4ad39"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy nonce16"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "auth-policy-on-password",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (ResponseMalformedException: RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=32 attrs=0x00 hmacLen=0 expected=password)",
+      "steps": 12,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x019b93c1"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x019b93c1"
+        ],
+        "transients": []
+      },
+      "events": [
+        "policy auth profile on RS_PW command"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "below-start",
+      "exit": 0,
+      "changes": 2,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_ORDER_MALFORMED: 0x80000005 after 0x00000000 from 0x80000011 rc=0x00000000",
+      "steps": 4,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "events": [
+        "below-start 1",
+        "below-start 2"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-data-extra",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary tailFields=3 tail=2)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01b18a54",
+        "0x01887d50"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-data-extra"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-data-missing",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary tailFields=0 tail=0)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01872f84",
+        "0x0188f53d"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-data-missing"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-0",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=0)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01a6a3f2",
+        "0x01ab07ed"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-digest-0"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-1",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=1)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01af0ac1",
+        "0x01ae6cbc"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-digest-1"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-100",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=100)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01bbd1fa",
+        "0x018fdbbe"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-digest-100"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-32",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=32)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01805f2e",
+        "0x0197a65b"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-digest-32"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-63",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=63)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01a73d99",
+        "0x01b9af0a"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-digest-63"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-64",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x018c06cd",
+        "0x01af337e",
+        "0x01a0c614"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-digest-64"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-digest-65",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=65)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x0187857f",
+        "0x01817a0c"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-digest-65"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hash-flip",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_HASH_MISMATCH: CreatePrimary)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01a9f1ca",
+        "0x0182c2e1"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-hash-flip"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hierarchy-40000001",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x0183cc44",
+        "0x01a37757",
+        "0x0182c7c9"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-hierarchy-40000001"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hierarchy-40000002",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: CreatePrimary 0x40000002)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01a5afb6",
+        "0x01ab119c"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-hierarchy-40000002"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hierarchy-40000007",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01b8c6be",
+        "0x01a115a7",
+        "0x01b1550d"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-hierarchy-40000007"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hierarchy-40000009",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: CreatePrimary 0x40000009)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x0189f566",
+        "0x01b1cf00"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-hierarchy-40000009"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hierarchy-4000000b",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01906514",
+        "0x01b84b5c",
+        "0x01a29895"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-hierarchy-4000000b"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-hierarchy-4000000c",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01b3915a",
+        "0x01bd044a",
+        "0x01ae8e11"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-hierarchy-4000000c"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-null-empty",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=0)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01ac5cb4",
+        "0x01856ec7"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-null-empty"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-outsideinfo",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01983bdb",
+        "0x01ada460",
+        "0x0196ccfa"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-outsideinfo"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-parentalg-invalid",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary parentNameAlg=0xffff)",
+      "steps": 33,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x0198b9b1",
+        "0x01887210"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "events": [
+        "creation-parentalg-invalid"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-parentname",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x018392d0",
+        "0x01acf3b4",
+        "0x01b1890f"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-parentname"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "creation-pcr-empty",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01b46569",
+        "0x01955a9c",
+        "0x01a6228c"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-pcr-empty"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "cross-page",
+      "exit": 0,
+      "changes": 2,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_ORDER_MALFORMED: 0x80000000 after 0x00000000 from 0x80000001 rc=0x00000000",
+      "steps": 4,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "events": [
+        "cross-page 1",
+        "cross-page 2"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "descending",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_ORDER_MALFORMED: 0x80000000 after 0x80000001 from 0x80000000 rc=0x00000000",
+      "steps": 3,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "events": [
+        "descending"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "duplicate-alias",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_ORDER_MALFORMED: 0x80000000 after 0x80000000 from 0x80000000 rc=0x00000000",
+      "steps": 3,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "events": [
+        "baseline hides B with duplicate A"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "duplicate-many",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_ORDER_MALFORMED: 0x80000000 after 0x80000000 from 0x80000000 rc=0x00000000",
+      "steps": 3,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "events": [
+        "multiple repeats within page"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "load-name-flip",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:Load(service-key) (ResponseMalformedException: RESPONSE_NAME_HASH_MISMATCH: Load)",
+      "steps": 36,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000001"
+        ]
+      },
+      "flushed": [
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x019b62a0",
+        "0x01b4612f"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000001"
+        ]
+      },
+      "events": [
+        "load-name-flip"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "loss-create",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: FOLLOWUP_CREATE_RESPONSE_LOSS)",
+      "steps": 35,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01bca921",
+        "0x01a97af8"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "discarded successful Create response"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "loss-define",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: FOLLOWUP_ACTUAL_RESPONSE_LOSS)",
+      "steps": 12,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01bbb50a"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [
+          "0x01807777"
+        ],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01807777",
+          "0x01bbb50a"
+        ],
+        "transients": []
+      },
+      "events": [
+        "discarded actual successful NV_DefineSpace response after execution"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "normal-foreign",
+      "exit": 0,
+      "changes": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01bf7226",
+        "0x01917257",
+        "0x019f7ed4"
+      ],
+      "before": {
+        "nv": [
+          "0x01807777"
+        ],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01807777"
+        ],
+        "transients": []
+      },
+      "events": []
+    },
+    {
+      "directory": "independent",
+      "mode": "normal",
+      "exit": 0,
+      "changes": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01a590c6",
+        "0x019ba0be",
+        "0x01b44081"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": []
+    },
+    {
+      "directory": "independent",
+      "mode": "partial-session",
+      "exit": 0,
+      "changes": 1,
+      "status": "TOOL_ERROR",
+      "failure": "System.IO.IOException: FOLLOWUP_PARTIAL_SESSION",
+      "steps": 4,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "actual IO exception during session baseline"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "partial-transient",
+      "exit": 0,
+      "changes": 1,
+      "status": "TOOL_ERROR",
+      "failure": "System.IO.IOException: FOLLOWUP_PARTIAL_TRANSIENT",
+      "steps": 3,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "actual IO exception during transient baseline"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-digest-0",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x0198f4b5",
+        "0x01a39d7f",
+        "0x019d158e"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-digest-0"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-digest-1",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x019b1952",
+        "0x01a41561",
+        "0x01a14a02"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-digest-1"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-digest-32",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x018029c7",
+        "0x0198e8a7",
+        "0x01965b7e"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-digest-32"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-digest-64",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01aefba7",
+        "0x01ba1c09",
+        "0x01aefada"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-digest-64"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-digest-65",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: len=65)",
+      "steps": 41,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01890bf5",
+        "0x01a8b111"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-digest-65"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-hierarchy-40000001",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01829fca",
+        "0x018440b2",
+        "0x018ab580"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-hierarchy-40000001"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-hierarchy-40000002",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x40000002)",
+      "steps": 41,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01b2de3b",
+        "0x01ad9a30"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-hierarchy-40000002"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-hierarchy-40000007",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x019259b1",
+        "0x018ad679",
+        "0x01a2daea"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-hierarchy-40000007"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-hierarchy-40000009",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x40000009)",
+      "steps": 41,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01be8da0",
+        "0x01a82764"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-hierarchy-40000009"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-hierarchy-4000000b",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01919110",
+        "0x01b83938",
+        "0x01a9d762"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-hierarchy-4000000b"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-hierarchy-4000000c",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x019f03bd",
+        "0x01924445",
+        "0x01a66567"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-hierarchy-4000000c"
+      ]
+    },
+    {
+      "directory": "independent",
+      "mode": "policy-timeout",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_POLICY_TIMEOUT_MALFORMED: len=1 at expiration=0)",
+      "steps": 41,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01a24a54",
+        "0x01a4d266"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-timeout"
+      ]
+    },
+    {
+      "directory": "independent-extra",
+      "mode": "cleanup-undefine-before",
+      "exit": 0,
+      "changes": 2,
+      "status": "FAILED_CLOSED",
+      "failure": "TPM_ERROR: s1.probe:NV_Increment#1 rc=0x00000101",
+      "steps": 17,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01a27687"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01a27687"
+      ],
+      "forwardedUndefines": 0,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01a27687"
+        ],
+        "transients": []
+      },
+      "events": [
+        "return injected TPM failure to enter cleanup before any undefine",
+        "cleanup undefine dropped before transmission"
+      ]
+    },
+    {
+      "directory": "independent-extra",
+      "mode": "loss-define-foreign-matching",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: FOLLOWUP_FOREIGN_MATCHING_LOST_DEFINE)",
+      "steps": 12,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01a36814"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "forwardedUndefines": 0,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01a36814"
+        ],
+        "transients": []
+      },
+      "events": [
+        "foreign seed matching public, different index auth rc=0x00000000",
+        "actual ceremony define reply rc=0x0000014c discarded"
+      ]
+    },
+    {
+      "directory": "independent-extra",
+      "mode": "policy-tag-8023",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01b1a723",
+        "0x01b0252d",
+        "0x019a91ac"
+      ],
+      "forwardedUndefines": 3,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-tag-8023"
+      ]
+    },
+    {
+      "directory": "independent-extra",
+      "mode": "policy-tag-8024",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x8024)",
+      "steps": 41,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01b01882",
+        "0x019dc1d6"
+      ],
+      "forwardedUndefines": 2,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-tag-8024"
+      ]
+    },
+    {
+      "directory": "independent-extra",
+      "mode": "undefine-drop-before",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_UndefineSpace (IOException: FOLLOWUP_UNDEFINE_BEFORE_SEND)",
+      "steps": 24,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01afe0b6",
+        "0x01afe0b6"
+      ],
+      "forwardedUndefines": 1,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "first normal undefine dropped before transmission"
+      ]
+    },
+    {
+      "directory": "independent-partial",
+      "mode": "partial-session-badclass",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: 0x01000001 asked=0x02000000 rc=0x00000000",
+      "steps": 4,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "forwardedUndefines": 0,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "partial-session-badclass"
+      ]
+    },
+    {
+      "directory": "independent-partial",
+      "mode": "partial-transient-badclass",
+      "exit": 0,
+      "changes": 1,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_HANDLE_CLASS_MALFORMED: 0x01000001 asked=0x80000000 rc=0x00000000",
+      "steps": 3,
+      "postRunInventory": {
+        "verified": false,
+        "error": "partial baseline: run stopped during the baseline snapshot (transients/sessions baseline absent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [],
+      "forwardedUndefines": 0,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "partial-transient-badclass"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "auth-password-on-policy",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01a87e94",
+        "0x01848df0",
+        "0x01a12719"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "RS_PW profile on policy command"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "auth-policy-on-password",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x019656c9",
+        "0x01bbc117",
+        "0x01aebddd"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy auth profile on RS_PW command"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "creation-data-missing",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01903fe9",
+        "0x018c68ab",
+        "0x01af8c7d"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-data-missing"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "creation-hash-flip",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x019654ea",
+        "0x01b12812",
+        "0x0188bc41"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-hash-flip"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "creation-outsideinfo",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x018e4cf1",
+        "0x01843b37",
+        "0x01972a96"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "creation-outsideinfo"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "duplicate-alias",
+      "exit": 0,
+      "changes": 2,
+      "status": "FAILED_CLOSED",
+      "failure": "TPM_ERROR: s2:Create(service-key,ECDSA-P256) rc=0x00000902",
+      "steps": 10,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000002"
+        ]
+      },
+      "flushed": [
+        "0x80000001"
+      ],
+      "deleteAttempts": [],
+      "before": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "transients": [
+          "0x80000000",
+          "0x80000002"
+        ]
+      },
+      "events": [
+        "baseline hides B with duplicate A",
+        "replace created handle with hidden victim B"
+      ]
+    },
+    {
+      "directory": "control-before-fix",
+      "mode": "policy-digest-1",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x018a45a9",
+        "0x019229a1",
+        "0x01821794"
+      ],
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-digest-1"
+      ]
+    },
+    {
+      "directory": "control-extra",
+      "mode": "cleanup-undefine-before",
+      "exit": 0,
+      "changes": 2,
+      "status": "FAILED_CLOSED",
+      "failure": "TPM_ERROR: s1.probe:NV_Increment#1 rc=0x00000101",
+      "steps": 17,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01823a05"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [],
+      "deleteAttempts": [
+        "0x01823a05"
+      ],
+      "forwardedUndefines": 0,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01823a05"
+        ],
+        "transients": []
+      },
+      "events": [
+        "return injected TPM failure to enter cleanup before any undefine",
+        "cleanup undefine dropped before transmission"
+      ]
+    },
+    {
+      "directory": "control-extra",
+      "mode": "policy-tag-8023",
+      "exit": 0,
+      "changes": 1,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      },
+      "flushed": [
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x03000000",
+        "0x80000002",
+        "0x03000000",
+        "0x80000001",
+        "0x80000000"
+      ],
+      "deleteAttempts": [
+        "0x01aa7688",
+        "0x0190f742",
+        "0x01944201"
+      ],
+      "forwardedUndefines": 3,
+      "before": {
+        "nv": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "transients": []
+      },
+      "events": [
+        "policy-tag-8023"
+      ]
+    }
+  ],
+  "checks": [
+    "Every independent collector exited 0",
+    "Full historical duplicate/hidden-victim chain fires twice and flushes victim on pre-fix core",
+    "Target breaks chain at baseline; both guards survive and no mutation is attempted",
+    "Named rejection for duplicate-many",
+    "Named rejection for descending",
+    "Named rejection for cross-page",
+    "Named rejection for below-start",
+    "Bound authentication profile rejects auth-policy-on-password",
+    "Bound authentication profile rejects auth-password-on-policy",
+    "Bound authentication profile rejects auth-policy-nonce16",
+    "Bound authentication profile rejects auth-policy-attrs08",
+    "Untrusted partial baseline partial-transient",
+    "Untrusted partial baseline partial-session",
+    "Untrusted partial baseline partial-transient-badclass",
+    "Untrusted partial baseline partial-session-badclass",
+    "Actual lost define response leaves own candidate and pre-existing foreign NV; zero undefine attempts",
+    "Matching-public foreign seed survives lost failed define reply; zero forwarded undefines",
+    "Known remaining NULL auth ticket digest accepted at lengths 1/32/64",
+    "Known remaining creation data mismatch accepted",
+    "Reconciliation text promises cleanup after cleanup budget already spent",
+    "Genuine positive-expiration swtpm success rejected only by target schema",
+    "No extra daemon at native suite exit; supplied fixture stays intentionally",
+    "Assertion failure inside test body leaves no owned simulator",
+    "Readiness failure leaks one live owned simulator at immediate node exit",
+    "Template allowlist has identical semantic entries"
+  ],
+  "processes": {
+    "suiteBefore": {
+      "all": 2,
+      "own": 1,
+      "file": "shipped/processes-before-suite.txt"
+    },
+    "suiteImmediate": {
+      "all": 2,
+      "own": 1,
+      "file": "shipped/processes-immediately-after-suite.txt"
+    },
+    "rehearsalImmediate": {
+      "all": 2,
+      "own": 1,
+      "file": "shipped/processes-immediately-after-rehearsal.txt"
+    },
+    "fixtureStopped": {
+      "all": 1,
+      "own": 0,
+      "file": "shipped/processes-after-fixture-stop.txt"
+    },
+    "assertionBefore": {
+      "all": 1,
+      "own": 0,
+      "file": "forced-failure/processes-before.txt"
+    },
+    "assertionImmediate": {
+      "all": 1,
+      "own": 0,
+      "file": "forced-failure/processes-immediately-after.txt"
+    },
+    "readinessBefore": {
+      "all": 1,
+      "own": 0,
+      "file": "readiness-failure/processes-before.txt"
+    },
+    "readinessImmediate": {
+      "all": 2,
+      "own": 1,
+      "file": "readiness-failure/processes-immediately-after.txt"
+    },
+    "readinessExplicitCleanup": {
+      "all": 1,
+      "own": 0,
+      "file": "readiness-failure/processes-after-explicit-cleanup.txt"
+    }
+  },
+  "allowlist": {
+    "before": [
+      "civilization/001-domain/README.md",
+      "civilization/001-domain/domain-name-ar.txt",
+      "civilization/001-domain/education/README.md",
+      "civilization/001-domain/education/charter.md",
+      "civilization/001-domain/education/curriculum.md",
+      "civilization/001-domain/education/events.ts",
+      "civilization/001-domain/education/metrics.ts",
+      "civilization/001-domain/education/policy.yaml",
+      "civilization/001-domain/education/registry.ts",
+      "civilization/001-domain/education/research-agenda.md",
+      "civilization/001-domain/education/safety.md",
+      "civilization/001-domain/education/service.ts",
+      "civilization/001-domain/education/test.spec.ts",
+      "civilization/001-domain/governance/README.md",
+      "civilization/001-domain/governance/charter.md",
+      "civilization/001-domain/governance/curriculum.md",
+      "civilization/001-domain/governance/events.ts",
+      "civilization/001-domain/governance/metrics.ts",
+      "civilization/001-domain/governance/policy.yaml",
+      "civilization/001-domain/governance/registry.ts",
+      "civilization/001-domain/governance/research-agenda.md",
+      "civilization/001-domain/governance/safety.md",
+      "civilization/001-domain/governance/service.ts",
+      "civilization/001-domain/governance/test.spec.ts",
+      "civilization/001-domain/operations/README.md",
+      "civilization/001-domain/operations/charter.md",
+      "civilization/001-domain/operations/curriculum.md",
+      "civilization/001-domain/operations/events.ts",
+      "civilization/001-domain/operations/metrics.ts",
+      "civilization/001-domain/operations/policy.yaml",
+      "civilization/001-domain/operations/registry.ts",
+      "civilization/001-domain/operations/research-agenda.md",
+      "civilization/001-domain/operations/safety.md",
+      "civilization/001-domain/operations/service.ts",
+      "civilization/001-domain/operations/test.spec.ts",
+      "civilization/001-domain/registry/README.md",
+      "civilization/001-domain/registry/charter.md",
+      "civilization/001-domain/registry/curriculum.md",
+      "civilization/001-domain/registry/events.ts",
+      "civilization/001-domain/registry/metrics.ts",
+      "civilization/001-domain/registry/policy.yaml",
+      "civilization/001-domain/registry/registry.ts",
+      "civilization/001-domain/registry/research-agenda.md",
+      "civilization/001-domain/registry/safety.md",
+      "civilization/001-domain/registry/service.ts",
+      "civilization/001-domain/registry/test.spec.ts",
+      "civilization/001-domain/research/README.md",
+      "civilization/001-domain/research/charter.md",
+      "civilization/001-domain/research/curriculum.md",
+      "civilization/001-domain/research/events.ts",
+      "civilization/001-domain/research/metrics.ts",
+      "civilization/001-domain/research/policy.yaml",
+      "civilization/001-domain/research/registry.ts",
+      "civilization/001-domain/research/research-agenda.md",
+      "civilization/001-domain/research/safety.md",
+      "civilization/001-domain/research/service.ts",
+      "civilization/001-domain/research/test.spec.ts",
+      "civilization/001-domain/safety/README.md",
+      "civilization/001-domain/safety/charter.md",
+      "civilization/001-domain/safety/curriculum.md",
+      "civilization/001-domain/safety/events.ts",
+      "civilization/001-domain/safety/metrics.ts",
+      "civilization/001-domain/safety/policy.yaml",
+      "civilization/001-domain/safety/registry.ts",
+      "civilization/001-domain/safety/research-agenda.md",
+      "civilization/001-domain/safety/safety.md",
+      "civilization/001-domain/safety/service.ts",
+      "civilization/001-domain/safety/test.spec.ts",
+      "federation/regions/001/provinces/001-01/municipalities/001/README.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/audit.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/budget.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/charter.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/communications.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/council.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/facilities.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/population.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/security.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/services.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/test.spec.ts",
+      "federation/regions/001/provinces/ولاية-001-01/README.md",
+      "federation/regions/001/provinces/ولاية-001-01/audit.md",
+      "federation/regions/001/provinces/ولاية-001-01/budget.yaml",
+      "federation/regions/001/provinces/ولاية-001-01/charter.md",
+      "federation/regions/001/provinces/ولاية-001-01/governor.md",
+      "federation/regions/001/provinces/ولاية-001-01/municipalities.yaml",
+      "federation/regions/001/provinces/ولاية-001-01/services.yaml",
+      "federation/regions/001/provinces/ولاية-001-01/test.spec.ts",
+      "federation/regions/001/الإقليم-الفدرالي-001/README.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/audit.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/budget.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/charter.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/council.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/governor.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/ministries.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/population.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/resources.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/security.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/test.spec.ts",
+      "institutions/001-الديوان-الملكي/README.md",
+      "institutions/001-الديوان-الملكي/audit.md",
+      "institutions/001-الديوان-الملكي/charter.md",
+      "institutions/001-الديوان-الملكي/facilities.yaml",
+      "institutions/001-الديوان-الملكي/metrics.yaml",
+      "institutions/001-الديوان-الملكي/organization.md",
+      "institutions/001-الديوان-الملكي/resource-registry.yaml",
+      "institutions/001-الديوان-الملكي/safety.md",
+      "institutions/001-الديوان-الملكي/staffing.yaml",
+      "institutions/001-الديوان-الملكي/test.spec.ts",
+      "institutions/001-الديوان-الملكي/workflows.md"
+    ],
+    "after": [
+      "civilization/001-domain/README.md",
+      "civilization/001-domain/domain-name-ar.txt",
+      "civilization/001-domain/education/README.md",
+      "civilization/001-domain/education/charter.md",
+      "civilization/001-domain/education/curriculum.md",
+      "civilization/001-domain/education/events.ts",
+      "civilization/001-domain/education/metrics.ts",
+      "civilization/001-domain/education/policy.yaml",
+      "civilization/001-domain/education/registry.ts",
+      "civilization/001-domain/education/research-agenda.md",
+      "civilization/001-domain/education/safety.md",
+      "civilization/001-domain/education/service.ts",
+      "civilization/001-domain/education/test.spec.ts",
+      "civilization/001-domain/governance/README.md",
+      "civilization/001-domain/governance/charter.md",
+      "civilization/001-domain/governance/curriculum.md",
+      "civilization/001-domain/governance/events.ts",
+      "civilization/001-domain/governance/metrics.ts",
+      "civilization/001-domain/governance/policy.yaml",
+      "civilization/001-domain/governance/registry.ts",
+      "civilization/001-domain/governance/research-agenda.md",
+      "civilization/001-domain/governance/safety.md",
+      "civilization/001-domain/governance/service.ts",
+      "civilization/001-domain/governance/test.spec.ts",
+      "civilization/001-domain/operations/README.md",
+      "civilization/001-domain/operations/charter.md",
+      "civilization/001-domain/operations/curriculum.md",
+      "civilization/001-domain/operations/events.ts",
+      "civilization/001-domain/operations/metrics.ts",
+      "civilization/001-domain/operations/policy.yaml",
+      "civilization/001-domain/operations/registry.ts",
+      "civilization/001-domain/operations/research-agenda.md",
+      "civilization/001-domain/operations/safety.md",
+      "civilization/001-domain/operations/service.ts",
+      "civilization/001-domain/operations/test.spec.ts",
+      "civilization/001-domain/registry/README.md",
+      "civilization/001-domain/registry/charter.md",
+      "civilization/001-domain/registry/curriculum.md",
+      "civilization/001-domain/registry/events.ts",
+      "civilization/001-domain/registry/metrics.ts",
+      "civilization/001-domain/registry/policy.yaml",
+      "civilization/001-domain/registry/registry.ts",
+      "civilization/001-domain/registry/research-agenda.md",
+      "civilization/001-domain/registry/safety.md",
+      "civilization/001-domain/registry/service.ts",
+      "civilization/001-domain/registry/test.spec.ts",
+      "civilization/001-domain/research/README.md",
+      "civilization/001-domain/research/charter.md",
+      "civilization/001-domain/research/curriculum.md",
+      "civilization/001-domain/research/events.ts",
+      "civilization/001-domain/research/metrics.ts",
+      "civilization/001-domain/research/policy.yaml",
+      "civilization/001-domain/research/registry.ts",
+      "civilization/001-domain/research/research-agenda.md",
+      "civilization/001-domain/research/safety.md",
+      "civilization/001-domain/research/service.ts",
+      "civilization/001-domain/research/test.spec.ts",
+      "civilization/001-domain/safety/README.md",
+      "civilization/001-domain/safety/charter.md",
+      "civilization/001-domain/safety/curriculum.md",
+      "civilization/001-domain/safety/events.ts",
+      "civilization/001-domain/safety/metrics.ts",
+      "civilization/001-domain/safety/policy.yaml",
+      "civilization/001-domain/safety/registry.ts",
+      "civilization/001-domain/safety/research-agenda.md",
+      "civilization/001-domain/safety/safety.md",
+      "civilization/001-domain/safety/service.ts",
+      "civilization/001-domain/safety/test.spec.ts",
+      "federation/regions/001/provinces/001-01/municipalities/001/README.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/audit.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/budget.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/charter.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/communications.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/council.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/facilities.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/population.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/security.md",
+      "federation/regions/001/provinces/001-01/municipalities/001/services.yaml",
+      "federation/regions/001/provinces/001-01/municipalities/001/test.spec.ts",
+      "federation/regions/001/provinces/ولاية-001-01/README.md",
+      "federation/regions/001/provinces/ولاية-001-01/audit.md",
+      "federation/regions/001/provinces/ولاية-001-01/budget.yaml",
+      "federation/regions/001/provinces/ولاية-001-01/charter.md",
+      "federation/regions/001/provinces/ولاية-001-01/governor.md",
+      "federation/regions/001/provinces/ولاية-001-01/municipalities.yaml",
+      "federation/regions/001/provinces/ولاية-001-01/services.yaml",
+      "federation/regions/001/provinces/ولاية-001-01/test.spec.ts",
+      "federation/regions/001/الإقليم-الفدرالي-001/README.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/audit.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/budget.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/charter.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/council.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/governor.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/ministries.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/population.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/resources.yaml",
+      "federation/regions/001/الإقليم-الفدرالي-001/security.md",
+      "federation/regions/001/الإقليم-الفدرالي-001/test.spec.ts",
+      "institutions/001-الديوان-الملكي/README.md",
+      "institutions/001-الديوان-الملكي/audit.md",
+      "institutions/001-الديوان-الملكي/charter.md",
+      "institutions/001-الديوان-الملكي/facilities.yaml",
+      "institutions/001-الديوان-الملكي/metrics.yaml",
+      "institutions/001-الديوان-الملكي/organization.md",
+      "institutions/001-الديوان-الملكي/resource-registry.yaml",
+      "institutions/001-الديوان-الملكي/safety.md",
+      "institutions/001-الديوان-الملكي/staffing.yaml",
+      "institutions/001-الديوان-الملكي/test.spec.ts",
+      "institutions/001-الديوان-الملكي/workflows.md"
+    ]
+  },
+  "nativeSuite": {
+    "exit": 0,
+    "tests": 73,
+    "fail": 0,
+    "skipped": 0
+  },
+  "positiveExpirationCommand": "bash run-positive-expiration.sh"
+}
