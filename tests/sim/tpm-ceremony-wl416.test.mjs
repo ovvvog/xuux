@@ -848,12 +848,21 @@ simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها
     // يُحصَّلُ ويُتحقَّقُ (عددٌ صحيحٌ > 1 — قراءةُ ملفٍّ فارغٍ تُعطي 0) قبلَ أيِّ إشارةٍ للحارسِ.
     let childPid = null;
     if (Number.isInteger(zombiePid) && zombiePid > 1) childPid = zombiePid;
+    // انتظارٌ محدودٌ غيرُ حاجبٍ لسجلٍّ صالحٍ للابنِ قبلَ أيِّ إشارةٍ للحارسِ (جولةُ 8):
+    // القراءةُ الواحدةُ تتركُ نافذةً يُقتَلُ فيها الحارسُ قبلَ نشرِ رقمِ الابنِ فيضيعَ
+    // إسنادُهُ — والاكتشافُ قد يرمي بينَ إطلاقِ الابنِ وكتابةِ رقمِهِ. الحارسُ ينشرُ الرقمَ
+    // فورَ الولادةِ فعادةً يعودُ الانتظارُ فورًا؛ وإن انقضى الحدُّ (5 ثوانٍ) بلا سجلٍّ صالحٍ
+    // فالإسنادُ متعذِّرٌ: يُعلَنُ الفشلُ ويُحفَظُ المجلّدُ — لا تنظيفَ بلا برهانٍ.
     if (childPid === null) {
-      try {
-        const recorded = Number(readFileSync(childPidFile, 'utf8').trim());
-        if (Number.isInteger(recorded) && recorded > 1) childPid = recorded;
-      } catch {
-        /* لا ملفَ */
+      const deadline = Date.now() + 5000;
+      while (childPid === null && Date.now() < deadline) {
+        try {
+          const recorded = Number(readFileSync(childPidFile, 'utf8').trim());
+          if (Number.isInteger(recorded) && recorded > 1) childPid = recorded;
+        } catch {
+          /* لا ملفَ بعدُ */
+        }
+        if (childPid === null) await new Promise((r) => setTimeout(r, 20));
       }
     }
     // (1) الحارسُ — مسارٌ مستقلٌّ: فشلُهُ لا يمنعُ تنظيفَ الابنِ.
