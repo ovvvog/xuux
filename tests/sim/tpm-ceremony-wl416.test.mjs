@@ -768,21 +768,24 @@ simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها
   writeFileSync(fakeScript, 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);');
   // الوالدُ الحارسُ (python) يُطلقُ الابنَ الزائفَ ويكتبُ رقمَهُ في ملفٍّ فورَ الولادةِ ثمّ ينامُ —
   // لا يُلقّيه عمدًا فتبقى زومبيًّا قابلةً للقياسِ، ورقمُهُ لا يضيعُ منّا ولو أخفقَ الاكتشافُ.
-  const parent = spawn(
-    'python3',
-    [
-      '-c',
-      'import subprocess, time\n' +
-        `p = subprocess.Popen(['swtpm', ${JSON.stringify(fakeScript)}, '--tpmstate', 'dir=' + ${JSON.stringify(dir)}], executable=${JSON.stringify(process.execPath)})\n` +
-        `open(${JSON.stringify(childPidFile)}, 'w').write(str(p.pid))\n` +
-        'time.sleep(120)',
-    ],
-    { stdio: 'ignore' },
-  );
+  // الإطلاقُ نفسُهُ داخلَ الحمايةِ (جولةُ 7): فشلُ الإطلاقِ يُسجَّلُ خطأً للجسمِ ولا يُتجاوَزُ
+  // التنظيفُ أبدًا — فلا يتيمَ من مسارِ الإخفاقِ.
+  let parent = null;
   let zombiePid = null;
   let bodyError = null;
-  let cleanupFailed = null;
+  const cleanupFailures = [];
   try {
+    parent = spawn(
+      'python3',
+      [
+        '-c',
+        'import subprocess, time\n' +
+          `p = subprocess.Popen(['swtpm', ${JSON.stringify(fakeScript)}, '--tpmstate', 'dir=' + ${JSON.stringify(dir)}], executable=${JSON.stringify(process.execPath)})\n` +
+          `open(${JSON.stringify(childPidFile)}, 'w').write(str(p.pid))\n` +
+          'time.sleep(120)',
+      ],
+      { stdio: 'ignore' },
+    );
     // العمليّةُ حيّةٌ وتُكتشَفُ بهويّتِها (swtpm يملكُ مسارَ الحالةِ) ثمّ تُقتَلُ من الشاهدِ نفسِهِ —
     // فتبقى زومبيًّا بلا مُلقّي (الوالدُ الحارسُ لا ينتظرُها) وملفُّ PID لا وجودَ لهُ أصلًا.
     for (let i = 0; i < 250; i++) {
@@ -794,20 +797,22 @@ simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
     assert.ok(zombiePid !== null, 'fake swtpm must be discoverable before it becomes a zombie');
-    // اتساقُ الإسنادِ: رقمُ الابنِ المسجَّلُ لدى الحارسِ فورَ ولادتِهِ هو نفسُهُ المكتشَفُ من الوسائطِ.
+    // اتساقُ الإسنادِ: رقمُ الابنِ المسجَّلُ لدى الحارسِ فورَ ولادتِهِ هو نفسُهُ المكتشَفُ من الوسائطِ —
+    // ورقمٌ صحيحٌ أكبرُ من 1 حصرًا (قراءةُ ملفٍّ فارغٍ تُعطي 0 — لا يُقبلُ رقمٌ غيرُ صالحٍ إسنادًا).
     let guardianRecorded = null;
     for (let i = 0; i < 250; i++) {
       try {
         guardianRecorded = Number(readFileSync(childPidFile, 'utf8').trim());
-        if (Number.isInteger(guardianRecorded)) break;
+        if (Number.isInteger(guardianRecorded) && guardianRecorded > 1) break;
+        guardianRecorded = null;
       } catch {
         /* لم يُكتَبْ بعدُ */
       }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
     assert.ok(
-      Number.isInteger(guardianRecorded),
-      'guardian must record the child pid at birth (attribution survives discovery failure)',
+      guardianRecorded !== null,
+      'guardian must record a valid child pid (> 1) at birth (attribution survives discovery failure)',
     );
     assert.equal(
       guardianRecorded,
@@ -838,83 +843,111 @@ simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها
     bodyError = e;
     throw e;
   } finally {
-    // التنظيفُ المُثبَتُ لا الافتراضيُّ (جولةُ 6): الوالدُ الحارسُ أوّلًا — هويّتُهُ تُثبَتُ من سطرِ
-    // أوامرِهِ (يحملُ مسارَ ملفِ رقمِ الابنِ الفريدَ) قبلَ أيِّ إشارةٍ — فموتُهُ يُودِعُ الابنَ لعملِ
-    // init؛ والابنُ إن بقيَ حيًّا يُنهى عبرَ القناةِ بهويّتِهِ المُثبَتةِ، وإن كانَ زومبيًّا فيُلقّاهُ
-    // init بعدَ موتِ والدِهِ. وزوالُ كليهما مُثبَتٌ بـESRCH وإلّا فشلَ التنظيفُ الاختبارَ كلَّهُ ولا
-    // يُحذَفُ المجلّدُ بلا برهانٍ — ولا قيمةَ زائفةً (كـ -1) في أيِّ إثباتٍ.
-    try {
-      const guardianPid = parent.pid;
-      let guardianOurs = false;
+    // التنظيفُ المُثبَتُ لا الافترائيُّ (جولتا 6 و7): مساراتٌ مستقلةٌ — فشلُ مسارٍ لا يُعطّلُ
+    // المساراتِ الأخرى؛ تُجمعُ الأخطاءُ كلُّها ولا يُختصرُ المسارُ عندَ أولِّ رميةٍ. رقمُ الابنِ
+    // يُحصَّلُ ويُتحقَّقُ (عددٌ صحيحٌ > 1 — قراءةُ ملفٍّ فارغٍ تُعطي 0) قبلَ أيِّ إشارةٍ للحارسِ.
+    let childPid = null;
+    if (Number.isInteger(zombiePid) && zombiePid > 1) childPid = zombiePid;
+    if (childPid === null) {
       try {
-        guardianOurs = readFileSync(`/proc/${guardianPid}/cmdline`, 'utf8').includes(childPidFile);
+        const recorded = Number(readFileSync(childPidFile, 'utf8').trim());
+        if (Number.isInteger(recorded) && recorded > 1) childPid = recorded;
       } catch {
-        /* زال سلفًا */
+        /* لا ملفَ */
       }
-      if (!guardianOurs && !pidProvenDead(guardianPid)) {
-        cleanupFailed = `guardian identity not provable before signalling (pid ${guardianPid})`;
-      } else if (!pidProvenDead(guardianPid)) {
-        // الحصادُ الفعليُّ للوالدِ: حدثُ exit يُطلقُهُ libuv بعدَ waitpid — انتظارٌ يُديرُ حلقةَ
-        // الأحداثِ (الإشارةُ المتزامنةُ الحاجبةُ تُؤجّلُ الحصادَ فلا يُثبَتُ الزوالُ أبدًا).
-        const exited = new Promise((resolve) => {
-          parent.once('exit', resolve);
-        });
-        process.kill(guardianPid, 'SIGKILL');
-        await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
-        for (let i = 0; i < 250; i++) {
-          if (pidProvenDead(guardianPid)) break;
-          await new Promise((r) => setTimeout(r, 20));
-        }
-        if (!pidProvenDead(guardianPid))
-          cleanupFailed = `guardian not provably dead after SIGKILL (pid ${guardianPid})`;
-      }
-      // الابنُ: رقمُهُ عندَنا من الاكتشافِ أو من ملفِ الحارسِ — لا يُفتَرَضُ ولا يُزيَّفُ.
-      let childPid = zombiePid;
-      if (childPid === null) {
+    }
+    // (1) الحارسُ — مسارٌ مستقلٌّ: فشلُهُ لا يمنعُ تنظيفَ الابنِ.
+    if (parent !== null) {
+      const guardianPid = parent.pid;
+      if (!pidProvenDead(guardianPid)) {
         try {
-          childPid = Number(readFileSync(childPidFile, 'utf8').trim());
-        } catch {
-          /* لا ملفَ */
+          let guardianOurs = false;
+          try {
+            guardianOurs = readFileSync(`/proc/${guardianPid}/cmdline`, 'utf8').includes(childPidFile);
+          } catch {
+            /* زال سلفًا */
+          }
+          if (!guardianOurs) {
+            cleanupFailures.push(`guardian identity not provable before signalling (pid ${guardianPid})`);
+          } else {
+            // الحصادُ الفعليُّ للوالدِ: حدثُ exit يُطلقُهُ libuv بعدَ waitpid — انتظارٌ يُديرُ حلقةَ
+            // الأحداثِ (الإشارةُ المتزامنةُ الحاجبةُ تُؤجّلُ الحصادَ فلا يُثبَتُ الزوالُ أبدًا).
+            const exited = new Promise((resolve) => {
+              parent.once('exit', resolve);
+            });
+            process.kill(guardianPid, 'SIGKILL');
+            await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
+          }
+        } catch (e) {
+          cleanupFailures.push(`guardian cleanup threw: ${e && e.message}`);
+        }
+        if (!pidProvenDead(guardianPid)) {
+          try {
+            for (let i = 0; i < 250; i++) {
+              if (pidProvenDead(guardianPid)) break;
+              await new Promise((r) => setTimeout(r, 20));
+            }
+          } catch (e) {
+            cleanupFailures.push(`guardian wait threw: ${e && e.message}`);
+          }
+          if (!pidProvenDead(guardianPid))
+            cleanupFailures.push(`guardian not provably dead after SIGKILL (pid ${guardianPid})`);
         }
       }
-      if (!Number.isInteger(childPid)) {
-        cleanupFailed = cleanupFailed ?? 'child pid unprovable (no discovery, no guardian record)';
-      } else if (!pidProvenDead(childPid)) {
-        // حيٌّ (لم يصرْ زومبيًّا) ⇒ يُنهى عبرَ القناةِ بهويّتِهِ؛ زومبي ⇒ init يُلقّيهِ بعدَ والدهِ.
+    }
+    // (2) الابنُ — مسارٌ مستقلٌّ لا يُعطَّلُ بفشلِ مسارِ الحارسِ (جولةُ 7): حيٌّ ⇒ يُنهى عبرَ
+    // القناةِ بهويّتِهِ؛ زومبي ⇒ init يُلقّيهِ بعدَ موتِ والدِهِ.
+    if (childPid === null) {
+      if (parent !== null)
+        cleanupFailures.push('child pid unprovable (no discovery, no valid guardian record)');
+    } else if (!pidProvenDead(childPid)) {
+      try {
         let st = null;
         try {
           const s = readFileSync(`/proc/${childPid}/stat`, 'utf8');
-          const c = s.lastIndexOf(')');
-          if (c >= 0) st = s.slice(c + 2).split(' ')[0];
+          const cl = s.lastIndexOf(')');
+          if (cl >= 0) st = s.slice(cl + 2).split(' ')[0];
         } catch {
           /* زالت */
         }
         if (st !== 'Z') {
           if (!killSim(childPid, { dir, graceMs: 500 }))
-            cleanupFailed = cleanupFailed ?? `child not stopped via the channel (pid ${childPid})`;
+            cleanupFailures.push(`child not stopped via the channel (pid ${childPid})`);
         }
         for (let i = 0; i < 250; i++) {
           if (pidProvenDead(childPid)) break;
           await new Promise((r) => setTimeout(r, 20));
         }
         if (!pidProvenDead(childPid))
-          cleanupFailed = cleanupFailed ?? `child not provably dead (pid ${childPid})`;
+          cleanupFailures.push(`child not provably dead (pid ${childPid})`);
+      } catch (e) {
+        cleanupFailures.push(`child cleanup threw: ${e && e.message}`);
       }
-      // الحذفُ لا يقعُ إلّا ببرهانٍ كاملٍ: لا فشلَ تنظيفٍ ولا عمليّةَ تملكُ المسارَ بعدَ التنظيفِ.
-      if (cleanupFailed === null && discoverSimPids(dir).length === 0) {
-        rmSync(dir, { recursive: true, force: true });
-      }
-    } catch (e) {
-      cleanupFailed = cleanupFailed ?? `cleanup threw: ${e && e.message}`;
     }
-    // فشلُ التنظيفِ مع فشلِ الجسمِ: يُسجَّلُ صراحةً في الخرجِ (الاختبارُ فاشلٌ أصلًا باستثناءِ
-    // الجسمِ فلا يُحجبُ)؛ ومع نجاحِ الجسمِ يُفشِلُ التنظيفُ الاختبارَ صراحةً بعدَ finally.
-    if (cleanupFailed !== null && bodyError !== null) {
-      console.error(`ZOMBIE cleanup also failed — state dir preserved: ${dir} — ${cleanupFailed}`);
+    // (3) بقايا المسارِ: نتائجٌ في الاكتشافِ بعدَ التنظيفِ ⇒ فشلُ تنظيفٍ صريحٌ معلَنٌ يُفشِلُ
+    // الاختبارَ — لا مجردَ منعِ الحذفِ (جولةُ 7).
+    let remaining = [];
+    try {
+      remaining = discoverSimPids(dir);
+    } catch (e) {
+      cleanupFailures.push(`final scan threw: ${e && e.message}`);
+    }
+    if (remaining.length > 0)
+      cleanupFailures.push(`processes still own the state dir after cleanup: ${remaining.join(',')}`);
+    // الحذفُ لا يقعُ إلّا ببرهانٍ كاملٍ: لا فشلَ تنظيفٍ ولا عمليّةَ تملكُ المسارَ بعدَ التنظيفِ.
+    if (cleanupFailures.length === 0 && remaining.length === 0) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    // فشلُ التنظيفِ مع فشلِ الجسمِ: يُسجَّلُ صراحةً في الخرجِ (الاختبارُ فاشلٌ أصلًا
+    // باستثناءِ الجسمِ فلا يُحجبُ)؛ ومع نجاحِ الجسمِ يُفشِلُ التنظيفُ الاختبارَ صراحةً بعدَ finally.
+    if (cleanupFailures.length > 0 && bodyError !== null) {
+      console.error(`ZOMBIE cleanup also failed — state dir preserved: ${dir} — ${cleanupFailures.join(' | ')}`);
     }
   }
-  if (cleanupFailed !== null) {
-    throw new Error(`ZOMBIE cleanup failed — state dir preserved: ${dir} — ${cleanupFailed}`);
+  if (cleanupFailures.length > 0) {
+    throw new Error(
+      `ZOMBIE cleanup failed — state dir preserved: ${dir} — ${cleanupFailures.join(' | ')}`,
+    );
   }
 });
 
