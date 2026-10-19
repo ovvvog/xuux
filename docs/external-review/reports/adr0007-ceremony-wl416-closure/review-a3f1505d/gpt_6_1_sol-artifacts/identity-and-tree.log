@@ -1,0 +1,16 @@
+first-observed-reviewed-head=a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d
+first-operation=git -C /home/user/workspace/xuux-review-a3f1505d rev-parse HEAD
+review-start-utc=2026-10-19T01:10:55Z
+a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d
+e23bd4314cf629846969f3685fb71e1681403c89
+review-tree-status
+baseline-tree-status
+scope-names
+sim/tpm-ceremony/README.md
+sim/tpm-ceremony/TpmCeremonyCore.cs
+tests/helpers/TpmCeremonyFaultTransport.cs
+tests/helpers/ceremony-swtpm.mjs
+tests/helpers/tpm-ceremony-harness.ps1
+tests/sim/tpm-ceremony-guard.test.mjs
+tests/sim/tpm-ceremony-wl416.test.mjs
+v20.20.2

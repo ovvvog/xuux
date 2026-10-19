@@ -975,3 +975,89 @@ simTest('ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها
 
 
 // خاتمةُ الملفِ: كلُّ اختبارٍ يُنهي محاكيَه في finally — لا يتامى.
+
+// ── WL-418: ملاحظتا المراجعةِ المستقلّةِ على a3f1505d (أُعيدَ إنتاجُهما قبلَ الإصلاحِ؛ الأدلّةُ في
+// docs/external-review/reports/adr0007-ceremony-wl416-closure/) ──
+
+// NV4/NV5 (WL418-gpt_6_1_sol-01): فهرسٌ غيرُ منسوبٍ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ ⇒ حاجزُ بوابةِ الإرسالِ يوقفُ
+// الأمرَ المُغيِّرَ التاليَ (لا الجردَ النهائيَّ وحدَه)، والنصُّ لا يدّعي «قبلَ أيِّ أمرٍ مُغيِّرٍ»، والفهرسُ باقٍ.
+// المسموحُ بعدَ الظهورِ تحريرُ ما ثبتت ملكيّتُه لهذا التشغيلِ وحدَه (FlushContext وNV_UndefineSpace).
+for (const [id, mode, haltedCc, haltedName] of [
+  ['NV4', 'nv-appear-after-define', '0x00000134', /before the next state-changing command \(s1\.probe:NV_Increment#1\)/],
+  ['NV5', 'nv-appear-after-primary', '0x00000153', /before the next state-changing command \(s2:Create\(service-key,ECDSA-P256\)\)/],
+]) {
+  simPwshTest(`${id}: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (${mode}) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف`, () => {
+    withSim((s) => {
+      const o = fault(s, mode);
+      const r = o.report;
+      assert.equal(r.status, 'FAILED_CLOSED');
+      assert.match(r.failure, /^NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED/);
+      assert.match(r.failure, haltedName, 'the halt names the command it stopped: ' + (r.failure || '').slice(0, 400));
+      assert.doesNotMatch(r.failure, /halted before any state-changing command/, 'must not claim nothing was sent');
+      assert.ok(!r.steps.some((x) => x.commandCode === haltedCc), 'the next state-changing command is not sent');
+      const allowedAfter = new Set(['0x00000165', '0x00000122']); // تحريرُ مواردِ هذا التشغيلِ المثبتةِ وحدَها
+      const mutatingAfter = r.steps
+        .filter((x) => x.stage === 'cleanup' || x.stage === 'post-run')
+        .filter((x) => STATE_CHANGING.has(x.commandCode) && !allowedAfter.has(x.commandCode));
+      assert.deepEqual(mutatingAfter, [], 'only proven-own releases after the halt');
+      const nvAfter = list(o.nvAfter).map((h) => h.toLowerCase());
+      assert.ok(nvAfter.includes('0x01807777'), 'the late third-party index must survive untouched');
+      assert.match(r.facts['nvOwnershipGuard.unresolvedIndices'] || '', /0x01807777/i);
+    });
+  });
+}
+
+// L7a (WL418-grok_4_7-01): ملفُّ PID يحملُ رقمًا لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا يُسلَّمُ الرقمُ (كانَ
+// يُسلَّمُ فيقيسُ stopSim عمليّةً أخرى ويحذفُ المجلّدَ ويتركُ المالكَ حيًّا) — يُعاملُ كمحاولةٍ لم تُسلَّم.
+simTest('L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى', () => {
+  const abandoned = [];
+  let launched = null;
+  let threw = null;
+  try {
+    startSimShared({
+      prefix: 'xuux-wl418-l7a-',
+      portBase: 3520,
+      label: 'WL-418/L7a',
+      attempts: 1,
+      readyTries: 2,
+      readyDelayMs: 50,
+      probe: () => true,
+      afterSpawn: ({ pid, pidFile }) => {
+        launched = pid;
+        writeFileSync(pidFile, '2147483001');
+      },
+      onAbandon: (a) => abandoned.push(a),
+    });
+  } catch (e) {
+    threw = e;
+  }
+  assert.ok(threw, 'a pid that does not own the state dir must not be handed over');
+  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+  assert.equal(abandoned[0].reason, 'pid-not-owner');
+  assert.equal(abandoned[0].stopped, true, 'the real (state-dir-bound) simulator is terminated');
+  assert.equal(discoverSimPids(abandoned[0].dir).length, 0, 'no orphan swtpm');
+  assert.equal(stateDirExists(abandoned[0].dir), false);
+  assert.ok(Number.isInteger(launched) && launched > 1);
+  let alive;
+  try {
+    process.kill(launched, 0);
+    alive = true;
+  } catch (e) {
+    alive = e.code !== 'ESRCH';
+  }
+  assert.equal(alive, false, 'the launched owner is gone');
+});
+
+// L7b (WL418-grok_4_7-01): stopSim بمقبضٍ رقمُه زائلٌ والمالكُ حيٌّ ⇒ لا يُعلَنُ التوقّفُ قبلَ إنهاءِ المالكِ
+// المُثبَتِ ملكُه بالمسحِ (كانَ يعيدُ true ويحذفُ المجلّدَ والمالكُ حيٌّ).
+simTest('L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم', () => {
+  const s = startSimShared({ prefix: 'xuux-wl418-l7b-', portBase: 3540, label: 'WL-418/L7b', attempts: 1 });
+  const owners = discoverSimPids(s.dir);
+  assert.deepEqual(owners, [s.pid], 'startSim hands over the proven owner');
+  const st = stopSim({ ...s, pid: 2147483000 });
+  const after = discoverSimPids(s.dir);
+  if (after.length > 0) stopSim({ ...s, pid: after[0] });
+  assert.deepEqual(after, [], 'a stop claim requires the state-dir owner to be gone');
+  assert.equal(st, true);
+  assert.equal(stateDirExists(s.dir), false);
+});

@@ -393,6 +393,9 @@ export function startSim(opts = {}) {
           const pid = readPid(pidFile);
           if (!ready) abandonReason = 'not-ready';
           else if (pid === null) abandonReason = 'no-pid';
+          // لا يُسلَّمُ رقمُ ملفِ PID إلّا إن ثبتَ أنه المالكُ الحيُّ لمسارِ الحالةِ (WL-418، WL418-grok_4_7-01):
+          // رقمٌ لا يملكُ المجلّدَ يجعلُ stopSim لاحقًا يقيسُ عمليّةً أخرى — يُعاملُ كمحاولةٍ لم تُسلَّم.
+          else if (!scanStateDir(dir).matches.includes(pid)) abandonReason = 'pid-not-owner';
           else return { dir, port, pidFile, pid };
         } catch (e) {
           launchError = e;
@@ -452,6 +455,13 @@ export function stopSim(s) {
   if (!s) return true;
   const stopped = killSim(s.pid, { dir: s.dir });
   if (stopped !== true) return false;
+  // زوالُ الرقمِ المسلَّمِ وحدَه ليس زوالَ المالكِ (WL-418، WL418-grok_4_7-01): عمليّةُ swtpm حيّةٌ مُثبَتٌ
+  // أنها تملكُ مسارَ الحالةِ ⇒ تُنهى بالمسارِ نفسِه (هويّةٌ قبلَ الإشارة)، ولا يُعلَنُ التوقّفُ ولا يُحذَفُ
+  // المجلّدُ إلّا بعدَ أن يخلوَ المسحُ القرائيُّ منها.
+  for (const p of scanStateDir(s.dir).matches) {
+    if (killSim(p, { dir: s.dir }) !== true) return false;
+  }
+  if (scanStateDir(s.dir).matches.length > 0) return false;
   try {
     rmSync(s.dir, { recursive: true, force: true });
   } catch {

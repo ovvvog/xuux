@@ -1,0 +1,16 @@
+$ tree=/home/user/workspace/xuux HEAD=a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d dirty=5
+$ flock /tmp/council-wl418-sim.lock env XUUX_TPM_SIM=1 node stopsim-gap-fixed.mjs
+{
+  "returnedPid": 22827,
+  "ownersBefore": [
+    22827
+  ],
+  "deadPid": 2147483000,
+  "stopResult": true,
+  "threw": null,
+  "dirExistsAfterStopSim": false,
+  "ownersAfter": [],
+  "realStillAlive": false
+}
+exit_code=0
+swtpm_left=0
