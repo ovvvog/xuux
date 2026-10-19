@@ -1,0 +1,16 @@
+63c63
+<             Resp p = Resp.Parse(t.Transmit(Cmd.GetCapability(1, start, 64)), 0, Tpm.ST_NO_SESSIONS, 0);
+---
+>             Resp p = Resp.Parse(t.Transmit(Cmd.GetCapability(1, start, 64)), 0);
+88c88
+<                     Resp p = Resp.Parse(inner.Transmit(Cmd.NvReadPublic(fault.DefinedHandle)), 0, Tpm.ST_NO_SESSIONS, 0);
+---
+>                     Resp p = Resp.Parse(inner.Transmit(Cmd.NvReadPublic(fault.DefinedHandle)), 0);
+91c91
+<                     Resp u = Resp.Parse(inner.Transmit(Cmd.NvUndefineSpace(new byte[0], fault.DefinedHandle)), 0, Tpm.ST_SESSIONS, 1);
+---
+>                     Resp u = Resp.Parse(inner.Transmit(Cmd.NvUndefineSpace(new byte[0], fault.DefinedHandle)), 0);
+96c96
+<                     Resp f = Resp.Parse(inner.Transmit(Cmd.FlushContext(fault.LostSession)), 0, Tpm.ST_NO_SESSIONS, 0);
+---
+>                     Resp f = Resp.Parse(inner.Transmit(Cmd.FlushContext(fault.LostSession)), 0);

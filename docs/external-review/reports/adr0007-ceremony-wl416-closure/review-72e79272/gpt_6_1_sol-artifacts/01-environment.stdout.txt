@@ -1,0 +1,13 @@
+2026-10-19T07:34:49Z
+Expected review path absent; create filesystem alias only to verified local gpt tree.
+/tmp/wt-72e79272-gpt
+72e79272576f0d9e85c1d69f415e834ee542c34a
+339f59346c44a31e3db5ebc721b8dc75d19f2d3f
+v20.20.2
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+PowerShell 7.4.6
+tool="tpm2_getcap" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device
+baseline processes
+ 2528  2525 Sl   node /tmp/council-wl422-gpt_6_1_sol/record.mjs 01-environment /home/user/workspace bash -c date -u +%Y-%m-%dT%H:%M:%SZ; if test ! -e /tmp/wt-72e79272-gpt_6_1_sol; then printf "Expected review path absent; create filesystem alias only to verified local gpt tree.\n"; test "$(git -C /tmp/wt-72e79272-gpt rev-parse HEAD)" = 72e79272576f0d9e85c1d69f415e834ee542c34a && ln -s /tmp/wt-72e79272-gpt /tmp/wt-72e79272-gpt_6_1_sol || exit 1; fi; readlink -f /tmp/wt-72e79272-gpt_6_1_sol; git -C /tmp/wt-72e79272-gpt_6_1_sol rev-parse HEAD; git -C /tmp/wt-72e79272-gpt_6_1_sol status --porcelain=v1; git -C /tmp/wt-339f5934 rev-parse HEAD; node --version; swtpm --version; pwsh --version; tpm2_getcap --version; printf "baseline processes\n"; ps -eo pid,ppid,stat,args | rg "[s]wtpm|[c]eremony|[t]pm-ceremony"
+ 2539  2528 S    bash -c date -u +%Y-%m-%dT%H:%M:%SZ; if test ! -e /tmp/wt-72e79272-gpt_6_1_sol; then printf "Expected review path absent; create filesystem alias only to verified local gpt tree.\n"; test "$(git -C /tmp/wt-72e79272-gpt rev-parse HEAD)" = 72e79272576f0d9e85c1d69f415e834ee542c34a && ln -s /tmp/wt-72e79272-gpt /tmp/wt-72e79272-gpt_6_1_sol || exit 1; fi; readlink -f /tmp/wt-72e79272-gpt_6_1_sol; git -C /tmp/wt-72e79272-gpt_6_1_sol rev-parse HEAD; git -C /tmp/wt-72e79272-gpt_6_1_sol status --porcelain=v1; git -C /tmp/wt-339f5934 rev-parse HEAD; node --version; swtpm --version; pwsh --version; tpm2_getcap --version; printf "baseline processes\n"; ps -eo pid,ppid,stat,args | rg "[s]wtpm|[c]eremony|[t]pm-ceremony"
+ 2615  2539 S    rg [s]wtpm|[c]eremony|[t]pm-ceremony

@@ -1,0 +1,51 @@
+2026-10-19T07:40:50Z
+HEAD
+72e79272576f0d9e85c1d69f415e834ee542c34a
+Repository status (must be empty)
+Tracked changes (must be empty)
+Core hashes
+7a86b97a99a52c05e3d7712d93dbf3228ee7a965703350f157046a208f89e5e6  sim/tpm-ceremony/TpmCeremonyCore.cs
+37d5ebfce1526b32a92bf402bf4114b1309c4b7fae15a7cd76428111c427f17d  /tmp/council-wl422-gpt_6_1_sol/mutant-core.cs
+Core baseline-to-reviewed diff (must be empty)
+Guard numbered lines
+  1067	
+  1068	// WL-421 (WL420-gpt_6_1_sol-02): حارسُ تنظيفٍ لاختباراتِ الرجوعِ. كلُّ مسارِ حالةٍ يُسجَّلُ فورَ معرفتِه، وبعدَ
+  1069	// الجسمِ — نجحَ أو رمى — يُنهى كلُّ مالكٍ مثبَتِ الهويّةِ (killSim: هويّةٌ قبلَ الإشارة) ويُحذفُ المجلّدُ إن خلا.
+  1070	// خطأُ الجسمِ الأصليُّ يُعادُ رميُه (مع ذكرِ أيِّ يتيمٍ تعذّرَ إنهاؤه)، وعندَ نجاحِه يُشترطُ ألّا يبقى يتيم.
+  1071	function cleanupOwned(dir) {
+  1072	  if (!dir) return []; // لا يُشترَطُ بقاءُ المجلّد: تنفيذٌ معيبٌ قد يحذفُه ومالكُه حيٌّ — الاكتشافُ بسطرِ الأوامر
+  1073	  for (const p of discoverSimPids(dir)) killSim(p, { dir });
+  1074	  const left = discoverSimPids(dir);
+  1075	  if (left.length === 0) rmSync(dir, { recursive: true, force: true });
+  1076	  return left;
+  1077	}
+  1078	function withCleanupGuard(body) {
+  1079	  const dirs = new Set();
+  1080	  let err = null;
+  1081	  try {
+  1082	    body((d) => {
+  1083	      if (d) dirs.add(d);
+  1084	      return d;
+  1085	    });
+  1086	  } catch (e) {
+  1087	    err = e;
+  1088	  }
+  1089	  const leftovers = [...dirs].flatMap((d) => cleanupOwned(d));
+  1090	  if (err) {
+  1091	    if (leftovers.length > 0) err.message += ' | orphan swtpm left after cleanup: ' + JSON.stringify(leftovers);
+  1092	    throw err;
+  1093	  }
+  1094	  assert.deepEqual(leftovers, [], 'no orphan swtpm after the test');
+  1095	  for (const d of dirs) assert.deepEqual(discoverSimPids(d), [], 'no live owner of ' + d);
+  1096	}
+  1097	
+Guard absent in baseline
+Baseline guard lookup exit=1 (1 means no definitions)
+Final process snapshot
+{
+  "utc": "2026-10-19T07:40:50.601Z",
+  "swtpm": [],
+  "reviewOwners": 0,
+  "zombies": [],
+  "stateDirs": []
+}

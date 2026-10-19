@@ -1,0 +1,112 @@
+[
+  {
+    "file": "cd-empty-pcr-digest.json",
+    "mode": "cd-empty-pcr-digest",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "create-cd-missing.json",
+    "mode": "create-cd-missing",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 81,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": [
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x03000000",
+      "0x80000002",
+      "0x03000000",
+      "0x80000001",
+      "0x80000000"
+    ]
+  },
+  {
+    "file": "post-inventory-no-progress.json",
+    "mode": "post-inventory-no-progress",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 31,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": []
+  },
+  {
+    "file": "post-inventory-wrong-class.json",
+    "mode": "post-inventory-wrong-class",
+    "status": "COMPLETE",
+    "failure": null,
+    "changes": 1,
+    "steps": 31,
+    "reconciliation": [],
+    "leftovers": [],
+    "post": {
+      "verified": true,
+      "error": null,
+      "residualNv": [],
+      "residualSessions": [],
+      "residualTransients": []
+    },
+    "nvBefore": [],
+    "nvAfter": [],
+    "transientsBefore": [],
+    "transientsAfter": [],
+    "sessionsAfter": [],
+    "flushed": []
+  }
+]

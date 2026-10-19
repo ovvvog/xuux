@@ -1,0 +1,332 @@
+     1	// @ts-nocheck
+     2	// tests/sim/tpm-ceremony-wl414-fup.test.mjs
+     3	//
+     4	// WL-414 — دورةُ المعالجةِ المحدودةُ بعدَ متابعةِ المراجعةِ المستقلّةِ (تقريرُ gpt_6_1_sol على 3e67d362،
+     5	// وإعادةُ الإنتاجِ على a3272058). اختباراتُ رجوعٍ إيجابيّةٌ وسلبيّةٌ لكلِّ مسألةٍ:
+     6	//   FUP-SOL-01  تذكرةُ PolicySigned عندَ expiration=0 (تذكرةُ NULL): وسمٌ غيرُ 0x8025، أو هرميّةٌ غيرُ RH_NULL،
+     7	//               أو بصمةٌ غيرُ فارغةٍ ⇒ فشلٌ مسمّى (كانت 1/32/64 والهرميّاتُ الثلاثُ و0x8023 تُقبلُ).
+     8	//   FUP-SOL-02  parentName/parentQualifiedName/parentNameAlg/outsideInfo في بياناتِ الإنشاءِ مربوطةٌ بالطلبِ
+     9	//               وبالأصلِ المعروفِ (كانت تُستهلَكُ بنيويًّا فقط).
+    10	//   FUP-SOL-03  فشلُ جاهزيّةِ startSim بعدَ إطلاقِ swtpm ⇒ يُنهى المحاكي فلا يبقى يتيمٌ.
+    11	//   FUP-SOL-04  نصُّ المصالحةِ بعدَ استنفادِ محاولةِ التنظيفِ يصفُ الميزانيّةَ المستنفدةَ (لا «متروكٌ للمحاولة»).
+    12	//   FUP-SOL-05  الردُّ الصحيحُ عندَ expiration=3600 (تذكرةُ NULL، timeout فارغ) مقبولٌ.
+    13	//   البصمة       طولُ بصمةِ تذكرةِ PolicySigned مربوطٌ بالطلبِ: 0 لتذكرةِ NULL و64 للتذكرةِ الحقيقيّةِ
+    14	//               (expiration سالبٌ في جلسةِ سياسةٍ) — قِيسَ على swtpm.
+    15	// كلُّ اختبارٍ يشغّلُ محاكيَه الخاصَّ. لا TBS، ولا /dev/tpm*، ولا عتاد.
+    16	
+    17	import { test } from 'node:test';
+    18	import assert from 'node:assert/strict';
+    19	import { tmpdir } from 'node:os';
+    20	import { join } from 'node:path';
+    21	import { fileURLToPath } from 'node:url';
+    22	import { spawnSync } from 'node:child_process';
+    23	import { startSim as startSimShared, stopSim, swtpmProcessesWithPath } from '../helpers/ceremony-swtpm.mjs';
+    24	import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
+    25	
+    26	const root = fileURLToPath(new URL('../../', import.meta.url));
+    27	const harness = join(root, 'tests/helpers/tpm-ceremony-harness.ps1');
+    28	
+    29	const pwshAvailable = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' }).status === 0;
+    30	const sim = isSimEnabled();
+    31	const simTest = (name, fn) => test(name, { skip: !sim ? 'swtpm/XUUX_TPM_SIM unavailable' : false }, fn);
+    32	const simPwshTest = (name, fn) =>
+    33	  test(name, { skip: !sim ? 'swtpm/XUUX_TPM_SIM unavailable' : (!pwshAvailable ? 'pwsh unavailable' : false) }, fn);
+    34	
+    35	function startSim() {
+    36	  return startSimShared({ prefix: 'xuux-wl414fup-', portBase: 3100, label: 'WL-414/FUP' });
+    37	}
+    38	
+    39	function harnessRun(s, args) {
+    40	  const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', harness, '-SimPort', String(s.port), ...args],
+    41	    { encoding: 'utf8', maxBuffer: 64 << 20 });
+    42	  assert.equal(r.status, 0, r.stderr || r.stdout);
+    43	  return JSON.parse(r.stdout);
+    44	}
+    45	
+    46	const fault = (s, mode) => harnessRun(s, ['-Mode', 'fault', '-Fault', mode]);
+    47	const list = (x) => (x === null || x === undefined ? [] : Array.isArray(x) ? x : [x]);
+    48	
+    49	// ── FUP-SOL-05 + البصمة: الأشكالُ الحقيقيّةُ الستّةُ على swtpm مقبولةٌ، وكلٌّ بالشكلِ المقيس ──
+    50	simPwshTest('FUP-1: ردودُ PolicySigned الحقيقيّةُ (سياسة/تجربة × 0/3600/-3600) مقبولةٌ بأشكالِها المقيسة', () => {
+    51	  const s = startSim();
+    52	  try {
+    53	    const o = harnessRun(s, ['-Mode', 'policysigned-shapes']);
+    54	    const shapes = list(o.shapes);
+    55	    assert.equal(shapes.length, 6, JSON.stringify(shapes));
+    56	    const nullTicket = 'timeoutLen=0 tag=0x8025 hierarchy=0x40000007 digestLen=0 SCHEMA_ACCEPT';
+    57	    const expected = {
+    58	      'session=policy expiration=0': nullTicket,
+    59	      'session=policy expiration=3600': nullTicket,
+    60	      // التذكرةُ الحقيقيّةُ الوحيدةُ: timeout UINT64، وهرميّةُ مفتاحِ التوقيعِ (المالك)، وبصمةٌ بطولِ 64.
+    61	      'session=policy expiration=-3600': 'timeoutLen=8 tag=0x8025 hierarchy=0x40000001 digestLen=64 SCHEMA_ACCEPT',
+    62	      'session=trial expiration=0': nullTicket,
+    63	      'session=trial expiration=3600': nullTicket,
+    64	      'session=trial expiration=-3600': nullTicket,
+    65	    };
+    66	    for (const [k, v] of Object.entries(expected)) {
+    67	      assert.ok(shapes.includes(k + ' rc=0x00000000 ' + v), k + ' => ' + JSON.stringify(shapes));
+    68	    }
+    69	  } finally { stopSim(s); }
+    70	});
+    71	
+    72	// ── FUP-SOL-01 + البصمة: تذكرةُ NULL المشوَّهةُ عندَ expiration=0 مرفوضةٌ باسمٍ ──
+    73	const psRejectCases = [
+    74	  ['fup-ps-digest-1', 'RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=1 expected=0'],
+    75	  ['fup-ps-digest-32', 'RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=32 expected=0'],
+    76	  ['fup-ps-digest-64', 'RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=64 expected=0'],
+    77	  ['fup-ps-hierarchy-40000001', 'RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x40000001 expected=0x40000007'],
+    78	  ['fup-ps-hierarchy-4000000b', 'RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x4000000b expected=0x40000007'],
+    79	  ['fup-ps-hierarchy-4000000c', 'RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x4000000c expected=0x40000007'],
+    80	  ['fup-ps-tag-8023', 'RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x8023'],
+    81	  ['fup-ps-tag-8024', 'RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x8024'],
+    82	];
+    83	
+    84	for (const [mode, err] of psRejectCases) {
+    85	  simPwshTest('FUP-2: تذكرةُ PolicySigned عندَ expiration=0 (' + mode + ') ⇒ نتيجةٌ مجهولةٌ مسمّاةٌ ومُجرَدة', () => {
+    86	    const s = startSim();
+    87	    try {
+    88	      const o = fault(s, mode);
+    89	      const r = o.report;
+    90	      assert.equal(o.fault.changes, 1, 'probe fired once');
+    91	      assert.equal(r.status, 'FAILED_CLOSED');
+    92	      assert.ok(r.failure.startsWith('OUTCOME_UNKNOWN: s2.trial:PolicySigned '), 'prefix: ' + r.failure);
+    93	      assert.ok(r.failure.includes(err), 'error name: ' + r.failure);
+    94	    } finally { stopSim(s); }
+    95	  });
+    96	}
+    97	
+    98	// ضوابطُ إيجابيّةٌ للمُعيدِ نفسِه: إعادةُ ترميزٍ بالقيمِ الصحيحةِ لا تُغيّرُ القبولَ (المسبرُ لا يكسرُ الردَّ بذاتِه).
+    99	for (const mode of ['fup-ps-digest-0', 'fup-ps-hierarchy-40000007', 'fup-ps-tag-8025']) {
+   100	  simPwshTest('FUP-2c: إعادةُ ترميزِ تذكرةِ PolicySigned بقيمِها الصحيحةِ (' + mode + ') ⇒ COMPLETE', () => {
+   101	    const s = startSim();
+   102	    try {
+   103	      const o = fault(s, mode);
+   104	      assert.equal(o.fault.changes, 1, 'probe fired once');
+   105	      assert.equal(o.report.status, 'COMPLETE', o.report.failure);
+   106	    } finally { stopSim(s); }
+   107	  });
+   108	}
+   109	
+   110	// ── FUP-SOL-02: الحقولُ الذيليّةُ لبياناتِ الإنشاءِ مربوطةٌ بالطلبِ وبالأصلِ المعروف ──
+   111	const createStep = 's2:Create(service-key,ECDSA-P256)';
+   112	const primaryStep = 's2:CreatePrimary(storage,ECC-P256)';
+   113	const cdRejectCases = [
+   114	  ['fup-cd-parentname', createStep, 'RESPONSE_CREATION_DATA_MALFORMED: Create parentName differs from known parent'],
+   115	  ['fup-cd-parentqn', createStep, 'RESPONSE_CREATION_DATA_MALFORMED: Create parentQualifiedName differs from known parent'],
+   116	  ['fup-cd-outsideinfo', createStep, 'RESPONSE_CREATION_DATA_MALFORMED: Create outsideInfo differs from request'],
+   117	  ['fup-cd-pna-null', createStep, 'RESPONSE_CREATION_DATA_MALFORMED: Create parentNameAlg=0x0010 expected=0x000b'],
+   118	  ['fup-cdp-parentname', primaryStep, 'RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary parentName differs from known parent'],
+   119	  ['fup-cdp-parentqn', primaryStep, 'RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary parentQualifiedName differs from known parent'],
+   120	  ['fup-cdp-outsideinfo', primaryStep, 'RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary outsideInfo differs from request'],
+   121	  ['fup-cdp-pna-sha256', primaryStep, 'RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary parentNameAlg=0x000b expected=0x0010'],
+   122	];
+   123	
+   124	for (const [mode, step, err] of cdRejectCases) {
+   125	  simPwshTest('FUP-3: بياناتُ إنشاءٍ بحقلٍ غيرِ مربوطٍ (' + mode + ') ⇒ نتيجةٌ مجهولةٌ مسمّاة', () => {
+   126	    const s = startSim();
+   127	    try {
+   128	      const o = fault(s, mode);
+   129	      const r = o.report;
+   130	      assert.equal(o.fault.changes, 1, 'probe fired once');
+   131	      assert.equal(r.status, 'FAILED_CLOSED');
+   132	      assert.ok(r.failure.startsWith('OUTCOME_UNKNOWN: ' + step + ' '), 'prefix: ' + r.failure);
+   133	      assert.ok(r.failure.includes(err), 'error name: ' + r.failure);
+   134	    } finally { stopSim(s); }
+   135	  });
+   136	}
+   137	
+   138	for (const mode of ['fup-cd-identity', 'fup-cdp-identity']) {
+   139	  simPwshTest('FUP-3c: إعادةُ ترميزِ بياناتِ الإنشاءِ بقيمِها الحقيقيّةِ (' + mode + ') ⇒ COMPLETE', () => {
+   140	    const s = startSim();
+   141	    try {
+   142	      const o = fault(s, mode);
+   143	      assert.equal(o.fault.changes, 1, 'probe fired once');
+   144	      assert.equal(o.report.status, 'COMPLETE', o.report.failure);
+   145	    } finally { stopSim(s); }
+   146	  });
+   147	}
+   148	
+   149	// ── FUP-SOL-04: نصُّ المصالحةِ يطابقُ ميزانيّةَ محاولاتِ التنظيفِ ──
+   150	simPwshTest('FUP-4: حذفُ التنظيفِ يُسقَطُ قبلَ الإرسالِ ⇒ «الميزانيّةُ مستنفدةٌ» وبقيّةٌ معلَنةٌ، لا «متروكٌ لمحاولةٍ»', () => {
+   151	  const s = startSim();
+   152	  try {
+   153	    const o = fault(s, 'fup-cleanup-undefine-before');
+   154	    const r = o.report;
+   155	    const h = o.fault.definedHandle;
+   156	    assert.equal(o.fault.changes, 2, 'both injections fired');
+   157	    assert.equal(r.status, 'FAILED_CLOSED');
+   158	    const rec = list(r.reconciliation);
+   159	    assert.ok(rec.includes('nv-undefine ' + h + ': still present; deletion outcome unknown; cleanup attempt budget already spent (1 per resource; no further attempt); declared as leftover'), JSON.stringify(rec));
+   160	    assert.ok(!rec.some((x) => x.includes('left for the bounded cleanup attempt')), JSON.stringify(rec));
+   161	    assert.ok(list(r.cleanupLeftovers).some((x) => x.startsWith('nv ' + h + ':')), JSON.stringify(r.cleanupLeftovers));
+   162	    // الفهرسُ باقٍ فعلًا على المحاكي — الإعلانُ يطابقُ الحالة.
+   163	    assert.ok(list(o.nvAfter).includes(h), JSON.stringify(o.nvAfter));
+   164	  } finally { stopSim(s); }
+   165	});
+   166	
+   167	simPwshTest('FUP-4c: حذفُ المرحلةِ يُسقَطُ قبلَ التنظيفِ ⇒ «متروكٌ لمحاولةِ التنظيفِ» ثمّ يُحذفُ فعلًا', () => {
+   168	  const s = startSim();
+   169	  try {
+   170	    const o = fault(s, 'fup-undefine-drop-before');
+   171	    const r = o.report;
+   172	    const h = o.fault.definedHandle;
+   173	    assert.equal(o.fault.changes, 1, 'probe fired once');
+   174	    const rec = list(r.reconciliation);
+   175	    assert.ok(rec.includes('nv-undefine ' + h + ': still present; deletion outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)'), JSON.stringify(rec));
+   176	    assert.ok(!rec.some((x) => x.includes('budget already spent')), JSON.stringify(rec));
+   177	    assert.ok(!list(o.nvAfter).includes(h), 'cleanup removed the run-owned index: ' + JSON.stringify(o.nvAfter));
+   178	  } finally { stopSim(s); }
+   179	});
+   180	
+   181	// ── FUP-SOL-03: فشلُ جاهزيّةِ startSim لا يتركُ محاكيًا يتيمًا ──
+   182	simTest('FUP-5: swtpm يُطلَقُ ثمّ يفشلُ استعلامُ الجاهزيّةِ ⇒ يُنهى قبلَ رميِ الخطأ ولا يبقى يتيم', () => {
+   183	  const prefix = 'xuux-wl414fup-notready-' + process.pid + '-';
+   184	  const abandoned = [];
+   185	  assert.throws(() => startSimShared({
+   186	    prefix, portBase: 3500, attempts: 2, readyTries: 1, probe: () => false,
+   187	    onAbandon: (x) => abandoned.push(x), label: 'WL-414/FUP-5',
+   188	  }), /WL-414\/FUP-5: تعذّرَ تشغيلُ محاكٍ معزول/);
+   189	  assert.equal(abandoned.length, 2, JSON.stringify(abandoned));
+   190	  for (const a of abandoned) {
+   191	    assert.equal(a.reason, 'not-ready');
+   192	    assert.ok(Number.isInteger(a.pid) && a.pid > 1, 'swtpm was actually launched: ' + JSON.stringify(a));
+   193	    assert.equal(a.stopped, true, 'launched simulator stopped: ' + JSON.stringify(a));
+   194	    let alive = true;
+   195	    try { process.kill(a.pid, 0); } catch { alive = false; }
+   196	    assert.equal(alive, false, 'pid ' + a.pid + ' gone');
+   197	  }
+   198	  // فورَ رجوعِ الخطأ — قبلَ أيِّ تنظيفٍ خارجيٍّ — لا عمليّةَ swtpm تحملُ بادئةَ هذا الاختبار.
+   199	  assert.deepEqual(swtpmProcessesWithPath(join(tmpdir(), prefix)), []);
+   200	});
+   201	
+   202	simTest('FUP-5c: مسارُ النجاحِ ⇒ stopSim ينتظرُ زوالَ المحاكي ولا يبقى يتيم', () => {
+   203	  const s = startSim();
+   204	  assert.ok(swtpmProcessesWithPath(s.dir).length === 1, 'running before stop');
+   205	  assert.equal(stopSim(s), true);
+   206	  assert.deepEqual(swtpmProcessesWithPath(s.dir), []);
+   207	});
+   260	    const s = startSim();
+   261	    try {
+   262	      const o = fault(s, mode);
+   263	      const r = o.report;
+   264	      assert.equal(r.status, 'FAILED_CLOSED');
+   265	      assert.ok(r.failure.startsWith('OUTCOME_UNKNOWN: ' + step + ' '), 'prefix: ' + r.failure);
+   266	      assert.ok(r.failure.includes(err), 'error name: ' + r.failure);
+   267	      // \u0627\u0644\u0623\u0645\u0631\u064f \u0645\u064f\u063a\u064a\u0651\u0631\u064c \u21d2 \u0644\u0627 \u0645\u0631\u062d\u0644\u0629\u064b \u0644\u0627\u062d\u0642\u0629\u064b \u062a\u064f\u063a\u064a\u0651\u0631\u064f \u062d\u0627\u0644\u0629\u064b.
+   268	      assertNoLaterStage(r, step);
+   269	    } finally { stopSim(s); }
+   270	  });
+   271	}
+   272	
+   273	simPwshTest('R3-09: قراءةُ NV بردٍّ ناجحٍ وبياناتٍ أقصرَ من المطلوبِ ⇒ فشلٌ مغلقٌ مسمّى (قراءةٌ لا تُغيّرُ)', () => {
+   274	  const s = startSim();
+   275	  try {
+   276	    const o = fault(s, 'schema-nvread-short');
+   277	    const r = o.report;
+   278	    assert.equal(r.status, 'FAILED_CLOSED');
+   279	    assert.match(r.failure, /RESPONSE_NV_READ_SIZE_MALFORMED: len=1 asked=/);
+   280	    assert.ok(!/OUTCOME_UNKNOWN/.test(r.failure), 'NV_Read is not state-changing');
+   281	  } finally { stopSim(s); }
+   282	});
+   283	
+   284	simPwshTest('R3-10: توقيعٌ بردٍّ ناجحٍ ومكوّنٌ مقتطَعٌ ⇒ فشلٌ مغلقٌ مسمّى (Sign لا يُغيّرُ)', () => {
+   285	  const s = startSim();
+   286	  try {
+   287	    const o = fault(s, 'schema-sign-short');
+   288	    const r = o.report;
+   289	    assert.equal(r.status, 'FAILED_CLOSED');
+   290	    assert.match(r.failure, /RESPONSE_SIGNATURE_COMPONENT_MALFORMED: r=1 s=32/);
+   291	  } finally { stopSim(s); }
+   292	});
+   293	
+   294	simPwshTest('R3-11: PolicySigned ناجحٌ ببصمةِ تذكرةٍ تتجاوزُ الحدَّ ⇒ نتيجةٌ مجهولةٌ مُغلَفةٌ ومُجرَدة', () => {
+   295	  const s = startSim();
+   296	  try {
+   297	    const o = fault(s, 'schema-policysigned-digest');
+   298	    const r = o.report;
+   299	    assert.equal(r.status, 'FAILED_CLOSED');
+   300	    assert.match(r.failure, /^OUTCOME_UNKNOWN: s2\.trial:PolicySigned/);
+   301	    // WL-414: الطولُ مربوطٌ بالطلبِ — expiration=0 يطلبُ تذكرةَ NULL ببصمةٍ فارغة.
+   302	    assert.match(r.failure, /RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=65 expected=0/);
+   303	    assertNoLaterStage(r, 's2.trial:PolicySigned');
+   304	  } finally { stopSim(s); }
+   305	});
+   306	
+   307	// ── الجولةُ الثالثةُ على de099aa8 (تقاريرُ المراجعينَ الثلاثةِ: gpt_6_1_sol وgemini_3_8_flash وgrok_4_7) ──
+   308	// فجواتٌ قِيست في تحليلِ الردودِ والنقلِ والتنظيفِ فقُبلت ثمّ عولجت: لكلِّ فجوةٍ مسبرُ حقنٍ يُثبتُ
+   309	// الرفضَ المسمّى (أو القبولَ المشروعَ) — لا ادّعاءً بلا تشويهٍ، ولا تشويهًا بلا اسمٍ.
+   310	
+   311	const r3cRejectCases = [
+   312	  ['auth-cross-policy-on-password', 's1.probe:NV_DefineSpace', 'RESPONSE_AUTH_CONTENT_MALFORMED: auth#0 nonceLen=32 attrs=0x00 hmacLen=0 expected=password'],
+   313	  ['ticket-hierarchy-revoke', 's2:CreatePrimary(storage,ECC-P256)', 'RESPONSE_TICKET_HIERARCHY_MALFORMED: CreatePrimary 0x40000002'],
+   314	  ['ticket-digest-short', 's2:CreatePrimary(storage,ECC-P256)', 'RESPONSE_TICKET_DIGEST_MALFORMED: CreatePrimary len=1'],
+   315	  ['policysigned-timeout-nonempty', 's2.trial:PolicySigned', 'RESPONSE_POLICY_TIMEOUT_MALFORMED: len=8 expected=0 at expiration=0'],
+   316	  ['load-alias-live', 's2:Load(service-key)', 'RESPONSE_HANDLE_REISSUED: Load(service-key) 0x80000000 still live in this run'],
+   317	];
+   318	
+   319	for (const [mode, step, err] of r3cRejectCases) {
+   320	  simPwshTest('R3-12: \u0641\u062c\u0648\u0629\u064c \u0645\u0642\u064a\u0633\u0629\u064c \u0645\u0646 \u062c\u0648\u0644\u0629\u0650 R3 \u0639\u0644\u0649 de099aa8 (' + mode + ') \u21d2 \u0641\u0634\u0644\u064c \u0645\u063a\u0644\u0642\u064c \u0645\u0633\u0645\u0651\u0649', () => {
+   321	    const s = startSim();
+   322	    try {
+   323	      const o = fault(s, mode);
+   324	      const r = o.report;
+   325	      assert.equal(r.status, 'FAILED_CLOSED');
+   326	      assert.ok(r.failure.startsWith('OUTCOME_UNKNOWN: ' + step + ' '), 'prefix: ' + r.failure);
+   327	      assert.ok(r.failure.includes(err), 'error name: ' + r.failure);
+   328	      assertNoLaterStage(r, step);
+   329	    } finally { stopSim(s); }
+   330	  });
+   331	}
+   332	
+   333	simPwshTest('R3-13: \u0645\u0644\u0641\u0651\u064f \u062a\u0641\u0648\u064a\u0636\u0650 \u0631\u062f\u0651\u064d \u064a\u0631\u062a\u0628\u0637 \u0628\u0646\u0648\u0639\u0650 \u062c\u0644\u0633\u0629\u0650 \u0627\u0644\u0637\u0644\u0628\u0650 \u2014 \u0645\u0644\u0641\u064f \u0633\u064a\u0627\u0633\u0629\u064d \u0635\u063a\u0651\u0631\u064e \u0625\u0644\u0649 16 \u0641\u064a \u0631\u062f\u0651\u0650 \u062c\u0644\u0633\u0629\u0650 \u0633\u064a\u0627\u0633\u0629\u064d \u21d2 \u0645\u0631\u0641\u0648\u0636\u064c \u0645\u0633\u0645\u0651\u0649 \u0644\u0627 \u0642\u0628\u0648\u0644\u064c \u0635\u0645\u062a\u064c', () => {
+   334	  const s = startSim();
+   335	  try {
+  1688	            if (_baselineTransients != null && _baselineTransients.Contains(h))
+  1689	                throw new ResponseMalformedException("RESPONSE_HANDLE_PREEXISTING: " + what + " " + Hex.U32(h) + " existed in baseline transients inventory", 0);
+  1690	            if (_baselineSessions != null && _baselineSessions.Contains(h))
+  1691	                throw new ResponseMalformedException("RESPONSE_HANDLE_PREEXISTING: " + what + " " + Hex.U32(h) + " existed in baseline sessions inventory", 0);
+  1692	        }
+  1693	
+  1694	        private void SessionConsumed(uint h) { _transients.Remove(h); _ctx.EndOfLife(h); _r.Fact("ctx.endOfLife.sessionConsumed", "session-consumed " + Hex.U32(h) + " contextGone=" + (!_ctx.Knows(h))); } // شاهدُ الحالةِ الفعلّيّةِ بعدَ الإزالةِ (جولتا 3 و4)
+  1695	
+  1696	        private void SignAHash(string label, uint key, byte[] nonceTpm, out byte[] r, out byte[] s)
+  1697	        {
+  1789	            _policy = tpmDigest;
+  1790	        }
+  1791	
+  1792	        // التحقّقُ من السماتِ الكاملةِ والسياسةِ (§4.1/§4.2) على فهرسٍ مؤقّتٍ في المحاكي يُحذَفُ — ليس S3:
+  1793	        // S3 فهرسُ مرساةٍ دائمٌ على العتادِ، وهو غيرُ مأذون.
+  1794	        private void StageS2Validation()
+  1795	        {
+  1796	            _stage = "S2-validate";
+  1797	            uint h = PickVacantHandle("s2v.anchorShape");
+  1798	            Define("s2v.anchorShape", h, Tpm.ANCHOR_ATTRIBUTES, _policy);
+  1799	
+  1800	            RefusedIncrement("s2v:NV_Increment(password-auth)", h, Cmd.PasswordAuth(new byte[0]), 0x0000012F, null);
+  1801	
+  1802	            byte[] nonce;
+  1803	            uint ps = StartSession("s2v.policy", Tpm.SE_POLICY, out nonce);
+  1804	            byte[] sr; byte[] ss;
+  1805	            SignAHash("s2v.policy", _serviceKey, nonce, out sr, out ss);
+  1806	            PolicySignedStep("s2v.policy", _serviceKey, ps, nonce, sr, ss);
+  1807	            PolicyCommandCodeStep("s2v.policy", ps, Tpm.CC_NV_Increment);
+  1808	            Increment("s2v.policy:NV_Increment(policy-session)", h, Cmd.PolicyAuth(ps, Random(32)), null);
+  1809	            SessionConsumed(ps);
+  1810	            ulong v1 = ReadCounter("s2v:NV_Read(empty-auth)#1", h);
+  1811	
+  1812	            // إعادةُ توقيعٍ قديمٍ على جلسةٍ جديدة (nonce مختلف) ⇒ يُرفَضُ برمزِ توقيعٍ غيرِ صالحٍ (0x5DB).
+  1813	            byte[] nonce2;
+67:فالمتبقّي على المنفِّذِ **خمسةٌ وثلاثونَ بنداً** قابلةً للإغلاقِ داخلَ المستودعِ، **أُغلِقَ منها حتى `WL-192` ثمانيةَ عشرَ**: `DOC-1`…`DOC-8` **كلُّها** (‏`DOC-8` في `WL-178`)، **ومعها `D-9`** بجدولٍ مقيسٍ من تاريخِ Git، **ومعها `REPO-2` و`REPO-3` و`REPO-4` و`REPO-5`** بإذنِ المالكِ، **ومعها `LIVE-1`** بإقلاعٍ مقيسٍ لا موصوفٍ، **ومعها `LIVE-6`** بترجمةِ رمزِ حيازةٍ إلى `401` (‏`WL-180`)، **ومعها `LIVE-2`** بحدٍّ مقيسٍ في موضعِ قراءتِه لا موصوفٍ في تعليقٍ (‏`WL-182`)، **ومعها `LIVE-5`** بوسيطٍ موقِّعٍ مُعلَنِ السُّلطةِ والمدى لا بإسقاطِ الحيازةِ (‏`WL-183`)، **ومعها `DOC-10`** المُكتشَفُ في الدفعةِ نفسِها والمُغلَقُ فيها، **ومعها شُطُرُ المنفِّذِ في `M11.04-F07`** التي استُنفِدَت في `WL-184` (‏**والحكمُ للمجلسِ لا له**)، **ومعها شُطُرُ المنفِّذِ في
+69:**والمفتوحُ على المنفِّذِ بنودٌ تُسمّى ولا تُعَدُّ وحدَها** (‏م4 — والعددُ الجاريُّ «ثمانيةَ عشرَ» أعلاه رقمٌ موروثٌ لم يُعَدْ حسابُه في هذه الدفعةِ، **والتسميةُ حُجّةٌ والعدُّ ليس مقياساً**): `R3-A-01` و~~`LIVE-14`~~ 🟢 (أُغلِقَ في WL-235) و~~`LIVE-15`~~ 🟢 (أُغلِقَ في WL-233) و~~`LIVE-17`~~ 🟢 (أُغلِقَ في WL-289) و~~`LIVE-18`~~ 🟢 (أُغلِقَ في WL-263) و`OPS-1/MAIN-DRIFT-WINDOW` (شقُّهُ المنفِّذيُّ في WL-266، ومعيارُهُ يُقاسُ على main بعدَ الدمجِ). **و`REPO-1` أُغلِقَ في `WL-206`، و`LIVE-8` أُغلِقَ في `WL-207`، و`LIVE-3` أُغلِقَ في `WL-204`، و`DOC-11` أُغلِقَ في `WL-205` بتكذيبِ مقدّمتِه لا بتقليمٍ.** **و`D-5` أُغلِقَ في `WL-196`، و`LIM-1` في `WL-197`، و`LIVE-4` في `WL-198`، و`LIVE-7` في الدفعةِ `WL-199`…`WL-203` — وفي أثنائِها كُشِفَ بالقياسِ دَينانِ جديدانِ فقُيِّدا في §4.6 ولم �
+123:| `M11.04-F07` | عالية | **شُطُرُ المنفِّذِ مُستنفَدةٌ (`WL-184`):** `WL-160` (`cb3ffc16`) عالجَ قفلَ الكاتبِ، و`WL-092` أَلزمَ الشطرَينِ في المصنعِ، **وقِيسَ في `WL-184` أنّ الشطرَ الثانيَ كان لا يزالُ مفتوحاً بمسارٍ أدقَّ** (بيانٌ أقدمُ صحيحُ الخاتَمِ + محوُ `halt/` وحدَه ⇒ `running`/`epoch=0`) **فسُدَّ بشاهدٍ مختومٍ في السجلِّ** مع حدٍّ باقٍ مُعلَنٍ يُوجَّهُ إلى `R3-A-01`. **والحكمُ للمجلسِ لا للمنفِّذِ** (المادة 11 §1) | مجلس |
+124:| `R3-A-01` | عالية | **شُطُرُ المنفِّذِ مُستنفَدةٌ (`WL-185`):** `WL-098` ختمَ بيانَ جذرِ الحالةِ داخلَ التوكنِ، و`WL-100` صمَّمَ مرساةَ الحداثةِ في عدّادِ TPM NV **وثيقةَ قرارٍ (`ADR 0007`) بلا تنفيذٍ على عتادٍ**. **وقِيسَ في `WL-185` أنّ كلَّ مسارٍ أضيقَ من اللقطةِ الكاملةِ مسدودٌ**: `P10`/`R4-B-01` ⇒ `STATE_MANIFEST_JOURNAL_UNAUTHENTICATED` في الإنتاجِ والتطويرِ، والطيُّ العاريُ ⇒ مسدودٌ (`R4-K3-02`)، والاسترجاعُ الجزئيُّ ⇒ مسدودٌ (`WL-184`)؛ **وأُضيفَ شاهدُ تُخْمٍ ثالثٌ** يَقيسُ ذلك من مصنعِ الإنتاجِ في `tests/root-of-trust/replay-limit.test.mjs`، **وصُحِّحَت عبارتانِ أوسعُ من المقيسِ** في `ADR 0006`. **والباقي — مرجعُ حداثةٍ خارجَ القرصِ — خارجُ يدِ المنفِّذِ**: `ADR 0007` §7 تَشترطُ موافقةَ المالكِ على خدمةِ Windows وربطِ المُضيفِ وقناةِ IPC ونموذجِ
+129:| ~~`R5-A-01`~~ 🟢 | عالية | مُعالَجةٌ (`WL-210`) — شاهدُ الدفترِ بلا شاهدٍ ثانٍ. يتقاطعُ مع `R3-A-01`/`S13` · **مُغلَقةٌ في العقدِ** (‏`config/external-review.yaml`: `status: closed`، جولةُ إعادةِ الاختبارِ 8، `fixCommit: a28830a9`؛ علامتُها هنا من `WL-338`) | مجلس |
+176:**فالباقي على المنفِّذِ من هذا القسمِ صفرٌ بعدَ `WL-185`:** `R3-A-01` استُنفِدَت
+226:| ~~`DOC-15`~~ 🟢 | **مُكتشَفٌ بالقياسِ في `WL-221`** (في أثناءِ البحثِ عن أوّلِ بندٍ قابلٍ للتنفيذِ بعدَ `WL-220`): جدولُ §4.3 **يَنقُضُ نصَّهُ وعقدَهُ معاً** — خمسةُ صفوفٍ (`R6-A-12` و`R6-A-13` و`R6-B-03` و`R6-B-04` و`R6-B-05`، أسطرُ 143–147) تُسنِدُ عمودَ الإغلاقِ إلى «منفِّذ»، بينما `config/external-review.yaml` يَنُصُّ `resultAuthority: model-council` وبندُ استقلالِه يقولُ «المنفِّذُ قد يُنفِّذُ إصلاحاً لنتيجةٍ، لكنّ إعادةَ الاختبارِ **وحكمَ الإغلاقِ** يُصدِرُهما المجلسُ»، والمادة 11 §1 تقضي أنّ **المنفِّذَ ليسَ المراجعَ**، **ونصُّ §4.3 نفسُهُ في سطرَيهِ 107–108 و152 يقولُ ذلكَ حرفاً**. فالجدولُ كانَ يَمنحُ المنفِّذَ سلطةً نَفاها المتنُ فوقَهُ بأربعةِ أسطرٍ. **والخطرُ ليسَ خطأً إملائيّاً: صفٌّ يقولُ «الإغلاقُ: منفِّذ» رخصةٌ �
+238:| ~~`DOC-17`~~ 🟢 | **مُكتشَفٌ بالقياسِ في `WL-268`: حاجزٌ يَخضَرُّ على رقمٍ كاذبٍ.** `guard:doc-counts` (‏`R3`) يَعُدُّ البنودَ المفتوحةَ على المنفِّذِ من قائمةٍ في §3 بالتقاطِ كلِّ معرِّفٍ بينَ علامتَيْ كودٍ، **فعَدَّ المشطوبَ مفتوحاً**: قالَ «5 بنودٍ مفتوحةٍ» والقائمةُ فيها `LIVE-14` و`LIVE-15` و`LIVE-18` مشطوبةً مُغلَقةً، واللوحةُ `PROJECT_STATUS.md` تُسمّي الخمسةَ مفتوحةً — فتَطابَقَ خطآنِ فمرَّ الحاجزُ. ونمطُ المعرِّفِ `[A-Z0-9-]+` لا يَلتقطُ معرِّفَ فرعٍ بـ`/`، فغابَ `OPS-1/MAIN-DRIFT-WINDOW` عن العدِّ | المشطوبُ لا يُعَدُّ، ومعرِّفُ الفرعِ يُعَدُّ، والقائمتانِ تُطابِقانِ الواقعَ — **أُغلِقَ في `WL-268`**: `openIdsInList` في `scripts/lib/doc-count-facts.mjs` تُسقِطُ `~~…~~` قبلَ العدِّ وتَقبلُ `/`، ويَستعملُها طرفا المقارنةِ. والقائمت
+246:| ~~`LIVE-23`~~ 🟢 | **مُكتشَفٌ بالقياسِ في `WL-301`:** منذ نقلِ CI إلى `ubuntu-latest` (‏`WL-286`) **لا يُشغَّلُ في CI أيُّ اختبارِ عزلٍ حقيقيٍّ بمساحاتِ الأسماءِ** — التشغيلةُ `37008810615` على `main@d79cded2` تطبعُ `# SKIP` لستّةِ اختباراتٍ بسببِ `unshare: write failed /proc/self/uid_map` ولواحدٍ بـ«العزل الحقيقي غير متاح في المضيف»، ومعها 25 اختبارَ محاكي TPM و7 اختباراتِ توكنِ SoftHSM حقيقيٍّ. فالأخضرُ على `main` **لا يقيسُ** العزلَ (‏`src/execution/isolation.mjs`) ولا مسارَ HSM الحقيقيَّ ولا TPM، وكانَ العزلُ يُقاسُ على العدّاءِ المقيمِ (‏`apparmor_restrict_unprivileged_userns = 0`). **والتخطّي مُعلَنٌ بسببِه لا مُخفًى** — فليسَ خرقاً لـ§5، لكنّه فجوةُ قياسٍ لم تُقيَّدْ حتى اليومِ | **أُغلِقَ في `WL-405` بخيارِ «خطوةٍ تُهيِّئُ المضيفَ» الذي يسمحُ بهِ شرطُ الإغ�
+276:| ~~`LIVE-43`~~ 🟢 | **مُكتشَفٌ بالقياسِ في `WL-374` على `main@01085e8a` (‏بعدَ `WL-372`):** (1) الإيقافُ السياديُّ في `sim/tpm/manifest_seal_sim.mjs` علامةٌ في `halt.json` خارجَ الختمِ والعدّادِ — حذفُها أو الكتابةُ فوقَها يُعيدُ `recover()` إلى `running`، ومسارُ `STATE_TPM_INDEX_MISSING` يكتبُ `epoch: 0` فوقَها (‏مقيسٌ: `expected 1, actual 0`)؛ (2) staged مصنوعٌ عندَ `S = B = C` يُعادُ شهادتُه فيستبدلُ المتنَ الملتزمَ (‏مقيسٌ: `running` لا `TORN`)؛ (3) `tests/sim/**` كلُّها تُتخطّى في CI فدليلُ ADR 0006/0007 المحاكى محلّيٌّ لا يُعادُ قياسُه | **أُغلِقَ في الدفعةِ نفسِها:** `haltSovereign()` يختمُ الإيقافَ في المتنِ ويُقدِّمُ العدّادَ، و`recover()` يقرأُه من المتنِ المتحقَّقِ ولا يكتبُ `RUNNING` فوقَه في أيِّ مسارٍ، والإغلاقُ لا يُخفِّضُه، وstaged المختلفُ عندَ `B = C` ⇒ `TORN`؛ و`scripts/tpm-sim
+299:في السجلِّ يمنعُ الرجوعَ باسترجاعٍ جزئيٍّ، **والحكمُ للمجلسِ**) ← `R3-A-01`.
+336:| `EXT-6` | `R3-A-01` — **مرجعُ حداثةٍ خارجَ القرصِ** (مرساةُ عدّادِ NV في TPM): التصميمُ مكتوبٌ في `docs/adr/0007-tpm-nv-counter-freshness-anchor-design.md` **ولا سطرَ تنفيذٍ فيه** | `ADR 0007` §7 تَمنعُ أيَّ سطرِ تنفيذٍ قبلَ موافقةٍ صريحةٍ على خمسةٍ: **خدمةُ Windows جديدةٌ**، و**ربطُ جذرِ الثقةِ بمُضيفٍ بعينِه** (‏فنقلُ الخدمةِ يَصيرُ إجراءً محكوماً)، و**قناةُ IPC** (`AF_VSOCK` أم loopback مرآتيٌّ)، و**تحديثُ نموذجِ التهديدِ**، و**تخصيصُ فهرسِ NV على TPM الحقيقيِّ**. وثلاثةٌ منها قراراتُ مالكٍ، وجردُ فهارسِ NV والسعةِ يَقتضي أمراً على المُضيفِ خارجَ صندوقِ المنفِّذِ. **ووجودُ TPM في الجهازِ ليسَ موافقةً** | (1) موافقةٌ مكتوبةٌ على البنودِ الخمسةِ وعلى §4.10؛ (2) جردُ فهارسِ NV والسعةِ على المُضيفِ؛ (3) قرارُ القناةِ؛ ثمّ يُنفِّذُ ا
+276:| ~~`LIVE-43`~~ 🟢 | **مُكتشَفٌ بالقياسِ في `WL-374` على `main@01085e8a` (‏بعدَ `WL-372`):** (1) الإيقافُ السياديُّ في `sim/tpm/manifest_seal_sim.mjs` علامةٌ في `halt.json` خارجَ الختمِ والعدّادِ — حذفُها أو الكتابةُ فوقَها يُعيدُ `recover()` إلى `running`، ومسارُ `STATE_TPM_INDEX_MISSING` يكتبُ `epoch: 0` فوقَها (‏مقيسٌ: `expected 1, actual 0`)؛ (2) staged مصنوعٌ عندَ `S = B = C` يُعادُ شهادتُه فيستبدلُ المتنَ الملتزمَ (‏مقيسٌ: `running` لا `TORN`)؛ (3) `tests/sim/**` كلُّها تُتخطّى في CI فدليلُ ADR 0006/0007 المحاكى محلّيٌّ لا يُعادُ قياسُه | **أُغلِقَ في الدفعةِ نفسِها:** `haltSovereign()` يختمُ الإيقافَ في المتنِ ويُقدِّمُ العدّادَ، و`recover()` يقرأُه من المتنِ المتحقَّقِ ولا يكتبُ `RUNNING` فوقَه في أيِّ مسارٍ، والإغلاقُ لا يُخفِّضُه، وstaged المختلفُ عندَ `B = C` ⇒ `TORN`؛ و`scripts/tpm-sim
+336:| `EXT-6` | `R3-A-01` — **مرجعُ حداثةٍ خارجَ القرصِ** (مرساةُ عدّادِ NV في TPM): التصميمُ مكتوبٌ في `docs/adr/0007-tpm-nv-counter-freshness-anchor-design.md` **ولا سطرَ تنفيذٍ فيه** | `ADR 0007` §7 تَمنعُ أيَّ سطرِ تنفيذٍ قبلَ موافقةٍ صريحةٍ على خمسةٍ: **خدمةُ Windows جديدةٌ**، و**ربطُ جذرِ الثقةِ بمُضيفٍ بعينِه** (‏فنقلُ الخدمةِ يَصيرُ إجراءً محكوماً)، و**قناةُ IPC** (`AF_VSOCK` أم loopback مرآتيٌّ)، و**تحديثُ نموذجِ التهديدِ**، و**تخصيصُ فهرسِ NV على TPM الحقيقيِّ**. وثلاثةٌ منها قراراتُ مالكٍ، وجردُ فهارسِ NV والسعةِ يَقتضي أمراً على المُضيفِ خارجَ صندوقِ المنفِّذِ. **ووجودُ TPM في الجهازِ ليسَ موافقةً** | (1) موافقةٌ مكتوبةٌ على البنودِ الخمسةِ وعلى §4.10؛ (2) جردُ فهارسِ NV والسعةِ على المُضيفِ؛ (3) قرارُ القناةِ؛ ثمّ يُنفِّذُ ا

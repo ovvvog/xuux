@@ -1,0 +1,13 @@
+2026-10-19T07:53:52Z
+HEAD
+72e79272576f0d9e85c1d69f415e834ee542c34a
+PRE
+339f59346c44a31e3db5ebc721b8dc75d19f2d3f
+STATUS
+PRODDIFF
+NODE
+v20.20.2
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+NOTPM
+ls: cannot access '/dev/tpm0': No such file or directory
+ls: cannot access '/dev/tpmrm0': No such file or directory

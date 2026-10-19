@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=env TMPDIR=/tmp/council-wl420-gpt_6_1_sol WL420_FAULT_HARNESS=/tmp/council-wl420-gpt_6_1_sol/old-harness.ps1 node --experimental-loader=/tmp/council-wl420-gpt_6_1_sol/port-loader.mjs /tmp/council-wl420-gpt_6_1_sol/fault-detail.mjs nv-appear-after-define 
+start=2026-10-19T04:13:32Z
+end=2026-10-19T04:13:33Z
+exit=0

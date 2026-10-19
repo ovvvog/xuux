@@ -1,0 +1,5 @@
+cwd=/tmp/council-wl420-gpt_6_1_sol
+command=node --input-type=module -e import\ \{readFileSync\,existsSync\}\ from\ \"node:fs\"\;\ import\ \{createHash\}\ from\ \"node:crypto\"\;\ const\ b=\"/tmp/council-wl420-gpt_6_1_sol/\"\;\ const\ s=readFileSync\(b+\"report.md\"\,\"utf8\"\)\;\ const\ refs=\[...s.matchAll\(/\\\]\\\(\(\[\^\)\]+\)\\\)/g\)\].map\(m=\>m\[1\]\)\;\ const\ missing=\[...new\ Set\(refs\)\].filter\(p=\>\!existsSync\(b+p\)\)\;\ console.log\(JSON.stringify\(\{reportBytes:Buffer.byteLength\(s\)\,sha256:createHash\(\"sha256\"\).update\(s\).digest\(\"hex\"\)\,references:refs.length\,missing\}\)\)\;\ if\(missing.length\)process.exit\(1\)\; 
+start=2026-10-19T04:18:33Z
+end=2026-10-19T04:18:33Z
+exit=0

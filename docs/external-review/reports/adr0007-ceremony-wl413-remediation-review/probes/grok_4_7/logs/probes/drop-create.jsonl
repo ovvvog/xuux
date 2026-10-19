@@ -1,0 +1,2 @@
+{"mode":"drop-create","status":"FAILED_CLOSED","failure":"OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: PROBE_DROP_CREATE_AFTER_SEND)","steps":34,"changes":1,"forwarded":33,"undefineForwards":2,"createForwards":1,"policySignedForwards":0,"planted":"0x00000000","leftovers":[],"reconciliation":[],"notes":[],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"none"}
+exit:0

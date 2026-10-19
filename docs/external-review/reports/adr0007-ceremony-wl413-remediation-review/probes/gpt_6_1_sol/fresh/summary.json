@@ -1,0 +1,2331 @@
+{
+  "digest": "4794629ceef5acb6c0ef1085e59915dd134008b7f0e1f1c31477f9d2b739a666",
+  "reserved": [
+    {
+      "bit": 8,
+      "violations": [
+        "RESERVED_BIT_8=1"
+      ]
+    },
+    {
+      "bit": 9,
+      "violations": [
+        "RESERVED_BIT_9=1"
+      ]
+    },
+    {
+      "bit": 20,
+      "violations": [
+        "RESERVED_BIT_20=1"
+      ]
+    },
+    {
+      "bit": 21,
+      "violations": [
+        "RESERVED_BIT_21=1"
+      ]
+    },
+    {
+      "bit": 22,
+      "violations": [
+        "RESERVED_BIT_22=1"
+      ]
+    },
+    {
+      "bit": 23,
+      "violations": [
+        "RESERVED_BIT_23=1"
+      ]
+    },
+    {
+      "bit": 24,
+      "violations": [
+        "RESERVED_BIT_24=1"
+      ]
+    }
+  ],
+  "nonemptyPolicyRef": {
+    "name": "000b4c8450786b41af793b2f3cd0d08b95a3fb50044a983067854bfd3ee5f9bc031d",
+    "policyRef": "01020304",
+    "tpmDigest": "ffc2294e5e90f6d98d752397019feccba7f665059932d1564ef3abc717576916",
+    "policySignedRc": 0,
+    "calculated": "ffc2294e5e90f6d98d752397019feccba7f665059932d1564ef3abc717576916"
+  },
+  "rows": [
+    {
+      "file": "auth-continue-cleared.jsonl",
+      "mode": "auth-continue-cleared",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "auth-hmac.jsonl",
+      "mode": "auth-hmac",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "auth-nonce.jsonl",
+      "mode": "auth-nonce",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "auth-reserved.jsonl",
+      "mode": "auth-reserved",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "baseline-auth-reserved.jsonl",
+      "mode": "auth-reserved",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 78,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-handle-baseline-alias.jsonl",
+      "mode": "handle-baseline-alias",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 15,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000001"
+        ]
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-malformed-absence.jsonl",
+      "mode": "malformed-absence",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: INDEPENDENT_LOST_DEFINE_REPLY)",
+      "steps": 9,
+      "changes": 2,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x018f792b"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x018f792b: not-executed (verified absent by read-only inventory)"
+      ],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-negative-policy-loss.jsonl",
+      "mode": "negative-policy-loss",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v.replay:PolicySigned(old-signature) (IOException: INDEPENDENT_LOST_NEGATIVE_POLICYSIGNED_REPLY)",
+      "steps": 57,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-old-missing-response-auth.jsonl",
+      "mode": "old:missing-response-auth",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED)",
+      "steps": 12,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x01ad610e: executed; ownership proven by publicArea match",
+        "nv-undefine 0x01ad610e: verified absent (deletion took effect)"
+      ],
+      "cleanupLeftovers": [
+        "nv 0x01ad610e: OUTCOME_UNKNOWN: cleanup:NV_UndefineSpace (CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED)"
+      ]
+    },
+    {
+      "file": "baseline-policy-invalid-ticket.jsonl",
+      "mode": "policy-invalid-ticket",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 78,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-primary-empty-public.jsonl",
+      "mode": "primary-empty-public",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 78,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-r2-neg-increment-loss.jsonl",
+      "mode": "r2:neg-increment-loss",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v:NV_Increment(password-auth) (IOException: R2_LOSS_AFTER_NEGATIVE_INCREMENT)",
+      "steps": 48,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-r2-trailing-params.jsonl",
+      "mode": "r2:trailing-params",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 78,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-r2-written-before-reconcile.jsonl",
+      "mode": "r2:written-before-reconcile",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: R2_RESPONSE_LOSS_AFTER_DEFINE_AND_THIRD_PARTY_WRITE)",
+      "steps": 12,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x01939d4d: executed; ownership proven by publicArea match"
+      ],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "baseline-start-policy-empty-nonce.jsonl",
+      "mode": "start-policy-empty-nonce",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 78,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": []
+    },
+    {
+      "file": "create-empty-private.jsonl",
+      "mode": "create-empty-private",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "TPM_ERROR: s2:Load(service-key) rc=0x000001d5",
+      "steps": 35,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "create-invalid-creationdata.jsonl",
+      "mode": "create-invalid-creationdata",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "create-loss.jsonl",
+      "mode": "create-loss",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: INDEPENDENT_LOST_CREATE_REPLY)",
+      "steps": 34,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-blocked-forever-undefine.jsonl",
+      "mode": "g47:blocked-forever-undefine",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: s1.probe:NV_UndefineSpace rc=0x80280400",
+      "steps": 22,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01bbb721"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [
+        "nv 0x01bbb721: BLOCKED_FAIL_CLOSED: cleanup:NV_UndefineSpace"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01bbb721"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-blocked-on-expected-failure.jsonl",
+      "mode": "g47:blocked-on-expected-failure",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: s1.probe:NV_Read(before-first-increment) rc=0x80280400",
+      "steps": 16,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-drop-after-identity.jsonl",
+      "mode": "g47:drop-after-identity",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "SIMULATOR_CONNECTION_CLOSED rc=0x00000000",
+      "steps": 2,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-identity-ignores-string34.jsonl",
+      "mode": "g47:identity-ignores-string34",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "SIMULATOR_IDENTITY_REQUIRED: manufacturer=IBM vendor=0x53572020,0x2054504d,0x4556494c,0x58585858 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-io-throw.jsonl",
+      "mode": "g47:io-throw",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: probe write failed)",
+      "steps": 12,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x01ae9a1e: not-executed (verified absent by read-only inventory)"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-negative-unexpected-success.jsonl",
+      "mode": "g47:negative-unexpected-success",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_TAG_MISMATCH: expected=0x8002 got=0x8001 rc=0x00000000",
+      "steps": 16,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-size-mismatch.jsonl",
+      "mode": "g47:size-mismatch",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_SIZE_MISMATCH rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-truncate-header.jsonl",
+      "mode": "g47:truncate-header",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_TRUNCATED_HEADER rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-unexpected-rc.jsonl",
+      "mode": "g47:unexpected-rc",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "TPM_ERROR: s1.probe:NV_DefineSpace rc=0x00000101",
+      "steps": 11,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-vendor-space-fold.jsonl",
+      "mode": "g47:vendor-space-fold",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "SIMULATOR_IDENTITY_REQUIRED: manufacturer=IBM vendor=0x53205720,0x5420504d,0x00000000,0x00000000 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "g47-windows-family.jsonl",
+      "mode": "g47:windows-family",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: s1.probe:NV_DefineSpace rc=0x8028012f",
+      "steps": 11,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "gemini-blocked.jsonl",
+      "mode": "gemini:blocked",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: identity:GetCapability(TPM_PT_MANUFACTURER..VENDOR_STRING_4) rc=0x80280400",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "gemini-size.jsonl",
+      "mode": "gemini:size",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_SIZE_MISMATCH rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "gemini-truncate.jsonl",
+      "mode": "gemini:truncate",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_TRUNCATED_HEADER rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "handle-baseline-alias.jsonl",
+      "mode": "handle-baseline-alias",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": null,
+      "steps": 18,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000001"
+        ]
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [
+        "residual 0x80000001: present after run, absent from baseline; not removed"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000001"
+        ]
+      }
+    },
+    {
+      "file": "helper-blocked-forever-undefine.jsonl",
+      "mode": "helper:blocked-forever-undefine",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: s1.probe:NV_UndefineSpace rc=0x80280400",
+      "steps": 22,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01ac43d6"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [
+        "nv 0x01ac43d6: BLOCKED_FAIL_CLOSED: cleanup:NV_UndefineSpace"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01ac43d6"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-define-not-executed.jsonl",
+      "mode": "helper:define-not-executed",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413_DEFINE_DROPPED_BEFORE_EXECUTION)",
+      "steps": 12,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x01915987: not-executed (verified absent by read-only inventory)"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-define-params-extra.jsonl",
+      "mode": "helper:define-params-extra",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=2)",
+      "steps": 15,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x0189e628: executed; ownership proven by publicArea match"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-flush-refusal.jsonl",
+      "mode": "helper:flush-refusal",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: s2.trial:FlushContext rc=0x80280400",
+      "steps": 43,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [
+          "0x03000000"
+        ],
+        "transients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [
+        "transient 0x03000000: BLOCKED_FAIL_CLOSED: cleanup:FlushContext",
+        "transient 0x80000001: BLOCKED_FAIL_CLOSED: cleanup:FlushContext",
+        "transient 0x80000000: BLOCKED_FAIL_CLOSED: cleanup:FlushContext"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [
+          "0x03000000"
+        ],
+        "residualTransients": [
+          "0x80000000",
+          "0x80000001"
+        ]
+      }
+    },
+    {
+      "file": "helper-getcap-wrong-cap.jsonl",
+      "mode": "helper:getcap-wrong-cap",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_CAPABILITY_MISMATCH: asked=0x00000006 got=0x00000001 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-identity-missing-prop.jsonl",
+      "mode": "helper:identity-missing-prop",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "SIMULATOR_IDENTITY_INCOMPLETE: properties=4 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-identity-spacefold.jsonl",
+      "mode": "helper:identity-spacefold",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "SIMULATOR_IDENTITY_REQUIRED: manufacturer=IBM vendor=0x53205720,0x5420504d,0x00000000,0x00000000 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-identity-string34.jsonl",
+      "mode": "helper:identity-string34",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "SIMULATOR_IDENTITY_REQUIRED: manufacturer=IBM vendor=0x53572020,0x2054504d,0x4556494c,0x58585858 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "helper-load-name-short.jsonl",
+      "mode": "helper:load-name-short",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:Load(service-key) (CeremonyFailedException: RESPONSE_NAME_MALFORMED: Load len=2)",
+      "steps": 36,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000001"
+        ]
+      },
+      "reconciliation": [
+        "object-create 0x80000001: appeared during run; ownership not provable; left in place"
+      ],
+      "cleanupLeftovers": [
+        "transient 0x80000001: ownership-undetermined (appeared during run); not removed"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000001"
+        ]
+      }
+    },
+    {
+      "file": "helper-transport-dead-after-define.jsonl",
+      "mode": "helper:transport-dead-after-define",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: WL413R2_TRANSPORT_DIED_AFTER_DEFINE)",
+      "steps": 10,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x0186d530"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [
+        "reconcile nv-define 0x0186d530 unverifiable: WL413R2_TRANSPORT_DEAD",
+        "post-run inventory unavailable: residual state unknown (WL413R2_TRANSPORT_DEAD)"
+      ],
+      "postRunInventory": {
+        "verified": false,
+        "error": "WL413R2_TRANSPORT_DEAD",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "inventory-empty-more.jsonl",
+      "mode": "inventory-empty-more",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 18,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [
+          "0x03000000"
+        ],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "inventory-wrong-range.jsonl",
+      "mode": "inventory-wrong-range",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 18,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [
+          "0x03000000"
+        ],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "malformed-absence.jsonl",
+      "mode": "malformed-absence",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: INDEPENDENT_LOST_DEFINE_REPLY)",
+      "steps": 12,
+      "changes": 2,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01b3b0d6"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x01b3b0d6: not-executed (verified absent by read-only inventory)"
+      ],
+      "cleanupLeftovers": [
+        "residual 0x01b3b0d6: present after run, absent from baseline; not removed"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01b3b0d6"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "negative-policy-loss.jsonl",
+      "mode": "negative-policy-loss",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v.replay:PolicySigned(old-signature) (IOException: INDEPENDENT_LOST_NEGATIVE_POLICYSIGNED_REPLY)",
+      "steps": 60,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "negative-valid-success.jsonl",
+      "mode": "negative-valid-success",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "NEGATIVE_TEST_SUCCEEDED: s1.probe:NV_Read(before-first-increment) rc=0x00000000",
+      "steps": 16,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "old-define-response-loss.jsonl",
+      "mode": "old:define-response-loss",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: INDEPENDENT_RESPONSE_LOSS_AFTER_DEFINE_EXECUTION)",
+      "steps": 15,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x01b90c26: executed; ownership proven by publicArea match"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "old-flush-refusal.jsonl",
+      "mode": "old:flush-refusal",
+      "exit": 0,
+      "status": "BLOCKED_FAIL_CLOSED",
+      "failure": "BLOCKED_FAIL_CLOSED: s2.trial:FlushContext rc=0x80280400",
+      "steps": 43,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "old-invalid-tag.jsonl",
+      "mode": "old:invalid-tag",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_TAG_MISMATCH: expected=0x8001 got=0x1234 rc=0x00000000",
+      "steps": 1,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "old-missing-response-auth.jsonl",
+      "mode": "old:missing-response-auth",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED)",
+      "steps": 15,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x0182e81e: executed; ownership proven by publicArea match",
+        "nv-undefine 0x0182e81e: verified absent (deletion took effect)",
+        "post-run: 0x0182e81e declared as leftover above but verified absent by final inventory"
+      ],
+      "cleanupLeftovers": [
+        "nv 0x0182e81e: OUTCOME_UNKNOWN: cleanup:NV_UndefineSpace (CeremonyFailedException: RESPONSE_AUTH_AREA_MALFORMED)"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "old-unexpected-negative.jsonl",
+      "mode": "old:unexpected-negative",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "NEGATIVE_WRONG_RC: s2v.replay:PolicySigned(old-signature) expected=0x000005db got=0x00000101 rc=0x00000101",
+      "steps": 60,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "policy-invalid-ticket.jsonl",
+      "mode": "policy-invalid-ticket",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "primary-empty-public.jsonl",
+      "mode": "primary-empty-public",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "primary-invalid-creationdata.jsonl",
+      "mode": "primary-invalid-creationdata",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "primary-ticket-invalid.jsonl",
+      "mode": "primary-ticket-invalid",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "primary-wrong-name.jsonl",
+      "mode": "primary-wrong-name",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "r2-neg-increment-loss.jsonl",
+      "mode": "r2:neg-increment-loss",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2v:NV_Increment(password-auth) (IOException: R2_LOSS_AFTER_NEGATIVE_INCREMENT)",
+      "steps": 53,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-increment 0x018c98e1: not-executed (counter still uninitialized)"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "r2-trailing-params.jsonl",
+      "mode": "r2:trailing-params",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_PARAMS_TRAILING_BYTES: NV_ReadPublic extra=3 rc=0x00000000",
+      "steps": 13,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x01a28761"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [
+        "nv 0x01a28761: RESPONSE_PARAMS_TRAILING_BYTES: NV_ReadPublic extra=3"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x01a28761"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "r2-written-before-reconcile.jsonl",
+      "mode": "r2:written-before-reconcile",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (IOException: R2_RESPONSE_LOSS_AFTER_DEFINE_AND_THIRD_PARTY_WRITE)",
+      "steps": 12,
+      "changes": -1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [
+          "0x019ebe83"
+        ],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x019ebe83: exists with matching definition but TPMA_NV_WRITTEN is set although this run never wrote it; written by another party; ownership undetermined; left in place"
+      ],
+      "cleanupLeftovers": [
+        "nv 0x019ebe83: ownership-undetermined (written by another party after lost define reply); left in place"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [
+          "0x019ebe83"
+        ],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "signature-empty-r.jsonl",
+      "mode": "signature-empty-r",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "start-policy-empty-nonce.jsonl",
+      "mode": "start-policy-empty-nonce",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "start-trial-empty-nonce.jsonl",
+      "mode": "start-trial-empty-nonce",
+      "exit": 0,
+      "status": "COMPLETE",
+      "failure": null,
+      "steps": 81,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-122.jsonl",
+      "mode": "trailing-122",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_UndefineSpace (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1)",
+      "steps": 21,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-undefine 0x01aa8dbb: verified absent (deletion took effect)"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-12a.jsonl",
+      "mode": "trailing-12a",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_DefineSpace (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1)",
+      "steps": 15,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-define 0x019e2356: executed; ownership proven by publicArea match"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-131.jsonl",
+      "mode": "trailing-131",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: CreatePrimary extra=1)",
+      "steps": 33,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000000"
+        ]
+      },
+      "reconciliation": [
+        "object-create 0x80000000: appeared during run; ownership not provable; left in place"
+      ],
+      "cleanupLeftovers": [
+        "transient 0x80000000: ownership-undetermined (appeared during run); not removed"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000000"
+        ]
+      }
+    },
+    {
+      "file": "trailing-134.jsonl",
+      "mode": "trailing-134",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s1.probe:NV_Increment#1 (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1)",
+      "steps": 19,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "nv-increment 0x01906ee9: executed (value 1); one-time effect recorded; index cleanup follows ownership check"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-14e.jsonl",
+      "mode": "trailing-14e",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_PARAMS_TRAILING_BYTES: 0x0000014e extra=1 rc=0x00000000",
+      "steps": 18,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-153.jsonl",
+      "mode": "trailing-153",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: Create extra=1)",
+      "steps": 34,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-157.jsonl",
+      "mode": "trailing-157",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2:Load(service-key) (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: Load extra=1)",
+      "steps": 36,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": [
+          "0x80000001"
+        ]
+      },
+      "reconciliation": [
+        "object-create 0x80000001: appeared during run; ownership not provable; left in place"
+      ],
+      "cleanupLeftovers": [
+        "transient 0x80000001: ownership-undetermined (appeared during run); not removed"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": [
+          "0x80000001"
+        ]
+      }
+    },
+    {
+      "file": "trailing-15d.jsonl",
+      "mode": "trailing-15d",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_PARAMS_TRAILING_BYTES: Sign extra=1 rc=0x00000000",
+      "steps": 39,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-160.jsonl",
+      "mode": "trailing-160",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicySigned (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: PolicySigned extra=1)",
+      "steps": 41,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "policy-mutation 0x03000000: session still present; policy state unverifiable after lost response; left for bounded cleanup"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-165.jsonl",
+      "mode": "trailing-165",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:FlushContext (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1)",
+      "steps": 44,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "flush 0x03000000: verified absent (release took effect)"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-169.jsonl",
+      "mode": "trailing-169",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_PARAMS_TRAILING_BYTES: NV_ReadPublic extra=1 rc=0x00000000",
+      "steps": 15,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-16c.jsonl",
+      "mode": "trailing-16c",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:PolicyCommandCode (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: empty-params extra=1)",
+      "steps": 42,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [
+        "policy-mutation 0x03000000: session still present; policy state unverifiable after lost response; left for bounded cleanup"
+      ],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-176.jsonl",
+      "mode": "trailing-176",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "OUTCOME_UNKNOWN: s2.trial:StartAuthSession (CeremonyFailedException: RESPONSE_PARAMS_TRAILING_BYTES: 0x00000176 extra=1)",
+      "steps": 38,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [
+          "0x03000000"
+        ],
+        "transients": []
+      },
+      "reconciliation": [
+        "session-create 0x03000000: appeared during run; ownership not provable; left in place"
+      ],
+      "cleanupLeftovers": [
+        "session 0x03000000: ownership-undetermined (appeared during run); not removed"
+      ],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [
+          "0x03000000"
+        ],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-17a.jsonl",
+      "mode": "trailing-17a",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_PARAMS_TRAILING_BYTES: GetCapability extra=1 rc=0x00000000",
+      "steps": 1,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": false,
+        "error": "no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)",
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    },
+    {
+      "file": "trailing-189.jsonl",
+      "mode": "trailing-189",
+      "exit": 0,
+      "status": "FAILED_CLOSED",
+      "failure": "RESPONSE_PARAMS_TRAILING_BYTES: 0x00000189 extra=1 rc=0x00000000",
+      "steps": 42,
+      "changes": 1,
+      "before": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "after": {
+        "nv": [],
+        "sessions": [],
+        "transients": []
+      },
+      "reconciliation": [],
+      "cleanupLeftovers": [],
+      "postRunInventory": {
+        "verified": true,
+        "error": null,
+        "residualNv": [],
+        "residualSessions": [],
+        "residualTransients": []
+      }
+    }
+  ]
+}

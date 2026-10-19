@@ -1,0 +1,2 @@
+{"mode":"drop-refused-policysigned","status":"FAILED_CLOSED","failure":"OUTCOME_UNKNOWN: s2v.replay:PolicySigned(old-signature) (IOException: PROBE_DROP_REFUSED_POLICYSIGNED)","steps":60,"changes":1,"forwarded":59,"undefineForwards":3,"createForwards":1,"policySignedForwards":3,"planted":"0x00000000","leftovers":[],"reconciliation":[],"notes":[],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"none"}
+exit:0

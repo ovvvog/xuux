@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=env TMPDIR=/tmp/council-wl420-gpt_6_1_sol node --experimental-loader=/tmp/council-wl420-gpt_6_1_sol/port-loader.mjs /tmp/council-wl420-gpt_6_1_sol/fault-detail.mjs nv-appear-after-define 
+start=2026-10-19T04:11:50Z
+end=2026-10-19T04:11:51Z
+exit=0

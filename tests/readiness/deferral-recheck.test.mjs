@@ -175,8 +175,8 @@ test('مُطفَرةٌ في السجلِّ: حذفُ موعدِ تأجيلٍ ي�
   try {
     // وتيرةٌ تُطال بيدٍ خارجَ سياسةِ سلطتِها — أخطرُ من حذفٍ ظاهرٍ.
     const mutated = original.replace(
-      "    recheck:\n      cadence: P1M\n      lastReviewedOn: '2026-09-17'",
-      "    recheck:\n      cadence: P3M\n      lastReviewedOn: '2026-09-17'",
+      "    recheck:\n      cadence: P1M\n      lastReviewedOn: '2026-10-17'",
+      "    recheck:\n      cadence: P3M\n      lastReviewedOn: '2026-10-17'",
     );
     assert.notEqual(mutated, original, 'المُطفَرةُ لم تُطبَّق — فالاختبارُ لا يقيسُ شيئاً');
     fs.writeFileSync(DEFERRALS, mutated);

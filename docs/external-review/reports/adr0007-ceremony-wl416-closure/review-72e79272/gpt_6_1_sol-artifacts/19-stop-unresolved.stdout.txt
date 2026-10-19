@@ -1,0 +1,2 @@
+{"tree":"/tmp/wt-339f5934","mode":"unresolved","owner":3709,"delivered":2147483000,"beforeOwners":[],"returned":true,"ownerDead":false,"ownerState":"S","dirKept":false,"decoyDead":null,"elapsedMs":3.7317490000000078,"signals":[],"nonzeroKillCalls":0,"failedOnce":false}
+{"cleanupOwners":[],"dir":"/tmp/council-wl422-gpt_6_1_sol/tmp/review-unresolved-3tp94R"}

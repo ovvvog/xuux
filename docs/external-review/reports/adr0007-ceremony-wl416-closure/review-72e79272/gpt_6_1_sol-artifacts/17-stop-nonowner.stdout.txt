@@ -1,0 +1,3 @@
+{"tree":"/tmp/wt-339f5934","mode":"nonowner","owner":3653,"delivered":3655,"beforeOwners":[3653],"returned":false,"ownerDead":false,"ownerState":"S","dirKept":true,"decoyDead":false,"elapsedMs":0.29398100000000227,"signals":[],"nonzeroKillCalls":0,"failedOnce":false}
+{"cleanupChild":3655,"state":"ESRCH","dead":true}
+{"cleanupOwners":[],"dir":"/tmp/council-wl422-gpt_6_1_sol/tmp/review-nonowner-BPz6SA"}

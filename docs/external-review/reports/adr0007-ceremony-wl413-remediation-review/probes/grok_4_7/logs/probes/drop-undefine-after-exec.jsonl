@@ -1,0 +1,2 @@
+{"mode":"drop-undefine-after-exec","status":"FAILED_CLOSED","failure":"OUTCOME_UNKNOWN: s1.probe:NV_UndefineSpace (IOException: PROBE_DROP_UNDEFINE_AFTER_EXEC)","steps":21,"changes":1,"forwarded":20,"undefineForwards":1,"createForwards":0,"policySignedForwards":0,"planted":"0x00000000","leftovers":[],"reconciliation":["nv-undefine 0x0188946a: verified absent (deletion took effect)"],"notes":[],"postVerified":true,"postError":null,"residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"none"}
+exit:0

@@ -1,0 +1,5 @@
+de099aa8cfd82dda106199eeaf11e134b5ee6639
+v20.20.2
+PowerShell 7.4.6
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+tool="tpm2_getcap" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device

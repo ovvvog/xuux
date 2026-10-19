@@ -1,0 +1,20 @@
+$ tree=/tmp/wt-a3f1505d HEAD=a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d dirty=0
+$ flock /tmp/council-wl418-sim.lock env XUUX_TPM_SIM=1 node startsim-stale-pid-a3f1505d.mjs
+{
+  "launched": 22670,
+  "returned": {
+    "dir": "/tmp/xuux-wl418-stale-Yu2YsE",
+    "port": 7876,
+    "pidFile": "/tmp/xuux-wl418-stale-Yu2YsE/swtpm.pid",
+    "pid": 2147483001
+  },
+  "stopResult": true,
+  "threw": null,
+  "dirExists": false,
+  "ownersAfterStop": [
+    22670
+  ],
+  "launchedAlive": true
+}
+exit_code=0
+swtpm_left=0

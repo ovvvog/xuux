@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=bash -e -c test\ \"\$\(git\ rev-parse\ HEAD\)\"\ =\ df435a951486f124a5c75a337f17bd96924d7352\;\ for\ d\ in\ /tmp/wt-df435a95-gpt\ /tmp/wt-a3f1505d\ /tmp/wt-e23bd431\;\ do\ test\ -z\ \"\$\(git\ -C\ \"\$d\"\ status\ --porcelain=v1\)\"\;\ printf\ \"clean_tree=%s\ head=\"\ \"\$d\"\;\ git\ -C\ \"\$d\"\ rev-parse\ HEAD\;\ done\;\ node\ /tmp/council-wl420-gpt_6_1_sol/list-own-processes.mjs\;\ date\ -u\ +\"%Y-%m-%dT%H:%M:%SZ\" 
+start=2026-10-19T04:14:14Z
+end=2026-10-19T04:14:14Z
+exit=0

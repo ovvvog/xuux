@@ -1,0 +1,286 @@
+   655	        // ملفُّ السياسةِ في ردِّ أمرٍ بكلمةِ سرٍّ — والعكسُ — كان يُقبلُ لأنّ الفاحصَ يقبلُ أحدَ الملفينِ
+   656	        // على أيِّ منطقةِ تفويضٍ. attrs=0x01 (continueSession وحده) للملفينِ، وnonceTPM للسياسةِ = 32
+   657	        // (حجمُ nonceCaller في هذهِ البروفةِ؛ nonceTPM يُحفظُ من أولِّ nonceCaller — Part 1 §19.6.3.2).
+   658	        public static bool[] ExpectedPasswordSessions(byte[] cmd, int authCount)
+   659	        {
+   660	            bool[] kinds = new bool[authCount];
+   661	            ushort tag = (ushort)((cmd[0] << 8) | cmd[1]);
+   662	            if (tag != Tpm.ST_SESSIONS || authCount == 0) return kinds;
+   663	            Rd c = new Rd(cmd);
+   664	            c.U16(); c.U32(); uint cc = c.U32();
+   665	            c.Raw(4 * HandleCountOf(cc));
+   666	            c.U32(); // حجمُ منطقةِ التفويضِ
+   667	            for (int i = 0; i < authCount; i++)
+   668	            {
+   669	                kinds[i] = c.U32() == Tpm.RS_PW;
+   670	                c.B2B(); c.U8(); c.B2B(); // nonce، السماتُ، hmac للطلبِ
+   671	            }
+   672	            return kinds;
+   673	        }
+   674	
+   675	        private static int HandleCountOf(uint cc)
+   676	        {
+   677	            switch (cc)
+   678	            {
+   679	                case Tpm.CC_NV_DefineSpace: return 1;
+   680	                case Tpm.CC_NV_Increment: return 2;
+   681	                case Tpm.CC_NV_Read: return 2;
+   682	                case Tpm.CC_NV_UndefineSpace: return 2;
+   683	                case Tpm.CC_NV_ReadPublic: return 1;
+   684	                case Tpm.CC_CreatePrimary: return 1;
+   685	                case Tpm.CC_Create: return 1;
+   686	                case Tpm.CC_Load: return 1;
+   687	                case Tpm.CC_Sign: return 1;
+   688	                case Tpm.CC_PolicySigned: return 2;
+   689	                case Tpm.CC_PolicyCommandCode: return 1;
+   690	                case Tpm.CC_PolicyGetDigest: return 1;
+   691	                case Tpm.CC_FlushContext: return 0;
+   692	                case Tpm.CC_StartAuthSession: return 2;
+   693	                case Tpm.CC_GetCapability: return 0;
+   694	                default: throw new CeremonyFailedException("RESPONSE_SCHEMA_UNKNOWN_COMMAND: " + Hex.U32(cc), 0);
+   695	            }
+   696	        }
+   697	
+   698	        // منطقةُ معاملاتِ الطلبِ: بعدَ الترويسةِ والمقابضِ ومنطقةِ التفويضِ إن وُجدت (كلُّ ذلك من بايتاتِ الطلبِ نفسِه).
+   699	        private static byte[] CmdParams(byte[] cmd)
+   700	        {
+   701	            Rd c = new Rd(cmd);
+   702	            ushort tag = c.U16(); c.U32(); uint cc = c.U32();
+   703	            c.Raw(4 * HandleCountOf(cc));
+   704	            if (tag == Tpm.ST_SESSIONS) { uint authSize = c.U32(); c.Raw((int)authSize); }
+   705	            return c.Raw(c.Remaining);
+   706	        }
+   707	
+   708	        // قالبُ المفتاحِ من أمرِ Create/CreatePrimary: B2B(sensitive) ثمّ B2B(template).
+   709	        private static byte[] CmdTemplate(byte[] cmd)
+   710	        {
+   711	            Rd c = new Rd(CmdParams(cmd));
+   712	            c.B2B();
+   713	            return c.B2B();
+   714	        }
+   715	
+   716	        // تذكرةُ إنشاءٍ (TPMT_TK_CREATION): الوسمُ 0x8021 (TPM_ST_CREATED) والهرميّةُ مقبضُ ثابتٍ صالحٌ
+   717	        // (قياسُ swtpm: 0x40000001 للمالك) — قياسُ 2026-10-18.
+   718	        private static void CreationTicket(ushort tag, uint hierarchy, string what)
+   719	        {
+   720	            if (tag != 0x8021) throw new ResponseMalformedException("RESPONSE_TICKET_TAG_MALFORMED: " + what + " 0x" + tag.ToString("x4"), 0);
+   721	            // قيمُ TPMI_RH_HIERARCHY الأربعُ حصرًا (Part 2 جدولُ 29/51/28: المالكُ 0x40000001،
+   722	            // NULL 0x40000007، التأييدُ 0x4000000B، المنصّةُ 0x4000000C) — نطاقٌ عدديٌّ متصلٌ يقبلُ
+   723	            // مقابضَ ليست هرميّةً (R3SOL-03/قياسُ المراجعينَ) ويَرفضُ هرميّةً صالحةً أعلى.
+   724	            if (hierarchy != 0x40000001u && hierarchy != 0x40000007u && hierarchy != 0x4000000Bu && hierarchy != 0x4000000Cu)
+   725	                throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: " + what + " " + Hex.U32(hierarchy), 0);
+   726	        }
+   727	
+   728	        // طولُ بصمةِ التذكرةِ الحقيقيّةِ (HMAC بمفتاحِ سلامةِ السياقِ) في swtpm/libtpms: 64 — القياسُ نفسُه
+   729	        // لتذكرةِ الإنشاءِ (Create/CreatePrimary) ولتذكرةِ PolicySigned عندَ expiration سالبٍ في جلسةِ سياسةٍ
+   730	        // (قياسُ 2026-10-18، probes/TicketShape.cs). تذكرةُ NULL بصمتُها فارغةٌ (Part 2 §10.7.5).
+   731	        private const int TicketDigestLen = 64;
+   732	
+   733	        // تذكرةُ تفويضٍ (TPMT_TK_AUTH) في ردِّ PolicySigned (WL-414 FUP-SOL-01/05 + ربطُ طولِ البصمةِ): الوسمُ
+   734	        // TPM_ST_AUTH_SIGNED = 0x8025 حصرًا (Part 2 جدولُ 19؛ 0x8023 هو AUTH_SECRET لـPolicySecret — كان يُقبلُ
+   735	        // خطأً بتعليقٍ عكسَ الوسمينِ). شكلُ التذكرةِ يُستنتَجُ من الطلبِ لا من الردِّ (Part 3 §23.3 + قياسُ swtpm):
+   736	        //   expiration ≥ 0، أو جلسةُ تجربةٍ ⇒ تذكرةُ NULL: timeout فارغٌ، hierarchy = RH_NULL، بصمةٌ فارغةٌ.
+   737	        //   expiration < 0 في جلسةِ سياسةٍ ⇒ تذكرةٌ حقيقيّةٌ: timeout بـ8 بايتاتٍ (UINT64)، hierarchy = هرميّةُ
+   738	        //   authObject المسجّلةُ، بصمةٌ بـTicketDigestLen.
+   739	        // سابقًا: كانت أيُّ هرميّةٍ من الأربعِ وأيُّ بصمةٍ ≤64 تُقبلُ عندَ الصفرِ، وكان الردُّ الصحيحُ عندَ
+   740	        // expiration موجبٍ (timeout فارغٌ) يُرفضُ.
+   741	        private static void PolicySignedTicket(byte[] cmd, byte[] to, ushort tag, uint hierarchy, byte[] digest, ResponseContext ctx)
+   742	        {
+   743	            if (tag != 0x8025)
+   744	                throw new ResponseMalformedException("RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x" + tag.ToString("x4"), 0);
+   745	            Rd cp = new Rd(CmdParams(cmd)); cp.B2B(); cp.B2B(); cp.B2B(); int expiration = (int)cp.U32();
+   746	            bool realTicket = false;
+   747	            uint expectedHierarchy = Tpm.RH_NULL;
+   748	            if (expiration < 0)
+   749	            {
+   750	                uint authObject = ((uint)cmd[10] << 24) | ((uint)cmd[11] << 16) | ((uint)cmd[12] << 8) | cmd[13];
+   751	                uint session = ((uint)cmd[14] << 24) | ((uint)cmd[15] << 16) | ((uint)cmd[16] << 8) | cmd[17];
+   752	                byte type; byte[] n, q; uint h;
+   753	                if (ctx == null || !ctx.TrySessionType(session, out type))
+   754	                    throw new ResponseMalformedException("RESPONSE_POLICY_CONTEXT_UNKNOWN: session " + Hex.U32(session) + " at expiration=" + expiration, 0);
+   755	                if (type == Tpm.SE_POLICY)
+   756	                {
+   757	                    if (!ctx.TryObject(authObject, out n, out q, out h))
+   758	                        throw new ResponseMalformedException("RESPONSE_POLICY_CONTEXT_UNKNOWN: authObject " + Hex.U32(authObject), 0);
+   759	                    realTicket = true;
+   760	                    expectedHierarchy = h;
+   761	                }
+   762	            }
+   763	            int expectedTimeout = realTicket ? 8 : 0;
+   764	            int expectedDigest = realTicket ? TicketDigestLen : 0;
+   765	            if (to.Length != expectedTimeout)
+   766	                throw new ResponseMalformedException("RESPONSE_POLICY_TIMEOUT_MALFORMED: len=" + to.Length + " expected=" + expectedTimeout + " at expiration=" + expiration, 0);
+   767	            if (hierarchy != expectedHierarchy)
+   768	                throw new ResponseMalformedException("RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned " + Hex.U32(hierarchy) + " expected=" + Hex.U32(expectedHierarchy), 0);
+   769	            if (digest.Length != expectedDigest)
+   770	                throw new ResponseMalformedException("RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=" + digest.Length + " expected=" + expectedDigest, 0);
+   771	        }
+   772	
+   773	        // منطقةٌ عامّةٌ لمفتاحِ ECC-P256 (SOL413-04): رأسُها (كلُّ حقولِ TPMT_PUBLIC عدا unique) يطابقُ القالبَ
+   774	        // المُرسَلَ بايتًا ببايتٍ، وunique نقطةُ P-256 كاملةٌ: X وY بـ32 بايتًا لكلٍّ منهما.
+   775	        private static void EccPublic(byte[] pub, byte[] template, string what)
+   776	        {
+   777	            if (pub.Length != template.Length - 4 + 68)
+   778	                throw new ResponseMalformedException("RESPONSE_PUBLIC_AREA_MALFORMED: " + what + " len=" + pub.Length + " template=" + template.Length, 0);
+   779	            for (int i = 0; i < template.Length - 4; i++)
+   780	                if (pub[i] != template[i])
+   781	                    throw new ResponseMalformedException("RESPONSE_PUBLIC_AREA_MALFORMED: " + what + " head differs from sent template at " + i, 0);
+   782	            Rd u = new Rd(pub);
+   783	            u.Raw(template.Length - 4);
+   784	            if (u.B2B().Length != 32 || u.B2B().Length != 32)
+   785	                throw new ResponseMalformedException("RESPONSE_PUBLIC_AREA_MALFORMED: " + what + " unique not a P-256 point", 0);
+   786	        }
+   787	
+   788	        // TPMS_CREATION_DATA (SOL413-04) كما يُعلّمُها swtpm/libtpms (قياسُ 2026-10-18): تحديدُ PCR بعددٍ
+   789	        // ومداخلَ محدودةٍ، ثمّ بصمةٌ بحجمِ 32، ثمّ locality وparentNameAlg ثمّ حقولُ B2B محدودةٌ تُستهلَكُ كاملةً.
+   790	        private static void CreationData(byte[] cd, string what, byte[] cmd, ResponseContext ctx)
+   668	            // ── WL-416: أوضاعُ قراراتِ المالكِ (more=0) وحاجزِ ملكيّةِ مجالِ المالكِ ──
+   669	            // inventory-more0-hide: يُحجبُ الفهرسُ المزروعُ وحدهُ من صفحاتِ جردِ NV — بقيةُ الصفحةِ كما ردّها
+   670	            // المحاكي (المقابضُ الأخرى و more كما هي)؛ فالردُّ الصحيحُ البنيةِ الذي يُعلنُ more=0 ليس برهانَ
+   671	            // خلوٍّ: الاختبارُ يُثبتُ وجودَ الفهرسِ بجردٍ مباشرٍ بعدَ البروفةِ.
+   672	            if (rc == 0 && _mode == "inventory-more0-hide" && cc == Tpm.CC_GetCapability)
+   673	            {
+   674	                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); uint cap = c.U32(); uint prop = c.U32();
+   675	                if (cap == 1 && prop >= 0x01000000u && prop < 0x02000000u)
+   676	                {
+   677	                    Changes++;
+   678	                    // إعادةُ كتابةِ الردّ: تحليلُ المعاملاتِ وإسقاطُ الفهرسِ المزروعِ فقطْ وحفظُ more كما ردّ.
+   679	                    return RewriteNoSessionsParams(raw, 0, delegate(byte[] prm)
+   680	                    {
+   681	                        Rd r = new Rd(prm); byte more = r.U8(); uint rcap = r.U32(); uint cnt = r.U32();
+   682	                        List<uint> keep = new List<uint>();
+   683	                        for (uint i = 0; i < cnt; i++)
+   684	                        {
+   685	                            uint h = r.U32();
+   686	                            if (h != _plantedNv) keep.Add(h);
+   687	                        }
+   688	                        Wr w = new Wr().U8(more).U32(rcap).U32((uint)keep.Count);
+   689	                        foreach (uint h in keep) w.U32(h);
+   690	                        return w.Bytes();
+   691	                    });
+   692	                }
+   693	            }
+   694	            // nv-appear-midrun: عندَ طلبِ جردِ NV الثاني يُعرّفُ النقلُ فهرسًا حقيقيًّا داخلَ مجالِ المالك
+   695	            // (طرفٌ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ) قبلَ تمريرِ الطلبِ — الردُّ يشملُهُ فيوقفُهُ الحاجزُ.
+   696	            if ((_mode == "nv-appear-midrun" || _mode == "nv-appear-late") && cc == Tpm.CC_GetCapability)
+   697	            {
+   698	                Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); uint cap = c.U32(); uint prop = c.U32();
+   699	                if (cap == 1 && prop >= 0x01000000u && prop < 0x02000000u)
+   700	                {
+   701	                    _nvInvCount++;
+   702	                    // nv-appear-midrun: الجردُ الثاني (حاجزُ ما بعدِ خطِّ الأساسِ)؛ nv-appear-late: الجردُ الثالث
+   703	                    // (حاجزُ PickVacantHandle المتكرّرُ قبلَ كلِّ تعريفٍ) — كلاهُما ظهورٌ من طرفٍ ثالثٍ يوقفُهُ الحاجزُ.
+   704	                    if ((_mode == "nv-appear-midrun" && _nvInvCount == 2) || (_mode == "nv-appear-late" && _nvInvCount == 3))
+   705	                    {
+   706	                        Changes++;
+   707	                        Resp d = Resp.Parse(_inner.Transmit(Cmd.NvDefineSpace(new byte[0], new byte[0], PlantedNvPublic(0x01807777))), 0, Tpm.ST_SESSIONS, 1, new bool[] { true });
+   708	                        if (d.Rc != 0) throw new InvalidOperationException("midrun NV define failed rc=" + Hex.U32(d.Rc));
+   709	                    }
+   710	                }
+   711	            }
+   712	            // WL-418 (WL418-gpt_6_1_sol-01): ظهورٌ متأخّرٌ بعدَ أمرٍ مُغيِّرٍ ناجحٍ — يُعرَّفُ فهرسٌ حقيقيٌّ داخلَ مجالِ
+   713	            // المالكِ بعدَ نجاحِ أوّلِ NV_DefineSpace (nv-appear-after-define) أو أوّلِ CreatePrimary
+   714	            // (nv-appear-after-primary)، بلا إخفاءٍ عن أيِّ جرد. حاجزُ بوابةِ الإرسالِ يوقفُ الأمرَ المُغيِّرَ التالي.
+   715	            if (((_mode == "nv-appear-after-define" && cc == Tpm.CC_NV_DefineSpace) ||
+   716	                 (_mode == "nv-appear-after-primary" && cc == Tpm.CC_CreatePrimary)) && rc == 0 && Changes == 0)
+   717	            {
+   718	                Changes++;
+   719	                Resp d = Resp.Parse(_inner.Transmit(Cmd.NvDefineSpace(new byte[0], new byte[0], PlantedNvPublic(0x01807777))), 0, Tpm.ST_SESSIONS, 1, new bool[] { true });
+   720	                if (d.Rc != 0) throw new InvalidOperationException("late NV define failed rc=" + Hex.U32(d.Rc));
+   721	            }
+   722	            if (rc == 0x18B && _mode == "readpublic-malformed-18b" && cc == Tpm.CC_NV_ReadPublic && _defineLost)
+   723	            {
+   724	                Changes++;
+   725	                byte[] forged = (byte[])raw.Clone(); forged[0] = 0x12; forged[1] = 0x34;
+   726	                return forged;
+   727	            }
+   728	
+   975	
+   976	
+   977	// خاتمةُ الملفِ: كلُّ اختبارٍ يُنهي محاكيَه في finally — لا يتامى.
+   978	
+   979	// ── WL-418: ملاحظتا المراجعةِ المستقلّةِ على a3f1505d (أُعيدَ إنتاجُهما قبلَ الإصلاحِ؛ الأدلّةُ في
+   980	// docs/external-review/reports/adr0007-ceremony-wl416-closure/) ──
+   981	
+   982	// NV4/NV5 (WL418-gpt_6_1_sol-01): فهرسٌ غيرُ منسوبٍ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ ⇒ حاجزُ بوابةِ الإرسالِ يوقفُ
+   983	// الأمرَ المُغيِّرَ التاليَ (لا الجردَ النهائيَّ وحدَه)، والنصُّ لا يدّعي «قبلَ أيِّ أمرٍ مُغيِّرٍ»، والفهرسُ باقٍ.
+   984	// المسموحُ بعدَ الظهورِ تحريرُ ما ثبتت ملكيّتُه لهذا التشغيلِ وحدَه (FlushContext وNV_UndefineSpace).
+   985	for (const [id, mode, haltedCc, haltedName] of [
+   986	  ['NV4', 'nv-appear-after-define', '0x00000134', /before the next state-changing command \(s1\.probe:NV_Increment#1\)/],
+   987	  ['NV5', 'nv-appear-after-primary', '0x00000153', /before the next state-changing command \(s2:Create\(service-key,ECDSA-P256\)\)/],
+   988	]) {
+   989	  simPwshTest(`${id}: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (${mode}) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف`, () => {
+   990	    withSim((s) => {
+   991	      const o = fault(s, mode);
+   992	      const r = o.report;
+   993	      assert.equal(r.status, 'FAILED_CLOSED');
+   994	      assert.match(r.failure, /^NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED/);
+   995	      assert.match(r.failure, haltedName, 'the halt names the command it stopped: ' + (r.failure || '').slice(0, 400));
+   996	      assert.doesNotMatch(r.failure, /halted before any state-changing command/, 'must not claim nothing was sent');
+   997	      assert.ok(!r.steps.some((x) => x.commandCode === haltedCc), 'the next state-changing command is not sent');
+   998	      const allowedAfter = new Set(['0x00000165', '0x00000122']); // تحريرُ مواردِ هذا التشغيلِ المثبتةِ وحدَها
+   999	      const mutatingAfter = r.steps
+  1000	        .filter((x) => x.stage === 'cleanup' || x.stage === 'post-run')
+  1001	        .filter((x) => STATE_CHANGING.has(x.commandCode) && !allowedAfter.has(x.commandCode));
+  1002	      assert.deepEqual(mutatingAfter, [], 'only proven-own releases after the halt');
+  1003	      const nvAfter = list(o.nvAfter).map((h) => h.toLowerCase());
+  1004	      assert.ok(nvAfter.includes('0x01807777'), 'the late third-party index must survive untouched');
+  1005	      assert.match(r.facts['nvOwnershipGuard.unresolvedIndices'] || '', /0x01807777/i);
+  1006	    });
+  1007	  });
+  1008	}
+  1009	
+  1010	// L7a (WL418-grok_4_7-01): ملفُّ PID يحملُ رقمًا لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا يُسلَّمُ الرقمُ (كانَ
+  1011	// يُسلَّمُ فيقيسُ stopSim عمليّةً أخرى ويحذفُ المجلّدَ ويتركُ المالكَ حيًّا) — يُعاملُ كمحاولةٍ لم تُسلَّم.
+  1012	simTest('L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى', () => {
+  1013	  const abandoned = [];
+  1014	  let launched = null;
+  1015	  let threw = null;
+  1016	  try {
+  1017	    startSimShared({
+  1018	      prefix: 'xuux-wl418-l7a-',
+  1019	      portBase: 3520,
+  1020	      label: 'WL-418/L7a',
+  1021	      attempts: 1,
+  1022	      readyTries: 2,
+  1023	      readyDelayMs: 50,
+  1024	      probe: () => true,
+  1025	      afterSpawn: ({ pid, pidFile }) => {
+  1026	        launched = pid;
+  1027	        writeFileSync(pidFile, '2147483001');
+  1028	      },
+  1029	      onAbandon: (a) => abandoned.push(a),
+  1030	    });
+  1031	  } catch (e) {
+  1032	    threw = e;
+  1033	  }
+  1034	  assert.ok(threw, 'a pid that does not own the state dir must not be handed over');
+  1035	  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+  1036	  assert.equal(abandoned[0].reason, 'pid-not-owner');
+  1037	  assert.equal(abandoned[0].stopped, true, 'the real (state-dir-bound) simulator is terminated');
+  1038	  assert.equal(discoverSimPids(abandoned[0].dir).length, 0, 'no orphan swtpm');
+  1039	  assert.equal(stateDirExists(abandoned[0].dir), false);
+  1040	  assert.ok(Number.isInteger(launched) && launched > 1);
+  1041	  let alive;
+  1042	  try {
+  1043	    process.kill(launched, 0);
+  1044	    alive = true;
+  1045	  } catch (e) {
+  1046	    alive = e.code !== 'ESRCH';
+  1047	  }
+  1048	  assert.equal(alive, false, 'the launched owner is gone');
+  1049	});
+  1050	
+  1051	// L7b (WL418-grok_4_7-01): stopSim بمقبضٍ رقمُه زائلٌ والمالكُ حيٌّ ⇒ لا يُعلَنُ التوقّفُ قبلَ إنهاءِ المالكِ
+  1052	// المُثبَتِ ملكُه بالمسحِ (كانَ يعيدُ true ويحذفُ المجلّدَ والمالكُ حيٌّ).
+  1053	simTest('L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم', () => {
+  1054	  const s = startSimShared({ prefix: 'xuux-wl418-l7b-', portBase: 3540, label: 'WL-418/L7b', attempts: 1 });
+  1055	  const owners = discoverSimPids(s.dir);
+  1056	  assert.deepEqual(owners, [s.pid], 'startSim hands over the proven owner');
+  1057	  const st = stopSim({ ...s, pid: 2147483000 });
+  1058	  const after = discoverSimPids(s.dir);
+  1059	  if (after.length > 0) stopSim({ ...s, pid: after[0] });
+  1060	  assert.deepEqual(after, [], 'a stop claim requires the state-dir owner to be gone');
+  1061	  assert.equal(st, true);
+  1062	  assert.equal(stateDirExists(s.dir), false);
+  1063	});

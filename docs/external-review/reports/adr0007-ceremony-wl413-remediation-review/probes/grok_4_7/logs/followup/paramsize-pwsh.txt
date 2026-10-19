@@ -1,0 +1,2 @@
+caught System.OverflowException: Arithmetic operation resulted in an overflow.
+pwsh-parse-done

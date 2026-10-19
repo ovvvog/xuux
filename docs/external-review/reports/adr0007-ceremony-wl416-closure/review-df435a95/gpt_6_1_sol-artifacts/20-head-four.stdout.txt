@@ -1,0 +1,123 @@
+TAP version 13
+# (node:29139) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("/tmp/council-wl420-gpt_6_1_sol/port-loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ توقّفًا والاكتشافُ البديلُ يُنهي المحاكي
+ok 1 - L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ توقّفًا والاكتشافُ البديلُ يُنهي المحاكي # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.690824
+  ...
+# Subtest: L2: رميُ probe بعدَ الإطلاقِ يمرُّ عبرَ التنظيفِ المضمونِ فلا يتيمَ
+ok 2 - L2: رميُ probe بعدَ الإطلاقِ يمرُّ عبرَ التنظيفِ المضمونِ فلا يتيمَ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.114317
+  ...
+# Subtest: L3: رميُ onAbandon لا يمنعُ التنظيفَ ولا يُخفي فشلَهُ
+ok 3 - L3: رميُ onAbandon لا يمنعُ التنظيفَ ولا يُخفي فشلَهُ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.082177
+  ...
+# Subtest: L4: المجلّدُ لا يُحذفُ إلّا بعدَ زوالِ العمليّةِ (المراقبُ شاهدُ الترتيبِ)
+ok 4 - L4: المجلّدُ لا يُحذفُ إلّا بعدَ زوالِ العمليّةِ (المراقبُ شاهدُ الترتيبِ) # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.078565
+  ...
+# Subtest: L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا صادقًا ويُحفَظُ مجلّدُ الحالةِ ولا يُقتَلُ شىءٌ زورًا
+ok 5 - L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا صادقًا ويُحفَظُ مجلّدُ الحالةِ ولا يُقتَلُ شىءٌ زورًا # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.069463
+  ...
+# Subtest: L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ لا يُقتلُها والاكتشافُ يُنهي الملكَ الحقيقيّ
+ok 6 - L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ لا يُقتلُها والاكتشافُ يُنهي الملكَ الحقيقيّ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.061397
+  ...
+# Subtest: L6: ثلاثُ إخفاقاتِ جاهزيّةٍ متتاليةٍ تنتهي بلا أيِّ يتيمٍ
+ok 7 - L6: ثلاثُ إخفاقاتِ جاهزيّةٍ متتاليةٍ تنتهي بلا أيِّ يتيمٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.060738
+  ...
+# Subtest: CTX: فقدُ ردِّ التحريرِ وإثباتُ الغيابِ وإعادةُ الاستخدامِ واستهلاكُ الجلسةِ كما قِيسَ
+ok 8 - CTX: فقدُ ردِّ التحريرِ وإثباتُ الغيابِ وإعادةُ الاستخدامِ واستهلاكُ الجلسةِ كما قِيسَ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.083913
+  ...
+# Subtest: CTX2: فقدُ ردِّ التحريرِ داخلَ البروفةِ يُزيلُ السياقَ عبرَ مسارِ المصالحةِ الحقيقيّ
+ok 9 - CTX2: فقدُ ردِّ التحريرِ داخلَ البروفةِ يُزيلُ السياقَ عبرَ مسارِ المصالحةِ الحقيقيّ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.138118
+  ...
+# Subtest: M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا
+ok 10 - M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.151951
+  ...
+# Subtest: NV1: فهرسٌ داخلَ مجالِ المالكِ قبلَ البروفةِ يُوقفُها مسمّىً بلا أيِّ أمرٍ مُغيِّرٍ ولا حذفٍ
+ok 11 - NV1: فهرسٌ داخلَ مجالِ المالكِ قبلَ البروفةِ يُوقفُها مسمّىً بلا أيِّ أمرٍ مُغيِّرٍ ولا حذفٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.095774
+  ...
+# Subtest: NV2: فهرسٌ من طرفٍ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ يُوقفُ البروفةَ قبلَ أيِّ تعريفٍ
+ok 12 - NV2: فهرسٌ من طرفٍ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ يُوقفُ البروفةَ قبلَ أيِّ تعريفٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.079437
+  ...
+# Subtest: R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُبقي الحالةَ غيرَ محسومةٍ — لا توقّفَ ولا حذفَ
+ok 13 - R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُبقي الحالةَ غيرَ محسومةٍ — لا توقّفَ ولا حذفَ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.069794
+  ...
+# Subtest: R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنعُ SIGKILL ويُعيدُ فشلًا صادقًا
+ok 14 - R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنعُ SIGKILL ويُعيدُ فشلًا صادقًا # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.123037
+  ...
+# Subtest: NV3: فهرسٌ يظهرُ بعدَ اجتيازِ الحاجزِ الأولِ يُوقفُ البروفةَ عندَ حاجزِ التعريفِ المتكرّرِ
+ok 15 - NV3: فهرسٌ يظهرُ بعدَ اجتيازِ الحاجزِ الأولِ يُوقفُ البروفةَ عندَ حاجزِ التعريفِ المتكرّرِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.080247
+  ...
+# Subtest: CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd وحدَها — لا process.kill غيرَ صفريٍ
+ok 16 - CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd وحدَها — لا process.kill غيرَ صفريٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.068105
+  ...
+# Subtest: CHANNEL2: SIGTERM وحدها تُنهي المحاكيَ المستجيبَ — لا تصعيدَ ولا process.kill غيرَ صفريٍ
+ok 17 - CHANNEL2: SIGTERM وحدها تُنهي المحاكيَ المستجيبَ — لا تصعيدَ ولا process.kill غيرَ صفريٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.105408
+  ...
+# Subtest: ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ
+ok 18 - ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.174178
+  ...
+# Subtest: NV4: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-define) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف
+ok 19 - NV4: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-define) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف
+  ---
+  duration_ms: 1346.325055
+  ...
+# Subtest: NV5: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-primary) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف
+ok 20 - NV5: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-primary) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف
+  ---
+  duration_ms: 1117.257535
+  ...
+# Subtest: L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+ok 21 - L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+  ---
+  duration_ms: 37.202487
+  ...
+# Subtest: L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+ok 22 - L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+  ---
+  duration_ms: 42.370828
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 18
+# todo 0
+# duration_ms 2938.81112

@@ -1,0 +1,18 @@
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: proven owner must be terminated
+
+false !== true
+
+    at new:nonowner (file:///tmp/council-wl422-grok_4_7/probes/lifecycle.mjs:255:14)
+    at file:///tmp/council-wl422-grok_4_7/probes/lifecycle.mjs:273:29 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: 'strictEqual'
+}
+
+Node.js v20.20.2

@@ -1,0 +1,45 @@
+{
+  "which": "old",
+  "mode": "zombie-self",
+  "helperPath": "/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs",
+  "port": 24130,
+  "head": "339f59346c44a31e3db5ebc721b8dc75d19f2d3f",
+  "before": {
+    "ownerPid": 6276,
+    "state": "Z",
+    "cmdline": {
+      "bytes": 0,
+      "text": ""
+    },
+    "discover": [],
+    "scan": {
+      "matches": [],
+      "zombies": 1,
+      "unresolved": 0,
+      "zombiePids": [
+        6276
+      ]
+    }
+  },
+  "elapsedMs": 0,
+  "deliveredPid": 6276,
+  "stopSimReturned": false,
+  "stateDirExists": true,
+  "after": {
+    "state": "Z",
+    "esrch": false,
+    "cmdline": {
+      "bytes": 0,
+      "text": ""
+    },
+    "discover": [],
+    "scan": {
+      "matches": [],
+      "zombies": 1,
+      "unresolved": 0,
+      "zombiePids": [
+        6276
+      ]
+    }
+  }
+}

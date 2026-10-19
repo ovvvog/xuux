@@ -1,0 +1,2 @@
+{"pid":29061,"argv":["swtpm","socket","--tpm2","--tpmstate","dir=/tmp/council-wl420-gpt_6_1_sol/xuux-wl418-l7a-NK3EMp","--server","type=tcp,port=7634,bindaddr=127.0.0.1","--ctrl","type=tcp,port=7635,bindaddr=127.0.0.1","--flags","not-need-init,startup-clear","--pid","file=/tmp/council-wl420-gpt_6_1_sol/xuux-wl418-l7a-NK3EMp/swtpm.pid","--daemon"]}
+own_state_dir_owners=1

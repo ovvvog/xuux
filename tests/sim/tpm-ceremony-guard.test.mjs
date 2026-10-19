@@ -51,7 +51,8 @@ test('static: النقلُ الوحيدُ swtpm على loopback، والنواة
   const transports = [...cs.matchAll(/class\s+(\w+)\s*:\s*ICeremonyTransport/g)].map((m) => m[1]);
   assert.deepEqual(transports, ['SwtpmLoopbackTransport']);
   assert.match(cs, /host != "127\.0\.0\.1" && host != "::1"\) throw new CeremonyFailedException\("SIMULATOR_TRANSPORT_LOOPBACK_ONLY"/);
-  assert.match(cs, /AssertSimulatorIdentity\(\);\s*\n\s*if \(stages == "S1"/);
+  // الهويّةُ الكاملةُ ثمّ خطُّ الأساسِ ثمّ حاجزُ ملكيّةِ فهارسِ NV ثمّ المراحلُ — لا أمرٍ مُغيّرٍ قبلَ الهويّةِ والجردِ (WL-413؛ WL-416).
+  assert.match(cs, /AssertSimulatorIdentity\(\);\s*\n\s*SnapshotBaseline\(\);\s*\n\s*AssertNvRangeOwnership\(\);\s*\n\s*if \(stages == "S1"/);
   for (const re of [/\$"/, /\?\./, /\bnameof\b/, /out var\b/, /\)\s*=>/]) assert.equal(re.test(cs), false, `C# 5 violation ${re}`);
   // المُسلسِلُ: بصمةُ الأمرِ لا بايتاتُه.
   const toJson = cs.slice(cs.indexOf('public string ToJson()'));
@@ -97,17 +98,26 @@ pwshTest('pwsh: شريحةٌ غيرُ المحاكي (IFX) ⇒ FAILED_CLOSED ب�
   assert.deepEqual(res.report.cleanupLeftovers, []);
 });
 
-pwshTest('pwsh: كلُّ أمرٍ تبنيه البروفةُ يرفضُه حارسُ أداةِ المضيف (TpmGuard) ولا يبلغُ النقل', () => {
+pwshTest('pwsh: حارسُ أداةِ المضيفِ يرفضُ أوامرَ التغييرِ والسياساتِ ويسمحُ باستعلامَيِ الجردِ فقط', () => {
   const r = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', harness, '-Mode', 'host-guard'], { encoding: 'utf8', maxBuffer: 16 << 20 });
   assert.equal(r.status, 0, r.stderr);
   const res = JSON.parse(r.stdout);
-  assert.ok(res.cases.length >= 15);
+  assert.ok(res.cases.length >= 17);
+  // الاستثناءانِ المقصودانِ (WL-413/SOL-06): استعلامُ القدراتِ وقراءةُ المنطقةِ العامّةِ — قرائيّانِ مسموحانِ في
+  // حارسِ أداةِ الجردِ؛ وكلُّ أوامرِ التغييرِ والسياساتِ والتوقيعِ تُرفضُ ولا تبلغُ النقلَ.
   for (const c of res.cases) {
-    assert.equal(c.rejected, true, c.name);
-    assert.match(c.message, /^XUUX_TPM_COMMAND_NOT_ALLOWED/, c.name);
+    if (c.name === 'GetCapability' || c.name === 'NV_ReadPublic') {
+      assert.equal(c.rejected, false, c.name);
+    } else {
+      assert.equal(c.rejected, true, c.name);
+      assert.match(c.message, /^XUUX_TPM_COMMAND_NOT_ALLOWED/, c.name);
+    }
   }
-  assert.deepEqual(res.reached, []);
-  assert.equal(res.submittedCount, 0);
+  assert.equal(res.reached.length, 2);
+  assert.ok(res.reached.every((h) => h.startsWith('8001')));
+  assert.ok(res.reached.some((h) => h.includes('0000017a')));
+  assert.ok(res.reached.some((h) => h.includes('00000169')));
+  assert.equal(res.submittedCount, 2);
   const ccs = new Set(res.cases.map((c) => c.commandCode));
   for (const cc of ['0x0000012a', '0x00000134', '0x00000122', '0x00000160', '0x00000131']) assert.ok(ccs.has(cc), cc);
 });

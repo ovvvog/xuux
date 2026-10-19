@@ -1,0 +1,2 @@
+{"tree":"/tmp/wt-72e79272-gpt_6_1_sol","mode":"channel-failure","owner":3790,"delivered":3790,"beforeOwners":[3790],"returned":false,"ownerDead":true,"ownerState":"ESRCH","dirKept":true,"decoyDead":null,"elapsedMs":24.468630000000005,"signals":[{"pid":3790,"signal":15,"injected":true},{"pid":3790,"signal":15,"injected":false}],"nonzeroKillCalls":0,"failedOnce":true}
+{"cleanupOwners":[],"dir":"/tmp/council-wl422-gpt_6_1_sol/tmp/review-channel-failure-KvFsXq"}

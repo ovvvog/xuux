@@ -1,0 +1,49 @@
+---- auth-cross tpm2 ----
+---- end auth-cross ----
+---- policy-nonce16 tpm2 ----
+---- end policy-nonce16 ----
+---- policy-attrs08 tpm2 ----
+---- end policy-attrs08 ----
+---- ps-timeout8 tpm2 ----
+---- end ps-timeout8 ----
+---- ps-hier02 tpm2 ----
+---- end ps-hier02 ----
+---- define-loss tpm2 ----
+- 0x1B09750
+---- end define-loss ----
+---- plant-then-drop tpm2 ----
+- 0x1805943
+---- end plant-then-drop ----
+---- load-loss tpm2 ----
+- 0x80000001
+---- end load-loss ----
+---- session-loss tpm2 ----
+- 0x3000000
+---- end session-loss ----
+---- session-alias tpm2 ----
+- 0x3000000
+- 0x3000001
+---- end session-alias ----
+---- load-alias-primary tpm2 ----
+- 0x80000001
+---- end load-alias-primary ----
+---- undefine-loss tpm2 ----
+---- end undefine-loss ----
+---- cp-name-flip tpm2 ----
+- 0x80000000
+---- end cp-name-flip ----
+---- define-loss tpm2 ----
+- 0x18D8DEB
+- 0x80000000
+---- end define-loss ----
+---- log tpm2 ----
+---- end log ----
+---- define-loss tpm2 ----
+- 0x1A34F4D
+---- end define-loss ----
+---- define-loss tpm2 ----
+- 0x1A34F4D
+- 0x1B67116
+---- end define-loss ----
+---- undefine-drop-before tpm2 ----
+---- end undefine-drop-before ----

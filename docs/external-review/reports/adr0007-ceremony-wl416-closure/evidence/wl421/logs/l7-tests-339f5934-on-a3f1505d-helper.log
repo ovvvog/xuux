@@ -1,0 +1,67 @@
+# test file SHA=339f5934 tests/sim/tpm-ceremony-wl416.test.mjs; helper overridden -> /tmp/wt-a3f1505d/tests/helpers/ceremony-swtpm.mjs (a3f1505d)
+# cmd: XUUX_OLD_HELPER=/tmp/wt-a3f1505d/tests/helpers/ceremony-swtpm.mjs XUUX_TPM_SIM=1 node --import <register old-helper-loader> --test --test-name-pattern=^L7 tests/sim/tpm-ceremony-wl416.test.mjs
+# date=2026-10-19T05:33:53Z
+  duration_ms: 0.062009
+  ...
+# Subtest: L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+not ok 21 - L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+  ---
+  duration_ms: 11.323475
+  location: '/tmp/wt-339f5934/tests/sim/tpm-ceremony-wl416.test.mjs:42:31'
+  failureType: 'testCodeFailure'
+  error: 'a pid that does not own the state dir must not be handed over'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: ~
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/wt-339f5934/tests/sim/tpm-ceremony-wl416.test.mjs:1034:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+not ok 22 - L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+  ---
+  duration_ms: 42.750979
+  location: '/tmp/wt-339f5934/tests/sim/tpm-ceremony-wl416.test.mjs:42:31'
+  failureType: 'testCodeFailure'
+  error: |-
+    a stop claim requires the state-dir owner to be gone
+    + actual - expected
+    + [
+    +   10417
+    + ]
+    - []
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+    0: 10417
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/wt-339f5934/tests/sim/tpm-ceremony-wl416.test.mjs:1060:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+1..22
+# tests 22
+# suites 0
+# pass 0
+# fail 2
+# cancelled 0
+# skipped 20
+# todo 0
+# duration_ms 479.421611
+# exit=1
+# orphan scan after run (prefix /tmp/xuux-wl418-l7):
+{"pid":10414,"argv":["swtpm","socket","--tpm2","--tpmstate","dir=/tmp/xuux-wl418-l7a-BvrNfc","--server","type=tcp,port=3556,bindaddr=127.0.0.1","--ctrl","type=tcp,port=3557,bindaddr=127.0.0.1","--flags","not-need-init,startup-clear","--pid","file=/tmp/xuux-wl418-l7a-BvrNfc/swtpm.pid","--daemon"]}
+orphan_swtpm_owners=1

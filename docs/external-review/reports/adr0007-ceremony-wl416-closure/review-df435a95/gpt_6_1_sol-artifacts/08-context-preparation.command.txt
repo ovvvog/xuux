@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=bash /tmp/council-wl420-gpt_6_1_sol/prepare-context.sh 
+start=2026-10-19T04:07:20Z
+end=2026-10-19T04:07:20Z
+exit=0

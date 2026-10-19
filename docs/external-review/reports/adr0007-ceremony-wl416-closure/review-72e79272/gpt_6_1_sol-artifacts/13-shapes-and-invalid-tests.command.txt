@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:36:20.354Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'bash' '-c' 'nl -ba tests/sim/tpm-ceremony-wl414-fup.test.mjs | sed -n "1,210p"; nl -ba tests/sim/tpm-ceremony-wl413-r3.test.mjs | sed -n "260,335p"; nl -ba sim/tpm-ceremony/TpmCeremonyCore.cs | sed -n "1688,1697p;1789,1813p"; rg -n "R3-A-01" docs/roadmap/06-debt-register.md | cut -c 1-1200; rg -n "EXT-6" docs/roadmap/06-debt-register.md | tail -2 | cut -c 1-1200'

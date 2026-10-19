@@ -1,0 +1,412 @@
+     1	// @ts-nocheck
+     2	// tests/sim/tpm-ceremony-wl416.test.mjs
+     3	//
+     4	// WL-416 — إغلاقُ ثغراتِ متابعةِ المراجعةِ المستقلّةِ على e23bd431 (قرارا المالكِ + FUP-SOL-03 + سياقُ الردّ).
+     5	//   (أ) دورةُ حياةِ startSim: غيابُ ملفِ PID ليسَ برهانَ توقّفٍ؛ استثناءُ probe/onAbandon لا يتجاوزُ التنظيفَ؛
+     6	//        الحذفَ بعدَ إثباتِ الزوالِ حدَّه؛ الهويّةُ مربوطةٌ بمسارِ الحالةِ من سطرِ الأوامرِ؛ لا قتلَ لعمليّةٍ
+     7	//        لا تُثبَتُ ملكيّتُها؛ والتوقّفُ لا يُعلَنُ بلا قرينةٍ.
+     8	//   (ب) دورةُ حياةِ سياقِ الردّ (ResponseContext): إزالةٌ مسمّاةٌ عندَ إثباتِ انتهاءِ العمرِ (تحريرٌ مؤكَّدٌ،
+     9	//        غيابٌ مُثبَتٌ بجردٍ قرائيّ، استهلاكُ جلسةِ السياسةِ)؛ لا وراثةَ لمقابضَ أُعيدَ استخدامُها؛ والسياقُ
+    10	//        المفقودُ لا يتحوّلُ قبولًا افتراضيًّا (رفضٌ مسمّى: RESPONSE_CREATION_PARENT_UNKNOWN للفحصِ وRESPONSE_POLICY_CONTEXT_UNKNOWN لفحوصِ الجلساتِ).
+    11	//   (ج) قرارُ المالكِ (more=0): الإبقاءُ على السلوكِ الحاليّ مع توثيقِ حدِّهِ — الردُّ الصحيحُ البنيةِ الذي
+    12	//        يُعلنُ more=0 نهايةُ جردٍ بحسبِ العقدِ لا برهانَ خلوٍّ: فهرسٌ حقيقيٌّ يُحجبُ من الصفحاتِ والبروفةُ
+    13	//        تكتملُ، والجردُ المباشرُ يُثبتُ وجودَهُ بعدَها.
+    14	//   (د) حاجزُ إرهاقِ فهارسِ NV (قرارُ المالكِ المحافِظ): فهرسٌ واحدٌ داخلَ مجالِ المالكِ لا يمكنُ إثباتُ
+    15	//        أنّ هذه البروفةَ أنشأتهُ ⇒ إيقافٌ مسمّى قبلَ أيِّ أمرٍ مُغيِّرٍ، بلا حذفٍ، سواءٌ وُجدَ قبلَ خطِّ
+    16	//        الأساسِ أو ظهرَ بعدَهُ.
+    17	// كلُّ اختبارٍ يشغّلُ محاكيَه الخاصَّ. لا TBS، ولا /dev/tpm*، ولا عتاد.
+    18	
+    19	import { test, afterEach } from 'node:test';
+    20	import assert from 'node:assert/strict';
+    21	import { join } from 'node:path';
+    22	import { fileURLToPath } from 'node:url';
+    23	import { spawn as spawnChild, spawnSync } from 'node:child_process';
+    24	import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+    25	import { tmpdir } from 'node:os';
+    26	import {
+    27	  startSim as startSimShared,
+    28	  stopSim,
+    29	  killSim,
+    30	  terminateAttempt,
+    31	  discoverSimPids,
+    32	  stateDirExists,
+    33	} from '../helpers/ceremony-swtpm.mjs';
+    34	import { isSimEnabled } from '../../sim/tpm/tcti_guard.mjs';
+    35	
+    36	const root = fileURLToPath(new URL('../../', import.meta.url));
+    37	const harness = join(root, 'tests/helpers/tpm-ceremony-harness.ps1');
+    38	
+    39	const pwshAvailable =
+    40	  spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' }).status === 0;
+    41	const sim = isSimEnabled();
+    42	const simTest = (name, fn) => test(name, { skip: !sim ? 'swtpm/XUUX_TPM_SIM unavailable' : false }, fn);
+    43	const simPwshTest = (name, fn) =>
+    44	  test(name, { skip: !sim ? 'swtpm/XUUX_TPM_SIM unavailable' : (!pwshAvailable ? 'pwsh unavailable' : false) }, fn);
+    45	
+    46	function startSim() {
+    47	  return startSimShared({ prefix: 'xuux-wl416-', portBase: 3300, label: 'WL-416' });
+    48	}
+    49	
+    50	function harnessRun(s, args) {
+    51	  const r = spawnSync(
+    52	    'pwsh',
+    53	    ['-NoProfile', '-NonInteractive', '-File', harness, '-SimPort', String(s.port), ...args],
+    54	    { encoding: 'utf8', maxBuffer: 64 << 20 },
+    55	  );
+    56	  assert.equal(r.status, 0, r.stderr || r.stdout);
+    57	  return JSON.parse(r.stdout);
+    58	}
+    59	
+    60	const fault = (s, mode) => harnessRun(s, ['-Mode', 'fault', '-Fault', mode]);
+    61	
+    62	// كلُّ اختبارٍ يملكُ محاكيَه وينهيهِ في finally — وفشلُ الإيقافِ يُفشلُ الاختبارَ بعدَ نجاحِ الجسمِ (لا يُبتلَعُ).
+    63	function withSim(fn) {
+    64	  const s = startSim();
+    65	  let ok = false;
+    66	  try {
+    67	    fn(s);
+    68	    ok = true;
+    69	  } finally {
+    70	    const st = stopSim(s);
+    71	    if (ok) assert.equal(st, true, 'stopSim must prove termination and remove the state dir');
+    72	  }
+    73	}
+    74	
+    75	// WL-421: كلُّ ابنٍ غيرِ متزامنٍ يُطلقُه اختبارٌ يُسجَّلُ، وبعدَ كلِّ اختبارٍ يُلقّى ما خرجَ منها (زومبي أو زائل)
+    76	// بدورةِ حلقةِ أحداثٍ حقيقيّة — الاختباراتُ المتزامنةُ لا تُديرُ الحلقةَ فيبقى الابنُ الخارجُ زومبي في عمليّةِ
+    77	// الاختبارِ، فيحجبُ (بحقٍّ) إثباتَ توقّفٍ لاحقٍ: stopSim لا يعلنُ التوقّفَ مع زومبي غيرِ مُلقّاة.
+    78	const trackedChildren = new Set();
+    79	function spawn(...args) {
+    80	  const c = spawnChild(...args);
+    81	  trackedChildren.add(c);
+    82	  return c;
+    83	}
+    84	function childExitedOrZombie(pid) {
+    85	  try {
+    86	    const st = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    87	    return st.slice(st.lastIndexOf(')') + 2).split(' ')[0] === 'Z';
+    88	  } catch {
+    89	    return true;
+    90	  }
+    91	}
+    92	afterEach(async () => {
+    93	  for (const c of trackedChildren) {
+    94	    if (c.exitCode !== null || c.signalCode !== null) {
+    95	      trackedChildren.delete(c);
+    96	      continue;
+    97	    }
+    98	    if (!c.pid || !childExitedOrZombie(c.pid)) continue; // ما زالَ حيًّا: لا يُنتظرُ ولا يُقتَل
+    99	    await Promise.race([
+   100	      new Promise((r) => c.once('exit', r)),
+   101	      new Promise((r) => setTimeout(r, 2000).unref()),
+   102	    ]);
+   103	    if (c.exitCode !== null || c.signalCode !== null) trackedChildren.delete(c);
+   104	  }
+   105	});
+   106	
+   107	// ESRCH وحدها غيابٌ مؤكَّدٌ لرقمِ مقبضٍ معروفٍ: أيُّ خطأٍ آخر (EPERM مثلًا) حالةٌ مجهولةٌ لا دليلَ موتٍ.
+   108	// والزومبي (Z) منتهيةٌ فعليًا وإن بقي مدخلُها في /proc حتى يُلقَّ — «ميّتةٌ» لا «حيّةٌ».
+   109	function pidProvenDead(pid) {
+   110	  try {
+   111	    process.kill(pid, 0);
+   112	    return false; // العمليّةُ موجودةٌ: ليس دليلَ موتٍ — ESRCH وحدها الدليلُ المقبولُ (حسمُ المراجعةِ 3)
+   113	  } catch (e) {
+   114	    return e && e.code === 'ESRCH';
+   115	  }
+   116	}
+   117	const list = (x) => (x === null || x === undefined ? [] : Array.isArray(x) ? x : [x]);
+   118	
+   119	// أوامرُ البروفةِ المُغيِّرةُ للحالةِ (مثلُ wl413-r3): لا يجوزُ ظهورُها قبلَ الفشلِ المسمّى.
+   120	const STATE_CHANGING = new Set([
+   121	  '0x0000012a', '0x00000134', '0x00000122', '0x00000131', '0x00000153',
+   122	  '0x00000157', '0x00000176', '0x00000160', '0x0000016c', '0x00000165',
+   123	]);
+   124	
+   125	// عمليّةُ نومٍ بريئةٌ (node) تحملُ رقمًا في ملفِ PID: يجبُ ألّا تُقتَلَ عندَ التحقّقِ من هويّةِ المحاكي.
+   126	function spawnSleeper() {
+   127	  const p = spawn(process.execPath, ['-e', 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60000);'], {
+   128	    stdio: 'ignore',
+   129	    detached: true,
+   130	  });
+   131	  p.unref();
+   132	  return p.pid;
+   133	}
+   134	
+   135	function pgrepSwtpmCount() {
+   136	  const r = spawnSync('pgrep', ['-c', '--', 'swtpm'], { encoding: 'utf8' });
+   137	  return Number(String(r.stdout || '').trim()) || 0;
+   138	}
+   139	
+   140	// ── (أ) دورةُ حياةِ startSim ──
+   141	
+   142	// L1: غيابُ ملفِ PID ليسَ برهانَ توقّفٍ — الاكتشافُ البديلُ يربطُ العمليّةَ بمسارِ الحالةِ ويُنهيها.
+   143	simTest('L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ توقّفًا والاكتشافُ البديلُ يُنهي المحاكي', () => {
+   144	  const abandoned = [];
+   145	  let launchedPid = null;
+   146	  let threw = null;
+   147	  try {
+   148	    startSimShared({
+   149	      prefix: 'xuux-wl416-l1-',
+   150	      portBase: 3340,
+   151	      label: 'WL-416/L1',
+   152	      attempts: 1,
+   153	      probe: () => false,
+   154	      afterSpawn: ({ pid, pidFile }) => {
+   155	        launchedPid = pid; // المقبضُ يُقرأُ قبلَ الحذفِ: هويةٌ محفوظةٌ للتحققِ المستقلِّ
+   350	        portBase: 3460 + 20 * i,
+   351	        label: 'WL-416/L6',
+   352	        attempts: 1,
+   353	        probe: () => false,
+   354	        onAbandon: (a) => dirs.push(a.dir),
+   355	      });
+   356	    } catch (e) {
+   357	      threw = e;
+   358	    }
+   359	    assert.ok(threw, 'each failed start must reject');
+   360	  }
+   361	  for (const d of dirs) assert.equal(discoverSimPids(d).length, 0, 'no orphan for ' + d);
+   362	  const after = pgrepSwtpmCount();
+   363	  assert.ok(after <= before, `swtpm count must not grow (before=${before} after=${after})`);
+   364	});
+   365	
+   366	// ── (ب) دورةُ حياةِ سياقِ الردّ (ResponseContext) — قياسٌ مباشرٌ على swtpm ──
+   367	
+   368	simPwshTest('CTX: فقدُ ردِّ التحريرِ وإثباتُ الغيابِ وإعادةُ الاستخدامِ واستهلاكُ الجلسةِ كما قِيسَ', () => {
+   369	  withSim((s) => {
+   370	    const o = harnessRun(s, ['-Mode', 'ctx-lifetime']);
+   371	    const cases = list(o.cases);
+   372	    assert.ok(cases.includes('probe: done'), JSON.stringify(cases));
+   373	    const line = (prefix) => {
+   374	      const found = cases.filter((c) => c.startsWith(prefix));
+   375	      assert.equal(found.length, 1, 'exactly one line for ' + prefix + ': ' + JSON.stringify(cases));
+   376	      return found[0];
+   377	    };
+   378	    // الحالةُ 1: فقدُ ردِّ التحريرِ ⇒ غيابٌ مُثبَتٌ بجردٍ قرائيّ، ثمّ EndOfLife يزيلُ السياقَ.
+   379	    assert.match(line('record:'), /known=True hier=0x40000001 nameLen=34/);
+   380	    assert.match(line('flush-loss:'), /presentAfterLoss=False/);
+   381	    assert.match(line('endoflife:'), /contextRemoved=True/);
+   382	    // إعادةُ استخدامٍ غيرُ مسجَّلةٍ: لا وراثةَ، ورفضٌ مسمّى لا ادّعاءُ تلفٍ.
+   383	    assert.match(line('reuse-unrecorded: handle='), /inheritedContext=False/);
+   384	    assert.match(
+   385	      line('reuse-unrecorded: createCheck='),
+   386	      /createCheck=REJECT RESPONSE_CREATION_PARENT_UNKNOWN/,
+   387	      'unrecorded reuse must fail with the named missing-context failure (RESPONSE_CREATION_PARENT_UNKNOWN), not default-accept',
+   388	    );
+   389	    // الحالةُ 2: إعادةُ الاستخدامِ معَ التسجيلِ ⇒ مقبولٌ (الاسمُ يُبنى من الردِّ الجديدِ لا يُورَّثُ).
+   390	    assert.match(line('reuse-recorded: known='), /known=True/);
+   391	    assert.match(line('reuse-recorded: createCheck='), /createCheck=ACCEPT/);
+   392	    // الحالةُ 3: المقبضُ الباقي ⇒ السياقُ محفوظٌ (لا EndOfLife بلا قرينةِ زوالٍ).
+   393	    assert.match(line('still-present:'), /flushFailed=True present=True contextKept=True/);
+   394	    // الحالةُ 4: جلسةُ السياسةِ تُستهلَكُ بالأمرِ المُفوِّزِ الناجحِ (قياسٌ مباشرٌ فوريّ) ثمّ يزولُ سياقُها.
+   395	    assert.match(line('policy-session:'), /known=True type=1/);
+   396	    assert.match(line('consumed:'), /sessionGoneImmediately=True contextRemoved=True/);
+   397	  });
+   398	});
+   399	
+   400	// ── (ج) قرارُ المالكِ (more=0): السلوكُ باقٍ وحدُّهُ موثَّقٌ بالقياسِ ──
+   401	
+   402	// CTX2: شاهدُ المسارِ الحقيقيّ لا القياسَ اليدويّ فحسب: فقدُ ردِّ FlushContext داخلَ دورةِ البروفةِ نفسِها
+   403	// يُفعّلُ المصالحةَ القرائيّةَ التي تُثبِتُ الغيابَ فتُزيلُ السياقَ من المسارِ الإنتاجيّ (ReconcileOne→EndOfLife)،
+   404	// ورفضُ التحريرِ (المقبضُ باقٍ) لا يُزيلُ شيئًا — والفرقُ بينَ الحالتَينِ مُثبَتٌ في حقائقِ التقرير.
+   405	simPwshTest('CTX2: فقدُ ردِّ التحريرِ داخلَ البروفةِ يُزيلُ السياقَ عبرَ مسارِ المصالحةِ الحقيقيّ', () => {
+   406	  withSim((s) => {
+   407	    const o = fault(s, 'flush-response-loss');
+   408	    const r = o.report;
+   409	    // المصالحةُ جرتْ وأثبتَتِ الغيابَ فمُسِحَ السياقُ من المسارِ الحقيقيِّ — والشاهدُ **حالةُ السياقِ نفسُهُ**
+   410	    // (contextGone تُشتَقُّ من الخرائطِ بعدَ الاستدعاءِ: حذفُ EndOfLife مع إبقاءِ الحقيقةِ يُسقطُ الشاهدَ — جولةُ 4):
+   411	    const eol = String(r.facts['ctx.endOfLife.flush'] || '');
+   412	    assert.match(
+   413	      eol,
+   414	      /verified-absent 0x[0-9a-f]+ contextGone=True/i,
+   415	      'the real path must prove context end-of-life (state, not adjacency) after flush response loss: ' + JSON.stringify(r.facts['ctx.endOfLife.flush']),
+   416	    );
+   417	    const rec = list(r.reconciliation);
+   418	    assert.ok(
+   419	      rec.some((x) => /verified absent \(release took effect\)/.test(String(x))),
+   420	      'reconciliation must record the read-only proof of absence: ' + JSON.stringify(rec),
+   421	    );
+   422	    // وبفقدِ الردّ دون تنفيذٍ (المقبضُ باقٍ بحقٍّ): لا إزالةَ ولا شاهدَ — والفرقُ بينَ الحالتَينِ مُقاسٌ
+   423	    // بجردٍ قرائيّ لا مُدّعى: العَرَضُ الخارجيُّ واحدٌ والحقيقةُ مُتمايزةٌ بالقراءةِ وحدَها:
+   424	    const o2 = fault(s, 'flush-response-loss-noexec');
+   425	    const r2 = o2.report;
+   426	    assert.doesNotMatch(
+   427	      String(r2.facts['ctx.endOfLife.flush'] || ''),
+   428	      /verified-absent/,
+   429	      'a flush whose response was lost without execution (handle still present) must not claim context end-of-life',
+   430	    );
+   431	    // والشاهدُ الموجبُ للحفظِ: حالةُ السياقِ نفسُهُ (contextKnown=True من الخرائطِ — جولةُ 4):
+   432	    assert.match(
+   433	      String(r2.facts['ctx.endOfLife.flushKept'] || ''),
+   434	      /present contextKnown=True/i,
+   435	      'the still-present handle must provably keep its context (state, not adjacency)',
+   436	    );
+   437	    assert.ok(
+   438	      list(r2.reconciliation).some((x) => /still present; release outcome unknown/.test(String(x))),
+   439	      'reconciliation must honestly record the unknown release outcome: ' + JSON.stringify(list(r2.reconciliation)),
+   440	    );
+   441	  });
+   442	});
+   443	
+   444	// SC1 (WL-421 — المسارُ المباشرُ SessionConsumed): بروفةٌ حقيقيّةٌ كاملةٌ على swtpm، والناقلُ شاهدٌ قرائيٌّ فقط
+   445	// (لا يغيّرُ بايتًا): يجردُ مقابضَ جلساتِ السياسةِ المحمّلةِ قبلَ NV_Increment بجلسةِ السياسةِ وبعدَه. الخاصيّةُ
+   446	// المقيسةُ: المحاكي نفسُه يُثبتُ أنّ الجلسةَ كانت محمّلةً ثمّ زالت باستهلاكِها، والنواةُ في المسارِ الإنتاجيِّ
+   447	// (StageS2Validation → SessionConsumed) أزالت سياقَها — contextGone تُشتقُّ من الخرائطِ (Knows) بعدَ الإزالةِ لا من
+   448	// تجاورِ نصٍّ، فحذفُ _ctx.EndOfLife من SessionConsumed يُسقطُ هذا الاختبار (قيسَ بالطفرةِ في WL-421). حدُّه: يقيسُ
+   449	// الإزالةَ لا الرفضَ — رفضُ ردِّ سياسةٍ لاحقٍ على المقبضِ المستهلكِ (RESPONSE_POLICY_CONTEXT_UNKNOWN عبرَ
+   450	// TrySessionType) مستنتَجٌ من الشيفرةِ وغيرُ مقيسٍ هنا.
+   451	simPwshTest('SC1: SessionConsumed في المسارِ الحقيقيِّ — المحاكي يُثبتُ الاستهلاكَ والسياقُ يُزالُ', () => {
+   452	  withSim((s) => {
+   453	    const o = fault(s, 'consumed-session-witness');
+   454	    const r = o.report;
+   455	    assert.equal(r.status, 'COMPLETE', 'a witness-only transport must not change the outcome: ' + JSON.stringify(r.failure || null));
+   456	    assert.equal(Number(o.fault.changes), 1, 'the witness engaged exactly once (the policy-session NV_Increment)');
+   457	    const h = String(o.fault.witnessSession);
+   458	    assert.match(h, /^0x03[0-9a-f]{6}$/i, 'the consumed handle is a policy session');
+   459	    assert.equal(o.fault.witnessPresentBefore, true, 'the policy session was loaded on the TPM before the increment');
+   460	    assert.equal(o.fault.witnessPresentAfter, false, 'the TPM consumed the policy session (absent after the increment)');
+   461	    const fact = String(r.facts['ctx.endOfLife.sessionConsumed'] || '');
+   462	    assert.equal(
+   463	      fact.toLowerCase(),
+   464	      ('session-consumed ' + h + ' contextGone=True').toLowerCase(),
+   465	      'the production path must remove the consumed session context (state-derived): ' + JSON.stringify(fact),
+   466	    );
+   467	  });
+   468	});
+   469	
+   470	simPwshTest('M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا', () => {
+   471	  withSim((s) => {
+   472	    const o = fault(s, 'inventory-more0-hide');
+   473	    const r = o.report;
+   474	    // البروفةُ تكتملُ: الجردُ المحجوبُ لا يُفسدُ العقدَ (نهايةُ الجردِ more=0 عقدُ ردٍّ لا برهانَ خلوٍّ).
+   475	    assert.equal(r.status, 'COMPLETE', r.failure || JSON.stringify(r).slice(0, 400));
+     1	﻿#Requires -Version 5.1
+     2	# tests/helpers/tpm-ceremony-harness.ps1
+     3	#
+     4	# حزامُ اختبارٍ (WL-412؛ WL-413) لنواةِ البروفة sim/tpm-ceremony/TpmCeremonyCore.cs:
+     5	#   -Mode inject-blocked  : البروفةُ على swtpm عبرَ BlockingTransport (‏-BlockCc/-Nth، و-BlockAll للحجبِ الدائم)
+     6	#                           ⇒ تقريرٌ + ما مُرِّر.
+     7	#   -Mode foreign-identity: البروفةُ على نقلٍ يدّعي مصنّعاً غيرَ المحاكي ⇒ يجبُ ألّا يُرسَلَ إلا استعلامُ الهويّة.
+     8	#   -Mode fault          : مسابرُ WL-413 (‏-Fault): تشويهُ ردودٍ، فقدُ ردِّ تعريفٍ بعدَ/قبلَ التنفيذ، رفضُ تحريرٍ،
+     9	#                          رمزٌ عامٌّ مكانَ رفضٍ سلبيٍّ، حجبُ حذفٍ دائم، وهوياتُ محاكٍ محرَّفة — مع جردِ
+    10	#                          المواردِ قبلَ التشغيلِ وبعدَهُ (فهارسُ NV والجلساتُ) لإثباتِ البقايا على المحاكي.
+    11	#   -Mode policysigned-shapes: (WL-414 FUP-SOL-01/05) PolicySigned حقيقيٌّ على swtpm لكلِّ (سياسة/تجربة × expiration
+    12	#                          0/3600/-3600) وحكمُ ResponseSchema.Check على الردِّ غيرِ المشوَّه — حالاتٌ إيجابيّة.
+    13	#   -Mode host-guard     : أوامرُ المراسمِ بالمنشئِ نفسِه تُعرَضُ على حارسِ أداةِ المضيف (TpmGuard) عبرَ
+    14	#                           RecordingTransport ⇒ أوامرُ التغييرِ تُرفَضُ، واستعلاما الجرد يبلغان النقل.
+    15	# يُستدعى من tests/sim/tpm-ceremony-*.test.mjs فقط، بعدَ assertSimulatorTcti في جهةِ Node.
+    16	
+    17	[CmdletBinding()]
+    18	param(
+    19	  [Parameter(Mandatory = $true)][ValidateSet('inject-blocked', 'foreign-identity', 'fault', 'host-guard', 'policysigned-shapes', 'ctx-lifetime')][string]$Mode,
+    20	  [ValidateSet('127.0.0.1', '::1')][string]$SimHost = '127.0.0.1',
+    21	  [int]$SimPort = 2321,
+    22	  [string]$BlockCc,
+    23	  [int]$Nth = 1,
+    24	  [switch]$BlockAll,
+    25	  [string]$Fault,
+    26	  [string]$Stages = 'ALL'
+    27	)
+    28	Set-StrictMode -Version 2.0
+    29	$ErrorActionPreference = 'Stop'
+    30	
+    31	$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+    32	$core = Join-Path $root 'sim/tpm-ceremony/TpmCeremonyCore.cs'
+    33	$helper = Join-Path $PSScriptRoot 'TpmCeremonyFaultTransport.cs'
+    34	
+    35	function Get-HandleList {
+    36	  param([Xuux.TpmCeremony.ICeremonyTransport]$Transport, [uint32]$Start)
+    37	  $p = [Xuux.TpmCeremony.Resp]::Parse($Transport.Transmit([Xuux.TpmCeremony.Cmd]::GetCapability(1, $Start, 64)), 0, 0x8001, 0, [bool[]]@())
+    38	  $r = New-Object Xuux.TpmCeremony.Rd -ArgumentList (,$p.Params)
+    39	  [void]$r.U8(); [void]$r.U32(); $count = $r.U32()
+    40	  $hs = @()
+    41	  for ($i = 0; $i -lt $count; $i++) { $hs += ('0x{0:x8}' -f $r.U32()) }
+    42	  return ,@($hs)
+    43	}
+    44	
+    45	if ($Mode -eq 'host-guard') {
+    46	  Add-Type -Path @($core, $helper, (Join-Path $root 'sim/tpm-host/TpmInventoryCore.cs'), (Join-Path $PSScriptRoot 'TpmHostSimTransport.cs')) -IgnoreWarnings
+    47	  $rec = New-Object Xuux.TpmHost.Tests.RecordingTransport
+    48	  $out = @()
+    49	  foreach ($kv in [Xuux.TpmCeremony.Tests.CommandEmitter]::All()) {
+    50	    $hex = $kv.Value
+    51	    $b = New-Object byte[] ($hex.Length / 2)
+    52	    for ($i = 0; $i -lt $b.Length; $i++) { $b[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
+    53	    $rejected = $false; $msg = $null
+    54	    try { [void]$rec.Submit($b) } catch { $rejected = $true; $msg = $_.Exception.InnerException.Message; if (-not $msg) { $msg = $_.Exception.Message } }
+    55	    $out += [ordered]@{ name = $kv.Key; commandCode = ('0x' + $hex.Substring(12, 8)); rejected = $rejected; message = $msg }
+    56	  }
+    57	  $res = [ordered]@{ cases = $out; reached = @($rec.Reached); submittedCount = $rec.SubmittedCount }
+    58	  [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 6 -Compress))
+    59	  exit 0
+    60	}
+    61	
+    62	Add-Type -Path @($core, $helper) -IgnoreWarnings
+    63	
+    64	if ($Mode -eq 'foreign-identity') {
+    65	  $t = New-Object Xuux.TpmCeremony.Tests.ForeignIdentityTransport
+    66	  $r = (New-Object Xuux.TpmCeremony.CeremonyRehearsal($t)).Run($Stages)
+    67	  $res = [ordered]@{ report = ($r.ToJson() | ConvertFrom-Json); received = @($t.Received) }
+    68	  [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 8 -Compress))
+    69	  exit 0
+    70	}
+    71	
+    72	if ($Mode -eq 'policysigned-shapes') {
+    73	  $inner = New-Object Xuux.TpmCeremony.SwtpmLoopbackTransport($SimHost, $SimPort)
+    74	  try {
+    75	    $lines = [Xuux.TpmCeremony.Tests.PolicySignedShapes]::Run($inner)
+    76	    [Console]::Out.WriteLine((@{ shapes = @($lines) } | ConvertTo-Json -Depth 4 -Compress))
+    77	  } finally { $inner.Dispose() }
+    78	  exit 0
+    79	}
+    80	
+    81	# WL-416: قياسُ دورةِ حياةِ سياقِ الردّ (ResponseContext) على swtpm حقيقيّ — حالاتُ فقدِ ردِّ التحريرِ
+    82	# وإثباتِ الغيابِ وإعادةِ الاستخدامِ واستهلاكِ جلسةِ السياسةِ (انظر ContextLifetimeProbe).
+    83	if ($Mode -eq 'ctx-lifetime') {
+    84	  $inner = New-Object Xuux.TpmCeremony.SwtpmLoopbackTransport($SimHost, $SimPort)
+    85	  try {
+    86	    $lines = [Xuux.TpmCeremony.Tests.ContextLifetimeProbe]::Run($inner)
+    87	    [Console]::Out.WriteLine((@{ cases = @($lines) } | ConvertTo-Json -Depth 4 -Compress))
+    88	  } finally { $inner.Dispose() }
+    89	  exit 0
+    90	}
+    91	
+    92	if ($Mode -eq 'fault') {
+    93	  if (-not $Fault) { throw 'fault mode requires -Fault' }
+    94	  $inner = New-Object Xuux.TpmCeremony.SwtpmLoopbackTransport($SimHost, $SimPort)
+    95	  try {
+    96	    $nvBefore = Get-HandleList -Transport $inner -Start 0x01000000
+    97	    $sessionsBefore = Get-HandleList -Transport $inner -Start 0x02000000
+    98	    # session-alias (WL-413 R3 / SOL413-01): جلسةُ فخٍّ قبلَ البروفةِ لتكونَ في خطِّ الأساسِ.
+    99	    if ($Fault -eq 'session-alias') {
+   100	      $t = New-Object Xuux.TpmCeremony.Tests.CeremonyFaultTransport($inner, $Fault, $true)
+   101	    } else {
+   102	      $t = New-Object Xuux.TpmCeremony.Tests.CeremonyFaultTransport($inner, $Fault)
+   103	    }
+   104	    $r = (New-Object Xuux.TpmCeremony.CeremonyRehearsal($t)).Run($Stages)
+   105	    $nvAfter = Get-HandleList -Transport $inner -Start 0x01000000
+   106	    $sessionsAfter = Get-HandleList -Transport $inner -Start 0x02000000
+   107	    $res = [ordered]@{
+   108	      report = ($r.ToJson() | ConvertFrom-Json)
+   109	      fault = [ordered]@{ mode = $Fault; changes = $t.Changes; definedHandle = ('0x{0:x8}' -f $t.DefinedHandle); lostSession = ('0x{0:x8}' -f $t.LostSession); thirdPartyRc = ('0x{0:x8}' -f $t.ThirdPartyRc); witnessSession = ('0x{0:x8}' -f $t.WitnessSession); witnessPresentBefore = $t.WitnessPresentBefore; witnessPresentAfter = $t.WitnessPresentAfter }
+   110	      nvBefore = $nvBefore; nvAfter = $nvAfter; sessionsBefore = $sessionsBefore; sessionsAfter = $sessionsAfter
+   111	    }
+   112	    [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 8 -Compress))
+   113	  } finally { $inner.Dispose() }
+   114	  exit 0
+   115	}
+   116	
+   117	if (-not $BlockCc) { throw 'inject-blocked requires -BlockCc' }
+   118	$inner = New-Object Xuux.TpmCeremony.SwtpmLoopbackTransport($SimHost, $SimPort)
+   119	try {
+   120	  $t = New-Object Xuux.TpmCeremony.Tests.BlockingTransport($inner, [Convert]::ToUInt32($BlockCc, 16), $Nth, [bool]$BlockAll)
+   121	  $r = (New-Object Xuux.TpmCeremony.CeremonyRehearsal($t)).Run($Stages)
+   122	  $res = [ordered]@{ report = ($r.ToJson() | ConvertFrom-Json); forwarded = @($t.Forwarded); blockedCount = $t.BlockedCount }
+   123	  [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 8 -Compress))
+   124	} finally { $inner.Dispose() }
+   125	exit 0
+tests/helpers/TpmCeremonyFaultTransport.cs:89:        // (S2-validate: NV_Increment بجلسةِ سياسةٍ ثمّ SessionConsumed) — جردٌ قرائيٌّ حقيقيٌّ لمقابضِ جلساتِ
+tests/helpers/TpmCeremonyFaultTransport.cs:936:    //   3. فقدُ الردِّ والمقبضُ ما زالَ حاضرًا (جردٌ قرائيّ) ⇒ السياقُ محفوظٌ (لا EndOfLife).
+tests/helpers/TpmCeremonyFaultTransport.cs:938:    //      وقبلَ تحريرِ غيرِها) ثمّ EndOfLife يزيلُ نوعَها المسجّل.
+tests/helpers/TpmCeremonyFaultTransport.cs:979:            System.Reflection.MethodInfo endOfLife = ctxType == null ? null : ctxType.GetMethod("EndOfLife");
+tests/helpers/TpmCeremonyFaultTransport.cs:981:            System.Reflection.MethodInfo trySessionType = ctxType == null ? null : ctxType.GetMethod("TrySessionType");
+tests/helpers/TpmCeremonyFaultTransport.cs:1003:            // إثباتُ الغيابِ بجردٍ قرائيّ ⇒ مسارُ الإنتاجِ (ReconcileOne) يستدعي EndOfLife:

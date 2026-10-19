@@ -1,0 +1,85 @@
+{
+  "reviewer": "gpt_6_1_sol",
+  "commit": "de099aa8cfd82dda106199eeaf11e134b5ee6639",
+  "report": "report.md",
+  "measurementCounts": {
+    "requiredNodeTests": 62,
+    "nodeExit": 0,
+    "shippedFaultModesReplayed": 29,
+    "independentCurrentCases": 33,
+    "independentBaselineCases": 32,
+    "baselineCommit": "8b48a568"
+  },
+  "findings": [
+    {
+      "id": "R3SOL-01",
+      "severity": "high",
+      "title": "Duplicate baseline inventory plus aliased creation response causes flush of a pre-run object",
+      "injections": 2,
+      "provenance": "also measured on 8b48a568",
+      "evidence": ["current-v2/inventory-duplicate-alias.json", "baseline-v2/inventory-duplicate-alias.json", "parser-boundary.txt"]
+    },
+    {
+      "id": "R3SOL-02",
+      "severity": "medium",
+      "title": "Response authorization profiles are interchangeable and reserved session bit 3 is accepted",
+      "provenance": "remaining gap after added validation",
+      "evidence": ["current-v2/auth-pw-reserved3.json", "current-v2/auth-policy-password.json", "current-v2/auth-policy-reserved3.json"]
+    },
+    {
+      "id": "R3SOL-03",
+      "severity": "medium",
+      "title": "Missing creation-data fields, malformed tickets, altered creation hashes and foreign Load names remain accepted",
+      "provenance": "also measured on 8b48a568",
+      "evidence": ["current-v2/cd-missing.json", "current-extra/create-cd-missing.json", "current-v2/creation-ticket-hierarchy.json", "current-v2/policy-ticket-timeout.json", "current-v2/foreign-load-name.json"]
+    },
+    {
+      "id": "R3SOL-04",
+      "severity": "low",
+      "title": "Final comparative inventory field is true after a partially constructed baseline",
+      "provenance": "measured on new error path; final status remains FAILED_CLOSED",
+      "evidence": ["current-v2/baseline-transient-badclass.json"]
+    },
+    {
+      "id": "R3SOL-05",
+      "severity": "low",
+      "title": "New creation-data minimum and fixed PCR digest size reject empty-PCR digest encoding",
+      "provenance": "new rejection versus 8b48a568; synthetic response, not a second TPM implementation",
+      "evidence": ["current-extra/cd-empty-pcr-digest.json", "baseline-extra/cd-empty-pcr-digest.json", "spec-r183-note.md"]
+    },
+    {
+      "id": "R3SOL-06",
+      "severity": "low",
+      "title": "New R3 tests leave 21 swtpm daemon processes after Node exits",
+      "provenance": "new test file; identified processes stopped after recording",
+      "evidence": ["test-owned-process-metadata.txt", "test-stop-excerpt.txt", "test-daemon-shutdown.txt"]
+    },
+    {
+      "id": "R3SOL-07",
+      "severity": "low",
+      "title": "Ownership and response-validation documentation exceeds or contradicts measured behavior",
+      "provenance": "documentation comparison",
+      "evidence": ["readme-excerpt.txt", "threat-model-excerpt.txt", "current-v2-summary.json"]
+    },
+    {
+      "id": "R3SOL-08",
+      "severity": "low",
+      "title": "Create reconciliation infers likely non-execution from absence of handles",
+      "provenance": "new Create ledger path",
+      "evidence": ["current-create-proof/create-loss-proof.json"]
+    }
+  ],
+  "ownershipDecision": {
+    "foreignIdenticalDefinitionRetained": "current-foreign/same-public-foreign.json",
+    "baselineDeletedForeignDefinition": "baseline-foreign/same-public-foreign.json",
+    "accumulationCounts": [0, 1, 2, 3],
+    "subsequentNormalReportBaselineCount": 3,
+    "evidence": ["accumulation-summary.json", "accumulation/nv-after-normal.txt"]
+  },
+  "finalAudit": {
+    "evidence": "final-audit-v2.txt",
+    "gitStatusPorcelainBytes": 0,
+    "protectedDiffBytes": 0,
+    "assignedListenersRemaining": 0
+  }
+}

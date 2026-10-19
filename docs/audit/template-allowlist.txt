@@ -122,3 +122,4 @@ institutions/001-الديوان-الملكي/safety.md
 institutions/001-الديوان-الملكي/staffing.yaml
 institutions/001-الديوان-الملكي/test.spec.ts
 institutions/001-الديوان-الملكي/workflows.md
+

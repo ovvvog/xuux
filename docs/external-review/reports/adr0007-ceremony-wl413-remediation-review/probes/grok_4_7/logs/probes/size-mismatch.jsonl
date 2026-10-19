@@ -1,0 +1,2 @@
+{"mode":"size-mismatch","status":"FAILED_CLOSED","failure":"RESPONSE_SIZE_MISMATCH rc=0x00000000","steps":1,"changes":1,"forwarded":0,"undefineForwards":0,"createForwards":0,"policySignedForwards":0,"planted":"0x00000000","leftovers":[],"reconciliation":[],"notes":[],"postVerified":false,"postError":"no baseline: run stopped before the read-only baseline snapshot (no state-changing command was sent)","residualNv":[],"residualSessions":[],"residualTransients":[],"changingAfterFail":"no-failed-step"}
+exit:0

@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:38:59.265Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'env' 'XUUX_TPM_SIM=1' 'TPM2TOOLS_TCTI=swtpm:host=127.0.0.1,port=2321' 'TMPDIR=/tmp/council-wl422-gpt_6_1_sol/tmp' 'node' '--import=/tmp/council-wl422-gpt_6_1_sol/sc1-hook.mjs' '--test' '--test-concurrency=1' '--test-name-pattern=^(SC1:|CTX:|CTX2:)' 'tests/sim/tpm-ceremony-wl416.test.mjs'

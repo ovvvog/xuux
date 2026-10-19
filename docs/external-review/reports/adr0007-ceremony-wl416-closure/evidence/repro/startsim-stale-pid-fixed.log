@@ -1,0 +1,13 @@
+$ tree=/home/user/workspace/xuux HEAD=a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d dirty=5
+$ flock /tmp/council-wl418-sim.lock env XUUX_TPM_SIM=1 node startsim-stale-pid-fixed.mjs
+{
+  "launched": 22775,
+  "returned": null,
+  "stopResult": null,
+  "threw": "WL418-stale: تعذّرَ تشغيلُ محاكٍ معزول",
+  "dirExists": null,
+  "ownersAfterStop": [],
+  "launchedAlive": false
+}
+exit_code=0
+swtpm_left=0

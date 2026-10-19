@@ -1,0 +1,21 @@
+after-fix/cleanup-undefine-before exit=0 status=FAILED_CLOSED steps=17 failure=TPM_ERROR: s1.probe:NV_Increment#1 rc=0x00000101 | nv-undefine 0x01bb88c2: still present; deletion outcome unknown; cleanup attempt budget already spent (1 per resource; no further attempt); declared as leftover
+after-fix/creation-digest-64 exit=0 status=COMPLETE steps=81 failure=None 
+after-fix/creation-hierarchy-40000001 exit=0 status=COMPLETE steps=81 failure=None 
+after-fix/creation-outsideinfo exit=0 status=FAILED_CLOSED steps=33 failure=OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary outsideInfo differs f 
+after-fix/creation-parentname exit=0 status=FAILED_CLOSED steps=33 failure=OUTCOME_UNKNOWN: s2:CreatePrimary(storage,ECC-P256) (ResponseMalformedException: RESPONSE_CREATION_DATA_MALFORMED: CreatePrimary parentName differs fr 
+after-fix/creation-pcr-empty exit=0 status=COMPLETE steps=81 failure=None 
+after-fix/load-name-flip exit=0 status=FAILED_CLOSED steps=36 failure=OUTCOME_UNKNOWN: s2:Load(service-key) (ResponseMalformedException: RESPONSE_NAME_HASH_MISMATCH: Load) 
+after-fix/loss-create exit=0 status=FAILED_CLOSED steps=35 failure=OUTCOME_UNKNOWN: s2:Create(service-key,ECDSA-P256) (IOException: FOLLOWUP_CREATE_RESPONSE_LOSS) 
+after-fix/normal exit=0 status=COMPLETE steps=81 failure=None 
+after-fix/policy-digest-0 exit=0 status=COMPLETE steps=81 failure=None 
+after-fix/policy-digest-1 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=1 expected=0) 
+after-fix/policy-digest-32 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=32 expected=0) 
+after-fix/policy-digest-64 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=64 expected=0) 
+after-fix/policy-digest-65 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_DIGEST_MALFORMED: PolicySigned len=65 expected=0) 
+after-fix/policy-hierarchy-40000001 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x40000001 expected=0x40000007) 
+after-fix/policy-hierarchy-40000007 exit=0 status=COMPLETE steps=81 failure=None 
+after-fix/policy-hierarchy-4000000b exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x4000000b expected=0x40000007) 
+after-fix/policy-hierarchy-4000000c exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_HIERARCHY_MALFORMED: PolicySigned 0x4000000c expected=0x40000007) 
+after-fix/policy-tag-8023 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x8023) 
+after-fix/policy-tag-8024 exit=0 status=FAILED_CLOSED steps=41 failure=OUTCOME_UNKNOWN: s2.trial:PolicySigned (ResponseMalformedException: RESPONSE_TICKET_TAG_MALFORMED: PolicySigned 0x8024) 
+after-fix/undefine-drop-before exit=0 status=FAILED_CLOSED steps=24 failure=OUTCOME_UNKNOWN: s1.probe:NV_UndefineSpace (IOException: FOLLOWUP_UNDEFINE_BEFORE_SEND) | nv-undefine 0x01b0b850: still present; deletion outcome unknown; left for the bounded cleanup attempt (declared as leftover if it remains)

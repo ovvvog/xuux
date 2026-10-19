@@ -1,0 +1,8 @@
+parameterSize-ffffffff: ResponseMalformedException: RESPONSE_PARAMETER_SIZE_INVALID: 4294967295 > remaining 5
+parameterSize-80000000: ResponseMalformedException: RESPONSE_PARAMETER_SIZE_INVALID: 2147483648 > remaining 5
+capability-more-than-requested: accepted
+capability-below-requested: accepted
+capability-duplicate: accepted
+capability-descending: accepted
+malformed-18b-tag: ResponseMalformedException: RESPONSE_ERROR_TAG_MALFORMED
+malformed-14a-body: ResponseMalformedException: RESPONSE_ERROR_BODY_MALFORMED

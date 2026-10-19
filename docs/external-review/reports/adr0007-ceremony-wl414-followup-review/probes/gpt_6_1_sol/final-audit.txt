@@ -1,0 +1,11 @@
++ git -C repo rev-parse HEAD
+3e67d362dc4f30ec35f73957fd5542be47a3a875
++ git -C repo status --porcelain
++ git -C repo diff --exit-code 8b48a568 -- scripts/production-entry.mjs config/external-review.yaml version.json sim/tpm/tcti_guard.mjs
++ echo protected_exit=0
+protected_exit=0
++ ps -C swtpm -o pid,ppid,stat,args
+  PID  PPID STAT COMMAND
+10834     1 S    swtpm socket --tpm2 --tpmstate dir=/tmp/wl414-followup/swtpm-shared2 --server type=tcp,port=2321,bindaddr=127.0.0.1 --ctrl type=tcp,port=2322,bindaddr=127.0.0.1 --flags not-need-init,startup-clear --daemon
++ ss -ltn '( sport = :7100 or sport = :7101 )'
+State Recv-Q Send-Q Local Address:Port Peer Address:Port

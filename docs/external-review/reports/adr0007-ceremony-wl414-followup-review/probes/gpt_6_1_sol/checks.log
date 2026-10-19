@@ -1,0 +1,73 @@
+OBSERVED Every independent collector exited 0
+OBSERVED Full historical duplicate/hidden-victim chain fires twice and flushes victim on pre-fix core
+OBSERVED Target breaks chain at baseline; both guards survive and no mutation is attempted
+OBSERVED Named rejection for duplicate-many
+OBSERVED Named rejection for descending
+OBSERVED Named rejection for cross-page
+OBSERVED Named rejection for below-start
+OBSERVED Bound authentication profile rejects auth-policy-on-password
+OBSERVED Bound authentication profile rejects auth-password-on-policy
+OBSERVED Bound authentication profile rejects auth-policy-nonce16
+OBSERVED Bound authentication profile rejects auth-policy-attrs08
+OBSERVED Untrusted partial baseline partial-transient
+OBSERVED Untrusted partial baseline partial-session
+OBSERVED Untrusted partial baseline partial-transient-badclass
+OBSERVED Untrusted partial baseline partial-session-badclass
+OBSERVED Actual lost define response leaves own candidate and pre-existing foreign NV; zero undefine attempts
+OBSERVED Matching-public foreign seed survives lost failed define reply; zero forwarded undefines
+OBSERVED Known remaining NULL auth ticket digest accepted at lengths 1/32/64
+OBSERVED Known remaining creation data mismatch accepted
+OBSERVED Reconciliation text promises cleanup after cleanup budget already spent
+OBSERVED Genuine positive-expiration swtpm success rejected only by target schema
+OBSERVED No extra daemon at native suite exit; supplied fixture stays intentionally
+OBSERVED Assertion failure inside test body leaves no owned simulator
+OBSERVED Readiness failure leaks one live owned simulator at immediate node exit
+OBSERVED Template allowlist has identical semantic entries
+run_count=65 check_count=25
+{
+  "suiteBefore": {
+    "all": 2,
+    "own": 1,
+    "file": "shipped/processes-before-suite.txt"
+  },
+  "suiteImmediate": {
+    "all": 2,
+    "own": 1,
+    "file": "shipped/processes-immediately-after-suite.txt"
+  },
+  "rehearsalImmediate": {
+    "all": 2,
+    "own": 1,
+    "file": "shipped/processes-immediately-after-rehearsal.txt"
+  },
+  "fixtureStopped": {
+    "all": 1,
+    "own": 0,
+    "file": "shipped/processes-after-fixture-stop.txt"
+  },
+  "assertionBefore": {
+    "all": 1,
+    "own": 0,
+    "file": "forced-failure/processes-before.txt"
+  },
+  "assertionImmediate": {
+    "all": 1,
+    "own": 0,
+    "file": "forced-failure/processes-immediately-after.txt"
+  },
+  "readinessBefore": {
+    "all": 1,
+    "own": 0,
+    "file": "readiness-failure/processes-before.txt"
+  },
+  "readinessImmediate": {
+    "all": 2,
+    "own": 1,
+    "file": "readiness-failure/processes-immediately-after.txt"
+  },
+  "readinessExplicitCleanup": {
+    "all": 1,
+    "own": 0,
+    "file": "readiness-failure/processes-after-explicit-cleanup.txt"
+  }
+}

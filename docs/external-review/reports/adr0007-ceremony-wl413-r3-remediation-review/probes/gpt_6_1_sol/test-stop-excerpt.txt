@@ -1,0 +1,11 @@
+    if (!ready) { rmSync(dir, { recursive: true, force: true }); continue; }
+    return { dir, port, pidFile };
+  }
+  throw new Error('WL-413/R3: تعذّرَ تشغيلُ محاكٍ معزول');
+}
+
+function stopSim(s) {
+  try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* أفضلُ جهد */ }
+}
+
+function fault(s, mode) {

@@ -1,0 +1,19 @@
+2026-10-17T22:59:18Z
+dbaf61049bbdb9b2b93cab6c7605d439c1c465b3
+git rev-parse rc=0
+git status --porcelain rc=0 bytes=0
+git diff 1ca1668e -- sim/tpm-host/ rc=0 bytes=0
+State Recv-Q Send-Q Local Address:Port Peer Address:PortProcess
+ss rc=0
+active own simulator/proxy listing ends
+summary rc=0
+93a94957b207217f1450242f4d908f9741dea42ed342ab8cbb62d6964063d025  /home/user/workspace/council-wl413/gpt_6_1_sol/fresh/tcg-part1-r138.pdf
+d3b495d2cb03aa3957bfa52498556c7d176249aa8c87ca18501fad879a790f5f  /home/user/workspace/council-wl413/gpt_6_1_sol/fresh/tcg-part2-r138.pdf
+fe3c6e3bd62d6aa08cb476bd83880eed7d1bb3ffbabaf7be5a11c41ebf0fec30  /home/user/workspace/council-wl413/gpt_6_1_sol/fresh/tcg-part3-r138.pdf
+historical diff exit=1 (1 denotes adaptation)
+v20.20.2
+PowerShell 7.4.6
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+tool="tpm2_getcap" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device
+Mono C# compiler version 6.14.1.0
+2026-10-17T22:59:18Z

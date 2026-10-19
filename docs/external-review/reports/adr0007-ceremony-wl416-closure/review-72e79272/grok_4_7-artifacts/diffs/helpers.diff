@@ -1,0 +1,107 @@
+diff --git a/tests/helpers/TpmCeremonyFaultTransport.cs b/tests/helpers/TpmCeremonyFaultTransport.cs
+index 1b6405a4..33b97172 100644
+--- a/tests/helpers/TpmCeremonyFaultTransport.cs
++++ b/tests/helpers/TpmCeremonyFaultTransport.cs
+@@ -85,6 +85,24 @@ namespace Xuux.TpmCeremony.Tests
+         public readonly List<string> Forwarded = new List<string>();
+ 
+         public uint ThirdPartyRc = 0xFFFFFFFF;
++        // WL-421 (consumed-session-witness): شاهدُ المحاكي على استهلاكِ جلسةِ السياسةِ في المسارِ الإنتاجيِّ
++        // (S2-validate: NV_Increment بجلسةِ سياسةٍ ثمّ SessionConsumed) — جردٌ قرائيٌّ حقيقيٌّ لمقابضِ جلساتِ
++        // السياسةِ المحمّلةِ قبلَ الأمرِ وبعدَه، عبرَ النقلِ الداخليِّ دونَ تغييرِ أيِّ بايتٍ في الأمرِ أو الردّ.
++        public uint WitnessSession;
++        public bool WitnessPresentBefore;
++        public bool WitnessPresentAfter;
++
++        private bool PolicySessionLoaded(uint h)
++        {
++            Rd r = new Rd(_inner.Transmit(Cmd.GetCapability(1u /* TPM_CAP_HANDLES */, 0x02000000u /* TPM_HT_LOADED_SESSION */, 64)));
++            r.U16(); r.U32();
++            uint rc = r.U32();
++            if (rc != 0) throw new InvalidOperationException("witness GetCapability rc=" + Hex.U32(rc));
++            r.U8(); r.U32(); uint cnt = r.U32();
++            // الجلساتُ المحمّلةُ (HMAC والسياسة) تُجرَدُ بنطاقِ 0x02 وتتشاركُ فضاءَ فهارسَ واحدًا ⇒ المطابقةُ بالفهرس
++            for (uint i = 0; i < cnt; i++) if ((r.U32() & 0x00FFFFFFu) == (h & 0x00FFFFFFu)) return true;
++            return false;
++        }
+         private int _increments;
+         private bool _dead;
+         private uint _livePrimary; // مقبضُـ CreatePrimary الحيّ (وضعُ load-alias-live)
+@@ -330,9 +348,24 @@ namespace Xuux.TpmCeremony.Tests
+                 Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); DefinedHandle = c.U32();
+                 throw new System.IO.IOException("WL414_FUP_UNDEFINE_DROPPED_BEFORE_SEND");
+             }
++            bool witness = false;
++            if (_mode == "consumed-session-witness" && cc == Tpm.CC_NV_Increment && Changes == 0 && command.Length >= 26
++                && (((uint)command[0] << 8) | command[1]) == Tpm.ST_SESSIONS)
++            {
++                uint sh = ((uint)command[22] << 24) | ((uint)command[23] << 16) | ((uint)command[24] << 8) | command[25];
++                if ((sh >> 24) == 0x03u)
++                {
++                    witness = true; WitnessSession = sh; WitnessPresentBefore = PolicySessionLoaded(sh);
++                }
++            }
+             byte[] raw = _inner.Transmit(command);
+             Rd header = new Rd(raw);
+             ushort tag = header.U16(); header.U32(); uint rc = header.U32();
++            if (witness && rc == 0)
++            {
++                Changes++;
++                WitnessPresentAfter = PolicySessionLoaded(WitnessSession);
++            }
+             if (_mode == "session-alias" && cc == Tpm.CC_StartAuthSession && rc == 0)
+             {
+                 Changes++;
+diff --git a/tests/helpers/ceremony-swtpm.mjs b/tests/helpers/ceremony-swtpm.mjs
+index 093ea062..e25a6d8a 100644
+--- a/tests/helpers/ceremony-swtpm.mjs
++++ b/tests/helpers/ceremony-swtpm.mjs
+@@ -451,17 +451,28 @@ export function startSim(opts = {}) {
+ 
+ // قتلُ عمليّةِ المحاكي وانتظارُ زوالِها قبلَ حذفِ مجلّدِ الحالةِ (الحذفُ وحدَه ترك 21 يتيمًا — WL-413 R3).
+ // الحذفَ بعدَ إثباتِ الزوالِ فقط: تعذّرَ الإيقافُ أو تعذّرَ إثباتُ الهويّةِ ⇒ يُحفَظُ المجلّدُ ويُعادَ false.
++// WL-421 (WL420-gpt_6_1_sol-01، WL420-grok_4_7-01): نتيجةُ المسحِ النهائيِّ هي نموذجُ terminateAttempt نفسُه —
++// لا يُعلَنُ التوقّفُ مع مالكٍ حيٍّ، ولا مع عمليّةٍ غيرِ محسومةِ الهويّةِ، ولا مع زومبي غيرِ مُلقّاةٍ (لا سطرَ
++// أوامرَ لها فلا إسنادَ، وقد تكونُ محاكينا). وفشلُ إنهاءِ الرقمِ المسلَّمِ لا يوقفُ المسارَ مبكّرًا: المالكُ
++// المُثبَتُ ملكُه بالمسحِ يُنهى بالمسارِ نفسِه (killSim: هويّةٌ قبلَ الإشارةِ، ولا إشارةَ لرقمٍ لم تُثبَتْ هويّتُه)،
++// ثمّ يُعادُ false لأنّ زوالَ الرقمِ المسلَّمِ أو انتماءَه لم يُثبَت.
++const STOP_SETTLE_MS = 1000; // مهلةُ استقرارٍ محدودةٌ لزومبي عابرةٍ يُلقّيها أبوها — لا تحويلَ لزومبي باقيةٍ إلى نجاح
++function stopScanClear(dir) {
++  for (let waited = 0; ; waited += 50) {
++    const r = scanStateDir(dir);
++    if (r.matches.length === 0 && r.unresolved.length === 0 && r.zombies.length === 0) return true;
++    if (r.matches.length > 0 || waited >= STOP_SETTLE_MS) return false;
++    sleepMs(50);
++  }
++}
+ export function stopSim(s) {
+   if (!s) return true;
+-  const stopped = killSim(s.pid, { dir: s.dir });
+-  if (stopped !== true) return false;
+-  // زوالُ الرقمِ المسلَّمِ وحدَه ليس زوالَ المالكِ (WL-418، WL418-grok_4_7-01): عمليّةُ swtpm حيّةٌ مُثبَتٌ
+-  // أنها تملكُ مسارَ الحالةِ ⇒ تُنهى بالمسارِ نفسِه (هويّةٌ قبلَ الإشارة)، ولا يُعلَنُ التوقّفُ ولا يُحذَفُ
+-  // المجلّدُ إلّا بعدَ أن يخلوَ المسحُ القرائيُّ منها.
++  const deliveredGone = killSim(s.pid, { dir: s.dir }) === true;
++  let ownersGone = true;
+   for (const p of scanStateDir(s.dir).matches) {
+-    if (killSim(p, { dir: s.dir }) !== true) return false;
++    if (killSim(p, { dir: s.dir }) !== true) ownersGone = false;
+   }
+-  if (scanStateDir(s.dir).matches.length > 0) return false;
++  if (!deliveredGone || !ownersGone || !stopScanClear(s.dir)) return false;
+   try {
+     rmSync(s.dir, { recursive: true, force: true });
+   } catch {
+diff --git a/tests/helpers/tpm-ceremony-harness.ps1 b/tests/helpers/tpm-ceremony-harness.ps1
+index e91a3958..fee375a1 100644
+--- a/tests/helpers/tpm-ceremony-harness.ps1
++++ b/tests/helpers/tpm-ceremony-harness.ps1
+@@ -106,7 +106,7 @@ if ($Mode -eq 'fault') {
+     $sessionsAfter = Get-HandleList -Transport $inner -Start 0x02000000
+     $res = [ordered]@{
+       report = ($r.ToJson() | ConvertFrom-Json)
+-      fault = [ordered]@{ mode = $Fault; changes = $t.Changes; definedHandle = ('0x{0:x8}' -f $t.DefinedHandle); lostSession = ('0x{0:x8}' -f $t.LostSession); thirdPartyRc = ('0x{0:x8}' -f $t.ThirdPartyRc) }
++      fault = [ordered]@{ mode = $Fault; changes = $t.Changes; definedHandle = ('0x{0:x8}' -f $t.DefinedHandle); lostSession = ('0x{0:x8}' -f $t.LostSession); thirdPartyRc = ('0x{0:x8}' -f $t.ThirdPartyRc); witnessSession = ('0x{0:x8}' -f $t.WitnessSession); witnessPresentBefore = $t.WitnessPresentBefore; witnessPresentAfter = $t.WitnessPresentAfter }
+       nvBefore = $nvBefore; nvAfter = $nvAfter; sessionsBefore = $sessionsBefore; sessionsAfter = $sessionsAfter
+     }
+     [Console]::Out.WriteLine(($res | ConvertTo-Json -Depth 8 -Compress))

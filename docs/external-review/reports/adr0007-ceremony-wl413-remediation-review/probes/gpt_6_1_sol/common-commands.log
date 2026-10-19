@@ -1,0 +1,27 @@
+2026-10-17T22:49:02Z
+dbaf61049bbdb9b2b93cab6c7605d439c1c465b3
+v20.20.2
+PowerShell 7.4.6
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+tool="tpm2_getcap" version="5.7" tctis="libtss2-tctildr" tcti-default=tcti-device
+Mono C# compiler version 6.14.1.0
+simulator launch rc=0
+swtpm: Could not open TCP socket: Address already in use
+getcap rc=0
+node tests rc=0
+# Subtest: R2-05: منفذٌ بلا مستمعٍ ⇒ SIMULATOR_LISTENER_ABSENT (لا اتصالَ ولا افتراض)
+ok 41 - R2-05: منفذٌ بلا مستمعٍ ⇒ SIMULATOR_LISTENER_ABSENT (لا اتصالَ ولا افتراض)
+  ---
+  duration_ms: 460.572106
+  ...
+1..41
+# tests 41
+# suites 0
+# pass 41
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 35748.189865
+direct rehearsal rc=0
+2026-10-17T22:49:40Z

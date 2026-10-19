@@ -1,0 +1,244 @@
+2026-10-17T22:51:20Z
+stopped own swtpm pid=5340
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-nQVj3k rc=0
+common tests exit=0
+  ...
+1..41
+# tests 41
+# suites 0
+# pass 41
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 36442.080267
+direct ALL exit=0
+host-guard exit=0
+current build exit=1
+stopped own swtpm pid=7197
+2026-10-17T22:53:01Z
+current build exit=0
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-O7GPcG rc=0
+old:invalid-tag exit=0
+stopped own swtpm pid=8472
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-6sWMGZ rc=0
+old:missing-response-auth exit=0
+stopped own swtpm pid=8484
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-nib82p rc=0
+old:define-response-loss exit=0
+stopped own swtpm pid=8496
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-OcFhHu rc=0
+old:flush-refusal exit=0
+stopped own swtpm pid=8508
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-ca4wkt rc=0
+old:unexpected-negative exit=0
+stopped own swtpm pid=8520
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-M1SN31 rc=0
+r2:written-before-reconcile exit=0
+stopped own swtpm pid=8532
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-T6OEFR rc=0
+r2:neg-increment-loss exit=0
+stopped own swtpm pid=8544
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-Uf1jbM rc=0
+r2:trailing-params exit=0
+stopped own swtpm pid=8556
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-1rvcQJ rc=0
+helper:flush-refusal exit=0
+stopped own swtpm pid=8568
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-lumLp5 rc=0
+helper:blocked-forever-undefine exit=0
+stopped own swtpm pid=8580
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-QmdbSl rc=0
+helper:identity-string34 exit=0
+stopped own swtpm pid=8592
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-0QxV0i rc=0
+helper:identity-spacefold exit=0
+stopped own swtpm pid=8604
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-S0e7ky rc=0
+helper:identity-missing-prop exit=0
+stopped own swtpm pid=8616
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-23nUeG rc=0
+gemini:truncate exit=0
+stopped own swtpm pid=8628
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-DPfwtO rc=0
+gemini:size exit=0
+stopped own swtpm pid=8640
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-RLmC4E rc=0
+gemini:blocked exit=0
+stopped own swtpm pid=8652
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-qqh5tn rc=0
+g47:truncate-header exit=0
+stopped own swtpm pid=8664
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-lkMOOY rc=0
+g47:size-mismatch exit=0
+stopped own swtpm pid=8676
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-07Rj9V rc=0
+g47:unexpected-rc exit=0
+stopped own swtpm pid=8688
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-mIdXAG rc=0
+g47:windows-family exit=0
+stopped own swtpm pid=8700
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-fdXlCa rc=0
+g47:blocked-forever-undefine exit=0
+stopped own swtpm pid=8712
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-MbmPeG rc=0
+g47:blocked-on-expected-failure exit=0
+stopped own swtpm pid=8724
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-ScxYVk rc=0
+g47:negative-unexpected-success exit=0
+stopped own swtpm pid=8736
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-YH36wN rc=0
+g47:drop-after-identity exit=0
+stopped own swtpm pid=8748
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-wLc8ah rc=0
+g47:io-throw exit=0
+stopped own swtpm pid=8760
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-rWHiQM rc=0
+g47:identity-ignores-string34 exit=0
+stopped own swtpm pid=8772
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-lY4iyv rc=0
+g47:vendor-space-fold exit=0
+stopped own swtpm pid=8784
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-gLpgoY rc=0
+auth-nonce exit=0
+stopped own swtpm pid=8796
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-PK1pYz rc=0
+auth-hmac exit=0
+stopped own swtpm pid=8808
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-rXC7p0 rc=0
+auth-reserved exit=0
+stopped own swtpm pid=8820
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-ugqEAQ rc=0
+auth-continue-cleared exit=0
+stopped own swtpm pid=8832
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-7nN0bM rc=0
+primary-empty-public exit=0
+stopped own swtpm pid=8844
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-YpdZLQ rc=0
+primary-invalid-creationdata exit=0
+stopped own swtpm pid=8856
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-FH0c6h rc=0
+primary-wrong-name exit=0
+stopped own swtpm pid=8868
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-vOLsAr rc=0
+primary-ticket-invalid exit=0
+stopped own swtpm pid=8880
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-CJfsCe rc=0
+create-invalid-creationdata exit=0
+stopped own swtpm pid=8892
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-G5lALN rc=0
+create-empty-private exit=0
+stopped own swtpm pid=8904
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-a1LLPa rc=0
+policy-invalid-ticket exit=0
+stopped own swtpm pid=8916
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-pTHavc rc=0
+signature-empty-r exit=0
+stopped own swtpm pid=8928
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-E3i3v3 rc=0
+start-trial-empty-nonce exit=0
+stopped own swtpm pid=8940
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-qax7dn rc=0
+start-policy-empty-nonce exit=0
+stopped own swtpm pid=8952
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-nKY2Zg rc=0
+handle-baseline-alias exit=0
+stopped own swtpm pid=8964
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-niV7at rc=0
+inventory-empty-more exit=0
+stopped own swtpm pid=8976
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-rhUPLt rc=0
+inventory-wrong-range exit=0
+stopped own swtpm pid=8988
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-6kf8x6 rc=0
+negative-policy-loss exit=0
+stopped own swtpm pid=9000
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-NI4xEn rc=0
+create-loss exit=0
+stopped own swtpm pid=9012
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-6fC8eP rc=0
+malformed-absence exit=0
+stopped own swtpm pid=9024
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-ihxLtQ rc=0
+negative-valid-success exit=0
+stopped own swtpm pid=9036
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-7I7p3d rc=0
+trailing-122 exit=0
+stopped own swtpm pid=9048
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-mq6yq1 rc=0
+trailing-12a exit=0
+stopped own swtpm pid=9060
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-UPUzHc rc=0
+trailing-131 exit=0
+stopped own swtpm pid=9072
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-dghm99 rc=0
+trailing-134 exit=0
+stopped own swtpm pid=9084
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-FrCfbk rc=0
+trailing-14e exit=0
+stopped own swtpm pid=9096
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-lG7qE3 rc=0
+trailing-153 exit=0
+stopped own swtpm pid=9108
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-n7Lm75 rc=0
+trailing-157 exit=0
+stopped own swtpm pid=9120
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-JQlRjc rc=0
+trailing-15d exit=0
+stopped own swtpm pid=9132
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-H1j9Rr rc=0
+trailing-160 exit=0
+stopped own swtpm pid=9144
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-UBEFmu rc=0
+trailing-165 exit=0
+stopped own swtpm pid=9156
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-uJFUzE rc=0
+trailing-169 exit=0
+stopped own swtpm pid=9168
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-zSqYH3 rc=0
+trailing-16c exit=0
+stopped own swtpm pid=9180
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-cQtcwi rc=0
+trailing-176 exit=0
+stopped own swtpm pid=9192
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-9OTBtW rc=0
+trailing-17a exit=0
+stopped own swtpm pid=9204
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-y9IuDA rc=0
+trailing-189 exit=0
+git show baseline exit=0
+baseline build exit=0
+stopped own swtpm pid=9216
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-a0Ai5R rc=0
+baseline r2:written-before-reconcile exit=0
+stopped own swtpm pid=9244
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-tUWKB9 rc=0
+baseline r2:neg-increment-loss exit=0
+stopped own swtpm pid=9256
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-tHhmLC rc=0
+baseline r2:trailing-params exit=0
+stopped own swtpm pid=9268
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-TbXvvs rc=0
+baseline auth-reserved exit=0
+stopped own swtpm pid=9280
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-lr7NZv rc=0
+baseline primary-empty-public exit=0
+stopped own swtpm pid=9292
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-Tfx4SW rc=0
+baseline policy-invalid-ticket exit=0
+stopped own swtpm pid=9304
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-oIWJll rc=0
+baseline start-policy-empty-nonce exit=0
+stopped own swtpm pid=9316
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-hhBgTG rc=0
+baseline handle-baseline-alias exit=0
+stopped own swtpm pid=9328
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-XB6AM5 rc=0
+baseline malformed-absence exit=0
+stopped own swtpm pid=9340
+swtpm state=/home/user/workspace/council-wl413/gpt_6_1_sol/fresh/state-HMt2qB rc=0
+baseline negative-policy-loss exit=0
+parser build exit=0
+parser checks exit=0
+2026-10-17T22:53:10Z
+stopped own swtpm pid=9352

@@ -1,0 +1,3 @@
+{"status":"COMPLETE","failure":"","changes":1,"witnessSession":"0x03000000","witnessPresentBefore":true,"witnessPresentAfter":false,"fact":"session-consumed 0x03000000 contextGone=True","knowsDerived":"True"}
+{"simPort":25426,"simPid":7243,"pwshStatus":0}
+{"stopSim":true}

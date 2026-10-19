@@ -1,0 +1,8 @@
+launch cd-empty-pcr-digest 0
+mono IndependentR3-v3.exe cd-empty-pcr-digest 0
+launch create-cd-missing 0
+mono IndependentR3-v3.exe create-cd-missing 0
+launch post-inventory-no-progress 0
+mono IndependentR3-v3.exe post-inventory-no-progress 0
+launch post-inventory-wrong-class 0
+mono IndependentR3-v3.exe post-inventory-wrong-class 0

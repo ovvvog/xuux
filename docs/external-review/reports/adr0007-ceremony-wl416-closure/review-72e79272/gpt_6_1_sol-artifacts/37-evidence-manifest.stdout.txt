@@ -1,0 +1,641 @@
+{
+  "provider": "OpenAI",
+  "identity": "gpt_6_1_sol",
+  "reviewedSha": "72e79272576f0d9e85c1d69f415e834ee542c34a",
+  "evidenceRoot": "/tmp/council-wl422-gpt_6_1_sol",
+  "generatedUtc": "2026-10-19T07:44:29.735Z",
+  "files": [
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/01-environment.command.txt",
+      "bytes": 789,
+      "sha256": "e1d5980a02efdb4be1abf097c66df7e936bf5d73b689fce9f7094f0a8601bb7a"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/01-environment.exit.txt",
+      "bytes": 38,
+      "sha256": "e6f6f3506a7a38c34403862ea1d9416df29e7b73853ad1c39baecc47b6f4881e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/01-environment.stdout.txt",
+      "bytes": 2014,
+      "sha256": "c6896620e71c7ffdabd52c16e18c674a25f7e1df655f88c3b87312ea94e9608c"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/02-code-diff.command.txt",
+      "bytes": 264,
+      "sha256": "edba736fc3ed12845ecac989b93a26b5bcc924c2f8de7719b1ad1ed75daeb1aa"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/02-code-diff.exit.txt",
+      "bytes": 38,
+      "sha256": "5a417fbf5962e64f10b516212ec71ce8d3d1bbcf0c2d49dff6c8408f86356a2b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/02-code-diff.stdout.txt",
+      "bytes": 25734,
+      "sha256": "edfdf09bd2a2c778af329487e8b9e8d5a2772c0034d058a56513def8586ce8fd"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/03-helper-source.command.txt",
+      "bytes": 270,
+      "sha256": "10dea621d1242c9a17e1b88165358ea3ef2a1e016065e270aa049a8546e22ba0"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/03-helper-source.exit.txt",
+      "bytes": 38,
+      "sha256": "00620c8fa8d17249d73d7236cb78c41c186e0ac5069b6e411d3f702108adff25"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/03-helper-source.stdout.txt",
+      "bytes": 33156,
+      "sha256": "3ddb1ef4b51c3ecb26d7e1e9a3590ccf3b0aab892439b33cfe62110bd6e49e57"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/04-tests-and-context.command.txt",
+      "bytes": 447,
+      "sha256": "11fc1e7f28994db7bec902cdbbe44b1b16490616b25ed0827ef84ba9462bf4a0"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/04-tests-and-context.exit.txt",
+      "bytes": 38,
+      "sha256": "aa2d09864eeb3a96780a66ac13f887a95d0bb7dabdd1c169eff9dc6e4eec937d"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/04-tests-and-context.stdout.txt",
+      "bytes": 28604,
+      "sha256": "19dff8f03422e28610e45a7ef87fe14e4ac671c336909778019333f7114899f4"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/05-l7-l8.command.txt",
+      "bytes": 259,
+      "sha256": "a118c927057f01487ffc4864c8b0644e57856a91936bf92c5afabc5d2690ba83"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/05-l7-l8.exit.txt",
+      "bytes": 38,
+      "sha256": "ea0950061bc47a372de55194f0623efcdc735df6f3c702838696dc95de82c604"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/05-l7-l8.stdout.txt",
+      "bytes": 9992,
+      "sha256": "fd64f516ea9b886c5a8bcfcda96edcd70dd1f9c063c877fc2f0ea2567138a0a4"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/06-sim-guard.command.txt",
+      "bytes": 436,
+      "sha256": "f96009f8c1805c64048a48689411140ec2a95bdf6322af8fe427742b061954e1"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/06-sim-guard.exit.txt",
+      "bytes": 38,
+      "sha256": "62c05b77a83aab925a8ae641db8901e092466aed281b18218b87203fc79d8e53"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/06-sim-guard.stdout.txt",
+      "bytes": 19554,
+      "sha256": "c3e2526136e94478fa91d4f31114bdcf47ecd51e6294c93cc18630c9d5a0badf"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/07-declarations.command.txt",
+      "bytes": 451,
+      "sha256": "0a8624b4f219429b0516504c044e02a9a5e549977fbb0cc827500705fdd6c834"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/07-declarations.exit.txt",
+      "bytes": 38,
+      "sha256": "248ca88e478a5080cea8ab32776d210559c6a003d4130d2863a0ce431db1c6d6"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/07-declarations.stderr.txt",
+      "bytes": 82,
+      "sha256": "051289ef304a5e479ce21ec5b37b9aa64b76d492d13bc4aa10da030415bfbdbc"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/07-declarations.stdout.txt",
+      "bytes": 37619,
+      "sha256": "7e2c425c58404e454780b4f6360c2f90035e331d1772617d1501e7aabeb230de"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/08-l7-l8-enabled.command.txt",
+      "bytes": 307,
+      "sha256": "303681109fdf1254b168d3f7b9329b308096dc96ce21cfb1d972827eaeb38c31"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/08-l7-l8-enabled.exit.txt",
+      "bytes": 38,
+      "sha256": "8458ea67a4b188263264674b4407c62923baa286490bc324d8b06dea88ceeab6"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/08-l7-l8-enabled.stdout.txt",
+      "bytes": 9811,
+      "sha256": "787a11ab91926595df3d981f43f19177eae68e12dd881dcd9a25e8ded948bbf9"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/09-after-l7-l8.command.txt",
+      "bytes": 136,
+      "sha256": "a66d398b03750ba8b6bbee95ace1f905291b8791d7fbf24c0b4c6f96e086105b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/09-after-l7-l8.exit.txt",
+      "bytes": 38,
+      "sha256": "07b7837dd231761b69935919ee43e60e49496965fa35ddf5f4db4f6cdd6cc130"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/09-after-l7-l8.stdout.txt",
+      "bytes": 112,
+      "sha256": "1f764007deb6a16d5a3c6ea81c24199de0f24ff7c93b5089cdf3c894efd6b7fd"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/10-response-core.command.txt",
+      "bytes": 666,
+      "sha256": "b8eee80f8a006589df1ccce9b6a0ba2bb6c3fe0465b4f5ea2d764d1671d03c42"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/10-response-core.exit.txt",
+      "bytes": 38,
+      "sha256": "61cfa1a8a8dfca0b42b813d7f602800de90966b51929d9cdfc7b9ee5870828fa"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/10-response-core.stderr.txt",
+      "bytes": 58,
+      "sha256": "49c0f20c9d1c803152bf4a9947193fc6216333b8d60bdafc4c213d2e43d6f788"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/10-response-core.stdout.txt",
+      "bytes": 134707,
+      "sha256": "0a03e33a93b5152b23f7dcb7d7e7f81d1c776039d743c410d0ac837fd790221b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/11-full-wl416.command.txt",
+      "bytes": 269,
+      "sha256": "477cfa0c0e976f55b1dc9bbeafb617fb835b2b611d2098f82c8f0c5ab9c7e3a1"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/11-full-wl416.exit.txt",
+      "bytes": 38,
+      "sha256": "d76b9d3a3fd657ace3d1a738b288302c681bcfd9c5c1b0042fadce1de6746a5e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/11-full-wl416.stdout.txt",
+      "bytes": 9026,
+      "sha256": "3cbb4f972c05da7393738d33ffcf8c8daa5d937aeb504b8814853029782be487"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/12-after-full.command.txt",
+      "bytes": 136,
+      "sha256": "005d80211f13749ae6da500dc90afcca96500c9e64b4506d689af97273c871ef"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/12-after-full.exit.txt",
+      "bytes": 38,
+      "sha256": "a0b4a4ee03f4def7c35e5c8ca83a8885d9519a236dcdd88e780cfdb82906cb3e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/12-after-full.stdout.txt",
+      "bytes": 112,
+      "sha256": "8aae0b11c6f5b3913dd05af028da115f61e94f45cf49a5f9522504d5041f411b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/13-shapes-and-invalid-tests.command.txt",
+      "bytes": 442,
+      "sha256": "9d0a4a562dd6de73158af7d64775c7333e9395218443b6ecb3fd4aa9a394e92f"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/13-shapes-and-invalid-tests.exit.txt",
+      "bytes": 38,
+      "sha256": "4be9bc20267d61c0798aa4c625c3ce7db5c54d30d65442bb10de00e0e132b680"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/13-shapes-and-invalid-tests.stdout.txt",
+      "bytes": 35868,
+      "sha256": "be26fe4bb127ae821bee515d3dc89c83fae75f546441318ad1a921760f7fcfd9"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/14-prepare-mutant.command.txt",
+      "bytes": 134,
+      "sha256": "9e2f8fe4ed2e88ebdbe3a377e30229ab3b8c568b018d7dec171f4e607e14f112"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/14-prepare-mutant.exit.txt",
+      "bytes": 38,
+      "sha256": "a0f285e70ee1d57b6f7cb5df47389bc174c022ba6814e25478aeba98c74e5a52"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/14-prepare-mutant.stdout.txt",
+      "bytes": 456,
+      "sha256": "6c4476873d097c998929be412c5868152e62425ec251e21bfcb758856e3009c8"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/15-stop-zombie.command.txt",
+      "bytes": 209,
+      "sha256": "6b9858101e322386c5da33ef11fa16d70a6b725dc8d43f82e2f6cb47fcfa3f5b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/15-stop-zombie.exit.txt",
+      "bytes": 38,
+      "sha256": "1a41440dc2cff455cafb80a85a11d6dee9c48067e7e3ab6df4fe0c0481bfef9d"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/15-stop-zombie.stderr.txt",
+      "bytes": 360,
+      "sha256": "93dd2eb1dbd62d4d4c71ee4a97af8a670ec73e30ff45a010dd0f335c58521951"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/15-stop-zombie.stdout.txt",
+      "bytes": 313,
+      "sha256": "6c04fee93c8fcd1bdcfdf8c857d02c6d6401783af943994b5859c35a40a3153d"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/16-stop-zombie.command.txt",
+      "bytes": 221,
+      "sha256": "0c16ff135d06a008c65571e4cb3457124d3ec5abc286a428363f78b0a956ef33"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/16-stop-zombie.exit.txt",
+      "bytes": 38,
+      "sha256": "b918efbf0f0379f27dc4d0e84eb5e72246f74b5a7fc75f080a5518a56ca03713"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/16-stop-zombie.stdout.txt",
+      "bytes": 319,
+      "sha256": "fbe258099f15e3e2c9d4c2ece9dc2e16bfea14cf352d0e688a392d99dc713f68"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/17-stop-nonowner.command.txt",
+      "bytes": 211,
+      "sha256": "e88ebe3297a0ea481a147577226e2b8d517d0c8703a281acef901ae0acd56e90"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/17-stop-nonowner.exit.txt",
+      "bytes": 38,
+      "sha256": "479d32c4139417565c4403bdae1f6910a9e261123614d315d151bb223fee4f4e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/17-stop-nonowner.stderr.txt",
+      "bytes": 360,
+      "sha256": "ab0aa13a666e0b500614742dcdcc8bde6dac0c62293be663a5acf9b489ea9de7"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/17-stop-nonowner.stdout.txt",
+      "bytes": 405,
+      "sha256": "65d6b75b556cd6221af12065efd413bb9846b9126b9f1f6f545b2da638993087"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/18-stop-nonowner.command.txt",
+      "bytes": 223,
+      "sha256": "89a8e53d9977a0194a25d0bcb6ee8026d74b1616eca0644e030902076930ffc7"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/18-stop-nonowner.exit.txt",
+      "bytes": 38,
+      "sha256": "bf0972ffc8252084c0661e18b3a8d7215f91503fb8c42a4dc45d158388e4cc80"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/18-stop-nonowner.stdout.txt",
+      "bytes": 460,
+      "sha256": "4f55a04416b6ab52b13716c42995e87ac69582c68b59031d52345484d8aa16ef"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/19-stop-unresolved.command.txt",
+      "bytes": 213,
+      "sha256": "b0f36c87d75a234982d9365e4ddcbdf2ff83cc5bdee7ee9371ad12da98c54614"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/19-stop-unresolved.exit.txt",
+      "bytes": 38,
+      "sha256": "fe53825c22b1b3c561433d0e004efa53b6678e60b4c86167b31a3280e813f853"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/19-stop-unresolved.stderr.txt",
+      "bytes": 360,
+      "sha256": "14ffb8268bed4059b080ad15044eddf0a8aeaec4696b72dd440e3f27deaeaf6c"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/19-stop-unresolved.stdout.txt",
+      "bytes": 359,
+      "sha256": "3dd3ba7337e0f7d54280f633114ac5598400d0cf358fd959e53b70318925a4ea"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/20-stop-unresolved.command.txt",
+      "bytes": 225,
+      "sha256": "5edd0963a5fbe82967d138042743309c94ff03333b429b9003aba57d78dcc4a4"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/20-stop-unresolved.exit.txt",
+      "bytes": 38,
+      "sha256": "5998df6ff2c25439b88b179625366f306fbab9a063b22cf848effb355dd0707a"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/20-stop-unresolved.stdout.txt",
+      "bytes": 364,
+      "sha256": "1bb9ce7f68c722a31ad285acf4a502db04c576d1843c46fa73ad4133d42ee7e2"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/21-stop-channel-failure.command.txt",
+      "bytes": 218,
+      "sha256": "79647da9889f800703cd2d2671b366d6f436685344dcb8526d7c1991595e757f"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/21-stop-channel-failure.exit.txt",
+      "bytes": 38,
+      "sha256": "bbdb3956770a0e1827e8160d98576e95b3b58eae1089ac34ed1079cac6e193a7"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/21-stop-channel-failure.stderr.txt",
+      "bytes": 360,
+      "sha256": "fe4f56cad1f64f5fe2706dcda5f97ce064b9e25852f1393e4c61537caaa7776a"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/21-stop-channel-failure.stdout.txt",
+      "bytes": 407,
+      "sha256": "8d2bfbadd6bbe54e21c2862a23850ce0b6024d3b9c1877f07734308acf6edf00"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/22-stop-channel-failure.command.txt",
+      "bytes": 230,
+      "sha256": "70d6d07a91491b797ee7a75340c4c02a930875ddc2265bedefb906663a252798"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/22-stop-channel-failure.exit.txt",
+      "bytes": 38,
+      "sha256": "ec9e21b1209679481742b71ee37779d0373017df717943dc4fd9ed6396191212"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/22-stop-channel-failure.stdout.txt",
+      "bytes": 463,
+      "sha256": "352d39b27ffc9d790082399a8c9f7fbee249d809b3dbca0f69958f921611253b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/23-stop-absent.command.txt",
+      "bytes": 221,
+      "sha256": "d04111226b316ea47990696e2c87f1e67f29beffe1afc1ed48ca419b812d8e6f"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/23-stop-absent.exit.txt",
+      "bytes": 38,
+      "sha256": "c2206ef4ef51fb32f91203f08e97504102115b272d08e8c747c30d638db92731"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/23-stop-absent.stdout.txt",
+      "bytes": 410,
+      "sha256": "503299c866e33ade9a5c325397e535d0a0b4ff517c79e7bc5b56171a75c6ec16"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/24-after-stop-probes.command.txt",
+      "bytes": 136,
+      "sha256": "7a07d68ad48d4dcf5cb538798666503ff5529799c3f03d05f1b17827cfb99402"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/24-after-stop-probes.exit.txt",
+      "bytes": 38,
+      "sha256": "da06933045427e146db41afd85edad139347532fe93fc35c4a17d5a9fde1cf5d"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/24-after-stop-probes.stdout.txt",
+      "bytes": 112,
+      "sha256": "56f5f5958f5d6aa003446c1edf794cc548c7ed771cbdbcdcd48c101d15c1e69c"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/25-new-tests-old-helper.command.txt",
+      "bytes": 384,
+      "sha256": "297293def70be1850b6ccbac1ebbf157ba457353eee2e7cd6e623cc57a691f9e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/25-new-tests-old-helper.exit.txt",
+      "bytes": 38,
+      "sha256": "806ee55997941118bba7f9f70d776a5a757a51a8608d0e3504ddf68994d931c2"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/25-new-tests-old-helper.stdout.txt",
+      "bytes": 12071,
+      "sha256": "4c79b0ae4cf2892e72193e9541e5632dee975b04fa2b2d6cfc187c28ce0c14ab"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/26-after-old-helper.command.txt",
+      "bytes": 136,
+      "sha256": "9923159b9252bee679769ccde0e5a77809a64377f91818a083d69a911b65be49"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/26-after-old-helper.exit.txt",
+      "bytes": 38,
+      "sha256": "e05a95a90d85ff6d6387b123bcb863c9d75c2726f6b0e0b92fa4f297ecfa28f6"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/26-after-old-helper.stdout.txt",
+      "bytes": 112,
+      "sha256": "7683978145dd49414f9bb4b47bdc9c021e941446a0c5e090d2c5cc27d65cc297"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/27-sc1-raw-baseline.command.txt",
+      "bytes": 365,
+      "sha256": "b0c2b41fd905a903c7cd2f9059b1f5401bd2eb5d570f95089aebc404ad4c5f0b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/27-sc1-raw-baseline.exit.txt",
+      "bytes": 38,
+      "sha256": "3351a289d93b8035debca14fdf018530bf5acb3b622efcc7f98baac56fbb912f"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/27-sc1-raw-baseline.stdout.txt",
+      "bytes": 78256,
+      "sha256": "52f5176d7e30b55be18d9bfbab92062e02835a829658418b6c8b7f5e7dc9b5c1"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/28-sc1-mutant.command.txt",
+      "bytes": 377,
+      "sha256": "00ae599c094ddea405f4de186f29a2a6e6bd18c7e653793f87dfe8670d2b94b6"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/28-sc1-mutant.exit.txt",
+      "bytes": 38,
+      "sha256": "d9da9178b44eda272a71164b4322a7b2a797e96ae9dc59e78b0efd1d219c7453"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/28-sc1-mutant.stdout.txt",
+      "bytes": 42523,
+      "sha256": "5f9b376fc3dad17360e2c80c5caf88984800fd8c550c2a5e312ff8dace33cc13"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/29-after-context.command.txt",
+      "bytes": 136,
+      "sha256": "68f348cb6c1cf392de124dbcc8097539933a7415455f824279670fb871cdf71a"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/29-after-context.exit.txt",
+      "bytes": 38,
+      "sha256": "326bebdd5f0a6771238115b2484c11e6b8badf058cd413f97ee76388960aa508"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/29-after-context.stdout.txt",
+      "bytes": 112,
+      "sha256": "3d991d37f766193b8cb00a854b7b58ed4466bb242577043492715f6c9016bf99"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/30-sc1-after-mutant.command.txt",
+      "bytes": 297,
+      "sha256": "d0a2912344ce4e4fa368708ec692ffd82cd12213acc137d92825608316559d05"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/30-sc1-after-mutant.exit.txt",
+      "bytes": 38,
+      "sha256": "e603357b3bf1807c83db33dfb23ab3eaa7c8917ff7ef837a5d664e121832fd45"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/30-sc1-after-mutant.stdout.txt",
+      "bytes": 9966,
+      "sha256": "161dff688d54d3549d4383ef8e6ea8eadd01c41dbf1dc0ba3b1fe8b1f2b6c956"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/31-guard-original-error.command.txt",
+      "bytes": 198,
+      "sha256": "6281d0cc3c18e1c6f3e72a8d0c79bc2c3ee8157d188650d75f2a1445a3400209"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/31-guard-original-error.exit.txt",
+      "bytes": 38,
+      "sha256": "12c64ae22f7887f6a4309bd9e4f707a50863e54e27eb1fd657d4f8eeca903cde"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/31-guard-original-error.stdout.txt",
+      "bytes": 334,
+      "sha256": "c7ca3dacd64dfbe7c1d701c635cb4764c08f79ccee722b46583df7addec36563"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/32-guard-cleanup-eacces.command.txt",
+      "bytes": 189,
+      "sha256": "3cdea1367c99adf7ee3999be288e585145855d608bde253172166937f2a7ff60"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/32-guard-cleanup-eacces.exit.txt",
+      "bytes": 38,
+      "sha256": "2111e95974b4c5992faf7d42deb2d2feea1d0415f272a1eb261a287cfb24df7f"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/32-guard-cleanup-eacces.stdout.txt",
+      "bytes": 436,
+      "sha256": "0354488b6dba2934847bf84fcdaf6ac8aa48e6f5633d46d34db29e452a6bddcd"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/33-fup-response-context.command.txt",
+      "bytes": 335,
+      "sha256": "03ebd04357fa092d325d930b668632c5d3ea23a4d86c29f6f83e43f77ab6c38c"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/33-fup-response-context.exit.txt",
+      "bytes": 38,
+      "sha256": "502bd3e99fd86020e2a27e9b4f7307216fbd891460bd591257c820a976024a65"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/33-fup-response-context.stdout.txt",
+      "bytes": 8960,
+      "sha256": "3e09150b43c5cec4220844bf4fc820499e1050f505f19400cc87006857c71f00"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/34-after-guard-and-fup.command.txt",
+      "bytes": 136,
+      "sha256": "2fff2f06b6ef2e9868a47de15f32e07e6736f2ef9db26f06fb59989b8454e52c"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/34-after-guard-and-fup.exit.txt",
+      "bytes": 38,
+      "sha256": "6f01be9d0bed0c0cbeee553e840295afdada8e039faa42ab3f64b5d824d923c1"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/34-after-guard-and-fup.stdout.txt",
+      "bytes": 112,
+      "sha256": "9375c6a4cc4495ea3e4e76891a11211107bfa634c30ab28b29fe79fb8c0a8e32"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/35-evidence-summary.command.txt",
+      "bytes": 138,
+      "sha256": "aa5f48e1109efbbf570c1096557e40d99e1c3dfdb4d6a9fe510ea997da0593cd"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/35-evidence-summary.exit.txt",
+      "bytes": 38,
+      "sha256": "78216e592333e3a4493c4fc8b6ee9ff76904c532d9177a5616fb65bc8ea74406"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/35-evidence-summary.stdout.txt",
+      "bytes": 5207,
+      "sha256": "1c458e767fc4e4392bee8c1e771b1782699193fe34c1e3bf2e72a9078fb895f0"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/36-final-integrity.command.txt",
+      "bytes": 984,
+      "sha256": "a581f443741dde34aa742bd45801eba561acbc29b6480553cecb865c5efd9102"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/36-final-integrity.exit.txt",
+      "bytes": 38,
+      "sha256": "bd347d61ab7e79c65fa1e6c86662cbb77f37c8f7b4ebfe108fd9e96faac06b04"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/36-final-integrity.stdout.txt",
+      "bytes": 2399,
+      "sha256": "e484dd3dac74b25e0dc6b64c664935b97356d7539b328d515a66f377b8debdc3"
+    }
+  ],
+  "supportFiles": [
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/cleanup-error-probe.mjs",
+      "bytes": 2050,
+      "sha256": "c1e477ecfd054d0608c9991fc6119d285c602b75fd4074c37705025900fa6c06"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/evidence-manifest.mjs",
+      "bytes": 1254,
+      "sha256": "312f3eaaa002fea25d637713d1e33aff4cdf38a1e7d6ccd2dab0c9fec17a4a5e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/finalize-report.mjs",
+      "bytes": 1569,
+      "sha256": "10eac1f8651927f2da6a7130dcefc77c60cd00b5975f69cc53c591312aa2eb12"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/mutant-core.cs",
+      "bytes": 134287,
+      "sha256": "37d5ebfce1526b32a92bf402bf4114b1309c4b7fae15a7cd76428111c427f17d"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/old-helper-loader.mjs",
+      "bytes": 372,
+      "sha256": "c199e7aec4b52f5afb47650525f64ade35ecb1a5ead7d0362311de69fb919d18"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/prepare-mutant.mjs",
+      "bytes": 950,
+      "sha256": "6bc08591e11f3f254e10124ff5b71dd01b8dbe1bd8fb3bf5ec2b8f32d833068e"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/process-snapshot.mjs",
+      "bytes": 1096,
+      "sha256": "b70600758147e5f658d346fa12d39361df86da8f9e0882ed06ad72ffbad0868a"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/record.mjs",
+      "bytes": 1174,
+      "sha256": "0828d22cbe8eb743f10085ad21ef7756e78c1b85d89ffd0ee8290ec2655160cc"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/sc1-harness.ps1",
+      "bytes": 763,
+      "sha256": "0be84e86ab57702c72afdffdc0f64f63881bae4349855e8c746fa24bf7b62d4b"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/sc1-hook.mjs",
+      "bytes": 830,
+      "sha256": "5954dfb5d43c13205fc6fb6c6864e3df2be619a8f3d0ebd8eb5adb1cbb3d6eac"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/stop-probes.mjs",
+      "bytes": 5356,
+      "sha256": "574a7fd36a13954e3c92c55baac49a9b82db44e915f49c645c079cf6098ded52"
+    },
+    {
+      "path": "/tmp/council-wl422-gpt_6_1_sol/summarize-evidence.mjs",
+      "bytes": 1792,
+      "sha256": "a9c1b739801f069435972716cda0a68450f163faa6f93e8e2fd00e849433c685"
+    }
+  ]
+}
