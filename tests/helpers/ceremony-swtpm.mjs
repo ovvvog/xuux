@@ -451,17 +451,28 @@ export function startSim(opts = {}) {
 
 // قتلُ عمليّةِ المحاكي وانتظارُ زوالِها قبلَ حذفِ مجلّدِ الحالةِ (الحذفُ وحدَه ترك 21 يتيمًا — WL-413 R3).
 // الحذفَ بعدَ إثباتِ الزوالِ فقط: تعذّرَ الإيقافُ أو تعذّرَ إثباتُ الهويّةِ ⇒ يُحفَظُ المجلّدُ ويُعادَ false.
+// WL-421 (WL420-gpt_6_1_sol-01، WL420-grok_4_7-01): نتيجةُ المسحِ النهائيِّ هي نموذجُ terminateAttempt نفسُه —
+// لا يُعلَنُ التوقّفُ مع مالكٍ حيٍّ، ولا مع عمليّةٍ غيرِ محسومةِ الهويّةِ، ولا مع زومبي غيرِ مُلقّاةٍ (لا سطرَ
+// أوامرَ لها فلا إسنادَ، وقد تكونُ محاكينا). وفشلُ إنهاءِ الرقمِ المسلَّمِ لا يوقفُ المسارَ مبكّرًا: المالكُ
+// المُثبَتُ ملكُه بالمسحِ يُنهى بالمسارِ نفسِه (killSim: هويّةٌ قبلَ الإشارةِ، ولا إشارةَ لرقمٍ لم تُثبَتْ هويّتُه)،
+// ثمّ يُعادُ false لأنّ زوالَ الرقمِ المسلَّمِ أو انتماءَه لم يُثبَت.
+const STOP_SETTLE_MS = 1000; // مهلةُ استقرارٍ محدودةٌ لزومبي عابرةٍ يُلقّيها أبوها — لا تحويلَ لزومبي باقيةٍ إلى نجاح
+function stopScanClear(dir) {
+  for (let waited = 0; ; waited += 50) {
+    const r = scanStateDir(dir);
+    if (r.matches.length === 0 && r.unresolved.length === 0 && r.zombies.length === 0) return true;
+    if (r.matches.length > 0 || waited >= STOP_SETTLE_MS) return false;
+    sleepMs(50);
+  }
+}
 export function stopSim(s) {
   if (!s) return true;
-  const stopped = killSim(s.pid, { dir: s.dir });
-  if (stopped !== true) return false;
-  // زوالُ الرقمِ المسلَّمِ وحدَه ليس زوالَ المالكِ (WL-418، WL418-grok_4_7-01): عمليّةُ swtpm حيّةٌ مُثبَتٌ
-  // أنها تملكُ مسارَ الحالةِ ⇒ تُنهى بالمسارِ نفسِه (هويّةٌ قبلَ الإشارة)، ولا يُعلَنُ التوقّفُ ولا يُحذَفُ
-  // المجلّدُ إلّا بعدَ أن يخلوَ المسحُ القرائيُّ منها.
+  const deliveredGone = killSim(s.pid, { dir: s.dir }) === true;
+  let ownersGone = true;
   for (const p of scanStateDir(s.dir).matches) {
-    if (killSim(p, { dir: s.dir }) !== true) return false;
+    if (killSim(p, { dir: s.dir }) !== true) ownersGone = false;
   }
-  if (scanStateDir(s.dir).matches.length > 0) return false;
+  if (!deliveredGone || !ownersGone || !stopScanClear(s.dir)) return false;
   try {
     rmSync(s.dir, { recursive: true, force: true });
   } catch {

@@ -16,11 +16,11 @@
 //        الأساسِ أو ظهرَ بعدَهُ.
 // كلُّ اختبارٍ يشغّلُ محاكيَه الخاصَّ. لا TBS، ولا /dev/tpm*، ولا عتاد.
 
-import { test } from 'node:test';
+import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn as spawnChild, spawnSync } from 'node:child_process';
 import { writeFileSync, unlinkSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
@@ -71,6 +71,38 @@ function withSim(fn) {
     if (ok) assert.equal(st, true, 'stopSim must prove termination and remove the state dir');
   }
 }
+
+// WL-421: كلُّ ابنٍ غيرِ متزامنٍ يُطلقُه اختبارٌ يُسجَّلُ، وبعدَ كلِّ اختبارٍ يُلقّى ما خرجَ منها (زومبي أو زائل)
+// بدورةِ حلقةِ أحداثٍ حقيقيّة — الاختباراتُ المتزامنةُ لا تُديرُ الحلقةَ فيبقى الابنُ الخارجُ زومبي في عمليّةِ
+// الاختبارِ، فيحجبُ (بحقٍّ) إثباتَ توقّفٍ لاحقٍ: stopSim لا يعلنُ التوقّفَ مع زومبي غيرِ مُلقّاة.
+const trackedChildren = new Set();
+function spawn(...args) {
+  const c = spawnChild(...args);
+  trackedChildren.add(c);
+  return c;
+}
+function childExitedOrZombie(pid) {
+  try {
+    const st = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return st.slice(st.lastIndexOf(')') + 2).split(' ')[0] === 'Z';
+  } catch {
+    return true;
+  }
+}
+afterEach(async () => {
+  for (const c of trackedChildren) {
+    if (c.exitCode !== null || c.signalCode !== null) {
+      trackedChildren.delete(c);
+      continue;
+    }
+    if (!c.pid || !childExitedOrZombie(c.pid)) continue; // ما زالَ حيًّا: لا يُنتظرُ ولا يُقتَل
+    await Promise.race([
+      new Promise((r) => c.once('exit', r)),
+      new Promise((r) => setTimeout(r, 2000).unref()),
+    ]);
+    if (c.exitCode !== null || c.signalCode !== null) trackedChildren.delete(c);
+  }
+});
 
 // ESRCH وحدها غيابٌ مؤكَّدٌ لرقمِ مقبضٍ معروفٍ: أيُّ خطأٍ آخر (EPERM مثلًا) حالةٌ مجهولةٌ لا دليلَ موتٍ.
 // والزومبي (Z) منتهيةٌ فعليًا وإن بقي مدخلُها في /proc حتى يُلقَّ — «ميّتةٌ» لا «حيّةٌ».
@@ -405,6 +437,32 @@ simPwshTest('CTX2: فقدُ ردِّ التحريرِ داخلَ البروفة�
     assert.ok(
       list(r2.reconciliation).some((x) => /still present; release outcome unknown/.test(String(x))),
       'reconciliation must honestly record the unknown release outcome: ' + JSON.stringify(list(r2.reconciliation)),
+    );
+  });
+});
+
+// SC1 (WL-421 — المسارُ المباشرُ SessionConsumed): بروفةٌ حقيقيّةٌ كاملةٌ على swtpm، والناقلُ شاهدٌ قرائيٌّ فقط
+// (لا يغيّرُ بايتًا): يجردُ مقابضَ جلساتِ السياسةِ المحمّلةِ قبلَ NV_Increment بجلسةِ السياسةِ وبعدَه. الخاصيّةُ
+// المقيسةُ: المحاكي نفسُه يُثبتُ أنّ الجلسةَ كانت محمّلةً ثمّ زالت باستهلاكِها، والنواةُ في المسارِ الإنتاجيِّ
+// (StageS2Validation → SessionConsumed) أزالت سياقَها — contextGone تُشتقُّ من الخرائطِ (Knows) بعدَ الإزالةِ لا من
+// تجاورِ نصٍّ، فحذفُ _ctx.EndOfLife من SessionConsumed يُسقطُ هذا الاختبار (قيسَ بالطفرةِ في WL-421). حدُّه: يقيسُ
+// الإزالةَ لا الرفضَ — رفضُ ردِّ سياسةٍ لاحقٍ على المقبضِ المستهلكِ (RESPONSE_POLICY_CONTEXT_UNKNOWN عبرَ
+// TrySessionType) مستنتَجٌ من الشيفرةِ وغيرُ مقيسٍ هنا.
+simPwshTest('SC1: SessionConsumed في المسارِ الحقيقيِّ — المحاكي يُثبتُ الاستهلاكَ والسياقُ يُزالُ', () => {
+  withSim((s) => {
+    const o = fault(s, 'consumed-session-witness');
+    const r = o.report;
+    assert.equal(r.status, 'COMPLETE', 'a witness-only transport must not change the outcome: ' + JSON.stringify(r.failure || null));
+    assert.equal(Number(o.fault.changes), 1, 'the witness engaged exactly once (the policy-session NV_Increment)');
+    const h = String(o.fault.witnessSession);
+    assert.match(h, /^0x03[0-9a-f]{6}$/i, 'the consumed handle is a policy session');
+    assert.equal(o.fault.witnessPresentBefore, true, 'the policy session was loaded on the TPM before the increment');
+    assert.equal(o.fault.witnessPresentAfter, false, 'the TPM consumed the policy session (absent after the increment)');
+    const fact = String(r.facts['ctx.endOfLife.sessionConsumed'] || '');
+    assert.equal(
+      fact.toLowerCase(),
+      ('session-consumed ' + h + ' contextGone=True').toLowerCase(),
+      'the production path must remove the consumed session context (state-derived): ' + JSON.stringify(fact),
     );
   });
 });
@@ -1007,57 +1065,173 @@ for (const [id, mode, haltedCc, haltedName] of [
   });
 }
 
-// L7a (WL418-grok_4_7-01): ملفُّ PID يحملُ رقمًا لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا يُسلَّمُ الرقمُ (كانَ
-// يُسلَّمُ فيقيسُ stopSim عمليّةً أخرى ويحذفُ المجلّدَ ويتركُ المالكَ حيًّا) — يُعاملُ كمحاولةٍ لم تُسلَّم.
-simTest('L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى', () => {
-  const abandoned = [];
-  let launched = null;
-  let threw = null;
+// WL-421 (WL420-gpt_6_1_sol-02): حارسُ تنظيفٍ لاختباراتِ الرجوعِ. كلُّ مسارِ حالةٍ يُسجَّلُ فورَ معرفتِه، وبعدَ
+// الجسمِ — نجحَ أو رمى — يُنهى كلُّ مالكٍ مثبَتِ الهويّةِ (killSim: هويّةٌ قبلَ الإشارة) ويُحذفُ المجلّدُ إن خلا.
+// خطأُ الجسمِ الأصليُّ يُعادُ رميُه (مع ذكرِ أيِّ يتيمٍ تعذّرَ إنهاؤه)، وعندَ نجاحِه يُشترطُ ألّا يبقى يتيم.
+function cleanupOwned(dir) {
+  if (!dir) return []; // لا يُشترَطُ بقاءُ المجلّد: تنفيذٌ معيبٌ قد يحذفُه ومالكُه حيٌّ — الاكتشافُ بسطرِ الأوامر
+  for (const p of discoverSimPids(dir)) killSim(p, { dir });
+  const left = discoverSimPids(dir);
+  if (left.length === 0) rmSync(dir, { recursive: true, force: true });
+  return left;
+}
+function withCleanupGuard(body) {
+  const dirs = new Set();
+  let err = null;
   try {
-    startSimShared({
-      prefix: 'xuux-wl418-l7a-',
-      portBase: 3520,
-      label: 'WL-418/L7a',
-      attempts: 1,
-      readyTries: 2,
-      readyDelayMs: 50,
-      probe: () => true,
-      afterSpawn: ({ pid, pidFile }) => {
-        launched = pid;
-        writeFileSync(pidFile, '2147483001');
-      },
-      onAbandon: (a) => abandoned.push(a),
+    body((d) => {
+      if (d) dirs.add(d);
+      return d;
     });
   } catch (e) {
-    threw = e;
+    err = e;
   }
-  assert.ok(threw, 'a pid that does not own the state dir must not be handed over');
-  assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
-  assert.equal(abandoned[0].reason, 'pid-not-owner');
-  assert.equal(abandoned[0].stopped, true, 'the real (state-dir-bound) simulator is terminated');
-  assert.equal(discoverSimPids(abandoned[0].dir).length, 0, 'no orphan swtpm');
-  assert.equal(stateDirExists(abandoned[0].dir), false);
-  assert.ok(Number.isInteger(launched) && launched > 1);
-  let alive;
-  try {
-    process.kill(launched, 0);
-    alive = true;
-  } catch (e) {
-    alive = e.code !== 'ESRCH';
+  const leftovers = [...dirs].flatMap((d) => cleanupOwned(d));
+  if (err) {
+    if (leftovers.length > 0) err.message += ' | orphan swtpm left after cleanup: ' + JSON.stringify(leftovers);
+    throw err;
   }
-  assert.equal(alive, false, 'the launched owner is gone');
+  assert.deepEqual(leftovers, [], 'no orphan swtpm after the test');
+  for (const d of dirs) assert.deepEqual(discoverSimPids(d), [], 'no live owner of ' + d);
+}
+
+// L7a (WL418-grok_4_7-01): ملفُّ PID يحملُ رقمًا لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا يُسلَّمُ الرقمُ (كانَ
+// يُسلَّمُ فيقيسُ stopSim عمليّةً أخرى ويحذفُ المجلّدَ ويتركُ المالكَ حيًّا) — يُعاملُ كمحاولةٍ لم تُسلَّم.
+// WL-421: الجسمُ كلُّه تحتَ حارسِ التنظيفِ — مسارُ الحالةِ يُسجَّلُ عندَ الإطلاقِ فلا يتيمَ ولو سُلِّمَ المقبضُ خطأً.
+simTest('L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى', () => {
+  withCleanupGuard((track) => {
+    const abandoned = [];
+    let launched = null;
+    let threw = null;
+    try {
+      const handed = startSimShared({
+        prefix: 'xuux-wl418-l7a-',
+        portBase: 3520,
+        label: 'WL-418/L7a',
+        attempts: 1,
+        readyTries: 2,
+        readyDelayMs: 50,
+        probe: () => true,
+        afterSpawn: ({ pid, dir, pidFile }) => {
+          launched = pid;
+          track(dir);
+          writeFileSync(pidFile, '2147483001');
+        },
+        onAbandon: (a) => abandoned.push(a),
+      });
+      track(handed && handed.dir);
+    } catch (e) {
+      threw = e;
+    }
+    assert.ok(threw, 'a pid that does not own the state dir must not be handed over');
+    assert.equal(abandoned.length, 1, JSON.stringify(abandoned));
+    assert.equal(abandoned[0].reason, 'pid-not-owner');
+    assert.equal(abandoned[0].stopped, true, 'the real (state-dir-bound) simulator is terminated');
+    assert.equal(discoverSimPids(abandoned[0].dir).length, 0, 'no orphan swtpm');
+    assert.equal(stateDirExists(abandoned[0].dir), false);
+    assert.ok(Number.isInteger(launched) && launched > 1);
+    assert.equal(pidProvenDead(launched), true, 'the launched owner is gone');
+  });
 });
 
 // L7b (WL418-grok_4_7-01): stopSim بمقبضٍ رقمُه زائلٌ والمالكُ حيٌّ ⇒ لا يُعلَنُ التوقّفُ قبلَ إنهاءِ المالكِ
-// المُثبَتِ ملكُه بالمسحِ (كانَ يعيدُ true ويحذفُ المجلّدَ والمالكُ حيٌّ).
+// المُثبَتِ ملكُه بالمسحِ (كانَ يعيدُ true ويحذفُ المجلّدَ والمالكُ حيٌّ). WL-421: تحتَ حارسِ التنظيف.
 simTest('L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم', () => {
-  const s = startSimShared({ prefix: 'xuux-wl418-l7b-', portBase: 3540, label: 'WL-418/L7b', attempts: 1 });
-  const owners = discoverSimPids(s.dir);
-  assert.deepEqual(owners, [s.pid], 'startSim hands over the proven owner');
-  const st = stopSim({ ...s, pid: 2147483000 });
-  const after = discoverSimPids(s.dir);
-  if (after.length > 0) stopSim({ ...s, pid: after[0] });
-  assert.deepEqual(after, [], 'a stop claim requires the state-dir owner to be gone');
-  assert.equal(st, true);
-  assert.equal(stateDirExists(s.dir), false);
+  withCleanupGuard((track) => {
+    const s = startSimShared({ prefix: 'xuux-wl418-l7b-', portBase: 3540, label: 'WL-418/L7b', attempts: 1 });
+    track(s.dir);
+    assert.deepEqual(discoverSimPids(s.dir), [s.pid], 'startSim hands over the proven owner');
+    const st = stopSim({ ...s, pid: 2147483000 });
+    assert.deepEqual(discoverSimPids(s.dir), [], 'a stop claim requires the state-dir owner to be gone');
+    assert.equal(st, true);
+    assert.equal(stateDirExists(s.dir), false);
+  });
+});
+
+// L7c (WL-421، WL420-gpt_6_1_sol-01): مالكٌ حقيقيٌّ لمسارِ الحالةِ صارَ زومبي (SIGKILL لابنٍ لم يُلقَّ بعدُ) ⇒
+// stopSim برقمٍ زائلٍ لا يعلنُ التوقّفَ ولا يحذفُ المجلّد (كانَ يعيدُ true ويحذفُ والمالكُ زومبي). ثمّ يُلقّى
+// الابنُ ويُثبَتُ غيابُه بـESRCH ويُحذفُ المجلّدُ في finally — لا يتيمَ في نجاحٍ ولا فشل.
+simTest('L7c: مالكٌ زومبي غيرُ مُلقًّى ⇒ stopSim يعيدُ false ويحفظُ المجلّد', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xuux-wl421-l7c-'));
+  const pidFile = join(dir, 'swtpm.pid');
+  const port = 3580 + 2 * Math.floor(Math.random() * 40);
+  const child = spawn(
+    'swtpm',
+    [
+      'socket', '--tpm2', '--tpmstate', `dir=${dir}`,
+      '--server', `type=tcp,port=${port},bindaddr=127.0.0.1`,
+      '--ctrl', `type=tcp,port=${port + 1},bindaddr=127.0.0.1`,
+      '--flags', 'not-need-init,startup-clear', '--pid', `file=${pidFile}`,
+    ],
+    { stdio: 'ignore' },
+  );
+  const exited = new Promise((r) => child.once('exit', r));
+  try {
+    let owned = false;
+    for (let i = 0; i < 100 && !owned; i++) {
+      owned = discoverSimPids(dir).includes(child.pid);
+      if (!owned) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.ok(owned, 'the real swtpm owns the state dir');
+    child.kill('SIGKILL'); // لا حصادَ قبلَ دورانِ حلقةِ الأحداث ⇒ زومبي
+    let state = null;
+    for (let i = 0; i < 100 && state !== 'Z'; i++) {
+      const st = readFileSync(`/proc/${child.pid}/stat`, 'utf8');
+      state = st.slice(st.lastIndexOf(')') + 2).split(' ')[0];
+      if (state !== 'Z') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+    assert.equal(state, 'Z', 'the owner is an unreaped zombie');
+    assert.equal(stopSim({ pid: 2147483000, dir, pidFile }), false, 'an owned zombie is not proof of termination');
+    assert.equal(stateDirExists(dir), true, 'state dir kept while the owner is unresolved');
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.equal(pidProvenDead(child.pid), true, 'the reaped owner is absent (ESRCH)');
+  assert.deepEqual(discoverSimPids(dir), []);
+});
+
+// L7d (WL-421، WL420-grok_4_7-01): الرقمُ المسلَّمُ حيٌّ لكنه ليس المالكَ ⇒ لا إشارةَ إليه، والمالكُ المُثبَتُ
+// يُنهى رغمَ ذلك (كانَ stopSim يعودُ مبكّرًا ويتركُه حيًّا)، ولا يُعلَنُ التوقّفُ فيُحفَظُ المجلّد.
+simTest('L7d: رقمٌ مسلَّمٌ حيٌّ غيرُ مالكٍ ⇒ المالكُ المثبتُ يُنهى ولا يُعلَنُ التوقّف', async () => {
+  const decoy = spawn('sleep', ['120'], { stdio: 'ignore' });
+  const decoyExited = new Promise((r) => decoy.once('exit', r));
+  try {
+    withCleanupGuard((track) => {
+      const s = startSimShared({ prefix: 'xuux-wl421-l7d-', portBase: 3660, label: 'WL-421/L7d', attempts: 1 });
+      track(s.dir);
+      const owner = s.pid;
+      assert.equal(stopSim({ ...s, pid: decoy.pid }), false, 'an unproven delivered pid is not a stop proof');
+      assert.equal(pidProvenDead(decoy.pid), false, 'no signal to a pid whose identity is not ours');
+      assert.deepEqual(discoverSimPids(s.dir), [], 'the proven owner is terminated anyway');
+      assert.equal(pidProvenDead(owner), true);
+      assert.equal(stateDirExists(s.dir), true, 'dir kept: the claim is unproven');
+    });
+  } finally {
+    decoy.kill('SIGKILL');
+    await decoyExited; // يُلقّى الطُّعمُ قبلَ الاختبارِ التالي فلا يبقى زومبي يحجبُ إثباتَ توقّفٍ لاحق
+  }
+});
+
+// L8 (WL-421، WL420-gpt_6_1_sol-02): حارسُ التنظيفِ نفسُه في مسارِ الفشل — جسمٌ يرمي بعدَ إطلاقِ محاكٍ حقيقيٍّ
+// ⇒ الخطأُ الأصليُّ يصلُ كما هو، ولا تبقى عمليّةُ swtpm تملكُ المسار، ويُحذفُ المجلّد.
+simTest('L8: حارسُ التنظيفِ ينهي المحاكي ويعيدُ الخطأَ الأصليَّ عندَ فشلِ الجسم', () => {
+  let dir = null;
+  let pid = null;
+  assert.throws(
+    () =>
+      withCleanupGuard((track) => {
+        const s = startSimShared({ prefix: 'xuux-wl421-l8-', portBase: 3700, label: 'WL-421/L8', attempts: 1 });
+        dir = track(s.dir);
+        pid = s.pid;
+        assert.deepEqual(discoverSimPids(dir), [pid]);
+        throw new Error('WL421-injected-body-failure');
+      }),
+    /^Error: WL421-injected-body-failure$/,
+  );
+  assert.ok(dir && Number.isInteger(pid));
+  assert.deepEqual(discoverSimPids(dir), [], 'no orphan after a failing body');
+  assert.equal(pidProvenDead(pid), true);
+  assert.equal(stateDirExists(dir), false);
 });

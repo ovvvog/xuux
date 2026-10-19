@@ -1,0 +1,23 @@
+# SHA=339f59346c44a31e3db5ebc721b8dc75d19f2d3f helper=/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs
+# cmd: XUUX_HELPER=/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs node docs/external-review/reports/adr0007-ceremony-wl416-closure/evidence/wl421/probes/stop-zombie.mjs
+# date=2026-10-19T05:33:42Z
+{"helper":"/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs","ownerPid":10317,"ownerState":"Z","stopSimReturned":true,"stateDirExists":false}
+{"phase":"cleanup","ownerPid":10317,"reapedAbsentByESRCH":true}
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: a stale pid plus an owned zombie must not prove termination
+
+true !== false
+
+    at file:///home/user/workspace/repo/docs/external-review/reports/adr0007-ceremony-wl416-closure/evidence/wl421/probes/stop-zombie.mjs:44:10 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: true,
+  expected: false,
+  operator: 'strictEqual'
+}
+
+Node.js v20.20.2
+# exit=1
