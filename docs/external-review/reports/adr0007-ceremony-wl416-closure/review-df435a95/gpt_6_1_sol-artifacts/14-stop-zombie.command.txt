@@ -1,0 +1,5 @@
+cwd=/tmp/wt-a3f1505d
+command=env TMPDIR=/tmp/council-wl420-gpt_6_1_sol node /tmp/council-wl420-gpt_6_1_sol/stop-zombie-probe.mjs 
+start=2026-10-19T04:09:50Z
+end=2026-10-19T04:09:50Z
+exit=1

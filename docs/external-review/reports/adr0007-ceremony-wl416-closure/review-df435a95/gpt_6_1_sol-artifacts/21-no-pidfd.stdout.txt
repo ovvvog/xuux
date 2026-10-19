@@ -1,0 +1,2 @@
+{"phase":"without-python","pid":29244,"dir":"/tmp/council-wl420-gpt_6_1_sol/wl420-no-python-yQGma8","stopped":false,"nonzeroSignals":0,"liveOwners":[29244],"dirExists":true}
+{"phase":"cleanup","stopped":true,"remainingOwners":[]}

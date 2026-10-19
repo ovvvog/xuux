@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=nl -ba tests/helpers/TpmCeremonyFaultTransport.cs 
+start=2026-10-19T04:06:39Z
+end=2026-10-19T04:06:39Z
+exit=0

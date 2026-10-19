@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=bash -c nl\ -ba\ sim/tpm-ceremony/TpmCeremonyCore.cs\ \|\ sed\ -n\ \"655\,790p\"\;\ nl\ -ba\ tests/helpers/TpmCeremonyFaultTransport.cs\ \|\ sed\ -n\ \"668\,728p\"\;\ nl\ -ba\ tests/sim/tpm-ceremony-wl416.test.mjs\ \|\ sed\ -n\ \"975\,1063p\" 
+start=2026-10-19T04:11:58Z
+end=2026-10-19T04:11:58Z
+exit=0

@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=sed -n 1\,220p /tmp/council-wl420-brief.md 
+start=2026-10-19T04:10:33Z
+end=2026-10-19T04:10:33Z
+exit=0

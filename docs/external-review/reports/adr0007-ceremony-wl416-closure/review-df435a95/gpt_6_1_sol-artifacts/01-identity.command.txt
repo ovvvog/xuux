@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=bash -c date\ -u\;\ git\ rev-parse\ HEAD\;\ git\ status\ --porcelain=v1\;\ node\ --version\;\ swtpm\ --version\;\ pwsh\ --version\;\ git\ -C\ /tmp/wt-a3f1505d\ rev-parse\ HEAD\;\ git\ -C\ /tmp/wt-e23bd431\ rev-parse\ HEAD 
+start=2026-10-19T04:06:22Z
+end=2026-10-19T04:06:22Z
+exit=0

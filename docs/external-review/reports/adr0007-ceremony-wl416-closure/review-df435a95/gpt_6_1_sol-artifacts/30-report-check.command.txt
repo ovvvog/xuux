@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=node --input-type=module -e $'import {readFileSync,existsSync} from "node:fs"; const base="/tmp/council-wl420-gpt_6_1_sol/"; const s=readFileSync(base+"report.md","utf8"); const refs=[...s.matchAll(/\\]\\(([^)]+)\\)/g)].map(m=>m[1]); const missing=[...new Set(refs)].filter(p=>!existsSync(base+p)); console.log(JSON.stringify({reportBytes:Buffer.byteLength(s),references:refs.length,uniqueReferences:new Set(refs).size,missing,verdicts:s.match(/^## \330\247\331\204\330\250\331\206\330\257 .*$/gm),findings:s.match(/^### WL420-.*$/gm)},null,2)); if(missing.length)process.exit(1);' 
+start=2026-10-19T04:17:51Z
+end=2026-10-19T04:17:51Z
+exit=0

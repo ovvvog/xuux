@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=bash -c nl\ -ba\ docs/roadmap/05-work-log.md\ \|\ sed\ -n\ \"1\,120p\"\;\ nl\ -ba\ sim/tpm-ceremony/README.md\ \|\ sed\ -n\ \"66\,133p\" 
+start=2026-10-19T04:07:30Z
+end=2026-10-19T04:07:30Z
+exit=0

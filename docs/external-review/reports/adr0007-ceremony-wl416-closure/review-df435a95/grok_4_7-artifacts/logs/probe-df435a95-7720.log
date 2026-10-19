@@ -1,0 +1,11 @@
+core_file=/tmp/wt-df435a95-grok/sim/tpm-ceremony/TpmCeremonyCore.cs core_sha256=7a86b97a99a52c05e3d7712d93dbf3228ee7a965703350f157046a208f89e5e6
+probe_sha256=578ea4632f0699a9324639a0b68a77bb5b56721ed85bc094c4b10e78d2e7d54e
+core: EndOfLife present (fixed)
+recorded-reuse-new-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=True identity=B creationDataSha=AAAF769870C06CA0 verdict=ACCEPT
+unrecorded-reuse-new-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=False identity=B creationDataSha=AAAF769870C06CA0 verdict=REJECT RESPONSE_CREATION_PARENT_UNKNOWN: Create parent 0x80000000
+unrecorded-reuse-same-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=False identity=A creationDataSha=A1712AE1877941D9 verdict=REJECT RESPONSE_CREATION_PARENT_UNKNOWN: Create parent 0x80000000
+invalid-response-recorded-reuse: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=True identity=B creationDataSha=AAAF769870C06CA0 verdict=REJECT RESPONSE_CREATION_DATA_MALFORMED: Create parentName differs from known parent
+probe: done
+probe_exit=0
+swtpm_after_stop_with_dir=0
+EXIT:0

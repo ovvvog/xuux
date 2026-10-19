@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=git diff e23bd431 df435a951486f124a5c75a337f17bd96924d7352 -- sim/tpm-ceremony/TpmCeremonyCore.cs 
+start=2026-10-19T04:07:43Z
+end=2026-10-19T04:07:43Z
+exit=0

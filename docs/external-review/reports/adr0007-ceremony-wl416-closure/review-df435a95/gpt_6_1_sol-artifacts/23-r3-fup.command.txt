@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=env TMPDIR=/tmp/council-wl420-gpt_6_1_sol XUUX_TPM_SIM=1 TPM2TOOLS_TCTI=swtpm:host=127.0.0.1\,port=7600 node --experimental-loader=/tmp/council-wl420-gpt_6_1_sol/port-loader.mjs --test --test-concurrency=1 tests/sim/tpm-ceremony-wl413-r3.test.mjs tests/sim/tpm-ceremony-wl414-fup.test.mjs 
+start=2026-10-19T04:11:54Z
+end=2026-10-19T04:13:01Z
+exit=0

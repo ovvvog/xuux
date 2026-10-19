@@ -1,0 +1,10 @@
+A handedOwner=30411 decoy=30413 ownersBefore=[30411]
+A stopSim_return=false ownersAfter=[30411] dirExists=true ownerAlive=true decoyAlive=true
+A cleanup killSim(30411)=true
+A cleanup deleted dir after owners gone
+B owner=30430 ownersBefore=[30430]
+B stopSim_return=true ownersAfter=[] dirExists=false ownerAlive=false
+C threw=WL420-gap-c: simulator process not proven stopped (state dir kept as evidence: /tmp/xuux-wl420-gap-c-bMuvY1); refusing to retry or delete reason=pid-not-owner stopped=false dirExists=true launched=30437 launchedAlive=true owners=[30437]
+C cleanup killSim=true
+C afterCleanup owners=[] dirExists=true
+EXIT:0

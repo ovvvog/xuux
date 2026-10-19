@@ -1,0 +1,1 @@
+{"pid":29061,"dir":"/tmp/council-wl420-gpt_6_1_sol/xuux-wl418-l7a-NK3EMp","stopped":true,"directoryIntentionallyRetained":true}

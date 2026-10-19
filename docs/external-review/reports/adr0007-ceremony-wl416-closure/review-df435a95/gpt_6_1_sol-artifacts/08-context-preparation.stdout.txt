@@ -1,0 +1,13 @@
+--- /tmp/wt-df435a95-gpt/docs/external-review/reports/adr0007-ceremony-wl416-closure/probes/run.sh	2026-10-19 04:05:14.458257770 +0000
++++ /tmp/council-wl420-gpt_6_1_sol/context-probe/run.sh	2026-10-19 04:07:20.382257770 +0000
+@@ -2,7 +2,7 @@
+ # الاستخدام: run.sh <core.cs> <port> — يشغّلُ المسبارَ على swtpm معزولٍ ثمّ يوقفُه ويطبعُ العمليّاتِ الباقية.
+ set -u
+ core="$1"; port="$2"; here="$(cd "$(dirname "$0")" && pwd)"
+-D="$(mktemp -d /tmp/wl416-ctxreg-sim.XXXXXX)"
++D="$(mktemp -d /tmp/council-wl420-gpt_6_1_sol/context-probe/wl416-ctxreg-sim.XXXXXX)"
+ swtpm socket --tpm2 --tpmstate "dir=$D" --server type=tcp,port=$port,bindaddr=127.0.0.1 --ctrl type=tcp,port=$((port+1)),bindaddr=127.0.0.1 --flags not-need-init,startup-clear --pid "file=$D/pid" --daemon || exit 90
+ pid=$(<"$D/pid")
+ echo "core_file=$core core_sha256=$(sha256sum "$core" | cut -c1-64)"
+578ea4632f0699a9324639a0b68a77bb5b56721ed85bc094c4b10e78d2e7d54e  /tmp/wt-df435a95-gpt/docs/external-review/reports/adr0007-ceremony-wl416-closure/probes/CtxRegressionProbe.cs
+578ea4632f0699a9324639a0b68a77bb5b56721ed85bc094c4b10e78d2e7d54e  /tmp/council-wl420-gpt_6_1_sol/context-probe/CtxRegressionProbe.cs
