@@ -1,0 +1,41 @@
+# test file = WL-421 working tree tests/sim/tpm-ceremony-wl416.test.mjs; helper = /tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs (339f5934); date=2026-10-19T05:45:48Z
+# orphan scan before (prefix /tmp/xuux-wl4):
+orphan_swtpm_owners=0
+# cmd: XUUX_OLD_HELPER=/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs XUUX_TPM_SIM=1 node --import <register probes/old-helper-loader.mjs> --test --test-name-pattern='^(L7|L8)' tests/sim/tpm-ceremony-wl416.test.mjs
+# exit=1
+ok 22 - L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+ok 23 - L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+not ok 24 - L7c: مالكٌ زومبي غيرُ مُلقًّى ⇒ stopSim يعيدُ false ويحفظُ المجلّد
+    an owned zombie is not proof of termination
+    true !== false
+    TestContext.<anonymous> (file:///home/user/workspace/repo/tests/sim/tpm-ceremony-wl416.test.mjs:1184:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+not ok 25 - L7d: رقمٌ مسلَّمٌ حيٌّ غيرُ مالكٍ ⇒ المالكُ المثبتُ يُنهى ولا يُعلَنُ التوقّف
+    the proven owner is terminated anyway
+    + actual - expected
+    + [
+    +   13442
+    + ]
+    - []
+    file:///home/user/workspace/repo/tests/sim/tpm-ceremony-wl416.test.mjs:1207:14
+    withCleanupGuard (file:///home/user/workspace/repo/tests/sim/tpm-ceremony-wl416.test.mjs:1082:5)
+    TestContext.<anonymous> (file:///home/user/workspace/repo/tests/sim/tpm-ceremony-wl416.test.mjs:1201:5)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+ok 26 - L8: حارسُ التنظيفِ ينهي المحاكي ويعيدُ الخطأَ الأصليَّ عندَ فشلِ الجسم
+# tests 26
+# pass 3
+# fail 2
+# skipped 21
+# orphan scan after (prefix /tmp/xuux-wl4):
+orphan_swtpm_owners=0

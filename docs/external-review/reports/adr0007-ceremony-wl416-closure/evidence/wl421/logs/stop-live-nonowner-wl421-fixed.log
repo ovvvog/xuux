@@ -1,0 +1,6 @@
+# helper = WL-421 working tree tests/helpers/ceremony-swtpm.mjs (sha256 bf582107d89cb514…) on base 339f5934
+# cmd: XUUX_HELPER=<repo>/tests/helpers/ceremony-swtpm.mjs node docs/external-review/reports/adr0007-ceremony-wl416-closure/evidence/wl421/probes/stop-live-nonowner.mjs
+# date=2026-10-19T05:46:01Z
+{"helper":"/home/user/workspace/repo/tests/helpers/ceremony-swtpm.mjs","owner":13607,"decoy":13609,"stopSimReturned":false,"ownersAfter":[],"ownerAlive":false,"decoyAlive":true,"dirExists":true}
+{"phase":"cleanup","ownersLeft":[],"dirExists":false}
+# exit=0

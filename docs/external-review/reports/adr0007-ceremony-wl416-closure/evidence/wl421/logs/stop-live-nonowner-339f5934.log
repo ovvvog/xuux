@@ -1,0 +1,26 @@
+# SHA=339f59346c44a31e3db5ebc721b8dc75d19f2d3f helper=/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs
+# cmd: XUUX_HELPER=/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs node docs/external-review/reports/adr0007-ceremony-wl416-closure/evidence/wl421/probes/stop-live-nonowner.mjs
+# date=2026-10-19T05:33:42Z
+{"helper":"/tmp/wt-339f5934/tests/helpers/ceremony-swtpm.mjs","owner":10347,"decoy":10349,"stopSimReturned":false,"ownersAfter":[10347],"ownerAlive":true,"decoyAlive":true,"dirExists":true}
+{"phase":"cleanup","ownersLeft":[],"dirExists":false}
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: the proven owner is terminated anyway
++ actual - expected
+
++ [
++   10347
++ ]
+- []
+    at file:///home/user/workspace/repo/docs/external-review/reports/adr0007-ceremony-wl416-closure/evidence/wl421/probes/stop-live-nonowner.mjs:22:10 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: [ 10347 ],
+  expected: [],
+  operator: 'deepStrictEqual'
+}
+
+Node.js v20.20.2
+# exit=1

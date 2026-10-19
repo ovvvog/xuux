@@ -1,0 +1,6 @@
+# helper = WL-421 working tree tests/helpers/ceremony-swtpm.mjs (sha256 bf582107d89cb514…) on base 339f5934
+# cmd: XUUX_HELPER=<repo>/tests/helpers/ceremony-swtpm.mjs node docs/external-review/reports/adr0007-ceremony-wl416-closure/evidence/wl421/probes/stop-zombie.mjs
+# date=2026-10-19T05:45:59Z
+{"helper":"/home/user/workspace/repo/tests/helpers/ceremony-swtpm.mjs","ownerPid":13587,"ownerState":"Z","stopSimReturned":false,"stateDirExists":true}
+{"phase":"cleanup","ownerPid":13587,"reapedAbsentByESRCH":true}
+# exit=0

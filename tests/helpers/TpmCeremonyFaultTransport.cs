@@ -85,6 +85,24 @@ namespace Xuux.TpmCeremony.Tests
         public readonly List<string> Forwarded = new List<string>();
 
         public uint ThirdPartyRc = 0xFFFFFFFF;
+        // WL-421 (consumed-session-witness): شاهدُ المحاكي على استهلاكِ جلسةِ السياسةِ في المسارِ الإنتاجيِّ
+        // (S2-validate: NV_Increment بجلسةِ سياسةٍ ثمّ SessionConsumed) — جردٌ قرائيٌّ حقيقيٌّ لمقابضِ جلساتِ
+        // السياسةِ المحمّلةِ قبلَ الأمرِ وبعدَه، عبرَ النقلِ الداخليِّ دونَ تغييرِ أيِّ بايتٍ في الأمرِ أو الردّ.
+        public uint WitnessSession;
+        public bool WitnessPresentBefore;
+        public bool WitnessPresentAfter;
+
+        private bool PolicySessionLoaded(uint h)
+        {
+            Rd r = new Rd(_inner.Transmit(Cmd.GetCapability(1u /* TPM_CAP_HANDLES */, 0x02000000u /* TPM_HT_LOADED_SESSION */, 64)));
+            r.U16(); r.U32();
+            uint rc = r.U32();
+            if (rc != 0) throw new InvalidOperationException("witness GetCapability rc=" + Hex.U32(rc));
+            r.U8(); r.U32(); uint cnt = r.U32();
+            // الجلساتُ المحمّلةُ (HMAC والسياسة) تُجرَدُ بنطاقِ 0x02 وتتشاركُ فضاءَ فهارسَ واحدًا ⇒ المطابقةُ بالفهرس
+            for (uint i = 0; i < cnt; i++) if ((r.U32() & 0x00FFFFFFu) == (h & 0x00FFFFFFu)) return true;
+            return false;
+        }
         private int _increments;
         private bool _dead;
         private uint _livePrimary; // مقبضُـ CreatePrimary الحيّ (وضعُ load-alias-live)
@@ -330,9 +348,24 @@ namespace Xuux.TpmCeremony.Tests
                 Rd c = new Rd(command); c.U16(); c.U32(); c.U32(); c.U32(); DefinedHandle = c.U32();
                 throw new System.IO.IOException("WL414_FUP_UNDEFINE_DROPPED_BEFORE_SEND");
             }
+            bool witness = false;
+            if (_mode == "consumed-session-witness" && cc == Tpm.CC_NV_Increment && Changes == 0 && command.Length >= 26
+                && (((uint)command[0] << 8) | command[1]) == Tpm.ST_SESSIONS)
+            {
+                uint sh = ((uint)command[22] << 24) | ((uint)command[23] << 16) | ((uint)command[24] << 8) | command[25];
+                if ((sh >> 24) == 0x03u)
+                {
+                    witness = true; WitnessSession = sh; WitnessPresentBefore = PolicySessionLoaded(sh);
+                }
+            }
             byte[] raw = _inner.Transmit(command);
             Rd header = new Rd(raw);
             ushort tag = header.U16(); header.U32(); uint rc = header.U32();
+            if (witness && rc == 0)
+            {
+                Changes++;
+                WitnessPresentAfter = PolicySessionLoaded(WitnessSession);
+            }
             if (_mode == "session-alias" && cc == Tpm.CC_StartAuthSession && rc == 0)
             {
                 Changes++;
