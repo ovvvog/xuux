@@ -1,0 +1,45 @@
+{
+  "serviceKeyName": "000bc91cdffa28d1178813749d1b761af375c38e5ce72d603100501e85546e6e7b71",
+  "first": "f8cfbed0ca04ca5689ed77cf8a65f5fcbaa261257df60151db301a126e616638",
+  "signed": "ec6e8386910ebe842c30f6d3656b2357f159f7ab999d4a276bafc1dcf89ec9a8",
+  "final": "6d0fb50fddee0f153bd361fbf220511f614ee59a8e1cd14e096004047f326a27",
+  "withoutSecondHash": "4df020ca7ed1318c387be079b5d27dc41ce489e171513da23a3689dde51a25ec",
+  "comparisons": 4,
+  "reservedBitAcceptance": [
+    {
+      "bit": 8,
+      "attributes": "2040118",
+      "violations": []
+    },
+    {
+      "bit": 9,
+      "attributes": "2040218",
+      "violations": []
+    },
+    {
+      "bit": 20,
+      "attributes": "2140018",
+      "violations": []
+    },
+    {
+      "bit": 21,
+      "attributes": "2240018",
+      "violations": []
+    },
+    {
+      "bit": 22,
+      "attributes": "2440018",
+      "violations": []
+    },
+    {
+      "bit": 23,
+      "attributes": "2840018",
+      "violations": []
+    },
+    {
+      "bit": 24,
+      "attributes": "3040018",
+      "violations": []
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+2026-10-17T10:17:33Z
+rehearsal_S1_exit=0
+{
+  "stages": "S1",
+  "failure": null,
+  "stepsCount": 25,
+  "cleanupLeftovers": []
+}
+rehearsal_S2_exit=0
+{
+  "stages": "S2",
+  "failure": null,
+  "stepsCount": 12,
+  "cleanupLeftovers": []
+}

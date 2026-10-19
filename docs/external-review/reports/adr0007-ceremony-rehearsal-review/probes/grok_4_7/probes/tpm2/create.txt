@@ -1,0 +1,33 @@
+name-alg:
+  value: sha256
+  raw: 0xb
+attributes:
+  value: fixedtpm|fixedparent|sensitivedataorigin|userwithauth|sign
+  raw: 0x40072
+type:
+  value: ecc
+  raw: 0x23
+curve-id:
+  value: NIST p256
+  raw: 0x3
+kdfa-alg:
+  value: null
+  raw: 0x10
+kdfa-halg:
+  value: (null)
+  raw: 0x0
+scheme:
+  value: ecdsa
+  raw: 0x18
+scheme-halg:
+  value: sha256
+  raw: 0xb
+sym-alg:
+  value: null
+  raw: 0x10
+sym-mode:
+  value: (null)
+  raw: 0x0
+sym-keybits: 0
+x: c3060519198e8eba84c52da5dc79c00b4a56049c530fe65d2d90cc3ab7e67e86
+y: a955c73459a362b33fcfa8ba0efc0b6b1b72544d92765bbd3035b98e796161c2
