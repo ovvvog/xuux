@@ -1,0 +1,3 @@
+{"tree":"/tmp/wt-72e79272-gpt_6_1_sol","mode":"zombie","owner":3628,"before":"Z","after":"Z","returned":false,"dirKept":true,"elapsedMs":1046.270668,"signals":[],"nonzeroKillCalls":0}
+{"cleanupChild":3628,"state":"ESRCH","dead":true}
+{"cleanupOwners":[],"dir":"/tmp/council-wl422-gpt_6_1_sol/tmp/review-zombie-n4zI4r"}

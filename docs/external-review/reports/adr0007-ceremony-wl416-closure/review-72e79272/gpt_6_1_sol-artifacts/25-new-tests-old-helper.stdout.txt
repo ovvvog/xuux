@@ -1,0 +1,190 @@
+TAP version 13
+# (node:3895) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("/tmp/council-wl422-gpt_6_1_sol/old-helper-loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ توقّفًا والاكتشافُ البديلُ يُنهي المحاكي
+ok 1 - L1: فقدُ ملفِ PID بعدَ الإطلاقِ لا يُعلَنُ توقّفًا والاكتشافُ البديلُ يُنهي المحاكي # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.765266
+  ...
+# Subtest: L2: رميُ probe بعدَ الإطلاقِ يمرُّ عبرَ التنظيفِ المضمونِ فلا يتيمَ
+ok 2 - L2: رميُ probe بعدَ الإطلاقِ يمرُّ عبرَ التنظيفِ المضمونِ فلا يتيمَ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.119398
+  ...
+# Subtest: L3: رميُ onAbandon لا يمنعُ التنظيفَ ولا يُخفي فشلَهُ
+ok 3 - L3: رميُ onAbandon لا يمنعُ التنظيفَ ولا يُخفي فشلَهُ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.088762
+  ...
+# Subtest: L4: المجلّدُ لا يُحذفُ إلّا بعدَ زوالِ العمليّةِ (المراقبُ شاهدُ الترتيبِ)
+ok 4 - L4: المجلّدُ لا يُحذفُ إلّا بعدَ زوالِ العمليّةِ (المراقبُ شاهدُ الترتيبِ) # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.074734
+  ...
+# Subtest: L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا صادقًا ويُحفَظُ مجلّدُ الحالةِ ولا يُقتَلُ شىءٌ زورًا
+ok 5 - L5a: فشلُ إرسالِ الإشارةِ يُعلَنُ فشلًا صادقًا ويُحفَظُ مجلّدُ الحالةِ ولا يُقتَلُ شىءٌ زورًا # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.072209
+  ...
+# Subtest: L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ لا يُقتلُها والاكتشافُ يُنهي الملكَ الحقيقيّ
+ok 6 - L5b: ملفُّ PID مشوّشٌ نحوَ عمليّةٍ بريئةٍ لا يُقتلُها والاكتشافُ يُنهي الملكَ الحقيقيّ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.061297
+  ...
+# Subtest: L6: ثلاثُ إخفاقاتِ جاهزيّةٍ متتاليةٍ تنتهي بلا أيِّ يتيمٍ
+ok 7 - L6: ثلاثُ إخفاقاتِ جاهزيّةٍ متتاليةٍ تنتهي بلا أيِّ يتيمٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.063797
+  ...
+# Subtest: CTX: فقدُ ردِّ التحريرِ وإثباتُ الغيابِ وإعادةُ الاستخدامِ واستهلاكُ الجلسةِ كما قِيسَ
+ok 8 - CTX: فقدُ ردِّ التحريرِ وإثباتُ الغيابِ وإعادةُ الاستخدامِ واستهلاكُ الجلسةِ كما قِيسَ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.104763
+  ...
+# Subtest: CTX2: فقدُ ردِّ التحريرِ داخلَ البروفةِ يُزيلُ السياقَ عبرَ مسارِ المصالحةِ الحقيقيّ
+ok 9 - CTX2: فقدُ ردِّ التحريرِ داخلَ البروفةِ يُزيلُ السياقَ عبرَ مسارِ المصالحةِ الحقيقيّ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.127651
+  ...
+# Subtest: SC1: SessionConsumed في المسارِ الحقيقيِّ — المحاكي يُثبتُ الاستهلاكَ والسياقُ يُزالُ
+ok 10 - SC1: SessionConsumed في المسارِ الحقيقيِّ — المحاكي يُثبتُ الاستهلاكَ والسياقُ يُزالُ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.129551
+  ...
+# Subtest: M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا
+ok 11 - M0: more=0 يُنهي الجردَ بحسبِ العقدِ لا بحسبِ الحقيقةِ — فهرسٌ محجوبٌ يبقى موجودًا # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.083223
+  ...
+# Subtest: NV1: فهرسٌ داخلَ مجالِ المالكِ قبلَ البروفةِ يُوقفُها مسمّىً بلا أيِّ أمرٍ مُغيِّرٍ ولا حذفٍ
+ok 12 - NV1: فهرسٌ داخلَ مجالِ المالكِ قبلَ البروفةِ يُوقفُها مسمّىً بلا أيِّ أمرٍ مُغيِّرٍ ولا حذفٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.073724
+  ...
+# Subtest: NV2: فهرسٌ من طرفٍ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ يُوقفُ البروفةَ قبلَ أيِّ تعريفٍ
+ok 13 - NV2: فهرسٌ من طرفٍ ثالثٍ يظهرُ بعدَ خطِّ الأساسِ يُوقفُ البروفةَ قبلَ أيِّ تعريفٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.067345
+  ...
+# Subtest: R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُبقي الحالةَ غيرَ محسومةٍ — لا توقّفَ ولا حذفَ
+ok 14 - R2-01: محاكٍ حيٌّ بهويّةٍ غيرِ مقروءةٍ يُبقي الحالةَ غيرَ محسومةٍ — لا توقّفَ ولا حذفَ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.120103
+  ...
+# Subtest: R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنعُ SIGKILL ويُعيدُ فشلًا صادقًا
+ok 15 - R2-02: تغيّرُ الهويّةِ عندَ التصعيدِ يمنعُ SIGKILL ويُعيدُ فشلًا صادقًا # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.07523
+  ...
+# Subtest: NV3: فهرسٌ يظهرُ بعدَ اجتيازِ الحاجزِ الأولِ يُوقفُ البروفةَ عندَ حاجزِ التعريفِ المتكرّرِ
+ok 16 - NV3: فهرسٌ يظهرُ بعدَ اجتيازِ الحاجزِ الأولِ يُوقفُ البروفةَ عندَ حاجزِ التعريفِ المتكرّرِ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.631722
+  ...
+# Subtest: CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd وحدَها — لا process.kill غيرَ صفريٍ
+ok 17 - CHANNEL: إشارتا killSim (SIGTERM والتصعيد) عبرَ pidfd وحدَها — لا process.kill غيرَ صفريٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.085138
+  ...
+# Subtest: CHANNEL2: SIGTERM وحدها تُنهي المحاكيَ المستجيبَ — لا تصعيدَ ولا process.kill غيرَ صفريٍ
+ok 18 - CHANNEL2: SIGTERM وحدها تُنهي المحاكيَ المستجيبَ — لا تصعيدَ ولا process.kill غيرَ صفريٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.196213
+  ...
+# Subtest: ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ
+ok 19 - ZOMBIE: زومبيٌّ بلا ملفِ PID لا يُعلَنُ معها توقّفٌ — الحالةُ غيرُ محسومةٍ # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.085742
+  ...
+# Subtest: NV4: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-define) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف
+ok 20 - NV4: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-define) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.112975
+  ...
+# Subtest: NV5: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-primary) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف
+ok 21 - NV5: فهرسٌ يظهرُ بعدَ أمرٍ مُغيِّرٍ ناجحٍ (nv-appear-after-primary) يوقفُ الأمرَ المُغيِّرَ التاليَ ولا يُحذَف # SKIP test name does not match pattern
+  ---
+  duration_ms: 0.066344
+  ...
+# Subtest: L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+ok 22 - L7a: رقمُ ملفِ PID لا يملكُ مسارَ الحالةِ بعدَ الجاهزيّةِ ⇒ لا تسليمَ والمالكُ الحقيقيُّ يُنهى
+  ---
+  duration_ms: 45.997225
+  ...
+# Subtest: L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+ok 23 - L7b: stopSim لا يعلنُ التوقّفَ ولا يحذفُ المجلّدَ ومالكُه حيٌّ وإن زالَ الرقمُ المسلَّم
+  ---
+  duration_ms: 46.698249
+  ...
+# Subtest: L7c: مالكٌ زومبي غيرُ مُلقًّى ⇒ stopSim يعيدُ false ويحفظُ المجلّد
+not ok 24 - L7c: مالكٌ زومبي غيرُ مُلقًّى ⇒ stopSim يعيدُ false ويحفظُ المجلّد
+  ---
+  duration_ms: 45.15535
+  location: '/tmp/wt-72e79272-gpt/tests/sim/tpm-ceremony-wl416.test.mjs:42:31'
+  failureType: 'testCodeFailure'
+  error: |-
+    an owned zombie is not proof of termination
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///tmp/wt-72e79272-gpt/tests/sim/tpm-ceremony-wl416.test.mjs:1184:12)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: L7d: رقمٌ مسلَّمٌ حيٌّ غيرُ مالكٍ ⇒ المالكُ المثبتُ يُنهى ولا يُعلَنُ التوقّف
+not ok 25 - L7d: رقمٌ مسلَّمٌ حيٌّ غيرُ مالكٍ ⇒ المالكُ المثبتُ يُنهى ولا يُعلَنُ التوقّف
+  ---
+  duration_ms: 51.214818
+  location: '/tmp/wt-72e79272-gpt/tests/sim/tpm-ceremony-wl416.test.mjs:42:31'
+  failureType: 'testCodeFailure'
+  error: |-
+    the proven owner is terminated anyway
+    + actual - expected
+    
+    + [
+    +   3938
+    + ]
+    - []
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual:
+    0: 3938
+  operator: 'deepStrictEqual'
+  stack: |-
+    file:///tmp/wt-72e79272-gpt/tests/sim/tpm-ceremony-wl416.test.mjs:1207:14
+    withCleanupGuard (file:///tmp/wt-72e79272-gpt/tests/sim/tpm-ceremony-wl416.test.mjs:1082:5)
+    TestContext.<anonymous> (file:///tmp/wt-72e79272-gpt/tests/sim/tpm-ceremony-wl416.test.mjs:1201:5)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: L8: حارسُ التنظيفِ ينهي المحاكي ويعيدُ الخطأَ الأصليَّ عندَ فشلِ الجسم
+ok 26 - L8: حارسُ التنظيفِ ينهي المحاكي ويعيدُ الخطأَ الأصليَّ عندَ فشلِ الجسم
+  ---
+  duration_ms: 58.489443
+  ...
+1..26
+# tests 26
+# suites 0
+# pass 3
+# fail 2
+# cancelled 0
+# skipped 21
+# todo 0
+# duration_ms 702.913008

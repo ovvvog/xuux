@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:35:18.238Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'bash' '-c' 'git show 72e7927 -- PROJECT_STATUS.md docs/HANDOFF.md docs/roadmap/05-work-log.md docs/external-review/reports/adr0007-ceremony-wl416-closure/README.md; rg -n "R3-A-01|EXT-6|ResponseContext|صحيح|SessionConsumed|SC1" docs/roadmap/06-risk-debt-register.md docs/external-review/reports/adr0007-ceremony-wl416-closure/README.md; rg --files docs | rg "debt|risk"'

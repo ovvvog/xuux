@@ -1,0 +1,2 @@
+{"tree":"/tmp/wt-339f5934","mode":"channel-failure","owner":3763,"delivered":3763,"beforeOwners":[3763],"returned":false,"ownerDead":false,"ownerState":"S","dirKept":true,"decoyDead":null,"elapsedMs":0.34349800000001096,"signals":[{"pid":3763,"signal":15,"injected":true}],"nonzeroKillCalls":0,"failedOnce":true}
+{"cleanupOwners":[],"dir":"/tmp/council-wl422-gpt_6_1_sol/tmp/review-channel-failure-Euj02Y"}

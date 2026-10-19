@@ -1,0 +1,30 @@
+commit 72e79272576f0d9e85c1d69f415e834ee542c34a
+Author:     Perplexity Computer <computer@perplexity.ai>
+AuthorDate: Mon Oct 19 05:53:28 2026 +0000
+Commit:     Perplexity Computer <computer@perplexity.ai>
+CommitDate: Mon Oct 19 05:53:28 2026 +0000
+
+    fix(wl421): stopSim لا يعلنُ التوقّفَ مع مالكٍ زومبي ولا يتوقّفُ مبكّرًا، ونظافةُ اختباراتِ الرجوع، وشاهدُ SessionConsumed
+
+ PROJECT_STATUS.md                                  |   1 +
+ docs/HANDOFF.md                                    |   6 +-
+ .../adr0007-ceremony-wl416-closure/README.md       |  63 +++++
+ .../logs/l7-l8-new-tests-on-339f5934-helper.log    |  41 ++++
+ .../logs/l7-l8-new-tests-on-a3f1505d-helper.log    |  65 +++++
+ .../logs/l7-l8-new-tests-on-wl421-fixed-helper.log |  16 ++
+ .../logs/l7-tests-339f5934-on-a3f1505d-helper.log  |  67 ++++++
+ .../evidence/wl421/logs/sc1-mutation.log           | 110 +++++++++
+ .../wl421/logs/stop-live-nonowner-339f5934.log     |  26 ++
+ .../wl421/logs/stop-live-nonowner-wl421-fixed.log  |   6 +
+ .../evidence/wl421/logs/stop-zombie-339f5934.log   |  23 ++
+ .../wl421/logs/stop-zombie-wl421-fixed.log         |   6 +
+ .../evidence/wl421/probes/list-swtpm-orphans.mjs   |  17 ++
+ .../evidence/wl421/probes/old-helper-loader.mjs    |   8 +
+ .../evidence/wl421/probes/stop-live-nonowner.mjs   |  30 +++
+ .../evidence/wl421/probes/stop-zombie.mjs          |  53 ++++
+ docs/roadmap/05-work-log.md                        |  12 +
+ tests/helpers/TpmCeremonyFaultTransport.cs         |  33 +++
+ tests/helpers/ceremony-swtpm.mjs                   |  25 +-
+ tests/helpers/tpm-ceremony-harness.ps1             |   2 +-
+ tests/sim/tpm-ceremony-wl416.test.mjs              | 266 +++++++++++++++++----
+ 21 files changed, 819 insertions(+), 57 deletions(-)

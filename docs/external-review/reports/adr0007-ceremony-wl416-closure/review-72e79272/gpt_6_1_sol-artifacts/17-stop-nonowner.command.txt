@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:38:18.822Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'env' 'TMPDIR=/tmp/council-wl422-gpt_6_1_sol/tmp' 'node' '/tmp/council-wl422-gpt_6_1_sol/stop-probes.mjs' '/tmp/wt-339f5934' 'nonowner'

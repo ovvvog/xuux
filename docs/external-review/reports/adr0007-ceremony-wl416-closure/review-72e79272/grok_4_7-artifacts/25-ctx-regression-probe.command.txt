@@ -1,0 +1,1 @@
+bash /tmp/wt-72e79272-grok/docs/external-review/reports/adr0007-ceremony-wl416-closure/probes/run.sh /tmp/wt-72e79272-grok/sim/tpm-ceremony/TpmCeremonyCore.cs 25640 

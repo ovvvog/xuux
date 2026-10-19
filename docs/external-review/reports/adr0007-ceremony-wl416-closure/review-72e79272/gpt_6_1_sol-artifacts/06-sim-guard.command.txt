@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:35:18.244Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'bash' '-c' 'nl -ba sim/tpm/tcti_guard.mjs | sed -n "1,260p"; env | sort | rg -i "tpm|sim|tcti"; ls -l /usr/bin/swtpm; command -v swtpm; rg -n "SessionConsumed|class ResponseContext|RESPONSE_POLICY_CONTEXT_UNKNOWN|TrySessionType|contextGone|EndOfLife" sim/tpm-ceremony/TpmCeremonyCore.cs; nl -ba tests/helpers/TpmCeremonyFaultTransport.cs | sed -n "920,1150p"'
