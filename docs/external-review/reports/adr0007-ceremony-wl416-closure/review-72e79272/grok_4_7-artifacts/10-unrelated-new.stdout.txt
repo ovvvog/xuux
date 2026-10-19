@@ -1,0 +1,45 @@
+{
+  "which": "new",
+  "mode": "unrelated-block",
+  "helperPath": "/tmp/wt-72e79272-grok/tests/helpers/ceremony-swtpm.mjs",
+  "port": 24180,
+  "head": "72e79272576f0d9e85c1d69f415e834ee542c34a",
+  "started": {
+    "pid": 6435,
+    "dir": "/tmp/xuux-wl422-unrel-7rxgAW",
+    "discover": [
+      6435
+    ]
+  },
+  "unrelatedZombie": {
+    "pid": 6437,
+    "state": "Z",
+    "cmdline": {
+      "bytes": 0,
+      "text": ""
+    }
+  },
+  "elapsedMs": 1070,
+  "stopSimReturned": false,
+  "stateDirExists": true,
+  "ownerAfter": {
+    "state": "GONE",
+    "esrch": true,
+    "discover": []
+  },
+  "scanAfter": {
+    "matches": [],
+    "zombies": 1,
+    "unresolved": 0,
+    "zombiePids": [
+      6437
+    ]
+  },
+  "second": {
+    "elapsedMs": 3,
+    "stopSimReturned": true,
+    "stateDirExists": false,
+    "ownerEsrch": true
+  },
+  "dir": "/tmp/xuux-wl422-unrel-7rxgAW"
+}

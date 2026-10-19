@@ -1,0 +1,18 @@
+{
+  "report": "/tmp/council-wl422-gpt_6_1_sol/report.md",
+  "provider": "OpenAI",
+  "identity": "gpt_6_1_sol",
+  "endUtc": "2026-10-19T07:44:29.889Z",
+  "reportBytes": 30703,
+  "reportSha256": "54eed8d9e1db511889262aa3034458f0c70a39d9eea9273cbff3c7944c29ccff",
+  "citationTargetsVerified": true,
+  "repositoryClean": true,
+  "reviewConcluded": true,
+  "openFindings": [
+    {
+      "id": "WL422-gpt_6_1_sol-01",
+      "severity": "low",
+      "summary": "Cleanup EACCES masks original body error; measured real filesystem permissions; no simulator left"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "restricted": true,
+  "uid": 2000,
+  "dir": "/tmp/council-wl422-gpt_6_1_sol/tmp/review-guard-eacces-aRidaT",
+  "pid": 4341,
+  "caughtOriginal": false,
+  "originalMessage": "review-original-body-error",
+  "caughtMessage": "EACCES: permission denied, unlink '/tmp/council-wl422-gpt_6_1_sol/tmp/review-guard-eacces-aRidaT/.lock'",
+  "caughtCode": "EACCES",
+  "ownersAfter": [],
+  "dirKept": true
+}
+{"finalOwners":[],"dirExists":false}

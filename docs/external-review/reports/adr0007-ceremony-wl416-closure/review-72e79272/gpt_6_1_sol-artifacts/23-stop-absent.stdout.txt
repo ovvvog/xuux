@@ -1,0 +1,2 @@
+{"tree":"/tmp/wt-72e79272-gpt_6_1_sol","mode":"absent","owner":3817,"delivered":2147483000,"beforeOwners":[3817],"returned":true,"ownerDead":true,"ownerState":"ESRCH","dirKept":false,"decoyDead":null,"elapsedMs":27.37935999999999,"signals":[{"pid":3817,"signal":15,"injected":false}],"nonzeroKillCalls":0,"failedOnce":false}
+{"cleanupOwners":[],"dir":"/tmp/council-wl422-gpt_6_1_sol/tmp/review-absent-i4HpeS"}

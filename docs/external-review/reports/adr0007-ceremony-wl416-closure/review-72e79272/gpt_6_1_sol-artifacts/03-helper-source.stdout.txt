@@ -1,0 +1,496 @@
+     1	// @ts-nocheck
+     2	// tests/helpers/ceremony-swtpm.mjs
+     3	//
+     4	// WL-414 FUP-SOL-03 ثمّ WL-416 — تشغيلُ محاكيِ swtpm معزولٍ لاختباراتِ البروفةِ وإيقافُه.
+     5	// كانت startSim منسوخةً في ثلاثةِ ملفّاتِ اختبارٍ، وعندَ نجاحِ إطلاقِ swtpm مع فشلِ استعلامِ الجاهزيّةِ كانت
+     6	// تحذفُ مجلّدَ الحالةِ وتنتقلُ للمحاولةِ التاليةِ دونَ إيقافِ العمليّةِ — فيبقى محاكٍ يتيمٌ (PPID=1) بعدَ
+     7	// خروجِ الاختبارِ (قياسُ gpt_6_1_sol على 3e67d362، وإعادةُ إنتاجِه على a3272058). ثمّ أثبتَ مراجعا e23bd431
+     8	// فجوتَينِ باقيتَينِ (WL-416): غيابُ ملفِ PID كان يُعلَنُ توقّفًا (stopped=true) بلا قرينةٍ على زوالِ العمليّةِ،
+     9	// واستثناءُ probe/onAbandon كان يتجاوزُ التنظيفَ. الآن:
+    10	//   - هويةُ العمليّةِ تُربَطُ بمسارِ الحالةِ الفعليِّ من سطرِ أوامرِها (تفكيكُ وسائطِ /proc/<pid>/cmdline على
+    11	//     الفواصلِ الصفريةِ ومطابقةُ الوسمِ `--tpmstate` ومعاملِهِ `dir=<مسار>` كاملًا) — لا برقمِ منفذٍ ولا
+    12	//     بمطابقةِ نصٍّ جزئيٍّ، ولا تُقتَلُ عمليّةٌ لا يُثبَتُ أنها التي أنشأها هذا التشغيلُ.
+    13	//   - استثناءُ إرسالِ الإشارةِ ليسَ إثباتَ زوالٍ: ESRCH وحدها دليلُ غيابٍ؛ وغيرُها (EPERM مثلًا) حالةٌ مجهولةٌ
+    14	//     لا تُعلَنَ نجاحًا.
+    15	//   - غيابُ ملفِ PID لا يُعَدُّ توقّفًا: الاكتشافُ البديلُ يربطُ العمليّةَ بمجلّدِ الحالةِ ويُنهيها؛ وتعذّرَ إثباتُ
+    16	//     الهويّةِ أو الإيقافُ ⇒ stopped=false صادقةٌ ويُحفَظُ مجلّدُ الحالةِ دليلًا ولا يُحذَفُ ولا تُعادُ المحاولةُ.
+    17	//   - كلُّ مسارِ خروجٍ بعدَ الإطلاقِ (رميُ probe أو afterSpawn، رميُ onAbandon، فشلُ الإيقافِ نفسِه) يمرُّ عبرَ
+    18	//     تنظيفٍ مضمونٍ: لا يتجاوزُ أيُّ استثناءٍ مرحلةَ الإنهاءِ، ولا يُحذفُ مجلّدُ الحالةِ قبلَ إثباتِ زوالِ العمليّةِ
+    19	//     المقصودةِ (المراقبُ يُستدعى بعدَ الإنهاءِ وقبلَ الحذفِ، فشاهِدُ الترتيبِ داخلَه).
+    20	// لا TBS، ولا /dev/tpm*، ولا عتاد: محاكٍ على 127.0.0.1 أو ::1 فقط.
+    21	
+    22	import { mkdtempSync, rmSync, readFileSync, readdirSync, existsSync } from 'node:fs';
+    23	import { tmpdir } from 'node:os';
+    24	import { join } from 'node:path';
+    25	import { spawnSync, execFileSync } from 'node:child_process';
+    26	
+    27	// ── قراءةُ /proc: هويةُ العمليّةِ وحيواتُها ──
+    28	
+    29	// سطرُ أوامرِ العمليّةِ مفكوكًا على الفواصلِ الصفريةِ (وسائطٌ كاملةٌ لا نصٌّ واحدٌ).
+    30	function procArgs(pid) {
+    31	  try {
+    32	    return readFileSync(`/proc/${pid}/cmdline`, 'utf8')
+    33	      .split('\0')
+    34	      .filter((s) => s.length > 0);
+    35	  } catch {
+    36	    return null; // تعذّرَتِ القراءةُ: ليست دليلَ غيابٍ ولا دليلَ هويّةٍ
+    37	  }
+    38	}
+    39	
+    40	// هل العمليّةُ حيّةٌ؟ ESRCH وحدها غيابٌ مؤكَّدٌ؛ رفضُ الصلاحيّةِ (EPERM) يعني وجودَها. لا يُدَّعى موتٌ
+    41	// بحالةِ الزومبي (Z) — فشلٌ واضحُ الحدِّ (ESRCH) هو الدليلُ الوحيدُ المقبولُ (حسمُ المراجعة 3، WL-416).
+    42	function alive(pid) {
+    43	  try {
+    44	    process.kill(pid, 0);
+    45	  } catch (e) {
+    46	    return e && e.code === 'ESRCH' ? false : true;
+    47	  }
+    48	  return true;
+    49	}
+    50	
+    51	// حالةُ العمليّةِ من /proc/<pid>/stat: الزومبي (Z) منتهيةٌ عمليًا فلا تُحسَبُ حيّةً عليلا، وخيوطُ النواةِ
+    52	// (ppid=2 أو 0) ليست عمليّاتِ مستخدمٍ أصلًا. تعذّرَتِ القراءةُ ⇒ null (لا دليلَ غيابٍ ولا دليلَ هويّةٍ).
+    53	function procState(pid) {
+    54	  try {
+    55	    const s = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    56	    const close = s.lastIndexOf(')');
+    57	    if (close < 0) return null;
+    58	    const rest = s.slice(close + 2).split(' ');
+    59	    return { state: rest[0], ppid: Number(rest[1]) };
+    60	  } catch {
+    61	    return null;
+    62	  }
+    63	}
+    64	
+    65	// عمليّةُ swtpm تملكُ هذهِ الجلسةَ: وسمُ `--tpmstate` ومعاملُهُ `dir=<dir>` كاملًا بينَ وسائطِها.
+    66	function ownsStateDir(args, dir) {
+    67	  for (let i = 0; i + 1 < args.length; i++) {
+    68	    if (args[i] === '--tpmstate' && args[i + 1] === `dir=${dir}`) return true;
+    69	  }
+    70	  return false;
+    71	}
+    72	
+    73	// ── إشارةٌ مرتبطةٌ بهويّةٍ مستقرةٍ (pidfd) — إغلاقُ نافذةِ التحقّقِ-ثمّ-الإشارةِ (جولةُ المراجعةِ الرابعةِ) ──
+    74	// نافذةُ «تحقّقٌ من الهويّةِ ثمّ kill بالرقمِ» غيرُ ذرّيّةٍ: قد يموتُ الهدفُ ويُعادُ استخدامُ رقمِهِ بينَهما
+    75	// فتُصيبُ الإشارةُ بريئًا. الإغلاقُ: تُفتَحُ مقبضةُ العمليّةِ (pidfd) أولًا فتتعلّقُ بالعمليّةِ نفسِها لا برقمِها،
+    76	// ثمّ يُعادُ إثباتُ الهويّةِ من /proc/<pid>/cmdline (سطرُ أوامرٍ كاملٌ + مسارُ الحالةِ)، ثمّ تُرسَلُ الإشارةُ
+    77	// عبرَ المقبضةِ وحدَها — فأيُّ إعادةِ استخدامٍ للرقمِ بعدَ الفتحِ لا تُلامسُها الإشارةُ (ESRCH على الأصلِ).
+    78	// القناةُ عبرَ python3 المتاحِ: os.pidfd_open/signal.pidfd_send_signal إن وُجدا، وإلّا فاستدعاءُ
+    79	// النظامِ الخامُّ عبرَ ctypes (SYS_pidfd_open=434 وSYS_pidfd_send_signal=424 — أرقامٌ موحّدةٌ على
+    80	// معماريّاتِ 64-بتِ لينكس 5.3+). وتمثيلُ الإشارةِ **رقمٌ** (SIGTERM=15 وSIGKILL=9): القناةَ لا تُمرَّرُ
+    81	// الأسماءُ (عقدُ int(sys.argv[2]) في الطرفِ الآخرِ — حسمُ جولةِ المراجعةِ الخامسةِ). وإن تعذّرَ كلٌّ
+    82	// ذلكَ (بيئةٌ بلا python3 أو بلا pidfd أصلًا) فلا رجوعَ إلى process.kill بالرقمِ أبدًا: الفشلُ
+    83	// مغلَقٌ — لا إشارةَ ولا حذفَ ولا توقّفًا يُعلَنُ (LIVE-47: القيدُ البيئيُّ لا نافذةَ أمانَ).
+    84	const PIDFD_SIGNAL_SCRIPT = [
+    85	  'import os, signal, sys',
+    86	  'pid = int(sys.argv[1]); sig = int(sys.argv[2]); want_dir = sys.argv[3] if len(sys.argv) > 3 else None',
+    87	  "SYSCALLS = {'x86_64': (434, 424), 'aarch64': (434, 424), 'arm64': (434, 424)}",
+    88	  'def raw_syscall(num, *a):',
+    89	  '    import ctypes',
+    90	  '    libc = ctypes.CDLL(None, use_errno=True)',
+    91	  '    rc = libc.syscall(num, *a)',
+    92	  '    if rc == -1:',
+    93	  '        e = ctypes.get_errno()',
+    94	  '        if e == 3: raise ProcessLookupError()',
+    95	  '        raise OSError(e, os.strerror(e))',
+    96	  '    return rc',
+    97	  'def do_pidfd_open(pid):',
+    98	  '    if hasattr(os, "pidfd_open"): return os.pidfd_open(pid)',
+    99	  '    import platform',
+   100	  '    nums = SYSCALLS.get(platform.machine())',
+   101	  '    if nums is None: raise AttributeError("pidfd_open")',
+   102	  '    return raw_syscall(nums[0], pid, 0)',
+   103	  'def do_pidfd_send(fd, sig):',
+   104	  '    if hasattr(signal, "pidfd_send_signal"): return signal.pidfd_send_signal(fd, sig)',
+   105	  '    import platform',
+   106	  '    nums = SYSCALLS.get(platform.machine())',
+   107	  '    if nums is None: raise AttributeError("pidfd_send_signal")',
+   108	  '    return raw_syscall(nums[1], fd, sig, 0, 0)',
+   109	  'try:',
+   110	  '    fd = do_pidfd_open(pid)',
+   111	  'except ProcessLookupError:',
+   112	  "    print('esrch'); sys.exit(0)",
+   113	  'except (AttributeError, OSError):',
+   114	  "    print('unsupported'); sys.exit(0)",
+   115	  'try:',
+   116	  "    with open('/proc/%d/cmdline' % pid, 'rb') as f:",
+   117	  '        raw = f.read()',
+   118	  "    args = [a.decode('utf-8', 'replace') for a in raw.split(bytes([0])) if a]",
+   119	  "    if not args or 'swtpm' not in args[0]:",
+   120	  "        print('mismatch'); sys.exit(0)",
+   121	  '    if want_dir is not None:',
+   122	  "        ok = any(args[i] == '--tpmstate' and i + 1 < len(args) and args[i+1] == 'dir=' + want_dir for i in range(len(args)))",
+   123	  '        if not ok:',
+   124	  "            print('mismatch'); sys.exit(0)",
+   125	  '    do_pidfd_send(fd, sig)',
+   126	  "    print('ok')",
+   127	  'except ProcessLookupError:',
+   128	  "    print('esrch')",
+   129	  'except (AttributeError, OSError):',
+   130	  "    print('unsupported')",
+   131	  'finally:',
+   132	  '    try: os.close(fd)',
+   133	  '    except OSError: pass',
+   134	].join('\n');
+   135	
+   136	// تُعيدُ 'ok' (أُرسِلَتْ عبرَ المقبضةِ) أو 'esrch' (زالتْ قبلَها) أو 'mismatch' (الهويّةُ لم تُثبَتْ عبرَ
+   137	// المقبضةِ — لا إشارةَ) أو 'unsupported' (القناةُ غيرُ متاحةٍ: لا رجوعَ بالرقمِ — الفشلُ مغلَقٌ عندَ
+   138	// المتصلِ). تمثيلُ الإشارةِ رقمٌ: الأسماءُ تُترجَمُ هنا (عقدُ int() في الطرفِ الآخرِ — جولةُ 5).
+   139	const SIGNAL_NUMBERS = { SIGTERM: 15, SIGKILL: 9, SIGINT: 2 };
+   140	function pidfdSignal(pid, sig, dir) {
+   141	  const sigNum = typeof sig === 'number' ? sig : SIGNAL_NUMBERS[sig];
+   142	  if (!Number.isInteger(sigNum) || sigNum < 0) return 'unsupported';
+   143	  let r;
+   144	  try {
+   145	    r = spawnSync(
+   146	      'python3',
+   147	      ['-c', PIDFD_SIGNAL_SCRIPT, String(pid), String(sigNum), dir === null ? '' : dir],
+   148	      {
+   149	        encoding: 'utf8',
+   150	        timeout: 10000,
+   151	      },
+   152	    );
+   153	  } catch {
+   154	    return 'unsupported';
+   155	  }
+   156	  if (!r || r.status !== 0 || r.error) return 'unsupported';
+   157	  const out = String(r.stdout || '').trim();
+   158	  return out === 'ok' || out === 'esrch' || out === 'mismatch' ? out : 'unsupported';
+   159	}
+   160	
+   161	// عمليّاتُ swtpm الحيّةُ المرتبطةُ بمسارِ حالةٍ بعينِهِ (هويةً كاملةً من الوسائطِ، لا مطابقةَ نصٍّ جزئيٍّ).
+   162	export function discoverSimPids(dir) {
+   163	  return scanStateDir(dir).matches;
+   164	}
+   165	
+   166	// مسحٌ قرائيٌّ لمسارِ حالةٍ: matches = عمليّاتٌ مُثبَتٌ أنها swtpm يملكُ مسارَ الحالةِ؛ unresolved = عمليّةٌ
+   167	// حيّةٌ لا يمكنُ قراءةُ هويّتِها (سطرُ أوامرٍ غيرُ مقروءٍ لعمليّةٍ ليست زومبي ولا خيطَ نواةٍ)؛ zombies =
+   168	// عمليّةٌ خرجَتْ ولم يُلقَّ أثرُها بعدُ — لا يمكنُ إسنادُها (لا سطرَ أوامرَ) فقد تكونُ محاكينا الذي لم
+   169	// يُلقَّ — فلا يجوزُ أن يُعلَنَ التوقّفُ مع بقائِها (حسمُ جولةِ المراجعةِ الخامسةِ: ESRCH وحدها، والزومبيُّ
+   170	// ليست ESRCH). لا يُقتَلُ شيءٌ من هذا المسحِ: قراءةٌ فقط.
+   171	// readCmdline: حقنةُ اختبارٍ لمحاكاةِ قراءةٍ غيرِ مقروءةٍ (الافتراضيُّ قراءةُ /proc الحقيقيّةُ).
+   172	function scanStateDir(dir, { readCmdline = procArgs } = {}) {
+   173	  const matches = [];
+   174	  const unresolved = [];
+   175	  const zombies = [];
+   176	  for (const entry of readdirSync('/proc')) {
+   177	    if (!/^\d+$/.test(entry)) continue;
+   178	    const pid = Number(entry);
+   179	    if (pid <= 1) continue;
+   180	    const args = readCmdline(pid);
+   181	    if (args === null || args.length === 0) {
+   182	      // لا هويةَ مقروءةً: الزومبي خرجَتْ فعلًا لكنّ أثرَها باقٍ وغيرُ مُسنَدٍ — تُسجَّلُ (لا يُعلَنُ معها
+   183	      // توقّفٌ) ولا يُشارُ إليها ولا يُقتَلُ شيءٌ؛ ومسارُ ملفِ PID يُبقيها غيرَ محسومةٍ (قراءةٌ فارغةٌ ⇒
+   184	      // identityUnknown ⇒ stopped=false). وخيطُ النواةِ ليسَ عمليّةَ مستخدمٍ؛ وما عدا ذلك حيّةٌ غيرُ محسومةِ الهويّةِ.
+   185	      const st = procState(pid);
+   186	      if (st === null) {
+   187	        if (alive(pid)) unresolved.push(pid);
+   188	        continue;
+   189	      }
+   190	      if (st.state === 'Z') {
+   191	        zombies.push(pid); // غيرُ قابلةٍ للإسنادِ: قد تكونُ محاكينا — التوقّفُ لا يُثبَتُ معها
+   192	        continue;
+   193	      }
+   194	      if (st.ppid === 2 || st.ppid === 0) continue;
+   195	      if (alive(pid)) unresolved.push(pid);
+   196	      continue;
+   197	    }
+   198	    if (!args[0].includes('swtpm')) continue;
+   199	    if (dir === null || ownsStateDir(args, dir)) matches.push(pid);
+   200	  }
+   201	  return { matches, unresolved, zombies };
+   202	}
+   203	
+   204	function sleepMs(ms) {
+   205	  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+   206	}
+   207	
+   208	// ── إنهاءُ عمليّةِ المحاكي وانتظارُ زوالِها ──
+   209	//
+   210	// يعيدَ true فقط عندَ قرينةٍ صحيحةٍ على زوالِ العمليّةِ المقصودةِ (ESRCH عندَ الإشارةِ أو بعدها، أو زوالُ
+   211	// /proc/<pid>). أمّا تعذّرُ قراءةِ الهويّةِ، أو عدمُ مطابقةِ سطرِ الأوامرِ لمسارِ الحالةِ (إعادةُ استخدامِ PID
+   212	// لعمليّةٍ أخرى)، أو رفضُ إرسالِ الإشارةِ بصلاحيّةٍ — فكلُّها حالاتٌ مجهولةٌ تُعيدُ false ولا تُقتَلُ فيها عمليّةٌ
+   213	// لا يُثبَتُ أنها العمليّةُ التي أنشأها هذا التشغيلُ.
+   214	// opts.dir: مسارُ الحالةِ للتحقّقِ من ملكيّةِ العمليّةِ قبلَ أيِّ إشارةٍ.
+   215	// opts.injectKillFailure: حقنٌ محدودٌ للاختبارِ — يُمحاكي فشلَ إرسالِ الإشارةِ بصلاحيّةٍ (EPERM) فلا يُعلَنَ
+   216	// التوقّفُ كذبًا ولا يُحذَفُ المجلّدُ.
+   217	export function killSim(
+   218	  pid,
+   219	  { graceMs = 3000, dir = null, injectKillFailure = false, readCmdline = procArgs } = {},
+   220	) {
+   221	  if (!Number.isInteger(pid) || pid <= 1) return false; // رقمٌ غيرُ صالحٍ ليس دليلَ زوالٍ ولا إذنَ تنظيفٍ (حسمُ المراجعةِ 3)
+   222	  // هويةُ العمليّةِ قابلةٌ للقراءةِ: إن لم تربطها بمسارِ حالتِنا فهي ليست مِلكَنا — لا تُمسّ.
+   223	  const args = readCmdline(pid);
+   224	  if (args !== null && args.length > 0) {
+   225	    if (!args[0].includes('swtpm') || (dir !== null && !ownsStateDir(args, dir))) return false;
+   226	  } else if (alive(pid)) {
+   227	    // سطرُ أوامرِها غيرُ مقروءٍ لكنّها حيّةٌ: الهويّةُ غيرُ قابلةٍ للإثباتِ — لا قتلَ بلا قرينةٍ.
+   228	    return false;
+   229	  } else {
+   230	    return true; // لا عمليّةَ بهذا الرقمِ: زالت.
+   231	  }
+   232	  // الإشارةُ الأولى (SIGTERM) عبرَ المقبضةِ المرتبطةِ بالهويّةِ وحدَها — لا مسارَ آخرَ: تعذّرَتِ القناةُ
+   233	  // (unsupported) فالإيقافُ يفشلُ مغلقًا (لا إشارةَ بالرقمِ البحتِ — حسمُ جولةِ المراجعةِ الخامسةِ):
+   234	  if (injectKillFailure) return false; // فشلُ إرسالٍ محقونٌ: ليسَ إثباتَ زوالٍ (كما كانَ يُرمى ويُلتقطُ)
+   235	  const viaPidfd = pidfdSignal(pid, 'SIGTERM', dir);
+   236	  if (viaPidfd !== 'esrch' && viaPidfd !== 'ok') return false; // mismatch/unsupported وغيرُهما: لا إشارةَ ولا زوالًا يُعلَن
+   237	  for (let waited = 0; waited < graceMs; waited += 20) {
+   238	    if (!alive(pid)) return true;
+   239	    sleepMs(20);
+   240	  }
+   241	  // التصعيدُ (SIGKILL) لا يقعُ على الرقمِ وحدَهُ: الهويّةُ يُعادُ إثباتُها قبلَهُ — انتظارُنا فحصُ وجودٍ
+   242	  // بالرقمِ فقط، وقد يُعادُ استخدامُهُ لعمليّةٍ أخرى بينَ الإشارتَينِ (WL-416 جولةُ المراجعةِ الثانيةِ).
+   243	  const argsAtEscalation = readCmdline(pid);
+   244	  if (
+   245	    argsAtEscalation === null ||
+   246	    argsAtEscalation.length === 0 ||
+   247	    !argsAtEscalation[0].includes('swtpm') ||
+   248	    (dir !== null && !ownsStateDir(argsAtEscalation, dir))
+   249	  ) {
+   250	    return false; // الهويّةُ لم تُثبَتْ عندَ التصعيدِ: لا قتلَ لعمليّةٍ قد لا تكونَ مِلكَنا
+   251	  }
+   252	  if (injectKillFailure) return false; // فشلُ إرسالٍ محقونٌ عندَ التصعيدِ: ليسَ إثباتَ زوالٍ
+   253	  // التصعيدُ (SIGKILL) عبرَ المقبضةِ كذلك — لا مسارَ آخرَ: تعذّرَتِ القناةُ فالإيقافُ يفشلُ مغلقًا.
+   254	  const killViaPidfd = pidfdSignal(pid, 'SIGKILL', dir);
+   255	  if (killViaPidfd !== 'esrch' && killViaPidfd !== 'ok') return false; // mismatch/unsupported: لا تصعيدَ
+   256	  for (let waited = 0; waited < 1000; waited += 20) {
+   257	    if (!alive(pid)) return true;
+   258	    sleepMs(20);
+   259	  }
+   260	  return !alive(pid);
+   260	  return !alive(pid);
+   261	}
+   262	
+   263	function readPid(pidFile) {
+   264	  try {
+   265	    const n = Number(readFileSync(pidFile, 'utf8').trim());
+   266	    return Number.isInteger(n) && n > 1 ? n : null;
+   267	  } catch {
+   268	    return null;
+   269	  }
+   270	}
+   271	
+   272	function defaultProbe(port) {
+   273	  try {
+   274	    execFileSync('tpm2_getcap', ['--tcti=swtpm:host=127.0.0.1,port=' + port, 'properties-fixed'], {
+   275	      stdio: 'ignore',
+   276	    });
+   277	    return true;
+   278	  } catch {
+   279	    return false;
+   280	  }
+   281	}
+   282	
+   283	// إنهاءُ محاولةٍ: العمليّةُ المقصودةُ هي ما يربطُهُ سطرُ أوامرِهِ بمسارِ الحالةِ. لا يُقتَلُ ما لا يُثبَتُ
+   284	// ملكُهُ، ولا يُعلَنُ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (إعادةُ مسحٍ قرائيةٍ بعدَ الإنهاءِ)
+   285	// وبانعدامِ كلِّ عمليّةٍ غيرِ محسومةِ الهويّةِ وكلِّ زومبي غيرِ مُلقّاةٍ (غيرِ قابلةٍ للإسنادِ — جولةُ 5).
+   286	export function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline = procArgs }) {
+   287	  const pidFromFile = readPid(pidFile);
+   288	  let identityUnknown = false;
+   289	  let usedPidFile = false;
+   290	  if (pidFromFile !== null && alive(pidFromFile)) {
+   291	    usedPidFile = true;
+   292	    const args = readCmdline(pidFromFile);
+   293	    if (args === null || args.length === 0) {
+   294	      identityUnknown = true; // حيّةٌ ولا يُقرأُ سطرُ أوامرِها: الهويّةُ غيرُ قابلةٍ للإثباتِ
+   295	    } else if (args[0].includes('swtpm') && (dir === null || ownsStateDir(args, dir))) {
+   296	      // مِلكُنا المُعلَنُ من ملفِ PID ومربوطٌ بمسارِ الحالةِ: يُنهى ويُنتظرُ زوالُهُ.
+   297	      if (!killSim(pidFromFile, { dir, injectKillFailure, readCmdline })) identityUnknown = true;
+   298	    }
+   299	    // وإلا: الملفُّ يشيرُ إلى عمليّةٍ لا تربطُها بمسارِ حالتِنا — ليست مِلكَ هذا التشغيلِ فلا تُمسّ.
+   300	  }
+   301	  // غيابُ ملفِ PID ليسَ دليلَ توقّفٍ: الاكتشافُ البديلُ من /proc يربطُ العمليّةَ بمسارِ الحالةِ الفعليّ.
+   302	  // والاكتشافُ الفارغُ ليسَ إثباتَ موتٍ: عمليّةٌ حيّةٌ لا تُقرأُ هويّتُها تُبقي الحالةَ غيرَ محسومةٍ،
+   303	  // والزومبيُّ غيرُ المُلقّاةِ كذلك — لا سطرَ أوامرَ لها فلا إسنادَ، وقد تكونُ محاكينا (جولةُ 5).
+   304	  const scan = scanStateDir(dir, { readCmdline });
+   305	  if (scan.unresolved.length > 0) identityUnknown = true;
+   306	  if (scan.zombies.length > 0) identityUnknown = true;
+   307	  const discovered = scan.matches;
+   308	  const discoveryUsed =
+   309	    discovered.length > 0 || scan.unresolved.length > 0 || scan.zombies.length > 0;
+   310	  for (const p of discovered) {
+   311	    if (!killSim(p, { dir, injectKillFailure, readCmdline })) identityUnknown = true;
+   312	  }
+   313	  // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ، ولا عمليّةً غيرَ محسومةٍ،
+   314	  // ولا زومبيً غيرَ مُلقّاةٍ (ESRCH وحدها دليلُ الزوالِ — لا يُكتفى بخروجٍ لم يُلقَ أثرُهُ).
+   315	  const remaining = scanStateDir(dir, { readCmdline });
+   316	  return {
+   317	    stopped:
+   318	      !identityUnknown &&
+   319	      remaining.matches.length === 0 &&
+   320	      remaining.unresolved.length === 0 &&
+   321	      remaining.zombies.length === 0,
+   322	    identityUnknown,
+   323	    discoveryUsed,
+   324	    usedPidFile,
+   325	  };
+   326	}
+   327	
+   328	// opts: prefix (بادئةُ مجلّدِ الحالةِ)، portBase، bindaddr، attempts (8)، readyTries (10)، readyDelayMs (1000)،
+   329	// probe(port) ⇒ boolean (افتراضيًّا tpm2_getcap)، onAbandon({pid, dir, port, stopped, reason}) لمراقبةِ الاختبارِ،
+   330	// label للخطأ، afterSpawn({pid, dir, pidFile}) بعدَ الإطلاقِ وقبلَ الجاهزيّةِ (للاختباراتِ)،
+   331	// injectKillFailure (للاختبارِ: محاكاةُ فشلِ الإشارةِ).
+   332	export function startSim(opts = {}) {
+   333	  const {
+   334	    prefix = 'xuux-ceremony-',
+   335	    portBase = 2700,
+   336	    bindaddr = '127.0.0.1',
+   337	    attempts = 8,
+   338	    readyTries = 10,
+   339	    readyDelayMs = 1000,
+   340	    probe = defaultProbe,
+   341	    onAbandon = null,
+   342	    label = 'WL-413',
+   343	    afterSpawn = null,
+   344	    injectKillFailure = false,
+   345	    readCmdline = null,
+   346	  } = opts;
+   347	  for (let attempt = 0; attempt < attempts; attempt++) {
+   348	    const dir = mkdtempSync(join(tmpdir(), prefix));
+   349	    const port = portBase + 2 * Math.floor(Math.random() * 150);
+   350	    const pidFile = join(dir, 'swtpm.pid');
+   351	    let launchError = null;
+   352	    let abandonReason = null;
+   353	    let r = null;
+   354	    try {
+   355	      r = spawnSync(
+   356	        'swtpm',
+   357	        [
+   358	          'socket',
+   359	          '--tpm2',
+   360	          '--tpmstate',
+   361	          `dir=${dir}`,
+   362	          '--server',
+   363	          `type=tcp,port=${port},bindaddr=${bindaddr}`,
+   364	          '--ctrl',
+   365	          `type=tcp,port=${port + 1},bindaddr=127.0.0.1`,
+   366	          '--flags',
+   367	          'not-need-init,startup-clear',
+   368	          '--pid',
+   369	          `file=${pidFile}`,
+   370	          '--daemon',
+   371	        ],
+   372	        { encoding: 'utf8' },
+   373	      );
+   374	    } catch (e) {
+   375	      launchError = e;
+   376	      abandonReason = 'spawn-threw';
+   377	    }
+   378	    if (launchError === null) {
+   379	      // حتى عندَ خروجٍ غيرِ صفريٍّ قد يكونُ ملفُّ pid كُتب: يُنهى ما وُجدَ قبلَ أيِّ قرارٍ على المجلّدِ.
+   380	      if (r.status !== 0) abandonReason = 'spawn-failed';
+   381	      else {
+   382	        try {
+   383	          if (afterSpawn) afterSpawn({ pid: readPid(pidFile), dir, pidFile });
+   384	          let ready = false;
+   385	          // رميُ probe استثناءً لا يتجاوزُ التنظيفَ: كلُّ ما بعدَ الإطلاقِ يمرُّ عبرَ مسارِ الإنهاءِ نفسِهِ.
+   386	          for (let i = 0; i < readyTries; i++) {
+   387	            if (probe(port)) {
+   388	              ready = true;
+   389	              break;
+   390	            }
+   391	            if (i + 1 < readyTries) sleepMs(readyDelayMs);
+   392	          }
+   393	          const pid = readPid(pidFile);
+   394	          if (!ready) abandonReason = 'not-ready';
+   395	          else if (pid === null) abandonReason = 'no-pid';
+   396	          // لا يُسلَّمُ رقمُ ملفِ PID إلّا إن ثبتَ أنه المالكُ الحيُّ لمسارِ الحالةِ (WL-418، WL418-grok_4_7-01):
+   397	          // رقمٌ لا يملكُ المجلّدَ يجعلُ stopSim لاحقًا يقيسُ عمليّةً أخرى — يُعاملُ كمحاولةٍ لم تُسلَّم.
+   398	          else if (!scanStateDir(dir).matches.includes(pid)) abandonReason = 'pid-not-owner';
+   399	          else return { dir, port, pidFile, pid };
+   400	        } catch (e) {
+   401	          launchError = e;
+   402	          abandonReason = 'exception-after-launch';
+   403	        }
+   404	      }
+   405	    }
+   406	    // ── مسارُ الإنهاءِ الموحّدُ لكلِّ محاولةٍ لم تُسلَّمْ: إثباتُ الزوالِ أولًا، ثمّ المراقبُ، ثمّ الحذفُ ──
+   407	    // المقبضُ يُقرأُ قبلَ الإنهاءِ: swtpm يحذفُ ملفَ PID بنفسِهِ عندَ توقّفِهِ الرشيقِ فلا يُقرأُ بعدهُ.
+   408	    const pidBeforeTermination = readPid(pidFile);
+   409	    let stopped = false;
+   410	    let cleanupError = null;
+   411	    let callbackError = null;
+   412	    try {
+   413	      stopped = terminateAttempt({
+   414	        pidFile,
+   415	        dir,
+   416	        injectKillFailure,
+   417	        readCmdline: readCmdline || procArgs,
+   418	      }).stopped;
+   419	    } catch (e) {
+   420	      cleanupError = e; // فشلُ الإنهاءِ نفسِه: يُحفَظُ ولا يُعلَنَ نجاحًا
+   421	    }
+   422	    // المراقبُ بعدَ الإنهاءِ وقبلَ الحذفِ: فشلُهُ لا يتجاوزُ التنظيفَ ولا يُخفيهِ.
+   423	    if (onAbandon) {
+   424	      try {
+   425	        onAbandon({ pid: pidBeforeTermination, dir, port, stopped, reason: abandonReason });
+   426	      } catch (e) {
+   427	        callbackError = e;
+   428	      }
+   429	    }
+   430	    // الحذفَ بعدَ إثباتِ الزوالِ وحدَهُ: بقيّةُ عمليّةٍ أو هويّةٍ غيرِ مثبَتةٍ ⇒ يُحفَظُ المجلّدُ دليلًا ويُوقَفُ
+   431	    // المسارُ مغلقًا — لا محاولةً تاليةً تُطلقُ محاكياتٍ فوقَ عمليّةٍ لم يُثبَتْ زوالُها.
+   432	    if (stopped) {
+   433	      try {
+   434	        rmSync(dir, { recursive: true, force: true });
+   435	      } catch (e) {
+   436	        cleanupError = cleanupError || e;
+   437	      }
+   438	    } else {
+   439	      cleanupError =
+   440	        cleanupError ||
+   441	        new Error(
+   442	          `${label}: simulator process not proven stopped (state dir kept as evidence: ${dir}); refusing to retry or delete`,
+   443	        );
+   444	    }
+   445	    if (cleanupError) throw cleanupError; // فشلُ التنظيفِ لا يُبتلَعُ خلفَ خطأٍ أصليٍّ ولا يجاورُهُ صامتًا
+   446	    if (callbackError) throw callbackError; // وفشلُ المراقبِ يظهرُ بعدَ اكتمالِ التنظيفِ
+   447	    if (launchError) throw launchError; // الاستثناءُ الأصليُّ يُعادُ رميُهُ بعدَ تنظيفٍ مضمونٍ
+   448	  }
+   449	  throw new Error(label + ': تعذّرَ تشغيلُ محاكٍ معزول');
+   450	}
+   451	
+   452	// قتلُ عمليّةِ المحاكي وانتظارُ زوالِها قبلَ حذفِ مجلّدِ الحالةِ (الحذفُ وحدَه ترك 21 يتيمًا — WL-413 R3).
+   453	// الحذفَ بعدَ إثباتِ الزوالِ فقط: تعذّرَ الإيقافُ أو تعذّرَ إثباتُ الهويّةِ ⇒ يُحفَظُ المجلّدُ ويُعادَ false.
+   454	// WL-421 (WL420-gpt_6_1_sol-01، WL420-grok_4_7-01): نتيجةُ المسحِ النهائيِّ هي نموذجُ terminateAttempt نفسُه —
+   455	// لا يُعلَنُ التوقّفُ مع مالكٍ حيٍّ، ولا مع عمليّةٍ غيرِ محسومةِ الهويّةِ، ولا مع زومبي غيرِ مُلقّاةٍ (لا سطرَ
+   456	// أوامرَ لها فلا إسنادَ، وقد تكونُ محاكينا). وفشلُ إنهاءِ الرقمِ المسلَّمِ لا يوقفُ المسارَ مبكّرًا: المالكُ
+   457	// المُثبَتُ ملكُه بالمسحِ يُنهى بالمسارِ نفسِه (killSim: هويّةٌ قبلَ الإشارةِ، ولا إشارةَ لرقمٍ لم تُثبَتْ هويّتُه)،
+   458	// ثمّ يُعادُ false لأنّ زوالَ الرقمِ المسلَّمِ أو انتماءَه لم يُثبَت.
+   459	const STOP_SETTLE_MS = 1000; // مهلةُ استقرارٍ محدودةٌ لزومبي عابرةٍ يُلقّيها أبوها — لا تحويلَ لزومبي باقيةٍ إلى نجاح
+   460	function stopScanClear(dir) {
+   461	  for (let waited = 0; ; waited += 50) {
+   462	    const r = scanStateDir(dir);
+   463	    if (r.matches.length === 0 && r.unresolved.length === 0 && r.zombies.length === 0) return true;
+   464	    if (r.matches.length > 0 || waited >= STOP_SETTLE_MS) return false;
+   465	    sleepMs(50);
+   466	  }
+   467	}
+   468	export function stopSim(s) {
+   469	  if (!s) return true;
+   470	  const deliveredGone = killSim(s.pid, { dir: s.dir }) === true;
+   471	  let ownersGone = true;
+   472	  for (const p of scanStateDir(s.dir).matches) {
+   473	    if (killSim(p, { dir: s.dir }) !== true) ownersGone = false;
+   474	  }
+   475	  if (!deliveredGone || !ownersGone || !stopScanClear(s.dir)) return false;
+   476	  try {
+   477	    rmSync(s.dir, { recursive: true, force: true });
+   478	  } catch {
+   479	    /* أفضلُ جهدٍ — الزوالُ مثبتٌ فلا يتيمَ */
+   480	  }
+   481	  return true;
+   482	}
+   483	
+   484	// للاختبار: هل مجلّدُ الحالةِ ما زالَ على القرصِ؟ (شاهدُ ترتيبِ الحذفِ بعدَ زوالِ العمليّةِ)
+   485	export function stateDirExists(dir) {
+   486	  return existsSync(dir);
+   487	}
+   488	
+   489	// للاختبار: هل توجدُ عمليّةُ swtpm حيّةٌ تحملُ هذا المسارَ في سطرِ أوامرِها؟ (قراءةُ /proc فقط)
+   490	export function swtpmProcessesWithPath(path) {
+   491	  const r = spawnSync('pgrep', ['-af', '--', 'swtpm'], { encoding: 'utf8' });
+   492	  return String(r.stdout || '')
+   493	    .split('\n')
+   494	    .filter((l) => l.includes(path));
+   495	}

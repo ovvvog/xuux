@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:34:56.430Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'bash' '-c' 'nl -ba tests/helpers/ceremony-swtpm.mjs | sed -n "1,260p"; nl -ba tests/helpers/ceremony-swtpm.mjs | sed -n "260,640p"; nl -ba tests/helpers/ceremony-swtpm.mjs | sed -n "640,1000p"'

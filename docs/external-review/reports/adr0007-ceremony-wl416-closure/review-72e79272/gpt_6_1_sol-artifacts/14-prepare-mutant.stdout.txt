@@ -1,0 +1,8 @@
+{
+  "original": "/tmp/wt-72e79272-gpt_6_1_sol/sim/tpm-ceremony/TpmCeremonyCore.cs",
+  "target": "/tmp/council-wl422-gpt_6_1_sol/mutant-core.cs",
+  "originalSha256": "7a86b97a99a52c05e3d7712d93dbf3228ee7a965703350f157046a208f89e5e6",
+  "mutantSha256": "37d5ebfce1526b32a92bf402bf4114b1309c4b7fae15a7cd76428111c427f17d",
+  "mutation": "Omit _ctx.EndOfLife(h) only in SessionConsumed; leave state-derived fact intact",
+  "repositoryOriginalUnchanged": true
+}

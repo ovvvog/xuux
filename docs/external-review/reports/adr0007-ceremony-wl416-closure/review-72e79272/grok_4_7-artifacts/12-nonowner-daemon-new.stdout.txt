@@ -1,0 +1,25 @@
+{
+  "sim": {
+    "pid": 6526,
+    "dir": "/tmp/xuux-wl422-daemon-nonowner-Ege7oh",
+    "port": 24312
+  },
+  "decoy": 6523,
+  "discoverBefore": [
+    6526
+  ],
+  "killDecoy": false,
+  "stopSimReturned": false,
+  "elapsedMs": 24,
+  "owner": {
+    "state": "GONE",
+    "esrch": true,
+    "discover": []
+  },
+  "decoyAfter": {
+    "state": "S",
+    "esrch": false,
+    "signalLog": "ready\n"
+  },
+  "stateDirExists": true
+}

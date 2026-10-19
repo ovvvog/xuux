@@ -1,0 +1,2 @@
+# start UTC: 2026-10-19T07:39:06.950Z
+cd '/tmp/wt-72e79272-gpt_6_1_sol' && 'node' '/tmp/council-wl422-gpt_6_1_sol/process-snapshot.mjs'
