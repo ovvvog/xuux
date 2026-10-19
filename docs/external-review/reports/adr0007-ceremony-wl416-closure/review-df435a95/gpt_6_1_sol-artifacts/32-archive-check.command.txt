@@ -1,0 +1,5 @@
+cwd=/tmp/council-wl420-gpt_6_1_sol
+command=python3 -m zipfile -t /tmp/council-wl420-gpt_6_1_sol/wl420-gpt_6_1_sol-evidence.zip 
+start=2026-10-19T04:18:42Z
+end=2026-10-19T04:18:43Z
+exit=0

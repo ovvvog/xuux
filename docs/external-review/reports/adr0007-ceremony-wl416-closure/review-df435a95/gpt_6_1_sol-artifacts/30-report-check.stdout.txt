@@ -1,0 +1,18 @@
+{
+  "reportBytes": 32482,
+  "references": 145,
+  "uniqueReferences": 71,
+  "missing": [],
+  "verdicts": [
+    "## البند 1: open",
+    "## البند 2: holds",
+    "## البند 3: holds",
+    "## البند 4: holds",
+    "## البند 5: open"
+  ],
+  "findings": [
+    "### WL420-gpt_6_1_sol-01 — medium — stopSim يهمل الزومبي وغير المحسوم في المسح النهائي",
+    "### WL420-gpt_6_1_sol-02 — medium — L7a يترك محاكيًا حيًا عند إخفاق التراجع الذي صُمم لاكتشافه",
+    "### WL420-gpt_6_1_sol-03 — low — نص حاجز NV يدّعي إرسال أوامر قبل إرسال أول أمر"
+  ]
+}

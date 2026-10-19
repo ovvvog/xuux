@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=nl -ba tests/sim/tpm-ceremony-wl416.test.mjs 
+start=2026-10-19T04:06:22Z
+end=2026-10-19T04:06:22Z
+exit=0

@@ -1,0 +1,4 @@
+{"phase":"live","dir":"/tmp/council-wl420-gpt_6_1_sol/stop-zombie-6csFAQ","ownerPid":28490,"argv":["swtpm","socket","--tpm2","--tpmstate","dir=/tmp/council-wl420-gpt_6_1_sol/stop-zombie-6csFAQ","--server","type=tcp,port=7686,bindaddr=127.0.0.1","--ctrl","type=tcp,port=7687,bindaddr=127.0.0.1","--flags","not-need-init,startup-clear","--pid","file=/tmp/council-wl420-gpt_6_1_sol/stop-zombie-6csFAQ/swtpm.pid",""]}
+{"phase":"pre-stop","actualOwnerState":"Z","pidStillExists":true,"scanOwners":[],"terminateAttempt":{"stopped":false,"identityUnknown":true,"discoveryUsed":true,"usedPidFile":true},"stateDirExists":true}
+{"phase":"post-stop","suppliedPid":2147483000,"stopSimReturned":true,"actualOwnerStillExists":true,"actualOwnerState":"Z","stateDirExists":false}
+{"phase":"cleanup","actualOwnerPid":28490,"absentByESRCH":true,"directoryRetained":false}

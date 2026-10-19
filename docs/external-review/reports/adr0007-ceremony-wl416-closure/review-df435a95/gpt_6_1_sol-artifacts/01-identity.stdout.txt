@@ -1,0 +1,7 @@
+Mon Oct 19 04:06:22 UTC 2026
+df435a951486f124a5c75a337f17bd96924d7352
+v20.20.2
+TPM emulator version 0.10.1, Copyright (c) 2014-2022 IBM Corp. and others
+PowerShell 7.6.7
+a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d
+e23bd4314cf629846969f3685fb71e1681403c89

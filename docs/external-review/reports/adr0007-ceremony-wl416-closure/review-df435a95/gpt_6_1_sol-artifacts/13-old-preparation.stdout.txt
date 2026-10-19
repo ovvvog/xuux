@@ -1,0 +1,19 @@
+--- /tmp/wt-df435a95-gpt/tests/helpers/tpm-ceremony-harness.ps1	2026-10-19 04:05:14.570257770 +0000
++++ /tmp/council-wl420-gpt_6_1_sol/old-harness.ps1	2026-10-19 04:08:09.830257770 +0000
+@@ -28,9 +28,9 @@
+ Set-StrictMode -Version 2.0
+ $ErrorActionPreference = 'Stop'
+ 
+-$root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
++$root = '/tmp/wt-a3f1505d'
+ $core = Join-Path $root 'sim/tpm-ceremony/TpmCeremonyCore.cs'
+-$helper = Join-Path $PSScriptRoot 'TpmCeremonyFaultTransport.cs'
++$helper = '/tmp/wt-df435a95-gpt/tests/helpers/TpmCeremonyFaultTransport.cs'
+ 
+ function Get-HandleList {
+   param([Xuux.TpmCeremony.ICeremonyTransport]$Transport, [uint32]$Start)
+a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d
+e3651be9049db38e7c4deaafb87c1168b66586bd5e85e516eab01779b78c6af7  /tmp/wt-a3f1505d/sim/tpm-ceremony/TpmCeremonyCore.cs
+c620904c6303c2d091e4d12254549cb48e821cb5ee7aedf72bd8ee3c70ffb404  /tmp/wt-a3f1505d/tests/helpers/ceremony-swtpm.mjs
+e7987e581377f177269851749ab251f75edb2a94a97b86f6664b67d5025b9b57  /tmp/wt-df435a95-gpt/tests/sim/tpm-ceremony-wl416.test.mjs
+68ef45a38a8c9d2454e40006bf060b8c1629c9bfa7689d9025c0cbd974e0c3e2  /tmp/wt-df435a95-gpt/tests/helpers/TpmCeremonyFaultTransport.cs

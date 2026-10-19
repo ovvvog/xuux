@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=git diff --check a3f1505d df435a951486f124a5c75a337f17bd96924d7352 -- sim tests scripts 
+start=2026-10-19T04:12:41Z
+end=2026-10-19T04:12:41Z
+exit=0

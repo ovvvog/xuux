@@ -1,0 +1,5 @@
+cwd=/tmp/wt-a3f1505d
+command=node /tmp/council-wl420-gpt_6_1_sol/cleanup-own-processes.mjs 
+start=2026-10-19T04:11:29Z
+end=2026-10-19T04:11:29Z
+exit=0

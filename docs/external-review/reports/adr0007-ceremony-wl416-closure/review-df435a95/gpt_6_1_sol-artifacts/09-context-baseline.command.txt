@@ -1,0 +1,5 @@
+cwd=/tmp/wt-df435a95-gpt
+command=env TMPDIR=/tmp/council-wl420-gpt_6_1_sol bash /tmp/council-wl420-gpt_6_1_sol/context-probe/run.sh /tmp/wt-e23bd431/sim/tpm-ceremony/TpmCeremonyCore.cs 7690 
+start=2026-10-19T04:07:20Z
+end=2026-10-19T04:07:21Z
+exit=0

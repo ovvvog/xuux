@@ -1,0 +1,15 @@
+MODE=nv-appear-after-define port=7782 pid=1949 core=e3651be9049db38e
+status=FAILED_CLOSED
+FAILURE=NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED: NV index(es) inside the declared XUUX owner range cannot be proven as created-by-this-run and safely deletable; rehearsal halted before any state-changing command. Matching the public area to the request is not proof of ownership. Owner review of the recorded index list is required before any cleanup. rc=0x00000000
+STATE_CHANGING=["S1:s1.probe:NV_DefineSpace:0x0000012a","S1:s1.probe:NV_Increment#1:0x00000134","S1:s1.probe:NV_Increment#2:0x00000134","S1:s1.probe:NV_UndefineSpace:0x00000122"]
+nvAfter=["0x01807777"]
+---
+swtpm_left=0
+MODE=nv-appear-after-primary port=7784 pid=2225 core=e3651be9049db38e
+status=FAILED_CLOSED
+FAILURE=NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED: NV index(es) inside the declared XUUX owner range cannot be proven as created-by-this-run and safely deletable; rehearsal halted before any state-changing command. Matching the public area to the request is not proof of ownership. Owner review of the recorded index list is required before any cleanup. rc=0x00000000
+STATE_CHANGING=["S1:s1.probe:NV_DefineSpace:0x0000012a","S1:s1.probe:NV_Increment#1:0x00000134","S1:s1.probe:NV_Increment#2:0x00000134","S1:s1.probe:NV_UndefineSpace:0x00000122","S1:s1.redefine:NV_DefineSpace:0x0000012a","S1:s1.redefine:NV_Increment#1:0x00000134","S1:s1.redefine:NV_UndefineSpace:0x00000122","S2:s2:CreatePrimary(storage,ECC-P256):0x00000131","S2:s2:Create(service-key,ECDSA-P256):0x00000153","S2:s2:Load(service-key):0x00000157","S2:s2.trial:StartAuthSession:0x00000176","S2:s2.trial:PolicySigned:0x00000160","S2:s2.trial:PolicyCommandCode:0x0000016c","S2:s2.trial:FlushContext:0x00000165","cleanup:cleanup:FlushContext:0x00000165","cleanup:cleanup:FlushContext:0x00000165"]
+nvAfter=["0x01807777"]
+---
+swtpm_left=0
+DONE
