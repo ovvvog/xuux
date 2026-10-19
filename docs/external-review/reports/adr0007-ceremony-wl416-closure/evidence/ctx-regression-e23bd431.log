@@ -1,0 +1,14 @@
+$ date -u: 2026-10-19T00:47:37Z
+$ git -C /tmp/wt-e23bd431 rev-parse HEAD: e23bd4314cf629846969f3685fb71e1681403c89
+$ bash docs/external-review/reports/adr0007-ceremony-wl416-closure/probes/run.sh /tmp/wt-e23bd431/sim/tpm-ceremony/TpmCeremonyCore.cs 7440
+core_file=/tmp/wt-e23bd431/sim/tpm-ceremony/TpmCeremonyCore.cs core_sha256=de076f9c73dce9a0c6f1916083d1281c8ffe7c6338cf63dc1ad040da177d15b4
+probe_sha256=578ea4632f0699a9324639a0b68a77bb5b56721ed85bc094c4b10e78d2e7d54e
+core: EndOfLife absent (baseline)
+recorded-reuse-new-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=True identity=B creationDataSha=26B0105574976F16 verdict=ACCEPT
+unrecorded-reuse-new-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=False identity=B creationDataSha=26B0105574976F16 verdict=REJECT RESPONSE_CREATION_DATA_MALFORMED: Create parentName differs from known parent
+unrecorded-reuse-same-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=False identity=A creationDataSha=B412B7BC6C7D8308 verdict=ACCEPT
+invalid-response-recorded-reuse: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=True identity=B creationDataSha=26B0105574976F16 verdict=REJECT RESPONSE_CREATION_DATA_MALFORMED: Create parentName differs from known parent
+probe: done
+probe_exit=0
+swtpm_after_stop_with_dir=0
+exit_code=0
