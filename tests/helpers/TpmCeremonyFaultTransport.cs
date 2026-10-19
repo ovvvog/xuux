@@ -709,6 +709,16 @@ namespace Xuux.TpmCeremony.Tests
                     }
                 }
             }
+            // WL-418 (WL418-gpt_6_1_sol-01): ظهورٌ متأخّرٌ بعدَ أمرٍ مُغيِّرٍ ناجحٍ — يُعرَّفُ فهرسٌ حقيقيٌّ داخلَ مجالِ
+            // المالكِ بعدَ نجاحِ أوّلِ NV_DefineSpace (nv-appear-after-define) أو أوّلِ CreatePrimary
+            // (nv-appear-after-primary)، بلا إخفاءٍ عن أيِّ جرد. حاجزُ بوابةِ الإرسالِ يوقفُ الأمرَ المُغيِّرَ التالي.
+            if (((_mode == "nv-appear-after-define" && cc == Tpm.CC_NV_DefineSpace) ||
+                 (_mode == "nv-appear-after-primary" && cc == Tpm.CC_CreatePrimary)) && rc == 0 && Changes == 0)
+            {
+                Changes++;
+                Resp d = Resp.Parse(_inner.Transmit(Cmd.NvDefineSpace(new byte[0], new byte[0], PlantedNvPublic(0x01807777))), 0, Tpm.ST_SESSIONS, 1, new bool[] { true });
+                if (d.Rc != 0) throw new InvalidOperationException("late NV define failed rc=" + Hex.U32(d.Rc));
+            }
             if (rc == 0x18B && _mode == "readpublic-malformed-18b" && cc == Tpm.CC_NV_ReadPublic && _defineLost)
             {
                 Changes++;

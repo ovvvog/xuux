@@ -1,0 +1,10 @@
+core_file=/home/user/workspace/xuux-review-a3f1505d/sim/tpm-ceremony/TpmCeremonyCore.cs core_sha256=e3651be9049db38e7c4deaafb87c1168b66586bd5e85e516eab01779b78c6af7
+probe_sha256=578ea4632f0699a9324639a0b68a77bb5b56721ed85bc094c4b10e78d2e7d54e
+core: EndOfLife present (fixed)
+recorded-reuse-new-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=True identity=B creationDataSha=2257E001DE4E0600 verdict=ACCEPT
+unrecorded-reuse-new-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=False identity=B creationDataSha=2257E001DE4E0600 verdict=REJECT RESPONSE_CREATION_PARENT_UNKNOWN: Create parent 0x80000000
+unrecorded-reuse-same-identity: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=False identity=A creationDataSha=5B009C88C0866849 verdict=REJECT RESPONSE_CREATION_PARENT_UNKNOWN: Create parent 0x80000000
+invalid-response-recorded-reuse: handle=0x80000000 flushExecutedResponseDropped=True absentByInventory=True reusedHandle=0x80000000 sameNumber=True reuseRecorded=True identity=B creationDataSha=2257E001DE4E0600 verdict=REJECT RESPONSE_CREATION_DATA_MALFORMED: Create parentName differs from known parent
+probe: done
+probe_exit=0
+swtpm_after_stop_with_dir=0

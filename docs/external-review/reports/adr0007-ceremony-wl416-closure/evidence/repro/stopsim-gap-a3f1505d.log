@@ -1,0 +1,18 @@
+$ tree=/tmp/wt-a3f1505d HEAD=a3f1505daf2247b60f33a5f4d4ab24f35dd7af5d dirty=0
+$ flock /tmp/council-wl418-sim.lock env XUUX_TPM_SIM=1 node stopsim-gap-a3f1505d.mjs
+{
+  "returnedPid": 22722,
+  "ownersBefore": [
+    22722
+  ],
+  "deadPid": 2147483000,
+  "stopResult": true,
+  "threw": null,
+  "dirExistsAfterStopSim": false,
+  "ownersAfter": [
+    22722
+  ],
+  "realStillAlive": true
+}
+exit_code=0
+swtpm_left=0

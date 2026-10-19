@@ -1191,8 +1191,21 @@ namespace Xuux.TpmCeremony
             Tpm.CC_PolicySigned, Tpm.CC_PolicyCommandCode, Tpm.CC_FlushContext
         };
 
+        // حاجزُ ملكيةِ مجالِ المالكِ عندَ بوابةِ الإرسالِ (WL-418، ملاحظةُ المراجعةِ المستقلّةِ WL418-gpt_6_1_sol-01):
+        // بعدَ أوّلِ فحصٍ ناجحٍ (بعدَ خطِّ الأساسِ) يُعادُ الفحصُ قبلَ كلِّ أمرٍ مُغيِّرٍ، فظهورُ فهرسٍ غيرِ منسوبٍ
+        // في منتصفِ التشغيلِ يوقفُ الأمرَ التاليَ لا الجردَ النهائيَّ وحدَه. الاستثناءُ الصريحُ: FlushContext
+        // وNV_UndefineSpace — تحريرُ مواردَ أنشأها هذا التشغيلُ وثبتت ملكيّتُها؛ لا يحذفانِ فهرسًا غيرَ مثبَتِ الملكيّةِ
+        // (الحذفُ مشروطٌ بقيدٍ في _definedByRun)، ووقفُهما يُبقي بقايا. وأوامرُ الجردِ قرائيّةٌ فلا دورانَ.
+        private bool _nvGuardArmed;
+
+        private static bool NvGuardedAtSend(uint cc)
+        {
+            return StateChanging.Contains(cc) && cc != Tpm.CC_FlushContext && cc != Tpm.CC_NV_UndefineSpace;
+        }
+
         private Resp Send(string name, byte[] cmd, int respHandles, string expectation, int authCount)
         {
+            if (_nvGuardArmed && NvGuardedAtSend(CommandCodeOf(cmd))) AssertNvRangeOwnership(name);
             Step s = new Step();
             s.Stage = _cleanup ? "cleanup" : _stage;
             s.Name = name;
@@ -1469,7 +1482,11 @@ namespace Xuux.TpmCeremony
         // غيرُ محسومٍ (السياسةُ المحافِظةُ: لا يوجدُ دليلٌ كافٍ لتبريرِ عتبةٍ أعلى).
         private const int UnresolvedNvStopThreshold = 1;
 
-        private void AssertNvRangeOwnership()
+        private void AssertNvRangeOwnership() { AssertNvRangeOwnership(null); }
+
+        // nextCommand: اسمُ الأمرِ المُغيِّرِ الذي أُوقِفَ قبلَه (null عندَ الفحصِ الأوّلِ قبلَ أيِّ أمرٍ مُغيِّرٍ)،
+        // فلا يدّعي نصُّ الفشلِ «قبلَ أيِّ أمرٍ مُغيِّرٍ» بعدَ أن أُرسِلَت أوامرُ مُغيِّرةٌ فعلًا.
+        private void AssertNvRangeOwnership(string nextCommand)
         {
             HashSet<uint> present = NvHandles();
             List<uint> unresolved = new List<uint>();
@@ -1488,10 +1505,14 @@ namespace Xuux.TpmCeremony
                 _r.Fact("nvOwnershipGuard.stopThreshold", UnresolvedNvStopThreshold.ToString());
                 throw new CeremonyFailedException(
                     "NV_INDEX_UNATTRIBUTABLE_OWNER_REVIEW_REQUIRED: NV index(es) inside the declared XUUX owner range " +
-                    "cannot be proven as created-by-this-run and safely deletable; rehearsal halted before any state-changing " +
-                    "command. Matching the public area to the request is not proof of ownership. " +
+                    "cannot be proven as created-by-this-run and safely deletable; rehearsal halted " +
+                    (_nvGuardArmed
+                        ? "before the next state-changing command (" + nextCommand + "); state-changing commands were already sent in this run (see steps)"
+                        : "before any state-changing command") +
+                    ". Matching the public area to the request is not proof of ownership. " +
                     "Owner review of the recorded index list is required before any cleanup.", 0);
             }
+            _nvGuardArmed = true;
         }
 
         // جردٌ فوريٌّ قبلَ كلِّ تعريف ⇒ مقبضٌ عشوائيٌّ خالٍ في مجالِ المالك. لا مقبضَ ثابتٌ ولا إعادةُ محاولة.
@@ -1499,7 +1520,7 @@ namespace Xuux.TpmCeremony
         private uint PickVacantHandle(string purpose)
         {
             HashSet<uint> used = NvHandles();
-            AssertNvRangeOwnership();
+            AssertNvRangeOwnership(purpose + ":NV_DefineSpace");
             uint countersMax = Property(0x116);
             uint counters = Property(0x20A);
             _r.Fact(purpose + ".nvHandlesBefore", used.Count.ToString());
