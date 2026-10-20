@@ -59,6 +59,13 @@ import {
 import { basename, dirname, join } from 'node:path';
 
 import { isProductionRuntime } from './production-boot.mjs';
+import {
+  FNV_MANIFEST_SCHEMA_VERSION,
+  buildManifestFnvBinding,
+  manifestFnvBindingEqual,
+  manifestFnvBindingShapeError,
+} from './fnv-binding.mjs';
+import type { FnvBindingMaterial, ManifestFnvBinding } from './fnv-binding.mjs';
 
 /** اسمُ الملفِّ في جذرِ الحالةِ — مثبَّتٌ كي لا يُخترَع في موضعينِ. */
 export const STATE_MANIFEST_FILE = 'root-of-trust.manifest.json';
@@ -83,10 +90,21 @@ export const STATE_JOURNAL_LOCK_SUFFIX = '.lock';
 /** المتغيّرُ الذي يُعلَنُ به إذنُ التهيئةِ — إعلانٌ لا استنباط. */
 export const STATE_PROVISION_ENV = 'XUUX_ROOT_OF_TRUST_PROVISION';
 
+/**
+ * إعلانُ تفويضِ مراسمِ ربطِ NV في البيانِ — إعلانٌ لا استنباط: الربطُ يغيّرُ وضعَ
+ * البيانِ (‏`version: 3`) فلا يقعُ بغيرِ إذنٍ معلَنٍ (WL-434). يشاركُ إعلانَ ربطِ
+ * المرجعِ الأوّلِ (`XUUX_FRESHNESS_BIND_DECLARED`) المراسمَ نفسَها.
+ */
+export const FNV_BIND_DECLARED_ENV = 'XUUX_FRESHNESS_BIND_DECLARED';
+
 /** سياقُ النشرِ المُعلَنُ — يدخلُ المتنَ الموقَّعَ فلا يُنقَلُ بيانٌ بينَ نشرينِ. */
 export const STATE_CONTEXT_ENV = 'XUUX_STATE_CONTEXT';
 
-/** إصدارُ صيغةِ البيانِ. يدخلُ المتنَ الموقَّعَ: صيغةٌ أقدمُ لا تُقبَلُ صامتةً. */
+/**
+ * إصدارُ صيغةِ البيانِ. يدخلُ المتنَ الموقَّعَ: صيغةٌ أقدمُ لا تُقبَلُ صامتةً.
+ * `2` = المسارُ التاريخيُّ (بلا ربطِ NV)؛ `3` = مخطّطُ WL-434 (الربطُ إلزاميّ) —
+ * القارئُ الذي لا يعرفُ 3 يرفضُ البيانَ بدلَ قبولِه معَ تجاهلِ الحمايةِ الجديدةِ.
+ */
 export const STATE_MANIFEST_VERSION = 2;
 
 /** أخطاءُ البيانِ، مثبَّتةٌ نصاً كي تُختبرَ ولا تُخمَّن. */
@@ -106,6 +124,15 @@ export const StateManifestErrorCodes = [
   'STATE_MANIFEST_SEALER_REQUIRED',
   'STATE_MANIFEST_JOURNAL_LOCKED',
   'STATE_MANIFEST_STAGED_INVALID',
+  /**
+   * WL-434: ربطُ NV في المتنِ ناقصُ الشكلِ أو لا يطابقُ `instanceId` المتنَ، أو
+   * مهرَّبٌ في مخطّطٍ تاريخيٍّ لا يحملُه، أو غائبٌ عن مخطّطِ NV الذي يوجبُه.
+   */
+  'STATE_MANIFEST_FNV_BINDING_INVALID',
+  /** WL-434: محاولةُ تغييرِ ربطٍ قائمٍ أو إعادةِ ربطٍ فوقَ ربطٍ — مراسمُ مالكٍ لا تحديثٌ. */
+  'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+  /** WL-434: مراسمُ ختمِ الربطِ في المتنِ بلا إعلانِ التفويضِ في البيئة. */
+  'STATE_MANIFEST_FNV_BINDING_NOT_DECLARED',
 ] as const;
 
 export type StateManifestErrorCode = (typeof StateManifestErrorCodes)[number];
@@ -166,6 +193,14 @@ export interface StateManifestBody extends StateManifestBinding {
    * **غيرُ مُقَرٍّ به**، فيُحسَمُ بالمرجعِ (‏استرجاعٌ أو ترقية) قبلَ أيِّ قبول.
    */
   staged?: StagedCommit | null;
+  /**
+   * WL-434: ربطُ مرجعِ الحداثةِ على NV كما يُختَمُ في المتنِ — المقبضانِ واسمَا
+   * `NV_ReadPublic` و`base` المثبَّتُ خارجَ `R` و`instanceId` وهويةُ TPM وسياستُها.
+   * يُنشأُ مرّةً واحدةً عبرَ `bindFnvAsync` المعلنةِ، ولا يتغيّرُ بعدَها عبرَ أيِّ ختمٍ
+   * (‏`#sealWith` يحرسُ الثباتَ مقارنةً بالقيمةِ لا بالمرجعِ). غيابُه في `version: 3`
+   * رفضٌ، ووجودُه في `version: 2` مهرَّبٌ مرفوضٌ — لا ترقيةَ صامتةً في الاتجاهَين.
+   */
+  freshnessBinding?: ManifestFnvBinding | null;
 }
 
 /** سجلُّ التزامٍ مُرحَّلٍ داخلَ المتنِ المختوم. */
@@ -584,6 +619,50 @@ export class StateManifest {
   }
 
   /**
+   * WL-434 — مراسمُ ربطِ NV المعلنةُ: تختُمُ مادّةَ المرجعِ في المتنِ وترفعُ المخطّطَ
+   * إلى `version: 3` معًا، فلا يوجدَ بيانٌ تاريخيٌّ يحملُ ربطًا ولا بيانُ NV بلا ربط.
+   *
+   * **إعلانٌ لا استنباط:** بلا `XUUX_FRESHNESS_BIND_DECLARED=1` لا ربطَ — التغييرُ
+   * يبدّلُ وضعَ البيانِ فلا يقعُ ضمنَ تحديثٍ عاديّ. و**إعادةُ الربطِ فوقَ ربطٍ
+   * قائمٍ مرفوضةٌ**: مراسمُ مالكٍ لا مسارٌ صامت، والمرجعُ نفسُه لا يُجمعُ منه مادّةٌ
+   * جديدةٌ ليُعادَ تثبيتُها (تعافي B2 يعيدُ استعمالَ الربطِ المختومِ نفسِه).
+   * المادّةُ تُنسَخُ نسخًا عميقًا فلا يبقى للمدخِلِ مرجعٌ يعدّلُ به الربطَ بعدَ الختم.
+   * @param material - مادّةُ الربطِ من المصدرِ (المقبضانِ والاسمانِ و`base` والهويةُ والسياسة)
+   * @param env - البيئةُ التي يُقرأُ منها إعلانُ التفويضِ
+   * @returns المتنُ بعدَ الختمِ — `version: 3` و`freshnessBinding` مثبتٌ فيه
+   */
+  async bindFnvAsync(material: FnvBindingMaterial, env: NodeJS.ProcessEnv = process.env): Promise<StateManifestBody> {
+    if ((env[FNV_BIND_DECLARED_ENV] ?? '').trim() !== '1') {
+      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_NOT_DECLARED', FNV_BIND_DECLARED_ENV);
+    }
+    if (!existsSync(this.location)) {
+      throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
+    }
+    const body = this.#verifySeal(null);
+    if (body.freshnessBinding !== undefined && body.freshnessBinding !== null) {
+      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'ربطٌ قائمٌ؛ إعادةُ الربطِ مراسمُ مالكٍ');
+    }
+    if (body.version === FNV_MANIFEST_SCHEMA_VERSION) {
+      // بيانُ NV بلا ربطٍ — حالةٌ لا ينتجُها مسارٌ مشروعٌ، ولا يُكمَلُ استنباطًا.
+      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'مخطّطُ NV بلا ربطٍ');
+    }
+    let binding: ManifestFnvBinding;
+    try {
+      binding = buildManifestFnvBinding(material, body.instanceId);
+    } catch (error) {
+      throw new StateManifestError(
+        'STATE_MANIFEST_FNV_BINDING_INVALID',
+        (error as Error).message.split(':').slice(1).join(':').trim() || 'مادّةٌ ناقصةٌ',
+      );
+    }
+    await this.#sealWith(
+      (sealed) => ({ ...sealed, version: FNV_MANIFEST_SCHEMA_VERSION, freshnessBinding: binding }),
+      false,
+    );
+    return this.read();
+  }
+
+  /**
    * ختمٌ مطويٌّ عامٌّ: نقطةُ ضبطٍ، أو ترحيلٌ، أو ترقية.
    *
    * `LIVE-35` (‏`WL-326`): كان الختمُ ثمَّ حذفُ الدفترِ خطوتينِ بلا ربط، فانقطاعٌ
@@ -605,6 +684,10 @@ export class StateManifest {
     try {
       this.#verified = null;
       const body = this.#verify(null);
+      // WL-434: التقطِ الربطَ والمخطّطَ **قبلَ** التحديثِ وقبلَ أيّ مرجعٍ مشتركٍ —
+      // المقارنةُ بعدَه بالقيمةِ لا بالمرجعِ، فكائنانِ يشتركانِ في المرجعِ متساويانِ
+      // دائمًا ولو حُرّفَ أحدهما.
+      const previousBinding = body.freshnessBinding ?? null;
       const target = this.journalFile + SEALING_SUFFIX + String(body.sequence + 1);
       this.#removeStaleSealing(body.sequence);
       if (existsSync(this.journalFile)) {
@@ -627,6 +710,21 @@ export class StateManifest {
         sealedAt: new Date().toISOString(),
         journalHead: 'checkpoint:' + String(body.sequence + 1),
       };
+      // WL-434: ثباتُ الربطِ والمخطّطِ عبرَ كلِّ ختمٍ — الترقيةُ الوحيدةُ الممكنةُ هي
+      // 2→3 عبرَ `bindFnvAsync` المعلنةِ وحدَها، وما عداها رفضٌ لا تجاهلٌ صامت: الربطُ
+      // لا يُهرَّبُ في مخطّطٍ تاريخيّ، ولا يُحذفُ أو يُحرّفُ أو يُخفَضُ مخطّطُه بعدَ ختمِه.
+      if (previousBinding !== null) {
+        if (!manifestFnvBindingEqual(previousBinding, next.freshnessBinding ?? null)) {
+          throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'الربطُ لا يتغيّرُ عبرَ الختمِ');
+        }
+        if (next.version !== FNV_MANIFEST_SCHEMA_VERSION) {
+          throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'مخطّطُ NV لا يرجعُ');
+        }
+      } else if ((next.freshnessBinding ?? null) !== null) {
+        if (next.version !== FNV_MANIFEST_SCHEMA_VERSION) {
+          throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'ربطٌ في مخطّطٍ تاريخيّ');
+        }
+      }
       await this.#seal(next);
       if (applyPending) this.#pending.clear();
       rmSync(target, { force: true });
@@ -957,11 +1055,22 @@ export class StateManifest {
       // `R3-A-01`. لا يُقبَلُ ولا يُرقَّى صامتاً.
       throw new StateManifestError('STATE_MANIFEST_SEAL_MISSING', this.location);
     }
-    if (body.version !== STATE_MANIFEST_VERSION) {
+    if (body.version !== STATE_MANIFEST_VERSION && body.version !== FNV_MANIFEST_SCHEMA_VERSION) {
       throw new StateManifestError(
         'STATE_MANIFEST_VERSION_UNSUPPORTED',
         String(body.version ?? 'غائب'),
       );
+    }
+    // WL-434: قواعدُ الربطِ لكلِّ مخطّطٍ على حدةٍ — لا يُهرَّبُ ربطٌ في المخطّطِ
+    // التاريخيِّ (بلا إعلانِ وضعٍ) ولا يُقبَلُ بيانُ NV بلا ربطٍ (الغيابُ رفضٌ لا
+    // دعوةٌ للإنشاء).
+    const fnvBinding = body.freshnessBinding;
+    if (body.version === STATE_MANIFEST_VERSION) {
+      if (fnvBinding !== undefined && fnvBinding !== null) {
+        throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'ربطٌ في مخطّطٍ تاريخيّ');
+      }
+    } else if (fnvBinding === undefined || fnvBinding === null) {
+      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'مخطّطُ NV بلا ربطٍ');
     }
     if (
       typeof body.kingId !== 'string' ||
@@ -989,6 +1098,17 @@ export class StateManifest {
     }
     if (!optionalFieldsValid(body)) {
       throw new StateManifestError('STATE_MANIFEST_STAGED_INVALID', 'حقولُ الالتزامِ المُرحَّلِ');
+    }
+    // WL-434: شكلُ الربطِ وربطُه بنسخةِ الجذرِ — الرفضُ مسمّى، والهويةُ والسياسةُ
+    // إلزامُ شكلٍ (رفضُ الربطِ الناقصِ)، وصحةُ الشكلِ ليست إثباتَ هويةِ عتادٍ (حدٌّ معلَن).
+    if (fnvBinding !== undefined && fnvBinding !== null) {
+      const bindingError = manifestFnvBindingShapeError(fnvBinding);
+      if (bindingError !== null) {
+        throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', bindingError);
+      }
+      if (fnvBinding.instanceId !== body.instanceId) {
+        throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'instanceId');
+      }
     }
     const sealedBody = body as StateManifestBody;
     // ترتيبٌ مقصودٌ: الهويةُ والرِباطُ **يُرفَضانِ قبلَ** التحقّقِ من الخاتَمِ، كي
