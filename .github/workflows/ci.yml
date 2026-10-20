@@ -195,17 +195,6 @@ jobs:
       - name: اختبارات محاكي TPM على swtpm (WL-374) — دليل محاكاة لا عتاد
         run: bash scripts/tpm-sim-ci.sh
 
-      # WL-434: عند سقوطِ خطوةِ المحاكي يُرفَعُ ملفُّ الـTAP كامِلًا كقطعةٍ أثريةّ — كانَ
-      # السكربتُ يطبعُ رؤوسَ الإخفاقِ العليا وحدَها فتضيعُ تفاصيلُ الاختباراتِ الداخليةِ
-      # المتداخلةِ، ولا سبيلَ لاسترجاعِها بعدَ انتهاءِ التشغيلةِ.
-      - name: رفع TAP للمحاكي عند الفشل (WL-434)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: tpm-sim-tap
-          path: ${{ runner.temp }}/xuux-swtpm.*/sim.tap
-          if-no-files-found: ignore
-
       # WL-405/LIVE-23: اختباراتُ التوكنِ الحقيقيِّ (`XUUX_HSM_TEST`) كانت تُتخطّى كلُّها في
       # CI (لا softhsm2 على العدّاء)، فالإقلاعُ الإنتاجيُّ على PKCS#11 حقيقيٍّ لم يُعَدْ قياسُه
       # هنا قطّ. تُثبَّتُ softhsm2 وتُشغَّل الملفَّانِ المقيّدانِ بالتوكنِ بعقدِ الإعلانِ، وتسقطُ
@@ -332,6 +321,17 @@ jobs:
             ${{ runner.temp }}/ci-tests-summary.txt
           retention-days: 14
           if-no-files-found: error
+
+      # WL-434: عند سقوطِ خطوةِ المحاكي يُرفَعُ ملفُّ الـTAP كامِلًا كقطعةٍ أثريةّ — كانَ
+      # السكربتُ يطبعُ رؤوسَ الإخفاقِ العليا وحدَها فتضيعُ تفاصيلُ الاختباراتِ الداخليةِ
+      # المتداخلةِ، ولا سبيلَ لاسترجاعِها بعدَ انتهاءِ التشغيلةِ.
+      - name: رفع TAP للمحاكي عند الفشل (WL-434)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpm-sim-tap
+          path: ${{ runner.temp }}/xuux-swtpm.*/sim.tap
+          if-no-files-found: ignore
 
       - name: التحقق من البذرة (المخططات + تماسك العدّادات)
         run: npm run validate:seed
