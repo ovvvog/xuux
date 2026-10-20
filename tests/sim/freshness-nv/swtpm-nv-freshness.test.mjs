@@ -485,4 +485,41 @@ describe('WL-431 — مرجعُ الحداثةِ على NV في swtpm (محاك�
       await env.cleanup();
     }
   });
+
+  test('T7 (WL-432) ضابطٌ سالب: مَن يملكُ كتابةَ R يعيدُ كتابةَ base فيُقبَلُ استرجاعُ لقطةِ التطبيقِ وحدَها — والتثبيتُ خارجَ R يرفضُه', async () => {
+    const env = await lab();
+    try {
+      const { base } = await env.socket().provision();
+      const keys = makeKeys();
+      let runtime = await bootRoot(env.root, keys, env.socket());
+      await commitCommand(runtime, 'cmd-1');
+      await runtime.close();
+      const oldRef = await env.socket().read();
+      const appOld = join(env.base, 'app-old');
+      cpSync(env.root, appOld, { recursive: true });
+      runtime = await bootRoot(env.root, keys, env.socket());
+      await commitCommand(runtime, 'cmd-2');
+      await runtime.close();
+      const now = await env.socket().inspect();
+      assert.ok(now.reference.epoch > oldRef.epoch);
+
+      // كاتبٌ يملكُ تفويضَ كتابةِ R (‏في المجسّ: تفويضُ المالك) — العدّادُ لا يرجع، لكنّ base يُزاح.
+      await env.socket().writeRawRecordForTest(
+        encodeRecord({ phase: 0, base: now.counter - oldRef.epoch, epoch: oldRef.epoch, cur: oldRef.anchor }),
+      );
+      rmSync(env.root, { recursive: true, force: true });
+      cpSync(appOld, env.root, { recursive: true });
+      // (أ) بلا تثبيت: الحالةُ القديمةُ تُقبَل — استرجاعٌ بلا كشفٍ وبلا لمسِ لقطةِ المحاكي.
+      runtime = await bootRoot(env.root, keys, env.socket());
+      assert.equal(runtime.freshnessBoot, 'B1', 'حدٌّ مقيس: base في R ليس مرجعًا رتيبًا');
+      assert.notEqual(runtime.ledger.state('cmd-2'), 'committed');
+      await runtime.close();
+      // (ب) ضابطٌ موجب للتخفيف: base مثبَّتٌ خارجَ R ⇒ القراءةُ والإقلاعُ يُرفَضانِ مغلقَين.
+      const pinned = env.socket({ pinnedBase: base });
+      assert.equal((await rejection(() => pinned.read())).code, NV_PROBE_CODES.INCONSISTENT);
+      assert.equal((await rejection(() => bootRoot(env.root, keys, pinned))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+    } finally {
+      await env.cleanup();
+    }
+  });
 });
