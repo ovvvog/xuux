@@ -59,9 +59,7 @@ rc=$?
 set -e
 grep -E '^# (tests|pass|fail|skipped|todo)' "${tap_file}" || true
 if [ "${rc}" -ne 0 ]; then
-  # تفاصيلُ الإخفاقِ كاملةً (المستوياتُ المتداخلةَ مشمولةً): التشغيلُ الأعلىُ
-  # كانَ يطبعُ رؤوسَ الإخفاقِ العليا وحدَها فتضيعُ تفاصيلُ الاختباراتِ الداخليةِ.
-  grep -E '^ *not ok' -A 14 "${tap_file}" >&2 || true
+  grep -E '^not ok' "${tap_file}" >&2 || true
   echo "::error::اختباراتُ محاكي TPM سقطَت (rc=${rc})" >&2
   exit "${rc}"
 fi
