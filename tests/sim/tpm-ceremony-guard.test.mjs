@@ -237,12 +237,18 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   // خامسٍ في هذهِ المجلداتِ يُرفَضُ كما كانَ. وتغييرُ هذهِ الملفاتِ الأربعةِ يبقى خاضعًا
   // لكلِّ ما عداه: مدخلةُ سجلِ عملٍ تُسمّيه (المادة 6 — يحرسُها project-state)، ومراجعةُ
   // PR، وCI. وسطرُ الاستثناءِ هذا جزءٌ من الأثرِ المعلنِ في مدخلةِ WL-434 وPR الخاصِّ بها.
-  const WL434_OWNER_AUTHORIZED = [
-    'src/root-of-trust/fnv-binding.mts',
-    'src/root-of-trust/state-manifest.mts',
-    'src/root-of-trust/production-runtime.mts',
-    'src/root-of-trust/index.mts',
-  ];
+  // **والاستثناءُ مربوطٌ بالمحتوى المعتمدِ لا بالمسارِ وحدَه:** بصمةُ كلِّ ملفٍّ من
+  // الأربعةِ كما هو في دفعةِ WL-434 المعتمدةِ (تسلسلُ الختومِ واختباراتُ التكاملِ
+  // والبصماتُ في مدخلةِ السجلِّ). أيُّ تعديلٍ لاحقٍ على أحدِها — ولو سطرًا — يُخرجُ
+  // بصمتَه عن المعتمدةِ فيعودُ الملفُ محميًّا كما كانَ كلُّ ما عداه. فالإذنُ إذنٌ
+  // **بفرقٍ معروضٍ بعينِهِ** لا إذنٌ مفتوحًا لملفاتِها إلى الأبد.
+  const WL434_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/root-of-trust/fnv-binding.mts': '87aac0e89b3b82d29df4d92bb17d1e6f06b10c5b',
+    'src/root-of-trust/state-manifest.mts': 'babf1f59c1c51fff4bb20d93878020953ae21046',
+    'src/root-of-trust/production-runtime.mts': '3f0f2772ff45fd2d42cd23f6322792ad2b2ce289',
+    'src/root-of-trust/index.mts': '226210d855749cdf816515f5ce2b5428dadab68b',
+  }));
+  const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
 
@@ -282,6 +288,10 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     assert.equal(after, before, `مدخلةُ ${CONTRACT_ENTRY} في ${CONTRACT_PATH} عُدِّلَتْ في هذه الدفعةِ — هذا خارجَ نطاقِ الدفعةِ (يجوزُ تحديثُ غيرِها من المدخلاتِ)`);
   }
 
-  const violations = touched.filter((f) => isProtected(f) && !WL434_OWNER_AUTHORIZED.includes(f));
+  const violations = touched.filter(
+    (f) =>
+      isProtected(f) &&
+      !(WL434_OWNER_AUTHORIZED.has(f) && currentBlob(f) === WL434_OWNER_AUTHORIZED.get(f)),
+  );
   assert.equal(violations.length, 0, 'ملفاتٌ محميةٌ عُدِّلَتْ في هذه الدفعةِ (النطاقُ المضيَّقُ بقرارِ WL-429): ' + violations.join(', '));
 });
