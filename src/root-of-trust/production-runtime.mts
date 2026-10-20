@@ -368,7 +368,10 @@ export async function decideStateBoundBoot(
     }
     const sourceBinding = socket.pinnedBinding();
     if (sourceBinding === null || typeof sourceBinding !== 'object') {
-      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_INVALID', 'المصدرُ لا يكشفُ ربطًا مثبّتًا');
+      throw new ProductionRuntimeError(
+        'FRESHNESS_NV_BINDING_INVALID',
+        'المصدرُ لا يكشفُ ربطًا مثبّتًا',
+      );
     }
     const diff = fnvBindingSourceDiff(fnvBinding, sourceBinding as Record<string, unknown>);
     if (diff !== null) {

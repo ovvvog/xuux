@@ -61,7 +61,9 @@ function softwareSealer() {
   return {
     id,
     signAsync: async (payload) =>
-      edSign(null, Buffer.from(JSON.stringify(payload), 'utf8'), pair.privateKey).toString('base64'),
+      edSign(null, Buffer.from(JSON.stringify(payload), 'utf8'), pair.privateKey).toString(
+        'base64',
+      ),
     verify: (payload, signature) =>
       edVerify(
         null,
@@ -93,13 +95,19 @@ async function provisionedManifest(dir) {
   const sealer = softwareSealer();
   const file = join(dir, 'root-of-trust.manifest.json');
   const manifest = new StateManifest(file, { fsync: false, sealer });
-  await manifest.provisionAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' }, PROVISION_ENV);
+  await manifest.provisionAsync(
+    { kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' },
+    PROVISION_ENV,
+  );
   return { manifest, file, sealer };
 }
 
 /** يكتبُ بيانًا مختومًا بختمٍ صالحٍ لكن بمتنٍّ يعدّلُه المُختبِر — صنعةُ مهاجمٍ يملكُ القرص. */
 async function craftSealed(file, sealer, body) {
-  const sealed = { body, seal: { alg: 'ed25519', signerId: sealer.id, signature: await sealer.signAsync(body) } };
+  const sealed = {
+    body,
+    seal: { alg: 'ed25519', signerId: sealer.id, signature: await sealer.signAsync(body) },
+  };
   writeFileSync(file, JSON.stringify(sealed, null, 2) + '\n');
 }
 
@@ -124,10 +132,19 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       const bound = manifest.read();
       assert.equal(bound.version, FNV_MANIFEST_SCHEMA_VERSION);
       assert.equal(bound.freshnessBinding.base, '7');
-      assert.equal(bound.freshnessBinding.instanceId, bound.instanceId, 'الربطُ يربطُ بنسخةِ الجذرِ');
+      assert.equal(
+        bound.freshnessBinding.instanceId,
+        bound.instanceId,
+        'الربطُ يربطُ بنسخةِ الجذرِ',
+      );
       // فتحٌ بنسخةٍ جديدةٍ من القرصِ: الختمُ يغطّي الربطَ ويعيدُه كما خُتم.
       const reopened = new StateManifest(file, { fsync: false, sealer });
-      const body = await reopened.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' });
+      const body = await reopened.openAsync({
+        kingId: sealer.id,
+        context: 'test',
+        tokenSerial: 'T',
+        moduleSha256: 'M',
+      });
       assert.equal(body.version, FNV_MANIFEST_SCHEMA_VERSION);
       assert.deepEqual(body.freshnessBinding, bound.freshnessBinding);
     } finally {
@@ -143,8 +160,15 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       assert.equal(undeclared.code, 'STATE_MANIFEST_FNV_BINDING_NOT_DECLARED');
       await manifest.bindFnvAsync(material(), DECLARED_ENV);
       const again = await rejection(() => manifest.bindFnvAsync(material(), DECLARED_ENV));
-      assert.equal(again.code, 'STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'إعادةُ الربطِ مراسمُ مالكٍ');
-      const absentFile = new StateManifest(join(dir, 'none.manifest.json'), { fsync: false, sealer: manifest.read && softwareSealer() });
+      assert.equal(
+        again.code,
+        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+        'إعادةُ الربطِ مراسمُ مالكٍ',
+      );
+      const absentFile = new StateManifest(join(dir, 'none.manifest.json'), {
+        fsync: false,
+        sealer: manifest.read && softwareSealer(),
+      });
       const noRoot = await rejection(() => absentFile.bindFnvAsync(material(), DECLARED_ENV));
       assert.equal(noRoot.code, 'STATE_ROOT_UNPROVISIONED');
     } finally {
@@ -183,7 +207,12 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
         const { file, sealer } = await boundThenMutate(sub, mutate);
         const reopened = new StateManifest(file, { fsync: false, sealer });
         const error = await rejection(() =>
-          reopened.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' }),
+          reopened.openAsync({
+            kingId: sealer.id,
+            context: 'test',
+            tokenSerial: 'T',
+            moduleSha256: 'M',
+          }),
         );
         assert.equal(
           error.code,
@@ -206,14 +235,27 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       await craftSealed(join(dir, 'smuggled.json'), sealer, smuggled);
       const opened = new StateManifest(join(dir, 'smuggled.json'), { fsync: false, sealer });
       const smuggleError = await rejection(() =>
-        opened.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' }),
+        opened.openAsync({
+          kingId: sealer.id,
+          context: 'test',
+          tokenSerial: 'T',
+          moduleSha256: 'M',
+        }),
       );
       assert.equal(smuggleError.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
       // مخطّطُ NV بلا ربطٍ: غيابٌ رفضٌ لا دعوةٌ للإنشاء.
-      await craftSealed(join(dir, 'unbound.json'), sealer, { ...structuredClone(body), version: FNV_MANIFEST_SCHEMA_VERSION });
+      await craftSealed(join(dir, 'unbound.json'), sealer, {
+        ...structuredClone(body),
+        version: FNV_MANIFEST_SCHEMA_VERSION,
+      });
       const unbound = new StateManifest(join(dir, 'unbound.json'), { fsync: false, sealer });
       const unboundError = await rejection(() =>
-        unbound.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' }),
+        unbound.openAsync({
+          kingId: sealer.id,
+          context: 'test',
+          tokenSerial: 'T',
+          moduleSha256: 'M',
+        }),
       );
       assert.equal(unboundError.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
       // وإصدارٌ لا يعرفهُ العقدُ أصلًا يبقى مرفوضًا.
@@ -248,7 +290,11 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       for (const [m, expectedDetail] of cases) {
         const error = await rejection(() => manifest.bindFnvAsync(m, DECLARED_ENV));
         assert.equal(error.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
-        assert.equal(error.detail, expectedDetail, `المادّةُ الناقصةُ تُسمّي حقلَها (${expectedDetail})`);
+        assert.equal(
+          error.detail,
+          expectedDetail,
+          `المادّةُ الناقصةُ تُسمّي حقلَها (${expectedDetail})`,
+        );
       }
       // وinstanceId لا يُفترضُ: الربطُ يُبنى بمعرّفِ نسخةِ الجذرِ من المتنِ لا من المادّةِ.
       await manifest.bindFnvAsync(material(), DECLARED_ENV);
@@ -267,7 +313,12 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       // إعادةُ الختمِ بختمٍ صالحٍ بعدَ تحريفِ instanceId — الختمُ سليمٌ لكنّ الربطَ لا يطابقُ النسخةَ.
       const reopened = new StateManifest(file, { fsync: false, sealer });
       const error = await rejection(() =>
-        reopened.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' }),
+        reopened.openAsync({
+          kingId: sealer.id,
+          context: 'test',
+          tokenSerial: 'T',
+          moduleSha256: 'M',
+        }),
       );
       assert.equal(error.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
       assert.equal(error.detail, 'instanceId');
@@ -291,7 +342,13 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       await manifest.checkpointAsync();
       assert.deepEqual(manifest.read().freshnessBinding, sealed);
       assert.equal(manifest.read().version, FNV_MANIFEST_SCHEMA_VERSION);
-      await manifest.stageAsync({ txn: 't1', intent: 'ledger.commit', fromEpoch: 0, fromAnchor: 'genesis', at: new Date().toISOString() });
+      await manifest.stageAsync({
+        txn: 't1',
+        intent: 'ledger.commit',
+        fromEpoch: 0,
+        fromAnchor: 'genesis',
+        at: new Date().toISOString(),
+      });
       assert.deepEqual(manifest.read().freshnessBinding, sealed);
       await manifest.promoteAsync({ epoch: 1, anchor: 'a'.repeat(64), digest: 'd'.repeat(64) });
       assert.deepEqual(manifest.read().freshnessBinding, sealed);
@@ -314,12 +371,23 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
     try {
       const { manifest, file, sealer } = await provisionedManifest(dir);
       await manifest.checkpointAsync();
-      await manifest.stageAsync({ txn: 't', intent: 'log.append', fromEpoch: 0, fromAnchor: 'genesis', at: new Date().toISOString() });
+      await manifest.stageAsync({
+        txn: 't',
+        intent: 'log.append',
+        fromEpoch: 0,
+        fromAnchor: 'genesis',
+        at: new Date().toISOString(),
+      });
       await manifest.clearStagedAsync();
       assert.equal(manifest.read().version, 2, 'لا ترقيةَ صامتةَ لمخطّطٍ تاريخيٍّ');
       assert.equal(manifest.read().freshnessBinding, undefined);
       const reopened = new StateManifest(file, { fsync: false, sealer });
-      const body = await reopened.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' });
+      const body = await reopened.openAsync({
+        kingId: sealer.id,
+        context: 'test',
+        tokenSerial: 'T',
+        moduleSha256: 'M',
+      });
       assert.equal(body.version, 2);
       assert.equal(body.freshnessBinding, undefined);
     } finally {
@@ -343,7 +411,11 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
         lockDir: join(dir, 'locks'),
         manifestBinding: () => binding,
       });
-      assert.equal(socket.pinnedBinding(), null, 'لا ربطَ بعدُ — والقراءةُ سترفضُ في القسمِ المحاكى');
+      assert.equal(
+        socket.pinnedBinding(),
+        null,
+        'لا ربطَ بعدُ — والقراءةُ سترفضُ في القسمِ المحاكى',
+      );
       await manifest.bindFnvAsync(material(), DECLARED_ENV);
       binding = structuredClone(manifest.read().freshnessBinding);
       assert.deepEqual(socket.pinnedBinding(), binding, 'الربطُ من البيانِ كما خُتم');
@@ -352,7 +424,11 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
       binding.counterName = 'nothex';
       const tampered = await rejection(() => socket.pinnedBinding());
       assert.equal(tampered.code, 'FRESHNESS_NV_BINDING_INVALID');
-      assert.equal(tampered.message.includes('counterName'), true, 'الرفضُ يسمّي الحقلَ لا سرًّا يكشفُه');
+      assert.equal(
+        tampered.message.includes('counterName'),
+        true,
+        'الرفضُ يسمّي الحقلَ لا سرًّا يكشفُه',
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -437,16 +513,24 @@ describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (�
         const keys = makeKeys();
         const socket = new TestStateBoundSocket();
         socket.failReadWith(Object.assign(new Error(`${code}: قياسٌ بمحتوىً حسّاسٍ`), { code }));
-        const error = await rejection(() => bootRoot(join(dir, code), keys, socket, { env: bootEnv(keys) }));
+        const error = await rejection(() =>
+          bootRoot(join(dir, code), keys, socket, { env: bootEnv(keys) }),
+        );
         assert.equal(error.code, code, `الرمزُ المسمّى ${code} يصلُ إلى قرارِ الإقلاعِ`);
         const fixedDetails = ['ربطُ NV غيرُ صالحٍ', 'ربطُ NV لا يطابقُ المرجع'];
-        assert.equal(fixedDetails.includes(error.detail), true, 'التفصيلُ نصٌّ ثابتٌ لا محتوىُ الاستثناء');
+        assert.equal(
+          fixedDetails.includes(error.detail),
+          true,
+          'التفصيلُ نصٌّ ثابتٌ لا محتوىُ الاستثناء',
+        );
         assert.equal(String(error.message).includes('حسّاس'), false, 'لا محتوىَ استثناءٍ يُمرّر');
       }
       const keys = makeKeys();
       const socket = new TestStateBoundSocket();
       socket.failReadWith(new Error('FRESHNESS_TRANSPORT_LOST'));
-      const error = await rejection(() => bootRoot(join(dir, 'b0'), keys, socket, { env: bootEnv(keys) }));
+      const error = await rejection(() =>
+        bootRoot(join(dir, 'b0'), keys, socket, { env: bootEnv(keys) }),
+      );
       assert.equal(error.code, 'FRESHNESS_SOURCE_UNAVAILABLE', 'غيرُ المسمّى يبقى B0');
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -489,7 +573,9 @@ describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (�
       // مقبسٌ يكشفُ ربطًا بقاعدةٍ أخرى — لا مصدرَ حقيقةٍ ثانٍ.
       const divergent = new TestStateBoundSocket();
       divergent.usePinnedBinding(() => ({ ...sealed.body.freshnessBinding, base: '3' }));
-      const divergentError = await rejection(() => bootRoot(root, keys, divergent, { env: bootEnv(keys) }));
+      const divergentError = await rejection(() =>
+        bootRoot(root, keys, divergent, { env: bootEnv(keys) }),
+      );
       assert.equal(divergentError.code, 'FRESHNESS_NV_BINDING_MISMATCH');
       assert.equal(divergentError.detail, 'base', 'الرفضُ يسمّي الحقلَ المتّفقَ عليهِ');
       // والمطابقُ يُقلِعُ: إقلاعٌ ثانٍ فوقَ الجذرِ المربوطِ (المرجعُ في عهدِ البيانِ نفسِهِ).
@@ -518,7 +604,11 @@ describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (�
       crashing.usePinnedBinding(() => material());
       crashing.failAdvanceWith(new Error('FRESHNESS_TRANSPORT_LOST'));
       const crash = await rejection(() => bootRoot(root, keys, crashing, { env: bootEnv(keys) }));
-      assert.equal(crash.code, 'FRESHNESS_ADVANCE_UNRESOLVED', 'انقطاعُ النقلِ يسيّجُ الحاجزَ ولا يُقدمُ المرجعَ');
+      assert.equal(
+        crash.code,
+        'FRESHNESS_ADVANCE_UNRESOLVED',
+        'انقطاعُ النقلِ يسيّجُ الحاجزَ ولا يُقدمُ المرجعَ',
+      );
       const sealed = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
       assert.equal(sealed.body.version, FNV_MANIFEST_SCHEMA_VERSION, 'المادّةُ من المصدرِ خُتمت');
       assert.equal(sealed.body.freshnessAnchor, undefined, 'والربطُ لم يكتملْ بعدُ');
@@ -532,7 +622,11 @@ describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (�
       });
       const runtime = await bootRoot(root, keys, recovery, { env: bootEnv(keys) });
       const after = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
-      assert.deepEqual(after.body.freshnessBinding, sealed.body.freshnessBinding, 'الربطُ المختومُ لم يُمسّ');
+      assert.deepEqual(
+        after.body.freshnessBinding,
+        sealed.body.freshnessBinding,
+        'الربطُ المختومُ لم يُمسّ',
+      );
       assert.equal(after.body.staged, null, 'والترحيلُ استُرجِعَ');
       assert.equal(runtime.manifest.read().freshnessEpoch, 1, 'والتعافي رقّى العهدَ إلى 1');
       await runtime.close();
@@ -559,13 +653,17 @@ describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (�
       const tampered = new TestStateBoundSocket();
       tampered.forceCurrent(bound);
       tampered.usePinnedBinding(() => sealed.body.freshnessBinding);
-      const tamperedError = await rejection(() => bootRoot(root, keys, tampered, { env: bootEnv(keys) }));
+      const tamperedError = await rejection(() =>
+        bootRoot(root, keys, tampered, { env: bootEnv(keys) }),
+      );
       assert.equal(tamperedError.code, 'STATE_MANIFEST_SEAL_INVALID');
       // وحذفُ البيانِ ⇒ جذرٌ غيرُ مهيَّأٍ لا «حالةٌ افتراضيّةٌ».
       rmSync(file);
       const deleted = new TestStateBoundSocket();
       const deletedError = await rejection(() =>
-        bootRoot(root, keys, deleted, { env: bootEnv(keys, { XUUX_ROOT_OF_TRUST_PROVISION: '0' }) }),
+        bootRoot(root, keys, deleted, {
+          env: bootEnv(keys, { XUUX_ROOT_OF_TRUST_PROVISION: '0' }),
+        }),
       );
       assert.equal(deletedError.code, 'PRODUCTION_STATE_ROOT_UNPROVISIONED');
     } finally {
