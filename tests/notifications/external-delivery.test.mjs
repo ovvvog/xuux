@@ -84,7 +84,9 @@ test(
  */
 function composerSmtpTransport(_config) {
   return async () => {
-    throw new Error('SMTP_TRANSPORT_NOT_PROVIDED: نقلُ SMTP مسؤوليّةُ موقعِ التركيبِ منذ WL-426 — وفِّرْ نقلًا حقيقيًّا من كودِ المُركِّبِ الموثوقِ');
+    throw new Error(
+      'SMTP_TRANSPORT_NOT_PROVIDED: نقلُ SMTP مسؤوليّةُ موقعِ التركيبِ منذ WL-426 — وفِّرْ نقلًا حقيقيًّا من كودِ المُركِّبِ الموثوقِ',
+    );
   };
 }
 

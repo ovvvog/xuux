@@ -187,7 +187,9 @@ createSmtpEgressTransport({ getSmtpConfig: () => null });
 `;
   await assert.rejects(
     () =>
-      execFileAsync(process.execPath, ['--input-type=module', '-e', factoryProbe], { cwd: process.cwd() }),
+      execFileAsync(process.execPath, ['--input-type=module', '-e', factoryProbe], {
+        cwd: process.cwd(),
+      }),
     (error) => {
       assert.match(
         String(/** @type {{ stderr?: string }} */ (error).stderr),
@@ -272,7 +274,11 @@ test('WL-426: النقلُ يُكتَبُ في موقعِ التركيبِ — �
   const firstRequest = gateRequests[0];
   assert.ok(firstRequest !== undefined, 'نداءُ البوابةِ مضمونٌ قبلَ قراءتِهِ');
   assert.equal(firstRequest.destination, 'smtp.internal.example', 'وجهةُ الإذنِ مضيفُ الإعدادِ');
-  assert.equal(transportRecords.length, 1, 'النقلُ (كودُ الموقعِ) استُدعي مرةً واحدةً عبرَ البوابةِ');
+  assert.equal(
+    transportRecords.length,
+    1,
+    'النقلُ (كودُ الموقعِ) استُدعي مرةً واحدةً عبرَ البوابةِ',
+  );
   const firstRecord = transportRecords[0];
   assert.ok(firstRecord !== undefined, 'نقلٌ واحدٌ مضمونٌ قبلَ قراءتِهِ');
   const payload = JSON.parse(firstRecord.payload);
