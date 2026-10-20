@@ -231,7 +231,7 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       // ربطُ اللقطةِ القديمةِ بايتًا ببايتٍ هو الحاليّ: المتنُ ثابتٌ منذُ التهيئة.
       assert.deepEqual(readFileSync(env.bindingFile), readFileSync(join(h.appNow, 'freshness-nv.binding.json')));
       assert.equal((await rejection(() => env.socket().read())).code, BINDING_CODES.MISMATCH);
-      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_NV_BINDING_MISMATCH');
       // الضابطُ: بلا ربطٍ (‏سلوكُ WL-431) يُقبَلُ الهجومُ نفسُه — فالرفضُ أعلاه من الربطِ لا من غيره.
       const unbound = await bootRoot(env.root, h.keys, env.socket({ binding: null }));
       assert.equal(unbound.freshnessBoot, 'B1');
@@ -313,7 +313,8 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       const parsed = JSON.parse(original);
       const tryAll = async (expect) => {
         assert.equal((await rejection(() => env.socket().read())).code, expect);
-        assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+        // WL-434: رموزُ الرفضِ المسمّاةُ تصلُ إلى القرارِ كما هي — قائمةٌ مغلقة.
+        assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, expect);
       };
       rmSync(env.bindingFile);
       await tryAll(BINDING_CODES.INVALID);
@@ -372,7 +373,7 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
           restoreApp(env, snap);
           const error = await rejection(() => bootRoot(env.root, h.keys, env.socket()));
           assert.ok(
-            ['FRESHNESS_SOURCE_UNAVAILABLE', 'STALE_MANIFEST_EPOCH'].includes(error.code),
+            ['FRESHNESS_SOURCE_UNAVAILABLE', 'FRESHNESS_NV_BINDING_MISMATCH', 'STALE_MANIFEST_EPOCH'].includes(error.code),
             `قُبِلت حالةٌ بعدَ إعادةِ التعريف: ${error.code}`,
           );
         }
@@ -393,7 +394,7 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       assert.equal(error.code, 'FRESHNESS_ADVANCE_UNRESOLVED');
       assert.equal((await rejection(() => commitCommand(runtime, 'cmd-4'))).code, 'COMMIT_BARRIER_FENCED');
       await runtime.close();
-      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_NV_BINDING_INVALID');
       writeFileSync(env.bindingFile, original);
       const after = await env.socket().inspect();
       assert.equal(after.counter, h.now.counter, 'لا زيادةَ بلا ربطٍ موثوق');
@@ -520,12 +521,12 @@ describe('WL-434 — الربطُ داخلَ متنِ البيانِ المخت�
       writeFileSync(manifestFile, before);
       // وتحريرُ الربطِ في المتنِ يُسقِطُ ختمَهُ فورًا.
       const tampered = JSON.parse(before);
-      tampered.body.freshnessBinding.base = '1';
+      tampered.body.freshnessBinding.base = '0';
       writeFileSync(manifestFile, JSON.stringify(tampered, null, 2) + '\n');
       assert.equal((await rejection(() => socket().read())).code, BINDING_CODES.INVALID, 'بيانٌ مُحرَّفٌ ⇒ ربطٌ غيرُ صالحٍ');
       // والاسترجاعُ: البيانُ الأصليُّ يعيدُ القراءةَ كما كانت.
       writeFileSync(manifestFile, before);
-      assert.equal((await socket().read()).epoch, 1n, 'البيانُ الأصليُّ يعملُ كما كان');
+      assert.equal((await socket().read()).epoch, beforeDelete.epoch, 'البيانُ الأصليُّ يعملُ كما كان');
     } finally {
       await sw.dispose();
       rmSync(base, { recursive: true, force: true });
