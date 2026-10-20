@@ -52,6 +52,7 @@ import {
   FreshnessAdvanceError,
   judgeStateAdvance,
 } from '../../src/root-of-trust/index.mjs';
+import { BINDING_CODES, normalizeHandle, openBindingFile, parseNvName, sealBindingFile } from './pinned-binding.mjs';
 import { codedError } from './swtpm-harness.mjs';
 
 export const RECORD_SIZE = 128;
@@ -147,7 +148,8 @@ export class SwtpmNvStateBoundSocket {
 
   /**
    * @param {{tools: () => import('./swtpm-harness.mjs').Tpm2Tools, counterIndex: string,
-   *   recordIndex: string, lockDir: string, lockTimeoutMs?: number, unsafeNoLock?: boolean, pinnedBase?: bigint}} opts
+   *   recordIndex: string, lockDir: string, lockTimeoutMs?: number, unsafeNoLock?: boolean, pinnedBase?: bigint,
+   *   binding?: {file: string, publicKey: import('node:crypto').KeyObject}}} opts
    *   ‏`tools` دالّةٌ لا كائنٌ: منفذُ المحاكي يتغيّرُ عندَ إعادةِ تشغيلِه.
    */
   constructor(opts) {
@@ -159,6 +161,11 @@ export class SwtpmNvStateBoundSocket {
     this.unsafeNoLock = opts.unsafeNoLock === true;
     /** `base` مثبَّتٌ خارجَ `R` (‏قياسُ التخفيفِ في WL-432)؛ `null` = سلوكُ WL-431. */
     this.pinnedBase = opts.pinnedBase ?? null;
+    /**
+     * WL-433 (‏D1-أ): ربطٌ مختومٌ خارجَ `R` بالمقبضَين واسمَي NV و`base`. إن وُجدَ فهو مصدرُ `base`
+     * الوحيد، ويُتحقَّقُ منه في كلِّ قراءةٍ وانتقال (‏`sim/freshness-nv/pinned-binding.mjs`).
+     */
+    this.binding = opts.binding ?? null;
     mkdirSync(this.lockDir, { recursive: true });
   }
 
@@ -185,6 +192,26 @@ export class SwtpmNvStateBoundSocket {
     return decodeRecord(raw);
   }
 
+  async #nvName(index) {
+    return parseNvName(await this.#tpm('tpm2_nvreadpublic', [index]));
+  }
+
+  /**
+   * `base` المثبَّت: من الربطِ المختومِ إن وُجد (‏بعدَ التحقّقِ من ختمِه ومقبضَيه واسمَي NV الحاليَّين)،
+   * أو من `pinnedBase`، أو `null` (‏سلوكُ WL-431: `base` من `R`).
+   */
+  async #pinned() {
+    if (this.binding === null) return this.pinnedBase;
+    const b = openBindingFile(this.binding.file, this.binding.publicKey);
+    if (b.counterIndex !== normalizeHandle(this.counterIndex) || b.recordIndex !== normalizeHandle(this.recordIndex)) {
+      throw codedError(BINDING_CODES.MISMATCH, 'binding handles differ from the configured indices');
+    }
+    const [cn, rn] = [await this.#nvName(this.counterIndex), await this.#nvName(this.recordIndex)];
+    if (cn !== b.counterName) throw codedError(BINDING_CODES.MISMATCH, 'counter NV name differs from the pinned name');
+    if (rn !== b.recordName) throw codedError(BINDING_CODES.MISMATCH, 'record NV name differs from the pinned name');
+    return b.base;
+  }
+
   async #writeRecord(rec) {
     await this.#tpm('tpm2_nvwrite', ['-C', 'o', '-i', '-', this.recordIndex], { input: encodeRecord(rec) });
   }
@@ -192,8 +219,11 @@ export class SwtpmNvStateBoundSocket {
   /**
    * التهيئة: تعريفُ الفهرسَين، ورفعُ `C` مرّةً (‏كي يُقرأ)، وكتابةُ `(0, genesis)` بـ`base = C`.
    * تُرفَضُ إن وُجدَ أيُّ الفهرسَين — لا إعادةُ تهيئةٍ صامتة.
+   * @param {{sign?: (bytes: Buffer) => Promise<Buffer>}} [opts] - موقِّعُ الربطِ إن كان للمقبسِ `binding`
+   *   (‏الخطوةُ P5: يُختَمُ بعدَ كتابةِ `R` فاسماهما نهائيّان). سقوطٌ قبلَ ختمِه ⇒ لا ربطَ ⇒ القراءةُ ترفض،
+   *   والتهيئةُ لا تُعاد (‏الفهرسانِ موجودان) — مراسمُ مالكٍ لا استردادٌ تلقائيّ.
    */
-  async provision() {
+  async provision(opts = {}) {
     await this.#tpm('tpm2_nvdefine', [
       '-C', 'o', '-s', '8', '-a', 'ownerread|ownerwrite|nt=counter', this.counterIndex,
     ]);
@@ -203,21 +233,39 @@ export class SwtpmNvStateBoundSocket {
     await this.#tpm('tpm2_nvincrement', ['-C', 'o', this.counterIndex]);
     const base = await this.#readCounter();
     await this.#writeRecord({ phase: 0, base, epoch: 0n, cur: FRESHNESS_GENESIS_ANCHOR });
+    if (this.binding !== null) {
+      if (typeof opts.sign !== 'function') throw codedError(BINDING_CODES.INVALID, 'binding signer required');
+      await sealBindingFile(
+        this.binding.file,
+        {
+          counterIndex: this.counterIndex,
+          recordIndex: this.recordIndex,
+          counterName: await this.#nvName(this.counterIndex),
+          recordName: await this.#nvName(this.recordIndex),
+          base,
+        },
+        opts.sign,
+      );
+    }
     return { base };
   }
 
   /** الحالةُ الخامُّ للقياس: `C` والسجلُّ والمرجعُ المحسوب. */
   async inspect() {
+    const pinned = await this.#pinned();
     const counter = await this.#readCounter();
     const record = await this.#readRecord();
-    return { counter, record, reference: this.#derive(counter, record) };
+    return { counter, record, reference: this.#derive(counter, record, pinned) };
   }
 
-  #derive(counter, record) {
-    if (this.pinnedBase !== null && record.base !== this.pinnedBase) {
+  #derive(counter, record, pinned) {
+    if (pinned !== null && record.base !== pinned) {
       // WL-432: `base` في `R` قابلٌ لإعادةِ الكتابةِ ممّن يملكُ تفويضَ كتابةِ `R`؛ فإن ثُبِّتَ خارجَه
       // (‏مثلًا في البيانِ المختوم) فاختلافُه رفضٌ مغلق — وإلّا فإعادةُ كتابتِه استرجاعٌ كاملٌ (T7).
-      throw codedError(NV_PROBE_CODES.INCONSISTENT, `record base ${record.base} != pinned ${this.pinnedBase}`);
+      throw codedError(
+        this.binding === null ? NV_PROBE_CODES.INCONSISTENT : BINDING_CODES.MISMATCH,
+        `record base ${record.base} != pinned ${pinned}`,
+      );
     }
     if (counter < record.base) {
       throw codedError(NV_PROBE_CODES.INCONSISTENT, `counter ${counter} below base ${record.base}`);
@@ -239,9 +287,10 @@ export class SwtpmNvStateBoundSocket {
   }
 
   async read() {
+    const pinned = await this.#pinned();
     const counter = await this.#readCounter();
     const record = await this.#readRecord();
-    const ref = this.#derive(counter, record);
+    const ref = this.#derive(counter, record, pinned);
     return { epoch: ref.epoch, anchor: ref.anchor };
   }
 
@@ -284,9 +333,10 @@ export class SwtpmNvStateBoundSocket {
       if (fault === 'throw-before-apply') {
         throw codedError(NV_PROBE_CODES.TRANSPORT_LOST, 'before apply');
       }
+      const pinned = await this.#pinned();
       const counter = await this.#readCounter();
       const record = await this.#readRecord();
-      const ref = this.#derive(counter, record);
+      const ref = this.#derive(counter, record, pinned);
       if (this.hooks.afterRead) await this.hooks.afterRead();
       if (ref.pending === 'after-increment') {
         // إصلاحٌ عديمُ الأثرِ الثاني: الالتزامُ وقعَ في `C`، والسجلُّ يُتَمّ.
