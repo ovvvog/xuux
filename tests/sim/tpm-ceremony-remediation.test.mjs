@@ -85,7 +85,10 @@ test('static: فاحصُ السماتِ يُعلِنُ مخالفةَ البتا
 });
 
 // ── 3) المشغّلُ يتحقّقُ من سياقِ تشغيلِ المحاكي عبرَ ملفِّ PID (بلا محاكٍ للحالاتِ الرافضةِ). ──
-test('pwsh: المشغّلُ يرفضُ ملفَّ PID غائبًا أو منتحلًا (ليسَ swtpm) قبلَ أيِّ اتصال', () => {
+// حارسُ توافرِ pwsh كالسابقِ في الملفِ الشقيقِ: البيئاتُ بلا pwsh (كبيئةِ منفِّذٍ
+// محليّةٍ) تتخطّى بالاسمِ والعلّةِ — وCI (ubuntu-latest) عليه pwsh فيُشغّلُه هناكَ فعلًا.
+const pidPwshTest = (name, fn) => test(name, { skip: pwshAvailable ? false : 'pwsh unavailable' }, fn);
+pidPwshTest('pwsh: المشغّلُ يرفضُ ملفَّ PID غائبًا أو منتحلًا (ليسَ swtpm) قبلَ أيِّ اتصال', () => {
   const absent = rehearseOn({ port: 2400 }, ['-SimPidFile', '/nonexistent/wl413.pid']);
   assert.equal(absent.rc, 4);
   assert.match(absent.stdout, /TOOL_ERROR/);
