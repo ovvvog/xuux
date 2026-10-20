@@ -228,6 +228,21 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   const closure = new Set([...bootClosure(worktreeReader), ...bootClosure(baseReader)]);
 
   const NAMED_PROTECTED = ['sim/tpm/tcti_guard.mjs', 'version.json', ENTRY_ROOT, 'scripts/tpm-sim-ci.sh'];
+  // قرارُ المالكِ (‏2026-10-20، دورةُ تفويضِ 20 أكتوبر، خيارُ «أذن بتعديلٍ محدودٍ
+  // للحارس»): استثناءٌ **مسمّى ومؤرَّخ ومحدود** لملفاتِ WL-434 الأربعةِ وحدَها — تنفيذُ
+  // «الربطُ المختومُ داخلَ متنِ البيانِ» (الخيارُ أ من الملحقِ ج §5.1) يستلزمُ حتمًا
+  // تعديلَها، فالتجميدُ المطلقُ كانَ سيحجبَ تنفيذَ التكليفِ نفسِه. **هذا الاستثناءُ لا
+  // يُضعِفُ شيئًا آخرَ:** بقيةُ `src/root-of-trust` و`src/production` والملفاتُ المسماةُ
+  // وإغلاقُ تبعياتِ الإقلاعِ ومدخلةُ `R3-A-01` من العقدِ محميةٌ كما كانتْ، وأيُّ ملفٍّ
+  // خامسٍ في هذهِ المجلداتِ يُرفَضُ كما كانَ. وتغييرُ هذهِ الملفاتِ الأربعةِ يبقى خاضعًا
+  // لكلِّ ما عداه: مدخلةُ سجلِ عملٍ تُسمّيه (المادة 6 — يحرسُها project-state)، ومراجعةُ
+  // PR، وCI. وسطرُ الاستثناءِ هذا جزءٌ من الأثرِ المعلنِ في مدخلةِ WL-434 وPR الخاصِّ بها.
+  const WL434_OWNER_AUTHORIZED = [
+    'src/root-of-trust/fnv-binding.mts',
+    'src/root-of-trust/state-manifest.mts',
+    'src/root-of-trust/production-runtime.mts',
+    'src/root-of-trust/index.mts',
+  ];
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
 
@@ -267,6 +282,6 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     assert.equal(after, before, `مدخلةُ ${CONTRACT_ENTRY} في ${CONTRACT_PATH} عُدِّلَتْ في هذه الدفعةِ — هذا خارجَ نطاقِ الدفعةِ (يجوزُ تحديثُ غيرِها من المدخلاتِ)`);
   }
 
-  const violations = touched.filter(isProtected);
+  const violations = touched.filter((f) => isProtected(f) && !WL434_OWNER_AUTHORIZED.includes(f));
   assert.equal(violations.length, 0, 'ملفاتٌ محميةٌ عُدِّلَتْ في هذه الدفعةِ (النطاقُ المضيَّقُ بقرارِ WL-429): ' + violations.join(', '));
 });
