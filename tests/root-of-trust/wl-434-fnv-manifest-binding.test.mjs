@@ -366,6 +366,49 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
     }
   });
 
+  test('تزامنُ مراسمَينِ بمادّتَينِ مختلفتَين: البيانُ ينتهي بربطٍ واحدٍ صالحِ الختمِ مهما جرى السباقُ، وإعادةُ الربطِ بعدهُ مرفوضةٌ', async () => {
+    const dir = tmp('wl434-concurrent-');
+    try {
+      const { manifest } = await provisionedManifest(dir);
+      // مراسمانِ متزامنتانِ بمادّتَينِ مختلفتَينِ (‏base مختلفة): السباقُ محتملُ النتائجِ —
+      // إمّا أن تلحقَ الثانيةُ بعدَ ختمِ الأولى فتُرفَضُ من حارسِ الختمِ (‏IMMUTABLE)،
+      // وإمّا أن تلتقطَ كلتاهما «لا ربطَ» قبلَ أيِّ ختمٍ فيختمُ آخرُهما فوقَ أولِهما.
+      // **العقدُ في الحالتَينِ واحدٌ:** البيانُ ينتهي بربطٍ **واحدٍ** صالحِ الشكلِ والختمِ
+      // (‏base إحدى المادّتَينِ، لا خليطٌ ولا حقلٌ ناقصٌ)، وبإعادةِ ربطٍ بعدهُ مرفوضةٍ.
+      const [a, b] = await Promise.allSettled([
+        manifest.bindFnvAsync(material(), DECLARED_ENV),
+        manifest.bindFnvAsync(material({ base: '9' }), DECLARED_ENV),
+      ]);
+      const fulfilled = [a, b].filter((r) => r.status === 'fulfilled');
+      const rejected = [a, b].filter((r) => r.status === 'rejected');
+      assert.ok(
+        (fulfilled.length === 1 && rejected.length === 1) || fulfilled.length === 2,
+        'لا نتيجةَ ثالثةَ للسباقِ: ختمٌ واحدٌ أو ختمانِ متزاحمانِ',
+      );
+      for (const r of rejected) {
+        assert.equal(
+          r.reason.code,
+          'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+          'الرفضُ إن وقعَ فمن حارسِ الختمِ',
+        );
+      }
+      const body = manifest.read();
+      assert.equal(body.version, FNV_MANIFEST_SCHEMA_VERSION, 'v3 بعدَ السباقِ');
+      assert.ok(
+        ['7', '9'].includes(body.freshnessBinding.base),
+        'الربطُ المختومُ إحدى المادّتَينِ لا ثالثٌ',
+      );
+      assert.equal(body.freshnessBinding.instanceId, body.instanceId, 'مربوطٌ بنسخةِ الجذرِ');
+      // وإعادةُ الربطِ بعدَ استقرارِ النتيجةِ مرفوضةٌ دائمًا — لا نافذةَ بعدَ السباقِ.
+      const again = await rejection(() =>
+        manifest.bindFnvAsync(material({ base: '11' }), DECLARED_ENV),
+      );
+      assert.equal(again.code, 'STATE_MANIFEST_FNV_BINDING_IMMUTABLE');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('التوافقُ: البيانُ التاريخيُّ يبقى بلا ربطٍ ولا تُرقّيهِ التحديثاتُ صامتةً', async () => {
     const dir = tmp('wl434-compat-');
     try {
