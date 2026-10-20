@@ -20,7 +20,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { FRESHNESS_GENESIS_ANCHOR } from '../../../src/root-of-trust/index.mjs';
+import { FRESHNESS_GENESIS_ANCHOR, StateManifest, fingerprint } from '../../../src/root-of-trust/index.mjs';
+import { createPublicKey, verify as edVerify } from 'node:crypto';
 import {
   BINDING_CODES,
   BINDING_SCHEMA,
@@ -36,7 +37,7 @@ import {
   encodeRecord,
 } from '../../../sim/freshness-nv/nv-state-bound-socket.mjs';
 import { registerTmpRoot } from '../../helpers/tmp-roots.mjs';
-import { bootRoot, makeKeys } from '../../helpers/wl-326-root.mjs';
+import { bootRoot, makeKeys, pairOf } from '../../helpers/wl-326-root.mjs';
 
 const COUNTER = '0x01500030';
 const RECORD = '0x01500031';
@@ -427,6 +428,81 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       assert.equal((await rejection(() => fresh.provision())).code, BINDING_CODES.INVALID);
     } finally {
       await env.cleanup();
+    }
+  });
+});
+
+describe('WL-434 — الربطُ داخلَ متنِ البيانِ المختومِ لا ملفًّا جانبيًّا (محاكاةٌ لا عتاد)', { skip }, () => {
+  /** موقّعُ بيانٍ بعقدِ `ManifestSealer` من مفاتيحِ الإقلاعِ نفسِها — لقراءةٍ مُتحقَّقٍ من الختمِ. */
+  function manifestSealerOf(keys) {
+    const pub = createPublicKey(keys.anchor.pub);
+    const pair = pairOf(keys.anchor);
+    const id = 'king:' + fingerprint(pub).slice(0, 24);
+    return {
+      id,
+      signAsync: async (payload) => edSign(null, Buffer.from(JSON.stringify(payload)), pair.privateKey).toString('base64'),
+      verify: (payload, signature) =>
+        edVerify(null, Buffer.from(JSON.stringify(payload)), pub, Buffer.from(signature, 'base64')),
+    };
+  }
+
+  test('الإقلاعُ المعلَنُ يختمُ مادّةَ المرجعِ الحيّ في المتنِ، والمقبسُ يستهلكُهُ من البيانِ المُتحقَّقِ منهِ، وحذفُ البيانِ أو تحريرُهُ رفضٌ مسمّى', async () => {
+    const base = tmp('wl434-sim-');
+    const sw = new SwtpmInstance({ stateDir: join(base, 'swtpm-state') });
+    mkdirSync(sw.stateDir, { recursive: true });
+    await sw.start();
+    try {
+      const root = join(base, 'app-root');
+      mkdirSync(root, { recursive: true });
+      const keys = makeKeys();
+      const sealer = manifestSealerOf(keys);
+      const manifestFile = join(root, 'root-of-trust.manifest.json');
+      /** يقرأُ الربطَ من البيانِ **مُتحقَّقًّا من ختمِهِ** في كلّ مرةٍ — لا نسخةً محفوظةً. */
+      const readBinding = () => {
+        const manifest = new StateManifest(manifestFile, { fsync: false, sealer });
+        return manifest.read().freshnessBinding ?? null;
+      };
+      const socket = (opts = {}) =>
+        new SwtpmNvStateBoundSocket({
+          tools: () => sw.tools(),
+          counterIndex: COUNTER,
+          recordIndex: RECORD,
+          lockDir: join(base, 'locks'),
+          manifestBinding: readBinding,
+          ...opts,
+        });
+      // التهيئةُ بلا ربطٍ (‏v2 تاريخيّ): المقبسُ يقرأُ `base` من `R` حتى المراسمِ.
+      const { base: provisionedBase } = await socket().provision();
+      // الإقلاعُ المعلَنُ: B10 يجمعُ المادّةَ من المرجعِ الحيّ (المقبضانِ والاسمانِ و`base`)
+      // ويختمُها في المتنِ — فلا ملفَّ ربطٍ جانبيًّا في المسارِ البتةَ.
+      const first = await bootRoot(root, keys, socket(), { env: { XUUX_FRESHNESS_BIND_DECLARED: '1' } });
+      assert.equal(first.freshnessBoot, 'B10');
+      const sealed = JSON.parse(readFileSync(manifestFile, 'utf8'));
+      assert.equal(sealed.body.version, 3, 'مخطّطُ NV بعدَ المراسمِ');
+      assert.equal(sealed.body.freshnessBinding.counterName, (await socket().pinnedBinding()).counterName, 'الربطُ من المرجعِ الحيّ');
+      assert.equal(sealed.body.freshnessBinding.base, provisionedBase.toString(), 'base من قيمةِ C عندَ الربطِ');
+      assert.equal(sealed.body.freshnessBinding.instanceId, sealed.body.instanceId, 'مربوطٌ بنسخةِ الجذرِ');
+      await first.close();
+      // إقلاعٌ ثانٍ: المقبسُ يستهلكُ الربطَ من البيانِ المُتحقَّقِ منهِ (لا من `R` ولا من ملفٍّ)،
+      // ومقارنةُ البيانِ والمصدرِ عندَ الإقلاعِ تمرُّ — فالمصدرُ هو الذي ملأ المتنَ.
+      const second = await bootRoot(root, keys, socket(), { env: {} });
+      assert.equal(second.freshnessBoot, 'B1');
+      await second.close();
+      // حذفُ البيانِ أثناءَ التشغيلِ: القراءةُ تُرفَضُ برمزِ الربطِ المسمّى لا بخطأٍ مجهولٍ.
+      const before = readFileSync(manifestFile, 'utf8');
+      rmSync(manifestFile);
+      assert.equal((await rejection(() => socket().read())).code, BINDING_CODES.INVALID, 'بيانٌ محذوفٌ ⇒ ربطٌ غيرُ مقروءٍ');
+      // وتحريرُ الربطِ في المتنِ يُسقِطُ ختمَهُ فورًا.
+      const tampered = JSON.parse(before);
+      tampered.body.freshnessBinding.base = '1';
+      writeFileSync(manifestFile, JSON.stringify(tampered, null, 2) + '\n');
+      assert.equal((await rejection(() => socket().read())).code, BINDING_CODES.INVALID, 'بيانٌ مُحرَّفٌ ⇒ ربطٌ غيرُ صالحٍ');
+      // والاسترجاعُ: البيانُ الأصليُّ يعيدُ القراءةَ كما كانت.
+      writeFileSync(manifestFile, before);
+      assert.equal((await socket().read()).epoch, 1n, 'البيانُ الأصليُّ يعملُ كما كان');
+    } finally {
+      await sw.dispose();
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });
