@@ -47,7 +47,10 @@ export const FNV_BINDING_SCHEMA = 'xuux.manifest-fnv-binding/1';
  * (`decideStateBoundBoot`) فلا يبقى «ربطٌ مكسورٌ» متعذّرَ التمييزِ من «مصدرٍ لا يجيب».
  * تفصيلُ الرسائلِ ثابتٌ نصًّا: لا `error.message` ولا محتوىُ استثناءٍ حسّاسٍ يُمرَّر.
  */
-export const FnvBindingErrorCodes = ['FRESHNESS_NV_BINDING_INVALID', 'FRESHNESS_NV_BINDING_MISMATCH'] as const;
+export const FnvBindingErrorCodes = [
+  'FRESHNESS_NV_BINDING_INVALID',
+  'FRESHNESS_NV_BINDING_MISMATCH',
+] as const;
 
 export type FnvBindingErrorCode = (typeof FnvBindingErrorCodes)[number];
 
@@ -109,13 +112,18 @@ export function fnvBindingMaterialShapeError(material: unknown): string | null {
   if (!NV_NAME.test(String(m.recordName ?? ''))) return 'recordName';
   if (typeof m.base !== 'string' || !DECIMAL.test(m.base)) return 'base';
   const identity = m.tpmIdentity as Partial<TpmIdentitySource> | undefined;
-  if (identity === undefined || identity === null || typeof identity !== 'object') return 'tpmIdentity';
-  if (typeof identity.kind !== 'string' || !IDENTITY_KINDS.has(identity.kind)) return 'tpmIdentity.kind';
-  if (typeof identity.value !== 'string' || !IDENTITY_VALUE.test(identity.value)) return 'tpmIdentity.value';
+  if (identity === undefined || identity === null || typeof identity !== 'object')
+    return 'tpmIdentity';
+  if (typeof identity.kind !== 'string' || !IDENTITY_KINDS.has(identity.kind))
+    return 'tpmIdentity.kind';
+  if (typeof identity.value !== 'string' || !IDENTITY_VALUE.test(identity.value))
+    return 'tpmIdentity.value';
   const policy = m.authPolicy as Partial<{ counter: unknown; record: unknown }> | undefined;
   if (policy === undefined || policy === null || typeof policy !== 'object') return 'authPolicy';
-  if (typeof policy.counter !== 'string' || !POLICY_DIGEST.test(policy.counter)) return 'authPolicy.counter';
-  if (typeof policy.record !== 'string' || !POLICY_DIGEST.test(policy.record)) return 'authPolicy.record';
+  if (typeof policy.counter !== 'string' || !POLICY_DIGEST.test(policy.counter))
+    return 'authPolicy.counter';
+  if (typeof policy.record !== 'string' || !POLICY_DIGEST.test(policy.record))
+    return 'authPolicy.record';
   return null;
 }
 
@@ -180,7 +188,9 @@ export function manifestFnvBindingEqual(previous: unknown, next: unknown): boole
   const a = previous as Partial<ManifestFnvBinding> | null;
   const b = next as Partial<ManifestFnvBinding> | null;
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
-  return manifestFnvBindingBytes(a as ManifestFnvBinding).equals(manifestFnvBindingBytes(b as ManifestFnvBinding));
+  return manifestFnvBindingBytes(a as ManifestFnvBinding).equals(
+    manifestFnvBindingBytes(b as ManifestFnvBinding),
+  );
 }
 
 /**
@@ -224,7 +234,10 @@ export function fnvBindingSourceDiff(
  * @param material - المادّةُ من المصدر
  * @param instanceId - معرّفُ نسخةِ الجذرِ من المتن
  */
-export function buildManifestFnvBinding(material: FnvBindingMaterial, instanceId: string): ManifestFnvBinding {
+export function buildManifestFnvBinding(
+  material: FnvBindingMaterial,
+  instanceId: string,
+): ManifestFnvBinding {
   const shapeError = fnvBindingMaterialShapeError(material);
   if (shapeError !== null) {
     throw new Error(`FNV_BINDING_MATERIAL_INVALID: ${shapeError}`);

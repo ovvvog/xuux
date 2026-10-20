@@ -631,16 +631,25 @@ export class StateManifest {
    * @param env - البيئةُ التي يُقرأُ منها إعلانُ التفويضِ
    * @returns المتنُ بعدَ الختمِ — `version: 3` و`freshnessBinding` مثبتٌ فيه
    */
-  async bindFnvAsync(material: FnvBindingMaterial, env: NodeJS.ProcessEnv = process.env): Promise<StateManifestBody> {
+  async bindFnvAsync(
+    material: FnvBindingMaterial,
+    env: NodeJS.ProcessEnv = process.env,
+  ): Promise<StateManifestBody> {
     if ((env[FNV_BIND_DECLARED_ENV] ?? '').trim() !== '1') {
-      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_NOT_DECLARED', FNV_BIND_DECLARED_ENV);
+      throw new StateManifestError(
+        'STATE_MANIFEST_FNV_BINDING_NOT_DECLARED',
+        FNV_BIND_DECLARED_ENV,
+      );
     }
     if (!existsSync(this.location)) {
       throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
     }
     const body = this.#verifySeal(null);
     if (body.freshnessBinding !== undefined && body.freshnessBinding !== null) {
-      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'ربطٌ قائمٌ؛ إعادةُ الربطِ مراسمُ مالكٍ');
+      throw new StateManifestError(
+        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+        'ربطٌ قائمٌ؛ إعادةُ الربطِ مراسمُ مالكٍ',
+      );
     }
     if (body.version === FNV_MANIFEST_SCHEMA_VERSION) {
       // بيانُ NV بلا ربطٍ — حالةٌ لا ينتجُها مسارٌ مشروعٌ، ولا يُكمَلُ استنباطًا.
@@ -715,14 +724,23 @@ export class StateManifest {
       // لا يُهرَّبُ في مخطّطٍ تاريخيّ، ولا يُحذفُ أو يُحرّفُ أو يُخفَضُ مخطّطُه بعدَ ختمِه.
       if (previousBinding !== null) {
         if (!manifestFnvBindingEqual(previousBinding, next.freshnessBinding ?? null)) {
-          throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'الربطُ لا يتغيّرُ عبرَ الختمِ');
+          throw new StateManifestError(
+            'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+            'الربطُ لا يتغيّرُ عبرَ الختمِ',
+          );
         }
         if (next.version !== FNV_MANIFEST_SCHEMA_VERSION) {
-          throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_IMMUTABLE', 'مخطّطُ NV لا يرجعُ');
+          throw new StateManifestError(
+            'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+            'مخطّطُ NV لا يرجعُ',
+          );
         }
       } else if ((next.freshnessBinding ?? null) !== null) {
         if (next.version !== FNV_MANIFEST_SCHEMA_VERSION) {
-          throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'ربطٌ في مخطّطٍ تاريخيّ');
+          throw new StateManifestError(
+            'STATE_MANIFEST_FNV_BINDING_INVALID',
+            'ربطٌ في مخطّطٍ تاريخيّ',
+          );
         }
       }
       await this.#seal(next);
@@ -1067,7 +1085,10 @@ export class StateManifest {
     const fnvBinding = body.freshnessBinding;
     if (body.version === STATE_MANIFEST_VERSION) {
       if (fnvBinding !== undefined && fnvBinding !== null) {
-        throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'ربطٌ في مخطّطٍ تاريخيّ');
+        throw new StateManifestError(
+          'STATE_MANIFEST_FNV_BINDING_INVALID',
+          'ربطٌ في مخطّطٍ تاريخيّ',
+        );
       }
     } else if (fnvBinding === undefined || fnvBinding === null) {
       throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'مخطّطُ NV بلا ربطٍ');
