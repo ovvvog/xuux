@@ -441,6 +441,7 @@ export class StateManifest {
   readonly #fsync: boolean;
   #sealer: ManifestSealer | null;
   #verified: StateManifestBody | null = null;
+  #sealChain: Promise<void> = Promise.resolve();
   /**
    * مفتاحُ مصادقةِ دفترِ الرفعِ (R4-B-01). يُستخرجُ من التوكن مرةً واحدةً عندَ
    * الإقلاعِ، فيُستعملُ في تجزئةِ سطورِ الدفترِ HMAC لا SHA-256 عاريّاً.
@@ -682,7 +683,26 @@ export class StateManifest {
    * @param mutate - تحويلُ المتنِ المطويِّ قبلَ الختم
    * @param applyPending - هل تُختَمُ الرفوعُ المعلَّقةُ في هذا الختم (‏الترقيةُ وحدَها)
    */
+  /**
+   * WL-434 — تسلسلُ الختومِ: لا سباقَ بينَ ختمَينِ. مراسمانِ متزامنتانِ (أو ختمٌ
+   * وتحديثٌ) يُسلسَلانِ على سلسلةٍ واحدةٍ داخلَ العمليّةِ، فالثاني يقرأُ ختمَ الأولِ
+   * **داخلَ المقطعِ الحرجِّ نفسِهِ** ويرفضُ `IMMUTABLE` إن حاولَ ربطًا مختلفًا — بدلَ
+   * أن يلتقطَ كلٌّ منهما «لا ربطَ» قبلَ أيِّ ختمٍ فيختمَ آخرُهما فوقَ أولِهما. القفلُ
+   * العابرُ للعملياتِ (قفلُ الملفِّ) يبقى كما هو؛ هذه السلسلةُ تحرسُ داخلَ العمليّةِ.
+   */
   async #sealWith(
+    mutate: (body: StateManifestBody) => StateManifestBody,
+    applyPending: boolean,
+  ): Promise<void> {
+    const run = this.#sealChain.then(() => this.#sealSerialized(mutate, applyPending));
+    this.#sealChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    await run;
+  }
+
+  async #sealSerialized(
     mutate: (body: StateManifestBody) => StateManifestBody,
     applyPending: boolean,
   ): Promise<void> {
