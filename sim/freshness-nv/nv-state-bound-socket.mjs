@@ -147,7 +147,7 @@ export class SwtpmNvStateBoundSocket {
 
   /**
    * @param {{tools: () => import('./swtpm-harness.mjs').Tpm2Tools, counterIndex: string,
-   *   recordIndex: string, lockDir: string, lockTimeoutMs?: number, unsafeNoLock?: boolean}} opts
+   *   recordIndex: string, lockDir: string, lockTimeoutMs?: number, unsafeNoLock?: boolean, pinnedBase?: bigint}} opts
    *   ‏`tools` دالّةٌ لا كائنٌ: منفذُ المحاكي يتغيّرُ عندَ إعادةِ تشغيلِه.
    */
   constructor(opts) {
@@ -157,6 +157,8 @@ export class SwtpmNvStateBoundSocket {
     this.lockDir = opts.lockDir;
     this.lockTimeoutMs = opts.lockTimeoutMs ?? 10000;
     this.unsafeNoLock = opts.unsafeNoLock === true;
+    /** `base` مثبَّتٌ خارجَ `R` (‏قياسُ التخفيفِ في WL-432)؛ `null` = سلوكُ WL-431. */
+    this.pinnedBase = opts.pinnedBase ?? null;
     mkdirSync(this.lockDir, { recursive: true });
   }
 
@@ -212,6 +214,11 @@ export class SwtpmNvStateBoundSocket {
   }
 
   #derive(counter, record) {
+    if (this.pinnedBase !== null && record.base !== this.pinnedBase) {
+      // WL-432: `base` في `R` قابلٌ لإعادةِ الكتابةِ ممّن يملكُ تفويضَ كتابةِ `R`؛ فإن ثُبِّتَ خارجَه
+      // (‏مثلًا في البيانِ المختوم) فاختلافُه رفضٌ مغلق — وإلّا فإعادةُ كتابتِه استرجاعٌ كاملٌ (T7).
+      throw codedError(NV_PROBE_CODES.INCONSISTENT, `record base ${record.base} != pinned ${this.pinnedBase}`);
+    }
     if (counter < record.base) {
       throw codedError(NV_PROBE_CODES.INCONSISTENT, `counter ${counter} below base ${record.base}`);
     }
