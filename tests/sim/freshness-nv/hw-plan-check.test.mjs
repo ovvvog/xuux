@@ -132,6 +132,23 @@ test('الجاهزيّة: قفلُ DA أو إعادةُ تشغيلٍ معلّق�
   );
 });
 
+test('حقولُ Get-Tpm نصوصٌ كما يكتبُها جردُ Windows ("True"/"False") ⇒ تُقرأُ صحيحةً، والمجهولُ مانع', () => {
+  const asStrings = (r) => {
+    for (const [k, v] of Object.entries(r.getTpm.fields)) if (typeof v === 'boolean') r.getTpm.fields[k] = v ? 'True' : 'False';
+  };
+  const ok = planCheck(hardwareLike(asStrings));
+  for (const b of ok.blockers) assert.ok(!/^TPM_NOT_READY|^TPM_DA_|^TPM_RESTART/.test(b), b);
+  assert.ok(
+    planCheck(hardwareLike((r) => void (asStrings(r), (r.getTpm.fields.LockedOut = 'True')))).blockers.includes('TPM_DA_LOCKED_OUT_OR_UNKNOWN'),
+  );
+  assert.ok(
+    planCheck(hardwareLike((r) => void (asStrings(r), (r.getTpm.fields.TpmReady = 'Unknown')))).blockers.includes('TPM_NOT_READY:TpmReady'),
+  );
+  assert.ok(
+    planCheck(hardwareLike((r) => void (asStrings(r), delete r.getTpm.fields.RestartPending))).blockers.includes('TPM_RESTART_PENDING'),
+  );
+});
+
 test('جردٌ فاسدٌ أو ناقصٌ ⇒ مانع، وسمةٌ غيرُ مقروءةٍ لفهرسٍ ⇒ مانعٌ مسمّىً بالمقبض', () => {
   assert.ok(planCheck(hardwareLike((r) => void r.errors.push('X'))).blockers.includes('INVENTORY_INVALID'));
   assert.ok(

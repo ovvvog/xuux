@@ -91,14 +91,26 @@ export function planCheck(report, opts = {}) {
   };
   const g = report.getTpm?.ok === true && report.getTpm.fields && typeof report.getTpm.fields === 'object' ? report.getTpm.fields : null;
   const pick = (k) => (g && Object.hasOwn(g, k) ? g[k] : null);
+  // ‏win_tpm_inventory.ps1 يكتبُ حقولَ Get-Tpm نصوصًا ("True"/"False") — قِيسَ على عتادِ WL-432؛
+  // فالقيمةُ المنطقيّةُ تُقرأُ من الشكلَين، وأيُّ شيءٍ آخرَ مجهولٌ (null) فيُعامَلُ مانعًا حيثُ يلزمُ.
+  const flag = (k) => {
+    const v = pick(k);
+    if (v === true || v === false) return v;
+    if (typeof v === 'string') {
+      const t = v.trim().toLowerCase();
+      if (t === 'true') return true;
+      if (t === 'false') return false;
+    }
+    return null;
+  };
   out.readiness = Object.fromEntries(
     ['TpmPresent', 'TpmReady', 'TpmEnabled', 'TpmActivated', 'TpmOwned', 'RestartPending', 'ManagedAuthLevel', 'OwnerClearDisabled', 'AutoProvisioning', 'LockedOut', 'LockoutCount', 'LockoutMax'].map((k) => [k, pick(k)]),
   );
   if (g === null) blockers.push('READINESS_UNKNOWN_GET_TPM_ABSENT');
   else {
-    for (const k of ['TpmPresent', 'TpmReady', 'TpmEnabled']) if (pick(k) !== true) blockers.push(`TPM_NOT_READY:${k}`);
-    if (pick('LockedOut') !== false) blockers.push('TPM_DA_LOCKED_OUT_OR_UNKNOWN');
-    if (pick('RestartPending') === true) blockers.push('TPM_RESTART_PENDING');
+    for (const k of ['TpmPresent', 'TpmReady', 'TpmEnabled']) if (flag(k) !== true) blockers.push(`TPM_NOT_READY:${k}`);
+    if (flag('LockedOut') !== false) blockers.push('TPM_DA_LOCKED_OUT_OR_UNKNOWN');
+    if (flag('RestartPending') !== false) blockers.push('TPM_RESTART_PENDING');
   }
 
   // (ج) الموارد — أربعةُ أبعادٍ منفصلةٍ لا يُستنتَجُ أحدُها من آخر
