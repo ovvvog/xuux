@@ -445,8 +445,13 @@ export async function decideStateBoundBoot(
       // WL-434: ختمُ الربطِ في المتنِ جزءٌ من المراسمِ المعلنةِ نفسِها — من المصدرِ
       // وحدهِ (إن كشفَ مادّةً)، لا يُصنَعُ لبيانٍ قديمٍ ولا يُعوّضُ حقلٌ مفقودٌ. ومن
       // لا يكشفُ مادّةً يبقى على المسارِ التاريخيِّ كما هو (لا backend إنتاجيًّا اليوم).
+      // **والإعلانُ للربطِ صريحٌ بالبيئةِ وحدَها** (`XUUX_FRESHNESS_BIND_DECLARED=1`) —
+      // التهيئةُ وحدها تُعلنُ الجذرَ لا المراسمَ: مقبسُ المحاكاةِ يكشفُ المادّةَ دائمًا،
+      // فلولا هذا الشرطُ لدخلَت إقلاعاتُ التهيئةِ التاريخيّةُ (v2) في مراسمِ v3 بلا
+      // إعلانٍ ورفضتْ `NOT_DECLARED` — انحدارٌ ممنوعٌ.
+      const bindDeclared = context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
       const materialSource = socket as Partial<FnvBindingMaterialSource>;
-      if (typeof materialSource.fnvBindingMaterial === 'function') {
+      if (bindDeclared && typeof materialSource.fnvBindingMaterial === 'function') {
         await manifest.bindFnvAsync(await materialSource.fnvBindingMaterial(), context.env);
       }
       await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
