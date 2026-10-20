@@ -366,40 +366,36 @@ describe('WL-434 — الربطُ في متنِ البيانِ الموقَّع�
     }
   });
 
-  test('تزامنُ مراسمَينِ بمادّتَينِ مختلفتَين: البيانُ ينتهي بربطٍ واحدٍ صالحِ الختمِ مهما جرى السباقُ، وإعادةُ الربطِ بعدهُ مرفوضةٌ', async () => {
+  test('تزامنُ مراسمَينِ بمادّتَينِ مختلفتَين: التسلسلُ يُدرِكُ السباقَ — واحدةٌ تُختَمُ والثانيةُ تُرفَضُ IMMUTABLE والربطُ المختومُ هو ربطُ الناجحةِ', async () => {
     const dir = tmp('wl434-concurrent-');
     try {
       const { manifest } = await provisionedManifest(dir);
-      // مراسمانِ متزامنتانِ بمادّتَينِ مختلفتَينِ (‏base مختلفة): السباقُ محتملُ النتائجِ —
-      // إمّا أن تلحقَ الثانيةُ بعدَ ختمِ الأولى فتُرفَضُ من حارسِ الختمِ (‏IMMUTABLE)،
-      // وإمّا أن تلتقطَ كلتاهما «لا ربطَ» قبلَ أيِّ ختمٍ فيختمُ آخرُهما فوقَ أولِهما.
-      // **العقدُ في الحالتَينِ واحدٌ:** البيانُ ينتهي بربطٍ **واحدٍ** صالحِ الشكلِ والختمِ
-      // (‏base إحدى المادّتَينِ، لا خليطٌ ولا حقلٌ ناقصٌ)، وبإعادةِ ربطٍ بعدهُ مرفوضةٍ.
+      // مراسمانِ متزامنتانِ بمادّتَينِ مختلفتَينِ (‏base مختلفة): تسلسلُ الختومِ
+      // (‏`#sealWith` على سلسلةٍ واحدةٍ) يُدرِكُ السباقَ — الثانيةُ تقرأُ ختمَ الأولى
+      // داخلَ المقطعِ الحرجِّ فتُرفَضُ، بدلَ أن يلتقطَ كلٌّ منهما «لا ربطَ» فيختمَ
+      // آخرُهما فوقَ أولِهما. **والمختومُ هو ربطُ الناجحةِ وحدَها** — لا غيرُ.
+      const first = material();
+      const second = material({ base: '9' });
       const [a, b] = await Promise.allSettled([
-        manifest.bindFnvAsync(material(), DECLARED_ENV),
-        manifest.bindFnvAsync(material({ base: '9' }), DECLARED_ENV),
+        manifest.bindFnvAsync(first, DECLARED_ENV),
+        manifest.bindFnvAsync(second, DECLARED_ENV),
       ]);
       const fulfilled = [a, b].filter((r) => r.status === 'fulfilled');
       const rejected = [a, b].filter((r) => r.status === 'rejected');
-      assert.ok(
-        (fulfilled.length === 1 && rejected.length === 1) || fulfilled.length === 2,
-        'لا نتيجةَ ثالثةَ للسباقِ: ختمٌ واحدٌ أو ختمانِ متزاحمانِ',
+      assert.equal(fulfilled.length, 1, 'مراسمٌ واحدةٌ فقط تُختَم — الثانيةُ لا تنجو');
+      assert.equal(rejected.length, 1, 'والثانيةُ تُرفَضُ حتمًا');
+      assert.equal(
+        rejected[0].reason.code,
+        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+        'الرفضُ من حارسِ الختمِ المُسلسَلِ',
       );
-      for (const r of rejected) {
-        assert.equal(
-          r.reason.code,
-          'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
-          'الرفضُ إن وقعَ فمن حارسِ الختمِ',
-        );
-      }
-      const body = manifest.read();
-      assert.equal(body.version, FNV_MANIFEST_SCHEMA_VERSION, 'v3 بعدَ السباقِ');
-      assert.ok(
-        ['7', '9'].includes(body.freshnessBinding.base),
-        'الربطُ المختومُ إحدى المادّتَينِ لا ثالثٌ',
-      );
-      assert.equal(body.freshnessBinding.instanceId, body.instanceId, 'مربوطٌ بنسخةِ الجذرِ');
-      // وإعادةُ الربطِ بعدَ استقرارِ النتيجةِ مرفوضةٌ دائمًا — لا نافذةَ بعدَ السباقِ.
+      // والمختومُ هو ربطُ الناجحةِ بالقيمةِ (base) — لا ربطُ الخاسرةِ ولا ثالثٌ.
+      const sealedBase = manifest.read().freshnessBinding.base;
+      const fulfilledBase = fulfilled[0] === a ? first.base : second.base;
+      const rejectedBase = fulfilled[0] === a ? second.base : first.base;
+      assert.equal(sealedBase, fulfilledBase, 'المختومُ ربطُ الناجحةِ وحدَها');
+      assert.notEqual(sealedBase, rejectedBase, 'وليسَ ربطَ المرفوضةِ');
+      // وإعادةُ الربطِ بعدَ السباقِ مرفوضةٌ — لا نافذةَ بعدهُ.
       const again = await rejection(() =>
         manifest.bindFnvAsync(material({ base: '11' }), DECLARED_ENV),
       );
@@ -672,6 +668,74 @@ describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (�
       );
       assert.equal(after.body.staged, null, 'والترحيلُ استُرجِعَ');
       assert.equal(runtime.manifest.read().freshnessEpoch, 1, 'والتعافي رقّى العهدَ إلى 1');
+      await runtime.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('إقلاعُ تهيئةٍ بمقبسٍ يكشفُ المادّةَ بلا إعلانِ ربطٍ: المسارُ التاريخيُّ (v2) — لا مراسمَ ولا استهلاكَ', async () => {
+    const dir = tmp('wl434-prov-nodecl-');
+    try {
+      const keys = makeKeys();
+      const root = join(dir, 'root');
+      const socket = new TestStateBoundSocket();
+      let materialCalls = 0;
+      socket.useMaterial(() => {
+        materialCalls += 1;
+        return material();
+      });
+      socket.usePinnedBinding(() => {
+        throw new Error('لا يجبُ أن يُقرأَ الربطُ المثبَّتُ في مسارٍ تاريخيّ');
+      });
+      // تهيئةُ جذرٍ جديدٍ **بلا إعلانِ الربطِ** (PROVISION وحدَه): المقبسُ يكشفُ
+      // المادّةَ لكنّ الإعلانَ الصريحَ للبيئةِ هو الذي يفتحُ المراسمَ — فلولا الشرطُ
+      // لدخلَت كلُّ تهيئةٍ تاريخيّةٍ في v3 وفشلتْ `NOT_DECLARED` (انحدارٌ مقيسٌ هنا).
+      const runtime = await bootRoot(root, keys, socket, {
+        env: { XUUX_ROOT_OF_TRUST_PROVISION: '1' },
+      });
+      assert.equal(runtime.freshnessBoot, 'B10');
+      const sealed = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
+      assert.equal(sealed.body.version, 2, 'بيانٌ تاريخيّ — لا مخطّطَ NV بلا مراسمَ');
+      assert.equal(sealed.body.freshnessBinding, undefined, 'ولا ربطَ بلا إعلانٍ');
+      assert.equal(materialCalls, 0, 'والمادّةُ لم تُجمَعْ من المصدرِ أصلًا');
+      await runtime.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('حذفُ البيانِ أثناءَ التشغيلِ يُسقِطُ المعاملةَ قبلَ أيّ زيادةٍ في العهدِ — والمرجعُ لا يتقدّمُ', async () => {
+    const dir = tmp('wl434-inop-');
+    try {
+      const keys = makeKeys();
+      const root = join(dir, 'root');
+      const socket = new TestStateBoundSocket();
+      socket.useMaterial(() => material());
+      socket.usePinnedBinding(() => material());
+      const runtime = await bootRoot(root, keys, socket, { env: bootEnv(keys) });
+      assert.equal(runtime.freshnessBoot, 'B10');
+      const before = await socket.read();
+      // حذفُ البيانِ والنظامُ يعملُ: أيُّ معاملةٍ لاحقةٍ تُرفَضُ قبلَ أيّ قبولٍ —
+      // المقبسُ يقرأُ الربطَ من البيانِ فغيابُهُ رفضٌ مسمّى، والزيادةُ لا تقعُ.
+      rmSync(join(root, 'root-of-trust.manifest.json'));
+      let failed = null;
+      try {
+        await runtime.ledger.transactAsync('crown.command', async () => {
+          runtime.ledger.begin({ id: 'cmd-x' });
+          await runtime.ledger.commitSigned({ id: 'cmd-x' });
+        });
+      } catch (error) {
+        failed = error;
+      }
+      assert.ok(failed !== null, 'المعاملةُ بعدَ فقدانِ البيانِ تُرفَضُ');
+      // الرفضُ هنا من طبقةِ المنسّقِ (قراءةُ البيانِ الغائبِ ⇒ `STATE_ROOT_UNPROVISIONED`
+      // المسمّاة)؛ أمّا المقبسُ الذي يستهلكُ الربطَ من البيانِ (محاكاةُ swtpm في CI)
+      // فيلفّها `FRESHNESS_NV_BINDING_INVALID` من مصدرِهِ — كلاهما رفضٌ مغلقٌ مسمّى،
+      // لا خطأٌ مجهولٌ يُقبَلُ، ولا زيادةٌ تقعُ (المرجعُ لم يتقدّمْ أدناهُ).
+      assert.equal(failed.code, 'STATE_ROOT_UNPROVISIONED');
+      const after = await socket.read();
+      assert.equal(after.epoch, before.epoch, 'والعهدُ لم يتقدّمْ — لا زيادةً بلا بيانٍ');
       await runtime.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
