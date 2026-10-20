@@ -4,9 +4,11 @@
 // WL-431 — عمليّةُ عميلٍ مستقلّةٌ لمجسِّ مرجعِ الحداثة: تُثبتُ أنّ المرجعَ يُقرأُ بعدَ انتهاءِ عمليّةِ
 // العميلِ وتشغيلِها ثانيةً، وتقيسُ التزامنَ والسقوطَ (‏SIGKILL) عبرَ العمليات. **محاكاةٌ فقط.**
 //
-// الوسيطُ الوحيد: JSON ‏`{tcti, counterIndex, recordIndex, lockDir, op, from?, to?, faults?, goFile?}`.
+// الوسيطُ الوحيد: JSON ‏`{tcti, counterIndex, recordIndex, lockDir, op, from?, to?, faults?, goFile?, binding?}`
+// (‏`binding = {file, publicKeyPem}` في WL-433: الربطُ المختومُ يُتحقَّقُ منه ولا يُختَمُ في العميل).
 // المخرجُ: سطرُ JSON واحدٌ ‏`{ok, reading?|code?, name?}` (‏العهودُ نصًّا).
 
+import { createPublicKey } from 'node:crypto';
 import { existsSync } from 'node:fs';
 
 import { Tpm2Tools } from './swtpm-harness.mjs';
@@ -19,6 +21,7 @@ const socket = new SwtpmNvStateBoundSocket({
   counterIndex: spec.counterIndex,
   recordIndex: spec.recordIndex,
   lockDir: spec.lockDir,
+  binding: spec.binding ? { file: spec.binding.file, publicKey: createPublicKey(spec.binding.publicKeyPem) } : null,
 });
 socket.faults = spec.faults ?? [];
 const reading = (r) => ({ epoch: r.epoch.toString(), anchor: r.anchor });
