@@ -479,7 +479,12 @@ describe('WL-434 — الربطُ داخلَ متنِ البيانِ المخت�
       assert.equal(first.freshnessBoot, 'B10');
       const sealed = JSON.parse(readFileSync(manifestFile, 'utf8'));
       assert.equal(sealed.body.version, 3, 'مخطّطُ NV بعدَ المراسمِ');
-      assert.equal(sealed.body.freshnessBinding.counterName, (await socket().pinnedBinding()).counterName, 'الربطُ من المرجعِ الحيّ');
+      // قراءةٌ مستقلةٌ من NV نفسِهِ (tpm2_nvreadpublic خارجَ المقبسِ) — لا مقارنةَ
+      // بيانٍ بنفسِهِ: المختومُ في المتنِ يجبُ أن يطابقَ الاسمَ كما يُقرأُ من العتادِ
+      // المحاكى مباشرةً.
+      const liveCounterName = parseNvName(await sw.tools().exec('tpm2_nvreadpublic', [COUNTER]));
+      assert.equal(sealed.body.freshnessBinding.counterName, liveCounterName, 'الربطُ من المرجعِ الحيّ');
+      assert.equal(sealed.body.freshnessBinding.recordName, parseNvName(await sw.tools().exec('tpm2_nvreadpublic', [RECORD])), 'واسمُ السجلِّ كذلكَ');
       assert.equal(sealed.body.freshnessBinding.base, provisionedBase.toString(), 'base من قيمةِ C عندَ الربطِ');
       assert.equal(sealed.body.freshnessBinding.instanceId, sealed.body.instanceId, 'مربوطٌ بنسخةِ الجذرِ');
       await first.close();
@@ -487,11 +492,32 @@ describe('WL-434 — الربطُ داخلَ متنِ البيانِ المخت�
       // ومقارنةُ البيانِ والمصدرِ عندَ الإقلاعِ تمرُّ — فالمصدرُ هو الذي ملأ المتنَ.
       const second = await bootRoot(root, keys, socket(), { env: {} });
       assert.equal(second.freshnessBoot, 'B1');
-      await second.close();
-      // حذفُ البيانِ أثناءَ التشغيلِ: القراءةُ تُرفَضُ برمزِ الربطِ المسمّى لا بخطأٍ مجهولٍ.
+      // والعملُ يزدهرُ فوقَ الربطِ من البيانِ: أمرٌ يُثبَّتُ في سجلٍّ قائمٍ.
+      await commitCommand(second, 'cmd-1');
+      const beforeDelete = await socket().read();
       const before = readFileSync(manifestFile, 'utf8');
+      // حذفُ البيانِ **والنظامُ يعملُ**: المعاملةُ اللاحقةُ تُرفَضُ قبلَ أيّ زيادةٍ في
+      // العهدِ (الرفضُ المسمّى `FRESHNESS_NV_BINDING_INVALID` من مصدرِ المقبسِ نفسِهِ —
+      // المقبسُ يستهلكُ الربطَ من البيانِ فيلفُّ فقدانَهُ برمزِ الربطِ)، والعدادُ لا يتقدّمُ.
       rmSync(manifestFile);
-      assert.equal((await rejection(() => socket().read())).code, BINDING_CODES.INVALID, 'بيانٌ محذوفٌ ⇒ ربطٌ غيرُ مقروءٍ');
+      let failed = null;
+      try {
+        await commitCommand(second, 'cmd-2');
+      } catch (error) {
+        failed = error;
+      }
+      assert.ok(failed !== null, 'المعاملةُ بعدَ فقدانِ البيانِ تُرفَضُ');
+      assert.ok(
+        ['FRESHNESS_NV_BINDING_INVALID', 'FRESHNESS_ADVANCE_UNRESOLVED', 'STATE_ROOT_UNPROVISIONED'].includes(
+          failed.code,
+        ),
+        `رفضٌ مسمّى مغلقٌ (وكُتبَ ${failed.code})`,
+      );
+      const afterDelete = await socket().read();
+      assert.equal(afterDelete.epoch, beforeDelete.epoch, 'والعهدُ لم يتقدّمْ — لا زيادةً بلا بيانٍ');
+      await second.close();
+      // استرجاعُ البيانِ لفحصِ التحريفِ: المحتوى الأصليُّ محفوظٌ في `before` أعلاه.
+      writeFileSync(manifestFile, before);
       // وتحريرُ الربطِ في المتنِ يُسقِطُ ختمَهُ فورًا.
       const tampered = JSON.parse(before);
       tampered.body.freshnessBinding.base = '1';
