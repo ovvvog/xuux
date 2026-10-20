@@ -198,7 +198,12 @@ export class SwtpmNvStateBoundSocket {
       try {
         fromManifest = this.manifestBinding();
       } catch (error) {
-        // بيانٌ محذوفٌ أو مُحرَّفٌ أثناءَ التشغيلِ: رفضٌ مسمّى لا خطأٌ مجهولٌ يُقرأُ B0.
+        // بيانٌ غائبٌ (لم يُهيَّأْ بعدُ أو حُذِفَ): لا ربطَ يُكشَفُ من المتنِ — والمقبسُ
+        // يقرأُ `base` من `R` كعهدِ ما قبلَ المراسمِ. ليست ثغرةً: كلُّ مسارِ قبولٍ
+        // (الإقلاعُ والمعاملةُ) يقرأُ البيانَ بنفسِهِ فسقوطُهُ هناكَ `STATE_ROOT_UNPROVISIONED`
+        // المسمّاة. أمّا التحريرُ (ختمٌ مكسورٌ) فرمزُهُ `INVALID` أدناه.
+        if (error.code === 'STATE_ROOT_UNPROVISIONED') return null;
+        // بيانٌ مُحرَّفٌ أثناءَ التشغيلِ: رفضٌ مسمّى لا خطأٌ مجهولٌ يُقرأُ B0.
         throw codedError(BINDING_CODES.INVALID, `manifest binding unreadable: ${error.code ?? error.name}`);
       }
       if (fromManifest === null) return null;
