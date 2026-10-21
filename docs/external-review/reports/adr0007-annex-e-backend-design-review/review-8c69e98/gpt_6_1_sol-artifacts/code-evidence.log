@@ -1,0 +1,508 @@
+
+---manifest body/options---
+   155	}
+   156	
+   157	/** الحقولُ الثلاثةُ الرتيبةُ التي لا تنزلُ. */
+   158	export type MonotonicKey = 'anchoredCount' | 'haltEpoch' | 'ledgerCommitted' | 'freshnessEpoch';
+   159	
+   160	/** ما يربطُ البيانَ بنظامِه: هويةٌ وسياقٌ وتوكنٌ وموديول. */
+   161	export interface StateManifestBinding {
+   162	  kingId: string;
+   163	  context: string;
+   164	  tokenSerial: string;
+   165	  moduleSha256: string;
+   166	}
+   167	
+   168	/** متنُ البيانِ كما يُوقَّعُ ويُحفَظُ. لا يحملُ مادةَ مفتاحٍ ولا سرّاً. */
+   169	export interface StateManifestBody extends StateManifestBinding {
+   170	  version: number;
+   171	  /** مُعرِّفُ نسخةِ الجذرِ — عشوائيٌّ عندَ التهيئةِ، يربطُ المواضعَ الثلاثةَ. */
+   172	  instanceId: string;
+   173	  createdAt: string;
+   174	  sealedAt: string;
+   175	  /** عدّادُ نقاطِ الضبطِ — يعلو ولا ينزل. */
+   176	  sequence: number;
+   177	  anchoredCount: number;
+   178	  haltEpoch: number;
+   179	  ledgerCommitted: number;
+   180	  /** عَهْدُ الحداثةِ من مصدرٍ خارجَ القرص (EXT-6). صفرٌ إن لم يُوصَلْ. */
+   181	  freshnessEpoch: number;
+   182	  /** رأسُ دفترِ الرفعِ لحظةَ الختمِ — يمنعُ قصَّ الدفترِ إلى ما قبلَ الختم. */
+   183	  journalHead: string;
+   184	  /**
+   185	   * `LIVE-28` (‏`WL-326`): بصمةُ الحالةِ `V_e` التي يشهدُ عليها المرجعُ الخارجيُّ في
+   186	   * العهدِ `freshnessEpoch`. لا تُوجدُ إلّا في الوضعِ المربوطِ بالحالة.
+   187	   */
+   188	  stateDigest?: string;
+   189	  /** `A_e = H(domain ‖ instanceId ‖ e ‖ V_e)` — ما يحملُه المرجعُ الخارجيُّ في العهدِ `e`. */
+   190	  freshnessAnchor?: string;
+   191	  /**
+   192	   * التزامٌ مُرحَّلٌ لم يُرَقَّ (‏`S2`): وجودُه عندَ الإقلاعِ يعني أنّ ما بعدَه على القرصِ
+   193	   * **غيرُ مُقَرٍّ به**، فيُحسَمُ بالمرجعِ (‏استرجاعٌ أو ترقية) قبلَ أيِّ قبول.
+   194	   */
+   195	  staged?: StagedCommit | null;
+   196	  /**
+   197	   * WL-434: ربطُ مرجعِ الحداثةِ على NV كما يُختَمُ في المتنِ — المقبضانِ واسمَا
+   198	   * `NV_ReadPublic` و`base` المثبَّتُ خارجَ `R` و`instanceId` وهويةُ TPM وسياستُها.
+   199	   * يُنشأُ مرّةً واحدةً عبرَ `bindFnvAsync` المعلنةِ، ولا يتغيّرُ بعدَها عبرَ أيِّ ختمٍ
+   200	   * (‏`#sealWith` يحرسُ الثباتَ مقارنةً بالقيمةِ لا بالمرجعِ). غيابُه في `version: 3`
+   201	   * رفضٌ، ووجودُه في `version: 2` مهرَّبٌ مرفوضٌ — لا ترقيةَ صامتةً في الاتجاهَين.
+   202	   */
+   203	  freshnessBinding?: ManifestFnvBinding | null;
+   204	}
+   205	
+   206	/** سجلُّ التزامٍ مُرحَّلٍ داخلَ المتنِ المختوم. */
+   207	export interface StagedCommit {
+   208	  /** معرّفُ المعاملة — يطابقُ رأسَ سجلِّ التراجعِ وإلّا فلا يُوثَقُ بالسجلّ. */
+   209	  txn: string;
+   210	  /** القصدُ المُعلَنُ (‏`halt`، `ledger.commit`، `log.append`، …) للتدقيق. */
+   211	  intent: string;
+   212	  /** العهدُ والمرساةُ اللذانِ بدأت منهما المعاملة. */
+   213	  fromEpoch: number;
+   214	  fromAnchor: string;
+   215	  at: string;
+   216	}
+   217	
+   218	/** البيانُ كما يُكتَبُ: متنٌ وخاتَمُه. */
+   219	export interface SealedStateManifest {
+   220	  body: StateManifestBody;
+   221	  seal: { alg: 'ed25519'; signerId: string; signature: string };
+   222	}
+   304	    instanceId,
+   305	    seq: entry.seq,
+   306	    key: entry.key,
+   307	    value: entry.value,
+   308	    at: entry.at,
+   309	    prev: entry.prev,
+   310	  });
+   311	  if (key) {
+   312	    return createHmac('sha256', key).update(data).digest('hex');
+   313	  }
+   314	  return createHash('sha256').update(data).digest('hex');
+   315	}
+   316	
+   317	/** كتابةٌ ذريّةٌ: ملفٌّ مؤقّتٌ ثمَّ `rename`، فلا يُقرأُ نصفُ ملفٍّ عطباً. */
+   318	function writeAtomic(file: string, text: string, fsync: boolean): void {
+   319	  mkdirSync(dirname(file), { recursive: true });
+   320	  const temporary = `${file}.tmp-${String(process.pid)}`;
+   321	  const line = Buffer.from(text, 'utf8');
+   322	  const fd = openSync(temporary, 'w');
+   323	  try {
+   324	    let written = 0;
+   325	    while (written < line.length) written += writeSync(fd, line, written);
+   326	    if (fsync) fsyncSync(fd);
+   327	  } finally {
+   328	    closeSync(fd);
+   329	  }
+   330	  renameSync(temporary, file);
+
+---manifest bind---
+   678	   * `LIVE-35` (‏`WL-326`): كان الختمُ ثمَّ حذفُ الدفترِ خطوتينِ بلا ربط، فانقطاعٌ
+   679	   * بينَهما يتركُ متناً جديداً تحتَ دفترٍ قديمٍ يُقرأُ `STATE_MANIFEST_ROLLBACK_DETECTED`.
+   680	   * الآنَ يُعادُ تسميةُ الدفترِ أوّلاً إلى `journal.sealing-<K>` (‏`K` تسلسلُ الختمِ
+   681	   * الجديد)، ثمَّ يُختَم، ثمَّ يُحذَف. فعندَ القراءةِ: `K ≤ sequence` ⇒ طُويَ فعلاً
+   682	   * فيُهمَل؛ `K = sequence+1` ⇒ لم يُختَمْ فيُطوى قبلَ الدفتر.
+   683	   * @param mutate - تحويلُ المتنِ المطويِّ قبلَ الختم
+   684	   * @param applyPending - هل تُختَمُ الرفوعُ المعلَّقةُ في هذا الختم (‏الترقيةُ وحدَها)
+   685	   */
+   686	  /**
+   687	   * WL-434 — تسلسلُ الختومِ: لا سباقَ بينَ ختمَينِ. مراسمانِ متزامنتانِ (أو ختمٌ
+   688	   * وتحديثٌ) يُسلسَلانِ على سلسلةٍ واحدةٍ داخلَ العمليّةِ، فالثاني يقرأُ ختمَ الأولِ
+   689	   * **داخلَ المقطعِ الحرجِّ نفسِهِ** ويرفضُ `IMMUTABLE` إن حاولَ ربطًا مختلفًا — بدلَ
+   690	   * أن يلتقطَ كلٌّ منهما «لا ربطَ» قبلَ أيِّ ختمٍ فيختمَ آخرُهما فوقَ أولِهما. القفلُ
+   691	   * العابرُ للعملياتِ (قفلُ الملفِّ) يبقى كما هو؛ هذه السلسلةُ تحرسُ داخلَ العمليّةِ.
+   692	   */
+   693	  async #sealWith(
+   694	    mutate: (body: StateManifestBody) => StateManifestBody,
+   695	    applyPending: boolean,
+   696	  ): Promise<void> {
+   697	    const run = this.#sealChain.then(() => this.#sealSerialized(mutate, applyPending));
+   698	    this.#sealChain = run.then(
+   699	      () => undefined,
+   700	      () => undefined,
+   701	    );
+   702	    await run;
+   703	  }
+   704	
+   705	  async #sealSerialized(
+   706	    mutate: (body: StateManifestBody) => StateManifestBody,
+   707	    applyPending: boolean,
+   708	  ): Promise<void> {
+   709	    // WL-165: الطيُّ يحذفُ الدفترَ، فلو وقعَ رفعٌ من عمليةٍ أخرى بينَ الختمِ
+   710	    // والحذفِ لَضاعَ شاهدٌ مرفوعٌ بلا أثرٍ — وهو عينُ ما تقولُه `R4-B-03`:
+   711	    // شاهدٌ يبقى خارجَ الخاتَمِ. فالطيُّ داخلَ القفلِ والقراءةُ من القرصِ داخلَه.
+   712	    this.#acquireJournalLock();
+   713	    try {
+   714	      this.#verified = null;
+   715	      const body = this.#verify(null);
+   716	      // WL-434: التقطِ الربطَ والمخطّطَ **قبلَ** التحديثِ وقبلَ أيّ مرجعٍ مشتركٍ —
+   717	      // المقارنةُ بعدَه بالقيمةِ لا بالمرجعِ، فكائنانِ يشتركانِ في المرجعِ متساويانِ
+   718	      // دائمًا ولو حُرّفَ أحدهما.
+   719	      const previousBinding = body.freshnessBinding ?? null;
+   720	      const target = this.journalFile + SEALING_SUFFIX + String(body.sequence + 1);
+   721	      this.#removeStaleSealing(body.sequence);
+   722	      if (existsSync(this.journalFile)) {
+   723	        if (existsSync(target)) {
+   724	          appendLine(target, readFileSync(this.journalFile, 'utf8'), this.#fsync);
+   725	          rmSync(this.journalFile, { force: true });
+   726	        } else {
+   727	          renameSync(this.journalFile, target);
+   728	        }
+   729	        fsyncDirectory(dirname(this.journalFile), this.#fsync);
+   730	      }
+   731	      let folded = body;
+   732	      if (applyPending) {
+   733	        folded = { ...body };
+   734	        for (const [key, value] of this.#pending) folded[key] = Math.max(folded[key], value);
+   735	      }
+   736	      const next: StateManifestBody = {
+   737	        ...mutate(folded),
+   738	        sequence: body.sequence + 1,
+  1033	  /** الموقّعُ أو خطأٌ: مسارٌ إنتاجيٌّ بلا خاتَمٍ ليس مساراً مقبولاً. */
+  1034	  #requireSealer(): ManifestSealer {
+  1035	    if (this.#sealer === null) {
+  1036	      throw new StateManifestError('STATE_MANIFEST_SEALER_REQUIRED', this.location);
+  1037	    }
+  1038	    return this.#sealer;
+  1039	  }
+  1040	
+  1041	  /** يختمُ متناً ويكتبُه ذريّاً. التوقيعُ داخلَ التوكنِ لا في هذه العملية. */
+  1042	  async #seal(body: StateManifestBody): Promise<void> {
+  1043	    const sealer = this.#requireSealer();
+  1044	    const signature = await sealer.signAsync(body);
+  1045	    const sealed: SealedStateManifest = {
+  1046	      body,
+  1047	      seal: { alg: 'ed25519', signerId: sealer.id, signature },
+  1048	    };
+  1049	    writeAtomic(this.location, JSON.stringify(sealed, null, 2) + '\n', this.#fsync);
+  1050	  }
+  1051	
+  1052	  /**
+  1053	   * التحقّقُ الكاملُ ثمَّ الطيُّ: خاتَمٌ، رِباطٌ، سلسلةُ دفترِ الرفعِ، مرساةُ
+  1054	   * الحدِّ الأعلى. كلُّ فشلٍ رمزُه، ولا واحدَ منها يُقرأُ «حالةً افتراضيّةً».
+  1055	   */
+
+---runtime bind gate---
+   334	    provisioning: boolean;
+   335	    env: NodeJS.ProcessEnv;
+   336	    layout: StateLayout;
+   337	  },
+   338	): Promise<'B1' | 'B2' | 'B3' | 'B10'> {
+   339	  let reference: { epoch: bigint; anchor: string };
+   340	  try {
+   341	    reference = await socket.read();
+   342	  } catch (error) {
+   343	    // WL-434: رموزُ ربطِ NV المسمّاةُ تصلُ إلى القرارِ كما هي — قائمةٌ مغلقةٌ لا
+   344	    // تُحاكي غيرَها ولا تكشفُ محتوىُ استثناءٍ حسّاسًا. وما ليسَ مسمّىً يبقى B0
+   345	    // المغلقَ نفسَه: نتيجةٌ مجهولةٌ = مصدرٌ غيرُ متاحٍ، والإقلاعُ يرفضُ.
+   346	    const code = (error as { code?: unknown }).code;
+   347	    if (code === 'FRESHNESS_NV_BINDING_INVALID') {
+   348	      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_INVALID', 'ربطُ NV غيرُ صالحٍ');
+   349	    }
+   350	    if (code === 'FRESHNESS_NV_BINDING_MISMATCH') {
+   351	      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_MISMATCH', 'ربطُ NV لا يطابقُ المرجع');
+   352	    }
+   353	    // B0
+   354	    throw new ProductionRuntimeError('FRESHNESS_SOURCE_UNAVAILABLE', 'تعذّرت قراءةُ المرجع');
+   355	  }
+   356	  const body = manifest.read();
+   357	  // WL-434: في وضعِ NV (‏الربطُ المختومُ في البيانِ) التحقّقُ من المصدرِ **إلزاميّ** —
+   358	  // غيابُ كشفِ الربطِ عندَ المصدرِ ليسِ تخطيًا للفحصِ بل رفضٌ مغلقٌ: حمايةٌ لا
+   359	  // تُعطّلُ بحذفِ واجهةٍ. والاختلافُ بينَ البيانِ والمصدرِ رفضٌ مسمّى، فلا مصدرَ
+   360	  // حقيقةٍ ثانيًا إلى جانبِ البيانِ المختومِ.
+   361	  const fnvBinding = body.freshnessBinding ?? null;
+   362	  if (fnvBinding !== null) {
+   363	    if (!isFnvPinnedBindingSource(socket)) {
+   364	      throw new ProductionRuntimeError(
+   365	        'FRESHNESS_NV_BINDING_INVALID',
+   366	        'بيانٌ يحملُ ربطًا والمصدرُ لا يكشفُ ربطًا مثبّتًا',
+   367	      );
+   368	    }
+   369	    const sourceBinding = socket.pinnedBinding();
+   370	    if (sourceBinding === null || typeof sourceBinding !== 'object') {
+   371	      throw new ProductionRuntimeError(
+   372	        'FRESHNESS_NV_BINDING_INVALID',
+   373	        'المصدرُ لا يكشفُ ربطًا مثبّتًا',
+   374	      );
+   375	    }
+   376	    const diff = fnvBindingSourceDiff(fnvBinding, sourceBinding as Record<string, unknown>);
+   377	    if (diff !== null) {
+   378	      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_MISMATCH', diff);
+   379	    }
+   380	  }
+   381	  const staged = body.staged ?? null;
+   382	  if (staged !== null) {
+   383	    const fromEpoch = BigInt(staged.fromEpoch);
+   384	    if (reference.epoch === fromEpoch && reference.anchor === staged.fromAnchor) {
+   385	      // B2: المرجعُ لم يتقدّمْ فوقَ المعاملة ⇒ لم يُقَرَّ بها ⇒ استرجاعٌ دقيق.
+   386	      await CommitCoordinator.rollbackStagedAsync(
+   387	        context.root,
+   388	        manifest,
+   389	        staged.txn,
+   390	        context.fsync,
+   391	      );
+   392	      if (staged.intent === FRESHNESS_BIND_INTENT) {
+   393	        // ربطٌ أوّلُ انقطعَ قبلَ الانتقال: الترحيلُ المختومُ نفسُه هو الإعلان. الحكمُ `B2`
+   394	        // (‏استرجاعٌ دقيقٌ إلى ما قبلَ الربط) ثمَّ يُعادُ الربطُ فوقَ الحالةِ نفسِها.
+   395	        await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+   396	        return 'B2';
+   397	      }
+   398	      assertDigestMatches(manifest.read(), context.layout);
+   399	      return 'B2';
+   400	    }
+   401	    if (reference.epoch === fromEpoch) {
+   402	      throw new ProductionRuntimeError(
+   403	        'FRESHNESS_SAME_EPOCH_FORK',
+   404	        `المرجعُ في العهدِ ${String(fromEpoch)} بمرساةٍ غيرِ مرساةِ الترحيل`,
+   405	      );
+   423	        STALE_MANIFEST_EPOCH,
+   424	        `المرجعُ ${String(reference.epoch)} أحدثُ من الترحيلِ ${String(fromEpoch)}`,
+   425	      );
+   426	    }
+   427	    throw new ProductionRuntimeError(
+   428	      'FRESHNESS_EPOCH_REGRESSION',
+   429	      `الترحيلُ من ${String(fromEpoch)} والمرجعُ ${String(reference.epoch)}`,
+   430	    );
+   431	  }
+   432	  const manifestEpoch = BigInt(body.freshnessEpoch);
+   433	  if (body.freshnessAnchor === undefined || body.stateDigest === undefined) {
+   434	    // B10: لم يُربَطْ بعد. الربطُ الأوّلُ **مُعلَنٌ** لا مُستنبَط: تهيئةٌ جديدةٌ، أو إعلانٌ صريح.
+   435	    const declared = context.provisioning || context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+   436	    // والمرجعُ في النشأةِ وحدَها: مرجعٌ تقدّمَ لا يُربَطُ به جذرٌ غيرُ مربوط. وعهدُ البيانِ
+   437	    // القديمُ (‏مقبسُ `bump`) لا يُشترَطُ صفراً عندَ الإعلان: المرجعُ المربوطُ سلسلةٌ جديدة،
+   438	    // ولقطةٌ قديمةٌ غيرُ مربوطةٍ بعدَ الربطِ تُرَدُّ هنا نفسِه (‏المرجعُ لم يعُدْ في النشأة).
+   439	    if (
+   440	      (manifestEpoch === 0n || declared) &&
+   441	      reference.epoch === 0n &&
+   442	      reference.anchor === FRESHNESS_GENESIS_ANCHOR &&
+   443	      declared
+   444	    ) {
+   445	      // WL-434: ختمُ الربطِ في المتنِ جزءٌ من المراسمِ المعلنةِ نفسِها — من المصدرِ
+   446	      // وحدهِ (إن كشفَ مادّةً)، لا يُصنَعُ لبيانٍ قديمٍ ولا يُعوّضُ حقلٌ مفقودٌ. ومن
+   447	      // لا يكشفُ مادّةً يبقى على المسارِ التاريخيِّ كما هو (لا backend إنتاجيًّا اليوم).
+   448	      // **والإعلانُ للربطِ صريحٌ بالبيئةِ وحدَها** (`XUUX_FRESHNESS_BIND_DECLARED=1`) —
+   449	      // التهيئةُ وحدها تُعلنُ الجذرَ لا المراسمَ: مقبسُ المحاكاةِ يكشفُ المادّةَ دائمًا،
+   450	      // فلولا هذا الشرطُ لدخلَت إقلاعاتُ التهيئةِ التاريخيّةُ (v2) في مراسمِ v3 بلا
+   451	      // إعلانٍ ورفضتْ `NOT_DECLARED` — انحدارٌ ممنوعٌ.
+   452	      const bindDeclared = context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+   453	      const materialSource = socket as Partial<FnvBindingMaterialSource>;
+   454	      if (bindDeclared && typeof materialSource.fnvBindingMaterial === 'function') {
+   455	        await manifest.bindFnvAsync(await materialSource.fnvBindingMaterial(), context.env);
+   456	      }
+   457	      await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+   458	      return 'B10';
+   459	    }
+   460	    if (reference.epoch > manifestEpoch) {
+   461	      throw new ProductionRuntimeError(
+   462	        STALE_MANIFEST_EPOCH,
+   463	        `المرجعُ ${String(reference.epoch)} والبيانُ غيرُ مربوطٍ في ${String(manifestEpoch)}`,
+   464	      );
+   465	    }
+   466	    throw new ProductionRuntimeError(
+   467	      'FRESHNESS_BINDING_UNDECLARED',
+   468	      `${FRESHNESS_BIND_DECLARED_ENV}=1 مطلوبٌ لربطِ جذرٍ قائم`,
+   469	    );
+   470	  }
+   471	  if (reference.epoch > manifestEpoch) {
+   472	    // B5
+   473	    throw new ProductionRuntimeError(
+   474	      STALE_MANIFEST_EPOCH,
+   475	      `المرجعُ ${String(reference.epoch)} أحدثُ من البيانِ ${String(manifestEpoch)}`,
+   476	    );
+
+---coordinator locks---
+   293	  #queue: Promise<void> = Promise.resolve();
+   294	  #fence: Error | null = null;
+   295	  #closed = false;
+   296	  /** آخرُ إيصالٍ — يُقرأُ في الاختبارِ لإثباتِ الترتيب. */
+   297	  lastReceipt: CommitReceipt | null = null;
+   298	  /** مراقبُ مراحلَ — للاختبارِ وحدَه (‏تتبُّعُ الترتيب)، لا يُغيّرُ السلوك. */
+   299	  onStage: ((stage: 'S2' | 'S3' | 'S4' | 'S5' | 'ACK', intent: string) => void) | null = null;
+   300	
+   301	  /**
+   302	   * @param options - الخيارات
+   303	   */
+   304	  constructor(options: CommitCoordinatorOptions) {
+   305	    this.root = resolve(options.root);
+   306	    this.#rootPrefix = this.root.endsWith(sep) ? this.root : this.root + sep;
+   307	    this.undoFile = join(this.root, STATE_UNDO_FILE);
+   308	    this.#extra = new Set((options.extraFiles ?? []).map((file) => resolve(file)));
+   309	    this.#manifest = options.manifest;
+   310	    this.#layout = options.layout;
+   311	    this.#fsync = options.fsync ?? true;
+   312	    this.#socket = options.socket;
+   313	    this.#retries = options.advanceRetries ?? 3;
+   314	    this.#onFence = options.onFence ?? null;
+   315	  }
+   316	
+   317	  /** هل الحاجزُ في الوضعِ المربوطِ بالحالة؟ */
+   318	  get stateBound(): boolean {
+   319	    return this.#socket !== null;
+   320	  }
+   321	
+   322	  /** سببُ التسييجِ إن سُيِّج. */
+   323	  get fenced(): Error | null {
+   397	   * @returns نتيجةُ الفعل
+   398	   */
+   399	  async run<T>(intent: string, fn: () => Promise<T> | T): Promise<T> {
+   400	    return this.#enqueue(intent, fn, false);
+   401	  }
+   402	
+   403	  /**
+   404	   * `B10`: الربطُ الأوّلُ بالمرجعِ المربوط — معاملةٌ بلا فعلٍ تنقلُ المرجعَ من
+   405	   * `(0, GENESIS)` إلى `(1, A_1)` فوقَ الحالةِ القائمة. يُنادى من الإقلاعِ وحدَه.
+   406	   * @param intent - القصد
+   407	   */
+   408	  async bindAsync(intent: string): Promise<void> {
+   409	    await this.#enqueue(intent, () => undefined, true);
+   410	  }
+   411	
+   412	  async #enqueue<T>(intent: string, fn: () => Promise<T> | T, bind: boolean): Promise<T> {
+   413	    if (activeTransaction(this) !== null) return await fn();
+   414	    if (this.#closed) throw new CommitBarrierError('COMMIT_BARRIER_CLOSED', intent);
+   415	    if (this.#fence !== null) {
+   416	      throw new CommitBarrierError('COMMIT_BARRIER_FENCED', intent, this.#fence);
+   417	    }
+   418	    let release: () => void = () => undefined;
+   419	    const previous = this.#queue;
+   420	    this.#queue = new Promise<void>((resolveQueue) => {
+   421	      release = resolveQueue;
+   422	    });
+   423	    await previous;
+   424	    try {
+   425	      if (this.#fence !== null) {
+   426	        throw new CommitBarrierError('COMMIT_BARRIER_FENCED', intent, this.#fence);
+   427	      }
+   428	      return await this.#transact(intent, fn, bind);
+   429	    } finally {
+   430	      release();
+   431	    }
+   432	  }
+   433	
+   434	  /** جسمُ المعاملة: S2 ← S3 ← S4 ← S5. */
+   435	  async #transact<T>(intent: string, fn: () => Promise<T> | T, bind: boolean): Promise<T> {
+   436	    const body = this.#manifest.read();
+   437	    // الربطُ الأوّلُ (‏`B10`) يبدأُ سلسلةَ المرجعِ المربوطِ من النشأة، أيّاً كانَ عهدُ البيانِ
+   438	    // على المسارِ القديم.
+   439	    const from = bind ? { epoch: 0n, anchor: FRESHNESS_GENESIS_ANCHOR } : this.#fromOf(body);
+   440	    if (this.#socket !== null && !bind) {
+   441	      // فحصُ الكاتبِ الأجنبيّ (‏`D6`): الحالةُ على القرصِ قبلَ المعاملةِ يجبُ أن تكونَ
+   442	      // عينَ ما خُتِمَ آخرَ مرّة. وإلّا فقد كتبَ غيرُ الكاتبِ الواحد.
+   443	      const before = computeStateDigest(this.#layout);
+   444	      if (before !== body.stateDigest) {
+   445	        throw this.#fenceWith(
+   446	          new CommitBarrierError('STATE_FOREIGN_WRITE_DETECTED', `${intent}: V_disk ≠ V_m`),
+   447	        );
+   448	      }
+
+---supported modes and factory---
+   379	   * يوقّع مادةً داخل التوكن.
+   380	   * @param payload - المادة الكائنية (تُرتَّب JSON كما في `KingIdentity`)
+   381	   * @returns التوقيع بترميز base64url
+   382	   */
+   383	  async signAsync(payload: object): Promise<string> {
+   384	    const signature = await this.#handle.sign(Buffer.from(JSON.stringify(payload), 'utf8'));
+   385	    if (!Buffer.isBuffer(signature) || signature.length !== 64) {
+   386	      throw new HsmBindingError('HSM_SIGNATURE_LENGTH_INVALID', String(signature?.length ?? 0));
+   387	    }
+   388	    return signature.toString('base64url');
+   389	  }
+   390	
+   391	  /**
+   392	   * يستخرجُ مفتاحَ مصادقةِ دفترِ الرفعِ (R4-B-01). يوقّعُ حمولةً ثابتةً داخلَ
+    48	
+    49	  const root = env.XUUX_STATE_ROOT ?? resolve(process.cwd(), '.state');
+    50	
+    51	  // مقبسُ الحداثةِ — في الإنتاجِ الحقيقيِّ يلزمُ backend دائمٌ موثوقٌ (لا ذاكرةٌ).
+    52	  // هذا المُشغِّلُ لا يَختلِقُ مقبسَ ذاكرةٍ ولا يقبلُ backend غيرَ مدعومٍ.
+    53	  // إن لم يُتوفَّرْ backend مدعومٌ، يَفشلُ مغلقاً برسالةٍ واضحةٍ قبلَ إنشاءِ النظامِ.
+    54	  /** @type {Set<string>} */
+    55	  const SUPPORTED_FRESHNESS_BACKENDS = new Set([]); // لا backend مدعومٌ في هذه البيئةِ
+    56	  const freshnessBackend = env.XUUX_FRESHNESS_BACKEND ?? '';
+    57	  if (!freshnessBackend) {
+    58	    console.error('ERROR: XUUX_FRESHNESS_BACKEND not set.');
+    59	    console.error(
+    60	      '  Production requires a durable freshness backend (not InMemoryFreshnessSocket).',
+    61	    );
+    62	    console.error(
+    63	      '  No backend is supported in this environment — production boot is refused closed.',
+    64	    );
+    65	    process.exit(1);
+
+---ceremony response profiles and no replay---
+   491	                    // منطقةُ تفويضِ الردِّ: TPMS_AUTH_RESPONSE لكلِّ جلسةٍ أُرسِلَت في الطلبِ (Part 2 §10.13.3).
+   492	                    // تدقيقُ المحتوى (WL-413 الدفعة الثالثة / SOL413-03): البروفةُ لا تُرسِلُ إلا نوعيْ تفويضٍ —
+   493	                    // كلمةَ سرٍّ (RS_PW) وجلسةَ سياسةٍ — فكلُّ ردِّ تفويضٍ يجبُ أن يطابقَ أحدَ الملفيْنِ كاملًا
+   494	                    // وإلّا فشلٌ مغلقٌ مسمّى لا يُمرَّرُ:
+   495	                    //   RS_PW  : nonceTPM فارغٌ (حجمُ 0)، sessionAttributes = continueSession وحده (0x01)، hmac فارغٌ.
+   496	                    //   policy : nonceTPM من 16..64 بايتًا، hmac فارغٌ (لا sessionKey لهذهِ الجلساتِ)،
+   497	                    //            sessionAttributes بلا بتّاتٍ محفوظةٍ (أعلىُ 4 بتّاتٍ صفرٌ دائمًا).
+   498	                    for (int i = 0; i < authCount; i++)
+   499	                    {
+   500	                        byte[] nonce = r.B2B();
+   501	                        byte attrs = r.U8();
+   502	                        byte[] hmac = r.B2B();
+   503	                        bool passwordProfile = nonce.Length == 0 && hmac.Length == 0 && attrs == 0x01;
+   504	                        bool policyProfile = nonce.Length == 32 && hmac.Length == 0 && attrs == 0x00; // قياسُ swtpm: بلا continueSession
+   505	                        bool expectPassword = passwordSessions != null && i < passwordSessions.Length && passwordSessions[i];
+   506	                        if (expectPassword ? !passwordProfile : !policyProfile)
+   507	                            throw new ResponseMalformedException("RESPONSE_AUTH_CONTENT_MALFORMED: auth#" + i + " nonceLen=" + nonce.Length + " attrs=0x" + attrs.ToString("x2") + " hmacLen=" + hmac.Length + " expected=" + (expectPassword ? "password" : "policy"), 0);
+   508	                    }
+   509	                }
+  1194	        // حاجزُ ملكيةِ مجالِ المالكِ عندَ بوابةِ الإرسالِ (WL-418، ملاحظةُ المراجعةِ المستقلّةِ WL418-gpt_6_1_sol-01):
+  1195	        // بعدَ أوّلِ فحصٍ ناجحٍ (بعدَ خطِّ الأساسِ) يُعادُ الفحصُ قبلَ كلِّ أمرٍ مُغيِّرٍ، فظهورُ فهرسٍ غيرِ منسوبٍ
+  1196	        // في منتصفِ التشغيلِ يوقفُ الأمرَ التاليَ لا الجردَ النهائيَّ وحدَه. الاستثناءُ الصريحُ: FlushContext
+  1197	        // وNV_UndefineSpace — تحريرُ مواردَ أنشأها هذا التشغيلُ وثبتت ملكيّتُها؛ لا يحذفانِ فهرسًا غيرَ مثبَتِ الملكيّةِ
+  1198	        // (الحذفُ مشروطٌ بقيدٍ في _definedByRun)، ووقفُهما يُبقي بقايا. وأوامرُ الجردِ قرائيّةٌ فلا دورانَ.
+  1199	        private bool _nvGuardArmed;
+  1200	
+  1201	        private static bool NvGuardedAtSend(uint cc)
+  1202	        {
+  1203	            return StateChanging.Contains(cc) && cc != Tpm.CC_FlushContext && cc != Tpm.CC_NV_UndefineSpace;
+  1204	        }
+  1205	
+  1206	        private Resp Send(string name, byte[] cmd, int respHandles, string expectation, int authCount)
+  1207	        {
+  1208	            if (_nvGuardArmed && NvGuardedAtSend(CommandCodeOf(cmd))) AssertNvRangeOwnership(name);
+  1209	            Step s = new Step();
+  1210	            s.Stage = _cleanup ? "cleanup" : _stage;
+  1211	            s.Name = name;
+  1212	            s.CommandCode = CommandCodeOf(cmd);
+  1213	            s.CommandSha256 = Hex.Of(Sha.H(cmd));
+  1214	            s.Expectation = expectation;
+  1215	            _r.Steps.Add(s);
+  1216	            Resp p;
+  1217	            try
+  1218	            {
+  1219	                byte[] raw = _t.Transmit(cmd);
+  1220	                p = Resp.Parse(raw, respHandles, TagOf(cmd), authCount, ResponseSchema.ExpectedPasswordSessions(cmd, authCount));
+  1221	                if (p.Rc == 0)
+  1222	                {
+  1223	                    ResponseSchema.Check(CommandCodeOf(cmd), cmd, p.Params, _ctx);
+  1224	                    _ctx.Record(CommandCodeOf(cmd), cmd, p.Handles, p.Params);
+  1225	                }
+  1226	                // فحصُ تبنّي المقبضِ داخلَ الإرسالِ نفسه (إصلاحٌ R3): مقبضٌ من خطِّ الأساسِ في ردِّ إنشاءٍ يُرمى هنا — فيُغلّفُ الفشلُ للأمرِ
+  1227	                // المُغيّرِ بنتيجةٍ مجهولةٍ ويُجرَدُ كسائرِهَا (SOL413-01)، لا فشلٌ مجردًا يفقدُ التسميةَ.
+  1228	                for (int i = 0; i < p.Handles.Length; i++) AdoptHandle(p.Handles[i], NameSuffix(name));
+  1229	            }
+  1230	            catch (CeremonyUnknownOutcomeException) { throw; }
+  1231	            catch (Exception e)
+  1232	            {
+  1233	                // الردُّ لم يُستلَمْ بعدَ إرسالِ أمرٍ مُغيِّرٍ: الأثرُ مجهولٌ — يُفشِلُ مغلقًا ويُجردُ لاحقًا.
+  1234	                if (StateChanging.Contains(CommandCodeOf(cmd)))
+  1235	                {
+  1236	                    s.Outcome = "unknown";
+  1237	                    throw new CeremonyUnknownOutcomeException(name, e);
+  1238	                }
+  1239	                throw;
+  1240	            }
+  1241	            s.ResponseCode = p.Rc;
+  1242	            // رفضُ الطبقةِ (TBS) أو أيُّ رمزِ Windows ⇒ توقّفٌ مغلقٌ: لا إعادة، ولا بديل، ولا تخفيفُ سمات.
+  1243	            if ((p.Rc & 0xFFFF0000u) == 0x80280000u)
+  1244	            {
+  1245	                s.Outcome = "blocked";
+  1246	                throw new CeremonyBlockedException(name, p.Rc);
+  1247	            }
+  1248	            if (expectation == "success")
+  1249	            {
+  1250	                // ردُّ خطأٍ من الـTPM كاملُ البنيةِ (رأسٌ فقط) — نتيجةٌ معلومةٌ مسمّاةٌ (SOL413-05): الأدلّةُ
