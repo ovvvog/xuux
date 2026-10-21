@@ -1,0 +1,60 @@
+Council WL-437, round 2, gpt_6_1_sol (OPENAI).
+Reviewed worktree: /tmp/wt-992230c-gpt
+Commit: 992230cee3d5dbb0661ad4d7a3f373428d7cdb98
+
+Allowed evidence read:
+- Full docs/adr/0007-annex-e-production-backend-design.md on the reviewed commit.
+- Relevant referenced production-runtime, production-boot, state-manifest,
+  commit-barrier, fnv-binding, freshness-socket, production entry, simulator
+  ceremony/inventory and freshness probe code.
+- Only my own round-1 report in review-d3d5e1f9/gpt_6_1_sol-report.md.
+- Public TCG Part 1 rev1.59 and Part 3 rev1.64 (native fetch); subsequently
+  final TCG Published Part 3 and Part 4 rev1.59 from exact download URLs on the
+  TCG resource page (native fetch failed at the CDN; curl fallback).
+
+No other member report/artifacts read. No gh, real TPM, TBS, /dev/tpm*,
+swtpm, tpm2-tools, commit, merge, push or tracked-file modification.
+
+Retest summary:
+- New response attribute auditExclusive is output status, not an exact echo of
+  the command byte. TCG Published Part4 §6.4.5.7 lines 1572-1595 explicitly
+  makes first audit use exclusive and reports the bit. ADR uses 0x81 but
+  requires exact response attribute equality; correct 0x83 is rejected.
+- Matrix uses sealed C/R for initialization commands before P5 creates a seal.
+  Signed provisioning targets must be a separate, narrowly scoped gate source.
+- Matrix fixes GetCapability HANDLES property at 0x01000000. Subsequent page
+  requires last+1, even for a TPM returning only one value on each call.
+- Pending coordinator bind recovery refers to consumed record's
+  bindingBytesSha256, but the normative consumedAuthorizations list only has
+  authorization digest, type, challenge. Specify persistence of the target
+  digest at the same atomic seal, not an invented recovery field.
+
+Additional normative defect, R2-05:
+- ADR line166 explicitly says negative expiration means no ticket, which is
+  backwards: expiration=-60 requests ticket-generation semantics.
+- Do not claim that LoadExternal(RH_NULL) forces PolicySigned output to have an empty digest.
+  The final rev1.59 reference code calls TicketComputeAuth for negative
+  expiration; HierarchyGetProof defaults to nullProof for RH_NULL and
+  TicketComputeAuth computes a digest. Not allowing PolicyTicket is distinct
+  from incorrectly claiming no ticket is produced. Preserve -60 and discard
+  its output ticket, or choose positive expiration if no ticket is intended.
+
+Compilation:
+- First tsc invocation could not resolve @types/node because the overriding
+  config lives in /tmp. Explicit worktree typeRoots fixed resolution.
+- Final tsc exit 0; all emitted files reside beneath this directory's build/.
+- WL-434 original test file runs with a loader that redirects runtime .mjs
+  imports to the isolated build. Only cleanup-root registration is replaced
+  with a retention helper. No assertion or production implementation changed.
+- Existing suite: 17 tests, 2 suites, 17 without failure, exit 0.
+- These are baseline tests, not tests of the future backend or authorization
+  schema proposed in ADR §6.3.
+
+Evidence files:
+- build.log, wl434-tests.tap, tsconfig-review.json, loader*.mjs.
+- audit-response-witness.mjs / .json: deterministic valid HMAC specification
+  vector; not device execution and not a backend implementation test.
+- gate-transition-witness.mjs / .json: literal design-contract counterexamples;
+  not TPM execution.
+- tcg-r159-part3*.pdf / .txt and tcg-r159-part4-code.pdf / .txt preserve public
+  specification texts used for the decisive checks.

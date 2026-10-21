@@ -1,0 +1,18 @@
+captured=2026-10-21T07:38:37Z
+
+HEAD
+8c69e98dd45f9129698fd2027f00eed20885e748
+
+TRACKED STATUS
+
+SOURCE DIFF AGAINST ROUND 2
+source-diff-exit=0
+
+TARGET HASHES
+7d1b9678869a15168e18a5d7f893556a7209188159b1ed311caed22e09bbc79d  docs/adr/0007-annex-e-production-backend-design.md
+08624fdb16ca5fac876146c2912b27be241d1dcba2271090396dbdcae2d15516  src/root-of-trust/state-manifest.mts
+556032235c8e3e527a8aee28b402375e4aff761b57c9bbe8e6dfc09ae57a022a  src/root-of-trust/production-runtime.mts
+bbe82b21fe2ddebe66d746af237d602edb4790c9925935dcbb64e9bba8684038  src/root-of-trust/fnv-binding.mts
+cd5dd77514289239cadf5304dd6d17a435c25c017235e6cef68e062a2c91fb86  src/root-of-trust/commit-barrier.mts
+
+GIT STATUS ALL

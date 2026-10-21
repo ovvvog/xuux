@@ -1,0 +1,6 @@
+# replica of dead-pid O_EXCL steal (not the repo lock file)
+# command exit 0
+lock_before {"pid": 4194304}
+dead_pid_alive False
+stolen {"pid": 8532}
+exit 0

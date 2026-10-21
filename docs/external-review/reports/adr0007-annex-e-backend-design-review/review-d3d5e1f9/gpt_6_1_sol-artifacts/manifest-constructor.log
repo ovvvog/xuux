@@ -1,0 +1,114 @@
+   440	  #journalLockDepth = 0;
+   441	  readonly #fsync: boolean;
+   442	  #sealer: ManifestSealer | null;
+   443	  #verified: StateManifestBody | null = null;
+   444	  #sealChain: Promise<void> = Promise.resolve();
+   445	  /**
+   446	   * مفتاحُ مصادقةِ دفترِ الرفعِ (R4-B-01). يُستخرجُ من التوكن مرةً واحدةً عندَ
+   447	   * الإقلاعِ، فيُستعملُ في تجزئةِ سطورِ الدفترِ HMAC لا SHA-256 عاريّاً.
+   448	   */
+   449	  #journalKey: string | null = null;
+   450	  /**
+   451	   * البيئةُ التي يُقرأُ منها إعلانُ الوضعِ (‏`R4-K3-02`). تُحقَنُ في الاختبارِ
+   452	   * وتُقرأُ من العمليةِ في الإنتاجِ، فيُعرَفُ متى تكونُ مصادقةُ دفترِ الرفعِ
+   453	   * **إلزاماً** لا خياراً.
+   454	   */
+   455	  readonly #env: NodeJS.ProcessEnv;
+   456	  /** موجِّهُ الرفعِ — يُركِّبُه حاجزُ الالتزامِ بعدَ الإقلاع (‏`WL-326`). */
+   457	  #router: RaiseRouter | null = null;
+   458	  /** رفوعٌ داخلَ معاملةٍ لم تُختَمْ بعد — تُقرأُ فوقَ المتنِ ولا تُكتَبُ في الدفتر. */
+   459	  readonly #pending = new Map<MonotonicKey, number>();
+   460	
+   461	  /**
+   462	   * @param file - مسارُ ملفِّ البيان
+   463	   * @param options - مزامنةُ القرصِ، والموقّعُ الذي يختمُ ويتحقّق، والبيئة
+   464	   */
+   465	  constructor(
+   466	    file: string,
+   467	    options: { fsync?: boolean; sealer?: ManifestSealer; env?: NodeJS.ProcessEnv } = {},
+   468	  ) {
+   469	    this.location = file;
+   470	    this.journalFile = join(dirname(file), STATE_JOURNAL_FILE);
+   471	    this.journalLockFile = this.journalFile + STATE_JOURNAL_LOCK_SUFFIX;
+   472	    this.#fsync = options.fsync ?? true;
+   473	    this.#sealer = options.sealer ?? null;
+   474	    this.#env = options.env ?? process.env;
+   475	  }
+   476	
+   477	  /**
+   478	   * هل مصادقةُ دفترِ الرفعِ إلزامٌ؟ (‏`R4-K3-02`) في الإنتاجِ نعم بلا استثناءٍ:
+   479	   * تجزئةٌ عاريّةٌ (SHA-256 بلا مفتاحٍ) يقدرُ مالكُ القرصِ على حسابِها بنفسِه،
+   480	   * فسطرٌ «متّسقُ التجزئةِ» يرفعُ العدّاداتِ قسريّاً. والمصادقةُ وحدَها هي التي
+   481	   * تجعلُ الاتّساقَ برهاناً.
+   482	   * @returns هل المصادقةُ إلزامٌ في هذا الوضع
+   483	   */
+   484	  #journalAuthRequired(): boolean {
+   485	    return isProductionRuntime(this.#env);
+    28	import {
+    29	  FNV_BIND_DECLARED_ENV,
+    30	  FNV_MANIFEST_SCHEMA_VERSION,
+    31	  STATE_PROVISION_ENV,
+    32	  StateManifest,
+    33	} from '../../src/root-of-trust/index.mjs';
+    34	import { SwtpmNvStateBoundSocket } from '../../sim/freshness-nv/nv-state-bound-socket.mjs';
+    35	import { bootRoot, makeKeys } from '../helpers/wl-326-root.mjs';
+    36	import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
+    37	
+    38	const COUNTER = '0x01500030';
+    39	const RECORD = '0x01500031';
+    40	const NAME_C = `000b${'1'.repeat(64)}`;
+    41	const NAME_R = `000b${'2'.repeat(64)}`;
+    42	
+    43	/** مادّةُ ربطٍ كاملةُ الشكلِ — كما يوفّرُها مصدرُ NV، لا كما يخترعُه المنفّذ. */
+    44	function material(overrides = {}) {
+    45	  return {
+    46	    counterIndex: COUNTER,
+    47	    recordIndex: RECORD,
+    48	    counterName: NAME_C,
+    49	    recordName: NAME_R,
+    50	    base: '7',
+    51	    tpmIdentity: { kind: 'ek-name', value: `000b${'a'.repeat(64)}` },
+    52	    authPolicy: { counter: '', record: '' },
+    53	    ...overrides,
+    54	  };
+    55	}
+    56	
+    57	/** موقّعٌ بالعقدِ نفسِه (`ManifestSealer`): توقيعُ Ed25519 على `JSON.stringify` للمتنِ. */
+    58	function softwareSealer() {
+    59	  const pair = generateKeyPairSync('ed25519');
+    60	  const id = 'king:wl-434-test';
+    61	  return {
+    62	    id,
+    63	    signAsync: async (payload) =>
+    64	      edSign(null, Buffer.from(JSON.stringify(payload), 'utf8'), pair.privateKey).toString(
+    65	        'base64',
+    66	      ),
+    67	    verify: (payload, signature) =>
+    68	      edVerify(
+    69	        null,
+    70	        Buffer.from(JSON.stringify(payload), 'utf8'),
+    71	        pair.publicKey,
+    72	        Buffer.from(signature, 'base64'),
+    73	      ),
+    74	  };
+    75	}
+    76	
+    77	const PROVISION_ENV = { [STATE_PROVISION_ENV]: '1' };
+    78	const DECLARED_ENV = { [STATE_PROVISION_ENV]: '1', [FNV_BIND_DECLARED_ENV]: '1' };
+    79	
+    80	function tmp(prefix) {
+    81	  return registerTmpRoot(mkdtempSync(join(tmpdir(), prefix)));
+    82	}
+    83	
+    84	async function rejection(fn) {
+    85	  try {
+    86	    await fn();
+    87	  } catch (error) {
+    88	    return error;
+    89	  }
+    90	  return assert.fail('لم يُرفَعْ خطأ');
+    91	}
+    92	
+    93	/** يهيّئُ بيانًا (v2) موقَّعًا بموقِّعٍ تجريبيٍّ ويعيدُ البيانَ ومسارَه. */
+    94	async function provisionedManifest(dir) {
+    95	  const sealer = softwareSealer();

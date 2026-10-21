@@ -1,0 +1,12 @@
+{
+  "kind": "TCG-specification-level-vector-no-TPM",
+  "command": "TPM2_GetCapability first use of new salted HMAC audit session",
+  "commandAttributes": "0x81",
+  "correctResponseAttributes": "0x83",
+  "ADR_4_4_equal_attributes_accepts": false,
+  "rpHash": "a8b3a13ec6efa1cf8447dca502662b46061902dab46e7d2d3cedc1d09b1b88bc",
+  "responseHmac": "4f78c19885ed19e482a983e5dfdb77091753f4d131b8b471fd048a91d809d632",
+  "incorrectHmacUsingCommandAttributes": "d40ad47955615caa701032ca5c26485fc0cc4fc3474f13dc009c017e67394bd9",
+  "responseBytes": "80020000005c00000000000000090000000001000000000020cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc8300204f78c19885ed19e482a983e5dfdb77091753f4d131b8b471fd048a91d809d632",
+  "responseLength": 92
+}

@@ -31,6 +31,8 @@ import {
   sealEventData,
 } from './hsm-binding.mjs';
 import type { HsmSigner } from './hsm-binding.mjs';
+import { fnvBindingSourceDiff, isFnvPinnedBindingSource } from './fnv-binding.mjs';
+import type { FnvBindingMaterialSource } from './fnv-binding.mjs';
 import type { HsmKeySource, SealedPayload } from './hsm-binding.mjs';
 import { LOG_HEAD_SUFFIX, PersistentEventLog, inspectEventLog } from './persistent-log.mjs';
 import type { EventDataSealer } from './persistent-log.mjs';
@@ -124,6 +126,13 @@ export const ProductionRuntimeErrorCodes = [
   'FRESHNESS_SAME_EPOCH_FORK',
   'FRESHNESS_STATE_DIGEST_MISMATCH',
   'FRESHNESS_BINDING_UNDECLARED',
+  /**
+   * WL-434: رموزُ ربطِ NV المسمّاةُ تصلُ إلى قرارِ الإقلاعِ كما هي — قائمةٌ مغلقةٌ
+   * من `FnvBindingErrorCodes`، فلا يبقى «ربطٌ مكسورٌ» متعذّرَ التمييزِ من «مصدرٍ
+   * لا يجيبُ». التفصيلُ ثابتٌ نصًّا: لا `error.message` ولا محتوىُ استثناءٍ يُمرّر.
+   */
+  'FRESHNESS_NV_BINDING_INVALID',
+  'FRESHNESS_NV_BINDING_MISMATCH',
 ] as const;
 
 export type ProductionRuntimeErrorCode = (typeof ProductionRuntimeErrorCodes)[number];
@@ -330,11 +339,45 @@ export async function decideStateBoundBoot(
   let reference: { epoch: bigint; anchor: string };
   try {
     reference = await socket.read();
-  } catch {
+  } catch (error) {
+    // WL-434: رموزُ ربطِ NV المسمّاةُ تصلُ إلى القرارِ كما هي — قائمةٌ مغلقةٌ لا
+    // تُحاكي غيرَها ولا تكشفُ محتوىُ استثناءٍ حسّاسًا. وما ليسَ مسمّىً يبقى B0
+    // المغلقَ نفسَه: نتيجةٌ مجهولةٌ = مصدرٌ غيرُ متاحٍ، والإقلاعُ يرفضُ.
+    const code = (error as { code?: unknown }).code;
+    if (code === 'FRESHNESS_NV_BINDING_INVALID') {
+      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_INVALID', 'ربطُ NV غيرُ صالحٍ');
+    }
+    if (code === 'FRESHNESS_NV_BINDING_MISMATCH') {
+      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_MISMATCH', 'ربطُ NV لا يطابقُ المرجع');
+    }
     // B0
     throw new ProductionRuntimeError('FRESHNESS_SOURCE_UNAVAILABLE', 'تعذّرت قراءةُ المرجع');
   }
   const body = manifest.read();
+  // WL-434: في وضعِ NV (‏الربطُ المختومُ في البيانِ) التحقّقُ من المصدرِ **إلزاميّ** —
+  // غيابُ كشفِ الربطِ عندَ المصدرِ ليسِ تخطيًا للفحصِ بل رفضٌ مغلقٌ: حمايةٌ لا
+  // تُعطّلُ بحذفِ واجهةٍ. والاختلافُ بينَ البيانِ والمصدرِ رفضٌ مسمّى، فلا مصدرَ
+  // حقيقةٍ ثانيًا إلى جانبِ البيانِ المختومِ.
+  const fnvBinding = body.freshnessBinding ?? null;
+  if (fnvBinding !== null) {
+    if (!isFnvPinnedBindingSource(socket)) {
+      throw new ProductionRuntimeError(
+        'FRESHNESS_NV_BINDING_INVALID',
+        'بيانٌ يحملُ ربطًا والمصدرُ لا يكشفُ ربطًا مثبّتًا',
+      );
+    }
+    const sourceBinding = socket.pinnedBinding();
+    if (sourceBinding === null || typeof sourceBinding !== 'object') {
+      throw new ProductionRuntimeError(
+        'FRESHNESS_NV_BINDING_INVALID',
+        'المصدرُ لا يكشفُ ربطًا مثبّتًا',
+      );
+    }
+    const diff = fnvBindingSourceDiff(fnvBinding, sourceBinding as Record<string, unknown>);
+    if (diff !== null) {
+      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_MISMATCH', diff);
+    }
+  }
   const staged = body.staged ?? null;
   if (staged !== null) {
     const fromEpoch = BigInt(staged.fromEpoch);
@@ -399,6 +442,18 @@ export async function decideStateBoundBoot(
       reference.anchor === FRESHNESS_GENESIS_ANCHOR &&
       declared
     ) {
+      // WL-434: ختمُ الربطِ في المتنِ جزءٌ من المراسمِ المعلنةِ نفسِها — من المصدرِ
+      // وحدهِ (إن كشفَ مادّةً)، لا يُصنَعُ لبيانٍ قديمٍ ولا يُعوّضُ حقلٌ مفقودٌ. ومن
+      // لا يكشفُ مادّةً يبقى على المسارِ التاريخيِّ كما هو (لا backend إنتاجيًّا اليوم).
+      // **والإعلانُ للربطِ صريحٌ بالبيئةِ وحدَها** (`XUUX_FRESHNESS_BIND_DECLARED=1`) —
+      // التهيئةُ وحدها تُعلنُ الجذرَ لا المراسمَ: مقبسُ المحاكاةِ يكشفُ المادّةَ دائمًا،
+      // فلولا هذا الشرطُ لدخلَت إقلاعاتُ التهيئةِ التاريخيّةُ (v2) في مراسمِ v3 بلا
+      // إعلانٍ ورفضتْ `NOT_DECLARED` — انحدارٌ ممنوعٌ.
+      const bindDeclared = context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+      const materialSource = socket as Partial<FnvBindingMaterialSource>;
+      if (bindDeclared && typeof materialSource.fnvBindingMaterial === 'function') {
+        await manifest.bindFnvAsync(await materialSource.fnvBindingMaterial(), context.env);
+      }
       await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
       return 'B10';
     }

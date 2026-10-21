@@ -8,14 +8,18 @@
 //   2) pwsh: المُشغِّلُ يرفضُ مضيفاً غيرَ loopback (ValidateSet)، والنقلُ يرفضُه بـSIMULATOR_TRANSPORT_LOOPBACK_ONLY.
 //   3) pwsh: نقلٌ يدّعي شريحةً غيرَ المحاكي (IFX) ⇒ FAILED_CLOSED بعدَ استعلامِ الهويّةِ وحدَه.
 //   4) pwsh: كلُّ أمرٍ تبنيه البروفةُ يُعرَضُ على حارسِ أداةِ المضيف (TpmGuard) ⇒ يُرفَضُ كلُّه ولا يبلغُ النقل.
-//   5) static: حارسُ المحاكي القائمُ (sim/tpm/tcti_guard.mjs) وقائمةُ الحداثةِ الإنتاجيةِ لم تُمَسّا.
+//   5) static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-429): الملفاتُ المسمّاةُ وإغلاقُ تبعياتِ scripts/
+//      production-entry.mjs وsrc/production وsrc/root-of-trust ومدخلةُ R3-A-01 وحدها في العقدِ لم تُمَسّ.
+//      لا تجميدَ لكلِّ src/ ولا للعقدِ بأكملِهِ (قرارُ المالكِ: تضييقُ النطاقِ لا تعطيلُ الحارسِ).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync, execFileSync } from 'node:child_process';
+import ts from 'typescript';
+import { parse as parseYaml } from 'yaml';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const dir = join(root, 'sim/tpm-ceremony');
@@ -122,11 +126,172 @@ pwshTest('pwsh: حارسُ أداةِ المضيفِ يرفضُ أوامرَ ا�
   for (const cc of ['0x0000012a', '0x00000134', '0x00000122', '0x00000160', '0x00000131']) assert.ok(ccs.has(cc), cc);
 });
 
-test('static: حارسُ المحاكي القائمُ وبوابةُ الحداثةِ الإنتاجيةُ وعقدُ المراجعةِ لم تُمَسّ في هذه الدفعة', () => {
-  // المقارنةُ بكوميتِ الأساسِ 8b9fca7a (رأسُ PR #376) — إن توفّرَ في تاريخِ النسخة.
-  const base = '8b9fca7ac2541e28e1c840b6e171b00cc8580adf';
-  const has = spawnSync('git', ['cat-file', '-e', base + '^{commit}'], { cwd: root }).status === 0;
-  if (!has) return; // نسخةٌ سطحيةٌ بلا الأساس: الفحصُ النصّيُّ أدناه يبقى.
-  const changed = execFileSync('git', ['diff', '--name-only', base, '--', 'sim/tpm/tcti_guard.mjs', 'config/external-review.yaml', 'version.json', 'src/', 'scripts/production-entry.mjs', 'scripts/tpm-sim-ci.sh'], { cwd: root, encoding: 'utf8' }).trim();
-  assert.equal(changed, '', 'protected files changed: ' + changed);
+test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-412 مضيّقًا بقرارِ WL-429): الملفاتُ المسمّاةُ وإغلاقُ تبعياتِ الإقلاعِ وsrc/production وsrc/root-of-trust ومدخلةُ R3-A-01 وحدها لم تُمَسّ في هذه الدفعة', () => {
+  // قرارُ المالكِ في WL-429: الخيارُ 1 — تضييقُ نطاقِ الحارسِ لا تعطيلُه ولا إبقاءُ تجميدِ src/ بأكملِه.
+  // النطاقُ المحميُّ: (أ) ملفاتٌ مسمّاةٌ، (ب) الإغلاقُ الانتقاليُّ للتبعياتِ المحليّةِ لمسارِ scripts/
+  // production-entry.mjs (اتحادُ إغلاقِ الأساسِ والمرشَّحِ)، (ج) المجلّدانِ src/production وsrc/root-of-trust
+  // بأكملِهما، (د) مدخلةُ R3-A-01 وحدها في config/external-review.yaml — فتُقبَلُ مثلاً تحديثاتُ
+  // CO55-M11.05-R3-01 ولا يُقبَلُ مسُّ R3-A-01، ويبقى تغييرُ src/notifications/channels/email.mjs خارجَ
+  // النطاقِ ما دامَ لا يصلُ إلى مسارِ الإقلاعِ المحميِّ. حمايةُ SUPPORTED_FRESHNESS_BACKENDS ومسارِ
+  // الإقلاعِ وسياساتِ الإنتاجِ قائمةٌ عبرَ الملفِ المسمّى والإغلاقِ والمجلّدين.
+  const GUARD_FREEZE_BASE = '8b9fca7ac2541e28e1c840b6e171b00cc8580adf'; // نقطةُ ولادةِ الحارسِ (رأسُ PR #376).
+  const base = process.env.GUARD_BASE || GUARD_FREEZE_BASE;
+  // غيابُ أساسِ المقارنةِ يُفشِلُ الحارسَ بوضوحٍ — لا return يتجاوزُ المقارنةَ إذا غابَ الالتزامُ.
+  const baseExists = spawnSync('git', ['cat-file', '-e', base + '^{commit}'], { cwd: root }).status === 0;
+  assert.ok(baseExists, `GUARD_BASE غير متاحٍ في تاريخِ هذه النسخةِ (${base}) — الحارسُ يفشلُ مغلقًا ولا يتخطى الصمتَ`);
+
+  const git = (args, opts = {}) => {
+    try {
+      return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 256 << 20, ...opts });
+    } catch (e) {
+      assert.fail(`تعذّر تنفيذُ git ${args.join(' ')} داخلَ الحارسِ — فشلٌ مغلقٌ: ${e.message}`);
+    }
+  };
+
+  // قارئٌ للشجرةِ العاملةِ (متعقَّبةً وغيرَ متعقَّبةٍ) وقارئٌ لشجرةِ الأساسِ — كلاهما يفشلُ مغلقًا عندَ
+  // خطأِ القراءةِ، فلا يُتجاهَلُ استثناءٌ ويُتابَع.
+  const worktreeReader = {
+    exists: (f) => { try { return statSync(join(root, f)).isFile(); } catch { return false; } },
+    read: (f) => { try { return readFileSync(join(root, f), 'utf8').replace(/^\uFEFF/, ''); } catch (e) { throw new Error(`تعذّرت قراءةُ ${f} من الشجرةِ العاملةِ — الحارسُ مغلقٌ: ${e.message}`, { cause: e }); } },
+    tracked: null, // يُضبطُ بعدَه
+  };
+  const trackedSet = new Set(git(['ls-files']).split('\n').filter(Boolean));
+  worktreeReader.tracked = (f) => trackedSet.has(f);
+  const baseReader = {
+    exists: (f) => spawnSync('git', ['cat-file', '-e', `${base}:${f}`], { cwd: root }).status === 0,
+    read: (f) => { try { return git(['show', `${base}:${f}`]); } catch (e) { throw new Error(`تعذّرت قراءةُ ${f} من شجرةِ الأساسِ ${base.slice(0, 8)} — الحارسُ مغلقٌ: ${e.message}`, { cause: e }); } },
+    tracked: (f) => spawnSync('git', ['cat-file', '-e', `${base}:${f}`], { cwd: root }).status === 0,
+  };
+
+  // استخراجُ الاستيراداتِ المحليّةِ من AST بمحلِّلِ TypeScript (المتاحُ في اعتمادياتِ البناءِ) —
+  // فيُلتقطُ الاقتباسُ المفردُ والمزدوجُ والاستيرادُ الثابتُ متعددُ الأسطرِ وإعادةُ التصديرِ
+  // والاستيرادُ الديناميكيُّ ذو المسارِ الحرفيِّ، ولا يُحسَبُ ما في التعليقاتِ والسلاسلِ شيفرةً.
+  const localImportSpecifiers = (source) => {
+    const sf = ts.createSourceFile('entry.mjs', source, ts.ScriptTarget.Latest, true);
+    const specs = [];
+    const visit = (node) => {
+      const isImportExport = ts.isImportDeclaration(node) || ts.isExportDeclaration(node);
+      if (isImportExport && node.moduleSpecifier && ts.isStringLiteralLike(node.moduleSpecifier)) specs.push(node.moduleSpecifier.text);
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments.length === 1 && ts.isStringLiteralLike(node.arguments[0])) specs.push(node.arguments[0].text);
+      node.forEachChild(visit);
+    };
+    visit(sf);
+    return specs.filter((x) => x.startsWith('./') || x.startsWith('../'));
+  };
+
+  // الامتداداتُ وتحويلاتُ المصدرِ المدعومةُ معلَنةً — لا تجربةُ امتداداتٍ بالتبادلِ. التحويلُ الوحيدُ
+  // للمصدرِ: ناتجُ البناءِ .mjs يُحلُّ إلى مصدرِهِ المتعقَّبِ .mts (وكذلك .js إلى .ts) فلا يحميَ الحارسُ
+  // ناتجَ بناءٍ متجاهَلًا بدلَ مصدرِهِ.
+  const EXTENSIONS = ['.mjs', '.js', '.mts', '.ts', '.cjs', '.json'];
+  const SOURCE_SWAP = { '.mjs': '.mts', '.js': '.ts' };
+  const resolveLocalImport = (fromFile, spec, reader) => {
+    const target = posix.normalize(posix.join(posix.dirname(fromFile), spec));
+    const candidates = [];
+    if (/\.[A-Za-z]+$/.test(spec)) {
+      candidates.push(target);
+      const dot = target.lastIndexOf('.');
+      const ext = target.slice(dot);
+      if (SOURCE_SWAP[ext]) candidates.push(target.slice(0, dot) + SOURCE_SWAP[ext]);
+    } else {
+      for (const e of EXTENSIONS) candidates.push(target + e);
+    }
+    const existing = candidates.filter(reader.exists);
+    const tracked = existing.filter((c) => reader.tracked(c));
+    if (tracked.length > 0) return tracked[0]; // المصدرُ المتعقَّبُ مقدَّمٌ على ناتجِ البناءِ.
+    if (existing.length > 0) return existing[0];
+    return null; // استيرادٌ محليٌّ غيرُ محسومٍ — يُفشِلُ الحارسَ مغلقًا عندَ المستدعي.
+  };
+
+  const ENTRY_ROOT = 'scripts/production-entry.mjs';
+  const bootClosure = (reader) => {
+    const closure = new Set();
+    const queue = [ENTRY_ROOT];
+    while (queue.length) {
+      const f = queue.pop();
+      if (closure.has(f)) continue;
+      closure.add(f);
+      let source;
+      try {
+        source = reader.read(f);
+      } catch (e) {
+        assert.fail(`إغلاقُ تبعياتِ الإقلاعِ: ${e.message}`);
+      }
+      for (const spec of localImportSpecifiers(source)) {
+        const resolved = resolveLocalImport(f, spec, reader);
+        if (resolved === null) assert.fail(`إغلاقُ تبعياتِ الإقلاعِ: استيرادٌ محليٌّ غيرُ محسومٍ في ${f} («${spec}») — الحارسُ يفشلُ مغلقًا ولا يتجاهلُه`);
+        if (!closure.has(resolved)) queue.push(resolved);
+      }
+    }
+    return closure;
+  };
+  // اتحادُ إغلاقِ الأساسِ والمرشَّحِ: لا تسقُطَ حمايةُ تبعيةٍ بمجرّدِ تغييرِ مسارِ الوصولِ إليها.
+  const closure = new Set([...bootClosure(worktreeReader), ...bootClosure(baseReader)]);
+
+  const NAMED_PROTECTED = ['sim/tpm/tcti_guard.mjs', 'version.json', ENTRY_ROOT, 'scripts/tpm-sim-ci.sh'];
+  // قرارُ المالكِ (‏2026-10-20، دورةُ تفويضِ 20 أكتوبر، خيارُ «أذن بتعديلٍ محدودٍ
+  // للحارس»): استثناءٌ **مسمّى ومؤرَّخ ومحدود** لملفاتِ WL-434 الأربعةِ وحدَها — تنفيذُ
+  // «الربطُ المختومُ داخلَ متنِ البيانِ» (الخيارُ أ من الملحقِ ج §5.1) يستلزمُ حتمًا
+  // تعديلَها، فالتجميدُ المطلقُ كانَ سيحجبَ تنفيذَ التكليفِ نفسِه. **هذا الاستثناءُ لا
+  // يُضعِفُ شيئًا آخرَ:** بقيةُ `src/root-of-trust` و`src/production` والملفاتُ المسماةُ
+  // وإغلاقُ تبعياتِ الإقلاعِ ومدخلةُ `R3-A-01` من العقدِ محميةٌ كما كانتْ، وأيُّ ملفٍّ
+  // خامسٍ في هذهِ المجلداتِ يُرفَضُ كما كانَ. وتغييرُ هذهِ الملفاتِ الأربعةِ يبقى خاضعًا
+  // لكلِّ ما عداه: مدخلةُ سجلِ عملٍ تُسمّيه (المادة 6 — يحرسُها project-state)، ومراجعةُ
+  // PR، وCI. وسطرُ الاستثناءِ هذا جزءٌ من الأثرِ المعلنِ في مدخلةِ WL-434 وPR الخاصِّ بها.
+  // **والاستثناءُ مربوطٌ بالمحتوى المعتمدِ لا بالمسارِ وحدَه:** بصمةُ كلِّ ملفٍّ من
+  // الأربعةِ كما هو في دفعةِ WL-434 المعتمدةِ (تسلسلُ الختومِ واختباراتُ التكاملِ
+  // والبصماتُ في مدخلةِ السجلِّ). أيُّ تعديلٍ لاحقٍ على أحدِها — ولو سطرًا — يُخرجُ
+  // بصمتَه عن المعتمدةِ فيعودُ الملفُ محميًّا كما كانَ كلُّ ما عداه. فالإذنُ إذنٌ
+  // **بفرقٍ معروضٍ بعينِهِ** لا إذنٌ مفتوحًا لملفاتِها إلى الأبد.
+  const WL434_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/root-of-trust/fnv-binding.mts': '87aac0e89b3b82d29df4d92bb17d1e6f06b10c5b',
+    'src/root-of-trust/state-manifest.mts': 'babf1f59c1c51fff4bb20d93878020953ae21046',
+    'src/root-of-trust/production-runtime.mts': '3f0f2772ff45fd2d42cd23f6322792ad2b2ce289',
+    'src/root-of-trust/index.mts': '226210d855749cdf816515f5ce2b5428dadab68b',
+  }));
+  const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
+  const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
+
+  // المقارنةُ بالشجرةِ العاملةِ (تُدرِكُ غيرَ الملتزَمِ أيضًا) مع جردِ غيرِ المتعقَّبِ.
+  const changed = git(['diff', '--name-only', base]).split('\n').filter(Boolean);
+  const untracked = git(['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean);
+  const touched = [...new Set([...changed, ...untracked])];
+
+  // مدخلةُ R3-A-01 وحدها من العقدِ: تُحدَّدُ بمحلِّلِ YAML مع اشتراطِ وجودِها مرةً واحدةً فقط، ثم
+  // يُقارَنُ مقطعُها الخامُّ دونَ إعادةِ تسلسلِ — فتبقى تحديثاتُ المدخلاتِ الأخرى (مثلَ
+  // CO55-M11.05-R3-01) مقبولةً ورفضُ أيِّ تعديلٍ أو حذفٍ أو تكرارٍ لـR3-A-01.
+  const CONTRACT_PATH = 'config/external-review.yaml';
+  const CONTRACT_ENTRY = 'R3-A-01';
+  const extractEntrySegment = (text, where) => {
+    let doc;
+    try {
+      doc = parseYaml(text);
+    } catch (e) {
+      assert.fail(`عقدُ المراجعةِ لا يُعرَبُ في ${where} — الحارسُ مغلقٌ: ${e.message}`);
+    }
+    const entries = Array.isArray(doc?.findings) ? doc.findings : null;
+    assert.ok(entries, `بنيةُ العقدِ غيرُ متوقَّعةٍ في ${where} (لا قائمةَ findings) — الحارسُ مغلقٌ`);
+    const matches = entries.filter((r) => r && r.id === CONTRACT_ENTRY);
+    assert.equal(matches.length, 1, `مدخلةُ ${CONTRACT_ENTRY} يجبُ أن توجدَ مرةً واحدةً فقط في ${where} (وُجدتْ ${matches.length})`);
+    const lines = text.split('\n');
+    const start = lines.findIndex((l) => /^ {2}- id: R3-A-01\s*$/.test(l));
+    assert.ok(start !== -1, `لم يُعثَرْ على مقطعِ ${CONTRACT_ENTRY} الخامِّ في ${where}`);
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i++) {
+      if (/^ {2}- /.test(lines[i]) || /^[^\s]/.test(lines[i])) { end = i; break; }
+    }
+    return lines.slice(start, end).join('\n').trim();
+  };
+  if (touched.includes(CONTRACT_PATH)) {
+    const before = extractEntrySegment(baseReader.read(CONTRACT_PATH), `الأساسِ ${base.slice(0, 8)}`);
+    const after = extractEntrySegment(worktreeReader.read(CONTRACT_PATH), 'الشجرةِ العاملةِ');
+    assert.equal(after, before, `مدخلةُ ${CONTRACT_ENTRY} في ${CONTRACT_PATH} عُدِّلَتْ في هذه الدفعةِ — هذا خارجَ نطاقِ الدفعةِ (يجوزُ تحديثُ غيرِها من المدخلاتِ)`);
+  }
+
+  const violations = touched.filter(
+    (f) =>
+      isProtected(f) &&
+      !(WL434_OWNER_AUTHORIZED.has(f) && currentBlob(f) === WL434_OWNER_AUTHORIZED.get(f)),
+  );
+  assert.equal(violations.length, 0, 'ملفاتٌ محميةٌ عُدِّلَتْ في هذه الدفعةِ (النطاقُ المضيَّقُ بقرارِ WL-429): ' + violations.join(', '));
 });

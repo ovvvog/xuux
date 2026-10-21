@@ -1,0 +1,253 @@
+// @ts-nocheck
+// tests/helpers/wl-326-root.mjs
+//
+// `WL-326` (‏`LIVE-28` الخيار ب، `D3`/`D6`): أدواتُ قياسٍ على **جذرِ الثقةِ الإنتاجيِّ الحقيقيّ**
+// (‏`createProductionRootOfTrust` بحاجزِه وبيانِه وسجلِّه ودفترِه) عبرَ عملياتٍ متعدّدة:
+//
+//   - مفاتيحُ ثابتةٌ تُسلسَلُ إلى JSON فتُقلِعُ بها عمليّةٌ فرعيّةٌ الجذرَ نفسَه بعدَ SIGKILL.
+//   - توكنٌ برمجيٌّ يحقّقُ عقدَ `HsmKeySource` (‏المفاتيحُ لا تخرجُ منه إلا عامّة) — بديلُ
+//     التوكنِ العتاديِّ في الاختبار، وهو هو في `production-runtime.test.mjs`.
+//   - مرجعُ حداثةٍ **مربوطٌ بالحالة** على ملفٍّ خارجَ جذرِ الحالة (‏`testFixture`): يدومُ عبرَ
+//     العمليات، ويُطبِّقُ `judgeStateAdvance` نفسَه الذي يحكمُ به المرجعُ في الذاكرة، ويحقنُ
+//     أعطالَ النقلِ والسقوطَ قبلَ التطبيقِ وبعدَه. هو أداةُ اختبارٍ لا مرجعٌ إنتاجيّ: المدخلُ
+//     الإنتاجيُّ يرفضُ كلَّ مقبسٍ يحملُ `testFixture` — ولا يُقدَّمُ دليلاً على عتادٍ (‏`D2`).
+
+import {
+  createCipheriv,
+  createDecipheriv,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomBytes,
+  sign as softwareSign,
+} from 'node:crypto';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeSync,
+} from 'node:fs';
+
+import {
+  FRESHNESS_GENESIS_ANCHOR,
+  SEAL_IV_BYTES,
+  createProductionRootOfTrust,
+  fingerprint,
+  judgeStateAdvance,
+} from '../../src/root-of-trust/index.mjs';
+import { kingIdOfPublicKey, registerTestKing, signRoyalCommand } from './royal-halt-command.mjs';
+
+/**
+ * مفاتيحُ الجذرِ مُسلسَلةً.
+ * @returns {object} المفاتيح
+ */
+export function makeKeys() {
+  const pem = (pair) => ({
+    pub: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    priv: pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
+  });
+  return {
+    anchor: pem(generateKeyPairSync('ed25519')),
+    ledger: pem(generateKeyPairSync('ed25519')),
+    royal: pem(generateKeyPairSync('ed25519')),
+    aead: randomBytes(32).toString('hex'),
+  };
+}
+
+/**
+ * زوجٌ من مفاتيحَ مُسلسَلة.
+ * @param {{pub: string, priv: string}} serialized - المفتاحان
+ * @returns {{publicKey: import('node:crypto').KeyObject, privateKey: import('node:crypto').KeyObject}} الزوج
+ */
+export function pairOf(serialized) {
+  return {
+    publicKey: createPublicKey(serialized.pub),
+    privateKey: createPrivateKey(serialized.priv),
+  };
+}
+
+/**
+ * توكنٌ برمجيٌّ بعقدِ `HsmKeySource`.
+ * @param {ReturnType<typeof makeKeys>} keys - المفاتيح
+ * @returns {object} المصدر
+ */
+export function tokenFromKeys(keys) {
+  const aes = Buffer.from(keys.aead, 'hex');
+  const ed = new Map([
+    ['06', registerTestKing(pairOf(keys.anchor))],
+    ['07', registerTestKing(pairOf(keys.ledger))],
+  ]);
+  const aad = Buffer.from('xuux-event');
+  return {
+    describe: () => ({ kind: 'pkcs11-hsm', canExport: false, tokenSerial: 'DEADBEEFCAFE0001' }),
+    getAeadKey: async (keyId) => {
+      if (keyId !== '05') throw new Error('KEY_NOT_FOUND');
+      return {
+        keyId,
+        encrypt: async (plaintext) => {
+          const iv = randomBytes(SEAL_IV_BYTES);
+          const cipher = createCipheriv('aes-256-gcm', aes, iv);
+          cipher.setAAD(aad);
+          const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+          return { ciphertext, iv, tag: cipher.getAuthTag() };
+        },
+        decrypt: async (ciphertext, iv, tag) => {
+          const decipher = createDecipheriv('aes-256-gcm', aes, iv);
+          decipher.setAAD(aad);
+          decipher.setAuthTag(tag);
+          return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+        },
+      };
+    },
+    getSigningKey: async (keyId) => {
+      const pair = ed.get(keyId);
+      if (!pair) throw new Error('KEY_NOT_FOUND');
+      return {
+        keyId,
+        sign: async (message) => softwareSign(null, message, pair.privateKey),
+        exportPublicPem: async () => pair.publicKey.export({ type: 'spki', format: 'pem' }),
+      };
+    },
+  };
+}
+
+/**
+ * بيئةُ إنتاجٍ كاملةُ الشرطِ لهذه المفاتيح.
+ * @param {ReturnType<typeof makeKeys>} keys - المفاتيح
+ * @param {object} [extra] - زيادات
+ * @returns {object} البيئة
+ */
+export function envFor(keys, extra = {}) {
+  const royal = pairOf(keys.royal);
+  registerTestKing(royal);
+/**
+ * تسجيلُ الجذورِ المؤقّتةِ لمحوِها عندَ خروجِ العمليّةِ — سياسةُ `LIVE-9`.
+ *
+ * **علّةُ وجودِ هذه الوحدةِ عَطَبٌ قِيسَ لا خطرٌ مُتخيَّلٌ:** حزمةُ الاختباراتِ
+ * كانت تُنشئُ جذوراً مؤقّتةً في `/tmp` **ولا تَحذفُها**. وذلكَ **لا يظهرُ** على
+ * عدّاءٍ عابرٍ تُهدَمُ آلتُه بعدَ كلِّ تشغيلةٍ، **ويَقتُلُ** عدّاءً مقيماً يَبقى
+ * فيه `/tmp` بينَ التشغيلاتِ: ثلاثةُ ملفّاتٍ تَنسخُ شجرةَ المستودعِ فأنفَدَتِ
+ * المساحةَ، فسقطَتْ تشغيلةٌ بـ`125` فشلَ `copyfile` برمزِ `EDQUOT` **بلا علاقةٍ
+ * بالشفرةِ** (‏`LIVE-9` / `WL-217`، التشغيلةُ `35334036249`).
+ *
+ * **ولا يُغلَقُ مثلُ هذا بإصلاحِ الملفّاتِ الثلاثةِ:** الفئةُ تعودُ بأسماءٍ جديدةٍ
+ * وملفّاتٍ جديدةٍ. وقد قِيسَ أنّها **قائمةٌ فعلاً** في `29` ملفّاً آخرَ بـ`43`
+ * موضعَ إنشاءٍ، تَركَت `39` جذراً و`~51M` في تشغيلةٍ واحدةٍ على `main`
+ * (‏`WL-218`) — و`/tmp` هناك قرصٌ ذاكريٌّ سعتُه `788M` فقط، أي **~`14` تشغيلةً
+ * حتّى الامتلاءِ**. فما لا يُقاسُ يعودُ، ولذلك صارَ لهذه الوحدةِ **حاجزٌ**
+ * (`npm run guard:test-tmp-hygiene`) يَرفضُ ملفَّ اختبارٍ يُنشئُ جذراً ولا
+ * يُدبِّرُ محوَهُ — **بلا قائمةِ استثناءٍ**.
+ *
+ * **ولا تُغيِّرُ هذه الوحدةُ منطقَ اختبارٍ ولا توكيداً:** `registerTmpRoot`
+ * تُعيدُ **المسارَ نفسَه** الذي أعطيتَها، فموضعُ النداءِ يُغلَّفُ ولا يُستبدَلُ،
+ * ولا يُمَسُّ جسدُ اختبارٍ. والمحوُ يقعُ عندَ **خروجِ العمليّةِ** لا بينَ
+ * الاختباراتِ، و`node --test` يُشغِّلُ كلَّ ملفٍّ في عمليّةٍ مستقلّةٍ، فلا يَمحو
+ * جذرَ ملفٍّ آخرَ ما زالَ يعملُ.
+ *
+ * **حدودٌ مُعلَنةٌ لا مستورةٌ:**
+ *   1. لا تَبلغُ ما تُنشئُه **عمليّةٌ فرعيّةٌ** يُشعِلُها اختبارٌ — تلكَ تَمحو
+ *      لنفسِها أو تَبقى، ويَكشِفُها قياسُ `/tmp` بعدَ الاختباراتِ في CI.
+ *   2. المحوُ عندَ الخروجِ **لا يقعُ** إن قُتِلَتِ العمليّةُ بـ`SIGKILL` أو
+ *      انهارَتْ — فبقاءُ جذرٍ بعدَ انهيارٍ سلوكٌ متوقَّعٌ لا عَطَبٌ جديدٌ.
+ *
+ * @module tests/helpers/tmp-roots
+ */
+
+import { rmSync } from 'node:fs';
+import process from 'node:process';
+
+/** @type {string[]} الجذورُ المُسجَّلةُ في هذه العمليّةِ. */
+const ROOTS = [];
+
+/** @type {boolean} هل رُكِّبَ مُستمِعُ الخروجِ؟ — يُركَّبُ مرّةً واحدةً. */
+let installed = false;
+
+/**
+ * يَمحو كلَّ جذرٍ مُسجَّلٍ. **لا يَرمي**: خروجُ العمليّةِ لا يُفسَدُ بفشلِ محوٍ،
+ * وما بقيَ يَكشِفُه قياسُ `/tmp` في CI لا تجاهُلٌ صامتٌ.
+ *
+ * @returns {void}
+ */
+function purgeRoots() {
+  while (ROOTS.length > 0) {
+    const dir = ROOTS.pop();
+    try {
+      rmSync(String(dir), { recursive: true, force: true });
+    } catch {
+      // مقصودٌ: الخروجُ لا يُفسَدُ بفشلِ محوٍ.
+    }
+  }
+}
+
+/**
+ * يُسجِّلُ جذراً مؤقّتاً لمحوِه عندَ خروجِ العمليّةِ، **ويُعيدُهُ كما هو**.
+ *
+ * تُستعمَلُ تغليفاً لموضعِ الإنشاءِ لا استبدالاً له:
+ *
+ * ```js
+ * const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'x-')));
+ * ```
+ *
+ * @param {string} dir مسارُ الجذرِ المُنشَأِ.
+ * @returns {string} المسارُ نفسُه بلا تغييرٍ.
+ */
+export function registerTmpRoot(dir) {
+  const value = String(dir);
+  if (!installed) {
+    process.on('exit', purgeRoots);
+    installed = true;
+  }
+  ROOTS.push(value);
+  return value;
+}
+
+/**
+ * الجذورُ المُسجَّلةُ الآنَ — **موجودةٌ ليُقاسَ السلوكُ لا ليُغيَّرَ**: بها يُثبَتُ
+ * في اختبارِ الحاجزِ أنّ التسجيلَ يقعُ فعلاً وأنّ المحوَ يُصيبُ ما سُجِّلَ.
+ *
+ * @returns {string[]} نسخةٌ من قائمةِ الجذورِ.
+ */
+export function registeredTmpRoots() {
+  return [...ROOTS];
+}
+tests/helpers/wl-326-root.mjs:15:import {
+tests/helpers/wl-326-root.mjs:24:import {
+tests/helpers/wl-326-root.mjs:34:import {
+tests/helpers/wl-326-root.mjs:41:import { kingIdOfPublicKey, registerTestKing, signRoyalCommand } from './royal-halt-command.mjs';
+tests/helpers/wl-326-root.mjs:47:export function makeKeys() {
+tests/helpers/wl-326-root.mjs:65:export function pairOf(serialized) {
+tests/helpers/wl-326-root.mjs:77:export function tokenFromKeys(keys) {
+tests/helpers/wl-326-root.mjs:123:export function envFor(keys, extra = {}) {
+tests/helpers/wl-326-root.mjs:151:export function royalCommand(keys, operation, reason, targetEpoch) {
+tests/helpers/wl-326-root.mjs:163:export class FileStateBoundSocket {
+tests/helpers/wl-326-root.mjs:225:export async function bootRoot(root, keys, socket, options = {}) {
+src/root-of-trust/index.mts:4:export * from './identity.mjs';
+src/root-of-trust/index.mts:5:export * from './event-log.mjs';
+src/root-of-trust/index.mts:6:export * from './crown.mjs';
+src/root-of-trust/index.mts:7:export * from './policy.mjs';
+src/root-of-trust/index.mts:8:export * from './persistent-log.mjs';
+src/root-of-trust/index.mts:9:export * from './anchor.mjs';
+src/root-of-trust/index.mts:13:export * from './production-boot.mjs';
+src/root-of-trust/index.mts:14:export * from './state-manifest.mjs';
+src/root-of-trust/index.mts:16:export * from './fnv-binding.mjs';
+src/root-of-trust/index.mts:18:export * from './key-store.mjs';
+src/root-of-trust/index.mts:19:export * from './key-provider.mjs';
+src/root-of-trust/index.mts:20:export * from './key-provider-local.mjs';
+src/root-of-trust/index.mts:21:export * from './key-provider-remote.mjs';
+src/root-of-trust/index.mts:22:export * from './king-key.mjs';
+src/root-of-trust/index.mts:23:export * from './king-key-rotation.mjs';
+src/root-of-trust/index.mts:24:export * from './command-ledger.mjs';
+src/root-of-trust/index.mts:25:export * from './hsm-binding.mjs';
+src/root-of-trust/index.mts:26:export * from './halt-switch.mjs';
+src/root-of-trust/index.mts:27:export * from './freshness-socket.mjs';
+src/root-of-trust/index.mts:28:export * from './commit-barrier.mjs';
+src/root-of-trust/index.mts:29:export * from './root-intents.mjs';
+src/root-of-trust/index.mts:30:export * from './clock.mjs';
+src/root-of-trust/index.mts:33:export * from './production-runtime.mjs';
+tests/helpers/tmp-roots.mjs:34:import { rmSync } from 'node:fs';
+tests/helpers/tmp-roots.mjs:35:import process from 'node:process';
+tests/helpers/tmp-roots.mjs:72:export function registerTmpRoot(dir) {
+tests/helpers/tmp-roots.mjs:88:export function registeredTmpRoots() {
