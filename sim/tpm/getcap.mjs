@@ -74,12 +74,28 @@ export function getCapability(cap, opts = {}) {
 
 // ── محلّلات مخرجات القدرات (فشل مغلق: ما لا يُحلَّل يُرفض لا يُخمَّن) ──
 
-// أوّلُ إصدارِ إراتا لـr1.38 تحقّقنا أنّه يحوي البندَ 2.22 (إضافةُ NOTE «الصفرُ = لا حدَّ أقصى ثابتاً»):
-// Errata v1.8، بتاريخ 2019-07-12 (اليوم 193). وإراتا v1.0 (2017-01-16) لا تحويه. الإصداراتُ بينهما
-// (v1.1/v1.3/v1.4) لم يُتحقَّق منها، فتاريخٌ أقدمُ من v1.8 لا يُثبِتُ الدلالةَ (تحفّظٌ لا نفي).
-// والشريحةُ تعلنُ تاريخَ آخرِ إراتا تطبّقُها في TPM_PT_YEAR/TPM_PT_DAY_OF_YEAR (Errata 1.11/1.15 §2.24،
-// وTCG Guide 1.38→1.59: «The errata version that is implemented by a TPM is reported in … TPM_PT_DAY_OF_YEAR and TPM_PT_YEAR»).
+// ── مصدرُ التاريخِ ومجالُه (WL-441) ──
+// Part 2 r1.59 الجدول 23: ‏TPM_PT_YEAR «the specification year using the CE»، وTPM_PT_DAY_OF_YEAR
+// «the specification day of year» (المثال: 15 نوفمبر 2010 = 319، فالأوّلُ من يناير = 1)، و«The specification
+// date is on the title page of the specification or errata». وإراتا r1.38 v1.15 §2.24 (‏2025-06-10):
+// «TPM_SPEC_YEAR and TPM_SPEC_DAY_OF_YEAR should be set to the date of the most recent Errata document
+// that revised the behavior of the TPM» (والمنصوصُ هناك 2024/172). فالتاريخُ تاريخُ وثيقةٍ منشورة:
+//   (1) صلاحيّةٌ تقويميّة: سنةٌ ميلاديّةٌ ≥ 1 (لا سنةَ صفرٍ في CE)، واليومُ 1..365، أو 366 في السنةِ الكبيسةِ
+//       الغريغوريّةِ وحدَها؛ وما خالفَ ذلك ليس تاريخًا ⇒ فشلٌ مغلق.
+//   (2) اتّساقٌ مع المراجعة: لا تسبقُ وثيقةٌ لـr1.38 نصَّ r1.38 نفسَه (صفحةُ عنوانِه: 2016-09-29، اليوم 273،
+//       كما تنقلُه صفحاتُ عنوانِ إراتاه) ⇒ تاريخٌ أقدمُ مع المراجعة 138 تناقضٌ ⇒ فشلٌ مغلق.
+//   (3) نافذةُ الدليل: لا تُرقّى الدلالةُ إلّا داخلَ [أوّلِ إراتا مؤكَّدٍ أنّها تحوي البندَ 2.22، آخرِ إراتا
+//       تحقّقنا من نصِّها أنّها تحويه]. وما بعدَ الحدِّ الأعلى (ومنه سنواتٌ كـ0xFFFFFFFF) لا وثيقةَ متحقَّقًا منها
+//       تقابلُه ⇒ `zero-meaning-not-established` لا خطأٌ ولا ترقية. لا حدَّ زمنيَّ مخترَعًا: الحدّانِ تاريخا صفحتَي
+//       عنوانِ وثيقتَين قُرئ نصُّهما، ويُرفَعُ الأعلى حينَ يُقرأُ نصُّ إراتا أحدث (v1.16 بتاريخ 2026-08-11 لم يُقرأ).
+// أوّلُ إصدارٍ تحقّقنا أنّه يحوي البندَ 2.22 (إضافةُ NOTE «الصفرُ = لا حدَّ أقصى ثابتاً»): Errata v1.8
+// بتاريخ 2019-07-12 (اليوم 193). وإراتا v1.0 (2017-01-16) لا تحويه، والإصداراتُ بينهما لم يُتحقَّق منها،
+// فتاريخٌ أقدمُ من v1.8 لا يُثبِتُ الدلالةَ (تحفّظٌ لا نفي). والإرشادُ (TCG Guide 1.38→1.59): «The errata
+// version that is implemented by a TPM is reported in the TPM properties TPM_PT_DAY_OF_YEAR and TPM_PT_YEAR».
+const R138_SPEC_TITLE_DATE = { year: 2016, dayOfYear: 273 };
 const R138_ERRATA_2_22_FIRST_CONFIRMED = { year: 2019, dayOfYear: 193 };
+// آخرُ إراتا لـr1.38 قُرئ نصُّها فوُجدَ فيه البندُ 2.22: v1.15، صفحةُ عنوانِها 2025-06-10 (اليوم 161).
+const R138_ERRATA_2_22_LATEST_VERIFIED = { year: 2025, dayOfYear: 161 };
 
 /**
  * يفسر قيمة TPM2_PT_NV_COUNTERS_MAX **بحسب مستوى المواصفة الذي تعلنه الشريحة**:
@@ -88,8 +104,12 @@ const R138_ERRATA_2_22_FIRST_CONFIRMED = { year: 2019, dayOfYear: 193 };
  * - قيمة موجبة ⇒ `fixed-maximum`: حدّ أعلى لعدد فهارس العدّادات (لا سعة حرّة).
  * - صفر مع مراجعة ≥ 159 (1.59) ⇒ `no-fixed-maximum`: NOTE 2 في Part 2 r1.59 فأحدث
  *   («The value zero indicates that there is no fixed maximum»).
- * - صفر مع مراجعة 138 وتاريخ ≥ 2019-07-12 ⇒ `no-fixed-maximum`: النصُّ الأصليُّ لـr1.38 بلا هذه الـNOTE،
+ * - صفر مع مراجعة 138 وتاريخ في [2019-07-12، 2025-06-10] ⇒ `no-fixed-maximum`: النصُّ الأصليُّ لـr1.38 بلا هذه الـNOTE،
  *   لكنّ إراتا r1.38 (البند 2.22، من v1.8 فأحدث) تضيفها.
+ * - صفر مع مراجعة 138 وتاريخ بعدَ آخرِ إراتا متحقَّقٍ منها (2025-06-10) ⇒ `zero-meaning-not-established`
+ *   بأساسِ `r1.38-spec-date-beyond-latest-verified-errata` (WL-441).
+ * - تاريخٌ ليس تاريخًا تقويميًّا (اليوم 366 في سنةٍ غيرِ كبيسة، أو صفر، أو السنة 0)، أو أقدمُ من نصِّ r1.38 مع
+ *   المراجعة 138 ⇒ فشلٌ مغلق `TPM_PT_SPEC_DATE_UNKNOWN` (WL-441).
  * - غير ذلك (r1.38 بتاريخٍ أقدمَ أو بلا تاريخ، أو مراجعةٌ أخرى < 159، أو بلا مراجعة) ⇒
  *   `zero-meaning-not-established`: الدلالةُ **غيرُ مثبَتةٍ من المعلَن**، فلا يُقرأ الصفر «غير مدعوم» ولا «بلا حدّ».
  *
@@ -115,10 +135,16 @@ export function interpretNvCountersMax(rawValue, revisionTimes100, specDate) {
   if (specDate !== undefined && specDate !== null) {
     const year = parseRawInteger(specDate.year);
     const dayOfYear = parseRawInteger(specDate.dayOfYear);
-    if (year === null || dayOfYear === null || year < 2013 || dayOfYear < 1 || dayOfYear > 366) {
+    if (year === null || dayOfYear === null) {
       return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN: unparsable year/day-of-year' };
     }
+    if (year < 1 || dayOfYear < 1 || dayOfYear > daysInCeYear(year)) {
+      return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN: not a calendar date (day-of-year outside the CE year)' };
+    }
     date = { year, dayOfYear };
+    if (revision === 138 && !dateAtLeast(date, R138_SPEC_TITLE_DATE)) {
+      return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN: date precedes the r1.38 specification (2016-09-29)' };
+    }
   }
   const base = {
     ok: /** @type {true} */ (true),
@@ -133,9 +159,18 @@ export function interpretNvCountersMax(rawValue, revisionTimes100, specDate) {
     return { ...base, semantics: 'no-fixed-maximum', basis: 'part2-r1.59+-note2' };
   }
   if (revision === 138 && date !== null && dateAtLeast(date, R138_ERRATA_2_22_FIRST_CONFIRMED)) {
+    if (!dateAtLeast(R138_ERRATA_2_22_LATEST_VERIFIED, date)) {
+      // تاريخٌ صحيحٌ تقويميًّا بعدَ آخرِ إراتا متحقَّقٍ منها: لا وثيقةَ مقروءةً تقابلُه ⇒ لا ترقية.
+      return { ...base, semantics: 'zero-meaning-not-established', basis: 'r1.38-spec-date-beyond-latest-verified-errata' };
+    }
     return { ...base, semantics: 'no-fixed-maximum', basis: 'r1.38-errata-2.22' };
   }
   return { ...base, semantics: 'zero-meaning-not-established', basis: 'no-normative-text-established-for-reported-level' };
+}
+
+/** عددُ أيّامِ السنةِ الميلاديّةِ بقاعدةِ الكبيسِ الغريغوريّة (÷4، إلّا ÷100 ما لم تقبلْ ÷400). @param {number} year */
+function daysInCeYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 366 : 365;
 }
 
 /** @param {{year: number, dayOfYear: number}} a @param {{year: number, dayOfYear: number}} b */
