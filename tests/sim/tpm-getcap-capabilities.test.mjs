@@ -46,8 +46,9 @@ test('static: NV_COUNTERS_MAX=0 — r1.59 فأحدث ⇒ «لا حدّ ثابت�
 
 test('static: NV_COUNTERS_MAX=0 مع r1.38 — يتبعُ تاريخَ الإراتا المعلَن لا المراجعةَ وحدَها (LIVE-46)', () => {
   const r = (date) => interpretNvCountersMax('0x0', '0x8A', date);
-  // إراتا v1.8 (2019-07-12 = اليوم 193) فأحدث تضيفُ الـNOTE (البند 2.22).
-  for (const d of [{ year: 2019, dayOfYear: 193 }, { year: '0x7E3', dayOfYear: '0xC1' }, { year: 2019, dayOfYear: 352 }, { year: 2025, dayOfYear: 161 }]) {
+  // تواريخُ تنصُّ عليها إراتا مقروءةٌ تحوي الـNOTE (البند 2.22): v1.8 (193/2019) وv1.11 (352/2019).
+  // (WL-441: أُخرِجَ 2025/161 — تاريخُ صفحةِ عنوانِ v1.15 التي تنصُّ في §2.24 على 2024/172 لا عليه.)
+  for (const d of [{ year: 2019, dayOfYear: 193 }, { year: '0x7E3', dayOfYear: '0xC1' }, { year: 2019, dayOfYear: 352 }]) {
     const z = r(d);
     assert.equal(z.semantics, 'no-fixed-maximum', JSON.stringify(d));
     assert.equal(z.basis, 'r1.38-errata-2.22');
@@ -95,6 +96,60 @@ test('static: مراجعةٌ أو تاريخٌ غيرُ قابلٍ للتحلي�
     const r = interpretNvCountersMax(0, 138, d);
     assert.equal(r.ok, false, JSON.stringify(d));
     assert.match(r.error, /^TPM_PT_SPEC_DATE_UNKNOWN/);
+  }
+});
+
+test('static: تاريخُ المواصفةِ تاريخٌ تقويميٌّ ميلاديٌّ — الكبيسُ الغريغوريُّ وحدودُ اليومِ (WL-441)', () => {
+  // Part 2 r1.59 الجدول 23: السنةُ بالتقويمِ الميلاديِّ (CE) ويومُ السنة 1..365/366.
+  const ok = (rev, year, dayOfYear) => interpretNvCountersMax(0, rev, { year, dayOfYear });
+  // حدودٌ مشروعةٌ لا تُرفَض: آخرُ يومٍ في سنةٍ عاديّة، واليوم 366 في كبيسةٍ (÷4، و÷400)، والأوّلُ من يناير.
+  for (const [rev, y, d] of [[138, 2019, 365], [138, 2020, 366], [138, 2024, 366], [159, 2000, 366], [138, 2020, 1], [183, 2024, '0x16E']]) {
+    const r = ok(rev, y, d);
+    assert.equal(r.ok, true, `rev=${rev} ${y}/${d}`);
+  }
+  // تاريخٌ صحيحٌ لا تنصُّ عليه إراتا ⇒ مقبولٌ غيرُ مُرقّى.
+  assert.equal(ok(138, 2020, 366).semantics, 'zero-meaning-not-established');
+  assert.equal(ok(138, 2024, 366).basis, 'r1.38-spec-date-not-prescribed-by-verified-errata');
+  // 2024/172 (20 يونيو) تنصُّ عليه v1.15 — وحسابُه يمرُّ بـ29 فبراير: الكبيسُ في نصِّ TCG نفسِه.
+  assert.equal(ok(138, 2024, 172).semantics, 'no-fixed-maximum');
+  // اليوم 366 في سنةٍ غيرِ كبيسة ⇒ ليس تاريخًا ⇒ فشلٌ مغلق، ولا يُرقّى إلى no-fixed-maximum.
+  for (const [rev, y] of [[138, 2019], [138, 2021], [138, 2023], [159, 2021], [159, 1900], [159, 2100], [138, 0xffffffff]]) {
+    const r = ok(rev, y, 366);
+    assert.equal(r.ok, false, `rev=${rev} ${y}/366`);
+    assert.match(r.error, /^TPM_PT_SPEC_DATE_UNKNOWN: not a calendar date/);
+  }
+  // لا سنةَ صفرٍ في CE، ولا يومَ صفر.
+  assert.match(ok(159, 0, 1).error, /^TPM_PT_SPEC_DATE_UNKNOWN: not a calendar date/);
+  assert.match(ok(138, 2020, 0).error, /^TPM_PT_SPEC_DATE_UNKNOWN/);
+  // المراجعةُ ≥ 159 لا تستعملُ التاريخَ في الاستنتاج: تاريخٌ تقويميٌّ قديمٌ لا يغيّرُ أساسَها.
+  const r159 = ok(159, 1999, 1);
+  assert.equal(r159.ok, true);
+  assert.equal(r159.basis, 'part2-r1.59+-note2');
+});
+
+test('static: r1.38 — لا ترقيةَ إلّا لتاريخٍ تنصُّ عليه إراتا مقروءة؛ والسابقُ لنصِّ r1.38 تناقضٌ مغلق (WL-441)', () => {
+  const r = (year, dayOfYear) => interpretNvCountersMax('0x0', '0x8A', { year, dayOfYear });
+  // الحدُّ الأدنى: صفحةُ عنوانِ r1.38 (2016-09-29 = اليوم 273) مقبولةٌ غيرُ مُرقّاة، وما قبلَها فشلٌ مغلق.
+  assert.equal(r(2016, 273).semantics, 'zero-meaning-not-established');
+  for (const [y, d] of [[2016, 272], [2015, 365], [2013, 1], [1, 1]]) {
+    const z = r(y, d);
+    assert.equal(z.ok, false, `${y}/${d}`);
+    assert.match(z.error, /^TPM_PT_SPEC_DATE_UNKNOWN: date precedes the r1.38 specification/);
+  }
+  // القائمةُ المغلقة: ما نصَّ عليه §2.24 في v1.8 وv1.9 وv1.11 وv1.12 وv1.13/v1.14 وv1.15 ⇒ مُرقّى.
+  for (const [y, d] of [[2019, 193], [2019, 235], [2019, 352], [2021, 28], [2023, 9], [2024, 172], ['0x7E8', '0xAC']]) {
+    const z = r(y, d);
+    assert.equal(z.semantics, 'no-fixed-maximum', `${y}/${d}`);
+    assert.equal(z.basis, 'r1.38-errata-2.22');
+  }
+  // ما لا تنصُّ عليه وثيقةٌ مقروءة ⇒ غيرُ مثبَت: جارُ تاريخٍ منصوص (2019/194، 2024/171)، وتاريخٌ بينَ إصدارَين (2022/100)،
+  // وتاريخُ صفحةِ عنوانِ v1.14 (2024/25) وv1.15 (2025/161) وv1.16 (2026/223) حيثُ لا تنصُّ عليها، وسنواتٌ غيرُ واقعيّة.
+  for (const [y, d] of [[2019, 194], [2024, 171], [2022, 100], [2024, 25], [2025, 161], [2025, 162], [2026, 223], [2030, 1], [0xffffffff, 1], ['0xFFFFFFFF', '0x1'], [100000, 60]]) {
+    const z = r(y, d);
+    assert.equal(z.ok, true, `${y}/${d}`);
+    assert.equal(z.semantics, 'zero-meaning-not-established', `${y}/${d} must not become no-fixed-maximum`);
+    assert.equal(z.basis, 'r1.38-spec-date-not-prescribed-by-verified-errata');
+    assert.equal(z.supportProven, false);
   }
 });
 

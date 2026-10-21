@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { interpretNvCountersMax as interpretInSimulator } from '../../sim/tpm/getcap.mjs';
 import {
   analyzeInventory,
   checkAllowedCommand,
@@ -74,7 +75,9 @@ test('static: NV_COUNTERS_MAX — الصفرُ ليس «غيرَ مدعوم»، 
   const errata = interpretNvCountersMax(0, 138, { year: 2019, dayOfYear: 193 });
   assert.equal(errata.semantics, 'no-fixed-maximum');
   assert.equal(errata.basis, 'r1.38-errata-2.22');
-  assert.equal(interpretNvCountersMax(0, 138, { year: 2024, dayOfYear: 25 }).semantics, 'no-fixed-maximum');
+  // LIVE-60 (WL-443): 2024/25 تاريخُ صفحةِ عنوانِ v1.14، وv1.14 §2.24 تنصُّ على 2023/9 لا عليه ⇒ غيرُ مثبَت؛ و2023/9 مُرقّى.
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2024, dayOfYear: 25 }).semantics, 'zero-meaning-not-established');
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2023, dayOfYear: 9 }).semantics, 'no-fixed-maximum');
   // لا ادّعاءَ دعمٍ: الخاصيةُ لا تُثبِتُه (WL-439).
   assert.equal(errata.supportProven, false);
   assert.equal(errata.supportProofRequires, 'counter-creation');
@@ -291,4 +294,32 @@ test('static: CLI — ملفٌّ غيرُ مقروء ⇒ 2، وملفٌّ سلي
   assert.match(missing.stderr, /INVENTORY_UNREADABLE/);
   const usage = spawnSync(process.execPath, [decoderPath], { encoding: 'utf8' });
   assert.equal(usage.status, 2);
+});
+
+test('static: LIVE-60 — تكافؤُ دلالةِ NV_COUNTERS_MAX بينَ مُفسِّرِ الجردِ و`sim/tpm/getcap.mjs` على شبكةِ تواريخَ ومراجعات (WL-443)', () => {
+  // لا تختلفُ الوحدتانِ في القبول، ولا في الدلالة، ولا في الأساس — ومنها الحالاتُ الحدّيّةُ والتواريخُ غيرُ الصالحة.
+  const years = [1, 1900, 2000, 2013, 2015, 2016, 2017, 2019, 2020, 2021, 2023, 2024, 2025, 2026, 2100, 100000, 0xffffffff, 0];
+  const days = [0, 1, 9, 25, 28, 161, 171, 172, 192, 193, 194, 235, 272, 273, 352, 365, 366, 367];
+  const dates = [undefined, null];
+  for (const year of years) for (const dayOfYear of days) dates.push({ year, dayOfYear });
+  let compared = 0;
+  for (const rev of [undefined, 116, 137, 138, 159, 183]) {
+    for (const value of [0, 8]) {
+      for (const d of dates) {
+        const host = interpretNvCountersMax(value, rev, d);
+        const simulator = interpretInSimulator(value, rev, d);
+        const where = `value=${value} rev=${rev} date=${JSON.stringify(d)}`;
+        assert.equal(host.ok, simulator.ok, where);
+        if (host.ok) {
+          assert.equal(host.semantics, simulator.semantics, where);
+          assert.equal(host.basis, simulator.basis, where);
+          assert.equal(host.supportProven, false, where);
+        } else {
+          assert.equal(host.error, simulator.error.split(':')[0], where);
+        }
+        compared += 1;
+      }
+    }
+  }
+  assert.ok(compared > 3000, `compared=${compared}`);
 });

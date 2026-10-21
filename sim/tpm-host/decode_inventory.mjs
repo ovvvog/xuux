@@ -264,6 +264,19 @@ export const OWNER_INDEX_RANGE = Object.freeze({ first: 0x01800000, last: 0x01bf
 // Errata v1.8، بتاريخ 2019-07-12 (اليوم 193). وإراتا v1.0 (2017-01-16) لا تحويه، وما بينهما
 // (v1.1/v1.3/v1.4) لم يُتحقَّقْ منه فتاريخٌ أقدمُ من v1.8 لا يُثبِتُ الدلالةَ (تحفّظٌ لا نفي).
 const R138_ERRATA_2_22_FIRST_CONFIRMED = { year: 2019, dayOfYear: 193 };
+// قواعدُ التاريخِ مطابقةٌ لـ`sim/tpm/getcap.mjs` (WL-441/WL-442، LIVE-60) ومحروسةٌ باختبارِ تكافؤٍ يستوردُ الوحدتَين
+// (لا يُستورَدُ `getcap.mjs` هنا: أداةُ المضيفِ منفصلةٌ عن المحاكي وحارسِ TCTI). سندُها ومصادرُها هناك:
+// تاريخٌ ميلاديٌّ صحيحٌ بالكبيسِ الغريغوريّ وإلّا فشلٌ مغلق؛ ومع r1.38 لا يسبقُ 2016/273 (Part 2 r1.38 الجدول 6)؛
+// والترقيةُ لتاريخٍ ينصُّ عليه §2.24 في إراتا مقروءةٍ تحوي البندَ 2.22 وحدَه.
+const R138_SPEC_TITLE_DATE = { year: 2016, dayOfYear: 273 };
+const R138_ERRATA_2_22_PRESCRIBED_DATES = Object.freeze([
+  { errata: '1.8', year: 2019, dayOfYear: 193 },
+  { errata: '1.9', year: 2019, dayOfYear: 235 },
+  { errata: '1.11', year: 2019, dayOfYear: 352 },
+  { errata: '1.12', year: 2021, dayOfYear: 28 },
+  { errata: '1.13 (و1.14)', year: 2023, dayOfYear: 9 },
+  { errata: '1.15', year: 2024, dayOfYear: 172 },
+]);
 
 /**
  * تفسيرُ NV_COUNTERS_MAX بحسبِ مستوى المواصفةِ الذي تعلنه الشريحةُ: المراجعةُ وتاريخُ الإراتا —
@@ -295,10 +308,14 @@ export function interpretNvCountersMax(value, revisionTimes100, specDate) {
     const year = specDate.year;
     const day = specDate.dayOfYear;
     // سنةٌ فوقَ مدى UINT32 غيرُ قابلةٍ للتحليلِ ⇒ فشلٌ مغلقٌ لا تخمين (كما في `parseRawInteger` هناك).
-    if (!Number.isInteger(year) || !Number.isInteger(day) || year < 2013 || year > 0xffffffff || day < 1 || day > 366) {
+    if (!Number.isInteger(year) || !Number.isInteger(day) || year > 0xffffffff || day > 0xffffffff) {
       return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN' };
     }
+    // ليس تاريخًا تقويميًّا (لا سنةَ صفرٍ في CE، واليومُ 366 في الكبيسةِ وحدَها) ⇒ فشلٌ مغلق (LIVE-60).
+    if (year < 1 || day < 1 || day > daysInCeYear(year)) return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN' };
     date = { year, dayOfYear: day };
+    // r1.38 بتاريخٍ يسبقُ نصَّها ⇒ تناقضٌ ⇒ فشلٌ مغلق.
+    if (revision === 138 && !dateAtLeast(date, R138_SPEC_TITLE_DATE)) return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN' };
   }
   const base = {
     ok: true,
@@ -313,7 +330,15 @@ export function interpretNvCountersMax(value, revisionTimes100, specDate) {
     return { ...base, semantics: 'no-fixed-maximum', basis: 'part2-r1.59+-note2', note: 'Part 2 r1.59 NOTE 2: bounded by the NV memory pool' };
   }
   if (revision === 138 && date !== null && dateAtLeast(date, R138_ERRATA_2_22_FIRST_CONFIRMED)) {
-    return { ...base, semantics: 'no-fixed-maximum', basis: 'r1.38-errata-2.22', note: 'r1.38 errata 2.22 (v1.8+, 2019-07-12): bounded by the NV memory pool' };
+    if (!R138_ERRATA_2_22_PRESCRIBED_DATES.some((e) => e.year === date.year && e.dayOfYear === date.dayOfYear)) {
+      return {
+        ...base,
+        semantics: 'zero-meaning-not-established',
+        basis: 'r1.38-spec-date-not-prescribed-by-verified-errata',
+        note: 'no read r1.38 errata prescribes this TPM_PT_YEAR/DAY_OF_YEAR; the datasheet bound applies',
+      };
+    }
+    return { ...base, semantics: 'no-fixed-maximum', basis: 'r1.38-errata-2.22', note: 'r1.38 errata 2.22 (date prescribed by a read errata §2.24): bounded by the NV memory pool' };
   }
   return {
     ...base,
@@ -321,6 +346,11 @@ export function interpretNvCountersMax(value, revisionTimes100, specDate) {
     basis: 'no-normative-text-established-for-reported-level',
     note: 'original r1.38 text has no NOTE 2; zero does not mean unsupported and does not prove unlimited — the datasheet bound applies',
   };
+}
+
+/** @param {number} year */
+function daysInCeYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0 ? 366 : 365;
 }
 
 /** @param {{year: number, dayOfYear: number}} a @param {{year: number, dayOfYear: number}} b */
