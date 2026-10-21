@@ -1,0 +1,110 @@
+    12	// فأيُّ تحريرٍ للربطِ بعدَ الختمِ يُسقِطُ التوقيعَ (`STATE_MANIFEST_SEAL_INVALID`).
+    13	// والاختبارُ `wl-434-fnv-manifest-binding` يقيسُ ذلك على مسارِ الإنتاجِ الحقيقيّ.
+    14	//
+    15	// **سياسةُ إصدارِ المخطّطِ والتوافقِ (بلا ترقيةٍ صامتةٍ):**
+    16	//   - `version: 2` (التاريخيُّ): بلا ربطٍ. يبقى مقبولًا كما هو، ولا يُرقّيه `openAsync`
+    17	//     ولا `checkpointAsync` ولا أيُّ تحديثٍ عاديّ. وربطٌ مهرَّبٌ في متنه ⇒ رفضٌ
+    18	//     (`STATE_MANIFEST_FNV_BINDING_INVALID`) — لا يُقبَلُ حقلُ حمايةٍ بلا إعلانِ الوضعِ.
+    19	//   - `version: 3` (وضعُ NV): الربطُ **إلزاميُّ**؛ غيابُه رفضٌ لا دعوةٌ لإنشائه.
+    20	//     القارئُ القديمُ (الذي لا يعرفُ إلا 2) يرفضُه بـ`STATE_MANIFEST_VERSION_UNSUPPORTED`
+    21	//     بدلَ قبولِه معَ تجاهلِ الحمايةِ الجديدة.
+    22	//   - الانتقالُ 2→3 لا يقعُ إلا عبرَ مراسمِ الربطِ المعلنةِ (`bindFnvAsync`)، ولا
+    23	//     رجوعَ بعدها: `version` و`freshnessBinding` ثابتانِ عبرَ كلِّ ختمٍ لاحقٍ.
+    24	//
+    25	// **حدٌّ مصرَّحٌ به (لا يُدَّعى خلافُه):** `tpmIdentity` و`authPolicy` جزءٌ من عقدِ
+    26	// الربطِ ومصدرُهما المرجعُ نفسُه (اسمُ مفتاحِ EK أو شهادتُه، وسياسةُ كلِّ فهرسٍ كما
+    27	// تُقرَأُ من منطقتهِ العامة). **لا backend إنتاجيًّا يوفّرُهما اليوم** (`SUPPORTED_FRESHNESS_BACKENDS`
+    28	// فارغ)، فلا يُنشَأُ ربطٌ إنتاجيٌّ إلا بمرجعٍ حقيقيٍّ يوفرُهما، والاختباراتُ تُحْقِنُ
+    29	// مادّةً معلَنةً بلا ادّعاءِ هويةِ عتاد. وصحةُ الشكلِ ليست إثباتًا لهويةِ TPM.
+    30	// **ويُرفضُ الربطُ الناقصُ**: غيابُ الهويةِ أو السياسةِ أو خللُ شكلِهما ⇒
+    31	// `STATE_MANIFEST_FNV_BINDING_INVALID`.
+    32	
+    33	import type { StateManifestBody } from './state-manifest.mjs';
+    34	
+    35	/**
+    36	 * إصدارُ مخططِ البيانِ الذي يحملُ ربطَ NV — يميّزُه القارئُ فيفرضُ الربطَ.
+    37	 * القارئُ القديمُ يرفضُه بـ`STATE_MANIFEST_VERSION_UNSUPPORTED` فلا يُقبَلُ بيانُ NV
+    38	 * معَ تجاهلِ حمايتِه.
+    39	 */
+    40	export const FNV_MANIFEST_SCHEMA_VERSION = 3;
+    41	
+    42	/** بادئةُ المجالِ في بايتاتِ التحقّقِ من تماسكِ الربطِ — تمنعُ خلطَ الغرض. */
+    43	export const FNV_BINDING_SCHEMA = 'xuux.manifest-fnv-binding/1';
+    44	
+    45	/**
+    46	 * رموزُ أخطاءِ ربطِ NV المسمّاةُ — قائمةٌ مغلقةٌ تصلُ إلى قرارِ الإقلاعِ كما هي
+    47	 * (`decideStateBoundBoot`) فلا يبقى «ربطٌ مكسورٌ» متعذّرَ التمييزِ من «مصدرٍ لا يجيب».
+    48	 * تفصيلُ الرسائلِ ثابتٌ نصًّا: لا `error.message` ولا محتوىُ استثناءٍ حسّاسٍ يُمرَّر.
+    49	 */
+    50	export const FnvBindingErrorCodes = [
+    51	  'FRESHNESS_NV_BINDING_INVALID',
+    52	  'FRESHNESS_NV_BINDING_MISMATCH',
+    53	] as const;
+    54	
+    55	export type FnvBindingErrorCode = (typeof FnvBindingErrorCodes)[number];
+   215	  const identity = sourceBinding.tpmIdentity as { kind?: unknown; value?: unknown } | undefined;
+   216	  if (identity !== undefined && identity !== null && typeof identity === 'object') {
+   217	    pairs.push(['tpmIdentity.kind', manifestBinding.tpmIdentity.kind, identity.kind]);
+   218	    pairs.push(['tpmIdentity.value', manifestBinding.tpmIdentity.value, identity.value]);
+   219	  }
+   220	  const policy = sourceBinding.authPolicy as { counter?: unknown; record?: unknown } | undefined;
+   221	  if (policy !== undefined && policy !== null && typeof policy === 'object') {
+   222	    pairs.push(['authPolicy.counter', manifestBinding.authPolicy.counter, policy.counter]);
+   223	    pairs.push(['authPolicy.record', manifestBinding.authPolicy.record, policy.record]);
+   224	  }
+   225	  for (const [field, manifestValue, sourceValue] of pairs) {
+   226	    if (manifestValue !== sourceValue) return field;
+   227	  }
+   228	  return null;
+   229	}
+   230	
+   231	/**
+   232	 * يبني الربطَ المختومَ من المادّةِ ونسخةِ الجذرِ — نسخًا عميقًا للمادّةِ كي لا
+   233	 * يبقى للمدخِلِ مرجعٌ يعدّلُ به الربطَ بعدَ الختم.
+   234	 * @param material - المادّةُ من المصدر
+   235	 * @param instanceId - معرّفُ نسخةِ الجذرِ من المتن
+   236	 */
+   237	export function buildManifestFnvBinding(
+   238	  material: FnvBindingMaterial,
+   239	  instanceId: string,
+   240	): ManifestFnvBinding {
+   241	  const shapeError = fnvBindingMaterialShapeError(material);
+   242	  if (shapeError !== null) {
+   243	    throw new Error(`FNV_BINDING_MATERIAL_INVALID: ${shapeError}`);
+   244	  }
+   245	  return {
+   246	    schema: FNV_BINDING_SCHEMA,
+   247	    instanceId,
+   248	    counterIndex: material.counterIndex,
+   249	    recordIndex: material.recordIndex,
+   250	    counterName: material.counterName,
+   251	    recordName: material.recordName,
+   252	    base: material.base,
+   253	    tpmIdentity: { kind: material.tpmIdentity.kind, value: material.tpmIdentity.value },
+   254	    authPolicy: { counter: material.authPolicy.counter, record: material.authPolicy.record },
+   255	  };
+   256	}
+   257	
+   258	/**
+   259	 * عقدُ مصدرٍ يكشفُ الربطَ الذي يتحققُ منه — يميّزُ المقبسَ الذي يملكُ ربطًا مثبَّتًا.
+   260	 * غيابُ الكشفِ في وضعِ NV ليسِ تخطيًا للفحصِ بل رفضٌ مغلقٌ عندَ الإقلاع.
+   261	 */
+   262	export interface FnvPinnedBindingSource {
+   263	  /** الربطُ المثبَّتُ الذي يتحققُ منه المصدرُ في كلِّ قراءةٍ وانتقال. */
+   264	  pinnedBinding(): unknown;
+   265	}
+   266	
+   267	/**
+   268	 * عقدُ مصدرٍ يوفّرُ مادّةَ الربطِ عندَ المراسمِ المعلنةِ (‏B10) — المصدرُ وحدَه
+   269	 * يملكُ المادّةَ (المقبضانِ والاسمانِ و`base` والهويةُ والسياسةُ)؛ المنفّذُ لا
+   270	 * يخترعُها ولا يخمّنُها. من لا يكشفُها يبقى على المسارِ التاريخيّ.
+   271	 */
+   272	export interface FnvBindingMaterialSource {
+   273	  /** مادّةُ الربطِ من المرجعِ الحيّ — تُقرأُ مرّةً عندَ الربطِ الأوّلِ المعلن. */
+   274	  fnvBindingMaterial(): Promise<FnvBindingMaterial>;
+   275	}
+   276	
+   277	/**
+   278	 * هل يكشفُ المقبسُ ربطًا مثبَّتًا؟
+   279	 * @param socket - المقبسُ المفحوص
+   280	 */

@@ -1,0 +1,107 @@
+   360	      assert.equal(manifest.read().anchoredCount, 5);
+   361	      // والملفُّ على القرصِ يحملُ الربطَ نفسَه بعدَ كلِّ هذهِ الختومِ.
+   362	      const onDisk = JSON.parse(readFileSync(file, 'utf8')).body;
+   363	      assert.deepEqual(onDisk.freshnessBinding, sealed);
+   364	    } finally {
+   365	      rmSync(dir, { recursive: true, force: true });
+   366	    }
+   367	  });
+   368	
+   369	  test('تزامنُ مراسمَينِ بمادّتَينِ مختلفتَين: التسلسلُ يُدرِكُ السباقَ — واحدةٌ تُختَمُ والثانيةُ تُرفَضُ IMMUTABLE والربطُ المختومُ هو ربطُ الناجحةِ', async () => {
+   370	    const dir = tmp('wl434-concurrent-');
+   371	    try {
+   372	      const { manifest } = await provisionedManifest(dir);
+   373	      // مراسمانِ متزامنتانِ بمادّتَينِ مختلفتَينِ (‏base مختلفة): تسلسلُ الختومِ
+   374	      // (‏`#sealWith` على سلسلةٍ واحدةٍ) يُدرِكُ السباقَ — الثانيةُ تقرأُ ختمَ الأولى
+   375	      // داخلَ المقطعِ الحرجِّ فتُرفَضُ، بدلَ أن يلتقطَ كلٌّ منهما «لا ربطَ» فيختمَ
+   376	      // آخرُهما فوقَ أولِهما. **والمختومُ هو ربطُ الناجحةِ وحدَها** — لا غيرُ.
+   377	      const first = material();
+   378	      const second = material({ base: '9' });
+   379	      const [a, b] = await Promise.allSettled([
+   380	        manifest.bindFnvAsync(first, DECLARED_ENV),
+   381	        manifest.bindFnvAsync(second, DECLARED_ENV),
+   382	      ]);
+   383	      const fulfilled = [a, b].filter((r) => r.status === 'fulfilled');
+   384	      const rejected = [a, b].filter((r) => r.status === 'rejected');
+   385	      assert.equal(fulfilled.length, 1, 'مراسمٌ واحدةٌ فقط تُختَم — الثانيةُ لا تنجو');
+   386	      assert.equal(rejected.length, 1, 'والثانيةُ تُرفَضُ حتمًا');
+   387	      assert.equal(
+   388	        rejected[0].reason.code,
+   389	        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   390	        'الرفضُ من حارسِ الختمِ المُسلسَلِ',
+   391	      );
+   392	      // والمختومُ هو ربطُ الناجحةِ بالقيمةِ (base) — لا ربطُ الخاسرةِ ولا ثالثٌ.
+   393	      const sealedBase = manifest.read().freshnessBinding.base;
+   394	      const fulfilledBase = fulfilled[0] === a ? first.base : second.base;
+   395	      const rejectedBase = fulfilled[0] === a ? second.base : first.base;
+   396	      assert.equal(sealedBase, fulfilledBase, 'المختومُ ربطُ الناجحةِ وحدَها');
+   397	      assert.notEqual(sealedBase, rejectedBase, 'وليسَ ربطَ المرفوضةِ');
+   398	      // وإعادةُ الربطِ بعدَ السباقِ مرفوضةٌ — لا نافذةَ بعدهُ.
+   399	      const again = await rejection(() =>
+   400	        manifest.bindFnvAsync(material({ base: '11' }), DECLARED_ENV),
+   401	      );
+   402	      assert.equal(again.code, 'STATE_MANIFEST_FNV_BINDING_IMMUTABLE');
+   403	    } finally {
+   404	      rmSync(dir, { recursive: true, force: true });
+   405	    }
+   406	  });
+   407	
+   408	  test('التوافقُ: البيانُ التاريخيُّ يبقى بلا ربطٍ ولا تُرقّيهِ التحديثاتُ صامتةً', async () => {
+   409	    const dir = tmp('wl434-compat-');
+   410	    try {
+   411	      const { manifest, file, sealer } = await provisionedManifest(dir);
+   412	      await manifest.checkpointAsync();
+   413	      await manifest.stageAsync({
+   414	        txn: 't',
+   415	        intent: 'log.append',
+   416	        fromEpoch: 0,
+   417	        fromAnchor: 'genesis',
+   418	        at: new Date().toISOString(),
+   419	      });
+   420	      await manifest.clearStagedAsync();
+   163	- **صاحبُ تفويضِ المالك** يستطيعُ حذفَ `C` و`R` وإعادةَ تعريفِهما. بعدَ إعادةِ التعريفِ يبدأُ العدّادُ من أعلى قيمةٍ سابقة (ADR 0007، يحتاجُ قياسًا على هذه الشريحة)، فيظهرُ `C − base(المثبَّت)` أكبرَ من العهد، وتكونُ النتيجةُ **رفضًا (حرمانًا من الخدمة) لا استرجاعًا**. هذا بشرطِ أن يكونَ `base` مثبّتًا خارجَ الـTPM. **بدونِ تثبيتٍ يصيرُ استرجاعًا كاملًا (T7).**
+   164	- **`TPM2_Clear` أو إعادةُ تهيئةِ الـTPM** تمسحُ الفهرسَين، فيرفضُ الإقلاعُ ولا يُكشَفُ إلّا الغياب.
+   165	- **حاملُ مفتاحِ الخدمة** يكتبُ `R` بأيِّ قيمة. التثبيتُ الخارجيُّ يكشفُ تغييرَ `base`، أمّا المرساةُ المزوّرةُ فيكشفُها البيانُ الموقّعُ في HSM.
+   166	- **استرجاعُ القرصِ كلِّه** لا يُرجِعُ NV على العتاد، بخلافِ swtpm حيث الحالةُ ملفّ. **وهذا هو الفرقُ الوحيدُ الذي يُرجى من العتاد، ويحتاجُ قياسًا (H8).**
+   167	
+   168	## 7. التنظيفُ والاسترداد (‏مشروطٌ بإذنِ المالك)
+   169	
+   170	1. **الإسناد قبلَ الحذف:** لا يُحذفُ فهرسٌ إلّا إذا اجتمعت فيه أربعةُ شروط:
+   171	   - (أ) غائبٌ في جردِ خطِّ الأساس؛
+   172	   - (ب) وصلَ ردُّ تعريفِه بنجاح، ولم يضِعْ؛
+   173	   - (ج) منطقتُه العامّةُ تطابقُ الطلبَ بايتًا ببايت؛
+   174	   - (د) مقبضُه مسجّلٌ في دفترِ المواردِ قبلَ الإرسال.
+   175	
+   176	   إن ضاعَ ردُّ التعريف **فلا حذفَ أبدًا** حتى لو تطابقتِ المنطقةُ العامّة (قرارُ المالكِ R3/G47-413-1)، ويُتركُ الفهرسُ دليلًا ويُعلَن.
+   177	2. **الترتيب:** `NV_UndefineSpace(R)` ثمّ `NV_UndefineSpace(C)`، محاولةٌ واحدةٌ لكلّ فهرس. أيُّ رفضٍ من عائلةِ `0x8028xxxx` يعني `BLOCKED_FAIL_CLOSED`.
+   178	3. **التحقّق:** جردٌ قرائيٌّ بعدَ التنظيفِ مقابلَ خطِّ الأساس، و`residualNv` تُعلَن.
+   179	4. **إن تعذّرَ التنظيف:** يبقى الفهرسُ مع المقبضِ والسماتِ والبصمةِ في التقرير. لا `Clear`، ولا تغييرَ لتفويض، ولا مساسَ بـBitLocker. القرارُ للمالك.
+   180	5. **الاسترداد (قرارُ المالك D5):**
+   181	   - (أ) الإبقاءُ على `C` بعدَ التأهيلِ ليصيرَ المرجعَ الدائم، بشرطِ مراجعةِ الـbackend؛
+   182	   - أو (ب) الحذفُ بعدَ القياس.
+   183	
+   184	   الحذفُ يجعلُ تكرارَ القياسِ يبدأُ من حالةٍ جديدة، ولا يُرجِعُ الحصّة. وإعادةُ التعريفِ لا تُرجِعُ العدّادَ إلى الصفر.
+   185	
+/tmp/council-wl437/gpt_6_1_sol/build/src/root-of-trust/production-boot.mjs:34:import { createHash, createPublicKey } from 'node:crypto';
+/tmp/council-wl437/gpt_6_1_sol/build/src/root-of-trust/state-manifest.mjs:45:import { createHash, createHmac } from 'node:crypto';
+/tmp/council-wl437/gpt_6_1_sol/build/src/root-of-trust/state-manifest.mjs:46:import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeSync, } from 'node:fs';
+/tmp/council-wl437/gpt_6_1_sol/build/src/root-of-trust/state-manifest.mjs:47:import { basename, dirname, join } from 'node:path';
+/tmp/council-wl437/gpt_6_1_sol/build/src/root-of-trust/state-manifest.mjs:48:import { isProductionRuntime } from './production-boot.mjs';
+/tmp/council-wl437/gpt_6_1_sol/build/src/root-of-trust/state-manifest.mjs:49:import { FNV_MANIFEST_SCHEMA_VERSION, buildManifestFnvBinding, manifestFnvBindingEqual, manifestFnvBindingShapeError, } from './fnv-binding.mjs';
+51:export const STATE_MANIFEST_FILE = 'root-of-trust.manifest.json';
+53:export const STATE_JOURNAL_FILE = 'root-of-trust.manifest.journal';
+66:export const STATE_JOURNAL_LOCK_SUFFIX = '.lock';
+68:export const STATE_PROVISION_ENV = 'XUUX_ROOT_OF_TRUST_PROVISION';
+74:export const FNV_BIND_DECLARED_ENV = 'XUUX_FRESHNESS_BIND_DECLARED';
+76:export const STATE_CONTEXT_ENV = 'XUUX_STATE_CONTEXT';
+82:export const STATE_MANIFEST_VERSION = 2;
+84:export const StateManifestErrorCodes = [
+111:export class StateManifestError extends Error {
+132:export function stateProvisionDeclared(env = process.env) {
+133:    return (env[STATE_PROVISION_ENV] ?? '').trim() === '1';
+140:export function stateManifestPath(root) {
+149:export function stateManifestBinding(kingId, env = process.env) {
+288:export class StateManifest {
+411:            throw new StateManifestError('STATE_PROVISION_NOT_DECLARED', STATE_PROVISION_ENV);
+476:        if ((env[FNV_BIND_DECLARED_ENV] ?? '').trim() !== '1') {
+477:            throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_NOT_DECLARED', FNV_BIND_DECLARED_ENV);

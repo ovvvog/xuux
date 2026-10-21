@@ -19,7 +19,6 @@ import {
   EmailChannel,
   isLoopbackDestination,
 } from '../../src/notifications/index.mjs';
-import { createSmtpEgressTransport } from '../../src/notifications/channels/email.mjs';
 import { createEgressGate } from '../../src/egress/egress-gate.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
@@ -77,10 +76,24 @@ test(
 
 // ── Email ──
 
+/**
+ * نقلُ SMTP يكتبُه المركِّبُ في موقعِ التركيبِ (WL-426 — سابقةُ Telegram: لا قدرةَ
+ * إرسالٍ على سطحِ وحدةِ القناةِ). هذا هيكلٌ موثِّقٌ لا يُنفِّذُ البروتوكولَ: إن
+ * فُعِّلَ التسليمُ الخارجيُّ يوصلُ المالكُ نقلًا حقيقيًّا من كودِ التركيبِ الموثوقِ.
+ * @param {{ host: string, port: number, user: string, password: string }} _config
+ */
+function composerSmtpTransport(_config) {
+  return async () => {
+    throw new Error(
+      'SMTP_TRANSPORT_NOT_PROVIDED: نقلُ SMTP مسؤوليّةُ موقعِ التركيبِ منذ WL-426 — وفِّرْ نقلًا حقيقيًّا من كودِ المُركِّبِ الموثوقِ',
+    );
+  };
+}
+
 test(
   'Email — إرسالٌ حقيقيٌّ وقبولُ المزوِّد',
   {
-    skip: 'يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.',
+    skip: 'يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ)، ونقلَ SMTP يكتبُه المركِّبُ في موقعِ التركيبِ بعد WL-426 (وحدةُ القناةِ لم تعد تُصدِّرُ نقلًا خامًا). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.',
   },
   async () => {
     const smtpConfig = {
@@ -120,7 +133,11 @@ test(
           purpose: 'إشعارات خارجية',
         },
       ],
-      transport: createSmtpEgressTransport({ getSmtpConfig: () => smtpConfig }),
+      // WL-426: وحدةُ القناةِ لم تعد تُصدِّرُ نقلَ SMTP خامًا (مسارُ الجولةِ السادسةِ) —
+      // نقلُ التسليمِ الخارجيِّ يكتبُه المركِّبُ في موقعِ التركيبِ (سابقةُ Telegram).
+      // هذا الهيكلُ وثيقةُ تركيبٍ لا يُشغَّلُ (تخطٍّ ثابتٌ أعلاهُ)؛ فمن يفعِّلُ
+      // التسليمَ الخارجيَّ عليه أن يُوصِلَ نقلَ SMTP من كودِه الموثوقِ.
+      transport: composerSmtpTransport(smtpConfig),
       classifier: null,
       callsPerWindow: 30,
       maxPayloadBytes: 65536,

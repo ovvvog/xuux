@@ -1,0 +1,42 @@
+/usr/include/linux/vtpm_proxy.h
+/usr/share/doc/libtss2-esys-3.0.2-0t64/copyright
+/usr/share/doc/swtpm-libs/changelog.Debian.gz
+/usr/share/doc/swtpm-libs/copyright
+/usr/share/doc/libtss2-sys1t64/copyright
+/usr/share/doc/tpm2-tools/changelog.Debian.gz
+/usr/share/doc/tpm2-tools/copyright
+/usr/share/doc/libtpms0/changelog.Debian.gz
+/usr/share/doc/libtpms0/copyright
+/usr/share/doc/libtss2-tcti-cmd0t64/copyright
+/usr/share/doc/tpm-udev/changelog.Debian.gz
+/usr/share/doc/tpm-udev/copyright
+/usr/share/doc/libtss2-mu-4.0.1-0t64/changelog.Debian.gz
+/usr/share/doc/libtss2-mu-4.0.1-0t64/copyright
+/usr/share/doc/libtss2-tcti-mssim0t64/copyright
+/usr/share/doc/swtpm-tools/copyright
+/usr/share/doc/libtss2-tctildr0t64/copyright
+/usr/share/doc/libtss2-tcti-swtpm0t64/copyright
+/usr/share/doc/libtss2-tcti-libtpms0t64/copyright
+/usr/share/doc/libtss2-fapi1t64/copyright
+/usr/share/doc/libtss2-rc0t64/changelog.Debian.gz
+/usr/share/doc/libtss2-rc0t64/copyright
+/usr/share/doc/libtss2-tcti-device0t64/copyright
+/usr/share/doc/swtpm/copyright
+/usr/share/doc/libtss2-tcti-spi-helper0t64/copyright
+Usage: tpm2_startauthsession [<options>]
+Where <options> are:
+    [ --policy-session] [ --audit-session] [ --bind-context=<value>] [ --bind-auth=<value>]
+    [ --tpmkey-context=<value>] [ --hmac-session] [ -g | --hash-algorithm=<value>] [ -G | --key-algorithm=<value>]
+    [ -S | --session=<value>] [ -c | --key-context=<value>] [ -n | --name=<value>]
+Usage: tpm2_loadexternal [<options>]
+Where <options> are:
+    [ -C | --hierarchy=<value>] [ -u | --public=<value>] [ -r | --private=<value>] [ -c | --key-context=<value>]
+    [ -a | --attributes=<value>] [ -L | --policy=<value>] [ -p | --auth=<value>] [ -g | --hash-algorithm=<value>]
+    [ -G | --key-algorithm=<value>] [ -n | --name=<value>] [ --passin=<value>] [ --cphash=<value>]
+    [ -R | --autoflush]
+Usage: tpm2_policysigned [<options>]
+Where <options> are:
+    [ -L | --policy=<value>] [ -S | --session=<value>] [ -g | --hash-algorithm=<value>] [ -s | --signature=<value>]
+    [ -f | --format=<value>] [ -c | --key-context=<value>] [ -t | --expiration=<value>] [ -q | --qualification=<value>]
+    [ -x | --nonce-tpm] [ --ticket=<value>] [ --timeout=<value>] [ --raw-data=<value>]
+    [ --cphash-input=<value>]
