@@ -74,40 +74,79 @@ export function getCapability(cap, opts = {}) {
 
 // ── محلّلات مخرجات القدرات (فشل مغلق: ما لا يُحلَّل يُرفض لا يُخمَّن) ──
 
+// أوّلُ إصدارِ إراتا لـr1.38 تحقّقنا أنّه يحوي البندَ 2.22 (إضافةُ NOTE «الصفرُ = لا حدَّ أقصى ثابتاً»):
+// Errata v1.8، بتاريخ 2019-07-12 (اليوم 193). وإراتا v1.0 (2017-01-16) لا تحويه. الإصداراتُ بينهما
+// (v1.1/v1.3/v1.4) لم يُتحقَّق منها، فتاريخٌ أقدمُ من v1.8 لا يُثبِتُ الدلالةَ (تحفّظٌ لا نفي).
+// والشريحةُ تعلنُ تاريخَ آخرِ إراتا تطبّقُها في TPM_PT_YEAR/TPM_PT_DAY_OF_YEAR (Errata 1.11/1.15 §2.24،
+// وTCG Guide 1.38→1.59: «The errata version that is implemented by a TPM is reported in … TPM_PT_DAY_OF_YEAR and TPM_PT_YEAR»).
+const R138_ERRATA_2_22_FIRST_CONFIRMED = { year: 2019, dayOfYear: 193 };
+
 /**
- * يفسر قيمة TPM2_PT_NV_COUNTERS_MAX **بحسب المراجعة التي تعلنها الشريحة** (TPM2_PT_REVISION).
+ * يفسر قيمة TPM2_PT_NV_COUNTERS_MAX **بحسب مستوى المواصفة الذي تعلنه الشريحة**:
+ * المراجعة (TPM2_PT_REVISION) وتاريخ المواصفة/الإراتا (TPM2_PT_YEAR، TPM2_PT_DAY_OF_YEAR).
  *
- * - قيمة موجبة ⇒ حدّ أعلى لعدد فهارس العدّادات (لا سعة حرّة).
- * - صفر مع مراجعة ≥ 1.59 ⇒ «لا حدّ أقصى ثابتاً»: نصّ NOTE 2 في TPM 2.0 Library Part 2 r1.59
+ * - قيمة موجبة ⇒ `fixed-maximum`: حدّ أعلى لعدد فهارس العدّادات (لا سعة حرّة).
+ * - صفر مع مراجعة ≥ 159 (1.59) ⇒ `no-fixed-maximum`: NOTE 2 في Part 2 r1.59 فأحدث
  *   («The value zero indicates that there is no fixed maximum»).
- * - صفر مع مراجعة أقدم (مثل r1.38 التي تعلنها SLB9670، ADR 0007 annex A) أو بلا مراجعة ⇒
- *   **دلالة غير معرَّفة نصّاً**: NOTE 2 غائبة عن r1.38، فلا يُقرأ الصفر «غير مدعوم» ولا «بلا حدّ».
+ * - صفر مع مراجعة 138 وتاريخ ≥ 2019-07-12 ⇒ `no-fixed-maximum`: النصُّ الأصليُّ لـr1.38 بلا هذه الـNOTE،
+ *   لكنّ إراتا r1.38 (البند 2.22، من v1.8 فأحدث) تضيفها.
+ * - غير ذلك (r1.38 بتاريخٍ أقدمَ أو بلا تاريخ، أو مراجعةٌ أخرى < 159، أو بلا مراجعة) ⇒
+ *   `zero-meaning-not-established`: الدلالةُ **غيرُ مثبَتةٍ من المعلَن**، فلا يُقرأ الصفر «غير مدعوم» ولا «بلا حدّ».
  *
- * ولا يُستنتج من هذه الخاصية دعمُ العدّادات أصلاً: الدعم يُثبَت عملياً بإنشاء عدّاد
- * (`supportProvenBy: 'counter-creation'`)، فلا حقل `supported` في المخرج (LIVE-46، WL-438).
- * التفسير نفسه في `sim/tpm-host/decode_inventory.mjs` (interpretNvCountersMax).
+ * الخاصيةُ لا تُثبت دعمَ العدّادات: `supportProven: false` دائماً، و`supportProofRequires: 'counter-creation'`
+ * يسمّي ما يلزمُ لإثباته (إنشاءُ عدّادٍ فعليّ) ولا يدّعي أنّه حدث (LIVE-46، WL-438).
+ * والمدخلات الخام: رقمٌ صحيحٌ أو نصٌّ عشريٌّ أو `0x…`؛ وما لا يُحلَّل ⇒ فشلٌ مغلق.
  * @param {number|string} rawValue رقم أو نص مثل "0x0"
- * @param {number|string} [revisionTimes100] قيمة TPM2_PT_REVISION الخام (المراجعة × 100، مثل 0x8A = 1.38)
- * @returns {{ok: true, maxCounters: number, revisionTimes100: number|null, supportProvenBy: 'counter-creation',
- *   semantics: 'no-fixed-maximum'|'fixed-maximum'|'zero-meaning-not-defined-for-reported-revision'}|{ok: false, error: string}}
+ * @param {number|string|null} [revisionTimes100] TPM2_PT_REVISION الخام (المراجعة × 100: 0x8A = 1.38، 0x9F = 1.59)
+ * @param {{year?: number|string|null, dayOfYear?: number|string|null}|null} [specDate] TPM2_PT_YEAR وTPM2_PT_DAY_OF_YEAR الخام
+ * @returns {{ok: true, maxCounters: number, revisionTimes100: number|null, specDate: {year: number, dayOfYear: number}|null,
+ *   supportProven: false, supportProofRequires: 'counter-creation', basis: string,
+ *   semantics: 'no-fixed-maximum'|'fixed-maximum'|'zero-meaning-not-established'}|{ok: false, error: string}}
  */
-export function interpretNvCountersMax(rawValue, revisionTimes100) {
-  const value = typeof rawValue === 'number' ? rawValue : parseHexValue(String(rawValue ?? ''));
-  if (value === null || !Number.isInteger(value) || value < 0) {
-    return { ok: false, error: 'NV_COUNTERS_MAX_UNKNOWN: unparsable value' };
-  }
+export function interpretNvCountersMax(rawValue, revisionTimes100, specDate) {
+  const value = parseRawInteger(rawValue);
+  if (value === null) return { ok: false, error: 'NV_COUNTERS_MAX_UNKNOWN: unparsable value' };
   let revision = null;
   if (revisionTimes100 !== undefined && revisionTimes100 !== null) {
-    revision =
-      typeof revisionTimes100 === 'number' ? revisionTimes100 : parseHexValue(String(revisionTimes100));
-    if (revision === null || !Number.isInteger(revision) || revision <= 0) {
-      return { ok: false, error: 'TPM_PT_REVISION_UNKNOWN: unparsable revision' };
-    }
+    revision = parseRawInteger(revisionTimes100);
+    if (revision === null || revision === 0) return { ok: false, error: 'TPM_PT_REVISION_UNKNOWN: unparsable revision' };
   }
-  const base = { ok: true, maxCounters: value, revisionTimes100: revision, supportProvenBy: 'counter-creation' };
-  if (value > 0) return { ...base, semantics: 'fixed-maximum' };
-  if (revision !== null && revision >= 159) return { ...base, semantics: 'no-fixed-maximum' };
-  return { ...base, semantics: 'zero-meaning-not-defined-for-reported-revision' };
+  let date = null;
+  if (specDate !== undefined && specDate !== null) {
+    const year = parseRawInteger(specDate.year);
+    const dayOfYear = parseRawInteger(specDate.dayOfYear);
+    if (year === null || dayOfYear === null || year < 2013 || dayOfYear < 1 || dayOfYear > 366) {
+      return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN: unparsable year/day-of-year' };
+    }
+    date = { year, dayOfYear };
+  }
+  const base = {
+    ok: /** @type {true} */ (true),
+    maxCounters: value,
+    revisionTimes100: revision,
+    specDate: date,
+    supportProven: /** @type {false} */ (false),
+    supportProofRequires: /** @type {'counter-creation'} */ ('counter-creation'),
+  };
+  if (value > 0) return { ...base, semantics: 'fixed-maximum', basis: 'nonzero-value' };
+  if (revision !== null && revision >= 159) {
+    return { ...base, semantics: 'no-fixed-maximum', basis: 'part2-r1.59+-note2' };
+  }
+  if (revision === 138 && date !== null && dateAtLeast(date, R138_ERRATA_2_22_FIRST_CONFIRMED)) {
+    return { ...base, semantics: 'no-fixed-maximum', basis: 'r1.38-errata-2.22' };
+  }
+  return { ...base, semantics: 'zero-meaning-not-established', basis: 'no-normative-text-established-for-reported-level' };
+}
+
+/** @param {{year: number, dayOfYear: number}} a @param {{year: number, dayOfYear: number}} b */
+function dateAtLeast(a, b) {
+  return a.year > b.year || (a.year === b.year && a.dayOfYear >= b.dayOfYear);
+}
+
+/** عددٌ صحيحٌ غيرُ سالبٍ آمنٌ من رقمٍ أو نصٍّ عشريٍّ/`0x…`؛ وإلّا null. */
+function parseRawInteger(v) {
+  const n = typeof v === 'number' ? v : typeof v === 'string' ? parseHexValue(v) : null;
+  return n !== null && Number.isSafeInteger(n) && n >= 0 ? n : null;
 }
 
 /**
