@@ -1,0 +1,11 @@
+Title: Trusted Platform Module Library Part 3: Commands TCG ...
+URL: https://trustedcomputinggroup.org/wp-content/uploads/TCG_TPM2_r1p64_Part3_Commands_15may2021.pdf
+Hostname: trustedcomputinggroup
+Is cached: true
+Is paywall: false
+Trust: {"description":"is trusted for industry standards and technical guidance on trusted computing, including Trusted Platform Module specifications","level":2,"name":"trusted"}
+Content:
+- **Extra, non-authorization session:** Yes. Clause 5.5 states: “If a session is not being used for authorization, at least one of decrypt, encrypt, or audit must be SET. (TPM_RC_ATTRIBUTES).” Therefore, if no command handle requires authorization and an HMAC session is included without any of those attributes set, the specified error is **TPM_RC_ATTRIBUTES**. The same condition applies to any session that is not being used for authorization; an HMAC session is not exempt because it is an HMAC session.
+- **Distinction for an authorization session:** The check above applies when the session is **not** being used for authorization. Clause 5.5 separately requires an authorization session for each handle marked with `@` (`TPM_RC_AUTH_MISSING`). The document also says that only one session is allowed for session auditing, decrypting a command parameter, or encrypting a response parameter; a session not used for authorization must have at least one of `decrypt`, `encrypt`, or `audit` set.
+- **`TPM2_PolicyCommandCode`:** Its command table specifies `TPM_ST_SESSIONS` **if an audit session is present; otherwise `TPM_ST_NO_SESSIONS`**. Its `policySession` handle has **Auth Index: None**. Thus, the table permits an audit session for this command, not an authorization session for `policySession`. A session supplied for auditing must have the audit attribute set; a non-authorization session with none of `audit`, `encrypt`, or `decrypt` set fails the general session-area validation with **TPM_RC_ATTRIBUTES**.
+- **Authorization roles:** The specification defines `USER`, `ADMIN`, and `DUP` as Auth Role values for handles decorated with `@`. `TPM2_PolicyCommandCode`’s `policySession` is not decorated with `@` and has Auth Index None, so no Auth Role is specified for that handle.

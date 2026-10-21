@@ -1,0 +1,28 @@
+Title: Trusted Platform Module Library Part 1: Architecture TCG ...
+URL: https://trustedcomputinggroup.org/wp-content/uploads/TCG_TPM2_r1p59_Part1_Architecture_pub.pdf
+Hostname: trustedcomputinggroup
+Is cached: true
+Is paywall: false
+Trust: {"description":"is trusted for industry standards and technical guidance on trusted computing, including Trusted Platform Module specifications","level":2,"name":"trusted"}
+Content:
+### `TPM_RC_BAD_TAG` / `TPM_ST_RSP_COMMAND`
+| Location | Exact information stated |
+|---|---|
+| Change History, Revision 98, page iii | “Changed TPM_RC_BAD_TAG to 0x01e so that its value would match TPM_BADTAG from 1.2” |
+| §18.2, “responseCode,” page 89 | “A non-zero responseCode indicates an error or fault. In this case, tag will be TPM_ST_NO_SESSIONS, and responseSize is 10, indicating that no octets follow the responseCode. No handle, parameter, or session response components are present.” |
+| §18.2, “tag,” page 89 | The page lists `TPM_ST_NO_SESSIONS` and `TPM_ST_SESSIONS` as the tag values used for commands and responses defined in this specification. |
+The supplied page content does **not** state a specific `TPM_RC_BAD_TAG` response exception involving `TPM_ST_RSP_COMMAND`, nor does it mention `TPM_ST_RSP_COMMAND`.
+### Response HMAC and omission rules
+| Case | Exact rule | Location |
+|---|---|---|
+| Password authorization response | The response `nonceTPM` is “zero-length for a password authorization.” The response `sessionAttributes` are a “copy of the flags from the password authorization in the command, continueSession will be SET.” The response `hmac` is a “zero-length buffer for a password authorization.” | §19.4, Table 13, page 101 |
+| Unbound, unsalted session | If both `tpmKey` and `bind` are `TPM_RH_NULL`, `sessionKey` is “set to an Empty Buffer.” | §19.6.8, page 108 |
+| Empty HMAC key | If `sessionKey` and `authValue` are both Empty Buffers, “the HMAC key will be an Empty Buffer.” The caller may provide the computed `authHMAC` or omit it; if omitted, the `hmac` size is zero and “the TPM will accept this value of hmac as providing valid authorization for the object.” | §19.6.15, page 115 |
+| Empty-HMAC-key response behavior | “The TPM will use the same formulation in the response as was in the command. That is, if hmac was non-zero in the command, the TPM will compute authHMAC as shown in equation (17) and use the result as hmac. If hmac was an Empty Buffer in the command, it will be an Empty Buffer in the response.” | §19.6.15, page 115 |
+| Policy session, `authValue` inclusion | For policy sessions, `authValue` is not included in the HMAC calculation unless the policy session included `TPM2_PolicyAuthValue()` and it was not superseded by `TPM2_PolicyPassword()`. | §19.6.7, Note 1, page 106 |
+| Policy session with `isAuthValueNeeded` SET | The HMAC key is the concatenation of the entity’s `authValue` and the session’s `sessionKey`. With `isAuthValueNeeded` CLEAR, the HMAC key is the session’s `sessionKey`. | §19.6.10, page 110 |
+| `isAuthValueNeeded` meaning | `TPM2_PolicyAuthValue()` sets `policySession→isAuthValueNeeded`; when the policy is used for authorization, the TPM performs an HMAC check if it is SET. The attribute’s default is CLEAR, and it is also cleared by `TPM2_PolicyPassword()`. | §19.7.8, page 126 |
+| `TPM2_PolicyPassword()` | If `policySession→isPasswordNeeded` is SET, the TPM performs a password check. `TPM2_PolicyAuthValue()` and `TPM2_PolicyPassword()` are interchangeable; if both are used, the TPM performs the check according to the last one used in the policy. | §19.7.7.6, pages 124–125 |
+| Policy authorization with an Empty `authValue` | A policy session’s `authValue` is an Empty Buffer if the authorized object’s `authValue` is Empty, or if the policy does not use the object’s `authValue`—that is, the evaluated policy does not contain `TPM2_PolicyAuthValue()`. In these cases, if `sessionKey` is also Empty, `hmac` may be either a valid `authHMAC` or an Empty Buffer. For a bound or salted policy session, `sessionKey` is not Empty and `hmac` must be valid. | §19.6.15, page 115 |
+| Policy containing `TPM2_PolicyPassword()` | “For a policy session that contains TPM2_PolicyPassword(), the password takes precedence and must be present in hmac.” | §19.6.15, page 115 |
+For session-based response authentication, the general HMAC uses `rpHash`; for a response, `nonceNewer` is `nonceTPM` and `nonceOlder` is `nonceCaller`. Nonce size fields are not included in the HMAC computation. (§19.6.7, pages 105–106; §19.6.3.1, page 103.)
