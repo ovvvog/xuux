@@ -12,6 +12,8 @@ export * from './anchor.mjs';
 // المفاتيح لأن كلَّ مَن يبني موفّراً أو هويةً يمرُّ عليه.
 export * from './production-boot.mjs';
 export * from './state-manifest.mjs';
+// WL-434: عقدُ ربطِ NV كما يُختمُ في متنِ البيانِ الموقَّعِ.
+export * from './fnv-binding.mjs';
 
 export * from './key-store.mjs';
 export * from './key-provider.mjs';

@@ -20,7 +20,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
-import { FRESHNESS_GENESIS_ANCHOR } from '../../../src/root-of-trust/index.mjs';
+import { FRESHNESS_GENESIS_ANCHOR, StateManifest, fingerprint } from '../../../src/root-of-trust/index.mjs';
+import { createPublicKey, verify as edVerify } from 'node:crypto';
 import {
   BINDING_CODES,
   BINDING_SCHEMA,
@@ -36,7 +37,7 @@ import {
   encodeRecord,
 } from '../../../sim/freshness-nv/nv-state-bound-socket.mjs';
 import { registerTmpRoot } from '../../helpers/tmp-roots.mjs';
-import { bootRoot, makeKeys } from '../../helpers/wl-326-root.mjs';
+import { bootRoot, makeKeys, pairOf } from '../../helpers/wl-326-root.mjs';
 
 const COUNTER = '0x01500030';
 const RECORD = '0x01500031';
@@ -230,7 +231,7 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       // ربطُ اللقطةِ القديمةِ بايتًا ببايتٍ هو الحاليّ: المتنُ ثابتٌ منذُ التهيئة.
       assert.deepEqual(readFileSync(env.bindingFile), readFileSync(join(h.appNow, 'freshness-nv.binding.json')));
       assert.equal((await rejection(() => env.socket().read())).code, BINDING_CODES.MISMATCH);
-      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_NV_BINDING_MISMATCH');
       // الضابطُ: بلا ربطٍ (‏سلوكُ WL-431) يُقبَلُ الهجومُ نفسُه — فالرفضُ أعلاه من الربطِ لا من غيره.
       const unbound = await bootRoot(env.root, h.keys, env.socket({ binding: null }));
       assert.equal(unbound.freshnessBoot, 'B1');
@@ -312,7 +313,8 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       const parsed = JSON.parse(original);
       const tryAll = async (expect) => {
         assert.equal((await rejection(() => env.socket().read())).code, expect);
-        assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+        // WL-434: رموزُ الرفضِ المسمّاةُ تصلُ إلى القرارِ كما هي — قائمةٌ مغلقة.
+        assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, expect);
       };
       rmSync(env.bindingFile);
       await tryAll(BINDING_CODES.INVALID);
@@ -371,7 +373,7 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
           restoreApp(env, snap);
           const error = await rejection(() => bootRoot(env.root, h.keys, env.socket()));
           assert.ok(
-            ['FRESHNESS_SOURCE_UNAVAILABLE', 'STALE_MANIFEST_EPOCH'].includes(error.code),
+            ['FRESHNESS_SOURCE_UNAVAILABLE', 'FRESHNESS_NV_BINDING_MISMATCH', 'STALE_MANIFEST_EPOCH'].includes(error.code),
             `قُبِلت حالةٌ بعدَ إعادةِ التعريف: ${error.code}`,
           );
         }
@@ -392,7 +394,7 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       assert.equal(error.code, 'FRESHNESS_ADVANCE_UNRESOLVED');
       assert.equal((await rejection(() => commitCommand(runtime, 'cmd-4'))).code, 'COMMIT_BARRIER_FENCED');
       await runtime.close();
-      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_SOURCE_UNAVAILABLE');
+      assert.equal((await rejection(() => bootRoot(env.root, h.keys, env.socket()))).code, 'FRESHNESS_NV_BINDING_INVALID');
       writeFileSync(env.bindingFile, original);
       const after = await env.socket().inspect();
       assert.equal(after.counter, h.now.counter, 'لا زيادةَ بلا ربطٍ موثوق');
@@ -427,6 +429,107 @@ describe('WL-433 — معالجةُ T7 بربطٍ مختومٍ خارجَ R (م�
       assert.equal((await rejection(() => fresh.provision())).code, BINDING_CODES.INVALID);
     } finally {
       await env.cleanup();
+    }
+  });
+});
+
+describe('WL-434 — الربطُ داخلَ متنِ البيانِ المختومِ لا ملفًّا جانبيًّا (محاكاةٌ لا عتاد)', { skip }, () => {
+  /** موقّعُ بيانٍ بعقدِ `ManifestSealer` من مفاتيحِ الإقلاعِ نفسِها — لقراءةٍ مُتحقَّقٍ من الختمِ. */
+  function manifestSealerOf(keys) {
+    const pub = createPublicKey(keys.anchor.pub);
+    const pair = pairOf(keys.anchor);
+    const id = 'king:' + fingerprint(pub).slice(0, 24);
+    return {
+      id,
+      signAsync: async (payload) => edSign(null, Buffer.from(JSON.stringify(payload)), pair.privateKey).toString('base64'),
+      verify: (payload, signature) =>
+        edVerify(null, Buffer.from(JSON.stringify(payload)), pub, Buffer.from(signature, 'base64')),
+    };
+  }
+
+  test('الإقلاعُ المعلَنُ يختمُ مادّةَ المرجعِ الحيّ في المتنِ، والمقبسُ يستهلكُهُ من البيانِ المُتحقَّقِ منهِ، وحذفُ البيانِ أو تحريرُهُ رفضٌ مسمّى', async () => {
+    const base = tmp('wl434-sim-');
+    const sw = new SwtpmInstance({ stateDir: join(base, 'swtpm-state') });
+    mkdirSync(sw.stateDir, { recursive: true });
+    await sw.start();
+    try {
+      const root = join(base, 'app-root');
+      mkdirSync(root, { recursive: true });
+      const keys = makeKeys();
+      const sealer = manifestSealerOf(keys);
+      const manifestFile = join(root, 'root-of-trust.manifest.json');
+      /** يقرأُ الربطَ من البيانِ **مُتحقَّقًّا من ختمِهِ** في كلّ مرةٍ — لا نسخةً محفوظةً. */
+      const readBinding = () => {
+        const manifest = new StateManifest(manifestFile, { fsync: false, sealer });
+        return manifest.read().freshnessBinding ?? null;
+      };
+      const socket = (opts = {}) =>
+        new SwtpmNvStateBoundSocket({
+          tools: () => sw.tools(),
+          counterIndex: COUNTER,
+          recordIndex: RECORD,
+          lockDir: join(base, 'locks'),
+          manifestBinding: readBinding,
+          ...opts,
+        });
+      // التهيئةُ بلا ربطٍ (‏v2 تاريخيّ): المقبسُ يقرأُ `base` من `R` حتى المراسمِ.
+      const { base: provisionedBase } = await socket().provision();
+      // الإقلاعُ المعلَنُ: B10 يجمعُ المادّةَ من المرجعِ الحيّ (المقبضانِ والاسمانِ و`base`)
+      // ويختمُها في المتنِ — فلا ملفَّ ربطٍ جانبيًّا في المسارِ البتةَ.
+      const first = await bootRoot(root, keys, socket(), { env: { XUUX_FRESHNESS_BIND_DECLARED: '1' } });
+      assert.equal(first.freshnessBoot, 'B10');
+      const sealed = JSON.parse(readFileSync(manifestFile, 'utf8'));
+      assert.equal(sealed.body.version, 3, 'مخطّطُ NV بعدَ المراسمِ');
+      // قراءةٌ مستقلةٌ من NV نفسِهِ (tpm2_nvreadpublic خارجَ المقبسِ) — لا مقارنةَ
+      // بيانٍ بنفسِهِ: المختومُ في المتنِ يجبُ أن يطابقَ الاسمَ كما يُقرأُ من العتادِ
+      // المحاكى مباشرةً.
+      const liveCounterName = parseNvName(await sw.tools().exec('tpm2_nvreadpublic', [COUNTER]));
+      assert.equal(sealed.body.freshnessBinding.counterName, liveCounterName, 'الربطُ من المرجعِ الحيّ');
+      assert.equal(sealed.body.freshnessBinding.recordName, parseNvName(await sw.tools().exec('tpm2_nvreadpublic', [RECORD])), 'واسمُ السجلِّ كذلكَ');
+      assert.equal(sealed.body.freshnessBinding.base, provisionedBase.toString(), 'base من قيمةِ C عندَ الربطِ');
+      assert.equal(sealed.body.freshnessBinding.instanceId, sealed.body.instanceId, 'مربوطٌ بنسخةِ الجذرِ');
+      await first.close();
+      // إقلاعٌ ثانٍ: المقبسُ يستهلكُ الربطَ من البيانِ المُتحقَّقِ منهِ (لا من `R` ولا من ملفٍّ)،
+      // ومقارنةُ البيانِ والمصدرِ عندَ الإقلاعِ تمرُّ — فالمصدرُ هو الذي ملأ المتنَ.
+      const second = await bootRoot(root, keys, socket(), { env: {} });
+      assert.equal(second.freshnessBoot, 'B1');
+      // والعملُ يزدهرُ فوقَ الربطِ من البيانِ: أمرٌ يُثبَّتُ في سجلٍّ قائمٍ.
+      await commitCommand(second, 'cmd-1');
+      const beforeDelete = await socket().read();
+      const before = readFileSync(manifestFile, 'utf8');
+      // حذفُ البيانِ **والنظامُ يعملُ**: المعاملةُ اللاحقةُ تُرفَضُ قبلَ أيّ زيادةٍ في
+      // العهدِ (الرفضُ المسمّى `FRESHNESS_NV_BINDING_INVALID` من مصدرِ المقبسِ نفسِهِ —
+      // المقبسُ يستهلكُ الربطَ من البيانِ فيلفُّ فقدانَهُ برمزِ الربطِ)، والعدادُ لا يتقدّمُ.
+      rmSync(manifestFile);
+      let failed = null;
+      try {
+        await commitCommand(second, 'cmd-2');
+      } catch (error) {
+        failed = error;
+      }
+      assert.ok(failed !== null, 'المعاملةُ بعدَ فقدانِ البيانِ تُرفَضُ');
+      assert.ok(
+        ['FRESHNESS_NV_BINDING_INVALID', 'FRESHNESS_ADVANCE_UNRESOLVED', 'STATE_ROOT_UNPROVISIONED'].includes(
+          failed.code,
+        ),
+        `رفضٌ مسمّى مغلقٌ (وكُتبَ ${failed.code})`,
+      );
+      const afterDelete = await socket().read();
+      assert.equal(afterDelete.epoch, beforeDelete.epoch, 'والعهدُ لم يتقدّمْ — لا زيادةً بلا بيانٍ');
+      await second.close();
+      // استرجاعُ البيانِ لفحصِ التحريفِ: المحتوى الأصليُّ محفوظٌ في `before` أعلاه.
+      writeFileSync(manifestFile, before);
+      // وتحريرُ الربطِ في المتنِ يُسقِطُ ختمَهُ فورًا.
+      const tampered = JSON.parse(before);
+      tampered.body.freshnessBinding.base = '0';
+      writeFileSync(manifestFile, JSON.stringify(tampered, null, 2) + '\n');
+      assert.equal((await rejection(() => socket().read())).code, BINDING_CODES.INVALID, 'بيانٌ مُحرَّفٌ ⇒ ربطٌ غيرُ صالحٍ');
+      // والاسترجاعُ: البيانُ الأصليُّ يعيدُ القراءةَ كما كانت.
+      writeFileSync(manifestFile, before);
+      assert.equal((await socket().read()).epoch, beforeDelete.epoch, 'البيانُ الأصليُّ يعملُ كما كان');
+    } finally {
+      await sw.dispose();
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });

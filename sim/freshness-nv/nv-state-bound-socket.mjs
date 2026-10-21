@@ -54,9 +54,16 @@ import {
 } from '../../src/root-of-trust/index.mjs';
 import { BINDING_CODES, normalizeHandle, openBindingFile, parseNvName, sealBindingFile } from './pinned-binding.mjs';
 import { codedError } from './swtpm-harness.mjs';
+import { manifestFnvBindingShapeError } from '../../src/root-of-trust/fnv-binding.mjs';
 
 export const RECORD_SIZE = 128;
 const MAGIC = Buffer.from('XFN1', 'ascii');
+
+/**
+ * هويةُ TPM المعلنةُ للمحاكاةِ — ليست إثباتَ هويةِ عتادٍ (لا backend إنتاجيًّا يوفرُ
+ * هويةً حقيقيّةً اليوم)؛ البنيةُ نفسُها التي سيملؤها المصدرُ الحقيقيّ.
+ */
+export const SIM_TPM_IDENTITY = Object.freeze({ kind: 'ek-name', value: `000b${'e'.repeat(64)}` });
 const HEX64 = /^[0-9a-f]{64}$/;
 
 /** رموزُ هذا المجسِّ (‏كلُّها «نتيجةٌ مجهولةٌ أو مرجعٌ غيرُ مقروءٍ» — ليست `FreshnessAdvanceError`). */
@@ -149,8 +156,11 @@ export class SwtpmNvStateBoundSocket {
   /**
    * @param {{tools: () => import('./swtpm-harness.mjs').Tpm2Tools, counterIndex: string,
    *   recordIndex: string, lockDir: string, lockTimeoutMs?: number, unsafeNoLock?: boolean, pinnedBase?: bigint,
-   *   binding?: {file: string, publicKey: import('node:crypto').KeyObject}}} opts
+   *   binding?: {file: string, publicKey: import('node:crypto').KeyObject},
+   *   manifestBinding?: () => (object|null)}} opts
    *   ‏`tools` دالّةٌ لا كائنٌ: منفذُ المحاكي يتغيّرُ عندَ إعادةِ تشغيلِه.
+   *   ‏`manifestBinding` (WL-434): دالّةٌ تُقرأُ **في كلّ تحقّقٍ** من البيانِ المختومِ نفسِه —
+   *   البيانُ مصدرُ الحقيقةِ الوحيدُ لا ملفٌّ جانبيٌّ ثانٍ. غيابُ الربطِ (null) رفضٌ مغلقٌ.
    */
   constructor(opts) {
     this.toolsOf = opts.tools;
@@ -166,7 +176,73 @@ export class SwtpmNvStateBoundSocket {
      * الوحيد، ويُتحقَّقُ منه في كلِّ قراءةٍ وانتقال (‏`sim/freshness-nv/pinned-binding.mjs`).
      */
     this.binding = opts.binding ?? null;
+    /**
+     * WL-434: الربطُ من متنِ البيانِ المختومِ — يُقرأُ حديثًا في كلّ تحقّقٍ لا نسخةً واحدةً
+     * عندَ البناءِ، فيبقى فحصُ كلّ قراءةٍ حاضرًا ولو حُذفَ البيانُ أو حُرّفَ بعدَها.
+     */
+    this.manifestBinding = opts.manifestBinding ?? null;
     mkdirSync(this.lockDir, { recursive: true });
+  }
+
+  /**
+   * الربطُ المثبّتُ الفعّالُ الذي يتحقّقُ منه المقبسُ — كما يكشفُه لمسارِ الإقلاعِ
+   * (WL-434): مقارنةُ البيانِ والمصدرِ إلزامٌ عندَ الإقلاعِ، وغيابُ الكشفِ ليسِ تخطيًا.
+   * `base` سلسلةٌ عشريةٌ كانونيةٌ كي تُقارَنَ بالقيمةِ لا بالنوعِ. ملفُّ WL-433 الجانبيُّ
+   * أقدمُ مخطّطًا ولا يحملُ الهويةَ والسياسةَ — حدٌّ معلَنٌ في المقارنةِ.
+   * @returns {{counterIndex: string, recordIndex: string, counterName: string, recordName: string,
+   *   base: string, tpmIdentity?: object, authPolicy?: object}|null}
+   */
+  pinnedBinding() {
+    if (this.manifestBinding !== null) {
+      let fromManifest;
+      try {
+        fromManifest = this.manifestBinding();
+      } catch (error) {
+        // بيانٌ غائبٌ (لم يُهيَّأْ بعدُ أو حُذِفَ): لا ربطَ يُكشَفُ من المتنِ — والمقبسُ
+        // يقرأُ `base` من `R` كعهدِ ما قبلَ المراسمِ. ليست ثغرةً: كلُّ مسارِ قبولٍ
+        // (الإقلاعُ والمعاملةُ) يقرأُ البيانَ بنفسِهِ فسقوطُهُ هناكَ `STATE_ROOT_UNPROVISIONED`
+        // المسمّاة. أمّا التحريرُ (ختمٌ مكسورٌ) فرمزُهُ `INVALID` أدناه.
+        if (error.code === 'STATE_ROOT_UNPROVISIONED') return null;
+        // بيانٌ مُحرَّفٌ أثناءَ التشغيلِ: رفضٌ مسمّى لا خطأٌ مجهولٌ يُقرأُ B0.
+        throw codedError(BINDING_CODES.INVALID, `manifest binding unreadable: ${error.code ?? error.name}`);
+      }
+      if (fromManifest === null) return null;
+      const shapeError = manifestFnvBindingShapeError(fromManifest);
+      if (shapeError !== null) throw codedError(BINDING_CODES.INVALID, `manifest binding ${shapeError}`);
+      return fromManifest;
+    }
+    if (this.binding !== null) {
+      const file = openBindingFile(this.binding.file, this.binding.publicKey);
+      return {
+        counterIndex: file.counterIndex,
+        recordIndex: file.recordIndex,
+        counterName: file.counterName,
+        recordName: file.recordName,
+        base: file.base.toString(),
+      };
+    }
+    return null;
+  }
+
+  /**
+   * مادّةُ الربطِ من المرجعِ الحيّ (‏WL-434، مراسمُ B10 المعلنة): المقبضانِ المضبوطانِ
+   * واسمَا NV كما يُقرآنِ الآنَ من `NV_ReadPublic` و`base` كما يُقرأُ من `C`. **الهويةُ
+   * والسياسةُ معلَنتانِ للمحاكاةِ** (‏`SIM_TPM_IDENTITY` ولا سياسةَ على فهرسَي المحاكاةِ)
+   * لا إثباتَ هويةِ عتادٍ — ذاك حدُّ الـbackend الحقيقيّ.
+   * @returns {Promise<import('../../src/root-of-trust/fnv-binding.mjs').FnvBindingMaterial>}
+   */
+  async fnvBindingMaterial() {
+    const counterName = await this.#nvName(this.counterIndex);
+    const recordName = await this.#nvName(this.recordIndex);
+    return {
+      counterIndex: normalizeHandle(this.counterIndex),
+      recordIndex: normalizeHandle(this.recordIndex),
+      counterName,
+      recordName,
+      base: (await this.#readCounter()).toString(),
+      tpmIdentity: SIM_TPM_IDENTITY,
+      authPolicy: { counter: '', record: '' },
+    };
   }
 
   get lockFile() {
@@ -197,10 +273,28 @@ export class SwtpmNvStateBoundSocket {
   }
 
   /**
-   * `base` المثبَّت: من الربطِ المختومِ إن وُجد (‏بعدَ التحقّقِ من ختمِه ومقبضَيه واسمَي NV الحاليَّين)،
-   * أو من `pinnedBase`، أو `null` (‏سلوكُ WL-431: `base` من `R`).
+   * `base` المثبَّت: من الربطِ المختومِ في البيانِ (‏WL-434) إن وُجدَ، أو من ملفِّ
+   * الربطِ الجانبيّ (‏WL-433)، أو من `pinnedBase`، أو `null` (‏سلوكُ WL-431: `base` من `R`).
    */
   async #pinned() {
+    if (this.manifestBinding !== null) {
+      const b = this.pinnedBinding();
+      // ‏`null` = بيانٌ تاريخيّ (v2) بلا ربطٍ: ما قبلَ المراسمِ — سلوكُ WL-431/432 (base
+      // من `pinnedBase` أو `R`). أمّا بيانُ NV (v3) فربطُهُ إلزامٌ في المتنِ نفسِهِ،
+      // وفقدانُهُ أو تحريرُهُ يُرفَضُ قراءةً لا يُكمَلُ استنباطًا.
+      if (b !== null && b !== undefined) {
+        if (
+        b.counterIndex !== normalizeHandle(this.counterIndex) ||
+        b.recordIndex !== normalizeHandle(this.recordIndex)
+      ) {
+          throw codedError(BINDING_CODES.MISMATCH, 'binding handles differ from the configured indices');
+        }
+        const [cn, rn] = [await this.#nvName(this.counterIndex), await this.#nvName(this.recordIndex)];
+        if (cn !== b.counterName) throw codedError(BINDING_CODES.MISMATCH, 'counter NV name differs from the pinned name');
+        if (rn !== b.recordName) throw codedError(BINDING_CODES.MISMATCH, 'record NV name differs from the pinned name');
+        return BigInt(b.base);
+      }
+    }
     if (this.binding === null) return this.pinnedBase;
     const b = openBindingFile(this.binding.file, this.binding.publicKey);
     if (b.counterIndex !== normalizeHandle(this.counterIndex) || b.recordIndex !== normalizeHandle(this.recordIndex)) {
