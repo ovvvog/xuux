@@ -1,0 +1,137 @@
+    57	  writeSync,
+    58	} from 'node:fs';
+    59	import { basename, dirname, join } from 'node:path';
+    60	
+    61	import { isProductionRuntime } from './production-boot.mjs';
+    62	import {
+    63	  FNV_MANIFEST_SCHEMA_VERSION,
+    64	  buildManifestFnvBinding,
+    65	  manifestFnvBindingEqual,
+    66	  manifestFnvBindingShapeError,
+    67	} from './fnv-binding.mjs';
+    68	import type { FnvBindingMaterial, ManifestFnvBinding } from './fnv-binding.mjs';
+    69	
+    70	/** اسمُ الملفِّ في جذرِ الحالةِ — مثبَّتٌ كي لا يُخترَع في موضعينِ. */
+    71	export const STATE_MANIFEST_FILE = 'root-of-trust.manifest.json';
+    72	
+    73	/** دفترُ الرفعِ المتسلسلُ بالتجزئةِ — يجاورُ البيانَ ويُطوى عندَ نقطةِ الضبط. */
+    74	export const STATE_JOURNAL_FILE = 'root-of-trust.manifest.journal';
+    75	
+    76	/**
+    77	 * قفلُ الكاتبِ الواحدِ على دفترِ الرفعِ (‏`WL-165`، امتدادُ `R4-B-03`/`M11.04-F05`).
+    78	 *
+    79	 * **لماذا صارَ لازماً:** الرفعُ كان يقرأُ الرأسَ ثمَّ يُلحِقُ سطراً بلا أيِّ حجزٍ،
+    80	 * والقيمةُ المقروءةُ من ذاكرةِ العمليةِ لا من القرصِ. فعمليّتانِ ترفعانِ الشاهدَ
+    81	 * نفسَه — وهو ما يفعلُه بالضبطِ مُثبِّتُ السجلِّ خارجَ العمليةِ (`scripts/anchor-log.mjs`)
+   825	   * يأخذُ قفلَ الكاتبِ الواحدِ على دفترِ الرفعِ (‏`WL-165`). قفلٌ لعمليةٍ حيّةٍ
+   826	   * أخرى رفضٌ مغلقٌ برمزِه، وقفلٌ لعمليةٍ ميتةٍ أو لا يُقرأُ يُنتزَعُ مرّةً واحدةً:
+   827	   * أثرُ تعطُّلٍ لا ملكيّةٌ قائمةٌ، ولو بقيَ لعطَّلَ الرفعَ أبداً.
+   828	   */
+   829	  #acquireJournalLock(): void {
+   830	    if (this.#journalLockDepth > 0) {
+   831	      this.#journalLockDepth += 1;
+   832	      return;
+   833	    }
+   834	    mkdirSync(dirname(this.journalFile), { recursive: true });
+   835	    for (let attempt = 0; attempt < 2; attempt += 1) {
+   836	      try {
+   837	        const fd = openSync(this.journalLockFile, 'wx', 0o600);
+   838	        try {
+   839	          writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+   840	        } finally {
+   841	          closeSync(fd);
+   842	        }
+   843	        this.#journalLockDepth = 1;
+   844	        return;
+   845	      } catch (error) {
+   846	        if ((error as { code?: string }).code !== 'EEXIST') throw error;
+   847	        const owner = journalLockOwner(this.journalLockFile);
+   848	        if (owner !== null && owner !== process.pid && pidAlive(owner)) {
+   849	          throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
+   850	        }
+   851	        rmSync(this.journalLockFile, { force: true });
+   852	      }
+   853	    }
+   854	    throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'تعذّرَ أخذُ القفل');
+   855	  }
+   856	
+   857	  /** يفكُّ قفلَ الدفترِ عندَ الخروجِ من أعمقِ مستوى أُخِذَ فيه. */
+   858	  #releaseJournalLock(): void {
+   859	    this.#journalLockDepth -= 1;
+   860	    if (this.#journalLockDepth > 0) return;
+   861	    this.#journalLockDepth = 0;
+   862	    rmSync(this.journalLockFile, { force: true });
+   863	  }
+   864	
+   865	  /**
+   866	   * يقرأُ المتنَ الفعّالَ. غيابُ البيانِ أو خاتَمِه أو مرساتِه فشلٌ مغلقٌ لا
+   867	   * صفرٌ صامت.
+   868	   * @returns المتنُ الفعّال
+   869	   */
+   870	  read(): StateManifestBody {
+   184	   الحذفُ يجعلُ تكرارَ القياسِ يبدأُ من حالةٍ جديدة، ولا يُرجِعُ الحصّة. وإعادةُ التعريفِ لا تُرجِعُ العدّادَ إلى الصفر.
+   185	
+   186	## 8. جدولُ الأوامر
+   187	
+   188	### 8.1 قرائيّةٌ — مسموحةٌ الآن
+   189	
+   190	| الأمر | TPM_CC | المقابض | الأثر |
+   191	| --- | --- | --- | --- |
+   192	| `TPM2_GetCapability` (الخصائص، والمقابض، والأوامر، والخوارزميات) | 0x17A | — | لا شيء |
+   193	| `TPM2_NV_ReadPublic` لكلِّ مقبضٍ قائم | 0x169 | القائمة | لا شيء (لا يقرأُ المحتوى) |
+   194	| قراءةُ السجلّ: قوائمُ TBS وسياسةُ TPM، أسماءُ قيمٍ وقيمٌ مسمّاة (Q2) | — | — | لا شيء |
+   195	| `Get-BitLockerVolume` (أنواعُ الحُماةِ فقط) و`dsregcmd /status` (أسطرٌ مسمّاة) | — | — | لا شيء |
+   196	
+   197	### 8.2 مُغيِّرةٌ أو تمسُّ المحتوى — كلٌّ بإذنٍ مستقلّ
+   198	
+   199	| المرحلة | الأمر | TPM_CC | المقبض | التفويض | الأثرُ المتوقّع | التراجع |
+   200	| --- | --- | --- | --- | --- | --- | --- |
+   201	| S1 (سبرٌ مؤقّت) | `NV_DefineSpace` (عدّادٌ مؤقّت) | 0x12A | مقترحٌ في مجالِ المالك | المالك | فهرسٌ جديد، و−1 من الحصّة | `NV_UndefineSpace` (0x122) |
+    84	        public const uint OBJ_NODA = 1u << 10;
+    85	        public const uint OBJ_RESTRICTED = 1u << 16;
+    86	        public const uint OBJ_DECRYPT = 1u << 17;
+    87	        public const uint OBJ_SIGN = 1u << 18;
+    88	
+    89	        public const uint OWNER_INDEX_FIRST = 0x01800000;
+    90	        public const uint OWNER_INDEX_LAST = 0x01BFFFFF;
+    91	
+    92	        // Windows TBS: TPM_E_COMMAND_BLOCKED (winerror.h).
+    93	        public const uint TPM_E_COMMAND_BLOCKED = 0x80280400;
+    94	
+    95	        // رمزُ رفضِ مقبضٍ غيرِ موجودٍ (TPM_RC_HANDLE) — يُستعملُ في جردِ المصالحةِ القرائيّ.
+    96	        public const uint RC_HANDLE = 0x0000018B;
+    97	        // رمزُ رفضِ قراءةِ عدّادٍ غيرِ مهيّأٍ (TPM_RC_NV_UNINITIALIZED).
+    98	        public const uint RC_NV_UNINITIALIZED = 0x0000014A;
+  1231	            catch (Exception e)
+  1232	            {
+  1233	                // الردُّ لم يُستلَمْ بعدَ إرسالِ أمرٍ مُغيِّرٍ: الأثرُ مجهولٌ — يُفشِلُ مغلقًا ويُجردُ لاحقًا.
+  1234	                if (StateChanging.Contains(CommandCodeOf(cmd)))
+  1235	                {
+  1236	                    s.Outcome = "unknown";
+  1237	                    throw new CeremonyUnknownOutcomeException(name, e);
+  1238	                }
+  1239	                throw;
+  1240	            }
+  1241	            s.ResponseCode = p.Rc;
+  1242	            // رفضُ الطبقةِ (TBS) أو أيُّ رمزِ Windows ⇒ توقّفٌ مغلقٌ: لا إعادة، ولا بديل، ولا تخفيفُ سمات.
+  1243	            if ((p.Rc & 0xFFFF0000u) == 0x80280000u)
+  1244	            {
+  1245	                s.Outcome = "blocked";
+  1246	                throw new CeremonyBlockedException(name, p.Rc);
+  1247	            }
+  1248	            if (expectation == "success")
+    49	  const root = env.XUUX_STATE_ROOT ?? resolve(process.cwd(), '.state');
+    50	
+    51	  // مقبسُ الحداثةِ — في الإنتاجِ الحقيقيِّ يلزمُ backend دائمٌ موثوقٌ (لا ذاكرةٌ).
+    52	  // هذا المُشغِّلُ لا يَختلِقُ مقبسَ ذاكرةٍ ولا يقبلُ backend غيرَ مدعومٍ.
+    53	  // إن لم يُتوفَّرْ backend مدعومٌ، يَفشلُ مغلقاً برسالةٍ واضحةٍ قبلَ إنشاءِ النظامِ.
+    54	  /** @type {Set<string>} */
+    55	  const SUPPORTED_FRESHNESS_BACKENDS = new Set([]); // لا backend مدعومٌ في هذه البيئةِ
+    56	  const freshnessBackend = env.XUUX_FRESHNESS_BACKEND ?? '';
+    57	  if (!freshnessBackend) {
+    58	    console.error('ERROR: XUUX_FRESHNESS_BACKEND not set.');
+    59	    console.error(
+    60	      '  Production requires a durable freshness backend (not InMemoryFreshnessSocket).',
+    61	    );
+370:    const dir = tmp('wl434-concurrent-');
+373:      // مراسمانِ متزامنتانِ بمادّتَينِ مختلفتَينِ (‏base مختلفة): تسلسلُ الختومِ

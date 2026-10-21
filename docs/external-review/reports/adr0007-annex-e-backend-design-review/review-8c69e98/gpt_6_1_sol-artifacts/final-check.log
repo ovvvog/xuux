@@ -1,0 +1,226 @@
+final-check-utc=2026-10-21T07:51:03Z
+
+HEAD
+8c69e98dd45f9129698fd2027f00eed20885e748
+
+TRACKED AND UNTRACKED STATUS
+
+SOURCE EQUALITY ROUND 2
+source-diff-exit=0
+
+TARGET HASH
+7d1b9678869a15168e18a5d7f893556a7209188159b1ed311caed22e09bbc79d  docs/adr/0007-annex-e-production-backend-design.md
+
+REPORT CHECK
+{
+  "report": "/tmp/council-wl437-r3/gpt_6_1_sol/report.md",
+  "items": [
+    [
+      1,
+      "holds"
+    ],
+    [
+      2,
+      "holds"
+    ],
+    [
+      3,
+      "holds"
+    ],
+    [
+      4,
+      "holds"
+    ],
+    [
+      5,
+      "open"
+    ],
+    [
+      6,
+      "open"
+    ]
+  ],
+  "previous": [
+    {
+      "id": "WL437-gpt_6_1_sol-01",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-02",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-03",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-04",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-05",
+      "status": "partially"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-06",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-01",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-02",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-03",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-04",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-05",
+      "status": "addressed"
+    }
+  ],
+  "newFindings": [
+    {
+      "id": "WL437-gpt_6_1_sol-R3-01",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-02",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-03",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-04",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-05",
+      "severity": "low"
+    }
+  ],
+  "localCitationCount": 119,
+  "allLocalTargetsExist": true,
+  "forbiddenJudgmentTokens": 0,
+  "reportBytes": 44309
+}
+report-check-exit=0
+
+POST-TIMESTAMP CONSISTENCY CHECK
+{
+  "report": "/tmp/council-wl437-r3/gpt_6_1_sol/report.md",
+  "items": [
+    [
+      1,
+      "holds"
+    ],
+    [
+      2,
+      "holds"
+    ],
+    [
+      3,
+      "holds"
+    ],
+    [
+      4,
+      "holds"
+    ],
+    [
+      5,
+      "open"
+    ],
+    [
+      6,
+      "open"
+    ]
+  ],
+  "previous": [
+    {
+      "id": "WL437-gpt_6_1_sol-01",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-02",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-03",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-04",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-05",
+      "status": "partially"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-06",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-01",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-02",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-03",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-04",
+      "status": "addressed"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R2-05",
+      "status": "addressed"
+    }
+  ],
+  "newFindings": [
+    {
+      "id": "WL437-gpt_6_1_sol-R3-01",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-02",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-03",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-04",
+      "severity": "medium"
+    },
+    {
+      "id": "WL437-gpt_6_1_sol-R3-05",
+      "severity": "low"
+    }
+  ],
+  "localCitationCount": 119,
+  "allLocalTargetsExist": true,
+  "forbiddenJudgmentTokens": 0,
+  "reportBytes": 44273
+}
+post-timestamp-check-exit=0
+
+FINAL REPORT SHA256
+3fe89ba14ca5249e17ff2e4b97fca26c02598f2a4107e6d790f6f173e8eea87a  /tmp/council-wl437-r3/gpt_6_1_sol/report.md
+
+FINAL GIT HEAD AND STATUS
+8c69e98dd45f9129698fd2027f00eed20885e748

@@ -1,0 +1,5 @@
+SIM_STARTUP 80010000000a00000000
+GETCAP_HMAC_ONLY {"command":"0x17a","attrs":"0x1","rc":"0x982","tag":"0x8001","responseBytes":10}
+GETCAP_HMAC_AUDIT {"command":"0x17a","attrs":"0x81","rc":"0x0","tag":"0x8002","responseBytes":100}
+POLICYCOMMANDCODE_HMAC_ONLY {"command":"0x16c","attrs":"0x1","rc":"0x982","tag":"0x8001","responseBytes":10}
+POLICYCOMMANDCODE_HMAC_AUDIT {"command":"0x16c","attrs":"0x81","rc":"0x0","tag":"0x8002","responseBytes":83}
