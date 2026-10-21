@@ -1,0 +1,6 @@
+(node:8810) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("/tmp/council-wl437/gpt_6_1_sol/compiled-source-loader.mjs", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+FIRST_BOOT_INJECTED_STOP {"code":"PROBE_GAP"}
+ON_DISK_AFTER_STOP {"version":3,"bindingPresent":true,"staged":null,"freshnessAnchor":null,"stateDigest":null,"freshnessEpoch":0}
+RESTART {"resumed":false,"code":"STATE_MANIFEST_FNV_BINDING_IMMUTABLE","detail":"ربطٌ قائمٌ؛ إعادةُ الربطِ مراسمُ مالكٍ"}

@@ -1,0 +1,50 @@
+Title: TCG
+URL: https://trustedcomputinggroup.org/wp-content/uploads/TPM-Rev-2.0-Part-3-Commands-01.38.pdf
+Hostname: trustedcomputinggroup
+Is cached: true
+Is paywall: false
+Trust: {"description":"is trusted for industry standards and technical guidance on trusted computing, including Trusted Platform Module specifications","level":2,"name":"trusted"}
+Content:
+### Command-tag processing and `TPM_RC_BAD_TAG`
+- **Section 5.3 — Mode Checks:** In Failure mode, `TPM2_GetTestResult()` and `TPM2_GetCapability()` are accepted only with command tag `TPM_ST_NO_SESSIONS`; otherwise, the TPM returns `TPM_RC_FAILURE`.
+- **Section 5.2 — Command Header Validation:** The TPM shall unmarshal `TPMI_ST_COMMAND_TAG` and verify that it is either `TPM_ST_SESSIONS` or `TPM_ST_NO_SESSIONS`; otherwise, it returns `TPM_RC_BAD_TAG`.
+- **Section 6.1 — Tag, invalid-tag response:** “A special case exists when the command tag parameter is not an allowed value (`TPM_ST_SESSIONS` or `TPM_ST_NO_SESSIONS). For this case, it is assumed that the system software is attempting to send a command formatted for a TPM 1.2 but the TPM is not capable of executing TPM 1.2 commands. So that the TPM 1.2 compatible software will have a recognizable response, the TPM sets tag to `TPM_ST_RSP_COMMAND`, responseSize to `00 00 00 0A₁₆` and responseCode to `TPM_RC_BAD_TAG`. This is the same response as the TPM 1.2 fatal error for `TPM_BADTAG`.”
+### NV Index removal (`TPM2_NV_UndefineSpace`, section 31.4)
+| Item | Details stated in the page |
+|---|---|
+| Purpose | Removes an Index from the TPM. |
+| Authorization handle | `authHandle` is `TPM_RH_OWNER` or `TPM_RH_PLATFORM+{PP}`. It has Auth Index 1 and Auth Role USER. |
+| NV Index parameter | `nvIndex` is the NV Index to remove from NV space; Auth Index: None. |
+| Undefined Index | If `nvIndex` is not defined, the TPM shall return `TPM_RC_HANDLE`. |
+| Platform-created Index | If `nvIndex` has `TPMA_NV_PLATFORMCREATE` SET, the TPM shall return `TPM_RC_NV_AUTHORIZATION` unless Platform Authorization is provided. |
+| Policy-delete attribute | If `nvIndex` has `TPMA_NV_POLICY_DELETE` SET, the TPM shall return `TPM_RC_ATTRIBUTES`. |
+| Owner-created Index and Platform Authorization | An Index with `TPMA_NV_PLATFORMCREATE` CLEAR may be deleted with Platform Authorization as long as `shEnable` is SET. If `shEnable` is CLEAR, indexes created using Owner Authorization are not accessible even for deletion by the platform. |
+### NV Index definition (`TPM2_NV_DefineSpace`, section 31.3)
+| Item | Details stated in the page |
+|---|---|
+| Purpose | Defines the attributes of an NV Index and reserves space for its data. If a definition already exists at the NV Index, the TPM returns `TPM_RC_NV_DEFINED`. |
+| `authHandle` | `TPMI_RH_PROVISION @authHandle`: `TPM_RH_OWNER` or `TPM_RH_PLATFORM+{PP}`; Auth Index 1; Auth Role USER. Owner Authorization cannot be used if `shEnable` is CLEAR; Platform Authorization cannot be used if `phEnableNV` is CLEAR. |
+| `auth` parameter | `TPM2B_AUTH auth` is the authorization value. Its value is saved in the created structure. Its size must be no larger than the digest size produced by the NV Index’s `nameAlg`; otherwise, the TPM returns `TPM_RC_SIZE`. |
+| `publicInfo` | `TPM2B_NV_PUBLIC publicInfo` contains the public parameters of the NV area. |
+| `nameAlg` and extend Index | If `nvIndexType` is `TPM_NT_EXTEND`, `publicInfo→dataSize` must match the digest size of `publicInfo.nameAlg`; otherwise, the TPM returns `TPM_RC_SIZE`. |
+| Reserved Index type | If `nvIndexType` has a reserved value in `publicInfo`, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| Initial-state attributes | `TPMA_NV_WRITTEN`, `TPMA_NV_READLOCKED`, and `TPMA_NV_WRITELOCKED` must not be SET; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| Counter, bits, and PIN Index sizes | For `TPM_NT_COUNTER`, `TPM_NT_BITS`, `TPM_NT_PIN_FAIL`, or `TPM_NT_PIN_PASS`, `publicInfo→dataSize` must be 8; otherwise, the TPM returns `TPM_RC_SIZE`. |
+| Ordinary Index size | If the Index is ordinary and `publicInfo→dataSize` exceeds the implementation’s supported size, the TPM returns `TPM_RC_SIZE`. The page notes that the limit may vary by Index type and attributes. |
+| Read authorization attributes | At least one of `TPMA_NV_PPREAD`, `TPMA_NV_OWNERREAD`, `TPMA_NV_AUTHREAD`, or `TPMA_NV_POLICYREAD` must be SET; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| Write authorization attributes | At least one of `TPMA_NV_PPWRITE`, `TPMA_NV_OWNERWRITE`, `TPMA_NV_AUTHWRITE`, or `TPMA_NV_POLICYWRITE` must be SET; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| `TPMA_NV_CLEAR_STCLEAR` | If SET, `nvIndexType` must not be `TPM_NT_COUNTER`; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| `TPMA_NV_PLATFORMCREATE` and authorization | If Platform Authorization/Policy is used, `TPMA_NV_PLATFORMCREATE` must be SET. If Owner Authorization/Policy is used, it must be CLEAR. An incorrect setting returns `TPM_RC_ATTRIBUTES`. |
+| `TPMA_NV_POLICY_DELETE` | If SET, authorization must be with Platform Authorization; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| PIN Fail Index | For `TPM_NT_PIN_FAIL`, `TPMA_NV_NO_DA` must be SET; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| PIN Fail/PIN Pass write attributes | For `TPM_NT_PIN_FAIL` or `TPM_NT_PIN_PASS`, at least one of `TPMA_NV_PPWRITE`, `TPMA_NV_OWNERWRITE`, or `TPMA_NV_POLICYWRITE` must be SET, and `TPMA_NV_AUTHWRITE` must be CLEAR; otherwise, the TPM returns `TPM_RC_ATTRIBUTES`. |
+| Implementation support | If the implementation does not support `TPM2_NV_Increment()`, `TPM_NT_COUNTER` is not allowed; if it does not support `TPM2_NV_SetBits()`, `TPM_NT_BITS` is not allowed; if it does not support `TPM2_NV_Extend()`, `TPM_NT_EXTEND` is not allowed; and if it does not support `TPM2_NV_UndefineSpaceSpecial()`, `TPMA_NV_POLICY_DELETE` is not allowed. Each such unsupported use returns `TPM_RC_ATTRIBUTES`. |
+| After successful definition | The NV Index exists, but `TPMA_NV_WRITTEN` is CLEAR. Access to its NV data returns `TPM_RC_NV_UNINITIALIZED`. If lack of resources prevents defining a counter Index, the TPM returns `TPM_RC_NV_SPACE`. |
+### Session state on `TPM_RC_RETRY`, `TPM_RC_YIELDED`, and `TPM_RC_TESTING`
+- **Section 5.9 — Command Post Processing:** “If that code is not `TPM_RC_SUCCESS`, the post processing code will not update any session or audit data and will return a 10-octet response packet.” On success, the TPM generates a new nonce for each session.
+- **Section 6.2 — Response Codes:** The general rule is that any response other than `TPM_RC_SUCCESS` means the command did not complete and TPM state is unchanged, with the stated exception that dictionary-attack protection logic may be modified on authorization failure.
+- The page describes the three codes as follows:
+  - `TPM_RC_RETRY`: “the TPM was not able to start the command.”
+  - `TPM_RC_YIELDED`: “the TPM has suspended operation on the command; forward progress was made and the command may be retried.”
+  - `TPM_RC_TESTING`: “the TPM is performing tests and cannot respond to the request at this time. The command may be retried.”
+- **Nonce/session conclusion:** The page says unsuccessful-command post-processing does not update session data, and nonce generation is described as success post-processing. It does not state a separate, code-specific nonce rule for these three response codes; for `TPM_RC_YIELDED`, it additionally states that forward progress was made.
