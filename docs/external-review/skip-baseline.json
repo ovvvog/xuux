@@ -5,18 +5,18 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "957f6a6bf09423c66a403db6395c27c1fbe7535c",
-      "mainHeadAtMeasure": "957f6a6bf09423c66a403db6395c27c1fbe7535c",
-      "scopeDigest": "9791a5edde159fc7e5f747f7ac6e0846f3142578e1d045098d4e7dcee662f268",
-      "measuredOn": "2026-10-19",
+      "commit": "dcd1e90f347a0112e4f865db618f4f21e18215bf",
+      "mainHeadAtMeasure": "dcd1e90f347a0112e4f865db618f4f21e18215bf",
+      "scopeDigest": "40df7424f15efadb1f222ec6d874d80d888980246577959f8838de121baae81e",
+      "measuredOn": "2026-10-21",
       "verdict": "success",
-      "testFileCount": 272,
-      "tests": 2911,
-      "pass": 2585,
+      "testFileCount": 276,
+      "tests": 2947,
+      "pass": 2621,
       "fail": 0,
       "skipped": 326,
-      "skipLines": 328,
-      "topLevelSkipPoints": 315,
+      "skipLines": 331,
+      "topLevelSkipPoints": 318,
       "attributedToDatabaseUrl": 149,
       "otherReasons": [
         {
@@ -36,6 +36,10 @@
           "count": 5
         },
         {
+          "reason": "يتطلّبُ XUUX_TPM_SIM=1 معَ swtpm وtpm2-tools (‏scripts/tpm-sim-ci.sh)",
+          "count": 3
+        },
+        {
           "reason": "XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI",
           "count": 2
         },
@@ -52,7 +56,7 @@
           "count": 1
         },
         {
-          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.",
+          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ)، ونقلَ SMTP يكتبُه المركِّبُ في موقعِ التركيبِ بعد WL-426 (وحدةُ القناةِ لم تعد تُصدِّرُ نقلًا خامًا). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.",
           "count": 1
         }
       ]
@@ -61,18 +65,18 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "957f6a6bf09423c66a403db6395c27c1fbe7535c",
-      "mainHeadAtMeasure": "957f6a6bf09423c66a403db6395c27c1fbe7535c",
-      "scopeDigest": "9791a5edde159fc7e5f747f7ac6e0846f3142578e1d045098d4e7dcee662f268",
-      "measuredOn": "2026-10-19",
+      "commit": "dcd1e90f347a0112e4f865db618f4f21e18215bf",
+      "mainHeadAtMeasure": "dcd1e90f347a0112e4f865db618f4f21e18215bf",
+      "scopeDigest": "40df7424f15efadb1f222ec6d874d80d888980246577959f8838de121baae81e",
+      "measuredOn": "2026-10-21",
       "verdict": "success",
-      "testFileCount": 272,
-      "tests": 2911,
-      "pass": 2585,
+      "testFileCount": 276,
+      "tests": 2947,
+      "pass": 2621,
       "fail": 0,
       "skipped": 326,
-      "skipLines": 328,
-      "topLevelSkipPoints": 315,
+      "skipLines": 331,
+      "topLevelSkipPoints": 318,
       "attributedToDatabaseUrl": 149,
       "otherReasons": [
         {
@@ -92,6 +96,10 @@
           "count": 5
         },
         {
+          "reason": "يتطلّبُ XUUX_TPM_SIM=1 معَ swtpm وtpm2-tools (‏scripts/tpm-sim-ci.sh)",
+          "count": 3
+        },
+        {
           "reason": "XUUX_CHANNEL_POC=1 غيرُ مُعلَنٍ — مسارُ القناةِ الحيُّ محلّيٌّ لا CI",
           "count": 2
         },
@@ -108,7 +116,7 @@
           "count": 1
         },
         {
-          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.",
+          "reason": "يحتاج بيانات اعتماد SMTP صحيحة (Gmail App Password + 2FA) وسياسةَ خروجٍ تأذنُ للفاعلِ بمضيفِ SMTP (قرارُ مالكٍ على حزمةِ السياساتِ — الافتراضُ منعٌ)، ونقلَ SMTP يكتبُه المركِّبُ في موقعِ التركيبِ بعد WL-426 (وحدةُ القناةِ لم تعد تُصدِّرُ نقلًا خامًا). القناةُ تمرُّ عبرَ بوابةِ الخروجِ (R5-B-04) لا اتصالًا مباشرًا.",
           "count": 1
         }
       ]
