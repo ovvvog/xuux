@@ -284,14 +284,18 @@ export function interpretNvCountersMax(value, revisionTimes100, specDate) {
   if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) return { ok: false, error: 'NV_COUNTERS_MAX_UNKNOWN' };
   let revision = null;
   if (revisionTimes100 !== undefined && revisionTimes100 !== null) {
-    if (!Number.isInteger(revisionTimes100) || revisionTimes100 <= 0) return { ok: false, error: 'TPM_PT_REVISION_UNKNOWN' };
+    // مراجعةٌ فوقَ مدى UINT32 غيرُ قابلةٍ للتحليلِ ⇒ مجهولةٌ لا مقبولة (كما في `sim/tpm/getcap.mjs`، WL-439).
+    if (!Number.isInteger(revisionTimes100) || revisionTimes100 <= 0 || revisionTimes100 > 0xffffffff) {
+      return { ok: false, error: 'TPM_PT_REVISION_UNKNOWN' };
+    }
     revision = revisionTimes100;
   }
   let date = null;
   if (specDate !== undefined && specDate !== null) {
     const year = specDate.year;
     const day = specDate.dayOfYear;
-    if (!Number.isInteger(year) || !Number.isInteger(day) || year < 2013 || day < 1 || day > 366) {
+    // سنةٌ فوقَ مدى UINT32 غيرُ قابلةٍ للتحليلِ ⇒ فشلٌ مغلقٌ لا تخمين (كما في `parseRawInteger` هناك).
+    if (!Number.isInteger(year) || !Number.isInteger(day) || year < 2013 || year > 0xffffffff || day < 1 || day > 366) {
       return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN' };
     }
     date = { year, dayOfYear: day };

@@ -90,6 +90,61 @@ test('static: NV_COUNTERS_MAX — الصفرُ ليس «غيرَ مدعوم»، 
   assert.equal(interpretNvCountersMax(4294967296, 138).ok, false);
   assert.equal(interpretNvCountersMax('8', 138).ok, false);
   assert.equal(interpretNvCountersMax(0, 0).ok, false);
+  // فوقَ مدى UINT32: فشلٌ مغلقٌ لا قبول (كما في WL-439).
+  assert.equal(interpretNvCountersMax(0, 0x100000000).ok, false);
+  assert.equal(interpretNvCountersMax(0, 138, { year: 0x100000000, dayOfYear: 193 }).ok, false);
+});
+
+test('static: NV_COUNTERS_MAX — شاهدُ الفجوةِ الدلاليّةِ لمعيارِ LIVE-58: صفرٌ على r1.38 بتاريخِ إراتا v1.8 (2019-07-12) ⇒ no-fixed-maximum', () => {
+  // هذا الاختبارُ هو شاهدُ الفجوةِ الدلاليّةِ نفسِها (لا شكلِ الحقولِ): الصيغةُ القديمةُ كانت تُرجعُ
+  // `zero-meaning-not-defined-for-reported-revision` مهما كانَ التاريخُ لأنّها لا تأخذُه أصلًا.
+  const errata = interpretNvCountersMax(0, 138, { year: 2019, dayOfYear: 193 });
+  assert.equal(errata.ok, true);
+  assert.equal(errata.semantics, 'no-fixed-maximum');
+  assert.equal(errata.basis, 'r1.38-errata-2.22');
+});
+
+test('static: جردٌ اصطناعيٌّ عبرَ بايتاتِ الخصائصِ: r1.38 بتاريخِ 2019-07-12 وNV_COUNTERS_MAX=0 ⇒ no-fixed-maximum من المسارِ الكاملِ', () => {
+  // بناءُ ردِّ GetCapability(TPM_CAP_TPM_PROPERTIES) صحيحًا بايتًا بايتًا، وتمريرُه من
+  // analyzeInventory — فالإثباتُ أنّ التاريخَ يمرُّ من الجردِ إلى المُفسِّرِ لا من الحقلِ المباشرِ وحده.
+  const props = [
+    [0x102, 138], // TPM_PT_REVISION = 1.38
+    [0x104, 2019], // TPM_PT_YEAR
+    [0x103, 193], // TPM_PT_DAY_OF_YEAR (2019-07-12)
+    [0x116, 0], // TPM_PT_NV_COUNTERS_MAX = 0
+  ];
+  const body = Buffer.alloc(9 + props.length * 8);
+  body.writeUInt8(0, 0); // moreData = NO
+  body.writeUInt32BE(0x6, 1); // capability = TPM_CAP_TPM_PROPERTIES
+  body.writeUInt32BE(props.length, 5);
+  props.forEach(([p, v], i) => {
+    const o = 9 + i * 8;
+    body.writeUInt32BE(p, o);
+    body.writeUInt32BE(v, o + 4);
+  });
+  const res = Buffer.alloc(10 + body.length);
+  res.writeUInt16BE(0x8001, 0); res.writeUInt32BE(res.length, 2); res.writeUInt32BE(0, 6);
+  body.copy(res, 10);
+  const req = Buffer.alloc(22);
+  req.writeUInt16BE(0x8001, 0); req.writeUInt32BE(22, 2); req.writeUInt32BE(0x17a, 6);
+  req.writeUInt32BE(0x6, 10); req.writeUInt32BE(0x100, 14); req.writeUInt32BE(64, 18);
+  const doc = {
+    schema: 'xuux.tpm-host-inventory/1',
+    exitCode: 0,
+    status: 'COMPLETE',
+    inventory: {
+      transport: 'simulator:swtpm-synth',
+      queries: [{ id: 'q-props', requestHex: req.toString('hex'), responseHex: res.toString('hex') }],
+      capabilities: [{ name: 'tpm-properties-fixed', queryIds: ['q-props'], complete: true }],
+    },
+  };
+  const r = analyzeInventory(doc);
+  assert.equal(r.tpm.specRevisionTimes100, 138);
+  assert.equal(r.tpm.specYear, 2019);
+  assert.equal(r.tpm.specDayOfYear, 193);
+  assert.equal(r.nv.nvCountersMax.ok, true);
+  assert.equal(r.nv.nvCountersMax.semantics, 'no-fixed-maximum');
+  assert.equal(r.nv.nvCountersMax.basis, 'r1.38-errata-2.22');
 });
 
 test('static: الجردُ الكاملُ يمرّرُ المراجعةَ والتاريخَ إلى المُفسِّرِ (swtpm: r1.83 وتاريخُ 2024)', () => {
