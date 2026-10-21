@@ -1,0 +1,9 @@
+{
+  "extends": "/tmp/wt-992230c-gpt/tsconfig.build.json",
+  "compilerOptions": {
+    "outDir": "/tmp/council-wl437-r2/gpt_6_1_sol/build",
+    "typeRoots": ["/tmp/wt-992230c-gpt/node_modules/@types"],
+    "sourceMap": false,
+    "declaration": false
+  }
+}
