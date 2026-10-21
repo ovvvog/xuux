@@ -55,18 +55,50 @@ test('static: transport=tbs وحدَه يُصنَّفُ hardware-tbs؛ والم�
   assert.equal(analyzeInventory(hostDoc({ ...inv, transport: 'mystery' })).evidenceClass, 'unknown-transport');
 });
 
-test('static: NV_COUNTERS_MAX — الصفرُ ليس «غيرَ مدعوم»، ودلالتُه تتبعُ المراجعةَ المعلنة', () => {
+test('static: NV_COUNTERS_MAX — الصفرُ ليس «غيرَ مدعوم»، ودلالتُه تتبعُ مستوى المواصفةِ المعلَنَ (المراجعةُ وتاريخُ الإراتا) كما في WL-439', () => {
+  // r1.59 فأحدث: NOTE 2 — والمراجعةُ تغلبُ التاريخَ (r1.59 بتاريخٍ قديمٍ تبقى بلا حدٍّ ثابتٍ).
   assert.equal(interpretNvCountersMax(0, 159).semantics, 'no-fixed-maximum');
   assert.equal(interpretNvCountersMax(0, 183).semantics, 'no-fixed-maximum');
+  assert.equal(interpretNvCountersMax(0, 159, { year: 2014, dayOfYear: 10 }).semantics, 'no-fixed-maximum');
+  assert.equal(interpretNvCountersMax(0, 183).basis, 'part2-r1.59+-note2');
+  // r1.38: النصُّ الأصليُّ بلا NOTE؛ والإراتا (البندُ 2.22، من v1.8 بتاريخ 2019-07-12 = اليوم 193) تضيفُها.
   const r138 = interpretNvCountersMax(0, 138);
-  assert.equal(r138.semantics, 'zero-meaning-not-defined-for-reported-revision');
+  assert.equal(r138.semantics, 'zero-meaning-not-established');
   assert.match(r138.note, /does not mean unsupported/);
-  assert.equal(interpretNvCountersMax(0, undefined).semantics, 'zero-meaning-not-defined-for-reported-revision');
+  assert.equal(interpretNvCountersMax(0, undefined).semantics, 'zero-meaning-not-established');
+  assert.equal(interpretNvCountersMax(0, 138, null).semantics, 'zero-meaning-not-established');
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2017, dayOfYear: 16 }).semantics, 'zero-meaning-not-established'); // إراتا v1.0
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2019, dayOfYear: 192 }).semantics, 'zero-meaning-not-established'); // اليومُ قبلَ v1.8
+  assert.equal(interpretNvCountersMax(0, undefined, { year: 2024, dayOfYear: 25 }).semantics, 'zero-meaning-not-established'); // تاريخٌ بلا مراجعةٍ لا يكفي
+  assert.equal(interpretNvCountersMax(0, 137, { year: 2024, dayOfYear: 25 }).semantics, 'zero-meaning-not-established'); // مراجعةٌ أخرى غيرُ 138
+  const errata = interpretNvCountersMax(0, 138, { year: 2019, dayOfYear: 193 });
+  assert.equal(errata.semantics, 'no-fixed-maximum');
+  assert.equal(errata.basis, 'r1.38-errata-2.22');
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2024, dayOfYear: 25 }).semantics, 'no-fixed-maximum');
+  // لا ادّعاءَ دعمٍ: الخاصيةُ لا تُثبِتُه (WL-439).
+  assert.equal(errata.supportProven, false);
+  assert.equal(errata.supportProofRequires, 'counter-creation');
+  // القيمةُ الموجبةُ حدٌّ أعلى لا سعةٌ حرّة.
   const r8 = interpretNvCountersMax(8, 138);
   assert.equal(r8.semantics, 'fixed-maximum');
   assert.match(r8.note, /not free capacity/);
+  // فشلٌ مغلق: تاريخٌ ناقصٌ أو خارجُ المدى، وقيمٌ غيرُ قابلةٍ للتحليل.
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2019 }).ok, false);
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2012, dayOfYear: 200 }).ok, false);
+  assert.equal(interpretNvCountersMax(0, 138, { year: 2019, dayOfYear: 400 }).ok, false);
   assert.equal(interpretNvCountersMax(-1, 138).ok, false);
+  assert.equal(interpretNvCountersMax(4294967296, 138).ok, false);
   assert.equal(interpretNvCountersMax('8', 138).ok, false);
+  assert.equal(interpretNvCountersMax(0, 0).ok, false);
+});
+
+test('static: الجردُ الكاملُ يمرّرُ المراجعةَ والتاريخَ إلى المُفسِّرِ (swtpm: r1.83 وتاريخُ 2024)', () => {
+  const r = analyzeInventory(hostDoc(loadFixture()));
+  assert.equal(r.nv.nvCountersMax.ok, true);
+  assert.equal(r.nv.nvCountersMax.semantics, 'no-fixed-maximum');
+  assert.equal(r.nv.nvCountersMax.basis, 'part2-r1.59+-note2');
+  assert.deepEqual(r.nv.nvCountersMax.specDate, { year: 2024, dayOfYear: 25 });
+  assert.equal(r.nv.nvCountersMax.revisionTimes100, 183);
 });
 
 test('static: ردودٌ مقطوعة/متعارضةُ الطولِ/وسمٌ غريبٌ ⇒ أخطاءٌ مسمّاة', () => {

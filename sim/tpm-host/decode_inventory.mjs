@@ -7,8 +7,10 @@
 // قواعدُ الفشلِ المغلق:
 //   - ما لا يُحلَّلُ يُعلَنُ خطأً مسمّىً ولا يُخمَّن؛ والقيمُ غيرُ المعروفةِ تُحفَظُ أرقاماً.
 //   - أصلُ الدليلِ مُعلَنٌ: transport=tbs ⇒ «hardware-tbs»؛ وأيُّ شيءٍ آخرَ ⇒ ليس دليلَ عتاد.
-//   - الحدُّ الأقصى النظريُّ ليس سعةً حرّة؛ وصفرُ NV_COUNTERS_MAX يُفسَّرُ بحسبِ مراجعةِ المواصفةِ
-//     التي تعلنُها الشريحةُ نفسُها (NOTE 2 موجودةٌ في r1.59 وغائبةٌ عن r1.38).
+//   - الحدُّ الأقصى النظريُّ ليس سعةً حرّة؛ وصفرُ NV_COUNTERS_MAX يُفسَّرُ بحسبِ مستوى
+//     المواصفةِ الذي تعلنُه الشريحةُ (المراجعةُ وتاريخُ الإراتا): NOTE 2 في Part 2 r1.59 فأحدث،
+//     وغائبةٌ عن النصِّ الأصليِّ لـr1.38 — وإراتا r1.38 (البندُ 2.22، من v1.8 بتاريخِ 2019-07-12
+//     فأحدث) تضيفُها، والشريحةُ تعلنُ تاريخَ إراتاها في TPM_PT_YEAR/TPM_PT_DAY_OF_YEAR (LIVE-58).
 //   - قائمةُ TPM_CAP_COMMANDS هي ما تُنفِّذُه الشريحة، لا قائمةُ سماحِ TBS.
 //
 // الاستعمال: node sim/tpm-host/decode_inventory.mjs <inventory.json>
@@ -258,23 +260,68 @@ export function decodeNvReadPublicResponse(bytes, expectedHandle) {
 // مجالُ فهارسِ المالكِ (سجلُّ TCG للمقابضِ المحفوظةِ v1p6؛ ADR 0007 §4.1).
 export const OWNER_INDEX_RANGE = Object.freeze({ first: 0x01800000, last: 0x01bfffff });
 
+// أوّلُ إصدارِ إراتا لـr1.38 تحقّقنا أنّه يحوي البندَ 2.22 (كما في `sim/tpm/getcap.mjs`، WL-439):
+// Errata v1.8، بتاريخ 2019-07-12 (اليوم 193). وإراتا v1.0 (2017-01-16) لا تحويه، وما بينهما
+// (v1.1/v1.3/v1.4) لم يُتحقَّقْ منه فتاريخٌ أقدمُ من v1.8 لا يُثبِتُ الدلالةَ (تحفّظٌ لا نفي).
+const R138_ERRATA_2_22_FIRST_CONFIRMED = { year: 2019, dayOfYear: 193 };
+
 /**
- * تفسيرُ NV_COUNTERS_MAX بحسبِ المراجعةِ المعلنةِ من الشريحة.
+ * تفسيرُ NV_COUNTERS_MAX بحسبِ مستوى المواصفةِ الذي تعلنه الشريحةُ: المراجعةُ وتاريخُ الإراتا —
+ * بالتسمياتِ نفسِها التي في `sim/tpm/getcap.mjs` (WL-439، إغلاقُ LIVE-58).
  * r1.59 Part 2 NOTE 2: «The value zero indicates that there is no fixed maximum».
- * r1.38 Part 2: لا NOTE 2 — فالصفرُ هناك غيرُ معرَّفٍ نصّاً، لا «غيرُ مدعوم» ولا «بلا حد».
+ * النصُّ الأصليُّ لـr1.38 لا يحملُ هذه الملاحظة؛ وإراتاه (البندُ 2.22) تضيفُها — مؤكَّدةٌ في
+ * v1.8 بتاريخِ 2019-07-12 (اليوم 193) فأحدث، وغائبةٌ عن v1.0 (2017-01-16) — والشريحةُ تعلنُ
+ * تاريخَ آخرِ إراتا تطبّقُها في TPM_PT_YEAR/TPM_PT_DAY_OF_YEAR (Errata §2.24).
+ * @param {number} value قيمة TPM_PT_NV_COUNTERS_MAX (رقمٌ من الجردِ المفكوكِ، لا نصٌّ)
+ * @param {number|null} [revisionTimes100] TPM_PT_REVISION (المراجعة × 100) أو null/undefined
+ * @param {{year?: number|null, dayOfYear?: number|null}|null|undefined} [specDate] TPM_PT_YEAR وTPM_PT_DAY_OF_YEAR أو null
+ * @returns {{ok: true, value: number, revisionTimes100: number|null, specDate: {year: number, dayOfYear: number}|null,
+ *   supportProven: false, supportProofRequires: 'counter-creation', basis: string,
+ *   semantics: 'no-fixed-maximum'|'fixed-maximum'|'zero-meaning-not-established'}|{ok: false, error: string}}
+ * التاريخُ المعطىُ غيرُ القابلِ للتحليلِ ⇒ فشلٌ مغلقٌ لا تخمين؛ والغائبُ ⇒ لا إراتا تُفترض.
  */
-export function interpretNvCountersMax(value, revisionTimes100) {
-  if (!Number.isInteger(value) || value < 0) return { ok: false, error: 'NV_COUNTERS_MAX_UNKNOWN' };
-  if (value > 0) return { ok: true, value, semantics: 'fixed-maximum', note: 'upper bound on counter indexes, not free capacity' };
-  if (Number.isInteger(revisionTimes100) && revisionTimes100 >= 159) {
-    return { ok: true, value, semantics: 'no-fixed-maximum', note: 'Part 2 r1.59 NOTE 2: bounded by the NV memory pool' };
+export function interpretNvCountersMax(value, revisionTimes100, specDate) {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) return { ok: false, error: 'NV_COUNTERS_MAX_UNKNOWN' };
+  let revision = null;
+  if (revisionTimes100 !== undefined && revisionTimes100 !== null) {
+    if (!Number.isInteger(revisionTimes100) || revisionTimes100 <= 0) return { ok: false, error: 'TPM_PT_REVISION_UNKNOWN' };
+    revision = revisionTimes100;
   }
-  return {
+  let date = null;
+  if (specDate !== undefined && specDate !== null) {
+    const year = specDate.year;
+    const day = specDate.dayOfYear;
+    if (!Number.isInteger(year) || !Number.isInteger(day) || year < 2013 || day < 1 || day > 366) {
+      return { ok: false, error: 'TPM_PT_SPEC_DATE_UNKNOWN' };
+    }
+    date = { year, dayOfYear: day };
+  }
+  const base = {
     ok: true,
     value,
-    semantics: 'zero-meaning-not-defined-for-reported-revision',
-    note: 'Part 2 r1.38 has no NOTE 2; zero does not mean unsupported and does not prove unlimited — the datasheet bound applies',
+    revisionTimes100: revision,
+    specDate: date,
+    supportProven: /** @type {false} */ (false),
+    supportProofRequires: /** @type {'counter-creation'} */ ('counter-creation'),
   };
+  if (value > 0) return { ...base, semantics: 'fixed-maximum', basis: 'nonzero-value', note: 'upper bound on counter indexes, not free capacity' };
+  if (revision !== null && revision >= 159) {
+    return { ...base, semantics: 'no-fixed-maximum', basis: 'part2-r1.59+-note2', note: 'Part 2 r1.59 NOTE 2: bounded by the NV memory pool' };
+  }
+  if (revision === 138 && date !== null && dateAtLeast(date, R138_ERRATA_2_22_FIRST_CONFIRMED)) {
+    return { ...base, semantics: 'no-fixed-maximum', basis: 'r1.38-errata-2.22', note: 'r1.38 errata 2.22 (v1.8+, 2019-07-12): bounded by the NV memory pool' };
+  }
+  return {
+    ...base,
+    semantics: 'zero-meaning-not-established',
+    basis: 'no-normative-text-established-for-reported-level',
+    note: 'original r1.38 text has no NOTE 2; zero does not mean unsupported and does not prove unlimited — the datasheet bound applies',
+  };
+}
+
+/** @param {{year: number, dayOfYear: number}} a @param {{year: number, dayOfYear: number}} b */
+function dateAtLeast(a, b) {
+  return a.year > b.year || (a.year === b.year && a.dayOfYear >= b.dayOfYear);
 }
 
 /** يحلّلُ ملفَّ جردٍ كاملٍ ويُعيدُ تقريراً. لا يرمي على مدخلٍ فاسد: يُعيدُ أخطاءً مسمّاة. */
@@ -398,7 +445,11 @@ export function analyzeInventory(doc) {
   };
   const mem = P.TPM_PT_MEMORY;
   report.nv = {
-    nvCountersMax: P.TPM_PT_NV_COUNTERS_MAX === undefined ? { ok: false, error: 'ABSENT' } : interpretNvCountersMax(P.TPM_PT_NV_COUNTERS_MAX, P.TPM_PT_REVISION),
+    nvCountersMax: P.TPM_PT_NV_COUNTERS_MAX === undefined ? { ok: false, error: 'ABSENT' } : interpretNvCountersMax(
+      P.TPM_PT_NV_COUNTERS_MAX,
+      P.TPM_PT_REVISION,
+      P.TPM_PT_YEAR !== undefined || P.TPM_PT_DAY_OF_YEAR !== undefined ? { year: P.TPM_PT_YEAR, dayOfYear: P.TPM_PT_DAY_OF_YEAR } : null,
+    ),
     nvCountersDefined: P.TPM_PT_NV_COUNTERS ?? null,
     nvCountersAvailOrderly: P.TPM_PT_NV_COUNTERS_AVAIL ?? null,
     nvCountersAvailNote: 'TPM_PT_NV_COUNTERS_AVAIL counts additional counters with TPMA_NV_ORDERLY SET and is an estimate; ADR 0007 §4.1 requires ORDERLY=0, so this is not a measure for the anchor',
