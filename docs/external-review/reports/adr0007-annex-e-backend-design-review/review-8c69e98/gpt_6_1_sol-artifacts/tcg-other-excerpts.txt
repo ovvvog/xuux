@@ -1,0 +1,31 @@
+مقتطفات مرجعية جُمعت بواسطة fetch_url لهذه المراجعة، لا تشغيل TPM.
+
+TCG EK Credential Profile v2.5 R2
+https://trustedcomputinggroup.org/wp-content/uploads/TCG-EK-Credential-Profile-V-2.5-R2_published.pdf
+
+"If the EK Template is Absent, the default template is used as the TPMT_PUBLIC."
+"If the EK Template is Populated and the EK Nonce is Absent, the EK Template is used unmodified as the TPMT_PUBLIC."
+"Read all NV index handles or those of interest returned in the list from step 1 using TPM2_NV_ReadPublic(), and TPM2_NV_Read()."
+"An EK Certificate is stored in an NV Index as an X.509 certificate encoded in DER format. The NV Index data contains only the DER certificate data."
+
+عند وجود nonce لـRSA 2048، يُحشى إلى 256 بايتًا ويُدخل في unique.rsa؛ وعند ECC P256، يُحشى إلى 32 في unique.ecc.x، ويكون y أصفارًا بطول 32.
+قراءة بيانات القالب/nonce تسبق إنشاء EK بواسطة TPM2_CreatePrimary.
+
+TCG TPM 2.0 r1.59 Part 2
+https://trustedcomputinggroup.org/wp-content/uploads/TCG_TPM2_r1p59_Part2_Structures_pub.pdf
+
+§10.7.2:
+"When a command requires a ticket and no ticket is available, the caller is required to provide a structure with a ticket tag that is correct for the context. The hierarchy shall be set to TPM_RH_NULL, and digest shall be the Empty Buffer (a buffer with a size field of zero). This construct is the NULL Ticket."
+
+§10.7.5، الجدول 98:
+TPMT_TK_AUTH.tag {TPM_ST_AUTH_SIGNED, TPM_ST_AUTH_SECRET}.
+
+§13.5، الجدول 215:
+TPMS_NV_PUBLIC: nvIndex, nameAlg, attributes, authPolicy, dataSize.
+لا يضم منطقة بيانات NV نفسها.
+
+§13.6، الجدول 216:
+TPM2B_NV_PUBLIC: size, nvPublic.
+
+§10.5.3، الجدول 91:
+TPM2B_NAME: size, name.

@@ -1,0 +1,310 @@
+URL: https://cdn.trustedcomputinggroup.org/production/TCG_TPM_2_r1p59_Part3_Commands_pub_00016d87e3.pdf
+Level 00 Revision 01.59                Copyright © TCG 2006-2020                             November 8, 2019
+Part 3: Commands                                                          Trusted Platform Module Library
+
+
+
+6     Response Values
+
+6.1    Tag
+
+When a command completes successfully, the tag parameter in the response shall have the same value
+as the tag parameter in the command (TPM_ST_SESSIONS or TPM_ST_NO_SESSIONS). When a
+command fails (the responseCode is not TPM_RC_SUCCESS), then the tag parameter in the response
+shall be TPM_ST_NO_SESSIONS.
+A special case exists when the command tag parameter is not an allowed value (TPM_ST_SESSIONS or
+TPM_ST_NO_SESSIONS). For this case, it is assumed that the system software is attempting to send a
+command formatted for a TPM 1.2 but the TPM is not capable of executing TPM 1.2 commands. So that
+the TPM 1.2 compatible software will have a recognizable response, the TPM sets tag to
+TPM_ST_RSP_COMMAND, responseSize to 00 00 00 0A16 and responseCode to TPM_RC_BAD_TAG.
+This is the same response as the TPM 1.2 fatal error for TPM_BADTAG.
+
+6.2    Response Codes
+
+The normal response for any command is TPM_RC_SUCCESS. Any other value indicates that the
+command did not complete and the state of the TPM is unchanged. An exception to this general rule is
+that the logic associated with dictionary attack protection is allowed to be modified when an authorization
+failure occurs.
+Commands have response codes that are specific to that command, and those response codes are
+enumerated in the detailed actions of each command. The codes associated with the unmarshaling of
+parameters are documented Table 3. Another set of response code values are not command specific and
+indicate a problem that is not specific to the command. That is, if the indicated problem is remedied, the
+same command could be resubmitted and may complete normally.
+The response codes that are not command specific are listed and described in
+Trusted Platform Module Library                                                         Part 3: Commands
+
+
+
+         Command and Response
+
+                          Table 15 — TPM2_StartAuthSession Command
+Type                          Name                  Description
+                                                    TPM_ST_SESSIONS if an audit, decrypt, or encrypt
+TPMI_ST_COMMAND_TAG           tag                   session is present; otherwise,
+                                                    TPM_ST_NO_SESSIONS
+UINT32                        commandSize
+TPM_CC                        commandCode           TPM_CC_StartAuthSession
+
+                                                    handle of a loaded decrypt key used to encrypt salt
+TPMI_DH_OBJECT+               tpmKey                may be TPM_RH_NULL
+                                                    Auth Index: None
+                                                    entity providing the authValue
+TPMI_DH_ENTITY+               bind                  may be TPM_RH_NULL
+                                                    Auth Index: None
+
+                                                    initial nonceCaller, sets nonceTPM size for the session
+TPM2B_NONCE                   nonceCaller
+                                                    shall be at least 16 octets
+                                                    value encrypted according to the type of tpmKey
+TPM2B_ENCRYPTED_SECRET encryptedSalt                If tpmKey is TPM_RH_NULL, this shall be the Empty
+                                                    Buffer.
+                                                    indicates the type of the session; simple HMAC or policy
+TPM_SE                        sessionType
+                                                    (including a trial policy)
+                                                    the algorithm and key size for parameter encryption
+TPMT_SYM_DEF+                 symmetric
+                                                    may select TPM_ALG_NULL
+                                                    hash algorithm to use for the session
+TPMI_ALG_HASH                 authHash              Shall be a hash algorithm supported by the TPM and
+                                                    not TPM_ALG_NULL
+
+
+                          Table 16 — TPM2_StartAuthSession Response
+Type                          Name                  Description
+TPM_ST                        tag                   see clause 6
+UINT32                        responseSize
+TPM_RC                        responseCode
+
+TPMI_SH_AUTH_SESSION          sessionHandle         handle for the newly created session
+
+                                                    the initial nonce from the TPM, used in the computation
+TPM2B_NONCE                   nonceTPM
+                                                    of the sessionKey
+
+
+
+
+Family “2.0”                                 TCG Published                                         Page 39
+Level 00 Revision 01.59              Copyright © TCG 2006-2020                         November 8, 2019
+Part 3: Commands                                         Trusted Platform Module Library
+
+
+
+          Command and Response
+
+                        Table 23 — TPM2_LoadExternal Command
+Type                     Name                  Description
+                                               TPM_ST_SESSIONS if an audit, encrypt, or decrypt
+TPMI_ST_COMMAND_TAG      tag                   session is present; otherwise,
+                                               TPM_ST_NO_SESSIONS
+UINT32                   commandSize
+TPM_CC                   commandCode           TPM_CC_LoadExternal
+
+TPM2B_SENSITIVE          inPrivate             the sensitive portion of the object (optional)
+TPM2B_PUBLIC+            inPublic              the public portion of the object
+TPMI_RH_HIERARCHY+       hierarchy             hierarchy with which the object area is associated
+
+
+                        Table 24 — TPM2_LoadExternal Response
+Type                     Name                  Description
+TPM_ST                   tag                   see clause 6
+UINT32                   responseSize
+TPM_RC                   responseCode
+
+                                               handle of type TPM_HT_TRANSIENT for the loaded
+TPM_HANDLE               objectHandle
+                                               object
+
+TPM2B_NAME               name                  name of the loaded object
+
+
+
+
+Page 54                                 TCG Published                                       Family “2.0”
+November 8, 2019                Copyright © TCG 2006-2020                   Level 00 Revision 01.59
+
+                            Table 124 — TPM2_PolicySigned Command
+Type                          Name                   Description
+                                                     TPM_ST_SESSIONS if an audit, encrypt, or decrypt
+TPMI_ST_COMMAND_TAG           tag                    session is present; otherwise,
+                                                     TPM_ST_NO_SESSIONS
+UINT32                        commandSize
+TPM_CC                        commandCode            TPM_CC_PolicySigned
+
+                                                     handle for a key that will validate the signature
+TPMI_DH_OBJECT                authObject
+                                                     Auth Index: None
+                                                     handle for the policy session being extended
+TPMI_SH_POLICY                policySession
+                                                     Auth Index: None
+
+                                                     the policy nonce for the session
+TPM2B_NONCE                   nonceTPM
+                                                     This can be the Empty Buffer.
+                                                     digest of the command parameters to which this
+                                                     authorization is limited
+TPM2B_DIGEST                  cpHashA                This is not the cpHash for this command but the cpHash
+                                                     for the command to which this policy session will be
+                                                     applied. If it is not limited, the parameter will be the
+                                                     Empty Buffer.
+                                                     a reference to a policy relating to the authorization –
+                                                     may be the Empty Buffer
+TPM2B_NONCE                   policyRef
+                                                     Size is limited to be no larger than the nonce size
+                                                     supported on the TPM.
+                                                     time when authorization will expire, measured in
+                                                     seconds from the time that nonceTPM was generated
+INT32                         expiration
+                                                     If expiration is non-negative, a NULL Ticket is returned.
+                                                     See 23.2.5.
+TPMT_SIGNATURE                auth                   signed authorization (not optional)
+
+
+                            Table 125 — TPM2_PolicySigned Response
+Type                          Name                   Description
+TPM_ST                        tag                    see clause 6
+UINT32                        responseSize
+TPM_RC                        responseCode
+
+                                                     implementation-specific time value, used to indicate to
+                                                     the TPM when the ticket expires
+TPM2B_TIMEOUT                 timeout
+                                                     NOTE            If policyTicket is a NULL Ticket, then this shall
+                                                                     be the Empty Buffer.
+
+                                                     produced if the command succeeds and expiration in
+TPMT_TK_AUTH                  policyTicket           the command was non-zero; this ticket will use the
+                                                     TPMT_ST_AUTH_SIGNED structure tag. See 23.2.5
+
+
+
+
+Family “2.0”                                  TCG Published                                              Page 219
+Level 00 Revision 01.59              Copyright © TCG 2006-2020                              November 8, 2019
+Part 3: Commands                                       Trusted Platform Module Library
+
+
+
+         Command and Response
+
+                   Table 140 — TPM2_PolicyCommandCode Command
+Type                    Name                   Description
+                                               TPM_ST_SESSIONS if an audit session is present;
+TPMI_ST_COMMAND_TAG     tag
+                                               otherwise, TPM_ST_NO_SESSIONS
+UINT32                  commandSize
+TPM_CC                  commandCode            TPM_CC_PolicyCommandCode
+
+                                               handle for the policy session being extended
+TPMI_SH_POLICY          policySession
+                                               Auth Index: None
+
+TPM_CC                  code                   the allowed commandCode
+
+
+                   Table 141 — TPM2_PolicyCommandCode Response
+Type                    Name                   Description
+TPM_ST                  tag                    see clause 6
+UINT32                  responseSize
+TPM_RC                  responseCode
+
+
+
+
+Page 244                                TCG Published                                    Family “2.0”
+November 8, 2019               Copyright © TCG 2006-2020                  Level 00 Revision 01.59
+Trusted Platform Module Library                               Part 3: Commands
+
+
+
+         Detailed Actions
+
+[[PolicyCommandCode]]
+November 8, 2019                       Copyright © TCG 2006-2020                      Level 00 Revision 01.59
+Trusted Platform Module Library                                                           Part 3: Commands
+
+
+          Command and Response
+
+                            Table 198 — TPM2_FlushContext Command
+ Type                         Name                   Description
+ TPMI_ST_COMMAND_TAG          tag                    TPM_ST_NO_SESSIONS
+ UINT32                       commandSize
+ TPM_CC                       commandCode            TPM_CC_FlushContext
+
+                                                     the handle of the item to flush
+ TPMI_DH_CONTEXT              flushHandle
+                                                     NOTE           This is a use of a handle as a parameter.
+
+
+                            Table 199 — TPM2_FlushContext Response
+ Type                         Name                   Description
+ TPM_ST                       tag                    see clause 6
+ UINT32                       responseSize
+ TPM_RC                       responseCode
+
+
+
+
+Family “2.0”                                 TCG Published                                           Page 333
+Level 00 Revision 01.59             Copyright © TCG 2006-2020                            November 8, 2019
+31.6   TPM2_NV_ReadPublic
+
+         General Description
+
+This command is used to read the public area and Name of an NV Index. The public area of an Index is
+not privacy-sensitive and no authorization is required to read this data.
+
+
+
+
+Page 370                                  TCG Published                                Family “2.0”
+November 8, 2019                   Copyright © TCG 2006-2020               Level 00 Revision 01.59
+Trusted Platform Module Library                                                        Part 3: Commands
+
+
+
+          Command and Response
+
+                           Table 218 — TPM2_NV_ReadPublic Command
+ Type                         Name                   Description
+                                                     TPM_ST_SESSIONS if an audit or encrypt session is
+ TPMI_ST_COMMAND_TAG          tag
+                                                     present; otherwise, TPM_ST_NO_SESSIONS
+ UINT32                       commandSize
+ TPM_CC                       commandCode            TPM_CC_NV_ReadPublic
+
+                                                     the NV Index
+ TPMI_RH_NV_INDEX             nvIndex
+                                                     Auth Index: None
+
+
+                           Table 219 — TPM2_NV_ReadPublic Response
+ Type                         Name                   Description
+ TPM_ST                       tag                    see clause 6
+ UINT32                       responseSize
+ TPM_RC                       responseCode
+
+ TPM2B_NV_PUBLIC              nvPublic               the public area of the NV Index
+ TPM2B_NAME                   nvName                 the Name of the nvIndex
+
+
+
+
+Family “2.0”                                 TCG Published                                    Page 371
+Level 00 Revision 01.59             Copyright © TCG 2006-2020                          November 8, 2019
+Part 3: Commands                                       Trusted Platform Module Library
+
+
+
+        Detailed Actions
+
+          iv) if the TPM implementation moves a persistent object to RAM for command processing then
+              sufficient RAM space is available (TPM_RC_OBJECT_MEMORY).
+      3) If the handle references an NV Index, then
+          i)    an Index exists that corresponds to the handle (TPM_RC_HANDLE); and
+          ii)   the hierarchy associated with the existing NV Index is not disabled (TPM_RC_HANDLE).
+          iii) If the command requires write access to the index data then TPMA_NV_WRITELOCKED is
+               not SET (TPM_RC_NV_LOCKED)
+          iv) If the command requires read access to the index data then TPMA_NV_READLOCKED is
+              not SET (TPM_RC_NV_LOCKED)

@@ -1,0 +1,74 @@
+{
+  "result": {
+    "verdict": "needs-changes",
+    "summary": "The document is unusually careful about separating design from implementation and explicitly leaves hardware qualification, platform support, and G1–G4 open. It also correctly states that pinning base does not solve joint application-and-TPM restore (T6). Before this is an implementable security design, clarify the signed authorization protocol and its replay, race, and key-custody controls; tighten command-gate and response-validation requirements; and qualify the claims about EK identity and TPM authentication.",
+    "findings": [
+      {
+        "id": "F-01",
+        "severity": "high",
+        "section": "§6.3, §11 E9",
+        "issue": "The proposed authorization format does not specify enough to implement verifiable, replay-resistant authorization. The schema only defines operation \"bind-initial\", while stage (1) also refers to owner authorization for definition and initialization. The signature encoding, algorithm/key identifier, canonicalization rules, nonce generation and durable consumption, and clock basis for notAfter are unspecified. In particular, a nonce-consumed check is not a replay defense unless consumption is durable and atomic with the authorized action.",
+        "evidence": "The schema lists `operation: \"bind-initial\"` and `nonce, notAfter`; the text then says stage (1) obtains “إذنَ تعريفٍ وتهيئةٍ (P1–P4)” and §6.3 says verification checks “أنّ `nonce` لم يُستهلَك.” No format or durable-consumption procedure is specified.",
+        "recommendation": "Specify separate authorization types or explicitly define the initial-setup authorization. Define signed bytes unambiguously, signature algorithm and key identity, nonce creation and durable single-use tracking, expiry clock/rollback behavior, and crash ordering for consuming the nonce versus sealing. Add tests for replay across restart and concurrent ceremony processes."
+      },
+      {
+        "id": "F-02",
+        "severity": "high",
+        "section": "§6.3, §7.1, §7.2",
+        "issue": "The design does not close the time-of-check/time-of-use gap between reading TPM binding material and sealing the manifest. A signature over the calculated binding bytes proves what was authorized, but does not prove that the TPM state or source remains unchanged until the seal is committed. The existing serialized manifest bind does not, by itself, serialize external TPM commands or other processes.",
+        "evidence": "The authorization is checked “قبلَ الختم” against `bindingBytesSha256`, while §7.1 describes the manifest operation as serialized and §7.2 separately recommends a host lock for concurrent transitions. The document does not specify a lock spanning TPM reads, authorization validation, and manifest sealing, or a final re-read before sealing.",
+        "recommendation": "Define the ceremony transaction boundary: acquire a system-wide lock before reading the TPM, validate authorization and current identity/material under that lock, re-read or otherwise verify the material immediately before sealing, and state how the lock excludes every process capable of changing the relevant TPM state. Treat failures or interruption between these steps as an explicit recoverable state."
+      },
+      {
+        "id": "F-03",
+        "severity": "medium",
+        "section": "§4.3, §4.4",
+        "issue": "The response-validation rule is too strict for TPM error responses. TPM error responses generally use a no-sessions response header even when the submitted command used sessions; they do not carry the successful-response session HMACs described in the table. Requiring the response tag to match the command tag and requiring an HMAC for every session would reject legitimate TPM error responses, including retry or command errors.",
+        "evidence": "§4.4 requires “وسمُ الردِّ يطابقُ وسمَ الأمر” and “HMAC الردِّ يُتحقَّقُ منه لكلِّ جلسة”; §4.4 also separately discusses TPM retry codes.",
+        "recommendation": "Define separate strict parsing paths for successful and error responses. Validate the expected success tag and response HMACs for successful session commands; validate the specified no-sessions error form and response code for errors, without treating an absent error-response HMAC as success. Preserve the no-resend rule for mutating commands."
+      },
+      {
+        "id": "F-04",
+        "severity": "medium",
+        "section": "§4.3",
+        "issue": "The command allowlist is described mainly in terms of command codes and target NV handles, but several allowed commands require parameter-level restrictions to prevent the allowlist from admitting unintended operations. This is especially relevant to CreatePrimary, LoadExternal, PolicySigned, NV_DefineSpace, and NV_UndefineSpace; restricting only the command code does not constrain hierarchy, template, signing key, policy parameters, attributes, or the exact index being defined or removed.",
+        "evidence": "§4.3 lists `ReadPublic`, `CreatePrimary`, `LoadExternal`, `PolicySigned`, `NV_DefineSpace`, and `NV_UndefineSpace` as allowed commands, and explicitly calls out target-handle checks only for `NV_Increment` and `NV_Write`.",
+        "recommendation": "Specify and test parameter-level validation for every allowed command: exact hierarchy and EK template, approved external key and policy parameters, exact NV handles and attributes, and the ceremony conditions for define/undefine. Reject unrecognized parameter combinations before transport submission."
+      },
+      {
+        "id": "F-05",
+        "severity": "medium",
+        "section": "§3.1, §3.2",
+        "issue": "The wording overstates what the EK certificate and salted session establish. A certificate chain establishes that a trusted issuer certified the EK public key; identifying that issuer as the device manufacturer requires a configured trust policy that maps roots/issuers to manufacturers. A salted session with a validated EK and response HMAC provides evidence that the session peer can use the corresponding key, subject to the stated TPM assumptions, but does not by itself rule out a relay or establish a direct physical connection.",
+        "evidence": "§3.1 says a certificate proves “مفتاحُ EK هذا صادرٌ عن TPM من مصنّعٍ معيّن” and that the salted session “can ensure that the caller is connected to an authentic TPM.” §3.2 says “المصنّعُ يُشتقُّ من مُصدِرِ الشهادة”.",
+        "recommendation": "Describe the result as issuer-certified EK-key provenance and session-key possession, conditional on trusted-root policy and TPM implementation assumptions. State how certificate roots and issuer-to-manufacturer mappings are selected, and avoid claiming direct connection or physical-device authentication against relay unless an additional mechanism provides it."
+      },
+      {
+        "id": "F-06",
+        "severity": "medium",
+        "section": "§3.2, §3.5, §4.4",
+        "issue": "The proposed failure behavior is not fully reconciled with the existing closed error-code set. The excerpted binding code defines only `FRESHNESS_NV_BINDING_INVALID` and `FRESHNESS_NV_BINDING_MISMATCH`; the document proposes `FRESHNESS_TPM_IDENTITY_UNPROVEN` as a new code, but also says identity and session failures map through the existing mismatch path. It is unclear which failures are binding mismatches, source failures, or new identity errors, and which are permitted by the production runtime.",
+        "evidence": "§3.2 says identity/session failures use `FRESHNESS_NV_BINDING_MISMATCH`; §3.5 proposes `FRESHNESS_TPM_IDENTITY_UNPROVEN`; the supplied `fnv-binding.mts` excerpt lists only `FRESHNESS_NV_BINDING_INVALID` and `FRESHNESS_NV_BINDING_MISMATCH` in `FnvBindingErrorCodes`.",
+        "recommendation": "Define a single error taxonomy for certificate absence, chain-validation failure, identity mismatch, session/HMAC failure, and source unavailability. Identify which codes require code changes and tests; do not describe proposed codes as available until they are added to the closed runtime allowlist."
+      },
+      {
+        "id": "F-07",
+        "severity": "medium",
+        "section": "§5.3, §7.2",
+        "issue": "Authorization and concurrency lockout behavior needs an explicit operational design. `NO_DA` on an NV index does not establish that owner-hierarchy authorization or other authorization paths are exempt from TPM dictionary-attack behavior. The document says owner authorization is requested for ceremony operations but does not specify retry limits, rate limiting, lockout recovery, or safe handling of an operator repeatedly supplying an incorrect authorization.",
+        "evidence": "§5.3 states that `NV_DefineSpace`/`NV_UndefineSpace` use owner authorization and that it is not stored; §5.3 describes `NO_DA` for the NV indexes; §7.2 specifies interruption and process-lock behavior but no authorization lockout handling.",
+        "recommendation": "Document which authorization entities and commands can affect TPM lockout state for the target TPMs, set bounded retry behavior, and define a recovery procedure that does not attempt to discover or extract authorization secrets. Confirm the behavior on the qualified hardware before ceremony use."
+      }
+    ],
+    "overclaims": [
+      "The statement that the certificate issuer identifies the TPM manufacturer is stronger than the evidence described unless the design also defines trusted roots and an issuer-to-manufacturer policy.",
+      "The salted-session wording can be read as proving a direct connection to a physical TPM. It should be limited to session-key possession by the peer, subject to the stated assumptions; relay is not addressed.",
+      "No broad implementation, platform-support, test-closure, or hardware-qualification overclaim was found in the supplied document: it repeatedly says the backend and platform transports are absent, G1–G4 remain open, and hardware testing is unauthorized.",
+      "The document correctly says T6 remains open and that pinning base does not solve joint application-and-TPM restore."
+    ],
+    "tpm_technical_errors": [
+      "The response-validation rule in §4.4 is technically overgeneralized: TPM error responses do not necessarily use the same response tag as the submitted sessions command and do not carry successful-response session HMACs. The parser must distinguish successful session responses from error responses.",
+      "The supplied excerpt does not establish a technical error in the listed EK certificate NV indices, TPM command codes, `PolicySigned` use of `nonceTPM`/`cpHashA`/expiration, or the stated NV attributes. Those details should still be checked against the cited TPM/TCG specifications and the target TPM implementations; the proposal is not evidence that they have been implemented or measured."
+    ]
+  }
+}
