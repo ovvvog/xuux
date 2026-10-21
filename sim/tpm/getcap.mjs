@@ -75,23 +75,39 @@ export function getCapability(cap, opts = {}) {
 // ── محلّلات مخرجات القدرات (فشل مغلق: ما لا يُحلَّل يُرفض لا يُخمَّن) ──
 
 /**
- * يفسر قيمة TPM2_PT_NV_COUNTERS_MAX.
- * الصفر = «لا حدّ أقصى ثابتاً» بحسب مواصفة TPM 2.0 Library Part 2 (fixed properties)،
- * لا «عدم دعم العدّادات». دعم العدّادات يُثبت عملياً بإنشاء عدّاد، لا بهذه الخاصية.
+ * يفسر قيمة TPM2_PT_NV_COUNTERS_MAX **بحسب المراجعة التي تعلنها الشريحة** (TPM2_PT_REVISION).
+ *
+ * - قيمة موجبة ⇒ حدّ أعلى لعدد فهارس العدّادات (لا سعة حرّة).
+ * - صفر مع مراجعة ≥ 1.59 ⇒ «لا حدّ أقصى ثابتاً»: نصّ NOTE 2 في TPM 2.0 Library Part 2 r1.59
+ *   («The value zero indicates that there is no fixed maximum»).
+ * - صفر مع مراجعة أقدم (مثل r1.38 التي تعلنها SLB9670، ADR 0007 annex A) أو بلا مراجعة ⇒
+ *   **دلالة غير معرَّفة نصّاً**: NOTE 2 غائبة عن r1.38، فلا يُقرأ الصفر «غير مدعوم» ولا «بلا حدّ».
+ *
+ * ولا يُستنتج من هذه الخاصية دعمُ العدّادات أصلاً: الدعم يُثبَت عملياً بإنشاء عدّاد
+ * (`supportProvenBy: 'counter-creation'`)، فلا حقل `supported` في المخرج (LIVE-46، WL-438).
+ * التفسير نفسه في `sim/tpm-host/decode_inventory.mjs` (interpretNvCountersMax).
  * @param {number|string} rawValue رقم أو نص مثل "0x0"
- * @returns {{ok: true, supported: boolean, maxCounters: number, semantics: 'no-fixed-maximum'|'fixed-maximum'}|{ok: false, error: string}}
+ * @param {number|string} [revisionTimes100] قيمة TPM2_PT_REVISION الخام (المراجعة × 100، مثل 0x8A = 1.38)
+ * @returns {{ok: true, maxCounters: number, revisionTimes100: number|null, supportProvenBy: 'counter-creation',
+ *   semantics: 'no-fixed-maximum'|'fixed-maximum'|'zero-meaning-not-defined-for-reported-revision'}|{ok: false, error: string}}
  */
-export function interpretNvCountersMax(rawValue) {
+export function interpretNvCountersMax(rawValue, revisionTimes100) {
   const value = typeof rawValue === 'number' ? rawValue : parseHexValue(String(rawValue ?? ''));
   if (value === null || !Number.isInteger(value) || value < 0) {
     return { ok: false, error: 'NV_COUNTERS_MAX_UNKNOWN: unparsable value' };
   }
-  return {
-    ok: true,
-    supported: true,
-    maxCounters: value,
-    semantics: value === 0 ? 'no-fixed-maximum' : 'fixed-maximum',
-  };
+  let revision = null;
+  if (revisionTimes100 !== undefined && revisionTimes100 !== null) {
+    revision =
+      typeof revisionTimes100 === 'number' ? revisionTimes100 : parseHexValue(String(revisionTimes100));
+    if (revision === null || !Number.isInteger(revision) || revision <= 0) {
+      return { ok: false, error: 'TPM_PT_REVISION_UNKNOWN: unparsable revision' };
+    }
+  }
+  const base = { ok: true, maxCounters: value, revisionTimes100: revision, supportProvenBy: 'counter-creation' };
+  if (value > 0) return { ...base, semantics: 'fixed-maximum' };
+  if (revision !== null && revision >= 159) return { ...base, semantics: 'no-fixed-maximum' };
+  return { ...base, semantics: 'zero-meaning-not-defined-for-reported-revision' };
 }
 
 /**
