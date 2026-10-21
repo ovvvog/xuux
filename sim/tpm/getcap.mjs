@@ -143,10 +143,14 @@ function dateAtLeast(a, b) {
   return a.year > b.year || (a.year === b.year && a.dayOfYear >= b.dayOfYear);
 }
 
-/** عددٌ صحيحٌ غيرُ سالبٍ آمنٌ من رقمٍ أو نصٍّ عشريٍّ/`0x…`؛ وإلّا null. */
+/**
+ * عددٌ صحيحٌ غيرُ سالبٍ ضمنَ مدى `UINT32` (‏`0x0`–`0xFFFFFFFF`: خاصيّاتُ TPM التي تُفسَّرُ هنا من هذا النوعِ)،
+ * من رقمٍ أو نصٍّ عشريٍّ/`0x…`؛ وما جاوزَ المدى أو لم يُحلَّل ⇒ `null` (فشلٌ مغلق: قيمةٌ خامٌ فوقَ المدى
+ * لا تصدرُ عن خاصيةٍ من هذا النوعِ فلا تُقرأ مراجعةً ولا حدًّا).
+ */
 function parseRawInteger(v) {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseHexValue(v) : null;
-  return n !== null && Number.isSafeInteger(n) && n >= 0 ? n : null;
+  return n !== null && Number.isSafeInteger(n) && n >= 0 && n <= 0xffffffff ? n : null;
 }
 
 /**

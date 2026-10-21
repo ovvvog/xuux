@@ -104,6 +104,28 @@ test('static: قيمة غير قابلة للتحليل في NV_COUNTERS_MAX ⇒
   assert.equal(interpretNvCountersMax(-1).ok, false);
 });
 
+test('static: قيمةٌ خامٌ فوقَ مدى UINT32 (0xFFFFFFFF) ⇒ فشلٌ مغلقٌ لا تفسير (WL-438)', () => {
+  // خاصيّاتُ TPM المُفسَّرَةُ هنا (REVISION، YEAR، DAY_OF_YEAR، NV_COUNTERS_MAX) من نوعِ UINT32؛
+  // فما جاوزَ المدى لا يصدرُ عن خاصيةٍ حقيقيةٍ ولا يُقرأ مراجعةً صحيحةً أو حدًّا. الحدُّ نفسُه (0xFFFFFFFF) مقبولٌ نحوياً.
+  for (const rev of [0x100000000, 4294967296, '0x100000000', '4294967296', 2 ** 53 - 1 + 1]) {
+    const r = interpretNvCountersMax(0, rev);
+    assert.equal(r.ok, false, `rev=${String(rev)}`);
+    assert.match(r.error, /^TPM_PT_REVISION_UNKNOWN/);
+  }
+  for (const val of [0x100000000, '0x100000000', 4294967296, '4294967296']) {
+    const r = interpretNvCountersMax(val, 159);
+    assert.equal(r.ok, false, `val=${String(val)}`);
+    assert.match(r.error, /^NV_COUNTERS_MAX_UNKNOWN/);
+  }
+  const y = interpretNvCountersMax(0, 138, { year: 0x100000000, dayOfYear: 193 });
+  assert.equal(y.ok, false);
+  assert.match(y.error, /^TPM_PT_SPEC_DATE_UNKNOWN/);
+  // والحدُّ الأعلى للنوعِ (UINT32) نفسُه يبقى قابلًا للتحليلِ نحوياً (التفسيرُ يبقى مربوطًا بالمراجعة).
+  const edge = interpretNvCountersMax(0, 0xffffffff);
+  assert.equal(edge.ok, true);
+  assert.equal(edge.revisionTimes100, 0xffffffff);
+});
+
 // ── static: moreData ──
 
 test('static: moreData صريحة تُقرأ، والغياب/الغريب ⇒ unknown (فشل مغلق)', () => {
