@@ -319,6 +319,36 @@ test('G2-1 (طفرات): المُجمِّعُ الصحيحُ يجتازُ الج
   }
 });
 
+// ——— (د) خياراتٌ غيرُ صالحةٍ (WL-455) ———
+
+test('G2-1 (WL-455): خياراتٌ غيرُ نهائيّةٍ أو غيرُ صحيحةٍ تُرفَضُ مسمّاةً قبلَ أيِّ اتّصال — NaN/Infinity كانت تُعطِّلُ الحدَّ الأعلىَ صامتةً', async () => {
+  // المُجمِّعُ: NaN/Infinity (وكذا 0 وسالبٌ وكسريٌّ وغيرُ عددٍ) رفضٌ مسمّى بنتيجةِ not-sent،
+  // لا حدٌّ أعلى معطَّل. قبلَ الإصلاحِ كانَ `new ResponseFramer(NaN)` يمرُّ و`size > NaN`
+  // كاذبةٌ دائمًا، فيُقبلُ ردٌّ يعلنُ أيَّ حجمٍ (قيس: رأسٌ يعلنُ 100000 بايتٍ ⇒ need-more).
+  const badMax = [NaN, Infinity, -Infinity, 0, -5, 4096.5, '4096', null];
+  for (const bad of badMax) {
+    assert.throws(
+      () => new ResponseFramer(/** @type {any} */ (bad)),
+      (e) => e instanceof RawTransportError && e.code === E.OPTIONS_INVALID && e.outcome === 'not-sent',
+      `maxResponseBytes=${String(bad)}`,
+    );
+  }
+  // النقلُ: الخيارُ غيرُ الصالحِ يُرفَضُ قبلَ إنشاءِ المقعدِ — لا اتّصالَ ولا كتابةَ أصلًا.
+  const srv = await fakeServer(() => {});
+  const badOpens = [
+    { maxResponseBytes: NaN },
+    { maxResponseBytes: Infinity },
+    { timeoutMs: NaN },
+    { connectTimeoutMs: Infinity },
+    { maxResponseBytes: 9 },
+  ];
+  for (const bad of badOpens) {
+    await rejectsWith(SwtpmRawTransport.open(srv.tcti, bad), E.OPTIONS_INVALID, 'not-sent');
+  }
+  assert.equal(srv.connections(), 0, 'لا اتّصالَ لأيِّ خيارٍ مرفوض');
+  await srv.close();
+});
+
 // ——— (ب) swtpm حقيقيٌّ على loopback ———
 
 const sim = isSimEnabled();
