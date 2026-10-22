@@ -1,0 +1,40 @@
+{
+  "body": {
+    "version": 3,
+    "kingId": "king:r4-public-test-key",
+    "context": "public-r4-test",
+    "tokenSerial": "PUBLIC-R4-TOKEN",
+    "moduleSha256": "PUBLIC-R4-MODULE",
+    "instanceId": "ac8f738868ce95287c347364e59741e1ce6d3dad27dce1c63887e58f01c9eae0",
+    "createdAt": "2026-10-22T02:33:51.876Z",
+    "sealedAt": "2026-10-22T02:33:51.880Z",
+    "sequence": 2,
+    "anchoredCount": 0,
+    "haltEpoch": 0,
+    "ledgerCommitted": 0,
+    "freshnessEpoch": 0,
+    "journalHead": "checkpoint:2",
+    "freshnessBinding": {
+      "schema": "xuux.manifest-fnv-binding/1",
+      "instanceId": "ac8f738868ce95287c347364e59741e1ce6d3dad27dce1c63887e58f01c9eae0",
+      "counterIndex": "0x01800010",
+      "recordIndex": "0x01800011",
+      "counterName": "000bcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "recordName": "000befefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef",
+      "base": "2",
+      "tpmIdentity": {
+        "kind": "ek-certificate-sha256",
+        "value": "2222222222222222222222222222222222222222222222222222222222222222"
+      },
+      "authPolicy": {
+        "counter": "1111111111111111111111111111111111111111111111111111111111111111",
+        "record": "1212121212121212121212121212121212121212121212121212121212121212"
+      }
+    }
+  },
+  "seal": {
+    "alg": "ed25519",
+    "signerId": "king:r4-public-test-key",
+    "signature": "CRN/q7ul7TqAOurt7cpOzGmWnTRl1cYGDUeUdn55PEkk+mXJUN/IPgGMOv+6AKNuKP83ButSlkfK+5NONLHNCw=="
+  }
+}

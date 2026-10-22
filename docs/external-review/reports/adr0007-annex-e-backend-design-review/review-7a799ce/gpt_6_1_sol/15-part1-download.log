@@ -1,0 +1,6 @@
+$ curl -fL --max-time 60 TCG_TPM2_r1p59_Part1_Architecture_pub.pdf -o /tmp/council-wl437-r4/gpt_6_1_sol/tcg-part1-r159.pdf
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  0      0   0      0   0      0      0      0                              0
+curl: (22) The requested URL returned error: 429
+curl exit=22

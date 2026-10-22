@@ -1,0 +1,13 @@
+$ date -u
+2026-10-22T02:42:28Z
+$ git rev-parse HEAD
+7a799cecf23b80538487a01560144ecb39f99abd
+$ git status --short
+exit=0
+$ git diff --quiet
+exit=0
+$ git diff --cached --quiet
+exit=0
+$ node report structure and evidence validation
+{"sixItems":6,"historicalStatusRows":17,"newFindings":2,"evidenceReferences":24,"noMissingEvidence":true,"unitTests":17,"unitFailures":0,"unitSkipped":0,"reportBytes":35738}
+exit=0

@@ -1,0 +1,3 @@
+$ node sim/freshness-nv/hw-plan-check.mjs (static document-only checks)
+usage: hw-plan-check.mjs <inventory.json> [--c HANDLE --r HANDLE]
+exit=2

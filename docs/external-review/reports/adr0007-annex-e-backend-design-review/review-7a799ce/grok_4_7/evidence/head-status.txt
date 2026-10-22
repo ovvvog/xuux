@@ -1,0 +1,4 @@
+HEAD=7a799cecf23b80538487a01560144ecb39f99abd
+STATUS:
+BACKEND:
+  const SUPPORTED_FRESHNESS_BACKENDS = new Set([]); // لا backend مدعومٌ في هذه البيئةِ

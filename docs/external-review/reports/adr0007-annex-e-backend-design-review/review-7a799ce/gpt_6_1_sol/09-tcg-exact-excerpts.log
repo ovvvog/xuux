@@ -1,0 +1,259 @@
+TCG Part 3 §6.1 / §23.2–23.3 / §31.4 excerpts (pdftotext line ranges)
+6     Response Values
+
+6.1    Tag
+
+When a command completes successfully, the tag parameter in the response shall have the same value
+as the tag parameter in the command (TPM_ST_SESSIONS or TPM_ST_NO_SESSIONS). When a
+command fails (the responseCode is not TPM_RC_SUCCESS), then the tag parameter in the response
+shall be TPM_ST_NO_SESSIONS.
+A special case exists when the command tag parameter is not an allowed value (TPM_ST_SESSIONS or
+TPM_ST_NO_SESSIONS). For this case, it is assumed that the system software is attempting to send a
+command formatted for a TPM 1.2 but the TPM is not capable of executing TPM 1.2 commands. So that
+the TPM 1.2 compatible software will have a recognizable response, the TPM sets tag to
+TPM_ST_RSP_COMMAND, responseSize to 00 00 00 0A16 and responseCode to TPM_RC_BAD_TAG.
+This is the same response as the TPM 1.2 fatal error for TPM_BADTAG.
+
+6.2    Response Codes
+
+The normal response for any command is TPM_RC_SUCCESS. Any other value indicates that the
+
+          Policy Ticket Creation
+
+For TPM2_PolicySigned() or TPM2_PolicySecret(), if the caller specified a negative value for expiration,
+then the TPM will return a ticket that includes a value indicating when the authorization expires.
+Otherwise, the TPM will return a NULL Ticket.
+
+NOTE 1             If the authHandle in TPM2_PolicySecret() references a PIN Pass Index, then the command may
+                   succeed but a NULL Ticket will be returned.
+
+The required computation for the digest in the authorization ticket is:
+         HMACcontextAlg(proof, (TPM_ST_AUTH_xxx || cpHash || policyRef || authName
+                                 || timeout || [timeEpoch] || [resetCount]))                                      (12)
+
+
+                            Table 125 — TPM2_PolicySigned Response
+Type                          Name                   Description
+TPM_ST                        tag                    see clause 6
+UINT32                        responseSize
+TPM_RC                        responseCode
+
+                                                     implementation-specific time value, used to indicate to
+                                                     the TPM when the ticket expires
+TPM2B_TIMEOUT                 timeout
+                                                     NOTE            If policyTicket is a NULL Ticket, then this shall
+                                                                     be the Empty Buffer.
+
+                                                     produced if the command succeeds and expiration in
+TPMT_TK_AUTH                  policyTicket           the command was non-zero; this ticket will use the
+                                                     TPMT_ST_AUTH_SIGNED structure tag. See 23.2.5
+
+
+
+
+Family “2.0”                                  TCG Published                                              Page 219
+Level 00 Revision 01.59              Copyright © TCG 2006-2020                              November 8, 2019
+Part 3: Commands                                       Trusted Platform Module Library
+31.4   TPM2_NV_UndefineSpace
+
+         General Description
+
+This command removes an Index from the TPM.
+If nvIndex is not defined, the TPM shall return TPM_RC_HANDLE.
+If nvIndex references an Index that has its TPMA_NV_PLATFORMCREATE attribute SET, the TPM shall
+return TPM_RC_NV_AUTHORIZATION unless Platform Authorization is provided.
+If nvIndex references an Index that has its TPMA_NV_POLICY_DELETE attribute SET, the TPM shall
+return TPM_RC_ATTRIBUTES.
+
+NOTE           An Index with TPMA_NV_PLATFORMCREATE CLEAR may be deleted with Platform Authorization
+               as long as shEnable is SET. If shEnable is CLEAR, indexes created using Owner Authorization are
+               not accessible even for deletion by the platform.
+
+
+
+
+Page 364                                     TCG Published                                      Family “2.0”
+November 8, 2019                     Copyright © TCG 2006-2020                    Level 00 Revision 01.59
+Trusted Platform Module Library                                                      Part 3: Commands
+
+
+          Command and Response
+
+                          Table 214 — TPM2_NV_UndefineSpace Command
+ Type                         Name                   Description
+ TPMI_ST_COMMAND_TAG          tag                    TPM_ST_SESSIONS
+ UINT32                       commandSize
+ TPM_CC                       commandCode            TPM_CC_NV_UndefineSpace {NV}
+
+                                                     TPM_RH_OWNER or TPM_RH_PLATFORM+{PP}
+ TPMI_RH_PROVISION            @authHandle            Auth Index: 1
+                                                     Auth Role: USER
+                                                     the NV Index to remove from NV space
+ TPMI_RH_NV_INDEX             nvIndex
+                                                     Auth Index: None
+
+
+                          Table 215 — TPM2_NV_UndefineSpace Response
+ Type                         Name                   Description
+ TPM_ST                       tag                    see clause 6
+ UINT32                       responseSize
+ TPM_RC                       responseCode
+
+
+
+
+Family “2.0”                                 TCG Published                                  Page 365
+Level 00 Revision 01.59             Copyright © TCG 2006-2020                       November 8, 2019
+Part 3: Commands                                       Trusted Platform Module Library
+
+
+
+        Detailed Actions
+
+[[NV_UndefineSpace]]
+
+
+
+TCG Part 4 audit status, response HMAC, session attributes / flush excerpts
+       Family “2.0”                                    TCG Published                                         Page 231
+       Level 00 Revision 01.59                 Copyright © TCG 2006-2020                           November 8, 2019
+       Trusted Platform Module Library                                      Part 4: Supporting Routines
+
+
+1565
+1566             // If a session is used for audit
+1567             if(IS_ATTRIBUTE(s_attributes[i], TPMA_SESSION, audit))
+1568             {
+1569                 // An audit session has been found
+1570                 auditSession = s_sessionHandles[i];
+1571
+1572                 // If the session has not been an audit session yet, or
+1573                 // the auditSetting bits indicate a reset, initialize it and set
+1574                 // it to be the exclusive session
+1575                 if(session->attributes.isAudit == CLEAR
+1576                    || IS_ATTRIBUTE(s_attributes[i], TPMA_SESSION, auditReset))
+1577                 {
+1578                     InitAuditSession(session);
+1579                     g_exclusiveAuditSession = auditSession;
+1580                 }
+1581                 else
+1582                 {
+1583                     // Check if the audit session is the current exclusive audit
+1584                     // session and, if not, clear previous exclusive audit session.
+1585                     if(g_exclusiveAuditSession != auditSession)
+1586                         g_exclusiveAuditSession = TPM_RH_UNASSIGNED;
+1587                 }
+1588                 // Report audit session exclusivity.
+1589                 if(g_exclusiveAuditSession == auditSession)
+1590                 {
+1591                     SET_ATTRIBUTE(s_attributes[i], TPMA_SESSION, auditExclusive);
+1592                 }
+1593                 else
+1594                 {
+1595                     CLEAR_ATTRIBUTE(s_attributes[i], TPMA_SESSION, auditExclusive);
+1596                 }
+1597                 // Extend audit log.
+1598                 Audit(command, session);
+1599           }
+1600       }
+       Page 232                                  TCG Published                            Family “2.0”
+       November 8, 2019                   Copyright © TCG 2006-2020           Level 00 Revision 01.59
+       Part 4: Supporting Routines                                           Trusted Platform Module Library
+
+
+1624        TPM2B_DIGEST         *rpHash = ComputeRpHash(command, session->authHashAlg);
+1625   //
+1626        // Generate HMAC key
+1627        MemoryCopy2B(&key.b, &session->sessionKey.b, sizeof(key.t.buffer));
+1628
+1629        // Add the object authValue if required
+1630        if(session->attributes.includeAuth == SET)
+1631        {
+1632            // Note: includeAuth may be SET for a policy that is used in
+1633            // UndefineSpaceSpecial(). At this point, the Index has been deleted
+1634            // so the includeAuth will have no meaning. However, the
+1635            // s_associatedHandles[] value for the session is now set to TPM_RH_NULL so
+1636            // this will return the authValue associated with TPM_RH_NULL and that is
+1637            // and empty buffer.
+1638            TPM2B_AUTH           authValue;
+1639   //
+1640             // Get the authValue with trailing zeros removed
+1641             EntityGetAuthValue(s_associatedHandles[sessionIndex], &authValue);
+1642
+1643             // Add it to the key
+1644             MemoryConcat2B(&key.b, &authValue.b, sizeof(key.t.buffer));
+1645        }
+1646
+1647        // if the HMAC key size is 0, the response HMAC is computed according to the
+1648        // input HMAC
+1649        if(key.t.size == 0
+1650           && s_inputAuthValues[sessionIndex].t.size == 0)
+1651        {
+1652            hmac->t.size = 0;
+1653            return;
+1654        }
+1655        // Start HMAC computation.
+1656        hmac->t.size = CryptHmacStart2B(&hmacState, session->authHashAlg, &key.b);
+1657
+1658        // Add hash components.
+1659        CryptDigestUpdate2B(&hmacState.hashState, &rpHash->b);
+1660        CryptDigestUpdate2B(&hmacState.hashState, &session->nonceTPM.b);
+1661        CryptDigestUpdate2B(&hmacState.hashState, &s_nonceCaller[sessionIndex].b);
+1662
+1663        // Add session attributes.
+1664        buffer = marshalBuffer;
+1665        marshalSize = TPMA_SESSION_Marshal(&s_attributes[sessionIndex], &buffer, NULL);
+1666        CryptDigestUpdate(&hmacState.hashState, marshalSize, marshalBuffer);
+1667
+1668        // Finalize HMAC.
+1669        CryptHmacEnd2B(&hmacState, &hmac->b);
+1670
+1671        return;
+1672   }
+
+
+       6.4.5.9      UpdateInternalSession()
+
+       Updates internal sessions:
+1811                  {
+1812                      // Compute the response HMAC and get a pointer to the nonce used.
+1813                      // This function will also update the values if needed. Note, the
+1814                      nonceTPM = BuildSingleResponseAuth(command, i, &responseAuth);
+1815                  }
+1816                  command->authSize += TPM2B_NONCE_Marshal(nonceTPM,
+1817                                                           &command->responseBuffer,
+1818                                                           NULL);
+1819                  command->authSize += TPMA_SESSION_Marshal(&s_attributes[i],
+1820                                                            &command->responseBuffer,
+1821                                                            NULL);
+1822                  command->authSize += TPM2B_DIGEST_Marshal(&responseAuth,
+1823                                                            &command->responseBuffer,
+1824                                                            NULL);
+1825                  if(!IS_ATTRIBUTE(s_attributes[i], TPMA_SESSION, continueSession))
+1826                      SessionFlush(s_sessionHandles[i]);
+1827              }
+1828        }
+1829        return;
+1830   }
+
+
+       6.4.5.13     SessionRemoveAssociationToHandle()
+
+       This function deals with the case where an entity associated with an authorization is deleted during
+       command processing. The primary use of this is to support UndefineSpaceSpecial().
+
+1831   void
+1832   SessionRemoveAssociationToHandle(
+1833        TPM_HANDLE         handle
+1834        )
+1835   {
+1836        UINT32                  i;
+1837   //
+1838        for(i = 0; i < MAX_SESSION_NUM; i++)
+1839        {
+1840            if(s_associatedHandles[i] == handle)
+1841            {
+1842                s_associatedHandles[i] = TPM_RH_NULL;
+1843            }
+1844        }
+1845   }
