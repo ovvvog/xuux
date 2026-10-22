@@ -280,6 +280,22 @@ test('R5-02: KDFa مطابقٌ لـSP 800-108 بعدّادٍ واحد، وsessio
   assert.ok(!key.equals(kdfa(salt, 'ATH', nc, nt, 256)));
 });
 
+test('WL-452: متجهاتٌ ثابتةٌ مستقلةُ الاشتقاق لsessionKey وHMAC الردّ (تقفلُ الصيغةَ لا مجردَ الاتساقِ الداخليّ)', () => {
+  // المتجهان محسوبان ببناءٍ مستقلٍّ لمعادلةِ SP 800-108 (عدّاد، HMAC، تصفيةِ الصفرِ بعدَ العلامة)
+  // ولمعادلةِ ردِّ النواةِ (rp ‖ nonceTPM ‖ nonceCaller ‖ attrs) خارجَ دوالِّ النموذجِ، ثمّ ثُبّتا هنا حرفيًّا.
+  const salt = Buffer.alloc(32, 0x01);
+  const nt = Buffer.alloc(32, 0x02);
+  const nc = Buffer.alloc(32, 0x03);
+  assert.equal(
+    sessionKeyFor(salt, nt, nc).toString('hex'),
+    'd61e4115d0e81cb1945ebb5d9b419bee7a4ee232e491f18649e90032a4af1aaa',
+  );
+  assert.equal(
+    responseHmac(sessionKeyFor(salt, nt, nc), Buffer.alloc(32, 0x0a), nt, nc, 0x81).toString('hex'),
+    '3bed9c83f098b14732419c7f9fcfff4eaf0198f7a5512c961260c1fa2e78ace9',
+  );
+});
+
 test('EK مستمرّ (T4): bootstrap → salted بـP0 → confirmed، والبصمةُ من C1', () => {
   const { gate } = fullRun();
   assert.equal(gate.state, 'confirmed');
@@ -634,6 +650,47 @@ test('salted: لا تُفرَّغُ الجلسةُ المملّحةُ قبلَ C
     'FLUSH_EK_BEFORE_C1',
   );
   rejects(() => gate.prepare({ cc: 'FlushContext', flushHandle: 0x02000077 }), 'FLUSH_FOREIGN');
+});
+
+test('WL-452 — T5 (CreatePrimary) بجلسةٍ في bootstrap: رفضٌ قبلَ الإرسال (النصُّ: T1–T6 بلا جلساتٍ أو بـTPM_RS_PW)', () => {
+  const tpm = simulatedTpm();
+  const gate = createGate({ persistentEkHandle: PERSISTENT, certificateEkPublic: EK_PUBLIC });
+  const { ekHandle } = bootstrapRows(gate, tpm);
+  send(gate, tpm, sas(ekHandle));
+  rejects(
+    () =>
+      gate.prepare({
+        cc: 'CreatePrimary',
+        primaryHandle: 'ENDORSEMENT',
+        auth: 'PW',
+        session: { handle: gate.bootstrapSessionHandle, attrs: 0x81 },
+      }),
+    'SESSION_IN_BOOTSTRAP',
+  );
+  // والاتصالُ سليمٌ: الشكلُ بلا جلسةٍ ما زالَ مقبولًا (T5_ONCE لم يُستهلَك بالرفض).
+  send(gate, tpm, {
+    cc: 'CreatePrimary',
+    primaryHandle: 'ENDORSEMENT',
+    auth: 'PW',
+  });
+  assert.equal(gate.state, 'bootstrap');
+});
+
+test('WL-452 — ردُّ StartAuthSession بمنطقةِ تفويضٍ (ليس ن1 بحسبِ واصفِه) يُغلقُ الاتّصال', () => {
+  const tpm = simulatedTpm();
+  const gate = createGate({ persistentEkHandle: PERSISTENT, certificateEkPublic: EK_PUBLIC });
+  const { ekHandle } = bootstrapRows(gate, tpm);
+  const prepared = gate.prepare(sas(ekHandle));
+  const resp = tpm.respond(prepared);
+  const withAuth = {
+    ...resp,
+    auth: { nonceTPM: randomBytes(32), attrs: 0x81, hmac: randomBytes(32) },
+  };
+  const out = gate.accept(withAuth);
+  assert.equal(out.state, 'closed');
+  assert.match(gate.closedReason, /بمنطقةِ تفويض/);
+  // ولا محاولةَ بعدها.
+  rejects(() => gate.prepare(p0(gate)), 'CLOSED');
 });
 
 test('النموذجُ تصميميّ: لا يستوردُه src/ ولا sim/، والملحقُ يعلنُ P0 وصيغةَ sessionKey', () => {

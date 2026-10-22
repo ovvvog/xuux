@@ -248,6 +248,10 @@ export function createGate({
           reject('T4_HANDLE', 'T4: مقبضُ EK المستمرُّ المعلنُ وحدَه');
         return 'T4';
       case 'CreatePrimary':
+        // WL-452: النصُّ «T1–T6 بلا جلساتٍ أو بـTPM_RS_PW» وT5 «TPM_RS_PW وحدَها» — فحملُ جلسةٍ على T5 رفضٌ قبلَ الإرسال.
+        // (الفحصُ غيابُ session وحدَه: T5 يحملُ auth = TPM_RS_PW مشروعًا.)
+        if (cmd.session !== undefined)
+          reject('SESSION_IN_BOOTSTRAP', 'CreatePrimary بجلسةٍ في bootstrap');
         if (cmd.auth !== 'PW' || cmd.primaryHandle !== 'ENDORSEMENT') reject('T5_SHAPE', 'T5');
         if (!g.t1.done) reject('T5_BEFORE_T1', 'T5 يحتاجُ جردَ T1 مكتملًا');
         if (g.createPrimaryCount > 0) reject('T5_ONCE', 'مفتاحٌ عابرٌ واحدٌ في الاتّصال');
@@ -445,6 +449,9 @@ export function createGate({
       }
       if (resp.rc !== 0) return close(`خطأ في ${row}`);
       if (row === 'SAS') {
+        // WL-452: ردُّ StartAuthSession ن1 بحسبِ واصفِه (§4.4)؛ منطقةُ تفويضٍ في ردِّهِ ليست ن1 فتُغلقُ الاتّصال
+        // كما تُغلقُ ردودُ بقيةِ الصفوفِ بلا جلساتٍ إذا حملتْ منطقةَ تفويضٍ أدناه.
+        if (resp.auth) return close('ردٌّ بمنطقةِ تفويضٍ لأمرٍ بلا جلسات');
         const nonceTPM = resp.params.nonceTPM;
         const key = sessionKeyFor(cmd.salt.value, nonceTPM, cmd.nonceCaller);
         g.bootstrapSession = {
