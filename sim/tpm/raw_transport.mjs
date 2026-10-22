@@ -39,6 +39,7 @@ export const RAW_TRANSPORT_ERRORS = Object.freeze({
   RESPONSE_TRAILING_BYTES: 'RAW_TRANSPORT_RESPONSE_TRAILING_BYTES',
   UNSOLICITED_BYTES: 'RAW_TRANSPORT_UNSOLICITED_BYTES',
   POISONED: 'RAW_TRANSPORT_POISONED',
+  OPTIONS_INVALID: 'RAW_TRANSPORT_OPTIONS_INVALID',
 });
 
 export class RawTransportError extends Error {
@@ -53,6 +54,32 @@ export class RawTransportError extends Error {
     this.code = code;
     this.outcome = outcome;
   }
+}
+
+/**
+ * WL-455: خياراتُ النقلِ أعدادٌ نهائيّةٌ موجبةٌ أو رفضٌ قبلَ أيِّ اتّصال. `NaN`/`Infinity` في
+ * `maxResponseBytes` كانت تُعطِّلُ الحدَّ الأعلىَ صامتةً (`size > NaN` كاذبةٌ دائمًا) فيُقبلُ ردٌّ يعلنُ
+ * أيَّ حجمٍ، و`NaN` في المهلِ تُطلِقُ المؤقِّتَ فورًا. فالخيارُ غيرُ الصالحِ رفضٌ مسمّى بنتيجةِ `not-sent`
+ * لا سلوكٌ صامت. والحدُّ الأدنى للردِّ رأسُه العشرةُ بايتات.
+ * @param {{ timeoutMs?: number, maxResponseBytes?: number, connectTimeoutMs?: number }} options
+ * @returns {{ timeoutMs: number, maxResponseBytes: number, connectTimeoutMs: number }}
+ */
+export function checkTransportOptions(options) {
+  const bad = (/** @type {string} */ what, /** @type {unknown} */ value) =>
+    new RawTransportError(
+      RAW_TRANSPORT_ERRORS.OPTIONS_INVALID,
+      'not-sent',
+      `${what} must be a positive finite number${what === 'maxResponseBytes' ? ` (integer >= ${TPM_HEADER_SIZE})` : ''}: ${String(value)}`,
+    );
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw bad('timeoutMs', timeoutMs);
+  const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  if (!Number.isFinite(connectTimeoutMs) || connectTimeoutMs <= 0) throw bad('connectTimeoutMs', connectTimeoutMs);
+  const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < TPM_HEADER_SIZE) {
+    throw bad('maxResponseBytes', maxResponseBytes);
+  }
+  return { timeoutMs, connectTimeoutMs, maxResponseBytes };
 }
 
 /**
@@ -127,6 +154,13 @@ export function checkCommandBytes(bytes) {
 export class ResponseFramer {
   /** @param {number} maxResponseBytes */
   constructor(maxResponseBytes) {
+    if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < TPM_HEADER_SIZE) {
+      throw new RawTransportError(
+        RAW_TRANSPORT_ERRORS.OPTIONS_INVALID,
+        'not-sent',
+        `maxResponseBytes must be a positive finite integer >= ${TPM_HEADER_SIZE}: ${String(maxResponseBytes)}`,
+      );
+    }
     this.max = maxResponseBytes;
     /** @type {Buffer[]} */
     this.chunks = [];
@@ -182,6 +216,7 @@ export class SwtpmRawTransport {
    */
   static async open(tcti, options = {}) {
     const { host, port } = parseSimulatorEndpoint(tcti);
+    checkTransportOptions(options);
     const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     const socket = await new Promise((resolve, reject) => {
       const s = net.connect({ host, port });
@@ -206,6 +241,12 @@ export class SwtpmRawTransport {
    * @param {{ timeoutMs?: number, maxResponseBytes?: number }} options
    */
   constructor(socket, options) {
+    try {
+      checkTransportOptions(options);
+    } catch (e) {
+      socket.destroy();
+      throw e;
+    }
     this.socket = socket;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
