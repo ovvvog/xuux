@@ -1273,3 +1273,31 @@ test('DOC-31 — المستودعُ نفسُه: مالكا DOC-30 وDOC-27 من 
     'HANDOFF يعرضُ نصّاً من وصفِ DOC-30 مالكاً',
   );
 });
+
+test('WL-450 — طلبٌ مركَّبٌ في CI يُقاسُ على origin/main لا على قاعدتِه: طبقةٌ سفلى لم تُقَسْ على main لا تَعبُرُ بأخضرِ ما فوقَها', () => {
+  const root = fixture();
+  // الطبقةُ السفلى: كودٌ بلا ذاكرةٍ على فرعِ مكدّسٍ لم يُقَسْ على main.
+  git(root, ['checkout', '-q', '-b', 'stack-base', 'main']);
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  commit(root, 'lower layer: code only');
+  // الطبقةُ العليا: تعديلُ وثيقةٍ محايدةٍ فوقَها.
+  git(root, ['checkout', '-q', '-b', 'stack-top']);
+  write(root, 'docs/THREAT_MODEL.md', '# نموذج التهديد\n\nتصحيحٌ لغويّ.\n');
+  commit(root, 'upper layer: neutral doc');
+  git(root, ['update-ref', 'refs/remotes/origin/main', 'main']);
+  git(root, ['update-ref', 'refs/remotes/origin/stack-base', 'stack-base']);
+  const env = { ...process.env };
+  delete env['PROJECT_STATE_BASE'];
+  env['GITHUB_EVENT_NAME'] = 'pull_request';
+  env['GITHUB_BASE_REF'] = 'stack-base';
+  const run = spawnSync(process.execPath, [GUARD, '--root', root, '--no-consistency'], {
+    encoding: 'utf8',
+    env,
+  });
+  const out = `${run.stdout}\n${run.stderr}`;
+  assert.match(out, /الأساسُ: origin\/main/u, out);
+  assert.equal(run.status, 1, out);
+  assert.match(out, /PS2\/NO-RECORD/u);
+  // والقياسُ القديمُ على القاعدةِ الحرفيّةِ كانَ يُمرِّرُ الطبقةَ نفسَها:
+  assert.equal(runGuard(root, 'origin/stack-base').status, 0, 'فرقُ الطبقةِ العليا وحدَه محايد.');
+});
