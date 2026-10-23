@@ -8,7 +8,7 @@
 // ثمّ يُشغِّلُ حواجزَ الاتّساقِ القائمةَ فيعطي حكماً واحداً.
 //
 // **يحكمُ على الفرقِ لا على الشجرةِ** — وهذا ما لم يكن يقيسُه حاجزٌ قبلَه:
-//   الأساسُ: `--base <ref>`، أو `PROJECT_STATE_BASE`، أو في CI لطلبِ دمجٍ `origin/<base_ref>`،
+//   الأساسُ: `--base <ref>`، أو `PROJECT_STATE_BASE`، أو في CI لطلبِ دمجٍ `origin/main` أيًّا كانت قاعدتُه (WL-450)،
 //   أو في CI لدفعٍ إلى `main` الأبُ الأوّلُ `HEAD^1`، وإلّا `merge-base HEAD origin/main`.
 //   والفرقُ `git diff --no-renames -z --name-status <base>...HEAD`.
 //
@@ -126,7 +126,12 @@ function resolveBase() {
   if (explicit !== undefined && explicit !== '') return explicit;
   const event = process.env['GITHUB_EVENT_NAME'];
   const baseRef = process.env['GITHUB_BASE_REF'];
-  if (event === 'pull_request' && baseRef) return `origin/${baseRef}`;
+  // WL-450: طلبُ الدمجِ يُقاسُ على `origin/main` **أيًّا كانت قاعدتُه الحرفيّة**. فالطلبُ
+  // المركَّبُ (قاعدتُه فرعُ طلبٍ آخر) لو قيسَ على قاعدتِه لَخرجَ فحصُه المطلوبُ أخضرَ على فرقِ
+  // طبقتِه وحدَها؛ ثمّ يُعادُ توجيهُه إلى `main` عندَ دمجِ ما تحتَه — وتغييرُ القاعدةِ لا يُطلِقُ
+  // `pull_request` بأنواعِه الافتراضيّة — فيبقى الفحصُ الأخضرُ على الرأسِ نفسِه ويَعبُرُ إلى
+  // `main` ما لم يُقَسْ عليه. والقياسُ على `main` يجعلُ الأخضرَ صادقًا لـ`main` في الحالتين.
+  if (event === 'pull_request' && baseRef) return 'origin/main';
   if (event === 'push') return 'HEAD^1';
   try {
     return git(['merge-base', 'HEAD', 'origin/main']).trim();
