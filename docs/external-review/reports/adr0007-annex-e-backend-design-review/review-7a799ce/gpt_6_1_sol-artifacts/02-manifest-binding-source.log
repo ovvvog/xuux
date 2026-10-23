@@ -1,0 +1,868 @@
+$ nl -ba src/root-of-trust/state-manifest.mts (selected ranges)
+   120	  'STATE_MANIFEST_VERSION_UNSUPPORTED',
+   121	  'STATE_MANIFEST_JOURNAL_INVALID',
+   122	  'STATE_MANIFEST_JOURNAL_UNAUTHENTICATED',
+   123	  'STATE_MANIFEST_ROLLBACK_DETECTED',
+   124	  'STATE_MANIFEST_SEALER_REQUIRED',
+   125	  'STATE_MANIFEST_JOURNAL_LOCKED',
+   126	  'STATE_MANIFEST_STAGED_INVALID',
+   127	  /**
+   128	   * WL-434: ربطُ NV في المتنِ ناقصُ الشكلِ أو لا يطابقُ `instanceId` المتنَ، أو
+   129	   * مهرَّبٌ في مخطّطٍ تاريخيٍّ لا يحملُه، أو غائبٌ عن مخطّطِ NV الذي يوجبُه.
+   130	   */
+   131	  'STATE_MANIFEST_FNV_BINDING_INVALID',
+   132	  /** WL-434: محاولةُ تغييرِ ربطٍ قائمٍ أو إعادةِ ربطٍ فوقَ ربطٍ — مراسمُ مالكٍ لا تحديثٌ. */
+   133	  'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   134	  /** WL-434: مراسمُ ختمِ الربطِ في المتنِ بلا إعلانِ التفويضِ في البيئة. */
+   135	  'STATE_MANIFEST_FNV_BINDING_NOT_DECLARED',
+   136	] as const;
+   137	
+   138	export type StateManifestErrorCode = (typeof StateManifestErrorCodes)[number];
+   139	
+   140	/** خطأُ البيان: رسالتُه رمزُه، وتفصيلُه أسماءٌ وأعدادٌ لا أسرار. */
+   141	export class StateManifestError extends Error {
+   142	  readonly code: StateManifestErrorCode;
+   143	  readonly detail?: string;
+   144	
+   145	  /**
+   146	   * @param code - رمزُ الخطأ
+   147	   * @param detail - تفصيلٌ يُقرأُ برمجياً، بلا قيمةِ سرٍّ فيه
+   148	   */
+   149	  constructor(code: StateManifestErrorCode, detail?: string) {
+   150	    super(code);
+   151	    this.name = 'StateManifestError';
+   152	    this.code = code;
+   153	    if (detail !== undefined) this.detail = detail;
+   154	  }
+   155	}
+   156	
+   157	/** الحقولُ الثلاثةُ الرتيبةُ التي لا تنزلُ. */
+   158	export type MonotonicKey = 'anchoredCount' | 'haltEpoch' | 'ledgerCommitted' | 'freshnessEpoch';
+   159	
+   160	/** ما يربطُ البيانَ بنظامِه: هويةٌ وسياقٌ وتوكنٌ وموديول. */
+   161	export interface StateManifestBinding {
+   162	  kingId: string;
+   163	  context: string;
+   164	  tokenSerial: string;
+   165	  moduleSha256: string;
+   166	}
+   167	
+   168	/** متنُ البيانِ كما يُوقَّعُ ويُحفَظُ. لا يحملُ مادةَ مفتاحٍ ولا سرّاً. */
+   169	export interface StateManifestBody extends StateManifestBinding {
+   170	  version: number;
+   171	  /** مُعرِّفُ نسخةِ الجذرِ — عشوائيٌّ عندَ التهيئةِ، يربطُ المواضعَ الثلاثةَ. */
+   172	  instanceId: string;
+   173	  createdAt: string;
+   174	  sealedAt: string;
+   175	  /** عدّادُ نقاطِ الضبطِ — يعلو ولا ينزل. */
+   176	  sequence: number;
+   177	  anchoredCount: number;
+   178	  haltEpoch: number;
+   179	  ledgerCommitted: number;
+   180	  /** عَهْدُ الحداثةِ من مصدرٍ خارجَ القرص (EXT-6). صفرٌ إن لم يُوصَلْ. */
+   181	  freshnessEpoch: number;
+   182	  /** رأسُ دفترِ الرفعِ لحظةَ الختمِ — يمنعُ قصَّ الدفترِ إلى ما قبلَ الختم. */
+   183	  journalHead: string;
+   184	  /**
+   185	   * `LIVE-28` (‏`WL-326`): بصمةُ الحالةِ `V_e` التي يشهدُ عليها المرجعُ الخارجيُّ في
+   186	   * العهدِ `freshnessEpoch`. لا تُوجدُ إلّا في الوضعِ المربوطِ بالحالة.
+   187	   */
+   188	  stateDigest?: string;
+   189	  /** `A_e = H(domain ‖ instanceId ‖ e ‖ V_e)` — ما يحملُه المرجعُ الخارجيُّ في العهدِ `e`. */
+   190	  freshnessAnchor?: string;
+   191	  /**
+   192	   * التزامٌ مُرحَّلٌ لم يُرَقَّ (‏`S2`): وجودُه عندَ الإقلاعِ يعني أنّ ما بعدَه على القرصِ
+   193	   * **غيرُ مُقَرٍّ به**، فيُحسَمُ بالمرجعِ (‏استرجاعٌ أو ترقية) قبلَ أيِّ قبول.
+   194	   */
+   195	  staged?: StagedCommit | null;
+   196	  /**
+   197	   * WL-434: ربطُ مرجعِ الحداثةِ على NV كما يُختَمُ في المتنِ — المقبضانِ واسمَا
+   198	   * `NV_ReadPublic` و`base` المثبَّتُ خارجَ `R` و`instanceId` وهويةُ TPM وسياستُها.
+   199	   * يُنشأُ مرّةً واحدةً عبرَ `bindFnvAsync` المعلنةِ، ولا يتغيّرُ بعدَها عبرَ أيِّ ختمٍ
+   200	   * (‏`#sealWith` يحرسُ الثباتَ مقارنةً بالقيمةِ لا بالمرجعِ). غيابُه في `version: 3`
+   201	   * رفضٌ، ووجودُه في `version: 2` مهرَّبٌ مرفوضٌ — لا ترقيةَ صامتةً في الاتجاهَين.
+   202	   */
+   203	  freshnessBinding?: ManifestFnvBinding | null;
+   204	}
+   205	
+   206	/** سجلُّ التزامٍ مُرحَّلٍ داخلَ المتنِ المختوم. */
+   207	export interface StagedCommit {
+   208	  /** معرّفُ المعاملة — يطابقُ رأسَ سجلِّ التراجعِ وإلّا فلا يُوثَقُ بالسجلّ. */
+   209	  txn: string;
+   210	  /** القصدُ المُعلَنُ (‏`halt`، `ledger.commit`، `log.append`، …) للتدقيق. */
+   211	  intent: string;
+   212	  /** العهدُ والمرساةُ اللذانِ بدأت منهما المعاملة. */
+   213	  fromEpoch: number;
+   214	  fromAnchor: string;
+   215	  at: string;
+   216	}
+   217	
+   218	/** البيانُ كما يُكتَبُ: متنٌ وخاتَمُه. */
+   219	export interface SealedStateManifest {
+   220	  body: StateManifestBody;
+   221	  seal: { alg: 'ed25519'; signerId: string; signature: string };
+   222	}
+   223	
+   224	/** أقلُّ ما يلزمُ من الموقّعِ — يوافقُ `HsmSigner` بلا اقترانٍ بوحدتِه. */
+   225	export interface ManifestSealer {
+   226	  readonly id: string;
+   227	  signAsync(payload: object): Promise<string>;
+   228	  verify(payload: object, signature: string): boolean;
+   229	  /**
+   230	   * يستخرجُ مفتاحَ مصادقةٍ لدفترِ الرفعِ من التوكن (R4-B-01). إن وُجد، صارتْ
+   231	   * تجزئةُ سطرِ الدفترِ HMAC لا SHA-256 عاريّاً، فلا يستطيعُ مالكُ القرصِ أن
+   232	   * يَدُسَّ سطراً غيرَ مُصادَقٍ عليه ثم يُختَمَ في المتنِ. مفتاحٌ واحدٌ يُستخرجُ
+   233	   * مرةً واحدةً عندَ الإقلاع.
+   234	   */
+   235	  deriveJournalKey?(instanceId: string): Promise<string>;
+   236	}
+   237	
+   238	/** حدٌّ أدنى دائمٌ: يُقرأُ ويُرفَعُ ولا يُخفَض. عقدٌ بنيويٌّ كي يُحقَنَ في الاختبار. */
+   239	export interface MonotonicFloor {
+   240	  read(): number;
+   241	  raise(value: number): void;
+   242	}
+   243	
+   244	/** سطرُ دفترِ الرفعِ — مُسلسَلٌ بالتجزئةِ فلا يُقَصُّ ولا يُدَسُّ فيه. */
+   245	interface JournalEntry {
+   246	  seq: number;
+   247	  key: MonotonicKey;
+   248	  value: number;
+   249	  at: string;
+   250	  prev: string;
+   251	  hash: string;
+   252	  /**
+   253	   * مصادقةُ السطرِ بمفتاحٍ مستخرجٍ من التوكن (R4-B-01). إن وُجد، فالتجزئةُ
+   254	   * `hash` صارتْ HMAC-SHA256 لا SHA-256 عاريّاً. إن لم يكن للموقّعِ
+   255	   * `deriveJournalKey`، يبقى السطرُ بلا `mac` — وهذا مسارُ الاختبارِ فقط.
+   256	   */
+   257	  mac?: string;
+   258	}
+   259	
+   260	/**
+   261	 * يقرأُ إعلانَ إذنِ التهيئةِ من البيئةِ. الإذنُ **يُعلَن** ولا يُستنبَطُ من
+   262	 * فراغِ القرصِ: جذرٌ ممحوٌّ وجذرٌ جديدٌ لا يُفرَّقانِ بالنظرِ إلى القرصِ وحدَه.
+   263	 * @param env - البيئةُ المقروءة
+   264	 * @returns هل أُعلِنَ الإذن
+   265	 */
+   266	export function stateProvisionDeclared(env: NodeJS.ProcessEnv = process.env): boolean {
+   267	  return (env[STATE_PROVISION_ENV] ?? '').trim() === '1';
+   268	}
+   269	
+   270	/**
+   271	 * يبني مسارَ البيانِ من جذرِ الحالة.
+   272	 * @param root - جذرُ الحالة
+   273	 * @returns مسارُ الملف
+   274	 */
+   275	export function stateManifestPath(root: string): string {
+   276	  return join(root, STATE_MANIFEST_FILE);
+   277	}
+   278	
+   279	/**
+   280	 * يقرأُ رِباطَ البيانِ من البيئةِ: الهويةُ والسياقُ والتوكنُ والموديول.
+   281	 * @param kingId - هويةُ الملكِ الحاضرة
+   282	 * @param env - البيئةُ المقروءة
+   283	 * @returns الرِباطُ كما يدخلُ المتنَ الموقَّع
+   284	 */
+   285	export function stateManifestBinding(
+   286	  kingId: string,
+   287	  env: NodeJS.ProcessEnv = process.env,
+   288	): StateManifestBinding {
+   289	  return {
+   290	    kingId,
+   291	    context: (env[STATE_CONTEXT_ENV] ?? '').trim(),
+   292	    tokenSerial: (env.XUUX_PKCS11_TOKEN_SERIAL ?? '').trim(),
+   293	    moduleSha256: (env.XUUX_PKCS11_MODULE_SHA256 ?? '').trim(),
+   294	  };
+   295	}
+   296	
+   297	/** تجزئةُ سطرٍ في دفترِ الرفعِ — تشملُ السابقَ فتصيرُ سلسلةً لا كومةً. */
+   298	function journalHash(
+   299	  instanceId: string,
+   300	  entry: Omit<JournalEntry, 'hash' | 'mac'>,
+   301	  key?: string | null,
+   302	): string {
+   303	  const data = JSON.stringify({
+   304	    instanceId,
+   305	    seq: entry.seq,
+   306	    key: entry.key,
+   307	    value: entry.value,
+   308	    at: entry.at,
+   309	    prev: entry.prev,
+   310	  });
+   311	  if (key) {
+   312	    return createHmac('sha256', key).update(data).digest('hex');
+   313	  }
+   314	  return createHash('sha256').update(data).digest('hex');
+   315	}
+   316	
+   317	/** كتابةٌ ذريّةٌ: ملفٌّ مؤقّتٌ ثمَّ `rename`، فلا يُقرأُ نصفُ ملفٍّ عطباً. */
+   318	function writeAtomic(file: string, text: string, fsync: boolean): void {
+   319	  mkdirSync(dirname(file), { recursive: true });
+   320	  const temporary = `${file}.tmp-${String(process.pid)}`;
+   321	  const line = Buffer.from(text, 'utf8');
+   322	  const fd = openSync(temporary, 'w');
+   323	  try {
+   324	    let written = 0;
+   325	    while (written < line.length) written += writeSync(fd, line, written);
+   326	    if (fsync) fsyncSync(fd);
+   327	  } finally {
+   328	    closeSync(fd);
+   329	  }
+   330	  renameSync(temporary, file);
+   331	  // `WL-326` (‏`D3`): الترقيةُ لا تدومُ بالمحتوى وحدَه بل بالاسم؛ فالمجلّدُ يُزامَن.
+   332	  fsyncDirectory(dirname(file), fsync);
+   333	}
+   334	
+   335	/**
+   336	 * يُزامِنُ مجلّداً كي يدومَ الاسمُ نفسُه (‏إعادةُ تسميةٍ أو حذف) لا المحتوى وحدَه.
+   337	 * @param dir - المجلّد
+   338	 * @param fsync - هل المزامنةُ مفعّلة
+   339	 */
+   340	function fsyncDirectory(dir: string, fsync: boolean): void {
+   590	      journalHead: 'genesis',
+   591	    };
+   592	    await this.#seal(body);
+   593	    rmSync(this.journalFile, { force: true });
+   594	    this.#verified = body;
+   595	  }
+   596	
+   597	  /**
+   598	   * يفتحُ بياناً قائماً: خاتَمٌ ثمَّ رِباطٌ ثمَّ دفترُ رفعٍ ثمَّ مرساةُ حدٍّ أعلى.
+   599	   * ولا يُوثَقُ بحقلٍ واحدٍ قبلَ تمامِ الأربعةِ — وذاك عينُ ما نقضَه `R3-A-01`.
+   600	   * @param binding - الرِباطُ المُعلَنُ
+   601	   * @returns المتنُ الفعّالُ بعدَ طيِّ دفترِ الرفع
+   602	   */
+   603	  async openAsync(binding: StateManifestBinding): Promise<StateManifestBody> {
+   604	    // R4-B-01: استخرجْ مفتاحَ المصادقةِ قبلَ طيِّ الدفترِ، فلا يُقبَلُ سطرٌ غيرُ
+   605	    // مُصادَقٍ عليه. الترتيبُ مقصودٌ: الخاتَمُ أولاً، ثمَّ المفتاحُ، ثمَّ الطيُّ.
+   606	    const sealedBody = this.#verifySeal(binding);
+   607	    await this.#deriveJournalKey(sealedBody.instanceId);
+   608	    const folded = this.#foldJournal(sealedBody);
+   609	    this.#verified = folded.body;
+   610	    await this.checkpointAsync();
+   611	    return folded.body;
+   612	  }
+   613	
+   614	  /**
+   615	   * نقطةُ ضبطٍ: يطوي دفترَ الرفعِ في متنٍ جديدٍ ويختمُه داخلَ التوكن. تُنادى
+   616	   * عندَ كلِّ إقلاعٍ، فنافذةُ الإعادةِ المُعلَنةُ ما بينَ إقلاعينِ لا أكثر.
+   617	   */
+   618	  async checkpointAsync(): Promise<void> {
+   619	    await this.#sealWith((body) => body, false);
+   620	  }
+   621	
+   622	  /**
+   623	   * WL-434 — مراسمُ ربطِ NV المعلنةُ: تختُمُ مادّةَ المرجعِ في المتنِ وترفعُ المخطّطَ
+   624	   * إلى `version: 3` معًا، فلا يوجدَ بيانٌ تاريخيٌّ يحملُ ربطًا ولا بيانُ NV بلا ربط.
+   625	   *
+   626	   * **إعلانٌ لا استنباط:** بلا `XUUX_FRESHNESS_BIND_DECLARED=1` لا ربطَ — التغييرُ
+   627	   * يبدّلُ وضعَ البيانِ فلا يقعُ ضمنَ تحديثٍ عاديّ. و**إعادةُ الربطِ فوقَ ربطٍ
+   628	   * قائمٍ مرفوضةٌ**: مراسمُ مالكٍ لا مسارٌ صامت، والمرجعُ نفسُه لا يُجمعُ منه مادّةٌ
+   629	   * جديدةٌ ليُعادَ تثبيتُها (تعافي B2 يعيدُ استعمالَ الربطِ المختومِ نفسِه).
+   630	   * المادّةُ تُنسَخُ نسخًا عميقًا فلا يبقى للمدخِلِ مرجعٌ يعدّلُ به الربطَ بعدَ الختم.
+   631	   * @param material - مادّةُ الربطِ من المصدرِ (المقبضانِ والاسمانِ و`base` والهويةُ والسياسة)
+   632	   * @param env - البيئةُ التي يُقرأُ منها إعلانُ التفويضِ
+   633	   * @returns المتنُ بعدَ الختمِ — `version: 3` و`freshnessBinding` مثبتٌ فيه
+   634	   */
+   635	  async bindFnvAsync(
+   636	    material: FnvBindingMaterial,
+   637	    env: NodeJS.ProcessEnv = process.env,
+   638	  ): Promise<StateManifestBody> {
+   639	    if ((env[FNV_BIND_DECLARED_ENV] ?? '').trim() !== '1') {
+   640	      throw new StateManifestError(
+   641	        'STATE_MANIFEST_FNV_BINDING_NOT_DECLARED',
+   642	        FNV_BIND_DECLARED_ENV,
+   643	      );
+   644	    }
+   645	    if (!existsSync(this.location)) {
+   646	      throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
+   647	    }
+   648	    const body = this.#verifySeal(null);
+   649	    if (body.freshnessBinding !== undefined && body.freshnessBinding !== null) {
+   650	      throw new StateManifestError(
+   651	        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   652	        'ربطٌ قائمٌ؛ إعادةُ الربطِ مراسمُ مالكٍ',
+   653	      );
+   654	    }
+   655	    if (body.version === FNV_MANIFEST_SCHEMA_VERSION) {
+   656	      // بيانُ NV بلا ربطٍ — حالةٌ لا ينتجُها مسارٌ مشروعٌ، ولا يُكمَلُ استنباطًا.
+   657	      throw new StateManifestError('STATE_MANIFEST_FNV_BINDING_INVALID', 'مخطّطُ NV بلا ربطٍ');
+   658	    }
+   659	    let binding: ManifestFnvBinding;
+   660	    try {
+   661	      binding = buildManifestFnvBinding(material, body.instanceId);
+   662	    } catch (error) {
+   663	      throw new StateManifestError(
+   664	        'STATE_MANIFEST_FNV_BINDING_INVALID',
+   665	        (error as Error).message.split(':').slice(1).join(':').trim() || 'مادّةٌ ناقصةٌ',
+   666	      );
+   667	    }
+   668	    await this.#sealWith(
+   669	      (sealed) => ({ ...sealed, version: FNV_MANIFEST_SCHEMA_VERSION, freshnessBinding: binding }),
+   670	      false,
+   671	    );
+   672	    return this.read();
+   673	  }
+   674	
+   675	  /**
+   676	   * ختمٌ مطويٌّ عامٌّ: نقطةُ ضبطٍ، أو ترحيلٌ، أو ترقية.
+   677	   *
+   678	   * `LIVE-35` (‏`WL-326`): كان الختمُ ثمَّ حذفُ الدفترِ خطوتينِ بلا ربط، فانقطاعٌ
+   679	   * بينَهما يتركُ متناً جديداً تحتَ دفترٍ قديمٍ يُقرأُ `STATE_MANIFEST_ROLLBACK_DETECTED`.
+   680	   * الآنَ يُعادُ تسميةُ الدفترِ أوّلاً إلى `journal.sealing-<K>` (‏`K` تسلسلُ الختمِ
+   681	   * الجديد)، ثمَّ يُختَم، ثمَّ يُحذَف. فعندَ القراءةِ: `K ≤ sequence` ⇒ طُويَ فعلاً
+   682	   * فيُهمَل؛ `K = sequence+1` ⇒ لم يُختَمْ فيُطوى قبلَ الدفتر.
+   683	   * @param mutate - تحويلُ المتنِ المطويِّ قبلَ الختم
+   684	   * @param applyPending - هل تُختَمُ الرفوعُ المعلَّقةُ في هذا الختم (‏الترقيةُ وحدَها)
+   685	   */
+   686	  /**
+   687	   * WL-434 — تسلسلُ الختومِ: لا سباقَ بينَ ختمَينِ. مراسمانِ متزامنتانِ (أو ختمٌ
+   688	   * وتحديثٌ) يُسلسَلانِ على سلسلةٍ واحدةٍ داخلَ العمليّةِ، فالثاني يقرأُ ختمَ الأولِ
+   689	   * **داخلَ المقطعِ الحرجِّ نفسِهِ** ويرفضُ `IMMUTABLE` إن حاولَ ربطًا مختلفًا — بدلَ
+   690	   * أن يلتقطَ كلٌّ منهما «لا ربطَ» قبلَ أيِّ ختمٍ فيختمَ آخرُهما فوقَ أولِهما. القفلُ
+   691	   * العابرُ للعملياتِ (قفلُ الملفِّ) يبقى كما هو؛ هذه السلسلةُ تحرسُ داخلَ العمليّةِ.
+   692	   */
+   693	  async #sealWith(
+   694	    mutate: (body: StateManifestBody) => StateManifestBody,
+   695	    applyPending: boolean,
+   696	  ): Promise<void> {
+   697	    const run = this.#sealChain.then(() => this.#sealSerialized(mutate, applyPending));
+   698	    this.#sealChain = run.then(
+   699	      () => undefined,
+   700	      () => undefined,
+   701	    );
+   702	    await run;
+   703	  }
+   704	
+   705	  async #sealSerialized(
+   706	    mutate: (body: StateManifestBody) => StateManifestBody,
+   707	    applyPending: boolean,
+   708	  ): Promise<void> {
+   709	    // WL-165: الطيُّ يحذفُ الدفترَ، فلو وقعَ رفعٌ من عمليةٍ أخرى بينَ الختمِ
+   710	    // والحذفِ لَضاعَ شاهدٌ مرفوعٌ بلا أثرٍ — وهو عينُ ما تقولُه `R4-B-03`:
+   711	    // شاهدٌ يبقى خارجَ الخاتَمِ. فالطيُّ داخلَ القفلِ والقراءةُ من القرصِ داخلَه.
+   712	    this.#acquireJournalLock();
+   713	    try {
+   714	      this.#verified = null;
+   715	      const body = this.#verify(null);
+   716	      // WL-434: التقطِ الربطَ والمخطّطَ **قبلَ** التحديثِ وقبلَ أيّ مرجعٍ مشتركٍ —
+   717	      // المقارنةُ بعدَه بالقيمةِ لا بالمرجعِ، فكائنانِ يشتركانِ في المرجعِ متساويانِ
+   718	      // دائمًا ولو حُرّفَ أحدهما.
+   719	      const previousBinding = body.freshnessBinding ?? null;
+   720	      const target = this.journalFile + SEALING_SUFFIX + String(body.sequence + 1);
+   721	      this.#removeStaleSealing(body.sequence);
+   722	      if (existsSync(this.journalFile)) {
+   723	        if (existsSync(target)) {
+   724	          appendLine(target, readFileSync(this.journalFile, 'utf8'), this.#fsync);
+   725	          rmSync(this.journalFile, { force: true });
+   726	        } else {
+   727	          renameSync(this.journalFile, target);
+   728	        }
+   729	        fsyncDirectory(dirname(this.journalFile), this.#fsync);
+   730	      }
+   731	      let folded = body;
+   732	      if (applyPending) {
+   733	        folded = { ...body };
+   734	        for (const [key, value] of this.#pending) folded[key] = Math.max(folded[key], value);
+   735	      }
+   736	      const next: StateManifestBody = {
+   737	        ...mutate(folded),
+   738	        sequence: body.sequence + 1,
+   739	        sealedAt: new Date().toISOString(),
+   740	        journalHead: 'checkpoint:' + String(body.sequence + 1),
+   741	      };
+   742	      // WL-434: ثباتُ الربطِ والمخطّطِ عبرَ كلِّ ختمٍ — الترقيةُ الوحيدةُ الممكنةُ هي
+   743	      // 2→3 عبرَ `bindFnvAsync` المعلنةِ وحدَها، وما عداها رفضٌ لا تجاهلٌ صامت: الربطُ
+   744	      // لا يُهرَّبُ في مخطّطٍ تاريخيّ، ولا يُحذفُ أو يُحرّفُ أو يُخفَضُ مخطّطُه بعدَ ختمِه.
+   745	      if (previousBinding !== null) {
+   746	        if (!manifestFnvBindingEqual(previousBinding, next.freshnessBinding ?? null)) {
+   747	          throw new StateManifestError(
+   748	            'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   749	            'الربطُ لا يتغيّرُ عبرَ الختمِ',
+   750	          );
+   751	        }
+   752	        if (next.version !== FNV_MANIFEST_SCHEMA_VERSION) {
+   753	          throw new StateManifestError(
+   754	            'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   755	            'مخطّطُ NV لا يرجعُ',
+   756	          );
+   757	        }
+   758	      } else if ((next.freshnessBinding ?? null) !== null) {
+   759	        if (next.version !== FNV_MANIFEST_SCHEMA_VERSION) {
+   760	          throw new StateManifestError(
+   761	            'STATE_MANIFEST_FNV_BINDING_INVALID',
+   762	            'ربطٌ في مخطّطٍ تاريخيّ',
+   763	          );
+   764	        }
+   765	      }
+   766	      await this.#seal(next);
+   767	      if (applyPending) this.#pending.clear();
+   768	      rmSync(target, { force: true });
+   769	      this.#verified = next;
+   770	    } finally {
+   771	      this.#releaseJournalLock();
+   772	    }
+   773	  }
+   774	
+   775	  /**
+   776	   * ملفُّ طيٍّ جارٍ لم يُختَمْ بعدُ (‏`K = sequence+1`)، أو `null`.
+   777	   * @param sequence - تسلسلُ المتنِ المختومِ المقروء
+   778	   * @returns مسارُه
+   779	   */
+   780	  #pendingSealing(sequence: number): string | null {
+   781	    const target = this.journalFile + SEALING_SUFFIX + String(sequence + 1);
+   782	    return existsSync(target) ? target : null;
+   783	  }
+   784	
+   785	  /**
+   786	   * يحذفُ ملفّاتِ طيٍّ طُويَت فعلاً (‏`K ≤ sequence`) — أثرُ انقطاعٍ بعدَ الختم.
+   787	   * @param sequence - تسلسلُ المتنِ المختوم
+   788	   */
+   789	  #removeStaleSealing(sequence: number): void {
+   790	    const dir = dirname(this.journalFile);
+   800	      const k = Number(name.slice(prefix.length));
+   801	      if (Number.isSafeInteger(k) && k <= sequence) rmSync(join(dir, name), { force: true });
+   802	    }
+   803	  }
+   804	
+   805	  /**
+   806	   * سطورُ الدفترِ غيرُ المطويّةِ بترتيبِها: ملفُّ طيٍّ جارٍ ثمَّ الدفتر.
+   807	   * @param body - المتنُ المختوم
+   808	   * @returns السطور
+   809	   */
+   810	  #journalLines(body: StateManifestBody): string[] {
+   811	    const files: string[] = [];
+   812	    const sealing = this.#pendingSealing(body.sequence);
+   813	    if (sealing !== null) files.push(sealing);
+   814	    if (existsSync(this.journalFile)) files.push(this.journalFile);
+   815	    const lines: string[] = [];
+   816	    for (const file of files) {
+   817	      for (const line of readFileSync(file, 'utf8').split('\n')) {
+   818	        if (line.trim() !== '') lines.push(line);
+   819	      }
+   820	    }
+   821	    return lines;
+   822	  }
+   823	
+   824	  /**
+   825	   * يأخذُ قفلَ الكاتبِ الواحدِ على دفترِ الرفعِ (‏`WL-165`). قفلٌ لعمليةٍ حيّةٍ
+   826	   * أخرى رفضٌ مغلقٌ برمزِه، وقفلٌ لعمليةٍ ميتةٍ أو لا يُقرأُ يُنتزَعُ مرّةً واحدةً:
+   827	   * أثرُ تعطُّلٍ لا ملكيّةٌ قائمةٌ، ولو بقيَ لعطَّلَ الرفعَ أبداً.
+   828	   */
+   829	  #acquireJournalLock(): void {
+   830	    if (this.#journalLockDepth > 0) {
+   831	      this.#journalLockDepth += 1;
+   832	      return;
+   833	    }
+   834	    mkdirSync(dirname(this.journalFile), { recursive: true });
+   835	    for (let attempt = 0; attempt < 2; attempt += 1) {
+   836	      try {
+   837	        const fd = openSync(this.journalLockFile, 'wx', 0o600);
+   838	        try {
+   839	          writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
+   840	        } finally {
+   841	          closeSync(fd);
+   842	        }
+   843	        this.#journalLockDepth = 1;
+   844	        return;
+   845	      } catch (error) {
+   846	        if ((error as { code?: string }).code !== 'EEXIST') throw error;
+   847	        const owner = journalLockOwner(this.journalLockFile);
+   848	        if (owner !== null && owner !== process.pid && pidAlive(owner)) {
+   849	          throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
+   850	        }
+   851	        rmSync(this.journalLockFile, { force: true });
+   852	      }
+   853	    }
+   854	    throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'تعذّرَ أخذُ القفل');
+   855	  }
+   856	
+   857	  /** يفكُّ قفلَ الدفترِ عندَ الخروجِ من أعمقِ مستوى أُخِذَ فيه. */
+   858	  #releaseJournalLock(): void {
+   859	    this.#journalLockDepth -= 1;
+   860	    if (this.#journalLockDepth > 0) return;
+   861	    this.#journalLockDepth = 0;
+   862	    rmSync(this.journalLockFile, { force: true });
+   863	  }
+   864	
+   865	  /**
+   866	   * يقرأُ المتنَ الفعّالَ. غيابُ البيانِ أو خاتَمِه أو مرساتِه فشلٌ مغلقٌ لا
+   867	   * صفرٌ صامت.
+   868	   * @returns المتنُ الفعّال
+   869	   */
+   870	  read(): StateManifestBody {
+   871	    const base = this.#verified ?? this.#verify(null);
+   872	    if (this.#pending.size === 0) return base;
+   873	    const overlay: StateManifestBody = { ...base };
+   874	    for (const [key, value] of this.#pending) overlay[key] = Math.max(overlay[key], value);
+   875	    return overlay;
+  1000	        this.raise('haltEpoch', value);
+  1001	      },
+  1002	    };
+  1003	  }
+  1004	
+  1005	  /**
+  1006	   * شاهدُ عَدِّ المُثبَّتاتِ كواجهةٍ صغيرةٍ تُحقَنُ في `maybeAnchorLogWithHsm`
+  1007	   * (‏`R5-B-02`): بدلَ callbackٍ عامٍّ يُستقبَلُ شاهدٌ موثوقٌ ويُرفَعُ مباشرةً، ثمّ
+  1008	   * يُتحقَّقُ من ارتفاعِهِ فلا يمرُّ مرساةٌ موقَّعةٌ بلا شاهدٍ.
+  1009	   * @returns الحدُّ الأدنى الدائم
+  1010	   */
+  1011	  anchoredCountFloor(): MonotonicFloor {
+  1012	    return {
+  1013	      read: (): number => this.read().anchoredCount,
+  1014	      raise: (value: number): void => {
+  1015	        this.raise('anchoredCount', value);
+  1016	      },
+  1017	    };
+  1018	  }
+  1019	
+  1020	  /**
+  1021	   * شاهدُ عَدِّ الأوامرِ المُثبَّتةِ كواجهةٍ صغيرةٍ تُحقَنُ في `CommandLedger`.
+  1022	   * @returns الحدُّ الأدنى الدائم
+  1023	   */
+  1024	  ledgerWitness(): MonotonicFloor {
+  1025	    return {
+  1026	      read: (): number => this.read().ledgerCommitted,
+  1027	      raise: (value: number): void => {
+  1028	        this.raise('ledgerCommitted', value);
+  1029	      },
+  1030	    };
+  1031	  }
+  1032	
+  1033	  /** الموقّعُ أو خطأٌ: مسارٌ إنتاجيٌّ بلا خاتَمٍ ليس مساراً مقبولاً. */
+  1034	  #requireSealer(): ManifestSealer {
+  1035	    if (this.#sealer === null) {
+  1036	      throw new StateManifestError('STATE_MANIFEST_SEALER_REQUIRED', this.location);
+  1037	    }
+  1038	    return this.#sealer;
+  1039	  }
+  1040	
+  1041	  /** يختمُ متناً ويكتبُه ذريّاً. التوقيعُ داخلَ التوكنِ لا في هذه العملية. */
+  1042	  async #seal(body: StateManifestBody): Promise<void> {
+  1043	    const sealer = this.#requireSealer();
+  1044	    const signature = await sealer.signAsync(body);
+  1045	    const sealed: SealedStateManifest = {
+  1046	      body,
+  1047	      seal: { alg: 'ed25519', signerId: sealer.id, signature },
+  1048	    };
+  1049	    writeAtomic(this.location, JSON.stringify(sealed, null, 2) + '\n', this.#fsync);
+  1050	  }
+  1051	
+  1052	  /**
+  1053	   * التحقّقُ الكاملُ ثمَّ الطيُّ: خاتَمٌ، رِباطٌ، سلسلةُ دفترِ الرفعِ، مرساةُ
+  1054	   * الحدِّ الأعلى. كلُّ فشلٍ رمزُه، ولا واحدَ منها يُقرأُ «حالةً افتراضيّةً».
+  1055	   */
+  1056	  #verify(binding: StateManifestBinding | null): StateManifestBody {
+  1057	    const sealedBody = this.#verifySeal(binding);
+  1058	    const folded = this.#foldJournal(sealedBody);
+  1059	    this.#verified = folded.body;
+  1060	    return folded.body;
+  1061	  }
+  1062	
+  1063	  /**
+  1064	   * يتحقّقُ من الخاتَمِ والرباطِ فقط — بلا طيِّ دفترِ الرفعِ (R4-B-01). يُستدعى
+  1065	   * أولاً، ثمَّ يُستخرجُ مفتاحُ المصادقةِ، ثمَّ يُطوى الدفترُ بالمفتاح.
+  1066	   */
+  1067	  #verifySeal(binding: StateManifestBinding | null): StateManifestBody {
+  1068	    const sealer = this.#requireSealer();
+  1069	    if (!existsSync(this.location)) {
+  1070	      throw new StateManifestError('STATE_ROOT_UNPROVISIONED', this.location);
+  1071	    }
+  1072	    let parsed: unknown;
+  1073	    try {
+  1074	      parsed = JSON.parse(readFileSync(this.location, 'utf8'));
+  1075	    } catch {
+$ nl -ba src/root-of-trust/fnv-binding.mts
+     1	// جذرُ الثقة — ربطُ مرجعِ الحداثةِ على NV داخلَ متنِ البيانِ المختومِ (WL-434).
+     2	//
+     3	// **ما هذا الملفُّ:** عقدُ الربطِ المثبَّتِ لمرجعِ الحداثةِ على فهارسِ NV، كما يُختمُ
+     4	// في متنِ بيانِ جذرِ الحالةِ الموقَّعِ بمفتاحِ الملكِ داخلَ HSM — تنفيذُ الخيارِ (أ)
+     5	// من §5.1 في الملحقِ ج لـADR 0007 («حقلٌ في متنِ البيانِ المختومِ … يُكتَبُ مرّةً
+     6	// عندَ الربطِ الأوّلِ ولا يتغيّرُ»). قبلَ WL-434 كانَ الربطُ ملفًّا جانبيًّا في المحاكاةِ
+     7	// وحدَها (`sim/freshness-nv/pinned-binding.mjs`)؛ هنا يصيرُ حقلًا في المتنِ الموقَّعِ
+     8	// نفسِه، فلا مصدرَ حقيقةٍ ثانيًا إلى جانبِ البيان.
+     9	//
+    10	// **تغطيةُ الختمِ (قياسٌ لا ادّعاءٌ):** `ManifestSealer.signAsync` يوقّعُ
+    11	// `JSON.stringify(payload)` كاملًا، والحقولُ المتداخّلةُ تدخلُ في المتنِ الموقَّعِ،
+    12	// فأيُّ تحريرٍ للربطِ بعدَ الختمِ يُسقِطُ التوقيعَ (`STATE_MANIFEST_SEAL_INVALID`).
+    13	// والاختبارُ `wl-434-fnv-manifest-binding` يقيسُ ذلك على مسارِ الإنتاجِ الحقيقيّ.
+    14	//
+    15	// **سياسةُ إصدارِ المخطّطِ والتوافقِ (بلا ترقيةٍ صامتةٍ):**
+    16	//   - `version: 2` (التاريخيُّ): بلا ربطٍ. يبقى مقبولًا كما هو، ولا يُرقّيه `openAsync`
+    17	//     ولا `checkpointAsync` ولا أيُّ تحديثٍ عاديّ. وربطٌ مهرَّبٌ في متنه ⇒ رفضٌ
+    18	//     (`STATE_MANIFEST_FNV_BINDING_INVALID`) — لا يُقبَلُ حقلُ حمايةٍ بلا إعلانِ الوضعِ.
+    19	//   - `version: 3` (وضعُ NV): الربطُ **إلزاميُّ**؛ غيابُه رفضٌ لا دعوةٌ لإنشائه.
+    20	//     القارئُ القديمُ (الذي لا يعرفُ إلا 2) يرفضُه بـ`STATE_MANIFEST_VERSION_UNSUPPORTED`
+    21	//     بدلَ قبولِه معَ تجاهلِ الحمايةِ الجديدة.
+    22	//   - الانتقالُ 2→3 لا يقعُ إلا عبرَ مراسمِ الربطِ المعلنةِ (`bindFnvAsync`)، ولا
+    23	//     رجوعَ بعدها: `version` و`freshnessBinding` ثابتانِ عبرَ كلِّ ختمٍ لاحقٍ.
+    24	//
+    25	// **حدٌّ مصرَّحٌ به (لا يُدَّعى خلافُه):** `tpmIdentity` و`authPolicy` جزءٌ من عقدِ
+    26	// الربطِ ومصدرُهما المرجعُ نفسُه (اسمُ مفتاحِ EK أو شهادتُه، وسياسةُ كلِّ فهرسٍ كما
+    27	// تُقرَأُ من منطقتهِ العامة). **لا backend إنتاجيًّا يوفّرُهما اليوم** (`SUPPORTED_FRESHNESS_BACKENDS`
+    28	// فارغ)، فلا يُنشَأُ ربطٌ إنتاجيٌّ إلا بمرجعٍ حقيقيٍّ يوفرُهما، والاختباراتُ تُحْقِنُ
+    29	// مادّةً معلَنةً بلا ادّعاءِ هويةِ عتاد. وصحةُ الشكلِ ليست إثباتًا لهويةِ TPM.
+    30	// **ويُرفضُ الربطُ الناقصُ**: غيابُ الهويةِ أو السياسةِ أو خللُ شكلِهما ⇒
+    31	// `STATE_MANIFEST_FNV_BINDING_INVALID`.
+    32	
+    33	import type { StateManifestBody } from './state-manifest.mjs';
+    34	
+    35	/**
+    36	 * إصدارُ مخططِ البيانِ الذي يحملُ ربطَ NV — يميّزُه القارئُ فيفرضُ الربطَ.
+    37	 * القارئُ القديمُ يرفضُه بـ`STATE_MANIFEST_VERSION_UNSUPPORTED` فلا يُقبَلُ بيانُ NV
+    38	 * معَ تجاهلِ حمايتِه.
+    39	 */
+    40	export const FNV_MANIFEST_SCHEMA_VERSION = 3;
+    41	
+    42	/** بادئةُ المجالِ في بايتاتِ التحقّقِ من تماسكِ الربطِ — تمنعُ خلطَ الغرض. */
+    43	export const FNV_BINDING_SCHEMA = 'xuux.manifest-fnv-binding/1';
+    44	
+    45	/**
+    46	 * رموزُ أخطاءِ ربطِ NV المسمّاةُ — قائمةٌ مغلقةٌ تصلُ إلى قرارِ الإقلاعِ كما هي
+    47	 * (`decideStateBoundBoot`) فلا يبقى «ربطٌ مكسورٌ» متعذّرَ التمييزِ من «مصدرٍ لا يجيب».
+    48	 * تفصيلُ الرسائلِ ثابتٌ نصًّا: لا `error.message` ولا محتوىُ استثناءٍ حسّاسٍ يُمرَّر.
+    49	 */
+    50	export const FnvBindingErrorCodes = [
+    51	  'FRESHNESS_NV_BINDING_INVALID',
+    52	  'FRESHNESS_NV_BINDING_MISMATCH',
+    53	] as const;
+    54	
+    55	export type FnvBindingErrorCode = (typeof FnvBindingErrorCodes)[number];
+    56	
+    57	/** شكلُ هويةِ TPM — مصدرُها المرجعُ (اسمُ مفتاحِ EK أو تجزئةُ شهادتِه) لا القارئ. */
+    58	export interface TpmIdentitySource {
+    59	  kind: 'ek-name' | 'ek-certificate-sha256';
+    60	  /** قيمةٌ سداسيةٌ عشريةٌ غيرُ فارغةٍ كما قرأها المصدرُ (بلا تفسيرٍ هنا). */
+    61	  value: string;
+    62	}
+    63	
+    64	/**
+    65	 * مادّةُ الربطِ كما يوفّرُها مصدرُ NV عندَ المراسمِ المعلنةِ — لا يخترعُها المنفّذ.
+    66	 * `authPolicy` لكلِّ فهرسٍ على حدةٍ (قد تختلفانِ، وقد تكونانِ فارغتينِ: «لا سياسة»
+    67	 * أمرٌ يُثبَّتُ كما هو؛ لا يُفترضُ أنّهما غيرُ فارغتينِ ولا متطابقتين).
+    68	 */
+    69	export interface FnvBindingMaterial {
+    70	  /** مقبضُ فهرسِ العدّادِ `C` — `0x` + ثمانيةٌ سداسيةٌ عشريةٌ. */
+    71	  counterIndex: string;
+    72	  /** مقبضُ فهرسِ السجلِّ `R`. */
+    73	  recordIndex: string;
+    74	  /** اسمُ NV للعدّادِ من `TPM2_NV_ReadPublic` — `000b` + 64 سداسيةً. */
+    75	  counterName: string;
+    76	  /** اسمُ NV للسجلِّ. */
+    77	  recordName: string;
+    78	  /** قيمةُ `C` عندَ الربطِ — سلسلةٌ عشريةٌ عشرية (BigInt خارجَ JSON). */
+    79	  base: string;
+    80	  tpmIdentity: TpmIdentitySource;
+    81	  authPolicy: { counter: string; record: string };
+    82	}
+    83	
+    84	/**
+    85	 * الربطُ كما يُختمُ في متنِ البيانِ — امتدادُ المادّةِ بـ`instanceId` الذي يربطُه
+    86	 * بنسخةِ جذرِ الثقةِ التي خُتمَ فيها، فلا يُنقَلُ بيانٌ إلى نشرٍ أو جهازٍ آخرَ.
+    87	 */
+    88	export interface ManifestFnvBinding extends FnvBindingMaterial {
+    89	  schema: typeof FNV_BINDING_SCHEMA;
+    90	  instanceId: string;
+    91	}
+    92	
+    93	const HANDLE = /^0x[0-9a-f]{8}$/;
+    94	const NV_NAME = /^000b[0-9a-f]{64}$/;
+    95	const DECIMAL = /^(0|[1-9][0-9]*)$/;
+    96	const POLICY_DIGEST = /^([0-9a-f]{2})*$/;
+    97	const IDENTITY_VALUE = /^[0-9a-f]{8,1024}$/;
+    98	const IDENTITY_KINDS = new Set(['ek-name', 'ek-certificate-sha256']);
+    99	
+   100	/**
+   101	 * يتحقّقُ من شكلِ المادّةِ — قائمةٌ مغلقةٌ من الفحوصِ، لا سرٌّ في تفصيلِها.
+   102	 * @param material - المادّةُ المفحوصة
+   103	 * @returns سببُ الرفضِ أو `null` إن صحّ الشكلُ
+   104	 */
+   105	export function fnvBindingMaterialShapeError(material: unknown): string | null {
+   106	  const m = material as Partial<FnvBindingMaterial> | null;
+   107	  if (m === null || typeof m !== 'object') return 'not an object';
+   108	  if (!HANDLE.test(String(m.counterIndex ?? ''))) return 'counterIndex';
+   109	  if (!HANDLE.test(String(m.recordIndex ?? ''))) return 'recordIndex';
+   110	  if (m.counterIndex === m.recordIndex) return 'C == R';
+   111	  if (!NV_NAME.test(String(m.counterName ?? ''))) return 'counterName';
+   112	  if (!NV_NAME.test(String(m.recordName ?? ''))) return 'recordName';
+   113	  if (typeof m.base !== 'string' || !DECIMAL.test(m.base)) return 'base';
+   114	  const identity = m.tpmIdentity as Partial<TpmIdentitySource> | undefined;
+   115	  if (identity === undefined || identity === null || typeof identity !== 'object')
+   116	    return 'tpmIdentity';
+   117	  if (typeof identity.kind !== 'string' || !IDENTITY_KINDS.has(identity.kind))
+   118	    return 'tpmIdentity.kind';
+   119	  if (typeof identity.value !== 'string' || !IDENTITY_VALUE.test(identity.value))
+   120	    return 'tpmIdentity.value';
+   121	  const policy = m.authPolicy as Partial<{ counter: unknown; record: unknown }> | undefined;
+   122	  if (policy === undefined || policy === null || typeof policy !== 'object') return 'authPolicy';
+   123	  if (typeof policy.counter !== 'string' || !POLICY_DIGEST.test(policy.counter))
+   124	    return 'authPolicy.counter';
+   125	  if (typeof policy.record !== 'string' || !POLICY_DIGEST.test(policy.record))
+   126	    return 'authPolicy.record';
+   127	  return null;
+   128	}
+   129	
+   130	/**
+   131	 * يتحقّقُ من شكلِ الربطِ المختومِ في المتنِ — المادّةُ و`instanceId` معًا.
+   132	 * @param binding - الربطُ كما قُرئ من المتن
+   133	 * @returns سببُ الرفضِ أو `null`
+   134	 */
+   135	export function manifestFnvBindingShapeError(binding: unknown): string | null {
+   136	  const b = binding as Partial<ManifestFnvBinding> | null;
+   137	  if (b === null || typeof b !== 'object') return 'not an object';
+   138	  if (b.schema !== FNV_BINDING_SCHEMA) return 'schema';
+   139	  const material: FnvBindingMaterial = {
+   140	    counterIndex: String(b.counterIndex ?? ''),
+   141	    recordIndex: String(b.recordIndex ?? ''),
+   142	    counterName: String(b.counterName ?? ''),
+   143	    recordName: String(b.recordName ?? ''),
+   144	    base: String(b.base ?? ''),
+   145	    tpmIdentity: b.tpmIdentity as TpmIdentitySource,
+   146	    authPolicy: b.authPolicy as { counter: string; record: string },
+   147	  };
+   148	  const materialError = fnvBindingMaterialShapeError(material);
+   149	  if (materialError !== null) return materialError;
+   150	  if (typeof b.instanceId !== 'string' || b.instanceId.length === 0) return 'instanceId';
+   151	  return null;
+   152	}
+   153	
+   154	/**
+   155	 * بايتاتُ التماسكِ للربطِ داخلَ المتنِ — ترتيبُ حقولٍ ثابتٌ وسابقةُ مجالٍ تمنعُ
+   156	 * استعمالَ القيمةِ لغرضٍ آخرَ. تُستعملُ في مقارنةِ الثباتِ (لا في توقيعٍ مستقلٍّ:
+   157	 * الختمُ الكاملُ للمتنِ هو ما يحمي الربط).
+   158	 * @param binding - الربطُ المختومُ في المتن
+   159	 */
+   160	export function manifestFnvBindingBytes(binding: ManifestFnvBinding): Buffer {
+   161	  return Buffer.from(
+   162	    JSON.stringify([
+   163	      FNV_BINDING_SCHEMA,
+   164	      binding.instanceId,
+   165	      binding.counterIndex,
+   166	      binding.recordIndex,
+   167	      binding.counterName,
+   168	      binding.recordName,
+   169	      binding.base,
+   170	      binding.tpmIdentity.kind,
+   171	      binding.tpmIdentity.value,
+   172	      binding.authPolicy.counter,
+   173	      binding.authPolicy.record,
+   174	    ]),
+   175	    'utf8',
+   176	  );
+   177	}
+   178	
+   179	/**
+   180	 * مقارنةُ ثباتٍ للربطِ — مقارنةُ بايتاتٍ لا مراجعَ: كائنانِ يشتركانِ في المرجعِ
+   181	 * متساويانِ دائمًا، فالمقارنةُ بالقيمةِ هي وحدها دليلُ الثبات.
+   182	 * @param previous - الربطُ كما كانَ قبلَ التحديث
+   183	 * @param next - الربطُ كما صارَ بعده
+   184	 * @returns هل هما القيمةُ نفسُها بايتًا ببايت
+   185	 */
+   186	export function manifestFnvBindingEqual(previous: unknown, next: unknown): boolean {
+   187	  if (previous === next) return true;
+   188	  const a = previous as Partial<ManifestFnvBinding> | null;
+   189	  const b = next as Partial<ManifestFnvBinding> | null;
+   190	  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
+   191	  return manifestFnvBindingBytes(a as ManifestFnvBinding).equals(
+   192	    manifestFnvBindingBytes(b as ManifestFnvBinding),
+   193	  );
+   194	}
+   195	
+   196	/**
+   197	 * الحقولُ المشتركةُ بينَ ربطِ البيانِ وربطِ المصدرِ — ما يجبَ أن يتفقَ عليهِ
+   198	 * المصدرُ والبيانُ وإلّا فالإقلاعُ يرفض. الهويةُ والسياسةُ تُقارَنانِ أيضًا متى
+   199	 * وضعهما المصدرُ (ملفُّ WL-433 الجانبيُّ أقدمُ مخطّطًا ولا يحملُهما — حدٌّ معلَنٌ).
+   200	 * @param manifestBinding - الربطُ المختومُ في البيان
+   201	 * @param sourceBinding - الربطُ الذي يتحققُ منه المصدر
+   202	 * @returns أولُ اختلافٍ أو `null` إن اتفقا
+   203	 */
+   204	export function fnvBindingSourceDiff(
+   205	  manifestBinding: ManifestFnvBinding,
+   206	  sourceBinding: Record<string, unknown>,
+   207	): string | null {
+   208	  const pairs: Array<[string, unknown, unknown]> = [
+   209	    ['counterIndex', manifestBinding.counterIndex, sourceBinding.counterIndex],
+   210	    ['recordIndex', manifestBinding.recordIndex, sourceBinding.recordIndex],
+   211	    ['counterName', manifestBinding.counterName, sourceBinding.counterName],
+   212	    ['recordName', manifestBinding.recordName, sourceBinding.recordName],
+   213	    ['base', manifestBinding.base, sourceBinding.base],
+   214	  ];
+   215	  const identity = sourceBinding.tpmIdentity as { kind?: unknown; value?: unknown } | undefined;
+   216	  if (identity !== undefined && identity !== null && typeof identity === 'object') {
+   217	    pairs.push(['tpmIdentity.kind', manifestBinding.tpmIdentity.kind, identity.kind]);
+   218	    pairs.push(['tpmIdentity.value', manifestBinding.tpmIdentity.value, identity.value]);
+   219	  }
+   220	  const policy = sourceBinding.authPolicy as { counter?: unknown; record?: unknown } | undefined;
+   221	  if (policy !== undefined && policy !== null && typeof policy === 'object') {
+   222	    pairs.push(['authPolicy.counter', manifestBinding.authPolicy.counter, policy.counter]);
+   223	    pairs.push(['authPolicy.record', manifestBinding.authPolicy.record, policy.record]);
+   224	  }
+   225	  for (const [field, manifestValue, sourceValue] of pairs) {
+   226	    if (manifestValue !== sourceValue) return field;
+   227	  }
+   228	  return null;
+   229	}
+   230	
+   231	/**
+   232	 * يبني الربطَ المختومَ من المادّةِ ونسخةِ الجذرِ — نسخًا عميقًا للمادّةِ كي لا
+   233	 * يبقى للمدخِلِ مرجعٌ يعدّلُ به الربطَ بعدَ الختم.
+   234	 * @param material - المادّةُ من المصدر
+   235	 * @param instanceId - معرّفُ نسخةِ الجذرِ من المتن
+   236	 */
+   237	export function buildManifestFnvBinding(
+   238	  material: FnvBindingMaterial,
+   239	  instanceId: string,
+   240	): ManifestFnvBinding {
+   241	  const shapeError = fnvBindingMaterialShapeError(material);
+   242	  if (shapeError !== null) {
+   243	    throw new Error(`FNV_BINDING_MATERIAL_INVALID: ${shapeError}`);
+   244	  }
+   245	  return {
+   246	    schema: FNV_BINDING_SCHEMA,
+   247	    instanceId,
+   248	    counterIndex: material.counterIndex,
+   249	    recordIndex: material.recordIndex,
+   250	    counterName: material.counterName,
+   251	    recordName: material.recordName,
+   252	    base: material.base,
+   253	    tpmIdentity: { kind: material.tpmIdentity.kind, value: material.tpmIdentity.value },
+   254	    authPolicy: { counter: material.authPolicy.counter, record: material.authPolicy.record },
+   255	  };
+   256	}
+   257	
+   258	/**
+   259	 * عقدُ مصدرٍ يكشفُ الربطَ الذي يتحققُ منه — يميّزُ المقبسَ الذي يملكُ ربطًا مثبَّتًا.
+   260	 * غيابُ الكشفِ في وضعِ NV ليسِ تخطيًا للفحصِ بل رفضٌ مغلقٌ عندَ الإقلاع.
+   261	 */
+   262	export interface FnvPinnedBindingSource {
+   263	  /** الربطُ المثبَّتُ الذي يتحققُ منه المصدرُ في كلِّ قراءةٍ وانتقال. */
+   264	  pinnedBinding(): unknown;
+   265	}
+   266	
+   267	/**
+   268	 * عقدُ مصدرٍ يوفّرُ مادّةَ الربطِ عندَ المراسمِ المعلنةِ (‏B10) — المصدرُ وحدَه
+   269	 * يملكُ المادّةَ (المقبضانِ والاسمانِ و`base` والهويةُ والسياسةُ)؛ المنفّذُ لا
+   270	 * يخترعُها ولا يخمّنُها. من لا يكشفُها يبقى على المسارِ التاريخيّ.
+   271	 */
+   272	export interface FnvBindingMaterialSource {
+   273	  /** مادّةُ الربطِ من المرجعِ الحيّ — تُقرأُ مرّةً عندَ الربطِ الأوّلِ المعلن. */
+   274	  fnvBindingMaterial(): Promise<FnvBindingMaterial>;
+   275	}
+   276	
+   277	/**
+   278	 * هل يكشفُ المقبسُ ربطًا مثبَّتًا؟
+   279	 * @param socket - المقبسُ المفحوص
+   280	 */
+   281	export function isFnvPinnedBindingSource(socket: unknown): socket is FnvPinnedBindingSource {
+   282	  if (socket === null || typeof socket !== 'object') return false;
+   283	  return typeof (socket as Partial<FnvPinnedBindingSource>).pinnedBinding === 'function';
+   284	}
+   285	
+   286	/**
+   287	 * هل يحملُ البيانُ ربطَ NV؟ — للتمييزِ بينَ المسارِ التاريخيِّ ووضعِ NV عندَ الإقلاع.
+   288	 * @param body - متنُ البيان
+   289	 */
+   290	export function manifestHasFnvBinding(body: StateManifestBody): boolean {
+   291	  return body.freshnessBinding !== undefined && body.freshnessBinding !== null;
+   292	}

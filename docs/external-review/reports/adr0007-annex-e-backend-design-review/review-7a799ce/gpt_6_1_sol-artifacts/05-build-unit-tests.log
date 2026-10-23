@@ -1,0 +1,48 @@
+$ node --version
+v20.20.2
+$ node node_modules/typescript/bin/tsc -p tsconfig.build.json --outDir /tmp/council-wl437-r4/gpt_6_1_sol/build --incremental false
+exit=0
+$ TMPDIR=/tmp/council-wl437-r4/gpt_6_1_sol/test-tmp node --experimental-loader /tmp/council-wl437-r4/gpt_6_1_sol/loader.mjs --test tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs
+TAP version 13
+# (node:2565) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+# --import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("/tmp/council-wl437-r4/gpt_6_1_sol/loader.mjs", pathToFileURL("./"));'
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# node:internal/modules/run_main:123
+#     triggerUncaughtException(
+#     ^
+# Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/wt-7a799ce-gpt/src/root-of-trust/index.mjs' imported from /tmp/wt-7a799ce-gpt/tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs
+#     at finalizeResolution (node:internal/modules/esm/resolve:283:11)
+#     at moduleResolve (node:internal/modules/esm/resolve:952:10)
+#     at defaultResolve (node:internal/modules/esm/resolve:1188:11)
+#     at nextResolve (node:internal/modules/esm/hooks:864:28)
+#     at resolve (file:///tmp/council-wl437-r4/gpt_6_1_sol/loader.mjs:6:23)
+#     at nextResolve (node:internal/modules/esm/hooks:864:28)
+#     at Hooks.resolve (node:internal/modules/esm/hooks:306:30)
+#     at handleMessage (node:internal/modules/esm/worker:196:24)
+#     at Immediate.checkForMessages (node:internal/modules/esm/worker:138:28)
+#     at process.processImmediate (node:internal/timers:483:21) {
+#   code: 'ERR_MODULE_NOT_FOUND',
+#   url: 'file:///tmp/wt-7a799ce-gpt/src/root-of-trust/index.mjs'
+# }
+# Node.js v20.20.2
+# Subtest: /tmp/wt-7a799ce-gpt/tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs
+not ok 1 - /tmp/wt-7a799ce-gpt/tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs
+  ---
+  duration_ms: 120.43068
+  location: '/tmp/wt-7a799ce-gpt/tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs:1:1'
+  failureType: 'testCodeFailure'
+  exitCode: 1
+  signal: ~
+  error: 'test failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 124.967402
+exit=1

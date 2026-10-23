@@ -1,0 +1,9 @@
+$ node --experimental-loader /tmp/council-wl437-r4/gpt_6_1_sol/loader.mjs /tmp/council-wl437-r4/gpt_6_1_sol/current-code-probes.mjs (corrected ManifestSealer API)
+(node:3173) ExperimentalWarning: `--experimental-loader` may be removed in the future; instead use `register()`:
+--import 'data:text/javascript,import { register } from "node:module"; import { pathToFileURL } from "node:url"; register("/tmp/council-wl437-r4/gpt_6_1_sol/loader.mjs", pathToFileURL("./"));'
+(Use `node --trace-warnings ...` to show where the warning was created)
+CURRENT_SEQUENTIAL_SECOND_BIND STATE_MANIFEST_FNV_BINDING_IMMUTABLE
+CURRENT_SAME_OBJECT_CONCURRENT_IDENTICAL_BINDS ["fulfilled","fulfilled"]
+CURRENT_OPTIONAL_SOURCE_IDENTITY_DIFF null
+SCOPE Current source probes only: these do not implement the signed G3 proposal.
+exit=0

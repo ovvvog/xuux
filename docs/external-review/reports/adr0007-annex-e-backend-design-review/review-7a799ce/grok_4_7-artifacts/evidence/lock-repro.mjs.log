@@ -1,0 +1,2 @@
+{"pid":3402,"owner":3402,"predicate":"owner !== null && owner !== process.pid && pidAlive(owner)","samePidFallsThroughToRmSync":true,"file":"src/root-of-trust/state-manifest.mts:848"}
+EXIT:0
