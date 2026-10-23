@@ -248,6 +248,19 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     'src/root-of-trust/production-runtime.mts': '3f0f2772ff45fd2d42cd23f6322792ad2b2ce289',
     'src/root-of-trust/index.mts': '226210d855749cdf816515f5ce2b5428dadab68b',
   }));
+  // قرارُ المالكِ (‏2026-10-24، جلسةُ WL-461): استثناءٌ مسمّى مؤرّخٌ محدودٌ بالملفِ الواحدِ
+  // `scripts/tpm-sim-ci.sh` وحدَه — إصلاحُ فجوةِ قابليةِ التحققِ المعلنةِ في WL-461: ملفُّ TAP
+  // كانَ يُكتبُ داخلَ مجلدِ الحالةِ الذي يحذفُهُ الفخُّ عندَ الخروجِ، فكانَ رفعُهُ أثرًا (WL-434)
+  // يقعُ على ملفِّ محذوفٖ دائمًا ولا يُنجَزُ إلا عندَ الفشلِ أصلًا؛ والسكربتُ لا يطبعُ تفاصيلَ الاختباراتِ
+  // إلا عندَ الفشلِ. التعديلُ المعتمدُ: كتابةُ TAP في `RUNNER_TEMP/xuux-sim-tap`
+  // يبقى بعدَ الفخِّ، وطباعتُهُ عبرَ `tee` في سجلِ الخطوةِ (نجاحًا وفشلًا)، ورفعُهُ أثرًا دائمًا من سيرِ
+  // العملِ. **هذا الاستثناءُ لا يُضعِفُ شيئًا آخرَ:** كلُّ مسارِ الحمايةِ في السكربتِ باقٍ كما هو (‏الإسقاطُ عندَ أيِّ تخطّٖ غيرَ
+  // `XUUX_CHANNEL_POC`، قتلُ المحاكي وتنطيفُ الحالةِ في الفخِّ، وحدودُ «محاكٍ لا عتاد»)؛ وسائرُ الملفاتِ المحميةِ كما كانتْ،
+  // ومدخلةُ WL-461 في سجلِ الأعمالِ تُسمّي الملفَ، وتغييرُهُ خاضعٌ لكلِ ما عداه (‏مراجعةُ PR وCI). **والاستثناءُ مربوطٌ بالبصمةِ المعتمدةِ
+  // لا بالمسارِ وحدَه:** أيُّ تعديلٍ لاحقٖ على الملفِ — ولو سطرًا — يُخرجُ بصمتَهُ عن هذه فيعودُ محميًا كما كانَ. فالإذنُ إذنٌ بفرقِ معروضٖ بعينِهِ لا إذنٌ مفتوحًا للأبدِ.
+  const WL461_OWNER_AUTHORIZED = new Map(Object.entries({
+    'scripts/tpm-sim-ci.sh': '32ae60ff3f3fa5150fa188b9265bb219ab9decff',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -291,7 +304,7 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   const violations = touched.filter(
     (f) =>
       isProtected(f) &&
-      !(WL434_OWNER_AUTHORIZED.has(f) && currentBlob(f) === WL434_OWNER_AUTHORIZED.get(f)),
+      !((WL434_OWNER_AUTHORIZED.has(f) || WL461_OWNER_AUTHORIZED.has(f)) && currentBlob(f) === (WL434_OWNER_AUTHORIZED.get(f) || WL461_OWNER_AUTHORIZED.get(f))),
   );
   assert.equal(violations.length, 0, 'ملفاتٌ محميةٌ عُدِّلَتْ في هذه الدفعةِ (النطاقُ المضيَّقُ بقرارِ WL-429): ' + violations.join(', '));
 });
