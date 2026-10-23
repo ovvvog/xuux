@@ -1,0 +1,10 @@
+{
+  "pages": [
+    {
+      "url": "https://trustedcomputinggroup.org/wp-content/uploads/TCG_TPM2_r1p59_Part1_Architecture_pub.pdf",
+      "error": "error parsing data for \"https://trustedcomputinggroup.org/wp-content/uploads/TCG_TPM2_r1p59_Part1_Architecture_pub.pdf\" in table 'crawler/v2/pages': crawler error http_code_too_many_requests: http_code_too_many_requests",
+      "is_cached": false,
+      "is_paywall": false
+    }
+  ]
+}

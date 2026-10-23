@@ -1,0 +1,6 @@
+C define 0x02040018 expect 0x02040018 match True
+R define 0x02041008 expect 0x02041008 match True
+C written 0x22040018 expect 0x22040018 match True
+R written 0x22041008 expect 0x22041008 match True
+forbidden bits clear on both masks
+samePidFallsThroughToRmSync=True

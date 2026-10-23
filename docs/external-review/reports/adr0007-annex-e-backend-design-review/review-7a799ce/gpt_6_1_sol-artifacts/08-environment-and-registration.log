@@ -1,0 +1,35 @@
+$ git diff --stat 8c69e98dd45f9129698fd2027f00eed20885e748 HEAD -- src/root-of-trust sim/freshness-nv docs/adr/0007-annex-e-production-backend-design.md
+ docs/adr/0007-annex-e-production-backend-design.md | 100 ++++++++++++++++-----
+ 1 file changed, 77 insertions(+), 23 deletions(-)
+$ nl -ba scripts/production-entry.mjs, lines 51-75
+    51	  // مقبسُ الحداثةِ — في الإنتاجِ الحقيقيِّ يلزمُ backend دائمٌ موثوقٌ (لا ذاكرةٌ).
+    52	  // هذا المُشغِّلُ لا يَختلِقُ مقبسَ ذاكرةٍ ولا يقبلُ backend غيرَ مدعومٍ.
+    53	  // إن لم يُتوفَّرْ backend مدعومٌ، يَفشلُ مغلقاً برسالةٍ واضحةٍ قبلَ إنشاءِ النظامِ.
+    54	  /** @type {Set<string>} */
+    55	  const SUPPORTED_FRESHNESS_BACKENDS = new Set([]); // لا backend مدعومٌ في هذه البيئةِ
+    56	  const freshnessBackend = env.XUUX_FRESHNESS_BACKEND ?? '';
+    57	  if (!freshnessBackend) {
+    58	    console.error('ERROR: XUUX_FRESHNESS_BACKEND not set.');
+    59	    console.error(
+    60	      '  Production requires a durable freshness backend (not InMemoryFreshnessSocket).',
+    61	    );
+    62	    console.error(
+    63	      '  No backend is supported in this environment — production boot is refused closed.',
+    64	    );
+    65	    process.exit(1);
+    66	  }
+    67	  if (!SUPPORTED_FRESHNESS_BACKENDS.has(freshnessBackend)) {
+    68	    console.error(`ERROR: XUUX_FRESHNESS_BACKEND="${freshnessBackend}" is not supported.`);
+    69	    console.error('  Supported backends: (none in this environment)');
+    70	    console.error(
+    71	      '  Production requires a durable freshness backend with proven anti-rollback properties.',
+    72	    );
+    73	    process.exit(1);
+    74	  }
+    75	
+$ command -v swtpm
+exit=1
+$ command -v tpm2_getcap
+exit=1
+$ date -u
+2026-10-22T02:29:42Z
