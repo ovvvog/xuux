@@ -236,3 +236,22 @@ test('WL-327 — مسارُ النشرِ cancel-in-progress: true', async () => 
     'cancel-in-progress ليس true — تشغيلةٌ منتظرةٌ قد تحجبُ ما بعدها (OPS-1/MAIN-DRIFT-WINDOW لمسة (ج)).',
   );
 });
+
+test('WL-448 — المسارُ يَجري على كلِّ طلبِ دمجٍ أيًّا كانت قاعدتُه (الطلباتُ المركَّبة)', async () => {
+  const { parse } = await import('yaml');
+  /** @type {Record<string, any>} */
+  const on = parse(workflow).on;
+  // `pull_request` حاضرٌ، و**بلا** مرشّحِ فروعٍ: طلبٌ قاعدتُه فرعُ طلبٍ آخرَ يُفحَصُ كذلك.
+  assert.ok(on && 'pull_request' in on, 'ci.yml يَجري على pull_request.');
+  const pr = on.pull_request ?? {};
+  assert.equal(
+    pr.branches,
+    undefined,
+    'لا مرشّحَ branches على pull_request — وإلّا سقطَ الطلبُ المركَّبُ صامتًا.',
+  );
+  assert.equal(pr['branches-ignore'], undefined, 'ولا branches-ignore.');
+  assert.equal(pr.paths, undefined, 'ولا مرشّحَ مساراتٍ يُسقِطُ طلبًا توثيقيًّا.');
+  assert.equal(pr['paths-ignore'], undefined, 'ولا paths-ignore.');
+  // و`push` باقٍ على `main` وحدَه: التوسيعُ للطلباتِ لا للدفعِ إلى كلِّ فرع.
+  assert.deepEqual(on.push?.branches, ['main'], 'push باقٍ على main وحدَه.');
+});
