@@ -9,7 +9,8 @@
 #
 # **حدٌّ مُعلَنٌ:** محاكٍ لا عتاد. لا يُثبِتُ شيئاً عن TPM حقيقيٍّ (‏ADR 0007 §9)، ولا
 # يلمسُ `/dev/tpm*` (‏`sim/tpm/tcti_guard.mjs` يرفضُ كلَّ TCTI غيرِ `swtpm:`/`mssim:`).
-# ولا يتركُ أثراً في `/tmp` (‏سياسةُ `LIVE-9`): الحالةُ في `RUNNER_TEMP`.
+# ولا يتركُ أثراً في `/tmp` (‏سياسةُ `LIVE-9`): الحالةُ في `RUNNER_TEMP`، وملفُّ TAP
+# الدائمُ (‏WL-461) في `RUNNER_TEMP/xuux-sim-tap` تحذفُهُ آليّةُ العدّاءِ بعدَ الوظيفةِ.
 
 set -euo pipefail
 
@@ -18,7 +19,18 @@ readonly CTRL=2322
 
 state_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/xuux-swtpm.XXXXXX")"
 pid_file="${state_dir}/swtpm.pid"
-tap_file="${state_dir}/sim.tap"
+# WL-461: ملفُّ TAP كانَ داخلَ مجلدِ الحالةِ الذي يحذفُهُ الفخُّ عندَ الخروجِ، فكانَ رفعُهُ
+# أثرًا (‏WL-434) يقعُ على ملفٍّ محذوفٍ دائمًا ولا يُنجَزُ إلا عندَ الفشلِ أصلًا. الآنَ:
+# في CI (‏`RUNNER_TEMP` معلومٌ) يُكتبُ في مجلدٍ مستقلٍّ يبقى بعدَ الفخِّ حتى خطوةِ الرفعِ؛
+# ومحليًّا (‏لا `RUNNER_TEMP`) يبقى في مجلدِ الحالةِ فيُحذفُ معَهُ (لا حاجةَ لأثرٍ محليًّا
+# وسياسةُ LIVE-9 محفوظةٌ: كلُّ شيءٍ تحتَ `RUNNER_TEMP` لا `/tmp`).
+if [ -n "${RUNNER_TEMP:-}" ]; then
+  tap_dir="${RUNNER_TEMP}/xuux-sim-tap"
+  mkdir -p "${tap_dir}"
+else
+  tap_dir="${state_dir}"
+fi
+tap_file="${tap_dir}/sim.tap"
 
 cleanup() {
   if [ -f "${pid_file}" ]; then kill "$(cat "${pid_file}")" 2>/dev/null || true; fi
@@ -53,8 +65,11 @@ if [ "${ready}" != 1 ]; then
   exit 1
 fi
 
+# WL-461: الطباعةُ عبرَ `tee` فلا يُختزنُ الأثرُ في الملفِ وحدهُ — أسماءُ الاختباراتِ
+# المنفذةِ والمتخطاةِ وأسبابُها تظهرُ في سجلِّ الخطوةِ عندَ النجاحِ كما عندَ الفشلِ،
+# لا رؤوسَ الإخفاقِ وحدها (فجوةُ WL-434 في الإظهارِ لا في الحفظِ وحده).
 set +e
-node --test --test-concurrency=1 --test-reporter=tap tests/sim/ > "${tap_file}" 2>&1
+node --test --test-concurrency=1 --test-reporter=tap tests/sim/ 2>&1 | tee "${tap_file}"
 rc=$?
 set -e
 grep -E '^# (tests|pass|fail|skipped|todo)' "${tap_file}" || true
