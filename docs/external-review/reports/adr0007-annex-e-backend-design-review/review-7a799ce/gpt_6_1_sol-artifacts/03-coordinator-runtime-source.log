@@ -1,0 +1,993 @@
+$ nl -ba src/root-of-trust/commit-barrier.mts
+   200	    try {
+   201	      names = readdirSync(dir).filter((name) => !transientName(name));
+   202	    } catch {
+   203	      names = [];
+   204	    }
+   205	    names.sort();
+   206	    outer.update(`d\u0000${dir}\u0000${String(names.length)}\n`);
+   207	    for (const name of names) outer.update(`e\u0000${name}\u0000${fileDigest(join(dir, name))}\n`);
+   208	  }
+   209	  return outer.digest('hex');
+   210	}
+   211	
+   212	/** تجزئةُ ملفٍّ، والغائبُ تجزئةُ الفارغ. */
+   213	function fileDigest(file: string): string {
+   214	  const hash = createHash('sha256');
+   215	  try {
+   216	    hash.update(readFileSync(file));
+   217	  } catch (error) {
+   218	    if ((error as { code?: string }).code !== 'ENOENT') throw error;
+   219	  }
+   220	  return hash.digest('hex');
+   221	}
+   222	
+   223	/** كتابةٌ كاملةٌ في مقبض. */
+   224	function writeFully(fd: number, text: string): void {
+   225	  const buffer = Buffer.from(text, 'utf8');
+   226	  let written = 0;
+   227	  while (written < buffer.length) written += writeSync(fd, buffer, written);
+   228	}
+   229	
+   230	/** مزامنةُ مجلّدٍ بلا رفعٍ حيثُ لا يُسمَح. */
+   231	function syncDir(dir: string, fsync: boolean): void {
+   232	  if (!fsync) return;
+   233	  let fd: number | null = null;
+   234	  try {
+   235	    fd = openSync(dir, 'r');
+   236	    fsyncSync(fd);
+   237	  } catch {
+   238	    /* بعضُ الأنظمةِ لا تُزامِنُ مجلّداً */
+   239	  } finally {
+   240	    if (fd !== null) closeSync(fd);
+   241	  }
+   242	}
+   243	
+   244	/** هل الخطأُ فشلُ إدخالٍ/إخراجٍ (‏لا رفضٌ مسمّىً من المجال)؟ */
+   245	function isIoFailure(error: unknown): boolean {
+   246	  if (error === null || typeof error !== 'object') return true;
+   247	  const candidate = error as { errno?: unknown; code?: unknown };
+   248	  if (typeof candidate.errno === 'number') return true;
+   249	  const code = typeof candidate.code === 'string' ? candidate.code : '';
+   250	  return code === 'PARTIAL_WRITE' || code === 'LOG_CLOSED' || code === '';
+   251	}
+   252	
+   253	/** خياراتُ الحاجز. */
+   254	export interface CommitCoordinatorOptions {
+   255	  /** جذرُ الحالة — كلُّ كتابةٍ تحتَه تمرُّ بالحاجز. */
+   256	  root: string;
+   257	  /** ملفّاتُ حالةٍ خارجَ الجذر (‏مخزنُ تثبيتاتٍ مُعلَنٌ بالبيئة). */
+   258	  extraFiles?: string[];
+   259	  manifest: StateManifest;
+   260	  /** مكوّناتُ البصمة. */
+   261	  layout: StateLayout;
+   262	  fsync?: boolean;
+   263	  /** المرجعُ المربوطُ بالحالة، أو `null` للوضعِ القديم (‏`bump()` في الإقلاعِ وحدَه). */
+   264	  socket: StateBoundFreshnessSocket | null;
+   265	  /** عددُ إعاداتِ الانتقالِ بعدَ نتيجةٍ مجهولة (‏الافتراض ٣). */
+   266	  advanceRetries?: number;
+   267	  /** يُنادى عندَ التسييج — يُغلِقُ الجذرُ به السجلَّ فيُفلِتُ قفلَه لإقلاعٍ مُستعيد. */
+   268	  onFence?: (error: Error) => void;
+   269	}
+   270	
+   271	/** خلاصةُ معاملةٍ أُقِرَّت — للتدقيقِ وللاختبار. */
+   272	export interface CommitReceipt {
+   273	  txn: string;
+   274	  intent: string;
+   275	  epoch: number;
+   276	  anchor: string | null;
+   277	}
+   278	
+   279	/**
+   280	 * الحاجز. واحدٌ لكلِّ جذرٍ في عمليةِ الجذرِ وحدَها.
+   281	 */
+   282	export class CommitCoordinator {
+   283	  readonly root: string;
+   284	  readonly undoFile: string;
+   285	  readonly #rootPrefix: string;
+   286	  readonly #extra: Set<string>;
+   287	  readonly #manifest: StateManifest;
+   288	  readonly #layout: StateLayout;
+   289	  readonly #fsync: boolean;
+   290	  readonly #socket: StateBoundFreshnessSocket | null;
+   291	  readonly #retries: number;
+   292	  readonly #onFence: ((error: Error) => void) | null;
+   293	  #queue: Promise<void> = Promise.resolve();
+   294	  #fence: Error | null = null;
+   295	  #closed = false;
+   296	  /** آخرُ إيصالٍ — يُقرأُ في الاختبارِ لإثباتِ الترتيب. */
+   297	  lastReceipt: CommitReceipt | null = null;
+   298	  /** مراقبُ مراحلَ — للاختبارِ وحدَه (‏تتبُّعُ الترتيب)، لا يُغيّرُ السلوك. */
+   299	  onStage: ((stage: 'S2' | 'S3' | 'S4' | 'S5' | 'ACK', intent: string) => void) | null = null;
+   300	
+   301	  /**
+   302	   * @param options - الخيارات
+   303	   */
+   304	  constructor(options: CommitCoordinatorOptions) {
+   305	    this.root = resolve(options.root);
+   306	    this.#rootPrefix = this.root.endsWith(sep) ? this.root : this.root + sep;
+   307	    this.undoFile = join(this.root, STATE_UNDO_FILE);
+   308	    this.#extra = new Set((options.extraFiles ?? []).map((file) => resolve(file)));
+   309	    this.#manifest = options.manifest;
+   310	    this.#layout = options.layout;
+   311	    this.#fsync = options.fsync ?? true;
+   312	    this.#socket = options.socket;
+   313	    this.#retries = options.advanceRetries ?? 3;
+   314	    this.#onFence = options.onFence ?? null;
+   315	  }
+   316	
+   317	  /** هل الحاجزُ في الوضعِ المربوطِ بالحالة؟ */
+   318	  get stateBound(): boolean {
+   319	    return this.#socket !== null;
+   320	  }
+   321	
+   322	  /** سببُ التسييجِ إن سُيِّج. */
+   323	  get fenced(): Error | null {
+   324	    return this.#fence;
+   325	  }
+   326	
+   327	  /**
+   328	   * يُفعِّلُ الحاجز: بعدَه كلُّ كتابةِ حالةٍ تحتَ الجذرِ خارجَ معاملةٍ مرفوضة، وكلُّ رفعٍ
+   329	   * في البيانِ داخلَ معاملةٍ يُعلَّقُ إلى الترقية. يُنادى في آخرِ الإقلاع.
+   330	   */
+   331	  activate(): void {
+   332	    for (const other of [...registry]) {
+   333	      if (other.root === this.root && other !== this) other.close();
+   334	    }
+   335	    registry.add(this);
+   336	    this.#manifest.useRaiseRouter((key: MonotonicKey) => {
+   337	      if (activeTransaction(this) !== null) return 'buffer';
+   338	      if (this.#closed) return 'journal';
+   339	      throw new CommitBarrierError('STATE_WRITE_OUTSIDE_BARRIER', `manifest:${key}`);
+   340	    });
+   341	  }
+   342	
+   343	  /** يُعطِّلُ الحاجزَ ويفكُّ تسجيلَه — عندَ إغلاقِ الجذر. */
+   344	  close(): void {
+   345	    this.#closed = true;
+   346	    registry.delete(this);
+   347	    this.#manifest.useRaiseRouter(null);
+   348	  }
+   349	
+   350	  /**
+   351	   * هل يغطّي الحاجزُ هذا المسار؟
+   352	   * @param absolute - مسارٌ مطلق
+   353	   * @returns نعم أو لا
+   354	   */
+   355	  covers(absolute: string): boolean {
+   356	    return absolute.startsWith(this.#rootPrefix) || this.#extra.has(absolute);
+   357	  }
+   358	
+   359	  /**
+   360	   * خطّافُ الكتابة: داخلَ المعاملةِ يحفظُ ما قبلَها، وخارجَها يرفض.
+   361	   * @param absolute - المسار
+   362	   * @param kind - النوع
+   363	   */
+   364	  noteWrite(absolute: string, kind: DurableWriteKind): void {
+   365	    const txn = activeTransaction(this);
+   366	    if (txn === null) {
+   367	      throw new CommitBarrierError('STATE_WRITE_OUTSIDE_BARRIER', this.#rel(absolute));
+   368	    }
+   369	    if (txn.touched.has(absolute)) return;
+   370	    let record: UndoRecord;
+   371	    if (kind === 'append') {
+   372	      let size = 0;
+   373	      try {
+   374	        size = statSync(absolute).size;
+   375	      } catch (error) {
+   376	        if ((error as { code?: string }).code !== 'ENOENT') throw error;
+   377	      }
+   378	      record = { t: 'append', path: this.#rel(absolute), size };
+   379	    } else {
+   380	      let content: string | null = null;
+   381	      try {
+   382	        content = readFileSync(absolute).toString('base64');
+   383	      } catch (error) {
+   384	        if ((error as { code?: string }).code !== 'ENOENT') throw error;
+   385	      }
+   386	      record = { t: 'replace', path: this.#rel(absolute), content };
+   387	    }
+   388	    this.#appendUndo(txn, record);
+   389	    txn.touched.add(absolute);
+   390	  }
+   391	
+   392	  /**
+   393	   * ينفّذُ فعلاً إنتاجيّاً عبرَ الحاجز. لا يُرجِعُ نجاحاً إلّا بعدَ الدوامِ والترقية.
+   394	   * والنداءُ من داخلِ معاملةٍ جاريةٍ يُضَمُّ إليها (‏لا تتداخلُ المعاملات).
+   395	   * @param intent - القصدُ المُعلَن
+   396	   * @param fn - الفعل
+   397	   * @returns نتيجةُ الفعل
+   398	   */
+   399	  async run<T>(intent: string, fn: () => Promise<T> | T): Promise<T> {
+   400	    return this.#enqueue(intent, fn, false);
+   401	  }
+   402	
+   403	  /**
+   404	   * `B10`: الربطُ الأوّلُ بالمرجعِ المربوط — معاملةٌ بلا فعلٍ تنقلُ المرجعَ من
+   405	   * `(0, GENESIS)` إلى `(1, A_1)` فوقَ الحالةِ القائمة. يُنادى من الإقلاعِ وحدَه.
+   406	   * @param intent - القصد
+   407	   */
+   408	  async bindAsync(intent: string): Promise<void> {
+   409	    await this.#enqueue(intent, () => undefined, true);
+   410	  }
+   411	
+   412	  async #enqueue<T>(intent: string, fn: () => Promise<T> | T, bind: boolean): Promise<T> {
+   413	    if (activeTransaction(this) !== null) return await fn();
+   414	    if (this.#closed) throw new CommitBarrierError('COMMIT_BARRIER_CLOSED', intent);
+   415	    if (this.#fence !== null) {
+   416	      throw new CommitBarrierError('COMMIT_BARRIER_FENCED', intent, this.#fence);
+   417	    }
+   418	    let release: () => void = () => undefined;
+   419	    const previous = this.#queue;
+   420	    this.#queue = new Promise<void>((resolveQueue) => {
+   421	      release = resolveQueue;
+   422	    });
+   423	    await previous;
+   424	    try {
+   425	      if (this.#fence !== null) {
+   426	        throw new CommitBarrierError('COMMIT_BARRIER_FENCED', intent, this.#fence);
+   427	      }
+   428	      return await this.#transact(intent, fn, bind);
+   429	    } finally {
+   430	      release();
+   431	    }
+   432	  }
+   433	
+   434	  /** جسمُ المعاملة: S2 ← S3 ← S4 ← S5. */
+   435	  async #transact<T>(intent: string, fn: () => Promise<T> | T, bind: boolean): Promise<T> {
+   436	    const body = this.#manifest.read();
+   437	    // الربطُ الأوّلُ (‏`B10`) يبدأُ سلسلةَ المرجعِ المربوطِ من النشأة، أيّاً كانَ عهدُ البيانِ
+   438	    // على المسارِ القديم.
+   439	    const from = bind ? { epoch: 0n, anchor: FRESHNESS_GENESIS_ANCHOR } : this.#fromOf(body);
+   440	    if (this.#socket !== null && !bind) {
+   441	      // فحصُ الكاتبِ الأجنبيّ (‏`D6`): الحالةُ على القرصِ قبلَ المعاملةِ يجبُ أن تكونَ
+   442	      // عينَ ما خُتِمَ آخرَ مرّة. وإلّا فقد كتبَ غيرُ الكاتبِ الواحد.
+   443	      const before = computeStateDigest(this.#layout);
+   444	      if (before !== body.stateDigest) {
+   445	        throw this.#fenceWith(
+   446	          new CommitBarrierError('STATE_FOREIGN_WRITE_DETECTED', `${intent}: V_disk ≠ V_m`),
+   447	        );
+   448	      }
+   449	    }
+   450	    const txn: Transaction = {
+   451	      coordinator: this,
+   452	      txn: randomUUID(),
+   453	      intent,
+   454	      touched: new Set(),
+   455	      undoFd: null,
+   456	      done: false,
+   457	    };
+   458	    // S2: سجلُّ تراجعٍ جديدٌ مُزامَنٌ **ثمَّ** ختمُ الترحيل — فلا يوجدُ `staged` بلا سجلّ.
+   459	    this.#openUndo(txn);
+   460	    try {
+   461	      await this.#manifest.stageAsync({
+   462	        txn: txn.txn,
+   463	        intent,
+   464	        fromEpoch: Number(from.epoch),
+   465	        fromAnchor: from.anchor,
+   466	        at: new Date().toISOString(),
+   467	      });
+   468	    } catch (error) {
+   469	      this.#closeUndo(txn);
+   470	      throw error;
+   471	    }
+   472	    this.onStage?.('S2', intent);
+   473	    // S3
+   474	    let result: T | undefined;
+   475	    let failure: unknown = null;
+   476	    let failed = false;
+   477	    try {
+   478	      result = await context.run(txn, async () => await fn());
+   479	    } catch (error) {
+   480	      failed = true;
+   481	      failure = error;
+   482	    } finally {
+   483	      txn.done = true;
+   484	      this.#closeUndo(txn);
+   485	    }
+   486	    this.onStage?.('S3', intent);
+   487	    if (failed && txn.touched.size > 0 && isIoFailure(failure)) {
+   488	      // كتابةٌ انقطعت في منتصفِها: الحالةُ في الذاكرةِ والقرصِ قد افترقتا. لا يُقَرُّ بها
+   489	      // ولا يُتقدَّمُ فوقَها؛ يبقى `staged` فيسترجعُها الإقلاعُ التالي (‏`B2`).
+   490	      throw this.#fenceWith(failure as Error);
+   491	    }
+   492	    if (!bind && txn.touched.size === 0 && !this.#manifest.hasPendingRaises) {
+   493	      // لا أثرَ على القرص: لا حالةَ جديدةَ يُشهَدُ عليها.
+   494	      await this.#manifest.clearStagedAsync().catch((error: unknown) => {
+   495	        throw this.#fenceWith(error as Error);
+   496	      });
+   497	      if (failed) throw failure;
+   498	      return result as T;
+   499	    }
+   500	    // S4 + S5
+   501	    try {
+   502	      const receipt = await this.#commit(txn, body, from);
+   503	      this.lastReceipt = receipt;
+   504	    } catch (error) {
+   505	      throw this.#fenceWith(error as Error);
+   506	    }
+   507	    this.onStage?.('ACK', intent);
+   508	    // الرفضُ المسمّى من المجالِ (‏إيقافٌ مرفوضٌ كُتِبَ قيدُه) يُرفَعُ **بعدَ** دوامِ قيدِه.
+   509	    if (failed) throw failure;
+   510	    return result as T;
+   511	  }
+   512	
+   513	  /** S4 ثمَّ S5. */
+   514	  async #commit(
+   515	    txn: Transaction,
+   516	    body: StateManifestBody,
+   517	    from: StateBoundReading,
+   518	  ): Promise<CommitReceipt> {
+   519	    if (this.#socket === null) {
+   520	      this.onStage?.('S4', txn.intent);
+   521	      await this.#manifest.promoteAsync(null);
+   522	      this.onStage?.('S5', txn.intent);
+   523	      return { txn: txn.txn, intent: txn.intent, epoch: body.freshnessEpoch, anchor: null };
+   524	    }
+   525	    const digest = computeStateDigest(this.#layout);
+   526	    const epoch = Number(from.epoch) + 1;
+   527	    const anchor = stateAnchor(body.instanceId, epoch, digest);
+   528	    await this.#advance(from, { epoch: BigInt(epoch), anchor });
+   529	    this.onStage?.('S4', txn.intent);
+   530	    await this.#manifest.promoteAsync({ epoch, anchor, digest });
+   531	    this.onStage?.('S5', txn.intent);
+   532	    return { txn: txn.txn, intent: txn.intent, epoch, anchor };
+   533	  }
+   534	
+   535	  /**
+   536	   * الانتقالُ مع إعادةِ المحاولةِ الآمنة: رفضٌ مسمّىً نهائيٌّ؛ ونتيجةٌ مجهولةٌ تُحسَمُ
+   537	   * بالقراءة: `cur = to` ⇒ نجح؛ `cur = from` ⇒ يُعادُ بالحُجَجِ نفسِها؛ غيرُهما ⇒ رفض.
+   538	   * @param from - من
+   539	   * @param to - إلى
+   540	   */
+   541	  async #advance(from: StateBoundReading, to: StateBoundReading): Promise<void> {
+   542	    const socket = this.#socket as StateBoundFreshnessSocket;
+   543	    let lastUnknown: unknown = null;
+   544	    for (let attempt = 0; attempt <= this.#retries; attempt += 1) {
+   545	      try {
+   546	        const now = await socket.advanceState(from, to);
+   547	        if (now.epoch === to.epoch && now.anchor === to.anchor) return;
+   548	        throw new FreshnessAdvanceError('FRESHNESS_STALE_TRANSITION', now);
+   549	      } catch (error) {
+   550	        if (error instanceof FreshnessAdvanceError) throw error;
+   551	        lastUnknown = error;
+   552	      }
+   553	      let current: StateBoundReading;
+   554	      try {
+   555	        current = await socket.read();
+   556	      } catch (error) {
+   557	        lastUnknown = error;
+   558	        continue;
+   559	      }
+   560	      if (current.epoch === to.epoch && current.anchor === to.anchor) return;
+   561	      if (current.epoch === from.epoch && current.anchor === from.anchor) continue;
+   562	      if (current.epoch === from.epoch) {
+   563	        throw new FreshnessAdvanceError('FRESHNESS_SAME_EPOCH_FORK', current);
+   564	      }
+   565	      throw new FreshnessAdvanceError(
+   566	        current.epoch < from.epoch ? 'FRESHNESS_REFERENCE_BEHIND' : 'FRESHNESS_STALE_TRANSITION',
+   567	        current,
+   568	      );
+   569	    }
+   570	    throw new CommitBarrierError(
+   571	      'FRESHNESS_ADVANCE_UNRESOLVED',
+   572	      `بعدَ ${String(this.#retries + 1)} محاولات`,
+   573	      lastUnknown,
+   574	    );
+   575	  }
+   576	
+   577	  /** من أين تبدأُ المعاملة. */
+   578	  #fromOf(body: StateManifestBody): StateBoundReading {
+   579	    return {
+   580	      epoch: BigInt(body.freshnessEpoch),
+   581	      anchor: body.freshnessAnchor ?? FRESHNESS_GENESIS_ANCHOR,
+   582	    };
+   583	  }
+   584	
+   585	  /** يُسيِّجُ الحاجزَ ويُرجِعُ الخطأ. */
+   586	  #fenceWith(error: Error): Error {
+   587	    if (this.#fence === null) {
+   588	      this.#fence = error;
+   589	      this.#manifest.dropPendingRaises();
+   590	      try {
+   591	        this.#onFence?.(error);
+   592	      } catch {
+   593	        /* التسييجُ لا يُحجَبُ بفشلِ تنظيف */
+   594	      }
+   595	    }
+   596	    return error;
+   597	  }
+   598	
+   599	  #rel(absolute: string): string {
+   600	    return absolute.startsWith(this.#rootPrefix) ? relative(this.root, absolute) : absolute;
+   601	  }
+   602	
+   603	  #openUndo(txn: Transaction): void {
+   604	    mkdirSync(this.root, { recursive: true });
+   605	    const temporary = `${this.undoFile}.tmp`;
+   606	    const fd = openSync(temporary, 'w', 0o600);
+   607	    try {
+   608	      const header: UndoRecord = {
+   609	        t: 'header',
+   610	        txn: txn.txn,
+   611	        intent: txn.intent,
+   612	        at: new Date().toISOString(),
+   613	      };
+   614	      writeFully(fd, JSON.stringify(header) + '\n');
+   615	      if (this.#fsync) fsyncSync(fd);
+   616	    } finally {
+   617	      closeSync(fd);
+   618	    }
+   619	    renameSync(temporary, this.undoFile);
+   620	    syncDir(this.root, this.#fsync);
+$ nl -ba src/root-of-trust/production-runtime.mts
+   250	   */
+   251	  revokeAsync(certificateId: string, revokedBy: string, reason: string): Promise<boolean>;
+   252	  /** تثبيتُ السجلِّ عبرَ الحاجز — المسارُ الإنتاجيُّ لـ`maybeAnchorLogWithHsm`. */
+   253	  anchorAsync(options?: {
+   254	    force?: boolean;
+   255	    intervalMs?: number;
+   256	    at?: Date;
+   257	  }): Promise<AnchorRecord | null>;
+   258	  /**
+   259	   * `D6`: يُطبِّقُ قصودَ العملياتِ الأخرى المُودَعةَ في صندوقِ الجذرِ (‏`root-intents.mts`)
+   260	   * عبرَ الحاجز — فلا كاتبَ ثانياً لـ`nodes/` و`acks/` ومخزنِ المراسي.
+   261	   * @returns عددُ القصودِ المُعالَجة
+   262	   */
+   263	  drainIntentsAsync(): Promise<number>;
+   264	  /**
+   265	   * حكمُ الإقلاعِ في الوضعِ المربوطِ بالحالة (‏`B1`/`B2`/`B3`/`B10`)، أو `null` في الوضعِ
+   266	   * القديمِ (‏`bump`). للتدقيقِ وإعادةِ القياس.
+   267	   */
+   268	  freshnessBoot: 'B1' | 'B2' | 'B3' | 'B10' | null;
+   269	  /** يُغلقُ الحاجزَ والسجلَّ وجلسةَ التوكن. */
+   270	  close(): Promise<void>;
+   271	}
+   272	
+   273	/** قصدُ الربطِ الأوّلِ بالمرجعِ المربوطِ بالحالة (‏`B10`). */
+   274	const FRESHNESS_BIND_INTENT = 'freshness.bind';
+   275	
+   276	/** إعلانُ ربطِ جذرٍ قائمٍ بمرجعٍ مربوطٍ لأوّلِ مرّة — إعلانٌ لا استنباط (‏كإذنِ التهيئة). */
+   277	export const FRESHNESS_BIND_DECLARED_ENV = 'XUUX_FRESHNESS_BIND_DECLARED';
+   278	
+   279	/**
+   280	 * مكوّناتُ بصمةِ الحالة `V` (‏§2 من التصميم بعدَ تصحيحِ افتراضِ `WL-325` الرابع): السجلُّ
+   281	 * والدفترُ وحجوزاتُه والإيقافُ بعهدِه وتاريخِه وعُقدِه وإقراراتِه (‏`P8`/`P9` **داخلَ**
+   282	 * البصمة) والتثبيتاتُ والسحب و`clock-state.json` (‏`P13`، `LIVE-37`/`WL-331`: أرضيّةُ
+   283	 * الحدّ الأعلى للساعةِ السياديّة — استرجاعُها أقدمَ يُحيي نافذةَ الإعادةِ، فهي حالةٌ
+   284	 * تُقَرّ لا مجرّدُ أرضيّةِ قياس). ومستثنى: البيانُ ودفترُه (‏آليّةُ الختمِ نفسُها)، والأقفالُ،
+   285	 * ورأسُ السجلِّ (‏مشتقٌّ يُعادُ بناؤه، ويُسترجَعُ معَ السجلّ)، وصندوقُ القصود.
+   286	 *
+   287	 * `LIVE-37`: غابَ P13 عن جردِ P0–P12 في `WL-325` فبقيَ استرجاعُه أقدمَ بلا كشف. صارَ داخلَ
+   288	 * `V`، وكتابتُه لا تقعُ إلّا عبرَ حاجزِ الالتزام (‏معاملةُ `clock.persist` في `SovereignClock`).
+   289	 * ومعلَنٌ: جذرٌ رُبِطَ قبلَ هذا التغييرِ يحملُ بصمةً بلا P13، فأوّلُ إقلاعٍ له بعده في
+   290	 * الوضعِ المربوطِ يُرَدّ بفرقِ البصمةِ حتى تُكتَبَ الحالةُ التاليةُ — لا تُدّعى ترقيةٌ
+   291	 * صامتةٌ (والوضعُ المربوطُ اختباريٌّ اليوم، `LIVE-38`).
+   292	 * @param root - جذرُ الحالة
+   293	 * @param anchorFile - مخزنُ التثبيتات
+   294	 * @returns المكوّنات
+   295	 */
+   296	export function productionStateLayout(root: string, anchorFile: string): StateLayout {
+   297	  const halt = join(root, 'halt', 'directive.json');
+   298	  const ledger = join(root, 'commands.ledger');
+   299	  return {
+   300	    files: [
+   301	      join(root, 'events.log'),
+   302	      ledger,
+   303	      halt,
+   304	      halt + HALT_EPOCH_SUFFIX,
+   305	      halt + HALT_HISTORY_SUFFIX,
+   306	      anchorFile,
+   307	      join(root, 'revoked.jsonl'),
+   308	      join(root, 'clock-state.json'),
+   309	      // **WL-363 (‏قرارُ المالكِ):** لقطةُ منحِ القدراتِ داخلَ بصمةِ الحالةِ المختومةِ.
+   310	      // مسارُ الكتابةِ صارَ موافقَ الحاجزِ (`beforeDurableWrite` في المخزنِ) فكتابتُها
+   311	      // تُحدِّثُ الهضمَ وترفَعُ البيانَ معَ ختمِ الشاهدِ — كتلةً واحدةً.
+   312	      join(root, 'capability-grants.json'),
+   313	    ],
+   314	    dirs: [ledger + LEDGER_CLAIMS_SUFFIX, halt + HALT_NODES_SUFFIX, halt + HALT_ACKS_SUFFIX],
+   315	  };
+   316	}
+   317	
+   318	/**
+   319	 * حكمُ الإقلاعِ في الوضعِ المربوطِ بالحالة (‏§5: `B0`–`B10`). يقعُ **قبلَ** فتحِ السجلِّ
+   320	 * والدفتر: الاسترجاعُ يقصُّ ما كُتِبَ بعدَ آخرِ ترقية، فلا يُقرأُ شيءٌ قبلَه.
+   321	 * @param manifest - البيانُ المفتوح
+   322	 * @param socket - المرجع
+   323	 * @param coordinator - الحاجزُ (‏للربطِ الأوّل)
+   324	 * @param context - الجذرُ والمزامنةُ والتهيئةُ والبيئة
+   325	 * @returns ما وقع — للتدقيق
+   326	 */
+   327	export async function decideStateBoundBoot(
+   328	  manifest: StateManifest,
+   329	  socket: StateBoundFreshnessSocket,
+   330	  coordinator: CommitCoordinator,
+   331	  context: {
+   332	    root: string;
+   333	    fsync: boolean;
+   334	    provisioning: boolean;
+   335	    env: NodeJS.ProcessEnv;
+   336	    layout: StateLayout;
+   337	  },
+   338	): Promise<'B1' | 'B2' | 'B3' | 'B10'> {
+   339	  let reference: { epoch: bigint; anchor: string };
+   340	  try {
+   341	    reference = await socket.read();
+   342	  } catch (error) {
+   343	    // WL-434: رموزُ ربطِ NV المسمّاةُ تصلُ إلى القرارِ كما هي — قائمةٌ مغلقةٌ لا
+   344	    // تُحاكي غيرَها ولا تكشفُ محتوىُ استثناءٍ حسّاسًا. وما ليسَ مسمّىً يبقى B0
+   345	    // المغلقَ نفسَه: نتيجةٌ مجهولةٌ = مصدرٌ غيرُ متاحٍ، والإقلاعُ يرفضُ.
+   346	    const code = (error as { code?: unknown }).code;
+   347	    if (code === 'FRESHNESS_NV_BINDING_INVALID') {
+   348	      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_INVALID', 'ربطُ NV غيرُ صالحٍ');
+   349	    }
+   350	    if (code === 'FRESHNESS_NV_BINDING_MISMATCH') {
+   351	      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_MISMATCH', 'ربطُ NV لا يطابقُ المرجع');
+   352	    }
+   353	    // B0
+   354	    throw new ProductionRuntimeError('FRESHNESS_SOURCE_UNAVAILABLE', 'تعذّرت قراءةُ المرجع');
+   355	  }
+   356	  const body = manifest.read();
+   357	  // WL-434: في وضعِ NV (‏الربطُ المختومُ في البيانِ) التحقّقُ من المصدرِ **إلزاميّ** —
+   358	  // غيابُ كشفِ الربطِ عندَ المصدرِ ليسِ تخطيًا للفحصِ بل رفضٌ مغلقٌ: حمايةٌ لا
+   359	  // تُعطّلُ بحذفِ واجهةٍ. والاختلافُ بينَ البيانِ والمصدرِ رفضٌ مسمّى، فلا مصدرَ
+   360	  // حقيقةٍ ثانيًا إلى جانبِ البيانِ المختومِ.
+   361	  const fnvBinding = body.freshnessBinding ?? null;
+   362	  if (fnvBinding !== null) {
+   363	    if (!isFnvPinnedBindingSource(socket)) {
+   364	      throw new ProductionRuntimeError(
+   365	        'FRESHNESS_NV_BINDING_INVALID',
+   366	        'بيانٌ يحملُ ربطًا والمصدرُ لا يكشفُ ربطًا مثبّتًا',
+   367	      );
+   368	    }
+   369	    const sourceBinding = socket.pinnedBinding();
+   370	    if (sourceBinding === null || typeof sourceBinding !== 'object') {
+   371	      throw new ProductionRuntimeError(
+   372	        'FRESHNESS_NV_BINDING_INVALID',
+   373	        'المصدرُ لا يكشفُ ربطًا مثبّتًا',
+   374	      );
+   375	    }
+   376	    const diff = fnvBindingSourceDiff(fnvBinding, sourceBinding as Record<string, unknown>);
+   377	    if (diff !== null) {
+   378	      throw new ProductionRuntimeError('FRESHNESS_NV_BINDING_MISMATCH', diff);
+   379	    }
+   380	  }
+   381	  const staged = body.staged ?? null;
+   382	  if (staged !== null) {
+   383	    const fromEpoch = BigInt(staged.fromEpoch);
+   384	    if (reference.epoch === fromEpoch && reference.anchor === staged.fromAnchor) {
+   385	      // B2: المرجعُ لم يتقدّمْ فوقَ المعاملة ⇒ لم يُقَرَّ بها ⇒ استرجاعٌ دقيق.
+   386	      await CommitCoordinator.rollbackStagedAsync(
+   387	        context.root,
+   388	        manifest,
+   389	        staged.txn,
+   390	        context.fsync,
+   391	      );
+   392	      if (staged.intent === FRESHNESS_BIND_INTENT) {
+   393	        // ربطٌ أوّلُ انقطعَ قبلَ الانتقال: الترحيلُ المختومُ نفسُه هو الإعلان. الحكمُ `B2`
+   394	        // (‏استرجاعٌ دقيقٌ إلى ما قبلَ الربط) ثمَّ يُعادُ الربطُ فوقَ الحالةِ نفسِها.
+   395	        await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+   396	        return 'B2';
+   397	      }
+   398	      assertDigestMatches(manifest.read(), context.layout);
+   399	      return 'B2';
+   400	    }
+   401	    if (reference.epoch === fromEpoch) {
+   402	      throw new ProductionRuntimeError(
+   403	        'FRESHNESS_SAME_EPOCH_FORK',
+   404	        `المرجعُ في العهدِ ${String(fromEpoch)} بمرساةٍ غيرِ مرساةِ الترحيل`,
+   405	      );
+   406	    }
+   407	    if (reference.epoch === fromEpoch + 1n) {
+   408	      const digest = computeStateDigest(context.layout);
+   409	      const anchor = stateAnchor(body.instanceId, Number(reference.epoch), digest);
+   410	      if (anchor === reference.anchor) {
+   411	        // B3: المرجعُ تقدّمَ فوقَ عينِ هذه الحالة ⇒ تُرقّى.
+   412	        await manifest.promoteAsync({ epoch: Number(reference.epoch), anchor, digest });
+   413	        return 'B3';
+   414	      }
+   415	      // B4: المرجعُ تقدّمَ فوقَ حالةٍ غيرِ التي على القرص.
+   416	      throw new ProductionRuntimeError(
+   417	        'FRESHNESS_SAME_EPOCH_FORK',
+   418	        `المرجعُ في ${String(reference.epoch)} يشهدُ على حالةٍ غيرِ التي على القرص`,
+   419	      );
+   420	    }
+   421	    if (reference.epoch > fromEpoch + 1n) {
+   422	      throw new ProductionRuntimeError(
+   423	        STALE_MANIFEST_EPOCH,
+   424	        `المرجعُ ${String(reference.epoch)} أحدثُ من الترحيلِ ${String(fromEpoch)}`,
+   425	      );
+   426	    }
+   427	    throw new ProductionRuntimeError(
+   428	      'FRESHNESS_EPOCH_REGRESSION',
+   429	      `الترحيلُ من ${String(fromEpoch)} والمرجعُ ${String(reference.epoch)}`,
+   430	    );
+   431	  }
+   432	  const manifestEpoch = BigInt(body.freshnessEpoch);
+   433	  if (body.freshnessAnchor === undefined || body.stateDigest === undefined) {
+   434	    // B10: لم يُربَطْ بعد. الربطُ الأوّلُ **مُعلَنٌ** لا مُستنبَط: تهيئةٌ جديدةٌ، أو إعلانٌ صريح.
+   435	    const declared = context.provisioning || context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+   436	    // والمرجعُ في النشأةِ وحدَها: مرجعٌ تقدّمَ لا يُربَطُ به جذرٌ غيرُ مربوط. وعهدُ البيانِ
+   437	    // القديمُ (‏مقبسُ `bump`) لا يُشترَطُ صفراً عندَ الإعلان: المرجعُ المربوطُ سلسلةٌ جديدة،
+   438	    // ولقطةٌ قديمةٌ غيرُ مربوطةٍ بعدَ الربطِ تُرَدُّ هنا نفسِه (‏المرجعُ لم يعُدْ في النشأة).
+   439	    if (
+   440	      (manifestEpoch === 0n || declared) &&
+   441	      reference.epoch === 0n &&
+   442	      reference.anchor === FRESHNESS_GENESIS_ANCHOR &&
+   443	      declared
+   444	    ) {
+   445	      // WL-434: ختمُ الربطِ في المتنِ جزءٌ من المراسمِ المعلنةِ نفسِها — من المصدرِ
+   446	      // وحدهِ (إن كشفَ مادّةً)، لا يُصنَعُ لبيانٍ قديمٍ ولا يُعوّضُ حقلٌ مفقودٌ. ومن
+   447	      // لا يكشفُ مادّةً يبقى على المسارِ التاريخيِّ كما هو (لا backend إنتاجيًّا اليوم).
+   448	      // **والإعلانُ للربطِ صريحٌ بالبيئةِ وحدَها** (`XUUX_FRESHNESS_BIND_DECLARED=1`) —
+   449	      // التهيئةُ وحدها تُعلنُ الجذرَ لا المراسمَ: مقبسُ المحاكاةِ يكشفُ المادّةَ دائمًا،
+   450	      // فلولا هذا الشرطُ لدخلَت إقلاعاتُ التهيئةِ التاريخيّةُ (v2) في مراسمِ v3 بلا
+   451	      // إعلانٍ ورفضتْ `NOT_DECLARED` — انحدارٌ ممنوعٌ.
+   452	      const bindDeclared = context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+   453	      const materialSource = socket as Partial<FnvBindingMaterialSource>;
+   454	      if (bindDeclared && typeof materialSource.fnvBindingMaterial === 'function') {
+   455	        await manifest.bindFnvAsync(await materialSource.fnvBindingMaterial(), context.env);
+   456	      }
+   457	      await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+   458	      return 'B10';
+   459	    }
+   460	    if (reference.epoch > manifestEpoch) {
+   461	      throw new ProductionRuntimeError(
+   462	        STALE_MANIFEST_EPOCH,
+   463	        `المرجعُ ${String(reference.epoch)} والبيانُ غيرُ مربوطٍ في ${String(manifestEpoch)}`,
+   464	      );
+   465	    }
+   466	    throw new ProductionRuntimeError(
+   467	      'FRESHNESS_BINDING_UNDECLARED',
+   468	      `${FRESHNESS_BIND_DECLARED_ENV}=1 مطلوبٌ لربطِ جذرٍ قائم`,
+   469	    );
+   470	  }
+   471	  if (reference.epoch > manifestEpoch) {
+   472	    // B5
+   473	    throw new ProductionRuntimeError(
+   474	      STALE_MANIFEST_EPOCH,
+   475	      `المرجعُ ${String(reference.epoch)} أحدثُ من البيانِ ${String(manifestEpoch)}`,
+   476	    );
+   477	  }
+   478	  if (manifestEpoch > reference.epoch) {
+   479	    // B7
+   480	    throw new ProductionRuntimeError(
+   481	      'FRESHNESS_EPOCH_REGRESSION',
+   482	      `البيانُ ${String(manifestEpoch)} أحدثُ من المرجعِ ${String(reference.epoch)}`,
+   483	    );
+   484	  }
+   485	  if (reference.anchor !== body.freshnessAnchor) {
+   486	    // B6: العهدُ نفسُه ومرساةٌ أخرى — لقطةٌ من فرعٍ آخر.
+   487	    throw new ProductionRuntimeError(
+   488	      'FRESHNESS_SAME_EPOCH_FORK',
+   489	      `العهدُ ${String(manifestEpoch)} بمرساتينِ مختلفتين`,
+   490	    );
+   491	  }
+   492	  // B8
+   493	  assertDigestMatches(body, context.layout);
+   494	  return 'B1';
+   495	}
+   496	
+   497	/**
+   498	 * `B8`: الحالةُ على القرصِ عينُ ما خُتِمَ — بالبصمةِ الكاملةِ لا بالأعداد.
+   499	 * @param body - المتن
+   500	 * @param layout - المكوّنات
+$ nl -ba src/root-of-trust/freshness-socket.mts
+     1	// مقبسُ الحداثةِ — واجهةٌ مجرَّدةٌ لمرجعِ حداثةٍ خارجَ القرص.
+     2	//
+     3	// **لماذا هذا الملفُّ:** البيانُ المختومُ يمنعُ التزويرَ والتخفيضَ بالتحرير،
+     4	// لكنّه لا يمنعُ الإعادة: من ملكَ القرصَ أعادَ لقطةً كاملةً متّسقةً. والمنعُ
+     5	// الكاملُ يقتضي مرجعَ حداثةٍ لا يقدرُ الخصمُ على إعادتِه إلى الوراء — وهو إمّا
+     6	// داخلَ عتادٍ مستقلٍّ (HSM عدّادٌ رتيبٌ، TPM NV) أو خارجَ نطاقِ القرص (مُشهِدٌ
+     7	// شبكيٌّ، توقيعٌ سياديٌّ دوريٌّ).
+     8	//
+     9	// **هذه الواجهةُ عقدٌ لا تنفيذٌ:** لا تُدَّعى حمايةٌ من الإعادةِ بلا backend
+    10	// موصولٍ فعليّاً. `NullFreshnessSocket` لا يفعلُ شيئاً، وهو الافتراضُ — فالسلوكُ
+    11	// كما كان. أمّا `MockFreshnessSocket` فللاختبارِ: يُثبتُ أنَّ اللقطةَ القديمةَ
+    12	// تُرفَضُ حين يُرفعُ المرجعُ، وأنَّها تُقبَلُ حين لا يُوجدُ.
+    13	//
+    14	// **حدٌّ مُعلَنٌ:** الواجهةُ وحدَها ليست إصلاحاً. ولا backend غيرُ موصولٍ. ولا
+    15	// اختبارٌ متخطٍّ. لا يُدَّعى `VERIFIED` ولا `closed` حتى يصبحَ مصدرُ الحداثةِ
+    16	// الحقيقيُّ موصولاً ويمنعُ rollback فعليّاً. والقرارُ في اختيارِ الـbackend
+    17	// للمالك — راجع `docs/external-review/options/2026-09-30-r3-a-01-ext-6-options.md`.
+    18	
+    19	/**
+    20	 * قراءةُ مرجعِ الحداثةِ — نتيجةٌ غيرُ قابلةٍ للتزويرِ من خارجِ القرص.
+    21	 * @property epoch - رقمٌ رتيبٌ لا يَرجِعُ إلى الوراء
+    22	 * @property anchor - تجزئةٌ أو مُعرِّفٌ يربطُ القراءةَ بالحالةِ المقروءة
+    23	 */
+    24	export interface FreshnessReading {
+    25	  readonly epoch: bigint;
+    26	  readonly anchor: string;
+    27	}
+    28	
+    29	/**
+    30	 * مقبسُ الحداثةِ — واجهةٌ مجرَّدةٌ لمرجعِ حداثةٍ خارجَ القرص.
+    31	 *
+    32	 * @property read - يقرأُ المرجعَ الحاليَّ. إن فشلَ القراءةُ برفعٍ، يُرفَضُ الإقلاعُ
+    33	 *   مغلقَ لا يسقطُ إلى `null` ولا يعودُ إلى الحالِ السابق.
+    34	 * @property bump - يرفعُ المرجعَ بعدَ كلِّ ختم. إن فشلَ الرفعُ برفعٍ، يُرفَضُ الختمُ.
+    35	 */
+    36	export interface FreshnessSocket {
+    37	  /**
+    38	   * يقرأُ مرجعَ الحداثةِ الحاليَّ.
+    39	   * @returns القراءةُ الحاليّة
+    40	   * @throws Error إن تعذّرَتِ القراءةُ — فشلٌ مغلقٌ لا صمتٌ.
+    41	   */
+    42	  read(): Promise<FreshnessReading>;
+    43	
+    44	  /**
+    45	   * يرفعُ مرجعَ الحداثةِ بعدَ كلِّ ختمٍ.
+    46	   * @returns القراءةُ بعدَ الرفع
+    47	   * @throws Error إن تعذّرَ الرفعُ — فشلٌ مغلقٌ لا صمتٌ.
+    48	   */
+    49	  bump(): Promise<FreshnessReading>;
+    50	}
+    51	
+    52	/**
+    53	 * مقبسٌ فارغٌ — لا يفعلُ شيئاً، وهو الافتراضُ.
+    54	 *
+    55	 * السلوكُ معه كما كان تماماً: لا فحصَ حداثةٍ، لا رفضَ إعادةٍ. الحدُّ المُعلَنُ
+    56	 * في ADR 0006 قائمٌ.
+    57	 */
+    58	export class NullFreshnessSocket implements FreshnessSocket {
+    59	  private static instance: NullFreshnessSocket | null = null;
+    60	
+    61	  static get INSTANCE(): NullFreshnessSocket {
+    62	    if (NullFreshnessSocket.instance === null) {
+    63	      NullFreshnessSocket.instance = new NullFreshnessSocket();
+    64	    }
+    65	    return NullFreshnessSocket.instance;
+    66	  }
+    67	
+    68	  async read(): Promise<FreshnessReading> {
+    69	    return { epoch: 0n, anchor: 'null' };
+    70	  }
+    71	
+    72	  async bump(): Promise<FreshnessReading> {
+    73	    return { epoch: 0n, anchor: 'null' };
+    74	  }
+    75	}
+    76	
+    77	/**
+    78	 * مقبسُ اختبارٍ — عدّادٌ رتيبٌ في الذاكرة. لا يدومُ عبرَ إعادةِ التشغيل:
+    79	 * للاختبارِ وحدَه، لا للإنتاج.
+    80	 *
+    81	 * يُثبتُ به أنَّ اللقطةَ القديمةَ تُرفَضُ حين يُرفعُ المرجعُ، وتُقبَلُ حين
+    82	 * لا يُوجدُ.
+    83	 */
+    84	export class InMemoryFreshnessSocket implements FreshnessSocket {
+    85	  /** علامةُ أنّ هذا المقبسَ تركيبيٌّ للاختبارِ لا مصدرُ حداثةٍ إنتاجيٌّ. */
+    86	  readonly testFixture = true;
+    87	  private epoch: bigint;
+    88	  private readonly anchorPrefix: string;
+    89	
+    90	  constructor(initial: bigint = 0n, anchorPrefix: string = 'test') {
+    91	    this.epoch = initial;
+    92	    this.anchorPrefix = anchorPrefix;
+    93	  }
+    94	
+    95	  async read(): Promise<FreshnessReading> {
+    96	    return { epoch: this.epoch, anchor: `${this.anchorPrefix}:${this.epoch}` };
+    97	  }
+    98	
+    99	  async bump(): Promise<FreshnessReading> {
+   100	    this.epoch += 1n;
+   101	    return { epoch: this.epoch, anchor: `${this.anchorPrefix}:${this.epoch}` };
+   102	  }
+   103	
+   104	  /** يُرفعُ يدويّاً للاختبار — يُحاكي تقدّمَ مرجعٍ خارجيّ. */
+   105	  advance(): void {
+   106	    this.epoch += 1n;
+   107	  }
+   108	
+   109	  /** يُعطّلُ القراءةَ — يُحاكي انقطاعَ مرجعٍ خارجيّ. */
+   110	  failNext(): void {
+   111	    const original = this.read.bind(this);
+   112	    this.read = async () => {
+   113	      throw new Error('FRESHNESS_SOURCE_UNAVAILABLE');
+   114	      void original;
+   115	    };
+   116	  }
+   117	}
+   118	
+   119	/**
+   120	 * يُحدِّدُ هل المقبسُ فارغٌ (لا يفعلُ شيئاً) أم فعليٌّ.
+   121	 * @param socket - المقبسُ المُفحوص
+   122	 * @returns `true` إن كانَ فارغاً
+   123	 */
+   124	export function isNullFreshnessSocket(
+   125	  socket: FreshnessSocket | StateBoundFreshnessSocket | null | undefined,
+   126	): boolean {
+   127	  return socket === null || socket === undefined || socket instanceof NullFreshnessSocket;
+   128	}
+   129	
+   130	/**
+   131	 * رمزُ الرفضِ عندَ اكتشافِ بيانٍ أقدمَ من المرجعِ.
+   132	 */
+   133	export const STALE_MANIFEST_EPOCH = 'STALE_MANIFEST_EPOCH' as const;
+   134	
+   135	/**
+   136	 * رمزُ الرفضِ عندَ تعذُّرِ قراءةِ مرجعِ الحداثةِ.
+   137	 */
+   138	export const FRESHNESS_SOURCE_UNAVAILABLE = 'FRESHNESS_SOURCE_UNAVAILABLE' as const;
+   139	
+   140	// ─────────────────────────────────────────────────────────────────────────────
+   141	// `LIVE-28` (‏`WL-326`، الخيارُ ب): مقبسُ حداثةٍ **مربوطٌ بالحالة**.
+   142	//
+   143	// `bump()` يرفعُ عدّاداً لا يعرفُ ما يشهدُ عليه، فلقطةٌ قديمةٌ تُقبَلُ إن أُعيدَ
+   144	// معها عددٌ صحيح. والعقدُ هنا انتقالٌ ذرّيٌّ مشروطٌ (compare-and-advance) من
+   145	// `(e, A_e)` إلى `(e+1, A_{e+1})` حيثُ `A` تجزئةُ الحالةِ نفسِها، فلا يتقدّمُ المرجعُ
+   146	// إلّا فوقَ الحالةِ التي يشهدُ عليها، ولا يُقبَلُ انتقالانِ مختلفانِ من العهدِ نفسِه.
+   147	//
+   148	// **حدٌّ مُعلَنٌ:** لا backend إنتاجيَّ هنا. اختيارُ العتادِ قرارُ المالكِ (‏`D2`) ولم
+   149	// يُحسَمْ. والمرجعُ الذي في الذاكرةِ أدناه مِرجعُ اختبارٍ يُرَدُّ في نقطةِ الدخولِ
+   150	// الإنتاجيّةِ (‏`testFixture`) ولا يُحسَبُ دليلاً إنتاجيّاً.
+   151	// ─────────────────────────────────────────────────────────────────────────────
+   152	
+   153	/** مرساةُ النشأةِ: حالُ المرجعِ قبلَ أوّلِ ربطٍ — `(0, GENESIS)`. */
+   154	export const FRESHNESS_GENESIS_ANCHOR = 'genesis' as const;
+   155	
+   156	/** أخطاءُ الانتقالِ المسمّاةُ (‏§6 من تصميمِ الخيارِ ب). */
+   157	export const FreshnessAdvanceErrorCodes = [
+   158	  /** انتقالٌ غيرُ صالحِ الشكلِ: عهدٌ غيرُ تالٍ، أو مرساةٌ فارغة. */
+   159	  'FRESHNESS_ADVANCE_INVALID',
+   160	  /** المرجعُ في العهدِ `from.epoch` بمرساةٍ أخرى: انشقاقٌ في العهدِ نفسِه. */
+   161	  'FRESHNESS_SAME_EPOCH_FORK',
+   162	  /** المرجعُ تقدّمَ إلى ما بعدَ `to`، أو إلى `to.epoch` بمرساةٍ أخرى. */
+   163	  'FRESHNESS_STALE_TRANSITION',
+   164	  /** المرجعُ أقدمُ من `from`: ما يُطلَبُ رفعُه ليس ما يشهدُ عليه المرجع. */
+   165	  'FRESHNESS_REFERENCE_BEHIND',
+   166	] as const;
+   167	
+   168	export type FreshnessAdvanceErrorCode = (typeof FreshnessAdvanceErrorCodes)[number];
+   169	
+   170	/** رفضٌ مسمّىً من المرجعِ: نتيجتُه معلومةٌ (لم يتقدّم)، بخلافِ الخطأِ المجهول. */
+   171	export class FreshnessAdvanceError extends Error {
+   172	  readonly code: FreshnessAdvanceErrorCode;
+   173	  readonly current: StateBoundReading | null;
+   174	
+   175	  /**
+   176	   * @param code - رمزُ الرفض
+   177	   * @param current - قراءةُ المرجعِ ساعةَ الرفضِ إن عُرِفت
+   178	   */
+   179	  constructor(code: FreshnessAdvanceErrorCode, current: StateBoundReading | null = null) {
+   180	    super(code);
+   181	    this.name = 'FreshnessAdvanceError';
+   182	    this.code = code;
+   183	    this.current = current;
+   184	  }
+   185	}
+   186	
+   187	/** قراءةُ مرجعٍ مربوطٍ بالحالة: عهدٌ ومرساةُ الحالةِ في ذلك العهد. */
+   188	export interface StateBoundReading {
+   189	  readonly epoch: bigint;
+   190	  readonly anchor: string;
+   191	}
+   192	
+   193	/**
+   194	 * مقبسٌ مربوطٌ بالحالة. الكشفُ عنه بالعَلَمِ `stateBound` **ودالّةِ `advanceState`
+   195	 * معاً** — لا بالاسمِ `advance` الذي تحملُه مقابسُ الاختبارِ القديمةُ بمعنىً آخرَ
+   196	 * (‏افتراضُ `WL-325` الخامسُ الذي ثبتَ خطؤه).
+   197	 */
+   198	export interface StateBoundFreshnessSocket {
+   199	  readonly stateBound: true;
+   200	  /** يقرأُ المرجعَ. الفشلُ رفعٌ لا صمت. */
+   201	  read(): Promise<StateBoundReading>;
+   202	  /**
+   203	   * انتقالٌ ذرّيٌّ مشروط: ينجحُ **فقط** إن كان المرجعُ `from` الآن، فيصيرُ `to`.
+   204	   * ونداءٌ مكرَّرٌ بالحُجَجِ نفسِها بعدَ نجاحٍ يُرجِعُ `to` (‏عديمُ الأثرِ الثاني)
+   205	   * كي تكونَ إعادةُ المحاولةِ بعدَ نتيجةٍ مجهولةٍ آمنة.
+   206	   * @throws FreshnessAdvanceError رفضٌ مسمّىً — لم يتقدّمِ المرجع
+   207	   * @throws Error غيرُه — النتيجةُ **مجهولةٌ** ويلزمُ `read()` قبلَ أيِّ حكم
+   208	   */
+   209	  advanceState(from: StateBoundReading, to: StateBoundReading): Promise<StateBoundReading>;
+   210	}
+   211	
+   212	/**
+   213	 * هل المقبسُ مربوطٌ بالحالة؟
+   214	 * @param socket - المقبس
+   215	 * @returns نعم إن حملَ العقدَ كاملاً
+   216	 */
+   217	export function isStateBoundFreshnessSocket(socket: unknown): socket is StateBoundFreshnessSocket {
+   218	  if (socket === null || typeof socket !== 'object') return false;
+   219	  const candidate = socket as Partial<StateBoundFreshnessSocket>;
+   220	  return (
+   221	    candidate.stateBound === true &&
+   222	    typeof candidate.advanceState === 'function' &&
+   223	    typeof candidate.read === 'function'
+   224	  );
+   225	}
+   226	
+   227	/**
+   228	 * يحكمُ على انتقالٍ مطلوبٍ أمامَ قراءةٍ حاليّة — منطقُ §6 في موضعٍ واحدٍ يستعملُه
+   229	 * كلُّ مرجعٍ (‏ذاكرةٌ أو ملفٌّ أو عتادٌ لاحقاً) فلا يفترقُ العقدُ بينَها.
+   230	 * @param current - المرجعُ الآن
+   231	 * @param from - ما يُدَّعى أنّه المرجع
+   232	 * @param to - ما يُطلَبُ الانتقالُ إليه
+   233	 * @returns `'apply'` أو `'already'` (‏تكرارٌ بعدَ نجاح)، وإلّا يرفعُ رفضاً مسمّىً
+   234	 */
+   235	export function judgeStateAdvance(
+   236	  current: StateBoundReading,
+   237	  from: StateBoundReading,
+   238	  to: StateBoundReading,
+   239	): 'apply' | 'already' {
+   240	  if (
+   241	    typeof from.anchor !== 'string' ||
+   242	    typeof to.anchor !== 'string' ||
+   243	    from.anchor === '' ||
+   244	    to.anchor === '' ||
+   245	    to.epoch !== from.epoch + 1n ||
+   246	    from.epoch < 0n
+   247	  ) {
+   248	    throw new FreshnessAdvanceError('FRESHNESS_ADVANCE_INVALID', current);
+   249	  }
+   250	  if (current.epoch === to.epoch && current.anchor === to.anchor) return 'already';
+   251	  if (current.epoch === from.epoch) {
+   252	    if (current.anchor === from.anchor) return 'apply';
+   253	    throw new FreshnessAdvanceError('FRESHNESS_SAME_EPOCH_FORK', current);
+   254	  }
+   255	  if (current.epoch < from.epoch) {
+   256	    throw new FreshnessAdvanceError('FRESHNESS_REFERENCE_BEHIND', current);
+   257	  }
+   258	  throw new FreshnessAdvanceError('FRESHNESS_STALE_TRANSITION', current);
+   259	}
+   260	
+   261	/**
+   262	 * مرجعٌ مربوطٌ بالحالةِ في الذاكرة — **للاختبارِ وحدَه**: لا يدومُ عبرَ العملية،
+   263	 * ويُرَدُّ في نقطةِ الدخولِ الإنتاجيّة (‏`testFixture`). يُحقَنُ فيه فشلٌ قبلَ
+   264	 * التطبيقِ أو بعدَه لقياسِ مسارِ «النتيجةِ المجهولة».
+   265	 */
+   266	export class InMemoryStateBoundFreshnessSocket implements StateBoundFreshnessSocket {
+   267	  readonly stateBound = true as const;
+   268	  readonly testFixture = true;
+   269	  #current: StateBoundReading = { epoch: 0n, anchor: FRESHNESS_GENESIS_ANCHOR };
+   270	  #faults: Array<'before' | 'after'> = [];
+   271	  #readFaults = 0;
+   272	  /** عددُ الانتقالاتِ المُطبَّقةِ فعلاً — يُقرأُ في الاختبار. */
+   273	  applied = 0;
+   274	
+   275	  async read(): Promise<StateBoundReading> {
+   276	    if (this.#readFaults > 0) {
+   277	      this.#readFaults -= 1;
+   278	      throw new Error('FRESHNESS_SOURCE_UNAVAILABLE');
+   279	    }
+   280	    return this.#current;
+   281	  }
+   282	
+   283	  async advanceState(from: StateBoundReading, to: StateBoundReading): Promise<StateBoundReading> {
+   284	    const fault = this.#faults.shift();
+   285	    if (fault === 'before') throw new Error('FRESHNESS_TRANSPORT_LOST');
+   286	    const verdict = judgeStateAdvance(this.#current, from, to);
+   287	    if (verdict === 'apply') {
+   288	      this.#current = { epoch: to.epoch, anchor: to.anchor };
+   289	      this.applied += 1;
+   290	    }
+   291	    if (fault === 'after') throw new Error('FRESHNESS_TRANSPORT_LOST');
+   292	    return this.#current;
+   293	  }
+   294	
+   295	  /** فشلٌ نقلٌ قبلَ أن يصلَ الطلبُ — النتيجةُ: لم يتقدّم. */
+   296	  failBeforeApply(times = 1): void {
+   297	    for (let i = 0; i < times; i += 1) this.#faults.push('before');
+   298	  }
+   299	
+   300	  /** فشلُ نقلٍ بعدَ التطبيق — النتيجةُ: تقدّمَ، والمتّصلُ لا يعلم. */
+   301	  failAfterApply(times = 1): void {
+   302	    for (let i = 0; i < times; i += 1) this.#faults.push('after');
+   303	  }
+   304	
+   305	  /** قراءاتٌ تفشلُ — انقطاعُ المرجع. */
+   306	  failReads(times = 1): void {
+   307	    this.#readFaults += times;
+   308	  }
+   309	
+   310	  /**
+   311	   * يضعُ المرجعَ على حالٍ بعينِها — يُحاكي كاتباً آخرَ تقدّمَ به (‏انشقاق) أو مرجعاً
+   312	   * أُعيدَ. للاختبارِ وحدَه.
+   313	   * @param reading - الحالُ الجديدة
+   314	   */
+   315	  force(reading: StateBoundReading): void {
+   316	    this.#current = { epoch: reading.epoch, anchor: reading.anchor };
+   317	  }
+   318	}

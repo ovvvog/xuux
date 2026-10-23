@@ -1,0 +1,149 @@
+$ node sim/freshness-nv/hw-plan-check.mjs tests/fixtures/tpm-host/swtpm-inventory.json
+{
+  "inventorySha256": "95817f233751699975804b435389f4e091f36637ab822f4921212803a61e07aa",
+  "schema": "xuux.fnv-hw-plan-check/1",
+  "readOnly": true,
+  "blockers": [
+    "NOT_HARDWARE_EVIDENCE",
+    "READINESS_UNKNOWN_GET_TPM_ABSENT"
+  ],
+  "ownerDecisions": [
+    "OWNER_RANGE_OCCUPIED_UNATTRIBUTED:1 — the WL-416 ownership barrier halts before any mutating command; owner must decide whether to permit a run beside indices it cannot attribute"
+  ],
+  "notes": [
+    "NV_COUNTER_QUOTA_POOL_BOUND: no fixed maximum (r1.59 NOTE 2); bounded by unmeasured NV pool"
+  ],
+  "evidenceClass": "simulator-not-hardware",
+  "identity": {
+    "manufacturer": "IBM",
+    "vendorString": "SW   TPM",
+    "family": "2.0",
+    "specRevisionTimes100": 183,
+    "firmware": "8228.293.18.0"
+  },
+  "readiness": {
+    "TpmPresent": null,
+    "TpmReady": null,
+    "TpmEnabled": null,
+    "TpmActivated": null,
+    "TpmOwned": null,
+    "RestartPending": null,
+    "ManagedAuthLevel": null,
+    "OwnerClearDisabled": null,
+    "AutoProvisioning": null,
+    "LockedOut": null,
+    "LockoutCount": null,
+    "LockoutMax": null
+  },
+  "resources": {
+    "counterQuota": {
+      "max": 0,
+      "semantics": "no-fixed-maximum",
+      "defined": 1,
+      "needed": 1,
+      "headroomUpperBound": null,
+      "note": "upper bound only; NV pool may be exhausted first (free bytes unmeasured)"
+    },
+    "indexCount": {
+      "defined": 2,
+      "listed": 2,
+      "needed": 2
+    },
+    "size": {
+      "recordBytes": 128,
+      "nvIndexMax": 2048,
+      "nvBufferMax": 1024,
+      "freeNvBytes": null
+    },
+    "persistentAvailEstimate": 64,
+    "authorization": {
+      "managedAuthLevel": null,
+      "proven": false,
+      "note": "Get-Tpm fields are status, not proof that owner/storage authorization is usable by the ceremony"
+    }
+  },
+  "handles": {
+    "inUse": [
+      "0x01500016",
+      "0x01800001"
+    ],
+    "byRange": {
+      "tpm-manufacturer": 0,
+      "platform-manufacturer": 1,
+      "owner": 1,
+      "tcg-defined": 0
+    },
+    "ownerRangeInUse": [
+      "0x01800001"
+    ],
+    "ownerRangeDetail": [
+      {
+        "handle": "0x01800001",
+        "type": "ORDINARY",
+        "attributes": [
+          "OWNERWRITE",
+          "AUTHWRITE",
+          "OWNERREAD",
+          "AUTHREAD"
+        ],
+        "dataSize": 32,
+        "error": null
+      }
+    ]
+  },
+  "proposal": {
+    "c": "0x01afd712",
+    "r": "0x01afd713",
+    "source": "deterministic-proposal",
+    "seed": "xuux/freshness-nv/hw-qualification/v1",
+    "recheckImmediatelyBeforeDefine": true,
+    "issues": []
+  },
+  "commands": {
+    "TPM2_NV_DefineSpace": true,
+    "TPM2_NV_UndefineSpace": true,
+    "TPM2_NV_Increment": true,
+    "TPM2_NV_Read": true,
+    "TPM2_NV_ReadPublic": true,
+    "TPM2_PolicySigned": true,
+    "TPM2_PolicyCommandCode": true,
+    "TPM2_StartAuthSession": true,
+    "TPM2_NV_Certify": true
+  },
+  "tbsObserved": {
+    "TPM2_GetCapability": "all-succeeded",
+    "TPM2_NV_ReadPublic": "all-succeeded",
+    "TPM2_NV_DefineSpace": "not-sent-by-design",
+    "TPM2_NV_Increment": "not-sent-by-design",
+    "TPM2_NV_Certify": "not-sent-by-design",
+    "blockedResponses": []
+  },
+  "driftVsWl411": {
+    "nvIndexes": [
+      16,
+      2
+    ],
+    "counters": [
+      4,
+      1
+    ],
+    "nvCountersMax": [
+      8,
+      0
+    ],
+    "ownerRange": [
+      5,
+      1
+    ]
+  },
+  "unmeasurableReadOnly": [
+    "free NV bytes: no GetCapability property; only an approved define attempt (TPM_RC_NV_SPACE) measures it",
+    "whether Windows TBS permits NV_DefineSpace / NV_Increment / NV_Write / NV_UndefineSpace / NV_Certify for the ceremony account",
+    "usable owner (storage hierarchy) authorization — ManagedAuthLevel is status, not proof",
+    "counter monotonicity across undefine/redefine and across power loss on this chip",
+    "single NV_Write atomicity for R under power loss (vendor property, not in the spec guarantee)",
+    "BitLocker / Windows Hello dependence on the indices in the owner range (read with manage-bde / dsregcmd, not via TPM)"
+  ],
+  "verdict": "BLOCKED"
+}
+exit=1

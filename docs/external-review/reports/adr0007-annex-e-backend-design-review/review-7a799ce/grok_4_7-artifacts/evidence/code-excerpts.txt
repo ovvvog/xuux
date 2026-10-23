@@ -1,0 +1,68 @@
+=== fnv-binding.mts:215-224 ===
+export function fnvBindingSourceDiff(
+  manifestBinding: ManifestFnvBinding,
+  sourceBinding: Record<string, unknown>,
+): string | null {
+  const pairs: Array<[string, unknown, unknown]> = [
+    ['counterIndex', manifestBinding.counterIndex, sourceBinding.counterIndex],
+    ['recordIndex', manifestBinding.recordIndex, sourceBinding.recordIndex],
+    ['counterName', manifestBinding.counterName, sourceBinding.counterName],
+    ['recordName', manifestBinding.recordName, sourceBinding.recordName],
+    ['base', manifestBinding.base, sourceBinding.base],
+  ];
+  const identity = sourceBinding.tpmIdentity as { kind?: unknown; value?: unknown } | undefined;
+  if (identity !== undefined && identity !== null && typeof identity === 'object') {
+    pairs.push(['tpmIdentity.kind', manifestBinding.tpmIdentity.kind, identity.kind]);
+    pairs.push(['tpmIdentity.value', manifestBinding.tpmIdentity.value, identity.value]);
+  }
+  const policy = sourceBinding.authPolicy as { counter?: unknown; record?: unknown } | undefined;
+  if (policy !== undefined && policy !== null && typeof policy === 'object') {
+    pairs.push(['authPolicy.counter', manifestBinding.authPolicy.counter, policy.counter]);
+    pairs.push(['authPolicy.record', manifestBinding.authPolicy.record, policy.record]);
+  }
+  for (const [field, manifestValue, sourceValue] of pairs) {
+    if (manifestValue !== sourceValue) return field;
+  }
+  return null;
+}
+=== state-manifest.mts:848 ===
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'EEXIST') throw error;
+        const owner = journalLockOwner(this.journalLockFile);
+        if (owner !== null && owner !== process.pid && pidAlive(owner)) {
+          throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
+        }
+        rmSync(this.journalLockFile, { force: true });
+      }
+    }
+    throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'تعذّرَ أخذُ القفل');
+=== production-runtime.mts:452-457 and 471-476 ===
+      const bindDeclared = context.env[FRESHNESS_BIND_DECLARED_ENV] === '1';
+      const materialSource = socket as Partial<FnvBindingMaterialSource>;
+      if (bindDeclared && typeof materialSource.fnvBindingMaterial === 'function') {
+        await manifest.bindFnvAsync(await materialSource.fnvBindingMaterial(), context.env);
+      }
+      await coordinator.bindAsync(FRESHNESS_BIND_INTENT);
+  if (reference.epoch > manifestEpoch) {
+    // B5
+    throw new ProductionRuntimeError(
+      STALE_MANIFEST_EPOCH,
+      `المرجعُ ${String(reference.epoch)} أحدثُ من البيانِ ${String(manifestEpoch)}`,
+    );
+=== annex key lines ===
+L69 len=1919 head='   - **`pinnedBinding()` يُحسَبُ حيًّا في كلِّ إقلاع، لا من `NV_ReadPublic` وحده** (WL437-grok_4_7-R2-02): الأسماءُ وسياستا الفهرسَين من `NV_ReadPublic` داخلَ الجلسةِ المملّحة؛ و**'
+L154 len=1239 head='- **جلسةُ السياسةِ استعمالٌ واحد (WL437-grok_4_7-R3-01):** لكلِّ أمرٍ مُغيِّرٍ (`NV_Increment(C)` أو `NV_Write(R)`) جلسةُ سياسةٍ جديدةٌ: `StartAuthSession` ثمّ `PolicySigned` ثمّ `'
+L161 len=1250 head='| `GetCapability` | — | `capability` ∈ {`TPM_CAP_HANDLES` (0x1) بدايةً من `property` = 0x01000000 (مجالُ NV)، أو 0x81000000 (المستمرّة)؛ `TPM_CAP_TPM_PROPERTIES` (0x6)}. و`property'
+L165 len=1738 head='| `CreatePrimary` | `primaryHandle` = `TPM_RH_ENDORSEMENT`، بتفويضٍ فارغٍ عبرَ `TPM_RS_PW`. وإن كانَ تفويضُ المصادقةِ غيرَ فارغٍ فالتوقّف، بلا محاولة | `inPublic` = **`TPMT_PUBLIC`'
+L180 len=326 head='**(خ) ردُّ خطأ (الرمزُ ≠ `TPM_RC_SUCCESS`).** الشكلُ بالضبط: **عشرةُ بايتات**، والوسمُ `TPM_ST_NO_SESSIONS` (0x8001)، و`responseSize` = 10، و**عددُ البايتاتِ المستلَمةِ 10 بلا ذيل*'
+L186 len=1097 head='- **(ن1) بلا جلسات:** الأمرُ أُرسِلَ بوسمِ `TPM_ST_NO_SESSIONS`، والردُّ كذلك، ولا منطقةَ تفويض. **ويُقبَلُ شكلًا فقط، وبحسبِ واصفِ الأمرِ في §4.3 (WL437-gpt_6_1_sol-R3-02):** حيثُ'
+L191 len=1016 head='  و`authValue` فارغٌ في كلِّ استعمالاتِ هذا التصميم (لا `PolicyAuthValue`، وجلسةُ السلامةِ لا كيانَ لها). وتشفيرُ المعاملاتِ معطّل (`symmetric = NULL`)، فلا nonces تشفيرٍ في المعاد'
+L326 len=54 head='| `authHandle` | `"0x40000001"` (`TPM_RH_OWNER`) | — |'
+L339 len=72 head='| القناعُ في الإذنِ وفي `NV_DefineSpace` | `0x02040018` | `0x02041008` |'
+L344 len=155 head='- `d1 = SHA-256(0³² ‖ TPM_CC_PolicySigned (0x00000160) ‖ Name(مفتاحُ الخدمة))`، ثمّ `d2 = SHA-256(d1 ‖ policyRef)` و`policyRef` فارغ، فـ`d2 = SHA-256(d1)`؛'
+L381 len=152 head='  **حدٌّ أمنيٌّ صريحٌ لسجلِّ استهلاكِ `provision-define-init` (WL437-grok_4_7-R3-02، WL437-gpt_6_1_sol-R2-06) — لا يدّعي هذا التصميمُ مقاومةً للإرجاع:**'
+L387 len=200 head='  - **والقرارُ للمالك [قرارُ مالك E11]:** قبولُ هذا الحدِّ المعلن، أو اشتراطُ شاهدٍ رتيبٍ مستقلٍّ قبلَ أيِّ مراسمٍ إنتاجيّة. **فـR2-06 لا يُعَدُّ معالَجًا بالمقاومة**؛ هو موثَّقٌ ح'
+L397 len=251 head='4. **إعادةُ القراءةِ في الجلسةِ المملّحةِ نفسِها** قبلَ الختمِ مباشرة: الاسمان، و**قيمةُ `C` بالضبط**، و**بصمةُ بايتاتِ `R`**. أيُّ اختلافٍ عن الخطوة 2 يعني توقّفًا دونَ ختم (WL437'
+L410 len=234 head='- أمرُ مراسمٍ منفصلٌ (`scripts/freshness-bind-ceremony.mjs`) لا مسارُ إقلاع: الخدمةُ ترفضُ `XUUX_FRESHNESS_BIND_DECLARED` دائمًا (§6.2)، ويجري الأمرُ تحتَ قفلِ السلطةِ ومعَ الإعلان'
+L477 len=513 head='   - `bindFnvAsync` مع `coordinator.bindAsync` — **و`bindFnvAsync` و`#sealSerialized` لا يثقانِ بإعلانِ المستدعي (WL437-grok_4_7-R2-02، وR3-06):** يستلمانِ **رمزَ قدرةٍ** (capabili'
+L480 len=493 head='3. **هويّةُ القفل: الجهازُ لا التثبيت (WL437-grok_4_7-R3-06).** قفلُ السلطةِ واحدٌ **لكلِّ TPM على المضيف**، لا لكلِّ `instanceId`: تثبيتانِ على مضيفٍ واحدٍ يتشاركانِ الـTPM فيتسلس'

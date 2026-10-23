@@ -1,0 +1,28 @@
+$ date -u
+2026-10-22T02:40:34Z
+$ git rev-parse HEAD
+7a799cecf23b80538487a01560144ecb39f99abd
+exit=0
+$ git status --short
+exit=0
+$ git diff --quiet
+exit=0
+$ git diff --cached --quiet
+exit=0
+$ tail -n 12 06-unit-tests.log
+  type: 'suite'
+  ...
+1..2
+# tests 17
+# suites 2
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 354.721552
+exit=0
+$ wc -l report.md
+123 /tmp/council-wl437-r4/gpt_6_1_sol/report.md
+$ rg -n -i forbidden judgment words report.md
+rg exit=1 (1 means no matches)
