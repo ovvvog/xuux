@@ -307,6 +307,124 @@ export function nvReadCpHash(handleNames, size, offset) {
 }
 
 /**
+ * المنطقةُ العامّةُ لفهرسِ NV كما تُرسَلُ في `NV_DefineSpace` وتُعادُ في `NV_ReadPublic`:
+ * `nvIndex(4) † nameAlg(2) † attributes(4) † authPolicy(TPM2B) † dataSize(2)`.
+ * @param {{ nvIndex: number, dataSize: number, attributes: number, authPolicy?: Buffer }} fields
+ */
+export function nvPublicArea(fields) {
+  if (!Number.isInteger(fields.nvIndex)) throw invalid('nvIndex', 'must be an integer');
+  if (!Number.isInteger(fields.dataSize) || fields.dataSize < 0) throw invalid('dataSize', 'must be a non-negative integer');
+  if (!Number.isInteger(fields.attributes)) throw invalid('attributes', 'must be an integer');
+  const authPolicy = fields.authPolicy ?? Buffer.alloc(0);
+  if (!isBuffer(authPolicy)) throw invalid('authPolicy', 'must be bytes when provided');
+  return Buffer.concat([
+    u32(fields.nvIndex),
+    u16(TPM_ALG.SHA256),
+    u32(fields.attributes),
+    tpm2b(authPolicy),
+    u16(fields.dataSize),
+  ]);
+}
+
+/**
+ * عصٌّ تجريبيٌّ (خارجَ البوّابةِ) — `NV_DefineSpace`: يُنشئُ فهرسًا بسماتِ
+ * AUTHREAD|AUTHWRITE وقيمةِ تفويضٍ فارغةٍ، فيقرأُهُ الجلسةُ المملّحةُ غيرُ المربوطةِ
+ * (مفتاحُ HMAC = sessionKey † authValue الفارغةِ — Part 1 §18.3) وجلسةُ كلمةِ
+ * المرورِ على حدٍّ سواءٍ. التفويضُ: مالكُِ الهرمِ بجلسةِ كلمةِ مرورٍ فارغةٍ.
+ * @param {{ nvIndex: number, dataSize: number, attributes: number, authPolicy?: Buffer, session: { area: Buffer, descriptor: unknown } }} fields
+ */
+export function buildNvDefineSpace(fields) {
+  const publicInfo = nvPublicArea(fields);
+  // معاملاتُ الأمرِ: auth(TPMS_NV_AUTH = TPM2B nvAuth فارغةٌ في هذا التصميمِ) † publicInfo(TPM2B_NV_PUBLIC)
+  const parameters = Buffer.concat([tpm2b(Buffer.alloc(0)), tpm2b(publicInfo)]);
+  const command = assemble({
+    tag: TPM_ST.SESSIONS,
+    commandCode: TPM_CC.NV_DefineSpace,
+    handles: [u32(TPM_RH.OWNER)],
+    authorization: authorizationArea(fields.session),
+    parameters,
+  });
+  return {
+    command,
+    descriptor: {
+      commandCode: TPM_CC.NV_DefineSpace,
+      tag: TPM_ST.SESSIONS,
+      responseHandleCount: 0,
+      mutating: true,
+      allowNoSessionsResponse: false,
+      sessions: [/** @type {any} */ (fields.session).descriptor],
+    },
+    parameters,
+    cpHash: cpHash(TPM_CC.NV_DefineSpace, [permanentName(TPM_RH.OWNER)], parameters),
+    indexName: nvIndexName(publicInfo, TPM_ALG.SHA256),
+  };
+}
+
+/**
+ * عصٌّ تجريبيٌّ (خارجَ البوّابةِ) — `NV_UndefineSpace`: تنطيفُ فهرسٍ أنشأهُ الاختبارُ — لا يتسرّبُ حالةً
+ * للاختباراتِ اللاحقةِ في المحاكي المشتركِ.
+ * @param {{ nvIndex: number, indexName?: Buffer, session: { area: Buffer, descriptor: unknown } }} fields
+ */
+export function buildNvUndefineSpace(fields) {
+  if (!Number.isInteger(fields.nvIndex)) throw invalid('nvIndex', 'must be an integer');
+  const parameters = Buffer.alloc(0);
+  const command = assemble({
+    tag: TPM_ST.SESSIONS,
+    commandCode: TPM_CC.NV_UndefineSpace,
+    handles: [u32(TPM_RH.OWNER), u32(fields.nvIndex)],
+    authorization: authorizationArea(fields.session),
+    parameters,
+  });
+  return {
+    command,
+    descriptor: {
+      commandCode: TPM_CC.NV_UndefineSpace,
+      tag: TPM_ST.SESSIONS,
+      responseHandleCount: 0,
+      mutating: true,
+      allowNoSessionsResponse: false,
+      sessions: [/** @type {any} */ (fields.session).descriptor],
+    },
+    parameters,
+    cpHash: cpHash(TPM_CC.NV_UndefineSpace, [permanentName(TPM_RH.OWNER), fields.indexName ?? u32(fields.nvIndex)], parameters),
+  };
+}
+
+/**
+ * عصٌّ تجريبيٌّ (خارجَ البوّابةِ) — `NV_Write`: يكتبُ محتوى معلومًا في فهرسٍ بسمةِ
+ * AUTHWRITE وقيمةِ تفويضٍ فارغةٍ (جلسةُ كلمةِ المرورِ على الفهرسِ نفسِهِ — المقبضانِ هُما الفهرسُ).
+ * @param {{ nvIndex: number, data: Buffer, offset: number, session: { area: Buffer, descriptor: unknown }, indexName?: Buffer }} fields
+ */
+export function buildNvWrite(fields) {
+  if (!Number.isInteger(fields.nvIndex)) throw invalid('nvIndex', 'must be an integer');
+  if (!isBuffer(fields.data) || fields.data.length === 0) throw invalid('data', 'must be non-empty bytes');
+  if (!Number.isInteger(fields.offset) || fields.offset < 0) throw invalid('offset', 'must be a non-negative integer');
+  const parameters = Buffer.concat([tpm2b(fields.data), u16(fields.offset)]);
+  const command = assemble({
+    tag: TPM_ST.SESSIONS,
+    commandCode: TPM_CC.NV_Write,
+    handles: [u32(fields.nvIndex), u32(fields.nvIndex)],
+    authorization: authorizationArea(fields.session),
+    parameters,
+  });
+  if (fields.indexName !== undefined && !isBuffer(fields.indexName)) throw invalid('indexName', 'must be bytes when provided');
+  return {
+    command,
+    descriptor: {
+      commandCode: TPM_CC.NV_Write,
+      tag: TPM_ST.SESSIONS,
+      responseHandleCount: 0,
+      mutating: true,
+      allowNoSessionsResponse: false,
+      sessions: [/** @type {any} */ (fields.session).descriptor],
+    },
+    parameters,
+    // cpHash لأمرِ NV_Write يحتاجُ اسمَي الفهرسِ (المقبضانِ هُما الفهرسُ) — يُمرَّرُ من خطوةِ التعريفِ.
+    cpHash: fields.indexName ? cpHash(TPM_CC.NV_Write, [fields.indexName, fields.indexName], parameters) : null,
+  };
+}
+
+/**
  * T3/C1 — `NV_Read`. `handleNames` أسماءُ المقبضينِ (authHandle وnvIndex) بترتيبِ الأمرِ
  * — واسمُ الفهرسِ يُحسَبُ محلّيًّا من منطقتِهِ العامّةِ (`nvIndexName`).
  * @param {{ authHandle: number, nvIndex: number, size: number, offset: number, session: { area: Buffer, descriptor: unknown }, handleNames: Buffer[] }} fields
