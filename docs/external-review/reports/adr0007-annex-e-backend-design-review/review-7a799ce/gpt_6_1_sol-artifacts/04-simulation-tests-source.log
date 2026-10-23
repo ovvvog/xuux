@@ -1,0 +1,1267 @@
+$ nl -ba sim/freshness-nv/nv-state-bound-socket.mjs
+     1	// @ts-nocheck
+     2	// sim/freshness-nv/nv-state-bound-socket.mjs
+     3	//
+     4	// WL-431 — **مجسُّ محاكاةٍ** لمرجعِ حداثةٍ مربوطٍ بالحالةِ على NV في swtpm (R3-A-01 / EXT-6).
+     5	//
+     6	// **ما ليسَهُ:** ليس `TpmNvFreshnessSocket` إنتاجيًّا، ولا backend مدعومًا في
+     7	// `SUPPORTED_FRESHNESS_BACKENDS`، ولا دليلًا على أنّ TPM عتاديًّا جاهز. يحملُ `testFixture`
+     8	// و`simulationOnly` فيرفضُه المدخلُ الإنتاجيُّ كما يرفضُ كلَّ مقبسِ اختبار.
+     9	//
+    10	// **العقدُ المُنفَّذُ:** `StateBoundFreshnessSocket` من `src/root-of-trust/freshness-socket.mts`
+    11	// (‏`stateBound` + `read()` + `advanceState(from, to)`)، والحكمُ بـ`judgeStateAdvance` نفسِه.
+    12	//
+    13	// **التخطيطُ على NV (فهرسانِ في هرمِ المالكِ، بلا `ORDERLY`):**
+    14	//   - `C` عدّادٌ (`nt=counter`): رتيبٌ لا ينقصُ حتى لمن يملكُ تفويضَ الكتابة؛ وهو **نقطةُ الالتزامِ**.
+    15	//     العهدُ = `C - base` حيثُ `base` قيمةُ `C` عندَ التهيئة (‏العدّادُ يبدأُ بأكبرِ قيمةٍ عرفَها الـTPM
+    16	//     لا بالصفر — TPM 2.0 Part 3 §31).
+    17	//   - `R` فهرسٌ عاديٌّ (128 بايتًا) يحملُ سجلًّا مختومًا بـSHA-256: `phase` (‏0 مُلتزَمٌ، 1 قصدٌ
+    18	//     معلّقٌ)، و`base`، و`epoch`، ومرساةُ العهدِ الحاليِّ، ومرساةُ العهدِ التالي (‏في القصدِ وحدَه).
+    19	//
+    20	// **ترتيبُ الكتابةِ في `advanceState` (‏وتحتَ قفلٍ حصريٍّ — انظر أدناه):**
+    21	//   1. قراءةُ `C` و`R` ⇒ المرجعُ الحاليُّ (أيُّ فشلٍ أو تناقضٍ ⇒ رفضٌ مغلق).
+    22	//   2. `judgeStateAdvance(current, from, to)` ⇒ رفضٌ مسمّىً بلا أيِّ كتابة، أو `already`، أو `apply`.
+    23	//   3. كتابةُ القصدِ في `R`: `{phase: 1, epoch: from.epoch, cur: from.anchor, next: to.anchor}`.
+    24	//   4. `TPM2_NV_Increment(C)` — **نقطةُ الالتزام**.
+    25	//   5. قراءةُ `C` ثانيةً: يجبُ أن تكونَ +1 بالضبطِ وإلّا ⇒ `FRESHNESS_NV_CONCURRENT_INCREMENT` (مغلق).
+    26	//   6. كتابةُ السجلِّ المُلتزَمِ `{phase: 0, epoch: to.epoch, cur: to.anchor}`.
+    27	//
+    28	// **نوافذُ التعطّلِ وسياستُها (المرجعُ يُحسَمُ دائمًا من `C`):**
+    29	//   - قبلَ 3: لا أثر. - بينَ 3 و4: `read()` ⇒ `(from)` — لم يتقدّم؛ وإعادةُ المحاولةِ بالحُججِ نفسِها
+    30	//     تُكمِل، وانتقالٌ آخرُ من العهدِ نفسِه يُحكَمُ بقواعدِ العقدِ (القصدُ غيرُ المُلتزَمِ لا يُعتَدُّ به).
+    31	//   - بينَ 4 و6: `read()` ⇒ `(to)` — تقدّمَ؛ وإعادةُ المحاولةِ بالحُججِ نفسِها ⇒ `already` وتُتمُّ 6.
+    32	//   - `R` تالفٌ (بصمةٌ أو سحرٌ) أو `C - base` لا يطابقُ `R` بـ0 أو +1 ⇒ `FRESHNESS_NV_INCONSISTENT`.
+    33	//   **لا ذرّيّةَ مُدّعاةً بينَ فهرسَين:** الـTPM لا يقدّمُ مقارنةً وتبديلًا على عدّادٍ، ولا كتابةً ذرّيّةً
+    34	//   لفهرسَين. ذرّيّةُ الأمرِ الواحدِ (`NV_Write` لـ`R` كاملًا) **افتراضٌ لم يُقَس هنا** — والسجلُّ
+    35	//   مختومٌ بتجزئةٍ كي يُكشفَ تمزّقُه إن وقعَ لا كي يُمنَع.
+    36	//
+    37	// **التزامنُ:** الـTPM لا يمنعُ كاتبَينِ من قراءةِ `C` معًا ثمّ زيادتِه مرّتَين. لذا كلُّ
+    38	// `advanceState` يأخذُ قفلًا حصريًّا عبرَ العملياتِ (ملفٌّ يُنشأُ بـ`O_EXCL` في `lockDir`، وقفلُ عمليّةٍ
+    39	// ميّتةٍ يُستعادُ)، والخطوةُ 5 تكشفُ ما يفلتُ منه فترفضُ مغلقًا لا صامتًا. القفلُ ترتيبٌ للتزامنِ
+    40	// لا حمايةٌ من الإعادة. **الخيارُ `unsafeNoLock` للضابطِ السلبيِّ وحدَه.**
+    41	//
+    42	// **حدٌّ لا يُثبتُه هذا المجسُّ:** المرجعُ المحاكى ملفُّ حالةٍ على قرصِ المضيف
+    43	// (`tpm2-00.permall`). من استرجعَ لقطةَ التطبيقِ **ولقطةَ حالةِ المحاكي معًا** إلى زمنٍ أقدمَ حصلَ على
+    44	// حالةٍ قديمةٍ متّسقةٍ يقبلُها المجسُّ — يُقاسُ ذلك صراحةً ضابطًا سلبيًّا ولا يُدَّعى خلافُه.
+    45	
+    46	import { createHash } from 'node:crypto';
+    47	import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
+    48	import { join } from 'node:path';
+    49	
+    50	import {
+    51	  FRESHNESS_GENESIS_ANCHOR,
+    52	  FreshnessAdvanceError,
+    53	  judgeStateAdvance,
+    54	} from '../../src/root-of-trust/index.mjs';
+    55	import { BINDING_CODES, normalizeHandle, openBindingFile, parseNvName, sealBindingFile } from './pinned-binding.mjs';
+    56	import { codedError } from './swtpm-harness.mjs';
+    57	import { manifestFnvBindingShapeError } from '../../src/root-of-trust/fnv-binding.mjs';
+    58	
+    59	export const RECORD_SIZE = 128;
+    60	const MAGIC = Buffer.from('XFN1', 'ascii');
+    61	
+    62	/**
+    63	 * هويةُ TPM المعلنةُ للمحاكاةِ — ليست إثباتَ هويةِ عتادٍ (لا backend إنتاجيًّا يوفرُ
+    64	 * هويةً حقيقيّةً اليوم)؛ البنيةُ نفسُها التي سيملؤها المصدرُ الحقيقيّ.
+    65	 */
+    66	export const SIM_TPM_IDENTITY = Object.freeze({ kind: 'ek-name', value: `000b${'e'.repeat(64)}` });
+    67	const HEX64 = /^[0-9a-f]{64}$/;
+    68	
+    69	/** رموزُ هذا المجسِّ (‏كلُّها «نتيجةٌ مجهولةٌ أو مرجعٌ غيرُ مقروءٍ» — ليست `FreshnessAdvanceError`). */
+    70	export const NV_PROBE_CODES = Object.freeze({
+    71	  SOURCE_UNAVAILABLE: 'FRESHNESS_SOURCE_UNAVAILABLE',
+    72	  INCONSISTENT: 'FRESHNESS_NV_INCONSISTENT',
+    73	  CONCURRENT_INCREMENT: 'FRESHNESS_NV_CONCURRENT_INCREMENT',
+    74	  LOCK_TIMEOUT: 'FRESHNESS_NV_LOCK_TIMEOUT',
+    75	  TRANSPORT_LOST: 'FRESHNESS_TRANSPORT_LOST',
+    76	  NOT_PROVISIONED: 'FRESHNESS_NV_NOT_PROVISIONED',
+    77	});
+    78	
+    79	function encodeAnchor(anchor) {
+    80	  if (anchor === FRESHNESS_GENESIS_ANCHOR) return Buffer.concat([Buffer.from([0]), Buffer.alloc(32)]);
+    81	  if (typeof anchor === 'string' && HEX64.test(anchor)) {
+    82	    return Buffer.concat([Buffer.from([1]), Buffer.from(anchor, 'hex')]);
+    83	  }
+    84	  return null;
+    85	}
+    86	
+    87	function decodeAnchor(buf) {
+    88	  if (buf[0] === 0 && buf.subarray(1).every((b) => b === 0)) return FRESHNESS_GENESIS_ANCHOR;
+    89	  if (buf[0] === 1) return buf.subarray(1).toString('hex');
+    90	  return null;
+    91	}
+    92	
+    93	/**
+    94	 * يرمّزُ سجلَّ `R`.
+    95	 * @param {{phase: 0|1, base: bigint, epoch: bigint, cur: string, next?: string}} rec
+    96	 */
+    97	export function encodeRecord(rec) {
+    98	  const out = Buffer.alloc(RECORD_SIZE);
+    99	  MAGIC.copy(out, 0);
+   100	  out[4] = 1;
+   101	  out[5] = rec.phase;
+   102	  out.writeBigUInt64BE(rec.base, 8);
+   103	  out.writeBigUInt64BE(rec.epoch, 16);
+   104	  encodeAnchor(rec.cur).copy(out, 24);
+   105	  (rec.phase === 1 ? encodeAnchor(rec.next) : Buffer.alloc(33)).copy(out, 57);
+   106	  createHash('sha256').update(out.subarray(0, 96)).digest().copy(out, 96);
+   107	  return out;
+   108	}
+   109	
+   110	/** يفكُّ سجلَّ `R` أو يرفعُ `FRESHNESS_NV_INCONSISTENT`. */
+   111	export function decodeRecord(buf) {
+   112	  const bad = (why) => codedError(NV_PROBE_CODES.INCONSISTENT, `record ${why}`);
+   113	  if (!Buffer.isBuffer(buf) || buf.length !== RECORD_SIZE) throw bad('size');
+   114	  if (!buf.subarray(0, 4).equals(MAGIC) || buf[4] !== 1) throw bad('magic/version');
+   115	  const digest = createHash('sha256').update(buf.subarray(0, 96)).digest();
+   116	  if (!digest.equals(buf.subarray(96, 128))) throw bad('checksum (torn or tampered)');
+   117	  const phase = buf[5];
+   118	  if (phase !== 0 && phase !== 1) throw bad('phase');
+   119	  const cur = decodeAnchor(buf.subarray(24, 57));
+   120	  const next = phase === 1 ? decodeAnchor(buf.subarray(57, 90)) : undefined;
+   121	  if (cur === null || (phase === 1 && next === null)) throw bad('anchor');
+   122	  return {
+   123	    phase,
+   124	    base: buf.readBigUInt64BE(8),
+   125	    epoch: buf.readBigUInt64BE(16),
+   126	    cur,
+   127	    next,
+   128	  };
+   129	}
+   130	
+   131	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+   132	
+   133	function pidAlive(pid) {
+   134	  try {
+   135	    process.kill(pid, 0);
+   136	    return true;
+   137	  } catch (error) {
+   138	    return error.code === 'EPERM';
+   139	  }
+   140	}
+   141	
+   142	/**
+   143	 * مرجعُ حداثةٍ مربوطٌ بالحالةِ على NV في swtpm — **محاكاة**.
+   144	 */
+   145	export class SwtpmNvStateBoundSocket {
+   146	  stateBound = true;
+   147	  testFixture = true;
+   148	  simulationOnly = true;
+   149	  /** عددُ الانتقالاتِ التي زادت `C` من هذه النسخة. */
+   150	  applied = 0;
+   151	  /** طابورُ أعطالٍ يُستهلَكُ في كلِّ `advanceState`. */
+   152	  faults = [];
+   153	  /** خطّافاتُ قياسٍ اختياريّة: `afterRead`، `beforeIncrement`، `afterIncrement`. */
+   154	  hooks = {};
+   155	
+   156	  /**
+   157	   * @param {{tools: () => import('./swtpm-harness.mjs').Tpm2Tools, counterIndex: string,
+   158	   *   recordIndex: string, lockDir: string, lockTimeoutMs?: number, unsafeNoLock?: boolean, pinnedBase?: bigint,
+   159	   *   binding?: {file: string, publicKey: import('node:crypto').KeyObject},
+   160	   *   manifestBinding?: () => (object|null)}} opts
+   161	   *   ‏`tools` دالّةٌ لا كائنٌ: منفذُ المحاكي يتغيّرُ عندَ إعادةِ تشغيلِه.
+   162	   *   ‏`manifestBinding` (WL-434): دالّةٌ تُقرأُ **في كلّ تحقّقٍ** من البيانِ المختومِ نفسِه —
+   163	   *   البيانُ مصدرُ الحقيقةِ الوحيدُ لا ملفٌّ جانبيٌّ ثانٍ. غيابُ الربطِ (null) رفضٌ مغلقٌ.
+   164	   */
+   165	  constructor(opts) {
+   166	    this.toolsOf = opts.tools;
+   167	    this.counterIndex = opts.counterIndex;
+   168	    this.recordIndex = opts.recordIndex;
+   169	    this.lockDir = opts.lockDir;
+   170	    this.lockTimeoutMs = opts.lockTimeoutMs ?? 10000;
+   171	    this.unsafeNoLock = opts.unsafeNoLock === true;
+   172	    /** `base` مثبَّتٌ خارجَ `R` (‏قياسُ التخفيفِ في WL-432)؛ `null` = سلوكُ WL-431. */
+   173	    this.pinnedBase = opts.pinnedBase ?? null;
+   174	    /**
+   175	     * WL-433 (‏D1-أ): ربطٌ مختومٌ خارجَ `R` بالمقبضَين واسمَي NV و`base`. إن وُجدَ فهو مصدرُ `base`
+   176	     * الوحيد، ويُتحقَّقُ منه في كلِّ قراءةٍ وانتقال (‏`sim/freshness-nv/pinned-binding.mjs`).
+   177	     */
+   178	    this.binding = opts.binding ?? null;
+   179	    /**
+   180	     * WL-434: الربطُ من متنِ البيانِ المختومِ — يُقرأُ حديثًا في كلّ تحقّقٍ لا نسخةً واحدةً
+   181	     * عندَ البناءِ، فيبقى فحصُ كلّ قراءةٍ حاضرًا ولو حُذفَ البيانُ أو حُرّفَ بعدَها.
+   182	     */
+   183	    this.manifestBinding = opts.manifestBinding ?? null;
+   184	    mkdirSync(this.lockDir, { recursive: true });
+   185	  }
+   186	
+   187	  /**
+   188	   * الربطُ المثبّتُ الفعّالُ الذي يتحقّقُ منه المقبسُ — كما يكشفُه لمسارِ الإقلاعِ
+   189	   * (WL-434): مقارنةُ البيانِ والمصدرِ إلزامٌ عندَ الإقلاعِ، وغيابُ الكشفِ ليسِ تخطيًا.
+   190	   * `base` سلسلةٌ عشريةٌ كانونيةٌ كي تُقارَنَ بالقيمةِ لا بالنوعِ. ملفُّ WL-433 الجانبيُّ
+   191	   * أقدمُ مخطّطًا ولا يحملُ الهويةَ والسياسةَ — حدٌّ معلَنٌ في المقارنةِ.
+   192	   * @returns {{counterIndex: string, recordIndex: string, counterName: string, recordName: string,
+   193	   *   base: string, tpmIdentity?: object, authPolicy?: object}|null}
+   194	   */
+   195	  pinnedBinding() {
+   196	    if (this.manifestBinding !== null) {
+   197	      let fromManifest;
+   198	      try {
+   199	        fromManifest = this.manifestBinding();
+   200	      } catch (error) {
+   201	        // بيانٌ غائبٌ (لم يُهيَّأْ بعدُ أو حُذِفَ): لا ربطَ يُكشَفُ من المتنِ — والمقبسُ
+   202	        // يقرأُ `base` من `R` كعهدِ ما قبلَ المراسمِ. ليست ثغرةً: كلُّ مسارِ قبولٍ
+   203	        // (الإقلاعُ والمعاملةُ) يقرأُ البيانَ بنفسِهِ فسقوطُهُ هناكَ `STATE_ROOT_UNPROVISIONED`
+   204	        // المسمّاة. أمّا التحريرُ (ختمٌ مكسورٌ) فرمزُهُ `INVALID` أدناه.
+   205	        if (error.code === 'STATE_ROOT_UNPROVISIONED') return null;
+   206	        // بيانٌ مُحرَّفٌ أثناءَ التشغيلِ: رفضٌ مسمّى لا خطأٌ مجهولٌ يُقرأُ B0.
+   207	        throw codedError(BINDING_CODES.INVALID, `manifest binding unreadable: ${error.code ?? error.name}`);
+   208	      }
+   209	      if (fromManifest === null) return null;
+   210	      const shapeError = manifestFnvBindingShapeError(fromManifest);
+   211	      if (shapeError !== null) throw codedError(BINDING_CODES.INVALID, `manifest binding ${shapeError}`);
+   212	      return fromManifest;
+   213	    }
+   214	    if (this.binding !== null) {
+   215	      const file = openBindingFile(this.binding.file, this.binding.publicKey);
+   216	      return {
+   217	        counterIndex: file.counterIndex,
+   218	        recordIndex: file.recordIndex,
+   219	        counterName: file.counterName,
+   220	        recordName: file.recordName,
+   221	        base: file.base.toString(),
+   222	      };
+   223	    }
+   224	    return null;
+   225	  }
+   226	
+   227	  /**
+   228	   * مادّةُ الربطِ من المرجعِ الحيّ (‏WL-434، مراسمُ B10 المعلنة): المقبضانِ المضبوطانِ
+   229	   * واسمَا NV كما يُقرآنِ الآنَ من `NV_ReadPublic` و`base` كما يُقرأُ من `C`. **الهويةُ
+   230	   * والسياسةُ معلَنتانِ للمحاكاةِ** (‏`SIM_TPM_IDENTITY` ولا سياسةَ على فهرسَي المحاكاةِ)
+   231	   * لا إثباتَ هويةِ عتادٍ — ذاك حدُّ الـbackend الحقيقيّ.
+   232	   * @returns {Promise<import('../../src/root-of-trust/fnv-binding.mjs').FnvBindingMaterial>}
+   233	   */
+   234	  async fnvBindingMaterial() {
+   235	    const counterName = await this.#nvName(this.counterIndex);
+   236	    const recordName = await this.#nvName(this.recordIndex);
+   237	    return {
+   238	      counterIndex: normalizeHandle(this.counterIndex),
+   239	      recordIndex: normalizeHandle(this.recordIndex),
+   240	      counterName,
+   241	      recordName,
+   242	      base: (await this.#readCounter()).toString(),
+   243	      tpmIdentity: SIM_TPM_IDENTITY,
+   244	      authPolicy: { counter: '', record: '' },
+   245	    };
+   246	  }
+   247	
+   248	  get lockFile() {
+   249	    return join(this.lockDir, `fnv-${this.counterIndex}.lock`);
+   250	  }
+   251	
+   252	  async #tpm(tool, args, opts) {
+   253	    try {
+   254	      return await this.toolsOf().exec(tool, args, opts);
+   255	    } catch (error) {
+   256	      throw codedError(NV_PROBE_CODES.SOURCE_UNAVAILABLE, `${tool} failed`, { cause: error });
+   257	    }
+   258	  }
+   259	
+   260	  async #readCounter() {
+   261	    const raw = await this.#tpm('tpm2_nvread', ['-C', 'o', '-s', '8', this.counterIndex]);
+   262	    if (raw.length !== 8) throw codedError(NV_PROBE_CODES.SOURCE_UNAVAILABLE, `counter read ${raw.length} bytes`);
+   263	    return raw.readBigUInt64BE(0);
+   264	  }
+   265	
+   266	  async #readRecord() {
+   267	    const raw = await this.#tpm('tpm2_nvread', ['-C', 'o', '-s', String(RECORD_SIZE), this.recordIndex]);
+   268	    return decodeRecord(raw);
+   269	  }
+   270	
+   271	  async #nvName(index) {
+   272	    return parseNvName(await this.#tpm('tpm2_nvreadpublic', [index]));
+   273	  }
+   274	
+   275	  /**
+   276	   * `base` المثبَّت: من الربطِ المختومِ في البيانِ (‏WL-434) إن وُجدَ، أو من ملفِّ
+   277	   * الربطِ الجانبيّ (‏WL-433)، أو من `pinnedBase`، أو `null` (‏سلوكُ WL-431: `base` من `R`).
+   278	   */
+   279	  async #pinned() {
+   280	    if (this.manifestBinding !== null) {
+   281	      const b = this.pinnedBinding();
+   282	      // ‏`null` = بيانٌ تاريخيّ (v2) بلا ربطٍ: ما قبلَ المراسمِ — سلوكُ WL-431/432 (base
+   283	      // من `pinnedBase` أو `R`). أمّا بيانُ NV (v3) فربطُهُ إلزامٌ في المتنِ نفسِهِ،
+   284	      // وفقدانُهُ أو تحريرُهُ يُرفَضُ قراءةً لا يُكمَلُ استنباطًا.
+   285	      if (b !== null && b !== undefined) {
+   286	        if (
+   287	        b.counterIndex !== normalizeHandle(this.counterIndex) ||
+   288	        b.recordIndex !== normalizeHandle(this.recordIndex)
+   289	      ) {
+   290	          throw codedError(BINDING_CODES.MISMATCH, 'binding handles differ from the configured indices');
+   291	        }
+   292	        const [cn, rn] = [await this.#nvName(this.counterIndex), await this.#nvName(this.recordIndex)];
+   293	        if (cn !== b.counterName) throw codedError(BINDING_CODES.MISMATCH, 'counter NV name differs from the pinned name');
+   294	        if (rn !== b.recordName) throw codedError(BINDING_CODES.MISMATCH, 'record NV name differs from the pinned name');
+   295	        return BigInt(b.base);
+   296	      }
+   297	    }
+   298	    if (this.binding === null) return this.pinnedBase;
+   299	    const b = openBindingFile(this.binding.file, this.binding.publicKey);
+   300	    if (b.counterIndex !== normalizeHandle(this.counterIndex) || b.recordIndex !== normalizeHandle(this.recordIndex)) {
+   301	      throw codedError(BINDING_CODES.MISMATCH, 'binding handles differ from the configured indices');
+   302	    }
+   303	    const [cn, rn] = [await this.#nvName(this.counterIndex), await this.#nvName(this.recordIndex)];
+   304	    if (cn !== b.counterName) throw codedError(BINDING_CODES.MISMATCH, 'counter NV name differs from the pinned name');
+   305	    if (rn !== b.recordName) throw codedError(BINDING_CODES.MISMATCH, 'record NV name differs from the pinned name');
+   306	    return b.base;
+   307	  }
+   308	
+   309	  async #writeRecord(rec) {
+   310	    await this.#tpm('tpm2_nvwrite', ['-C', 'o', '-i', '-', this.recordIndex], { input: encodeRecord(rec) });
+   311	  }
+   312	
+   313	  /**
+   314	   * التهيئة: تعريفُ الفهرسَين، ورفعُ `C` مرّةً (‏كي يُقرأ)، وكتابةُ `(0, genesis)` بـ`base = C`.
+   315	   * تُرفَضُ إن وُجدَ أيُّ الفهرسَين — لا إعادةُ تهيئةٍ صامتة.
+   316	   * @param {{sign?: (bytes: Buffer) => Promise<Buffer>}} [opts] - موقِّعُ الربطِ إن كان للمقبسِ `binding`
+   317	   *   (‏الخطوةُ P5: يُختَمُ بعدَ كتابةِ `R` فاسماهما نهائيّان). سقوطٌ قبلَ ختمِه ⇒ لا ربطَ ⇒ القراءةُ ترفض،
+   318	   *   والتهيئةُ لا تُعاد (‏الفهرسانِ موجودان) — مراسمُ مالكٍ لا استردادٌ تلقائيّ.
+   319	   */
+   320	  async provision(opts = {}) {
+   321	    await this.#tpm('tpm2_nvdefine', [
+   322	      '-C', 'o', '-s', '8', '-a', 'ownerread|ownerwrite|nt=counter', this.counterIndex,
+   323	    ]);
+   324	    await this.#tpm('tpm2_nvdefine', [
+   325	      '-C', 'o', '-s', String(RECORD_SIZE), '-a', 'ownerread|ownerwrite', this.recordIndex,
+   326	    ]);
+   327	    await this.#tpm('tpm2_nvincrement', ['-C', 'o', this.counterIndex]);
+   328	    const base = await this.#readCounter();
+   329	    await this.#writeRecord({ phase: 0, base, epoch: 0n, cur: FRESHNESS_GENESIS_ANCHOR });
+   330	    if (this.binding !== null) {
+   331	      if (typeof opts.sign !== 'function') throw codedError(BINDING_CODES.INVALID, 'binding signer required');
+   332	      await sealBindingFile(
+   333	        this.binding.file,
+   334	        {
+   335	          counterIndex: this.counterIndex,
+   336	          recordIndex: this.recordIndex,
+   337	          counterName: await this.#nvName(this.counterIndex),
+   338	          recordName: await this.#nvName(this.recordIndex),
+   339	          base,
+   340	        },
+   341	        opts.sign,
+   342	      );
+   343	    }
+   344	    return { base };
+   345	  }
+   346	
+   347	  /** الحالةُ الخامُّ للقياس: `C` والسجلُّ والمرجعُ المحسوب. */
+   348	  async inspect() {
+   349	    const pinned = await this.#pinned();
+   350	    const counter = await this.#readCounter();
+   351	    const record = await this.#readRecord();
+   352	    return { counter, record, reference: this.#derive(counter, record, pinned) };
+   353	  }
+   354	
+   355	  #derive(counter, record, pinned) {
+   356	    if (pinned !== null && record.base !== pinned) {
+   357	      // WL-432: `base` في `R` قابلٌ لإعادةِ الكتابةِ ممّن يملكُ تفويضَ كتابةِ `R`؛ فإن ثُبِّتَ خارجَه
+   358	      // (‏مثلًا في البيانِ المختوم) فاختلافُه رفضٌ مغلق — وإلّا فإعادةُ كتابتِه استرجاعٌ كاملٌ (T7).
+   359	      throw codedError(
+   360	        this.binding === null ? NV_PROBE_CODES.INCONSISTENT : BINDING_CODES.MISMATCH,
+   361	        `record base ${record.base} != pinned ${pinned}`,
+   362	      );
+   363	    }
+   364	    if (counter < record.base) {
+   365	      throw codedError(NV_PROBE_CODES.INCONSISTENT, `counter ${counter} below base ${record.base}`);
+   366	    }
+   367	    const d = counter - record.base;
+   368	    if (record.phase === 0 && d === record.epoch) {
+   369	      return { epoch: record.epoch, anchor: record.cur, pending: null };
+   370	    }
+   371	    if (record.phase === 1 && d === record.epoch) {
+   372	      return { epoch: record.epoch, anchor: record.cur, pending: 'before-increment' };
+   373	    }
+   374	    if (record.phase === 1 && d === record.epoch + 1n) {
+   375	      return { epoch: record.epoch + 1n, anchor: record.next, pending: 'after-increment' };
+   376	    }
+   377	    throw codedError(
+   378	      NV_PROBE_CODES.INCONSISTENT,
+   379	      `counter epoch ${d} vs record epoch ${record.epoch} phase ${record.phase}`,
+   380	    );
+   381	  }
+   382	
+   383	  async read() {
+   384	    const pinned = await this.#pinned();
+   385	    const counter = await this.#readCounter();
+   386	    const record = await this.#readRecord();
+   387	    const ref = this.#derive(counter, record, pinned);
+   388	    return { epoch: ref.epoch, anchor: ref.anchor };
+   389	  }
+   390	
+   391	  async #lock() {
+   392	    if (this.unsafeNoLock) return () => undefined;
+   393	    const deadline = Date.now() + this.lockTimeoutMs;
+   394	    for (;;) {
+   395	      try {
+   396	        const fd = openSync(this.lockFile, 'wx');
+   397	        writeSync(fd, String(process.pid));
+   398	        closeSync(fd);
+   399	        return () => rmSync(this.lockFile, { force: true });
+   400	      } catch (error) {
+   401	        if (error.code !== 'EEXIST') throw error;
+   402	      }
+   403	      let holder = NaN;
+   404	      try {
+   405	        holder = Number(readFileSync(this.lockFile, 'utf8'));
+   406	      } catch {
+   407	        /* removed between open and read */
+   408	      }
+   409	      // قفلُ عمليّةٍ ميّتةٍ (‏سقوطٌ في منتصفِ انتقال) يُستعاد؛ والحكمُ بعدَه من `C` لا من القفل.
+   410	      if (Number.isInteger(holder) && holder > 0 && !pidAlive(holder)) {
+   411	        rmSync(this.lockFile, { force: true });
+   412	        continue;
+   413	      }
+   414	      if (Date.now() > deadline) throw codedError(NV_PROBE_CODES.LOCK_TIMEOUT, this.lockFile);
+   415	      await sleep(5);
+   416	    }
+   417	  }
+   418	
+   419	  async advanceState(from, to) {
+   420	    if (encodeAnchor(to?.anchor) === null || encodeAnchor(from?.anchor) === null) {
+   421	      // المجسُّ يرمّزُ المرساةَ في 33 بايتًا: `genesis` أو SHA-256 hex فقط.
+   422	      throw new FreshnessAdvanceError('FRESHNESS_ADVANCE_INVALID', null);
+   423	    }
+   424	    const release = await this.#lock();
+   425	    try {
+   426	      const fault = this.faults.shift();
+   427	      if (fault === 'throw-before-apply') {
+   428	        throw codedError(NV_PROBE_CODES.TRANSPORT_LOST, 'before apply');
+   429	      }
+   430	      const pinned = await this.#pinned();
+   431	      const counter = await this.#readCounter();
+   432	      const record = await this.#readRecord();
+   433	      const ref = this.#derive(counter, record, pinned);
+   434	      if (this.hooks.afterRead) await this.hooks.afterRead();
+   435	      if (ref.pending === 'after-increment') {
+   436	        // إصلاحٌ عديمُ الأثرِ الثاني: الالتزامُ وقعَ في `C`، والسجلُّ يُتَمّ.
+   437	        await this.#writeRecord({ phase: 0, base: record.base, epoch: ref.epoch, cur: ref.anchor });
+   438	      }
+   439	      const current = { epoch: ref.epoch, anchor: ref.anchor };
+   440	      const verdict = judgeStateAdvance(current, from, to);
+   441	      if (verdict === 'already') return current;
+   442	      await this.#writeRecord({
+   443	        phase: 1,
+   444	        base: record.base,
+   445	        epoch: from.epoch,
+   446	        cur: from.anchor,
+   447	        next: to.anchor,
+   448	      });
+   449	      if (fault === 'kill-after-intent') process.kill(process.pid, 'SIGKILL');
+   450	      if (fault === 'throw-after-intent') {
+   451	        throw codedError(NV_PROBE_CODES.TRANSPORT_LOST, 'after intent, before increment');
+   452	      }
+   453	      if (this.hooks.beforeIncrement) await this.hooks.beforeIncrement();
+   454	      await this.#tpm('tpm2_nvincrement', ['-C', 'o', this.counterIndex]);
+   455	      this.applied += 1;
+   456	      if (this.hooks.afterIncrement) await this.hooks.afterIncrement();
+   457	      if (fault === 'kill-after-increment') process.kill(process.pid, 'SIGKILL');
+   458	      if (fault === 'throw-after-increment') {
+   459	        throw codedError(NV_PROBE_CODES.TRANSPORT_LOST, 'after increment, before finalize');
+   460	      }
+   461	      const after = await this.#readCounter();
+   462	      if (after !== counter + 1n) {
+   463	        throw codedError(
+   464	          NV_PROBE_CODES.CONCURRENT_INCREMENT,
+   465	          `counter moved ${counter} -> ${after}; expected exactly +1`,
+   466	        );
+   467	      }
+   468	      await this.#writeRecord({ phase: 0, base: record.base, epoch: to.epoch, cur: to.anchor });
+   469	      if (fault === 'throw-after-finalize') {
+   470	        throw codedError(NV_PROBE_CODES.TRANSPORT_LOST, 'after finalize');
+   471	      }
+   472	      return { epoch: to.epoch, anchor: to.anchor };
+   473	    } finally {
+   474	      release();
+   475	    }
+   476	  }
+   477	
+   478	  /**
+   479	   * يكتبُ سجلًّا خامًّا في `R` — **للقياسِ وحدَه** (‏كاتبٌ يملكُ تفويضَ NV يحاولُ الإرجاع، أو تلف).
+   480	   * @param {Buffer} raw
+   481	   */
+   482	  async writeRawRecordForTest(raw) {
+   483	    await this.#tpm('tpm2_nvwrite', ['-C', 'o', '-i', '-', this.recordIndex], { input: raw });
+   484	  }
+   485	}
+$ nl -ba tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs
+     1	// @ts-nocheck
+     2	// tests/root-of-trust/wl-434-fnv-manifest-binding.test.mjs
+     3	//
+     4	// WL-434 — تكاملُ الربطِ المثبَّتِ معَ البيانِ الموقَّعِ (الخيارُ أ من §5.1 في الملحقِ ج
+     5	// لـADR 0007): الربطُ حقلٌ في متنِ البيانِ المختومِ بمفتاحِ الملكِ، لا ملفٌّ جانبيّ.
+     6	//
+     7	// **ما يقيسُه على المسارِ البرمجيِّ الحقيقيّ:**
+     8	//   - التهيئةُ وختمُ الربطِ وفتحُ البيانِ (`StateManifest.bindFnvAsync` المعلنة).
+     9	//   - تغطيةُ الختمِ للربطِ (تحريرُه ⇒ `SEAL_INVALID`)، ورفضُ الربطِ الغائبِ أو المهرَّبِ
+    10	//     أو الناقصِ أو المعدَّلِ، ورفضُ اختلافِ `instanceId` والمقابضِ والأسماءِ و`base`.
+    11	//   - الثباتُ عبرَ كلِّ تحديثاتِ البيانِ (نقطةُ ضبطٍ، ترحيلٌ، ترقيةٌ، رفعٌ) ورفضُ إعادةِ الربط.
+    12	//   - سياسةُ المخطّطِ: `2` تاريخيٌّ يبقى، `3` يحملُ الربطَ إلزامًا، ولا ترقيةَ صامتةً.
+    13	//   - رموزُ ربطِ NV المسمّاةُ تصلُ إلى قرارِ الإقلاعِ (`decideStateBoundBoot`)، والتحققُ
+    14	//     من المصدرِ إلزامٌ لا يُعطَّلُ، وB10 يختمُ المادّةَ من المصدرِ وB2 يعيدُ الربطَ المختومَ.
+    15	//
+    16	// **حدودٌ معلنة:** الموقِّعُ زوجُ Ed25519 تجريبيٌّ لا HSM عتاديّ (لكنّه العقدُ نفسُه —
+    17	// التوقيعُ على `JSON.stringify` للمتنِ كاملًا)؛ والهويةُ والسياسةُ مادّةٌ معلَنةٌ من
+    18	// المصدرِ لا إثباتَ هويةِ عتادٍ (لا backend إنتاجيًّا اليوم). وأسطعُ اختباراتِ المحاكاة
+    19	// (swtpm) في ملفِّ `tests/sim/freshness-nv/` — تتخطّى هنا لغيابِ البيئةِ وتُشغَّلُ في CI.
+    20	
+    21	import assert from 'node:assert/strict';
+    22	import { generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
+    23	import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+    24	import { tmpdir } from 'node:os';
+    25	import { join } from 'node:path';
+    26	import { describe, test } from 'node:test';
+    27	
+    28	import {
+    29	  FNV_BIND_DECLARED_ENV,
+    30	  FNV_MANIFEST_SCHEMA_VERSION,
+    31	  STATE_PROVISION_ENV,
+    32	  StateManifest,
+    33	} from '../../src/root-of-trust/index.mjs';
+    34	import { SwtpmNvStateBoundSocket } from '../../sim/freshness-nv/nv-state-bound-socket.mjs';
+    35	import { bootRoot, makeKeys } from '../helpers/wl-326-root.mjs';
+    36	import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
+    37	
+    38	const COUNTER = '0x01500030';
+    39	const RECORD = '0x01500031';
+    40	const NAME_C = `000b${'1'.repeat(64)}`;
+    41	const NAME_R = `000b${'2'.repeat(64)}`;
+    42	
+    43	/** مادّةُ ربطٍ كاملةُ الشكلِ — كما يوفّرُها مصدرُ NV، لا كما يخترعُه المنفّذ. */
+    44	function material(overrides = {}) {
+    45	  return {
+    46	    counterIndex: COUNTER,
+    47	    recordIndex: RECORD,
+    48	    counterName: NAME_C,
+    49	    recordName: NAME_R,
+    50	    base: '7',
+    51	    tpmIdentity: { kind: 'ek-name', value: `000b${'a'.repeat(64)}` },
+    52	    authPolicy: { counter: '', record: '' },
+    53	    ...overrides,
+    54	  };
+    55	}
+    56	
+    57	/** موقّعٌ بالعقدِ نفسِه (`ManifestSealer`): توقيعُ Ed25519 على `JSON.stringify` للمتنِ. */
+    58	function softwareSealer() {
+    59	  const pair = generateKeyPairSync('ed25519');
+    60	  const id = 'king:wl-434-test';
+    61	  return {
+    62	    id,
+    63	    signAsync: async (payload) =>
+    64	      edSign(null, Buffer.from(JSON.stringify(payload), 'utf8'), pair.privateKey).toString(
+    65	        'base64',
+    66	      ),
+    67	    verify: (payload, signature) =>
+    68	      edVerify(
+    69	        null,
+    70	        Buffer.from(JSON.stringify(payload), 'utf8'),
+    71	        pair.publicKey,
+    72	        Buffer.from(signature, 'base64'),
+    73	      ),
+    74	  };
+    75	}
+    76	
+    77	const PROVISION_ENV = { [STATE_PROVISION_ENV]: '1' };
+    78	const DECLARED_ENV = { [STATE_PROVISION_ENV]: '1', [FNV_BIND_DECLARED_ENV]: '1' };
+    79	
+    80	function tmp(prefix) {
+    81	  return registerTmpRoot(mkdtempSync(join(tmpdir(), prefix)));
+    82	}
+    83	
+    84	async function rejection(fn) {
+    85	  try {
+    86	    await fn();
+    87	  } catch (error) {
+    88	    return error;
+    89	  }
+    90	  return assert.fail('لم يُرفَعْ خطأ');
+    91	}
+    92	
+    93	/** يهيّئُ بيانًا (v2) موقَّعًا بموقِّعٍ تجريبيٍّ ويعيدُ البيانَ ومسارَه. */
+    94	async function provisionedManifest(dir) {
+    95	  const sealer = softwareSealer();
+    96	  const file = join(dir, 'root-of-trust.manifest.json');
+    97	  const manifest = new StateManifest(file, { fsync: false, sealer });
+    98	  await manifest.provisionAsync(
+    99	    { kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' },
+   100	    PROVISION_ENV,
+   101	  );
+   102	  return { manifest, file, sealer };
+   103	}
+   104	
+   105	/** يكتبُ بيانًا مختومًا بختمٍ صالحٍ لكن بمتنٍّ يعدّلُه المُختبِر — صنعةُ مهاجمٍ يملكُ القرص. */
+   106	async function craftSealed(file, sealer, body) {
+   107	  const sealed = {
+   108	    body,
+   109	    seal: { alg: 'ed25519', signerId: sealer.id, signature: await sealer.signAsync(body) },
+   110	  };
+   111	  writeFileSync(file, JSON.stringify(sealed, null, 2) + '\n');
+   112	}
+   113	
+   114	/** يبني بيانًا صالحًا كاملًا ثم يعدّلُ المتنّ **بلا إعادةِ ختمٍ** — هجومُ مالكِ القرصِ نفسِهُ. */
+   115	async function boundThenMutate(dir, mutate) {
+   116	  const { manifest, file, sealer } = await provisionedManifest(dir);
+   117	  await manifest.bindFnvAsync(material(), DECLARED_ENV);
+   118	  const sealed = JSON.parse(readFileSync(file, 'utf8'));
+   119	  mutate(sealed.body);
+   120	  writeFileSync(file, JSON.stringify(sealed, null, 2) + '\n');
+   121	  return { file, sealer, sealed };
+   122	}
+   123	
+   124	describe('WL-434 — الربطُ في متنِ البيانِ الموقَّعِ (وحدةٌ على المسارِ الحقيقيّ)', () => {
+   125	  test('التهيئةُ ثمّ ختمُ الربطِ المعلَنُ ثمّ الفتحُ: v3 يحملُ الربطَ والخاتَمُ يغطّيه', async () => {
+   126	    const dir = tmp('wl434-bind-');
+   127	    try {
+   128	      const { manifest, file, sealer } = await provisionedManifest(dir);
+   129	      assert.equal(manifest.read().version, 2, 'التهيئةُ تُنشئُ المخطّطَ التاريخيَّ');
+   130	      assert.equal(manifest.read().freshnessBinding, undefined, 'لا ربطَ قبلَ المراسمِ');
+   131	      await manifest.bindFnvAsync(material(), DECLARED_ENV);
+   132	      const bound = manifest.read();
+   133	      assert.equal(bound.version, FNV_MANIFEST_SCHEMA_VERSION);
+   134	      assert.equal(bound.freshnessBinding.base, '7');
+   135	      assert.equal(
+   136	        bound.freshnessBinding.instanceId,
+   137	        bound.instanceId,
+   138	        'الربطُ يربطُ بنسخةِ الجذرِ',
+   139	      );
+   140	      // فتحٌ بنسخةٍ جديدةٍ من القرصِ: الختمُ يغطّي الربطَ ويعيدُه كما خُتم.
+   141	      const reopened = new StateManifest(file, { fsync: false, sealer });
+   142	      const body = await reopened.openAsync({
+   143	        kingId: sealer.id,
+   144	        context: 'test',
+   145	        tokenSerial: 'T',
+   146	        moduleSha256: 'M',
+   147	      });
+   148	      assert.equal(body.version, FNV_MANIFEST_SCHEMA_VERSION);
+   149	      assert.deepEqual(body.freshnessBinding, bound.freshnessBinding);
+   150	    } finally {
+   151	      rmSync(dir, { recursive: true, force: true });
+   152	    }
+   153	  });
+   154	
+   155	  test('المراسمُ بلا إعلانٍ مرفوضةٌ، وبلا بيانٍ مرفوضةٌ، وإعادةُ الربطِ مرفوضةٌ', async () => {
+   156	    const dir = tmp('wl434-declare-');
+   157	    try {
+   158	      const { manifest } = await provisionedManifest(dir);
+   159	      const undeclared = await rejection(() => manifest.bindFnvAsync(material(), PROVISION_ENV));
+   160	      assert.equal(undeclared.code, 'STATE_MANIFEST_FNV_BINDING_NOT_DECLARED');
+   161	      await manifest.bindFnvAsync(material(), DECLARED_ENV);
+   162	      const again = await rejection(() => manifest.bindFnvAsync(material(), DECLARED_ENV));
+   163	      assert.equal(
+   164	        again.code,
+   165	        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   166	        'إعادةُ الربطِ مراسمُ مالكٍ',
+   167	      );
+   168	      const absentFile = new StateManifest(join(dir, 'none.manifest.json'), {
+   169	        fsync: false,
+   170	        sealer: manifest.read && softwareSealer(),
+   171	      });
+   172	      const noRoot = await rejection(() => absentFile.bindFnvAsync(material(), DECLARED_ENV));
+   173	      assert.equal(noRoot.code, 'STATE_ROOT_UNPROVISIONED');
+   174	    } finally {
+   175	      rmSync(dir, { recursive: true, force: true });
+   176	    }
+   177	  });
+   178	
+   179	  test('تحريرُ الربطِ في الملفِ المختومِ ⇒ الخاتَمُ يُسقِطُ القراءةَ (تغطيةُ الختمِ مقيسةٌ)', async () => {
+   180	    const dir = tmp('wl434-tamper-');
+   181	    try {
+   182	      const cases = [
+   183	        (body) => (body.freshnessBinding.base = '3'),
+   184	        (body) => (body.freshnessBinding.counterName = NAME_R),
+   185	        (body) => (body.freshnessBinding.recordIndex = '0x01500032'),
+   186	        (body) => (body.freshnessBinding.tpmIdentity.value = `000b${'b'.repeat(64)}`),
+   187	        (body) => (body.freshnessBinding.authPolicy.counter = 'aa'),
+   188	        (body) => (body.freshnessBinding.instanceId = 'f'.repeat(64)),
+   189	        (body) => delete body.freshnessBinding,
+   190	        (body) => delete body.freshnessBinding.tpmIdentity,
+   191	      ];
+   192	      // الحالاتُ 0–4 تحرّفُ قيمًا صحيحةَ الشكلِ فلا يكشفُها إلا الخاتَمُ (تغطيةُ الختمِ)،
+   193	      // والحالاتُ 5–7 تكسرُ قواعدَ المخطّطِ نفسِها فيرفضُها التحقّقُ المسمّى قبلَ الخاتَمِ.
+   194	      const expectedCodes = [
+   195	        'STATE_MANIFEST_SEAL_INVALID',
+   196	        'STATE_MANIFEST_SEAL_INVALID',
+   197	        'STATE_MANIFEST_SEAL_INVALID',
+   198	        'STATE_MANIFEST_SEAL_INVALID',
+   199	        'STATE_MANIFEST_SEAL_INVALID',
+   200	        'STATE_MANIFEST_FNV_BINDING_INVALID',
+   201	        'STATE_MANIFEST_FNV_BINDING_INVALID',
+   202	        'STATE_MANIFEST_FNV_BINDING_INVALID',
+   203	      ];
+   204	      for (const [i, mutate] of cases.entries()) {
+   205	        const sub = join(dir, `c${i}`);
+   206	        mkdirSync(sub, { recursive: true });
+   207	        const { file, sealer } = await boundThenMutate(sub, mutate);
+   208	        const reopened = new StateManifest(file, { fsync: false, sealer });
+   209	        const error = await rejection(() =>
+   210	          reopened.openAsync({
+   211	            kingId: sealer.id,
+   212	            context: 'test',
+   213	            tokenSerial: 'T',
+   214	            moduleSha256: 'M',
+   215	          }),
+   216	        );
+   217	        assert.equal(
+   218	          error.code,
+   219	          expectedCodes[i],
+   220	          `تحريرُ الحالةِ ${i} يجبُ أن يُرفَضَ (${expectedCodes[i]}) لا أن يُقبلَ`,
+   221	        );
+   222	      }
+   223	    } finally {
+   224	      rmSync(dir, { recursive: true, force: true });
+   225	    }
+   226	  });
+   227	
+   228	  test('ربطٌ مهرَّبٌ في مخطّطٍ تاريخيٍّ (ختمٌ صالح) ⇒ INVALID، ومخطّطُ NV بلا ربطٍ ⇒ INVALID', async () => {
+   229	    const dir = tmp('wl434-smuggle-');
+   230	    try {
+   231	      const { manifest, file, sealer } = await provisionedManifest(dir);
+   232	      const body = JSON.parse(readFileSync(file, 'utf8')).body;
+   233	      // ختمٌ صالحٌ تمامًا لكنّ المتنَ يحملُ ربطًا معَ version: 2 — لا تُقبَلُ حمايةٌ بلا إعلانِ وضعٍ.
+   234	      const smuggled = { ...structuredClone(body), freshnessBinding: material() };
+   235	      await craftSealed(join(dir, 'smuggled.json'), sealer, smuggled);
+   236	      const opened = new StateManifest(join(dir, 'smuggled.json'), { fsync: false, sealer });
+   237	      const smuggleError = await rejection(() =>
+   238	        opened.openAsync({
+   239	          kingId: sealer.id,
+   240	          context: 'test',
+   241	          tokenSerial: 'T',
+   242	          moduleSha256: 'M',
+   243	        }),
+   244	      );
+   245	      assert.equal(smuggleError.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
+   246	      // مخطّطُ NV بلا ربطٍ: غيابٌ رفضٌ لا دعوةٌ للإنشاء.
+   247	      await craftSealed(join(dir, 'unbound.json'), sealer, {
+   248	        ...structuredClone(body),
+   249	        version: FNV_MANIFEST_SCHEMA_VERSION,
+   250	      });
+   251	      const unbound = new StateManifest(join(dir, 'unbound.json'), { fsync: false, sealer });
+   252	      const unboundError = await rejection(() =>
+   253	        unbound.openAsync({
+   254	          kingId: sealer.id,
+   255	          context: 'test',
+   256	          tokenSerial: 'T',
+   257	          moduleSha256: 'M',
+   258	        }),
+   259	      );
+   260	      assert.equal(unboundError.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
+   261	      // وإصدارٌ لا يعرفهُ العقدُ أصلًا يبقى مرفوضًا.
+   262	      await craftSealed(join(dir, 'v4.json'), sealer, { ...structuredClone(body), version: 4 });
+   263	      const v4 = new StateManifest(join(dir, 'v4.json'), { fsync: false, sealer });
+   264	      const v4Error = await rejection(() =>
+   265	        v4.openAsync({ kingId: sealer.id, context: 'test', tokenSerial: 'T', moduleSha256: 'M' }),
+   266	      );
+   267	      assert.equal(v4Error.code, 'STATE_MANIFEST_VERSION_UNSUPPORTED');
+   268	      void manifest;
+   269	    } finally {
+   270	      rmSync(dir, { recursive: true, force: true });
+   271	    }
+   272	  });
+   273	
+   274	  test('المادّةُ الناقصةُ أو الفاسدةُ تُرفَضُ باسمِ حقلِها: الهويةُ والسياسةُ إلزامُ شكلٍ', async () => {
+   275	    const dir = tmp('wl434-material-');
+   276	    try {
+   277	      const { manifest } = await provisionedManifest(dir);
+   278	      const cases = [
+   279	        [material({ tpmIdentity: undefined }), 'tpmIdentity'],
+   280	        [material({ tpmIdentity: { kind: 'guess', value: 'ab' } }), 'tpmIdentity.kind'],
+   281	        [material({ tpmIdentity: { kind: 'ek-name', value: 'zz' } }), 'tpmIdentity.value'],
+   282	        [material({ authPolicy: undefined }), 'authPolicy'],
+   283	        [material({ authPolicy: { counter: 'xyz', record: '' } }), 'authPolicy.counter'],
+   284	        [material({ counterIndex: '0x15' }), 'counterIndex'],
+   285	        [material({ recordIndex: COUNTER }), 'C == R'],
+   286	        [material({ counterName: 'nothex' }), 'counterName'],
+   287	        [material({ base: 'x7' }), 'base'],
+   288	        [material({ base: '-1' }), 'base'],
+   289	      ];
+   290	      for (const [m, expectedDetail] of cases) {
+   291	        const error = await rejection(() => manifest.bindFnvAsync(m, DECLARED_ENV));
+   292	        assert.equal(error.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
+   293	        assert.equal(
+   294	          error.detail,
+   295	          expectedDetail,
+   296	          `المادّةُ الناقصةُ تُسمّي حقلَها (${expectedDetail})`,
+   297	        );
+   298	      }
+   299	      // وinstanceId لا يُفترضُ: الربطُ يُبنى بمعرّفِ نسخةِ الجذرِ من المتنِ لا من المادّةِ.
+   300	      await manifest.bindFnvAsync(material(), DECLARED_ENV);
+   301	      assert.equal(manifest.read().freshnessBinding.instanceId, manifest.read().instanceId);
+   302	    } finally {
+   303	      rmSync(dir, { recursive: true, force: true });
+   304	    }
+   305	  });
+   306	
+   307	  test('instanceId مختلفٌ في متنٍ مختومٍ صالحٍ ⇒ INVALID (الربطُ لا يُنقَلُ بينَ نسختينِ)', async () => {
+   308	    const dir = tmp('wl434-instanceid-');
+   309	    try {
+   310	      const { file, sealer } = await boundThenMutate(dir, (body) => {
+   311	        body.freshnessBinding.instanceId = 'e'.repeat(64);
+   312	      });
+   313	      // إعادةُ الختمِ بختمٍ صالحٍ بعدَ تحريفِ instanceId — الختمُ سليمٌ لكنّ الربطَ لا يطابقُ النسخةَ.
+   314	      const reopened = new StateManifest(file, { fsync: false, sealer });
+   315	      const error = await rejection(() =>
+   316	        reopened.openAsync({
+   317	          kingId: sealer.id,
+   318	          context: 'test',
+   319	          tokenSerial: 'T',
+   320	          moduleSha256: 'M',
+   321	        }),
+   322	      );
+   323	      assert.equal(error.code, 'STATE_MANIFEST_FNV_BINDING_INVALID');
+   324	      assert.equal(error.detail, 'instanceId');
+   325	    } finally {
+   326	      rmSync(dir, { recursive: true, force: true });
+   327	    }
+   328	  });
+   329	
+   330	  test('الثباتُ: كلُّ تحديثاتِ البيانِ تحفظُ الربطَ بايتًا ببايت، وتحريرُ كائنِ المادّةِ بعدَ الختمِ لا يمسّهُ', async () => {
+   331	    const dir = tmp('wl434-immut-');
+   332	    try {
+   333	      const { manifest, file } = await provisionedManifest(dir);
+   334	      const m = material();
+   335	      await manifest.bindFnvAsync(m, DECLARED_ENV);
+   336	      const sealed = structuredClone(manifest.read().freshnessBinding);
+   337	      // تعديلُ كائنِ المادّةِ بعدَ الختمِ (نسخةٌ عميقةٌ في المراسمِ): لا أثرَ على المختومِ.
+   338	      m.base = '999';
+   339	      m.tpmIdentity.value = `000b${'c'.repeat(64)}`;
+   340	      assert.deepEqual(manifest.read().freshnessBinding, sealed);
+   341	      // نقطةُ ضبطٍ، وترحيلُ التزامٍ، وترقيةُ عهدٍ، ومحوُ الترحيلِ — كلُّها تحفظُ الربطَ والمخطّطَ.
+   342	      await manifest.checkpointAsync();
+   343	      assert.deepEqual(manifest.read().freshnessBinding, sealed);
+   344	      assert.equal(manifest.read().version, FNV_MANIFEST_SCHEMA_VERSION);
+   345	      await manifest.stageAsync({
+   346	        txn: 't1',
+   347	        intent: 'ledger.commit',
+   348	        fromEpoch: 0,
+   349	        fromAnchor: 'genesis',
+   350	        at: new Date().toISOString(),
+   351	      });
+   352	      assert.deepEqual(manifest.read().freshnessBinding, sealed);
+   353	      await manifest.promoteAsync({ epoch: 1, anchor: 'a'.repeat(64), digest: 'd'.repeat(64) });
+   354	      assert.deepEqual(manifest.read().freshnessBinding, sealed);
+   355	      await manifest.clearStagedAsync();
+   356	      assert.deepEqual(manifest.read().freshnessBinding, sealed);
+   357	      manifest.raise('anchoredCount', 5);
+   358	      await manifest.checkpointAsync();
+   359	      assert.deepEqual(manifest.read().freshnessBinding, sealed);
+   360	      assert.equal(manifest.read().anchoredCount, 5);
+   361	      // والملفُّ على القرصِ يحملُ الربطَ نفسَه بعدَ كلِّ هذهِ الختومِ.
+   362	      const onDisk = JSON.parse(readFileSync(file, 'utf8')).body;
+   363	      assert.deepEqual(onDisk.freshnessBinding, sealed);
+   364	    } finally {
+   365	      rmSync(dir, { recursive: true, force: true });
+   366	    }
+   367	  });
+   368	
+   369	  test('تزامنُ مراسمَينِ بمادّتَينِ مختلفتَين: التسلسلُ يُدرِكُ السباقَ — واحدةٌ تُختَمُ والثانيةُ تُرفَضُ IMMUTABLE والربطُ المختومُ هو ربطُ الناجحةِ', async () => {
+   370	    const dir = tmp('wl434-concurrent-');
+   371	    try {
+   372	      const { manifest } = await provisionedManifest(dir);
+   373	      // مراسمانِ متزامنتانِ بمادّتَينِ مختلفتَينِ (‏base مختلفة): تسلسلُ الختومِ
+   374	      // (‏`#sealWith` على سلسلةٍ واحدةٍ) يُدرِكُ السباقَ — الثانيةُ تقرأُ ختمَ الأولى
+   375	      // داخلَ المقطعِ الحرجِّ فتُرفَضُ، بدلَ أن يلتقطَ كلٌّ منهما «لا ربطَ» فيختمَ
+   376	      // آخرُهما فوقَ أولِهما. **والمختومُ هو ربطُ الناجحةِ وحدَها** — لا غيرُ.
+   377	      const first = material();
+   378	      const second = material({ base: '9' });
+   379	      const [a, b] = await Promise.allSettled([
+   380	        manifest.bindFnvAsync(first, DECLARED_ENV),
+   381	        manifest.bindFnvAsync(second, DECLARED_ENV),
+   382	      ]);
+   383	      const fulfilled = [a, b].filter((r) => r.status === 'fulfilled');
+   384	      const rejected = [a, b].filter((r) => r.status === 'rejected');
+   385	      assert.equal(fulfilled.length, 1, 'مراسمٌ واحدةٌ فقط تُختَم — الثانيةُ لا تنجو');
+   386	      assert.equal(rejected.length, 1, 'والثانيةُ تُرفَضُ حتمًا');
+   387	      assert.equal(
+   388	        rejected[0].reason.code,
+   389	        'STATE_MANIFEST_FNV_BINDING_IMMUTABLE',
+   390	        'الرفضُ من حارسِ الختمِ المُسلسَلِ',
+   391	      );
+   392	      // والمختومُ هو ربطُ الناجحةِ بالقيمةِ (base) — لا ربطُ الخاسرةِ ولا ثالثٌ.
+   393	      const sealedBase = manifest.read().freshnessBinding.base;
+   394	      const fulfilledBase = fulfilled[0] === a ? first.base : second.base;
+   395	      const rejectedBase = fulfilled[0] === a ? second.base : first.base;
+   396	      assert.equal(sealedBase, fulfilledBase, 'المختومُ ربطُ الناجحةِ وحدَها');
+   397	      assert.notEqual(sealedBase, rejectedBase, 'وليسَ ربطَ المرفوضةِ');
+   398	      // وإعادةُ الربطِ بعدَ السباقِ مرفوضةٌ — لا نافذةَ بعدهُ.
+   399	      const again = await rejection(() =>
+   400	        manifest.bindFnvAsync(material({ base: '11' }), DECLARED_ENV),
+   401	      );
+   402	      assert.equal(again.code, 'STATE_MANIFEST_FNV_BINDING_IMMUTABLE');
+   403	    } finally {
+   404	      rmSync(dir, { recursive: true, force: true });
+   405	    }
+   406	  });
+   407	
+   408	  test('التوافقُ: البيانُ التاريخيُّ يبقى بلا ربطٍ ولا تُرقّيهِ التحديثاتُ صامتةً', async () => {
+   409	    const dir = tmp('wl434-compat-');
+   410	    try {
+   411	      const { manifest, file, sealer } = await provisionedManifest(dir);
+   412	      await manifest.checkpointAsync();
+   413	      await manifest.stageAsync({
+   414	        txn: 't',
+   415	        intent: 'log.append',
+   416	        fromEpoch: 0,
+   417	        fromAnchor: 'genesis',
+   418	        at: new Date().toISOString(),
+   419	      });
+   420	      await manifest.clearStagedAsync();
+   421	      assert.equal(manifest.read().version, 2, 'لا ترقيةَ صامتةَ لمخطّطٍ تاريخيٍّ');
+   422	      assert.equal(manifest.read().freshnessBinding, undefined);
+   423	      const reopened = new StateManifest(file, { fsync: false, sealer });
+   424	      const body = await reopened.openAsync({
+   425	        kingId: sealer.id,
+   426	        context: 'test',
+   427	        tokenSerial: 'T',
+   428	        moduleSha256: 'M',
+   429	      });
+   430	      assert.equal(body.version, 2);
+   431	      assert.equal(body.freshnessBinding, undefined);
+   432	    } finally {
+   433	      rmSync(dir, { recursive: true, force: true });
+   434	    }
+   435	  });
+   436	
+   437	  test('مقبسُ المحاكاةِ يستهلكُ الربطَ من البيانِ حديثًا: الغيابُ رفضٌ والتحريفُ رفضٌ (بلا swtpm)', async () => {
+   438	    // pinnedBinding() لا يلمسُ المحاكي: يقرأُ من دالّةِ البيانِ ويُتحقَّقُ من شكلِه — وذاك
+   439	    // مستوىُ الوحدةِ؛ أما فحصُ الأسماءِ من NV_ReadPublic ففي قسمِ المحاكاةِ (swtpm في CI).
+   440	    const dir = tmp('wl434-socket-');
+   441	    try {
+   442	      const { manifest } = await provisionedManifest(dir);
+   443	      let binding = null;
+   444	      const socket = new SwtpmNvStateBoundSocket({
+   445	        tools: () => {
+   446	          throw new Error('لا يُنادى المحاكي في هذا القياس');
+   447	        },
+   448	        counterIndex: COUNTER,
+   449	        recordIndex: RECORD,
+   450	        lockDir: join(dir, 'locks'),
+   451	        manifestBinding: () => binding,
+   452	      });
+   453	      assert.equal(
+   454	        socket.pinnedBinding(),
+   455	        null,
+   456	        'لا ربطَ بعدُ — والقراءةُ سترفضُ في القسمِ المحاكى',
+   457	      );
+   458	      await manifest.bindFnvAsync(material(), DECLARED_ENV);
+   459	      binding = structuredClone(manifest.read().freshnessBinding);
+   460	      assert.deepEqual(socket.pinnedBinding(), binding, 'الربطُ من البيانِ كما خُتم');
+   461	      // تحريفُ ما تُعيدُهُ الدالّةُ (بيانٌ حُرّفَ): رفضٌ مسمّى لا قيمةٌ بديلة — والتحريفُ
+   462	      // الذي يكسرُ الشكلَ تُسمّيهِ الحقلَ، والذي يحفظُ الشكلَ يكشفُهُ الخاتَمُ عندَ الفتحِ.
+   463	      binding.counterName = 'nothex';
+   464	      const tampered = await rejection(() => socket.pinnedBinding());
+   465	      assert.equal(tampered.code, 'FRESHNESS_NV_BINDING_INVALID');
+   466	      assert.equal(
+   467	        tampered.message.includes('counterName'),
+   468	        true,
+   469	        'الرفضُ يسمّي الحقلَ لا سرًّا يكشفُه',
+   470	      );
+   471	    } finally {
+   472	      rmSync(dir, { recursive: true, force: true });
+   473	    }
+   474	  });
+   475	});
+   476	
+   477	/**
+   478	 * مقبسُ اختبارٍ مربوطٌ بالحالةِ بالعقدِ الكاملِ (`stateBound`) معَ امتداداتِ WL-434:
+   479	 * كشفُ الربطِ المثبَّتِ (`pinnedBinding`)، ومادّةُ الربطِ (`fnvBindingMaterial`)،
+   480	 * وحقنُ أخطاءِ قراءةٍ مسمّاةٍ (رموزُ NV المغلقة) وغيرِ مسمّاةٍ (B0).
+   481	 */
+   482	class TestStateBoundSocket {
+   483	  stateBound = true;
+   484	  testFixture = true;
+   485	  #current = { epoch: 0n, anchor: 'genesis' };
+   486	  #pinned = null;
+   487	  #readError = null;
+   488	  #advanceError = null;
+   489	
+   490	  /** يرفعُ خطأَ القراءةِ القادمَ (مسمّى بكودٍ أو غيرُ مسمّى) — حقنُ قياسٍ. */
+   491	  failReadWith(error) {
+   492	    this.#readError = error;
+   493	  }
+   494	
+   495	  /** يُفشِلُ كلَّ انتقالٍ — انقطاعُ نقلٍ بعدَ الترحيلِ: نتيجةٌ مجهولةٌ تُسيّجُ الحاجزَ. */
+   496	  failAdvanceWith(error) {
+   497	    this.#advanceError = error;
+   498	  }
+   499	
+   500	  /** يضعُ المرجعَ على حالٍ بعينِها — إقلاعٌ ثانٍ فوقَ جذرٍ مربوطٍ. */
+   501	  forceCurrent(reading) {
+   502	    this.#current = { epoch: reading.epoch, anchor: reading.anchor };
+   503	  }
+   504	
+   505	  /** يركّبُ كاشفَ الربطِ المثبّتِ (WL-434) — أو يبقيهُ غائبًا. */
+   506	  usePinnedBinding(fn) {
+   507	    this.#pinned = fn;
+   508	  }
+   509	
+   510	  /** يركّبُ مادّةَ الربطِ من المصدرِ (B10) — أو يبقيها غائبةً (فلا كشفَ ولا استهلاكَ). */
+   511	  useMaterial(fn) {
+   512	    this.fnvBindingMaterial = async () => fn();
+   513	  }
+   514	
+   515	  pinnedBinding() {
+   516	    if (typeof this.#pinned === 'function') return this.#pinned();
+   517	    return null;
+   518	  }
+   519	
+   520	  async read() {
+   521	    if (this.#readError !== null) throw this.#readError;
+   522	    return this.#current;
+   523	  }
+   524	
+   525	  async advanceState(from, to) {
+   526	    if (this.#advanceError !== null) throw this.#advanceError;
+   527	    if (this.#current.epoch === from.epoch && this.#current.anchor === from.anchor) {
+   528	      this.#current = { epoch: to.epoch, anchor: to.anchor };
+   529	    }
+   530	    return this.#current;
+   531	  }
+   532	}
+   533	
+   534	function bootEnv(keys, extra = {}) {
+   535	  return { XUUX_FRESHNESS_BIND_DECLARED: '1', ...extra };
+   536	}
+   537	
+   538	/**
+   539	 * يقرأُ عهدَ الجذرِ المربوطِ ومرساةَهُ من بيانِهِ على القرصِ — لإقلاعٍ ثانٍ فوقَهُ.
+   540	 * @param {string} root - جذرُ الحالةِ
+   541	 */
+   542	async function firstBoundReading(root) {
+   543	  const sealed = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
+   544	  return { epoch: BigInt(sealed.body.freshnessEpoch), anchor: sealed.body.freshnessAnchor };
+   545	}
+   546	
+   547	describe('WL-434 — رموزُ الربطِ في قرارِ الإقلاعِ (المسارُ الإنتاجيُّ عبرَ bootRoot)', () => {
+   548	  test('رموزُ NV المسمّاةُ تصلُ إلى القرارِ كما هي، وغيرُ المسمّى يبقى B0 المغلق', async () => {
+   549	    const dir = tmp('wl434-boot-codes-');
+   550	    try {
+   551	      for (const code of ['FRESHNESS_NV_BINDING_INVALID', 'FRESHNESS_NV_BINDING_MISMATCH']) {
+   552	        const keys = makeKeys();
+   553	        const socket = new TestStateBoundSocket();
+   554	        socket.failReadWith(Object.assign(new Error(`${code}: قياسٌ بمحتوىً حسّاسٍ`), { code }));
+   555	        const error = await rejection(() =>
+   556	          bootRoot(join(dir, code), keys, socket, { env: bootEnv(keys) }),
+   557	        );
+   558	        assert.equal(error.code, code, `الرمزُ المسمّى ${code} يصلُ إلى قرارِ الإقلاعِ`);
+   559	        const fixedDetails = ['ربطُ NV غيرُ صالحٍ', 'ربطُ NV لا يطابقُ المرجع'];
+   560	        assert.equal(
+   561	          fixedDetails.includes(error.detail),
+   562	          true,
+   563	          'التفصيلُ نصٌّ ثابتٌ لا محتوىُ الاستثناء',
+   564	        );
+   565	        assert.equal(String(error.message).includes('حسّاس'), false, 'لا محتوىَ استثناءٍ يُمرّر');
+   566	      }
+   567	      const keys = makeKeys();
+   568	      const socket = new TestStateBoundSocket();
+   569	      socket.failReadWith(new Error('FRESHNESS_TRANSPORT_LOST'));
+   570	      const error = await rejection(() =>
+   571	        bootRoot(join(dir, 'b0'), keys, socket, { env: bootEnv(keys) }),
+   572	      );
+   573	      assert.equal(error.code, 'FRESHNESS_SOURCE_UNAVAILABLE', 'غيرُ المسمّى يبقى B0');
+   574	    } finally {
+   575	      rmSync(dir, { recursive: true, force: true });
+   576	    }
+   577	  });
+   578	
+   579	  test('بيانٌ يحملُ ربطًا ومقبسٌ لا يكشفُهُ ⇒ INVALID: التحقّقُ إلزامٌ لا يُعطَّلُ بحذفِ الواجهة', async () => {
+   580	    const dir = tmp('wl434-boot-nv-');
+   581	    try {
+   582	      const keys = makeKeys();
+   583	      const root = join(dir, 'root');
+   584	      const socket = new TestStateBoundSocket();
+   585	      socket.useMaterial(() => material());
+   586	      // الإقلاعُ الأوّلُ يربطُ ويختمُ المادّةَ من المصدرِ (B10).
+   587	      await bootRoot(root, keys, socket, { env: bootEnv(keys) });
+   588	      const stateManifestPath = join(root, 'root-of-trust.manifest.json');
+   589	      assert.equal(existsSync(stateManifestPath), true);
+   590	      const sealed = JSON.parse(readFileSync(stateManifestPath, 'utf8'));
+   591	      assert.equal(sealed.body.version, FNV_MANIFEST_SCHEMA_VERSION, 'B10 ختمَ الربطَ في المتنِ');
+   592	      assert.equal(sealed.body.freshnessBinding.base, '7');
+   593	      // إقلاعٌ ثانٍ بمقبسٍ لا يكشفُ الربطَ: الحمايةُ لا تسقُطُ بحذفِ الواجهةِ.
+   594	      const silent = new TestStateBoundSocket();
+   595	      const error = await rejection(() => bootRoot(root, keys, silent, { env: bootEnv(keys) }));
+   596	      assert.equal(error.code, 'FRESHNESS_NV_BINDING_INVALID');
+   597	    } finally {
+   598	      rmSync(dir, { recursive: true, force: true });
+   599	    }
+   600	  });
+   601	
+   602	  test('اختلافُ البيانِ والمصدرِ (base) ⇒ MISMATCH مسمّى، والتطابقُ يُقلِعُ', async () => {
+   603	    const dir = tmp('wl434-boot-match-');
+   604	    try {
+   605	      const keys = makeKeys();
+   606	      const root = join(dir, 'root');
+   607	      const socket = new TestStateBoundSocket();
+   608	      socket.useMaterial(() => material());
+   609	      const first = await bootRoot(root, keys, socket, { env: bootEnv(keys) });
+   610	      await first.close();
+   611	      const sealed = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
+   612	      // مقبسٌ يكشفُ ربطًا بقاعدةٍ أخرى — لا مصدرَ حقيقةٍ ثانٍ.
+   613	      const divergent = new TestStateBoundSocket();
+   614	      divergent.usePinnedBinding(() => ({ ...sealed.body.freshnessBinding, base: '3' }));
+   615	      const divergentError = await rejection(() =>
+   616	        bootRoot(root, keys, divergent, { env: bootEnv(keys) }),
+   617	      );
+   618	      assert.equal(divergentError.code, 'FRESHNESS_NV_BINDING_MISMATCH');
+   619	      assert.equal(divergentError.detail, 'base', 'الرفضُ يسمّي الحقلَ المتّفقَ عليهِ');
+   620	      // والمطابقُ يُقلِعُ: إقلاعٌ ثانٍ فوقَ الجذرِ المربوطِ (المرجعُ في عهدِ البيانِ نفسِهِ).
+   621	      const bound = await firstBoundReading(root);
+   622	      const matching = new TestStateBoundSocket();
+   623	      matching.forceCurrent(bound);
+   624	      matching.usePinnedBinding(() => sealed.body.freshnessBinding);
+   625	      const runtime = await bootRoot(root, keys, matching, { env: bootEnv(keys) });
+   626	      assert.equal(runtime.manifest.read().version, FNV_MANIFEST_SCHEMA_VERSION);
+   627	      assert.deepEqual(runtime.manifest.read().freshnessBinding, sealed.body.freshnessBinding);
+   628	      await runtime.close();
+   629	    } finally {
+   630	      rmSync(dir, { recursive: true, force: true });
+   631	    }
+   632	  });
+   633	
+   634	  test('B10 يختمُ مادّةَ المصدرِ في المتنِ، وتعافي B2 يعيدُ الربطَ المختومَ نفسَهُ بلا مادّةٍ جديدة', async () => {
+   635	    const dir = tmp('wl434-boot-b10b2-');
+   636	    try {
+   637	      const keys = makeKeys();
+   638	      const root = join(dir, 'root');
+   639	      // الإقلاعُ الأوّلُ: B10 يختمُ مادّةَ المصدرِ، ثمّ ينقطعُ النقلُ بعدَ ترحيلِ الربطِ
+   640	      // وقبلَ تقدّمِ المرجعِ — فسقوطٌ حقيقيٌّ في منتصفِ المعاملةِ يتركُ `staged` مختومًا.
+   641	      const crashing = new TestStateBoundSocket();
+   642	      crashing.useMaterial(() => material());
+   643	      crashing.usePinnedBinding(() => material());
+   644	      crashing.failAdvanceWith(new Error('FRESHNESS_TRANSPORT_LOST'));
+   645	      const crash = await rejection(() => bootRoot(root, keys, crashing, { env: bootEnv(keys) }));
+   646	      assert.equal(
+   647	        crash.code,
+   648	        'FRESHNESS_ADVANCE_UNRESOLVED',
+   649	        'انقطاعُ النقلِ يسيّجُ الحاجزَ ولا يُقدمُ المرجعَ',
+   650	      );
+   651	      const sealed = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
+   652	      assert.equal(sealed.body.version, FNV_MANIFEST_SCHEMA_VERSION, 'المادّةُ من المصدرِ خُتمت');
+   653	      assert.equal(sealed.body.freshnessAnchor, undefined, 'والربطُ لم يكتملْ بعدُ');
+   654	      assert.equal(sealed.body.staged.intent, 'freshness.bind', 'والترحيلُ مختومٌ في المتنِ');
+   655	      // والتعافي (B2) يعيدُ استعمالَ الربطِ المختومِ نفسِهُ: أيُّ نداءٍ للمادّةِ دليلُ
+   656	      // خلطٍ في المسارِ، فالمقبسُ يرفعُهُ — والحاجزُ يُكمِلُ من النشأةِ كما هو التصميمُ.
+   657	      const recovery = new TestStateBoundSocket();
+   658	      recovery.usePinnedBinding(() => material());
+   659	      recovery.useMaterial(() => {
+   660	        throw new Error('B2 لا يجمعُ مادّةً جديدةً');
+   661	      });
+   662	      const runtime = await bootRoot(root, keys, recovery, { env: bootEnv(keys) });
+   663	      const after = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
+   664	      assert.deepEqual(
+   665	        after.body.freshnessBinding,
+   666	        sealed.body.freshnessBinding,
+   667	        'الربطُ المختومُ لم يُمسّ',
+   668	      );
+   669	      assert.equal(after.body.staged, null, 'والترحيلُ استُرجِعَ');
+   670	      assert.equal(runtime.manifest.read().freshnessEpoch, 1, 'والتعافي رقّى العهدَ إلى 1');
+   671	      await runtime.close();
+   672	    } finally {
+   673	      rmSync(dir, { recursive: true, force: true });
+   674	    }
+   675	  });
+   676	
+   677	  test('إقلاعُ تهيئةٍ بمقبسٍ يكشفُ المادّةَ بلا إعلانِ ربطٍ: المسارُ التاريخيُّ (v2) — لا مراسمَ ولا استهلاكَ', async () => {
+   678	    const dir = tmp('wl434-prov-nodecl-');
+   679	    try {
+   680	      const keys = makeKeys();
+   681	      const root = join(dir, 'root');
+   682	      const socket = new TestStateBoundSocket();
+   683	      let materialCalls = 0;
+   684	      socket.useMaterial(() => {
+   685	        materialCalls += 1;
+   686	        return material();
+   687	      });
+   688	      socket.usePinnedBinding(() => {
+   689	        throw new Error('لا يجبُ أن يُقرأَ الربطُ المثبَّتُ في مسارٍ تاريخيّ');
+   690	      });
+   691	      // تهيئةُ جذرٍ جديدٍ **بلا إعلانِ الربطِ** (PROVISION وحدَه): المقبسُ يكشفُ
+   692	      // المادّةَ لكنّ الإعلانَ الصريحَ للبيئةِ هو الذي يفتحُ المراسمَ — فلولا الشرطُ
+   693	      // لدخلَت كلُّ تهيئةٍ تاريخيّةٍ في v3 وفشلتْ `NOT_DECLARED` (انحدارٌ مقيسٌ هنا).
+   694	      const runtime = await bootRoot(root, keys, socket, {
+   695	        env: { XUUX_ROOT_OF_TRUST_PROVISION: '1' },
+   696	      });
+   697	      assert.equal(runtime.freshnessBoot, 'B10');
+   698	      const sealed = JSON.parse(readFileSync(join(root, 'root-of-trust.manifest.json'), 'utf8'));
+   699	      assert.equal(sealed.body.version, 2, 'بيانٌ تاريخيّ — لا مخطّطَ NV بلا مراسمَ');
+   700	      assert.equal(sealed.body.freshnessBinding, undefined, 'ولا ربطَ بلا إعلانٍ');
+   701	      assert.equal(materialCalls, 0, 'والمادّةُ لم تُجمَعْ من المصدرِ أصلًا');
+   702	      await runtime.close();
+   703	    } finally {
+   704	      rmSync(dir, { recursive: true, force: true });
+   705	    }
+   706	  });
+   707	
+   708	  test('حذفُ البيانِ أثناءَ التشغيلِ يُسقِطُ المعاملةَ قبلَ أيّ زيادةٍ في العهدِ — والمرجعُ لا يتقدّمُ', async () => {
+   709	    const dir = tmp('wl434-inop-');
+   710	    try {
+   711	      const keys = makeKeys();
+   712	      const root = join(dir, 'root');
+   713	      const socket = new TestStateBoundSocket();
+   714	      socket.useMaterial(() => material());
+   715	      socket.usePinnedBinding(() => material());
+   716	      const runtime = await bootRoot(root, keys, socket, { env: bootEnv(keys) });
+   717	      assert.equal(runtime.freshnessBoot, 'B10');
+   718	      const before = await socket.read();
+   719	      // حذفُ البيانِ والنظامُ يعملُ: أيُّ معاملةٍ لاحقةٍ تُرفَضُ قبلَ أيّ قبولٍ —
+   720	      // المقبسُ يقرأُ الربطَ من البيانِ فغيابُهُ رفضٌ مسمّى، والزيادةُ لا تقعُ.
+   721	      rmSync(join(root, 'root-of-trust.manifest.json'));
+   722	      let failed = null;
+   723	      try {
+   724	        await runtime.ledger.transactAsync('crown.command', async () => {
+   725	          runtime.ledger.begin({ id: 'cmd-x' });
+   726	          await runtime.ledger.commitSigned({ id: 'cmd-x' });
+   727	        });
+   728	      } catch (error) {
+   729	        failed = error;
+   730	      }
+   731	      assert.ok(failed !== null, 'المعاملةُ بعدَ فقدانِ البيانِ تُرفَضُ');
+   732	      // الرفضُ هنا من طبقةِ المنسّقِ (قراءةُ البيانِ الغائبِ ⇒ `STATE_ROOT_UNPROVISIONED`
+   733	      // المسمّاة)؛ أمّا المقبسُ الذي يستهلكُ الربطَ من البيانِ (محاكاةُ swtpm في CI)
+   734	      // فيلفّها `FRESHNESS_NV_BINDING_INVALID` من مصدرِهِ — كلاهما رفضٌ مغلقٌ مسمّى،
+   735	      // لا خطأٌ مجهولٌ يُقبَلُ، ولا زيادةٌ تقعُ (المرجعُ لم يتقدّمْ أدناهُ).
+   736	      assert.equal(failed.code, 'STATE_ROOT_UNPROVISIONED');
+   737	      const after = await socket.read();
+   738	      assert.equal(after.epoch, before.epoch, 'والعهدُ لم يتقدّمْ — لا زيادةً بلا بيانٍ');
+   739	      await runtime.close();
+   740	    } finally {
+   741	      rmSync(dir, { recursive: true, force: true });
+   742	    }
+   743	  });
+   744	
+   745	  test('تحريفُ البيانِ أو حذفُهُ أثناءَ التشغيلِ يُسقِطُ الإقلاعَ مغلقًا قبلَ أيّ قبول', async () => {
+   746	    const dir = tmp('wl434-boot-tamper-');
+   747	    try {
+   748	      const keys = makeKeys();
+   749	      const root = join(dir, 'root');
+   750	      const socket = new TestStateBoundSocket();
+   751	      socket.useMaterial(() => material());
+   752	      const first = await bootRoot(root, keys, socket, { env: bootEnv(keys) });
+   753	      await first.close();
+   754	      const file = join(root, 'root-of-trust.manifest.json');
+   755	      const sealed = JSON.parse(readFileSync(file, 'utf8'));
+   756	      // تحريفُ الربطِ في الملفِّ ⇒ الخاتَمُ يُسقِطُ الإقلاعَ كلهُ.
+   757	      sealed.body.freshnessBinding.base = '1';
+   758	      writeFileSync(file, JSON.stringify(sealed, null, 2) + '\n');
+   759	      const bound = await firstBoundReading(root);
+   760	      const tampered = new TestStateBoundSocket();
+   761	      tampered.forceCurrent(bound);
+   762	      tampered.usePinnedBinding(() => sealed.body.freshnessBinding);
+   763	      const tamperedError = await rejection(() =>
+   764	        bootRoot(root, keys, tampered, { env: bootEnv(keys) }),
+   765	      );
+   766	      assert.equal(tamperedError.code, 'STATE_MANIFEST_SEAL_INVALID');
+   767	      // وحذفُ البيانِ ⇒ جذرٌ غيرُ مهيَّأٍ لا «حالةٌ افتراضيّةٌ».
+   768	      rmSync(file);
+   769	      const deleted = new TestStateBoundSocket();
+   770	      const deletedError = await rejection(() =>
+   771	        bootRoot(root, keys, deleted, {
+   772	          env: bootEnv(keys, { XUUX_ROOT_OF_TRUST_PROVISION: '0' }),
+   773	        }),
+   774	      );
+   775	      assert.equal(deletedError.code, 'PRODUCTION_STATE_ROOT_UNPROVISIONED');
+   776	    } finally {
+   777	      rmSync(dir, { recursive: true, force: true });
+   778	    }
+   779	  });
+   780	});
