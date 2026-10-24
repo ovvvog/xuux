@@ -633,13 +633,17 @@ test('G2-3: P0 بردِّ خطأٍ (rc) ⇒ إغلاقٌ بFRESHNESS_TPM_IDENTIT
 
 // ——— (5) C1: المطابقةُ البايتيّةُ ———
 
-test('G2-3 (C1): اختلافُ بايتٍ واحدٍ في محتوى فهرسٍ بينَ التمهيدِ وC1 ⇒ إغلاق', async () => {
-  const fake = new FakeTpm({ nv: [{ index: 0x01c00002, data: Buffer.alloc(64, 0xab) }], tamper: { driftNvContent: 0x01c00002 } });
-  const { gate } = await bootstrappedGate(fake);
-  await gate.p0Attest();
-  assert.equal(gate.state, 'salted');
-  await assert.rejects(gate.c1Confirm(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.IDENTITY_UNPROVEN);
-  assert.ok(gate.closed);
+test('G2-3 (C1): اختلافُ بايتٍ واحدٍ في محتوى فهرسٍ بينَ التمهيدِ وC1 ⇒ إغلاق (فهرسٌ-فهرسٌ على الستّةِ كاملةً)', async () => {
+  // بندُ القبولِ (5) من مصفوفةِ G2: المطابقةُ البايتيّةُ تُفحَصُ لكلِّ فهرسٍ من مجالِ §4.3 —
+  // لا لفهرسٍ واحدٍ ممثّلٍ فحسب (WL-462: تعميمُ الحالةِ من 0x01c00002 وحدها إلى الستّةِ).
+  for (const index of builder.EK_NV_RANGE.indices) {
+    const fake = new FakeTpm({ nv: [{ index, data: Buffer.alloc(64, 0xab) }], tamper: { driftNvContent: index } });
+    const { gate } = await bootstrappedGate(fake);
+    await gate.p0Attest();
+    assert.equal(gate.state, 'salted', `salted قبل C1 للفهرس 0x${index.toString(16)}`);
+    await assert.rejects(gate.c1Confirm(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.IDENTITY_UNPROVEN);
+    assert.ok(gate.closed, `إغلاقٌ عند انجرافِ بايتٍ في الفهرس 0x${index.toString(16)}`);
+  }
 });
 
 test('G2-3 (C1): فهرسٌ يظهرُ في C1 ولم يرهُ T1 ⇒ إغلاقٌ (لا زائدَ)', async () => {

@@ -42,7 +42,9 @@ export const GATE_ERRORS = Object.freeze({
   IDENTITY_UNPROVEN: 'FRESHNESS_TPM_IDENTITY_UNPROVEN',
 });
 
-class GateError extends Error {
+// WL-462: صُدِّرَ ليستعملهُ تجميعُ قالبِ EK (ek_template.mjs) في حالةِ التوقّفِ (4) بنمطِ أخطاءِ
+// البوّابةِ نفسِهِ — دونَ أيِّ تغييرٍ في سلوكِ البوّابةِ ذاتِها.
+export class GateError extends Error {
   /**
    * @param {string} code من `GATE_ERRORS`
    * @param {string} row الصفُّ الذي رُفض
