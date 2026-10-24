@@ -26,7 +26,8 @@ export const COMMAND_BUILDER_ERRORS = Object.freeze({
   NOT_IMPLEMENTED: 'COMMAND_BUILDER_NOT_IMPLEMENTED',
 });
 
-class CommandBuilderError extends Error {
+// WL-462: صُدِّرَ ليستعملهُ تجميعُ قالبِ EK (ek_template.mjs) في رفضِ القالبِ المخالفِ لنوعِ الشهادةِ.
+export class CommandBuilderError extends Error {
   /**
    * @param {string} code من `COMMAND_BUILDER_ERRORS`
    * @param {string} field الحقلُ المخالف
@@ -55,6 +56,7 @@ export const TPM_CC = Object.freeze({
   NV_Read: 0x14e,
   NV_ReadPublic: 0x169,
   ReadPublic: 0x173,
+  EvictControl: 0x120,
   GetCapability: 0x17a,
   CreatePrimary: 0x131,
   StartAuthSession: 0x176,
@@ -651,18 +653,71 @@ export function defaultEkTemplateEccP256() {
   return Buffer.concat([u16(TPM_ALG.ECC), u16(TPM_ALG.SHA256), u32(0x00030072), tpm2b(Buffer.alloc(0)), parameters, unique]);
 }
 
-/** قالبٌ بقالبٍ مقروءٍ وحشوِ nonce (حالةُ 3) — يُعطى القالبُ المقروءُ كاملًا والـnonce المُحشوّ. @param {Buffer} readTemplate @param {Buffer} nonce @param {'rsa'} kind */
+/**
+ * قالبٌ بقالبٍ مقروءٍ وحشوِ nonce (حالةُ 3 من ملفِ اعتمادِ EK §2.2.1.6): يُعطى القالبُ المقروءُ
+ * كاملًا والـnonce، فيُستبدَلُ حقلُ unique كلُّهُ بالقيمةِ المحشوّةِ — **واعيًا بالتحليلِ** لا
+ * بلاحقةٍ ثابتةِ الطولِ (WL-462: كانتِ اللاحقةُ الثابتةُ (258) تفترضُ unique بطولِ 256 فتُفسِدُ
+ * أيَّ قالبٍ مقروءٍ أقصرَ — عيبٌ مُثبَتٌ باختبارِ انحدارٍ في `tests/sim/g2-ek-template.test.mjs`).
+ * القالبُ يُحلَّلُ أولًا `parseTpmtPublic` فلا بايتَ زائدًا ولا بنيةً فاسدةً، وkind يطابقُ نوعَ القالب.
+ * @param {Buffer} readTemplate @param {Buffer} nonce @param {'rsa'|'ecc'} kind
+ */
 export function ekTemplateWithNonce(readTemplate, nonce, kind) {
   if (!isBuffer(readTemplate) || readTemplate.length === 0) throw invalid('readTemplate', 'must be bytes');
   if (!isBuffer(nonce)) throw invalid('nonce', 'must be bytes');
+  const parsed = parseTpmtPublic(readTemplate);
   if (kind === 'rsa') {
+    if (parsed.type !== TPM_ALG.RSA) throw invalid('kind', 'template is not RSA');
     if (nonce.length > 256) throw invalid('nonce', 'RSA nonce padded to 256');
     const padded = Buffer.concat([nonce, Buffer.alloc(256 - nonce.length)]);
-    // استبدالُ حقلِ unique (آخرُ TPMT_PUBLIC) بالقيمةِ المحشوّةِ.
-    const body = readTemplate.subarray(0, readTemplate.length - 258);
+    // استبدالُ حقلِ unique من حدِّهِ المقيسِ بالتحليلِ (لا افتراضَ لطولِ اللاحقةِ).
+    const body = readTemplate.subarray(0, /** @type {number} */ (parsed.uniqueOffset));
     return Buffer.concat([body, tpm2b(padded)]);
   }
-  throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.NOT_IMPLEMENTED, 'kind', 'ECC nonce stuffing not implemented in this slice');
+  if (kind === 'ecc') {
+    if (parsed.type !== TPM_ALG.ECC) throw invalid('kind', 'template is not ECC');
+    if (nonce.length > 32) throw invalid('nonce', 'ECC nonce padded to 32');
+    const x = Buffer.concat([nonce, Buffer.alloc(32 - nonce.length)]);
+    const body = readTemplate.subarray(0, /** @type {number} */ (parsed.uniqueOffset));
+    // unique.ecc = TPMS_ECC_POINT: x محشوٌّ إلى 32 وy = 32 صفرًا (§4.3 حالةُ 3).
+    return Buffer.concat([body, tpm2b(x), tpm2b(Buffer.alloc(32))]);
+  }
+  throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.NOT_IMPLEMENTED, 'kind', `unknown kind ${String(kind)}`);
+}
+
+/**
+ * عصٌّ تجريبيٌّ (خارجَ البوّابةِ) — `EvictControl`: ترقيةُ مفتاحٍ عابرٍ إلى مقبضٍ مستمرٍّ أو
+ * إزالةُ مقبضٍ مستمرٍّ (بتمريرِ المقبضِ المستمرِّ في الحقلَينِ معًا). لا ترسلهُ البوّابةُ أبدًا
+ * (§4.3: ممنوعٌ دائمًا في هذا المنفّذ) — هذا تثبيتُ رقعةِ اختبارِ مسارِ T4 وحدَه.
+ * @param {{ objectHandle: number, persistentHandle: number, objectName?: Buffer, session: { area: Buffer, descriptor: unknown } }} fields
+ */
+export function buildEvictControl(fields) {
+  if (!Number.isInteger(fields.objectHandle)) throw invalid('objectHandle', 'must be an integer');
+  if (!Number.isInteger(fields.persistentHandle) || fields.persistentHandle < 0x81000000 || fields.persistentHandle > 0x81ffffff) {
+    throw invalid('persistentHandle', 'must be inside the TPM persistent range 0x81000000–0x81ffffff');
+  }
+  // persistentHandle بارامترٌ لا مقبضٌ ثالثٌ (Part 3 §30: مقبضانِ فقط ثمّ البرامترات) —
+  // وضعُهُ مقبضًا يجعلُ المحاكيَ يقرؤُهُ authorizationSizeً فيرفضُ الأمرَ بـTPM_RC_SIZE.
+  const parameters = u32(fields.persistentHandle);
+  const command = assemble({
+    tag: TPM_ST.SESSIONS,
+    commandCode: TPM_CC.EvictControl,
+    handles: [u32(TPM_RH.OWNER), u32(fields.objectHandle)],
+    authorization: authorizationArea(fields.session),
+    parameters,
+  });
+  return {
+    command,
+    descriptor: {
+      commandCode: TPM_CC.EvictControl,
+      tag: TPM_ST.SESSIONS,
+      responseHandleCount: 0,
+      mutating: true,
+      allowNoSessionsResponse: false,
+      sessions: [/** @type {any} */ (fields.session).descriptor],
+    },
+    parameters,
+    cpHash: cpHash(TPM_CC.EvictControl, [permanentName(TPM_RH.OWNER), fields.objectName ?? u32(fields.objectHandle)], parameters),
+  };
 }
 
 // ——— تحليلُ `TPMT_PUBLIC` (لقراءةِ مفتاحِ EK العامّ من ردِّ T4/T5) ———
@@ -671,7 +726,7 @@ export function ekTemplateWithNonce(readTemplate, nonce, kind) {
  * يحلّلُ `TPMT_PUBLIC` (بدونَ بادئةِ الطولِ) لنوعَي RSA وECC، ويتحقّقُ من nameAlg.
  * لا يقبلُ بايتاتٍ زائدةً (قراءةٌ بالأطوالِ المعلنةِ فقط).
  * @param {Buffer} bytes
- * @returns {{ type: number, nameAlg: number, objectAttributes: number, rsa?: { keyBits: number, exponent: number, modulus: Buffer }, ecc?: { curveId: number, x: Buffer, y: Buffer }, publicBytes: Buffer }}
+ * @returns {{ type: number, nameAlg: number, objectAttributes: number, uniqueOffset: number, rsa?: { keyBits: number, exponent: number, modulus: Buffer }, ecc?: { curveId: number, x: Buffer, y: Buffer }, publicBytes: Buffer }}
  */
 export function parseTpmtPublic(bytes) {
   if (!isBuffer(bytes) || bytes.length < 12) throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'TPMT_PUBLIC', 'too short');
@@ -701,11 +756,15 @@ export function parseTpmtPublic(bytes) {
     }
     const keyBits = take(2).readUInt16BE(0);
     const exponent = take(4).readUInt32BE(0);
+    // WL-462: حدُّ بدايةِ حقلِ unique (بادئةُ TP2B) — يُلتقطُ هنا قبلَ قراءةِ الحقلِ نفسِه.
+    const uniqueOffset = off;
     const modulusLen = take(2).readUInt16BE(0);
     const modulus = take(modulusLen);
     if (off !== bytes.length) throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'TPMT_PUBLIC', `${bytes.length - off} trailing bytes`);
     if (nameAlg !== TPM_ALG.SHA256) throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'nameAlg', 'SHA-256 only');
-    return { type, nameAlg, objectAttributes, rsa: { keyBits, exponent, modulus }, publicBytes: bytes };
+    // WL-462: موضعُ بدايةِ حقلِ unique — يعيدهُ التجميعُ الواعي بالتحليلِ (ekTemplateWithNonce)
+    // بدلَ افتراضِ لاحقةٍ ثابتةٍ الطولِ كانَ يفسدُ القوالبَ ذاتَ unique أقصر.
+    return { type, nameAlg, objectAttributes, rsa: { keyBits, exponent, modulus }, publicBytes: bytes, uniqueOffset };
   }
   if (type === TPM_ALG.ECC) {
     const symAlg = take(2).readUInt16BE(0);
@@ -721,13 +780,16 @@ export function parseTpmtPublic(bytes) {
     if (kdf !== TPM_ALG.NULL) {
       throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'kdf', 'must be NULL');
     }
+    // WL-462: حدُّ بدايةِ unique (بادئةُ TP2B لـx) — كما في فرعِ RSA أعلاه.
+    const uniqueOffset = off;
     const xLen = take(2).readUInt16BE(0);
     const x = take(xLen);
     const yLen = take(2).readUInt16BE(0);
     const y = take(yLen);
     if (off !== bytes.length) throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'TPMT_PUBLIC', `${bytes.length - off} trailing bytes`);
     if (nameAlg !== TPM_ALG.SHA256) throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'nameAlg', 'SHA-256 only');
-    return { type, nameAlg, objectAttributes, ecc: { curveId, x, y }, publicBytes: bytes };
+    // WL-462: موضعُ بدايةِ unique (x أولًا) — كما في فرعِ RSA أعلاه.
+    return { type, nameAlg, objectAttributes, ecc: { curveId, x, y }, publicBytes: bytes, uniqueOffset };
   }
   throw new CommandBuilderError(COMMAND_BUILDER_ERRORS.PUBLIC_INVALID, 'type', `unsupported 0x${type.toString(16)}`);
 }
