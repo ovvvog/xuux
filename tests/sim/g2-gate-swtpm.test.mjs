@@ -519,6 +519,16 @@ simTest('G2: مسارُ T4 — EK مستمرّ عبرَ البوّابةِ عل�
     assert.equal(gate.state, 'confirmed', 'persistent-EK path reaches confirmed');
     await gate.flushContext({ flushHandle: sas.handle });
     assert.equal(gate.closed, false, 'clean close, no gate failure');
+
+    // تنطيفٌ مُتحقَّقٌ منه (لا مجرّدَ مسعىً): إزالةُ المستمرِّ يجبَ أن تنجحَ، ثمّ إزالةٌ
+    // ثانيةٌ للمقبضِ نفسِهِ يجبُ أن تخفقَ (لا كائنَ بعدَها) — هذا إثباتُ الزوالِ الفعليِّ.
+    const evictDone = builder.buildEvictControl({ objectHandle: PERSISTENT_HANDLE, persistentHandle: PERSISTENT_HANDLE, session: builder.passwordSession() });
+    const evictDoneParsed = await submitRetry(t, evictDone);
+    assert.equal(evictDoneParsed.form, 'n3', 'cleanup EvictControl must succeed (n3)');
+    const evictAgain = builder.buildEvictControl({ objectHandle: PERSISTENT_HANDLE, persistentHandle: PERSISTENT_HANDLE, session: builder.passwordSession() });
+    const evictAgainParsed = parseResponse(await t.submit(evictAgain.command), evictAgain.descriptor);
+    assert.equal(evictAgainParsed.form, 'error', 'second EvictControl must fail — the persistent handle is gone');
+    assert.ok(/** @type {number} */ (evictAgainParsed.rc) !== 0, 'second EvictControl rc must be nonzero (no such persistent object)');
   } finally {
     // تنطيفٌ صارمٌ: إزالةُ المفتاحِ المستمرِّ (EvictControl بالمقبضِ نفسِهِ في الحقلَينِ) قبلَ الإغلاقِ —
     // مسعىً أخيرٌ لا يُفشِلُ الاختبارَ إن كانَ قد زال.
