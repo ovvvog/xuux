@@ -484,6 +484,10 @@ simTest('G2: الحالةُ (4) — قالبٌ غائبٌ وnonce موجود: ت
 simTest('G2: مسارُ T4 — EK مستمرّ عبرَ البوّابةِ على swtpm حيّ: ReadPublic للمقبضِ المستمرِّ ثمّ salted ثمّ confirmed (WL-462)', async () => {
   const t = await SwtpmRawTransport.open(/** @type {string} */ (process.env.TPM2TOOLS_TCTI));
   const PERSISTENT_HANDLE = 0x81000000;
+  /** مقابضٌ أُنشئت ولم يُثبَت زوالُها بعد — للتنظيفِ الاحتياطيِّ في finally (مسارُ الفشلِ). @type {number | null} */
+  let probeHandle = null;
+  /** @type {number | null} */
+  let sessionHandle = null;
   try {
     // (أ) عصٌّ تجريبيٌّ خارجَ البوّابةِ: CreatePrimary بالقالبِ الافتراضيِّ ثمّ EvictControl
     // إلى مقبضٍ مستمرٍّ في المدىِ 0x81000000 (البوّابةُ لا ترى هذه الخطوة — EvictControl
@@ -491,12 +495,14 @@ simTest('G2: مسارُ T4 — EK مستمرّ عبرَ البوّابةِ عل�
     const probe = builder.buildCreatePrimary({ inPublic: builder.defaultEkTemplateRsa2048(), session: builder.passwordSession() });
     const probeParsed = parseResponse(await t.submit(probe.command), probe.descriptor);
     assert.equal(probeParsed.form, 'n3', 'probe CreatePrimary must be n3');
+    probeHandle = /** @type {number} */ (probeParsed.handles[0]);
     const probeOut = firstTpm2b(probeParsed.parameters);
     const evict = builder.buildEvictControl({ objectHandle: /** @type {number} */ (probeParsed.handles[0]), persistentHandle: PERSISTENT_HANDLE, session: builder.passwordSession() });
     const evictParsed = parseResponse(await t.submit(evict.command), evict.descriptor);
     assert.equal(evictParsed.form, 'n3', 'EvictControl response must be n3 (password session)');
     const probeFlush = builder.buildFlushContext({ flushHandle: /** @type {number} */ (probeParsed.handles[0]) });
     assert.equal(parseResponse(await t.submit(probeFlush.command), probeFlush.descriptor).form, 'n1');
+    probeHandle = null; // زالَ وتحقّقنا من الاستجابةِ (n1)
     const pubT4 = builder.parseTpmtPublic(probeOut);
     assert.ok(pubT4.rsa, 'T4 probe public is RSA');
     const ekIdentity = mintSimulatedEkCertificatePair({ kty: 'RSA', n: pubT4.rsa.modulus.toString('base64url'), e: 'AQAB' });
@@ -511,6 +517,7 @@ simTest('G2: مسارُ T4 — EK مستمرّ عبرَ البوّابةِ عل�
     assert.equal(gate.verifyEkIdentity(), true, 'T4: EK identity verified against the persistent handle');
     const sas = await gate.startAuthSession();
     assert.ok(Number.isInteger(sas.handle), 'salted HMAC session opened with the persistent EK as tpmKey');
+    sessionHandle = sas.handle;
     const p0 = await gate.p0Attest();
     assert.deepEqual(p0.handles, [], 'P0 page over the empty inventory');
     assert.equal(gate.state, 'salted', 'P0 promotes to salted (R5-01)');
@@ -518,20 +525,32 @@ simTest('G2: مسارُ T4 — EK مستمرّ عبرَ البوّابةِ عل�
     assert.deepEqual(c1.handles, [], 'C1 confirms the empty handle set');
     assert.equal(gate.state, 'confirmed', 'persistent-EK path reaches confirmed');
     await gate.flushContext({ flushHandle: sas.handle });
+    sessionHandle = null; // زالَ وتحقّقنا من الاستجابةِ
     assert.equal(gate.closed, false, 'clean close, no gate failure');
 
     // تنطيفٌ مُتحقَّقٌ منه (لا مجرّدَ مسعىً): إزالةُ المستمرِّ يجبَ أن تنجحَ، ثمّ إزالةٌ
-    // ثانيةٌ للمقبضِ نفسِهِ يجبُ أن تخفقَ (لا كائنَ بعدَها) — هذا إثباتُ الزوالِ الفعليِّ.
+    // ثانيةٌ للمقبضِ نفسِهِ يجبُ أن تخفقَ بخطإِ غيابِ objectHandle تحديدًا — هذا إثباتُ الزوالِ.
     const evictDone = builder.buildEvictControl({ objectHandle: PERSISTENT_HANDLE, persistentHandle: PERSISTENT_HANDLE, session: builder.passwordSession() });
     const evictDoneParsed = await submitRetry(t, evictDone);
     assert.equal(evictDoneParsed.form, 'n3', 'cleanup EvictControl must succeed (n3)');
     const evictAgain = builder.buildEvictControl({ objectHandle: PERSISTENT_HANDLE, persistentHandle: PERSISTENT_HANDLE, session: builder.passwordSession() });
     const evictAgainParsed = parseResponse(await t.submit(evictAgain.command), evictAgain.descriptor);
     assert.equal(evictAgainParsed.form, 'error', 'second EvictControl must fail — the persistent handle is gone');
-    assert.ok(/** @type {number} */ (evictAgainParsed.rc) !== 0, 'second EvictControl rc must be nonzero (no such persistent object)');
+    // 0x28b مفكوكُ الاسمِ عبرَ tpm2_rc_decode: «tpm:handle(2): the handle is not correct for
+    // the use» — المقبضُ الثاني في منطقةِ المقايسِ هو objectHandle (الكائنُ المستمرُّ) وقد زال؛
+    // قيمةٌ مُلاحظةٌ تجريبيًا لا مُخمَّنة، ومُتسقةٌ مع مواصفةِ TPM2 (ليست خاصّيةَ إصدارِ swtpm).
+    assert.equal(evictAgainParsed.rc, 0x28b, 'second EvictControl rc must be 0x28b (handle(2): objectHandle not correct for use)');
+    assert.equal(evictAgainParsed.retryable, false, 'the absence error is terminal, not retryable');
+    assert.equal(evictAgainParsed.fatal, false, 'the absence error is a normal TPM error, not fatal');
   } finally {
-    // تنطيفٌ صارمٌ: إزالةُ المفتاحِ المستمرِّ (EvictControl بالمقبضِ نفسِهِ في الحقلَينِ) قبلَ الإغلاقِ —
-    // مسعىً أخيرٌ لا يُفشِلُ الاختبارَ إن كانَ قد زال.
+    // مسعىً احتياطيًّا لمسارِ الفشلِ فقط (المسارُ الناجحُ يُثبتُ التنظيفَ أعلاه): أيُّ مقبضٍ
+    // أُنشئ ولم يُثبَت زوالُه يُطالَبُ هنا بالتنظيفِ، ونتائجُ المساعي متجاهَلةٌ لا تُفشِلُ الاختبار.
+    try {
+      if (sessionHandle !== null) await t.submit(builder.buildFlushContext({ flushHandle: sessionHandle }).command);
+    } catch { /* already flushed or transport dead — ignore */ }
+    try {
+      if (probeHandle !== null) await t.submit(builder.buildFlushContext({ flushHandle: probeHandle }).command);
+    } catch { /* already flushed or transport dead — ignore */ }
     try {
       const evictCleanup = builder.buildEvictControl({ objectHandle: PERSISTENT_HANDLE, persistentHandle: PERSISTENT_HANDLE, session: builder.passwordSession() });
       try {
