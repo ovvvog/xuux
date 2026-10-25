@@ -32,6 +32,14 @@ else
 fi
 tap_file="${tap_dir}/sim.tap"
 
+# WL-465: محوُ أيّ أثرِ TAP متقادمٍ **قبلَ أيّ مسارِ تشغيلٍ** — إن فشلَ السكربتُ قبلَ إنتاجِ
+# TAP جديدةٍ (قبلَ سطرِ tee) فلا ملفَّ أصلًا، فتُخطئُ خطوةُ الرفعِ الدائمةُ
+# (‏`if-no-files-found: error`) بصوتٍ عالٍ بدلَ رفعِ أثرِ تشغيلةٍ سابقةٍ بوصفِهِ دليلَ هذهِ
+# التشغيلةِ. (في CI عدّاءٌ جديدٌ لكلِّ وظيفةٍ فلا يتكوّنُ ملفٌّ متقادمٌ أصلًا؛ هذا تحصينٌ
+# إنسيابيٌّ لعدّاءٍ مُقيمٍ يُعيدُ استخدامَ `RUNNER_TEMP`، وسلوكُ السكربتِ نفسِهِ مقيسٌ في
+# `tests/tooling/tpm-sim-ci-tap.test.mjs`.)
+rm -f "${tap_file}"
+
 cleanup() {
   if [ -f "${pid_file}" ]; then kill "$(cat "${pid_file}")" 2>/dev/null || true; fi
   rm -rf "${state_dir}" sim/tpm/_tear sim/tpm/_replay sim/tpm/_snap sim/tpm/_sovereign || true
