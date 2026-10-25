@@ -43,6 +43,32 @@ function fakeSmtpServer() {
   });
 }
 
+/**
+ * مسجِّلُ محاولاتِ الاتصالِ كلِّها (LIVE-56 — تعميمُ العدِّ على كلِّ الوجهاتِ): يُغلِّفُ
+ * `net.Socket.prototype.connect` — النقطةَ الوحيدةَ المشتركةَ لكلِّ مساراتِ الاتصالِ
+ * (قيسَ تجريبيًا: net.connect وnet.createConnection والمقبسُ الخامُ وtls.connect كلُّها
+ * تنتهي إليها) — فيُسجِّلُ كلَّ محاولةِ اتصالٍ إلى أيِّ وجهةٍ كانت، فاتصالٌ خارجَ الوجهةِ
+ * المأذونةِ لا يمرُّ بلا رصدٍ أيا كانَ البابُ الذي دخلَ منهُ. يُعادُ الأصلُ في `finally`.
+ * @returns {{ attempts: unknown[][], restore: () => void }}
+ */
+function recordConnectAttempts() {
+  /** @type {unknown[][]} */
+  const attempts = [];
+  const originalConnect = net.Socket.prototype.connect;
+  net.Socket.prototype.connect = /** @type {typeof net.Socket.prototype.connect} */ (
+    function patchedSocketConnect(...args) {
+      attempts.push(args);
+      return Reflect.apply(originalConnect, this, args);
+    }
+  );
+  return {
+    attempts,
+    restore() {
+      net.Socket.prototype.connect = originalConnect;
+    },
+  };
+}
+
 /** @returns {{ ownerId: string, channel: string, subject: string, body: string, sentAtMs: number }} */
 function makeMessage() {
   return {
@@ -291,22 +317,105 @@ test('WL-426: النقلُ يُكتَبُ في موقعِ التركيبِ — �
 test('WL-426: بلا بوابةٍ لا يُفتحُ اتصالٌ — ولو وُجدَ نقلٌ في موقعِ التركيبِ', async () => {
   const smtp = await fakeSmtpServer();
   try {
-    const config = { host: '127.0.0.1', port: 587, user: 'user', password: 'pass' };
-    // نقلُ مُركِّبٍ موجودٌ في النطاقِ — القناةُ لا تعرفُهُ ولا تستدعيهِ بلا بوابةٍ
+    // LIVE-56: الوجهةُ المأذونةُ في الإعدادِ هي منفذُ العدّادِ نفسُهُ — كان العدّادُ على
+    // منفذٍ عشوائيٍّ بينما الإعدادُ يصرّحُ بـ587 فكانَ تأكيدُ «صفرِ اتصالاتٍ» فارغًا من
+    // القياسِ (اتصالٌ حقيقيٌّ بالوجهةِ المصرّحِ بها لا يراهُ العدّادُ). صارَ العدُّ مربوطًا
+    // بالوجهةِ المأذونةِ، ومسجِّلُ محاولاتِ الاتصالِ يُعمّمُ الرصدَ على كلِّ الوجهاتِ.
+    const config = {
+      host: '127.0.0.1',
+      port: /** @type {import('node:net').AddressInfo} */ (smtp.server.address()).port,
+      user: 'user',
+      password: 'pass',
+    };
+    // نقلُ مُركِّبٍ موجودٌ في النطاقِ — القناةُ لا تعرفُهُ ولا تستدعيهِ بلا بوابةٍ
     const composerTransport = async () => ({ messageId: 'never' });
-    const channel = EmailChannel({ getSmtpConfig: () => config }); // بلا بوابةٍ
-    const result = await channel.send(makeMessage(), 'test@example.com');
-    assert.equal(result.state, 'failed');
-    assert.ok(
-      result.failureReason !== null && result.failureReason.includes('EGRESS_GATE_REQUIRED'),
-    );
-    assert.equal(
-      smtp.connections(),
-      0,
-      'لا اتصالَ بلا بوابةٍ — النقلُ لا يُستدعى إلا منَ البوابةِ',
-    );
-    void composerTransport;
+    const recorder = recordConnectAttempts();
+    try {
+      const channel = EmailChannel({ getSmtpConfig: () => config }); // بلا بوابةٍ
+      const result = await channel.send(makeMessage(), 'test@example.com');
+      assert.equal(result.state, 'failed');
+      assert.ok(
+        result.failureReason !== null && result.failureReason.includes('EGRESS_GATE_REQUIRED'),
+      );
+      assert.equal(
+        smtp.connections(),
+        0,
+        'لا اتصالَ بلا بوابةٍ — النقلُ لا يُستدعى إلا منَ البوابةِ',
+      );
+      assert.equal(
+        recorder.attempts.length,
+        0,
+        'لا محاولةَ اتصالٍ إلى أيِّ وجهةٍ كانت — تعميمُ العدِّ على كلِّ الوجهاتِ (LIVE-56)',
+      );
+      void composerTransport;
+    } finally {
+      recorder.restore();
+    }
   } finally {
     await smtp.close();
+  }
+});
+
+test('LIVE-56: العدّادُ على الوجهةِ المأذونةِ لهُ أسنانٌ — اتصالٌ حقيقيٌّ بها يُرى (شاهدُ رصدٍ)', async () => {
+  // شاهدُ أسنانٍ لا زينةٍ: منفذُ العدّادِ هو وجهةُ الإعدادِ المأذونةَ، واتصالٌ حقيقيٌّ
+  // بها يَرفعُ العدّادَ — فصفرُ العدّادِ في الاختبارِ أعلاهُ قياسٌ لا تصريحًا.
+  const smtp = await fakeSmtpServer();
+  const recorder = recordConnectAttempts();
+  try {
+    const port = /** @type {import('node:net').AddressInfo} */ (smtp.server.address()).port;
+    await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.destroy();
+        resolve(undefined);
+      });
+      socket.on('error', reject);
+    });
+    assert.equal(smtp.connections(), 1, 'اتصالٌ حقيقيٌّ بالوجهةِ المأذونةِ يَرفعُ العدّادَ');
+    assert.ok(recorder.attempts.length >= 1, 'والمسجِّلُ العامُّ يراهُ أيضًا');
+  } finally {
+    recorder.restore();
+    await smtp.close();
+  }
+});
+
+test('LIVE-56: أيُّ اتصالٍ خارجَ الوجهةِ المأذونةِ يُكتشَفُ من أيِّ بابٍ (تعميمُ العدِّ)', async () => {
+  // العدّادُ المأذونُ على وجهةِ الإعدادِ لا يرى اتصالًا خارجَها — والمسجِّلُ العامُّ
+  // (على النقطةِ الوحيدةِ المشتركةِ لكلِّ مساراتِ الاتصالِ) يراهُ. يُختبرُ من أبوابٍ
+  // مختلفةٍ: net.createConnection والمقبسِ الخامِّ — فليس الرصدُ حبيسَ الواجهةِ الأولى.
+  const authorized = await fakeSmtpServer();
+  const outside = await fakeSmtpServer();
+  const recorder = recordConnectAttempts();
+  try {
+    const port = /** @type {import('node:net').AddressInfo} */ (outside.server.address()).port;
+    await new Promise((resolve, reject) => {
+      const socket = net.createConnection(port, '127.0.0.1', () => {
+        socket.destroy();
+        resolve(undefined);
+      });
+      socket.on('error', reject);
+    });
+    await new Promise((resolve, reject) => {
+      const socket = new net.Socket();
+      socket.on('error', reject);
+      socket.connect(port, '127.0.0.1', () => {
+        socket.destroy();
+        resolve(undefined);
+      });
+    });
+    assert.equal(
+      authorized.connections(),
+      0,
+      'العدّادُ المأذونُ لم يرَ اتصالًا (الاتصالُ خارجُ وجهتِهِ)',
+    );
+    assert.equal(outside.connections(), 2, 'الاتصالانِ الخارجانِ وقعا فعلًا');
+    assert.equal(
+      recorder.attempts.length,
+      2,
+      'والمسجِّلُ العامُّ اكتشفَهُما معًا من البابينِ — فلا اتصالًا خارجَ المأذونِ يمرُّ بلا رصدٍ',
+    );
+  } finally {
+    recorder.restore();
+    await authorized.close();
+    await outside.close();
   }
 });
