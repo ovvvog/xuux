@@ -14,7 +14,6 @@
 
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import tls from 'node:tls';
 import test from 'node:test';
 
 import { execFile } from 'node:child_process';
@@ -46,32 +45,26 @@ function fakeSmtpServer() {
 
 /**
  * مسجِّلُ محاولاتِ الاتصالِ كلِّها (LIVE-56 — تعميمُ العدِّ على كلِّ الوجهاتِ): يُغلِّفُ
- * `net.connect` و`tls.connect` فيُسجِّلُ كلَّ محاولةِ اتصالٍ إلى أيِّ وجهةٍ كانت — فاتصالٌ
- * خارجَ الوجهةِ المأذونةِ لا يمرُّ بلا رصدٍ. يُعادُ الأصلُ في `finally` لا محوًا للأثرِ.
+ * `net.Socket.prototype.connect` — النقطةَ الوحيدةَ المشتركةَ لكلِّ مساراتِ الاتصالِ
+ * (قيسَ تجريبيًا: net.connect وnet.createConnection والمقبسُ الخامُ وtls.connect كلُّها
+ * تنتهي إليها) — فيُسجِّلُ كلَّ محاولةِ اتصالٍ إلى أيِّ وجهةٍ كانت، فاتصالٌ خارجَ الوجهةِ
+ * المأذونةِ لا يمرُّ بلا رصدٍ أيا كانَ البابُ الذي دخلَ منهُ. يُعادُ الأصلُ في `finally`.
  * @returns {{ attempts: unknown[][], restore: () => void }}
  */
 function recordConnectAttempts() {
   /** @type {unknown[][]} */
   const attempts = [];
-  const originalNetConnect = net.connect;
-  const originalTlsConnect = tls.connect;
-  net.connect = /** @type {typeof net.connect} */ (
-    function patchedNetConnect(...args) {
+  const originalConnect = net.Socket.prototype.connect;
+  net.Socket.prototype.connect = /** @type {typeof net.Socket.prototype.connect} */ (
+    function patchedSocketConnect(...args) {
       attempts.push(args);
-      return Reflect.apply(originalNetConnect, net, args);
-    }
-  );
-  tls.connect = /** @type {typeof tls.connect} */ (
-    function patchedTlsConnect(...args) {
-      attempts.push(args);
-      return Reflect.apply(originalTlsConnect, tls, args);
+      return Reflect.apply(originalConnect, this, args);
     }
   );
   return {
     attempts,
     restore() {
-      net.connect = originalNetConnect;
-      tls.connect = originalTlsConnect;
+      net.Socket.prototype.connect = originalConnect;
     },
   };
 }
@@ -385,30 +378,40 @@ test('LIVE-56: العدّادُ على الوجهةِ المأذونةِ لهُ 
   }
 });
 
-test('LIVE-56: أيُّ اتصالٍ خارجَ الوجهةِ المأذونةِ يُكتشَفُ (تعميمُ العدِّ على كلِّ الوجهاتِ)', async () => {
+test('LIVE-56: أيُّ اتصالٍ خارجَ الوجهةِ المأذونةِ يُكتشَفُ من أيِّ بابٍ (تعميمُ العدِّ)', async () => {
   // العدّادُ المأذونُ على وجهةِ الإعدادِ لا يرى اتصالًا خارجَها — والمسجِّلُ العامُّ
-  // لمحاولاتِ الاتصالِ يراهُ فلا يمرُّ اتصالٌ خارجيٌّ بلا قياسٍ.
+  // (على النقطةِ الوحيدةِ المشتركةِ لكلِّ مساراتِ الاتصالِ) يراهُ. يُختبرُ من أبوابٍ
+  // مختلفةٍ: net.createConnection والمقبسِ الخامِّ — فليس الرصدُ حبيسَ الواجهةِ الأولى.
   const authorized = await fakeSmtpServer();
   const outside = await fakeSmtpServer();
   const recorder = recordConnectAttempts();
   try {
+    const port = /** @type {import('node:net').AddressInfo} */ (outside.server.address()).port;
     await new Promise((resolve, reject) => {
-      const port = /** @type {import('node:net').AddressInfo} */ (outside.server.address()).port;
-      const socket = net.connect(port, '127.0.0.1', () => {
+      const socket = net.createConnection(port, '127.0.0.1', () => {
         socket.destroy();
         resolve(undefined);
       });
       socket.on('error', reject);
+    });
+    await new Promise((resolve, reject) => {
+      const socket = new net.Socket();
+      socket.on('error', reject);
+      socket.connect(port, '127.0.0.1', () => {
+        socket.destroy();
+        resolve(undefined);
+      });
     });
     assert.equal(
       authorized.connections(),
       0,
       'العدّادُ المأذونُ لم يرَ اتصالًا (الاتصالُ خارجُ وجهتِهِ)',
     );
-    assert.equal(outside.connections(), 1, 'الاتصالُ الخارجُّ وقعَ فعلًا');
-    assert.ok(
-      recorder.attempts.length >= 1,
-      'والمسجِّلُ العامُّ اكتشفَهُ — فلا اتصالًا خارجَ المأذونِ يمرُّ بلا رصدٍ',
+    assert.equal(outside.connections(), 2, 'الاتصالانِ الخارجانِ وقعا فعلًا');
+    assert.equal(
+      recorder.attempts.length,
+      2,
+      'والمسجِّلُ العامُّ اكتشفَهُما معًا من البابينِ — فلا اتصالًا خارجَ المأذونِ يمرُّ بلا رصدٍ',
     );
   } finally {
     recorder.restore();
