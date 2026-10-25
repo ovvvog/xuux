@@ -432,7 +432,11 @@ simTest('G2: الحالةُ (4) — قالبٌ غائبٌ وnonce موجود: ت
   const counting = {
     submit: async (/** @type {Uint8Array | Buffer} */ bytes) => {
       const b = Buffer.from(bytes);
-      if (b.length >= 8 && b.readUInt16BE(6) === 0x131) createPrimaryCount++;
+      // (WL-465) رمزُ الأمرِ u32 عندَ الإزاحةِ 6 (‏tag‗size‗cc — Part 2 §6): القراءةُ
+      // السابقةُ u16@6 كانت تُطابقُ صفرًا دائمًا فلا يعدُّ الأمرَ قطّ — عدّادٌ ميتٌ يجعلُ
+      // تأكيدَ «لا CreatePrimary مُرسلًا» فارغَ المنفعةِ (يمرُّ لو أُرسلَ فعلًا). صُحّحت إلى
+      // u32@6 معَ طولٍ كافٍ قبلَ القراءةِ.
+      if (b.length >= 10 && b.readUInt32BE(6) === builder.TPM_CC.CreatePrimary) createPrimaryCount++;
       return t.submit(b);
     },
   };
@@ -561,3 +565,565 @@ simTest('G2: مسارُ T4 — EK مستمرّ عبرَ البوّابةِ عل�
   }
 });
 
+
+// ——— WL-465: تسديدُ فجواتِ G2 على swtpm الحيّ ———
+//
+// حاشيةُ WL-462 تركت البندَ (5) على المحاكي الحيّ بلا وسيطِ عبثٍ متاح، وحالاتِ الرفضِ في
+// البنودِ (3) و(4) و(6)–(9) على النادلِ الوهميّ وحده. تُسدَّدُ هنا بأربعةِ أدلةٍ حيّةٍ
+// صادقةِ التسميةِ:
+//
+// 1. **انجرافُ المحتوى (5):** كتابةُ NV **مشروعةٌ** على المحاكي الحيّ بينَ قراءةِ التمهيدِ
+//    (T3) وقراءةِ C1 — لا وسيطَ عبثٍ مُختلَق: المحتوى يتغيّرُ فعلًا، واسمُ الفهرسِ لا
+//    يتغيّرُ بالمحتوى فتبقى مصادقةُ أوامرِ C1 سليمةً، فيصلُ التناقضُ إلى **مقارنةِ البايتاتِ**
+//    نفسِها — المسارُ الحقيقيُّ الذي أرادَهُ بندُ القبول. لكلِّ فهرسٍ من الستّةِ.
+// 2. **انجرافُ مجموعةِ المقابضِ (5)/(6):** إضافةُ فهرسٍ بـNV_DefineSpace وحذفُ فهرسٍ بـ
+//    NV_UndefineSpace بعدَ اكتمالِ T1 — عمليّاتٌ مشروعةٌ على المحاكي، ومقارنةُ مجموعةِ
+//    C1 (من صفحةِ P0) معَ مجموعةِ T1 هي التي تُغلقُ.
+// 3. **رفضٌ قبلَ الإرسالِ (3)/(4)/(7)/(8):** حالاتُ رفضِ البوّابةِ قبلَ أيِّ بايتٍ يُرسَل —
+//    فوقَ النقلِ الحيّ نفسِهِ، بغلافِ عدٍّ يحصي الأوامرَ المُرسَلةَ فعلًا (الرفضُ طبقةُ
+//    البوّابةِ، والعدّادُ يُثبتُ أنّ النقلَ لم يُلمَس).
+// 4. **حقنُ أعطالٍ في النقلِ (7 — أشكالُ الردّ):** غلافٌ فوقَ swtpm الحيّ يعترضُ ردَّ P0
+//    (أولَ GetCapability بجلسةٍ) ويُحرّفُه: HMAC فاسدٌ، أو سمةُ 0x01، أو ردُّ خطأٍ
+//    مُصنَّعٌ. تسميةٌ دقيقةٌ: **حقنُ أعطالٍ في النقلِ** لا «استجابةٌ طبيعيةٌ»؛ كلُّ أمرٍ غيرِ
+//    مستهدَفٍ يمرُّ كما هو (والعدّادُ يُثبتُهُ)، والاعتراضُ أصابَ الأمرَ المقصودَ وحدَه،
+//    والرفضُ وقعَ في طبقةِ التحقّقِ من الردّ للسببِ الصحيحِ.
+//
+// **حدٌّ معلَن:** كلُّ ذلك دليلُ محاكاةٍ على swtpm لا دليلَ عتادٍ (ADR 0007 §9)، ولا يرفعُ
+// أيَّ قرارِ مخاطرةٍ إنتاجيّ، و`SUPPORTED_FRESHNESS_BACKENDS` يبقى فارغًا.
+
+/**
+ * غلافُ عدٍّ فوقَ النقلِ الخام: يحصي كلَّ أمرٍ يُرسَل فعلًا إلى المحاكي. رفضُ البوّابةِ
+ * قبلَ الإرسالِ يُثبَتُ بهذهِ الحاصّةِ — العدّادُ لا يتحرّكُ إلا ببايتاتٍ بلغتِ النقلَ الحيّ.
+ */
+class CountingTransport {
+  /** @param {import('../../sim/tpm/raw_transport.mjs').SwtpmRawTransport} inner */
+  constructor(inner) {
+    this.inner = inner;
+    /** @type {Buffer[]} */
+    this.sent = [];
+  }
+  /** @param {Uint8Array | Buffer} bytes @returns {Promise<Uint8Array>} */
+  async submit(bytes) {
+    const b = Buffer.from(bytes);
+    this.sent.push(b);
+    return this.inner.submit(b);
+  }
+}
+
+/**
+ * غلافُ حقنِ أعطالٍ في النقلِ فوقَ swtpm حيّ. كلُّ أمرٍ غيرِ مستهدَفٍ يُمرَّرُ إلى المحاكي
+ * كما هو (يُحصى في `passedThrough`)، والأمرُ المستهدَفُ — أولُ GetCapability بجلسةٍ =
+ * أمرُ الإثباتِ P0 — يُمرَّرُ فيُحرَّفُ ردُّهُ (حُقنَتِ العطلَةُ في النقلِ لا في المحاكي):
+ *
+ * - `corruptHmac`: قلبُ آخرِ بايتٍ في الردّ (آخرُ بايتِ HMAC في منطقةِ التفويضِ).
+ * - `flipAttrs`: تعيينُ بايتِ سماتِ الجلسةِ في الردّ إلى 0x01 (حالةُ «بالسمة 0x01»
+ *   في مصفوفةِ القبولِ — بلا audit، فيرفضُهُ فحصُ السماتِ في محلّلِ الردودِ).
+ * - `errorResponse`: ردُّ خطأٍ مُصنَّعٌ بعشرةِ بايتاتٍ (§4.4 خ) لا يُمرَّرُ إلى المحاكي أصلًا.
+ *
+ * حقنةٌ واحدةٌ لا تتكرّرُ (single-shot): ما بعدَها يعودُ الغلافُ شفّافًا.
+ */
+class FaultInjectingTransport {
+  /**
+   * @param {import('../../sim/tpm/raw_transport.mjs').SwtpmRawTransport} inner
+   * @param {'corruptHmac' | 'flipAttrs' | 'errorResponse'} fault
+   * @param {number} errorCode — رمزُ ردِّ الخطأِ المُصنَّعِ وحده
+   */
+  constructor(inner, fault, errorCode = 0x9a2) {
+    this.inner = inner;
+    this.fault = fault;
+    this.errorCode = errorCode;
+    /** @type {Buffer[]} */
+    this.passedThrough = [];
+    this.injected = 0;
+  }
+  /** @param {Uint8Array | Buffer} bytes @returns {Promise<Uint8Array | Buffer>} */
+  async submit(bytes) {
+    const b = Buffer.from(bytes);
+    const isSessionedGetCapability =
+      b.length >= 10 && b.readUInt16BE(0) === 0x8002 && b.readUInt32BE(6) === builder.TPM_CC.GetCapability;
+    if (!isSessionedGetCapability || this.injected > 0) {
+      this.passedThrough.push(b);
+      return this.inner.submit(b);
+    }
+    this.injected += 1;
+    if (this.fault === 'errorResponse') {
+      // ردُّ خطأٍ بعشرةِ بايتاتٍ: وسمُ بلا جلساتٍ + حجمٌ + رمزٌ — مُصنَّعٌ لا من المحاكي.
+      const frame = Buffer.alloc(10);
+      frame.writeUInt16BE(0x8001, 0);
+      frame.writeUInt32BE(10, 2);
+      frame.writeUInt32BE(this.errorCode, 6);
+      return frame;
+    }
+    const response = Buffer.from(await this.inner.submit(b));
+    if (this.fault === 'corruptHmac') {
+      const lastByte = response.length - 1;
+      response[lastByte] = (response[lastByte] ?? 0) ^ 0x01;
+      return response;
+    }
+    // flipAttrs: منطقةُ التفويضِ تبدأُ بعدَ المعاملاتِ (u32 حجمُها عندَ 10): nonceTPM
+    // (tpm2b) ثمّ بايتُ السماتِ — يُعيَّنُ إلى 0x01 كما في حالةِ المصفوفةِ.
+    const parameterSize = response.readUInt32BE(10);
+    const authStart = 14 + parameterSize;
+    const attrsOffset = authStart + 2 + response.readUInt16BE(authStart);
+    response[attrsOffset] = 0x01;
+    return response;
+  }
+}
+
+simTest('G2 (5): انجرافُ محتوى الفهرسِ بينَ التمهيدِ وC1 على swtpm حيّ — كتابةُ NV مشروعةٌ على المحاكي، لكلِّ فهرسٍ من الستّةِ (WL-465)', async () => {
+  const t = await SwtpmRawTransport.open(/** @type {string} */ (process.env.TPM2TOOLS_TCTI));
+  /** فهارسُ عُرّفت ولم تُمحَ بعد — للتنطيفِ الاحتياطيِّ في finally. @type {{ nvIndex: number, indexName: Buffer }[]} */
+  const defined = [];
+  /** مقابضُ عابرةٌ نشطةٌ (جلسةٌ وEK) — تُفرَّغُ يدويًّا بعدَ إغلاقِ البوّابةِ بالفشلِ. @type {number[]} */
+  const liveHandles = [];
+  try {
+    // (أ) عصٌّ تجريبيٌّ واحدٌ للهويّةِ: الاشتقاقُ حتميٌّ (القالبُ نفسُهُ على حالةِ المحاكي
+    // نفسِها ⇒ المفتاحُ نفسُهُ)، فيكفي استخراجُ معاملِ EK مرةً واحدةً لكلِّ الدوراتِ.
+    const probeBuilt = builder.buildCreatePrimary({ inPublic: builder.defaultEkTemplateRsa2048(), session: builder.passwordSession() });
+    const probeParsed = parseResponse(await t.submit(probeBuilt.command), probeBuilt.descriptor);
+    assert.equal(probeParsed.form, 'n3', 'probe CreatePrimary response must be n3');
+    const probeOutPublic = firstTpm2b(probeParsed.parameters);
+    const probeFlush = builder.buildFlushContext({ flushHandle: /** @type {number} */ (probeParsed.handles[0]) });
+    assert.equal(parseResponse(await t.submit(probeFlush.command), probeFlush.descriptor).form, 'n1', 'probe flush must be n1');
+    const probeTpmt = builder.parseTpmtPublic(probeOutPublic);
+    assert(probeTpmt.rsa, 'probe EK must be RSA');
+    const ekIdentity = mintSimulatedEkCertificatePair({ kty: 'RSA', n: probeTpmt.rsa.modulus.toString('base64url'), e: 'AQAB' });
+
+    const NV_DATA_SIZE = 32;
+    // (ب) لكلِّ فهرسٍ من الستّةِ دورةٌ كاملةٌ: تعريفٌ وكتابةٌ ثمّ تمهيدٌ حتى P0 ثمّ انجرافٌ
+    // مشروعٌ (كتابةٌ فوقَ الفهرسِ) ثمّ C1 يجبُ أن يُغلقَ عندَ المقارنةِ البايتيّةِ.
+    for (const nvIndex of builder.EK_NV_RANGE.indices) {
+      const contentA = Buffer.alloc(NV_DATA_SIZE, 0x5a);
+      contentA.writeUInt8(nvIndex & 0xff, 0); // يحملُ الفهرسَ في بايتِهِ الأول
+      const define = builder.buildNvDefineSpace({ nvIndex, dataSize: NV_DATA_SIZE, attributes: 0x00040004, session: builder.passwordSession() });
+      const definedResp = await submitRetry(t, define);
+      assert.equal(definedResp.form, 'n3', `NV_DefineSpace(0x${nvIndex.toString(16)}) must succeed`);
+      defined.push({ nvIndex, indexName: define.indexName });
+      const writeA = builder.buildNvWrite({ nvIndex, data: contentA, offset: 0, session: builder.passwordSession(), indexName: define.indexName });
+      assert.equal((await submitRetry(t, writeA)).form, 'n3', `initial NV_Write(0x${nvIndex.toString(16)}) must succeed`);
+
+      const gate = new FreshnessGate({ transport: t, mode: 'operation', persistentEkHandle: null, ekIdentity });
+      const t1 = await gate.t1Inventory();
+      assert.deepEqual(t1.handles, [nvIndex], `T1 must inventory exactly 0x${nvIndex.toString(16)}`);
+      await gate.t6nvBufferMax();
+      await gate.t2nvReadPublic({ nvIndex });
+      const t3 = await gate.t3nvRead({ nvIndex, size: NV_DATA_SIZE, offset: 0 });
+      assert.ok(t3.equals(contentA), `T3 must read the written content for 0x${nvIndex.toString(16)}`);
+      const t5 = await gate.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+      liveHandles.push(t5.handle);
+      assert.equal(gate.verifyEkIdentity(), true, 'EK identity verified against the live swtpm EK');
+      const sas = await gate.startAuthSession();
+      liveHandles.push(sas.handle);
+      const p0 = await gate.p0Attest();
+      assert.deepEqual(p0.handles, [nvIndex], `P0 page must cover 0x${nvIndex.toString(16)}`);
+      assert.equal(gate.state, 'salted', 'P0 verified response promotes to salted');
+
+      // (ج) الانجرافُ المشروعُ: كتابةٌ فوقَ الفهرسِ خارجَ البوّابةِ عبرَ النقلِ الخامِّ — لا
+      // وسيطَ عبثٍ مُختلَق: المحاكي نفسُهُ يقبلُ الكتابةَ (تفويضُ الفهرسِ فارغٌ)، والمحتوى
+      // يتغيّرُ فعلًا ببايتٍ واحدٍ. اسمُ الفهرسِ لا يتغيّرُ بالمحتوى فتبقى مصادقةُ أوامرِ
+      // C1 سليمةً — فيصلُ التناقضُ إلى المقارنةِ البايتيّةِ نفسِها لا إلى فشلِ HMAC.
+      const contentB = Buffer.from(contentA);
+      const driftByte = contentB.length - 1;
+      contentB[driftByte] = (contentB[driftByte] ?? 0) ^ 0x01;
+      const writeB = builder.buildNvWrite({ nvIndex, data: contentB, offset: 0, session: builder.passwordSession(), indexName: define.indexName });
+      assert.equal((await submitRetry(t, writeB)).form, 'n3', `legitimate drift NV_Write(0x${nvIndex.toString(16)}) must succeed on the simulator`);
+
+      // C1 يقرأُ المحتوى الجديدَ بردٍّ مصادَقٍ سليمِ، ثمّ تُسقطُهُ المقارنةُ البايتيّةُ.
+      /** @type {unknown} */
+      let caught;
+      await assert.rejects(gate.c1Confirm(), (/** @type {{ code?: string }} */ e) => { caught = e; return e.code === GATE_ERRORS.IDENTITY_UNPROVEN; });
+      assert.match(String(/** @type {Error} */ (caught).message), /differs from T3/, `rejection must come from the byte comparison for 0x${nvIndex.toString(16)}`);
+      assert.equal(gate.closed, true, `gate closed on content drift for 0x${nvIndex.toString(16)}`);
+
+      // (د) تنطيفُ الدورةِ: البوّابةُ أُغلقت بالفشلِ فلا تُفرِّغُ عبرَها — تفريغٌ خامٌّ
+      // للمقبضينِ (الجلسةُ وEK العابرُ) ثمّ محوُ الفهرسِ قبلَ الدورةِ التاليةِ.
+      for (const h of liveHandles.splice(0)) {
+        const flush = builder.buildFlushContext({ flushHandle: h });
+        const flushed = parseResponse(await t.submit(flush.command), flush.descriptor);
+        assert.equal(flushed.rc, 0, `FlushContext(0x${h.toString(16)}) must succeed`);
+      }
+      const undef = builder.buildNvUndefineSpace({ nvIndex, indexName: define.indexName, session: builder.passwordSession() });
+      const undefinedResp = await submitRetry(t, undef);
+      assert.equal(undefinedResp.rc, 0, `NV_UndefineSpace(0x${nvIndex.toString(16)}) must succeed`);
+      defined.pop();
+    }
+    assert.equal(defined.length, 0, 'all six drift cycles cleaned up');
+  } finally {
+    try {
+      for (const h of liveHandles.splice(0)) {
+        try { await t.submit(builder.buildFlushContext({ flushHandle: h }).command); } catch { /* already flushed — ignore */ }
+      }
+      for (const { nvIndex, indexName } of defined.splice(0)) {
+        try {
+          const undef = builder.buildNvUndefineSpace({ nvIndex, indexName, session: builder.passwordSession() });
+          await submitRetry(t, undef);
+        } catch { /* already undefined — ignore */ }
+      }
+    } catch { /* transport dead — ignore */ }
+    await t.close();
+  }
+});
+
+simTest('G2 (5)/(6): انجرافُ مجموعةِ المقابضِ بينَ T1 وC1 على swtpm حيّ — إضافةُ فهرسٍ وحذفُ فهرسٍ بعدَ التمهيدِ (WL-465)', async () => {
+  const t = await SwtpmRawTransport.open(/** @type {string} */ (process.env.TPM2TOOLS_TCTI));
+  /** @type {{ nvIndex: number, indexName: Buffer }[]} */
+  const defined = [];
+  /** @type {number[]} */
+  const liveHandles = [];
+  try {
+    // عصٌّ تجريبيٌّ للهويّةِ — كما في اختبارِ الانجرافِ أعلاه.
+    const probeBuilt = builder.buildCreatePrimary({ inPublic: builder.defaultEkTemplateRsa2048(), session: builder.passwordSession() });
+    const probeParsed = parseResponse(await t.submit(probeBuilt.command), probeBuilt.descriptor);
+    assert.equal(probeParsed.form, 'n3', 'probe CreatePrimary response must be n3');
+    const probeOutPublic = firstTpm2b(probeParsed.parameters);
+    const probeFlush = builder.buildFlushContext({ flushHandle: /** @type {number} */ (probeParsed.handles[0]) });
+    assert.equal(parseResponse(await t.submit(probeFlush.command), probeFlush.descriptor).form, 'n1', 'probe flush must be n1');
+    const probeTpmt = builder.parseTpmtPublic(probeOutPublic);
+    assert(probeTpmt.rsa, 'probe EK must be RSA');
+    const ekIdentity = mintSimulatedEkCertificatePair({ kty: 'RSA', n: probeTpmt.rsa.modulus.toString('base64url'), e: 'AQAB' });
+
+    const NV_DATA_SIZE = 8;
+    const content = Buffer.alloc(NV_DATA_SIZE, 0x3c);
+    const A = 0x01c00002;
+    const B = 0x01c00003;
+    /** تعريفُ فهرسٍ وكتابةُ محتواهُ عبرَ النقلِ الخامِّ (تثبيتُ رقعةِ الاختبارِ). @param {number} nvIndex */
+    const defineAndWrite = async (nvIndex) => {
+      const define = builder.buildNvDefineSpace({ nvIndex, dataSize: NV_DATA_SIZE, attributes: 0x00040004, session: builder.passwordSession() });
+      assert.equal((await submitRetry(t, define)).form, 'n3', `NV_DefineSpace(0x${nvIndex.toString(16)}) must succeed`);
+      defined.push({ nvIndex, indexName: define.indexName });
+      const write = builder.buildNvWrite({ nvIndex, data: content, offset: 0, session: builder.passwordSession(), indexName: define.indexName });
+      assert.equal((await submitRetry(t, write)).form, 'n3', `NV_Write(0x${nvIndex.toString(16)}) must succeed`);
+    };
+
+    // (أ) الإضافةُ: التمهيدُ على {A} وحدها (B لم تُعرَّفْ بعدُ)، ثمّ تعريفُ B قبلَ P0 —
+    // صفحةُ P0 تجلبُ {A,B} فتخالفُ مجموعةَ T1 عندَ المقارنةِ في C1.
+    await defineAndWrite(A);
+    const gateAdd = new FreshnessGate({ transport: t, mode: 'operation', persistentEkHandle: null, ekIdentity });
+    const t1Add = await gateAdd.t1Inventory();
+    assert.deepEqual(t1Add.handles, [A], 'T1 inventories only A before B is defined');
+    await gateAdd.t6nvBufferMax();
+    await gateAdd.t2nvReadPublic({ nvIndex: A });
+    await gateAdd.t3nvRead({ nvIndex: A, size: NV_DATA_SIZE, offset: 0 });
+    const t5Add = await gateAdd.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+    liveHandles.push(t5Add.handle);
+    assert.equal(gateAdd.verifyEkIdentity(), true, 'EK identity verified');
+    const sasAdd = await gateAdd.startAuthSession();
+    liveHandles.push(sasAdd.handle);
+    // الإضافةُ المشروعةُ بعدَ اكتمالِ T1: تعريفُ B عبرَ النقلِ الخامِّ (خارجَ البوّابةِ).
+    await defineAndWrite(B);
+    const p0Add = await gateAdd.p0Attest();
+    assert.deepEqual(p0Add.handles, [A, B], 'P0 page must now carry both indices');
+    /** @type {unknown} */
+    let caughtAdd;
+    await assert.rejects(gateAdd.c1Confirm(), (/** @type {{ code?: string }} */ e) => { caughtAdd = e; return e.code === GATE_ERRORS.IDENTITY_UNPROVEN; });
+    assert.match(String(/** @type {Error} */ (caughtAdd).message), /handle set differs from T1/, 'add: C1 set comparison must close the gate');
+    assert.equal(gateAdd.closed, true, 'add: gate closed');
+
+    // (ب) الحذفُ: تعريفُ الفهرسينِ قبلَ البوّابةِ، تمهيدٌ على {A,B}، ثمّ محوُ B قبلَ P0 —
+    // صفحةُ P0 تجلبُ {A} وحدها فتخالفُ مجموعةَ T1.
+    const gateDrop = new FreshnessGate({ transport: t, mode: 'operation', persistentEkHandle: null, ekIdentity });
+    const t1Drop = await gateDrop.t1Inventory();
+    assert.deepEqual(t1Drop.handles, [A, B], 'T1 inventories both indices');
+    await gateDrop.t6nvBufferMax();
+    await gateDrop.t2nvReadPublic({ nvIndex: A });
+    await gateDrop.t3nvRead({ nvIndex: A, size: NV_DATA_SIZE, offset: 0 });
+    await gateDrop.t2nvReadPublic({ nvIndex: B });
+    await gateDrop.t3nvRead({ nvIndex: B, size: NV_DATA_SIZE, offset: 0 });
+    const t5Drop = await gateDrop.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+    liveHandles.push(t5Drop.handle);
+    assert.equal(gateDrop.verifyEkIdentity(), true, 'EK identity verified');
+    const sasDrop = await gateDrop.startAuthSession();
+    liveHandles.push(sasDrop.handle);
+    // الحذفُ المشروعُ بعدَ اكتمالِ T1: محوُ B عبرَ النقلِ الخامِّ (خارجَ البوّابةِ).
+    const bEntry = defined.find((d) => d.nvIndex === B);
+    assert.ok(bEntry, 'B must have been defined and tracked');
+    const undefB = builder.buildNvUndefineSpace({ nvIndex: B, indexName: bEntry.indexName, session: builder.passwordSession() });
+    assert.equal((await submitRetry(t, undefB)).rc, 0, 'legitimate NV_UndefineSpace(B) must succeed on the simulator');
+    // مُحي مشروعًا وسطَ الاختبارِ عمدًا — يُحذفُ من سجلِّ التنطيفِ كي لا «يُمحى» مرتينِ.
+    defined.splice(defined.findIndex((d) => d.nvIndex === B), 1);
+    const p0Drop = await gateDrop.p0Attest();
+    assert.deepEqual(p0Drop.handles, [A], 'P0 page must carry only A after B is dropped');
+    /** @type {unknown} */
+    let caughtDrop;
+    await assert.rejects(gateDrop.c1Confirm(), (/** @type {{ code?: string }} */ e) => { caughtDrop = e; return e.code === GATE_ERRORS.IDENTITY_UNPROVEN; });
+    assert.match(String(/** @type {Error} */ (caughtDrop).message), /handle set differs from T1/, 'drop: C1 set comparison must close the gate');
+    assert.equal(gateDrop.closed, true, 'drop: gate closed');
+
+    // تنطيفٌ صارمٌ: المقابضُ العابرةُ خامًّا (البوّابتانِ مغلقتانِ بالفشلِ)، ثمّ محوُ ما بقيَ.
+    for (const h of liveHandles.splice(0)) {
+      const flush = builder.buildFlushContext({ flushHandle: h });
+      const flushed = parseResponse(await t.submit(flush.command), flush.descriptor);
+      assert.equal(flushed.rc, 0, `FlushContext(0x${h.toString(16)}) must succeed`);
+    }
+    for (const { nvIndex, indexName } of defined.splice(0)) {
+      const undef = builder.buildNvUndefineSpace({ nvIndex, indexName, session: builder.passwordSession() });
+      assert.equal((await submitRetry(t, undef)).rc, 0, `NV_UndefineSpace(0x${nvIndex.toString(16)}) must succeed`);
+    }
+  } finally {
+    try {
+      for (const h of liveHandles.splice(0)) {
+        try { await t.submit(builder.buildFlushContext({ flushHandle: h }).command); } catch { /* already flushed — ignore */ }
+      }
+      for (const { nvIndex, indexName } of defined.splice(0)) {
+        try {
+          const undef = builder.buildNvUndefineSpace({ nvIndex, indexName, session: builder.passwordSession() });
+          await submitRetry(t, undef);
+        } catch { /* already undefined — ignore */ }
+      }
+    } catch { /* transport dead — ignore */ }
+    await t.close();
+  }
+});
+
+simTest('G2 (3)/(8): رفضُ صفوفٍ خارجَ الحالةِ وجلسةٍ ثانيةٍ وP0 مزدوجٍ قبلَ الإرسالِ على swtpm حيّ — غلافُ عدٍّ يُثبتُ صفرَ بايتاتٍ (WL-465)', async () => {
+  const t = await SwtpmRawTransport.open(/** @type {string} */ (process.env.TPM2TOOLS_TCTI));
+  const counting = new CountingTransport(t);
+  /** @type {{ nvIndex: number, indexName: Buffer }[]} */
+  const defined = [];
+  try {
+    const NV_DATA_SIZE = 8;
+    const A = 0x01c00002;
+    const define = builder.buildNvDefineSpace({ nvIndex: A, dataSize: NV_DATA_SIZE, attributes: 0x00040004, session: builder.passwordSession() });
+    assert.equal((await submitRetry(t, define)).form, 'n3', 'NV_DefineSpace(A) must succeed');
+    defined.push({ nvIndex: A, indexName: define.indexName });
+    const write = builder.buildNvWrite({ nvIndex: A, data: Buffer.alloc(NV_DATA_SIZE, 0x21), offset: 0, session: builder.passwordSession(), indexName: define.indexName });
+    assert.equal((await submitRetry(t, write)).form, 'n3', 'NV_Write(A) must succeed');
+
+    // عصٌّ تجريبيٌّ للهويّةِ.
+    const probeBuilt = builder.buildCreatePrimary({ inPublic: builder.defaultEkTemplateRsa2048(), session: builder.passwordSession() });
+    const probeParsed = parseResponse(await t.submit(probeBuilt.command), probeBuilt.descriptor);
+    assert.equal(probeParsed.form, 'n3', 'probe CreatePrimary response must be n3');
+    const probeOutPublic = firstTpm2b(probeParsed.parameters);
+    const probeFlush = builder.buildFlushContext({ flushHandle: /** @type {number} */ (probeParsed.handles[0]) });
+    assert.equal(parseResponse(await t.submit(probeFlush.command), probeFlush.descriptor).form, 'n1', 'probe flush must be n1');
+    const probeTpmt = builder.parseTpmtPublic(probeOutPublic);
+    assert(probeTpmt.rsa, 'probe EK must be RSA');
+    const ekIdentity = mintSimulatedEkCertificatePair({ kty: 'RSA', n: probeTpmt.rsa.modulus.toString('base64url'), e: 'AQAB' });
+
+    // (3) C1 في bootstrap — رفضٌ قبلَ الإرسالِ: العدّادُ لا يتحرّكُ.
+    const gate = new FreshnessGate({ transport: /** @type {any} */ (counting), mode: 'operation', persistentEkHandle: null, ekIdentity });
+    let sent = counting.sent.length;
+    await assert.rejects(gate.c1Confirm(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.STATE_INVALID);
+    assert.equal(counting.sent.length, sent, 'C1 in bootstrap sends nothing');
+
+    // تمهيدٌ كاملٌ فوقَ الغلافِ نفسِهِ.
+    const t1 = await gate.t1Inventory();
+    assert.deepEqual(t1.handles, [A], 'T1 inventories the test index');
+    await gate.t6nvBufferMax();
+    await gate.t2nvReadPublic({ nvIndex: A });
+    await gate.t3nvRead({ nvIndex: A, size: NV_DATA_SIZE, offset: 0 });
+    const t5 = await gate.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+    assert.equal(gate.verifyEkIdentity(), true, 'EK identity verified');
+    const sas = await gate.startAuthSession();
+
+    // (8) جلسةٌ ثانيةٌ — رفضٌ قبلَ الإرسالِ (مرةٌ واحدةٌ في الاتصالِ).
+    sent = counting.sent.length;
+    await assert.rejects(gate.startAuthSession(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.DUPLICATE_ATTEMPT);
+    assert.equal(counting.sent.length, sent, 'second StartAuthSession sends nothing');
+
+    // P0 → salted.
+    const p0 = await gate.p0Attest();
+    assert.deepEqual(p0.handles, [A], 'P0 page covers the test index');
+    assert.equal(gate.state, 'salted', 'P0 promotes to salted');
+
+    // (3) صفوفُ التمهيدِ في salted — رفضٌ قبلَ الإرسالِ.
+    sent = counting.sent.length;
+    await assert.rejects(gate.t6nvBufferMax(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.STATE_INVALID);
+    await assert.rejects(gate.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.STATE_INVALID);
+    await assert.rejects(gate.t2nvReadPublic({ nvIndex: A }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.STATE_INVALID);
+    await assert.rejects(gate.t3nvRead({ nvIndex: A, size: NV_DATA_SIZE, offset: 0 }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.STATE_INVALID);
+    assert.equal(counting.sent.length, sent, 'bootstrap rows in salted send nothing');
+
+    // C1 → confirmed ثمّ الصفوفُ بعدَها مرفوضةٌ (لا إعادةَ للجردِ الموثّقِ).
+    await gate.c1Confirm();
+    assert.equal(gate.state, 'confirmed', 'C1 confirms');
+    sent = counting.sent.length;
+    await assert.rejects(gate.c1Confirm(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.STATE_INVALID);
+    assert.equal(counting.sent.length, sent, 'C1 after confirmed sends nothing');
+
+    // تفريغٌ نظيفٌ عبرَ البوّابةِ وحدَها.
+    await gate.flushContext({ flushHandle: sas.handle });
+    await gate.flushContext({ flushHandle: t5.handle });
+    assert.equal(gate.closed, false, 'clean close, no gate failure');
+
+    // (7) P0 مزدوجٌ: نداءانِ متوازيانِ — واحدٌ ينفَّذُ والثاني DUPLICATE_ATTEMPT قبلَ
+    // الإرسالِ. بوّابةٌ ثانيةٌ فوقَ الغلافِ نفسِهِ (المحاكي مشتركٌ بينَ الاختباراتِ).
+    const gate2 = new FreshnessGate({ transport: /** @type {any} */ (counting), mode: 'operation', persistentEkHandle: null, ekIdentity });
+    await gate2.t1Inventory();
+    await gate2.t6nvBufferMax();
+    await gate2.t2nvReadPublic({ nvIndex: A });
+    await gate2.t3nvRead({ nvIndex: A, size: NV_DATA_SIZE, offset: 0 });
+    const t5b = await gate2.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+    gate2.verifyEkIdentity();
+    const sasb = await gate2.startAuthSession();
+    const before = counting.sent.length;
+    const results = await Promise.allSettled([gate2.p0Attest(), gate2.p0Attest()]);
+    const rejected = results.filter((r) => r.status === 'rejected');
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    assert.equal(rejected.length, 1, 'exactly one P0 attempt rejected');
+    assert.equal(fulfilled.length, 1, 'exactly one P0 attempt fulfilled');
+    assert.equal(/** @type {{ reason: { code?: string } }} */ (rejected[0]).reason.code, GATE_ERRORS.DUPLICATE_ATTEMPT);
+    assert.equal(gate2.state, 'salted', 'the winning P0 promotes to salted');
+    // المرفوضُ لم يُرسِلْ شيئًا: ما زادَ في العدّادِ هو أمرُ الفائزِ وحدَه.
+    assert.equal(counting.sent.length - before, 1, 'only the winning P0 attempt reached the simulator');
+    await gate2.c1Confirm();
+    await gate2.flushContext({ flushHandle: sasb.handle });
+    await gate2.flushContext({ flushHandle: t5b.handle });
+    assert.equal(gate2.closed, false, 'clean close');
+
+    // تنطيفُ الفهرسِ.
+    const undef = builder.buildNvUndefineSpace({ nvIndex: A, indexName: define.indexName, session: builder.passwordSession() });
+    assert.equal((await submitRetry(t, undef)).rc, 0, 'NV_UndefineSpace(A) must succeed');
+    defined.pop();
+  } finally {
+    try {
+      for (const { nvIndex, indexName } of defined.splice(0)) {
+        try {
+          const undef = builder.buildNvUndefineSpace({ nvIndex, indexName, session: builder.passwordSession() });
+          await submitRetry(t, undef);
+        } catch { /* already undefined — ignore */ }
+      }
+    } catch { /* transport dead — ignore */ }
+    await t.close();
+  }
+});
+
+simTest('G2 (4)/(7): رفضُ T2/T3 بفهرسٍ ليس في T1 أو خارجَ الستّةِ، وP0 قبلَ StartAuthSession — قبلَ الإرسالِ على swtpm حيّ (WL-465)', async () => {
+  const t = await SwtpmRawTransport.open(/** @type {string} */ (process.env.TPM2TOOLS_TCTI));
+  const counting = new CountingTransport(t);
+  /** @type {{ nvIndex: number, indexName: Buffer }[]} */
+  const defined = [];
+  /** @type {number[]} */
+  const liveHandles = [];
+  try {
+    const NV_DATA_SIZE = 8;
+    const A = 0x01c00002;
+    const define = builder.buildNvDefineSpace({ nvIndex: A, dataSize: NV_DATA_SIZE, attributes: 0x00040004, session: builder.passwordSession() });
+    assert.equal((await submitRetry(t, define)).form, 'n3', 'NV_DefineSpace(A) must succeed');
+    defined.push({ nvIndex: A, indexName: define.indexName });
+    const write = builder.buildNvWrite({ nvIndex: A, data: Buffer.alloc(NV_DATA_SIZE, 0x21), offset: 0, session: builder.passwordSession(), indexName: define.indexName });
+    assert.equal((await submitRetry(t, write)).form, 'n3', 'NV_Write(A) must succeed');
+
+    const probeBuilt = builder.buildCreatePrimary({ inPublic: builder.defaultEkTemplateRsa2048(), session: builder.passwordSession() });
+    const probeParsed = parseResponse(await t.submit(probeBuilt.command), probeBuilt.descriptor);
+    assert.equal(probeParsed.form, 'n3', 'probe CreatePrimary response must be n3');
+    const probeOutPublic = firstTpm2b(probeParsed.parameters);
+    const probeFlush = builder.buildFlushContext({ flushHandle: /** @type {number} */ (probeParsed.handles[0]) });
+    assert.equal(parseResponse(await t.submit(probeFlush.command), probeFlush.descriptor).form, 'n1', 'probe flush must be n1');
+    const probeTpmt = builder.parseTpmtPublic(probeOutPublic);
+    assert(probeTpmt.rsa, 'probe EK must be RSA');
+    const ekIdentity = mintSimulatedEkCertificatePair({ kty: 'RSA', n: probeTpmt.rsa.modulus.toString('base64url'), e: 'AQAB' });
+
+    const gate = new FreshnessGate({ transport: /** @type {any} */ (counting), mode: 'operation', persistentEkHandle: null, ekIdentity });
+    const t1 = await gate.t1Inventory();
+    assert.deepEqual(t1.handles, [A], 'T1 inventories the test index');
+    await gate.t6nvBufferMax();
+    // قراءاتُ التمهيدِ للفهرسِ المُعرَّفِ نفسِهِ — بلاها لا تملكُ C1 جردَ تمهيدٍ تقارِنُ عليهِ
+    // (بعدَ T6: ترتيبُ صفوفِ التمهيدِ T1→T6→T2→T3 ملزمٌ في البوّابةِ).
+    await gate.t2nvReadPublic({ nvIndex: A });
+    await gate.t3nvRead({ nvIndex: A, size: NV_DATA_SIZE, offset: 0 });
+
+    // (4) T2/T3 بفهرسٍ في المدى وليسَ في T1 (0x01c00003)، وبفهرسٍ خارجَ الستّةِ (0x01800000)
+    // — رفضٌ قبلَ الإرسالِ: العدّادُ لا يتحرّكُ.
+    let sent = counting.sent.length;
+    await assert.rejects(gate.t2nvReadPublic({ nvIndex: 0x01c00003 }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.PRECONDITION_FAILED);
+    await assert.rejects(gate.t3nvRead({ nvIndex: 0x01c00003, size: 1, offset: 0 }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.PRECONDITION_FAILED);
+    await assert.rejects(gate.t2nvReadPublic({ nvIndex: 0x01800000 }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.PRECONDITION_FAILED);
+    await assert.rejects(gate.t3nvRead({ nvIndex: 0x01800000, size: 1, offset: 0 }), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.PRECONDITION_FAILED);
+    assert.equal(counting.sent.length, sent, 'T2/T3 rejections send nothing');
+
+    // (7) P0 قبلَ StartAuthSession — رفضٌ قبلَ الإرسالِ (شرطاه: T1 مكتملٌ والجلسةُ قائمةٌ).
+    const t5 = await gate.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+    liveHandles.push(t5.handle);
+    assert.equal(gate.verifyEkIdentity(), true, 'EK identity verified');
+    sent = counting.sent.length;
+    await assert.rejects(gate.p0Attest(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.PRECONDITION_FAILED);
+    assert.equal(counting.sent.length, sent, 'P0 before StartAuthSession sends nothing');
+
+    // بعدَ الجلسةِ: P0 يمرُّ.
+    const sas = await gate.startAuthSession();
+    liveHandles.push(sas.handle);
+    const p0 = await gate.p0Attest();
+    assert.deepEqual(p0.handles, [A], 'P0 passes after StartAuthSession');
+    assert.equal(gate.state, 'salted', 'P0 promotes to salted');
+    await gate.c1Confirm();
+    assert.equal(gate.state, 'confirmed', 'C1 confirms');
+    await gate.flushContext({ flushHandle: sas.handle });
+    await gate.flushContext({ flushHandle: t5.handle });
+    assert.equal(gate.closed, false, 'clean close');
+
+    const undef = builder.buildNvUndefineSpace({ nvIndex: A, indexName: define.indexName, session: builder.passwordSession() });
+    assert.equal((await submitRetry(t, undef)).rc, 0, 'NV_UndefineSpace(A) must succeed');
+    defined.pop();
+  } finally {
+    try {
+      for (const h of liveHandles.splice(0)) {
+        try { await t.submit(builder.buildFlushContext({ flushHandle: h }).command); } catch { /* already flushed — ignore */ }
+      }
+      for (const { nvIndex, indexName } of defined.splice(0)) {
+        try {
+          const undef = builder.buildNvUndefineSpace({ nvIndex, indexName, session: builder.passwordSession() });
+          await submitRetry(t, undef);
+        } catch { /* already undefined — ignore */ }
+      }
+    } catch { /* transport dead — ignore */ }
+    await t.close();
+  }
+});
+
+simTest('G2 (7): حقن أعطالٍ في النقلِ فوقَ swtpm حيّ — HMAC فاسدٌ وسمةُ 0x01 وردُّ خطأٍ مُصنَّعٌ لردِّ P0 ⇒ إغلاقٌ قبلَ salted (R5-01) (WL-465)', async () => {
+  const t = await SwtpmRawTransport.open(/** @type {string} */ (process.env.TPM2TOOLS_TCTI));
+  try {
+    // عصٌّ تجريبيٌّ واحدٌ للهويّةِ (الاشتقاقُ حتميٌّ فيكفي مرةً واحدةً للعيّناتِ الثلاثِ).
+    const probeBuilt = builder.buildCreatePrimary({ inPublic: builder.defaultEkTemplateRsa2048(), session: builder.passwordSession() });
+    const probeParsed = parseResponse(await t.submit(probeBuilt.command), probeBuilt.descriptor);
+    assert.equal(probeParsed.form, 'n3', 'probe CreatePrimary response must be n3');
+    const probeOutPublic = firstTpm2b(probeParsed.parameters);
+    const probeFlush = builder.buildFlushContext({ flushHandle: /** @type {number} */ (probeParsed.handles[0]) });
+    assert.equal(parseResponse(await t.submit(probeFlush.command), probeFlush.descriptor).form, 'n1', 'probe flush must be n1');
+    const probeTpmt = builder.parseTpmtPublic(probeOutPublic);
+    assert(probeTpmt.rsa, 'probe EK must be RSA');
+    const ekIdentity = mintSimulatedEkCertificatePair({ kty: 'RSA', n: probeTpmt.rsa.modulus.toString('base64url'), e: 'AQAB' });
+
+    for (const fault of /** @type {('corruptHmac' | 'flipAttrs' | 'errorResponse')[]} */ (['corruptHmac', 'flipAttrs', 'errorResponse'])) {
+      const wrapper = new FaultInjectingTransport(t, fault);
+      const gate = new FreshnessGate({ transport: /** @type {any} */ (wrapper), mode: 'operation', persistentEkHandle: null, ekIdentity });
+      await gate.t1Inventory();
+      await gate.t6nvBufferMax();
+      const t5 = await gate.t5createPrimary({ inPublic: builder.defaultEkTemplateRsa2048() });
+      gate.verifyEkIdentity();
+      const sas = await gate.startAuthSession();
+
+      // إثباتُ العبورِ: أوامرُ التمهيدِ كلُّها مرَّتْ عبرَ الغلافِ نفسِهِ كما هي — وإلّا
+      // لما اكتملَ التمهيدُ أصلًا (الردودُ الحيّةُ من swtpm تحقَّقتْ منها البوّابةُ).
+      assert.ok(wrapper.passedThrough.length > 0, 'non-targeted bootstrap commands passed through the wrapper untouched');
+      assert.equal(wrapper.injected, 0, 'fault has not fired before P0');
+
+      // الحقنةُ: P0 (أولُ GetCapability بجلسةٍ) يُعترَضُ ردُّهُ — مرةً واحدةً.
+      /** @type {unknown} */
+      let caught;
+      await assert.rejects(gate.p0Attest(), (/** @type {{ code?: string }} */ e) => { caught = e; return e.code === GATE_ERRORS.IDENTITY_UNPROVEN; });
+      assert.equal(wrapper.injected, 1, 'fault fired exactly once on the sessioned GetCapability (P0)');
+
+      // الرفضُ للسببِ الصحيحِ في الطبقةِ الصحيحةِ (تحقُّقُ محلّلِ الردودِ):
+      if (fault === 'corruptHmac') {
+        assert.match(String(/** @type {Error} */ (caught).message), /TPM_RESPONSE_HMAC_MISMATCH/, 'HMAC corruption caught at response verification');
+      } else if (fault === 'flipAttrs') {
+        assert.match(String(/** @type {Error} */ (caught).message), /TPM_RESPONSE_ATTRS_INVALID/, 'attrs 0x01 caught at response verification');
+      } else {
+        assert.match(String(/** @type {Error} */ (caught).message), /rc=0x9a2/, 'fabricated error response rejected');
+      }
+      assert.equal(gate.state, 'bootstrap', 'R5-01: no salted without a verified P0 response');
+      assert.equal(gate.closed, true, 'gate closed on the tampered P0 response');
+
+      // تفريغٌ خامٌّ (البوّابةُ مغلقةٌ بالفشلِ لا تُفرِّغُ عبرَها): الجلسةُ وEK العابرُ.
+      for (const h of [sas.handle, t5.handle]) {
+        const flush = builder.buildFlushContext({ flushHandle: h });
+        const flushed = parseResponse(await t.submit(flush.command), flush.descriptor);
+        assert.equal(flushed.rc, 0, `FlushContext(0x${h.toString(16)}) must succeed`);
+      }
+    }
+  } finally {
+    await t.close();
+  }
+});

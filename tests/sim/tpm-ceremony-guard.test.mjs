@@ -261,6 +261,15 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   const WL461_OWNER_AUTHORIZED = new Map(Object.entries({
     'scripts/tpm-sim-ci.sh': '32ae60ff3f3fa5150fa188b9265bb219ab9decff',
   }));
+  // WL-465: استثناءٌ مسمًّى مؤرّخٌ ثانٍ من المالكِ (2026-10-25) على الملفِ المحميِّ نفسِهِ — سطرُ `rm -f`
+  // واحدٌ لمحوِ أثرِ TAP متقادمٍ **قبلَ أيِّ مسارِ تشغيلٍ** (فرقٌ معروضٌ بعينِهِ في المحادثةِ وفي مدخلةِ
+  // WL-465)، والسلوكُ مقياسٌ في `tests/tooling/tpm-sim-ci-tap.test.mjs` (3 اختباراتٍ تشغّل السكربتَ الفعليَّ
+  // بمحاكياتٍ مُعوّضةٍ، وسقوطُ الاختبارِ الحاسمِ بلا إصلاحٍ قِيسَ قبلَ التنفيذِ). وسائرُ ما قِيلَ في استثناءِ WL-461
+  // ينطبقُ هنا كما هو: **الإذنُ إذنٌ بفرقٍ معروضٍ بعينِهِ لا إذنٌ مفتوحًا للأبدِ** — أيُّ تعديلٍ لاحقٍ
+  // يُخرجُ بصمتَهُ عن هذه فيعودُ محميًا كما كانَ، وكلُّ مسارِ الحمايةِ الآخرِ في السكربتِ باقٍ كما هو.
+  const WL465_OWNER_AUTHORIZED = new Map(Object.entries({
+    'scripts/tpm-sim-ci.sh': '1bab96691990f79b7d9185c0143871855ce799c1',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -301,10 +310,17 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     assert.equal(after, before, `مدخلةُ ${CONTRACT_ENTRY} في ${CONTRACT_PATH} عُدِّلَتْ في هذه الدفعةِ — هذا خارجَ نطاقِ الدفعةِ (يجوزُ تحديثُ غيرِها من المدخلاتِ)`);
   }
 
+  // القبولُ بالبصمةِ من **أحدثِ إذنٍ مسمّى لكلِّ مسارٍ** (WL-465 ثمّ WL-461 ثمّ WL-434): الإذنُ
+  // اللاحقُ يُثبّتُ بصمةً جديدةً فيُلغي حُكمَ البصمةِ الأقدمِ على المسارِ نفسِهِ (إرجاعُ الملفِ
+  // إلى بصمةٍ سابقةٍ رفضٌ لا قبولٌ)، والملفاتُ التي لأحدها وحدَه إذنٌ تبقى على بصمتِه.
+  const ownerAuthorizedBlob = (f) => {
+    const expected =
+      WL465_OWNER_AUTHORIZED.get(f) ?? WL461_OWNER_AUTHORIZED.get(f) ?? WL434_OWNER_AUTHORIZED.get(f);
+    return expected !== undefined && currentBlob(f) === expected ? expected : undefined;
+  };
+
   const violations = touched.filter(
-    (f) =>
-      isProtected(f) &&
-      !((WL434_OWNER_AUTHORIZED.has(f) || WL461_OWNER_AUTHORIZED.has(f)) && currentBlob(f) === (WL434_OWNER_AUTHORIZED.get(f) || WL461_OWNER_AUTHORIZED.get(f))),
+    (f) => isProtected(f) && ownerAuthorizedBlob(f) === undefined,
   );
   assert.equal(violations.length, 0, 'ملفاتٌ محميةٌ عُدِّلَتْ في هذه الدفعةِ (النطاقُ المضيَّقُ بقرارِ WL-429): ' + violations.join(', '));
 });
