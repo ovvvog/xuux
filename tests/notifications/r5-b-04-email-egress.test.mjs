@@ -422,12 +422,13 @@ test('LIVE-56: أيُّ اتصالٍ خارجَ الوجهةِ المأذونة�
 
 // ——— WL-471 (LIVE-55) — اختبارُ رجوعِ N1 ———
 // الملاحظةُ (3) في الجولةِ السابعةِ (WL-427): أحدُ اختبارَي WL-426 ينجحُ على الكودِ
-// القديمِ أيضًا فلا يكشفُ عودةَ N1 (انفصالَ وجهةِ الإذنِ عن وجهةِ النقلِ). هذا
-// الاختبارُ يسدُّ الفجوةَ: نقلُ موقعِ التركيبِ يفتحُ اتصالًا حقيقيًّا (لا كعبًا)،
-// والاختبارُ يُثبتُ أنّ الاتصالَ يقعُ على الوجهةِ المأذونةِ (وجهةِ الإذنِ منَ
-// القراءةِ الواحدةِ) لا على غيرِها — فأيُّ نسخةٍ تُعيدُ فصلَ الوجهاتِ تُسرِّبُ
-// اتصالًا خارجَ المأذونِ فيسقطُ الاختبارُ (نموذجُ مسبارِ العضوِ الثانيِّ في
-// الجولةِ السابعةِ — نسخةٌ مُعدَّلةٌ تُسرِّبُ اتصالًا).
+// القديمِ أيضًا فلا يكشفُ عودةَ N1 (انفصالَ وجهةِ الإذنِ عن وجهةِ النقلِ — النقلُ
+// يعيدُ قراءةَ إعدادهِ الخاصِّ متجاهلًا وجهةَ السجلِّ المُصدَّرةَ منَ البوابةِ).
+// هذا الاختبارُ يسدُّ الفجوةَ: إن صدَّرتِ الوحدةُ نقلًا (كما في النسخةِ القديمةِ
+// `2dcaaeeb`) استُعملَ النقلُ المُصدَّرُ نفسُهُ؛ وإلّا فنموذجُ نقلِ موقعِ التركيبِ.
+// وفي الحالَينِ: الاتصالُ يجبُ أن يقعَ على الوجهةِ المأذونةِ (وجهةِ الإذنِ منَ
+// القراءةِ الواحدةِ) — فأيُّ نسخةٍ يقعُ فيها الاتصالُ على غيرِها (إعدادِ النقلِ
+// الخاصِّ) يسقطُ الاختبارُ (نموذجُ مسبارِ العضوِ الثانيِّ: نسخةٌ تُسرِّبُ اتصالًا).
 
 test('LIVE-55: وجهةُ النقلِ الفعليةُ = وجهةُ الإذنِ — اختبارُ رجوعِ N1 (انفصالُ الوجهاتِ)', async () => {
   const authorized = await fakeSmtpServer();
@@ -436,34 +437,81 @@ test('LIVE-55: وجهةُ النقلِ الفعليةُ = وجهةُ الإذن�
     const authorizedPort = /** @type {import('node:net').AddressInfo} */ (
       authorized.server.address()
     ).port;
-    const config = {
+    const outsidePort = /** @type {import('node:net').AddressInfo} */ (outside.server.address())
+      .port;
+    // إعدادُ القناةِ (القراءةُ الواحدةُ) ⇒ الوجهةُ المأذونةُ A
+    const channelConfig = {
       host: '127.0.0.1',
       port: authorizedPort,
       user: 'user',
       password: 'pass',
     };
+    // إعدادُ النقلِ الخاصُّ (إعادةُ القراءةِ) ⇒ الوجهةُ الخارجيةُ B — لو تجاهلَ
+    // النقلُ وجهةَ السجلِّ المأذونةَ (A) وقرأَ إعدادَهُ هو لوقعَ الاتصالُ هنا
+    const outsideConfig = {
+      host: '127.0.0.1',
+      port: outsidePort,
+      user: 'user',
+      password: 'pass',
+    };
+
+    // نقلُ الوحدةِ المُصدَّرُ إن وُجدَ (نسخةٌ تُعيدُ فصلَ الوجهاتِ — كالنسخةِ القديمةِ
+    // `2dcaaeeb`)؛ وإلّا فنموذجُ نقلِ موقعِ التركيبِ (كودُ المُركِّبِ) الذي يتصلُ
+    // بوجهةِ السجلِّ التي أذنَتْ لها البوابةُ. في الحالَينِ يُختبرُ العقدُ نفسُهُ:
+    // الاتصالُ يقعُ على المأذونِ لا على إعدادِ النقلِ الخاصِّ.
+    const module = /** @type {Record<string, unknown>} */ (
+      await import('../../src/notifications/channels/email.mjs')
+    );
+    const exportedTransportFactory = module.createSmtpEgressTransport;
+    /** @type {((record: { destination: unknown, port: unknown, bytes: number, payload: string }) => Promise<{ messageId: string | null }>) | null} */
+    let transport = null;
+    let usedExportedFactory = false;
+    if (typeof exportedTransportFactory === 'function') {
+      usedExportedFactory = true;
+      const factory =
+        /** @type {(deps: { getSmtpConfig: () => { host: string, port: number, user: string, password: string } | null }) => (record: { destination: unknown, bytes: number, payload: string | Uint8Array }) => Promise<{ messageId: string | null }>} */ (
+          exportedTransportFactory
+        );
+      // نسخةُ الفصلِ: نقلُ الوحدةِ يُركَّبُ بإعدادٍ خاصٍّ (B) — فإن كان يعيدُ قراءةَ
+      // إعدادهِ متجاهلًا وجهةَ السجلِّ (A) وقعَ الاتصالُ على B وهذا هو N1 عينُهُ.
+      const factoryTransport = factory({ getSmtpConfig: () => outsideConfig });
+      transport = async (record) => {
+        // سِباقٌ زمنيٌّ: نقلُ النسخةِ المفصولةِ قد يعلّقُ بعدَ أن يقعَ الاتصالُ على
+        // غيرِ المأذونِ (بروتوكولُهُ ضدَ الخادمِ الخطأِ) — والاتصالاتُ وقعتْ فعلًا
+        // فيُفحَصُ موضعُها ولا يعلّقُ الفحصُ إلى ما لا نهايةَ.
+        const outcome = await Promise.race([
+          factoryTransport({
+            destination: record.destination,
+            bytes: record.bytes,
+            payload: record.payload,
+          }),
+          new Promise((resolve) => {
+            setTimeout(() => resolve({ messageId: null }), 5000);
+          }),
+        ]);
+        return outcome;
+      };
+    } else {
+      // المُصلَحُ: لا نقلَ على سطحِ الوحدةِ — نموذجُ نقلِ موقعِ التركيبِ يتصلُ بوجهةِ
+      // السجلِّ التي أذنَتْ لها البوابةُ (لا يعيدُ قراءةَ الإعدادِ).
+      transport = async (record) => {
+        await new Promise((resolve, reject) => {
+          const socket = net.connect(
+            /** @type {number} */ (record.port),
+            /** @type {string} */ (record.destination),
+            () => {
+              socket.destroy();
+              resolve(undefined);
+            },
+          );
+          socket.on('error', reject);
+        });
+        return { messageId: 'msg-55' };
+      };
+    }
 
     /** @type {Array<{ destination: unknown, port: unknown }>} */
     const transportRecords = [];
-    /**
-     * @param {{ destination: unknown, port: unknown, bytes: number, payload: string }} record
-     */
-    const composerTransport = async (record) => {
-      transportRecords.push({ destination: record.destination, port: record.port });
-      await new Promise((resolve, reject) => {
-        const socket = net.connect(
-          /** @type {number} */ (record.port),
-          /** @type {string} */ (record.destination),
-          () => {
-            socket.destroy();
-            resolve(undefined);
-          },
-        );
-        socket.on('error', reject);
-      });
-      return { messageId: 'msg-55' };
-    };
-
     const fakeEgressGate = {
       /**
        * @param {import('../../src/egress/egress-gate.mjs').EgressRequest} request
@@ -475,7 +523,9 @@ test('LIVE-55: وجهةُ النقلِ الفعليةُ = وجهةُ الإذن�
           bytes: Buffer.byteLength(/** @type {string} */ (request.payload)),
           payload: /** @type {string} */ (request.payload),
         };
-        const result = await composerTransport(record);
+        transportRecords.push({ destination: record.destination, port: record.port });
+        const transportFn = /** @type {NonNullable<typeof transport>} */ (transport);
+        const result = await transportFn(record);
         return {
           bytes: record.bytes,
           destination: request.destination,
@@ -486,36 +536,43 @@ test('LIVE-55: وجهةُ النقلِ الفعليةُ = وجهةُ الإذن�
     };
 
     const channel = EmailChannel({
-      getSmtpConfig: () => config,
+      getSmtpConfig: () => channelConfig,
       egressGate: fakeEgressGate,
     });
     const result = await channel.send(makeMessage(), 'test@example.com');
 
-    assert.equal(result.state, 'sent', `الإرسالُ عبرَ البوابةِ ينجحُ: ${result.failureReason}`);
-    assert.equal(
-      transportRecords.length,
-      1,
-      'نقلُ موقعِ التركيبِ استُدعي مرةً واحدةً عبرَ البوابةِ',
-    );
-    const firstRecord = transportRecords[0];
-    assert.ok(firstRecord !== undefined, 'نقلٌ واحدٌ مضمونٌ قبلَ قراءتِهِ');
-    // وجهةُ الإذنِ (مضيفُ القراءةِ الواحدةِ) هي وجهةُ النقلِ الفعليةِ:
-    assert.equal(
-      firstRecord.destination,
-      config.host,
-      'الوجهةُ المُصدَّرةُ للنقلِ هي وجهةُ الإذنِ (مضيفُ الإعدادِ)',
-    );
-    assert.equal(firstRecord.port, authorizedPort, 'ومنفذُها منفذُ الإذنِ');
+    // الاتصالُ وقعَ على الوجهةِ المأذونةِ (A) — لا على إعدادِ النقلِ الخاصِّ (B).
+    // هذا هو كشفُ N1: لو فصلَتِ النسخةُ الوجهاتِ لوقعَ الاتصالُ على B.
     assert.equal(
       authorized.connections(),
       1,
-      'اتصالُ النقلِ وقعَ على الوجهةِ المأذونةِ — وجهةِ الإذنِ',
+      'اتصالُ النقلِ وقعَ على الوجهةِ المأذونةِ — وجهةِ الإذنِ منَ القراءةِ الواحدةِ',
     );
     assert.equal(
       outside.connections(),
       0,
-      'لا اتصالَ خارجَ الوجهةِ المأذونةِ — لا انفصالَ بينَ وجهةِ الإذنِ ووجهةِ النقلِ (N1)',
+      'لا اتصالَ على إعدادِ النقلِ الخاصِّ — لا انفصالَ بينَ وجهةِ الإذنِ ووجهةِ النقلِ (N1)',
     );
+    if (usedExportedFactory) {
+      // نسخةُ الفصلِ: سقطَ الاختبارُ أعلاهُ إن وقعَ الاتصالُ خارجَ المأذونِ — وهنا
+      // نسجّلُ صراحةً أنّ التحققَ من النقلِ المُصدَّرِ حصلَ لا من نموذجٍ داخليٍّ.
+      assert.equal(
+        authorized.connections(),
+        1,
+        'النقلُ المُصدَّرُ منَ الوحدةِ أُخضِعَ للفحصِ نفسِهِ — ولم يوقِعِ الاتصالَ على المأذونِ',
+      );
+    }
+    assert.equal(result.state, 'sent', `الإرسالُ عبرَ البوابةِ ينجح: ${result.failureReason}`);
+    assert.equal(transportRecords.length, 1, 'نقلٌ واحدٌ عبرَ البوابةِ');
+    const firstRecord = transportRecords[0];
+    assert.ok(firstRecord !== undefined, 'نقلٌ واحدٌ مضمونٌ قبلَ قراءتِهِ');
+    // وجهةُ الإذنِ (مضيفُ القراءةِ الواحدةِ) هي وجهةُ السجلِّ المُصدَّرةُ للنقلِ:
+    assert.equal(
+      firstRecord.destination,
+      channelConfig.host,
+      'الوجهةُ المُصدَّرةُ في السجلِّ هي وجهةُ الإذنِ (مضيفُ الإعدادِ)',
+    );
+    assert.equal(firstRecord.port, authorizedPort, 'ومنفذُها منفذُ الإذنِ');
   } finally {
     await authorized.close();
     await outside.close();
