@@ -96,6 +96,64 @@ jobs:
           df -h /tmp / >&2
           exit 1
 
+      # LIVE-47 (مُكتشَفٌ ومعالَجٌ عبرَ جولاتِ المراجعةِ 4 و5 لـWL-416 — WL-417): إشاراتُ
+      # إيقافِ المحاكي في `tests/helpers/ceremony-swtpm.mjs` تمرُّ بقناةِ python3
+      # (os.pidfd_open أو استدعاءِ النظامِ الخامِّ عبرَ ctypes) ولا رجوعَ إلى
+      # `process.kill` بالرقمِ أبدًا. **تثبيتُ python3 شرطًا بيئيّاً مُعلَنًا في CI** هو
+      # خيارُ إغلاقِ الدَّينِ الثاني (الأولُ — قناةٌ أصيلةٌ في Node نفسِها — غيرُ متاحةٍ
+      # بعد). بيئةٌ بلا python3 أو بلا pidfd لا تستطيعُ إيقافَ المحاكياتِ فتفشلُ
+      # الاختباراتُ فشلًا صادقًا (مقبولٌ ومُعلَنٌ لا نافذةَ أمانٍ) — وهنا يُقاسُ الشرطُ
+      # مقدّمًا ويُسمّى غيابُه باسمِه فلا يسقطُ فحصٌ لسببٍ غيرِ سببِه المكتوبِ (سابقةُ
+      # خطوةِ pkcs11js أعلاه).
+      - name: التحقّق من قناة pidfd عبر python3 (شرطٌ بيئيّ مُعلَن — إغلاق LIVE-47)
+        run: |
+          if ! command -v python3 >/dev/null 2>&1; then
+            echo "::error::python3 غائبةٌ من بيئةِ CI — وهي قناةُ إشاراتِ إيقافِ المحاكي (pidfd) في tests/helpers/ceremony-swtpm.mjs، وغيابُها يعطّلُ إيقافَ المحاكياتِ (فشلٌ صادقٌ مُعلَنٌ لا نافذةَ أمانٍ). أُعلِنَتْ شرطًا بيئيّاً بموجبِ إغلاقِ LIVE-47." >&2
+            exit 1
+          fi
+          out=$(python3 - << 'PYEOF'
+          import os, signal, sys
+          SYSCALLS = {'x86_64': (434, 424), 'aarch64': (434, 424), 'arm64': (434, 424)}
+          def raw_syscall(num, *a):
+              import ctypes
+              libc = ctypes.CDLL(None, use_errno=True)
+              rc = libc.syscall(num, *a)
+              if rc == -1:
+                  e = ctypes.get_errno()
+                  if e == 3: raise ProcessLookupError()
+                  raise OSError(e, os.strerror(e))
+              return rc
+          def do_pidfd_open(pid):
+              if hasattr(os, 'pidfd_open'): return os.pidfd_open(pid)
+              import platform
+              nums = SYSCALLS.get(platform.machine())
+              if nums is None: raise AttributeError('pidfd_open')
+              return raw_syscall(nums[0], pid, 0)
+          def do_pidfd_send(fd, sig):
+              if hasattr(signal, 'pidfd_send_signal'): return signal.pidfd_send_signal(fd, sig)
+              import platform
+              nums = SYSCALLS.get(platform.machine())
+              if nums is None: raise AttributeError('pidfd_send_signal')
+              return raw_syscall(nums[1], fd, sig, 0, 0)
+          try:
+              fd = do_pidfd_open(os.getpid())
+          except (AttributeError, OSError) as exc:
+              print('unsupported: %s' % exc)
+              sys.exit(0)
+          try:
+              do_pidfd_send(fd, 0)
+              print('ok')
+          finally:
+              try: os.close(fd)
+              except OSError: pass
+          PYEOF
+          )
+          if [ "$out" != "ok" ]; then
+            echo "::error::قناةُ pidfd غيرُ متاحةٍ في بيئةِ CI ($out) — إشاراتُ إيقافِ المحاكي تعتمدُها ولا رجوعَ إلى process.kill بالرقمِ. الشرطُ البيئيُّ المُعلَنُ بموجبِ إغلاقِ LIVE-47 غيرُ مُستوفى." >&2
+            exit 1
+          fi
+          echo "python3 وقناةُ pidfd حاضرتان — الشرطُ البيئيُّ المُعلَنُ (LIVE-47) مُستوفى ومُقاسٌ."
+
       # الخادم أعلاه 18.6. على ubuntu-latest يأتي postgresql-client 16 مثبّتاً مسبقاً،
       # لكنّ pg_dump 16 يرفضه `assertClientNotOlder` في scripts/lib/pg-tools.mjs.
       # نُثبّتُ postgresql-client-18 من مستودع PGDG. **تحديثٌ محدودٌ:** لا نُحدِّثُ كلَّ
