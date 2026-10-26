@@ -419,3 +419,105 @@ test('LIVE-56: أيُّ اتصالٍ خارجَ الوجهةِ المأذونة�
     await outside.close();
   }
 });
+
+// ——— WL-471 (LIVE-55) — اختبارُ رجوعِ N1 ———
+// الملاحظةُ (3) في الجولةِ السابعةِ (WL-427): أحدُ اختبارَي WL-426 ينجحُ على الكودِ
+// القديمِ أيضًا فلا يكشفُ عودةَ N1 (انفصالَ وجهةِ الإذنِ عن وجهةِ النقلِ). هذا
+// الاختبارُ يسدُّ الفجوةَ: نقلُ موقعِ التركيبِ يفتحُ اتصالًا حقيقيًّا (لا كعبًا)،
+// والاختبارُ يُثبتُ أنّ الاتصالَ يقعُ على الوجهةِ المأذونةِ (وجهةِ الإذنِ منَ
+// القراءةِ الواحدةِ) لا على غيرِها — فأيُّ نسخةٍ تُعيدُ فصلَ الوجهاتِ تُسرِّبُ
+// اتصالًا خارجَ المأذونِ فيسقطُ الاختبارُ (نموذجُ مسبارِ العضوِ الثانيِّ في
+// الجولةِ السابعةِ — نسخةٌ مُعدَّلةٌ تُسرِّبُ اتصالًا).
+
+test('LIVE-55: وجهةُ النقلِ الفعليةُ = وجهةُ الإذنِ — اختبارُ رجوعِ N1 (انفصالُ الوجهاتِ)', async () => {
+  const authorized = await fakeSmtpServer();
+  const outside = await fakeSmtpServer();
+  try {
+    const authorizedPort = /** @type {import('node:net').AddressInfo} */ (
+      authorized.server.address()
+    ).port;
+    const config = {
+      host: '127.0.0.1',
+      port: authorizedPort,
+      user: 'user',
+      password: 'pass',
+    };
+
+    /** @type {Array<{ destination: unknown, port: unknown }>} */
+    const transportRecords = [];
+    /**
+     * @param {{ destination: unknown, port: unknown, bytes: number, payload: string }} record
+     */
+    const composerTransport = async (record) => {
+      transportRecords.push({ destination: record.destination, port: record.port });
+      await new Promise((resolve, reject) => {
+        const socket = net.connect(
+          /** @type {number} */ (record.port),
+          /** @type {string} */ (record.destination),
+          () => {
+            socket.destroy();
+            resolve(undefined);
+          },
+        );
+        socket.on('error', reject);
+      });
+      return { messageId: 'msg-55' };
+    };
+
+    const fakeEgressGate = {
+      /**
+       * @param {import('../../src/egress/egress-gate.mjs').EgressRequest} request
+       */
+      async send(request) {
+        const record = {
+          destination: request.destination,
+          port: request.context?.['port'],
+          bytes: Buffer.byteLength(/** @type {string} */ (request.payload)),
+          payload: /** @type {string} */ (request.payload),
+        };
+        const result = await composerTransport(record);
+        return {
+          bytes: record.bytes,
+          destination: request.destination,
+          policyId: 'pol:egress-approved-destinations',
+          result,
+        };
+      },
+    };
+
+    const channel = EmailChannel({
+      getSmtpConfig: () => config,
+      egressGate: fakeEgressGate,
+    });
+    const result = await channel.send(makeMessage(), 'test@example.com');
+
+    assert.equal(result.state, 'sent', `الإرسالُ عبرَ البوابةِ ينجحُ: ${result.failureReason}`);
+    assert.equal(
+      transportRecords.length,
+      1,
+      'نقلُ موقعِ التركيبِ استُدعي مرةً واحدةً عبرَ البوابةِ',
+    );
+    const firstRecord = transportRecords[0];
+    assert.ok(firstRecord !== undefined, 'نقلٌ واحدٌ مضمونٌ قبلَ قراءتِهِ');
+    // وجهةُ الإذنِ (مضيفُ القراءةِ الواحدةِ) هي وجهةُ النقلِ الفعليةِ:
+    assert.equal(
+      firstRecord.destination,
+      config.host,
+      'الوجهةُ المُصدَّرةُ للنقلِ هي وجهةُ الإذنِ (مضيفُ الإعدادِ)',
+    );
+    assert.equal(firstRecord.port, authorizedPort, 'ومنفذُها منفذُ الإذنِ');
+    assert.equal(
+      authorized.connections(),
+      1,
+      'اتصالُ النقلِ وقعَ على الوجهةِ المأذونةِ — وجهةِ الإذنِ',
+    );
+    assert.equal(
+      outside.connections(),
+      0,
+      'لا اتصالَ خارجَ الوجهةِ المأذونةِ — لا انفصالَ بينَ وجهةِ الإذنِ ووجهةِ النقلِ (N1)',
+    );
+  } finally {
+    await authorized.close();
+    await outside.close();
+  }
+});
