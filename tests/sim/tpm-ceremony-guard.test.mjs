@@ -270,6 +270,26 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   const WL465_OWNER_AUTHORIZED = new Map(Object.entries({
     'scripts/tpm-sim-ci.sh': '1bab96691990f79b7d9185c0143871855ce799c1',
   }));
+  // قرارُ المالكِ (‏2026-10-27، دورةُ تفويضِ 27 أكتوبر — إصلاحُ نتائجِ جولتَي
+  // المجلسِ 7 و8 من `M11.06`): استثناءٌ مسمّى مؤرّخٌ محدودٌ **بثلاثةِ ملفاتٍ**
+  // وحدَها — تنفيذُ إصلاحِ `R6-A-07` (المحرّكُ لا يُصدِرُ إذنًا سياديًّا بفحصِ
+  // الصورةِ؛ الإذنَ تُصدِرُهُ ترقيةُ نقطةِ الإنفاذِ بعدَ تحقُّقِ الديوانِ) و`R6-A-08`
+  // (خصوصيّةُ `#safeMode` و`#production` في النواةِ، وإنتاجيّةُ العمليةِ الحقيقيةِ
+  // تُقرأُ ولا يُخفيها حقنُ `env: {}`). الإصلاحُ مستحيلٌ خارجَ هذهِ الملفاتِ —
+  // العيبُ نفسُهُ في المحرّكِ والنواةِ. **هذا الاستثناءُ لا يُضعِفُ شيئًا آخرَ:**
+  // بقيةُ الملفاتِ المحميةِ والملفاتِ المسماةِ وإغلاقِ تبعياتِ الإقلاعِ ومدخلةِ
+  // `R3-A-01` من العقدِ محميةٌ كما كانتْ. وتغييرُ هذهِ الملفاتِ خاضعٌ لكلِّ ما عداه:
+  // مدخلةُ سجلِ عملٍ تُسمّيها (المادة 6 — يحرسُها project-state)، ومراجعةُ PR، وCI،
+  // وحكمُ المجلسِ في الجولةِ القادمةِ. **والاستثناءُ مربوطٌ بالبصمةِ المعتمدةِ لا
+  // بالمسارِ وحدَه:** بصمةُ كلِّ ملفٍّ منَ الثلاثةِ كما هو في دفعةِ WL-478 المعتمدةِ.
+  // أيُّ تعديلٍ لاحقٍ على أحدِها — ولو سطرًا — يُخرجُ بصمتَهُ عن المعتمدةِ فيعودُ
+  // الملفُ محميًّا كما كانَ كلُّ ما عداه. فالإذنُ إذنٌ **بفرقٍ معروضٍ بعينِهِ** لا
+  // إذنٌ مفتوحًا لملفاتِها إلى الأبد.
+  const WL478_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/policy/engine.mjs': 'aacf01570a3c4f6c8e86584fedea206c11e0c209',
+    'src/policy/enforcement-point.mjs': '55110061b60598399c3bb1efc816d35ed5f31430',
+    'src/core/execution-kernel.mjs': 'b41297048c6cdd9510cadcc8b5e513bee1b2b0d4',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -310,12 +330,15 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     assert.equal(after, before, `مدخلةُ ${CONTRACT_ENTRY} في ${CONTRACT_PATH} عُدِّلَتْ في هذه الدفعةِ — هذا خارجَ نطاقِ الدفعةِ (يجوزُ تحديثُ غيرِها من المدخلاتِ)`);
   }
 
-  // القبولُ بالبصمةِ من **أحدثِ إذنٍ مسمّى لكلِّ مسارٍ** (WL-465 ثمّ WL-461 ثمّ WL-434): الإذنُ
+  // القبولُ بالبصمةِ من **أحدثِ إذنٍ مسمّى لكلِّ مسارٍ** (WL-478 ثمّ WL-465 ثمّ WL-461 ثمّ WL-434): الإذنُ
   // اللاحقُ يُثبّتُ بصمةً جديدةً فيُلغي حُكمَ البصمةِ الأقدمِ على المسارِ نفسِهِ (إرجاعُ الملفِ
   // إلى بصمةٍ سابقةٍ رفضٌ لا قبولٌ)، والملفاتُ التي لأحدها وحدَه إذنٌ تبقى على بصمتِه.
   const ownerAuthorizedBlob = (f) => {
     const expected =
-      WL465_OWNER_AUTHORIZED.get(f) ?? WL461_OWNER_AUTHORIZED.get(f) ?? WL434_OWNER_AUTHORIZED.get(f);
+      WL478_OWNER_AUTHORIZED.get(f) ??
+      WL465_OWNER_AUTHORIZED.get(f) ??
+      WL461_OWNER_AUTHORIZED.get(f) ??
+      WL434_OWNER_AUTHORIZED.get(f);
     return expected !== undefined && currentBlob(f) === expected ? expected : undefined;
   };
 

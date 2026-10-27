@@ -349,6 +349,34 @@ export class PolicyDecisionPoint {
           evaluatedAt,
         });
       }
+      // **تضييقٌ ثانٍ من النتيجةِ `R6-A-07` (جولتا 7 و8):** المحرّكُ لا يُصدِرُ
+      // **إذنًا سياديًّا أصلًا**. فحصُ الصورةِ لا يُنتِجُ إذنًا، والقرارُ الوحيدُ
+      // الصادرُ عن المحرّكِ لفعلٍ فوقَ العتبةِ **مأذونٍ بهِ بالسياسة** هو تأجيلٌ
+      // إلى التحقّقِ من الأمرِ الموقَّعِ عندَ نقطةِ الإنفاذِ: `policyAllows: true`
+      // و`allowed: false`. فلا يبقى للمحرّكِ إذنٌ سياديٌّ يُنتحَلُ بملخصٍ مختلقٍ
+      // مهما حسُنَتْ صورتُه. الإذنُ يُصدرُهُ ترقيةُ القرارِ عندَ نقطةِ الإنفاذِ بعدَ
+      // تحقُّقِ الديوانِ من الأمرِ الملكيِّ، فلا يُنشَأُ هنا مصدرُ حقيقةٍ ثانٍ يتحقّقُ
+      // من توقيعٍ — وهذا حدودُ المحرّكِ المعلَنُ باقٍ.
+      if (hasCommand && digestShaped) {
+        return Object.freeze({
+          allowed: false,
+          effect: 'deny',
+          code: 'SOVEREIGN_COMMAND_VERIFICATION_REQUIRED',
+          reason: `فعلٌ فوق العتبة السيادية: ${request.action}. السياسة ${governingAllow.id} تأذن به، والمحرّكُ لا يُجيزُ فعلاً سياديًّا بفحصِ الصورةِ وحدَه — الإذنُ يُصدرُهُ التحقُّقُ من الأمرِ الملكيِّ الموقَّعِ عندَ نقطةِ الإنفاذِ، فهذا تأجيلٌ لا رفضَ صلاحية.`,
+          policyId: governingAllow.id,
+          policyVersion: governingAllow.version,
+          policyAllows: true,
+          requiresRoyalCommand: true,
+          ...(typeof request.royalCommandId === 'string'
+            ? { royalCommandId: request.royalCommandId }
+            : {}),
+          ...(typeof request.royalCommandDigest === 'string'
+            ? { royalCommandDigest: request.royalCommandDigest }
+            : {}),
+          matched: trace,
+          evaluatedAt,
+        });
+      }
     }
 
     const sovereign = this.threshold.has(request.action);

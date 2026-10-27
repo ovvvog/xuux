@@ -43,6 +43,18 @@ import { PolicyDecisionPoint } from './engine.mjs';
  */
 
 /**
+ * `R6-A-07` (جولتا 7 و8): أثرُ السياسةِ لا الإذنِ النافذِ. الفعلُ السياديُّ
+ * المأذونُ به بالسياسةِ يعودُ منَ المحرّكِ **تأجيلًا** (`allowed: false` و
+ * `policyAllows: true`) — وهو في أثرِ السياسةِ سماحٌ ينتظرُ تحقّقَ الأمرِ لا
+ * رفضٌ، فلو قورنَ بالإذنِ النافذِ وحدهُ لصارَ سماحُ السياسةِ ومَنعُها سواءً.
+ * @param {import('./model.mjs').PolicyDecision} decision
+ * @returns {'allow' | 'deny'}
+ */
+function policyEffectOf(decision) {
+  return decision.allowed || decision.policyAllows === true ? 'allow' : 'deny';
+}
+
+/**
  * تقرير أثر مقترح على قرارات مسجلة.
  * @typedef {object} PolicyImpactReport
  * @property {number} total
@@ -211,14 +223,17 @@ export function simulatePolicyChange({ recorded, currentBundle, proposedBundle }
   for (const record of recorded) {
     const before = current.evaluate(record.request);
     const after = proposed.evaluate(record.request);
-    if (before.allowed && !after.allowed) {
+    // المقارنةُ بأثرِ السياسةِ (`policyEffectOf`) لا بالإذنِ النافذِ وحده:
+    // فسماحُ سياسةٍ لفعلٍ سياديٍّ يظهرُ تأجيلًا بعدَ إصلاحِ `R6-A-07`، ومقارنتُهُ
+    // بالإذنِ النافذِ تُخفي تبدّلَ السياسةِ عن العتبةِ السياديّةِ كليًا.
+    if (policyEffectOf(before) === 'allow' && policyEffectOf(after) === 'deny') {
       allowToDeny += 1;
-    } else if (!before.allowed && after.allowed) {
+    } else if (policyEffectOf(before) === 'deny' && policyEffectOf(after) === 'allow') {
       denyToAllow += 1;
     } else {
       unchanged += 1;
     }
-    if (before.allowed !== after.allowed && examples.length < 20) {
+    if (policyEffectOf(before) !== policyEffectOf(after) && examples.length < 20) {
       examples.push(
         Object.freeze({
           actor: record.request.actor.id,

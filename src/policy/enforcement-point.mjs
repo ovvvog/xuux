@@ -344,10 +344,20 @@ export class EnforcementPoint {
 
     let decision = this.decisionPoint.evaluate(evaluated);
 
-    // R5-B-06 (تقرير: R5-B-04): التحقّقُ من الأمرِ الملكيِّ بعدَ القرارِ وقبلَ
-    // التذكرة. المحرّكُ فحصَ الصورةَ، والإنفاذُ يتحقّقُ من الديوان. أمرٌ غيرُ
-    // موثَّقٍ لا يُصدرُ تذكرةً ولو كانت صورةُ ملخصِه صحيحة.
-    if (decision.allowed && decision.requiresRoyalCommand) {
+    // R5-B-06 (تقرير: R5-B-04) و`R6-A-07` (جولتا 7 و8): التحقّقُ من الأمرِ
+    // الملكيِّ بعدَ القرارِ وقبلَ التذكرة. حاجزُ `R5-B-06` الأصليُّ باقٍ: أيُّ
+    // قرارٍ **مسِموحٍ** يعلنُ حاجتَهُ لأمرٍ ملكيٍّ يمرُّ بالتحقّقِ — ولو جاءَ من
+    // نقطةِ قرارٍ أخرى لا من محرّكِ المشروعِ (فلا ينكسرُ الحاجزُ بتبديلِ النقطةِ).
+    // و`R6-A-07` يضيفُ إليه **تأجيلَ** المحرّكِ: قرارُ العتبةِ السياديّةِ المأذونُ بهِ
+    // بالسياسةِ (`policyAllows: true` و`allowed: false`) يُتحقّقُ منه الديوانُ فإن
+    // أجازَ الأمرَ **رقّى القرارَ** إلى إذنٍ نافذٍ، وإن رفضَهُ أو غابَ المُحقّقُ بقي
+    // مرفوضًا. فحصُ الصورةِ عندَ المحرّكِ لا يُصدرُ إذنًا، والتحقّقُ لا يُصدرُه إلا
+    // لديوانٍ يجيزُ الأمر.
+    const sovereignDeferral =
+      !decision.allowed &&
+      decision.code === 'SOVEREIGN_COMMAND_VERIFICATION_REQUIRED' &&
+      decision.policyAllows === true;
+    if (decision.requiresRoyalCommand && (decision.allowed || sovereignDeferral)) {
       if (this.royalCommandVerifier === null) {
         decision = Object.freeze({
           ...decision,
@@ -400,6 +410,17 @@ export class EnforcementPoint {
             effect: /** @type {const} */ ('deny'),
             code: /** @type {const} */ ('SOVEREIGN_COMMAND_UNVERIFIED'),
             reason: `الفعل ${evaluated.action} فوق العتبة السيادية، والأمر الملكي ${commandId ?? '—'} غير مُجازٍ (${refusal}). فحصُ صورةِ الملخصِ لا يُغني عن تحقُّقِ التوقيعِ والتفويض.`,
+          });
+        } else if (decision.policyAllows === true && !decision.allowed) {
+          // `R6-A-07` (جولتا 7 و8): الترقيةُ بعدَ التحقّقِ — الإذنَ السياديَّ
+          // يُصدِرُهُ ديوانُ الأمرِ الملكيِّ لا المحرّكُ، فلا يصلُ إذنٌ نافذٌ إلى
+          // التذكرةِ إلا بعدَ إجازةِ الأمرِ الموقَّعِ.
+          decision = Object.freeze({
+            ...decision,
+            allowed: true,
+            effect: /** @type {const} */ ('allow'),
+            code: /** @type {const} */ ('POLICY_ALLOW'),
+            reason: `${decision.reason} والأمر الملكي ${commandId} مُجازٌ من الديوان — الإذن صدر بعد التحقّق من الأمر الموقّع لا بفحص الصورة (R6-A-07).`,
           });
         }
       }

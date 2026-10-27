@@ -112,3 +112,75 @@ test(
     }
   },
 );
+
+test('R6-A-07 (جولتا 7 و8): أثرُ السياسةِ السياديّةِ يظهرُ في المحاكاةِ رغمَ تأجيلِ المحرّكِ', () => {
+  // بعدَ إصلاحِ `R6-A-07` يعودُ الفعلُ السياديُّ المأذونُ به بالسياسةِ منَ المحرّكِ
+  // تأجيلًا (`allowed: false` و`policyAllows: true`) — ولو قورنَ بالإذنِ النافذِ
+  // وحدهِ لصارَ تحويلُ سماحِ السياسةِ إلى منعِها «بلا أثرٍ»، ولتخفّى تغييراتُ
+  // العتبةِ السياديّةِ عن تقريرِ الأثرِ كليًا. فهذا الاختبارُ يقيسُ التصنيفَ
+  // بأثرِ السياسةِ لا بالإذنِ النافذِ، في الاتجاهينِ.
+  const currentBundle = loadPolicyBundle();
+  const sovereign = policyById(currentBundle.policies, 'pol:king-sovereign-acts');
+  const denyExport = policyById(currentBundle.policies, 'pol:forbid-key-export');
+  const request = {
+    actor: { id: 'actor:probe', role: 'role:king', state: 'active' },
+    action: 'stop-state',
+    resource: { type: 'state', id: 'all' },
+    royalCommandId: 'cmd:sim-0001',
+    royalCommandDigest: 'a'.repeat(64),
+  };
+  /** @type {import('../../src/policy/simulator.mjs').RecordedPolicyDecision} */
+  const record = {
+    request,
+    allowed: false,
+    code: 'SOVEREIGN_COMMAND_VERIFICATION_REQUIRED',
+    policyId: 'pol:king-sovereign-acts',
+    policyVersion: sovereign.version,
+    recordedAt: new Date(),
+  };
+  /**
+   * @param {PolicyRecord} policy
+   */
+  const withPolicy = (policy) => {
+    const replacement = new Map([[policy.id, policy]]);
+    return Object.freeze({
+      ...currentBundle,
+      policies: Object.freeze(
+        currentBundle.policies.map((candidate) => replacement.get(candidate.id) ?? candidate),
+      ),
+    });
+  };
+  // الاتجاهُ الأولُ: سماحٌ سياديٌّ (تأجيلٌ) يتحوّلُ إلى منعٍ — يظهرُ `allowToDeny`.
+  const deniedSovereign = withPolicy({ ...sovereign, effect: /** @type {const} */ ('deny') });
+  const toDeny = simulatePolicyChange({
+    recorded: [record],
+    currentBundle,
+    proposedBundle: deniedSovereign,
+  });
+  assert.equal(toDeny.allowToDeny, 1, 'تحويلُ سماحٍ سياديٍّ إلى منعٍ لم يظهر في الأثر');
+  assert.equal(toDeny.unchanged, 0);
+
+  // الاتجاهُ الثانيُ: منعٌ سياديٌّ (المفتاحُ المطلقُ) يتحوّلُ إلى سماحٍ — يظهرُ `denyToAllow`.
+  const exportRequest = {
+    ...request,
+    action: 'export-keys',
+    royalCommandId: 'cmd:sim-0002',
+  };
+  /** @type {import('../../src/policy/simulator.mjs').RecordedPolicyDecision} */
+  const exportRecord = {
+    request: exportRequest,
+    allowed: false,
+    code: 'POLICY_DENY',
+    policyId: denyExport.id,
+    policyVersion: denyExport.version,
+    recordedAt: new Date(),
+  };
+  const allowedExport = withPolicy({ ...denyExport, effect: /** @type {const} */ ('allow') });
+  const toAllow = simulatePolicyChange({
+    recorded: [exportRecord],
+    currentBundle,
+    proposedBundle: allowedExport,
+  });
+  assert.equal(toAllow.denyToAllow, 1, 'تحويلُ منعٍ سياديٍّ إلى سماحٍ لم يظهر في الأثر');
+  assert.equal(toAllow.unchanged, 0);
+});
