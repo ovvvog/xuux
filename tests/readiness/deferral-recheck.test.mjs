@@ -155,7 +155,11 @@ test('السجلُّ الحقيقيُّ: كلُّ تأجيلٍ موقوتٌ وو
   assert.deepEqual(
     auditDeferralReviews(registry.deferrals, {
       policy,
-      today: registry.deferrals[0]?.recheck.lastReviewedOn ?? '2026-09-17',
+      today: registry.deferrals.reduce(
+        (latest, d) =>
+          (d.recheck?.lastReviewedOn ?? '') > latest ? d.recheck.lastReviewedOn : latest,
+        '2026-09-17',
+      ),
     }),
     [],
   );
@@ -175,8 +179,8 @@ test('مُطفَرةٌ في السجلِّ: حذفُ موعدِ تأجيلٍ ي�
   try {
     // وتيرةٌ تُطال بيدٍ خارجَ سياسةِ سلطتِها — أخطرُ من حذفٍ ظاهرٍ.
     const mutated = original.replace(
-      "    recheck:\n      cadence: P1M\n      lastReviewedOn: '2026-10-17'",
-      "    recheck:\n      cadence: P3M\n      lastReviewedOn: '2026-10-17'",
+      "    recheck:\n      cadence: P1M\n      lastReviewedOn: '2026-10-27'",
+      "    recheck:\n      cadence: P3M\n      lastReviewedOn: '2026-10-27'",
     );
     assert.notEqual(mutated, original, 'المُطفَرةُ لم تُطبَّق — فالاختبارُ لا يقيسُ شيئاً');
     fs.writeFileSync(DEFERRALS, mutated);
