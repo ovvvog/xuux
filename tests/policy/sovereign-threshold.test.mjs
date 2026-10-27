@@ -91,10 +91,17 @@ const DIGEST_A = 'a'.repeat(64);
 const DIGEST_B = 'b'.repeat(64);
 
 test('الأمر الملكي يفتح فعل العتبة ولا يفتح الممنوع المطلق', () => {
+  // `R6-A-07` (جولتا 7 و8): المحرّكُ لم يعدْ يُصدِرُ إذنًا سياديًّا بفحصِ الصورةِ —
+  // فعلُ العتبةِ المأذونُ به بالسياسةِ يعودُ **تأجيلًا** (`policyAllows: true` و
+  // `allowed: false`)، والإذنَ يُصدِرُهُ الترقيةُ عندَ نقطةِ الإنفاذِ بعدَ تحقُّقِ
+  // الديوانِ من الأمرِ الموقّعِ (يُقاسُ في اختبارِ نقطةِ الإنفاذِ). والممنوعُ
+  // المطلقُ يبقى ممنوعًا لا يفتحهُ أمرٌ ولا تأجيل.
   const stop = pdp.evaluate(
     kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: DIGEST_A }),
   );
-  assert.equal(stop.allowed, true, 'الأمر الملكي المقبول يُنفِذ الفعل السيادي');
+  assert.equal(stop.allowed, false, 'المحرّكُ لا يُجيزُ فعلاً سياديًّا بفحصِ الصورةِ وحدَه');
+  assert.equal(stop.code, 'SOVEREIGN_COMMAND_VERIFICATION_REQUIRED');
+  assert.equal(stop.policyAllows, true, 'السياسةُ تأذنُ — التأجيلُ للتحقّقِ لا رفضَ صلاحية');
   assert.equal(stop.policyId, 'pol:king-sovereign-acts');
   assert.equal(stop.royalCommandId, 'cmd:0001', 'القرار يصف الأمر الذي صدر من أجله');
 
@@ -142,9 +149,27 @@ test('R6-A-07: ملخصٌ لا يمكنُ أن يكونَ ملخصَ أمرٍ ل
   }
 });
 
-test('R6-A-07: الملخصُ ذو الصورةِ الصحيحةِ يبقى نافذاً — الفحصُ صورةٌ لا تشديدٌ على السلطةِ', () => {
+test('R6-A-07 (جولتا 7 و8): ملخصٌ صحيحُ الصورةِ لا يُنتِجُ إذنًا بل تأجيلًا قابلًا للترقية', () => {
+  // الدلالةُ المُصلَحةُ: «نافذ» لم تعدْ صفةَ قرارِ المحرّكِ، بل صفةَ قرارِ نقطةِ
+  // الإنفاذِ بعدَ تحقُّقِ الديوانِ. فحصُ الصورةِ عندَ المحرّكِ يميّزُ ما يمكنُ أن يكونَ
+  // ملخصًا (فيتأجّلُ للتحقّقِ) مما لا يمكنُ (فيرفضُ بربطٍ مشوَّهٍ) — وهذا كلُّ ما
+  // يملكُه المحرّكُ، ولا يملكُ إذنًا. والترقيةُ تُقاسُ في اختبارِ نقطةِ الإنفاذِ
+  // (r6-a-07-sovereign-deferral).
   const decision = pdp.evaluate(
     kingRequest('stop-state', { royalCommandId: 'cmd:0001', royalCommandDigest: DIGEST_A }),
   );
-  assert.equal(decision.allowed, true, 'ملخصٌ صحيحُ الصورةِ رُدَّ — تضييقٌ تجاوزَ نطاقَه');
+  assert.equal(
+    decision.allowed,
+    false,
+    'المحرّكُ أصدرَ إذنًا سياديًّا بفحصِ الصورةِ — العيبُ باقٍ',
+  );
+  assert.equal(decision.code, 'SOVEREIGN_COMMAND_VERIFICATION_REQUIRED');
+  assert.equal(decision.policyAllows, true, 'التأجيلُ فقدَ تمييزَه عن رفضِ الصلاحية');
+  assert.equal(decision.requiresRoyalCommand, true);
+  assert.equal(decision.royalCommandId, 'cmd:0001');
+  assert.equal(
+    decision.royalCommandDigest,
+    DIGEST_A,
+    'القرارُ يحملُ الملخصَ لتقارنه نقطةُ الإنفاذِ بالأمرِ',
+  );
 });

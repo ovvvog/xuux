@@ -123,6 +123,22 @@ export class SafeMode {
 
 export class ExecutionKernel {
   /**
+   * `R6-A-08` (جولتا 7 و8): الوضعُ الآمنُ **خاصّ** لا يُدخَلُ من خارجِ النواةِ.
+   * كانَ الحقلُ عامًّا فمكّنَ مناداةَ `kernel.safeMode.enter()` مباشرةً فتتجاوزُ
+   * فحصَ الإنتاجِ في `stop`/`resume` — فصارَ الدخولُ والخروجُ لا يمرّانِ إلا
+   * بمساري `stop`/`resume` المقيّدينِ بالأمرِ الملكيّ.
+   * @type {SafeMode}
+   */
+  #safeMode;
+  /**
+   * `R6-A-08` (جولتا 7 و8): إنتاجيةُ النواةِ **خاصّةٌ للقراءةِ** أيضًا — getter
+   * لا حقلٌ قابلٌ للكتابةِ. فالكتابةُ المباشرةُ `kernel.production = false`
+   * كانت تفتحُ مسارَ الإيقافِ/الاستئنافِ الحرَّ في نواةٍ إنتاجيةٍ، فلم يعدْ
+   * بالإمكانِ خفضُها ولا رفعُها من خارجِ الباني.
+   * @type {boolean}
+   */
+  #production;
+  /**
    * الاعتماديات موصوفة كاختيارية في النوع لأن التوقيع يقبل الاستدعاء بلا وسائط
    * ويردّ عليه بخطأ مُسمّى `KERNEL_DEPENDENCY_MISSING`. جعلها إلزامية في النوع
    * كان سيحوّل ذلك الخطأ المقروء إلى انهيار تفكيك غامض — أي تغييراً في السلوك.
@@ -150,17 +166,40 @@ export class ExecutionKernel {
     this.policy = policy;
     this.haltSwitch = haltSwitch;
     this.enforcement = enforcement;
-    /** `WL-302`: يُقرأُ مرّةً — في الإنتاجِ لا يُبدَّلُ الوضعُ الآمنُ بنداءِ دالّة. */
-    this.production = isProductionRuntime(env);
+    /**
+     * `R6-A-08` (جولتا 7 و8): إنتاجيةُ النواةِ لا تنزلُ بحقنِ بيئةٍ. البيئةُ
+     * المُمرَّرةُ تُقرأُ، لكنّ **بيئةَ العمليةِ الحقيقيةَ** تُقرأُ معها — فلا يمكنُ
+     * لعمليةٍ إنتاجيةٍ أن تُخفيَ إنتاجيّتَها بحقنِ `env: {}`: البيئةُ الحقيقيةُ
+     * **ترفعُ** إلى الإنتاجِ ولا تخفضُه أبدًا. وتبقى قدرةُ الاختبارِ على محاكاةِ
+     * الإنتاجِ بحقنِ بيئةٍ إنتاجيةٍ في عمليةٍ غيرِ إنتاجيةٍ كما هي.
+     * `WL-302`: يُقرأُ مرّةً — في الإنتاجِ لا يُبدَّلُ الوضعُ الآمنُ بنداءِ دالّة.
+     */
+    this.#production = isProductionRuntime(env) || isProductionRuntime(process.env);
     /**
      * الأفعال المحكومة تُقرأ من **البيانات** لا من نقطة التفويض: لو كانت المعرفة
      * تأتي من النقطة وحدها لصار «لا تُوصل النقطة» هو المسار الجانبي نفسه.
      * @type {ReadonlySet<string>}
      */
     this.governedActions = loadGovernedActions();
-    this.safeMode = new SafeMode();
+    /**
+     * `R6-A-08` (جولتا 7 و8): الوضعُ الآمنُ **خاصّ** لا يُدخَلُ من خارجِ النواةِ.
+     * كانَ الحقلُ عامًّا فمكّنَ مناداةَ `kernel.safeMode.enter()` مباشرةً فتتجاوزُ
+     * فحصَ الإنتاجِ في `stop`/`resume` — فصارَ الدخولُ والخروجُ لا يمرّانِ إلا
+     * بمساري `stop`/`resume` المقيّدينِ بالأمرِ الملكيّ.
+     * @type {SafeMode}
+     */
+    this.#safeMode = new SafeMode();
     /** @type {Map<string, Task>} */
     this.tasks = new Map();
+  }
+
+  /**
+   * إنتاجيةُ النواةِ للقراءةِ من الخارجِ لا للكتابةِ (`R6-A-08`): الكتابةُ المباشرةُ
+   * على الحقلِ كانت تفتحُ مسارَ الإيقافِ/الاستئنافِ الحرَّ في نواةٍ إنتاجيةٍ.
+   * @returns {boolean}
+   */
+  get production() {
+    return this.#production;
   }
   /**
    * يُقدّم أمراً موقّعاً للتنفيذ: يُجيزه التاج أولاً، ثم يُنفَّذ المُعالِج تحت
@@ -174,7 +213,7 @@ export class ExecutionKernel {
   async submit(command, signature, handler, authorization = {}) {
     // الإيقاف الشامل أولاً: قرارٌ سيادي دائم يعلو على الوضع الآمن المحلي.
     if (this.haltSwitch) this.haltSwitch.assertOperational();
-    this.safeMode.assertOperational();
+    this.#safeMode.assertOperational();
     if (typeof handler !== 'function') throw new Error('TASK_HANDLER_REQUIRED');
     // التفويض يُفحص **قبل** قبول التاج: أمرٌ لن يُنفَّذ لا يجوز أن يُحرق معرّفه
     // في دفتر الأوامر، فيبقى قابلاً للإصدار من جديد بعد الحصول على تذكرة.
@@ -326,8 +365,8 @@ export class ExecutionKernel {
   stop(reason = 'kernel emergency stop', actorId = 'crown') {
     // `WL-302`: نصُّ فاعلٍ (`'crown'`) ليس سلطةً. في الإنتاجِ يُرفَضُ هذا المسارُ،
     // والوضعُ الآمنُ يُدخَلُ بـ`enterSafeMode` بأمرٍ ملكيٍّ موقَّعٍ عبرَ `HaltSwitch`.
-    if (this.production) throw new Error('KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND');
-    this.safeMode.enter(reason);
+    if (this.#production) throw new Error('KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND');
+    this.#safeMode.enter(reason);
     this.log.append('kernel.safe-mode.entered', actorId, { reason });
   }
   /**
@@ -338,8 +377,8 @@ export class ExecutionKernel {
    * @returns {void}
    */
   resume(actorId = 'crown') {
-    if (this.production) throw new Error('KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND');
-    this.safeMode.leave();
+    if (this.#production) throw new Error('KERNEL_SAFE_MODE_REQUIRES_ROYAL_COMMAND');
+    this.#safeMode.leave();
     this.log.append('kernel.safe-mode.left', actorId, {});
   }
 
