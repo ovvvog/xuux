@@ -383,11 +383,17 @@ test('كلُّ ارتباطٍ له معيارُ قبولٍ ومُخرَجاتٌ 
 
 test('الوثيقةُ تُصرِّح بما لا تقولُه ولا تحمل لفظَ اعتمادٍ ذاتيٍّ', () => {
   const doc = readFileSync(join(ROOT, DOC_PATH), 'utf8');
-  for (const needle of [
-    'ما لا تقولُه هذه الوثيقةُ',
-    'الحدودُ المعلَنةُ',
-    'awaiting-model-council',
-  ]) {
+  // الحالةُ تُشتقُّ منَ العقدِ لا تُصلَّبُ في الاختبارِ: العقدُ تحرّكَ من
+  // `awaiting-model-council` إلى `council-findings-recorded` بعدَ عملِ المجلسِ،
+  // وتصلّيبُ الحالةِ القديمةِ كانَ سيُبقي الوثيقةَ مُضطرّةً إلى ادّعاءٍ تقادمَ.
+  const contractStatuses = [
+    ...new Set(
+      /** @type {Record<string, unknown>[]} */ (readContract()['engagements'] ?? []).map(
+        (engagement) => String(engagement['status'] ?? ''),
+      ),
+    ),
+  ].filter(Boolean);
+  for (const needle of ['ما لا تقولُه هذه الوثيقةُ', 'الحدودُ المعلَنةُ', ...contractStatuses]) {
     assert.ok(doc.includes(needle), `الوثيقةُ لا تُصرِّح بحدِّها: «${needle}»`);
   }
   for (const id of EXPECTED_ENGAGEMENTS) {
