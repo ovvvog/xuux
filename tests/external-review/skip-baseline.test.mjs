@@ -71,7 +71,7 @@ function makeTree(opts = {}) {
       skipLines: 128,
       topLevelSkipPoints: 121,
       attributedToDatabaseUrl: 92,
-      otherReasons: [{ reason: 'swtpm unavailable', count: 25 }],
+      otherReasons: [{ reason: 'swtpm unavailable', count: 36 }],
       ...(opts.artifactPatch ?? {}),
     };
     writeFileSync(
@@ -129,6 +129,56 @@ test('R5-A-06: نسبةٌ إلى DATABASE_URL أكبرُ من عدّادِ ال�
     makeTree({ declared: '٢٠٠', artifactPatch: { attributedToDatabaseUrl: 200 } }),
   );
   assert.ok(violations.some((v) => v.startsWith('R1/SANITY')));
+});
+
+test('R8-03: تفصيلُ الأسبابِ ناقصٌ (لا يُجمَعُ إلى أسطرِ # SKIP) ⇒ مردودٌ بـR1/BREAKDOWN', () => {
+  // المقترحُ R8-03 (عضوٌ واحدٌ، جولةٌ غيرُ مكتملة): الحاجزُ كانَ يتحقّقُ من أنَّ كلَّ رقمٍ
+  // مُعلَنٍ مقيسٌ، ولا يتحقّقُ من أنَّ التفصيلَ كاملٌ. سببٌ ساقطٌ بثلاثةِ اختباراتٍ هنا.
+  const { violations } = checkSkipBaseline(
+    makeTree({ artifactPatch: { otherReasons: [{ reason: 'swtpm unavailable', count: 33 }] } }),
+  );
+  const hit = violations.filter((v) => v.startsWith('R1/BREAKDOWN'));
+  assert.equal(hit.length, 1, `تُوقِّعَ انتهاكٌ واحدٌ، والذي وقعَ: ${violations.join(' | ')}`);
+  assert.match(hit[0] ?? '', /125.*128/);
+});
+
+test('R8-03: تفصيلٌ زائدٌ على أسطرِ # SKIP ⇒ مردودٌ بـR1/BREAKDOWN', () => {
+  const { violations } = checkSkipBaseline(
+    makeTree({
+      artifactPatch: {
+        otherReasons: [
+          { reason: 'swtpm unavailable', count: 36 },
+          { reason: 'سببٌ مُختلَقٌ', count: 2 },
+        ],
+      },
+    }),
+  );
+  assert.ok(violations.some((v) => v.startsWith('R1/BREAKDOWN')));
+});
+
+test('R8-03: سببُ DATABASE_URL مكرَّرٌ في «الأسبابِ الأخرى» أو سببٌ مكرَّرٌ أو عددٌ غيرُ موجبٍ ⇒ مردودٌ بـR1/BREAKDOWN', () => {
+  for (const otherReasons of [
+    [
+      { reason: 'swtpm unavailable', count: 30 },
+      { reason: 'DATABASE_URL غائب', count: 6 },
+    ],
+    [
+      { reason: 'swtpm unavailable', count: 18 },
+      { reason: 'swtpm unavailable', count: 18 },
+    ],
+    [
+      { reason: 'swtpm unavailable', count: 36 },
+      { reason: 'صفر', count: 0 },
+    ],
+    [{ reason: '', count: 36 }],
+    'ليست قائمة',
+  ]) {
+    const { violations } = checkSkipBaseline(makeTree({ artifactPatch: { otherReasons } }));
+    assert.ok(
+      violations.some((v) => v.startsWith('R1/BREAKDOWN')),
+      `${JSON.stringify(otherReasons)} ⇒ ${violations.join(' | ')}`,
+    );
+  }
 });
 
 test('R5-A-06: حقلٌ غيرُ عددٍ صحيحٍ في الأثرِ ⇒ مردودٌ بـR1/FIELD', () => {

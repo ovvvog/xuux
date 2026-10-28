@@ -26,6 +26,13 @@
 //     أساسُهُ بعدَ فتحِهِ يَسقُطُ قبلَ الدمجِ لا بعدَهُ. **ولا يُستثنى بمنفَذِ
 //     الإخفاقِ الذاتيِّ قطعاً** (‏`LIVE-16`): لا يقولُ «الأثرُ متقادِمٌ» بل «الأساسُ
 //     تحرَّكَ»، وعلاجُهُ إعادةُ قياسٍ لا استثناءٌ.
+//   - R1/BREAKDOWN (‏`R8-03`، مقترحُ عضوٍ واحدٍ لا نتيجةٌ معتمدةٌ): تفصيلُ الأسبابِ
+//     **كاملٌ** — `attributedToDatabaseUrl` + مجموعُ `otherReasons` = `skipLines`، لأنَّ
+//     القياسَ يَعُدُّ سببَ كلِّ سطرِ `# SKIP` (‏`measure-skip-baseline.mjs`). وكلُّ سببٍ
+//     نصٌّ غيرُ فارغٍ لا يُكرَّرُ ولا يحملُ `DATABASE_URL`، وعددُهُ صحيحٌ موجبٌ. فسببٌ
+//     ساقطٌ من التفصيلِ أو مُختلَقٌ فيه يَسقُطُ لا يَمُرُّ أخضرَ. **وحدٌّ معلَنٌ:** هذا
+//     يَحرُسُ الأثرَ لا نصَّ الخطّةِ؛ والأسبابُ تابعةٌ للمضيفِ (‏`pwsh` والمساحاتُ والعزلُ)،
+//     والبصمةُ (‏R7) بصمةُ الشجرةِ لا المضيفِ — فقياسٌ على مضيفٍ آخرَ قد يختلفُ تفصيلُهُ.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
@@ -199,6 +206,38 @@ export function checkSkipBaseline(root) {
         violations.push(`R2/DUPLICATE: مُدخلتانِ لخطّةٍ واحدةٍ: ${e.plan}`);
       } else {
         byPlan.set(e.plan, e);
+      }
+    }
+    // ── R1/BREAKDOWN ──
+    if (!Array.isArray(e?.otherReasons)) {
+      violations.push(`R1/BREAKDOWN: المُدخلةُ ${i} حقلُها \`otherReasons\` ليسَ قائمةً.`);
+    } else {
+      /** @type {Set<string>} */
+      const seen = new Set();
+      let sum = Number.isInteger(e?.attributedToDatabaseUrl) ? e.attributedToDatabaseUrl : 0;
+      for (const r of e.otherReasons) {
+        const reason = typeof r?.reason === 'string' ? r.reason.trim() : '';
+        if (reason.length === 0 || !Number.isInteger(r?.count) || r.count <= 0) {
+          violations.push(
+            `R1/BREAKDOWN: المُدخلةُ ${i} فيها سببٌ بلا نصٍّ أو بعددٍ غيرِ صحيحٍ موجبٍ: ${JSON.stringify(r)}`,
+          );
+          continue;
+        }
+        if (reason.includes('DATABASE_URL')) {
+          violations.push(
+            `R1/BREAKDOWN: المُدخلةُ ${i} تُدرِجُ سببَ DATABASE_URL في «الأسبابِ الأخرى» — يُعَدُّ مرّتين.`,
+          );
+        }
+        if (seen.has(reason)) {
+          violations.push(`R1/BREAKDOWN: المُدخلةُ ${i} تُكرِّرُ السببَ نفسَه: ${reason}`);
+        }
+        seen.add(reason);
+        sum += r.count;
+      }
+      if (Number.isInteger(e?.skipLines) && sum !== e.skipLines) {
+        violations.push(
+          `R1/BREAKDOWN: المُدخلةُ ${i} تفصيلُها يُجمَعُ إلى ${sum} وأسطرُ # SKIP ${e.skipLines} — التفصيلُ ناقصٌ أو زائدٌ.`,
+        );
       }
     }
     if (Number.isInteger(e?.attributedToDatabaseUrl) && Number.isInteger(e?.skipped)) {
