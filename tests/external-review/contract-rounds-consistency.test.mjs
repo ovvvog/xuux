@@ -162,3 +162,62 @@ test('CO55-M11.05-R3-03: رقمُ الجولةِ في عنوانِ التقري�
     'كلُّ عنوانٍ رقميٍّ صريحٍ يطابقُ اسمَ ملفِّهِ أو استثناءً موثَّقاً',
   );
 });
+
+const MISSING_REPORTS_NOTE = path.join(
+  REPO_ROOT,
+  'docs',
+  'external-review',
+  'council-membership-missing-raw-reports.md',
+);
+
+/** @returns {Array<{ engagement: string, member: string, round: number }>} */
+function knownMissingRawReports() {
+  const note = readFileSync(MISSING_REPORTS_NOTE, 'utf8');
+  const fenced = note.match(/```yaml\n([\s\S]*?)```/);
+  assert.notEqual(fenced, null, 'سجلُّ العضوياتِ بلا تقريرٍ خامٍّ يحملُ كتلةَ yaml');
+  const parsed = YAML.parse(/** @type {string} */ (fenced?.[1]));
+  return Array.isArray(parsed?.knownMissingRawReports) ? parsed.knownMissingRawReports : [];
+}
+
+/**
+ * @param {string} engagementId
+ * @param {string} memberId
+ * @param {number} round
+ */
+function rawReportFileName(engagementId, memberId, round) {
+  return `${engagementId}-round-${round}-model-council-report-${memberId.replace(/_/g, '-')}.md`;
+}
+
+test('R8-02: كلُّ عضويةٍ مسجَّلةٍ في العقدِ لها تقريرٌ خامٌّ على القرصِ — إلا استثناءً موثَّقاً غيرَ متقادمٍ', () => {
+  // الاتجاهُ المعاكسُ لاختبارَي العدَّادِ أعلاه: هناك «القرصُ والعضويةُ ≤ العدَّادِ»،
+  // وهنا «العضويةُ ⇒ أثرٌ خامٌّ». بلا هذا يُسجَّلُ عضوٌ بجولةٍ لا أثرَ لها.
+  const onDisk = new Set(existsSync(REPORTS_DIR) ? readdirSync(REPORTS_DIR) : []);
+  const exceptions = knownMissingRawReports();
+  const key = (/** @type {string} */ e, /** @type {string} */ m, /** @type {number} */ r) =>
+    `${e}/${m}/${r}`;
+  const excepted = new Set(exceptions.map((x) => key(x.engagement, x.member, x.round)));
+  const membership = new Set();
+  const violations = [];
+  for (const engagement of councilEngagements()) {
+    const members = engagement.executedBy?.members;
+    if (!Array.isArray(members)) continue;
+    for (const member of members) {
+      if (!Array.isArray(member?.rounds)) continue;
+      for (const round of member.rounds) {
+        const k = key(engagement.id, member.id, round);
+        membership.add(k);
+        const present = onDisk.has(rawReportFileName(engagement.id, member.id, round));
+        if (!present && !excepted.has(k)) {
+          violations.push(`${k}: عضويةٌ بلا تقريرٍ خامٍّ ولا استثناءٍ موثَّقٍ`);
+        }
+        if (present && excepted.has(k)) {
+          violations.push(`${k}: استثناءٌ متقادمٌ — التقريرُ موجودٌ فاحذفِ الاستثناءَ`);
+        }
+      }
+    }
+  }
+  for (const k of excepted) {
+    if (!membership.has(k)) violations.push(`${k}: استثناءٌ وهميٌّ لا يطابقُ عضويةً مسجَّلةً`);
+  }
+  assert.deepEqual(violations, [], 'العضويةُ والأثرُ الخامُّ متّسقانِ في الاتجاهينِ');
+});
