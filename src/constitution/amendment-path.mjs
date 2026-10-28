@@ -23,9 +23,18 @@
  * لا يُميَّز عن الخلل.
  *
  * **حدودٌ معلَنة:**
- *   1. **الطروحُ في الذاكرة**، لا في جدول. فطرحٌ لم يُبرَم يزول بإعادة التشغيل
- *      ويلزم إعادةُ طرحه بأمرٍ جديد. والاتجاهُ آمن (فقدانُ طرحٍ لا يُنشئ
- *      تعديلاً)، لكنه **نقصٌ مُعلَن** لا ميزة، مكتوبٌ في `docs/REMAINING_WORK.md`.
+ *   1. **الطروحُ تُستعاد من السجلِّ لا من لقطة** (`WL-484`، شطرُ المقترحاتِ في
+ *      `R6-A-05`). كانت الطروحُ ومعرّفاتُ الأوامرِ المستهلَكةِ في الذاكرةِ وحدَها،
+ *      فكانت إعادةُ التشغيلِ تُسقِطُ الطرحَ **وتُعيدُ قبولَ أمرٍ استُهلك**. صارَ
+ *      المُنشئُ يُعيدُ بناءَهما من أحداثِ القناةِ في سجلِّ الأحداثِ المتسلسلِ
+ *      (الشاهد)، ويُطابقُها **في الاتجاهين** مع سلسلةِ الدستورِ الموقَّعة؛ وأيُّ
+ *      شاهدٍ خربٍ أو متعارضٍ أو متراجعٍ يُسقِطُ التركيبَ مغلقاً
+ *      (`CONSTITUTION_PROPOSALS_WITNESS_INVALID`/`..._CONFLICT`). وحدودُهُ:
+ *      سجلٌّ مختومٌ (`sealed`) لا يُقرأُ متزامناً فيُرفَضُ صراحةً (والإلحاقُ
+ *      المتزامنُ عليهِ مرفوضٌ أصلاً)؛ وتراجعُ السجلِّ إلى ما قبلَ طرحٍ لم يُبرَمْ
+ *      لا يُكشَفُ إلا بمرساةٍ خارجيّةٍ (`EXT-6`) — والاتجاهُ آمن: طرحٌ مفقودٌ لا
+ *      يُنشئُ تعديلاً؛ وطرحٌ قديمٌ بلا نصٍّ في حدثِهِ (قبلَ `WL-484`) لا يُستعادُ
+ *      بل يُحصى في `unrecoverable` ويبقى أمرُهُ مستهلَكاً.
  *   2. الوحدةُ **تتحقّق من أمرٍ مقبولٍ سلفاً** من `CrownGateway` ولا تتحقّق من
  *      التوقيع بنفسها؛ فقبولُ الأمر مسؤوليةُ البوابة، وهذه الوحدةُ تفحص
  *      **مطابقةَ الأمر للفعل والهدف والحِمل وعدمَ إعادةِ استعماله**.
@@ -86,6 +95,10 @@ export const AMENDMENT_ERRORS = Object.freeze({
   REVIEW_CONFLICT: 'CONSTITUTION_REVIEW_CONFLICT',
   SELF_REVIEW_REFUSED: 'CONSTITUTION_SELF_REVIEW_REFUSED',
   DELIBERATION_INCOMPLETE: 'CONSTITUTION_DELIBERATION_INCOMPLETE',
+  /** شاهدُ الاسترجاعِ (السجلّ) خربٌ أو ناقصُ الحقولِ أو لا يُقرأ (`WL-484`). */
+  WITNESS_INVALID: 'CONSTITUTION_PROPOSALS_WITNESS_INVALID',
+  /** الشاهدُ سليمُ الشكلِ لكنّه يناقضُ نفسَهُ أو سلسلةَ الدستورِ (`WL-484`). */
+  WITNESS_CONFLICT: 'CONSTITUTION_PROPOSALS_WITNESS_CONFLICT',
 });
 
 /** فاعلٌ في المسار: هويّةٌ **ودورٌ مُصرَّحٌ به من خارج الوحدة** لا مطالبةٌ في نصّ. */
@@ -167,6 +180,258 @@ export class AmendmentPath {
     this.proposals = new Map();
     /** @type {Set<string>} معرّفاتُ الأوامر التي استُهلكت في هذا المسار. */
     this.consumedCommands = new Set();
+    /** @type {Set<string>} طروحٌ شُهِدَت بلا نصٍّ (قبلَ `WL-484`) فلا تُستعاد. */
+    this.unrecoverable = new Set();
+    /** @type {number[]} عهودُ تعديلٍ في السلسلةِ وقعَ الانقطاعُ قبلَ قيدِ إبرامِها. */
+    this.ratifiedWithoutWitness = [];
+    this.#restoreFromWitness();
+  }
+
+  /**
+   * **الاسترجاعُ من الشاهد** (`WL-484`، `R6-A-05`). يُعيدُ بناءَ الطروحِ والأوامرِ
+   * المستهلَكةِ بإعادةِ تطبيقِ أحداثِ القناةِ بالترتيبِ وبالقواعدِ نفسِها التي
+   * فرضَها المسارُ حيّاً؛ فحدثٌ ما كانَ المسارُ ليقبلَهُ حيّاً شاهدٌ متعارض.
+   * ثمّ يُطابقُ الشاهدَ بسلسلةِ الدستورِ الموقَّعةِ في الاتجاهين:
+   *   - إبرامٌ في السجلِّ بلا عهدٍ مطابقٍ في السلسلة ⇒ السلسلةُ تراجعت أو غريبة؛
+   *   - عهدُ تعديلٍ في السلسلةِ بلا طرحٍ مُراجَعٍ مطابقٍ في السجلّ ⇒ السجلُّ
+   *     تراجعَ أو غريب. **والاستثناءُ الوحيدُ** نافذةُ الانقطاعِ بينَ كتابةِ العهدِ
+   *     وقيدِ الإبرام: عهدٌ **أخيرٌ** يطابقُ طرحاً مُراجَعاً متوافقاً على العهدِ
+   *     السابقِ له نصّاً ومادّةً ومعرّفاً — فيُعدُّ مُبرَماً ويُحصى في
+   *     `ratifiedWithoutWitness`، لأنّ السلسلةَ موقَّعةٌ بمفتاحِ الملكِ ولا تُكتَبُ
+   *     إلا من `ratify` بعدَ كلِّ فحوصِه.
+   * لا يكتبُ شيئاً في السجلّ؛ فالإقلاعُ نفسُهُ قراءةٌ لا واقعة.
+   * @returns {void}
+   */
+  #restoreFromWitness() {
+    const log =
+      /** @type {{ sealed?: unknown, events?: unknown, verifyChain?: () => { ok: boolean, brokenAt?: number } }} */ (
+        /** @type {unknown} */ (this.log)
+      );
+    /** @type {(detail: string) => never} */
+    const invalid = (detail) => {
+      throw new ConstitutionError(AMENDMENT_ERRORS.WITNESS_INVALID, detail);
+    };
+    /** @type {(detail: string) => never} */
+    const conflict = (detail) => {
+      throw new ConstitutionError(AMENDMENT_ERRORS.WITNESS_CONFLICT, detail);
+    };
+    if (log.sealed === true) {
+      invalid(
+        'سجلٌّ مختومٌ لا تُقرأ متونُهُ متزامنةً؛ ومسارُ التعديلِ يُلحِقُ متزامناً — فلا يُركَّبُ عليهِ بلا مسارٍ لامتزامنٍ مُصمَّم.',
+      );
+    }
+    if (log.events === undefined) return; // سجلٌّ بلا قراءةٍ (بديلٌ اختباريٌّ): لا شاهدَ يُستعاد
+    if (!Array.isArray(log.events)) invalid('أحداثُ السجلِّ ليست قائمة؛ فلا يُقرأ الشاهد.');
+    if (typeof log.verifyChain === 'function') {
+      const chain = log.verifyChain();
+      if (!chain.ok) {
+        invalid(
+          `سلسلةُ السجلِّ مكسورةٌ عندَ ${String(chain.brokenAt)}؛ ولا يُستعادُ طرحٌ من شاهدٍ خرب.`,
+        );
+      }
+    }
+    const revisions = this.store.revisions().map(({ revision }) => revision);
+    /** @type {Map<number, ConstitutionRevision>} */
+    const byEpoch = new Map(revisions.map((revision) => [revision.epoch, revision]));
+    /**
+     * نصُّ المادّةِ النافذُ عندَ عهدٍ بعينه — من النصِّ المؤسِّسِ وما أُبرم حتّاه.
+     * @param {string} articleId
+     * @param {number} epoch
+     * @returns {string | null}
+     */
+    const textAt = (articleId, epoch) => {
+      const founding = this.policy.articles.find((article) => article.id === articleId);
+      if (!founding) return null;
+      let text = founding.text;
+      for (const revision of revisions) {
+        if (revision.epoch > epoch) break;
+        if (revision.kind === 'amendment' && revision.articleId === articleId) {
+          text = revision.text ?? text;
+        }
+      }
+      return text;
+    };
+    /** @type {Set<number>} */
+    const witnessedEpochs = new Set();
+    const str = (/** @type {unknown} */ v) => typeof v === 'string' && v.trim() !== '';
+
+    for (const event of /** @type {Array<{ seq?: number, type: string, actor: string, data: Record<string, unknown>, at: string }>} */ (
+      log.events
+    )) {
+      if (typeof event?.type !== 'string' || !event.type.startsWith('constitution.amendment.'))
+        continue;
+      if (event.type === 'constitution.amendment.refused') continue; // الرفضُ لا يُغيّرُ حالاً
+      const where = `الحدث ${String(event.seq)} (${event.type})`;
+      const d = isPlainObject(event.data) ? event.data : invalid(`${where}: متنٌ ليس كائناً.`);
+      if (!str(d.proposalId)) invalid(`${where}: بلا معرّفِ طرح.`);
+      const id = /** @type {string} */ (d.proposalId);
+
+      if (event.type === 'constitution.amendment.proposed') {
+        if (
+          !str(d.commandId) ||
+          !str(d.proposalHash) ||
+          !str(d.articleId) ||
+          !Number.isInteger(d.epoch)
+        ) {
+          invalid(`${where}: حقولُ الطرحِ ناقصة.`);
+        }
+        const commandId = /** @type {string} */ (d.commandId);
+        if (this.consumedCommands.has(commandId)) {
+          conflict(
+            `${where}: الأمرُ ${commandId} استُهلكَ قبلاً في الشاهد؛ والمسارُ حيّاً ما كانَ ليقبلَه.`,
+          );
+        }
+        this.consumedCommands.add(commandId);
+        if (d.text === undefined && d.previousText === undefined && d.proposedAt === undefined) {
+          // طرحٌ سابقٌ لـ`WL-484`: حدثُهُ يحملُ التجزئةَ لا النصّ — فلا يُستعاد.
+          this.proposals.delete(id);
+          this.unrecoverable.add(id);
+          continue;
+        }
+        if (
+          !str(d.text) ||
+          typeof d.previousText !== 'string' ||
+          epochMs(d.proposedAt) === null ||
+          !str(d.reason)
+        ) {
+          invalid(`${where}: نصُّ الطرحِ أو سببُهُ أو وقتُهُ ناقصٌ أو خربان.`);
+        }
+        const epoch = /** @type {number} */ (d.epoch);
+        const articleId = /** @type {string} */ (d.articleId);
+        const recomputed = AmendmentPath.hashProposal({
+          articleId,
+          previousText: /** @type {string} */ (d.previousText),
+          text: /** @type {string} */ (d.text),
+          proposer: event.actor,
+          epoch,
+          reason: /** @type {string} */ (d.reason),
+        });
+        if (recomputed !== d.proposalHash || recomputed.slice(0, 32) !== id) {
+          invalid(`${where}: التجزئةُ المختومةُ لا تطابقُ حقولَ الطرحِ المقروءة.`);
+        }
+        if (!byEpoch.has(epoch)) {
+          conflict(
+            `${where}: طرحٌ على العهد ${epoch} والسلسلةُ لا تبلغُه — السلسلةُ تراجعت أو غريبة.`,
+          );
+        }
+        if (textAt(articleId, epoch) !== d.previousText) {
+          conflict(
+            `${where}: النصُّ السابقُ في الطرحِ لا يطابقُ نصَّ المادّةِ في السلسلةِ عندَ العهد ${epoch}.`,
+          );
+        }
+        this.unrecoverable.delete(id);
+        this.proposals.set(id, {
+          id,
+          articleId,
+          previousText: /** @type {string} */ (d.previousText),
+          text: /** @type {string} */ (d.text),
+          reason: /** @type {string} */ (d.reason),
+          proposer: event.actor,
+          proposedAt: /** @type {string} */ (d.proposedAt),
+          epoch,
+          proposalHash: recomputed,
+          state: ProposalState.PROPOSED,
+          review: null,
+          ratifiedEpoch: null,
+        });
+        continue;
+      }
+
+      if (event.type === 'constitution.amendment.reviewed') {
+        if (this.unrecoverable.has(id)) continue;
+        const proposal = this.proposals.get(id);
+        if (!proposal) conflict(`${where}: مراجعةٌ لطرحٍ لم يشهدْهُ السجلّ.`);
+        if (proposal.state !== ProposalState.PROPOSED) {
+          conflict(`${where}: مراجعةٌ ثانيةٌ لطرحٍ في حالة «${proposal.state}».`);
+        }
+        if (event.actor === proposal.proposer) conflict(`${where}: الطارحُ راجعَ طرحَه.`);
+        const verdict = d.verdict;
+        if (verdict !== ReviewVerdict.COMPATIBLE && verdict !== ReviewVerdict.CONFLICT) {
+          invalid(`${where}: حكمُ مراجعةٍ غيرُ معروف.`);
+        }
+        const state =
+          verdict === ReviewVerdict.COMPATIBLE ? ProposalState.REVIEWED : ProposalState.REFUSED;
+        if (d.state !== state || !str(d.opinion))
+          invalid(`${where}: الحالةُ لا تطابقُ الحكمَ أو الرأيُ غائب.`);
+        const at = d.at === undefined ? event.at : d.at;
+        if (epochMs(at) === null) invalid(`${where}: وقتُ المراجعةِ خربان.`);
+        proposal.review = {
+          reviewer: event.actor,
+          verdict: /** @type {string} */ (verdict),
+          opinion: /** @type {string} */ (d.opinion),
+          at: /** @type {string} */ (at),
+        };
+        proposal.state = state;
+        continue;
+      }
+
+      if (event.type === 'constitution.amendment.ratified') {
+        if (!str(d.commandId) || !Number.isInteger(d.epoch) || !str(d.articleId)) {
+          invalid(`${where}: حقولُ الإبرامِ ناقصة.`);
+        }
+        const commandId = /** @type {string} */ (d.commandId);
+        if (this.consumedCommands.has(commandId)) {
+          conflict(`${where}: أمرُ الإبرامِ ${commandId} استُهلكَ قبلاً في الشاهد.`);
+        }
+        this.consumedCommands.add(commandId);
+        const epoch = /** @type {number} */ (d.epoch);
+        const revision = byEpoch.get(epoch);
+        if (
+          !revision ||
+          revision.kind !== 'amendment' ||
+          revision.amendmentId !== id ||
+          revision.articleId !== d.articleId
+        ) {
+          conflict(
+            `${where}: إبرامٌ على العهد ${epoch} لا يقابلُهُ عهدٌ مطابقٌ في السلسلة — السلسلةُ تراجعت أو غريبة.`,
+          );
+        }
+        if (witnessedEpochs.has(epoch))
+          conflict(`${where}: العهدُ ${epoch} أُبرمَ مرّتين في الشاهد.`);
+        witnessedEpochs.add(epoch);
+        if (this.unrecoverable.has(id)) continue;
+        const proposal = this.proposals.get(id);
+        if (!proposal) conflict(`${where}: إبرامٌ لطرحٍ لم يشهدْهُ السجلّ.`);
+        if (proposal.state !== ProposalState.REVIEWED) {
+          conflict(
+            `${where}: إبرامُ طرحٍ في حالة «${proposal.state}» والمسارُ لا يُبرمُ إلا المراجَعَ المتوافق.`,
+          );
+        }
+        if (
+          d.proposalHash !== proposal.proposalHash ||
+          revision.text !== proposal.text ||
+          epoch !== proposal.epoch + 1
+        ) {
+          conflict(`${where}: العهدُ المُبرَمُ لا يطابقُ الطرحَ نصّاً أو تجزئةً أو تعاقباً.`);
+        }
+        proposal.state = ProposalState.RATIFIED;
+        proposal.ratifiedEpoch = epoch;
+        continue;
+      }
+      invalid(`${where}: نوعٌ غيرُ معروفٍ في قناةِ الدستور.`);
+    }
+
+    // الاتجاهُ المعاكس: كلُّ عهدِ تعديلٍ في السلسلةِ له إبرامٌ في الشاهد.
+    const top = revisions.at(-1)?.epoch ?? 0;
+    for (const revision of revisions) {
+      if (revision.kind !== 'amendment' || witnessedEpochs.has(revision.epoch)) continue;
+      const proposal = this.proposals.get(revision.amendmentId ?? '');
+      const crashGap =
+        revision.epoch === top &&
+        proposal !== undefined &&
+        proposal.state === ProposalState.REVIEWED &&
+        proposal.epoch + 1 === revision.epoch &&
+        proposal.articleId === revision.articleId &&
+        proposal.text === revision.text;
+      if (!crashGap) {
+        conflict(
+          `العهدُ ${revision.epoch} في السلسلةِ بلا إبرامٍ في الشاهدِ ولا طرحٍ مُراجَعٍ يطابقُه — السجلُّ تراجعَ أو غريب.`,
+        );
+      }
+      proposal.state = ProposalState.RATIFIED;
+      proposal.ratifiedEpoch = revision.epoch;
+      this.ratifiedWithoutWitness.push(revision.epoch);
+    }
   }
 
   /**
@@ -382,6 +647,11 @@ export class AmendmentPath {
       epoch,
       commandId: accepted.id,
       reason: why,
+      // `WL-484`: ما يلزمُ لاسترجاعِ الطرحِ بعدَ إعادةِ التشغيل — فالتجزئةُ وحدَها
+      // تشهدُ ولا تُعيدُ نصّاً.
+      text: nextText,
+      previousText: article.text,
+      proposedAt: proposal.proposedAt,
     });
     return Object.freeze({ ...proposal });
   }
@@ -461,6 +731,7 @@ export class AmendmentPath {
       verdict,
       opinion: said,
       state: proposal.state,
+      at: review.at,
     });
     return Object.freeze({ ...proposal, review: Object.freeze({ ...review }) });
   }
