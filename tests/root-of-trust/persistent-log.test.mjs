@@ -506,6 +506,8 @@ test('رموز أخطاء السجل الدائم مثبَّتة نصاً، وا
       'EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION',
       'SEALED_LOG_REQUIRES_ASYNC_APPEND',
       'EVENT_LOG_SEALER_MISSING',
+      // WL-485: رابطٌ رمزيٌّ معلَّقٌ إلى ملفِّ السجلِّ يُرفَضُ برمزٍ لا بإنشاءِ ملفٍّ لا يحرسُهُ قفل.
+      'LOG_PATH_UNRESOLVABLE',
     ],
   );
   const error = new PersistentLogError('CORRUPT_EVENT_LOG', { brokenAt: 4 });

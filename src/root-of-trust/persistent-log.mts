@@ -42,16 +42,18 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   truncateSync,
   writeFileSync,
   writeSync,
 } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { beforeDurableWrite } from './commit-barrier.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import {
@@ -81,6 +83,7 @@ export const PersistentLogErrorCodes = [
   'EVENT_LOG_SEAL_REQUIRED_IN_PRODUCTION',
   'SEALED_LOG_REQUIRES_ASYNC_APPEND',
   'EVENT_LOG_SEALER_MISSING',
+  'LOG_PATH_UNRESOLVABLE',
 ] as const;
 
 export type PersistentLogErrorCode = (typeof PersistentLogErrorCodes)[number];
@@ -320,6 +323,39 @@ export function inspectEventLog(file: string): EventLogInspection {
   return inspection;
 }
 
+/**
+ * **المسارُ القانونيُّ لملفِّ السجلّ** (‏`WL-485`). كانَ القفلُ والرأسُ يُشتقّانِ من نصِّ
+ * المسارِ المُمرَّر، فرابطٌ رمزيٌّ إلى الملفِّ أو إلى مجلّدِهِ يأخذُ قفلاً آخرَ ويفتحُ كاتباً
+ * ثانياً على السجلِّ نفسِه (‏مقترحُ `CO55-M11.05-R8-01` من تقريرِ عضوٍ منفرد). صارَ المجلّدُ
+ * يُحَلُّ بـ`realpathSync.native` (‏يُوحِّدُ الروابطَ ومحارفَ الحالةِ حيثُ النظامُ لا يُفرِّقُها)،
+ * والملفُّ إن كانَ رابطاً رمزيّاً يُحَلُّ إلى هدفِه؛ ورابطٌ معلَّقٌ يُرفَضُ
+ * (‏`LOG_PATH_UNRESOLVABLE`) لأنّ الكتابةَ عبرَهُ تُنشئُ ملفّاً لا يعرفُهُ قفلُه.
+ * **حدٌّ معلَن:** الروابطُ الصلبةُ (‏اسمانِ لِـ`inode` واحدٍ) لا يكشفُها حلُّ المسار؛ وقفلٌ على
+ * هويّةِ `dev/ino` يُغيِّرُ موضعَ ملفِّ القفلِ المُعلَنَ (‏`LOG_LOCK_SUFFIX`) فلم يُعتمَد هنا.
+ * @param file - المسارُ كما مُرِّر
+ * @returns المسارُ القانونيّ
+ */
+export function canonicalLogPath(file: string): string {
+  const absolute = resolve(file);
+  const candidate = join(realpathSync.native(dirname(absolute)), basename(absolute));
+  let isLink: boolean;
+  try {
+    isLink = lstatSync(candidate).isSymbolicLink();
+  } catch (error) {
+    if ((error as { code?: string }).code === 'ENOENT') return candidate;
+    throw error;
+  }
+  if (!isLink) return candidate;
+  try {
+    return realpathSync.native(candidate);
+  } catch {
+    throw new PersistentLogError('LOG_PATH_UNRESOLVABLE', {
+      detail:
+        'رابطٌ رمزيٌّ معلَّقٌ إلى ملفِّ السجلّ: الكتابةُ عبرَهُ تُنشئُ ملفّاً لا يحرسُهُ قفلُه',
+    });
+  }
+}
+
 /** أقلُّ ما يلزمُ من حاجزِ الالتزام. */
 export interface LogCommitBarrier {
   run<T>(intent: string, fn: () => Promise<T> | T): Promise<T>;
@@ -382,11 +418,13 @@ export class PersistentEventLog extends EventLog {
         detail: 'سجلُّ أحداثٍ بلا ختمٍ في الإنتاج: الجسمُ سيُكتب نصّاً صريحاً',
       });
     }
-    this.file = file;
-    this.headFile = file + LOG_HEAD_SUFFIX;
-    this.lockFile = file + LOG_LOCK_SUFFIX;
+    mkdirSync(dirname(resolve(file)), { recursive: true });
+    // `WL-485`: الهويّةُ بالملفِّ لا بنصِّ المسار — فالقفلُ والرأسُ واحدانِ لكلِّ مسارٍ إليه.
+    const canonical = canonicalLogPath(file);
+    this.file = canonical;
+    this.headFile = canonical + LOG_HEAD_SUFFIX;
+    this.lockFile = canonical + LOG_LOCK_SUFFIX;
     this.#fsync = options.fsync ?? true;
-    mkdirSync(dirname(file), { recursive: true });
     if (options.lock ?? true) this.#acquireLock();
     try {
       this.load({ acceptMissingHead: options.acceptMissingHead ?? false });
