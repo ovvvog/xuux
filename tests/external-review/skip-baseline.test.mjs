@@ -7,7 +7,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  cpSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -131,7 +139,7 @@ test('R5-A-06: نسبةٌ إلى DATABASE_URL أكبرُ من عدّادِ ال�
   assert.ok(violations.some((v) => v.startsWith('R1/SANITY')));
 });
 
-test('R8-03: تفصيلُ الأسبابِ ناقصٌ (لا يُجمَعُ إلى أسطرِ # SKIP) ⇒ مردودٌ بـR1/BREAKDOWN', () => {
+test('R8-03: تفصيلُ الأسبابِ ناقصٌ (لا يُجمَعُ إلى أسطرِ التخطّي) ⇒ مردودٌ بـR1/BREAKDOWN', () => {
   // المقترحُ R8-03 (عضوٌ واحدٌ، جولةٌ غيرُ مكتملة): الحاجزُ كانَ يتحقّقُ من أنَّ كلَّ رقمٍ
   // مُعلَنٍ مقيسٌ، ولا يتحقّقُ من أنَّ التفصيلَ كاملٌ. سببٌ ساقطٌ بثلاثةِ اختباراتٍ هنا.
   const { violations } = checkSkipBaseline(
@@ -142,7 +150,7 @@ test('R8-03: تفصيلُ الأسبابِ ناقصٌ (لا يُجمَعُ إل�
   assert.match(hit[0] ?? '', /125.*128/);
 });
 
-test('R8-03: تفصيلٌ زائدٌ على أسطرِ # SKIP ⇒ مردودٌ بـR1/BREAKDOWN', () => {
+test('R8-03: تفصيلٌ زائدٌ على أسطرِ التخطّي ⇒ مردودٌ بـR1/BREAKDOWN', () => {
   const { violations } = checkSkipBaseline(
     makeTree({
       artifactPatch: {
@@ -316,4 +324,47 @@ test('الحاجزُ عمليّةً منفصلةً: يَخرُجُ بـ0 على 
   }
   assert.equal(code, 1, 'حاجزٌ لا يَسقُطُ عندَ نقضِه ليسَ مُنفَذاً');
   assert.match(stderr, /R4\/DRIFT/);
+});
+
+test('WL-489: لا عنوانَ اختبارٍ يحملُ توجيهَ تخطٍّ أو تأجيلٍ من TAP — وإلّا عُدَّ سطرُه تخطّياً في القياس', () => {
+  // أداةُ القياسِ تعدُّ كلَّ سطرٍ فيه `# SKIP` (‏`l.includes('# SKIP')`)، ومُشغِّلُ node
+  // يُهرِّبُ `#` في العنوانِ إلى `\#` فيبقى النصُّ `# SKIP` مُطابِقاً. عنوانٌ كهذا زادَ
+  // `skipLines` بأربعةٍ وصنعَ «سبباً» زائفاً، فأسقطَ `S9/ACCOUNTING` نشرَ القياسِ
+  // `40721221794` (‏`main@a8b05eea`). الفحصُ قرائيٌّ على مصدرِ الاختباراتِ كلِّها.
+  const offenders = [];
+  const walk = (dir) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(p);
+      else if (/\.test\.m?[jt]s$/.test(ent.name)) {
+        const src = readFileSync(p, 'utf8');
+        const re = /\b(?:test|it|describe|suite)(?:\.\w+)?\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
+        for (const m of src.matchAll(re)) {
+          if (/#\s*(?:SKIP|TODO)\b/i.test(m[2] ?? '')) {
+            offenders.push(`${path.relative(REPO, p)}: ${m[2]}`);
+          }
+        }
+      }
+    }
+  };
+  walk(path.join(REPO, 'tests'));
+  assert.deepEqual(offenders, [], `عناوينُ تُلوِّثُ عدَّ التخطّي:\n${offenders.join('\n')}`);
+});
+
+test('WL-489: الآليّةُ مثبَّتةٌ — عنوانٌ مُهرَّبٌ فيه توجيهُ التخطّي يُعَدُّ سطرَ تخطٍّ عندَ parseTap', () => {
+  // يوثّقُ لماذا يلزمُ الفحصُ أعلاه: الأداةُ لا تُميِّزُ `\#` المُهرَّبَ. فإن صارت تُميِّزُه
+  // يوماً فشلَ هذا الاختبارُ ليُراجَعَ الفحصُ لا ليُحذَفَ صامتاً.
+  const hash = '#';
+  const tap = [
+    `# Subtest: عنوانٌ \\${hash} SKIP فيه`,
+    `ok 1 - عنوانٌ \\${hash} SKIP فيه`,
+    '1..1',
+    '# tests 1',
+    '# pass 1',
+    '# fail 0',
+    '# skipped 0',
+  ].join('\n');
+  const m = parseTap(tap);
+  assert.equal(m.skipped, 0);
+  assert.equal(m.skipLines, 2, 'سطرانِ بلا تخطٍّ حقيقيٍّ يُعدّانِ — وهذا عينُ ما وقع');
 });
