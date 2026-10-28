@@ -164,6 +164,9 @@ channels:
       - type: constitution.amendment.proposed
         version: 1
         required: [articleId, commandId, epoch, proposalHash, proposalId, reason]
+        # WL-484 (R6-A-05): ما يلزمُ لاسترجاعِ الطرحِ بعدَ إعادةِ التشغيل؛ اختياريٌّ
+        # لأنّ أحداثاً سابقةً بلا هذه الحقولِ قائمةٌ وتُقرأُ «غيرَ قابلةٍ للاسترجاع».
+        optional: [previousText, proposedAt, text]
       - type: constitution.amendment.ratified
         version: 1
         required: [articleId, commandId, epoch, proposalHash, proposalId]
@@ -174,6 +177,7 @@ channels:
       - type: constitution.amendment.reviewed
         version: 1
         required: [articleId, opinion, proposalId, state, verdict]
+        optional: [at]
   - id: court
     subject: 'القضايا: فتحُها وسماعُها والحكمُ فيها واستئنافُها'
     classification: sensitive
