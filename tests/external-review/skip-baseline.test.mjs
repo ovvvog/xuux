@@ -331,7 +331,9 @@ test('WL-489: لا عنوانَ اختبارٍ يحملُ توجيهَ تخطٍ�
   // يُهرِّبُ `#` في العنوانِ إلى `\#` فيبقى النصُّ `# SKIP` مُطابِقاً. عنوانٌ كهذا زادَ
   // `skipLines` بأربعةٍ وصنعَ «سبباً» زائفاً، فأسقطَ `S9/ACCOUNTING` نشرَ القياسِ
   // `40721221794` (‏`main@a8b05eea`). الفحصُ قرائيٌّ على مصدرِ الاختباراتِ كلِّها.
+  /** @type {string[]} */
   const offenders = [];
+  /** @param {string} dir */
   const walk = (dir) => {
     for (const ent of readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, ent.name);
