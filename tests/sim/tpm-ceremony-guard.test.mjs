@@ -290,6 +290,18 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     'src/policy/enforcement-point.mjs': '55110061b60598399c3bb1efc816d35ed5f31430',
     'src/core/execution-kernel.mjs': 'b41297048c6cdd9510cadcc8b5e513bee1b2b0d4',
   }));
+  // قرارُ المالكِ (‏2026-10-28، تكليفُ الاستردادِ — إذنٌ صريحٌ في المحادثةِ بعدَ أن رفضَ
+  // هذا الحارسُ دفعَ إصلاحِ المقترحِ `R8-01`): استثناءٌ مسمّى مؤرّخٌ محدودٌ **بملفٍّ واحدٍ**
+  // `src/root-of-trust/persistent-log.mts` — قفلُ الكاتبِ الواحدِ يُحسَبُ على المسارِ القانونيِّ
+  // (‏`canonicalLogPath`، والرابطُ المعلَّقُ يُرفَضُ `LOG_PATH_UNRESOLVABLE`). الإصلاحُ مستحيلٌ خارجَ
+  // هذا الملفِّ لأنَّ القفلَ فيه. **هذا الاستثناءُ لا يُضعِفُ شيئًا آخرَ:** بقيةُ `src/root-of-trust`
+  // و`src/production` والملفاتُ المسماةُ وإغلاقُ تبعياتِ الإقلاعِ ومدخلةُ `R3-A-01` محميةٌ كما كانتْ،
+  // ولا مساسَ لـ`SUPPORTED_FRESHNESS_BACKENDS`. وتغييرُهُ خاضعٌ لكلِّ ما عداه (مدخلةُ WL-488، ومراجعةُ
+  // PR، وCI). **والاستثناءُ مربوطٌ بالبصمةِ المعتمدةِ لا بالمسارِ وحدَه:** أيُّ تعديلٍ لاحقٍ — ولو
+  // سطرًا — يُخرجُ بصمتَهُ عن هذه فيعودُ محميًّا. فالإذنُ إذنٌ **بفرقٍ معروضٍ بعينِهِ**.
+  const WL488_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/root-of-trust/persistent-log.mts': '2d3f8c83188c6b00f1222c75400450082fc21a0f',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -335,6 +347,7 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   // إلى بصمةٍ سابقةٍ رفضٌ لا قبولٌ)، والملفاتُ التي لأحدها وحدَه إذنٌ تبقى على بصمتِه.
   const ownerAuthorizedBlob = (f) => {
     const expected =
+      WL488_OWNER_AUTHORIZED.get(f) ??
       WL478_OWNER_AUTHORIZED.get(f) ??
       WL465_OWNER_AUTHORIZED.get(f) ??
       WL461_OWNER_AUTHORIZED.get(f) ??
