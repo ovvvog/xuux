@@ -27,6 +27,12 @@
 //        سببٌ جديدٌ يُوقفُ السكربتَ (لا يُبتلَعُ ولا يُحذفُ) — تحديثُ القالبِ عمدةٌ.
 //   S9 — حسابُ الأثرِ مقفولٌ: مجموعُ تفصيلِ الأسبابِ يسوّي أسطرَ التخطّي الباقيةَ
 //        (‏skipLines − المنسوبِ للقاعدةِ) — وإلّا انغلقَ السكربتُ لا كتبَ فقرةً كاذبةً.
+//        **والحسابُ على الفقرةِ المولَّدةِ نفسِها (انحدارُ WL-490):** البندُ في القالبِ
+//        يجمعُ **كلَّ** الأسبابِ التي يطابقُ مفتاحُها لا أولَها (`find` كانَ يأخذُ
+//        الأولَ فيسقطُ سببًا يطابقُ بندًا نفسَهُ — قِيسَ في دورةِ نشرِ `39346878`:
+//        فقرةٌ مجموعُها 344 وأسطرُ الأثرِ 347)، ومجموعُ الفقرةِ المكتوبةِ يسوّي
+//        الباقيَ وإلّا انغلقَ السكربتَ برمزِ `S9/RENDER_ACCOUNTING` قبلَ الكتابةِ —
+//        فسببٌ يطابقُ بندينِ يُكتَشَفُ ولا يُكتَبُ مرّتينِ.
 //
 // الوسائط: <artifact-path> [root]
 //   artifact-path — مسارُ ملفِّ الأثر (skip-baseline.json)
@@ -69,9 +75,18 @@ const NUMBERS_MARK = 'ملاحظةُ بيئةٍ مُقاسةٌ لا مُقدَّ
 /**
  * بنودُ تفصيلِ الأسبابِ الأُخرى: مفتاحٌ يُطابِقُ وصفَ السببِ في الأثرِ وعنوانٌ ثابتٌ
  * في الفقرةِ. البندُ ذو العدِّ ١ يُجمَعُ في «فرادى»، وما فوقَهُ يُذكَرُ بعدِّهِ.
+ * انحدارُ WL-490: البندُ يجمعُ **كلَّ** الأسبابِ التي يطابقُها مفتاحُهُ (لا أولَها)،
+ * فلا يسقطُ سببٌ يشاركُ غيرَهُ مفتاحَ بندٍ. ومفتاحُ البندِ يُقرَّرُ خاصًّا بسببٍ
+ * واحدٍ — فمفتاحٌ يطابقُ سببينِ يُجمِعُهما البندُ الواحدُ ويُفقدُ الفرقَ بينَهما،
+ * وسببٌ يطابقُ بندينِ يُكتَبُ مرّتينِ فيكسِرُ حسابَ الفقرةِ — وإقفالُ `S9/RENDER_ACCOUNTING`
+ * يكشفُهُ قبلَ الكتابةِ.
  */
 const OTHER_CLAUSES = [
-  { key: /swtpm|XUUX_TPM_SIM/, label: 'لغيابِ `swtpm/XUUX_TPM_SIM`' },
+  { key: /swtpm\/XUUX_TPM_SIM/, label: 'لغيابِ `swtpm/XUUX_TPM_SIM`' },
+  {
+    key: /tpm2-tools|tpm-sim-ci/,
+    label: 'لاختباراتِ محاكيِ TPM بخطوةِ CI المخصّصةِ (`tpm2-tools`)',
+  },
   {
     key: /مساحاتِ أسماء|namespaces|unshare|uid_map/,
     label: 'لتعذُّرِ إنشاءِ مساحاتِ أسماءِ النواةِ في مضيفِ القياسِ',
@@ -96,33 +111,41 @@ const OTHER_CLAUSES = [
  * كلُّها من الأثرِ — لا رقمًا يُنسخُ يدًا. مطابقةُ الناتجِ لما في الشجرةِ الآنَ
  * شرطُ العودةِ الآمنةِ (لا فرقَ عندَ إعادةِ التشغيلِ على الأثرِ نفسِهِ).
  * @param {{ attributedToDatabaseUrl: number, skipped: number, skipLines: number, topLevelSkipPoints: number, otherReasons?: Array<{ reason: string, count: number }> }} entry
- * @returns {string}
+ * @returns {{ line: string, othersSum: number }} الفقرةُ ومجموعُ الأسبابِ الأُخرى كما رُسِمَت فيها فعلًا —
+ *   لإقفالِ حسابِ الفقرةِ المكتوبةِ نفسِها (S9/RENDER_ACCOUNTING) لا حسابِ الأثرِ وحدهُ.
  */
 function renderNumbersLine(entry) {
   /** @type {string[]} */
   const parts = [];
   /** @type {string[]} */
   const singles = [];
+  /** مجموعُ الأسبابِ الأُخرى كما رُسِمَت في الفقرةِ (بنودٌ وفرادى). */
+  let renderedOthers = 0;
   for (const clause of OTHER_CLAUSES) {
-    const reason = (entry.otherReasons ?? []).find((r) => clause.key.test(String(r.reason)));
-    if (reason === undefined) continue;
-    if (reason.count === 1) singles.push(clause.label);
-    else parts.push(`${toArabicDigits(reason.count)} ${clause.label}`);
+    // انحدارُ WL-490: كلُّ الأسبابِ التي يطابقُها مفتاحُ البندِ تُجمَعُ — لا
+    // أولُها فحسب؛ فقد كانَ find() يُسقِطُ سببًا يشاركُ غيرَهُ مفتاحَ بندٍ فتُكتَبُ
+    // فقرةٌ ناقصةٌ من أثرٍ سليمِ الحسابِ.
+    const matches = (entry.otherReasons ?? []).filter((r) => clause.key.test(String(r.reason)));
+    if (matches.length === 0) continue;
+    const total = matches.reduce((a, r) => a + Number(r.count), 0);
+    renderedOthers += total;
+    if (matches.length === 1 && total === 1) singles.push(clause.label);
+    else parts.push(`${toArabicDigits(total)} ${clause.label}`);
   }
   if (singles.length > 0) {
     const word = SINGLES_WORDS[singles.length] ?? toArabicDigits(singles.length);
     parts.push(`${word} فرادى: ${singles.join('، و')}`);
   }
   const breakdown = `\u200f${parts.join('، و')}`;
-  return (
+  const line =
     `> **${NUMBERS_MARK} (\u200fمُصحَّحةٌ في \`WL-232\` بالنتيجةِ \`R5-A-06\`):** ` +
     `بلا \`DATABASE_URL\` تتخطّى الحزمةُ ${toArabicDigits(entry.attributedToDatabaseUrl)} اختباراً ` +
     `**بسببِ غيابِ القاعدةِ وحدَه**. وعدّادُ التخطّي الختاميُّ **${toArabicDigits(entry.skipped)}** ` +
     `لأنَّ بقيّتَهُ أسبابٌ أُخرى مُسمّاةٌ (${breakdown})، وأسطرُ \`# SKIP\` كافّةً ` +
     `**${toArabicDigits(entry.skipLines)}**، ونقاطُ التخطّي في المستوى الأعلى ` +
     `**${toArabicDigits(entry.topLevelSkipPoints)}**. **وهذهِ ثلاثةُ مقاييسَ مختلفةٍ لا رقمٌ واحدٌ** ` +
-    `— فالعضوُ يُصرِّحُ بأيِّها قاسَ ولا يَخلِطُها.`
-  );
+    `— فالعضوُ يُصرِّحُ بأيِّها قاسَ ولا يَخلِطُها.`;
+  return { line, othersSum: renderedOthers };
 }
 
 if (!ARTIFACT_PATH) {
@@ -262,8 +285,18 @@ for (const m of artifact.measurements) {
       otherReasons: m.otherReasons ?? [],
     };
     const regenerated = renderNumbersLine(numbersEntry);
-    if (lines[numbersIndices[0]] !== regenerated) {
-      lines[numbersIndices[0]] = regenerated;
+    // انحدارُ WL-490: حسابُ الفقرةِ المولَّدةِ نفسِها مقفولٌ لا حسابُ الأثرِ وحدهُ —
+    // فسببٌ يُطابِقُ بندينِ يُكتَبُ مرّتينِ (مجموعٌ مزدوجٌ)، وبندٌ يطابقُ سببينِ
+    // يجمعُهما؛ في كلِّ حالٍ لا يسوّي مجموعُ الفقرةِ الباقيَ فتُرفَضُ الكتابةُ إغلاقًا
+    // لا فقرةً كاذبةً تُنشرُ.
+    if (numbersEntry.attributedToDatabaseUrl + regenerated.othersSum !== numbersEntry.skipLines) {
+      violations.push(
+        `S9/RENDER_ACCOUNTING: ${m.plan} فقرةُ الأرقامِ المولَّدةُ (${numbersEntry.attributedToDatabaseUrl} + ${regenerated.othersSum}) لا تسوّي أسطرَ التخطّي (${numbersEntry.skipLines}) — سببٌ يطابقُ بندينِ أو بندًا يفقدُ سببًا؟`,
+      );
+      continue;
+    }
+    if (lines[numbersIndices[0]] !== regenerated.line) {
+      lines[numbersIndices[0]] = regenerated.line;
       console.log(`✅ ${m.plan}: فقرةُ الأرقامِ وُلِّدت من الأثرِ.`);
     }
   }

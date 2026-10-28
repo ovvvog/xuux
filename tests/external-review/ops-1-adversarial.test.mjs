@@ -1885,3 +1885,54 @@ test('م١٠ — S7: فقرتا أرقامٍ في خطّةٍ واحدةٍ غمو
   assert.equal(r.exit, 1, 'فشلٌ مغلقٌ.');
   assert.ok(r.stderr.includes('S7/AMBIGUOUS'), 'يسمّي الغموضَ.');
 });
+
+test('م١١ — S7: سببانِ يطابقُ كلٌّ منهما بندَ قالبٍ لا يُسقِطُ أحدهما الآخر (انحدارُ WL-490)', () => {
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s11-')));
+  // عينُ الحادثةِ الحيّةِ في دورةِ نشرِ 39346878: سببٌ عامٌّ (swtpm/XUUX_TPM_SIM
+  // unavailable) وسببٌ أخصُّ (يتطلّبُ XUUX_TPM_SIM=1 معَ swtpm وtpm2-tools) —
+  // كلاهما كانَ يطابقُ بندَ /swtpm|XUUX_TPM_SIM/ فأخذَ find() الأولَ وأسقطَ
+  // الثاني من الفقرةِ المولَّدةِ فصارَ مجموعُها 344 وأسطرُ الأثرِ 347.
+  const others = [
+    { reason: 'swtpm/XUUX_TPM_SIM unavailable', count: 33 },
+    {
+      reason: 'يتطلّبُ XUUX_TPM_SIM=1 معَ swtpm وtpm2-tools (scripts/tpm-sim-ci.sh)',
+      count: 3,
+    },
+  ];
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md', undefined, {
+      otherReasons: others,
+      skipLines: 128,
+    }),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), makePlanWithNumbers('eba5afcf'));
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 0, `التوليدُ لا يفشلُ: ${r.stderr}`);
+  const after = readFileSync(path.join(dir, 'docs/external-review/plan.md'), 'utf8');
+  assert.ok(after.includes('٣٣ لغيابِ `swtpm/XUUX_TPM_SIM`'), 'السببُ العامُّ مذكورٌ بعدِّهِ.');
+  assert.ok(
+    after.includes('٣ لاختباراتِ محاكيِ TPM بخطوةِ CI المخصّصةِ (`tpm2-tools`)'),
+    'والسببُ الأخصُّ لم يُسقَطْ من الفقرةِ — عينُ انحدارِ WL-490.',
+  );
+});
+
+test('م١٢ — S9: حسابُ الفقرةِ المولَّدةِ نفسُها مقفولٌ — سببٌ يطابقُ بندينِ يُسقِطُ لا يُكتَبُ مرّتين', () => {
+  const dir = registerTmpRoot(mkdtempSync(path.join(os.tmpdir(), 'sync-s12-')));
+  // السببُ يطابقُ بندَي «العزل الحقيقي» و«SMTP» معاً — فلو جُمِعا مرّتينِ لصارَ
+  // مجموعُ الفقرةِ ٧٢ والباقيَ ٣٦. حسابُ الأثرِ (S9 على المدخلاتِ) يمرُّ، فلا
+  // يكشفُهُ إلّا إقفالُ الحسابِ على النصِّ المولَّدِ نفسِهِ.
+  const others = [{ reason: 'العزل الحقيقي وبياناتُ اعتمادِ SMTP غائبان', count: 36 }];
+  writeFileSync(
+    path.join(dir, 'skip-baseline.json'),
+    makeArtifact('88707820', '2026-09-22', 'docs/external-review/plan.md', undefined, {
+      otherReasons: others,
+    }),
+  );
+  mkdirSync(path.join(dir, 'docs/external-review'), { recursive: true });
+  writeFileSync(path.join(dir, 'docs/external-review/plan.md'), makePlanWithNumbers('eba5afcf'));
+  const r = runSync(path.join(dir, 'skip-baseline.json'), dir);
+  assert.equal(r.exit, 1, 'فشلٌ مغلقٌ — لا فقرةَ كاذبةً.');
+  assert.ok(r.stderr.includes('S9/RENDER_ACCOUNTING'), 'يسمّي خللَ حسابِ الفقرةِ المولَّدةِ.');
+});
