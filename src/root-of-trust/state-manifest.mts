@@ -880,9 +880,38 @@ export class StateManifest {
       if (owner !== null && owner !== process.pid && pidAlive(owner)) {
         throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
       }
+      // WL-493 (دينُ `LIVE-63`): قفلُ نسخةٍ شقيقةٍ حيّةٍ في العمليّةِ نفسِها قفلٌ حيٌّ
+      // لا يُنتزَعُ — رمزُ الاقتناءِ يميّزُهُ عنّا (pid واحدٌ ورمزانِ). الانتزاعُ هنا كانَ
+      // **حتميًّا لا نظريًّا**: نسخةٌ تنتزعُ قفلَ أختِها المعلّقةِ في `await signAsync`
+      // فتكتبُ الأختُ بيانَها بعدَ فقدانِ قفلِها (مُعادُ إنتاجِهِ في اختبارِ `LIVE-63/1`).
+      if (owner === process.pid && this.#journalLockHeldByLiveSibling()) {
+        throw new StateManifestError(
+          'STATE_MANIFEST_JOURNAL_LOCKED',
+          'نسخةٌ شقيقةٌ حيّةٌ في العمليّةِ نفسِها',
+        );
+      }
       this.#stealJournalLock();
     }
     throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'تعذّرَ أخذُ القفل');
+  }
+
+  /**
+   * هل القفلُ على المسارِ قفلُ نسخةٍ شقيقةٍ حيّةٍ في العمليّةِ نفسِها؟ (انحدارُ `WL-493`)
+   * رمزُ الاقتناءِ هو ما يُميّزُ — فالعمليّةُ الواحدةُ قد تحملُ نسختَينِ على جذرٍ واحدٍ
+   * (pid واحدٌ ورمزانِ)، والقفلُ الذي يحملُ رمزًا وليسَ رمزَنا (لا نمسكُ القفلَ هنا)
+   * قفلُ أختٍ حيّةٍ: نسختُنا لا تدخلُ القسمَ الحرجَّ ولا تنتزعُهُ. والقفلُ بلا رمزٍ
+   * (صيغةٌ قديمةٌ) يبقى على سلوكِهِ السابقِ (انتزاعُ أثرِ التعطُّلِ).
+   */
+  #journalLockHeldByLiveSibling(): boolean {
+    try {
+      const parsed = JSON.parse(readFileSync(this.journalLockFile, 'utf8')) as {
+        pid?: unknown;
+        token?: unknown;
+      };
+      return parsed.pid === process.pid && typeof parsed.token === 'string';
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -929,12 +958,16 @@ export class StateManifest {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     };
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (this.#createExclusively(permit, this.#journalLockPayload(randomUUID()))) {
+      const permitToken = randomUUID();
+      if (this.#createExclusively(permit, this.#journalLockPayload(permitToken))) {
         try {
           // داخلَ التصريحِ: الفحصُ يُعادُ فعلًا — المالكُ الذي قُرِئَ ميتًا خارجَهُ قد
           // يكونُ قفلًا حيًّا الآنَ (استحواذَهُ منافسٌ)، وسلبُهُ حرامٌ.
           const owner = journalLockOwner(this.journalLockFile);
           if (owner !== null && owner !== process.pid && pidAlive(owner)) return;
+          // WL-493 (دينُ `LIVE-63`): النسخةُ الشقيقةُ الحيّةُ في العمليّةِ نفسِها قفلُها
+          // قفلٌ حيٌّ لا يُنتزَعُ — قد تظهرُ بينَ فحصِ الاقتناءِ وهنا (أختٌ اقتنتِ المسارَ).
+          if (owner === process.pid && this.#journalLockHeldByLiveSibling()) return;
           if (!existsSync(this.journalLockFile)) return;
           // المطالبةُ الذرّيّةُ (الطبقةُ الثانيةُ): القفلُ يُنقلُ باسمٍ فريدٍ فلا يُحذفَ
           // شيءٌ على المسارِ المشتركِ أصلًا — الحذفُ بعدَ قراءةٍ متقادمةٍ هو الذي كانَ
@@ -963,7 +996,18 @@ export class StateManifest {
           rmSync(claimed, { force: true });
           return;
         } finally {
-          rmSync(permit, { force: true });
+          // WL-493 (دينُ `LIVE-63`): لا يُحذَفُ منَ المسارِ المشتركِ إلا ما نملكُهُ —
+          // تصريحُنا قد يكونُ انتُزِعَ (مُطالَبًا وأُعيدَ أو حُذفَ) وأخذَ المسارَ
+          // تصريحٌ أحدثُ لغيرِنا، فالحذفُ الأعمى كانَ يُسقِطُهُ. فالحذفُ مقيدٌ برمزِ
+          // الاقتناءِ الذي في التصريحِ على المسارِ الآنَ.
+          let permitAtPathIsOurs = false;
+          try {
+            const parsed = JSON.parse(readFileSync(permit, 'utf8')) as { token?: unknown };
+            permitAtPathIsOurs = parsed.token === permitToken;
+          } catch {
+            // غائبٌ أو غيرُ مقروءٍ: ليسَ تصريحَنا فلا يُمسُّ.
+          }
+          if (permitAtPathIsOurs) rmSync(permit, { force: true });
         }
       }
       const holder = this.#filePid(permit);
@@ -975,7 +1019,22 @@ export class StateManifest {
           if ((error as { code?: string }).code !== 'ENOENT') throw error;
           continue; // استولى غيرُهُ على المطالبةِ: تنافسٌ عادلٌ من جديدٍ
         }
-        rmSync(claimed, { force: true }); // ملفُّنا المتفرِّدُ — حذفُهُ آمنٌ دومًا
+        // WL-493 (دينُ `LIVE-63`): تحقّقُ محتوى المطالَبِ قبلَ حذفِهِ — التصريحُ الذي
+        // على المسارِ الآنَ قد يكونُ تصريحًا حيًّا اقتناهُ منافسٌ بينَ قراءةِ الميتِ
+        // والمطالبةِ، فلا يُحذَفُ تصريحُ حيٍّ منَ المسارِ المشتركِ أبدًا (النمطُ نفسُهُ
+        // الذي أُصلِحَ للقفلِ نفسِهِ): المُطالَبُ الميتُ يُحذفُ، والحيُّ يُعادُ إن كانَ
+        // المسارُ حرًّا.
+        const claimedPermitOwner = this.#filePid(claimed);
+        if (claimedPermitOwner === null || claimedPermitOwner === holder) {
+          rmSync(claimed, { force: true }); // ميتٌ أو غيرُ مقروءٍ: حذفُ الاسمِ الفريدِ آمنٌ
+        } else {
+          try {
+            linkSync(claimed, permit); // حيٌّ اقتطيناهُ سهوًا: أعِدْهُ ما دامَ المسارُ حرًّا
+          } catch {
+            // المسارُ مشغولٌ بتصريحٍ أحدثَ: لا نطمسُهُ.
+          }
+          rmSync(claimed, { force: true });
+        }
         continue;
       }
       sleepSync(5); // منافسٌ حيٌّ في قسمِهِ الحرجِّ (لحظاتٌ): انتظارٌ قصيرٌ ثمَّ إعادةُ المحاولةِ
@@ -1261,6 +1320,11 @@ export class StateManifest {
   async #seal(body: StateManifestBody): Promise<void> {
     const sealer = this.#requireSealer();
     const signature = await sealer.signAsync(body);
+    // WL-493 (دينُ `LIVE-63`): نقطةُ التعليقِ أعلاهَ داخلَ القسمِ الحرجِّ (الختمُ
+    // يمسكُ قفلَ الدفترِ) — والملكيّةُ تُعادُ فحصُها **بعدَها وقبلَ الكتابةِ**: القفلُ
+    // قد يُسلبَ أثناءَ الانتظارِ فالكتابةُ حينها كتابةُ بلا قفلٍ (مُعادُ إنتاجُهُ في
+    // اختبارِ `LIVE-63/1`). والحارسُ no-op في مسارِ التهيئةِ (لا قفلَ هناك).
+    this.#assertJournalLockOurs();
     const sealed: SealedStateManifest = {
       body,
       seal: { alg: 'ed25519', signerId: sealer.id, signature },

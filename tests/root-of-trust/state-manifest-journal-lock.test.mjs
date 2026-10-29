@@ -26,7 +26,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -242,5 +242,117 @@ test('LIVE-62/4: إجهادُ السباقِ — عملياتٌ متسابقةٌ
     assert.equal(body.haltEpoch, maxTried, 'القيمةُ وصلتْ إلى أعلى رفعٍ حاولَهُ المتسابقونَ');
     assert.equal(existsSync(reader.journalLockFile), false, 'والقفلُ لا يُتركُ قائمًا');
     assert.equal(existsSync(`${reader.journalLockFile}.steal-permit`), false, 'ولا تصريحَ يُتركُ');
+  });
+});
+
+// WL-493 — إغلاقُ دينِ `LIVE-63`: النسخةُ الشقيقةُ الحيّةُ في العمليّةِ نفسِها كانت
+// تنتزعُ قفلَ أختِها المعلّقةِ في `await signAsync` أثناءَ الختمِ (انتزاعٌ **حتميٌّ لا
+// نظريٌّ**: pid واحدٌ ورمزانِ لا يميّزُ بينهما انتزاعُ ما قبلَ `WL-493`)، فتكتبُ
+// المعلّقةُ بيانَها بعدَ فقدانِ قفلِها — كاتبٌ بلا قفلٍ. الآن: قفلُ الشقيقةِ الحيّةِ
+// قفلٌ حيٌّ لا يُنتزَعُ (رفضٌ مغلقٌ برمزِهِ)، وحيازةُ القفلِ يُعادُ فحصُها **بعدَ
+// نقطةِ التعليقِ وقبلَ كتابةِ البيانِ** — فلا كتابةَ بلا قفلٍ أبدًا. والاختبارانِ
+// حتميّانِ بلا مؤقتاتٍ ولا تخمينِ توقيتٍ: حاجزُ وعدينِ صريحينِ يُدخِلُ الختمَ التعليقَ
+// ويُفرِجُ عنهُ عندَ الاكتفاءِ.
+test('LIVE-63/1: نسخةٌ شقيقةٌ حيّةٌ في العمليّةِ نفسِها لا تنتزعُ قفلَ أختِها المعلّقةِ في الختمِ — والختمُ يكتملُ نظيفًا (انحدارُ WL-493)', async () => {
+  await withDir(async (dir) => {
+    const { file, pair } = await provisioned(dir);
+    // حاجزُ وعدينِ صريحينِ: الموقّعُ يُعلِنُ دخولَهُ (دخلَ الختمُ نقطةَ التعليقِ داخلَ
+    // القسمِ الحرجِّ) ويبقى معلّقًا حتى يُفرِجَ الاختبارُ — لا مؤقتَ ولا دورانَ انتظارٍ.
+    let resolveGate = () => {};
+    const gate = new Promise((resolve) => {
+      resolveGate = resolve;
+    });
+    let markEntered = () => {};
+    const entered = new Promise((resolve) => {
+      markEntered = resolve;
+    });
+    const gatedSealer = {
+      id: KING,
+      signAsync: async (payload) => {
+        markEntered();
+        await gate;
+        return edSign(null, Buffer.from(JSON.stringify(payload), 'utf8'), pair.privateKey).toString(
+          'base64',
+        );
+      },
+      verify: (payload, signature) =>
+        edVerify(
+          null,
+          Buffer.from(JSON.stringify(payload), 'utf8'),
+          pair.publicKey,
+          Buffer.from(signature, 'base64'),
+        ),
+    };
+    // B: نسخةٌ بموقّعٍ مسوّرٍ — الختمُ يعلّقُ عندَ signAsync داخلَ القسمِ الحرجِّ
+    const b = new StateManifest(file, { fsync: false, sealer: gatedSealer });
+    const checkpoint = b.checkpointAsync();
+    await entered;
+    try {
+      // A: نسخةٌ شقيقةٌ حيّةٌ — رفعُها أثناءَ تعليقِ B يجبُ أن يُرفضَ رفضًا مغلقًا، لا أن
+      // تنتزعَ قفلَ أختِها فتكتبَ الأختُ بعدَ فقدانِ قفلِها (كانَ يقعُ قبلَ `WL-493`).
+      const a = new StateManifest(file, { fsync: false, sealer: softwareSealer(pair) });
+      assert.throws(
+        () => a.raise('haltEpoch', 5),
+        (e) => e.code === 'STATE_MANIFEST_JOURNAL_LOCKED',
+      );
+    } finally {
+      resolveGate();
+    }
+    await checkpoint; // يكتملُ ختمُ B نظيفًا: لم يُسلبْ قفلُها فلم تُلغَ كتابتُها
+    // وبعدَ اكتمالِ الختمِ يقعُ الرفعُ عندَ الشقيقةِ — والقارئُ النظيفُ يُطابقُ
+    const a2 = new StateManifest(file, { fsync: false, sealer: softwareSealer(pair) });
+    a2.raise('haltEpoch', 5);
+    const reader = new StateManifest(file, { fsync: false, sealer: softwareSealer(pair) });
+    const body = await reader.openAsync(BINDING);
+    assert.equal(body.haltEpoch, 5, 'الحالةُ النهائيةُ متّسقةٌ: لا ROLLBACK ولا فقد');
+  });
+});
+
+test('LIVE-63/2: الختمُ المعلّقُ يفقدُ قفلَهُ فلا كتابةَ — الرفضُ بعدَ التعليقِ قبلَ الكتابةِ لا كتابةً بلا قفلٍ (انحدارُ WL-493)', async () => {
+  await withDir(async (dir) => {
+    const { file, pair } = await provisioned(dir);
+    let resolveGate = () => {};
+    const gate = new Promise((resolve) => {
+      resolveGate = resolve;
+    });
+    let markEntered = () => {};
+    const entered = new Promise((resolve) => {
+      markEntered = resolve;
+    });
+    const gatedSealer = {
+      id: KING,
+      signAsync: async (payload) => {
+        markEntered();
+        await gate;
+        return edSign(null, Buffer.from(JSON.stringify(payload), 'utf8'), pair.privateKey).toString(
+          'base64',
+        );
+      },
+      verify: (payload, signature) =>
+        edVerify(
+          null,
+          Buffer.from(JSON.stringify(payload), 'utf8'),
+          pair.publicKey,
+          Buffer.from(signature, 'base64'),
+        ),
+    };
+    const b = new StateManifest(file, { fsync: false, sealer: gatedSealer });
+    const checkpoint = b.checkpointAsync();
+    await entered;
+    // سلبُ القفلِ منَ الخارجِ (أيُّ مسلوبٍ كانَ): الختمُ المعلّقُ يجبُ أن يرفضَ بعدَ
+    // التعليقِ **قبلَ** كتابةِ البيانِ — فالكتابةُ بلا قفلٍ هي عينُ الكاتبينَ.
+    let manifestBefore;
+    try {
+      manifestBefore = readFileSync(file, 'utf8');
+      rmSync(b.journalLockFile, { force: true });
+    } finally {
+      resolveGate(); // أفرِجْ عن الموقّعِ قبلَ مطالبةِ الرفضِ: الرفضُ لا يُطالَبُ وهوَ معلّقٌ
+    }
+    await assert.rejects(checkpoint, (e) => e.code === 'STATE_MANIFEST_JOURNAL_LOCKED');
+    assert.equal(
+      readFileSync(file, 'utf8'),
+      manifestBefore,
+      'البيانُ لم يُكتبْ بعدَ فقدانِ القفلِ — الرفضُ سابقٌ للكتابةِ',
+    );
   });
 });

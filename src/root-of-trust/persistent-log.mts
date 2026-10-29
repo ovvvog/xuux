@@ -526,7 +526,8 @@ export class PersistentEventLog extends EventLog {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     };
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (this.#createExclusively(permit, this.#lockPayload(randomUUID()))) {
+      const permitToken = randomUUID();
+      if (this.#createExclusively(permit, this.#lockPayload(permitToken))) {
         try {
           // داخلَ التصريحِ: الفحصُ يُعادُ فعلًا — فالمالكُ الذي قُرِئَ ميتًا خارجَهُ قد
           // يكونُ قفلًا آخرَ حيًّا الآنَ (استحواذَهُ منافسٌ)، وسلبُهُ حرامٌ.
@@ -569,7 +570,18 @@ export class PersistentEventLog extends EventLog {
           }
           return;
         } finally {
-          rmSync(permit, { force: true });
+          // WL-493 (دينُ `LIVE-63`): لا يُحذَفُ منَ المسارِ المشتركِ إلا ما نملكُهُ —
+          // تصريحُنا قد يكونُ انتُزِعَ (مُطالَبًا وأُعيدَ أو حُذفَ) وأخذَ المسارَ
+          // تصريحٌ أحدثُ لغيرِنا، فالحذفُ الأعمى كانَ يُسقِطُهُ. فالحذفُ مقيدٌ برمزِ
+          // الاقتناءِ الذي في التصريحِ على المسارِ الآنَ.
+          let permitAtPathIsOurs = false;
+          try {
+            const parsed = JSON.parse(readFileSync(permit, 'utf8')) as { token?: unknown };
+            permitAtPathIsOurs = parsed.token === permitToken;
+          } catch {
+            // غائبٌ أو غيرُ مقروءٍ: ليسَ تصريحَنا فلا يُمسُّ.
+          }
+          if (permitAtPathIsOurs) rmSync(permit, { force: true });
         }
       }
       // التصريحُ مأخوذٌ: إن ماتَ ماسكُهُ انتُزعَ **بمطالبةٍ ذرّيّةٍ** (‏`renameSync` —
@@ -586,7 +598,22 @@ export class PersistentEventLog extends EventLog {
           if ((error as { code?: string }).code !== 'ENOENT') throw error;
           continue; // استولى غيرُهُ على المطالبةِ: تنافسٌ عادلٌ من جديدٍ
         }
-        rmSync(claimed, { force: true }); // ملفُّنا المتفرِّدُ — حذفُهُ آمنٌ دومًا
+        // WL-493 (دينُ `LIVE-63`): تحقّقُ محتوى المطالَبِ قبلَ حذفِهِ — التصريحُ الذي
+        // على المسارِ الآنَ قد يكونُ تصريحًا حيًّا اقتناهُ منافسٌ بينَ قراءةِ الميتِ
+        // والمطالبةِ، فلا يُحذَفُ تصريحُ حيٍّ منَ المسارِ المشتركِ أبدًا (النمطُ نفسُهُ
+        // الذي أُصلِحَ للقفلِ نفسِهِ): المُطالَبُ الميتُ يُحذفُ، والحيُّ يُعادُ إن كانَ
+        // المسارُ حرًّا.
+        const claimedPermitOwner = this.#filePid(claimed);
+        if (claimedPermitOwner === null || claimedPermitOwner === holder) {
+          rmSync(claimed, { force: true }); // ميتٌ أو غيرُ مقروءٍ: حذفُ الاسمِ الفريدِ آمنٌ
+        } else {
+          try {
+            linkSync(claimed, permit); // حيٌّ اقتطيناهُ سهوًا: أعِدْهُ ما دامَ المسارُ حرًّا
+          } catch {
+            // المسارُ مشغولٌ بتصريحٍ أحدثَ: لا نطمسُهُ.
+          }
+          rmSync(claimed, { force: true });
+        }
         continue;
       }
       sleepSync(5); // منافسٌ حيٌّ في قسمِهِ الحرجِّ (لحظاتٌ): انتظارٌ قصيرٌ ثمَّ إعادةُ المحاولةِ
