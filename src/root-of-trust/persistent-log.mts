@@ -404,6 +404,11 @@ export class PersistentEventLog extends EventLog {
 
   #fd: number | null = null;
   #locked = false;
+  /**
+   * رمزُ الاقتناءِ الجاري (انحدارُ `WL-492`): هويةٌ فريدةٌ لكلِّ اقتناءٍ تُكتبُ في
+   * حمولةِ القفلِ، فيميّزُ حارسُ الكتابةِ قفلَنا عن قفلٍ آخرَ ولو بالعمليّةِ نفسِها.
+   */
+  #lockToken: string | null = null;
   #fsync: boolean;
   #closed = false;
   readonly #sealer: EventDataSealer | null;
@@ -459,8 +464,10 @@ export class PersistentEventLog extends EventLog {
    */
   #acquireLock(): void {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      if (this.#createExclusively(this.lockFile, this.#lockPayload())) {
+      const token = randomUUID();
+      if (this.#createExclusively(this.lockFile, this.#lockPayload(token))) {
         this.#locked = true;
+        this.#lockToken = token;
         heldLocks.add(resolve(this.lockFile));
         return;
       }
@@ -472,6 +479,30 @@ export class PersistentEventLog extends EventLog {
       this.#stealLock(owner);
     }
     throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: 'تعذّر أخذ القفل' });
+  }
+
+  /**
+   * حارسُ ملكيةِ القفلِ قبلَ كلِّ كتابةٍ (انحدارُ `WL-492`، الطبقةُ الثالثةُ): القفلُ
+   * ملفٌّ على مسارٍ مشتركٍ، ولا «حذفًا مشروطًا» في POSIX، فأيُّ بروتوكولِ ملفّاتٍ يُبقي
+   * نافذةً ضيقةً جدًّا يُسرقُ فيها قفلٌ حيٌّ (فُصِّلَ في سجلِّ `WL-492` لإجهادِ نظيرِهِ في
+   * `state-manifest`). فالمقتني يتحقّقُ قبلَ كلِّ كتابةٍ تحويريةٍ أنَّ القفلَ ما زالَ قفلَهُ
+   * (pid + رمزُ الاقتناءِ)، وإلّا رفضَ برمزٍ مغلقٍ قابلٍ للإعادةِ (`LOG_ALREADY_LOCKED`)
+   * — فشلٌ لا فسادٌ: الكاتبُ المسروقُ قفلُهُ يُلغي كتابتَهُ، ولا يكتبُ اثنانِ معًا.
+   */
+  #assertLockOurs(): void {
+    if (!this.#locked || this.#lockToken === null) return;
+    let parsed: { pid?: unknown; token?: unknown };
+    try {
+      parsed = JSON.parse(readFileSync(this.lockFile, 'utf8')) as {
+        pid?: unknown;
+        token?: unknown;
+      };
+    } catch {
+      throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: 'قفل السجل لم يعد قفلنا' });
+    }
+    if (parsed.pid !== process.pid || parsed.token !== this.#lockToken) {
+      throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: 'قفل السجل لم يعد قفلنا' });
+    }
   }
 
   /**
@@ -495,25 +526,94 @@ export class PersistentEventLog extends EventLog {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     };
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      if (this.#createExclusively(permit, this.#lockPayload())) {
+      const permitToken = randomUUID();
+      if (this.#createExclusively(permit, this.#lockPayload(permitToken))) {
         try {
           // داخلَ التصريحِ: الفحصُ يُعادُ فعلًا — فالمالكُ الذي قُرِئَ ميتًا خارجَهُ قد
-          // يكونُ قفلًا آخرَ حيًّا الآنَ (استحواذَهُ منافسٌ)، والحذفُ عندها سلبُ قفلٍ حيٍّ.
+          // يكونُ قفلًا آخرَ حيًّا الآنَ (استحواذَهُ منافسٌ)، وسلبُهُ حرامٌ.
           const owner = this.#lockOwner();
           if (owner === null || !this.#lockHeldByLiveOwner(owner)) {
-            rmSync(this.lockFile, { force: true });
-            this.recovery.stolenLockPid = deadOwner;
+            if (existsSync(this.lockFile)) {
+              // المطالبةُ الذرّيّةُ (الطبقةُ الثانيةُ، انحدارُ `WL-492`): القفلُ يُنقلُ
+              // باسمٍ فريدٍ فلا يُحذفَ شيءٌ على المسارِ المشتركِ أصلًا — الحذفُ بعدَ
+              // قراءةٍ متقادمةٍ هو الذي كانَ يسلبُ قفلًا حيًّا اقتناهُ منافسٌ بينَ
+              // الفحصِ والحذفِ (فُصِّلَ في إجهادِ نظيرِهِ في `state-manifest`).
+              const claimed = `${this.lockFile}.${process.pid}.${Date.now()}.${randomUUID()}.claimed`;
+              let claimedOwner: number | null = null;
+              try {
+                renameSync(this.lockFile, claimed);
+                claimedOwner = this.#filePid(claimed);
+              } catch (error) {
+                if ((error as { code?: string }).code !== 'ENOENT') throw error;
+              }
+              if (claimedOwner !== null && claimedOwner === owner) {
+                // هو الميتُ الذي فحصناهُ: حذفُ الاسمِ الفريدِ آمنٌ دومًا.
+                rmSync(claimed, { force: true });
+                this.recovery.stolenLockPid = deadOwner;
+              } else if (claimedOwner !== null) {
+                // حيٌّ اقتطيناهُ سهوًا (اقتنى منافسٌ المسارَ بينَ الفحصِ والمطالبةِ):
+                // أعِدْهُ ما دامَ المسارُ حرًّا — فلا يُيتَّمُ مالكٌ بلا قفلٍ؛ وإن كانَ
+                // المسارُ مشغولًا فنسختُنا تُحذفُ وحارسُ الكتابةِ عندَ المالكِ يرفضُ
+                // الكتابةَ بلا قفلِهِ.
+                try {
+                  linkSync(claimed, this.lockFile);
+                } catch {
+                  // المسارُ مشغولٌ بقفلٍ أحدثَ: لا نطمسُهُ.
+                }
+                rmSync(claimed, { force: true });
+              } else {
+                // تحرّرَ قبلَنا (ENOENT) أو عطِلَت قراءتُهُ: لا شيءَ ننتزعُهُ.
+              }
+            } else {
+              this.recovery.stolenLockPid = deadOwner;
+            }
           }
           return;
         } finally {
-          rmSync(permit, { force: true });
+          // WL-493 (دينُ `LIVE-63`): لا يُحذَفُ منَ المسارِ المشتركِ إلا ما نملكُهُ —
+          // تصريحُنا قد يكونُ انتُزِعَ (مُطالَبًا وأُعيدَ أو حُذفَ) وأخذَ المسارَ
+          // تصريحٌ أحدثُ لغيرِنا، فالحذفُ الأعمى كانَ يُسقِطُهُ. فالحذفُ مقيدٌ برمزِ
+          // الاقتناءِ الذي في التصريحِ على المسارِ الآنَ.
+          let permitAtPathIsOurs = false;
+          try {
+            const parsed = JSON.parse(readFileSync(permit, 'utf8')) as { token?: unknown };
+            permitAtPathIsOurs = parsed.token === permitToken;
+          } catch {
+            // غائبٌ أو غيرُ مقروءٍ: ليسَ تصريحَنا فلا يُمسُّ.
+          }
+          if (permitAtPathIsOurs) rmSync(permit, { force: true });
         }
       }
-      // التصريحُ مأخوذٌ: إن ماتَ ماسكُهُ انتُزعَ (الميتُ لا يعودُ فلا يمسكُهُ اثنانِ)،
+      // التصريحُ مأخوذٌ: إن ماتَ ماسكُهُ انتُزعَ **بمطالبةٍ ذرّيّةٍ** (‏`renameSync` —
+      // من ينجحُ وحدَه يمسكُ الملفَّ المتنازعَ عليه؛ انحدارُ WL-492: الحذفُ الأعمى
+      // بعدَ قراءةٍ سابقةٍ كانَ يسمحُ لمنافسٍ ثانٍ بقراءتِهِ المتقادمةِ أن يحذفَ تصريحًا
+      // حيًّا أنشأَهُ منافسٌ آخرُ بينَ الفحصَينِ فيدخلَ الاثنانِ القسمَ الحرجَ معًا)،
       // وإن عُدِمَت قراءةُ مالكِهِ انتُظِرَ (قد يكونُ يُكتَبُ الآنَ) — لا انتزاعَ عمياءَ.
       const holder = this.#filePid(permit);
       if (holder !== null && !this.#pidAlive(holder)) {
-        rmSync(permit, { force: true });
+        const claimed = `${permit}.${process.pid}.${Date.now()}.${randomUUID()}.claimed`;
+        try {
+          renameSync(permit, claimed); // المطالبةُ: من ينجحُ وحدَه يزيلُ التصريحَ الميت
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ENOENT') throw error;
+          continue; // استولى غيرُهُ على المطالبةِ: تنافسٌ عادلٌ من جديدٍ
+        }
+        // WL-493 (دينُ `LIVE-63`): تحقّقُ محتوى المطالَبِ قبلَ حذفِهِ — التصريحُ الذي
+        // على المسارِ الآنَ قد يكونُ تصريحًا حيًّا اقتناهُ منافسٌ بينَ قراءةِ الميتِ
+        // والمطالبةِ، فلا يُحذَفُ تصريحُ حيٍّ منَ المسارِ المشتركِ أبدًا (النمطُ نفسُهُ
+        // الذي أُصلِحَ للقفلِ نفسِهِ): المُطالَبُ الميتُ يُحذفُ، والحيُّ يُعادُ إن كانَ
+        // المسارُ حرًّا.
+        const claimedPermitOwner = this.#filePid(claimed);
+        if (claimedPermitOwner === null || claimedPermitOwner === holder) {
+          rmSync(claimed, { force: true }); // ميتٌ أو غيرُ مقروءٍ: حذفُ الاسمِ الفريدِ آمنٌ
+        } else {
+          try {
+            linkSync(claimed, permit); // حيٌّ اقتطيناهُ سهوًا: أعِدْهُ ما دامَ المسارُ حرًّا
+          } catch {
+            // المسارُ مشغولٌ بتصريحٍ أحدثَ: لا نطمسُهُ.
+          }
+          rmSync(claimed, { force: true });
+        }
         continue;
       }
       sleepSync(5); // منافسٌ حيٌّ في قسمِهِ الحرجِّ (لحظاتٌ): انتظارٌ قصيرٌ ثمَّ إعادةُ المحاولةِ
@@ -523,12 +623,17 @@ export class PersistentEventLog extends EventLog {
     });
   }
 
-  /** محتوى ملفِّ القفلِ/التصريحِ: من يمسكُهُ ومتى بدأَ. */
-  #lockPayload(): string {
+  /**
+   * محتوى ملفِّ القفلِ/التصريحِ: من يمسكُهُ ومتى بدأَ وبرمزِ اقتنائِهِ الفريدِ.
+   * @param token - رمزُ الاقتناءِ (فريدٌ لكلِّ اقتناءٍ) — يُميّزُ قفلَنا عن قفلِ
+   * نسخةٍ أخرى في العمليّةِ نفسِها، ويُحقَّقُ بهِ حارسُ الكتابةِ قبلَ كلِّ كتابةٍ.
+   */
+  #lockPayload(token: string): string {
     return JSON.stringify({
       pid: process.pid,
       start: processStartTicks(process.pid),
       at: new Date().toISOString(),
+      token,
     });
   }
 
@@ -625,12 +730,48 @@ export class PersistentEventLog extends EventLog {
     }
   }
 
-  /** يفلت القفل إن كان مملوكاً لهذه العملية. */
+  /**
+   * يفلت القفل إن كان مملوكاً لهذه العملية. **الطبقةُ الأولى — تحريرٌ بمطالبةٍ فريدةٍ
+   * (انحدارُ `WL-492`):** الحذفُ المباشرُ على المسارِ المشتركِ يتركُ نافذةً يحذفُ فيها
+   * تحريرٌ متأخّرٌ قفلًا حيًّا اقتناهُ منافسٌ بعدَ تحريرِنا. الآنَ: القفلُ يُطالَبُ باسمٍ
+   * فريدٍ ثمَّ يُتحقَّقُ محتوى المطالَبِ (رمزُ اقتنائِنا) — فإن كانَ قفلَنا حُذفَ الاسمُ
+   * الفريدُ (آمنٌ دومًا)، وإن كانَ قفلًا اقتناهُ غيرُنا أُعيدَ إلى المسارِ ما دامَ حرًّا
+   * — فلا يُحذفَ قفلُ حيٍّ منَ المسارِ المشتركِ أبدًا.
+   */
   #releaseLock(): void {
     if (!this.#locked) return;
-    rmSync(this.lockFile, { force: true });
-    heldLocks.delete(resolve(this.lockFile));
+    const token = this.#lockToken;
+    this.#lockToken = null;
     this.#locked = false;
+    heldLocks.delete(resolve(this.lockFile));
+    if (token === null) {
+      rmSync(this.lockFile, { force: true }); // اقتناءٌ بلا رمزٍ (مسارٌ قديمٌ): كما كانَ
+      return;
+    }
+    const released = `${this.lockFile}.${process.pid}.${Date.now()}.${randomUUID()}.released`;
+    try {
+      renameSync(this.lockFile, released); // المطالبةُ الذرّيّةُ: المسارُ يتحرّرُ بها وحدها
+    } catch {
+      return; // لا قفلَ على المسارِ: سُرقَ وتحرَّرَ — لا شيءَ نحذفُهُ
+    }
+    let parsed: { token?: unknown };
+    try {
+      parsed = JSON.parse(readFileSync(released, 'utf8')) as { token?: unknown };
+    } catch {
+      rmSync(released, { force: true });
+      return;
+    }
+    if (parsed.token === token) {
+      rmSync(released, { force: true }); // قفلُنا: حذفُ الاسمِ الفريدِ آمنٌ
+      return;
+    }
+    // قفلُ غيرِنا (سُرقَ قفلُنا في نافذةٍ نادرةٍ): أعِدْهُ إن كانَ المسارُ حرًّا.
+    try {
+      linkSync(released, this.lockFile);
+    } catch {
+      // المسارُ مشغولٌ: لا نطمسَ قفلًا حيًّا جديدًا.
+    }
+    rmSync(released, { force: true });
   }
 
   /**
@@ -811,6 +952,9 @@ export class PersistentEventLog extends EventLog {
    */
   #appendRecord(type: string, actor: string, data: object): EventRecord {
     if (this.#closed || this.#fd === null) throw new PersistentLogError('LOG_CLOSED');
+    // حارسُ الملكيةِ قبلَ الكتابةِ (الطبقةُ الثالثةُ، انحدارُ `WL-492`): قفلٌ حيٌّ
+    // مسروقٌ = لا كتابةَ — فشلٌ مغلقٌ قابلٌ للإعادةِ لا كاتبانِ على السجلِّ.
+    this.#assertLockOurs();
     // `WL-326`: قبلَ أن يتقدّمَ أيُّ شيءٍ في الذاكرة — رفضُ الحاجزِ لا يتركُ حدثاً بلا قرص.
     beforeDurableWrite(this.file, 'append');
     const event = super.append(type, actor, data);

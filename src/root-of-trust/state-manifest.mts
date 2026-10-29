@@ -43,11 +43,12 @@
 //     نافذةَ الإعادةِ غيرِ المكشوفةِ إلى ما بينَ إقلاعينِ، مع الفحوصِ المتقاطعةِ
 //     القائمةِ (المراسي والدفترُ ومفتاحُ الإيقافِ) التي تكشفُ اللقطةَ الجزئيّة.
 
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomUUID } from 'node:crypto';
 import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -438,6 +439,12 @@ export class StateManifest {
   readonly journalLockFile: string;
   /** هل هذه النسخةُ تحملُ القفلَ الآنَ؟ يمنعُ فكَّ قفلٍ مُتشعِّبٍ. */
   #journalLockDepth = 0;
+  /**
+   * رمزُ الاقتناءِ الجاري (انحدارُ `WL-492`): هويةٌ فريدةٌ لكلِّ اقتناءٍ للقفلِ
+   * تُكتبُ في حمولتِهِ، فيميّزُ حارسُ الكتابةِ قفلَنا الحيَّ عن قفلٍ اقتناهُ غيرُنا
+   * — ولو بالعمليةِ نفسِها (نسختانِ على جذرٍ واحدٍ: pid واحدٌ ورمزانِ مختلفانِ).
+   */
+  #journalLockToken: string | null = null;
   readonly #fsync: boolean;
   #sealer: ManifestSealer | null;
   #verified: StateManifestBody | null = null;
@@ -719,6 +726,10 @@ export class StateManifest {
       const previousBinding = body.freshnessBinding ?? null;
       const target = this.journalFile + SEALING_SUFFIX + String(body.sequence + 1);
       this.#removeStaleSealing(body.sequence);
+      // حارسُ الملكيةِ قبلَ أولِ كتابةٍ تحويريةٍ في الختمِ (الطبقةُ الثالثةُ، انحدارُ
+      // `WL-492`): الختمُ يمرُّ بنقطةِ تعليقِ (`await`) داخلَ القسمِ الحرجِّ، والقفلُ
+      // الحيُّ المسروقُ في نافذةٍ نادرةٍ = لا كتابةَ — فشلٌ مغلقٌ قابلٌ للإعادةِ.
+      this.#assertJournalLockOurs();
       if (existsSync(this.journalFile)) {
         if (existsSync(target)) {
           appendLine(target, readFileSync(this.journalFile, 'utf8'), this.#fsync);
@@ -763,8 +774,13 @@ export class StateManifest {
           );
         }
       }
+      // حارسُ الملكيةِ قبلَ كتابةِ المتنِ (الطبقةُ الثالثةُ): نقطةُ التعليقِ أعلاه قد
+      // مكّنت منافسًا في نافذةٍ نادرةٍ — قفلُنا لا يزالُ قفلَنا أو لا ختمَ.
+      this.#assertJournalLockOurs();
       await this.#seal(next);
       if (applyPending) this.#pending.clear();
+      // حارسُ الملكيةِ بعدَ التعليقِ وقبلَ حذفِ هدفِ الطيِّ: الحذفُ تحويرٌ أيضًا.
+      this.#assertJournalLockOurs();
       rmSync(target, { force: true });
       this.#verified = next;
     } finally {
@@ -814,7 +830,20 @@ export class StateManifest {
     if (existsSync(this.journalFile)) files.push(this.journalFile);
     const lines: string[] = [];
     for (const file of files) {
-      for (const line of readFileSync(file, 'utf8').split('\n')) {
+      // انحدارُ `WL-492`: قراءةُ الدفترِ تُؤخذُ أحيانًا خارجَ القفلِ (لقطةٌ غيرُ
+      // ذرّيّةٍ بتصميمٍ)، وبينَ `existsSync` و`readFileSync` قد يطوي الختمُ الملفَّ
+      // (rename) فينهارُ القارئُ بـ`ENOENT` خامٍ لا رمزَ لهُ. الملفُ الذي زالَ في
+      // اللقطةِ زالَ بمسارٍ مشروعٍ (طيٌّ مكتملٌ) — تعامَلْ معهُ كغائبٍ: الطيُّ بعدها
+      // إمّا متّسقٌ (منظرٌ أقدمُ صحيحٌ) أو مرفوضٌ برمزٍ مسمّى (`ROLLBACK_DETECTED`)
+      // — فشلٌ مغلقٌ مسمّى لا انهيارٌ عارٍ.
+      let content: string;
+      try {
+        content = readFileSync(file, 'utf8');
+      } catch (error) {
+        if ((error as { code?: string }).code === 'ENOENT') continue;
+        throw error;
+      }
+      for (const line of content.split('\n')) {
         if (line.trim() !== '') lines.push(line);
       }
     }
@@ -825,6 +854,14 @@ export class StateManifest {
    * يأخذُ قفلَ الكاتبِ الواحدِ على دفترِ الرفعِ (‏`WL-165`). قفلٌ لعمليةٍ حيّةٍ
    * أخرى رفضٌ مغلقٌ برمزِه، وقفلٌ لعمليةٍ ميتةٍ أو لا يُقرأُ يُنتزَعُ مرّةً واحدةً:
    * أثرُ تعطُّلٍ لا ملكيّةٌ قائمةٌ، ولو بقيَ لعطَّلَ الرفعَ أبداً.
+   *
+   * انحدارُ `WL-492` (‏دينُ `LIVE-62`): الإنشاؤُ كانَ `openSync('wx')` ثمَّ كتابةُ
+   * المحتوى بعدهُ، فتوجدُ نافذةُ «قفلٍ فارغٍ» يقرأُ فيها المنافسُ مالكًا `null`
+   * فينتزعُ قفلًا لعمليةٍ حيّةٍ، والانتزاعُ كانَ حذفًا غيرَ مشروطٍ بعدَ قراءةِ
+   * مالكٍ ميتٍ فيسلبُ منافسًا استحواذَ القفلَ بينَ الفحصَينِ — كاتبانِ معًا على
+   * الدفترِ (النمطُ المقيسُ في نظيرِهِ من `persistent-log`: تشغيلةُ `40814498943`
+   * وإجهادُ `R8-01/8`). الآن: إنشاؤُ ذرّيُّ المحتوى (ملفٌّ مؤقتٌ كاملٌ ثمَّ `linkSync`)
+   * والانتزاعُ تحتَ تصريحِ سرقةٍ حصريٍّ يُعادُ فيهِ فحصُ المالكِ لحظةَ الحذفِ.
    */
   #acquireJournalLock(): void {
     if (this.#journalLockDepth > 0) {
@@ -833,33 +870,271 @@ export class StateManifest {
     }
     mkdirSync(dirname(this.journalFile), { recursive: true });
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const fd = openSync(this.journalLockFile, 'wx', 0o600);
-        try {
-          writeSync(fd, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-        } finally {
-          closeSync(fd);
-        }
+      const token = randomUUID();
+      if (this.#createExclusively(this.journalLockFile, this.#journalLockPayload(token))) {
         this.#journalLockDepth = 1;
+        this.#journalLockToken = token;
         return;
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'EEXIST') throw error;
-        const owner = journalLockOwner(this.journalLockFile);
-        if (owner !== null && owner !== process.pid && pidAlive(owner)) {
-          throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
-        }
-        rmSync(this.journalLockFile, { force: true });
       }
+      const owner = journalLockOwner(this.journalLockFile);
+      if (owner !== null && owner !== process.pid && pidAlive(owner)) {
+        throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', `العملية ${String(owner)}`);
+      }
+      // WL-493 (دينُ `LIVE-63`): قفلُ نسخةٍ شقيقةٍ حيّةٍ في العمليّةِ نفسِها قفلٌ حيٌّ
+      // لا يُنتزَعُ — رمزُ الاقتناءِ يميّزُهُ عنّا (pid واحدٌ ورمزانِ). الانتزاعُ هنا كانَ
+      // **حتميًّا لا نظريًّا**: نسخةٌ تنتزعُ قفلَ أختِها المعلّقةِ في `await signAsync`
+      // فتكتبُ الأختُ بيانَها بعدَ فقدانِ قفلِها (مُعادُ إنتاجِهِ في اختبارِ `LIVE-63/1`).
+      if (owner === process.pid && this.#journalLockHeldByLiveSibling()) {
+        throw new StateManifestError(
+          'STATE_MANIFEST_JOURNAL_LOCKED',
+          'نسخةٌ شقيقةٌ حيّةٌ في العمليّةِ نفسِها',
+        );
+      }
+      this.#stealJournalLock();
     }
     throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'تعذّرَ أخذُ القفل');
   }
 
-  /** يفكُّ قفلَ الدفترِ عندَ الخروجِ من أعمقِ مستوى أُخِذَ فيه. */
+  /**
+   * هل القفلُ على المسارِ قفلُ نسخةٍ شقيقةٍ حيّةٍ في العمليّةِ نفسِها؟ (انحدارُ `WL-493`)
+   * رمزُ الاقتناءِ هو ما يُميّزُ — فالعمليّةُ الواحدةُ قد تحملُ نسختَينِ على جذرٍ واحدٍ
+   * (pid واحدٌ ورمزانِ)، والقفلُ الذي يحملُ رمزًا وليسَ رمزَنا (لا نمسكُ القفلَ هنا)
+   * قفلُ أختٍ حيّةٍ: نسختُنا لا تدخلُ القسمَ الحرجَّ ولا تنتزعُهُ. والقفلُ بلا رمزٍ
+   * (صيغةٌ قديمةٌ) يبقى على سلوكِهِ السابقِ (انتزاعُ أثرِ التعطُّلِ).
+   */
+  #journalLockHeldByLiveSibling(): boolean {
+    try {
+      const parsed = JSON.parse(readFileSync(this.journalLockFile, 'utf8')) as {
+        pid?: unknown;
+        token?: unknown;
+      };
+      return parsed.pid === process.pid && typeof parsed.token === 'string';
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * حارسُ ملكيةِ القفلِ قبلَ كلِّ كتابةٍ (انحدارُ `WL-492`، الطبقةُ الثالثةُ): القفلُ
+   * ملفٌّ على مسارٍ مشتركٍ، ولا «حذفًا مشروطًا» في POSIX، فأيُّ بروتوكولِ ملفّاتٍ
+   * يُبقي نافذةً ضيقةً جدًّا يُسرقُ فيها قفلٌ حيٌّ (فُصِّلَت في سجلِّ `WL-492`). فالمقتني
+   * يتحقّقُ قبلَ كلِّ كتابةٍ تحويريةٍ أنَّ القفلَ على المسارِ ما زالَ قفلَهُ (pid + رمزُ
+   * الاقتناءِ)، وإلّا رفضَ برمزٍ مغلقٍ قابلٍ للإعادةِ (`JOURNAL_LOCKED`) — فشلٌ لا فسادٌ:
+   * الكاتبُ المسروقُ قفلُهُ يُلغي كتابتَهُ ويعيدُ، ولا يكتبُ اثنانِ على الدفترِ أبدًا.
+   */
+  #assertJournalLockOurs(): void {
+    if (this.#journalLockDepth === 0 || this.#journalLockToken === null) return;
+    let parsed: { pid?: unknown; token?: unknown };
+    try {
+      parsed = JSON.parse(readFileSync(this.journalLockFile, 'utf8')) as {
+        pid?: unknown;
+        token?: unknown;
+      };
+    } catch {
+      throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'قفلُ الدفترِ لم يعد قفلَنا');
+    }
+    if (parsed.pid !== process.pid || parsed.token !== this.#journalLockToken) {
+      throw new StateManifestError('STATE_MANIFEST_JOURNAL_LOCKED', 'قفلُ الدفترِ لم يعد قفلَنا');
+    }
+  }
+
+  /**
+   * انتزاعُ قفلِ دفترِ الرفعِ الميتِ تحتَ تصريحِ سرقةٍ حصريٍّ (انحدارُ `WL-492`).
+   *
+   * **السباقُ الذي يُغلقُهُ (الطبقةُ الثانيةُ — مطالبةٌ بتحقّقِ محتوى):** حذفُ القفلِ
+   * الميتِ على المسارِ المشتركِ بعدَ قراءةِ مالكٍ يتركُ نافذةً اقتنى فيها منافسٌ
+   * حيٌّ القفلَ فيُحذفُ قفلُهُ الحيُّ — كاتبانِ على الدفترِ (مقيسٌ في إجهادِ
+   * `LIVE-62/4` بفحصِ مالكٍ فارغٍ بعدَ تحريرٍ متزامنٍ). الآنَ الحذفُ لا يمسُّ المسارَ
+   * المشتركَ أصلًا: القفلُ الميتُ يُطالَبُ باسمٍ فريدٍ (‏`renameSync` ذرّيٌّ — من ينجحُ
+   * وحدَه يمسكُ الملفَّ)، ثمَّ يُقرأُ محتوى المطالَبِ: فإن كانَ المالكَ الميتَ/الغائبَ
+   * الذي فُحصَ حُذفَ الاسمُ الفريدُ، وإن كانَ قفلًا حيًّا اقتناهُ السارقُ سهوًا أُعيدَ
+   * إلى المسارِ — فلا يُيتَّمُ مالكٌ بلا قفلٍ، وحارسُ الكتابةِ عندَ المالكِ يرفضُ
+   * الكتابةَ بلا قفلِهِ. والتصريحُ نفسُهُ: إنشاؤُهُ ذرّيُّ المحتوى، واستردادُهُ من
+   * مالكٍ ميتٍ مطالبةٌ ذرّيّةٌ، ومن لا يُقرأُ مالكُهُ يُنتظَرُ ولا يُنتزَعُ عمياءً.
+   */
+  #stealJournalLock(): void {
+    const permit = `${this.journalLockFile}.steal-permit`;
+    const sleepSync = (ms: number): void => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    };
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const permitToken = randomUUID();
+      if (this.#createExclusively(permit, this.#journalLockPayload(permitToken))) {
+        try {
+          // داخلَ التصريحِ: الفحصُ يُعادُ فعلًا — المالكُ الذي قُرِئَ ميتًا خارجَهُ قد
+          // يكونُ قفلًا حيًّا الآنَ (استحواذَهُ منافسٌ)، وسلبُهُ حرامٌ.
+          const owner = journalLockOwner(this.journalLockFile);
+          if (owner !== null && owner !== process.pid && pidAlive(owner)) return;
+          // WL-493 (دينُ `LIVE-63`): النسخةُ الشقيقةُ الحيّةُ في العمليّةِ نفسِها قفلُها
+          // قفلٌ حيٌّ لا يُنتزَعُ — قد تظهرُ بينَ فحصِ الاقتناءِ وهنا (أختٌ اقتنتِ المسارَ).
+          if (owner === process.pid && this.#journalLockHeldByLiveSibling()) return;
+          if (!existsSync(this.journalLockFile)) return;
+          // المطالبةُ الذرّيّةُ (الطبقةُ الثانيةُ): القفلُ يُنقلُ باسمٍ فريدٍ فلا يُحذفَ
+          // شيءٌ على المسارِ المشتركِ أصلًا — الحذفُ بعدَ قراءةٍ متقادمةٍ هو الذي كانَ
+          // يسلبُ قفلًا حيًّا اقتناهُ منافسٌ بينَ الفحصِ والحذفِ (مقيسٌ في `LIVE-62/4`).
+          const claimed = `${this.journalLockFile}.${process.pid}.${Date.now()}.${randomUUID()}.claimed`;
+          try {
+            renameSync(this.journalLockFile, claimed);
+          } catch (error) {
+            if ((error as { code?: string }).code === 'ENOENT') return; // تحرّرَ قبلَنا: لا شيءَ ننتزعُهُ
+            throw error;
+          }
+          const claimedOwner = journalLockOwner(claimed);
+          if (claimedOwner === owner) {
+            // هو الميتُ/العاطلُ الذي فحصناهُ: حذفُ الاسمِ الفريدِ آمنٌ دومًا.
+            rmSync(claimed, { force: true });
+            return;
+          }
+          // حيٌّ اقتطيناهُ سهوًا (اقتنى منافسٌ المسارَ بينَ الفحصِ والمطالبةِ): أعِدْهُ
+          // ما دامَ المسارُ حرًّا — فلا يُيتَّمُ مالكٌ بلا قفلٍ؛ وإن كانَ المسارُ مشغولًا
+          // فنسختُنا تُحذفُ وحارسُ الكتابةِ عندَ المالكِ يرفضُ الكتابةَ بلا قفلِهِ.
+          try {
+            linkSync(claimed, this.journalLockFile);
+          } catch {
+            // المسارُ مشغولٌ بقفلٍ أحدثَ: لا نطمسُهُ.
+          }
+          rmSync(claimed, { force: true });
+          return;
+        } finally {
+          // WL-493 (دينُ `LIVE-63`): لا يُحذَفُ منَ المسارِ المشتركِ إلا ما نملكُهُ —
+          // تصريحُنا قد يكونُ انتُزِعَ (مُطالَبًا وأُعيدَ أو حُذفَ) وأخذَ المسارَ
+          // تصريحٌ أحدثُ لغيرِنا، فالحذفُ الأعمى كانَ يُسقِطُهُ. فالحذفُ مقيدٌ برمزِ
+          // الاقتناءِ الذي في التصريحِ على المسارِ الآنَ.
+          let permitAtPathIsOurs = false;
+          try {
+            const parsed = JSON.parse(readFileSync(permit, 'utf8')) as { token?: unknown };
+            permitAtPathIsOurs = parsed.token === permitToken;
+          } catch {
+            // غائبٌ أو غيرُ مقروءٍ: ليسَ تصريحَنا فلا يُمسُّ.
+          }
+          if (permitAtPathIsOurs) rmSync(permit, { force: true });
+        }
+      }
+      const holder = this.#filePid(permit);
+      if (holder !== null && !pidAlive(holder)) {
+        const claimed = `${permit}.${process.pid}.${Date.now()}.${randomUUID()}.claimed`;
+        try {
+          renameSync(permit, claimed); // المطالبةُ: من ينجحُ وحدَه يزيلُ التصريحَ الميت
+        } catch (error) {
+          if ((error as { code?: string }).code !== 'ENOENT') throw error;
+          continue; // استولى غيرُهُ على المطالبةِ: تنافسٌ عادلٌ من جديدٍ
+        }
+        // WL-493 (دينُ `LIVE-63`): تحقّقُ محتوى المطالَبِ قبلَ حذفِهِ — التصريحُ الذي
+        // على المسارِ الآنَ قد يكونُ تصريحًا حيًّا اقتناهُ منافسٌ بينَ قراءةِ الميتِ
+        // والمطالبةِ، فلا يُحذَفُ تصريحُ حيٍّ منَ المسارِ المشتركِ أبدًا (النمطُ نفسُهُ
+        // الذي أُصلِحَ للقفلِ نفسِهِ): المُطالَبُ الميتُ يُحذفُ، والحيُّ يُعادُ إن كانَ
+        // المسارُ حرًّا.
+        const claimedPermitOwner = this.#filePid(claimed);
+        if (claimedPermitOwner === null || claimedPermitOwner === holder) {
+          rmSync(claimed, { force: true }); // ميتٌ أو غيرُ مقروءٍ: حذفُ الاسمِ الفريدِ آمنٌ
+        } else {
+          try {
+            linkSync(claimed, permit); // حيٌّ اقتطيناهُ سهوًا: أعِدْهُ ما دامَ المسارُ حرًّا
+          } catch {
+            // المسارُ مشغولٌ بتصريحٍ أحدثَ: لا نطمسُهُ.
+          }
+          rmSync(claimed, { force: true });
+        }
+        continue;
+      }
+      sleepSync(5); // منافسٌ حيٌّ في قسمِهِ الحرجِّ (لحظاتٌ): انتظارٌ قصيرٌ ثمَّ إعادةُ المحاولةِ
+    }
+    throw new StateManifestError(
+      'STATE_MANIFEST_JOURNAL_LOCKED',
+      'تعذّرَ أخذُ القفل (تصريحُ السرقةِ مشغولٌ)',
+    );
+  }
+
+  /**
+   * محتوى ملفِّ القفلِ/التصريحِ: من يمسكُهُ ومتى بدأَ وبرمزِ اقتنائِهِ الفريدِ.
+   * @param token - رمزُ الاقتناءِ (فريدٌ لكلِّ اقتناءٍ) — يُميّزُ قفلَنا عن قفلِ
+   * نسخةٍ أخرى في العمليّةِ نفسِها، ويُحقَّقُ بهِ حارسُ الكتابةِ قبلَ كلِّ كتابةٍ.
+   */
+  #journalLockPayload(token: string): string {
+    return JSON.stringify({ pid: process.pid, at: new Date().toISOString(), token });
+  }
+
+  /** يقرأُ رقمَ العمليةِ المكتوبَ في ملفٍّ بصيغةِ القفلِ، أو `null` إن تعذّرَ. */
+  #filePid(file: string): number | null {
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown };
+      return typeof parsed.pid === 'number' ? parsed.pid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * إنشاءٌ حصريٌّ ذرّيُّ المحتوى (انحدارُ `WL-492`): يُكتَبُ المحتوى كاملًا في ملفٍّ
+   * مؤقتٍ فريدٍ ثمَّ يُظهَرُ بـ`linkSync` — فالملفُّ الموجودُ موجودٌ بمحتواهِ دومًا،
+   * ولا نافذةَ «ملفٍّ فارغٍ يُقرأُ مالكُهُ ملكًا مجهولًا». الملفُّ المؤقتُ يُزالُ في
+   * كلِّ حالٍ (الانهيارُ بينَ الكتابةِ والإظهارِ يتركُ يتيمًا صغيرًا لا يقرأهُ أحدٌ).
+   * @param target - المسارُ الذي يُطلبُ ظهورُه
+   * @param payload - محتواهُ الكامل
+   * @returns `true` إن ظهرَ (ملكَ الطالبَ)، و`false` إن كانَ موجودًا سلفًا
+   */
+  #createExclusively(target: string, payload: string): boolean {
+    const tmp = `${target}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+    try {
+      const fd = openSync(tmp, 'wx');
+      try {
+        writeSync(fd, payload);
+      } finally {
+        closeSync(fd);
+      }
+      try {
+        linkSync(tmp, target);
+        return true;
+      } finally {
+        rmSync(tmp, { force: true });
+      }
+    } catch (error) {
+      if ((error as { code?: string }).code === 'EEXIST') return false;
+      throw error;
+    }
+  }
+
+  /**
+   * يفكُّ قفلَ الدفترِ عندَ الخروجِ من أعمقِ مستوى أُخِذَ فيهِ. **الطبقةُ الأولى —
+   * تحريرٌ بمطالبةٍ فريدةٍ (انحدارُ `WL-492`):** الحذفُ المباشرُ على المسارِ المشتركِ
+   * يتركُ نافذةً يحذفُ فيها تحريرٌ متأخّرٌ قفلًا حيًّا اقتناهُ منافسٌ بعدَ تحريرِنا
+   * (مقيسٌ في إجهادِ `LIVE-62/4`). الآنَ: القفلُ يُطالَبُ باسمٍ فريدٍ ثمَّ يُتحقَّقُ
+   * محتوى المطالَبِ (رمزُ اقتنائِنا) — فإن كانَ قفلَنا حُذفَ الاسمُ الفريدُ (آمنٌ
+   * دومًا)، وإن كانَ قفلًا اقتناهُ غيرُنا (سُرقَ قفلُنا في نافذةٍ نادرةٍ) أُعيدَ إلى
+   * المسارِ ما دامَ حرًّا — فلا يُحذفَ قفلُ حيٍّ منَ المسارِ المشتركِ أبدًا.
+   */
   #releaseJournalLock(): void {
     this.#journalLockDepth -= 1;
     if (this.#journalLockDepth > 0) return;
     this.#journalLockDepth = 0;
-    rmSync(this.journalLockFile, { force: true });
+    const token = this.#journalLockToken;
+    this.#journalLockToken = null;
+    if (token === null) return;
+    const released = `${this.journalLockFile}.${process.pid}.${Date.now()}.${randomUUID()}.released`;
+    try {
+      renameSync(this.journalLockFile, released); // المطالبةُ الذرّيّةُ: المسارُ يتحرّرُ بها وحدها
+    } catch {
+      return; // لا قفلَ على المسارِ: سُرقَ وتحرَّرَ — لا شيءَ نحذفُهُ
+    }
+    let parsed: { token?: unknown };
+    try {
+      parsed = JSON.parse(readFileSync(released, 'utf8')) as { token?: unknown };
+    } catch {
+      rmSync(released, { force: true });
+      return;
+    }
+    if (parsed.token === token) {
+      rmSync(released, { force: true }); // قفلُنا: حذفُ الاسمِ الفريدِ آمنٌ
+      return;
+    }
+    // قفلُ غيرِنا (سُرقَ قفلُنا): أعِدْهُ إن كانَ المسارُ حرًّا، وإلّا فنسختُنا تُحذفُ
+    // وحارسُ الكتابةِ عندَ مالكِهِ يرفضُ الكتابةَ بلا قفلِهِ.
+    try {
+      linkSync(released, this.journalLockFile);
+    } catch {
+      // المسارُ مشغولٌ: لا نطمسَ قفلًا حيًّا جديدًا.
+    }
+    rmSync(released, { force: true });
   }
 
   /**
@@ -976,6 +1251,9 @@ export class StateManifest {
       const seq = body.sequence;
       const entry: Omit<JournalEntry, 'hash' | 'mac'> = { seq, key, value, at, prev: head };
       const hash = journalHash(body.instanceId, entry, this.#journalKey);
+      // حارسُ الملكيةِ قبلَ الكتابةِ (الطبقةُ الثالثةُ، انحدارُ `WL-492`): قفلٌ حيٌّ
+      // مسروقٌ = لا كتابةَ — فشلٌ مغلقٌ قابلٌ للإعادةِ لا كاتبانِ على الدفترِ.
+      this.#assertJournalLockOurs();
       const full: JournalEntry = { ...entry, hash };
       // R4-B-01: إن وُجدَ مفتاحٌ من التوكن، فاكتبْ الـ HMAC كحقلٍ مُنفصلٍ أيضاً
       // كي يُعرفَ عندَ التحقّقِ أنَّ السطرَ مُصادَقٌ عليه لا عارٍ.
@@ -1042,6 +1320,11 @@ export class StateManifest {
   async #seal(body: StateManifestBody): Promise<void> {
     const sealer = this.#requireSealer();
     const signature = await sealer.signAsync(body);
+    // WL-493 (دينُ `LIVE-63`): نقطةُ التعليقِ أعلاهَ داخلَ القسمِ الحرجِّ (الختمُ
+    // يمسكُ قفلَ الدفترِ) — والملكيّةُ تُعادُ فحصُها **بعدَها وقبلَ الكتابةِ**: القفلُ
+    // قد يُسلبَ أثناءَ الانتظارِ فالكتابةُ حينها كتابةُ بلا قفلٍ (مُعادُ إنتاجُهُ في
+    // اختبارِ `LIVE-63/1`). والحارسُ no-op في مسارِ التهيئةِ (لا قفلَ هناك).
+    this.#assertJournalLockOurs();
     const sealed: SealedStateManifest = {
       body,
       seal: { alg: 'ed25519', signerId: sealer.id, signature },

@@ -17,6 +17,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -229,6 +230,33 @@ test('R8-01/8: إجهادُ السباقِ — جولاتٌ متتابعةٌ، �
       const lock = readFileSync(file + LOG_LOCK_SUFFIX, 'utf8');
       const parsed = JSON.parse(lock);
       assert.equal(typeof parsed.pid, 'number', 'القفلُ يحملُ رقمَ عمليةٍ كاملًا');
+    }
+  });
+});
+
+// WL-492 — استردادُ تصريحِ سرقةٍ ماتَ مالكُهُ: القفلُ الميتُ يُنتزَعُ تحتَ تصريحٍ حصريٍّ،
+// والتصريحُ المتعطِّلُ نفسُهُ يُستردُّ **بمطالبةٍ ذرّيّةٍ** (renameSync) لا بحذفٍ أعمى بعدَ
+// قراءةٍ متقادمةٍ — فلا يُحذفُ تصريحُ منافسٍ حيٍّ، ولا يبقى المتعطِّلُ معطِّلًا للأبدِ.
+test('R8-01/9: تصريحُ سرقةٍ متعطِّلٌ (ماتَ مالكُهُ) يُستردُّ بالمطالبةِ الذرّيّةِ — والقفلُ الميتُ يُنتزعُ (انحدارُ WL-492)', async () => {
+  await withDir(async (dir) => {
+    const file = path.join(dir, 'events.log');
+    new PersistentEventLog(file, OPTS).close();
+    // عمليةٌ ماتت فعلًا (لا رقمًا مفترى): يُنتظَرُ خروجُها ثمَّ يُنسبُ إليها القفلُ والتصريحُ.
+    const dead = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20)']);
+    const deadPid = dead.pid;
+    await new Promise((resolve) => dead.on('exit', resolve));
+    writeFileSync(file + LOG_LOCK_SUFFIX, JSON.stringify({ pid: deadPid, at: 'x' }));
+    const permit = file + LOG_LOCK_SUFFIX + '.steal-permit';
+    writeFileSync(permit, JSON.stringify({ pid: deadPid, at: 'x' }));
+    const log = new PersistentEventLog(file, OPTS);
+    try {
+      assert.equal(log.events.length, 0, 'الفتحُ نجحَ بعدَ استردادِ القفلِ الميتِ');
+      const lock = readFileSync(file + LOG_LOCK_SUFFIX, 'utf8');
+      const parsed = JSON.parse(lock);
+      assert.equal(parsed.pid, process.pid, 'والقفلُ الظاهرُ صارَ لنا بمحتواهُ الكامل');
+      assert.equal(existsSync(permit), false, 'والتصريحُ لا يُترَكُ قائمًا بعدَ الاستردادِ');
+    } finally {
+      log.close();
     }
   });
 });
