@@ -9,7 +9,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PersistentEventLog, LOG_LOCK_SUFFIX } from '../../src/root-of-trust/index.mjs';
@@ -188,5 +196,39 @@ test('R8-01/7: التزامن — عمليّاتٌ متسابقةٌ على ال�
       results.every((r) => r === 'OPEN' || r === 'LOG_ALREADY_LOCKED'),
       JSON.stringify(results),
     );
+  });
+});
+
+// WL-491 — انحدارُ سباقِ إنشاءِ القفلِ: كانت نافذةُ «ملفِّ قفلٍ بلا محتوى» بينَ
+// `openSync('wx')` و`writeSync` تجعلُ المنافسَ يقرأُ مالكًا `null` فينتزعُ القفلَ من
+// كاتبٍ حيٍّ — قِيسَ في CI (تشغيلةُ `40814498943`): كاتبانِ OPEN من ستّةِ متسابقين.
+// الإصلاحُ أزالَ النافذةَ بالبناءِ (ملفٌّ مؤقتٌ كاملٌ ثم `linkSync` ذرّيٌّ)؛ وهذا
+// الإجهادُ حارسُ الانحدارِ: جولاتٌ متتابعةٌ من السباقِ نفسِهِ، كاتبٌ واحدٌ فقط في
+// كلِّ جولةٍ، والقفلُ الظاهرُ مقروءُ المحتوى دومًا.
+test('R8-01/8: إجهادُ السباقِ — جولاتٌ متتابعةٌ، كاتبٌ واحدٌ فقط في كلِّ جولةٍ، والقفلُ مقروءُ المحتوى (انحدارُ WL-491)', async () => {
+  await withDir(async (dir) => {
+    const file = path.join(dir, 'events.log');
+    const link = path.join(dir, 'alias.log');
+    new PersistentEventLog(file, OPTS).close();
+    symlinkSync(file, link);
+    for (let round = 0; round < 15; round += 1) {
+      const children = Array.from({ length: 6 }, (_, i) => holder(i % 2 === 0 ? file : link, 400));
+      const results = await Promise.all(children.map(firstLine));
+      for (const child of children) child.kill();
+      assert.equal(
+        results.filter((r) => r === 'OPEN').length,
+        1,
+        `جولةُ ${round}: ${JSON.stringify(results)}`,
+      );
+      assert.ok(
+        results.every((r) => r === 'OPEN' || r === 'LOG_ALREADY_LOCKED'),
+        JSON.stringify(results),
+      );
+      // القفلُ الظاهرُ بعدَ الجولةِ مقروءُ المحتوى: مالكُهُ رقمُ عمليةٍ — فالقفلُ
+      // الموجودُ موجودٌ بمحتواهُ، لا نافذةَ فارغةً تُقرأُ مالكًا مجهولًا.
+      const lock = readFileSync(file + LOG_LOCK_SUFFIX, 'utf8');
+      const parsed = JSON.parse(lock);
+      assert.equal(typeof parsed.pid, 'number', 'القفلُ يحملُ رقمَ عمليةٍ كاملًا');
+    }
   });
 });
