@@ -19,6 +19,9 @@
 //      وسطرٌ تالف في الوسط عبثٌ لا انقطاع.
 //   5. **كاتب واحد**: قفلٌ بملف (`<الملف>.lock`) يحمل رقم العملية، ويُنتزع إن
 //      كانت العملية مالكته ميتة — فقفلٌ يبقى بعد قتل العملية كان سيمنع الإقلاع.
+//      وإظهارُ القفلِ ذرّيٌّ (انحدارُ WL-491): المحتوى يُكتَبُ في ملفٍّ مؤقتٍ ثم
+//      يُظهَرُ القفلُ بـ`linkSync`، فلا يوجدُ قفلٌ بلا محتوى يُقرأُ مالكُهُ `null`
+//      فيُنتزعُ من كاتبٍ حيٍّ — كما قِيسَ في CI (`40814498943`).
 //
 // ما لا يفعله (معلَن، لا مضمر): الرأس **غير موقَّع**، فمن يملك الكتابة على القرص
 // يستطيع إعادة بناء السجل والرأس معاً بلا كشف. حدّ ذلك هو التثبيت الموقَّع
@@ -42,6 +45,7 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -53,6 +57,7 @@ import {
   writeFileSync,
   writeSync,
 } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { beforeDurableWrite } from './commit-barrier.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
@@ -440,34 +445,132 @@ export class PersistentEventLog extends EventLog {
     }
   }
 
-  /** يأخذ قفل الكاتب الواحد، وينتزعه إن كانت العملية المالكة له ميتة. */
+  /**
+   * يأخذ قفل الكاتب الواحد، وينتزعه إن كانت العملية المالكة له ميتة.
+   *
+   * ذرّيّةُ الإنشاءِ (انحدارُ WL-491): كانَ القفلُ يُنشأُ `openSync('wx')` ثم
+   * يُكتَبُ محتواهُ بعدهُ، فتوجدُ نافذةٌ يظهرُ فيها ملفُّ القفلِ **فارغًا**. المنافسُ
+   * في تلكَ النافذةِ يقرأُ مالكًا `null` فيَعُدُّ القفلَ أثرَ تعطُّلٍ فينتزعهُ وينشئُ
+   * قفلَهُ — فكاتبانِ يفتحانِ السجلَّ معًا، وقِيسَ هذا بعينِهِ في CI (تشغيلةُ
+   * `40814498943`: كاتبانِ OPEN من ستّةِ متسابقين)، ثمَّ أُعيدَ إنتاجُهُ محليًّا
+   * بإجهادِ `R8-01/8`. الآنَ يُكتَبُ المحتوى كاملًا في ملفٍّ مؤقتٍ ثم يُظهَرُ القفلُ
+   * بـ`linkSync` الذرّيِّ — فالقفلُ الموجودُ موجودٌ دائمًا بمحتواهُ، ولا يبقى
+   * للانتزاعِ إلّا القفلُ الذي ماتَ مالكُهُ فعلًا.
+   */
   #acquireLock(): void {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const fd = openSync(this.lockFile, 'wx');
-        writeSync(
-          fd,
-          JSON.stringify({
-            pid: process.pid,
-            start: processStartTicks(process.pid),
-            at: new Date().toISOString(),
-          }),
-        );
-        closeSync(fd);
+      if (this.#createExclusively(this.lockFile, this.#lockPayload())) {
         this.#locked = true;
         heldLocks.add(resolve(this.lockFile));
         return;
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'EEXIST') throw error;
-        const owner = this.#lockOwner();
-        if (owner !== null && this.#lockHeldByLiveOwner(owner))
-          throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: `العملية ${owner}` });
-        // قفلٌ لعملية ميتة (أو قفل تالف) أثرُ تعطُّل لا ملكية: يُنتزع ويُعلَن.
-        rmSync(this.lockFile, { force: true });
-        this.recovery.stolenLockPid = owner;
       }
+      const owner = this.#lockOwner();
+      if (owner !== null && this.#lockHeldByLiveOwner(owner))
+        throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: `العملية ${owner}` });
+      // قفلٌ لعملية ميتة (أو قفل تالف) أثرُ تعطُّل لا ملكية: يُنتزع ويُعلَن —
+      // لكنْ تحتَ تصريحِ سرقةٍ حصريٍّ يعيدُ فحصَ المالكِ داخلَهُ (انحدارُ WL-491).
+      this.#stealLock(owner);
     }
     throw new PersistentLogError('LOG_ALREADY_LOCKED', { detail: 'تعذّر أخذ القفل' });
+  }
+
+  /**
+   * انتزاعُ قفلِ عمليةٍ ميتةٍ — تحتَ تصريحِ سرقةٍ حصريٍّ (انحدارُ WL-491).
+   *
+   * **السباقُ الذي يُغلقُهُ هذا:** قبلَهُ كانَ المنتزِعُ يقرأُ مالكًا ميتًا ثمَّ يحذفُ
+   * القفلَ بلا شرطٍ، وبينَ القراءةِ والحذفِ قد يكونُ منافسٌ آخرُ قد انتزعَ القفلَ
+   * الميتَ واستحواذَهُ (حيًّا) — فيحذفُ المنتزِعُ قفلَ المنافسِ الحيِّ ويستحوذُ بدورِهِ:
+   * **كاتبانِ على السجلِّ معًا**، وقِيسَ هذا بعينِهِ (‏`40814498943` ثمَّ أُعيدَ
+   * إنتاجُهُ محليًّا بإجهادِ `R8-01/8`). الآنَ حذفُ القفلِ الميتِ لا يقعُ إلّا داخلَ
+   * تصريحٍ حصريٍّ يُعادُ فيهِ فحصُ المالكِ لحظةَ الحذفِ: فإن عادَ حيًّا (استحواذَهُ
+   * منافسٌ بينَ الفحصَينِ) لا سلبَةَ، ومنافسٌ حيٌّ يمسكُ التصريحَ يُنتظَرُ لحظاتٍ،
+   * وتصريحُ متعطِّلٍ (ماتَ مالكُهُ قبلَ إفلاتِهِ) يُنتزعُ بأمانٍ — فالميتُ لا يعودُ
+   * فيستحيلُ أن يمسكَ اثنانِ التصريحَ معًا. والتصريحُ نفسُهُ يُنشأُ بالإنشاءِ الذرّيِّ
+   * فلا يُقرأَ مالكُهُ `null` وهوَ يُكتَبُ: منَ لا يُقرأُ مالكُهُ يُنتظَرُ ولا يُنتزَعُ.
+   * @param deadOwner - المالكُ الميتُ كما قُرِئَ خارجَ التصريحِ (للإعلانِ عنهِ)
+   */
+  #stealLock(deadOwner: number | null): void {
+    const permit = `${this.lockFile}.steal-permit`;
+    const sleepSync = (ms: number): void => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    };
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if (this.#createExclusively(permit, this.#lockPayload())) {
+        try {
+          // داخلَ التصريحِ: الفحصُ يُعادُ فعلًا — فالمالكُ الذي قُرِئَ ميتًا خارجَهُ قد
+          // يكونُ قفلًا آخرَ حيًّا الآنَ (استحواذَهُ منافسٌ)، والحذفُ عندها سلبُ قفلٍ حيٍّ.
+          const owner = this.#lockOwner();
+          if (owner === null || !this.#lockHeldByLiveOwner(owner)) {
+            rmSync(this.lockFile, { force: true });
+            this.recovery.stolenLockPid = deadOwner;
+          }
+          return;
+        } finally {
+          rmSync(permit, { force: true });
+        }
+      }
+      // التصريحُ مأخوذٌ: إن ماتَ ماسكُهُ انتُزعَ (الميتُ لا يعودُ فلا يمسكُهُ اثنانِ)،
+      // وإن عُدِمَت قراءةُ مالكِهِ انتُظِرَ (قد يكونُ يُكتَبُ الآنَ) — لا انتزاعَ عمياءَ.
+      const holder = this.#filePid(permit);
+      if (holder !== null && !this.#pidAlive(holder)) {
+        rmSync(permit, { force: true });
+        continue;
+      }
+      sleepSync(5); // منافسٌ حيٌّ في قسمِهِ الحرجِّ (لحظاتٌ): انتظارٌ قصيرٌ ثمَّ إعادةُ المحاولةِ
+    }
+    throw new PersistentLogError('LOG_ALREADY_LOCKED', {
+      detail: 'تعذّر أخذ القفل (تصريحُ السرقةِ مشغولٌ)',
+    });
+  }
+
+  /** محتوى ملفِّ القفلِ/التصريحِ: من يمسكُهُ ومتى بدأَ. */
+  #lockPayload(): string {
+    return JSON.stringify({
+      pid: process.pid,
+      start: processStartTicks(process.pid),
+      at: new Date().toISOString(),
+    });
+  }
+
+  /** يقرأُ رقمَ العمليةِ المكتوبَ في ملفٍّ بصيغةِ القفلِ، أو `null` إن تعذّرَ. */
+  #filePid(file: string): number | null {
+    try {
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { pid?: unknown };
+      return typeof parsed.pid === 'number' ? parsed.pid : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * إنشاءٌ حصريٌّ ذرّيُّ المحتوى (انحدارُ WL-491): يُكتَبُ المحتوى كاملًا في ملفٍّ
+   * مؤقتٍ فريدٍ ثمَّ يُظهَرُ الملفُّ بـ`linkSync` — فالملفُّ الموجودُ موجودٌ بمحتواهُ
+   * دومًا، ولا نافذةَ «ملفٍّ فارغٍ يُقرأُ مالكُهُ ملكًا مجهولًا». الملفُّ المؤقتُ
+   * يُزالُ في كلِّ حالٍ (الانهيارُ بينَ الكتابةِ والإظهارِ يتركُ ملفًّا يتيمًا صغيرًا
+   * لا يقرأهُ أحدٌ — عيبٌ جماليٌّ معلَنٌ لا خطرٌ).
+   * @param target - المسارُ الذي يُطلبُ ظهورُهُ
+   * @param payload - محتواهُ الكاملُ
+   * @returns `true` إن ظهرَ (ملكَ الطالبَ)، و`false` إن كانَ موجودًا سلفًا
+   */
+  #createExclusively(target: string, payload: string): boolean {
+    const tmp = `${target}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+    try {
+      const fd = openSync(tmp, 'wx');
+      try {
+        writeSync(fd, payload);
+      } finally {
+        closeSync(fd);
+      }
+      try {
+        linkSync(tmp, target);
+        return true;
+      } finally {
+        rmSync(tmp, { force: true });
+      }
+    } catch (error) {
+      if ((error as { code?: string }).code === 'EEXIST') return false;
+      throw error;
+    }
   }
 
   /**
