@@ -24,6 +24,19 @@
 // وحدةِ القناةِ. فمن أرادَ إرسالًا فلا سبيلَ إلا عبرَ بوابةٍ يركِّبُها — والقناةُ بلا
 // بوابةٍ تُرفَضُ قبلَ أيِّ اتصالٍ.
 //
+// **LIVE-53 (WL-429 — قيدُ عقدٍ على أيِّ نقلِ SMTP يُكتبُ في موقعِ التركيبِ):**
+// حقنُ أوامرِ SMTP بـCRLF يقعُ **بعدَ** بوابةِ الخروجِ (النقلُ هو من يُركِّبُ
+// أوامرَ البروتوكولِ منَ العنوانِ). القناةُ تُنفِّذُ الشقَّ الأقوى: **رفضٌ مغلقٌ
+// مسمّى (`SMTP_DESTINATION_CRLF_FORBIDDEN`) لأيِّ وجهةٍ تحملُ CR أو LF قبلَ أيِّ
+// نداءٍ للبوابةِ** — فلا يبلغُ أيَّ نقلٍ (في موقعِ التركيبِ أو غيرِهِ) عنوانٌ
+// يحملُ سطرًا محقونًا. وأيُّ نقلٍ يُكتبُهُ المُركِّبُ في موقعِ التركيبِ يبقى مُلزَمًا
+// بالقيدِ نفسِهِ في عقدِهِ: رفضٌ صريحٌ أو ترميزٌ مع تهريبِ النقطةِ — الرفضُ من
+// المنبعِ لا يُعفي النقلَ من القيدِ بل يقطعُ عنهُ المادةَ الملغومةَ.
+//
+// **LIVE-54 (WL-429):** `maskEmail` تُعقِّمُ محارفَ التحكّمِ (CRLF وكلَّ C0/DEL)
+// قبلَ الإخفاءِ — فالمخرجُ المطبوعُ في السجلِّ لا ينقسمُ على أسطرِ المحقونِ،
+// والمحتوى المحقونُ يبقى مرئيًّا في سطرٍ واحدٍ (تشخيصٌ لا إخفاءٌ).
+//
 // **حدٌّ معلَنٌ — لا سرَّ في الكود:** كلمةُ السرِّ تُقرأُ من متغيّرٍ بيئيٍّ
 // (SMTP_PASSWORD) ولا تُكتبُ في الكودِ ولا السجلّ.
 //
@@ -52,6 +65,22 @@ export function EmailChannel(deps) {
      * @returns {Promise<import('../dispatcher.mjs').NotificationResult>}
      */
     async send(message, destination) {
+      // LIVE-53 (WL-429): قيدُ عقدٍ على مسارِ البريدِ — أيُّ وجهةٍ تحملُ CR أو LF
+      // تُرفَضُ رفضًا مغلقًا مسمّى **قبلَ** قراءةِ الإعدادِ وقبلَ أيِّ نداءٍ للبوابةِ.
+      // الحقنُ يقعُ بعدَ البوابةِ (النقلُ يُركِّبُ أوامرَ SMTP منَ العنوانِ) — والرفضُ
+      // منَ المنبعِ يقطعُ المادةَ الملغومةَ قبلَ أن تبلغَ أيَّ نقلٍ في موقعِ التركيبِ.
+      if (/[\r\n]/.test(destination)) {
+        return createNotificationResult({
+          channel: 'email',
+          ownerId: message.ownerId,
+          maskedDestination: maskEmail(destination),
+          state: 'failed',
+          attemptedAtMs: message.sentAtMs,
+          failureReason:
+            'SMTP_DESTINATION_CRLF_FORBIDDEN: العنوانُ يحملُ أسطرًا محقونةً (CR/LF) — مرفوضٌ قبلَ البوابةِ وكلِّ نقلٍ (LIVE-53)',
+        });
+      }
+
       const config = deps.getSmtpConfig();
       if (!config) {
         return createNotificationResult({
@@ -153,11 +182,24 @@ export function EmailChannel(deps) {
 
 /**
  * يُخفي عنوانَ البريدِ في السجلِّ.
+ *
+ * **LIVE-54 (WL-429):** التعقيمُ قبلَ الإخفاءِ — تُحذَفُ محارفُ التحكّمِ
+ * (CRLF وكلُّ C0 وDEL) منَ المخرجِ المطبوعِ فلا ينقسمُ السطرُ على أسطرِ
+ * المحقونِ. المحتوى المحقونُ يبقى مرئيًّا في سطرٍ واحدٍ (تشخيصٌ لا إخفاءٌ)،
+ * والسلوكُ على العناوينِ السليمةِ لا يتغيّرُ.
  * @param {string} email
  * @returns {string}
  */
 function maskEmail(email) {
-  const [local = '', domain = ''] = email.split('@');
+  // LIVE-54: التعقيمُ قبلَ الإخفاءِ — لا سطرًا محقونًا في المخرجِ المطبوعِ.
+  // الفحصُ برموزِ المحارفِ لا بنمطٍ خامٍ (قاعدةُ `no-control-regex`).
+  const sanitized = [...email]
+    .filter((ch) => {
+      const code = ch.codePointAt(0);
+      return code === undefined || (code >= 0x20 && code !== 0x7f);
+    })
+    .join('');
+  const [local = '', domain = ''] = sanitized.split('@');
   if (!domain || local.length <= 2) return `*@${domain ?? ''}`;
   return `${local[0]}***${local[local.length - 1]}@${domain}`;
 }
