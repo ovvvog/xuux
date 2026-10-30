@@ -7,14 +7,14 @@
 # الكتابةِ (‏`dm-flakey` بـ`error_writes`) داخلَ المعاملةِ.
 #
 # **الضماناتُ المقيسةُ (‏كلُّ سطرٍ `OUTCOME` يُحكَمُ عليه هنا لا في العمليّةِ الفرعيّةِ):**
-#   G1 لا فقدَ بعدَ الدوامِ: القطعُ عندَ S5 أو ACK ⇐ `BOOT_OK` و`committed`.
-#   G2 لا التزامَ شبحيّاً: القطعُ عندَ S2 أو S3 والمرجعُ لم يتقدّمْ ⇐ `BOOT_OK` و`unknown`.
-#   G3 المرجعُ متقدّمٌ على القرصِ (‏صورةُ S3 بلقطةِ S4، وصورةُ S4): إمّا `BOOT_OK`
+#   PL1 لا فقدَ بعدَ الدوامِ: القطعُ عندَ S5 أو ACK ⇐ `BOOT_OK` و`committed`.
+#   PL2 لا التزامَ شبحيّاً: القطعُ عندَ S2 أو S3 والمرجعُ لم يتقدّمْ ⇐ `BOOT_OK` و`unknown`.
+#   PL3 المرجعُ متقدّمٌ على القرصِ (‏صورةُ S3 بلقطةِ S4، وصورةُ S4): إمّا `BOOT_OK`
 #      و`committed` (‏إكمالٌ) وإمّا رفضٌ **مسمّى** (‏إغلاقٌ آمنٌ). `BOOT_OK` مع `unknown` هنا
 #      قبولٌ صامتٌ لحالةٍ أقدمَ منَ المرجعِ ⇐ سقوطٌ. ورفضٌ بلا رمزٍ ⇐ سقوطٌ.
-#   G4 سلامةُ نظامِ الملفاتِ مستقلّةً عن التطبيقِ: `e2fsck -fn` نظيفٌ على كلِّ صورةٍ بعدَ
+#   PL4 سلامةُ نظامِ الملفاتِ مستقلّةً عن التطبيقِ: `e2fsck -fn` نظيفٌ على كلِّ صورةٍ بعدَ
 #      استرجاعِ المجلّةِ عندَ التحميلِ.
-#   G5 لا إقرارَ مع خطأِ كتابةٍ: الكتابةُ تُرفَضُ (‏EIO) ابتداءً من S2 أو S3 ⇐ `NO_ACK`
+#   PL5 لا إقرارَ مع خطأِ كتابةٍ: الكتابةُ تُرفَضُ (‏EIO) ابتداءً من S2 أو S3 ⇐ `NO_ACK`
 #      برمزٍ مسمّى؛ وبعدَ إعادةِ التحميلِ: لا `committed` بعدَ فشلِ S3-قبلَ-التقدّمِ (‏S2)،
 #      وأيُّ إقلاعٍ إمّا `BOOT_OK` متّسقٌ وإمّا رفضٌ مسمّى.
 #
@@ -127,23 +127,23 @@ judge_cut() {
   case "$2:$3" in
     S5:* | ACK:*)
       [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] && ok=1 || ok=0
-      verdict G1 "${label}" "${ok}" "${outcome}" ;;
+      verdict PL1 "${label}" "${ok}" "${outcome}" ;;
     S2:S2 | S3:S3)
       [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] && ok=1 || ok=0
-      verdict G2 "${label}" "${ok}" "${outcome}" ;;
+      verdict PL2 "${label}" "${ok}" "${outcome}" ;;
     *)
       if [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] ||
         [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then
         ok=1
       else ok=0; fi
-      verdict G3 "${label}" "${ok}" "${outcome}" ;;
+      verdict PL3 "${label}" "${ok}" "${outcome}" ;;
   esac
 }
 
 # الشاهدُ السلبيُّ (‏`fsync:false` — خيارٌ إنتاجيٌّ حقيقيٌّ، لا مسَّ بالشفرةِ): لا شيءَ يُفلَشُ
 # فالصورةُ عندَ كلِّ علامةٍ هي خطُّ الأساسِ. القياسُ يجبُ أن **يرى** الفقدَ:
-#   N1 والمرجعُ لم يتقدّمْ (‏لقطةُ S2/S3) ⇐ `BOOT_OK` و`unknown`.
-#   N2 والمرجعُ متقدّمٌ (‏لقطةُ S4 فما بعدَها) معَ قرصٍ أقدمَ ⇐ رفضٌ مسمّى. فلو حفظَ القطعُ ما لم
+#   PLN1 والمرجعُ لم يتقدّمْ (‏لقطةُ S2/S3) ⇐ `BOOT_OK` و`unknown`.
+#   PLN2 والمرجعُ متقدّمٌ (‏لقطةُ S4 فما بعدَها) معَ قرصٍ أقدمَ ⇐ رفضٌ مسمّى. فلو حفظَ القطعُ ما لم
 #      يُزامَنْ لظهرَ `BOOT_OK` و`committed` هنا (‏قياسٌ أعمى)، و`BOOT_OK` و`unknown` قبولٌ صامتٌ
 #      لاسترجاعٍ (‏rollback) بعدَ فقدِ طاقةٍ — وكلاهما سقوطٌ.
 judge_negative() {
@@ -152,10 +152,10 @@ judge_negative() {
   case "$2" in
     S2 | S3)
       [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] && ok=1 || ok=0
-      verdict N1 "${label}" "${ok}" "${outcome}" ;;
+      verdict PLN1 "${label}" "${ok}" "${outcome}" ;;
     *)
       if [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then ok=1; else ok=0; fi
-      verdict N2 "${label}" "${ok}" "${outcome}" ;;
+      verdict PLN2 "${label}" "${ok}" "${outcome}" ;;
   esac
 }
 
@@ -207,7 +207,7 @@ stage_cuts() {
       else
         judge_negative "${stage}" "${witness}" "${outcome}"
       fi
-      verdict G4 "iter${iter}/cut@${stage}/witness@${witness}" "$(fsck_clean "${loop}")" e2fsck
+      verdict PL4 "iter${iter}/cut@${stage}/witness@${witness}" "$(fsck_clean "${loop}")" e2fsck
       drop_loop "${loop}"
     done
   done
@@ -236,7 +236,7 @@ eio_case() {
   result="$(node "${CHILD}" "${WORK}/config.json" "eio-${at}")"
   echo "OUTCOME|eio@${at}/transaction|${result}"
   if [[ "${result}" =~ ^NO_ACK:[A-Za-z][A-Za-z0-9_]+$ && "${result}" != 'NO_ACK:UNNAMED' ]]; then ok=1; else ok=0; fi
-  verdict G5 "eio@${at}/no-ack" "${ok}" "${result}"
+  verdict PL5 "eio@${at}/no-ack" "${ok}" "${result}"
 
   # «إعادةُ التشغيلِ»: فكُّ التحميلِ، وإعادةُ الجهازِ سليماً، وتحميلٌ جديدٌ يقرأُ القرصَ لا الذاكرة.
   sudo umount "${MNT}" || sudo umount -l "${MNT}"
@@ -252,8 +252,8 @@ eio_case() {
     [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then
     ok=1
   else ok=0; fi
-  verdict G5 "eio@${at}/reboot" "${ok}" "${outcome}"
-  verdict G4 "eio@${at}" "$(fsck_clean "/dev/mapper/${DM_FLAKEY}")" e2fsck
+  verdict PL5 "eio@${at}/reboot" "${ok}" "${outcome}"
+  verdict PL4 "eio@${at}" "$(fsck_clean "/dev/mapper/${DM_FLAKEY}")" e2fsck
   sudo dmsetup remove "${DM_FLAKEY}"
   drop_loop "${data}"
 }
