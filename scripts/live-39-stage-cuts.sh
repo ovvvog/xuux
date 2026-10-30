@@ -17,6 +17,8 @@
 #   PL5 لا إقرارَ مع خطأِ كتابةٍ: الكتابةُ تُرفَضُ (‏EIO) ابتداءً من S2 أو S3 ⇐ `NO_ACK`
 #      برمزٍ مسمّى؛ وبعدَ إعادةِ التحميلِ: لا `committed` بعدَ فشلِ S3-قبلَ-التقدّمِ (‏S2)،
 #      وأيُّ إقلاعٍ إمّا `BOOT_OK` متّسقٌ وإمّا رفضٌ مسمّى.
+#   HARNESS الحزامُ نفسُهُ: المعاملةُ المرحليّةُ أُقِرَّ بها، ولقطةُ المرجعِ موجودةٌ عندَ كلِّ علامةٍ
+#      (‏غيابُها سقوطٌ منذ `WL-499` لا ملاحظةٌ). دوالُّ الحكمِ في `scripts/lib/live-39-judge.sh`.
 #
 # **حدٌّ معلَنٌ (‏بحرفِ WL-360):** إعادةُ تشغيلِ سجلِّ نواةٍ حقيقيٍّ على جهازِ حلقةٍ في عدّاءٍ
 # مستضافٍ — لا فقدُ طاقةٍ فعليٌّ على عتادٍ مخصّصٍ، ولا برهانُ TPM/HSM، ولا جاهزيّةُ إنتاجٍ.
@@ -29,6 +31,9 @@ readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly CHILD="${REPO_ROOT}/tests/helpers/wl-498-stage-cut-child.mjs"
 readonly PROVISION_CHILD="${REPO_ROOT}/tests/helpers/wl-360-crash-child.mjs"
 readonly REPLAY="${REPO_ROOT}/scripts/lib/log-writes-replay.mjs"
+# دوالُّ الحكمِ مفصولةٌ ومختبَرةٌ بلا نواةٍ (‏`WL-499`: `tests/tooling/live-39-judge.test.mjs`).
+# shellcheck source=lib/live-39-judge.sh
+source "${REPO_ROOT}/scripts/lib/live-39-judge.sh"
 readonly WORK="${RUNNER_TEMP:-/tmp}/lw498"
 readonly MNT='/mnt/lw498'
 readonly DM_LOG='lw498log'
@@ -65,17 +70,6 @@ drop_loop() {
   local kept=()
   for loop in "${LOOPS[@]}"; do [ "${loop}" = "$1" ] || kept+=("${loop}"); done
   LOOPS=("${kept[@]}")
-}
-
-# الحكمُ: `verdict <guarantee> <label> <ok:0|1> <detail>`
-verdict() {
-  CHECKS=$((CHECKS + 1))
-  if [ "$3" = 1 ]; then
-    echo "PASS|$1|$2|$4"
-  else
-    echo "FAIL|$1|$2|$4"
-    FAILURES=$((FAILURES + 1))
-  fi
 }
 
 write_config() {
@@ -120,45 +114,6 @@ fsck_clean() {
   fi
 }
 
-judge_cut() {
-  # $1 iteration · $2 stage · $3 witness-stage · $4 outcome
-  local label="iter$1/cut@$2/witness@$3" outcome="$4"
-  echo "OUTCOME|${label}|${outcome}"
-  case "$2:$3" in
-    S5:* | ACK:*)
-      [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] && ok=1 || ok=0
-      verdict PL1 "${label}" "${ok}" "${outcome}" ;;
-    S2:S2 | S3:S3)
-      [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] && ok=1 || ok=0
-      verdict PL2 "${label}" "${ok}" "${outcome}" ;;
-    *)
-      if [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] ||
-        [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then
-        ok=1
-      else ok=0; fi
-      verdict PL3 "${label}" "${ok}" "${outcome}" ;;
-  esac
-}
-
-# الشاهدُ السلبيُّ (‏`fsync:false` — خيارٌ إنتاجيٌّ حقيقيٌّ، لا مسَّ بالشفرةِ): لا شيءَ يُفلَشُ
-# فالصورةُ عندَ كلِّ علامةٍ هي خطُّ الأساسِ. القياسُ يجبُ أن **يرى** الفقدَ:
-#   PLN1 والمرجعُ لم يتقدّمْ (‏لقطةُ S2/S3) ⇐ `BOOT_OK` و`unknown`.
-#   PLN2 والمرجعُ متقدّمٌ (‏لقطةُ S4 فما بعدَها) معَ قرصٍ أقدمَ ⇐ رفضٌ مسمّى. فلو حفظَ القطعُ ما لم
-#      يُزامَنْ لظهرَ `BOOT_OK` و`committed` هنا (‏قياسٌ أعمى)، و`BOOT_OK` و`unknown` قبولٌ صامتٌ
-#      لاسترجاعٍ (‏rollback) بعدَ فقدِ طاقةٍ — وكلاهما سقوطٌ.
-judge_negative() {
-  local label="nofsync/cut@$1/witness@$2" outcome="$3"
-  echo "OUTCOME|${label}|${outcome}"
-  case "$2" in
-    S2 | S3)
-      [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] && ok=1 || ok=0
-      verdict PLN1 "${label}" "${ok}" "${outcome}" ;;
-    *)
-      if [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then ok=1; else ok=0; fi
-      verdict PLN2 "${label}" "${ok}" "${outcome}" ;;
-  esac
-}
-
 # ══ السيناريو أ: قطعٌ عندَ كلِّ مرحلةٍ على dm-log-writes ══
 stage_cuts() {
   local iter="$1" op="${2:-staged}"
@@ -181,7 +136,7 @@ stage_cuts() {
   ack="$(node "${CHILD}" "${WORK}/config.json" "${op}")"
   verdict HARNESS "iter${iter}/staged-transaction" "$([ "${ack}" = ACK ] && echo 1 || echo 0)" "${ack}"
   for stage in ${STAGES}; do
-    [ -f "${WORK}/snaps/${stage}.json" ] || echo "NOTE|iter${iter}|no witness snapshot at ${stage}"
+    judge_witness "iter${iter}/${stage}" "${WORK}/snaps/${stage}.json"
   done
   # القطعُ: ما بعدَ العلامةِ وما لم يُفلَش يسقُطُ.
   sudo umount "${MNT}"
@@ -234,9 +189,8 @@ eio_case() {
 
   local result
   result="$(node "${CHILD}" "${WORK}/config.json" "eio-${at}")"
-  echo "OUTCOME|eio@${at}/transaction|${result}"
-  if [[ "${result}" =~ ^NO_ACK:[A-Za-z][A-Za-z0-9_]+$ && "${result}" != 'NO_ACK:UNNAMED' ]]; then ok=1; else ok=0; fi
-  verdict PL5 "eio@${at}/no-ack" "${ok}" "${result}"
+  judge_eio_ack "${at}" "${result}"
+  judge_witness "eio@${at}" "${WORK}/socket.json"
 
   # «إعادةُ التشغيلِ»: فكُّ التحميلِ، وإعادةُ الجهازِ سليماً، وتحميلٌ جديدٌ يقرأُ القرصَ لا الذاكرة.
   sudo umount "${MNT}" || sudo umount -l "${MNT}"
@@ -246,13 +200,7 @@ eio_case() {
   local outcome
   outcome="$(verify_with_witness "${WORK}/socket.json")"
   sudo umount "${MNT}"
-  echo "OUTCOME|eio@${at}/reboot|${outcome}"
-  if [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] ||
-    [[ "${at}" != S2 && "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] ||
-    [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then
-    ok=1
-  else ok=0; fi
-  verdict PL5 "eio@${at}/reboot" "${ok}" "${outcome}"
+  judge_eio_reboot "${at}" "${outcome}"
   verdict PL4 "eio@${at}" "$(fsck_clean "/dev/mapper/${DM_FLAKEY}")" e2fsck
   sudo dmsetup remove "${DM_FLAKEY}"
   drop_loop "${data}"
