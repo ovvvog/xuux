@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# LIVE-39 — قطعُ الطاقةِ عندَ كلِّ مرحلةٍ من حاجزِ الالتزامِ وحقنُ أخطاءِ الكتابةِ (WL-498).
+#
+# **ما يُضيفُهُ على `scripts/live-39-power-loss.sh` (‏WL-360):** ذاك يقطعُ عندَ `ACK` وحدَها.
+# هذا يقطعُ عندَ **كلِّ** مرحلةٍ (‏S2 · S3 · S4 · S5 · ACK) لمعاملةٍ واحدةٍ، ويقيسُ ما بعدَ
+# إعادةِ التشغيلِ، ويُكرِّرُ ذلكَ `LIVE39_ITERATIONS` مرّةً على أجهزةٍ جديدةٍ، ثمّ يحقنُ أخطاءَ
+# الكتابةِ (‏`dm-flakey` بـ`error_writes`) داخلَ المعاملةِ.
+#
+# **الضماناتُ المقيسةُ (‏كلُّ سطرٍ `OUTCOME` يُحكَمُ عليه هنا لا في العمليّةِ الفرعيّةِ):**
+#   G1 لا فقدَ بعدَ الدوامِ: القطعُ عندَ S5 أو ACK ⇐ `BOOT_OK` و`committed`.
+#   G2 لا التزامَ شبحيّاً: القطعُ عندَ S2 أو S3 والمرجعُ لم يتقدّمْ ⇐ `BOOT_OK` و`unknown`.
+#   G3 المرجعُ متقدّمٌ على القرصِ (‏صورةُ S3 بلقطةِ S4، وصورةُ S4): إمّا `BOOT_OK`
+#      و`committed` (‏إكمالٌ) وإمّا رفضٌ **مسمّى** (‏إغلاقٌ آمنٌ). `BOOT_OK` مع `unknown` هنا
+#      قبولٌ صامتٌ لحالةٍ أقدمَ منَ المرجعِ ⇐ سقوطٌ. ورفضٌ بلا رمزٍ ⇐ سقوطٌ.
+#   G4 سلامةُ نظامِ الملفاتِ مستقلّةً عن التطبيقِ: `e2fsck -fn` نظيفٌ على كلِّ صورةٍ بعدَ
+#      استرجاعِ المجلّةِ عندَ التحميلِ.
+#   G5 لا إقرارَ مع خطأِ كتابةٍ: الكتابةُ تُرفَضُ (‏EIO) ابتداءً من S2 أو S3 ⇐ `NO_ACK`
+#      برمزٍ مسمّى؛ وبعدَ إعادةِ التحميلِ: لا `committed` بعدَ فشلِ S3-قبلَ-التقدّمِ (‏S2)،
+#      وأيُّ إقلاعٍ إمّا `BOOT_OK` متّسقٌ وإمّا رفضٌ مسمّى.
+#
+# **حدٌّ معلَنٌ (‏بحرفِ WL-360):** إعادةُ تشغيلِ سجلِّ نواةٍ حقيقيٍّ على جهازِ حلقةٍ في عدّاءٍ
+# مستضافٍ — لا فقدُ طاقةٍ فعليٌّ على عتادٍ مخصّصٍ، ولا برهانُ TPM/HSM، ولا جاهزيّةُ إنتاجٍ.
+# والمرجعُ الخارجيُّ ملفٌّ خارجَ القرصِ المُختبرِ (‏`testFixture`) تُلتقَطُ حالُهُ عندَ كلِّ علامةٍ.
+#
+# `LIVE39_OBSERVE=1` يطبعُ النتائجَ بلا حكمٍ (‏للاستكشافِ فقطِ؛ CI لا يضبطُهُ).
+set -euo pipefail
+
+readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly CHILD="${REPO_ROOT}/tests/helpers/wl-498-stage-cut-child.mjs"
+readonly PROVISION_CHILD="${REPO_ROOT}/tests/helpers/wl-360-crash-child.mjs"
+readonly REPLAY="${REPO_ROOT}/scripts/lib/log-writes-replay.mjs"
+readonly WORK="${RUNNER_TEMP:-/tmp}/lw498"
+readonly MNT='/mnt/lw498'
+readonly DM_LOG='lw498log'
+readonly DM_FLAKEY='lw498flakey'
+readonly SIZE_BYTES='268435456'
+readonly ITERATIONS="${LIVE39_ITERATIONS:-3}"
+readonly OBSERVE="${LIVE39_OBSERVE:-0}"
+readonly STAGES='S2 S3 S4 S5 ACK'
+
+LOOPS=()
+FAILURES=0
+CHECKS=0
+
+cleanup() {
+  sudo umount "${MNT}" >/dev/null 2>&1 || true
+  sudo dmsetup remove "${DM_LOG}" >/dev/null 2>&1 || true
+  sudo dmsetup remove "${DM_FLAKEY}" >/dev/null 2>&1 || true
+  # تحييدٌ محصورٌ بالأجهزةِ التي أنشأها هذا السكربتُ وحدَهُ (‏لا `losetup -D`).
+  for loop in "${LOOPS[@]}"; do sudo losetup -d "${loop}" >/dev/null 2>&1 || true; done
+  sudo rm -rf "${WORK}"
+}
+trap cleanup EXIT
+
+new_loop() {
+  sudo truncate -s 256M "$1"
+  local loop
+  loop="$(sudo losetup -f --show "$1")"
+  LOOPS+=("${loop}")
+  echo "${loop}"
+}
+
+drop_loop() {
+  sudo losetup -d "$1"
+  local kept=()
+  for loop in "${LOOPS[@]}"; do [ "${loop}" = "$1" ] || kept+=("${loop}"); done
+  LOOPS=("${kept[@]}")
+}
+
+# الحكمُ: `verdict <guarantee> <label> <ok:0|1> <detail>`
+verdict() {
+  CHECKS=$((CHECKS + 1))
+  if [ "$3" = 1 ]; then
+    echo "PASS|$1|$2|$4"
+  else
+    echo "FAIL|$1|$2|$4"
+    FAILURES=$((FAILURES + 1))
+  fi
+}
+
+write_config() {
+  # $1 = جذرُ الحالة، $2 = اسمُ جهازِ العلامات، $3 = مجلدُ اللقطات، $4 = جهازُ flakey الخلفيّ
+  node -e '
+const { writeFileSync } = require("node:fs");
+const [helper, root, dm, snaps, work, flakeyDev, flakeyName] = process.argv.slice(1);
+import(helper).then(({ makeKeys }) => {
+  const socketFile = `${work}/socket.json`;
+  const base = { root, socketFile, dm };
+  const flakey = { name: flakeyName, dev: flakeyDev, sectors: String(268435456 / 512) };
+  const config = {
+    keys: makeKeys(),
+    ops: {
+      provision: { ...base, mode: "provision", fsync: true },
+      staged: { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", prefix: "cut", snapshots: snaps },
+      "eio-S2": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S2", flakey },
+      "eio-S3": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S3", flakey },
+      verify: { ...base, mode: "verify", socketFile: `${work}/verify-socket.json`, ids: ["cmd-cut"] },
+    },
+  };
+  writeFileSync(`${work}/config.json`, JSON.stringify(config));
+});' "${REPO_ROOT}/tests/helpers/wl-326-root.mjs" "${MNT}/root" "$2" "$3" "${WORK}" "${4:-none}" "${DM_FLAKEY}"
+}
+
+# يُقلِعُ من الصورةِ المحمَّلةِ على MNT بلقطةِ مرجعٍ ويطبعُ الناتجَ في سطرٍ واحدٍ.
+verify_with_witness() {
+  sudo rm -f "${WORK}/verify-socket.json"
+  if [ -n "$1" ] && [ -f "$1" ]; then
+    cp "$1" "${WORK}/verify-socket.json"
+    chmod 0666 "${WORK}/verify-socket.json"
+  fi
+  node "${CHILD}" "${WORK}/config.json" verify | paste -sd' '
+}
+
+fsck_clean() {
+  # بعدَ `umount`: المجلّةُ استُرجِعَت عندَ التحميلِ؛ `-n` لا يكتبُ شيئاً.
+  if sudo e2fsck -fn "$1" >"${WORK}/fsck.out" 2>&1; then echo 1; else
+    sed 's/^/  fsck: /' "${WORK}/fsck.out" | head -20 >&2
+    echo 0
+  fi
+}
+
+judge_cut() {
+  # $1 iteration · $2 stage · $3 witness-stage · $4 outcome
+  local label="iter$1/cut@$2/witness@$3" outcome="$4"
+  echo "OUTCOME|${label}|${outcome}"
+  case "$2:$3" in
+    S5:* | ACK:*)
+      [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] && ok=1 || ok=0
+      verdict G1 "${label}" "${ok}" "${outcome}" ;;
+    S2:S2 | S3:S3)
+      [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] && ok=1 || ok=0
+      verdict G2 "${label}" "${ok}" "${outcome}" ;;
+    *)
+      if [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] ||
+        [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then
+        ok=1
+      else ok=0; fi
+      verdict G3 "${label}" "${ok}" "${outcome}" ;;
+  esac
+}
+
+# ══ السيناريو أ: قطعٌ عندَ كلِّ مرحلةٍ على dm-log-writes ══
+stage_cuts() {
+  local iter="$1"
+  sudo rm -rf "${WORK}" && mkdir -p "${WORK}/snaps"
+  local data log
+  data="$(new_loop "${WORK}/data.dev")"
+  log="$(new_loop "${WORK}/log.dev")"
+  sudo dmsetup create "${DM_LOG}" \
+    --table "0 $(sudo blockdev --getsz "${data}") log-writes ${data} ${log}"
+  sudo mkfs.ext4 -q -F -E nodiscard "/dev/mapper/${DM_LOG}"
+  sudo mkdir -p "${MNT}"
+  sudo mount -o commit=600 "/dev/mapper/${DM_LOG}" "${MNT}"
+  sudo chmod 0777 "${MNT}"
+  write_config "${MNT}/root" "${DM_LOG}" "${WORK}/snaps"
+
+  node "${PROVISION_CHILD}" "${WORK}/config.json" provision | grep -qx BOOTED
+  sudo sync
+  sudo dmsetup message "${DM_LOG}" 0 mark baseline
+  local ack
+  ack="$(node "${CHILD}" "${WORK}/config.json" staged)"
+  verdict HARNESS "iter${iter}/staged-transaction" "$([ "${ack}" = ACK ] && echo 1 || echo 0)" "${ack}"
+  for stage in ${STAGES}; do
+    [ -f "${WORK}/snaps/${stage}.json" ] || echo "NOTE|iter${iter}|no witness snapshot at ${stage}"
+  done
+  # القطعُ: ما بعدَ العلامةِ وما لم يُفلَش يسقُطُ.
+  sudo umount "${MNT}"
+  sudo dmsetup remove "${DM_LOG}"
+  sudo sync
+
+  for stage in ${STAGES}; do
+    local witnesses="${stage}"
+    [ "${stage}" = S3 ] && witnesses='S3 S4'
+    for witness in ${witnesses}; do
+      local image="${WORK}/image.dev" loop outcome
+      sudo rm -f "${image}"
+      sudo truncate -s 256M "${image}"
+      sudo node "${REPLAY}" --log "${log}" --image "${image}" \
+        --end-mark "cut-${stage}" --size "${SIZE_BYTES}" >/dev/null
+      loop="$(sudo losetup -f --show "${image}")"
+      LOOPS+=("${loop}")
+      sudo mount "${loop}" "${MNT}"
+      outcome="$(verify_with_witness "${WORK}/snaps/${witness}.json")"
+      sudo umount "${MNT}"
+      judge_cut "${iter}" "${stage}" "${witness}" "${outcome}"
+      verdict G4 "iter${iter}/cut@${stage}/witness@${witness}" "$(fsck_clean "${loop}")" e2fsck
+      drop_loop "${loop}"
+    done
+  done
+  drop_loop "${data}"
+  drop_loop "${log}"
+}
+
+# ══ السيناريو ب: أخطاءُ كتابةٍ داخلَ المعاملةِ على dm-flakey ══
+eio_case() {
+  local at="$1"
+  sudo rm -rf "${WORK}" && mkdir -p "${WORK}/snaps"
+  local data
+  data="$(new_loop "${WORK}/flakey.dev")"
+  local sectors
+  sectors="$(sudo blockdev --getsz "${data}")"
+  sudo dmsetup create "${DM_FLAKEY}" --table "0 ${sectors} flakey ${data} 0 180 0"
+  sudo mkfs.ext4 -q -F -E nodiscard "/dev/mapper/${DM_FLAKEY}"
+  sudo mkdir -p "${MNT}"
+  sudo mount "/dev/mapper/${DM_FLAKEY}" "${MNT}"
+  sudo chmod 0777 "${MNT}"
+  write_config "${MNT}/root" none "${WORK}/snaps" "${data}"
+  node "${PROVISION_CHILD}" "${WORK}/config.json" provision | grep -qx BOOTED
+  sudo sync
+
+  local result
+  result="$(node "${CHILD}" "${WORK}/config.json" "eio-${at}")"
+  echo "OUTCOME|eio@${at}/transaction|${result}"
+  if [[ "${result}" =~ ^NO_ACK:[A-Za-z][A-Za-z0-9_]+$ && "${result}" != 'NO_ACK:UNNAMED' ]]; then ok=1; else ok=0; fi
+  verdict G5 "eio@${at}/no-ack" "${ok}" "${result}"
+
+  # «إعادةُ التشغيلِ»: فكُّ التحميلِ، وإعادةُ الجهازِ سليماً، وتحميلٌ جديدٌ يقرأُ القرصَ لا الذاكرة.
+  sudo umount "${MNT}" || sudo umount -l "${MNT}"
+  sudo dmsetup remove "${DM_FLAKEY}"
+  sudo dmsetup create "${DM_FLAKEY}" --table "0 ${sectors} flakey ${data} 0 180 0"
+  sudo mount "/dev/mapper/${DM_FLAKEY}" "${MNT}"
+  local outcome
+  outcome="$(verify_with_witness "${WORK}/socket.json")"
+  sudo umount "${MNT}"
+  echo "OUTCOME|eio@${at}/reboot|${outcome}"
+  if [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] ||
+    [[ "${at}" != S2 && "${outcome}" == 'BOOT_OK STATE:cmd-cut=committed' ]] ||
+    [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then
+    ok=1
+  else ok=0; fi
+  verdict G5 "eio@${at}/reboot" "${ok}" "${outcome}"
+  verdict G4 "eio@${at}" "$(fsck_clean "/dev/mapper/${DM_FLAKEY}")" e2fsck
+  sudo dmsetup remove "${DM_FLAKEY}"
+  drop_loop "${data}"
+}
+
+uname -r
+for iter in $(seq 1 "${ITERATIONS}"); do stage_cuts "${iter}"; done
+eio_case S2
+eio_case S3
+
+echo "LIVE39_STAGE_CUTS checks=${CHECKS} failures=${FAILURES} iterations=${ITERATIONS}"
+if [ "${FAILURES}" -ne 0 ] && [ "${OBSERVE}" != 1 ]; then
+  echo "LIVE39_STAGE_CUTS_FAILED"
+  exit 1
+fi
+echo LIVE39_STAGE_CUTS_DONE

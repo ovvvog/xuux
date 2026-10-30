@@ -1,0 +1,25 @@
+# probe مؤقّت (WL-498): استكشافُ قطعِ الطاقةِ عندَ كلِّ مرحلةٍ — يُحذَفُ قبلَ طلبِ الدمج.
+name: Probe LIVE-39 stage cuts (WL-498)
+
+on:
+  push:
+    branches: [feat/wl-498-live-39-stage-cuts]
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci
+      - run: npm run build
+      - name: قطعٌ عندَ كلِّ مرحلةٍ (مراقبةٌ بلا حكم)
+        env:
+          LIVE39_OBSERVE: '1'
+        run: bash scripts/live-39-stage-cuts.sh
