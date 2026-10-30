@@ -92,6 +92,7 @@ import(helper).then(({ makeKeys }) => {
     ops: {
       provision: { ...base, mode: "provision", fsync: true },
       staged: { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", prefix: "cut", snapshots: snaps },
+      "staged-nofsync": { ...base, mode: "transact-staged", fsync: false, id: "cmd-cut", prefix: "cut", snapshots: snaps },
       "eio-S2": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S2", flakey },
       "eio-S3": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S3", flakey },
       verify: { ...base, mode: "verify", socketFile: `${work}/verify-socket.json`, ids: ["cmd-cut"] },
@@ -139,9 +140,28 @@ judge_cut() {
   esac
 }
 
+# الشاهدُ السلبيُّ (‏`fsync:false` — خيارٌ إنتاجيٌّ حقيقيٌّ، لا مسَّ بالشفرةِ): لا شيءَ يُفلَشُ
+# فالصورةُ عندَ كلِّ علامةٍ هي خطُّ الأساسِ. القياسُ يجبُ أن **يرى** الفقدَ:
+#   N1 والمرجعُ لم يتقدّمْ (‏لقطةُ S2/S3) ⇐ `BOOT_OK` و`unknown`.
+#   N2 والمرجعُ متقدّمٌ (‏لقطةُ S4 فما بعدَها) معَ قرصٍ أقدمَ ⇐ رفضٌ مسمّى. فلو حفظَ القطعُ ما لم
+#      يُزامَنْ لظهرَ `BOOT_OK` و`committed` هنا (‏قياسٌ أعمى)، و`BOOT_OK` و`unknown` قبولٌ صامتٌ
+#      لاسترجاعٍ (‏rollback) بعدَ فقدِ طاقةٍ — وكلاهما سقوطٌ.
+judge_negative() {
+  local label="nofsync/cut@$1/witness@$2" outcome="$3"
+  echo "OUTCOME|${label}|${outcome}"
+  case "$2" in
+    S2 | S3)
+      [[ "${outcome}" == 'BOOT_OK STATE:cmd-cut=unknown' ]] && ok=1 || ok=0
+      verdict N1 "${label}" "${ok}" "${outcome}" ;;
+    *)
+      if [[ "${outcome}" =~ ^BOOT_REFUSED:[A-Z][A-Z0-9_]+$ && "${outcome}" != 'BOOT_REFUSED:UNNAMED' ]]; then ok=1; else ok=0; fi
+      verdict N2 "${label}" "${ok}" "${outcome}" ;;
+  esac
+}
+
 # ══ السيناريو أ: قطعٌ عندَ كلِّ مرحلةٍ على dm-log-writes ══
 stage_cuts() {
-  local iter="$1"
+  local iter="$1" op="${2:-staged}"
   sudo rm -rf "${WORK}" && mkdir -p "${WORK}/snaps"
   local data log
   data="$(new_loop "${WORK}/data.dev")"
@@ -158,7 +178,7 @@ stage_cuts() {
   sudo sync
   sudo dmsetup message "${DM_LOG}" 0 mark baseline
   local ack
-  ack="$(node "${CHILD}" "${WORK}/config.json" staged)"
+  ack="$(node "${CHILD}" "${WORK}/config.json" "${op}")"
   verdict HARNESS "iter${iter}/staged-transaction" "$([ "${ack}" = ACK ] && echo 1 || echo 0)" "${ack}"
   for stage in ${STAGES}; do
     [ -f "${WORK}/snaps/${stage}.json" ] || echo "NOTE|iter${iter}|no witness snapshot at ${stage}"
@@ -182,7 +202,11 @@ stage_cuts() {
       sudo mount "${loop}" "${MNT}"
       outcome="$(verify_with_witness "${WORK}/snaps/${witness}.json")"
       sudo umount "${MNT}"
-      judge_cut "${iter}" "${stage}" "${witness}" "${outcome}"
+      if [ "${op}" = staged ]; then
+        judge_cut "${iter}" "${stage}" "${witness}" "${outcome}"
+      else
+        judge_negative "${stage}" "${witness}" "${outcome}"
+      fi
       verdict G4 "iter${iter}/cut@${stage}/witness@${witness}" "$(fsck_clean "${loop}")" e2fsck
       drop_loop "${loop}"
     done
@@ -236,6 +260,7 @@ eio_case() {
 
 uname -r
 for iter in $(seq 1 "${ITERATIONS}"); do stage_cuts "${iter}"; done
+stage_cuts neg staged-nofsync
 eio_case S2
 eio_case S3
 
