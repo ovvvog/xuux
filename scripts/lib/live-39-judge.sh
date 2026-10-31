@@ -110,3 +110,30 @@ judge_eio_reboot() {
   else ok=0; fi
   verdict PL5 "eio@$1/reboot" "${ok}" "$2"
 }
+
+# `judge_dirsync <mode> <site> <label> <primary-result> <all-result>` — `WL-505` (‏`LIVE-39` ع١):
+# دوامُ الاسمِ في نظامِ الملفّاتِ عندَ علامةٍ بعدَ مزامنةِ مجلّدٍ، **لا** نتيجةُ البروتوكول.
+#   PLD1 الشاهدُ الموجب (‏`witness`): كلُّ اسمٍ مَسَّتهُ العمليّةُ قبلَ المزامنةِ دائمٌ عندَ العلامة.
+#   PLD2 الطفرةُ (‏`mutate`، المزامنةُ مُسقَطة): عندَ المواضعِ المطلوبةِ (‏M2 وM4) يجبُ أن يكونَ الاسمُ
+#        الأوّليُّ **غيرَ** دائمٍ — بقاؤه دائماً عمى. وغيرُها يُعلَنُ `OBSERVED` بلا حكم.
+#   PLD3 الطفرةُ المضادّةُ لأداةِ القياس (‏`early`، العلامةُ قبلَ النداء): كـPLD2 — بقاءُ الاسمِ دائماً
+#        عندَ علامةٍ تسبقُ المزامنةَ يعني أنّ الأداةَ لا تقيسُ الترتيبَ فـPLD1 نفسُه غيرُ موثوق.
+judge_dirsync() {
+  local mode="$1" site="$2" label="dirsync-$1/$3" primary="$4" all="$5" ok guarantee
+  echo "OUTCOME|${label}|site=${site}|primary=${primary}|all=${all}"
+  case "${mode}" in
+    witness)
+      [[ "${all}" == DURABLE ]] && ok=1 || ok=0
+      verdict PLD1 "${label}" "${ok}" "${all}" ;;
+    mutate | early)
+      [ "${mode}" = mutate ] && guarantee=PLD2 || guarantee=PLD3
+      if [[ "${site}" == M2 || "${site}" == M4 ]]; then
+        [[ "${primary}" == LOST:* ]] && ok=1 || ok=0
+        verdict "${guarantee}" "${label}" "${ok}" "${primary}"
+      else
+        echo "OBSERVED|${guarantee}|${label}|site=${site}|primary=${primary}"
+      fi ;;
+    *)
+      verdict HARNESS "${label}/mode" 0 "unknown-mode=${mode}" ;;
+  esac
+}

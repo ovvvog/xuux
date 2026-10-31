@@ -17,7 +17,7 @@
 //
 // الحكمُ في `verify` لا يُقرَّرُ هنا: الرفضُ المسمّى يُطبَعُ `BOOT_REFUSED:<code>` والسكربتُ
 // يحكمُ عليه (‏`scripts/live-39-stage-cuts.sh`).
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
@@ -57,10 +57,19 @@ function failWrites(flakey) {
 const codeOf = (error) =>
   (error && typeof error === 'object' && (error.code || error.name)) || 'UNNAMED';
 
+// `WL-505` (‏`LIVE-39` ع١): سيناريو علاماتِ مزامنةِ المجلّدِ يطلبُ نوافذَ المراحلِ في سجلِّ الحائلِ
+// (‏`STAGE|<s>`) ليُنسَبَ كلُّ `dirsync-<n>` إلى موضعِه. غيابُ `dirsyncLog` ⇐ لا أثرَ لهذا إطلاقاً.
+const stageLine = op.dirsyncLog
+  ? (/** @type {string} */ stage) => appendFileSync(op.dirsyncLog, `STAGE|${stage}\n`)
+  : () => {};
+
 if (op.mode === 'transact-staged') {
   const socket = new FileStateBoundSocket(op.socketFile);
+  stageLine('BOOT');
   const runtime = await bootRoot(op.root, config.keys, socket, { fsync: op.fsync });
+  stageLine('TXN');
   runtime.commitBarrier.onStage = (stage) => {
+    stageLine(stage);
     if (op.prefix) {
       mustSudo(['dmsetup', 'message', op.dm, '0', 'mark', `${op.prefix}-${stage}`]);
       if (existsSync(op.socketFile)) {
