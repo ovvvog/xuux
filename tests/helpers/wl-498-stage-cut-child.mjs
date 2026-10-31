@@ -17,7 +17,6 @@
 //
 // الحكمُ في `verify` لا يُقرَّرُ هنا: الرفضُ المسمّى يُطبَعُ `BOOT_REFUSED:<code>` والسكربتُ
 // يحكمُ عليه (‏`scripts/live-39-stage-cuts.sh`).
-import fs from 'node:fs';
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -26,27 +25,6 @@ import { FileStateBoundSocket, bootRoot } from './wl-326-root.mjs';
 
 const config = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const op = config.ops[process.argv[3]];
-
-/**
- * اختبارُ الطفرةِ (‏`LIVE-39`/`WL-502`): حذفُ `fsync` **المجلّدِ** وحدَهُ من مسارِ الكتابةِ
- * (‏`op.skipDirFsync`) — ملفّاتُ `fsync` تبقى كما هي. الاستيرادُ المسمّى من `node:fs` رابطٌ
- * حيٌّ يقرأُ من كائنِ الوحدةِ نفسِهِ؛ فالاستبدالُ هنا يصيبُ نداءاتِ شفرةِ الإنتاجِ الفعليةَ.
- * والعدّادُ يُصدَّرُ في `stderr` عندَ الخروجِ ليُثبِتَ السكربتُ أنّ الطفرةَ جرت فعلًا
- * (‏بلا عدٍّ لا يُعرفُ: أعمى القياسُ أم طفرةٌ لم تُطبَّق؟).
- * @returns {() => number} دالةُ قراءةِ عددِ مرّاتِ تخطّي fsync المجلّدِ
- */
-function installDirFsyncSkip() {
-  const realFsyncSync = fs.fsyncSync;
-  let skipped = 0;
-  fs.fsyncSync = (fd) => {
-    if (fs.fstatSync(fd).isDirectory()) {
-      skipped += 1;
-      return undefined;
-    }
-    return realFsyncSync(fd);
-  };
-  return () => skipped;
-}
 
 /**
  * أمرُ `sudo` يجبُ أن ينجحَ — فشلُهُ فشلٌ للقياسِ لا شيءٌ يُتَسامَحُ معهُ.
@@ -80,9 +58,6 @@ const codeOf = (error) =>
   (error && typeof error === 'object' && (error.code || error.name)) || 'UNNAMED';
 
 if (op.mode === 'transact-staged') {
-  // الطفرةُ تُطبَّقُ على كاتبِ المعاملةِ وحدَهُ (‏لا على `provision` ولا على `verify`):
-  // المُقاسُ رؤيةُ القياسِ لغيابِ fsync المجلّدِ عندَ الكتابةِ.
-  const skippedCount = op.skipDirFsync ? installDirFsyncSkip() : null;
   const socket = new FileStateBoundSocket(op.socketFile);
   const runtime = await bootRoot(op.root, config.keys, socket, { fsync: op.fsync });
   runtime.commitBarrier.onStage = (stage) => {
@@ -109,10 +84,6 @@ if (op.mode === 'transact-staged') {
     await runtime.close();
   } catch {
     // الإغلاقُ بعدَ فشلِ الكتابةِ قد يفشلُ هو الآخرُ؛ الحكمُ على السطرِ أعلاه.
-  }
-  if (skippedCount) {
-    // إثباتٌ أنّ نداءاتِ الإنتاجِ مرّتْ عبرَ الطفرةِ (‏سكربتُ القياسِ يحكمُ على العدّ).
-    process.stderr.write(`MUTATION_DIR_FSYNC_SKIPPED count=${skippedCount()}\n`);
   }
   process.exit(0);
 }
