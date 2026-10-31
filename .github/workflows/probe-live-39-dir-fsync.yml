@@ -4,8 +4,12 @@
 # خطوةُ CI الدائمةُ — لا خطوةً مخفَّفةً — ليتّسقَ القياسُ معَ ما سيُقاسُ لاحقاً.
 name: probe LIVE-39 dir-fsync mutation
 
+# الإطلاقُ بدفعِ الفرعِ نفسِهِ: مساراتُ `workflow_dispatch` لا تُسجَّلُ إلّا منَ الفرعِ
+# الافتراضيّ، فالاستقصاءُ المؤقّتُ يُطلَقُ بدفعِ تغييرٍ عليه (الملفُّ على الفرعِ هو
+# الذي يُشغَّلُ — شجرةُ الفرعِ لا شجرةُ `main`).
 on:
-  workflow_dispatch:
+  push:
+    branches: [feat/wl-502-live-39-dir-fsync-mutation]
 
 permissions:
   contents: read
