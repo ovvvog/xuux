@@ -19,6 +19,14 @@
 #      وأيُّ إقلاعٍ إمّا `BOOT_OK` متّسقٌ وإمّا رفضٌ مسمّى.
 #   HARNESS الحزامُ نفسُهُ: المعاملةُ المرحليّةُ أُقِرَّ بها، ولقطةُ المرجعِ موجودةٌ عندَ كلِّ علامةٍ
 #      (‏غيابُها سقوطٌ منذ `WL-499` لا ملاحظةٌ). دوالُّ الحكمِ في `scripts/lib/live-39-judge.sh`.
+#   PLM اختبارُ الطفرةِ (‏`WL-502`/`LIVE-39`): حذفُ `fsync` المجلّدِ وحدَهُ من مسارِ الكتابةِ
+#      عبرَ حائلِ `LD_PRELOAD` يعترضُ `fsync(2)` على مقابضِ المجلداتِ (‏`scripts/lib/
+#      live-39-mutate-dir-fsync.c`) — ترقيعُ `node:fs` لا يصيبُ كودَ الإنتاجِ لأنّ
+#      الاستيرادَ المسمّى يُحلُّ وقتَ الربطِ. **فشلُ القياسِ هو المطلوبُ**: عندَ
+#      القطوعِ التي يَعِدُها الشاهدُ الإيجابيُّ بدوامٍ (‏S3/S4، S4، S5، ACK) يجبُ ألّا تبقىَ
+#      النتيجةُ `committed`؛ فإن بقيت فالقياسُ أعمى على ext4 (سقوطٌ لا نجاحٌ)، وإن انحرفت
+#      (‏رفضٌ مسمّى أو `unknown`) فقد رأى القياسُ الغيابَ. والطفرةُ تُثبِتُ نفسَها بعدّادِ
+#      تخطّياتٍ في `stderr` (‏`MUTATION_DIR_FSYNC_SKIPPED`) — عدٌّ صفرٌ سقوطُ تهيئةٍ.
 #
 # **حدٌّ معلَنٌ (‏بحرفِ WL-360):** إعادةُ تشغيلِ سجلِّ نواةٍ حقيقيٍّ على جهازِ حلقةٍ في عدّاءٍ
 # مستضافٍ — لا فقدُ طاقةٍ فعليٌّ على عتادٍ مخصّصٍ، ولا برهانُ TPM/HSM، ولا جاهزيّةُ إنتاجٍ.
@@ -43,10 +51,10 @@ readonly ITERATIONS="${LIVE39_ITERATIONS:-3}"
 readonly OBSERVE="${LIVE39_OBSERVE:-0}"
 readonly STAGES='S2 S3 S4 S5 ACK'
 
-LOOPS=()
-FAILURES=0
-CHECKS=0
-
+# حائلُ طفرةِ fsync المجلّدِ (‏WL-502): يُترجَمُ مرةً ويُحمَّلُ بـ`LD_PRELOAD` على العمليّةِ
+# الفرعيّةِ لكاتبِ سيناريو `staged-mutdir` وحدَهُ — لا مسَّ لكودِ الإنتاجِ.
+MUT_SO="$(mktemp -d)/live-39-mutate-dir-fsync.so"
+readonly MUT_SO
 cleanup() {
   sudo umount "${MNT}" >/dev/null 2>&1 || true
   sudo dmsetup remove "${DM_LOG}" >/dev/null 2>&1 || true
@@ -54,8 +62,14 @@ cleanup() {
   # تحييدٌ محصورٌ بالأجهزةِ التي أنشأها هذا السكربتُ وحدَهُ (‏لا `losetup -D`).
   for loop in "${LOOPS[@]}"; do sudo losetup -d "${loop}" >/dev/null 2>&1 || true; done
   sudo rm -rf "${WORK}"
+  rm -f "${MUT_SO}" && rmdir "$(dirname "${MUT_SO}")" 2>/dev/null || true
 }
 trap cleanup EXIT
+gcc -shared -fPIC -o "${MUT_SO}" "${REPO_ROOT}/scripts/lib/live-39-mutate-dir-fsync.c"
+
+LOOPS=()
+FAILURES=0
+CHECKS=0
 
 new_loop() {
   sudo truncate -s 256M "$1"
@@ -87,6 +101,7 @@ import(helper).then(({ makeKeys }) => {
       provision: { ...base, mode: "provision", fsync: true },
       staged: { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", prefix: "cut", snapshots: snaps },
       "staged-nofsync": { ...base, mode: "transact-staged", fsync: false, id: "cmd-cut", prefix: "cut", snapshots: snaps },
+      "staged-mutdir": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", prefix: "cut", snapshots: snaps },
       "eio-S2": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S2", flakey },
       "eio-S3": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S3", flakey },
       verify: { ...base, mode: "verify", socketFile: `${work}/verify-socket.json`, ids: ["cmd-cut"] },
@@ -133,8 +148,20 @@ stage_cuts() {
   sudo sync
   sudo dmsetup message "${DM_LOG}" 0 mark baseline
   local ack
-  ack="$(node "${CHILD}" "${WORK}/config.json" "${op}")"
+  # سيناريو الطفرةِ يُحمَّلُ على حائلِ `LD_PRELOAD` (إسقاطُ fsync المجلداتِ في النواةِ).
+  if [ "${op}" = staged-mutdir ]; then
+    ack="$(LD_PRELOAD="${MUT_SO}" node "${CHILD}" "${WORK}/config.json" "${op}" 2> >(tee "${WORK}/child.err" >&2))"
+  else
+    ack="$(node "${CHILD}" "${WORK}/config.json" "${op}" 2> >(tee "${WORK}/child.err" >&2))"
+  fi
   verdict HARNESS "iter${iter}/staged-transaction" "$([ "${ack}" = ACK ] && echo 1 || echo 0)" "${ack}"
+  # الطفرةُ (staged-mutdir): يجبُ أن يُثبِتَ الحائلُ أنّ نداءاتِ الإنتاجِ مرّتْ عبرَهُ —
+  # عدٌّ صفرٌ يعني أنّ الطفرةَ لم تُصِبْ المسارَ فلا يُقاسُ شيءٌ (سقوطُ تهيئةٍ لا عمىً).
+  if [ "${op}" = staged-mutdir ]; then
+    local mutcount
+    mutcount="$(sed -n 's/^MUTATION_DIR_FSYNC_SKIPPED count=\([0-9][0-9]*\)$/\1/p' "${WORK}/child.err" | head -1)"
+    verdict HARNESS "iter${iter}/mutation-active" "$([ -n "${mutcount}" ] && [ "${mutcount}" -ge 1 ] && echo 1 || echo 0)" "dir-fsync-skipped=${mutcount:-none}"
+  fi
   for stage in ${STAGES}; do
     judge_witness "iter${iter}/${stage}" "${WORK}/snaps/${stage}.json"
   done
@@ -159,6 +186,8 @@ stage_cuts() {
       sudo umount "${MNT}"
       if [ "${op}" = staged ]; then
         judge_cut "${iter}" "${stage}" "${witness}" "${outcome}"
+      elif [ "${op}" = staged-mutdir ]; then
+        judge_mutation "${stage}" "${witness}" "${outcome}"
       else
         judge_negative "${stage}" "${witness}" "${outcome}"
       fi
@@ -209,6 +238,15 @@ eio_case() {
 uname -r
 for iter in $(seq 1 "${ITERATIONS}"); do stage_cuts "${iter}"; done
 stage_cuts neg staged-nofsync
+# اختبارُ الطفرةِ (‏`WL-502`): حذفُ fsync المجلّدِ وحدَهُ — **سيناريو اختياريٌّ لا يدخلُ المسارَ الدائمَ**:
+# قياسُهُ على عدّاءِ CI أثبتَ عمىً على `ext4` (التشغيلةُ `41181438329`: `count=6` وكلُّ قطوعِ الدوامِ
+# `committed`) فتشغيلُهُ الدائمُ يُحمِّرُ الخطوةَ الدائمةَ بلا علاجٍ (مُقيسٌ بالتشغيلةِ `41182355757`) —
+# يُشغَّلُ بـ`LIVE39_RUN_MUTDIR=1` عندَ الحاجةِ (استقصاءٌ أو بعدَ قرارِ الجهةِ المخوَّلةِ بعلاجِ العمى).
+if [ "${LIVE39_RUN_MUTDIR:-0}" = "1" ]; then
+  stage_cuts mut staged-mutdir
+else
+  echo "LIVE39_MUTDIR_OPTIN_SKIPPED"
+fi
 eio_case S2
 eio_case S3
 

@@ -101,6 +101,33 @@ test('judge_eio_ack/judge_eio_reboot: PL5 — لا إقرارَ معَ خطأِ 
   expectVerdict('S3 reboot unnamed', ['judge_eio_reboot', 'S3', 'BOOT_REFUSED:UNNAMED'], false);
 });
 
+test('judge_mutation: PLM — القياسُ يجبُ أن يرى حذفَ fsync المجلّدِ (فشلُ الطفرةِ هو النجاحُ)', () => {
+  for (const [stage, witness] of [
+    ['S3', 'S4'],
+    ['S4', 'S4'],
+    ['S5', 'S5'],
+    ['ACK', 'ACK'],
+  ]) {
+    // بقاءُ `committed` بعدَ حذفِ fsync المجلّدِ = قياسٌ أعمى على ext4 — سقوطٌ.
+    expectVerdict(
+      `${stage} committed (blind)`,
+      ['judge_mutation', stage, witness, COMMITTED],
+      false,
+    );
+    // انحرافٌ عن الدوامِ = القياسُ رأى الغيابَ — نجاحٌ.
+    expectVerdict(`${stage} unknown (seen)`, ['judge_mutation', stage, witness, UNKNOWN], true);
+    expectVerdict(`${stage} refused (seen)`, ['judge_mutation', stage, witness, REFUSED], true);
+  }
+});
+
+test('judge_mutation: قطوعُ ما قبلَ تقدّمِ المرجعِ تُحكَمُ بضماناتِ الشاهدِ نفسِها (PL2)', () => {
+  for (const stage of ['S2', 'S3']) {
+    expectVerdict(`${stage} unknown`, ['judge_mutation', stage, stage, UNKNOWN], true);
+    expectVerdict(`${stage} committed`, ['judge_mutation', stage, stage, COMMITTED], false);
+    expectVerdict(`${stage} refused`, ['judge_mutation', stage, stage, REFUSED], false);
+  }
+});
+
 test('judge_witness: غيابُ لقطةِ المرجعِ سقوطٌ لا ملاحظةٌ', (t) => {
   const base = registerTmpRoot(mkdtempSync(join(tmpdir(), 'l39j-')));
   t.after(() => rmSync(base, { recursive: true, force: true }));
