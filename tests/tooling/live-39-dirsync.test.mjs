@@ -117,7 +117,10 @@ for (const mode of ['witness', 'mutate', 'early']) {
   test(`الحائلُ (${mode}): علامتانِ في النطاقِ وحدَه، بأسمائِهما وموضعِهما من النداء`, () => {
     const { result, text, root } = runShim(mode);
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stderr, new RegExp(`LIVE39_DIRSYNC_SUMMARY mode=${mode} marks=2 out_of_scope=1`));
+    assert.match(
+      result.stderr,
+      new RegExp(`LIVE39_DIRSYNC_SUMMARY mode=${mode} marks=2 out_of_scope=1`),
+    );
     const marks = parseLog(text);
     assert.equal(marks.length, 2);
     assert.equal(marks[0].primary, `${root}/m.json`);
@@ -185,7 +188,10 @@ test('المِحكُّ: الدوامُ على الشجرةِ الحيّةِ نف
   assert.equal(judgeMark(first, stale).result, `LOST:PRESENT:${root}/m.json.tmp`);
   assert.equal(judgeMark(first, stale).primaryResult, 'DURABLE');
   // الاسمُ موجودٌ بمحتوى قديم (‏مدخلٌ قديمٌ لا الملفُّ المُزامَن)
-  const old = { ...fs, read: (p) => (p === `${root}/m.json` ? Buffer.from('v0') : readFileSync(p)) };
+  const old = {
+    ...fs,
+    read: (p) => (p === `${root}/m.json` ? Buffer.from('v0') : readFileSync(p)),
+  };
   assert.equal(judgeMark(first, old).primaryResult, `LOST:CONTENT:${root}/m.json`);
 });
 
@@ -193,7 +199,10 @@ test('المِحكُّ: محتوى الثانويِّ لا يُحكَم (‏مز
   const fs = { exists: () => true, read: () => Buffer.from('x'), isFile: () => true };
   const secondary = { path: '/r/lock', state: 'present', snap: '/s/1-0.bin', primary: false };
   assert.equal(judgeName(secondary, fs), 'OK');
-  assert.equal(judgeName({ ...secondary, primary: true }, { ...fs, read: (p) => Buffer.from(p) }), 'CONTENT');
+  assert.equal(
+    judgeName({ ...secondary, primary: true }, { ...fs, read: (p) => Buffer.from(p) }),
+    'CONTENT',
+  );
   assert.equal(judgeName({ ...secondary, state: 'absent' }, fs), 'PRESENT');
 });
 
@@ -225,7 +234,10 @@ const LOST = 'LOST:MISSING:/r/root-of-trust.manifest.json';
 
 test('judge_dirsync: PLD1 — الشاهدُ لا يقبلُ إلّا DURABLE لكلِّ الأسماء', () => {
   assert.deepEqual(judge('judge_dirsync', 'witness', 'M2', 'l', 'DURABLE', 'DURABLE').failures, 0);
-  assert.equal(judge('judge_dirsync', 'witness', 'M2', 'l', 'DURABLE', 'LOST:PRESENT:/r/x').failures, 1);
+  assert.equal(
+    judge('judge_dirsync', 'witness', 'M2', 'l', 'DURABLE', 'LOST:PRESENT:/r/x').failures,
+    1,
+  );
   assert.equal(judge('judge_dirsync', 'witness', 'BOOT', 'l', LOST, LOST).failures, 1);
 });
 
@@ -241,7 +253,10 @@ for (const [mode, guarantee] of [
       const blind = judge('judge_dirsync', mode, site, 'l', 'DURABLE', 'DURABLE');
       assert.deepEqual([blind.checks, blind.failures], [1, 1], blind.out);
       // الثانويُّ وحدَه ضائعٌ والأوّليُّ دائمٌ ⇐ عمى (‏الحكمُ على الاسمِ الذي وُجِدَت المزامنةُ لأجلِه)
-      assert.equal(judge('judge_dirsync', mode, site, 'l', 'DURABLE', 'LOST:PRESENT:/r/t').failures, 1);
+      assert.equal(
+        judge('judge_dirsync', mode, site, 'l', 'DURABLE', 'LOST:PRESENT:/r/t').failures,
+        1,
+      );
     }
     for (const site of ['BOOT', 'M1', 'M3', 'OTHER']) {
       const observed = judge('judge_dirsync', mode, site, 'l', 'DURABLE', 'DURABLE');

@@ -50,7 +50,7 @@ export function parseLine(line) {
     if (at > 0) fields[part.slice(0, at)] = part.slice(at + 1);
     else fields[part] = '';
   }
-  return { kind, fields };
+  return { kind: kind ?? '', fields };
 }
 
 /**
@@ -210,7 +210,10 @@ export function main(argv) {
   const [command, ...rest] = argv;
   /** @type {Record<string, string>} */
   const options = {};
-  for (let i = 0; i < rest.length; i += 2) options[rest[i].replace(/^--/u, '')] = rest[i + 1];
+  for (let i = 0; i + 1 < rest.length; i += 2) {
+    const key = String(rest[i] ?? '').replace(/^--/u, '');
+    options[key] = String(rest[i + 1] ?? '');
+  }
   if (!options.log || !existsSync(options.log)) {
     process.stderr.write(`DIRSYNC_CHECK_NO_LOG ${options.log}\n`);
     return 2;
