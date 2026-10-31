@@ -1,0 +1,26 @@
+# مسارُ استقصاءٍ مؤقّتٌ (‏`WL-502`/`LIVE-39`) — **يُحذفُ في الدفعةِ النهائيّةِ قبلَ فتحِ الطلبِ**.
+# الهدفُ: قياسُ اختبارِ الطفرةِ (‏حذفُ fsync المجلّدِ) على عدّاءٍ يملكُ `dm-log-writes`
+# (‏البيئةُ المحليّةُ للمنفّذِ بلا device-mapper). يشغِّلُ السكربتَ نفسَهُ الذي ستشغِّلهُ
+# خطوةُ CI الدائمةُ — لا خطوةً مخفَّفةً — ليتّسقَ القياسُ معَ ما سيُقاسُ لاحقاً.
+name: probe LIVE-39 dir-fsync mutation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: استقصاء — قطع المراحل مع طفرة fsync المجلد
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: جلب المستودع
+        uses: actions/checkout@v4
+      - name: تثبيت التبعيات
+        run: npm ci
+      - name: بناء المصادر (.mts إلى .mjs)
+        run: npm run build
+      - name: القياس — القطع عند كل مرحلة مع اختبار الطفرة
+        run: bash scripts/live-39-stage-cuts.sh

@@ -72,6 +72,24 @@ judge_negative() {
   esac
 }
 
+# `judge_mutation <stage> <witness-stage> <outcome>` — PLM: اختبارُ الطفرةِ (‏`WL-502`/`LIVE-39`).
+#   المُقاسُ: هل يرى القياسُ حذفَ `fsync` المجلّدِ؟ عندَ القطوعِ التي يَعِدُها الشاهدُ
+#   الإيجابيُّ بدوامٍ (‏S3 بلقطةِ S4، وS4 وS5 وACK) — بقاءُ `committed` بعدَ حذفِ
+#   fsync المجلّدِ = القياسُ **أعمى** على ext4: سقوطٌ لا نجاحٌ. وأيُّ انحرافٍ (‏رفضٌ
+#   مسمّى أو `unknown`) = القياسُ رأى الغيابَ. أمّا قطوعُ ما قبلَ تقدّمِ المرجعِ
+#   (‏S2/S3 بلقطتِها) فلا يَعِدُها الشاهدُ بدوامٍ أصلاً — تُحكَمُ بضماناتِ الشاهدِ نفسِها.
+judge_mutation() {
+  local label="mutdir/cut@$1/witness@$2" outcome="$3" ok
+  echo "OUTCOME|${label}|${outcome}"
+  case "$1:$2" in
+    S3:S4 | S4:S4 | S5:S5 | ACK:ACK)
+      [[ "${outcome}" != 'BOOT_OK STATE:cmd-cut=committed' ]] && ok=1 || ok=0
+      verdict PLM "${label}" "${ok}" "${outcome}" ;;
+    *)
+      judge_cut mut "$1" "$2" "$3" ;;
+  esac
+}
+
 # `judge_eio_ack <stage> <result>` — PL5: لا إقرارَ معَ خطأِ كتابةٍ، والرمزُ مسمّى.
 judge_eio_ack() {
   local ok

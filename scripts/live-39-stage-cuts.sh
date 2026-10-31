@@ -19,6 +19,12 @@
 #      وأيُّ إقلاعٍ إمّا `BOOT_OK` متّسقٌ وإمّا رفضٌ مسمّى.
 #   HARNESS الحزامُ نفسُهُ: المعاملةُ المرحليّةُ أُقِرَّ بها، ولقطةُ المرجعِ موجودةٌ عندَ كلِّ علامةٍ
 #      (‏غيابُها سقوطٌ منذ `WL-499` لا ملاحظةٌ). دوالُّ الحكمِ في `scripts/lib/live-39-judge.sh`.
+#   PLM اختبارُ الطفرةِ (‏`WL-502`/`LIVE-39`): حذفُ `fsync` المجلّدِ وحدَهُ من مسارِ الكتابةِ
+#      (‏`fsyncSync` على fd مجلّدٍ يتخطّى، والملفاتِ تبقى) — **فشلُ القياسِ هو المطلوبُ**: عندَ
+#      القطوعِ التي يَعِدُها الشاهدُ الإيجابيُّ بدوامٍ (‏S3/S4، S4، S5، ACK) يجبُ ألّا تبقىَ
+#      النتيجةُ `committed`؛ فإن بقيت فالقياسُ أعمى على ext4 (سقوطٌ لا نجاحٌ)، وإن انحرفت
+#      (‏رفضٌ مسمّى أو `unknown`) فقد رأى القياسُ الغيابَ. والطفرةُ تُثبِتُ نفسَها بعدّادِ
+#      تخطّياتٍ مُصدَّرٍ في `stderr` (‏`MUTATION_DIR_FSYNC_SKIPPED`) — عدٌّ صفرٌ سقوطُ تهيئةٍ.
 #
 # **حدٌّ معلَنٌ (‏بحرفِ WL-360):** إعادةُ تشغيلِ سجلِّ نواةٍ حقيقيٍّ على جهازِ حلقةٍ في عدّاءٍ
 # مستضافٍ — لا فقدُ طاقةٍ فعليٌّ على عتادٍ مخصّصٍ، ولا برهانُ TPM/HSM، ولا جاهزيّةُ إنتاجٍ.
@@ -87,6 +93,7 @@ import(helper).then(({ makeKeys }) => {
       provision: { ...base, mode: "provision", fsync: true },
       staged: { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", prefix: "cut", snapshots: snaps },
       "staged-nofsync": { ...base, mode: "transact-staged", fsync: false, id: "cmd-cut", prefix: "cut", snapshots: snaps },
+      "staged-mutdir": { ...base, mode: "transact-staged", fsync: true, skipDirFsync: true, id: "cmd-cut", prefix: "cut", snapshots: snaps },
       "eio-S2": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S2", flakey },
       "eio-S3": { ...base, mode: "transact-staged", fsync: true, id: "cmd-cut", failWritesAt: "S3", flakey },
       verify: { ...base, mode: "verify", socketFile: `${work}/verify-socket.json`, ids: ["cmd-cut"] },
@@ -133,8 +140,15 @@ stage_cuts() {
   sudo sync
   sudo dmsetup message "${DM_LOG}" 0 mark baseline
   local ack
-  ack="$(node "${CHILD}" "${WORK}/config.json" "${op}")"
+  ack="$(node "${CHILD}" "${WORK}/config.json" "${op}" 2> >(tee "${WORK}/child.err" >&2))"
   verdict HARNESS "iter${iter}/staged-transaction" "$([ "${ack}" = ACK ] && echo 1 || echo 0)" "${ack}"
+  # الطفرةُ (staged-mutdir): يجبُ أن يُثبِتَ العونُ أنّ نداءاتِ الإنتاجِ مرّتْ عبرَها —
+  # عدٌّ صفرٌ يعني أنّ الطفرةَ لم تُصِبْ المسارَ فلا يُقاسُ شيءٌ (سقوطُ تهيئةٍ لا عمىً).
+  if [ "${op}" = staged-mutdir ]; then
+    local mutcount
+    mutcount="$(sed -n 's/^MUTATION_DIR_FSYNC_SKIPPED count=\([0-9][0-9]*\)$/\1/p' "${WORK}/child.err" | head -1)"
+    verdict HARNESS "iter${iter}/mutation-active" "$([ -n "${mutcount}" ] && [ "${mutcount}" -ge 1 ] && echo 1 || echo 0)" "dir-fsync-skipped=${mutcount:-none}"
+  fi
   for stage in ${STAGES}; do
     judge_witness "iter${iter}/${stage}" "${WORK}/snaps/${stage}.json"
   done
@@ -159,6 +173,8 @@ stage_cuts() {
       sudo umount "${MNT}"
       if [ "${op}" = staged ]; then
         judge_cut "${iter}" "${stage}" "${witness}" "${outcome}"
+      elif [ "${op}" = staged-mutdir ]; then
+        judge_mutation "${stage}" "${witness}" "${outcome}"
       else
         judge_negative "${stage}" "${witness}" "${outcome}"
       fi
@@ -209,6 +225,8 @@ eio_case() {
 uname -r
 for iter in $(seq 1 "${ITERATIONS}"); do stage_cuts "${iter}"; done
 stage_cuts neg staged-nofsync
+# اختبارُ الطفرةِ (‏`WL-502`): حذفُ fsync المجلّدِ وحدَهُ — فشلُ القياسِ هو النجاحُ المطلوبُ.
+stage_cuts mut staged-mutdir
 eio_case S2
 eio_case S3
 
