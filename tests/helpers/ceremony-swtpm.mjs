@@ -280,9 +280,39 @@ function defaultProbe(port) {
   }
 }
 
+// (LIVE-64، WL-507) ميزانيّةُ استقرارِ التحقّقِ النهائيِّ: الزومبي العابرةُ (أثناءَ إلقائِها من أبيها)
+// وعمليّاتُ /proc عابرةُ الهويّةِ (أثناءَ execve) شأنٌ لحظيٌّ على مستوى الجهازِ كُلِّهِ لا يخصُّ محاكينا —
+// قياسُ إلقاءِ زومبيٍ يتيمةٍ (أبوها init): 1-2 ملّي ثانيةٍ (n=15، WL-507) — فميزانيّةُ 2000ms تغطّيها
+// بألفِ ضعفٍ، وتحاذي سابقةَ stopScanClear (STOP_SETTLE_MS=1000) مضاعفةً لِحِملِ عدّاءاتِ CI.
+// الأسنانُ كما هيَ: زومبيٌ ثابتةٌ أو مالكٌ حيٌّ أو عمليّةٌ غيرُ محسومةٍ الهويّةِ بعدَ المهلةِ يُبقي الحكمَ
+// «غيرَ مثبتِ التوقّفِ» — المهلةُ تُبرَّرُ بالقياسِ ولا تُستخدمُ برهانًا بذاتِها.
+const STOP_VERIFY_SETTLE_MS = 2000;
+const STOP_VERIFY_POLL_MS = 20;
+
+function scanClean(scan) {
+  return scan.matches.length === 0 && scan.unresolved.length === 0 && scan.zombies.length === 0;
+}
+
+// (LIVE-64) تحقّقٌ نهائيٌّ مستقرٌّ: مسحٌ واحدٌ لحظيٌّ كانَ يصادفُ زومبي أجنبيّةً عابرةً على العدّاءِ
+// فيسمّمُ البرهانَ (فشلُ 41213586471/محاولةِ 2: المحاكيُّ زالَ في ملّي ثوانٍ والمسحُ رأى زومبيً لغيرِه).
+// الحلُّ: إعادةُ المسحِ ضمنَ مهلةٍ محدودةٍ حتى يستقرَّ الجهازُ — البرهانُ هو المسحُ النظيفُ نفسُهُ،
+// والمهلةُ حدٌّ للصبرِ على العابرةِ فقط، لا تحويلًا للثابتةِ إلى نجاحٍ.
+function settleStateDirScan(dir, readCmdline) {
+  let scan = scanStateDir(dir, { readCmdline });
+  const start = Date.now();
+  while (!scanClean(scan) && Date.now() - start < STOP_VERIFY_SETTLE_MS) {
+    // مالكٌ حيٌّ لا يُنتظرُ: برهانُ زوالِهِ هو ESRCH لا الصبرُ (كما في stopScanClear).
+    if (scan.matches.length > 0) return scan;
+    sleepMs(STOP_VERIFY_POLL_MS);
+    scan = scanStateDir(dir, { readCmdline });
+  }
+  return scan;
+}
+
 // إنهاءُ محاولةٍ: العمليّةُ المقصودةُ هي ما يربطُهُ سطرُ أوامرِهِ بمسارِ الحالةِ. لا يُقتَلُ ما لا يُثبَتُ
-// ملكُهُ، ولا يُعلَنُ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (إعادةُ مسحٍ قرائيةٍ بعدَ الإنهاءِ)
-// وبانعدامِ كلِّ عمليّةٍ غيرِ محسومةِ الهويّةِ وكلِّ زومبي غيرِ مُلقّاةٍ (غيرِ قابلةٍ للإسنادِ — جولةُ 5).
+// ملكُهُ، ولا يُعلَنُ التوقّفُ إلّا بزوالِ كلِّ عمليّةٍ مُثبَتِ الملكيّةِ (مسحٌ قرائيٌّ مستقرٌّ بعدَ الإنهاءِ)
+// وبانعدامِ كلِّ عمليّةٍ غيرِ محسومةِ الهويّةِ وكلِّ زومبي غيرِ مُلقّاةٍ (غيرِ قابلةٍ للإسنادِ — جولةُ 5؛
+// والتحقّقُ المستقرُّ من جولةِ LIVE-64 لا يخفّفُ هذا الشرطَ بل يفصلُ العابرةَ اللحظيّةَ عن الثابتةِ).
 export function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline = procArgs }) {
   const pidFromFile = readPid(pidFile);
   let identityUnknown = false;
@@ -301,9 +331,11 @@ export function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline 
   // غيابُ ملفِ PID ليسَ دليلَ توقّفٍ: الاكتشافُ البديلُ من /proc يربطُ العمليّةَ بمسارِ الحالةِ الفعليّ.
   // والاكتشافُ الفارغُ ليسَ إثباتَ موتٍ: عمليّةٌ حيّةٌ لا تُقرأُ هويّتُها تُبقي الحالةَ غيرَ محسومةٍ،
   // والزومبيُّ غيرُ المُلقّاةِ كذلك — لا سطرَ أوامرَ لها فلا إسنادَ، وقد تكونُ محاكينا (جولةُ 5).
+  // (LIVE-64) لكنّ هذا الحكمَ على «الجهازِ كلِّهِ» يُحتَّمُ من المسحِ النهائيِّ المستقرِّ بعدَ الإنهاءِ:
+  // عابرةٌ لحظيّةٌ (زومبيٌ يُلقّيها أبوها في ملّي ثوانٍ) لا تسمّمُ البرهانَ، وثابتةٌ تُبقيهِ «غيرَ مثبتٍ».
+  // فالزومبيُّ هنا معلومٌ حالةً لا هويةً: لا يُقتَلُ ولا يُسندُ إلى محاكينا، والحكمُ عليهِ مؤجَّلٌ
+  // للمسحِ المستقرِّ — فإن بقيتْ (كما في L7c: مالكٌ زومبيٌّ لا يُلقّيهِ أبوهُ) فلن يُعلَنَ التوقّفُ أبدًا.
   const scan = scanStateDir(dir, { readCmdline });
-  if (scan.unresolved.length > 0) identityUnknown = true;
-  if (scan.zombies.length > 0) identityUnknown = true;
   const discovered = scan.matches;
   const discoveryUsed =
     discovered.length > 0 || scan.unresolved.length > 0 || scan.zombies.length > 0;
@@ -311,15 +343,16 @@ export function terminateAttempt({ pidFile, dir, injectKillFailure, readCmdline 
     if (!killSim(p, { dir, injectKillFailure, readCmdline })) identityUnknown = true;
   }
   // القرينةُ الإيجابيةُ: لا عمليّةَ swtpm حيّةً تملكُ مسارَ الحالةِ بعدَ الإنهاءِ، ولا عمليّةً غيرَ محسومةٍ،
-  // ولا زومبيً غيرَ مُلقّاةٍ (ESRCH وحدها دليلُ الزوالِ — لا يُكتفى بخروجٍ لم يُلقَ أثرُهُ).
-  const remaining = scanStateDir(dir, { readCmdline });
+  // ولا زومبيً غيرَ مُلقّاةٍ (ESRCH وحدها دليلُ الزوالِ — لا يُكتفى بخروجٍ لم يُلقَ أثرُهُ) — والقراءةُ
+  // مستقرّةٌ (LIVE-64): العابرةُ تُنتظرُ ضمنَ المهلةِ المبرَّرةِ بالقياسِ، والثابتةُ تُفشلُ البرهانَ كما هي.
+  const remaining = settleStateDirScan(dir, readCmdline);
+  // (LIVE-64) التفريقُ بعدَ الاستقرارِ: زومبي/غيرُ محسومةٍ ثابتةٌ بعدَ المهلةِ ⇒ الهويّةُ مجهولةٌ
+  // والحالةُ غيرُ محسومةٍ كما كانت (اختبارُ ZOMBIE)؛ مالكٌ حيٌّ ⇒ التوقّفُ لا يُعلَنُ لكنّ الهويّةَ
+  // ليست مجهولةً (كما في L7d). والعابرةُ التي أُلقيتْ خلالَ المهلةِ لا تتركُ أثرًا في الحكمِ.
+  const unattributableLingering = remaining.unresolved.length > 0 || remaining.zombies.length > 0;
   return {
-    stopped:
-      !identityUnknown &&
-      remaining.matches.length === 0 &&
-      remaining.unresolved.length === 0 &&
-      remaining.zombies.length === 0,
-    identityUnknown,
+    stopped: !identityUnknown && scanClean(remaining),
+    identityUnknown: identityUnknown || unattributableLingering,
     discoveryUsed,
     usedPidFile,
   };
