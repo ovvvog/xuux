@@ -5,23 +5,23 @@
       "engagement": "M11.05",
       "plan": "docs/external-review/M11.05-round-1-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "db22135ec358c62c7aebf447154b1d78fd4345ef",
-      "mainHeadAtMeasure": "db22135ec358c62c7aebf447154b1d78fd4345ef",
-      "scopeDigest": "71263d78077c3f50e721cdf61cd7801541967b97268bd1aa663e7f6e11fd83e3",
+      "commit": "09949278e03122d0bf6735d20d84c77c2b7b9970",
+      "mainHeadAtMeasure": "09949278e03122d0bf6735d20d84c77c2b7b9970",
+      "scopeDigest": "ed7837a881270168cc5c87ce205b3611fb25f86ed59a38ec4f6982f17c33cd76",
       "measuredOn": "2026-11-01",
       "verdict": "success",
       "testFileCount": 293,
-      "tests": 3136,
+      "tests": 3137,
       "pass": 2794,
       "fail": 0,
-      "skipped": 342,
-      "skipLines": 347,
-      "topLevelSkipPoints": 334,
+      "skipped": 343,
+      "skipLines": 348,
+      "topLevelSkipPoints": 335,
       "attributedToDatabaseUrl": 149,
       "otherReasons": [
         {
           "reason": "swtpm/XUUX_TPM_SIM unavailable",
-          "count": 171
+          "count": 172
         },
         {
           "reason": "تخطٍّ معلن: تعذّر إنشاء user/mount/network/pid namespaces: unshare: write failed /proc/self/uid_map: Operation not permitted. الرفض مقصود لأن التنفيذ بلا عزل غير مقبول.",
@@ -65,23 +65,23 @@
       "engagement": "M11.06",
       "plan": "docs/external-review/M11.06-round-2-plan.md",
       "command": "env -u DATABASE_URL npm test",
-      "commit": "db22135ec358c62c7aebf447154b1d78fd4345ef",
-      "mainHeadAtMeasure": "db22135ec358c62c7aebf447154b1d78fd4345ef",
-      "scopeDigest": "71263d78077c3f50e721cdf61cd7801541967b97268bd1aa663e7f6e11fd83e3",
+      "commit": "09949278e03122d0bf6735d20d84c77c2b7b9970",
+      "mainHeadAtMeasure": "09949278e03122d0bf6735d20d84c77c2b7b9970",
+      "scopeDigest": "ed7837a881270168cc5c87ce205b3611fb25f86ed59a38ec4f6982f17c33cd76",
       "measuredOn": "2026-11-01",
       "verdict": "success",
       "testFileCount": 293,
-      "tests": 3136,
+      "tests": 3137,
       "pass": 2794,
       "fail": 0,
-      "skipped": 342,
-      "skipLines": 347,
-      "topLevelSkipPoints": 334,
+      "skipped": 343,
+      "skipLines": 348,
+      "topLevelSkipPoints": 335,
       "attributedToDatabaseUrl": 149,
       "otherReasons": [
         {
           "reason": "swtpm/XUUX_TPM_SIM unavailable",
-          "count": 171
+          "count": 172
         },
         {
           "reason": "تخطٍّ معلن: تعذّر إنشاء user/mount/network/pid namespaces: unshare: write failed /proc/self/uid_map: Operation not permitted. الرفض مقصود لأن التنفيذ بلا عزل غير مقبول.",
