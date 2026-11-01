@@ -1235,3 +1235,54 @@ simTest('L8: حارسُ التنظيفِ ينهي المحاكي ويعيدُ ا
   assert.equal(pidProvenDead(pid), true);
   assert.equal(stateDirExists(dir), false);
 });
+
+// ── (هـ) LIVE-64 (WL-507): الفشلُ المتقطّعُ الحقيقيُّ في فحصِ طلبِ البوتِ #497 (التشغيلةُ 41213586471،
+// المحاولةُ 2): عمليّةُ swtpm أُنهيتْ وزالتْ في ملّي ثوانٍ (مدّةُ L3 كلُّها 9 ثوانٍ هي انتظارُ الجاهزيّةِ)،
+// لكنّ مسحًا آليًّا واحدًا صادفَ زومبيً عابرةً على مستوى الجهازِ كلِّهِ (زومبي يُلقّيها أبوها في ملّي
+// ثوانٍ — قياسُ اليتيمةِ منها: 1-2ms) فحوّلَ «تنظيفٌ نظيفٌ» إلى «غيرُ مثبتِ التوقّفِ» وأخفى خطأَ onAbandon.
+// هذا الاختبارُ يعيدُ إنتاجَ الحالةَ حتميًّا: زومبيٌ أجنبيّةٌ عابرةٌ (ابنُ مساعدٍ مستقلٍّ يُلقّيهِ بعدَ
+// ~700ms) موجودةٌ أثناءَ إنهاءِ محاكينا الحقيقيِّ — والإثباتُ يجبُ ألّا يُسمَّمَ بها، وألّا تتحوّلَ زومبيٌ
+// ثابتةٌ (L7c) إلى نجاحٍ: التمييزُ بالاستقرارِ المحدودِ المبرَّرِ بالقياسِ، لا بتخفيفِ الشرطِ.
+const LIVE64_FOREIGN_ZOMBIE_HELPER = `
+const { spawn } = require('node:child_process');
+const child = spawn('sleep', ['30'], { stdio: 'ignore' });
+setTimeout(() => {
+  child.kill('SIGKILL');
+  process.stdout.write(String(child.pid));
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 700); // الزومبي ثابتةٌ ما دامَ المساعدُ محجوزًا
+}, 40);
+setTimeout(() => process.exit(0), 3000); // يبقى حيًّا بعدَ إلقاءِ ابنِه: خروجُه هو نفسُه كانَ سيصنعُ زومبيً
+`;
+function procStateIs(pid, state) {
+  try {
+    const st = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return st.slice(st.lastIndexOf(')') + 2).split(' ')[0] === state;
+  } catch {
+    return false;
+  }
+}
+simTest('L9: زومبيٌ أجنبيّةٌ عابرةٌ لا تمنعُ إثباتَ توقّفِ المحاكي (LIVE-64)', async () => {
+  const s = startSimShared({ prefix: 'xuux-wl416-l9-', portBase: 3780, label: 'WL-416/L9', attempts: 1 });
+  // مساعدٌ مستقلٌّ يصنعُ زومبيً أجنبيّةً عابرةً (لا تملكُ مسارَ حالتِنا ولا تعرفُهُ) ويُلقّيها بعدَ ~700ms
+  const helper = spawn(process.execPath, ['-e', LIVE64_FOREIGN_ZOMBIE_HELPER], { stdio: ['ignore', 'pipe', 'ignore'] });
+  let zombiePid = 0;
+  helper.stdout.on('data', (d) => { zombiePid = Number(String(d).trim()); });
+  const t0 = Date.now();
+  while (!(zombiePid > 1 && procStateIs(zombiePid, 'Z'))) {
+    if (Date.now() - t0 > 8000) throw new Error('LIVE-64 repro: the foreign zombie never appeared');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  // النافذةُ: الزومبي الأجنبيّةُ موجودةٌ الآنَ — إثباتُ توقّفِ محاكينا لا يجوزُ أن يُسمَّمَ بها
+  const result = terminateAttempt({ pidFile: s.pidFile, dir: s.dir });
+  assert.equal(result.stopped, true, 'LIVE-64: a foreign transient zombie must not poison our stop proof: ' + JSON.stringify(result));
+  assert.equal(pidProvenDead(s.pid), true, 'our simulator is ESRCH-proven gone');
+  assert.equal(procStateIs(zombiePid, 'Z') || pidProvenDead(zombiePid), true, 'the foreign zombie is gone (reaped by its own helper)');
+  assert.equal(stateDirExists(s.dir), true, 'terminateAttempt لا يحذفُ المجلّدَ — الحذفُ شأنُ المستدعي');
+  rmSync(s.dir, { recursive: true, force: true });
+  // انتظارُ خروجِ المساعدِ كي لا يبقى أثرًا للاختباراتِ اللاحقةِ (يُلقّى في afterEach كإخوانِه)
+  const helperGone = Date.now() + 8000;
+  while (!(helper.exitCode !== null || helper.signalCode !== null)) {
+    if (Date.now() > helperGone) throw new Error('LIVE-64 repro: helper did not exit');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+});
