@@ -106,3 +106,15 @@ powershell -NoProfile -File .\sim\tpm-host\win_tpm_inventory.ps1
   «غيرُ مثبَتٍ من المعلَن» — لا «غيرُ مدعوم» ولا «بلا حد». والقيمةُ الموجبةُ حدٌّ أعلى لا سعةٌ حرّة.
 - **رتابةُ العدّادِ عبرَ الحذفِ وإعادةِ التعريف، وتوفّرُ تفويضِ هرمِ التخزين** — تحتاجُ عملياتٍ تغيّرُ
   الحالة، خارجَ هذه الأداة.
+
+## أدواتُ تأهيلِ Windows 11 القرائيّة (‏`WL-510`)
+
+التصميمُ وخطّةُ القبول: `docs/adr/0007-annex-f-windows11-tbs-qualification.md` §5. **لم يُشغَّلْ شيءٌ منها على المضيف.**
+
+| الملف | الدور |
+|---|---|
+| `win11_qualification_readonly.ps1` | ‏W-R2/W-R3: نظامُ التشغيل، بصمةُ `tpm.sys`، خدمةُ TBS، فئةُ المستدعي، شهاداتُ EK (‏جلسةُ مدير). **لا يرسلُ أيَّ أمرٍ إلى TPM**، ولا `Get-Tpm`، ولا `OwnerAuth`. |
+| `wsl_interop_probe.sh` | ‏W-R4: توفّرُ التشغيلِ البينيِّ داخلَ WSL. لا يشغّلُ أيَّ برنامجِ Windows. |
+| `check_win11_qualification.mjs` | المُقيِّم: حكمٌ لكلِّ فحص، وبصماتُ المدخلات، و`freshnessProven`/`productionEligible`/`ekChainVerified` = `false` دائمًا. |
+
+يحرسُها `tests/sim/win11-qualification.test.mjs` (فحصٌ نصّيٌّ، وخروجُ 2 على غيرِ Windows/WSL، وأحكامُ المُقيِّمِ على مدخلاتٍ اصطناعيّةٍ موسومة).
