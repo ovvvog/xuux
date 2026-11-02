@@ -118,3 +118,15 @@ powershell -NoProfile -File .\sim\tpm-host\win_tpm_inventory.ps1
 | `check_win11_qualification.mjs` | المُقيِّم: حكمٌ لكلِّ فحص، وبصماتُ المدخلات، و`freshnessProven`/`productionEligible`/`ekChainVerified` = `false` دائمًا. |
 
 يحرسُها `tests/sim/win11-qualification.test.mjs` (فحصٌ نصّيٌّ، وخروجُ 2 على غيرِ Windows/WSL، وأحكامُ المُقيِّمِ على مدخلاتٍ اصطناعيّةٍ موسومة).
+
+## بروتوكولُ مساعدِ W-B — طبقةُ نقلٍ مقيسةٌ على المحاكاةِ (‏`WL-511`)
+
+التصميمُ: `docs/adr/0007-annex-g-wb-helper-protocol.md`. **طبقةُ نقلٍ فقط** لا تبني المساعدَ الحقيقيَّ ولا
+تكلّمُ TBS ولا Windows — قياسُ العقدِ على مساعدٍ زائفٍ في CI قبلَ أيِّ بناءٍ (تكليفُ WL-511). لا تُفعّلُ
+شيئًا ولا تختارُ W-B نهائيًّا (قرارُ ق-2 للمالك).
+
+| الملف | الدور |
+|---|---|
+| `wb_helper_protocol.mjs` | عميلُ المساعدِ: بصمةٌ قبلَ التشغيل، طلبٌ واحدٌ وردٌّ واحدٌ بتأطيرِ `channel_protocol` المشتركِ، نداءٌ يعادُ حرفيًّا، وفشلٌ مغلقٌ مسمّى لكلِّ خرقٍ (BAD_FRAME/EXTRA_OUTPUT/EXIT/STDERR/TIMEOUT/NONCE_MISMATCH). |
+| `tests/sim/fixtures/wb_fake_helper.mjs` | مساعدٌ زائفٌ بأوضاعٍ فاسدةٍ مختارةٍ لقياسِ كلِّ رموزِ الفشلِ المغلقِ سلوكًا. |
+| `tests/sim/wb-helper-protocol.test.mjs` | المِحكُّ: بصمةٌ وفشلٌ مغلقٌ وسلامةُ مدخلاتَ ومخرجاتٍ — 9 اختباراتٍ خضراء. |
