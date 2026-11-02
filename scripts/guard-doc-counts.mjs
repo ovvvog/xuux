@@ -6,7 +6,7 @@
 // `WL-063` بحاجزِ `guard:progress`، لكنّ بقيةَ العدّاداتِ اليدويّةِ لم تكن
 // محصورة.
 //
-// **الحاجزُ يَفحَصُ سبعَ قواعدَ** (وكانَ ثلاثةَ عدّاداتٍ يومَ `WL-196`):
+// **الحاجزُ يَفحَصُ عشرَ قواعدَ** (وكانَ ثلاثةَ عدّاداتٍ يومَ `WL-196`):
 //   - R1: عددُ الحواجزِ في `PROJECT_STATUS.md` يُطابقُ عددَ `guard:*` في `validate`.
 //   - R2: عددُ ملفاتِ الاختبارِ في `docs/ROOT_OF_TRUST.md` يُطابقُ عددَ `*.test.mjs`.
 //   - R3: عددُ البنودِ المفتوحةِ في `PROJECT_STATUS.md` يُطابقُ عددَ البنودِ المفتوحةِ على المنفِّذ.
@@ -29,6 +29,11 @@
 //     ⇒ `R8/YAML-OPEN-MARKED`. فالحاجزُ يقيسُ الصفَّ بالعقدِ ولا يُغيِّرُ العقد.
 //   - R9: معرِّفُ الدَّينِ يرِدُ صفّاً مرّةً واحدةً في الجدولِ الواحدِ (`R9/DUP-ROW`) — أُضيفَ في
 //     `WL-336` لـ`DOC-28`.
+//   - R10: عمودُ الشدّةِ في §4.3 يُطابقُ `findings[].severity` في العقدِ (`R10/SEVERITY`) — أُضيفَ في
+//     `WL-509`. **الحادثةُ:** صفُّ `CO55-M11.05-R3-01` قالَ «حرجة» والعقدُ والتقريرُ الخامُّ يقولانِ `high`،
+//     والحاجزُ أخضرُ لأنَّ أيَّ قاعدةٍ لم تقرأِ الشدّة. وفي `WL-509` أيضاً: صارَ نمطُ خليّةِ المعرِّفِ في `R8`
+//     يقبلُ 🔴 (‏علامةُ «مفتوحٌ») بعدَما كانت ثلاثةُ صفوفٍ تحملُها (`CO55-M11.05-R3-0{1,2,3}`) تُتخطّى
+//     بلا فحصٍ — فنتيجةٌ `closed` في العقدِ بصفٍّ يحملُ 🔴 كانت تمرُّ صامتةً.
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -493,7 +498,7 @@ const facts = readDocCountFacts(root);
         if (line.startsWith('### ') || line.startsWith('## ')) break;
         if (!line.startsWith('|') || line.includes('| ---')) continue;
         const idCell = (line.split('|')[1] ?? '').trim();
-        const m = /^(~~)?`([^`]+)`(~~)?\s*(🟢)?\s*$/u.exec(idCell);
+        const m = /^(~~)?`([^`]+)`(~~)?\s*(🟢|🔴)?\s*$/u.exec(idCell);
         if (m === null) continue;
         const id = String(m[2]);
         const status = statusOf.get(id);
@@ -508,6 +513,62 @@ const facts = readDocCountFacts(root);
         } else if (status !== 'closed' && anyMark) {
           violations.push(
             `R8/YAML-OPEN-MARKED: «${id}» حالتُها \`${status}\` في \`config/external-review.yaml\` وصفُّها في §4.3 يحملُ علامةَ إغلاقٍ — لا تُغلَقُ نتيجةٌ في السجلِّ وهي مفتوحةٌ في العقد — سطر ${i + 1}.`,
+          );
+        }
+      }
+    }
+  }
+}
+
+// ── R10 (‏§4.3): الشدّةُ من العقدِ لا من الصفِّ — `WL-509` ──
+//   تقرأُ `findings[].severity` بمُفسِّرِ YAML وتُقابِلُ به الخليّةَ الثانيةَ في صفِّ النتيجة. **لا تكتبُ في العقد.**
+{
+  const contractText = readText('config/external-review.yaml');
+  /** @type {unknown} */
+  let contract = null;
+  try {
+    contract = contractText.trim() === '' ? null : parseYaml(contractText);
+  } catch {
+    // R5 يُبلِّغُ عن عطبِ التفسير.
+  }
+  const findings =
+    contract && typeof contract === 'object'
+      ? /** @type {{findings?: unknown}} */ (contract).findings
+      : undefined;
+  /** @type {Record<string, string>} */
+  const severityLabel = { critical: 'حرجة', high: 'عالية', medium: 'متوسطة', low: 'منخفضة' };
+  if (Array.isArray(findings)) {
+    /** @type {Map<string, string>} */
+    const severityOf = new Map();
+    for (const f of findings) {
+      if (f && typeof f === 'object' && 'id' in f) {
+        const { id, severity } = /** @type {{id: unknown, severity?: unknown}} */ (f);
+        if (typeof id === 'string') severityOf.set(id, String(severity ?? ''));
+      }
+    }
+    const lines = readText('docs/roadmap/06-debt-register.md').split('\n');
+    const start = lines.findIndex((l) => l.startsWith('### 4.3'));
+    if (start !== -1) {
+      for (let i = start + 1; i < lines.length; i += 1) {
+        const line = lines[i] ?? '';
+        if (line.startsWith('### ') || line.startsWith('## ')) break;
+        if (!line.startsWith('|') || line.includes('| ---')) continue;
+        const cells = line.split('|');
+        const idCell = (cells[1] ?? '').trim();
+        const m = /^(~~)?`([^`]+)`(~~)?\s*(🟢|🔴)?\s*$/u.exec(idCell);
+        if (m === null) continue;
+        const id = String(m[2]);
+        const severity = severityOf.get(id);
+        if (severity === undefined) continue; // `R6` يقيسُ الاتّجاهَ الآخر.
+        const expected = severityLabel[severity];
+        const actual = (cells[2] ?? '').trim();
+        if (expected === undefined) {
+          violations.push(
+            `R10/SEVERITY: «${id}» شدّتُها في العقدِ \`${severity}\` ليست من (critical/high/medium/low) — سطر ${i + 1}.`,
+          );
+        } else if (actual !== expected) {
+          violations.push(
+            `R10/SEVERITY: «${id}» شدّتُها في \`config/external-review.yaml\` \`${severity}\` («${expected}») وصفُّها في §4.3 يقولُ «${actual}» — سطر ${i + 1}.`,
           );
         }
       }
