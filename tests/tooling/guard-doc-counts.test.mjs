@@ -702,3 +702,72 @@ test('R8/UNMARKED: السجلُّ الحاليُّ يمرُّ — كلُّ مع�
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// ── الطفرتان M22 وM23 وانحدارُهما: الشدّةُ من العقدِ (‏`R10`) وصفوفُ 🔴 في `R8` (‏`WL-509`) ──
+//   **الحادثةُ:** صفُّ `CO55-M11.05-R3-01` قالَ «حرجة» والعقدُ `high`، ولا قاعدةَ تقرأُ الشدّة. وصفوفُ
+//   §4.3 الحاملةُ 🔴 كانَ نمطُ `R8` يتخطّاها، فنتيجةٌ `closed` في العقدِ بصفٍّ 🔴 تمرُّ صامتةً.
+
+test('الطفرةُ M22: إعادةُ «حرجة» إلى صفِّ `CO55-M11.05-R3-01` (‏الحادثةُ نفسُها) تُسقِطُ الحاجزَ بـR10/SEVERITY', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    const mutated = debt.replace(
+      '| `CO55-M11.05-R3-01` 🔴 | عالية |',
+      '| `CO55-M11.05-R3-01` 🔴 | حرجة |',
+    );
+    assert.notEqual(mutated, debt, 'ينبغي أن يُعثَرَ على صفِّ CO55-M11.05-R3-01');
+    writeFileSync(debtPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R10\/SEVERITY: «CO55-M11.05-R3-01»/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M22ب: خفضُ شدّةِ صفٍّ بلا 🔴 (‏`UF-01`: عالية ← منخفضة) يُسقِطُ الحاجزَ بـR10/SEVERITY', () => {
+  const tmp = cloneRepo();
+  try {
+    const debtPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const debt = readFileSync(debtPath, 'utf8');
+    const mutated = debt.replace('| `UF-01` | عالية |', '| `UF-01` | منخفضة |');
+    assert.notEqual(mutated, debt, 'ينبغي أن يُعثَرَ على صفِّ UF-01');
+    writeFileSync(debtPath, mutated);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R10\/SEVERITY: «UF-01»/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('الطفرةُ M23: `CO55-M11.05-R3-02` تُجعَلُ `closed` في نسخةِ العقدِ وصفُّها يحملُ 🔴 ⇒ R8/YAML-CLOSED-UNMARKED (‏كانَ يُتخطّى)', () => {
+  const tmp = cloneRepo();
+  try {
+    const yamlPath = path.join(tmp, 'config/external-review.yaml');
+    const lines = readFileSync(yamlPath, 'utf8').split('\n');
+    const at = lines.findIndex((l) => /^\s*- id: ['"]?CO55-M11\.05-R3-02['"]?\s*$/.test(l));
+    assert.ok(at !== -1, 'ينبغي أن يُعثَرَ على CO55-M11.05-R3-02 في العقد');
+    const rel = lines.slice(at + 1).findIndex((l) => /^\s*status: open\s*$/.test(l));
+    assert.ok(rel !== -1, 'ينبغي أن يُعثَرَ على حالتِها');
+    lines[at + 1 + rel] = (lines[at + 1 + rel] ?? '').replace('open', 'closed');
+    writeFileSync(yamlPath, lines.join('\n'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/YAML-CLOSED-UNMARKED: «CO55-M11.05-R3-02»/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R10 (‏§4.3): السجلُّ الحاليُّ يطابقُ شدّةَ العقدِ في كلِّ صفّ', () => {
+  const tmp = cloneRepo();
+  try {
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, stderr);
+    assert.doesNotMatch(stderr, /R10\/SEVERITY/);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
