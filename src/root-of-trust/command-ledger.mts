@@ -55,7 +55,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { ledgerEntryBody } from './hsm-binding.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import { basename, dirname, join } from 'node:path';
-import { beforeDurableWrite } from './commit-barrier.mjs';
+import { beforeDurableWrite, fsyncDirectoryOrFail } from './commit-barrier.mjs';
 
 /** لاحقة مجلد الحجوزات: مفتاحٌ لكل أمر، وإنشاؤه الحصري هو الذرّية نفسها. */
 export const LEDGER_CLAIMS_SUFFIX = '.claims';
@@ -897,19 +897,12 @@ export class CommandLedger {
 
   /**
    * يُزامن مجلد الحجوزات كي يصمد اسمُ الحجز نفسه لانقطاع الطاقة، لا محتواه
-   * وحده. وتعذُّرها على بعض الأنظمة لا يُسقط العملية — الحجز قائم في كل حال.
+   * وحده. يفشل مغلقاً (`LIVE-65`): كان تعذُّرُها يُبتلَع فيُعاد رقمُ الحاجز من
+   * `begin` (إقرارٌ بالحجز) واسمُه غيرُ دائم؛ الآن يُرفَع الخطأ فلا إقرار.
    */
   #fsyncDir(): void {
     if (!this.#fsync) return;
-    let fd: number | null = null;
-    try {
-      fd = openSync(this.claimsDir, 'r');
-      fsyncSync(fd);
-    } catch {
-      // بعض الأنظمة لا تسمح بمزامنة مجلد؛ يُترك بلا ضمانٍ إضافي ويبقى المنع.
-    } finally {
-      if (fd !== null) closeSync(fd);
-    }
+    fsyncDirectoryOrFail(this.claimsDir);
   }
 
   /**

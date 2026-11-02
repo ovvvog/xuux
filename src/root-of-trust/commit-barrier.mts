@@ -227,18 +227,39 @@ function writeFully(fd: number, text: string): void {
   while (written < buffer.length) written += writeSync(fd, buffer, written);
 }
 
-/** مزامنةُ مجلّدٍ بلا رفعٍ حيثُ لا يُسمَح. */
+/**
+ * `LIVE-65` (‏`D3`): مزامنةُ مجلّدٍ **تفشلُ مغلقةً** — المصدرُ الواحدُ لمزامنةِ المجلّدِ في
+ * `commit-barrier` و`state-manifest` و`command-ledger`. كانت المواضعُ الثلاثةُ تلفُّها بـ`catch {}`
+ * («بعضُ الأنظمةِ لا تُزامِنُ مجلّداً»)، فتبتلعُ معها `EIO`/`ENOSPC`/`EROFS`، فيُقَرُّ بالعمليّةِ
+ * واسمُ الملفِّ غيرُ مضمونِ الدوام. الآن كلُّ خطأٍ في الفتحِ أو المزامنةِ أو الإغلاقِ يُرفَعُ كما هو.
+ *
+ * **لا قائمةَ استثناءٍ** عمداً: لا منصّةَ مدعومةٌ يُثبَتُ فيها أنّ رفضَ مزامنةِ المجلّدِ «غيرُ مدعومٍ»
+ * لا «فشلٌ». الجذرُ يُشغَّلُ ويُختبَرُ على Linux وحدَه (‏`ubuntu-latest`)، وفيه تُزامَنُ المجلّداتُ،
+ * و`clock.mts` و`root-intents.mts` يُزامِنانِها صارمَينِ من قبلُ. و`EINVAL`/`ENOTSUP`/`EPERM`/`EISDIR`
+ * معناها أنّ الاسمَ **لم يُضمَنْ** دوامُه — فتمريرُها نجاحاً إضعافٌ لدلالةِ `ACK`. نظامُ ملفّاتٍ
+ * أو منصّةٌ لا تُزامِنُ مجلّداً تفشلُ هنا مغلقةً، وهذا قيدُ توافقٍ موثَّقٌ لا خطأٌ يُستثنى.
+ * خطأُ المزامنةِ مُقدَّمٌ على خطأِ الإغلاق؛ وخطأُ الإغلاقِ وحدَه يُرفَعُ أيضاً (‏قد يحملُ خطأً مؤجَّلاً).
+ * @param dir - المجلّد
+ */
+export function fsyncDirectoryOrFail(dir: string): void {
+  const fd = openSync(dir, 'r');
+  try {
+    fsyncSync(fd);
+  } catch (error) {
+    try {
+      closeSync(fd);
+    } catch {
+      /* خطأُ المزامنةِ هو المرفوع؛ والمقبضُ يُغلَقُ في كلِّ حال */
+    }
+    throw error;
+  }
+  closeSync(fd);
+}
+
+/** مزامنةُ مجلّدٍ حينَ تكونُ المزامنةُ مفعّلة — تفشلُ مغلقةً (‏`LIVE-65`). */
 function syncDir(dir: string, fsync: boolean): void {
   if (!fsync) return;
-  let fd: number | null = null;
-  try {
-    fd = openSync(dir, 'r');
-    fsyncSync(fd);
-  } catch {
-    /* بعضُ الأنظمةِ لا تُزامِنُ مجلّداً */
-  } finally {
-    if (fd !== null) closeSync(fd);
-  }
+  fsyncDirectoryOrFail(dir);
 }
 
 /** هل الخطأُ فشلُ إدخالٍ/إخراجٍ (‏لا رفضٌ مسمّىً من المجال)؟ */
