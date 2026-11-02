@@ -124,9 +124,7 @@
   },
   "dependencies": {
     "pg": "8.23.0",
+    "pkcs11js": "2.1.7",
     "yaml": "2.9.0"
-  },
-  "optionalDependencies": {
-    "pkcs11js": "^2.1.7"
   }
 }
