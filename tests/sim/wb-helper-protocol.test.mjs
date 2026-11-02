@@ -15,7 +15,11 @@
 //   4) سلامةُ المدخلات: op بمحارفِ تحكّمٍ أو طويلٌ، وargs غيرُ مصفوفةٍ أو زائدةٌ أو ضخمة ⇒ رفضٌ قبلَ التشغيل.
 //   5) الفشلُ المغلقُ سلوكًا (كلُّ وضعٍ فاسدٍ من المساعدِ الزائفِ برمزِه المسمّى):
 //      garbage/badcrc ⇒ BAD_FRAME · extra ⇒ EXTRA_OUTPUT · exit1 ⇒ EXIT_1 · stderr ⇒ STDERR ·
-//      silent/late ⇒ TIMEOUT (يُقتَل) · wrongnonce ⇒ NONCE_MISMATCH · okfalse ⇒ رمزُ المساعد.
+//      silent/late ⇒ TIMEOUT (يُقتَل) · wrongnonce ⇒ NONCE_MISMATCH · okfalse ⇒ REPORTED_FAILURE.
+//   6) WL-514 — التصليب: مسارٌ نسبيٌّ ⇒ PATH_NOT_ABSOLUTE · سكربتٌ غيرُ مبصومٍ ⇒ ARGS_UNPINNED ·
+//      فشلُ spawn ⇒ SPAWN_FAILED · شكلُ ردٍّ مفتوحٌ ⇒ BAD_RESPONSE · ادّعاءُ دليلٍ ⇒ EVIDENCE_CLAIM ·
+//      مخرجٌ غيرُ محدودٍ ⇒ OUTPUT_TOO_LARGE · عدّادٌ ≠ 0 ⇒ BAD_FRAME · إشارةٌ ⇒ SIGNALLED ·
+//      رمزُ المساعدِ لا يصيرُ رمزَنا (remoteCode منقّى).
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,6 +40,7 @@ const protoPath = join(root, 'sim/tpm-host/wb_helper_protocol.mjs');
 const fixture = join(root, 'tests/sim/fixtures/wb_fake_helper.mjs');
 const nodeBin = process.execPath;
 const pinned = sha256File(nodeBin);
+const fixturePin = sha256File(fixture);
 const stripHash = (s) => s.split('\n').map((l) => l.replace(/(^|\s)#.*$/, '')).join('\n');
 
 const call = (mode, over = {}) =>
@@ -45,6 +50,7 @@ const call = (mode, over = {}) =>
     op: 'inventory.getCapability',
     args: ['TPM_PT_MANUFACTURER_ID'],
     spawnArgs: mode ? [fixture, mode] : [fixture],
+    spawnArgsSha256: mode ? [fixturePin, null] : [fixturePin],
     timeoutMs: 4000,
     ...over,
   });
@@ -121,7 +127,50 @@ test('الفشلُ المغلقُ سلوكًا: لا ردَّ أبدًا أو ر
 
 test('النداءُ يربطُ الردَّ بالطلبِ: عدمُ مطابقتِه أو إبلاغُ فشلٍ ⇒ رمزُه المسمّى', async () => {
   await expectCode('WB_HELPER_NONCE_MISMATCH', () => call('wrongnonce'));
-  await expectCode('WB_HELPER_REPORTED_FAILURE', () => call('okfalse'));
+  await assert.rejects(
+    () => call('okfalse'),
+    (e) => e.code === 'WB_HELPER_REPORTED_FAILURE' && e.remoteCode === 'HELPER_TBS_UNAVAILABLE',
+  );
+});
+
+test('WL-514: رمزُ فشلِ المساعدِ لا يصيرُ رمزَنا — يُنقّى إلى remoteCode', async () => {
+  await assert.rejects(
+    () => call('okinject'),
+    (e) => e.code === 'WB_HELPER_REPORTED_FAILURE' && e.remoteCode === 'UNPARSEABLE' && !/rm -rf/.test(e.code),
+  );
+});
+
+test('WL-514: المسارُ مطلقٌ والسكربتُ المفسَّرُ مبصوم', async () => {
+  await expectCode('WB_HELPER_PATH_NOT_ABSOLUTE', () => call(null, { helperPath: 'node' }));
+  await expectCode('WB_HELPER_PATH_NOT_ABSOLUTE', () => call(null, { helperPath: './node' }));
+  await expectCode('WB_HELPER_ARGS_UNPINNED', () => call(null, { spawnArgsSha256: undefined }));
+  await expectCode('WB_HELPER_ARGS_UNPINNED', () => call('ok', { spawnArgsSha256: [fixturePin] }));
+  await expectCode('WB_HELPER_ARGS_UNPINNED', () => call('ok', { spawnArgsSha256: [null, null] }));
+  const wrong = createHash('sha256').update('x').digest('hex');
+  await expectCode('WB_HELPER_FINGERPRINT_MISMATCH', () => call(null, { spawnArgsSha256: [wrong] }));
+});
+
+test('WL-514: فشلُ spawn يُحسَمُ برمزٍ لا باستثناءٍ طليق', async () => {
+  // ملفٌّ مبصومٌ صحيحًا لكنّه غيرُ قابلٍ للتنفيذ (‏EACCES): الرمزُ المسمّى لا انهيارُ العمليّة.
+  await expectCode('WB_HELPER_SPAWN_FAILED', () =>
+    call(null, { helperPath: fixture, fingerprintSha256: fixturePin, spawnArgs: [], spawnArgsSha256: undefined }),
+  );
+});
+
+test('WL-514: شكلُ الردِّ مغلقٌ و op يعادُ — وإلّا BAD_RESPONSE', async () => {
+  for (const mode of ['noresult', 'extrakey', 'wrongop', 'notbool']) {
+    await expectCode('WB_HELPER_BAD_RESPONSE', () => call(mode));
+  }
+});
+
+test('WL-514: طبقةُ النقلِ لا تحملُ ادّعاءَ دليل (freshnessProven في العمق) ⇒ EVIDENCE_CLAIM', async () => {
+  await expectCode('WB_HELPER_EVIDENCE_CLAIM', () => call('claim'));
+});
+
+test('WL-514: مخرجٌ غيرُ محدودٍ يُقتَلُ عندَ حدِّ الإطار، وعدّادٌ ≠ 0 مرفوض، والإشارةُ مسمّاة', async () => {
+  await expectCode('WB_HELPER_OUTPUT_TOO_LARGE', () => call('flood'));
+  await expectCode('WB_HELPER_BAD_FRAME', () => call('badcounter'));
+  await expectCode('WB_HELPER_SIGNALLED', () => call('signal'));
 });
 
 test('البروتوكولُ يرفضُ الطلباتِ الكبيرةَ حتى معَ مساعدٍ سليمٍ (حدُّ الحمولةِ المشتركِ)', async () => {

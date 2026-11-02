@@ -119,11 +119,20 @@ export function evaluateWin11Qualification(input = {}) {
   } else {
     const reasons = [];
     if (interop.binfmt?.enabled !== true) reasons.push('WSLInterop binfmt handler not enabled');
-    if (interop.wslConfInteropEnabled === false) reasons.push('/etc/wsl.conf disables interop');
+    // WL-514 (B-20): null (غيرُ مضبوطٍ = الافتراضُ مفعَّل) أو true وحدَهما يمرّان؛ أيُّ قيمةٍ أخرى ("0"، "no"…) FAIL.
+    const conf = interop.wslConfInteropEnabled;
+    if (conf === false) reasons.push('/etc/wsl.conf disables interop');
+    else if (conf !== null && conf !== undefined && conf !== true) reasons.push(`/etc/wsl.conf interop value not understood: ${JSON.stringify(conf)}`);
     if (interop.powershellResolvable !== true) reasons.push('powershell.exe not resolvable');
-    const host = !eErr ? elevated : !sErr ? standard : null;
-    const dist = host?.wsl?.distributions?.find?.((/** @type {any} */ d) => d.isDefault);
-    if (host && dist && dist.interopFlag === false) reasons.push('default distribution has interop flag cleared');
+    // WL-514 (B-19): تقريرُ الجلسةِ **العاديّة** (المستخدمُ الذي يشغّلُ WSL والمساعد) لا المدير — فـHKCU\…\Lxss
+    // للمديرِ قد يكونُ حسابًا آخرَ بلا توزيعات، فكانَ الفحصُ يُتخطّى ويُعطى PASS. وغيابُ التوزيعةِ الافتراضيّة FAIL.
+    if (sErr) {
+      reasons.push(`standard report required for the default distribution check: ${sErr}`);
+    } else {
+      const dist = standard.wsl?.distributions?.find?.((/** @type {any} */ d) => d.isDefault === true);
+      if (!dist) reasons.push('no default WSL distribution recorded in the standard report');
+      else if (dist.interopFlag !== true) reasons.push('default distribution has interop flag cleared');
+    }
     items.push(item('W-R4', reasons.length ? 'FAIL' : 'PASS', reasons));
   }
 
@@ -133,6 +142,8 @@ export function evaluateWin11Qualification(input = {}) {
     freshnessProven: false,
     productionEligible: false,
     ekChainVerified: false,
+    // WL-514 (B-18): ما لا يقيّمُه هذا المُقيِّمُ مسمّى، فلا يُقرأُ «كلُّ ما عُرضَ PASS» تأهيلًا لـق2 (W-R0…W-R5).
+    notEvaluatedHere: ['W-R0', 'W-R1', 'W-R5'],
     note: 'read-only evidence: platform context, hardware identity and channel availability only',
   };
 }
@@ -164,7 +175,10 @@ function main(argv) {
   }
   const verdict = evaluateWin11Qualification(input);
   process.stdout.write(JSON.stringify({ ...verdict, inputs }, null, 2) + '\n');
-  return verdict.items.some((x) => x.verdict === 'INVALID' || x.verdict === 'FAIL') ? 1 : 0;
+  if (verdict.items.some((x) => x.verdict === 'INVALID' || x.verdict === 'FAIL')) return 1;
+  // WL-514 (B-18): فحصٌ لم يُشغَّلْ ليسَ نجاحًا — خروجُ 2 «غيرُ مكتمل» لا 0.
+  if (verdict.items.some((x) => x.verdict === 'NOT_RUN')) return 2;
+  return 0;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

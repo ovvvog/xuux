@@ -79,6 +79,9 @@ powershell -NoProfile -File .\sim\tpm-host\win_tpm_inventory.ps1
 التفسير: `node sim/tpm-host/decode_inventory.mjs <file.json>` (خروجٌ 0 بلا أخطاء، 1 بأخطاءٍ مسمّاة، 2 ملفٌّ
 غيرُ مقروء). المُفسِّرُ يُعيدُ حسابَ الاكتمالِ من البايتات، ويصنّفُ الدليلَ `hardware-tbs` فقط إن كان
 النقلُ `tbs`، ويكشفُ أيَّ طلبٍ في الملفِّ خارجَ قائمةِ السماح.
+**تنبيه `WL-514`:** حقلُ `transport` يكتبُه الجردُ عن نفسِه، فوسمُ `hardware-tbs` **ادّعاءٌ ذاتيّ** لا إثباتُ عتاد:
+المُفسِّرُ يُخرجُ معه `transportClaimSource: "self-reported"` و`hardwareVerified: false` دائمًا. أصالةُ الشريحةِ
+لا تُثبَتُ من الملفِّ وحدَه بل من سلسلةِ شهادةِ EK ومراجعتِها (W-R3) — وهي خارجَ هذه الأداة.
 
 ## ما لا يمكنُ لهذه الأداةِ إثباتُه (حدودٌ معلنة)
 
@@ -115,7 +118,7 @@ powershell -NoProfile -File .\sim\tpm-host\win_tpm_inventory.ps1
 |---|---|
 | `win11_qualification_readonly.ps1` | ‏W-R2/W-R3: نظامُ التشغيل، بصمةُ `tpm.sys`، خدمةُ TBS، فئةُ المستدعي، شهاداتُ EK (‏جلسةُ مدير). **لا يرسلُ أيَّ أمرٍ إلى TPM**، ولا `Get-Tpm`، ولا `OwnerAuth`. |
 | `wsl_interop_probe.sh` | ‏W-R4: توفّرُ التشغيلِ البينيِّ داخلَ WSL. لا يشغّلُ أيَّ برنامجِ Windows. |
-| `check_win11_qualification.mjs` | المُقيِّم: حكمٌ لكلِّ فحص، وبصماتُ المدخلات، و`freshnessProven`/`productionEligible`/`ekChainVerified` = `false` دائمًا. |
+| `check_win11_qualification.mjs` | المُقيِّم: حكمٌ لكلِّ فحص، وبصماتُ المدخلات، و`freshnessProven`/`productionEligible`/`ekChainVerified` = `false` دائمًا. خروجُه (`WL-514`): 0 كلُّ ما قُيِّمَ PASS، 1 FAIL/INVALID، **2 فحصٌ NOT_RUN** (غيرُ مكتمل)، 64 وسيطٌ خاطئ. لا يقيّمُ W-R0/W-R1/W-R5 (`notEvaluatedHere`)، وW-R4 يقرأُ توزيعةَ WSL الافتراضيّةَ من تقريرِ الجلسةِ **العاديّة**. |
 
 يحرسُها `tests/sim/win11-qualification.test.mjs` (فحصٌ نصّيٌّ، وخروجُ 2 على غيرِ Windows/WSL، وأحكامُ المُقيِّمِ على مدخلاتٍ اصطناعيّةٍ موسومة).
 

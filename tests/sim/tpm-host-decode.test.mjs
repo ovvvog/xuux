@@ -56,6 +56,15 @@ test('static: transport=tbs وحدَه يُصنَّفُ hardware-tbs؛ والم�
   assert.equal(analyzeInventory(hostDoc({ ...inv, transport: 'mystery' })).evidenceClass, 'unknown-transport');
 });
 
+test('WL-514: وسمُ hardware-tbs ذاتيٌّ — تعديلُ transport يدويًّا لا يرقّي hardwareVerified أبدًا', () => {
+  const inv = loadFixture();
+  for (const transport of ['tbs', 'simulator-swtpm', 'mystery']) {
+    const r = analyzeInventory(hostDoc({ ...inv, transport }));
+    assert.equal(r.hardwareVerified, false, transport);
+    assert.equal(r.transportClaimSource, 'self-reported', transport);
+  }
+});
+
 test('static: NV_COUNTERS_MAX — الصفرُ ليس «غيرَ مدعوم»، ودلالتُه تتبعُ مستوى المواصفةِ المعلَنَ (المراجعةُ وتاريخُ الإراتا) كما في WL-439', () => {
   // r1.59 فأحدث: NOTE 2 — والمراجعةُ تغلبُ التاريخَ (r1.59 بتاريخٍ قديمٍ تبقى بلا حدٍّ ثابتٍ).
   assert.equal(interpretNvCountersMax(0, 159).semantics, 'no-fixed-maximum');
