@@ -204,13 +204,51 @@ test('المُقيِّم: قناةُ التشغيلِ البينيِّ معطَ�
     { interop: interop({ powershellResolvable: false }) },
     {
       interop: interop(),
-      elevated: qual(true, { wsl: { distributions: [{ name: 'S', isDefault: true, version: 2, flags: 14, interopFlag: false }] } }),
+      standard: qual(false, { wsl: { distributions: [{ name: 'S', isDefault: true, version: 2, flags: 14, interopFlag: false }] } }),
     },
+    // WL-514 (B-20): قيمةُ wsl.conf غيرُ المفهومةِ لا تمرّ.
+    { interop: interop({ wslConfInteropEnabled: '0' }) },
+    { interop: interop({ wslConfInteropEnabled: 'no' }) },
+    // WL-514 (B-19): بلا توزيعةٍ افتراضيّةٍ في التقريرِ العاديّ ⇒ FAIL لا تخطٍّ صامت.
+    { interop: interop(), standard: qual(false, { wsl: { distributions: [] } }) },
+    { interop: interop(), standard: qual(false, { wsl: { distributions: [{ name: 'S', isDefault: false, version: 2, flags: 15, interopFlag: true }] } }) },
   ];
   for (const c of cases) {
     const v = evaluateWin11Qualification({ standard: qual(false), elevated: qual(true), ...c });
     assert.equal(byId(v)['W-R4'].verdict, 'FAIL');
     assertInvariants(v);
+  }
+});
+
+test('WL-514 (B-19): W-R4 يقرأُ تقريرَ الجلسةِ العاديّة — مديرٌ بلا توزيعاتٍ لا يُخفي علمَ التشغيلِ المعطَّل', () => {
+  const v = evaluateWin11Qualification({
+    standard: qual(false, { wsl: { distributions: [{ name: 'S', isDefault: true, version: 2, flags: 14, interopFlag: false }] } }),
+    elevated: qual(true, { wsl: { distributions: [] } }),
+    interop: interop(),
+  });
+  assert.equal(byId(v)['W-R4'].verdict, 'FAIL');
+  // وبلا تقريرٍ عاديٍّ لا PASS لـW-R4.
+  const v2 = evaluateWin11Qualification({ elevated: qual(true), interop: interop() });
+  assert.equal(byId(v2)['W-R4'].verdict, 'FAIL');
+  assert.deepEqual(v.notEvaluatedHere, ['W-R0', 'W-R1', 'W-R5']);
+});
+
+test('WL-514 (B-18): CLI بمدخلٍ ناقصٍ (فحوصٌ NOT_RUN) يخرجُ 2 «غيرُ مكتمل» لا 0', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'w11n-'));
+  try {
+    const p = join(dir, 'interop.json');
+    writeFileSync(p, JSON.stringify(interop()));
+    const r = spawnSync(process.execPath, [checker, '--interop', p], { encoding: 'utf8' });
+    // بلا تقريرٍ عاديٍّ يفشلُ W-R4 (1)، وفي غيرِ ذلك NOT_RUN ⇒ 2؛ في الحالَين ليسَ 0.
+    assert.notEqual(r.status, 0);
+    const s2 = join(dir, 'standard.json');
+    const e2 = join(dir, 'elevated.json');
+    writeFileSync(s2, JSON.stringify(qual(false)));
+    writeFileSync(e2, JSON.stringify(qual(true)));
+    const r2 = spawnSync(process.execPath, [checker, '--standard', s2, '--elevated', e2], { encoding: 'utf8' });
+    assert.equal(r2.status, 2, r2.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

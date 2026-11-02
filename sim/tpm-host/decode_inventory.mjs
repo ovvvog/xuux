@@ -402,6 +402,10 @@ export function analyzeInventory(doc) {
     return report;
   }
   report.schemaOk = errors.length === 0;
+  // WL-514 (B-24): الوسمُ يُشتقُّ من حقلٍ يكتبُه الجردُ عن نفسِه؛ لا شيءَ في الملفِّ يُثبتُ العتاد. فيُعلَنُ ذلك
+  // صراحةً: transportClaimSource=self-reported و hardwareVerified=false دائمًا، مهما كانَ transport.
+  report.transportClaimSource = 'self-reported';
+  report.hardwareVerified = false;
   report.evidenceClass = inv.transport === 'tbs' ? 'hardware-tbs' : (typeof inv.transport === 'string' && inv.transport.startsWith('simulator') ? 'simulator-not-hardware' : 'unknown-transport');
 
   const byId = new Map();
