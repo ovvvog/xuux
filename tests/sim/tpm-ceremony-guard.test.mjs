@@ -359,6 +359,22 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     'src/root-of-trust/state-manifest.mts': '46a04a169908dd7229c609c442b96f3bdf415367',
     'src/root-of-trust/command-ledger.mts': '0b5875fbcfd1b4300d20166ac34c3dbc9940a04f',
   }));
+  // قرارُ المالكِ (2026-11-03 — «WL-516 — استعادةُ السيطرةِ على الحالةِ…»، الجزءُ الثالث:
+  // «يمنحُكَ هذا التكليفُ إذنًا صريحًا بفحصِ وإصلاحِ `LIVE-66` داخلَ المسارِ المحميِّ، ضمنَ
+  // الحدودِ»): استثناءٌ مسمّى مؤرَّخٌ **بملفٍّ واحدٍ** هو موضعُ `LIVE-66` بعينِه — `#fsyncDir`
+  // في `src/root-of-trust/halt-switch.mts` كانَ يلفُّ مزامنةَ المجلّدِ بـ`catch {}` فيبتلعُ
+  // `EIO` فيُعَدُّ تبديلُ مفتاحِ الإيقافِ مكتوباً واسمُه غيرُ مضمونِ الدوام (مدخلةُ `WL-516`).
+  // الإصلاحُ بأقلِّ تغييرٍ آمن: استعمالُ المصدرِ الواحدِ `fsyncDirectoryOrFail` (‏`LIVE-65`)
+  // مكانَ الابتلاعِ، بلا مساسٍ لسلطةِ الأمرِ الملكيِّ ولا التواقيعِ ولا هويةِ المالكِ ولا
+  // العتبةِ السياديةِ ولا طريقةِ تخويلِ الإيقافِ والاستئناف. **وهذا الاستثناءُ لا يُضعِفُ
+  // شيئًا آخرَ:** بقيةُ `src/root-of-trust` و`src/production` والملفاتُ المسماةُ وإغلاقُ
+  // تبعياتِ الإقلاعِ ومدخلةُ `R3-A-01` محميةٌ كما كانتْ، ولا مساسَ لـ`SUPPORTED_FRESHNESS_BACKENDS`.
+  // والفرقُ معروضٌ بعينِهِ في `PR` الدفعةِ، وتغييرُهُ خاضعٌ لكلِّ ما عداه (مراجعةُ `PR`
+  // المستقلّة، وCI). **والاستثناءُ مربوطٌ بالبصمةِ المعتمدةِ لا بالمسارِ وحدَه:** أيُّ تعديلٍ
+  // لاحقٍ — ولو سطرًا — يُخرجُ بصمتَهُ عن هذه فيعودُ محميًّا.
+  const WL516_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/root-of-trust/halt-switch.mts': 'b47060cda7ce65c7b1df24c95718dca1ac5c6eb6',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -404,6 +420,7 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   // إلى بصمةٍ سابقةٍ رفضٌ لا قبولٌ)، والملفاتُ التي لأحدها وحدَه إذنٌ تبقى على بصمتِه.
   const ownerAuthorizedBlob = (f) => {
     const expected =
+      WL516_OWNER_AUTHORIZED.get(f) ??
       WL515_OWNER_AUTHORIZED.get(f) ??
       WL493_OWNER_AUTHORIZED.get(f) ??
       WL492_OWNER_AUTHORIZED.get(f) ??
