@@ -8,15 +8,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { generateKeyPairSync, createHash } from 'node:crypto';
-import {
+import fs, {
   appendFileSync,
   copyFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
+import { constants as osConstants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import {
@@ -955,3 +957,355 @@ test(
     );
   },
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `LIVE-66` — مزامنةُ مجلّدِ مفتاحِ الإيقافِ تفشلُ مغلقةً: لا يُعَدُّ الإيقافُ ولا
+// الاستئنافُ دائمَينِ قبلَ تحقُّقِ المتانةِ (المصدرُ الموحّدُ `fsyncDirectoryOrFail`
+// من `commit-barrier.mjs`، مكانَ `catch {}` الذي كان يبتلعُ `EIO`).
+//
+// حقنُ العطلِ بلا خطّافٍ في الإنتاج: تُستبدَلُ `openSync`/`fsyncSync`/`closeSync`/
+// `renameSync` في `node:fs` ثمَّ `syncBuiltinESMExports()` فتراها الاستيراداتُ المسمّاةُ
+// في الوحداتِ المصرَّفة. القاعدةُ `{ op, dir, code }`: لا تُصيبُ إلّا فتحَ/مزامنةَ/إغلاقَ
+// المجلّدِ (`dir: true`) — أي مسارَ `#fsyncDir` بعينِه، لا كتابةَ الملفِّ ولا قراءتَه.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * @typedef {Object} Live66Event أثرُ نداءٍ في `node:fs` مسجَّلٌ للحقنِ والقياسِ.
+ * @property {string} op العمليةُ (open/fsync/close/rename)
+ * @property {string | null} [path] مسارُ الهدفِ إن عُرِفَ
+ * @property {boolean} dir هل الهدفُ مجلّدٌ
+ * @property {string} [from] مصدرُ الترقيةِ (rename)
+ * @property {string} [to] هدفُ الترقيةِ (rename)
+ *
+ * @typedef {Object} Live66Rule قاعدةُ حقنِ عطلٍ محصورةٍ بنوعِ العمليةِ والهدفِ.
+ * @property {string} op العمليةُ المُستهدَفةُ
+ * @property {boolean} dir هل يستهدفُ مجلّداً
+ * @property {string} code رمزُ الخطأِ المحقونِ
+ * @property {() => boolean} [when] تقييدٌ إضافيٌّ للتسليحِ
+ * @property {number} hits عددُ مرّاتِ الإصابةِ
+ */
+
+/**
+ * خطأٌ بشكلِ أخطاءِ `node:fs` (‏`code` و`errno` و`syscall`).
+ * @param {string} code - رمزُ الخطأِ
+ * @param {string} syscall - العمليةُ
+ * @returns {Error & { code: string, errno: number, syscall: string }} الخطأُ
+ */
+function live66ErrnoError(code, syscall) {
+  const errno = /** @type {Record<string, number>} */ (osConstants.errno)[code];
+  return Object.assign(new Error(`${code}: محقونٌ (LIVE-66), ${syscall}`), {
+    code,
+    errno: typeof errno === 'number' ? -errno : -1,
+    syscall,
+  });
+}
+
+/**
+ * حاقنُ أعطالِ مزامنةِ المجلّدِ في `node:fs` — محصورٌ بالمجلّدِ لا بالملفّ.
+ * @returns {{events: Live66Event[], fail(rule: Omit<Live66Rule, 'hits'>): Live66Rule, restore(): void}} الحاقنُ
+ */
+function live66Faults() {
+  const original = {
+    openSync: fs.openSync,
+    fsyncSync: fs.fsyncSync,
+    closeSync: fs.closeSync,
+    renameSync: fs.renameSync,
+  };
+  const paths = new Map();
+  /** @type {Live66Rule[]} */
+  const rules = [];
+  /** @type {Live66Event[]} */
+  const events = [];
+  /**
+   * يسجّلُ النداءَ ويُصيبُه بالقواعدِ المطابقةِ.
+   * @param {string} op - العمليةُ
+   * @param {number | null} fd - المقبضُ إن وُجدَ
+   * @param {string | null} path - المسارُ إن عُرِفَ
+   */
+  const fire = (op, fd, path) => {
+    let dir;
+    try {
+      dir = fd !== null ? fs.fstatSync(fd).isDirectory() : fs.statSync(String(path)).isDirectory();
+    } catch {
+      dir = false;
+    }
+    events.push({ op, path: path ?? paths.get(fd) ?? null, dir });
+    for (const rule of rules) {
+      if (rule.op !== op || rule.dir !== dir) continue;
+      if (rule.when && !rule.when()) continue;
+      rule.hits += 1;
+      throw live66ErrnoError(rule.code, op);
+    }
+  };
+  fs.openSync = /** @type {typeof fs.openSync} */ (
+    function openSync(path, ...rest) {
+      fire('open', null, String(path));
+      const fd = original.openSync.call(this, path, ...rest);
+      paths.set(fd, String(path));
+      return fd;
+    }
+  );
+  fs.fsyncSync = /** @type {typeof fs.fsyncSync} */ (
+    function fsyncSync(fd) {
+      fire('fsync', fd, paths.get(fd) ?? null);
+      return original.fsyncSync.call(this, fd);
+    }
+  );
+  fs.closeSync = /** @type {typeof fs.closeSync} */ (
+    function closeSync(fd) {
+      const path = paths.get(fd) ?? null;
+      const result = original.closeSync.call(this, fd);
+      paths.delete(fd);
+      fire('close', null, path);
+      return result;
+    }
+  );
+  fs.renameSync = /** @type {typeof fs.renameSync} */ (
+    function renameSync(from, to) {
+      const result = original.renameSync.call(this, from, to);
+      events.push({ op: 'rename', from: String(from), to: String(to), dir: false });
+      return result;
+    }
+  );
+  syncBuiltinESMExports();
+  return {
+    events,
+    fail(rule) {
+      const full = { ...rule, hits: 0 };
+      rules.push(full);
+      return full;
+    },
+    restore() {
+      Object.assign(fs, original);
+      syncBuiltinESMExports();
+    },
+  };
+}
+
+/**
+ * يمسكُ خطأً متزامناً (‏`assert.throws` لا يعيدُ الخطأَ في node:assert).
+ * @param {() => void} fn - النداءُ المُتوقَّعُ رميُهُ
+ * @returns {Error & { code: string }} الخطأُ المرميُّ
+ */
+function live66Thrown(fn) {
+  try {
+    fn();
+  } catch (/** @type {any} */ error) {
+    return error;
+  }
+  throw new Error('لم يُرفَعْ خطأ (LIVE-66)');
+}
+
+/**
+ * بيئةُ `LIVE-66`: مجلّدٌ مؤقّتٌ وملكٌ ومفتاحُ إيقافٍ بمزامنةٍ مفعّلةٍ وسجلٌّ مُسجِّل.
+ * @typedef {Object} Live66Context
+ * @property {string} dir المجلّدُ المؤقّتُ
+ * @property {string} file مسارُ التوجيهِ
+ * @property {import('../../src/root-of-trust/index.mjs').KingIdentity} king الملكُ
+ * @property {Array<{type: string}>} logEvents أحداثُ السجلِّ
+ * @property {(options?: Record<string, unknown>) => HaltSwitch} make صانعُ المفتاحِ
+ */
+
+/**
+ * @returns {Live66Context} البيئةُ
+ */
+function live66Setup() {
+  const dir = registerTmpRoot(mkdtempSync(join(tmpdir(), 'live66-')));
+  const file = join(dir, 'state', 'halt.json');
+  const king = new KingIdentity();
+  /** @type {Array<{type: string}>} */
+  const logEvents = [];
+  const log = {
+    append: (
+      /** @type {string} */ type,
+      /** @type {unknown} */ _actor,
+      /** @type {unknown} */ _data,
+    ) => {
+      logEvents.push({ type });
+    },
+  };
+  const make = (options = {}) =>
+    new HaltSwitch(file, king, { fsync: true, allowUnsignedTestHalt: true, log, ...options });
+  return { dir, file, king, logEvents, make };
+}
+
+test('LIVE-66/1: النجاح — الملفُّ المؤقّتُ يُزامَنُ ويُرقّى قبلَ مزامنةِ المجلّدِ، وكلُّ ذلك قبلَ الإقرارِ بالإصدار', () => {
+  const ctx = live66Setup();
+  const faults = live66Faults();
+  try {
+    const halt = ctx.make();
+    const directive = halt.halt('إيقافٌ ناجحٌ (LIVE-66/1)');
+    assert.equal(directive.state, 'halted');
+    assert.equal(directive.epoch, 1);
+    assert.equal(halt.read().state, 'halted');
+    assert.equal(halt.read().problem, undefined);
+    // الإقرارُ بالإصدارِ في السجلِّ وقعَ بعدَ كلِّ الكتابةِ والمزامنةِ.
+    assert.ok(ctx.logEvents.some((e) => e.type === 'halt.issued'));
+    const seq = faults.events;
+    const dirSyncs = seq.filter((e) => e.op === 'fsync' && e.dir);
+    // مِلءُ العهدِ ونشرُ التوجيهِ كتابتانِ ذرّيّتانِ؛ التاريخُ إلحاقٌ بلا مزامنةِ مجلّد.
+    assert.equal(dirSyncs.length, 2, 'مزامنتا مجلّدٍ: العهدُ والتوجيه');
+    for (const sync of dirSyncs) {
+      const at = seq.indexOf(sync);
+      const fileSynced = seq
+        .slice(0, at)
+        .some((e) => e.op === 'fsync' && !e.dir && String(e.path).includes('.writing-'));
+      assert.ok(fileSynced, 'الملفُّ المؤقّتُ مُزامَنٌ قبلَ مزامنةِ مجلّدِه');
+      const promoted = seq.slice(0, at).some((e) => e.op === 'rename');
+      assert.ok(promoted, 'الترقيةُ (rename) قبلَ مزامنةِ المجلّد');
+    }
+    // والحدثُ الأوّلُ في كلِّ كتابةٍ ذرّيةٍ هو فتحُ الملفِّ المؤقّتِ لا المجلّد.
+    const first = seq[0];
+    assert.ok(first, 'تسلسلُ الأحداثِ غيرُ فارغٍ');
+    assert.equal(first.op, 'open');
+    assert.equal(first.dir, false);
+  } finally {
+    faults.restore();
+  }
+});
+
+test('LIVE-66/2: EIO في مزامنةِ المجلّدِ يُسقِطُ الإيقافَ — لا توجيهَ ولا إقرار، والحالةُ مغلقةٌ بعده', () => {
+  const ctx = live66Setup();
+  const faults = live66Faults();
+  try {
+    faults.fail({ op: 'fsync', dir: true, code: 'EIO' });
+    const halt = ctx.make();
+    const error = live66Thrown(() => halt.halt('إيقافٌ يفشلُ (LIVE-66/2)'));
+    assert.equal(error.code, 'EIO');
+    // لم يُنشَرْ توجيهٌ ولم يُقَرْ بالإصدار — والفشلُ مرفوعٌ لا مبتلَع.
+    assert.equal(existsSync(ctx.file), false, 'لا توجيهَ منشوراً');
+    assert.ok(!ctx.logEvents.some((e) => e.type === 'halt.issued'), 'لا إقرارَ بالإصدار');
+    // القراءةُ بعدَ الفشلِ مغلقة: العهدُ مرفوعٌ بلا توجيهٍ ⇒ HALT_DIRECTIVE_MISSING.
+    const reading = halt.read();
+    assert.equal(reading.state, 'halted');
+    assert.equal(reading.problem, 'HALT_DIRECTIVE_MISSING');
+  } finally {
+    faults.restore();
+  }
+});
+
+test('LIVE-66/3: أخطاءُ التخزينِ الحقيقيّةُ الأخرى (ENOSPC/EROFS/EDQUOT) مرفوعةٌ لا مبتلَعة، وكذلك رفضُ المزامنةِ (EINVAL/ENOTSUP/EPERM) — لا قائمةَ استثناء', () => {
+  for (const code of ['ENOSPC', 'EROFS', 'EDQUOT', 'EINVAL', 'ENOTSUP', 'EPERM']) {
+    const ctx = live66Setup();
+    const faults = live66Faults();
+    try {
+      faults.fail({ op: 'fsync', dir: true, code });
+      const halt = ctx.make();
+      const error = live66Thrown(() => halt.halt(`إيقافٌ يفشلُ (${code})`));
+      assert.equal(error.code, code);
+      assert.ok(
+        !ctx.logEvents.some((e) => e.type === 'halt.issued'),
+        `لا إقرارَ بالإصدار (${code})`,
+      );
+      assert.equal(halt.read().state, 'halted', `الحالةُ مغلقةٌ بعدَ ${code}`);
+    } finally {
+      faults.restore();
+    }
+  }
+});
+
+test('LIVE-66/4: فشلُ فتحِ المجلّدِ وفشلُ إغلاقِهِ مرفوعانِ — لا يُعَدُّ التبديلُ ناجحاً', () => {
+  const openFailure = live66Setup();
+  const openFaults = live66Faults();
+  try {
+    openFaults.fail({ op: 'open', dir: true, code: 'EACCES' });
+    const halt = openFailure.make();
+    const error = live66Thrown(() => halt.halt('فتحٌ يفشلُ (LIVE-66/4)'));
+    assert.equal(error.code, 'EACCES');
+    assert.ok(!openFailure.logEvents.some((e) => e.type === 'halt.issued'));
+  } finally {
+    openFaults.restore();
+  }
+  const closeFailure = live66Setup();
+  const closeFaults = live66Faults();
+  try {
+    // الإغلاقُ بعدَ نجاحِ المزامنة: خطأُ الإغلاقِ وحدهُ مرفوعٌ أيضاً.
+    closeFaults.fail({ op: 'close', dir: true, code: 'EIO' });
+    const halt = closeFailure.make();
+    const error = live66Thrown(() => halt.halt('إغلاقٌ يفشلُ (LIVE-66/4)'));
+    assert.equal(error.code, 'EIO');
+    assert.ok(!closeFailure.logEvents.some((e) => e.type === 'halt.issued'));
+  } finally {
+    closeFaults.restore();
+  }
+});
+
+test('LIVE-66/5: خطأُ المزامنةِ مُقدَّمٌ على خطأِ الإغلاقِ — لا يُبتلَعُ أيٌّ منهما', () => {
+  const ctx = live66Setup();
+  const faults = live66Faults();
+  try {
+    faults.fail({ op: 'fsync', dir: true, code: 'EIO' });
+    faults.fail({ op: 'close', dir: true, code: 'EBADF' });
+    const halt = ctx.make();
+    const error = live66Thrown(() => halt.halt('كلاهما يفشلُ (LIVE-66/5)'));
+    assert.equal(error.code, 'EIO', 'المزامنةُ هي المرفوعةُ لا الإغلاق');
+  } finally {
+    faults.restore();
+  }
+});
+
+test('LIVE-66/6: فشلُ الاستئنافِ لا يتركُ استئنافاً غيرَ دائم — الحالةُ تبقى مغلقةً بعدَ الفشلِ وبعدَ الإقلاعِ من جديد', () => {
+  const ctx = live66Setup();
+  const halt = ctx.make();
+  halt.halt('إيقافٌ ناجحٌ قبلَ فحصِ الاستئناف');
+  const faults = live66Faults();
+  try {
+    faults.fail({ op: 'fsync', dir: true, code: 'EIO' });
+    const error = live66Thrown(() => halt.resume('استئنافٌ يفشلُ (LIVE-66/6)'));
+    assert.equal(error.code, 'EIO');
+    assert.ok(!ctx.logEvents.some((e) => e.type === 'halt.resumed'), 'لا إقرارٍ بالاستئناف');
+    // الحالةُ بعدَ الفشلِ مغلقةٌ لا «تعمل»: عهدٌ مرفوعٌ فوقَ توجيهٍ قديمٍ ⇒ STALE_HALT_DIRECTIVE.
+    let reading = halt.read();
+    assert.equal(reading.state, 'halted');
+    assert.equal(reading.problem, 'STALE_HALT_DIRECTIVE');
+    // والإقلاعُ من جديدٍ لا يتبنّى الحالةَ القديمةَ على أنّها محفوظةٌ ناجحة.
+    const rebooted = ctx.make();
+    reading = rebooted.read();
+    assert.equal(reading.state, 'halted');
+    assert.equal(reading.problem, 'STALE_HALT_DIRECTIVE');
+  } finally {
+    faults.restore();
+  }
+  // وبعدَ زوالِ العطل: الاستئنافُ ينجحُ فعلًا — لا يعلقُ المسارُ ولا تتعطلُ القراءة.
+  // (العهدُ 3: الإيقافُ 1، والاستئنافُ الفاشلُ رفعَ العهدَ 2 بلا توجيهٍ، فجاءَ هذا في 3.)
+  const resumed = halt.resume('استئنافٌ بعدَ زوالِ العطل');
+  assert.equal(resumed.state, 'running');
+  assert.equal(resumed.epoch, 3);
+  assert.equal(halt.read().problem, undefined);
+  assert.equal(halt.read().state, 'running');
+  // ملاحظةٌ (دينٌ جديدٌ `LIVE-67`، سلوكٌ مسبقٌ لا يصنعهُ هذا الإصلاح): فجوةُ تسلسلِ
+  // العهدِ (1 ثمّ 3) تجعلُ `verifyHistory` يرفضُ اتصالَ التاريخِ إلى الأبدِ — وهي متاحةٌ
+  // بلا حقنِ عطلٍ عبرَ انهيارٍ بينَ رفعِ العهدِ ونشرِ التوجيهِ (قيست تجريبيًّا). القراءةُ
+  // والتنفيذُ سليمانِ، والتاريخُ المُلحَقُ يشهدُ التوجيهَ الأخير، لكنّ شاهدَ التماثُلِ
+  // يبقى مكسوراً. مسجَّلٌ دينًا مستقلًّا: إصلاحُهُ يمسُّ صيغةَ العهدِ (سطحٌ دستوريٌّ)
+  // ولا يُتَّخذُ في دفعةِ `LIVE-66`.
+});
+
+test('LIVE-66/7: فشلُ المزامنةِ لا يغيّرُ صلاحياتِ الإيقافِ والاستئنافِ — الرفضُ السياديُّ أسبقُ من التخزين', () => {
+  const ctx = live66Setup();
+  const faults = live66Faults();
+  try {
+    faults.fail({ op: 'fsync', dir: true, code: 'EIO' });
+    // القارئُ لا يكتبُ أصلًا — الرفضُ قبلَ أيِّ مساسٍ بالتخزين.
+    const reader = ctx.make({ readOnly: true, allowUnsignedTestHalt: undefined });
+    assert.equal(live66Thrown(() => reader.halt('x')).code, 'HALT_READ_ONLY');
+    // وبلا مُحقِّقٍ أوامرَ ولا تصريحِ اختبارٍ: الرفضُ المسمّى لا خطأُ القرص.
+    const unsigned = new HaltSwitch(ctx.file, ctx.king, { fsync: true });
+    assert.equal(live66Thrown(() => unsigned.halt('x')).code, 'HALT_ROYAL_COMMAND_REQUIRED');
+    // ومتحقّقٌ بلا قدرةِ توقيعٍ (عقدةٌ) لا يُصدرُ توجيهاً.
+    const nodeOnly = new HaltSwitch(
+      ctx.file,
+      { id: 'node', verify: () => true },
+      {
+        fsync: true,
+        allowUnsignedTestHalt: true,
+      },
+    );
+    assert.equal(live66Thrown(() => nodeOnly.halt('x')).code, 'HALT_SIGNER_REQUIRED');
+    assert.equal(existsSync(ctx.file), false, 'لم تُكتَبْ أيُّ كتابةٍ بعدَ الرفضِ');
+  } finally {
+    faults.restore();
+  }
+});

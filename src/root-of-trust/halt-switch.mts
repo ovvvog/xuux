@@ -64,7 +64,7 @@ import {
   verify as verifySignature,
 } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { beforeDurableWrite } from './commit-barrier.mjs';
+import { beforeDurableWrite, fsyncDirectoryOrFail } from './commit-barrier.mjs';
 import { fingerprint } from './identity.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import { isWellFormedRoyalCommandBody, trustedRoyalVerifierFingerprint } from './royal-command.mjs';
@@ -1744,19 +1744,18 @@ export class HaltSwitch implements HaltGuard {
 
   /**
    * يُزامن مجلداً كي يصمد اسمُ الملف نفسه لانقطاع الطاقة، لا محتواه وحده.
+   * **يفشل مغلقاً (`LIVE-66`)**: كان الالتفافُ بـ`catch {}` («بعضُ الأنظمةِ لا
+   * تُزامِنُ مجلداً») يبتلعُ `EIO`/`ENOSPC`/`EROFS` فيُعَدُّ تبديلُ مفتاحِ الإيقافِ
+   * (‏`#writeAtomic`) مكتوباً واسمُه غيرُ مضمونِ الدوام — والمسارُ هنا دستوريٌّ: زرُّ
+   * الإيقافِ والسيادة. الآن يُستعمَلُ المصدرُ الواحدُ `fsyncDirectoryOrFail`
+   * (‏`commit-barrier.mjs`، `LIVE-65`) الذي يرفعُ كلَّ خطأِ فتحٍ أو مزامنةٍ أو إغلاق،
+   * فلا يُعَدُّ الإيقافُ ولا الاستئنافُ دائماً قبلَ تحقُّقِ المتانةِ، وترتيبُ الكتابةِ
+   * (‏مؤقتٌ ثمَّ `fsync` ثمَّ `rename` ثمَّ مزامنةُ المجلد) بلا تغيير.
    * @param path - مسار المجلد
    */
   #fsyncDir(path: string): void {
     if (!this.#fsync) return;
-    let fd: number | null = null;
-    try {
-      fd = openSync(path, 'r');
-      fsyncSync(fd);
-    } catch {
-      // بعض الأنظمة لا تسمح بمزامنة مجلد؛ يبقى المحتوى مُزامَناً على كل حال.
-    } finally {
-      if (fd !== null) closeSync(fd);
-    }
+    fsyncDirectoryOrFail(path);
   }
 
   /**
