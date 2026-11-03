@@ -18,7 +18,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import {
+import fs, {
   appendFileSync,
   cpSync,
   existsSync,
@@ -28,8 +28,9 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { syncBuiltinESMExports } from 'node:module';
+import { constants as osConstants, tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import test, { describe } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -801,6 +802,394 @@ describe('L — القفلُ والختمُ والشاهد (WL-326: LOG_ALREADY_
       } finally {
         ctx.cleanup();
       }
+    } finally {
+      ws.cleanup();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `LIVE-65` (‏`D3` على خطأِ القرص): مزامنةُ المجلّدِ لا تُبتلَع، ولا `ACK` بعدَ فشلِها.
+//
+// حقنُ العطلِ بلا خطّافٍ في الإنتاج: تُستبدَلُ `openSync`/`fsyncSync`/`closeSync` في `node:fs`
+// ثمَّ `syncBuiltinESMExports()` فتراها الاستيراداتُ المسمّاةُ في الوحداتِ المصرَّفة. يُسجَّلُ لكلِّ
+// مقبضٍ مسارُه، فيُحقَنُ الخطأُ على مجلّدٍ بعينِه (‏أو ملفٍّ بعينِه) بعدَ مرحلةٍ بعينِها. والمواضعُ:
+//   S1 `syncDir` في `commit-barrier.mts` (‏فتحُ سجلِّ التراجعِ، واسترجاعُ `B2`)
+//   S2 `fsyncDirectory` في `state-manifest.mts` (‏ترقيةُ البيانِ في `S5`)
+//   S3 `#fsyncDir` في `command-ledger.mts` (‏نشرُ اسمِ الحجزِ في `begin`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** خطأٌ بشكلِ أخطاءِ `node:fs` (‏`code` و`errno` و`syscall`). */
+function errnoError(code, syscall) {
+  const errno = osConstants.errno[code];
+  return Object.assign(new Error(`${code}: محقونٌ (LIVE-65), ${syscall}`), {
+    code,
+    errno: typeof errno === 'number' ? -errno : -1,
+    syscall,
+  });
+}
+
+/**
+ * حاقنُ أعطالٍ في `node:fs`. القاعدةُ `{ op, dir, match, code, when }`: `op` ∈ open|fsync|close،
+ * و`dir` نوعُ الهدف، و`match(path, stack)` يحصرُه، و`when()` يُسلِّحُه.
+ * @returns {object} الحاقن
+ */
+function fsFaults() {
+  const original = { openSync: fs.openSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync };
+  const paths = new Map();
+  const rules = [];
+  const events = [];
+  const fire = (op, fd, path) => {
+    let isDir;
+    try {
+      isDir = fd !== null ? fs.fstatSync(fd).isDirectory() : fs.statSync(path).isDirectory();
+    } catch {
+      isDir = false;
+    }
+    const stack = new Error().stack ?? '';
+    for (const rule of rules) {
+      if (rule.op !== op || rule.dir !== isDir) continue;
+      if (rule.when && !rule.when()) continue;
+      if (rule.match && !rule.match(path, stack)) continue;
+      rule.hits += 1;
+      events.push({ op, path, isDir, injected: rule.code });
+      throw errnoError(rule.code, op);
+    }
+    events.push({ op, path, isDir, injected: null });
+  };
+  fs.openSync = function openSync(path, ...rest) {
+    if (rules.some((r) => r.op === 'open')) fire('open', null, resolve(String(path)));
+    const fd = original.openSync.call(this, path, ...rest);
+    paths.set(fd, resolve(String(path)));
+    return fd;
+  };
+  fs.fsyncSync = function fsyncSync(fd) {
+    fire('fsync', fd, paths.get(fd) ?? null);
+    return original.fsyncSync.call(this, fd);
+  };
+  fs.closeSync = function closeSync(fd) {
+    const path = paths.get(fd) ?? null;
+    paths.delete(fd);
+    const result = original.closeSync.call(this, fd);
+    if (rules.some((r) => r.op === 'close')) fire('close', null, path);
+    return result;
+  };
+  syncBuiltinESMExports();
+  return {
+    events,
+    fail(rule) {
+      const full = { hits: 0, ...rule };
+      rules.push(full);
+      return full;
+    },
+    restore() {
+      Object.assign(fs, original);
+      syncBuiltinESMExports();
+    },
+  };
+}
+
+/**
+ * جذرٌ إنتاجيٌّ مُقلَعٌ وحاقنٌ ومتتبِّعُ مراحل؛ ثمَّ يُنفِّذُ `body` ويُنظِّف.
+ * @param {(ctx: object) => Promise<void>} body - الاختبار
+ */
+async function withFaultyRoot(body) {
+  const ws = workspace();
+  let faults = null;
+  let runtime = null;
+  try {
+    const keys = makeKeys();
+    const socket = new FileStateBoundSocket(ws.socketFile);
+    runtime = await bootRoot(ws.root, keys, socket, DURABLE);
+    await commitCommand(runtime, 'cmd-warm');
+    const trace = [];
+    const stage = { current: null };
+    runtime.commitBarrier.onStage = (name) => {
+      stage.current = name;
+      trace.push(name);
+    };
+    faults = fsFaults();
+    await body({ ws, keys, socket, runtime, trace, stage, faults });
+  } finally {
+    faults?.restore();
+    await runtime?.close().catch(() => {});
+    ws.cleanup();
+  }
+}
+
+/** المزامنةُ مفعّلةٌ كما في المدخلِ الإنتاجيّ (‏`src/production/entrypoint.mjs`: `fsync: true`). */
+const DURABLE = { fsync: true };
+
+/**
+ * الأمرُ ليس مُثبَّتاً: إمّا حالةٌ غيرُ `committed`، وإمّا رفضٌ مسمّىً للقراءة (‏دفترٌ أمامَ شاهدِه
+ * بعدَ ختمٍ لم يتمّ) — وكلاهما ليس إقراراً.
+ */
+function assertNotCommitted(runtime, id) {
+  let state;
+  try {
+    state = runtime.ledger.state(id);
+  } catch (error) {
+    assert.ok(typeof error.code === 'string' && error.code.length > 0, 'رفضٌ مسمّى');
+    return;
+  }
+  assert.notEqual(state, 'committed');
+}
+
+const manifestDir = (root) => resolve(dirname(stateManifestPath(root)));
+
+/**
+ * يحصرُ الحقنَ في موضعٍ واحدٍ من الثلاثة. الجذرُ هو مجلّدُ البيانِ أيضاً، فيُعزَلُ S1 بمكدّسِ
+ * `#openUndo` (‏ختمُ الترحيلِ في S2 يُزامِنُ المجلّدَ نفسَه قبلَ نداءِ `S2`)، ويُعزَلُ S2 بالمرحلة
+ * (‏ترقيةُ البيانِ بعدَ `S4`)، وS3 بمجلّدِ الحجوزات.
+ * @returns {{when?: Function, match: Function}} القاعدة
+ */
+function siteRule(site, ws, runtime, stage) {
+  if (site === 'S1') {
+    return { match: (p, stack) => p === resolve(ws.root) && stack.includes('openUndo') };
+  }
+  if (site === 'S2') {
+    return { when: () => stage.current === 'S4', match: (p) => p === manifestDir(ws.root) };
+  }
+  const claims = resolve(runtime.ledger.claimsDir);
+  return { match: (p) => p === claims };
+}
+
+describe('LIVE-65 — مزامنةُ المجلّدِ تفشلُ مغلقةً ولا ACK بعدَ فشلِها', () => {
+  test('النجاح: كلُّ مزامنةِ مجلّدٍ لازمةٍ تقعُ قبلَ ACK، والترتيبُ ملفٌّ ثمَّ مجلّدُه', async () => {
+    await withFaultyRoot(async ({ ws, runtime, trace, faults }) => {
+      const claims = resolve(runtime.ledger.claimsDir);
+      const root = resolve(ws.root);
+      runtime.commitBarrier.onStage = (name) => {
+        trace.push(name);
+        faults.events.push({ op: 'stage', path: name });
+      };
+      await commitCommand(runtime, 'cmd-ok');
+      assert.deepEqual(trace, ['S2', 'S3', 'S4', 'S5', 'ACK']);
+      assert.equal(runtime.ledger.state('cmd-ok'), 'committed');
+      const seq = faults.events;
+      const ack = seq.findIndex((e) => e.op === 'stage' && e.path === 'ACK');
+      const dirSyncs = seq.map((e, i) => ({ ...e, i })).filter((e) => e.op === 'fsync' && e.isDir);
+      // S1: سجلُّ التراجعِ في الجذر — قبلَ S2.
+      const s2 = seq.findIndex((e) => e.op === 'stage' && e.path === 'S2');
+      assert.ok(
+        dirSyncs.some((e) => e.path === root && e.i < s2),
+        'S1 قبلَ S2',
+      );
+      // S3: مجلّدُ الحجوزات — بعدَ S2 وقبلَ ACK.
+      assert.ok(
+        dirSyncs.some((e) => e.path === claims && e.i > s2 && e.i < ack),
+        'S3 قبلَ ACK',
+      );
+      // S2: مجلّدُ البيانِ بعدَ S4 وقبلَ S5 (‏ترقيةُ البيان)، ومسبوقٌ بمزامنةِ ملفِّه المؤقّت.
+      const s4 = seq.findIndex((e) => e.op === 'stage' && e.path === 'S4');
+      const s5 = seq.findIndex((e) => e.op === 'stage' && e.path === 'S5');
+      const promoteDir = dirSyncs.find(
+        (e) => e.path === manifestDir(ws.root) && e.i > s4 && e.i < s5,
+      );
+      assert.ok(promoteDir, 'مزامنةُ مجلّدِ البيانِ بينَ S4 وS5');
+      const promoteFile = seq.findIndex(
+        (e, i) =>
+          e.op === 'fsync' &&
+          !e.isDir &&
+          i > s4 &&
+          i < promoteDir.i &&
+          String(e.path).includes('root-of-trust.manifest.json.tmp-'),
+      );
+      assert.ok(promoteFile > s4, 'الملفُّ يُزامَنُ قبلَ مجلّدِه');
+      assert.ok(ack > promoteDir.i, 'ACK بعدَ مزامنةِ المجلّد');
+      assert.equal(
+        seq.filter((e) => e.injected !== null && e.injected !== undefined).length,
+        0,
+        'لا حقنَ في مسارِ النجاح',
+      );
+    });
+  });
+
+  test('S1 commit-barrier: EIO في مزامنةِ الجذرِ عندَ فتحِ سجلِّ التراجع ⇒ يُرفَعُ ولا S2 ولا ACK', async () => {
+    await withFaultyRoot(async ({ ws, runtime, trace, stage, faults }) => {
+      const rule = faults.fail({
+        op: 'fsync',
+        dir: true,
+        code: 'EIO',
+        ...siteRule('S1', ws, runtime, stage),
+      });
+      const error = await rejection(() => commitCommand(runtime, 'cmd-s1'));
+      assert.equal(error.code, 'EIO');
+      assert.ok(rule.hits >= 1, 'الحقنُ وقع');
+      assert.ok(!trace.includes('S2'), 'لا ترحيلَ بلا سجلِّ تراجعٍ دائم');
+      assert.ok(!trace.includes('ACK'));
+      assert.notEqual(runtime.ledger.state('cmd-s1'), 'committed');
+    });
+  });
+
+  test('S3 command-ledger: EIO في مزامنةِ مجلّدِ الحجوزاتِ بعدَ نشرِ الاسم ⇒ begin يُرفَعُ ولا ACK', async () => {
+    await withFaultyRoot(async ({ runtime, trace, faults }) => {
+      const claims = resolve(runtime.ledger.claimsDir);
+      const rule = faults.fail({ op: 'fsync', dir: true, code: 'EIO', match: (p) => p === claims });
+      let begun = null;
+      const error = await rejection(() =>
+        runtime.ledger.transactAsync('crown.command', async () => {
+          begun = runtime.ledger.begin({ id: 'cmd-s3' });
+          await runtime.ledger.commitSigned({ id: 'cmd-s3' });
+        }),
+      );
+      assert.equal(error.code, 'EIO');
+      assert.equal(rule.hits, 1);
+      assert.equal(begun, null, 'begin لم يُقِرَّ بالحجز (لم يُرجِعْ رقمَ الحاجز)');
+      assert.ok(trace.includes('S3') && !trace.includes('S4') && !trace.includes('ACK'));
+      assert.notEqual(runtime.ledger.state('cmd-s3'), 'committed');
+    });
+  });
+
+  test('S2 state-manifest: EIO في مزامنةِ مجلّدِ البيانِ عندَ الترقية ⇒ يُسيَّجُ ولا S5 ولا ACK', async () => {
+    await withFaultyRoot(async ({ ws, runtime, trace, stage, faults }) => {
+      const rule = faults.fail({
+        op: 'fsync',
+        dir: true,
+        code: 'EIO',
+        when: () => stage.current === 'S4',
+        match: (p) => p === manifestDir(ws.root),
+      });
+      const error = await rejection(() => commitCommand(runtime, 'cmd-s2'));
+      assert.equal(error.code, 'EIO');
+      assert.equal(rule.hits, 1);
+      assert.ok(trace.includes('S4') && !trace.includes('S5') && !trace.includes('ACK'));
+      // الحاجزُ مُسيَّج: لا يُبنى فوقَ حالٍ لم يُضمَنْ دوامُها.
+      const next = await rejection(() => commitCommand(runtime, 'cmd-after'));
+      assert.equal(next.code, 'COMMIT_BARRIER_FENCED');
+    });
+  });
+
+  test('فشلُ مزامنةِ الملفّ (‏لا المجلّد) في البيانِ وفي الحجز ⇒ لا ACK', async () => {
+    for (const target of ['root-of-trust.manifest.json.tmp-', '.claiming-']) {
+      await withFaultyRoot(async ({ runtime, trace, stage, faults }) => {
+        const rule = faults.fail({
+          op: 'fsync',
+          dir: false,
+          code: 'EIO',
+          when: () => target === '.claiming-' || stage.current === 'S4',
+          match: (p) => String(p).includes(target),
+        });
+        const error = await rejection(() => commitCommand(runtime, `cmd-file`));
+        assert.equal(error.code, 'EIO', target);
+        assert.equal(rule.hits, 1, target);
+        assert.ok(!trace.includes('ACK'), target);
+        assertNotCommitted(runtime, 'cmd-file');
+      });
+    }
+  });
+
+  test('أخطاءُ تخزينٍ أخرى في المواضعِ الثلاثة (ENOSPC/EROFS/EDQUOT/EBADF) لا تصيرُ نجاحاً', async () => {
+    for (const code of ['ENOSPC', 'EROFS', 'EDQUOT', 'EBADF']) {
+      for (const site of ['S1', 'S2', 'S3']) {
+        await withFaultyRoot(async ({ ws, runtime, trace, stage, faults }) => {
+          const rule = faults.fail({
+            op: 'fsync',
+            dir: true,
+            code,
+            ...siteRule(site, ws, runtime, stage),
+          });
+          const error = await rejection(() => commitCommand(runtime, 'cmd-x'));
+          assert.equal(error.code, code, `${site}/${code}`);
+          assert.ok(rule.hits >= 1, `${site}/${code}`);
+          assert.ok(!trace.includes('ACK'), `${site}/${code}`);
+        });
+      }
+    }
+  });
+
+  test('لا قائمةَ استثناء: EINVAL/ENOTSUP/EPERM/EISDIR («غيرُ مدعوم») تفشلُ مغلقةً أيضاً', async () => {
+    // قرارُ التصميم (‏`fsyncDirectoryOrFail`): لا منصّةَ مدعومةٌ يُثبَتُ فيها أنّ رفضَ مزامنةِ
+    // المجلّدِ «غيرُ مدعومٍ» لا «فشل» — فلا يُستثنى رمزٌ، وهذا الاختبارُ يُسقِطُ أيَّ استثناءٍ يُضاف.
+    for (const code of ['EINVAL', 'ENOTSUP', 'EPERM', 'EISDIR']) {
+      for (const site of ['S1', 'S2', 'S3']) {
+        await withFaultyRoot(async ({ ws, runtime, trace, stage, faults }) => {
+          faults.fail({
+            op: 'fsync',
+            dir: true,
+            code,
+            ...siteRule(site, ws, runtime, stage),
+          });
+          const error = await rejection(() => commitCommand(runtime, 'cmd-u'));
+          assert.equal(error.code, code, `${site}/${code}`);
+          assert.ok(!trace.includes('ACK'), `${site}/${code}`);
+        });
+      }
+    }
+  });
+
+  test('فشلُ فتحِ المجلّدِ أو إغلاقِه (‏خطأٌ مؤجَّل) يُرفَعُ كذلك ولا ACK', async () => {
+    for (const op of ['open', 'close']) {
+      await withFaultyRoot(async ({ runtime, trace, faults }) => {
+        const claims = resolve(runtime.ledger.claimsDir);
+        const rule = faults.fail({ op, dir: true, code: 'EIO', match: (p) => p === claims });
+        const error = await rejection(() => commitCommand(runtime, `cmd-${op}`));
+        assert.equal(error.code, 'EIO', op);
+        assert.ok(rule.hits >= 1, op);
+        assert.ok(!trace.includes('ACK'), op);
+      });
+    }
+  });
+
+  test('S1 في الاسترجاع (B2): EIO في مزامنةِ المجلّدِ لا يُعلَنُ استرجاعاً، والإقلاعُ السليمُ بعدَه B2', async () => {
+    const ws = workspace();
+    try {
+      const keys = makeKeys();
+      // حالٌ مُرحَّلةٌ بأثرٍ على القرص.
+      const runtime = await bootRoot(
+        ws.root,
+        keys,
+        new FileStateBoundSocket(ws.socketFile),
+        DURABLE,
+      );
+      await commitCommand(runtime, 'cmd-warm');
+      let current = null;
+      runtime.commitBarrier.onStage = (name) => {
+        current = name;
+      };
+      // EIO في مزامنةِ ملفِّ الدفترِ داخلَ S3 بعدَ أن لُمِسَ (‏كتابةٌ ممزّقة) ⇒ تسييجٌ و`staged` باقٍ.
+      const ledgerFile = resolve(runtime.ledger.file);
+      let faults = fsFaults();
+      faults.fail({
+        op: 'fsync',
+        dir: false,
+        code: 'EIO',
+        when: () => current === 'S2',
+        match: (p) => p === ledgerFile,
+      });
+      await rejection(() => commitCommand(runtime, 'cmd-staged'));
+      faults.restore();
+      await runtime.close().catch(() => {});
+      assert.ok(manifestBody(ws.root).staged, 'بقيَ staged');
+      // إقلاعٌ تفشلُ فيه مزامنةُ المجلّدِ داخلَ `rollbackStagedAsync` وحدَه.
+      faults = fsFaults();
+      const rule = faults.fail({
+        op: 'fsync',
+        dir: true,
+        code: 'EIO',
+        match: (_p, stack) => stack.includes('rollbackStagedAsync'),
+      });
+      let failedBoot;
+      try {
+        failedBoot = await rejection(() =>
+          bootRoot(ws.root, keys, new FileStateBoundSocket(ws.socketFile), DURABLE),
+        );
+      } finally {
+        faults.restore();
+      }
+      assert.ok(rule.hits >= 1, 'الحقنُ وقعَ في الاسترجاع');
+      assert.equal(failedBoot.code, 'EIO');
+      assert.ok(manifestBody(ws.root).staged, 'لم يُمحَ staged بعدَ استرجاعٍ غيرِ دائم');
+      const healthy = await bootRoot(
+        ws.root,
+        keys,
+        new FileStateBoundSocket(ws.socketFile),
+        DURABLE,
+      );
+      assert.equal(healthy.freshnessBoot, 'B2');
+      assert.notEqual(healthy.ledger.state('cmd-staged'), 'committed');
+      assert.equal(healthy.ledger.state('cmd-warm'), 'committed');
+      await healthy.close();
     } finally {
       ws.cleanup();
     }

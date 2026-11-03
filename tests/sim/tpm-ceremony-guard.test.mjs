@@ -344,6 +344,21 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     'src/root-of-trust/persistent-log.mts': 'c8358e1cf080f5172a5defb9c3ffc1bea4f88ae1',
     'src/root-of-trust/state-manifest.mts': 'ca11b2f342753a61fd6b30b8cc6459fd24c08cf5',
   }));
+  // قرارُ المالكِ (‏2026-11-03 — «التكليف التنفيذي — LIVE-65»: «أصلح المواضع الثلاثة، لا موضعًا واحدًا
+  // مع ترك البقية»، وهو إذنُ المسارِ المحميِّ الذي اشترطَه صفُّ `LIVE-65` في سجلِّ الديون): استثناءٌ
+  // مسمّى مؤرَّخٌ **بثلاثةِ ملفّاتٍ** هي مواضعُ `LIVE-65` بأعيانِها — مزامنةُ المجلّدِ تفشلُ مغلقةً
+  // (‏`fsyncDirectoryOrFail` في `commit-barrier.mts`، تستدعيها `state-manifest.mts` و`command-ledger.mts`)
+  // بدلَ `catch {}` الذي كانَ يبتلعُ `EIO` فيصدرُ `ACK` واسمُ الملفِّ غيرُ دائم (مدخلةُ `WL-515`).
+  // **وهذا الاستثناءُ لا يُضعِفُ شيئًا آخرَ:** بقيةُ `src/root-of-trust` (‏ومنها `halt-switch.mts` —
+  // `LIVE-66`) و`src/production` والملفاتُ المسماةُ وإغلاقُ تبعياتِ الإقلاعِ ومدخلةُ `R3-A-01` محميةٌ كما
+  // كانتْ، ولا مساسَ لـ`SUPPORTED_FRESHNESS_BACKENDS`. والفرقُ معروضٌ بعينِهِ في `PR` الدفعةِ، وتغييرُهُ
+  // خاضعٌ لكلِّ ما عداه (مراجعةُ `PR` المستقلّة، وCI). **والاستثناءُ مربوطٌ بالبصمةِ المعتمدةِ لا بالمسارِ
+  // وحدَهُ:** أيُّ تعديلٍ لاحقٍ — ولو سطرًا — يُخرجُ بصمتَهُ عن هذه فيعودُ محميًّا.
+  const WL515_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/root-of-trust/commit-barrier.mts': '05628d85ec8949be16e1cc74ce943b015f35bb7b',
+    'src/root-of-trust/state-manifest.mts': '46a04a169908dd7229c609c442b96f3bdf415367',
+    'src/root-of-trust/command-ledger.mts': '0b5875fbcfd1b4300d20166ac34c3dbc9940a04f',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -389,6 +404,7 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   // إلى بصمةٍ سابقةٍ رفضٌ لا قبولٌ)، والملفاتُ التي لأحدها وحدَه إذنٌ تبقى على بصمتِه.
   const ownerAuthorizedBlob = (f) => {
     const expected =
+      WL515_OWNER_AUTHORIZED.get(f) ??
       WL493_OWNER_AUTHORIZED.get(f) ??
       WL492_OWNER_AUTHORIZED.get(f) ??
       WL491_OWNER_AUTHORIZED.get(f) ??

@@ -59,6 +59,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
+import { fsyncDirectoryOrFail } from './commit-barrier.mjs';
 import { isProductionRuntime } from './production-boot.mjs';
 import {
   FNV_MANIFEST_SCHEMA_VERSION,
@@ -334,21 +335,14 @@ function writeAtomic(file: string, text: string, fsync: boolean): void {
 }
 
 /**
- * يُزامِنُ مجلّداً كي يدومَ الاسمُ نفسُه (‏إعادةُ تسميةٍ أو حذف) لا المحتوى وحدَه.
+ * يُزامِنُ مجلّداً كي يدومَ الاسمُ نفسُه (‏إعادةُ تسميةٍ أو حذف) لا المحتوى وحدَه. يفشلُ مغلقاً
+ * (‏`LIVE-65`): خطأُ المزامنةِ يُرفَعُ فلا يُختَمُ البيانُ ولا يُقَرُّ بالرفعِ واسمُه غيرُ دائم.
  * @param dir - المجلّد
  * @param fsync - هل المزامنةُ مفعّلة
  */
 function fsyncDirectory(dir: string, fsync: boolean): void {
   if (!fsync) return;
-  let fd: number | null = null;
-  try {
-    fd = openSync(dir, 'r');
-    fsyncSync(fd);
-  } catch {
-    /* بعضُ الأنظمةِ لا تُزامِنُ مجلّداً؛ المحتوى مُزامَنٌ على كلِّ حال */
-  } finally {
-    if (fd !== null) closeSync(fd);
-  }
+  fsyncDirectoryOrFail(dir);
 }
 
 /** إلحاقٌ كاملٌ لا جزئيٌّ صامتٌ — سطرُ دفترِ رفعٍ ناقصٌ يُقرأُ عبثاً بحقٍّ. */
