@@ -26,6 +26,7 @@ import fs, {
   readdirSync,
   readFileSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -35,6 +36,8 @@ import test, { describe } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  HALT_EPOCH_SUFFIX,
+  HALT_HISTORY_SUFFIX,
   HaltSwitch,
   InMemoryStateBoundFreshnessSocket,
   computeStateDigest,
@@ -1195,3 +1198,195 @@ describe('LIVE-65 — مزامنةُ المجلّدِ تفشلُ مغلقةً و
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `WL-522` — `LIVE-74` (‏N7) في المختبرِ وحدَه: العبثُ بحالةِ الإيقافِ وقتَ التشغيلِ على
+// الجذرِ الإنتاجيِّ الحقيقيِّ (‏بمقبسِ الاختبار). يثبّتُ اختبارانِ العيبَ القائم (‏الإيقافُ
+// الملكيُّ يُسيَّجُ و`assertOperational` يمرُّ)، ويقيسُ ثالثٌ **قراءةً مغلقةً مختبريّةً**
+// مُعرَّفةً هنا لا في `src/`: الحاجزُ مُسيَّجٌ، أو بصمةُ القرصِ ≠ بصمةِ البيانِ المختوم ⇒
+// `halted`، بلا أيِّ كتابة. **ليست سلوكًا إنتاجيًّا**: إدخالُها `HaltSwitch`/`crown` قرارُ
+// المالك (‏دلالةُ التحقّق)، والإصلاحُ يقلبُ تأكيداتِ التوصيفِ صراحةً.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** ملفُّ توجيهِ الإيقافِ في الجذر. */
+const haltFile = (root) => join(root, 'halt', 'directive.json');
+
+/** أسطرُ التاريخِ الخامُ بلا الفارغة. */
+const historyLines = (root) =>
+  readFileSync(haltFile(root) + HALT_HISTORY_SUFFIX, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0);
+
+/** يكتبُ أسطرَ التاريخِ كما هي. */
+const putHistory = (root, lines) =>
+  writeFileSync(haltFile(root) + HALT_HISTORY_SUFFIX, lines.map((line) => line + '\n').join(''));
+
+/**
+ * أربعةَ عشرَ عبثًا وقتَ التشغيلِ بملفّاتِ الإيقافِ ومجلّدِ العُقد — كاتبٌ أجنبيٌّ يملكُ القرص.
+ * @type {Record<string, (root: string) => void>}
+ */
+const LIVE74_TAMPERS = {
+  'history-empty': (root) => writeFileSync(haltFile(root) + HALT_HISTORY_SUFFIX, ''),
+  'history-delete': (root) => unlinkSync(haltFile(root) + HALT_HISTORY_SUFFIX),
+  'history-last-only': (root) => putHistory(root, historyLines(root).slice(-1)),
+  'history-prefix': (root) => putHistory(root, historyLines(root).slice(0, -1)),
+  'history-mid-delete': (root) => {
+    const lines = historyLines(root);
+    lines.splice(1, 1);
+    putHistory(root, lines);
+  },
+  'history-mid-corrupt': (root) => {
+    const lines = historyLines(root);
+    lines.splice(1, 0, '{x');
+    putHistory(root, lines);
+  },
+  'history-append-garbage': (root) => putHistory(root, [...historyLines(root), '{x']),
+  'history-duplicate-last': (root) => {
+    const lines = historyLines(root);
+    putHistory(root, [...lines, lines.at(-1)]);
+  },
+  'epoch-down': (root) => writeFileSync(haltFile(root) + HALT_EPOCH_SUFFIX, '1\n'),
+  'epoch-up': (root) => writeFileSync(haltFile(root) + HALT_EPOCH_SUFFIX, '99\n'),
+  'epoch-delete': (root) => unlinkSync(haltFile(root) + HALT_EPOCH_SUFFIX),
+  'directive-old': (root) => writeFileSync(haltFile(root), historyLines(root)[0] + '\n'),
+  'directive-delete': (root) => unlinkSync(haltFile(root)),
+  'node-foreign': (root) =>
+    writeFileSync(
+      join(root, 'halt', 'directive.json.nodes', 'rogue.json'),
+      JSON.stringify({ nodeId: 'rogue' }) + '\n',
+    ),
+};
+
+/** العبثُ الذي يمرُّ معه `assertOperational` اليومَ (‏مقيسٌ في `WL-522`). */
+const LIVE74_ASSERT_PASSES = [
+  'history-empty',
+  'history-delete',
+  'history-last-only',
+  'history-mid-delete',
+  'history-mid-corrupt',
+  'history-append-garbage',
+  'history-duplicate-last',
+  'epoch-down',
+  'epoch-delete',
+  'node-foreign',
+];
+
+/**
+ * القراءةُ المغلقةُ المختبريّة — **في الاختبارِ وحدَه**، لا تكتبُ شيئًا.
+ * @param {object} runtime - الجذر
+ * @param {string} root - جذرُ الحالة
+ * @returns {{state: string, why: string|null}} الحكم
+ */
+function labClosedRead(runtime, root) {
+  if (runtime.commitBarrier.fenced) return { state: 'halted', why: 'COMMIT_BARRIER_FENCED' };
+  const disk = computeStateDigest(productionStateLayout(root, join(root, 'anchors.jsonl')));
+  if (disk !== manifestBody(root).stateDigest)
+    return { state: 'halted', why: 'STATE_DIGEST_MISMATCH' };
+  return { state: runtime.haltSwitch.read().state, why: null };
+}
+
+/** إيقافٌ أو استئنافٌ بأمرٍ ملكيٍّ موقَّعٍ على العهدِ الحاضر. */
+async function royal(runtime, keys, operation) {
+  const epoch = runtime.haltSwitch.read().epoch;
+  await runtime.haltSwitch[`${operation}Async`](
+    operation,
+    royalCommand(keys, operation, operation, epoch),
+  );
+}
+
+/** جذرٌ مُقلِعٌ مرَّ بإيقافَين واستئنافَين ملكيّين — تاريخٌ من أربعةِ أسطر. */
+async function bootedWithHistory() {
+  const ws = workspace();
+  const keys = makeKeys();
+  const runtime = await bootRoot(ws.root, keys, new FileStateBoundSocket(ws.socketFile));
+  for (const operation of ['halt', 'resume', 'halt', 'resume'])
+    await royal(runtime, keys, operation);
+  return { ws, keys, runtime };
+}
+
+describe('WL-522/LIVE-74 — العبثُ وقتَ التشغيلِ وقراءةٌ مغلقةٌ مختبريّة (‏N7، مختبرًا لا إنتاجًا)', () => {
+  test('توصيف: بعدَ كلِّ عبثٍ من 14 يُسيَّجُ الإيقافُ الملكيّ، و`assertOperational` يمرُّ في 10 منها', async () => {
+    const passes = [];
+    for (const [name, tamper] of Object.entries(LIVE74_TAMPERS)) {
+      const { ws, keys, runtime } = await bootedWithHistory();
+      try {
+        assert.equal(labClosedRead(runtime, ws.root).why, null, `${name}: لا إنذارَ قبلَ العبث`);
+        tamper(ws.root);
+        if (thrownOrNull(() => runtime.haltSwitch.assertOperational()) === null) passes.push(name);
+        const halt = await rejection(() => royal(runtime, keys, 'halt'));
+        assert.equal(
+          halt.code,
+          'STATE_FOREIGN_WRITE_DETECTED',
+          `LIVE-74 مفتوح (${name}): الإيقافُ الملكيُّ يُسيَّجُ وقتَ التشغيل`,
+        );
+      } finally {
+        await runtime.close().catch(() => undefined);
+        ws.cleanup();
+      }
+    }
+    assert.deepEqual(
+      passes,
+      LIVE74_ASSERT_PASSES,
+      'LIVE-74 مفتوح: الحرمانُ من الإيقافِ حتّى الإقلاع',
+    );
+  });
+
+  test('مختبر: القراءةُ المغلقةُ تُعيدُ `halted` بعدَ كلِّ عبثٍ من 14 — قبلَ محاولةِ الإيقافِ وبعدَها، بلا كتابة', async () => {
+    for (const [name, tamper] of Object.entries(LIVE74_TAMPERS)) {
+      const { ws, keys, runtime } = await bootedWithHistory();
+      try {
+        tamper(ws.root);
+        const digestBefore = manifestBody(ws.root).stateDigest;
+        assert.deepEqual(
+          labClosedRead(runtime, ws.root),
+          { state: 'halted', why: 'STATE_DIGEST_MISMATCH' },
+          name,
+        );
+        await rejection(() => royal(runtime, keys, 'halt'));
+        assert.deepEqual(
+          labClosedRead(runtime, ws.root),
+          { state: 'halted', why: 'COMMIT_BARRIER_FENCED' },
+          name,
+        );
+        assert.equal(manifestBody(ws.root).stateDigest, digestBefore, `${name}: القراءةُ لا تكتب`);
+      } finally {
+        await runtime.close().catch(() => undefined);
+        ws.cleanup();
+      }
+    }
+  });
+
+  test('مختبر: لا إنذارَ كاذبًا في 50 إيقافًا/استئنافًا ملكيًّا و20 أمرَ دفترٍ مشروعًا', async () => {
+    const { ws, keys, runtime } = await bootedWithHistory();
+    try {
+      for (let index = 0; index < 50; index += 1) {
+        await royal(
+          runtime,
+          keys,
+          runtime.haltSwitch.read().state === 'halted' ? 'resume' : 'halt',
+        );
+        const verdict = labClosedRead(runtime, ws.root);
+        assert.equal(verdict.why, null);
+        assert.equal(verdict.state, runtime.haltSwitch.read().state);
+      }
+      if (runtime.haltSwitch.read().state === 'halted') await royal(runtime, keys, 'resume');
+      for (let index = 0; index < 20; index += 1) {
+        await commitCommand(runtime, `cmd-live74-${index}`);
+        assert.deepEqual(labClosedRead(runtime, ws.root), { state: 'running', why: null });
+      }
+    } finally {
+      await runtime.close();
+      ws.cleanup();
+    }
+  });
+});
+
+/** يُرجعُ الخطأَ المتزامنَ أو `null`. */
+function thrownOrNull(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  return null;
+}
