@@ -1309,3 +1309,113 @@ test('LIVE-66/7: فشلُ المزامنةِ لا يغيّرُ صلاحياتِ 
     faults.restore();
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `WL-521` — اختباراتُ توصيفٍ دائمةٌ لـ`LIVE-67`/`68`/`69`/`70`/`72` على `HaltSwitch`
+// الإنتاجيِّ نفسِه، بلا أيِّ تعديلٍ للمصدر. كانت أدلّتُها حزمةً خارجَ المستودع
+// (‏`WL-518`/`WL-519`) لا تُستعادُ من كلِّ بيئة؛ فهذه تُعيدُ إنتاجَها في CI.
+// **هي تثبيتٌ للعيبِ القائمِ لا إغلاقٌ له**: كلُّ تأكيدٍ هنا يصفُ السلوكَ المعيبَ
+// الحاليّ، والإصلاحُ الذي يُغلقُ الدَّينَ (‏بقرارِ المالكِ، لا قبلَه) يجبُ أن يقلبَ
+// التأكيدَ المعنيَّ صراحةً ويُحدِّثَ سجلَّ الديون — فلا يمرُّ إصلاحٌ صامت.
+// لا تغييرَ لقاعدةِ «+1» ولا لـ`verifyHistory` ولا لصيغةِ العهد (‏قراراتُ المالك 1 و2).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * يقرأ أسطرَ التاريخِ الخامَ بلا الأسطرِ الفارغة.
+ * @param {string} file - ملفُّ التوجيه
+ * @returns {string[]} الأسطر
+ */
+function rawHistoryLines(file) {
+  return readFileSync(file + HALT_HISTORY_SUFFIX, 'utf8')
+    .split('\n')
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * يكتبُ أسطرَ التاريخِ كما هي (عبثٌ وقتَ التشغيلِ يحاكي مهاجمًا على القرص).
+ * @param {string} file - ملفُّ التوجيه
+ * @param {string[]} lines - الأسطر
+ * @returns {void}
+ */
+function writeHistoryLines(file, lines) {
+  writeFileSync(file + HALT_HISTORY_SUFFIX, lines.map((line) => line + '\n').join(''));
+}
+
+test('WL-521/LIVE-67 توصيف: عهدٌ محروقٌ (انهيارٌ بعدَ رفعِ الأرضيةِ وقبلَ الإلحاق) يقطعُ التاريخَ إلى الأبد', () => {
+  const ctx = setup();
+  ctx.halt.halt('إيقافٌ أوّل');
+  // حالةُ القرصِ بعدَ `#writeEpoch(2)` ثمّ موتِ العمليّةِ قبلَ `appendLine`.
+  writeFileSync(ctx.file + HALT_EPOCH_SUFFIX, '2\n');
+  const reboot = new HaltSwitch(ctx.file, ctx.king, { fsync: false, allowUnsignedTestHalt: true });
+  const afterCrash = reboot.read();
+  // سليمٌ ويبقى: القراءةُ مغلقةٌ لأنّ التوجيهَ أقدمُ من الأرضية.
+  assert.equal(afterCrash.state, 'halted');
+  assert.equal(afterCrash.problem, 'STALE_HALT_DIRECTIVE');
+  assert.equal(reboot.verifyHistory().ok, true);
+  reboot.resume('استئنافٌ بعدَ الانهيار');
+  reboot.halt('إيقافٌ تالٍ');
+  // العيبُ القائم: العهدُ 2 لم يُنشَرْ قطُّ، فالتاريخُ 1 ثمّ 3 ثمّ 4.
+  assert.deepEqual(
+    reboot.history().map((directive) => directive.epoch),
+    [1, 3, 4],
+  );
+  const verdict = reboot.verifyHistory();
+  assert.equal(verdict.ok, false, 'LIVE-67 مفتوح: الإصلاحُ يقلبُ هذا التأكيدَ بقرارِ المالك');
+  assert.equal(verdict.problem, 'STALE_HALT_DIRECTIVE');
+  assert.equal(verdict.problemAt, 2);
+});
+
+test('WL-521/LIVE-68 توصيف: تفريغُ التاريخِ وقتَ التشغيلِ لا يُكشَف — `running` و`verifyHistory` سليمٌ بصفرِ توجيهات', () => {
+  const ctx = setup();
+  ctx.halt.halt('أ');
+  ctx.halt.resume('ب');
+  writeFileSync(ctx.file + HALT_HISTORY_SUFFIX, '');
+  assert.equal(ctx.halt.read().state, 'running', 'LIVE-68 مفتوح');
+  assert.deepEqual(ctx.halt.verifyHistory(), { ok: true, directives: 0 });
+});
+
+test('WL-521/LIVE-69 توصيف: استبدالُ التاريخِ بسطرِه الأخيرِ يتركُ `read()` ‏`running`؛ يكشفُه `verifyHistory` وحدَه', () => {
+  const ctx = setup();
+  ctx.halt.halt('أ');
+  ctx.halt.resume('ب');
+  ctx.halt.halt('ج');
+  ctx.halt.resume('د');
+  writeHistoryLines(ctx.file, rawHistoryLines(ctx.file).slice(-1));
+  assert.equal(ctx.halt.read().state, 'running', 'LIVE-69 مفتوح');
+  const verdict = ctx.halt.verifyHistory();
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.problem, 'HALT_LINK_MISMATCH');
+});
+
+test('WL-521/LIVE-70 توصيف: حذفُ سطرٍ من الوسطِ يتركُ `read()` ‏`running`؛ يكشفُه `verifyHistory` وحدَه', () => {
+  const ctx = setup();
+  ctx.halt.halt('أ');
+  ctx.halt.resume('ب');
+  ctx.halt.halt('ج');
+  ctx.halt.resume('د');
+  const lines = rawHistoryLines(ctx.file);
+  lines.splice(1, 1);
+  writeHistoryLines(ctx.file, lines);
+  assert.equal(ctx.halt.read().state, 'running', 'LIVE-70 مفتوح');
+  const verdict = ctx.halt.verifyHistory();
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.problem, 'HALT_LINK_MISMATCH');
+  assert.equal(verdict.problemAt, 2);
+});
+
+test('WL-521/LIVE-72 توصيف: سطرٌ تالفٌ وسطَ التاريخِ يُتخطّى صامتًا و`verifyHistory` يقولُ سليم', () => {
+  const ctx = setup();
+  ctx.halt.halt('أ');
+  ctx.halt.resume('ب');
+  const lines = rawHistoryLines(ctx.file);
+  lines.splice(1, 0, '{تالف');
+  writeHistoryLines(ctx.file, lines);
+  assert.equal(rawHistoryLines(ctx.file).length, 3);
+  assert.deepEqual(
+    ctx.halt.history().map((directive) => directive.epoch),
+    [1, 2],
+    'LIVE-72 مفتوح: `history()` يتخطّى السطرَ التالفَ بلا موضع',
+  );
+  assert.deepEqual(ctx.halt.verifyHistory(), { ok: true, directives: 2 });
+  assert.equal(ctx.halt.read().state, 'running');
+});
