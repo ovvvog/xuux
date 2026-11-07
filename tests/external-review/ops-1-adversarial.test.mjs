@@ -1361,6 +1361,29 @@ test('ب٤ — `pkcs11js` يَحكُمُ ولا يُسكَتُ، وبلا `npm i
   assert.match(String(lines.at(-1)), /require\.resolve\('pkcs11js'\)/);
 });
 
+test('ب٤ب — عقدُ `pkcs11js` إلزاميٌّ في `dependencies` ولا مسارَ بناءٍ خارجَ القفلِ في `ci.yml` (`OPS-1/M6` بعدَ `#509` · `WL-524`)', () => {
+  const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  assert.ok(
+    pkg.dependencies?.pkcs11js,
+    'عقدُ `#509`: `pkcs11js` تبعيّةٌ إلزاميّةٌ في `dependencies` — وإلا عادَ الغيابُ الصامتُ.',
+  );
+  assert.ok(
+    !pkg.optionalDependencies?.pkcs11js,
+    'عودتُها إلى `optionalDependencies` تُحيي التخطّي الصامتَ الذي قِيسَ في `35336883199`.',
+  );
+  const ci = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+  for (const forbidden of [
+    'npm install --no-save',
+    'npm rebuild pkcs11js',
+    'npm install pkcs11js',
+  ]) {
+    assert.ok(
+      !ci.includes(forbidden),
+      `مسارُ بناءٍ خارجَ القفلِ عادَ إلى ci.yml — ماتَ بقرارِ #509 (npm ci يَسقُطُ بفقدِها) وحُذِفَ في WL-524: ${forbidden}`,
+    );
+  }
+});
+
 test('ب٥ — `ci.yml` يَجلِبُ `origin/main` مادّةً لـ`R8` حاسماً', () => {
   const text = readFileSync(path.join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
   assert.match(text, /git fetch --no-tags origin main:refs\/remotes\/origin\/main/);
