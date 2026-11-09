@@ -453,15 +453,19 @@ test('الطفرةُ S2: إضافةُ بندٍ **مشطوبٍ** إلى قائم�
   }
 });
 
-test('الطفرةُ S3: معرِّفُ فرعٍ بـ`/` يُعَدُّ — حذفُهُ من اللوحةِ يُسقِطُ الحاجز', () => {
+test('الطفرةُ S3: معرِّفُ فرعٍ بـ`/` يُعَدُّ — فتحُهُ في السجلِّ يُسقِطُ الحاجز', () => {
   const tmp = cloneRepo();
   try {
-    const statusPath = path.join(tmp, 'PROJECT_STATUS.md');
-    const status = readFileSync(statusPath, 'utf8');
-    const removed = status.replaceAll(' و`OPS-1/MAIN-DRIFT-WINDOW`', '');
-    assert.notEqual(removed, status, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
-    writeFileSync(statusPath, removed);
-    assert.equal(runGuard(tmp), 1, 'بندٌ مفتوحٌ غابَ عن اللوحةِ ⇒ انحرافٌ');
+    const registerPath = path.join(tmp, 'docs/roadmap/06-debt-register.md');
+    const register = readFileSync(registerPath, 'utf8');
+    const opened = register.replace('~~`OPS-1/MAIN-DRIFT-WINDOW`~~', '`OPS-1/MAIN-DRIFT-WINDOW`');
+    assert.notEqual(opened, register, 'ينبغي أن يُعثَرَ على موضعِ الطفرةِ');
+    writeFileSync(registerPath, opened);
+    assert.equal(
+      runGuard(tmp),
+      1,
+      'بندٌ بمعرِّفِ فرعٍ صارَ مفتوحاً ولم تَذكُرْهُ اللوحةُ ⇒ انحرافٌ',
+    );
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
