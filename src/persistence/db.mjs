@@ -73,7 +73,14 @@ export const DB_ERRORS = Object.freeze({
   URL_INVALID: 'DB_URL_INVALID',
   INSECURE_IN_PRODUCTION: 'DB_INSECURE_IN_PRODUCTION',
   CA_UNREADABLE: 'DB_CA_UNREADABLE',
+  FENCE_ROLE_REQUIRED: 'DB_FENCE_ROLE_REQUIRED',
 });
+
+/**
+ * دورُ إقلاعٍ مُسيَّج (`WL-532`): `xw_<معرّفُ العامل>_<16 من معرّفِ الإقلاع>` كما تُصدِرُه
+ * `fence.issue_credential`. يُطابَقُ نصّاً هنا لأنّ هذه الوحدةَ لا تستوردُ السياج.
+ */
+const FENCED_ROLE = /^xw_[a-z][a-z0-9]{0,19}_[0-9a-f]{16}$/;
 
 /** خطأ وصلة يحمل رمزاً مسمّى. */
 export class DatabaseConfigError extends Error {
@@ -217,6 +224,18 @@ export function resolveDatabaseConfig(options = {}) {
  */
 export function createPool(options = {}) {
   const { url, tls, ca } = resolveDatabaseConfig(options);
+  // وضعُ السياج (`XUUX_DB_FENCE=required`، ‏`WL-532`): المجمّعُ لا يُنشأُ إلا بدورِ إقلاعٍ
+  // بلا سرّ — فلا يعملُ عاملٌ «مُسيَّج» بوصلةِ `DATABASE_URL` العامّةِ سهواً. والفحصُ هنا لا في
+  // العاملِ وحدَه لأنّ كلَّ مسارٍ يُنشئُ مجمّعاً يمرُّ من هنا.
+  if ((process.env.XUUX_DB_FENCE ?? '').trim() === 'required') {
+    const user = decodeURIComponent(url.username);
+    if (!FENCED_ROLE.test(user) || url.password !== '') {
+      throw new DatabaseConfigError(
+        DB_ERRORS.FENCE_ROLE_REQUIRED,
+        `XUUX_DB_FENCE=required: الوصلةُ يجبُ أن تكونَ بدورِ إقلاعٍ مُسيَّجٍ بلا كلمةِ مرور، لا «${user}».`,
+      );
+    }
+  }
   // `sslmode` يُقرأُ في هذه الوحدةِ وُيُحذَفُ من الوصلةِ قبلَ تمريرِها إلى `pg`.
   // والسببُ مقيسٌ لا نظريٌّ: `pg` يشتقُّ من `sslmode` إعدادَ TLS الخاصَّ به
   // **فيُلغي به كائنَ `ssl` المُمرَّرَ**، فتضيعُ شهادةُ جهةِ الإصدارِ وتفشلُ الوصلةُ

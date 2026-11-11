@@ -322,6 +322,10 @@ export async function restoreBackup(options, databaseUrl) {
       // لا يُدخل اسمٌ من المستخدم هنا؛ الاسمان ثابتان ومقتبسان لإبقاء الحرس واضحاً.
       await pool.query(`DROP SCHEMA IF EXISTS ${quoteIdent(STATE_SCHEMA)} CASCADE`);
       await pool.query(`DROP TABLE IF EXISTS public.${quoteIdent(MIGRATION_LEDGER)}`);
+      // `WL-532`: مخطّطُ السياجِ يُمحى مع `state` لأنّ النسخةَ المُسيَّجةَ تحملُه. وعلى
+      // قاعدةٍ مُسيَّجةٍ حيّةٍ يرفضُ قادحُ `xf_ddl_drop` هذا الحذفَ — رفضٌ مقصود: لا
+      // تُستبدَلُ قاعدةٌ مُسيَّجةٌ بالقوّة؛ يُنزَعُ السياجُ أولاً بهجرةِ النزولِ تحت `HALTED`.
+      await pool.query('DROP SCHEMA IF EXISTS fence CASCADE');
     }
   } finally {
     await pool.end();

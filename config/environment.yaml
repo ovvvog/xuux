@@ -227,6 +227,35 @@ variables:
       معرِّفُ المهمّةِ يُمرَّرُ من `src/execution/limits.mjs` إلى العمليّةِ الابنةِ
       وحدَها. يُعلَنُ هنا لأنّ كلَّ متغيّرٍ يقرؤه الكودُ يُعلَنُ في العقدِ ولو لم
       يكن إلزاميّاً في أيِّ بيئة.
+  # ── سياجُ القاعدة (‏`WL-532`) — اختياريٌّ؛ جعلُه إلزاميّاً في الإنتاجِ قرارُ مالك ──
+  - id: XUUX_DB_FENCE
+    requiredIn: []
+    format: '^(required)?$'
+    secret: false
+    statement: >-
+      وضعُ سياجِ القاعدةِ للعامل (‏`scripts/worker.mjs`). `required`: لا يُنشَأُ مجمّعٌ
+      إلا بدورِ إقلاعٍ بلا سرّ (‏`createPool` يرفضُ غيرَه)، بعدَ حارسٍ صارمٍ ومصافحةٍ
+      بتوقيعِ العامل. وقيمةٌ أخرى تُرفَضُ ولا تُقرأُ «بلا سياج». الغيابُ = الوضعُ القائم.
+  - id: XUUX_FENCE_WORKER_ID
+    requiredIn: []
+    format: '^[a-z][a-z0-9]{0,19}$'
+    secret: false
+    statement: >-
+      معرِّفُ العاملِ في القائمةِ السياديّة (‏`fence.roster`). لازمٌ حين `XUUX_DB_FENCE=required`.
+  - id: XUUX_FENCE_WORKER_KEY
+    requiredIn: []
+    format: '^/.+$'
+    secret: false
+    statement: >-
+      مسارُ مفتاحِ العاملِ الخاصّ (Ed25519، PKCS#8) — المسارُ لا المفتاح. يوقّعُ به العاملُ
+      تحدّيَ إقلاعِه ولا يراه الجذر. مفتاحُ ملفٍّ (‏`hardwareBacked=false`)؛ لا HSM/TPM هنا.
+  - id: XUUX_HALT_EPOCH_FLOOR
+    requiredIn: []
+    format: '^/.+$'
+    secret: false
+    statement: >-
+      مسارُ حدِّ العهدِ الخارجيّ للقراءةِ الصارمةِ (‏`D-14`): بلا حدٍّ صالحٍ لا قراءةَ RUNNING،
+      وثلاثيّةٌ أقدمُ منه ⇒ `EPOCH_FLOOR_AHEAD`. لازمٌ حين `XUUX_DB_FENCE=required`.
   - id: WEIGHTS_DIR
     requiredIn: []
     format: '^/.*|^\./.*'
