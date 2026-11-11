@@ -1,0 +1,707 @@
+{
+  "schema": "xuux/fence-lab-report/v1",
+  "work_log": "WL-532",
+  "generated_at": "2026-11-11T21:42:14.409Z",
+  "environment": {
+    "pg_bin": "/usr/lib/postgresql/18/bin",
+    "pg_version": "postgres (PostgreSQL) 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1)",
+    "node": "v20.20.2",
+    "kernel": "6.1.155",
+    "host": "space-sandbox",
+    "os_user": "user",
+    "sudo": true,
+    "cgroup_parent": "/sys/fs/cgroup/space.slice/space-workloads.service/workloads/xuux-fence",
+    "git_head": "092c011ac1bc8a5e185094e0e5745e194275c28b",
+    "git_dirty": false
+  },
+  "declared_limits": [
+    "مفاتيحُ اختبارٍ مولَّدةٌ في الذاكرة — لا مفتاحَ مالكٍ ولا HSM/TPM (hardwareBacked=false)",
+    "superuser والجذرُ (root) خارجَ السياجِ عمداً ويُعلَنانِ break-glass — لا حمايةَ منهما",
+    "المرحلةُ A تستعملُ حزامَ كلماتِ مرورٍ عبرَ TCP (حدٌّ معلنٌ في رأسِ الاختبار)؛ ربطُ الهويّةِ بـpeer يُثبَتُ في المرحلةِ B وحدَها",
+    "لا تلاعبَ بساعةِ النظامِ ولا فقدَ طاقةٍ حقيقيّاً؛ الانهيارُ = pg_ctl -m immediate",
+    "نجاحُ المختبرِ ليس دليلَ جاهزيّةٍ إنتاجية، ولا يمسُّ RISK-0054 (NO-GO)"
+  ],
+  "summary": {
+    "checks": {
+      "PASS": 13,
+      "FAIL": 0,
+      "PARTIAL": 0,
+      "NOT RUN": 0
+    },
+    "attacks": {
+      "PASS": 21,
+      "FAIL": 0,
+      "PARTIAL": 3,
+      "NOT RUN": 1
+    },
+    "tests": {
+      "PASS": 42,
+      "FAIL": 0,
+      "PARTIAL": 0,
+      "NOT RUN": 0
+    }
+  },
+  "checks": [
+    {
+      "id": "LAB-ENV-01",
+      "title": "عنقودٌ مؤقّتٌ جديدٌ من initdb (لا ملفّاتٍ قديمة)",
+      "status": "PASS",
+      "port": 34647
+    },
+    {
+      "id": "LAB-SUITE-db-fence",
+      "title": "تشغيلُ tests/fence/db-fence.test.mjs",
+      "status": "PASS",
+      "exit": 0,
+      "tests": 21,
+      "log": "db-fence.test.mjs.tap",
+      "log_sha256": "267f0f6175a412ae2d5fd2776c724f19a8014827fcd8776b12cfad12ff556a37"
+    },
+    {
+      "id": "LAB-SUITE-halt-integrity",
+      "title": "تشغيلُ tests/fence/halt-integrity.test.mjs",
+      "status": "PASS",
+      "exit": 0,
+      "tests": 15,
+      "log": "halt-integrity.test.mjs.tap",
+      "log_sha256": "f14680d0762646f0d0d5e01235deb937bd1ac9fbb37a15fea850d09574979d13"
+    },
+    {
+      "id": "LAB-SUITE-effects",
+      "title": "تشغيلُ tests/fence/effects.test.mjs",
+      "status": "PASS",
+      "exit": 0,
+      "tests": 6,
+      "log": "effects.test.mjs.tap",
+      "log_sha256": "8a207aec581a92dda99f2a39361c70fb2eb578777dad867d2f46a5896dee6b35"
+    },
+    {
+      "id": "LAB-AUTH-01",
+      "title": "بعدَ التشديد: TCP مرفوضٌ حتى لـpostgres؛ الدخولُ بالمقبسِ وpeer فقط",
+      "status": "PASS",
+      "stderr": "psql: error: connection to server at \"127.0.0.1\", port 34647 failed: FATAL:  pg_hba.conf rejects connection for host \"127.0.0.1\", user \"postgres\", database \"lab\", no encryption"
+    },
+    {
+      "id": "LAB-CRED-05a",
+      "title": "T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه ويكتب",
+      "status": "PASS",
+      "whoami": {
+        "now": "2026-11-11T21:42:00.701159+00:00",
+        "epoch": 2,
+        "known": true,
+        "state": "RUNNING",
+        "boot_id": "4e1d7d85feb7b56fc62818aaec63b18f",
+        "worker_id": "alpha",
+        "session_user": "xw_alpha_4e1d7d85feb7b56f",
+        "roster_version": 1,
+        "credential_epoch": 2,
+        "lease_expires_at": "2026-11-11T21:42:30.682998+00:00",
+        "credential_status": "ACTIVE"
+      }
+    },
+    {
+      "id": "LAB-CRED-05b",
+      "title": "T-CRED-05: مستخدمُ نظامِ beta لا يستعملُ اعتمادَ alpha (الهجوم 2)",
+      "status": "PASS",
+      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-DQr5yc/sock/.s.PGSQL.34647\" failed: FATAL:  Peer authentication failed for user \"xw_alpha_4e1d7d85feb7b56f\""
+    },
+    {
+      "id": "LAB-CRED-05c",
+      "title": "T-CRED-05: مستخدمُ المختبرِ نفسُه (مالكُ العنقود) لا يدخلُ بدورِ alpha",
+      "status": "PASS",
+      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-DQr5yc/sock/.s.PGSQL.34647\" failed: FATAL:  Peer authentication failed for user \"xw_alpha_4e1d7d85feb7b56f\""
+    },
+    {
+      "id": "LAB-CRED-05d",
+      "title": "T-CRED-05: دورُ الإقلاعِ عبرَ TCP مرفوضٌ (لا سرَّ قابلاً للنقل)",
+      "status": "PASS",
+      "stderr": "psql: error: connection to server at \"127.0.0.1\", port 34647 failed: FATAL:  pg_hba.conf rejects connection for host \"127.0.0.1\", user \"xw_alpha_4e1d7d85feb7b56f\", database \"lab\", no encryption"
+    },
+    {
+      "id": "LAB-CRED-05e",
+      "title": "مستخدمُ نظامِ العاملِ لا يدخلُ بدورِ xf_root ولا xf_sovereign ولا postgres",
+      "status": "PASS"
+    },
+    {
+      "id": "LAB-HALT-LIVE",
+      "title": "إيقافٌ حقيقيٌّ تحتَ كاتبٍ حيٍّ بمستخدمِ نظامِ العامل × 10: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة",
+      "status": "PASS",
+      "iterations": 10,
+      "failures": 0,
+      "log": "halt-live-rounds.json",
+      "log_sha256": "3533193849b820feb03f7591d040c4adf6dae292a5dedbf4acac54f4be217a8f"
+    },
+    {
+      "id": "LAB-RESTART",
+      "title": "انهيارُ العنقود (immediate) ⇒ RECOVERY_REQUIRED؛ RECOVER موقَّعٌ ⇒ HALTED لا RUNNING؛ ثمّ RESUME",
+      "status": "PASS",
+      "after_restart": {
+        "epoch": 23,
+        "state": "RECOVERY_REQUIRED",
+        "problem": "incarnation_mismatch",
+        "stored_state": "HALTED"
+      },
+      "replay_rejected": "XF409",
+      "recovered_to": "HALTED",
+      "epoch": 26
+    },
+    {
+      "id": "LAB-PHYS-RESTORE",
+      "title": "استعادةُ نسخةٍ فيزيائيةٍ قديمة (pg_basebackup) ⇒ RECOVERY_REQUIRED؛ الكتابةُ والأمرُ المُعادُ مرفوضان (الهجومان 21 و23)",
+      "status": "PASS",
+      "copy_state": {
+        "epoch": 26,
+        "state": "RECOVERY_REQUIRED",
+        "problem": "incarnation_mismatch",
+        "stored_state": "RUNNING"
+      },
+      "copy_check_ok": false,
+      "replay_rejected": "XF409",
+      "worker_write": "ERROR:  fence: تجسُّدُ القاعدةِ لا يطابقُ المختوم (استرجاعٌ/إعادةُ تشغيل) — RECOVERY_REQUIRED"
+    }
+  ],
+  "tests": {
+    "Ed25519 داخلَ القاعدة: متجهُ RFC 8032 (اختبار 1) ومطابقةُ Node، والتلاعبُ يُرفَض": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "البدءُ مغلق: بعدَ الهجرةِ والإقلاعِ HALTED؛ لا عودةَ افتراضيةَ إلى RUNNING، ولا كتابةَ لعامل": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "RESUME: توقيعٌ مزوَّر، نوعٌ آخر، عهدٌ متوقَّعٌ خاطئ، نافذةٌ منقضية، هاشُ قائمةٍ خاطئ، دليلٌ غائب — كلُّها تُرفَض": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-CRED-07: الجذرُ وحدَه لا يُصدِرُ اعتماداً — يلزمُ توقيعُ مفتاحِ العاملِ المُدرَجِ على تحدّيه": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-ROS-03: عاملٌ خارجَ القائمةِ لا يُصدَرُ له، وتغييرُ القائمةِ تحتَ RUNNING مرفوض": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-CRED-05 (جزئيٌّ هنا): دورُ الإقلاعِ يصدرُ بلا سرّ، ولا يرثُ إلا xuux_worker بلا SET": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "الكتابةُ المشروعة: اعتمادٌ نشِطٌ في RUNNING يكتب (INSERT/UPSERT/MERGE/UPDATE/DELETE؛ وCOPY مرفوضٌ تحتَ RLS) ويعرفُ نفسَه": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "هويّةٌ مزوَّرة: دورٌ عاديٌّ ذو امتيازٍ على الجدول، ومتغيّراتُ جلسةٍ مُزوَّرة، وsearch_path — لا شيءَ منها يُعطي هويّة": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "الاعتمادُ القديم: إقلاعٌ جديدٌ يُلغي القديمَ ويُنهي جلستَه، وإعادةُ الدخولِ بالقديمِ مرفوضة": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "الإيجار: انقضاؤه يرفضُ الكتابة (XF009)، والجذرُ لا يُجدِّدُ لاعتمادٍ ملغى": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "حافظُ الإيجار يتوقّفُ أوّلَ قراءةٍ غيرِ RUNNING ولا يُعيدُ التجديد": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "REPEATABLE READ: لقطةٌ قبلَ الإيقافِ لا تكتبُ بعدَه (خطّيّةُ FOR SHARE على صفِّ التحكّم)": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "الحقنُ بالأعطال: انقطاعٌ بعدَ كلِّ خطوةٍ يُبقي القاعدةَ مغلقةً للعامل، ولا يُستأنَفُ دونَ إكمال": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "جدولٌ جديدٌ بلا زناد، أو زنادٌ معطَّل، أو دالّةُ سياجٍ مُستبدَلة (superuser) ⇒ RESUME يرفض": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-REC-05: نسخةٌ من القاعدةِ (قاعدةٌ أخرى من القالب) تبدأ RECOVERY_REQUIRED؛ الأمرُ المُعادُ والكتابةُ مرفوضان": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "T-REC-07: RECOVER يتطلّبُ أمراً موقَّعاً يُسمّي التجسُّدَ الحيّ، ويُفضي إلى HALTED لا RUNNING، ويُلغي الاعتمادات": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "ربطُ العامل (§7): prepareFencedWorker — حارسٌ مركّب، مصافحةٌ بتوقيعِ العامل، دورُ إقلاعٍ بلا سرّ، وcreatePool يرفضُ غيرَه": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "صفُّ التحكّم: لا حذفَ ولا خفضَ للعهد ولا انتقالَ ممنوعٌ حتى لـsuperuser عبرَ المسارِ العادي": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "سلسلةُ الأحداث: هاشٌ متّصلٌ من GENESIS_FENCE بلا فجوة": {
+      "status": "PASS",
+      "file": "tests/fence/db-fence.test.mjs"
+    },
+    "D-14: نظامٌ سليمٌ يُقرأُ كما هو — RUNNING بعدَ الاستئناف، HALTED بعدَ الإيقاف": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: غيابُ الثلاثيّةِ كلِّها = محوٌ ⇒ RECOVERY_REQUIRED (والقارئُ الأصليُّ يقرأُه running — الفرقُ مقصود)": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: بلا حدٍّ خارجيٍّ للعهد لا قراءةَ RUNNING، والحدُّ التالفُ كالغائب": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: استرجاعُ ثلاثيّةٍ أقدمَ من الحدِّ الخارجيّ ⇒ EPOCH_FLOOR_AHEAD": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: توجيهٌ محذوفٌ أو تالف ⇒ RECOVERY_REQUIRED": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: توجيهٌ موقَّعٌ صحيحٌ لكنّه أقدمُ من آخرِ التاريخ (إعادةُ running قديم) ⇒ DIRECTIVE_NOT_LAST": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: سطرُ تاريخٍ تالفٌ — في الأوّلِ أو الوسط — لا يُتجاوَز": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: ذيلُ تاريخٍ مقطوع (كتابةٌ منقطعة) ⇒ HISTORY_TAIL_TRUNCATED": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: تاريخٌ محذوفٌ والتوجيهُ باقٍ ⇒ HISTORY_MISSING (ولا يُقرأُ التوجيهُ وحدَه)": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: سطرٌ وسطيٌّ عُدِّلَ: هاشٌ قديم ⇒ HASH_MISMATCH؛ هاشٌ مُعادٌ ⇒ SIGNATURE_INVALID وانقطاعُ الربط": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: حذفُ سطرٍ من الوسط ⇒ فجوةُ عهدٍ وانقطاعُ ربط": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: ملفُّ العهد: أعلى من التاريخ، أدنى، تالف، غائب — كلُّها مغلقة": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: سجلُّ عقدةٍ أو إقرارٌ تالف لا يُتجاهَل": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: العمليةُ الميتةُ ليست إقراراً؛ الإقرارُ الموقَّعُ للعهدِ الجاري وحدَه يُكمِل، والحيُّ غيرُ المسجَّلِ يمنع": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "D-14: الحارسُ الصارمُ يرمي على HALTED وRECOVERY_REQUIRED ويمرُّ على RUNNING": {
+      "status": "PASS",
+      "file": "tests/fence/halt-integrity.test.mjs"
+    },
+    "E1..E16: كلُّ أثرٍ مُصنَّفٌ بضابطٍ وحالةٍ ودليل — لا أثرَ غيرُ مصنَّف": {
+      "status": "PASS",
+      "file": "tests/fence/effects.test.mjs"
+    },
+    "E6: cgroup.kill يقتلُ الابنَ والحفيدَ اليتيم (setsid، أبوه مات) ويُثبتُ الخلوّ": {
+      "status": "PASS",
+      "file": "tests/fence/effects.test.mjs"
+    },
+    "E6: بلا cgroup مفوَّض يرفضُ CgroupScope الإنشاءَ صراحةً (لا نطاقَ وهميّ)": {
+      "status": "PASS",
+      "file": "tests/fence/effects.test.mjs"
+    },
+    "T-EFF-02: الخروجُ عبرَ EgressGate القائمة — الإيقافُ يُجهِضُ الجاريَ ويرفضُ الجديد، والحارسُ يُقرأ قبلَ كلِّ نقل": {
+      "status": "PASS",
+      "file": "tests/fence/effects.test.mjs"
+    },
+    "T-EFF-03: المستقبِلُ يرفضُ العهدَ القديمَ والتكرارَ وغيرَ RUNNING (رمزُ السياج)": {
+      "status": "PASS",
+      "file": "tests/fence/effects.test.mjs"
+    },
+    "الخطوة 11: موقِفُ آثارٍ بلا أيِّ ضابطٍ ليس نجاحاً": {
+      "status": "PASS",
+      "file": "tests/fence/effects.test.mjs"
+    }
+  },
+  "attacks": [
+    {
+      "n": 1,
+      "title": "الكتابةُ مباشرةً دونَ مكتبةِ XUUX",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "هويّةٌ مزوَّرة: دورٌ عاديٌّ ذو امتيازٍ على الجدول، ومتغيّراتُ جلسةٍ مُزوَّرة، وsearch_path — لا شيءَ منها يُعطي هويّة",
+          "status": "PASS"
+        },
+        {
+          "ref": "T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-CRED-05c",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 2,
+      "title": "استخدامُ اعتمادِ عاملٍ آخر",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "LAB-CRED-05b",
+          "status": "PASS"
+        },
+        {
+          "ref": "T-CRED-07: الجذرُ وحدَه لا يُصدِرُ اعتماداً — يلزمُ توقيعُ مفتاحِ العاملِ المُدرَجِ على تحدّيه",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 3,
+      "title": "إعادةُ استعمالِ اعتمادٍ قديم",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "الاعتمادُ القديم: إقلاعٌ جديدٌ يُلغي القديمَ ويُنهي جلستَه، وإعادةُ الدخولِ بالقديمِ مرفوضة",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 4,
+      "title": "إعادةُ الاتصالِ بعدَ الإيقاف",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-HALT-LIVE",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 5,
+      "title": "الكتابةُ من معاملةٍ بدأت قبلَ الإيقاف",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-HALT-LIVE",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 6,
+      "title": "الكتابةُ تحتَ REPEATABLE READ",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "REPEATABLE READ: لقطةٌ قبلَ الإيقافِ لا تكتبُ بعدَه (خطّيّةُ FOR SHARE على صفِّ التحكّم)",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 7,
+      "title": "الكتابةُ بعدَ الاستئنافِ من جلسةٍ قديمة",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-HALT-LIVE",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 8,
+      "title": "تعطيلُ Trigger",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "جدولٌ جديدٌ بلا زناد، أو زنادٌ معطَّل، أو دالّةُ سياجٍ مُستبدَلة (superuser) ⇒ RESUME يرفض",
+          "status": "PASS"
+        },
+        {
+          "ref": "T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 9,
+      "title": "إضافةُ جدولٍ دونَ Trigger",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "جدولٌ جديدٌ بلا زناد، أو زنادٌ معطَّل، أو دالّةُ سياجٍ مُستبدَلة (superuser) ⇒ RESUME يرفض",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 10,
+      "title": "استبدالُ دالّةِ SECURITY DEFINER",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "جدولٌ جديدٌ بلا زناد، أو زنادٌ معطَّل، أو دالّةُ سياجٍ مُستبدَلة (superuser) ⇒ RESUME يرفض",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 11,
+      "title": "تزويرُ GUC",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "هويّةٌ مزوَّرة: دورٌ عاديٌّ ذو امتيازٍ على الجدول، ومتغيّراتُ جلسةٍ مُزوَّرة، وsearch_path — لا شيءَ منها يُعطي هويّة",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 12,
+      "title": "التلاعبُ بـsearch_path",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "هويّةٌ مزوَّرة: دورٌ عاديٌّ ذو امتيازٍ على الجدول، ومتغيّراتُ جلسةٍ مُزوَّرة، وsearch_path — لا شيءَ منها يُعطي هويّة",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 13,
+      "title": "استخدامُ SET ROLE",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد",
+          "status": "PASS"
+        },
+        {
+          "ref": "T-CRED-05 (جزئيٌّ هنا): دورُ الإقلاعِ يصدرُ بلا سرّ، ولا يرثُ إلا xuux_worker بلا SET",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 14,
+      "title": "COPY وMERGE وTRUNCATE",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "الكتابةُ المشروعة: اعتمادٌ نشِطٌ في RUNNING يكتب (INSERT/UPSERT/MERGE/UPDATE/DELETE؛ وCOPY مرفوضٌ تحتَ RLS) ويعرفُ نفسَه",
+          "status": "PASS"
+        },
+        {
+          "ref": "T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 15,
+      "title": "large objects",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 16,
+      "title": "NOTIFY",
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "ref": "T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض",
+          "status": "PASS"
+        }
+      ],
+      "partial": "NOTIFY لا يُسحَبُ بامتياز؛ الجلساتُ تُنهى عندَ الإيقافِ فلا NOTIFY بعدَه، لكنّ ما أُرسِلَ قبلَ الالتزامِ في نافذةِ الإيقافِ خطرٌ متبقٍّ مُعلَن (E3)"
+    },
+    {
+      "n": 17,
+      "title": "الاحتفاظُ بقفلٍ استشاريّ",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 18,
+      "title": "تشغيلُ عمليةٍ فرعيةٍ بعدَ موتِ الأب",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "E6: cgroup.kill يقتلُ الابنَ والحفيدَ اليتيم (setsid، أبوه مات) ويُثبتُ الخلوّ",
+          "status": "PASS"
+        },
+        {
+          "ref": "E6: بلا cgroup مفوَّض يرفضُ CgroupScope الإنشاءَ صراحةً (لا نطاقَ وهميّ)",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 19,
+      "title": "إرسالُ HTTPS بعدَ HALT",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-EFF-02: الخروجُ عبرَ EgressGate القائمة — الإيقافُ يُجهِضُ الجاريَ ويرفضُ الجديد، والحارسُ يُقرأ قبلَ كلِّ نقل",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 20,
+      "title": "إعادةُ تشغيلِ رسالةِ Outbox قديمة",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-EFF-03: المستقبِلُ يرفضُ العهدَ القديمَ والتكرارَ وغيرَ RUNNING (رمزُ السياج)",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 21,
+      "title": "استعادةُ نسخةٍ قديمة",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "T-REC-05: نسخةٌ من القاعدةِ (قاعدةٌ أخرى من القالب) تبدأ RECOVERY_REQUIRED؛ الأمرُ المُعادُ والكتابةُ مرفوضان",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-PHYS-RESTORE",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 22,
+      "title": "حذفُ كلِّ ملفّاتِ حالةِ الجذر",
+      "status": "PASS",
+      "evidence": [
+        {
+          "ref": "D-14: غيابُ الثلاثيّةِ كلِّها = محوٌ ⇒ RECOVERY_REQUIRED (والقارئُ الأصليُّ يقرأُه running — الفرقُ مقصود)",
+          "status": "PASS"
+        },
+        {
+          "ref": "D-14: تاريخٌ محذوفٌ والتوجيهُ باقٍ ⇒ HISTORY_MISSING (ولا يُقرأُ التوجيهُ وحدَه)",
+          "status": "PASS"
+        },
+        {
+          "ref": "D-14: ملفُّ العهد: أعلى من التاريخ، أدنى، تالف، غائب — كلُّها مغلقة",
+          "status": "PASS"
+        }
+      ]
+    },
+    {
+      "n": 23,
+      "title": "استعادةُ جذرٍ وقاعدةٍ متوافقَين من نسخةٍ قديمة",
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "ref": "D-14: استرجاعُ ثلاثيّةٍ أقدمَ من الحدِّ الخارجيّ ⇒ EPOCH_FLOOR_AHEAD",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-PHYS-RESTORE",
+          "status": "PASS"
+        }
+      ],
+      "partial": "الكشفُ يعتمدُ على حدِّ عهدٍ خارجيٍّ (XUUX_HALT_EPOCH_FLOOR) وتجسُّدِ العنقود؛ مَن يملكُ الحدَّ والقاعدةَ معاً (الجذر/superuser) خارجَ نموذجِ التهديد — لا مرساةَ مستقلّةً (HSM/TPM) متاحة"
+    },
+    {
+      "n": 24,
+      "title": "التلاعبُ بساعةِ القاعدة",
+      "status": "NOT RUN",
+      "evidence": [],
+      "not_run": "تغييرُ ساعةِ النظامِ يتطلّبُ صلاحيةَ المضيفِ ولا faketime في المختبر؛ الإيجارُ يعتمدُ clock_timestamp() — خطرٌ متبقٍّ مُعلَن"
+    },
+    {
+      "n": 25,
+      "title": "الانهيارُ في منتصفِ كلِّ خطوةٍ من الإيقافِ والاستئناف",
+      "status": "PARTIAL",
+      "evidence": [
+        {
+          "ref": "الحقنُ بالأعطال: انقطاعٌ بعدَ كلِّ خطوةٍ يُبقي القاعدةَ مغلقةً للعامل، ولا يُستأنَفُ دونَ إكمال",
+          "status": "PASS"
+        },
+        {
+          "ref": "LAB-RESTART",
+          "status": "PASS"
+        }
+      ],
+      "partial": "الإيقافُ: حقنٌ بعدَ كلِّ خطوة + انهيارُ العنقود. الاستئنافُ معاملةٌ واحدةٌ ذرّيةٌ (لا نقاطَ وسطى قابلةً للحقن)، ولا فقدَ طاقةٍ حقيقيّاً (§14-8)"
+    }
+  ],
+  "logs": [
+    {
+      "name": "initdb.log",
+      "sha256": "ab94d7171b989bc2f721e2cc4697fddec126cfc6c336454a33cfccc5003cf4b6",
+      "bytes": 842
+    },
+    {
+      "name": "db-fence.test.mjs.tap",
+      "sha256": "267f0f6175a412ae2d5fd2776c724f19a8014827fcd8776b12cfad12ff556a37",
+      "bytes": 8721
+    },
+    {
+      "name": "halt-integrity.test.mjs.tap",
+      "sha256": "f14680d0762646f0d0d5e01235deb937bd1ac9fbb37a15fea850d09574979d13",
+      "bytes": 4580
+    },
+    {
+      "name": "effects.test.mjs.tap",
+      "sha256": "8a207aec581a92dda99f2a39361c70fb2eb578777dad867d2f46a5896dee6b35",
+      "bytes": 1988
+    },
+    {
+      "name": "halt-live-rounds.json",
+      "sha256": "3533193849b820feb03f7591d040c4adf6dae292a5dedbf4acac54f4be217a8f",
+      "bytes": 2752
+    },
+    {
+      "name": "pg_basebackup.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "name": "postgres-primary.log",
+      "sha256": "cefdddc287bcf005f75a3e2f4ec8d9bd3f2153895ae77acd62e878e50e78b4a6",
+      "bytes": 95096
+    }
+  ],
+  "report_sha256": "008577d0a06e6f41425932e7a24c06189c3ca2373ddd7b0f6dcf90d3bd524a27"
+}
