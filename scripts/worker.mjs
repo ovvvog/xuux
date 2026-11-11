@@ -55,6 +55,9 @@ import {
 import { randomUUID } from 'node:crypto';
 import { dbFenceMode, prepareFencedWorker } from '../src/fence/db-fence.mjs';
 
+/** حجمُ مجمّعِ العاملِ المُسيَّج: ثابتٌ ومختوم (حدُّ دورِ الإقلاع CONNECTION LIMIT 16). */
+const FENCED_POOL_SIZE = 8;
+
 /**
  * @param {readonly string[]} argv
  * @returns {{ worker: string, once: boolean, maxTasks: number, pollMs: number, haltFile: string, publicKey: string | null, registrationTtlMs: number, recoveryPolicy: { maxProbes?: number, baseDelayMs?: number, maxDelayMs?: number } }}
@@ -157,8 +160,12 @@ async function main() {
       ? await prepareFencedWorker({ env: process.env, halt })
       : null;
   const guard = fence === null ? halt : fence.haltGuard;
-  const pool = fence === null ? createPool() : createPool({ url: fence.databaseUrl });
+  const pool =
+    fence === null ? createPool() : createPool({ url: fence.databaseUrl, max: FENCED_POOL_SIZE });
   if (fence !== null) {
+    // ختمُ الجلسات (`WL-532` §5): كلُّ وصلاتِ المجمّعِ تُفتحُ الآنَ وتُختمُ بمفتاحِ العامل، ثمّ
+    // يُغلَقُ الدخولُ بدورِ الإقلاع — عمليةٌ أخرى بالـUID نفسِه لا تدخلُ بعدَها، وإن سبقت أفشلت الختم.
+    await fence.seal(pool, FENCED_POOL_SIZE);
     await fence.verify(pool);
     process.stdout.write(
       `وضعُ السياج: ${fence.workerId} بدورِ ${String(fence.credential.role_name)} (عهد ${String(fence.credential.epoch)}، مفتاحٌ عتاديّ: ${fence.hardwareBacked ? 'نعم' : 'لا'})\n`,

@@ -1,0 +1,206 @@
+# خريطةُ مساراتِ الاتصالِ بقاعدةِ البيانات (WL-532، المراجعةُ المعدَّلة §4).
+#
+# كلُّ موضعٍ في src/ وscripts/ يفتحُ وصلةً بالقاعدة (createPool، new pg.Pool، new pg.Client، أو أداةُ
+# PostgreSQL خارجية) مُدرَجٌ هنا بعددِ مرّاتِه. الاختبار tests/fence/connection-map.test.mjs يفشلُ عندَ
+# أيِّ موضعٍ غيرِ مُدرَج أو عددٍ مختلف أو إدخالٍ بلا موضع — فلا يُضافُ مسارُ اتصالٍ صامتاً.
+#
+# fence (حالُ المسارِ حين تكونُ القاعدةُ مُسيَّجة، أي بعدَ fence.bootstrap):
+#   FENCED_WRITER     كاتبٌ داخلَ السياج: دورُ إقلاعٍ مختومُ الجلسات (seal_sessions) واعتمادٌ وإيجار.
+#   DEFAULT_DENY      ليس كاتباً مُسيَّجاً: أيُّ كتابةٍ له بدورٍ عاديٍّ تُرفَضُ في الزناد (XF006)، وفي
+#                     XUUX_DB_FENCE=required يرفضُ createPool وصلتَه أصلاً (FENCE_ROLE_REQUIRED).
+#                     فشلٌ مغلق — لكنّه أيضاً **معطَّلٌ وظيفياً** تحتَ السياج (فجوةٌ معلنة، لا حماية).
+#   MIGRATOR_HALTED   xuux_migrator يكتبُ تحتَ HALTED وحدَها (XF010 خارجَها).
+#   FENCE_CONTROL     xf_root / xf_sovereign: يُديرانِ السياجَ ولا يكتبانِ جداولَ الدولة.
+#   BREAK_GLASS       superuser (أو مالكُ العنقود): **خارجَ السياجِ عمداً** — guard_write يُعيدُ فوراً
+#                     لـsuperuser. لا حمايةَ منه؛ مُعلَنٌ في fence.breakglass ويُراجَع.
+#   ISOLATED_DB       قاعدةٌ معزولةٌ مؤقّتةٌ تُنشأُ وتُسقَطُ (برهانُ هجرات/حواجز) — لا تمسُّ قاعدةَ الدولة.
+#   LAB_ONLY          المختبرُ وحدَه (scripts/fence-lab*.mjs) على عنقودٍ مؤقّت.
+#   LIBRARY           تعريفُ المصنعِ نفسِه (لا يتّصلُ إلا حينَ يُنادى).
+#
+# production_supervisor: لا مُشرِفَ إنتاجيّاً اليوم. FenceRoot وsuperviseWorkerHandshake وconfirmWorkerSeal
+# تُستعمَلُ في الاختبارات والمختبرِ وحدَهما؛ لا شيءَ في المستودعِ يُطلقُ worker.mjs بـXUUX_DB_FENCE=required
+# في الإنتاج. هذه فجوةٌ معلنةٌ تحتاجُ قراراً (انظر الإدخالَ supervisor أدناه)، لا ادّعاءَ تغطية.
+version: 1
+production_supervisor: absent
+sites:
+  - file: src/persistence/db.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: مصنعُ createPool — كلُّ createPool أدناه يمرُّ به
+    role: من DATABASE_URL أو options.url
+    fence: LIBRARY
+    why: >-
+      في XUUX_DB_FENCE=required يرفضُ أيَّ وصلةٍ ليست بدورِ إقلاعٍ (xw_*) أو تحملُ كلمةَ مرور،
+      ويُبقي الخاملَ مفتوحاً (idleTimeoutMillis=0) لأنّ الوصلاتِ مختومةٌ والدورُ NOLOGIN بعدَ الختم.
+  - file: scripts/worker.mjs
+    kind: createPool
+    count: 2
+    purpose: >-
+      العامل (المُنفِّذ) — الكاتبُ الوحيدُ المقصودُ داخلَ السياج. موضعان: الفرعُ المُسيَّجُ
+      (createPool بدورِ الإقلاع) والفرعُ القديمُ بلا سياج (createPool من DATABASE_URL)
+    role: دورُ إقلاعٍ xw_<worker>_<boot> بلا سرّ (peer) حين XUUX_DB_FENCE=required؛ وإلا DATABASE_URL
+    fence: FENCED_WRITER
+    why: >-
+      prepareFencedWorker ⇒ مصافحةٌ بتوقيعِ العامل ⇒ مجمّعٌ بحجمٍ ثابتٍ (8) يُختمُ كلُّه (seal) ثمّ
+      verify. **بلا XUUX_DB_FENCE=required يعملُ بالوضعِ القديمِ بلا سياج** — والسياجُ في القاعدة
+      يرفضُ عندئذٍ كتابتَه (XF006) إن كانت القاعدةُ مُسيَّجة، إلا إن كان superuser (BREAK_GLASS).
+  - file: scripts/scheduler.mjs
+    kind: createPool
+    count: 1
+    purpose: المُجدوِل (مهامٌّ دوريةٌ تكتبُ الحالة)
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: >-
+      ليس في القائمةِ ولا يحملُ اعتماداً: تحتَ السياجِ تُرفَضُ كتابتُه (XF006) وفي وضعِ
+      XUUX_DB_FENCE=required يرفضُه createPool. إدخالُه داخلَ السياجِ يتطلّبُ إطلاقَه عاملاً من القائمة
+      عبرَ مُشرِف — والمُشرِفُ الإنتاجيُّ غائب. فجوةٌ معلنة.
+  - file: scripts/retention.mjs
+    kind: createPool
+    count: 1
+    purpose: تشغيلُ سياسةِ الاحتفاظِ والمحو
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: كالمُجدوِل — كتابتُه مرفوضةٌ تحتَ السياجِ بدورٍ عاديّ؛ تُشغَّلُ اليومَ خارجَ قاعدةٍ مُسيَّجة أو بـsuperuser (BREAK_GLASS).
+  - file: scripts/rollback-model.mjs
+    kind: createPool
+    count: 1
+    purpose: تراجعُ نموذجٍ ناشط (يكتبُ سجلَّ النماذج)
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: كتابةٌ إداريةٌ بلا اعتماد ⇒ XF006 تحتَ السياج.
+  - file: scripts/stress.mjs
+    kind: createPool
+    count: 1
+    purpose: قياسُ السعة (أداةُ تطوير)
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: أداةُ قياسٍ لا إنتاج؛ تحتَ السياجِ تُرفَضُ كتابتُها.
+  - file: scripts/serve-state.mjs
+    kind: createPool
+    count: 1
+    purpose: بابُ الدولةِ للتطويرِ المحلّيّ (--db)
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: معلنٌ للتطويرِ وحدَه في رأسِه؛ تحتَ السياجِ كتابتُه مرفوضة وقراءتُه بدورٍ عاديٍّ خارجَ RLS العامل.
+  - file: scripts/policy-simulate.mjs
+    kind: createPool
+    count: 1
+    purpose: محاكي أثرِ السياسة (قراءةٌ فقط حسبَ رأسِه)
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: لا يكتب؛ لو كتب لرُفِض (XF006).
+  - file: scripts/migrate.mjs
+    kind: createPool
+    count: 1
+    purpose: الهجرات
+    role: DATABASE_URL (المقصود xuux_migrator)
+    fence: MIGRATOR_HALTED
+    why: guard_write يقبلُ xuux_migrator تحتَ HALTED فقط (XF010)؛ تشغيلُه بـsuperuser BREAK_GLASS.
+  - file: scripts/guard-encryption.mjs
+    kind: createPool
+    count: 1
+    purpose: حاجزُ التشفير (فحصُ مخطَّطٍ/صفوف)
+    role: DATABASE_URL
+    fence: DEFAULT_DENY
+    why: قراءةٌ للفحص؛ لا كتابةَ مقصودة.
+  - file: scripts/verify-migrations.mjs
+    kind: createPool
+    count: 3
+    purpose: برهانُ انعكاسِ الهجرات على قاعدةٍ معزولة
+    role: superuser الخادمِ المعلن (إنشاءُ/إسقاطُ قاعدة)
+    fence: ISOLATED_DB
+    why: يُنشئُ قاعدةً مؤقّتةً ويُسقطُها؛ لا يمسُّ قاعدةَ الدولة.
+  - file: scripts/verify-data-preservation.mjs
+    kind: createPool
+    count: 3
+    purpose: برهانُ حفظِ البياناتِ عبرَ الهجرات على قاعدةٍ معزولة
+    role: superuser الخادمِ المعلن
+    fence: ISOLATED_DB
+    why: كالسابق.
+  - file: scripts/guard-lineage.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: حاجزُ نسبِ البيانات
+    role: DATABASE_URL
+    fence: ISOLATED_DB
+    why: حاجزُ بناءٍ على قاعدةِ الاختبار؛ ليس مساراً تشغيلياً.
+  - file: scripts/guard-retention.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: حاجزُ دورةِ الاحتفاظ
+    role: DATABASE_URL
+    fence: ISOLATED_DB
+    why: كالسابق.
+  - file: scripts/guard-memory.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: حاجزُ حدودِ ذاكرةِ الوكلاء
+    role: DATABASE_URL
+    fence: ISOLATED_DB
+    why: كالسابق.
+  - file: scripts/backup.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: النسخُ الاحتياطيّ (pg_dump)
+    role: DATABASE_URL (إداريّ)
+    fence: BREAK_GLASS
+    why: قراءةٌ إداريةٌ تتطلّبُ HALTED؛ لا تكتبُ الحالة.
+  - file: scripts/backup.mjs
+    kind: pg_tool
+    count: 2
+    purpose: pg_dump / pg_restore --list
+    role: كالسابق
+    fence: BREAK_GLASS
+    why: أداةُ قراءة.
+  - file: scripts/restore.mjs
+    kind: pg.Pool
+    count: 4
+    purpose: الاستعادةُ إلى قاعدةٍ نظيفة
+    role: إداريّ (superuser)
+    fence: BREAK_GLASS
+    why: >-
+      يكتبُ قاعدةً جديدةً بالكامل؛ تجسُّدُها (sysid/dbname/pm_start) يخالفُ المختومَ فتبدأُ
+      RECOVERY_REQUIRED ولا يكتبُ عاملٌ قبلَ RECOVER موقَّع (T-REC-05، LAB-PHYS-RESTORE).
+  - file: scripts/restore.mjs
+    kind: pg_tool
+    count: 1
+    purpose: pg_restore
+    role: كالسابق
+    fence: BREAK_GLASS
+    why: كالسابق.
+  - file: scripts/fence-lab.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: مجمّعُ superuser في المختبر
+    role: postgres على عنقودٍ مؤقّت
+    fence: LAB_ONLY
+    why: يُنشئُ القاعدةَ ويقيسُ؛ ليس مساراً إنتاجيّاً.
+  - file: scripts/fence-lab.mjs
+    kind: pg.Client
+    count: 1
+    purpose: وصلاتُ xf_root/xf_sovereign/postgres في المختبر (FenceRoot وFenceSovereign)
+    role: xf_root، xf_sovereign، postgres (peer)
+    fence: LAB_ONLY
+    why: مسارُ التحكّمِ الوحيدُ الذي يُطلقُ FenceRoot فعلاً اليوم — في المختبرِ لا في الإنتاج.
+  - file: scripts/fence-lab.mjs
+    kind: pg_tool
+    count: 11
+    purpose: pg_ctl/initdb/createdb/psql/pg_basebackup في المختبر
+    role: مالكُ العنقودِ المؤقّت ومستخدمو العمّال (sudo)
+    fence: LAB_ONLY
+    why: أدواتُ المختبر.
+  - file: scripts/fence-lab-writer.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: كاتبُ المختبرِ بمستخدمِ نظامِ العامل
+    role: دورُ إقلاعٍ (peer) مختوم
+    fence: LAB_ONLY
+    why: يسلكُ مسارَ العاملِ نفسَه (sealFencedPool) على عنقودِ المختبر.
+supervisor:
+  status: absent
+  decision_required: >-
+    لا مُشرِفَ إنتاجيٌّ يُطلقُ العمّالَ بالسياج، ويُجدّدُ الإيجار، ويؤكّدُ الختم، ويُنفّذُ HALT.
+    الخياران: (أ) بناءُ مُشرِفٍ أدنى (عمليةٌ بدورِ xf_root تُطلقُ worker.mjs وتُسلّمُه المفتاحَ عبرَ
+    واصفِ ملفٍّ وتضبطُ PR_SET_DUMPABLE=0) ضمنَ مسارِ عملٍ مستقلٍّ يملكُ قرارَ النشر؛ (ب) إبقاءُ
+    السياجِ غيرَ مُفعَّلٍ في الإنتاج (الحالُ اليوم، RISK-0054 NO-GO) حتى ذلك. لم يُبنَ هنا لأنّه
+    قرارُ نشرٍ وتشغيلٍ خارجَ حدودِ هذا التكليف (لا نشرَ إنتاجيّاً).

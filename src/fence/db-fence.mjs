@@ -31,6 +31,7 @@ import { createStrictHaltGuard, fileEpochFloor } from './halt-integrity.mjs';
 
 export const SOVEREIGN_PREFIX = 'xuux-fence/sovereign/v1\n';
 export const CREDENTIAL_PREFIX = 'xuux-fence/credential/v1';
+export const SEAL_PREFIX = 'xuux-fence/seal/v1';
 
 /** رموزُ أخطاءِ العميل. رموزُ القاعدةِ (`XFnnn`) تمرُّ كما هي في `error.code`. */
 export const FENCE_ERRORS = Object.freeze({
@@ -40,6 +41,8 @@ export const FENCE_ERRORS = Object.freeze({
   HALT_INCOMPLETE: 'FENCE_HALT_INCOMPLETE',
   HANDSHAKE_FAILED: 'FENCE_HANDSHAKE_FAILED',
   WORKER_CONFIG: 'FENCE_WORKER_CONFIG',
+  SEAL_REFUSED: 'FENCE_SEAL_REFUSED',
+  EFFECTS_EVIDENCE_REJECTED: 'FENCE_EFFECTS_EVIDENCE_REJECTED',
 });
 
 export class FenceError extends Error {
@@ -323,11 +326,20 @@ export class FenceSovereign {
   }
 
   /**
-   * يستأنفُ — بعدَ أن يراجعَ المالكُ دليلَ الآثارِ ويوقّعَ هاشَه.
+   * يستأنفُ — بعدَ أن يراجعَ دليلَ الآثارِ ويوقّعَ هاشَه. **لا يوقّعُ عمياناً:** يرفضُ قبلَ
+   * التوقيعِ إن لم يجتزِ الدليلُ `reviewEffectsEvidence` (انظرها لما يُتحقَّقُ منه وما لا يُمكن).
    * @param {string} effectsEvidenceSha256
    */
   async resume(effectsEvidenceSha256) {
     const s = await this.status();
+    const review = reviewEffectsEvidence(s, effectsEvidenceSha256);
+    if (!review.ok) {
+      throw new FenceError(
+        FENCE_ERRORS.EFFECTS_EVIDENCE_REJECTED,
+        `السياديُّ يرفضُ توقيعَ RESUME: ${review.problems.join('؛ ')}`,
+        review,
+      );
+    }
     const signed = this.sign('resume', s, {
       roster_hash: s.bound.roster_hash,
       pm_start_epoch: String(s.live.pm_start_epoch),
@@ -339,6 +351,205 @@ export class FenceSovereign {
     ]);
     return r.rows[0].r;
   }
+}
+
+/**
+ * مراجعةُ السياديِّ لدليلِ الآثارِ قبلَ توقيعِ RESUME — ما يستطيعُ التحقّقَ منه **مستقلّاً عن
+ * الجذر** (من حالةِ القاعدةِ التي يقرؤها بوصلتِه هو):
+ *  - الدليلُ موجودٌ في العهدِ الحاليّ، وهو آخرُ دليلِ آثار، ونوعُه EFFECTS_HALTED، وهاشُه هو
+ *    الذي سيوقّعه؛
+ *  - `ok === true` صريحاً، و`halt_id`/`epoch` في التفاصيلِ يطابقان ما ختمته القاعدةُ في
+ *    `binding` وآخرَ إيقافٍ مكتمل؛
+ *  - القائمةُ والتجسُّدُ المختومان في `binding` يطابقان الحالةَ الحيّة؛
+ *  - الحالةُ HALTED فعلاً.
+ * **ما لا يستطيعه:** أن يُثبتَ صدقَ الوقائعِ الخارجية (cgroup فارغ، منافذُ مغلقة) — تلك
+ * ادّعاءُ الجذرِ الذي قاسها. الهاشُ يمنعُ تغييرَها بعدَ التسجيل لا كذبَها عندَه.
+ * @param {Record<string, any>} status - `fence.status()`
+ * @param {string} sha256
+ * @returns {{ ok: boolean, problems: string[], evidence: Record<string, any> | null }}
+ */
+export function reviewEffectsEvidence(status, sha256) {
+  const problems = [];
+  const ev = status?.effects_evidence ?? null;
+  const bound = status?.bound ?? {};
+  if (status?.effective?.state !== 'HALTED')
+    problems.push(`الحالةُ ${status?.effective?.state} لا HALTED`);
+  if (ev === null) problems.push('لا دليلَ آثارٍ في هذا العهد');
+  else {
+    if (ev.kind !== 'EFFECTS_HALTED') problems.push(`آخرُ دليلٍ ${ev.kind}`);
+    if (ev.sha256 !== sha256) problems.push('الهاشُ المطلوبُ توقيعُه ليس آخرَ دليل');
+    if (ev.detail?.ok !== true) problems.push('ok ليس true');
+    const b = ev.binding ?? {};
+    if (Number(ev.detail?.halt_id) !== Number(b.halt_id))
+      problems.push('halt_id في التفاصيلِ ≠ المختوم');
+    if (Number(b.halt_id) !== Number(status?.latest_complete_halt))
+      problems.push('الدليلُ ليس لآخرِ إيقافٍ مكتمل');
+    if (Number(ev.detail?.epoch) !== Number(bound.epoch) || Number(b.epoch) !== Number(bound.epoch))
+      problems.push('عهدُ الدليلِ ≠ العهدِ الحاليّ');
+    if (b.roster_hash !== bound.roster_hash) problems.push('القائمةُ تغيّرت بعدَ الدليل');
+    const inc = b.incarnation ?? {};
+    const live = status?.live ?? {};
+    if (
+      inc.sysid !== live.sysid ||
+      String(inc.pm_start_epoch) !== String(live.pm_start_epoch) ||
+      Number(inc.timeline) !== Number(live.timeline)
+    )
+      problems.push('تجسُّدُ القاعدةِ تغيّرَ بعدَ الدليل');
+  }
+  return { ok: problems.length === 0, problems, evidence: ev };
+}
+
+// ── ختمُ الجلسات ─────────────────────────────────────────────────────────────
+
+/**
+ * نصُّ رسالةِ الختمِ كما تبنيه `fence.seal_sessions` حرفياً.
+ * @param {{ db: string, sysid: string, workerId: string, bootId: string, epoch: number | string,
+ *           roleName: string }} ctx
+ * @param {Array<{ pid: number, start: string }>} sessions
+ * @returns {string}
+ */
+export function sealMessage(ctx, sessions) {
+  const list = [...sessions]
+    .sort((a, b) => Number(a.pid) - Number(b.pid))
+    .map((t) => `${Number(t.pid)}:${String(t.start)}`)
+    .join(',');
+  return [
+    SEAL_PREFIX,
+    ctx.db,
+    ctx.sysid,
+    ctx.workerId,
+    ctx.bootId,
+    String(ctx.epoch),
+    ctx.roleName,
+    list,
+  ].join('\n');
+}
+
+/**
+ * يختمُ العاملُ جلساتِه: يجمعُ وسمَ كلِّ وصلةٍ يملكُها، يوقّعُ المجموعةَ بمفتاحِه، ويطلبُ من
+ * القاعدةِ أن تقصرَ الاعتمادَ عليها وتُغلقَ الدخول. أيُّ جلسةٍ أخرى للدورِ (عمليةٌ ثانيةٌ بالـUID
+ * نفسِه) تُفشلُ الختمَ وتُلغي الاعتماد — فشلٌ مغلق.
+ * @param {Array<{ query: Function }>} clients - كلُّ وصلاتِ العامل، مفتوحةً
+ * @param {KeyProvider} key
+ * @param {{ db: string, sysid: string, workerId: string, bootId: string, epoch: number | string,
+ *           roleName: string }} ctx
+ * @returns {Promise<Array<{ pid: number, start: string }>>}
+ */
+export async function sealFencedSessions(clients, key, ctx) {
+  if (clients.length === 0) throw new FenceError(FENCE_ERRORS.SEAL_REFUSED, 'لا وصلاتٍ للختم');
+  const sessions = [];
+  for (const c of clients) {
+    const tag = (await c.query('SELECT fence.session_tag() AS t')).rows[0].t;
+    if (tag === null || tag === undefined) {
+      throw new FenceError(FENCE_ERRORS.SEAL_REFUSED, 'وسمُ الجلسةِ غيرُ متاح');
+    }
+    sessions.push({ pid: Number(tag.pid), start: String(tag.start) });
+  }
+  if (new Set(sessions.map((t) => t.pid)).size !== sessions.length) {
+    throw new FenceError(FENCE_ERRORS.SEAL_REFUSED, 'وصلتان بالجلسةِ نفسِها');
+  }
+  const signature = key.sign(Buffer.from(sealMessage(ctx, sessions), 'utf8'));
+  const first = /** @type {{ query: Function }} */ (clients[0]);
+  const r = (
+    await first.query('SELECT fence.seal_sessions($1::jsonb, $2) AS r', [
+      JSON.stringify(sessions),
+      signature,
+    ])
+  ).rows[0].r;
+  if (r?.sealed !== true) {
+    throw new FenceError(
+      FENCE_ERRORS.SEAL_REFUSED,
+      `رفضت القاعدةُ الختم (${r?.reason}) — الاعتمادُ أُلغي`,
+      r,
+    );
+  }
+  return sessions;
+}
+
+/**
+ * يفتحُ `size` وصلةً في المجمّعِ ويختمُها كلَّها، ثمّ يُعيدُها إليه. المجمّعُ في وضعِ السياجِ
+ * لا يُغلقُ الخاملَ (`idleTimeoutMillis: 0`) فلا يحتاجُ وصلةً جديدة؛ وأيُّ وصلةٍ جديدةٍ بعدَ
+ * الختمِ تُرفَضُ (الدورُ NOLOGIN) — انقطاعٌ يعني إقلاعاً جديداً، لا ثغرة.
+ * @param {import('pg').Pool} pool
+ * @param {number} size
+ * @param {KeyProvider} key
+ * @param {Parameters<typeof sealFencedSessions>[2]} ctx
+ */
+export async function sealFencedPool(pool, size, key, ctx) {
+  /** @type {import('pg').PoolClient[]} */
+  const held = [];
+  // رفضُ الختمِ يُنهي جلساتِ الدورِ الأخرى في القاعدة؛ وصلةٌ محجوزةٌ تُطلقُ عندئذٍ 'error' بلا
+  // مستمعٍ فتُسقطُ العمليةَ قبلَ أن تُبلغَ المُشرِفَ بالفشل. نستمعُ أثناءَ الحجزِ ونُعيدُ المُنهاةَ
+  // إلى المجمّعِ مُتلَفة (release(err)) فلا تُعادُ إلى الاستعمال.
+  /** @type {Map<import('pg').PoolClient, unknown>} */
+  const broken = new Map();
+  /** @type {Map<import('pg').PoolClient, (error: unknown) => void>} */
+  const listeners = new Map();
+  try {
+    for (let i = 0; i < size; i++) {
+      const c = await pool.connect();
+      const onError = (/** @type {unknown} */ error) => broken.set(c, error);
+      c.on('error', onError);
+      listeners.set(c, onError);
+      held.push(c);
+    }
+    return await sealFencedSessions(held, key, ctx);
+  } finally {
+    for (const c of held) {
+      const onError = listeners.get(c);
+      if (onError) c.removeListener('error', onError);
+      const error = broken.get(c);
+      c.release(error instanceof Error ? error : undefined);
+    }
+  }
+}
+
+/**
+ * طرفُ المُشرِف بعدَ الإصدار: ينتظرُ إبلاغَ العاملِ بختمِه عبرَ IPC، ويقارنُه بما ختمته القاعدة.
+ * غيابُ الإبلاغ، أو إبلاغُ فشل، أو اختلافُ المجموعة (عمليةٌ أخرى ختمت) ⇒ يُلغي الاعتماد.
+ * @param {FenceRoot} root
+ * @param {{ on: Function, off: Function }} child
+ * @param {Record<string, any>} credential
+ * @param {{ timeoutMs?: number }} [options]
+ * @returns {Promise<Array<{ pid: number, start: string }>>}
+ */
+export function confirmWorkerSeal(root, child, credential, options = {}) {
+  const role = String(credential['role_name']);
+  return new Promise((resolve, reject) => {
+    const fail = async (/** @type {string} */ why) => {
+      child.off('message', onMessage);
+      clearTimeout(timer);
+      await root.revokeCredential(role, `SEAL_NOT_CONFIRMED:${why}`).catch(() => {});
+      reject(
+        new FenceError(FENCE_ERRORS.SEAL_REFUSED, `الختمُ لم يتأكّد (${why}) — أُلغي ${role}`),
+      );
+    };
+    const timer = setTimeout(() => void fail('timeout'), options.timeoutMs ?? 15_000);
+    /** @param {any} message */
+    const onMessage = async (message) => {
+      if (message?.type === 'xuux-fence/seal-failed') return fail(String(message.reason));
+      if (message?.type !== 'xuux-fence/sealed' || message.role_name !== role) return;
+      try {
+        const db = await root.credentialSeal(role);
+        const reported = stableStringify(
+          [...(message.sessions ?? [])].sort((a, b) => Number(a.pid) - Number(b.pid)),
+        );
+        if (
+          db?.status !== 'ACTIVE' ||
+          db?.sealed !== true ||
+          stableStringify(db.sessions) !== reported
+        ) {
+          return fail('mismatch');
+        }
+        child.off('message', onMessage);
+        clearTimeout(timer);
+        resolve(db.sessions);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error));
+      }
+    };
+    child.on('message', onMessage);
+  });
 }
 
 // ── الجذر ────────────────────────────────────────────────────────────────────
@@ -405,6 +616,11 @@ export class FenceRoot {
   /** @param {string} role */
   async renewLease(role) {
     return (await this.one('SELECT fence.renew_lease($1) AS r', [role])).r;
+  }
+
+  /** @param {string} role */
+  async credentialSeal(role) {
+    return (await this.one('SELECT fence.credential_seal($1) AS r', [role])).r;
   }
 
   /** @param {string} role @param {string} reason */
@@ -540,19 +756,48 @@ export class FenceRoot {
         steps,
       };
     }
-    const effects = await options.effects.stop();
-    const detail = { halt_id: haltId, epoch: complete.epoch, ok: effects.ok, ...effects.detail };
-    const digest = await this.with((c) => jsonbDigest(c, detail));
-    await this.one('SELECT fence.record_effects_evidence($1, $2::jsonb) AS r', [
-      digest,
-      JSON.stringify(detail),
-    ]);
-    steps.push({ step: 11, effectsOk: effects.ok, digest });
+    /** @type {{ ok: boolean, detail: Record<string, unknown> }} */
+    let effects;
+    try {
+      effects = await options.effects.stop();
+    } catch (error) {
+      // موقِفُ الآثارِ نفسُه فشل: لا نعرفُ حالَ الآثار ⇒ ok=false (يُسجَّلُ إن أمكن).
+      effects = {
+        ok: false,
+        detail: { stop_error: error instanceof Error ? error.message : String(error) },
+      };
+    }
+    // الحقولُ المُلزِمةُ بعدَ التفاصيل: لا يكتبُ موقِفُ الآثارِ فوقَ halt_id أو epoch أو ok.
+    const detail = {
+      ...effects.detail,
+      halt_id: haltId,
+      epoch: complete.epoch,
+      ok: effects.ok === true,
+    };
+    let digest;
+    try {
+      digest = await this.with((c) => jsonbDigest(c, detail));
+      await this.one('SELECT fence.record_effects_evidence($1, $2::jsonb) AS r', [
+        digest,
+        JSON.stringify(detail),
+      ]);
+    } catch (error) {
+      // تعذّرُ تسجيلِ الدليل: القاعدةُ مُسيَّجةٌ (HALTED) لكن RESUME مستحيلٌ بلا دليل.
+      steps.push({ step: 11, effectsOk: effects.ok === true, recordError: String(error) });
+      return {
+        haltId,
+        systemHaltComplete: false,
+        dbFenced: true,
+        reason: 'EFFECTS_EVIDENCE_NOT_RECORDED',
+        steps,
+      };
+    }
+    steps.push({ step: 11, effectsOk: effects.ok === true, digest });
     return {
       haltId,
       systemHaltComplete: effects.ok === true,
       dbFenced: true,
-      effectsEvidenceSha256: digest,
+      effectsEvidenceSha256: effects.ok === true ? digest : null,
       reason: effects.ok ? null : 'EFFECTS_NOT_STOPPED',
       steps,
     };
@@ -575,6 +820,8 @@ export async function assertFencedSession(db, self) {
     who.worker_id === self.workerId &&
     (self.bootId === undefined || who.boot_id === self.bootId) &&
     who.credential_status === 'ACTIVE' &&
+    who.sealed === true &&
+    who.session_sealed === true &&
     who.state === 'RUNNING' &&
     Number(who.epoch) === Number(who.credential_epoch);
   if (!ok) {
@@ -593,7 +840,7 @@ export async function assertFencedSession(db, self) {
  * @param {KeyProvider} key
  * @param {{ workerId: string, bootId: string, timeoutMs?: number,
  *           channel?: { send: Function, on: Function, off: Function } }} self
- * @returns {Promise<{ role_name: string, epoch: number, lease_renew_s: number }>}
+ * @returns {Promise<{ role_name: string, epoch: number, lease_renew_s: number, db: string, sysid: string }>}
  */
 export function workerFenceHandshake(key, self) {
   const channel = self.channel ?? /** @type {any} */ (process);
@@ -610,9 +857,12 @@ export function workerFenceHandshake(key, self) {
       channel.off('message', onMessage);
       reject(new FenceError(FENCE_ERRORS.HANDSHAKE_FAILED, 'انقضت مهلةُ المصافحة'));
     }, self.timeoutMs ?? 15_000);
+    /** @type {Record<string, unknown> | null} */
+    let seen = null;
     /** @param {any} message */
     const onMessage = (message) => {
       if (message?.type === 'xuux-fence/challenge') {
+        seen = message.challenge;
         try {
           const signature = signCredentialChallenge(key, message.challenge, self);
           channel.send({
@@ -628,7 +878,8 @@ export function workerFenceHandshake(key, self) {
       } else if (message?.type === 'xuux-fence/credential') {
         clearTimeout(timer);
         channel.off('message', onMessage);
-        resolve(message.credential);
+        // سياقُ رسالةِ الختمِ من التحدّي الذي تحقّقَ منه العاملُ ووقّعه (لا ممّا يُمليه لاحقاً).
+        resolve({ ...message.credential, db: seen?.['db'], sysid: seen?.['sysid'] });
       } else if (message?.type === 'xuux-fence/refused') {
         clearTimeout(timer);
         channel.off('message', onMessage);
@@ -787,6 +1038,15 @@ export async function prepareFencedWorker(input) {
     ...(input.channel === undefined ? {} : { channel: input.channel }),
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
   });
+  const channel = input.channel ?? /** @type {any} */ (process);
+  const sealCtx = {
+    db: String(credential.db),
+    sysid: String(credential.sysid),
+    workerId,
+    bootId,
+    epoch: credential.epoch,
+    roleName: String(credential.role_name),
+  };
   return {
     workerId,
     bootId,
@@ -794,6 +1054,25 @@ export async function prepareFencedWorker(input) {
     haltGuard,
     hardwareBacked: key.hardwareBacked,
     databaseUrl: fencedDatabaseUrl(databaseUrl, String(credential.role_name)),
+    /**
+     * يختمُ كلَّ وصلاتِ المجمّعِ (`size` = حجمُه الأقصى) ويُبلغُ المُشرِف. فشلُ الختمِ يُبلَغُ
+     * ثمّ يُرمى — العاملُ لا يعمل.
+     * @param {import('pg').Pool} pool @param {number} size
+     */
+    seal: async (pool, size) => {
+      try {
+        const sessions = await sealFencedPool(pool, size, key, sealCtx);
+        channel.send?.({ type: 'xuux-fence/sealed', role_name: sealCtx.roleName, sessions });
+        return sessions;
+      } catch (error) {
+        channel.send?.({
+          type: 'xuux-fence/seal-failed',
+          role_name: sealCtx.roleName,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    },
     /** @param {{ query: Function }} db */
     verify: (db) => assertFencedSession(db, { workerId, bootId }),
   };

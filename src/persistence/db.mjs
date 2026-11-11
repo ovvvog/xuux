@@ -227,7 +227,8 @@ export function createPool(options = {}) {
   // وضعُ السياج (`XUUX_DB_FENCE=required`، ‏`WL-532`): المجمّعُ لا يُنشأُ إلا بدورِ إقلاعٍ
   // بلا سرّ — فلا يعملُ عاملٌ «مُسيَّج» بوصلةِ `DATABASE_URL` العامّةِ سهواً. والفحصُ هنا لا في
   // العاملِ وحدَه لأنّ كلَّ مسارٍ يُنشئُ مجمّعاً يمرُّ من هنا.
-  if ((process.env.XUUX_DB_FENCE ?? '').trim() === 'required') {
+  const fenced = (process.env.XUUX_DB_FENCE ?? '').trim() === 'required';
+  if (fenced) {
     const user = decodeURIComponent(url.username);
     if (!FENCED_ROLE.test(user) || url.password !== '') {
       throw new DatabaseConfigError(
@@ -247,7 +248,9 @@ export function createPool(options = {}) {
     connectionString: dsn.toString(),
     max: options.max ?? 8,
     connectionTimeoutMillis: 5_000,
-    idleTimeoutMillis: 10_000,
+    // المجمّعُ المُسيَّجُ لا يُغلقُ الخامل: وصلاتُه مختومةٌ (`fence.seal_sessions`) والدورُ
+    // NOLOGIN بعدَ الختم، فوصلةٌ تُغلَقُ لا تُستبدَل.
+    idleTimeoutMillis: fenced ? 0 : 10_000,
     statement_timeout: 30_000,
     query_timeout: 30_000,
     application_name: 'digital-state',

@@ -26,6 +26,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -40,11 +41,15 @@ import { fileURLToPath } from 'node:url';
 
 import pg from 'pg';
 
+import { EventEmitter } from 'node:events';
+
 import {
   FenceRoot,
   FenceSovereign,
+  confirmWorkerSeal,
   generateTestKeyProvider,
   newBootId,
+  reviewEffectsEvidence,
   signCredentialChallenge,
 } from '../src/fence/db-fence.mjs';
 import { up } from '../src/persistence/migrator.mjs';
@@ -66,10 +71,49 @@ const reportPath = path.resolve(ROOT, arg('--report', DEFAULT_REPORT) ?? DEFAULT
 const keep = argv.includes('--keep');
 const iterations = Number(arg('--iterations', '10'));
 
-// ── أدوات ────────────────────────────────────────────────────────────────────
-
 /** @param {string | Buffer} data */
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
+
+// ── بصمةُ الشجرةِ القابلةِ للتنفيذ (§3: الرأسُ المختبَرُ هو الرأسُ المعروض) ──────────
+/** الجذورُ التي يتوقّفُ عليها سلوكُ المختبرِ والاختبارات. */
+const TREE_ROOTS = ['src', 'scripts', 'migrations', 'tests', 'config'];
+const TREE_FILES = /^(package(-lock)?\.json|tsconfig[^/]*\.json)$/;
+/**
+ * SHA-256 لقائمةٍ مرتّبةٍ من «مسار␀بصمة» لكلِّ ملفٍّ متتبَّعٍ في git تحتَ الجذورِ أعلاه — من
+ * محتوى شجرةِ العملِ (ما يُشغَّلُ فعلاً)، لا من الفهرس.
+ * @returns {{ sha256: string, files: number }}
+ */
+function executableTreeDigest() {
+  const r = spawnSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: 'utf8' });
+  const files = r.stdout
+    .split('\0')
+    .filter(
+      (f) => f !== '' && (TREE_ROOTS.some((d) => f.startsWith(`${d}/`)) || TREE_FILES.test(f)),
+    )
+    .filter((f) => existsSync(path.join(ROOT, f)))
+    .sort();
+  const lines = files.map((f) => `${f}\0${sha256(readFileSync(path.join(ROOT, f)))}`);
+  return { sha256: sha256(lines.join('\n')), files: files.length };
+}
+
+if (argv.includes('--verify-report')) {
+  // يتحقّقُ من تقريرٍ محفوظ: سلامةُ هاشِ التقرير، ومطابقةُ رأسِه وبصمةِ شجرتِه للشجرةِ الحالية.
+  const file = path.resolve(ROOT, arg('--verify-report', DEFAULT_REPORT) ?? DEFAULT_REPORT);
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  const { report_sha256: claimed, ...rest } = saved;
+  const problems = [];
+  if (sha256(JSON.stringify(rest, null, 2)) !== claimed)
+    problems.push('report_sha256 لا يطابقُ المحتوى');
+  const tree = executableTreeDigest();
+  if (saved.environment?.tree_sha256 !== tree.sha256)
+    problems.push(`بصمةُ الشجرة ${saved.environment?.tree_sha256} ≠ الحالية ${tree.sha256}`);
+  if (saved.environment?.git_dirty !== false) problems.push('شُغِّلَ على شجرةٍ غيرِ نظيفة');
+  const out = { file: path.relative(ROOT, file), ok: problems.length === 0, problems, tree };
+  process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+  process.exit(out.ok ? 0 : 1);
+}
+
+// ── أدوات ────────────────────────────────────────────────────────────────────
 
 function findPgBin() {
   const explicit = arg('--pg-bin');
@@ -233,6 +277,8 @@ const env = {
   cgroup_parent: process.env['XUUX_CGROUP_PARENT'] ?? null,
   git_head: run('git', ['rev-parse', 'HEAD']).stdout.trim(),
   git_dirty: run('git', ['status', '--porcelain']).stdout.trim() !== '',
+  tree_sha256: executableTreeDigest().sha256,
+  tree_files: executableTreeDigest().files,
 };
 
 /** @type {Record<string, { status: string, file: string }>} */
@@ -272,27 +318,43 @@ async function main() {
   record('LAB-ENV-01', 'عنقودٌ مؤقّتٌ جديدٌ من initdb (لا ملفّاتٍ قديمة)', 'PASS', {
     port: cluster.port,
   });
+  // شجرةٌ غيرُ نظيفةٍ ⇒ FAIL: لا يُعرَضُ تشغيلٌ على تعديلاتٍ غيرِ ملتزَمةٍ كأنّه تشغيلُ الرأس.
+  record(
+    'LAB-ENV-02',
+    'الشجرةُ نظيفةٌ: الرأسُ المختبَرُ هو الملتزَم (git_head + tree_sha256)',
+    env.git_dirty ? 'FAIL' : 'PASS',
+    { git_head: env.git_head, tree_sha256: env.tree_sha256, git_dirty: env.git_dirty },
+  );
 
   // ── A: اختباراتُ السياجِ على العنقودِ الجديد ──
   const tcpUrl = `postgresql://postgres@127.0.0.1:${cluster.port}/state`;
-  for (const file of [
-    'tests/fence/db-fence.test.mjs',
-    'tests/fence/halt-integrity.test.mjs',
-    'tests/fence/effects.test.mjs',
-  ]) {
+  /** @type {Array<[string, Record<string, string>]>} */
+  const suites = [
+    ['tests/fence/db-fence.test.mjs', {}],
+    ['tests/fence/fence-lifecycle.test.mjs', {}],
+    ['tests/fence/halt-integrity.test.mjs', {}],
+    ['tests/fence/effects.test.mjs', {}],
+    ['tests/fence/connection-map.test.mjs', {}],
+    // §6: libsodium مرجعٌ مستقلٌّ **إلزاميّ** هنا (غيابُه FAIL لا SKIP)، وضبابٌ أوسع.
+    ['tests/fence/ed25519.test.mjs', { XUUX_ED_SODIUM: 'required', XUUX_ED_FUZZ_N: '2000' }],
+  ];
+  for (const [file, extraEnv] of suites) {
     const r = run(
       process.execPath,
-      ['--test', '--test-reporter=tap', '--test-concurrency=1', '--test-timeout=60000', file],
-      { env: { ...process.env, DATABASE_URL: tcpUrl }, timeout: 900_000 },
+      ['--test', '--test-reporter=tap', '--test-concurrency=1', '--test-timeout=600000', file],
+      { env: { ...process.env, DATABASE_URL: tcpUrl, ...extraEnv }, timeout: 1_800_000 },
     );
     const log = saveLog(`${path.basename(file)}.tap`, r.stdout + r.stderr);
     let parsed = 0;
-    for (const line of r.stdout.split('\n')) {
-      const m = /^\s*(not ok|ok) \d+ - (.*?)(?: # (SKIP|TODO)\b(.*))?$/.exec(line);
+    const lines = r.stdout.split('\n');
+    // مجموعاتُ describe في المستوى الأعلى حين يكونُ في الملفِّ نتائجُ متداخلة: ليست اختبارات.
+    const nested = lines.some((l) => /^\s+(not ok|ok) \d+ - /.test(l));
+    for (const line of lines) {
+      const m = /^(\s*)(not ok|ok) \d+ - (.*?)(?: # (SKIP|TODO)\b(.*))?$/.exec(line);
       if (m === null) continue;
-      const name = (m[2] ?? '').replace(/\\#/g, '#').trim();
-      if (name === 'سياجُ القاعدة — WL-532') continue; // مجموعةُ describe
-      const status = m[3] === 'SKIP' ? 'NOT RUN' : m[1] === 'ok' ? 'PASS' : 'FAIL';
+      if (nested && (m[1] ?? '') === '') continue;
+      const name = (m[3] ?? '').replace(/\\#/g, '#').trim();
+      const status = m[4] === 'SKIP' ? 'NOT RUN' : m[2] === 'ok' ? 'PASS' : 'FAIL';
       testResults[name] = { status, file };
       parsed++;
     }
@@ -407,36 +469,29 @@ async function liveLab() {
     await sovClient.connect();
     sovereign.db = sovClient;
   };
-  const resume = async (/** @type {string} */ label) => {
-    const detail = {
-      lab: label,
-      at: new Date().toISOString(),
-      scopes: [],
-      egress: [],
-      note: 'لا آثارَ خارجيةً في سيناريو المختبر',
-    };
-    const d = await root.with(async (c) => {
-      const h = (
-        await c.query(`SELECT encode(sha256(convert_to($1::jsonb::text,'UTF8')),'hex') AS d`, [
-          JSON.stringify(detail),
-        ])
-      ).rows[0].d;
-      await c.query('SELECT fence.record_effects_evidence($1, $2::jsonb)', [
-        h,
-        JSON.stringify(detail),
-      ]);
-      return h;
-    });
-    return sovereign.resume(d);
+  /**
+   * استئنافٌ كما يفعلُه المشغِّل: دليلُ الآثارِ مربوطٌ بآخرِ إيقافٍ مكتمل، فإن لم يجتزْ مراجعةَ
+   * السياديِّ (لا دليلَ في العهدِ بعدَ الإقلاعِ أو RECOVER، أو دليلٌ لإيقافٍ سابق) يُجرى إيقافٌ كامل.
+   * @param {string} label
+   */
+  const resume = async (label) => {
+    let s = await sovereign.status();
+    if (!reviewEffectsEvidence(s, String(s.effects_evidence?.sha256)).ok) {
+      const hr = await root.halt(`lab-resume-${label}`, { effects: noEffects });
+      must(hr.systemHaltComplete === true, `إيقافُ ما قبلَ الاستئناف: ${JSON.stringify(hr)}`);
+      s = await sovereign.status();
+    }
+    return sovereign.resume(String(s.effects_evidence?.sha256));
   };
   const noEffects = {
     stop: async () => ({ ok: true, detail: { lab: true, scopes: [], egress: [] } }),
   };
   const boot = async (/** @type {'alpha'|'beta'} */ w) => {
     const bootId = newBootId();
-    return root.issueCredential(w, bootId, (ch) =>
+    const c = await root.issueCredential(w, bootId, (ch) =>
       signCredentialChallenge(keys[w], ch, { workerId: w, bootId }),
     );
+    return { ...c, boot_id: bootId };
   };
 
   // ── تشديدُ المصادقة ──
@@ -487,38 +542,204 @@ async function liveLab() {
     }
   }
 
+  // ── تطبيقُ العاملِ: نسخةٌ يقرؤها مستخدمو العمّال (المستودعُ تحتَ مجلّدٍ 0750) ──
+  const app = path.join(work, 'app');
+  /** @type {Record<string, string>} */
+  const keyFiles = {};
+  /** يمدُّ نسخةَ src/ وكاتبِ المختبرِ واعتمادِ pg (وإغلاقِه)، ومفاتيحُ العمّالِ 0400 لمالكيها. */
+  const prepareApp = () => {
+    mkdirSync(path.join(app, 'scripts'), { recursive: true });
+    cpSync(path.join(ROOT, 'src'), path.join(app, 'src'), { recursive: true });
+    cpSync(
+      path.join(ROOT, 'scripts', 'fence-lab-writer.mjs'),
+      path.join(app, 'scripts', 'fence-lab-writer.mjs'),
+    );
+    cpSync(path.join(ROOT, 'package.json'), path.join(app, 'package.json'));
+    const seen = new Set();
+    const pending = ['pg'];
+    while (pending.length > 0) {
+      const name = /** @type {string} */ (pending.pop());
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const dir = path.join(ROOT, 'node_modules', name);
+      cpSync(dir, path.join(app, 'node_modules', name), { recursive: true });
+      const pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+      pending.push(...Object.keys(pkg.dependencies ?? {}));
+    }
+    must(run('chmod', ['-R', 'a+rX,go-w', app]).status === 0, 'chmod app');
+    const keysDir = path.join(app, 'keys');
+    mkdirSync(keysDir, { mode: 0o755 });
+    chmodSync(keysDir, 0o755);
+    for (const w of WORKERS) {
+      const tmpKey = path.join(work, `${w}.pem.tmp`);
+      writeFileSync(tmpKey, keys[w].privateKeyPem, { mode: 0o600 });
+      keyFiles[w] = path.join(keysDir, `${w}.pem`);
+      const inst = run('sudo', [
+        '-n',
+        'install',
+        '-o',
+        OS_USER(w),
+        '-m',
+        '0400',
+        tmpKey,
+        /** @type {string} */ (keyFiles[w]),
+      ]);
+      rmSync(tmpKey, { force: true });
+      must(inst.status === 0, `install key ${w}: ${inst.stderr}`);
+    }
+    return { packages: [...seen].sort() };
+  };
+
+  /**
+   * يُطلقُ كاتباً حقيقيّاً بمستخدمِ نظامِ العامل: مجمّعُ pg مختومٌ بمفتاحِ العامل.
+   * @param {'alpha'|'beta'} w @param {Record<string, any>} c - الاعتمادُ المُصدَر
+   * @param {{ writer: string, poolSize?: number, keyOf?: 'alpha'|'beta', sealOnly?: boolean }} o
+   */
+  const spawnWriter = async (w, c, o) => {
+    const s = await sovereign.status();
+    const input = {
+      sock: cluster.sock,
+      port: cluster.port,
+      database: 'lab',
+      role: String(c.role_name),
+      workerId: w,
+      bootId: String(c.boot_id),
+      epoch: c.epoch,
+      sysid: String(s.live.sysid),
+      keyFile: keyFiles[o.keyOf ?? w],
+      poolSize: o.poolSize ?? 4,
+      writer: o.writer,
+      sealOnly: o.sealOnly === true,
+    };
+    const child = spawn(
+      'sudo',
+      [
+        '-n',
+        '-u',
+        OS_USER(w),
+        process.execPath,
+        path.join(app, 'scripts', 'fence-lab-writer.mjs'),
+        Buffer.from(JSON.stringify(input)).toString('base64url'),
+      ],
+      { cwd: app, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const bus = new EventEmitter();
+    /** @type {Array<Record<string, any>>} */
+    const messages = [];
+    let buf = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        try {
+          const m = JSON.parse(line);
+          messages.push(m);
+          bus.emit('message', m);
+        } catch {
+          stderr += `${line}\n`;
+        }
+      }
+    });
+    child.stderr.on('data', (d) => (stderr += d));
+    const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+    /** @param {string[]} types @param {number} [ms] */
+    const waitFor = (types, ms = 15_000) =>
+      new Promise((resolve) => {
+        const hit = messages.find((m) => types.includes(m.type));
+        if (hit) return resolve(hit);
+        const t = setTimeout(() => {
+          bus.off('message', on);
+          resolve({ type: 'timeout' });
+        }, ms);
+        /** @param {any} m */
+        const on = (m) => {
+          if (!types.includes(m.type)) return;
+          clearTimeout(t);
+          bus.off('message', on);
+          resolve(m);
+        };
+        bus.on('message', on);
+      });
+    return {
+      child,
+      bus,
+      messages,
+      exited,
+      waitFor,
+      get stderr() {
+        return stderr;
+      },
+      kill: () => run('sudo', ['-n', 'pkill', '-KILL', '-u', OS_USER(w), '-f', 'fence-lab-writer']),
+    };
+  };
+  /** @param {string} role */
+  const credStatus = async (role) =>
+    (
+      await labPool.query(
+        'SELECT status, revoke_reason FROM fence.credentials WHERE role_name = $1',
+        [role],
+      )
+    ).rows[0] ?? null;
+  /** @param {string} writer */
+  const rowsOf = async (writer) =>
+    Number(
+      (
+        await labPool.query(`SELECT count(*)::int AS n FROM state.lab_probe WHERE writer = $1`, [
+          writer,
+        ])
+      ).rows[0].n,
+    );
+
   const cred = await boot('alpha');
   const role = String(cred.role_name);
+  const workerChecks = [
+    'LAB-APP',
+    'LAB-CRED-05a',
+    'LAB-CRED-05b',
+    'LAB-CRED-05c',
+    'LAB-CRED-05d',
+    'LAB-CRED-05e',
+    'LAB-SEAL-01',
+    'LAB-UID-01',
+    'LAB-UID-02',
+    'LAB-UID-03',
+    'LAB-UID-04',
+    'LAB-UID-05',
+    'LAB-HALT-LIVE',
+  ];
   if (!osUsersReady) {
-    for (const id of [
-      'LAB-CRED-05a',
-      'LAB-CRED-05b',
-      'LAB-CRED-05c',
-      'LAB-CRED-05d',
-      'LAB-CRED-05e',
-      'LAB-HALT-LIVE',
-      'LAB-CONC',
-    ])
+    for (const id of workerChecks)
       record(id, 'يتطلّبُ مستخدمي نظامٍ للعمّال (sudo -n)', 'NOT RUN', {
         reason: 'لا sudo غيرُ تفاعليّ',
       });
   } else {
+    await check('LAB-APP', 'نسخةُ تطبيقِ العاملِ ومفاتيحُه (0400 لمستخدمِ كلِّ عامل)', async () =>
+      prepareApp(),
+    );
     await check(
       'LAB-CRED-05a',
-      'T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه ويكتب',
+      'T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه — لكنّ جلسةً غيرَ مختومةٍ لا تكتب (XF011)',
       async () => {
-        const r = psqlAs(
-          OS_USER('alpha'),
-          role,
-          `INSERT INTO state.lab_probe(writer) VALUES ('alpha-ok'); SELECT fence.whoami()::text`,
-        );
+        const r = psqlAs(OS_USER('alpha'), role, `SELECT fence.whoami()::text`);
         must(r.ok, r.err);
         const who = JSON.parse(r.out.split('\n').pop() ?? '{}');
         must(
-          who.known === true && who.worker_id === 'alpha' && who.credential_status === 'ACTIVE',
+          who.known === true &&
+            who.worker_id === 'alpha' &&
+            who.credential_status === 'ACTIVE' &&
+            who.sealed === false,
           r.out,
         );
-        return { whoami: who };
+        const w = psqlAs(
+          OS_USER('alpha'),
+          role,
+          `INSERT INTO state.lab_probe(writer) VALUES ('alpha-unsealed')`,
+        );
+        must(!w.ok && /المختومة/.test(w.err), `كتابةٌ غيرُ مختومةٍ قُبِلت: ${w.out}${w.err}`);
+        return { whoami: who, unsealed_write: w.err.split('\n')[0]?.slice(0, 200) };
       },
     );
     await check(
@@ -580,66 +801,230 @@ async function liveLab() {
       },
     );
 
-    // ── إيقافٌ حقيقيٌّ تحتَ كاتبٍ حيٍّ، متكرّر ──
+    // ── §5: ختمُ الجلساتِ وعمليّاتٌ بالـUID نفسِه ──
+    await check(
+      'LAB-SEAL-01',
+      'عملية Node بمستخدمِ alpha تختمُ مجمّعَها (4 وصلات) وتكتب؛ المُشرِفُ يطابقُ الختم',
+      async () => {
+        const wr = await spawnWriter('alpha', cred, { writer: 'seal-01', poolSize: 4 });
+        const confirmed = await confirmWorkerSeal(root, wr.bus, cred, { timeoutMs: 15_000 });
+        await new Promise((r) => setTimeout(r, 300));
+        const n = await rowsOf('seal-01');
+        must(n > 0, `لا كتابة: ${wr.stderr}`);
+        // UID-01 هنا: الكاتبُ حيّ ومختوم.
+        const late = psqlAs(
+          OS_USER('alpha'),
+          role,
+          `INSERT INTO state.lab_probe(writer) VALUES ('uid-01')`,
+        );
+        record(
+          'LAB-UID-01',
+          'عمليةٌ ثانيةٌ بالـUID نفسِه بعدَ الختم: الدخولُ مرفوض (الدورُ NOLOGIN) والعاملُ يواصل',
+          !late.ok &&
+            /not permitted to log in/.test(late.err) &&
+            (await credStatus(role))?.status === 'ACTIVE'
+            ? 'PASS'
+            : 'FAIL',
+          { stderr: late.err.split('\n')[0]?.slice(0, 200), credential: await credStatus(role) },
+        );
+        await root.revokeCredential(role, 'lab-seal-01-done');
+        const code = await Promise.race([
+          wr.exited,
+          new Promise((r) => setTimeout(() => r('timeout'), 10_000)),
+        ]);
+        if (code === 'timeout') wr.kill();
+        return { sessions: confirmed, rows: n, writer_exit: code, stopped: wr.messages.at(-1) };
+      },
+    );
+    await check(
+      'LAB-UID-02',
+      'دخيلٌ بالـUID نفسِه حاضرٌ لحظةَ الختم ⇒ الختمُ مرفوض (session_set_mismatch)، الاعتمادُ يُلغى، الدخيلُ يُنهى',
+      async () => {
+        const c = await boot('alpha');
+        const r = String(c.role_name);
+        const intruder = spawn(
+          'sudo',
+          [
+            '-n',
+            '-u',
+            OS_USER('alpha'),
+            bin('psql'),
+            '-X',
+            '-At',
+            '-h',
+            cluster.sock,
+            '-p',
+            String(cluster.port),
+            '-U',
+            r,
+            '-d',
+            'lab',
+            '-c',
+            'SELECT pg_sleep(30)',
+          ],
+          { stdio: ['ignore', 'ignore', 'pipe'] },
+        );
+        let ierr = '';
+        intruder.stderr.on('data', (d) => (ierr += d));
+        const iexit = new Promise((res) => intruder.on('exit', (code) => res(code)));
+        for (let i = 0; i < 50; i++) {
+          const n = (
+            await labPool.query(
+              'SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = $1',
+              [r],
+            )
+          ).rows[0].n;
+          if (n > 0) break;
+          await new Promise((res) => setTimeout(res, 100));
+        }
+        const wr = await spawnWriter('alpha', c, { writer: 'uid-02' });
+        const sealP = confirmWorkerSeal(root, wr.bus, c, { timeoutMs: 15_000 }).then(
+          () => 'confirmed',
+          (e) => String(e.message),
+        );
+        const msg = await wr.waitFor(['xuux-fence/sealed', 'xuux-fence/seal-failed']);
+        const sup = await sealP;
+        const code = await Promise.race([
+          iexit,
+          new Promise((res) => setTimeout(() => res('timeout'), 10_000)),
+        ]);
+        if (code === 'timeout') intruder.kill('SIGKILL');
+        const st = await credStatus(r);
+        must(msg.type === 'xuux-fence/seal-failed', JSON.stringify(msg));
+        must(
+          st?.status === 'REVOKED' && /session_set_mismatch/.test(String(st?.revoke_reason)),
+          JSON.stringify(st),
+        );
+        must(code !== 0 && code !== 'timeout', `الدخيلُ لم يُنهَ (${code})`);
+        must((await rowsOf('uid-02')) === 0, 'كتابةٌ رغمَ الرفض');
+        return {
+          worker: msg,
+          supervisor: sup,
+          credential: st,
+          intruder_exit: code,
+          intruder_stderr: ierr.trim().slice(0, 160),
+        };
+      },
+    );
+    await check(
+      'LAB-UID-03',
+      'دخيلٌ بالـUID نفسِه بلا المفتاح يختمُ بتوقيعٍ مزوَّر ⇒ bad_signature، الاعتمادُ يُلغى',
+      async () => {
+        const c = await boot('alpha');
+        const r = String(c.role_name);
+        const q = psqlAs(
+          OS_USER('alpha'),
+          r,
+          `SELECT fence.seal_sessions(jsonb_build_array(fence.session_tag()), decode(repeat('ab', 64), 'hex'))::text`,
+        );
+        const out = JSON.parse(q.out.split('\n').pop() || '{}');
+        const st = await credStatus(r);
+        must(out.sealed === false && out.reason === 'bad_signature', q.out + q.err);
+        must(st?.status === 'REVOKED', JSON.stringify(st));
+        return { result: out, credential: st };
+      },
+    );
+    await check(
+      'LAB-UID-04',
+      'حدُّ نظامِ التشغيل: مفتاحُ alpha (0400) لا يقرؤه مستخدمُ beta — ويقرؤه أيُّ عمليةٍ بـUID alpha (حدٌّ معلن)',
+      async () => {
+        const other = run('sudo', [
+          '-n',
+          '-u',
+          OS_USER('beta'),
+          'cat',
+          /** @type {string} */ (keyFiles['alpha']),
+        ]);
+        const same = run('sudo', [
+          '-n',
+          '-u',
+          OS_USER('alpha'),
+          'cat',
+          /** @type {string} */ (keyFiles['alpha']),
+        ]);
+        must(other.status !== 0, 'beta قرأ مفتاحَ alpha');
+        must(same.status === 0 && same.stdout.includes('PRIVATE KEY'), 'UID alpha لم يقرأ مفتاحَه');
+        return {
+          beta_read: other.stderr.trim().slice(0, 160),
+          same_uid_can_read: true,
+          note: 'أيُّ عمليةٍ بـUID العاملِ تقرأُ المفتاحَ وتستطيعُ ptrace العاملِ (لا Yama هنا) — الختمُ لا يُثبتُ هويّةَ العمليةِ أمامَها',
+        };
+      },
+    );
+    await check(
+      'LAB-UID-05',
+      'خطرٌ متبقٍّ: عمليةٌ بالـUID نفسِه تقرأُ المفتاحَ وتسبقُ العاملَ إلى الختم ⇒ تختمُ وتكتب؛ العاملُ الحقيقيُّ يفشلُ فيُلغي المُشرِفُ الاعتمادَ ويُنهي المهاجم',
+      async () => {
+        const c = await boot('alpha');
+        const r = String(c.role_name);
+        const attacker = await spawnWriter('alpha', c, { writer: 'uid-05-attacker', poolSize: 2 });
+        const am = await attacker.waitFor(['xuux-fence/sealed', 'xuux-fence/seal-failed']);
+        must(am.type === 'xuux-fence/sealed', `المهاجمُ لم يختم: ${JSON.stringify(am)}`);
+        await new Promise((res) => setTimeout(res, 300));
+        const real = await spawnWriter('alpha', c, { writer: 'uid-05-real' });
+        const sup = await confirmWorkerSeal(root, real.bus, c, { timeoutMs: 15_000 }).then(
+          () => 'confirmed',
+          (e) => String(e.message),
+        );
+        const revokedAt = new Date();
+        const acode = await Promise.race([
+          attacker.exited,
+          new Promise((res) => setTimeout(() => res('timeout'), 10_000)),
+        ]);
+        if (acode === 'timeout') attacker.kill();
+        await new Promise((res) => setTimeout(res, 300));
+        const before = await rowsOf('uid-05-attacker');
+        const afterRevoke = Number(
+          (
+            await labPool.query(
+              `SELECT count(*)::int AS n FROM state.lab_probe WHERE writer = 'uid-05-attacker' AND at > $1`,
+              [revokedAt],
+            )
+          ).rows[0].n,
+        );
+        const st = await credStatus(r);
+        must(sup !== 'confirmed', 'المُشرِفُ أكّدَ ختمَ المهاجم');
+        must(st?.status === 'REVOKED', JSON.stringify(st));
+        must(afterRevoke === 0, `كتابةٌ بعدَ الإلغاء: ${afterRevoke}`);
+        must((await rowsOf('uid-05-real')) === 0, 'العاملُ الحقيقيُّ كتب');
+        return {
+          residual_risk: true,
+          attacker_rows_before_revoke: before,
+          attacker_rows_after_revoke: afterRevoke,
+          attacker_exit: acode,
+          real_worker: real.messages[0] ?? null,
+          supervisor: sup,
+          credential: st,
+          note: 'كشفٌ بعديٌّ لا منع: نافذةُ المهاجمِ بينَ ختمِه وفشلِ العاملِ الحقيقيّ حقيقية',
+        };
+      },
+    );
+
+    // ── إيقافٌ حقيقيٌّ تحتَ كاتبٍ حيٍّ مختوم، متكرّر ──
     /** @type {Array<Record<string, unknown>>} */
     const rounds = [];
     let failures = 0;
     for (let i = 0; i < iterations; i++) {
-      const c = i === 0 ? cred : await boot('alpha');
+      if ((await sovereign.status()).effective.state !== 'RUNNING') await resume(`pre-live-${i}`);
+      const c = await boot('alpha');
       const r = String(c.role_name);
       const writer = `w${i}`;
-      const script = `\\set ON_ERROR_STOP 1\n${Array.from({ length: 4000 }, () => `INSERT INTO state.lab_probe(writer) VALUES ('${writer}'); SELECT pg_sleep(0.005);`).join('\n')}\n`;
-      const child = spawn(
-        'sudo',
-        [
-          '-n',
-          '-u',
-          OS_USER('alpha'),
-          bin('psql'),
-          '-X',
-          '-q',
-          '-At',
-          '-h',
-          cluster.sock,
-          '-p',
-          String(cluster.port),
-          '-U',
-          r,
-          '-d',
-          'lab',
-        ],
-        {
-          stdio: ['pipe', 'ignore', 'pipe'],
-        },
+      const wr = await spawnWriter('alpha', c, { writer, poolSize: 4 });
+      const sealed = await confirmWorkerSeal(root, wr.bus, c, { timeoutMs: 15_000 }).then(
+        () => true,
+        (e) => String(e.message),
       );
-      let stderr = '';
-      child.stderr.on('data', (d) => (stderr += d));
-      const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
-      child.stdin.on('error', () => {}); // الكاتبُ يُنهى أثناءَ الإرسال: EPIPE متوقَّع
-      child.stdin.end(script);
       await new Promise((res) => setTimeout(res, 150 + Math.floor(Math.random() * 400)));
-      const before = Number(
-        (
-          await labPool.query(`SELECT count(*)::int AS n FROM state.lab_probe WHERE writer = $1`, [
-            writer,
-          ])
-        ).rows[0].n,
-      );
+      const before = await rowsOf(writer);
       const h = await root.halt(`lab-live-${i}`, { effects: noEffects });
       const code = await Promise.race([
-        exited,
+        wr.exited,
         new Promise((res) => setTimeout(() => res('timeout'), 10_000)),
       ]);
       const fencedAt = (
         await labPool.query(`SELECT max(at) AS t FROM fence.evidence WHERE kind = 'DB_FENCED'`)
       ).rows[0].t;
-      const n1 = Number(
-        (
-          await labPool.query(`SELECT count(*)::int AS n FROM state.lab_probe WHERE writer = $1`, [
-            writer,
-          ])
-        ).rows[0].n,
-      );
+      const n1 = await rowsOf(writer);
       const late = Number(
         (
           await labPool.query(
@@ -649,19 +1034,14 @@ async function liveLab() {
         ).rows[0].n,
       );
       await new Promise((res) => setTimeout(res, 250));
-      const n2 = Number(
-        (
-          await labPool.query(`SELECT count(*)::int AS n FROM state.lab_probe WHERE writer = $1`, [
-            writer,
-          ])
-        ).rows[0].n,
-      );
+      const n2 = await rowsOf(writer);
       const relogin = psqlAs(
         OS_USER('alpha'),
         r,
         `INSERT INTO state.lab_probe(writer) VALUES ('${writer}-relogin')`,
       );
       const ok =
+        sealed === true &&
         h.dbFenced === true &&
         h.systemHaltComplete === true &&
         before > 0 &&
@@ -673,22 +1053,23 @@ async function liveLab() {
       if (!ok) failures++;
       rounds.push({
         i,
+        sealed,
         before,
         committed: n1,
         after_wait: n2,
         late_writes: late,
         writer_exit: code,
+        writer_stopped: wr.messages.find((m) => m.type === 'stopped') ?? null,
         relogin_refused: !relogin.ok,
         systemHaltComplete: h.systemHaltComplete,
-        writer_stderr: stderr.trim().split('\n').pop()?.slice(0, 160),
       });
-      if (code === 'timeout') child.kill('SIGKILL');
+      if (code === 'timeout') wr.kill();
       await resume(`lab-live-${i}`);
     }
     const lg = saveLog('halt-live-rounds.json', JSON.stringify(rounds, null, 2));
     record(
       'LAB-HALT-LIVE',
-      `إيقافٌ حقيقيٌّ تحتَ كاتبٍ حيٍّ بمستخدمِ نظامِ العامل × ${iterations}: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة`,
+      `إيقافٌ حقيقيٌّ تحتَ كاتبٍ Node مختومٍ (4 وصلات) بمستخدمِ نظامِ العامل × ${iterations}: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة`,
       failures === 0 ? 'PASS' : 'FAIL',
       {
         iterations,

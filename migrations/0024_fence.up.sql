@@ -68,6 +68,9 @@ ALTER ROLE xuux_migrator NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION NOBYP
 
 GRANT xuux_worker TO xf_owner WITH ADMIN OPTION, INHERIT FALSE, SET FALSE;
 GRANT pg_signal_backend TO xf_owner;
+-- ختمُ الجلسات (`fence.seal_sessions`) يقرأُ `backend_start` لجلساتِ دورِ الإقلاع؛ تلك
+-- القيمةُ محجوبةٌ عن غيرِ المالكِ دونَ pg_read_all_stats. قراءةٌ فقط، ولا تجاوزَ بها.
+GRANT pg_read_all_stats TO xf_owner;
 GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_system() TO xf_owner;
 GRANT EXECUTE ON FUNCTION pg_catalog.pg_control_checkpoint() TO xf_owner;
 
@@ -123,6 +126,10 @@ CREATE TABLE fence.credentials (
   revoked_at timestamptz,
   revoke_reason text,
   role_dropped boolean NOT NULL DEFAULT false,
+  -- ختمُ الجلسات: مجموعةُ (pid, backend_start) التي أعلنتها العمليةُ الحاملةُ لمفتاحِ
+  -- العاملِ بتوقيعِه. لا كتابةَ ولا قراءةَ لجلسةٍ خارجَها؛ وبعدَ الختمِ الدورُ NOLOGIN.
+  sealed_at timestamptz,
+  sealed_sessions jsonb,
   UNIQUE (worker_id, boot_id)
 );
 CREATE UNIQUE INDEX credentials_one_active_per_worker ON fence.credentials (worker_id) WHERE status = 'ACTIVE';
@@ -198,6 +205,9 @@ CREATE TABLE fence.evidence (
   kind text NOT NULL CHECK (kind ~ '^[A-Z_]{3,40}$'),
   sha256 text NOT NULL CHECK (sha256 ~ '^[0-9a-f]{64}$'),
   detail jsonb NOT NULL,
+  -- ما رصدته القاعدةُ نفسُها لحظةَ التسجيل (لا ما ادّعاه المُسجِّل): الإيقافُ والعهدُ
+  -- والقائمةُ والتجسُّد. RESUME يقارنُه بالحالةِ الحيّة.
+  binding jsonb,
   recorded_by name NOT NULL DEFAULT session_user,
   at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
@@ -216,9 +226,16 @@ REVOKE ALL ON ALL TABLES IN SCHEMA fence FROM PUBLIC;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA fence FROM PUBLIC;
 
 -- ── Ed25519 (RFC 8032) داخلَ القاعدة ──────────────────────────────────────────
--- تحقّقٌ فقط (لا مفاتيحَ خاصّةً في القاعدة). مُقارَنٌ مع `node:crypto` ومتّجهاتِ
--- RFC 8032 في `tests/fence/db-fence.test.mjs`. تحقّقٌ بلا عاملِ مرافق (cofactorless)
--- كـOpenSSL؛ يرفضُ ترميزاً غيرَ قانونيّ (y ≥ p) وS ≥ L.
+-- تحقّقٌ فقط (لا مفاتيحَ خاصّةً في القاعدة). سياسةٌ صارمةٌ بنمطِ libsodium:
+--   • ترميزٌ قانونيٌّ لـA وR (y < p، ولا x=0 مع بتِّ الإشارة) وS < L (يمنعُ قابليةَ
+--     التطويع S+L)؛
+--   • رفضُ A أو R من رتبةٍ صغيرة ([8]P = O): مفتاحٌ عامٌّ من رتبةٍ صغيرةٍ يجعلُ
+--     التواقيعَ قابلةً للتزويرِ لأيّ رسالة (Wycheproof ‹SmallOrderPublicKey›)؛
+--   • معادلةٌ بلا عاملِ مرافق (cofactorless) [S]B = R + [k]A.
+-- وعندَ تسجيلِ مفتاحٍ (bootstrap/roster_set/key_rotate) يُشترطُ أيضاً أن يكونَ في
+-- الزمرةِ الجزئيةِ ذاتِ الرتبةِ الأوّلية ([L]A = O) فيُرفضُ المفتاحُ مختلطُ الرتبة.
+-- مُدقَّقٌ تفاضلياً مع node:crypto وlibsodium ومتّجهاتِ RFC 8032 وWycheproof
+-- وed25519-speccheck في `tests/fence/ed25519.test.mjs` و`scripts/fence-lab.mjs`.
 CREATE FUNCTION fence._ed_modpow(b numeric, e numeric, m numeric) RETURNS numeric
 LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE r numeric := 1; x numeric := mod(b, m); n numeric := e;
@@ -302,6 +319,38 @@ BEGIN
 END
 $f$;
 
+-- نقطةٌ إسقاطيةٌ (X:Y:Z:T) هي العنصرُ المحايدُ إذا X = 0 وY = Z.
+CREATE FUNCTION fence._ed_is_identity(pt numeric[]) RETURNS boolean
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT pt[1] = 0 AND pt[2] = pt[3]
+$f$;
+
+-- رتبةٌ صغيرة ⇔ [8]P = O (يشملُ العناصرَ الثمانيةَ لزمرةِ الالتواء).
+CREATE FUNCTION fence._ed_small_order(pt numeric[]) RETURNS boolean
+LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE x numeric[] := pt;
+BEGIN
+  x := fence._ed_add(x, x); x := fence._ed_add(x, x); x := fence._ed_add(x, x);
+  RETURN fence._ed_is_identity(x);
+END
+$f$;
+
+-- قبولُ مفتاحٍ عامٍّ للتسجيل: 32 بايتاً، ترميزٌ قانونيّ، ليس من رتبةٍ صغيرة، وفي
+-- الزمرةِ الجزئيةِ الأوّلية ([L]A = O ⇒ لا مركّبةَ التواء). أغلى من التحقّق، لكنه
+-- يُنفَّذُ مرّةً عند التسجيلِ لا عندَ كلِّ توقيع.
+CREATE FUNCTION fence.ed25519_key_ok(pub bytea) RETURNS boolean
+LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE
+  l CONSTANT numeric := 7237005577332262213973186563042994240857116359379907606001950938285454250989;
+  a numeric[];
+BEGIN
+  IF pub IS NULL OR length(pub) <> 32 THEN RETURN false; END IF;
+  a := fence._ed_decode(pub);
+  IF a IS NULL OR fence._ed_small_order(a) THEN RETURN false; END IF;
+  RETURN fence._ed_is_identity(fence._ed_mul(l, a));
+END
+$f$;
+
 CREATE FUNCTION fence.ed25519_verify(pub bytea, msg bytea, sig bytea) RETURNS boolean
 LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE
@@ -320,6 +369,7 @@ BEGIN
   a := fence._ed_decode(pub);
   r := fence._ed_decode(substring(sig FROM 1 FOR 32));
   IF a IS NULL OR r IS NULL THEN RETURN false; END IF;
+  IF fence._ed_small_order(a) OR fence._ed_small_order(r) THEN RETURN false; END IF;
   s := fence._ed_le2int(substring(sig FROM 33 FOR 32));
   IF s >= l THEN RETURN false; END IF;
   k := mod(fence._ed_le2int(sha512(substring(sig FROM 1 FOR 32) || pub || msg)), l);
@@ -397,7 +447,12 @@ BEGIN
       'roster_version', c.roster_version, 'roster_hash', c.roster_hash, 'sysid', c.sysid, 'dbname', c.dbname,
       'pm_start_epoch', c.pm_start_epoch::text, 'timeline', c.timeline, 'lease_window_s', c.lease_window_s,
       'lease_renew_s', c.lease_renew_s, 'command_max_validity_s', c.command_max_validity_s,
-      'seal', c.seal, 'has_sovereign_key', c.sovereign_pubkey IS NOT NULL) END);
+      'seal', c.seal, 'has_sovereign_key', c.sovereign_pubkey IS NOT NULL) END,
+    -- ما يراجعُه السياديُّ قبلَ أن يوقّعَ RESUME (لا يوقّعُ هاشاً لم يرَ تفاصيلَه وربطَه).
+    'effects_evidence', (SELECT jsonb_build_object('id', e.id, 'kind', e.kind, 'epoch', e.epoch, 'sha256', e.sha256,
+        'detail', e.detail, 'binding', e.binding) FROM fence.evidence e
+       WHERE c.id IS NOT NULL AND e.epoch = c.epoch AND e.kind IN ('EFFECTS_HALTED', 'EFFECTS_NOT_HALTED') ORDER BY e.id DESC LIMIT 1),
+    'latest_complete_halt', fence._latest_complete_halt());
 END
 $f$;
 
@@ -501,6 +556,26 @@ $ao$;
 -- يُقرَّرُ بـsession_user (لا current_user ولا متغيّرِ جلسة): SET ROLE وSECURITY
 -- DEFINER وGUC مُزوَّر لا تُغيّرُه. superuser يمرّ — حدٌّ مُعلَن (`T-OWN-04`) لأنّه
 -- يُعطّلُ الزنادَ أصلاً؛ ادّعاءُ غيرِ ذلك كذب.
+-- وسمُ جلسةٍ خادمة: pid ولحظةُ بدئها بالميكروثانية (يمنعُ الالتباسَ بإعادةِ استعمالِ pid).
+CREATE FUNCTION fence._backend_tag(p integer) RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT jsonb_build_object('pid', a.pid, 'start', ((extract(epoch FROM a.backend_start) * 1000000)::bigint)::text)
+  FROM pg_stat_get_activity(p) a WHERE a.pid = p AND a.backend_start IS NOT NULL
+$f$;
+
+-- هل الجلسةُ الحاليّةُ ضمنَ الجلساتِ المختومةِ لهذا الاعتماد؟
+CREATE FUNCTION fence._session_sealed(cr fence.credentials) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT cr.sealed_at IS NOT NULL AND cr.sealed_sessions IS NOT NULL
+     AND coalesce(cr.sealed_sessions @> jsonb_build_array(fence._backend_tag(pg_backend_pid())), false)
+$f$;
+
+-- وسمُ جلسةِ العاملِ نفسِه (يجمعُه قبلَ الختمِ من كلِّ وصلةٍ في مجمّعه).
+CREATE FUNCTION fence.session_tag() RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT fence._backend_tag(pg_backend_pid())
+$f$;
+
 CREATE FUNCTION fence.guard_write() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE
@@ -551,6 +626,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.expires_at > clock_timestamp()) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF009', MESSAGE = 'fence: الإيجارُ منقضٍ أو غائب';
   END IF;
+  IF NOT fence._session_sealed(cr) THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF011', MESSAGE = format('fence: الجلسة %s ليست ضمنَ الجلساتِ المختومةِ للاعتماد %s', pg_backend_pid(), s);
+  END IF;
   RETURN NULL;
 END
 $f$;
@@ -565,7 +643,7 @@ BEGIN
   IF (fence.effective_state()->>'state') IS DISTINCT FROM 'RUNNING' THEN RETURN false; END IF;
   SELECT * INTO c FROM fence.control WHERE id;
   SELECT * INTO cr FROM fence.credentials WHERE role_name = s;
-  IF NOT FOUND OR cr.status <> 'ACTIVE' OR cr.epoch <> c.epoch THEN RETURN false; END IF;
+  IF NOT FOUND OR cr.status <> 'ACTIVE' OR cr.epoch <> c.epoch OR NOT fence._session_sealed(cr) THEN RETURN false; END IF;
   RETURN EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.expires_at > clock_timestamp())
      AND NOT EXISTS (SELECT 1 FROM fence.halt_requests WHERE status IN ('OPEN', 'LOCKED'));
 END
@@ -812,7 +890,8 @@ BEGIN
   SELECT coalesce(jsonb_agg(p.oid::regprocedure::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_proc p
   JOIN pg_namespace ns ON ns.oid = p.pronamespace
   WHERE ns.nspname = 'fence' AND has_function_privilege('xuux_worker', p.oid, 'EXECUTE')
-    AND p.oid NOT IN ('fence.whoami()'::regprocedure, 'fence.read_ok()'::regprocedure, 'fence.effective_state()'::regprocedure);
+    AND p.oid NOT IN ('fence.whoami()'::regprocedure, 'fence.read_ok()'::regprocedure, 'fence.effective_state()'::regprocedure,
+                      'fence.session_tag()'::regprocedure, 'fence.seal_sessions(jsonb, bytea)'::regprocedure);
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_fence_execute', 'functions', x)); END IF;
   SELECT coalesce(jsonb_agg(e.extname ORDER BY 1), '[]'::jsonb) INTO x FROM pg_extension e
   WHERE e.extname IN ('dblink', 'postgres_fdw', 'file_fdw', 'adminpack', 'pg_background', 'plpython3u', 'plperlu');
@@ -839,7 +918,8 @@ BEGIN
   RETURN jsonb_build_object('known', true, 'session_user', session_user, 'worker_id', cr.worker_id,
     'boot_id', cr.boot_id, 'credential_epoch', cr.epoch, 'credential_status', cr.status,
     'roster_version', cr.roster_version, 'state', eff->'state', 'epoch', eff->'epoch',
-    'lease_expires_at', l.expires_at, 'now', clock_timestamp());
+    'lease_expires_at', l.expires_at, 'sealed', cr.sealed_at IS NOT NULL,
+    'session_sealed', fence._session_sealed(cr), 'session', fence._backend_tag(pg_backend_pid()), 'now', clock_timestamp());
 END
 $f$;
 
@@ -855,7 +935,7 @@ BEGIN
   IF c.sovereign_pubkey IS NOT NULL THEN
     RAISE EXCEPTION USING ERRCODE = 'XF302', MESSAGE = 'fence: المفتاحُ السياديُّ مُثبَّتٌ سلفاً — التدويرُ بأمرٍ KEY_ROTATE موقَّع';
   END IF;
-  IF sovereign_pubkey IS NULL OR length(sovereign_pubkey) <> 32 OR fence._ed_decode(sovereign_pubkey) IS NULL THEN
+  IF NOT fence.ed25519_key_ok(sovereign_pubkey) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF303', MESSAGE = 'fence: مفتاحٌ عامٌّ غيرُ صالح';
   END IF;
   UPDATE fence.control SET state = 'HALTED', epoch = c.epoch + 1, sovereign_pubkey = bootstrap.sovereign_pubkey,
@@ -947,7 +1027,7 @@ BEGIN
   v := c.roster_version + 1;
   DELETE FROM fence.roster;
   FOR w IN SELECT * FROM jsonb_array_elements(p->'workers') LOOP
-    IF fence._ed_decode(decode(w->>'pubkey', 'hex')) IS NULL THEN
+    IF NOT fence.ed25519_key_ok(decode(w->>'pubkey', 'hex')) THEN
       RAISE EXCEPTION USING ERRCODE = 'XF404', MESSAGE = format('fence: مفتاحُ العامل %s غيرُ صالح', w->>'worker_id');
     END IF;
     INSERT INTO fence.roster (worker_id, pubkey, os_principal, roster_version)
@@ -1000,7 +1080,7 @@ DECLARE p jsonb := fence._verify_command(payload, signature, 'KEY_ROTATE'); c fe
 BEGIN
   SELECT * INTO c FROM fence.control WHERE id;
   k := decode(p->>'new_pubkey', 'hex');
-  IF k IS NULL OR length(k) <> 32 OR fence._ed_decode(k) IS NULL THEN
+  IF NOT fence.ed25519_key_ok(k) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF404', MESSAGE = 'fence: مفتاحٌ جديدٌ غيرُ صالح';
   END IF;
   IF fence.effective_state()->>'state' NOT IN ('HALTED', 'RECOVERY_REQUIRED') THEN
@@ -1076,7 +1156,7 @@ $f$;
 -- أو لم يكن check_fenced() سليماً **الآن**، أو غاب دليلُ الآثارِ الخارجيةِ الموقَّعُ هاشُه.
 CREATE FUNCTION fence.resume(payload text, signature bytea) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
-DECLARE p jsonb := fence._verify_command(payload, signature, 'RESUME'); c fence.control; chk jsonb; eff jsonb := fence.effective_state();
+DECLARE p jsonb := fence._verify_command(payload, signature, 'RESUME'); c fence.control; chk jsonb; eff jsonb := fence.effective_state(); ev fence.evidence;
 BEGIN
   SELECT * INTO c FROM fence.control WHERE id;
   IF eff->>'state' <> 'HALTED' THEN
@@ -1091,8 +1171,16 @@ BEGIN
   IF p->>'pm_start_epoch' IS DISTINCT FROM (fence._live_incarnation())->>'pm_start_epoch' THEN
     RAISE EXCEPTION USING ERRCODE = 'XF410', MESSAGE = 'fence: الأمرُ لا يُسمّي التجسُّدَ الحيّ';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM fence.evidence e WHERE e.epoch = c.epoch AND e.kind = 'EFFECTS_HALTED' AND e.sha256 = p->>'effects_evidence_sha256') THEN
-    RAISE EXCEPTION USING ERRCODE = 'XF414', MESSAGE = 'fence: دليلُ الآثارِ الخارجيةِ لهذا العهدِ غائبٌ أو لا يطابقُ الهاشَ الموقَّع';
+  -- آخرُ دليلِ آثارٍ في هذا العهد هو المعتبَر (دليلٌ لاحقٌ بـok=false يُبطلُ سابقَه)، ويجبُ أن
+  -- يطابقَ الهاشَ الموقَّع، وأن يكونَ لآخرِ إيقافٍ مكتمل، وأن تطابقَ القائمةُ والتجسُّدُ المختومان
+  -- فيه الحالةَ **الآن** (تغييرُ القائمةِ تحتَ HALTED بعدَ الدليلِ يُسقطُه).
+  SELECT * INTO ev FROM fence.evidence e WHERE e.epoch = c.epoch AND e.kind IN ('EFFECTS_HALTED', 'EFFECTS_NOT_HALTED') ORDER BY e.id DESC LIMIT 1;
+  IF ev.id IS NULL OR ev.kind <> 'EFFECTS_HALTED' OR ev.sha256 IS DISTINCT FROM p->>'effects_evidence_sha256'
+     OR ev.detail->'ok' IS DISTINCT FROM 'true'::jsonb
+     OR (ev.binding->>'halt_id')::bigint IS DISTINCT FROM fence._latest_complete_halt()
+     OR ev.binding->>'roster_hash' IS DISTINCT FROM c.roster_hash
+     OR ev.binding->'incarnation' IS DISTINCT FROM fence._live_incarnation() THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF414', MESSAGE = 'fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد';
   END IF;
   chk := fence.check_fenced();
   IF NOT (chk->>'ok')::boolean THEN
@@ -1201,6 +1289,79 @@ BEGIN
 END
 $f$;
 
+-- ختمُ الجلسات (`WL-532` §5): تمييزُ «العمليةِ» عن «هويّةِ نظامِ التشغيل». peer يُثبتُ UID
+-- فقط، وأيُّ عمليةٍ أخرى بالـUID نفسِه تستطيعُ الدخولَ بدورِ الإقلاع. فبعدَ أن يفتحَ العاملُ
+-- وصلاتِه يُعلِنُ مجموعتَها (pid, backend_start) **موقَّعةً بمفتاحِه** فتتحقّقُ القاعدةُ أنّها
+-- تساوي تماماً جلساتِ الدورِ الحيّة، ثمّ تجعلُ الدورَ NOLOGIN. بعدَها لا جلسةَ جديدة، ولا
+-- كتابةَ/قراءةَ لجلسةٍ خارجَ المجموعة (XF011). أيُّ شذوذٍ — جلسةٌ غيرُ معلنة، توقيعٌ غيرُ
+-- صالح، ختمٌ ثانٍ — **يُلغي الاعتماد** (فشلٌ مغلق) ويُسجَّلُ حدثاً، ولا يُرفَعُ استثناءٌ كي لا
+-- يُتراجَعَ عن الإلغاء. **حدّ:** عمليةٌ بالـUID نفسِه تقرأُ ملفَّ المفتاحِ وتسبقُ العاملَ إلى
+-- الختمِ تفوزُ بالسباق؛ يكشفُها فشلُ العاملِ ويُلغيها المُشرِفُ (`confirmWorkerSeal`)، ولا يمنعُها.
+CREATE FUNCTION fence.seal_sessions(sessions jsonb, signature bytea) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE s name := session_user; c fence.control; cr fence.credentials; r fence.roster;
+  live jsonb := fence._live_incarnation(); actual jsonb; declared jsonb; msg text; why text;
+BEGIN
+  SELECT * INTO c FROM fence.control WHERE id FOR SHARE;
+  SELECT * INTO cr FROM fence.credentials WHERE role_name = s FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF006', MESSAGE = format('fence: هويّةٌ غيرُ معروفة (%s)', s);
+  END IF;
+  IF cr.status <> 'ACTIVE' THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF007', MESSAGE = format('fence: الاعتمادُ %s ملغى', s);
+  END IF;
+  IF fence.effective_state()->>'state' <> 'RUNNING' THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF004', MESSAGE = 'fence: لا ختمَ خارجَ RUNNING';
+  END IF;
+  SELECT coalesce(jsonb_agg(t ORDER BY (t->>'pid')::int), '[]'::jsonb) INTO actual
+    FROM (SELECT fence._backend_tag(a.pid) AS t FROM pg_stat_activity a WHERE a.usename = s) x;
+  BEGIN
+    SELECT coalesce(jsonb_agg(jsonb_build_object('pid', (e->>'pid')::int, 'start', e->>'start') ORDER BY (e->>'pid')::int), '[]'::jsonb)
+      INTO declared FROM jsonb_array_elements(CASE WHEN jsonb_typeof(sessions) = 'array' THEN sessions ELSE '[]'::jsonb END) e;
+  EXCEPTION WHEN others THEN
+    declared := '[]'::jsonb;
+  END;
+  SELECT * INTO r FROM fence.roster WHERE worker_id = cr.worker_id AND roster_version = c.roster_version;
+  msg := 'xuux-fence/seal/v1' || chr(10) || current_database() || chr(10) || (live->>'sysid') || chr(10) ||
+    cr.worker_id || chr(10) || cr.boot_id || chr(10) || cr.epoch || chr(10) || s || chr(10) ||
+    coalesce((SELECT string_agg((e->>'pid') || ':' || (e->>'start'), ',' ORDER BY (e->>'pid')::int) FROM jsonb_array_elements(declared) e), '');
+  why := CASE
+    WHEN cr.sealed_at IS NOT NULL THEN 'already_sealed'
+    WHEN r.worker_id IS NULL THEN 'not_in_roster'
+    WHEN jsonb_array_length(declared) = 0 THEN 'no_sessions_declared'
+    WHEN signature IS NULL OR NOT fence.ed25519_verify(r.pubkey, convert_to(msg, 'UTF8'), signature) THEN 'bad_signature'
+    WHEN declared IS DISTINCT FROM actual THEN 'session_set_mismatch'
+    ELSE NULL END;
+  IF why IS NOT NULL THEN
+    UPDATE fence.credentials SET status = 'REVOKED', revoked_at = clock_timestamp(), revoke_reason = 'SEAL_REFUSED:' || why
+     WHERE role_name = s AND status = 'ACTIVE';
+    DELETE FROM fence.run_lease WHERE role_name = s;
+    EXECUTE format('ALTER ROLE %I NOLOGIN', s);
+    PERFORM fence._terminate_worker_sessions(s);
+    PERFORM fence._event('SEAL_REFUSED', c.epoch, jsonb_build_object('role', s, 'reason', why, 'declared', declared,
+      'actual', actual, 'caller', fence._backend_tag(pg_backend_pid())));
+    RETURN jsonb_build_object('sealed', false, 'reason', why, 'declared', declared, 'actual', actual);
+  END IF;
+  UPDATE fence.credentials SET sealed_at = clock_timestamp(), sealed_sessions = declared WHERE role_name = s;
+  EXECUTE format('ALTER ROLE %I NOLOGIN', s);
+  PERFORM fence._event('SESSIONS_SEALED', c.epoch, jsonb_build_object('role', s, 'sessions', declared));
+  RETURN jsonb_build_object('sealed', true, 'role_name', s, 'sessions', declared);
+END
+$f$;
+
+-- ما ختمه الاعتماد (للمُشرِف: يقارنُه بما أبلغه العاملُ عبرَ IPC).
+CREATE FUNCTION fence.credential_seal(role_name name) RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE cr fence.credentials;
+BEGIN
+  PERFORM fence._assert_root();
+  SELECT * INTO cr FROM fence.credentials WHERE credentials.role_name = credential_seal.role_name;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  RETURN jsonb_build_object('role_name', cr.role_name, 'status', cr.status, 'revoke_reason', cr.revoke_reason,
+    'sealed', cr.sealed_at IS NOT NULL, 'sessions', cr.sealed_sessions);
+END
+$f$;
+
 CREATE FUNCTION fence.renew_lease(role_name name) RETURNS timestamptz
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE c fence.control; cr fence.credentials; e timestamptz;
@@ -1240,6 +1401,12 @@ $f$;
 
 -- الإيقاف — الخطوات 1..11 مقسومةٌ على معاملاتٍ يقودها `src/fence/db-fence.mjs`.
 -- (1) التسجيل، (2) رفضُ الكتاباتِ الجديدةِ فوراً (الحارسُ يقرأُ الطلبَ المفتوح).
+-- آخرُ إيقافٍ اكتملَ بنفسِه (لا ما استُوفيَ بغيره «superseded_by»).
+CREATE FUNCTION fence._latest_complete_halt() RETURNS bigint
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT max(h.id) FROM fence.halt_requests h WHERE h.status = 'COMPLETE' AND NOT (coalesce(h.report, '{}'::jsonb) ? 'superseded_by')
+$f$;
+
 CREATE FUNCTION fence.halt_request(reason text) RETURNS bigint
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE hid bigint; c fence.control;
@@ -1339,22 +1506,39 @@ BEGIN
 END
 $f$;
 
--- دليلُ الآثارِ الخارجية (cgroup فارغ، المنافذُ مغلقة…) يُسجَّلُ بهاشِه؛ RESUME يشترطُ
--- أن يوقّعَ المالكُ الهاشَ نفسَه. يُقبَلُ تحتَ HALTED فقط.
+-- دليلُ الآثارِ الخارجية (cgroup فارغ، المنافذُ مغلقة…). **مَن يقيس:** الجذرُ (موقِفُ الآثار،
+-- `src/fence/effects.mjs`). **مَن يسجّل:** الجذرُ هنا. **ما تضيفُه القاعدةُ ممّا رصدته هي:**
+-- أنّ الدليلَ يخصُّ آخرَ إيقافٍ مكتملٍ في هذا العهد (لا دليلَ قديماً)، وأنّ «ok» صريحٌ، ثمّ
+-- تختمُ في `binding` القائمةَ والتجسُّدَ وهاشَ DB_FENCED لحظةَ التسجيل. الهاشُ يُثبتُ أنّ
+-- التفاصيلَ لم تتغيّرْ بعدَ حسابِه، **لا أنّ مصدرَها صادق**: الوقائعُ الخارجيةُ ادّعاءُ الجذر.
+-- دليلٌ بـok=false يُسجَّلُ EFFECTS_NOT_HALTED (أثرٌ للتدقيق) ولا يصلحُ لـRESUME.
 CREATE FUNCTION fence.record_effects_evidence(digest text, detail jsonb) RETURNS bigint
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
-DECLARE c fence.control; eid bigint;
+DECLARE c fence.control; eid bigint; hid bigint; fenced text; k text; b jsonb;
 BEGIN
   PERFORM fence._assert_root();
-  SELECT * INTO c FROM fence.control WHERE id;
+  SELECT * INTO c FROM fence.control WHERE id FOR SHARE;
   IF fence.effective_state()->>'state' <> 'HALTED' THEN
     RAISE EXCEPTION USING ERRCODE = 'XF507', MESSAGE = 'fence: دليلُ الآثارِ تحتَ HALTED فقط';
   END IF;
   IF encode(sha256(convert_to(detail::text, 'UTF8')), 'hex') IS DISTINCT FROM digest THEN
     RAISE EXCEPTION USING ERRCODE = 'XF508', MESSAGE = 'fence: الهاشُ لا يطابقُ التفاصيل';
   END IF;
-  INSERT INTO fence.evidence (epoch, kind, sha256, detail) VALUES (c.epoch, 'EFFECTS_HALTED', digest, detail) RETURNING evidence.id INTO eid;
-  PERFORM fence._event('EFFECTS_EVIDENCE', c.epoch, jsonb_build_object('sha256', digest));
+  hid := fence._latest_complete_halt();
+  SELECT e.sha256 INTO fenced FROM fence.evidence e WHERE e.epoch = c.epoch AND e.kind = 'DB_FENCED' ORDER BY e.id DESC LIMIT 1;
+  IF hid IS NULL OR fenced IS NULL OR detail->>'halt_id' IS DISTINCT FROM hid::text OR detail->>'epoch' IS DISTINCT FROM c.epoch::text THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF509', MESSAGE = format('fence: الدليلُ لا يخصُّ آخرَ إيقافٍ مكتملٍ في هذا العهد (halt=%s epoch=%s؛ المتوقَّع %s/%s مع DB_FENCED)',
+      detail->>'halt_id', detail->>'epoch', hid, c.epoch);
+  END IF;
+  IF jsonb_typeof(detail->'ok') IS DISTINCT FROM 'boolean' THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF509', MESSAGE = 'fence: الدليلُ بلا «ok» منطقيّ صريح';
+  END IF;
+  k := CASE WHEN detail->'ok' = 'true'::jsonb THEN 'EFFECTS_HALTED' ELSE 'EFFECTS_NOT_HALTED' END;
+  b := jsonb_build_object('halt_id', hid, 'epoch', c.epoch, 'roster_version', c.roster_version, 'roster_hash', c.roster_hash,
+    'db_fenced_sha256', fenced, 'incarnation', fence._live_incarnation(), 'recorded_by', session_user,
+    'recorded_at', clock_timestamp());
+  INSERT INTO fence.evidence (epoch, kind, sha256, detail, binding) VALUES (c.epoch, k, digest, detail, b) RETURNING evidence.id INTO eid;
+  PERFORM fence._event('EFFECTS_EVIDENCE', c.epoch, jsonb_build_object('sha256', digest, 'kind', k, 'halt_id', hid, 'evidence_id', eid));
   RETURN eid;
 END
 $f$;
@@ -1366,17 +1550,19 @@ SELECT fence._reseal();
 
 -- ── الامتيازات ──────────────────────────────────────────────────────────────
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA fence FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION fence.whoami(), fence.read_ok(), fence.effective_state() TO xuux_worker;
+GRANT EXECUTE ON FUNCTION fence.whoami(), fence.read_ok(), fence.effective_state(), fence.session_tag(),
+  fence.seal_sessions(jsonb, bytea) TO xuux_worker;
 -- read_ok() تستدعيها سياسةُ RLS لكلِّ قارئ: غيرُ العاملِ يُعادُ له true (لا يكشفُ شيئاً). بلا
 -- EXECUTE لـPUBLIC يفشلُ كلُّ قارئٍ مشروعٍ غيرِ عاملٍ بـ42501 بدلَ أن يُحكَمَ عليه بالزناد.
 GRANT EXECUTE ON FUNCTION fence.read_ok() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION fence.effective_state(), fence.check_fenced(), fence.status() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
 GRANT EXECUTE ON FUNCTION fence.issue_challenge(text, text), fence.issue_credential(text, bytea), fence.renew_lease(name),
   fence.revoke_credential(name, text), fence.halt_request(text), fence.halt_lock(bigint),
-  fence.halt_revoke_and_terminate(bigint), fence.halt_complete(bigint), fence.record_effects_evidence(text, jsonb) TO xf_root;
+  fence.halt_revoke_and_terminate(bigint), fence.halt_complete(bigint), fence.record_effects_evidence(text, jsonb),
+  fence.credential_seal(name) TO xf_root;
 GRANT EXECUTE ON FUNCTION fence.halt_request(text), fence.resume(text, bytea), fence.recover(text, bytea),
   fence.roster_set(text, bytea), fence.key_rotate(text, bytea), fence.breakglass_set(text, bytea),
-  fence.lease_set(text, bytea), fence.ed25519_verify(bytea, bytea, bytea) TO xf_sovereign;
+  fence.lease_set(text, bytea), fence.ed25519_verify(bytea, bytea, bytea), fence.ed25519_key_ok(bytea) TO xf_sovereign;
 -- إنشاءُ الزنادِ على جدولٍ جديدٍ يتطلّبُ EXECUTE على دالّتِه وقتَ CREATE TRIGGER.
 GRANT EXECUTE ON FUNCTION fence.guard_write(), fence.read_ok(), fence.cover_relation(oid), fence._ddl_note(text),
   fence.protected_relations(), fence.coverage_problems() TO xuux_migrator, xuux_owner;

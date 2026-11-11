@@ -25,7 +25,6 @@ import { join } from 'node:path';
 import {
   FENCE_ERRORS,
   FenceError,
-  FenceRoot,
   FenceSovereign,
   assertFencedSession,
   dbFenceMode,
@@ -34,46 +33,13 @@ import {
   generateTestKeyProvider,
   newBootId,
   rawEd25519PublicKey,
+  confirmWorkerSeal,
   signCredentialChallenge,
 } from '../../src/fence/db-fence.mjs';
 import { DB_ERRORS, createPool } from '../../src/persistence/db.mjs';
-import { up } from '../../src/persistence/migrator.mjs';
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
-import {
-  createIsolatedDatabase,
-  databaseUrl,
-  quoteIdent,
-  skipWithoutDatabase,
-} from '../helpers/pg.mjs';
-
-/**
- * يمسكُ رفضَ وعدٍ ويُرجعُه.
- * @param {() => Promise<unknown>} fn
- * @returns {Promise<any>}
- */
-async function rejection(fn) {
-  try {
-    await fn();
-  } catch (error) {
-    return error;
-  }
-  throw new Error('لم يُرفَض النداءُ وكان يجب أن يُرفَض');
-}
-
-/**
- * يرفضُ بأحدِ الرموزِ المتوقَّعة.
- * @param {() => Promise<unknown>} fn
- * @param {string[]} codes
- * @param {string} why
- */
-async function rejectsWith(fn, codes, why) {
-  const error = await rejection(fn);
-  assert.ok(
-    codes.includes(error.code),
-    `${why}: الرمز ${error.code} (${error.message}) وليس من ${codes.join('/')}`,
-  );
-  return error;
-}
+import { databaseUrl, quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { NO_EFFECTS, harness, rejection, rejectsWith } from '../helpers/fence-harness.mjs';
 
 /** إرسالُ COPY FROM STDIN بلا مكتبةٍ إضافية: كائنٌ قابلٌ للإرسالِ بواجهةِ `pg`. */
 class CopyIn {
@@ -119,149 +85,6 @@ function copyIn(client, text, data) {
   const q = new CopyIn(text, data);
   client.query(/** @type {any} */ (q));
   return q.done;
-}
-
-/**
- * الحزام: قاعدةٌ معزولةٌ مُسيَّجة، سياديٌّ، جذر، وعاملان في القائمة.
- * @param {string} label
- */
-async function harness(label) {
-  const admin = new pg.Pool({ connectionString: databaseUrl(), max: 2 });
-  await dropStrayWorkerRoles(admin);
-  const db = await createIsolatedDatabase(label);
-  await up(db.pool);
-  const superuser = String((await db.pool.query('SELECT current_user AS u')).rows[0].u);
-  /** @type {pg.Client[]} */
-  const clients = [];
-  /**
-   * يتّصلُ بدور (كلمةُ مرورٍ عشوائيةٌ يمنحُها superuser — حدُّ الحزامِ المعلن).
-   * @param {string} role
-   * @param {{ database?: string }} [opts]
-   */
-  const login = async (role, opts = {}) => {
-    const password = randomBytes(18).toString('base64url');
-    await db.pool.query(`ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}'`);
-    const url = new URL(databaseUrl() ?? '');
-    url.username = role;
-    url.password = password;
-    url.pathname = `/${opts.database ?? db.name}`;
-    const client = new pg.Client({ connectionString: url.toString() });
-    client.on('error', () => {});
-    await client.connect();
-    clients.push(client);
-    return client;
-  };
-  let rootClient = await login('xf_root');
-  let sovClient = await login('xf_sovereign');
-  const sovereignKey = generateTestKeyProvider('sovereign');
-  await db.pool.query('SELECT fence.bootstrap($1)', [sovereignKey.publicKeyRaw()]);
-  const sovereign = new FenceSovereign(sovClient, sovereignKey);
-  const root = new FenceRoot(
-    async () =>
-      /** @type {any} */ ({
-        query: (/** @type {any[]} */ ...a) => /** @type {any} */ (rootClient).query(...a),
-      }),
-    {
-      lockTimeoutMs: 400,
-    },
-  );
-  const keys = { alpha: generateTestKeyProvider('alpha'), beta: generateTestKeyProvider('beta') };
-  const bypass = (
-    await db.pool.query(
-      `SELECT rolname FROM pg_roles WHERE rolcanlogin AND (rolsuper OR rolbypassrls OR rolreplication OR rolcreaterole) ORDER BY 1`,
-    )
-  ).rows.map((r) => String(r.rolname));
-  await sovereign.breakglassSet(bypass);
-  await sovereign.rosterSet([
-    { worker_id: 'alpha', pubkey: keys.alpha.publicKeyRaw(), os_principal: 'xuuxw-alpha' },
-    { worker_id: 'beta', pubkey: keys.beta.publicKeyRaw(), os_principal: 'xuuxw-beta' },
-  ]);
-  // جدولُ اختبارٍ يُنشَأُ تحتَ HALTED فيُغطّى تلقائياً (مُطلِقُ DDL).
-  await db.pool.query(
-    `CREATE TABLE state.fence_probe (id integer PRIMARY KEY, v text NOT NULL DEFAULT '')`,
-  );
-  await db.pool.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON state.fence_probe TO xuux_worker`);
-
-  /** دليلُ آثارٍ (لا آثارَ في الحزام) ثمّ استئنافٌ سياديّ. */
-  const resume = async () => {
-    const detail = { harness: label, at: new Date().toISOString(), scopes: [], egress: [] };
-    const d = (
-      await rootClient.query(
-        `SELECT encode(sha256(convert_to($1::jsonb::text,'UTF8')),'hex') AS d`,
-        [JSON.stringify(detail)],
-      )
-    ).rows[0].d;
-    await rootClient.query('SELECT fence.record_effects_evidence($1, $2::jsonb)', [
-      d,
-      JSON.stringify(detail),
-    ]);
-    return sovereign.resume(d);
-  };
-
-  /**
-   * يُصدِرُ اعتمادَ إقلاعٍ لعاملٍ ويتّصلُ به.
-   * @param {'alpha' | 'beta'} workerId
-   * @param {{ connect?: boolean }} [opts]
-   */
-  const boot = async (workerId, opts = {}) => {
-    const bootId = newBootId();
-    const credential = await root.issueCredential(workerId, bootId, (ch) =>
-      signCredentialChallenge(keys[workerId], ch, { workerId, bootId }),
-    );
-    const secret = (
-      await db.pool.query('SELECT rolpassword IS NULL AS none FROM pg_authid WHERE rolname = $1', [
-        credential.role_name,
-      ])
-    ).rows[0];
-    const client = opts.connect === false ? null : await login(credential.role_name);
-    return { bootId, credential, client, issuedWithoutSecret: secret?.none === true };
-  };
-
-  return {
-    db,
-    admin,
-    superuser,
-    login,
-    root,
-    get rootClient() {
-      return rootClient;
-    },
-    sovereign,
-    get sovClient() {
-      return sovClient;
-    },
-    /** بعدَ قطعِ وصلاتِ القاعدة (نسخُ القالب): وصلتا الجذرِ والسياديِّ من جديد. */
-    async reconnect() {
-      rootClient = await login('xf_root');
-      sovClient = await login('xf_sovereign');
-      sovereign.db = sovClient;
-    },
-    keys,
-    resume,
-    boot,
-    async close() {
-      for (const c of clients) await c.end().catch(() => {});
-      await db.drop();
-      await dropStrayWorkerRoles(admin);
-      await admin.end();
-    },
-  };
-}
-
-/** أدوارُ الإقلاعِ على مستوى العنقود: تُسقَطُ بعدَ كلِّ حزامٍ فلا تُفسِدُ فحصَ غيرِه. @param {pg.Pool} admin */
-async function dropStrayWorkerRoles(admin) {
-  const roles = await admin
-    .query(
-      `SELECT r.rolname FROM pg_roles r JOIN pg_auth_members m ON m.member = r.oid
-      WHERE m.roleid = 'xuux_worker'::regrole AND r.rolname LIKE 'xw\\_%'`,
-    )
-    .catch(() => ({ rows: [] }));
-  for (const r of roles.rows) {
-    await admin.query(`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1`, [
-      r.rolname,
-    ]);
-    await admin.query(`DROP ROLE IF EXISTS ${quoteIdent(r.rolname)}`).catch(() => {});
-  }
 }
 
 const RFC8032_TEST1 = {
@@ -358,31 +181,48 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
   });
 
   test('RESUME: توقيعٌ مزوَّر، نوعٌ آخر، عهدٌ متوقَّعٌ خاطئ، نافذةٌ منقضية، هاشُ قائمةٍ خاطئ، دليلٌ غائب — كلُّها تُرفَض', async () => {
-    const s = await h.sovereign.status();
-    const detail = { pre: true };
-    const d = (
+    const s0 = await h.sovereign.status();
+    const send = (/** @type {{payload: string, signature: Buffer}} */ c) =>
+      h.sovClient.query('SELECT fence.resume($1,$2)', [c.payload, c.signature]);
+    // دليلٌ غائب (لا إيقافَ مكتملٌ في هذا العهدِ بعدَ الإقلاع)
+    await rejectsWith(
+      () =>
+        send(
+          h.sovereign.sign('resume', s0, {
+            roster_hash: s0.bound.roster_hash,
+            pm_start_epoch: String(s0.live.pm_start_epoch),
+            effects_evidence_sha256: '0'.repeat(64),
+          }),
+        ),
+      ['XF414'],
+      'بلا دليلِ آثار',
+    );
+    // دليلٌ غيرُ مربوطٍ بإيقافٍ مكتمل ⇒ لا يُسجَّلُ أصلاً (XF509)
+    const loose = { pre: true, ok: true };
+    const looseD = (
       await h.rootClient.query(
         `SELECT encode(sha256(convert_to($1::jsonb::text,'UTF8')),'hex') AS d`,
-        [JSON.stringify(detail)],
+        [JSON.stringify(loose)],
       )
     ).rows[0].d;
+    await rejectsWith(
+      () =>
+        h.rootClient.query('SELECT fence.record_effects_evidence($1, $2::jsonb)', [
+          looseD,
+          JSON.stringify(loose),
+        ]),
+      ['XF509'],
+      'دليلٌ بلا halt_id',
+    );
+    const halted = await h.root.halt('resume-matrix', { effects: NO_EFFECTS });
+    assert.equal(halted.systemHaltComplete, true, JSON.stringify(halted));
+    const d = String(halted.effectsEvidenceSha256);
+    const s = await h.sovereign.status();
     const extra = {
       roster_hash: s.bound.roster_hash,
       pm_start_epoch: String(s.live.pm_start_epoch),
       effects_evidence_sha256: d,
     };
-    const send = (/** @type {{payload: string, signature: Buffer}} */ c) =>
-      h.sovClient.query('SELECT fence.resume($1,$2)', [c.payload, c.signature]);
-    // دليلٌ غائب
-    await rejectsWith(
-      () => send(h.sovereign.sign('resume', s, extra)),
-      ['XF414'],
-      'بلا دليلِ آثار',
-    );
-    await h.rootClient.query('SELECT fence.record_effects_evidence($1, $2::jsonb)', [
-      d,
-      JSON.stringify(detail),
-    ]);
     // توقيعٌ بمفتاحٍ آخر
     const forger = new FenceSovereign(h.sovClient, generateTestKeyProvider('forger'));
     await rejectsWith(() => send(forger.sign('resume', s, extra)), ['XF403'], 'مفتاحٌ مزوَّر');
@@ -1149,6 +989,20 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     assert.equal(url.username, issued.role_name);
     assert.equal(url.password, '', 'لا سرَّ في الوصلة');
     const c = await h.login(String(issued.role_name));
+    // جلسةٌ غيرُ مختومة: لا تُقبَلُ للعاملِ قبلَ الختم.
+    await assert.rejects(
+      () => fw.verify(c),
+      (e) => e instanceof FenceError && e.code === FENCE_ERRORS.SESSION_NOT_FENCED,
+    );
+    const onePool = /** @type {any} */ ({
+      connect: async () => Object.assign(c, { release: () => {} }),
+    });
+    const [confirmed, sealedSessions] = await Promise.all([
+      confirmWorkerSeal(h.root, child, issued, { timeoutMs: 5000 }),
+      fw.seal(onePool, 1),
+    ]);
+    assert.equal(sealedSessions.length, 1);
+    assert.deepEqual(confirmed, sealedSessions, 'المُشرِفُ يرى ما ختمه العامل');
     const who = await fw.verify(c);
     assert.equal(who.worker_id, 'alpha');
     assert.equal(who.boot_id, fw.bootId);
