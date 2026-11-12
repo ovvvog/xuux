@@ -304,6 +304,18 @@ export async function createBackup(dumpPath, databaseUrl) {
         /** @type {Record<string, unknown> | undefined} */ (exported.rows[0])?.['snapshot'],
       );
       snapshot = await inspectDatabase(client);
+      // `WL-532`: إن كانت القاعدةُ مُسيَّجةً نُسخَ مخطّطُ `fence` معها؛ وإلا حملت النسخةُ
+      // قوادحَ `xf_guard` وسياساتِ `xf_read` بلا دوالِّها فتفشلُ الاستعادة. والمستعادُ
+      // يبدأ مغلقاً: صفُّ التحكّمِ مربوطٌ بهويّةِ العنقودِ الأصليّ (`sysid`/`dbname`/
+      // زمنِ الإقلاع) فيُقرأُ `RECOVERY_REQUIRED`، وقوادحُ الأحداثِ (على مستوى القاعدة)
+      // لا تُنسخ فيرفضُ `check_fenced()` الاستئنافَ حتى يُعيدَ المالكُ تركيبَ السياج.
+      const fenced = await client.query(
+        "SELECT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'fence') AS present",
+      );
+      const fenceSchemaArgs =
+        /** @type {Record<string, unknown> | undefined} */ (fenced.rows[0])?.['present'] === true
+          ? ['--schema', 'fence']
+          : [];
       const dumpTool = await resolveVerifiedDumpTool(snapshot.databaseVersion);
       result = await run(dumpTool, [
         '--format=custom',
@@ -311,6 +323,7 @@ export async function createBackup(dumpPath, databaseUrl) {
         dumpPath,
         '--schema',
         STATE_SCHEMA,
+        ...fenceSchemaArgs,
         '--no-owner',
         '--no-privileges',
         '--snapshot',

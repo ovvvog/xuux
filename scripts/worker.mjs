@@ -53,6 +53,10 @@ import {
   createWorkerRegistry,
 } from '../src/execution/worker-registry.mjs';
 import { randomUUID } from 'node:crypto';
+import { dbFenceMode, prepareFencedWorker } from '../src/fence/db-fence.mjs';
+
+/** حجمُ مجمّعِ العاملِ المُسيَّج: ثابتٌ ومختوم (حدُّ دورِ الإقلاع CONNECTION LIMIT 16). */
+const FENCED_POOL_SIZE = 8;
 
 /**
  * @param {readonly string[]} argv
@@ -146,7 +150,27 @@ async function main() {
   const halt = new HaltSwitch(options.haltFile, royalVerifierFromPublicKey(options.publicKey), {
     readOnly: true,
   });
-  const pool = createPool();
+  // وضعُ السياج (‏`WL-532`، ‏`XUUX_DB_FENCE=required`): الحارسُ يصيرُ مركّباً (HaltSwitch +
+  // القراءةُ الصارمة `D-14`)، والاعتمادُ يُصدَرُ لهذا الإقلاعِ وحدَه بمصافحةٍ مع المُشرِف
+  // (الجذر) يوقّعُ فيها العاملُ تحدّيَه بمفتاحِه، والمجمّعُ بدورِ الإقلاعِ بلا سرّ، ويُثبَتُ
+  // قبلَ أيِّ عملٍ أنّ الجلسةَ هي الاعتمادُ النشِط. لا بروتوكولَ موازٍ: كلُّ ما بعدَ هذا
+  // السطرِ هو العاملُ نفسُه بالحارسِ نفسِه في كلِّ موضع.
+  const fence =
+    dbFenceMode(process.env) === 'required'
+      ? await prepareFencedWorker({ env: process.env, halt })
+      : null;
+  const guard = fence === null ? halt : fence.haltGuard;
+  const pool =
+    fence === null ? createPool() : createPool({ url: fence.databaseUrl, max: FENCED_POOL_SIZE });
+  if (fence !== null) {
+    // ختمُ الجلسات (`WL-532` §5): كلُّ وصلاتِ المجمّعِ تُفتحُ الآنَ وتُختمُ بمفتاحِ العامل، ثمّ
+    // يُغلَقُ الدخولُ بدورِ الإقلاع — عمليةٌ أخرى بالـUID نفسِه لا تدخلُ بعدَها، وإن سبقت أفشلت الختم.
+    await fence.seal(pool, FENCED_POOL_SIZE);
+    await fence.verify(pool);
+    process.stdout.write(
+      `وضعُ السياج: ${fence.workerId} بدورِ ${String(fence.credential.role_name)} (عهد ${String(fence.credential.epoch)}، مفتاحٌ عتاديّ: ${fence.hardwareBacked ? 'نعم' : 'لا'})\n`,
+    );
+  }
   const queue = createTaskQueue({ pool });
   const isolationLogFile = process.env['ISOLATION_LOG_FILE'] ?? 'state/isolation-events.jsonl';
   // في الإنتاج يُفتحُ السجلُّ مختوماً بمفتاحِ التوكن، ويُلبَسُ مصرِفاً مرتَّباً
@@ -167,7 +191,7 @@ async function main() {
   const worker = createWorker({
     queue,
     pool,
-    haltGuard: halt,
+    haltGuard: guard,
     ledger: createQuotaLedger({ pool, definitions: loadPolicyBundle().quotas }),
     worker: options.worker,
     pendingResults,
@@ -184,7 +208,7 @@ async function main() {
     pool,
     queue,
     worker: options.worker,
-    haltGuard: halt,
+    haltGuard: guard,
     log: isolationSink,
     policy: options.recoveryPolicy,
     // بوابةُ الملكيّةِ على التسويةِ (`WL-396`): الاستردادُ يكتبُ بالمفتاحِ الاسميِّ
@@ -245,7 +269,7 @@ async function main() {
   /** @returns {Promise<{ fault: WorkerDatabaseFault | null, deferred: boolean }>} */
   const settlePending = async () => {
     try {
-      const counts = await settlePendingResults({ store: pendingResults, queue, haltGuard: halt });
+      const counts = await settlePendingResults({ store: pendingResults, queue, haltGuard: guard });
       if (counts.examined > 0) {
         process.stdout.write(
           `${new Date().toISOString()} | pending-results | سُوّيت: ${counts.settled} | عُلّقت: ${counts.superseded} | تضادّت: ${counts.conflicts}\n`,
@@ -290,7 +314,7 @@ async function main() {
     // والتأجيلُ يُحملُ من حصيلةِ التسويةِ نفسِها لا من عيّنةٍ لاحقةٍ.
     const isHalted = () => {
       try {
-        halt.assertOperational();
+        guard.assertOperational();
         return false;
       } catch {
         return true;

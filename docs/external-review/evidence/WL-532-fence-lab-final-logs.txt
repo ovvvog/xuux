@@ -1,0 +1,2105 @@
+# WL-532 fence lab — final run logs
+# git_head=535a4d411420bba016d8bc4d026774f22b5fc2c9 tree_sha256=f66e31b9f3e1366ed1e67cbdf952a5a78b1d264194e04d4bbee9df51365088e0 report_sha256=f12daf498fa4655326c92a4b7072d46d41e693ce50dbd3c1ffadff1673d53a79
+# Each section: "=== BEGIN <name> sha256=<hex> bytes=<n>" … "=== END <name>". sha256 is over the exact section bytes and matches report.logs[].
+=== BEGIN fence-lab.stdout sha256=cd05d18fa780bf6aed0c14d691d30931209839b58140f24d9e8d10b751ba4aef bytes=3843
+PASS     LAB-ENV-01 — عنقودٌ مؤقّتٌ جديدٌ من initdb (لا ملفّاتٍ قديمة)
+PASS     LAB-ENV-02 — الشجرةُ نظيفةٌ: الرأسُ المختبَرُ هو الملتزَم (git_head + tree_sha256)
+PASS     LAB-SUITE-db-fence — تشغيلُ tests/fence/db-fence.test.mjs
+PASS     LAB-SUITE-fence-lifecycle — تشغيلُ tests/fence/fence-lifecycle.test.mjs
+PASS     LAB-SUITE-halt-integrity — تشغيلُ tests/fence/halt-integrity.test.mjs
+PASS     LAB-SUITE-effects — تشغيلُ tests/fence/effects.test.mjs
+PASS     LAB-SUITE-connection-map — تشغيلُ tests/fence/connection-map.test.mjs
+PASS     LAB-SUITE-ed25519 — تشغيلُ tests/fence/ed25519.test.mjs
+PASS     LAB-AUTH-01 — بعدَ التشديد: TCP مرفوضٌ حتى لـpostgres؛ الدخولُ بالمقبسِ وpeer فقط
+PASS     LAB-APP — نسخةُ تطبيقِ العاملِ ومفاتيحُه (0400 لمستخدمِ كلِّ عامل)
+PASS     LAB-CRED-05a — T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه — لكنّ جلسةً غيرَ مختومةٍ لا تكتب (XF011)
+PASS     LAB-CRED-05b — T-CRED-05: مستخدمُ نظامِ beta لا يستعملُ اعتمادَ alpha (الهجوم 2)
+PASS     LAB-CRED-05c — T-CRED-05: مستخدمُ المختبرِ نفسُه (مالكُ العنقود) لا يدخلُ بدورِ alpha
+PASS     LAB-CRED-05d — T-CRED-05: دورُ الإقلاعِ عبرَ TCP مرفوضٌ (لا سرَّ قابلاً للنقل)
+PASS     LAB-CRED-05e — مستخدمُ نظامِ العاملِ لا يدخلُ بدورِ xf_root ولا xf_sovereign ولا postgres
+PASS     LAB-UID-01 — عمليةٌ ثانيةٌ بالـUID نفسِه بعدَ الختم: الدخولُ مرفوض (الدورُ NOLOGIN) والعاملُ يواصل
+PASS     LAB-SEAL-01 — عملية Node بمستخدمِ alpha تختمُ مجمّعَها (4 وصلات) وتكتب؛ المُشرِفُ يطابقُ الختم
+PASS     LAB-UID-02 — دخيلٌ بالـUID نفسِه حاضرٌ لحظةَ الختم ⇒ الختمُ مرفوض (session_set_mismatch)، الاعتمادُ يُلغى، الدخيلُ يُنهى
+PASS     LAB-UID-03 — دخيلٌ بالـUID نفسِه بلا المفتاح يختمُ بتوقيعٍ مزوَّر ⇒ bad_signature، الاعتمادُ يُلغى
+PASS     LAB-UID-04 — حدُّ نظامِ التشغيل: مفتاحُ alpha (0400) لا يقرؤه مستخدمُ beta — ويقرؤه أيُّ عمليةٍ بـUID alpha (حدٌّ معلن)
+PASS     LAB-UID-05 — خطرٌ متبقٍّ: عمليةٌ بالـUID نفسِه تقرأُ المفتاحَ وتسبقُ العاملَ إلى الختم ⇒ تختمُ وتكتب؛ العاملُ الحقيقيُّ يفشلُ فيُلغي المُشرِفُ الاعتمادَ ويُنهي المهاجم
+PASS     LAB-HALT-LIVE — إيقافٌ حقيقيٌّ تحتَ كاتبٍ Node مختومٍ (4 وصلات) بمستخدمِ نظامِ العامل × 10: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة
+PASS     LAB-RESTART — انهيارُ العنقود (immediate) ⇒ RECOVERY_REQUIRED؛ RECOVER موقَّعٌ ⇒ HALTED لا RUNNING؛ ثمّ RESUME
+PASS     LAB-PHYS-RESTORE — استعادةُ نسخةٍ فيزيائيةٍ قديمة (pg_basebackup) ⇒ RECOVERY_REQUIRED؛ الكتابةُ والأمرُ المُعادُ مرفوضان (الهجومان 21 و23)
+
+التقرير: docs/external-review/evidence/WL-532-fence-lab-report.json
+الفحوص {"PASS":24,"FAIL":0,"PARTIAL":0,"NOT RUN":0} · الهجمات {"PASS":21,"FAIL":0,"PARTIAL":3,"NOT RUN":1}
+أُبقيَ مجلّدُ العمل: /tmp/xuux-fence-lab-OxxTp7
+
+=== END fence-lab.stdout
+=== BEGIN initdb.log sha256=aabd264c41f17028057e0a72b57ff39f1af52d99c3e07cd182a245b0b1c9b05b bytes=842
+The files belonging to this database system will be owned by user "user".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "C".
+The default text search configuration will be set to "english".
+
+Data page checksums are enabled.
+
+creating directory /tmp/xuux-fence-lab-OxxTp7/data ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... posix
+selecting default "max_connections" ... 100
+selecting default "shared_buffers" ... 128MB
+selecting default time zone ... Etc/UTC
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+
+Success. You can now start the database server using:
+
+    /usr/lib/postgresql/18/bin/pg_ctl -D /tmp/xuux-fence-lab-OxxTp7/data -l logfile start
+
+
+=== END initdb.log
+=== BEGIN db-fence.test.mjs.tap sha256=3194dfab6d946d69bd92831e3d2fc9d6ef686acd03f52245a6e94c0efe4a0404 bytes=8719
+TAP version 13
+# Subtest: سياجُ القاعدة — WL-532
+    # Subtest: Ed25519 داخلَ القاعدة: متجهُ RFC 8032 (اختبار 1) ومطابقةُ Node، والتلاعبُ يُرفَض
+    ok 1 - Ed25519 داخلَ القاعدة: متجهُ RFC 8032 (اختبار 1) ومطابقةُ Node، والتلاعبُ يُرفَض
+      ---
+      duration_ms: 142.897154
+      ...
+    # Subtest: البدءُ مغلق: بعدَ الهجرةِ والإقلاعِ HALTED؛ لا عودةَ افتراضيةَ إلى RUNNING، ولا كتابةَ لعامل
+    ok 2 - البدءُ مغلق: بعدَ الهجرةِ والإقلاعِ HALTED؛ لا عودةَ افتراضيةَ إلى RUNNING، ولا كتابةَ لعامل
+      ---
+      duration_ms: 190.233371
+      ...
+    # Subtest: RESUME: توقيعٌ مزوَّر، نوعٌ آخر، عهدٌ متوقَّعٌ خاطئ، نافذةٌ منقضية، هاشُ قائمةٍ خاطئ، دليلٌ غائب — كلُّها تُرفَض
+    ok 3 - RESUME: توقيعٌ مزوَّر، نوعٌ آخر، عهدٌ متوقَّعٌ خاطئ، نافذةٌ منقضية، هاشُ قائمةٍ خاطئ، دليلٌ غائب — كلُّها تُرفَض
+      ---
+      duration_ms: 443.521765
+      ...
+    # Subtest: T-CRED-07: الجذرُ وحدَه لا يُصدِرُ اعتماداً — يلزمُ توقيعُ مفتاحِ العاملِ المُدرَجِ على تحدّيه
+    ok 4 - T-CRED-07: الجذرُ وحدَه لا يُصدِرُ اعتماداً — يلزمُ توقيعُ مفتاحِ العاملِ المُدرَجِ على تحدّيه
+      ---
+      duration_ms: 46.732169
+      ...
+    # Subtest: T-ROS-03: عاملٌ خارجَ القائمةِ لا يُصدَرُ له، وتغييرُ القائمةِ تحتَ RUNNING مرفوض
+    ok 5 - T-ROS-03: عاملٌ خارجَ القائمةِ لا يُصدَرُ له، وتغييرُ القائمةِ تحتَ RUNNING مرفوض
+      ---
+      duration_ms: 13.432447
+      ...
+    # Subtest: T-CRED-05 (جزئيٌّ هنا): دورُ الإقلاعِ يصدرُ بلا سرّ، ولا يرثُ إلا xuux_worker بلا SET
+    ok 6 - T-CRED-05 (جزئيٌّ هنا): دورُ الإقلاعِ يصدرُ بلا سرّ، ولا يرثُ إلا xuux_worker بلا SET
+      ---
+      duration_ms: 15.73372
+      ...
+    # Subtest: الكتابةُ المشروعة: اعتمادٌ نشِطٌ في RUNNING يكتب (INSERT/UPSERT/MERGE/UPDATE/DELETE؛ وCOPY مرفوضٌ تحتَ RLS) ويعرفُ نفسَه
+    ok 7 - الكتابةُ المشروعة: اعتمادٌ نشِطٌ في RUNNING يكتب (INSERT/UPSERT/MERGE/UPDATE/DELETE؛ وCOPY مرفوضٌ تحتَ RLS) ويعرفُ نفسَه
+      ---
+      duration_ms: 163.893447
+      ...
+    # Subtest: T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد
+    ok 8 - T-OWN-04 وT-PRIV-05: العاملُ لا يملكُ جدولاً، ولا CREATE/TEMP/LO/TRUNCATE/TRIGGER، ولا SET ROLE، ولا تعطيلَ للزناد
+      ---
+      duration_ms: 162.64377
+      ...
+    # Subtest: هويّةٌ مزوَّرة: دورٌ عاديٌّ ذو امتيازٍ على الجدول، ومتغيّراتُ جلسةٍ مُزوَّرة، وsearch_path — لا شيءَ منها يُعطي هويّة
+    ok 9 - هويّةٌ مزوَّرة: دورٌ عاديٌّ ذو امتيازٍ على الجدول، ومتغيّراتُ جلسةٍ مُزوَّرة، وsearch_path — لا شيءَ منها يُعطي هويّة
+      ---
+      duration_ms: 1265.4168
+      ...
+    # Subtest: الاعتمادُ القديم: إقلاعٌ جديدٌ يُلغي القديمَ ويُنهي جلستَه، وإعادةُ الدخولِ بالقديمِ مرفوضة
+    ok 10 - الاعتمادُ القديم: إقلاعٌ جديدٌ يُلغي القديمَ ويُنهي جلستَه، وإعادةُ الدخولِ بالقديمِ مرفوضة
+      ---
+      duration_ms: 313.903829
+      ...
+    # Subtest: الإيجار: انقضاؤه يرفضُ الكتابة (XF009)، والجذرُ لا يُجدِّدُ لاعتمادٍ ملغى
+    ok 11 - الإيجار: انقضاؤه يرفضُ الكتابة (XF009)، والجذرُ لا يُجدِّدُ لاعتمادٍ ملغى
+      ---
+      duration_ms: 151.290598
+      ...
+    # Subtest: حافظُ الإيجار يتوقّفُ أوّلَ قراءةٍ غيرِ RUNNING ولا يُعيدُ التجديد
+    ok 12 - حافظُ الإيجار يتوقّفُ أوّلَ قراءةٍ غيرِ RUNNING ولا يُعيدُ التجديد
+      ---
+      duration_ms: 260.995894
+      ...
+    # Subtest: REPEATABLE READ: لقطةٌ قبلَ الإيقافِ لا تكتبُ بعدَه (خطّيّةُ FOR SHARE على صفِّ التحكّم)
+    ok 13 - REPEATABLE READ: لقطةٌ قبلَ الإيقافِ لا تكتبُ بعدَه (خطّيّةُ FOR SHARE على صفِّ التحكّم)
+      ---
+      duration_ms: 636.731511
+      ...
+    # Subtest: T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض
+    ok 14 - T-EFF-01: إيقافٌ كاملٌ مع معاملةٍ جاريةٍ تمسكُ القفل — تُنهى، والكتابةُ لا تلتزم، وكلُّ مسارِ كتابةٍ بعدَه مرفوض
+      ---
+      duration_ms: 1172.200316
+      ...
+    # Subtest: الحقنُ بالأعطال: انقطاعٌ بعدَ كلِّ خطوةٍ يُبقي القاعدةَ مغلقةً للعامل، ولا يُستأنَفُ دونَ إكمال
+    ok 15 - الحقنُ بالأعطال: انقطاعٌ بعدَ كلِّ خطوةٍ يُبقي القاعدةَ مغلقةً للعامل، ولا يُستأنَفُ دونَ إكمال
+      ---
+      duration_ms: 2027.148005
+      ...
+    # Subtest: جدولٌ جديدٌ بلا زناد، أو زنادٌ معطَّل، أو دالّةُ سياجٍ مُستبدَلة (superuser) ⇒ RESUME يرفض
+    ok 16 - جدولٌ جديدٌ بلا زناد، أو زنادٌ معطَّل، أو دالّةُ سياجٍ مُستبدَلة (superuser) ⇒ RESUME يرفض
+      ---
+      duration_ms: 2481.283776
+      ...
+# [تنبيه] اتصال ساكن انقطع في state_test_fence_c58977ee: terminating connection due to administrator command
+    # Subtest: T-REC-05: نسخةٌ من القاعدةِ (قاعدةٌ أخرى من القالب) تبدأ RECOVERY_REQUIRED؛ الأمرُ المُعادُ والكتابةُ مرفوضان
+    ok 17 - T-REC-05: نسخةٌ من القاعدةِ (قاعدةٌ أخرى من القالب) تبدأ RECOVERY_REQUIRED؛ الأمرُ المُعادُ والكتابةُ مرفوضان
+      ---
+      duration_ms: 640.501889
+      ...
+    # Subtest: T-REC-07: RECOVER يتطلّبُ أمراً موقَّعاً يُسمّي التجسُّدَ الحيّ، ويُفضي إلى HALTED لا RUNNING، ويُلغي الاعتمادات
+    ok 18 - T-REC-07: RECOVER يتطلّبُ أمراً موقَّعاً يُسمّي التجسُّدَ الحيّ، ويُفضي إلى HALTED لا RUNNING، ويُلغي الاعتمادات
+      ---
+      duration_ms: 461.482502
+      ...
+    # Subtest: ربطُ العامل (§7): prepareFencedWorker — حارسٌ مركّب، مصافحةٌ بتوقيعِ العامل، دورُ إقلاعٍ بلا سرّ، وcreatePool يرفضُ غيرَه
+    ok 19 - ربطُ العامل (§7): prepareFencedWorker — حارسٌ مركّب، مصافحةٌ بتوقيعِ العامل، دورُ إقلاعٍ بلا سرّ، وcreatePool يرفضُ غيرَه
+      ---
+      duration_ms: 463.965559
+      ...
+    # Subtest: صفُّ التحكّم: لا حذفَ ولا خفضَ للعهد ولا انتقالَ ممنوعٌ حتى لـsuperuser عبرَ المسارِ العادي
+    ok 20 - صفُّ التحكّم: لا حذفَ ولا خفضَ للعهد ولا انتقالَ ممنوعٌ حتى لـsuperuser عبرَ المسارِ العادي
+      ---
+      duration_ms: 30.126036
+      ...
+    # Subtest: سلسلةُ الأحداث: هاشٌ متّصلٌ من GENESIS_FENCE بلا فجوة
+    ok 21 - سلسلةُ الأحداث: هاشٌ متّصلٌ من GENESIS_FENCE بلا فجوة
+      ---
+      duration_ms: 4.493637
+      ...
+    1..21
+ok 1 - سياجُ القاعدة — WL-532
+  ---
+  duration_ms: 11918.426546
+  type: 'suite'
+  ...
+1..1
+# tests 21
+# suites 1
+# pass 21
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 12142.348051
+
+=== END db-fence.test.mjs.tap
+=== BEGIN fence-lifecycle.test.mjs.tap sha256=53f11f4494315eb18684d603af4ffa50fcb9da500f8860474f556f7895d6e9c6 bytes=7763
+TAP version 13
+# Subtest: دورةُ حياةِ السياج — WL-532 (§5 §7 §8)
+    # Subtest: SEAL-01: جلسةٌ غيرُ مختومةٍ لاعتمادٍ نشِطٍ لا تكتب (XF011)؛ بعدَ الختمِ تكتب
+    ok 1 - SEAL-01: جلسةٌ غيرُ مختومةٍ لاعتمادٍ نشِطٍ لا تكتب (XF011)؛ بعدَ الختمِ تكتب
+      ---
+      duration_ms: 170.772907
+      ...
+    # Subtest: SEAL-02: بعدَ الختمِ الدورُ NOLOGIN — دخولٌ لاحقٌ بالدورِ نفسِه (عمليةٌ أخرى) مرفوض
+    ok 2 - SEAL-02: بعدَ الختمِ الدورُ NOLOGIN — دخولٌ لاحقٌ بالدورِ نفسِه (عمليةٌ أخرى) مرفوض
+      ---
+      duration_ms: 171.062868
+      ...
+    # Subtest: SEAL-03: دخيلٌ حاضرٌ لحظةَ الختم ⇒ الختمُ يُرفَضُ والاعتمادُ يُلغى وجلسةُ الدخيلِ تُنهى
+    ok 3 - SEAL-03: دخيلٌ حاضرٌ لحظةَ الختم ⇒ الختمُ يُرفَضُ والاعتمادُ يُلغى وجلسةُ الدخيلِ تُنهى
+      ---
+      duration_ms: 169.065967
+      ...
+    # Subtest: SEAL-04: توقيعٌ بمفتاحٍ آخر، أو مجموعةٌ فارغة، أو ختمٌ ثانٍ ⇒ رفضٌ وإلغاء
+    ok 4 - SEAL-04: توقيعٌ بمفتاحٍ آخر، أو مجموعةٌ فارغة، أو ختمٌ ثانٍ ⇒ رفضٌ وإلغاء
+      ---
+      duration_ms: 188.777191
+      ...
+    # Subtest: SEAL-05: المُشرِفُ يُلغي إن أبلغ العاملُ مجموعةً غيرَ المختومة، أو فشلاً، أو صمت
+    ok 5 - SEAL-05: المُشرِفُ يُلغي إن أبلغ العاملُ مجموعةً غيرَ المختومة، أو فشلاً، أو صمت
+      ---
+      duration_ms: 903.984307
+      ...
+    # Subtest: SEAL-06 (خطرٌ متبقٍّ معلن): من يقرأُ مفتاحَ العاملِ ويسبقُه إلى الختمِ يختم — والمُشرِفُ يكشفُ ويُلغي
+    ok 6 - SEAL-06 (خطرٌ متبقٍّ معلن): من يقرأُ مفتاحَ العاملِ ويسبقُه إلى الختمِ يختم — والمُشرِفُ يكشفُ ويُلغي
+      ---
+      duration_ms: 373.810403
+      ...
+    # Subtest: SEAL-07: sealFencedPool مع دخيلٍ حاضر ⇒ يرمي SEAL_REFUSED ولا يُسقطُ العمليةَ (وصلاتُ المجمّعِ المُنهاةُ تُتلَف)
+    ok 7 - SEAL-07: sealFencedPool مع دخيلٍ حاضر ⇒ يرمي SEAL_REFUSED ولا يُسقطُ العمليةَ (وصلاتُ المجمّعِ المُنهاةُ تُتلَف)
+      ---
+      duration_ms: 681.706003
+      ...
+    # Subtest: EVID-01: الطالبُ (السياديّ) والعاملُ لا يُسجّلان دليلاً؛ والدليلُ لا يُعدَّلُ ولا يُحذَف
+    ok 8 - EVID-01: الطالبُ (السياديّ) والعاملُ لا يُسجّلان دليلاً؛ والدليلُ لا يُعدَّلُ ولا يُحذَف
+      ---
+      duration_ms: 719.252892
+      ...
+    # Subtest: EVID-02: ok=false يُسجَّلُ EFFECTS_NOT_HALTED فلا SYSTEM_HALT_COMPLETE، والسياديُّ لا يوقّع، والقاعدةُ ترفض
+    ok 9 - EVID-02: ok=false يُسجَّلُ EFFECTS_NOT_HALTED فلا SYSTEM_HALT_COMPLETE، والسياديُّ لا يوقّع، والقاعدةُ ترفض
+      ---
+      duration_ms: 613.438677
+      ...
+    # Subtest: EVID-03: دليلٌ قديم (إيقافٌ سابق) لا يُعادُ استعمالُه، ودليلٌ بعهدٍ أو إيقافٍ آخرَ لا يُسجَّل
+    ok 10 - EVID-03: دليلٌ قديم (إيقافٌ سابق) لا يُعادُ استعمالُه، ودليلٌ بعهدٍ أو إيقافٍ آخرَ لا يُسجَّل
+      ---
+      duration_ms: 602.130872
+      ...
+    # Subtest: EVID-04: تغييرُ القائمةِ بعدَ الدليلِ يُسقطُه (الربطُ بالقائمة)، ومفاتيحُ صغيرةُ الرتبةِ أو مختلطةٌ لا تُسجَّل
+    ok 11 - EVID-04: تغييرُ القائمةِ بعدَ الدليلِ يُسقطُه (الربطُ بالقائمة)، ومفاتيحُ صغيرةُ الرتبةِ أو مختلطةٌ لا تُسجَّل
+      ---
+      duration_ms: 444.87839
+      ...
+    # Subtest: HR-01: جلساتٌ مختومةٌ متعدّدة، إحداها في معاملةٍ مفتوحة ⇒ الإيقافُ يُنهيها كلَّها ولا يلتزمُ شيء
+    ok 12 - HR-01: جلساتٌ مختومةٌ متعدّدة، إحداها في معاملةٍ مفتوحة ⇒ الإيقافُ يُنهيها كلَّها ولا يلتزمُ شيء
+      ---
+      duration_ms: 1267.600477
+      ...
+    # Subtest: HR-02: انقطاعُ وصلةِ الجذرِ أثناءَ الإيقاف ⇒ الحالةُ ليست RUNNING، والكاتبُ مرفوض، وإعادةُ الإيقافِ تُكمل
+    ok 13 - HR-02: انقطاعُ وصلةِ الجذرِ أثناءَ الإيقاف ⇒ الحالةُ ليست RUNNING، والكاتبُ مرفوض، وإعادةُ الإيقافِ تُكمل
+      ---
+      duration_ms: 505.660576
+      ...
+    # Subtest: HR-03: تعذّرُ تسجيلِ دليلِ الآثار ⇒ DB_FENCED بلا SYSTEM_HALT_COMPLETE، ولا استئناف
+    ok 14 - HR-03: تعذّرُ تسجيلِ دليلِ الآثار ⇒ DB_FENCED بلا SYSTEM_HALT_COMPLETE، ولا استئناف
+      ---
+      duration_ms: 347.541691
+      ...
+    # Subtest: HR-04: الإعادة، والأمرُ المنقضي، وأمران متزامنان ⇒ واحدٌ فقط ينجح
+    ok 15 - HR-04: الإعادة، والأمرُ المنقضي، وأمران متزامنان ⇒ واحدٌ فقط ينجح
+      ---
+      duration_ms: 3138.633007
+      ...
+    # Subtest: HR-05: HALT وRESUME متزامنان ⇒ لا حالةَ وسطى: إمّا RUNNING بلا طلبٍ معلّق أو ليست RUNNING والكاتبُ مرفوض
+    ok 16 - HR-05: HALT وRESUME متزامنان ⇒ لا حالةَ وسطى: إمّا RUNNING بلا طلبٍ معلّق أو ليست RUNNING والكاتبُ مرفوض
+      ---
+      duration_ms: 1885.305905
+      ...
+    # Subtest: HR-06: فشلُ RESUME في كلِّ مرحلةٍ يُبقي HALTED، ولا يُسجِّلُ أمراً، ولا يُصدِرُ اعتماداً
+    ok 17 - HR-06: فشلُ RESUME في كلِّ مرحلةٍ يُبقي HALTED، ولا يُسجِّلُ أمراً، ولا يُصدِرُ اعتماداً
+      ---
+      duration_ms: 542.998782
+      ...
+    # Subtest: HR-07: انهيارُ كلِّ الوصلات (جذر، سياديّ، عمال) أثناءَ الإيقاف ⇒ الحالةُ دائمةٌ وليست RUNNING، والإكمالُ بعدَ إعادةِ الاتصال
+    ok 18 - HR-07: انهيارُ كلِّ الوصلات (جذر، سياديّ، عمال) أثناءَ الإيقاف ⇒ الحالةُ دائمةٌ وليست RUNNING، والإكمالُ بعدَ إعادةِ الاتصال
+      ---
+      duration_ms: 263.007097
+      ...
+    # Subtest: HR-08: حالةُ القاعدةِ تخالفُ حالةَ النظام — كلٌّ منهما يُغلقُ وحدَه (الحارسُ المركّب)
+    ok 19 - HR-08: حالةُ القاعدةِ تخالفُ حالةَ النظام — كلٌّ منهما يُغلقُ وحدَه (الحارسُ المركّب)
+      ---
+      duration_ms: 493.561187
+      ...
+    1..19
+ok 1 - دورةُ حياةِ السياج — WL-532 (§5 §7 §8)
+  ---
+  duration_ms: 14702.352712
+  type: 'suite'
+  ...
+1..1
+# tests 19
+# suites 1
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 14922.817956
+
+=== END fence-lifecycle.test.mjs.tap
+=== BEGIN halt-integrity.test.mjs.tap sha256=a047e76c438033de061b91e8b4ad9d726aabbeb0d17384f4469049307e4e8127 bytes=4580
+TAP version 13
+# Subtest: D-14: نظامٌ سليمٌ يُقرأُ كما هو — RUNNING بعدَ الاستئناف، HALTED بعدَ الإيقاف
+ok 1 - D-14: نظامٌ سليمٌ يُقرأُ كما هو — RUNNING بعدَ الاستئناف، HALTED بعدَ الإيقاف
+  ---
+  duration_ms: 12.628367
+  ...
+# Subtest: D-14: غيابُ الثلاثيّةِ كلِّها = محوٌ ⇒ RECOVERY_REQUIRED (والقارئُ الأصليُّ يقرأُه running — الفرقُ مقصود)
+ok 2 - D-14: غيابُ الثلاثيّةِ كلِّها = محوٌ ⇒ RECOVERY_REQUIRED (والقارئُ الأصليُّ يقرأُه running — الفرقُ مقصود)
+  ---
+  duration_ms: 1.63521
+  ...
+# Subtest: D-14: بلا حدٍّ خارجيٍّ للعهد لا قراءةَ RUNNING، والحدُّ التالفُ كالغائب
+ok 3 - D-14: بلا حدٍّ خارجيٍّ للعهد لا قراءةَ RUNNING، والحدُّ التالفُ كالغائب
+  ---
+  duration_ms: 5.548749
+  ...
+# Subtest: D-14: استرجاعُ ثلاثيّةٍ أقدمَ من الحدِّ الخارجيّ ⇒ EPOCH_FLOOR_AHEAD
+ok 4 - D-14: استرجاعُ ثلاثيّةٍ أقدمَ من الحدِّ الخارجيّ ⇒ EPOCH_FLOOR_AHEAD
+  ---
+  duration_ms: 2.83897
+  ...
+# Subtest: D-14: توجيهٌ محذوفٌ أو تالف ⇒ RECOVERY_REQUIRED
+ok 5 - D-14: توجيهٌ محذوفٌ أو تالف ⇒ RECOVERY_REQUIRED
+  ---
+  duration_ms: 3.994836
+  ...
+# Subtest: D-14: توجيهٌ موقَّعٌ صحيحٌ لكنّه أقدمُ من آخرِ التاريخ (إعادةُ running قديم) ⇒ DIRECTIVE_NOT_LAST
+ok 6 - D-14: توجيهٌ موقَّعٌ صحيحٌ لكنّه أقدمُ من آخرِ التاريخ (إعادةُ running قديم) ⇒ DIRECTIVE_NOT_LAST
+  ---
+  duration_ms: 3.850789
+  ...
+# Subtest: D-14: سطرُ تاريخٍ تالفٌ — في الأوّلِ أو الوسط — لا يُتجاوَز
+ok 7 - D-14: سطرُ تاريخٍ تالفٌ — في الأوّلِ أو الوسط — لا يُتجاوَز
+  ---
+  duration_ms: 8.913856
+  ...
+# Subtest: D-14: ذيلُ تاريخٍ مقطوع (كتابةٌ منقطعة) ⇒ HISTORY_TAIL_TRUNCATED
+ok 8 - D-14: ذيلُ تاريخٍ مقطوع (كتابةٌ منقطعة) ⇒ HISTORY_TAIL_TRUNCATED
+  ---
+  duration_ms: 3.004267
+  ...
+# Subtest: D-14: تاريخٌ محذوفٌ والتوجيهُ باقٍ ⇒ HISTORY_MISSING (ولا يُقرأُ التوجيهُ وحدَه)
+ok 9 - D-14: تاريخٌ محذوفٌ والتوجيهُ باقٍ ⇒ HISTORY_MISSING (ولا يُقرأُ التوجيهُ وحدَه)
+  ---
+  duration_ms: 2.627474
+  ...
+# Subtest: D-14: سطرٌ وسطيٌّ عُدِّلَ: هاشٌ قديم ⇒ HASH_MISMATCH؛ هاشٌ مُعادٌ ⇒ SIGNATURE_INVALID وانقطاعُ الربط
+ok 10 - D-14: سطرٌ وسطيٌّ عُدِّلَ: هاشٌ قديم ⇒ HASH_MISMATCH؛ هاشٌ مُعادٌ ⇒ SIGNATURE_INVALID وانقطاعُ الربط
+  ---
+  duration_ms: 4.336404
+  ...
+# Subtest: D-14: حذفُ سطرٍ من الوسط ⇒ فجوةُ عهدٍ وانقطاعُ ربط
+ok 11 - D-14: حذفُ سطرٍ من الوسط ⇒ فجوةُ عهدٍ وانقطاعُ ربط
+  ---
+  duration_ms: 3.283124
+  ...
+# Subtest: D-14: ملفُّ العهد: أعلى من التاريخ، أدنى، تالف، غائب — كلُّها مغلقة
+ok 12 - D-14: ملفُّ العهد: أعلى من التاريخ، أدنى، تالف، غائب — كلُّها مغلقة
+  ---
+  duration_ms: 9.419006
+  ...
+# Subtest: D-14: سجلُّ عقدةٍ أو إقرارٌ تالف لا يُتجاهَل
+ok 13 - D-14: سجلُّ عقدةٍ أو إقرارٌ تالف لا يُتجاهَل
+  ---
+  duration_ms: 3.972369
+  ...
+# Subtest: D-14: العمليةُ الميتةُ ليست إقراراً؛ الإقرارُ الموقَّعُ للعهدِ الجاري وحدَه يُكمِل، والحيُّ غيرُ المسجَّلِ يمنع
+ok 14 - D-14: العمليةُ الميتةُ ليست إقراراً؛ الإقرارُ الموقَّعُ للعهدِ الجاري وحدَه يُكمِل، والحيُّ غيرُ المسجَّلِ يمنع
+  ---
+  duration_ms: 71.737985
+  ...
+# Subtest: D-14: الحارسُ الصارمُ يرمي على HALTED وRECOVERY_REQUIRED ويمرُّ على RUNNING
+ok 15 - D-14: الحارسُ الصارمُ يرمي على HALTED وRECOVERY_REQUIRED ويمرُّ على RUNNING
+  ---
+  duration_ms: 5.503334
+  ...
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 278.248468
+
+=== END halt-integrity.test.mjs.tap
+=== BEGIN effects.test.mjs.tap sha256=0f91aa8e42982a0c2bc240a57de934875be6615cc4e6d49364b184daa056423d bytes=1989
+TAP version 13
+# Subtest: E1..E16: كلُّ أثرٍ مُصنَّفٌ بضابطٍ وحالةٍ ودليل — لا أثرَ غيرُ مصنَّف
+ok 1 - E1..E16: كلُّ أثرٍ مُصنَّفٌ بضابطٍ وحالةٍ ودليل — لا أثرَ غيرُ مصنَّف
+  ---
+  duration_ms: 15.084691
+  ...
+# Subtest: E6: cgroup.kill يقتلُ الابنَ والحفيدَ اليتيم (setsid، أبوه مات) ويُثبتُ الخلوّ
+ok 2 - E6: cgroup.kill يقتلُ الابنَ والحفيدَ اليتيم (setsid، أبوه مات) ويُثبتُ الخلوّ
+  ---
+  duration_ms: 349.666154
+  ...
+# Subtest: E6: بلا cgroup مفوَّض يرفضُ CgroupScope الإنشاءَ صراحةً (لا نطاقَ وهميّ)
+ok 3 - E6: بلا cgroup مفوَّض يرفضُ CgroupScope الإنشاءَ صراحةً (لا نطاقَ وهميّ)
+  ---
+  duration_ms: 0.308977
+  ...
+# Subtest: T-EFF-02: الخروجُ عبرَ EgressGate القائمة — الإيقافُ يُجهِضُ الجاريَ ويرفضُ الجديد، والحارسُ يُقرأ قبلَ كلِّ نقل
+ok 4 - T-EFF-02: الخروجُ عبرَ EgressGate القائمة — الإيقافُ يُجهِضُ الجاريَ ويرفضُ الجديد، والحارسُ يُقرأ قبلَ كلِّ نقل
+  ---
+  duration_ms: 293.981703
+  ...
+# Subtest: T-EFF-03: المستقبِلُ يرفضُ العهدَ القديمَ والتكرارَ وغيرَ RUNNING (رمزُ السياج)
+ok 5 - T-EFF-03: المستقبِلُ يرفضُ العهدَ القديمَ والتكرارَ وغيرَ RUNNING (رمزُ السياج)
+  ---
+  duration_ms: 0.907887
+  ...
+# Subtest: الخطوة 11: موقِفُ آثارٍ بلا أيِّ ضابطٍ ليس نجاحاً
+ok 6 - الخطوة 11: موقِفُ آثارٍ بلا أيِّ ضابطٍ ليس نجاحاً
+  ---
+  duration_ms: 0.163732
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 830.02549
+
+=== END effects.test.mjs.tap
+=== BEGIN connection-map.test.mjs.tap sha256=c4ff8742438247c920f410ba201e46ad1b4f60b85b263afb3ce4f7a4757faaa5 bytes=1197
+TAP version 13
+# Subtest: CONN-MAP-01: الماسحُ يلتقطُ كلَّ نوعٍ ويتجاهلُ التعليق
+ok 1 - CONN-MAP-01: الماسحُ يلتقطُ كلَّ نوعٍ ويتجاهلُ التعليق
+  ---
+  duration_ms: 1.971096
+  ...
+# Subtest: CONN-MAP-02: كلُّ موضعِ اتصالٍ مُدرَجٌ بعددِه، ولا إدخالَ بلا موضع
+ok 2 - CONN-MAP-02: كلُّ موضعِ اتصالٍ مُدرَجٌ بعددِه، ولا إدخالَ بلا موضع
+  ---
+  duration_ms: 64.22576
+  ...
+# Subtest: CONN-MAP-03: كلُّ إدخالٍ مُصنَّفٌ بفئةٍ معروفةٍ وسببٍ ودور
+ok 3 - CONN-MAP-03: كلُّ إدخالٍ مُصنَّفٌ بفئةٍ معروفةٍ وسببٍ ودور
+  ---
+  duration_ms: 0.321316
+  ...
+# Subtest: CONN-MAP-04: FENCED_WRITER يسلكُ المصافحةَ والختمَ فعلاً؛ وغيابُ المُشرِفِ مُعلَن
+ok 4 - CONN-MAP-04: FENCED_WRITER يسلكُ المصافحةَ والختمَ فعلاً؛ وغيابُ المُشرِفِ مُعلَن
+  ---
+  duration_ms: 1.129599
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 213.930816
+
+=== END connection-map.test.mjs.tap
+=== BEGIN ed25519.test.mjs.tap sha256=adaa482e114ffa9b7d85fe7b7d38159a81b144bc50ef87b221f75f09d43ea593 bytes=2778
+TAP version 13
+# Subtest: متّجهاتُ الطرفِ الثالث محفوظةٌ ببصمتِها المعلَنة
+ok 1 - متّجهاتُ الطرفِ الثالث محفوظةٌ ببصمتِها المعلَنة
+  ---
+  duration_ms: 2.549719
+  ...
+# Subtest: Ed25519 داخلَ القاعدة — تدقيقٌ تفاضليّ (WL-532 §6)
+    # Subtest: Wycheproof: كلُّ «صحيح» يُقبَل وكلُّ «مرفوض» يُرفَض؛ «المقبولُ» بالسياسةِ الصارمة
+    ok 1 - Wycheproof: كلُّ «صحيح» يُقبَل وكلُّ «مرفوض» يُرفَض؛ «المقبولُ» بالسياسةِ الصارمة
+      ---
+      duration_ms: 1.982785
+      ...
+    # Subtest: ed25519-speccheck: لا يُقبَلُ إلا الحالة 3 (سلوكُ libsodium)
+    ok 2 - ed25519-speccheck: لا يُقبَلُ إلا الحالة 3 (سلوكُ libsodium)
+      ---
+      duration_ms: 0.39421
+      ...
+    # Subtest: اختلافُ OpenSSL محصورٌ في المفتاحِ من رتبةٍ صغيرةٍ وA غيرِ القانونيّ (القاعدةُ أشدّ)
+    ok 3 - اختلافُ OpenSSL محصورٌ في المفتاحِ من رتبةٍ صغيرةٍ وA غيرِ القانونيّ (القاعدةُ أشدّ)
+      ---
+      duration_ms: 46.821359
+      ...
+    # Subtest: ضبابٌ تفاضليّ مع node:crypto (2000 مفتاحاً × 8 طفرات)
+    ok 4 - ضبابٌ تفاضليّ مع node:crypto (2000 مفتاحاً × 8 طفرات)
+      ---
+      duration_ms: 3101.195104
+      ...
+    # Subtest: مدخلاتٌ مشوَّهة: NULL وأطوالٌ خاطئة تُرجعُ false بلا استثناء
+    ok 5 - مدخلاتٌ مشوَّهة: NULL وأطوالٌ خاطئة تُرجعُ false بلا استثناء
+      ---
+      duration_ms: 9.504562
+      ...
+    # Subtest: تسجيلُ المفاتيح (ed25519_key_ok): الصادقُ يُقبَل؛ الصغيرُ والمختلطُ وغيرُ القانونيّ يُرفَض
+    ok 6 - تسجيلُ المفاتيح (ed25519_key_ok): الصادقُ يُقبَل؛ الصغيرُ والمختلطُ وغيرُ القانونيّ يُرفَض
+      ---
+      duration_ms: 175.363308
+      ...
+    # Subtest: libsodium: مطابقةٌ تامّةٌ على المتّجهاتِ والضبابِ كلِّه
+    ok 7 - libsodium: مطابقةٌ تامّةٌ على المتّجهاتِ والضبابِ كلِّه
+      ---
+      duration_ms: 621.655596
+      ...
+    # libsodium agreement: 16222/16222
+    1..7
+ok 2 - Ed25519 داخلَ القاعدة — تدقيقٌ تفاضليّ (WL-532 §6)
+  ---
+  duration_ms: 84055.933608
+  type: 'suite'
+  ...
+1..2
+# tests 8
+# suites 1
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 84217.5517
+
+=== END ed25519.test.mjs.tap
+=== BEGIN halt-live-rounds.json sha256=3c96adef17bbcaa96b82bec8dba5cf70997fb695edc5cfc6ff755bb0f7e83cca bytes=4052
+[
+  {
+    "i": 0,
+    "sealed": true,
+    "before": 67,
+    "committed": 68,
+    "after_wait": 68,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 68,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 1,
+    "sealed": true,
+    "before": 68,
+    "committed": 69,
+    "after_wait": 69,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 69,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 2,
+    "sealed": true,
+    "before": 84,
+    "committed": 85,
+    "after_wait": 85,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 85,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 3,
+    "sealed": true,
+    "before": 81,
+    "committed": 82,
+    "after_wait": 82,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 82,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 4,
+    "sealed": true,
+    "before": 31,
+    "committed": 32,
+    "after_wait": 32,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 32,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 5,
+    "sealed": true,
+    "before": 45,
+    "committed": 46,
+    "after_wait": 46,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 46,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 6,
+    "sealed": true,
+    "before": 85,
+    "committed": 87,
+    "after_wait": 87,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 87,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 7,
+    "sealed": true,
+    "before": 33,
+    "committed": 34,
+    "after_wait": 34,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 34,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 8,
+    "sealed": true,
+    "before": 72,
+    "committed": 73,
+    "after_wait": 73,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 73,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 9,
+    "sealed": true,
+    "before": 50,
+    "committed": 51,
+    "after_wait": 51,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 51,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  }
+]
+=== END halt-live-rounds.json
+=== BEGIN pg_basebackup.log sha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 bytes=0
+
+=== END pg_basebackup.log
+=== BEGIN postgres-primary.log sha256=2f5d29c9e1c3bbf13d0590b72a42bcf4e83e9f2b15c47bb361eb9ef2f13cd051 bytes=154665
+2026-11-12 00:14:22.429 UTC [23374] LOG:  starting PostgreSQL 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, 64-bit
+2026-11-12 00:14:22.429 UTC [23374] LOG:  listening on IPv4 address "127.0.0.1", port 41383
+2026-11-12 00:14:22.430 UTC [23374] LOG:  listening on Unix socket "/tmp/xuux-fence-lab-OxxTp7/sock/.s.PGSQL.41383"
+2026-11-12 00:14:22.433 UTC [23380] LOG:  database system was shut down at 2026-11-12 00:14:22 UTC
+2026-11-12 00:14:22.435 UTC [23374] LOG:  database system is ready to accept connections
+2026-11-12 00:14:22.519 UTC [23385] LOG:  connection received: host=[local]
+2026-11-12 00:14:22.519 UTC [23385] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:14:22.519 UTC [23385] LOG:  connection authorized: user=postgres database=postgres application_name=createdb
+2026-11-12 00:14:22.847 UTC [23403] LOG:  connection received: host=127.0.0.1 port=34236
+2026-11-12 00:14:22.850 UTC [23403] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:22.850 UTC [23403] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:22.855 UTC [23403] ERROR:  role "xuux_worker" does not exist at character 100
+2026-11-12 00:14:22.855 UTC [23403] STATEMENT:  SELECT r.rolname FROM pg_roles r JOIN pg_auth_members m ON m.member = r.oid
+	      WHERE m.roleid = 'xuux_worker'::regrole AND r.rolname LIKE 'xw\_%'
+2026-11-12 00:14:22.858 UTC [23404] LOG:  connection received: host=127.0.0.1 port=34246
+2026-11-12 00:14:22.859 UTC [23404] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:22.859 UTC [23404] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:22.894 UTC [23405] LOG:  connection received: host=127.0.0.1 port=34258
+2026-11-12 00:14:22.895 UTC [23405] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:22.895 UTC [23405] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:22.900 UTC [23406] LOG:  connection received: host=127.0.0.1 port=34264
+2026-11-12 00:14:22.900 UTC [23406] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:22.900 UTC [23406] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:23.268 UTC [23407] LOG:  connection received: host=127.0.0.1 port=34270
+2026-11-12 00:14:23.282 UTC [23407] LOG:  connection authenticated: identity="xf_root" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:23.282 UTC [23407] LOG:  connection authorized: user=xf_root database=state_test_fence_c58977ee
+2026-11-12 00:14:23.292 UTC [23408] LOG:  connection received: host=127.0.0.1 port=34278
+2026-11-12 00:14:23.296 UTC [23408] LOG:  connection authenticated: identity="xf_sovereign" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:23.296 UTC [23408] LOG:  connection authorized: user=xf_sovereign database=state_test_fence_c58977ee
+2026-11-12 00:14:23.974 UTC [23407] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:23.974 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:23.974 UTC [23407] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:23.988 UTC [23408] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:23.988 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:23.988 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:23.989 UTC [23407] ERROR:  fence: الدليلُ لا يخصُّ آخرَ إيقافٍ مكتملٍ في هذا العهد (halt= epoch=؛ المتوقَّع /1 مع DB_FENCED)
+2026-11-12 00:14:23.989 UTC [23407] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 15 at RAISE
+2026-11-12 00:14:23.989 UTC [23407] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:24.158 UTC [23408] ERROR:  fence: توقيعُ الأمرِ السياديِّ غيرُ صالح
+2026-11-12 00:14:24.158 UTC [23408] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 16 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.158 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.170 UTC [23408] ERROR:  fence: توقيعُ الأمرِ السياديِّ غيرُ صالح
+2026-11-12 00:14:24.170 UTC [23408] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 16 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.170 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.181 UTC [23408] ERROR:  fence: نوعُ الأمر RECOVER والمطلوب RESUME
+2026-11-12 00:14:24.181 UTC [23408] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 24 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.181 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.195 UTC [23408] ERROR:  fence: expected_epoch=9 والعهدُ 2
+2026-11-12 00:14:24.195 UTC [23408] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 36 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.195 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.207 UTC [23408] ERROR:  fence: الأمرُ خارجَ نافذةِ صلاحيته
+2026-11-12 00:14:24.207 UTC [23408] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 41 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.207 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.219 UTC [23408] ERROR:  fence: هاشُ القائمةِ لا يطابق (أو لا قائمة)
+2026-11-12 00:14:24.219 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 12 at RAISE
+2026-11-12 00:14:24.219 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.231 UTC [23408] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:24.231 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:24.231 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.231 UTC [23407] ERROR:  permission denied for function resume
+2026-11-12 00:14:24.231 UTC [23407] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.232 UTC [23405] ERROR:  fence: الأوامرُ السياديةُ عبرَ xf_sovereign وحده
+2026-11-12 00:14:24.232 UTC [23405] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 5 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.232 UTC [23405] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.418 UTC [23408] ERROR:  fence: nonce مستعمَلٌ سلفاً — إعادةُ إرسال
+2026-11-12 00:14:24.418 UTC [23408] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 30 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:24.418 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:24.425 UTC [23407] ERROR:  fence: إثباتُ حيازةِ مفتاحِ العاملِ غيرُ صالح
+2026-11-12 00:14:24.425 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_credential(text,bytea) line 18 at RAISE
+2026-11-12 00:14:24.425 UTC [23407] STATEMENT:  SELECT fence.issue_credential($1, $2) AS r
+2026-11-12 00:14:24.437 UTC [23407] ERROR:  fence: إثباتُ حيازةِ مفتاحِ العاملِ غيرُ صالح
+2026-11-12 00:14:24.437 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_credential(text,bytea) line 18 at RAISE
+2026-11-12 00:14:24.437 UTC [23407] STATEMENT:  SELECT fence.issue_credential($1, $2) AS r
+2026-11-12 00:14:24.448 UTC [23407] ERROR:  fence: إثباتُ حيازةِ مفتاحِ العاملِ غيرُ صالح
+2026-11-12 00:14:24.448 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_credential(text,bytea) line 18 at RAISE
+2026-11-12 00:14:24.448 UTC [23407] STATEMENT:  SELECT fence.issue_credential($1, $2) AS r
+2026-11-12 00:14:24.462 UTC [23407] ERROR:  fence: تحدٍّ غائبٌ أو مستعمَلٌ أو منقضٍ أو من عهدٍ آخر
+2026-11-12 00:14:24.462 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_credential(text,bytea) line 11 at RAISE
+2026-11-12 00:14:24.462 UTC [23407] STATEMENT:  SELECT fence.issue_credential($1, $2) AS r
+2026-11-12 00:14:24.463 UTC [23407] ERROR:  fence: boot_id مستعمَلٌ لهذا العامل
+2026-11-12 00:14:24.463 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 16 at RAISE
+2026-11-12 00:14:24.463 UTC [23407] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:24.466 UTC [23407] ERROR:  fence: العاملُ gamma ليس في القائمة
+2026-11-12 00:14:24.466 UTC [23407] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 10 at RAISE
+2026-11-12 00:14:24.466 UTC [23407] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:24.478 UTC [23408] ERROR:  fence: تغييرُ القائمةِ تحتَ HALTED فقط
+2026-11-12 00:14:24.478 UTC [23408] CONTEXT:  PL/pgSQL function fence.roster_set(text,bytea) line 6 at RAISE
+2026-11-12 00:14:24.478 UTC [23408] STATEMENT:  SELECT fence.roster_set($1, $2) AS r
+2026-11-12 00:14:24.515 UTC [23409] LOG:  connection received: host=127.0.0.1 port=34286
+2026-11-12 00:14:24.519 UTC [23409] LOG:  connection authenticated: identity="xw_alpha_52df5328a288cab1" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:24.519 UTC [23409] LOG:  connection authorized: user=xw_alpha_52df5328a288cab1 database=state_test_fence_c58977ee
+2026-11-12 00:14:24.552 UTC [23409] ERROR:  COPY FROM not supported with row-level security
+2026-11-12 00:14:24.552 UTC [23409] HINT:  Use INSERT statements instead.
+2026-11-12 00:14:24.552 UTC [23409] STATEMENT:  COPY state.fence_probe (id, v) FROM STDIN
+2026-11-12 00:14:24.557 UTC [23409] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:24.683 UTC [23410] LOG:  connection received: host=127.0.0.1 port=34300
+2026-11-12 00:14:24.686 UTC [23410] LOG:  connection authenticated: identity="xw_alpha_bea0d38052bf6080" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:24.686 UTC [23410] LOG:  connection authorized: user=xw_alpha_bea0d38052bf6080 database=state_test_fence_c58977ee
+2026-11-12 00:14:24.713 UTC [23410] ERROR:  fence: DDL (CREATE TABLE) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.713 UTC [23410] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.713 UTC [23410] STATEMENT:  CREATE TABLE state.evil (x int)
+2026-11-12 00:14:24.713 UTC [23410] ERROR:  fence: DDL (CREATE TABLE) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.713 UTC [23410] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.713 UTC [23410] STATEMENT:  CREATE TABLE public.evil (x int)
+2026-11-12 00:14:24.713 UTC [23410] ERROR:  fence: DDL (CREATE TABLE) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.713 UTC [23410] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.713 UTC [23410] STATEMENT:  CREATE TEMP TABLE evil (x int)
+2026-11-12 00:14:24.714 UTC [23410] ERROR:  permission denied for function lo_create
+2026-11-12 00:14:24.714 UTC [23410] STATEMENT:  SELECT lo_create(0)
+2026-11-12 00:14:24.714 UTC [23410] ERROR:  permission denied for function lo_from_bytea
+2026-11-12 00:14:24.714 UTC [23410] STATEMENT:  SELECT lo_from_bytea(0, $1)
+2026-11-12 00:14:24.714 UTC [23410] ERROR:  permission denied for table fence_probe
+2026-11-12 00:14:24.714 UTC [23410] STATEMENT:  TRUNCATE state.fence_probe
+2026-11-12 00:14:24.714 UTC [23410] ERROR:  fence: DDL (ALTER TABLE) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.714 UTC [23410] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.714 UTC [23410] STATEMENT:  ALTER TABLE state.fence_probe DISABLE TRIGGER xf_guard
+2026-11-12 00:14:24.717 UTC [23410] ERROR:  fence: DDL (ALTER TABLE) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.717 UTC [23410] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.717 UTC [23410] STATEMENT:  ALTER TABLE state.fence_probe DISABLE ROW LEVEL SECURITY
+2026-11-12 00:14:24.717 UTC [23410] ERROR:  permission denied to set role "xuux_owner"
+2026-11-12 00:14:24.717 UTC [23410] STATEMENT:  SET ROLE xuux_owner
+2026-11-12 00:14:24.718 UTC [23410] ERROR:  permission denied to set role "xuux_worker"
+2026-11-12 00:14:24.718 UTC [23410] STATEMENT:  SET ROLE xuux_worker
+2026-11-12 00:14:24.718 UTC [23410] ERROR:  permission denied to set role "xf_root"
+2026-11-12 00:14:24.718 UTC [23410] STATEMENT:  SET ROLE xf_root
+2026-11-12 00:14:24.718 UTC [23410] ERROR:  permission denied for function halt_complete
+2026-11-12 00:14:24.718 UTC [23410] STATEMENT:  SELECT fence.halt_complete(1)
+2026-11-12 00:14:24.718 UTC [23410] ERROR:  permission denied for function check_fenced
+2026-11-12 00:14:24.718 UTC [23410] STATEMENT:  SELECT fence.check_fenced()
+2026-11-12 00:14:24.718 UTC [23410] ERROR:  permission denied for table control
+2026-11-12 00:14:24.718 UTC [23410] STATEMENT:  UPDATE fence.control SET state = 'RUNNING'
+2026-11-12 00:14:24.718 UTC [23410] ERROR:  permission denied to set session authorization "xf_root"
+2026-11-12 00:14:24.718 UTC [23410] STATEMENT:  SET session_authorization = 'xf_root'
+2026-11-12 00:14:24.719 UTC [23410] ERROR:  fence: DDL (CREATE RULE) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.719 UTC [23410] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.719 UTC [23410] STATEMENT:  CREATE RULE r AS ON INSERT TO state.fence_probe DO INSTEAD NOTHING
+2026-11-12 00:14:24.720 UTC [23410] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:24.822 UTC [23406] ERROR:  fence: DDL (GRANT) ممنوعٌ تحتَ RUNNING — الهجراتُ تحتَ HALTED
+2026-11-12 00:14:24.822 UTC [23406] CONTEXT:  PL/pgSQL function fence._ddl_start() line 5 at RAISE
+2026-11-12 00:14:24.822 UTC [23406] STATEMENT:  GRANT SELECT ON state.fence_probe TO PUBLIC
+2026-11-12 00:14:24.824 UTC [23411] LOG:  connection received: host=127.0.0.1 port=34306
+2026-11-12 00:14:24.825 UTC [23411] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:24.825 UTC [23411] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:25.469 UTC [23412] LOG:  connection received: host=127.0.0.1 port=34316
+2026-11-12 00:14:25.472 UTC [23412] LOG:  connection authenticated: identity="xattacker" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:25.472 UTC [23412] LOG:  connection authorized: user=xattacker database=state_test_fence_c58977ee
+2026-11-12 00:14:25.478 UTC [23412] ERROR:  fence: هويّةٌ غيرُ معروفة (xattacker)
+2026-11-12 00:14:25.478 UTC [23412] CONTEXT:  PL/pgSQL function fence.guard_write() line 36 at RAISE
+2026-11-12 00:14:25.478 UTC [23412] STATEMENT:  INSERT INTO state.fence_probe VALUES (50, 'x')
+2026-11-12 00:14:25.479 UTC [23412] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:26.108 UTC [23414] LOG:  connection received: host=127.0.0.1 port=34318
+2026-11-12 00:14:26.112 UTC [23414] LOG:  connection authenticated: identity="xw_alpha_2e8cdae3c83b89eb" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:26.112 UTC [23414] LOG:  connection authorized: user=xw_alpha_2e8cdae3c83b89eb database=state_test_fence_c58977ee
+2026-11-12 00:14:26.154 UTC [23414] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:26.261 UTC [23415] LOG:  connection received: host=127.0.0.1 port=34322
+2026-11-12 00:14:26.265 UTC [23415] LOG:  connection authenticated: identity="xw_alpha_9794bfb5bcf66edc" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:26.265 UTC [23415] LOG:  connection authorized: user=xw_alpha_9794bfb5bcf66edc database=state_test_fence_c58977ee
+2026-11-12 00:14:26.291 UTC [23416] LOG:  connection received: host=127.0.0.1 port=34328
+2026-11-12 00:14:26.294 UTC [23416] LOG:  connection authenticated: identity="xw_alpha_2e8cdae3c83b89eb" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:26.294 UTC [23416] LOG:  connection authorized: user=xw_alpha_2e8cdae3c83b89eb database=state_test_fence_c58977ee
+2026-11-12 00:14:26.294 UTC [23416] FATAL:  role "xw_alpha_2e8cdae3c83b89eb" is not permitted to log in
+2026-11-12 00:14:26.299 UTC [23415] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:26.419 UTC [23417] LOG:  connection received: host=127.0.0.1 port=34334
+2026-11-12 00:14:26.422 UTC [23417] LOG:  connection authenticated: identity="xw_beta_c309531b445b0c72" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:26.422 UTC [23417] LOG:  connection authorized: user=xw_beta_c309531b445b0c72 database=state_test_fence_c58977ee
+2026-11-12 00:14:26.446 UTC [23417] ERROR:  fence: الإيجارُ منقضٍ أو غائب
+2026-11-12 00:14:26.446 UTC [23417] CONTEXT:  PL/pgSQL function fence.guard_write() line 48 at RAISE
+2026-11-12 00:14:26.446 UTC [23417] STATEMENT:  INSERT INTO state.fence_probe VALUES (20, 'late')
+2026-11-12 00:14:26.450 UTC [23417] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:26.551 UTC [23407] ERROR:  fence: اعتمادٌ غيرُ نشِط
+2026-11-12 00:14:26.551 UTC [23407] CONTEXT:  PL/pgSQL function fence.renew_lease(name) line 11 at RAISE
+2026-11-12 00:14:26.551 UTC [23407] STATEMENT:  SELECT fence.renew_lease($1) AS r
+2026-11-12 00:14:26.833 UTC [23418] LOG:  connection received: host=127.0.0.1 port=34336
+2026-11-12 00:14:26.836 UTC [23418] LOG:  connection authenticated: identity="xw_alpha_ce5949d1587cd562" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:26.836 UTC [23418] LOG:  connection authorized: user=xw_alpha_ce5949d1587cd562 database=state_test_fence_c58977ee
+2026-11-12 00:14:26.865 UTC [23418] ERROR:  could not serialize access due to concurrent update
+2026-11-12 00:14:26.865 UTC [23418] CONTEXT:  SQL statement "SELECT *        FROM fence.control WHERE id FOR SHARE"
+	PL/pgSQL function fence.guard_write() line 12 at SQL statement
+2026-11-12 00:14:26.865 UTC [23418] STATEMENT:  INSERT INTO state.fence_probe VALUES (30, 'rr')
+2026-11-12 00:14:26.868 UTC [23418] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:27.474 UTC [23419] LOG:  connection received: host=127.0.0.1 port=34346
+2026-11-12 00:14:27.478 UTC [23419] LOG:  connection authenticated: identity="xw_alpha_094c4e24fa44f88b" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:27.478 UTC [23419] LOG:  connection authorized: user=xw_alpha_094c4e24fa44f88b database=state_test_fence_c58977ee
+2026-11-12 00:14:27.519 UTC [23420] LOG:  connection received: host=127.0.0.1 port=34362
+2026-11-12 00:14:27.523 UTC [23420] LOG:  connection authenticated: identity="xw_beta_5dd891f8a0d0f5ed" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:27.523 UTC [23420] LOG:  connection authorized: user=xw_beta_5dd891f8a0d0f5ed database=state_test_fence_c58977ee
+2026-11-12 00:14:27.949 UTC [23407] ERROR:  canceling statement due to lock timeout
+2026-11-12 00:14:27.949 UTC [23407] CONTEXT:  while locking tuple (0,10) in relation "control"
+	SQL statement "SELECT *        FROM fence.control WHERE id FOR UPDATE"
+	PL/pgSQL function fence.halt_lock(bigint) line 5 at SQL statement
+2026-11-12 00:14:27.949 UTC [23407] STATEMENT:  SELECT fence.halt_lock($1) AS r
+2026-11-12 00:14:27.951 UTC [23419] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:28.051 UTC [23420] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:28.322 UTC [23411] ERROR:  role "xw_alpha_094c4e24fa44f88b" does not exist
+2026-11-12 00:14:28.322 UTC [23411] STATEMENT:  ALTER ROLE "xw_alpha_094c4e24fa44f88b" PASSWORD '5RyiGUf4p0SqVEcqAmC3UxOs'
+2026-11-12 00:14:28.324 UTC [23421] LOG:  connection received: host=127.0.0.1 port=34376
+2026-11-12 00:14:28.325 UTC [23421] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:28.325 UTC [23421] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:28.326 UTC [23421] ERROR:  role "xw_beta_5dd891f8a0d0f5ed" does not exist
+2026-11-12 00:14:28.326 UTC [23421] STATEMENT:  ALTER ROLE "xw_beta_5dd891f8a0d0f5ed" PASSWORD 'i3cRr3nsOMLBKjWAEZji9hEU'
+2026-11-12 00:14:28.637 UTC [23422] LOG:  connection received: host=127.0.0.1 port=34392
+2026-11-12 00:14:28.638 UTC [23422] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:28.638 UTC [23422] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:28.645 UTC [23423] LOG:  connection received: host=127.0.0.1 port=34406
+2026-11-12 00:14:28.648 UTC [23423] LOG:  connection authenticated: identity="xw_alpha_d61ba4d131ad9f50" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:28.648 UTC [23423] LOG:  connection authorized: user=xw_alpha_d61ba4d131ad9f50 database=state_test_fence_c58977ee
+2026-11-12 00:14:28.672 UTC [23423] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:14:28.672 UTC [23423] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:14:28.672 UTC [23423] STATEMENT:  INSERT INTO state.fence_probe VALUES (60, 'afterRequest')
+2026-11-12 00:14:28.674 UTC [23407] ERROR:  fence: دليلُ الآثارِ تحتَ HALTED فقط
+2026-11-12 00:14:28.674 UTC [23407] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 7 at RAISE
+2026-11-12 00:14:28.674 UTC [23407] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:28.677 UTC [23423] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:29.110 UTC [23424] LOG:  connection received: host=127.0.0.1 port=39386
+2026-11-12 00:14:29.113 UTC [23424] LOG:  connection authenticated: identity="xw_alpha_49163b731faba1af" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:29.113 UTC [23424] LOG:  connection authorized: user=xw_alpha_49163b731faba1af database=state_test_fence_c58977ee
+2026-11-12 00:14:29.142 UTC [23424] ERROR:  fence: الحالة HALT_REQUESTED — الكتابةُ مرفوضة
+2026-11-12 00:14:29.142 UTC [23424] CONTEXT:  PL/pgSQL function fence.guard_write() line 29 at RAISE
+2026-11-12 00:14:29.142 UTC [23424] STATEMENT:  INSERT INTO state.fence_probe VALUES (60, 'afterLock')
+2026-11-12 00:14:29.144 UTC [23407] ERROR:  fence: دليلُ الآثارِ تحتَ HALTED فقط
+2026-11-12 00:14:29.144 UTC [23407] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 7 at RAISE
+2026-11-12 00:14:29.144 UTC [23407] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:29.146 UTC [23424] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:29.588 UTC [23425] LOG:  connection received: host=127.0.0.1 port=39390
+2026-11-12 00:14:29.591 UTC [23425] LOG:  connection authenticated: identity="xw_alpha_220a0904989ca9ef" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:29.591 UTC [23425] LOG:  connection authorized: user=xw_alpha_220a0904989ca9ef database=state_test_fence_c58977ee
+2026-11-12 00:14:29.616 UTC [23425] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:29.720 UTC [23407] ERROR:  fence: دليلُ الآثارِ تحتَ HALTED فقط
+2026-11-12 00:14:29.720 UTC [23407] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 7 at RAISE
+2026-11-12 00:14:29.720 UTC [23407] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:30.046 UTC [23426] LOG:  connection received: host=127.0.0.1 port=39406
+2026-11-12 00:14:30.053 UTC [23426] LOG:  connection authenticated: identity="xw_alpha_f7982a5d11c0b770" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:30.053 UTC [23426] LOG:  connection authorized: user=xw_alpha_f7982a5d11c0b770 database=state_test_fence_c58977ee
+2026-11-12 00:14:30.081 UTC [23426] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:30.350 UTC [23408] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:30.350 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:30.350 UTC [23408] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:30.948 UTC [23422] ERROR:  fence: إسقاطُ xf_guard on state.fence_new ممنوع
+2026-11-12 00:14:30.948 UTC [23422] CONTEXT:  PL/pgSQL function fence._ddl_drop() line 7 at RAISE
+2026-11-12 00:14:30.948 UTC [23422] STATEMENT:  DROP TRIGGER xf_guard ON state.fence_new
+2026-11-12 00:14:30.950 UTC [23427] LOG:  connection received: host=127.0.0.1 port=39416
+2026-11-12 00:14:30.951 UTC [23427] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:30.951 UTC [23427] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:30.955 UTC [23427] ERROR:  fence: تعديلُ مخطّطِ السياجِ ممنوع (CREATE FUNCTION fence.read_ok())
+2026-11-12 00:14:30.955 UTC [23427] CONTEXT:  PL/pgSQL function fence._ddl_end() line 6 at RAISE
+2026-11-12 00:14:30.955 UTC [23427] STATEMENT:  CREATE OR REPLACE FUNCTION fence.read_ok() RETURNS boolean LANGUAGE sql AS $$ SELECT true $$
+2026-11-12 00:14:30.957 UTC [23428] LOG:  connection received: host=127.0.0.1 port=39424
+2026-11-12 00:14:30.958 UTC [23428] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:30.958 UTC [23428] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:31.547 UTC [23408] ERROR:  fence: check_fenced() غيرُ سليم — لا استئناف: [{"kind": "rls_missing", "object": "state.fence_unfenced"}, {"kind": "uncovered_relation", "object": "state.fence_unfenced"}, {"kind": "event_triggers_missing_or_disabled", "enabled": 2}]
+2026-11-12 00:14:31.547 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 30 at RAISE
+2026-11-12 00:14:31.547 UTC [23408] STATEMENT:  SELECT fence.resume($1, $2) AS r
+2026-11-12 00:14:31.869 UTC [23408] ERROR:  fence: check_fenced() غيرُ سليم — لا استئناف: [{"kind": "event_triggers_missing_or_disabled", "enabled": 2}, {"kind": "fence_function_tampered", "function": "fence.read_ok()"}]
+2026-11-12 00:14:31.869 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 30 at RAISE
+2026-11-12 00:14:31.869 UTC [23408] STATEMENT:  SELECT fence.resume($1, $2) AS r
+2026-11-12 00:14:32.005 UTC [23428] ERROR:  fence: المعاملةُ تكسرُ تغطيةَ السياج: [{"kind": "uncovered_relation", "object": "state.fence_probe"}]
+2026-11-12 00:14:32.005 UTC [23428] CONTEXT:  PL/pgSQL function fence._ddl_commit_check() line 10 at RAISE
+2026-11-12 00:14:32.005 UTC [23428] STATEMENT:  ALTER TABLE state.fence_probe DISABLE TRIGGER xf_guard
+2026-11-12 00:14:32.007 UTC [23429] LOG:  connection received: host=127.0.0.1 port=39438
+2026-11-12 00:14:32.007 UTC [23429] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:32.007 UTC [23429] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:32.344 UTC [23408] ERROR:  fence: check_fenced() غيرُ سليم — لا استئناف: [{"kind": "uncovered_relation", "object": "state.fence_probe"}, {"kind": "event_triggers_missing_or_disabled", "enabled": 2}]
+2026-11-12 00:14:32.344 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 30 at RAISE
+2026-11-12 00:14:32.344 UTC [23408] STATEMENT:  SELECT fence.resume($1, $2) AS r
+2026-11-12 00:14:32.516 UTC [23429] ERROR:  fence: المعاملةُ تكسرُ تغطيةَ السياج: [{"kind": "writing_rule", "object": "state.fence_new:xr"}]
+2026-11-12 00:14:32.516 UTC [23429] CONTEXT:  PL/pgSQL function fence._ddl_commit_check() line 10 at RAISE
+2026-11-12 00:14:32.516 UTC [23429] STATEMENT:  CREATE RULE xr AS ON INSERT TO state.fence_new DO ALSO NOTIFY x
+2026-11-12 00:14:32.517 UTC [23430] LOG:  connection received: host=127.0.0.1 port=39452
+2026-11-12 00:14:32.518 UTC [23430] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:32.518 UTC [23430] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:32.817 UTC [23408] ERROR:  fence: check_fenced() غيرُ سليم — لا استئناف: [{"kind": "writing_rule", "object": "state.fence_new:xr"}, {"kind": "event_triggers_missing_or_disabled", "enabled": 2}]
+2026-11-12 00:14:32.817 UTC [23408] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 30 at RAISE
+2026-11-12 00:14:32.817 UTC [23408] STATEMENT:  SELECT fence.resume($1, $2) AS r
+2026-11-12 00:14:33.293 UTC [23431] LOG:  connection received: host=127.0.0.1 port=39458
+2026-11-12 00:14:33.293 UTC [23431] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:33.293 UTC [23431] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:33.298 UTC [23430] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:33.300 UTC [23408] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:33.302 UTC [23407] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:33.472 UTC [23432] LOG:  connection received: host=127.0.0.1 port=39460
+2026-11-12 00:14:33.473 UTC [23432] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:33.473 UTC [23432] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee_copy
+2026-11-12 00:14:33.493 UTC [23432] ERROR:  fence: الأمرُ لقاعدةٍ/عنقودٍ آخر
+2026-11-12 00:14:33.493 UTC [23432] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 33 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:33.493 UTC [23432] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:33.660 UTC [23378] LOG:  checkpoint starting: immediate force wait
+2026-11-12 00:14:33.735 UTC [23378] LOG:  checkpoint complete: wrote 2250 buffers (13.7%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 1 recycled; write=0.041 s, sync=0.032 s, total=0.075 s; sync files=969, longest=0.001 s, average=0.001 s; distance=18823 kB, estimate=18823 kB; lsn=0/29C79E0, redo lsn=0/29C7988
+2026-11-12 00:14:33.751 UTC [23433] LOG:  connection received: host=127.0.0.1 port=39476
+2026-11-12 00:14:33.752 UTC [23433] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:33.752 UTC [23433] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:33.758 UTC [23434] LOG:  connection received: host=127.0.0.1 port=39488
+2026-11-12 00:14:33.761 UTC [23434] LOG:  connection authenticated: identity="xf_root" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:33.761 UTC [23434] LOG:  connection authorized: user=xf_root database=state_test_fence_c58977ee
+2026-11-12 00:14:33.767 UTC [23435] LOG:  connection received: host=127.0.0.1 port=39500
+2026-11-12 00:14:33.770 UTC [23435] LOG:  connection authenticated: identity="xf_sovereign" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:33.770 UTC [23435] LOG:  connection authorized: user=xf_sovereign database=state_test_fence_c58977ee
+2026-11-12 00:14:33.778 UTC [23433] ERROR:  fence: تعديلُ مخطّطِ السياجِ ممنوع (ALTER TABLE fence.control)
+2026-11-12 00:14:33.778 UTC [23433] CONTEXT:  PL/pgSQL function fence._ddl_end() line 6 at RAISE
+2026-11-12 00:14:33.778 UTC [23433] STATEMENT:  ALTER TABLE fence.control DISABLE TRIGGER xf_control_row
+2026-11-12 00:14:33.779 UTC [23436] LOG:  connection received: host=127.0.0.1 port=39512
+2026-11-12 00:14:33.780 UTC [23436] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:33.780 UTC [23436] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:33.784 UTC [23436] ERROR:  fence: تعديلُ مخطّطِ السياجِ ممنوع (ALTER TABLE fence.control)
+2026-11-12 00:14:33.784 UTC [23436] CONTEXT:  PL/pgSQL function fence._ddl_end() line 6 at RAISE
+2026-11-12 00:14:33.784 UTC [23436] STATEMENT:  ALTER TABLE fence.control ENABLE ALWAYS TRIGGER xf_control_row
+2026-11-12 00:14:33.788 UTC [23434] ERROR:  fence: دليلُ الآثارِ تحتَ HALTED فقط
+2026-11-12 00:14:33.788 UTC [23434] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 7 at RAISE
+2026-11-12 00:14:33.788 UTC [23434] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:33.803 UTC [23435] ERROR:  fence: ختمٌ فاسد — RECOVER يتطلّبُ reseal_from موقَّعاً
+2026-11-12 00:14:33.803 UTC [23435] CONTEXT:  PL/pgSQL function fence.recover(text,bytea) line 17 at RAISE
+2026-11-12 00:14:33.803 UTC [23435] STATEMENT:  SELECT fence.recover($1,$2)
+2026-11-12 00:14:33.829 UTC [23435] ERROR:  fence: الأمرُ لا يُسمّي التجسُّدَ الحيَّ (pm_start/timeline)
+2026-11-12 00:14:33.829 UTC [23435] CONTEXT:  PL/pgSQL function fence.recover(text,bytea) line 23 at RAISE
+2026-11-12 00:14:33.829 UTC [23435] STATEMENT:  SELECT fence.recover($1,$2)
+2026-11-12 00:14:34.272 UTC [23437] LOG:  connection received: host=127.0.0.1 port=39522
+2026-11-12 00:14:34.273 UTC [23437] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.273 UTC [23437] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:34.279 UTC [23438] LOG:  connection received: host=127.0.0.1 port=39536
+2026-11-12 00:14:34.288 UTC [23438] LOG:  connection authenticated: identity="xw_alpha_865e021f02a802f1" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:34.288 UTC [23438] LOG:  connection authorized: user=xw_alpha_865e021f02a802f1 database=state_test_fence_c58977ee
+2026-11-12 00:14:34.316 UTC [23434] ERROR:  permission denied for function whoami
+2026-11-12 00:14:34.316 UTC [23434] STATEMENT:  SELECT fence.whoami() AS w
+2026-11-12 00:14:34.333 UTC [23438] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:34.445 UTC [23439] LOG:  connection received: host=127.0.0.1 port=39552
+2026-11-12 00:14:34.449 UTC [23439] LOG:  connection authenticated: identity="xw_alpha_53bbe39bf8f67e17" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:34.449 UTC [23439] LOG:  connection authorized: user=xw_alpha_53bbe39bf8f67e17 database=state_test_fence_c58977ee
+2026-11-12 00:14:34.474 UTC [23439] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:34.699 UTC [23437] ERROR:  fence: صفُّ التحكّمِ لا يُحذَف
+2026-11-12 00:14:34.699 UTC [23437] CONTEXT:  PL/pgSQL function fence._control_guard() line 4 at RAISE
+2026-11-12 00:14:34.699 UTC [23437] STATEMENT:  DELETE FROM fence.control
+2026-11-12 00:14:34.707 UTC [23440] LOG:  connection received: host=127.0.0.1 port=39562
+2026-11-12 00:14:34.707 UTC [23440] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.707 UTC [23440] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:34.710 UTC [23440] ERROR:  fence: العهدُ لا ينقص (28 → 27)
+2026-11-12 00:14:34.710 UTC [23440] CONTEXT:  PL/pgSQL function fence._control_guard() line 13 at RAISE
+2026-11-12 00:14:34.710 UTC [23440] STATEMENT:  UPDATE fence.control SET epoch = epoch - 1
+2026-11-12 00:14:34.713 UTC [23441] LOG:  connection received: host=127.0.0.1 port=39574
+2026-11-12 00:14:34.714 UTC [23441] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.714 UTC [23441] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:34.717 UTC [23441] ERROR:  fence: انتقالٌ ممنوع RECOVERY_REQUIRED → RUNNING
+2026-11-12 00:14:34.717 UTC [23441] CONTEXT:  PL/pgSQL function fence._control_guard() line 25 at RAISE
+2026-11-12 00:14:34.717 UTC [23441] STATEMENT:  UPDATE fence.control SET state = 'RUNNING', epoch = epoch + 1
+2026-11-12 00:14:34.719 UTC [23442] LOG:  connection received: host=127.0.0.1 port=39588
+2026-11-12 00:14:34.720 UTC [23442] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.720 UTC [23442] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:34.722 UTC [23442] ERROR:  fence: fence.events إلحاقٌ فقط (DELETE ممنوع)
+2026-11-12 00:14:34.722 UTC [23442] CONTEXT:  PL/pgSQL function fence._append_only() line 3 at RAISE
+2026-11-12 00:14:34.722 UTC [23442] STATEMENT:  DELETE FROM fence.events
+2026-11-12 00:14:34.725 UTC [23443] LOG:  connection received: host=127.0.0.1 port=39594
+2026-11-12 00:14:34.725 UTC [23443] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.725 UTC [23443] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:34.727 UTC [23443] ERROR:  fence: fence.evidence إلحاقٌ فقط (TRUNCATE ممنوع)
+2026-11-12 00:14:34.727 UTC [23443] CONTEXT:  PL/pgSQL function fence._append_only() line 3 at RAISE
+2026-11-12 00:14:34.727 UTC [23443] STATEMENT:  TRUNCATE fence.evidence
+2026-11-12 00:14:34.729 UTC [23444] LOG:  connection received: host=127.0.0.1 port=39598
+2026-11-12 00:14:34.729 UTC [23444] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.729 UTC [23444] LOG:  connection authorized: user=postgres database=state_test_fence_c58977ee
+2026-11-12 00:14:34.737 UTC [23445] LOG:  connection received: host=127.0.0.1 port=39614
+2026-11-12 00:14:34.738 UTC [23445] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:34.738 UTC [23445] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:34.740 UTC [23378] LOG:  checkpoint starting: immediate force wait
+2026-11-12 00:14:34.742 UTC [23378] LOG:  checkpoint complete: wrote 15 buffers (0.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.003 s; sync files=13, longest=0.001 s, average=0.001 s; distance=198 kB, estimate=16960 kB; lsn=0/29F9490, redo lsn=0/29F9438
+2026-11-12 00:14:35.073 UTC [23463] LOG:  connection received: host=127.0.0.1 port=39618
+2026-11-12 00:14:35.074 UTC [23463] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:35.074 UTC [23463] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:35.082 UTC [23464] LOG:  connection received: host=127.0.0.1 port=39628
+2026-11-12 00:14:35.082 UTC [23464] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:35.082 UTC [23464] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:35.131 UTC [23465] LOG:  connection received: host=127.0.0.1 port=39632
+2026-11-12 00:14:35.132 UTC [23465] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:35.132 UTC [23465] LOG:  connection authorized: user=postgres database=state_test_fencelife_1207a181
+2026-11-12 00:14:35.140 UTC [23466] LOG:  connection received: host=127.0.0.1 port=39642
+2026-11-12 00:14:35.140 UTC [23466] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:35.140 UTC [23466] LOG:  connection authorized: user=postgres database=state_test_fencelife_1207a181
+2026-11-12 00:14:35.506 UTC [23467] LOG:  connection received: host=127.0.0.1 port=39644
+2026-11-12 00:14:35.513 UTC [23467] LOG:  connection authenticated: identity="xf_root" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:35.513 UTC [23467] LOG:  connection authorized: user=xf_root database=state_test_fencelife_1207a181
+2026-11-12 00:14:35.519 UTC [23468] LOG:  connection received: host=127.0.0.1 port=39658
+2026-11-12 00:14:35.522 UTC [23468] LOG:  connection authenticated: identity="xf_sovereign" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:35.522 UTC [23468] LOG:  connection authorized: user=xf_sovereign database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.286 UTC [23469] LOG:  connection received: host=127.0.0.1 port=39670
+2026-11-12 00:14:36.290 UTC [23469] LOG:  connection authenticated: identity="xw_alpha_b3f3cae50c7920e5" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.290 UTC [23469] LOG:  connection authorized: user=xw_alpha_b3f3cae50c7920e5 database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.297 UTC [23469] ERROR:  fence: الجلسة 23469 ليست ضمنَ الجلساتِ المختومةِ للاعتماد xw_alpha_b3f3cae50c7920e5
+2026-11-12 00:14:36.297 UTC [23469] CONTEXT:  PL/pgSQL function fence.guard_write() line 51 at RAISE
+2026-11-12 00:14:36.297 UTC [23469] STATEMENT:  INSERT INTO state.fence_probe (id, v) VALUES ($1, $2)
+2026-11-12 00:14:36.324 UTC [23469] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:36.455 UTC [23470] LOG:  connection received: host=127.0.0.1 port=39680
+2026-11-12 00:14:36.459 UTC [23470] LOG:  connection authenticated: identity="xw_alpha_2c631f0ae66708bf" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.459 UTC [23470] LOG:  connection authorized: user=xw_alpha_2c631f0ae66708bf database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.486 UTC [23471] LOG:  connection received: host=127.0.0.1 port=39690
+2026-11-12 00:14:36.491 UTC [23471] LOG:  connection authenticated: identity="xw_alpha_2c631f0ae66708bf" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.492 UTC [23471] LOG:  connection authorized: user=xw_alpha_2c631f0ae66708bf database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.492 UTC [23471] FATAL:  role "xw_alpha_2c631f0ae66708bf" is not permitted to log in
+2026-11-12 00:14:36.495 UTC [23470] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:36.621 UTC [23472] LOG:  connection received: host=127.0.0.1 port=39700
+2026-11-12 00:14:36.625 UTC [23472] LOG:  connection authenticated: identity="xw_alpha_b50309ead666a68e" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.625 UTC [23472] LOG:  connection authorized: user=xw_alpha_b50309ead666a68e database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.633 UTC [23473] LOG:  connection received: host=127.0.0.1 port=39704
+2026-11-12 00:14:36.637 UTC [23473] LOG:  connection authenticated: identity="xw_alpha_b50309ead666a68e" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.637 UTC [23473] LOG:  connection authorized: user=xw_alpha_b50309ead666a68e database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.661 UTC [23473] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:36.765 UTC [23472] ERROR:  fence: الاعتمادُ xw_alpha_b50309ead666a68e ملغى
+2026-11-12 00:14:36.765 UTC [23472] CONTEXT:  PL/pgSQL function fence.guard_write() line 39 at RAISE
+2026-11-12 00:14:36.765 UTC [23472] STATEMENT:  INSERT INTO state.fence_probe (id, v) VALUES ($1, $2)
+2026-11-12 00:14:36.786 UTC [23474] LOG:  connection received: host=127.0.0.1 port=39720
+2026-11-12 00:14:36.790 UTC [23474] LOG:  connection authenticated: identity="xw_alpha_92c9d28e06dfbbb7" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.790 UTC [23474] LOG:  connection authorized: user=xw_alpha_92c9d28e06dfbbb7 database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.833 UTC [23475] LOG:  connection received: host=127.0.0.1 port=39722
+2026-11-12 00:14:36.837 UTC [23475] LOG:  connection authenticated: identity="xw_alpha_9b694f8eba73458b" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.837 UTC [23475] LOG:  connection authorized: user=xw_alpha_9b694f8eba73458b database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.883 UTC [23476] LOG:  connection received: host=127.0.0.1 port=39732
+2026-11-12 00:14:36.887 UTC [23476] LOG:  connection authenticated: identity="xw_alpha_2e0e2e8919cc9d6f" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.887 UTC [23476] LOG:  connection authorized: user=xw_alpha_2e0e2e8919cc9d6f database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.921 UTC [23477] LOG:  connection received: host=127.0.0.1 port=39744
+2026-11-12 00:14:36.924 UTC [23477] LOG:  connection authenticated: identity="xw_alpha_6dae4b376653f5d4" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.924 UTC [23477] LOG:  connection authorized: user=xw_alpha_6dae4b376653f5d4 database=state_test_fencelife_1207a181
+2026-11-12 00:14:36.975 UTC [23478] LOG:  connection received: host=127.0.0.1 port=39748
+2026-11-12 00:14:36.979 UTC [23478] LOG:  connection authenticated: identity="xw_alpha_e971dccedac6ab85" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:36.979 UTC [23478] LOG:  connection authorized: user=xw_alpha_e971dccedac6ab85 database=state_test_fencelife_1207a181
+2026-11-12 00:14:37.005 UTC [23478] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:37.125 UTC [23479] LOG:  connection received: host=127.0.0.1 port=39756
+2026-11-12 00:14:37.128 UTC [23479] LOG:  connection authenticated: identity="xw_alpha_4630a15af017ab28" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:37.128 UTC [23479] LOG:  connection authorized: user=xw_alpha_4630a15af017ab28 database=state_test_fencelife_1207a181
+2026-11-12 00:14:37.153 UTC [23479] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:37.277 UTC [23480] LOG:  connection received: host=127.0.0.1 port=39770
+2026-11-12 00:14:37.280 UTC [23480] LOG:  connection authenticated: identity="xw_alpha_2b9bef6edba2b049" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:37.280 UTC [23480] LOG:  connection authorized: user=xw_alpha_2b9bef6edba2b049 database=state_test_fencelife_1207a181
+2026-11-12 00:14:37.604 UTC [23480] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:37.731 UTC [23482] LOG:  connection received: host=127.0.0.1 port=39782
+2026-11-12 00:14:37.734 UTC [23482] LOG:  connection authenticated: identity="xw_alpha_b89c31fc1ffe92af" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:37.734 UTC [23482] LOG:  connection authorized: user=xw_alpha_b89c31fc1ffe92af database=state_test_fencelife_1207a181
+2026-11-12 00:14:37.758 UTC [23482] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:37.879 UTC [23483] LOG:  connection received: host=127.0.0.1 port=39784
+2026-11-12 00:14:37.882 UTC [23483] LOG:  connection authenticated: identity="xw_alpha_dd49cde319226738" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:37.882 UTC [23483] LOG:  connection authorized: user=xw_alpha_dd49cde319226738 database=state_test_fencelife_1207a181
+2026-11-12 00:14:37.889 UTC [23484] LOG:  connection received: host=127.0.0.1 port=39792
+2026-11-12 00:14:37.893 UTC [23484] LOG:  connection authenticated: identity="xw_alpha_dd49cde319226738" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:37.893 UTC [23484] LOG:  connection authorized: user=xw_alpha_dd49cde319226738 database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.126 UTC [23485] LOG:  connection received: host=127.0.0.1 port=39796
+2026-11-12 00:14:38.129 UTC [23485] LOG:  connection authenticated: identity="xw_alpha_dd49cde319226738" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:38.129 UTC [23485] LOG:  connection authorized: user=xw_alpha_dd49cde319226738 database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.129 UTC [23485] FATAL:  role "xw_alpha_dd49cde319226738" is not permitted to log in
+2026-11-12 00:14:38.130 UTC [23484] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:38.252 UTC [23486] LOG:  connection received: host=127.0.0.1 port=39806
+2026-11-12 00:14:38.255 UTC [23486] LOG:  connection authenticated: identity="xw_alpha_de9c8819d8c3f5db" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:38.255 UTC [23486] LOG:  connection authorized: user=xw_alpha_de9c8819d8c3f5db database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.262 UTC [23487] LOG:  connection received: host=127.0.0.1 port=39812
+2026-11-12 00:14:38.265 UTC [23487] LOG:  connection authenticated: identity="xw_alpha_de9c8819d8c3f5db" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:38.265 UTC [23487] LOG:  connection authorized: user=xw_alpha_de9c8819d8c3f5db database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.271 UTC [23488] LOG:  connection received: host=127.0.0.1 port=39824
+2026-11-12 00:14:38.274 UTC [23488] LOG:  connection authenticated: identity="xw_alpha_de9c8819d8c3f5db" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:38.274 UTC [23488] LOG:  connection authorized: user=xw_alpha_de9c8819d8c3f5db database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.276 UTC [23489] LOG:  connection received: host=127.0.0.1 port=39838
+2026-11-12 00:14:38.279 UTC [23489] LOG:  connection authenticated: identity="xw_alpha_de9c8819d8c3f5db" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:38.279 UTC [23489] LOG:  connection authorized: user=xw_alpha_de9c8819d8c3f5db database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.281 UTC [23490] LOG:  connection received: host=127.0.0.1 port=39846
+2026-11-12 00:14:38.283 UTC [23490] LOG:  connection authenticated: identity="xw_alpha_de9c8819d8c3f5db" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:38.284 UTC [23490] LOG:  connection authorized: user=xw_alpha_de9c8819d8c3f5db database=state_test_fencelife_1207a181
+2026-11-12 00:14:38.310 UTC [23486] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:38.410 UTC [23487] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:38.511 UTC [23489] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:38.611 UTC [23490] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:38.920 UTC [23472] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:39.020 UTC [23474] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:39.121 UTC [23475] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:39.221 UTC [23476] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:39.321 UTC [23477] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:39.621 UTC [23468] ERROR:  permission denied for function record_effects_evidence
+2026-11-12 00:14:39.621 UTC [23468] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:39.623 UTC [23465] ERROR:  fence: fence.evidence إلحاقٌ فقط (UPDATE ممنوع)
+2026-11-12 00:14:39.623 UTC [23465] CONTEXT:  PL/pgSQL function fence._append_only() line 3 at RAISE
+2026-11-12 00:14:39.623 UTC [23465] STATEMENT:  UPDATE fence.evidence SET detail = '{"ok":true}' WHERE kind = 'EFFECTS_HALTED'
+2026-11-12 00:14:39.623 UTC [23466] ERROR:  fence: fence.evidence إلحاقٌ فقط (DELETE ممنوع)
+2026-11-12 00:14:39.623 UTC [23466] CONTEXT:  PL/pgSQL function fence._append_only() line 3 at RAISE
+2026-11-12 00:14:39.623 UTC [23466] STATEMENT:  DELETE FROM fence.evidence
+2026-11-12 00:14:39.627 UTC [23491] LOG:  connection received: host=127.0.0.1 port=52822
+2026-11-12 00:14:39.628 UTC [23491] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:39.628 UTC [23491] LOG:  connection authorized: user=postgres database=state_test_fencelife_1207a181
+2026-11-12 00:14:39.630 UTC [23491] ERROR:  fence: fence.evidence إلحاقٌ فقط (TRUNCATE ممنوع)
+2026-11-12 00:14:39.630 UTC [23491] CONTEXT:  PL/pgSQL function fence._append_only() line 3 at RAISE
+2026-11-12 00:14:39.630 UTC [23491] STATEMENT:  TRUNCATE fence.evidence
+2026-11-12 00:14:39.631 UTC [23492] LOG:  connection received: host=127.0.0.1 port=52832
+2026-11-12 00:14:39.632 UTC [23492] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:39.632 UTC [23492] LOG:  connection authorized: user=postgres database=state_test_fencelife_1207a181
+2026-11-12 00:14:39.950 UTC [23468] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:39.950 UTC [23468] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:39.950 UTC [23468] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:40.845 UTC [23468] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:40.845 UTC [23468] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:40.845 UTC [23468] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:40.846 UTC [23467] ERROR:  fence: الدليلُ لا يخصُّ آخرَ إيقافٍ مكتملٍ في هذا العهد (halt=7 epoch=12؛ المتوقَّع 8/12 مع DB_FENCED)
+2026-11-12 00:14:40.846 UTC [23467] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 15 at RAISE
+2026-11-12 00:14:40.846 UTC [23467] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:40.847 UTC [23467] ERROR:  fence: الدليلُ لا يخصُّ آخرَ إيقافٍ مكتملٍ في هذا العهد (halt=8 epoch=11؛ المتوقَّع 8/12 مع DB_FENCED)
+2026-11-12 00:14:40.847 UTC [23467] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 15 at RAISE
+2026-11-12 00:14:40.847 UTC [23467] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:40.848 UTC [23467] ERROR:  fence: الدليلُ بلا «ok» منطقيّ صريح
+2026-11-12 00:14:40.848 UTC [23467] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 19 at RAISE
+2026-11-12 00:14:40.848 UTC [23467] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:40.849 UTC [23467] ERROR:  fence: الهاشُ لا يطابقُ التفاصيل
+2026-11-12 00:14:40.849 UTC [23467] CONTEXT:  PL/pgSQL function fence.record_effects_evidence(text,jsonb) line 10 at RAISE
+2026-11-12 00:14:40.849 UTC [23467] STATEMENT:  SELECT fence.record_effects_evidence($1, $2::jsonb)
+2026-11-12 00:14:41.205 UTC [23468] ERROR:  fence: مفتاحُ العامل alpha غيرُ صالح
+2026-11-12 00:14:41.205 UTC [23468] CONTEXT:  PL/pgSQL function fence.roster_set(text,bytea) line 15 at RAISE
+2026-11-12 00:14:41.205 UTC [23468] STATEMENT:  SELECT fence.roster_set($1, $2) AS r
+2026-11-12 00:14:41.222 UTC [23468] ERROR:  fence: مفتاحُ العامل alpha غيرُ صالح
+2026-11-12 00:14:41.222 UTC [23468] CONTEXT:  PL/pgSQL function fence.roster_set(text,bytea) line 15 at RAISE
+2026-11-12 00:14:41.222 UTC [23468] STATEMENT:  SELECT fence.roster_set($1, $2) AS r
+2026-11-12 00:14:41.235 UTC [23468] ERROR:  fence: مفتاحٌ جديدٌ غيرُ صالح
+2026-11-12 00:14:41.235 UTC [23468] CONTEXT:  PL/pgSQL function fence.key_rotate(text,bytea) line 7 at RAISE
+2026-11-12 00:14:41.235 UTC [23468] STATEMENT:  SELECT fence.key_rotate($1, $2) AS r
+2026-11-12 00:14:41.271 UTC [23468] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:41.271 UTC [23468] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:41.271 UTC [23468] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:41.647 UTC [23493] LOG:  connection received: host=127.0.0.1 port=52838
+2026-11-12 00:14:41.650 UTC [23493] LOG:  connection authenticated: identity="xw_alpha_d93ce9b3e08d177c" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:41.650 UTC [23493] LOG:  connection authorized: user=xw_alpha_d93ce9b3e08d177c database=state_test_fencelife_1207a181
+2026-11-12 00:14:41.656 UTC [23494] LOG:  connection received: host=127.0.0.1 port=52844
+2026-11-12 00:14:41.659 UTC [23494] LOG:  connection authenticated: identity="xw_alpha_d93ce9b3e08d177c" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:41.659 UTC [23494] LOG:  connection authorized: user=xw_alpha_d93ce9b3e08d177c database=state_test_fencelife_1207a181
+2026-11-12 00:14:41.664 UTC [23495] LOG:  connection received: host=127.0.0.1 port=52858
+2026-11-12 00:14:41.667 UTC [23495] LOG:  connection authenticated: identity="xw_alpha_d93ce9b3e08d177c" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:41.667 UTC [23495] LOG:  connection authorized: user=xw_alpha_d93ce9b3e08d177c database=state_test_fencelife_1207a181
+2026-11-12 00:14:42.105 UTC [23467] ERROR:  canceling statement due to lock timeout
+2026-11-12 00:14:42.105 UTC [23467] CONTEXT:  while locking tuple (0,15) in relation "control"
+	SQL statement "SELECT *        FROM fence.control WHERE id FOR UPDATE"
+	PL/pgSQL function fence.halt_lock(bigint) line 5 at SQL statement
+2026-11-12 00:14:42.105 UTC [23467] STATEMENT:  SELECT fence.halt_lock($1) AS r
+2026-11-12 00:14:42.107 UTC [23493] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:42.207 UTC [23494] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:42.307 UTC [23495] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:42.734 UTC [23496] LOG:  connection received: host=127.0.0.1 port=52872
+2026-11-12 00:14:42.737 UTC [23496] LOG:  connection authenticated: identity="xw_alpha_a9c6c6eebcd00170" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:42.737 UTC [23496] LOG:  connection authorized: user=xw_alpha_a9c6c6eebcd00170 database=state_test_fencelife_1207a181
+2026-11-12 00:14:42.762 UTC [23496] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:14:42.762 UTC [23496] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:14:42.762 UTC [23496] STATEMENT:  INSERT INTO state.fence_probe (id, v) VALUES ($1, $2)
+2026-11-12 00:14:42.762 UTC [23467] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:42.770 UTC [23497] LOG:  connection received: host=127.0.0.1 port=52886
+2026-11-12 00:14:42.773 UTC [23497] LOG:  connection authenticated: identity="xf_root" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:42.773 UTC [23497] LOG:  connection authorized: user=xf_root database=state_test_fencelife_1207a181
+2026-11-12 00:14:42.779 UTC [23498] LOG:  connection received: host=127.0.0.1 port=52888
+2026-11-12 00:14:42.782 UTC [23498] LOG:  connection authenticated: identity="xf_sovereign" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:42.782 UTC [23498] LOG:  connection authorized: user=xf_sovereign database=state_test_fencelife_1207a181
+2026-11-12 00:14:42.791 UTC [23496] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:43.413 UTC [23497] ERROR:  invalid input syntax for type json
+2026-11-12 00:14:43.413 UTC [23497] DETAIL:  Unicode low surrogate must follow a high surrogate.
+2026-11-12 00:14:43.413 UTC [23497] CONTEXT:  JSON data, line 1: {"note":"\ud800"...
+	unnamed portal parameter $1 = '...'
+2026-11-12 00:14:43.413 UTC [23497] STATEMENT:  SELECT encode(sha256(convert_to($1::jsonb::text, 'UTF8')), 'hex') AS d
+2026-11-12 00:14:46.209 UTC [23498] ERROR:  fence: الأمرُ خارجَ نافذةِ صلاحيته
+2026-11-12 00:14:46.209 UTC [23498] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 41 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:46.209 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:46.215 UTC [23499] LOG:  connection received: host=127.0.0.1 port=52894
+2026-11-12 00:14:46.222 UTC [23499] LOG:  connection authenticated: identity="xf_sovereign" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:46.222 UTC [23499] LOG:  connection authorized: user=xf_sovereign database=state_test_fencelife_1207a181
+2026-11-12 00:14:46.394 UTC [23499] ERROR:  fence: expected_epoch=24 والعهدُ 25
+2026-11-12 00:14:46.394 UTC [23499] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 36 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:46.394 UTC [23499] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:46.552 UTC [23498] ERROR:  fence: nonce مستعمَلٌ سلفاً — إعادةُ إرسال
+2026-11-12 00:14:46.552 UTC [23498] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 30 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:46.552 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:46.880 UTC [23498] ERROR:  fence: طلبُ إيقافٍ معلّقٌ لم يكتمل — لا استئنافَ قبلَ إكماله
+2026-11-12 00:14:46.880 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 9 at RAISE
+2026-11-12 00:14:46.880 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:47.031 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:47.031 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:47.031 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:47.345 UTC [23498] ERROR:  fence: طلبُ إيقافٍ معلّقٌ لم يكتمل — لا استئنافَ قبلَ إكماله
+2026-11-12 00:14:47.345 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 9 at RAISE
+2026-11-12 00:14:47.345 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:47.501 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:47.501 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:47.501 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:47.821 UTC [23498] ERROR:  fence: طلبُ إيقافٍ معلّقٌ لم يكتمل — لا استئنافَ قبلَ إكماله
+2026-11-12 00:14:47.821 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 9 at RAISE
+2026-11-12 00:14:47.821 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:47.967 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:47.967 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:47.967 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.290 UTC [23498] ERROR:  fence: طلبُ إيقافٍ معلّقٌ لم يكتمل — لا استئنافَ قبلَ إكماله
+2026-11-12 00:14:48.290 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 9 at RAISE
+2026-11-12 00:14:48.290 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.439 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.439 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.439 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.752 UTC [23498] ERROR:  fence: توقيعُ الأمرِ السياديِّ غيرُ صالح
+2026-11-12 00:14:48.752 UTC [23498] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 16 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:48.752 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.754 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.754 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.754 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.764 UTC [23498] ERROR:  fence: نوعُ الأمر RECOVER والمطلوب RESUME
+2026-11-12 00:14:48.764 UTC [23498] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 24 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:48.764 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.768 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.768 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.768 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.781 UTC [23498] ERROR:  fence: expected_epoch=41 والعهدُ 40
+2026-11-12 00:14:48.781 UTC [23498] CONTEXT:  PL/pgSQL function fence._verify_command(text,bytea,text) line 36 at RAISE
+	PL/pgSQL function fence.resume(text,bytea) line 2 during statement block local variable initialization
+2026-11-12 00:14:48.781 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.782 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.782 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.782 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.793 UTC [23498] ERROR:  fence: هاشُ القائمةِ لا يطابق (أو لا قائمة)
+2026-11-12 00:14:48.793 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 12 at RAISE
+2026-11-12 00:14:48.793 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.794 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.794 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.794 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.806 UTC [23498] ERROR:  fence: الأمرُ لا يُسمّي التجسُّدَ الحيّ
+2026-11-12 00:14:48.806 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 15 at RAISE
+2026-11-12 00:14:48.806 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.806 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.806 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.806 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:48.818 UTC [23498] ERROR:  fence: دليلُ الآثارِ لهذا العهدِ غائبٌ أو سلبيّ أو لا يطابقُ الهاشَ الموقَّع أو الإيقافَ أو القائمةَ أو التجسُّد
+2026-11-12 00:14:48.818 UTC [23498] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 26 at RAISE
+2026-11-12 00:14:48.818 UTC [23498] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:14:48.820 UTC [23497] ERROR:  fence: لا إصدارَ اعتمادٍ تحتَ HALTED
+2026-11-12 00:14:48.820 UTC [23497] CONTEXT:  PL/pgSQL function fence.issue_challenge(text,text) line 7 at RAISE
+2026-11-12 00:14:48.820 UTC [23497] STATEMENT:  SELECT fence.issue_challenge($1, $2) AS r
+2026-11-12 00:14:49.006 UTC [23500] LOG:  connection received: host=127.0.0.1 port=59042
+2026-11-12 00:14:49.010 UTC [23500] LOG:  connection authenticated: identity="xw_alpha_b9b92c54024ca73b" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:49.010 UTC [23500] LOG:  connection authorized: user=xw_alpha_b9b92c54024ca73b database=state_test_fencelife_1207a181
+2026-11-12 00:14:49.034 UTC [23468] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:49.034 UTC [23497] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:49.034 UTC [23498] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:49.038 UTC [23500] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:49.043 UTC [23501] LOG:  connection received: host=127.0.0.1 port=59046
+2026-11-12 00:14:49.049 UTC [23501] LOG:  connection authenticated: identity="xf_root" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:49.049 UTC [23501] LOG:  connection authorized: user=xf_root database=state_test_fencelife_1207a181
+2026-11-12 00:14:49.055 UTC [23502] LOG:  connection received: host=127.0.0.1 port=59050
+2026-11-12 00:14:49.057 UTC [23502] LOG:  connection authenticated: identity="xf_sovereign" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:49.057 UTC [23502] LOG:  connection authorized: user=xf_sovereign database=state_test_fencelife_1207a181
+2026-11-12 00:14:49.456 UTC [23503] LOG:  connection received: host=127.0.0.1 port=59054
+2026-11-12 00:14:49.459 UTC [23503] LOG:  connection authenticated: identity="xw_alpha_ae3d31e12c33bbee" method=scram-sha-256 (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:4)
+2026-11-12 00:14:49.459 UTC [23503] LOG:  connection authorized: user=xw_alpha_ae3d31e12c33bbee database=state_test_fencelife_1207a181
+2026-11-12 00:14:49.483 UTC [23503] FATAL:  terminating connection due to administrator command
+2026-11-12 00:14:49.746 UTC [23505] LOG:  connection received: host=127.0.0.1 port=59070
+2026-11-12 00:14:49.746 UTC [23505] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:49.746 UTC [23505] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:49.749 UTC [23378] LOG:  checkpoint starting: immediate force wait
+2026-11-12 00:14:49.751 UTC [23378] LOG:  checkpoint complete: wrote 22 buffers (0.1%), wrote 2 SLRU buffers; 0 WAL file(s) added, 0 removed, 1 recycled; write=0.001 s, sync=0.001 s, total=0.003 s; sync files=16, longest=0.001 s, average=0.001 s; distance=8342 kB, estimate=16098 kB; lsn=0/321ED78, redo lsn=0/321ED20
+2026-11-12 00:14:49.762 UTC [23506] LOG:  connection received: host=127.0.0.1 port=59076
+2026-11-12 00:14:49.762 UTC [23506] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:49.762 UTC [23506] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:51.574 UTC [23593] LOG:  connection received: host=127.0.0.1 port=59080
+2026-11-12 00:14:51.575 UTC [23593] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:51.575 UTC [23593] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:14:51.611 UTC [23594] LOG:  connection received: host=127.0.0.1 port=59084
+2026-11-12 00:14:51.613 UTC [23594] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:14:51.613 UTC [23594] LOG:  connection authorized: user=postgres database=state_test_ed25519_18f2c6b1
+2026-11-12 00:16:15.603 UTC [23628] LOG:  connection received: host=127.0.0.1 port=60676
+2026-11-12 00:16:15.604 UTC [23628] LOG:  connection authenticated: user="postgres" method=trust (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:15.604 UTC [23628] LOG:  connection authorized: user=postgres database=state
+2026-11-12 00:16:15.609 UTC [23378] LOG:  checkpoint starting: immediate force wait
+2026-11-12 00:16:15.613 UTC [23378] LOG:  checkpoint complete: wrote 74 buffers (0.5%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.003 s, sync=0.001 s, total=0.005 s; sync files=32, longest=0.001 s, average=0.001 s; distance=4934 kB, estimate=14982 kB; lsn=0/36F0880, redo lsn=0/36F0828
+2026-11-12 00:16:15.653 UTC [23629] LOG:  connection received: host=[local]
+2026-11-12 00:16:15.663 UTC [23629] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:15.663 UTC [23629] LOG:  connection authorized: user=postgres database=postgres
+2026-11-12 00:16:15.727 UTC [23630] LOG:  connection received: host=[local]
+2026-11-12 00:16:15.728 UTC [23630] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:15.728 UTC [23630] LOG:  connection authorized: user=postgres database=lab
+2026-11-12 00:16:15.736 UTC [23631] LOG:  connection received: host=[local]
+2026-11-12 00:16:15.737 UTC [23631] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:15.737 UTC [23631] LOG:  connection authorized: user=postgres database=lab
+2026-11-12 00:16:16.098 UTC [23632] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.099 UTC [23632] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.099 UTC [23632] LOG:  connection authorized: user=xf_sovereign database=lab
+2026-11-12 00:16:16.441 UTC [23374] LOG:  received SIGHUP, reloading configuration files
+2026-11-12 00:16:16.749 UTC [23635] LOG:  connection received: host=127.0.0.1 port=60690
+2026-11-12 00:16:16.750 UTC [23635] FATAL:  pg_hba.conf rejects connection for host "127.0.0.1", user "postgres", database "lab", no encryption
+2026-11-12 00:16:16.757 UTC [23636] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.757 UTC [23636] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.757 UTC [23636] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:16.768 UTC [23637] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.768 UTC [23637] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.768 UTC [23637] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:16.777 UTC [23638] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.778 UTC [23638] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.778 UTC [23638] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:16.788 UTC [23639] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.788 UTC [23639] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.788 UTC [23639] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:16.978 UTC [23640] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.979 UTC [23640] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.979 UTC [23640] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:16.983 UTC [23641] LOG:  connection received: host=[local]
+2026-11-12 00:16:16.984 UTC [23641] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:16.984 UTC [23641] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:17.193 UTC [23644] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.194 UTC [23644] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.194 UTC [23644] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:17.203 UTC [23645] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.203 UTC [23645] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.203 UTC [23645] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:17.353 UTC [23656] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.354 UTC [23656] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.354 UTC [23656] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab application_name=psql
+2026-11-12 00:16:17.368 UTC [23660] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.369 UTC [23660] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.369 UTC [23660] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab application_name=psql
+2026-11-12 00:16:17.377 UTC [23660] ERROR:  fence: الجلسة 23660 ليست ضمنَ الجلساتِ المختومةِ للاعتماد xw_alpha_f106e277cebe7e40
+2026-11-12 00:16:17.377 UTC [23660] CONTEXT:  PL/pgSQL function fence.guard_write() line 51 at RAISE
+2026-11-12 00:16:17.377 UTC [23660] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ('alpha-unsealed')
+2026-11-12 00:16:17.389 UTC [23664] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.389 UTC [23664] LOG:  connection authenticated: identity="xuuxw-beta" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.389 UTC [23664] LOG:  no match in usermap "fence" for user "xw_alpha_f106e277cebe7e40" authenticated as "xuuxw-beta"
+2026-11-12 00:16:17.389 UTC [23664] FATAL:  Peer authentication failed for user "xw_alpha_f106e277cebe7e40"
+2026-11-12 00:16:17.389 UTC [23664] DETAIL:  Connection matched file "/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf" line 3: "local all /^xw_ peer map=fence"
+2026-11-12 00:16:17.395 UTC [23666] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.396 UTC [23666] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.396 UTC [23666] LOG:  no match in usermap "fence" for user "xw_alpha_f106e277cebe7e40" authenticated as "user"
+2026-11-12 00:16:17.396 UTC [23666] FATAL:  Peer authentication failed for user "xw_alpha_f106e277cebe7e40"
+2026-11-12 00:16:17.396 UTC [23666] DETAIL:  Connection matched file "/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf" line 3: "local all /^xw_ peer map=fence"
+2026-11-12 00:16:17.402 UTC [23668] LOG:  connection received: host=127.0.0.1 port=60698
+2026-11-12 00:16:17.402 UTC [23668] FATAL:  pg_hba.conf rejects connection for host "127.0.0.1", user "xw_alpha_f106e277cebe7e40", database "lab", no encryption
+2026-11-12 00:16:17.410 UTC [23672] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.411 UTC [23672] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.411 UTC [23672] LOG:  no match in usermap "admin" for user "xf_root" authenticated as "xuuxw-alpha"
+2026-11-12 00:16:17.411 UTC [23672] FATAL:  Peer authentication failed for user "xf_root"
+2026-11-12 00:16:17.411 UTC [23672] DETAIL:  Connection matched file "/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf" line 1: "local all postgres,xf_root,xf_sovereign peer map=admin"
+2026-11-12 00:16:17.420 UTC [23676] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.421 UTC [23676] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.421 UTC [23676] LOG:  no match in usermap "admin" for user "xf_sovereign" authenticated as "xuuxw-alpha"
+2026-11-12 00:16:17.421 UTC [23676] FATAL:  Peer authentication failed for user "xf_sovereign"
+2026-11-12 00:16:17.421 UTC [23676] DETAIL:  Connection matched file "/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf" line 1: "local all postgres,xf_root,xf_sovereign peer map=admin"
+2026-11-12 00:16:17.431 UTC [23680] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.432 UTC [23680] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.432 UTC [23680] LOG:  no match in usermap "admin" for user "postgres" authenticated as "xuuxw-alpha"
+2026-11-12 00:16:17.432 UTC [23680] FATAL:  Peer authentication failed for user "postgres"
+2026-11-12 00:16:17.432 UTC [23680] DETAIL:  Connection matched file "/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf" line 1: "local all postgres,xf_root,xf_sovereign peer map=admin"
+2026-11-12 00:16:17.579 UTC [23694] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.582 UTC [23694] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.583 UTC [23694] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab
+2026-11-12 00:16:17.587 UTC [23695] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.587 UTC [23695] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.587 UTC [23695] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab
+2026-11-12 00:16:17.590 UTC [23696] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.591 UTC [23696] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.591 UTC [23696] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab
+2026-11-12 00:16:17.594 UTC [23697] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.594 UTC [23697] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.594 UTC [23697] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab
+2026-11-12 00:16:17.628 UTC [23698] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.629 UTC [23698] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.629 UTC [23698] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:17.948 UTC [23702] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.949 UTC [23702] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:17.949 UTC [23702] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab application_name=psql
+2026-11-12 00:16:17.949 UTC [23702] FATAL:  role "xw_alpha_f106e277cebe7e40" is not permitted to log in
+2026-11-12 00:16:17.952 UTC [23703] LOG:  connection received: host=[local]
+2026-11-12 00:16:17.953 UTC [23703] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:17.953 UTC [23703] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:17.960 UTC [23694] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.060 UTC [23695] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.160 UTC [23696] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.260 UTC [23697] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.263 UTC [23704] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.264 UTC [23704] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:18.264 UTC [23704] LOG:  connection authorized: user=xw_alpha_f106e277cebe7e40 database=lab
+2026-11-12 00:16:18.264 UTC [23704] FATAL:  role "xw_alpha_f106e277cebe7e40" is not permitted to log in
+2026-11-12 00:16:18.366 UTC [23705] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.367 UTC [23705] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:18.367 UTC [23705] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:18.375 UTC [23706] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.376 UTC [23706] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:18.376 UTC [23706] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:18.408 UTC [23710] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.408 UTC [23710] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:18.408 UTC [23710] LOG:  connection authorized: user=xw_alpha_c1c78f177b1aef98 database=lab application_name=psql
+2026-11-12 00:16:18.633 UTC [23724] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.635 UTC [23724] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:18.635 UTC [23724] LOG:  connection authorized: user=xw_alpha_c1c78f177b1aef98 database=lab
+2026-11-12 00:16:18.638 UTC [23725] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.639 UTC [23725] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:18.639 UTC [23725] LOG:  connection authorized: user=xw_alpha_c1c78f177b1aef98 database=lab
+2026-11-12 00:16:18.641 UTC [23726] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.642 UTC [23726] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:18.642 UTC [23726] LOG:  connection authorized: user=xw_alpha_c1c78f177b1aef98 database=lab
+2026-11-12 00:16:18.643 UTC [23727] LOG:  connection received: host=[local]
+2026-11-12 00:16:18.644 UTC [23727] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:18.644 UTC [23727] LOG:  connection authorized: user=xw_alpha_c1c78f177b1aef98 database=lab
+2026-11-12 00:16:18.672 UTC [23725] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.772 UTC [23726] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.872 UTC [23727] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.972 UTC [23710] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:18.972 UTC [23710] STATEMENT:  SELECT pg_sleep(30)
+2026-11-12 00:16:19.076 UTC [23728] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.077 UTC [23728] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:19.077 UTC [23728] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:19.089 UTC [23729] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.090 UTC [23729] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:19.090 UTC [23729] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:19.097 UTC [23730] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.098 UTC [23730] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:19.098 UTC [23730] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:19.131 UTC [23734] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.131 UTC [23734] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:19.131 UTC [23734] LOG:  connection authorized: user=xw_alpha_5a6eda474c00bd7d database=lab application_name=psql
+2026-11-12 00:16:19.162 UTC [23741] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.163 UTC [23741] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:19.163 UTC [23741] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:19.172 UTC [23742] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.173 UTC [23742] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:19.173 UTC [23742] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:19.340 UTC [23756] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.341 UTC [23756] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:19.341 UTC [23756] LOG:  connection authorized: user=xw_alpha_2adabc58c4c1f0a0 database=lab
+2026-11-12 00:16:19.344 UTC [23757] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.345 UTC [23757] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:19.345 UTC [23757] LOG:  connection authorized: user=xw_alpha_2adabc58c4c1f0a0 database=lab
+2026-11-12 00:16:19.829 UTC [23771] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.832 UTC [23771] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:19.832 UTC [23771] LOG:  connection authorized: user=xw_alpha_2adabc58c4c1f0a0 database=lab
+2026-11-12 00:16:19.832 UTC [23771] FATAL:  role "xw_alpha_2adabc58c4c1f0a0" is not permitted to log in
+2026-11-12 00:16:19.835 UTC [23772] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.836 UTC [23772] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:19.836 UTC [23772] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:19.843 UTC [23756] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:19.943 UTC [23757] FATAL:  terminating connection due to administrator command
+2026-11-12 00:16:19.945 UTC [23773] LOG:  connection received: host=[local]
+2026-11-12 00:16:19.946 UTC [23773] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:19.946 UTC [23773] LOG:  connection authorized: user=xw_alpha_2adabc58c4c1f0a0 database=lab
+2026-11-12 00:16:19.946 UTC [23773] FATAL:  role "xw_alpha_2adabc58c4c1f0a0" is not permitted to log in
+2026-11-12 00:16:20.361 UTC [23774] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.362 UTC [23774] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:20.362 UTC [23774] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:20.371 UTC [23775] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.372 UTC [23775] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:20.372 UTC [23775] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:20.518 UTC [23789] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.520 UTC [23789] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:20.520 UTC [23789] LOG:  connection authorized: user=xw_alpha_2351716a7b1a188c database=lab
+2026-11-12 00:16:20.523 UTC [23790] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.523 UTC [23790] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:20.523 UTC [23790] LOG:  connection authorized: user=xw_alpha_2351716a7b1a188c database=lab
+2026-11-12 00:16:20.526 UTC [23791] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.526 UTC [23791] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:20.526 UTC [23791] LOG:  connection authorized: user=xw_alpha_2351716a7b1a188c database=lab
+2026-11-12 00:16:20.528 UTC [23792] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.529 UTC [23792] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:20.529 UTC [23792] LOG:  connection authorized: user=xw_alpha_2351716a7b1a188c database=lab
+2026-11-12 00:16:20.558 UTC [23793] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.559 UTC [23793] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:20.559 UTC [23793] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:20.979 UTC [23794] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.980 UTC [23794] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:20.980 UTC [23794] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:20.987 UTC [23795] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.988 UTC [23795] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:20.988 UTC [23795] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:20.988 UTC [23792] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:20.988 UTC [23792] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:20.988 UTC [23792] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:20.998 UTC [23796] LOG:  connection received: host=[local]
+2026-11-12 00:16:20.999 UTC [23796] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:20.999 UTC [23796] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:21.007 UTC [23797] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.008 UTC [23797] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:21.008 UTC [23797] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:21.210 UTC [23798] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.211 UTC [23798] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:21.211 UTC [23798] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:21.215 UTC [23799] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.216 UTC [23799] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:21.216 UTC [23799] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:21.486 UTC [23803] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.487 UTC [23803] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:21.487 UTC [23803] LOG:  connection authorized: user=xw_alpha_2351716a7b1a188c database=lab application_name=psql
+2026-11-12 00:16:21.487 UTC [23803] FATAL:  role "xw_alpha_2351716a7b1a188c" does not exist
+2026-11-12 00:16:21.650 UTC [23804] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.651 UTC [23804] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:21.651 UTC [23804] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:21.658 UTC [23805] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.659 UTC [23805] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:21.659 UTC [23805] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:21.801 UTC [23819] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.803 UTC [23819] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:21.803 UTC [23819] LOG:  connection authorized: user=xw_alpha_a4da98bf9f9ab1ad database=lab
+2026-11-12 00:16:21.806 UTC [23820] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.807 UTC [23820] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:21.807 UTC [23820] LOG:  connection authorized: user=xw_alpha_a4da98bf9f9ab1ad database=lab
+2026-11-12 00:16:21.809 UTC [23821] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.809 UTC [23821] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:21.809 UTC [23821] LOG:  connection authorized: user=xw_alpha_a4da98bf9f9ab1ad database=lab
+2026-11-12 00:16:21.811 UTC [23822] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.811 UTC [23822] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:21.811 UTC [23822] LOG:  connection authorized: user=xw_alpha_a4da98bf9f9ab1ad database=lab
+2026-11-12 00:16:21.839 UTC [23823] LOG:  connection received: host=[local]
+2026-11-12 00:16:21.839 UTC [23823] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:21.839 UTC [23823] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.254 UTC [23824] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.255 UTC [23824] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.255 UTC [23824] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.262 UTC [23825] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.263 UTC [23825] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.263 UTC [23825] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.264 UTC [23822] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:22.264 UTC [23822] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:22.264 UTC [23822] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:22.272 UTC [23826] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.273 UTC [23826] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.273 UTC [23826] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.281 UTC [23827] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.282 UTC [23827] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.282 UTC [23827] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.461 UTC [23828] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.462 UTC [23828] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.462 UTC [23828] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.466 UTC [23829] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.467 UTC [23829] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.467 UTC [23829] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.736 UTC [23833] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.736 UTC [23833] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:22.736 UTC [23833] LOG:  connection authorized: user=xw_alpha_a4da98bf9f9ab1ad database=lab application_name=psql
+2026-11-12 00:16:22.736 UTC [23833] FATAL:  role "xw_alpha_a4da98bf9f9ab1ad" does not exist
+2026-11-12 00:16:22.905 UTC [23834] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.906 UTC [23834] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.906 UTC [23834] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:22.915 UTC [23835] LOG:  connection received: host=[local]
+2026-11-12 00:16:22.915 UTC [23835] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:22.915 UTC [23835] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.057 UTC [23849] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.058 UTC [23849] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:23.058 UTC [23849] LOG:  connection authorized: user=xw_alpha_a6768060d0286715 database=lab
+2026-11-12 00:16:23.061 UTC [23850] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.062 UTC [23850] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:23.062 UTC [23850] LOG:  connection authorized: user=xw_alpha_a6768060d0286715 database=lab
+2026-11-12 00:16:23.064 UTC [23851] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.064 UTC [23851] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:23.064 UTC [23851] LOG:  connection authorized: user=xw_alpha_a6768060d0286715 database=lab
+2026-11-12 00:16:23.066 UTC [23852] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.066 UTC [23852] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:23.066 UTC [23852] LOG:  connection authorized: user=xw_alpha_a6768060d0286715 database=lab
+2026-11-12 00:16:23.095 UTC [23853] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.096 UTC [23853] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.096 UTC [23853] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.611 UTC [23854] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.612 UTC [23854] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.612 UTC [23854] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.617 UTC [23852] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:23.617 UTC [23852] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:23.617 UTC [23852] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:23.622 UTC [23855] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.623 UTC [23855] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.623 UTC [23855] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.633 UTC [23856] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.634 UTC [23856] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.634 UTC [23856] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.642 UTC [23857] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.643 UTC [23857] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.643 UTC [23857] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.857 UTC [23858] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.858 UTC [23858] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.858 UTC [23858] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:23.862 UTC [23859] LOG:  connection received: host=[local]
+2026-11-12 00:16:23.863 UTC [23859] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:23.863 UTC [23859] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:24.134 UTC [23863] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.134 UTC [23863] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:24.134 UTC [23863] LOG:  connection authorized: user=xw_alpha_a6768060d0286715 database=lab application_name=psql
+2026-11-12 00:16:24.134 UTC [23863] FATAL:  role "xw_alpha_a6768060d0286715" does not exist
+2026-11-12 00:16:24.314 UTC [23864] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.314 UTC [23864] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:24.314 UTC [23864] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:24.323 UTC [23865] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.323 UTC [23865] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:24.323 UTC [23865] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:24.484 UTC [23879] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.485 UTC [23879] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:24.485 UTC [23879] LOG:  connection authorized: user=xw_alpha_bfc70b77beaf0f9c database=lab
+2026-11-12 00:16:24.488 UTC [23880] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.489 UTC [23880] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:24.489 UTC [23880] LOG:  connection authorized: user=xw_alpha_bfc70b77beaf0f9c database=lab
+2026-11-12 00:16:24.491 UTC [23881] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.492 UTC [23881] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:24.492 UTC [23881] LOG:  connection authorized: user=xw_alpha_bfc70b77beaf0f9c database=lab
+2026-11-12 00:16:24.493 UTC [23882] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.494 UTC [23882] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:24.494 UTC [23882] LOG:  connection authorized: user=xw_alpha_bfc70b77beaf0f9c database=lab
+2026-11-12 00:16:24.522 UTC [23883] LOG:  connection received: host=[local]
+2026-11-12 00:16:24.523 UTC [23883] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:24.523 UTC [23883] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.007 UTC [23890] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.008 UTC [23890] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.008 UTC [23890] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.015 UTC [23891] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.015 UTC [23882] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:25.015 UTC [23882] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:25.015 UTC [23882] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:25.016 UTC [23891] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.016 UTC [23891] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.027 UTC [23892] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.028 UTC [23892] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.028 UTC [23892] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.036 UTC [23893] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.037 UTC [23893] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.037 UTC [23893] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.213 UTC [23894] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.214 UTC [23894] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.214 UTC [23894] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.218 UTC [23895] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.218 UTC [23895] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.218 UTC [23895] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.486 UTC [23899] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.487 UTC [23899] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:25.487 UTC [23899] LOG:  connection authorized: user=xw_alpha_bfc70b77beaf0f9c database=lab application_name=psql
+2026-11-12 00:16:25.487 UTC [23899] FATAL:  role "xw_alpha_bfc70b77beaf0f9c" does not exist
+2026-11-12 00:16:25.654 UTC [23901] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.654 UTC [23901] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.654 UTC [23901] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.663 UTC [23902] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.664 UTC [23902] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.664 UTC [23902] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:25.810 UTC [23916] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.813 UTC [23916] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:25.813 UTC [23916] LOG:  connection authorized: user=xw_alpha_df49595573cdc62b database=lab
+2026-11-12 00:16:25.816 UTC [23917] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.816 UTC [23917] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:25.816 UTC [23917] LOG:  connection authorized: user=xw_alpha_df49595573cdc62b database=lab
+2026-11-12 00:16:25.818 UTC [23918] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.819 UTC [23918] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:25.819 UTC [23918] LOG:  connection authorized: user=xw_alpha_df49595573cdc62b database=lab
+2026-11-12 00:16:25.820 UTC [23919] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.821 UTC [23919] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:25.821 UTC [23919] LOG:  connection authorized: user=xw_alpha_df49595573cdc62b database=lab
+2026-11-12 00:16:25.849 UTC [23920] LOG:  connection received: host=[local]
+2026-11-12 00:16:25.850 UTC [23920] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:25.850 UTC [23920] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.048 UTC [23921] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.049 UTC [23921] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.049 UTC [23921] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.054 UTC [23919] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:26.054 UTC [23919] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:26.054 UTC [23919] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:26.057 UTC [23922] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.057 UTC [23922] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.057 UTC [23922] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.068 UTC [23923] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.068 UTC [23923] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.068 UTC [23923] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.076 UTC [23924] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.077 UTC [23924] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.077 UTC [23924] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.326 UTC [23925] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.327 UTC [23925] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.327 UTC [23925] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.331 UTC [23926] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.332 UTC [23926] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.332 UTC [23926] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.605 UTC [23930] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.606 UTC [23930] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:26.606 UTC [23930] LOG:  connection authorized: user=xw_alpha_df49595573cdc62b database=lab application_name=psql
+2026-11-12 00:16:26.606 UTC [23930] FATAL:  role "xw_alpha_df49595573cdc62b" does not exist
+2026-11-12 00:16:26.831 UTC [23931] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.832 UTC [23931] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.832 UTC [23931] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:26.842 UTC [23932] LOG:  connection received: host=[local]
+2026-11-12 00:16:26.843 UTC [23932] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:26.843 UTC [23932] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.004 UTC [23946] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.006 UTC [23946] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:27.006 UTC [23946] LOG:  connection authorized: user=xw_alpha_08c0f391dbb4bbe5 database=lab
+2026-11-12 00:16:27.012 UTC [23947] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.013 UTC [23947] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:27.013 UTC [23947] LOG:  connection authorized: user=xw_alpha_08c0f391dbb4bbe5 database=lab
+2026-11-12 00:16:27.016 UTC [23948] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.017 UTC [23948] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:27.017 UTC [23948] LOG:  connection authorized: user=xw_alpha_08c0f391dbb4bbe5 database=lab
+2026-11-12 00:16:27.019 UTC [23949] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.019 UTC [23949] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:27.019 UTC [23949] LOG:  connection authorized: user=xw_alpha_08c0f391dbb4bbe5 database=lab
+2026-11-12 00:16:27.051 UTC [23950] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.052 UTC [23950] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.052 UTC [23950] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.329 UTC [23951] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.330 UTC [23951] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.330 UTC [23951] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.338 UTC [23952] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.338 UTC [23949] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:27.338 UTC [23949] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:27.338 UTC [23949] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:27.345 UTC [23952] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.346 UTC [23952] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.354 UTC [23953] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.355 UTC [23953] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.355 UTC [23953] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.363 UTC [23954] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.364 UTC [23954] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.364 UTC [23954] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.542 UTC [23955] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.543 UTC [23955] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.543 UTC [23955] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.547 UTC [23956] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.547 UTC [23956] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.547 UTC [23956] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.816 UTC [23960] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.817 UTC [23960] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:27.817 UTC [23960] LOG:  connection authorized: user=xw_alpha_08c0f391dbb4bbe5 database=lab application_name=psql
+2026-11-12 00:16:27.817 UTC [23960] FATAL:  role "xw_alpha_08c0f391dbb4bbe5" does not exist
+2026-11-12 00:16:27.988 UTC [23961] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.989 UTC [23961] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.989 UTC [23961] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:27.997 UTC [23962] LOG:  connection received: host=[local]
+2026-11-12 00:16:27.998 UTC [23962] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:27.998 UTC [23962] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.147 UTC [23976] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.149 UTC [23976] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:28.149 UTC [23976] LOG:  connection authorized: user=xw_alpha_b498ff48f5a59b73 database=lab
+2026-11-12 00:16:28.152 UTC [23977] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.153 UTC [23977] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:28.153 UTC [23977] LOG:  connection authorized: user=xw_alpha_b498ff48f5a59b73 database=lab
+2026-11-12 00:16:28.155 UTC [23978] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.155 UTC [23978] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:28.155 UTC [23978] LOG:  connection authorized: user=xw_alpha_b498ff48f5a59b73 database=lab
+2026-11-12 00:16:28.157 UTC [23979] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.157 UTC [23979] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:28.157 UTC [23979] LOG:  connection authorized: user=xw_alpha_b498ff48f5a59b73 database=lab
+2026-11-12 00:16:28.186 UTC [23980] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.187 UTC [23980] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.187 UTC [23980] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.703 UTC [23981] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.704 UTC [23981] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.704 UTC [23981] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.712 UTC [23982] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.713 UTC [23982] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.713 UTC [23982] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.715 UTC [23979] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:28.715 UTC [23979] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:28.715 UTC [23979] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:28.725 UTC [23983] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.725 UTC [23983] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.725 UTC [23983] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.734 UTC [23984] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.735 UTC [23984] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.735 UTC [23984] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.912 UTC [23985] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.912 UTC [23985] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.912 UTC [23985] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:28.917 UTC [23986] LOG:  connection received: host=[local]
+2026-11-12 00:16:28.917 UTC [23986] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:28.917 UTC [23986] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.187 UTC [23990] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.187 UTC [23990] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:29.187 UTC [23990] LOG:  connection authorized: user=xw_alpha_b498ff48f5a59b73 database=lab application_name=psql
+2026-11-12 00:16:29.187 UTC [23990] FATAL:  role "xw_alpha_b498ff48f5a59b73" does not exist
+2026-11-12 00:16:29.354 UTC [23991] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.355 UTC [23991] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.355 UTC [23991] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.363 UTC [23992] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.364 UTC [23992] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.364 UTC [23992] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.523 UTC [24006] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.525 UTC [24006] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:29.525 UTC [24006] LOG:  connection authorized: user=xw_alpha_a4335e6aebfd09d9 database=lab
+2026-11-12 00:16:29.528 UTC [24007] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.529 UTC [24007] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:29.529 UTC [24007] LOG:  connection authorized: user=xw_alpha_a4335e6aebfd09d9 database=lab
+2026-11-12 00:16:29.531 UTC [24008] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.531 UTC [24008] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:29.531 UTC [24008] LOG:  connection authorized: user=xw_alpha_a4335e6aebfd09d9 database=lab
+2026-11-12 00:16:29.533 UTC [24009] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.533 UTC [24009] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:29.533 UTC [24009] LOG:  connection authorized: user=xw_alpha_a4335e6aebfd09d9 database=lab
+2026-11-12 00:16:29.562 UTC [24010] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.563 UTC [24010] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.563 UTC [24010] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.758 UTC [24011] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.759 UTC [24011] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.759 UTC [24011] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.766 UTC [24012] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.766 UTC [24012] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.766 UTC [24012] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.767 UTC [24009] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:29.767 UTC [24009] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:29.767 UTC [24009] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:29.777 UTC [24013] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.777 UTC [24013] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.777 UTC [24013] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.787 UTC [24014] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.788 UTC [24014] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.788 UTC [24014] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.974 UTC [24015] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.975 UTC [24015] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.975 UTC [24015] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:29.979 UTC [24016] LOG:  connection received: host=[local]
+2026-11-12 00:16:29.979 UTC [24016] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:29.979 UTC [24016] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:30.247 UTC [24020] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.248 UTC [24020] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:30.248 UTC [24020] LOG:  connection authorized: user=xw_alpha_a4335e6aebfd09d9 database=lab application_name=psql
+2026-11-12 00:16:30.248 UTC [24020] FATAL:  role "xw_alpha_a4335e6aebfd09d9" does not exist
+2026-11-12 00:16:30.404 UTC [24021] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.404 UTC [24021] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:30.404 UTC [24021] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:30.413 UTC [24022] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.413 UTC [24022] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:30.413 UTC [24022] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:30.558 UTC [24036] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.560 UTC [24036] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:30.560 UTC [24036] LOG:  connection authorized: user=xw_alpha_c51699998e5c56de database=lab
+2026-11-12 00:16:30.563 UTC [24037] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.564 UTC [24037] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:30.564 UTC [24037] LOG:  connection authorized: user=xw_alpha_c51699998e5c56de database=lab
+2026-11-12 00:16:30.565 UTC [24038] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.566 UTC [24038] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:30.566 UTC [24038] LOG:  connection authorized: user=xw_alpha_c51699998e5c56de database=lab
+2026-11-12 00:16:30.567 UTC [24039] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.568 UTC [24039] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:30.568 UTC [24039] LOG:  connection authorized: user=xw_alpha_c51699998e5c56de database=lab
+2026-11-12 00:16:30.597 UTC [24040] LOG:  connection received: host=[local]
+2026-11-12 00:16:30.597 UTC [24040] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:30.597 UTC [24040] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.039 UTC [24041] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.040 UTC [24041] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.040 UTC [24041] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.045 UTC [24039] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:31.045 UTC [24039] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:31.045 UTC [24039] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:31.050 UTC [24042] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.051 UTC [24042] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.051 UTC [24042] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.059 UTC [24043] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.060 UTC [24043] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.060 UTC [24043] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.068 UTC [24044] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.068 UTC [24044] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.068 UTC [24044] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.246 UTC [24045] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.246 UTC [24045] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.246 UTC [24045] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.250 UTC [24046] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.251 UTC [24046] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.251 UTC [24046] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.519 UTC [24050] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.519 UTC [24050] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:31.519 UTC [24050] LOG:  connection authorized: user=xw_alpha_c51699998e5c56de database=lab application_name=psql
+2026-11-12 00:16:31.519 UTC [24050] FATAL:  role "xw_alpha_c51699998e5c56de" does not exist
+2026-11-12 00:16:31.679 UTC [24052] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.679 UTC [24052] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.679 UTC [24052] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.689 UTC [24053] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.690 UTC [24053] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.690 UTC [24053] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:31.833 UTC [24067] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.835 UTC [24067] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:31.835 UTC [24067] LOG:  connection authorized: user=xw_alpha_9552ce2afca818be database=lab
+2026-11-12 00:16:31.838 UTC [24068] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.839 UTC [24068] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:31.839 UTC [24068] LOG:  connection authorized: user=xw_alpha_9552ce2afca818be database=lab
+2026-11-12 00:16:31.841 UTC [24069] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.841 UTC [24069] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:31.841 UTC [24069] LOG:  connection authorized: user=xw_alpha_9552ce2afca818be database=lab
+2026-11-12 00:16:31.843 UTC [24070] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.844 UTC [24070] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:31.844 UTC [24070] LOG:  connection authorized: user=xw_alpha_9552ce2afca818be database=lab
+2026-11-12 00:16:31.879 UTC [24071] LOG:  connection received: host=[local]
+2026-11-12 00:16:31.880 UTC [24071] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:31.880 UTC [24071] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.186 UTC [24072] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.187 UTC [24072] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.187 UTC [24072] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.193 UTC [24070] ERROR:  fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة
+2026-11-12 00:16:32.193 UTC [24070] CONTEXT:  PL/pgSQL function fence.guard_write() line 32 at RAISE
+2026-11-12 00:16:32.193 UTC [24070] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ($1)
+2026-11-12 00:16:32.193 UTC [24073] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.194 UTC [24073] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.194 UTC [24073] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.216 UTC [24074] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.217 UTC [24074] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.217 UTC [24074] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.227 UTC [24075] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.228 UTC [24075] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.228 UTC [24075] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.403 UTC [24076] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.404 UTC [24076] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.404 UTC [24076] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.409 UTC [24077] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.409 UTC [24077] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.409 UTC [24077] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.681 UTC [24081] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.682 UTC [24081] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:3)
+2026-11-12 00:16:32.682 UTC [24081] LOG:  connection authorized: user=xw_alpha_9552ce2afca818be database=lab application_name=psql
+2026-11-12 00:16:32.682 UTC [24081] FATAL:  role "xw_alpha_9552ce2afca818be" does not exist
+2026-11-12 00:16:32.842 UTC [24082] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.843 UTC [24082] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.843 UTC [24082] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.849 UTC [24083] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.850 UTC [24083] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.850 UTC [24083] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.857 UTC [24084] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.858 UTC [24084] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.858 UTC [24084] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:32.865 UTC [24085] LOG:  connection received: host=[local]
+2026-11-12 00:16:32.866 UTC [24085] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:32.866 UTC [24085] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.039 UTC [24086] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.040 UTC [24086] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.040 UTC [24086] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.044 UTC [24087] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.044 UTC [24087] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.044 UTC [24087] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.060 UTC [23374] LOG:  received immediate shutdown request
+2026-11-12 00:16:33.068 UTC [23374] LOG:  database system is shut down
+2026-11-12 00:16:33.192 UTC [24092] LOG:  starting PostgreSQL 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, 64-bit
+2026-11-12 00:16:33.192 UTC [24092] LOG:  listening on IPv4 address "127.0.0.1", port 41383
+2026-11-12 00:16:33.193 UTC [24092] LOG:  listening on Unix socket "/tmp/xuux-fence-lab-OxxTp7/sock/.s.PGSQL.41383"
+2026-11-12 00:16:33.196 UTC [24098] LOG:  database system was interrupted; last known up at 2026-11-12 00:16:15 UTC
+2026-11-12 00:16:33.226 UTC [24098] LOG:  database system was not properly shut down; automatic recovery in progress
+2026-11-12 00:16:33.227 UTC [24098] LOG:  redo starts at 0/36F0828
+2026-11-12 00:16:33.228 UTC [24098] WARNING:  could not open directory "base/19989": No such file or directory
+2026-11-12 00:16:33.228 UTC [24098] CONTEXT:  WAL redo at 0/36F08F8 for Database/DROP: dir 1663/19989
+2026-11-12 00:16:33.228 UTC [24098] WARNING:  some useless files may be left behind in old database directory "base/19989"
+2026-11-12 00:16:33.228 UTC [24098] CONTEXT:  WAL redo at 0/36F08F8 for Database/DROP: dir 1663/19989
+2026-11-12 00:16:33.265 UTC [24098] LOG:  invalid record length at 0/3F3DB70: expected at least 24, got 0
+2026-11-12 00:16:33.265 UTC [24098] LOG:  redo done at 0/3F3DB48 system usage: CPU: user: 0.02 s, system: 0.01 s, elapsed: 0.03 s
+2026-11-12 00:16:33.268 UTC [24096] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-12 00:16:33.296 UTC [24096] LOG:  checkpoint complete: wrote 1501 buffers (9.2%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.025 s, sync=0.003 s, total=0.029 s; sync files=627, longest=0.001 s, average=0.001 s; distance=8500 kB, estimate=8500 kB; lsn=0/3F3DB70, redo lsn=0/3F3DB70
+2026-11-12 00:16:33.298 UTC [24092] LOG:  database system is ready to accept connections
+2026-11-12 00:16:33.379 UTC [24102] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.381 UTC [24102] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.381 UTC [24102] LOG:  connection authorized: user=xf_sovereign database=lab
+2026-11-12 00:16:33.410 UTC [24102] ERROR:  fence: RESUME من HALTED فقط (الحالة RECOVERY_REQUIRED)
+2026-11-12 00:16:33.410 UTC [24102] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 6 at RAISE
+2026-11-12 00:16:33.410 UTC [24102] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 00:16:33.431 UTC [24103] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.431 UTC [24103] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.431 UTC [24103] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.438 UTC [24104] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.439 UTC [24104] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.439 UTC [24104] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.448 UTC [24105] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.449 UTC [24105] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.449 UTC [24105] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.460 UTC [24106] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.460 UTC [24106] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.460 UTC [24106] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.637 UTC [24107] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.637 UTC [24107] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.637 UTC [24107] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.641 UTC [24108] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.642 UTC [24108] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.642 UTC [24108] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.826 UTC [24109] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.827 UTC [24109] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.827 UTC [24109] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.835 UTC [24110] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.836 UTC [24110] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:33.836 UTC [24110] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:33.863 UTC [24112] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.864 UTC [24112] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:2)
+2026-11-12 00:16:33.864 UTC [24112] LOG:  replication connection authorized: user=postgres application_name=pg_basebackup
+2026-11-12 00:16:33.888 UTC [24096] LOG:  checkpoint starting: immediate force wait
+2026-11-12 00:16:33.916 UTC [24096] LOG:  checkpoint complete: wrote 149 buffers (0.9%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 2 recycled; write=0.003 s, sync=0.001 s, total=0.028 s; sync files=54, longest=0.001 s, average=0.001 s; distance=17161 kB, estimate=17161 kB; lsn=0/5000080, redo lsn=0/5000028
+2026-11-12 00:16:33.924 UTC [24113] LOG:  connection received: host=[local]
+2026-11-12 00:16:33.925 UTC [24113] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:2)
+2026-11-12 00:16:33.925 UTC [24113] LOG:  replication connection authorized: user=postgres application_name=pg_basebackup
+2026-11-12 00:16:34.104 UTC [24115] LOG:  connection received: host=[local]
+2026-11-12 00:16:34.105 UTC [24115] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:34.105 UTC [24115] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:34.112 UTC [24116] LOG:  connection received: host=[local]
+2026-11-12 00:16:34.112 UTC [24116] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:34.112 UTC [24116] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:34.120 UTC [24117] LOG:  connection received: host=[local]
+2026-11-12 00:16:34.121 UTC [24117] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:34.121 UTC [24117] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:34.129 UTC [24118] LOG:  connection received: host=[local]
+2026-11-12 00:16:34.130 UTC [24118] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:34.130 UTC [24118] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:34.332 UTC [24119] LOG:  connection received: host=[local]
+2026-11-12 00:16:34.333 UTC [24119] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:34.333 UTC [24119] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:34.342 UTC [24120] LOG:  connection received: host=[local]
+2026-11-12 00:16:34.342 UTC [24120] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-OxxTp7/data/pg_hba.conf:1)
+2026-11-12 00:16:34.342 UTC [24120] LOG:  connection authorized: user=xf_root database=lab
+2026-11-12 00:16:34.940 UTC [24092] LOG:  received fast shutdown request
+2026-11-12 00:16:34.940 UTC [24092] LOG:  aborting any active transactions
+2026-11-12 00:16:34.943 UTC [24092] LOG:  background worker "logical replication launcher" (PID 24101) exited with exit code 1
+2026-11-12 00:16:34.943 UTC [24096] LOG:  shutting down
+2026-11-12 00:16:34.944 UTC [24096] LOG:  checkpoint starting: shutdown immediate
+2026-11-12 00:16:34.946 UTC [24096] LOG:  checkpoint complete: wrote 23 buffers (0.1%), wrote 2 SLRU buffers; 0 WAL file(s) added, 0 removed, 1 recycled; write=0.001 s, sync=0.001 s, total=0.003 s; sync files=23, longest=0.001 s, average=0.001 s; distance=16463 kB, estimate=17091 kB; lsn=0/6013EA8, redo lsn=0/6013EA8
+2026-11-12 00:16:34.953 UTC [24092] LOG:  database system is shut down
+
+=== END postgres-primary.log

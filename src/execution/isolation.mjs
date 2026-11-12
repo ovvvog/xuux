@@ -251,7 +251,11 @@ function escapeKind(stderr) {
  * تعبر حدّ العملية، وقبولها يوهم بعزلٍ لا يحدث. يستعمل `handler` مرادفاً لفظياً
  * لمسار أمر كي يدعم مستدعي سجلّ المعالجات.
  *
- * @param {{ command?: string, handler?: string, args?: readonly string[], workdir: string, writableDir: string, timeoutMs?: number, memoryLimitMb?: number, maxFileSizeMb?: number, processLimit?: number, actor?: string, signal?: AbortSignal, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null }} request
+ * `cgroupProcs` (‏`WL-532`، E6): مسارُ `cgroup.procs` لنطاقِ الإقلاعِ (`CgroupScope`). إن
+ * مُرِّرَ انضمّت العمليةُ إلى النطاقِ **قبلَ** `unshare` فتبقى هي وذريّتُها (ولو تيتّمت
+ * بـ`setsid`) تحتَ `cgroup.kill` في خطوةِ الإيقاف 11 — مجموعةُ العملياتِ وحدها لا تكفي.
+ *
+ * @param {{ command?: string, handler?: string, args?: readonly string[], workdir: string, writableDir: string, timeoutMs?: number, memoryLimitMb?: number, maxFileSizeMb?: number, processLimit?: number, actor?: string, signal?: AbortSignal, cgroupProcs?: string, log: { append: (type: string, actor: string, payload: object) => unknown }, quarantine?: import('../governance/quarantine.mjs').QuarantineReporter | null }} request
  * @returns {Promise<IsolatedRun>}
  */
 export async function runIsolated(request) {
@@ -386,33 +390,40 @@ export async function runIsolated(request) {
   });
 
   return await new Promise((resolve, reject) => {
-    const child = spawn(
-      'unshare',
-      [
-        '--map-root-user',
-        '--net',
-        '--mount',
-        '--pid',
-        '--fork',
-        '--mount-proc',
-        '--',
-        'sh',
-        '-ceu',
-        NAMESPACE_RUNNER,
-        'isolation-runner',
-        sandboxRoot,
-        workdir,
-        writableDir,
-        runtimeCommand,
-        String(memoryLimitMb * 1024),
-        String(maxFileSizeMb * 1024),
-        String(processLimit),
-        String(Math.max(1, Math.ceil(timeoutMs / 1_000))),
-        commandInJail,
-        ...argsInJail,
-      ],
-      { detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    const unshareArgs = [
+      '--map-root-user',
+      '--net',
+      '--mount',
+      '--pid',
+      '--fork',
+      '--mount-proc',
+      '--',
+      'sh',
+      '-ceu',
+      NAMESPACE_RUNNER,
+      'isolation-runner',
+      sandboxRoot,
+      workdir,
+      writableDir,
+      runtimeCommand,
+      String(memoryLimitMb * 1024),
+      String(maxFileSizeMb * 1024),
+      String(processLimit),
+      String(Math.max(1, Math.ceil(timeoutMs / 1_000))),
+      commandInJail,
+      ...argsInJail,
+    ];
+    const child =
+      typeof request.cgroupProcs === 'string' && request.cgroupProcs !== ''
+        ? spawn(
+            '/bin/sh',
+            ['-c', 'echo $$ > "$0" && exec "$@"', request.cgroupProcs, 'unshare', ...unshareArgs],
+            {
+              detached: true,
+              stdio: ['ignore', 'pipe', 'pipe'],
+            },
+          )
+        : spawn('unshare', unshareArgs, { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let killed = false;

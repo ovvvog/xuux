@@ -1,0 +1,88 @@
+# جردُ الآثارِ الخارجيةِ وغيرِ الخارجية (WL-532، §9). لا أثرَ بلا تصنيف: الاختبار
+# tests/fence/effects.test.mjs يرفضُ أيَّ معرّفٍ من E1..E16 غائبٍ أو بلا ضابطٍ أو بلا حالة.
+# status: ENFORCED (مفروضٌ ومُختبَر) | PARTIAL (مفروضٌ بحدٍّ معلن) | RESIDUAL (خطرٌ متبقٍّ معلن، لا ضابط)
+# evidence: الاختبارُ أو خطوةُ المختبرِ التي تُثبِتُ الضابط.
+version: 1
+effects:
+  - id: E1
+    name: كتابةُ جداولِ الدولة (INSERT/UPDATE/DELETE/UPSERT/MERGE/المشاهد؛ TRUNCATE وCOPY FROM)
+    control: >-
+      زنادُ fence.guard_write() مُفعَّلٌ ALWAYS على كلِّ جدولٍ/قسم + FOR SHARE على صفِّ التحكّم؛
+      TRUNCATE غيرُ ممنوحٍ للعامل، وCOPY FROM مرفوضٌ تحتَ RLS (0A000) — والتطبيقُ لا يستعملُ COPY
+    status: ENFORCED
+    evidence: tests/fence/db-fence.test.mjs (T-EFF-01، الهجمات 1..14)
+  - id: E2
+    name: الكائناتُ الكبيرة (lo_*)
+    control: سحبُ EXECUTE على lo_* الكاتبة من PUBLIC + check_fenced يفحصُ امتيازَ العامل
+    status: ENFORCED
+    evidence: tests/fence/db-fence.test.mjs (هجوم LO)
+  - id: E3
+    name: NOTIFY
+    control: لا يمكنُ سحبُه بامتياز؛ ينقطعُ بإنهاءِ الجلسةِ في الخطوة 7، ويبقى ممكناً لجلسةٍ حيّةٍ حتى إنهائها
+    status: RESIDUAL
+    evidence: check_fenced().residuals يُدرجُ notify_not_revocable؛ tests/fence/db-fence.test.mjs يوثّقُ الحدّ
+  - id: E4
+    name: أقفالُ الاستشارة (advisory locks)
+    control: check_fenced يرفضُ إن بقيَ قفلٌ لجلسةِ عامل؛ الإنهاءُ يُحرّرُها
+    status: ENFORCED
+    evidence: tests/fence/db-fence.test.mjs (هجوم advisory lock)
+  - id: E5
+    name: قراءاتُ العامل
+    control: سياسةُ RLS xf_read (read_ok) تسدُّ قراءةَ العاملِ خارجَ RUNNING أو بلا اعتماد — مُكمِّلةٌ لا أساس
+    status: ENFORCED
+    evidence: tests/fence/db-fence.test.mjs (القراءة بعد الإيقاف)
+  - id: E6
+    name: العملياتُ الابنةُ (والأحفادُ واليتامى)
+    control: CgroupScope لكلِّ إقلاع — cgroup.kill ثمّ تحقُّقٌ من خلوِّ cgroup.procs وpopulated 0
+    status: PARTIAL
+    evidence: tests/fence/effects.test.mjs (يتطلّبُ XUUX_CGROUP_PARENT مفوَّضاً؛ وإلا NOT RUN) + scripts/fence-lab.mjs
+  - id: E7
+    name: النتائجُ المعلّقة (pending-results)
+    control: settlePendingResults يمرُّ بحارسِ الإيقاف؛ تسويتُها كتابةٌ في القاعدةِ فيمنعُها الزناد (E1)
+    status: ENFORCED
+    evidence: tests/fence/db-fence.test.mjs (T-EFF-01) — الكتابةُ نفسُها مرفوضة
+  - id: E8
+    name: الملفّاتُ المحلّية (مخرجاتُ العزل والسجلّات)
+    control: العمليةُ داخلَ النطاق تُقتَل (E6)؛ لا قفلَ على نظامِ الملفّاتِ نفسِه
+    status: PARTIAL
+    evidence: scripts/fence-lab.mjs (كتابةُ ملفٍّ تتوقّفُ بعد cgroup.kill)
+  - id: E9
+    name: طلباتُ الاستدلالِ عبرَ HTTPS
+    control: HaltFencedTransport ناقلاً داخلَ EgressGate القائمة — يُغلَقُ في الخطوة 11 فيُجهِضُ الجاري ويرفضُ الجديد
+    status: PARTIAL
+    evidence: tests/fence/effects.test.mjs (T-EFF-02)؛ وكيلُ خروجٍ على مستوى الشبكة غيرُ مُنفَّذ — يتطلّبُ موارد المالك
+  - id: E10
+    name: مزوِّدُ المفاتيحِ البعيد
+    control: يمرُّ بـEgressGate وناقلِها المُسيَّج؛ مزوِّدُ TPM/HSM الحقيقيُّ غيرُ متاح (hardwareKeyProvider يرمي)
+    status: PARTIAL
+    evidence: tests/fence/effects.test.mjs
+  - id: E11
+    name: خادمُ HTTP (serve-state)
+    control: كتاباتُه عبرَ createPool بدورِ superuser/مالكٍ قائم — لا تمرُّ بالسياجِ إلا إن شُغِّلَ بدورِ إقلاع
+    status: RESIDUAL
+    evidence: موثَّقٌ في وصفِ الطلب؛ ربطُه بدورِ إقلاعٍ قرارُ نشرٍ للمالك
+  - id: E12
+    name: الزمنُ والشاهد (ساعةُ القاعدة)
+    control: الإيجارُ يُقاسُ بـclock_timestamp() للقاعدة؛ تلاعبُ ساعةِ الخادمِ خارجَ النطاق
+    status: RESIDUAL
+    evidence: check_fenced().residuals يُدرجُ db_clock_trusted_unverified
+  - id: E13
+    name: سكربتاتُ المُشرِف والمُجدوِل (scheduler, serve-state)
+    control: تكتبُ بوصلاتٍ غيرِ مُسيَّجة؛ في وضعِ السياجِ يجبُ أن تعملَ بدورِ إقلاعٍ أو تُعلَنَ break-glass
+    status: RESIDUAL
+    evidence: check_fenced يعدُّ كلَّ دورِ تجاوزٍ قادرٍ على الدخولِ غيرِ معلَنٍ مشكلةً (undeclared_bypass)
+  - id: E14
+    name: المؤقّتاتُ داخلَ العملية
+    control: HaltSwitch/الحارسُ الصارمُ يُقرأ قبلَ كلِّ فعل؛ حافظُ الإيجارِ يتوقّفُ أوّلَ قراءةٍ غيرِ RUNNING
+    status: ENFORCED
+    evidence: tests/fence/db-fence.test.mjs (LeaseKeeper يتوقّف)
+  - id: E15
+    name: Outbox (رسائلُ خارجة)
+    control: fencingToken (عهد + مفتاحُ تكرار) وFencingReceiver يرفضُ العهدَ القديمَ والإعادة
+    status: PARTIAL
+    evidence: tests/fence/effects.test.mjs (T-EFF-03)؛ المستقبِلُ الخارجيُّ الحقيقيُّ يجبُ أن يتعاون
+  - id: E16
+    name: الطوابير
+    control: سحبُ المهامِّ كتابةٌ في state (E1) فيمنعُه الزناد؛ رسائلُ الطوابيرِ الخارجيةِ تحملُ رمزَ السياج (E15)
+    status: PARTIAL
+    evidence: tests/fence/db-fence.test.mjs + tests/fence/effects.test.mjs
