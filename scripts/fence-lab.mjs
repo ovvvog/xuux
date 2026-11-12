@@ -53,6 +53,7 @@ import {
   signCredentialChallenge,
 } from '../src/fence/db-fence.mjs';
 import { up } from '../src/persistence/migrator.mjs';
+import { isolatedLaunchCommand } from './worker.mjs';
 
 /**
  * مسبارُ الـUID نفسِه (`WL-533`، LAB-UID-06): يُشغَّلُ **بمستخدمِ العامل** ضدَّ pid، ويحاولُ ما يفعلُه
@@ -372,6 +373,8 @@ async function main() {
     ['tests/fence/halt-integrity.test.mjs', {}],
     ['tests/fence/effects.test.mjs', {}],
     ['tests/fence/connection-map.test.mjs', {}],
+    // `WL-533` (مراجعةُ #546): المُقلِعُ — منها ISO-41..45 بعملياتٍ حقيقيّةٍ عبرَ sudo وsetpriv.
+    ['tests/execution/worker-isolation.test.mjs', {}],
     // §6: libsodium مرجعٌ مستقلٌّ **إلزاميّ** هنا (غيابُه FAIL لا SKIP)، وضبابٌ أوسع.
     ['tests/fence/ed25519.test.mjs', { XUUX_ED_SODIUM: 'required', XUUX_ED_FUZZ_N: '2000' }],
   ];
@@ -614,6 +617,8 @@ async function liveLab() {
       path.join(ROOT, 'scripts', 'fence-lab-writer.mjs'),
       path.join(app, 'scripts', 'fence-lab-writer.mjs'),
     );
+    // مُقلِعُ العزل (`WL-533`): الكاتبُ يستوردُه وحدَه ثابتاً، ثمّ التطبيقَ ديناميكيّاً بعدَ الإسقاط.
+    cpSync(path.join(ROOT, 'scripts', 'worker.mjs'), path.join(app, 'scripts', 'worker.mjs'));
     cpSync(path.join(ROOT, 'package.json'), path.join(app, 'package.json'));
     const seen = new Set();
     const pending = ['pg'];
@@ -692,28 +697,26 @@ async function liveLab() {
     const writerPath = path.join(app, 'scripts', 'fence-lab-writer.mjs');
     const arg = Buffer.from(JSON.stringify(input)).toString('base64url');
     const ids = o.isolate === true ? osIds(OS_USER(w)) : null;
-    const child = spawn(
-      'sudo',
+    // `WL-533` (مراجعةُ #546): الإطلاقُ المعزولُ من بيئةِ سماحٍ صريحة (`env -i`) بحدِّ قدراتٍ
+    // {setuid,setgid} وno_new_privs؛ `sh` (root) يفتحُ ملفَّ المفتاحِ على الواصف 3 ثمّ `exec` للكاتب،
+    // والكاتبُ يُقلِعُ (يقرأُ ويغلقُ ويُسقِطُ ويتحقّق) قبلَ تحميلِ pg أو أيِّ وحدةٍ تطبيقيّة.
+    const launch =
       ids === null
-        ? ['-n', '-u', OS_USER(w), process.execPath, writerPath, arg]
-        : // `WL-533`: يبدأُ بـroot؛ `sh` (root) يفتحُ ملفَّ المفتاحِ على الواصف 3 ثمّ `exec` للكاتب،
-          // والكاتبُ يقرأُ الواصفَ ويغلقُه ويُسقِطُ هويّتَه إلى مستخدمِ العامل.
-          [
-            '-n',
-            'env',
-            'XUUX_FENCE_KEY_FD=3',
-            `XUUX_FENCE_WORKER_UID=${ids.uid}`,
-            `XUUX_FENCE_WORKER_GID=${ids.gid}`,
-            'sh',
-            '-c',
-            'exec "$0" "$1" "$2" 3<"$3"',
-            process.execPath,
-            writerPath,
-            arg,
-            /** @type {string} */ (rootKeyFiles[w]),
-          ],
-      { cwd: app, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+        ? { command: 'sudo', args: ['-n', '-u', OS_USER(w), process.execPath, writerPath, arg] }
+        : isolatedLaunchCommand({
+            node: process.execPath,
+            entry: writerPath,
+            args: [arg],
+            keyFile: /** @type {string} */ (rootKeyFiles[w]),
+            uid: ids.uid,
+            gid: ids.gid,
+            env: { XUUX_DB_FENCE: 'required' },
+            pass: ['XUUX_DB_FENCE'],
+          });
+    const child = spawn(launch.command, launch.args, {
+      cwd: app,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const bus = new EventEmitter();
     /** @type {Array<Record<string, any>>} */
     const messages = [];
@@ -1142,6 +1145,19 @@ async function liveLab() {
             sealed.isolation?.mode === 'uid-drop-after-exec',
             `العاملُ لم يُبلغْ عزلاً: ${JSON.stringify(sealed)}`,
           );
+          // مراجعةُ #546: الادّعاءُ بالضبطِ ما فحصَه المُقلِع — أربعةُ حقولٍ صفر، وCapBnd ⊆ 0xc0،
+          // وno_new_privs، وعقدُ الواصف (ملفٌّ عاديٌّ ملكُ root بلا group/other)، ولا نسخةَ مفتوحة.
+          const iso = sealed.isolation;
+          must(
+            JSON.stringify(iso.caps_zero) === '["CapInh","CapPrm","CapEff","CapAmb"]' &&
+              (BigInt(`0x${iso.cap_bnd}`) & ~0xc0n) === 0n &&
+              iso.no_new_privs === true &&
+              iso.key_fd_open_copies === 0 &&
+              iso.key_fd?.type === 'file' &&
+              iso.key_fd?.owner === 0 &&
+              iso.key_fd?.mode === '400',
+            `دليلُ العزلِ ناقص: ${JSON.stringify(iso)}`,
+          );
           const pid = Number(sealed.pid);
           const owner = run('stat', ['-c', '%u:%U %a', `/proc/${pid}/environ`, `/proc/${pid}/fd`]);
           // لا واصفَ في العاملِ يشيرُ إلى ملفِّ مفتاح (الواصف 3 أُغلِق)، ولا مفتاحَ في argv/env
@@ -1200,7 +1216,11 @@ async function liveLab() {
               'لا يحمي من root/CAP_SYS_PTRACE ولا من اختراقِ العاملِ نفسِه ولا من الإشاراتِ (توفّر)؛ دخولٌ بدورِ الإقلاعِ قبلَ الختمِ يُفشِلُه ويُكشَف (LAB-UID-02)',
           };
         } finally {
+          // غلافُ sudo ملكُ root ولا يطابقُه pkill -u؛ وقد يبقى متوقّفاً (T) بعدَ مسبارِ ptrace
+          // فيُبقي حلقةَ الأحداثِ حيّةً ويُعلِّقُ المختبر. اقتلْه بـSIGKILL صراحةً ثمّ افصلْه.
           control.kill();
+          if (control.pid) run('sudo', ['-n', 'kill', '-KILL', String(control.pid)]);
+          control.unref();
           run('sudo', [
             '-n',
             'pkill',

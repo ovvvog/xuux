@@ -16,16 +16,19 @@
  * ثمّ `{type:'stopped', committed, code, message}`. لا يقرأُ المُشرِفُ إلا هذه الأسطر.
  */
 
-import pg from 'pg';
-
-import { assertFencedSession, fileKeyProvider, sealFencedPool } from '../src/fence/db-fence.mjs';
-import { isolateWorkerProcess } from '../src/fence/worker-isolation.mjs';
+// `WL-533` (مراجعةُ #546): الاستيرادُ الثابتُ مُقلِعُ `scripts/worker.mjs` وحدَه (‏وحداتُ `node:` فقط).
+// في `isolate: true` يبدأُ الكاتبُ بـroot من المُطلِق (`isolatedLaunchCommand`)، فيُقرأُ الواصفُ ويُسقَطُ
+// الهويّةُ ويُتحقَّق **ثمّ** تُحمَّلُ `pg` ووحداتُ السياجِ ديناميكيّاً — لا شيفرةَ تطبيقٍ بصلاحيّةِ root.
+import { bootstrapIsolation } from './worker.mjs';
 
 const input = JSON.parse(Buffer.from(String(process.argv[2] ?? ''), 'base64url').toString('utf8'));
-// `WL-533` (`isolate: true`): الكاتبُ يبدأُ بـroot والمفتاحُ على واصفٍ موروث، فيقرؤه ويُسقِطُ هويّتَه
-// قبلَ أيِّ وصلة — مسارُ `scripts/worker.mjs` المعزولُ نفسُه (`isolateWorkerProcess`).
-const isolation =
-  input.isolate === true ? isolateWorkerProcess(process.env, { workerId: input.workerId }) : null;
+const isolation = input.isolate === true ? bootstrapIsolation(process.env) : null;
+if (input.isolate === true && isolation === null) {
+  throw new Error('isolate: true بلا XUUX_FENCE_ISOLATION=required — لا عزلَ صامتاً.');
+}
+const { default: pg } = await import('pg');
+const { assertFencedSession, fileKeyProvider, pemKeyProvider, sealFencedPool } =
+  await import('../src/fence/db-fence.mjs');
 /** @param {Record<string, unknown>} m */
 const emit = (m) => process.stdout.write(`${JSON.stringify(m)}\n`);
 
@@ -41,7 +44,10 @@ pool.on('error', () => {});
 
 let committed = 0;
 try {
-  const key = isolation === null ? fileKeyProvider(input.keyFile) : isolation.key;
+  const key =
+    isolation === null
+      ? fileKeyProvider(input.keyFile)
+      : pemKeyProvider(isolation.pem, `worker-fd:${input.workerId}`);
   let sessions;
   try {
     sessions = await sealFencedPool(pool, input.poolSize, key, {

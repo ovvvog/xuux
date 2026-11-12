@@ -97,7 +97,7 @@ export function fileKeyProvider(path, id = `file:${path}`) {
 }
 
 /**
- * مزوِّدٌ من نصِّ PKCS#8 في الذاكرة — يستعملُه العزلُ (`worker-isolation.mjs`) بعدَ قراءةِ المفتاحِ
+ * مزوِّدٌ من نصِّ PKCS#8 في الذاكرة — يستعملُه العزلُ (مُقلِعُ `scripts/worker.mjs`) بعدَ قراءةِ المفتاحِ
  * من واصفٍ موروث. برمجيٌّ كالملفّ: لا يدّعي حمايةً عتادية.
  * @param {string} pem
  * @param {string} id
@@ -1036,6 +1036,13 @@ export async function prepareFencedWorker(input) {
     throw new FenceError(
       FENCE_ERRORS.WORKER_CONFIG,
       'مفتاحٌ معزولٌ ومسارُ ملفِّ مفتاحٍ معاً: يُرفَض.',
+    );
+  }
+  // مراجعةُ #546: تشغيلٌ يُعلِنُ العزلَ إلزاميّاً لا يتراجعُ صامتاً إلى مسارِ الملفّ.
+  if (input.isolated === undefined && (env['XUUX_FENCE_ISOLATION'] ?? '').trim() === 'required') {
+    throw new FenceError(
+      FENCE_ERRORS.WORKER_CONFIG,
+      'XUUX_FENCE_ISOLATION=required ولا مفتاحَ معزول: لا تراجعَ إلى XUUX_FENCE_WORKER_KEY.',
     );
   }
   const keyPath = input.isolated === undefined ? required('XUUX_FENCE_WORKER_KEY') : null;

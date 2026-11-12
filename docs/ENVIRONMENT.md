@@ -99,9 +99,10 @@
 | `XUUX_DB_FENCE` | `^(required)?$` | لا شيء (سياجُ القاعدةِ اختياريٌّ — `WL-532`) | لا |
 | `XUUX_FENCE_WORKER_ID` | `^[a-z][a-z0-9]{0,19}$` | لا شيء (لازمٌ مع `XUUX_DB_FENCE=required`) | لا |
 | `XUUX_FENCE_WORKER_KEY` | مسارٌ مطلقٌ لمفتاحِ Ed25519 (‏PKCS#8) — المسارُ لا المفتاح | لا شيء (لازمٌ مع `XUUX_DB_FENCE=required`) | لا |
-| `XUUX_FENCE_KEY_FD` | (‏`WL-533`) رقمُ واصفٍ موروثٍ ≥ 3 يحملُ مفتاحَ العامل — الرقمُ لا المفتاح؛ العاملُ يبدأُ بـroot ويقرؤه ويغلقُه ثمّ يُسقِطُ هويّتَه (‏`src/fence/worker-isolation.mjs`). يُرفَضُ مع `XUUX_FENCE_WORKER_KEY` | لا شيء (العزلُ معطَّل) | لا |
-| `XUUX_FENCE_WORKER_UID` | (‏`WL-533`) UID موجبٌ يُسقِطُ إليه العاملُ المعزول (‏0 مرفوض) | لا شيء (لازمٌ مع `XUUX_FENCE_KEY_FD`) | لا |
-| `XUUX_FENCE_WORKER_GID` | (‏`WL-533`) GID موجبٌ أساسيٌّ ومجموعةٌ إضافيّةٌ وحيدة | لا شيء (لازمٌ مع `XUUX_FENCE_KEY_FD`) | لا |
+| `XUUX_FENCE_ISOLATION` | (‏`WL-533`) `required` ⇒ عزلٌ إلزاميٌّ يفشلُ مغلقاً (‏لا تراجعَ إلى `XUUX_FENCE_WORKER_KEY`، لا NODE_*/LD_*، NoNewPrivs=1 وCapBnd ⊆ 0xc0)؛ `off` أو الغياب ⇒ لا عزل، ومتغيّرُ عزلٍ بلا الوضعِ خطأُ إعداد | لا شيء (العزلُ معطَّل) | لا |
+| `XUUX_FENCE_KEY_FD` | (‏`WL-533`) رقمُ واصفٍ موروثٍ ≥ 3 يحملُ مفتاحَ العامل — الرقمُ لا المفتاح؛ العاملُ يبدأُ بـroot ويقرؤه ويغلقُه ثمّ يُسقِطُ هويّتَه (‏مُقلِعُ `scripts/worker.mjs`). لازمٌ مع `XUUX_FENCE_ISOLATION=required`؛ يُرفَضُ مع `XUUX_FENCE_WORKER_KEY` | لا شيء (العزلُ معطَّل) | لا |
+| `XUUX_FENCE_WORKER_UID` | (‏`WL-533`) UID موجبٌ يُسقِطُ إليه العاملُ المعزول (‏0 مرفوض) | لا شيء (لازمٌ مع `XUUX_FENCE_ISOLATION=required`) | لا |
+| `XUUX_FENCE_WORKER_GID` | (‏`WL-533`) GID موجبٌ أساسيٌّ ومجموعةٌ إضافيّةٌ وحيدة | لا شيء (لازمٌ مع `XUUX_FENCE_ISOLATION=required`) | لا |
 | `XUUX_HALT_EPOCH_FLOOR` | مسارٌ مطلقٌ لحدِّ العهدِ الخارجيّ | لا شيء (لازمٌ مع `XUUX_DB_FENCE=required`) | لا |
 
 **متغيّراتُ سياجِ القاعدةِ (‏`WL-532`):** الأربعةُ تُقرأُ في `scripts/worker.mjs` و`src/fence/db-fence.mjs` و`src/persistence/db.mjs` حين `XUUX_DB_FENCE=required` وحدَه؛ والغيابُ هو الوضعُ القائمُ بلا سياج، وجعلُ السياجِ إلزاميّاً في الإنتاجِ قرارُ مالكٍ لم يُتَّخَذ.

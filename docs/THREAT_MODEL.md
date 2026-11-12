@@ -328,3 +328,502 @@
   `tests/docs/security-docs.test.mjs` يمنع الحالتين من المرور بصمت.
 - **عمود «الخطر المتبقي» فارغ** ⇒ ضابطٌ يُروَّج بلا ثمن؛ الاختبار يرفض الصف.
 - **تهديد جديد بلا صف** ⇒ يُضاف بمعرّف تالٍ ولا يُدمج في صفٍّ قائم، كي يبقى العدّ صادقاً.
+
+---
+
+## 9. عزلُ العاملِ عن نفسِ UID والمُشرِف (‏`WL-533`) — التنفيذُ الفعليّ
+
+> **الحالة:** منفَّذٌ ومقيسٌ في المختبرِ على مضيفٍ واحد — دليلٌ محدودُ النطاق، لا إنتاج. هذا القسمُ يحلُّ محلَّ ADR 0009
+> المقترَح ومحلَّ ملفِّ المصفوفةِ المنفصل (‏مراجعةُ #546: لا زيادةَ في عددِ الملفّات). **لا يغلقُ** `UID-05` على مستوى الإنتاج،
+> ولا يغيّرُ `RISK-0054` ولا `LIVE-40/67/72/74/75` ولا `SUPPORTED_FRESHNESS_BACKENDS` ولا `R3-A-01`. لا يدّعي إثباتَ هويّةِ
+> العملية، ولا حمايةً من root أو superuser، ولا حمايةً عتاديّة، ولا اختبارَ فقدِ طاقة. المصفوفةُ القابلةُ للفحصِ في §9.9
+> يحرسُها `tests/fence/connection-map.test.mjs` (‏THR-01..08)، والسلوكُ يحرسُه `tests/execution/worker-isolation.test.mjs`.
+
+### 9.1 الفجوةُ المقيسة (‏`WL-532`)
+
+العاملُ يُشغَّلُ بمستخدمِ العاملِ مباشرةً ومفتاحُه ملفٌّ 0400 يملكُه ذلك المستخدم: عمليةٌ أخرى بالـUID نفسِه تقرأُ المفتاحَ وتختمُ
+قبلَه (‏LAB-UID-04/05: كشفٌ بعديٌّ لا منع)، وتقرأُ ‎/proc/‹pid›/environ|maps|mem|fd‎، وتستطيعُ ptrace وpidfd_getfd (‏المضيفُ بلا Yama).
+وprctl(PR_SET_DUMPABLE,0) وحدَه لا يكفي: الملفُّ يبقى مقروءاً للـUID، وبينَ execve والاستدعاءِ نافذةُ سباق، وexecve لاحقٌ يُعيدُ
+dumpable=1، وNode لا يكشفُ prctl.
+
+### 9.2 ترتيبُ الإقلاعِ المنفَّذ (‏`scripts/worker.mjs`)
+
+1. **نقطةُ الدخولِ مُقلِعٌ لا يستوردُ ثابتاً إلا وحداتِ `node:`** (‏ISO-40 يقيسُ رسمَ الاستيراد). كلُّ وحدةٍ تطبيقيّةٍ تُحمَّلُ
+   ديناميكيّاً في `loadApp()`، و`main()` يستدعي `bootstrapIsolation(process.env)` **قبلَ** `loadApp()`. وكاتبُ المختبرِ
+   (‏`scripts/fence-lab-writer.mjs`) يستوردُ المُقلِعَ وحدَه ثمّ `pg` ووحداتِ السياجِ ديناميكيّاً.
+2. **الوضعُ صريحٌ ويفشلُ مغلقاً:** `XUUX_FENCE_ISOLATION=required`. بلا أيِّ متغيّرِ عزلٍ لا عزل؛ وأيُّ متغيّرٍ منها
+   (‏`XUUX_FENCE_KEY_FD`، `XUUX_FENCE_WORKER_UID`، `XUUX_FENCE_WORKER_GID`) بلا الوضعِ خطأُ إعداد. ومع الوضع: غيابُ الواصفِ
+   أو UID أو GID، أو وجودُ `XUUX_FENCE_WORKER_KEY` (‏المسارُ القديم)، أو غيابُ `XUUX_DB_FENCE=required` ⇒ خروجٌ قبلَ أيِّ نداءِ
+   نظام. و`prepareFencedWorker` يرفضُ الوضعَ بلا مفتاحٍ معزول — لا تراجعَ صامتاً إلى الملف (‏ISO-03، ISO-14، ISO-21).
+3. **مدخلاتُ إطلاقٍ عدائيّة:** متغيّراتُ ‎NODE_*‎ (‏عدا ‎NODE_ENV‎) و‎LD_*‎ و‎DYLD_*‎ وأيُّ وسيطٍ في execArgv ⇒ رفض (‏ISO-04).
+4. **سياسةُ الإطلاق:** يبدأُ بـroot، وNoNewPrivs=1 وCapBnd ⊆ 0xc0 (‏setgid وsetuid فقط) **قبلَ** قراءةِ الواصف (‏ISO-07)، و
+   fs.suid_dumpable ∈ {0,2} (‏ISO-08).
+5. **عقدُ الواصف** (‏§9.4) ثمّ القراءةُ والإغلاقُ في كلِّ حال، ثمّ مفتاحُ Ed25519 خاصّ.
+6. **الإسقاط:** setgroups([gid]) ← setgid ← setuid. تغييرُ الاعتمادِ بعدَ execve يجعلُ النواةَ تضبطُ dumpable على
+   fs.suid_dumpable، فتصيرُ ملفّاتُ ‎/proc/‹pid›‎ ملكَ root ويُرفَضُ ptrace وpidfd_getfd من الـUID نفسِه. (‏spawn بخيارِ uid مرفوض:
+   يُسقِطُ قبلَ execve فيعودُ dumpable=1.)
+7. **التحقّق** (‏§9.5) — يفشلُ مغلقاً — ثمّ وحدَه `loadApp()`.
+
+**أثرٌ جانبيٌّ في وحدةٍ مستوردة** (‏ISO-41، عمليةٌ حقيقيّةٌ عبرَ sudo وsetpriv): كلُّ وحدةٍ من وحداتِ `loadApp()` الإحدى عشرة
+مستبدَلةٌ بوحدةٍ تكتبُ getuid() لحظةَ تقييمِها ⇒ كلُّها بالـUID المُسقَط؛ والضابطُ (‏نقطةُ دخولٍ تستوردُ وحدةً ثابتاً، كما كان
+قبلَ المراجعة) يكتبُ 0 — فالمسبارُ يكشفُ root حينَ يقع.
+
+### 9.3 المُطلِقُ وبيئةُ السماح (‏`isolatedLaunchCommand`)
+
+‎sudo -n /usr/bin/env -i PATH=… ‹متغيّراتٌ مسمّاة› XUUX_FENCE_ISOLATION=required XUUX_FENCE_KEY_FD=3 … /usr/bin/setpriv
+--no-new-privs --bounding-set -all,+setuid,+setgid --inh-caps -all /bin/sh -c 'k=$1; shift; exec "$@" 3<"$k"' sh ‹keyFile› ‹node› ‹entry›‎.
+لا يرثُ الابنُ متغيّراً لم يُسمَّ؛ وتمريرُ ‎NODE_*‎ أو ‎LD_*‎ أو ‎DYLD_*‎ أو `XUUX_FENCE_WORKER_KEY` أو متغيّراتِ العزلِ مرفوضٌ ولو طُلِب
+(‏ISO-15/16/17). وsh (‏root منقوصُ القدرات، بلا DAC_OVERRIDE) يفتحُ ملفَّ المفتاحِ ملكَ root 0400 — فشجرةُ التطبيقِ يجبُ أن تكونَ
+مقروءةً للجميع (‏المختبرُ ينسخُها إلى ‎/tmp‎ بـa+rX).
+
+**NODE_OPTIONS (‏ISO-42، مقيس):** عبرَ المُطلِق لا يعبرُ الحِمْل. وإطلاقٌ يتجاوزُ المُطلِقَ ويحقنُ ‎NODE_OPTIONS=--require …‎ **يُشغِّلُ
+الحِمْلَ بـroot قبلَ أوّلِ سطرٍ من المُقلِع** (‏الحِمْلُ كتبَ 0)؛ المُقلِعُ يكشفُه ويرفضُ الإكمالَ فلا يُقرأُ المفتاحُ ولا تُحمَّلُ
+وحدة — **كاشفٌ لا حاجز**. الحاجزُ هو المُطلِق وحدَه، ومكافئُه الإنتاجيُّ (‏تصميمٌ غيرُ منفَّذ): وحدةُ systemd بـNoNewPrivileges=yes
+وCapabilityBoundingSet=CAP_SETUID CAP_SETGID وبيئةٍ صريحةٍ (‏Environment=) بلا EnvironmentFile يكتبُه غيرُ root.
+
+### 9.4 عقدُ واصفِ المفتاح (‏`keyFdViolations`)
+
+| الحقل | المطلوب | يُرفَضُ (‏KEY_FD) |
+| --- | --- | --- |
+| النوع | ملفٌّ عاديّ | أنبوب، مقبس، طرفيّة، مجلّد (‏ISO-09) |
+| المالك | 0 | أيُّ UID آخر (‏ISO-09، ISO-44 حقيقيّ) |
+| الصلاحيات | لا group ولا other؛ المالكُ يقرأ | 0440، 0604، 0644، 0200 |
+| الحجم | 0 < الحجم ≤ 16384 | صفرٌ أو أكبر |
+| المحتوى | مفتاحُ Ed25519 خاصّ | نصٌّ تالف، مفتاحُ P-256 (‏ISO-12) |
+| ما بعدَ الإغلاق | لا نسخةَ مفتوحةً (‏dev/ino) في 0..4095 | ‎4<&3‎ ⇒ VERIFY_FAILED (‏ISO-43 حقيقيّ) |
+| الأبناء | لا يرثُ ابنٌ واصفاً إلى الملف | (‏ISO-43: مسحُ python3 لابنٍ حقيقيّ = لا شيء) |
+
+### 9.5 التحقّقُ من القدرات — الادّعاءُ بالضبط
+
+بعدَ الإسقاطِ يقرأُ المُقلِعُ ‎/proc/self/status‎ ويرفضُ ما لم يكن: Uid وGid الأربعةُ مطابقة، Groups = gid، **CapInh وCapPrm وCapEff
+وCapAmb صفر**، **CapBnd ⊆ 0xc0**، **NoNewPrivs=1**، setuid(0) مرفوض، ‎/proc/self/environ‎ ملكُ root، ولا نسخةَ من الواصف.
+الدليلُ يُبلغُ `caps_zero` (‏أسماءُ الحقولِ الأربعةِ لا «كلُّ القدرات»)، و`cap_bnd` (‏المقيس: c0)، و`no_new_privs`. **الأثر:** CapBnd
+غيرُ صفر — setuid وsetgid في الحدِّ لا في المسموح؛ لا تُستعادُ إلا بـexecve لبرنامجٍ ذي قدراتٍ ملفّيّة، وno_new_privs يمنعُ ذلك.
+حقلُ `capabilities_zero` القديمُ (‏الذي سمّى خمسةَ حقولٍ صفراً ولم يفحص CapBnd) أُزيل.
+
+### 9.6 حالاتُ السباق
+
+| اللحظة | ما يستطيعُه مهاجمٌ بالـUID | الدليل |
+| --- | --- | --- |
+| قبلَ execve وحتى الإسقاط | لا شيء: العمليةُ ملكُ root؛ ولا شيفرةَ تطبيقٍ تعمل | ISO-41، LAB-UID-06 |
+| بينَ الإسقاطِ والختم | لا قراءةَ ولا ptrace؛ **يستطيعُ** الدخولَ بدورِ الإقلاعِ فيُفشلُ الختمَ ويُكشَف ⇒ توفّرٌ لا كتابة | LAB-UID-02 |
+| بعدَ الختم | الدورُ NOLOGIN ⇒ الدخولُ مرفوض | LAB-UID-06 |
+| أيَّ وقت | kill وSIGSTOP (‏توفّر) | TH-UID-07 |
+
+### 9.7 ما لا يغلقُه
+
+root وCAP_SYS_PTRACE (‏TH-UID-11)؛ اختراقُ العاملِ نفسِه (‏TH-UID-10)؛ هجومُ التوفّرِ قبلَ الختم (‏TH-UID-06، يحتاجُ UID لكلِّ إقلاع:
+D-SUP-2)؛ سلامةُ ملفّاتِ نقطةِ الدخولِ وnode وsh وsetpriv التي تعملُ بـroot قبلَ الإسقاط، وإطلاقٌ يتجاوزُ المُطلِق (‏TH-UID-08)؛
+التفريغُ الفعليُّ لم يُسبَّب (‏TH-UID-05). مسارُ الملفِّ القديمُ باقٍ لتشغيلٍ لا يُعلِنُ العزل، ومكشوفٌ كما هو (‏LAB-UID-05 بتوقّعِه
+الأصليّ)؛ والإلزامُ الإنتاجيُّ جزءٌ من المُشرِف وقرارُ المالك — لذلك **`LIVE-75` بند 4 لا يُغيَّر**، و`UID-05` غيرُ مغلقٍ إنتاجيّاً.
+
+### 9.8 التصميمُ المتبقّي (‏غيرُ منفَّذ)
+
+- **المُشرِف (‏T2):** المُطلِق (‏وحدةُ systemd، root) يفتحُ ملفَّ مفتاحِ كلِّ عاملٍ لحظةَ الإطلاقِ ولا يحملُ xf_root؛ المُشرِفُ بـUID
+  مخصّصٍ يحملُ xf_root ولا يرى مفاتيحَ العمّال؛ العاملُ ‎xuuxw-‹id›‎ nologin (‏أو DynamicUser)؛ السياديُّ خارجَ المضيف؛ PostgreSQL على
+  مقبسِ Unix فقط. تدفّقُ المفاتيح: تسجيلُ المفتاحِ العامِّ وحدَه في ‎fence.roster‎ بأمرٍ سياديّ ⇐ عندَ كلِّ إقلاعٍ الواصفُ 3 ⇐ المُقلِع
+  ⇐ مصافحةُ تحدٍّ ⇐ ختم. عندَ إقلاعِ المُشرِفِ يُلغى كلُّ اعتمادٍ ACTIVE يتيم (‏TH-SUP-05).
+- **خادمُ الصديق + Cloudflare (‏T3):** بيئةُ قياسٍ غيرُ موثوقة — VM مخصّصة، cloudflared صادرٌ فقط، تطبيقُ Access واحدٌ إلى SSH،
+  لا ingress لقاعدة، لا سرَّ إنتاجيّ؛ نتائجُها لا تغلقُ RISK ولا LIVE. **لم يُثبَّت ولم يُغيَّر شيء** (‏D-ENV-1).
+- **Windows 11 / TPM (‏T4):** أدواتُ القراءةِ قائمةٌ (‏`sim/tpm-host/README.md`) ومحروسة، **ولم تُشغَّل**؛ عدّادُ NV لمرساةِ الحداثةِ
+  وحدَها لا لمفتاحِ العامل (‏D-TPM-1). ممنوعٌ بلا إذنٍ منفصل: أيُّ أمرٍ يغيّرُ TPM أو BitLocker أو Windows Hello.
+- **مزوِّدٌ غيرُ قابلٍ للتصدير (‏T5):** `hardwareKeyProvider` واجهةٌ ترمي `FENCE_KEY_PROVIDER_UNAVAILABLE` — ليست تكاملاً. المرشّح:
+  رمزُ PKCS#11 مستقلٌّ عن جذرِ الثقةِ بـEdDSA؛ لا ادّعاءَ قبلَ قياسِ رفضِ التصديرِ والتوقيعِ وإعادةِ التشغيلِ والتدويرِ والفشل (‏D-KEY-1).
+- **scheduler وretention وserve-state (‏T6):** اليومَ مرفوضةٌ تحتَ السياج (‏`config/db-connection-map.yaml`) — إغلاقٌ لا حماية.
+  التصميم: كلٌّ عاملٌ في القائمةِ بمفتاحِه وعزلِ §9.2، بالترتيب retention ثمّ scheduler ثمّ serve-state (‏D-ROS-1).
+- **خطّةُ اختبار (‏T7):** مراقبٌ مستقلٌّ لدليلِ الآثار (‏LIVE-75 بند 14)، وNOTIFY تحتَ حمل، وقفزاتُ الساعة، وفقدُ الطاقة — الأخيرُ
+  **ممنوعٌ بلا إذنٍ صريح** (‏D-EVD-1).
+
+### 9.9 مصفوفةُ التهديدات (‏قابلةٌ للفحص)
+
+الحالات: MITIGATED_TESTED (‏منفَّذٌ ومقيسٌ بحدِّه في limit)، MITIGATED_DESIGN (‏مصمَّمٌ — ليس حماية)، PARTIAL، RESIDUAL، OWNER_DECISION.
+THR-01..08 يُفشلُ: حقلاً غائباً، دليلاً غيرَ موجودٍ أو معرّفاً غائباً عن ملفِّه، MITIGATED_TESTED بلا اختبار، فاعلاً من فئةِ root
+موسوماً PARTIAL أو أعلى، ادّعاءَ عتادٍ أو هويّةِ عملية، قرارَ مالكٍ غيرَ متّسق، مهمّةً ناقصة.
+
+```yaml
+version: 1
+phase: WL-533
+actors:
+  same_uid: عمليةٌ أخرى تعملُ بـUID العامل (خدمةٌ مشترِكة، شيفرةٌ مخترِقةٌ لحسابِ الخدمة، أداةٌ يشغّلُها المشغّل)
+  host_root: root أو أيُّ عمليةٍ بـCAP_SYS_PTRACE/CAP_DAC_OVERRIDE على المضيف
+  superuser: superuser في PostgreSQL أو مالكُ العنقود
+  worker_rce: شيفرةٌ تعملُ داخلَ عمليةِ العاملِ نفسِها
+  supervisor: عمليةُ المُشرِف (xf_root)
+  friend_root: مالكُ خادمِ الصديق (root عليه)
+  network: أيُّ طرفٍ على الإنترنت
+  local_admin: مديرُ Windows على جهازِ المالك
+  operator_error: خطأُ مشغّلٍ أو أداةٍ (لا خصم)
+threats:
+  # ── UID-05: حدودُ /proc وptrace والواصفاتِ والـUID المشترَك والتفريغ ──────────────────────
+  - id: TH-UID-01
+    actor: same_uid
+    asset: مفتاحُ العاملِ الخاصّ (ملفّ)
+    attack: قراءةُ ملفِّ المفتاح 0400 الذي يملكُه مستخدمُ العامل (LAB-UID-04/05 في WL-532)
+    control: الملفُّ ملكُ root 0400؛ المُشرِفُ يفتحُه ويمرّرُه واصفاً موروثاً (XUUX_FENCE_KEY_FD) ولا يقرؤه العاملُ من مسار
+    status: MITIGATED_TESTED
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-01, tests/execution/worker-isolation.test.mjs#ISO-44, scripts/fence-lab.mjs#LAB-UID-06]
+    limit: مسارُ الملفِّ (XUUX_FENCE_WORKER_KEY) باقٍ لتشغيلٍ لا يُعلِنُ العزل — مكشوفٌ كما قيسَ في LAB-UID-05؛ والتشغيلُ الذي يُعلِنُه يرفضُه (TH-UID-15). لا إلزامَ إنتاجيّاً
+  - id: TH-UID-02
+    actor: same_uid
+    asset: ذاكرةُ العاملِ وبيئتُه وخرائطُه
+    attack: قراءةُ /proc/<pid>/environ و maps و mem (والمفتاحُ في الذاكرة)
+    control: إسقاطُ الهويّةِ داخلَ العمليةِ بعدَ execve ⇒ dumpable=suid_dumpable ∈ {0,2} ⇒ ملفّاتُ /proc/<pid> ملكُ root؛ يُتحقَّقُ بعدَ الإسقاط (ownerOf /proc/self/environ = 0)
+    status: MITIGATED_TESTED
+    evidence:
+      [
+        tests/execution/worker-isolation.test.mjs#ISO-45,
+        tests/execution/worker-isolation.test.mjs#ISO-13,
+        scripts/fence-lab.mjs#LAB-UID-06,
+      ]
+    limit: /proc/<pid>/cmdline و status مقروءانِ للجميعِ دائماً — لذلك لا سرَّ في argv ولا env (المختبرُ يتحقّق)
+  - id: TH-UID-03
+    actor: same_uid
+    asset: ذاكرةُ العاملِ وتدفّقُ تنفيذِه
+    attack: PTRACE_ATTACH أو process_vm_readv (فحصُ PTRACE_MODE_ATTACH نفسُه)
+    control: العمليةُ غيرُ قابلةٍ للتفريغ ⇒ النواةُ ترفضُ ptrace بلا CAP_SYS_PTRACE في مجالِ المستخدم — لا يعتمدُ على Yama (المضيفُ المقيسُ بلا Yama)
+    status: MITIGATED_TESTED
+    evidence: [scripts/fence-lab.mjs#LAB-UID-06]
+    limit: root/CAP_SYS_PTRACE (TH-UID-11)
+  - id: TH-UID-04
+    actor: same_uid
+    asset: الواصفاتُ الموروثةُ والمفتوحة (واصفُ المفتاح، مقابسُ القاعدةِ المختومة)
+    attack: pidfd_getfd لنسخِ واصفِ مقبسٍ مختومٍ أو واصفِ المفتاح، أو قراءةُ /proc/<pid>/fd
+    control: واصفُ المفتاحِ يُغلَقُ فورَ القراءةِ وقبلَ الإسقاط؛ pidfd_getfd يتطلّبُ PTRACE_MODE_ATTACH ⇒ مرفوض؛ المختبرُ يتحقّقُ أنّ لا واصفَ في العاملِ يشيرُ إلى ملفِّ المفتاح
+    status: MITIGATED_TESTED
+    evidence:
+      [
+        tests/execution/worker-isolation.test.mjs#ISO-01,
+        tests/execution/worker-isolation.test.mjs#ISO-43,
+        scripts/fence-lab.mjs#LAB-UID-06,
+      ]
+    limit: المُقلِعُ يمسحُ الواصفاتِ 0..4095 بحثاً عن نسخةٍ من الملفِّ نفسِه (dev/ino) ويرفض؛ وابنٌ حقيقيٌّ لا يرثُه (ISO-43). نسخةٌ لا تُرى بـfstat (مقبسٌ يحملُ المحتوى) لا يكشفُها المسح
+  - id: TH-UID-05
+    actor: same_uid
+    asset: المفتاحُ في تفريغِ الانهيار (core dump)
+    attack: إسقاطُ العاملِ بإشارةٍ ثمّ قراءةُ ملفِّ core يملكُه مستخدمُ العامل
+    control: الإقلاعُ يرفضُ fs.suid_dumpable=1؛ مع 0 لا تفريغ، ومع 2 يكتبُه النواةُ لـroot وحدَه
+    status: PARTIAL
+    evidence:
+      [tests/execution/worker-isolation.test.mjs#ISO-08]
+    limit: لم يُسبَّب انهيارٌ حقيقيٌّ ولم يُفحَص core_pattern أو systemd-coredump على مضيفِ إنتاج (لا مضيفَ إنتاج)
+  - id: TH-UID-06
+    actor: same_uid
+    asset: سبقُ العاملِ إلى الختم
+    attack: الدخولُ بدورِ الإقلاعِ (peer، بلا سرّ) قبلَ ختمِ العامل، أو الختمُ بمفتاحٍ آخر
+    control: بلا المفتاحِ لا يُصنَعُ توقيعُ ختمٍ صالح؛ دخيلٌ حاضرٌ عندَ الختمِ يُفشِلُه ويُلغى الاعتمادُ وتُنهى جلساتُه (XF011)
+    status: PARTIAL
+    evidence: [scripts/fence-lab.mjs#LAB-UID-02, scripts/fence-lab.mjs#LAB-UID-06]
+    limit: يبقى هجومَ توفّر — المهاجمُ يُفشلُ الإقلاعَ ولا يكتب. الإغلاقُ التامُّ يحتاجُ UID مخصّصاً لكلِّ إقلاعٍ لا يشاركُه أحد (D-SUP-2)
+    decision: D-SUP-2
+  - id: TH-UID-07
+    actor: same_uid
+    asset: توفّرُ العامل
+    attack: kill -9 أو SIGSTOP للعاملِ (الإشاراتُ مسموحةٌ بينَ الـUID نفسِه بعدَ setuid)
+    control: لا ضابط — المُشرِفُ يرى الخروجَ ويُلغي الاعتماد
+    status: RESIDUAL
+    evidence: []
+    limit: توفّرٌ لا سلامة
+  - id: TH-UID-08
+    actor: same_uid
+    asset: شيفرةُ العامل (src/، node_modules) وبيئتُه (NODE_OPTIONS، LD_PRELOAD)
+    attack: تعديلُ ملفّاتٍ يحمّلُها العاملُ وهو root، أو حقنُ متغيّراتٍ في بيئةِ الإطلاق
+    control: لا شيفرةَ تطبيقٍ بصلاحيّةِ root — نقطةُ الدخولِ تستوردُ node فقط وتُحمِّلُ التطبيقَ ديناميكيّاً بعدَ الإسقاطِ والتحقّق (ISO-40/41)؛ المُطلِقُ يبني البيئةَ من قائمةِ سماحٍ صريحة (env -i) ويرفضُ تمريرَ NODE_* وLD_* وDYLD_*؛ المُقلِعُ يرفضُ وجودَها ووسائطَ execArgv
+    status: PARTIAL
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-40, tests/execution/worker-isolation.test.mjs#ISO-41, tests/execution/worker-isolation.test.mjs#ISO-42, tests/execution/worker-isolation.test.mjs#ISO-04, tests/execution/worker-isolation.test.mjs#ISO-15]
+    limit: NODE_OPTIONS ومثلُها تُنفَّذُ قبلَ أوّلِ سطرٍ من المُقلِع — إطلاقٌ يتجاوزُ المُطلِقَ يُشغِّلُ الحِمْلَ بـroot (مقيسٌ في ISO-42)؛ المُقلِعُ يكشفُ ويرفضُ ولا يمنع. ونقطةُ الدخولِ وnode وsh وsetpriv تعملُ بـroot منقوصِ القدرات قبلَ الإسقاط، فسلامةُ ملفّاتِها (ملكُ root وغيرُ قابلةٍ للكتابة) شرطٌ على المضيف لم يُفحَص قبلَ الإطلاق
+  - id: TH-UID-09
+    actor: same_uid
+    asset: فصلُ حسابِ الخدمة
+    attack: حسابُ العاملِ مشترَكٌ مع خدمةٍ أخرى أو قابلٌ للدخولِ التفاعليّ (shell، sudo، cron)
+    control: حسابٌ مخصّصٌ لكلِّ عامل nologin بلا home قابلٍ للكتابةِ ولا sudo ولا cron — مصمَّم؛ أو DynamicUser في systemd (D-SUP-2)
+    status: OWNER_DECISION
+    evidence: [docs/THREAT_MODEL.md]
+    limit: يحدّدُه مضيفُ الإنتاج، وهو غيرُ موجود
+    decision: D-SUP-2
+  - id: TH-UID-10
+    actor: worker_rce
+    asset: مفتاحُ العاملِ في ذاكرته
+    attack: شيفرةٌ داخلَ العاملِ تقرأُ المفتاحَ أو تختمُ وتكتبُ بنفسِها
+    control: لا ضابطَ داخلَ العملية — مزوِّدٌ غيرُ قابلٍ للتصدير (D-KEY-1) يحوّلُ السرقةَ إلى «منفذِ توقيعٍ أثناءَ الاختراق»
+    status: RESIDUAL
+    evidence: []
+    limit: لا يُثبتُ أيُّ ختمٍ سلامةَ الشيفرةِ التي تحملُ المفتاح
+    decision: D-KEY-1
+  - id: TH-UID-11
+    actor: host_root
+    asset: كلُّ ما سبق
+    attack: root يقرأُ الذاكرةَ أو يستبدلُ الثنائيّات أو يسرقُ ملفَّ المفتاحِ ملكَ root
+    control: لا ضابط — العزلُ آليّةُ نواةٍ تحتَ root لا فوقَه
+    status: RESIDUAL
+    evidence: []
+    limit: لا ادّعاءَ حمايةٍ من root؛ ولا إثباتَ لهويّةِ العمليةِ أمامَه
+  - id: TH-UID-12
+    actor: superuser
+    asset: جداولُ الدولةِ والسياج
+    attack: superuser يتجاوزُ guard_write (BREAK_GLASS)
+    control: لا ضابط — خارجَ السياجِ بالتعريف (LIVE-75 بند 1)
+    status: RESIDUAL
+    evidence: [config/db-connection-map.yaml]
+    limit: Event Triggers لا تحمي من superuser
+  - id: TH-UID-13
+    actor: same_uid
+    asset: الصلاحيّاتُ بعدَ الإسقاط
+    attack: execve لبرنامجِ setuid أو ذي قدراتٍ ملفّيّةٍ بعدَ الإسقاطِ لاستعادةِ root أو قدرة، أو إطلاقٌ بحدِّ قدراتٍ كامل
+    control: المُطلِقُ يضبطُ no_new_privs وحدَّ القدرات {setuid,setgid} (setpriv)؛ المُقلِعُ يرفضُ قبلَ قراءةِ الواصفِ إن لم يكن NoNewPrivs=1 وCapBnd ⊆ 0xc0، ويتحقّقُ بعدَ الإسقاطِ أنّ CapInh وCapPrm وCapEff وCapAmb صفرٌ وCapBnd ⊆ 0xc0 وNoNewPrivs=1 وsetuid(0) مرفوض
+    status: MITIGATED_TESTED
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-07, tests/execution/worker-isolation.test.mjs#ISO-13, tests/execution/worker-isolation.test.mjs#ISO-43, scripts/fence-lab.mjs#LAB-UID-06]
+    limit: الادّعاءُ هذه الحقولُ بالضبط — لا «كلُّ القدرات». CapBnd يبقى 0xc0 (setuid وsetgid في الحدِّ لا في المسموح)؛ وno_new_privs لا يمنعُ ما لا يمرُّ بـexecve
+  - id: TH-UID-14
+    actor: same_uid
+    asset: مصدرُ المفتاحِ على الواصف
+    attack: واصفٌ يشيرُ إلى أنبوبٍ أو مقبسٍ يتحكّمُ فيه مهاجم، أو إلى ملفٍّ يملكُه غيرُ root أو يقرؤه غيرُ مالكِه
+    control: عقدُ الواصفِ قبلَ القراءة — ملفٌّ عاديٌّ، مالكُه 0، بلا بِتّاتِ group/other، يقرؤه مالكُه، 0 < الحجم ≤ 16384؛ ثمّ مفتاحُ Ed25519 خاصّ — وإلّا KEY_FD ويُغلَقُ الواصفُ ولا يُسقَطُ شيء
+    status: MITIGATED_TESTED
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-09, tests/execution/worker-isolation.test.mjs#ISO-10, tests/execution/worker-isolation.test.mjs#ISO-12, tests/execution/worker-isolation.test.mjs#ISO-44]
+    limit: العقدُ يفحصُ الملفَّ المفتوحَ لا مَن فتحَه؛ ملفٌّ ملكُ root بمحتوًى خاطئٍ صالحِ البنيةِ يُكشَفُ عندَ المصافحة (مفتاحٌ غيرُ مسجَّل) لا هنا
+  - id: TH-UID-15
+    actor: operator_error
+    asset: إلزاميّةُ العزل
+    attack: تشغيلٌ يُعلِنُ العزلَ إلزاميّاً يتراجعُ صامتاً إلى مسارِ ملفِّ المفتاحِ القديم أو يعملُ بلا عزلٍ لغيابِ إعداد
+    control: XUUX_FENCE_ISOLATION=required يفشلُ مغلقاً عندَ غيابِ الواصفِ أو UID أو GID أو XUUX_DB_FENCE=required، ومع XUUX_FENCE_WORKER_KEY؛ وأيُّ متغيّرِ عزلٍ بلا الوضعِ خطأُ إعداد؛ وprepareFencedWorker يرفضُ الوضعَ بلا مفتاحٍ معزول
+    status: MITIGATED_TESTED
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-03, tests/execution/worker-isolation.test.mjs#ISO-14, tests/execution/worker-isolation.test.mjs#ISO-21]
+    limit: تشغيلٌ لا يُعلِنُ الوضعَ يبقى بمسارِ الملفّ — الإلزامُ الإنتاجيُّ قرارُ المُشرِف (D-SUP-1) لا هذا الفرع
+    decision: D-SUP-1
+  # ── المُشرِفُ الإنتاجيّ ───────────────────────────────────────────────────────────────
+  - id: TH-SUP-01
+    actor: supervisor
+    asset: الفصلُ بينَ xf_root والعاملِ والسياديّ
+    attack: المُشرِفُ (أو مخترِقُه) يكتبُ في جداولِ الدولة، أو يُصدِرُ اعتماداً لنفسِه، أو يستأنف
+    control: xf_root لا يكتبُ جداولَ الدولة (FENCE_CONTROL)؛ الاعتمادُ لا يُصدَرُ بلا توقيعِ العامل (T-CRED-07)؛ RESUME يتطلّبُ توقيعَ السياديِّ ودليلَ الآثار
+    status: PARTIAL
+    evidence: [tests/fence/db-fence.test.mjs, tests/fence/fence-lifecycle.test.mjs]
+    limit: المُشرِفُ يستطيعُ الإيقافَ والإلغاءَ (توفّر)، ويقيسُ دليلَ الآثارِ بنفسِه (LIVE-75 بند 14)؛ ولا مُشرِفَ إنتاجيّاً منفَّذاً
+    decision: D-SUP-1
+  - id: TH-SUP-02
+    actor: supervisor
+    asset: مفتاحُ العامل
+    attack: المُشرِفُ يقرأُ المفتاحَ الذي يمرّرُه
+    control: المطلِقُ (root، وحدةُ systemd) هو من يفتحُ الملف؛ المُشرِفُ (xf_root) بـUID آخرَ لا يقرؤه ويتكلّمُ مع العاملِ بـIPC فقط — مصمَّم
+    status: MITIGATED_DESIGN
+    evidence: [docs/THREAT_MODEL.md]
+    limit: في المختبرِ المطلِقُ والمُشرِفُ عمليةٌ واحدة
+    decision: D-SUP-1
+  - id: TH-SUP-03
+    actor: network
+    asset: PostgreSQL
+    attack: الوصولُ إلى المنفذِ من الإنترنت
+    control: listen_addresses على مقبسِ Unix (أو loopback)؛ pg_hba بـpeer للعمّال وشهادةٍ لـxf_root؛ لا نفقَ ولا منفذَ عامّ لـ5432
+    status: MITIGATED_DESIGN
+    evidence: [docs/THREAT_MODEL.md]
+    limit: لا مضيفَ إنتاجيّاً مُعدّاً
+    decision: D-ENV-1
+  - id: TH-SUP-04
+    actor: friend_root
+    asset: مفتاحُ السياديّ ومفاتيحُ الإنتاجِ وxf_root
+    attack: وجودُ أيِّ سرٍّ إنتاجيٍّ على خادمٍ يملكُ غيرُ المالكِ root فيه
+    control: سياسةٌ — لا سرَّ إنتاجيَّ ولا xf_root ولا مفتاحَ سياديٍّ على خادمِ الصديق؛ مفاتيحُ مولَّدةٌ للاختبارِ تُتلَفُ بعده
+    status: MITIGATED_DESIGN
+    evidence: [docs/THREAT_MODEL.md]
+    limit: سياسةٌ لا آليّة — friend_root يملكُ كلَّ ما يوضعُ هناك
+  - id: TH-SUP-05
+    actor: operator_error
+    asset: اعتماداتٌ يتيمة
+    attack: انهيارُ المُشرِفِ أو إعادةُ تشغيلِه والعمّالُ أحياء
+    control: عندَ إقلاعِ المُشرِف يُلغي كلَّ اعتمادٍ ACTIVE لم يُصدِره هو، ثمّ يُطلقُ إقلاعاتٍ جديدة — مصمَّم
+    status: MITIGATED_DESIGN
+    evidence: [docs/THREAT_MODEL.md]
+    limit: غيرُ منفَّذ
+  # ── خادمُ الصديق + Cloudflare ─────────────────────────────────────────────────────────
+  - id: TH-ENV-01
+    actor: network
+    asset: بيئةُ الاختبارِ على خادمِ الصديق
+    attack: نفقُ Cloudflare يعرضُ خدمةً أوسعَ من المقصود
+    control: cloudflared صادرٌ فقط؛ تطبيقُ Access واحدٌ بسياسةِ هويّةِ المالكِ (أو service token محدودِ الأجل) إلى وجهةٍ واحدة (SSH للمشغّلِ المعزول)؛ لا ingress لقاعدةٍ ولا لوحة
+    status: OWNER_DECISION
+    evidence: [docs/THREAT_MODEL.md]
+    limit: لم يُثبَّت شيءٌ ولم يُغيَّر إعداد — يتطلّبُ إذنَ المالكِ والصديق
+    decision: D-ENV-1
+  - id: TH-ENV-02
+    actor: friend_root
+    asset: صدقُ نتائجِ القياس
+    attack: مالكُ المضيفِ يزوّرُ ناتجَ اختبارِ الطاقةِ أو الساعةِ أو NOTIFY
+    control: الناتجُ «غيرُ موثوقِ المصدر» بالتعريف — يُعادُ في بيئةٍ ثانيةٍ ويُقارَن؛ لا يُحتسَبُ دليلاً سياديّاً ولا يغلقُ RISK أو LIVE
+    status: RESIDUAL
+    evidence: []
+    limit: الثقةُ بالقياسِ لا تتجاوزُ الثقةَ بمالكِ المضيف
+  - id: TH-ENV-03
+    actor: friend_root
+    asset: شبكةُ الصديقِ ومضيفُه
+    attack: مشغّلٌ مخترَقٌ ينتقلُ إلى شبكةِ الصديق
+    control: VM أو حاويةٌ بلا امتياز، بخروجٍ مقيَّدٍ بقائمة (GitHub، npm، Cloudflare)، بلا وصولٍ إلى LAN — يتطلّبُ قرارَ الصديقِ والمالك
+    status: OWNER_DECISION
+    evidence: [docs/THREAT_MODEL.md]
+    limit: لا يُعدُّ قبلَ موافقةٍ صريحة
+    decision: D-ENV-1
+  # ── Windows 11 / TPM ──────────────────────────────────────────────────────────────────
+  - id: TH-TPM-01
+    actor: operator_error
+    asset: حالةُ TPM وBitLocker وWindows Hello
+    attack: أداةُ «قراءة» ترسلُ أمراً يغيّرُ الحالة
+    control: أدواتُ sim/tpm-host حارسُها TpmGuard (GetCapability وNV_ReadPublic بشكلَين ثابتَين فقط) ومحروسةٌ باختبارٍ نصّيٍّ وعلى swtpm
+    status: MITIGATED_TESTED
+    evidence: [tests/sim/tpm-host-guard.test.mjs, tests/sim/win11-qualification.test.mjs]
+    limit: لم تُشغَّل على جهازِ المالك؛ فحوصُ pwsh تُتخطّى حيثُ لا pwsh
+    decision: D-TPM-1
+  - id: TH-TPM-02
+    actor: operator_error
+    asset: الفصلُ بينَ مرساةِ الحداثة ومفتاحِ العامل
+    attack: الخلطُ بينَ عدّادِ NV (‏R3-A-01/EXT-6) ومفتاحِ توقيعٍ للعامل
+    control: مساران منفصلان — عدّادُ NV لـADR 0007 وحدَه؛ مفتاحُ العاملِ مزوِّدٌ مستقلّ (D-KEY-1)؛ الاختبارُ يرفضُ ادّعاءَ مفتاحِ عاملٍ من NV
+    status: MITIGATED_DESIGN
+    evidence: [docs/THREAT_MODEL.md]
+    limit: تصميمٌ لا قياس
+  - id: TH-TPM-03
+    actor: local_admin
+    asset: عدّادُ NV
+    attack: مديرُ Windows يحذفُ الفهرسَ أو يمسحُ TPM
+    control: ADR 0007 الملحق و §7 (T1/T2) — الفشلُ مغلقٌ وتثبيتُ nvIndexName
+    status: RESIDUAL
+    evidence: [docs/adr/0007-annex-f-windows11-tbs-qualification.md]
+    limit: قيدُ مضيفٍ مشترَك
+  # ── مزوِّدُ مفتاحِ العامل ─────────────────────────────────────────────────────────────
+  - id: TH-KEY-01
+    actor: host_root
+    asset: مفتاحُ العاملِ القابلُ للتصدير
+    attack: نسخُ المفتاحِ واستعمالُه من مضيفٍ آخرَ بعدَ زوالِ الاختراق
+    control: مزوِّدٌ غيرُ قابلٍ للتصدير (PKCS#11 بـCKA_EXTRACTABLE=false وCKA_SENSITIVE=true، أو مفتاحُ TPM غيرُ مكرَّر) — لم يُنفَّذ ولم يُقَس؛ hardwareKeyProvider واجهةٌ غيرُ متاحة
+    status: OWNER_DECISION
+    evidence: [src/fence/db-fence.mjs]
+    limit: لا ادّعاءَ «مدعومٍ بالعتاد» قبلَ قياسِ توقيعٍ وإعادةِ تشغيلٍ وتدويرٍ وفشلٍ على مفتاحٍ حقيقيّ
+    decision: D-KEY-1
+  # ── المجدولُ والاحتفاظُ وserve-state ─────────────────────────────────────────────────
+  - id: TH-ROS-01
+    actor: operator_error
+    asset: كتّابٌ خارجَ السياج (scheduler، retention، serve-state)
+    attack: تعطيلُها تحتَ السياج (DEFAULT_DENY) يدفعُ المشغّلَ إلى superuser أو إلى إطفاءِ السياج
+    control: كلٌّ منها عاملٌ في القائمةِ بامتيازٍ ضيّقٍ ومفتاحِه ودورِ إقلاعِه — مصمَّم؛ DEFAULT_DENY إغلاقٌ لا حماية
+    status: MITIGATED_DESIGN
+    evidence:
+      [config/db-connection-map.yaml, docs/THREAT_MODEL.md]
+    limit: غيرُ منفَّذ؛ اختباراتُ البدءِ والإيقافِ والتعافي لكلٍّ منها مخطَّطة
+    decision: D-ROS-1
+  # ── دليلُ الآثار وNOTIFY والساعةُ والطاقة ───────────────────────────────────────────
+  - id: TH-EVD-01
+    actor: supervisor
+    asset: صدقُ دليلِ الآثار
+    attack: xf_root (الطرفُ المُوقِف) يقيسُ «لا آثار» ويسجّلُه
+    control: مصدرُ قياسٍ مستقلّ (عمليةٌ بـUID آخرَ تقرأُ cgroup وpg_stat_activity وpg_locks وتوقّعُ بمفتاحِها) — مصمَّم
+    status: MITIGATED_DESIGN
+    evidence: [docs/THREAT_MODEL.md]
+    limit: LIVE-75 بند 14 يبقى مفتوحاً
+    decision: D-EVD-1
+  - id: TH-EVD-02
+    actor: operator_error
+    asset: NOTIFY والساعةُ وفقدُ الطاقة
+    attack: نوافذُ غيرُ مقيسة (الهجمات 16 و24 و25 في WL-532)
+    control: خطّةُ اختبارٍ على بيئةٍ مخصّصة — لم تُشغَّل
+    status: OWNER_DECISION
+    evidence: [docs/THREAT_MODEL.md]
+    limit: قطعُ الطاقةِ الحقيقيُّ ممنوعٌ بلا إذنٍ صريح (LIVE-39)
+    decision: D-EVD-1
+owner_decisions:
+  - id: D-SUP-1
+    question: أين يعملُ المُشرِفُ الإنتاجيّ وبأيِّ فصلٍ بينَ المطلِق (root) والمُشرِف (xf_root)؟
+    why: لا مُشرِفَ إنتاجيّاً؛ العزلُ يتطلّبُ أن يبدأَ العاملُ بـroot، والمُشرِفُ يجبُ ألّا يقرأَ المفتاح
+    options:
+      [
+        وحدةُ systemd للمطلِق + مُشرِفٌ بـUID مخصّص (موصى),
+        المُشرِفُ نفسُه root (أبسط، يضمُّ المفتاحَ وxf_root في عمليةٍ واحدة),
+      ]
+    blocks: [TH-SUP-01, TH-SUP-02]
+  - id: D-SUP-2
+    question: حسابٌ ثابتٌ مخصّصٌ لكلِّ عامل، أم UID ديناميكيٌّ لكلِّ إقلاع (DynamicUser)؟
+    why: الـUID المشترَكُ يبقي هجومَ التوفّرِ قبلَ الختم (TH-UID-06)
+    options:
+      [
+        حسابٌ ثابتٌ nologin لكلِّ عامل + pg_ident بالاسم (أبسط),
+        DynamicUser لكلِّ إقلاع + pg_ident بالنمط (أقوى، أعقدُ تشغيلاً),
+      ]
+    blocks: [TH-UID-06, TH-UID-09]
+  - id: D-ENV-1
+    question: هل يُسمحُ ببيئةِ اختبارٍ معزولةٍ على خادمِ الصديقِ عبرَ Cloudflare Tunnel/Access، وبأيِّ هويّةٍ ووجهة؟
+    why: اختبارُ الطاقةِ والساعةِ وNOTIFY يحتاجُ مضيفاً مخصّصاً؛ لا سرَّ إنتاجيَّ عليه
+    options:
+      [
+        VM مخصّصةٌ + نفقٌ صادرٌ + Access بهويّةِ المالك (موصى),
+        حاويةٌ بلا امتياز على المضيف,
+        لا بيئةَ خارجيّة (تبقى 16/24/25 غيرَ مقيسة),
+      ]
+    blocks: [TH-SUP-03, TH-ENV-01, TH-ENV-03]
+  - id: D-TPM-1
+    question: هل يشغّلُ المالكُ أدواتِ القراءةِ (W-R0..W-R5) على Windows 11 ويرفعُ ملفّاتِ JSON الخامّ؟
+    why: لا جردَ حديثاً للجهاز؛ كلُّ ما بعدَه (W-P1، S1، H0–H9) يتطلّبُ إذناً منفصلاً بعدَ عرضِ الجرد
+    options: [تشغيلُ W-R0..W-R5 كما في sim/tpm-host/README.md (قراءةٌ فقط), تأجيل]
+    blocks: [TH-TPM-01]
+  - id: D-KEY-1
+    question: أيُّ مزوِّدٍ غيرِ قابلٍ للتصديرِ لمفتاحِ العامل؟
+    why: المفتاحُ اليومَ ملفٌّ برمجيّ؛ العزلُ لا يحميه من root ولا من اختراقِ العامل
+    options:
+      [
+        رمزُ PKCS#11 مستقلٌّ عن جذرِ الثقة (YubiHSM/Nitrokey/SmartCard-HSM),
+        مفتاحُ TPM 2.0 غيرُ مكرَّرٍ على مضيفِ الإنتاج (Linux tpm2-pkcs11),
+        إبقاءُ الملفِّ مع العزلِ وقبولُ الخطرِ كتابةً,
+      ]
+    blocks: [TH-UID-10, TH-KEY-01]
+  - id: D-ROS-1
+    question: هل يُعتمَدُ تحويلُ scheduler وretention وserve-state إلى عمّالٍ مُسيَّجين بالترتيبِ المقترَح؟
+    why: هي اليومَ DEFAULT_DENY — مغلقةٌ ومعطَّلةٌ تحتَ السياج
+    options: [retention ثمّ scheduler ثمّ serve-state (موصى), الثلاثةُ معاً]
+    blocks: [TH-ROS-01]
+  - id: D-EVD-1
+    question: مصدرُ قياسٍ مستقلٌّ لدليلِ الآثار، وإذنُ اختبارِ NOTIFY والساعةِ والطاقةِ على بيئةٍ مخصّصة؟
+    why: الدليلُ اليومَ يقيسُه الطرفُ المُوقِف؛ و16/24/25 غيرُ مقيسة
+    options: [مراقبٌ بـUID مستقلّ + بيئةُ D-ENV-1, مراقبٌ فقط بلا اختبارِ طاقة]
+    blocks: [TH-EVD-01, TH-EVD-02]
+owner_tasks:
+  - id: T1
+    title: UID-05 — تحليلُ الفجوةِ وتصميمُ منعِ القراءةِ والسبق
+    state: IMPLEMENTED_LAB
+    threats:
+      [
+        TH-UID-01,
+        TH-UID-02,
+        TH-UID-03,
+        TH-UID-04,
+        TH-UID-05,
+        TH-UID-06,
+        TH-UID-07,
+        TH-UID-08,
+        TH-UID-09,
+        TH-UID-10,
+        TH-UID-11,
+        TH-UID-13,
+        TH-UID-14,
+        TH-UID-15,
+      ]
+  - id: T2
+    title: نموذجُ تهديدِ المُشرِفِ ومخطّطُ الصلاحياتِ وتدفّقُ المفاتيح
+    state: DESIGNED
+    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12]
+  - id: T3
+    title: بيئةُ اختبارٍ معزولةٌ على خادمِ الصديقِ عبرَ Cloudflare
+    state: DESIGNED_NEEDS_APPROVAL
+    threats: [TH-SUP-04, TH-ENV-01, TH-ENV-02, TH-ENV-03]
+  - id: T4
+    title: مراجعةُ ADR 0007 وفحصُ TPM للقراءةِ فقط على Windows 11
+    state: TOOLS_EXIST_NEEDS_OWNER_RUN
+    threats: [TH-TPM-01, TH-TPM-02, TH-TPM-03]
+  - id: T5
+    title: ربطُ مفتاحِ العاملِ بمزوِّدٍ غيرِ قابلٍ للتصدير
+    state: STUDIED_NEEDS_HARDWARE
+    threats: [TH-KEY-01, TH-UID-10]
+  - id: T6
+    title: المجدولُ والاحتفاظُ وserve-state عمّالاً مستقلّين
+    state: DESIGNED
+    threats: [TH-ROS-01]
+  - id: T7
+    title: خطّةُ اختبارٍ مستقلّةٌ لدليلِ الآثارِ وNOTIFY والساعةِ والطاقة
+    state: DESIGNED_NEEDS_APPROVAL
+    threats: [TH-EVD-01, TH-EVD-02]
+```
