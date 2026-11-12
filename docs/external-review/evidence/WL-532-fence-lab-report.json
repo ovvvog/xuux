@@ -1,7 +1,7 @@
 {
   "schema": "xuux/fence-lab-report/v1",
   "work_log": "WL-532",
-  "generated_at": "2026-11-11T21:42:14.409Z",
+  "generated_at": "2026-11-12T00:16:35.043Z",
   "environment": {
     "pg_bin": "/usr/lib/postgresql/18/bin",
     "pg_version": "postgres (PostgreSQL) 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1)",
@@ -11,8 +11,10 @@
     "os_user": "user",
     "sudo": true,
     "cgroup_parent": "/sys/fs/cgroup/space.slice/space-workloads.service/workloads/xuux-fence",
-    "git_head": "092c011ac1bc8a5e185094e0e5745e194275c28b",
-    "git_dirty": false
+    "git_head": "535a4d411420bba016d8bc4d026774f22b5fc2c9",
+    "git_dirty": false,
+    "tree_sha256": "f66e31b9f3e1366ed1e67cbdf952a5a78b1d264194e04d4bbee9df51365088e0",
+    "tree_files": 913
   },
   "declared_limits": [
     "مفاتيحُ اختبارٍ مولَّدةٌ في الذاكرة — لا مفتاحَ مالكٍ ولا HSM/TPM (hardwareBacked=false)",
@@ -23,7 +25,7 @@
   ],
   "summary": {
     "checks": {
-      "PASS": 13,
+      "PASS": 24,
       "FAIL": 0,
       "PARTIAL": 0,
       "NOT RUN": 0
@@ -35,7 +37,7 @@
       "NOT RUN": 1
     },
     "tests": {
-      "PASS": 42,
+      "PASS": 73,
       "FAIL": 0,
       "PARTIAL": 0,
       "NOT RUN": 0
@@ -46,7 +48,15 @@
       "id": "LAB-ENV-01",
       "title": "عنقودٌ مؤقّتٌ جديدٌ من initdb (لا ملفّاتٍ قديمة)",
       "status": "PASS",
-      "port": 34647
+      "port": 41383
+    },
+    {
+      "id": "LAB-ENV-02",
+      "title": "الشجرةُ نظيفةٌ: الرأسُ المختبَرُ هو الملتزَم (git_head + tree_sha256)",
+      "status": "PASS",
+      "git_head": "535a4d411420bba016d8bc4d026774f22b5fc2c9",
+      "tree_sha256": "f66e31b9f3e1366ed1e67cbdf952a5a78b1d264194e04d4bbee9df51365088e0",
+      "git_dirty": false
     },
     {
       "id": "LAB-SUITE-db-fence",
@@ -54,8 +64,19 @@
       "status": "PASS",
       "exit": 0,
       "tests": 21,
+      "tap_tests": 21,
       "log": "db-fence.test.mjs.tap",
-      "log_sha256": "267f0f6175a412ae2d5fd2776c724f19a8014827fcd8776b12cfad12ff556a37"
+      "log_sha256": "3194dfab6d946d69bd92831e3d2fc9d6ef686acd03f52245a6e94c0efe4a0404"
+    },
+    {
+      "id": "LAB-SUITE-fence-lifecycle",
+      "title": "تشغيلُ tests/fence/fence-lifecycle.test.mjs",
+      "status": "PASS",
+      "exit": 0,
+      "tests": 19,
+      "tap_tests": 19,
+      "log": "fence-lifecycle.test.mjs.tap",
+      "log_sha256": "53f11f4494315eb18684d603af4ffa50fcb9da500f8860474f556f7895d6e9c6"
     },
     {
       "id": "LAB-SUITE-halt-integrity",
@@ -63,8 +84,9 @@
       "status": "PASS",
       "exit": 0,
       "tests": 15,
+      "tap_tests": 15,
       "log": "halt-integrity.test.mjs.tap",
-      "log_sha256": "f14680d0762646f0d0d5e01235deb937bd1ac9fbb37a15fea850d09574979d13"
+      "log_sha256": "a047e76c438033de061b91e8b4ad9d726aabbeb0d17384f4469049307e4e8127"
     },
     {
       "id": "LAB-SUITE-effects",
@@ -72,50 +94,98 @@
       "status": "PASS",
       "exit": 0,
       "tests": 6,
+      "tap_tests": 6,
       "log": "effects.test.mjs.tap",
-      "log_sha256": "8a207aec581a92dda99f2a39361c70fb2eb578777dad867d2f46a5896dee6b35"
+      "log_sha256": "0f91aa8e42982a0c2bc240a57de934875be6615cc4e6d49364b184daa056423d"
+    },
+    {
+      "id": "LAB-SUITE-connection-map",
+      "title": "تشغيلُ tests/fence/connection-map.test.mjs",
+      "status": "PASS",
+      "exit": 0,
+      "tests": 4,
+      "tap_tests": 4,
+      "log": "connection-map.test.mjs.tap",
+      "log_sha256": "c4ff8742438247c920f410ba201e46ad1b4f60b85b263afb3ce4f7a4757faaa5"
+    },
+    {
+      "id": "LAB-SUITE-ed25519",
+      "title": "تشغيلُ tests/fence/ed25519.test.mjs",
+      "status": "PASS",
+      "exit": 0,
+      "tests": 8,
+      "tap_tests": 8,
+      "log": "ed25519.test.mjs.tap",
+      "log_sha256": "adaa482e114ffa9b7d85fe7b7d38159a81b144bc50ef87b221f75f09d43ea593"
     },
     {
       "id": "LAB-AUTH-01",
       "title": "بعدَ التشديد: TCP مرفوضٌ حتى لـpostgres؛ الدخولُ بالمقبسِ وpeer فقط",
       "status": "PASS",
-      "stderr": "psql: error: connection to server at \"127.0.0.1\", port 34647 failed: FATAL:  pg_hba.conf rejects connection for host \"127.0.0.1\", user \"postgres\", database \"lab\", no encryption"
+      "stderr": "psql: error: connection to server at \"127.0.0.1\", port 41383 failed: FATAL:  pg_hba.conf rejects connection for host \"127.0.0.1\", user \"postgres\", database \"lab\", no encryption"
+    },
+    {
+      "id": "LAB-APP",
+      "title": "نسخةُ تطبيقِ العاملِ ومفاتيحُه (0400 لمستخدمِ كلِّ عامل)",
+      "status": "PASS",
+      "packages": [
+        "pg",
+        "pg-connection-string",
+        "pg-int8",
+        "pg-pool",
+        "pg-protocol",
+        "pg-types",
+        "pgpass",
+        "postgres-array",
+        "postgres-bytea",
+        "postgres-date",
+        "postgres-interval",
+        "split2",
+        "xtend"
+      ]
     },
     {
       "id": "LAB-CRED-05a",
-      "title": "T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه ويكتب",
+      "title": "T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه — لكنّ جلسةً غيرَ مختومةٍ لا تكتب (XF011)",
       "status": "PASS",
       "whoami": {
-        "now": "2026-11-11T21:42:00.701159+00:00",
-        "epoch": 2,
+        "now": "2026-11-12T00:16:17.359198+00:00",
+        "epoch": 3,
         "known": true,
         "state": "RUNNING",
-        "boot_id": "4e1d7d85feb7b56fc62818aaec63b18f",
+        "sealed": false,
+        "boot_id": "f106e277cebe7e40be3fd6197c4ef0ae",
+        "session": {
+          "pid": 23656,
+          "start": "1794442577353326"
+        },
         "worker_id": "alpha",
-        "session_user": "xw_alpha_4e1d7d85feb7b56f",
+        "session_user": "xw_alpha_f106e277cebe7e40",
         "roster_version": 1,
-        "credential_epoch": 2,
-        "lease_expires_at": "2026-11-11T21:42:30.682998+00:00",
+        "session_sealed": false,
+        "credential_epoch": 3,
+        "lease_expires_at": "2026-11-12T00:16:47.225083+00:00",
         "credential_status": "ACTIVE"
-      }
+      },
+      "unsealed_write": "ERROR:  fence: الجلسة 23660 ليست ضمنَ الجلساتِ المختومةِ للاعتماد xw_alpha_f106e277cebe7e40"
     },
     {
       "id": "LAB-CRED-05b",
       "title": "T-CRED-05: مستخدمُ نظامِ beta لا يستعملُ اعتمادَ alpha (الهجوم 2)",
       "status": "PASS",
-      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-DQr5yc/sock/.s.PGSQL.34647\" failed: FATAL:  Peer authentication failed for user \"xw_alpha_4e1d7d85feb7b56f\""
+      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-OxxTp7/sock/.s.PGSQL.41383\" failed: FATAL:  Peer authentication failed for user \"xw_alpha_f106e277cebe7e40\""
     },
     {
       "id": "LAB-CRED-05c",
       "title": "T-CRED-05: مستخدمُ المختبرِ نفسُه (مالكُ العنقود) لا يدخلُ بدورِ alpha",
       "status": "PASS",
-      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-DQr5yc/sock/.s.PGSQL.34647\" failed: FATAL:  Peer authentication failed for user \"xw_alpha_4e1d7d85feb7b56f\""
+      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-OxxTp7/sock/.s.PGSQL.41383\" failed: FATAL:  Peer authentication failed for user \"xw_alpha_f106e277cebe7e40\""
     },
     {
       "id": "LAB-CRED-05d",
       "title": "T-CRED-05: دورُ الإقلاعِ عبرَ TCP مرفوضٌ (لا سرَّ قابلاً للنقل)",
       "status": "PASS",
-      "stderr": "psql: error: connection to server at \"127.0.0.1\", port 34647 failed: FATAL:  pg_hba.conf rejects connection for host \"127.0.0.1\", user \"xw_alpha_4e1d7d85feb7b56f\", database \"lab\", no encryption"
+      "stderr": "psql: error: connection to server at \"127.0.0.1\", port 41383 failed: FATAL:  pg_hba.conf rejects connection for host \"127.0.0.1\", user \"xw_alpha_f106e277cebe7e40\", database \"lab\", no encryption"
     },
     {
       "id": "LAB-CRED-05e",
@@ -123,34 +193,145 @@
       "status": "PASS"
     },
     {
+      "id": "LAB-UID-01",
+      "title": "عمليةٌ ثانيةٌ بالـUID نفسِه بعدَ الختم: الدخولُ مرفوض (الدورُ NOLOGIN) والعاملُ يواصل",
+      "status": "PASS",
+      "stderr": "psql: error: connection to server on socket \"/tmp/xuux-fence-lab-OxxTp7/sock/.s.PGSQL.41383\" failed: FATAL:  role \"xw_alpha_f106e277cebe7e40\" is not permitted to log in",
+      "credential": {
+        "status": "ACTIVE",
+        "revoke_reason": null
+      }
+    },
+    {
+      "id": "LAB-SEAL-01",
+      "title": "عملية Node بمستخدمِ alpha تختمُ مجمّعَها (4 وصلات) وتكتب؛ المُشرِفُ يطابقُ الختم",
+      "status": "PASS",
+      "sessions": [
+        {
+          "pid": 23694,
+          "start": "1794442577579213"
+        },
+        {
+          "pid": 23695,
+          "start": "1794442577586907"
+        },
+        {
+          "pid": 23696,
+          "start": "1794442577590290"
+        },
+        {
+          "pid": 23697,
+          "start": "1794442577593912"
+        }
+      ],
+      "rows": 48,
+      "writer_exit": 3,
+      "stopped": {
+        "type": "stopped",
+        "committed": 103,
+        "code": "28000",
+        "message": "role \"xw_alpha_f106e277cebe7e40\" is not permitted to log in"
+      }
+    },
+    {
+      "id": "LAB-UID-02",
+      "title": "دخيلٌ بالـUID نفسِه حاضرٌ لحظةَ الختم ⇒ الختمُ مرفوض (session_set_mismatch)، الاعتمادُ يُلغى، الدخيلُ يُنهى",
+      "status": "PASS",
+      "worker": {
+        "type": "xuux-fence/seal-failed",
+        "role_name": "xw_alpha_c1c78f177b1aef98",
+        "reason": "رفضت القاعدةُ الختم (session_set_mismatch) — الاعتمادُ أُلغي"
+      },
+      "supervisor": "الختمُ لم يتأكّد (رفضت القاعدةُ الختم (session_set_mismatch) — الاعتمادُ أُلغي) — أُلغي xw_alpha_c1c78f177b1aef98",
+      "credential": {
+        "status": "REVOKED",
+        "revoke_reason": "SEAL_REFUSED:session_set_mismatch"
+      },
+      "intruder_exit": 2,
+      "intruder_stderr": "FATAL:  terminating connection due to administrator command\nserver closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbef"
+    },
+    {
+      "id": "LAB-UID-03",
+      "title": "دخيلٌ بالـUID نفسِه بلا المفتاح يختمُ بتوقيعٍ مزوَّر ⇒ bad_signature، الاعتمادُ يُلغى",
+      "status": "PASS",
+      "result": {
+        "actual": [
+          {
+            "pid": 23734,
+            "start": "1794442579130865"
+          }
+        ],
+        "reason": "bad_signature",
+        "sealed": false,
+        "declared": [
+          {
+            "pid": 23734,
+            "start": "1794442579130865"
+          }
+        ]
+      },
+      "credential": {
+        "status": "REVOKED",
+        "revoke_reason": "SEAL_REFUSED:bad_signature"
+      }
+    },
+    {
+      "id": "LAB-UID-04",
+      "title": "حدُّ نظامِ التشغيل: مفتاحُ alpha (0400) لا يقرؤه مستخدمُ beta — ويقرؤه أيُّ عمليةٍ بـUID alpha (حدٌّ معلن)",
+      "status": "PASS",
+      "beta_read": "cat: /tmp/xuux-fence-lab-OxxTp7/app/keys/alpha.pem: Permission denied",
+      "same_uid_can_read": true,
+      "note": "أيُّ عمليةٍ بـUID العاملِ تقرأُ المفتاحَ وتستطيعُ ptrace العاملِ (لا Yama هنا) — الختمُ لا يُثبتُ هويّةَ العمليةِ أمامَها"
+    },
+    {
+      "id": "LAB-UID-05",
+      "title": "خطرٌ متبقٍّ: عمليةٌ بالـUID نفسِه تقرأُ المفتاحَ وتسبقُ العاملَ إلى الختم ⇒ تختمُ وتكتب؛ العاملُ الحقيقيُّ يفشلُ فيُلغي المُشرِفُ الاعتمادَ ويُنهي المهاجم",
+      "status": "PASS",
+      "residual_risk": true,
+      "attacker_rows_before_revoke": 92,
+      "attacker_rows_after_revoke": 0,
+      "attacker_exit": 3,
+      "real_worker": {
+        "type": "xuux-fence/seal-failed",
+        "role_name": "xw_alpha_2adabc58c4c1f0a0",
+        "reason": "role \"xw_alpha_2adabc58c4c1f0a0\" is not permitted to log in"
+      },
+      "supervisor": "الختمُ لم يتأكّد (role \"xw_alpha_2adabc58c4c1f0a0\" is not permitted to log in) — أُلغي xw_alpha_2adabc58c4c1f0a0",
+      "credential": {
+        "status": "REVOKED",
+        "revoke_reason": "SEAL_NOT_CONFIRMED:role \"xw_alpha_2adabc58c4c1f0a0\" is not permitted to log in"
+      },
+      "note": "كشفٌ بعديٌّ لا منع: نافذةُ المهاجمِ بينَ ختمِه وفشلِ العاملِ الحقيقيّ حقيقية"
+    },
+    {
       "id": "LAB-HALT-LIVE",
-      "title": "إيقافٌ حقيقيٌّ تحتَ كاتبٍ حيٍّ بمستخدمِ نظامِ العامل × 10: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة",
+      "title": "إيقافٌ حقيقيٌّ تحتَ كاتبٍ Node مختومٍ (4 وصلات) بمستخدمِ نظامِ العامل × 10: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة",
       "status": "PASS",
       "iterations": 10,
       "failures": 0,
       "log": "halt-live-rounds.json",
-      "log_sha256": "3533193849b820feb03f7591d040c4adf6dae292a5dedbf4acac54f4be217a8f"
+      "log_sha256": "3c96adef17bbcaa96b82bec8dba5cf70997fb695edc5cfc6ff755bb0f7e83cca"
     },
     {
       "id": "LAB-RESTART",
       "title": "انهيارُ العنقود (immediate) ⇒ RECOVERY_REQUIRED؛ RECOVER موقَّعٌ ⇒ HALTED لا RUNNING؛ ثمّ RESUME",
       "status": "PASS",
       "after_restart": {
-        "epoch": 23,
+        "epoch": 24,
         "state": "RECOVERY_REQUIRED",
         "problem": "incarnation_mismatch",
         "stored_state": "HALTED"
       },
       "replay_rejected": "XF409",
       "recovered_to": "HALTED",
-      "epoch": 26
+      "epoch": 28
     },
     {
       "id": "LAB-PHYS-RESTORE",
       "title": "استعادةُ نسخةٍ فيزيائيةٍ قديمة (pg_basebackup) ⇒ RECOVERY_REQUIRED؛ الكتابةُ والأمرُ المُعادُ مرفوضان (الهجومان 21 و23)",
       "status": "PASS",
       "copy_state": {
-        "epoch": 26,
+        "epoch": 28,
         "state": "RECOVERY_REQUIRED",
         "problem": "incarnation_mismatch",
         "stored_state": "RUNNING"
@@ -245,6 +426,82 @@
       "status": "PASS",
       "file": "tests/fence/db-fence.test.mjs"
     },
+    "SEAL-01: جلسةٌ غيرُ مختومةٍ لاعتمادٍ نشِطٍ لا تكتب (XF011)؛ بعدَ الختمِ تكتب": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "SEAL-02: بعدَ الختمِ الدورُ NOLOGIN — دخولٌ لاحقٌ بالدورِ نفسِه (عمليةٌ أخرى) مرفوض": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "SEAL-03: دخيلٌ حاضرٌ لحظةَ الختم ⇒ الختمُ يُرفَضُ والاعتمادُ يُلغى وجلسةُ الدخيلِ تُنهى": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "SEAL-04: توقيعٌ بمفتاحٍ آخر، أو مجموعةٌ فارغة، أو ختمٌ ثانٍ ⇒ رفضٌ وإلغاء": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "SEAL-05: المُشرِفُ يُلغي إن أبلغ العاملُ مجموعةً غيرَ المختومة، أو فشلاً، أو صمت": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "SEAL-06 (خطرٌ متبقٍّ معلن): من يقرأُ مفتاحَ العاملِ ويسبقُه إلى الختمِ يختم — والمُشرِفُ يكشفُ ويُلغي": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "SEAL-07: sealFencedPool مع دخيلٍ حاضر ⇒ يرمي SEAL_REFUSED ولا يُسقطُ العمليةَ (وصلاتُ المجمّعِ المُنهاةُ تُتلَف)": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "EVID-01: الطالبُ (السياديّ) والعاملُ لا يُسجّلان دليلاً؛ والدليلُ لا يُعدَّلُ ولا يُحذَف": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "EVID-02: ok=false يُسجَّلُ EFFECTS_NOT_HALTED فلا SYSTEM_HALT_COMPLETE، والسياديُّ لا يوقّع، والقاعدةُ ترفض": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "EVID-03: دليلٌ قديم (إيقافٌ سابق) لا يُعادُ استعمالُه، ودليلٌ بعهدٍ أو إيقافٍ آخرَ لا يُسجَّل": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "EVID-04: تغييرُ القائمةِ بعدَ الدليلِ يُسقطُه (الربطُ بالقائمة)، ومفاتيحُ صغيرةُ الرتبةِ أو مختلطةٌ لا تُسجَّل": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-01: جلساتٌ مختومةٌ متعدّدة، إحداها في معاملةٍ مفتوحة ⇒ الإيقافُ يُنهيها كلَّها ولا يلتزمُ شيء": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-02: انقطاعُ وصلةِ الجذرِ أثناءَ الإيقاف ⇒ الحالةُ ليست RUNNING، والكاتبُ مرفوض، وإعادةُ الإيقافِ تُكمل": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-03: تعذّرُ تسجيلِ دليلِ الآثار ⇒ DB_FENCED بلا SYSTEM_HALT_COMPLETE، ولا استئناف": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-04: الإعادة، والأمرُ المنقضي، وأمران متزامنان ⇒ واحدٌ فقط ينجح": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-05: HALT وRESUME متزامنان ⇒ لا حالةَ وسطى: إمّا RUNNING بلا طلبٍ معلّق أو ليست RUNNING والكاتبُ مرفوض": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-06: فشلُ RESUME في كلِّ مرحلةٍ يُبقي HALTED، ولا يُسجِّلُ أمراً، ولا يُصدِرُ اعتماداً": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-07: انهيارُ كلِّ الوصلات (جذر، سياديّ، عمال) أثناءَ الإيقاف ⇒ الحالةُ دائمةٌ وليست RUNNING، والإكمالُ بعدَ إعادةِ الاتصال": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
+    "HR-08: حالةُ القاعدةِ تخالفُ حالةَ النظام — كلٌّ منهما يُغلقُ وحدَه (الحارسُ المركّب)": {
+      "status": "PASS",
+      "file": "tests/fence/fence-lifecycle.test.mjs"
+    },
     "D-14: نظامٌ سليمٌ يُقرأُ كما هو — RUNNING بعدَ الاستئناف، HALTED بعدَ الإيقاف": {
       "status": "PASS",
       "file": "tests/fence/halt-integrity.test.mjs"
@@ -328,6 +585,54 @@
     "الخطوة 11: موقِفُ آثارٍ بلا أيِّ ضابطٍ ليس نجاحاً": {
       "status": "PASS",
       "file": "tests/fence/effects.test.mjs"
+    },
+    "CONN-MAP-01: الماسحُ يلتقطُ كلَّ نوعٍ ويتجاهلُ التعليق": {
+      "status": "PASS",
+      "file": "tests/fence/connection-map.test.mjs"
+    },
+    "CONN-MAP-02: كلُّ موضعِ اتصالٍ مُدرَجٌ بعددِه، ولا إدخالَ بلا موضع": {
+      "status": "PASS",
+      "file": "tests/fence/connection-map.test.mjs"
+    },
+    "CONN-MAP-03: كلُّ إدخالٍ مُصنَّفٌ بفئةٍ معروفةٍ وسببٍ ودور": {
+      "status": "PASS",
+      "file": "tests/fence/connection-map.test.mjs"
+    },
+    "CONN-MAP-04: FENCED_WRITER يسلكُ المصافحةَ والختمَ فعلاً؛ وغيابُ المُشرِفِ مُعلَن": {
+      "status": "PASS",
+      "file": "tests/fence/connection-map.test.mjs"
+    },
+    "متّجهاتُ الطرفِ الثالث محفوظةٌ ببصمتِها المعلَنة": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "Wycheproof: كلُّ «صحيح» يُقبَل وكلُّ «مرفوض» يُرفَض؛ «المقبولُ» بالسياسةِ الصارمة": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "ed25519-speccheck: لا يُقبَلُ إلا الحالة 3 (سلوكُ libsodium)": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "اختلافُ OpenSSL محصورٌ في المفتاحِ من رتبةٍ صغيرةٍ وA غيرِ القانونيّ (القاعدةُ أشدّ)": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "ضبابٌ تفاضليّ مع node:crypto (2000 مفتاحاً × 8 طفرات)": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "مدخلاتٌ مشوَّهة: NULL وأطوالٌ خاطئة تُرجعُ false بلا استثناء": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "تسجيلُ المفاتيح (ed25519_key_ok): الصادقُ يُقبَل؛ الصغيرُ والمختلطُ وغيرُ القانونيّ يُرفَض": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
+    },
+    "libsodium: مطابقةٌ تامّةٌ على المتّجهاتِ والضبابِ كلِّه": {
+      "status": "PASS",
+      "file": "tests/fence/ed25519.test.mjs"
     }
   },
   "attacks": [
@@ -669,28 +974,43 @@
   "logs": [
     {
       "name": "initdb.log",
-      "sha256": "ab94d7171b989bc2f721e2cc4697fddec126cfc6c336454a33cfccc5003cf4b6",
+      "sha256": "aabd264c41f17028057e0a72b57ff39f1af52d99c3e07cd182a245b0b1c9b05b",
       "bytes": 842
     },
     {
       "name": "db-fence.test.mjs.tap",
-      "sha256": "267f0f6175a412ae2d5fd2776c724f19a8014827fcd8776b12cfad12ff556a37",
-      "bytes": 8721
+      "sha256": "3194dfab6d946d69bd92831e3d2fc9d6ef686acd03f52245a6e94c0efe4a0404",
+      "bytes": 8719
+    },
+    {
+      "name": "fence-lifecycle.test.mjs.tap",
+      "sha256": "53f11f4494315eb18684d603af4ffa50fcb9da500f8860474f556f7895d6e9c6",
+      "bytes": 7763
     },
     {
       "name": "halt-integrity.test.mjs.tap",
-      "sha256": "f14680d0762646f0d0d5e01235deb937bd1ac9fbb37a15fea850d09574979d13",
+      "sha256": "a047e76c438033de061b91e8b4ad9d726aabbeb0d17384f4469049307e4e8127",
       "bytes": 4580
     },
     {
       "name": "effects.test.mjs.tap",
-      "sha256": "8a207aec581a92dda99f2a39361c70fb2eb578777dad867d2f46a5896dee6b35",
-      "bytes": 1988
+      "sha256": "0f91aa8e42982a0c2bc240a57de934875be6615cc4e6d49364b184daa056423d",
+      "bytes": 1989
+    },
+    {
+      "name": "connection-map.test.mjs.tap",
+      "sha256": "c4ff8742438247c920f410ba201e46ad1b4f60b85b263afb3ce4f7a4757faaa5",
+      "bytes": 1197
+    },
+    {
+      "name": "ed25519.test.mjs.tap",
+      "sha256": "adaa482e114ffa9b7d85fe7b7d38159a81b144bc50ef87b221f75f09d43ea593",
+      "bytes": 2778
     },
     {
       "name": "halt-live-rounds.json",
-      "sha256": "3533193849b820feb03f7591d040c4adf6dae292a5dedbf4acac54f4be217a8f",
-      "bytes": 2752
+      "sha256": "3c96adef17bbcaa96b82bec8dba5cf70997fb695edc5cfc6ff755bb0f7e83cca",
+      "bytes": 4052
     },
     {
       "name": "pg_basebackup.log",
@@ -699,9 +1019,9 @@
     },
     {
       "name": "postgres-primary.log",
-      "sha256": "cefdddc287bcf005f75a3e2f4ec8d9bd3f2153895ae77acd62e878e50e78b4a6",
-      "bytes": 95096
+      "sha256": "2f5d29c9e1c3bbf13d0590b72a42bcf4e83e9f2b15c47bb361eb9ef2f13cd051",
+      "bytes": 154665
     }
   ],
-  "report_sha256": "008577d0a06e6f41425932e7a24c06189c3ca2373ddd7b0f6dcf90d3bd524a27"
+  "report_sha256": "f12daf498fa4655326c92a4b7072d46d41e693ce50dbd3c1ffadff1673d53a79"
 }
