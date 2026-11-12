@@ -39,6 +39,9 @@ import {
   keyFdViolations,
   isolatedLaunchEnv,
   ALLOWED_CAP_BND,
+  FD_MAX,
+  LAUNCH_SH,
+  scanOpenFds,
 } from '../../scripts/worker.mjs';
 import { UNSET_ENV, boundingCapabilities, parseUnit, systemdUnit } from '../../scripts/worker.mjs';
 
@@ -316,7 +319,9 @@ test.describe('WL-533 مُقلِعُ العزل — نظامٌ مزيَّف', ()
     ['fd=0', { ...ISO_ENV, XUUX_FENCE_KEY_FD: '0' }],
     ['fd=2', { ...ISO_ENV, XUUX_FENCE_KEY_FD: '2' }],
     ['fd سالب', { ...ISO_ENV, XUUX_FENCE_KEY_FD: '-3' }],
-    ['fd خارجَ مدى المسح', { ...ISO_ENV, XUUX_FENCE_KEY_FD: '5000' }],
+    // ‏(‏كانت «5000 خارجَ مدى المسح» مرفوضةً لمسحٍ محدودٍ بـ0..4095؛ أُزيلَ المسحُ المحدود — ISO-54.)
+    ['fd فوقَ مدى النوع int', { ...ISO_ENV, XUUX_FENCE_KEY_FD: String(FD_MAX + 1) }],
+    ['fd بأرقامٍ تفوقُ الدقّة', { ...ISO_ENV, XUUX_FENCE_KEY_FD: '99999999999999999999' }],
   ])) {
     test(`ISO-03: يفشلُ مغلقاً — ${name}`, () => {
       const f = isoFakeOs();
@@ -614,12 +619,19 @@ test('ISO-21: نقطةُ الدخولِ الحقيقيّةُ تفشلُ مغلق
 
 // ── عملياتٌ حقيقيّةٌ بـroot (sudo -n + setpriv) ──────────────────────────────────────────────
 
+// ‏المالكُ منعَ تشغيلَ عاملٍ بـroot على مضيفِ المختبرِ الحاليّ (‏node المضيفِ 0777، خطرٌ مفتوح):
+// XUUX_TEST_NO_ROOT_WORKER=1 يتخطّى الاختباراتِ التي تُشغِّلُ node بـroot — تخطٍّ مُعلَنٌ لا نجاح،
+// وتعملُ في CI حيثُ لا يُضبَط (‏ISO-41..45 وISO-57).
+const NO_ROOT_WORKER = process.env['XUUX_TEST_NO_ROOT_WORKER'] === '1';
 const canRoot = () =>
+  !NO_ROOT_WORKER &&
   process.platform === 'linux' &&
   spawnSync('sudo', ['-n', 'true']).status === 0 &&
   spawnSync('/usr/bin/setpriv', ['--version']).status === 0 &&
   spawnSync('id', ['-u', 'nobody']).status === 0;
-const ROOT_SKIP = 'لا sudo -n أو setpriv أو nobody (المختبرُ يقيسُ LAB-UID-06)';
+const ROOT_SKIP = NO_ROOT_WORKER
+  ? 'XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح'
+  : 'لا sudo -n أو setpriv أو nobody (المختبرُ يقيسُ LAB-UID-06)';
 
 /** @param {string} what */
 const idOf = (what) =>
@@ -1391,6 +1403,310 @@ test('ISO-52: محاكاةٌ حقيقيّةٌ من نصِّ الوحدة — ي�
     const y = emulateUnit(d, { NODE_ICU_DATA: '/nope' });
     assert.match(y.stderr, new RegExp(ISOLATION_ERRORS.HOSTILE_ENV), y.stderr);
     assert.equal(tree.mark('app'), null);
+  } finally {
+    tree.clean();
+  }
+});
+
+// ── WL-533: تعدادُ الواصفاتِ الفعليّ بدلَ المسحِ 0..4095 ─────────────────────────────────────
+// الخلل: `scanFds` كان يمسحُ 0..4095 فقط، والإعدادُ يرفضُ XUUX_FENCE_KEY_FD ≥ 4096. فنسخةٌ من واصفِ
+// المفتاحِ عندَ 5000 تمرُّ والتحقّقُ يقولُ «لا نسخ». الإصلاح: `scanOpenFds` يعدُّ /proc/self/fd حتّى
+// نقطةٍ ثابتة، ولا حدَّ إلا مدى النوع (‏FD_MAX = INT_MAX).
+
+/** @param {Record<number, {dev:number, ino:number} | Error>} m */
+const fakeFdStat = (m) => (/** @type {number} */ fd) => {
+  const v = m[fd];
+  if (v instanceof Error) throw v;
+  if (v === undefined) throw Object.assign(new Error('EBADF'), { code: 'EBADF' });
+  return v;
+};
+
+test.describe('WL-533 تعدادُ الواصفات (‏scanOpenFds)', () => {
+  test('ISO-53: نسخةٌ عندَ 5000 وعندَ 2^31-1 تُكتشَف — لا مسحَ بمدًى رقميّ', () => {
+    const key = { dev: 1, ino: 42 };
+    const hits = scanOpenFds(1, 42, {
+      list: () => ['0', '1', '2', '5000', String(FD_MAX), '7'],
+      fstat: fakeFdStat({
+        0: { dev: 9, ino: 1 },
+        1: { dev: 9, ino: 1 },
+        2: { dev: 9, ino: 1 },
+        5000: key,
+        [FD_MAX]: key,
+        7: { dev: 1, ino: 43 },
+      }),
+    });
+    assert.deepEqual(hits, [5000, FD_MAX]);
+  });
+
+  test('ISO-53: سباقُ الإغلاق — واصفٌ يُغلَقُ بينَ القائمةِ وfstat (‏EBADF) يُتخطّى، وواصفُ readdir نفسُه كذلك', () => {
+    assert.deepEqual(
+      scanOpenFds(1, 42, {
+        list: () => ['3', '4', '9000'],
+        fstat: fakeFdStat({ 3: { dev: 1, ino: 42 } }),
+      }),
+      [3],
+    );
+  });
+
+  test('ISO-53: سباقُ الفتح — واصفٌ يظهرُ في القائمةِ الثانيةِ يُفحَصُ ويُكتشَف (‏نقطةٌ ثابتة)', () => {
+    let n = 0;
+    const lists = [['3'], ['3', '8000'], ['3', '8000']];
+    const hits = scanOpenFds(1, 42, {
+      list: () => lists[Math.min(n++, lists.length - 1)] ?? [],
+      fstat: fakeFdStat({ 3: { dev: 2, ino: 2 }, 8000: { dev: 1, ino: 42 } }),
+    });
+    assert.deepEqual(hits, [8000]);
+    assert.equal(n, 3, 'تُعادُ القائمةُ حتّى لا يظهرَ رقمٌ جديد');
+  });
+
+  for (const [name, io] of /** @type {Array<[string, any]>} */ ([
+    [
+      'تعذُّرُ /proc/self/fd',
+      {
+        list: () => {
+          throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        },
+      },
+    ],
+    ['اسمٌ ليس رقماً', { list: () => ['3', 'x'], fstat: fakeFdStat({}) }],
+    ['رقمٌ بصفرٍ بادئ', { list: () => ['03'], fstat: fakeFdStat({}) }],
+    [
+      'fstat بخطأٍ غيرِ EBADF',
+      {
+        list: () => ['3'],
+        fstat: fakeFdStat({ 3: Object.assign(new Error('EIO'), { code: 'EIO' }) }),
+      },
+    ],
+  ])) {
+    test(`ISO-53: يفشلُ مغلقاً لا «لا نسخ» — ${name}`, () => {
+      isoRejects(() => scanOpenFds(1, 42, io), ISOLATION_ERRORS.VERIFY_FAILED);
+    });
+  }
+
+  test('ISO-53: على العمليةِ الحاليّة — يجدُ واصفاً مفتوحاً حقيقيّاً ولا يجدُه بعدَ إغلاقِه', (t) => {
+    if (process.platform !== 'linux') return t.skip('Linux فقط');
+    const dir = mkdtempSync(join(tmpdir(), 'xuux-fdscan-'));
+    try {
+      const f = join(dir, 'k');
+      writeFileSync(f, 'x');
+      const fd = fs.openSync(f, 'r');
+      const st = fs.fstatSync(fd);
+      assert.deepEqual(scanOpenFds(st.dev, st.ino), [fd]);
+      fs.closeSync(fd);
+      assert.deepEqual(scanOpenFds(st.dev, st.ino), []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('ISO-54: XUUX_FENCE_KEY_FD=5000 وFD_MAX مقبولانِ في الإعداد ويُفحَصانِ بـfstat (‏لا CONFIG)', () => {
+    for (const fd of ['5000', String(FD_MAX)]) {
+      const f = isoFakeOs();
+      const r = /** @type {any} */ (boot({ ...ISO_ENV, XUUX_FENCE_KEY_FD: fd }, f.os));
+      assert.equal(f.calls[0], `fstat:${fd}`);
+      assert.ok(f.calls.includes(`closeFd:${fd}`));
+      assert.equal(r.evidence.key_fd.fd, Number(fd));
+    }
+  });
+});
+
+// ── عمليّاتٌ حقيقيّةٌ بواصفاتٍ فوقَ 4095 — بلا root ───────────────────────────────────────────
+// الأبُ يفتحُ ملفَّ مفتاحٍ ويضعُه في الابنِ عندَ 5000 (‏ونسخةً عندَ 6000 في الضابط) عبرَ stdio.
+// الابنُ يُشغِّلُ bootstrapIsolation الحقيقيَّ بنظامٍ **نصفِ حقيقيّ**: fstat وقراءةُ الواصفِ وإغلاقُه
+// وscanOpenFds حقيقيّة؛ والمزيَّفُ وحدَه: مالكُ الملفّ (‏0 — لا يُنشئُ غيرُ root ملفّاً لـroot)، والهويّةُ
+// وsetuid و/proc/self/status (‏لا root هنا). ثمّ يُشغِّلُ حفيداً يعدُّ /proc/self/fd: هل ورثَ المفتاح؟
+
+const HIGH_FD = 5000;
+const HIGH_COPY = 6000;
+const hardNofile = () => {
+  const v = spawnSync('sh', ['-c', 'ulimit -Hn'], { encoding: 'utf8' }).stdout.trim();
+  return v === 'unlimited' ? Infinity : Number(v);
+};
+/** @param {import('node:test').TestContext} t */
+const needHighFds = (t) => {
+  if (process.platform !== 'linux') return (t.skip('Linux فقط'), false);
+  if (hardNofile() > HIGH_COPY) return true;
+  // في CI لا تخطّي: حدٌّ منخفضٌ هناكَ يُخفي الاختبارَ فيُرفَض.
+  assert.equal(
+    process.env['CI'],
+    undefined,
+    `RLIMIT_NOFILE الصلبُ ${hardNofile()} ≤ ${HIGH_COPY} في CI`,
+  );
+  return (
+    t.skip(
+      `RLIMIT_NOFILE الصلبُ ${hardNofile()} ≤ ${HIGH_COPY}: لا واصفَ فوقَ 4095 هنا — تخطٍّ لا نجاح`,
+    ),
+    false
+  );
+};
+
+const WORKER_URL = new URL('../../scripts/worker.mjs', import.meta.url).href;
+const HIGH_FD_CHILD = `
+import { bootstrapIsolation, scanOpenFds } from ${JSON.stringify(WORKER_URL)};
+import { closeSync, fstatSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+const cfg = JSON.parse(process.env.FD_TEST);
+const key = fstatSync(cfg.keyFile === undefined ? cfg.fd : cfg.fd);
+const LISTER = "const fs=require('fs');const t=fs.statSync(process.argv[1]);const h=[];" +
+  "for(const n of fs.readdirSync('/proc/self/fd')){try{const s=fs.fstatSync(+n);if(s.dev===t.dev&&s.ino===t.ino)h.push(+n)}catch{}}" +
+  "console.log(JSON.stringify(h))";
+const grand = () => JSON.parse(spawnSync(process.execPath, ['-e', LISTER, cfg.keyFile],
+  { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).stdout);
+const out = { before: scanOpenFds(key.dev, key.ino), grandBefore: grand() };
+let uid = 0;
+const os = {
+  getuid: () => uid, geteuid: () => uid,
+  setgroups() {}, setgid() {},
+  setuid(u) { if (u === 0 && uid !== 0) throw new Error('EPERM'); uid = u; },
+  fstat(fd) { const s = fstatSync(fd); return { type: s.isFile() ? 'file' : 'other', uid: 0, mode: s.mode & 0o7777, size: s.size, dev: s.dev, ino: s.ino }; },
+  readFd: (fd) => readFileSync(fd, 'utf8'),
+  closeFd: (fd) => closeSync(fd),
+  scanFds: (d, i) => scanOpenFds(d, i),
+  readText: (p) => p === '/proc/sys/fs/suid_dumpable' ? '0\\n' : (uid === 0 ? cfg.statusRoot : cfg.statusDropped),
+  ownerOf: () => 0,
+};
+try {
+  const r = bootstrapIsolation(cfg.env, { os, execArgv: [], trust: () => ({ violations: [], checked: [{}] }), trustPaths: ['/x'] });
+  out.ok = true; out.evidence = r.evidence; out.pemOk = r.pem.includes('PRIVATE KEY');
+} catch (e) { out.ok = false; out.code = e.code; out.message = e.message; }
+out.closed = (() => { try { fstatSync(cfg.fd); return 'open'; } catch (e) { return e.code; } })();
+out.after = scanOpenFds(key.dev, key.ino);
+out.grandAfter = grand();
+process.stdout.write(JSON.stringify(out) + '\\n');
+`;
+
+/** @param {boolean} withCopy */
+function runHighFd(withCopy) {
+  const dir = mkdtempSync(join(tmpdir(), 'xuux-highfd-'));
+  try {
+    const keyFile = join(dir, 'worker.pem');
+    writeFileSync(keyFile, ISO_PEM);
+    chmodSync(keyFile, 0o400);
+    const fd = fs.openSync(keyFile, 'r');
+    try {
+      /** @type {any[]} */
+      const stdio = new Array(withCopy ? HIGH_COPY + 1 : HIGH_FD + 1).fill(null);
+      stdio[0] = 'ignore';
+      stdio[1] = 'pipe';
+      stdio[2] = 'inherit';
+      stdio[HIGH_FD] = fd;
+      if (withCopy) stdio[HIGH_COPY] = fd;
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', HIGH_FD_CHILD], {
+        encoding: 'utf8',
+        stdio,
+        timeout: 30_000,
+        env: {
+          PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+          FD_TEST: JSON.stringify({
+            fd: HIGH_FD,
+            keyFile,
+            env: { ...ISO_ENV, XUUX_FENCE_KEY_FD: String(HIGH_FD) },
+            statusRoot: isoStatus({ uid: 0, gid: 0 }),
+            statusDropped: isoStatus({ uid: 1001, gid: 1002 }),
+          }),
+        },
+      });
+      assert.equal(r.status, 0, `الابن: ${r.stderr ?? ''}`);
+      return JSON.parse(String(r.stdout).trim());
+    } finally {
+      fs.closeSync(fd);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('ISO-55: واصفُ مفتاحٍ صحيحٌ عندَ 5000 يُقبَل، ويُغلَق، ولا نسخةَ بعدَه، ولا يرثُه حفيد (‏والضابطُ: يرثُه قبلَ الإغلاق)', (t) => {
+  if (!needHighFds(t)) return;
+  const o = runHighFd(false);
+  assert.deepEqual(o.before, [HIGH_FD], 'الواصفُ عندَ 5000 قبلَ الإقلاع');
+  assert.deepEqual(
+    o.grandBefore,
+    [HIGH_FD],
+    'الضابط: قبلَ الإغلاقِ يرثُه الحفيد — فالقياسُ يكشفُ التسرّب',
+  );
+  assert.equal(o.ok, true, JSON.stringify(o));
+  assert.equal(o.pemOk, true);
+  assert.equal(o.evidence.key_fd.fd, HIGH_FD);
+  assert.equal(o.evidence.key_fd_open_copies, 0);
+  assert.equal(o.closed, 'EBADF', 'الواصفُ مغلقٌ بعدَ الإقلاع');
+  assert.deepEqual(o.after, [], 'لا نسخةَ مفتوحةً بعدَ الإغلاق');
+  assert.deepEqual(o.grandAfter, [], 'الحفيدُ بعدَ الإقلاعِ لا يرثُ أيَّ واصفٍ إلى المفتاح');
+});
+
+test('ISO-56: نسخةُ المفتاحِ عندَ 6000 (‏فوقَ 4095) تُكتشَفُ بعدَ الإغلاق ⇒ VERIFY_FAILED', (t) => {
+  if (!needHighFds(t)) return;
+  const o = runHighFd(true);
+  assert.deepEqual(o.before, [HIGH_FD, HIGH_COPY]);
+  assert.equal(o.ok, false, JSON.stringify(o));
+  assert.equal(o.code, ISOLATION_ERRORS.VERIFY_FAILED, JSON.stringify(o));
+  assert.match(o.message, new RegExp(`نسخُ واصفِ المفتاحِ مفتوحة: ${HIGH_COPY}`));
+  assert.equal(o.closed, 'EBADF', 'الأصلُ أُغلِقَ رغمَ الرفض');
+  assert.deepEqual(o.after, [HIGH_COPY]);
+  assert.deepEqual(o.grandAfter, [HIGH_COPY], 'النسخةُ كانت ستتسرّبُ إلى الأبناء — لذلك يُرفَض');
+});
+
+test('ISO-57: root حقيقيّ — المُطلِقُ بواصفِ 5000 يُقبَلُ ولا يتسرّب، ونسخةٌ عندَ 6000 ⇒ VERIFY_FAILED', (t) => {
+  if (!canRoot()) return t.skip(ROOT_SKIP);
+  if (!needHighFds(t)) return;
+  const python = spawnSync('sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).stdout.trim();
+  if (python === '') return t.skip('لا python3');
+  const tree = rootTree();
+  try {
+    const entry = tree.put(
+      'scripts/fd-child.mjs',
+      `import { spawnSync } from 'node:child_process';\n` +
+        `import { bootstrapIsolation } from './worker.mjs';\n` +
+        `try {\n  const r = bootstrapIsolation(process.env);\n` +
+        `  const c = spawnSync(${JSON.stringify(python)}, ['-c', ${JSON.stringify(FD_SCAN_PY)}, ${JSON.stringify(tree.keyFile)}], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });\n` +
+        `  process.stdout.write(JSON.stringify({ ok: true, evidence: r?.evidence, child: JSON.parse(c.stdout) }) + '\\n');\n` +
+        `} catch (e) {\n  process.stdout.write(JSON.stringify({ ok: false, code: e.code, message: e.message }) + '\\n');\n}\n`,
+    );
+    const uid = idOf('-u');
+    const l = isolatedLaunchCommand({
+      node: trustedNode(),
+      entry,
+      keyFile: tree.keyFile,
+      uid,
+      gid: idOf('-g'),
+      env: { XUUX_DB_FENCE: 'required' },
+      pass: ['XUUX_DB_FENCE'],
+    });
+    const SCRIPT = 'k=$1; shift; exec "$@" 3<"$k"';
+    assert.ok(
+      l.args.includes(SCRIPT) &&
+        l.args.includes(LAUNCH_SH) &&
+        l.args.includes('XUUX_FENCE_KEY_FD=3'),
+    );
+    // ‏dash لا يعيدُ التوجيهَ فوقَ 9 — bash (‏ملكُ root) لهذا القياسِ وحدَه.
+    /** @param {string} redir */
+    const at = (redir) =>
+      l.args.map((a) =>
+        a === LAUNCH_SH
+          ? '/bin/bash'
+          : a === SCRIPT
+            ? `k=$1; shift; exec "$@" ${redir}`
+            : a === 'XUUX_FENCE_KEY_FD=3'
+              ? `XUUX_FENCE_KEY_FD=${HIGH_FD}`
+              : a,
+      );
+    const ok = JSON.parse(
+      spawnSync(l.command, at(`${HIGH_FD}<"$k"`), { encoding: 'utf8', timeout: 30_000 }).stdout ||
+        '{}',
+    );
+    assert.equal(ok.ok, true, JSON.stringify(ok));
+    assert.equal(ok.evidence.key_fd.fd, HIGH_FD);
+    assert.equal(ok.evidence.key_fd.owner, 0);
+    assert.equal(ok.evidence.key_fd_open_copies, 0);
+    assert.deepEqual(ok.child, { uid, hits: [] }, 'الابنُ ورثَ واصفاً إلى ملفِّ المفتاح');
+    const bad = JSON.parse(
+      spawnSync(l.command, at(`${HIGH_FD}<"$k" ${HIGH_COPY}<&${HIGH_FD}`), {
+        encoding: 'utf8',
+        timeout: 30_000,
+      }).stdout || '{}',
+    );
+    assert.equal(bad.code, ISOLATION_ERRORS.VERIFY_FAILED, JSON.stringify(bad));
+    assert.match(bad.message, new RegExp(`نسخُ واصفِ المفتاحِ مفتوحة: ${HIGH_COPY}`));
   } finally {
     tree.clean();
   }

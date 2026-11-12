@@ -408,7 +408,7 @@ node مستبدَلٌ لا يفحصُ نفسَه. **المقيسُ على مضي
 | الصلاحيات | لا group ولا other؛ المالكُ يقرأ | 0440، 0604، 0644، 0200 |
 | الحجم | 0 < الحجم ≤ 16384 | صفرٌ أو أكبر |
 | المحتوى | مفتاحُ Ed25519 خاصّ | نصٌّ تالف، مفتاحُ P-256 (‏ISO-12) |
-| ما بعدَ الإغلاق | لا نسخةَ مفتوحةً (‏dev/ino) في 0..4095 | ‎4<&3‎ ⇒ VERIFY_FAILED (‏ISO-43 حقيقيّ) |
+| ما بعدَ الإغلاق | لا نسخةَ مفتوحةً (‏dev/ino) بينَ **كلِّ** الواصفاتِ المفتوحة (‏تعدادُ /proc/self/fd حتّى نقطةٍ ثابتة؛ تعذُّرُه يفشلُ مغلقاً) | ‎4<&3‎ ⇒ VERIFY_FAILED (‏ISO-43)؛ نسخةٌ عندَ 6000 ⇒ VERIFY_FAILED وواصفٌ عندَ 5000 يُقبَلُ ولا يُورَث (‏ISO-55/56 بلا root، وISO-57 بـroot في CI) |
 | الأبناء | لا يرثُ ابنٌ واصفاً إلى الملف | (‏ISO-43: مسحُ python3 لابنٍ حقيقيّ = لا شيء) |
 
 ### 9.5 التحقّقُ من القدرات — الادّعاءُ بالضبط
@@ -512,9 +512,13 @@ threats:
       [
         tests/execution/worker-isolation.test.mjs#ISO-01,
         tests/execution/worker-isolation.test.mjs#ISO-43,
+        tests/execution/worker-isolation.test.mjs#ISO-53,
+        tests/execution/worker-isolation.test.mjs#ISO-55,
+        tests/execution/worker-isolation.test.mjs#ISO-56,
+        tests/execution/worker-isolation.test.mjs#ISO-57,
         scripts/fence-lab.mjs#LAB-UID-06,
       ]
-    limit: المُقلِعُ يمسحُ الواصفاتِ 0..4095 بحثاً عن نسخةٍ من الملفِّ نفسِه (dev/ino) ويرفض؛ وابنٌ حقيقيٌّ لا يرثُه (ISO-43). نسخةٌ لا تُرى بـfstat (مقبسٌ يحملُ المحتوى) لا يكشفُها المسح
+    limit: المُقلِعُ يعدُّ كلَّ الواصفاتِ المفتوحةِ فعلاً (/proc/self/fd، لا مسحَ 0..4095 — كان نسخةٌ عندَ 5000 تمرّ) بحثاً عن الملفِّ نفسِه (dev/ino) ويرفض، وتعذُّرُ التعدادِ يفشلُ مغلقاً؛ وابنٌ حقيقيٌّ لا يرثُه (ISO-43/55). نسخةٌ لا تُرى بـfstat (مقبسٌ يحملُ المحتوى) لا يكشفُها المسح
   - id: TH-UID-05
     actor: same_uid
     asset: المفتاحُ في تفريغِ الانهيار (core dump)

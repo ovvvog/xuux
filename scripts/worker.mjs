@@ -26,6 +26,7 @@ import {
   fstatSync,
   lstatSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
   statSync,
@@ -72,8 +73,11 @@ export const ISOLATION_ENV = Object.freeze({
 export const ALLOWED_CAP_BND = 0xc0n;
 /** أقصى حجمٍ لمفتاحٍ على الواصف (PEM لـEd25519 نحوَ 119 بايتاً). */
 export const KEY_FD_MAX_BYTES = 16_384;
-/** مدى مسحِ الواصفاتِ بحثاً عن نسخةٍ مكرَّرةٍ من واصفِ المفتاح. */
-export const FD_SCAN_LIMIT = 4_096;
+/**
+ * أعلى رقمِ واصفٍ ممكنٍ في Linux: الواصفُ ‎`int`‎ في النواة، وحدُّه الفعليُّ RLIMIT_NOFILE وfs.nr_open.
+ * هذا **مدى النوع** لا حدُّ مسح — لا مسحَ بالأرقامِ أصلاً (‏`scanOpenFds` يعدُّ المفتوحَ فعلاً).
+ */
+export const FD_MAX = 2_147_483_647;
 
 /** متغيّراتُ بيئةٍ تُنفِّذُ شيفرةً أو تُحمِّلُ مكتباتٍ قبلَ المُقلِع، أو تكتبُ ملفّاتٍ بصلاحيّةِ root. */
 export const HOSTILE_ENV = [/^NODE_(?!ENV$)/, /^LD_/, /^DYLD_/];
@@ -115,6 +119,68 @@ const fdType = (s) =>
               ? 'block'
               : 'other';
 
+/**
+ * تعدادُ **كلِّ** الواصفاتِ المفتوحةِ فعلاً (‏/proc/self/fd) والتي تشيرُ إلى (‏dev، ino) — لا مسحَ بمدًى رقميّ.
+ * (‏كان المسحُ 0..4095، فنسخةٌ عندَ 5000 تمرُّ والتحقّقُ يقولُ «لا نسخ».)
+ *
+ * السباقات:
+ *   - واصفٌ يُغلَقُ بينَ القائمةِ وfstat ⇒ EBADF ⇒ يُتخطّى: المغلقُ ليس نسخةً مفتوحة. وواصفُ المجلّدِ
+ *     الذي تفتحُه readdir نفسُها يظهرُ في القائمةِ ثمّ يُغلَق — فيُتخطّى كذلك.
+ *   - واصفٌ يُفتَحُ أثناءَ المسح ⇒ تُعادُ القائمةُ حتّى لا يظهرَ رقمٌ لم يُفحَص (‏نقطةٌ ثابتة؛ تنتهي لأنّ كلَّ
+ *     دورةٍ تُضيفُ رقماً جديداً على الأقلّ إلى مجموعةٍ محدودةٍ بالواصفاتِ المفتوحة). المُقلِعُ متزامنٌ
+ *     في هذه المرحلة، فهذا دفاعٌ لا افتراض.
+ *   - تعذُّرُ القائمة، أو اسمٌ ليس رقماً، أو خطأُ fstat غيرُ EBADF ⇒ **يفشلُ مغلقاً** (‏VERIFY_FAILED)
+ *     لا «لا نسخ».
+ * لا يتبعُ الروابطَ بمسار: fstat على رقمِ الواصفِ نفسِه (‏لا نافذةَ بينَ readlink وstat).
+ *
+ * @param {number} dev @param {number} ino
+ * @param {{ list?: () => string[], fstat?: (fd: number) => { dev: number, ino: number } }} [io]
+ * @returns {number[]}
+ */
+export function scanOpenFds(dev, ino, io = {}) {
+  const list = io.list ?? (() => readdirSync('/proc/self/fd'));
+  const stat = io.fstat ?? ((fd) => fstatSync(fd));
+  const fail = (/** @type {string} */ why) => {
+    throw new IsolationError(
+      ISOLATION_ERRORS.VERIFY_FAILED,
+      `تعذّرَ تعدادُ الواصفاتِ المفتوحة: ${why} — لا يُقالُ «لا نسخ».`,
+    );
+  };
+  /** @type {Set<number>} */
+  const seen = new Set();
+  /** @type {number[]} */
+  const hits = [];
+  for (;;) {
+    /** @type {string[]} */
+    let names;
+    try {
+      names = list();
+    } catch (error) {
+      return fail(`/proc/self/fd: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const fresh = [];
+    for (const name of names) {
+      if (!/^(0|[1-9][0-9]*)$/.test(name)) return fail(`اسمٌ ليس رقمَ واصف «${name}»`);
+      const fd = Number(name);
+      if (!seen.has(fd)) fresh.push(fd);
+    }
+    if (fresh.length === 0) break;
+    for (const fd of fresh) {
+      seen.add(fd);
+      /** @type {{ dev: number, ino: number }} */
+      let s;
+      try {
+        s = stat(fd);
+      } catch (error) {
+        if (/** @type {any} */ (error)?.code === 'EBADF') continue;
+        return fail(`fstat(${fd}): ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (s.dev === dev && s.ino === ino) hits.push(fd);
+    }
+  }
+  return hits.sort((a, b) => a - b);
+}
+
 /** @type {IsolationOs} */
 const realOs = {
   getuid: () => /** @type {any} */ (process).getuid(),
@@ -135,19 +201,7 @@ const realOs = {
   },
   readFd: (fd) => readFileSync(fd, 'utf8'),
   closeFd: (fd) => closeSync(fd),
-  scanFds: (dev, ino) => {
-    /** @type {number[]} */
-    const hits = [];
-    for (let fd = 0; fd < FD_SCAN_LIMIT; fd += 1) {
-      try {
-        const s = fstatSync(fd);
-        if (s.dev === dev && s.ino === ino) hits.push(fd);
-      } catch {
-        // EBADF: واصفٌ غيرُ مفتوح.
-      }
-    }
-    return hits;
-  },
+  scanFds: (dev, ino) => scanOpenFds(dev, ino),
   readText: (p) => readFileSync(p, 'utf8'),
   ownerOf: (p) => statSync(p).uid,
 };
@@ -429,7 +483,7 @@ export function bootstrapIsolation(env, options = {}) {
     );
   }
   const fdRaw = val(env, ISOLATION_ENV.keyFd);
-  if (!/^[3-9]$|^[1-9][0-9]+$/.test(fdRaw) || Number(fdRaw) >= FD_SCAN_LIMIT) {
+  if (!/^[3-9]$|^[1-9][0-9]+$/.test(fdRaw) || Number(fdRaw) > FD_MAX) {
     throw new IsolationError(
       ISOLATION_ERRORS.CONFIG,
       `${ISOLATION_ENV.keyFd} غائبٌ أو غيرُ صالح («${fdRaw}»): العزلُ الإلزاميُّ بلا واصفٍ يُرفَض.`,
