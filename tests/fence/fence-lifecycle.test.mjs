@@ -482,6 +482,37 @@ describe('دورةُ حياةِ السياج — WL-532 (§5 §7 §8)', { skip: 
 
   // ── §7 HALT/RESUME ─────────────────────────────────────────────────────────
 
+  test('EVID-05: تجسُّدُ الدليلِ يُعادُ نصّاً بدقّتِه — ميكروثانيةٌ تنتهي بصفرٍ لا تُسقطُ دليلاً سليماً (WL-533، LAB-RESTART)', async () => {
+    // الفشلُ المقيسُ في المختبر: binding.incarnation.pm_start_epoch عادَ رقماً في JSON فصارَ في JS
+    // ‎…123450 ⇒ …12345‎، والمقارنةُ نصّاً مع live (نصّ) ⇒ «تجسُّدُ القاعدةِ تغيّرَ بعدَ الدليل».
+    await ensureRunning();
+    const r = await h.root.halt('evid-05', {
+      effects: { stop: async () => ({ ok: true, detail: {} }) },
+    });
+    assert.equal(r.systemHaltComplete, true);
+    const s = await h.sovereign.status();
+    const pm = s.effects_evidence.binding.incarnation.pm_start_epoch;
+    assert.equal(typeof pm, 'string', 'pm_start_epoch في الدليلِ نصٌّ لا رقم');
+    assert.equal(pm, s.live.pm_start_epoch);
+    const exact = (
+      await h.db.pool.query(`SELECT extract(epoch FROM pg_postmaster_start_time())::text AS t`)
+    ).rows[0].t;
+    assert.equal(pm, exact, 'الدقّةُ كاملةٌ كما في PostgreSQL');
+    assert.equal(reviewEffectsEvidence(s, String(r.effectsEvidenceSha256)).ok, true);
+    // الضابط: الحالةُ نفسُها والتجسُّدُ رقماً بصفرٍ ذيليٍّ (كما كان) ⇒ مراجعةٌ سليمةٌ تُرفَض.
+    const zero = '1794477600.123450';
+    const numeric = JSON.parse(`{"e":${zero}}`).e;
+    const forged = structuredClone(s);
+    forged.live.pm_start_epoch = zero;
+    forged.effects_evidence.binding.incarnation.pm_start_epoch = numeric;
+    assert.notEqual(String(numeric), zero);
+    assert.ok(
+      reviewEffectsEvidence(forged, String(r.effectsEvidenceSha256)).problems.includes(
+        'تجسُّدُ القاعدةِ تغيّرَ بعدَ الدليل',
+      ),
+    );
+  });
+
   test('HR-01: جلساتٌ مختومةٌ متعدّدة، إحداها في معاملةٍ مفتوحة ⇒ الإيقافُ يُنهيها كلَّها ولا يلتزمُ شيء', async () => {
     await ensureRunning();
     const w = await h.boot('alpha', { seal: false });

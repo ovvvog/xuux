@@ -450,7 +450,12 @@ BEGIN
       'seal', c.seal, 'has_sovereign_key', c.sovereign_pubkey IS NOT NULL) END,
     -- ما يراجعُه السياديُّ قبلَ أن يوقّعَ RESUME (لا يوقّعُ هاشاً لم يرَ تفاصيلَه وربطَه).
     'effects_evidence', (SELECT jsonb_build_object('id', e.id, 'kind', e.kind, 'epoch', e.epoch, 'sha256', e.sha256,
-        'detail', e.detail, 'binding', e.binding) FROM fence.evidence e
+        'detail', e.detail,
+        -- والتجسُّدُ المربوطُ بالدليلِ نصّاً كذلك (‏WL-533): رقماً في JSON يفقدُ أصفارَه الذيليّةَ في JS
+        -- (‏‎…123450‎ ⇒ ‎…12345‎) فيرفضُ السياديُّ دليلاً سليماً حينَ تنتهي الميكروثانيةُ بصفر.
+        'binding', CASE WHEN e.binding #> '{incarnation,pm_start_epoch}' IS NULL THEN e.binding
+          ELSE jsonb_set(e.binding, '{incarnation,pm_start_epoch}', to_jsonb(e.binding #>> '{incarnation,pm_start_epoch}')) END)
+       FROM fence.evidence e
        WHERE c.id IS NOT NULL AND e.epoch = c.epoch AND e.kind IN ('EFFECTS_HALTED', 'EFFECTS_NOT_HALTED') ORDER BY e.id DESC LIMIT 1),
     'latest_complete_halt', fence._latest_complete_halt());
 END
