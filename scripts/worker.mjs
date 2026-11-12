@@ -119,19 +119,30 @@ const fdType = (s) =>
               ? 'block'
               : 'other';
 
+/** حدُّ جولاتِ عدمِ الاستقرار — بلوغُه **يفشلُ مغلقاً** (‏VERIFY_FAILED)، فلا يُخفي نسخةً بل يرفضُ الإقلاع. */
+export const FD_SCAN_MAX_ROUNDS = 64;
+
 /**
- * تعدادُ **كلِّ** الواصفاتِ المفتوحةِ فعلاً (‏/proc/self/fd) والتي تشيرُ إلى (‏dev، ino) — لا مسحَ بمدًى رقميّ.
+ * تعدادُ **كلِّ** الواصفاتِ المفتوحةِ فعلاً (‏/proc/self/fd) التي تشيرُ إلى (‏dev، ino) — لا مسحَ بمدًى رقميّ.
  * (‏كان المسحُ 0..4095، فنسخةٌ عندَ 5000 تمرُّ والتحقّقُ يقولُ «لا نسخ».)
  *
- * السباقات:
- *   - واصفٌ يُغلَقُ بينَ القائمةِ وfstat ⇒ EBADF ⇒ يُتخطّى: المغلقُ ليس نسخةً مفتوحة. وواصفُ المجلّدِ
- *     الذي تفتحُه readdir نفسُها يظهرُ في القائمةِ ثمّ يُغلَق — فيُتخطّى كذلك.
- *   - واصفٌ يُفتَحُ أثناءَ المسح ⇒ تُعادُ القائمةُ حتّى لا يظهرَ رقمٌ لم يُفحَص (‏نقطةٌ ثابتة؛ تنتهي لأنّ كلَّ
- *     دورةٍ تُضيفُ رقماً جديداً على الأقلّ إلى مجموعةٍ محدودةٍ بالواصفاتِ المفتوحة). المُقلِعُ متزامنٌ
- *     في هذه المرحلة، فهذا دفاعٌ لا افتراض.
- *   - تعذُّرُ القائمة، أو اسمٌ ليس رقماً، أو خطأُ fstat غيرُ EBADF ⇒ **يفشلُ مغلقاً** (‏VERIFY_FAILED)
- *     لا «لا نسخ».
- * لا يتبعُ الروابطَ بمسار: fstat على رقمِ الواصفِ نفسِه (‏لا نافذةَ بينَ readlink وstat).
+ * الخوارزمية: لقطاتٌ متتالية؛ كلُّ لقطةٍ = قائمةُ الأرقامِ ثمّ fstat لكلٍّ منها ⇒ خريطةُ رقمٍ ⇒ هويّةٍ (‏dev:ino)
+ * للمفتوحِ فقط. تُعادُ اللقطةُ حتّى تتطابقَ لقطتانِ متتاليتانِ تماماً، والنتيجةُ **اتّحادُ** الإصاباتِ في كلِّ
+ * اللقطات. فلا «رقمٌ رأيناه» يُعفى من إعادةِ الفحص: رقمٌ أُغلِقَ (‏EBADF) ثمّ أُعيدَ استعمالُه، أو رقمٌ تغيّرت
+ * هويّتُه بينَ لقطتين، يُغيّرُ اللقطةَ فتُعاد ويُفحَصُ من جديد (‏ISO-53 «إعادةُ استعمالِ الرقم»).
+ * (‏النسخةُ السابقةُ كانت تحفظُ الأرقامَ في `seen` فتتخطّى رقماً أُعيدَ استعمالُه — ملاحظةُ المراجعةِ المستقلّة.)
+ *   - EBADF ⇒ الرقمُ ليس في اللقطة (‏واصفُ readdir نفسُها يظهرُ في القائمةِ ثمّ يُغلَقُ فيغيبُ في كلِّ لقطة).
+ *   - تعذُّرُ القائمة، أو اسمٌ ليس رقماً، أو خطأُ fstat غيرُ EBADF، أو عدمُ الاستقرارِ بعدَ FD_SCAN_MAX_ROUNDS
+ *     ⇒ **يفشلُ مغلقاً**.
+ *   - fstat على رقمِ الواصفِ نفسِه، لا اتّباعُ رابطٍ بمسار.
+ *
+ * حدُّ الضمان (‏لا يُدّعى أكثرُ منه): أيُّ مسحٍ لقطةٌ في الزمن. نسخةٌ يُنشئُها خيطٌ آخرُ **في العمليّةِ نفسِها** ثمّ
+ * يُزيلُها كلَّها بينَ fstat رقمٍ واحدٍ في لقطتينِ متتاليتينِ لا تُرى، ونسخةٌ تُنشأُ بعدَ آخرِ لقطةٍ لا تُرى.
+ * لا تستطيعُ عمليّةٌ أخرى إدخالَ واصفٍ إلى هذه العمليّة (‏إلا ptrace أو root — TH-UID-11).
+ * **لا يُدّعى أنّ جدولَ الواصفاتِ لا يتغيّرُ بالتوازي:** تحتَ ESM تكونُ خيوطُ libuv قائمةً قبلَ المُقلِع (‏مقيس:
+ * 11 خيطاً في Node 20 قبلَ أيِّ إدخالٍ/إخراجٍ لاتزامنيّ). المقيسُ والمُختبَرُ أضيق: مسارُ المُقلِعِ متزامنٌ لا
+ * يُرسِلُ عملاً إلى تلك الخيوط (‏ISO-58، فحصُ المصدر)، وجدولُ الواصفاتِ ثابتٌ عبرَ الإقلاعِ الحقيقيِّ عدا
+ * الواصفِ المُغلَق (‏ISO-55)، وتُسجَّلُ حالةُ الخيوطِ الأخرى (‏نداءُ النظامِ الذي تنتظرُ فيه) دليلاً لا توكيداً.
  *
  * @param {number} dev @param {number} ino
  * @param {{ list?: () => string[], fstat?: (fd: number) => { dev: number, ino: number } }} [io]
@@ -147,10 +158,8 @@ export function scanOpenFds(dev, ino, io = {}) {
     );
   };
   /** @type {Set<number>} */
-  const seen = new Set();
-  /** @type {number[]} */
-  const hits = [];
-  for (;;) {
+  const hits = new Set();
+  const snapshot = () => {
     /** @type {string[]} */
     let names;
     try {
@@ -158,15 +167,11 @@ export function scanOpenFds(dev, ino, io = {}) {
     } catch (error) {
       return fail(`/proc/self/fd: ${error instanceof Error ? error.message : String(error)}`);
     }
-    const fresh = [];
+    /** @type {Map<number, string>} */
+    const snap = new Map();
     for (const name of names) {
       if (!/^(0|[1-9][0-9]*)$/.test(name)) return fail(`اسمٌ ليس رقمَ واصف «${name}»`);
       const fd = Number(name);
-      if (!seen.has(fd)) fresh.push(fd);
-    }
-    if (fresh.length === 0) break;
-    for (const fd of fresh) {
-      seen.add(fd);
       /** @type {{ dev: number, ino: number }} */
       let s;
       try {
@@ -175,10 +180,23 @@ export function scanOpenFds(dev, ino, io = {}) {
         if (/** @type {any} */ (error)?.code === 'EBADF') continue;
         return fail(`fstat(${fd}): ${error instanceof Error ? error.message : String(error)}`);
       }
-      if (s.dev === dev && s.ino === ino) hits.push(fd);
+      snap.set(fd, `${s.dev}:${s.ino}`);
+      if (s.dev === dev && s.ino === ino) hits.add(fd);
     }
+    return snap;
+  };
+  /** @param {Map<number, string>} a @param {Map<number, string>} b */
+  const same = (a, b) => a.size === b.size && [...a].every(([fd, id]) => b.get(fd) === id);
+  let prev = snapshot();
+  for (let round = 1; ; round += 1) {
+    if (round > FD_SCAN_MAX_ROUNDS) {
+      return fail(`جدولُ الواصفاتِ لم يستقرَّ في ${FD_SCAN_MAX_ROUNDS} جولة`);
+    }
+    const cur = snapshot();
+    if (same(prev, cur)) break;
+    prev = cur;
   }
-  return hits.sort((a, b) => a - b);
+  return [...hits].sort((a, b) => a - b);
 }
 
 /** @type {IsolationOs} */

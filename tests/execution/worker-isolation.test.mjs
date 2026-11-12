@@ -42,6 +42,7 @@ import {
   FD_MAX,
   LAUNCH_SH,
   scanOpenFds,
+  FD_SCAN_MAX_ROUNDS,
 } from '../../scripts/worker.mjs';
 import { UNSET_ENV, boundingCapabilities, parseUnit, systemdUnit } from '../../scripts/worker.mjs';
 
@@ -1411,7 +1412,7 @@ test('ISO-52: محاكاةٌ حقيقيّةٌ من نصِّ الوحدة — ي�
 // ── WL-533: تعدادُ الواصفاتِ الفعليّ بدلَ المسحِ 0..4095 ─────────────────────────────────────
 // الخلل: `scanFds` كان يمسحُ 0..4095 فقط، والإعدادُ يرفضُ XUUX_FENCE_KEY_FD ≥ 4096. فنسخةٌ من واصفِ
 // المفتاحِ عندَ 5000 تمرُّ والتحقّقُ يقولُ «لا نسخ». الإصلاح: `scanOpenFds` يعدُّ /proc/self/fd حتّى
-// نقطةٍ ثابتة، ولا حدَّ إلا مدى النوع (‏FD_MAX = INT_MAX).
+// تتطابقَ لقطتانِ كاملتان (‏اتّحادُ الإصابات — لا «رقمٌ رأيناه» يُعفى)، ولا حدَّ إلا مدى النوع (‏FD_MAX = INT_MAX).
 
 /** @param {Record<number, {dev:number, ino:number} | Error>} m */
 const fakeFdStat = (m) => (/** @type {number} */ fd) => {
@@ -1457,6 +1458,90 @@ test.describe('WL-533 تعدادُ الواصفات (‏scanOpenFds)', () => {
     });
     assert.deepEqual(hits, [8000]);
     assert.equal(n, 3, 'تُعادُ القائمةُ حتّى لا يظهرَ رقمٌ جديد');
+  });
+
+  // ── إعادةُ استعمالِ الرقم (‏ملاحظةُ المراجعةِ المستقلّة): النسخةُ السابقةُ كانت تحفظُ كلَّ رقمٍ رأته في
+  // `seen`، فرقمٌ أُغلِقَ (‏EBADF) ثمّ أُعيدَ استعمالُه لنسخةٍ من المفتاحِ لا يُفحَصُ ثانيةً. الآن: لقطاتٌ
+  // كاملةٌ حتّى تتطابقَ اثنتانِ متتاليتان، والنتيجةُ اتّحادُ الإصاباتِ في كلِّ اللقطات.
+  /** fstat مُتسلسِل: كلُّ رقمٍ يُعيدُ القيمَ بالترتيبِ ثمّ يثبتُ على الأخيرة. @param {Record<number, Array<{dev:number, ino:number} | Error | undefined>>} seq */
+  const seqFdStat = (seq) => {
+    /** @type {Record<number, number>} */
+    const at = {};
+    const calls = /** @type {number[]} */ ([]);
+    const fstat = (/** @type {number} */ fd) => {
+      calls.push(fd);
+      const vs = seq[fd] ?? [undefined];
+      const i = Math.min(at[fd] ?? 0, vs.length - 1);
+      at[fd] = i + 1;
+      return fakeFdStat({ [fd]: /** @type {any} */ (vs[i]) })(fd);
+    };
+    return { fstat, calls };
+  };
+
+  test('ISO-53: إعادةُ استعمالِ الرقم — 5000 يُغلَقُ قبلَ fstat (‏EBADF) ثمّ يُعادُ فتحُه نسخةً من المفتاح ⇒ يُكتشَف', () => {
+    const io = seqFdStat({ 3: [{ dev: 9, ino: 1 }], 5000: [undefined, { dev: 1, ino: 42 }] });
+    assert.deepEqual(scanOpenFds(1, 42, { list: () => ['3', '5000'], fstat: io.fstat }), [5000]);
+    assert.ok(
+      io.calls.filter((fd) => fd === 5000).length >= 2,
+      'الرقمُ نفسُه يُفحَصُ ثانيةً — لا «رأيناه» يُعفيه',
+    );
+  });
+
+  test('ISO-53: تبدُّلُ الهويّة — 5000 ملفٌّ آخرُ في لقطةٍ ثمّ نسخةُ المفتاحِ في التالية ⇒ يُكتشَف', () => {
+    const io = seqFdStat({
+      5000: [
+        { dev: 9, ino: 7 },
+        { dev: 1, ino: 42 },
+      ],
+    });
+    assert.deepEqual(scanOpenFds(1, 42, { list: () => ['5000'], fstat: io.fstat }), [5000]);
+  });
+
+  test('ISO-53: نسخةٌ تظهرُ في لقطةٍ ثمّ تختفي تبقى في النتيجة (‏اتّحاد) — يفشلُ مغلقاً لا «لا نسخ»', () => {
+    const io = seqFdStat({ 5000: [{ dev: 1, ino: 42 }, undefined] });
+    assert.deepEqual(scanOpenFds(1, 42, { list: () => ['5000'], fstat: io.fstat }), [5000]);
+  });
+
+  test('ISO-53: حدُّ الضمانِ مُختبَرٌ لا مُخفًى — نسخةٌ تُفتَحُ بعدَ آخرِ لقطتينِ متطابقتينِ لا تُرى', () => {
+    // ‏أيُّ مسحٍ لقطةٌ في الزمن: لقطتانِ متطابقتانِ (‏4 مغلق) ثمّ فتحٌ بعدَهما لا يراه أيُّ مسح. لهذا لا يُدّعى
+    // أنّ جدولَ الواصفاتِ لا يتغيّرُ بالتوازي؛ الضمانُ المقيسُ للإقلاعِ الحقيقيّ في ISO-55 وISO-58.
+    let n = 0;
+    const io = seqFdStat({ 4: [undefined, undefined, { dev: 1, ino: 42 }] });
+    const hits = scanOpenFds(1, 42, {
+      list: () => {
+        n += 1;
+        return ['4'];
+      },
+      fstat: io.fstat,
+    });
+    assert.deepEqual(hits, []);
+    assert.equal(n, 2);
+  });
+
+  test('ISO-53: جدولٌ لا يستقرُّ ⇒ VERIFY_FAILED بعدَ FD_SCAN_MAX_ROUNDS (‏فشلٌ مغلقٌ لا حدٌّ يُخفي)', () => {
+    let n = 0;
+    isoRejects(
+      () =>
+        scanOpenFds(1, 42, {
+          list: () => [String(3 + (n++ % 2))],
+          fstat: () => ({ dev: 9, ino: n }),
+        }),
+      ISOLATION_ERRORS.VERIFY_FAILED,
+    );
+    assert.equal(n, FD_SCAN_MAX_ROUNDS + 1);
+  });
+
+  test('ISO-53: جدولٌ ثابتٌ (‏واصفُ readdir نفسُه EBADF في كلِّ لقطة) ينتهي بلقطتين', () => {
+    let n = 0;
+    const hits = scanOpenFds(1, 42, {
+      list: () => {
+        n += 1;
+        return ['0', '1', '2', '21'];
+      },
+      fstat: fakeFdStat({ 0: { dev: 9, ino: 1 }, 1: { dev: 9, ino: 1 }, 2: { dev: 9, ino: 1 } }),
+    });
+    assert.deepEqual(hits, []);
+    assert.equal(n, 2);
   });
 
   for (const [name, io] of /** @type {Array<[string, any]>} */ ([
@@ -1543,7 +1628,7 @@ const needHighFds = (t) => {
 const WORKER_URL = new URL('../../scripts/worker.mjs', import.meta.url).href;
 const HIGH_FD_CHILD = `
 import { bootstrapIsolation, scanOpenFds } from ${JSON.stringify(WORKER_URL)};
-import { closeSync, fstatSync, readFileSync } from 'node:fs';
+import { closeSync, fstatSync, readFileSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 const cfg = JSON.parse(process.env.FD_TEST);
 const key = fstatSync(cfg.keyFile === undefined ? cfg.fd : cfg.fd);
@@ -1553,6 +1638,22 @@ const LISTER = "const fs=require('fs');const t=fs.statSync(process.argv[1]);cons
 const grand = () => JSON.parse(spawnSync(process.execPath, ['-e', LISTER, cfg.keyFile],
   { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).stdout);
 const out = { before: scanOpenFds(key.dev, key.ino), grandBefore: grand() };
+const table = () => {
+  const t = {};
+  for (const n of readdirSync('/proc/self/fd')) {
+    try { const st = fstatSync(+n); t[n] = st.dev + ':' + st.ino; } catch {}
+  }
+  return t;
+};
+const threads = () => readdirSync('/proc/self/task').map((tid) => {
+  let syscall;
+  try { syscall = readFileSync('/proc/self/task/' + tid + '/syscall', 'utf8').split(' ')[0].trim(); }
+  catch (e) { syscall = e.code; }
+  const st = readFileSync('/proc/self/task/' + tid + '/stat', 'utf8');
+  return { tid: +tid, main: +tid === process.pid, syscall, state: st.slice(st.lastIndexOf(')') + 2).split(' ')[0] };
+});
+out.threads = threads();
+out.tableBefore = table();
 let uid = 0;
 const os = {
   getuid: () => uid, geteuid: () => uid,
@@ -1569,6 +1670,8 @@ try {
   const r = bootstrapIsolation(cfg.env, { os, execArgv: [], trust: () => ({ violations: [], checked: [{}] }), trustPaths: ['/x'] });
   out.ok = true; out.evidence = r.evidence; out.pemOk = r.pem.includes('PRIVATE KEY');
 } catch (e) { out.ok = false; out.code = e.code; out.message = e.message; }
+out.tableAfter = table();
+out.threadsAfter = threads();
 out.closed = (() => { try { fstatSync(cfg.fd); return 'open'; } catch (e) { return e.code; } })();
 out.after = scanOpenFds(key.dev, key.ino);
 out.grandAfter = grand();
@@ -1632,6 +1735,57 @@ test('ISO-55: واصفُ مفتاحٍ صحيحٌ عندَ 5000 يُقبَل، و
   assert.equal(o.closed, 'EBADF', 'الواصفُ مغلقٌ بعدَ الإقلاع');
   assert.deepEqual(o.after, [], 'لا نسخةَ مفتوحةً بعدَ الإغلاق');
   assert.deepEqual(o.grandAfter, [], 'الحفيدُ بعدَ الإقلاعِ لا يرثُ أيَّ واصفٍ إلى المفتاح');
+  // ‏جدولُ الواصفاتِ عبرَ الإقلاعِ الحقيقيّ: لا تغيُّرَ إلا إغلاقُ واصفِ المفتاح — لا خيطَ آخرَ فتحَ أو أغلقَ
+  // شيئاً في نافذةِ المسح (‏قياسٌ للتشغيلِ هذا، لا برهانٌ عامّ — حدُّ الضمانِ في scanOpenFds).
+  const expected = { ...o.tableBefore };
+  delete expected[String(HIGH_FD)];
+  assert.ok(o.tableBefore[String(HIGH_FD)] !== undefined, 'المفتاحُ في الجدولِ قبلَ الإقلاع');
+  assert.deepEqual(o.tableAfter, expected, 'الجدولُ بعدَ الإقلاعِ = قبلَه بلا واصفِ المفتاح');
+  t.diagnostic(`threads(before)=${JSON.stringify(o.threads)}`);
+  t.diagnostic(`threads(after)=${JSON.stringify(o.threadsAfter)}`);
+  t.diagnostic(`fd-table(before)=${JSON.stringify(o.tableBefore)}`);
+});
+
+test('ISO-58: مسارُ المُقلِعِ متزامنٌ — لا يُرسِلُ عملاً إلى خيوطٍ أخرى قبلَ المسحِ ولا أثناءَه (‏فحصُ المصدر)', () => {
+  // ‏ما يُثبَتُ هنا ضيّق: شيفرةُ المُقلِع (‏قبلَ LAUNCH_SUDO) لا تحوي await ولا ردودَ نداءٍ مؤجّلة، وكلُّ ما
+  // تستوردُه من node:fs متزامن، وmain() تستدعي bootstrapIsolation قبلَ أوّلِ await. فلا إدخالَ/إخراجَ
+  // لاتزامنيّاً من هذه العمليّةِ يفتحُ واصفاً أثناءَ المسح. لا يُدّعى أكثرُ من ذلك (‏حدُّ الضمانِ في scanOpenFds).
+  const src = fs.readFileSync(new URL('../../scripts/worker.mjs', import.meta.url), 'utf8');
+  const cut = src.indexOf('export const LAUNCH_SUDO');
+  assert.ok(cut > 0);
+  const boot = src.slice(0, cut);
+  assert.ok(
+    boot.includes('export function bootstrapIsolation('),
+    'المُقلِعُ داخلَ المقطعِ المفحوص',
+  );
+  assert.ok(boot.includes('export function scanOpenFds('), 'المسحُ داخلَ المقطعِ المفحوص');
+  const code = boot.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  for (const re of [
+    /\bawait\b/,
+    /\basync\b/,
+    /\bPromise\b/,
+    /\.then\(/,
+    /\bsetTimeout\b/,
+    /\bsetImmediate\b/,
+    /\bnextTick\b/,
+    /\bqueueMicrotask\b/,
+    /\bWorker\b/,
+  ]) {
+    assert.doesNotMatch(code, re, `المُقلِعُ بلا ${re}`);
+  }
+  const fsImport = /import\s*\{([^}]*)\}\s*from\s*'node:fs'/.exec(src);
+  assert.ok(fsImport);
+  for (const name of String(fsImport[1])
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean)) {
+    assert.match(name, /Sync$/, `استيرادُ node:fs متزامن: ${name}`);
+  }
+  assert.doesNotMatch(src, /from 'node:fs\/promises'/);
+  const main = src.slice(src.indexOf('async function main() {'));
+  const first = main.indexOf('bootstrapIsolation(process.env)');
+  assert.ok(first > 0);
+  assert.doesNotMatch(main.slice(0, first), /\bawait\b/, 'لا await قبلَ المُقلِعِ في main');
 });
 
 test('ISO-56: نسخةُ المفتاحِ عندَ 6000 (‏فوقَ 4095) تُكتشَفُ بعدَ الإغلاق ⇒ VERIFY_FAILED', (t) => {
