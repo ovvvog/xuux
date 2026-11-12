@@ -1,0 +1,172 @@
+[
+  {
+    "i": 0,
+    "sealed": true,
+    "before": 40,
+    "committed": 42,
+    "after_wait": 42,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 42,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 1,
+    "sealed": true,
+    "before": 65,
+    "committed": 67,
+    "after_wait": 67,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 67,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 2,
+    "sealed": true,
+    "before": 37,
+    "committed": 38,
+    "after_wait": 38,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 38,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 3,
+    "sealed": true,
+    "before": 83,
+    "committed": 84,
+    "after_wait": 84,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 84,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 4,
+    "sealed": true,
+    "before": 78,
+    "committed": 79,
+    "after_wait": 79,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 79,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 5,
+    "sealed": true,
+    "before": 82,
+    "committed": 83,
+    "after_wait": 83,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 83,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 6,
+    "sealed": true,
+    "before": 89,
+    "committed": 90,
+    "after_wait": 90,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 90,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 7,
+    "sealed": true,
+    "before": 32,
+    "committed": 34,
+    "after_wait": 34,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 34,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 8,
+    "sealed": true,
+    "before": 47,
+    "committed": 48,
+    "after_wait": 48,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 48,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  },
+  {
+    "i": 9,
+    "sealed": true,
+    "before": 84,
+    "committed": 86,
+    "after_wait": 86,
+    "late_writes": 0,
+    "writer_exit": 3,
+    "writer_stopped": {
+      "type": "stopped",
+      "committed": 86,
+      "code": "XF005",
+      "message": "fence: طلبُ إيقافٍ مُسجَّل — الكتابةُ مرفوضة"
+    },
+    "relogin_refused": true,
+    "systemHaltComplete": true
+  }
+]
