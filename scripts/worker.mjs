@@ -20,40 +20,946 @@
  * ضمن الميزانية، و`65` عطبٌ ليس تعذّراً (فسادٌ، مخطّطٌ غائب، نتيجةٌ لا تطابق).
  */
 
+import { createHash, createPrivateKey, randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-import { PersistentEventLog } from '../src/root-of-trust/persistent-log.mjs';
-import {
-  HaltSwitch,
-  isProductionRuntime,
-  openProductionEventLog,
-  royalVerifierFromPublicKey,
-} from '../src/root-of-trust/index.mjs';
-import { createTaskQueue } from '../src/execution/queue.mjs';
-import { createWorker } from '../src/execution/worker.mjs';
-import {
-  createPendingResultStore,
-  settlePendingResults,
-  settleUntilAdmitted,
-} from '../src/execution/pending-results.mjs';
-import {
-  RECOVERY_EXIT_CODES,
-  RECOVERY_VERDICTS,
-  WorkerDatabaseFault,
-  abortableSleep,
-  classifyDatabaseFault,
-  createDatabaseRecovery,
-} from '../src/execution/db-recovery.mjs';
-import { createQuotaLedger } from '../src/policy/quota.mjs';
-import { loadPolicyBundle } from '../src/policy/loader.mjs';
-import { createPool } from '../src/persistence/db.mjs';
-import {
-  WORKER_REGISTRY_ERRORS,
-  WorkerRegistryError,
-  createWorkerRegistry,
-} from '../src/execution/worker-registry.mjs';
-import { randomUUID } from 'node:crypto';
-import { dbFenceMode, prepareFencedWorker } from '../src/fence/db-fence.mjs';
+/** @typedef {import('../src/execution/db-recovery.mjs').WorkerDatabaseFault} WorkerDatabaseFault */
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// مُقلِعُ العزل (`WL-533`، علاجُ `LAB-UID-05`) — **لا يستوردُ إلا وحداتِ `node:`**.
+//
+// ترتيبُ الإقلاع (‏مراجعةُ #546): هذا الملفُّ نقطةُ الدخول، ورسمُ استيرادِه الثابتُ وحداتُ `node:`
+// وحدَها (‏يقيسُه اختبارُ ISO-40). فإن طُلبَ العزلُ (‏`XUUX_FENCE_ISOLATION=required`) لا تُقيَّمُ أيُّ
+// وحدةٍ تطبيقيّةٍ ولا شيفرةُ تطبيقٍ وهو root: يُقرأُ واصفُ المفتاحِ ويُفحَصُ ويُغلَق، وتُسقَطُ الهويّة،
+// ويُتحقَّق — ثمّ وحدَه `loadApp()` يُحمِّلُ التطبيقَ ديناميكيّاً (‏ISO-41 يقيسُ أثراً جانبيّاً في وحدةٍ
+// مستوردة). وأمّا `NODE_OPTIONS` ومثلُها فتُنفَّذُ **قبلَ** أوّلِ سطرٍ هنا — فلا يحميها المُقلِع؛ يرفضُ
+// وجودَها (‏كاشفٌ لا حاجز)، والحاجزُ بيئةُ السماحِ الصريحةِ في المُطلِق `isolatedLaunchCommand`.
+//
+// **ما لا يحميه:** root ومن يملكُ CAP_SYS_PTRACE؛ اختراقُ العاملِ نفسِه؛ إشاراتُ القتلِ من الـUID
+// نفسِه. لا يُثبتُ هويّةَ العملية، ولا حمايةً عتاديّة. والقياسُ على مضيفٍ واحد.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+export const ISOLATION_ERRORS = Object.freeze({
+  CONFIG: 'FENCE_ISOLATION_CONFIG',
+  HOSTILE_ENV: 'FENCE_ISOLATION_HOSTILE_ENV',
+  NOT_PRIVILEGED: 'FENCE_ISOLATION_NOT_PRIVILEGED',
+  LAUNCH_POLICY: 'FENCE_ISOLATION_LAUNCH_POLICY',
+  DUMPABLE_POLICY: 'FENCE_ISOLATION_SUID_DUMPABLE',
+  KEY_FD: 'FENCE_ISOLATION_KEY_FD',
+  VERIFY_FAILED: 'FENCE_ISOLATION_VERIFY_FAILED',
+  UNTRUSTED_CODE: 'FENCE_ISOLATION_UNTRUSTED_CODE',
+});
+
+/** المتغيّراتُ التي يحدّدُها المُطلِق. لا يحملُ أيٌّ منها سرّاً. */
+export const ISOLATION_ENV = Object.freeze({
+  mode: 'XUUX_FENCE_ISOLATION',
+  keyFd: 'XUUX_FENCE_KEY_FD',
+  uid: 'XUUX_FENCE_WORKER_UID',
+  gid: 'XUUX_FENCE_WORKER_GID',
+});
+
+/** حدُّ مجموعةِ القدراتِ المسموح (CapBnd): CAP_SETGID(6) وCAP_SETUID(7) فقط — للإسقاطِ وحدَه. */
+export const ALLOWED_CAP_BND = 0xc0n;
+/** أقصى حجمٍ لمفتاحٍ على الواصف (PEM لـEd25519 نحوَ 119 بايتاً). */
+export const KEY_FD_MAX_BYTES = 16_384;
+/**
+ * أعلى رقمِ واصفٍ ممكنٍ في Linux: الواصفُ ‎`int`‎ في النواة، وحدُّه الفعليُّ RLIMIT_NOFILE وfs.nr_open.
+ * هذا **مدى النوع** لا حدُّ مسح — لا مسحَ بالأرقامِ أصلاً (‏`scanOpenFds` يعدُّ المفتوحَ فعلاً).
+ */
+export const FD_MAX = 2_147_483_647;
+
+/** متغيّراتُ بيئةٍ تُنفِّذُ شيفرةً أو تُحمِّلُ مكتباتٍ قبلَ المُقلِع، أو تكتبُ ملفّاتٍ بصلاحيّةِ root. */
+export const HOSTILE_ENV = [/^NODE_(?!ENV$)/, /^LD_/, /^DYLD_/];
+
+export class IsolationError extends Error {
+  /** @param {string} code @param {string} message @param {unknown} [details] */
+  constructor(code, message, details) {
+    super(message);
+    this.name = 'IsolationError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+/**
+ * @typedef {{ type: string, uid: number, mode: number, size: number, dev: number, ino: number }} FdStat
+ * @typedef {{
+ *   getuid(): number, geteuid(): number,
+ *   setgroups(g: number[]): void, setgid(g: number): void, setuid(u: number): void,
+ *   fstat(fd: number): FdStat, readFd(fd: number): string, closeFd(fd: number): void,
+ *   scanFds(dev: number, ino: number): number[],
+ *   readText(path: string): string, ownerOf(path: string): number,
+ * }} IsolationOs
+ */
+
+/** @param {import('node:fs').Stats} s */
+const fdType = (s) =>
+  s.isFile()
+    ? 'file'
+    : s.isFIFO()
+      ? 'fifo'
+      : s.isSocket()
+        ? 'socket'
+        : s.isCharacterDevice()
+          ? 'char'
+          : s.isDirectory()
+            ? 'dir'
+            : s.isBlockDevice()
+              ? 'block'
+              : 'other';
+
+/** حدُّ جولاتِ عدمِ الاستقرار — بلوغُه **يفشلُ مغلقاً** (‏VERIFY_FAILED)، فلا يُخفي نسخةً بل يرفضُ الإقلاع. */
+export const FD_SCAN_MAX_ROUNDS = 64;
+
+/**
+ * تعدادُ **كلِّ** الواصفاتِ المفتوحةِ فعلاً (‏/proc/self/fd) التي تشيرُ إلى (‏dev، ino) — لا مسحَ بمدًى رقميّ.
+ * (‏كان المسحُ 0..4095، فنسخةٌ عندَ 5000 تمرُّ والتحقّقُ يقولُ «لا نسخ».)
+ *
+ * الخوارزمية: لقطاتٌ متتالية؛ كلُّ لقطةٍ = قائمةُ الأرقامِ ثمّ fstat لكلٍّ منها ⇒ خريطةُ رقمٍ ⇒ هويّةٍ (‏dev:ino)
+ * للمفتوحِ فقط. تُعادُ اللقطةُ حتّى تتطابقَ لقطتانِ متتاليتانِ تماماً، والنتيجةُ **اتّحادُ** الإصاباتِ في كلِّ
+ * اللقطات. فلا «رقمٌ رأيناه» يُعفى من إعادةِ الفحص: رقمٌ أُغلِقَ (‏EBADF) ثمّ أُعيدَ استعمالُه، أو رقمٌ تغيّرت
+ * هويّتُه بينَ لقطتين، يُغيّرُ اللقطةَ فتُعاد ويُفحَصُ من جديد (‏ISO-53 «إعادةُ استعمالِ الرقم»).
+ * (‏النسخةُ السابقةُ كانت تحفظُ الأرقامَ في `seen` فتتخطّى رقماً أُعيدَ استعمالُه — ملاحظةُ المراجعةِ المستقلّة.)
+ *   - EBADF ⇒ الرقمُ ليس في اللقطة (‏واصفُ readdir نفسُها يظهرُ في القائمةِ ثمّ يُغلَقُ فيغيبُ في كلِّ لقطة).
+ *   - تعذُّرُ القائمة، أو اسمٌ ليس رقماً، أو خطأُ fstat غيرُ EBADF، أو عدمُ الاستقرارِ بعدَ FD_SCAN_MAX_ROUNDS
+ *     ⇒ **يفشلُ مغلقاً**.
+ *   - fstat على رقمِ الواصفِ نفسِه، لا اتّباعُ رابطٍ بمسار.
+ *
+ * حدُّ الضمان (‏لا يُدّعى أكثرُ منه): أيُّ مسحٍ لقطةٌ في الزمن. نسخةٌ يُنشئُها خيطٌ آخرُ **في العمليّةِ نفسِها** ثمّ
+ * يُزيلُها كلَّها بينَ fstat رقمٍ واحدٍ في لقطتينِ متتاليتينِ لا تُرى، ونسخةٌ تُنشأُ بعدَ آخرِ لقطةٍ لا تُرى.
+ * لا تستطيعُ عمليّةٌ أخرى إدخالَ واصفٍ إلى هذه العمليّة (‏إلا ptrace أو root — TH-UID-11).
+ * **لا يُدّعى أنّ جدولَ الواصفاتِ لا يتغيّرُ بالتوازي:** تحتَ ESM تكونُ خيوطُ libuv قائمةً قبلَ المُقلِع (‏مقيس:
+ * 11 خيطاً في Node 20 قبلَ أيِّ إدخالٍ/إخراجٍ لاتزامنيّ). المقيسُ والمُختبَرُ أضيق: مسارُ المُقلِعِ متزامنٌ لا
+ * يُرسِلُ عملاً إلى تلك الخيوط (‏ISO-58، فحصُ المصدر)، وجدولُ الواصفاتِ ثابتٌ عبرَ الإقلاعِ الحقيقيِّ عدا
+ * الواصفِ المُغلَق (‏ISO-55)، وتُسجَّلُ حالةُ الخيوطِ الأخرى (‏نداءُ النظامِ الذي تنتظرُ فيه) دليلاً لا توكيداً.
+ *
+ * @param {number} dev @param {number} ino
+ * @param {{ list?: () => string[], fstat?: (fd: number) => { dev: number, ino: number } }} [io]
+ * @returns {number[]}
+ */
+export function scanOpenFds(dev, ino, io = {}) {
+  const list = io.list ?? (() => readdirSync('/proc/self/fd'));
+  const stat = io.fstat ?? ((fd) => fstatSync(fd));
+  const fail = (/** @type {string} */ why) => {
+    throw new IsolationError(
+      ISOLATION_ERRORS.VERIFY_FAILED,
+      `تعذّرَ تعدادُ الواصفاتِ المفتوحة: ${why} — لا يُقالُ «لا نسخ».`,
+    );
+  };
+  /** @type {Set<number>} */
+  const hits = new Set();
+  const snapshot = () => {
+    /** @type {string[]} */
+    let names;
+    try {
+      names = list();
+    } catch (error) {
+      return fail(`/proc/self/fd: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    /** @type {Map<number, string>} */
+    const snap = new Map();
+    for (const name of names) {
+      if (!/^(0|[1-9][0-9]*)$/.test(name)) return fail(`اسمٌ ليس رقمَ واصف «${name}»`);
+      const fd = Number(name);
+      /** @type {{ dev: number, ino: number }} */
+      let s;
+      try {
+        s = stat(fd);
+      } catch (error) {
+        if (/** @type {any} */ (error)?.code === 'EBADF') continue;
+        return fail(`fstat(${fd}): ${error instanceof Error ? error.message : String(error)}`);
+      }
+      snap.set(fd, `${s.dev}:${s.ino}`);
+      if (s.dev === dev && s.ino === ino) hits.add(fd);
+    }
+    return snap;
+  };
+  /** @param {Map<number, string>} a @param {Map<number, string>} b */
+  const same = (a, b) => a.size === b.size && [...a].every(([fd, id]) => b.get(fd) === id);
+  let prev = snapshot();
+  for (let round = 1; ; round += 1) {
+    if (round > FD_SCAN_MAX_ROUNDS) {
+      return fail(`جدولُ الواصفاتِ لم يستقرَّ في ${FD_SCAN_MAX_ROUNDS} جولة`);
+    }
+    const cur = snapshot();
+    if (same(prev, cur)) break;
+    prev = cur;
+  }
+  return [...hits].sort((a, b) => a - b);
+}
+
+/** @type {IsolationOs} */
+const realOs = {
+  getuid: () => /** @type {any} */ (process).getuid(),
+  geteuid: () => /** @type {any} */ (process).geteuid(),
+  setgroups: (g) => /** @type {any} */ (process).setgroups(g),
+  setgid: (g) => /** @type {any} */ (process).setgid(g),
+  setuid: (u) => /** @type {any} */ (process).setuid(u),
+  fstat: (fd) => {
+    const s = fstatSync(fd);
+    return {
+      type: fdType(s),
+      uid: s.uid,
+      mode: s.mode & 0o7777,
+      size: s.size,
+      dev: s.dev,
+      ino: s.ino,
+    };
+  },
+  readFd: (fd) => readFileSync(fd, 'utf8'),
+  closeFd: (fd) => closeSync(fd),
+  scanFds: (dev, ino) => scanOpenFds(dev, ino),
+  readText: (p) => readFileSync(p, 'utf8'),
+  ownerOf: (p) => statSync(p).uid,
+};
+
+// ── ثقةُ الشيفرةِ التي تعملُ بـroot (‏WL-533، الجولةُ الثالثة) ─────────────────────────────────────
+// node والمُقلِعُ وsh وsetpriv وenv وsudo تعملُ بـroot (‏منقوصِ القدرات) **قبلَ** الإسقاط. فإن كتبَ
+// أحدَها — أو مجلّداً في طريقِه، أو رابطاً رمزيّاً في سلسلتِه — غيرُ root، صارَ الإقلاعُ التالي شيفرتَه
+// بصلاحيّةِ root. (‏قِيسَ على مضيفِ المختبر: `/usr/local/bin/node` ‏0777 ملكُ uid 1001.)
+// العقد: كلُّ مجلّدٍ يُعبَرُ ملكُ root ولا يكتبُه group/other إلا بِبِتِّ sticky؛ وكلُّ رابطٍ رمزيٍّ في
+// السلسلةِ ملكُ root؛ والملفُّ النهائيُّ عاديٌّ ملكُ root لا يكتبُه group/other؛ وبصمةُ sha256 إن ثُبِّتت.
+// (‏بِتُّ group في ‎st_mode‎ هو قناعُ ACL حين توجد، فمدخلُ ACL بالكتابةِ يظهرُ فيه.)
+// **الحدّ:** لا يفحصُ المكتباتِ المشتركةَ ولا node_modules ولا النواة؛ وفحصُ المُقلِعِ لنفسِه كاشفٌ لسوءِ
+// إعدادٍ لا حاجز — node مستبدَلٌ لا يُشغِّلُه. الحاجزُ فحصُ المُطلِقِ قبلَ exec (‏isolatedLaunchCommand).
+
+/**
+ * @typedef {{ type: string, uid: number, mode: number }} PathStat
+ * @typedef {{ lstat(p: string): PathStat, readlink(p: string): string, sha256(p: string): string }} TrustFs
+ */
+
+/** @type {TrustFs} */
+const realTrustFs = {
+  lstat: (p) => {
+    const s = lstatSync(p);
+    return { type: s.isSymbolicLink() ? 'symlink' : fdType(s), uid: s.uid, mode: s.mode & 0o7777 };
+  },
+  readlink: (p) => readlinkSync(p),
+  sha256: (p) => createHash('sha256').update(readFileSync(p)).digest('hex'),
+};
+
+/** @param {string} p */
+const parts = (p) => p.split('/').filter((x) => x !== '' && x !== '.');
+/** @param {string} dir @param {string} name */
+const joinAbs = (dir, name) => (dir === '/' ? `/${name}` : `${dir}/${name}`);
+/** @param {string} p */
+const parentOf = (p) => (p.lastIndexOf('/') <= 0 ? '/' : p.slice(0, p.lastIndexOf('/')));
+/** @param {number} m */
+const oct = (m) => (m & 0o7777).toString(8);
+
+/**
+ * يمشي المسارَ مكوِّناً مكوِّناً ويتبعُ كلَّ رابطٍ بنفسِه (‏لا realpath واحداً) فيفحصُ كلَّ ما يُعبَر.
+ * @param {readonly string[]} paths
+ * `optional`: مساراتٌ يجوزُ غيابُها (‏وحداتٌ لم تُنشَر) — ويُفحَصُ أعمقُ مجلّدٍ موجودٍ في طريقِها، فمجلّدٌ
+ * يكتبُه غيرُ root يُرفَضُ ولو غابَ الملفّ.
+ * @param {{ fs?: TrustFs, pins?: Readonly<Record<string, string>>, optional?: readonly string[] }} [o]
+ * @returns {{ violations: string[], checked: Array<{ path: string, real: string, sha256?: string }>,
+ *   absent: string[] }}
+ */
+export function codeTrustViolations(paths, o = {}) {
+  const fs = o.fs ?? realTrustFs;
+  const pins = o.pins ?? {};
+  const optional = new Set(o.optional ?? []);
+  /** @type {string[]} */
+  const absent = [];
+  /** @type {string[]} */
+  const violations = [];
+  /** @type {Array<{ path: string, real: string, sha256?: string }>} */
+  const checked = [];
+  /** @param {string} d @param {PathStat} s */
+  const dirIssue = (d, s) =>
+    s.type !== 'dir'
+      ? `${d}: ليس مجلّداً (${s.type})`
+      : s.uid !== 0
+        ? `${d}: مجلّدٌ ملكُ ${s.uid}`
+        : (s.mode & 0o022) !== 0 && (s.mode & 0o1000) === 0
+          ? `${d}: مجلّدٌ يكتبُه غيرُ root (${oct(s.mode)})`
+          : null;
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p.startsWith('/')) {
+      violations.push(`${String(p)}: ليس مساراً مطلقاً`);
+      continue;
+    }
+    /** @type {string[]} */
+    const bad = [];
+    try {
+      const root = dirIssue('/', fs.lstat('/'));
+      if (root !== null) bad.push(root);
+      let cur = '/';
+      let todo = parts(p);
+      let hops = 0;
+      /** @type {PathStat | null} */
+      let leaf = null;
+      while (todo.length > 0) {
+        const c = /** @type {string} */ (todo.shift());
+        if (c === '..') {
+          cur = parentOf(cur);
+          continue;
+        }
+        const next = joinAbs(cur, c);
+        /** @type {PathStat} */
+        let s;
+        try {
+          s = fs.lstat(next);
+        } catch (error) {
+          if (optional.has(p) && /** @type {any} */ (error)?.code === 'ENOENT') break;
+          throw error;
+        }
+        if (s.type === 'symlink') {
+          if (s.uid !== 0) bad.push(`${next}: رابطٌ رمزيٌّ ملكُ ${s.uid}`);
+          if (++hops > 40) throw new Error('روابطُ رمزيّةٌ أكثرُ من 40');
+          const t = fs.readlink(next);
+          todo = [...parts(t), ...todo];
+          if (t.startsWith('/')) cur = '/';
+          continue;
+        }
+        if (todo.length > 0) {
+          const issue = dirIssue(next, s);
+          if (issue !== null) bad.push(issue);
+          cur = next;
+        } else {
+          leaf = s;
+          cur = next;
+        }
+      }
+      if (leaf === null) {
+        if (optional.has(p)) {
+          absent.push(p);
+          violations.push(...bad);
+          continue;
+        }
+        throw new Error('مسارٌ بلا ملفّ');
+      }
+      if (leaf.type !== 'file') bad.push(`${cur}: ليس ملفّاً عاديّاً (${leaf.type})`);
+      if (leaf.uid !== 0) bad.push(`${cur}: ملفٌّ ملكُ ${leaf.uid}`);
+      if ((leaf.mode & 0o022) !== 0) bad.push(`${cur}: ملفٌّ يكتبُه غيرُ root (${oct(leaf.mode)})`);
+      /** @type {{ path: string, real: string, sha256?: string }} */
+      const entry = { path: p, real: cur };
+      const pin = pins[p];
+      if (pin !== undefined) {
+        const h = fs.sha256(cur);
+        entry.sha256 = h;
+        if (h !== pin)
+          bad.push(`${p}: بصمةٌ ${h.slice(0, 12)}… لا تطابقُ المثبَّتة ${pin.slice(0, 12)}…`);
+      }
+      if (bad.length === 0) checked.push(entry);
+    } catch (error) {
+      bad.push(`${p}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    violations.push(...bad);
+  }
+  return { violations: [...new Set(violations)], checked, absent };
+}
+
+/**
+ * مساراتُ الشيفرةِ التي يفحصُها المُقلِعُ قبلَ قراءةِ المفتاح: node، ونقطةُ الدخول، والمُقلِعُ نفسُه،
+ * ووحداتُ `loadApp()` (‏تعملُ بالهويّةِ المُسقَطة، لكنّ كتابتَها من مستخدمٍ آخرَ اختراقٌ عابرٌ للعمّال).
+ */
+export const APP_MODULES = Object.freeze([
+  '../src/root-of-trust/persistent-log.mjs',
+  '../src/root-of-trust/index.mjs',
+  '../src/execution/queue.mjs',
+  '../src/execution/worker.mjs',
+  '../src/execution/pending-results.mjs',
+  '../src/execution/db-recovery.mjs',
+  '../src/policy/quota.mjs',
+  '../src/policy/loader.mjs',
+  '../src/persistence/db.mjs',
+  '../src/execution/worker-registry.mjs',
+  '../src/fence/db-fence.mjs',
+]);
+
+/** وحداتُ `loadApp()` بمساراتِها المطلقة — يجوزُ غيابُها في فحصِ المُقلِع (‏لا تُقيَّمُ بـroot). */
+export const appModulePaths = () =>
+  APP_MODULES.map((m) => fileURLToPath(new URL(m, import.meta.url)));
+
+/** @param {readonly string[]} argv */
+export function bootstrapTrustPaths(argv = process.argv) {
+  const self = fileURLToPath(import.meta.url);
+  const entry = argv[1] !== undefined && argv[1].startsWith('/') ? [argv[1]] : [];
+  return [...new Set([process.execPath, ...entry, self, ...appModulePaths()])];
+}
+
+/** @param {NodeJS.ProcessEnv} env @param {string} name */
+const val = (env, name) => (env[name] ?? '').trim();
+
+/**
+ * وضعُ العزلِ المُعلَن. **يفشلُ مغلقاً:** أيُّ متغيّرٍ من متغيّراتِ العزلِ بلا
+ * `XUUX_FENCE_ISOLATION=required` خطأُ إعداد، لا تجاهلٌ صامت.
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {'off' | 'required'}
+ */
+export function isolationMode(env) {
+  const raw = val(env, ISOLATION_ENV.mode);
+  const partial = [ISOLATION_ENV.keyFd, ISOLATION_ENV.uid, ISOLATION_ENV.gid].filter(
+    (n) => val(env, n) !== '',
+  );
+  if (raw === '' || raw === 'off') {
+    if (partial.length > 0) {
+      throw new IsolationError(
+        ISOLATION_ERRORS.CONFIG,
+        `${partial.join('، ')} بلا ${ISOLATION_ENV.mode}=required: إعدادُ عزلٍ لا يُعلِنُ وضعَه يُرفَض.`,
+      );
+    }
+    return 'off';
+  }
+  if (raw !== 'required') {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      `${ISOLATION_ENV.mode}=«${raw}» غيرُ معروف — المقبول: required أو off أو الغياب.`,
+    );
+  }
+  return 'required';
+}
+
+/**
+ * متغيّراتُ البيئةِ ووسائطُ Node العدائيّة. تُنفَّذُ قبلَ المُقلِع، فالرفضُ هنا كشفٌ لإطلاقٍ مخالفٍ
+ * لا منعٌ لأثرٍ وقع.
+ * @param {NodeJS.ProcessEnv} env @param {readonly string[]} execArgv
+ */
+export function hostileLaunchInputs(env, execArgv) {
+  const names = Object.keys(env).filter((n) => HOSTILE_ENV.some((re) => re.test(n)));
+  return [...names.sort(), ...execArgv.map((a) => `execArgv:${a}`)];
+}
+
+/** @param {NodeJS.ProcessEnv} env @param {string} name */
+function positiveInt(env, name) {
+  const raw = val(env, name);
+  if (!/^[1-9][0-9]*$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      `${name} يجبُ أن يكونَ عدداً موجباً (لا root): «${raw}».`,
+    );
+  }
+  return Number(raw);
+}
+
+/** @param {string} status @param {string} field */
+const statusField = (status, field) =>
+  (status.split('\n').find((l) => l.startsWith(`${field}:`)) ?? '')
+    .slice(field.length + 1)
+    .trim()
+    .split(/\s+/)
+    .filter((x) => x !== '');
+
+/** @param {string} status @param {string} field */
+const capOf = (status, field) => {
+  const hex = statusField(status, field)[0] ?? '';
+  return /^[0-9a-f]+$/i.test(hex) ? BigInt(`0x${hex}`) : null;
+};
+
+/**
+ * عقدُ الواصف: ملفٌّ عاديٌّ يملكُه root، لا يقرؤه غيرُ مالكِه، يقرؤه مالكُه، وحجمُه معقول. لا أنبوبٌ
+ * ولا مقبسٌ ولا طرفيّةٌ ولا مجلّد — مصدرٌ يتحكّمُ فيه غيرُ root أو يُعيدُ محتوًى متغيّراً مرفوض.
+ * @param {FdStat} s
+ */
+export function keyFdViolations(s) {
+  /** @type {string[]} */
+  const v = [];
+  if (s.type !== 'file') v.push(`type=${s.type}`);
+  if (s.uid !== 0) v.push(`owner=${s.uid}`);
+  if ((s.mode & 0o077) !== 0) v.push(`mode=${(s.mode & 0o777).toString(8)} (group/other)`);
+  if ((s.mode & 0o400) === 0) v.push(`mode=${(s.mode & 0o777).toString(8)} (owner unreadable)`);
+  if (!(s.size > 0 && s.size <= KEY_FD_MAX_BYTES)) v.push(`size=${s.size}`);
+  return v;
+}
+
+/**
+ * المُقلِع: يُستدعى **قبلَ تحميلِ أيِّ وحدةٍ تطبيقيّة**. بلا عزلٍ مطلوبٍ يُعيدُ `null`؛ ومعه إمّا عزلٌ
+ * متحقَّقٌ منه وإمّا استثناءٌ — لا مسارَ وسطاً.
+ * @param {NodeJS.ProcessEnv} env
+ * @param {{ os?: IsolationOs, execArgv?: readonly string[],
+ *   trust?: (paths: readonly string[]) => { violations: string[], checked: unknown[] },
+ *   trustPaths?: readonly string[] }} [options]
+ * @returns {{ pem: string, evidence: Readonly<Record<string, unknown>> } | null}
+ */
+export function bootstrapIsolation(env, options = {}) {
+  if (isolationMode(env) === 'off') return null;
+  const os = options.os ?? realOs;
+  // ١. الإعداد — قبلَ أيِّ نداءٍ للنظام.
+  if (val(env, 'XUUX_FENCE_WORKER_KEY') !== '') {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      'XUUX_FENCE_WORKER_KEY مع العزلِ الإلزاميّ: لا تراجعَ إلى مسارِ ملفِّ المفتاحِ القديم.',
+    );
+  }
+  if (val(env, 'XUUX_DB_FENCE') !== 'required') {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      'العزلُ الإلزاميُّ يتطلّبُ XUUX_DB_FENCE=required: المفتاحُ المعزولُ لا مستهلِكَ له بلا سياج.',
+    );
+  }
+  const fdRaw = val(env, ISOLATION_ENV.keyFd);
+  if (!/^[3-9]$|^[1-9][0-9]+$/.test(fdRaw) || Number(fdRaw) > FD_MAX) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      `${ISOLATION_ENV.keyFd} غائبٌ أو غيرُ صالح («${fdRaw}»): العزلُ الإلزاميُّ بلا واصفٍ يُرفَض.`,
+    );
+  }
+  const fd = Number(fdRaw);
+  const uid = positiveInt(env, ISOLATION_ENV.uid);
+  const gid = positiveInt(env, ISOLATION_ENV.gid);
+  // ٢. مدخلاتُ إطلاقٍ عدائيّة.
+  const hostile = hostileLaunchInputs(env, options.execArgv ?? process.execArgv);
+  if (hostile.length > 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.HOSTILE_ENV,
+      `مدخلاتُ إطلاقٍ تُنفِّذُ شيفرةً قبلَ المُقلِع: ${hostile.join('، ')}. المُطلِقُ يجبُ أن يبنيَ ` +
+        'البيئةَ من قائمةِ سماحٍ صريحة (isolatedLaunchCommand) — وأثرُها إن وُجِدَ قد وقعَ بصلاحيّةِ root.',
+      hostile,
+    );
+  }
+  // ٣. الصلاحيّةُ وسياسةُ الإطلاق.
+  if (os.geteuid() !== 0 || os.getuid() !== 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.NOT_PRIVILEGED,
+      'العزلُ يتطلّبُ أن يبدأَ العاملُ بـroot ويُسقِطَ هويّتَه بنفسِه: عمليةٌ بُدئت بمستخدمِ العاملِ ' +
+        'مباشرةً (dumpable=1) يقرؤها أيُّ عمليةٍ بالـUID نفسِه (LAB-UID-05).',
+    );
+  }
+  const before = os.readText('/proc/self/status');
+  const bndBefore = capOf(before, 'CapBnd');
+  const nnpBefore = statusField(before, 'NoNewPrivs')[0];
+  if (nnpBefore !== '1' || bndBefore === null || (bndBefore & ~ALLOWED_CAP_BND) !== 0n) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.LAUNCH_POLICY,
+      `سياسةُ الإطلاق: المطلوبُ NoNewPrivs=1 وCapBnd ⊆ {setgid,setuid} (0xc0)، والمقيسُ ` +
+        `NoNewPrivs=${nnpBefore ?? '?'} CapBnd=${bndBefore?.toString(16) ?? '?'}. ` +
+        'بلا ذلك يستعيدُ execve لبرنامجِ setuid أو ذي قدراتٍ ملفّيّةٍ صلاحيّاتٍ بعدَ الإسقاط.',
+    );
+  }
+  const suidDumpable = os.readText('/proc/sys/fs/suid_dumpable').trim();
+  if (suidDumpable !== '0' && suidDumpable !== '2') {
+    throw new IsolationError(
+      ISOLATION_ERRORS.DUMPABLE_POLICY,
+      `fs.suid_dumpable=${suidDumpable}: بعدَ إسقاطِ الهويّةِ تبقى العمليةُ قابلةً للتفريغِ والـptrace ` +
+        'من الـUID نفسِه. المطلوب 0 أو 2.',
+    );
+  }
+  // ٣ب. ثقةُ الشيفرةِ العاملةِ بـroot — قبلَ أيِّ قراءةٍ للمفتاح. كاشفٌ لا حاجز (‏انظر codeTrustViolations).
+  const trustPaths = options.trustPaths ?? bootstrapTrustPaths();
+  const trust = (
+    options.trust ?? ((ps) => codeTrustViolations(ps, { optional: appModulePaths() }))
+  )(trustPaths);
+  if (trust.violations.length > 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+      `شيفرةٌ تعملُ بـroot يكتبُها غيرُ root: ${trust.violations.join('؛ ')}. لا يُقرأُ المفتاح.`,
+      trust.violations,
+    );
+  }
+  // ٤. عقدُ الواصف، ثمّ القراءةُ والإغلاق — في كلِّ حال.
+  /** @type {FdStat} */
+  let st;
+  /** @type {string} */
+  let pem;
+  try {
+    st = os.fstat(fd);
+    const bad = keyFdViolations(st);
+    if (bad.length > 0) {
+      throw new IsolationError(
+        ISOLATION_ERRORS.KEY_FD,
+        `واصفُ المفتاح ${fd} يخالفُ العقد: ${bad.join('، ')}.`,
+        bad,
+      );
+    }
+    pem = os.readFd(fd);
+  } catch (error) {
+    if (error instanceof IsolationError) throw error;
+    throw new IsolationError(
+      ISOLATION_ERRORS.KEY_FD,
+      `واصفُ المفتاح ${fd} غيرُ مقروء: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  } finally {
+    try {
+      os.closeFd(fd);
+    } catch {
+      // واصفٌ غيرُ مفتوحٍ أصلاً: خطؤه ظاهرٌ من fstat.
+    }
+  }
+  let keyType;
+  try {
+    keyType = createPrivateKey(pem).asymmetricKeyType;
+  } catch {
+    keyType = 'unparseable';
+  }
+  if (keyType !== 'ed25519') {
+    throw new IsolationError(
+      ISOLATION_ERRORS.KEY_FD,
+      `محتوى الواصفِ ليس مفتاحَ Ed25519 خاصّاً (${keyType}).`,
+    );
+  }
+  // ٥. الإسقاط.
+  os.setgroups([gid]);
+  os.setgid(gid);
+  os.setuid(uid);
+  // ٦. التحقّق — يفشلُ مغلقاً.
+  const evidence = verifyIsolation(os, { uid, gid, suidDumpable, fd, dev: st.dev, ino: st.ino });
+  return {
+    pem,
+    evidence: Object.freeze({
+      ...evidence,
+      code_trust: { checked: trust.checked.length },
+      key_fd: {
+        fd,
+        type: st.type,
+        owner: st.uid,
+        mode: (st.mode & 0o777).toString(8),
+        bytes: st.size,
+      },
+    }),
+  };
+}
+
+/**
+ * @param {IsolationOs} os
+ * @param {{ uid: number, gid: number, suidDumpable: string, fd: number, dev: number, ino: number }} want
+ */
+export function verifyIsolation(os, want) {
+  /** @type {string[]} */
+  const failures = [];
+  const status = os.readText('/proc/self/status');
+  const uids = statusField(status, 'Uid').map(Number);
+  const gids = statusField(status, 'Gid').map(Number);
+  const groups = statusField(status, 'Groups').map(Number);
+  if (uids.length !== 4 || uids.some((u) => u !== want.uid)) failures.push(`Uid=${uids.join(',')}`);
+  if (gids.length !== 4 || gids.some((g) => g !== want.gid)) failures.push(`Gid=${gids.join(',')}`);
+  if (groups.some((g) => g !== want.gid)) failures.push(`Groups=${groups.join(',')}`);
+  for (const cap of ['CapInh', 'CapPrm', 'CapEff', 'CapAmb']) {
+    if (capOf(status, cap) !== 0n) failures.push(`${cap}=${statusField(status, cap)[0] ?? '?'}`);
+  }
+  const bnd = capOf(status, 'CapBnd');
+  if (bnd === null || (bnd & ~ALLOWED_CAP_BND) !== 0n) failures.push(`CapBnd=${bnd?.toString(16)}`);
+  const nnp = statusField(status, 'NoNewPrivs')[0];
+  if (nnp !== '1') failures.push(`NoNewPrivs=${nnp ?? '?'}`);
+  let regained = false;
+  try {
+    os.setuid(0);
+    regained = true;
+  } catch {
+    // المتوقّع: EPERM.
+  }
+  if (regained) failures.push('setuid(0) نجح');
+  const procOwner = os.ownerOf('/proc/self/environ');
+  if (procOwner !== 0) failures.push(`/proc/self/environ ملكُ ${procOwner} (dumpable=1)`);
+  const copies = os.scanFds(want.dev, want.ino);
+  if (copies.length > 0) failures.push(`نسخُ واصفِ المفتاحِ مفتوحة: ${copies.join(',')}`);
+  if (failures.length > 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.VERIFY_FAILED,
+      `فشلَ التحقّقُ من عزلِ العامل: ${failures.join('؛ ')}`,
+      failures,
+    );
+  }
+  return {
+    mode: 'uid-drop-after-exec',
+    uid: want.uid,
+    gid: want.gid,
+    suid_dumpable: want.suidDumpable,
+    proc_owner: procOwner,
+    setuid0_refused: true,
+    // الادّعاءُ بالضبط: هذه الحقولُ الأربعةُ صفر، وCapBnd ⊆ 0xc0، وNoNewPrivs=1 — لا «كلُّ القدرات».
+    caps_zero: ['CapInh', 'CapPrm', 'CapEff', 'CapAmb'],
+    cap_bnd: /** @type {bigint} */ (bnd).toString(16),
+    no_new_privs: true,
+    key_fd_open_copies: 0,
+  };
+}
+
+/** البرامجُ التي يُشغِّلُها المُطلِقُ بـroot — مساراتٌ مطلقةٌ ثابتةٌ لا PATH. */
+export const LAUNCH_SUDO = '/usr/bin/sudo';
+export const LAUNCH_ENV = '/usr/bin/env';
+export const LAUNCH_SETPRIV = '/usr/bin/setpriv';
+export const LAUNCH_SH = '/bin/sh';
+
+/** متغيّراتٌ لا يمرّرُها المُطلِقُ أبداً ولو طُلِبت. */
+const NEVER_PASS = [
+  ...HOSTILE_ENV,
+  /^XUUX_FENCE_WORKER_KEY$/,
+  /^XUUX_FENCE_(ISOLATION|KEY_FD|WORKER_UID|WORKER_GID)$/,
+];
+
+/**
+ * بيئةُ السماحِ الصريحةُ وفحصُ المُدخلات — مشتركةٌ بينَ المُطلِقِ ووحدةِ systemd (‏مصدرٌ واحد).
+ * @param {{ node: string, entry: string, keyFile: string, uid: number, gid: number,
+ *   env: NodeJS.ProcessEnv, pass?: readonly string[] }} o
+ * @returns {Record<string, string>}
+ */
+export function isolatedLaunchEnv(o) {
+  for (const [name, p] of /** @type {Array<[string, string]>} */ ([
+    ['node', o.node],
+    ['entry', o.entry],
+    ['keyFile', o.keyFile],
+  ])) {
+    if (typeof p !== 'string' || !p.startsWith('/')) {
+      throw new IsolationError(ISOLATION_ERRORS.CONFIG, `${name} يجبُ أن يكونَ مساراً مطلقاً.`);
+    }
+  }
+  for (const n of [o.uid, o.gid]) {
+    if (!Number.isSafeInteger(n) || n <= 0) {
+      throw new IsolationError(ISOLATION_ERRORS.CONFIG, `uid/gid موجبٌ مطلوب (لا root): ${n}.`);
+    }
+  }
+  /** @type {Record<string, string>} */
+  const env = { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' };
+  for (const name of o.pass ?? []) {
+    if (!/^[A-Z][A-Z0-9_]*$/.test(name) || NEVER_PASS.some((re) => re.test(name))) {
+      throw new IsolationError(
+        ISOLATION_ERRORS.HOSTILE_ENV,
+        `المتغيّر «${name}» لا يُمرَّرُ إلى عاملٍ معزول.`,
+      );
+    }
+    const v = o.env[name];
+    if (v === undefined) continue;
+    if (v.includes('\0') || v.includes('\n')) {
+      throw new IsolationError(ISOLATION_ERRORS.CONFIG, `قيمةُ «${name}» تحوي فاصلاً.`);
+    }
+    env[name] = v;
+  }
+  env[ISOLATION_ENV.mode] = 'required';
+  env[ISOLATION_ENV.keyFd] = '3';
+  env[ISOLATION_ENV.uid] = String(o.uid);
+  env[ISOLATION_ENV.gid] = String(o.gid);
+  return env;
+}
+
+/**
+ * المُطلِق: يبني أمرَ إقلاعٍ معزولٍ **من بيئةِ سماحٍ صريحة** (`env -i`)، بحدِّ قدراتٍ {setgid,setuid}
+ * وno_new_privs (`setpriv`)، ومفتاحٍ يفتحُه `sh` (root) على الواصف 3. لا يرثُ الابنُ متغيّراً لم يُسمَّ.
+ * **ويفحصُ ثقةَ الشيفرةِ قبلَ أن يبنيَ الأمر** (‏الحاجزُ لا الكاشف): node ونقطةُ الدخولِ وenv وsetpriv وsh —
+ * وsudo إن استُعمِل — بعقدِ `codeTrustViolations` وبصماتٍ اختياريّة. لا مسارَ لتجاوزِه. (‏ملفُّ المفتاحِ لا يُفحَصُ
+ * هنا: المُقلِعُ يفحصُ الواصفَ المفتوحَ نفسَه بـfstat، فلا نافذةَ سباقٍ بينَ الفحصِ والفتح.)
+ * @param {{ node: string, entry: string, args?: readonly string[], keyFile: string, uid: number,
+ *   gid: number, env: NodeJS.ProcessEnv, pass?: readonly string[], sudo?: boolean,
+ *   trust?: { fs?: TrustFs, pins?: Readonly<Record<string, string>> } }} o
+ */
+export function isolatedLaunchCommand(o) {
+  const env = isolatedLaunchEnv(o);
+  const trustPaths = [
+    ...(o.sudo === false ? [] : [LAUNCH_SUDO]),
+    LAUNCH_ENV,
+    LAUNCH_SETPRIV,
+    LAUNCH_SH,
+    o.node,
+    o.entry,
+  ];
+  const trust = codeTrustViolations(trustPaths, o.trust ?? {});
+  if (trust.violations.length > 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+      `المُطلِقُ يرفض: ${trust.violations.join('؛ ')}.`,
+      trust.violations,
+    );
+  }
+  const inner = [
+    LAUNCH_ENV,
+    '-i',
+    ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
+    LAUNCH_SETPRIV,
+    '--no-new-privs',
+    '--bounding-set',
+    '-all,+setuid,+setgid',
+    '--inh-caps',
+    '-all',
+    LAUNCH_SH,
+    '-c',
+    'k=$1; shift; exec "$@" 3<"$k"',
+    'sh',
+    o.keyFile,
+    o.node,
+    o.entry,
+    ...(o.args ?? []),
+  ];
+  return o.sudo === false
+    ? { command: LAUNCH_ENV, args: inner.slice(1), env, trust: trust.checked }
+    : { command: LAUNCH_SUDO, args: ['-n', ...inner], env, trust: trust.checked };
+}
+
+// ── عقدُ وحدةِ systemd المكافئةِ للمُطلِق (‏WL-533، §9.3ب) ─────────────────────────────────────
+// دوالُّ نقيّةٌ بلا إدخالٍ أو إخراج: تبني نصَّ الوحدةِ ولا تكتبُ ملفّاً ولا تستدعي systemctl ولا تُثبِّتُ
+// شيئاً (‏التثبيتُ قرارُ المالك D-SUP-1/2). في هذا الملفِّ لا في ملفٍّ مستقلّ: G1 ‏3220 (‏قرارُ المالك)،
+// ولأنّها مبنيّةٌ من `isolatedLaunchEnv` وALLOWED_CAP_BND نفسَيهما فلا عقدَ موازٍ. الاستعمال:
+//   node --input-type=module -e "import { systemdUnit } from '/opt/xuux/scripts/worker.mjs';
+//     process.stdout.write(systemdUnit({ node, entry, keyFile, uid, gid, env: process.env, pass }).unit)"
+// والمُقلِعُ لا يستدعيها؛ لا مسارَ لها في إقلاعِ العامل. لم يُشغَّل systemd: عقدٌ نصّيٌّ ومحاكاتُه (‏ISO-52).
+
+/** أسماءُ القدرات في حدِّ ALLOWED_CAP_BND (‏البتّ ٦ CAP_SETGID، ٧ CAP_SETUID). */
+const CAP_NAMES = Object.freeze({ 6: 'CAP_SETGID', 7: 'CAP_SETUID' });
+
+/** أسماءٌ عدائيّةٌ معروفةٌ تُزالُ من بيئةِ المدير — ليست شاملة. */
+export const UNSET_ENV = Object.freeze([
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_REPL_EXTERNAL_MODULE',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'NODE_DEBUG',
+  'NODE_V8_COVERAGE',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'LD_AUDIT',
+  'XUUX_FENCE_WORKER_KEY',
+]);
+
+/** القدراتُ المسموحةُ في الحدّ، مشتقّةً من ALLOWED_CAP_BND لا مكتوبةً يدويّاً. */
+export function boundingCapabilities() {
+  /** @type {string[]} */
+  const caps = [];
+  for (let bit = 0; bit < 64; bit++) {
+    if ((ALLOWED_CAP_BND >> BigInt(bit)) & 1n) {
+      const name = /** @type {Record<number, string>} */ (CAP_NAMES)[bit];
+      if (name === undefined) throw new Error(`بتّ قدرةٍ بلا اسم: ${bit}`);
+      caps.push(name);
+    }
+  }
+  return caps.sort().reverse(); // CAP_SETUID CAP_SETGID
+}
+
+/** محارفُ تُغيّرُ معنى سطرِ الوحدة (‏فاصل، اقتباس، هروب، محدِّد %) — رفضٌ لا هروب. */
+const UNSAFE = /[\s"'\\%;$`]/u;
+
+/** @param {string} v */
+const hasControl = (v) => [...v].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+
+/** @param {string} what @param {string} v */
+function safe(what, v) {
+  if (typeof v !== 'string' || v === '' || UNSAFE.test(v) || hasControl(v)) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      `${what} يحوي محرفاً لا يُكتَبُ في وحدةِ systemd بأمان: «${String(v)}».`,
+    );
+  }
+  return v;
+}
+
+/**
+ * يولّدُ نصَّ الوحدة. يرمي `FENCE_ISOLATION_CONFIG` لمُدخلٍ غيرِ آمن، و`FENCE_ISOLATION_HOSTILE_ENV`
+ * لاسمٍ ممنوع، و`FENCE_ISOLATION_UNTRUSTED_CODE` لشيفرةٍ غيرِ موثوقة (ما لم يُعطَّل الفحصُ صراحةً).
+ * @param {{ node: string, entry: string, args?: readonly string[], keyFile: string, uid: number,
+ *   gid: number, env?: NodeJS.ProcessEnv, pass?: readonly string[], description?: string,
+ *   trust?: false | { fs?: TrustFs, pins?: Readonly<Record<string, string>> } }} o
+ * @returns {{ unit: string, env: Record<string, string>, trust: number }}
+ */
+export function systemdUnit(o) {
+  const env = isolatedLaunchEnv({ ...o, env: o.env ?? {} });
+  safe('node', o.node);
+  safe('entry', o.entry);
+  safe('keyFile', o.keyFile);
+  for (const a of o.args ?? []) safe('وسيط', a);
+  for (const [k, v] of Object.entries(env)) safe(`قيمة ${k}`, v);
+  let checked = 0;
+  if (o.trust !== false) {
+    const t = codeTrustViolations([o.node, o.entry], o.trust ?? {});
+    if (t.violations.length > 0) {
+      throw new IsolationError(
+        ISOLATION_ERRORS.UNTRUSTED_CODE,
+        `مولّدُ الوحدةِ يرفض: ${t.violations.join('؛ ')}.`,
+        t.violations,
+      );
+    }
+    checked = t.checked.length;
+  }
+  const description = [...(o.description ?? 'XUUX fenced worker (WL-533 contract)')]
+    .filter((c) => !hasControl(c) && c !== '%')
+    .join('');
+  const lines = [
+    '# مولَّدٌ من systemdUnit في scripts/worker.mjs — عقدٌ لم يُثبَّت (‏D-SUP-1/2).',
+    '[Unit]',
+    `Description=${description}`,
+    '',
+    '[Service]',
+    'Type=simple',
+    'User=root',
+    'Group=root',
+    'NoNewPrivileges=yes',
+    `CapabilityBoundingSet=${boundingCapabilities().join(' ')}`,
+    'AmbientCapabilities=',
+    'UMask=0077',
+    `UnsetEnvironment=${UNSET_ENV.join(' ')}`,
+    ...Object.entries(env).map(([k, v]) => `Environment=${k}=${v}`),
+    `OpenFile=${o.keyFile}:xuux-key:read-only`,
+    `ExecStart=${[o.node, o.entry, ...(o.args ?? [])].join(' ')}`,
+    'Restart=no',
+    '',
+  ];
+  return { unit: lines.join('\n'), env, trust: checked };
+}
+
+/**
+ * يقرأُ نصَّ وحدةٍ مولَّدة (‏للاختبار والتحقّق) — لا محلّلَ systemd عامّاً.
+ * @param {string} text
+ */
+export function parseUnit(text) {
+  /** @type {Record<string, string[]>} */
+  const d = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith('[')) continue;
+    const i = line.indexOf('=');
+    const k = line.slice(0, i);
+    (d[k] ??= []).push(line.slice(i + 1));
+  }
+  return d;
+}
+
+/**
+ * وحداتُ التطبيق — تُحمَّلُ **بعدَ** `bootstrapIsolation` وحدَه (‏ISO-41). لا استيرادَ ثابتاً لأيٍّ منها
+ * في هذا الملفّ: أيُّ أثرٍ جانبيٍّ في وحدةٍ منها يقعُ بالهويّةِ المُسقَطةِ لا بـroot.
+ */
+export async function loadApp() {
+  const [log, rot, queue, workerMod, pending, recovery, quota, policy, db, registry, fence] =
+    await Promise.all([
+      import('../src/root-of-trust/persistent-log.mjs'),
+      import('../src/root-of-trust/index.mjs'),
+      import('../src/execution/queue.mjs'),
+      import('../src/execution/worker.mjs'),
+      import('../src/execution/pending-results.mjs'),
+      import('../src/execution/db-recovery.mjs'),
+      import('../src/policy/quota.mjs'),
+      import('../src/policy/loader.mjs'),
+      import('../src/persistence/db.mjs'),
+      import('../src/execution/worker-registry.mjs'),
+      import('../src/fence/db-fence.mjs'),
+    ]);
+  return {
+    PersistentEventLog: log.PersistentEventLog,
+    HaltSwitch: rot.HaltSwitch,
+    isProductionRuntime: rot.isProductionRuntime,
+    openProductionEventLog: rot.openProductionEventLog,
+    royalVerifierFromPublicKey: rot.royalVerifierFromPublicKey,
+    createTaskQueue: queue.createTaskQueue,
+    createWorker: workerMod.createWorker,
+    createPendingResultStore: pending.createPendingResultStore,
+    settlePendingResults: pending.settlePendingResults,
+    settleUntilAdmitted: pending.settleUntilAdmitted,
+    RECOVERY_EXIT_CODES: recovery.RECOVERY_EXIT_CODES,
+    RECOVERY_VERDICTS: recovery.RECOVERY_VERDICTS,
+    WorkerDatabaseFault: recovery.WorkerDatabaseFault,
+    abortableSleep: recovery.abortableSleep,
+    classifyDatabaseFault: recovery.classifyDatabaseFault,
+    createDatabaseRecovery: recovery.createDatabaseRecovery,
+    createQuotaLedger: quota.createQuotaLedger,
+    loadPolicyBundle: policy.loadPolicyBundle,
+    createPool: db.createPool,
+    WORKER_REGISTRY_ERRORS: registry.WORKER_REGISTRY_ERRORS,
+    WorkerRegistryError: registry.WorkerRegistryError,
+    createWorkerRegistry: registry.createWorkerRegistry,
+    dbFenceMode: fence.dbFenceMode,
+    prepareFencedWorker: fence.prepareFencedWorker,
+    pemKeyProvider: fence.pemKeyProvider,
+  };
+}
 
 /** حجمُ مجمّعِ العاملِ المُسيَّج: ثابتٌ ومختوم (حدُّ دورِ الإقلاع CONNECTION LIMIT 16). */
 const FENCED_POOL_SIZE = 8;
@@ -140,6 +1046,46 @@ function recoveryPolicyFrom(flags) {
 }
 
 async function main() {
+  // ١. المُقلِع (`WL-533`): قبلَ تحميلِ أيِّ وحدةٍ تطبيقيّة. عزلٌ مطلوبٌ ⇒ عزلٌ متحقَّقٌ أو خروج.
+  const isolated = bootstrapIsolation(process.env);
+  // ٢. التطبيق — بالهويّةِ المُسقَطةِ إن طُلِبَ العزل.
+  const {
+    PersistentEventLog,
+    HaltSwitch,
+    isProductionRuntime,
+    openProductionEventLog,
+    royalVerifierFromPublicKey,
+    createTaskQueue,
+    createWorker,
+    createPendingResultStore,
+    settlePendingResults,
+    settleUntilAdmitted,
+    RECOVERY_EXIT_CODES,
+    RECOVERY_VERDICTS,
+    WorkerDatabaseFault,
+    abortableSleep,
+    classifyDatabaseFault,
+    createDatabaseRecovery,
+    createQuotaLedger,
+    loadPolicyBundle,
+    createPool,
+    WORKER_REGISTRY_ERRORS,
+    WorkerRegistryError,
+    createWorkerRegistry,
+    dbFenceMode,
+    prepareFencedWorker,
+    pemKeyProvider,
+  } = await loadApp();
+  const isolatedKey =
+    isolated === null
+      ? undefined
+      : {
+          key: pemKeyProvider(
+            isolated.pem,
+            `worker-fd:${process.env['XUUX_FENCE_WORKER_ID'] ?? 'unknown'}`,
+          ),
+          evidence: isolated.evidence,
+        };
   const options = parseArguments(process.argv.slice(2));
   if (options.publicKey === null) {
     throw new Error(
@@ -157,7 +1103,11 @@ async function main() {
   // السطرِ هو العاملُ نفسُه بالحارسِ نفسِه في كلِّ موضع.
   const fence =
     dbFenceMode(process.env) === 'required'
-      ? await prepareFencedWorker({ env: process.env, halt })
+      ? await prepareFencedWorker({
+          env: process.env,
+          halt,
+          ...(isolatedKey === undefined ? {} : { isolated: isolatedKey }),
+        })
       : null;
   const guard = fence === null ? halt : fence.haltGuard;
   const pool =
@@ -168,7 +1118,7 @@ async function main() {
     await fence.seal(pool, FENCED_POOL_SIZE);
     await fence.verify(pool);
     process.stdout.write(
-      `وضعُ السياج: ${fence.workerId} بدورِ ${String(fence.credential.role_name)} (عهد ${String(fence.credential.epoch)}، مفتاحٌ عتاديّ: ${fence.hardwareBacked ? 'نعم' : 'لا'})\n`,
+      `وضعُ السياج: ${fence.workerId} بدورِ ${String(fence.credential.role_name)} (عهد ${String(fence.credential.epoch)}، مفتاحٌ عتاديّ: ${fence.hardwareBacked ? 'نعم' : 'لا'}، عزلُ العملية: ${fence.processIsolation === null ? 'لا' : 'نعم'})\n`,
     );
   }
   const queue = createTaskQueue({ pool });
@@ -485,9 +1435,21 @@ async function main() {
   if (exitCode !== undefined) process.exitCode = exitCode;
 }
 
-main().catch((error) => {
-  process.stderr.write(
-    `فشل إقلاع العامل: ${error instanceof Error ? error.message : String(error)}\n`,
-  );
-  process.exitCode = 1;
-});
+/** نقطةُ الدخولِ وحدَها تُشغِّلُ main — الاستيرادُ (‏كاتبُ المختبرِ والاختبارات) لا يُشغِّلُه. */
+const isEntry = (() => {
+  try {
+    return realpathSync(process.argv[1] ?? '') === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
+if (isEntry) {
+  main().catch((error) => {
+    const code = /** @type {any} */ (error)?.code;
+    process.stderr.write(
+      `فشل إقلاع العامل: ${typeof code === 'string' ? `${code}: ` : ''}${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    process.exitCode = 1;
+  });
+}

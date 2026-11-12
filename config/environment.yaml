@@ -249,6 +249,35 @@ variables:
     statement: >-
       مسارُ مفتاحِ العاملِ الخاصّ (Ed25519، PKCS#8) — المسارُ لا المفتاح. يوقّعُ به العاملُ
       تحدّيَ إقلاعِه ولا يراه الجذر. مفتاحُ ملفٍّ (‏`hardwareBacked=false`)؛ لا HSM/TPM هنا.
+  - id: XUUX_FENCE_ISOLATION
+    requiredIn: []
+    format: '^(required|off)$'
+    secret: false
+    statement: >-
+      (`WL-533`) وضعُ عزلِ العامل. `required` ⇒ يفشلُ الإقلاعُ مغلقاً ما لم يكتمل العزل (واصفٌ وUID وGID
+      و`XUUX_DB_FENCE=required`، بلا `XUUX_FENCE_WORKER_KEY`، بلا NODE_*/LD_*، من root بـNoNewPrivs=1 وCapBnd ⊆ 0xc0)
+      ولا تراجعَ إلى مسارِ الملفّ. الغيابُ أو `off` ⇒ لا عزل، ووجودُ أيِّ متغيّرِ عزلٍ آخرَ حينئذٍ خطأُ إعداد.
+  - id: XUUX_FENCE_KEY_FD
+    requiredIn: []
+    format: '^([3-9]|[1-9][0-9]+)$'
+    secret: false
+    statement: >-
+      (`WL-533`) رقمُ الواصفِ الموروثِ الذي يحملُ مفتاحَ العامل — الرقمُ لا المفتاح. المُشرِفُ (root)
+      يفتحُ ملفَّ المفتاحِ (ملكُ root، 0400) ويُشغِّلُ العاملَ بـroot؛ العاملُ يقرأُ الواصفَ ويغلقُه
+      ثمّ يُسقِطُ هويّتَه داخلَ العملية (مُقلِعُ `scripts/worker.mjs`). لازمٌ مع `XUUX_FENCE_ISOLATION=required`
+      ويُرفَضُ بدونه؛ ويُرفَضُ مع `XUUX_FENCE_WORKER_KEY`. عقدُ الواصف: ملفٌّ عاديٌّ ملكُ root بلا group/other.
+  - id: XUUX_FENCE_WORKER_UID
+    requiredIn: []
+    format: '^[1-9][0-9]*$'
+    secret: false
+    statement: >-
+      (`WL-533`) الـUID الذي يُسقِطُ إليه العاملُ المعزولُ هويّتَه. لازمٌ مع `XUUX_FENCE_KEY_FD`؛ 0 مرفوض.
+  - id: XUUX_FENCE_WORKER_GID
+    requiredIn: []
+    format: '^[1-9][0-9]*$'
+    secret: false
+    statement: >-
+      (`WL-533`) الـGID الأساسيُّ والمجموعةُ الإضافيّةُ الوحيدةُ للعاملِ المعزول. لازمٌ مع `XUUX_FENCE_KEY_FD`.
   - id: XUUX_HALT_EPOCH_FLOOR
     requiredIn: []
     format: '^/.+$'
