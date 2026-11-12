@@ -1,0 +1,34 @@
+2026-11-12 06:21:44.010 UTC [19165] LOG:  starting PostgreSQL 18.6 (Ubuntu 18.6-0ubuntu0.26.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, 64-bit
+2026-11-12 06:21:44.010 UTC [19165] LOG:  listening on IPv4 address "127.0.0.1", port 38985
+2026-11-12 06:21:44.010 UTC [19165] LOG:  listening on Unix socket "/tmp/xuux-fence-lab-4vI3wr/sock-copy/.s.PGSQL.38985"
+2026-11-12 06:21:44.013 UTC [19171] LOG:  database system was interrupted; last known up at 2026-11-12 06:21:43 UTC
+2026-11-12 06:21:44.024 UTC [19171] LOG:  starting backup recovery with redo LSN 0/5000028, checkpoint LSN 0/5000080, on timeline ID 1
+2026-11-12 06:21:44.025 UTC [19171] LOG:  redo starts at 0/5000028
+2026-11-12 06:21:44.025 UTC [19171] LOG:  completed backup recovery with redo LSN 0/5000028 and end LSN 0/5000120
+2026-11-12 06:21:44.025 UTC [19171] LOG:  consistent recovery state reached at 0/5000120
+2026-11-12 06:21:44.025 UTC [19171] LOG:  redo done at 0/5000120 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2026-11-12 06:21:44.053 UTC [19169] LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-11-12 06:21:44.055 UTC [19169] LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 1 recycled; write=0.001 s, sync=0.001 s, total=0.002 s; sync files=2, longest=0.001 s, average=0.001 s; distance=16384 kB, estimate=16384 kB; lsn=0/6000028, redo lsn=0/6000028
+2026-11-12 06:21:44.057 UTC [19165] LOG:  database system is ready to accept connections
+2026-11-12 06:21:44.092 UTC [19175] LOG:  connection received: host=[local]
+2026-11-12 06:21:44.093 UTC [19175] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-4vI3wr/copy/pg_hba.conf:1)
+2026-11-12 06:21:44.093 UTC [19175] LOG:  connection authorized: user=postgres database=lab
+2026-11-12 06:21:44.277 UTC [19176] LOG:  connection received: host=[local]
+2026-11-12 06:21:44.278 UTC [19176] LOG:  connection authenticated: identity="user" method=peer (/tmp/xuux-fence-lab-4vI3wr/copy/pg_hba.conf:1)
+2026-11-12 06:21:44.278 UTC [19176] LOG:  connection authorized: user=xf_sovereign database=lab
+2026-11-12 06:21:44.298 UTC [19176] ERROR:  fence: RESUME من HALTED فقط (الحالة RECOVERY_REQUIRED)
+2026-11-12 06:21:44.298 UTC [19176] CONTEXT:  PL/pgSQL function fence.resume(text,bytea) line 6 at RAISE
+2026-11-12 06:21:44.298 UTC [19176] STATEMENT:  SELECT fence.resume($1,$2)
+2026-11-12 06:21:44.309 UTC [19180] LOG:  connection received: host=[local]
+2026-11-12 06:21:44.309 UTC [19180] LOG:  connection authenticated: identity="xuuxw-alpha" method=peer (/tmp/xuux-fence-lab-4vI3wr/copy/pg_hba.conf:3)
+2026-11-12 06:21:44.309 UTC [19180] LOG:  connection authorized: user=xw_alpha_4f0a27f8f2732914 database=lab application_name=psql
+2026-11-12 06:21:44.313 UTC [19180] ERROR:  fence: تجسُّدُ القاعدةِ لا يطابقُ المختوم (استرجاعٌ/إعادةُ تشغيل) — RECOVERY_REQUIRED
+2026-11-12 06:21:44.313 UTC [19180] CONTEXT:  PL/pgSQL function fence.guard_write() line 22 at RAISE
+2026-11-12 06:21:44.313 UTC [19180] STATEMENT:  INSERT INTO state.lab_probe(writer) VALUES ('copy')
+2026-11-12 06:21:44.315 UTC [19165] LOG:  received fast shutdown request
+2026-11-12 06:21:44.316 UTC [19165] LOG:  aborting any active transactions
+2026-11-12 06:21:44.319 UTC [19165] LOG:  background worker "logical replication launcher" (PID 19174) exited with exit code 1
+2026-11-12 06:21:44.320 UTC [19169] LOG:  shutting down
+2026-11-12 06:21:44.320 UTC [19169] LOG:  checkpoint starting: shutdown immediate
+2026-11-12 06:21:44.322 UTC [19169] LOG:  checkpoint complete: wrote 10 buffers (0.1%), wrote 1 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.001 s, sync=0.001 s, total=0.002 s; sync files=11, longest=0.001 s, average=0.001 s; distance=42 kB, estimate=14749 kB; lsn=0/600AAD8, redo lsn=0/600AAD8
+2026-11-12 06:21:44.329 UTC [19165] LOG:  database system is shut down

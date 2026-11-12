@@ -1,0 +1,14 @@
+ac7840bdd7cb7c3057e6eb7de84a915ae94d62ec1f07e5fb1462d297bdf7f589  ./WL-533-fence-lab-report.json
+26f3b425a4098221976bfb7894a70b751b5b2d8b07b9a2ee1d154defb0e69a3a  ./lab-stdout.log
+0a69bec7c173767696539c8e6c4093f507690a0e0f1921a1176cef6d8b59a2af  ./logs/connection-map.test.mjs.tap
+93331d7d4c490877897c3f5ae0008056a4f41c3dede041f316d48bb951d249b7  ./logs/db-fence.test.mjs.tap
+a347936c01ae76cf35cf569b62192ba791a8b681e23a0cba69bbe114ba3b0e4e  ./logs/ed25519.test.mjs.tap
+0003775cb76b41e15dc39aab8e985e3c3e0fb184c6779c2183d93051049ba53a  ./logs/effects.test.mjs.tap
+e479df7613fae9d3cd557f26f9025328780bbdb1e7ce87dd80d736dc0b801061  ./logs/fence-lifecycle.test.mjs.tap
+e20b7837127f394cf38d65b8717c596007ddd54637176c0d79b3755921fd19a2  ./logs/halt-integrity.test.mjs.tap
+5e767b0ef1547a651233f10b7e7a97d95381690893a41a2eab334e4c894c4aa8  ./logs/halt-live-rounds.json
+28badb05d209f57c60e90fbe95c1dde18baa5e8a2482589dd444ddfa5203fab1  ./logs/initdb.log
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ./logs/pg_basebackup.log
+310d5071350ef3851d5ade7401400f24c97d489a91a47b914e18789eb6636aff  ./logs/postgres-copy.log
+12deb7f5b3956bcd38f581fcb171a7c1324201c4c93649dbefc9034d30f50ec4  ./logs/postgres-primary.log
+c43b361d9305a38cb4cf3845b0c5633e21bc2d4908df9b60c2c61be38db07e31  ./logs/worker-isolation.test.mjs.tap
