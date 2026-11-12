@@ -54,6 +54,43 @@ import {
 } from '../src/fence/db-fence.mjs';
 import { up } from '../src/persistence/migrator.mjs';
 
+/**
+ * مسبارُ الـUID نفسِه (`WL-533`، LAB-UID-06): يُشغَّلُ **بمستخدمِ العامل** ضدَّ pid، ويحاولُ ما يفعلُه
+ * مهاجمٌ بالـUID نفسِه: قراءةُ `/proc/<pid>/{environ,maps,mem,fd}`، و`PTRACE_ATTACH`، و`pidfd_getfd`
+ * لكلِّ واصفٍ 0..63، وقراءةُ ملفِّ المفتاح. الخرجُ JSON: `OK:…` أو `DENIED:…` لكلِّ محاولة.
+ * x86_64/aarch64: رقمُ `pidfd_getfd` = 438 في كليهما.
+ */
+const SAME_UID_PROBE = String.raw`
+import ctypes, os, sys, json
+pid = int(sys.argv[1]); keyfile = sys.argv[2]; r = {}
+def t(name, f):
+    try: r[name] = 'OK:' + str(f())[:40]
+    except Exception as e: r[name] = 'DENIED:' + type(e).__name__
+t('environ', lambda: open('/proc/%d/environ' % pid, 'rb').read())
+t('maps', lambda: open('/proc/%d/maps' % pid).read())
+t('fd_list', lambda: os.listdir('/proc/%d/fd' % pid))
+def mem():
+    start = open('/proc/%d/maps' % pid).readline().split('-')[0]
+    f = open('/proc/%d/mem' % pid, 'rb'); f.seek(int(start, 16)); return f.read(16)
+t('mem', mem)
+libc = ctypes.CDLL(None, use_errno=True)
+rc = libc.ptrace(16, pid, 0, 0); err = ctypes.get_errno()
+r['ptrace_attach'] = 'OK' if rc == 0 else 'DENIED:errno%d' % err
+if rc == 0:
+    libc.ptrace(17, pid, 0, 0)
+try:
+    pfd = os.pidfd_open(pid); got = []; errs = set()
+    for fd in range(64):
+        n = libc.syscall(438, pfd, fd, 0)
+        if n >= 0: got.append(fd); os.close(n)
+        else: errs.add(ctypes.get_errno())
+    r['pidfd_getfd'] = ('OK:%s' % got) if got else 'DENIED:errno%s' % sorted(errs)
+except Exception as e:
+    r['pidfd_getfd'] = 'DENIED:' + type(e).__name__
+t('root_key_file', lambda: open(keyfile).read())
+print(json.dumps(r))
+`;
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_REPORT = 'docs/external-review/evidence/WL-532-fence-lab-report.json';
 const WORKERS = /** @type {const} */ (['alpha', 'beta']);
@@ -560,6 +597,15 @@ async function liveLab() {
   const app = path.join(work, 'app');
   /** @type {Record<string, string>} */
   const keyFiles = {};
+  /** @type {Record<string, string>} */
+  const rootKeyFiles = {};
+  /** @param {string} user */
+  const osIds = (user) => {
+    const u = run('id', ['-u', user]);
+    const g = run('id', ['-g', user]);
+    must(u.status === 0 && g.status === 0, `id ${user}`);
+    return { uid: Number(u.stdout.trim()), gid: Number(g.stdout.trim()) };
+  };
   /** يمدُّ نسخةَ src/ وكاتبِ المختبرِ واعتمادِ pg (وإغلاقِه)، ومفاتيحُ العمّالِ 0400 لمالكيها. */
   const prepareApp = () => {
     mkdirSync(path.join(app, 'scripts'), { recursive: true });
@@ -598,8 +644,24 @@ async function liveLab() {
         tmpKey,
         /** @type {string} */ (keyFiles[w]),
       ]);
+      // `WL-533`: نسخةٌ ملكُ root (0400) للعاملِ المعزول — مستخدمُ العاملِ لا يقرؤها؛ المُشرِفُ
+      // (هنا sudo/sh بـroot) يفتحُها ويمرّرُها واصفاً موروثاً.
+      rootKeyFiles[w] = path.join(keysDir, `${w}.root.pem`);
+      const instRoot = run('sudo', [
+        '-n',
+        'install',
+        '-o',
+        'root',
+        '-g',
+        'root',
+        '-m',
+        '0400',
+        tmpKey,
+        /** @type {string} */ (rootKeyFiles[w]),
+      ]);
       rmSync(tmpKey, { force: true });
       must(inst.status === 0, `install key ${w}: ${inst.stderr}`);
+      must(instRoot.status === 0, `install root key ${w}: ${instRoot.stderr}`);
     }
     return { packages: [...seen].sort() };
   };
@@ -607,7 +669,8 @@ async function liveLab() {
   /**
    * يُطلقُ كاتباً حقيقيّاً بمستخدمِ نظامِ العامل: مجمّعُ pg مختومٌ بمفتاحِ العامل.
    * @param {'alpha'|'beta'} w @param {Record<string, any>} c - الاعتمادُ المُصدَر
-   * @param {{ writer: string, poolSize?: number, keyOf?: 'alpha'|'beta', sealOnly?: boolean }} o
+   * @param {{ writer: string, poolSize?: number, keyOf?: 'alpha'|'beta', sealOnly?: boolean,
+   *           isolate?: boolean }} o
    */
   const spawnWriter = async (w, c, o) => {
     const s = await sovereign.status();
@@ -624,17 +687,31 @@ async function liveLab() {
       poolSize: o.poolSize ?? 4,
       writer: o.writer,
       sealOnly: o.sealOnly === true,
+      isolate: o.isolate === true,
     };
+    const writerPath = path.join(app, 'scripts', 'fence-lab-writer.mjs');
+    const arg = Buffer.from(JSON.stringify(input)).toString('base64url');
+    const ids = o.isolate === true ? osIds(OS_USER(w)) : null;
     const child = spawn(
       'sudo',
-      [
-        '-n',
-        '-u',
-        OS_USER(w),
-        process.execPath,
-        path.join(app, 'scripts', 'fence-lab-writer.mjs'),
-        Buffer.from(JSON.stringify(input)).toString('base64url'),
-      ],
+      ids === null
+        ? ['-n', '-u', OS_USER(w), process.execPath, writerPath, arg]
+        : // `WL-533`: يبدأُ بـroot؛ `sh` (root) يفتحُ ملفَّ المفتاحِ على الواصف 3 ثمّ `exec` للكاتب،
+          // والكاتبُ يقرأُ الواصفَ ويغلقُه ويُسقِطُ هويّتَه إلى مستخدمِ العامل.
+          [
+            '-n',
+            'env',
+            'XUUX_FENCE_KEY_FD=3',
+            `XUUX_FENCE_WORKER_UID=${ids.uid}`,
+            `XUUX_FENCE_WORKER_GID=${ids.gid}`,
+            'sh',
+            '-c',
+            'exec "$0" "$1" "$2" 3<"$3"',
+            process.execPath,
+            writerPath,
+            arg,
+            /** @type {string} */ (rootKeyFiles[w]),
+          ],
       { cwd: app, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     const bus = new EventEmitter();
@@ -722,6 +799,7 @@ async function liveLab() {
     'LAB-UID-03',
     'LAB-UID-04',
     'LAB-UID-05',
+    'LAB-UID-06',
     'LAB-HALT-LIVE',
   ];
   if (!osUsersReady) {
@@ -1011,6 +1089,131 @@ async function liveLab() {
           credential: st,
           note: 'كشفٌ بعديٌّ لا منع: نافذةُ المهاجمِ بينَ ختمِه وفشلِ العاملِ الحقيقيّ حقيقية',
         };
+      },
+    );
+
+    await check(
+      'LAB-UID-06',
+      'WL-533 علاجُ UID-05: عاملٌ معزول (يبدأُ بـroot، المفتاحُ واصفٌ موروثٌ من ملفٍّ ملكِ root، ثمّ إسقاطُ الهويّةِ داخلَ العملية) — عمليةٌ بالـUID نفسِه لا تقرأُ المفتاحَ ولا /proc ولا ptrace ولا pidfd_getfd، والضابطُ (عمليةٌ بُدئت بالـUID مباشرةً) مكشوف',
+      async () => {
+        const py = run('python3', ['-c', 'import ctypes, os; os.pidfd_open']);
+        must(py.status === 0, `python3 بـctypes و os.pidfd_open مطلوب: ${py.stderr}`);
+        const c = await boot('alpha');
+        const r = String(c.role_name);
+        const real = await spawnWriter('alpha', c, {
+          writer: 'uid-06-real',
+          isolate: true,
+          sealOnly: true,
+        });
+        const sup = await confirmWorkerSeal(root, real.bus, c, { timeoutMs: 15_000 }).then(
+          () => 'confirmed',
+          (e) => String(e.message),
+        );
+        const sealed = /** @type {Record<string, any>} */ (
+          real.messages.find((m) => m.type === 'xuux-fence/sealed') ?? {}
+        );
+        // الضابط: عمليةٌ بُدئت بمستخدمِ العاملِ مباشرةً (كالكاتبِ غيرِ المعزول) — يجبُ أن يكشفَها
+        // المسبارُ نفسُه، وإلّا فالمسبارُ لا يقيسُ شيئاً.
+        const control = spawn(
+          'sudo',
+          ['-n', '-u', OS_USER('alpha'), process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+          { stdio: 'ignore' },
+        );
+        await new Promise((res) => setTimeout(res, 800));
+        const cpid = run('pgrep', ['-u', OS_USER('alpha'), '-f', '^[^ ]*node -e setInterval']);
+        /** @param {number} pid */
+        const probe = (pid) => {
+          const p = run('sudo', [
+            '-n',
+            '-u',
+            OS_USER('alpha'),
+            'python3',
+            '-c',
+            SAME_UID_PROBE,
+            String(pid),
+            /** @type {string} */ (rootKeyFiles['alpha']),
+          ]);
+          must(p.status === 0, `probe: ${p.stderr}`);
+          return JSON.parse(p.stdout);
+        };
+        try {
+          must(sup === 'confirmed', `المُشرِفُ لم يؤكّدْ ختمَ العاملِ المعزول: ${sup}`);
+          must(
+            sealed.isolation?.mode === 'uid-drop-after-exec',
+            `العاملُ لم يُبلغْ عزلاً: ${JSON.stringify(sealed)}`,
+          );
+          const pid = Number(sealed.pid);
+          const owner = run('stat', ['-c', '%u:%U %a', `/proc/${pid}/environ`, `/proc/${pid}/fd`]);
+          // لا واصفَ في العاملِ يشيرُ إلى ملفِّ مفتاح (الواصف 3 أُغلِق)، ولا مفتاحَ في argv/env
+          // (‏cmdline مقروءٌ للجميعِ دائماً؛ environ يقرؤه root هنا للتحقّقِ فقط).
+          const fdLinks = run('sudo', [
+            '-n',
+            'sh',
+            '-c',
+            `for f in /proc/${pid}/fd/*; do readlink "$f"; done`,
+          ]);
+          must(fdLinks.status === 0, `readlink: ${fdLinks.stderr}`);
+          must(!/\.pem/.test(fdLinks.stdout), `واصفٌ مفتوحٌ على ملفِّ مفتاح: ${fdLinks.stdout}`);
+          const cmdline = run('sudo', [
+            '-n',
+            '-u',
+            OS_USER('alpha'),
+            'cat',
+            `/proc/${pid}/cmdline`,
+          ]);
+          const environ = run('sudo', ['-n', 'cat', `/proc/${pid}/environ`]);
+          must(cmdline.status === 0 && !cmdline.stdout.includes('PRIVATE'), 'مفتاحٌ في argv');
+          must(environ.status === 0 && !environ.stdout.includes('PRIVATE'), 'مفتاحٌ في env');
+          const isolated = probe(pid);
+          const controlPid = Number(cpid.stdout.trim().split('\n')[0]);
+          must(controlPid > 0, `لا ضابط: ${cpid.stderr}`);
+          const exposed = probe(controlPid);
+          const leaks = Object.entries(isolated).filter(([, v]) => !String(v).startsWith('DENIED'));
+          must(leaks.length === 0, `العاملُ المعزولُ مكشوف: ${JSON.stringify(leaks)}`);
+          must(
+            String(exposed.environ).startsWith('OK') &&
+              String(exposed.ptrace_attach).startsWith('OK') &&
+              String(exposed.pidfd_getfd).startsWith('OK'),
+            `الضابطُ غيرُ مكشوف ⇒ المسبارُ لا يقيس: ${JSON.stringify(exposed)}`,
+          );
+          const late = psqlAs(
+            OS_USER('alpha'),
+            r,
+            `INSERT INTO state.lab_probe(writer) VALUES ('uid-06-late')`,
+          );
+          must(
+            !late.ok && /not permitted to log in/.test(late.err),
+            `دخولٌ بعدَ الختم: ${late.out}`,
+          );
+          must((await credStatus(r))?.status === 'ACTIVE', 'الاعتمادُ لم يبقَ نشِطاً');
+          return {
+            worker_pid: pid,
+            isolation: sealed.isolation,
+            proc_owner: owner.stdout.trim().split('\n'),
+            open_fds: fdLinks.stdout.trim().split('\n').length,
+            key_fd_closed: true,
+            cmdline_readable_by_same_uid_without_secret: true,
+            same_uid_vs_isolated: isolated,
+            same_uid_vs_control: exposed,
+            late_login: late.err.split('\n')[0]?.slice(0, 160),
+            limits:
+              'لا يحمي من root/CAP_SYS_PTRACE ولا من اختراقِ العاملِ نفسِه ولا من الإشاراتِ (توفّر)؛ دخولٌ بدورِ الإقلاعِ قبلَ الختمِ يُفشِلُه ويُكشَف (LAB-UID-02)',
+          };
+        } finally {
+          control.kill();
+          run('sudo', [
+            '-n',
+            'pkill',
+            '-KILL',
+            '-u',
+            OS_USER('alpha'),
+            '-f',
+            'node -e setInterval',
+          ]);
+          await root.revokeCredential(r, 'lab-uid-06-done').catch(() => {});
+          real.kill();
+          await Promise.race([real.exited, new Promise((res) => setTimeout(res, 5_000))]);
+        }
       },
     );
 
@@ -1357,7 +1560,7 @@ const count = (/** @type {Array<Record<string, any>>} */ xs) =>
   );
 const report = {
   schema: 'xuux/fence-lab-report/v1',
-  work_log: 'WL-532',
+  work_log: arg('--work-log', 'WL-532') ?? 'WL-532',
   generated_at: new Date().toISOString(),
   environment: env,
   declared_limits: [

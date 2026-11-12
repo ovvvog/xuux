@@ -11,7 +11,7 @@
  *
  * الدخل: وسيطٌ واحدٌ JSON بـbase64url:
  *   { sock, port, database, role, workerId, bootId, epoch, sysid, keyFile, poolSize, writer,
- *     sealOnly? }
+ *     sealOnly?, isolate? }
  * الخرج: أسطرُ JSON على stdout بنوعِ رسائلِ IPC نفسِها (`xuux-fence/sealed` | `xuux-fence/seal-failed`)
  * ثمّ `{type:'stopped', committed, code, message}`. لا يقرأُ المُشرِفُ إلا هذه الأسطر.
  */
@@ -19,8 +19,13 @@
 import pg from 'pg';
 
 import { assertFencedSession, fileKeyProvider, sealFencedPool } from '../src/fence/db-fence.mjs';
+import { isolateWorkerProcess } from '../src/fence/worker-isolation.mjs';
 
 const input = JSON.parse(Buffer.from(String(process.argv[2] ?? ''), 'base64url').toString('utf8'));
+// `WL-533` (`isolate: true`): الكاتبُ يبدأُ بـroot والمفتاحُ على واصفٍ موروث، فيقرؤه ويُسقِطُ هويّتَه
+// قبلَ أيِّ وصلة — مسارُ `scripts/worker.mjs` المعزولُ نفسُه (`isolateWorkerProcess`).
+const isolation =
+  input.isolate === true ? isolateWorkerProcess(process.env, { workerId: input.workerId }) : null;
 /** @param {Record<string, unknown>} m */
 const emit = (m) => process.stdout.write(`${JSON.stringify(m)}\n`);
 
@@ -36,7 +41,7 @@ pool.on('error', () => {});
 
 let committed = 0;
 try {
-  const key = fileKeyProvider(input.keyFile);
+  const key = isolation === null ? fileKeyProvider(input.keyFile) : isolation.key;
   let sessions;
   try {
     sessions = await sealFencedPool(pool, input.poolSize, key, {
@@ -55,7 +60,13 @@ try {
     });
     process.exit(4);
   }
-  emit({ type: 'xuux-fence/sealed', role_name: input.role, sessions, pid: process.pid });
+  emit({
+    type: 'xuux-fence/sealed',
+    role_name: input.role,
+    sessions,
+    pid: process.pid,
+    isolation: isolation?.evidence ?? null,
+  });
   await assertFencedSession(pool, { workerId: input.workerId, bootId: input.bootId });
   if (input.sealOnly === true) {
     // يبقى حيّاً (وصلاتُه مختومةٌ مفتوحة) حتى يُنهيه المختبر.

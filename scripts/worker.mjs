@@ -54,6 +54,7 @@ import {
 } from '../src/execution/worker-registry.mjs';
 import { randomUUID } from 'node:crypto';
 import { dbFenceMode, prepareFencedWorker } from '../src/fence/db-fence.mjs';
+import { isolateWorkerProcess, isolationRequested } from '../src/fence/worker-isolation.mjs';
 
 /** حجمُ مجمّعِ العاملِ المُسيَّج: ثابتٌ ومختوم (حدُّ دورِ الإقلاع CONNECTION LIMIT 16). */
 const FENCED_POOL_SIZE = 8;
@@ -140,6 +141,11 @@ function recoveryPolicyFrom(flags) {
 }
 
 async function main() {
+  // عزلُ العملية (`WL-533`، علاجُ `LAB-UID-05`): إن مرّرَ المُشرِفُ المفتاحَ واصفاً موروثاً، يقرؤه
+  // العاملُ ويُسقِطُ هويّتَه **قبلَ أيِّ شيءٍ آخر** — لا ملفَّ ولا وصلةَ وهو root.
+  const isolated = isolationRequested(process.env)
+    ? isolateWorkerProcess(process.env, { workerId: process.env['XUUX_FENCE_WORKER_ID'] ?? '' })
+    : undefined;
   const options = parseArguments(process.argv.slice(2));
   if (options.publicKey === null) {
     throw new Error(
@@ -157,7 +163,11 @@ async function main() {
   // السطرِ هو العاملُ نفسُه بالحارسِ نفسِه في كلِّ موضع.
   const fence =
     dbFenceMode(process.env) === 'required'
-      ? await prepareFencedWorker({ env: process.env, halt })
+      ? await prepareFencedWorker({
+          env: process.env,
+          halt,
+          ...(isolated === undefined ? {} : { isolated }),
+        })
       : null;
   const guard = fence === null ? halt : fence.haltGuard;
   const pool =
@@ -168,7 +178,7 @@ async function main() {
     await fence.seal(pool, FENCED_POOL_SIZE);
     await fence.verify(pool);
     process.stdout.write(
-      `وضعُ السياج: ${fence.workerId} بدورِ ${String(fence.credential.role_name)} (عهد ${String(fence.credential.epoch)}، مفتاحٌ عتاديّ: ${fence.hardwareBacked ? 'نعم' : 'لا'})\n`,
+      `وضعُ السياج: ${fence.workerId} بدورِ ${String(fence.credential.role_name)} (عهد ${String(fence.credential.epoch)}، مفتاحٌ عتاديّ: ${fence.hardwareBacked ? 'نعم' : 'لا'}، عزلُ العملية: ${fence.processIsolation === null ? 'لا' : 'نعم'})\n`,
     );
   }
   const queue = createTaskQueue({ pool });
