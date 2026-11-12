@@ -40,12 +40,7 @@ import {
   isolatedLaunchEnv,
   ALLOWED_CAP_BND,
 } from '../../scripts/worker.mjs';
-import {
-  UNSET_ENV,
-  boundingCapabilities,
-  parseUnit,
-  systemdUnit,
-} from '../../scripts/fence-worker-unit.mjs';
+import { UNSET_ENV, boundingCapabilities, parseUnit, systemdUnit } from '../../scripts/worker.mjs';
 
 const skip = probeIsolation().available
   ? false
@@ -1192,7 +1187,7 @@ test('ISO-47: عمليّةٌ حقيقيّة — بصمةُ node المثبَّت
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
-// `WL-533` (‏جولةٌ لاحقة، البند ٣) — عقدُ وحدةِ systemd المكافئةِ للمُطلِق (`scripts/fence-worker-unit.mjs`).
+// `WL-533` (‏جولةٌ لاحقة، البند ٣) — عقدُ وحدةِ systemd المكافئةِ للمُطلِق (`systemdUnit` في scripts/worker.mjs).
 //  - ISO-48..51: نصٌّ مولَّد — مطابقةُ المُطلِق (‏البيئة والحدّ)، ورفضُ الحقن، وفحصُ الثقة، ولا تثبيت.
 //  - ISO-52: محاكاةٌ حقيقيّةٌ **من نصِّ الوحدةِ المحلَّل** (‏sudo + env + setpriv + sh)، مع ضوابطَ سلبيّة.
 // لم يُشغَّل systemd: هذا عقدٌ نصّيٌّ ومحاكاتُه، لا دليلٌ على سلوكِ مديرِ systemd على مضيفٍ ما.
@@ -1275,56 +1270,37 @@ test('ISO-50: الوحدةُ لا تُولَّدُ لشيفرةٍ غيرِ مو�
   assert.equal(systemdUnit({ ...UNIT_BASE, trust: false }).trust, 0);
 });
 
-test('ISO-51: المولّدُ لا يُثبِّتُ ولا يستدعي systemctl ولا يكتبُ ملفّاً', () => {
-  const src = readFileSync(
-    fileURLToPath(new URL('../../scripts/fence-worker-unit.mjs', import.meta.url)),
-    'utf8',
-  );
-  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+test('ISO-51: المولّدُ نقيٌّ — لا يكتبُ ولا يُشغِّلُ ولا يستدعي systemctl، ولا يستدعيه مسارُ الإقلاع', () => {
+  const src = readFileSync(WORKER_ENTRY, 'utf8');
+  const a = src.indexOf('// ── عقدُ وحدةِ systemd');
+  const b = src.indexOf('export async function loadApp()');
+  assert.ok(a > 0 && b > a, 'قسمُ المولّدِ قبلَ loadApp');
+  const code = src
+    .slice(a, b)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
   assert.doesNotMatch(
     code,
-    /systemctl|daemon-reload|writeFile|appendFile|mkdir|child_process|spawn|exec\(/,
+    /systemctl|daemon-reload|writeFile|appendFile|mkdir|openSync|spawn|exec(File)?Sync|process\.(stdout|exit)/,
   );
+  // لا يُستدعى خارجَ قسمِه: الإقلاعُ (bootstrapIsolation/main) لا يمرُّ به.
+  const outside = src.slice(0, a) + src.slice(b);
+  assert.doesNotMatch(outside, /systemdUnit\(|parseUnit\(/);
+  // وعبرَ الاستيرادِ كما يُستعمَل.
   const r = spawnSync(
     process.execPath,
     [
-      fileURLToPath(new URL('../../scripts/fence-worker-unit.mjs', import.meta.url)),
-      '--node',
-      '/usr/bin/node',
-      '--entry',
-      '/opt/x/w.mjs',
-      '--key-file',
-      '/etc/k',
-      '--uid',
-      '990',
-      '--gid',
-      '990',
-      '--no-trust-check',
+      '--input-type=module',
+      '-e',
+      `import { systemdUnit } from ${JSON.stringify(WORKER_ENTRY)};` +
+        `process.stdout.write(systemdUnit({ node: '/usr/bin/node', entry: '/opt/x/w.mjs', keyFile: '/etc/k',` +
+        ` uid: 990, gid: 990, env: {}, trust: false }).unit)`,
     ],
     { encoding: 'utf8' },
   );
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^CapabilityBoundingSet=CAP_SETUID CAP_SETGID$/m);
-  const bad = spawnSync(
-    process.execPath,
-    [
-      fileURLToPath(new URL('../../scripts/fence-worker-unit.mjs', import.meta.url)),
-      '--node',
-      '/usr/bin/node',
-      '--entry',
-      '/opt/x/w.mjs',
-      '--key-file',
-      '/etc/k',
-      '--uid',
-      '0',
-      '--gid',
-      '990',
-      '--no-trust-check',
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.equal(bad.status, 2);
-  assert.match(bad.stderr, /FENCE_ISOLATION_CONFIG/);
+  assert.match(r.stdout, /^OpenFile=\/etc\/k:xuux-key:read-only$/m);
 });
 
 /**

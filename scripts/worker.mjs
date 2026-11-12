@@ -714,6 +714,133 @@ export function isolatedLaunchCommand(o) {
     : { command: LAUNCH_SUDO, args: ['-n', ...inner], env, trust: trust.checked };
 }
 
+// ── عقدُ وحدةِ systemd المكافئةِ للمُطلِق (‏WL-533، §9.3ب) ─────────────────────────────────────
+// دوالُّ نقيّةٌ بلا إدخالٍ أو إخراج: تبني نصَّ الوحدةِ ولا تكتبُ ملفّاً ولا تستدعي systemctl ولا تُثبِّتُ
+// شيئاً (‏التثبيتُ قرارُ المالك D-SUP-1/2). في هذا الملفِّ لا في ملفٍّ مستقلّ: G1 ‏3220 (‏قرارُ المالك)،
+// ولأنّها مبنيّةٌ من `isolatedLaunchEnv` وALLOWED_CAP_BND نفسَيهما فلا عقدَ موازٍ. الاستعمال:
+//   node --input-type=module -e "import { systemdUnit } from '/opt/xuux/scripts/worker.mjs';
+//     process.stdout.write(systemdUnit({ node, entry, keyFile, uid, gid, env: process.env, pass }).unit)"
+// والمُقلِعُ لا يستدعيها؛ لا مسارَ لها في إقلاعِ العامل. لم يُشغَّل systemd: عقدٌ نصّيٌّ ومحاكاتُه (‏ISO-52).
+
+/** أسماءُ القدرات في حدِّ ALLOWED_CAP_BND (‏البتّ ٦ CAP_SETGID، ٧ CAP_SETUID). */
+const CAP_NAMES = Object.freeze({ 6: 'CAP_SETGID', 7: 'CAP_SETUID' });
+
+/** أسماءٌ عدائيّةٌ معروفةٌ تُزالُ من بيئةِ المدير — ليست شاملة. */
+export const UNSET_ENV = Object.freeze([
+  'NODE_OPTIONS',
+  'NODE_PATH',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_REPL_EXTERNAL_MODULE',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'NODE_DEBUG',
+  'NODE_V8_COVERAGE',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'LD_AUDIT',
+  'XUUX_FENCE_WORKER_KEY',
+]);
+
+/** القدراتُ المسموحةُ في الحدّ، مشتقّةً من ALLOWED_CAP_BND لا مكتوبةً يدويّاً. */
+export function boundingCapabilities() {
+  /** @type {string[]} */
+  const caps = [];
+  for (let bit = 0; bit < 64; bit++) {
+    if ((ALLOWED_CAP_BND >> BigInt(bit)) & 1n) {
+      const name = /** @type {Record<number, string>} */ (CAP_NAMES)[bit];
+      if (name === undefined) throw new Error(`بتّ قدرةٍ بلا اسم: ${bit}`);
+      caps.push(name);
+    }
+  }
+  return caps.sort().reverse(); // CAP_SETUID CAP_SETGID
+}
+
+/** محارفُ تُغيّرُ معنى سطرِ الوحدة (‏فاصل، اقتباس، هروب، محدِّد %) — رفضٌ لا هروب. */
+const UNSAFE = /[\s"'\\%;$`]/u;
+
+/** @param {string} v */
+const hasControl = (v) => [...v].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
+
+/** @param {string} what @param {string} v */
+function safe(what, v) {
+  if (typeof v !== 'string' || v === '' || UNSAFE.test(v) || hasControl(v)) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.CONFIG,
+      `${what} يحوي محرفاً لا يُكتَبُ في وحدةِ systemd بأمان: «${String(v)}».`,
+    );
+  }
+  return v;
+}
+
+/**
+ * يولّدُ نصَّ الوحدة. يرمي `FENCE_ISOLATION_CONFIG` لمُدخلٍ غيرِ آمن، و`FENCE_ISOLATION_HOSTILE_ENV`
+ * لاسمٍ ممنوع، و`FENCE_ISOLATION_UNTRUSTED_CODE` لشيفرةٍ غيرِ موثوقة (ما لم يُعطَّل الفحصُ صراحةً).
+ * @param {{ node: string, entry: string, args?: readonly string[], keyFile: string, uid: number,
+ *   gid: number, env?: NodeJS.ProcessEnv, pass?: readonly string[], description?: string,
+ *   trust?: false | { fs?: TrustFs, pins?: Readonly<Record<string, string>> } }} o
+ * @returns {{ unit: string, env: Record<string, string>, trust: number }}
+ */
+export function systemdUnit(o) {
+  const env = isolatedLaunchEnv({ ...o, env: o.env ?? {} });
+  safe('node', o.node);
+  safe('entry', o.entry);
+  safe('keyFile', o.keyFile);
+  for (const a of o.args ?? []) safe('وسيط', a);
+  for (const [k, v] of Object.entries(env)) safe(`قيمة ${k}`, v);
+  let checked = 0;
+  if (o.trust !== false) {
+    const t = codeTrustViolations([o.node, o.entry], o.trust ?? {});
+    if (t.violations.length > 0) {
+      throw new IsolationError(
+        ISOLATION_ERRORS.UNTRUSTED_CODE,
+        `مولّدُ الوحدةِ يرفض: ${t.violations.join('؛ ')}.`,
+        t.violations,
+      );
+    }
+    checked = t.checked.length;
+  }
+  const description = [...(o.description ?? 'XUUX fenced worker (WL-533 contract)')]
+    .filter((c) => !hasControl(c) && c !== '%')
+    .join('');
+  const lines = [
+    '# مولَّدٌ من systemdUnit في scripts/worker.mjs — عقدٌ لم يُثبَّت (‏D-SUP-1/2).',
+    '[Unit]',
+    `Description=${description}`,
+    '',
+    '[Service]',
+    'Type=simple',
+    'User=root',
+    'Group=root',
+    'NoNewPrivileges=yes',
+    `CapabilityBoundingSet=${boundingCapabilities().join(' ')}`,
+    'AmbientCapabilities=',
+    'UMask=0077',
+    `UnsetEnvironment=${UNSET_ENV.join(' ')}`,
+    ...Object.entries(env).map(([k, v]) => `Environment=${k}=${v}`),
+    `OpenFile=${o.keyFile}:xuux-key:read-only`,
+    `ExecStart=${[o.node, o.entry, ...(o.args ?? [])].join(' ')}`,
+    'Restart=no',
+    '',
+  ];
+  return { unit: lines.join('\n'), env, trust: checked };
+}
+
+/**
+ * يقرأُ نصَّ وحدةٍ مولَّدة (‏للاختبار والتحقّق) — لا محلّلَ systemd عامّاً.
+ * @param {string} text
+ */
+export function parseUnit(text) {
+  /** @type {Record<string, string[]>} */
+  const d = {};
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith('[')) continue;
+    const i = line.indexOf('=');
+    const k = line.slice(0, i);
+    (d[k] ??= []).push(line.slice(i + 1));
+  }
+  return d;
+}
+
 /**
  * وحداتُ التطبيق — تُحمَّلُ **بعدَ** `bootstrapIsolation` وحدَه (‏ISO-41). لا استيرادَ ثابتاً لأيٍّ منها
  * في هذا الملفّ: أيُّ أثرٍ جانبيٍّ في وحدةٍ منها يقعُ بالهويّةِ المُسقَطةِ لا بـroot.

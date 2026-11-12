@@ -388,9 +388,9 @@ node مستبدَلٌ لا يفحصُ نفسَه. **المقيسُ على مضي
 بـroot في المسارِ المعزول؛ فنتيجةُ مختبرِ `7ccaf82d` قامت على شرطِ مضيفٍ غيرِ مفحوص. المضيفُ لم يُغيَّر؛ المختبرُ والاختباراتُ
 تستعملُ نسخةً ملكَ root ‏0755. حدود: المكتباتُ المشترَكة (‏ld.so، libc، ‎ld.so.cache‎) وnode_modules والنواةُ غيرُ مفحوصة.
 
-### 9.3ب وحدةُ systemd المكافئة (‏`scripts/fence-worker-unit.mjs` — عقدٌ لا تثبيت)
+### 9.3ب وحدةُ systemd المكافئة (‏`systemdUnit` في `scripts/worker.mjs` — عقدٌ لا تثبيت)
 
-يُولِّدُ نصَّ الوحدةِ على stdout من **المصدرِ نفسِه** (`isolatedLaunchEnv` وALLOWED_CAP_BND): ‎User=root‎، ‎NoNewPrivileges=yes‎،
+دالّةٌ نقيّةٌ (‏لا CLI، ولا يستدعيها مسارُ الإقلاع؛ في الملفِّ نفسِه لأنّ G1 ‏3220) تبني نصَّ الوحدةِ من **المصدرِ نفسِه** (`isolatedLaunchEnv` وALLOWED_CAP_BND): ‎User=root‎، ‎NoNewPrivileges=yes‎،
 ‎CapabilityBoundingSet=CAP_SETUID CAP_SETGID‎، ‎AmbientCapabilities=‎ فارغ، ‎Environment=‎ بقائمةِ السماحِ وبلا EnvironmentFile،
 ‎UnsetEnvironment=‎ لأسماءٍ عدائيّةٍ معروفة، ‎OpenFile=‹key›:xuux-key:read-only‎ (‏systemd ≥ 253؛ الواصفُ 3 ما دامت بلا مقابس)،
 وExecStart مطلق؛ ويرفضُ المحارفَ التي تغيّرُ معنى السطرِ (‏فاصل، اقتباس، ‎%‎، ‎;‎) بدلَ تهريبِها، ولا يُولِّدُ لشيفرةٍ غيرِ موثوقة
@@ -620,7 +620,7 @@ threats:
     actor: operator_error
     asset: بيئةُ وحدةِ systemd وسياستُها
     attack: بيئةُ مديرِ systemd (set-environment) أو EnvironmentFile تُدخِلُ NODE_* أو LD_*، أو وحدةٌ بلا NoNewPrivileges أو بحدِّ قدراتٍ كامل، أو حقنُ سطرٍ عبرَ قيمةٍ أو مسار
-    control: scripts/fence-worker-unit.mjs يولِّدُ الوحدةَ من مصدرِ المُطلِقِ نفسِه، بلا EnvironmentFile، وبـUnsetEnvironment للأسماءِ المعروفة، ويرفضُ المحارفَ الخطرة؛ والمُقلِعُ يرفضُ ما يفلتُ (HOSTILE_ENV) وغيابَ NoNewPrivs أو الحدِّ (LAUNCH_POLICY) — مقيسٌ بمحاكاةٍ من نصِّ الوحدة
+    control: systemdUnit في scripts/worker.mjs يولِّدُ الوحدةَ من مصدرِ المُطلِقِ نفسِه، بلا EnvironmentFile، وبـUnsetEnvironment للأسماءِ المعروفة، ويرفضُ المحارفَ الخطرة؛ والمُقلِعُ يرفضُ ما يفلتُ (HOSTILE_ENV) وغيابَ NoNewPrivs أو الحدِّ (LAUNCH_POLICY) — مقيسٌ بمحاكاةٍ من نصِّ الوحدة
     status: MITIGATED_DESIGN
     evidence: [tests/execution/worker-isolation.test.mjs#ISO-48, tests/execution/worker-isolation.test.mjs#ISO-49, tests/execution/worker-isolation.test.mjs#ISO-51, tests/execution/worker-isolation.test.mjs#ISO-52]
     limit: لم يُشغَّل systemd ولم تُثبَّت الوحدة — المحاكاةُ بـsetpriv لا تُثبتُ سلوكَ المدير (ترتيبُ OpenFile، وLISTEN_FDS، والإصدار ≥ 253)؛ UnsetEnvironment ليس شاملاً، وما يفلتُ منه يُكشَفُ لا يُمنَع
