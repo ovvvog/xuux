@@ -1,0 +1,590 @@
+TAP version 13
+# Subtest: العامل يمرّر المهمة إلى namespaces حقيقية ويثبت نتيجتها
+ok 1 - العامل يمرّر المهمة إلى namespaces حقيقية ويثبت نتيجتها
+  ---
+  duration_ms: 89.406325
+  ...
+# Subtest: WL-533 مُقلِعُ العزل — نظامٌ مزيَّف
+    # Subtest: ISO-01: الترتيب — fstat ثمّ قراءةٌ وإغلاقٌ قبلَ أيِّ إسقاط، ثمّ setgroups→setgid→setuid ثمّ التحقّق
+    ok 1 - ISO-01: الترتيب — fstat ثمّ قراءةٌ وإغلاقٌ قبلَ أيِّ إسقاط، ثمّ setgroups→setgid→setuid ثمّ التحقّق
+      ---
+      duration_ms: 4.719323
+      ...
+    # Subtest: ISO-02: بلا متغيّراتِ عزلٍ ⇒ null (لا عزلَ مطلوب)؛ وoff صريحٌ كذلك
+    ok 2 - ISO-02: بلا متغيّراتِ عزلٍ ⇒ null (لا عزلَ مطلوب)؛ وoff صريحٌ كذلك
+      ---
+      duration_ms: 0.193062
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — XUUX_FENCE_KEY_FD بلا وضع
+    ok 3 - ISO-03: يفشلُ مغلقاً — XUUX_FENCE_KEY_FD بلا وضع
+      ---
+      duration_ms: 0.435513
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — UID/GID بلا وضع
+    ok 4 - ISO-03: يفشلُ مغلقاً — UID/GID بلا وضع
+      ---
+      duration_ms: 0.127976
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — off مع واصف
+    ok 5 - ISO-03: يفشلُ مغلقاً — off مع واصف
+      ---
+      duration_ms: 0.102793
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — وضعٌ مجهول
+    ok 6 - ISO-03: يفشلُ مغلقاً — وضعٌ مجهول
+      ---
+      duration_ms: 0.186718
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — required بلا واصف
+    ok 7 - ISO-03: يفشلُ مغلقاً — required بلا واصف
+      ---
+      duration_ms: 0.256879
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — required بلا uid
+    ok 8 - ISO-03: يفشلُ مغلقاً — required بلا uid
+      ---
+      duration_ms: 0.186946
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — required بلا gid
+    ok 9 - ISO-03: يفشلُ مغلقاً — required بلا gid
+      ---
+      duration_ms: 0.194006
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — تراجعٌ إلى XUUX_FENCE_WORKER_KEY
+    ok 10 - ISO-03: يفشلُ مغلقاً — تراجعٌ إلى XUUX_FENCE_WORKER_KEY
+      ---
+      duration_ms: 0.106755
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — بلا XUUX_DB_FENCE=required
+    ok 11 - ISO-03: يفشلُ مغلقاً — بلا XUUX_DB_FENCE=required
+      ---
+      duration_ms: 0.105071
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — uid=0
+    ok 12 - ISO-03: يفشلُ مغلقاً — uid=0
+      ---
+      duration_ms: 0.247531
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — gid=0
+    ok 13 - ISO-03: يفشلُ مغلقاً — gid=0
+      ---
+      duration_ms: 0.183313
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — uid غيرُ رقميّ
+    ok 14 - ISO-03: يفشلُ مغلقاً — uid غيرُ رقميّ
+      ---
+      duration_ms: 0.113106
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — fd=0
+    ok 15 - ISO-03: يفشلُ مغلقاً — fd=0
+      ---
+      duration_ms: 0.092469
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — fd=2
+    ok 16 - ISO-03: يفشلُ مغلقاً — fd=2
+      ---
+      duration_ms: 0.09258
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — fd سالب
+    ok 17 - ISO-03: يفشلُ مغلقاً — fd سالب
+      ---
+      duration_ms: 0.19992
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — fd فوقَ مدى النوع int
+    ok 18 - ISO-03: يفشلُ مغلقاً — fd فوقَ مدى النوع int
+      ---
+      duration_ms: 0.145119
+      ...
+    # Subtest: ISO-03: يفشلُ مغلقاً — fd بأرقامٍ تفوقُ الدقّة
+    ok 19 - ISO-03: يفشلُ مغلقاً — fd بأرقامٍ تفوقُ الدقّة
+      ---
+      duration_ms: 0.104872
+      ...
+    # Subtest: ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — NODE_OPTIONS
+    ok 20 - ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — NODE_OPTIONS
+      ---
+      duration_ms: 0.233763
+      ...
+    # Subtest: ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — NODE_PATH
+    ok 21 - ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — NODE_PATH
+      ---
+      duration_ms: 0.116013
+      ...
+    # Subtest: ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — LD_PRELOAD
+    ok 22 - ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — LD_PRELOAD
+      ---
+      duration_ms: 0.085966
+      ...
+    # Subtest: ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — LD_LIBRARY_PATH
+    ok 23 - ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — LD_LIBRARY_PATH
+      ---
+      duration_ms: 0.082117
+      ...
+    # Subtest: ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — DYLD_INSERT_LIBRARIES
+    ok 24 - ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — DYLD_INSERT_LIBRARIES
+      ---
+      duration_ms: 0.077347
+      ...
+    # Subtest: ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — execArgv --import
+    ok 25 - ISO-04: مدخلُ إطلاقٍ عدائيّ ⇒ HOSTILE_ENV قبلَ قراءةِ الواصف — execArgv --import
+      ---
+      duration_ms: 0.115464
+      ...
+    # Subtest: ISO-05: NODE_ENV ليس عدائيّاً
+    ok 26 - ISO-05: NODE_ENV ليس عدائيّاً
+      ---
+      duration_ms: 0.1017
+      ...
+    # Subtest: ISO-06: عمليةٌ بُدئت بغيرِ root ⇒ NOT_PRIVILEGED ولا يُقرأُ الواصف
+    ok 27 - ISO-06: عمليةٌ بُدئت بغيرِ root ⇒ NOT_PRIVILEGED ولا يُقرأُ الواصف
+      ---
+      duration_ms: 0.147224
+      ...
+    # Subtest: ISO-07: سياسةُ الإطلاق ⇒ LAUNCH_POLICY قبلَ قراءةِ الواصف — NoNewPrivs=0
+    ok 28 - ISO-07: سياسةُ الإطلاق ⇒ LAUNCH_POLICY قبلَ قراءةِ الواصف — NoNewPrivs=0
+      ---
+      duration_ms: 0.191386
+      ...
+    # Subtest: ISO-07: سياسةُ الإطلاق ⇒ LAUNCH_POLICY قبلَ قراءةِ الواصف — CapBnd كامل (بلا setpriv)
+    ok 29 - ISO-07: سياسةُ الإطلاق ⇒ LAUNCH_POLICY قبلَ قراءةِ الواصف — CapBnd كامل (بلا setpriv)
+      ---
+      duration_ms: 0.118016
+      ...
+    # Subtest: ISO-07: سياسةُ الإطلاق ⇒ LAUNCH_POLICY قبلَ قراءةِ الواصف — CapBnd فيه CAP_DAC_OVERRIDE
+    ok 30 - ISO-07: سياسةُ الإطلاق ⇒ LAUNCH_POLICY قبلَ قراءةِ الواصف — CapBnd فيه CAP_DAC_OVERRIDE
+      ---
+      duration_ms: 0.104412
+      ...
+    # Subtest: ISO-08: fs.suid_dumpable=1 ⇒ مرفوضٌ قبلَ قراءةِ المفتاح؛ و2 مقبول
+    ok 31 - ISO-08: fs.suid_dumpable=1 ⇒ مرفوضٌ قبلَ قراءةِ المفتاح؛ و2 مقبول
+      ---
+      duration_ms: 0.925741
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — أنبوب (fifo)
+    ok 32 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — أنبوب (fifo)
+      ---
+      duration_ms: 0.190823
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — مقبس
+    ok 33 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — مقبس
+      ---
+      duration_ms: 0.144805
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — طرفيّة
+    ok 34 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — طرفيّة
+      ---
+      duration_ms: 0.214974
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — مجلّد
+    ok 35 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — مجلّد
+      ---
+      duration_ms: 0.138455
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — مالكٌ غيرُ root
+    ok 36 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — مالكٌ غيرُ root
+      ---
+      duration_ms: 0.104606
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — 0440 (group)
+    ok 37 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — 0440 (group)
+      ---
+      duration_ms: 0.106718
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — 0604 (other)
+    ok 38 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — 0604 (other)
+      ---
+      duration_ms: 0.119862
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — 0200 (المالكُ لا يقرأ)
+    ok 39 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — 0200 (المالكُ لا يقرأ)
+      ---
+      duration_ms: 0.104205
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — حجمٌ صفر
+    ok 40 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — حجمٌ صفر
+      ---
+      duration_ms: 0.098629
+      ...
+    # Subtest: ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — حجمٌ ضخم
+    ok 41 - ISO-09: عقدُ الواصف ⇒ KEY_FD ويُغلَقُ الواصفُ ولا يُقرأُ ولا يُسقَط — حجمٌ ضخم
+      ---
+      duration_ms: 0.092715
+      ...
+    # Subtest: ISO-10: keyFdViolations — عقدٌ صريحٌ لكلِّ حقل
+    ok 42 - ISO-10: keyFdViolations — عقدٌ صريحٌ لكلِّ حقل
+      ---
+      duration_ms: 0.121827
+      ...
+    # Subtest: ISO-11: فشلُ قراءةِ الواصف ⇒ KEY_FD ويُغلَقُ ولا يُسقَطُ شيء
+    ok 43 - ISO-11: فشلُ قراءةِ الواصف ⇒ KEY_FD ويُغلَقُ ولا يُسقَطُ شيء
+      ---
+      duration_ms: 0.18226
+      ...
+    # Subtest: ISO-12: محتوًى ليس مفتاحَ Ed25519 ⇒ KEY_FD قبلَ الإسقاط
+    ok 44 - ISO-12: محتوًى ليس مفتاحَ Ed25519 ⇒ KEY_FD قبلَ الإسقاط
+      ---
+      duration_ms: 1.660926
+      ...
+    # Subtest: ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — setuid(0) ينجحُ بعدَ الإسقاط
+    ok 45 - ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — setuid(0) ينجحُ بعدَ الإسقاط
+      ---
+      duration_ms: 0.686024
+      ...
+    # Subtest: ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — /proc/self/environ ملكُ العامل (dumpable=1)
+    ok 46 - ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — /proc/self/environ ملكُ العامل (dumpable=1)
+      ---
+      duration_ms: 0.641546
+      ...
+    # Subtest: ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — CapEff≠0 بعدَ الإسقاط
+    ok 47 - ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — CapEff≠0 بعدَ الإسقاط
+      ---
+      duration_ms: 0.704342
+      ...
+    # Subtest: ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — Uid مختلف
+    ok 48 - ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — Uid مختلف
+      ---
+      duration_ms: 0.6023
+      ...
+    # Subtest: ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — CapBnd اتّسعَ بعدَ الإسقاط
+    ok 49 - ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — CapBnd اتّسعَ بعدَ الإسقاط
+      ---
+      duration_ms: 0.699152
+      ...
+    # Subtest: ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — نسخةٌ مكرَّرةٌ من واصفِ المفتاحِ مفتوحة (4<&3)
+    ok 50 - ISO-13: التحقّقُ يفشلُ مغلقاً ⇒ VERIFY_FAILED — نسخةٌ مكرَّرةٌ من واصفِ المفتاحِ مفتوحة (4<&3)
+      ---
+      duration_ms: 0.668565
+      ...
+    # Subtest: ISO-14: prepareFencedWorker — العزلُ الإلزاميُّ بلا مفتاحٍ معزولٍ يُرفَض (لا تراجعَ إلى الملف)
+    ok 51 - ISO-14: prepareFencedWorker — العزلُ الإلزاميُّ بلا مفتاحٍ معزولٍ يُرفَض (لا تراجعَ إلى الملف)
+      ---
+      duration_ms: 1.877196
+      ...
+    # Subtest: ISO-15: المُطلِق — بيئةُ سماحٍ صريحة: NODE_OPTIONS وLD_PRELOAD والمفتاحُ لا تعبر
+    ok 52 - ISO-15: المُطلِق — بيئةُ سماحٍ صريحة: NODE_OPTIONS وLD_PRELOAD والمفتاحُ لا تعبر
+      ---
+      duration_ms: 1.06426
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «NODE_OPTIONS»
+    ok 53 - ISO-16: المُطلِقُ يرفضُ تمريرَ «NODE_OPTIONS»
+      ---
+      duration_ms: 0.173204
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «NODE_PATH»
+    ok 54 - ISO-16: المُطلِقُ يرفضُ تمريرَ «NODE_PATH»
+      ---
+      duration_ms: 0.079807
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «LD_PRELOAD»
+    ok 55 - ISO-16: المُطلِقُ يرفضُ تمريرَ «LD_PRELOAD»
+      ---
+      duration_ms: 0.06754
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «DYLD_INSERT_LIBRARIES»
+    ok 56 - ISO-16: المُطلِقُ يرفضُ تمريرَ «DYLD_INSERT_LIBRARIES»
+      ---
+      duration_ms: 0.095655
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «XUUX_FENCE_WORKER_KEY»
+    ok 57 - ISO-16: المُطلِقُ يرفضُ تمريرَ «XUUX_FENCE_WORKER_KEY»
+      ---
+      duration_ms: 0.104287
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «XUUX_FENCE_KEY_FD»
+    ok 58 - ISO-16: المُطلِقُ يرفضُ تمريرَ «XUUX_FENCE_KEY_FD»
+      ---
+      duration_ms: 0.092402
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «XUUX_FENCE_ISOLATION»
+    ok 59 - ISO-16: المُطلِقُ يرفضُ تمريرَ «XUUX_FENCE_ISOLATION»
+      ---
+      duration_ms: 0.064157
+      ...
+    # Subtest: ISO-16: المُطلِقُ يرفضُ تمريرَ «lower_case»
+    ok 60 - ISO-16: المُطلِقُ يرفضُ تمريرَ «lower_case»
+      ---
+      duration_ms: 0.063795
+      ...
+    # Subtest: ISO-17: المُطلِقُ يرفضُ مساراتٍ نسبيّةً وuid/gid=0 وقيمةً فيها سطرٌ جديد
+    ok 61 - ISO-17: المُطلِقُ يرفضُ مساراتٍ نسبيّةً وuid/gid=0 وقيمةً فيها سطرٌ جديد
+      ---
+      duration_ms: 0.184256
+      ...
+    1..61
+ok 2 - WL-533 مُقلِعُ العزل — نظامٌ مزيَّف
+  ---
+  duration_ms: 22.895376
+  type: 'suite'
+  ...
+# Subtest: ISO-40: رسمُ الاستيرادِ الثابت — المُقلِعُ `node:` وحدَه، وكاتبُ المختبرِ `node:` + المُقلِع
+ok 3 - ISO-40: رسمُ الاستيرادِ الثابت — المُقلِعُ `node:` وحدَه، وكاتبُ المختبرِ `node:` + المُقلِع
+  ---
+  duration_ms: 1.201023
+  ...
+# Subtest: ISO-20: عمليةٌ حقيقيّةٌ بلا root تطلبُ العزل ⇒ NOT_PRIVILEGED (لا عزلٌ صامت)
+ok 4 - ISO-20: عمليةٌ حقيقيّةٌ بلا root تطلبُ العزل ⇒ NOT_PRIVILEGED (لا عزلٌ صامت)
+  ---
+  duration_ms: 40.310554
+  ...
+# Subtest: ISO-21: نقطةُ الدخولِ الحقيقيّةُ تفشلُ مغلقةً بلا واصفٍ أو مع مسارِ المفتاحِ القديم
+ok 5 - ISO-21: نقطةُ الدخولِ الحقيقيّةُ تفشلُ مغلقةً بلا واصفٍ أو مع مسارِ المفتاحِ القديم
+  ---
+  duration_ms: 115.600271
+  ...
+# Subtest: ISO-41: عدائيّ — أثرٌ جانبيٌّ في كلِّ وحدةٍ تطبيقيّةٍ مستوردةٍ يقعُ بالهويّةِ المُسقَطة، والضابطُ يكشفُ root
+ok 6 - ISO-41: عدائيّ — أثرٌ جانبيٌّ في كلِّ وحدةٍ تطبيقيّةٍ مستوردةٍ يقعُ بالهويّةِ المُسقَطة، والضابطُ يكشفُ root # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.293436
+  ...
+# Subtest: ISO-42: NODE_OPTIONS — إطلاقٌ مباشرٌ يُنفِّذُ الحِمْلَ بـroot (خطرٌ مقيس) والمُقلِعُ يرفض؛ المُطلِقُ يُسقِطُه
+ok 7 - ISO-42: NODE_OPTIONS — إطلاقٌ مباشرٌ يُنفِّذُ الحِمْلَ بـroot (خطرٌ مقيس) والمُقلِعُ يرفض؛ المُطلِقُ يُسقِطُه # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.172595
+  ...
+# Subtest: ISO-43: الواصفُ لا يتسرّبُ إلى الأبناء؛ والضابطُ (4<&3) يفشلُ بـVERIFY_FAILED
+ok 8 - ISO-43: الواصفُ لا يتسرّبُ إلى الأبناء؛ والضابطُ (4<&3) يفشلُ بـVERIFY_FAILED # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.193924
+  ...
+# Subtest: ISO-44: عقدُ الواصفِ على عمليةٍ حقيقيّة — مفتاحٌ يقرؤه غيرُ root (0644) أو يملكُه غيرُ root ⇒ KEY_FD
+ok 9 - ISO-44: عقدُ الواصفِ على عمليةٍ حقيقيّة — مفتاحٌ يقرؤه غيرُ root (0644) أو يملكُه غيرُ root ⇒ KEY_FD # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.13777
+  ...
+# Subtest: ISO-45: root ⇒ nobody — الـUID نفسُه لا يقرأُ /proc/<pid>/environ ولا fd، والضابطُ مكشوف
+ok 10 - ISO-45: root ⇒ nobody — الـUID نفسُه لا يقرأُ /proc/<pid>/environ ولا fd، والضابطُ مكشوف # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.200297
+  ...
+# Subtest: ISO-18: المُقلِعُ يرفضُ شيفرةً غيرَ موثوقةٍ قبلَ أيِّ قراءةٍ للمفتاحِ أو إسقاط (UNTRUSTED_CODE)
+ok 11 - ISO-18: المُقلِعُ يرفضُ شيفرةً غيرَ موثوقةٍ قبلَ أيِّ قراءةٍ للمفتاحِ أو إسقاط (UNTRUSTED_CODE)
+  ---
+  duration_ms: 0.454981
+  ...
+# Subtest: ISO-19: عقدُ الثقة — codeTrustViolations على نظامِ ملفّاتٍ مزيَّف
+    # Subtest: مسارٌ كلُّه root ‏0755 ⇒ مقبول
+    ok 1 - مسارٌ كلُّه root ‏0755 ⇒ مقبول
+      ---
+      duration_ms: 0.366685
+      ...
+    # Subtest: ملفٌّ 0777 ملكُ 1001 (كما على مضيفِ المختبر) ⇒ مرفوض
+    ok 2 - ملفٌّ 0777 ملكُ 1001 (كما على مضيفِ المختبر) ⇒ مرفوض
+      ---
+      duration_ms: 0.166122
+      ...
+    # Subtest: ملفٌّ ملكُ root يكتبُه group ⇒ مرفوض
+    ok 3 - ملفٌّ ملكُ root يكتبُه group ⇒ مرفوض
+      ---
+      duration_ms: 0.110417
+      ...
+    # Subtest: مجلّدٌ ملكُ مستخدم، أو يكتبُه group بلا sticky ⇒ مرفوض؛ و/tmp ‏1777 ملكُ root ⇒ مقبول
+    ok 4 - مجلّدٌ ملكُ مستخدم، أو يكتبُه group بلا sticky ⇒ مرفوض؛ و/tmp ‏1777 ملكُ root ⇒ مقبول
+      ---
+      duration_ms: 0.291051
+      ...
+    # Subtest: رابطٌ رمزيٌّ: كلُّ قفزةٍ تُفحَص — رابطٌ ملكُ مستخدم، أو هدفٌ في مجلّدٍ يكتبُه غيرُ root ⇒ مرفوض
+    ok 5 - رابطٌ رمزيٌّ: كلُّ قفزةٍ تُفحَص — رابطٌ ملكُ مستخدم، أو هدفٌ في مجلّدٍ يكتبُه غيرُ root ⇒ مرفوض
+      ---
+      duration_ms: 0.34533
+      ...
+    # Subtest: ليس ملفّاً عاديّاً، ومسارٌ نسبيّ، وغائبٌ إلزاميّ ⇒ مرفوض؛ وغائبٌ اختياريّ في مجلّدٍ سليم ⇒ مقبول
+    ok 6 - ليس ملفّاً عاديّاً، ومسارٌ نسبيّ، وغائبٌ إلزاميّ ⇒ مرفوض؛ وغائبٌ اختياريّ في مجلّدٍ سليم ⇒ مقبول
+      ---
+      duration_ms: 0.29794
+      ...
+    # Subtest: بصمةٌ مثبَّتة: تطابقٌ ⇒ مقبولٌ ومسجَّل؛ اختلافٌ ⇒ مرفوض
+    ok 7 - بصمةٌ مثبَّتة: تطابقٌ ⇒ مقبولٌ ومسجَّل؛ اختلافٌ ⇒ مرفوض
+      ---
+      duration_ms: 0.167247
+      ...
+    # Subtest: المُطلِقُ يفحصُ sudo وenv وsetpriv وsh وnode ونقطةَ الدخول — ويرفضُ قبلَ بناءِ الأمر
+    ok 8 - المُطلِقُ يفحصُ sudo وenv وsetpriv وsh وnode ونقطةَ الدخول — ويرفضُ قبلَ بناءِ الأمر
+      ---
+      duration_ms: 0.520745
+      ...
+    1..8
+ok 12 - ISO-19: عقدُ الثقة — codeTrustViolations على نظامِ ملفّاتٍ مزيَّف
+  ---
+  duration_ms: 2.48373
+  type: 'suite'
+  ...
+# Subtest: ISO-22: قائمةُ وحداتِ التطبيقِ في فحصِ الثقةِ هي ما يستوردُه loadApp() بعينه
+ok 13 - ISO-22: قائمةُ وحداتِ التطبيقِ في فحصِ الثقةِ هي ما يستوردُه loadApp() بعينه
+  ---
+  duration_ms: 0.67301
+  ...
+# Subtest: ISO-46: عمليّةٌ حقيقيّة — المُطلِقُ يرفضُ node يكتبُه غيرُ root ونقطةَ دخولٍ ملكَ مستخدم؛ وتجاوزُه يكشفُه المُقلِعُ قبلَ قراءةِ المفتاح
+ok 14 - ISO-46: عمليّةٌ حقيقيّة — المُطلِقُ يرفضُ node يكتبُه غيرُ root ونقطةَ دخولٍ ملكَ مستخدم؛ وتجاوزُه يكشفُه المُقلِعُ قبلَ قراءةِ المفتاح # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.193104
+  ...
+# Subtest: ISO-47: عمليّةٌ حقيقيّة — بصمةُ node المثبَّتة: تطابقٌ يُطلِق، واختلافٌ يُرفَضُ قبلَ الإطلاق
+ok 15 - ISO-47: عمليّةٌ حقيقيّة — بصمةُ node المثبَّتة: تطابقٌ يُطلِق، واختلافٌ يُرفَضُ قبلَ الإطلاق # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.134014
+  ...
+# Subtest: ISO-48: الوحدةُ تطابقُ المُطلِق — البيئةُ نفسُها، والحدُّ CAP_SETUID CAP_SETGID من ALLOWED_CAP_BND
+ok 16 - ISO-48: الوحدةُ تطابقُ المُطلِق — البيئةُ نفسُها، والحدُّ CAP_SETUID CAP_SETGID من ALLOWED_CAP_BND
+  ---
+  duration_ms: 2.704579
+  ...
+# Subtest: ISO-49: الوحدةُ ترفضُ الحقنَ والمُدخلاتِ الممنوعةَ بدلَ أن تهرّبَها
+ok 17 - ISO-49: الوحدةُ ترفضُ الحقنَ والمُدخلاتِ الممنوعةَ بدلَ أن تهرّبَها
+  ---
+  duration_ms: 0.639822
+  ...
+# Subtest: ISO-50: الوحدةُ لا تُولَّدُ لشيفرةٍ غيرِ موثوقة (‏العقدُ نفسُه للمُطلِق)
+ok 18 - ISO-50: الوحدةُ لا تُولَّدُ لشيفرةٍ غيرِ موثوقة (‏العقدُ نفسُه للمُطلِق)
+  ---
+  duration_ms: 2.971545
+  ...
+# Subtest: ISO-51: المولّدُ نقيٌّ — لا يكتبُ ولا يُشغِّلُ ولا يستدعي systemctl، ولا يستدعيه مسارُ الإقلاع
+ok 19 - ISO-51: المولّدُ نقيٌّ — لا يكتبُ ولا يُشغِّلُ ولا يستدعي systemctl، ولا يستدعيه مسارُ الإقلاع
+  ---
+  duration_ms: 80.364443
+  ...
+# Subtest: ISO-52: محاكاةٌ حقيقيّةٌ من نصِّ الوحدة — يُقلِعُ ويُحمِّلُ التطبيقَ بالهويّةِ المُسقَطة؛ وحذفُ NoNewPrivileges أو الحدِّ يُرفَض، وNODE_* من المدير يُزالُ أو يُكشَف
+ok 20 - ISO-52: محاكاةٌ حقيقيّةٌ من نصِّ الوحدة — يُقلِعُ ويُحمِّلُ التطبيقَ بالهويّةِ المُسقَطة؛ وحذفُ NoNewPrivileges أو الحدِّ يُرفَض، وNODE_* من المدير يُزالُ أو يُكشَف # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.271215
+  ...
+# Subtest: WL-533 تعدادُ الواصفات (‏scanOpenFds)
+    # Subtest: ISO-53: نسخةٌ عندَ 5000 وعندَ 2^31-1 تُكتشَف — لا مسحَ بمدًى رقميّ
+    ok 1 - ISO-53: نسخةٌ عندَ 5000 وعندَ 2^31-1 تُكتشَف — لا مسحَ بمدًى رقميّ
+      ---
+      duration_ms: 0.56296
+      ...
+    # Subtest: ISO-53: سباقُ الإغلاق — واصفٌ يُغلَقُ بينَ القائمةِ وfstat (‏EBADF) يُتخطّى، وواصفُ readdir نفسُه كذلك
+    ok 2 - ISO-53: سباقُ الإغلاق — واصفٌ يُغلَقُ بينَ القائمةِ وfstat (‏EBADF) يُتخطّى، وواصفُ readdir نفسُه كذلك
+      ---
+      duration_ms: 0.184347
+      ...
+    # Subtest: ISO-53: سباقُ الفتح — واصفٌ يظهرُ في القائمةِ الثانيةِ يُفحَصُ ويُكتشَف (‏نقطةٌ ثابتة)
+    ok 3 - ISO-53: سباقُ الفتح — واصفٌ يظهرُ في القائمةِ الثانيةِ يُفحَصُ ويُكتشَف (‏نقطةٌ ثابتة)
+      ---
+      duration_ms: 0.154898
+      ...
+    # Subtest: ISO-53: يفشلُ مغلقاً لا «لا نسخ» — تعذُّرُ /proc/self/fd
+    ok 4 - ISO-53: يفشلُ مغلقاً لا «لا نسخ» — تعذُّرُ /proc/self/fd
+      ---
+      duration_ms: 0.140953
+      ...
+    # Subtest: ISO-53: يفشلُ مغلقاً لا «لا نسخ» — اسمٌ ليس رقماً
+    ok 5 - ISO-53: يفشلُ مغلقاً لا «لا نسخ» — اسمٌ ليس رقماً
+      ---
+      duration_ms: 0.09162
+      ...
+    # Subtest: ISO-53: يفشلُ مغلقاً لا «لا نسخ» — رقمٌ بصفرٍ بادئ
+    ok 6 - ISO-53: يفشلُ مغلقاً لا «لا نسخ» — رقمٌ بصفرٍ بادئ
+      ---
+      duration_ms: 0.072673
+      ...
+    # Subtest: ISO-53: يفشلُ مغلقاً لا «لا نسخ» — fstat بخطأٍ غيرِ EBADF
+    ok 7 - ISO-53: يفشلُ مغلقاً لا «لا نسخ» — fstat بخطأٍ غيرِ EBADF
+      ---
+      duration_ms: 0.120438
+      ...
+    # Subtest: ISO-53: على العمليةِ الحاليّة — يجدُ واصفاً مفتوحاً حقيقيّاً ولا يجدُه بعدَ إغلاقِه
+    ok 8 - ISO-53: على العمليةِ الحاليّة — يجدُ واصفاً مفتوحاً حقيقيّاً ولا يجدُه بعدَ إغلاقِه
+      ---
+      duration_ms: 1.615223
+      ...
+    # Subtest: ISO-54: XUUX_FENCE_KEY_FD=5000 وFD_MAX مقبولانِ في الإعداد ويُفحَصانِ بـfstat (‏لا CONFIG)
+    not ok 9 - ISO-54: XUUX_FENCE_KEY_FD=5000 وFD_MAX مقبولانِ في الإعداد ويُفحَصانِ بـfstat (‏لا CONFIG)
+      ---
+      duration_ms: 0.368354
+      location: '/home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1502:3'
+      failureType: 'testCodeFailure'
+      error: 'XUUX_FENCE_KEY_FD غائبٌ أو غيرُ صالح («5000»): العزلُ الإلزاميُّ بلا واصفٍ يُرفَض.'
+      code: 'FENCE_ISOLATION_CONFIG'
+      name: 'IsolationError'
+      stack: |-
+        bootstrapIsolation (file:///home/user/workspace/xuux/scripts/worker.mjs:496:11)
+        boot (file:///home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:240:3)
+        TestContext.<anonymous> (file:///home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1505:37)
+        Test.runInAsyncScope (node:async_hooks:206:9)
+        Test.run (node:internal/test_runner/test:796:25)
+        Suite.processPendingSubtests (node:internal/test_runner/test:526:18)
+        Test.postRun (node:internal/test_runner/test:889:19)
+        Test.run (node:internal/test_runner/test:835:12)
+        process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+        async Suite.processPendingSubtests (node:internal/test_runner/test:526:7)
+      ...
+    1..9
+not ok 21 - WL-533 تعدادُ الواصفات (‏scanOpenFds)
+  ---
+  duration_ms: 3.610569
+  type: 'suite'
+  location: '/home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1424:6'
+  failureType: 'subtestsFailed'
+  error: '1 subtest failed'
+  code: 'ERR_TEST_FAILURE'
+  ...
+# Subtest: ISO-55: واصفُ مفتاحٍ صحيحٌ عندَ 5000 يُقبَل، ويُغلَق، ولا نسخةَ بعدَه، ولا يرثُه حفيد (‏والضابطُ: يرثُه قبلَ الإغلاق)
+not ok 22 - ISO-55: واصفُ مفتاحٍ صحيحٌ عندَ 5000 يُقبَل، ويُغلَق، ولا نسخةَ بعدَه، ولا يرثُه حفيد (‏والضابطُ: يرثُه قبلَ الإغلاق)
+  ---
+  duration_ms: 110.854784
+  location: '/home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1619:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"before":[5000],"grandBefore":[5000],"ok":false,"code":"FENCE_ISOLATION_CONFIG","message":"XUUX_FENCE_KEY_FD غائبٌ أو غيرُ صالح («5000»): العزلُ الإلزاميُّ بلا واصفٍ يُرفَض.","closed":"open","after":[5000],"grandAfter":[5000]}
+    
+    false !== true
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1628:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Suite.postRun (node:internal/test_runner/test:889:19)
+    Suite.run (node:internal/test_runner/test:1150:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: ISO-56: نسخةُ المفتاحِ عندَ 6000 (‏فوقَ 4095) تُكتشَفُ بعدَ الإغلاق ⇒ VERIFY_FAILED
+not ok 23 - ISO-56: نسخةُ المفتاحِ عندَ 6000 (‏فوقَ 4095) تُكتشَفُ بعدَ الإغلاق ⇒ VERIFY_FAILED
+  ---
+  duration_ms: 112.963071
+  location: '/home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1637:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    {"before":[5000,6000],"grandBefore":[5000,6000],"ok":false,"code":"FENCE_ISOLATION_CONFIG","message":"XUUX_FENCE_KEY_FD غائبٌ أو غيرُ صالح («5000»): العزلُ الإلزاميُّ بلا واصفٍ يُرفَض.","closed":"open","after":[5000,6000],"grandAfter":[5000,6000]}
+    + actual - expected
+    
+    + 'FENCE_ISOLATION_CONFIG'
+    - 'FENCE_ISOLATION_VERIFY_FAILED'
+                       ^
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'FENCE_ISOLATION_VERIFY_FAILED'
+  actual: 'FENCE_ISOLATION_CONFIG'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///home/user/workspace/xuux/tests/execution/worker-isolation.test.mjs:1642:10)
+    Test.runInAsyncScope (node:async_hooks:206:9)
+    Test.run (node:internal/test_runner/test:796:25)
+    Test.processPendingSubtests (node:internal/test_runner/test:526:18)
+    Test.postRun (node:internal/test_runner/test:889:19)
+    Test.run (node:internal/test_runner/test:835:12)
+    process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    async Test.processPendingSubtests (node:internal/test_runner/test:526:7)
+  ...
+# Subtest: ISO-57: root حقيقيّ — المُطلِقُ بواصفِ 5000 يُقبَلُ ولا يتسرّب، ونسخةٌ عندَ 6000 ⇒ VERIFY_FAILED
+ok 24 - ISO-57: root حقيقيّ — المُطلِقُ بواصفِ 5000 يُقبَلُ ولا يتسرّب، ونسخةٌ عندَ 6000 ⇒ VERIFY_FAILED # SKIP XUUX_TEST_NO_ROOT_WORKER=1: لا عاملَ بـroot على هذا المضيف (‏قرارُ المالك) — تخطٍّ لا نجاح
+  ---
+  duration_ms: 0.289205
+  ...
+1..24
+# tests 99
+# suites 3
+# pass 87
+# fail 3
+# cancelled 0
+# skipped 9
+# todo 0
+# duration_ms 882.857548

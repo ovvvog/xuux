@@ -1,0 +1,10 @@
+# Subtest: ع٥ — رمزُ خروجٍ صفرٌ وTAP يقولُ إخفاقاً ⇒ MEASURE_EXIT_TAP_DIVERGENT
+ok 706 - ع٥ — رمزُ خروجٍ صفرٌ وTAP يقولُ إخفاقاً ⇒ MEASURE_EXIT_TAP_DIVERGENT
+# Subtest: ع٥ب — رمزُ خروجٍ غيرُ صفرٍ وTAP يقولُ نجاحاً ⇒ MEASURE_EXIT_TAP_DIVERGENT
+ok 707 - ع٥ب — رمزُ خروجٍ غيرُ صفرٍ وTAP يقولُ نجاحاً ⇒ MEASURE_EXIT_TAP_DIVERGENT
+# tests 3334
+# pass 2980
+# fail 0
+# skipped 354
+✅ اجتاز التحقق الكامل. الدفع مسموح.
+EXIT 0
