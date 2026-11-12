@@ -7,12 +7,14 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import YAML from 'yaml';
+
+import { FENCE_ERRORS, hardwareKeyProvider } from '../../src/fence/db-fence.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CLASSES = new Set([
@@ -131,4 +133,146 @@ test('CONN-MAP-04: FENCED_WRITER يسلكُ المصافحةَ والختمَ ف
   assert.equal(map.production_supervisor, 'absent');
   assert.equal(map.supervisor.status, 'absent');
   assert.ok(map.supervisor.decision_required.trim().length > 0);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// مصفوفةُ تهديداتِ `WL-533` — كتلةُ yaml في `docs/THREAT_MODEL.md` §9.9 (‏مراجعةُ #546: نُقلت من ملفٍّ
+// منفصلٍ بلا زيادةٍ في عددِ الملفّات). THR-01..08:
+//  - THR-01 الحقولُ والحالاتُ والفاعلون؛ THR-02 كلُّ دليلٍ ملفٌّ موجودٌ ومعرّفُه بعدَ # فيه نصّاً؛
+//  - THR-03 MITIGATED_TESTED بدليلٍ اختباريّ؛ THR-04 لا حمايةَ مقيسةً من root/superuser/مالكِ المضيف؛
+//  - THR-05 لا ادّعاءَ عتادٍ أو هويّةِ عملية؛ THR-06 قراراتُ المالكِ متّسقة؛ THR-07 T1..T7 تغطّي الكلّ؛
+//  - THR-08 الثوابتُ المجمَّدة: SUPPORTED_FRESHNESS_BACKENDS فارغة، وhardwareKeyProvider لا يوقّع.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+const THREAT_DOC = readFileSync(path.join(ROOT, 'docs', 'THREAT_MODEL.md'), 'utf8');
+const MATRIX = THREAT_DOC.slice(THREAT_DOC.indexOf('### 9.9 ')).match(/```yaml\n([\s\S]*?)```/);
+assert.ok(MATRIX, 'لا كتلةَ yaml في docs/THREAT_MODEL.md §9.9');
+const doc = YAML.parse(String(MATRIX[1]));
+const STATUSES = new Set([
+  'MITIGATED_TESTED',
+  'MITIGATED_DESIGN',
+  'PARTIAL',
+  'RESIDUAL',
+  'OWNER_DECISION',
+]);
+const ROOTLIKE = new Set(['host_root', 'superuser', 'friend_root', 'local_admin']);
+/** @type {Array<Record<string, any>>} */
+const threats = doc.threats;
+
+test.describe('WL-533 مصفوفةُ التهديدات (docs/THREAT_MODEL.md §9.9)', () => {
+  test('THR-01: الحقولُ والحالاتُ والفاعلون', () => {
+    assert.equal(doc.version, 1);
+    assert.equal(doc.phase, 'WL-533');
+    const ids = new Set();
+    for (const t of threats) {
+      for (const k of ['id', 'actor', 'asset', 'attack', 'control', 'status', 'limit']) {
+        assert.ok(typeof t[k] === 'string' && t[k].trim() !== '', `${t.id}: ${k}`);
+      }
+      assert.ok(Array.isArray(t.evidence), `${t.id}: evidence`);
+      assert.match(t.id, /^TH-[A-Z]{3}-\d{2}$/);
+      assert.ok(!ids.has(t.id), `مكرّر ${t.id}`);
+      ids.add(t.id);
+      assert.ok(STATUSES.has(t.status), `${t.id}: ${t.status}`);
+      assert.ok(t.actor in doc.actors, `${t.id}: فاعلٌ غيرُ معرَّف ${t.actor}`);
+    }
+    assert.ok(threats.length >= 25);
+  });
+
+  test('THR-02: كلُّ دليلٍ موجودٌ ومعرّفُه في ملفِّه', () => {
+    for (const t of threats) {
+      for (const ref of t.evidence) {
+        const [file, anchor] = String(ref).split('#');
+        const full = path.join(ROOT, /** @type {string} */ (file));
+        assert.ok(existsSync(full), `${t.id}: ${file} غيرُ موجود`);
+        if (anchor !== undefined) {
+          assert.ok(
+            readFileSync(full, 'utf8').includes(anchor),
+            `${t.id}: ${anchor} غائبٌ عن ${file}`,
+          );
+        }
+      }
+    }
+  });
+
+  test('THR-03: MITIGATED_TESTED بدليلٍ اختباريٍّ لا وثيقة', () => {
+    for (const t of threats.filter((x) => x.status === 'MITIGATED_TESTED')) {
+      assert.ok(
+        t.evidence.some(
+          (/** @type {string} */ e) =>
+            e.startsWith('tests/') || /^scripts\/fence-lab\.mjs#LAB-/.test(e),
+        ),
+        `${t.id}: MITIGATED_TESTED بلا اختبار`,
+      );
+    }
+  });
+
+  test('THR-04: لا حمايةَ من root/superuser/مالكِ المضيف', () => {
+    for (const t of threats.filter((x) => ROOTLIKE.has(x.actor))) {
+      assert.ok(
+        ['RESIDUAL', 'OWNER_DECISION', 'MITIGATED_DESIGN'].includes(t.status),
+        `${t.id}: ${t.actor} ⇒ ${t.status}`,
+      );
+    }
+    const hostRoot = threats.filter((x) => x.actor === 'host_root' || x.actor === 'superuser');
+    assert.ok(hostRoot.length >= 2);
+    assert.ok(hostRoot.every((x) => x.status !== 'MITIGATED_TESTED'));
+  });
+
+  test('THR-05: لا ادّعاءَ عتادٍ أو هويّةِ عمليةٍ أو حمايةٍ من superuser', () => {
+    // على البياناتِ لا التعليقات (رأسُ الملفِّ يذكرُ العباراتِ المحظورةَ ليحظرَها).
+    const data = JSON.stringify(doc);
+    for (const bad of [
+      /hardware[- ]backed"?:\s*true/i,
+      /process identity proven/i,
+      /superuser protection/i,
+    ]) {
+      assert.doesNotMatch(data, bad);
+    }
+    for (const t of threats.filter((x) => String(x.status).startsWith('MITIGATED'))) {
+      assert.doesNotMatch(`${t.control} ${t.limit}`, /مدعومٌ بالعتاد|حمايةٌ عتاديّةٌ مثبتة/);
+    }
+  });
+
+  test('THR-06: قراراتُ المالك متّسقة', () => {
+    const decisions = new Map(doc.owner_decisions.map((/** @type {any} */ d) => [d.id, d]));
+    for (const d of decisions.values()) {
+      for (const k of ['question', 'why']) assert.ok(String(d[k]).trim() !== '', `${d.id}: ${k}`);
+      assert.ok(Array.isArray(d.options) && d.options.length >= 2, `${d.id}: options`);
+      for (const b of d.blocks)
+        assert.ok(
+          threats.some((t) => t.id === b),
+          `${d.id}: ${b}`,
+        );
+    }
+    for (const t of threats) {
+      if (t.decision !== undefined) assert.ok(decisions.has(t.decision), `${t.id}: ${t.decision}`);
+      if (t.status === 'OWNER_DECISION') assert.ok(t.decision !== undefined, `${t.id} بلا قرار`);
+    }
+  });
+
+  test('THR-07: المهامُّ السبعُ تغطّي كلَّ التهديدات', () => {
+    const tasks = doc.owner_tasks;
+    assert.deepEqual(
+      tasks.map((/** @type {any} */ t) => t.id),
+      ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'],
+    );
+    const covered = new Set(tasks.flatMap((/** @type {any} */ t) => t.threats));
+    for (const t of threats) assert.ok(covered.has(t.id), `${t.id} خارجَ المهامّ`);
+    for (const id of covered)
+      assert.ok(
+        threats.some((t) => t.id === id),
+        `مهمّةٌ تشيرُ إلى ${id}`,
+      );
+  });
+
+  test('THR-08: الثوابتُ المجمَّدة — لا backend حداثة، ولا مزوِّدَ عتاديٌّ يوقّع', () => {
+    const entry = readFileSync(path.join(ROOT, 'scripts', 'production-entry.mjs'), 'utf8');
+    assert.match(entry, /const SUPPORTED_FRESHNESS_BACKENDS = new Set\(\[\]\);/);
+    const hw = hardwareKeyProvider('pkcs11:token=none');
+    assert.throws(
+      () => hw.sign(Buffer.from('x')),
+      (e) => /** @type {any} */ (e).code === FENCE_ERRORS.KEY_PROVIDER_UNAVAILABLE,
+    );
+    assert.throws(() => hw.publicKeyRaw());
+  });
 });

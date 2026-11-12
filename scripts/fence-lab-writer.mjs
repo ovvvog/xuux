@@ -11,16 +11,24 @@
  *
  * الدخل: وسيطٌ واحدٌ JSON بـbase64url:
  *   { sock, port, database, role, workerId, bootId, epoch, sysid, keyFile, poolSize, writer,
- *     sealOnly? }
+ *     sealOnly?, isolate? }
  * الخرج: أسطرُ JSON على stdout بنوعِ رسائلِ IPC نفسِها (`xuux-fence/sealed` | `xuux-fence/seal-failed`)
  * ثمّ `{type:'stopped', committed, code, message}`. لا يقرأُ المُشرِفُ إلا هذه الأسطر.
  */
 
-import pg from 'pg';
-
-import { assertFencedSession, fileKeyProvider, sealFencedPool } from '../src/fence/db-fence.mjs';
+// `WL-533` (مراجعةُ #546): الاستيرادُ الثابتُ مُقلِعُ `scripts/worker.mjs` وحدَه (‏وحداتُ `node:` فقط).
+// في `isolate: true` يبدأُ الكاتبُ بـroot من المُطلِق (`isolatedLaunchCommand`)، فيُقرأُ الواصفُ ويُسقَطُ
+// الهويّةُ ويُتحقَّق **ثمّ** تُحمَّلُ `pg` ووحداتُ السياجِ ديناميكيّاً — لا شيفرةَ تطبيقٍ بصلاحيّةِ root.
+import { bootstrapIsolation } from './worker.mjs';
 
 const input = JSON.parse(Buffer.from(String(process.argv[2] ?? ''), 'base64url').toString('utf8'));
+const isolation = input.isolate === true ? bootstrapIsolation(process.env) : null;
+if (input.isolate === true && isolation === null) {
+  throw new Error('isolate: true بلا XUUX_FENCE_ISOLATION=required — لا عزلَ صامتاً.');
+}
+const { default: pg } = await import('pg');
+const { assertFencedSession, fileKeyProvider, pemKeyProvider, sealFencedPool } =
+  await import('../src/fence/db-fence.mjs');
 /** @param {Record<string, unknown>} m */
 const emit = (m) => process.stdout.write(`${JSON.stringify(m)}\n`);
 
@@ -36,7 +44,10 @@ pool.on('error', () => {});
 
 let committed = 0;
 try {
-  const key = fileKeyProvider(input.keyFile);
+  const key =
+    isolation === null
+      ? fileKeyProvider(input.keyFile)
+      : pemKeyProvider(isolation.pem, `worker-fd:${input.workerId}`);
   let sessions;
   try {
     sessions = await sealFencedPool(pool, input.poolSize, key, {
@@ -55,7 +66,13 @@ try {
     });
     process.exit(4);
   }
-  emit({ type: 'xuux-fence/sealed', role_name: input.role, sessions, pid: process.pid });
+  emit({
+    type: 'xuux-fence/sealed',
+    role_name: input.role,
+    sessions,
+    pid: process.pid,
+    isolation: isolation?.evidence ?? null,
+  });
   await assertFencedSession(pool, { workerId: input.workerId, bootId: input.bootId });
   if (input.sealOnly === true) {
     // يبقى حيّاً (وصلاتُه مختومةٌ مفتوحة) حتى يُنهيه المختبر.

@@ -97,6 +97,17 @@ export function fileKeyProvider(path, id = `file:${path}`) {
 }
 
 /**
+ * مزوِّدٌ من نصِّ PKCS#8 في الذاكرة — يستعملُه العزلُ (مُقلِعُ `scripts/worker.mjs`) بعدَ قراءةِ المفتاحِ
+ * من واصفٍ موروث. برمجيٌّ كالملفّ: لا يدّعي حمايةً عتادية.
+ * @param {string} pem
+ * @param {string} id
+ * @returns {KeyProvider}
+ */
+export function pemKeyProvider(pem, id) {
+  return keyObjectProvider(createPrivateKey(pem), id);
+}
+
+/**
  * مزوِّدٌ في الذاكرة بمفتاحٍ مولَّدٍ — اختباراتٌ فقط (`D-11`: مفاتيحُ اختبارٍ لا إنتاج).
  * @param {string} [id]
  * @returns {KeyProvider & { privateKeyPem: string }}
@@ -1005,7 +1016,8 @@ export function dbFenceMode(env) {
  *  4. `verify(db)`: يُثبتُ قبلَ أيِّ عملٍ أنّ الجلسةَ هي اعتمادُ هذا الإقلاعِ النشِط.
  * @param {{ env: NodeJS.ProcessEnv, halt: { assertOperational(): void, file: string, epochFile: string,
  *           historyFile: string, nodesDir: string, acksDir: string, king: any },
- *           channel?: { send: Function, on: Function, off: Function }, timeoutMs?: number }} input
+ *           channel?: { send: Function, on: Function, off: Function }, timeoutMs?: number,
+ *           isolated?: { key: KeyProvider, evidence: Readonly<Record<string, unknown>> } }} input
  */
 export async function prepareFencedWorker(input) {
   const { env, halt } = input;
@@ -1018,7 +1030,22 @@ export async function prepareFencedWorker(input) {
     return value;
   };
   const workerId = required('XUUX_FENCE_WORKER_ID');
-  const keyPath = required('XUUX_FENCE_WORKER_KEY');
+  // `WL-533`: مفتاحٌ قرأه العزلُ من واصفٍ موروثٍ (العاملُ أسقطَ هويّتَه) — أو مسارُ ملفٍّ (المختبر،
+  // ومكشوفٌ لعملياتِ الـUID نفسِه: `LAB-UID-05`). لا يُقبَلُ الاثنانِ معاً.
+  if (input.isolated !== undefined && (env['XUUX_FENCE_WORKER_KEY'] ?? '').trim() !== '') {
+    throw new FenceError(
+      FENCE_ERRORS.WORKER_CONFIG,
+      'مفتاحٌ معزولٌ ومسارُ ملفِّ مفتاحٍ معاً: يُرفَض.',
+    );
+  }
+  // مراجعةُ #546: تشغيلٌ يُعلِنُ العزلَ إلزاميّاً لا يتراجعُ صامتاً إلى مسارِ الملفّ.
+  if (input.isolated === undefined && (env['XUUX_FENCE_ISOLATION'] ?? '').trim() === 'required') {
+    throw new FenceError(
+      FENCE_ERRORS.WORKER_CONFIG,
+      'XUUX_FENCE_ISOLATION=required ولا مفتاحَ معزول: لا تراجعَ إلى XUUX_FENCE_WORKER_KEY.',
+    );
+  }
+  const keyPath = input.isolated === undefined ? required('XUUX_FENCE_WORKER_KEY') : null;
   const floorPath = required('XUUX_HALT_EPOCH_FLOOR');
   const databaseUrl = required('DATABASE_URL');
   const strict = createStrictHaltGuard(halt, { epochFloor: fileEpochFloor(floorPath) });
@@ -1030,7 +1057,10 @@ export async function prepareFencedWorker(input) {
     strict,
   });
   haltGuard.assertOperational();
-  const key = fileKeyProvider(keyPath, `worker:${workerId}`);
+  const key =
+    input.isolated === undefined
+      ? fileKeyProvider(/** @type {string} */ (keyPath), `worker:${workerId}`)
+      : input.isolated.key;
   const bootId = newBootId();
   const credential = await workerFenceHandshake(key, {
     workerId,
@@ -1053,6 +1083,7 @@ export async function prepareFencedWorker(input) {
     credential,
     haltGuard,
     hardwareBacked: key.hardwareBacked,
+    processIsolation: input.isolated?.evidence ?? null,
     databaseUrl: fencedDatabaseUrl(databaseUrl, String(credential.role_name)),
     /**
      * يختمُ كلَّ وصلاتِ المجمّعِ (`size` = حجمُه الأقصى) ويُبلغُ المُشرِف. فشلُ الختمِ يُبلَغُ

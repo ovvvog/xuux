@@ -53,6 +53,44 @@ import {
   signCredentialChallenge,
 } from '../src/fence/db-fence.mjs';
 import { up } from '../src/persistence/migrator.mjs';
+import { codeTrustViolations, isolatedLaunchCommand } from './worker.mjs';
+
+/**
+ * مسبارُ الـUID نفسِه (`WL-533`، LAB-UID-06): يُشغَّلُ **بمستخدمِ العامل** ضدَّ pid، ويحاولُ ما يفعلُه
+ * مهاجمٌ بالـUID نفسِه: قراءةُ `/proc/<pid>/{environ,maps,mem,fd}`، و`PTRACE_ATTACH`، و`pidfd_getfd`
+ * لكلِّ واصفٍ 0..63، وقراءةُ ملفِّ المفتاح. الخرجُ JSON: `OK:…` أو `DENIED:…` لكلِّ محاولة.
+ * x86_64/aarch64: رقمُ `pidfd_getfd` = 438 في كليهما.
+ */
+const SAME_UID_PROBE = String.raw`
+import ctypes, os, sys, json
+pid = int(sys.argv[1]); keyfile = sys.argv[2]; r = {}
+def t(name, f):
+    try: r[name] = 'OK:' + str(f())[:40]
+    except Exception as e: r[name] = 'DENIED:' + type(e).__name__
+t('environ', lambda: open('/proc/%d/environ' % pid, 'rb').read())
+t('maps', lambda: open('/proc/%d/maps' % pid).read())
+t('fd_list', lambda: os.listdir('/proc/%d/fd' % pid))
+def mem():
+    start = open('/proc/%d/maps' % pid).readline().split('-')[0]
+    f = open('/proc/%d/mem' % pid, 'rb'); f.seek(int(start, 16)); return f.read(16)
+t('mem', mem)
+libc = ctypes.CDLL(None, use_errno=True)
+rc = libc.ptrace(16, pid, 0, 0); err = ctypes.get_errno()
+r['ptrace_attach'] = 'OK' if rc == 0 else 'DENIED:errno%d' % err
+if rc == 0:
+    libc.ptrace(17, pid, 0, 0)
+try:
+    pfd = os.pidfd_open(pid); got = []; errs = set()
+    for fd in range(64):
+        n = libc.syscall(438, pfd, fd, 0)
+        if n >= 0: got.append(fd); os.close(n)
+        else: errs.add(ctypes.get_errno())
+    r['pidfd_getfd'] = ('OK:%s' % got) if got else 'DENIED:errno%s' % sorted(errs)
+except Exception as e:
+    r['pidfd_getfd'] = 'DENIED:' + type(e).__name__
+t('root_key_file', lambda: open(keyfile).read())
+print(json.dumps(r))
+`;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_REPORT = 'docs/external-review/evidence/WL-532-fence-lab-report.json';
@@ -168,7 +206,13 @@ function run(cmd, args, opts = {}) {
     timeout: opts.timeout ?? 120_000,
     maxBuffer: 64 * 1024 * 1024,
   });
-  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
+  return {
+    status: r.status,
+    signal: r.signal,
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+    error: r.error,
+  };
 }
 
 /** @type {Array<Record<string, any>>} */
@@ -335,6 +379,8 @@ async function main() {
     ['tests/fence/halt-integrity.test.mjs', {}],
     ['tests/fence/effects.test.mjs', {}],
     ['tests/fence/connection-map.test.mjs', {}],
+    // `WL-533` (مراجعةُ #546): المُقلِعُ — منها ISO-41..45 بعملياتٍ حقيقيّةٍ عبرَ sudo وsetpriv.
+    ['tests/execution/worker-isolation.test.mjs', {}],
     // §6: libsodium مرجعٌ مستقلٌّ **إلزاميّ** هنا (غيابُه FAIL لا SKIP)، وضبابٌ أوسع.
     ['tests/fence/ed25519.test.mjs', { XUUX_ED_SODIUM: 'required', XUUX_ED_FUZZ_N: '2000' }],
   ];
@@ -371,16 +417,36 @@ async function main() {
     }
     // مطابقةٌ مع ملخّصِ TAP نفسِه (`# tests N`): اختلافُ العدِّ فشلٌ لا تقريبٌ.
     const tapTotal = Number(/^# tests (\d+)$/m.exec(r.stdout)?.[1] ?? NaN);
+    const pass = r.status === 0 && parsed > 0 && parsed === tapTotal;
+    // الفشلُ يحملُ سببَه في التقريرِ نفسِه (‏سطورُ «not ok» وما يليها، وذيلُ stderr، والإشارة) — فلا يضيعُ
+    // بحذفِ مجلّدِ العمل (‏فشلٌ سابقٌ في LAB-SUITE-db-fence لم يُعرَفْ سببُه لهذا).
+    /** @type {string[]} */
+    const failures = [];
+    if (!pass) {
+      for (let i = 0; i < lines.length && failures.length < 12; i++) {
+        if (/^\s*not ok \d+ - /.test(lines[i] ?? ''))
+          failures.push(lines.slice(i, i + 14).join('\n'));
+      }
+    }
     record(
       `LAB-SUITE-${path.basename(file, '.test.mjs')}`,
       `تشغيلُ ${file}`,
-      r.status === 0 && parsed > 0 && parsed === tapTotal ? 'PASS' : 'FAIL',
+      pass ? 'PASS' : 'FAIL',
       {
         exit: r.status,
         tests: parsed,
         tap_tests: tapTotal,
         log: log.name,
         log_sha256: log.sha256,
+        ...(pass
+          ? {}
+          : {
+              signal: r.signal ?? null,
+              spawn_error: r.error?.message ?? null,
+              failures,
+              stderr_tail: String(r.stderr ?? '').slice(-2000),
+              stdout_tail: String(r.stdout ?? '').slice(-1500),
+            }),
       },
     );
   }
@@ -560,6 +626,21 @@ async function liveLab() {
   const app = path.join(work, 'app');
   /** @type {Record<string, string>} */
   const keyFiles = {};
+  /** @type {Record<string, string>} */
+  const rootKeyFiles = {};
+  // `WL-533` (الجولةُ الثالثة): شجرةٌ موثوقةٌ للعاملِ المعزول — node والتطبيقُ ملكُ root لا يكتبُهما غيرُه
+  // (‏عقدُ codeTrustViolations). node المضيفِ هنا قد يكتبُه غيرُ root (‏قِيسَ: 0777 ملكُ uid 1001)، فيرفضُه
+  // المُطلِق؛ والمختبرُ لا يُغيّرُ المضيف — ينسخُ node إلى مجلّدٍ ملكِ root ويُحذَفُ في النهاية.
+  const trusted = path.join(tmpdir(), `xuux-fence-trusted-${path.basename(work).slice(-6)}`);
+  const trustedNode = path.join(trusted, 'node');
+  const trustedApp = path.join(trusted, 'app');
+  /** @param {string} user */
+  const osIds = (user) => {
+    const u = run('id', ['-u', user]);
+    const g = run('id', ['-g', user]);
+    must(u.status === 0 && g.status === 0, `id ${user}`);
+    return { uid: Number(u.stdout.trim()), gid: Number(g.stdout.trim()) };
+  };
   /** يمدُّ نسخةَ src/ وكاتبِ المختبرِ واعتمادِ pg (وإغلاقِه)، ومفاتيحُ العمّالِ 0400 لمالكيها. */
   const prepareApp = () => {
     mkdirSync(path.join(app, 'scripts'), { recursive: true });
@@ -568,6 +649,8 @@ async function liveLab() {
       path.join(ROOT, 'scripts', 'fence-lab-writer.mjs'),
       path.join(app, 'scripts', 'fence-lab-writer.mjs'),
     );
+    // مُقلِعُ العزل (`WL-533`): الكاتبُ يستوردُه وحدَه ثابتاً، ثمّ التطبيقَ ديناميكيّاً بعدَ الإسقاط.
+    cpSync(path.join(ROOT, 'scripts', 'worker.mjs'), path.join(app, 'scripts', 'worker.mjs'));
     cpSync(path.join(ROOT, 'package.json'), path.join(app, 'package.json'));
     const seen = new Set();
     const pending = ['pg'];
@@ -598,16 +681,55 @@ async function liveLab() {
         tmpKey,
         /** @type {string} */ (keyFiles[w]),
       ]);
+      // `WL-533`: نسخةٌ ملكُ root (0400) للعاملِ المعزول — مستخدمُ العاملِ لا يقرؤها؛ المُشرِفُ
+      // (هنا sudo/sh بـroot) يفتحُها ويمرّرُها واصفاً موروثاً.
+      rootKeyFiles[w] = path.join(keysDir, `${w}.root.pem`);
+      const instRoot = run('sudo', [
+        '-n',
+        'install',
+        '-o',
+        'root',
+        '-g',
+        'root',
+        '-m',
+        '0400',
+        tmpKey,
+        /** @type {string} */ (rootKeyFiles[w]),
+      ]);
       rmSync(tmpKey, { force: true });
       must(inst.status === 0, `install key ${w}: ${inst.stderr}`);
+      must(instRoot.status === 0, `install root key ${w}: ${instRoot.stderr}`);
     }
-    return { packages: [...seen].sort() };
+    /** @param {string[]} a */
+    const asRoot = (a) => {
+      const r = run('sudo', ['-n', ...a]);
+      must(r.status === 0, `sudo ${a.join(' ')}: ${r.stderr}`);
+    };
+    asRoot(['install', '-d', '-o', 'root', '-g', 'root', '-m', '0755', trusted, trustedApp]);
+    asRoot(['install', '-o', 'root', '-g', 'root', '-m', '0755', process.execPath, trustedNode]);
+    for (const part of ['src', 'scripts', 'node_modules', 'package.json'])
+      asRoot(['cp', '-r', path.join(app, part), path.join(trustedApp, part)]);
+    asRoot(['chown', '-R', 'root:root', trustedApp]);
+    asRoot(['chmod', '-R', 'a+rX,go-w', trustedApp]);
+    const trust = codeTrustViolations([
+      trustedNode,
+      path.join(trustedApp, 'scripts', 'fence-lab-writer.mjs'),
+      path.join(trustedApp, 'scripts', 'worker.mjs'),
+    ]);
+    must(trust.violations.length === 0, `الشجرةُ الموثوقةُ غيرُ موثوقة: ${trust.violations}`);
+    return {
+      packages: [...seen].sort(),
+      trusted_tree: trusted,
+      host_node: process.execPath,
+      host_node_trust_violations: codeTrustViolations([process.execPath]).violations,
+    };
   };
 
   /**
    * يُطلقُ كاتباً حقيقيّاً بمستخدمِ نظامِ العامل: مجمّعُ pg مختومٌ بمفتاحِ العامل.
    * @param {'alpha'|'beta'} w @param {Record<string, any>} c - الاعتمادُ المُصدَر
-   * @param {{ writer: string, poolSize?: number, keyOf?: 'alpha'|'beta', sealOnly?: boolean }} o
+   * @param {{ writer: string, poolSize?: number, keyOf?: 'alpha'|'beta', sealOnly?: boolean,
+   *           isolate?: boolean }} o
    */
   const spawnWriter = async (w, c, o) => {
     const s = await sovereign.status();
@@ -624,19 +746,32 @@ async function liveLab() {
       poolSize: o.poolSize ?? 4,
       writer: o.writer,
       sealOnly: o.sealOnly === true,
+      isolate: o.isolate === true,
     };
-    const child = spawn(
-      'sudo',
-      [
-        '-n',
-        '-u',
-        OS_USER(w),
-        process.execPath,
-        path.join(app, 'scripts', 'fence-lab-writer.mjs'),
-        Buffer.from(JSON.stringify(input)).toString('base64url'),
-      ],
-      { cwd: app, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    const writerPath = path.join(app, 'scripts', 'fence-lab-writer.mjs');
+    const trustedWriter = path.join(trustedApp, 'scripts', 'fence-lab-writer.mjs');
+    const arg = Buffer.from(JSON.stringify(input)).toString('base64url');
+    const ids = o.isolate === true ? osIds(OS_USER(w)) : null;
+    // `WL-533` (مراجعةُ #546): الإطلاقُ المعزولُ من بيئةِ سماحٍ صريحة (`env -i`) بحدِّ قدراتٍ
+    // {setuid,setgid} وno_new_privs؛ `sh` (root) يفتحُ ملفَّ المفتاحِ على الواصف 3 ثمّ `exec` للكاتب،
+    // والكاتبُ يُقلِعُ (يقرأُ ويغلقُ ويُسقِطُ ويتحقّق) قبلَ تحميلِ pg أو أيِّ وحدةٍ تطبيقيّة.
+    const launch =
+      ids === null
+        ? { command: 'sudo', args: ['-n', '-u', OS_USER(w), process.execPath, writerPath, arg] }
+        : isolatedLaunchCommand({
+            node: trustedNode,
+            entry: trustedWriter,
+            args: [arg],
+            keyFile: /** @type {string} */ (rootKeyFiles[w]),
+            uid: ids.uid,
+            gid: ids.gid,
+            env: { XUUX_DB_FENCE: 'required' },
+            pass: ['XUUX_DB_FENCE'],
+          });
+    const child = spawn(launch.command, launch.args, {
+      cwd: ids === null ? app : trustedApp,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     const bus = new EventEmitter();
     /** @type {Array<Record<string, any>>} */
     const messages = [];
@@ -682,6 +817,7 @@ async function liveLab() {
       bus,
       messages,
       exited,
+      launchTrust: 'trust' in launch ? launch.trust : null,
       waitFor,
       get stderr() {
         return stderr;
@@ -722,6 +858,7 @@ async function liveLab() {
     'LAB-UID-03',
     'LAB-UID-04',
     'LAB-UID-05',
+    'LAB-UID-06',
     'LAB-HALT-LIVE',
   ];
   if (!osUsersReady) {
@@ -1011,6 +1148,150 @@ async function liveLab() {
           credential: st,
           note: 'كشفٌ بعديٌّ لا منع: نافذةُ المهاجمِ بينَ ختمِه وفشلِ العاملِ الحقيقيّ حقيقية',
         };
+      },
+    );
+
+    await check(
+      'LAB-UID-06',
+      'WL-533 علاجُ UID-05: عاملٌ معزول (يبدأُ بـroot، المفتاحُ واصفٌ موروثٌ من ملفٍّ ملكِ root، ثمّ إسقاطُ الهويّةِ داخلَ العملية) — عمليةٌ بالـUID نفسِه لا تقرأُ المفتاحَ ولا /proc ولا ptrace ولا pidfd_getfd، والضابطُ (عمليةٌ بُدئت بالـUID مباشرةً) مكشوف',
+      async () => {
+        const py = run('python3', ['-c', 'import ctypes, os; os.pidfd_open']);
+        must(py.status === 0, `python3 بـctypes و os.pidfd_open مطلوب: ${py.stderr}`);
+        const c = await boot('alpha');
+        const r = String(c.role_name);
+        const real = await spawnWriter('alpha', c, {
+          writer: 'uid-06-real',
+          isolate: true,
+          sealOnly: true,
+        });
+        const sup = await confirmWorkerSeal(root, real.bus, c, { timeoutMs: 15_000 }).then(
+          () => 'confirmed',
+          (e) => String(e.message),
+        );
+        const sealed = /** @type {Record<string, any>} */ (
+          real.messages.find((m) => m.type === 'xuux-fence/sealed') ?? {}
+        );
+        // الضابط: عمليةٌ بُدئت بمستخدمِ العاملِ مباشرةً (كالكاتبِ غيرِ المعزول) — يجبُ أن يكشفَها
+        // المسبارُ نفسُه، وإلّا فالمسبارُ لا يقيسُ شيئاً.
+        const control = spawn(
+          'sudo',
+          ['-n', '-u', OS_USER('alpha'), process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+          { stdio: 'ignore' },
+        );
+        await new Promise((res) => setTimeout(res, 800));
+        const cpid = run('pgrep', ['-u', OS_USER('alpha'), '-f', '^[^ ]*node -e setInterval']);
+        /** @param {number} pid */
+        const probe = (pid) => {
+          const p = run('sudo', [
+            '-n',
+            '-u',
+            OS_USER('alpha'),
+            'python3',
+            '-c',
+            SAME_UID_PROBE,
+            String(pid),
+            /** @type {string} */ (rootKeyFiles['alpha']),
+          ]);
+          must(p.status === 0, `probe: ${p.stderr}`);
+          return JSON.parse(p.stdout);
+        };
+        try {
+          must(sup === 'confirmed', `المُشرِفُ لم يؤكّدْ ختمَ العاملِ المعزول: ${sup}`);
+          must(
+            sealed.isolation?.mode === 'uid-drop-after-exec',
+            `العاملُ لم يُبلغْ عزلاً: ${JSON.stringify(sealed)}`,
+          );
+          // مراجعةُ #546: الادّعاءُ بالضبطِ ما فحصَه المُقلِع — أربعةُ حقولٍ صفر، وCapBnd ⊆ 0xc0،
+          // وno_new_privs، وعقدُ الواصف (ملفٌّ عاديٌّ ملكُ root بلا group/other)، ولا نسخةَ مفتوحة.
+          const iso = sealed.isolation;
+          must(
+            JSON.stringify(iso.caps_zero) === '["CapInh","CapPrm","CapEff","CapAmb"]' &&
+              (BigInt(`0x${iso.cap_bnd}`) & ~0xc0n) === 0n &&
+              iso.no_new_privs === true &&
+              iso.key_fd_open_copies === 0 &&
+              iso.key_fd?.type === 'file' &&
+              iso.key_fd?.owner === 0 &&
+              iso.key_fd?.mode === '400' &&
+              Number(iso.code_trust?.checked) >= 3,
+            `دليلُ العزلِ ناقص: ${JSON.stringify(iso)}`,
+          );
+          const pid = Number(sealed.pid);
+          const owner = run('stat', ['-c', '%u:%U %a', `/proc/${pid}/environ`, `/proc/${pid}/fd`]);
+          // لا واصفَ في العاملِ يشيرُ إلى ملفِّ مفتاح (الواصف 3 أُغلِق)، ولا مفتاحَ في argv/env
+          // (‏cmdline مقروءٌ للجميعِ دائماً؛ environ يقرؤه root هنا للتحقّقِ فقط).
+          const fdLinks = run('sudo', [
+            '-n',
+            'sh',
+            '-c',
+            `for f in /proc/${pid}/fd/*; do readlink "$f"; done`,
+          ]);
+          must(fdLinks.status === 0, `readlink: ${fdLinks.stderr}`);
+          must(!/\.pem/.test(fdLinks.stdout), `واصفٌ مفتوحٌ على ملفِّ مفتاح: ${fdLinks.stdout}`);
+          const cmdline = run('sudo', [
+            '-n',
+            '-u',
+            OS_USER('alpha'),
+            'cat',
+            `/proc/${pid}/cmdline`,
+          ]);
+          const environ = run('sudo', ['-n', 'cat', `/proc/${pid}/environ`]);
+          must(cmdline.status === 0 && !cmdline.stdout.includes('PRIVATE'), 'مفتاحٌ في argv');
+          must(environ.status === 0 && !environ.stdout.includes('PRIVATE'), 'مفتاحٌ في env');
+          const isolated = probe(pid);
+          const controlPid = Number(cpid.stdout.trim().split('\n')[0]);
+          must(controlPid > 0, `لا ضابط: ${cpid.stderr}`);
+          const exposed = probe(controlPid);
+          const leaks = Object.entries(isolated).filter(([, v]) => !String(v).startsWith('DENIED'));
+          must(leaks.length === 0, `العاملُ المعزولُ مكشوف: ${JSON.stringify(leaks)}`);
+          must(
+            String(exposed.environ).startsWith('OK') &&
+              String(exposed.ptrace_attach).startsWith('OK') &&
+              String(exposed.pidfd_getfd).startsWith('OK'),
+            `الضابطُ غيرُ مكشوف ⇒ المسبارُ لا يقيس: ${JSON.stringify(exposed)}`,
+          );
+          const late = psqlAs(
+            OS_USER('alpha'),
+            r,
+            `INSERT INTO state.lab_probe(writer) VALUES ('uid-06-late')`,
+          );
+          must(
+            !late.ok && /not permitted to log in/.test(late.err),
+            `دخولٌ بعدَ الختم: ${late.out}`,
+          );
+          must((await credStatus(r))?.status === 'ACTIVE', 'الاعتمادُ لم يبقَ نشِطاً');
+          return {
+            worker_pid: pid,
+            isolation: sealed.isolation,
+            launch_trust: real.launchTrust,
+            proc_owner: owner.stdout.trim().split('\n'),
+            open_fds: fdLinks.stdout.trim().split('\n').length,
+            key_fd_closed: true,
+            cmdline_readable_by_same_uid_without_secret: true,
+            same_uid_vs_isolated: isolated,
+            same_uid_vs_control: exposed,
+            late_login: late.err.split('\n')[0]?.slice(0, 160),
+            limits:
+              'لا يحمي من root/CAP_SYS_PTRACE ولا من اختراقِ العاملِ نفسِه ولا من الإشاراتِ (توفّر)؛ دخولٌ بدورِ الإقلاعِ قبلَ الختمِ يُفشِلُه ويُكشَف (LAB-UID-02)',
+          };
+        } finally {
+          // غلافُ sudo ملكُ root ولا يطابقُه pkill -u؛ وقد يبقى متوقّفاً (T) بعدَ مسبارِ ptrace
+          // فيُبقي حلقةَ الأحداثِ حيّةً ويُعلِّقُ المختبر. اقتلْه بـSIGKILL صراحةً ثمّ افصلْه.
+          control.kill();
+          if (control.pid) run('sudo', ['-n', 'kill', '-KILL', String(control.pid)]);
+          control.unref();
+          run('sudo', [
+            '-n',
+            'pkill',
+            '-KILL',
+            '-u',
+            OS_USER('alpha'),
+            '-f',
+            'node -e setInterval',
+          ]);
+          await root.revokeCredential(r, 'lab-uid-06-done').catch(() => {});
+          real.kill();
+          await Promise.race([real.exited, new Promise((res) => setTimeout(res, 5_000))]);
+        }
       },
     );
 
@@ -1357,7 +1638,7 @@ const count = (/** @type {Array<Record<string, any>>} */ xs) =>
   );
 const report = {
   schema: 'xuux/fence-lab-report/v1',
-  work_log: 'WL-532',
+  work_log: arg('--work-log', 'WL-532') ?? 'WL-532',
   generated_at: new Date().toISOString(),
   environment: env,
   declared_limits: [
@@ -1385,6 +1666,13 @@ process.stdout.write(`\nالتقرير: ${path.relative(ROOT, reportPath)}\n`);
 process.stdout.write(
   `الفحوص ${JSON.stringify(report.summary.checks)} · الهجمات ${JSON.stringify(report.summary.attacks)}\n`,
 );
+// الشجرةُ الموثوقةُ ملكُ root — تُحذَفُ دائماً (‏لا تحوي مفتاحاً؛ المفاتيحُ في مجلّدِ العمل).
+run('sudo', [
+  '-n',
+  'rm',
+  '-rf',
+  path.join(tmpdir(), `xuux-fence-trusted-${path.basename(work).slice(-6)}`),
+]);
 if (keep) process.stdout.write(`أُبقيَ مجلّدُ العمل: ${work}\n`);
 else rmSync(work, { recursive: true, force: true });
 process.exitCode =
