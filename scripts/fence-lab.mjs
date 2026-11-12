@@ -347,24 +347,38 @@ async function main() {
     const log = saveLog(`${path.basename(file)}.tap`, r.stdout + r.stderr);
     let parsed = 0;
     const lines = r.stdout.split('\n');
-    // مجموعاتُ describe في المستوى الأعلى حين يكونُ في الملفِّ نتائجُ متداخلة: ليست اختبارات.
-    const nested = lines.some((l) => /^\s+(not ok|ok) \d+ - /.test(l));
-    for (const line of lines) {
-      const m = /^(\s*)(not ok|ok) \d+ - (.*?)(?: # (SKIP|TODO)\b(.*))?$/.exec(line);
+    // مجموعاتُ describe ليست اختبارات: تُعرَفُ بـ`type: 'suite'` في كتلةِ YAML التاليةِ لسطرِها —
+    // لا بمستوى الإزاحة (ملفٌّ يمزجُ test وdescribe في المستوى الأعلى كان يُسقِطُ اختباراتِه).
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^(\s*)(not ok|ok) \d+ - (.*?)(?: # (SKIP|TODO)\b(.*))?$/.exec(lines[i] ?? '');
       if (m === null) continue;
-      if (nested && (m[1] ?? '') === '') continue;
+      const indent = (m[1] ?? '').length;
+      let suite = false;
+      if ((lines[i + 1] ?? '').trim() === '---') {
+        for (let j = i + 2; j < lines.length; j++) {
+          const l = lines[j] ?? '';
+          if (l.trim() === '...') break;
+          if (l.length - l.trimStart().length === indent + 2 && l.trim() === "type: 'suite'")
+            suite = true;
+        }
+      }
+      if (suite) continue;
       const name = (m[3] ?? '').replace(/\\#/g, '#').trim();
       const status = m[4] === 'SKIP' ? 'NOT RUN' : m[2] === 'ok' ? 'PASS' : 'FAIL';
-      testResults[name] = { status, file };
+      const key = name in testResults ? `${name} [${file}]` : name;
+      testResults[key] = { status, file };
       parsed++;
     }
+    // مطابقةٌ مع ملخّصِ TAP نفسِه (`# tests N`): اختلافُ العدِّ فشلٌ لا تقريبٌ.
+    const tapTotal = Number(/^# tests (\d+)$/m.exec(r.stdout)?.[1] ?? NaN);
     record(
       `LAB-SUITE-${path.basename(file, '.test.mjs')}`,
       `تشغيلُ ${file}`,
-      r.status === 0 && parsed > 0 ? 'PASS' : 'FAIL',
+      r.status === 0 && parsed > 0 && parsed === tapTotal ? 'PASS' : 'FAIL',
       {
         exit: r.status,
         tests: parsed,
+        tap_tests: tapTotal,
         log: log.name,
         log_sha256: log.sha256,
       },
