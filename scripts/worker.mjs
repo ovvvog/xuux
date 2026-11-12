@@ -20,8 +20,16 @@
  * ضمن الميزانية، و`65` عطبٌ ليس تعذّراً (فسادٌ، مخطّطٌ غائب، نتيجةٌ لا تطابق).
  */
 
-import { createPrivateKey, randomUUID } from 'node:crypto';
-import { closeSync, fstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { createHash, createPrivateKey, randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -49,6 +57,7 @@ export const ISOLATION_ERRORS = Object.freeze({
   DUMPABLE_POLICY: 'FENCE_ISOLATION_SUID_DUMPABLE',
   KEY_FD: 'FENCE_ISOLATION_KEY_FD',
   VERIFY_FAILED: 'FENCE_ISOLATION_VERIFY_FAILED',
+  UNTRUSTED_CODE: 'FENCE_ISOLATION_UNTRUSTED_CODE',
 });
 
 /** المتغيّراتُ التي يحدّدُها المُطلِق. لا يحملُ أيٌّ منها سرّاً. */
@@ -67,7 +76,7 @@ export const KEY_FD_MAX_BYTES = 16_384;
 export const FD_SCAN_LIMIT = 4_096;
 
 /** متغيّراتُ بيئةٍ تُنفِّذُ شيفرةً أو تُحمِّلُ مكتباتٍ قبلَ المُقلِع، أو تكتبُ ملفّاتٍ بصلاحيّةِ root. */
-const HOSTILE_ENV = [/^NODE_(?!ENV$)/, /^LD_/, /^DYLD_/];
+export const HOSTILE_ENV = [/^NODE_(?!ENV$)/, /^LD_/, /^DYLD_/];
 
 export class IsolationError extends Error {
   /** @param {string} code @param {string} message @param {unknown} [details] */
@@ -142,6 +151,173 @@ const realOs = {
   readText: (p) => readFileSync(p, 'utf8'),
   ownerOf: (p) => statSync(p).uid,
 };
+
+// ── ثقةُ الشيفرةِ التي تعملُ بـroot (‏WL-533، الجولةُ الثالثة) ─────────────────────────────────────
+// node والمُقلِعُ وsh وsetpriv وenv وsudo تعملُ بـroot (‏منقوصِ القدرات) **قبلَ** الإسقاط. فإن كتبَ
+// أحدَها — أو مجلّداً في طريقِه، أو رابطاً رمزيّاً في سلسلتِه — غيرُ root، صارَ الإقلاعُ التالي شيفرتَه
+// بصلاحيّةِ root. (‏قِيسَ على مضيفِ المختبر: `/usr/local/bin/node` ‏0777 ملكُ uid 1001.)
+// العقد: كلُّ مجلّدٍ يُعبَرُ ملكُ root ولا يكتبُه group/other إلا بِبِتِّ sticky؛ وكلُّ رابطٍ رمزيٍّ في
+// السلسلةِ ملكُ root؛ والملفُّ النهائيُّ عاديٌّ ملكُ root لا يكتبُه group/other؛ وبصمةُ sha256 إن ثُبِّتت.
+// (‏بِتُّ group في ‎st_mode‎ هو قناعُ ACL حين توجد، فمدخلُ ACL بالكتابةِ يظهرُ فيه.)
+// **الحدّ:** لا يفحصُ المكتباتِ المشتركةَ ولا node_modules ولا النواة؛ وفحصُ المُقلِعِ لنفسِه كاشفٌ لسوءِ
+// إعدادٍ لا حاجز — node مستبدَلٌ لا يُشغِّلُه. الحاجزُ فحصُ المُطلِقِ قبلَ exec (‏isolatedLaunchCommand).
+
+/**
+ * @typedef {{ type: string, uid: number, mode: number }} PathStat
+ * @typedef {{ lstat(p: string): PathStat, readlink(p: string): string, sha256(p: string): string }} TrustFs
+ */
+
+/** @type {TrustFs} */
+const realTrustFs = {
+  lstat: (p) => {
+    const s = lstatSync(p);
+    return { type: s.isSymbolicLink() ? 'symlink' : fdType(s), uid: s.uid, mode: s.mode & 0o7777 };
+  },
+  readlink: (p) => readlinkSync(p),
+  sha256: (p) => createHash('sha256').update(readFileSync(p)).digest('hex'),
+};
+
+/** @param {string} p */
+const parts = (p) => p.split('/').filter((x) => x !== '' && x !== '.');
+/** @param {string} dir @param {string} name */
+const joinAbs = (dir, name) => (dir === '/' ? `/${name}` : `${dir}/${name}`);
+/** @param {string} p */
+const parentOf = (p) => (p.lastIndexOf('/') <= 0 ? '/' : p.slice(0, p.lastIndexOf('/')));
+/** @param {number} m */
+const oct = (m) => (m & 0o7777).toString(8);
+
+/**
+ * يمشي المسارَ مكوِّناً مكوِّناً ويتبعُ كلَّ رابطٍ بنفسِه (‏لا realpath واحداً) فيفحصُ كلَّ ما يُعبَر.
+ * @param {readonly string[]} paths
+ * `optional`: مساراتٌ يجوزُ غيابُها (‏وحداتٌ لم تُنشَر) — ويُفحَصُ أعمقُ مجلّدٍ موجودٍ في طريقِها، فمجلّدٌ
+ * يكتبُه غيرُ root يُرفَضُ ولو غابَ الملفّ.
+ * @param {{ fs?: TrustFs, pins?: Readonly<Record<string, string>>, optional?: readonly string[] }} [o]
+ * @returns {{ violations: string[], checked: Array<{ path: string, real: string, sha256?: string }>,
+ *   absent: string[] }}
+ */
+export function codeTrustViolations(paths, o = {}) {
+  const fs = o.fs ?? realTrustFs;
+  const pins = o.pins ?? {};
+  const optional = new Set(o.optional ?? []);
+  /** @type {string[]} */
+  const absent = [];
+  /** @type {string[]} */
+  const violations = [];
+  /** @type {Array<{ path: string, real: string, sha256?: string }>} */
+  const checked = [];
+  /** @param {string} d @param {PathStat} s */
+  const dirIssue = (d, s) =>
+    s.type !== 'dir'
+      ? `${d}: ليس مجلّداً (${s.type})`
+      : s.uid !== 0
+        ? `${d}: مجلّدٌ ملكُ ${s.uid}`
+        : (s.mode & 0o022) !== 0 && (s.mode & 0o1000) === 0
+          ? `${d}: مجلّدٌ يكتبُه غيرُ root (${oct(s.mode)})`
+          : null;
+  for (const p of paths) {
+    if (typeof p !== 'string' || !p.startsWith('/')) {
+      violations.push(`${String(p)}: ليس مساراً مطلقاً`);
+      continue;
+    }
+    /** @type {string[]} */
+    const bad = [];
+    try {
+      const root = dirIssue('/', fs.lstat('/'));
+      if (root !== null) bad.push(root);
+      let cur = '/';
+      let todo = parts(p);
+      let hops = 0;
+      /** @type {PathStat | null} */
+      let leaf = null;
+      while (todo.length > 0) {
+        const c = /** @type {string} */ (todo.shift());
+        if (c === '..') {
+          cur = parentOf(cur);
+          continue;
+        }
+        const next = joinAbs(cur, c);
+        /** @type {PathStat} */
+        let s;
+        try {
+          s = fs.lstat(next);
+        } catch (error) {
+          if (optional.has(p) && /** @type {any} */ (error)?.code === 'ENOENT') break;
+          throw error;
+        }
+        if (s.type === 'symlink') {
+          if (s.uid !== 0) bad.push(`${next}: رابطٌ رمزيٌّ ملكُ ${s.uid}`);
+          if (++hops > 40) throw new Error('روابطُ رمزيّةٌ أكثرُ من 40');
+          const t = fs.readlink(next);
+          todo = [...parts(t), ...todo];
+          if (t.startsWith('/')) cur = '/';
+          continue;
+        }
+        if (todo.length > 0) {
+          const issue = dirIssue(next, s);
+          if (issue !== null) bad.push(issue);
+          cur = next;
+        } else {
+          leaf = s;
+          cur = next;
+        }
+      }
+      if (leaf === null) {
+        if (optional.has(p)) {
+          absent.push(p);
+          violations.push(...bad);
+          continue;
+        }
+        throw new Error('مسارٌ بلا ملفّ');
+      }
+      if (leaf.type !== 'file') bad.push(`${cur}: ليس ملفّاً عاديّاً (${leaf.type})`);
+      if (leaf.uid !== 0) bad.push(`${cur}: ملفٌّ ملكُ ${leaf.uid}`);
+      if ((leaf.mode & 0o022) !== 0) bad.push(`${cur}: ملفٌّ يكتبُه غيرُ root (${oct(leaf.mode)})`);
+      /** @type {{ path: string, real: string, sha256?: string }} */
+      const entry = { path: p, real: cur };
+      const pin = pins[p];
+      if (pin !== undefined) {
+        const h = fs.sha256(cur);
+        entry.sha256 = h;
+        if (h !== pin)
+          bad.push(`${p}: بصمةٌ ${h.slice(0, 12)}… لا تطابقُ المثبَّتة ${pin.slice(0, 12)}…`);
+      }
+      if (bad.length === 0) checked.push(entry);
+    } catch (error) {
+      bad.push(`${p}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    violations.push(...bad);
+  }
+  return { violations: [...new Set(violations)], checked, absent };
+}
+
+/**
+ * مساراتُ الشيفرةِ التي يفحصُها المُقلِعُ قبلَ قراءةِ المفتاح: node، ونقطةُ الدخول، والمُقلِعُ نفسُه،
+ * ووحداتُ `loadApp()` (‏تعملُ بالهويّةِ المُسقَطة، لكنّ كتابتَها من مستخدمٍ آخرَ اختراقٌ عابرٌ للعمّال).
+ */
+export const APP_MODULES = Object.freeze([
+  '../src/root-of-trust/persistent-log.mjs',
+  '../src/root-of-trust/index.mjs',
+  '../src/execution/queue.mjs',
+  '../src/execution/worker.mjs',
+  '../src/execution/pending-results.mjs',
+  '../src/execution/db-recovery.mjs',
+  '../src/policy/quota.mjs',
+  '../src/policy/loader.mjs',
+  '../src/persistence/db.mjs',
+  '../src/execution/worker-registry.mjs',
+  '../src/fence/db-fence.mjs',
+]);
+
+/** وحداتُ `loadApp()` بمساراتِها المطلقة — يجوزُ غيابُها في فحصِ المُقلِع (‏لا تُقيَّمُ بـroot). */
+export const appModulePaths = () =>
+  APP_MODULES.map((m) => fileURLToPath(new URL(m, import.meta.url)));
+
+/** @param {readonly string[]} argv */
+export function bootstrapTrustPaths(argv = process.argv) {
+  const self = fileURLToPath(import.meta.url);
+  const entry = argv[1] !== undefined && argv[1].startsWith('/') ? [argv[1]] : [];
+  return [...new Set([process.execPath, ...entry, self, ...appModulePaths()])];
+}
 
 /** @param {NodeJS.ProcessEnv} env @param {string} name */
 const val = (env, name) => (env[name] ?? '').trim();
@@ -231,7 +407,9 @@ export function keyFdViolations(s) {
  * المُقلِع: يُستدعى **قبلَ تحميلِ أيِّ وحدةٍ تطبيقيّة**. بلا عزلٍ مطلوبٍ يُعيدُ `null`؛ ومعه إمّا عزلٌ
  * متحقَّقٌ منه وإمّا استثناءٌ — لا مسارَ وسطاً.
  * @param {NodeJS.ProcessEnv} env
- * @param {{ os?: IsolationOs, execArgv?: readonly string[] }} [options]
+ * @param {{ os?: IsolationOs, execArgv?: readonly string[],
+ *   trust?: (paths: readonly string[]) => { violations: string[], checked: unknown[] },
+ *   trustPaths?: readonly string[] }} [options]
  * @returns {{ pem: string, evidence: Readonly<Record<string, unknown>> } | null}
  */
 export function bootstrapIsolation(env, options = {}) {
@@ -297,6 +475,18 @@ export function bootstrapIsolation(env, options = {}) {
         'من الـUID نفسِه. المطلوب 0 أو 2.',
     );
   }
+  // ٣ب. ثقةُ الشيفرةِ العاملةِ بـroot — قبلَ أيِّ قراءةٍ للمفتاح. كاشفٌ لا حاجز (‏انظر codeTrustViolations).
+  const trustPaths = options.trustPaths ?? bootstrapTrustPaths();
+  const trust = (
+    options.trust ?? ((ps) => codeTrustViolations(ps, { optional: appModulePaths() }))
+  )(trustPaths);
+  if (trust.violations.length > 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+      `شيفرةٌ تعملُ بـroot يكتبُها غيرُ root: ${trust.violations.join('؛ ')}. لا يُقرأُ المفتاح.`,
+      trust.violations,
+    );
+  }
   // ٤. عقدُ الواصف، ثمّ القراءةُ والإغلاق — في كلِّ حال.
   /** @type {FdStat} */
   let st;
@@ -348,6 +538,7 @@ export function bootstrapIsolation(env, options = {}) {
     pem,
     evidence: Object.freeze({
       ...evidence,
+      code_trust: { checked: trust.checked.length },
       key_fd: {
         fd,
         type: st.type,
@@ -414,6 +605,12 @@ export function verifyIsolation(os, want) {
   };
 }
 
+/** البرامجُ التي يُشغِّلُها المُطلِقُ بـroot — مساراتٌ مطلقةٌ ثابتةٌ لا PATH. */
+export const LAUNCH_SUDO = '/usr/bin/sudo';
+export const LAUNCH_ENV = '/usr/bin/env';
+export const LAUNCH_SETPRIV = '/usr/bin/setpriv';
+export const LAUNCH_SH = '/bin/sh';
+
 /** متغيّراتٌ لا يمرّرُها المُطلِقُ أبداً ولو طُلِبت. */
 const NEVER_PASS = [
   ...HOSTILE_ENV,
@@ -422,12 +619,12 @@ const NEVER_PASS = [
 ];
 
 /**
- * المُطلِق: يبني أمرَ إقلاعٍ معزولٍ **من بيئةِ سماحٍ صريحة** (`env -i`)، بحدِّ قدراتٍ {setgid,setuid}
- * وno_new_privs (`setpriv`)، ومفتاحٍ يفتحُه `sh` (root) على الواصف 3. لا يرثُ الابنُ متغيّراً لم يُسمَّ.
- * @param {{ node: string, entry: string, args?: readonly string[], keyFile: string, uid: number,
- *   gid: number, env: NodeJS.ProcessEnv, pass?: readonly string[], sudo?: boolean }} o
+ * بيئةُ السماحِ الصريحةُ وفحصُ المُدخلات — مشتركةٌ بينَ المُطلِقِ ووحدةِ systemd (‏مصدرٌ واحد).
+ * @param {{ node: string, entry: string, keyFile: string, uid: number, gid: number,
+ *   env: NodeJS.ProcessEnv, pass?: readonly string[] }} o
+ * @returns {Record<string, string>}
  */
-export function isolatedLaunchCommand(o) {
+export function isolatedLaunchEnv(o) {
   for (const [name, p] of /** @type {Array<[string, string]>} */ ([
     ['node', o.node],
     ['entry', o.entry],
@@ -462,17 +659,48 @@ export function isolatedLaunchCommand(o) {
   env[ISOLATION_ENV.keyFd] = '3';
   env[ISOLATION_ENV.uid] = String(o.uid);
   env[ISOLATION_ENV.gid] = String(o.gid);
+  return env;
+}
+
+/**
+ * المُطلِق: يبني أمرَ إقلاعٍ معزولٍ **من بيئةِ سماحٍ صريحة** (`env -i`)، بحدِّ قدراتٍ {setgid,setuid}
+ * وno_new_privs (`setpriv`)، ومفتاحٍ يفتحُه `sh` (root) على الواصف 3. لا يرثُ الابنُ متغيّراً لم يُسمَّ.
+ * **ويفحصُ ثقةَ الشيفرةِ قبلَ أن يبنيَ الأمر** (‏الحاجزُ لا الكاشف): node ونقطةُ الدخولِ وenv وsetpriv وsh —
+ * وsudo إن استُعمِل — بعقدِ `codeTrustViolations` وبصماتٍ اختياريّة. لا مسارَ لتجاوزِه. (‏ملفُّ المفتاحِ لا يُفحَصُ
+ * هنا: المُقلِعُ يفحصُ الواصفَ المفتوحَ نفسَه بـfstat، فلا نافذةَ سباقٍ بينَ الفحصِ والفتح.)
+ * @param {{ node: string, entry: string, args?: readonly string[], keyFile: string, uid: number,
+ *   gid: number, env: NodeJS.ProcessEnv, pass?: readonly string[], sudo?: boolean,
+ *   trust?: { fs?: TrustFs, pins?: Readonly<Record<string, string>> } }} o
+ */
+export function isolatedLaunchCommand(o) {
+  const env = isolatedLaunchEnv(o);
+  const trustPaths = [
+    ...(o.sudo === false ? [] : [LAUNCH_SUDO]),
+    LAUNCH_ENV,
+    LAUNCH_SETPRIV,
+    LAUNCH_SH,
+    o.node,
+    o.entry,
+  ];
+  const trust = codeTrustViolations(trustPaths, o.trust ?? {});
+  if (trust.violations.length > 0) {
+    throw new IsolationError(
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+      `المُطلِقُ يرفض: ${trust.violations.join('؛ ')}.`,
+      trust.violations,
+    );
+  }
   const inner = [
-    '/usr/bin/env',
+    LAUNCH_ENV,
     '-i',
     ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
-    '/usr/bin/setpriv',
+    LAUNCH_SETPRIV,
     '--no-new-privs',
     '--bounding-set',
     '-all,+setuid,+setgid',
     '--inh-caps',
     '-all',
-    '/bin/sh',
+    LAUNCH_SH,
     '-c',
     'k=$1; shift; exec "$@" 3<"$k"',
     'sh',
@@ -482,8 +710,8 @@ export function isolatedLaunchCommand(o) {
     ...(o.args ?? []),
   ];
   return o.sudo === false
-    ? { command: '/usr/bin/env', args: inner.slice(1), env }
-    : { command: 'sudo', args: ['-n', ...inner], env };
+    ? { command: LAUNCH_ENV, args: inner.slice(1), env, trust: trust.checked }
+    : { command: LAUNCH_SUDO, args: ['-n', ...inner], env, trust: trust.checked };
 }
 
 /**

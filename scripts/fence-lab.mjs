@@ -53,7 +53,7 @@ import {
   signCredentialChallenge,
 } from '../src/fence/db-fence.mjs';
 import { up } from '../src/persistence/migrator.mjs';
-import { isolatedLaunchCommand } from './worker.mjs';
+import { codeTrustViolations, isolatedLaunchCommand } from './worker.mjs';
 
 /**
  * مسبارُ الـUID نفسِه (`WL-533`، LAB-UID-06): يُشغَّلُ **بمستخدمِ العامل** ضدَّ pid، ويحاولُ ما يفعلُه
@@ -206,7 +206,13 @@ function run(cmd, args, opts = {}) {
     timeout: opts.timeout ?? 120_000,
     maxBuffer: 64 * 1024 * 1024,
   });
-  return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
+  return {
+    status: r.status,
+    signal: r.signal,
+    stdout: r.stdout ?? '',
+    stderr: r.stderr ?? '',
+    error: r.error,
+  };
 }
 
 /** @type {Array<Record<string, any>>} */
@@ -411,16 +417,36 @@ async function main() {
     }
     // مطابقةٌ مع ملخّصِ TAP نفسِه (`# tests N`): اختلافُ العدِّ فشلٌ لا تقريبٌ.
     const tapTotal = Number(/^# tests (\d+)$/m.exec(r.stdout)?.[1] ?? NaN);
+    const pass = r.status === 0 && parsed > 0 && parsed === tapTotal;
+    // الفشلُ يحملُ سببَه في التقريرِ نفسِه (‏سطورُ «not ok» وما يليها، وذيلُ stderr، والإشارة) — فلا يضيعُ
+    // بحذفِ مجلّدِ العمل (‏فشلٌ سابقٌ في LAB-SUITE-db-fence لم يُعرَفْ سببُه لهذا).
+    /** @type {string[]} */
+    const failures = [];
+    if (!pass) {
+      for (let i = 0; i < lines.length && failures.length < 12; i++) {
+        if (/^\s*not ok \d+ - /.test(lines[i] ?? ''))
+          failures.push(lines.slice(i, i + 14).join('\n'));
+      }
+    }
     record(
       `LAB-SUITE-${path.basename(file, '.test.mjs')}`,
       `تشغيلُ ${file}`,
-      r.status === 0 && parsed > 0 && parsed === tapTotal ? 'PASS' : 'FAIL',
+      pass ? 'PASS' : 'FAIL',
       {
         exit: r.status,
         tests: parsed,
         tap_tests: tapTotal,
         log: log.name,
         log_sha256: log.sha256,
+        ...(pass
+          ? {}
+          : {
+              signal: r.signal ?? null,
+              spawn_error: r.error?.message ?? null,
+              failures,
+              stderr_tail: String(r.stderr ?? '').slice(-2000),
+              stdout_tail: String(r.stdout ?? '').slice(-1500),
+            }),
       },
     );
   }
@@ -602,6 +628,12 @@ async function liveLab() {
   const keyFiles = {};
   /** @type {Record<string, string>} */
   const rootKeyFiles = {};
+  // `WL-533` (الجولةُ الثالثة): شجرةٌ موثوقةٌ للعاملِ المعزول — node والتطبيقُ ملكُ root لا يكتبُهما غيرُه
+  // (‏عقدُ codeTrustViolations). node المضيفِ هنا قد يكتبُه غيرُ root (‏قِيسَ: 0777 ملكُ uid 1001)، فيرفضُه
+  // المُطلِق؛ والمختبرُ لا يُغيّرُ المضيف — ينسخُ node إلى مجلّدٍ ملكِ root ويُحذَفُ في النهاية.
+  const trusted = path.join(tmpdir(), `xuux-fence-trusted-${path.basename(work).slice(-6)}`);
+  const trustedNode = path.join(trusted, 'node');
+  const trustedApp = path.join(trusted, 'app');
   /** @param {string} user */
   const osIds = (user) => {
     const u = run('id', ['-u', user]);
@@ -668,7 +700,29 @@ async function liveLab() {
       must(inst.status === 0, `install key ${w}: ${inst.stderr}`);
       must(instRoot.status === 0, `install root key ${w}: ${instRoot.stderr}`);
     }
-    return { packages: [...seen].sort() };
+    /** @param {string[]} a */
+    const asRoot = (a) => {
+      const r = run('sudo', ['-n', ...a]);
+      must(r.status === 0, `sudo ${a.join(' ')}: ${r.stderr}`);
+    };
+    asRoot(['install', '-d', '-o', 'root', '-g', 'root', '-m', '0755', trusted, trustedApp]);
+    asRoot(['install', '-o', 'root', '-g', 'root', '-m', '0755', process.execPath, trustedNode]);
+    for (const part of ['src', 'scripts', 'node_modules', 'package.json'])
+      asRoot(['cp', '-r', path.join(app, part), path.join(trustedApp, part)]);
+    asRoot(['chown', '-R', 'root:root', trustedApp]);
+    asRoot(['chmod', '-R', 'a+rX,go-w', trustedApp]);
+    const trust = codeTrustViolations([
+      trustedNode,
+      path.join(trustedApp, 'scripts', 'fence-lab-writer.mjs'),
+      path.join(trustedApp, 'scripts', 'worker.mjs'),
+    ]);
+    must(trust.violations.length === 0, `الشجرةُ الموثوقةُ غيرُ موثوقة: ${trust.violations}`);
+    return {
+      packages: [...seen].sort(),
+      trusted_tree: trusted,
+      host_node: process.execPath,
+      host_node_trust_violations: codeTrustViolations([process.execPath]).violations,
+    };
   };
 
   /**
@@ -695,6 +749,7 @@ async function liveLab() {
       isolate: o.isolate === true,
     };
     const writerPath = path.join(app, 'scripts', 'fence-lab-writer.mjs');
+    const trustedWriter = path.join(trustedApp, 'scripts', 'fence-lab-writer.mjs');
     const arg = Buffer.from(JSON.stringify(input)).toString('base64url');
     const ids = o.isolate === true ? osIds(OS_USER(w)) : null;
     // `WL-533` (مراجعةُ #546): الإطلاقُ المعزولُ من بيئةِ سماحٍ صريحة (`env -i`) بحدِّ قدراتٍ
@@ -704,8 +759,8 @@ async function liveLab() {
       ids === null
         ? { command: 'sudo', args: ['-n', '-u', OS_USER(w), process.execPath, writerPath, arg] }
         : isolatedLaunchCommand({
-            node: process.execPath,
-            entry: writerPath,
+            node: trustedNode,
+            entry: trustedWriter,
             args: [arg],
             keyFile: /** @type {string} */ (rootKeyFiles[w]),
             uid: ids.uid,
@@ -714,7 +769,7 @@ async function liveLab() {
             pass: ['XUUX_DB_FENCE'],
           });
     const child = spawn(launch.command, launch.args, {
-      cwd: app,
+      cwd: ids === null ? app : trustedApp,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const bus = new EventEmitter();
@@ -762,6 +817,7 @@ async function liveLab() {
       bus,
       messages,
       exited,
+      launchTrust: 'trust' in launch ? launch.trust : null,
       waitFor,
       get stderr() {
         return stderr;
@@ -1155,7 +1211,8 @@ async function liveLab() {
               iso.key_fd_open_copies === 0 &&
               iso.key_fd?.type === 'file' &&
               iso.key_fd?.owner === 0 &&
-              iso.key_fd?.mode === '400',
+              iso.key_fd?.mode === '400' &&
+              Number(iso.code_trust?.checked) >= 3,
             `دليلُ العزلِ ناقص: ${JSON.stringify(iso)}`,
           );
           const pid = Number(sealed.pid);
@@ -1205,6 +1262,7 @@ async function liveLab() {
           return {
             worker_pid: pid,
             isolation: sealed.isolation,
+            launch_trust: real.launchTrust,
             proc_owner: owner.stdout.trim().split('\n'),
             open_fds: fdLinks.stdout.trim().split('\n').length,
             key_fd_closed: true,
@@ -1608,6 +1666,13 @@ process.stdout.write(`\nالتقرير: ${path.relative(ROOT, reportPath)}\n`);
 process.stdout.write(
   `الفحوص ${JSON.stringify(report.summary.checks)} · الهجمات ${JSON.stringify(report.summary.attacks)}\n`,
 );
+// الشجرةُ الموثوقةُ ملكُ root — تُحذَفُ دائماً (‏لا تحوي مفتاحاً؛ المفاتيحُ في مجلّدِ العمل).
+run('sudo', [
+  '-n',
+  'rm',
+  '-rf',
+  path.join(tmpdir(), `xuux-fence-trusted-${path.basename(work).slice(-6)}`),
+]);
 if (keep) process.stdout.write(`أُبقيَ مجلّدُ العمل: ${work}\n`);
 else rmSync(work, { recursive: true, force: true });
 process.exitCode =

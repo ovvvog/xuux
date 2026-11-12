@@ -378,8 +378,26 @@ dumpable=1، وNode لا يكشفُ prctl.
 
 **NODE_OPTIONS (‏ISO-42، مقيس):** عبرَ المُطلِق لا يعبرُ الحِمْل. وإطلاقٌ يتجاوزُ المُطلِقَ ويحقنُ ‎NODE_OPTIONS=--require …‎ **يُشغِّلُ
 الحِمْلَ بـroot قبلَ أوّلِ سطرٍ من المُقلِع** (‏الحِمْلُ كتبَ 0)؛ المُقلِعُ يكشفُه ويرفضُ الإكمالَ فلا يُقرأُ المفتاحُ ولا تُحمَّلُ
-وحدة — **كاشفٌ لا حاجز**. الحاجزُ هو المُطلِق وحدَه، ومكافئُه الإنتاجيُّ (‏تصميمٌ غيرُ منفَّذ): وحدةُ systemd بـNoNewPrivileges=yes
-وCapabilityBoundingSet=CAP_SETUID CAP_SETGID وبيئةٍ صريحةٍ (‏Environment=) بلا EnvironmentFile يكتبُه غيرُ root.
+وحدة — **كاشفٌ لا حاجز**. الحاجزُ هو المُطلِق وحدَه، ومكافئُه الإنتاجيُّ وحدةُ systemd (‏§9.3ب، عقدٌ مولَّدٌ لم يُثبَّت).
+
+**ثقةُ الشيفرةِ التي تعملُ بـroot (‏TH-UID-16، `codeTrustViolations`):** قبلَ أن يبنيَ المُطلِقُ أمرَه يفحصُ sudo وenv وsetpriv وsh
+وnode ونقطةَ الدخول: كلُّ مجلّدٍ في السلسلةِ ملكُ root بلا كتابةٍ لـgroup/other (‏إلا اللاصق)، وكلُّ رابطٍ رمزيٍّ (‏حتى 40 قفزة)
+ملكُ root، والورقةُ ملفٌّ عاديٌّ ملكُ root بلا كتابةٍ لغيرِه، وبصمةُ sha256 اختياريّة (‏ISO-19/46/47) — **حاجز**. والمُقلِعُ يكرّرُ
+الفحصَ على node ونقطةِ الدخولِ ونفسِه ووحداتِ `loadApp()` الإحدى عشرة قبلَ قراءةِ الواصف (‏ISO-18/22، الخطوة ٣ب) — **كاشفٌ لا حاجز**:
+node مستبدَلٌ لا يفحصُ نفسَه. **المقيسُ على مضيفِ المختبر:** ‎/usr/local/bin/node‎ ‏0777 ملكُ uid 1001 — أيُّ مستخدمٍ يكتبُه، وهو يعملُ
+بـroot في المسارِ المعزول؛ فنتيجةُ مختبرِ `7ccaf82d` قامت على شرطِ مضيفٍ غيرِ مفحوص. المضيفُ لم يُغيَّر؛ المختبرُ والاختباراتُ
+تستعملُ نسخةً ملكَ root ‏0755. حدود: المكتباتُ المشترَكة (‏ld.so، libc، ‎ld.so.cache‎) وnode_modules والنواةُ غيرُ مفحوصة.
+
+### 9.3ب وحدةُ systemd المكافئة (‏`scripts/fence-worker-unit.mjs` — عقدٌ لا تثبيت)
+
+يُولِّدُ نصَّ الوحدةِ على stdout من **المصدرِ نفسِه** (`isolatedLaunchEnv` وALLOWED_CAP_BND): ‎User=root‎، ‎NoNewPrivileges=yes‎،
+‎CapabilityBoundingSet=CAP_SETUID CAP_SETGID‎، ‎AmbientCapabilities=‎ فارغ، ‎Environment=‎ بقائمةِ السماحِ وبلا EnvironmentFile،
+‎UnsetEnvironment=‎ لأسماءٍ عدائيّةٍ معروفة، ‎OpenFile=‹key›:xuux-key:read-only‎ (‏systemd ≥ 253؛ الواصفُ 3 ما دامت بلا مقابس)،
+وExecStart مطلق؛ ويرفضُ المحارفَ التي تغيّرُ معنى السطرِ (‏فاصل، اقتباس، ‎%‎، ‎;‎) بدلَ تهريبِها، ولا يُولِّدُ لشيفرةٍ غيرِ موثوقة
+(‏ISO-48..51). **بيئةُ مديرِ systemd** (‏‎systemctl set-environment‎) تُورَّثُ لكلِّ وحدة: UnsetEnvironment يزيلُ المعروفَ، وما ليس فيه
+(‏لا أنماطَ فيها) يصلُ ويرفضُه المُقلِع — كشفٌ لا منع. ISO-52 يُحاكي الوحدةَ من نصِّها المحلَّل (‏sudo + env + setpriv + sh): تُقلِعُ
+وتُحمِّلُ التطبيقَ بالهويّةِ المُسقَطة، وحذفُ NoNewPrivileges أو الحدِّ ⇒ LAUNCH_POLICY، وNODE_ICU_DATA من المدير ⇒ HOSTILE_ENV.
+**لم يُشغَّل systemd**: هذا عقدٌ ومحاكاتُه، والتثبيتُ قرارُ المالك (‏D-SUP-1/2).
 
 ### 9.4 عقدُ واصفِ المفتاح (‏`keyFdViolations`)
 
@@ -413,7 +431,7 @@ dumpable=1، وNode لا يكشفُ prctl.
 ### 9.7 ما لا يغلقُه
 
 root وCAP_SYS_PTRACE (‏TH-UID-11)؛ اختراقُ العاملِ نفسِه (‏TH-UID-10)؛ هجومُ التوفّرِ قبلَ الختم (‏TH-UID-06، يحتاجُ UID لكلِّ إقلاع:
-D-SUP-2)؛ سلامةُ ملفّاتِ نقطةِ الدخولِ وnode وsh وsetpriv التي تعملُ بـroot قبلَ الإسقاط، وإطلاقٌ يتجاوزُ المُطلِق (‏TH-UID-08)؛
+D-SUP-2)؛ ما لا يفحصُه عقدُ الثقة — المكتباتُ المشترَكةُ وnode_modules والنواة (‏TH-UID-16)، وإطلاقٌ يتجاوزُ المُطلِق (‏TH-UID-08)؛
 التفريغُ الفعليُّ لم يُسبَّب (‏TH-UID-05). مسارُ الملفِّ القديمُ باقٍ لتشغيلٍ لا يُعلِنُ العزل، ومكشوفٌ كما هو (‏LAB-UID-05 بتوقّعِه
 الأصليّ)؛ والإلزامُ الإنتاجيُّ جزءٌ من المُشرِف وقرارُ المالك — لذلك **`LIVE-75` بند 4 لا يُغيَّر**، و`UID-05` غيرُ مغلقٍ إنتاجيّاً.
 
@@ -530,7 +548,7 @@ threats:
     control: لا شيفرةَ تطبيقٍ بصلاحيّةِ root — نقطةُ الدخولِ تستوردُ node فقط وتُحمِّلُ التطبيقَ ديناميكيّاً بعدَ الإسقاطِ والتحقّق (ISO-40/41)؛ المُطلِقُ يبني البيئةَ من قائمةِ سماحٍ صريحة (env -i) ويرفضُ تمريرَ NODE_* وLD_* وDYLD_*؛ المُقلِعُ يرفضُ وجودَها ووسائطَ execArgv
     status: PARTIAL
     evidence: [tests/execution/worker-isolation.test.mjs#ISO-40, tests/execution/worker-isolation.test.mjs#ISO-41, tests/execution/worker-isolation.test.mjs#ISO-42, tests/execution/worker-isolation.test.mjs#ISO-04, tests/execution/worker-isolation.test.mjs#ISO-15]
-    limit: NODE_OPTIONS ومثلُها تُنفَّذُ قبلَ أوّلِ سطرٍ من المُقلِع — إطلاقٌ يتجاوزُ المُطلِقَ يُشغِّلُ الحِمْلَ بـroot (مقيسٌ في ISO-42)؛ المُقلِعُ يكشفُ ويرفضُ ولا يمنع. ونقطةُ الدخولِ وnode وsh وsetpriv تعملُ بـroot منقوصِ القدرات قبلَ الإسقاط، فسلامةُ ملفّاتِها (ملكُ root وغيرُ قابلةٍ للكتابة) شرطٌ على المضيف لم يُفحَص قبلَ الإطلاق
+    limit: NODE_OPTIONS ومثلُها تُنفَّذُ قبلَ أوّلِ سطرٍ من المُقلِع — إطلاقٌ يتجاوزُ المُطلِقَ يُشغِّلُ الحِمْلَ بـroot (مقيسٌ في ISO-42)؛ المُقلِعُ يكشفُ ويرفضُ ولا يمنع. وسلامةُ ملفّاتِ الشيفرةِ التي تعملُ بـroot قبلَ الإسقاطِ تُفحَصُ الآن (TH-UID-16) بحدودِها
   - id: TH-UID-09
     actor: same_uid
     asset: فصلُ حسابِ الخدمة
@@ -589,6 +607,23 @@ threats:
     status: MITIGATED_TESTED
     evidence: [tests/execution/worker-isolation.test.mjs#ISO-03, tests/execution/worker-isolation.test.mjs#ISO-14, tests/execution/worker-isolation.test.mjs#ISO-21]
     limit: تشغيلٌ لا يُعلِنُ الوضعَ يبقى بمسارِ الملفّ — الإلزامُ الإنتاجيُّ قرارُ المُشرِف (D-SUP-1) لا هذا الفرع
+    decision: D-SUP-1
+  - id: TH-UID-16
+    actor: same_uid
+    asset: ملفّاتُ الشيفرةِ التي تعملُ بـroot قبلَ الإسقاط (sudo، env، setpriv، sh، node، نقطةُ الدخول، وحداتُ التطبيق)
+    attack: تعديلُ أو استبدالُ ملفٍّ يكتبُه غيرُ root، أو مجلّدٍ في سلسلتِه، أو رابطٍ رمزيٍّ — مقيسٌ أنّ /usr/local/bin/node على مضيفِ المختبر 0777 ملكُ uid 1001
+    control: codeTrustViolations — كلُّ مجلّدٍ في السلسلةِ ملكُ root بلا كتابةٍ لـgroup/other إلا اللاصق، وكلُّ رابطٍ ملكُ root (حتى 40 قفزة)، والورقةُ ملفٌّ عاديٌّ ملكُ root بلا كتابةٍ لغيرِه، وبصمةُ sha256 اختياريّة؛ المُطلِقُ ومولّدُ وحدةِ systemd يرفضان قبلَ البناء (حاجز)، والمُقلِعُ يرفضُ قبلَ قراءةِ الواصف (كاشف)
+    status: PARTIAL
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-18, tests/execution/worker-isolation.test.mjs#ISO-19, tests/execution/worker-isolation.test.mjs#ISO-22, tests/execution/worker-isolation.test.mjs#ISO-46, tests/execution/worker-isolation.test.mjs#ISO-47, tests/execution/worker-isolation.test.mjs#ISO-50, scripts/fence-lab.mjs#LAB-UID-06]
+    limit: المكتباتُ المشترَكة (ld.so، libc، ld.so.cache) وnode_modules والنواةُ غيرُ مفحوصة؛ فحصُ المُقلِعِ يجري داخلَ node الذي قد يكونُ مستبدَلاً — كاشفٌ لا حاجز؛ node المضيفِ لم يُصلَح (المختبرُ يستعملُ نسخةً ملكَ root)
+  - id: TH-UID-17
+    actor: operator_error
+    asset: بيئةُ وحدةِ systemd وسياستُها
+    attack: بيئةُ مديرِ systemd (set-environment) أو EnvironmentFile تُدخِلُ NODE_* أو LD_*، أو وحدةٌ بلا NoNewPrivileges أو بحدِّ قدراتٍ كامل، أو حقنُ سطرٍ عبرَ قيمةٍ أو مسار
+    control: scripts/fence-worker-unit.mjs يولِّدُ الوحدةَ من مصدرِ المُطلِقِ نفسِه، بلا EnvironmentFile، وبـUnsetEnvironment للأسماءِ المعروفة، ويرفضُ المحارفَ الخطرة؛ والمُقلِعُ يرفضُ ما يفلتُ (HOSTILE_ENV) وغيابَ NoNewPrivs أو الحدِّ (LAUNCH_POLICY) — مقيسٌ بمحاكاةٍ من نصِّ الوحدة
+    status: MITIGATED_DESIGN
+    evidence: [tests/execution/worker-isolation.test.mjs#ISO-48, tests/execution/worker-isolation.test.mjs#ISO-49, tests/execution/worker-isolation.test.mjs#ISO-51, tests/execution/worker-isolation.test.mjs#ISO-52]
+    limit: لم يُشغَّل systemd ولم تُثبَّت الوحدة — المحاكاةُ بـsetpriv لا تُثبتُ سلوكَ المدير (ترتيبُ OpenFile، وLISTEN_FDS، والإصدار ≥ 253)؛ UnsetEnvironment ليس شاملاً، وما يفلتُ منه يُكشَفُ لا يُمنَع
     decision: D-SUP-1
   # ── المُشرِفُ الإنتاجيّ ───────────────────────────────────────────────────────────────
   - id: TH-SUP-01
@@ -801,11 +836,12 @@ owner_tasks:
         TH-UID-13,
         TH-UID-14,
         TH-UID-15,
+        TH-UID-16,
       ]
   - id: T2
     title: نموذجُ تهديدِ المُشرِفِ ومخطّطُ الصلاحياتِ وتدفّقُ المفاتيح
     state: DESIGNED
-    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12]
+    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17]
   - id: T3
     title: بيئةُ اختبارٍ معزولةٌ على خادمِ الصديقِ عبرَ Cloudflare
     state: DESIGNED_NEEDS_APPROVAL

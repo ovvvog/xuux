@@ -8,14 +8,13 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
-  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
@@ -28,13 +27,25 @@ import {
   rawEd25519PublicKey,
 } from '../../src/fence/db-fence.mjs';
 import {
+  APP_MODULES as BOOT_APP_MODULES,
   ISOLATION_ERRORS,
+  LAUNCH_SUDO,
   bootstrapIsolation,
+  bootstrapTrustPaths,
+  codeTrustViolations,
   hostileLaunchInputs,
   isolatedLaunchCommand,
   isolationMode,
   keyFdViolations,
+  isolatedLaunchEnv,
+  ALLOWED_CAP_BND,
 } from '../../scripts/worker.mjs';
+import {
+  UNSET_ENV,
+  boundingCapabilities,
+  parseUnit,
+  systemdUnit,
+} from '../../scripts/fence-worker-unit.mjs';
 
 const skip = probeIsolation().available
   ? false
@@ -227,7 +238,29 @@ const isoRejects = (fn, code) =>
   });
 
 /** @param {Record<string, string>} env @param {ReturnType<typeof isoFakeOs>['os']} os */
-const boot = (env, os) => bootstrapIsolation(env, { os, execArgv: [] });
+const boot = (env, os) =>
+  bootstrapIsolation(env, { os, execArgv: [], trust: TRUST_OK, trustPaths: ['/fake/node'] });
+
+/** فحصُ ثقةٍ مزيَّفٌ ناجح — لأنّ اختباراتِ النظامِ المزيَّفِ تقيسُ غيرَه (‏ISO-18 يقيسُه). */
+const TRUST_OK = () => ({ violations: [], checked: [{}] });
+
+/**
+ * نظامُ ملفّاتٍ مزيَّفٌ لعقدِ الثقة: كلُّ مسارٍ مجلّدٌ ملكُ root ‏0755 إلا ما يُعلَن.
+ * @param {Record<string, { type?: string, uid?: number, mode?: number, link?: string, sha?: string }>} [m]
+ */
+const trustFs = (m = {}) => ({
+  lstat: (/** @type {string} */ p) => {
+    const e = m[p] ?? {};
+    const leafish = /\.(mjs|pem)$|\/(node|env|setpriv|sh|sudo|dash)$/.test(p);
+    return {
+      type: e.link !== undefined ? 'symlink' : (e.type ?? (leafish ? 'file' : 'dir')),
+      uid: e.uid ?? 0,
+      mode: e.mode ?? 0o755,
+    };
+  },
+  readlink: (/** @type {string} */ p) => String(m[p]?.link),
+  sha256: (/** @type {string} */ p) => m[p]?.sha ?? 'f'.repeat(64),
+});
 
 test.describe('WL-533 مُقلِعُ العزل — نظامٌ مزيَّف', () => {
   test('ISO-01: الترتيب — fstat ثمّ قراءةٌ وإغلاقٌ قبلَ أيِّ إسقاط، ثمّ setgroups→setgid→setuid ثمّ التحقّق', () => {
@@ -460,8 +493,10 @@ test.describe('WL-533 مُقلِعُ العزل — نظامٌ مزيَّف', ()
         DATABASE_URL: 'postgresql:///x',
       },
       pass: ['DATABASE_URL'],
+      trust: { fs: trustFs() },
     });
-    assert.equal(l.command, 'sudo');
+    // مسارٌ مطلقٌ لا بحثٌ في PATH (‏الجولةُ الثالثة): الملفُّ الذي يُفحَصُ هو الذي يُشغَّل.
+    assert.equal(l.command, LAUNCH_SUDO);
     assert.deepEqual(l.args.slice(0, 3), ['-n', '/usr/bin/env', '-i']);
     assert.deepEqual(l.env, {
       PATH: '/usr/sbin:/usr/bin:/sbin:/bin',
@@ -519,6 +554,7 @@ const BASE_LAUNCH = Object.freeze({
   uid: 987,
   gid: 987,
   env: {},
+  trust: { fs: trustFs() },
 });
 
 const WORKER_ENTRY = fileURLToPath(new URL('../../scripts/worker.mjs', import.meta.url));
@@ -594,40 +630,54 @@ const ROOT_SKIP = 'لا sudo -n أو setpriv أو nobody (المختبرُ يق�
 const idOf = (what) =>
   Number(spawnSync('id', [what, 'nobody'], { encoding: 'utf8' }).stdout.trim());
 
-/** شجرةٌ يقرؤها root منقوصُ القدرات (لا DAC_OVERRIDE): `/tmp/…` 0755 ومفتاحٌ ملكُ root 0400. */
+/** @param {string[]} a */
+const sudo = (a) => {
+  const r = spawnSync('sudo', ['-n', ...a], { encoding: 'utf8' });
+  assert.equal(r.status, 0, `sudo ${a.join(' ')}: ${r.stderr}`);
+  return r;
+};
+
+/** @type {string | null} */
+let trustedNodeDir = null;
+/**
+ * نسخةُ node موثوقة: ملكُ root ‏0755 في مجلّدٍ ملكِ root (‏node المضيفِ هنا 0777 ملكُ uid 1001 — يرفضُه
+ * عقدُ الثقة، وهذا ما يجب). تُنشأُ مرّةً للملفّ وتُحذَفُ في نهايتِه.
+ */
+function trustedNode() {
+  if (trustedNodeDir === null) {
+    const d = mkdtempSync(join(tmpdir(), 'xuux-iso-node-'));
+    sudo(['install', '-o', 'root', '-g', 'root', '-m', '0755', process.execPath, join(d, 'node')]);
+    sudo(['chown', 'root:root', d]);
+    sudo(['chmod', '0755', d]);
+    trustedNodeDir = d;
+  }
+  return join(trustedNodeDir, 'node');
+}
+test.after(() => {
+  if (trustedNodeDir !== null) spawnSync('sudo', ['-n', 'rm', '-rf', trustedNodeDir]);
+});
+
+/**
+ * شجرةٌ **ملكُ root** لا يكتبُها غيرُه (‏عقدُ الثقة)، يقرؤها root منقوصُ القدرات (‏لا DAC_OVERRIDE):
+ * `/tmp/…` ‏0755، ومفتاحٌ ملكُ root ‏0400، ومجلّدُ علاماتٍ 0777 خارجَ مساراتِ الشيفرة. الكتابةُ عبرَ sudo.
+ */
 function rootTree() {
   const dir = mkdtempSync(join(tmpdir(), 'xuux-iso-'));
-  chmodSync(dir, 0o755);
-  mkdirSync(join(dir, 'scripts'));
-  copyFileSync(WORKER_ENTRY, join(dir, 'scripts', 'worker.mjs'));
-  const marks = join(dir, 'marks');
-  mkdirSync(marks);
-  chmodSync(marks, 0o777);
-  const tmpKey = join(dir, 'k.tmp');
-  writeFileSync(tmpKey, ISO_PEM, { mode: 0o600 });
-  const keyFile = join(dir, 'k.root.pem');
-  const inst = spawnSync('sudo', [
-    '-n',
-    'install',
-    '-o',
-    'root',
-    '-g',
-    'root',
-    '-m',
-    '0400',
-    tmpKey,
-    keyFile,
-  ]);
-  rmSync(tmpKey);
-  assert.equal(inst.status, 0, String(inst.stderr));
-  spawnSync('chmod', ['-R', 'a+rX', dir]);
-  /** @param {string} rel @param {string} body */
-  const put = (rel, body) => {
-    mkdirSync(dirname(join(dir, rel)), { recursive: true, mode: 0o755 });
-    writeFileSync(join(dir, rel), body, { mode: 0o644 });
-    spawnSync('chmod', ['-R', 'a+rX', dir]);
+  const stage = mkdtempSync(join(tmpdir(), 'xuux-iso-stage-'));
+  sudo(['chown', 'root:root', dir]);
+  sudo(['chmod', '0755', dir]);
+  /** @param {string} rel @param {string} body @param {string} [mode] */
+  const put = (rel, body, mode = '0644') => {
+    const tmp = join(stage, 'f');
+    writeFileSync(tmp, body);
+    sudo(['install', '-D', '-o', 'root', '-g', 'root', '-m', mode, tmp, join(dir, rel)]);
+    rmSync(tmp);
     return join(dir, rel);
   };
+  put('scripts/worker.mjs', readFileSync(WORKER_ENTRY, 'utf8'));
+  const marks = join(dir, 'marks');
+  sudo(['install', '-d', '-o', 'root', '-g', 'root', '-m', '0777', marks]);
+  const keyFile = put('k.root.pem', ISO_PEM, '0400');
   /** @param {string} name */
   const mark = (name) => {
     const p = join(marks, name);
@@ -635,11 +685,17 @@ function rootTree() {
   };
   return {
     dir,
+    stage,
     keyFile,
     marks,
     put,
     mark,
-    clean: () => rmSync(dir, { recursive: true, force: true }),
+    /** @param {string} name */
+    unmark: (name) => spawnSync('sudo', ['-n', 'rm', '-f', join(marks, name)]),
+    clean: () => {
+      spawnSync('sudo', ['-n', 'rm', '-rf', dir]);
+      rmSync(stage, { recursive: true, force: true });
+    },
   };
 }
 
@@ -682,7 +738,7 @@ test('ISO-41: عدائيّ — أثرٌ جانبيٌّ في كلِّ وحدةٍ 
     const launch = (/** @type {string} */ entry) =>
       runLaunch(
         isolatedLaunchCommand({
-          node: process.execPath,
+          node: trustedNode(),
           entry,
           keyFile: tree.keyFile,
           uid,
@@ -698,7 +754,7 @@ test('ISO-41: عدائيّ — أثرٌ جانبيٌّ في كلِّ وحدةٍ 
     assert.equal(seen.length, APP_MODULES.length, String(seen));
     assert.deepEqual([...new Set(seen)], [String(uid)], 'وحدةٌ تطبيقيّةٌ قُيِّمت بـroot');
     // الضابط: نقطةُ دخولٍ تستوردُ وحدةً تطبيقيّةً ثابتاً (كما كان قبلَ المراجعة) ⇒ تُقيَّمُ بـroot.
-    rmSync(join(tree.marks, 'app'));
+    tree.unmark('app');
     const ctl = tree.put(
       'scripts/static-entry.mjs',
       `import '../src/execution/queue.mjs';\nimport { bootstrapIsolation } from './worker.mjs';\nbootstrapIsolation(process.env);\n`,
@@ -721,7 +777,7 @@ test('ISO-42: NODE_OPTIONS — إطلاقٌ مباشرٌ يُنفِّذُ الح
     );
     const parentEnv = { XUUX_DB_FENCE: 'required', NODE_OPTIONS: `--require ${pre}` };
     const l = isolatedLaunchCommand({
-      node: process.execPath,
+      node: trustedNode(),
       entry: join(tree.dir, 'scripts', 'worker.mjs'),
       keyFile: tree.keyFile,
       uid: idOf('-u'),
@@ -733,7 +789,7 @@ test('ISO-42: NODE_OPTIONS — إطلاقٌ مباشرٌ يُنفِّذُ الح
     runLaunch(l);
     assert.equal(tree.mark('pre'), null, 'NODE_OPTIONS عبرَ بيئةَ السماح');
     assert.ok(tree.mark('app') !== null, 'المُقلِعُ لم يُكمِل ⇒ (أ) لا يقيس');
-    rmSync(join(tree.marks, 'app'));
+    tree.unmark('app');
     // (ب) تجاوزُ المُطلِق (حقنٌ في env): الحِمْلُ يعملُ بـroot قبلَ المُقلِع — لا يمنعُه المُقلِع،
     //     بل يكشفُه ويرفضُ الإكمالَ فلا يُقرأُ المفتاحُ ولا تُحمَّلُ وحدةٌ تطبيقيّة.
     const i = l.args.indexOf('-i');
@@ -780,7 +836,7 @@ test('ISO-43: الواصفُ لا يتسرّبُ إلى الأبناء؛ وال�
     );
     const uid = idOf('-u');
     const l = isolatedLaunchCommand({
-      node: process.execPath,
+      node: trustedNode(),
       entry,
       keyFile: tree.keyFile,
       uid,
@@ -819,14 +875,16 @@ test('ISO-44: عقدُ الواصفِ على عمليةٍ حقيقيّة — م�
   try {
     hookApp(tree);
     const base = {
-      node: process.execPath,
+      node: trustedNode(),
       entry: join(tree.dir, 'scripts', 'worker.mjs'),
       uid: idOf('-u'),
       gid: idOf('-g'),
       env: { XUUX_DB_FENCE: 'required' },
       pass: ['XUUX_DB_FENCE'],
     };
-    const loose = join(tree.dir, 'loose.pem');
+    // مفتاحٌ ملكُ غيرِ root ‏0644 في مجلّدٍ يقرؤه root منقوصُ القدرات.
+    chmodSync(tree.stage, 0o755);
+    const loose = join(tree.stage, 'loose.pem');
     writeFileSync(loose, ISO_PEM, { mode: 0o644 });
     chmodSync(loose, 0o644);
     for (const keyFile of [loose]) {
@@ -851,7 +909,7 @@ test('ISO-45: root ⇒ nobody — الـUID نفسُه لا يقرأُ /proc/<pi
       `setInterval(() => {}, 1000);\n`,
   );
   const l = isolatedLaunchCommand({
-    node: process.execPath,
+    node: trustedNode(),
     entry,
     keyFile: tree.keyFile,
     uid: idOf('-u'),
@@ -902,6 +960,462 @@ test('ISO-45: root ⇒ nobody — الـUID نفسُه لا يقرأُ /proc/<pi
     }
     iso.kill();
     ctl.kill();
+    tree.clean();
+  }
+});
+
+// ── ثقةُ الشيفرةِ العاملةِ بـroot (‏الجولةُ الثالثة) ────────────────────────────────────────────────
+//  - ISO-18/19/22: نظامٌ مزيَّف؛ ISO-46/47: عملياتٌ حقيقيّة.
+
+test('ISO-18: المُقلِعُ يرفضُ شيفرةً غيرَ موثوقةٍ قبلَ أيِّ قراءةٍ للمفتاحِ أو إسقاط (UNTRUSTED_CODE)', () => {
+  const f = isoFakeOs();
+  /** @type {readonly string[]} */
+  let asked = [];
+  isoRejects(
+    () =>
+      bootstrapIsolation(ISO_ENV, {
+        os: f.os,
+        execArgv: [],
+        trustPaths: ['/usr/local/bin/node', '/app/scripts/worker.mjs'],
+        trust: (ps) => {
+          asked = ps;
+          return { violations: ['/usr/local/bin/node: ملفٌّ يكتبُه غيرُ root (777)'], checked: [] };
+        },
+      }),
+    ISOLATION_ERRORS.UNTRUSTED_CODE,
+  );
+  assert.deepEqual(asked, ['/usr/local/bin/node', '/app/scripts/worker.mjs']);
+  assert.deepEqual(f.calls, [], 'نداءٌ للنظامِ (fstat/readFd/set*id) قبلَ رفضِ الثقة');
+  // والمساراتُ الافتراضيّة: node ونقطةُ الدخولِ والمُقلِعُ ووحداتُ التطبيق.
+  const d = bootstrapTrustPaths(['/n', '/app/scripts/worker.mjs']);
+  assert.ok(d.includes(process.execPath) && d.includes('/app/scripts/worker.mjs'));
+  assert.ok(d.includes(WORKER_ENTRY));
+  assert.equal(d.filter((p) => p.includes('/src/')).length, BOOT_APP_MODULES.length);
+});
+
+test.describe('ISO-19: عقدُ الثقة — codeTrustViolations على نظامِ ملفّاتٍ مزيَّف', () => {
+  /** @param {Parameters<typeof trustFs>[0]} m @param {string[]} paths @param {object} [o] */
+  const v = (m, paths, o = {}) => codeTrustViolations(paths, { fs: trustFs(m), ...o });
+  test('مسارٌ كلُّه root ‏0755 ⇒ مقبول', () => {
+    const r = v({}, ['/usr/bin/node']);
+    assert.deepEqual(r.violations, []);
+    assert.deepEqual(r.checked, [{ path: '/usr/bin/node', real: '/usr/bin/node' }]);
+  });
+  test('ملفٌّ 0777 ملكُ 1001 (كما على مضيفِ المختبر) ⇒ مرفوض', () => {
+    const r = v({ '/usr/local/bin/node': { uid: 1001, mode: 0o777 } }, ['/usr/local/bin/node']);
+    assert.equal(r.violations.length, 2, String(r.violations));
+  });
+  test('ملفٌّ ملكُ root يكتبُه group ⇒ مرفوض', () => {
+    assert.equal(v({ '/a/node': { mode: 0o775 } }, ['/a/node']).violations.length, 1);
+  });
+  test('مجلّدٌ ملكُ مستخدم، أو يكتبُه group بلا sticky ⇒ مرفوض؛ و/tmp ‏1777 ملكُ root ⇒ مقبول', () => {
+    assert.match(
+      v({ '/home/u': { uid: 1000 } }, ['/home/u/node']).violations[0] ?? '',
+      /ملكُ 1000/,
+    );
+    assert.match(v({ '/opt': { mode: 0o775 } }, ['/opt/node']).violations[0] ?? '', /775/);
+    assert.deepEqual(v({ '/tmp': { mode: 0o1777 } }, ['/tmp/x/node']).violations, []);
+    assert.equal(v({ '/tmp': { mode: 0o777 } }, ['/tmp/x/node']).violations.length, 1);
+  });
+  test('رابطٌ رمزيٌّ: كلُّ قفزةٍ تُفحَص — رابطٌ ملكُ مستخدم، أو هدفٌ في مجلّدٍ يكتبُه غيرُ root ⇒ مرفوض', () => {
+    // /bin -> usr/bin (‏ملكُ root) ⇒ مقبولٌ ويُفحَصُ /usr/bin.
+    const ok = v({ '/bin': { link: 'usr/bin' } }, ['/bin/sh']);
+    assert.deepEqual(ok.violations, []);
+    assert.equal(ok.checked[0]?.real, '/usr/bin/sh');
+    assert.equal(
+      v({ '/usr/bin/x': { link: '/opt/node', uid: 1000 } }, ['/usr/bin/x']).violations.length,
+      1,
+    );
+    // قفزةٌ وسيطةٌ إلى مجلّدٍ يكتبُه مستخدم (‏لا يكشفُها realpath واحد ثمّ فحصُ الهدفِ وحدَه إن عادَ الرابط).
+    const hop = v(
+      {
+        '/usr/bin/n': { link: '/home/u/n' },
+        '/home/u': { uid: 1000 },
+        '/home/u/n': { link: '/usr/lib/node' },
+      },
+      ['/usr/bin/n'],
+    );
+    assert.deepEqual(hop.violations, ['/home/u: مجلّدٌ ملكُ 1000'], String(hop.violations));
+    const loop = v({ '/a/x': { link: '/a/y' }, '/a/y': { link: '/a/x' } }, ['/a/x']);
+    assert.match(loop.violations[0] ?? '', /40/);
+  });
+  test('ليس ملفّاً عاديّاً، ومسارٌ نسبيّ، وغائبٌ إلزاميّ ⇒ مرفوض؛ وغائبٌ اختياريّ في مجلّدٍ سليم ⇒ مقبول', () => {
+    assert.equal(v({ '/a/node': { type: 'fifo' } }, ['/a/node']).violations.length, 1);
+    assert.equal(v({}, ['node']).violations.length, 1);
+    const fsMissing = {
+      ...trustFs({ '/app/src': { uid: 1000 } }),
+      lstat: (/** @type {string} */ p) => {
+        if (p.startsWith('/app/src/')) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return trustFs({ '/app/src': { uid: 1000 } }).lstat(p);
+      },
+    };
+    const req = codeTrustViolations(['/app/src/m.mjs'], { fs: fsMissing });
+    assert.ok(req.violations.some((x) => /ENOENT/.test(x)));
+    const opt = codeTrustViolations(['/app/src/m.mjs'], {
+      fs: fsMissing,
+      optional: ['/app/src/m.mjs'],
+    });
+    assert.deepEqual(opt.absent, ['/app/src/m.mjs']);
+    assert.ok(
+      opt.violations.some((x) => x.startsWith('/app/src:')),
+      'مجلّدٌ يكتبُه مستخدمٌ مقبولٌ لغيابِ الملفّ',
+    );
+  });
+  test('بصمةٌ مثبَّتة: تطابقٌ ⇒ مقبولٌ ومسجَّل؛ اختلافٌ ⇒ مرفوض', () => {
+    const good = v({ '/a/node': { sha: 'a'.repeat(64) } }, ['/a/node'], {
+      pins: { '/a/node': 'a'.repeat(64) },
+    });
+    assert.deepEqual(good.violations, []);
+    assert.equal(good.checked[0]?.sha256, 'a'.repeat(64));
+    const bad = v({ '/a/node': { sha: 'b'.repeat(64) } }, ['/a/node'], {
+      pins: { '/a/node': 'a'.repeat(64) },
+    });
+    assert.match(bad.violations[0] ?? '', /بصمة/);
+  });
+  test('المُطلِقُ يفحصُ sudo وenv وsetpriv وsh وnode ونقطةَ الدخول — ويرفضُ قبلَ بناءِ الأمر', () => {
+    const l = isolatedLaunchCommand(BASE_LAUNCH);
+    assert.deepEqual(
+      l.trust.map((x) => x.path),
+      [
+        '/usr/bin/sudo',
+        '/usr/bin/env',
+        '/usr/bin/setpriv',
+        '/bin/sh',
+        '/usr/local/bin/node',
+        '/app/scripts/worker.mjs',
+      ],
+    );
+    for (const p of ['/usr/bin/setpriv', '/bin/sh', '/usr/bin/sudo', '/app/scripts/worker.mjs']) {
+      isoRejects(
+        () =>
+          isolatedLaunchCommand({ ...BASE_LAUNCH, trust: { fs: trustFs({ [p]: { uid: 1000 } }) } }),
+        ISOLATION_ERRORS.UNTRUSTED_CODE,
+      );
+    }
+    // sudo:false لا يفحصُ sudo لأنّه لا يُشغِّلُه.
+    const ns = isolatedLaunchCommand({
+      ...BASE_LAUNCH,
+      sudo: false,
+      trust: { fs: trustFs({ '/usr/bin/sudo': { uid: 1000 } }) },
+    });
+    assert.equal(ns.command, '/usr/bin/env');
+  });
+});
+
+test('ISO-22: قائمةُ وحداتِ التطبيقِ في فحصِ الثقةِ هي ما يستوردُه loadApp() بعينه', () => {
+  const src = readFileSync(WORKER_ENTRY, 'utf8');
+  const body = src.slice(
+    src.indexOf('export async function loadApp()'),
+    src.indexOf('return {', src.indexOf('export async function loadApp()')),
+  );
+  const imported = [...body.matchAll(/import\('([^']+)'\)/g)].map((m) => String(m[1]));
+  assert.deepEqual(imported, [...BOOT_APP_MODULES]);
+});
+
+test('ISO-46: عمليّةٌ حقيقيّة — المُطلِقُ يرفضُ node يكتبُه غيرُ root ونقطةَ دخولٍ ملكَ مستخدم؛ وتجاوزُه يكشفُه المُقلِعُ قبلَ قراءةِ المفتاح', (t) => {
+  if (!canRoot()) return t.skip(ROOT_SKIP);
+  const tree = rootTree();
+  try {
+    hookApp(tree);
+    // node المضيف (‏إن كان يكتبُه غيرُ root) — حقيقةٌ تُسجَّلُ ولا تُفترض.
+    const host = codeTrustViolations([process.execPath]);
+    t.diagnostic(
+      `node المضيف ${process.execPath}: ${host.violations.length === 0 ? 'موثوق' : host.violations.join('؛ ')}`,
+    );
+    // (أ) نسخةُ node ملكُ المستخدم 0777 — كحالِ مضيفِ المختبر — في مجلّدٍ يقرؤه root منقوصُ القدرات.
+    chmodSync(tree.stage, 0o755);
+    const loose = join(tree.stage, 'node');
+    copyFileSync(process.execPath, loose);
+    chmodSync(loose, 0o777);
+    const base = {
+      entry: join(tree.dir, 'scripts', 'worker.mjs'),
+      keyFile: tree.keyFile,
+      uid: idOf('-u'),
+      gid: idOf('-g'),
+      env: { XUUX_DB_FENCE: 'required' },
+      pass: ['XUUX_DB_FENCE'],
+    };
+    isoRejects(
+      () => isolatedLaunchCommand({ ...base, node: loose }),
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+    );
+    // (ب) نقطةُ دخولٍ ملكُ المستخدم.
+    const userEntry = join(tree.stage, 'worker.mjs');
+    copyFileSync(WORKER_ENTRY, userEntry);
+    isoRejects(
+      () => isolatedLaunchCommand({ ...base, node: trustedNode(), entry: userEntry }),
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+    );
+    // (ج) تجاوزُ فحصِ المُطلِق: الأمرُ نفسُه بـnode غيرِ موثوق ⇒ المُقلِعُ (بـroot) يرفضُ بـUNTRUSTED_CODE
+    //     قبلَ قراءةِ الواصف، ولا تُحمَّلُ وحدةٌ تطبيقيّة. كاشفٌ لا حاجز: node مستبدَلٌ لا يفحصُ نفسَه.
+    const l = isolatedLaunchCommand({ ...base, node: trustedNode() });
+    const bypass = l.args.map((a) => (a === trustedNode() ? loose : a));
+    assert.notDeepEqual(bypass, l.args);
+    const r = spawnSync(l.command, bypass, { encoding: 'utf8', timeout: 30_000 });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, new RegExp(ISOLATION_ERRORS.UNTRUSTED_CODE));
+    assert.match(r.stderr, /يكتبُه غيرُ root \(777\)/);
+    assert.equal(tree.mark('app'), null, 'وحداتٌ تطبيقيّةٌ حُمِّلت رغمَ رفضِ الثقة');
+    // والضابط: الأمرُ نفسُه بـnode الموثوق يُكمِلُ ويُحمِّلُ التطبيقَ بالهويّةِ المُسقَطة.
+    runLaunch(l);
+    assert.deepEqual([...new Set(tree.mark('app') ?? [])], [String(idOf('-u'))]);
+  } finally {
+    tree.clean();
+  }
+});
+
+test('ISO-47: عمليّةٌ حقيقيّة — بصمةُ node المثبَّتة: تطابقٌ يُطلِق، واختلافٌ يُرفَضُ قبلَ الإطلاق', (t) => {
+  if (!canRoot()) return t.skip(ROOT_SKIP);
+  const tree = rootTree();
+  try {
+    const node = trustedNode();
+    const h = String(spawnSync('sha256sum', [node], { encoding: 'utf8' }).stdout.split(' ')[0]);
+    assert.match(h, /^[0-9a-f]{64}$/);
+    const base = {
+      node,
+      entry: join(tree.dir, 'scripts', 'worker.mjs'),
+      keyFile: tree.keyFile,
+      uid: idOf('-u'),
+      gid: idOf('-g'),
+      env: { XUUX_DB_FENCE: 'required' },
+      pass: ['XUUX_DB_FENCE'],
+    };
+    const l = isolatedLaunchCommand({ ...base, trust: { pins: { [node]: h } } });
+    assert.equal(l.trust.find((x) => x.path === node)?.sha256, h);
+    isoRejects(
+      () => isolatedLaunchCommand({ ...base, trust: { pins: { [node]: '0'.repeat(64) } } }),
+      ISOLATION_ERRORS.UNTRUSTED_CODE,
+    );
+  } finally {
+    tree.clean();
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// `WL-533` (‏جولةٌ لاحقة، البند ٣) — عقدُ وحدةِ systemd المكافئةِ للمُطلِق (`scripts/fence-worker-unit.mjs`).
+//  - ISO-48..51: نصٌّ مولَّد — مطابقةُ المُطلِق (‏البيئة والحدّ)، ورفضُ الحقن، وفحصُ الثقة، ولا تثبيت.
+//  - ISO-52: محاكاةٌ حقيقيّةٌ **من نصِّ الوحدةِ المحلَّل** (‏sudo + env + setpriv + sh)، مع ضوابطَ سلبيّة.
+// لم يُشغَّل systemd: هذا عقدٌ نصّيٌّ ومحاكاتُه، لا دليلٌ على سلوكِ مديرِ systemd على مضيفٍ ما.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+const UNIT_BASE = Object.freeze({
+  ...BASE_LAUNCH,
+  keyFile: '/etc/xuux/worker.key',
+  env: { XUUX_DB_FENCE: 'required', PGHOST: '127.0.0.1' },
+  pass: ['XUUX_DB_FENCE', 'PGHOST'],
+});
+
+test('ISO-48: الوحدةُ تطابقُ المُطلِق — البيئةُ نفسُها، والحدُّ CAP_SETUID CAP_SETGID من ALLOWED_CAP_BND', () => {
+  const { unit, env } = systemdUnit(UNIT_BASE);
+  const d = parseUnit(unit);
+  const launch = isolatedLaunchCommand(UNIT_BASE);
+  assert.deepEqual(env, launch.env);
+  assert.deepEqual(env, isolatedLaunchEnv(UNIT_BASE));
+  assert.deepEqual(
+    Object.fromEntries(
+      (d.Environment ?? []).map((e) => [e.slice(0, e.indexOf('=')), e.slice(e.indexOf('=') + 1)]),
+    ),
+    launch.env,
+  );
+  assert.deepEqual(d.User, ['root']);
+  assert.deepEqual(d.NoNewPrivileges, ['yes']);
+  assert.deepEqual(d.AmbientCapabilities, ['']);
+  assert.deepEqual(d.CapabilityBoundingSet, ['CAP_SETUID CAP_SETGID']);
+  assert.equal(ALLOWED_CAP_BND, (1n << 6n) | (1n << 7n));
+  assert.deepEqual(boundingCapabilities(), ['CAP_SETUID', 'CAP_SETGID']);
+  assert.deepEqual(d.OpenFile, ['/etc/xuux/worker.key:xuux-key:read-only']);
+  assert.deepEqual(d.ExecStart, [`${UNIT_BASE.node} ${UNIT_BASE.entry}`]);
+  assert.equal(d.EnvironmentFile, undefined, 'EnvironmentFile يُدخِلُ بيئةً غيرَ مسمّاة');
+  assert.equal(env.XUUX_FENCE_KEY_FD, '3');
+  // UnsetEnvironment يُزيلُ ما يورّثُه المدير؛ وكلُّ اسمٍ فيه يرفضُه المُقلِعُ أصلاً (‏مصدرٌ واحد).
+  const unset = String(d.UnsetEnvironment?.[0]).split(' ');
+  assert.deepEqual(unset, [...UNSET_ENV]);
+  for (const n of unset) {
+    if (n === 'XUUX_FENCE_WORKER_KEY') continue;
+    assert.deepEqual(hostileLaunchInputs({ [n]: 'x' }, []), [n]);
+  }
+});
+
+test('ISO-49: الوحدةُ ترفضُ الحقنَ والمُدخلاتِ الممنوعةَ بدلَ أن تهرّبَها', () => {
+  for (const bad of [
+    { node: 'node' },
+    { node: '/usr/bin/no de' },
+    { entry: '/app/x.mjs\nExecStartPre=/bin/sh' },
+    { keyFile: '/etc/%h/k' },
+    { keyFile: '/etc/k";x' },
+    { args: ['--x;y'] },
+    { uid: 0 },
+    { env: { XUUX_DB_FENCE: 'a b' } },
+  ]) {
+    isoRejects(() => systemdUnit({ ...UNIT_BASE, ...bad }), ISOLATION_ERRORS.CONFIG);
+  }
+  for (const name of ['NODE_OPTIONS', 'LD_PRELOAD', 'XUUX_FENCE_WORKER_KEY', 'XUUX_FENCE_KEY_FD']) {
+    isoRejects(
+      () => systemdUnit({ ...UNIT_BASE, pass: [name], env: { [name]: 'x' } }),
+      ISOLATION_ERRORS.HOSTILE_ENV,
+    );
+  }
+});
+
+test('ISO-50: الوحدةُ لا تُولَّدُ لشيفرةٍ غيرِ موثوقة (‏العقدُ نفسُه للمُطلِق)', () => {
+  isoRejects(
+    () =>
+      systemdUnit({
+        ...UNIT_BASE,
+        trust: { fs: trustFs({ '/usr/local/bin/node': { uid: 1001, mode: 0o777 } }) },
+      }),
+    ISOLATION_ERRORS.UNTRUSTED_CODE,
+  );
+  isoRejects(
+    () => systemdUnit({ ...UNIT_BASE, trust: { fs: trustFs({ '/app': { uid: 1001 } }) } }),
+    ISOLATION_ERRORS.UNTRUSTED_CODE,
+  );
+  assert.equal(systemdUnit(UNIT_BASE).trust, 2);
+  // التعطيلُ صريحٌ ومرئيٌّ في الوسائط، لا افتراضيّ.
+  assert.equal(systemdUnit({ ...UNIT_BASE, trust: false }).trust, 0);
+});
+
+test('ISO-51: المولّدُ لا يُثبِّتُ ولا يستدعي systemctl ولا يكتبُ ملفّاً', () => {
+  const src = readFileSync(
+    fileURLToPath(new URL('../../scripts/fence-worker-unit.mjs', import.meta.url)),
+    'utf8',
+  );
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(
+    code,
+    /systemctl|daemon-reload|writeFile|appendFile|mkdir|child_process|spawn|exec\(/,
+  );
+  const r = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('../../scripts/fence-worker-unit.mjs', import.meta.url)),
+      '--node',
+      '/usr/bin/node',
+      '--entry',
+      '/opt/x/w.mjs',
+      '--key-file',
+      '/etc/k',
+      '--uid',
+      '990',
+      '--gid',
+      '990',
+      '--no-trust-check',
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^CapabilityBoundingSet=CAP_SETUID CAP_SETGID$/m);
+  const bad = spawnSync(
+    process.execPath,
+    [
+      fileURLToPath(new URL('../../scripts/fence-worker-unit.mjs', import.meta.url)),
+      '--node',
+      '/usr/bin/node',
+      '--entry',
+      '/opt/x/w.mjs',
+      '--key-file',
+      '/etc/k',
+      '--uid',
+      '0',
+      '--gid',
+      '990',
+      '--no-trust-check',
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /FENCE_ISOLATION_CONFIG/);
+});
+
+/**
+ * محاكاةُ الوحدة: يُبنى الأمرُ من **النصِّ المحلَّل** وحدَه — بيئةُ المديرِ ناقصاً UnsetEnvironment زائداً
+ * Environment، وno_new_privs إن NoNewPrivileges=yes، والحدُّ من CapabilityBoundingSet، وOpenFile على 3.
+ * @param {Record<string, string[]>} d @param {Record<string, string>} [manager]
+ */
+function emulateUnit(d, manager = {}) {
+  const unset = new Set(String(d.UnsetEnvironment?.[0] ?? '').split(' '));
+  const env = Object.entries(manager)
+    .filter(([k]) => !unset.has(k))
+    .map(([k, v]) => `${k}=${v}`);
+  env.push(...(d.Environment ?? []));
+  const caps = String(d.CapabilityBoundingSet?.[0] ?? '')
+    .split(' ')
+    .filter((c) => c !== '')
+    .map((c) => `+${c.replace(/^CAP_/, '').toLowerCase()}`);
+  const priv = [
+    ...(d.NoNewPrivileges?.[0] === 'yes' ? ['--no-new-privs'] : []),
+    ...(caps.length > 0 ? ['--bounding-set', `-all,${caps.join(',')}`] : []),
+    '--inh-caps',
+    '-all',
+  ];
+  const key = String(d.OpenFile?.[0]).split(':')[0];
+  const exec = String(d.ExecStart?.[0]).split(' ');
+  return spawnSync(
+    'sudo',
+    [
+      '-n',
+      '/usr/bin/env',
+      '-i',
+      ...env,
+      '/usr/bin/setpriv',
+      ...priv,
+      '/bin/sh',
+      '-c',
+      'k=$1; shift; exec "$@" 3<"$k"',
+      'sh',
+      String(key),
+      ...exec,
+    ],
+    { encoding: 'utf8', timeout: 30_000 },
+  );
+}
+
+test('ISO-52: محاكاةٌ حقيقيّةٌ من نصِّ الوحدة — يُقلِعُ ويُحمِّلُ التطبيقَ بالهويّةِ المُسقَطة؛ وحذفُ NoNewPrivileges أو الحدِّ يُرفَض، وNODE_* من المدير يُزالُ أو يُكشَف', (t) => {
+  if (!canRoot()) return t.skip(ROOT_SKIP);
+  const tree = rootTree();
+  try {
+    hookApp(tree);
+    const uid = idOf('-u');
+    const { unit } = systemdUnit({
+      node: trustedNode(),
+      entry: join(tree.dir, 'scripts', 'worker.mjs'),
+      keyFile: tree.keyFile,
+      uid,
+      gid: idOf('-g'),
+      env: { XUUX_DB_FENCE: 'required' },
+      pass: ['XUUX_DB_FENCE'],
+    });
+    const d = parseUnit(unit);
+    // (أ) الوحدةُ كما هي، وبيئةُ مديرٍ ملوّثةٌ بما في UnsetEnvironment ⇒ يُزالُ ويُقلِع.
+    const r = emulateUnit(d, {
+      NODE_OPTIONS: `--require ${join(tree.marks, 'nope.cjs')}`,
+      LD_PRELOAD: '/nope.so',
+    });
+    assert.doesNotMatch(r.stderr, /FENCE_ISOLATION_/, `المُقلِعُ رفض: ${r.stderr}`);
+    assert.deepEqual(
+      [...new Set(tree.mark('app') ?? [])],
+      [String(uid)],
+      `لم يُحمَّلْ بالهويّةِ المُسقَطة: ${r.stderr}`,
+    );
+    // (ب) بلا NoNewPrivileges ⇒ LAUNCH_POLICY ولا تحميل.
+    for (const [
+      what,
+      mut,
+    ] of /** @type {Array<[string, Record<string, string[] | undefined>]>} */ ([
+      ['NoNewPrivileges', { NoNewPrivileges: undefined }],
+      ['CapabilityBoundingSet', { CapabilityBoundingSet: undefined }],
+    ])) {
+      tree.unmark('app');
+      const x = emulateUnit(/** @type {Record<string, string[]>} */ ({ ...d, ...mut }));
+      assert.match(x.stderr, new RegExp(ISOLATION_ERRORS.LAUNCH_POLICY), `${what}: ${x.stderr}`);
+      assert.equal(tree.mark('app'), null, `${what}: حُمِّل التطبيقُ رغمَ الرفض`);
+    }
+    // (ج) اسمٌ عدائيٌّ ليس في UnsetEnvironment (لا أنماطَ فيها) ⇒ يصلُ، والمُقلِعُ يكشفُه — كشفٌ لا منع.
+    tree.unmark('app');
+    const y = emulateUnit(d, { NODE_ICU_DATA: '/nope' });
+    assert.match(y.stderr, new RegExp(ISOLATION_ERRORS.HOSTILE_ENV), y.stderr);
+    assert.equal(tree.mark('app'), null);
+  } finally {
     tree.clean();
   }
 });
