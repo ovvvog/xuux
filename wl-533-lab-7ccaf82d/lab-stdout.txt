@@ -1,0 +1,30 @@
+PASS     LAB-ENV-01 — عنقودٌ مؤقّتٌ جديدٌ من initdb (لا ملفّاتٍ قديمة)
+PASS     LAB-ENV-02 — الشجرةُ نظيفةٌ: الرأسُ المختبَرُ هو الملتزَم (git_head + tree_sha256)
+PASS     LAB-SUITE-db-fence — تشغيلُ tests/fence/db-fence.test.mjs
+PASS     LAB-SUITE-fence-lifecycle — تشغيلُ tests/fence/fence-lifecycle.test.mjs
+PASS     LAB-SUITE-halt-integrity — تشغيلُ tests/fence/halt-integrity.test.mjs
+PASS     LAB-SUITE-effects — تشغيلُ tests/fence/effects.test.mjs
+PASS     LAB-SUITE-connection-map — تشغيلُ tests/fence/connection-map.test.mjs
+PASS     LAB-SUITE-worker-isolation — تشغيلُ tests/execution/worker-isolation.test.mjs
+PASS     LAB-SUITE-ed25519 — تشغيلُ tests/fence/ed25519.test.mjs
+PASS     LAB-AUTH-01 — بعدَ التشديد: TCP مرفوضٌ حتى لـpostgres؛ الدخولُ بالمقبسِ وpeer فقط
+PASS     LAB-APP — نسخةُ تطبيقِ العاملِ ومفاتيحُه (0400 لمستخدمِ كلِّ عامل)
+PASS     LAB-CRED-05a — T-CRED-05: مستخدمُ نظامِ alpha يدخلُ بدورِ إقلاعِه بلا سرّ (peer) ويعرفُ نفسَه — لكنّ جلسةً غيرَ مختومةٍ لا تكتب (XF011)
+PASS     LAB-CRED-05b — T-CRED-05: مستخدمُ نظامِ beta لا يستعملُ اعتمادَ alpha (الهجوم 2)
+PASS     LAB-CRED-05c — T-CRED-05: مستخدمُ المختبرِ نفسُه (مالكُ العنقود) لا يدخلُ بدورِ alpha
+PASS     LAB-CRED-05d — T-CRED-05: دورُ الإقلاعِ عبرَ TCP مرفوضٌ (لا سرَّ قابلاً للنقل)
+PASS     LAB-CRED-05e — مستخدمُ نظامِ العاملِ لا يدخلُ بدورِ xf_root ولا xf_sovereign ولا postgres
+PASS     LAB-UID-01 — عمليةٌ ثانيةٌ بالـUID نفسِه بعدَ الختم: الدخولُ مرفوض (الدورُ NOLOGIN) والعاملُ يواصل
+PASS     LAB-SEAL-01 — عملية Node بمستخدمِ alpha تختمُ مجمّعَها (4 وصلات) وتكتب؛ المُشرِفُ يطابقُ الختم
+PASS     LAB-UID-02 — دخيلٌ بالـUID نفسِه حاضرٌ لحظةَ الختم ⇒ الختمُ مرفوض (session_set_mismatch)، الاعتمادُ يُلغى، الدخيلُ يُنهى
+PASS     LAB-UID-03 — دخيلٌ بالـUID نفسِه بلا المفتاح يختمُ بتوقيعٍ مزوَّر ⇒ bad_signature، الاعتمادُ يُلغى
+PASS     LAB-UID-04 — حدُّ نظامِ التشغيل: مفتاحُ alpha (0400) لا يقرؤه مستخدمُ beta — ويقرؤه أيُّ عمليةٍ بـUID alpha (حدٌّ معلن)
+PASS     LAB-UID-05 — خطرٌ متبقٍّ: عمليةٌ بالـUID نفسِه تقرأُ المفتاحَ وتسبقُ العاملَ إلى الختم ⇒ تختمُ وتكتب؛ العاملُ الحقيقيُّ يفشلُ فيُلغي المُشرِفُ الاعتمادَ ويُنهي المهاجم
+PASS     LAB-UID-06 — WL-533 علاجُ UID-05: عاملٌ معزول (يبدأُ بـroot، المفتاحُ واصفٌ موروثٌ من ملفٍّ ملكِ root، ثمّ إسقاطُ الهويّةِ داخلَ العملية) — عمليةٌ بالـUID نفسِه لا تقرأُ المفتاحَ ولا /proc ولا ptrace ولا pidfd_getfd، والضابطُ (عمليةٌ بُدئت بالـUID مباشرةً) مكشوف
+PASS     LAB-HALT-LIVE — إيقافٌ حقيقيٌّ تحتَ كاتبٍ Node مختومٍ (4 وصلات) بمستخدمِ نظامِ العامل × 10: لا كتابةَ بعدَ DB_FENCED، الكاتبُ يُنهى، وإعادةُ الدخولِ مرفوضة
+PASS     LAB-RESTART — انهيارُ العنقود (immediate) ⇒ RECOVERY_REQUIRED؛ RECOVER موقَّعٌ ⇒ HALTED لا RUNNING؛ ثمّ RESUME
+PASS     LAB-PHYS-RESTORE — استعادةُ نسخةٍ فيزيائيةٍ قديمة (pg_basebackup) ⇒ RECOVERY_REQUIRED؛ الكتابةُ والأمرُ المُعادُ مرفوضان (الهجومان 21 و23)
+
+التقرير: ../../../../tmp/wl533-out/WL-533-fence-lab-report.json
+الفحوص {"PASS":26,"FAIL":0,"PARTIAL":0,"NOT RUN":0} · الهجمات {"PASS":21,"FAIL":0,"PARTIAL":3,"NOT RUN":1}
+أُبقيَ مجلّدُ العمل: /tmp/xuux-fence-lab-poLo1c
