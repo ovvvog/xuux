@@ -1711,7 +1711,12 @@ const ATTACKS = [
   { n: 12, title: 'التلاعبُ بـsearch_path', refs: [T('هويّةٌ مزوَّرة')] },
   { n: 13, title: 'استخدامُ SET ROLE', refs: [T('T-OWN-04'), T('T-CRED-05')] },
   { n: 14, title: 'COPY وMERGE وTRUNCATE', refs: [T('الكتابةُ المشروعة'), T('T-OWN-04')] },
-  { n: 15, title: 'large objects', refs: [T('T-OWN-04')] },
+  {
+    n: 15,
+    title: 'large objects',
+    // WL-536/WL-537: كتاباتُ خارجَ الجداولِ من العائلةِ نفسِها — التسلسلاتُ ورسائلُ WAL المنطقيّة.
+    refs: [T('T-OWN-04'), T('WL-536: لا nextval'), T('WL-537: لا pg_logical_emit_message')],
+  },
   {
     n: 16,
     title: 'NOTIFY',

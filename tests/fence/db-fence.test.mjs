@@ -604,6 +604,44 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     await h.root.revokeCredential(w.credential.role_name, 'test');
   });
 
+  test('WL-537: لا pg_logical_emit_message للعامل — رسالةُ WAL لا معامليّةٌ تتجاوزُ الزنادَ وتصلُ مستهلكي الفكِّ المنطقيّ', async () => {
+    // سلبيّ (يفشلُ قبلَ الإصلاح): الدالّةُ مُنفَّذةٌ لـPUBLIC، فعاملٌ بإيجارٍ منقضٍ يكتبُ في WAL رسالةً
+    // (transactional=false) تبقى بعدَ ROLLBACK، ويراها كلُّ مستهلكٍ منطقيٍّ (CDC) — أثرٌ خارجيٌّ بلا xf_guard.
+    const fns = await h.db.pool.query(
+      `SELECT p.oid::regprocedure::text AS f, has_function_privilege('xuux_worker', p.oid, 'EXECUTE') AS x
+         FROM pg_proc p WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_logical_emit_message'
+        ORDER BY 1`,
+    );
+    assert.ok(fns.rows.length >= 2, 'نسختا الدالّة (text وbytea)');
+    for (const { f, x } of fns.rows) assert.equal(x, false, `${f}: لا EXECUTE للعامل`);
+    const w = await h.boot('beta');
+    const c = /** @type {pg.Client} */ (w.client);
+    await h.db.pool.query(
+      `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+      [w.credential.role_name],
+    );
+    const lsn0 = (await h.db.pool.query('SELECT pg_current_wal_insert_lsn()::text AS l')).rows[0].l;
+    await rejectsWith(
+      () => c.query(`SELECT pg_logical_emit_message(false, 'xuux', 'after-expiry')`),
+      ['42501'],
+      'رسالةٌ لا معامليّةٌ بإيجارٍ منقضٍ',
+    );
+    await rejectsWith(
+      () => c.query(`SELECT pg_logical_emit_message(true, 'xuux', '\\x00'::bytea)`),
+      ['42501'],
+      'رسالةٌ معامليّةٌ (bytea) بلا كتابةٍ في جدول',
+    );
+    // إيجابيّ: الكتابةُ المشروعةُ بإيجارٍ صالحٍ تبقى تعمل، وسجلُّ WAL يتقدّمُ بها لا بالرسالة.
+    await h.root.renewLease(w.credential.role_name);
+    await c.query(
+      `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
+       VALUES ('evt-wl537', 'fence.probe', 'actor-wl537', '{}'::jsonb, repeat('a', 64), now())`,
+    );
+    await c.query(`DELETE FROM state.events WHERE event_id = 'evt-wl537'`);
+    assert.ok(typeof lsn0 === 'string' && lsn0.includes('/'), lsn0);
+    await h.root.revokeCredential(w.credential.role_name, 'test');
+  });
+
   const clockFile = process.env['XUUX_FENCE_FAKETIME_FILE'] ?? '';
   test(
     'الهجوم 24 (WL-536): ساعةُ القاعدةِ تتقدّمُ فيُغلَق، وتتراجعُ قبلَ آخرِ تجديدٍ فيُرفَضُ (XF012) — والتراجعُ دونَه حدٌّ معلن',
@@ -929,6 +967,19 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     );
     await rejectsWith(() => h.resume(), ['XF415'], 'تسلسلٌ قابلٌ للكتابةِ للعامل');
     await h.db.pool.query('REVOKE USAGE ON ALL SEQUENCES IN SCHEMA state FROM xuux_worker');
+    // WL-537: إعادةُ EXECUTE على pg_logical_emit_message لـPUBLIC تُكشَفُ وتمنعُ الاستئناف.
+    await h.db.pool.query(
+      'GRANT EXECUTE ON FUNCTION pg_catalog.pg_logical_emit_message(boolean, text, text, boolean) TO PUBLIC',
+    );
+    chk = await h.root.checkFenced();
+    assert.ok(
+      chk.problems.some((/** @type {any} */ p) => p.kind === 'worker_wal_message_write'),
+      JSON.stringify(chk.problems),
+    );
+    await rejectsWith(() => h.resume(), ['XF415'], 'رسالةُ WAL مُتاحةٌ للعامل');
+    await h.db.pool.query(
+      'REVOKE EXECUTE ON FUNCTION pg_catalog.pg_logical_emit_message(boolean, text, text, boolean) FROM PUBLIC',
+    );
     // زنادٌ معطَّل: والمُطلِقُ مفعَّلٌ، يرفضُ فحصُ الالتزامِ المؤجَّلِ المعاملةَ نفسَها (XF203)…
     await h.db.pool.query('ALTER EVENT TRIGGER xf_ddl_end ENABLE ALWAYS');
     await rejectsWith(

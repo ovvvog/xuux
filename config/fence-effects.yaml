@@ -12,10 +12,10 @@ effects:
     status: ENFORCED
     evidence: tests/fence/db-fence.test.mjs (T-EFF-01، الهجمات 1..14)
   - id: E2
-    name: الكائناتُ الكبيرة (lo_*)
-    control: سحبُ EXECUTE على lo_* الكاتبة من PUBLIC + check_fenced يفحصُ امتيازَ العامل
+    name: الكائناتُ الكبيرة (lo_*) ورسائلُ WAL المنطقيّة (pg_logical_emit_message، WL-537)
+    control: سحبُ EXECUTE على lo_* الكاتبة وعلى pg_logical_emit_message من PUBLIC + check_fenced يفحصُ امتيازَ العامل
     status: ENFORCED
-    evidence: tests/fence/db-fence.test.mjs (هجوم LO)
+    evidence: tests/fence/db-fence.test.mjs (هجوم LO؛ WL-537 رسالةُ WAL بإيجارٍ منقضٍ مرفوضة)
   - id: E3
     name: NOTIFY
     control: لا يمكنُ سحبُه بامتياز؛ ينقطعُ بإنهاءِ الجلسةِ في الخطوة 7، ويبقى ممكناً لجلسةٍ حيّةٍ حتى إنهائها

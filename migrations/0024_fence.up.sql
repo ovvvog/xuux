@@ -894,6 +894,11 @@ BEGIN
     AND p.proname IN ('lo_creat', 'lo_create', 'lo_from_bytea', 'lo_put', 'lowrite', 'lo_unlink', 'lo_truncate', 'lo_truncate64', 'lo_open', 'lo_import')
     AND has_function_privilege('xuux_worker', p.oid, 'EXECUTE');
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_large_object_write', 'functions', x)); END IF;
+  -- WL-537: رسالةُ WAL المنطقيّةُ أثرٌ خارجَ الزنادِ يصلُ المستهلكين — لا EXECUTE للعامل.
+  SELECT coalesce(jsonb_agg(p.oid::regprocedure::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_proc p
+  WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_logical_emit_message'
+    AND has_function_privilege('xuux_worker', p.oid, 'EXECUTE');
+  IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_wal_message_write', 'functions', x)); END IF;
   -- WL-536: nextval/setval كتابةٌ لا معامليّةٌ خارجَ الزناد — لا USAGE ولا UPDATE للعاملِ على أيِّ تسلسل.
   SELECT coalesce(jsonb_agg(c2.oid::regclass::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_class c2
   WHERE c2.relkind = 'S' AND (has_sequence_privilege('xuux_worker', c2.oid, 'USAGE') OR has_sequence_privilege('xuux_worker', c2.oid, 'UPDATE'));
@@ -1626,6 +1631,18 @@ GRANT SELECT, INSERT, DELETE ON public.schema_migrations TO xuux_migrator;
 REVOKE EXECUTE ON FUNCTION pg_catalog.lo_creat(integer), pg_catalog.lo_create(oid), pg_catalog.lo_from_bytea(oid, bytea),
   pg_catalog.lo_put(oid, bigint, bytea), pg_catalog.lowrite(integer, bytea), pg_catalog.lo_unlink(oid),
   pg_catalog.lo_truncate(integer, integer), pg_catalog.lo_truncate64(integer, bigint), pg_catalog.lo_open(oid, integer) FROM PUBLIC;
+
+-- WL-537: رسالةُ WAL المنطقيّةُ كتابةٌ خارجَ الجداول — لا تمرُّ بـxf_guard، وغيرُ المعامليّةِ منها
+-- تبقى بعدَ ROLLBACK ويراها كلُّ مستهلكِ فكٍّ منطقيّ (CDC). لا يستعملُها المشروع: تُسحَبُ من PUBLIC.
+DO $emit$
+DECLARE f regprocedure;
+BEGIN
+  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p
+           WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_logical_emit_message' LOOP
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', f);
+  END LOOP;
+END
+$emit$;
 
 -- ── التغطيةُ الأولى لكلِّ جدولٍ قائم ───────────────────────────────────────────
 DO $cover$
