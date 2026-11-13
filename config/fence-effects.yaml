@@ -63,9 +63,9 @@ effects:
     evidence: موثَّقٌ في وصفِ الطلب؛ ربطُه بدورِ إقلاعٍ قرارُ نشرٍ للمالك
   - id: E12
     name: الزمنُ والشاهد (ساعةُ القاعدة)
-    control: الإيجارُ يُقاسُ بـclock_timestamp() للقاعدة؛ تلاعبُ ساعةِ الخادمِ خارجَ النطاق
+    control: الإيجارُ يُقاسُ بـclock_timestamp() للقاعدة؛ التراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012، WL-536)، وما دونَه وتلاعبُ ساعةِ الخادمِ خارجَ النطاق
     status: RESIDUAL
-    evidence: check_fenced().residuals يُدرجُ db_clock_trusted_unverified
+    evidence: check_fenced().residuals يُدرجُ db_clock_trusted؛ tests/fence/db-fence.test.mjs (الهجوم 24، تحتَ libfaketime)
   - id: E13
     name: سكربتاتُ المُشرِف والمُجدوِل (scheduler, serve-state)
     control: تكتبُ بوصلاتٍ غيرِ مُسيَّجة؛ في وضعِ السياجِ يجبُ أن تعملَ بدورِ إقلاعٍ أو تُعلَنَ break-glass
