@@ -258,7 +258,9 @@ describe('دورةُ حياةِ السياج — WL-532 (§5 §7 §8)', { skip: 
     const password = randomBytes(18).toString('base64url');
     // WL-538: الدورُ يصدرُ VALID UNTIL '-infinity' (‏لا مصادقةَ بكلمةِ مرور)؛ المختبرُ يفتحُها بـsuperuser
     // ليصلَ المجمّعُ عبرَ TCP، والختمُ المرفوضُ يُعيدُها '-infinity'.
-    await h.db.pool.query(`ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}' VALID UNTIL 'infinity'`);
+    await h.db.pool.query(
+      `ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}' VALID UNTIL 'infinity'`,
+    );
     const url = new URL(databaseUrl() ?? '');
     url.username = role;
     url.password = password;

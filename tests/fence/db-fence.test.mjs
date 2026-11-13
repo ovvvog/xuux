@@ -678,7 +678,10 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
       (/** @type {any} */ e) => e,
     );
     if (stolen === null) await thief.end().catch(() => {});
-    assert.ok(stolen !== null, 'كلمةُ مرورٍ وضعَها العاملُ أدخلَت جلسةً عبرَ TCP — هويّةٌ مُصدَّرة');
+    assert.ok(
+      stolen !== null,
+      'كلمةُ مرورٍ وضعَها العاملُ أدخلَت جلسةً عبرَ TCP — هويّةٌ مُصدَّرة',
+    );
     assert.equal(stolen.code, '28P01', `رفضُ المصادقةِ لا غيرُه: ${stolen.code} ${stolen.message}`);
     await rejectsWith(
       () => c.query(`ALTER ROLE CURRENT_USER VALID UNTIL 'infinity'`),
@@ -712,7 +715,9 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
       'إيجارٌ منقضٍ',
     );
     await c.query(`ALTER ROLE CURRENT_USER SET search_path = public`);
-    await c.query(`ALTER ROLE CURRENT_USER IN DATABASE ${quoteIdent(h.db.name)} SET statement_timeout = 1`);
+    await c.query(
+      `ALTER ROLE CURRENT_USER IN DATABASE ${quoteIdent(h.db.name)} SET statement_timeout = 1`,
+    );
     await c.query(`ALTER ROLE CURRENT_USER PASSWORD 'after-expiry'`);
     assert.equal((await roleState(role)).settings, 2, 'الإعداداتُ كُتِبَت دائمةً بإيجارٍ منقضٍ');
     // (‏5) تجديدُ الإيجارِ لا يُعيدُ عاملاً عبثَ بدورِه: كتابتُه وقراءتُه مرفوضتان ما بقيَ الأثر (‏XF013).
@@ -727,10 +732,17 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     let chk = await h.root.checkFenced();
     const tamper = chk.problems.find((/** @type {any} */ p) => p.kind === 'worker_role_settings');
     assert.ok(tamper && tamper.roles.includes(role), JSON.stringify(chk.problems));
-    assert.ok(chk.residuals.some((/** @type {any} */ r) => r.kind === 'worker_self_alter_role'), 'الحدُّ معلن');
+    assert.ok(
+      chk.residuals.some((/** @type {any} */ r) => r.kind === 'worker_self_alter_role'),
+      'الحدُّ معلن',
+    );
     // (‏6) الإلغاءُ (‏بعدَ إنهاءِ الجلسات) يمحو الأثرَ كلَّه — ولا جلسةَ تبقى لتُعيدَه.
     await h.root.revokeCredential(role, 'wl-538');
-    assert.deepEqual(await roleState(role), { no_secret: true, pw_dead: true, settings: 0 }, 'الإلغاءُ يمحو');
+    assert.deepEqual(
+      await roleState(role),
+      { no_secret: true, pw_dead: true, settings: 0 },
+      'الإلغاءُ يمحو',
+    );
     await rejection(() => c.query('SELECT 1'));
     // (‏7) انحدار: أثرٌ على دورِ عاملٍ ملغى لم يُسقَط بعد (‏superuser، تحتَ HALTED) أو دورٌ يقبلُ كلمةَ مرور
     // ⇒ check_fenced يُظهِرُه وRESUME يرفضُ (‏XF415) — لا يُستأنَفُ فوقَ هويّةٍ عُبِثَ بها.
