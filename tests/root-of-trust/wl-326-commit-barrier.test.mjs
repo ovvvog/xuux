@@ -17,7 +17,7 @@
 
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import fs, {
   appendFileSync,
   cpSync,
@@ -1468,6 +1468,241 @@ async function bootedWithHistory() {
   for (const operation of ['halt', 'resume', 'halt', 'resume'])
     await royal(runtime, keys, operation);
   return { ws, keys, runtime };
+}
+
+// ── WL-535 (‏`LIVE-39`/`D3`): تدقيقُ الحاجزِ على **كلِّ** كاتبٍ إنتاجيّ ──
+//
+// الادّعاءُ المقيس: في كلِّ معاملةٍ، كلُّ مسارٍ في نطاقِ البصمةِ (‏`productionStateLayout`) تغيّرَ
+// بينَ S2 وS3 — إنشاءً أو تعديلاً أو حذفاً أو إعادةَ تسميةٍ أو مدخلاً جديداً في مجلّد — يُزامِنُه
+// الحاجزُ نفسُه (‏`#syncTouched`) **بعدَ S3 وقبلَ S4**: الملفُّ إن بقي، ثمّ مجلّدُه وكلُّ مجلّدٍ
+// فوقَه حتّى الجذر. والمقارنةُ بلقطتَي القرصِ لا بما يُعلِنُه الكاتب، فكاتبٌ يُغيِّرُ ملفّاً في
+// البصمةِ بلا `beforeDurableWrite` (‏فلا سجلَّ تراجعٍ له ولا مزامنة) يُسقِطُ التدقيقَ باسمِه.
+/** لقطةُ نطاقِ البصمة: مسارٌ ← تجزئةٌ (‏الغائبُ لا يظهر). */
+function layoutSnapshot(layout) {
+  const out = new Map();
+  const digestOf = (p) => {
+    try {
+      return createHash('sha256').update(readFileSync(p)).digest('hex');
+    } catch (error) {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    }
+  };
+  for (const file of layout.files) {
+    const d = digestOf(file);
+    if (d !== null) out.set(resolve(file), d);
+  }
+  for (const dir of layout.dirs) {
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      names = [];
+    }
+    for (const name of names) {
+      const d = digestOf(join(dir, name));
+      if (d !== null) out.set(resolve(join(dir, name)), d);
+    }
+  }
+  return out;
+}
+
+/** المساراتُ التي تغيّرت بينَ لقطتين. */
+function changedPaths(before, after) {
+  const changed = new Set();
+  for (const [p, d] of after) if (before.get(p) !== d) changed.add(p);
+  for (const p of before.keys()) if (!after.has(p)) changed.add(p);
+  return changed;
+}
+
+/**
+ * يُشغِّلُ `body` على جذرٍ إنتاجيٍّ مُزامِنٍ ويُدقِّقُ كلَّ معاملةٍ فيه. يُرجِعُ ما تغيّرَ في كلِّ معاملة.
+ * @returns {Promise<Array<{intent: string, changed: string[]}>>} المعاملاتُ المدقَّقة
+ */
+async function auditBarrier(body, { breakSync = false } = {}) {
+  const ws = workspace();
+  let runtime = null;
+  try {
+    const keys = makeKeys();
+    runtime = await bootRoot(ws.root, keys, new FileStateBoundSocket(ws.socketFile), DURABLE);
+    const root = resolve(ws.root);
+    const layout = productionStateLayout(ws.root, join(ws.root, 'anchors.jsonl'));
+    const audited = [];
+    let current = null;
+    runtime.commitBarrier.onStage = (name, intent) => {
+      if (name === 'S2') current = { intent, before: layoutSnapshot(layout), syncs: [] };
+      else if (name === 'S3' && current) {
+        current.after = layoutSnapshot(layout);
+        current.window = true;
+      } else if (name === 'S4' && current) {
+        current.window = false;
+        const changed = changedPaths(current.before, current.after);
+        const files = new Set(current.syncs.filter((s) => s.kind === 'file').map((s) => s.path));
+        const dirs = new Set(current.syncs.filter((s) => s.kind === 'dir').map((s) => s.path));
+        for (const p of changed) {
+          if (current.after.has(p)) {
+            assert.ok(files.has(p), `${intent}: ${p} تغيّرَ ولم يُزامِنْه الحاجزُ قبلَ S4`);
+          } else {
+            // حُذِفَ: ما يُزامَنُ هو مدخلُه في مجلّدِه — ولا بدَّ أن يكونَ في `touched` ليُسترجَع.
+            assert.ok(files.has(p), `${intent}: ${p} حُذِفَ خارجَ سجلِّ التراجع`);
+          }
+          for (let dir = dirname(p); ; dir = dirname(dir)) {
+            assert.ok(dirs.has(dir), `${intent}: مجلّدُ ${dir} لم يُزامَنْ قبلَ S4 (‏بعدَ ${p})`);
+            if (dir === root) break;
+          }
+        }
+        audited.push({ intent, changed: [...changed].map((p) => p.slice(root.length + 1)).sort() });
+        current = null;
+      }
+    };
+    runtime.commitBarrier.onSync = (path, kind) => {
+      if (breakSync) return;
+      if (current?.window) current.syncs.push({ path, kind });
+    };
+    await body({ ws, keys, runtime });
+    return audited;
+  } finally {
+    await runtime?.close().catch(() => {});
+    ws.cleanup();
+  }
+}
+
+describe('WL-535/LIVE-39 — تدقيقُ الحاجز: كلُّ تغييرٍ في البصمةِ يُزامَنُ قبلَ S4، على كلِّ كاتبٍ إنتاجيّ', () => {
+  /** كلُّ كاتبٍ إنتاجيٍّ في نطاقِ البصمة، بالمسارِ الإنتاجيِّ عبرَ الحاجز. */
+  const scenarios = {
+    'ledger: حجزٌ (‏link) + تثبيتٌ موقَّع': async ({ runtime }) => commitCommand(runtime, 'cmd-a1'),
+    'ledger: إلغاءٌ موقَّعٌ يحذفُ الحجز': async ({ runtime }) => {
+      await runtime.ledger.transactAsync('crown.command', async () => {
+        runtime.ledger.begin({ id: 'cmd-ab' });
+      });
+      await runtime.ledger.abortSigned({ id: 'cmd-ab' }, 'test');
+    },
+    'log: واقعةٌ مختومة (‏events.log)': async ({ runtime }) => {
+      await runtime.log.appendSealed('wl535.event', 'tester', { n: 1 });
+    },
+    'anchor: تثبيتُ السجلّ (‏إنشاءُ anchors.jsonl أوّلَ مرّة)': async ({ runtime }) => {
+      await runtime.log.appendSealed('wl535.event', 'tester', { n: 2 });
+      await runtime.anchorAsync({ force: true });
+    },
+    'revoke: سحبُ شهادة (‏إنشاءُ revoked.jsonl أوّلَ مرّة)': async ({ runtime }) => {
+      await runtime.revokeAsync('cert-wl535', 'king', 'test');
+    },
+    'halt: تسجيلُ عقدةٍ وإيقافٌ وإقرارٌ واستئنافٌ وشطبُ العقدة': async ({ runtime, keys }) => {
+      const node = generateKeyPairSync('ed25519');
+      const nodeKey = {
+        publicKeyPem: node.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+        sign: (payload) =>
+          signHaltAck(node.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), payload),
+      };
+      await runtime.haltSwitch.registerNodeAsync('node-a', { nodeKey });
+      await royal(runtime, keys, 'halt');
+      const halted = runtime.haltSwitch.read();
+      await runtime.haltSwitch.confirmHaltAsync(
+        'node-a',
+        nodeKey.sign(haltAckPayload(halted.directive.hash, halted.epoch, 'node-a')),
+      );
+      await royal(runtime, keys, 'resume');
+      await runtime.haltSwitch.unregisterNodeAsync('node-a');
+    },
+    'grants: لقطةُ المنح': async ({ runtime, ws }) => saveGrants(runtime, ws.root, [{ id: 'g' }]),
+    'clock: أرضيّةُ الساعة (‏clock-state.json)': async ({ runtime, ws }) => {
+      const { SovereignClock } = await import('../../src/root-of-trust/clock.mjs');
+      const clock = new SovereignClock({
+        statePath: join(ws.root, 'clock-state.json'),
+        commitBarrier: runtime.commitBarrier,
+      });
+      await runtime.commitBarrier.run('clock.tick', async () => {
+        clock.now();
+      });
+    },
+  };
+
+  const covered = new Set();
+  for (const [name, body] of Object.entries(scenarios)) {
+    test(name, async (t) => {
+      const audited = await auditBarrier(body);
+      const changed = audited.flatMap((a) => a.changed);
+      assert.ok(changed.length > 0, 'التدقيقُ ليسَ فارغاً: تغيّرَ شيءٌ في البصمة');
+      for (const p of changed) covered.add(p.split('/')[0].replace(/\.(nodes|acks|claims)$/, ''));
+      t.diagnostic(JSON.stringify(audited));
+    });
+  }
+
+  test('التغطية: كلُّ ملفٍّ ومجلّدٍ في نطاقِ البصمةِ لمسَه سيناريو واحدٌ على الأقلّ', () => {
+    const layout = productionStateLayout('/r', '/r/anchors.jsonl');
+    const names = [...layout.files, ...layout.dirs].map((p) => p.slice(3).split('/')[0]);
+    const expected = new Set(names.map((n) => n.replace(/\.(nodes|acks|claims)$/, '')));
+    assert.deepEqual([...expected].filter((n) => !covered.has(n)).sort(), []);
+  });
+
+  test('طفرة: حاجزٌ لا يُزامِنُ (‏onSync صامت) ⇒ التدقيقُ يسقطُ باسمِ المسار', async () => {
+    const error = await rejection(() =>
+      auditBarrier(scenarios['grants: لقطةُ المنح'], { breakSync: true }),
+    );
+    assert.match(String(error.message), /capability-grants\.json تغيّرَ ولم يُزامِنْه الحاجزُ/);
+  });
+});
+
+// ── WL-535: قياسُ كلفةِ مزامنةِ الحاجز (‏`#syncTouched`) — لا يُسجَّلُ إلّا بطلبٍ صريح ──
+//
+// لا يُسجَّلُ اختبارٌ ما لم يُضبَط `XUUX_BENCH_BARRIER=1`، فلا يتغيّرُ عددُ الاختباراتِ ولا التخطّي
+// (‏`R5-A-06`) في الحزمةِ العاديّة. وإعادةُ القياسِ بالأمرِ نفسِه على هذه الشجرةِ وعلى خطِّ
+// الأساسِ قبلَ `WL-534` (‏`021870e7`، بنسخِ هذا الملفِّ إليه) — الإجراءُ مسرودٌ في مدخلةِ `WL-535`.
+// المقاس: زمنُ المعاملةِ من النداءِ إلى الإقرار (‏ACK) على جذرٍ إنتاجيٍّ بـ`fsync: true`، وp50/p95/p99
+// ومعدّلُ الإنجاز. والأرقامُ خصيصةُ الوسيطِ والنظامِ لا ثابتٌ؛ تُقرأُ مقارنةً على الجهازِ نفسِه.
+if (process.env.XUUX_BENCH_BARRIER === '1') {
+  describe('WL-535 bench — كلفةُ المزامنةِ في الحاجز', () => {
+    const N = Number(process.env.XUUX_BENCH_N ?? 200);
+    const WARM = 20;
+    const pct = (sorted, p) =>
+      sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
+    const ops = {
+      'ledger.command': (rt, _root, i) => commitCommand(rt, `bench-${i}`),
+      'grants.persist': (rt, root, i) => saveGrants(rt, root, [{ id: `g-${i}` }]),
+      'log.append': (rt, _root, i) => rt.log.appendSealed('bench.event', 'bench', { i }),
+    };
+    for (const [name, op] of Object.entries(ops)) {
+      for (const fsync of [true, false]) {
+        test(`bench ${name} fsync=${fsync}`, async (t) => {
+          const base = registerTmpRoot(
+            mkdtempSync(join(process.env.XUUX_BENCH_DIR ?? tmpdir(), 'wl535-bench-')),
+          );
+          const root = join(base, 'root');
+          const runtime = await bootRoot(
+            root,
+            makeKeys(),
+            new FileStateBoundSocket(join(base, 'freshness.json')),
+            { fsync },
+          );
+          try {
+            for (let i = 0; i < WARM; i += 1) await op(runtime, root, `w${i}`);
+            const samples = [];
+            const t0 = process.hrtime.bigint();
+            for (let i = 0; i < N; i += 1) {
+              const s = process.hrtime.bigint();
+              await op(runtime, root, i);
+              samples.push(Number(process.hrtime.bigint() - s) / 1e6);
+            }
+            const total = Number(process.hrtime.bigint() - t0) / 1e9;
+            samples.sort((a, b) => a - b);
+            const row = {
+              op: name,
+              fsync,
+              n: N,
+              p50ms: Number(pct(samples, 50).toFixed(3)),
+              p95ms: Number(pct(samples, 95).toFixed(3)),
+              p99ms: Number(pct(samples, 99).toFixed(3)),
+              opsPerSec: Number((N / total).toFixed(1)),
+            };
+            t.diagnostic(`BENCH ${JSON.stringify(row)}`);
+          } finally {
+            await runtime.close();
+            rmSync(base, { recursive: true, force: true });
+          }
+        });
+      }
+    }
+  });
 }
 
 describe('WL-522/LIVE-74 — العبثُ وقتَ التشغيلِ وقراءةٌ مغلقةٌ مختبريّة (‏N7، مختبرًا لا إنتاجًا)', () => {
