@@ -375,6 +375,18 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
   const WL516_OWNER_AUTHORIZED = new Map(Object.entries({
     'src/root-of-trust/halt-switch.mts': 'b47060cda7ce65c7b1df24c95718dca1ac5c6eb6',
   }));
+  // قرارُ المالكِ (‏2026-11-13 06:06 +03 — **إذنٌ صريحٌ بالفرقِ بعينِهِ**: طُرِحَ الفرقُ على المالكِ ببصمتَيهِ
+  // في `PR #551` فوافقَ صراحةً «نعم، أذنتُ بالفرق كما هو»): استثناءٌ مسمّى مؤرَّخٌ **بملفّينِ** هما موضعا
+  // `LIVE-39`/`D3` في مدخلةِ `WL-534` — `#syncTouched` في `commit-barrier.mts` (‏مزامنةُ كلِّ مسارٍ لُمِسَ
+  // ومجلّداتِه قبلَ S4) و`save` في `src/identity/capability-grant-store.mjs` (‏إغلاقُ تبعياتِ الإقلاع:
+  // مؤقّتٌ فريدٌ يُزامَنُ ثمّ إعادةُ تسميةٍ ثمّ مزامنةُ المجلّد). **وهذا الاستثناءُ لا يُضعِفُ شيئًا آخرَ:**
+  // بقيةُ `src/root-of-trust` و`src/production` والملفاتُ المسماةُ وإغلاقُ تبعياتِ الإقلاعِ ومدخلةُ
+  // `R3-A-01` محميةٌ كما كانتْ، ولا مساسَ لـ`SUPPORTED_FRESHNESS_BACKENDS`. **والاستثناءُ مربوطٌ
+  // بالبصمةِ المعتمدةِ لا بالمسارِ وحدَه:** أيُّ تعديلٍ لاحقٍ — ولو سطرًا — يُخرجُ بصمتَهُ عن هذه فيعودُ محميًّا.
+  const WL534_OWNER_AUTHORIZED = new Map(Object.entries({
+    'src/root-of-trust/commit-barrier.mts': '610845c6bf599e274d83629209b158caa260360b',
+    'src/identity/capability-grant-store.mjs': 'af6ce29c1321d5395302b212be81795ea1c9eb5c',
+  }));
   const currentBlob = (f) => spawnSync('git', ['hash-object', '--', f], { cwd: root, encoding: 'utf8' }).stdout.trim();
   const PROTECTED_DIRS = ['src/production/', 'src/root-of-trust/'];
   const isProtected = (f) => NAMED_PROTECTED.includes(f) || PROTECTED_DIRS.some((d) => f.startsWith(d)) || closure.has(f);
@@ -415,11 +427,12 @@ test('static: حارسُ نطاقِ الإقلاعِ الإنتاجيِّ (WL-41
     assert.equal(after, before, `مدخلةُ ${CONTRACT_ENTRY} في ${CONTRACT_PATH} عُدِّلَتْ في هذه الدفعةِ — هذا خارجَ نطاقِ الدفعةِ (يجوزُ تحديثُ غيرِها من المدخلاتِ)`);
   }
 
-  // القبولُ بالبصمةِ من **أحدثِ إذنٍ مسمّى لكلِّ مسارٍ** (WL-493 ثمّ WL-492 ثمّ WL-491 ثمّ WL-488 ثمّ WL-478 ثمّ WL-465 ثمّ WL-461 ثمّ WL-434): الإذنُ
+  // القبولُ بالبصمةِ من **أحدثِ إذنٍ مسمّى لكلِّ مسارٍ** (WL-534 ثمّ WL-516 ثمّ WL-515 ثمّ WL-493 ثمّ WL-492 ثمّ WL-491 ثمّ WL-488 ثمّ WL-478 ثمّ WL-465 ثمّ WL-461 ثمّ WL-434): الإذنُ
   // اللاحقُ يُثبّتُ بصمةً جديدةً فيُلغي حُكمَ البصمةِ الأقدمِ على المسارِ نفسِهِ (إرجاعُ الملفِ
   // إلى بصمةٍ سابقةٍ رفضٌ لا قبولٌ)، والملفاتُ التي لأحدها وحدَه إذنٌ تبقى على بصمتِه.
   const ownerAuthorizedBlob = (f) => {
     const expected =
+      WL534_OWNER_AUTHORIZED.get(f) ??
       WL516_OWNER_AUTHORIZED.get(f) ??
       WL515_OWNER_AUTHORIZED.get(f) ??
       WL493_OWNER_AUTHORIZED.get(f) ??

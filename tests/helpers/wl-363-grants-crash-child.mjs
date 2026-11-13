@@ -70,10 +70,20 @@ process.stdout.write('BOOTED\n');
 if (config.op === 'grant') {
   // C3: كتابةٌ ممزّقةٌ — قتلٌ داخلَ جسمِ المعاملةِ بعدَ أولِ كتابةٍ للملفِّ.
   if (kill.inFn) {
-    const originalWrite = fs.writeFileSync;
-    fs.writeFileSync = function (file, data, ...rest) {
-      const out = originalWrite.call(fs, file, data, ...rest);
-      if (String(file).endsWith('capability-grants.json.tmp')) die();
+    // `WL-534`: المخزنُ يكتبُ مؤقّتاً فريداً (`capability-grants.json.tmp-<pid>-<uuid>`) بمقبضٍ
+    // (`openSync` + `writeSync` + `fsyncSync`) لا `writeFileSync` — فالقتلُ بعدَ أوّلِ كتابةٍ
+    // على مقبضِ المؤقّتِ نفسِه، قبلَ مزامنتِه وإعادةِ تسميتِه.
+    const originalOpen = fs.openSync;
+    const originalWrite = fs.writeSync;
+    const tmpFds = new Set();
+    fs.openSync = function (file, ...rest) {
+      const fd = originalOpen.call(fs, file, ...rest);
+      if (String(file).includes('capability-grants.json.tmp-')) tmpFds.add(fd);
+      return fd;
+    };
+    fs.writeSync = function (fd, ...rest) {
+      const out = originalWrite.call(fs, fd, ...rest);
+      if (tmpFds.has(fd)) die();
       return out;
     };
     syncBuiltinESMExports();

@@ -19,10 +19,11 @@
  * مخزنَها (‏`budget-store.mjs`، `LIM-1`).
  */
 
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { beforeDurableWrite } from '../root-of-trust/commit-barrier.mjs';
+import { beforeDurableWrite, fsyncDirectoryOrFail } from '../root-of-trust/commit-barrier.mjs';
 
 /**
  * مخزنُ منحِ قدراتٍ على ملفِّ JSON.
@@ -74,12 +75,35 @@ export class FileCapabilityGrantStore {
    */
   save(entries) {
     const dir = path.dirname(this.filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
+    const created = fs.existsSync(dir) ? null : fs.mkdirSync(dir, { recursive: true });
     beforeDurableWrite(this.filePath, 'replace');
-    const tmp = `${this.filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(entries, null, 2), 'utf8');
-    fs.renameSync(tmp, this.filePath);
+    // **WL-534 (`LIVE-39`):** مؤقّتٌ فريدٌ حصريٌّ (`wx`) يُزامَنُ قبلَ إعادةِ التسمية، ثمّ
+    // يُزامَنُ المجلّدُ (‏ومجلّداتُ الإنشاءِ حتّى أوّلِ قائمٍ) — فلا يُقَرُّ بمنحٍ أو إبطالٍ
+    // قبلَ دوامِ اسمِه ومحتواه. وكانت الكتابةُ بلا أيِّ مزامنةٍ وبمؤقّتٍ ثابتِ الاسم.
+    const tmp = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
+    const fd = fs.openSync(tmp, 'wx', 0o600);
+    try {
+      try {
+        const buffer = Buffer.from(JSON.stringify(entries, null, 2), 'utf8');
+        let written = 0;
+        while (written < buffer.length) written += fs.writeSync(fd, buffer, written);
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      fs.renameSync(tmp, this.filePath);
+    } catch (error) {
+      fs.rmSync(tmp, { force: true });
+      throw error;
+    }
+    fsyncDirectoryOrFail(dir);
+    if (typeof created === 'string') {
+      // مجلّداتٌ أُنشئت الآنَ: مدخلُ كلٍّ منها في أبيه حتّى أبِ أوّلِها إنشاءً.
+      const stop = path.dirname(created);
+      for (let parent = path.dirname(dir); ; parent = path.dirname(parent)) {
+        fsyncDirectoryOrFail(parent);
+        if (parent === stop || parent === path.dirname(parent)) break;
+      }
+    }
   }
 }

@@ -48,6 +48,7 @@ import {
   stateManifestPath,
   submitRootIntent,
 } from '../../src/root-of-trust/index.mjs';
+import { FileCapabilityGrantStore } from '../../src/identity/capability-grant-store.mjs';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { FileStateBoundSocket, bootRoot, makeKeys, royalCommand } from '../helpers/wl-326-root.mjs';
 
@@ -1195,6 +1196,171 @@ describe('LIVE-65 — مزامنةُ المجلّدِ تفشلُ مغلقةً و
       await healthy.close();
     } finally {
       ws.cleanup();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `WL-534` (‏`LIVE-39`، `D3`): الحاجزُ يُزامِنُ كلَّ مسارٍ لُمِسَ ومجلّداتِه حتّى الجذرِ قبلَ S4.
+//
+// العيبُ المقيس: لقطةُ المنحِ (‏`capability-grants.json`، داخلَ بصمةِ الحالةِ منذُ `WL-363`) كانت
+// تُكتَبُ `writeFileSync` + `renameSync` بلا أيِّ مزامنة، والحاجزُ يُقِرُّ بعدَها — فدوامُ منحٍ
+// أو إبطالٍ مُقَرٍّ كان مرهوناً بأنْ تجرَّ مزامنةٌ لاحقةٌ لملفٍّ آخرَ مجلّةَ `ext4` معها. وفقدُ
+// الطاقةِ بعدَ ACK يتركُ بصمةً على القرصِ ≠ البصمةِ المختومة ⇒ إقلاعٌ مرفوضٌ بعدَ إقرار.
+// القياسُ هنا بحاقنِ `LIVE-65` نفسِه (‏تتبُّعُ المقابضِ في `node:fs`)، لا فقدُ طاقةٍ.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** يحفظُ لقطةَ منحٍ داخلَ معاملةِ الحاجزِ كما يفعلُ `grantsTxn` في المدخلِ الإنتاجيّ. */
+async function saveGrants(runtime, root, entries) {
+  const store = new FileCapabilityGrantStore({ filePath: join(root, 'capability-grants.json') });
+  await runtime.commitBarrier.run('grants.persist', async () => {
+    store.save(entries);
+  });
+}
+
+describe('WL-534/LIVE-39 — مزامنةُ ما لُمِسَ قبلَ أن يُشهَدَ عليه', () => {
+  test('النجاح: ملفُّ المنحِ ومجلّدُه يُزامَنانِ بعدَ S3 وقبلَ S4، ثمّ ACK', async () => {
+    await withFaultyRoot(async ({ ws, runtime, trace, faults }) => {
+      const grants = resolve(join(ws.root, 'capability-grants.json'));
+      const root = resolve(ws.root);
+      const synced = [];
+      runtime.commitBarrier.onStage = (name) => {
+        trace.push(name);
+        faults.events.push({ op: 'stage', path: name });
+      };
+      runtime.commitBarrier.onSync = (path, kind) => synced.push(`${kind}:${path}`);
+      await saveGrants(runtime, ws.root, [{ id: 'g-1' }]);
+      assert.deepEqual(trace, ['S2', 'S3', 'S4', 'S5', 'ACK']);
+      assert.deepEqual(
+        synced,
+        [`file:${grants}`, `dir:${root}`],
+        'الملفُّ ثمّ مجلّدُه، مرّةً واحدة',
+      );
+      const seq = faults.events;
+      const at = (name) => seq.findIndex((e) => e.op === 'stage' && e.path === name);
+      const s3 = at('S3');
+      const s4 = at('S4');
+      const fileSync = seq.findIndex(
+        (e, i) => e.op === 'fsync' && !e.isDir && e.path === grants && i > s3 && i < s4,
+      );
+      const dirSync = seq.findIndex(
+        (e, i) => e.op === 'fsync' && e.isDir && e.path === root && i > fileSync && i < s4,
+      );
+      assert.ok(fileSync > s3, 'ملفُّ المنحِ النهائيُّ يُزامَنُ في الحاجزِ قبلَ S4');
+      assert.ok(dirSync > fileSync, 'ومجلّدُه بعدَه وقبلَ S4');
+      // والمخزنُ نفسُه (‏خارجَ الحاجزِ أيضاً): مؤقّتُه الفريدُ يُزامَنُ قبلَ إعادةِ التسمية.
+      assert.ok(
+        seq.some(
+          (e, i) =>
+            e.op === 'fsync' &&
+            !e.isDir &&
+            String(e.path).includes('capability-grants.json.tmp-') &&
+            i < fileSync,
+        ),
+        'مؤقّتُ المخزنِ يُزامَن',
+      );
+      assert.deepEqual(JSON.parse(readFileSync(grants, 'utf8')), [{ id: 'g-1' }]);
+      assert.deepEqual(
+        readdirSync(root).filter((name) => name.includes('capability-grants.json.tmp')),
+        [],
+        'لا مؤقّتَ متروك',
+      );
+    });
+  });
+
+  test('مجلّدٌ جديدٌ متداخلٌ تحتَ الجذر: كلُّ مجلّدٍ حتّى الجذرِ يُزامَنُ، الأعمقُ أوّلاً', async () => {
+    await withFaultyRoot(async ({ ws, runtime }) => {
+      const root = resolve(ws.root);
+      const synced = [];
+      runtime.commitBarrier.onSync = (path, kind) => synced.push(`${kind}:${path}`);
+      const nested = join(root, 'wl534', 'a', 'b', 'note.json');
+      await runtime.commitBarrier.run('wl534.nested', async () => {
+        fs.mkdirSync(dirname(nested), { recursive: true });
+        // كاتبٌ «مهمِل»: لا مزامنةَ لملفٍّ ولا لمجلّد — الحاجزُ وحدَه يضمنُ الدوام.
+        const { beforeDurableWrite } = await import('../../src/root-of-trust/commit-barrier.mjs');
+        beforeDurableWrite(nested, 'replace');
+        writeFileSync(nested, '{}');
+      });
+      assert.deepEqual(synced, [
+        `file:${nested}`,
+        `dir:${join(root, 'wl534', 'a', 'b')}`,
+        `dir:${join(root, 'wl534', 'a')}`,
+        `dir:${join(root, 'wl534')}`,
+        `dir:${root}`,
+      ]);
+    });
+  });
+
+  for (const target of ['file', 'dir']) {
+    test(`سلبيّ: EIO في مزامنةِ ${target === 'file' ? 'ملفِّ المنح' : 'مجلّدِه'} داخلَ الحاجز ⇒ لا S4 ولا ACK، تسييجٌ، والإقلاعُ B2 يُعيدُ ما قبلَها`, async () => {
+      await withFaultyRoot(async ({ ws, keys, runtime, trace, stage, faults }) => {
+        const grants = resolve(join(ws.root, 'capability-grants.json'));
+        await saveGrants(runtime, ws.root, [{ id: 'g-before' }]);
+        trace.length = 0;
+        const rule = faults.fail({
+          op: 'fsync',
+          dir: target === 'dir',
+          code: 'EIO',
+          when: () => stage.current === 'S3',
+          // بعدَ S3 (‏الجسمُ ومزامناتُ المخزنِ نفسِه انتهت) وفي `#syncTouched` حصراً.
+          match: (p, stack) =>
+            p === (target === 'dir' ? resolve(ws.root) : grants) && stack.includes('syncTouched'),
+        });
+        const error = await rejection(() => saveGrants(runtime, ws.root, [{ id: 'g-lost' }]));
+        assert.equal(error.code, 'EIO');
+        assert.equal(rule.hits, 1);
+        assert.ok(trace.includes('S3') && !trace.includes('S4') && !trace.includes('ACK'));
+        const next = await rejection(() => commitCommand(runtime, 'cmd-after-534'));
+        assert.equal(next.code, 'COMMIT_BARRIER_FENCED');
+        faults.restore();
+        await runtime.close().catch(() => {});
+        assert.ok(manifestBody(ws.root).staged, 'staged باقٍ: لم يُقَرَّ');
+        const healthy = await bootRoot(
+          ws.root,
+          keys,
+          new FileStateBoundSocket(ws.socketFile),
+          DURABLE,
+        );
+        try {
+          assert.equal(healthy.freshnessBoot, 'B2');
+          assert.deepEqual(JSON.parse(readFileSync(grants, 'utf8')), [{ id: 'g-before' }]);
+        } finally {
+          await healthy.close();
+        }
+      });
+    });
+  }
+
+  test('خارجَ الحاجز: المخزنُ يُزامِنُ المؤقّتَ والمجلّدَ ومجلّداتِ الإنشاء، وفشلُ مزامنةِ المؤقّتِ لا يُبدِّلُ الملفّ', () => {
+    const base = registerTmpRoot(mkdtempSync(join(tmpdir(), 'wl534-')));
+    const faults = fsFaults();
+    try {
+      const file = join(base, 'x', 'y', 'capability-grants.json');
+      new FileCapabilityGrantStore({ filePath: file }).save([{ id: 'a' }]);
+      const dirs = faults.events.filter((e) => e.op === 'fsync' && e.isDir).map((e) => e.path);
+      assert.deepEqual(dirs, [join(base, 'x', 'y'), join(base, 'x'), resolve(base)]);
+      assert.ok(
+        faults.events.some((e) => e.op === 'fsync' && !e.isDir && String(e.path).includes('.tmp-')),
+      );
+      faults.fail({
+        op: 'fsync',
+        dir: false,
+        code: 'EIO',
+        match: (p) => String(p).includes('.tmp-'),
+      });
+      const error = thrown(() =>
+        new FileCapabilityGrantStore({ filePath: file }).save([{ id: 'b' }]),
+      );
+      assert.equal(error.code, 'EIO');
+      assert.deepEqual(
+        JSON.parse(readFileSync(file, 'utf8')),
+        [{ id: 'a' }],
+        'الملفُّ لم يُستبدَل',
+      );
+      assert.deepEqual(readdirSync(dirname(file)), ['capability-grants.json'], 'لا مؤقّتَ متروك');
+    } finally {
+      faults.restore();
+      rmSync(base, { recursive: true, force: true });
     }
   });
 });
