@@ -18,7 +18,7 @@ import pg from 'pg';
 
 import { EventEmitter } from 'node:events';
 import { setImmediate } from 'node:timers';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -554,6 +554,147 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     await rejectsWith(() => h.root.renewLease(w.credential.role_name), ['XF007'], 'تجديدٌ لملغى');
   });
 
+  test('WL-536: لا nextval/setval للعاملِ على تسلسلاتِ state — أثرٌ لا معامليٌّ يتجاوزُ الزنادَ ويبقى بعدَ الإيقاف', async () => {
+    // سلبيّ (يفشلُ قبلَ الإصلاح): منحُ USAGE على تسلسلاتِ state كان يتيحُ للعاملِ nextval بعدَ انقضاءِ إيجارِه
+    // أو إلغاءِ اعتمادِه — كتابةٌ دائمةٌ لا تمرُّ بـxf_guard ولا يتراجعُ عنها ROLLBACK.
+    const seqs = await h.db.pool.query(
+      `SELECT c.oid::regclass::text AS s FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'state' AND c.relkind = 'S' ORDER BY 1`,
+    );
+    assert.ok(seqs.rows.length > 0, 'تسلسلاتُ هويّةٍ في state');
+    for (const { s } of seqs.rows) {
+      const p = await h.db.pool.query(
+        `SELECT has_sequence_privilege('xuux_worker', $1, 'USAGE') AS u,
+                has_sequence_privilege('xuux_worker', $1, 'UPDATE') AS w`,
+        [s],
+      );
+      assert.deepEqual(p.rows[0], { u: false, w: false }, `${s}: لا USAGE ولا UPDATE للعامل`);
+    }
+    const w = await h.boot('beta');
+    const c = /** @type {pg.Client} */ (w.client);
+    const seq = String(seqs.rows[0].s);
+    const before = await h.db.pool.query(`SELECT last_value, is_called FROM ${seq}`);
+    // إيجارٌ منقضٍ: الكتابةُ مرفوضةٌ (XF009) — وnextval يجبُ أن يُرفَضَ كذلك لا أن يتقدّمَ صامتاً.
+    await h.db.pool.query(
+      `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+      [w.credential.role_name],
+    );
+    await rejectsWith(
+      () => c.query(`SELECT nextval($1::regclass)`, [seq]),
+      ['42501'],
+      'nextval بإيجارٍ منقضٍ',
+    );
+    await rejectsWith(
+      () => c.query(`SELECT setval($1::regclass, 1000000)`, [seq]),
+      ['42501'],
+      'setval',
+    );
+    const after = await h.db.pool.query(`SELECT last_value, is_called FROM ${seq}`);
+    assert.deepEqual(after.rows[0], before.rows[0], 'التسلسلُ لم يتقدّم');
+    // إيجابيّ: الإدراجُ في عمودِ هويّةٍ لا يحتاجُ USAGE — الكتابةُ المشروعةُ تبقى تعمل.
+    await h.root.renewLease(w.credential.role_name);
+    const ins = await c.query(
+      `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
+       VALUES ('evt-wl536', 'fence.probe', 'actor-wl536', '{}'::jsonb, repeat('a', 64), now())
+       RETURNING seq`,
+    );
+    assert.ok(Number(ins.rows[0].seq) > 0, 'الهويّةُ تتولّدُ للعاملِ بلا USAGE');
+    await c.query(`DELETE FROM state.events WHERE event_id = 'evt-wl536'`);
+    await h.root.revokeCredential(w.credential.role_name, 'test');
+  });
+
+  const clockFile = process.env['XUUX_FENCE_FAKETIME_FILE'] ?? '';
+  test(
+    'الهجوم 24 (WL-536): ساعةُ القاعدةِ تتقدّمُ فيُغلَق، وتتراجعُ قبلَ آخرِ تجديدٍ فيُرفَضُ (XF012) — والتراجعُ دونَه حدٌّ معلن',
+    {
+      skip:
+        clockFile === ''
+          ? 'NOT RUN — XUUX_FENCE_FAKETIME_FILE غيرُ مضبوط (خادمٌ تحتَ libfaketime يقرأُ الإزاحةَ من الملف)'
+          : false,
+    },
+    async () => {
+      /** @param {string} offset إزاحةُ libfaketime النسبيّة (ثوانٍ بإشارة) */
+      const setClock = (offset) => {
+        // استبدالٌ ذرّيٌّ: libfaketime يقرأُ الملفَّ في كلِّ نداءٍ، فلا يرى ملفاً نصفَ مكتوب.
+        writeFileSync(`${clockFile}.tmp`, `${offset}\n`);
+        renameSync(`${clockFile}.tmp`, clockFile);
+      };
+      const skew = async () => {
+        const r = await h.db.pool.query(
+          'SELECT extract(epoch FROM clock_timestamp())::float8 AS t',
+        );
+        return Number(r.rows[0].t) - Date.now() / 1000;
+      };
+      setClock('+0');
+      assert.ok(Math.abs(await skew()) < 5, 'الساعةُ حقيقيّةٌ قبلَ البدء');
+      const w = await h.boot('beta');
+      const c = /** @type {pg.Client} */ (w.client);
+      const role = w.credential.role_name;
+      try {
+        await c.query(`INSERT INTO state.fence_probe VALUES (40, 'clock-0')`);
+        const win = Number(
+          (await h.db.pool.query('SELECT lease_window_s AS s FROM fence.control WHERE id')).rows[0]
+            .s,
+        );
+        // (1) التقدّم: الإيجارُ منقضٍ بساعةِ القاعدة ⇒ رفضٌ مغلقٌ، والقراءةُ محجوبة.
+        setClock(`+${win * 2 + 60}`);
+        assert.ok((await skew()) > win, 'الساعةُ تقدّمت فعلاً');
+        await rejectsWith(
+          () => c.query(`INSERT INTO state.fence_probe VALUES (41, 'fwd')`),
+          ['XF009'],
+          'تقدّمُ الساعة',
+        );
+        assert.equal((await c.query('SELECT id FROM state.fence_probe')).rows.length, 0, 'RLS');
+        setClock('+0');
+        await c.query(`INSERT INTO state.fence_probe VALUES (41, 'back-to-real')`);
+        // (2) سلبيّ (يفشلُ قبلَ الإصلاح): إيجارٌ منقضٍ ثمّ ساعةٌ مُرجَعةٌ ساعةً كاملة — كانت تُحييه.
+        await h.db.pool.query(
+          `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+          [role],
+        );
+        await rejectsWith(
+          () => c.query(`INSERT INTO state.fence_probe VALUES (42, 'expired')`),
+          ['XF009'],
+          'منقضٍ بالساعةِ الحقيقيّة',
+        );
+        setClock('-3600');
+        assert.ok((await skew()) < -3000, 'الساعةُ تراجعت فعلاً');
+        await rejectsWith(
+          () => c.query(`INSERT INTO state.fence_probe VALUES (42, 'revived')`),
+          ['XF012'],
+          'تراجعٌ قبلَ آخرِ تجديدٍ لا يُحيي الإيجار',
+        );
+        assert.equal(
+          (await c.query('SELECT id FROM state.fence_probe')).rows.length,
+          0,
+          'ولا القراءة',
+        );
+        await rejectsWith(() => h.root.renewLease(role), ['XF012'], 'ولا تجديدَ على ساعةٍ مُرجَعة');
+        // (3) إيجابيّ: بالساعةِ الحقيقيّةِ يعودُ الحكمُ إلى الانقضاءِ ثمّ التجديدُ يعمل.
+        setClock('+0');
+        await rejectsWith(
+          () => c.query(`INSERT INTO state.fence_probe VALUES (42, 'still-expired')`),
+          ['XF009'],
+          'ما زالَ منقضياً',
+        );
+        await h.root.renewLease(role);
+        await c.query(`INSERT INTO state.fence_probe VALUES (42, 'renewed')`);
+        // (4) الحدُّ المعلن: تراجعٌ أصغرُ من (الآن − آخرِ تجديد) يُحيي إيجاراً منقضياً بما لا يزيدُ على نافذة.
+        await h.db.pool.query(
+          `UPDATE fence.run_lease SET renewed_at = clock_timestamp() - interval '30 seconds',
+                  expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+          [role],
+        );
+        setClock('-10');
+        await c.query(`INSERT INTO state.fence_probe VALUES (43, 'bounded-residual')`);
+      } finally {
+        setClock('+0');
+        await h.db.pool.query('DELETE FROM state.fence_probe WHERE id BETWEEN 40 AND 43');
+        await h.root.revokeCredential(role, 'test').catch(() => {});
+      }
+    },
+  );
+
   test('حافظُ الإيجار يتوقّفُ أوّلَ قراءةٍ غيرِ RUNNING ولا يُعيدُ التجديد', async () => {
     const w = await h.boot('beta', { connect: false });
     let running = true;
@@ -778,6 +919,15 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     );
     await rejectsWith(() => h.resume(), ['XF415'], 'دالّةٌ مُستبدَلة');
     await h.db.pool.query(orig);
+    // WL-536: إعادةُ منحِ USAGE على تسلسلاتِ state للعاملِ تُكشَفُ وتمنعُ الاستئناف.
+    await h.db.pool.query('GRANT USAGE ON ALL SEQUENCES IN SCHEMA state TO xuux_worker');
+    chk = await h.root.checkFenced();
+    assert.ok(
+      chk.problems.some((/** @type {any} */ p) => p.kind === 'worker_sequence_write'),
+      JSON.stringify(chk.problems),
+    );
+    await rejectsWith(() => h.resume(), ['XF415'], 'تسلسلٌ قابلٌ للكتابةِ للعامل');
+    await h.db.pool.query('REVOKE USAGE ON ALL SEQUENCES IN SCHEMA state FROM xuux_worker');
     // زنادٌ معطَّل: والمُطلِقُ مفعَّلٌ، يرفضُ فحصُ الالتزامِ المؤجَّلِ المعاملةَ نفسَها (XF203)…
     await h.db.pool.query('ALTER EVENT TRIGGER xf_ddl_end ENABLE ALWAYS');
     await rejectsWith(

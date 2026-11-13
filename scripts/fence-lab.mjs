@@ -14,7 +14,7 @@
  *     والعشرين، مع SHA-256 لكلِّ سجلٍّ وللتقريرِ نفسِه.
  *
  * **حدودٌ معلنة:** المفاتيحُ مفاتيحُ اختبارٍ مولَّدةٌ في الذاكرة (لا مفتاحَ مالكٍ ولا HSM)؛
- * superuser والجذرُ خارجَ السياجِ عمداً؛ لا تلاعبَ بساعةِ النظام (الهجوم 24 NOT RUN)؛ لا فقدَ
+ * superuser والجذرُ خارجَ السياجِ عمداً؛ لا تلاعبَ بساعةِ النظام (الهجوم 24 يتطلّبُ libfaketime — WL-536)؛ لا فقدَ
  * طاقةٍ حقيقيّاً (إعادةُ التشغيلِ `pg_ctl -m immediate` فقط). ونجاحُ المختبرِ ليس دليلَ إنتاج.
  *
  * الاستعمال:
@@ -286,9 +286,30 @@ admin postgres postgres
 ${WORKERS.map((w) => `fence ${OS_USER(w)} /^xw_${w}_[0-9a-f]{16}$`).join('\n')}
 `;
 
+// `WL-536` (الهجوم 24): `XUUX_LAB_FAKETIME` مسارُ libfaketime — يُحمَّلُ في الخادمِ وحدَه، والإزاحةُ
+// في ملفٍّ يكتبُه الاختبار (‏`XUUX_FENCE_FAKETIME_FILE`). بدونه يبقى الهجومُ 24 NOT RUN.
+const FAKETIME_LIB = process.env['XUUX_LAB_FAKETIME'] ?? '';
+const CLOCK_FILE = FAKETIME_LIB === '' ? '' : path.join(tmpdir(), `xuux-lab-clock-${process.pid}`);
+if (FAKETIME_LIB !== '') {
+  must(existsSync(FAKETIME_LIB), `XUUX_LAB_FAKETIME=${FAKETIME_LIB} غيرُ موجود`);
+  writeFileSync(CLOCK_FILE, '+0\n');
+}
+const PG_ENV =
+  FAKETIME_LIB === ''
+    ? process.env
+    : {
+        ...process.env,
+        LD_PRELOAD: FAKETIME_LIB,
+        FAKETIME_TIMESTAMP_FILE: CLOCK_FILE,
+        FAKETIME_NO_CACHE: '1',
+        FAKETIME_DONT_FAKE_MONOTONIC: '1',
+      };
+
 /** @param {string} data @param {string} log */
 function pgStart(data, log) {
-  const r = run(bin('pg_ctl'), ['-D', data, '-l', log, '-w', '-t', '60', 'start']);
+  const r = run(bin('pg_ctl'), ['-D', data, '-l', log, '-w', '-t', '60', 'start'], {
+    env: PG_ENV,
+  });
   must(r.status === 0, `pg_ctl start: ${r.stderr || r.stdout}`);
 }
 /** @param {string} data @param {'fast'|'immediate'} [mode] */
@@ -374,7 +395,10 @@ async function main() {
   const tcpUrl = `postgresql://postgres@127.0.0.1:${cluster.port}/state`;
   /** @type {Array<[string, Record<string, string>]>} */
   const suites = [
-    ['tests/fence/db-fence.test.mjs', {}],
+    [
+      'tests/fence/db-fence.test.mjs',
+      CLOCK_FILE === '' ? {} : { XUUX_FENCE_FAKETIME_FILE: CLOCK_FILE },
+    ],
     ['tests/fence/fence-lifecycle.test.mjs', {}],
     ['tests/fence/halt-integrity.test.mjs', {}],
     ['tests/fence/effects.test.mjs', {}],
@@ -859,6 +883,7 @@ async function liveLab() {
     'LAB-UID-04',
     'LAB-UID-05',
     'LAB-UID-06',
+    'LAB-UID-07',
     'LAB-HALT-LIVE',
   ];
   if (!osUsersReady) {
@@ -1295,6 +1320,153 @@ async function liveLab() {
       },
     );
 
+    await check(
+      'LAB-UID-07',
+      'WL-536/TH-UID-05: انهيارٌ حقيقيٌّ (SIGABRT من الـUID نفسِه، RLIMIT_CORE مرفوع) — العاملُ المعزولُ لا يُخلِّفُ تفريغاً مع suid_dumpable=0، ومع 2 يكتبُه النواةُ لـroot وحدَه؛ والضابطُ (عمليةٌ بُدئت بالـUID) يُفرِّغُ تفريغاً يقرؤه الـUID',
+      async () => {
+        const origPattern = readFileSync('/proc/sys/kernel/core_pattern', 'utf8').trim();
+        const origDump = readFileSync('/proc/sys/fs/suid_dumpable', 'utf8').trim();
+        must(
+          origDump === '0' || origDump === '2',
+          `suid_dumpable=${origDump} يرفضُه المُقلِعُ أصلاً`,
+        );
+        const dir = mkdtempSync(path.join(tmpdir(), 'xuux-lab-cores-'));
+        chmodSync(dir, 0o1777);
+        /** @param {string} key @param {string} value */
+        const setSys = (key, value) => {
+          const r = run('sudo', [
+            '-n',
+            'sh',
+            '-c',
+            `printf '%s\\n' "$1" > /proc/sys/${key}`,
+            'sh',
+            value,
+          ]);
+          must(r.status === 0, `sysctl ${key}: ${r.stderr}`);
+        };
+        /** @param {number} pid */
+        const coresOf = (pid) => {
+          const r = run('sudo', [
+            '-n',
+            'sh',
+            '-c',
+            `ls -n "$1" | grep " core\\.$2\\." || true`,
+            'sh',
+            dir,
+            String(pid),
+          ]);
+          return r.stdout.trim() === '' ? [] : r.stdout.trim().split('\n');
+        };
+        /** @param {number} ms */
+        const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+        /** @param {number} pid */
+        const waitCore = async (pid) => {
+          for (let i = 0; i < 50 && coresOf(pid).length === 0; i++) await sleep(200);
+          return coresOf(pid);
+        };
+        /** @param {string} writer */
+        const crashIsolated = async (writer) => {
+          const c = await boot('alpha');
+          const real = await spawnWriter('alpha', c, { writer, isolate: true, sealOnly: true });
+          try {
+            const sup = await confirmWorkerSeal(root, real.bus, c, { timeoutMs: 15_000 }).then(
+              () => 'confirmed',
+              (e) => String(e.message),
+            );
+            must(sup === 'confirmed', `ختمُ العاملِ المعزول: ${sup}`);
+            const sealed = /** @type {Record<string, any>} */ (
+              real.messages.find((m) => m.type === 'xuux-fence/sealed') ?? {}
+            );
+            must(sealed.isolation?.mode === 'uid-drop-after-exec', JSON.stringify(sealed));
+            const pid = Number(sealed.pid);
+            // أسوأُ حالٍ للمدافع: حدُّ التفريغِ مرفوعٌ (root يرفعُه هنا؛ والـUID نفسُه يرفعُ الليّنَ حتّى الصلب).
+            must(
+              run('sudo', ['-n', 'prlimit', '--core=unlimited:unlimited', `--pid=${pid}`])
+                .status === 0,
+              'prlimit',
+            );
+            const sig = run('sudo', ['-n', '-u', OS_USER('alpha'), 'kill', '-ABRT', String(pid)]);
+            must(sig.status === 0, `الـUID نفسُه يُرسلُ الإشارة (توفّر، TH-UID-07): ${sig.stderr}`);
+            const code = await Promise.race([real.exited, sleep(15_000).then(() => 'timeout')]);
+            await sleep(500);
+            return { pid, exit: code, cores: coresOf(pid), role: String(c.role_name) };
+          } finally {
+            real.kill();
+            await root.revokeCredential(String(c.role_name), 'lab-uid-07-done').catch(() => {});
+          }
+        };
+        setSys('kernel/core_pattern', `${dir}/core.%p.%u`);
+        try {
+          setSys('fs/suid_dumpable', '0');
+          // الضابط: عمليةٌ بُدئت بالـUID مباشرةً تُفرِّغُ — وإلّا فالمسبارُ لا يقيس.
+          const control = spawn(
+            'sudo',
+            [
+              '-n',
+              '-u',
+              OS_USER('alpha'),
+              'sh',
+              '-c',
+              `ulimit -c unlimited; exec "$0" -e 'setInterval(() => {}, 1000)'`,
+              process.execPath,
+            ],
+            { stdio: 'ignore' },
+          );
+          await sleep(800);
+          const cpid = Number(
+            run('pgrep', ['-u', OS_USER('alpha'), '-f', 'setInterval'])
+              .stdout.trim()
+              .split('\n')[0],
+          );
+          must(cpid > 0, 'لا ضابط');
+          run('sudo', ['-n', '-u', OS_USER('alpha'), 'kill', '-ABRT', String(cpid)]);
+          const controlCores = await waitCore(cpid);
+          control.unref();
+          must(
+            controlCores.length === 1,
+            `الضابطُ لم يُفرِّغ ⇒ المسبارُ لا يقيس: ${JSON.stringify(controlCores)}`,
+          );
+          const uid = String(osIds(OS_USER('alpha')).uid);
+          must(
+            controlCores[0]?.split(/\s+/)[2] === uid,
+            `تفريغُ الضابطِ ملكُ الـUID: ${controlCores[0]}`,
+          );
+          // (أ) suid_dumpable=0: لا تفريغ.
+          const zero = await crashIsolated('uid-07-zero');
+          must(zero.exit !== 'timeout', 'العاملُ لم يمت بالإشارة');
+          must(zero.cores.length === 0, `تفريغٌ مع suid_dumpable=0: ${JSON.stringify(zero.cores)}`);
+          // (ب) suid_dumpable=2: تفريغٌ لـroot وحدَه، والـUID نفسُه لا يقرؤه.
+          setSys('fs/suid_dumpable', '2');
+          const two = await crashIsolated('uid-07-two');
+          const fields = (two.cores[0] ?? '').split(/\s+/);
+          must(
+            two.cores.length === 1,
+            `لا تفريغَ مع suid_dumpable=2: ${JSON.stringify(two.cores)}`,
+          );
+          must(
+            fields[2] === '0' && fields[0] === '-rw-------',
+            `التفريغُ ليس لـroot وحدَه: ${two.cores[0]}`,
+          );
+          const file = path.join(dir, String(fields[fields.length - 1]));
+          const read = run('sudo', ['-n', '-u', OS_USER('alpha'), 'head', '-c', '16', file]);
+          must(read.status !== 0, 'الـUID نفسُه قرأَ تفريغَ root');
+          return {
+            core_pattern: `${dir}/core.%p.%u`,
+            control: { pid: cpid, core: controlCores[0] },
+            suid_dumpable_0: zero,
+            suid_dumpable_2: { ...two, same_uid_read: read.stderr.trim().slice(0, 120) },
+            limits:
+              'مختبرٌ على آلةٍ افتراضيّة (kvm) لا مضيفُ إنتاج؛ systemd-coredump غيرُ مفحوص؛ root يقرأُ التفريغَ (TH-UID-11)',
+          };
+        } finally {
+          setSys('kernel/core_pattern', origPattern);
+          setSys('fs/suid_dumpable', origDump);
+          run('sudo', ['-n', 'pkill', '-KILL', '-u', OS_USER('alpha'), '-f', 'setInterval']);
+          run('sudo', ['-n', 'rm', '-rf', dir]);
+        }
+      },
+    );
+
     // ── إيقافٌ حقيقيٌّ تحتَ كاتبٍ حيٍّ مختوم، متكرّر ──
     /** @type {Array<Record<string, unknown>>} */
     const rounds = [];
@@ -1571,9 +1743,9 @@ const ATTACKS = [
   {
     n: 24,
     title: 'التلاعبُ بساعةِ القاعدة',
-    refs: [],
-    notRun:
-      'تغييرُ ساعةِ النظامِ يتطلّبُ صلاحيةَ المضيفِ ولا faketime في المختبر؛ الإيجارُ يعتمدُ clock_timestamp() — خطرٌ متبقٍّ مُعلَن',
+    refs: [T('الهجوم 24 (WL-536)')],
+    partial:
+      'WL-536: يُشغَّلُ على خادمٍ تحتَ libfaketime (XUUX_FENCE_FAKETIME_FILE) — بدونه NOT RUN. التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، والتراجعُ دونَه يُحيي إيجاراً منقضياً بما لا يزيدُ على نافذةٍ واحدة — خطرٌ متبقٍّ مُعلَن (E12)',
   },
   {
     n: 25,
@@ -1645,7 +1817,9 @@ const report = {
     'مفاتيحُ اختبارٍ مولَّدةٌ في الذاكرة — لا مفتاحَ مالكٍ ولا HSM/TPM (hardwareBacked=false)',
     'superuser والجذرُ (root) خارجَ السياجِ عمداً ويُعلَنانِ break-glass — لا حمايةَ منهما',
     'المرحلةُ A تستعملُ حزامَ كلماتِ مرورٍ عبرَ TCP (حدٌّ معلنٌ في رأسِ الاختبار)؛ ربطُ الهويّةِ بـpeer يُثبَتُ في المرحلةِ B وحدَها',
-    'لا تلاعبَ بساعةِ النظامِ ولا فقدَ طاقةٍ حقيقيّاً؛ الانهيارُ = pg_ctl -m immediate',
+    FAKETIME_LIB === ''
+      ? 'لا تلاعبَ بساعةِ النظامِ ولا فقدَ طاقةٍ حقيقيّاً؛ الانهيارُ = pg_ctl -m immediate'
+      : `ساعةُ الخادمِ وحدَه تحتَ libfaketime (${FAKETIME_LIB})؛ لا فقدَ طاقةٍ حقيقيّاً؛ الانهيارُ = pg_ctl -m immediate`,
     'نجاحُ المختبرِ ليس دليلَ جاهزيّةٍ إنتاجية، ولا يمسُّ RISK-0054 (NO-GO)',
   ],
   summary: {

@@ -628,6 +628,10 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM fence.roster r WHERE r.worker_id = cr.worker_id AND r.roster_version = c.roster_version) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF008', MESSAGE = format('fence: العاملُ %s ليس في القائمةِ المعتمدة', cr.worker_id);
   END IF;
+  -- WL-536 (الهجوم 24): ساعةٌ تراجعت قبلَ آخرِ تجديدٍ لا تُحيي إيجاراً منقضياً — رفضٌ مغلق.
+  IF EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.renewed_at > clock_timestamp()) THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF012', MESSAGE = 'fence: ساعةُ القاعدةِ تراجعت قبلَ آخرِ تجديدٍ للإيجار';
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.expires_at > clock_timestamp()) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF009', MESSAGE = 'fence: الإيجارُ منقضٍ أو غائب';
   END IF;
@@ -649,7 +653,8 @@ BEGIN
   SELECT * INTO c FROM fence.control WHERE id;
   SELECT * INTO cr FROM fence.credentials WHERE role_name = s;
   IF NOT FOUND OR cr.status <> 'ACTIVE' OR cr.epoch <> c.epoch OR NOT fence._session_sealed(cr) THEN RETURN false; END IF;
-  RETURN EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.expires_at > clock_timestamp())
+  RETURN EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.expires_at > clock_timestamp()
+                 AND l.renewed_at <= clock_timestamp())
      AND NOT EXISTS (SELECT 1 FROM fence.halt_requests WHERE status IN ('OPEN', 'LOCKED'));
 END
 $f$;
@@ -889,6 +894,10 @@ BEGIN
     AND p.proname IN ('lo_creat', 'lo_create', 'lo_from_bytea', 'lo_put', 'lowrite', 'lo_unlink', 'lo_truncate', 'lo_truncate64', 'lo_open', 'lo_import')
     AND has_function_privilege('xuux_worker', p.oid, 'EXECUTE');
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_large_object_write', 'functions', x)); END IF;
+  -- WL-536: nextval/setval كتابةٌ لا معامليّةٌ خارجَ الزناد — لا USAGE ولا UPDATE للعاملِ على أيِّ تسلسل.
+  SELECT coalesce(jsonb_agg(c2.oid::regclass::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_class c2
+  WHERE c2.relkind = 'S' AND (has_sequence_privilege('xuux_worker', c2.oid, 'USAGE') OR has_sequence_privilege('xuux_worker', c2.oid, 'UPDATE'));
+  IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_sequence_write', 'sequences', x)); END IF;
   SELECT coalesce(jsonb_agg(g.roleid::regrole::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_auth_members g
   WHERE g.member = 'xuux_worker'::regrole;
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_inherits_roles', 'roles', x)); END IF;
@@ -903,7 +912,7 @@ BEGIN
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'escape_extensions', 'extensions', x)); END IF;
   residuals := residuals || jsonb_build_array(
     jsonb_build_object('kind', 'notify_not_revocable', 'note', 'NOTIFY أمرٌ بلا امتياز: نافذتُه بين قفلِ الإيقافِ وإنهاءِ الجلسات؛ لا مُستقبِلَ في المشروع (E3)'),
-    jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة؛ العبثُ بها خارجَ السياج'));
+    jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة: التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، وما دونَه يمدُّ الإيجارَ بما لا يزيدُ على نافذةٍ واحدة؛ العبثُ بها خارجَ السياج'));
   RETURN jsonb_build_object('ok', jsonb_array_length(problems) = 0, 'problems', problems, 'residuals', residuals,
     'state', eff->'state', 'epoch', c.epoch, 'roster_version', c.roster_version, 'roster_hash', c.roster_hash,
     'incarnation', live, 'checked_at', clock_timestamp());
@@ -1380,6 +1389,10 @@ BEGIN
   IF NOT FOUND OR cr.status <> 'ACTIVE' OR cr.epoch <> c.epoch THEN
     RAISE EXCEPTION USING ERRCODE = 'XF007', MESSAGE = 'fence: اعتمادٌ غيرُ نشِط';
   END IF;
+  -- WL-536: لا تجديدَ على ساعةٍ تراجعت قبلَ آخرِ تجديد — وإلّا أعادَ التجديدُ شرعنةَ الساعةِ المُرجَعة.
+  IF EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = renew_lease.role_name AND l.epoch = c.epoch AND l.renewed_at > clock_timestamp()) THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF012', MESSAGE = 'fence: ساعةُ القاعدةِ تراجعت قبلَ آخرِ تجديد — لا تجديد';
+  END IF;
   e := clock_timestamp() + make_interval(secs => c.lease_window_s);
   UPDATE fence.run_lease SET expires_at = e, renewed_at = clock_timestamp() WHERE run_lease.role_name = renew_lease.role_name AND epoch = c.epoch;
   IF NOT FOUND THEN RAISE EXCEPTION USING ERRCODE = 'XF009', MESSAGE = 'fence: لا إيجار'; END IF;
@@ -1602,7 +1615,10 @@ GRANT USAGE ON SCHEMA state TO xuux_worker, xuux_migrator;
 GRANT CREATE ON SCHEMA state TO xuux_migrator;
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA state TO xuux_worker;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA state TO xuux_worker;
+-- WL-536: لا USAGE ولا UPDATE للعاملِ على تسلسلاتِ state. أعمدةُ الهويّةِ (GENERATED ... AS IDENTITY)
+-- تتولّدُ عندَ الإدراجِ بلا امتيازٍ على التسلسل، وnextval/setval أثرٌ لا معامليٌّ لا يمرُّ بـxf_guard
+-- ولا يتراجعُ عنه ROLLBACK — فكانَ مسارَ كتابةٍ بعدَ انقضاءِ الإيجارِ أو الإلغاء. SELECT وحدَه قراءة.
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA state TO xuux_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA state TO xuux_migrator;
 GRANT SELECT, INSERT, DELETE ON public.schema_migrations TO xuux_migrator;
 
