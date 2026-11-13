@@ -558,7 +558,8 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     // سلبيّ (يفشلُ قبلَ الإصلاح): منحُ USAGE على تسلسلاتِ state كان يتيحُ للعاملِ nextval بعدَ انقضاءِ إيجارِه
     // أو إلغاءِ اعتمادِه — كتابةٌ دائمةٌ لا تمرُّ بـxf_guard ولا يتراجعُ عنها ROLLBACK.
     const seqs = await h.db.pool.query(
-      `SELECT c.oid::regclass::text AS s FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      // اسمٌ مؤهَّلٌ بالمخطّط: search_path جلسةِ العاملِ غيرُ search_path الإدارة (regclass::text يُسقِطُه).
+      `SELECT format('%I.%I', n.nspname, c.relname) AS s FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'state' AND c.relkind = 'S' ORDER BY 1`,
     );
     assert.ok(seqs.rows.length > 0, 'تسلسلاتُ هويّةٍ في state');
