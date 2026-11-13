@@ -12,6 +12,9 @@
 //   S2  سجلُّ تراجعٍ جديدٌ مُزامَنٌ، ثمَّ ختمُ `staged = {txn, from: (e, A_e)}` في البيان.
 //   S3  تنفيذُ الفعل. كلُّ كتابةٍ دائمةٍ تُنادي `beforeDurableWrite` **قبلَ** أن تمسَّ
 //       القرص، فيُكتَبُ ما كان قبلَها في سجلِّ التراجعِ مُزامَناً.
+//   S3' (‏`WL-534`، `LIVE-39`) مزامنةُ كلِّ مسارٍ لُمِسَ في S3 **ومجلّداتِه حتّى الجذر**
+//       قبلَ S4 — فدوامُ ما يُشهَدُ عليه لا يتوقّفُ على انضباطِ كلِّ كاتبٍ ولا على مجلّةِ
+//       نظامِ ملفّاتٍ بعينِه. وفشلُها يُسيِّجُ ولا يُقَرُّ (‏`staged` باقٍ ⇒ `B2`).
 //   S4  (‏الوضعُ المربوطُ وحدَه) `V' = بصمةُ الحالة`، `A' = H(domain‖instanceId‖e+1‖V')`،
 //       ثمَّ `advanceState((e, A_e) → (e+1, A'))` مع إعادةِ محاولةٍ آمنةٍ لنتيجةٍ مجهولة.
 //   S5  الترقية: ختمُ `(e+1, A', V')` والرفوعِ المعلَّقةِ و`staged = null` معاً. ثمَّ الإقرار.
@@ -318,6 +321,11 @@ export class CommitCoordinator {
   lastReceipt: CommitReceipt | null = null;
   /** مراقبُ مراحلَ — للاختبارِ وحدَه (‏تتبُّعُ الترتيب)، لا يُغيّرُ السلوك. */
   onStage: ((stage: 'S2' | 'S3' | 'S4' | 'S5' | 'ACK', intent: string) => void) | null = null;
+  /**
+   * مراقبُ مزامنةِ المسارِ الملموسِ قبلَ S4 (‏`WL-534`) — للاختبارِ وحدَه: يُنادى قبلَ كلِّ
+   * مزامنةٍ بالمسارِ ونوعِه، لا يُغيّرُ السلوك.
+   */
+  onSync: ((path: string, kind: 'file' | 'dir') => void) | null = null;
 
   /**
    * @param options - الخيارات
@@ -518,8 +526,9 @@ export class CommitCoordinator {
       if (failed) throw failure;
       return result as T;
     }
-    // S4 + S5
+    // S3' + S4 + S5
     try {
+      this.#syncTouched(txn);
       const receipt = await this.#commit(txn, body, from);
       this.lastReceipt = receipt;
     } catch (error) {
@@ -529,6 +538,65 @@ export class CommitCoordinator {
     // الرفضُ المسمّى من المجالِ (‏إيقافٌ مرفوضٌ كُتِبَ قيدُه) يُرفَعُ **بعدَ** دوامِ قيدِه.
     if (failed) throw failure;
     return result as T;
+  }
+
+  /**
+   * S3' (‏`WL-534`، `LIVE-39`): مزامنةُ كلِّ مسارٍ لُمِسَ ومجلّداتِه قبلَ أن يُشهَدَ عليه.
+   *
+   * **لماذا هنا لا عندَ كلِّ كاتب:** `D3` عقدُ الحاجزِ لا عقدُ الكاتب. كاتبٌ يُعيدُ التسميةَ
+   * بلا مزامنةٍ (‏مخزنُ المنحِ قبلَ `WL-534`) أو ينشئُ ملفاً إلحاقيّاً أوّلَ مرّةٍ بلا مزامنةِ
+   * مجلّدِه، كانت معاملتُه تُقَرُّ ودوامُها مرهونٌ بأنّ مزامنةً لاحقةً لملفٍّ آخرَ تجرُّ معها
+   * مجلّةَ `ext4` كلَّها — سلوكُ نظامِ ملفّاتٍ لا ضمانٌ في العقد. فالمسارُ الملموسُ يُزامَنُ
+   * ملفّاً (‏إن بقي)، ثمّ كلُّ مجلّدٍ من مجلّدِه حتّى الجذرِ (‏يُغطّي الإنشاءَ والحذفَ وإعادةَ
+   * التسميةِ والمجلّداتِ المنشأةَ تكراريّاً)؛ والملفُّ خارجَ الجذرِ (‏`extraFiles`) مجلّدُه وحدَه.
+   * `ENOENT` على ملفٍّ معناهُ أنّه حُذِفَ في المعاملة فمجلّدُه هو ما يُزامَن؛ وكلُّ خطأٍ غيرِه
+   * يُرفَعُ فيُسيَّجُ الحاجزُ ولا `ACK` (‏لا قائمةَ استثناءٍ — كما `fsyncDirectoryOrFail`).
+   * @param txn - المعاملة
+   */
+  #syncTouched(txn: Transaction): void {
+    if (!this.#fsync || txn.touched.size === 0) return;
+    const dirs = new Set<string>();
+    for (const file of [...txn.touched].sort()) {
+      this.onSync?.(file, 'file');
+      let fd: number | null = null;
+      try {
+        fd = openSync(file, 'r');
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ENOENT') throw error;
+      }
+      if (fd !== null) {
+        try {
+          fsyncSync(fd);
+        } catch (error) {
+          try {
+            closeSync(fd);
+          } catch {
+            /* خطأُ المزامنةِ هو المرفوع */
+          }
+          throw error;
+        }
+        closeSync(fd);
+      }
+      if (!file.startsWith(this.#rootPrefix)) {
+        dirs.add(dirname(file));
+        continue;
+      }
+      for (let dir = dirname(file); ; dir = dirname(dir)) {
+        dirs.add(dir);
+        if (dir === this.root || !dir.startsWith(this.#rootPrefix)) break;
+      }
+    }
+    // الأعمقُ أوّلاً: مدخلُ الابنِ في أبيه يُزامَنُ بعدَ محتوى الابن.
+    for (const dir of [...dirs].sort((a, b) => b.length - a.length || (a < b ? -1 : 1))) {
+      this.onSync?.(dir, 'dir');
+      try {
+        fsyncDirectoryOrFail(dir);
+      } catch (error) {
+        // مجلّدٌ حُذِفَ في المعاملةِ نفسِها: أبوه في المجموعةِ ويُزامَنُ بعدَه.
+        if ((error as { code?: string }).code === 'ENOENT' && dir !== this.root) continue;
+        throw error;
+      }
+    }
   }
 
   /** S4 ثمَّ S5. */
