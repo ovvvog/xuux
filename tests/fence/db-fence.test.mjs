@@ -34,6 +34,7 @@ import {
   newBootId,
   rawEd25519PublicKey,
   confirmWorkerSeal,
+  sealFencedSessions,
   signCredentialChallenge,
 } from '../../src/fence/db-fence.mjs';
 import { DB_ERRORS, createPool } from '../../src/persistence/db.mjs';
@@ -640,6 +641,111 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     await c.query(`DELETE FROM state.events WHERE event_id = 'evt-wl537'`);
     assert.ok(typeof lsn0 === 'string' && lsn0.includes('/'), lsn0);
     await h.root.revokeCredential(w.credential.role_name, 'test');
+  });
+
+  test('WL-538: العاملُ يُغيّرُ كلمةَ مرورِه وإعداداتِ دورِه (‏ALTER ROLE الذاتيّ) — لا دخولَ بها، ولا كتابةَ بعدَها، وتُمحى عندَ الإلغاءِ والإيقاف', async () => {
+    // ‏PostgreSQL يسمحُ لكلِّ دورٍ بـALTER ROLE ‎<نفسه>‎ PASSWORD و‎SET‎ بلا امتيازٍ يُسحَب، ولا يُطلِقُ لها
+    // مُطلِقَ أحداث (‏أوامرُ كائناتٍ عامّة) — فهي كتاباتٌ دائمةٌ في pg_authid/pg_db_role_setting لا تمرُّ
+    // بـxf_guard. قبلَ الإصلاح: كلمةُ المرورِ تصيرُ سرّاً حاملاً يدخلُ به غيرُ مستخدمِ peer، والإعداداتُ تبقى
+    // بعدَ الإلغاء، والعاملُ يكتبُ وقد عبثَ بدورِه.
+    const roleState = async (/** @type {string} */ r) =>
+      (
+        await h.db.pool.query(
+          `SELECT a.rolpassword IS NULL AS no_secret, a.rolvaliduntil = '-infinity' AS pw_dead,
+                  (SELECT count(*)::int FROM pg_db_role_setting s WHERE s.setrole = a.oid) AS settings
+             FROM pg_authid a WHERE a.rolname = $1`,
+          [r],
+        )
+      ).rows[0];
+    if ((await h.sovereign.status()).effective.state !== 'RUNNING') await h.resume();
+    // (‏1) الإصدار: دورُ الإقلاعِ لا يقبلُ كلمةَ مرورٍ أبداً (‏VALID UNTIL '-infinity' لا يغيّرُه إلا CREATEROLE).
+    const w = await h.boot('beta', { seal: false });
+    const c = /** @type {pg.Client} */ (w.client);
+    const role = String(w.credential.role_name);
+    assert.equal(w.issuedWithoutSecret, true, 'صدرَ بلا سرّ');
+    assert.equal((await roleState(role)).pw_dead, true, 'VALID UNTIL -infinity عندَ الإصدار');
+    // (‏2) نافذةُ ما قبلَ الختم (‏الدورُ LOGIN): العاملُ يضعُ كلمةَ مرور — يقبلُها PostgreSQL ولا مانعَ له —
+    // لكنّها لا تُدخِلُ أحداً عبرَ TCP: الهويّةُ لا تُصدَّرُ سرّاً حاملاً إلى غيرِ مستخدمِ peer.
+    await c.query(`ALTER ROLE CURRENT_USER PASSWORD 'exported-by-worker'`);
+    const url = new URL(databaseUrl() ?? '');
+    url.username = role;
+    url.password = 'exported-by-worker';
+    url.pathname = `/${h.db.name}`;
+    const thief = new pg.Client({ connectionString: url.toString() });
+    thief.on('error', () => {});
+    const stolen = await thief.connect().then(
+      () => null,
+      (/** @type {any} */ e) => e,
+    );
+    if (stolen === null) await thief.end().catch(() => {});
+    assert.ok(stolen !== null, 'كلمةُ مرورٍ وضعَها العاملُ أدخلَت جلسةً عبرَ TCP — هويّةٌ مُصدَّرة');
+    assert.equal(stolen.code, '28P01', `رفضُ المصادقةِ لا غيرُه: ${stolen.code} ${stolen.message}`);
+    await rejectsWith(
+      () => c.query(`ALTER ROLE CURRENT_USER VALID UNTIL 'infinity'`),
+      ['42501'],
+      'العاملُ لا يُحيي كلمةَ المرور',
+    );
+    // (‏3) الختمُ يمحو ما وضعَه قبلَه.
+    const live = (await h.sovereign.status()).live;
+    await sealFencedSessions([c], h.keys.beta, {
+      db: h.db.name,
+      sysid: String(live.sysid),
+      workerId: 'beta',
+      bootId: w.bootId,
+      epoch: w.credential.epoch,
+      roleName: role,
+    });
+    assert.deepEqual(
+      await roleState(role),
+      { no_secret: true, pw_dead: true, settings: 0 },
+      'الختمُ يمحو كلمةَ المرورِ والإعدادات',
+    );
+    await c.query(`INSERT INTO state.fence_probe VALUES (538, 'sealed')`);
+    // (‏4) بإيجارٍ منقضٍ: الكتابةُ مرفوضةٌ (‏XF009)، وALTER ROLE الذاتيُّ يقبلُه PostgreSQL — كتابةٌ دائمة.
+    await h.db.pool.query(
+      `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+      [role],
+    );
+    await rejectsWith(
+      () => c.query(`UPDATE state.fence_probe SET v = 'late' WHERE id = 538`),
+      ['XF009'],
+      'إيجارٌ منقضٍ',
+    );
+    await c.query(`ALTER ROLE CURRENT_USER SET search_path = public`);
+    await c.query(`ALTER ROLE CURRENT_USER IN DATABASE ${quoteIdent(h.db.name)} SET statement_timeout = 1`);
+    await c.query(`ALTER ROLE CURRENT_USER PASSWORD 'after-expiry'`);
+    assert.equal((await roleState(role)).settings, 2, 'الإعداداتُ كُتِبَت دائمةً بإيجارٍ منقضٍ');
+    // (‏5) تجديدُ الإيجارِ لا يُعيدُ عاملاً عبثَ بدورِه: كتابتُه وقراءتُه مرفوضتان ما بقيَ الأثر (‏XF013).
+    await h.root.renewLease(role);
+    await rejectsWith(
+      () => c.query(`UPDATE state.fence_probe SET v = 'tampered' WHERE id = 538`),
+      ['XF013'],
+      'كتابةُ عاملٍ عبثَ بإعداداتِ دورِه',
+    );
+    const seen = await c.query(`SELECT count(*)::int AS n FROM state.fence_probe WHERE id = 538`);
+    assert.equal(seen.rows[0].n, 0, 'وقراءتُه مسدودة (‏read_ok)');
+    let chk = await h.root.checkFenced();
+    const tamper = chk.problems.find((/** @type {any} */ p) => p.kind === 'worker_role_settings');
+    assert.ok(tamper && tamper.roles.includes(role), JSON.stringify(chk.problems));
+    assert.ok(chk.residuals.some((/** @type {any} */ r) => r.kind === 'worker_self_alter_role'), 'الحدُّ معلن');
+    // (‏6) الإلغاءُ (‏بعدَ إنهاءِ الجلسات) يمحو الأثرَ كلَّه — ولا جلسةَ تبقى لتُعيدَه.
+    await h.root.revokeCredential(role, 'wl-538');
+    assert.deepEqual(await roleState(role), { no_secret: true, pw_dead: true, settings: 0 }, 'الإلغاءُ يمحو');
+    await rejection(() => c.query('SELECT 1'));
+    // (‏7) انحدار: أثرٌ على دورِ عاملٍ ملغى لم يُسقَط بعد (‏superuser، تحتَ HALTED) أو دورٌ يقبلُ كلمةَ مرور
+    // ⇒ check_fenced يُظهِرُه وRESUME يرفضُ (‏XF415) — لا يُستأنَفُ فوقَ هويّةٍ عُبِثَ بها.
+    await h.db.pool.query(`DELETE FROM state.fence_probe WHERE id = 538`);
+    await h.root.halt('wl-538', { effects: NO_EFFECTS });
+    await h.db.pool.query(`CREATE ROLE xw_alpha_0538053805380538 NOLOGIN IN ROLE xuux_worker`);
+    await h.db.pool.query(`ALTER ROLE xw_alpha_0538053805380538 SET search_path = public`);
+    await h.db.pool.query(`ALTER ROLE xw_alpha_0538053805380538 VALID UNTIL 'infinity'`);
+    chk = await h.root.checkFenced();
+    const kinds = chk.problems.map((/** @type {any} */ p) => p.kind);
+    assert.ok(kinds.includes('worker_role_settings'), JSON.stringify(kinds));
+    assert.ok(kinds.includes('worker_password_auth_enabled'), JSON.stringify(kinds));
+    await rejectsWith(() => h.resume(), ['XF415'], 'أثرُ عبثٍ على دورِ عاملٍ يمنعُ الاستئناف');
+    await h.db.pool.query(`DROP ROLE xw_alpha_0538053805380538`);
+    await h.resume();
   });
 
   const clockFile = process.env['XUUX_FENCE_FAKETIME_FILE'] ?? '';

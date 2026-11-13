@@ -638,6 +638,12 @@ BEGIN
   IF NOT fence._session_sealed(cr) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF011', MESSAGE = format('fence: الجلسة %s ليست ضمنَ الجلساتِ المختومةِ للاعتماد %s', pg_backend_pid(), s);
   END IF;
+  -- WL-538: دورٌ غيّرَ إعداداتِه الدائمةَ (‏ALTER ROLE <نفسه> SET) عبثَ بهويّتِه خارجَ السياج — رفضٌ مغلق
+  -- حتى يُلغى الاعتمادُ فيُمحى الأثر. ودورٌ يقبلُ كلمةَ مرورٍ ليس ممّا يُصدِرُه السياج.
+  IF EXISTS (SELECT 1 FROM pg_db_role_setting x WHERE x.setrole = (SELECT oid FROM pg_roles WHERE rolname = s))
+     OR (SELECT r.rolvaliduntil IS DISTINCT FROM '-infinity'::timestamptz FROM pg_roles r WHERE r.rolname = s) THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF013', MESSAGE = format('fence: الدورُ %s عُبِثَ بإعداداتِه أو يقبلُ كلمةَ مرور — الكتابةُ مرفوضة', s);
+  END IF;
   RETURN NULL;
 END
 $f$;
@@ -653,6 +659,11 @@ BEGIN
   SELECT * INTO c FROM fence.control WHERE id;
   SELECT * INTO cr FROM fence.credentials WHERE role_name = s;
   IF NOT FOUND OR cr.status <> 'ACTIVE' OR cr.epoch <> c.epoch OR NOT fence._session_sealed(cr) THEN RETURN false; END IF;
+  -- WL-538: كالحارس — لا قراءةَ لدورٍ عُبِثَ بإعداداتِه أو يقبلُ كلمةَ مرور.
+  IF EXISTS (SELECT 1 FROM pg_db_role_setting x WHERE x.setrole = s::regrole::oid)
+     OR (SELECT r.rolvaliduntil IS DISTINCT FROM '-infinity'::timestamptz FROM pg_roles r WHERE r.rolname = s) THEN
+    RETURN false;
+  END IF;
   RETURN EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = s AND l.epoch = c.epoch AND l.expires_at > clock_timestamp()
                  AND l.renewed_at <= clock_timestamp())
      AND NOT EXISTS (SELECT 1 FROM fence.halt_requests WHERE status IN ('OPEN', 'LOCKED'));
@@ -844,6 +855,14 @@ BEGIN
   SELECT coalesce(jsonb_agg(r.rolname ORDER BY r.rolname), '[]'::jsonb) INTO x FROM pg_roles r
   WHERE r.rolcanlogin AND fence.is_worker_role(r.oid);
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_login_roles', 'roles', x)); END IF;
+  -- WL-538: أثرُ ALTER ROLE الذاتيّ على أيِّ دورِ عامل (‏نشِطاً أو ملغى لم يُسقَط) أو على xuux_worker نفسِه:
+  -- إعداداتٌ دائمة، أو دورٌ تُقبَلُ له كلمةُ مرور (‏VALID UNTIL ليس '-infinity'). البصمةُ المخزَّنةُ لا تُرى هنا.
+  SELECT coalesce(jsonb_agg(DISTINCT r.rolname ORDER BY r.rolname), '[]'::jsonb) INTO x FROM pg_db_role_setting st
+    JOIN pg_roles r ON r.oid = st.setrole WHERE fence._is_worker_identity(r.oid) OR r.rolname = 'xuux_worker';
+  IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_role_settings', 'roles', x)); END IF;
+  SELECT coalesce(jsonb_agg(r.rolname ORDER BY r.rolname), '[]'::jsonb) INTO x FROM pg_roles r
+  WHERE fence._is_worker_identity(r.oid) AND r.rolvaliduntil IS DISTINCT FROM '-infinity'::timestamptz;
+  IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_password_auth_enabled', 'roles', x)); END IF;
   SELECT count(*) INTO n FROM fence.run_lease WHERE expires_at > clock_timestamp();
   IF n > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'unexpired_leases', 'count', n)); END IF;
   -- أدوارُ دخولٍ قادرةٌ على التجاوز: غيرُ المُعلَنةِ مشكلة، والمُعلَنةُ حدٌّ ظاهر.
@@ -917,7 +936,8 @@ BEGIN
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'escape_extensions', 'extensions', x)); END IF;
   residuals := residuals || jsonb_build_array(
     jsonb_build_object('kind', 'notify_not_revocable', 'note', 'NOTIFY أمرٌ بلا امتياز: نافذتُه بين قفلِ الإيقافِ وإنهاءِ الجلسات؛ لا مُستقبِلَ في المشروع (E3)'),
-    jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة: التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، وما دونَه يمدُّ الإيجارَ بما لا يزيدُ على نافذةٍ واحدة؛ العبثُ بها خارجَ السياج'));
+    jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة: التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، وما دونَه يمدُّ الإيجارَ بما لا يزيدُ على نافذةٍ واحدة؛ العبثُ بها خارجَ السياج'),
+    jsonb_build_object('kind', 'worker_self_alter_role', 'note', 'ALTER ROLE <نفسه> PASSWORD/SET بلا امتيازٍ يُسحَب ولا مُطلِقِ أحداث (WL-538): الإعداداتُ تُرفَضُ كتابتُها (XF013) وتُمحى عندَ الختمِ والإلغاءِ والإيقاف، وكلمةُ المرورِ لا تُدخِلُ أحداً (VALID UNTIL -infinity) وتُمحى كذلك؛ تغييرُ البصمةِ المخزَّنةِ نفسِه لا يُرى إلا بـsuperuser، ومنعُ الأمرِ من أصلِه يحتاجُ خطّافاً بلغةِ C (قرارُ معمار)'));
   RETURN jsonb_build_object('ok', jsonb_array_length(problems) = 0, 'problems', problems, 'residuals', residuals,
     'state', eff->'state', 'epoch', c.epoch, 'roster_version', c.roster_version, 'roster_hash', c.roster_hash,
     'incarnation', live, 'checked_at', clock_timestamp());
@@ -1154,6 +1174,10 @@ BEGIN
       RAISE EXCEPTION USING ERRCODE = 'XF412', MESSAGE = format('fence: دورُ عاملٍ %s قادرٌ على الدخولِ ولا يُدارُ من السياج', r.rolname);
     END;
   END LOOP;
+  -- WL-538: لا جلسةَ عاملٍ حيّة (‏XF411 أعلاه) — يُمحى ما وُضِعَ على أدوارِ العمّالِ قبلَ الاسترجاع.
+  FOR r IN SELECT rolname FROM pg_roles WHERE fence.is_worker_role(oid) LOOP
+    PERFORM fence._neutralize_role(r.rolname);
+  END LOOP;
   DELETE FROM fence.run_lease;
   UPDATE fence.halt_requests SET status = 'FAILED', completed_at = clock_timestamp(), report = jsonb_build_object('closed_by', 'RECOVER') WHERE status IN ('OPEN', 'LOCKED');
   -- كلُّ حالةٍ مختومةٍ تمرُّ بـRECOVERY_REQUIRED ثمّ HALTED، وكلُّ خطوةٍ ترفعُ العهد.
@@ -1237,6 +1261,39 @@ BEGIN
 END
 $f$;
 
+-- WL-538: ‏ALTER ROLE <نفسه> PASSWORD و‎SET‎ يملكُهما كلُّ دورٍ في PostgreSQL بلا امتيازٍ يُسحَب، ولا
+-- يُطلِقُ لهما مُطلِقَ أحداث — كتابتانِ دائمتانِ (‏pg_authid، pg_db_role_setting) لا تمرّانِ بـxf_guard.
+-- فلا يُمنَعُ الأمرُ نفسُه هنا، بل أثرُه: (‏أ) الدورُ يصدرُ VALID UNTIL '-infinity' فكلمةُ مرورٍ يضعُها العاملُ
+-- لا تُدخِلُ أحداً (‏peer/cert لا تقرآنِه، وتغييرُه لـCREATEROLE وحدَه)؛ (‏ب) الحارسُ يرفضُ جلسةَ دورٍ له
+-- إعداداتٌ دائمة (‏XF013)؛ (‏ج) هذه الدالّةُ تمحو الأثرَ — تُنادى بعدَ NOLOGIN وإنهاءِ الجلساتِ فلا تبقى
+-- جلسةٌ تُعيدُه؛ (‏د) check_fenced يرفضُ ما بقي. **حدّ:** تغييرُ البصمةِ المخزَّنةِ نفسِه لا يُرى إلا بـsuperuser.
+-- هويّةُ عاملٍ تحملُ امتيازاتِه (‏INHERIT أو SET) — لا xf_owner الذي يملكُ ADMIN على xuux_worker وحدَه.
+CREATE FUNCTION fence._is_worker_identity(r oid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT fence.is_worker_role(r) AND (pg_has_role(r, 'xuux_worker', 'USAGE') OR pg_has_role(r, 'xuux_worker', 'SET'))
+$f$;
+
+CREATE FUNCTION fence._neutralize_role(role_name name) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE r record; n integer := 0;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles x WHERE x.rolname = role_name AND fence._is_worker_identity(x.oid)) THEN
+    RETURN 0;
+  END IF;
+  EXECUTE format('ALTER ROLE %I PASSWORD NULL VALID UNTIL %L', role_name, '-infinity');
+  FOR r IN SELECT s.setdatabase, d.datname FROM pg_db_role_setting s LEFT JOIN pg_database d ON d.oid = s.setdatabase
+           WHERE s.setrole = (SELECT x.oid FROM pg_roles x WHERE x.rolname = role_name) LOOP
+    IF r.setdatabase = 0 THEN
+      EXECUTE format('ALTER ROLE %I RESET ALL', role_name);
+    ELSE
+      EXECUTE format('ALTER ROLE %I IN DATABASE %I RESET ALL', role_name, r.datname);
+    END IF;
+    n := n + 1;
+  END LOOP;
+  RETURN n;
+END
+$f$;
+
 CREATE FUNCTION fence.issue_challenge(worker_id text, boot_id text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE c fence.control; nonce text; rn name; eff jsonb := fence.effective_state(); live jsonb := fence._live_incarnation();
@@ -1295,8 +1352,10 @@ BEGIN
     DELETE FROM fence.run_lease WHERE role_name = old.role_name;
     EXECUTE format('ALTER ROLE %I NOLOGIN', old.role_name);
     PERFORM fence._terminate_worker_sessions(old.role_name);
+    PERFORM fence._neutralize_role(old.role_name);
   END LOOP;
-  EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT 16 PASSWORD NULL', ch.role_name);
+  -- WL-538: VALID UNTIL '-infinity' — لا مصادقةَ بكلمةِ مرورٍ لهذا الدورِ أبداً، ولو وضعَها العاملُ لنفسِه.
+  EXECUTE format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT 16 PASSWORD NULL VALID UNTIL %L', ch.role_name, '-infinity');
   EXECUTE format('GRANT xuux_worker TO %I WITH INHERIT TRUE, SET FALSE', ch.role_name);
   INSERT INTO fence.credentials (role_name, worker_id, boot_id, epoch, roster_version, status)
   VALUES (ch.role_name, ch.worker_id, ch.boot_id, c.epoch, c.roster_version, 'ACTIVE');
@@ -1357,12 +1416,15 @@ BEGIN
     DELETE FROM fence.run_lease WHERE role_name = s;
     EXECUTE format('ALTER ROLE %I NOLOGIN', s);
     PERFORM fence._terminate_worker_sessions(s);
+    PERFORM fence._neutralize_role(s);
     PERFORM fence._event('SEAL_REFUSED', c.epoch, jsonb_build_object('role', s, 'reason', why, 'declared', declared,
       'actual', actual, 'caller', fence._backend_tag(pg_backend_pid())));
     RETURN jsonb_build_object('sealed', false, 'reason', why, 'declared', declared, 'actual', actual);
   END IF;
   UPDATE fence.credentials SET sealed_at = clock_timestamp(), sealed_sessions = declared WHERE role_name = s;
   EXECUTE format('ALTER ROLE %I NOLOGIN', s);
+  -- WL-538: ما وضعَه العاملُ على دورِه قبلَ الختمِ يُمحى؛ وما يضعُه بعدَه يرفضُ الحارسُ كتابتَه (‏XF013).
+  PERFORM fence._neutralize_role(s);
   PERFORM fence._event('SESSIONS_SEALED', c.epoch, jsonb_build_object('role', s, 'sessions', declared));
   RETURN jsonb_build_object('sealed', true, 'role_name', s, 'sessions', declared);
 END
@@ -1417,6 +1479,7 @@ BEGIN
     EXECUTE format('ALTER ROLE %I NOLOGIN', role_name);
   END IF;
   n := fence._terminate_worker_sessions(role_name);
+  PERFORM fence._neutralize_role(role_name);
   PERFORM fence._event('CREDENTIAL_REVOKED', NULL, jsonb_build_object('role', role_name, 'reason', reason, 'terminated', n));
   RETURN n;
 END
@@ -1487,6 +1550,14 @@ BEGIN
     END;
   END LOOP;
   terminated := fence._terminate_worker_sessions(NULL);
+  -- WL-538: بعدَ إنهاءِ الجلساتِ تُمحى كلماتُ المرورِ والإعداداتُ عن كلِّ دورِ عامل (‏ما بقي يظهرُ في check_fenced).
+  FOR r IN SELECT rolname FROM pg_roles WHERE fence.is_worker_role(oid) LOOP
+    BEGIN
+      PERFORM fence._neutralize_role(r.rolname);
+    EXCEPTION WHEN insufficient_privilege THEN
+      NULL;
+    END;
+  END LOOP;
   PERFORM fence._event('HALT_REVOKED', NULL, jsonb_build_object('halt_id', halt_id, 'revoked', revoked, 'nologin', nologin, 'terminated', terminated));
   RETURN jsonb_build_object('revoked', revoked, 'nologin', nologin, 'terminated', terminated);
 END
