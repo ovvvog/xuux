@@ -53,6 +53,16 @@ GRANT EXECUTE ON FUNCTION pg_catalog.lo_creat(integer), pg_catalog.lo_create(oid
   pg_catalog.lo_put(oid, bigint, bytea), pg_catalog.lowrite(integer, bytea), pg_catalog.lo_unlink(oid),
   pg_catalog.lo_truncate(integer, integer), pg_catalog.lo_truncate64(integer, bigint), pg_catalog.lo_open(oid, integer) TO PUBLIC;
 
+DO $emit$
+DECLARE f regprocedure;
+BEGIN
+  FOR f IN SELECT p.oid::regprocedure FROM pg_proc p
+           WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_logical_emit_message' LOOP
+    EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO PUBLIC', f);
+  END LOOP;
+END
+$emit$;
+
 REVOKE ALL ON ALL TABLES IN SCHEMA state FROM xuux_worker, xuux_migrator;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA state FROM xuux_worker;
 REVOKE ALL ON SCHEMA state FROM xuux_worker, xuux_migrator;
