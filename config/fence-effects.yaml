@@ -86,3 +86,339 @@ effects:
     control: سحبُ المهامِّ كتابةٌ في state (E1) فيمنعُه الزناد؛ رسائلُ الطوابيرِ الخارجيةِ تحملُ رمزَ السياج (E15)
     status: PARTIAL
     evidence: tests/fence/db-fence.test.mjs + tests/fence/effects.test.mjs
+
+# WL-539 — جردٌ آليٌّ لقدراتِ العاملِ الدائمة. المصدرُ الحيُّ: fence.worker_capabilities() (كتالوجات PG)،
+# والمدقّقُ: auditWorkerCapabilities() في src/fence/effects.mjs (npm run fence:audit). كلُّ قدرةٍ في الجردِ
+# يجبُ أن تقعَ في صنفٍ هنا، وإلّا فشلَ المدقّقُ (unclassified). الصنفُ لا يُستنتَجُ من الاسم وحده:
+#   READ_ONLY         — قراءةٌ بلا كتابةٍ دائمة (تحليلٌ من مصدرِ PG)
+#   SESSION_TRANSIENT — أثرٌ يموتُ بموتِ الجلسة/المعاملة؛ الختمُ يقتلُ الجلسات (E4/E5)
+#   HANDLER           — معاملاتُها internal/trigger: لا تُستدعى من SQL مباشرة
+#   QUERY_EXECUTOR    — تنفّذُ نصَّ SQL بصلاحياتِ المستدعي نفسِه: لا تضيفُ قدرة، والزنادُ يحكمُ ما تكتبُه
+#   INTERNAL_CHECK    — EXECUTE لـPUBLIC لكنّ الدالةَ تفحصُ صلاحيةً داخلية؛ لكلٍّ مِسبارٌ يُنفَّذُ بدورِ العامل
+#                       المختوم ويجبُ أن يُرفَضَ بأحدِ الرموز (اختبار WL-539) — دليلٌ لا تحليل
+#   RESIDUAL          — مسموحٌ وأثرُه يتجاوزُ السياج؛ مربوطٌ بأثرٍ مُعلَنٍ متبقٍّ
+capabilities:
+  fence_api:
+    [
+      'fence.whoami()',
+      'fence.read_ok()',
+      'fence.effective_state()',
+      'fence.session_tag()',
+      'fence.seal_sessions(jsonb,bytea)',
+    ]
+  invoker_schemas: [state]
+  schemas_usage: [fence, information_schema, pg_catalog, public, state]
+  relations:
+    'pg_catalog.pg_settings:UPDATE': SESSION_TRANSIENT # UPDATE على العرضِ = set_config للجلسة
+  builtins:
+    READ_ONLY:
+      [
+        amvalidate,
+        array_sample,
+        array_shuffle,
+        clock_timestamp,
+        current_query,
+        currtid2,
+        currval,
+        gen_random_uuid,
+        lastval,
+        lo_close,
+        lo_get,
+        lo_lseek,
+        lo_lseek64,
+        lo_tell,
+        lo_tell64,
+        loread,
+        pg_available_wal_summaries,
+        pg_blocking_pids,
+        pg_collation_actual_version,
+        pg_control_checkpoint,
+        pg_control_init,
+        pg_control_recovery,
+        pg_control_system,
+        pg_current_wal_flush_lsn,
+        pg_current_wal_insert_lsn,
+        pg_current_wal_lsn,
+        pg_database_collation_actual_version,
+        pg_database_size,
+        pg_get_loaded_modules,
+        pg_get_multixact_members,
+        pg_get_sequence_data,
+        pg_get_wait_events,
+        pg_get_wal_replay_pause_state,
+        pg_get_wal_resource_managers,
+        pg_get_wal_summarizer_state,
+        pg_indexes_size,
+        pg_is_in_recovery,
+        pg_is_wal_replay_paused,
+        pg_isolation_test_session_is_blocked,
+        pg_jit_available,
+        pg_last_committed_xact,
+        pg_last_wal_receive_lsn,
+        pg_last_wal_replay_lsn,
+        pg_last_xact_replay_timestamp,
+        pg_lock_status,
+        pg_notification_queue_usage,
+        pg_partition_ancestors,
+        pg_partition_tree,
+        pg_prepared_xact,
+        pg_relation_size,
+        pg_safe_snapshot_blocking_pids,
+        pg_sequence_last_value,
+        pg_stat_get_backend_io,
+        pg_stat_get_backend_wal,
+        pg_stat_get_io,
+        pg_stat_get_recovery_prefetch,
+        pg_stat_get_xact_blocks_fetched,
+        pg_stat_get_xact_blocks_hit,
+        pg_stat_get_xact_function_calls,
+        pg_stat_get_xact_function_self_time,
+        pg_stat_get_xact_function_total_time,
+        pg_stat_get_xact_numscans,
+        pg_stat_get_xact_tuples_deleted,
+        pg_stat_get_xact_tuples_fetched,
+        pg_stat_get_xact_tuples_hot_updated,
+        pg_stat_get_xact_tuples_inserted,
+        pg_stat_get_xact_tuples_newpage_updated,
+        pg_stat_get_xact_tuples_returned,
+        pg_stat_get_xact_tuples_updated,
+        pg_table_size,
+        pg_tablespace_size,
+        pg_total_relation_size,
+        pg_wal_summary_contents,
+        pg_xact_commit_timestamp,
+        pg_xact_commit_timestamp_origin,
+        pg_xact_status,
+        random,
+        random_normal,
+        timeofday,
+        txid_status,
+        uuidv4,
+        uuidv7,
+      ]
+    SESSION_TRANSIENT:
+      [
+        pg_advisory_lock,
+        pg_advisory_lock_shared,
+        pg_advisory_unlock,
+        pg_advisory_unlock_all,
+        pg_advisory_unlock_shared,
+        pg_advisory_xact_lock,
+        pg_advisory_xact_lock_shared,
+        pg_try_advisory_lock,
+        pg_try_advisory_lock_shared,
+        pg_try_advisory_xact_lock,
+        pg_try_advisory_xact_lock_shared,
+        pg_export_snapshot,
+        pg_sleep,
+        pg_sleep_for,
+        pg_sleep_until,
+        pg_stat_clear_snapshot,
+        pg_stat_force_next_flush,
+        set_config,
+        setseed,
+      ]
+    HANDLER:
+      [
+        RI_FKey_cascade_del,
+        RI_FKey_cascade_upd,
+        RI_FKey_check_ins,
+        RI_FKey_check_upd,
+        RI_FKey_noaction_del,
+        RI_FKey_noaction_upd,
+        RI_FKey_restrict_del,
+        RI_FKey_restrict_upd,
+        RI_FKey_setdefault_del,
+        RI_FKey_setdefault_upd,
+        RI_FKey_setnull_del,
+        RI_FKey_setnull_upd,
+        bernoulli,
+        system,
+        brinhandler,
+        bthandler,
+        ginhandler,
+        gisthandler,
+        hashhandler,
+        spghandler,
+        heap_tableam_handler,
+        dsnowball_init,
+        dsnowball_lexize,
+        plpgsql_call_handler,
+        plpgsql_inline_handler,
+        plpgsql_validator,
+        suppress_redundant_updates_trigger,
+        tsvector_update_trigger,
+        tsvector_update_trigger_column,
+        unique_key_recheck,
+      ]
+    QUERY_EXECUTOR:
+      [
+        cursor_to_xml,
+        cursor_to_xmlschema,
+        query_to_xml,
+        query_to_xml_and_xmlschema,
+        query_to_xmlschema,
+        ts_rewrite,
+        ts_stat,
+      ]
+    RESIDUAL:
+      pg_notify: E3
+  # binary_upgrade_*: كلُّها تفحصُ IsBinaryUpgrade أوّلاً (55P02) — المِسبارُ يُولَّدُ لكلِّ تحميلٍ بمعاملاتٍ NULL
+  internal_check_prefix:
+    binary_upgrade_: { rejects: ['55P02', '42501'] }
+  internal_check:
+    nextval: { probe: "SELECT nextval('state.events_seq_seq')", rejects: ['42501'] }
+    setval: { probe: "SELECT setval('state.events_seq_seq', 1)", rejects: ['42501'] }
+    brin_summarize_new_values:
+      { probe: "SELECT brin_summarize_new_values('state.wl539_brin')", rejects: ['42501'] }
+    brin_summarize_range:
+      { probe: "SELECT brin_summarize_range('state.wl539_brin', 0)", rejects: ['42501'] }
+    brin_desummarize_range:
+      { probe: "SELECT brin_desummarize_range('state.wl539_brin', 0)", rejects: ['42501'] }
+    gin_clean_pending_list:
+      { probe: "SELECT gin_clean_pending_list('state.wl539_gin')", rejects: ['42501'] }
+    pg_cancel_backend: { probe: 'SELECT pg_cancel_backend({root_pid})', rejects: ['42501'] }
+    pg_terminate_backend: { probe: 'SELECT pg_terminate_backend({root_pid})', rejects: ['42501'] }
+    pg_clear_attribute_stats:
+      {
+        probe: "SELECT pg_clear_attribute_stats('state', 'events', 'seq', false)",
+        rejects: ['42501'],
+      }
+    pg_clear_relation_stats:
+      { probe: "SELECT pg_clear_relation_stats('state', 'events')", rejects: ['42501'] }
+    pg_restore_attribute_stats:
+      {
+        probe: "SELECT pg_restore_attribute_stats('schemaname', 'state', 'relname', 'events', 'attname', 'seq', 'inherited', false, 'null_frac', 0.5::real)",
+        rejects: ['42501'],
+      }
+    pg_restore_relation_stats:
+      {
+        probe: "SELECT pg_restore_relation_stats('schemaname', 'state', 'relname', 'events', 'reltuples', 999::real)",
+        rejects: ['42501'],
+      }
+    pg_create_logical_replication_slot:
+      {
+        probe: "SELECT pg_create_logical_replication_slot('wl539', 'pgoutput')",
+        rejects: ['42501'],
+      }
+    pg_create_physical_replication_slot:
+      { probe: "SELECT pg_create_physical_replication_slot('wl539')", rejects: ['42501'] }
+    pg_copy_logical_replication_slot:
+      { probe: "SELECT pg_copy_logical_replication_slot('a', 'b')", rejects: ['42501'] }
+    pg_copy_physical_replication_slot:
+      { probe: "SELECT pg_copy_physical_replication_slot('a', 'b')", rejects: ['42501'] }
+    pg_drop_replication_slot:
+      { probe: "SELECT pg_drop_replication_slot('wl539')", rejects: ['42501'] }
+    pg_replication_slot_advance:
+      { probe: "SELECT pg_replication_slot_advance('wl539', '0/0')", rejects: ['42501'] }
+    pg_logical_slot_get_changes:
+      {
+        probe: "SELECT * FROM pg_logical_slot_get_changes('wl539', NULL, NULL)",
+        rejects: ['42501'],
+      }
+    pg_logical_slot_get_binary_changes:
+      {
+        probe: "SELECT * FROM pg_logical_slot_get_binary_changes('wl539', NULL, NULL)",
+        rejects: ['42501'],
+      }
+    pg_logical_slot_peek_changes:
+      {
+        probe: "SELECT * FROM pg_logical_slot_peek_changes('wl539', NULL, NULL)",
+        rejects: ['42501'],
+      }
+    pg_logical_slot_peek_binary_changes:
+      {
+        probe: "SELECT * FROM pg_logical_slot_peek_binary_changes('wl539', NULL, NULL)",
+        rejects: ['42501'],
+      }
+    pg_sync_replication_slots:
+      { probe: 'SELECT pg_sync_replication_slots()', rejects: ['42501', '55000'] }
+    pg_import_system_collations:
+      { probe: "SELECT pg_import_system_collations('public')", rejects: ['42501'] }
+    pg_nextoid:
+      { probe: "SELECT pg_nextoid('state.events', 'seq', 'state.events_pkey')", rejects: ['42501'] }
+    pg_stop_making_pinned_objects:
+      { probe: 'SELECT pg_stop_making_pinned_objects()', rejects: ['42501'] }
+    pg_extension_config_dump:
+      { probe: "SELECT pg_extension_config_dump('state.events', '')", rejects: ['0A000', '42501'] }
+  # قدراتٌ لا يُمثّلُها كتالوجُ الصلاحيات (أوامرُ بلا صلاحية): كلٌّ بالحقولِ الثلاثةَ عشرَ في §4.3.
+  # الحقولُ: persistent · rollback · after_lease · after_seal · readable · fence_check · privilege_block · deeper · proof
+  privilege_free:
+    - id: CAP-ALTER-ROLE-SELF
+      name: ALTER ROLE <self> PASSWORD / SET / RESET
+      source: كلُّ دورٍ يغيّرُ كلمتَه وإعداداتِه دون صلاحية (‏لا مُطلِقَ أحداثٍ لأوامرِ الكائناتِ العامّة)
+      class: EFFECT_DISABLED
+      persistent: نعم — pg_authid / pg_db_role_setting (‏عنقوديّ)
+      rollback: نعم
+      after_lease: مقبولٌ من PG — كتابةٌ دائمةٌ بإيجارٍ منقضٍ (‏مقيسٌ في WL-538 وWL-539)
+      after_seal: مقبول؛ لكنّ كلمةَ المرورِ VALID UNTIL '-infinity' لا تُدخِلُ أحداً (‏28P01)، والإعدادُ يجعلُ كتابةَ العاملِ وقراءتَه XF013
+      readable: الإعدادُ تقرؤه جلساتٌ لاحقةٌ للدور — ولا جلسةَ لاحقةً بعدَ الإلغاء
+      fence_check: worker_role_settings في check_fenced (‏RESUME XF415)، والمحورُ role_setting في المدقّق (‏غيرُ مصنَّفٍ عمداً)
+      privilege_block: لا — الحاجزُ XF013 والمحوُ عندَ الختمِ والإلغاءِ والإيقاف
+      deeper: لا للأثرِ داخلَ السياج؛ الكتابةُ نفسُها لا تُمنَعُ دونَ امتدادٍ في الخادم (‏ممنوعٌ الآن، §5)
+      proof: tests/fence/db-fence.test.mjs (WL-538 + WL-539)
+    - id: CAP-NOTIFY
+      name: NOTIFY / pg_notify
+      source: PUBLIC (بلا صلاحية في PG)
+      class: RESIDUAL
+      persistent: لا تُكتَبُ في الجداول؛ تصلُ إلى مستمعينَ آخرين عند الالتزام
+      rollback: نعم (تُرسَلُ عند COMMIT فقط)
+      after_lease: مسموحة — لا يعرفُ الحارسُ الإيجار
+      after_seal: الجلسةُ مقتولة؛ ما أُرسِلَ قبلَ الختمِ وصل
+      readable: نعم — أيُّ LISTEN على القناة
+      fence_check: لا
+      privilege_block: لا (لا صلاحيةَ لـNOTIFY في PG)
+      deeper: نعم — المستمعُ يجبُ أن يرفضَ ما لا يحملُ رمزَ السياج (E15) أو حاجزٌ في الخادم
+      proof: probe ديناميكي (WL-539) + E3
+    - id: CAP-XID
+      name: استهلاكُ معرّفاتِ المعاملات (txid_current، أيُّ كتابةٍ تُبطَلُ)
+      source: ضمنيّ
+      class: SESSION_TRANSIENT
+      persistent: يتقدّمُ عدّادُ xid (لا محتوى)
+      rollback: لا — العدّادُ لا يتراجع
+      after_lease: مسموح
+      after_seal: الجلسةُ مقتولة
+      readable: رقمٌ فقط
+      fence_check: لا
+      privilege_block: لا
+      deeper: لا (خطرُ wraparound يحتاجُ معدّلاتٍ هائلة؛ statement_timeout/حدُّ الاتصالات يقيّدان)
+      proof: تحليل + probe (WL-539)
+    - id: CAP-SESSION
+      name: SET/set_config/DO/DISCARD/PREPARE/LISTEN/CURSOR/advisory/LOCK/SELECT FOR UPDATE/pg_export_snapshot
+      source: ضمنيّ أو PUBLIC
+      class: SESSION_TRANSIENT
+      persistent: لا — تنتهي بالجلسة أو المعاملة (قفلُ الصفِّ يكتبُ xmax بلا معنىً منطقي)
+      rollback: نعم
+      after_lease: مسموحة داخلَ الجلسة
+      after_seal: الجلسةُ مقتولة ⇒ تزول
+      readable: الأقفالُ مرئيّة (pg_locks) وقد تؤخّرُ غيرَها
+      fence_check: worker_sessions
+      privilege_block: لا
+      deeper: لا
+      proof: probe (WL-539) + E4/E5
+    - id: CAP-MAINTENANCE
+      name: ANALYZE / VACUUM على جداولَ لا يملكُها
+      source: ضمنيّ
+      class: EFFECT_DISABLED
+      persistent: لا — PG يتخطّى بـNOTICE «permission denied … skipping»
+      rollback: غيرُ منطبق
+      after_lease: مقبولٌ بلا أثر
+      after_seal: الجلسةُ مقتولة
+      readable: لا
+      fence_check: لا
+      privilege_block: نعم (الملكيةُ أو MAINTAIN)
+      deeper: لا
+      proof: probe مقيس (reltuples/last_analyze ثابتان) WL-539
+    - id: CAP-CROSS-DB
+      name: CONNECT/TEMPORARY على قواعدَ أخرى في العنقود (منحُ PUBLIC الافتراضي)
+      source: PUBLIC
+      class: RESIDUAL
+      persistent: خارجَ هذه القاعدة — حسبَ صلاحياتِ PUBLIC هناك
+      rollback: حسبَ القاعدةِ الأخرى
+      after_lease: مسموح إن سمحَ pg_hba
+      after_seal: كلمةُ السرِّ منزوعةٌ والجلساتُ مقتولةٌ عنقودياً — لكن العاملُ قبلَ الختمِ يستطيع
+      readable: نعم في القاعدةِ الأخرى
+      fence_check: لا (يُجرَدُ فقط)
+      privilege_block: لا — pg_hba أو REVOKE CONNECT FROM PUBLIC هناك (قرارُ مشغّل)
+      deeper: نعم — نشرٌ يجبُ أن يقصرَ pg_hba العاملَ على قاعدته
+      proof: worker_capabilities() axis=database (WL-539)

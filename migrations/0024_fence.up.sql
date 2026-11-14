@@ -884,6 +884,13 @@ BEGIN
   IF n > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_advisory_locks', 'count', n)); END IF;
   -- التغطية.
   problems := problems || fence.coverage_problems();
+  -- WL-539: ثوابتُ قدراتِ العاملِ البنيويّة (‏ملكيّة، منحٌ مباشر، عضويّة، SECURITY DEFINER، انجرافُ الكتالوج…).
+  -- خطأٌ في الجردِ لا يُسقِطُ check_fenced (‏فالإيقافُ يكتمل) ويُغلَقُ عليه: مشكلةٌ تمنعُ RESUME.
+  BEGIN
+    problems := problems || fence.capability_problems();
+  EXCEPTION WHEN OTHERS THEN
+    problems := problems || jsonb_build_array(jsonb_build_object('kind', 'capability_inventory_failed', 'sqlstate', SQLSTATE, 'message', SQLERRM));
+  END;
   -- مُطلِقاتُ DDL حاضرةٌ ومُفعَّلة.
   SELECT count(*) INTO n FROM pg_event_trigger WHERE evtname IN ('xf_ddl_start', 'xf_ddl_end', 'xf_ddl_drop') AND evtenabled IN ('O', 'A');
   IF n <> 3 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'event_triggers_missing_or_disabled', 'enabled', n)); END IF;
@@ -1301,6 +1308,229 @@ BEGIN
 END
 $f$;
 
+-- ── WL-539: جردُ قدراتِ العاملِ وثوابتُها البنيويّة ─────────────────────────────────
+-- ما سبقَ (‏WL-536..WL-538) سدَّ كتاباتٍ دائمةً بأسمائها: lo_*، pg_logical_emit_message، USAGE على
+-- التسلسلات، ALTER ROLE الذاتيّ. وهذا يُكشَفُ ما سُمّي فقط. هنا تُستخرَجُ القدراتُ من الكتالوجات نفسِها
+-- بقواعدَ عامّةٍ لا تعرفُ أسماءَ الكائنات: أيُّ ملكيّة، أو منحٍ مباشرٍ لهويّةِ عامل، أو عضويّةٍ غيرِ المتوقَّعة،
+-- أو SECURITY DEFINER منفَّذةٍ خارجَ القائمة، أو دالّةِ C خارجَ pg_catalog، أو امتيازٍ في الكتالوجِ يتجاوزُ
+-- امتيازَه الأوّليَّ (‏pg_init_privs)، أو كتابةٍ على علاقةٍ بلا زناد، أو امتيازٍ على مُعامِل/قاعدة/مساحةِ
+-- جداول/خادمٍ أجنبيّ/كائنٍ كبير، أو امتيازٍ افتراضيّ — كلُّها مشكلاتٌ تمنعُ RESUME (‏XF415).
+-- **الأساس:** دالّةُ SECURITY INVOKER بلغةٍ موثوقةٍ لا تمنحُ أكثرَ من امتيازِ مستدعيها؛ فسطحُ القدرةِ هو
+-- الامتيازاتُ والعضويّاتُ وSECURITY DEFINER ودوالُّ C المضمّنةُ (‏تفحصُ امتيازَها بنفسِها — تُصنَّفُ في
+-- config/fence-effects.yaml ويُثبَتُ رفضُها بالتشغيل) والأوامرُ التي لا امتيازَ لها (‏ALTER ROLE الذاتيّ، NOTIFY).
+-- **الحدّ:** لا يرى الكتالوجُ ما تفعلُه دالّةُ C داخلياً، ولا ما يملكُه superuser، ولا قواعدَ أخرى إلا عبرَ
+-- pg_shdepend؛ والتصنيفُ الدلاليُّ في المُدقِّقِ (‏src/fence/effects.mjs) لا هنا.
+-- مبادئُ العامل: xuux_worker وكلُّ هويّةٍ تحملُ امتيازَه (‏INHERIT أو SET) — لا xf_owner (‏ADMIN وحدَه، WL-538).
+CREATE FUNCTION fence._worker_principals() RETURNS TABLE (oid oid, rolname name, base boolean)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT r.oid, r.rolname, r.rolname = 'xuux_worker' FROM pg_roles r
+  WHERE r.rolname = 'xuux_worker' OR fence._is_worker_identity(r.oid)
+$f$;
+
+-- بالصيغةِ النصّيّةِ لـregprocedure (‏تُحَلُّ بعدَ إنشاءِ الدوالّ)، وهي قائمةُ check_fenced نفسُها (‏worker_fence_execute).
+CREATE FUNCTION fence._worker_allowed_execute() RETURNS SETOF text
+LANGUAGE sql IMMUTABLE SET search_path = pg_catalog, pg_temp AS $f$
+  VALUES ('fence.whoami()'), ('fence.read_ok()'), ('fence.effective_state()'), ('fence.session_tag()'),
+         ('fence.seal_sessions(jsonb,bytea)')
+$f$;
+
+-- امتيازاتُ PUBLIC أو العاملِ على كائناتِ الكتالوجِ التي تتجاوزُ امتيازَها الأوّليَّ (‏pg_init_privs، أو الافتراضيَّ
+-- إن لم يُسجَّل). سحبُ امتيازٍ (‏lo_*، pg_logical_emit_message) لا يظهرُ هنا — المنحُ وحدَه.
+CREATE FUNCTION fence._catalog_privilege_drift() RETURNS TABLE (obj text, priv text, grantee text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  WITH wr AS (SELECT 0::oid AS oid UNION ALL SELECT w.oid FROM fence._worker_principals() w),
+  objs AS (
+    SELECT 'pg_proc'::regclass AS cls, p.oid, p.oid::regprocedure::text AS obj, coalesce(p.proacl, acldefault('f', p.proowner)) AS acl,
+           acldefault('f', p.proowner) AS dflt
+    FROM pg_proc p WHERE p.pronamespace IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
+    UNION ALL
+    SELECT 'pg_class'::regclass, c.oid, c.oid::regclass::text,
+           coalesce(c.relacl, acldefault(CASE WHEN c.relkind = 'S' THEN 's' ELSE 'r' END::"char", c.relowner)),
+           acldefault(CASE WHEN c.relkind = 'S' THEN 's' ELSE 'r' END::"char", c.relowner)
+    FROM pg_class c WHERE c.relnamespace IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
+      AND c.relkind IN ('r', 'v', 'm', 'S', 'p', 'f')
+    UNION ALL
+    SELECT 'pg_namespace'::regclass, n.oid, 'schema ' || n.nspname, coalesce(n.nspacl, acldefault('n', n.nspowner)), acldefault('n', n.nspowner)
+    FROM pg_namespace n WHERE n.nspname IN ('pg_catalog', 'information_schema')
+    UNION ALL
+    SELECT 'pg_language'::regclass, l.oid, 'language ' || l.lanname, coalesce(l.lanacl, acldefault('l', l.lanowner)), acldefault('l', l.lanowner)
+    FROM pg_language l
+  )
+  SELECT o.obj, a.privilege_type, CASE WHEN a.grantee = 0 THEN 'PUBLIC' ELSE a.grantee::regrole::text END
+  FROM objs o, LATERAL aclexplode(o.acl) a
+  WHERE a.grantee IN (SELECT oid FROM wr)
+    AND NOT EXISTS (
+      SELECT 1 FROM aclexplode(coalesce((SELECT ip.initprivs FROM pg_init_privs ip
+                                          WHERE ip.objoid = o.oid AND ip.classoid = o.cls AND ip.objsubid = 0), o.dflt)) i
+      WHERE i.grantee = a.grantee AND i.privilege_type = a.privilege_type)
+    -- information_schema لا يُسجَّلُ في pg_init_privs (‏يُنشَأُ بعدَ التمهيد، ومنحُه SELECT/USAGE/EXECUTE لـPUBLIC
+    -- أصليّ): يُعَدُّ منه انجرافاً ما سوى القراءةِ والاستعمالِ والتنفيذ.
+    AND (NOT (o.obj LIKE 'information\_schema.%' OR o.obj = 'schema information_schema'
+              OR (o.cls = 'pg_proc'::regclass AND (SELECT pronamespace FROM pg_proc WHERE pg_proc.oid = o.oid) = 'information_schema'::regnamespace))
+         OR a.privilege_type NOT IN ('SELECT', 'USAGE', 'EXECUTE'))
+$f$;
+
+-- القائمةُ الخامّة: كلُّ قدرةٍ مقيسةٍ من الكتالوج، بلا حكم. يقرؤُها المُدقِّقُ ويُصنِّفُها.
+CREATE FUNCTION fence.worker_capabilities() RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT coalesce(jsonb_agg(x ORDER BY x->>'axis', x->>'object', x->>'privilege'), '[]'::jsonb) FROM (
+    -- خصائصُ الأدوار.
+    SELECT jsonb_build_object('axis', 'role_attribute', 'object', CASE WHEN w.base THEN 'xuux_worker' ELSE 'identity' END,
+      'privilege', concat_ws(',', CASE WHEN r.rolsuper THEN 'SUPERUSER' END, CASE WHEN r.rolcreaterole THEN 'CREATEROLE' END,
+        CASE WHEN r.rolcreatedb THEN 'CREATEDB' END, CASE WHEN r.rolreplication THEN 'REPLICATION' END,
+        CASE WHEN r.rolbypassrls THEN 'BYPASSRLS' END, CASE WHEN NOT r.rolinherit THEN 'NOINHERIT' END,
+        CASE WHEN w.base AND r.rolcanlogin THEN 'LOGIN' END,
+        CASE WHEN NOT w.base AND r.rolvaliduntil IS DISTINCT FROM '-infinity'::timestamptz THEN 'PASSWORD_USABLE' END),
+      'detail', jsonb_build_object('role', r.rolname, 'connlimit', r.rolconnlimit)) AS x
+    FROM fence._worker_principals() w JOIN pg_roles r ON r.oid = w.oid
+    UNION ALL
+    -- العضويّات: ما يرثُه العامل، ومن يرثُ العامل.
+    SELECT jsonb_build_object('axis', 'membership',
+      'object', CASE WHEN mw.base THEN 'xuux_worker' WHEN mw.oid IS NOT NULL THEN 'identity' ELSE m.member::regrole::text END
+        || ' -> ' || CASE WHEN rw.base THEN 'xuux_worker' WHEN rw.oid IS NOT NULL THEN 'identity' ELSE m.roleid::regrole::text END,
+      'privilege', concat_ws(',', CASE WHEN m.admin_option THEN 'ADMIN' END, CASE WHEN m.inherit_option THEN 'INHERIT' END,
+        CASE WHEN m.set_option THEN 'SET' END),
+      'detail', jsonb_build_object('member', m.member::regrole::text, 'role', m.roleid::regrole::text))
+    FROM pg_auth_members m
+    LEFT JOIN fence._worker_principals() mw ON mw.oid = m.member
+    LEFT JOIN fence._worker_principals() rw ON rw.oid = m.roleid
+    WHERE mw.oid IS NOT NULL OR rw.oid IS NOT NULL
+    UNION ALL
+    -- اعتمادُ أدوارِ العمّالِ في كلِّ قاعدةٍ من العنقود: ملكيّة (‏o)، ومنح (‏a)، وسياسة (‏r)، وامتيازٌ أوّليّ (‏i).
+    SELECT jsonb_build_object('axis', CASE d.deptype WHEN 'o' THEN 'ownership' ELSE 'shared_dependency' END,
+      'object', CASE WHEN d.dbid IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))
+                     THEN pg_describe_object(d.classid, d.objid, d.objsubid)
+                     ELSE format('db:%s class:%s oid:%s', d.dbid, d.classid::regclass, d.objid) END,
+      'privilege', d.deptype::text,
+      'detail', jsonb_build_object('role', CASE WHEN w.base THEN 'xuux_worker' ELSE 'identity' END, 'class', d.classid::regclass::text,
+        'local', d.dbid IN (0, (SELECT oid FROM pg_database WHERE datname = current_database()))))
+    FROM pg_shdepend d JOIN fence._worker_principals() w ON w.oid = d.refobjid
+    WHERE d.refclassid = 'pg_authid'::regclass
+    UNION ALL
+    -- القواعد (‏على مستوى العنقود).
+    SELECT jsonb_build_object('axis', 'database', 'object', CASE WHEN db.datname = current_database() THEN 'current' ELSE db.datname::text END,
+      'privilege', p.priv, 'detail', jsonb_build_object('datname', db.datname, 'allowconn', db.datallowconn))
+    FROM pg_database db CROSS JOIN (VALUES ('CONNECT'), ('TEMPORARY'), ('CREATE')) p(priv)
+    WHERE has_database_privilege('xuux_worker', db.oid, p.priv)
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'schema', 'object', n.nspname::text, 'privilege', p.priv)
+    FROM pg_namespace n CROSS JOIN (VALUES ('USAGE'), ('CREATE')) p(priv)
+    WHERE n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp\_%'
+      AND has_schema_privilege('xuux_worker', n.oid, p.priv)
+    UNION ALL
+    -- العلاقات: كلُّ امتيازٍ غيرِ القراءة (‏على الجدولِ أو على أيِّ عمود)، والقراءةُ خارجَ الكتالوج.
+    SELECT jsonb_build_object('axis', CASE WHEN c.relkind = 'S' THEN 'sequence' ELSE 'relation' END,
+      'object', c.oid::regclass::text, 'privilege', p.priv,
+      'detail', jsonb_build_object('relkind', c.relkind::text, 'schema', n.nspname,
+        'guarded', EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = c.oid AND t.tgname = 'xf_guard' AND t.tgenabled = 'A'),
+        -- CASE لا AND: PG لا يضمنُ ترتيبَ تقييمِ AND، وhas_table_privilege يرفضُ USAGE (‏للتسلسلاتِ وحدَها).
+        'column_only', CASE WHEN c.relkind = 'S' THEN false ELSE NOT has_table_privilege('xuux_worker', c.oid, p.priv) END))
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER'), ('MAINTAIN'), ('USAGE')) p(priv)
+    WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp\_%'
+      AND NOT (p.priv = 'SELECT' AND n.nspname IN ('pg_catalog', 'information_schema'))
+      AND CASE
+        WHEN c.relkind = 'S' THEN CASE WHEN p.priv IN ('SELECT', 'UPDATE', 'USAGE') THEN has_sequence_privilege('xuux_worker', c.oid, p.priv) ELSE false END
+        WHEN p.priv = 'USAGE' THEN false
+        WHEN has_table_privilege('xuux_worker', c.oid, p.priv) THEN true
+        WHEN p.priv IN ('SELECT', 'INSERT', 'UPDATE', 'REFERENCES') THEN has_any_column_privilege('xuux_worker', c.oid, p.priv)
+        ELSE false END
+    UNION ALL
+    -- الدوالّ: كلُّ ما يُنفَّذُ خارجَ الكتالوج، وكلُّ SECURITY DEFINER، وكلُّ دالّةٍ متطايرةٍ في pg_catalog.
+    SELECT jsonb_build_object('axis', 'function', 'object', p.oid::regprocedure::text, 'privilege', 'EXECUTE',
+      'detail', jsonb_build_object('schema', n.nspname, 'name', p.proname, 'language', l.lanname, 'volatile', p.provolatile::text,
+        'secdef', p.prosecdef, 'owner', pg_get_userbyid(p.proowner), 'kind', p.prokind::text,
+        'pinned_search_path', coalesce(array_to_string(p.proconfig, ',') LIKE '%search_path=%', false)))
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_language l ON l.oid = p.prolang
+    WHERE has_function_privilege('xuux_worker', p.oid, 'EXECUTE')
+      AND (n.nspname NOT IN ('pg_catalog', 'information_schema') OR p.prosecdef OR (p.provolatile = 'v' AND p.prokind IN ('f', 'p')))
+    UNION ALL
+    -- USAGE على لغةٍ غيرِ موثوقةٍ لا يُنشئُ بها إلا superuser — يُجرَدُ ولا يُعَدُّ مشكلة.
+    SELECT jsonb_build_object('axis', 'language', 'object', l.lanname::text, 'privilege', 'USAGE',
+      'detail', jsonb_build_object('trusted', l.lanpltrusted))
+    FROM pg_language l WHERE has_language_privilege('xuux_worker', l.oid, 'USAGE')
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'tablespace', 'object', t.spcname::text, 'privilege', 'CREATE')
+    FROM pg_tablespace t WHERE has_tablespace_privilege('xuux_worker', t.oid, 'CREATE')
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'foreign', 'object', 'fdw:' || f.fdwname, 'privilege', 'USAGE')
+    FROM pg_foreign_data_wrapper f WHERE has_foreign_data_wrapper_privilege('xuux_worker', f.oid, 'USAGE')
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'foreign', 'object', 'server:' || s.srvname, 'privilege', 'USAGE')
+    FROM pg_foreign_server s WHERE has_server_privilege('xuux_worker', s.oid, 'USAGE')
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'parameter', 'object', pa.parname::text, 'privilege', a.privilege_type)
+    FROM pg_parameter_acl pa, LATERAL aclexplode(pa.paracl) a
+    WHERE a.grantee = 0 OR a.grantee IN (SELECT w.oid FROM fence._worker_principals() w)
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'default_acl', 'object', da.defaclrole::regrole::text || ':' || da.defaclobjtype::text
+        || ':' || coalesce(da.defaclnamespace::regnamespace::text, '*'), 'privilege', a.privilege_type)
+    FROM pg_default_acl da, LATERAL aclexplode(da.defaclacl) a
+    WHERE da.defaclrole IN (SELECT w.oid FROM fence._worker_principals() w)
+       OR a.grantee = 0 OR a.grantee IN (SELECT w.oid FROM fence._worker_principals() w)
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'large_object', 'object', lo.oid::text, 'privilege', a.privilege_type)
+    FROM pg_largeobject_metadata lo, LATERAL aclexplode(coalesce(lo.lomacl, acldefault('L', lo.lomowner))) a
+    WHERE a.grantee = 0 OR a.grantee IN (SELECT w.oid FROM fence._worker_principals() w)
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'role_setting', 'object', CASE WHEN w.base THEN 'xuux_worker' ELSE 'identity' END,
+      'privilege', 'SETTING', 'detail', jsonb_build_object('role', w.rolname, 'database', st.setdatabase))
+    FROM pg_db_role_setting st JOIN fence._worker_principals() w ON w.oid = st.setrole
+    UNION ALL
+    SELECT jsonb_build_object('axis', 'catalog_privilege_drift', 'object', q.obj, 'privilege', q.priv,
+      'detail', jsonb_build_object('grantee', q.grantee))
+    FROM fence._catalog_privilege_drift() q
+  ) s
+$f$;
+
+-- الثوابتُ البنيويّة — مشكلاتٌ في check_fenced (‏تمنعُ RESUME). لا تعتمدُ على أسماءِ كائنات.
+CREATE FUNCTION fence.capability_problems() RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  WITH cap AS (SELECT x FROM jsonb_array_elements(fence.worker_capabilities()) x),
+  p AS (
+    SELECT 'worker_role_attributes' AS kind, x->'detail'->>'role' || ':' || (x->>'privilege') AS obj FROM cap
+    WHERE x->>'axis' = 'role_attribute' AND x->>'privilege' <> '' AND NOT (x->>'object' = 'identity' AND x->>'privilege' = 'PASSWORD_USABLE')
+    UNION ALL
+    -- المتوقَّعُ وحدَه: الهويّةُ ترثُ xuux_worker (‏INHERIT بلا SET ولا ADMIN)، وxf_owner يُديرُهما (‏ADMIN وحدَه).
+    SELECT 'worker_membership', x->>'object' || ':' || (x->>'privilege') FROM cap
+    WHERE x->>'axis' = 'membership'
+      AND NOT (x->>'object' = 'identity -> xuux_worker' AND x->>'privilege' = 'INHERIT')
+      AND NOT (x->>'object' IN ('xf_owner -> xuux_worker', 'xf_owner -> identity') AND x->>'privilege' = 'ADMIN')
+    UNION ALL
+    SELECT 'worker_owns_objects', x->>'object' FROM cap WHERE x->>'axis' = 'ownership'
+    UNION ALL
+    -- هويّةُ الإقلاعِ لا تُمنَحُ شيئاً مباشرةً (‏كلُّ امتيازِها عبرَ xuux_worker)؛ ولا سياسةَ ولا امتيازَ أوّليَّ للعامل.
+    SELECT 'worker_identity_direct_grant', x->>'object' FROM cap
+    WHERE x->>'axis' = 'shared_dependency' AND x->'detail'->>'role' = 'identity'
+    UNION ALL
+    SELECT 'worker_secdef_execute', x->>'object' FROM cap
+    WHERE x->>'axis' = 'function' AND (x->'detail'->>'secdef')::boolean
+      AND (x->>'object') NOT IN (SELECT f FROM fence._worker_allowed_execute() f)
+    UNION ALL
+    -- دالّةٌ بلغةٍ غيرِ موثوقةٍ (‏C/internal أو غيرُ موثوقة) خارجَ الكتالوج: سلوكُها لا يُرى.
+    SELECT 'worker_untrusted_function_execute', x->>'object' FROM cap
+    WHERE x->>'axis' = 'function' AND x->'detail'->>'schema' NOT IN ('pg_catalog', 'information_schema')
+      AND x->'detail'->>'language' NOT IN ('sql', 'plpgsql')
+    UNION ALL
+    -- كتابةٌ على علاقةٍ لا يحرسُها xf_guard (‏على الجدولِ أو عمودٍ منه). والمشهدُ يكتبُ بصلاحياتِ مالكِه
+    -- (‏مشهدٌ يملكُه المالكُ فوقَ fence.* تجاوز) فكلُّ مشهدٍ قابلٍ للكتابةِ مشكلة، عدا pg_settings (‏= set_config للجلسة).
+    SELECT 'worker_unguarded_write', x->>'object' || ':' || (x->>'privilege') FROM cap
+    WHERE x->>'axis' = 'relation' AND x->>'privilege' IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'MAINTAIN', 'TRIGGER', 'REFERENCES')
+      AND x->'detail'->>'relkind' IN ('r', 'p', 'f', 'm', 'v')
+      AND NOT (x->>'object' = 'pg_settings' AND x->'detail'->>'schema' = 'pg_catalog' AND x->>'privilege' = 'UPDATE')
+      AND NOT ((x->'detail'->>'guarded')::boolean AND x->>'privilege' IN ('INSERT', 'UPDATE', 'DELETE'))
+    UNION ALL
+    SELECT 'worker_database_create', x->>'object' FROM cap WHERE x->>'axis' = 'database' AND x->>'privilege' = 'CREATE'
+    UNION ALL
+    SELECT 'worker_' || (x->>'axis') || '_privilege', x->>'object' || ':' || (x->>'privilege') FROM cap
+    WHERE x->>'axis' IN ('tablespace', 'foreign', 'parameter', 'default_acl', 'large_object')
+    UNION ALL
+    SELECT 'worker_catalog_privilege_drift', x->>'object' || ':' || (x->>'privilege') || ':' || (x->'detail'->>'grantee') FROM cap
+    WHERE x->>'axis' = 'catalog_privilege_drift'
+  )
+  SELECT coalesce(jsonb_agg(jsonb_build_object('kind', kind, 'object', obj) ORDER BY kind, obj), '[]'::jsonb) FROM p
+$f$;
+
 CREATE FUNCTION fence.issue_challenge(worker_id text, boot_id text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE c fence.control; nonce text; rn name; eff jsonb := fence.effective_state(); live jsonb := fence._live_incarnation();
@@ -1657,6 +1887,7 @@ GRANT EXECUTE ON FUNCTION fence.whoami(), fence.read_ok(), fence.effective_state
 -- EXECUTE لـPUBLIC يفشلُ كلُّ قارئٍ مشروعٍ غيرِ عاملٍ بـ42501 بدلَ أن يُحكَمَ عليه بالزناد.
 GRANT EXECUTE ON FUNCTION fence.read_ok() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION fence.effective_state(), fence.check_fenced(), fence.status() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
+GRANT EXECUTE ON FUNCTION fence.worker_capabilities(), fence.capability_problems() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
 GRANT EXECUTE ON FUNCTION fence.issue_challenge(text, text), fence.issue_credential(text, bytea), fence.renew_lease(name),
   fence.revoke_credential(name, text), fence.halt_request(text), fence.halt_lock(bigint),
   fence.halt_revoke_and_terminate(bigint), fence.halt_complete(bigint), fence.record_effects_evidence(text, jsonb),

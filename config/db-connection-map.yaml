@@ -177,11 +177,11 @@ sites:
     why: يُنشئُ القاعدةَ ويقيسُ؛ ليس مساراً إنتاجيّاً.
   - file: scripts/fence-lab.mjs
     kind: pg.Client
-    count: 1
-    purpose: وصلاتُ xf_root/xf_sovereign/postgres في المختبر (FenceRoot وFenceSovereign)
-    role: xf_root، xf_sovereign، postgres (peer)
+    count: 2
+    purpose: وصلاتُ xf_root/xf_sovereign/postgres في المختبر (FenceRoot وFenceSovereign)؛ ووصلةُ `fence-lab.mjs audit` (WL-539)
+    role: xf_root، xf_sovereign، postgres (peer)؛ وللتدقيق دورٌ يملكُ EXECUTE على fence.worker_capabilities (xf_root/xf_sovereign/xf_auditor)
     fence: LAB_ONLY
-    why: مسارُ التحكّمِ الوحيدُ الذي يُطلقُ FenceRoot فعلاً اليوم — في المختبرِ لا في الإنتاج.
+    why: مسارُ التحكّمِ الوحيدُ الذي يُطلقُ FenceRoot فعلاً اليوم — في المختبرِ لا في الإنتاج. والتدقيقُ (npm run fence:audit) قراءةٌ فقط داخلَ BEGIN READ ONLY ثمّ ROLLBACK؛ لا يكتبُ ولا يُديرُ السياج.
   - file: scripts/fence-lab.mjs
     kind: pg_tool
     count: 11

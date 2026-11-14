@@ -109,6 +109,44 @@ const reportPath = path.resolve(ROOT, arg('--report', DEFAULT_REPORT) ?? DEFAULT
 const keep = argv.includes('--keep');
 const iterations = Number(arg('--iterations', '10'));
 
+// ── WL-539: `fence-lab.mjs audit [--url <db>]` — مدقّقُ قدراتِ العاملِ وحدَه على قاعدةٍ قائمة ──────────
+// يقرأُ fence.worker_capabilities() بدورٍ يملكُ EXECUTE عليها (‏xf_root/xf_sovereign/xf_auditor/المُهاجِر)،
+// ويطبعُ تقريراً حتميّاً (‏مرتّباً)، ويخرجُ 1 إن وُجدَت قدرةٌ غيرُ مصنّفة. لا يكتبُ شيئاً في القاعدة.
+if (argv[0] === 'audit') {
+  const { auditWorkerCapabilitiesLive, loadCapabilityPolicy } =
+    await import('../src/fence/effects.mjs');
+  const url = arg('--url', process.env['DATABASE_URL']);
+  if (!url) {
+    process.stderr.write('fence-lab audit: --url أو DATABASE_URL مطلوب\n');
+    process.exit(2);
+  }
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  try {
+    await client.query('BEGIN READ ONLY');
+    const r = await auditWorkerCapabilitiesLive(client, await loadCapabilityPolicy());
+    await client.query('ROLLBACK');
+    const out = {
+      ok: r.ok,
+      total: r.total,
+      byClass: Object.fromEntries(Object.entries(r.byClass).sort()),
+      unclassified: r.unclassified,
+      residual: r.residual.map((c) => ({
+        axis: c.axis,
+        object: c.object,
+        privilege: c.privilege,
+        rule: c.rule,
+      })),
+      stale: r.stale,
+    };
+    process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
+    process.exitCode = r.ok ? 0 : 1;
+  } finally {
+    await client.end();
+  }
+  process.exit();
+}
+
 /** @param {string | Buffer} data */
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 

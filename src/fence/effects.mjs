@@ -279,3 +279,165 @@ export function buildEffectsStopper(parts) {
     },
   };
 }
+
+// ─── WL-539: مدقّقُ قدراتِ العاملِ الدائمة ─────────────────────────────────────────────────────────
+// المصدرُ: fence.worker_capabilities() (كتالوجاتُ PG الحيّة — الصلاحياتُ الفعليةُ للعاملِ والهويّات،
+// مباشرةً وموروثةً ولـPUBLIC). التصنيفُ: config/fence-effects.yaml ‹capabilities›. كلُّ قدرةٍ لا تقعُ
+// في صنفٍ صريحٍ ⇒ unclassified ⇒ ok=false. لا شيءَ يُعَدُّ آمناً لأنّه «غيرُ مألوف» أو لتعذّرِ الدخول.
+
+/** @typedef {{ axis: string, object: string, privilege: string, detail?: Record<string, any> }} Capability */
+
+const READ_PRIVILEGES = new Set(['SELECT', 'USAGE', 'REFERENCES']);
+const STATE_WRITE = new Set(['INSERT', 'UPDATE', 'DELETE']);
+const EXPECTED_MEMBERSHIPS = new Set([
+  'identity -> xuux_worker:INHERIT', // الهويّةُ ترثُ صلاحياتِ xuux_worker (WL-532)
+  'xf_owner -> identity:ADMIN', // المالكُ يديرُ الهويّةَ ولا يرثُها (ADMIN فقط)
+  'xf_owner -> xuux_worker:ADMIN',
+]);
+
+/**
+ * يصنّفُ قدرةً واحدة. يُعيدُ { class, rule } أو null إن لم تُصنَّف.
+ * @param {Capability} c
+ * @param {Record<string, any>} policy
+ * @returns {{ class: string, rule: string } | null}
+ */
+export function classifyCapability(c, policy) {
+  const d = c.detail ?? {};
+  const builtins = policy.builtins ?? {};
+  switch (c.axis) {
+    case 'function': {
+      if ((policy.fence_api ?? []).includes(c.object))
+        return { class: 'FENCE_API', rule: 'fence_api' };
+      if (d.schema === 'pg_catalog' || d.schema === 'information_schema') {
+        if (d.secdef) return null;
+        for (const [cls, names] of Object.entries(builtins)) {
+          const list = Array.isArray(names) ? names : Object.keys(names);
+          if (list.includes(d.name)) return { class: cls, rule: `builtins.${cls}` };
+        }
+        if (Object.hasOwn(policy.internal_check ?? {}, d.name))
+          return { class: 'INTERNAL_CHECK', rule: `internal_check.${d.name}` };
+        for (const prefix of Object.keys(policy.internal_check_prefix ?? {}))
+          if (d.name.startsWith(prefix))
+            return { class: 'INTERNAL_CHECK', rule: `internal_check_prefix.${prefix}` };
+        return null;
+      }
+      // دالّةُ مستدعٍ (لا SECURITY DEFINER) بلغةٍ موثوقةٍ في مخطّطٍ مُعلَن: تنفّذُ بصلاحياتِ العاملِ نفسِه.
+      if (
+        (policy.invoker_schemas ?? []).includes(d.schema) &&
+        !d.secdef &&
+        ['sql', 'plpgsql'].includes(d.language)
+      )
+        return { class: 'INVOKER', rule: 'invoker_schemas' };
+      return null;
+    }
+    case 'relation': {
+      const explicit =
+        (policy.relations ?? {})[
+          `${d.schema}.${c.object.replace(/^[^.]*\./, '')}:${c.privilege}`
+        ] ?? (policy.relations ?? {})[`${d.schema}.${c.object}:${c.privilege}`];
+      if (explicit) return { class: explicit, rule: 'relations' };
+      if (READ_PRIVILEGES.has(c.privilege)) return { class: 'READ_ONLY', rule: 'relation_read' };
+      // كتابةٌ في state مقبولةٌ فقط على جدولٍ يحرسُه زنادُ السياج (E1)؛ TRUNCATE/TRIGGER/MAINTAIN ليست منها.
+      if (
+        STATE_WRITE.has(c.privilege) &&
+        d.guarded === true &&
+        ['r', 'p'].includes(d.relkind) &&
+        d.schema === 'state'
+      )
+        return { class: 'GUARDED_WRITE', rule: 'E1' };
+      return null;
+    }
+    case 'sequence':
+      return c.privilege === 'SELECT' ? { class: 'READ_ONLY', rule: 'sequence_read' } : null;
+    case 'schema':
+      return c.privilege === 'USAGE' && (policy.schemas_usage ?? []).includes(c.object)
+        ? { class: 'READ_ONLY', rule: 'schemas_usage' }
+        : null;
+    case 'database':
+      if (c.object === 'current')
+        return c.privilege === 'CONNECT' ? { class: 'FENCE_API', rule: 'connect' } : null;
+      if (c.privilege === 'CONNECT' || c.privilege === 'TEMPORARY')
+        return { class: 'RESIDUAL', rule: 'privilege_free.CAP-CROSS-DB' };
+      return null;
+    case 'language':
+      // trusted: تنفّذُ بصلاحياتِ المستدعي؛ untrusted: لا يُنشئُ بها إلا superuser (CREATE FUNCTION يرفض).
+      return c.privilege === 'USAGE' ? { class: 'READ_ONLY', rule: 'language_usage' } : null;
+    case 'membership':
+      return EXPECTED_MEMBERSHIPS.has(`${c.object}:${c.privilege}`)
+        ? { class: 'FENCE_API', rule: 'membership' }
+        : null;
+    case 'role_attribute':
+      return c.privilege === '' ? { class: 'FENCE_API', rule: 'role_attribute_none' } : null;
+    case 'shared_dependency':
+      // ACL لـxuux_worker: الصلاحيةُ نفسُها مجرودةٌ ومصنّفةٌ في محورِها هنا؛ في قاعدةٍ أخرى خارجَ رؤيتنا.
+      if (d.role === 'xuux_worker' && c.privilege === 'a')
+        return d.local
+          ? { class: 'FENCE_API', rule: 'acl_local' }
+          : { class: 'RESIDUAL', rule: 'privilege_free.CAP-CROSS-DB' };
+      return null;
+    default:
+      // ownership/parameter/default_acl/large_object/tablespace/foreign/role_setting/catalog_privilege_drift:
+      // لا وجهَ مشروعاً لها في العامل — كلُّها غيرُ مصنّفة.
+      return null;
+  }
+}
+
+/**
+ * @param {Capability[]} inventory
+ * @param {Record<string, any>} policy  قسمُ capabilities من fence-effects.yaml
+ */
+export function auditWorkerCapabilities(inventory, policy) {
+  /** @type {Record<string, number>} */
+  const byClass = {};
+  /** @type {Capability[]} */
+  const unclassified = [];
+  /** @type {Array<Capability & { class: string, rule: string }>} */
+  const classified = [];
+  const usedBuiltins = new Set();
+  for (const c of inventory) {
+    const r = classifyCapability(c, policy);
+    if (r === null) {
+      unclassified.push(c);
+      continue;
+    }
+    byClass[r.class] = (byClass[r.class] ?? 0) + 1;
+    classified.push({ ...c, ...r });
+    if (c.axis === 'function') usedBuiltins.add(c.detail?.name);
+  }
+  // قيودٌ في السياسةِ لا مقابلَ لها في الجرد: لا تُفشِلُ (اختلافُ إصدارِ PG) لكنها تُعلَن.
+  const declared = [
+    ...Object.values(policy.builtins ?? {}).flatMap((v) => (Array.isArray(v) ? v : Object.keys(v))),
+    ...Object.keys(policy.internal_check ?? {}),
+  ];
+  const stale = declared.filter((n) => !usedBuiltins.has(n)).sort();
+  const residual = classified.filter((c) => c.class === 'RESIDUAL');
+  const key = (/** @type {Capability} */ c) => `${c.axis}|${c.object}|${c.privilege}`;
+  unclassified.sort((a, b) => key(a).localeCompare(key(b)));
+  return {
+    ok: unclassified.length === 0,
+    total: inventory.length,
+    byClass,
+    unclassified,
+    residual,
+    stale,
+    classified,
+  };
+}
+
+/**
+ * يقرأُ الجردَ من القاعدةِ ويدقّقُه. client: اتصالٌ بدورٍ يملكُ EXECUTE على fence.worker_capabilities().
+ * @param {{ query: (sql: string) => Promise<{ rows: any[] }> }} client
+ * @param {Record<string, any>} policy
+ */
+export async function auditWorkerCapabilitiesLive(client, policy) {
+  const { rows } = await client.query('SELECT fence.worker_capabilities() AS inv');
+  return auditWorkerCapabilities(rows[0].inv ?? [], policy);
+}
+
+/** يقرأُ قسمَ capabilities من config/fence-effects.yaml. */
+export async function loadCapabilityPolicy(
+  path = new URL('../../config/fence-effects.yaml', import.meta.url),
+) {
+  const { default: YAML } = await import('yaml');
+  return YAML.parse(readFileSync(path, 'utf8')).capabilities;
+}
