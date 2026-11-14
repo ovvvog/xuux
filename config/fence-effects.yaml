@@ -410,15 +410,15 @@ capabilities:
       deeper: لا
       proof: probe مقيس (reltuples/last_analyze ثابتان) WL-539
     - id: CAP-CROSS-DB
-      name: CONNECT/TEMPORARY على قواعدَ أخرى في العنقود (منحُ PUBLIC الافتراضي)
-      source: PUBLIC
-      class: RESIDUAL
-      persistent: خارجَ هذه القاعدة — حسبَ صلاحياتِ PUBLIC هناك
-      rollback: حسبَ القاعدةِ الأخرى
-      after_lease: مسموح إن سمحَ pg_hba
-      after_seal: كلمةُ السرِّ منزوعةٌ والجلساتُ مقتولةٌ عنقودياً — لكن العاملُ قبلَ الختمِ يستطيع
-      readable: نعم في القاعدةِ الأخرى
-      fence_check: لا (يُجرَدُ فقط)
-      privilege_block: لا — pg_hba أو REVOKE CONNECT FROM PUBLIC هناك (قرارُ مشغّل)
-      deeper: نعم — نشرٌ يجبُ أن يقصرَ pg_hba العاملَ على قاعدته
-      proof: worker_capabilities() axis=database (WL-539)
+      name: CONNECT/TEMPORARY على قواعدَ أخرى في العنقود (منحُ PUBLIC الافتراضي، أو منحٌ مباشر/موروث)
+      source: PUBLIC (CREATE DATABASE يمنحُه افتراضاً) أو منح
+      class: EFFECT_DISABLED
+      persistent: لا بعدَ الاحتواء — العاملُ لا يدخلُ (42501) ولا يُنشئُ TEMP هناك
+      rollback: غيرُ منطبق
+      after_lease: الدخولُ مرفوضٌ بالصلاحية
+      after_seal: الجلساتُ مقتولةٌ عنقودياً وكلمةُ السرِّ منزوعة
+      readable: لا
+      fence_check: worker_database_reach (أيُّ CONNECT/TEMPORARY لهويّةِ العاملِ على قاعدةٍ أخرى ALLOW_CONNECTIONS ⇒ RESUME يُرفَض XF415)
+      privilege_block: نعم — fence.contain_database_reach() بـsuperuser يسحبُهما من PUBLIC ومن العاملِ وهويّاتِه على كلِّ قاعدةٍ أخرى؛ template0 (ALLOW_CONNECTIONS false) مُستثنىً بلا أثر
+      deeper: نعم — pg_hba يقصرُ العاملَ على قاعدتِه دفاعاً ثانياً (نشر)؛ الكشفُ عند الانتقال (RESUME/check_fenced) لا مستمرٌّ أثناءَ RUNNING
+      proof: WL-540 (هجومٌ قبلَ/بعدَ + طفرات إعادةِ المنحِ والقاعدةِ الجديدة) — worker_capabilities() axis=database

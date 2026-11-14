@@ -1408,10 +1408,15 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f
     WHERE d.refclassid = 'pg_authid'::regclass
     UNION ALL
     -- القواعد (‏على مستوى العنقود).
+    -- WL-540: لكلِّ مَن يدخلُ فعلاً (‏xuux_worker وكلُّ هويّةِ إقلاع — الدخولُ يفحصُ CONNECT بدورِ الدخولِ وما يرثُه)،
+    -- ومصدرُ الصلاحية: PUBLIC أم منحٌ مباشر/موروث.
     SELECT jsonb_build_object('axis', 'database', 'object', CASE WHEN db.datname = current_database() THEN 'current' ELSE db.datname::text END,
-      'privilege', p.priv, 'detail', jsonb_build_object('datname', db.datname, 'allowconn', db.datallowconn))
+      'privilege', p.priv, 'detail', jsonb_build_object('datname', db.datname, 'allowconn', db.datallowconn,
+        'via_public', has_database_privilege('public', db.oid, p.priv),
+        'principals', (SELECT jsonb_agg(DISTINCT CASE WHEN w.base THEN 'xuux_worker' ELSE 'identity' END)
+                       FROM fence._worker_principals() w WHERE has_database_privilege(w.oid, db.oid, p.priv))))
     FROM pg_database db CROSS JOIN (VALUES ('CONNECT'), ('TEMPORARY'), ('CREATE')) p(priv)
-    WHERE has_database_privilege('xuux_worker', db.oid, p.priv)
+    WHERE EXISTS (SELECT 1 FROM fence._worker_principals() w WHERE has_database_privilege(w.oid, db.oid, p.priv))
     UNION ALL
     SELECT jsonb_build_object('axis', 'schema', 'object', n.nspname::text, 'privilege', p.priv)
     FROM pg_namespace n CROSS JOIN (VALUES ('USAGE'), ('CREATE')) p(priv)
@@ -1522,6 +1527,13 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f
     UNION ALL
     SELECT 'worker_database_create', x->>'object' FROM cap WHERE x->>'axis' = 'database' AND x->>'privilege' = 'CREATE'
     UNION ALL
+    -- WL-540: العاملُ لا يدخلُ قاعدةً أخرى في العنقودِ ولا يُنشئُ فيها TEMP (‏PUBLIC الافتراضيُّ أو منحٌ). قاعدةٌ
+    -- ALLOW_CONNECTIONS false (‏template0) لا يُدخَلُ إليها بأيِّ صلاحية — تُستثنى وتُكشَفُ إن فُتِحَت.
+    -- العلاج: fence.contain_database_reach() بـsuperuser؛ وكلُّ قاعدةٍ جديدةٍ (‏CREATE DATABASE يمنحُ PUBLIC) تُعيدُ الكشف.
+    SELECT 'worker_database_reach', (x->>'object') || ':' || (x->>'privilege') FROM cap
+    WHERE x->>'axis' = 'database' AND x->>'object' <> 'current' AND x->>'privilege' IN ('CONNECT', 'TEMPORARY')
+      AND (x->'detail'->>'allowconn')::boolean
+    UNION ALL
     SELECT 'worker_' || (x->>'axis') || '_privilege', x->>'object' || ':' || (x->>'privilege') FROM cap
     WHERE x->>'axis' IN ('tablespace', 'foreign', 'parameter', 'default_acl', 'large_object')
     UNION ALL
@@ -1530,6 +1542,41 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f
   )
   SELECT coalesce(jsonb_agg(jsonb_build_object('kind', kind, 'object', obj) ORDER BY kind, obj), '[]'::jsonb) FROM p
 $f$;
+
+-- WL-540: احتواءُ الوصولِ عبرَ القواعد. PostgreSQL لا يعرفُ «منعاً» لدورٍ من صلاحيةِ PUBLIC، وCREATE DATABASE يمنحُ
+-- PUBLIC ‏CONNECT وTEMPORARY افتراضاً — فأضيقُ تغييرٍ ممكنٍ داخلَ PG: سحبُهما من PUBLIC (‏ومن العاملِ وهويّاتِه إن مُنِحا
+-- مباشرةً) على كلِّ قاعدةٍ أخرى يصلُها العامل، لا غير. superuser وحدَه (‏SECURITY INVOKER: يعملُ بصلاحيةِ المستدعي، ولا
+-- EXECUTE لأحد)، ويُعيدُ تقريراً بما سُحِب وما لم يُحَلّ (‏صلاحيةٌ موروثةٌ من دورٍ آخرَ لا تُسحَبُ منه صامتة — تبقى مشكلة).
+-- الأدوارُ غيرُ superuser التي تحتاجُ قاعدةً أخرى (‏تطبيقاتٌ مجاورة) تُمنَحُ صراحةً — قرارُ مشغّل. superuser لا يتأثّر.
+CREATE FUNCTION fence.contain_database_reach() RETURNS jsonb
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE r record; w record; revoked jsonb := '[]'::jsonb; unresolved jsonb := '[]'::jsonb;
+BEGIN
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF304', MESSAGE = 'fence: احتواءُ القواعدِ لـsuperuser وحده';
+  END IF;
+  FOR r IN SELECT db.oid, db.datname FROM pg_database db
+           WHERE db.datname <> current_database() AND db.datallowconn ORDER BY db.datname LOOP
+    IF has_database_privilege('public', r.oid, 'CONNECT') OR has_database_privilege('public', r.oid, 'TEMPORARY') THEN
+      EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', r.datname);
+      revoked := revoked || jsonb_build_array(jsonb_build_object('database', r.datname, 'from', 'PUBLIC'));
+    END IF;
+    FOR w IN SELECT p.rolname FROM fence._worker_principals() p ORDER BY p.rolname LOOP
+      IF EXISTS (SELECT 1 FROM pg_database d, aclexplode(d.datacl) a
+                 WHERE d.oid = r.oid AND a.grantee = w.rolname::regrole::oid AND a.privilege_type IN ('CONNECT', 'TEMPORARY')) THEN
+        EXECUTE format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM %I', r.datname, w.rolname);
+        revoked := revoked || jsonb_build_array(jsonb_build_object('database', r.datname, 'from', w.rolname::text));
+      END IF;
+    END LOOP;
+    IF EXISTS (SELECT 1 FROM fence._worker_principals() p
+               WHERE has_database_privilege(p.oid, r.oid, 'CONNECT') OR has_database_privilege(p.oid, r.oid, 'TEMPORARY')) THEN
+      unresolved := unresolved || jsonb_build_array(r.datname::text);
+    END IF;
+  END LOOP;
+  RETURN jsonb_build_object('revoked', revoked, 'unresolved', unresolved);
+END
+$f$;
+REVOKE ALL ON FUNCTION fence.contain_database_reach() FROM PUBLIC;
 
 CREATE FUNCTION fence.issue_challenge(worker_id text, boot_id text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$

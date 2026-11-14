@@ -575,6 +575,8 @@ async function liveLab() {
     beta: generateTestKeyProvider('lab-beta'),
   };
   await labPool.query('SELECT fence.bootstrap($1)', [sovereignKey.publicKeyRaw()]);
+  // WL-540: العنقودُ المختبريُّ مِلكُه — يُحتوى وصولُ العاملِ إلى postgres/template1 قبلَ أيِّ RESUME.
+  await labPool.query('SELECT fence.contain_database_reach()');
 
   /** @type {pg.Client} */
   let sovClient = socketClient('lab', 'xf_sovereign');

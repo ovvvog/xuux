@@ -1301,3 +1301,30 @@ test('WL-450 — طلبٌ مركَّبٌ في CI يُقاسُ على origin/main
   // والقياسُ القديمُ على القاعدةِ الحرفيّةِ كانَ يُمرِّرُ الطبقةَ نفسَها:
   assert.equal(runGuard(root, 'origin/stack-base').status, 0, 'فرقُ الطبقةِ العليا وحدَه محايد.');
 });
+
+test('WL-540 — ملخّصُ التسليم: لا تسقطُ مُدخلةٌ جزئيّةٌ من السلسلةِ المتّصلةِ من الأحدث، والحدُّ الأدنى ثمانٍ', () => {
+  const entry = (/** @type {number} */ n, /** @type {string} */ state) =>
+    `### [2026-01-01] — WL-${n} — **عنوان ${n}**\n\n- **الحالةُ بعدَ العمل:** ${state}\n`;
+  const render = (/** @type {string[]} */ states) =>
+    renderHandoff({
+      manifest,
+      workLog: states.map((st, i) => entry(900 - i, st)).join('\n'),
+      status: '',
+      debtRegister: '',
+      externalReview: null,
+      version: null,
+    });
+  const ids = (/** @type {string} */ text) =>
+    [...text.matchAll(/^\| `(WL-\d+)` \|/gmu)].map((m) => m[1]);
+  // عشرُ جزئيّاتٍ متّصلةٌ ثمّ مُغلَقة: العشرُ كلُّها تظهر، والمُغلَقةُ الأقدمُ لا.
+  const long = ids(render([...Array(10).fill('🟨 جزئي'), '🟩 مكتمل', '🟩 مكتمل']));
+  assert.equal(long.length, 10);
+  assert.ok(long.includes('WL-891') && !long.includes('WL-890'), JSON.stringify(long));
+  // سلسلةٌ قصيرة: الحدُّ الأدنى ثمانٍ كما كان.
+  assert.equal(ids(render(['🟨 جزئي', '🟩 مكتمل', ...Array(10).fill('🟩 مكتمل')])).length, 8);
+  // جزئيّةٌ بعدَ مُغلَقةٍ ليست في السلسلةِ المتّصلة.
+  assert.equal(
+    ids(render([...Array(9).fill('🟨 جزئي'), '🟩 مكتمل', ...Array(5).fill('🟨 جزئي')])).length,
+    9,
+  );
+});
