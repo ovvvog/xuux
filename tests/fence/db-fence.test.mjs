@@ -756,7 +756,30 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     assert.ok(kinds.includes('worker_role_settings'), JSON.stringify(kinds));
     assert.ok(kinds.includes('worker_password_auth_enabled'), JSON.stringify(kinds));
     await rejectsWith(() => h.resume(), ['XF415'], 'أثرُ عبثٍ على دورِ عاملٍ يمنعُ الاستئناف');
+    // ودورٌ كهذا لا يُديرُه السياجُ لا يُسقِطُ RECOVER (‏مسارُ الطوارئ، كان 42501) — والأثرُ يبقى ظاهراً.
+    // إفسادُ الختمِ بتغييرِ النافذةِ ثمّ إعادتُها باسترجاعٍ ثانٍ، فلا يرثُ ما بعدَه شيئاً.
+    const corruptWindow = async (/** @type {number} */ w) => {
+      await h.db.pool
+        .query(`ALTER TABLE fence.control DISABLE TRIGGER xf_control_row`)
+        .catch(() => {});
+      await h.db.pool.query(`UPDATE fence.control SET lease_window_s = $1`, [w]);
+      await h.db.pool
+        .query(`ALTER TABLE fence.control ENABLE ALWAYS TRIGGER xf_control_row`)
+        .catch(() => {});
+      assert.equal((await h.sovereign.status()).effective.state, 'RECOVERY_REQUIRED');
+      assert.equal((await h.sovereign.recover()).state, 'HALTED');
+    };
+    const window0 = Number(
+      (await h.db.pool.query(`SELECT lease_window_s FROM fence.control`)).rows[0].lease_window_s,
+    );
+    await corruptWindow(window0 + 2);
+    chk = await h.root.checkFenced();
+    assert.ok(
+      chk.problems.some((/** @type {any} */ p) => p.kind === 'worker_role_settings'),
+      'بعدَ RECOVER يبقى الأثرُ ظاهراً',
+    );
     await h.db.pool.query(`DROP ROLE xw_alpha_0538053805380538`);
+    await corruptWindow(window0);
     await h.resume();
   });
 

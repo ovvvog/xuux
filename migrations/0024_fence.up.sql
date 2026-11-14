@@ -937,7 +937,7 @@ BEGIN
   residuals := residuals || jsonb_build_array(
     jsonb_build_object('kind', 'notify_not_revocable', 'note', 'NOTIFY أمرٌ بلا امتياز: نافذتُه بين قفلِ الإيقافِ وإنهاءِ الجلسات؛ لا مُستقبِلَ في المشروع (E3)'),
     jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة: التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، وما دونَه يمدُّ الإيجارَ بما لا يزيدُ على نافذةٍ واحدة؛ العبثُ بها خارجَ السياج'),
-    jsonb_build_object('kind', 'worker_self_alter_role', 'note', 'ALTER ROLE <نفسه> PASSWORD/SET بلا امتيازٍ يُسحَب ولا مُطلِقِ أحداث (WL-538): الإعداداتُ تُرفَضُ كتابتُها (XF013) وتُمحى عندَ الختمِ والإلغاءِ والإيقاف، وكلمةُ المرورِ لا تُدخِلُ أحداً (VALID UNTIL -infinity) وتُمحى كذلك؛ تغييرُ البصمةِ المخزَّنةِ نفسِه لا يُرى إلا بـsuperuser، ومنعُ الأمرِ من أصلِه يحتاجُ خطّافاً بلغةِ C (قرارُ معمار)'));
+    jsonb_build_object('kind', 'worker_self_alter_role', 'note', 'ALTER ROLE <نفسه> PASSWORD/SET بلا امتيازٍ يُسحَب ولا مُطلِقِ أحداث (WL-538): الإعداداتُ تُرفَضُ كتابتُها (XF013) وتُمحى عندَ الختمِ والإلغاءِ والإيقاف، وكلمةُ المرورِ لا تُدخِلُ أحداً (VALID UNTIL -infinity) وتُمحى كذلك؛ لكنّ الكتابةَ نفسَها تبقى ممكنةً بإيجارٍ منقضٍ حتى الانتقالِ التالي: إعداداتٌ يقرؤُها كلُّ دور، وبصمةٌ بمحتوًى يختارُه العاملُ لا يراها إلا superuser؛ ومنعُ الأمرِ من أصلِه يحتاجُ خطّافاً بلغةِ C (قرارُ معمار)'));
   RETURN jsonb_build_object('ok', jsonb_array_length(problems) = 0, 'problems', problems, 'residuals', residuals,
     'state', eff->'state', 'epoch', c.epoch, 'roster_version', c.roster_version, 'roster_hash', c.roster_hash,
     'incarnation', live, 'checked_at', clock_timestamp());
@@ -1175,8 +1175,13 @@ BEGIN
     END;
   END LOOP;
   -- WL-538: لا جلسةَ عاملٍ حيّة (‏XF411 أعلاه) — يُمحى ما وُضِعَ على أدوارِ العمّالِ قبلَ الاسترجاع.
+  -- دورٌ لا يُديرُه السياجُ لا يُسقِطُ مسارَ الطوارئ: ما بقي عليه يُظهِرُه check_fenced فيمنعُ RESUME.
   FOR r IN SELECT rolname FROM pg_roles WHERE fence.is_worker_role(oid) LOOP
-    PERFORM fence._neutralize_role(r.rolname);
+    BEGIN
+      PERFORM fence._neutralize_role(r.rolname);
+    EXCEPTION WHEN insufficient_privilege THEN
+      NULL;
+    END;
   END LOOP;
   DELETE FROM fence.run_lease;
   UPDATE fence.halt_requests SET status = 'FAILED', completed_at = clock_timestamp(), report = jsonb_build_object('closed_by', 'RECOVER') WHERE status IN ('OPEN', 'LOCKED');
@@ -1265,8 +1270,10 @@ $f$;
 -- يُطلِقُ لهما مُطلِقَ أحداث — كتابتانِ دائمتانِ (‏pg_authid، pg_db_role_setting) لا تمرّانِ بـxf_guard.
 -- فلا يُمنَعُ الأمرُ نفسُه هنا، بل أثرُه: (‏أ) الدورُ يصدرُ VALID UNTIL '-infinity' فكلمةُ مرورٍ يضعُها العاملُ
 -- لا تُدخِلُ أحداً (‏peer/cert لا تقرآنِه، وتغييرُه لـCREATEROLE وحدَه)؛ (‏ب) الحارسُ يرفضُ جلسةَ دورٍ له
--- إعداداتٌ دائمة (‏XF013)؛ (‏ج) هذه الدالّةُ تمحو الأثرَ — تُنادى بعدَ NOLOGIN وإنهاءِ الجلساتِ فلا تبقى
--- جلسةٌ تُعيدُه؛ (‏د) check_fenced يرفضُ ما بقي. **حدّ:** تغييرُ البصمةِ المخزَّنةِ نفسِه لا يُرى إلا بـsuperuser.
+-- إعداداتٌ دائمة (‏XF013)؛ (‏ج) هذه الدالّةُ تمحو الأثرَ — تُنادى بعدَ NOLOGIN، وبعدَ إنهاءِ الجلساتِ في
+-- الإلغاءِ والإيقافِ والاسترجاعِ والختمِ المرفوض؛ أمّا بعدَ الختمِ الناجحِ فالجلساتُ المختومةُ حيّةٌ وقد تُعيدُه،
+-- فيُغطّيه (‏ب)؛ (‏د) check_fenced يرفضُ ما بقي. **حدّان:** الكتابةُ نفسُها (‏SET، يقرؤُها كلُّ دور، وبصمةٌ بمحتوًى
+-- يختارُه العاملُ لا يراها إلا superuser) تبقى ممكنةً حتى الانتقالِ التالي ولو انقضى الإيجار.
 -- هويّةُ عاملٍ تحملُ امتيازاتِه (‏INHERIT أو SET) — لا xf_owner الذي يملكُ ADMIN على xuux_worker وحدَه.
 CREATE FUNCTION fence._is_worker_identity(r oid) RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
