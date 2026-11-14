@@ -18,9 +18,14 @@ effects:
     evidence: tests/fence/db-fence.test.mjs (هجوم LO؛ WL-537 رسالةُ WAL بإيجارٍ منقضٍ مرفوضة)
   - id: E3
     name: NOTIFY
-    control: لا يمكنُ سحبُه بامتياز؛ ينقطعُ بإنهاءِ الجلسةِ في الخطوة 7، ويبقى ممكناً لجلسةٍ حيّةٍ حتى إنهائها
+    control: >-
+      pg_notify(text,text) مسحوبةٌ من PUBLIC وإعادتُها تمنعُ الإيقافَ وRESUME (‏worker_notify_function، WL-541)،
+      وCONNECT لـPUBLIC على القاعدةِ المسيَّجة كذلك (‏notify_listener_public)؛ أمرُ NOTIFY نفسُه بلا امتيازٍ يُسحَب —
+      ينقطعُ بإنهاءِ الجلسة (‏الإلغاء، الخطوة 7)، ويبقى ممكناً لجلسةٍ حيّةٍ ولو مختومةً أو بإيجارٍ منقضٍ حتى إنهائها
     status: RESIDUAL
-    evidence: check_fenced().residuals يُدرجُ notify_not_revocable؛ tests/fence/db-fence.test.mjs يوثّقُ الحدّ
+    evidence: >-
+      check_fenced().residuals يُدرجُ notify_not_revocable بسطحِه (‏fence.notify_surface())؛
+      tests/fence/db-fence.test.mjs (‏WL-541: مرسِلٌ ومستمعٌ فعليّان، دورةُ الحياة، الطفرات)
   - id: E4
     name: أقفالُ الاستشارة (advisory locks)
     control: check_fenced يرفضُ إن بقيَ قفلٌ لجلسةِ عامل؛ الإنهاءُ يُحرّرُها
@@ -261,8 +266,9 @@ capabilities:
         ts_rewrite,
         ts_stat,
       ]
-    RESIDUAL:
-      pg_notify: E3
+    # WL-541: pg_notify مسحوبةٌ من PUBLIC (‏0024) فلا تظهرُ في الجرد؛ ولا تُصنَّفُ هنا عمداً — إعادةُ منحِها تظهرُ
+    # غيرَ مصنّفةٍ في المدقّق، وworker_notify_function في check_fenced. أمرُ NOTIFY نفسُه متبقٍّ (‏CAP-NOTIFY، E3).
+    RESIDUAL: {}
   # binary_upgrade_*: كلُّها تفحصُ IsBinaryUpgrade أوّلاً (55P02) — المِسبارُ يُولَّدُ لكلِّ تحميلٍ بمعاملاتٍ NULL
   internal_check_prefix:
     binary_upgrade_: { rejects: ['55P02', '42501'] }
@@ -358,18 +364,28 @@ capabilities:
       deeper: لا للأثرِ داخلَ السياج؛ الكتابةُ نفسُها لا تُمنَعُ دونَ امتدادٍ في الخادم (‏ممنوعٌ الآن، §5)
       proof: tests/fence/db-fence.test.mjs (WL-538 + WL-539)
     - id: CAP-NOTIFY
-      name: NOTIFY / pg_notify
-      source: PUBLIC (بلا صلاحية في PG)
+      name: NOTIFY (‏الأمر، ومنه EXECUTE داخلَ PL/pgSQL) — pg_notify مسحوبةٌ (‏WL-541)
+      source: أمرٌ بلا صلاحيةٍ في PG؛ pg_notify(text,text) كانت لـPUBLIC وسُحِبَت في القاعدةِ المسيَّجة
       class: RESIDUAL
-      persistent: لا تُكتَبُ في الجداول؛ تصلُ إلى مستمعينَ آخرين عند الالتزام
+      persistent: >-
+        لا — لا جداولَ ولا WAL (‏بخلافِ pg_logical_emit_message، WL-537)؛ طابورٌ في الذاكرة/SLRU يبقى فيه الإشعارُ
+        لمستمعٍ كان متّصلاً حتى يقرأَه، ولا يُخزَّنُ لمستمعٍ لاحق، ويزولُ بإعادةِ تشغيلِ الخادم
       rollback: نعم (تُرسَلُ عند COMMIT فقط)
-      after_lease: مسموحة — لا يعرفُ الحارسُ الإيجار
-      after_seal: الجلسةُ مقتولة؛ ما أُرسِلَ قبلَ الختمِ وصل
-      readable: نعم — أيُّ LISTEN على القناة
-      fence_check: لا
-      privilege_block: لا (لا صلاحيةَ لـNOTIFY في PG)
-      deeper: نعم — المستمعُ يجبُ أن يرفضَ ما لا يحملُ رمزَ السياج (E15) أو حاجزٌ في الخادم
-      proof: probe ديناميكي (WL-539) + E3
+      after_lease: مسموحة — لا يعرفُ الحارسُ الإيجار (‏مقيسٌ — الكتابةُ XF009 والإشعارُ يصل)
+      after_seal: >-
+        الختمُ الناجحُ يُبقي الجلساتِ المختومةَ حيّةً فتُرسِل؛ الإلغاءُ والإيقافُ يُنهيانِها — وما التزمَ قبلَ الإنهاءِ
+        يصلُ مستمعاً كان متّصلاً ولو بعدَه (‏مقيس)
+      readable: >-
+        نعم — LISTEN بلا صلاحية: كلُّ دورِ دخولٍ يملكُ CONNECT على القاعدةِ المسيَّجة (‏مباشرةً أو بـINHERIT) أو superuser؛
+        محلّيٌّ للقاعدة؛ القناةُ ≤ 63 بايتاً والحمولةُ < 8000 بايت ولا قيدَ على المحتوى؛ مَن يستمعُ فعلاً لا يكشفُه PG
+      fence_check: >-
+        worker_notify_function (‏EXECUTE على pg_notify لأيِّ هويّةِ عامل) وnotify_listener_public (‏CONNECT لـPUBLIC)؛
+        والسطحُ في notify_not_revocable (‏fence.notify_surface())
+      privilege_block: جزئيّ — الدالّةُ نعم (‏مسحوبة)، والأمرُ لا (‏لا صلاحيةَ لـNOTIFY في PG)
+      deeper: >-
+        نعم — المستمعُ يجبُ أن يرفضَ ما لا يحملُ رمزَ السياج (‏E15)، أو خطّافُ ProcessUtility بلغةِ C يرفضُ NOTIFY
+        لهويّةِ العامل (‏قرارُ معمار للمالك، §5)، أو إنهاءُ الجلسةِ عندَ انقضاءِ الإيجار
+      proof: tests/fence/db-fence.test.mjs (‏WL-541) + E3
     - id: CAP-XID
       name: استهلاكُ معرّفاتِ المعاملات (txid_current، أيُّ كتابةٍ تُبطَلُ)
       source: ضمنيّ
