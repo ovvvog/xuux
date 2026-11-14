@@ -71,14 +71,30 @@ export async function harness(label) {
    */
   const login = async (role, opts = {}) => {
     const password = randomBytes(18).toString('base64url');
-    await db.pool.query(`ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}'`);
+    // WL-538: دورُ الإقلاعِ يصدرُ بـVALID UNTIL '-infinity' (‏لا دخولَ بكلمةِ مرورٍ أبداً). الحزامُ
+    // (‏superuser، حدُّه المعلن) يفتحُه للحظةِ الدخولِ ثمّ يُعيدُه كما صدر — فالجلسةُ القائمةُ تبقى،
+    // وما يُختبَرُ بعدَها هو الدورُ بحالتِه المُصدَرة لا بحالةٍ صنعها الحزام.
+    const prev = (
+      await db.pool.query(
+        `SELECT rolvaliduntil IS NOT NULL AND rolvaliduntil <= now() AS expired FROM pg_roles WHERE rolname = $1`,
+        [role],
+      )
+    ).rows[0];
+    const reopen = prev?.expired === true;
+    await db.pool.query(
+      `ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}'${reopen ? ` VALID UNTIL 'infinity'` : ''}`,
+    );
     const url = new URL(databaseUrl() ?? '');
     url.username = role;
     url.password = password;
     url.pathname = `/${opts.database ?? db.name}`;
     const client = new pg.Client({ connectionString: url.toString() });
     client.on('error', () => {});
-    await client.connect();
+    try {
+      await client.connect();
+    } finally {
+      if (reopen) await db.pool.query(`ALTER ROLE ${quoteIdent(role)} VALID UNTIL '-infinity'`);
+    }
     clients.push(client);
     return client;
   };
