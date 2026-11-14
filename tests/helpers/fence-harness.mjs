@@ -102,6 +102,22 @@ export async function harness(label) {
   let sovClient = await login('xf_sovereign');
   const sovereignKey = generateTestKeyProvider('sovereign');
   await db.pool.query('SELECT fence.bootstrap($1)', [sovereignKey.publicKeyRaw()]);
+  // WL-540: الاحتواءُ جزءٌ من الإقلاعِ السياديّ (‏superuser). عنقودُ الاختبارِ مشترك: تُحفَظُ منحُ PUBLIC السابقةُ
+  // لكلِّ قاعدةٍ فتُعادُ عند الإغلاق كما كانت (‏لا أثرَ جانبيٌّ على قواعدَ غيرِ الحزام).
+  /** @type {Map<string, string[]>} */
+  const publicBefore = new Map();
+  const containDatabases = async () => {
+    const before = await db.pool.query(
+      `SELECT datname, array_remove(ARRAY[
+         CASE WHEN has_database_privilege('public', oid, 'CONNECT') THEN 'CONNECT' END,
+         CASE WHEN has_database_privilege('public', oid, 'TEMPORARY') THEN 'TEMPORARY' END], NULL) AS privs
+       FROM pg_database WHERE datname <> current_database() AND datallowconn`,
+    );
+    for (const r of before.rows)
+      if (r.privs.length && !publicBefore.has(r.datname)) publicBefore.set(r.datname, r.privs);
+    return (await db.pool.query('SELECT fence.contain_database_reach() AS r')).rows[0].r;
+  };
+  await containDatabases();
   const sovereign = new FenceSovereign(sovClient, sovereignKey);
   const root = new FenceRoot(
     async () =>
@@ -211,8 +227,14 @@ export async function harness(label) {
     keys,
     resume,
     boot,
+    /** WL-540: احتواءٌ من جديد (‏بعدَ نسخِ قالبٍ أو إنشاءِ قاعدة) — يُعيدُ تقريرَ fence.contain_database_reach(). */
+    containDatabases,
     async close() {
       for (const c of clients) await c.end().catch(() => {});
+      for (const [name, privs] of publicBefore)
+        await admin
+          .query(`GRANT ${privs.join(', ')} ON DATABASE ${quoteIdent(name)} TO PUBLIC`)
+          .catch(() => {});
       await db.drop();
       await dropStrayWorkerRoles(admin);
       await admin.end();

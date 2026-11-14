@@ -356,8 +356,10 @@ export function classifyCapability(c, policy) {
     case 'database':
       if (c.object === 'current')
         return c.privilege === 'CONNECT' ? { class: 'FENCE_API', rule: 'connect' } : null;
-      if (c.privilege === 'CONNECT' || c.privilege === 'TEMPORARY')
-        return { class: 'RESIDUAL', rule: 'privilege_free.CAP-CROSS-DB' };
+      // WL-540: الدخولُ إلى قاعدةٍ أخرى أو TEMP فيها انحرافٌ (‏check_fenced: worker_database_reach) — إلا قاعدةً لا
+      // يُدخَلُ إليها أصلاً (‏ALLOW_CONNECTIONS false، template0): الصلاحيةُ بلا أثر.
+      if ((c.privilege === 'CONNECT' || c.privilege === 'TEMPORARY') && d.allowconn === false)
+        return { class: 'EFFECT_DISABLED', rule: 'privilege_free.CAP-CROSS-DB' };
       return null;
     case 'language':
       // trusted: تنفّذُ بصلاحياتِ المستدعي؛ untrusted: لا يُنشئُ بها إلا superuser (CREATE FUNCTION يرفض).
@@ -369,11 +371,12 @@ export function classifyCapability(c, policy) {
     case 'role_attribute':
       return c.privilege === '' ? { class: 'FENCE_API', rule: 'role_attribute_none' } : null;
     case 'shared_dependency':
-      // ACL لـxuux_worker: الصلاحيةُ نفسُها مجرودةٌ ومصنّفةٌ في محورِها هنا؛ في قاعدةٍ أخرى خارجَ رؤيتنا.
+      // ACL لـxuux_worker: الصلاحيةُ نفسُها مجرودةٌ ومصنّفةٌ في محورِها هنا. في قاعدةٍ أخرى: لا أثرَ دون CONNECT
+      // هناك — وCONNECT هناك مجرودٌ في محورِ database وغيرُ مصنَّف (‏WL-540)، فالاعتمادُ وحدَه بلا أثر.
       if (d.role === 'xuux_worker' && c.privilege === 'a')
         return d.local
           ? { class: 'FENCE_API', rule: 'acl_local' }
-          : { class: 'RESIDUAL', rule: 'privilege_free.CAP-CROSS-DB' };
+          : { class: 'EFFECT_DISABLED', rule: 'privilege_free.CAP-CROSS-DB' };
       return null;
     default:
       // ownership/parameter/default_acl/large_object/tablespace/foreign/role_setting/catalog_privilege_drift:
