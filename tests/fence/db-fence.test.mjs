@@ -1879,6 +1879,12 @@ describe('WL-540: احتواءُ الوصولِ عبرَ القواعد', { skip
       return String(/** @type {any} */ (e).code);
     }
   };
+  /** الإيقافُ يُلغي الهويّة (‏NOLOGIN): إقلاعٌ جديدٌ بعدَ كلِّ استئناف. */
+  const reboot = async () => {
+    identity = String(
+      (await h.boot('alpha', { seal: false, connect: false })).credential.role_name,
+    );
+  };
   before(async () => {
     policy = await loadCapabilityPolicy();
     h = await harness('wl540');
@@ -1980,6 +1986,63 @@ describe('WL-540: احتواءُ الوصولِ عبرَ القواعد', { skip
       (await h.boot('alpha', { seal: false, connect: false })).credential.role_name,
     );
     assert.equal(await attack('postgres'), '42501', 'بعدَ الاحتواء');
+  });
+
+  test('الإجراء: احتواءٌ بـunresolved غيرِ فارغٍ ليس نجاحاً — الوصولُ حقيقيّ، والإيقافُ لا يكتمل، وRESUME يُرفَض، ولا يُخفى بإعادةِ النداء', async () => {
+    // منحٌ موروثٌ عبرَ دورٍ وسيطٍ يرثُه xuux_worker (‏فهويّةُ العامل): الدالّةُ لا تسحبُه منه صامتةً.
+    await h.db.pool.query('CREATE ROLE wl540_inherit NOLOGIN');
+    await h.db.pool.query('GRANT CONNECT ON DATABASE postgres TO wl540_inherit');
+    await h.db.pool.query('GRANT wl540_inherit TO xuux_worker');
+    try {
+      const first = await h.containDatabases();
+      assert.deepEqual(first.revoked, [], 'لا منحَ لـPUBLIC ولا مباشرٌ يُسحَب');
+      assert.deepEqual(first.unresolved, ['postgres'], 'الموروثُ مُبلَغٌ عنه');
+      // ليس نجاحاً: الوصولُ قائمٌ فعلاً بهويّةِ العامل (‏الدخولُ يُقبَل؛ TEMP مرفوضٌ لأنّ الوسيطَ لا يملكُه).
+      const c = await h.login(identity, { database: 'postgres' });
+      assert.equal((await c.query('SELECT current_database() AS d')).rows[0].d, 'postgres');
+      await c.end();
+      assert.deepEqual(
+        (await reach()).map((p) => p.object),
+        ['postgres:CONNECT'],
+      );
+      assert.ok(
+        (await problems()).some((p) => p.kind === 'worker_membership'),
+        'العضويّةُ الوسيطةُ مكشوفةٌ أيضاً',
+      );
+      const r = await audit();
+      assert.ok(!r.ok && r.unclassified.some((x) => x.axis === 'database'));
+      // إعادةُ النداءِ لا «تُصلحُ» ولا تُخفي: النتيجةُ نفسُها.
+      assert.deepEqual(await h.containDatabases(), first);
+      const hr = /** @type {any} */ (
+        await h.root.halt('wl540-unresolved', { effects: NO_EFFECTS })
+      );
+      assert.equal(hr.dbFenced, false);
+      assert.equal(hr.reason, 'DB_NOT_FENCED');
+      assert.ok(
+        hr.check.problems.some(
+          (/** @type {any} */ p) =>
+            p.kind === 'worker_database_reach' && p.object === 'postgres:CONNECT',
+        ),
+        JSON.stringify(hr.check.problems),
+      );
+      assert.equal((await h.sovereign.status()).effective.state, 'HALT_REQUESTED');
+      await rejectsWith(() => h.resume(), ['XF415', 'XF507'], 'RESUME فوقَ احتواءٍ ناقص');
+      assert.notEqual((await h.sovereign.status()).effective.state, 'RUNNING');
+    } finally {
+      await h.db.pool.query('REVOKE wl540_inherit FROM xuux_worker');
+      await h.db.pool.query('REVOKE CONNECT ON DATABASE postgres FROM wl540_inherit');
+      await h.db.pool.query('DROP ROLE wl540_inherit');
+    }
+    // العلاجُ بقرارِ المشغّل (‏إزالةُ العضويّة) ثمّ النداءُ من جديد: unresolved فارغ ⇒ الإيقافُ يكتمل وRESUME ينجح.
+    assert.deepEqual((await h.containDatabases()).unresolved, []);
+    assert.deepEqual(await reach(), []);
+    const done = /** @type {any} */ (
+      await h.root.halt('wl540-unresolved-fixed', { effects: NO_EFFECTS })
+    );
+    assert.equal(done.dbFenced, true, JSON.stringify(done.check?.problems));
+    await h.resume();
+    assert.equal((await h.sovereign.status()).effective.state, 'RUNNING');
+    await reboot();
   });
 
   test('الاحتواءُ لـsuperuser وحدَه: لا EXECUTE للجذرِ ولا للسياديِّ ولا لهويّةِ العامل', async () => {

@@ -1044,7 +1044,11 @@ export function renderHandoff(sources) {
   out.push('');
   out.push('| المُدخلةُ | التاريخُ | العنوانُ | الحالةُ بعدَ العملِ |');
   out.push('| --- | --- | --- | --- |');
-  for (const entry of sorted.slice(0, 8)) {
+  // آخرُ ثماني مُدخلاتٍ على الأقلّ، ولا تسقطُ من الجدولِ مُدخلةٌ جزئيّةٌ (‏🟨) ما دامت في السلسلةِ المتّصلةِ من
+  // الأحدث: عملٌ لم يُغلَق لا يُمحى من الملخّصِ بمجرّدِ قدومِ مُدخلةٍ أحدث (‏WL-540: كان WL-532 يسقط).
+  const partialRun = sorted.findIndex((entry) => !stateOf(entry).startsWith('🟨'));
+  const shown = Math.max(8, partialRun === -1 ? sorted.length : partialRun);
+  for (const entry of sorted.slice(0, shown)) {
     const title = entry.title.replace(/\|/gu, '\\|').slice(0, 180);
     out.push(
       `| \`${entry.id}\` | ${entry.date} | ${title} | ${stateOf(entry).replace(/\|/gu, '\\|')} |`,
