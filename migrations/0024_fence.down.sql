@@ -62,6 +62,7 @@ BEGIN
   END LOOP;
 END
 $emit$;
+GRANT EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) TO PUBLIC;
 
 REVOKE ALL ON ALL TABLES IN SCHEMA state FROM xuux_worker, xuux_migrator;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA state FROM xuux_worker;
