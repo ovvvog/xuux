@@ -37,6 +37,7 @@ import {
   sealFencedSessions,
   signCredentialChallenge,
 } from '../../src/fence/db-fence.mjs';
+import { auditWorkerCapabilitiesLive, loadCapabilityPolicy } from '../../src/fence/effects.mjs';
 import { DB_ERRORS, createPool } from '../../src/persistence/db.mjs';
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { databaseUrl, quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
@@ -1437,3 +1438,407 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
 function quoteLiteral(v) {
   return `'${v.replace(/'/g, "''")}'`;
 }
+
+// ─── WL-539: جردٌ آليٌّ لقدراتِ العاملِ الدائمة ومدقّقٌ مستمرّ ─────────────────────────────────────
+describe('WL-539: مدقّقُ قدراتِ العامل', { skip: skipWithoutDatabase }, () => {
+  /** @type {Awaited<ReturnType<typeof harness>>} */
+  let h;
+  /** @type {Record<string, any>} */
+  let policy;
+  /** الجلسةُ المختومةُ الحاليّةُ للعامل (‏تُستبدَلُ بإقلاعٍ جديد). @type {{ c: pg.Client }} */
+  const w = { c: /** @type {any} */ (null) };
+  const audit = async () => auditWorkerCapabilitiesLive(/** @type {any} */ (h.rootClient), policy);
+  const problems = async () =>
+    /** @type {Array<{ kind: string, object: string }>} */ (
+      (await h.rootClient.query('SELECT fence.capability_problems() AS p')).rows[0].p
+    );
+  before(async () => {
+    policy = await loadCapabilityPolicy();
+    h = await harness('wl539');
+    // أهدافُ مسابيرِ BRIN/GIN: تُنشَأُ تحتَ HALTED فيغطّيها السياجُ تلقائياً.
+    await h.db.pool.query(`CREATE TABLE state.wl539_t (a integer, t tsvector)`);
+    await h.db.pool.query(`CREATE INDEX wl539_brin ON state.wl539_t USING brin (a)`);
+    await h.db.pool.query(
+      `CREATE INDEX wl539_gin ON state.wl539_t USING gin (t) WITH (fastupdate = on)`,
+    );
+    await h.db.pool.query(`GRANT SELECT, INSERT ON state.wl539_t TO xuux_worker`);
+    await h.resume();
+    w.c = /** @type {pg.Client} */ ((await h.boot('alpha')).client);
+  });
+  after(async () => h?.close());
+
+  test('القاعدةُ السليمة: جردٌ غيرُ تافهٍ، صفرُ قدرةٍ غيرِ مصنّفة، صفرُ مشكلة', async () => {
+    const r = await audit();
+    if (process.env['XUUX_CAPABILITY_REPORT']) {
+      writeFileSync(
+        process.env['XUUX_CAPABILITY_REPORT'],
+        `${JSON.stringify({ ...r, classified: undefined }, null, 2)}\n`,
+      );
+    }
+    assert.deepEqual(r.unclassified, [], 'قدرةٌ غيرُ مصنّفة');
+    // ضدّ «النجاحِ الزائفِ من قاعدةٍ فارغة»: الجردُ يرى فعلاً كلَّ محور، والهويّةَ الحيّة.
+    assert.ok(r.total > 300, `الجردُ ${r.total}`);
+    for (const cls of [
+      'FENCE_API',
+      'READ_ONLY',
+      'SESSION_TRANSIENT',
+      'HANDLER',
+      'QUERY_EXECUTOR',
+      'INTERNAL_CHECK',
+      'GUARDED_WRITE',
+      'RESIDUAL',
+    ])
+      assert.ok((r.byClass[cls] ?? 0) > 0, `صنفُ ${cls} فارغ`);
+    const inv = r.classified;
+    assert.ok(
+      inv.some((c) => c.axis === 'membership' && c.object === 'identity -> xuux_worker'),
+      'الهويّةُ الحيّةُ مجرودة',
+    );
+    assert.ok(
+      inv.some(
+        (c) =>
+          c.axis === 'relation' &&
+          c.object === 'state.wl539_t' &&
+          c.privilege === 'INSERT' &&
+          c.class === 'GUARDED_WRITE',
+      ),
+    );
+    assert.ok(
+      r.residual.some((c) => c.detail?.name === 'pg_notify'),
+      'pg_notify متبقٍّ معلن (E3)',
+    );
+    assert.deepEqual(await problems(), []);
+    const cf = (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+    assert.ok(
+      !cf.problems.some(
+        (/** @type {any} */ p) =>
+          String(p.kind).startsWith('worker_') && p.kind !== 'worker_sessions',
+      ),
+      JSON.stringify(cf.problems),
+    );
+  });
+
+  test('INTERNAL_CHECK: كلُّ دالّةٍ يُنفّذُها العاملُ بفحصٍ داخليٍّ تُرفَضُ فعلاً بدورِ العاملِ المختوم', async () => {
+    const r = await audit();
+    const rootPid = Number((await h.rootClient.query('SELECT pg_backend_pid() AS p')).rows[0].p);
+    const checked = r.classified.filter((c) => c.class === 'INTERNAL_CHECK');
+    assert.ok(checked.length >= 40, `${checked.length}`);
+    const sample = {
+      int4: '0',
+      int8: '0',
+      oid: '0',
+      text: "'x'",
+      name: "'x'",
+      bool: 'false',
+      regclass: "'state.wl539_t'",
+      pg_lsn: "'0/0'",
+      xid8: "'0'",
+      int2: '0',
+      char: "'x'",
+    };
+    for (const c of checked) {
+      const spec = policy.internal_check[c.detail?.name];
+      /** @type {string[]} */
+      let sqls;
+      /** @type {string[]} */
+      let rejects;
+      if (spec) {
+        sqls = [String(spec.probe).replace('{root_pid}', String(rootPid))];
+        rejects = spec.rejects;
+      } else {
+        const prefix = Object.keys(policy.internal_check_prefix).find((p) =>
+          c.detail?.name.startsWith(p),
+        );
+        assert.ok(prefix, c.object);
+        rejects = policy.internal_check_prefix[/** @type {string} */ (prefix)].rejects;
+        const types = (
+          await h.rootClient.query(
+            `SELECT array(SELECT format_type(t, NULL) FROM unnest(p.proargtypes) t) AS a
+             FROM pg_proc p WHERE p.oid = $1::regprocedure`,
+            [`pg_catalog.${c.object}`],
+          )
+        ).rows[0].a;
+        const args = types.map((/** @type {string} */ t) =>
+          t.endsWith('[]')
+            ? `'{}'::${t}`
+            : `${
+                sample[
+                  /** @type {keyof typeof sample} */ (
+                    t
+                      .replace(/^"|"$/g, '')
+                      .replace(/^integer$/, 'int4')
+                      .replace(/^bigint$/, 'int8')
+                      .replace(/^boolean$/, 'bool')
+                      .replace(/^smallint$/, 'int2')
+                  )
+                ] ?? `'0'`
+              }::${t}`,
+        );
+        sqls = [`SELECT pg_catalog.${quoteIdent(c.detail?.name)}(${args.join(', ')})`];
+      }
+      for (const sql of sqls) {
+        const e = await rejection(() => w.c.query(sql));
+        assert.ok(
+          e && rejects.includes(e.code),
+          `${c.object}: ${sql} ⇒ ${e?.code ?? 'قُبِلَ'} ${e?.message ?? ''}`,
+        );
+      }
+    }
+  });
+
+  test('الأوامرُ بلا صلاحية: NOTIFY متبقٍّ مقبول، وANALYZE/VACUUM بلا أثرٍ مقيس، وALTER ROLE الذاتيُّ مكشوفٌ ومعطَّلُ الأثر', async () => {
+    // إن صار NOTIFY مرفوضاً تغيّرَ المتبقّي E3 — يجبُ تحديثُ التصنيفِ لا إسكاتُ الاختبار.
+    await w.c.query(`NOTIFY wl539, 'residual'`);
+    await w.c.query(`SELECT pg_notify('wl539', 'residual')`);
+    const before = (
+      await h.db.pool.query(
+        `SELECT reltuples, (SELECT last_analyze FROM pg_stat_user_tables WHERE relid = 'state.fence_probe'::regclass) AS la FROM pg_class WHERE oid = 'state.fence_probe'::regclass`,
+      )
+    ).rows[0];
+    await w.c.query('ANALYZE state.fence_probe').catch(() => {});
+    await w.c.query('VACUUM state.fence_probe').catch(() => {});
+    const afterRow = (
+      await h.db.pool.query(
+        `SELECT reltuples, (SELECT last_analyze FROM pg_stat_user_tables WHERE relid = 'state.fence_probe'::regclass) AS la FROM pg_class WHERE oid = 'state.fence_probe'::regclass`,
+      )
+    ).rows[0];
+    assert.deepEqual(afterRow, before, 'ANALYZE/VACUUM غيرُ المالكِ بلا أثر');
+    // ALTER ROLE الذاتيُّ: يقبلُه PG (‏كتابةٌ دائمة)، فيكشفُه المدقّقُ محوراً غيرَ مصنّف، وأثرُه معطَّل (‏XF013)،
+    // وإقلاعٌ جديدٌ (‏يُلغي القديم) يمحوه — CAP-ALTER-ROLE-SELF ‹EFFECT_DISABLED›.
+    await w.c.query(`ALTER ROLE CURRENT_USER SET work_mem = '1MB'`);
+    const flagged = await audit();
+    assert.ok(
+      flagged.unclassified.some((c) => c.axis === 'role_setting' && c.object === 'identity'),
+      JSON.stringify(flagged.unclassified),
+    );
+    await rejectsWith(
+      () => w.c.query(`INSERT INTO state.fence_probe VALUES (539, 'x')`),
+      ['XF013'],
+      'كتابةُ عاملٍ عبثَ بدورِه',
+    );
+    const reboot = await h.boot('alpha');
+    Object.assign(w, { c: reboot.client });
+    assert.deepEqual((await audit()).unclassified, [], 'الإلغاءُ محا الإعداد');
+    for (const id of [
+      'CAP-ALTER-ROLE-SELF',
+      'CAP-NOTIFY',
+      'CAP-XID',
+      'CAP-SESSION',
+      'CAP-MAINTENANCE',
+      'CAP-CROSS-DB',
+    ]) {
+      const e = policy.privilege_free.find((/** @type {any} */ x) => x.id === id);
+      assert.ok(e, id);
+      for (const f of [
+        'name',
+        'source',
+        'class',
+        'persistent',
+        'rollback',
+        'after_lease',
+        'after_seal',
+        'readable',
+        'fence_check',
+        'privilege_block',
+        'deeper',
+        'proof',
+      ])
+        assert.ok(typeof e[f] === 'string' && e[f].trim() !== '', `${id}.${f}`);
+    }
+  });
+
+  test('تحتَ RUNNING: DDL/GRANT على الكائناتِ مرفوضٌ حتى للمالكِ الأعلى (‏XF201) — الطفراتُ التاليةُ تحتَ HALTED', async () => {
+    await rejectsWith(
+      () => h.db.pool.query('GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_reset() TO xuux_worker'),
+      ['XF201'],
+      'GRANT تحتَ RUNNING',
+    );
+    await h.root.halt('wl539-mutations', { effects: NO_EFFECTS });
+    assert.equal((await h.sovereign.status()).effective.state, 'HALTED');
+    assert.deepEqual((await audit()).unclassified, [], 'HALTED نظيف');
+  });
+
+  // كلُّ طفرةٍ تُطبَّقُ بالمالكِ الأعلى (superuser) ثمّ تُعكَس: المدقّقُ وcheck_fenced يكشفانِها كلتاهما.
+  /** @type {Array<{ name: string, apply: string[], revert: string[], kind: string | null, axis: string }>} */
+  const mutations = [
+    {
+      name: 'EXECUTE على دالّةِ كتالوجٍ مُقيَّدة',
+      apply: ['GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_reset() TO xuux_worker'],
+      revert: ['REVOKE EXECUTE ON FUNCTION pg_catalog.pg_stat_reset() FROM xuux_worker'],
+      kind: 'worker_catalog_privilege_drift',
+      axis: 'function',
+    },
+    {
+      name: 'SECURITY DEFINER في public يُنفّذُها PUBLIC',
+      apply: [
+        `CREATE FUNCTION public.wl539_secdef() RETURNS int LANGUAGE sql SECURITY DEFINER AS 'SELECT 1'`,
+      ],
+      revert: ['DROP FUNCTION public.wl539_secdef()'],
+      kind: 'worker_secdef_execute',
+      axis: 'function',
+    },
+    {
+      name: 'عضويةُ دورٍ مُعرَّفٍ مسبقاً لـxuux_worker',
+      apply: ['GRANT pg_read_all_data TO xuux_worker'],
+      revert: ['REVOKE pg_read_all_data FROM xuux_worker'],
+      kind: 'worker_membership',
+      axis: 'membership',
+    },
+    {
+      name: 'ملكيةُ كائنٍ لـxuux_worker',
+      apply: [
+        'CREATE FUNCTION public.wl539_owned() RETURNS int LANGUAGE sql AS $$SELECT 1$$',
+        'ALTER FUNCTION public.wl539_owned() OWNER TO xuux_worker',
+      ],
+      revert: ['DROP FUNCTION public.wl539_owned()'],
+      kind: 'worker_owns_objects',
+      axis: 'ownership',
+    },
+    {
+      name: 'صلاحياتٌ افتراضية',
+      apply: [
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO xuux_worker',
+      ],
+      revert: [
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM xuux_worker',
+      ],
+      kind: 'worker_default_acl_privilege',
+      axis: 'default_acl',
+    },
+    {
+      name: 'SET على مُعامِل',
+      apply: ['GRANT SET ON PARAMETER session_replication_role TO xuux_worker'],
+      revert: ['REVOKE SET ON PARAMETER session_replication_role FROM xuux_worker'],
+      kind: 'worker_parameter_privilege',
+      axis: 'parameter',
+    },
+    {
+      name: 'منحُ عمودٍ على جدولِ السياج',
+      apply: ['GRANT UPDATE (lease_window_s) ON fence.control TO xuux_worker'],
+      revert: ['REVOKE UPDATE (lease_window_s) ON fence.control FROM xuux_worker'],
+      kind: 'worker_unguarded_write',
+      axis: 'relation',
+    },
+    {
+      name: 'مشهدٌ قابلٌ للكتابةِ فوقَ fence.control (‏يكتبُ بصلاحياتِ مالكِه)',
+      apply: [
+        'CREATE VIEW state.wl539_v AS SELECT id, lease_window_s FROM fence.control',
+        'GRANT UPDATE ON state.wl539_v TO xuux_worker',
+      ],
+      revert: ['DROP VIEW state.wl539_v'],
+      kind: 'worker_unguarded_write',
+      axis: 'relation',
+    },
+    {
+      name: 'CREATE على القاعدة',
+      apply: ['GRANT CREATE ON DATABASE {db} TO xuux_worker'],
+      revert: ['REVOKE CREATE ON DATABASE {db} FROM xuux_worker'],
+      kind: 'worker_database_create',
+      axis: 'database',
+    },
+    {
+      name: 'TEMPORARY عبرَ PUBLIC على القاعدة',
+      apply: ['GRANT TEMPORARY ON DATABASE {db} TO PUBLIC'],
+      revert: ['REVOKE TEMPORARY ON DATABASE {db} FROM PUBLIC'],
+      kind: null,
+      axis: 'database',
+    },
+    {
+      // انحدارٌ لخللٍ وجدَه الجردُ نفسُه: has_table_privilege(تسلسل, 'USAGE') كان يرمي 22023 فيُسقِطُ check_fenced.
+      name: 'USAGE على تسلسلٍ في state (‏nextval لا معامليّ — WL-536)',
+      apply: ['GRANT USAGE ON SEQUENCE state.events_seq_seq TO xuux_worker'],
+      revert: ['REVOKE USAGE ON SEQUENCE state.events_seq_seq FROM xuux_worker'],
+      kind: null,
+      axis: 'sequence',
+    },
+    {
+      name: 'كائنٌ كبير',
+      apply: ['SELECT lo_create(95390)', 'GRANT SELECT ON LARGE OBJECT 95390 TO xuux_worker'],
+      revert: ['SELECT lo_unlink(95390)'],
+      kind: 'worker_large_object_privilege',
+      axis: 'large_object',
+    },
+    {
+      name: 'مساحةُ جداول',
+      apply: ['GRANT CREATE ON TABLESPACE pg_default TO xuux_worker'],
+      revert: ['REVOKE CREATE ON TABLESPACE pg_default FROM xuux_worker'],
+      kind: 'worker_tablespace_privilege',
+      axis: 'tablespace',
+    },
+    {
+      name: 'سمةُ دور',
+      apply: ['ALTER ROLE xuux_worker CREATEDB'],
+      revert: ['ALTER ROLE xuux_worker NOCREATEDB'],
+      kind: 'worker_role_attributes',
+      axis: 'role_attribute',
+    },
+  ];
+  for (const m of mutations) {
+    test(`طفرة: ${m.name} ⇒ يكشفُها المدقّق${m.kind ? ` وcheck_fenced (${m.kind})` : ''}`, async () => {
+      const sql = (/** @type {string} */ s) => s.replaceAll('{db}', quoteIdent(h.db.name));
+      for (const s of m.apply) await h.db.pool.query(sql(s));
+      try {
+        const r = await audit();
+        assert.ok(
+          !r.ok &&
+            r.unclassified.some((c) => c.axis === m.axis || c.axis === 'catalog_privilege_drift'),
+          `المدقّقُ لم يكشف: ${JSON.stringify(r.unclassified)}`,
+        );
+        if (m.kind)
+          assert.ok(
+            (await problems()).some((p) => p.kind === m.kind),
+            JSON.stringify(await problems()),
+          );
+      } finally {
+        for (const s of m.revert) await h.db.pool.query(sql(s));
+      }
+      assert.deepEqual((await audit()).unclassified, [], 'العكسُ يعيدُ النظافة');
+      assert.deepEqual(await problems(), []);
+    });
+  }
+
+  test('منعٌ من المصدر: TRUNCATE لعاملٍ على جدولٍ محروسٍ يُرفَضُ عندَ المنحِ نفسِه', async () => {
+    await rejectsWith(
+      () => h.db.pool.query('GRANT TRUNCATE ON state.fence_probe TO xuux_worker'),
+      ['XF203'],
+      'منحُ TRUNCATE',
+    );
+  });
+
+  test('الإيجابيُّ الكاذبُ مستبعد: منحُ قراءةٍ ودالّةُ مستدعٍ في state لا يُفشلان المدقّقَ ولا check_fenced', async () => {
+    await h.db.pool.query(`GRANT SELECT ON state.wl539_t TO xuux_worker`);
+    await h.db.pool.query(
+      `CREATE FUNCTION state.wl539_invoker(integer) RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT $1 + 1'`,
+    );
+    try {
+      const r = await audit();
+      assert.deepEqual(r.unclassified, []);
+      assert.ok(
+        r.classified.some(
+          (c) => c.object === 'state.wl539_invoker(integer)' && c.class === 'INVOKER',
+        ),
+      );
+      assert.deepEqual(await problems(), []);
+    } finally {
+      await h.db.pool.query(`DROP FUNCTION state.wl539_invoker(integer)`);
+    }
+  });
+
+  test('الطفرةُ تمنعُ الاستئناف: إيقافٌ ثمّ RESUME يُرفَضُ ما بقيت قدرةٌ غيرُ مصنّفة', async () => {
+    await h.db.pool.query('GRANT EXECUTE ON FUNCTION pg_catalog.pg_stat_reset() TO xuux_worker');
+    try {
+      await rejectsWith(() => h.resume(), ['XF415'], 'RESUME فوقَ قدرةٍ غيرِ مصنّفة');
+      const cf = (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.ok(
+        cf.problems.some((/** @type {any} */ p) => p.kind === 'worker_catalog_privilege_drift'),
+        JSON.stringify(cf.problems),
+      );
+    } finally {
+      await h.db.pool.query(
+        'REVOKE EXECUTE ON FUNCTION pg_catalog.pg_stat_reset() FROM xuux_worker',
+      );
+    }
+    await h.resume();
+    assert.equal((await h.sovereign.status()).effective.state, 'RUNNING');
+  });
+});
