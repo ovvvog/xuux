@@ -953,7 +953,7 @@ BEGIN
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'escape_extensions', 'extensions', x)); END IF;
   residuals := residuals || jsonb_build_array(
     -- WL-541: السطحُ مقيسٌ لا مُفترَض — مَن يستطيعُ الدخولَ (‏= LISTEN) ومن أين؛ مَن يستمعُ فعلاً لا يُرى.
-    jsonb_build_object('kind', 'notify_not_revocable', 'surface', fence.notify_surface(), 'note', 'أمرُ NOTIFY بلا امتيازٍ يُسحَب (‏pg_notify مسحوبةٌ من PUBLIC — WL-541): العاملُ يُرسِلُ ما دامت جلستُه حيّة — بعدَ الختمِ وبعدَ انقضاءِ الإيجارِ حتى الإلغاءِ أو الإيقاف؛ والإشعارُ الملتزَمُ قبلَ إنهاءِ الجلسةِ يصلُ مستمعاً كان متّصلاً ولو بعدَه، ولا يُخزَّنُ لمستمعٍ لاحق. المستمعُ: كلُّ مَن يدخلُ هذه القاعدة (‏surface.listeners) — لا مستهلكَ في المستودع، وما خارجَه لا يُثبَتُ غيابُه؛ والمنعُ من أصلِه يحتاجُ خطّافاً بلغةِ C (‏قرارُ معمار، E3)'),
+    jsonb_build_object('kind', 'notify_not_revocable', 'surface', fence.notify_surface(), 'note', 'أمرُ NOTIFY بلا امتيازٍ يُسحَب (‏pg_notify مسحوبةٌ من PUBLIC — WL-541): العاملُ يُرسِلُ ما دامت جلستُه حيّة — بعدَ الختمِ، وبعدَ انقضاءِ الإيجارِ حتى الحصادِ (‏reap_lapsed، WL-542: للجذرِ أو السياديّ، والانقضاءُ نهائيّ) أو الإلغاءِ أو الإيقاف؛ والإشعارُ الملتزَمُ قبلَ إنهاءِ الجلسةِ يصلُ مستمعاً كان متّصلاً ولو بعدَه، ولا يُخزَّنُ لمستمعٍ لاحق. المستمعُ: كلُّ مَن يدخلُ هذه القاعدة (‏surface.listeners) — لا مستهلكَ في المستودع، وما خارجَه لا يُثبَتُ غيابُه؛ والمنعُ من أصلِه يحتاجُ خطّافاً بلغةِ C (‏قرارُ معمار، E3)'),
     jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة: التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، وما دونَه يمدُّ الإيجارَ بما لا يزيدُ على نافذةٍ واحدة؛ العبثُ بها خارجَ السياج'),
     jsonb_build_object('kind', 'worker_self_alter_role', 'note', 'ALTER ROLE <نفسه> PASSWORD/SET بلا امتيازٍ يُسحَب ولا مُطلِقِ أحداث (WL-538): الإعداداتُ تُرفَضُ كتابتُها (XF013) وتُمحى عندَ الختمِ والإلغاءِ والإيقاف، وكلمةُ المرورِ لا تُدخِلُ أحداً (VALID UNTIL -infinity) وتُمحى كذلك؛ لكنّ الكتابةَ نفسَها تبقى ممكنةً بإيجارٍ منقضٍ حتى الانتقالِ التالي: إعداداتٌ يقرؤُها كلُّ دور، وبصمةٌ بمحتوًى يختارُه العاملُ لا يراها إلا superuser؛ ومنعُ الأمرِ من أصلِه يحتاجُ خطّافاً بلغةِ C (قرارُ معمار)'));
   RETURN jsonb_build_object('ok', jsonb_array_length(problems) = 0, 'problems', problems, 'residuals', residuals,
@@ -1672,6 +1672,7 @@ BEGIN
   IF fence.effective_state()->>'state' <> 'RUNNING' THEN
     RAISE EXCEPTION USING ERRCODE = 'XF502', MESSAGE = 'fence: لا إصدارَ اعتمادٍ خارجَ RUNNING';
   END IF;
+  PERFORM fence._reap_lapsed();  -- WL-542: كلُّ مصافحةٍ تحصدُ المنقضيَ أوّلاً
   SELECT * INTO ch FROM fence.challenges WHERE challenges.nonce = issue_credential.nonce FOR UPDATE;
   IF NOT FOUND OR ch.used_at IS NOT NULL OR ch.expires_at < clock_timestamp() OR ch.epoch <> c.epoch OR ch.roster_version <> c.roster_version THEN
     RAISE EXCEPTION USING ERRCODE = 'XF505', MESSAGE = 'fence: تحدٍّ غائبٌ أو مستعمَلٌ أو منقضٍ أو من عهدٍ آخر';
@@ -1789,13 +1790,18 @@ BEGIN
   IF fence.effective_state()->>'state' <> 'RUNNING' OR EXISTS (SELECT 1 FROM fence.halt_requests WHERE status IN ('OPEN', 'LOCKED')) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF502', MESSAGE = 'fence: لا تجديدَ خارجَ RUNNING';
   END IF;
-  SELECT * INTO cr FROM fence.credentials WHERE credentials.role_name = renew_lease.role_name;
+  -- WL-542: FOR UPDATE يُسلسلُ التجديدَ مع الحاصد (‏يقفلُ الصفَّ نفسَه): لا يُجدَّدُ ما يُحصَد.
+  SELECT * INTO cr FROM fence.credentials WHERE credentials.role_name = renew_lease.role_name FOR UPDATE;
   IF NOT FOUND OR cr.status <> 'ACTIVE' OR cr.epoch <> c.epoch THEN
     RAISE EXCEPTION USING ERRCODE = 'XF007', MESSAGE = 'fence: اعتمادٌ غيرُ نشِط';
   END IF;
   -- WL-536: لا تجديدَ على ساعةٍ تراجعت قبلَ آخرِ تجديد — وإلّا أعادَ التجديدُ شرعنةَ الساعةِ المُرجَعة.
   IF EXISTS (SELECT 1 FROM fence.run_lease l WHERE l.role_name = renew_lease.role_name AND l.epoch = c.epoch AND l.renewed_at > clock_timestamp()) THEN
     RAISE EXCEPTION USING ERRCODE = 'XF012', MESSAGE = 'fence: ساعةُ القاعدةِ تراجعت قبلَ آخرِ تجديد — لا تجديد';
+  END IF;
+  -- WL-542: الانقضاءُ نهائيّ — لا إحياءَ لإيجارٍ منقضٍ (‏كان يُعيدُ الكتابةَ للجلسةِ نفسِها). الطريقُ: حصادٌ ثمّ مصافحةٌ جديدة.
+  IF fence._lease_lapse_reason(cr, c) IS NOT NULL THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF009', MESSAGE = 'fence: الإيجارُ منقضٍ — الانقضاءُ نهائيّ، لا تجديد (‏reap_lapsed ثمّ مصافحةٌ جديدة)';
   END IF;
   e := clock_timestamp() + make_interval(secs => c.lease_window_s);
   UPDATE fence.run_lease SET expires_at = e, renewed_at = clock_timestamp() WHERE run_lease.role_name = renew_lease.role_name AND epoch = c.epoch;
@@ -1804,14 +1810,14 @@ BEGIN
 END
 $f$;
 
-CREATE FUNCTION fence.revoke_credential(role_name name, reason text) RETURNS integer
+-- WL-542: جسمُ الإلغاءِ داخليٌّ بلا تحقّقِ هويّة — يناديه revoke_credential (‏الجذر) والحاصدُ (‏الجذرُ أو السياديّ).
+CREATE FUNCTION fence._revoke_role(role_name name, reason text) RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE n integer;
 BEGIN
-  PERFORM fence._assert_root();
   UPDATE fence.credentials SET status = 'REVOKED', revoked_at = clock_timestamp(), revoke_reason = reason
-  WHERE credentials.role_name = revoke_credential.role_name AND status = 'ACTIVE';
-  DELETE FROM fence.run_lease WHERE run_lease.role_name = revoke_credential.role_name;
+  WHERE credentials.role_name = _revoke_role.role_name AND status = 'ACTIVE';
+  DELETE FROM fence.run_lease WHERE run_lease.role_name = _revoke_role.role_name;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
     EXECUTE format('ALTER ROLE %I NOLOGIN', role_name);
   END IF;
@@ -1819,6 +1825,69 @@ BEGIN
   PERFORM fence._neutralize_role(role_name);
   PERFORM fence._event('CREDENTIAL_REVOKED', NULL, jsonb_build_object('role', role_name, 'reason', reason, 'terminated', n));
   RETURN n;
+END
+$f$;
+
+CREATE FUNCTION fence.revoke_credential(role_name name, reason text) RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+  PERFORM fence._assert_root();
+  RETURN fence._revoke_role(role_name, reason);
+END
+$f$;
+
+-- WL-542: **انقضاءُ الإيجارِ نهائيّ.** كان الحارسُ يرفضُ كتابةَ الإيجارِ المنقضي (‏XF009) لكنّ الجلسةَ تبقى حيّةً —
+-- تُرسِلُ NOTIFY (‏E3) وتُبقي أثرَ ALTER ROLE الذاتيّ (‏WL-538) — حتى يُلغيَها الجذر؛ وكان renew_lease يُحييه فتعودُ
+-- الكتابةُ للجلسةِ نفسِها، والسياديُّ وحدَه لا يملكُ إنهاءَها (‏42501 على الإلغاءِ والإيقافِ وpg_terminate_backend).
+-- سببُ الانقضاءِ لاعتمادٍ نشِط، أو NULL إن كان إيجارُه صالحاً الآن (‏بالشروطِ نفسِها التي يرفضُ بها الحارس).
+CREATE FUNCTION fence._lease_lapse_reason(cr fence.credentials, c fence.control) RETURNS text
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  SELECT CASE
+    WHEN cr.epoch IS DISTINCT FROM c.epoch THEN 'stale_epoch'
+    WHEN l.role_name IS NULL THEN 'no_lease'
+    WHEN l.renewed_at > clock_timestamp() THEN 'clock_regressed'
+    WHEN l.expires_at <= clock_timestamp() THEN 'expired'
+  END
+  FROM (SELECT 1) one
+  LEFT JOIN fence.run_lease l ON l.role_name = cr.role_name AND l.epoch = c.epoch
+$f$;
+
+-- الحاصد: كلُّ اعتمادٍ نشِطٍ انقضى إيجارُه يُلغى (‏NOLOGIN، إنهاءُ الجلسات، محوُ الأثر) تحتَ FOR UPDATE على صفِّه —
+-- فيتسلسلُ مع renew_lease (‏يقفلُ الصفَّ نفسَه). ثمّ يتحقّقُ من بقاءِ جلساتٍ للدور بلقطةِ إحصاءاتٍ جديدة، ويُبلِغُ
+-- unresolved بصدقٍ (‏لا يُعلَنُ نجاحٌ وجلسةٌ حيّة). **الحدّ:** ما التزمَ قبلَ الإنهاءِ يصلُ مستمعاً متّصلاً، والنافذةُ
+-- بينَ الانقضاءِ والحصادِ قائمةٌ ما لم يُنادَ الحاصد (‏حافظُ الإيجارِ وhalt_request وissue_credential ينادونه).
+CREATE FUNCTION fence._reap_lapsed() RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+DECLARE c fence.control; cr fence.credentials; why text; n integer; alive integer;
+  reaped jsonb := '[]'::jsonb; unresolved jsonb := '[]'::jsonb;
+BEGIN
+  SELECT * INTO c FROM fence.control WHERE id;
+  FOR cr IN SELECT * FROM fence.credentials WHERE status = 'ACTIVE' ORDER BY role_name FOR UPDATE LOOP
+    -- الفحصُ بعدَ القفل: FOR UPDATE في READ COMMITTED يُعيدُ أحدثَ نسخةٍ للصفِّ بعدَ انتظارِ المُمسِك، والإيجارُ
+    -- يُقرأُ بلقطةٍ جديدة — فتجديدٌ التزمَ قبلَ القفلِ يُرى هنا ولا يُحصَدُ ما جُدِّد (‏مختبَرٌ بوصلتين).
+    why := fence._lease_lapse_reason(cr, c);
+    CONTINUE WHEN why IS NULL OR cr.status <> 'ACTIVE';
+    n := fence._revoke_role(cr.role_name, 'LEASE_LAPSED:' || why);
+    PERFORM pg_stat_clear_snapshot();
+    SELECT count(*) INTO alive FROM pg_stat_activity a WHERE a.usename = cr.role_name AND a.pid <> pg_backend_pid();
+    reaped := reaped || jsonb_build_array(jsonb_build_object('role', cr.role_name, 'reason', why, 'terminated', n, 'alive_after', alive));
+    IF alive > 0 THEN unresolved := unresolved || to_jsonb(cr.role_name::text); END IF;
+  END LOOP;
+  IF jsonb_array_length(reaped) > 0 THEN
+    PERFORM fence._event('LEASE_LAPSED_REAPED', c.epoch, jsonb_build_object('reaped', reaped, 'unresolved', unresolved));
+  END IF;
+  RETURN jsonb_build_object('ok', jsonb_array_length(unresolved) = 0, 'reaped', reaped, 'unresolved', unresolved);
+END
+$f$;
+
+-- للجذرِ أو السياديّ: الحصادُ لا يمنحُ سلطةً جديدة — لا يُلغي إلا ما انقضى إيجارُه، والانقضاءُ لا يتراجع.
+CREATE FUNCTION fence.reap_lapsed() RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+BEGIN
+  IF NOT (pg_has_role(session_user, 'xf_root', 'MEMBER') OR pg_has_role(session_user, 'xf_sovereign', 'MEMBER')) THEN
+    RAISE EXCEPTION USING ERRCODE = 'XF501', MESSAGE = 'fence: الحصادُ للجذرِ أو السياديّ';
+  END IF;
+  RETURN fence._reap_lapsed();
 END
 $f$;
 
@@ -1840,6 +1909,8 @@ BEGIN
   SELECT * INTO c FROM fence.control WHERE id;
   INSERT INTO fence.halt_requests (reason, epoch_before, status) VALUES (reason, coalesce(c.epoch, -1), 'OPEN') RETURNING halt_requests.id INTO hid;
   PERFORM fence._event('HALT_REQUESTED', c.epoch, jsonb_build_object('halt_id', hid, 'reason', reason));
+  -- WL-542: السياديُّ وحدَه لا يملكُ الإلغاء؛ فطلبُه الإيقافَ يحصدُ فوراً كلَّ جلسةٍ انقضى إيجارُها.
+  PERFORM fence._reap_lapsed();
   RETURN hid;
 END
 $f$;
@@ -1990,12 +2061,12 @@ GRANT EXECUTE ON FUNCTION fence.effective_state(), fence.check_fenced(), fence.s
 GRANT EXECUTE ON FUNCTION fence.worker_capabilities(), fence.capability_problems() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
 GRANT EXECUTE ON FUNCTION fence.notify_surface() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
 GRANT EXECUTE ON FUNCTION fence.issue_challenge(text, text), fence.issue_credential(text, bytea), fence.renew_lease(name),
-  fence.revoke_credential(name, text), fence.halt_request(text), fence.halt_lock(bigint),
+  fence.revoke_credential(name, text), fence.reap_lapsed(), fence.halt_request(text), fence.halt_lock(bigint),
   fence.halt_revoke_and_terminate(bigint), fence.halt_complete(bigint), fence.record_effects_evidence(text, jsonb),
   fence.credential_seal(name) TO xf_root;
 GRANT EXECUTE ON FUNCTION fence.halt_request(text), fence.resume(text, bytea), fence.recover(text, bytea),
   fence.roster_set(text, bytea), fence.key_rotate(text, bytea), fence.breakglass_set(text, bytea),
-  fence.lease_set(text, bytea), fence.ed25519_verify(bytea, bytea, bytea), fence.ed25519_key_ok(bytea) TO xf_sovereign;
+  fence.lease_set(text, bytea), fence.ed25519_verify(bytea, bytea, bytea), fence.ed25519_key_ok(bytea), fence.reap_lapsed() TO xf_sovereign;
 -- إنشاءُ الزنادِ على جدولٍ جديدٍ يتطلّبُ EXECUTE على دالّتِه وقتَ CREATE TRIGGER.
 GRANT EXECUTE ON FUNCTION fence.guard_write(), fence.read_ok(), fence.cover_relation(oid), fence._ddl_note(text),
   fence.protected_relations(), fence.coverage_problems() TO xuux_migrator, xuux_owner;

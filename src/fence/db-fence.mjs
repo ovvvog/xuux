@@ -268,6 +268,16 @@ export class FenceSovereign {
   }
 
   /**
+   * WL-542: حصادُ كلِّ اعتمادٍ نشِطٍ انقضى إيجارُه (‏إلغاءٌ، NOLOGIN، إنهاءُ جلساتِه) — بلا جذر.
+   * `ok=false` و`unresolved` غيرُ الفارغِ يعني جلسةً بقيت حيّة: ليس نجاحاً.
+   * @returns {Promise<{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[] }>}
+   */
+  async reapLapsed() {
+    const r = await this.db.query('SELECT fence.reap_lapsed() AS r');
+    return r.rows[0].r;
+  }
+
+  /**
    * يبني أمراً على الحالةِ الحيّةِ ويوقّعُه ويُرسلُه.
    * @param {string} fn - `resume` | `recover` | `roster_set` | `breakglass_set` | `lease_set` | `key_rotate`
    * @param {Record<string, unknown>} [extra]
@@ -639,6 +649,14 @@ export class FenceRoot {
     return (await this.one('SELECT fence.revoke_credential($1, $2) AS r', [role, reason])).r;
   }
 
+  /**
+   * WL-542: حصادُ الاعتماداتِ المنقضيةِ إيجاراتُها (‏انظر FenceSovereign.reapLapsed).
+   * @returns {Promise<{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[] }>}
+   */
+  async reapLapsed() {
+    return (await this.one('SELECT fence.reap_lapsed() AS r')).r;
+  }
+
   async status() {
     return (await this.one('SELECT fence.status() AS r')).r;
   }
@@ -650,9 +668,11 @@ export class FenceRoot {
   /**
    * حافظُ الإيجار: يُجدِّدُ **فقط** ما دام الحارسُ الصارمُ يقرأُ RUNNING. أوّلُ قراءةٍ غيرِ
    * RUNNING أو أوّلُ رفضٍ من القاعدةِ يوقفُه ولا يُعيدُه — فالإيجارُ ينقضي وحدَه.
+   * WL-542: وعندَ رفضِ القاعدةِ يُنادي الحاصدَ مرّةً (‏أفضلُ جهد) قبلَ `onStop` — فالإيجارُ المنقضي لا يُترَكُ
+   * بجلساتٍ حيّةٍ تُرسِلُ NOTIFY؛ ونتيجةُ الحصادِ (‏أو خطؤه) تُمرَّرُ في `onReap`.
    * @param {string} role
    * @param {{ assertOperational(): void }} haltGuard
-   * @param {{ intervalMs: number, onStop?: (reason: unknown) => void }} options
+   * @param {{ intervalMs: number, onStop?: (reason: unknown) => void, onReap?: (result: unknown) => void }} options
    * @returns {{ stop(): void, stopped: () => boolean }}
    */
   startLeaseKeeper(role, haltGuard, options) {
@@ -669,8 +689,21 @@ export class FenceRoot {
       if (stopped) return;
       try {
         haltGuard.assertOperational();
+      } catch (error) {
+        stop(error);
+        return;
+      }
+      try {
         await this.renewLease(role);
       } catch (error) {
+        if (stopped) return;
+        let reap;
+        try {
+          reap = await this.reapLapsed();
+        } catch (reapError) {
+          reap = reapError;
+        }
+        options.onReap?.(reap);
         stop(error);
         return;
       }
