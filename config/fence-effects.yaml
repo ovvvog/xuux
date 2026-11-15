@@ -115,6 +115,10 @@ capabilities:
     ]
   invoker_schemas: [state]
   schemas_usage: [fence, information_schema, pg_catalog, public, state]
+  # WL-544: القراءةُ (‏SELECT/REFERENCES على علاقة، SELECT على تسلسل) مصنّفةٌ READ_ONLY في هذه المخطّطاتِ وحدَها، وبشرطِ
+  # ألّا تكونَ العلاقةُ مشتقّةً من fence (‏reads_fence). ما سواها غيرُ مصنَّف (‏check_fenced: worker_read_outside_state،
+  # worker_fence_derived_read). خطُّ الأساسِ المقيس: العاملُ لا يقرأُ إلا جداولَ state وتسلسلاتِها.
+  read_schemas: [state]
   relations:
     'pg_catalog.pg_settings:UPDATE': SESSION_TRANSIENT # UPDATE على العرضِ = set_config للجلسة
   builtins:

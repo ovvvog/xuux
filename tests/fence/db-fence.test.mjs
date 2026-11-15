@@ -37,7 +37,11 @@ import {
   sealFencedSessions,
   signCredentialChallenge,
 } from '../../src/fence/db-fence.mjs';
-import { auditWorkerCapabilitiesLive, loadCapabilityPolicy } from '../../src/fence/effects.mjs';
+import {
+  auditWorkerCapabilitiesLive,
+  classifyCapability,
+  loadCapabilityPolicy,
+} from '../../src/fence/effects.mjs';
 import { DB_ERRORS, createPool } from '../../src/persistence/db.mjs';
 import { down as migratorDown } from '../../src/persistence/migrator.mjs';
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
@@ -2892,7 +2896,8 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
         )
       ).rows[0];
     const before = await snap();
-    assert.equal(before.v, 25);
+    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026، WL-544) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
+    assert.ok(before.v >= 25, String(before.v));
     // الطبقةُ الأولى: المُهاجِرُ نفسُه يُرفَضُ تحتَ RUNNING (‏xf_ddl_start ⇒ XF201 على إنشاءِ دفترِه).
     await assert.rejects(
       migratorDown(h.db.pool, { steps: 1 }),
@@ -2900,7 +2905,12 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
     );
     assert.deepEqual(await snap(), before);
     // الطبقةُ الثانية: نصُّ 0025 نفسُه (‏تقديماً ورجوعاً) يرفضُ تحتَ RUNNING بحارسِه (‏D-13) ولو نُفِّذَ مباشرة.
-    for (const file of ['0025_fence_lease_reaper.down.sql', '0025_fence_lease_reaper.up.sql']) {
+    for (const file of [
+      '0025_fence_lease_reaper.down.sql',
+      '0025_fence_lease_reaper.up.sql',
+      '0026_fence_read_surface.down.sql',
+      '0026_fence_read_surface.up.sql',
+    ]) {
       const sql = readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
       const c = await h.db.pool.connect();
       try {
@@ -2914,3 +2924,347 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
     }
   });
 });
+
+// ── WL-544: سطحُ القراءةِ وPUBLIC والتسلسلات ─────────────────────────────────────────────────
+// الجردُ مقيسٌ من الكتالوجِ الحيّ: ما لـPUBLIC بعدَ الإقلاع، وما يقرؤُه العامل. الهجماتُ تُطبَّقُ بالمالكِ الأعلى
+// ويُثبَتُ أثرُها بدورِ العاملِ نفسِه (‏SET ROLE xuux_worker)، ثمّ الكشفُ في check_fenced والمدقّق، ثمّ RESUME يُرفَض.
+// ما قبلَ 0026 (‏العيبُ مقيساً) والرجوعُ والطفراتُ في tests/persistence/migration-reversibility.test.mjs.
+describe(
+  'WL-544: PUBLIC والامتيازاتُ الموروثةُ والافتراضيّةُ والتسلسلات',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    /** @type {Record<string, any>} */
+    let policy;
+    before(async () => {
+      h = await harness('wl544');
+      policy = await loadCapabilityPolicy();
+    });
+    after(async () => {
+      if (h) await h.close();
+    });
+    const problems = async () =>
+      /** @type {Array<{ kind: string, object?: string }>} */ (
+        (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r.problems
+      );
+    const audit = () => auditWorkerCapabilitiesLive(h.rootClient, policy);
+    /**
+     * يُنفِّذُ بدورِ العاملِ في جلسةٍ جديدة (‏لحالةِ الجلسة)، بعدَ تمهيدٍ اختياريٍّ بالدورِ المتميّز.
+     * @param {string} sql @param {string} [pre]
+     */
+    const freshWorker = async (sql, pre) => {
+      const c = new pg.Client({
+        connectionString: /** @type {any} */ (h.db.pool).options.connectionString,
+      });
+      await c.connect();
+      try {
+        if (pre) await c.query(pre);
+        await c.query('SET ROLE xuux_worker');
+        await c.query(sql);
+        return 'OK';
+      } catch (e) {
+        return String(/** @type {any} */ (e).code);
+      } finally {
+        await c.end();
+      }
+    };
+    /** يُنفِّذُ بدورِ العاملِ في معاملةٍ تُرجَع. @param {string} sql */
+    const asWorker = async (sql) => {
+      const c = await h.db.pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('SET LOCAL ROLE xuux_worker');
+        await c.query(sql);
+        return 'OK';
+      } catch (e) {
+        return String(/** @type {any} */ (e).code);
+      } finally {
+        await c.query('ROLLBACK').catch(() => {});
+        c.release();
+      }
+    };
+
+    test('خطُّ الأساس: جردُ PUBLIC مقيس، والعاملُ لا يقرأُ إلا state، وcheck_fenced والمدقّقُ نظيفان', async () => {
+      const q = async (/** @type {string} */ s) => (await h.db.pool.query(s)).rows;
+      assert.deepEqual(
+        await q(`SELECT c.oid::regclass::text AS o FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace,
+                 aclexplode(coalesce(c.relacl, acldefault(CASE WHEN c.relkind = 'S' THEN 's' ELSE 'r' END::"char", c.relowner))) a
+               WHERE a.grantee = 0 AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg\\_%'`),
+        [],
+        'لا علاقةَ ولا تسلسلَ لـPUBLIC',
+      );
+      assert.deepEqual(
+        (
+          await q(`SELECT n.nspname || ':' || a.privilege_type AS o FROM pg_namespace n,
+                   aclexplode(coalesce(n.nspacl, acldefault('n', n.nspowner))) a WHERE a.grantee = 0 ORDER BY 1`)
+        ).map((r) => r.o),
+        ['information_schema:USAGE', 'pg_catalog:USAGE', 'public:USAGE'],
+        'PUBLIC: USAGE على ثلاثةِ مخطّطاتٍ وحدَها، لا CREATE',
+      );
+      assert.deepEqual(
+        (
+          await q(`SELECT n.nspname || '.' || p.proname AS o FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace,
+                   aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                 WHERE a.grantee = 0 AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1`)
+        ).map((r) => r.o),
+        ['fence.read_ok', 'state.report_sections_declared', 'state.text_array_is_named'],
+        'EXECUTE لـPUBLIC خارجَ الكتالوج: read_ok ودالّتا مستدعٍ ثابتتان في state',
+      );
+      assert.deepEqual(
+        await q(`SELECT a.privilege_type FROM pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+               WHERE a.grantee = 0 AND d.datname = current_database()`),
+        [],
+        'لا CONNECT ولا TEMPORARY لـPUBLIC على القاعدةِ المسيَّجة',
+      );
+      assert.deepEqual(await q('SELECT 1 FROM pg_default_acl'), [], 'لا امتيازاتٍ افتراضيّة');
+      const inv = (await h.rootClient.query('SELECT fence.worker_capabilities() AS r')).rows[0].r;
+      const readSchemas = new Set(
+        inv
+          .filter(
+            (/** @type {any} */ x) =>
+              ['relation', 'sequence'].includes(x.axis) && x.privilege === 'SELECT',
+          )
+          .map((/** @type {any} */ x) => x.detail.schema),
+      );
+      assert.deepEqual([...readSchemas], ['state']);
+      assert.ok(
+        inv.every(
+          (/** @type {any} */ x) => x.axis !== 'relation' || x.detail.reads_fence === false,
+        ),
+        'لا علاقةَ يقرؤُها العاملُ مشتقّةٌ من fence',
+      );
+      assert.deepEqual(await problems(), []);
+      assert.deepEqual((await audit()).unclassified, []);
+    });
+
+    test('التسلسلات: nextval/setval مرفوضان للعامل، وcurrval/lastval بلا قيمةٍ في الجلسة، وlast_value قراءة', async () => {
+      assert.equal(await asWorker(`SELECT nextval('state.events_seq_seq')`), '42501');
+      assert.equal(await asWorker(`SELECT setval('state.events_seq_seq', 1000000)`), '42501');
+      // currval/lastval حالةُ جلسة: تُقاسُ في جلسةٍ جديدةٍ لا في اتصالٍ مُعادٍ من المجمّع.
+      assert.equal(await freshWorker(`SELECT currval('state.events_seq_seq')`), '55000');
+      assert.equal(await freshWorker(`SELECT lastval()`), '55000');
+      // جلسةٌ سحبَ فيها دورٌ متميّزٌ من تسلسلِ fence ثمّ نزلَت إلى العامل: lastval لا يُسرِّبُ القيمة.
+      // ‏(‏nextval غيرُ معاملاتيّ: يستهلكُ رقماً في قاعدةِ الاختبارِ المعزولةِ فقط، وهذا مقبول.)
+      assert.equal(
+        await freshWorker(`SELECT lastval()`, `SELECT nextval('fence.evidence_id_seq')`),
+        '42501',
+      );
+      assert.equal(await asWorker('SELECT last_value FROM state.events_seq_seq'), 'OK');
+      assert.equal(await asWorker('SELECT last_value FROM fence.evidence_id_seq'), '42501');
+      assert.equal(await asWorker('SELECT count(*) FROM fence.credentials'), '42501');
+    });
+
+    /** @type {Array<{ name: string, apply: string[], revert: string[], exploit: string | null, kinds: string[] }>} */
+    const attacks = [
+      {
+        name: 'SELECT لـPUBLIC على fence.credentials',
+        apply: ['GRANT SELECT ON fence.credentials TO PUBLIC'],
+        revert: ['REVOKE SELECT ON fence.credentials FROM PUBLIC'],
+        exploit: 'SELECT role_name, boot_id FROM fence.credentials',
+        kinds: ['worker_read_outside_state'],
+      },
+      {
+        name: 'SELECT على fence.challenges عبرَ دورٍ وسيط',
+        apply: [
+          'CREATE ROLE wl544_mid NOLOGIN',
+          'GRANT SELECT ON fence.challenges TO wl544_mid',
+          'GRANT wl544_mid TO xuux_worker',
+        ],
+        revert: [
+          'REVOKE wl544_mid FROM xuux_worker',
+          'REVOKE ALL ON fence.challenges FROM wl544_mid',
+          'DROP ROLE wl544_mid',
+        ],
+        exploit: 'SELECT nonce FROM fence.challenges',
+        kinds: ['worker_read_outside_state', 'worker_membership'],
+      },
+      {
+        name: 'مشهدٌ في public فوقَ fence.credentials لـPUBLIC (‏يقرأُ بصلاحياتِ مالكِه)',
+        apply: [
+          'CREATE VIEW public.wl544_v AS SELECT role_name, sealed_sessions FROM fence.credentials',
+          'GRANT SELECT ON public.wl544_v TO PUBLIC',
+        ],
+        revert: ['DROP VIEW public.wl544_v'],
+        exploit: 'SELECT * FROM public.wl544_v',
+        kinds: ['worker_read_outside_state', 'worker_fence_derived_read'],
+      },
+      {
+        name: 'مشهدٌ مُجسَّدٌ في state فوقَ fence.sovereign_commands',
+        apply: [
+          'CREATE MATERIALIZED VIEW state.wl544_m AS SELECT nonce, signature FROM fence.sovereign_commands',
+          'GRANT SELECT ON state.wl544_m TO xuux_worker',
+        ],
+        revert: ['DROP MATERIALIZED VIEW state.wl544_m'],
+        exploit: 'SELECT * FROM state.wl544_m',
+        kinds: ['worker_fence_derived_read'],
+      },
+      {
+        name: 'SELECT لـPUBLIC على تسلسلٍ في fence',
+        apply: ['GRANT SELECT ON SEQUENCE fence.evidence_id_seq TO PUBLIC'],
+        revert: ['REVOKE SELECT ON SEQUENCE fence.evidence_id_seq FROM PUBLIC'],
+        exploit: 'SELECT last_value FROM fence.evidence_id_seq',
+        kinds: ['worker_read_outside_state'],
+      },
+      {
+        name: 'USAGE لـPUBLIC على تسلسلٍ في state (‏nextval)',
+        apply: ['GRANT USAGE ON SEQUENCE state.events_seq_seq TO PUBLIC'],
+        revert: ['REVOKE USAGE ON SEQUENCE state.events_seq_seq FROM PUBLIC'],
+        exploit: `SELECT nextval('state.events_seq_seq')`,
+        kinds: ['worker_sequence_write'],
+      },
+      {
+        name: 'UPDATE على تسلسلٍ في state عبرَ دورٍ وسيط (‏setval)',
+        apply: [
+          'CREATE ROLE wl544_seq NOLOGIN',
+          'GRANT UPDATE ON SEQUENCE state.task_transitions_id_seq TO wl544_seq',
+          'GRANT wl544_seq TO xuux_worker',
+        ],
+        revert: [
+          'REVOKE wl544_seq FROM xuux_worker',
+          'REVOKE ALL ON SEQUENCE state.task_transitions_id_seq FROM wl544_seq',
+          'DROP ROLE wl544_seq',
+        ],
+        exploit: `SELECT setval('state.task_transitions_id_seq', 1000000)`,
+        kinds: ['worker_sequence_write', 'worker_inherits_roles'],
+      },
+      {
+        name: 'امتيازٌ افتراضيٌّ جديد: جداولُ fence القادمةُ لـPUBLIC',
+        apply: [
+          'ALTER DEFAULT PRIVILEGES FOR ROLE xf_owner IN SCHEMA fence GRANT SELECT ON TABLES TO PUBLIC',
+        ],
+        revert: [
+          'ALTER DEFAULT PRIVILEGES FOR ROLE xf_owner IN SCHEMA fence REVOKE SELECT ON TABLES FROM PUBLIC',
+        ],
+        exploit: null,
+        kinds: ['worker_default_acl_privilege'],
+      },
+      {
+        name: 'امتيازٌ افتراضيٌّ جديد: تسلسلاتُ state القادمةُ للعامل',
+        apply: [
+          'ALTER DEFAULT PRIVILEGES FOR ROLE xuux_migrator IN SCHEMA state GRANT USAGE ON SEQUENCES TO xuux_worker',
+        ],
+        revert: [
+          'ALTER DEFAULT PRIVILEGES FOR ROLE xuux_migrator IN SCHEMA state REVOKE USAGE ON SEQUENCES FROM xuux_worker',
+        ],
+        exploit: null,
+        kinds: ['worker_default_acl_privilege'],
+      },
+    ];
+    for (const a of attacks) {
+      test(`هجوم: ${a.name} ⇒ أثرٌ حقيقيٌّ بدورِ العامل، ويكشفُه check_fenced (${a.kinds.join('+')}) والمدقّق`, async () => {
+        // قبلَ المنح: مرفوضٌ (‏42501) أو الكائنُ لم يُنشأ بعد (‏42P01: مشهدٌ يُنشئُه الهجومُ نفسُه).
+        if (a.exploit)
+          assert.ok(['42501', '42P01'].includes(await asWorker(a.exploit)), 'قبلَ المنح: مرفوض');
+        for (const s of a.apply) await h.db.pool.query(s);
+        try {
+          if (a.exploit)
+            assert.equal(await asWorker(a.exploit), 'OK', 'الهجومُ حقيقيّ: نجحَ بدورِ العامل');
+          const kinds = (await problems()).map((p) => p.kind);
+          for (const k of a.kinds) assert.ok(kinds.includes(k), `${k} ∉ ${JSON.stringify(kinds)}`);
+          const r = await audit();
+          assert.ok(!r.ok && r.unclassified.length > 0, 'المدقّقُ يكشف');
+        } finally {
+          for (const s of a.revert) await h.db.pool.query(s);
+        }
+        assert.deepEqual(await problems(), [], 'العكسُ يعيدُ النظافة');
+        assert.deepEqual((await audit()).unclassified, []);
+      });
+    }
+
+    test('منعٌ من المصدر: SELECT لـPUBLIC على public.schema_migrations يُرفَضُ لحظةَ المنح (‏XF203)', async () => {
+      await rejectsWith(
+        () => h.db.pool.query('GRANT SELECT ON public.schema_migrations TO PUBLIC'),
+        ['XF203'],
+        'منحُ القراءةِ على دفترِ الهجرات',
+      );
+      assert.deepEqual(await problems(), []);
+    });
+
+    test('امتيازٌ لدورٍ ليس العاملَ عضواً فيه لا يُعَدُّ قدرةً للعامل (‏لا إيجابيَّ كاذب)، ويُكشَفُ لحظةَ الوراثة', async () => {
+      await h.db.pool.query('CREATE ROLE wl544_other NOLOGIN');
+      await h.db.pool.query('GRANT SELECT ON fence.credentials TO wl544_other');
+      try {
+        assert.deepEqual(await problems(), []);
+        await h.db.pool.query('GRANT wl544_other TO xuux_worker');
+        const kinds = (await problems()).map((p) => p.kind);
+        assert.ok(kinds.includes('worker_read_outside_state'), JSON.stringify(kinds));
+        await h.db.pool.query('REVOKE wl544_other FROM xuux_worker');
+      } finally {
+        await h.db.pool.query('REVOKE ALL ON fence.credentials FROM wl544_other');
+        await h.db.pool.query('DROP ROLE wl544_other');
+      }
+      assert.deepEqual(await problems(), []);
+    });
+
+    test('قدرةُ قراءةٍ غيرُ مصنّفةٍ تمنعُ RESUME (‏XF415)، وبعدَ العكسِ يعودُ الجذرُ والسياديُّ والمدقّقُ والمُهاجِرُ والعاملُ كما كانوا', async () => {
+      // إيقافٌ كاملٌ نظيفٌ أوّلاً: فإكمالُ HALT نفسُه يرفضُ مع انجرافٍ قائم (‏يبقى HALT_REQUESTED)،
+      // والمطلوبُ هنا إثباتُ أنَّ RESUME وحدَه يُرفَضُ بـcheck_fenced (‏XF415) لا بغيابِ الدليل.
+      await h.root.halt('wl544-resume', { effects: NO_EFFECTS });
+      assert.equal((await h.sovereign.status()).effective.state, 'HALTED');
+      await h.db.pool.query('GRANT SELECT ON fence.sovereign_commands TO PUBLIC');
+      try {
+        await rejectsWith(() => h.resume(), ['XF415'], 'RESUME فوقَ قراءةٍ غيرِ مصنّفة');
+        const kinds = (await problems()).map((p) => p.kind);
+        assert.ok(kinds.includes('worker_read_outside_state'), JSON.stringify(kinds));
+      } finally {
+        await h.db.pool.query('REVOKE SELECT ON fence.sovereign_commands FROM PUBLIC');
+      }
+      await h.resume();
+      assert.equal((await h.sovereign.status()).effective.state, 'RUNNING');
+      for (const role of ['xf_auditor', 'xuux_migrator']) {
+        const c = await h.login(role);
+        const r = (await c.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+        assert.equal(r.ok, true, `${role}: check_fenced سليم`);
+      }
+      const w = await h.boot('alpha');
+      const cl = /** @type {pg.Client} */ (w.client);
+      assert.equal(
+        (await cl.query('SELECT count(*)::int AS n FROM state.fence_probe')).rows[0].n,
+        0,
+      );
+      assert.ok((await cl.query('SELECT fence.whoami() AS r')).rows[0].r);
+      await rejectsWith(
+        () => cl.query('SELECT count(*) FROM fence.credentials'),
+        ['42501'],
+        'العاملُ الحيُّ لا يقرأُ fence',
+      );
+    });
+
+    test('المدقّق (‏طفرات): القراءةُ مصنّفةٌ في read_schemas وحدَها ولعلاقةٍ غيرِ مشتقّةٍ من fence صراحةً', () => {
+      const rel = (/** @type {Record<string, any>} */ detail) => ({
+        axis: 'relation',
+        object: 'state.x',
+        privilege: 'SELECT',
+        detail: { schema: 'state', relkind: 'r', reads_fence: false, ...detail },
+      });
+      assert.equal(classifyCapability(rel({}), policy)?.class, 'READ_ONLY');
+      assert.equal(classifyCapability(rel({ schema: 'fence' }), policy), null, 'fence');
+      assert.equal(classifyCapability(rel({ schema: 'public' }), policy), null, 'public');
+      assert.equal(
+        classifyCapability(rel({ relkind: 'v', reads_fence: true }), policy),
+        null,
+        'مشتقّ',
+      );
+      assert.equal(
+        classifyCapability(rel({ reads_fence: undefined }), policy),
+        null,
+        'جردٌ بلا الحقلِ لا يُفترَضُ سليماً',
+      );
+      assert.equal(
+        classifyCapability(rel({}), { ...policy, read_schemas: [] }),
+        null,
+        'سياسةٌ بلا read_schemas',
+      );
+      const seq = (/** @type {string} */ schema) => ({
+        axis: 'sequence',
+        object: `${schema}.s`,
+        privilege: 'SELECT',
+        detail: { schema, relkind: 'S' },
+      });
+      assert.equal(classifyCapability(seq('state'), policy)?.class, 'READ_ONLY');
+      assert.equal(classifyCapability(seq('fence'), policy), null);
+      assert.deepEqual(policy.read_schemas, ['state']);
+    });
+  },
+);

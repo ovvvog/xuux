@@ -336,7 +336,12 @@ export function classifyCapability(c, policy) {
           `${d.schema}.${c.object.replace(/^[^.]*\./, '')}:${c.privilege}`
         ] ?? (policy.relations ?? {})[`${d.schema}.${c.object}:${c.privilege}`];
       if (explicit) return { class: explicit, rule: 'relations' };
-      if (READ_PRIVILEGES.has(c.privilege)) return { class: 'READ_ONLY', rule: 'relation_read' };
+      // WL-544: القراءةُ مصنّفةٌ في read_schemas وحدَها ولعلاقةٍ لا تشتقُّ من fence (‏reads_fence === false صراحةً —
+      // جردٌ بلا الحقلِ لا يُفترَضُ سليماً). مشهدٌ فوقَ fence يقرأُ بصلاحياتِ مالكِه: قراءةُ داخليّاتِ السياج.
+      if (READ_PRIVILEGES.has(c.privilege))
+        return (policy.read_schemas ?? []).includes(d.schema) && d.reads_fence === false
+          ? { class: 'READ_ONLY', rule: 'relation_read' }
+          : null;
       // كتابةٌ في state مقبولةٌ فقط على جدولٍ يحرسُه زنادُ السياج (E1)؛ TRUNCATE/TRIGGER/MAINTAIN ليست منها.
       if (
         STATE_WRITE.has(c.privilege) &&
@@ -348,7 +353,10 @@ export function classifyCapability(c, policy) {
       return null;
     }
     case 'sequence':
-      return c.privilege === 'SELECT' ? { class: 'READ_ONLY', rule: 'sequence_read' } : null;
+      // WL-544: قراءةُ تسلسلٍ (‏last_value) مصنّفةٌ في read_schemas وحدَها؛ تسلسلاتُ fence تكشفُ عددَ الأحداثِ والأدلّة.
+      return c.privilege === 'SELECT' && (policy.read_schemas ?? []).includes(d.schema)
+        ? { class: 'READ_ONLY', rule: 'sequence_read' }
+        : null;
     case 'schema':
       return c.privilege === 'USAGE' && (policy.schemas_usage ?? []).includes(c.object)
         ? { class: 'READ_ONLY', rule: 'schemas_usage' }
