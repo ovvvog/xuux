@@ -162,7 +162,7 @@ node scripts/time-attest.mjs --describe            # الحدودُ والمصا
   التحميلِ برمزِه.
 - `tests/root-of-trust/attested-time-gate.test.mjs` — **5 براهينَ** على البوّابةِ:
   أمرٌ صحيحُ التوقيعِ يُرفَضُ بلا بُرهانٍ ويُقبَلُ **بعينِه** بعدَه.
-- `tests/tooling/time-attest-cli.test.mjs` — **5 براهينَ من خارجِ العمليّةِ**.
+- `tests/tooling/guard-time.test.mjs` (‏كتلةُ أداةِ الإبرهان، مُدمَجةٌ في WL-545 لـG1) — **5 براهينَ من خارجِ العمليّةِ**.
 - `tests/tooling/guard-time.test.mjs` — **15 برهاناً**: أساسٌ وأربعَ عشرةَ تخريباً.
 
 ## ٩. حدودٌ مُعلَنةٌ

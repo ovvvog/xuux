@@ -132,7 +132,7 @@ node scripts/scheduler.mjs --once --json     # الحكمُ بأرقامِه
 - `tests/scheduling/run-ledger-postgres.test.mjs` — **برهانانِ على قاعدةٍ حقيقيّةٍ**:
   قفلُ الشقِّ يرفضُ الصفَّ الثانيَ من القاعدةِ، وتعديلُ صفٍّ بـ`UPDATE` يُكسِرُ
   السلسلةَ فيُقرأُ الكسرُ.
-- `tests/tooling/scheduler-cli.test.mjs` — **برهانانِ من خارجِ العمليّةِ**: رمزُ
+- `tests/tooling/guard-scheduling.test.mjs` (‏كتلةُ المُشغِّل، مُدمَجةٌ في WL-545 لـG1) — **برهانانِ من خارجِ العمليّةِ**: رمزُ
   الخروجِ وأرقامُ `--json` والبراهينُ السبعةُ.
 - `tests/tooling/guard-scheduling.test.mjs` — **9 براهينَ**: أساسٌ وثمانِ تخريباتٍ.
 

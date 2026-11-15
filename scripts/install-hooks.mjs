@@ -8,6 +8,10 @@
 // **ولا يعملُ في CI** (‏`CI=true`): مسارُ النشرِ يُشغِّلُ `npm ci` ثمّ `git push`، والحكمُ هناك
 // للفحصِ المطلوبِ لا للخطّاف. **والخطّافُ طبقةٌ أولى لا حمايةٌ:** يُتجاوَزُ بـ`--no-verify`،
 // والطبقةُ الحاكمةُ «فحص الجودة الكامل» في `ci.yml`.
+//
+// **والتثبيتُ اليدويُّ** (‏`XUUX_SKIP_HOOKS` مضبوطٌ، أو بعدَ `git config --unset core.hooksPath`): `node scripts/install-hooks.mjs`.
+// كان له نسخةُ shell (‏`scripts/install-hooks.sh`، WL-216) تفعلُ الشيءَ نفسَه؛ حُذِفت في WL-545 لحاجزِ G1 — والتنفيذُ
+// على `scripts/hooks/pre-push` محفوظٌ في Git (‏100755) فلا `chmod` يلزم.
 
 import { execFileSync } from 'node:child_process';
 import process from 'node:process';
