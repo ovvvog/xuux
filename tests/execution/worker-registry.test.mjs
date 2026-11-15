@@ -223,9 +223,13 @@ test(
     assert.equal(pk.rows.length, 1, 'المفتاحُ الأوّليُّ على الاسمِ هو عينُ القيدِ');
     // والرجوعُ يُسقِطُ الجدولَ كاملًا — فلا يبقى شاهدَ قبرٍ.
     const { down } = await import('../../src/persistence/migrator.mjs');
-    // `WL-532`: الهجرةُ 0024 (السياج) فوقَ 0023، فالرجوعُ إلى ما قبلَ 0023 خطوتان —
-    // أوّلُهما تنزعُ السياجَ (والحالةُ هنا ليست RUNNING فيُقبَل)، وثانيتُهما المقصودة.
-    await down(env.db.pool, { steps: 2 });
+    // `WL-532`: الهجرةُ 0024 (السياج) فوقَ 0023، و`WL-543`: ‏0025 فوقَها — فالرجوعُ إلى ما قبلَ 0023 بعددِ
+    // ما فوقَ 0022 في الدفتر (‏لا رقمٌ ثابتٌ يُكسَرُ بكلِّ هجرةٍ تالية)؛ والحالةُ هنا ليست RUNNING فيُقبَل.
+    const above = await env.db.pool.query(
+      'SELECT count(*)::int AS n FROM public.schema_migrations WHERE version >= 23',
+    );
+    assert.ok(above.rows[0]['n'] >= 2, '0023 و0024 مُطبَّقتان على الأقلّ');
+    await down(env.db.pool, { steps: above.rows[0]['n'] });
     const afterDown = await env.db.pool.query(
       `SELECT count(*)::int AS n FROM information_schema.tables
         WHERE table_schema = 'state' AND table_name = 'worker_registrations'`,
