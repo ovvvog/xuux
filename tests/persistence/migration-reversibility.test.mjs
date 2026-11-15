@@ -237,6 +237,9 @@ describe(
     let fresh;
     /** @type {string} */
     let dir24;
+    // WL-544: هذه الحزمةُ تقيسُ 0025 — فالتقديمُ يقفُ عندَها صراحةً (‏0026 وما بعدَها لها حزمتُها).
+    /** @type {string} */
+    let dir25;
     /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
     let at24;
     /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
@@ -255,11 +258,13 @@ describe(
     before(async () => {
       db = await createIsolatedDatabase('m0025');
       dir24 = migrationsDir(24);
+      dir25 = migrationsDir(25);
     });
     after(async () => {
       if (db !== undefined) await db.drop();
       if (fresh !== undefined) await fresh.drop();
       rmSync(dir24, { recursive: true, force: true });
+      rmSync(dir25, { recursive: true, force: true });
     });
 
     it('قاعدةٌ على 0024 القديمة (‏WL-541): البصمةُ المسجّلةُ ثابتةُ WL-541، والضماناتُ قائمة', async () => {
@@ -282,7 +287,7 @@ describe(
     });
 
     it('تتقدّمُ إلى 0025 بلا اختلافِ بصمة، وكلُّ ضماناتِ 0025 قائمة', async () => {
-      const out = await up(db.pool);
+      const out = await up(db.pool, { dir: dir25 });
       assert.deepEqual(out.applied, [25]);
       assert.deepEqual(await reaperProblems(db.pool), []);
       assert.deepEqual(await wl541Guarantees(db.pool), {
@@ -295,7 +300,7 @@ describe(
 
     it('قاعدةٌ جديدةٌ تطبّقُ الهجراتِ كلَّها من البداية تنتهي إلى الكتالوجِ نفسِه', async () => {
       fresh = await createIsolatedDatabase('m0025f');
-      await up(fresh.pool);
+      await up(fresh.pool, { dir: dir25 });
       assert.deepEqual(await reaperProblems(fresh.pool), []);
       assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at25);
     });
@@ -312,7 +317,7 @@ describe(
     });
 
     it('إعادةُ تقديمِ 0025 بعدَ الرجوعِ تُنتجُ الكتالوجَ نفسَه', async () => {
-      const out = await up(db.pool);
+      const out = await up(db.pool, { dir: dir25 });
       assert.deepEqual(out.applied, [25]);
       assert.deepEqual(await fenceFunctionCatalog(db.pool), at25);
     });
@@ -338,11 +343,11 @@ describe(
       };
       await alter('ALTER FUNCTION fence.renew_lease(name) SET work_mem = 64');
       const tampered = await fenceFunctionCatalog(db.pool);
-      await assert.rejects(up(db.pool), /البيانُ لا يطابقُ 1 دالّة/);
+      await assert.rejects(up(db.pool, { dir: dir25 }), /البيانُ لا يطابقُ 1 دالّة/);
       assert.deepEqual(await fenceFunctionCatalog(db.pool), tampered);
       await alter('ALTER FUNCTION fence.renew_lease(name) RESET work_mem');
       assert.deepEqual(await fenceFunctionCatalog(db.pool), at24);
-      await up(db.pool);
+      await up(db.pool, { dir: dir25 });
       assert.deepEqual(await fenceFunctionCatalog(db.pool), at25);
     });
 
@@ -419,9 +424,242 @@ describe(
         } finally {
           rmSync(d, { recursive: true, force: true });
         }
-        await up(db.pool);
+        await up(db.pool, { dir: dir25 });
         assert.deepEqual(await fenceFunctionCatalog(db.pool), at25);
       });
     }
+  },
+);
+
+// ── WL-544: قراءةُ العاملِ خارجَ state ومشتقّاتُ fence (‏0026) ──
+//
+// قبلَ 0026: منحُ SELECT لـPUBLIC على داخليّاتِ fence، أو مشهدٌ فوقَها يملكُه دورٌ مميَّز، لا يُرى في
+// capability_problems() (‏فلا يمنعُ RESUME). هنا: الهجومُ نفسُه على القاعدةِ نفسِها قبلَ 0026 وبعدَها، والرجوعُ يُعيدُ
+// كتالوجَ 0025 بايتاً ببايت، وطفراتُ 0026 تُكشَفُ كلُّها. الأثرُ التشغيليُّ (‏RESUME، العاملُ الحيّ) في tests/fence/db-fence.test.mjs.
+
+/**
+ * هجماتُ القراءة: تُطبَّقُ بالمالكِ الأعلى (‏المُطلِقُ معطَّلٌ للحظةِ الأمرِ وحدَه) وتُعكَس.
+ * @type {Array<{ name: string, apply: string[], revert: string[], kind: string, object: string }>}
+ */
+const READ_ATTACKS = [
+  {
+    name: 'SELECT لـPUBLIC على fence.credentials',
+    apply: ['GRANT SELECT ON fence.credentials TO PUBLIC'],
+    revert: ['REVOKE SELECT ON fence.credentials FROM PUBLIC'],
+    kind: 'worker_read_outside_state',
+    object: 'fence.credentials:SELECT',
+  },
+  {
+    name: 'SELECT على تسلسلٍ في fence عبرَ دورٍ وسيط',
+    apply: [
+      'CREATE ROLE wl544_mid NOLOGIN',
+      'GRANT SELECT ON SEQUENCE fence.evidence_id_seq TO wl544_mid',
+      'GRANT wl544_mid TO xuux_worker',
+    ],
+    revert: [
+      'REVOKE wl544_mid FROM xuux_worker',
+      'REVOKE ALL ON SEQUENCE fence.evidence_id_seq FROM wl544_mid',
+      'DROP ROLE wl544_mid',
+    ],
+    kind: 'worker_read_outside_state',
+    object: 'fence.evidence_id_seq:SELECT',
+  },
+  {
+    name: 'مشهدٌ في state فوقَ fence.challenges (‏يقرأُ بصلاحياتِ مالكِه)',
+    apply: [
+      'CREATE VIEW state.wl544_c AS SELECT nonce FROM fence.challenges',
+      'GRANT SELECT ON state.wl544_c TO xuux_worker',
+    ],
+    revert: ['DROP VIEW state.wl544_c'],
+    kind: 'worker_fence_derived_read',
+    object: 'state.wl544_c:SELECT',
+  },
+  {
+    name: 'مشهدٌ متداخل: state فوقَ public فوقَ fence.sovereign_commands',
+    apply: [
+      'CREATE VIEW public.wl544_a AS SELECT nonce, signature FROM fence.sovereign_commands',
+      'CREATE VIEW state.wl544_b AS SELECT * FROM public.wl544_a',
+      'GRANT SELECT ON state.wl544_b TO xuux_worker',
+    ],
+    revert: ['DROP VIEW state.wl544_b', 'DROP VIEW public.wl544_a'],
+    kind: 'worker_fence_derived_read',
+    object: 'state.wl544_b:SELECT',
+  },
+];
+
+/**
+ * @param {import('pg').Pool} pool
+ * @param {string[]} stmts
+ */
+async function asOwner(pool, stmts) {
+  await pool.query('ALTER EVENT TRIGGER xf_ddl_end DISABLE');
+  try {
+    for (const s of stmts) await pool.query(s);
+  } finally {
+    await pool.query('ALTER EVENT TRIGGER xf_ddl_end ENABLE ALWAYS');
+  }
+}
+
+/**
+ * هل يكشفُ capability_problems() الهجوم؟ يُطبِّقُ ثمّ يعكسُ دائماً.
+ * @param {import('pg').Pool} pool
+ * @param {(typeof READ_ATTACKS)[number]} a
+ */
+async function detects(pool, a) {
+  await asOwner(pool, a.apply);
+  try {
+    const r = await pool.query('SELECT fence.capability_problems() AS p');
+    return r.rows[0].p.some((/** @type {any} */ p) => p.kind === a.kind && p.object === a.object);
+  } finally {
+    await asOwner(pool, a.revert);
+  }
+}
+
+describe(
+  'WL-544 — 0026: الهجومُ قبلَها وبعدَها، والرجوع، والطفرات',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>> | undefined} */
+    let fresh;
+    /** @type {string} */
+    let dir25;
+    /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+    let at25;
+    /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+    let at26;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo @param {(name: string, text: string) => string} [mutate] */
+    const migrationsDir = (upTo, mutate = (_n, t) => t) => {
+      const d = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), mutate(f, readFileSync(join(src, f), 'utf8')));
+      }
+      return d;
+    };
+    before(async () => {
+      db = await createIsolatedDatabase('m0026');
+      dir25 = migrationsDir(25);
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      if (fresh !== undefined) await fresh.drop();
+      rmSync(dir25, { recursive: true, force: true });
+    });
+
+    it('قبلَ 0026 (‏قاعدةٌ على 0025): لا هجومَ قراءةٍ يُكشَف — العيبُ مقيسٌ لا مفترَض', async () => {
+      assert.equal((await up(db.pool, { dir: dir25 })).current, 25);
+      at25 = await fenceFunctionCatalog(db.pool);
+      for (const a of READ_ATTACKS) assert.equal(await detects(db.pool, a), false, a.name);
+    });
+
+    it('الترقيةُ إلى 0026 بلا اختلافِ بصمة، وكلُّ هجومٍ يُكشَف، وخطُّ الأساسِ نظيف', async () => {
+      assert.deepEqual((await up(db.pool)).applied, [26]);
+      for (const a of READ_ATTACKS) assert.equal(await detects(db.pool, a), true, a.name);
+      const p = (await db.pool.query('SELECT fence.capability_problems() AS p')).rows[0].p;
+      // ‏(worker_database_reach خارجَ هذه الحزمة: القاعدةُ هنا بلا إقلاعٍ ولا احتواء — WL-540.)
+      const kinds = /^worker_(read_outside_state|fence_derived_read)$/;
+      assert.deepEqual(
+        p.filter((/** @type {any} */ x) => kinds.test(x.kind)),
+        [],
+        'لا إيجابيَّ كاذبٌ على قاعدةٍ جديدة',
+      );
+      at26 = await fenceFunctionCatalog(db.pool);
+    });
+
+    it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0026 نفسِه', async () => {
+      fresh = await createIsolatedDatabase('m0026f');
+      await up(fresh.pool);
+      assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at26);
+    });
+
+    it('رجوعُ 0026 يُعيدُ كتالوجَ 0025 بايتاً ببايت (‏ويعودُ العيبُ كما قيس)، وإعادةُ التقديمِ تُطابق', async () => {
+      assert.equal((await down(db.pool, { steps: 1 })).current, 25);
+      assert.deepEqual(await fenceFunctionCatalog(db.pool), at25);
+      assert.equal(
+        await detects(db.pool, READ_ATTACKS[0] ?? assert.fail('READ_ATTACKS[0]')),
+        false,
+      );
+      assert.deepEqual((await up(db.pool)).applied, [26]);
+      assert.deepEqual(await fenceFunctionCatalog(db.pool), at26);
+    });
+
+    for (const [label, mutate, attack] of /** @type {const} */ ([
+      [
+        'بلا قاعدةِ worker_read_outside_state',
+        (/** @type {string} */ t) =>
+          t.replace(
+            /\n {4}SELECT 'worker_read_outside_state'[\s\S]*?IS DISTINCT FROM 'state'\n {4}UNION ALL/,
+            '',
+          ),
+        0,
+      ],
+      [
+        'استثناءُ fence من القراءةِ خارجَ state',
+        (/** @type {string} */ t) =>
+          t.replace("IS DISTINCT FROM 'state'", "NOT IN ('state', 'fence')"),
+        0,
+      ],
+      [
+        'التسلسلاتُ خارجَ القاعدة',
+        (/** @type {string} */ t) =>
+          t.replace(
+            "x->>'axis' IN ('relation', 'sequence') AND x->>'privilege' = 'SELECT'",
+            "x->>'axis' = 'relation' AND x->>'privilege' = 'SELECT'",
+          ),
+        1,
+      ],
+      [
+        'بلا قاعدةِ worker_fence_derived_read',
+        (/** @type {string} */ t) =>
+          t.replace(
+            /\n {4}SELECT 'worker_fence_derived_read'[\s\S]*?IN \('v', 'm'\)\n {4}UNION ALL/,
+            '',
+          ),
+        2,
+      ],
+      [
+        'إغلاقٌ غيرُ متعدٍّ (‏مشتقُّ المشتقِّ لا يُرى)',
+        (/** @type {string} */ t) =>
+          t.replace(
+            /\n {4}UNION\n {4}SELECT rw\.ev_class[\s\S]*?WHERE rw\.ev_class <> d\.refobjid\n/,
+            "\n    UNION\n    SELECT rw.ev_class FROM pg_rewrite rw\n    JOIN pg_depend d ON d.classid = 'pg_rewrite'::regclass AND d.objid = rw.oid AND d.refclassid = 'pg_class'::regclass\n    JOIN pg_class t ON t.oid = d.refobjid AND t.relnamespace = 'fence'::regnamespace\n    WHERE rw.ev_class <> d.refobjid\n",
+          ),
+        3,
+      ],
+    ])) {
+      it(`طفرةٌ في 0026 تُكشَف: ${label}`, async () => {
+        const d = migrationsDir(26, (n, t) =>
+          n === '0026_fence_read_surface.up.sql' ? mutate(t) : t,
+        );
+        try {
+          assert.notEqual(
+            readFileSync(join(d, '0026_fence_read_surface.up.sql'), 'utf8'),
+            readFileSync(join(src, '0026_fence_read_surface.up.sql'), 'utf8'),
+            'الطفرةُ لم تُطبَّق',
+          );
+          await down(db.pool, { steps: 1 });
+          await up(db.pool, { dir: d });
+          assert.equal(
+            await detects(db.pool, READ_ATTACKS[attack] ?? assert.fail(String(attack))),
+            false,
+            'الطفرةُ حيّة: الهجومُ لم يُكشَف',
+          );
+          await down(db.pool, { steps: 1, dir: d });
+        } finally {
+          rmSync(d, { recursive: true, force: true });
+        }
+        await up(db.pool);
+        assert.equal(
+          await detects(db.pool, READ_ATTACKS[attack] ?? assert.fail(String(attack))),
+          true,
+          'النصُّ الحقيقيُّ يكشف',
+        );
+        assert.deepEqual(await fenceFunctionCatalog(db.pool), at26);
+      });
+    }
+    // ‏(بلا SET LOCAL ROLE xf_owner طفرةٌ مكافئة: CREATE OR REPLACE يُبقي مالكَ الدالّةِ القائمة — لا تُعَدّ.)
   },
 );
