@@ -925,6 +925,16 @@ BEGIN
   WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_logical_emit_message'
     AND has_function_privilege('xuux_worker', p.oid, 'EXECUTE');
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_wal_message_write', 'functions', x)); END IF;
+  -- WL-541: pg_notify(text,text) مسحوبةٌ من PUBLIC — أعادتُها (‏لـPUBLIC، أو مباشرةً، أو عبرَ دورٍ يرثُه العامل) انحراف.
+  -- أمرُ NOTIFY نفسُه بلا امتيازٍ يُسحَب: متبقٍّ مُعلَن أدناه (‏notify_not_revocable)، لا يُخفى هنا.
+  SELECT coalesce(jsonb_agg(p.oid::regprocedure::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_proc p
+  WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_notify'
+    AND EXISTS (SELECT 1 FROM fence._worker_principals() w WHERE has_function_privilege(w.oid, p.oid, 'EXECUTE'));
+  IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'worker_notify_function', 'functions', x)); END IF;
+  -- WL-541: CONNECT لـPUBLIC على القاعدةِ المسيَّجة (‏سحبَته الهجرة) يجعلُ كلَّ دورِ دخولٍ في العنقودِ مستمعاً محتملاً لإشعاراتِ العامل.
+  IF has_database_privilege('public', current_database(), 'CONNECT') THEN
+    problems := problems || jsonb_build_array(jsonb_build_object('kind', 'notify_listener_public', 'database', current_database()));
+  END IF;
   -- WL-536: nextval/setval كتابةٌ لا معامليّةٌ خارجَ الزناد — لا USAGE ولا UPDATE للعاملِ على أيِّ تسلسل.
   SELECT coalesce(jsonb_agg(c2.oid::regclass::text ORDER BY 1), '[]'::jsonb) INTO x FROM pg_class c2
   WHERE c2.relkind = 'S' AND (has_sequence_privilege('xuux_worker', c2.oid, 'USAGE') OR has_sequence_privilege('xuux_worker', c2.oid, 'UPDATE'));
@@ -942,7 +952,8 @@ BEGIN
   WHERE e.extname IN ('dblink', 'postgres_fdw', 'file_fdw', 'adminpack', 'pg_background', 'plpython3u', 'plperlu');
   IF jsonb_array_length(x) > 0 THEN problems := problems || jsonb_build_array(jsonb_build_object('kind', 'escape_extensions', 'extensions', x)); END IF;
   residuals := residuals || jsonb_build_array(
-    jsonb_build_object('kind', 'notify_not_revocable', 'note', 'NOTIFY أمرٌ بلا امتياز: نافذتُه بين قفلِ الإيقافِ وإنهاءِ الجلسات؛ لا مُستقبِلَ في المشروع (E3)'),
+    -- WL-541: السطحُ مقيسٌ لا مُفترَض — مَن يستطيعُ الدخولَ (‏= LISTEN) ومن أين؛ مَن يستمعُ فعلاً لا يُرى.
+    jsonb_build_object('kind', 'notify_not_revocable', 'surface', fence.notify_surface(), 'note', 'أمرُ NOTIFY بلا امتيازٍ يُسحَب (‏pg_notify مسحوبةٌ من PUBLIC — WL-541): العاملُ يُرسِلُ ما دامت جلستُه حيّة — بعدَ الختمِ وبعدَ انقضاءِ الإيجارِ حتى الإلغاءِ أو الإيقاف؛ والإشعارُ الملتزَمُ قبلَ إنهاءِ الجلسةِ يصلُ مستمعاً كان متّصلاً ولو بعدَه، ولا يُخزَّنُ لمستمعٍ لاحق. المستمعُ: كلُّ مَن يدخلُ هذه القاعدة (‏surface.listeners) — لا مستهلكَ في المستودع، وما خارجَه لا يُثبَتُ غيابُه؛ والمنعُ من أصلِه يحتاجُ خطّافاً بلغةِ C (‏قرارُ معمار، E3)'),
     jsonb_build_object('kind', 'db_clock_trusted', 'note', 'الإيجارُ يُقاسُ بساعةِ القاعدة: التقدّمُ يُغلِق، والتراجعُ قبلَ آخرِ تجديدٍ يُرفَضُ (XF012)، وما دونَه يمدُّ الإيجارَ بما لا يزيدُ على نافذةٍ واحدة؛ العبثُ بها خارجَ السياج'),
     jsonb_build_object('kind', 'worker_self_alter_role', 'note', 'ALTER ROLE <نفسه> PASSWORD/SET بلا امتيازٍ يُسحَب ولا مُطلِقِ أحداث (WL-538): الإعداداتُ تُرفَضُ كتابتُها (XF013) وتُمحى عندَ الختمِ والإلغاءِ والإيقاف، وكلمةُ المرورِ لا تُدخِلُ أحداً (VALID UNTIL -infinity) وتُمحى كذلك؛ لكنّ الكتابةَ نفسَها تبقى ممكنةً بإيجارٍ منقضٍ حتى الانتقالِ التالي: إعداداتٌ يقرؤُها كلُّ دور، وبصمةٌ بمحتوًى يختارُه العاملُ لا يراها إلا superuser؛ ومنعُ الأمرِ من أصلِه يحتاجُ خطّافاً بلغةِ C (قرارُ معمار)'));
   RETURN jsonb_build_object('ok', jsonb_array_length(problems) = 0, 'problems', problems, 'residuals', residuals,
@@ -1578,6 +1589,48 @@ END
 $f$;
 REVOKE ALL ON FUNCTION fence.contain_database_reach() FROM PUBLIC;
 
+-- ── WL-541: سطحُ NOTIFY ─────────────────────────────────────────────────────────────────────
+-- NOTIFY محلّيٌّ للقاعدة، وLISTEN بلا امتياز: شرطُه الدخولُ إلى هذه القاعدةِ وحدَه (‏CONNECT لدورِ الدخولِ أو ما يرثُه
+-- بـINHERIT، أو superuser). فالمستمعونَ المحتمَلون = أدوارُ الدخولِ القادرةُ على CONNECT هنا. **الحدّ:** PG لا يكشفُ قنواتِ
+-- جلساتٍ أخرى (‏pg_listening_channels للجلسةِ نفسِها) — فمَن يستمعُ فعلاً لا يُرى (‏active_listeners_observable=false)،
+-- وpg_hba خارجَ الكتالوج. المنحُ المصنّفُ: أدوارُ السياجِ التي تمنحُها الهجرةُ CONNECT ومالكُ القاعدة؛ وما سواه يُعلَنُ
+-- (‏unclassified_grantees) ولا يُعَدُّ مشكلة — جعلُه مانعاً تغييرٌ في نموذجِ التشغيلِ يقرّرُه المالك.
+CREATE FUNCTION fence.notify_surface() RETURNS jsonb
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
+  WITH db AS (SELECT d.oid, d.datname, d.datdba, coalesce(d.datacl, acldefault('d', d.datdba)) AS acl
+              FROM pg_database d WHERE d.datname = current_database()),
+  allowed AS (SELECT unnest(ARRAY['xuux_worker', 'xf_root', 'xf_sovereign', 'xf_auditor', 'xuux_migrator']::name[]) AS rolname),
+  g AS (SELECT DISTINCT a.grantee FROM db, aclexplode(db.acl) a WHERE a.privilege_type = 'CONNECT'),
+  grantees AS (
+    SELECT CASE WHEN g.grantee = 0 THEN 'PUBLIC' ELSE g.grantee::regrole::text END AS grantee,
+           g.grantee <> 0 AND (g.grantee = (SELECT datdba FROM db)
+             OR g.grantee IN (SELECT r.oid FROM pg_roles r JOIN allowed USING (rolname))) AS classified,
+           g.grantee AS oid
+    FROM g),
+  live AS (SELECT a.usesysid, count(*)::int AS n FROM pg_stat_activity a
+           WHERE a.datid = (SELECT oid FROM db) AND a.backend_type = 'client backend' GROUP BY a.usesysid),
+  -- المستمعُ المحتمَل: دورُ دخولٍ يستطيعُ CONNECT هنا، أو دورٌ له جلسةٌ حيّةٌ هنا ولو صارَ NOLOGIN — الجلسةُ المختومةُ
+  -- تبقى حيّةً وتستطيعُ LISTEN (‏قناةٌ بينَ العمّال)، وسحبُ CONNECT أو LOGIN لا يُنهي جلسةً قائمة.
+  listeners AS (
+    SELECT r.rolname, r.rolsuper, coalesce(l.n, 0) AS live_sessions,
+      CASE WHEN r.rolsuper THEN ARRAY['superuser']
+           ELSE ARRAY(SELECT gr.grantee FROM grantees gr
+                      WHERE gr.oid = 0 OR (gr.oid <> 0 AND pg_has_role(r.oid, gr.oid, 'USAGE')) ORDER BY 1) END AS via
+    FROM pg_roles r LEFT JOIN live l ON l.usesysid = r.oid
+    WHERE coalesce(l.n, 0) > 0
+       OR (r.rolcanlogin AND (r.rolsuper OR has_database_privilege(r.oid, (SELECT oid FROM db), 'CONNECT'))))
+  SELECT jsonb_build_object(
+    'database', (SELECT datname FROM db),
+    'pg_notify_worker_execute', EXISTS (SELECT 1 FROM pg_proc p, fence._worker_principals() w
+                                       WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname = 'pg_notify'
+                                         AND has_function_privilege(w.oid, p.oid, 'EXECUTE')),
+    'connect_via_public', has_database_privilege('public', (SELECT oid FROM db), 'CONNECT'),
+    'active_listeners_observable', false,
+    'grantees', coalesce((SELECT jsonb_agg(jsonb_build_object('grantee', grantee, 'classified', classified) ORDER BY grantee) FROM grantees), '[]'::jsonb),
+    'unclassified_grantees', coalesce((SELECT jsonb_agg(grantee ORDER BY grantee) FROM grantees WHERE NOT classified), '[]'::jsonb),
+    'listeners', coalesce((SELECT jsonb_agg(jsonb_build_object('role', rolname, 'superuser', rolsuper, 'live_sessions', live_sessions, 'via', to_jsonb(via)) ORDER BY rolname) FROM listeners), '[]'::jsonb))
+$f$;
+
 CREATE FUNCTION fence.issue_challenge(worker_id text, boot_id text) RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f$
 DECLARE c fence.control; nonce text; rn name; eff jsonb := fence.effective_state(); live jsonb := fence._live_incarnation();
@@ -1935,6 +1988,7 @@ GRANT EXECUTE ON FUNCTION fence.whoami(), fence.read_ok(), fence.effective_state
 GRANT EXECUTE ON FUNCTION fence.read_ok() TO PUBLIC;
 GRANT EXECUTE ON FUNCTION fence.effective_state(), fence.check_fenced(), fence.status() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
 GRANT EXECUTE ON FUNCTION fence.worker_capabilities(), fence.capability_problems() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
+GRANT EXECUTE ON FUNCTION fence.notify_surface() TO xf_root, xf_sovereign, xf_auditor, xuux_migrator;
 GRANT EXECUTE ON FUNCTION fence.issue_challenge(text, text), fence.issue_credential(text, bytea), fence.renew_lease(name),
   fence.revoke_credential(name, text), fence.halt_request(text), fence.halt_lock(bigint),
   fence.halt_revoke_and_terminate(bigint), fence.halt_complete(bigint), fence.record_effects_evidence(text, jsonb),
@@ -1999,6 +2053,10 @@ BEGIN
   END LOOP;
 END
 $emit$;
+
+-- WL-541: pg_notify(text,text) — المسارُ الوحيدُ لـNOTIFY الذي يحكمُه امتياز (‏أمرُ NOTIFY نفسُه بلا امتياز، E3).
+-- لا يستعملُه المشروع ولا مستهلكَ فيه؛ السحبُ محلّيٌّ لهذه القاعدة (‏pg_proc لكلِّ قاعدة)، وsuperuser لا يتأثّر.
+REVOKE EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) FROM PUBLIC;
 
 -- ── التغطيةُ الأولى لكلِّ جدولٍ قائم ───────────────────────────────────────────
 DO $cover$

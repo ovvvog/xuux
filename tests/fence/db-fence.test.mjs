@@ -1486,9 +1486,10 @@ describe('WL-539: مدقّقُ قدراتِ العامل', { skip: skipWithoutDa
       'QUERY_EXECUTOR',
       'INTERNAL_CHECK',
       'GUARDED_WRITE',
-      'RESIDUAL',
     ])
       assert.ok((r.byClass[cls] ?? 0) > 0, `صنفُ ${cls} فارغ`);
+    // WL-541: كان RESIDUAL يضمُّ pg_notify وحدَها؛ سُحِبَت فصار فارغاً (‏NOTIFY الأمرُ خارجَ الجرد — CAP-NOTIFY).
+    assert.equal(r.byClass['RESIDUAL'] ?? 0, 0, 'لا دالّةَ متبقّيةً للعامل');
     const inv = r.classified;
     assert.ok(
       inv.some((c) => c.axis === 'membership' && c.object === 'identity -> xuux_worker'),
@@ -1503,10 +1504,12 @@ describe('WL-539: مدقّقُ قدراتِ العامل', { skip: skipWithoutDa
           c.class === 'GUARDED_WRITE',
       ),
     );
+    // WL-541: pg_notify مسحوبةٌ من PUBLIC — لا تظهرُ في جردِ العامل (‏NOTIFY الأمرُ متبقٍّ، CAP-NOTIFY).
     assert.ok(
-      r.residual.some((c) => c.detail?.name === 'pg_notify'),
-      'pg_notify متبقٍّ معلن (E3)',
+      !inv.some((c) => c.axis === 'function' && c.detail?.name === 'pg_notify'),
+      'pg_notify ليست في جردِ العامل',
     );
+    assert.deepEqual(r.residual, [], 'لا دالّةَ متبقّيةً في الجرد');
     assert.deepEqual(await problems(), []);
     const cf = (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
     assert.ok(
@@ -1589,7 +1592,12 @@ describe('WL-539: مدقّقُ قدراتِ العامل', { skip: skipWithoutDa
   test('الأوامرُ بلا صلاحية: NOTIFY متبقٍّ مقبول، وANALYZE/VACUUM بلا أثرٍ مقيس، وALTER ROLE الذاتيُّ مكشوفٌ ومعطَّلُ الأثر', async () => {
     // إن صار NOTIFY مرفوضاً تغيّرَ المتبقّي E3 — يجبُ تحديثُ التصنيفِ لا إسكاتُ الاختبار.
     await w.c.query(`NOTIFY wl539, 'residual'`);
-    await w.c.query(`SELECT pg_notify('wl539', 'residual')`);
+    // WL-541: الدالّةُ مسحوبة — المسارُ الذي يحكمُه امتيازٌ مُغلَق، والأمرُ وحدَه متبقٍّ.
+    await rejectsWith(
+      () => w.c.query(`SELECT pg_notify('wl539', 'residual')`),
+      ['42501'],
+      'pg_notify للعامل',
+    );
     const before = (
       await h.db.pool.query(
         `SELECT reltuples, (SELECT last_analyze FROM pg_stat_user_tables WHERE relid = 'state.fence_probe'::regclass) AS la FROM pg_class WHERE oid = 'state.fence_probe'::regclass`,
@@ -2167,5 +2175,378 @@ describe('WL-540: احتواءُ الوصولِ عبرَ القواعد', { skip
     assert.equal((await h.sovereign.status()).effective.state, 'RUNNING');
     const w = await h.boot('beta');
     await w.client?.query('SELECT 1');
+  });
+});
+
+// ─── WL-541: الأثرُ المتبقّي لـNOTIFY ─────────────────────────────────────────────────────────────
+// NOTIFY أمرٌ بلا امتيازٍ في PostgreSQL، وpg_notify(text,text) دالّةٌ مُنفَّذةٌ لـPUBLIC افتراضاً. الإشعارُ عابر:
+// يُسلَّمُ عند COMMIT لمستمعٍ متّصلٍ بالقاعدةِ نفسِها (‏LISTEN بلا امتياز — شرطُه الدخولُ وحدَه)، ولا يُخزَّنُ لمستمعٍ
+// لاحق؛ لكنّه يبقى في الطابورِ لمستمعٍ كان متّصلاً حتى يقرأَه — ولو انتهت جلسةُ المُرسِلِ أو أُلغيَ اعتمادُه.
+// هذا غيرُ pg_logical_emit_message (‏WL-537): رسالةُ WAL دائمةٌ يراها كلُّ مستهلكٍ منطقيٍّ لاحق.
+describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithoutDatabase }, () => {
+  /** @type {Awaited<ReturnType<typeof harness>>} */
+  let h;
+  /** @type {Record<string, any>} */
+  let policy;
+  const audit = async () => auditWorkerCapabilitiesLive(/** @type {any} */ (h.rootClient), policy);
+  const checkFenced = async () =>
+    /** @type {{ ok: boolean, problems: Array<{ kind: string }>, residuals: Array<any> }} */ (
+      (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r
+    );
+  const surface = async () =>
+    /** @type {Record<string, any>} */ (
+      (await h.rootClient.query('SELECT fence.notify_surface() AS s')).rows[0].s
+    );
+  const notifyProblems = async () =>
+    (await checkFenced()).problems.filter((p) =>
+      ['worker_notify_function', 'notify_listener_public'].includes(p.kind),
+    );
+  /**
+   * مستمعٌ فعليّ: LISTEN على قناة، ويجمعُ ما يصلُه.
+   * @param {pg.Client} c
+   * @param {string} channel
+   */
+  const listen = async (c, channel) => {
+    /** @type {string[]} */
+    const got = [];
+    c.on('notification', (m) => {
+      if (m.channel === channel) got.push(String(m.payload));
+    });
+    await c.query(`LISTEN ${channel}`);
+    return got;
+  };
+  /** الإشعارُ يُسلَّمُ للمستمعِ الخامل: جولةٌ على وصلتِه ومهلةٌ قصيرة. @param {pg.Client[]} cs */
+  const settle = async (...cs) => {
+    await new Promise((r) => setTimeout(r, 150));
+    for (const c of cs) await c.query('SELECT 1').catch(() => {});
+    await new Promise((r) => setTimeout(r, 50));
+  };
+  /** وصلةُ superuser إلى قاعدةٍ أخرى في العنقود. @param {string} database */
+  const superuserTo = async (database) => {
+    const u = new URL(process.env['DATABASE_URL'] ?? '');
+    u.pathname = `/${database}`;
+    const c = new pg.Client({ connectionString: u.toString() });
+    c.on('error', () => {});
+    await c.connect();
+    return c;
+  };
+  const dropRoles = async (/** @type {string[]} */ roles) => {
+    for (const r of roles) {
+      await h.db.pool.query(
+        `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = $1`,
+        [r],
+      );
+      await h.db.pool
+        .query(`REVOKE ALL ON DATABASE ${quoteIdent(h.db.name)} FROM ${quoteIdent(r)}`)
+        .catch(() => {});
+      await h.db.pool.query(`DROP ROLE IF EXISTS ${quoteIdent(r)}`);
+    }
+  };
+  before(async () => {
+    policy = await loadCapabilityPolicy();
+    h = await harness('wl541');
+    await h.resume();
+  });
+  after(async () => h?.close());
+
+  test('القدرة: العاملُ يُرسلُ بأمرِ NOTIFY ويصلُ مستمعاً متّصلاً في القاعدةِ نفسِها فقط؛ ROLLBACK لا يُرسِل، والمستمعُ اللاحقُ لا يرى، وpg_notify مسحوبةٌ (‏42501)', async () => {
+    const w = await h.boot('alpha');
+    const c = /** @type {pg.Client} */ (w.client);
+    const aud = await h.login('xf_auditor');
+    const got = await listen(aud, 'wl541');
+    // مستمعٌ في قاعدةٍ أخرى (‏superuser، فلا قيدَ صلاحية): NOTIFY محلّيٌّ للقاعدة.
+    const other = await superuserTo('postgres');
+    const elsewhere = await listen(other, 'wl541');
+    try {
+      await c.query(`NOTIFY wl541, 'stmt'`);
+      await c.query('BEGIN');
+      await c.query(`NOTIFY wl541, 'rolled-back'`);
+      await c.query('ROLLBACK');
+      await rejectsWith(
+        () => c.query(`SELECT pg_notify('wl541', 'fn')`),
+        ['42501'],
+        'pg_notify للعامل (‏سُحِبَت من PUBLIC — WL-541)',
+      );
+      // الأمرُ نفسُه داخلَ PL/pgSQL (‏EXECUTE) لا يمرُّ بامتياز: يبقى متبقّياً مُعلَناً.
+      await c.query(`DO $$BEGIN EXECUTE 'NOTIFY wl541, ''dynamic'''; END$$`);
+      await settle(aud, other);
+      assert.deepEqual(got, ['stmt', 'dynamic'], 'المستمعُ المتّصلُ يستقبلُ الأمرَ وحدَه');
+      assert.deepEqual(elsewhere, [], 'لا عبورَ بينَ القواعد');
+      // حدودُ PG: القناةُ ≤ 63 بايتاً (‏NAMEDATALEN-1، والمعرّفُ الأطولُ يُقتطَع)، والحمولةُ < 8000 بايت؛ لا قيدَ على المحتوى.
+      await rejectsWith(
+        () => c.query(`NOTIFY wl541, '${'a'.repeat(8000)}'`),
+        ['22023'],
+        'حمولةٌ أطولُ من الحدّ',
+      );
+      await c.query(`NOTIFY wl541, '${'a'.repeat(7999)}'`);
+      const late = await h.login('xf_auditor');
+      const lateGot = await listen(late, 'wl541');
+      await settle(aud, late);
+      assert.equal(got.at(-1)?.length, 7999);
+      assert.deepEqual(lateGot, [], 'ما سبقَ LISTEN لا يُخزَّنُ لمستمعٍ لاحق');
+      await late.end();
+    } finally {
+      await other.end().catch(() => {});
+      await aud.end().catch(() => {});
+      await h.root.revokeCredential(w.credential.role_name, 'wl541');
+    }
+  });
+
+  test('مَن يستطيعُ LISTEN: الدخولُ وحدَه شرطُه — منحٌ مباشرٌ أو عضويّةٌ موروثة (‏INHERIT) أو superuser؛ لا NOINHERIT ولا دورٌ بلا منح، وPUBLIC مسحوبٌ من القاعدةِ المسيَّجة', async () => {
+    const roles = ['wl541_member', 'wl541_noinh', 'wl541_none'];
+    await dropRoles(roles);
+    await h.db.pool.query('CREATE ROLE wl541_member LOGIN');
+    await h.db.pool.query('CREATE ROLE wl541_noinh LOGIN NOINHERIT');
+    await h.db.pool.query('CREATE ROLE wl541_none LOGIN');
+    await h.db.pool.query('GRANT xf_auditor TO wl541_member, wl541_noinh');
+    const a = await h.boot('alpha');
+    const b = await h.boot('beta');
+    try {
+      const member = await h.login('wl541_member');
+      const memberGot = await listen(member, 'wl541b');
+      const peer = await listen(/** @type {pg.Client} */ (b.client), 'wl541b');
+      const su = await superuserTo(h.db.name);
+      const suGot = await listen(su, 'wl541b');
+      for (const r of ['wl541_noinh', 'wl541_none'])
+        await rejectsWith(() => h.login(r), ['42501'], `${r}: لا CONNECT ⇒ لا LISTEN`);
+      await /** @type {pg.Client} */ (a.client).query(`NOTIFY wl541b, 'to-all'`);
+      await settle(member, /** @type {pg.Client} */ (b.client), su);
+      assert.deepEqual(memberGot, ['to-all'], 'عضوٌ يرثُ xf_auditor يستقبل');
+      assert.deepEqual(peer, ['to-all'], 'عاملٌ آخرُ يستقبل (‏قناةٌ بينَ العمّال)');
+      assert.deepEqual(suGot, ['to-all'], 'superuser يستقبل');
+      await su.end();
+      await member.end();
+      // السطحُ كما تراه القاعدة: مَن يستطيعُ الدخولَ (‏= LISTEN) ومن أين، دونَ ادّعاءِ مَن يستمعُ فعلاً.
+      const s = await surface();
+      assert.equal(s.connect_via_public, false);
+      assert.equal(s.pg_notify_worker_execute, false);
+      assert.equal(s.active_listeners_observable, false, 'PG لا يكشفُ قنواتِ جلساتٍ أخرى');
+      const by = new Map(s.listeners.map((/** @type {any} */ l) => [l.role, l]));
+      assert.deepEqual(by.get('wl541_member')?.via, ['xf_auditor']);
+      assert.ok(by.get(h.superuser)?.superuser, 'superuser مُدرَج');
+      // الهويّةُ المختومةُ NOLOGIN، لكنّ جلستَها الحيّةَ مستمعٌ محتمَل — تُدرَجُ بجلساتِها لا بقدرتِها على الدخول.
+      for (const id of [a.credential.role_name, b.credential.role_name]) {
+        assert.deepEqual(by.get(id)?.via, ['xuux_worker'], id);
+        assert.ok(by.get(id)?.live_sessions >= 1, id);
+      }
+      for (const r of ['wl541_noinh', 'wl541_none']) assert.ok(!by.has(r), r);
+      assert.deepEqual(
+        s.grantees.filter((/** @type {any} */ g) => !g.classified),
+        [],
+        'كلُّ منحِ CONNECT على القاعدةِ مصنّف',
+      );
+      assert.deepEqual(await notifyProblems(), []);
+    } finally {
+      await h.root.revokeCredential(a.credential.role_name, 'wl541');
+      await h.root.revokeCredential(b.credential.role_name, 'wl541');
+      await h.db.pool.query('REVOKE xf_auditor FROM wl541_member, wl541_noinh');
+      await dropRoles(roles);
+    }
+  });
+
+  test('دورةُ الحياة: الختمُ لا يقطعُ NOTIFY، وانقضاءُ الإيجارِ لا يمنعُه (‏الكتابةُ XF009)، وما التزمَ قبلَ الإلغاءِ يصلُ مستمعاً متّصلاً بعدَه، والإيقافُ يُنهي الجلسة، والاستئنافُ لا يُعيدُ القديمة', async () => {
+    const w = await h.boot('alpha');
+    const c = /** @type {pg.Client} */ (w.client);
+    assert.ok(w.sealed && w.sealed.length > 0, 'الجلسةُ مختومة');
+    const aud = await h.login('xf_auditor');
+    const got = await listen(aud, 'wl541c');
+    try {
+      await c.query(`NOTIFY wl541c, 'sealed'`);
+      await h.db.pool.query(
+        `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+        [w.credential.role_name],
+      );
+      await rejectsWith(
+        () => c.query(`INSERT INTO state.fence_probe VALUES (541, 'late')`),
+        ['XF009'],
+        'كتابةٌ بإيجارٍ منقضٍ',
+      );
+      await c.query(`NOTIFY wl541c, 'after-lease'`);
+      await settle(aud);
+      assert.deepEqual(got, ['sealed', 'after-lease'], 'NOTIFY بعدَ الختمِ وبعدَ انقضاءِ الإيجار');
+      // المستمعُ داخلَ معاملة: الإشعارُ ينتظرُه في الطابور. المُرسِلُ يُلغى (‏الجلسةُ تُنهى) ثمّ يصل.
+      await aud.query('BEGIN');
+      await c.query(`NOTIFY wl541c, 'before-revoke'`);
+      const n = await h.root.revokeCredential(w.credential.role_name, 'wl541-lifecycle');
+      assert.equal(n, 1, 'جلسةُ العاملِ أُنهيت');
+      await rejection(() => c.query(`NOTIFY wl541c, 'after-revoke'`));
+      await aud.query('COMMIT');
+      await settle(aud);
+      assert.deepEqual(
+        got.slice(2),
+        ['before-revoke'],
+        'أثرٌ عابرٌ يتجاوزُ الإلغاءَ لمستمعٍ كان متّصلاً',
+      );
+      const late = await h.login('xf_auditor');
+      const lateGot = await listen(late, 'wl541c');
+      await settle(late);
+      assert.deepEqual(lateGot, [], 'ولا يبقى لمستمعٍ لاحق');
+      await late.end();
+      // الإيقافُ: كلُّ جلسةِ عاملٍ تُنهى، والمتبقّي مُعلَنٌ بسطحِه في check_fenced.
+      const w2 = await h.boot('beta');
+      const c2 = /** @type {pg.Client} */ (w2.client);
+      await c2.query(`NOTIFY wl541c, 'before-halt'`);
+      const hr = /** @type {any} */ (await h.root.halt('wl541-halt', { effects: NO_EFFECTS }));
+      assert.equal(hr.dbFenced, true, JSON.stringify(hr.check?.problems));
+      await rejection(() => c2.query(`NOTIFY wl541c, 'after-halt'`));
+      await settle(aud);
+      assert.deepEqual(got.slice(3), ['before-halt']);
+      const res = (await checkFenced()).residuals.find(
+        (/** @type {any} */ r) => r.kind === 'notify_not_revocable',
+      );
+      assert.ok(res?.surface?.listeners?.length > 0, JSON.stringify(res));
+      assert.equal(res.surface.pg_notify_worker_execute, false);
+      await h.resume();
+      for (const role of [w.credential.role_name, w2.credential.role_name])
+        await rejection(() => h.login(role));
+      // الاستئنافُ: إقلاعٌ جديدٌ يعملُ (‏مسارٌ مشروعٌ لم يُكسَر).
+      const w3 = await h.boot('alpha');
+      await /** @type {pg.Client} */ (w3.client).query(
+        `INSERT INTO state.fence_probe VALUES (541, 'ok')`,
+      );
+      await /** @type {pg.Client} */ (w3.client).query(
+        `DELETE FROM state.fence_probe WHERE id = 541`,
+      );
+      await h.root.revokeCredential(w3.credential.role_name, 'wl541');
+    } finally {
+      await aud.end().catch(() => {});
+    }
+  });
+
+  test('الطفرات: إعادةُ pg_notify (‏PUBLIC، مباشر، موروث) أو CONNECT لـPUBLIC على القاعدةِ المسيَّجة ⇒ مكشوفةٌ وتمنعُ اكتمالَ الإيقافِ وRESUME', async () => {
+    const mutations = [
+      {
+        name: 'pg_notify لـPUBLIC',
+        apply: ['GRANT EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) TO PUBLIC'],
+        revert: ['REVOKE EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) FROM PUBLIC'],
+        kind: 'worker_notify_function',
+        unclassified: 'pg_notify',
+      },
+      {
+        name: 'pg_notify لـxuux_worker مباشرةً',
+        apply: ['GRANT EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) TO xuux_worker'],
+        revert: ['REVOKE EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) FROM xuux_worker'],
+        kind: 'worker_notify_function',
+        unclassified: 'pg_notify',
+      },
+      {
+        name: 'pg_notify موروثةٌ عبرَ دورٍ وسيط',
+        apply: [
+          'CREATE ROLE wl541_fn NOLOGIN',
+          'GRANT EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) TO wl541_fn',
+          'GRANT wl541_fn TO xuux_worker',
+        ],
+        revert: [
+          'REVOKE wl541_fn FROM xuux_worker',
+          'REVOKE EXECUTE ON FUNCTION pg_catalog.pg_notify(text, text) FROM wl541_fn',
+          'DROP ROLE wl541_fn',
+        ],
+        kind: 'worker_notify_function',
+        unclassified: 'pg_notify',
+      },
+      {
+        name: 'CONNECT لـPUBLIC على القاعدةِ المسيَّجة (‏كلُّ دورِ دخولٍ في العنقودِ مستمعٌ محتمل)',
+        apply: ['GRANT CONNECT ON DATABASE {db} TO PUBLIC'],
+        revert: ['REVOKE CONNECT ON DATABASE {db} FROM PUBLIC'],
+        kind: 'notify_listener_public',
+        unclassified: null,
+      },
+    ];
+    const sql = (/** @type {string} */ s) => s.replaceAll('{db}', quoteIdent(h.db.name));
+    // الإيقافُ أوّلاً: GRANT على دالّةٍ يمرُّ بمُطلِقِ الأحداث (‏XF201 تحتَ RUNNING).
+    await h.root.halt('wl541-mutations', { effects: NO_EFFECTS });
+    for (const m of mutations) {
+      for (const s of m.apply) await h.db.pool.query(sql(s));
+      try {
+        const kinds = (await notifyProblems()).map((p) => p.kind);
+        assert.deepEqual(kinds, [m.kind], `${m.name}: ${JSON.stringify(kinds)}`);
+        if (m.unclassified !== null) {
+          const r = await audit();
+          assert.ok(
+            !r.ok &&
+              r.unclassified.some(
+                (x) => x.axis === 'function' && x.detail?.name === m.unclassified,
+              ),
+            `${m.name}: المدقّقُ لا يصنّفُ pg_notify — ${JSON.stringify(r.unclassified)}`,
+          );
+        }
+        const hr = /** @type {any} */ (
+          await h.root.halt(`wl541-${m.kind}`, { effects: NO_EFFECTS })
+        );
+        assert.equal(hr.dbFenced, false, m.name);
+        assert.equal(hr.reason, 'DB_NOT_FENCED', m.name);
+        assert.equal((await h.sovereign.status()).effective.state, 'HALT_REQUESTED');
+        await rejectsWith(() => h.resume(), ['XF415', 'XF507'], `RESUME فوقَ ${m.name}`);
+        assert.notEqual((await h.sovereign.status()).effective.state, 'RUNNING');
+      } finally {
+        for (const s of m.revert) await h.db.pool.query(sql(s));
+      }
+      assert.deepEqual(await notifyProblems(), [], `${m.name}: الإرجاعُ يُزيلُ المشكلة`);
+    }
+    // بعدَ الإرجاع: إيقافٌ نظيفٌ يكتملُ ثمّ RESUME (‏الإيقافُ الفاشلُ يُبقي HALT_REQUESTED).
+    const reverted = /** @type {any} */ (
+      await h.root.halt('wl541-reverted', { effects: NO_EFFECTS })
+    );
+    assert.equal(reverted.dbFenced, true, JSON.stringify(reverted.check?.problems));
+    // هجومُ PUBLIC مُعادٌ إنتاجُه فعلاً: دورٌ بلا أيِّ منحٍ يدخلُ ويستقبلُ إشعارَ العامل.
+    await h.resume();
+    await h.db.pool.query('DROP ROLE IF EXISTS wl541_stranger');
+    await h.db.pool.query('CREATE ROLE wl541_stranger LOGIN');
+    const w = await h.boot('alpha');
+    try {
+      await rejectsWith(() => h.login('wl541_stranger'), ['42501'], 'قبلَ الطفرة');
+      await h.db.pool.query(sql('GRANT CONNECT ON DATABASE {db} TO PUBLIC'));
+      const s = await h.login('wl541_stranger');
+      const got = await listen(s, 'wl541d');
+      await /** @type {pg.Client} */ (w.client).query(`NOTIFY wl541d, 'leak'`);
+      await settle(s);
+      assert.deepEqual(got, ['leak'], 'PUBLIC يجعلُ أيَّ دورِ دخولٍ مستقبِلاً');
+      assert.equal((await surface()).connect_via_public, true);
+      await s.end();
+    } finally {
+      await h.db.pool.query(sql('REVOKE CONNECT ON DATABASE {db} FROM PUBLIC'));
+      await h.root.revokeCredential(w.credential.role_name, 'wl541');
+      await dropRoles(['wl541_stranger']);
+    }
+    const done = /** @type {any} */ (await h.root.halt('wl541-clean', { effects: NO_EFFECTS }));
+    assert.equal(done.dbFenced, true, JSON.stringify(done.check?.problems));
+    await h.resume();
+    assert.equal((await h.sovereign.status()).effective.state, 'RUNNING');
+  });
+
+  test('لا كسرَ ولا إخفاء: superuser يملكُ pg_notify، ومنحٌ صريحٌ لدورٍ تشغيليٍّ يظهرُ في السطحِ غيرَ مصنّفٍ دونَ أن يمنعَ (‏قرارُ مالك)، والجذرُ والسياديُّ والإقلاعُ تعمل', async () => {
+    const su = await superuserTo(h.db.name);
+    try {
+      await su.query(`SELECT pg_notify('wl541e', 'superuser')`);
+    } finally {
+      await su.end();
+    }
+    await dropRoles(['wl541_ops']);
+    await h.db.pool.query('CREATE ROLE wl541_ops LOGIN');
+    await h.db.pool.query(`GRANT CONNECT ON DATABASE ${quoteIdent(h.db.name)} TO wl541_ops`);
+    try {
+      const s = await surface();
+      assert.deepEqual(
+        s.grantees
+          .filter((/** @type {any} */ g) => !g.classified)
+          .map((/** @type {any} */ g) => g.grantee),
+        ['wl541_ops'],
+        'المنحُ الصريحُ ظاهرٌ لا مُخفى',
+      );
+      assert.deepEqual(s.listeners.find((/** @type {any} */ l) => l.role === 'wl541_ops')?.via, [
+        'wl541_ops',
+      ]);
+      assert.deepEqual(await notifyProblems(), [], 'ليس انحرافاً في السياج (‏حدٌّ مُعلَن)');
+      const cf = await checkFenced();
+      const res = cf.residuals.find((r) => r.kind === 'notify_not_revocable');
+      assert.deepEqual(res?.surface?.unclassified_grantees, ['wl541_ops']);
+    } finally {
+      await dropRoles(['wl541_ops']);
+    }
+    await h.reconnect();
+    const w = await h.boot('beta');
+    await /** @type {pg.Client} */ (w.client).query('SELECT 1');
+    await h.root.revokeCredential(w.credential.role_name, 'wl541');
+    assert.equal((await h.sovereign.status()).effective.state, 'RUNNING');
   });
 });
