@@ -18,7 +18,7 @@ import pg from 'pg';
 
 import { EventEmitter } from 'node:events';
 import { setImmediate } from 'node:timers';
-import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,6 +39,7 @@ import {
 } from '../../src/fence/db-fence.mjs';
 import { auditWorkerCapabilitiesLive, loadCapabilityPolicy } from '../../src/fence/effects.mjs';
 import { DB_ERRORS, createPool } from '../../src/persistence/db.mjs';
+import { down as migratorDown } from '../../src/persistence/migrator.mjs';
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { databaseUrl, quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { NO_EFFECTS, harness, rejection, rejectsWith } from '../helpers/fence-harness.mjs';
@@ -2877,6 +2878,39 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
       await aud.query('ROLLBACK').catch(() => {});
       await aud.end().catch(() => {});
       await h.root.reapLapsed();
+    }
+  });
+
+  test('WL-543: رجوعُ 0025 مرفوضٌ تحتَ RUNNING (‏D-13) — لا يُعطَّلُ مُطلِقٌ ولا تُمَسُّ دالّة', async () => {
+    if ((await h.sovereign.status()).effective.state !== 'RUNNING') await h.resume();
+    const snap = async () =>
+      (
+        await h.db.pool.query(
+          `SELECT (SELECT string_agg(evtname || ':' || evtenabled::text, ',' ORDER BY evtname) FROM pg_event_trigger) AS evt,
+                  (SELECT count(*)::int FROM pg_proc WHERE oid = 'fence.reap_lapsed()'::regprocedure) AS reaper,
+                  (SELECT max(version)::int FROM public.schema_migrations) AS v`,
+        )
+      ).rows[0];
+    const before = await snap();
+    assert.equal(before.v, 25);
+    // الطبقةُ الأولى: المُهاجِرُ نفسُه يُرفَضُ تحتَ RUNNING (‏xf_ddl_start ⇒ XF201 على إنشاءِ دفترِه).
+    await assert.rejects(
+      migratorDown(h.db.pool, { steps: 1 }),
+      (/** @type {any} */ e) => e.code === 'XF201' || /D-13/.test(String(e.message)),
+    );
+    assert.deepEqual(await snap(), before);
+    // الطبقةُ الثانية: نصُّ 0025 نفسُه (‏تقديماً ورجوعاً) يرفضُ تحتَ RUNNING بحارسِه (‏D-13) ولو نُفِّذَ مباشرة.
+    for (const file of ['0025_fence_lease_reaper.down.sql', '0025_fence_lease_reaper.up.sql']) {
+      const sql = readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
+      const c = await h.db.pool.connect();
+      try {
+        await c.query('BEGIN');
+        await assert.rejects(c.query(sql), /D-13/, file);
+      } finally {
+        await c.query('ROLLBACK').catch(() => {});
+        c.release();
+      }
+      assert.deepEqual(await snap(), before, file);
     }
   });
 });

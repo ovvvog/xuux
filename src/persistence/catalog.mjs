@@ -28,10 +28,14 @@ const SYSTEM_SCHEMAS = ['pg_catalog', 'information_schema'];
  * التقطْ صورةَ الكتالوجِ الحاليةَ نصّاً مُرتَّباً ثابتَ الترتيب.
  * الترتيبُ مفروضٌ في كلِّ استعلامٍ لأنّ PostgreSQL لا يضمنُ ترتيبَ الصفوفِ بلا
  * `ORDER BY`، وصورتانِ بترتيبَينِ مختلفَينِ تُقرَآنِ اختلافاً وهمياً.
+ * `routines` (‏WL-543): يضيفُ الدوالَّ في المخطّطاتِ غيرِ النظاميّة (‏التوقيع، بصمةُ التعريفِ كاملاً، التقلّب،
+ * SECURITY DEFINER، ACL) ومُطلِقاتِ الأحداث. اختياريٌّ لأنّ النسخَ والاستعادةَ لا تَعِدُ بنقلِ ACL والمُلّاك؛
+ * وتطلبُه أداةُ الانعكاس، فهجرةٌ لا تُغيّرُ إلا دوالَّ (‏كـ0025) تُقاسُ ولا تُقرأُ فارغة.
  * @param {CatalogQueryable} pool
+ * @param {{ routines?: boolean }} [options]
  * @returns {Promise<string>}
  */
-export async function catalogSnapshot(pool) {
+export async function catalogSnapshot(pool, options = {}) {
   const schemas = await pool.query(
     `SELECT nspname FROM pg_namespace
      WHERE nspname NOT LIKE 'pg_%' AND nspname <> 'information_schema'
@@ -62,6 +66,25 @@ export async function catalogSnapshot(pool) {
      WHERE domain_schema NOT IN ('pg_catalog', 'information_schema')
      ORDER BY domain_schema, domain_name`,
   );
+  /** @type {Record<string, unknown>} */
+  const extra = {};
+  if (options.routines === true) {
+    extra.routines = (
+      await pool.query(
+        `SELECT p.oid::regprocedure::text AS sig, md5(pg_catalog.pg_get_functiondef(p.oid)) AS def,
+                p.provolatile AS volatility, p.prosecdef AS security_definer, coalesce(p.proacl::text, '') AS acl
+         FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname NOT LIKE 'pg_%' AND n.nspname <> 'information_schema' AND p.prokind IN ('f', 'p')
+           AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e')
+         ORDER BY 1`,
+      )
+    ).rows;
+    extra.eventTriggers = (
+      await pool.query(
+        `SELECT evtname, evtevent, evtenabled, evtfoid::regproc::text AS fn FROM pg_catalog.pg_event_trigger ORDER BY evtname`,
+      )
+    ).rows;
+  }
   return JSON.stringify(
     {
       schemas: schemas.rows,
@@ -69,6 +92,7 @@ export async function catalogSnapshot(pool) {
       constraints: constraints.rows,
       indexes: indexes.rows,
       domains: domains.rows,
+      ...extra,
     },
     null,
     1,

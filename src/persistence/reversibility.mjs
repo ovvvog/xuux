@@ -160,22 +160,22 @@ export async function proveReversibility(pool, options = {}) {
   /** @type {ReversibilityCheck[]} */
   const checks = [];
   for (const migration of migrations) {
-    const before = await catalogSnapshot(pool);
+    const before = await catalogSnapshot(pool, { routines: true });
 
     const upStarted = Date.now();
     const upOutcome = await up(pool, { dir, to: migration.version, appliedBy: 'reversibility' });
     const upMs = Date.now() - upStarted;
-    const afterUp = await catalogSnapshot(pool);
+    const afterUp = await catalogSnapshot(pool, { routines: true });
     const ledgerAfterUp = (await readApplied(pool)).map((row) => row.version);
 
     const downStarted = Date.now();
     const downOutcome = await down(pool, { dir, steps: 1 });
     const downMs = Date.now() - downStarted;
-    const afterDown = await catalogSnapshot(pool);
+    const afterDown = await catalogSnapshot(pool, { routines: true });
     const ledgerAfterDown = (await readApplied(pool)).map((row) => row.version);
 
     await up(pool, { dir, to: migration.version, appliedBy: 'reversibility' });
-    const afterReapply = await catalogSnapshot(pool);
+    const afterReapply = await catalogSnapshot(pool, { routines: true });
 
     const expectedAfterUp = migrations
       .filter((item) => item.version <= migration.version)
