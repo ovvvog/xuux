@@ -15,7 +15,18 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, createHmac, generateKeyPairSync, randomBytes, privateDecrypt, constants as cryptoConstants } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomBytes,
+  privateDecrypt,
+  constants as cryptoConstants,
+} from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { FreshnessGate, GATE_ERRORS } from '../../sim/tpm/gate.mjs';
 import * as builder from '../../sim/tpm/command_builder.mjs';
 import { mintSimulatedEkCertificatePair } from '../../sim/tpm/ek_identity.mjs';
@@ -103,6 +114,27 @@ test('المستجيب المحلي: KDFa المستقل يطابق متجه WL-
 });
 
 /**
+ * WL-547 — زوجُ مفاتيحَ لا يشاركُ قفلَ مهمّةِ التوليد.
+ *
+ * على Node 20 (‏مقيسٌ على v20.20.2) يُعيدُ `generateKeyPairSync` بلا ترميزٍ كائنَي مفتاحٍ
+ * يشاركانِ مهمّةَ التوليدِ (‏`KeyGenJob`) قفلاً واحداً غيرَ تعاوديّ (‏`ManagedEVPPKey::mutex_`).
+ * المهمّةُ تصيرُ مهملةً بعدَ العودة، ومُفكِّكُها `~KeyPairGenConfig` يأخذُ القفل. و`export({ format:
+ * 'jwk' })` (‏`ExportJWKRsaKey`/`ExportJWKEdKey`/`ExportJWKEcKey`) و`asymmetricKeyDetails` يأخذانِه
+ * ثمّ يُخصِّصانِ في كومةِ V8؛ فإن وقعَ جمعُ القمامةِ داخلَهما وأنهى المهمّةَ نفسَها، طلبَ الخيطُ قفلاً
+ * يملكُه ⇒ تجمّدٌ أبديٌّ في futex (‏مُثبَتٌ بـgdb على ثلاثِ عمليّاتٍ معلّقةٍ وبنصٍّ أدنى خارجَ المشروع).
+ * العلاج: التوليدُ بترميزِ DER (‏يُصدَّرُ داخلَ المهمّةِ وهي حيّة، ولا كائنَ مفتاحٍ يُعادُ منها) ثمّ
+ * الاستيرادُ بـ`createPublicKey`/`createPrivateKey` إلى مفتاحٍ بقفلٍ جديدٍ لا يعرفُه أيُّ `KeyGenJob`.
+ * المادّةُ نفسُها والنوعُ نفسُه — لا تغييرَ في دلالةِ الاختبار.
+ * @param {{ publicKey: Buffer, privateKey: Buffer }} der
+ */
+function detachKeyPair(der) {
+  return {
+    publicKey: createPublicKey({ key: der.publicKey, format: 'der', type: 'spki' }),
+    privateKey: createPrivateKey({ key: der.privateKey, format: 'der', type: 'pkcs8' }),
+  };
+}
+
+/**
  * مستجيبُ TPM محليٌّ: يعرفُ فهارسَ NV (منطقتها العامّةُ ومحتواها)، ومفتاحَ EK (زوجُهُ
  * الكاملُ)، وجلساتِ الملح. يتحقّقُ من HMAC الأوامرِ ذاتِ الجلساتِ ويحسبُ HMAC الردودِ
  * ببناءٍ مستقلٍّ. `tamper` يفتحُ سيناريوهاتِ الفشلِ المسمّاة.
@@ -125,7 +157,15 @@ class FakeTpm {
     }
     this.pageSize = options.pageSize ?? 16;
     this.tamper = /** @type {FakeTamper} */ (options.tamper ?? {});
-    const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    // WL-547: زوجٌ منفصلٌ عن مهمّةِ التوليد (انظر detachKeyPair) — كان
+    // `generateKeyPairSync` بلا ترميزٍ ثمّ `export({ format: 'jwk' })` يتجمّدُ أحياناً.
+    const { publicKey, privateKey } = detachKeyPair(
+      generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: 'spki', format: 'der' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+      }),
+    );
     this.ekPrivateKey = privateKey;
     const jwkN = publicKey.export({ format: 'jwk' }).n;
     assert.ok(jwkN, 'fake responder: RSA JWK must carry n');
@@ -736,4 +776,80 @@ test('G2-3: §3.2-2 بفهرسِ EK يخالفُ الشهادةَ ⇒ FRESHNESS_
   assert.ok(gate.closed);
   // وبعدَ الإغلاقِ لا أمرًّا يُرسَل.
   await assert.rejects(gate.startAuthSession(), (/** @type {{ code?: string }} */ e) => e.code === GATE_ERRORS.CONNECTION_CLOSED);
+});
+
+// ——— (10) WL-547: لا كائنَ مفتاحٍ يشاركُ قفلَ مهمّةِ توليدٍ في ملفٍّ يأخذُ القفلَ ويُخصِّص ———
+
+const KEYGEN_CALL = new RegExp(String.raw`\bgenerateKeyPair(?:Sync)?\(`, 'g');
+const LOCKING_ALLOC_USE = [
+  new RegExp(String.raw`\.export\(\s*\{\s*format:\s*['"]jwk['"]`),
+  new RegExp(String.raw`\.asymmetricKeyDetails\b`),
+];
+
+/**
+ * نصُّ وسائطِ نداءٍ يبدأُ عندَ القوسِ المفتوح (‏مطابقةُ أقواسٍ بسيطة؛ تكفي لنداءاتِ المستودع).
+ * @param {string} text @param {number} open
+ */
+function callArgs(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return text.slice(open + 1, i);
+    }
+  }
+  return text.slice(open + 1);
+}
+
+/**
+ * مواضعُ التوليدِ المعرَّضةُ في نصِّ ملفّ: الملفُّ يأخذُ القفلَ ويُخصِّص (‏تصديرُ JWK أو
+ * asymmetricKeyDetails)، ونداءُ التوليدِ يُعيدُ كائناتِ مفاتيحَ (‏بلا publicKeyEncoding وprivateKeyEncoding).
+ * @param {string} text @returns {number[]} أرقامُ الأسطر
+ */
+function exposedKeygenLines(text) {
+  if (!LOCKING_ALLOC_USE.some((re) => re.test(text))) return [];
+  const lines = [];
+  for (const m of text.matchAll(KEYGEN_CALL)) {
+    const args = callArgs(text, (m.index ?? 0) + m[0].length - 1);
+    if (!(args.includes('publicKeyEncoding') && args.includes('privateKeyEncoding'))) {
+      lines.push(text.slice(0, m.index).split('\n').length);
+    }
+  }
+  return lines;
+}
+
+test('WL-547 (كاشف): النمطُ الذي جمّدَ الملفَّ يُكتشَف، والنمطُ المنفصلُ لا يُكتشَف', () => {
+  const fn = 'generateKeyPair' + 'Sync';
+  const before = `const { publicKey } = ${fn}('rsa', { modulusLength: 2048 });\nconst n = publicKey.export({ format: 'jwk' }).n;\n`;
+  assert.deepEqual(exposedKeygenLines(before), [1]);
+  const details = `const k = ${fn}('ed25519');\nvoid k.publicKey.asymmetricKeyDetails;\n`;
+  assert.deepEqual(exposedKeygenLines(details), [1]);
+  const after = `const { publicKey } = detachKeyPair(\n  ${fn}('rsa', {\n    modulusLength: 2048,\n    publicKeyEncoding: { type: 'spki', format: 'der' },\n    privateKeyEncoding: { type: 'pkcs8', format: 'der' },\n  }),\n);\nconst n = publicKey.export({ format: 'jwk' }).n;\n`;
+  assert.deepEqual(exposedKeygenLines(after), []);
+  // بلا استعمالٍ يأخذُ القفلَ ويُخصِّص: التوليدُ العاديُّ مسموح (‏التصديرُ إلى DER/PEM لا يأخذُ القفل).
+  const derOnly = `const k = ${fn}('ed25519');\nk.privateKey.export({ type: 'pkcs8', format: 'pem' });\n`;
+  assert.deepEqual(exposedKeygenLines(derOnly), []);
+});
+
+test('WL-547: لا ملفَّ في src/ وscripts/ وsim/ وtests/ يجمعُ كائنَ مفتاحٍ مولَّداً بلا ترميزٍ مع JWK أو asymmetricKeyDetails', () => {
+  const root = new URL('../..', import.meta.url).pathname;
+  /** @type {string[]} */
+  const offenders = [];
+  let scanned = 0;
+  /** @param {string} dir */
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.(?:mjs|cjs|js)$/.test(entry.name)) {
+        scanned += 1;
+        for (const line of exposedKeygenLines(readFileSync(full, 'utf8'))) offenders.push(`${relative(root, full)}:${line}`);
+      }
+    }
+  };
+  for (const top of ['src', 'scripts', 'sim', 'tests']) walk(join(root, top));
+  assert.ok(scanned > 100, `scanned only ${scanned} files`);
+  assert.deepEqual(offenders, []);
 });

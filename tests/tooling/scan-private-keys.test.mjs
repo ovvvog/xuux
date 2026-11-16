@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 
@@ -41,9 +41,40 @@ function withTempDir(body) {
   }
 }
 
-const ed = generateKeyPairSync('ed25519');
-const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
-const ec = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+/**
+ * WL-547 — زوجٌ لا يشاركُ قفلَ مهمّةِ التوليد: على Node 20 يتجمّدُ `export({ format: 'jwk' })`
+ * أحياناً على مفتاحٍ أعادَه التوليدُ بلا ترميز، إن أنهى جمعُ القمامةِ داخلَه مهمّةَ التوليدِ
+ * (‏قفلٌ غيرُ تعاوديٍّ يطلبُه الخيطُ وهو يملكُه — السببُ والدليلُ في `tests/sim/g2-gate.test.mjs`).
+ * التوليدُ بترميزِ DER ثمّ الاستيرادُ يُعطي المادّةَ نفسَها بقفلٍ لا تعرفُه المهمّة.
+ * @param {{ publicKey: Buffer, privateKey: Buffer }} der
+ */
+function detachKeyPair(der) {
+  return {
+    publicKey: createPublicKey({ key: der.publicKey, format: 'der', type: 'spki' }),
+    privateKey: createPrivateKey({ key: der.privateKey, format: 'der', type: 'pkcs8' }),
+  };
+}
+
+const ed = detachKeyPair(
+  generateKeyPairSync('ed25519', {
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+  }),
+);
+const rsa = detachKeyPair(
+  generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+  }),
+);
+const ec = detachKeyPair(
+  generateKeyPairSync('ec', {
+    namedCurve: 'prime256v1',
+    publicKeyEncoding: { type: 'spki', format: 'der' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+  }),
+);
 
 /** أشكال المادة الخاصة المزروعة، كل شكل مع الكاشف المتوقَّع له. */
 const SAMPLES = [
