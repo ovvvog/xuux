@@ -525,6 +525,8 @@ describe(
     let fresh;
     /** @type {string} */
     let dir25;
+    /** @type {string} */
+    let dir26;
     /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
     let at25;
     /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
@@ -542,11 +544,14 @@ describe(
     before(async () => {
       db = await createIsolatedDatabase('m0026');
       dir25 = migrationsDir(25);
+      // WL-545: هذه الحزمةُ تقيسُ 0026 — فالتقديمُ يقفُ عندَها صراحةً (‏0027 وما بعدَها لها حزمتُها).
+      dir26 = migrationsDir(26);
     });
     after(async () => {
       if (db !== undefined) await db.drop();
       if (fresh !== undefined) await fresh.drop();
       rmSync(dir25, { recursive: true, force: true });
+      rmSync(dir26, { recursive: true, force: true });
     });
 
     it('قبلَ 0026 (‏قاعدةٌ على 0025): لا هجومَ قراءةٍ يُكشَف — العيبُ مقيسٌ لا مفترَض', async () => {
@@ -556,7 +561,7 @@ describe(
     });
 
     it('الترقيةُ إلى 0026 بلا اختلافِ بصمة، وكلُّ هجومٍ يُكشَف، وخطُّ الأساسِ نظيف', async () => {
-      assert.deepEqual((await up(db.pool)).applied, [26]);
+      assert.deepEqual((await up(db.pool, { dir: dir26 })).applied, [26]);
       for (const a of READ_ATTACKS) assert.equal(await detects(db.pool, a), true, a.name);
       const p = (await db.pool.query('SELECT fence.capability_problems() AS p')).rows[0].p;
       // ‏(worker_database_reach خارجَ هذه الحزمة: القاعدةُ هنا بلا إقلاعٍ ولا احتواء — WL-540.)
@@ -571,7 +576,7 @@ describe(
 
     it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0026 نفسِه', async () => {
       fresh = await createIsolatedDatabase('m0026f');
-      await up(fresh.pool);
+      await up(fresh.pool, { dir: dir26 });
       assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at26);
     });
 
@@ -582,7 +587,7 @@ describe(
         await detects(db.pool, READ_ATTACKS[0] ?? assert.fail('READ_ATTACKS[0]')),
         false,
       );
-      assert.deepEqual((await up(db.pool)).applied, [26]);
+      assert.deepEqual((await up(db.pool, { dir: dir26 })).applied, [26]);
       assert.deepEqual(await fenceFunctionCatalog(db.pool), at26);
     });
 
@@ -651,7 +656,7 @@ describe(
         } finally {
           rmSync(d, { recursive: true, force: true });
         }
-        await up(db.pool);
+        await up(db.pool, { dir: dir26 });
         assert.equal(
           await detects(db.pool, READ_ATTACKS[attack] ?? assert.fail(String(attack))),
           true,
@@ -663,3 +668,65 @@ describe(
     // ‏(بلا SET LOCAL ROLE xf_owner طفرةٌ مكافئة: CREATE OR REPLACE يُبقي مالكَ الدالّةِ القائمة — لا تُعَدّ.)
   },
 );
+
+// ── WL-545: موعدُ الانقضاءِ التالي في نتيجةِ الحاصد (‏0027) ──
+//
+// 0027 تُبدِّلُ جسمَ fence._reap_lapsed() وحدَه (‏مفتاحٌ إضافيّ next_due_ms). هنا: ترقيةٌ من 0026 تُطبِّقُ [27] بلا
+// اختلافِ بصمة، وقاعدةٌ جديدةٌ تنتهي إلى الكتالوجِ نفسِه، والرجوعُ يُعيدُ كتالوجَ 0026 بايتاً ببايت (‏ويغيبُ المفتاح)،
+// وإعادةُ التقديمِ تُطابق. الأثرُ الزمنيُّ (‏نافذةٌ حقيقيّة، موتُ الجذر، الطفرات) في tests/fence/db-fence.test.mjs.
+describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ التقديم', { skip: skipWithoutDatabase }, () => {
+  /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+  let db;
+  /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>> | undefined} */
+  let fresh;
+  /** @type {string} */
+  let dir26;
+  /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+  let at26;
+  /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+  let at27;
+  const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+  /** @param {import('pg').Pool} pool */
+  const reapKeys = async (pool) =>
+    Object.keys((await pool.query('SELECT fence.reap_lapsed() AS r')).rows[0].r).sort();
+  before(async () => {
+    db = await createIsolatedDatabase('m0027');
+    dir26 = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+    for (const f of readdirSync(src)) {
+      if (Number(f.slice(0, 4)) > 26) continue;
+      writeFileSync(join(dir26, f), readFileSync(join(src, f), 'utf8'));
+    }
+  });
+  after(async () => {
+    if (db !== undefined) await db.drop();
+    if (fresh !== undefined) await fresh.drop();
+    rmSync(dir26, { recursive: true, force: true });
+  });
+
+  it('على 0026: لا next_due_ms (‏العيبُ: لا موعدَ يُجدوَلُ عليه)', async () => {
+    assert.equal((await up(db.pool, { dir: dir26 })).current, 26);
+    at26 = await fenceFunctionCatalog(db.pool);
+    assert.equal((await reapKeys(db.pool)).includes('next_due_ms'), false);
+  });
+
+  it('الترقيةُ إلى 0027 تُطبِّقُ [27] بلا اختلافِ بصمة، والمفتاحُ حاضر', async () => {
+    assert.deepEqual((await up(db.pool)).applied, [27]);
+    assert.equal((await reapKeys(db.pool)).includes('next_due_ms'), true);
+    at27 = await fenceFunctionCatalog(db.pool);
+    assert.notDeepEqual(at27, at26, '0027 غيّرت الكتالوجَ فعلاً');
+  });
+
+  it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0027 نفسِه', async () => {
+    fresh = await createIsolatedDatabase('m0027f');
+    await up(fresh.pool);
+    assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at27);
+  });
+
+  it('رجوعُ 0027 يُعيدُ كتالوجَ 0026 بايتاً ببايت، وإعادةُ التقديمِ تُطابق', async () => {
+    assert.equal((await down(db.pool, { steps: 1 })).current, 26);
+    assert.deepEqual(await fenceFunctionCatalog(db.pool), at26);
+    assert.equal((await reapKeys(db.pool)).includes('next_due_ms'), false);
+    assert.deepEqual((await up(db.pool)).applied, [27]);
+    assert.deepEqual(await fenceFunctionCatalog(db.pool), at27);
+  });
+});

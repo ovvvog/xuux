@@ -249,6 +249,87 @@ export async function jsonbDigest(db, detail) {
   return String(r.rows[0].d);
 }
 
+/**
+ * نتيجةُ `fence.reap_lapsed()`. `next_due_ms` (‏WL-545، الهجرة 0027): مللي ثوانٍ بساعةِ القاعدةِ حتى أقربِ انقضاءٍ لاعتمادٍ
+ * نشِط — 0 لما انقضى أو سببُه قائم — ولا يتجاوزُ `lease_window_s` (‏اعتمادٌ يصدرُ بعدَ النداءِ لا ينقضي قبلَه)؛ وغائبٌ
+ * (‏undefined) على قاعدةٍ قبلَ 0027، فيعودُ الحاصدُ إلى سقفِه.
+ * @typedef {{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[], next_due_ms?: number | null }} LapseReapResult
+ */
+
+/**
+ * WL-545: حاصدٌ مستقلٌّ عن حافظِ الإيجار. بلا هذا لا يُنادى `reap_lapsed` إلا عندَ رفضِ التجديدِ أو الإيقافِ أو المصافحة؛
+ * فإن ماتت عمليّةُ الجذر (‏ومعها الحافظ) أو أوقفَ الحارسُ المحلّيُّ الحافظَ بقيت جلسةُ الإيجارِ المنقضي حيّةً تُرسِلُ NOTIFY
+ * بلا حدّ (‏مقيسٌ على `db8de990`). يُنادي الحاصدَ عندَ `next_due_ms` (‏ساعةُ القاعدة، فلا انحرافَ بينَ ساعتَي المضيفَين)،
+ * ولا ينامُ أكثرَ من `ceilingMs` (‏يلتقطُ ما لا موعدَ له: stale_epoch وno_lease وclock_regressed، وقاعدةً قبلَ 0027).
+ *
+ * **النشر:** يُشغَّلُ بوصلةِ السياديّ (‏`FenceSovereign`) في عمليّةٍ غيرِ عمليّةِ الجذر — فلا يموتُ معه؛ ويصحُّ بوصلةِ
+ * الجذرِ كذلك. لا سلطةَ جديدة: الحاصدُ لا يُلغي إلا ما انقضى، والانقضاءُ لا يتراجع.
+ * **الحدّ (‏مُعلَن):** النافذةُ = تأخّرُ المؤقِّت + زمنُ النداء، بسقفِ `ceilingMs` لما لا موعدَ له (‏وبعدَ تقصيرِ النافذةِ
+ * بـlease_set تحتَ HALTED: نومٌ قائمٌ بالنافذةِ القديمةِ يحدُّه السقف)؛ وما دامت العمليّةُ نفسُها حيّة. وإن فشلَ النداءُ أُعيدَ بعدَ `retryMs` ويُبلَّغُ `onError` — لا يُعلَنُ حصادٌ لم يقع.
+ * @param {{ reapLapsed(): Promise<LapseReapResult> }} reaper - `FenceSovereign` أو `FenceRoot`
+ * @param {{ ceilingMs: number, minDelayMs?: number, retryMs?: number,
+ *           onReap?: (result: LapseReapResult) => void, onError?: (error: unknown) => void }} options
+ * @returns {{ stop(): Promise<void>, stopped: () => boolean, ticks: () => number }}
+ */
+export function startLapseReaper(reaper, options) {
+  const ceilingMs = options.ceilingMs;
+  if (!Number.isInteger(ceilingMs) || ceilingMs <= 0) {
+    throw new TypeError('startLapseReaper: ceilingMs عددٌ صحيحٌ موجب');
+  }
+  const minDelayMs = options.minDelayMs ?? 5;
+  const retryMs = options.retryMs ?? Math.min(1000, ceilingMs);
+  for (const [k, v] of [
+    ['minDelayMs', minDelayMs],
+    ['retryMs', retryMs],
+  ]) {
+    if (!Number.isInteger(v) || Number(v) < 0 || Number(v) > ceilingMs) {
+      throw new TypeError(`startLapseReaper: ${k} عددٌ صحيحٌ بينَ 0 وceilingMs`);
+    }
+  }
+  let stopped = false;
+  let count = 0;
+  /** @type {NodeJS.Timeout | null} */
+  let timer = null;
+  /** @type {Promise<void>} */
+  let inflight = Promise.resolve();
+  const schedule = (/** @type {number} */ ms) => {
+    if (!stopped) timer = setTimeout(run, Math.max(minDelayMs, Math.min(ms, ceilingMs)));
+  };
+  const tick = async () => {
+    count += 1;
+    /** @type {LapseReapResult} */
+    let r;
+    try {
+      r = await reaper.reapLapsed();
+    } catch (error) {
+      if (!stopped) options.onError?.(error);
+      schedule(retryMs);
+      return;
+    }
+    if (r.reaped.length > 0 || !r.ok) options.onReap?.(r);
+    // جلسةٌ بقيت حيّةً بعدَ الإلغاء (‏unresolved) ⇒ إعادةٌ قريبة لا انتظارُ الموعد.
+    if (!r.ok) return schedule(retryMs);
+    const due = r.next_due_ms;
+    schedule(typeof due === 'number' && Number.isFinite(due) ? due : ceilingMs);
+  };
+  const run = () => {
+    timer = null;
+    if (stopped) return;
+    inflight = tick();
+  };
+  run();
+  return {
+    stop: async () => {
+      stopped = true;
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      await inflight;
+    },
+    stopped: () => stopped,
+    ticks: () => count,
+  };
+}
+
 // ── السياديّ ─────────────────────────────────────────────────────────────────
 
 export class FenceSovereign {
@@ -270,7 +351,7 @@ export class FenceSovereign {
   /**
    * WL-542: حصادُ كلِّ اعتمادٍ نشِطٍ انقضى إيجارُه (‏إلغاءٌ، NOLOGIN، إنهاءُ جلساتِه) — بلا جذر.
    * `ok=false` و`unresolved` غيرُ الفارغِ يعني جلسةً بقيت حيّة: ليس نجاحاً.
-   * @returns {Promise<{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[] }>}
+   * @returns {Promise<LapseReapResult>}
    */
   async reapLapsed() {
     const r = await this.db.query('SELECT fence.reap_lapsed() AS r');
@@ -651,7 +732,7 @@ export class FenceRoot {
 
   /**
    * WL-542: حصادُ الاعتماداتِ المنقضيةِ إيجاراتُها (‏انظر FenceSovereign.reapLapsed).
-   * @returns {Promise<{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[] }>}
+   * @returns {Promise<LapseReapResult>}
    */
   async reapLapsed() {
     return (await this.one('SELECT fence.reap_lapsed() AS r')).r;

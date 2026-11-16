@@ -2701,7 +2701,14 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
       await h.root.renewLease(rb);
       assert.equal((await credential(rb)).status, 'ACTIVE');
       // الحصادُ ثانيةً لا يفعلُ شيئاً (‏لا يُخفي ولا يختلق).
-      assert.deepEqual(await h.sovereign.reapLapsed(), { ok: true, reaped: [], unresolved: [] });
+      // ‏(WL-545: next_due_ms مفتاحٌ إضافيّ — موعدُ rb المُجدَّدِ للتوّ، بينَ 0 والنافذة؛ والباقي كما كان.)
+      const { next_due_ms: due, ...again } = await h.sovereign.reapLapsed();
+      assert.deepEqual(again, { ok: true, reaped: [], unresolved: [] });
+      const win = (await h.db.pool.query('SELECT lease_window_s FROM fence.control')).rows[0];
+      assert.ok(
+        Number.isInteger(due) && Number(due) > 0 && Number(due) <= win.lease_window_s * 1000,
+        String(due),
+      );
       const ev = await h.db.pool.query(
         `SELECT detail FROM fence.events WHERE kind = 'LEASE_LAPSED_REAPED' ORDER BY seq DESC LIMIT 1`,
       );
@@ -2896,7 +2903,7 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
         )
       ).rows[0];
     const before = await snap();
-    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026، WL-544) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
+    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026 WL-544، 0027 WL-545) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
     assert.ok(before.v >= 25, String(before.v));
     // الطبقةُ الأولى: المُهاجِرُ نفسُه يُرفَضُ تحتَ RUNNING (‏xf_ddl_start ⇒ XF201 على إنشاءِ دفترِه).
     await assert.rejects(
@@ -2910,6 +2917,8 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
       '0025_fence_lease_reaper.up.sql',
       '0026_fence_read_surface.down.sql',
       '0026_fence_read_surface.up.sql',
+      '0027_fence_reap_deadline.down.sql',
+      '0027_fence_reap_deadline.up.sql',
     ]) {
       const sql = readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
       const c = await h.db.pool.connect();
