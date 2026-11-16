@@ -102,8 +102,8 @@ $ node --test tests/tooling/state-read-client.test.mjs
 $ node --test tests/transport/server.test.mjs
 # tests 29 · # pass 29 · # fail 0
 
-$ node --test tests/tooling/guard-api-contract.test.mjs
-# tests 5 · # pass 5 · # fail 0
+$ node --test tests/tooling/guard-doc-counts.test.mjs   # WL-546: دُمِجَ فيه guard-api-contract.test.mjs (‏كتلتُه الخمسُ كما هي)
+# tests 40 · # pass 40 · # fail 0
 
 $ node scripts/guard-api-contract.mjs
 $ node scripts/guard-transport.mjs
