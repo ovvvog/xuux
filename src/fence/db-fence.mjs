@@ -43,6 +43,7 @@ export const FENCE_ERRORS = Object.freeze({
   WORKER_CONFIG: 'FENCE_WORKER_CONFIG',
   SEAL_REFUSED: 'FENCE_SEAL_REFUSED',
   EFFECTS_EVIDENCE_REJECTED: 'FENCE_EFFECTS_EVIDENCE_REJECTED',
+  REAPER_ROLE: 'FENCE_REAPER_ROLE',
 });
 
 export class FenceError extends Error {
@@ -266,10 +267,13 @@ export async function jsonbDigest(db, detail) {
  * الجذرِ كذلك. لا سلطةَ جديدة: الحاصدُ لا يُلغي إلا ما انقضى، والانقضاءُ لا يتراجع.
  * **الحدّ (‏مُعلَن):** النافذةُ = تأخّرُ المؤقِّت + زمنُ النداء، بسقفِ `ceilingMs` لما لا موعدَ له (‏وبعدَ تقصيرِ النافذةِ
  * بـlease_set تحتَ HALTED: نومٌ قائمٌ بالنافذةِ القديمةِ يحدُّه السقف)؛ وما دامت العمليّةُ نفسُها حيّة. وإن فشلَ النداءُ أُعيدَ بعدَ `retryMs` ويُبلَّغُ `onError` — لا يُعلَنُ حصادٌ لم يقع.
+ * WL-546: استثناءٌ من `onReap`/`onError` لا يوقفُ الحاصد (‏يُعَدُّ في `stats().callbackErrors` ويُبلَّغُ `onCallbackError`).
  * @param {{ reapLapsed(): Promise<LapseReapResult> }} reaper - `FenceSovereign` أو `FenceRoot`
  * @param {{ ceilingMs: number, minDelayMs?: number, retryMs?: number,
- *           onReap?: (result: LapseReapResult) => void, onError?: (error: unknown) => void }} options
- * @returns {{ stop(): Promise<void>, stopped: () => boolean, ticks: () => number }}
+ *           onReap?: (result: LapseReapResult) => void, onError?: (error: unknown) => void,
+ *           onCallbackError?: (error: unknown) => void }} options
+ * @returns {{ stop(): Promise<void>, stopped: () => boolean, ticks: () => number,
+ *             stats: () => { ticks: number, errors: number, reaped: number, unresolved: number, callbackErrors: number } }}
  */
 export function startLapseReaper(reaper, options) {
   const ceilingMs = options.ceilingMs;
@@ -287,7 +291,7 @@ export function startLapseReaper(reaper, options) {
     }
   }
   let stopped = false;
-  let count = 0;
+  const stats = { ticks: 0, errors: 0, reaped: 0, unresolved: 0, callbackErrors: 0 };
   /** @type {NodeJS.Timeout | null} */
   let timer = null;
   /** @type {Promise<void>} */
@@ -295,27 +299,56 @@ export function startLapseReaper(reaper, options) {
   const schedule = (/** @type {number} */ ms) => {
     if (!stopped) timer = setTimeout(run, Math.max(minDelayMs, Math.min(ms, ceilingMs)));
   };
-  const tick = async () => {
-    count += 1;
-    /** @type {LapseReapResult} */
-    let r;
+  /**
+   * WL-546: استثناءٌ من نداءٍ راجعٍ (‏onReap/onError/onCallbackError) لا يُسقِطُ الجدولة: يُعَدُّ ويُبلَّغُ مرّةً
+   * لـ`onCallbackError` (‏واستثناؤه هو يُبتلَع — لا سلسلةَ بلا نهاية)، والحاصدُ يمضي.
+   * @param {((x: any) => void) | undefined} fn @param {unknown} arg
+   */
+  const safe = (fn, arg) => {
+    if (fn === undefined) return;
     try {
-      r = await reaper.reapLapsed();
+      fn(arg);
     } catch (error) {
-      if (!stopped) options.onError?.(error);
-      schedule(retryMs);
-      return;
+      stats.callbackErrors += 1;
+      try {
+        options.onCallbackError?.(error);
+      } catch {
+        // ‏مُبلِّغُ أخطاءِ النداءاتِ نفسُه رمى: لا يُعادُ إبلاغُه (‏عُدَّ أعلاه).
+      }
     }
-    if (r.reaped.length > 0 || !r.ok) options.onReap?.(r);
-    // جلسةٌ بقيت حيّةً بعدَ الإلغاء (‏unresolved) ⇒ إعادةٌ قريبة لا انتظارُ الموعد.
-    if (!r.ok) return schedule(retryMs);
-    const due = r.next_due_ms;
-    schedule(typeof due === 'number' && Number.isFinite(due) ? due : ceilingMs);
+  };
+  const tick = async () => {
+    stats.ticks += 1;
+    /** @type {number} */
+    let next = retryMs;
+    try {
+      /** @type {LapseReapResult} */
+      let r;
+      try {
+        r = await reaper.reapLapsed();
+      } catch (error) {
+        stats.errors += 1;
+        if (!stopped) safe(options.onError, error);
+        return;
+      }
+      const reaped = Array.isArray(r?.reaped) ? r.reaped.length : 0;
+      const unresolved = Array.isArray(r?.unresolved) ? r.unresolved.length : 0;
+      stats.reaped += reaped;
+      stats.unresolved += unresolved;
+      if (reaped > 0 || r?.ok !== true) safe(options.onReap, r);
+      // جلسةٌ بقيت حيّةً بعدَ الإلغاء (‏unresolved) أو نتيجةٌ غيرُ ok ⇒ إعادةٌ قريبة لا انتظارُ الموعد.
+      if (r?.ok !== true) return;
+      const due = r.next_due_ms;
+      next = typeof due === 'number' && Number.isFinite(due) ? due : ceilingMs;
+    } finally {
+      // ‏الجدولةُ في finally: لا مسارَ (‏ولا استثناءَ غيرَ متوقَّع) يتركُ الحاصدَ بلا نداءٍ تالٍ إلا stop().
+      schedule(next);
+    }
   };
   const run = () => {
     timer = null;
     if (stopped) return;
-    inflight = tick();
+    inflight = tick().catch(() => {});
   };
   run();
   return {
@@ -326,7 +359,87 @@ export function startLapseReaper(reaper, options) {
       await inflight;
     },
     stopped: () => stopped,
-    ticks: () => count,
+    ticks: () => stats.ticks,
+    stats: () => ({ ...stats }),
+  };
+}
+
+/**
+ * WL-546: حاصدُ عمليّةِ السياديّ — `startLapseReaper` فوقَ `FenceSovereign.reapLapsed()` بوصلةٍ تُفتَحُ عندَ الحاجة
+ * وتُعادُ بعدَ كلِّ انقطاع. **بلا مفتاحِ توقيع** (‏`new FenceSovereign(client, null)`): العمليّةُ تحصدُ ولا تُصدِرُ أوامر.
+ * يرفضُ البدءَ بدورٍ غيرِ `expectRole` (‏افتراضاً `xf_sovereign`) — فلا يُشغَّلُ بوصلةِ الجذرِ أو superuser صامتاً.
+ * كلُّ حدثٍ سطرٌ في `log` (‏بلا سلسلةِ الاتصالِ ولا أسرار): `connected`، `reaped`، `unresolved`، `error`، `stopped`.
+ * فشلُ الاتصالِ أو النداءِ = `error` وإعادةٌ بعدَ `retryMs` — لا يُعلَنُ حصادٌ لم يقع، ولا حلقةٌ ساخنة.
+ * @param {{ connect: () => Promise<import('pg').ClientBase & { end?: Function, on?: Function }>,
+ *           ceilingMs: number, minDelayMs?: number, retryMs?: number, expectRole?: string,
+ *           log?: (event: Record<string, unknown>) => void }} options
+ */
+export function runSovereignReaper(options) {
+  const expectRole = options.expectRole ?? 'xf_sovereign';
+  const log = options.log ?? (() => {});
+  /** @type {(import('pg').ClientBase & { end?: Function, on?: Function }) | null} */
+  let client = null;
+  let connects = 0;
+  const drop = async () => {
+    const c = client;
+    client = null;
+    if (c !== null && typeof c.end === 'function') await Promise.resolve(c.end()).catch(() => {});
+  };
+  const describe = (/** @type {any} */ e) => ({
+    code: e?.code ?? null,
+    message: String(e?.message ?? e).slice(0, 300),
+  });
+  const reaper = {
+    async reapLapsed() {
+      if (client === null) {
+        const c = await options.connect();
+        c.on?.('error', () => {});
+        try {
+          const who = (await c.query('SELECT current_user AS u, session_user AS s')).rows[0];
+          if (who.u !== expectRole || who.s !== expectRole) {
+            throw new FenceError(
+              FENCE_ERRORS.REAPER_ROLE,
+              `حاصدُ السياديّ: الدورُ ${who.s}/${who.u} ليس ${expectRole} — لا حصادَ بوصلةٍ أخرى`,
+            );
+          }
+        } catch (error) {
+          await Promise.resolve(c.end?.()).catch(() => {});
+          throw error;
+        }
+        // ‏startLapseReaper لا يُداخلُ نداءَين (‏التالي يُجدوَلُ بعدَ انتهاءِ السابق) — فلا سباقَ على client.
+        // eslint-disable-next-line require-atomic-updates
+        client = c;
+        connects += 1;
+        log({ ev: 'connected', role: expectRole, connects });
+      }
+      try {
+        return await new FenceSovereign(client, null).reapLapsed();
+      } catch (error) {
+        await drop();
+        throw error;
+      }
+    },
+  };
+  const handle = startLapseReaper(reaper, {
+    ceilingMs: options.ceilingMs,
+    ...(options.minDelayMs === undefined ? {} : { minDelayMs: options.minDelayMs }),
+    ...(options.retryMs === undefined ? {} : { retryMs: options.retryMs }),
+    onReap: (r) => {
+      for (const x of r.reaped ?? []) log({ ev: 'reaped', ...x });
+      if (r.ok !== true) log({ ev: 'unresolved', unresolved: r.unresolved ?? [] });
+    },
+    onError: (e) => log({ ev: 'error', ...describe(e) }),
+    onCallbackError: (e) => log({ ev: 'callback_error', ...describe(e) }),
+  });
+  return {
+    async stop() {
+      await handle.stop();
+      await drop();
+      const st = { ...handle.stats(), connects };
+      log({ ev: 'stopped', ...st });
+      return st;
+    },
+    stats: () => ({ ...handle.stats(), connects }),
   };
 }
 
@@ -335,7 +448,7 @@ export function startLapseReaper(reaper, options) {
 export class FenceSovereign {
   /**
    * @param {{ query: Function }} db - اتصالٌ بدورِ `xf_sovereign`
-   * @param {KeyProvider} key
+   * @param {KeyProvider | null} key - WL-546: `null` لعمليّةٍ تحصدُ ولا توقِّع (‏حاصدُ السياديّ) — فـ`sign` يرفض
    */
   constructor(db, key) {
     this.db = db;
@@ -383,6 +496,12 @@ export class FenceSovereign {
    * @param {{ expectedEpoch?: number, validitySeconds?: number, nonce?: string }} [opts]
    */
   sign(fn, s, extra, opts = {}) {
+    if (this.key === null) {
+      throw new FenceError(
+        FENCE_ERRORS.KEY_PROVIDER_UNAVAILABLE,
+        'FenceSovereign بلا مفتاح: لا توقيعَ لأمرٍ سياديّ',
+      );
+    }
     return signSovereignCommand(this.key, {
       type: fn.toUpperCase(),
       db: s.live.dbname,
