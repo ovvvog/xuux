@@ -226,3 +226,209 @@ test('guard:supply-chain fails when critical vulnerabilities exist', () => {
     cleanup(tmp);
   }
 });
+
+// ── WL-557: استثناءٌ ضيّقٌ مؤقّتٌ لثغرةٍ بلا إصدارٍ مُصلَح (‏GHSA-fc5q-39xc-vjpf، picomatch ≤ 4.0.7، «Patched: None»). ──
+// الاستثناءُ بمعرّفِ التبليغِ لا باسمِ الحزمة، ولا يُعذِرُ إلا عقدةً تطويريّةً (‏dev: true في ملفِّ القفل) قبلَ تاريخِ انقضائه،
+// وبشدّةٍ لا تتجاوزُ المُعلَنة؛ وكلُّ ثغرةٍ عاليةٍ أخرى في السلسلةِ نفسِها تُسقِطُ الإعذار.
+
+const PICO_URL = 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf';
+/** @param {Record<string, any>} [over] */
+const picoAudit = (over = {}) => ({
+  vulnerabilities: {
+    picomatch: {
+      name: 'picomatch',
+      severity: 'high',
+      via: [{ name: 'picomatch', url: PICO_URL, severity: 'high', title: 'ReDoS' }],
+      nodes: ['node_modules/picomatch'],
+    },
+    fdir: { name: 'fdir', severity: 'high', via: ['picomatch'], nodes: ['node_modules/fdir'] },
+    tinyglobby: {
+      name: 'tinyglobby',
+      severity: 'high',
+      via: ['fdir', 'picomatch'],
+      nodes: ['node_modules/tinyglobby'],
+    },
+    minimatch: {
+      name: 'minimatch',
+      severity: 'moderate',
+      via: [
+        {
+          name: 'minimatch',
+          url: 'https://github.com/advisories/GHSA-g3hv-75wg-m249',
+          severity: 'moderate',
+        },
+      ],
+      nodes: ['node_modules/minimatch'],
+    },
+    'ts-estree': {
+      name: 'ts-estree',
+      severity: 'high',
+      via: ['minimatch', 'tinyglobby'],
+      nodes: ['node_modules/ts-estree'],
+    },
+    ...over,
+  },
+});
+/** @param {boolean} [dev] */
+const picoLock = (dev = true) => ({
+  lockfileVersion: 3,
+  packages: Object.fromEntries(
+    ['picomatch', 'fdir', 'tinyglobby', 'minimatch', 'ts-estree'].map((n) => [
+      `node_modules/${n}`,
+      dev ? { version: '1.0.0', dev: true } : { version: '1.0.0' },
+    ]),
+  ),
+});
+const NOW = new Date('2026-11-18T12:00:00Z');
+
+test('WL-557: الإعذارُ يقبلُ ثغرةَ picomatch التطويريّةَ قبلَ الانقضاء — وكلُّ عقدةٍ عاليةٍ في سلسلتها مُعذَرة', async () => {
+  const { evaluateAudit, AUDIT_EXCEPTIONS } = await import('../../scripts/audit-check.mjs');
+  assert.ok(AUDIT_EXCEPTIONS.some((e) => e.advisory === PICO_URL && e.maxSeverity === 'high'));
+  const r = evaluateAudit(picoAudit(), picoLock(true), NOW);
+  assert.deepEqual(r.blocking, []);
+  assert.deepEqual(r.excused.map((x) => x.name).sort(), [
+    'fdir',
+    'picomatch',
+    'tinyglobby',
+    'ts-estree',
+  ]);
+});
+
+test('WL-557: عقدةٌ إنتاجيّةٌ (‏بلا dev في ملفِّ القفل) لا تُعذَر', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  const r = evaluateAudit(picoAudit(), picoLock(false), NOW);
+  assert.deepEqual(r.excused, []);
+  assert.deepEqual(r.blocking.map((x) => x.name).sort(), [
+    'fdir',
+    'picomatch',
+    'tinyglobby',
+    'ts-estree',
+  ]);
+  // ‏عقدةٌ غائبةٌ عن ملفِّ القفلِ كذلك: لا يُفترَضُ أنّها تطويريّة.
+  const r2 = evaluateAudit(picoAudit(), { lockfileVersion: 3, packages: {} }, NOW);
+  assert.equal(r2.blocking.length, 4);
+});
+
+test('WL-557: بعدَ تاريخِ الانقضاءِ لا إعذار (‏يُعادُ النظرُ أو يُجدَّدُ بقرارٍ مُسجَّل)', async () => {
+  const { evaluateAudit, AUDIT_EXCEPTIONS } = await import('../../scripts/audit-check.mjs');
+  const e = AUDIT_EXCEPTIONS.find((x) => x.advisory === PICO_URL);
+  assert.ok(e !== undefined);
+  const after = new Date(Date.parse(`${e.expires}T00:00:00Z`) + 1);
+  assert.equal(evaluateAudit(picoAudit(), picoLock(true), after).blocking.length, 4);
+  assert.ok(
+    Date.parse(`${e.expires}T00:00:00Z`) - NOW.getTime() <= 31 * 86400000,
+    'الانقضاءُ خلالَ شهرٍ على الأكثر',
+  );
+});
+
+test('WL-557: ثغرةٌ عاليةٌ أخرى في السلسلة، أو شدّةٌ حرجة، أو تبليغٌ غيرُ مُستثنى — تُسقِطُ الإعذار', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  const other = {
+    name: 'minimatch',
+    url: 'https://github.com/advisories/GHSA-zzzz-zzzz-zzzz',
+    severity: 'high',
+  };
+  const mixed = picoAudit({
+    minimatch: {
+      name: 'minimatch',
+      severity: 'high',
+      via: [other],
+      nodes: ['node_modules/minimatch'],
+    },
+  });
+  const r = evaluateAudit(mixed, picoLock(true), NOW);
+  assert.deepEqual(r.blocking.map((x) => x.name).sort(), ['minimatch', 'ts-estree']);
+  const crit = picoAudit();
+  const cp = /** @type {any} */ (crit.vulnerabilities)['picomatch'];
+  cp.severity = 'critical';
+  cp.via[0].severity = 'critical';
+  assert.ok(evaluateAudit(crit, picoLock(true), NOW).blocking.some((x) => x.name === 'picomatch'));
+  const unknown = {
+    vulnerabilities: {
+      pg: {
+        name: 'pg',
+        severity: 'high',
+        via: [{ url: 'https://x/GHSA-1', severity: 'high' }],
+        nodes: ['node_modules/pg'],
+      },
+    },
+  };
+  assert.equal(
+    evaluateAudit(unknown, { packages: { 'node_modules/pg': { dev: true } } }, NOW).blocking.length,
+    1,
+  );
+  // ‏سلسلةٌ دائريّةٌ أو اسمٌ غيرُ موجودٍ في via: لا إعذارَ بالغياب.
+  const dangling = {
+    vulnerabilities: {
+      a: { name: 'a', severity: 'high', via: ['ghost'], nodes: ['node_modules/a'] },
+    },
+  };
+  assert.equal(
+    evaluateAudit(dangling, { packages: { 'node_modules/a': { dev: true } } }, NOW).blocking.length,
+    1,
+  );
+});
+
+test('WL-557: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّقُ الإعذارَ نفسَه على التقرير — ويرفضُه للعقدةِ الإنتاجيّة', () => {
+  for (const dev of [true, false]) {
+    const tmp = makeTempRoot();
+    try {
+      mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
+      writeFileSync(
+        path.join(tmp, 'package.json'),
+        JSON.stringify({
+          name: 't',
+          version: '1.0.0',
+          private: true,
+          dependencies: { pg: '8.23.0' },
+        }),
+      );
+      writeFileSync(
+        path.join(tmp, 'package-lock.json'),
+        JSON.stringify({ name: 't', ...picoLock(dev) }),
+      );
+      writeFileSync(
+        path.join(tmp, 'sbom.cdx.json'),
+        JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'pg' }] }),
+      );
+      writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify(picoAudit()));
+      writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+      const result = runGuard(tmp);
+      assert.equal(result.ok, dev, `dev=${dev}: ${result.stderr || result.output}`);
+      if (!dev) assert.match(result.stderr || result.output, /R3/);
+    } finally {
+      cleanup(tmp);
+    }
+  }
+});
+
+test('WL-557: التطويريّةُ لكلِّ عقدةٍ ولكلِّ مسار — وسيطٌ إنتاجيٌّ أو مصدرٌ إنتاجيٌّ أو مسارٌ ثانٍ إنتاجيٌّ لا يُعذَر', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  const mid = picoLock(true);
+  mid.packages['node_modules/ts-estree'] = { version: '1.0.0' };
+  assert.deepEqual(
+    evaluateAudit(picoAudit(), mid, NOW).blocking.map((x) => x.name),
+    ['ts-estree'],
+  );
+  const src = picoLock(true);
+  src.packages['node_modules/picomatch'] = { version: '1.0.0' };
+  assert.deepEqual(
+    evaluateAudit(picoAudit(), src, NOW).blocking.map((x) => x.name),
+    ['fdir', 'picomatch', 'tinyglobby', 'ts-estree'],
+  );
+  const two = picoAudit();
+  two.vulnerabilities.picomatch.nodes = [
+    'node_modules/picomatch',
+    'node_modules/x/node_modules/picomatch',
+  ];
+  const lk = picoLock(true);
+  lk.packages['node_modules/x/node_modules/picomatch'] = { version: '1.0.0' };
+  assert.ok(evaluateAudit(two, lk, NOW).blocking.some((x) => x.name === 'picomatch'));
+});
+
+test('WL-557: اسمٌ غيرُ محلولٍ بينَ أسماءِ via المحلولةِ يُسقِطُ الإعذار', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  const a = picoAudit();
+  a.vulnerabilities.tinyglobby.via = ['picomatch', 'ghost'];
+  assert.ok(evaluateAudit(a, picoLock(true), NOW).blocking.some((x) => x.name === 'tinyglobby'));
+});

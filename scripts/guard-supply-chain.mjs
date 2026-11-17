@@ -24,6 +24,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 
+import { evaluateAudit } from './audit-check.mjs';
+
 const rootIndex = process.argv.indexOf('--root');
 const repoRoot = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
 
@@ -101,16 +103,12 @@ try {
   } else {
     try {
       const audit = JSON.parse(readFileSync(auditPath, 'utf8'));
-      const vulns = audit.vulnerabilities ?? {};
-      const critical = Object.values(vulns).filter(
-        (v) =>
-          typeof v === 'object' &&
-          v !== null &&
-          'severity' in v &&
-          (v.severity === 'critical' || v.severity === 'high'),
-      );
-      if (critical.length > 0) {
-        violations.push(`R3: ${critical.length} ثغرة حرجة/عالية في audit-report.json.`);
+      // WL-557: الحكمُ نفسُه الذي يُطبِّقُه audit:check (‏الإعذارُ الضيّقُ المؤقّتُ بملفِّ القفلِ في الجذرِ نفسِه).
+      const lockPath = path.join(repoRoot, 'package-lock.json');
+      const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, 'utf8')) : {};
+      const { blocking } = evaluateAudit(audit, lock, new Date());
+      if (blocking.length > 0) {
+        violations.push(`R3: ${blocking.length} ثغرة حرجة/عالية في audit-report.json.`);
       }
     } catch {
       violations.push('R3: `audit-report.json` ليس JSON صالح.');
