@@ -44,7 +44,9 @@ describe('WL-545: startLapseReaper (‏بلا قاعدة — حاصدٌ مزيّ
   });
   const wait = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
 
-  test('الخيارات: ceilingMs صحيحٌ موجب، وminDelayMs/retryMs بينَ 0 والسقف — وإلا TypeError', () => {
+  // WL-548: صفرٌ كان مقبولاً (‏retryMs = 0 مع فشلٍ دائم، أو minDelayMs = 0 مع next_due_ms = 0) ⇒ نداءٌ بلا تباعد —
+  // حلقةٌ ساخنةٌ على القاعدة. الحدُّ الأدنى 1 مث لكليهما.
+  test('الخيارات: ceilingMs صحيحٌ موجب، وminDelayMs/retryMs بينَ 1 والسقف — وإلا TypeError', () => {
     const r = fake([ok(null)]);
     for (const o of [
       { ceilingMs: 0 },
@@ -53,9 +55,15 @@ describe('WL-545: startLapseReaper (‏بلا قاعدة — حاصدٌ مزيّ
       { ceilingMs: Infinity },
       { ceilingMs: 100, minDelayMs: 200 },
       { ceilingMs: 100, retryMs: -1 },
+      { ceilingMs: 100, retryMs: 0 },
+      { ceilingMs: 100, minDelayMs: 0 },
+      { ceilingMs: 100, retryMs: 0, minDelayMs: 0 },
     ])
       assert.throws(
-        () => startLapseReaper(r, /** @type {any} */ (o)),
+        () => {
+          // قيمةٌ قُبِلت خطأً تُوقَفُ فوراً: الفشلُ يُبلَّغُ ولا يُعلِّقُ الملفَّ بمؤقِّتٍ حيّ.
+          void startLapseReaper(r, /** @type {any} */ (o)).stop();
+        },
         TypeError,
         JSON.stringify(o),
       );
