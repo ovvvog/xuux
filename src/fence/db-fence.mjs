@@ -253,8 +253,9 @@ export async function jsonbDigest(db, detail) {
 /**
  * نتيجةُ `fence.reap_lapsed()`. `next_due_ms` (‏WL-545، الهجرة 0027): مللي ثوانٍ بساعةِ القاعدةِ حتى أقربِ انقضاءٍ لاعتمادٍ
  * نشِط — 0 لما انقضى أو سببُه قائم — ولا يتجاوزُ `lease_window_s` (‏اعتمادٌ يصدرُ بعدَ النداءِ لا ينقضي قبلَه)؛ وغائبٌ
- * (‏undefined) على قاعدةٍ قبلَ 0027، فيعودُ الحاصدُ إلى سقفِه.
- * @typedef {{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[], next_due_ms?: number | null }} LapseReapResult
+ * (‏undefined) على قاعدةٍ قبلَ 0027، فيعودُ الحاصدُ إلى سقفِه. `lingering` (‏WL-552، الهجرة 0029): اعتماداتٌ غيرُ نشِطةٍ لها
+ * جلساتٌ حيّةٌ بـ(‏pid، backend_start) — كلٌّ منها في `unresolved` أيضاً فـ`ok` = false حتى تموت؛ وغائبٌ قبلَ 0029.
+ * @typedef {{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[], lingering?: Array<{ role: string, status: string, signalled: number, sessions: Array<{ pid: number, backend_start: string }> }>, next_due_ms?: number | null }} LapseReapResult
  */
 
 /** WL-548: أدنى إعادةٍ بعدَ فشلِ الحصاد (‏مث) — لا حلقةَ ساخنةً على القاعدة بأيِّ إعداد. */
