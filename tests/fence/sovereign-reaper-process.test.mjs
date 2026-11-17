@@ -17,6 +17,9 @@ import { after, before, describe, test } from 'node:test';
 
 import {
   FENCE_ERRORS,
+  REAPER_ERROR_TABLE,
+  REAPER_RETRY_FLOOR_MS,
+  classifyReaperError,
   runSovereignReaper,
   sealFencedSessions,
   startLapseReaper,
@@ -283,6 +286,346 @@ describe('WL-546: runSovereignReaper — اتصالٌ عندَ الحاجةِ و
     );
     assert.equal(log.filter((e) => e.ev === 'connected' || e.ev === 'reaped').length, 0);
     assert.equal(st.connects, 0);
+  });
+});
+
+// ── WL-553: تراجعٌ أُسّيٌّ بتذبذبٍ وتصنيفُ الأخطاء (‏بلا قاعدة) ───────────────────────────────
+
+describe('WL-553: startLapseReaper — تراجعٌ أُسّيٌّ بتذبذبٍ بينَ أرضيّةِ retryMs وسقفِ maxRetryMs', () => {
+  /**
+   * حاصدٌ يفشلُ `fails` مرّةً ثمّ ينجح، ويُسجِّلُ التأخيرَ المُعلَنَ لكلِّ فشل.
+   * @param {{ retryMs: number, maxRetryMs?: number, ceilingMs: number, random?: () => number,
+   *           pattern: Array<'e' | 'ok'>, waitMs: number }} o
+   */
+  const drive = async (o) => {
+    let i = 0;
+    /** @type {number[]} */
+    const delays = [];
+    /** @type {number[]} */
+    const at = [];
+    const h = startLapseReaper(
+      {
+        reapLapsed: async () => {
+          at.push(Date.now());
+          const step = o.pattern[Math.min(i, o.pattern.length - 1)];
+          i += 1;
+          if (step === 'e')
+            throw Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' });
+          return { ok: true, reaped: [], unresolved: [], next_due_ms: 1 };
+        },
+      },
+      {
+        ceilingMs: o.ceilingMs,
+        retryMs: o.retryMs,
+        minDelayMs: 1,
+        ...(o.maxRetryMs === undefined ? {} : { maxRetryMs: o.maxRetryMs }),
+        ...(o.random === undefined ? {} : { random: o.random }),
+        onError: (_e, info) => delays.push(Number(info?.retryInMs)),
+      },
+    );
+    await sleep(o.waitMs);
+    await h.stop();
+    return { delays, at, stats: h.stats() };
+  };
+
+  test('بلا تذبذب (‏random = 0 ⇒ الحدُّ الأعلى): 10، 20، 40، 80 ثمّ السقفُ 100 — والفواصلُ المقيسةُ تتبعُها', async () => {
+    const { delays, at } = await drive({
+      retryMs: 10,
+      maxRetryMs: 100,
+      ceilingMs: 1000,
+      random: () => 0,
+      pattern: ['e'],
+      waitMs: 500,
+    });
+    assert.deepEqual(delays.slice(0, 6), [10, 20, 40, 80, 100, 100]);
+    for (let k = 1; k < 5; k++) {
+      const gap = Number(at[k]) - Number(at[k - 1]);
+      assert.ok(gap >= Number(delays[k - 1]) - 2, `فاصلُ ${k}: ${gap} ≥ ${delays[k - 1]}`);
+    }
+  });
+
+  test('تذبذبٌ أقصى (‏random → 1): لا تأخيرَ دونَ retryMs (‏أرضيّةُ #565) ولا فوقَ maxRetryMs', async () => {
+    const { delays } = await drive({
+      retryMs: REAPER_RETRY_FLOOR_MS,
+      maxRetryMs: 80,
+      ceilingMs: 1000,
+      random: () => 0.999999,
+      pattern: ['e'],
+      waitMs: 400,
+    });
+    assert.ok(delays.length >= 6, `${delays.length}`);
+    assert.equal(delays[0], REAPER_RETRY_FLOOR_MS, 'الفشلُ الأوّلُ = retryMs بعينِه (‏سلوكُ #565)');
+    for (const d of delays) {
+      assert.ok(d >= REAPER_RETRY_FLOOR_MS && d <= 80, `${d}`);
+    }
+    // ‏التذبذبُ يُنزِلُ حتى نصفِ الأساسِ لا أدنى: الأساسُ 80 ⇒ ≥ 40.
+    assert.ok(
+      delays.slice(4).every((d) => d >= 40),
+      JSON.stringify(delays),
+    );
+  });
+
+  test('التذبذبُ فعليٌّ بـMath.random: تأخيراتُ السقفِ ليست كلُّها متساوية', async () => {
+    const { delays } = await drive({
+      retryMs: 10,
+      maxRetryMs: 40,
+      ceilingMs: 1000,
+      pattern: ['e'],
+      waitMs: 700,
+    });
+    const capped = delays.slice(3);
+    assert.ok(capped.length >= 8, `${capped.length}`);
+    assert.ok(new Set(capped).size > 1, `تذبذب: ${JSON.stringify(capped)}`);
+    assert.ok(
+      capped.every((d) => d >= 20 && d <= 40),
+      JSON.stringify(capped),
+    );
+  });
+
+  test('نداءٌ ناجحٌ يُصفِّرُ العدّاد: الفشلُ بعدَه يبدأُ من retryMs', async () => {
+    const { delays, stats } = await drive({
+      retryMs: 10,
+      maxRetryMs: 1000,
+      ceilingMs: 1000,
+      random: () => 0,
+      pattern: ['e', 'e', 'e', 'ok', 'e', 'e'],
+      waitMs: 250,
+    });
+    assert.deepEqual(delays.slice(0, 5), [10, 20, 40, 10, 20]);
+    assert.ok(stats.errors >= 5);
+  });
+
+  test('الافتراضُ بلا maxRetryMs = retryMs ثابت (‏سلوكُ #565 حرفيّاً لمن لم يطلب التراجع)', async () => {
+    const { delays } = await drive({
+      retryMs: 15,
+      ceilingMs: 1000,
+      random: () => 0,
+      pattern: ['e'],
+      waitMs: 200,
+    });
+    assert.ok(delays.length >= 5);
+    assert.ok(
+      delays.every((d) => d === 15),
+      JSON.stringify(delays),
+    );
+  });
+
+  test('maxRetryMs خارجَ [retryMs، ceilingMs] أو غيرُ صحيح ⇒ TypeError قبلَ أيِّ نداء', () => {
+    let calls = 0;
+    const r = { reapLapsed: async () => (calls++, { ok: true, reaped: [], unresolved: [] }) };
+    for (const maxRetryMs of [5, 1001, 1.5, Number.NaN]) {
+      assert.throws(
+        () => startLapseReaper(r, { ceilingMs: 1000, retryMs: 10, maxRetryMs }),
+        TypeError,
+        String(maxRetryMs),
+      );
+    }
+    assert.equal(calls, 0);
+  });
+});
+
+describe('WL-553: classifyReaperError — جدولُ التصنيف (‏لا كلُّ SQL دائم، ولا كلُّ اتصالٍ مؤقّت)', () => {
+  /** @param {string} code @param {string} [message] */
+  const cls = (code, message = 'x') =>
+    classifyReaperError(Object.assign(new Error(message), code === '' ? {} : { code })).class;
+
+  test('دائمٌ: مصادقةٌ وقاعدةٌ مفقودةٌ وصلاحيّةٌ وهجرةٌ ناقصةٌ ودورٌ خاطئ وشهادةُ TLS', () => {
+    for (const c of [
+      '28P01',
+      '28000',
+      '3D000',
+      '42501',
+      '42883',
+      '3F000',
+      '42P01',
+      FENCE_ERRORS.REAPER_ROLE,
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'CERT_HAS_EXPIRED',
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+    ])
+      assert.equal(cls(c), 'permanent', c);
+    assert.equal(cls('', 'The server does not support SSL connections'), 'permanent');
+    assert.equal(
+      cls('', 'SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string'),
+      'permanent',
+    );
+  });
+
+  test('مؤقّتٌ: أخطاءُ SQL للإيقافِ والموارد والتعارض والمهلة — ليست دائمة', () => {
+    for (const c of [
+      '57P01',
+      '57P02',
+      '57P03',
+      '53300',
+      '53100',
+      '53200',
+      '40001',
+      '40P01',
+      '55P03',
+      '57014',
+      '25006',
+      '08006',
+      '08001',
+      '08003',
+      '08004',
+    ])
+      assert.equal(cls(c), 'transient', c);
+  });
+
+  test('مؤقّتٌ: أخطاءُ الشبكة — وأخطاءُ اتصالٍ دائمةٌ أعلاه (‏28P01، TLS) ليست مؤقّتة', () => {
+    for (const c of [
+      'ECONNREFUSED',
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'EAI_AGAIN',
+      'EPIPE',
+      'ENOTFOUND',
+    ])
+      assert.equal(cls(c), 'transient', c);
+    for (const m of [
+      'Connection terminated unexpectedly',
+      'Connection terminated due to connection timeout',
+      'Query read timeout',
+      'timeout exceeded when trying to connect',
+    ])
+      assert.equal(cls('', m), 'transient', m);
+  });
+
+  test('مجهولٌ ⇒ unknown (‏يُعادُ كالمؤقّتِ ولا يُخرِجُ بـ78) — ومعه القاعدةُ التي طابقت لكلِّ صنف', () => {
+    for (const c of ['XX000', '22012', 'P0001', 'ZZZZZ', ''])
+      assert.equal(cls(c), 'unknown', c || '(بلا رمز)');
+    const r = classifyReaperError(Object.assign(new Error('x'), { code: '28P01' }));
+    assert.equal(typeof r.rule, 'string');
+    assert.ok(r.rule.length > 0);
+    assert.equal(classifyReaperError(null).class, 'unknown');
+    assert.equal(classifyReaperError('boom').class, 'unknown');
+  });
+
+  test('الجدولُ مُصدَّرٌ ومتناسق: كلُّ صفٍّ صنفٌ معلومٌ وسبب، ولا رمزٌ في صنفَين', () => {
+    assert.ok(Array.isArray(REAPER_ERROR_TABLE) && REAPER_ERROR_TABLE.length >= 8);
+    /** @type {Map<string, string>} */
+    const seen = new Map();
+    for (const row of REAPER_ERROR_TABLE) {
+      assert.ok(row.class === 'permanent' || row.class === 'transient', JSON.stringify(row));
+      assert.ok(typeof row.why === 'string' && row.why.length > 0);
+      for (const c of row.codes ?? []) {
+        assert.ok(!seen.has(c) || seen.get(c) === row.class, `${c} في صنفَين`);
+        seen.set(c, row.class);
+      }
+    }
+  });
+});
+
+describe('WL-553: runSovereignReaper — الصنفُ في السجلّ وحدُّ الأخطاءِ الدائمةِ المتتالية', () => {
+  /** @param {Array<string>} codes - رمزُ كلِّ محاولةِ اتصال؛ 'ok' = اتصالٌ يحصد */
+  const run = async (
+    /** @type {string[]} */ codes,
+    /** @type {number} */ limit,
+    /** @type {number} */ waitMs,
+  ) => {
+    /** @type {Array<Record<string, any>>} */
+    const log = [];
+    let i = 0;
+    const r = runSovereignReaper({
+      ceilingMs: 100,
+      retryMs: 10,
+      maxRetryMs: 10,
+      permanentLimit: limit,
+      log: (e) => log.push(e),
+      connect: async () => {
+        const c = codes[Math.min(i, codes.length - 1)] ?? 'ok';
+        i += 1;
+        if (c !== 'ok') throw Object.assign(new Error(`fail ${c}`), { code: c });
+        let reaps = 0;
+        return /** @type {any} */ ({
+          on() {},
+          async end() {},
+          /** @param {string} sql */
+          async query(sql) {
+            if (sql.includes('current_user'))
+              return { rows: [{ u: 'xf_sovereign', s: 'xf_sovereign' }] };
+            // ‏وصلةٌ تحصدُ مرّةً بنجاحٍ ثمّ ترفضُ بصلاحيّة (‏42501 دائم) ⇒ المحاولةُ التالية اتصالٌ جديد.
+            reaps += 1;
+            if (reaps === 1)
+              return { rows: [{ r: { ok: true, reaped: [], unresolved: [], next_due_ms: 1 } }] };
+            throw Object.assign(new Error('permission denied for function reap_lapsed'), {
+              code: '42501',
+            });
+          },
+        });
+      },
+    });
+    await sleep(waitMs);
+    await r.stop();
+    return log.filter((e) => e.ev === 'error');
+  };
+
+  test('28P01 متتالياً ⇒ consecutive_permanent يتصاعدُ وpermanent_exhausted عندَ الحدِّ مرّةً واحدة', async () => {
+    const errs = await run(['28P01'], 3, 120);
+    assert.ok(errs.length >= 4, `${errs.length}`);
+    assert.ok(errs.every((e) => e.class === 'permanent'));
+    assert.deepEqual(
+      errs.slice(0, 3).map((e) => e.consecutive_permanent),
+      [1, 2, 3],
+    );
+    assert.deepEqual(
+      errs.slice(0, 3).map((e) => e.permanent_exhausted === true),
+      [false, false, true],
+    );
+    assert.ok(errs.every((e) => typeof e.retry_in_ms === 'number'));
+  });
+
+  test('دائمٌ يتخلّلُه مؤقّتٌ أو مجهول ⇒ العدّادُ يُصفَّرُ ولا استنفاد', async () => {
+    const errs = await run(
+      ['28P01', '28P01', 'ECONNREFUSED', '28P01', '28P01', 'XX000', '28P01', '28P01', 'ECONNRESET'],
+      3,
+      150,
+    );
+    assert.ok(errs.length >= 9);
+    assert.equal(
+      errs.filter((e) => e.permanent_exhausted === true).length,
+      0,
+      JSON.stringify(errs.slice(0, 9).map((e) => e.code)),
+    );
+    assert.deepEqual(
+      errs.slice(0, 9).map((e) => e.class),
+      [
+        'permanent',
+        'permanent',
+        'transient',
+        'permanent',
+        'permanent',
+        'unknown',
+        'permanent',
+        'permanent',
+        'transient',
+      ],
+    );
+  });
+
+  test('حصادٌ ناجحٌ يُصفِّرُ العدّاد: الدائمُ بعدَه يبدأُ من 1، والاستنفادُ بعدَ الحدِّ كاملاً', async () => {
+    const errs = await run(['28P01', '28P01', '28P01', 'ok', '28P01'], 4, 150);
+    assert.ok(errs.length >= 7, `${errs.length}`);
+    assert.deepEqual(
+      errs.slice(0, 7).map((e) => [e.code, e.consecutive_permanent]),
+      [
+        ['28P01', 1],
+        ['28P01', 2],
+        ['28P01', 3],
+        ['42501', 1],
+        ['28P01', 2],
+        ['28P01', 3],
+        ['28P01', 4],
+      ],
+    );
+    assert.equal(
+      errs.findIndex((e) => e.permanent_exhausted === true),
+      6,
+    );
   });
 });
 
@@ -707,8 +1050,12 @@ describe(
 
     test('انقطاعُ القاعدة (‏وكيلٌ يُسقَط): أخطاءٌ مُسجَّلةٌ بإيقاعِ retryMs، لا حصادَ مُعلَنٌ أثناءَه، وإعادةُ اتصالٍ وحصادٌ بعدَه', async (t) => {
       const proxy = await tcpProxy();
+      // ‏WL-553: التعافي بعدَ عودةِ القاعدةِ ≤ سقفِ التراجع؛ افتراضُه = السقف (‏5 ث هنا) ⇒ يُثبَّتُ 1 ث ليبقى انتظارُ
+      // الحصادِ أدناه (‏5 ث) قياساً للتعافي لا لزمنِ التراجع. التراجعُ نفسُه مقيسٌ في اختبارِ «خطأٌ مؤقّت» أدناه.
       const reaper = startReaper(await roleUrl('xf_sovereign', proxy.port()), [
         '--query-timeout-ms',
+        '1000',
+        '--max-retry-ms',
         '1000',
       ]);
       try {
@@ -789,6 +1136,100 @@ describe(
       const secret = decodeURIComponent(new URL(rootUrl).password);
       assert.ok(secret.length > 10);
       assert.ok(!JSON.stringify([...r.events, ...n.events]).includes(secret), 'لا سرَّ في السجل');
+    });
+
+    /**
+     * WL-553: مُشرِفٌ بسياسةِ الوحدةِ المقترحة (‏Restart=always مع RestartPreventExitStatus=2 78): يُعيدُ التشغيلَ لكلِّ
+     * خروجٍ آخر حتى `maxStarts`. ليس systemd — يُثبِتُ أنّ رمزَ الخروجِ يُوقِفُ الإعادةَ تحتَ هذه السياسة، لا أنّ وحدةً نُصِّبت.
+     * @param {string} url @param {string[]} extra @param {number} maxStarts
+     */
+    const supervise = async (url, extra, maxStarts) => {
+      /** @type {Array<{ code: number | null, signal: string | null, events: Array<Record<string, any>> }>} */
+      const runs = [];
+      while (runs.length < maxStarts) {
+        const c = startReaper(url, extra);
+        const killer = setTimeout(() => c.p.kill('SIGKILL'), 15_000);
+        const ex = await c.exited;
+        clearTimeout(killer);
+        runs.push({ ...ex, events: c.events });
+        if (ex.code === 2 || ex.code === 78) break;
+      }
+      return runs;
+    };
+
+    test('WL-553: خطأٌ دائمٌ (‏28P01 كلمةُ مرورٍ خاطئة، 3D000 قاعدةٌ مفقودة) ⇒ خروجٌ بـ78 بعدَ الحدّ، والمُشرِفُ لا يُعيدُ التشغيلَ', async (t) => {
+      // ‏وصلةٌ صالحةٌ جديدة (‏roleUrl يُغيّرُ كلمةَ المرور؛ sovUrl قد يكونُ قديماً بعدَ اختبارٍ سابق) ⇒ 3D000 لا 28P01.
+      const good = await roleUrl('xf_sovereign');
+      const wrongPw = new URL(good);
+      wrongPw.password = randomBytes(18).toString('base64url');
+      const noDb = new URL(good);
+      noDb.pathname = `/${h.db.name}_wl553_missing`;
+      const extra = ['--retry-ms', '50', '--max-retry-ms', '200', '--permanent-limit', '3'];
+      for (const [label, url, code] of /** @type {const} */ ([
+        ['28P01', wrongPw.toString(), '28P01'],
+        ['3D000', noDb.toString(), '3D000'],
+      ])) {
+        const runs = await supervise(url, extra, 4);
+        assert.equal(runs.length, 1, `${label}: تشغيلٌ واحدٌ لا إعادة (‏${runs.length})`);
+        const run = first(runs);
+        assert.equal(run.code, 78, `${label}: ${JSON.stringify(run.events.slice(-4))}`);
+        const errs = run.events.filter((e) => e.ev === 'error');
+        assert.equal(errs.length, 3, `${label}: الحدُّ 3 محاولات`);
+        assert.ok(
+          errs.every((e) => e.code === code && e.class === 'permanent'),
+          JSON.stringify(errs),
+        );
+        assert.ok(
+          run.events.some((e) => e.ev === 'fatal' && e.reason === 'permanent' && e.code === code),
+        );
+        assert.equal(run.events.filter((e) => e.ev === 'connected' || e.ev === 'reaped').length, 0);
+        const secret = decodeURIComponent(wrongPw.password);
+        assert.ok(!JSON.stringify(run.events).includes(secret), 'لا سرَّ في السجل');
+        assert.ok(!JSON.stringify(run.events).includes(decodeURIComponent(new URL(good).password)));
+        t.diagnostic(
+          `${label}: exit=${run.code} errors=${errs.length} retry=${errs.map((e) => e.retry_in_ms).join(',')}`,
+        );
+      }
+    });
+
+    test('WL-553: خطأٌ مؤقّتٌ (‏منفذٌ مغلق) ⇒ لا خروج، والتأخيرُ يتضاعفُ من retryMs حتى maxRetryMs ولا يتجاوزُه', async (t) => {
+      const proxy = await tcpProxy();
+      const port = proxy.port();
+      await proxy.down();
+      const r = startReaper(await roleUrl('xf_sovereign', port), [
+        '--retry-ms',
+        '50',
+        '--max-retry-ms',
+        '400',
+        '--permanent-limit',
+        '2',
+      ]);
+      await sleep(3000);
+      assert.equal(r.p.exitCode, null, `حيٌّ بعدَ 3 ث: ${JSON.stringify(r.events.slice(-3))}`);
+      const errs = r.events.filter((e) => e.ev === 'error');
+      assert.ok(errs.length >= 6 && errs.length <= 20, `${errs.length}`);
+      assert.ok(
+        errs.every((e) => e.code === 'ECONNREFUSED' && e.class === 'transient'),
+        JSON.stringify(errs.slice(0, 3)),
+      );
+      assert.ok(errs.every((e) => e.consecutive_permanent === 0 && e.permanent_exhausted !== true));
+      const d = errs.map((e) => Number(e.retry_in_ms));
+      assert.equal(d[0], 50, 'الفشلُ الأوّلُ = retryMs');
+      assert.ok(
+        d.every((x) => x >= 50 && x <= 400),
+        JSON.stringify(d),
+      );
+      assert.ok(
+        d.slice(4).every((x) => x >= 200),
+        `بلغَ السقفَ (‏±التذبذب): ${JSON.stringify(d)}`,
+      );
+      for (let k = 1; k < 5; k++) {
+        const gap = Number(errs[k]?.seenAt) - Number(errs[k - 1]?.seenAt);
+        assert.ok(gap >= Number(d[k - 1]) - 20, `فاصلٌ مقيسٌ ${gap} ≥ ${d[k - 1]}`);
+      }
+      const st = await stopReaper(r);
+      assert.ok(st.errors >= errs.length, 'كلُّ فشلٍ مُسجَّلٌ في العدّاد');
+      t.diagnostic(`transient: errors=${errs.length} retry=${d.join(',')}`);
     });
 
     test('سباقُ التجديدِ والحصادِ عندَ حدِّ الانقضاء: تجديدٌ نجحَ ⇒ لا إلغاء؛ وإلغاءٌ ⇒ التجديدُ مرفوضٌ (‏XF009/XF007)', async (t) => {
