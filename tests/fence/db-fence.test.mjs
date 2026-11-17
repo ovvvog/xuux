@@ -2903,7 +2903,7 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
         )
       ).rows[0];
     const before = await snap();
-    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026 WL-544، 0027 WL-545) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
+    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026 WL-544، 0027 WL-545، 0028 WL-551) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
     assert.ok(before.v >= 25, String(before.v));
     // الطبقةُ الأولى: المُهاجِرُ نفسُه يُرفَضُ تحتَ RUNNING (‏xf_ddl_start ⇒ XF201 على إنشاءِ دفترِه).
     await assert.rejects(
@@ -2919,6 +2919,8 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
       '0026_fence_read_surface.up.sql',
       '0027_fence_reap_deadline.down.sql',
       '0027_fence_reap_deadline.up.sql',
+      '0028_fence_owner_membership.down.sql',
+      '0028_fence_owner_membership.up.sql',
     ]) {
       const sql = readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
       const c = await h.db.pool.connect();
@@ -3274,6 +3276,304 @@ describe(
       assert.equal(classifyCapability(seq('state'), policy)?.class, 'READ_ONLY');
       assert.equal(classifyCapability(seq('fence'), policy), null);
       assert.deepEqual(policy.read_schemas, ['state']);
+    });
+  },
+);
+
+// ── WL-551: عضويّةُ xf_owner تمنعُ RESUME (‏0028) ─────────────────────────────────────────────────
+// xf_owner يملكُ fence.* ودوالَّه، وله CREATEROLE وADMIN على xuux_worker. كلُّ عضويّةٍ فيه لدورٍ غيرِ superuser —
+// مباشرةً أو عبرَ سلسلةٍ (‏ولو بوسيطٍ NOLOGIN)، وبأيِّ تركيبٍ من ADMIN/INHERIT/SET — مشكلةٌ بمسارِها وخصائصِ حلقاتِها،
+// فـRESUME يُرفَضُ (‏XF415) حتى تُسحَب. الكشفُ لا المنع: العضوُ النشِطُ مالكٌ للسياج (‏متبقٍّ مُعلَنٌ مقيسٌ أدناه).
+// الرجوعُ والطفراتُ في tests/persistence/migration-reversibility.test.mjs.
+describe(
+  'WL-551: عضويّةُ xf_owner — مباشرةً وتعدّياً وبكلِّ الخصائص',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    /** @type {string[]} */
+    const made = [];
+    const su = (/** @type {string} */ s, /** @type {unknown[]} */ p = []) => h.db.pool.query(s, p);
+    const mk = async (/** @type {string} */ name, login = false) => {
+      await su(`DROP ROLE IF EXISTS ${quoteIdent(name)}`);
+      await su(`CREATE ROLE ${quoteIdent(name)} ${login ? 'LOGIN' : 'NOLOGIN'}`);
+      made.push(name);
+    };
+    const dropMade = async () => {
+      while (made.length) await su(`DROP ROLE IF EXISTS ${quoteIdent(String(made.pop()))}`);
+    };
+    /** @returns {Promise<{ ok: boolean, problems: any[], residuals: any[] }>} */
+    const fenced = async () =>
+      (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+    const owners = async () =>
+      (await fenced()).problems.filter((p) => p.kind === 'owner_membership');
+    const state = async () => (await h.sovereign.status()).effective.state;
+    before(async () => {
+      h = await harness('wl551');
+      const base = await fenced();
+      assert.equal(base.ok, true, JSON.stringify(base.problems));
+    });
+    after(async () => {
+      if (h) {
+        await dropMade().catch(() => {});
+        await h.close();
+      }
+    });
+
+    test('كلُّ تركيبٍ من ADMIN/INHERIT/SET (‏8) مباشرةً: مشكلةٌ بالخصائص ⇒ XF415، ثمّ السحبُ ⇒ سليم', async () => {
+      await h.root.halt('wl551-combos', { effects: NO_EFFECTS });
+      for (const admin of [false, true])
+        for (const inherit of [false, true])
+          for (const set of [false, true]) {
+            const r = `zz_wl551_${Number(admin)}${Number(inherit)}${Number(set)}`;
+            await mk(r);
+            await su(
+              `GRANT xf_owner TO ${quoteIdent(r)} WITH ADMIN ${admin}, INHERIT ${inherit}, SET ${set}`,
+            );
+            const p = await owners();
+            assert.deepEqual(
+              p,
+              [
+                {
+                  kind: 'owner_membership',
+                  role: r,
+                  login: false,
+                  depth: 1,
+                  path: [r, 'xf_owner'],
+                  edges: [{ role: 'xf_owner', member: r, admin, inherit, set }],
+                },
+              ],
+              r,
+            );
+            await rejectsWith(() => h.resume(), ['XF415'], `${r} يمنعُ الاستئناف`);
+            await su(`REVOKE xf_owner FROM ${quoteIdent(r)}`);
+            assert.deepEqual(await owners(), [], `${r}: السحبُ يُزيلُ المشكلة`);
+            assert.equal((await fenced()).ok, true, `${r}: سليمٌ بعدَ السحب`);
+          }
+      await dropMade();
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+    });
+
+    test('تعدّياً عبرَ وسطاءَ NOLOGIN (‏عمق 4، وماسة، ودورُ دخول، وxf_sovereign): كلُّ دورٍ بأقصرِ مساره ⇒ XF415', async () => {
+      await h.root.halt('wl551-chain', { effects: NO_EFFECTS });
+      for (const r of ['zz_wl551_m1', 'zz_wl551_m2', 'zz_wl551_m3', 'zz_wl551_b']) await mk(r);
+      await mk('zz_wl551_t', true);
+      // سلسلة: t (‏LOGIN) → m3 → m2 → m1 → xf_owner، الحلقاتُ بلا INHERIT ولا SET في الوسط (‏ADMIN وحدَه).
+      await su('GRANT xf_owner TO zz_wl551_m1 WITH INHERIT FALSE, SET FALSE, ADMIN TRUE');
+      await su('GRANT zz_wl551_m1 TO zz_wl551_m2 WITH INHERIT FALSE, SET TRUE');
+      await su('GRANT zz_wl551_m2 TO zz_wl551_m3');
+      await su('GRANT zz_wl551_m3 TO zz_wl551_t WITH INHERIT TRUE, SET FALSE');
+      // ماسة: b عضوٌ في m1 وm2 — أقصرُ مسارٍ عبرَ m1، ومرّةً واحدة.
+      await su('GRANT zz_wl551_m1 TO zz_wl551_b');
+      await su('GRANT zz_wl551_m2 TO zz_wl551_b');
+      let p = await owners();
+      assert.deepEqual(
+        p.map((x) => [x.role, x.depth, x.path, x.login]),
+        [
+          ['zz_wl551_b', 2, ['zz_wl551_b', 'zz_wl551_m1', 'xf_owner'], false],
+          ['zz_wl551_m1', 1, ['zz_wl551_m1', 'xf_owner'], false],
+          ['zz_wl551_m2', 2, ['zz_wl551_m2', 'zz_wl551_m1', 'xf_owner'], false],
+          ['zz_wl551_m3', 3, ['zz_wl551_m3', 'zz_wl551_m2', 'zz_wl551_m1', 'xf_owner'], false],
+          [
+            'zz_wl551_t',
+            4,
+            ['zz_wl551_t', 'zz_wl551_m3', 'zz_wl551_m2', 'zz_wl551_m1', 'xf_owner'],
+            true,
+          ],
+        ],
+      );
+      assert.deepEqual(
+        p
+          .find((x) => x.role === 'zz_wl551_t')
+          .edges.map((/** @type {any} */ e) => [e.member, e.admin, e.inherit, e.set]),
+        [
+          ['zz_wl551_t', false, true, false],
+          ['zz_wl551_m3', false, true, true],
+          ['zz_wl551_m2', false, false, true],
+          ['zz_wl551_m1', true, false, false],
+        ],
+        'خصائصُ كلِّ حلقةٍ من الدورِ إلى xf_owner',
+      );
+      await rejectsWith(() => h.resume(), ['XF415'], 'السلسلةُ تمنعُ الاستئناف');
+      // قطعُ الحلقةِ العليا وحدَها يُزيلُ الكلّ؛ وقطعُ حلقةٍ وسطى يُبقي ما فوقَها.
+      await su('REVOKE zz_wl551_m2 FROM zz_wl551_m3');
+      p = await owners();
+      assert.deepEqual(
+        p.map((x) => x.role),
+        ['zz_wl551_b', 'zz_wl551_m1', 'zz_wl551_m2'],
+      );
+      await rejectsWith(() => h.resume(), ['XF415'], 'ما بقي يمنعُ الاستئناف');
+      await su('REVOKE xf_owner FROM zz_wl551_m1');
+      assert.deepEqual(await owners(), []);
+      // دورٌ سياديٌّ (‏xf_sovereign) عضواً: يُبلَّغُ كغيرِه.
+      await su('GRANT xf_owner TO xf_sovereign');
+      try {
+        assert.deepEqual(
+          (await owners()).map((x) => x.role),
+          ['xf_sovereign'],
+        );
+        await rejectsWith(() => h.resume(), ['XF415'], 'xf_sovereign عضواً يمنعُ الاستئناف');
+      } finally {
+        await su('REVOKE xf_owner FROM xf_sovereign');
+      }
+      await dropMade();
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+    });
+
+    test('superuser عضواً لا يُبلَّغ (‏خارجَ السياج، T-OWN-04)، وما تحتَه يُبلَّغ', async () => {
+      await h.root.halt('wl551-su', { effects: NO_EFFECTS });
+      await mk('zz_wl551_su');
+      await su('ALTER ROLE zz_wl551_su SUPERUSER');
+      await mk('zz_wl551_under');
+      await su('GRANT xf_owner TO zz_wl551_su');
+      await su('GRANT zz_wl551_su TO zz_wl551_under');
+      assert.deepEqual(
+        (await owners()).map((x) => [x.role, x.path]),
+        [['zz_wl551_under', ['zz_wl551_under', 'zz_wl551_su', 'xf_owner']]],
+      );
+      await su('REVOKE xf_owner FROM zz_wl551_su');
+      await dropMade();
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+    });
+
+    test('فشلٌ مغلق: خطأٌ في جردِ العضويّة مشكلةٌ (‏ok=false — بوّابةُ RESUME وhalt_complete)، ولا يُسقِطُ check_fenced', async () => {
+      await h.root.halt('wl551-inv', { effects: NO_EFFECTS });
+      const c = await h.db.pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('ALTER EVENT TRIGGER xf_ddl_end DISABLE');
+        await c.query(`CREATE OR REPLACE FUNCTION fence._owner_membership_problems() RETURNS jsonb
+        LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $f$
+        BEGIN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'wl551 inventory fault'; END $f$`);
+        const r = (await c.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+        assert.equal(r.ok, false);
+        assert.deepEqual(
+          r.problems.filter(
+            (/** @type {any} */ p) => p.kind === 'owner_membership_inventory_failed',
+          ),
+          [
+            {
+              kind: 'owner_membership_inventory_failed',
+              sqlstate: '42501',
+              message: 'wl551 inventory fault',
+            },
+          ],
+        );
+      } finally {
+        await c.query('ROLLBACK').catch(() => {});
+        c.release();
+      }
+      assert.equal((await fenced()).ok, true, 'الإرجاعُ أعادَ الدالّة');
+      await h.resume();
+    });
+
+    test('HALT: عضويّةٌ قائمةٌ تُبقي الإيقافَ HALT_REQUESTED (‏DB_NOT_FENCED، والطلبُ غيرُ مكتمل)، والسحبُ يُكمِله', async () => {
+      if ((await state()) !== 'RUNNING') await h.resume();
+      await mk('zz_wl551_h');
+      await su('GRANT xf_owner TO zz_wl551_h WITH INHERIT FALSE, SET FALSE');
+      const r = await h.root.halt('wl551-halt', { effects: NO_EFFECTS });
+      assert.equal(r.dbFenced, false);
+      assert.equal(r.reason, 'DB_NOT_FENCED');
+      assert.ok(
+        r.check.problems.some(
+          (/** @type {any} */ p) => p.kind === 'owner_membership' && p.role === 'zz_wl551_h',
+        ),
+        JSON.stringify(r.check.problems),
+      );
+      assert.equal(await state(), 'HALT_REQUESTED');
+      // ‏الطلبُ مفتوحٌ لم يكتمل (‏لا انتقالَ ولا دلالةَ جديدة: كأيِّ مشكلةٍ في check_fenced منذُ 0024).
+      const hr = await su('SELECT status FROM fence.halt_requests WHERE id = $1', [r.haltId]);
+      assert.notEqual(hr.rows[0].status, 'COMPLETE');
+      await su('REVOKE xf_owner FROM zz_wl551_h');
+      const r2 = await h.root.halt('wl551-halt-2', { effects: NO_EFFECTS });
+      assert.equal(r2.dbFenced, true, JSON.stringify(r2.check?.problems));
+      assert.equal(await state(), 'HALTED');
+      await dropMade();
+      await h.resume();
+    });
+
+    test('أثرُ العضويّة: لا تُمحى ولا يُخفى كشفُها، ودورُ دخولٍ يرثُ العاملَ يُكشَف؛ والاستيلاءُ المباشرُ متبقٍّ مُعلَنٌ مقيس', async () => {
+      await h.root.halt('wl551-impact', { effects: NO_EFFECTS });
+      await mk('zz_wl551_p');
+      await su('GRANT xf_owner TO zz_wl551_p WITH INHERIT FALSE, SET TRUE');
+      const c = await h.db.pool.connect();
+      /** @type {Record<string, string>} */
+      const out = {};
+      const tryq = async (/** @type {string} */ k, /** @type {string} */ sql) => {
+        await c.query('SAVEPOINT p');
+        try {
+          await c.query(sql);
+          out[k] = 'OK';
+          await c.query('RELEASE SAVEPOINT p');
+        } catch (e) {
+          out[k] = String(/** @type {any} */ (e).code);
+          await c.query('ROLLBACK TO SAVEPOINT p');
+        }
+      };
+      try {
+        await c.query('BEGIN');
+        await c.query('SET LOCAL SESSION AUTHORIZATION zz_wl551_p');
+        await c.query('SET LOCAL ROLE xf_owner');
+        // ما يُخفي الكشفَ: كلُّه مرفوض.
+        await tryq('revoke_own_membership', 'REVOKE xf_owner FROM zz_wl551_p');
+        await tryq(
+          'replace_check_fenced',
+          `CREATE OR REPLACE FUNCTION fence.check_fenced() RETURNS jsonb LANGUAGE sql AS $$SELECT '{"ok":true}'::jsonb$$`,
+        );
+        await tryq(
+          'replace_inventory',
+          `CREATE OR REPLACE FUNCTION fence._owner_membership_problems() RETURNS jsonb LANGUAGE sql AS $$SELECT '[]'::jsonb$$`,
+        );
+        await tryq('disable_event_trigger', 'ALTER EVENT TRIGGER xf_ddl_end DISABLE');
+        await tryq('disable_control_trigger', 'ALTER TABLE fence.control DISABLE TRIGGER ALL');
+        await tryq('rewrite_events', 'UPDATE fence.events SET kind = kind');
+        await tryq('grant_owner_onward', 'GRANT xf_owner TO xf_auditor');
+        // دورُ دخولٍ يرثُ العامل: يُنشأ (‏CREATEROLE + ADMIN) لكنّه يُكشَف.
+        await tryq('create_login_role', 'CREATE ROLE zz_wl551_rogue LOGIN');
+        await tryq('grant_worker_to_rogue', 'GRANT xuux_worker TO zz_wl551_rogue');
+        const k = (await c.query('SELECT fence.check_fenced() AS r')).rows[0].r.problems.map(
+          (/** @type {any} */ p) => p.kind,
+        );
+        out.detects_rogue = String(k.includes('worker_login_roles'));
+        out.detects_owner = String(k.includes('owner_membership'));
+        // الاستيلاءُ المباشر (‏متبقٍّ): control بعهدٍ أعلى ثمّ إعادةُ الختم ⇒ RUNNING بلا RESUME ولا check_fenced.
+        await tryq(
+          'takeover_state',
+          `UPDATE fence.control SET state = 'RUNNING', epoch = epoch + 1`,
+        );
+        await tryq('takeover_reseal', 'SELECT fence._reseal()');
+        out.takeover_effective = String(
+          (await c.query(`SELECT fence.effective_state()->>'state' AS s`)).rows[0].s,
+        );
+      } finally {
+        await c.query('ROLLBACK').catch(() => {});
+        c.release();
+      }
+      assert.deepEqual(out, {
+        revoke_own_membership: '42501',
+        replace_check_fenced: 'XF202',
+        replace_inventory: 'XF202',
+        disable_event_trigger: '42501',
+        disable_control_trigger: 'XF202',
+        rewrite_events: 'XF104',
+        grant_owner_onward: '42501',
+        create_login_role: 'OK',
+        grant_worker_to_rogue: 'OK',
+        detects_rogue: 'true',
+        detects_owner: 'true',
+        takeover_state: 'OK',
+        takeover_reseal: 'OK',
+        takeover_effective: 'RUNNING',
+      });
+      const res = (await fenced()).residuals.find((r) => r.kind === 'owner_membership_detect_only');
+      assert.ok(res && /قرارُ مالك/.test(res.note), 'المتبقّي مُعلَنٌ في check_fenced');
+      await su('REVOKE xf_owner FROM zz_wl551_p');
+      await dropMade();
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
     });
   },
 );
