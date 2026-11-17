@@ -398,14 +398,15 @@ describe(
             readFileSync(new URL(FILE, src), 'utf8'),
             `${label}: الطفرةُ لم تُطبَّق`,
           );
-          assert.equal((await migratorDown(h.db.pool, { steps: 1 })).current, 26);
+          // ‏WL-551: 0028 فوقَ 0027 — الرجوعُ خطوتان إلى 26، والتقديمُ يُعيدُهما.
+          assert.equal((await migratorDown(h.db.pool, { steps: 2 })).current, 26);
           await migratorUp(h.db.pool, { dir: d });
           assert.notDeepEqual(await probe(), [], `${label}: الطفرةُ حيّة`);
           await migratorDown(h.db.pool, { steps: 1, dir: d });
         } finally {
           rmSync(d, { recursive: true, force: true });
         }
-        assert.deepEqual((await migratorUp(h.db.pool)).applied, [27]);
+        assert.deepEqual((await migratorUp(h.db.pool)).applied, [27, 28]);
       }
       assert.deepEqual(await probe(), [], 'النصُّ الحقيقيُّ يجتازُ الفحوصَ كلَّها');
       await h.resume();

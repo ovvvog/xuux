@@ -681,6 +681,8 @@ describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ ال
   let fresh;
   /** @type {string} */
   let dir26;
+  /** @type {string} */
+  let dir27;
   /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
   let at26;
   /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
@@ -692,7 +694,11 @@ describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ ال
   before(async () => {
     db = await createIsolatedDatabase('m0027');
     dir26 = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+    // WL-551: هذه الحزمةُ تقيسُ 0027 — فالتقديمُ يقفُ عندَها صراحةً (‏0028 وما بعدَها لها حزمتُها).
+    dir27 = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
     for (const f of readdirSync(src)) {
+      if (Number(f.slice(0, 4)) > 27) continue;
+      writeFileSync(join(dir27, f), readFileSync(join(src, f), 'utf8'));
       if (Number(f.slice(0, 4)) > 26) continue;
       writeFileSync(join(dir26, f), readFileSync(join(src, f), 'utf8'));
     }
@@ -701,6 +707,7 @@ describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ ال
     if (db !== undefined) await db.drop();
     if (fresh !== undefined) await fresh.drop();
     rmSync(dir26, { recursive: true, force: true });
+    rmSync(dir27, { recursive: true, force: true });
   });
 
   it('على 0026: لا next_due_ms (‏العيبُ: لا موعدَ يُجدوَلُ عليه)', async () => {
@@ -710,7 +717,7 @@ describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ ال
   });
 
   it('الترقيةُ إلى 0027 تُطبِّقُ [27] بلا اختلافِ بصمة، والمفتاحُ حاضر', async () => {
-    assert.deepEqual((await up(db.pool)).applied, [27]);
+    assert.deepEqual((await up(db.pool, { dir: dir27 })).applied, [27]);
     assert.equal((await reapKeys(db.pool)).includes('next_due_ms'), true);
     at27 = await fenceFunctionCatalog(db.pool);
     assert.notDeepEqual(at27, at26, '0027 غيّرت الكتالوجَ فعلاً');
@@ -718,7 +725,7 @@ describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ ال
 
   it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0027 نفسِه', async () => {
     fresh = await createIsolatedDatabase('m0027f');
-    await up(fresh.pool);
+    await up(fresh.pool, { dir: dir27 });
     assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at27);
   });
 
@@ -726,7 +733,186 @@ describe('WL-545 — 0027: الترقية، والرجوع، وإعادةُ ال
     assert.equal((await down(db.pool, { steps: 1 })).current, 26);
     assert.deepEqual(await fenceFunctionCatalog(db.pool), at26);
     assert.equal((await reapKeys(db.pool)).includes('next_due_ms'), false);
-    assert.deepEqual((await up(db.pool)).applied, [27]);
+    assert.deepEqual((await up(db.pool, { dir: dir27 })).applied, [27]);
     assert.deepEqual(await fenceFunctionCatalog(db.pool), at27);
   });
 });
+
+// ── WL-551: عضويّةُ xf_owner تمنعُ RESUME (‏0028) ──
+//
+// 0028 تُضيفُ fence._owner_membership_problems() وكتلةً مغلقةَ الفشلِ في check_fenced. هنا: على 0027 العضويّةُ لا تُرى
+// (‏العيبُ مقيساً)، والترقيةُ تُطبِّقُ [28] فتُرى، وقاعدةٌ جديدةٌ تنتهي إلى الكتالوجِ نفسِه، والرجوعُ يُعيدُ كتالوجَ 0027
+// بايتاً ببايت (‏التعريف، المالك، ACL، المُطلِقات، البيانُ ببصماتِه)، وإعادةُ التقديمِ تُطابق؛ وطفراتُ 0028 تُكشَف.
+// الأثرُ الحيُّ (‏XF415، HALT، الاستيلاءُ المباشرُ متبقّياً) في tests/fence/db-fence.test.mjs.
+describe(
+  'WL-551 — 0028: العيبُ، والترقية، والرجوع، والطفرات',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>> | undefined} */
+    let fresh;
+    /** @type {string} */
+    let dir27;
+    /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+    let at27;
+    /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+    let at28;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    const FILE = '0028_fence_owner_membership.up.sql';
+    /** @param {number} upTo @param {(n: string, t: string) => string} [mutate] */
+    const migrationsDir = (upTo, mutate = (_n, t) => t) => {
+      const d = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), mutate(f, readFileSync(join(src, f), 'utf8')));
+      }
+      return d;
+    };
+    const ROLES = ['zz_m28_t', 'zz_m28_m3', 'zz_m28_m2', 'zz_m28_m1', 'zz_m28_a'];
+    /**
+     * الفحصُ نفسُه للنصِّ الحقيقيِّ وللطفرات: سلسلةٌ بعمق 4 بوسطاءَ NOLOGIN، وعضوٌ بـADMIN وحدَه، وخطأٌ مُحقَنٌ في الجرد.
+     * @param {import('pg').Pool} pool @returns {Promise<string[]>} أسماءُ الفحوصِ الساقطة
+     */
+    const probe = async (pool) => {
+      const fails = [];
+      for (const r of ROLES) await pool.query(`DROP ROLE IF EXISTS ${r}`);
+      try {
+        for (const r of ROLES) await pool.query(`CREATE ROLE ${r} NOLOGIN`);
+        await pool.query('GRANT xf_owner TO zz_m28_m1');
+        await pool.query('GRANT zz_m28_m1 TO zz_m28_m2');
+        await pool.query('GRANT zz_m28_m2 TO zz_m28_m3');
+        await pool.query('GRANT zz_m28_m3 TO zz_m28_t');
+        await pool.query('GRANT xf_owner TO zz_m28_a WITH ADMIN TRUE, INHERIT FALSE, SET FALSE');
+        const chk = (await pool.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+        const seen = chk.problems
+          .filter((/** @type {any} */ p) => p.kind === 'owner_membership')
+          .map((/** @type {any} */ p) => `${p.role}:${p.depth}`)
+          .sort();
+        if (!seen.includes('zz_m28_t:4')) fails.push(`transitive:${seen}`);
+        if (!seen.includes('zz_m28_a:1')) fails.push(`admin_only:${seen}`);
+        if (chk.ok !== false) fails.push('ok');
+      } finally {
+        for (const r of ROLES) await pool.query(`DROP ROLE IF EXISTS ${r}`);
+      }
+      const c = await pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('ALTER EVENT TRIGGER xf_ddl_end DISABLE');
+        await c.query(`CREATE OR REPLACE FUNCTION fence._owner_membership_problems() RETURNS jsonb
+        LANGUAGE plpgsql STABLE SET search_path = pg_catalog, pg_temp AS $f$
+        BEGIN RAISE EXCEPTION 'wl551 fault'; END $f$`);
+        const r = (await c.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+        if (
+          !r.problems.some((/** @type {any} */ p) => p.kind === 'owner_membership_inventory_failed')
+        )
+          fails.push('inventory_fault_hidden');
+      } catch (e) {
+        fails.push(`check_fenced_raised:${/** @type {any} */ (e).code}`);
+      } finally {
+        await c.query('ROLLBACK').catch(() => {});
+        c.release();
+      }
+      return fails;
+    };
+    before(async () => {
+      db = await createIsolatedDatabase('m0028');
+      dir27 = migrationsDir(27);
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      if (fresh !== undefined) await fresh.drop();
+      rmSync(dir27, { recursive: true, force: true });
+    });
+
+    it('على 0027: العضويّةُ في xf_owner لا تُرى (‏العيبُ مقيساً)', async () => {
+      assert.equal((await up(db.pool, { dir: dir27 })).current, 27);
+      at27 = await fenceFunctionCatalog(db.pool);
+      const fails = await probe(db.pool);
+      assert.ok(
+        fails.some((f) => f.startsWith('transitive')),
+        JSON.stringify(fails),
+      );
+      assert.ok(
+        fails.some((f) => f.startsWith('admin_only')),
+        JSON.stringify(fails),
+      );
+    });
+
+    it('الترقيةُ إلى 0028 تُطبِّقُ [28] بلا اختلافِ بصمة، والفحصُ كلُّه يجتاز', async () => {
+      assert.deepEqual((await up(db.pool)).applied, [28]);
+      at28 = await fenceFunctionCatalog(db.pool);
+      assert.notDeepEqual(at28, at27, '0028 غيّرت الكتالوجَ فعلاً');
+      assert.deepEqual(await probe(db.pool), []);
+      const fn = at28.functions.find((f) => f.sig === 'fence._owner_membership_problems()');
+      assert.ok(fn, 'الدالّةُ حاضرة');
+      assert.equal(fn.owner, 'xf_owner');
+      assert.equal(fn.secdef, false, 'بصلاحيةِ المُنادي (‏check_fenced هو SECURITY DEFINER)');
+      assert.equal(fn.acl, '{xf_owner=X/xf_owner}', 'مسحوبةٌ من PUBLIC ولا تُمنَحُ لأحد');
+    });
+
+    it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0028 نفسِه', async () => {
+      fresh = await createIsolatedDatabase('m0028f');
+      await up(fresh.pool);
+      assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at28);
+    });
+
+    it('رجوعُ 0028 يُعيدُ كتالوجَ 0027 بايتاً ببايت (‏والبيانَ ببصماتِه)، وإعادةُ التقديمِ تُطابق', async () => {
+      assert.equal((await down(db.pool, { steps: 1 })).current, 27);
+      assert.deepEqual(await fenceFunctionCatalog(db.pool), at27);
+      assert.deepEqual((await up(db.pool)).applied, [28]);
+      assert.deepEqual(await fenceFunctionCatalog(db.pool), at28);
+    });
+
+    for (const [label, mutate] of /** @type {Array<[string, (t: string) => string]>} */ ([
+      [
+        'مباشرةٌ وحدَها (‏بلا الحدِّ التكراريّ)',
+        (t) =>
+          t.replace(
+            '    UNION\n    SELECT e.member, r.depth + 1 FROM reach r JOIN e ON e.roleid = r.member\n    WHERE r.depth < (SELECT count(*) FROM pg_roles)\n',
+            '',
+          ),
+      ],
+      [
+        'عمقٌ محدود (‏2)',
+        (t) => t.replace('WHERE r.depth < (SELECT count(*) FROM pg_roles)', 'WHERE r.depth < 2'),
+      ],
+      [
+        'ADMIN وحدَه لا يُعَدّ',
+        (t) =>
+          t.replace(
+            'FROM pg_auth_members am GROUP BY am.roleid, am.member',
+            'FROM pg_auth_members am WHERE am.inherit_option OR am.set_option GROUP BY am.roleid, am.member',
+          ),
+      ],
+      [
+        'بلا كتلةِ الفشلِ المغلق',
+        (t) =>
+          t.replace(
+            "  BEGIN\n    problems := problems || fence._owner_membership_problems();\n  EXCEPTION WHEN OTHERS THEN\n    problems := problems || jsonb_build_array(jsonb_build_object('kind', 'owner_membership_inventory_failed', 'sqlstate', SQLSTATE, 'message', SQLERRM));\n  END;\n",
+            '  problems := problems || fence._owner_membership_problems();\n',
+          ),
+      ],
+    ])) {
+      it(`طفرةٌ في 0028 تُكشَف: ${label}`, async () => {
+        const d = migrationsDir(28, (n, t) => (n === FILE ? mutate(t) : t));
+        try {
+          assert.notEqual(
+            readFileSync(join(d, FILE), 'utf8'),
+            readFileSync(join(src, FILE), 'utf8'),
+            'الطفرةُ لم تُطبَّق',
+          );
+          await down(db.pool, { steps: 1 });
+          await up(db.pool, { dir: d });
+          assert.notDeepEqual(await probe(db.pool), [], 'الطفرةُ حيّة');
+          await down(db.pool, { steps: 1, dir: d });
+        } finally {
+          rmSync(d, { recursive: true, force: true });
+        }
+        assert.deepEqual((await up(db.pool)).applied, [28]);
+        assert.deepEqual(await probe(db.pool), [], 'النصُّ الحقيقيُّ يجتاز');
+        assert.deepEqual(await fenceFunctionCatalog(db.pool), at28);
+      });
+    }
+  },
+);
