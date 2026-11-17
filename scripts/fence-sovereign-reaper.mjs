@@ -10,7 +10,9 @@
  * الدخل: `XUUX_SOVEREIGN_DATABASE_URL` (‏لا تُطبَعُ أبداً). الخيارات: `--ceiling-ms` (‏5000)، `--retry-ms` (‏1000)،
  * `--min-delay-ms` (‏5)، `--heartbeat-ms` (‏10000، 0 = بلا نبض)، `--query-timeout-ms` (‏10000، ≥ 1 — لا «بلا مهلة»)،
  * `--max-retry-ms` (‏WL-553، افتراضاً = `--ceiling-ms`: سقفُ التراجعِ الأُسّيّ بتذبذب، ∈ [retry، ceiling])،
- * `--permanent-limit` (‏WL-553، 5، ≥ 1: أخطاءٌ دائمةٌ متتاليةٌ بجدولِ `REAPER_ERROR_TABLE` قبلَ الخروجِ بـ78).
+ * `--permanent-limit` (‏WL-553، 5، ≥ 1: أخطاءٌ دائمةٌ متتاليةٌ بجدولِ `REAPER_ERROR_TABLE` قبلَ الخروجِ بـ78)،
+ * `--role` (‏WL-558: `sovereign` افتراضاً، أو `reaper` = دورُ `xf_reaper` وبابُ 0030 `fence.reaper_tick` بوصلةِ
+ * `XUUX_REAPER_DATABASE_URL`؛ ومعه `--query-timeout-ms` ∈ [2000، 300000] و`--ceiling-ms` ≤ 300000).
  * الخرج: سطرُ JSON لكلِّ حدثٍ على stdout: `started`، `connected`، `reaped`، `unresolved`، `error`، `heartbeat`،
  * `fatal`، `stopped` (‏بعدّاداتِ النبضاتِ والأخطاءِ والمحصودِ وغيرِ المحسوم). SIGTERM/SIGINT ⇒ إيقافٌ منضبطٌ ينتظرُ
  * النداءَ الجاريَ ثمّ خروجٌ بـ0.
@@ -43,6 +45,7 @@ const { values } = parseArgs({
     'query-timeout-ms': { type: 'string', default: '10000' },
     'max-retry-ms': { type: 'string' },
     'permanent-limit': { type: 'string', default: '5' },
+    role: { type: 'string', default: 'sovereign' },
   },
 });
 /** @param {string} name @param {number} [min] */
@@ -54,13 +57,25 @@ const int = (name, min = 0) => {
   }
   return v;
 };
-const url = process.env['XUUX_SOVEREIGN_DATABASE_URL'];
+// WL-558: `--role reaper` ⇒ دورُ xf_reaper وبابُ 0030 (‏fence.reaper_tick بنبضٍ في القاعدة) ووصلتُه XUUX_REAPER_DATABASE_URL.
+const role = /** @type {Record<string, string>} */ (values)['role'];
+if (role !== 'sovereign' && role !== 'reaper') {
+  emit({ ev: 'fatal', reason: '--role ∈ {sovereign، reaper}' });
+  process.exit(2);
+}
+const urlVar = role === 'reaper' ? 'XUUX_REAPER_DATABASE_URL' : 'XUUX_SOVEREIGN_DATABASE_URL';
+const url = process.env[urlVar];
 if (url === undefined || url === '') {
-  emit({ ev: 'fatal', reason: 'XUUX_SOVEREIGN_DATABASE_URL غيرُ مضبوط' });
+  emit({ ev: 'fatal', reason: `${urlVar} غيرُ مضبوط` });
   process.exit(2);
 }
 // WL-548: 0 في pg يعني «بلا مهلة» للاتصالِ والنداءِ معاً ⇒ قاعدةٌ لا تُجيبُ تُعلِّقُ الحصادَ صامتاً (‏لا error ولا إعادة) — أرضيّةٌ 1.
 const queryTimeoutMs = int('query-timeout-ms', 1);
+if (role === 'reaper' && (queryTimeoutMs < 2000 || queryTimeoutMs > 300000)) {
+  // ‏WL-558: البابُ يرفضُ ما دونَ 2000 (‏> lock_timeout = 1 ث) — رفضٌ هنا بـ2 لا 78 بعدَ خمسِ محاولات.
+  emit({ ev: 'fatal', reason: '--query-timeout-ms ∈ [2000، 300000] مع --role reaper' });
+  process.exit(2);
+}
 const heartbeatMs = int('heartbeat-ms');
 const ceilingMs = int('ceiling-ms');
 const maxRetryMs =
@@ -88,12 +103,16 @@ try {
     maxRetryMs,
     permanentLimit,
     minDelayMs: int('min-delay-ms'),
+    mode: role,
+    ...(role === 'reaper' ? { queryTimeoutMs } : {}),
     connect: async () => {
       const c = new pg.Client({
         connectionString: url,
         connectionTimeoutMillis: queryTimeoutMs,
         query_timeout: queryTimeoutMs,
-        application_name: 'xuux-sovereign-reaper',
+        // ‏WL-558: الخادمُ يُلغي النداءَ عندَ المهلةِ نفسِها (‏57014) — فلا يبقى حصادٌ يعملُ بعدَ تخلّي العميلِ عنه.
+        statement_timeout: queryTimeoutMs,
+        application_name: role === 'reaper' ? 'xuux-reaper' : 'xuux-sovereign-reaper',
       });
       c.on('error', () => {});
       try {

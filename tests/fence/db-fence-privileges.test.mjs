@@ -1389,3 +1389,489 @@ describe(
     });
   },
 );
+
+// ── WL-558: الحاصدُ الدائم (‏0030) — العضويّةُ المتعدّيةُ بلا حدِّ عمق، والنبضُ المربوطُ بالجلسة، والصحّة، وNOTIFY/LISTEN ──
+describe(
+  'WL-558: xf_reaper وبابُه fence.reaper_tick (‏0030)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    before(async () => {
+      h = await harness('wl558');
+    });
+    after(async () => h?.close());
+    const A = '00000000-0000-4000-8000-0000000000a1';
+    const B = '00000000-0000-4000-8000-0000000000b2';
+    /** @param {pg.Client} c @param {string} inst @param {number} [ceil] @param {number} [qt] */
+    const tick = async (c, inst, ceil = 1000, qt = 2000) =>
+      /** @type {Record<string, any>} */ (
+        (await c.query('SELECT fence.reaper_tick($1, $2, $3) AS r', [inst, ceil, qt])).rows[0].r
+      );
+    /** @param {number} [slack] */
+    const health = async (slack = 1000) =>
+      /** @type {Record<string, any>} */ (
+        (await h.rootClient.query('SELECT fence.reaper_health($1) AS r', [slack])).rows[0].r
+      );
+    /** صفُّ النسخة، والعدّاداتُ (‏bigint) أعداداً. @param {string} inst */
+    const beat = async (inst) => {
+      const r = (
+        await h.db.pool.query('SELECT * FROM fence.reaper_heartbeat WHERE instance = $1', [inst])
+      ).rows[0];
+      for (const k of ['ticks', 'ok_ticks', 'failed_ticks', 'reaped_total', 'connects'])
+        r[k] = Number(r[k]);
+      return r;
+    };
+    const problems = async () =>
+      /** @type {Array<Record<string, any>>} */ (
+        (await h.rootClient.query('SELECT fence.reaper_capability_problems() AS r')).rows[0].r
+      );
+    const memberships = async () =>
+      /** @type {Array<Record<string, any>>} */ (
+        (await h.rootClient.query('SELECT fence.reaper_capabilities() AS r')).rows[0].r
+      ).filter((x) => x.axis === 'membership');
+    /** @param {string[]} roles */
+    const dropRoles = async (roles) => {
+      for (const r of roles) await h.db.pool.query(`DROP ROLE IF EXISTS ${quoteIdent(r)}`);
+    };
+    /**
+     * يُغلِقُ الوصلاتِ وينتظرُ زوالَ خوادمِها بأرقامِها — خادمٌ يتأخّرُ موتُه يُحتسَبُ «غيرَ مربوط» فيما يلي.
+     * @param {pg.Client[]} cs
+     */
+    const ends = async (...cs) => {
+      const pids = cs.map((c) => Number(/** @type {any} */ (c).processID)).filter((x) => x > 0);
+      for (const c of cs) await c.end().catch(() => {});
+      const until = Date.now() + 5000;
+      while (Date.now() < until) {
+        const n = (
+          await h.db.pool.query(
+            'SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid = ANY($1::int[])',
+            [pids],
+          )
+        ).rows[0].n;
+        if (n === 0) return;
+        await new Promise((res) => setTimeout(res, 20));
+      }
+      assert.fail(`خوادمُ ${pids.join(',')} لم تزل خلال 5 ث`);
+    };
+
+    test('السليم: لا مشكلةَ امتياز، وcheck_fenced سليم، والاستئنافُ يمضي — وما لا يملكُه xf_reaper مرفوضٌ (‏42501) لا مخفيّ', async () => {
+      assert.deepEqual(await problems(), []);
+      const cf = (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.deepEqual(
+        cf.problems.filter((/** @type {any} */ p) => String(p.kind).startsWith('reaper_')),
+        [],
+      );
+      const c = await h.login('xf_reaper');
+      try {
+        for (const sql of [
+          `INSERT INTO fence.reaper_heartbeat (instance, backend_pid, backend_start, ceiling_ms, query_timeout_ms,
+           first_tick_at, last_tick_at, ticks, ok_ticks, failed_ticks, reaped_total, connects, last_result)
+         VALUES (gen_random_uuid(), 1, now(), 1, 2000, now(), now(), 1, 1, 0, 0, 1, '{}')`,
+          'SELECT fence.reaper_health()',
+          'SELECT fence.reap_lapsed()',
+          'SELECT fence._reap_lapsed()',
+          'SELECT fence.reaper_capabilities()',
+          `SELECT pg_notify('x', 'y')`,
+          'SELECT count(*) FROM state.fence_probe',
+        ])
+          assert.equal((await rejection(() => c.query(sql)))?.code, '42501', sql);
+        assert.equal(
+          (
+            await rejection(() =>
+              h.rootClient.query('SELECT fence.reaper_tick($1, 1000, 2000)', [A]),
+            )
+          )?.code,
+          '42501',
+        );
+        assert.equal(
+          (await rejection(() => h.db.pool.query('SELECT fence.reaper_tick($1, 1000, 2000)', [A])))
+            ?.code,
+          'XF520',
+          'superuser يملكُ EXECUTE لكنّ البابَ لدخولِ xf_reaper وحدَه',
+        );
+        assert.equal(
+          (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.reaper_heartbeat')).rows[0]
+            .n,
+          0,
+        );
+      } finally {
+        await ends(c);
+      }
+    });
+
+    test('العضويّةُ المتعدّية بلا حدٍّ ثابت: سلاسلُ 17 و18 و32 في الاتّجاهَين (‏إلى xf_owner ومن دورِ دخول) ⇒ مكشوفةٌ بعمقِها، وcheck_fenced يرفض', async () => {
+      for (const n of [17, 18, 32]) {
+        const up = Array.from({ length: n }, (_, i) => `wl558_up${n}_${i + 1}`);
+        const dn = Array.from({ length: n }, (_, i) => `wl558_dn${n}_${i + 1}`);
+        try {
+          for (const r of [...up, ...dn]) await h.db.pool.query(`CREATE ROLE ${r} NOLOGIN`);
+          await h.db.pool.query(`ALTER ROLE ${dn[n - 1]} LOGIN`);
+          // ‏xf_reaper ∈ up1 ∈ up2 … ∈ up_n ∈ xf_owner: n + 1 حافّة.
+          await h.db.pool.query(`GRANT ${up[0]} TO xf_reaper`);
+          for (let i = 0; i < n - 1; i++) await h.db.pool.query(`GRANT ${up[i + 1]} TO ${up[i]}`);
+          await h.db.pool.query(`GRANT xf_owner TO ${up[n - 1]}`);
+          // ‏dn_n (‏دخول) ∈ … ∈ dn1 ∈ xf_reaper: n حافّة.
+          await h.db.pool.query(`GRANT xf_reaper TO ${dn[0]}`);
+          for (let i = 0; i < n - 1; i++) await h.db.pool.query(`GRANT ${dn[i]} TO ${dn[i + 1]}`);
+          const m = await memberships();
+          const owner = m.find((x) => x.object === 'xf_reaper -> xf_owner');
+          assert.ok(owner, `${n}: xf_reaper -> xf_owner مكشوفة`);
+          assert.equal(owner.detail.depth, n + 1);
+          assert.equal(owner.detail.pg_has_role_member, true, 'وPG يراها عضويّةً فعلاً');
+          assert.equal(owner.via, 'transitive');
+          const login = m.find((x) => x.object === `${dn[n - 1]} -> xf_reaper`);
+          assert.ok(login, `${n}: ${dn[n - 1]} -> xf_reaper مكشوفة`);
+          assert.equal(login.detail.depth, n);
+          assert.equal(login.detail.member_can_login, true);
+          for (const r of [...up, ...dn])
+            assert.equal(m.filter((x) => String(x.object).split(' -> ').includes(r)).length, 1, r);
+          const p = await problems();
+          assert.ok(
+            p.some((x) => x.kind === 'reaper_membership' && x.object === 'xf_reaper -> xf_owner'),
+          );
+          assert.ok(
+            p.some(
+              (x) => x.kind === 'reaper_membership' && x.object === `${dn[n - 1]} -> xf_reaper`,
+            ),
+          );
+          const cf = (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+          assert.equal(cf.ok, false);
+          assert.ok(cf.problems.some((/** @type {any} */ x) => x.kind === 'reaper_membership'));
+          assert.equal((await health()).privileges_intact, false);
+        } finally {
+          await dropRoles([...up, ...dn]);
+        }
+        assert.deepEqual(await problems(), [], `${n}: السحبُ ⇒ سليم`);
+      }
+    });
+
+    test('المخطّطاتُ المتفرّعة: ماسةٌ ومساراتٌ متعدّدةٌ بأطوالٍ مختلفة ⇒ كلُّ هدفٍ مرّةً واحدةً بأقصرِ عمق؛ والدورةُ يرفضُها PG (‏0LP01)', async () => {
+      const R = ['wl558_a', 'wl558_b', 'wl558_c', 'wl558_d', 'wl558_e', 'wl558_f'];
+      try {
+        for (const r of R) await h.db.pool.query(`CREATE ROLE ${r} NOLOGIN`);
+        // ‏ماسة: reaper ∈ a، reaper ∈ b، a ∈ c، b ∈ c، c ∈ d. ومسارٌ طويلٌ إلى f: d ∈ e ∈ f، ومسارٌ قصيرٌ: a ∈ f.
+        for (const [g, m] of [
+          ['wl558_a', 'xf_reaper'],
+          ['wl558_b', 'xf_reaper'],
+          ['wl558_c', 'wl558_a'],
+          ['wl558_c', 'wl558_b'],
+          ['wl558_d', 'wl558_c'],
+          ['wl558_e', 'wl558_d'],
+          ['wl558_f', 'wl558_e'],
+          ['wl558_f', 'wl558_a'],
+        ])
+          await h.db.pool.query(`GRANT ${g} TO ${m}`);
+        const m = await memberships();
+        const depth = Object.fromEntries(
+          m
+            .filter((x) => x.detail.direction === 'member_of')
+            .map((x) => [x.object.split(' -> ')[1], x.detail.depth]),
+        );
+        assert.deepEqual(depth, {
+          wl558_a: 1,
+          wl558_b: 1,
+          wl558_c: 2,
+          wl558_d: 3,
+          wl558_e: 4,
+          wl558_f: 2,
+        });
+        assert.equal(m.length, 6, 'لا تكرارَ بتعدّدِ المسارات');
+        const cyc = await rejection(() => h.db.pool.query('GRANT wl558_d TO wl558_f'));
+        assert.ok(cyc, 'الدورةُ مرفوضة');
+        assert.equal(cyc.code, '0LP01');
+        assert.equal(
+          (await rejection(() => h.db.pool.query('GRANT xf_reaper TO wl558_f')))?.code,
+          '0LP01',
+          'دورةٌ عبرَ xf_reaper نفسِه مرفوضة',
+        );
+      } finally {
+        await dropRoles([...R].reverse());
+      }
+      assert.deepEqual(await memberships(), []);
+    });
+
+    test('الامتيازُ جزءٌ من الصحّة: نبضٌ طازجٌ مربوطٌ ناجحٌ ومنحٌ زائدٌ لـxf_reaper ⇒ غيرُ سليمٍ بـprivileges_intact = false؛ والسحبُ يُعيدُه سليماً', async () => {
+      const C = '00000000-0000-4000-8000-0000000000c3';
+      const c = await h.login('xf_reaper');
+      try {
+        assert.equal((await tick(c, C)).ok, true);
+        assert.equal((await health()).healthy, true);
+        await h.db.pool.query('GRANT SELECT ON fence.control TO xf_reaper');
+        assert.equal((await tick(c, C)).ok, true, 'الحصادُ نفسُه ينجح');
+        const bad = await health();
+        assert.deepEqual(
+          [bad.healthy, bad.privileges_intact, bad.tick_succeeded, bad.db_connected],
+          [false, false, true, true],
+          JSON.stringify(bad),
+        );
+        assert.ok(
+          bad.privilege_problems.some(
+            (/** @type {any} */ x) => x.object === 'fence.control' && x.privilege === 'SELECT',
+          ),
+          JSON.stringify(bad.privilege_problems),
+        );
+        await h.db.pool.query('REVOKE SELECT ON fence.control FROM xf_reaper');
+        assert.equal((await tick(c, C)).ok, true);
+        assert.equal((await health()).healthy, true);
+      } finally {
+        await h.db.pool.query('REVOKE ALL ON fence.control FROM xf_reaper');
+        await c.end();
+        await ends(c);
+      }
+    });
+
+    test('النبضُ المربوط: نسخةٌ واحدةٌ موصولةٌ ⇒ سليم؛ جلسةٌ غيرُ مربوطة، ونسختان، وربطٌ متعارض (‏XF522) ⇒ غيرُ سليم؛ وإعادةُ الاتصالِ تستلمُ النسخة', async () => {
+      const c1 = await h.login('xf_reaper');
+      /** @type {pg.Client[]} */
+      const opened = [c1];
+      try {
+        const r = await tick(c1, A);
+        assert.equal(r.ok, true);
+        let hl = await health();
+        assert.equal(hl.healthy, true, JSON.stringify(hl));
+        assert.deepEqual(
+          [
+            hl.db_connected,
+            hl.tick_attempted,
+            hl.tick_succeeded,
+            hl.privileges_intact,
+            hl.process_alive_observable,
+          ],
+          [true, true, true, true, false],
+        );
+        const b1 = await beat(A);
+        assert.equal(b1.backend_pid, (await c1.query('SELECT pg_backend_pid() AS p')).rows[0].p);
+        assert.deepEqual([b1.ticks, b1.ok_ticks, b1.failed_ticks, b1.connects], [1, 1, 0, 1]);
+        // ‏جلسةٌ ثانيةٌ بلا نبض.
+        const c2 = await h.login('xf_reaper');
+        opened.push(c2);
+        hl = await health();
+        assert.equal(hl.healthy, false);
+        assert.equal(hl.anomalies.unbound_reaper_sessions, 1);
+        // ‏الثانيةُ تنتحلُ النسخةَ A والأولى حيّة ⇒ XF522 بلا نبض؛ والأولى لا تنبضُ بنسخةٍ ثانية.
+        assert.equal((await rejection(() => tick(c2, A)))?.code, 'XF522');
+        assert.equal((await rejection(() => tick(c1, B)))?.code, 'XF522');
+        assert.equal((await beat(A)).ticks, 1);
+        // ‏نسختان موصولتان ⇒ غيرُ سليم.
+        assert.equal((await tick(c2, B)).ok, true);
+        hl = await health();
+        assert.equal(hl.healthy, false);
+        assert.deepEqual(
+          [hl.anomalies.connected_instances, hl.anomalies.unbound_reaper_sessions],
+          [2, 0],
+        );
+        // ‏حدُّ الاتصالِ 2: ثالثةٌ مرفوضة.
+        assert.equal((await rejection(() => h.login('xf_reaper')))?.code, '53300');
+        await ends(c2);
+        await h.db.pool.query('SELECT pg_stat_clear_snapshot()');
+        const wait = Date.now() + 5000;
+        while ((await health()).anomalies.connected_instances !== 1 && Date.now() < wait)
+          await new Promise((res) => setTimeout(res, 50));
+        assert.equal(
+          (await health()).healthy,
+          true,
+          'الثانيةُ ماتت: صفُّها غيرُ موصولٍ لا يُحتسَب',
+        );
+        // ‏إعادةُ الاتصال: الأولى تموت، وجلسةٌ جديدةٌ تستلمُ A (‏connects = 2).
+        await ends(c1);
+        const w2 = Date.now() + 5000;
+        while ((await health()).anomalies.connected_instances !== 0 && Date.now() < w2)
+          await new Promise((res) => setTimeout(res, 50));
+        hl = await health();
+        assert.deepEqual([hl.healthy, hl.db_connected], [false, false], 'بلا جلسة: غيرُ سليم');
+        const c3 = await h.login('xf_reaper');
+        opened.push(c3);
+        assert.equal((await tick(c3, A)).ok, true);
+        const b2 = await beat(A);
+        assert.deepEqual([b2.ticks, b2.connects], [2, 2]);
+        assert.equal(b2.backend_pid, (await c3.query('SELECT pg_backend_pid() AS p')).rows[0].p);
+        assert.equal((await health()).healthy, true);
+      } finally {
+        await ends(...opened);
+        await h.db.pool.query('DELETE FROM fence.reaper_heartbeat');
+      }
+    });
+
+    test('المهلة: العتبةُ = ceiling + 2 × query_timeout + slack (‏حدّاها بدقّة)، والمعاملاتُ خارجَ حدودِها XF521، والساعةُ الشاذّةُ غيرُ سليمة', async () => {
+      const c = await h.login('xf_reaper');
+      try {
+        for (const [ceil, qt] of [
+          [0, 2000],
+          [300001, 2000],
+          [1000, 1999],
+          [1000, 300001],
+        ])
+          assert.equal(
+            (await rejection(() => tick(c, A, ceil, qt)))?.code,
+            'XF521',
+            `${ceil}/${qt}`,
+          );
+        assert.equal((await tick(c, A, 1000, 2000)).ok, true);
+        const hl = await health(1000);
+        assert.equal(hl.instances[0].stale_after_ms, 6000);
+        const at = async (/** @type {number} */ agoMs) => {
+          await h.db.pool.query(
+            `UPDATE fence.reaper_heartbeat SET last_tick_at = clock_timestamp() - make_interval(secs => $1 / 1000.0),
+             last_ok_at = clock_timestamp() - make_interval(secs => $1 / 1000.0),
+             first_tick_at = clock_timestamp() - interval '1 hour'`,
+            [agoMs],
+          );
+          return health(1000);
+        };
+        let x = await at(5500);
+        assert.equal(x.healthy, true, `داخلَ العتبة: ${JSON.stringify(x)}`);
+        x = await at(6500);
+        assert.equal(x.healthy, false, 'بعدَ العتبة');
+        assert.equal(x.anomalies.stale_connected_instances, 1);
+        assert.deepEqual([x.db_connected, x.tick_attempted], [true, false]);
+        x = await at(-5000);
+        assert.equal(x.healthy, false, 'نبضٌ من المستقبل');
+        assert.equal(x.anomalies.clock_anomaly_instances, 1);
+        assert.equal(
+          (await rejection(() => h.rootClient.query('SELECT fence.reaper_health(-1)')))?.code,
+          '22023',
+        );
+      } finally {
+        await ends(c);
+        await h.db.pool.query('DELETE FROM fence.reaper_heartbeat');
+      }
+    });
+
+    test('فشلُ الحصاد: قفلٌ ممسوكٌ ⇒ نبضةٌ فاشلةٌ مُسجَّلةٌ (‏55P03) بلا last_ok_at وغيرُ سليم؛ وإلغاءُ النداءِ (‏57014) لا يكتبُ نبضاً؛ وإعداداتُ الدورِ XF523', async () => {
+      const c = await h.login('xf_reaper');
+      const locker = await h.db.pool.connect();
+      try {
+        assert.equal((await tick(c, A)).ok, true);
+        const ok1 = await beat(A);
+        await locker.query('BEGIN');
+        await locker.query('LOCK TABLE fence.credentials IN ACCESS EXCLUSIVE MODE');
+        const r = await tick(c, A);
+        assert.equal(r.ok, false);
+        assert.equal(r.tick_error.sqlstate, '55P03');
+        const f = await beat(A);
+        assert.deepEqual([f.ticks, f.ok_ticks, f.failed_ticks], [2, 1, 1]);
+        assert.equal(
+          f.last_ok_at.getTime(),
+          ok1.last_ok_at.getTime(),
+          'لا نجاحَ يُكتَبُ لحصادٍ فشل',
+        );
+        assert.ok(f.last_tick_at > ok1.last_tick_at);
+        assert.equal(f.last_error.sqlstate, '55P03');
+        const hl = await health();
+        assert.deepEqual([hl.healthy, hl.tick_attempted, hl.tick_succeeded], [false, true, false]);
+        // ‏مهلةُ النداءِ دونَ lock_timeout: الإلغاءُ لا تلتقطُه الكتلةُ الفرعيّة ⇒ لا نبض.
+        await c.query(`SET statement_timeout = 300`);
+        assert.equal((await rejection(() => tick(c, A)))?.code, '57014');
+        await c.query('RESET statement_timeout');
+        assert.equal((await beat(A)).ticks, 2, 'الإلغاءُ لم يكتب');
+        await locker.query('ROLLBACK');
+        assert.equal((await tick(c, A)).ok, true);
+        assert.equal((await health()).healthy, true, 'التعافي بعدَ زوالِ القفل');
+        await h.db.pool.query(`ALTER ROLE xf_reaper SET work_mem = '1MB'`);
+        try {
+          assert.equal((await rejection(() => tick(c, A)))?.code, 'XF523');
+          assert.ok(
+            (await problems()).some((p) => p.kind === 'reaper_role_setting'),
+            JSON.stringify(await problems()),
+          );
+        } finally {
+          await h.db.pool.query('ALTER ROLE xf_reaper RESET ALL');
+        }
+      } finally {
+        await locker.query('ROLLBACK').catch(() => {});
+        locker.release();
+        await ends(c);
+        await h.db.pool.query('DELETE FROM fence.reaper_heartbeat');
+      }
+    });
+
+    test('البابُ يحصدُ فعلاً: اعتمادٌ انقضى إيجارُه يُلغى وتُنهى جلستُه عبرَ reaper_tick، والنبضُ يعدُّه؛ والصالحُ لا يُمَسّ', async () => {
+      // ‏RESUME يمضي بـxf_reaper حاضراً (‏check_fenced سليمٌ بجردِه) — ثمّ إقلاعان.
+      await h.resume();
+      const c = await h.login('xf_reaper');
+      const a = await h.boot('alpha');
+      const b = await h.boot('beta');
+      const ra = String(a.credential.role_name);
+      const rb = String(b.credential.role_name);
+      try {
+        await h.db.pool.query(
+          `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+          [ra],
+        );
+        const r = await tick(c, A);
+        assert.equal(r.ok, true, JSON.stringify(r));
+        assert.deepEqual(
+          r.reaped.map((/** @type {any} */ x) => [x.role, x.reason, x.alive_after]),
+          [[ra, 'expired', 0]],
+        );
+        assert.ok(
+          await rejection(() => /** @type {pg.Client} */ (a.client).query('SELECT 1')),
+          'الجلسةُ أُنهِيَت',
+        );
+        assert.equal(
+          (await /** @type {pg.Client} */ (b.client).query('SELECT 1 AS x')).rows[0].x,
+          1,
+          'الصالحُ حيّ',
+        );
+        const st = (
+          await h.db.pool.query(
+            'SELECT status FROM fence.credentials WHERE role_name = ANY($1) ORDER BY role_name = $2 DESC',
+            [[ra, rb], ra],
+          )
+        ).rows.map((x) => x.status);
+        assert.deepEqual(st, ['REVOKED', 'ACTIVE']);
+        const hb = await beat(A);
+        assert.deepEqual([hb.reaped_total, hb.ok_ticks], [1, 1]);
+        assert.equal(hb.last_result.reaped, 1);
+      } finally {
+        await ends(c);
+        await h.db.pool.query('DELETE FROM fence.reaper_heartbeat');
+      }
+    });
+
+    test('المتبقّي المُعلَن: xf_reaper يستطيعُ LISTEN وأمرَ NOTIFY فعلاً (‏لا امتيازَ يُسحَب) في هذه القاعدةِ وحدَها، وpg_notify مسحوبة', async () => {
+      const r = await h.login('xf_reaper');
+      const su = new pg.Client({
+        connectionString: (() => {
+          const u = new URL(process.env['DATABASE_URL'] ?? '');
+          u.pathname = `/${h.db.name}`;
+          return u.toString();
+        })(),
+      });
+      su.on('error', () => {});
+      await su.connect();
+      try {
+        /** @type {string[]} */
+        const atReaper = [];
+        /** @type {string[]} */
+        const atSu = [];
+        r.on('notification', (m) => atReaper.push(`${m.channel}:${m.payload}`));
+        su.on('notification', (m) => atSu.push(`${m.channel}:${m.payload}`));
+        await r.query('LISTEN wl558_in');
+        await su.query('LISTEN wl558_out');
+        await su.query(`NOTIFY wl558_in, 'to-reaper'`);
+        await r.query(`NOTIFY wl558_out, 'from-reaper'`);
+        await r.query('BEGIN');
+        await r.query(`NOTIFY wl558_out, 'rolled-back'`);
+        await r.query('ROLLBACK');
+        await new Promise((res) => setTimeout(res, 150));
+        await r.query('SELECT 1');
+        await su.query('SELECT 1');
+        assert.deepEqual(atReaper, ['wl558_in:to-reaper']);
+        assert.deepEqual(atSu, ['wl558_out:from-reaper']);
+        assert.equal(
+          (await rejection(() => r.query(`SELECT pg_notify('wl558_out', 'x')`)))?.code,
+          '42501',
+        );
+        // ‏لا قاعدةَ أخرى: CONNECT على postgres مسحوبٌ من PUBLIC بالاحتواء.
+        assert.ok(await rejection(() => h.login('xf_reaper', { database: 'postgres' })));
+        const s = (await h.rootClient.query('SELECT fence.notify_surface() AS s')).rows[0].s;
+        assert.ok(JSON.stringify(s).includes('xf_reaper'), 'السطحُ يُسمّيه');
+        assert.deepEqual(await problems(), [], 'المتبقّي مُعلَنٌ لا مشكلة');
+      } finally {
+        await ends(r, su);
+      }
+    });
+  },
+);

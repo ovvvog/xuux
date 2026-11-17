@@ -23,6 +23,7 @@ import {
   createPublicKey,
   generateKeyPairSync,
   randomBytes,
+  randomUUID,
   sign,
 } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -281,7 +282,21 @@ export const REAPER_ERROR_TABLE = Object.freeze([
     codes: ['42883', '3F000', '42P01'],
     why: 'هجرةٌ ناقصة: دالّةٌ أو مخطّطٌ أو جدولٌ غيرُ موجود',
   },
-  { class: 'permanent', codes: [FENCE_ERRORS.REAPER_ROLE], why: 'الوصلةُ بدورٍ غيرِ xf_sovereign' },
+  {
+    class: 'permanent',
+    codes: [FENCE_ERRORS.REAPER_ROLE],
+    why: 'الوصلةُ بدورٍ غيرِ المتوقَّع (‏xf_sovereign أو xf_reaper)',
+  },
+  {
+    class: 'permanent',
+    codes: ['XF520', 'XF521', 'XF523'],
+    why: 'باب 0030: دخولٌ بغيرِ xf_reaper، أو سقفٌ/مهلةٌ خارجَ الحدود، أو إعداداتٌ دائمةٌ على xf_reaper',
+  },
+  {
+    class: 'transient',
+    codes: ['XF522', 'XF525'],
+    why: 'باب 0030: النسخةُ مربوطةٌ بوصلةٍ لم تمت بعد (‏إعادةُ اتصال)، أو نتيجةُ حصادٍ غيرُ مقروءة',
+  },
   {
     class: 'permanent',
     codes: [
@@ -502,11 +517,37 @@ export function startLapseReaper(reaper, options) {
  * عندَ بلوغِ `permanentLimit` (‏افتراضاً بلا حدّ) — والقرارُ (‏الخروجُ بـ78) لمُستدعيه.
  * @param {{ connect: () => Promise<import('pg').ClientBase & { end?: Function, on?: Function }>,
  *           ceilingMs: number, minDelayMs?: number, retryMs?: number, maxRetryMs?: number, permanentLimit?: number,
- *           expectRole?: string,
+ *           expectRole?: string, mode?: 'sovereign' | 'reaper', instance?: string, queryTimeoutMs?: number,
  *           log?: (event: Record<string, unknown>) => void }} options
+ * WL-558: `mode: 'reaper'` (‏الهجرة 0030) — دورُ `xf_reaper` وبابُه `fence.reaper_tick(instance، ceilingMs، queryTimeoutMs)`
+ * بنسخةٍ (‏`instance`، افتراضاً UUID لكلِّ عمليّة) تربطُها القاعدةُ بـ(‏pid، backend_start). `tick_error` = خطأٌ بلا إسقاطِ الوصلة.
  */
 export function runSovereignReaper(options) {
-  const expectRole = options.expectRole ?? 'xf_sovereign';
+  const mode = options.mode ?? 'sovereign';
+  if (mode !== 'sovereign' && mode !== 'reaper') {
+    throw new TypeError('runSovereignReaper: mode ∈ {sovereign، reaper}');
+  }
+  const expectRole = options.expectRole ?? (mode === 'reaper' ? 'xf_reaper' : 'xf_sovereign');
+  // WL-558: وضعُ الحاصدِ (‏0030) يُصرِّحُ للقاعدةِ بسقفِه ومهلتِه في كلِّ نبضة — فعتبةُ القِدَمِ في reaper_health هي ما
+  // يعملُ به فعلاً (‏ceiling + 2 × المهلة + slack). المهلةُ نفسُها تُضبَطُ على الوصلة (‏اتصالاً ونداءً) عندَ المُستدعي.
+  const instance = options.instance ?? randomUUID();
+  const queryTimeoutMs = options.queryTimeoutMs;
+  if (mode === 'reaper') {
+    if (
+      !Number.isInteger(options.ceilingMs) ||
+      options.ceilingMs < 1 ||
+      options.ceilingMs > 300000
+    ) {
+      throw new TypeError('runSovereignReaper(reaper): ceilingMs ∈ [1، 300000]');
+    }
+    if (
+      !Number.isInteger(queryTimeoutMs) ||
+      Number(queryTimeoutMs) < 2000 ||
+      Number(queryTimeoutMs) > 300000
+    ) {
+      throw new TypeError('runSovereignReaper(reaper): queryTimeoutMs ∈ [2000، 300000]');
+    }
+  }
   const log = options.log ?? (() => {});
   /** @type {(import('pg').ClientBase & { end?: Function, on?: Function }) | null} */
   let client = null;
@@ -549,16 +590,44 @@ export function runSovereignReaper(options) {
         // eslint-disable-next-line require-atomic-updates
         client = c;
         connects += 1;
-        log({ ev: 'connected', role: expectRole, connects });
+        log({
+          ev: 'connected',
+          role: expectRole,
+          connects,
+          ...(mode === 'reaper' ? { instance } : {}),
+        });
       }
+      /** @type {LapseReapResult & { tick_error?: { sqlstate?: string, message?: string } }} */
+      let r;
       try {
-        const r = await new FenceSovereign(client, null).reapLapsed();
-        consecutivePermanent = 0;
-        return r;
+        r =
+          mode === 'reaper'
+            ? (
+                await client.query('SELECT fence.reaper_tick($1, $2, $3) AS r', [
+                  instance,
+                  options.ceilingMs,
+                  queryTimeoutMs,
+                ])
+              ).rows[0].r
+            : await new FenceSovereign(client, null).reapLapsed();
       } catch (error) {
         await drop();
         throw error;
       }
+      // ‏WL-558: فشلُ الحصادِ داخلَ البابِ نبضةٌ فاشلةٌ مُسجَّلة (‏لا last_ok_at) — خطأٌ بالـSQLSTATE الداخليّ يُصنَّفُ كغيرِه،
+      // والوصلةُ تبقى (‏القاعدةُ أجابت؛ لا داعيَ لإعادةِ اتصالٍ تُضاعِفُ النافذة).
+      if (r !== null && typeof r === 'object' && r.tick_error !== undefined) {
+        const te = r.tick_error;
+        throw Object.assign(
+          new Error(`reaper_tick: ${String(te?.message ?? 'فشلُ الحصاد').slice(0, 300)}`),
+          {
+            code: typeof te?.sqlstate === 'string' ? te.sqlstate : 'XF525',
+            tickError: true,
+          },
+        );
+      }
+      consecutivePermanent = 0;
+      return r;
     },
   };
   const handle = startLapseReaper(reaper, {
@@ -594,6 +663,7 @@ export function runSovereignReaper(options) {
       return st;
     },
     stats: () => ({ ...handle.stats(), connects }),
+    instance: () => (mode === 'reaper' ? instance : null),
   };
 }
 
