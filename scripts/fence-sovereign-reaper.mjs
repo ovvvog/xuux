@@ -8,10 +8,17 @@
  * **بلا مفتاحِ توقيع:** تحصدُ ولا تُصدِرُ أمراً سياديّاً؛ وتُرفَضُ إن لم يكن الدورُ `xf_sovereign` (‏خروجٌ بـ2).
  *
  * الدخل: `XUUX_SOVEREIGN_DATABASE_URL` (‏لا تُطبَعُ أبداً). الخيارات: `--ceiling-ms` (‏5000)، `--retry-ms` (‏1000)،
- * `--min-delay-ms` (‏5)، `--heartbeat-ms` (‏10000، 0 = بلا نبض)، `--query-timeout-ms` (‏10000، ≥ 1 — لا «بلا مهلة»).
+ * `--min-delay-ms` (‏5)، `--heartbeat-ms` (‏10000، 0 = بلا نبض)، `--query-timeout-ms` (‏10000، ≥ 1 — لا «بلا مهلة»)،
+ * `--max-retry-ms` (‏WL-553، افتراضاً = `--ceiling-ms`: سقفُ التراجعِ الأُسّيّ بتذبذب، ∈ [retry، ceiling])،
+ * `--permanent-limit` (‏WL-553، 5، ≥ 1: أخطاءٌ دائمةٌ متتاليةٌ بجدولِ `REAPER_ERROR_TABLE` قبلَ الخروجِ بـ78).
  * الخرج: سطرُ JSON لكلِّ حدثٍ على stdout: `started`، `connected`، `reaped`، `unresolved`، `error`، `heartbeat`،
  * `fatal`، `stopped` (‏بعدّاداتِ النبضاتِ والأخطاءِ والمحصودِ وغيرِ المحسوم). SIGTERM/SIGINT ⇒ إيقافٌ منضبطٌ ينتظرُ
  * النداءَ الجاريَ ثمّ خروجٌ بـ0.
+ *
+ * **رموزُ الخروج (‏WL-553):** `0` إيقافٌ بإشارة · `2` استعمالٌ خاطئ (‏خيارٌ أو وصلةٌ غيرُ مضبوطة) أو دورٌ غيرُ `xf_sovereign` ·
+ * `78` (‏EX_CONFIG) خطأٌ دائمٌ تكرّرَ `--permanent-limit` مرّةً متتالية (‏مصادقة، قاعدةٌ مفقودة، صلاحيّة، هجرةٌ ناقصة، TLS).
+ * المُشرِفُ يُعيدُ ما سواها ويمنعُ إعادةَ `2` و`78` (‏`RestartPreventExitStatus=2 78`) — فالخطأُ الدائمُ لا يُعادُ بلا نهاية،
+ * والمؤقّتُ والمجهولُ يبقيانِ داخلَ العمليّةِ بتراجعٍ حتى `--max-retry-ms`.
  */
 
 import process from 'node:process';
@@ -34,6 +41,8 @@ const { values } = parseArgs({
     'min-delay-ms': { type: 'string', default: '5' },
     'heartbeat-ms': { type: 'string', default: '10000' },
     'query-timeout-ms': { type: 'string', default: '10000' },
+    'max-retry-ms': { type: 'string' },
+    'permanent-limit': { type: 'string', default: '5' },
   },
 });
 /** @param {string} name @param {number} [min] */
@@ -53,6 +62,12 @@ if (url === undefined || url === '') {
 // WL-548: 0 في pg يعني «بلا مهلة» للاتصالِ والنداءِ معاً ⇒ قاعدةٌ لا تُجيبُ تُعلِّقُ الحصادَ صامتاً (‏لا error ولا إعادة) — أرضيّةٌ 1.
 const queryTimeoutMs = int('query-timeout-ms', 1);
 const heartbeatMs = int('heartbeat-ms');
+const ceilingMs = int('ceiling-ms');
+const maxRetryMs =
+  /** @type {Record<string, unknown>} */ (values)['max-retry-ms'] === undefined
+    ? ceilingMs
+    : int('max-retry-ms', 1);
+const permanentLimit = int('permanent-limit', 1);
 
 /** @type {ReturnType<typeof runSovereignReaper> | null} */
 let reaper = null;
@@ -68,8 +83,10 @@ const shutdown = async (code) => {
 emit({ ev: 'started' });
 try {
   reaper = runSovereignReaper({
-    ceilingMs: int('ceiling-ms'),
+    ceilingMs,
     retryMs: int('retry-ms'),
+    maxRetryMs,
+    permanentLimit,
     minDelayMs: int('min-delay-ms'),
     connect: async () => {
       const c = new pg.Client({
@@ -93,6 +110,10 @@ try {
       if (event['ev'] === 'error' && event['code'] === FENCE_ERRORS.REAPER_ROLE) {
         emit({ ev: 'fatal', reason: 'role' });
         void shutdown(2);
+      } else if (event['ev'] === 'error' && event['permanent_exhausted'] === true) {
+        // ‏WL-553: خطأٌ دائمٌ متكرّر ⇒ 78 لا إعادةَ محاولةٍ بلا نهاية (‏ولا يُعيدُه المُشرِف).
+        emit({ ev: 'fatal', reason: 'permanent', code: event['code'], rule: event['rule'] });
+        void shutdown(78);
       }
     },
   });

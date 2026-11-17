@@ -262,6 +262,102 @@ export async function jsonbDigest(db, detail) {
 export const REAPER_RETRY_FLOOR_MS = 10;
 
 /**
+ * WL-553: جدولُ تصنيفِ أخطاءِ الحاصد. **دائمٌ** = لا يزولُ بالانتظار (‏إعدادٌ أو صلاحيّةٌ أو هجرةٌ ناقصة) ⇒ بعدَ
+ * `permanentLimit` متتاليةً تخرجُ العمليّةُ بـ78 (‏EX_CONFIG) فلا يُعيدُها المُشرِفُ بلا نهاية. **مؤقّتٌ** = انقطاعٌ أو إيقافٌ
+ * أو ضغطُ موارد ⇒ إعادةٌ بتراجع. وما لا يطابقُ صفّاً **مجهولٌ** يُعادُ كالمؤقّت ولا يُخرِجُ — فلا يُقتَلُ الحاصدُ بخطأٍ لم يُفهَم.
+ * لا كلُّ SQL دائم (‏57P01، 53300، 40001… مؤقّتة)، ولا كلُّ خطأِ اتصالٍ مؤقّت (‏28P01 وشهاداتُ TLS دائمة).
+ * @type {ReadonlyArray<Readonly<{ class: 'permanent' | 'transient', codes?: readonly string[], prefixes?: readonly string[], messages?: readonly RegExp[], why: string }>>}
+ */
+export const REAPER_ERROR_TABLE = Object.freeze([
+  {
+    class: 'permanent',
+    codes: ['28P01', '28000'],
+    why: 'مصادقة: كلمةُ مرورٍ خاطئةٌ أو لا مدخلَ في pg_hba أو دورٌ بلا دخول',
+  },
+  { class: 'permanent', codes: ['3D000'], why: 'القاعدةُ المسمّاةُ في الوصلةِ غيرُ موجودة' },
+  { class: 'permanent', codes: ['42501'], why: 'الدورُ لا يملكُ EXECUTE على reap_lapsed' },
+  {
+    class: 'permanent',
+    codes: ['42883', '3F000', '42P01'],
+    why: 'هجرةٌ ناقصة: دالّةٌ أو مخطّطٌ أو جدولٌ غيرُ موجود',
+  },
+  { class: 'permanent', codes: [FENCE_ERRORS.REAPER_ROLE], why: 'الوصلةُ بدورٍ غيرِ xf_sovereign' },
+  {
+    class: 'permanent',
+    codes: [
+      'DEPTH_ZERO_SELF_SIGNED_CERT',
+      'SELF_SIGNED_CERT_IN_CHAIN',
+      'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+      'CERT_HAS_EXPIRED',
+      'ERR_TLS_CERT_ALTNAME_INVALID',
+    ],
+    messages: [/^The server does not support SSL connections/, /^SASL: /],
+    why: 'TLS أو SCRAM: شهادةٌ مرفوضةٌ أو خادمٌ بلا TLS أو كلمةُ مرورٍ غيرُ مضبوطةٍ في العميل',
+  },
+  { class: 'transient', prefixes: ['08'], why: 'صنفُ 08: استثناءُ اتصال (‏انقطاعٌ أو رفضٌ عابر)' },
+  {
+    class: 'transient',
+    codes: ['57P01', '57P02', '57P03'],
+    why: 'إيقافٌ إداريٌّ أو انهيارٌ أو قاعدةٌ تبدأُ/تتعافى',
+  },
+  {
+    class: 'transient',
+    prefixes: ['53'],
+    why: 'صنفُ 53: نفادُ موارد (‏too_many_connections، ذاكرة، قرص)',
+  },
+  {
+    class: 'transient',
+    codes: ['40001', '40P01', '55P03', '57014', '25006'],
+    why: 'تعارضٌ أو قفلٌ أو مهلةُ نداءٍ أو قاعدةٌ للقراءةِ بعدَ تحويل',
+  },
+  {
+    class: 'transient',
+    codes: [
+      'ECONNREFUSED',
+      'ECONNRESET',
+      'ETIMEDOUT',
+      'EHOSTUNREACH',
+      'ENETUNREACH',
+      'EAI_AGAIN',
+      'EPIPE',
+      'ENOTFOUND',
+    ],
+    messages: [
+      /^Connection terminated/,
+      /^Query read timeout/,
+      /timeout exceeded when trying to connect/,
+    ],
+    why: 'شبكة: المضيفُ أو المنفذُ أو الاسمُ غيرُ متاحٍ الآن، أو مهلةُ العميل (‏ENOTFOUND مؤقّتٌ: انقطاعُ DNS لا يُميَّزُ من خطأِ الاسم)',
+  },
+]);
+
+/**
+ * WL-553: يُصنِّفُ خطأَ الحاصدِ بـ`REAPER_ERROR_TABLE` — بالرمزِ أوّلاً (‏SQLSTATE أو رمزُ Node) ثمّ بالرسالة.
+ * @param {unknown} error
+ * @returns {{ class: 'permanent' | 'transient' | 'unknown', rule: string }}
+ */
+export function classifyReaperError(error) {
+  const e = /** @type {any} */ (error);
+  const code = typeof e?.code === 'string' ? e.code : '';
+  const message = typeof e?.message === 'string' ? e.message : '';
+  for (const row of REAPER_ERROR_TABLE) {
+    if (
+      code !== '' &&
+      (row.codes?.includes(code) ||
+        row.prefixes?.some((p) => /^[0-9A-Z]{5}$/.test(code) && code.startsWith(p)))
+    )
+      return { class: row.class, rule: row.why };
+  }
+  for (const row of REAPER_ERROR_TABLE) {
+    if (row.messages?.some((m) => m.test(message))) return { class: row.class, rule: row.why };
+  }
+  return { class: 'unknown', rule: 'لا صفَّ يطابق — يُعادُ كالمؤقّتِ ولا يُخرِج' };
+}
+
+/** WL-553: نسبةُ التذبذبِ النازل: التأخيرُ ∈ [max(retryMs، الأساس × (1 − 0.5))، الأساس]. */
+export const REAPER_BACKOFF_JITTER = 0.5;
+
+/**
  * WL-545: حاصدٌ مستقلٌّ عن حافظِ الإيجار. بلا هذا لا يُنادى `reap_lapsed` إلا عندَ رفضِ التجديدِ أو الإيقافِ أو المصافحة؛
  * فإن ماتت عمليّةُ الجذر (‏ومعها الحافظ) أو أوقفَ الحارسُ المحلّيُّ الحافظَ بقيت جلسةُ الإيجارِ المنقضي حيّةً تُرسِلُ NOTIFY
  * بلا حدّ (‏مقيسٌ على `db8de990`). يُنادي الحاصدَ عندَ `next_due_ms` (‏ساعةُ القاعدة، فلا انحرافَ بينَ ساعتَي المضيفَين)،
@@ -273,8 +369,13 @@ export const REAPER_RETRY_FLOOR_MS = 10;
  * بـlease_set تحتَ HALTED: نومٌ قائمٌ بالنافذةِ القديمةِ يحدُّه السقف)؛ وما دامت العمليّةُ نفسُها حيّة. وإن فشلَ النداءُ أُعيدَ بعدَ `retryMs` ويُبلَّغُ `onError` — لا يُعلَنُ حصادٌ لم يقع.
  * WL-546: استثناءٌ من `onReap`/`onError` لا يوقفُ الحاصد (‏يُعَدُّ في `stats().callbackErrors` ويُبلَّغُ `onCallbackError`).
  * @param {{ reapLapsed(): Promise<LapseReapResult> }} reaper - `FenceSovereign` أو `FenceRoot`
- * @param {{ ceilingMs: number, minDelayMs?: number, retryMs?: number,
- *           onReap?: (result: LapseReapResult) => void, onError?: (error: unknown) => void,
+ * WL-553: **التراجعُ** — الفشلُ رقمُ n المتتالي يُعادُ بعدَ `min(maxRetryMs، retryMs × 2^(n−1))` منقوصاً بتذبذبٍ حتى النصفِ ولا
+ * دونَ `retryMs` (‏أرضيّةُ #565 قائمةٌ: ≥ `REAPER_RETRY_FLOOR_MS`). `maxRetryMs` ∈ [retryMs، ceilingMs] — فالحاصدُ لا ينامُ فوقَ
+ * سقفِه في أيِّ حال؛ وافتراضُه `retryMs` (‏إعادةٌ ثابتةٌ كما قبلُ لمن لم يطلبه). نداءٌ عادَ بنتيجةٍ (‏ولو ok=false) يُصفِّرُ العدّ.
+ * `onError(error, { retryInMs, consecutiveErrors })`.
+ * @param {{ ceilingMs: number, minDelayMs?: number, retryMs?: number, maxRetryMs?: number, random?: () => number,
+ *           onReap?: (result: LapseReapResult) => void,
+ *           onError?: (error: unknown, info: { retryInMs: number, consecutiveErrors: number }) => void,
  *           onCallbackError?: (error: unknown) => void }} options
  * @returns {{ stop(): Promise<void>, stopped: () => boolean, ticks: () => number,
  *             stats: () => { ticks: number, errors: number, reaped: number, unresolved: number, callbackErrors: number } }}
@@ -296,6 +397,21 @@ export function startLapseReaper(reaper, options) {
       throw new TypeError(`startLapseReaper: ${k} عددٌ صحيحٌ بينَ ${floor} وceilingMs`);
     }
   }
+  const maxRetryMs = options.maxRetryMs ?? retryMs;
+  if (!Number.isInteger(maxRetryMs) || maxRetryMs < retryMs || maxRetryMs > ceilingMs) {
+    throw new TypeError('startLapseReaper: maxRetryMs عددٌ صحيحٌ بينَ retryMs وceilingMs');
+  }
+  const random = options.random ?? Math.random;
+  let consecutiveErrors = 0;
+  /** تأخيرُ الفشلِ رقمِ n (‏≥ 1): أُسّيٌّ بسقفٍ ثمّ تذبذبٌ نازلٌ لا يعبرُ الأرضيّة. @param {number} n */
+  const backoff = (n) => {
+    const base = Math.min(maxRetryMs, retryMs * 2 ** Math.min(n - 1, 30));
+    const jittered = Math.round(
+      base * (1 - REAPER_BACKOFF_JITTER * Math.min(1, Math.max(0, random()))),
+    );
+    // ‏jittered ≤ base ≤ maxRetryMs، وretryMs ≤ maxRetryMs ⇒ الناتجُ في [retryMs، maxRetryMs] بلا قصٍّ ثانٍ.
+    return Math.max(retryMs, jittered);
+  };
   let stopped = false;
   const stats = { ticks: 0, errors: 0, reaped: 0, unresolved: 0, callbackErrors: 0 };
   /** @type {NodeJS.Timeout | null} */
@@ -323,6 +439,8 @@ export function startLapseReaper(reaper, options) {
       }
     }
   };
+  /** @param {((x: any, y: any) => void) | undefined} fn @param {unknown} arg @param {unknown} info */
+  const safe2 = (fn, arg, info) => safe(fn === undefined ? undefined : (x) => fn(x, info), arg);
   const tick = async () => {
     stats.ticks += 1;
     /** @type {number} */
@@ -334,9 +452,12 @@ export function startLapseReaper(reaper, options) {
         r = await reaper.reapLapsed();
       } catch (error) {
         stats.errors += 1;
-        if (!stopped) safe(options.onError, error);
+        consecutiveErrors += 1;
+        next = backoff(consecutiveErrors);
+        if (!stopped) safe2(options.onError, error, { retryInMs: next, consecutiveErrors });
         return;
       }
+      consecutiveErrors = 0;
       const reaped = Array.isArray(r?.reaped) ? r.reaped.length : 0;
       const unresolved = Array.isArray(r?.unresolved) ? r.unresolved.length : 0;
       stats.reaped += reaped;
@@ -376,8 +497,12 @@ export function startLapseReaper(reaper, options) {
  * يرفضُ البدءَ بدورٍ غيرِ `expectRole` (‏افتراضاً `xf_sovereign`) — فلا يُشغَّلُ بوصلةِ الجذرِ أو superuser صامتاً.
  * كلُّ حدثٍ سطرٌ في `log` (‏بلا سلسلةِ الاتصالِ ولا أسرار): `connected`، `reaped`، `unresolved`، `error`، `stopped`.
  * فشلُ الاتصالِ أو النداءِ = `error` وإعادةٌ بعدَ `retryMs` — لا يُعلَنُ حصادٌ لم يقع، ولا حلقةٌ ساخنة.
+ * WL-553: كلُّ `error` يحملُ `class` (‏permanent/transient/unknown بـ`classifyReaperError`) و`rule` و`retry_in_ms`
+ * و`consecutive_permanent` (‏الدائمةُ المتتالية؛ مؤقّتٌ أو مجهولٌ أو نداءٌ ناجحٌ يُصفِّرُها)، و`permanent_exhausted: true` مرّةً
+ * عندَ بلوغِ `permanentLimit` (‏افتراضاً بلا حدّ) — والقرارُ (‏الخروجُ بـ78) لمُستدعيه.
  * @param {{ connect: () => Promise<import('pg').ClientBase & { end?: Function, on?: Function }>,
- *           ceilingMs: number, minDelayMs?: number, retryMs?: number, expectRole?: string,
+ *           ceilingMs: number, minDelayMs?: number, retryMs?: number, maxRetryMs?: number, permanentLimit?: number,
+ *           expectRole?: string,
  *           log?: (event: Record<string, unknown>) => void }} options
  */
 export function runSovereignReaper(options) {
@@ -386,6 +511,14 @@ export function runSovereignReaper(options) {
   /** @type {(import('pg').ClientBase & { end?: Function, on?: Function }) | null} */
   let client = null;
   let connects = 0;
+  let consecutivePermanent = 0;
+  const permanentLimit = options.permanentLimit ?? Number.POSITIVE_INFINITY;
+  if (!(
+    permanentLimit === Number.POSITIVE_INFINITY ||
+    (Number.isInteger(permanentLimit) && permanentLimit >= 1)
+  )) {
+    throw new TypeError('runSovereignReaper: permanentLimit عددٌ صحيحٌ ≥ 1');
+  }
   const drop = async () => {
     const c = client;
     client = null;
@@ -419,7 +552,9 @@ export function runSovereignReaper(options) {
         log({ ev: 'connected', role: expectRole, connects });
       }
       try {
-        return await new FenceSovereign(client, null).reapLapsed();
+        const r = await new FenceSovereign(client, null).reapLapsed();
+        consecutivePermanent = 0;
+        return r;
       } catch (error) {
         await drop();
         throw error;
@@ -430,11 +565,24 @@ export function runSovereignReaper(options) {
     ceilingMs: options.ceilingMs,
     ...(options.minDelayMs === undefined ? {} : { minDelayMs: options.minDelayMs }),
     ...(options.retryMs === undefined ? {} : { retryMs: options.retryMs }),
+    ...(options.maxRetryMs === undefined ? {} : { maxRetryMs: options.maxRetryMs }),
     onReap: (r) => {
       for (const x of r.reaped ?? []) log({ ev: 'reaped', ...x });
       if (r.ok !== true) log({ ev: 'unresolved', unresolved: r.unresolved ?? [] });
     },
-    onError: (e) => log({ ev: 'error', ...describe(e) }),
+    onError: (e, info) => {
+      const c = classifyReaperError(e);
+      consecutivePermanent = c.class === 'permanent' ? consecutivePermanent + 1 : 0;
+      log({
+        ev: 'error',
+        ...describe(e),
+        class: c.class,
+        rule: c.rule,
+        retry_in_ms: info.retryInMs,
+        consecutive_permanent: consecutivePermanent,
+        permanent_exhausted: consecutivePermanent === permanentLimit,
+      });
+    },
     onCallbackError: (e) => log({ ev: 'callback_error', ...describe(e) }),
   });
   return {
