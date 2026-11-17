@@ -257,6 +257,9 @@ export async function jsonbDigest(db, detail) {
  * @typedef {{ ok: boolean, reaped: Array<Record<string, unknown>>, unresolved: string[], next_due_ms?: number | null }} LapseReapResult
  */
 
+/** WL-548: أدنى إعادةٍ بعدَ فشلِ الحصاد (‏مث) — لا حلقةَ ساخنةً على القاعدة بأيِّ إعداد. */
+export const REAPER_RETRY_FLOOR_MS = 10;
+
 /**
  * WL-545: حاصدٌ مستقلٌّ عن حافظِ الإيجار. بلا هذا لا يُنادى `reap_lapsed` إلا عندَ رفضِ التجديدِ أو الإيقافِ أو المصافحة؛
  * فإن ماتت عمليّةُ الجذر (‏ومعها الحافظ) أو أوقفَ الحارسُ المحلّيُّ الحافظَ بقيت جلسةُ الإيجارِ المنقضي حيّةً تُرسِلُ NOTIFY
@@ -282,12 +285,14 @@ export function startLapseReaper(reaper, options) {
   }
   const minDelayMs = options.minDelayMs ?? 5;
   const retryMs = options.retryMs ?? Math.min(1000, ceilingMs);
-  for (const [k, v] of [
-    ['minDelayMs', minDelayMs],
-    ['retryMs', retryMs],
-  ]) {
-    if (!Number.isInteger(v) || Number(v) < 0 || Number(v) > ceilingMs) {
-      throw new TypeError(`startLapseReaper: ${k} عددٌ صحيحٌ بينَ 0 وceilingMs`);
+  // WL-548: الصفرُ كان مقبولاً — retryMs = 0 مع minDelayMs = 0 وفشلٍ دائمٍ = نحوُ 900 نداءٍ/ث على القاعدة (‏حلقةٌ ساخنة،
+  // مقيسة). أرضيّةٌ لكلٍّ منهما: minDelayMs ≥ 1، وretryMs ≥ REAPER_RETRY_FLOOR_MS (‏≤ 100 محاولةٍ/ث عندَ الفشل).
+  for (const [k, v, floor] of /** @type {const} */ ([
+    ['minDelayMs', minDelayMs, 1],
+    ['retryMs', retryMs, REAPER_RETRY_FLOOR_MS],
+  ])) {
+    if (!Number.isInteger(v) || Number(v) < floor || Number(v) > ceilingMs) {
+      throw new TypeError(`startLapseReaper: ${k} عددٌ صحيحٌ بينَ ${floor} وceilingMs`);
     }
   }
   let stopped = false;

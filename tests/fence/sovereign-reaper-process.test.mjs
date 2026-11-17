@@ -763,6 +763,23 @@ describe(
       const n = startReaper('');
       assert.equal((await n.exited).code, 2);
       assert.ok(n.events.some((e) => e.ev === 'fatal'));
+      // WL-548: ‏--retry-ms 0 أو --min-delay-ms 0 = حلقةٌ ساخنة ⇒ رفضٌ قبلَ أيِّ اتصال (‏خروجٌ 2).
+      for (const bad of [
+        ['--retry-ms', '0'],
+        ['--min-delay-ms', '0'],
+      ]) {
+        const z = startReaper(sovUrl, bad);
+        assert.equal((await z.exited).code, 2, bad.join(' '));
+        assert.ok(
+          z.events.some((e) => e.ev === 'fatal'),
+          bad.join(' '),
+        );
+        assert.equal(
+          z.events.filter((e) => e.ev === 'connected' || e.ev === 'error').length,
+          0,
+          bad.join(' '),
+        );
+      }
       const secret = decodeURIComponent(new URL(rootUrl).password);
       assert.ok(secret.length > 10);
       assert.ok(!JSON.stringify([...r.events, ...n.events]).includes(secret), 'لا سرَّ في السجل');
