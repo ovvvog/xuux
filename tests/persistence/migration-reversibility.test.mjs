@@ -754,6 +754,8 @@ describe(
     let fresh;
     /** @type {string} */
     let dir27;
+    /** @type {string} */
+    let dir28;
     /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
     let at27;
     /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
@@ -818,11 +820,14 @@ describe(
     before(async () => {
       db = await createIsolatedDatabase('m0028');
       dir27 = migrationsDir(27);
+      // ‏WL-552: هذه الحزمةُ تقيسُ 0028 — فالتقديمُ يقفُ عندَها صراحةً (‏0029 وما بعدَها لها حزمتُها).
+      dir28 = migrationsDir(28);
     });
     after(async () => {
       if (db !== undefined) await db.drop();
       if (fresh !== undefined) await fresh.drop();
       rmSync(dir27, { recursive: true, force: true });
+      rmSync(dir28, { recursive: true, force: true });
     });
 
     it('على 0027: العضويّةُ في xf_owner لا تُرى (‏العيبُ مقيساً)', async () => {
@@ -840,7 +845,7 @@ describe(
     });
 
     it('الترقيةُ إلى 0028 تُطبِّقُ [28] بلا اختلافِ بصمة، والفحصُ كلُّه يجتاز', async () => {
-      assert.deepEqual((await up(db.pool)).applied, [28]);
+      assert.deepEqual((await up(db.pool, { dir: dir28 })).applied, [28]);
       at28 = await fenceFunctionCatalog(db.pool);
       assert.notDeepEqual(at28, at27, '0028 غيّرت الكتالوجَ فعلاً');
       assert.deepEqual(await probe(db.pool), []);
@@ -853,14 +858,14 @@ describe(
 
     it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0028 نفسِه', async () => {
       fresh = await createIsolatedDatabase('m0028f');
-      await up(fresh.pool);
+      await up(fresh.pool, { dir: dir28 });
       assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at28);
     });
 
     it('رجوعُ 0028 يُعيدُ كتالوجَ 0027 بايتاً ببايت (‏والبيانَ ببصماتِه)، وإعادةُ التقديمِ تُطابق', async () => {
       assert.equal((await down(db.pool, { steps: 1 })).current, 27);
       assert.deepEqual(await fenceFunctionCatalog(db.pool), at27);
-      assert.deepEqual((await up(db.pool)).applied, [28]);
+      assert.deepEqual((await up(db.pool, { dir: dir28 })).applied, [28]);
       assert.deepEqual(await fenceFunctionCatalog(db.pool), at28);
     });
 
@@ -909,10 +914,115 @@ describe(
         } finally {
           rmSync(d, { recursive: true, force: true });
         }
-        assert.deepEqual((await up(db.pool)).applied, [28]);
+        assert.deepEqual((await up(db.pool, { dir: dir28 })).applied, [28]);
         assert.deepEqual(await probe(db.pool), [], 'النصُّ الحقيقيُّ يجتاز');
         assert.deepEqual(await fenceFunctionCatalog(db.pool), at28);
       });
     }
+  },
+);
+
+// ── WL-552: جلسةُ الاعتمادِ الملغى الحيّة (‏0029) ──
+//
+// 0029 تُعيدُ كتابةَ fence._reap_lapsed() وتُضيفُ fence._signal_session(). هنا: الترقيةُ تُطبِّقُ [29]، وقاعدةٌ جديدةٌ تنتهي
+// إلى الكتالوجِ نفسِه، والرجوعُ يُعيدُ كتالوجَ 0028 بايتاً ببايت — و_reap_lapsed بعدَ الرجوعِ هي نصُّ 0027 حرفيّاً ببصمتِه
+// في البيان (‏مقابَلةً بقاعدةٍ وقفت عندَ 0027، و0028 لم تمسَّها). السلوكُ الحيُّ والطفراتُ في tests/fence/lease-reap-window.
+describe(
+  'WL-552 — 0029: الترقية، والرجوع إلى 0028 (‏و_reap_lapsed إلى 0027 ببصمتِها)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>> | undefined} */
+    let fresh;
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>> | undefined} */
+    let only27;
+    /** @type {string} */
+    let dir27;
+    /** @type {string} */
+    let dir28;
+    /** @type {string} */
+    let dir29;
+    /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+    let at28;
+    /** @type {Awaited<ReturnType<typeof fenceFunctionCatalog>>} */
+    let at29;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    const RL = 'fence._reap_lapsed()';
+    const SIG = 'fence._signal_session(integer,timestamp with time zone,name)';
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    /** @param {Awaited<ReturnType<typeof fenceFunctionCatalog>>} c @param {string} sig */
+    const entry = (c, sig) => ({
+      fn: c.functions.find((f) => f.sig === sig),
+      digest: c.manifest.find((m) => m.function_signature === sig)?.digest,
+    });
+    before(async () => {
+      db = await createIsolatedDatabase('m0029');
+      dir27 = migrationsDir(27);
+      dir28 = migrationsDir(28);
+      dir29 = migrationsDir(29);
+    });
+    after(async () => {
+      for (const d of [db, fresh, only27]) if (d !== undefined) await d.drop();
+      for (const d of [dir27, dir28, dir29]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('الترقيةُ إلى 0029 تُطبِّقُ [29] بلا اختلافِ بصمة، والدالّةُ الجديدةُ مسحوبةٌ من PUBLIC', async () => {
+      assert.equal((await up(db.pool, { dir: dir28 })).current, 28);
+      at28 = await fenceFunctionCatalog(db.pool);
+      assert.deepEqual((await up(db.pool, { dir: dir29 })).applied, [29]);
+      at29 = await fenceFunctionCatalog(db.pool);
+      assert.notDeepEqual(entry(at29, RL), entry(at28, RL), '0029 غيّرت _reap_lapsed فعلاً');
+      const fn = at29.functions.find((f) => f.sig === SIG);
+      assert.ok(fn, 'الدالّةُ حاضرة');
+      assert.equal(fn.owner, 'xf_owner');
+      assert.equal(
+        fn.secdef,
+        true,
+        'تُرسِلُ الإشارةَ بصلاحيةِ المالك (‏كـ_terminate_worker_sessions)',
+      );
+      assert.equal(fn.acl, '{xf_owner=X/xf_owner}', 'مسحوبةٌ من PUBLIC ولا تُمنَحُ لأحد');
+      assert.ok(entry(at29, SIG).digest, 'في البيان');
+      const others = (/** @type {typeof at28} */ c) => ({
+        functions: c.functions.filter((f) => f.sig !== RL && f.sig !== SIG),
+        eventTriggers: c.eventTriggers,
+        manifest: c.manifest.filter(
+          (m) => m.function_signature !== RL && m.function_signature !== SIG,
+        ),
+      });
+      assert.deepEqual(others(at29), others(at28), 'لا تغييرَ خارجَ الدالّتَين');
+    });
+
+    it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى كتالوجِ 0029 نفسِه', async () => {
+      fresh = await createIsolatedDatabase('m0029f');
+      await up(fresh.pool, { dir: dir29 });
+      assert.deepEqual(await fenceFunctionCatalog(fresh.pool), at29);
+    });
+
+    it('رجوعُ 0029 يُعيدُ كتالوجَ 0028 بايتاً ببايت، و_reap_lapsed نصَّ 0027 ببصمتِه، وإعادةُ التقديمِ تُطابق', async () => {
+      assert.equal((await down(db.pool, { steps: 1, dir: dir29 })).current, 28);
+      const back = await fenceFunctionCatalog(db.pool);
+      assert.deepEqual(back, at28);
+      only27 = await createIsolatedDatabase('m0029at27');
+      await up(only27.pool, { dir: dir27 });
+      const at27 = await fenceFunctionCatalog(only27.pool);
+      assert.deepEqual(
+        entry(back, RL),
+        entry(at27, RL),
+        'التعريفُ والمالكُ وACL وبصمةُ البيان = 0027',
+      );
+      assert.equal(entry(back, SIG).fn, undefined, 'الدالّةُ الجديدةُ أُسقِطت');
+      assert.equal(entry(back, SIG).digest, undefined, 'وبصمتُها من البيان');
+      assert.deepEqual((await up(db.pool, { dir: dir29 })).applied, [29]);
+      assert.deepEqual(await fenceFunctionCatalog(db.pool), at29);
+    });
   },
 );

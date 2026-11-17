@@ -2702,8 +2702,10 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
       assert.equal((await credential(rb)).status, 'ACTIVE');
       // الحصادُ ثانيةً لا يفعلُ شيئاً (‏لا يُخفي ولا يختلق).
       // ‏(WL-545: next_due_ms مفتاحٌ إضافيّ — موعدُ rb المُجدَّدِ للتوّ، بينَ 0 والنافذة؛ والباقي كما كان.)
-      const { next_due_ms: due, ...again } = await h.sovereign.reapLapsed();
+      // ‏(WL-552: lingering مفتاحٌ إضافيّ — لا جلسةَ لاعتمادٍ ملغى باقية ⇒ فارغ.)
+      const { next_due_ms: due, lingering, ...again } = await h.sovereign.reapLapsed();
       assert.deepEqual(again, { ok: true, reaped: [], unresolved: [] });
+      assert.deepEqual(lingering, []);
       const win = (await h.db.pool.query('SELECT lease_window_s FROM fence.control')).rows[0];
       assert.ok(
         Number.isInteger(due) && Number(due) > 0 && Number(due) <= win.lease_window_s * 1000,
@@ -2903,7 +2905,7 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
         )
       ).rows[0];
     const before = await snap();
-    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026 WL-544، 0027 WL-545، 0028 WL-551) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
+    // ‏≥ 25: هجراتٌ لاحقةٌ (‏0026 WL-544، 0027 WL-545، 0028 WL-551، 0029 WL-552) فوقَها؛ والرجوعُ خطوةً يمسُّ الأعلى — ومرفوضٌ كذلك.
     assert.ok(before.v >= 25, String(before.v));
     // الطبقةُ الأولى: المُهاجِرُ نفسُه يُرفَضُ تحتَ RUNNING (‏xf_ddl_start ⇒ XF201 على إنشاءِ دفترِه).
     await assert.rejects(
@@ -2921,6 +2923,8 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
       '0027_fence_reap_deadline.up.sql',
       '0028_fence_owner_membership.down.sql',
       '0028_fence_owner_membership.up.sql',
+      '0029_fence_revoked_session.down.sql',
+      '0029_fence_revoked_session.up.sql',
     ]) {
       const sql = readFileSync(new URL(`../../migrations/${file}`, import.meta.url), 'utf8');
       const c = await h.db.pool.connect();
