@@ -437,6 +437,8 @@ async function main() {
       'tests/fence/db-fence.test.mjs',
       CLOCK_FILE === '' ? {} : { XUUX_FENCE_FAKETIME_FILE: CLOCK_FILE },
     ],
+    // `WL-555`: كتلُ WL-541/544/551 نُقلت من db-fence إلى ملفٍّ مستقلٍّ لمهلةِ الملفّ — تبقى في المختبر.
+    ['tests/fence/db-fence-privileges.test.mjs', {}],
     ['tests/fence/fence-lifecycle.test.mjs', {}],
     ['tests/fence/halt-integrity.test.mjs', {}],
     ['tests/fence/effects.test.mjs', {}],
