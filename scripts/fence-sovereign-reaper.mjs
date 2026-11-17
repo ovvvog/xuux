@@ -8,7 +8,7 @@
  * **بلا مفتاحِ توقيع:** تحصدُ ولا تُصدِرُ أمراً سياديّاً؛ وتُرفَضُ إن لم يكن الدورُ `xf_sovereign` (‏خروجٌ بـ2).
  *
  * الدخل: `XUUX_SOVEREIGN_DATABASE_URL` (‏لا تُطبَعُ أبداً). الخيارات: `--ceiling-ms` (‏5000)، `--retry-ms` (‏1000)،
- * `--min-delay-ms` (‏5)، `--heartbeat-ms` (‏10000، 0 = بلا نبض)، `--query-timeout-ms` (‏10000).
+ * `--min-delay-ms` (‏5)، `--heartbeat-ms` (‏10000، 0 = بلا نبض)، `--query-timeout-ms` (‏10000، ≥ 1 — لا «بلا مهلة»).
  * الخرج: سطرُ JSON لكلِّ حدثٍ على stdout: `started`، `connected`، `reaped`، `unresolved`، `error`، `heartbeat`،
  * `fatal`، `stopped` (‏بعدّاداتِ النبضاتِ والأخطاءِ والمحصودِ وغيرِ المحسوم). SIGTERM/SIGINT ⇒ إيقافٌ منضبطٌ ينتظرُ
  * النداءَ الجاريَ ثمّ خروجٌ بـ0.
@@ -36,11 +36,11 @@ const { values } = parseArgs({
     'query-timeout-ms': { type: 'string', default: '10000' },
   },
 });
-/** @param {string} name */
-const int = (name) => {
+/** @param {string} name @param {number} [min] */
+const int = (name, min = 0) => {
   const v = Number(/** @type {Record<string, string>} */ (values)[name]);
-  if (!Number.isInteger(v) || v < 0) {
-    emit({ ev: 'fatal', reason: `--${name} عددٌ صحيحٌ غيرُ سالب` });
+  if (!Number.isInteger(v) || v < min) {
+    emit({ ev: 'fatal', reason: `--${name} عددٌ صحيحٌ ≥ ${min}` });
     process.exit(2);
   }
   return v;
@@ -50,7 +50,8 @@ if (url === undefined || url === '') {
   emit({ ev: 'fatal', reason: 'XUUX_SOVEREIGN_DATABASE_URL غيرُ مضبوط' });
   process.exit(2);
 }
-const queryTimeoutMs = int('query-timeout-ms');
+// WL-548: 0 في pg يعني «بلا مهلة» للاتصالِ والنداءِ معاً ⇒ قاعدةٌ لا تُجيبُ تُعلِّقُ الحصادَ صامتاً (‏لا error ولا إعادة) — أرضيّةٌ 1.
+const queryTimeoutMs = int('query-timeout-ms', 1);
 const heartbeatMs = int('heartbeat-ms');
 
 /** @type {ReturnType<typeof runSovereignReaper> | null} */

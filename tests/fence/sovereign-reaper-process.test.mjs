@@ -763,13 +763,19 @@ describe(
       const n = startReaper('');
       assert.equal((await n.exited).code, 2);
       assert.ok(n.events.some((e) => e.ev === 'fatal'));
-      // WL-548: ‏--retry-ms 0 أو --min-delay-ms 0 = حلقةٌ ساخنة ⇒ رفضٌ قبلَ أيِّ اتصال (‏خروجٌ 2).
+      // WL-548: ‏--retry-ms 0 أو --min-delay-ms 0 = حلقةٌ ساخنة، و--query-timeout-ms 0 = بلا مهلة (‏pg: 0 يُعطِّلُ مهلتَي
+      // الاتصالِ والنداء ⇒ نداءٌ معلَّقٌ يُوقِفُ الحصادَ صامتاً، مقيس) ⇒ رفضٌ قبلَ أيِّ اتصال (‏خروجٌ 2).
       for (const bad of [
         ['--retry-ms', '0'],
         ['--min-delay-ms', '0'],
+        ['--query-timeout-ms', '0'],
       ]) {
         const z = startReaper(sovUrl, bad);
-        assert.equal((await z.exited).code, 2, bad.join(' '));
+        // انحدارٌ يُقبَلُ فيه الإعدادُ يُبقي العمليّةَ حيّةً — تُقتَلُ بعدَ 5 ث فيفشلُ الاختبارُ سريعاً لا بمهلةِ الملفّ.
+        const killer = setTimeout(() => z.p.kill('SIGKILL'), 5000);
+        const zx = await z.exited;
+        clearTimeout(killer);
+        assert.equal(zx.code, 2, bad.join(' '));
         assert.ok(
           z.events.some((e) => e.ev === 'fatal'),
           bad.join(' '),
