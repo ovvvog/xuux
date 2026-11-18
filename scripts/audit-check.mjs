@@ -31,7 +31,7 @@ const rank = (s) =>
 
 /**
  * WL-557: يحكمُ على تقريرِ `npm audit --json` بملفِّ القفل.
- * @param {{ vulnerabilities?: Record<string, any> }} audit
+ * @param {any} audit تقريرُ `npm audit --json` كما هو (‏شكلُه يُتحقَّقُ منه — WL-572)
  * @param {{ lockfileVersion?: number, packages?: Record<string, { version?: string, dev?: boolean }> }} lock
  * @param {Date} now
  * @param {ReadonlyArray<{ advisory: string, maxSeverity: string, expires: string }>} [exceptions]
@@ -39,7 +39,27 @@ const rank = (s) =>
  *             excused: Array<{ name: string, severity: string, advisories: string[] }> }}
  */
 export function evaluateAudit(audit, lock, now, exceptions = AUDIT_EXCEPTIONS) {
-  const vulns = audit?.vulnerabilities ?? {};
+  // WL-572: تقريرٌ لا يُفهَمُ لا يُقرأُ «لا ثغرات» — خطأُ npm (‏`{message, error}` حينَ لا يُجيبُ السجلّ)، أو `vulnerabilities`
+  // غائبةٌ أو ليست كائناً، يُسقِطُ الفحص (‏فشلٌ مغلق). كانَ يُقرأُ 0 ثغراتٍ فيخرجُ ✅ بصفر.
+  const shape =
+    typeof audit !== 'object' || audit === null || Array.isArray(audit)
+      ? 'ليس كائناً'
+      : 'error' in audit
+        ? `خطأُ npm: ${String(/** @type {any} */ (audit).message ?? '').slice(0, 200)}`
+        : typeof audit.vulnerabilities !== 'object' ||
+            audit.vulnerabilities === null ||
+            Array.isArray(audit.vulnerabilities)
+          ? 'vulnerabilities غائبةٌ أو ليست كائناً'
+          : '';
+  if (shape !== '') {
+    return {
+      blocking: [
+        { name: '(التقرير)', severity: 'critical', reason: `تقريرُ تدقيقٍ غيرُ صالح: ${shape}` },
+      ],
+      excused: [],
+    };
+  }
+  const vulns = /** @type {Record<string, any>} */ (audit.vulnerabilities);
   const packages = lock?.packages ?? {};
   const live = exceptions.filter((e) => now.getTime() < Date.parse(`${e.expires}T00:00:00Z`));
   /** @param {any} v */
@@ -73,7 +93,8 @@ export function evaluateAudit(audit, lock, now, exceptions = AUDIT_EXCEPTIONS) {
   const result = { blocking: [], excused: [] };
   for (const [name, v] of Object.entries(vulns)) {
     const severity = String(v?.severity);
-    if (!(severity === 'high' || severity === 'critical')) continue;
+    // WL-572: الشدّةُ غيرُ المعروفةِ حرجةٌ (‏`rank`) — كانت تُتخطّى («Critical»، «HIGH»، فارغة، غائبة) فتمرّ.
+    if (rank(severity) < rank('high')) continue;
     const ls = leaves(name, new Set());
     let reason = '';
     if (ls === null) reason = 'سلسلةٌ غيرُ محلولة';

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { writeFileSync, mkdirSync, rmSync, readFileSync, cpSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -527,6 +527,136 @@ test('WL-571: كلُّ ثغرةٍ حرجةٍ أو عاليةٍ أخرى تُسق
     blocking: [],
     excused: [],
   });
+});
+
+// ── WL-572: الفحصُ كان يمرُّ على تقريرٍ لا يفهمُه — خطأُ npm (‏{message, error} بلا vulnerabilities، مقيسٌ بسجلٍّ لا يُجيب)
+// ‏أو شدّةُ عقدةٍ غيرُ معروفة («Critical»، «HIGH»، فارغة، غائبة) ⇒ 0 ثغرات ⇒ ✅ وخروجٌ 0، وR3 يقبلُ التقريرَ المحفوظ. ──
+
+const AUDIT_CHECK = fileURLToPath(new URL('../../scripts/audit-check.mjs', import.meta.url));
+/** خطأُ `npm audit --json` المقيسُ حرفيّاً حينَ لا يُجيبُ السجلّ (‏ECONNREFUSED). */
+const NPM_AUDIT_ERROR = {
+  message:
+    'request to http://127.0.0.1:9/-/npm/v1/security/audits/quick failed, reason: connect ECONNREFUSED 127.0.0.1:9',
+  error: { summary: '', detail: '' },
+};
+
+test('WL-572: تقريرُ تدقيقٍ لا يُفهَمُ يُسقِطُ الفحص — خطأُ npm، وغيابُ vulnerabilities أو شكلُها، وما ليس كائناً', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  const lock = { packages: {} };
+  for (const [label, audit] of /** @type {Array<[string, any]>} */ ([
+    ['خطأُ npm المقيس', NPM_AUDIT_ERROR],
+    ['error مع vulnerabilities فارغة', { error: { code: 'EAUDITNOLOCK' }, vulnerabilities: {} }],
+    ['بلا vulnerabilities', { auditReportVersion: 2, metadata: {} }],
+    ['vulnerabilities مصفوفة', { vulnerabilities: [] }],
+    ['vulnerabilities نصّ', { vulnerabilities: 'none' }],
+    ['vulnerabilities null', { vulnerabilities: null }],
+    ['null', null],
+    ['مصفوفة', []],
+    ['نصّ', 'ok'],
+  ])) {
+    const r = evaluateAudit(audit, lock, NOW);
+    assert.equal(r.blocking.length, 1, label);
+    assert.match(String(r.blocking[0]?.reason), /تقريرُ تدقيقٍ غيرُ صالح/, label);
+    assert.deepEqual(r.excused, [], label);
+  }
+  // ‏والتقريرُ السليمُ الفارغُ يمرّ (‏لا إنذارَ كاذب).
+  assert.deepEqual(evaluateAudit({ auditReportVersion: 2, vulnerabilities: {} }, lock, NOW), {
+    blocking: [],
+    excused: [],
+  });
+});
+
+test('WL-572: شدّةُ عقدةٍ غيرُ معروفةٍ تُعامَلُ حرجةً (‏فشلٌ مغلق) — إنتاجيّةً وتطويريّة، ولا يُعذِرُها إعذار', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  for (const severity of ['Critical', 'HIGH', 'severe', '', undefined, null, 7]) {
+    for (const dev of [true, false]) {
+      const audit = {
+        vulnerabilities: {
+          p: {
+            name: 'p',
+            severity,
+            via: [{ url: PICO_URL, severity }],
+            nodes: ['node_modules/p'],
+          },
+        },
+      };
+      const lock = { packages: { 'node_modules/p': dev ? { dev: true } : {} } };
+      const label = `${JSON.stringify(severity)}/${dev}`;
+      assert.deepEqual(
+        evaluateAudit(audit, lock, NOW).blocking.map((x) => x.name),
+        ['p'],
+        label,
+      );
+      assert.deepEqual(
+        evaluateAudit(audit, lock, NOW, PICO_EXC).blocking.map((x) => x.name),
+        ['p'],
+        `${label} مع إعذار`,
+      );
+    }
+  }
+  // ‏المعروفةُ دونَ «عالية» لا تُسقِط (‏الحدُّ نفسُه).
+  for (const severity of ['info', 'low', 'moderate']) {
+    const audit = {
+      vulnerabilities: {
+        p: { name: 'p', severity, via: [{ url: 'u', severity }], nodes: ['node_modules/p'] },
+      },
+    };
+    assert.deepEqual(evaluateAudit(audit, { packages: {} }, NOW).blocking, [], severity);
+  }
+});
+
+test('WL-572: audit:check يخرجُ بـ1 حينَ لا يُجيبُ سجلُّ npm، وR3 يرفضُ تقريرَ الخطأِ المحفوظ', () => {
+  const tmp = makeTempRoot();
+  try {
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 't',
+        version: '1.0.0',
+        private: true,
+        dependencies: { pg: '8.23.0' },
+      }),
+    );
+    writeFileSync(
+      path.join(tmp, 'package-lock.json'),
+      JSON.stringify({
+        name: 't',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': { name: 't', version: '1.0.0', dependencies: { pg: '8.23.0' } },
+          'node_modules/pg': { version: '8.23.0' },
+        },
+      }),
+    );
+    const r = spawnSync(process.execPath, [AUDIT_CHECK, '--root', tmp], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        npm_config_registry: 'http://127.0.0.1:9',
+        npm_config_fetch_retries: '0',
+      },
+      timeout: 60000,
+    });
+    assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /تقريرُ تدقيقٍ غيرُ صالح/);
+    assert.doesNotMatch(r.stdout, /✅/);
+    // ‏التقريرُ المحفوظُ (‏خطأُ npm) يرفضُه R3 كذلك.
+    mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
+    writeFileSync(
+      path.join(tmp, 'sbom.cdx.json'),
+      JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'pg' }] }),
+    );
+    writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+    writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify(NPM_AUDIT_ERROR));
+    const g = runGuard(tmp);
+    assert.equal(g.ok, false, g.output);
+    assert.match(g.stderr || g.output, /R3/);
+  } finally {
+    cleanup(tmp);
+  }
 });
 
 /**
