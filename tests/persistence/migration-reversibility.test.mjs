@@ -1443,3 +1443,151 @@ describe(
     });
   },
 );
+
+// ── WL-561: كاتبُ جداولِ fence الأخرى (‏0032) — دالّةٌ جديدةٌ ومُطلِقٌ على كلِّ جدولٍ غيرِ control؛ الرجوعُ يُعيدُ 0031 حرفياً ──
+/**
+ * كلُّ مُطلِقاتِ جداولِ fence (‏لا control وحدَه) — فيُرى ما يُضيفُه 0032 وما يُزيلُه الرجوع.
+ * @param {import('pg').Pool} pool
+ */
+async function fenceTriggerSnapshot(pool) {
+  const r = await pool.query(
+    `SELECT c.relname, t.tgname, t.tgenabled, t.tgtype, t.tgfoid::regprocedure::text AS fn
+       FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+      WHERE c.relnamespace = 'fence'::regnamespace AND NOT t.tgisinternal ORDER BY 1, 2`,
+  );
+  return r.rows;
+}
+
+describe(
+  'WL-561 — 0032: الترقيةُ تُضيفُ _table_writer_guard ومُطلِقَه على كلِّ جدولٍ غيرِ control وتُغيّرُ check_fenced فقط، والرجوعُ إلى 0031 حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir31;
+    /** @type {string} */
+    let dir32;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const ADDED = 'fence._table_writer_guard()';
+    before(async () => {
+      dir31 = migrationsDir(31);
+      dir32 = migrationsDir(32);
+      db = await createIsolatedDatabase('m0032');
+      await up(db.pool, { dir: dir31 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir31, dir32]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: دالّةٌ جديدةٌ واحدة، وcheck_fenced، ومُطلِقٌ لكلِّ جدولٍ غيرِ control؛ وxf_owner والجداولُ حرفيّاً؛ والرجوعُ يُطابقُ 0031', async () => {
+      const at31 = await ownerSnapshot(db.pool);
+      const tg31 = await fenceTriggerSnapshot(db.pool);
+      assert.deepEqual((await up(db.pool, { dir: dir32 })).applied, [32]);
+      const at32 = await ownerSnapshot(db.pool);
+      const tg32 = await fenceTriggerSnapshot(db.pool);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f31 = bySig(at31);
+      const f32 = bySig(at32);
+      assert.deepEqual(
+        Object.keys(f32).filter((k) => !(k in f31)),
+        [ADDED],
+        'دالّةٌ جديدةٌ واحدة',
+      );
+      assert.deepEqual(
+        Object.keys(f31).filter((k) => !(k in f32)),
+        [],
+        'لا دالّةَ محذوفة',
+      );
+      for (const sig of Object.keys(f31)) {
+        if (sig === 'fence.check_fenced()') {
+          assert.notEqual(f32[sig].def, f31[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f32[sig][k], f31[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f32[sig], f31[sig], `${sig} حرفيّاً`);
+      }
+      assert.match(f32[ADDED].def, /XF107/);
+      assert.match(f32[ADDED].def, /session_user/);
+      assert.equal(f32[ADDED].secdef, false, 'SECURITY INVOKER');
+      assert.match(f32['fence.check_fenced()'].def, /fence_table_writer_unguarded/);
+      // ‏البيانُ: الدالّةُ الجديدةُ تُسجَّل، وcheck_fenced يُعادُ تسجيلُه، ولا غيرُهما.
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m31 = m(at31);
+      const m32 = m(at32);
+      assert.deepEqual(
+        Object.keys(m32).filter((k) => !(k in m31)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(m31).filter((k) => m31[k] !== m32[k]),
+        ['fence.check_fenced()'],
+      );
+      assert.deepEqual(at32.owner, at31.owner, 'امتيازاتُ xf_owner وعضويّاتُه لا تتغيّر');
+      assert.deepEqual(at32.tables, at31.tables, 'ملكيّةُ جداولِ fence وACL لا تتغيّر');
+      assert.deepEqual(at32.eventTriggers, at31.eventTriggers);
+      // ‏المُطلِقات: ما قبلَها حرفيّاً، وxf_owner_writer واحدٌ (‏ENABLE ALWAYS) على كلِّ جدولٍ غيرِ control.
+      const tables = await db.pool.query(
+        `SELECT relname FROM pg_class WHERE relnamespace = 'fence'::regnamespace AND relkind = 'r'
+            AND relname <> 'control' ORDER BY 1`,
+      );
+      const added = tg32.filter((t) => t.tgname === 'xf_owner_writer');
+      assert.deepEqual(
+        tg32.filter((t) => t.tgname !== 'xf_owner_writer'),
+        tg31,
+      );
+      assert.equal(tg31.filter((t) => t.tgname === 'xf_owner_writer').length, 0);
+      assert.deepEqual(
+        added.map((t) => t.relname),
+        tables.rows.map((r) => r.relname),
+      );
+      assert.ok(added.length >= 10, `مُطلِقاتٌ كثيرة (${added.length})`);
+      for (const t of added) {
+        assert.equal(t.tgenabled, 'A', `${t.relname}: ENABLE ALWAYS`);
+        assert.equal(t.fn, ADDED);
+        // ‏BEFORE (2) | INSERT (4) | DELETE (8) | UPDATE (16) | TRUNCATE (32)، على مستوى الجملة (‏لا ROW=1).
+        assert.equal(Number(t.tgtype), 2 | 4 | 8 | 16 | 32, `${t.relname}: نوعُ المُطلِق`);
+      }
+      // ‏الكشف: مُطلِقٌ مُعطَّلٌ (‏بيدِ superuser بعدَ تعطيلِ xf_ddl_end) يظهرُ في check_fenced، والإعادةُ تمحوه.
+      const kinds = async () =>
+        (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r.problems.map(
+          (/** @type {{ kind: string }} */ p) => p.kind,
+        );
+      assert.ok(!(await kinds()).includes('fence_table_writer_unguarded'));
+      const client = await db.pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('ALTER EVENT TRIGGER xf_ddl_end DISABLE');
+        await client.query('ALTER TABLE fence.run_lease DISABLE TRIGGER xf_owner_writer');
+        const r = await client.query('SELECT fence.check_fenced() AS r');
+        const p = r.rows[0].r.problems.find(
+          (/** @type {{ kind: string }} */ x) => x.kind === 'fence_table_writer_unguarded',
+        );
+        assert.ok(p, 'المُطلِقُ المُعطَّلُ يُكشَف');
+        assert.deepEqual(p.tables, ['run_lease']);
+      } finally {
+        await client.query('ROLLBACK');
+        client.release();
+      }
+      assert.ok(!(await kinds()).includes('fence_table_writer_unguarded'));
+      // ‏الرجوعُ يُعيدُ 0031 حرفياً (‏دوالَّ وبياناً ومُطلِقات)؛ وإعادةُ التقديمِ تُطابقُ 0032.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir32 })).current, 31);
+      assert.deepEqual(await ownerSnapshot(db.pool), at31);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg31);
+      assert.deepEqual((await up(db.pool, { dir: dir32 })).applied, [32]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at32);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg32);
+    });
+  },
+);

@@ -13,9 +13,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import YAML from 'yaml';
-
 import { CONFIG_DIR, loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
+import { composeEnforcementChain } from '../../src/core/composition-root.mjs';
 
 /**
  * ينسخ بيانات المشروع إلى مجلد مؤقّت كي يُفسد فيها بندٌ واحد بلا لمس المستودع.
@@ -223,4 +223,93 @@ test('ملف مفقود يُفشل التحميل بخطأ مُسمّى لا ب�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// WL-561 (G1): دُمِجَ هنا حرفياً tests/policy/r5-b-08-quarantine-enforcement.test.mjs (‏توحيدُ الاستيرادِ فقط).
+// R5-B-08 (تقرير: R5-B-06) — اختبارُ إثباتٍ: حجرُ الذاكرةِ موصولٌ بنقطةِ الإنفاذ.
+//
+// **السلسلة:** composeEnforcementChain → تسجيل وكيل → quarantine.report → authorize.
+// **المعيار:** الوكيلُ المحجورُ يُرفضُ قبلَ تقييمِ السياسة. الإذنُ السابقُ للحجر
+// لا يبقى بعدَه. هذا الإثباتُ يُثبتُ أنّ الفشلَ السابقَ (وكيلٌ محجورٌ يُؤذَنُ له)
+// صار ممنوعاً.
+//
+// **الحدُّ معلَن:** هذا إثباتُ إنفاذٍ لا إثباتُ إغلاقٍ. صلاحيّةُ الإغلاقِ للمجلس.
+
+/** سجلُّ أحداثٍ صغيرٌ للقياس. */
+function memoryLog() {
+  /** @type {{ type: string, actor: string, payload: object }[]} */
+  const events = [];
+  return {
+    events,
+    /**
+     * @param {string} type
+     * @param {string} actor
+     * @param {object} payload
+     */
+    append(type, actor, payload) {
+      events.push({ type, actor, payload });
+    },
+  };
+}
+
+test('R5-B-08: وكيلٌ محجورٌ يُرفضُ عندَ نقطةِ الإنفاذِ قبلَ السياسة', async () => {
+  const chain = composeEnforcementChain({ log: memoryLog() });
+
+  const agent = await chain.registry.register({
+    name: 'quarantine-probe',
+    role: 'role:agent',
+    capabilities: ['action:write-memory'],
+    kind: 'autonomous',
+  });
+
+  // التحقّقُ من أنّ الوكيلَ مأذونٌ قبلَ الحجر
+  const before = await chain.enforcementPoint.authorize({
+    actor: { id: agent.id, kind: 'autonomous', role: 'role:agent', state: 'active' },
+    action: 'write-memory',
+    resource: { type: 'memory', id: agent.id },
+    context: {},
+  });
+  assert.equal(before.decision.allowed, true, 'الوكيلُ مأذونٌ قبلَ الحجر');
+
+  // الإبلاغُ عن شذوذٍ يحجرُ الوكيل
+  chain.quarantine.report({
+    kind: 'model-fingerprint-mismatch',
+    subject: agent.id,
+  });
+  assert.equal(chain.quarantine.isQuarantined(agent.id), true, 'الوكيلُ محجورٌ بعدَ الإبلاغ');
+
+  // المحاولةُ بعدَ الحجر: تُرفضُ بـ ACTOR_QUARANTINED
+  const after = await chain.enforcementPoint.authorize({
+    actor: { id: agent.id, kind: 'autonomous', role: 'role:agent', state: 'active' },
+    action: 'write-memory',
+    resource: { type: 'memory', id: agent.id },
+    context: {},
+  });
+  assert.equal(after.decision.allowed, false, 'الوكيلُ المحجورُ لا يُؤذَنُ');
+  assert.equal(after.decision.code, 'ACTOR_QUARANTINED', 'رمزُ الرفضِ ACTOR_QUARANTINED');
+});
+
+test('R5-B-08: فاعلٌ غيرُ محجورٍ لا يتأثّرُ بفحصِ الحجر', async () => {
+  const chain = composeEnforcementChain({ log: memoryLog() });
+
+  const agent = await chain.registry.register({
+    name: 'clean-probe',
+    role: 'role:agent',
+    capabilities: ['action:write-memory'],
+    kind: 'autonomous',
+  });
+
+  // حجرُ وكيلٍ آخر لا يؤثّرُ على هذا الوكيل
+  chain.quarantine.report({
+    kind: 'model-fingerprint-mismatch',
+    subject: 'agent:different',
+  });
+
+  const result = await chain.enforcementPoint.authorize({
+    actor: { id: agent.id, kind: 'autonomous', role: 'role:agent', state: 'active' },
+    action: 'write-memory',
+    resource: { type: 'memory', id: agent.id },
+    context: {},
+  });
+  assert.equal(result.decision.allowed, true, 'الوكيلُ غيرُ المحجورِ مأذونٌ');
 });
