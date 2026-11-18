@@ -2326,7 +2326,7 @@ describe(
       const base =
         await su(`SELECT r.rolname AS role, bool_or(am.admin_option) AS a, bool_or(am.inherit_option) AS i,
           bool_or(am.set_option) AS s FROM pg_auth_members am JOIN pg_roles r ON r.oid = am.roleid
-        WHERE am.member = 'xf_owner'::regrole GROUP BY r.rolname ORDER BY 1`);
+        WHERE am.member = 'xf_owner'::regrole AND r.rolname NOT LIKE 'xw\\_%' GROUP BY r.rolname ORDER BY 1`);
       assert.deepEqual(base.rows, [
         { role: 'pg_read_all_stats', a: false, i: true, s: true },
         { role: 'pg_signal_backend', a: false, i: true, s: true },
@@ -2341,6 +2341,8 @@ describe(
       await h.root.halt('wl563-detect', { effects: NO_EFFECTS });
       await mk('zz_wl563_mid');
       await mk('zz_wl563_su', 'NOLOGIN SUPERUSER');
+      // ‏اسمُ هويّةِ عاملٍ بلا عضويّةٍ في xuux_worker: حافّةُ المُنشئِ (‏ADMIN وحدَه) لا تُستثنى له.
+      await mk('xw_wl563_fake');
       const edge = (
         /** @type {string} */ role,
         /** @type {string} */ member,
@@ -2383,6 +2385,18 @@ describe(
           ['GRANT xf_root TO xf_owner WITH INHERIT FALSE, SET FALSE'],
           ['REVOKE xf_root FROM xf_owner'],
           [one('xf_root', {}, [edge('xf_root', 'xf_owner', false, false, false)])],
+        ],
+        [
+          'xf_root بحافّةِ المُنشئِ (‏ADMIN وحدَه)',
+          ['GRANT xf_root TO xf_owner WITH ADMIN TRUE, INHERIT FALSE, SET FALSE'],
+          ['REVOKE xf_root FROM xf_owner'],
+          [one('xf_root', {}, [edge('xf_root', 'xf_owner', true, false, false)])],
+        ],
+        [
+          'xw_* ليس عاملاً بحافّةِ المُنشئ',
+          ['GRANT xw_wl563_fake TO xf_owner WITH ADMIN TRUE, INHERIT FALSE, SET FALSE'],
+          ['REVOKE xw_wl563_fake FROM xf_owner'],
+          [one('xw_wl563_fake', {}, [edge('xw_wl563_fake', 'xf_owner', true, false, false)])],
         ],
         [
           'xf_root عبرَ وسيط',
@@ -2520,6 +2534,14 @@ describe(
       const role = String(w.credential.role_name);
       const renewed = await h.rootClient.query('SELECT fence.renew_lease($1) AS e', [role]);
       assert.ok(renewed.rows[0].e !== null, 'الجذرُ يجدّدُ الإيجار');
+      // ‏هويّةُ العاملِ أنشأَها xf_owner فصارَ له عليها حافّةُ المُنشئ (‏ADMIN وحدَه، PG 16+): أساسٌ لا مشكلة.
+      const creator = await h.db.pool.query(
+        `SELECT am.admin_option AS a, am.inherit_option AS i, am.set_option AS s FROM pg_auth_members am
+        WHERE am.member = 'xf_owner'::regrole AND am.roleid = $1::regrole`,
+        [role],
+      );
+      assert.deepEqual(creator.rows, [{ a: true, i: false, s: false }]);
+      assert.deepEqual(await upward(), []);
     });
   },
 );

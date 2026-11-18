@@ -109,7 +109,13 @@ BEGIN
   WHERE w.child = owner_oid
     AND NOT EXISTS (SELECT 1 FROM base b JOIN e ON e.roleid = r.oid AND e.member = owner_oid
                     WHERE b.rolname = r.rolname AND jsonb_array_length(w.edges) = 1
-                      AND e.admin = b.admin AND e.inherit = b.inherit AND e.set_ = b.set_);
+                      AND e.admin = b.admin AND e.inherit = b.inherit AND e.set_ = b.set_)
+    -- هويّاتُ العمّال: `CREATE ROLE` من xf_owner (‏issue_credential) يمنحُه في PG 16+ حافّةَ المُنشئِ تلقائيّاً (‏ADMIN وحدَه، بلا
+    -- INHERIT ولا SET — كحافّةِ xuux_worker). تُستثنى هذه الحافّةُ المباشرةُ وحدَها لدورٍ عاملٍ (‏xw_*، غيرِ فائق، عضوٍ في xuux_worker)؛
+    -- وما يصلُ إليه xf_owner عبرَها (‏عمقٌ ≥ 2) يُجرَدُ كغيرِه.
+    AND NOT (jsonb_array_length(w.edges) = 1 AND NOT r.rolsuper AND r.rolname LIKE 'xw\_%' AND fence.is_worker_role(r.oid)
+             AND EXISTS (SELECT 1 FROM e WHERE e.roleid = r.oid AND e.member = owner_oid
+                           AND e.admin AND NOT e.inherit AND NOT e.set_));
   RETURN out;
 END
 $f$;
