@@ -1265,3 +1265,296 @@ describe(
     });
   },
 );
+
+// ── WL-558: `--role reaper` (‏الهجرة 0030) — عمليّةٌ حقيقيّةٌ بدورِ xf_reaper، ونبضٌ وصحّةٌ في القاعدة، وانقطاعٌ وتعافٍ ──
+describe(
+  'WL-558: الحاصدُ الدائمُ بـ--role reaper — نبضٌ مربوطٌ وصحّةٌ تُرى من القاعدة، وانقطاعٌ يُرى، وتعافٍ',
+  { skip: skipWithoutDatabase, timeout: 90_000 },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    /** @type {Array<ReturnType<typeof child>>} */
+    const kids = [];
+    before(async () => {
+      h = await harness('wl558p');
+    });
+    after(async () => {
+      for (const k of kids) k.p.kill('SIGKILL');
+      await h?.close();
+    });
+    /** @param {string} role @param {number} [port] */
+    const urlFor = async (role, port) => {
+      const password = randomBytes(18).toString('base64url');
+      await h.db.pool.query(`ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}'`);
+      const url = new URL(databaseUrl() ?? '');
+      url.username = role;
+      url.password = password;
+      url.pathname = `/${h.db.name}`;
+      if (port !== undefined) {
+        url.hostname = '127.0.0.1';
+        url.port = String(port);
+      }
+      return url.toString();
+    };
+    /** @param {Record<string, string>} env @param {string[]} [extra] */
+    const start = (env, extra = []) => {
+      const c = child(
+        [
+          REAPER_CLI,
+          '--role',
+          'reaper',
+          '--ceiling-ms',
+          '1000',
+          '--retry-ms',
+          '200',
+          '--max-retry-ms',
+          '1000',
+          '--query-timeout-ms',
+          '2000',
+          '--heartbeat-ms',
+          '0',
+          ...extra,
+        ],
+        env,
+      );
+      kids.push(c);
+      return c;
+    };
+    // ‏xf_reaper يصدرُ بـVALID UNTIL '-infinity' (‏لا دخولَ بكلمةِ مرور؛ المصادقةُ في النشرِ peer/شهادة — الخيار A)، وجردُه
+    // يعدُّ كلمةَ مرورٍ صالحةً مشكلة (‏PASSWORD_USABLE). فالاختبارُ يفتحُها لحظةَ الاتصالِ وحدَها ثمّ يُعيدُها (‏كـlogin في الحزام):
+    // الجلسةُ القائمةُ تبقى، وما يُقاسُ بعدَها هو الدورُ بحالتِه المُصدَرة.
+    const gate = async (/** @type {boolean} */ open) =>
+      h.db.pool.query(`ALTER ROLE xf_reaper VALID UNTIL '${open ? 'infinity' : '-infinity'}'`);
+    const health = async () =>
+      /** @type {Record<string, any>} */ (
+        (await h.rootClient.query('SELECT fence.reaper_health(1000) AS r')).rows[0].r
+      );
+    /** @param {(x: Record<string, any>) => boolean} pred @param {number} ms */
+    const healthUntil = async (pred, ms) => {
+      const t = Date.now();
+      /** @type {Record<string, any>} */
+      let x = {};
+      while (Date.now() - t < ms) {
+        x = await health();
+        if (pred(x)) return { x, ms: Date.now() - t };
+        await sleep(50);
+      }
+      throw new Error(`الصحّةُ لم تبلغ الشرطَ خلال ${ms} مث: ${JSON.stringify(x)}`);
+    };
+
+    test('دورةٌ كاملة: اتصالٌ بنسخة ⇒ سليم؛ حصادٌ عبرَ الباب؛ انقطاعٌ ⇒ غيرُ سليمٍ مرئيّاً؛ عودةٌ ⇒ سليمٌ بإعادةِ ربط؛ SIGTERM ⇒ 0 بلا سرّ', async (t) => {
+      const proxy = await tcpProxy();
+      try {
+        const url = await urlFor('xf_reaper', proxy.port());
+        await gate(true);
+        const r = start({ XUUX_REAPER_DATABASE_URL: url });
+        const conn = await r.waitFor((e) => e.ev === 'connected', 10_000);
+        await gate(false);
+        assert.equal(conn.role, 'xf_reaper');
+        assert.match(String(conn.instance), /^[0-9a-f-]{36}$/);
+        const ok = await healthUntil((x) => x.healthy === true, 5000);
+        const inst = first(ok.x.instances);
+        assert.equal(inst.instance, conn.instance);
+        assert.deepEqual(
+          [inst.ceiling_ms, inst.query_timeout_ms, inst.stale_after_ms],
+          [1000, 2000, 6000],
+        );
+        // ‏حصادٌ عبرَ الباب: اعتمادٌ ينقضي ⇒ يُلغى خلالَ السقفِ تقريباً.
+        await h.resume();
+        const a = await h.boot('alpha');
+        const role = String(a.credential.role_name);
+        await h.db.pool.query(
+          `UPDATE fence.run_lease SET expires_at = clock_timestamp() - interval '1 second' WHERE role_name = $1`,
+          [role],
+        );
+        const reaped = await r.waitFor((e) => e.ev === 'reaped' && e.role === role, 5000);
+        assert.equal(reaped.reason, 'expired');
+        // ‏انقطاع: الوصلةُ تُقطَع ⇒ لا جلسةَ مربوطة ⇒ غيرُ سليم (‏db_connected = false)، والأخطاءُ مُسجَّلة.
+        await proxy.down();
+        const down = await healthUntil(
+          (x) => x.healthy === false && x.db_connected === false,
+          5000,
+        );
+        await sleep(1500);
+        const errs = r.events.filter((e) => e.ev === 'error');
+        assert.ok(errs.length >= 1, 'الانقطاعُ مُسجَّل');
+        assert.ok(
+          errs.every((e) => e.class !== 'permanent'),
+          JSON.stringify(errs.slice(-3)),
+        );
+        await gate(true);
+        await proxy.up();
+        await r.waitFor((e) => e.ev === 'connected' && e.connects === 2, 8000);
+        await gate(false);
+        const back = await healthUntil((x) => x.healthy === true, 8000);
+        const after = first(back.x.instances);
+        assert.equal(after.instance, conn.instance, 'النسخةُ نفسُها');
+        assert.ok(Number(after.connects) >= 2, 'أُعيدَ الربطُ بخادمٍ جديد');
+        r.p.kill('SIGTERM');
+        assert.deepEqual(await r.exited, { code: 0, signal: null });
+        const secret = decodeURIComponent(new URL(url).password);
+        assert.ok(!JSON.stringify(r.events).includes(secret), 'لا سرَّ في السجل');
+        assert.ok(!r.stderr().includes(secret));
+        await healthUntil((x) => x.healthy === false && x.db_connected === false, 5000);
+        t.diagnostic(
+          `healthy_after=${ok.ms}ms unhealthy_after_outage=${down.ms}ms recovered_after=${back.ms}ms errors=${errs.length}`,
+        );
+      } finally {
+        await proxy.down();
+        await h.db.pool.query(`ALTER ROLE xf_reaper PASSWORD NULL VALID UNTIL '-infinity'`);
+        assert.deepEqual(
+          (await h.rootClient.query('SELECT fence.reaper_capability_problems() AS r')).rows[0].r,
+          [],
+          'الدورُ عادَ إلى حالتِه المُصدَرة',
+        );
+      }
+    });
+
+    test('إعدادٌ خاطئ ⇒ خروجٌ بـ2 قبلَ أيِّ نبض: مهلةٌ دونَ 2000، وسقفٌ فوقَ 300000، ودورٌ مجهول، ووصلةُ السياديِّ بدورِ reaper', async () => {
+      const sov = await urlFor('xf_sovereign');
+      const rowsBefore = Number(
+        (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.reaper_heartbeat')).rows[0].n,
+      );
+      for (const [env, extra] of /** @type {Array<[Record<string, string>, string[]]>} */ ([
+        [{ XUUX_REAPER_DATABASE_URL: sov }, ['--query-timeout-ms', '1999']],
+        [{ XUUX_REAPER_DATABASE_URL: sov }, ['--ceiling-ms', '300001']],
+        [{ XUUX_REAPER_DATABASE_URL: sov }, ['--role', 'bogus']],
+        [{ XUUX_SOVEREIGN_DATABASE_URL: sov }, []],
+        [{ XUUX_REAPER_DATABASE_URL: sov }, []],
+      ])) {
+        const z = start(env, extra);
+        const killer = setTimeout(() => z.p.kill('SIGKILL'), 10_000);
+        const ex = await z.exited;
+        clearTimeout(killer);
+        assert.equal(
+          ex.code,
+          2,
+          `${JSON.stringify(Object.keys(env))} ${extra.join(' ')}: ${z.stderr().slice(-300)}`,
+        );
+        assert.ok(z.events.some((e) => e.ev === 'fatal'));
+        assert.equal(z.events.filter((e) => e.ev === 'reaped').length, 0);
+      }
+      const n = Number(
+        (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.reaper_heartbeat')).rows[0].n,
+      );
+      assert.equal(n, rowsBefore, 'لا نبضَ من إعدادٍ خاطئ');
+    });
+  },
+);
+
+// ── WL-558: runSovereignReaper بوضعِ reaper (‏اتصالٌ مزيّف) — الحدودُ والبابُ وtick_error ─────────────────
+describe('WL-558: runSovereignReaper(mode: reaper) — حدودٌ قبلَ أيِّ اتصال، وبابُ reaper_tick بنسخةٍ ومهلة، وtick_error فشلٌ مُصنَّفٌ بلا إسقاطِ الوصلة', () => {
+  test('mode مجهولٌ أو ceilingMs ∉ [1، 300000] أو queryTimeoutMs ∉ [2000، 300000] أو غيرُ صحيح ⇒ TypeError ولا اتصال', () => {
+    let connects = 0;
+    const connect = async () => {
+      connects += 1;
+      throw new Error('لا يُنادى');
+    };
+    /** @type {Array<Record<string, any>>} */
+    const bad = [
+      { mode: 'bogus', ceilingMs: 1000, queryTimeoutMs: 2000 },
+      { mode: 'reaper', ceilingMs: 0, queryTimeoutMs: 2000 },
+      { mode: 'reaper', ceilingMs: 300001, queryTimeoutMs: 2000 },
+      { mode: 'reaper', ceilingMs: 1.5, queryTimeoutMs: 2000 },
+      { mode: 'reaper', ceilingMs: 1000, queryTimeoutMs: 1999 },
+      { mode: 'reaper', ceilingMs: 1000, queryTimeoutMs: 1000 },
+      { mode: 'reaper', ceilingMs: 1000, queryTimeoutMs: 300001 },
+      { mode: 'reaper', ceilingMs: 1000, queryTimeoutMs: 2500.5 },
+      { mode: 'reaper', ceilingMs: 1000 },
+    ];
+    for (const o of bad)
+      assert.throws(
+        () => runSovereignReaper(/** @type {any} */ ({ ...o, connect })),
+        TypeError,
+        JSON.stringify(o),
+      );
+    for (const queryTimeoutMs of [2000, 300000]) {
+      const r = runSovereignReaper(
+        /** @type {any} */ ({
+          mode: 'reaper',
+          ceilingMs: 1000,
+          queryTimeoutMs,
+          retryMs: 1000,
+          connect,
+        }),
+      );
+      void r.stop();
+    }
+    assert.ok(connects <= 2, 'الحدودُ المقبولةُ وحدَها تصلُ إلى الاتصال');
+  });
+
+  test('النداءُ = reaper_tick(instance، ceilingMs، queryTimeoutMs)؛ tick_error ⇒ error بـSQLSTATE الداخليّ وصنفِه، والوصلةُ نفسُها تبقى، ونبضةٌ ناجحةٌ بعدَه تُصفِّر', async () => {
+    /** @type {Array<Record<string, any>>} */
+    const log = [];
+    /** @type {Array<{ sql: string, params: unknown[] | undefined }>} */
+    const calls = [];
+    let ended = 0;
+    let connects = 0;
+    let n = 0;
+    const r = runSovereignReaper({
+      mode: 'reaper',
+      instance: '00000000-0000-4000-8000-000000000558',
+      ceilingMs: 60,
+      queryTimeoutMs: 2000,
+      retryMs: 10,
+      maxRetryMs: 10,
+      log: (e) => log.push(e),
+      connect: async () => {
+        connects += 1;
+        return /** @type {any} */ ({
+          on() {},
+          async end() {
+            ended += 1;
+          },
+          /** @param {string} sql @param {unknown[]} [params] */
+          async query(sql, params) {
+            if (sql.includes('current_user')) return { rows: [{ u: 'xf_reaper', s: 'xf_reaper' }] };
+            calls.push({ sql, params });
+            n += 1;
+            // ‏نبضتان فاشلتان داخلَ الباب (‏قفلٌ ثمّ نتيجةٌ بلا sqlstate) ثمّ نجاح.
+            if (n === 1)
+              return {
+                rows: [
+                  {
+                    r: {
+                      ok: false,
+                      reaped: [],
+                      unresolved: [],
+                      tick_error: { sqlstate: '55P03', message: 'lock timeout' },
+                    },
+                  },
+                ],
+              };
+            if (n === 2)
+              return { rows: [{ r: { ok: false, reaped: [], unresolved: [], tick_error: {} } }] };
+            return { rows: [{ r: { ok: true, reaped: [], unresolved: [], next_due_ms: 30000 } }] };
+          },
+        });
+      },
+    });
+    for (let i = 0; i < 100 && n < 3; i++) await sleep(10);
+    const st = await r.stop();
+    assert.ok(n >= 3, `نداءات: ${n}`);
+    assert.ok(
+      calls.every((c) => /fence\.reaper_tick\(\$1, \$2, \$3\)/.test(c.sql)),
+      'البابُ وحدَه',
+    );
+    assert.deepEqual(calls[0]?.params, ['00000000-0000-4000-8000-000000000558', 60, 2000]);
+    const errs = log.filter((e) => e.ev === 'error');
+    assert.deepEqual(
+      errs.slice(0, 2).map((e) => [e.code, e.class]),
+      [
+        ['55P03', 'transient'],
+        ['XF525', 'transient'],
+      ],
+      JSON.stringify(errs),
+    );
+    assert.equal(connects, 1, 'tick_error لا يُسقِطُ الوصلة');
+    assert.equal(ended, 1, 'الإغلاقُ عندَ stop وحدَه');
+    assert.equal(st.connects, 1);
+    assert.equal(
+      log.find((e) => e.ev === 'connected')?.instance,
+      '00000000-0000-4000-8000-000000000558',
+    );
+  });
+});

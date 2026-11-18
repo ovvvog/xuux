@@ -1026,3 +1026,317 @@ describe(
     });
   },
 );
+
+// ── WL-558: الحاصدُ الدائم (‏0030) — دورٌ على مستوى العنقود، وبابٌ واحد، ورجوعٌ يُثبِتُ الحالةَ الناتجة ──
+//
+// xf_reaper دورٌ على مستوى العنقود، وعنقودُ الاختبارِ مشترك (‏قاعدةُ state وغيرُها قد تحملُ 0030). فقاعدةٌ «مِرساة» تُطبِّقُ
+// 0030 أوّلاً: الدورُ حاضرٌ بوسمِ 0030 واعتمادٍ في قاعدةٍ أخرى أيّاً كانت حالُ العنقود — فالقاعدةُ المختبَرةُ تسلكُ مسارَ
+// «القبول» صعوداً و«الإبقاء» رجوعاً حتميّاً. مسارا «الإنشاء» و«الإسقاط» و«XF526» يحتاجانِ عنقوداً بلا اعتماد: في مختبرِ
+// العنقودِ النظيف (‏evidence/wl558-reaper/lab.sh) وفي خطوةِ هجراتِ CI (‏up → down ⇒ لا دور → up).
+// التلاعبُ بالدورِ هنا مؤقّتٌ ويُعادُ في finally (‏الاختبارُ متسلسل: --test-concurrency=1).
+const REAPER_MARKER = 'xuux-fence-0030:xf_reaper';
+/**
+ * لقطةُ 0030: دوالُّ fence وبيانُها، وجداولُها بـACL، وACL هذه القاعدة، وحالُ xf_reaper كاملة (‏خصائص، وسم، عضويّاتٌ
+ * في الاتّجاهَين، إعدادات، واعتمادُه في هذه القاعدة).
+ * @param {import('pg').Pool} pool
+ */
+async function reaperSnapshot(pool) {
+  const base = await fenceFunctionCatalog(pool);
+  const tables = await pool.query(
+    `SELECT c.relname, c.relkind, pg_get_userbyid(c.relowner) AS owner, coalesce(c.relacl::text, '') AS acl
+       FROM pg_class c WHERE c.relnamespace = 'fence'::regnamespace AND c.relkind IN ('r', 'v', 'S') ORDER BY 1`,
+  );
+  const dbacl = await pool.query(
+    `SELECT coalesce(datacl::text, '') AS acl FROM pg_database WHERE datname = current_database()`,
+  );
+  const role = await pool.query(
+    `SELECT r.rolname, r.rolsuper, r.rolinherit, r.rolcreaterole, r.rolcreatedb, r.rolcanlogin, r.rolreplication,
+            r.rolbypassrls, r.rolconnlimit, r.rolvaliduntil::text AS validuntil,
+            shobj_description(r.oid, 'pg_authid') AS marker,
+            ARRAY(SELECT m.roleid::regrole::text || ':' || m.admin_option || m.inherit_option || m.set_option
+                    FROM pg_auth_members m WHERE m.member = r.oid ORDER BY 1) AS member_of,
+            ARRAY(SELECT m.member::regrole::text FROM pg_auth_members m WHERE m.roleid = r.oid ORDER BY 1) AS members,
+            ARRAY(SELECT coalesce(s.setdatabase::text, '') || '=' || array_to_string(s.setconfig, ',')
+                    FROM pg_db_role_setting s WHERE s.setrole = r.oid ORDER BY 1) AS settings,
+            (SELECT count(*)::int FROM pg_shdepend d
+              WHERE d.refobjid = r.oid AND d.dbid = (SELECT oid FROM pg_database WHERE datname = current_database()))
+              AS local_deps,
+            EXISTS (SELECT 1 FROM pg_shdepend d WHERE d.refobjid = r.oid AND d.dbid = 0
+                       AND d.classid = 'pg_database'::regclass
+                       AND d.objid = (SELECT oid FROM pg_database WHERE datname = current_database())) AS db_dep
+       FROM pg_roles r WHERE r.rolname = 'xf_reaper'`,
+  );
+  return { ...base, tables: tables.rows, dbacl: dbacl.rows[0].acl, role: role.rows[0] ?? null };
+}
+
+describe(
+  'WL-558 — 0030: الترقية، والرجوعُ إلى 0029 بالحالةِ الناتجة، ورفضُ دورٍ بالاسمِ نفسِه لم تُنشئه',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let anchor;
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>> | undefined} */
+    let fresh;
+    /** @type {string} */
+    let dir29;
+    /** @type {string} */
+    let dir30;
+    /** @type {Awaited<ReturnType<typeof reaperSnapshot>>} */
+    let at29;
+    /** @type {Awaited<ReturnType<typeof reaperSnapshot>>} */
+    let at30;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const NEW = [
+      'fence._worker_capability_problems()',
+      'fence.reaper_tick(uuid,integer,integer)',
+      'fence.reaper_health(integer)',
+      'fence.reaper_capabilities()',
+      'fence.reaper_capability_problems()',
+    ];
+    const CHANGED = ['fence.capability_problems()', 'fence.notify_surface()'];
+    before(async () => {
+      dir29 = migrationsDir(29);
+      dir30 = migrationsDir(30);
+      anchor = await createIsolatedDatabase('m0030a');
+      await up(anchor.pool, { dir: dir30 });
+      db = await createIsolatedDatabase('m0030');
+    });
+    after(async () => {
+      for (const d of [db, fresh, anchor]) if (d !== undefined) await d.drop();
+      for (const d of [dir29, dir30]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('المِرساة: xf_reaper بوسمِ 0030 وخصائصِه حرفيّاً، بلا عضويّةٍ ولا إعداد', async () => {
+      const r = (await reaperSnapshot(anchor.pool)).role;
+      assert.ok(r, 'الدورُ حاضر');
+      assert.deepEqual(
+        { ...r, local_deps: undefined, db_dep: undefined },
+        {
+          rolname: 'xf_reaper',
+          rolsuper: false,
+          rolinherit: false,
+          rolcreaterole: false,
+          rolcreatedb: false,
+          rolcanlogin: true,
+          rolreplication: false,
+          rolbypassrls: false,
+          rolconnlimit: 2,
+          validuntil: '-infinity',
+          marker: REAPER_MARKER,
+          member_of: [],
+          members: [],
+          settings: [],
+          local_deps: undefined,
+          db_dep: undefined,
+        },
+      );
+      assert.equal(r.local_deps, 2, 'USAGE (‏fence) + EXECUTE (‏reaper_tick) — لا غير');
+      assert.equal(r.db_dep, true, 'وCONNECT على القاعدة (‏اعتمادٌ مشتركٌ بـdbid = 0)');
+    });
+
+    it('الترقيةُ إلى 0030: [30]، والتغييرُ محصورٌ في المتوقَّع، وACL كلِّ دالّةٍ جديدةٍ حرفيّاً', async () => {
+      assert.equal((await up(db.pool, { dir: dir29 })).current, 29);
+      at29 = await reaperSnapshot(db.pool);
+      assert.deepEqual((await up(db.pool, { dir: dir30 })).applied, [30]);
+      at30 = await reaperSnapshot(db.pool);
+      const fn = (/** @type {typeof at30} */ c, /** @type {string} */ s) =>
+        c.functions.find((f) => f.sig === s);
+      const dg = (/** @type {typeof at30} */ c, /** @type {string} */ s) =>
+        c.manifest.find((m) => m.function_signature === s)?.digest;
+      const FULL =
+        '{xf_owner=X/xf_owner,xf_root=X/xf_owner,xf_sovereign=X/xf_owner,xf_auditor=X/xf_owner,xuux_migrator=X/xf_owner}';
+      assert.equal(
+        fn(at30, 'fence.reaper_tick(uuid,integer,integer)')?.acl,
+        '{xf_owner=X/xf_owner,xf_reaper=X/xf_owner}',
+      );
+      assert.equal(
+        fn(at30, 'fence.reaper_health(integer)')?.acl,
+        '{xf_owner=X/xf_owner,xf_root=X/xf_owner,xf_sovereign=X/xf_owner,xf_auditor=X/xf_owner}',
+      );
+      for (const s of [
+        'fence.reaper_capabilities()',
+        'fence.reaper_capability_problems()',
+        'fence.capability_problems()',
+      ])
+        assert.equal(fn(at30, s)?.acl, FULL, s);
+      for (const s of NEW) {
+        assert.equal(fn(at30, s)?.owner, 'xf_owner', s);
+        assert.equal(fn(at30, s)?.secdef, true, s);
+        assert.ok(dg(at30, s), `${s} في البيان`);
+      }
+      // ‏الدالّةُ القديمةُ أُعيدَت تسميتُها لا إنشاؤها: ACL وبصمتُها كما كانت تحتَ الاسمِ القديم.
+      const old = fn(at29, 'fence.capability_problems()');
+      const renamed = fn(at30, 'fence._worker_capability_problems()');
+      assert.equal(renamed?.acl, old?.acl);
+      assert.equal(
+        renamed?.def,
+        old?.def.replace('fence.capability_problems()', 'fence._worker_capability_problems()'),
+      );
+      assert.equal(
+        dg(at30, 'fence._worker_capability_problems()'),
+        dg(at29, 'fence.capability_problems()'),
+      );
+      assert.match(
+        String(fn(at30, 'fence.notify_surface()')?.def),
+        /'xuux_migrator', 'xf_reaper'\]::name\[\]/,
+      );
+      assert.deepEqual(
+        at30.tables.filter((t) => t.relname === 'reaper_heartbeat'),
+        [
+          {
+            relname: 'reaper_heartbeat',
+            relkind: 'r',
+            owner: 'xf_owner',
+            acl: '{xf_owner=arwdDxtm/xf_owner}',
+          },
+        ],
+      );
+      assert.match(at30.dbacl, /(^|,)xf_reaper=c\//, 'CONNECT وحدَه على هذه القاعدة');
+      const others = (/** @type {typeof at30} */ c) => ({
+        functions: c.functions.filter((f) => !NEW.includes(f.sig) && !CHANGED.includes(f.sig)),
+        eventTriggers: c.eventTriggers,
+        manifest: c.manifest.filter(
+          (m) => !NEW.includes(m.function_signature) && !CHANGED.includes(m.function_signature),
+        ),
+        tables: c.tables.filter((t) => t.relname !== 'reaper_heartbeat'),
+        dbacl: c.dbacl.replace(/,?xf_reaper=c\/[a-z_]+/, ''),
+      });
+      assert.deepEqual(others(at30), others(at29), 'لا تغييرَ خارجَ ما أعلنته 0030');
+      assert.deepEqual(
+        { ...at30.role, local_deps: 0, db_dep: false },
+        { ...at29.role, local_deps: 0, db_dep: false },
+        'الدورُ القائمُ لم يُعدَّل',
+      );
+      assert.deepEqual([at29.role?.local_deps, at29.role?.db_dep], [0, false]);
+      assert.deepEqual([at30.role?.local_deps, at30.role?.db_dep], [2, true]);
+    });
+
+    it('قاعدةٌ جديدةٌ من الصفر تنتهي إلى لقطةِ 0030 نفسِها', async () => {
+      fresh = await createIsolatedDatabase('m0030f');
+      await up(fresh.pool, { dir: dir30 });
+      assert.deepEqual(await reaperSnapshot(fresh.pool), at30);
+    });
+
+    it('رجوعُ 0030 يُعيدُ لقطةَ 0029 حرفيّاً (‏والدورُ باقٍ كما هو: له اعتمادٌ في المِرساة)، وإعادةُ التقديمِ تُطابق', async () => {
+      assert.equal((await down(db.pool, { steps: 1, dir: dir30 })).current, 29);
+      assert.deepEqual(await reaperSnapshot(db.pool), at29);
+      assert.deepEqual((await up(db.pool, { dir: dir30 })).applied, [30]);
+      assert.deepEqual(await reaperSnapshot(db.pool), at30);
+    });
+
+    /**
+     * تلاعبٌ مؤقّتٌ بالدور: يُطبَّقُ، ثمّ `body`، ثمّ يُعادُ ولو فشل.
+     * @param {string[]} apply @param {string[]} restore @param {() => Promise<void>} body
+     */
+    const tampered = async (apply, restore, body) => {
+      for (const s of apply) await db.pool.query(s);
+      try {
+        await body();
+      } finally {
+        for (const s of restore) await db.pool.query(s).catch(() => {});
+      }
+    };
+    const TAMPER = [
+      {
+        why: 'حدُّ اتصالٍ مختلف',
+        apply: ['ALTER ROLE xf_reaper CONNECTION LIMIT 3'],
+        restore: ['ALTER ROLE xf_reaper CONNECTION LIMIT 2'],
+      },
+      {
+        why: 'INHERIT',
+        apply: ['ALTER ROLE xf_reaper INHERIT'],
+        restore: ['ALTER ROLE xf_reaper NOINHERIT'],
+      },
+      {
+        why: 'VALID UNTIL مفتوح',
+        apply: [`ALTER ROLE xf_reaper VALID UNTIL 'infinity'`],
+        restore: [`ALTER ROLE xf_reaper VALID UNTIL '-infinity'`],
+      },
+      {
+        why: 'CREATEDB',
+        apply: ['ALTER ROLE xf_reaper CREATEDB'],
+        restore: ['ALTER ROLE xf_reaper NOCREATEDB'],
+      },
+      {
+        why: 'بلا وسمِ 0030 (‏دورٌ لم تُنشئه)',
+        apply: ['COMMENT ON ROLE xf_reaper IS NULL'],
+        restore: [`COMMENT ON ROLE xf_reaper IS '${REAPER_MARKER}'`],
+      },
+      {
+        why: 'وسمٌ آخر',
+        apply: [`COMMENT ON ROLE xf_reaper IS 'someone-else'`],
+        restore: [`COMMENT ON ROLE xf_reaper IS '${REAPER_MARKER}'`],
+      },
+      {
+        why: 'عضوٌ في دورٍ آخر',
+        apply: ['CREATE ROLE wl558_t_parent NOLOGIN', 'GRANT wl558_t_parent TO xf_reaper'],
+        restore: ['DROP ROLE IF EXISTS wl558_t_parent'],
+      },
+      {
+        why: 'له عضو',
+        apply: ['CREATE ROLE wl558_t_child NOLOGIN', 'GRANT xf_reaper TO wl558_t_child'],
+        restore: ['DROP ROLE IF EXISTS wl558_t_child'],
+      },
+      {
+        why: 'إعدادٌ دائم',
+        apply: [`ALTER ROLE xf_reaper SET work_mem = '1MB'`],
+        restore: ['ALTER ROLE xf_reaper RESET ALL'],
+      },
+    ];
+    for (const t of TAMPER) {
+      it(`التقديمُ يرفضُ xf_reaper قائماً بـ«${t.why}» (‏XF524) بلا أيِّ أثر: لا تعديلَ للدورِ ولا للقاعدة`, async () => {
+        assert.equal((await down(db.pool, { steps: 1, dir: dir30 })).current, 29);
+        await tampered(t.apply, t.restore, async () => {
+          const before_ = await reaperSnapshot(db.pool);
+          assert.notDeepEqual(before_.role, at29.role, 'التلاعبُ وقعَ فعلاً');
+          await assert.rejects(
+            up(db.pool, { dir: dir30 }),
+            (/** @type {any} */ e) => e?.code === 'XF524',
+          );
+          assert.deepEqual(
+            await reaperSnapshot(db.pool),
+            before_,
+            'لا أثر: الدورُ كما وُجدَ والقاعدةُ عندَ 0029',
+          );
+        });
+        assert.deepEqual(await reaperSnapshot(db.pool), at29, 'الإعادةُ تامّة');
+        assert.deepEqual((await up(db.pool, { dir: dir30 })).applied, [30]);
+      });
+    }
+
+    it('الرجوعُ لا يُسقِطُ ولا يُعدِّلُ دوراً بلا وسمِ 0030 — ويُعيدُ القاعدةَ إلى 0029 حرفيّاً', async () => {
+      await tampered(
+        [
+          'COMMENT ON ROLE xf_reaper IS NULL',
+          'CREATE ROLE wl558_t_parent NOLOGIN',
+          'GRANT wl558_t_parent TO xf_reaper',
+        ],
+        ['DROP ROLE IF EXISTS wl558_t_parent', `COMMENT ON ROLE xf_reaper IS '${REAPER_MARKER}'`],
+        async () => {
+          const role = (await reaperSnapshot(db.pool)).role;
+          assert.equal((await down(db.pool, { steps: 1, dir: dir30 })).current, 29);
+          const back = await reaperSnapshot(db.pool);
+          assert.deepEqual(
+            back.role,
+            { ...role, local_deps: 0, db_dep: false },
+            'الدورُ كما وُجدَ (‏بعضويّتِه ووسمِه الغائب)',
+          );
+          assert.deepEqual({ ...back, role: at29.role }, at29);
+        },
+      );
+      assert.deepEqual((await up(db.pool, { dir: dir30 })).applied, [30]);
+      assert.deepEqual(await reaperSnapshot(db.pool), at30);
+    });
+  },
+);
