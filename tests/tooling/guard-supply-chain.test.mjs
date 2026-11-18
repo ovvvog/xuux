@@ -280,11 +280,21 @@ const picoLock = (dev = true) => ({
   ),
 });
 const NOW = new Date('2026-11-18T12:00:00Z');
+// ‏WL-571: أُزيلَ الإعذارُ من `AUDIT_EXCEPTIONS` (‏سُحِبَ التبليغ)؛ اختباراتُ الآليّةِ (‏WL-557) تُمرِّرُه صراحةً بشروطِه نفسِها.
+const PICO_EXC = Object.freeze([
+  Object.freeze({
+    advisory: PICO_URL,
+    package: 'picomatch',
+    maxSeverity: /** @type {const} */ ('high'),
+    expires: '2026-12-02',
+    why: 'تثبيتٌ اختباريٌّ لآليّةِ WL-557',
+  }),
+]);
 
 test('WL-557: الإعذارُ يقبلُ ثغرةَ picomatch التطويريّةَ قبلَ الانقضاء — وكلُّ عقدةٍ عاليةٍ في سلسلتها مُعذَرة', async () => {
-  const { evaluateAudit, AUDIT_EXCEPTIONS } = await import('../../scripts/audit-check.mjs');
-  assert.ok(AUDIT_EXCEPTIONS.some((e) => e.advisory === PICO_URL && e.maxSeverity === 'high'));
-  const r = evaluateAudit(picoAudit(), picoLock(true), NOW);
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  assert.ok(PICO_EXC.some((e) => e.advisory === PICO_URL && e.maxSeverity === 'high'));
+  const r = evaluateAudit(picoAudit(), picoLock(true), NOW, PICO_EXC);
   assert.deepEqual(r.blocking, []);
   assert.deepEqual(r.excused.map((x) => x.name).sort(), [
     'fdir',
@@ -296,7 +306,7 @@ test('WL-557: الإعذارُ يقبلُ ثغرةَ picomatch التطويري�
 
 test('WL-557: عقدةٌ إنتاجيّةٌ (‏بلا dev في ملفِّ القفل) لا تُعذَر', async () => {
   const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
-  const r = evaluateAudit(picoAudit(), picoLock(false), NOW);
+  const r = evaluateAudit(picoAudit(), picoLock(false), NOW, PICO_EXC);
   assert.deepEqual(r.excused, []);
   assert.deepEqual(r.blocking.map((x) => x.name).sort(), [
     'fdir',
@@ -305,16 +315,16 @@ test('WL-557: عقدةٌ إنتاجيّةٌ (‏بلا dev في ملفِّ ال�
     'ts-estree',
   ]);
   // ‏عقدةٌ غائبةٌ عن ملفِّ القفلِ كذلك: لا يُفترَضُ أنّها تطويريّة.
-  const r2 = evaluateAudit(picoAudit(), { lockfileVersion: 3, packages: {} }, NOW);
+  const r2 = evaluateAudit(picoAudit(), { lockfileVersion: 3, packages: {} }, NOW, PICO_EXC);
   assert.equal(r2.blocking.length, 4);
 });
 
 test('WL-557: بعدَ تاريخِ الانقضاءِ لا إعذار (‏يُعادُ النظرُ أو يُجدَّدُ بقرارٍ مُسجَّل)', async () => {
-  const { evaluateAudit, AUDIT_EXCEPTIONS } = await import('../../scripts/audit-check.mjs');
-  const e = AUDIT_EXCEPTIONS.find((x) => x.advisory === PICO_URL);
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  const e = PICO_EXC.find((x) => x.advisory === PICO_URL);
   assert.ok(e !== undefined);
   const after = new Date(Date.parse(`${e.expires}T00:00:00Z`) + 1);
-  assert.equal(evaluateAudit(picoAudit(), picoLock(true), after).blocking.length, 4);
+  assert.equal(evaluateAudit(picoAudit(), picoLock(true), after, PICO_EXC).blocking.length, 4);
   assert.ok(
     Date.parse(`${e.expires}T00:00:00Z`) - NOW.getTime() <= 31 * 86400000,
     'الانقضاءُ خلالَ شهرٍ على الأكثر',
@@ -336,13 +346,15 @@ test('WL-557: ثغرةٌ عاليةٌ أخرى في السلسلة، أو شدّ
       nodes: ['node_modules/minimatch'],
     },
   });
-  const r = evaluateAudit(mixed, picoLock(true), NOW);
+  const r = evaluateAudit(mixed, picoLock(true), NOW, PICO_EXC);
   assert.deepEqual(r.blocking.map((x) => x.name).sort(), ['minimatch', 'ts-estree']);
   const crit = picoAudit();
   const cp = /** @type {any} */ (crit.vulnerabilities)['picomatch'];
   cp.severity = 'critical';
   cp.via[0].severity = 'critical';
-  assert.ok(evaluateAudit(crit, picoLock(true), NOW).blocking.some((x) => x.name === 'picomatch'));
+  assert.ok(
+    evaluateAudit(crit, picoLock(true), NOW, PICO_EXC).blocking.some((x) => x.name === 'picomatch'),
+  );
   const unknown = {
     vulnerabilities: {
       pg: {
@@ -354,7 +366,8 @@ test('WL-557: ثغرةٌ عاليةٌ أخرى في السلسلة، أو شدّ
     },
   };
   assert.equal(
-    evaluateAudit(unknown, { packages: { 'node_modules/pg': { dev: true } } }, NOW).blocking.length,
+    evaluateAudit(unknown, { packages: { 'node_modules/pg': { dev: true } } }, NOW, PICO_EXC)
+      .blocking.length,
     1,
   );
   // ‏سلسلةٌ دائريّةٌ أو اسمٌ غيرُ موجودٍ في via: لا إعذارَ بالغياب.
@@ -364,13 +377,18 @@ test('WL-557: ثغرةٌ عاليةٌ أخرى في السلسلة، أو شدّ
     },
   };
   assert.equal(
-    evaluateAudit(dangling, { packages: { 'node_modules/a': { dev: true } } }, NOW).blocking.length,
+    evaluateAudit(dangling, { packages: { 'node_modules/a': { dev: true } } }, NOW, PICO_EXC)
+      .blocking.length,
     1,
   );
 });
 
-test('WL-557: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّقُ الإعذارَ نفسَه على التقرير — ويرفضُه للعقدةِ الإنتاجيّة', () => {
-  for (const dev of [true, false]) {
+test('WL-557/WL-571: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّقُ حكمَ audit:check نفسَه — بلا إعذارٍ تسقطُ سلسلةُ picomatch تطويريّةً وإنتاجيّة، والتقريرُ النظيفُ يمرّ', () => {
+  for (const [dev, report] of /** @type {const} */ ([
+    [true, 'pico'],
+    [false, 'pico'],
+    [true, 'clean'],
+  ])) {
     const tmp = makeTempRoot();
     try {
       mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
@@ -391,11 +409,15 @@ test('WL-557: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّقُ ا
         path.join(tmp, 'sbom.cdx.json'),
         JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'pg' }] }),
       );
-      writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify(picoAudit()));
+      writeFileSync(
+        path.join(tmp, 'audit-report.json'),
+        JSON.stringify(report === 'pico' ? picoAudit() : { vulnerabilities: {} }),
+      );
       writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
       const result = runGuard(tmp);
-      assert.equal(result.ok, dev, `dev=${dev}: ${result.stderr || result.output}`);
-      if (!dev) assert.match(result.stderr || result.output, /R3/);
+      const ok = report === 'clean';
+      assert.equal(result.ok, ok, `dev=${dev} ${report}: ${result.stderr || result.output}`);
+      if (!ok) assert.match(result.stderr || result.output, /R3: 4 ثغرة حرجة\/عالية/);
     } finally {
       cleanup(tmp);
     }
@@ -407,13 +429,13 @@ test('WL-557: التطويريّةُ لكلِّ عقدةٍ ولكلِّ مسار
   const mid = picoLock(true);
   mid.packages['node_modules/ts-estree'] = { version: '1.0.0' };
   assert.deepEqual(
-    evaluateAudit(picoAudit(), mid, NOW).blocking.map((x) => x.name),
+    evaluateAudit(picoAudit(), mid, NOW, PICO_EXC).blocking.map((x) => x.name),
     ['ts-estree'],
   );
   const src = picoLock(true);
   src.packages['node_modules/picomatch'] = { version: '1.0.0' };
   assert.deepEqual(
-    evaluateAudit(picoAudit(), src, NOW).blocking.map((x) => x.name),
+    evaluateAudit(picoAudit(), src, NOW, PICO_EXC).blocking.map((x) => x.name),
     ['fdir', 'picomatch', 'tinyglobby', 'ts-estree'],
   );
   const two = picoAudit();
@@ -423,14 +445,88 @@ test('WL-557: التطويريّةُ لكلِّ عقدةٍ ولكلِّ مسار
   ];
   const lk = picoLock(true);
   lk.packages['node_modules/x/node_modules/picomatch'] = { version: '1.0.0' };
-  assert.ok(evaluateAudit(two, lk, NOW).blocking.some((x) => x.name === 'picomatch'));
+  assert.ok(evaluateAudit(two, lk, NOW, PICO_EXC).blocking.some((x) => x.name === 'picomatch'));
 });
 
 test('WL-557: اسمٌ غيرُ محلولٍ بينَ أسماءِ via المحلولةِ يُسقِطُ الإعذار', async () => {
   const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
   const a = picoAudit();
   a.vulnerabilities.tinyglobby.via = ['picomatch', 'ghost'];
-  assert.ok(evaluateAudit(a, picoLock(true), NOW).blocking.some((x) => x.name === 'tinyglobby'));
+  assert.ok(
+    evaluateAudit(a, picoLock(true), NOW, PICO_EXC).blocking.some((x) => x.name === 'tinyglobby'),
+  );
+});
+
+// ── WL-571: حسمُ LIVE-76 — سُحِبَ GHSA-fc5q-39xc-vjpf و`npm audit --json` لا يُبلِّغُه، فأُزيلَ الإعذار. ──
+
+test('WL-571: لا إعذارَ في AUDIT_EXCEPTIONS — سلسلةُ picomatch نفسُها تسقطُ تطويريّةً قبلَ الانقضاءِ السابق', async () => {
+  const { evaluateAudit, AUDIT_EXCEPTIONS } = await import('../../scripts/audit-check.mjs');
+  assert.deepEqual(AUDIT_EXCEPTIONS, []);
+  assert.ok(Object.isFrozen(AUDIT_EXCEPTIONS));
+  const r = evaluateAudit(picoAudit(), picoLock(true), NOW);
+  assert.deepEqual(r.excused, []);
+  assert.deepEqual(r.blocking.map((x) => x.name).sort(), [
+    'fdir',
+    'picomatch',
+    'tinyglobby',
+    'ts-estree',
+  ]);
+  assert.ok(r.blocking.every((x) => x.reason === `تبليغٌ غيرُ مُعذَر: ${PICO_URL}`));
+});
+
+test('WL-571: كلُّ ثغرةٍ حرجةٍ أو عاليةٍ أخرى تُسقِطُ الفحصَ بالقائمةِ الافتراضيّة — تطويريّةً أو إنتاجيّةً، مباشرةً أو عبرَ سلسلة', async () => {
+  const { evaluateAudit } = await import('../../scripts/audit-check.mjs');
+  for (const severity of ['high', 'critical']) {
+    for (const dev of [true, false]) {
+      const audit = {
+        vulnerabilities: {
+          leaf: {
+            name: 'leaf',
+            severity,
+            via: [{ url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc', severity }],
+            nodes: ['node_modules/leaf'],
+          },
+          parent: { name: 'parent', severity, via: ['leaf'], nodes: ['node_modules/parent'] },
+        },
+      };
+      const lock = {
+        packages: {
+          'node_modules/leaf': dev ? { dev: true } : {},
+          'node_modules/parent': dev ? { dev: true } : {},
+        },
+      };
+      const r = evaluateAudit(audit, lock, NOW);
+      assert.deepEqual(r.excused, [], `${severity}/${dev}`);
+      assert.deepEqual(
+        r.blocking.map((x) => x.name),
+        ['leaf', 'parent'],
+        `${severity}/${dev}`,
+      );
+    }
+  }
+  // ‏شدّةٌ مجهولةٌ في السلسلةِ تُعامَلُ حرجة، ودونَ «عالية» لا يُسقِط (‏الحدُّ نفسُه).
+  const odd = {
+    vulnerabilities: {
+      x: { name: 'x', severity: 'high', via: [{ url: 'u', severity: 'weird' }], nodes: ['n'] },
+      y: {
+        name: 'y',
+        severity: 'moderate',
+        via: [{ url: 'v', severity: 'moderate' }],
+        nodes: ['m'],
+      },
+    },
+  };
+  assert.deepEqual(
+    evaluateAudit(odd, { packages: { n: { dev: true }, m: { dev: true } } }, NOW).blocking.map(
+      (x) => x.name,
+    ),
+    ['x'],
+  );
+  // ‏تقريرُ القفلِ الحاليِّ بعدَ السحب (‏0 ثغرات) يمرّ.
+  assert.deepEqual(evaluateAudit({ vulnerabilities: {} }, { packages: {} }, NOW), {
+    blocking: [],
+    excused: [],
+  });
 });
 
 /**
