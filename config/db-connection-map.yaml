@@ -98,11 +98,15 @@ sites:
     why: guard_write يقبلُ xuux_migrator تحتَ HALTED فقط (XF010)؛ تشغيلُه بـsuperuser BREAK_GLASS.
   - file: scripts/fence-sovereign-reaper.mjs
     kind: pg.Client
-    count: 1
+    count: 2
     purpose: >-
       حاصدُ الإيجارِ في عمليّةِ السياديّ (WL-546) — يُنادي fence.reap_lapsed() عندَ موعدِ القاعدة،
       مستقلّاً عن الجذرِ وحافظِ الإيجار. أداةُ تشغيلٍ بلا تنصيب؛ موضعُها ودورةُ حياتِها قرارُ مالك.
-    role: XUUX_SOVEREIGN_DATABASE_URL (xf_sovereign وحدَه — runSovereignReaper يرفضُ غيرَه)
+      والموضعُ الثاني (WL-559) `--health`: نداءٌ واحدٌ لقراءةِ fence.reaper_health(slack) ثمّ إغلاق.
+    role: >-
+      XUUX_SOVEREIGN_DATABASE_URL (xf_sovereign وحدَه — runSovereignReaper يرفضُ غيرَه) أو
+      XUUX_REAPER_DATABASE_URL (xf_reaper، WL-558)؛ و`--health` بـXUUX_MONITOR_DATABASE_URL (xf_auditor —
+      قراءةٌ فقط، من مضيفٍ غيرِ مضيفِ القاعدة)
     fence: FENCE_CONTROL
     why: >-
       يحصدُ ما انقضى وحدَه (إلغاءٌ وNOLOGIN وإنهاءُ جلسات) ولا يكتبُ جداولَ الدولة؛ بلا مفتاحِ توقيع

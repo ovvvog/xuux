@@ -9,7 +9,10 @@
  */
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import net from 'node:net';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +23,7 @@ import {
   REAPER_ERROR_TABLE,
   REAPER_RETRY_FLOOR_MS,
   classifyReaperError,
+  renderReaperUnit,
   runSovereignReaper,
   sealFencedSessions,
   startLapseReaper,
@@ -1558,3 +1562,434 @@ describe('WL-558: runSovereignReaper(mode: reaper) — حدودٌ قبلَ أي�
     );
   });
 });
+
+// ── WL-559: الخيار A على مستوى المستودع — وحدةُ systemd مولَّدة، وتحقّقٌ آليّ، ومحاكاةُ مُشرِف، ورقابةٌ خارجيّة ─────────
+/** @param {string[]} args */
+const cli = (args) => {
+  const base = { ...process.env };
+  delete base['DATABASE_URL'];
+  delete base['XUUX_REAPER_DATABASE_URL'];
+  delete base['XUUX_MONITOR_DATABASE_URL'];
+  return spawnSync(process.execPath, [REAPER_CLI, ...args], {
+    cwd: REPO,
+    env: base,
+    encoding: 'utf8',
+  });
+};
+/**
+ * سياسةُ الوحدةِ كما يقرؤها systemd (‏للمفاتيحِ التي تحكمُ الإعادة) — من النصِّ المطبوعِ نفسِه لا من نسخةٍ في الاختبار.
+ * @param {string} text
+ */
+const unitPolicy = (text) => {
+  /** @type {Map<string, string[]>} */
+  const kv = new Map();
+  for (const line of text.split('\n')) {
+    const m = /^([A-Za-z]+)=(.*)$/.exec(line);
+    if (m) kv.set(String(m[1]), [...(kv.get(String(m[1])) ?? []), String(m[2])]);
+  }
+  const one = (/** @type {string} */ k) => {
+    const v = kv.get(k);
+    assert.ok(v && v.length === 1, `${k} مرّةً واحدة`);
+    return String(first(v));
+  };
+  return {
+    kv,
+    one,
+    restart: one('Restart'),
+    prevent: new Set(one('RestartPreventExitStatus').split(/\s+/).map(Number)),
+    burst: Number(one('StartLimitBurst')),
+    interval: Number(one('StartLimitIntervalSec')),
+    exec: one('ExecStart').split(' '),
+  };
+};
+/**
+ * مُشرِفٌ بقواعدِ systemd للمفاتيحِ المطبوعة: `Restart=on-failure` يُعيدُ عندَ رمزٍ ≠ 0 أو إشارةٍ غيرِ نظيفة، إلّا رمزاً في
+ * `RestartPreventExitStatus`؛ و`StartLimitBurst` تشغيلاً في `StartLimitIntervalSec` ⇒ توقّف (‏start-limit-hit). ليس systemd —
+ * يُثبِتُ أنّ السياسةَ المطبوعةَ مع رموزِ خروجِ العمليّةِ الحقيقيّة لا تدورُ، لا أنّ وحدةً نُصِّبت.
+ * @param {ReturnType<typeof unitPolicy>} pol @param {Record<string, string>} env
+ * @param {(c: ReturnType<typeof child>) => Promise<void>} [during]
+ */
+const superviseUnit = async (pol, env, during) => {
+  assert.equal(pol.exec[0], process.execPath);
+  /** @type {Array<{ code: number | null, signal: string | null, events: Array<Record<string, any>> }>} */
+  const runs = [];
+  /** @type {number[]} */
+  const starts = [];
+  let verdict = 'stopped';
+  for (;;) {
+    const now = Date.now();
+    if (starts.filter((x) => now - x < pol.interval * 1000).length >= pol.burst) {
+      verdict = 'start-limit-hit';
+      break;
+    }
+    starts.push(now);
+    const c = child(pol.exec.slice(1), env);
+    const killer = setTimeout(() => c.p.kill('SIGKILL'), 20_000);
+    if (during) await during(c);
+    const ex = await c.exited;
+    clearTimeout(killer);
+    runs.push({ ...ex, events: c.events });
+    const clean =
+      ex.code === 0 ||
+      (ex.code === null && ['SIGTERM', 'SIGINT', 'SIGHUP', 'SIGPIPE'].includes(String(ex.signal)));
+    if (clean || pol.restart !== 'on-failure') break;
+    if (ex.code !== null && pol.prevent.has(ex.code)) {
+      verdict = `prevented:${ex.code}`;
+      break;
+    }
+    await sleep(50); // ‏RestartSec مُصغَّر — الترتيبُ لا المدّة
+  }
+  return { runs, verdict };
+};
+
+describe('WL-559: --print-unit — وحدةٌ مولَّدةٌ بلا سرّ، وأقلُّ امتياز، وإعادةٌ بتصنيفِ الأخطاء، ومُدخلٌ مرفوض', () => {
+  test('الافتراض: UMask=0077، peer بلا كلمةِ مرور، --role reaper، on-failure مع منعِ 2 و78، وحدُّ تشغيل، وتصليب', () => {
+    const r = cli(['--print-unit']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout, renderReaperUnit({}), 'CLI = المكتبة');
+    const pol = unitPolicy(r.stdout);
+    assert.equal(pol.one('UMask'), '0077');
+    assert.equal(pol.restart, 'on-failure');
+    assert.deepEqual([...pol.prevent].sort(), [2, 78]);
+    assert.ok(
+      pol.burst >= 2 && pol.burst <= 10 && pol.interval >= 60,
+      `${pol.burst}/${pol.interval}`,
+    );
+    assert.deepEqual(pol.exec.slice(2, 4), ['--role', 'reaper']);
+    const qt = Number(pol.exec[pol.exec.indexOf('--query-timeout-ms') + 1]);
+    assert.ok(qt >= 2000, 'مهلةُ النداء ≥ أرضيّةِ 0030');
+    const envs = pol.kv.get('Environment') ?? [];
+    const dbu = envs.find((e) => e.startsWith('XUUX_REAPER_DATABASE_URL='));
+    assert.equal(
+      dbu,
+      'XUUX_REAPER_DATABASE_URL=postgresql:///xuux?host=/var/run/postgresql&user=xf_reaper',
+    );
+    const u = new URL(String(dbu).slice('XUUX_REAPER_DATABASE_URL='.length));
+    assert.equal(u.password, '', 'لا كلمةَ مرور');
+    assert.ok(
+      !/password|PGPASS|sslkey|EnvironmentFile|LoadCredential/i.test(r.stdout),
+      'لا سرَّ ولا ملفَّ أسرار',
+    );
+    for (const [k, v] of /** @type {const} */ ([
+      ['NoNewPrivileges', 'yes'],
+      ['CapabilityBoundingSet', ''],
+      ['AmbientCapabilities', ''],
+      ['ProtectSystem', 'strict'],
+      ['PrivateNetwork', 'yes'],
+      ['RestrictAddressFamilies', 'AF_UNIX'],
+      ['IPAddressDeny', 'any'],
+      ['PassEnvironment', ''],
+      ['User', 'xuux-reaper'],
+    ])) {
+      assert.equal(pol.one(k), v, k);
+    }
+    assert.ok(!pol.kv.has('ExecStartPre') && !pol.kv.has('ExecReload'), 'لا أوامرَ إضافيّة');
+  });
+
+  test('الخياراتُ تُنقَلُ إلى ExecStart بحدودِها؛ والمُدخلُ الخاطئُ ⇒ 2 بلا وحدةٍ جزئيّة', () => {
+    const r = cli([
+      '--print-unit',
+      '--unit-user',
+      'svc_r',
+      '--unit-database',
+      'xdb',
+      '--unit-socket-dir',
+      '/run/pg',
+      '--ceiling-ms',
+      '3000',
+      '--query-timeout-ms',
+      '4000',
+      '--retry-ms',
+      '100',
+      '--max-retry-ms',
+      '2000',
+      '--permanent-limit',
+      '7',
+      '--heartbeat-ms',
+      '0',
+    ]);
+    assert.equal(r.status, 0, r.stderr);
+    const pol = unitPolicy(r.stdout);
+    assert.equal(pol.one('User'), 'svc_r');
+    assert.deepEqual(pol.exec.slice(4), [
+      '--ceiling-ms',
+      '3000',
+      '--query-timeout-ms',
+      '4000',
+      '--retry-ms',
+      '100',
+      '--max-retry-ms',
+      '2000',
+      '--permanent-limit',
+      '7',
+      '--heartbeat-ms',
+      '0',
+    ]);
+    assert.ok(
+      r.stdout.includes('XUUX_REAPER_DATABASE_URL=postgresql:///xdb?host=/run/pg&user=xf_reaper'),
+    );
+    for (const bad of [
+      ['--unit-user', 'a b'],
+      ['--unit-user', 'root\nExecStartPre=/bin/sh'],
+      ['--unit-database', 'x&password=p'],
+      ['--unit-node', 'node'],
+      ['--unit-script', '/opt/x/../etc/s.mjs'],
+      ['--unit-script', '/opt/%h/s.mjs'],
+      ['--unit-socket-dir', '/run/pg q'],
+      ['--query-timeout-ms', '1999'],
+      ['--ceiling-ms', '300001'],
+      ['--retry-ms', '6000'],
+      ['--ceiling-ms', 'x'],
+    ]) {
+      const z = cli(['--print-unit', ...bad]);
+      assert.equal(z.status, 2, `${bad.join(' ')}: ${z.stdout}`);
+      assert.ok(!z.stdout.includes('[Service]'), `${bad.join(' ')}: لا وحدةَ جزئيّة`);
+    }
+  });
+
+  test('systemd-analyze verify بلا أيِّ تشخيصٍ للوحدة، و`security --offline` ≤ 1.0 — أو تخطٍّ مُعلَنٌ بلا systemd-analyze', (t) => {
+    const probe = spawnSync('systemd-analyze', ['--version'], { encoding: 'utf8' });
+    if (probe.status !== 0) {
+      t.skip('systemd-analyze غيرُ متاحٍ في هذه البيئة — الصياغةُ لم تُتحقَّق هنا');
+      return;
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'wl559-unit-'));
+    try {
+      const good = cli([
+        '--print-unit',
+        '--unit-node',
+        process.execPath,
+        '--unit-script',
+        REAPER_CLI,
+      ]);
+      assert.equal(good.status, 0);
+      const unitPath = join(dir, 'xuux-reaper.service');
+      writeFileSync(unitPath, good.stdout);
+      // ‏`verify` يخرجُ بـ0 مع مفتاحٍ مجهول (‏تحذيرٌ فقط) ⇒ الحكمُ أيضاً: لا سطرَ يذكرُ ملفَّ الوحدة.
+      const unitLines = (/** @type {string} */ err) =>
+        err.split('\n').filter((l) => l.includes(dir));
+      const v = spawnSync('systemd-analyze', ['verify', '--man=no', unitPath], {
+        encoding: 'utf8',
+      });
+      assert.equal(v.status, 0, v.stderr);
+      assert.deepEqual(unitLines(v.stderr), [], v.stderr);
+      // ‏ضابطُ الحكم: مفتاحٌ مجهولٌ يظهرُ تشخيصاً — فالفحصُ يرى ما يُخطئُه systemd.
+      const badPath = join(dir, 'bad.service');
+      writeFileSync(badPath, good.stdout.replace('UMask=0077', 'UMask=0077\nUMaskk=0077'));
+      const vb = spawnSync('systemd-analyze', ['verify', '--man=no', badPath], {
+        encoding: 'utf8',
+      });
+      assert.ok(
+        unitLines(vb.stderr).some((l) => /Unknown key/.test(l)),
+        vb.stderr,
+      );
+      const sec = spawnSync('systemd-analyze', ['security', '--offline=yes', unitPath], {
+        encoding: 'utf8',
+      });
+      assert.equal(sec.status, 0, sec.stderr);
+      const m = /Overall exposure level for [^:]+: ([0-9.]+)/.exec(sec.stdout);
+      assert.ok(m, sec.stdout.slice(-300));
+      assert.ok(Number(m[1]) <= 1.0, `التعرّض ${m[1]}`);
+      t.diagnostic(`systemd-analyze verify=0 exposure=${m[1]}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe(
+  'WL-559: محاكاةُ المُشرِفِ بالسياسةِ المطبوعة، و--health من خارجِ مضيفِ القاعدة',
+  { skip: skipWithoutDatabase, timeout: 110_000 },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    before(async () => {
+      h = await harness('wl559p');
+    });
+    after(async () => {
+      await h?.db.pool
+        .query(`ALTER ROLE xf_reaper PASSWORD NULL VALID UNTIL '-infinity'`)
+        .catch(() => {});
+      await h?.db.pool.query(`ALTER ROLE xf_auditor PASSWORD NULL`).catch(() => {});
+      await h?.close();
+    });
+    /** @param {string} role */
+    const urlFor = async (role) => {
+      const password = randomBytes(18).toString('base64url');
+      await h.db.pool.query(`ALTER ROLE ${quoteIdent(role)} PASSWORD '${password}'`);
+      const url = new URL(databaseUrl() ?? '');
+      url.username = role;
+      url.password = password;
+      url.pathname = `/${h.db.name}`;
+      return url.toString();
+    };
+    const gate = async (/** @type {boolean} */ open) =>
+      h.db.pool.query(`ALTER ROLE xf_reaper VALID UNTIL '${open ? 'infinity' : '-infinity'}'`);
+    // ‏الوحدةُ بحدودٍ مُصغَّرةٍ للاختبار (‏نفسُ المولِّد): الوصلةُ في الاختبارِ TCP بكلمةِ مرور، وفي الوحدةِ peer.
+    const pol = unitPolicy(
+      renderReaperUnit({
+        node: process.execPath,
+        script: REAPER_CLI,
+        ceilingMs: 1000,
+        queryTimeoutMs: 2000,
+        retryMs: 50,
+        maxRetryMs: 200,
+        permanentLimit: 3,
+        heartbeatMs: 0,
+      }),
+    );
+    /** @param {Record<string, string>} env */
+    const health = (env) =>
+      new Promise((resolve) => {
+        const c = child(
+          [REAPER_CLI, '--health', '--slack-ms', '1000', '--query-timeout-ms', '3000'],
+          env,
+        );
+        void c.exited.then((ex) => resolve({ ...ex, events: c.events, stderr: c.stderr() }));
+      });
+
+    test('خروجٌ دائم (‏28P01 ⇒ 78، وإعدادٌ ناقص ⇒ 2) لا يُعاد؛ والخروجُ النظيفُ لا يُعاد', async () => {
+      const good = await urlFor('xf_reaper');
+      const wrong = new URL(good);
+      wrong.password = randomBytes(18).toString('base64url');
+      const p = await superviseUnit(pol, { XUUX_REAPER_DATABASE_URL: wrong.toString() });
+      assert.equal(p.verdict, 'prevented:78');
+      assert.equal(p.runs.length, 1, 'تشغيلٌ واحد');
+      assert.equal(
+        first(p.runs).events.filter((e) => e.ev === 'error' && e.code === '28P01').length,
+        3,
+      );
+      const u = await superviseUnit(pol, {});
+      assert.equal(u.verdict, 'prevented:2');
+      assert.equal(u.runs.length, 1);
+      assert.ok(
+        !JSON.stringify([...p.runs, ...u.runs]).includes(wrong.password),
+        'لا سرَّ في السجل',
+      );
+      await gate(true);
+      try {
+        const z = await superviseUnit(pol, { XUUX_REAPER_DATABASE_URL: good }, async (c) => {
+          await c.waitFor((e) => e.ev === 'connected', 10_000);
+          c.p.kill('SIGTERM');
+        });
+        assert.equal(z.verdict, 'stopped');
+        assert.deepEqual([z.runs.length, first(z.runs).code], [1, 0]);
+      } finally {
+        await gate(false);
+      }
+    });
+
+    test('انهيارٌ متكرّر (‏SIGKILL بعدَ الاتصال) ⇒ يُعادُ حتى StartLimitBurst ثمّ يتوقّف — لا حلقةَ بلا نهاية', async () => {
+      const good = await urlFor('xf_reaper');
+      await gate(true);
+      try {
+        const z = await superviseUnit(pol, { XUUX_REAPER_DATABASE_URL: good }, async (c) => {
+          await c.waitFor((e) => e.ev === 'connected', 10_000);
+          c.p.kill('SIGKILL');
+        });
+        assert.equal(z.verdict, 'start-limit-hit');
+        assert.equal(z.runs.length, pol.burst);
+        assert.ok(z.runs.every((r) => r.signal === 'SIGKILL'));
+      } finally {
+        await gate(false);
+      }
+    });
+
+    test('--health: 0 مع حاصدٍ سليم، 1 بعدَ قتلِه (‏db_connected=false)، 3 بلا قاعدةٍ أو بلا صلاحيّة، 2 بلا وصلة — بلا سرّ', async (t) => {
+      const mon = await urlFor('xf_auditor');
+      const good = await urlFor('xf_reaper');
+      const none = /** @type {any} */ (await health({}));
+      assert.equal(none.code, 2);
+      await gate(true);
+      const r = child(pol.exec.slice(1), { XUUX_REAPER_DATABASE_URL: good });
+      try {
+        await r.waitFor((e) => e.ev === 'connected', 10_000);
+        await gate(false);
+        /** @type {any} */
+        let ok = { code: -1 };
+        const t0 = Date.now();
+        while (Date.now() - t0 < 8000) {
+          ok = await health({ XUUX_MONITOR_DATABASE_URL: mon });
+          if (ok.code === 0) break;
+          await sleep(200);
+        }
+        assert.equal(ok.code, 0, JSON.stringify(ok.events));
+        const line = first(
+          /** @type {Array<Record<string, any>>} */ (ok.events).filter((e) => e.ev === 'health'),
+        );
+        assert.deepEqual(
+          [
+            line['healthy'],
+            line['db_connected'],
+            line['tick_attempted'],
+            line['tick_succeeded'],
+            line['privileges_intact'],
+          ],
+          [true, true, true, true, true],
+        );
+        // ‏instances يعدُّ كلَّ صفوفِ النبض (‏نسخٌ ميّتةٌ من الاختبارَين السابقَين معها) — الموصولةُ السليمةُ واحدةٌ بالضبط.
+        assert.deepEqual(
+          [
+            line['anomalies']?.connected_instances,
+            line['anomalies']?.healthy_instances,
+            line['anomalies']?.unbound_reaper_sessions,
+          ],
+          [1, 1, 0],
+        );
+        assert.ok(Number(line['instances']) >= 1);
+        assert.equal(
+          line['process_alive_observable'],
+          false,
+          'القاعدةُ لا ترى العمليّةَ نفسَها — مُعلَن',
+        );
+        r.p.kill('SIGKILL');
+        await r.exited;
+        /** @type {any} */
+        let bad = { code: -1 };
+        const t1 = Date.now();
+        while (Date.now() - t1 < 8000) {
+          bad = await health({ XUUX_MONITOR_DATABASE_URL: mon });
+          if (bad.code === 1) break;
+          await sleep(200);
+        }
+        assert.equal(bad.code, 1, JSON.stringify(bad.events));
+        const bl = first(
+          /** @type {Array<Record<string, any>>} */ (bad.events).filter((e) => e.ev === 'health'),
+        );
+        assert.deepEqual([bl['healthy'], bl['db_connected']], [false, false]);
+        const closed = new URL(mon);
+        closed.hostname = '127.0.0.1';
+        closed.port = '1';
+        const unreach = /** @type {any} */ (
+          await health({ XUUX_MONITOR_DATABASE_URL: closed.toString() })
+        );
+        assert.equal(unreach.code, 3);
+        assert.ok(unreach.events.some((/** @type {any} */ e) => e.ev === 'health_error'));
+        // ‏دورُ دخولٍ مؤقّتٌ بـCONNECT وحدَه (‏بلا EXECUTE على reaper_health) ⇒ 42501 لا صحّةَ زائفة.
+        await h.db.pool.query('DROP ROLE IF EXISTS zz_wl559_mon');
+        await h.db.pool.query('CREATE ROLE zz_wl559_mon LOGIN');
+        await h.db.pool.query(`GRANT CONNECT ON DATABASE ${quoteIdent(h.db.name)} TO zz_wl559_mon`);
+        const worker = await urlFor('zz_wl559_mon');
+        const denied = /** @type {any} */ (await health({ XUUX_MONITOR_DATABASE_URL: worker }));
+        assert.equal(denied.code, 3, JSON.stringify(denied.events));
+        assert.ok(
+          denied.events.some(
+            (/** @type {any} */ e) => e.ev === 'health_error' && e.code === '42501',
+          ),
+          JSON.stringify(denied.events),
+        );
+        const all = JSON.stringify([ok, bad, unreach, denied]);
+        for (const u of [mon, worker])
+          assert.ok(!all.includes(decodeURIComponent(new URL(u).password)), 'لا سرّ');
+        t.diagnostic(`health: healthy=0 killed=1 unreachable=3 denied=3 usage=2`);
+      } finally {
+        r.p.kill('SIGKILL');
+        await gate(false);
+        await h.db.pool
+          .query(`REVOKE CONNECT ON DATABASE ${quoteIdent(h.db.name)} FROM zz_wl559_mon`)
+          .catch(() => {});
+        await h.db.pool.query('DROP ROLE IF EXISTS zz_wl559_mon').catch(() => {});
+      }
+    });
+  },
+);
