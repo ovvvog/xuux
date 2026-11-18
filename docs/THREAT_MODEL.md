@@ -854,7 +854,7 @@ owner_tasks:
   - id: T2
     title: نموذجُ تهديدِ المُشرِفِ ومخطّطُ الصلاحياتِ وتدفّقُ المفاتيح
     state: DESIGNED
-    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17]
+    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17, TH-OWN-01]
   - id: T3
     title: بيئةُ اختبارٍ معزولةٌ على خادمِ الصديقِ عبرَ Cloudflare
     state: DESIGNED_NEEDS_APPROVAL
