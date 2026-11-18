@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -431,4 +431,110 @@ test('WL-557: اسمٌ غيرُ محلولٍ بينَ أسماءِ via المح�
   const a = picoAudit();
   a.vulnerabilities.tinyglobby.via = ['picomatch', 'ghost'];
   assert.ok(evaluateAudit(a, picoLock(true), NOW).blocking.some((x) => x.name === 'tinyglobby'));
+});
+
+/**
+ * WL-565: جذرٌ أدنى صالحٌ بكلِّ الشروطِ إلا R5، بحزمِ قفلٍ يحدّدُها الاختبار.
+ *
+ * @param {Record<string, unknown>} packages
+ */
+function floorRoot(packages) {
+  const tmp = makeTempRoot();
+  mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({
+      name: 'test',
+      version: '1.0.0',
+      private: true,
+      devDependencies: { ajv: '8.20.0' },
+    }),
+  );
+  writeFileSync(
+    path.join(tmp, 'package-lock.json'),
+    JSON.stringify({
+      lockfileVersion: 3,
+      name: 'test',
+      packages: { '': { name: 'test' }, ...packages },
+    }),
+  );
+  writeFileSync(
+    path.join(tmp, 'sbom.cdx.json'),
+    JSON.stringify({
+      bomFormat: 'CycloneDX',
+      specVersion: '1.4',
+      components: [{ name: 'ajv', version: '8.20.0' }],
+    }),
+  );
+  writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({ vulnerabilities: {} }));
+  writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+  return tmp;
+}
+
+test('WL-565: R5 — نسخةُ fast-uri أو minimatch داخلَ مدى التبليغِ المسدودِ تُغلقُ الحاجز، بأيِّ عمق', () => {
+  /** @type {Array<[string, string]>} */
+  const cases = [
+    ['node_modules/fast-uri', '3.1.8'],
+    ['node_modules/fast-uri', '3.0.0'],
+    ['node_modules/ajv/node_modules/fast-uri', '3.1.6'],
+    ['node_modules/minimatch', '10.2.6'],
+    ['node_modules/minimatch', '7.0.0'],
+    ['node_modules/eslint/node_modules/minimatch', '11.0.0'],
+    ['node_modules/minimatch', 'not-a-version'],
+  ];
+  for (const [key, version] of cases) {
+    const tmp = floorRoot({ [key]: { version, dev: true } });
+    try {
+      const result = runGuard(tmp);
+      assert.equal(result.ok, false, `${key}@${version} يجبُ أن يُغلِقَ الحاجز`);
+      assert.match(result.stderr ?? '', /R5:/, `${key}@${version}: سببُ الإغلاقِ R5`);
+      assert.ok(
+        (result.stderr ?? '').includes(`${key}@`),
+        `${key}@${version}: المسارُ مُسمّىً في الرسالة`,
+      );
+    } finally {
+      cleanup(tmp);
+    }
+  }
+});
+
+test('WL-565: R5 — النسخُ المصحَّحةُ وما خارجَ المدى المنشورِ تمرّ، واسمٌ يشبهُ الحزمةَ لا يُلتبَس', () => {
+  const tmp = floorRoot({
+    'node_modules/fast-uri': { version: '3.1.9', dev: true },
+    'node_modules/x/node_modules/fast-uri': { version: '4.2.3', dev: true },
+    'node_modules/old/node_modules/fast-uri': { version: '2.4.0', dev: true },
+    'node_modules/minimatch': { version: '11.0.1', dev: true },
+    'node_modules/y/node_modules/minimatch': { version: '6.2.0', dev: true },
+    'node_modules/not-minimatch': { version: '10.0.0', dev: true },
+    'node_modules/fast-uri-extra': { version: '3.1.0', dev: true },
+  });
+  try {
+    const result = runGuard(tmp);
+    assert.equal(result.ok, true, `Expected pass, got: ${result.output || result.stderr}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-565: قفلُ المستودعِ نفسُه فوقَ الأرضيّات — كلُّ نسخِ fast-uri وminimatch خارجَ المدى المصاب', () => {
+  const lock = JSON.parse(readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
+  /** @type {string[]} */
+  const seen = [];
+  for (const [key, entry] of Object.entries(lock.packages)) {
+    const name = key.split('node_modules/').pop();
+    if (name !== 'fast-uri' && name !== 'minimatch') continue;
+    seen.push(`${key}@${entry.version}`);
+    const [major = 0, minor = 0, patch = 0] = String(entry.version).split('.').map(Number);
+    const n = major * 1e6 + minor * 1e3 + patch;
+    if (name === 'fast-uri') assert.ok(n < 3e6 || n >= 3001009, `${key}@${entry.version}`);
+    else assert.ok(n < 7e6 || n >= 11000001, `${key}@${entry.version}`);
+  }
+  assert.ok(
+    seen.some((s) => s.startsWith('node_modules/fast-uri@')),
+    `fast-uri في القفل: ${seen.join(', ')}`,
+  );
+  assert.ok(
+    seen.some((s) => s.startsWith('node_modules/minimatch@')),
+    `minimatch في القفل: ${seen.join(', ')}`,
+  );
 });
