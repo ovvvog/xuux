@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, cpSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -537,4 +537,135 @@ test('WL-565: قفلُ المستودعِ نفسُه فوقَ الأرضيّات
     seen.some((s) => s.startsWith('node_modules/minimatch@')),
     `minimatch في القفل: ${seen.join(', ')}`,
   );
+});
+
+/**
+ * جذرٌ مؤقّتٌ بشفرةِ تشغيلٍ في `src/` وpackage.json مُعطى (‏WL-568).
+ *
+ * @param {Record<string, unknown>} pkgFields
+ * @param {Record<string, string>} files مسارٌ نسبيٌّ تحتَ `src/` ← نصّ.
+ */
+function runtimeRoot(pkgFields, files) {
+  const tmp = floorRoot({});
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({ name: 'test', version: '1.0.0', private: true, ...pkgFields }),
+  );
+  for (const [rel, text] of Object.entries(files)) {
+    mkdirSync(path.dirname(path.join(tmp, 'src', rel)), { recursive: true });
+    writeFileSync(path.join(tmp, 'src', rel), text);
+  }
+  return tmp;
+}
+
+test('WL-568: R6 — حزمةٌ تستوردُها src/ وهي في devDependencies وحدَها تُغلقُ الحاجز، بكلِّ صيغِ الاستيراد', () => {
+  /** @type {Array<[string, string]>} */
+  const cases = [
+    ['ajv', "import { Ajv2020 } from 'ajv/dist/2020.js';\n"],
+    ['ajv', "const m = await import('ajv');\n"],
+    ['ajv', "import 'ajv';\n"],
+    ['ajv', "export { default } from 'ajv';\n"],
+    ['ajv', "const m = require('ajv');\n"],
+    ['@scope/pkg', "import x from '@scope/pkg/sub/index.js';\n"],
+    ['left-pad', "import pad from 'left-pad';\n"],
+  ];
+  for (const [name, text] of cases) {
+    const tmp = runtimeRoot(
+      { dependencies: { pg: '8.23.0' }, devDependencies: { ajv: '8.20.0' } },
+      { 'deep/nested/mod.mjs': text },
+    );
+    try {
+      const result = runGuard(tmp);
+      assert.equal(result.ok, false, `${text.trim()} يجبُ أن يُغلِقَ الحاجز`);
+      assert.match(result.stderr ?? '', /R6:/, `${text.trim()}: سببُ الإغلاقِ R6`);
+      assert.ok(
+        (result.stderr ?? '').includes(`${name} (‏src/deep/nested/mod.mjs`),
+        `${text.trim()}: الحزمةُ والملفُّ مُسمَّيانِ: ${result.stderr ?? ''}`,
+      );
+    } finally {
+      cleanup(tmp);
+    }
+  }
+});
+
+test('WL-568: R6 — المُعلَنُ في dependencies/optionalDependencies والمدمجُ والنسبيُّ يمرّ، وخارجَ src/ لا يُقرأ', () => {
+  const tmp = runtimeRoot(
+    {
+      dependencies: { ajv: '8.20.0', '@scope/pkg': '1.0.0' },
+      optionalDependencies: { pkcs11js: '2.1.7' },
+      devDependencies: { eslint: '10.15.0' },
+    },
+    {
+      'a.mjs': [
+        "import { Ajv2020 } from 'ajv/dist/2020.js';",
+        "import fs from 'node:fs';",
+        "import path from 'path';",
+        "import { x } from './b.mjs';",
+        "import y from '../src/b.mjs';",
+        "import z from '@scope/pkg/sub.js';",
+        "const p = await import('pkcs11js');",
+        "/** @type {typeof import('ajv/dist/2020.js').Ajv2020} */",
+        "// يلتقطُ `import('…')` و`require('…')` بمواصفةٍ حرفيّة.",
+        "const m = 'text from somewhere';",
+        "const self = await import('test/lib.mjs');",
+        '',
+      ].join('\n'),
+      'b.mjs': 'export const x = 1;\n',
+    },
+  );
+  writeFileSync(path.join(tmp, 'tool.mjs'), "import eslint from 'eslint';\n");
+  try {
+    const result = runGuard(tmp);
+    assert.equal(result.ok, true, `Expected pass, got: ${result.output || result.stderr}`);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-568: شفرةُ تشغيلِ المستودعِ نفسِه — كلُّ استيرادِها مُعلَنٌ تبعيّةَ تشغيل (‏ajv في dependencies)', () => {
+  const pkg = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  assert.equal(pkg.dependencies?.ajv, '8.20.0', 'ajv تبعيّةُ تشغيل');
+  assert.equal(pkg.devDependencies?.ajv, undefined, 'ajv ليست في devDependencies');
+  const lock = JSON.parse(readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
+  for (const name of [
+    'ajv',
+    'fast-uri',
+    'fast-deep-equal',
+    'json-schema-traverse',
+    'require-from-string',
+  ])
+    assert.notEqual(lock.packages[`node_modules/${name}`]?.dev, true, `${name} ليست dev في القفل`);
+  const tmp = runtimeRoot(
+    {
+      dependencies: pkg.dependencies,
+      optionalDependencies: pkg.optionalDependencies,
+      devDependencies: pkg.devDependencies,
+    },
+    {},
+  );
+  cpSync(path.join(repoRoot, 'src'), path.join(tmp, 'src'), { recursive: true });
+  try {
+    const result = runGuard(tmp);
+    assert.equal(result.ok, true, `Expected pass, got: ${result.output || result.stderr}`);
+    writeFileSync(
+      path.join(tmp, 'package.json'),
+      JSON.stringify({
+        name: 'test',
+        dependencies: Object.fromEntries(
+          Object.entries(pkg.dependencies).filter(([name]) => name !== 'ajv'),
+        ),
+        optionalDependencies: pkg.optionalDependencies,
+        devDependencies: { ...pkg.devDependencies, ajv: '8.20.0' },
+      }),
+    );
+    const before = runGuard(tmp);
+    assert.equal(
+      before.ok,
+      false,
+      'ajv في devDependencies وحدَها يُغلِقُ الحاجزَ على src/ الحقيقيّ',
+    );
+    assert.match(before.stderr ?? '', /R6: [^\n]*ajv \(‏src\/[^\n]*، 39 ملفّاً\)\.$/m);
+  } finally {
+    cleanup(tmp);
+  }
 });

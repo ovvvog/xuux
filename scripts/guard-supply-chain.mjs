@@ -7,7 +7,7 @@
 // تُفحص في CI، ولا قائمةَ مكوّناتٍ (SBOM) تُولَّد. فتبعيّةٌ بثغرةٍ حرجةٍ كانت
 // تمرّ بلا اعتراض، والبناءُ يخضرّ والنظامُ مكشوف.
 //
-// فالحاجز يتحقّق من ستّة شروط:
+// فالحاجز يتحقّق من سبعة شروط:
 //   R0: `package-lock.json` موجود وصالح.
 //   R1: كلُّ تبعيّات `package.json` مثبَّتةٌ بإصدارٍ دقيقٍ (لا `^` ولا `~`).
 //   R2: ملفُّ SBOM (`sbom.cdx.json`) موجودٌ وصالح.
@@ -15,6 +15,8 @@
 //   R4: لا وحداتٍ في `node_modules/` مُلتزَمةً في المستودع.
 //   R5 (‏WL-565): لا نسخةَ في ملفِّ القفلِ (‏بأيِّ عمقٍ) داخلَ مدى تبليغٍ سُدَّ — أرضيّةٌ لا ترجعُ
 //       بتحديثِ قفلٍ لاحقٍ ولو كانت شدّتُه دونَ «عالية» فلا يراها R3.
+//   R6 (‏WL-568): كلُّ حزمةٍ تستوردُها شفرةُ التشغيلِ (‏`src/`) مُعلَنةٌ في `dependencies` أو
+//       `optionalDependencies` — لا في `devDependencies` وحدَها فيُسقِطَها `npm ci --omit=dev`.
 //
 // حدٌّ معلن: الحاجزُ يقرأ النصَّ لا زمنَ التشغيل؛ و`npm audit` يُشغَّلُ كخطوةِ
 // CI منفصلةٍ لا هنا، لأنَّه يحتاجُ شبكةً وقد يبطئُ `validate` المحلّي. هنا
@@ -22,7 +24,8 @@
 // ولا يُدَّعى أنَّ هذا بديلٌ عن الفحصِ الخارجيِّ (M11.04) — هو فحصٌ آليٌّ
 // داخليٌّ لا أكثر.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -109,6 +112,89 @@ function floorViolations(lock) {
   return out;
 }
 
+/** امتداداتُ شفرةِ التشغيلِ التي يقرؤها R6. */
+const SOURCE_EXTENSIONS = Object.freeze(['.mjs', '.js', '.cjs', '.mts']);
+
+/** اسمُ حزمةِ npm (‏مع النطاقِ أو بدونه) في أوّلِ المواصفة. */
+const PACKAGE_NAME = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*/;
+
+/**
+ * المواصفاتُ الحرفيّةُ في نصٍّ: `from '…'`، و`import '…'`، و`import('…')`، و`require('…')`.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function importSpecifiers(text) {
+  const out = [];
+  const pattern =
+    /\bfrom\s*(['"])([^'"\n]+)\1|\bimport\s*(['"])([^'"\n]+)\3|\b(?:import|require)\s*\(\s*(['"])([^'"\n]+)\5\s*\)/g;
+  for (const match of text.matchAll(pattern)) out.push(match[2] ?? match[4] ?? match[6] ?? '');
+  return out;
+}
+
+/**
+ * اسمُ الحزمةِ الخارجيّةِ لمواصفةٍ، أو null لمسارٍ نسبيٍّ أو مطلقٍ أو وحدةٍ مدمجة.
+ *
+ * @param {string} specifier
+ * @returns {string | null}
+ */
+function externalPackage(specifier) {
+  if (specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('node:'))
+    return null;
+  const name = PACKAGE_NAME.exec(specifier)?.[0];
+  if (!name) return null;
+  if (builtinModules.includes(name) || builtinModules.includes(specifier)) return null;
+  const rest = specifier.slice(name.length);
+  return rest === '' || rest.startsWith('/') ? name : null;
+}
+
+/**
+ * كلُّ ملفٍّ مصدريٍّ تحتَ مجلّد (‏تكراريّاً).
+ *
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function sourceFiles(dir) {
+  if (!existsSync(dir)) return [];
+  /** @type {string[]} */
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sourceFiles(full));
+    else if (SOURCE_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) out.push(full);
+  }
+  return out.sort();
+}
+
+/**
+ * حزمٌ تستوردُها شفرةُ التشغيلِ وليست في `dependencies` ولا `optionalDependencies`.
+ *
+ * @param {string} root
+ * @param {Record<string, unknown>} pkg
+ * @returns {string[]} `حزمة (‏أوّلُ ملفٍّ، وعددُ الملفّات)`.
+ */
+function runtimeImportViolations(root, pkg) {
+  const declared = new Set([
+    ...Object.keys(/** @type {Record<string, string>} */ (pkg.dependencies ?? {})),
+    ...Object.keys(/** @type {Record<string, string>} */ (pkg.optionalDependencies ?? {})),
+  ]);
+  /** @type {Map<string, string[]>} */
+  const missing = new Map();
+  for (const file of sourceFiles(path.join(root, 'src'))) {
+    for (const specifier of importSpecifiers(readFileSync(file, 'utf8'))) {
+      const name = externalPackage(specifier);
+      if (!name || name === pkg.name || declared.has(name)) continue;
+      const files = missing.get(name) ?? [];
+      const rel = path.relative(root, file);
+      if (!files.includes(rel)) files.push(rel);
+      missing.set(name, files);
+    }
+  }
+  return [...missing].map(
+    ([name, files]) => `${name} (‏${files[0] ?? ''}، ${String(files.length)} ملفّاً)`,
+  );
+}
+
 /** @type {string[]} */
 const violations = [];
 
@@ -186,6 +272,14 @@ try {
     }
   } catch {
     // ‏غيابُ القفلِ أو فسادُه مُبلَّغٌ في R0.
+  }
+
+  // R6 (‏WL-568): استيراداتُ شفرةِ التشغيلِ مُعلَنةٌ تبعيّاتِ تشغيل
+  const undeclared = runtimeImportViolations(repoRoot, pkg);
+  if (undeclared.length > 0) {
+    violations.push(
+      `R6: حزمٌ تستوردُها \`src/\` وليست في \`dependencies\`/\`optionalDependencies\` (‏\`npm ci --omit=dev\` يُسقِطُها): ${undeclared.join('، ')}.`,
+    );
   }
 
   // R4: لا node_modules في المستودع
