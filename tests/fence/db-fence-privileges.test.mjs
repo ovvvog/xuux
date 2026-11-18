@@ -1307,7 +1307,7 @@ describe(
       await h.resume();
     });
 
-    test('أثرُ العضويّة: لا تُمحى ولا يُخفى كشفُها، ودورُ دخولٍ يرثُ العاملَ يُكشَف؛ والاستيلاءُ المباشرُ متبقٍّ مُعلَنٌ مقيس', async () => {
+    test('أثرُ العضويّة: لا تُمحى ولا يُخفى كشفُها، ودورُ دخولٍ يرثُ العاملَ يُكشَف؛ والاستيلاءُ المباشرُ (‏متبقٍّ في 0028) مرفوضٌ بـ0031 (‏XF105) مقيس', async () => {
       await h.root.halt('wl551-impact', { effects: NO_EFFECTS });
       await mk('zz_wl551_p');
       await su('GRANT xf_owner TO zz_wl551_p WITH INHERIT FALSE, SET TRUE');
@@ -1376,16 +1376,198 @@ describe(
         grant_worker_to_rogue: 'OK',
         detects_rogue: 'true',
         detects_owner: 'true',
-        takeover_state: 'OK',
-        takeover_reseal: 'OK',
-        takeover_effective: 'RUNNING',
+        // ‏WL-560 (‏0031): كانت OK/OK/RUNNING (‏الاستيلاءُ المقيسُ في WL-551) — الكاتبُ صارَ يُقرَّرُ بـsession_user.
+        takeover_state: 'XF105',
+        takeover_reseal: 'XF105',
+        takeover_effective: 'HALTED',
       });
       const res = (await fenced()).residuals.find((r) => r.kind === 'owner_membership_detect_only');
       assert.ok(res && /قرارُ مالك/.test(res.note), 'المتبقّي مُعلَنٌ في check_fenced');
+      assert.ok(
+        res && /0031/.test(res.note) && /لا يكتبُ fence\.control/.test(res.note),
+        'الملاحظةُ تصفُ 0031 لا الاستيلاءَ القديم',
+      );
       await su('REVOKE xf_owner FROM zz_wl551_p');
       await dropMade();
       assert.equal((await fenced()).ok, true);
       await h.resume();
+    });
+
+    test('WL-560: كاتبُ fence.control بـsession_user (‏0031) — دخولٌ حقيقيٌّ لعضوِ xf_owner وحدَه، ومعه xf_root، ومعه xf_sovereign؛ والمسارُ المشروعُ يبقى', async (t) => {
+      await h.root.halt('wl560-writer', { effects: NO_EFFECTS });
+      assert.equal(await state(), 'HALTED');
+      // ‏ثلاثةُ أدوارِ دخولٍ حقيقيّة (‏لا SET SESSION AUTHORIZATION من superuser — فذاك يسمحُ بتبديلِ الهويّةِ لاحقاً).
+      /** @type {Record<string, string>} */
+      const pw = {};
+      for (const [name, extra] of /** @type {const} */ ([
+        ['zz_wl560_p', []],
+        ['zz_wl560_r', ['xf_root']],
+        ['zz_wl560_s', ['xf_sovereign']],
+      ])) {
+        await mk(name, true);
+        pw[name] = `wl560-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+        await su(`ALTER ROLE ${quoteIdent(name)} PASSWORD '${pw[name]}'`);
+        await su(`GRANT CONNECT ON DATABASE ${quoteIdent(h.db.name)} TO ${quoteIdent(name)}`);
+        await su(`GRANT xf_owner TO ${quoteIdent(name)} WITH INHERIT FALSE, SET TRUE`);
+        for (const r of extra) await su(`GRANT ${r} TO ${quoteIdent(name)}`);
+      }
+      /** @param {string} name */
+      const login = async (name) => {
+        const u = new URL(String(process.env['DATABASE_URL']));
+        u.username = name;
+        u.password = String(pw[name]);
+        u.pathname = `/${h.db.name}`;
+        const c = new pg.Client({ connectionString: u.toString() });
+        await c.connect();
+        return c;
+      };
+      /** @param {pg.Client} c @param {Array<[string, string]>} steps */
+      const run = async (c, steps) => {
+        /** @type {Record<string, string>} */
+        const out = {};
+        await c.query('BEGIN');
+        for (const [k, sql] of steps) {
+          await c.query('SAVEPOINT p');
+          try {
+            const r = await c.query(sql);
+            out[k] = r.rows?.[0]?.v === undefined ? 'OK' : String(r.rows[0].v);
+            await c.query('RELEASE SAVEPOINT p');
+          } catch (e) {
+            out[k] = String(/** @type {any} */ (e).code);
+            await c.query('ROLLBACK TO SAVEPOINT p');
+          }
+        }
+        await c.query('ROLLBACK');
+        return out;
+      };
+      const eff = `SELECT fence.effective_state()->>'state' AS v`;
+      /** @type {pg.Client[]} */
+      const clients = [];
+      try {
+        const p = await login('zz_wl560_p');
+        clients.push(p);
+        const gotP = await run(p, [
+          ['session_user', 'SELECT session_user::text AS v'],
+          ['set_role', 'SET ROLE xf_owner'],
+          ['current_user', 'SELECT current_user::text AS v'],
+          ['takeover_state', `UPDATE fence.control SET state = 'RUNNING', epoch = epoch + 1`],
+          ['takeover_reseal', 'SELECT fence._reseal()'],
+          ['same_state_write', 'UPDATE fence.control SET seal = seal'],
+          [
+            'restrictive_write',
+            `UPDATE fence.control SET state = 'HALT_REQUESTED', epoch = epoch + 1`,
+          ],
+          ['lease_field_write', 'UPDATE fence.control SET lease_window_s = lease_window_s + 1'],
+          ['second_row_insert', 'INSERT INTO fence.control SELECT * FROM fence.control'],
+          ['effective', eff],
+          ['grant_root_self', 'GRANT xf_root TO zz_wl560_p'],
+          ['grant_sovereign_self', 'GRANT xf_sovereign TO zz_wl560_p'],
+          ['alter_sovereign', `ALTER ROLE xf_sovereign PASSWORD 'x'`],
+          ['disable_trigger', 'ALTER TABLE fence.control DISABLE TRIGGER xf_control_row'],
+          [
+            'replace_guard',
+            `CREATE OR REPLACE FUNCTION fence._control_guard() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$`,
+          ],
+          ['replica_role', 'SET session_replication_role = replica'],
+          ['reset_role', 'RESET ROLE'],
+          ['session_auth_sovereign', 'SET SESSION AUTHORIZATION xf_sovereign'],
+          // ‏بقايا مقيسةٌ لا يُغلِقُها 0031 (‏ملكيّةُ جداولِ fence الأخرى، وقفلُ الصفّ):
+          ['set_role_again', 'SET ROLE xf_owner'],
+          [
+            'residual_lease_update',
+            `UPDATE fence.run_lease SET expires_at = expires_at + interval '1 year'`,
+          ],
+          ['residual_credentials_update', `UPDATE fence.credentials SET revoked_at = revoked_at`],
+          ['residual_control_lock', 'SELECT 1 AS v FROM fence.control FOR UPDATE NOWAIT'],
+        ]);
+        assert.deepEqual(gotP, {
+          session_user: 'zz_wl560_p',
+          set_role: 'OK',
+          current_user: 'xf_owner',
+          takeover_state: 'XF105',
+          takeover_reseal: 'XF105',
+          same_state_write: 'XF105',
+          restrictive_write: 'XF105',
+          lease_field_write: 'XF105',
+          second_row_insert: 'XF105',
+          effective: 'HALTED',
+          grant_root_self: '42501',
+          grant_sovereign_self: '42501',
+          alter_sovereign: '42501',
+          disable_trigger: 'XF202',
+          replace_guard: 'XF202',
+          replica_role: '42501',
+          reset_role: 'OK',
+          session_auth_sovereign: '42501',
+          set_role_again: 'OK',
+          residual_lease_update: 'OK',
+          residual_credentials_update: 'OK',
+          residual_control_lock: '1',
+        });
+        for (const name of ['zz_wl560_r', 'zz_wl560_s']) {
+          const c = await login(name);
+          clients.push(c);
+          const got = await run(c, [
+            [
+              'direct_without_owner',
+              `UPDATE fence.control SET state = 'RUNNING', epoch = epoch + 1`,
+            ],
+            ['set_role', 'SET ROLE xf_owner'],
+            ['takeover_state', `UPDATE fence.control SET state = 'RUNNING', epoch = epoch + 1`],
+            [
+              'pubkey_write',
+              `UPDATE fence.control SET sovereign_pubkey = decode(repeat('00', 32), 'hex')`,
+            ],
+            ['lease_field_write', 'UPDATE fence.control SET lease_window_s = lease_window_s + 1'],
+            // ‏صفٌّ ثانٍ: XF106 قبلَ XF101 — العضوُ لا يُدرِجُ أصلاً (‏ولو كان الجدولُ فارغاً).
+            ['second_row_insert', 'INSERT INTO fence.control SELECT * FROM fence.control'],
+            ['reseal_same', 'SELECT fence._reseal()'],
+            [
+              'restrictive_write',
+              `UPDATE fence.control SET state = 'HALT_REQUESTED', epoch = epoch + 1`,
+            ],
+            // ‏كتابةٌ خامٌ بلا ختمٍ ⇒ الختمُ لا يطابقُ ⇒ RECOVERY_REQUIRED (‏أشدُّ تقييداً)؛ ثمّ الختمُ المشروعُ ⇒ HALT_REQUESTED.
+            ['effective_unsealed', eff],
+            ['reseal_restrictive', 'SELECT fence._reseal()'],
+            ['effective_after', eff],
+          ]);
+          assert.deepEqual(
+            got,
+            {
+              direct_without_owner: '42501',
+              set_role: 'OK',
+              takeover_state: 'XF106',
+              pubkey_write: 'XF106',
+              lease_field_write: 'XF106',
+              second_row_insert: 'XF106',
+              reseal_same: 'OK',
+              // ‏الإيقافُ يبقى ممكناً لجذرٍ أو سياديٍّ ولو كان عضواً (‏الكشفُ يُبقيه HALT_REQUESTED كما في 0028).
+              restrictive_write: 'OK',
+              effective_unsealed: 'RECOVERY_REQUIRED',
+              reseal_restrictive: 'OK',
+              effective_after: 'HALT_REQUESTED',
+            },
+            name,
+          );
+        }
+        t.diagnostic(
+          `owner-only: XF105 ×6; owner+root/sovereign: XF106 ×4; residual: lease/credentials/lock OK`,
+        );
+        assert.equal(await state(), 'HALTED', 'لا أثرَ باقٍ (‏كلُّه في معاملاتٍ أُرجِعت)');
+      } finally {
+        for (const c of clients) await c.end().catch(() => {});
+        // ‏الأدوارُ عنقوديّة: تُزالُ ولو فشلَ الاختبار (‏منحُ CONNECT يمنعُ DROP ROLE فيُسحَبُ أوّلاً).
+        for (const name of ['zz_wl560_p', 'zz_wl560_r', 'zz_wl560_s']) {
+          await su(
+            `REVOKE CONNECT ON DATABASE ${quoteIdent(h.db.name)} FROM ${quoteIdent(name)}`,
+          ).catch(() => {});
+        }
+        await dropMade();
+      }
+      assert.equal((await fenced()).ok, true);
+      // ‏المسارُ المشروع: RESUME موقَّعٌ من السياديّ (‏عبرَ _control_guard نفسِه) ⇒ RUNNING.
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
     });
   },
 );
