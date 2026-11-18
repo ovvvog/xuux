@@ -1340,3 +1340,106 @@ describe(
     });
   },
 );
+
+// ── WL-560: كاتبُ fence.control (‏0031) — حارسٌ يسألُ session_user؛ رجوعٌ يُعيدُ نصَّي 0024/0028 حرفياً، وxf_owner لا يتغيّر ──
+/**
+ * لقطةُ 0031: دوالُّ fence وبيانُها وحالُ xf_owner كاملة (‏خصائصُه وعضويّاتُه في الاتّجاهَين) — فلا تغييرَ لامتيازاته.
+ * @param {import('pg').Pool} pool
+ */
+async function ownerSnapshot(pool) {
+  const base = await fenceFunctionCatalog(pool);
+  const role = await pool.query(
+    `SELECT r.rolname, r.rolsuper, r.rolinherit, r.rolcreaterole, r.rolcreatedb, r.rolcanlogin, r.rolreplication,
+            r.rolbypassrls, r.rolconnlimit,
+            ARRAY(SELECT m.roleid::regrole::text || ':' || m.admin_option || m.inherit_option || m.set_option
+                    FROM pg_auth_members m WHERE m.member = r.oid ORDER BY 1) AS member_of,
+            ARRAY(SELECT m.member::regrole::text || ':' || m.admin_option
+                    FROM pg_auth_members m WHERE m.roleid = r.oid ORDER BY 1) AS members
+       FROM pg_roles r WHERE r.rolname = 'xf_owner'`,
+  );
+  const tables = await pool.query(
+    `SELECT c.relname, pg_get_userbyid(c.relowner) AS owner, coalesce(c.relacl::text, '') AS acl
+       FROM pg_class c WHERE c.relnamespace = 'fence'::regnamespace AND c.relkind IN ('r', 'v', 'S') ORDER BY 1`,
+  );
+  const triggers = await pool.query(
+    `SELECT tgname, tgenabled, tgfoid::regprocedure::text AS fn FROM pg_trigger
+      WHERE tgrelid = 'fence.control'::regclass AND NOT tgisinternal ORDER BY 1`,
+  );
+  return { ...base, owner: role.rows[0], tables: tables.rows, triggers: triggers.rows };
+}
+
+describe(
+  'WL-560 — 0031: الترقيةُ تُغيّرُ _control_guard وcheck_fenced فقط، والرجوعُ إلى 0030 بالحالةِ الناتجةِ حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir30;
+    /** @type {string} */
+    let dir31;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = mkdtempSync(join(tmpdir(), 'xuux-mig-'));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const CHANGED = ['fence._control_guard()', 'fence.check_fenced()'];
+    before(async () => {
+      dir30 = migrationsDir(30);
+      dir31 = migrationsDir(31);
+      db = await createIsolatedDatabase('m0031');
+      await up(db.pool, { dir: dir30 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir30, dir31]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: التغييرُ محصورٌ في دالّتَين، وxf_owner والجداولُ والمشغِّلاتُ حرفيّاً، والرجوعُ يُطابقُ 0030', async () => {
+      const at30 = await ownerSnapshot(db.pool);
+      assert.deepEqual((await up(db.pool, { dir: dir31 })).applied, [31]);
+      const at31 = await ownerSnapshot(db.pool);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f30 = bySig(at30);
+      const f31 = bySig(at31);
+      assert.deepEqual(Object.keys(f31), Object.keys(f30), 'لا دالّةَ جديدةَ ولا محذوفة');
+      for (const sig of Object.keys(f30)) {
+        if (CHANGED.includes(sig)) {
+          assert.notEqual(f31[sig].def, f30[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f31[sig][k], f30[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f31[sig], f30[sig], `${sig} حرفيّاً`);
+      }
+      assert.match(f31['fence._control_guard()'].def, /XF105/);
+      assert.match(f31['fence._control_guard()'].def, /XF106/);
+      assert.match(f31['fence._control_guard()'].def, /session_user/);
+      assert.doesNotMatch(f30['fence._control_guard()'].def, /XF105|XF106/);
+      assert.match(f31['fence.check_fenced()'].def, /0031/);
+      // ‏البيانُ يُعيدُ تسجيلَ الدالّتَين فقط.
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m30 = m(at30);
+      const m31 = m(at31);
+      assert.deepEqual(Object.keys(m31), Object.keys(m30));
+      const changedManifest = Object.keys(m30).filter((k) => m30[k] !== m31[k]);
+      assert.deepEqual(changedManifest.sort(), [...CHANGED].sort());
+      assert.deepEqual(at31.owner, at30.owner, 'امتيازاتُ xf_owner وعضويّاتُه لا تتغيّر');
+      assert.deepEqual(at31.tables, at30.tables, 'ملكيّةُ جداولِ fence وACL لا تتغيّر');
+      assert.deepEqual(at31.triggers, at30.triggers, 'مشغِّلاتُ fence.control لا تتغيّر');
+      assert.deepEqual(at31.eventTriggers, at30.eventTriggers);
+      // ‏الرجوعُ يُعيدُ 0030 حرفياً؛ وإعادةُ التقديمِ تُطابقُ 0031.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir31 })).current, 30);
+      assert.deepEqual(await ownerSnapshot(db.pool), at30);
+      assert.deepEqual((await up(db.pool, { dir: dir31 })).applied, [31]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at31);
+      const fenced = await db.pool.query('SELECT fence.check_fenced() AS r');
+      assert.ok(fenced.rows[0].r, 'check_fenced يعملُ بعدَ إعادةِ التقديم');
+    });
+  },
+);

@@ -214,10 +214,14 @@ jobs:
           npm run migrate -- up
           npm run migrate -- status
           npm run migrate -- down
+          # WL-560: رجوعُ 0031 يُعيدُ حارسَ 0024 (‏بلا XF105)، ثمّ خطوةٌ ثانيةٌ تُرجِعُ 0030.
+          node -e "const pg=require('pg');const c=new pg.Client({connectionString:process.env.DATABASE_URL});c.connect().then(()=>c.query(\"SELECT prosrc FROM pg_proc WHERE oid='fence._control_guard()'::regprocedure\")).then(r=>{if(/XF105/.test(r.rows[0].prosrc))throw new Error('حارسُ 0031 باقٍ بعد down');return c.end()}).catch(e=>{console.error(e.message);process.exit(1)})"
+          npm run migrate -- down
           # WL-558: رجوعُ 0030 يُسقِطُ xf_reaper الذي أنشأته (‏لا اعتمادَ لها في غيرِ هذه القاعدة)، وتقديمُها يُعيدُه بوسمِه.
           node -e "const pg=require('pg');const c=new pg.Client({connectionString:process.env.DATABASE_URL});c.connect().then(()=>c.query(\"SELECT count(*)::int n FROM pg_roles WHERE rolname='xf_reaper'\")).then(r=>{if(r.rows[0].n!==0)throw new Error('xf_reaper باقٍ بعد down');return c.end()}).catch(e=>{console.error(e.message);process.exit(1)})"
           npm run migrate -- up
           node -e "const pg=require('pg');const c=new pg.Client({connectionString:process.env.DATABASE_URL});c.connect().then(()=>c.query(\"SELECT shobj_description(oid,'pg_authid') m FROM pg_roles WHERE rolname='xf_reaper'\")).then(r=>{if(r.rows[0]?.m!=='xuux-fence-0030:xf_reaper')throw new Error('xf_reaper بلا وسمِ 0030 بعد up');return c.end()}).catch(e=>{console.error(e.message);process.exit(1)})"
+          node -e "const pg=require('pg');const c=new pg.Client({connectionString:process.env.DATABASE_URL});c.connect().then(()=>c.query(\"SELECT prosrc FROM pg_proc WHERE oid='fence._control_guard()'::regprocedure\")).then(r=>{if(!/XF105/.test(r.rows[0].prosrc)||!/XF106/.test(r.rows[0].prosrc))throw new Error('حارسُ 0031 غائبٌ بعد up');return c.end()}).catch(e=>{console.error(e.message);process.exit(1)})"
 
       - name: النسخ الاحتياطي والاستعادة — تمرين فعلي بزمن معلَن (M3.07)
         run: |
