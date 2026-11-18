@@ -784,6 +784,15 @@ threats:
     status: MITIGATED_TESTED
     evidence: [tests/fence/fence-lifecycle.test.mjs#WL-564, tests/persistence/migrator.test.mjs#WL-564]
     limit: المنحُ لا يُمنَعُ إنشاءً بل يُكشَفُ عندَ الانتقالِ ويُرفَضُ أثرُه الكتابيّ (‏منعُه قرارُ مالك)؛ والقراءةُ الممنوحةُ لغيرِ العاملِ خارجَ النطاق (‏WL-544)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
+  # ── WL-570: العضويّةُ بينَ الأدوارِ السياديّةِ الثلاثة (‏الهجرة 0035) ──────────────────────────────
+  - id: TH-OWN-03
+    actor: operator_error
+    asset: فصلُ الأدوارِ بينَ الجذرِ (‏xf_root) والسياديِّ (‏xf_sovereign) والمالكِ (‏xf_owner)
+    attack: GRANT بينَ أيِّ زوجٍ من الثلاثةِ في أيِّ اتّجاه (‏مباشرةً أو عبرَ وسيطٍ أو عبرَ الدورِ الثالث، بأيِّ خياراتٍ من ADMIN/INHERIT/SET) فيجمعُ دورٌ واحدٌ سلطةَ الإيقافِ وسلطةَ التوقيعِ السياديّ — وحافّةُ الجذرِ والسياديِّ بينهما لم يكن يراها check_fenced (‏RESUME ينجح)
+    control: check_fenced يجردُ كلَّ وصولٍ بينَ الثلاثةِ بأقصرِ مسارٍ وحوافِّه، ولا خيارَ يُعفي حافّة (‏sovereign_membership، مغلقُ الفشل؛ خطأُ الجردِ أو غيابُ دورٍ ⇒ sovereign_membership_inventory_failed) فيُرفَضُ RESUME (‏XF415) ويبقى الإيقافُ HALT_REQUESTED (‏DB_NOT_FENCED)؛ وحرّاسُ 0028/0033/0034 وACL كما هي
+    status: MITIGATED_TESTED
+    evidence: [tests/fence/fence-lifecycle.test.mjs#WL-570, tests/persistence/migrator.test.mjs#WL-570]
+    limit: كشفٌ عندَ بوّابتَي الاستئنافِ والإكمالِ لا منع — لا يمنعُ superuser من إنشاءِ عضويّةٍ مخالفة، ومنحٌ تحتَ RUNNING يُرى عندَ الانتقالِ التالي وحدَه؛ لا HALT تلقائيٌّ من الحاصد (‏الخيار ب غيرُ منفَّذ)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
 owner_decisions:
   - id: D-SUP-1
     question: أين يعملُ المُشرِفُ الإنتاجيّ وبأيِّ فصلٍ بينَ المطلِق (root) والمُشرِف (xf_root)؟
@@ -863,7 +872,7 @@ owner_tasks:
   - id: T2
     title: نموذجُ تهديدِ المُشرِفِ ومخطّطُ الصلاحياتِ وتدفّقُ المفاتيح
     state: DESIGNED
-    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17, TH-OWN-01, TH-OWN-02]
+    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17, TH-OWN-01, TH-OWN-02, TH-OWN-03]
   - id: T3
     title: بيئةُ اختبارٍ معزولةٌ على خادمِ الصديقِ عبرَ Cloudflare
     state: DESIGNED_NEEDS_APPROVAL

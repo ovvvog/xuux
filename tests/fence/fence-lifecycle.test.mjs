@@ -1277,3 +1277,305 @@ describe(
     });
   },
 );
+
+// ── WL-570: سياسةُ المالك — لا عضويّةَ بينَ xf_root وxf_sovereign وxf_owner في أيِّ اتّجاه (‏0035) — كشفٌ يمنعُ RESUME وhalt_complete ──
+describe(
+  'WL-570: عضويّةٌ بينَ الأدوارِ السياديّةِ الثلاثة (‏0035)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    /** @type {string[]} */
+    const made = [];
+    const SOV = ['xf_root', 'xf_sovereign', 'xf_owner'];
+    /** @type {Array<[string, string]>} الاتّجاهاتُ الستّة: [العضو، الدور] */
+    const PAIRS = SOV.flatMap((m) =>
+      SOV.filter((r) => r !== m).map((r) => /** @type {[string, string]} */ ([m, r])),
+    );
+    const su = (/** @type {string} */ s, /** @type {unknown[]} */ p = []) => h.db.pool.query(s, p);
+    const mk = async (/** @type {string} */ name) => {
+      await su(`DROP ROLE IF EXISTS ${quoteIdent(name)}`);
+      await su(`CREATE ROLE ${quoteIdent(name)} NOLOGIN`);
+      made.push(name);
+    };
+    // ‏الأدوارُ عامّةٌ في العنقود: كلُّ حافّةٍ بينَ الأدوارِ المحجوزةِ يصنعُها الاختبارُ تُسحَبُ مهما حدث.
+    const clearSovereign = async () => {
+      for (const [m, r] of PAIRS) await su(`REVOKE ${r} FROM ${m}`).catch(() => {});
+    };
+    const dropMade = async () => {
+      await clearSovereign();
+      while (made.length) await su(`DROP ROLE IF EXISTS ${quoteIdent(String(made.pop()))}`);
+    };
+    /** @returns {Promise<{ ok: boolean, problems: any[], residuals: any[] }>} */
+    const fenced = async () =>
+      (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+    const sovereign = async () =>
+      (await fenced()).problems.filter((p) => p.kind === 'sovereign_membership');
+    const inventory = async () =>
+      (await su('SELECT fence._sovereign_membership_problems() AS r')).rows[0].r;
+    const state = async () => (await h.sovereign.status()).effective.state;
+    const edge = (
+      /** @type {string} */ role,
+      /** @type {string} */ member,
+      admin = false,
+      inherit = true,
+      set = true,
+    ) => ({ role, member, admin, inherit, set });
+    /** @param {Array<ReturnType<typeof edge>>} edges */
+    const hit = (edges) => ({
+      kind: 'sovereign_membership',
+      member: edges[0]?.member,
+      role: edges[edges.length - 1]?.role,
+      depth: edges.length,
+      path: [edges[0]?.member, ...edges.map((e) => e.role)],
+      edges,
+    });
+    /** @param {any[]} xs */
+    const sorted = (xs) =>
+      [...xs].sort((a, b) => `${a.member}|${a.role}`.localeCompare(`${b.member}|${b.role}`));
+    before(async () => {
+      h = await harness('wl570');
+      const base = await fenced();
+      assert.equal(base.ok, true, JSON.stringify(base.problems));
+    });
+    after(async () => {
+      if (h) {
+        await dropMade().catch(() => {});
+        await h.close();
+      }
+    });
+
+    test('الاتّجاهاتُ الستّةُ مباشرةً × ثمانيةُ تراكيبِ ADMIN/INHERIT/SET ⇒ sovereign_membership ⇒ XF415؛ والسحبُ ⇒ سليمٌ ويُستأنَف', async () => {
+      // ‏الأساسُ صامت، ولا عضويّةَ بينَ الثلاثةِ أصلاً، والدالّةُ ليست لـPUBLIC ولا للعاملِ ولا للمدقّق.
+      assert.deepEqual(await sovereign(), []);
+      const none = await su(
+        `SELECT count(*)::int AS n FROM pg_auth_members am
+          WHERE am.roleid IN (SELECT oid FROM pg_roles WHERE rolname = ANY($1))
+            AND am.member IN (SELECT oid FROM pg_roles WHERE rolname = ANY($1))`,
+        [SOV],
+      );
+      assert.equal(none.rows[0].n, 0);
+      const acl =
+        await su(`SELECT has_function_privilege('xuux_worker', 'fence._sovereign_membership_problems()', 'EXECUTE') AS w,
+          has_function_privilege('xf_auditor', 'fence._sovereign_membership_problems()', 'EXECUTE') AS a,
+          has_function_privilege('xf_owner', 'fence._sovereign_membership_problems()', 'EXECUTE') AS o`);
+      assert.deepEqual(acl.rows[0], { w: false, a: false, o: true });
+      const res = (await fenced()).residuals.find(
+        (r) => r.kind === 'sovereign_membership_detect_only',
+      );
+      assert.match(String(res?.note), /superuser/, 'الحدُّ مُعلَن: الكشفُ لا المنع');
+      await h.root.halt('wl570-direct', { effects: NO_EFFECTS });
+      assert.equal(await state(), 'HALTED');
+      let n = 0;
+      let resumes = 0;
+      for (const [member, role] of PAIRS) {
+        for (const admin of [false, true])
+          for (const inherit of [false, true])
+            for (const set of [false, true]) {
+              const label = `${member} ∈ ${role} (‏ADMIN ${admin}، INHERIT ${inherit}، SET ${set})`;
+              await su(
+                `GRANT ${role} TO ${member} WITH ADMIN ${admin}, INHERIT ${inherit}, SET ${set}`,
+              );
+              try {
+                const want = [hit([edge(role, member, admin, inherit, set)])];
+                // ‏الجردُ نفسُه للثمانيةِ والأربعين (‏ميلّي ثوانٍ)؛ وcheck_fenced وRESUME — وكلٌّ منهما ثلثُ ثانيةٍ فأكثر — لكلِّ اتّجاهٍ
+                // بأضعفِ الخيارات (‏لا ADMIN ولا INHERIT ولا SET)، ولكلِّ تركيبٍ على اتّجاهٍ واحد: 13 استئنافاً مرفوضاً (‏مهلةُ الملفّ).
+                assert.deepEqual(await inventory(), want, label);
+                if (
+                  (!admin && !inherit && !set) ||
+                  (member === 'xf_root' && role === 'xf_sovereign')
+                ) {
+                  const r = await fenced();
+                  assert.equal(r.ok, false, label);
+                  assert.deepEqual(
+                    r.problems.filter((p) => p.kind === 'sovereign_membership'),
+                    want,
+                    label,
+                  );
+                  await rejectsWith(() => h.resume(), ['XF415'], `${label} يمنعُ الاستئناف`);
+                  assert.equal(await state(), 'HALTED', label);
+                  resumes += 1;
+                }
+              } finally {
+                await su(`REVOKE ${role} FROM ${member}`);
+              }
+              assert.deepEqual(await inventory(), [], `${label}: السحبُ يُزيلُ المشكلة`);
+              n += 1;
+            }
+      }
+      assert.deepEqual([n, resumes], [48, 13]);
+      // ‏مغلقُ الفشل: غيابُ الصلاحيّةِ على الدالّةِ لا يُسقِطُ check_fenced بل يصيرُ مشكلة.
+      await su('REVOKE EXECUTE ON FUNCTION fence._sovereign_membership_problems() FROM xf_owner');
+      try {
+        const r = await fenced();
+        assert.equal(r.ok, false);
+        assert.ok(
+          r.problems.some((p) => p.kind === 'sovereign_membership_inventory_failed'),
+          JSON.stringify(r.problems.map((p) => p.kind)),
+        );
+        await rejectsWith(() => h.resume(), ['XF415'], 'الجردُ الفاشلُ يمنعُ الاستئناف');
+      } finally {
+        await su('GRANT EXECUTE ON FUNCTION fence._sovereign_membership_problems() TO xf_owner');
+      }
+      // ‏مغلقُ الفشل: غيابُ أحدِ الأدوارِ الثلاثةِ بالاسم (‏هنا xf_owner بلا دخولٍ ولا كلمةِ مرور، يُعادُ اسمُه مهما حدث)
+      // ‏يرفعُ الجردُ خطأً فيصيرُ مشكلةً ولا يُقرأُ «لا عضويّة».
+      await su('ALTER ROLE xf_owner RENAME TO zz_xf_owner_renamed');
+      try {
+        await assert.rejects(() => inventory(), /أحدُ الأدوارِ السياديّةِ غائب/);
+        const r = await fenced();
+        assert.equal(r.ok, false);
+        assert.ok(
+          r.problems.some((p) => p.kind === 'sovereign_membership_inventory_failed'),
+          JSON.stringify(r.problems.map((p) => p.kind)),
+        );
+        await rejectsWith(() => h.resume(), ['XF415'], 'غيابُ دورٍ سياديٍّ يمنعُ الاستئناف');
+      } finally {
+        await su('ALTER ROLE zz_xf_owner_renamed RENAME TO xf_owner');
+      }
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+    });
+
+    test('المتعدّي: الاتّجاهاتُ الستّةُ عبرَ وسيط، وعبرَ وسيطَين، وعبرَ الدورِ الثالث ⇒ أقصرُ مسارٍ بحوافِّه ⇒ XF415', async () => {
+      await h.root.halt('wl570-transitive', { effects: NO_EFFECTS });
+      await mk('zz_wl570_m1');
+      await mk('zz_wl570_m2');
+      try {
+        for (const [member, role] of PAIRS) {
+          const label = `${member} ⇒ zz_wl570_m1 ⇒ ${role}`;
+          await su(`GRANT ${role} TO zz_wl570_m1 WITH INHERIT FALSE, SET FALSE`);
+          await su(`GRANT zz_wl570_m1 TO ${member}`);
+          assert.deepEqual(
+            await sovereign(),
+            [hit([edge('zz_wl570_m1', member), edge(role, 'zz_wl570_m1', false, false, false)])],
+            label,
+          );
+          await rejectsWith(() => h.resume(), ['XF415'], label);
+          await su(`REVOKE zz_wl570_m1 FROM ${member}`);
+          await su(`REVOKE ${role} FROM zz_wl570_m1`);
+          assert.deepEqual(await inventory(), [], `${label}: السحب`);
+        }
+        // ‏وسيطان (‏ADMIN وحدَه على الحافّةِ الوسطى).
+        await su('GRANT xf_sovereign TO zz_wl570_m2');
+        await su('GRANT zz_wl570_m2 TO zz_wl570_m1 WITH ADMIN TRUE, INHERIT FALSE, SET FALSE');
+        await su('GRANT zz_wl570_m1 TO xf_root');
+        assert.deepEqual(await sovereign(), [
+          hit([
+            edge('zz_wl570_m1', 'xf_root'),
+            edge('zz_wl570_m2', 'zz_wl570_m1', true, false, false),
+            edge('xf_sovereign', 'zz_wl570_m2'),
+          ]),
+        ]);
+        await rejectsWith(() => h.resume(), ['XF415'], 'وسيطان');
+        await su('REVOKE zz_wl570_m1 FROM xf_root');
+        await su('REVOKE zz_wl570_m2 FROM zz_wl570_m1');
+        await su('REVOKE xf_sovereign FROM zz_wl570_m2');
+        assert.deepEqual(await sovereign(), []);
+        // ‏عبرَ الدورِ الثالث: xf_root ∈ xf_owner ∈ xf_sovereign ⇒ ثلاثُ مشكلات (‏حافّتان وأقصرُ المتعدّي).
+        await su('GRANT xf_owner TO xf_root WITH INHERIT FALSE, SET FALSE');
+        await su('GRANT xf_sovereign TO xf_owner WITH INHERIT FALSE, SET FALSE');
+        assert.deepEqual(
+          sorted(await sovereign()),
+          sorted([
+            hit([edge('xf_owner', 'xf_root', false, false, false)]),
+            hit([edge('xf_sovereign', 'xf_owner', false, false, false)]),
+            hit([
+              edge('xf_owner', 'xf_root', false, false, false),
+              edge('xf_sovereign', 'xf_owner', false, false, false),
+            ]),
+          ]),
+        );
+        await rejectsWith(() => h.resume(), ['XF415'], 'عبرَ الدورِ الثالث');
+        await clearSovereign();
+        assert.deepEqual(await sovereign(), []);
+      } finally {
+        await dropMade();
+      }
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+    });
+
+    test('halt_complete: عضويّةٌ قائمةٌ تُبقي الإيقافَ HALT_REQUESTED (‏DB_NOT_FENCED)، والسحبُ يُكمِله', async () => {
+      if ((await state()) !== 'RUNNING') await h.resume();
+      // ‏superuser يمنحُ أثناءَ RUNNING (‏لا منعَ — الحدُّ المُعلَن)؛ البوّابةُ التاليةُ تكشفُه.
+      await su('GRANT xf_root TO xf_sovereign WITH INHERIT FALSE, SET FALSE');
+      try {
+        const r = await h.root.halt('wl570-halt', { effects: NO_EFFECTS });
+        assert.equal(r.dbFenced, false);
+        assert.equal(r.reason, 'DB_NOT_FENCED');
+        assert.deepEqual(
+          r.check.problems.filter((/** @type {any} */ p) => p.kind === 'sovereign_membership'),
+          [hit([edge('xf_root', 'xf_sovereign', false, false, false)])],
+        );
+        assert.equal(await state(), 'HALT_REQUESTED');
+        const hr = await su('SELECT status FROM fence.halt_requests WHERE id = $1', [r.haltId]);
+        assert.notEqual(hr.rows[0].status, 'COMPLETE');
+      } finally {
+        await su('REVOKE xf_root FROM xf_sovereign');
+      }
+      const r2 = await h.root.halt('wl570-halt-2', { effects: NO_EFFECTS });
+      assert.equal(r2.dbFenced, true, JSON.stringify(r2.check?.problems));
+      assert.equal(await state(), 'HALTED');
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+    });
+
+    test('لا إنذارَ كاذب: أبٌ مشترك، وعضوٌ مشترك، وعضويّاتٌ لغيرِ الثلاثة، والعاملُ وحافّةُ المُنشئ ⇒ صامتٌ ويُستأنَف؛ وبقيّةُ 0032 كما هي', async () => {
+      await h.root.halt('wl570-negative', { effects: NO_EFFECTS });
+      await mk('zz_wl570_up');
+      await mk('zz_wl570_down');
+      try {
+        // ‏الجذرُ والسياديُّ عضوانِ في دورٍ واحد (‏أبٌ مشترك) — ليست عضويّةً بينهما.
+        await su('GRANT zz_wl570_up TO xf_root, xf_sovereign, xf_owner');
+        // ‏دورٌ عضوٌ في الثلاثة (‏عضوٌ مشترك) — ليست عضويّةً بينها.
+        await su(
+          'GRANT xf_root, xf_sovereign, xf_owner TO zz_wl570_down WITH INHERIT FALSE, SET FALSE',
+        );
+        // ‏عضويّاتٌ لأدوارٍ أخرى في الثلاثةِ ولها.
+        await su('GRANT xf_auditor TO xf_root');
+        await su('GRANT pg_read_all_stats TO xf_sovereign');
+        assert.deepEqual(await sovereign(), [], 'لا عضويّةَ بينَ الثلاثة');
+      } finally {
+        await su('REVOKE zz_wl570_up FROM xf_root, xf_sovereign, xf_owner').catch(() => {});
+        await su('REVOKE xf_root, xf_sovereign, xf_owner FROM zz_wl570_down').catch(() => {});
+        await su('REVOKE xf_auditor FROM xf_root').catch(() => {});
+        await su('REVOKE pg_read_all_stats FROM xf_sovereign').catch(() => {});
+        await dropMade();
+      }
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+      // ‏العاملُ يُقلِع: حافّةُ المُنشئِ xf_owner ⇒ xw_* ⇒ xuux_worker لا تصلُ إلى الجذرِ ولا السياديّ.
+      const w = await h.boot('alpha');
+      assert.ok(w.client !== null && w.sealed !== null, 'العاملُ يُقلِعُ ويُختَم');
+      assert.deepEqual(await sovereign(), []);
+      const role = String(w.credential.role_name);
+      const renewed = await h.rootClient.query('SELECT fence.renew_lease($1) AS e', [role]);
+      assert.ok(renewed.rows[0].e !== null, 'الجذرُ يجدّدُ الإيجار');
+      await /** @type {pg.Client} */ (w.client).end();
+      // ‏بقيّةُ 0032 (‏قرارُ مالك) لا تتغيّر: الجذرُ عضواً في xf_owner يكتبُ الإيجارَ بعدَ SET ROLE — والاستئنافُ مرفوض.
+      await h.root.halt('wl570-residual', { effects: NO_EFFECTS });
+      await su('GRANT xf_owner TO xf_root WITH INHERIT FALSE, SET TRUE');
+      try {
+        await h.rootClient.query('BEGIN');
+        try {
+          await h.rootClient.query('SET LOCAL ROLE xf_owner');
+          await h.rootClient.query('DELETE FROM fence.run_lease');
+        } finally {
+          await h.rootClient.query('ROLLBACK');
+        }
+        assert.deepEqual(await sovereign(), [
+          hit([edge('xf_owner', 'xf_root', false, false, true)]),
+        ]);
+        await rejectsWith(() => h.resume(), ['XF415'], 'بقيّةُ 0032 مكشوفة');
+      } finally {
+        await su('REVOKE xf_owner FROM xf_root');
+      }
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+    });
+  },
+);
