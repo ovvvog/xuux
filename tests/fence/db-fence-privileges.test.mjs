@@ -2047,9 +2047,12 @@ describe(
         assert.equal(hl.instances[0].stale_after_ms, 6000);
         const at = async (/** @type {number} */ agoMs) => {
           await h.db.pool.query(
-            `UPDATE fence.reaper_heartbeat SET last_tick_at = clock_timestamp() - make_interval(secs => $1 / 1000.0),
-             last_ok_at = clock_timestamp() - make_interval(secs => $1 / 1000.0),
-             first_tick_at = clock_timestamp() - interval '1 hour'`,
+            // WL-566: لحظةٌ واحدةٌ للعمودَين كما يكتبُهما reaper_tick (‏now_) — نداءا clock_timestamp()
+            // منفصلَين يفترقانِ بميكروثانيةٍ (‏~3% من الصفوف) فيصيرُ last_ok_at > last_tick_at «شذوذَ ساعة».
+            `UPDATE fence.reaper_heartbeat SET last_tick_at = s.at_, last_ok_at = s.at_,
+             first_tick_at = s.now_ - interval '1 hour'
+             FROM (SELECT n.now_, n.now_ - make_interval(secs => $1 / 1000.0) AS at_
+                   FROM (SELECT clock_timestamp() AS now_) n) s`,
             [agoMs],
           );
           return health(1000);
