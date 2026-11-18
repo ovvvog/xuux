@@ -472,6 +472,7 @@ function floorRoot(packages) {
 }
 
 test('WL-565: R5 — نسخةُ fast-uri أو minimatch داخلَ مدى التبليغِ المسدودِ تُغلقُ الحاجز، بأيِّ عمق', () => {
+  /** @type {Array<[string, string]>} */
   const cases = [
     ['node_modules/fast-uri', '3.1.8'],
     ['node_modules/fast-uri', '3.0.0'],
@@ -523,7 +524,7 @@ test('WL-565: قفلُ المستودعِ نفسُه فوقَ الأرضيّات
     const name = key.split('node_modules/').pop();
     if (name !== 'fast-uri' && name !== 'minimatch') continue;
     seen.push(`${key}@${entry.version}`);
-    const [major, minor, patch] = String(entry.version).split('.').map(Number);
+    const [major = 0, minor = 0, patch = 0] = String(entry.version).split('.').map(Number);
     const n = major * 1e6 + minor * 1e3 + patch;
     if (name === 'fast-uri') assert.ok(n < 3e6 || n >= 3001009, `${key}@${entry.version}`);
     else assert.ok(n < 7e6 || n >= 11000001, `${key}@${entry.version}`);
