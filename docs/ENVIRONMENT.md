@@ -80,6 +80,7 @@
 | `STATE_ENV` | `^(development|ci|production)$` | `production` | لا |
 | `NODE_ENV` | `^(development|test|production)$` | `production` | لا |
 | `WEIGHTS_DIR` | مسارٌ مطلقٌ أو نسبيٌّ صريح | لا شيء (اختياريّ) | لا |
+| `XUUX_REAPER_DATABASE_URL` | `^postgres(ql)?://[^\s]+$` (‏peer بلا كلمةِ مرور في الوحدةِ المولَّدة — `WL-559`) | لا شيء (أداةُ الحاصدِ `--role reaper`) | نعم |
 | `XUUX_ROOT_OF_TRUST_MODE` | `^(hsm|software)$` | `production` | لا |
 | `XUUX_PKCS11_MODULE` | مسارٌ مطلق | `production` | لا |
 | `XUUX_PKCS11_MODULE_SHA256` | `^[0-9a-fA-F]{64}$` | `production` | لا |

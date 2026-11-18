@@ -347,6 +347,121 @@ export const REAPER_ERROR_TABLE = Object.freeze([
 ]);
 
 /**
+ * WL-559 (‏الخيار A، مستوى المستودعِ وحدَه — لا تنصيبَ ولا مضيف): وحدةُ systemd للحاصدِ بدورِ `xf_reaper`. نصٌّ يُولَّدُ
+ * ويُراجَعُ ويُتحقَّقُ منه آليّاً (‏`systemd-analyze verify`) — **لا يُثبِتُ نشراً**.
+ *
+ * - **لا سرّ:** الوصلةُ peer عبرَ مقبسِ Unix (‏`user=xf_reaper` بلا كلمةِ مرور؛ الدورُ `VALID UNTIL '-infinity'` في 0030)،
+ *   فلا كلمةَ مرورٍ في الوسائطِ ولا في البيئةِ ولا في السجلّ؛ والمُدخلاتُ تُرفَضُ إن حملت ما يكسرُ سطرَ الوحدة.
+ * - **الإعادةُ بتصنيفِ الأخطاء:** المؤقّتُ والمجهولُ يُعادانِ داخلَ العمليّةِ بتراجع (‏WL-553)؛ فالعمليّةُ لا تخرجُ إلّا بـ0
+ *   (‏إشارة) أو 2 (‏استعمالٌ/دور) أو 78 (‏دائمٌ متكرّر) أو انهيارٍ غيرِ متوقَّع. `Restart=on-failure` و
+ *   `RestartPreventExitStatus=2 78` ⇒ لا إعادةَ للدائم؛ و`StartLimitBurst` في `StartLimitIntervalSec` ⇒ الانهيارُ المتكرّرُ
+ *   يتوقّفُ ولا يدورُ بلا نهاية (‏الوحدةُ تصيرُ failed فتُرى).
+ * - **أقلُّ امتياز:** `UMask=0077`، بلا قدرات، `NoNewPrivileges`، نظامُ ملفّاتٍ للقراءة، `PrivateNetwork` و`AF_UNIX` وحدَه،
+ *   ومرشِّحُ نداءاتٍ نظاميّة. `MemoryDenyWriteExecute=no` مُعلَن: V8 يحتاجُ صفحاتٍ قابلةً للكتابةِ والتنفيذ.
+ * - **الرقابةُ خارجَ مضيفِ القاعدة:** `--health` (‏بوصلةِ `xf_auditor`) من مضيفٍ آخر — الوحدةُ لا تُراقِبُ نفسَها.
+ * @param {{ node?: string, script?: string, user?: string, database?: string, socketDir?: string,
+ *           ceilingMs?: number, queryTimeoutMs?: number, retryMs?: number, maxRetryMs?: number, permanentLimit?: number,
+ *           heartbeatMs?: number }} [o]
+ * @returns {string}
+ */
+export function renderReaperUnit(o = {}) {
+  const path = (/** @type {string} */ name, /** @type {string} */ v) => {
+    if (!/^\/[A-Za-z0-9._/-]+$/.test(v) || v.includes('..') || v.includes('//')) {
+      throw new TypeError(`renderReaperUnit: ${name} مسارٌ مطلقٌ بلا مسافةٍ ولا محارفَ خاصّة`);
+    }
+    return v;
+  };
+  const ident = (/** @type {string} */ name, /** @type {string} */ v) => {
+    if (!/^[a-z_][a-z0-9_-]{0,31}$/.test(v))
+      throw new TypeError(`renderReaperUnit: ${name} ∈ [a-z_][a-z0-9_-]{0,31}`);
+    return v;
+  };
+  const num = (
+    /** @type {string} */ name,
+    /** @type {number} */ v,
+    /** @type {number} */ lo,
+    /** @type {number} */ hi,
+  ) => {
+    if (!Number.isInteger(v) || v < lo || v > hi)
+      throw new TypeError(`renderReaperUnit: ${name} ∈ [${lo}، ${hi}]`);
+    return v;
+  };
+  const node = path('node', o.node ?? '/usr/bin/node');
+  const script = path('script', o.script ?? '/opt/xuux/scripts/fence-sovereign-reaper.mjs');
+  const user = ident('user', o.user ?? 'xuux-reaper');
+  const database = ident('database', o.database ?? 'xuux');
+  const socketDir = path('socketDir', o.socketDir ?? '/var/run/postgresql');
+  const ceilingMs = num('ceilingMs', o.ceilingMs ?? 5000, 1, 300000);
+  const queryTimeoutMs = num('queryTimeoutMs', o.queryTimeoutMs ?? 10000, 2000, 300000);
+  const retryMs = num('retryMs', o.retryMs ?? 1000, 10, ceilingMs);
+  const maxRetryMs = num('maxRetryMs', o.maxRetryMs ?? ceilingMs, retryMs, ceilingMs);
+  const permanentLimit = num('permanentLimit', o.permanentLimit ?? 5, 1, 1000);
+  const heartbeatMs = num('heartbeatMs', o.heartbeatMs ?? 10000, 0, 3600000);
+  return [
+    '# WL-559 — وحدةُ الحاصد (‏xf_reaper، الهجرة 0030). مولَّدةٌ بـ`fence-sovereign-reaper.mjs --print-unit`.',
+    '# تصميمٌ على مستوى المستودعِ وحدَه: لا تنصيبَ ولا مضيف. التحقّقُ الآليُّ لا يُثبِتُ نشراً.',
+    '# لا سرّ: peer عبرَ مقبسِ Unix. الرقابةُ من خارجِ مضيفِ القاعدة: `--health` بوصلةِ xf_auditor.',
+    '[Unit]',
+    'Description=XUUX fence lapse reaper (xf_reaper, peer over Unix socket)',
+    'After=postgresql.service',
+    'Wants=postgresql.service',
+    'StartLimitIntervalSec=300',
+    'StartLimitBurst=5',
+    '',
+    '[Service]',
+    'Type=simple',
+    `User=${user}`,
+    `Group=${user}`,
+    'UMask=0077',
+    `ExecStart=${node} ${script} --role reaper --ceiling-ms ${ceilingMs} --query-timeout-ms ${queryTimeoutMs} --retry-ms ${retryMs} --max-retry-ms ${maxRetryMs} --permanent-limit ${permanentLimit} --heartbeat-ms ${heartbeatMs}`,
+    `Environment=XUUX_REAPER_DATABASE_URL=postgresql:///${database}?host=${socketDir}&user=xf_reaper`,
+    'Environment=NODE_OPTIONS=',
+    'PassEnvironment=',
+    'Restart=on-failure',
+    'RestartSec=2',
+    'RestartPreventExitStatus=2 78',
+    'KillSignal=SIGTERM',
+    'TimeoutStopSec=15',
+    'StandardOutput=journal',
+    'StandardError=journal',
+    'NoNewPrivileges=yes',
+    'CapabilityBoundingSet=',
+    'AmbientCapabilities=',
+    'ProtectSystem=strict',
+    'ProtectHome=yes',
+    'PrivateTmp=yes',
+    'PrivateDevices=yes',
+    'PrivateNetwork=yes',
+    'IPAddressDeny=any',
+    'ProtectProc=invisible',
+    'ProcSubset=pid',
+    'ProtectHostname=yes',
+    'ProtectClock=yes',
+    'ProtectKernelTunables=yes',
+    'ProtectKernelModules=yes',
+    'ProtectKernelLogs=yes',
+    'ProtectControlGroups=yes',
+    'RestrictAddressFamilies=AF_UNIX',
+    'RestrictNamespaces=yes',
+    'RestrictRealtime=yes',
+    'RestrictSUIDSGID=yes',
+    'RemoveIPC=yes',
+    'LockPersonality=yes',
+    'MemoryDenyWriteExecute=no',
+    'SystemCallArchitectures=native',
+    'SystemCallFilter=@system-service',
+    'SystemCallFilter=~@privileged @resources',
+    'SystemCallErrorNumber=EPERM',
+    'MemoryMax=256M',
+    'TasksMax=32',
+    '',
+    '[Install]',
+    'WantedBy=multi-user.target',
+    '',
+  ].join('\n');
+}
+
+/**
  * WL-553: يُصنِّفُ خطأَ الحاصدِ بـ`REAPER_ERROR_TABLE` — بالرمزِ أوّلاً (‏SQLSTATE أو رمزُ Node) ثمّ بالرسالة.
  * @param {unknown} error
  * @returns {{ class: 'permanent' | 'transient' | 'unknown', rule: string }}
