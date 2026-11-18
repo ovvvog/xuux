@@ -2545,3 +2545,176 @@ describe(
     });
   },
 );
+
+// ── WL-564: امتيازاتٌ منجرفةٌ في fence (‏0034) — منحٌ من عضوٍ مُعفىً في xf_owner يبقى بعدَ سحبِ العضويّة ويُتيحُ كتابةً مباشرة ──
+describe(
+  'WL-564: امتيازٌ منجرفٌ في fence لغيرِ xf_owner (‏0034)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    const su = (/** @type {string} */ s) => h.db.pool.query(s);
+    /** @returns {Promise<{ ok: boolean, problems: any[] }>} */
+    const fenced = async () =>
+      (await h.rootClient.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+    const drift = async () =>
+      (await fenced()).problems
+        .filter((p) => p.kind === 'fence_acl_drift')
+        .map((p) => `${p.axis}|${p.object}|${p.grantee}|${p.privilege}|${p.grantable}`)
+        .sort();
+    const state = async () => (await h.sovereign.status()).effective.state;
+    /** @param {pg.Client} c @param {Array<[string, string]>} steps */
+    const run = async (c, steps) => {
+      /** @type {Record<string, string>} */
+      const out = {};
+      await c.query('BEGIN');
+      for (const [k, sql] of steps) {
+        await c.query('SAVEPOINT p');
+        try {
+          await c.query(sql);
+          out[k] = 'OK';
+          await c.query('RELEASE SAVEPOINT p');
+        } catch (e) {
+          out[k] = String(/** @type {any} */ (e).code);
+          await c.query('ROLLBACK TO SAVEPOINT p');
+        }
+      }
+      await c.query('ROLLBACK');
+      return out;
+    };
+    // ‏المنحُ التي يصنعُها عضوٌ مُعفىً في xf_owner بعدَ SET ROLE xf_owner، وعكسُها بـsuperuser (‏كأنّه المالك).
+    /** @type {Array<[string, string]>} */
+    const GRANTS = [
+      [
+        'GRANT UPDATE ON fence.credentials TO xf_auditor',
+        'REVOKE UPDATE ON fence.credentials FROM xf_auditor',
+      ],
+      ['GRANT UPDATE ON fence.control TO xf_root', 'REVOKE UPDATE ON fence.control FROM xf_root'],
+      [
+        'GRANT EXECUTE ON FUNCTION fence._reseal() TO xf_auditor',
+        'REVOKE EXECUTE ON FUNCTION fence._reseal() FROM xf_auditor',
+      ],
+      [
+        'GRANT UPDATE (pubkey) ON fence.roster TO xuux_migrator',
+        'REVOKE UPDATE (pubkey) ON fence.roster FROM xuux_migrator',
+      ],
+      [
+        'GRANT CREATE ON SCHEMA fence TO xf_auditor',
+        'REVOKE CREATE ON SCHEMA fence FROM xf_auditor',
+      ],
+      [
+        'GRANT SELECT ON fence.events TO xf_auditor WITH GRANT OPTION',
+        'REVOKE GRANT OPTION FOR SELECT ON fence.events FROM xf_auditor',
+      ],
+      [
+        'ALTER DEFAULT PRIVILEGES FOR ROLE xf_owner IN SCHEMA fence GRANT INSERT ON TABLES TO xf_auditor',
+        'ALTER DEFAULT PRIVILEGES FOR ROLE xf_owner IN SCHEMA fence REVOKE INSERT ON TABLES FROM xf_auditor',
+      ],
+    ];
+    const EXPECTED = [
+      'column|fence.roster.pubkey|xuux_migrator|UPDATE|false',
+      'default_acl|xf_owner/fence/r|xf_auditor|INSERT|false',
+      'function|fence._reseal()|xf_auditor|EXECUTE|false',
+      'relation|fence.control|xf_root|UPDATE|false',
+      'relation|fence.credentials|xf_auditor|UPDATE|false',
+      'relation|fence.events|xf_auditor|SELECT|true',
+      'schema|fence|xf_auditor|CREATE|false',
+    ];
+    const undo = async () => {
+      await su('REVOKE xf_owner FROM xf_root').catch(() => {});
+      for (const [, r] of GRANTS) await su(r).catch(() => {});
+    };
+    before(async () => {
+      h = await harness('wl564');
+      const base = await fenced();
+      assert.equal(base.ok, true, JSON.stringify(base.problems));
+    });
+    after(async () => {
+      if (h) {
+        await undo();
+        await h.close();
+      }
+    });
+
+    test('منحٌ من الجذرِ العضوِ في xf_owner يبقى بعدَ سحبِ العضويّة ⇒ fence_acl_drift ⇒ XF415؛ والكاتبُ المباشرُ ⇒ XF108؛ والعكسُ ⇒ سليمٌ ويُستأنَف', async () => {
+      // ‏الأساسُ صامت، والدالّةُ ليست لـPUBLIC ولا للعاملِ ولا للمدقّق.
+      assert.deepEqual(await drift(), []);
+      const acl =
+        await su(`SELECT has_function_privilege('xuux_worker', 'fence._fence_acl_problems()', 'EXECUTE') AS w,
+          has_function_privilege('xf_auditor', 'fence._fence_acl_problems()', 'EXECUTE') AS a`);
+      assert.deepEqual(acl.rows[0], { w: false, a: false });
+      await h.root.halt('wl564-acl', { effects: NO_EFFECTS });
+      assert.equal(await state(), 'HALTED');
+      const aud = await h.login('xf_auditor');
+      try {
+        // ‏البقيّةُ المُعلَنة (‏0032): الجذرُ عضواً في xf_owner يمنحُ بعدَ SET ROLE — ثمّ تُسحَبُ العضويّة.
+        await su('GRANT xf_owner TO xf_root WITH INHERIT FALSE, SET TRUE');
+        await h.rootClient.query('SET ROLE xf_owner');
+        try {
+          for (const [g] of GRANTS) await h.rootClient.query(g);
+        } finally {
+          await h.rootClient.query('RESET ROLE');
+        }
+        await su('REVOKE xf_owner FROM xf_root');
+        assert.deepEqual(await drift(), EXPECTED);
+        await rejectsWith(() => h.resume(), ['XF415'], 'RESUME فوقَ امتيازٍ منجرف');
+        // ‏الكاتبُ المباشرُ بلا عضويّةٍ في xf_owner: المدقّقُ على الاعتماد، والجذرُ على صفِّ التحكّمِ (‏ولو RUNNING بلا توقيع).
+        assert.deepEqual(
+          await run(aud, [
+            ['credentials_update', 'UPDATE fence.credentials SET revoked_at = revoked_at'],
+            ['reseal', 'SELECT fence._reseal()'],
+          ]),
+          { credentials_update: 'XF108', reseal: 'XF105' },
+        );
+        assert.deepEqual(
+          await run(h.rootClient, [
+            // ‏بلا قراءةِ عمود: المنحُ UPDATE وحدَه (‏لا SELECT للجذرِ على صفِّ التحكّم).
+            ['control_touch', 'UPDATE fence.control SET updated_at = now()'],
+            ['control_running', `UPDATE fence.control SET state = 'RUNNING', epoch = 1000000`],
+          ]),
+          { control_touch: 'XF108', control_running: 'XF108' },
+        );
+        assert.equal(await state(), 'HALTED');
+        // ‏مغلقُ الفشل: غيابُ الصلاحيّةِ على الدالّةِ لا يُسقِطُ check_fenced بل يصيرُ مشكلة.
+        await su('REVOKE EXECUTE ON FUNCTION fence._fence_acl_problems() FROM xf_owner');
+        try {
+          const kinds = (await fenced()).problems.map((p) => p.kind);
+          assert.ok(kinds.includes('fence_acl_inventory_failed'), JSON.stringify(kinds));
+        } finally {
+          await su('GRANT EXECUTE ON FUNCTION fence._fence_acl_problems() TO xf_owner');
+        }
+      } finally {
+        await undo();
+        await aud.end().catch(() => {});
+      }
+      assert.deepEqual(await drift(), []);
+      assert.equal((await fenced()).ok, true);
+      await h.resume();
+      assert.equal(await state(), 'RUNNING');
+    });
+
+    test('المساراتُ المشروعةُ لا تتغيّر: superuser يكتبُ مباشرة، والعاملُ يُقلِعُ ويُختَم، والجذرُ يجدّدُ الإيجار (‏والإيقافُ والاستئنافُ في الاختبارِ السابق)', async () => {
+      if ((await state()) !== 'RUNNING') await h.resume();
+      const c = await h.db.pool.connect();
+      try {
+        assert.deepEqual(
+          await run(/** @type {any} */ (c), [
+            ['manifest_update', 'UPDATE fence.manifest SET digest = digest'],
+            ['control_seal', 'UPDATE fence.control SET seal = seal'],
+          ]),
+          { manifest_update: 'OK', control_seal: 'OK' },
+        );
+      } finally {
+        c.release();
+      }
+      const w = await h.boot('alpha');
+      assert.ok(w.client !== null && w.sealed !== null, 'العاملُ يُقلِعُ ويُختَم');
+      const role = String(w.credential.role_name);
+      const renewed = await h.rootClient.query('SELECT fence.renew_lease($1) AS e', [role]);
+      assert.ok(renewed.rows[0].e !== null, 'الجذرُ يجدّدُ الإيجار');
+      await /** @type {pg.Client} */ (w.client).end();
+      assert.equal(await state(), 'RUNNING');
+      assert.deepEqual(await drift(), []);
+    });
+  },
+);

@@ -775,6 +775,15 @@ threats:
     status: MITIGATED_TESTED
     evidence: [tests/fence/db-fence-privileges.test.mjs#WL-563, tests/persistence/migrator.test.mjs#WL-563]
     limit: الحافّةُ الصاعدةُ لا تُمنَعُ إنشاءً (‏GRANT بيدِ superuser أو مديرِ الدور) بل تُكشَفُ عندَ الانتقال؛ والجذرُ أو السياديُّ عضواً مباشراً في xf_owner يبقى كاتباً (‏بقيّةُ 0032، قرارُ مالك)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
+  # ── WL-564: ACLُ السياجِ الباقي (‏الهجرة 0034) ──────────────────────────────────────────────
+  - id: TH-OWN-02
+    actor: operator_error
+    asset: fence.control وجداولُ fence الأخرى ودوالُّها ومخطّطُها
+    attack: عضوٌ مُعفىً في xf_owner (‏جذرٌ بعدَ SET ROLE xf_owner) يمنحُ UPDATE أو EXECUTE أو CREATE أو خيارَ المنحِ أو امتيازاً افتراضيّاً على كائناتِ fence لدورٍ آخر أو لنفسِه، فيبقى المنحُ بعدَ سحبِ العضويّة — والممنوحُ يكتبُ الاعتمادَ مباشرةً أو يضعُ صفَّ التحكّمِ RUNNING بلا توقيعٍ سياديّ، وcheck_fenced لا يراه
+    control: check_fenced يجردُ كلَّ امتيازٍ غيرِ القراءةِ لغيرِ المالكِ خارجَ الأساسِ المقيس (‏fence_acl_drift، مغلقُ الفشل) فيُرفَضُ RESUME (‏XF415)؛ والحارسان (‏0031 و0032 بنصِّ 0034) يرفضان كاتباً مباشراً current_user ليس xf_owner ولا superuser (‏XF108)
+    status: MITIGATED_TESTED
+    evidence: [tests/fence/db-fence-privileges.test.mjs#WL-564, tests/persistence/migrator.test.mjs#WL-564]
+    limit: المنحُ لا يُمنَعُ إنشاءً بل يُكشَفُ عندَ الانتقالِ ويُرفَضُ أثرُه الكتابيّ (‏منعُه قرارُ مالك)؛ والقراءةُ الممنوحةُ لغيرِ العاملِ خارجَ النطاق (‏WL-544)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
 owner_decisions:
   - id: D-SUP-1
     question: أين يعملُ المُشرِفُ الإنتاجيّ وبأيِّ فصلٍ بينَ المطلِق (root) والمُشرِف (xf_root)؟
@@ -854,7 +863,7 @@ owner_tasks:
   - id: T2
     title: نموذجُ تهديدِ المُشرِفِ ومخطّطُ الصلاحياتِ وتدفّقُ المفاتيح
     state: DESIGNED
-    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17, TH-OWN-01]
+    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17, TH-OWN-01, TH-OWN-02]
   - id: T3
     title: بيئةُ اختبارٍ معزولةٌ على خادمِ الصديقِ عبرَ Cloudflare
     state: DESIGNED_NEEDS_APPROVAL
