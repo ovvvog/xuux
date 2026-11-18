@@ -148,6 +148,44 @@ function holder(file, holdMs) {
   });
 }
 
+/**
+ * WL-569: عمليّةٌ تفتحُ السجلَّ وتمسكُ القفلَ **حتى يُطلَقَ** (‏إغلاقُ stdin) لا مدّةً ثابتة —
+ * فالمتسابقونَ كلُّهم يُجيبونَ والفائزُ ما زالَ يمسك، ولا يُقرأُ «فتحانِ متتاليانِ» تحتَ حِملٍ
+ * (‏بدءُ ستِّ عمليّاتٍ يتجاوزُ مدّةَ الإمساك) كاتبَينِ متزامنَين.
+ * @param {string} file
+ */
+function heldUntilReleased(file) {
+  const code = `
+    const { PersistentEventLog } = await import(${JSON.stringify(MODULE)});
+    try {
+      const log = new PersistentEventLog(${JSON.stringify(file)}, { fsync: false, env: { NODE_ENV: 'test' } });
+      process.stdout.write('OPEN\\n');
+      process.stdin.on('end', () => { log.close(); process.exit(0); });
+      process.stdin.resume();
+    } catch (e) { process.stdout.write((e.code ?? String(e)) + '\\n'); process.exit(0); }
+  `;
+  return spawn(process.execPath, ['--input-type=module', '-e', code], {
+    env: { ...process.env, NODE_ENV: 'test' },
+    stdio: ['pipe', 'pipe', 'inherit'],
+  });
+}
+
+/**
+ * يُطلقُ كلَّ ممسكٍ وينتظرُ خروجَه (‏فالقفلُ مُحرَّرٌ قبلَ الجولةِ التالية).
+ * @param {import('node:child_process').ChildProcess[]} children
+ */
+const releaseAll = (children) =>
+  Promise.all(
+    children.map(
+      (child) =>
+        new Promise((resolve) => {
+          if (child.exitCode !== null || child.signalCode !== null) return resolve(undefined);
+          child.on('exit', resolve);
+          child.stdin?.end();
+        }),
+    ),
+  );
+
 /** @param {import('node:child_process').ChildProcess} child */
 const firstLine = (child) =>
   new Promise((resolve) => {
@@ -189,9 +227,11 @@ test('R8-01/7: التزامن — عمليّاتٌ متسابقةٌ على ال�
     const link = path.join(dir, 'alias.log');
     new PersistentEventLog(file, OPTS).close();
     symlinkSync(file, link);
-    const children = Array.from({ length: 6 }, (_, i) => holder(i % 2 === 0 ? file : link, 2500));
+    const children = Array.from({ length: 6 }, (_, i) =>
+      heldUntilReleased(i % 2 === 0 ? file : link),
+    );
     const results = await Promise.all(children.map(firstLine));
-    for (const child of children) child.kill();
+    await releaseAll(children);
     assert.equal(results.filter((r) => r === 'OPEN').length, 1, JSON.stringify(results));
     assert.ok(
       results.every((r) => r === 'OPEN' || r === 'LOG_ALREADY_LOCKED'),
@@ -213,9 +253,15 @@ test('R8-01/8: إجهادُ السباقِ — جولاتٌ متتابعةٌ، �
     new PersistentEventLog(file, OPTS).close();
     symlinkSync(file, link);
     for (let round = 0; round < 15; round += 1) {
-      const children = Array.from({ length: 6 }, (_, i) => holder(i % 2 === 0 ? file : link, 400));
+      const children = Array.from({ length: 6 }, (_, i) =>
+        heldUntilReleased(i % 2 === 0 ? file : link),
+      );
       const results = await Promise.all(children.map(firstLine));
-      for (const child of children) child.kill();
+      // القفلُ الظاهرُ والفائزُ ما زالَ يمسك: مقروءُ المحتوى ومالكُه الفائزُ نفسُه.
+      const held = JSON.parse(readFileSync(file + LOG_LOCK_SUFFIX, 'utf8'));
+      const winner = children[results.indexOf('OPEN')];
+      await releaseAll(children);
+      assert.equal(held.pid, winner?.pid, `جولةُ ${round}: القفلُ للفائز`);
       assert.equal(
         results.filter((r) => r === 'OPEN').length,
         1,
@@ -225,11 +271,15 @@ test('R8-01/8: إجهادُ السباقِ — جولاتٌ متتابعةٌ، �
         results.every((r) => r === 'OPEN' || r === 'LOG_ALREADY_LOCKED'),
         JSON.stringify(results),
       );
-      // القفلُ الظاهرُ بعدَ الجولةِ مقروءُ المحتوى: مالكُهُ رقمُ عمليةٍ — فالقفلُ
+      // القفلُ الظاهرُ أثناءَ الإمساكِ مقروءُ المحتوى: مالكُهُ رقمُ عمليةٍ — فالقفلُ
       // الموجودُ موجودٌ بمحتواهُ، لا نافذةَ فارغةً تُقرأُ مالكًا مجهولًا.
-      const lock = readFileSync(file + LOG_LOCK_SUFFIX, 'utf8');
-      const parsed = JSON.parse(lock);
-      assert.equal(typeof parsed.pid, 'number', 'القفلُ يحملُ رقمَ عمليةٍ كاملًا');
+      assert.equal(typeof held.pid, 'number', 'القفلُ يحملُ رقمَ عمليةٍ كاملًا');
+      // وبعدَ الإطلاقِ المنظَّمِ يُحرَّرُ القفل.
+      assert.equal(
+        existsSync(file + LOG_LOCK_SUFFIX),
+        false,
+        `جولةُ ${round}: القفلُ مُحرَّرٌ بعدَ الإطلاق`,
+      );
     }
   });
 });
