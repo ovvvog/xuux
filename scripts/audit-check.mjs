@@ -10,6 +10,9 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
+// WL-571 (‏2026-11-19): أُزيلَ إعذارُ GHSA-fc5q-39xc-vjpf (‏picomatch، WL-557) — سُحِبَ التبليغُ (‏withdrawn_at
+// 2026-11-18T15:38:56Z) و`npm audit --json` على القفلِ نفسِه لا يُبلِّغُه (‏0 ثغرات). القائمةُ فارغة: كلُّ ثغرةٍ حرجةٍ أو عاليةٍ
+// تُسقِطُ الفحص؛ والآليّةُ باقيةٌ بشروطِها لإعذارٍ مستقبليٍّ بقرارٍ مُسجَّل.
 /**
  * WL-557: إعذاراتٌ ضيّقةٌ مؤقّتة — لثغرةٍ **لا إصدارَ مُصلَحاً لها** وحدَها (‏الترقيةُ أوّلاً حيث وُجدت). الإعذارُ بمعرّفِ
  * التبليغ (‏`url`) لا باسمِ الحزمة، ولا يشملُ إلا عقدةً تطويريّةً (‏`dev: true` لكلِّ مسارٍ لها في `package-lock.json` — فلا
@@ -18,18 +21,7 @@ import { fileURLToPath } from 'node:url';
  * غيرُ محلول، أو عقدةٌ إنتاجيّة، يُسقِطُ الإعذار.
  * @type {ReadonlyArray<{ advisory: string, package: string, maxSeverity: 'high' | 'critical', expires: string, why: string }>}
  */
-export const AUDIT_EXCEPTIONS = Object.freeze([
-  Object.freeze({
-    advisory: 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf',
-    package: 'picomatch',
-    maxSeverity: /** @type {const} */ ('high'),
-    expires: '2026-12-02',
-    why:
-      'picomatch ≤ 4.0.7 (‏ReDoS بأنماطِ extglob، نُشرَ 2026-10-19): «Patched versions: None» — لا ترقيةَ تسدُّه، ' +
-      'وtypescript-eslint 8.73.0 ما زالَ يجرُّه عبرَ tinyglobby. تبعيّةٌ تطويريّةٌ لـeslint/typescript-eslint وحدَهما ' +
-      '(‏`npm ls --omit=dev picomatch` فارغ)، والأنماطُ من إعدادِ المستودعِ لا من دخلٍ خارجيّ.',
-  }),
-]);
+export const AUDIT_EXCEPTIONS = Object.freeze([]);
 
 /** @param {string} s @returns {number} رتبةُ الشدّة؛ المجهولةُ حرجةٌ (‏فشلٌ مغلق). */
 const rank = (s) =>
