@@ -30,6 +30,7 @@ import {
   CrownGateway,
   createRoyalCommand,
 } from '../../src/root-of-trust/index.mjs';
+import { AgentIdentity } from '../../src/root-of-trust/index.mjs';
 
 const MODULE_URL = new URL('../../src/root-of-trust/index.mjs', import.meta.url).href;
 
@@ -524,4 +525,44 @@ test('R4-B-04: دفترٌ أمامَ الشاهدِ يُرفَضُ — استر�
     'دفترٌ أمامَ شاهدِهِ يجبُ أن يُرفَضَ بـLEDGER_AHEAD_OF_WITNESS',
   );
   rmSync(dir, { recursive: true, force: true });
+});
+
+// WL-560 (G1): دُمِجَ هنا حرفياً tests/root-of-trust/root-of-trust.test.mjs (‏توحيدُ الاستيرادِ فقط).
+test('king signs and verifies commands', () => {
+  const king = new KingIdentity();
+  const command = createRoyalCommand('inspect', 'agent:one');
+  const sig = king.sign(command);
+  assert.equal(king.verify(command, sig), true);
+  assert.equal(king.verify({ ...command, action: 'destroy' }, sig), false);
+});
+test('certificate authority issues and revokes agents', () => {
+  const king = new KingIdentity();
+  const ca = new CertificateAuthority(king);
+  const agent = new AgentIdentity(ca, 'one', 'observer', ['read:a']);
+  assert.equal(ca.isValid(agent.certificate), true);
+  ca.revoke(agent.certificate.id, 'test');
+  assert.equal(ca.isValid(agent.certificate), false);
+});
+test('event log is tamper evident', () => {
+  const log = new EventLog();
+  log.append('test', 'system', { ok: true });
+  log.append('test', 'system', { ok: false });
+  assert.equal(log.verify(), true);
+  const firstEvent = log.events[0];
+  assert.ok(firstEvent, 'يجب أن يوجد حدث أول لنعبث به');
+  // عبث مقصود: نوع `data` معلَن `object` لأن السجل لا يفرض شكل الحمولة، فيُوسَّع
+  // هنا إلى سجل مفاتيح للكتابة عليه. هذا هو محل الاختبار نفسه لا التفافاً عليه.
+  const tampered = /** @type {Record<string, unknown>} */ (firstEvent.data);
+  tampered.ok = 'tampered';
+  assert.equal(log.verify(), false);
+});
+test('crown gateway rejects bad signature and stops safely', () => {
+  const king = new KingIdentity();
+  const log = new EventLog();
+  const crown = new CrownGateway(king, new CertificateAuthority(king), log);
+  const c = createRoyalCommand('inspect', 'agent:one');
+  assert.throws(() => crown.command(c, 'bad'), /INVALID_ROYAL_SIGNATURE/);
+  assert.deepEqual(crown.command(c, king.sign(c)).action, 'inspect');
+  crown.stop('test');
+  assert.throws(() => crown.command(c, king.sign(c)), /CROWN_STOPPED/);
 });
