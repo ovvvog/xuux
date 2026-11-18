@@ -1096,7 +1096,7 @@ describe(
 // xf_owner يملكُ fence.* ودوالَّه، وله CREATEROLE وADMIN على xuux_worker. كلُّ عضويّةٍ فيه لدورٍ غيرِ superuser —
 // مباشرةً أو عبرَ سلسلةٍ (‏ولو بوسيطٍ NOLOGIN)، وبأيِّ تركيبٍ من ADMIN/INHERIT/SET — مشكلةٌ بمسارِها وخصائصِ حلقاتِها،
 // فـRESUME يُرفَضُ (‏XF415) حتى تُسحَب. الكشفُ لا المنع: العضوُ النشِطُ مالكٌ للسياج (‏متبقٍّ مُعلَنٌ مقيسٌ أدناه).
-// الرجوعُ والطفراتُ في tests/persistence/migration-reversibility.test.mjs.
+// الرجوعُ والطفراتُ في tests/persistence/migrator.test.mjs (‏نُقِلَ في WL-562).
 describe(
   'WL-551: عضويّةُ xf_owner — مباشرةً وتعدّياً وبكلِّ الخصائص',
   { skip: skipWithoutDatabase },
