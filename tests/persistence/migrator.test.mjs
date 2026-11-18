@@ -1286,3 +1286,114 @@ describe(
     });
   },
 );
+
+// ── WL-564: امتيازاتُ fence المنجرفة (‏0034) — دالّةُ جردٍ جديدة، والحارسان وcheck_fenced وحدَها؛ الرجوعُ يُعيدُ 0033 حرفياً ──
+describe(
+  'WL-564 — 0034: الترقيةُ تُضيفُ _fence_acl_problems وتُغيّرُ _control_guard و_table_writer_guard وcheck_fenced فقط، والرجوعُ إلى 0033 حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir33;
+    /** @type {string} */
+    let dir34;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-mig-')));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const ADDED = 'fence._fence_acl_problems()';
+    const CHANGED = [
+      'fence._control_guard()',
+      'fence._table_writer_guard()',
+      'fence.check_fenced()',
+    ];
+    before(async () => {
+      dir33 = migrationsDir(33);
+      dir34 = migrationsDir(34);
+      db = await createIsolatedDatabase('m0034');
+      await up(db.pool, { dir: dir33 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir33, dir34]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: دالّةٌ جديدةٌ واحدةٌ مسحوبةٌ من PUBLIC، وثلاثُ دوالَّ تتغيّرُ نصّاً فقط؛ والأدوارُ والجداولُ والمُطلِقاتُ حرفيّاً؛ والرجوعُ يُطابقُ 0033', async () => {
+      const at33 = await ownerSnapshot(db.pool);
+      const tg33 = await fenceTriggerSnapshot(db.pool);
+      assert.deepEqual((await up(db.pool, { dir: dir34 })).applied, [34]);
+      const at34 = await ownerSnapshot(db.pool);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f33 = bySig(at33);
+      const f34 = bySig(at34);
+      assert.deepEqual(
+        Object.keys(f34).filter((k) => !(k in f33)),
+        [ADDED],
+        'دالّةٌ جديدةٌ واحدة',
+      );
+      assert.deepEqual(
+        Object.keys(f33).filter((k) => !(k in f34)),
+        [],
+        'لا دالّةَ محذوفة',
+      );
+      for (const sig of Object.keys(f33)) {
+        if (CHANGED.includes(sig)) {
+          assert.notEqual(f34[sig].def, f33[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f34[sig][k], f33[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f34[sig], f33[sig], `${sig} حرفيّاً`);
+      }
+      assert.equal(f34[ADDED].secdef, false, 'SECURITY INVOKER');
+      assert.equal(f34[ADDED].owner, 'xf_owner');
+      assert.match(f34[ADDED].def, /fence_acl_drift/);
+      assert.match(f34['fence.check_fenced()'].def, /fence_acl_inventory_failed/);
+      for (const sig of ['fence._control_guard()', 'fence._table_writer_guard()'])
+        assert.match(f34[sig].def, /'XF108'/, sig);
+      const acl = await db.pool.query(
+        `SELECT has_function_privilege('xuux_worker', $1::regprocedure, 'EXECUTE') AS w,
+                has_function_privilege('xf_owner', $1::regprocedure, 'EXECUTE') AS o`,
+        [ADDED],
+      );
+      assert.deepEqual(acl.rows[0], { w: false, o: true }, 'ليست لـPUBLIC');
+      // ‏البيانُ: الجديدةُ تُسجَّل، والثلاثُ يُعادُ تسجيلُها، ولا غيرُها.
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m33 = m(at33);
+      const m34 = m(at34);
+      assert.deepEqual(
+        Object.keys(m34).filter((k) => !(k in m33)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(m33)
+          .filter((k) => m33[k] !== m34[k])
+          .sort(),
+        [...CHANGED].sort(),
+      );
+      assert.deepEqual(at34.owner, at33.owner, 'امتيازاتُ xf_owner وعضويّاتُه لا تتغيّر');
+      assert.deepEqual(at34.tables, at33.tables, 'ملكيّةُ جداولِ fence وACL لا تتغيّر');
+      assert.deepEqual(at34.eventTriggers, at33.eventTriggers);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg33, 'المُطلِقاتُ حرفيّاً');
+      const ok = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.deepEqual(
+        ok.problems.filter((/** @type {{ kind: string }} */ p) => /^fence_acl_/.test(p.kind)),
+        [],
+        'الأساسُ صامت',
+      );
+      // ‏الرجوعُ يُعيدُ 0033 حرفياً؛ وإعادةُ التقديمِ تُطابقُ 0034.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir34 })).current, 33);
+      assert.deepEqual(await ownerSnapshot(db.pool), at33);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg33);
+      assert.deepEqual((await up(db.pool, { dir: dir34 })).applied, [34]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at34);
+    });
+  },
+);
