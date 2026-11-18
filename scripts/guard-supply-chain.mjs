@@ -7,12 +7,14 @@
 // تُفحص في CI، ولا قائمةَ مكوّناتٍ (SBOM) تُولَّد. فتبعيّةٌ بثغرةٍ حرجةٍ كانت
 // تمرّ بلا اعتراض، والبناءُ يخضرّ والنظامُ مكشوف.
 //
-// فالحاجز يتحقّق من خمسة شروط:
+// فالحاجز يتحقّق من ستّة شروط:
 //   R0: `package-lock.json` موجود وصالح.
 //   R1: كلُّ تبعيّات `package.json` مثبَّتةٌ بإصدارٍ دقيقٍ (لا `^` ولا `~`).
 //   R2: ملفُّ SBOM (`sbom.cdx.json`) موجودٌ وصالح.
 //   R3: لا تبعيّةً بثغرةٍ حرجةٍ أو عاليةٍ في `npm audit`.
 //   R4: لا وحداتٍ في `node_modules/` مُلتزَمةً في المستودع.
+//   R5 (‏WL-565): لا نسخةَ في ملفِّ القفلِ (‏بأيِّ عمقٍ) داخلَ مدى تبليغٍ سُدَّ — أرضيّةٌ لا ترجعُ
+//       بتحديثِ قفلٍ لاحقٍ ولو كانت شدّتُه دونَ «عالية» فلا يراها R3.
 //
 // حدٌّ معلن: الحاجزُ يقرأ النصَّ لا زمنَ التشغيل؛ و`npm audit` يُشغَّلُ كخطوةِ
 // CI منفصلةٍ لا هنا، لأنَّه يحتاجُ شبكةً وقد يبطئُ `validate` المحلّي. هنا
@@ -45,6 +47,66 @@ function readJson(relativePath) {
       { cause: error },
     );
   }
+}
+
+/**
+ * أرضيّاتُ التبليغاتِ المسدودة (‏WL-565): المدى المصابُ كما نشرَه التبليغُ حرفيّاً
+ * (‏`from` شاملٌ و`below` مستثنى)، لكلِّ نسخةٍ من الحزمةِ في القفلِ بأيِّ عمق.
+ *
+ * @type {ReadonlyArray<{ name: string; from: string; below: string; advisories: string }>}
+ */
+const ADVISORY_FLOORS = Object.freeze([
+  {
+    name: 'fast-uri',
+    from: '3.0.0',
+    below: '3.1.9',
+    advisories:
+      'GHSA-w74x-v6f9-j3xg، GHSA-wjr9-j795-jxcr، GHSA-xhq7-xmqj-769h، GHSA-333x-w4r6-6crp',
+  },
+  { name: 'minimatch', from: '7.0.0', below: '11.0.1', advisories: 'GHSA-g3hv-75wg-m249' },
+]);
+
+/**
+ * @param {string} version
+ * @returns {number[] | null} الأرقامُ الثلاثةُ أو null إن لم تُقرأ.
+ */
+function parseVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+/** @param {number[]} a @param {number[]} b */
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i += 1) if (a[i] !== b[i]) return (a[i] ?? 0) - (b[i] ?? 0);
+  return 0;
+}
+
+/**
+ * كلُّ نسخةٍ في القفلِ داخلَ مدى أرضيّة (‏أو غيرُ مقروءةٍ — مغلقُ الفشل).
+ *
+ * @param {Record<string, unknown>} lock
+ * @returns {string[]} المخالفاتُ بصيغةِ `مسار@نسخة`.
+ */
+function floorViolations(lock) {
+  const packages = /** @type {Record<string, { version?: unknown }>} */ (lock.packages ?? {});
+  /** @type {string[]} */
+  const out = [];
+  for (const [key, entry] of Object.entries(packages)) {
+    for (const floor of ADVISORY_FLOORS) {
+      if (key !== `node_modules/${floor.name}` && !key.endsWith(`/node_modules/${floor.name}`))
+        continue;
+      const version = typeof entry?.version === 'string' ? entry.version : '';
+      const parsed = parseVersion(version);
+      const from = /** @type {number[]} */ (parseVersion(floor.from));
+      const below = /** @type {number[]} */ (parseVersion(floor.below));
+      if (!parsed || (compareVersions(parsed, from) >= 0 && compareVersions(parsed, below) < 0)) {
+        out.push(
+          `${key}@${version || '؟'} (‏${floor.advisories}؛ المصابُ ≥ ${floor.from} و< ${floor.below})`,
+        );
+      }
+    }
+  }
+  return out;
 }
 
 /** @type {string[]} */
@@ -113,6 +175,17 @@ try {
     } catch {
       violations.push('R3: `audit-report.json` ليس JSON صالح.');
     }
+  }
+
+  // R5 (‏WL-565): أرضيّاتُ التبليغاتِ المسدودةِ في القفلِ بأيِّ عمق
+  try {
+    const floorLock = readJson('package-lock.json');
+    const below = floorViolations(floorLock);
+    if (below.length > 0) {
+      violations.push(`R5: نسخٌ داخلَ مدى تبليغٍ مسدود: ${below.join('، ')}.`);
+    }
+  } catch {
+    // ‏غيابُ القفلِ أو فسادُه مُبلَّغٌ في R0.
   }
 
   // R4: لا node_modules في المستودع
