@@ -766,6 +766,15 @@ threats:
     evidence: [docs/THREAT_MODEL.md]
     limit: قطعُ الطاقةِ الحقيقيُّ ممنوعٌ بلا إذنٍ صريح (LIVE-39)
     decision: D-EVD-1
+  # ── WL-563: عضويّةُ xf_owner الصاعدة (‏الهجرة 0033) ──────────────────────────────────────────
+  - id: TH-OWN-01
+    actor: operator_error
+    asset: fence.control وجداولُ fence الأخرى (‏الإيجار، الاعتماد، القائمة، البيان)
+    attack: GRANT xf_root أو xf_sovereign TO xf_owner (‏مباشرةً أو عبرَ دورٍ وسيط، بأيِّ خيارات) فيصيرُ كلُّ عضوٍ في xf_owner معفىً من XF105/XF107 — يمدُّ الإيجارَ ويكتبُ الاعتمادَ وختمَ التحكّم — والحافّةُ لا يراها check_fenced
+    control: الحارسان (‏0031 و0032 بنصِّ 0033) يحسبان الجذرَ أو السياديَّ لعضوِ xf_owner بمسارِ عضويّةٍ لا يمرُّ بـxf_owner ⇒ XF107/XF105؛ وcheck_fenced يكشفُ كلَّ دورٍ يصلُه xf_owner خارجَ أساسِه (‏owner_upward_membership، مغلقُ الفشل) فيُرفَضُ RESUME (‏XF415)
+    status: MITIGATED_TESTED
+    evidence: [tests/fence/db-fence-privileges.test.mjs#WL-563, tests/persistence/migrator.test.mjs#WL-563]
+    limit: الحافّةُ الصاعدةُ لا تُمنَعُ إنشاءً (‏GRANT بيدِ superuser أو مديرِ الدور) بل تُكشَفُ عندَ الانتقال؛ والجذرُ أو السياديُّ عضواً مباشراً في xf_owner يبقى كاتباً (‏بقيّةُ 0032، قرارُ مالك)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
 owner_decisions:
   - id: D-SUP-1
     question: أين يعملُ المُشرِفُ الإنتاجيّ وبأيِّ فصلٍ بينَ المطلِق (root) والمُشرِف (xf_root)؟
@@ -845,7 +854,7 @@ owner_tasks:
   - id: T2
     title: نموذجُ تهديدِ المُشرِفِ ومخطّطُ الصلاحياتِ وتدفّقُ المفاتيح
     state: DESIGNED
-    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17]
+    threats: [TH-SUP-01, TH-SUP-02, TH-SUP-03, TH-SUP-05, TH-UID-12, TH-UID-17, TH-OWN-01]
   - id: T3
     title: بيئةُ اختبارٍ معزولةٌ على خادمِ الصديقِ عبرَ Cloudflare
     state: DESIGNED_NEEDS_APPROVAL
