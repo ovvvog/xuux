@@ -1397,3 +1397,113 @@ describe(
     });
   },
 );
+
+// ── WL-570: عضويّةٌ بينَ الأدوارِ السياديّة (‏0035) — دالّةُ جردٍ جديدة وcheck_fenced وحدَها؛ الرجوعُ يُعيدُ 0034 حرفياً ──
+describe(
+  'WL-570 — 0035: الترقيةُ تُضيفُ _sovereign_membership_problems وتُغيّرُ check_fenced فقط، والرجوعُ إلى 0034 حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir34;
+    /** @type {string} */
+    let dir35;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-mig-')));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const ADDED = 'fence._sovereign_membership_problems()';
+    const CHANGED = ['fence.check_fenced()'];
+    before(async () => {
+      dir34 = migrationsDir(34);
+      dir35 = migrationsDir(35);
+      db = await createIsolatedDatabase('m0035');
+      await up(db.pool, { dir: dir34 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir34, dir35]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: دالّةٌ جديدةٌ واحدةٌ مسحوبةٌ من PUBLIC، وcheck_fenced وحدَها تتغيّرُ نصّاً؛ والحارسانِ والأدوارُ والجداولُ والمُطلِقاتُ حرفيّاً؛ والرجوعُ يُطابقُ 0034', async () => {
+      const at34 = await ownerSnapshot(db.pool);
+      const tg34 = await fenceTriggerSnapshot(db.pool);
+      assert.deepEqual((await up(db.pool, { dir: dir35 })).applied, [35]);
+      const at35 = await ownerSnapshot(db.pool);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f34 = bySig(at34);
+      const f35 = bySig(at35);
+      assert.deepEqual(
+        Object.keys(f35).filter((k) => !(k in f34)),
+        [ADDED],
+        'دالّةٌ جديدةٌ واحدة',
+      );
+      assert.deepEqual(
+        Object.keys(f34).filter((k) => !(k in f35)),
+        [],
+        'لا دالّةَ محذوفة',
+      );
+      for (const sig of Object.keys(f34)) {
+        if (CHANGED.includes(sig)) {
+          assert.notEqual(f35[sig].def, f34[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f35[sig][k], f34[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f35[sig], f34[sig], `${sig} حرفيّاً`);
+      }
+      // ‏الحارسان (‏0032/0033/0034) والحاصدُ لم يُمَسّا — مشمولةٌ في «حرفيّاً» أعلاه، وتُسمّى هنا صراحةً.
+      for (const sig of ['fence._control_guard()', 'fence._table_writer_guard()'])
+        assert.deepEqual(f35[sig], f34[sig], `${sig} بنصِّ 0034`);
+      assert.equal(f35[ADDED].secdef, false, 'SECURITY INVOKER');
+      assert.equal(f35[ADDED].owner, 'xf_owner');
+      assert.match(f35[ADDED].def, /sovereign_membership/);
+      assert.match(f35['fence.check_fenced()'].def, /sovereign_membership_inventory_failed/);
+      assert.match(f35['fence.check_fenced()'].def, /sovereign_membership_detect_only/);
+      const acl = await db.pool.query(
+        `SELECT has_function_privilege('xuux_worker', $1::regprocedure, 'EXECUTE') AS w,
+                has_function_privilege('xf_owner', $1::regprocedure, 'EXECUTE') AS o`,
+        [ADDED],
+      );
+      assert.deepEqual(acl.rows[0], { w: false, o: true }, 'ليست لـPUBLIC');
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m34 = m(at34);
+      const m35 = m(at35);
+      assert.deepEqual(
+        Object.keys(m35).filter((k) => !(k in m34)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(m34).filter((k) => m34[k] !== m35[k]),
+        CHANGED,
+      );
+      assert.deepEqual(at35.owner, at34.owner, 'امتيازاتُ xf_owner وعضويّاتُه لا تتغيّر');
+      assert.deepEqual(at35.tables, at34.tables, 'ملكيّةُ جداولِ fence وACL لا تتغيّر');
+      assert.deepEqual(at35.eventTriggers, at34.eventTriggers);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg34, 'المُطلِقاتُ حرفيّاً');
+      const ok = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.deepEqual(
+        ok.problems.filter((/** @type {{ kind: string }} */ p) => /^sovereign_/.test(p.kind)),
+        [],
+        'الأساسُ صامت',
+      );
+      // ‏الرجوعُ يُعيدُ 0034 حرفياً؛ وإعادةُ التقديمِ تُطابقُ 0035.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir35 })).current, 34);
+      assert.deepEqual(await ownerSnapshot(db.pool), at34);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg34);
+      const gone = await db.pool.query(
+        `SELECT count(*)::int AS n FROM pg_proc WHERE proname = '_sovereign_membership_problems'`,
+      );
+      assert.equal(gone.rows[0].n, 0, 'الدالّةُ أُسقِطت');
+      assert.deepEqual((await up(db.pool, { dir: dir35 })).applied, [35]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at35);
+    });
+  },
+);
