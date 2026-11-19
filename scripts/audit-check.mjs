@@ -3,9 +3,13 @@
 //
 // يُشغّل `npm audit` ويُخرج تقريرًا بتنسيق JSON إلى `audit-report.json`.
 // يُفشل البناء عند وجود ثغرات حرجة أو عالية — إلا ما أعذرَه `AUDIT_EXCEPTIONS` (‏WL-557) بشروطِه كلِّها.
+// ‏WL-574: يُزيلُ التقريرَ السابقَ قبلَ التدقيق، ولا يكتبُ تقريراً إلا لتدقيقٍ ناجحٍ لم يتغيّرْ قفلُه أثناءَه — كتابةً ذرّيّةً
+// ‏(‏ملفٌّ مؤقّتٌ ثمّ rename) مختومةً بـ `xuuxAudit` (‏وقتُ البدءِ UTC وSHA-256 لبايتاتِ `package-lock.json` الخام)؛
+// ‏و R3 في guard:supply-chain يرفضُ تقريراً بلا ختمٍ صالح أو أقدمَ من 7 أيّام أو لقفلٍ آخر (‏`checkProvenance`).
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -125,10 +129,70 @@ export function evaluateAudit(audit, lock, now, exceptions = AUDIT_EXCEPTIONS) {
   return result;
 }
 
-/** @param {string} repoRoot @param {any} audit */
-function judge(repoRoot, audit) {
-  writeFileSync(`${repoRoot}/audit-report.json`, JSON.stringify(audit, null, 2) + '\n');
-  const lock = JSON.parse(readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
+/** WL-574: أقصى عمرٍ لتقريرٍ يقبلُه R3 (‏الحدُّ نفسُه مقبول). */
+export const AUDIT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** WL-574: سماحيّةُ انحرافِ الساعةِ لوقتٍ مستقبليّ — ما دونَها (‏والحدُّ نفسُه) مقبول، وما فوقَها مرفوض. */
+export const AUDIT_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const ISO_UTC_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const PROVENANCE_KEYS = '["generatedAt","lockfileSha256","version"]';
+
+/** WL-574: بصمةُ SHA-256 (‏hex صغيرة) لبايتاتِ الملفِّ الخام — لا لـ JSON بعدَ تحليلِه وإعادةِ تسلسلِه. @param {Buffer} bytes */
+export const lockDigest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+/**
+ * WL-574: يُرفِقُ بالتقريرِ حقلَ `xuuxAudit` (‏لا تحتَ `metadata` التي يملكُها npm) دونَ مسِّ بقيّتِه.
+ * @param {Record<string, unknown>} audit @param {Buffer} lockBytes بايتاتُ القفلِ الذي دُقِّقَ فعلاً @param {Date} at وقتُ بدءِ التدقيق
+ */
+export const stampProvenance = (audit, lockBytes, at) => ({
+  ...audit,
+  xuuxAudit: { version: 1, generatedAt: at.toISOString(), lockfileSha256: lockDigest(lockBytes) },
+});
+
+/**
+ * WL-574: هل التقريرُ حديثٌ ومربوطٌ بالقفلِ الحاليّ؟ يُرجِعُ '' أو سببَ الرفض؛ أيُّ حقلٍ مفقودٍ أو مشوّهٍ أو زائدٍ يُرفَض.
+ * @param {any} audit @param {Buffer | null} lockBytes بايتاتُ `package-lock.json` الحاليّ (‏null إن غاب) @param {Date} now
+ * @returns {string}
+ */
+export function checkProvenance(audit, lockBytes, now) {
+  /** @param {unknown} x */
+  const isObj = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+  if (!isObj(audit)) return 'التقريرُ ليس كائناً';
+  const p = audit.xuuxAudit;
+  if (!isObj(p)) return '`xuuxAudit` غائبٌ أو ليس كائناً';
+  if (JSON.stringify(Object.keys(p).sort()) !== PROVENANCE_KEYS) {
+    return '`xuuxAudit` بحقولٍ ناقصةٍ أو غيرِ متوقَّعة (‏المتوقَّع: version، generatedAt، lockfileSha256)';
+  }
+  if (p.version !== 1) return '`xuuxAudit.version` غيرُ معروف';
+  const g = p.generatedAt;
+  if (
+    typeof g !== 'string' ||
+    !ISO_UTC_MS.test(g) ||
+    Number.isNaN(Date.parse(g)) ||
+    new Date(g).toISOString() !== g
+  ) {
+    return '`xuuxAudit.generatedAt` ليس وقتاً UTC صريحاً صالحاً (‏YYYY-MM-DDTHH:mm:ss.sssZ)';
+  }
+  const age = now.getTime() - Date.parse(g);
+  if (age < -AUDIT_FUTURE_SKEW_MS)
+    return `\`xuuxAudit.generatedAt\` في المستقبلِ فوقَ سماحيّةِ 5 دقائق: ${g}`;
+  if (age > AUDIT_MAX_AGE_MS) return `التقريرُ أقدمُ من 7 أيّام: ${g}`;
+  if (typeof p.lockfileSha256 !== 'string' || !SHA256_HEX.test(p.lockfileSha256)) {
+    return '`xuuxAudit.lockfileSha256` ليس SHA-256 بـ 64 حرفاً hex صغيراً';
+  }
+  if (lockBytes === null) return '`package-lock.json` غائبٌ فلا يُطابَق';
+  if (p.lockfileSha256 !== lockDigest(lockBytes)) {
+    return 'بصمةُ التقريرِ لا تطابقُ `package-lock.json` الحاليّ (‏دُقِّقَ قفلٌ آخر)';
+  }
+  return '';
+}
+
+/**
+ * @param {string} repoRoot @param {any} audit @param {Buffer} lockBytes القفلُ الذي دُقِّقَ (‏ثابتٌ طوالَ التدقيق)
+ * @param {Date} startedAt
+ */
+function judge(repoRoot, audit, lockBytes, startedAt) {
+  const lock = JSON.parse(lockBytes.toString('utf8'));
   const { blocking, excused } = evaluateAudit(audit, lock, new Date());
   for (const x of excused) {
     console.log(
@@ -140,6 +204,14 @@ function judge(repoRoot, audit) {
     for (const x of blocking) console.error(`   - ${x.name}: ${x.severity} (${x.reason})`);
     process.exit(1);
   }
+  // ‏WL-574: الكتابةُ للناجحِ وحدَه، ذرّيّةً — فلا يُرى تقريرٌ نصفُ مكتوبٍ ولا تقريرٌ لتدقيقٍ فاشل.
+  const reportPath = path.join(repoRoot, 'audit-report.json');
+  const tmpPath = `${reportPath}.${process.pid}.tmp`;
+  writeFileSync(
+    tmpPath,
+    JSON.stringify(stampProvenance(audit, lockBytes, startedAt), null, 2) + '\n',
+  );
+  renameSync(tmpPath, reportPath);
   const total = Object.keys(audit.vulnerabilities ?? {}).length;
   console.log(
     `\n✅ لا ثغراتٍ حرجة/عالية غيرَ مُعذَرة (${total} ثغرةً في التقرير، ${excused.length} مُعذَرةٌ مؤقّتاً).`,
@@ -151,6 +223,14 @@ function main() {
   const repoRoot =
     rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
   console.log('═══ فحص الثغرات (M11.02) ═══');
+  // ‏WL-574: أبطِلِ التقريرَ السابقَ قبلَ أيِّ شيء — فشلٌ لاحقٌ لا يتركُ تقريراً قديماً يبدو صالحاً (‏rmSync يرمي إن تعذّر).
+  rmSync(path.join(repoRoot, 'audit-report.json'), { force: true });
+  const lockPath = path.join(repoRoot, 'package-lock.json');
+  /** @param {import('node:fs').Stats} s */
+  const sig = (s) => `${s.size}:${s.mtimeMs}:${s.ino}`;
+  const statBefore = sig(statSync(lockPath));
+  const lockBytes = readFileSync(lockPath);
+  const startedAt = new Date();
   /** @type {string} */
   let output;
   try {
@@ -179,7 +259,23 @@ function main() {
     );
     process.exit(1);
   }
-  judge(repoRoot, audit);
+  // ‏WL-574: القفلُ الذي قُرِئَ قبلَ التدقيقِ هو نفسُه بعدَه (‏بصمةً وحجماً ووقتَ تعديلٍ وinode) — وإلا فالتقريرُ لا يُنسَبُ لقفل.
+  /** @type {boolean} */
+  let changed;
+  try {
+    changed =
+      sig(statSync(lockPath)) !== statBefore ||
+      lockDigest(readFileSync(lockPath)) !== lockDigest(lockBytes);
+  } catch {
+    changed = true;
+  }
+  if (changed) {
+    console.error(
+      '⛔ package-lock.json تغيّرَ أثناءَ التدقيق — لا تقرير. أعِدْ `npm run audit:check` بعدَ استقرارِ القفل.',
+    );
+    process.exit(1);
+  }
+  judge(repoRoot, audit, lockBytes, startedAt);
 }
 
 if (

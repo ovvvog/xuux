@@ -1,7 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { writeFileSync, mkdirSync, rmSync, readFileSync, cpSync } from 'node:fs';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import {
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  readFileSync,
+  cpSync,
+  existsSync,
+  readdirSync,
+} from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +51,19 @@ function cleanup(root) {
   rmSync(root, { recursive: true, force: true });
 }
 
+/**
+ * WL-574: يختمُ تقريرَ تدقيقٍ بمنشئِه — وقتُ توليدٍ UTC وبصمةُ SHA-256 لبايتاتِ `package-lock.json` الخامِ في الجذر،
+ * محسوبةً هنا مستقلّةً عن الشفرةِ المُختبَرة. القفلُ يُكتَبُ قبلَ التقرير دائماً.
+ *
+ * @param {string} root @param {Record<string, unknown>} report @param {Date} [at]
+ */
+function stamped(root, report, at = new Date()) {
+  const lockfileSha256 = createHash('sha256')
+    .update(readFileSync(path.join(root, 'package-lock.json')))
+    .digest('hex');
+  return { ...report, xuuxAudit: { version: 1, generatedAt: at.toISOString(), lockfileSha256 } };
+}
+
 test('guard:supply-chain passes when all conditions are met', () => {
   const tmp = makeTempRoot();
   try {
@@ -74,9 +97,11 @@ test('guard:supply-chain passes when all conditions are met', () => {
     );
     writeFileSync(
       path.join(tmp, 'audit-report.json'),
-      JSON.stringify({
-        vulnerabilities: {},
-      }),
+      JSON.stringify(
+        stamped(tmp, {
+          vulnerabilities: {},
+        }),
+      ),
     );
     writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
 
@@ -411,7 +436,7 @@ test('WL-557/WL-571: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّ
       );
       writeFileSync(
         path.join(tmp, 'audit-report.json'),
-        JSON.stringify(report === 'pico' ? picoAudit() : { vulnerabilities: {} }),
+        JSON.stringify(stamped(tmp, report === 'pico' ? picoAudit() : { vulnerabilities: {} })),
       );
       writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
       const result = runGuard(tmp);
@@ -692,7 +717,10 @@ function floorRoot(packages) {
       components: [{ name: 'ajv', version: '8.20.0' }],
     }),
   );
-  writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify({ vulnerabilities: {} }));
+  writeFileSync(
+    path.join(tmp, 'audit-report.json'),
+    JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+  );
   writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
   return tmp;
 }
@@ -893,5 +921,513 @@ test('WL-568: شفرةُ تشغيلِ المستودعِ نفسِه — كلُّ
     assert.match(before.stderr ?? '', /R6: [^\n]*ajv \(‏src\/[^\n]*، 39 ملفّاً\)\.$/m);
   } finally {
     cleanup(tmp);
+  }
+});
+
+// ── WL-574: R3 كان يقبلُ أيَّ audit-report.json بشكلٍ صالح — قديماً أو لقفلٍ آخر (‏مقيسٌ: تقريرٌ بتاريخِ 2026-01-01 ⇒ خروجٌ 0).
+// ‏الآن: `xuuxAudit` = { version: 1, generatedAt: ISO-8601 UTC بالميلي‌ثانية و«Z»، lockfileSha256: SHA-256 لبايتاتِ القفلِ الخام }،
+// ‏عمرٌ ≤ 7 أيّام، ومستقبلٌ ≤ 5 دقائق (‏سماحيّةُ انحرافِ الساعة — مقبولٌ بالسياسةِ الموثَّقة)، وبصمةٌ مطابقةٌ تماماً. ──
+
+/** جذرٌ صالحٌ لـ R3 بتقريرٍ نظيفٍ يكتبُه المُستدعي. */
+function r3Root() {
+  const tmp = floorRoot({});
+  rmSync(path.join(tmp, 'audit-report.json'), { force: true });
+  return tmp;
+}
+const UNTRUSTED = /R3: تقريرُ التدقيقِ غيرُ موثوقِ المنشأ/;
+const DAY = 24 * 60 * 60 * 1000;
+const MIN = 60 * 1000;
+
+test('WL-574: R3 عبرَ CLI — تقريرٌ حديثٌ مربوطٌ بالقفلِ يمرّ، وكلُّ منشأٍ غائبٍ أو مشوّهٍ أو قديمٍ أو مستقبليٍّ أو لقفلٍ آخرَ يُرفَض', () => {
+  const tmp = r3Root();
+  try {
+    const now = new Date();
+    const good = stamped(tmp, { vulnerabilities: {} }, now);
+    const prov = good.xuuxAudit;
+    /** @type {Array<[string, any, boolean]>} */
+    const cases = [
+      ['حديثٌ صالح', good, true],
+      ['xuuxAudit غائب', { vulnerabilities: {} }, false],
+      [
+        'xuuxAudit تحتَ metadata بدلَه',
+        { vulnerabilities: {}, metadata: { xuuxAudit: prov } },
+        false,
+      ],
+      ['xuuxAudit null', { ...good, xuuxAudit: null }, false],
+      ['xuuxAudit مصفوفة', { ...good, xuuxAudit: [prov] }, false],
+      ['xuuxAudit نصّ', { ...good, xuuxAudit: JSON.stringify(prov) }, false],
+      ['حقلٌ غيرُ متوقَّع', { ...good, xuuxAudit: { ...prov, extra: 1 } }, false],
+      [
+        'version غائب',
+        {
+          ...good,
+          xuuxAudit: { generatedAt: prov.generatedAt, lockfileSha256: prov.lockfileSha256 },
+        },
+        false,
+      ],
+      ['version 2', { ...good, xuuxAudit: { ...prov, version: 2 } }, false],
+      ['version نصّيّ', { ...good, xuuxAudit: { ...prov, version: '1' } }, false],
+      [
+        'generatedAt غائب',
+        { ...good, xuuxAudit: { version: 1, lockfileSha256: prov.lockfileSha256 } },
+        false,
+      ],
+      ['generatedAt رقم', { ...good, xuuxAudit: { ...prov, generatedAt: now.getTime() } }, false],
+      ['generatedAt null', { ...good, xuuxAudit: { ...prov, generatedAt: null } }, false],
+      [
+        'generatedAt نصٌّ ليس وقتاً',
+        { ...good, xuuxAudit: { ...prov, generatedAt: 'yesterday' } },
+        false,
+      ],
+      ['generatedAt فارغ', { ...good, xuuxAudit: { ...prov, generatedAt: '' } }, false],
+      [
+        'generatedAt تاريخٌ مستحيل',
+        { ...good, xuuxAudit: { ...prov, generatedAt: '2026-02-30T00:00:00.000Z' } },
+        false,
+      ],
+      [
+        'generatedAt بإزاحةٍ لا UTC',
+        { ...good, xuuxAudit: { ...prov, generatedAt: prov.generatedAt.replace('Z', '+03:00') } },
+        false,
+      ],
+      [
+        'generatedAt بلا منطقة',
+        { ...good, xuuxAudit: { ...prov, generatedAt: prov.generatedAt.replace('Z', '') } },
+        false,
+      ],
+      [
+        'generatedAt بلا ميلي‌ثوانٍ',
+        {
+          ...good,
+          xuuxAudit: { ...prov, generatedAt: prov.generatedAt.replace(/\.\d{3}Z$/, 'Z') },
+        },
+        false,
+      ],
+      [
+        'generatedAt بمسافة',
+        { ...good, xuuxAudit: { ...prov, generatedAt: prov.generatedAt.replace('T', ' ') } },
+        false,
+      ],
+      [
+        'أقدمُ من 7 أيّامٍ بدقيقة',
+        stamped(tmp, { vulnerabilities: {} }, new Date(now.getTime() - 7 * DAY - MIN)),
+        false,
+      ],
+      [
+        'تقريرُ 2026-01-01 المقيس',
+        stamped(tmp, { vulnerabilities: {} }, new Date('2026-01-01T00:00:00.000Z')),
+        false,
+      ],
+      [
+        'أحدثُ من 7 أيّامٍ بدقيقة',
+        stamped(tmp, { vulnerabilities: {} }, new Date(now.getTime() - 7 * DAY + MIN)),
+        true,
+      ],
+      [
+        'مستقبليٌّ بـ 6 دقائق',
+        stamped(tmp, { vulnerabilities: {} }, new Date(now.getTime() + 6 * MIN)),
+        false,
+      ],
+      [
+        'مستقبليٌّ بسنة',
+        stamped(tmp, { vulnerabilities: {} }, new Date(now.getTime() + 365 * DAY)),
+        false,
+      ],
+      [
+        'مستقبليٌّ بـ 4 دقائق (‏داخلَ السماحيّة)',
+        stamped(tmp, { vulnerabilities: {} }, new Date(now.getTime() + 4 * MIN)),
+        true,
+      ],
+      [
+        'بصمةُ قفلٍ آخر',
+        {
+          ...good,
+          xuuxAudit: { ...prov, lockfileSha256: createHash('sha256').update('{}').digest('hex') },
+        },
+        false,
+      ],
+      [
+        'بصمةٌ بأحرفٍ كبيرة',
+        { ...good, xuuxAudit: { ...prov, lockfileSha256: prov.lockfileSha256.toUpperCase() } },
+        false,
+      ],
+      [
+        'بصمةٌ مقصوصة',
+        { ...good, xuuxAudit: { ...prov, lockfileSha256: prov.lockfileSha256.slice(1) } },
+        false,
+      ],
+      ['بصمةٌ غائبة', { ...good, xuuxAudit: { version: 1, generatedAt: prov.generatedAt } }, false],
+      ['بصمةٌ رقم', { ...good, xuuxAudit: { ...prov, lockfileSha256: 0 } }, false],
+    ];
+    for (const [label, report, ok] of cases) {
+      writeFileSync(path.join(tmp, 'audit-report.json'), JSON.stringify(report));
+      const r = runGuard(tmp);
+      assert.equal(r.ok, ok, `${label}: ${r.stderr || r.output}`);
+      if (!ok) assert.match(r.stderr ?? '', UNTRUSTED, label);
+      else assert.doesNotMatch(`${r.stderr ?? ''}${r.output}`, /R3/, label);
+    }
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-574: البصمةُ لبايتاتِ القفلِ الخام — قفلٌ بالمعنى نفسِه وتنسيقٍ آخرَ أو سطرٍ زائدٍ بعدَ الختمِ يُرفَض', () => {
+  const tmp = r3Root();
+  try {
+    const lockPath = path.join(tmp, 'package-lock.json');
+    writeFileSync(
+      path.join(tmp, 'audit-report.json'),
+      JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+    );
+    assert.equal(runGuard(tmp).ok, true);
+    const parsed = JSON.parse(readFileSync(lockPath, 'utf8'));
+    for (const [label, bytes] of /** @type {Array<[string, string]>} */ ([
+      ['إعادةُ تسلسلٍ بمسافات', JSON.stringify(parsed, null, 2)],
+      ['سطرٌ أخيرٌ زائد', `${readFileSync(lockPath, 'utf8')}\n`],
+    ])) {
+      writeFileSync(lockPath, bytes);
+      const r = runGuard(tmp);
+      assert.equal(r.ok, false, label);
+      assert.match(r.stderr ?? '', UNTRUSTED, label);
+      assert.match(r.stderr ?? '', /package-lock\.json/, label);
+    }
+    // ‏قفلٌ غائبٌ لا يُطابِقُ شيئاً.
+    rmSync(lockPath);
+    const r = runGuard(tmp);
+    assert.equal(r.ok, false);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-574: حدودُ checkProvenance بالضبط — 7 أيّامٍ مقبولة و+1ms مرفوض، و+5 دقائقَ مقبولة و+1ms مرفوض', async () => {
+  const m = await import('../../scripts/audit-check.mjs');
+  assert.equal(m.AUDIT_MAX_AGE_MS, 7 * DAY);
+  assert.equal(m.AUDIT_FUTURE_SKEW_MS, 5 * MIN);
+  const lockBytes = Buffer.from('{"lockfileVersion":3,"packages":{}}');
+  const sha = createHash('sha256').update(lockBytes).digest('hex');
+  assert.equal(m.lockDigest(lockBytes), sha);
+  const now = new Date('2026-11-19T12:00:00.000Z');
+  /** @param {number} dt */
+  const at = (dt) => ({
+    vulnerabilities: {},
+    xuuxAudit: {
+      version: 1,
+      generatedAt: new Date(now.getTime() + dt).toISOString(),
+      lockfileSha256: sha,
+    },
+  });
+  assert.equal(m.checkProvenance(at(0), lockBytes, now), '');
+  assert.equal(m.checkProvenance(at(-7 * DAY), lockBytes, now), '');
+  assert.match(m.checkProvenance(at(-7 * DAY - 1), lockBytes, now), /7 أيّام/);
+  assert.equal(m.checkProvenance(at(5 * MIN), lockBytes, now), '');
+  assert.match(m.checkProvenance(at(5 * MIN + 1), lockBytes, now), /مستقبل/);
+  assert.match(m.checkProvenance(at(0), null, now), /package-lock\.json/);
+  assert.match(m.checkProvenance(at(0), Buffer.from('{}'), now), /package-lock\.json/);
+  // ‏كلُّ شرطٍ يُرفَضُ لسببِه هو لا لغيرِه — وقتٌ «قريبٌ» من now لكنّه مستحيلٌ يُطبِّعُه Date.parse بصمت، أو بصيغةٍ موسَّعةٍ للسنة.
+  /** @param {string} g */
+  const withG = (g) => ({
+    vulnerabilities: {},
+    xuuxAudit: { version: 1, generatedAt: g, lockfileSha256: sha },
+  });
+  for (const [g, n] of /** @type {Array<[string, string]>} */ ([
+    ['2026-02-30T00:00:00.000Z', '2026-03-02T00:00:00.000Z'],
+    ['2026-02-29T12:00:00.000Z', '2026-03-01T12:00:00.000Z'],
+    ['2026-11-19T24:00:00.000Z', '2026-11-20T00:00:00.000Z'],
+    ['+010000-01-01T00:00:00.000Z', '+010000-01-01T00:00:00.000Z'],
+  ])) {
+    assert.match(m.checkProvenance(withG(g), lockBytes, new Date(n)), /UTC صريحاً/, g);
+  }
+  for (const bad of [
+    'A'.repeat(64),
+    sha.toUpperCase(),
+    `${sha}0`,
+    sha.slice(1),
+    ` ${sha.slice(1)}`,
+  ]) {
+    const a = {
+      vulnerabilities: {},
+      xuuxAudit: { version: 1, generatedAt: now.toISOString(), lockfileSha256: bad },
+    };
+    assert.match(m.checkProvenance(a, lockBytes, now), /ليس SHA-256 بـ 64/, bad);
+  }
+  for (const bad of [null, [], 'x', 1, { vulnerabilities: {} }]) {
+    assert.notEqual(m.checkProvenance(bad, lockBytes, now), '', JSON.stringify(bad));
+  }
+  // ‏الختمُ نفسُه يُنتجُ ما يقبلُه الفحص، ولا يمسُّ بقيّةَ التقرير.
+  const s = m.stampProvenance({ auditReportVersion: 2, vulnerabilities: {} }, lockBytes, now);
+  assert.deepEqual(s, {
+    auditReportVersion: 2,
+    vulnerabilities: {},
+    xuuxAudit: { version: 1, generatedAt: '2026-11-19T12:00:00.000Z', lockfileSha256: sha },
+  });
+  assert.equal(m.checkProvenance(s, lockBytes, now), '');
+});
+
+test('WL-574: evaluateAudit والإعذاراتُ ورتبُ الشدّةِ لم تتغيّر — xuuxAudit لا يُغيّرُ الحكم، والحكمُ لا يقرأُ المنشأ', async () => {
+  const { evaluateAudit, AUDIT_EXCEPTIONS, checkProvenance } =
+    await import('../../scripts/audit-check.mjs');
+  assert.ok(Object.isFrozen(AUDIT_EXCEPTIONS));
+  assert.deepEqual(AUDIT_EXCEPTIONS, []);
+  const prov = { version: 1, generatedAt: NOW.toISOString(), lockfileSha256: '0'.repeat(64) };
+  for (const [label, audit, lock, exc] of /** @type {Array<[string, any, any, any]>} */ ([
+    ['picomatch مُعذَرة', picoAudit(), picoLock(true), PICO_EXC],
+    ['picomatch بلا إعذار', picoAudit(), picoLock(true), undefined],
+    ['picomatch إنتاجيّة', picoAudit(), picoLock(false), PICO_EXC],
+    ['نظيف', { vulnerabilities: {} }, { packages: {} }, undefined],
+    ['خطأُ npm', NPM_AUDIT_ERROR, { packages: {} }, undefined],
+  ])) {
+    const plain = evaluateAudit(audit, lock, NOW, exc);
+    const withProv = evaluateAudit({ ...audit, xuuxAudit: prov }, lock, NOW, exc);
+    assert.deepEqual(withProv, plain, label);
+  }
+  // ‏رتبُ الشدّة: «Critical»/«HIGH»/فارغة ما تزالُ حرجةً (‏WL-572)، وmoderate لا تُسقِط.
+  for (const sev of ['Critical', 'HIGH', '', 'high', 'critical']) {
+    const r = evaluateAudit(
+      {
+        vulnerabilities: {
+          a: {
+            name: 'a',
+            severity: sev,
+            via: [{ url: 'u', severity: sev }],
+            nodes: ['node_modules/a'],
+          },
+        },
+      },
+      { packages: { 'node_modules/a': {} } },
+      NOW,
+    );
+    assert.equal(r.blocking.length, 1, sev);
+  }
+  assert.deepEqual(
+    evaluateAudit(
+      { vulnerabilities: { a: { name: 'a', severity: 'moderate', via: [] } } },
+      { packages: {} },
+      NOW,
+    ).blocking,
+    [],
+  );
+  assert.equal(typeof checkProvenance, 'function');
+});
+
+// ── WL-574: دورةُ الإنتاج عبرَ CLI الحقيقيّ — سجلٌّ محلّيٌّ (‏HTTP) يُجيبُ نقطةَ `advisories/bulk`، فـ npm audit يعملُ فعلاً. ──
+
+/**
+ * @param {string} cwd @param {string} registry
+ * @returns {Promise<{ status: number, stdout: string, stderr: string }>}
+ */
+function runAuditCheckAsync(cwd, registry) {
+  return new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [AUDIT_CHECK, '--root', cwd],
+      {
+        cwd,
+        encoding: 'utf8',
+        timeout: 90000,
+        env: {
+          ...process.env,
+          npm_config_registry: registry,
+          npm_config_fetch_retries: '0',
+          npm_config_audit_level: '',
+        },
+      },
+      (error, stdout, stderr) => {
+        const code = /** @type {any} */ (error)?.code;
+        resolve({ status: error ? (typeof code === 'number' ? code : -1) : 0, stdout, stderr });
+      },
+    );
+  });
+}
+
+/**
+ * سجلٌّ محلّيٌّ يُجيبُ كلَّ طلبٍ بـ body؛ `onRequest` يُنفَّذُ قبلَ الإجابة (‏لمحاكاةِ تغيّرِ القفلِ أثناءَ التدقيق).
+ * @param {string} body @param {() => void} [onRequest]
+ * @returns {Promise<{ url: string, hits: string[], close: () => Promise<void> }>}
+ */
+function fakeRegistry(body, onRequest) {
+  /** @type {string[]} */
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      hits.push(`${req.method} ${req.url}`);
+      onRequest?.();
+      res.setHeader('content-type', 'application/json');
+      res.end(body);
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const port = /** @type {import('node:net').AddressInfo} */ (server.address()).port;
+      resolve({
+        url: `http://127.0.0.1:${port}/`,
+        hits,
+        close: () => new Promise((r) => server.close(() => r(undefined))),
+      });
+    });
+  });
+}
+
+/** جذرٌ بقفلٍ حقيقيٍّ صغيرٍ يقبلُه npm audit، وصالحٌ لـ R3 فيما عدا التقرير. */
+function auditableRoot() {
+  const tmp = makeTempRoot();
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({ name: 't', version: '1.0.0', private: true, dependencies: { pg: '8.23.0' } }),
+  );
+  writeFileSync(
+    path.join(tmp, 'package-lock.json'),
+    JSON.stringify({
+      name: 't',
+      version: '1.0.0',
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': { name: 't', version: '1.0.0', dependencies: { pg: '8.23.0' } },
+        'node_modules/pg': { version: '8.23.0' },
+      },
+    }),
+  );
+  mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
+  writeFileSync(
+    path.join(tmp, 'sbom.cdx.json'),
+    JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'pg' }] }),
+  );
+  writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+  return tmp;
+}
+
+test('WL-574: audit:check الحقيقيُّ يكتبُ تقريراً مختوماً — وقتُ البدءِ UTC وبصمةُ القفلِ الخام — يقبلُه R3', async () => {
+  const tmp = auditableRoot();
+  const reg = await fakeRegistry('{}');
+  try {
+    const before = Date.now();
+    const r = await runAuditCheckAsync(tmp, reg.url);
+    const after = Date.now();
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+    assert.ok(
+      reg.hits.some((h) => h.includes('/-/npm/v1/security/advisories/bulk')),
+      reg.hits.join(','),
+    );
+    const report = JSON.parse(readFileSync(path.join(tmp, 'audit-report.json'), 'utf8'));
+    assert.equal(report.auditReportVersion, 2);
+    assert.deepEqual(report.vulnerabilities, {});
+    assert.equal(typeof report.metadata, 'object');
+    assert.equal('xuuxAudit' in report.metadata, false, 'لا شيءَ تحتَ metadata');
+    assert.deepEqual(Object.keys(report.xuuxAudit).sort(), [
+      'generatedAt',
+      'lockfileSha256',
+      'version',
+    ]);
+    assert.equal(report.xuuxAudit.version, 1);
+    assert.match(report.xuuxAudit.generatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    const t = Date.parse(report.xuuxAudit.generatedAt);
+    assert.ok(t >= before && t <= after, `${report.xuuxAudit.generatedAt} ∉ [${before}, ${after}]`);
+    const sha = createHash('sha256')
+      .update(readFileSync(path.join(tmp, 'package-lock.json')))
+      .digest('hex');
+    assert.equal(report.xuuxAudit.lockfileSha256, sha);
+    const g = runGuard(tmp);
+    assert.equal(g.ok, true, g.stderr || g.output);
+    assert.equal(
+      readdirSync(tmp).filter((f) => f.startsWith('audit-report.json.')).length,
+      0,
+      'لا ملفَّ مؤقّتاً متبقّياً',
+    );
+  } finally {
+    await reg.close();
+    cleanup(tmp);
+  }
+});
+
+test('WL-574: تغيّرُ القفلِ أثناءَ التدقيقِ يُفشِلُ audit:check بوضوحٍ ولا يتركُ تقريراً — ولا القديمَ الصالح', async () => {
+  for (const [label, mutate] of /** @type {Array<[string, (p: string, o: string) => void]>} */ ([
+    // ‏تغييرٌ في البايتاتِ لا في المعنى (‏سطرٌ زائد) — يكشفُه الفحصُ بالبصمةِ الخامِ وحدَها.
+    ['سطرٌ زائد', (p, o) => writeFileSync(p, `${o}\n`)],
+    // ‏تغييرٌ ثمّ عودةٌ إلى البايتاتِ نفسِها (‏ABA) — البصمةُ تتطابق؛ توقيعُ stat (‏mtime) يكشفُه.
+    [
+      'تغييرٌ ثمّ عودة (‏ABA)',
+      (p, o) => {
+        writeFileSync(p, `${o}\n`);
+        writeFileSync(p, o);
+      },
+    ],
+  ])) {
+    const tmp = auditableRoot();
+    const lockPath = path.join(tmp, 'package-lock.json');
+    const original = readFileSync(lockPath, 'utf8');
+    // ‏تقريرٌ سابقٌ صالحٌ تماماً لهذا القفل — كان سيمرُّ R3 لو بقي.
+    writeFileSync(
+      path.join(tmp, 'audit-report.json'),
+      JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+    );
+    assert.equal(runGuard(tmp).ok, true, `${label}: التقريرُ السابقُ صالحٌ قبلَ التشغيل`);
+    const reg = await fakeRegistry('{}', () => mutate(lockPath, original));
+    try {
+      const r = await runAuditCheckAsync(tmp, reg.url);
+      assert.ok(reg.hits.length > 0, `${label}: التدقيقُ وصلَ السجلّ`);
+      assert.equal(r.status, 1, `${label}: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stderr, /package-lock\.json تغيّرَ أثناءَ التدقيق/, label);
+      assert.doesNotMatch(r.stdout, /✅/, label);
+      assert.equal(
+        existsSync(path.join(tmp, 'audit-report.json')),
+        false,
+        `${label}: لا تقريرَ بعدَ السباق`,
+      );
+      const g = runGuard(tmp);
+      assert.equal(g.ok, false, label);
+      assert.match(g.stderr ?? '', /R3: `audit-report\.json` غائبٌ/, label);
+    } finally {
+      await reg.close();
+      cleanup(tmp);
+    }
+  }
+});
+
+test('WL-574: فشلُ التدقيقِ (‏سجلٌّ لا يُجيب، أو ثغرةٌ عالية) مع تقريرٍ قديمٍ صالحٍ — يُزالُ القديمُ فلا يقبلُه R3', async () => {
+  const highAdvisory = JSON.stringify({
+    pg: [
+      {
+        id: 1,
+        url: 'https://github.com/advisories/GHSA-test-574',
+        title: 'test',
+        severity: 'high',
+        vulnerable_versions: '<=99.0.0',
+        cwe: [],
+        cvss: { score: 7.5, vectorString: null },
+      },
+    ],
+  });
+  const reg = await fakeRegistry(highAdvisory);
+  try {
+    for (const [label, registry, msg] of /** @type {Array<[string, string, RegExp]>} */ ([
+      ['سجلٌّ لا يُجيب', 'http://127.0.0.1:9', /تقريرُ تدقيقٍ غيرُ صالح/],
+      ['ثغرةٌ عالية', reg.url, /ثغرةٌ حرجة\/عالية/],
+    ])) {
+      const tmp = auditableRoot();
+      try {
+        writeFileSync(
+          path.join(tmp, 'audit-report.json'),
+          JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+        );
+        assert.equal(runGuard(tmp).ok, true, `${label}: التقريرُ السابقُ صالحٌ قبلَ التشغيل`);
+        const r = await runAuditCheckAsync(tmp, registry);
+        assert.equal(r.status, 1, `${label}: ${r.stdout}\n${r.stderr}`);
+        assert.match(r.stderr, msg, label);
+        assert.equal(
+          existsSync(path.join(tmp, 'audit-report.json')),
+          false,
+          `${label}: لا تقريرَ بعدَ الفشل`,
+        );
+        const g = runGuard(tmp);
+        assert.equal(g.ok, false, label);
+        assert.match(g.stderr ?? '', /R3: `audit-report\.json` غائبٌ/, label);
+      } finally {
+        cleanup(tmp);
+      }
+    }
+  } finally {
+    await reg.close();
   }
 });
