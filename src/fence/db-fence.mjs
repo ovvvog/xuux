@@ -45,7 +45,11 @@ export const FENCE_ERRORS = Object.freeze({
   SEAL_REFUSED: 'FENCE_SEAL_REFUSED',
   EFFECTS_EVIDENCE_REJECTED: 'FENCE_EFFECTS_EVIDENCE_REJECTED',
   REAPER_ROLE: 'FENCE_REAPER_ROLE',
+  ORPHAN_SWEEP_INCOMPLETE: 'FENCE_ORPHAN_SWEEP_INCOMPLETE',
 });
+
+/** سببُ الإلغاءِ الافتراضيُّ لاعتمادٍ يتيمٍ عندَ إقلاعِ المُشرِف (‏TH-SUP-05، WL-577). */
+export const ORPHAN_REVOKE_REASON = 'SUPERVISOR_BOOT_ORPHAN';
 
 export class FenceError extends Error {
   /**
@@ -1186,6 +1190,95 @@ export class FenceRoot {
   /** @param {string} role @param {string} reason */
   async revokeCredential(role, reason) {
     return (await this.one('SELECT fence.revoke_credential($1, $2) AS r', [role, reason])).r;
+  }
+
+  /**
+   * TH-SUP-05 (‏WL-577): كنسُ الاعتماداتِ اليتيمةِ عندَ إقلاعِ المُشرِف. مُشرِفٌ انهارَ أو أُعيدَ تشغيلُه والعمّالُ
+   * أحياءٌ يتركُ اعتماداتٍ ACTIVE لم يُصدِرها المُشرِفُ الحاليّ؛ إيجارُها يبقى صالحاً حتى ينقضيَ (‏≤ `lease_window_s`)
+   * فيكتبُ عاملٌ لا يُراقبُه أحد. يُلغى هنا كلُّ اعتمادٍ ACTIVE ليس في `keep` (‏ما أصدرَه هذا المُشرِف؛ فارغٌ عندَ
+   * الإقلاع) بـ`fence.revoke_credential` — NOLOGIN وإنهاءُ الجلساتِ ومحوُ الأثر — ثمّ يُعادُ الجردُ **وفشلٌ مغلق**:
+   * اعتمادٌ يتيمٌ ظهرَ بعدَ الكنس (‏مُصدِرٌ آخرُ بدورِ الجذرِ في الوقتِ نفسِه) أو جلسةٌ لدورٍ ملغىً (‏في هذا الكنسِ أو
+   * لاعتمادٍ غيرِ ACTIVE قبلَه — جلسةٌ نجت من الإنهاء، صنفُ WL-552) بقيت حيّةً بعدَ
+   * `settleMs` ⇒ `FENCE_ORPHAN_SWEEP_INCOMPLETE` بالتفاصيل، فلا يُطلِقُ المُشرِفُ عمّالاً فوقَ حالةٍ لم تُحسَم.
+   * **الحدود:** الجردُ والإلغاءُ لا يُقفلانِ الإصدار — مُصدِرٌ متزامنٌ يُكشَفُ بإعادةِ الجردِ لا يُمنَع؛ والجلساتُ تُرى
+   * في `pg_stat_activity` بالاسمِ وحدَه (‏ما يراه `xf_root`)؛ وما التزمَ قبلَ الإلغاءِ يبقى.
+   * @param {{ keep?: Iterable<string>, reason?: string, settleMs?: number, pollMs?: number }} [options]
+   * @returns {Promise<{ revoked: Array<{ role_name: string, worker_id: string, boot_id: string, terminated: number }>, kept: string[] }>}
+   */
+  async revokeOrphanCredentials(options = {}) {
+    const keep = new Set();
+    for (const role of options.keep ?? []) {
+      if (typeof role !== 'string' || role === '')
+        throw new TypeError('revokeOrphanCredentials: keep يقبلُ أسماءَ أدوارٍ نصّيّةً غيرَ فارغة');
+      keep.add(role);
+    }
+    const reason = options.reason ?? ORPHAN_REVOKE_REASON;
+    if (typeof reason !== 'string' || reason.trim() === '')
+      throw new TypeError('revokeOrphanCredentials: reason نصٌّ غيرُ فارغ');
+    const settleMs = options.settleMs ?? 2_000;
+    const pollMs = options.pollMs ?? 50;
+    for (const [name, v] of /** @type {const} */ ([
+      ['settleMs', settleMs],
+      ['pollMs', pollMs],
+    ]))
+      if (!Number.isInteger(v) || v < 1)
+        throw new TypeError(`revokeOrphanCredentials: ${name} عددٌ صحيحٌ ≥ 1`);
+    const active = async () =>
+      /** @type {Array<{ role_name: string, worker_id: string, boot_id: string }>} */ (
+        await this.with(
+          async (c) =>
+            (
+              await c.query(
+                `SELECT role_name::text AS role_name, worker_id, boot_id FROM fence.credentials
+                 WHERE status = 'ACTIVE' ORDER BY role_name`,
+              )
+            ).rows,
+        )
+      );
+    const before = await active();
+    /** @type {Array<{ role_name: string, worker_id: string, boot_id: string, terminated: number }>} */
+    const revoked = [];
+    for (const cr of before) {
+      if (keep.has(cr.role_name)) continue;
+      const terminated = Number(await this.revokeCredential(cr.role_name, reason));
+      revoked.push({ ...cr, terminated });
+      this.log({ ev: 'orphan_revoked', role: cr.role_name, worker: cr.worker_id, terminated });
+    }
+    const after = await active();
+    const appeared = after.filter((cr) => !keep.has(cr.role_name));
+    const roles = revoked.map((r) => r.role_name);
+    /** @type {Array<{ role: string, pid: number }>} */
+    let lingering;
+    const deadline = Date.now() + settleMs;
+    for (;;) {
+      // ‏جلساتُ ما أُلغيَ هنا **وكلِّ** اعتمادٍ غيرِ ACTIVE (‏أُلغيَ أو انقضى قبلَ الإقلاع وبقيت جلستُه — صنفُ WL-552)،
+      // ولو كانَ في `keep` (‏`keep` يُعفي اعتماداً ACTIVE من الإلغاءِ لا جلسةَ دورٍ ملغىً من الفحص):
+      // المُشرِفُ لا يُطلِقُ فوقَ جلسةِ دورٍ مُسيَّجٍ لم تمُت.
+      lingering = (
+        await this.one(
+          `SELECT coalesce(jsonb_agg(jsonb_build_object('role', a.usename, 'pid', a.pid) ORDER BY a.pid), '[]') AS r
+           FROM pg_stat_activity a
+           WHERE a.usename = ANY($1::text[])
+              OR a.usename IN (SELECT role_name::text FROM fence.credentials WHERE status <> 'ACTIVE')`,
+          [roles],
+        )
+      ).r;
+      if (lingering.length === 0 || Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    }
+    if (appeared.length || lingering.length) {
+      this.log({
+        ev: 'orphan_sweep_incomplete',
+        appeared: appeared.length,
+        lingering: lingering.length,
+      });
+      throw new FenceError(
+        FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE,
+        'كنسُ الاعتماداتِ اليتيمةِ لم يكتمل: اعتمادٌ يتيمٌ ظهرَ بعدَ الكنسِ أو جلسةُ دورٍ ملغىً ما زالت حيّة',
+        { appeared, lingering, revoked },
+      );
+    }
+    return { revoked, kept: after.map((cr) => cr.role_name) };
   }
 
   /**

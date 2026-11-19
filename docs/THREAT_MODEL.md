@@ -669,10 +669,10 @@ threats:
     actor: operator_error
     asset: اعتماداتٌ يتيمة
     attack: انهيارُ المُشرِفِ أو إعادةُ تشغيلِه والعمّالُ أحياء
-    control: عندَ إقلاعِ المُشرِف يُلغي كلَّ اعتمادٍ ACTIVE لم يُصدِره هو، ثمّ يُطلقُ إقلاعاتٍ جديدة — مصمَّم
-    status: MITIGATED_DESIGN
-    evidence: [docs/THREAT_MODEL.md]
-    limit: غيرُ منفَّذ
+    control: عندَ إقلاعِ المُشرِف يُلغي كلَّ اعتمادٍ ACTIVE لم يُصدِره هو (‏`FenceRoot.revokeOrphanCredentials`، WL-577)، ثمّ يُعيدُ الجردَ ويفشلُ مغلقاً (‏FENCE_ORPHAN_SWEEP_INCOMPLETE) إن ظهرَ يتيمٌ أو بقيت جلسةٌ لدورٍ ملغىً، ثمّ يُطلقُ إقلاعاتٍ جديدة
+    status: PARTIAL
+    evidence: [tests/fence/fence-lifecycle.test.mjs#TH-SUP-05]
+    limit: البدائيّةُ منفَّذةٌ ومختبَرةٌ على PostgreSQL ولا مُشرِفَ إنتاجيٌّ يناديها عندَ الإقلاع (‏T2 DESIGNED)؛ مُصدِرٌ متزامنٌ بدورِ الجذرِ يُكشَفُ بإعادةِ الجردِ لا يُمنَع؛ الجلساتُ تُرى في pg_stat_activity بالاسمِ وحدَه؛ وما التزمَه العاملُ قبلَ الإلغاءِ يبقى
   # ── خادمُ الصديق + Cloudflare ─────────────────────────────────────────────────────────
   - id: TH-ENV-01
     actor: network

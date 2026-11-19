@@ -28,7 +28,9 @@ import pg from 'pg';
 import {
   FENCE_ERRORS,
   FenceError,
+  FenceRoot,
   FenceSovereign,
+  ORPHAN_REVOKE_REASON,
   confirmWorkerSeal,
   generateTestKeyProvider,
   reviewEffectsEvidence,
@@ -1579,3 +1581,338 @@ describe(
     });
   },
 );
+
+// ── TH-SUP-05 (‏WL-577): كنسُ الاعتماداتِ اليتيمةِ عندَ إقلاعِ المُشرِف ─────────────────────────────────
+describe(
+  'TH-SUP-05 — المُشرِفُ يُلغي عندَ إقلاعِه كلَّ اعتمادٍ ACTIVE لم يُصدِره (‏WL-577)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    before(async () => {
+      h = await harness('fence_orphans');
+      await h.resume();
+    });
+    after(async () => {
+      await h?.close();
+    });
+
+    /** @returns {Promise<Array<{ role_name: string, worker_id: string, status: string, revoke_reason: string | null }>>} */
+    const credentials = async () =>
+      (
+        await h.db.pool.query(
+          `SELECT role_name::text AS role_name, worker_id, status, revoke_reason FROM fence.credentials ORDER BY issued_at, role_name`,
+        )
+      ).rows;
+    /** @param {string} role */
+    const canLogin = async (role) =>
+      (await h.db.pool.query('SELECT rolcanlogin AS l FROM pg_roles WHERE rolname = $1', [role]))
+        .rows[0]?.l;
+    /** @param {string[]} roles */
+    const sessions = async (roles) =>
+      Number(
+        (
+          await h.db.pool.query(
+            'SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = ANY($1::text[])',
+            [roles],
+          )
+        ).rows[0].n,
+      );
+    const clean = async () => {
+      await h.root.revokeOrphanCredentials();
+      assert.deepEqual(
+        (await credentials()).filter((c) => c.status === 'ACTIVE'),
+        [],
+        'لا اعتمادَ نشِطاً قبلَ الاختبار',
+      );
+    };
+
+    test('إقلاعٌ بلا ما أصدرَه: كلُّ اعتمادٍ ACTIVE يُلغى وتُنهى جلساتُه ولا يكتبُ العاملُ بعدَه', async () => {
+      await clean();
+      const a = await h.boot('alpha');
+      const b = await h.boot('beta');
+      const ra = String(a.credential.role_name);
+      const rb = String(b.credential.role_name);
+      await /** @type {pg.Client} */ (a.client).query(
+        `INSERT INTO state.fence_probe (id, v) VALUES (5770, 'before-sweep')`,
+      );
+      assert.equal(await sessions([ra, rb]), 2, 'جلستا العاملَين حيّتانِ قبلَ الكنس');
+      /** @type {Array<Record<string, unknown>>} */
+      const log = [];
+      const root = new FenceRoot(
+        async () =>
+          /** @type {any} */ ({
+            query: (/** @type {any[]} */ ...q) => /** @type {any} */ (h.rootClient).query(...q),
+          }),
+        { log: (e) => log.push(e) },
+      );
+      const r = await root.revokeOrphanCredentials();
+      assert.deepEqual(
+        r.revoked.map((x) => [x.role_name, x.worker_id, x.terminated]).sort(),
+        [
+          [ra, 'alpha', 1],
+          [rb, 'beta', 1],
+        ].sort(),
+        'الاعتمادانِ أُلغيا وجلسةُ كلٍّ منهما أُنهيت',
+      );
+      assert.deepEqual(r.kept, [], 'لا شيءَ مُبقىً');
+      for (const x of r.revoked) assert.equal(typeof x.boot_id, 'string');
+      const byRole = new Map((await credentials()).map((c) => [c.role_name, c]));
+      for (const role of [ra, rb]) {
+        assert.equal(byRole.get(role)?.status, 'REVOKED', `${role} ملغى`);
+        assert.equal(byRole.get(role)?.revoke_reason, ORPHAN_REVOKE_REASON, 'بالسببِ المسمّى');
+        assert.equal(await canLogin(role), false, `${role} NOLOGIN`);
+      }
+      assert.equal(await sessions([ra, rb]), 0, 'لا جلسةَ حيّةً بعدَ الكنس');
+      await rejection(() =>
+        /** @type {pg.Client} */ (a.client).query(
+          `INSERT INTO state.fence_probe (id, v) VALUES (5771, 'after-sweep')`,
+        ),
+      );
+      const probe = await h.db.pool.query(
+        'SELECT id FROM state.fence_probe WHERE id IN (5770, 5771) ORDER BY id',
+      );
+      assert.deepEqual(
+        probe.rows.map((x) => x.id),
+        [5770],
+        'ما التزمَ قبلَ الكنسِ باقٍ ولا كتابةَ بعدَه',
+      );
+      assert.deepEqual(
+        log.map((e) => e['ev']),
+        ['orphan_revoked', 'orphan_revoked'],
+        'سجلٌّ لكلِّ إلغاء',
+      );
+      const again = await root.revokeOrphanCredentials();
+      assert.deepEqual(again, { revoked: [], kept: [] }, 'الكنسُ الثاني لا يجدُ شيئاً');
+      assert.equal(
+        (
+          await h.db.pool.query(
+            `SELECT count(*)::int AS n FROM fence.events WHERE kind = 'CREDENTIAL_REVOKED' AND detail->>'reason' = $1`,
+            [ORPHAN_REVOKE_REASON],
+          )
+        ).rows[0].n,
+        2,
+        'حدثانِ في سلسلةِ الأحداثِ بالسبب',
+      );
+    });
+
+    test('ما أصدرَه المُشرِفُ الحاليُّ يبقى ويكتب، والسببُ المخصّصُ يُسجَّل', async () => {
+      await clean();
+      const a = await h.boot('alpha');
+      const b = await h.boot('beta');
+      const ra = String(a.credential.role_name);
+      const rb = String(b.credential.role_name);
+      const r = await h.root.revokeOrphanCredentials({
+        keep: [ra, 'xuuxw_not_active'],
+        reason: 'wl577-keep',
+      });
+      assert.deepEqual(
+        r.revoked.map((x) => x.role_name),
+        [rb],
+        'اليتيمُ وحدَه أُلغي',
+      );
+      assert.deepEqual(r.kept, [ra], 'المُبقى هو ما أصدرَه المُشرِفُ وما زالَ نشِطاً');
+      const byRole = new Map((await credentials()).map((c) => [c.role_name, c]));
+      assert.equal(byRole.get(ra)?.status, 'ACTIVE');
+      assert.equal(byRole.get(rb)?.revoke_reason, 'wl577-keep');
+      await /** @type {pg.Client} */ (a.client).query(
+        `INSERT INTO state.fence_probe (id, v) VALUES (5772, 'kept-writes')`,
+      );
+      await rejection(() =>
+        /** @type {pg.Client} */ (b.client).query(
+          `INSERT INTO state.fence_probe (id, v) VALUES (5773, 'orphan-writes')`,
+        ),
+      );
+      assert.equal(await sessions([rb]), 0);
+      assert.equal(await sessions([ra]), 1, 'جلسةُ المُبقى لم تُمَسّ');
+    });
+
+    test('مُصدِرٌ متزامنٌ بدورِ الجذر ⇒ فشلٌ مغلقٌ بالتفاصيل لا نجاحٌ صامت', async () => {
+      await clean();
+      const a = await h.boot('alpha', { connect: false });
+      const ra = String(a.credential.role_name);
+      const root = new FenceRoot(
+        async () =>
+          /** @type {any} */ ({
+            query: (/** @type {any[]} */ ...q) => /** @type {any} */ (h.rootClient).query(...q),
+          }),
+      );
+      const orig = root.revokeCredential.bind(root);
+      /** @type {{ boot: Promise<{ credential: Record<string, unknown> }> | null }} */
+      const lateHolder = { boot: null };
+      // ‏مُشرِفٌ ثانٍ (‏أو أيُّ حاملٍ لـxf_root) يُصدِرُ اعتماداً بينَ الجردِ والتحقّق.
+      root.revokeCredential = async (role, why) => {
+        const n = await orig(role, why);
+        if (lateHolder.boot === null) {
+          lateHolder.boot = h.boot('beta', { connect: false });
+          await lateHolder.boot;
+        }
+        return n;
+      };
+      const error = await rejectsWith(
+        () => root.revokeOrphanCredentials(),
+        [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
+        'يتيمٌ ظهرَ بعدَ الكنس',
+      );
+      assert.ok(lateHolder.boot !== null, 'المُصدِرُ المتزامنُ عمل');
+      const late = String((await lateHolder.boot).credential.role_name);
+      assert.ok(error instanceof FenceError);
+      const detail = /** @type {any} */ (error.detail);
+      assert.deepEqual(
+        detail.appeared.map((/** @type {any} */ x) => x.role_name),
+        [late],
+        'الاعتمادُ المتأخّرُ مسمّى',
+      );
+      assert.deepEqual(
+        detail.revoked.map((/** @type {any} */ x) => x.role_name),
+        [ra],
+        'وما أُلغيَ قبلَه مُعلَن',
+      );
+      const byRole = new Map((await credentials()).map((c) => [c.role_name, c]));
+      assert.equal(
+        byRole.get(String(late))?.status,
+        'ACTIVE',
+        'لا يُلغى ما لم يُجرَد — يُكشَفُ ولا يُمنَع',
+      );
+      const r = await h.root.revokeOrphanCredentials();
+      assert.deepEqual(
+        r.revoked.map((x) => x.role_name),
+        [late],
+        'الكنسُ التالي يحسمُه',
+      );
+    });
+
+    test('جلسةٌ حيّةٌ لاعتمادٍ أُلغيَ قبلَ الإقلاع (‏نجت من الإنهاء — صنفُ WL-552) ⇒ فشلٌ مغلق', async () => {
+      await clean();
+      const g = await h.boot('alpha');
+      const rg = String(g.credential.role_name);
+      assert.equal(await sessions([rg]), 1, 'جلسةُ العاملِ حيّة');
+      // ‏محاكاةُ «أُلغيَ ولم تمُت جلستُه» (‏إنهاءٌ انقضت مهلتُه على خادمٍ موقوف): الحالةُ REVOKED بلا إنهاء — بدورِ superuser
+      // ‏في صندوقِ الاختبار وحدَه.
+      await h.db.pool.query(
+        `UPDATE fence.credentials SET status = 'REVOKED', revoke_reason = 'wl577-pre-boot' WHERE role_name = $1`,
+        [rg],
+      );
+      const error = await rejectsWith(
+        () => h.root.revokeOrphanCredentials({ settleMs: 200, pollMs: 20 }),
+        [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
+        'جلسةُ دورٍ ملغىً قبلَ الإقلاعِ ما زالت حيّة',
+      );
+      assert.ok(error instanceof FenceError);
+      const detail = /** @type {any} */ (error.detail);
+      assert.deepEqual(detail.revoked, [], 'لا اعتمادَ ACTIVE أُلغيَ في هذا الكنس');
+      assert.deepEqual(detail.appeared, []);
+      assert.deepEqual(
+        detail.lingering.map((/** @type {any} */ x) => x.role),
+        [rg],
+        'الجلسةُ الباقيةُ مسمّاةٌ بدورِها من pg_stat_activity الحقيقيّ',
+      );
+      assert.equal(typeof detail.lingering[0].pid, 'number');
+      // ‏`keep` يُعفي اعتماداً ACTIVE من الإلغاءِ لا جلسةَ دورٍ ملغىً من الفحص: إبقاءُ الدورِ نفسِه لا يُمرِّرُ الكنس.
+      const kept = await rejectsWith(
+        () => h.root.revokeOrphanCredentials({ keep: [rg], settleMs: 200, pollMs: 20 }),
+        [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
+        'keep لا يُعفي جلسةَ دورٍ ملغىً',
+      );
+      assert.deepEqual(
+        /** @type {any} */ (kept).detail.lingering.map((/** @type {any} */ x) => x.role),
+        [rg],
+      );
+      // ‏وينجحُ بعدَ موتِ الجلسة.
+      await h.db.pool.query(
+        'SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usename = $1',
+        [rg],
+      );
+      assert.deepEqual(await h.root.revokeOrphanCredentials({ settleMs: 2000 }), {
+        revoked: [],
+        kept: [],
+      });
+    });
+
+    test('دورٌ غيرُ الجذر لا يكنس: السياديُّ يُرفَضُ في القاعدة ولا يُلغى شيء', async () => {
+      await clean();
+      const a = await h.boot('alpha', { connect: false });
+      const ra = String(a.credential.role_name);
+      const sov = new FenceRoot(
+        async () =>
+          /** @type {any} */ ({
+            query: (/** @type {any[]} */ ...q) => /** @type {any} */ (h.sovClient).query(...q),
+          }),
+      );
+      const error = await rejection(() => sov.revokeOrphanCredentials());
+      assert.ok(
+        !(error instanceof FenceError),
+        `رفضُ القاعدةِ لا رمزُ الكنس: ${error.code} ${error.message}`,
+      );
+      const byRole = new Map((await credentials()).map((c) => [c.role_name, c]));
+      assert.equal(byRole.get(ra)?.status, 'ACTIVE', 'لا إلغاءَ بغيرِ الجذر');
+      await h.root.revokeOrphanCredentials();
+    });
+
+    test('جلسةُ دورٍ ملغىً بقيت حيّةً بعدَ المهلة ⇒ فشلٌ مغلقٌ (‏lingering)، وتُنتظَرُ حتى تموتَ إن ماتت', async () => {
+      await clean();
+      const a = await h.boot('alpha', { connect: false });
+      const ra = String(a.credential.role_name);
+      // ‏إنهاءُ الجلسةِ إشارةٌ لا انتظار: تبقى في pg_stat_activity لحظةً أو أكثر (‏SIGSTOP في المختبر، WL-552).
+      // ‏هنا تُحاكى بإجابةٍ مصنوعةٍ لاستعلامِ الجلسات وحدَه — الإلغاءُ نفسُه حقيقيّ.
+      let alive = 3;
+      /** @param {boolean} forever */
+      const rootWith = (forever) =>
+        new FenceRoot(
+          async () =>
+            /** @type {any} */ ({
+              query: async (/** @type {string} */ sql, /** @type {any[]} */ params) => {
+                if (/pg_stat_activity/.test(sql)) {
+                  if (forever || alive-- > 0) return { rows: [{ r: [{ role: ra, pid: 4242 }] }] };
+                  return { rows: [{ r: [] }] };
+                }
+                return /** @type {any} */ (h.rootClient).query(sql, params);
+              },
+            }),
+        );
+      const error = await rejectsWith(
+        () => rootWith(true).revokeOrphanCredentials({ settleMs: 120, pollMs: 20 }),
+        [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
+        'جلسةٌ لا تموت',
+      );
+      assert.deepEqual(error.detail.lingering, [{ role: ra, pid: 4242 }]);
+      assert.deepEqual(error.detail.appeared, []);
+      assert.equal((await credentials()).find((c) => c.role_name === ra)?.status, 'REVOKED');
+      const b = await h.boot('beta', { connect: false });
+      const r = await rootWith(false).revokeOrphanCredentials({ settleMs: 2_000, pollMs: 10 });
+      assert.deepEqual(
+        r.revoked.map((x) => x.role_name),
+        [String(b.credential.role_name)],
+      );
+      assert.equal(alive, -1, 'انتُظِرت الجلسةُ ثلاثَ مرّاتٍ ثمّ ماتت');
+    });
+  },
+);
+
+test('TH-SUP-05: مدخلاتُ الكنسِ تُرفَضُ قبلَ أيِّ اتصال (‏WL-577)', async () => {
+  let connects = 0;
+  const root = new FenceRoot(async () => {
+    connects++;
+    throw new Error('لا اتصال');
+  });
+  for (const [opts, why] of /** @type {Array<[any, string]>} */ ([
+    [{ keep: [''] }, 'keep فارغ'],
+    [{ keep: [42] }, 'keep رقم'],
+    [{ keep: [null] }, 'keep null'],
+    [{ reason: '' }, 'سببٌ فارغ'],
+    [{ reason: '   ' }, 'سببٌ فراغات'],
+    [{ reason: 7 }, 'سببٌ رقم'],
+    [{ settleMs: 0 }, 'مهلةٌ صفر'],
+    [{ settleMs: -1 }, 'مهلةٌ سالبة'],
+    [{ settleMs: 1.5 }, 'مهلةٌ كسريّة'],
+    [{ settleMs: Number.NaN }, 'مهلةٌ NaN'],
+    [{ pollMs: 0 }, 'فاصلٌ صفر'],
+    [{ pollMs: '10' }, 'فاصلٌ نصّ'],
+  ]))
+    await assert.rejects(() => root.revokeOrphanCredentials(opts), TypeError, why);
+  assert.equal(connects, 0, 'لا اتصالَ لمدخلاتٍ مرفوضة');
+  await assert.rejects(() => root.revokeOrphanCredentials(), /لا اتصال/);
+  assert.equal(connects, 1, 'المدخلاتُ الصالحةُ تتّصل');
+  assert.equal(ORPHAN_REVOKE_REASON, 'SUPERVISOR_BOOT_ORPHAN');
+  assert.equal(FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE, 'FENCE_ORPHAN_SWEEP_INCOMPLETE');
+});
