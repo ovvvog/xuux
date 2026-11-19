@@ -176,8 +176,10 @@ function matchableEntries(packages, problems) {
 }
 
 /**
- * WL-576: يفسّرُ `integrity` في القفلِ تفسيراً صارماً، ويُرجعُ بصمةَ الأقوى كما يختارُها npm sbom
- * (‏`ssri.parse(…, {single: true})` = أوّلُ رمزٍ للخوارزميّةِ الأقوى) بصيغة `ALG:hex`، أو سببَ الرفض.
+ * WL-576: يفسّرُ `integrity` في القفلِ تفسيراً صارماً، ويُرجعُ بصمةَ أوّلِ رمزٍ sha512 بصيغة `ALG:hex`، أو سببَ الرفض.
+ * تصحيحٌ (‏مراجعةُ fd47091c): ‏`ssri.parse(…, {single: true})` في ssri 10 (‏npm 10.8) لا يختارُ الأقوى بل يبني Hash من
+ * النصِّ كلِّه — فلقفلٍ متعدّدِ الرموزِ تخرجُ بصمةُ SBOM من الرمزِ الأوّلِ بملخّصٍ فاسد، فلا تطابقُ هذه القيمةَ ويُرفَضُ
+ * المكوّن (‏إغلاقٌ آمنٌ لا تجاوز). القفلُ الحقيقيُّ رمزٌ واحدٌ sha512 لكلِّ مدخلة.
  * الصرامة: كلُّ رمزٍ `alg-base64` بلا خيارات؛ Base64 قياسيٌّ قانونيٌّ (‏إعادةُ ترميزِه تساويه حرفاً بحرف،
  * فلا حشوَ ناقصٌ أو زائدٌ ولا بِتّاتٌ ذيليّةٌ غيرُ صفريّة)؛ وطولُ الملخّصِ يساوي طولَ الخوارزميّةِ بالضبط؛
  * والأقوى SHA-512 (‏ما دونه ضعيفٌ فيُرفَض، والقفلُ الحقيقيُّ كلُّه SHA-512).
@@ -250,6 +252,23 @@ export function sourceProblem(entry, pkgName) {
   if (resolved !== canonical) return `«${resolved}» ليس رابطَ tarball القانونيَّ «${canonical}»`;
   if (entry.integrity === undefined) return 'من السجلِّ بلا `integrity`';
   return '';
+}
+
+/**
+ * WL-576: مصدرُ المدخلةِ وبصمتُها وحدَهما (‏بلا SBOM) — للمدخلاتِ الاختياريّةِ الغائبةِ عن SBOM.
+ * @param {string} key @param {Record<string, any>} entry @returns {string[]}
+ */
+export function provenanceProblems(key, entry) {
+  const folder = key.slice(key.lastIndexOf(NM_MARK) + NM_MARK.length);
+  const pkgName = nonEmpty(entry.name) ? entry.name : folder;
+  const why = [];
+  const src = sourceProblem(entry, pkgName);
+  if (src !== '') why.push(`مصدرٌ غيرُ مدعوم: ${src}`);
+  if (entry.integrity !== undefined) {
+    const sri = parseSri(entry.integrity);
+    if ('error' in sri) why.push(`integrity في القفلِ غيرُ قابلةٍ للتفسير: ${sri.error}`);
+  }
+  return why;
 }
 
 /**
@@ -377,8 +396,14 @@ export function checkSbomComponents(sbom, lock) {
   });
   for (const [key, entry] of entries) {
     if (seen.has(key)) continue;
-    if (entry.optional === true || entry.devOptional === true) omittedOptional.push(key);
-    else problems.push(`مدخلةُ القفل «${key}@${entry.version}» مطلوبةٌ وغائبةٌ عن SBOM`);
+    if (entry.optional === true || entry.devOptional === true) {
+      // ‏WL-576 (‏مراجعةُ fd47091c): الاختياريّةُ الغائبةُ عن SBOM كانت تتخطّى سياسةَ المصدرِ وSRI — مدخلةٌ بمنصّةٍ
+      // أخرى (‏os/cpu) مصدرُها git أو سجلٌّ آخر تمرُّ بإعلانٍ ℹ️ ويجلبُها `npm ci` على تلك المنصّة. تُفحَصُ كالممثَّلة.
+      const why = provenanceProblems(key, entry);
+      if (why.length > 0)
+        problems.push(`مدخلةُ القفل الاختياريّة «${key}» (‏غائبةٌ عن SBOM): ${why.join('، ')}`);
+      else omittedOptional.push(key);
+    } else problems.push(`مدخلةُ القفل «${key}@${entry.version}» مطلوبةٌ وغائبةٌ عن SBOM`);
   }
   return { problems, omittedOptional };
 }

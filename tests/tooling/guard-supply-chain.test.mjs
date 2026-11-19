@@ -2814,7 +2814,7 @@ test('WL-576: parseSri — صارمٌ: الطولُ لكلِّ خوارزميّ�
   const hex = Buffer.from(GOOD512, 'base64').toString('hex');
   assert.equal(GOOD512.length, 88);
   assert.deepEqual(parseSri(`sha512-${GOOD512}`), { hash: `SHA-512:${hex}` });
-  // ‏رموزٌ متعدّدة: الأقوى يُختارُ كما يختارُه npm sbom (‏ssri single)، وأوّلُ رمزٍ له.
+  // ‏رموزٌ متعدّدة: يُؤخَذُ أوّلُ رمزِ sha512 (‏npm sbom نفسُه لا يُنتجُ هذه القيمةَ لقفلٍ متعدّدِ الرموز — ssri 10 يبني Hash من النصِّ كلِّه — فيُرفَضُ المكوّنُ مغلقاً).
   const g1 = createHash('sha1').update('x').digest('base64');
   const other = createHash('sha512').update('other').digest('base64');
   assert.deepEqual(parseSri(`sha1-${g1} sha512-${GOOD512}`), { hash: `SHA-512:${hex}` });
@@ -3042,4 +3042,151 @@ test('WL-576: مصدرٌ غيرُ مدعومٍ أو SRI مشوّهٌ يُرفَ�
       cleanup(tmp);
     }
   }
+});
+
+test('WL-576 (‏مراجعةُ fd47091c): اختياريّةٌ غائبةٌ عن SBOM بمصدرٍ غيرِ مدعومٍ أو SRI مشوّهٍ تُرفَضُ عبرَ CLI لا تُعلَنُ فقط', () => {
+  const good = registryEntry('node_modules/pg', { version: '8.23.0' });
+  /** @type {Array<[string, Record<string, any>, RegExp]>} */
+  const cases = [
+    [
+      'git لمنصّةٍ أخرى',
+      {
+        version: '1.0.0',
+        resolved: 'git+ssh://git@evil.example/x.git#deadbeef',
+        integrity: `sha512-${GOOD512}`,
+        optional: true,
+        os: ['darwin'],
+        cpu: ['arm64'],
+      },
+      /الاختياريّة «node_modules\/@evil\/darwin-arm64» \(‏غائبةٌ عن SBOM\): مصدرٌ غيرُ مدعوم: مصدرُ git/,
+    ],
+    [
+      'سجلٌّ آخرُ بـsha512-YQ',
+      {
+        version: '1.0.0',
+        resolved: 'https://evil.example/x.tgz',
+        integrity: 'sha512-YQ',
+        optional: true,
+      },
+      /مصدرٌ غيرُ مدعوم: .*integrity في القفلِ غيرُ قابلةٍ للتفسير/,
+    ],
+    [
+      'devOptional بلا resolved',
+      { version: '1.0.0', integrity: `sha512-${GOOD512}`, devOptional: true },
+      /مصدرٌ غيرُ مدعوم: بلا `resolved`/,
+    ],
+    [
+      'مصدرٌ قانونيٌّ بملخّصٍ مبتور',
+      {
+        ...registryEntry('node_modules/@evil/darwin-arm64', { version: '1.0.0' }),
+        integrity: `sha512-${Buffer.alloc(32, 1).toString('base64')}`,
+        optional: true,
+      },
+      /بطول 32 بايت ≠ 64/,
+    ],
+  ];
+  for (const [label, evil, re] of cases) {
+    const tmp = floorRoot({});
+    try {
+      const lock = {
+        lockfileVersion: 3,
+        name: 'test',
+        packages: {
+          '': { name: 'test' },
+          'node_modules/pg': good,
+          'node_modules/@evil/darwin-arm64': evil,
+        },
+      };
+      writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify(lock));
+      // ‏SBOM يمثّلُ المطلوبَ وحدَه كما يُنتجُه npm حينَ لا تُثبَّتُ الاختياريّةُ على هذه المنصّة.
+      writeFileSync(
+        path.join(tmp, 'sbom.cdx.json'),
+        JSON.stringify(
+          stampedSbom(tmp, {
+            bomFormat: 'CycloneDX',
+            specVersion: '1.4',
+            components: [npmComponent('node_modules/pg', good)],
+          }),
+        ),
+      );
+      writeFileSync(
+        path.join(tmp, 'audit-report.json'),
+        JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+      );
+      const r = runGuard(tmp);
+      assert.equal(r.ok, false, `${label}: يُرفَض`);
+      assert.match(r.stderr ?? '', MISMATCH, label);
+      assert.match(r.stderr ?? '', re, label);
+      assert.doesNotMatch(r.output, OPTIONAL_NOTE, `${label}: لا يُعلَنُ مقبولاً`);
+      assert.doesNotMatch(r.stderr ?? '', /R3|غيرُ مربوط/, `${label}: السببُ وحدَه لا غيرُه`);
+    } finally {
+      cleanup(tmp);
+    }
+  }
+  // ‏الضابط: الاختياريّةُ نفسُها بمصدرٍ قانونيٍّ وsha512 صالحةٍ تُقبَلُ وتُعلَن.
+  const tmp = floorRoot({});
+  try {
+    const opt = {
+      ...registryEntry('node_modules/@evil/darwin-arm64', { version: '1.0.0' }),
+      optional: true,
+    };
+    const lock = {
+      lockfileVersion: 3,
+      name: 'test',
+      packages: {
+        '': { name: 'test' },
+        'node_modules/pg': good,
+        'node_modules/@evil/darwin-arm64': opt,
+      },
+    };
+    writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify(lock));
+    writeFileSync(
+      path.join(tmp, 'sbom.cdx.json'),
+      JSON.stringify(
+        stampedSbom(tmp, {
+          bomFormat: 'CycloneDX',
+          specVersion: '1.4',
+          components: [npmComponent('node_modules/pg', good)],
+        }),
+      ),
+    );
+    writeFileSync(
+      path.join(tmp, 'audit-report.json'),
+      JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+    );
+    const r = runGuard(tmp);
+    assert.equal(r.ok, true, r.stderr || r.output);
+    assert.match(r.output, OPTIONAL_NOTE);
+    assert.match(r.output, /node_modules\/@evil\/darwin-arm64$/m);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-576: provenanceProblems — المصدرُ والبصمةُ وحدَهما، والاسمُ المستعارُ من `name`', async () => {
+  const { provenanceProblems } = await import('../../scripts/generate-sbom.mjs');
+  const ok = registryEntry('node_modules/a/node_modules/@s/b', { version: '2.0.0' });
+  assert.deepEqual(provenanceProblems('node_modules/a/node_modules/@s/b', ok), []);
+  const alias = { ...registryEntry('node_modules/real', { version: '1.0.0' }), name: 'real' };
+  assert.deepEqual(
+    provenanceProblems('node_modules/al', alias),
+    [],
+    'المستعارُ برابطِ اسمِه الحقيقيّ',
+  );
+  assert.match(
+    provenanceProblems('node_modules/real', { ...alias, name: 'other' }).join(),
+    /ليس رابطَ tarball القانونيَّ/,
+  );
+  assert.match(
+    provenanceProblems('node_modules/x', {
+      ...registryEntry('node_modules/x', { version: '1.0.0' }),
+      integrity: 'sha512-YQ',
+    }).join(),
+    /integrity في القفلِ غيرُ قابلةٍ للتفسير/,
+  );
+  assert.match(
+    provenanceProblems('node_modules/x', { version: '1.0.0', resolved: 'file:../x' }).join(),
+    /مصدرٌ محلّيٌّ «file:\.\.\/x»/,
+  );
+  assert.deepEqual(provenanceProblems('node_modules/x', { version: '1.0.0', inBundle: true }), []);
 });
