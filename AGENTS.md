@@ -11,6 +11,8 @@
    فلا يكونُ قديماً.
 2. **رأسُ `main` من Git لا من وثيقة:** `git fetch origin && git log -5 --oneline origin/main`
    و`gh pr list --state open`.
+   **ومنذُ `WL-532` يجري العملُ على فرعِ التكاملِ** `wl-532-533-integration` لا على `main`، فاقرأْ رأسَه كذلك:
+   `git log -5 --oneline origin/wl-532-533-integration` (‏ترتيبُ مصادرِ الحالةِ في [§0 من فهرسِ الوثائق](docs/README.md)).
 3. أحدثُ مُدخلةٍ كاملةٍ في [`docs/roadmap/05-work-log.md`](docs/roadmap/05-work-log.md) (‏في الأعلى)،
    ثمّ صفوفُ ما ستعملُ عليه في [`docs/roadmap/06-debt-register.md`](docs/roadmap/06-debt-register.md).
 4. [`GOVERNANCE_RULE.md`](GOVERNANCE_RULE.md): من يملكُ ماذا (‏منفِّذٌ · مجلسٌ · مالك). **المنفِّذُ ليس
