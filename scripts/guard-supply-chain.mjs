@@ -11,7 +11,8 @@
 //   R0: `package-lock.json` موجود وصالح.
 //   R1: كلُّ تبعيّات `package.json` مثبَّتةٌ بإصدارٍ دقيقٍ (لا `^` ولا `~`).
 //   R2: ملفُّ SBOM (`sbom.cdx.json`) موجودٌ وصالح.
-//   R3: لا تبعيّةً بثغرةٍ حرجةٍ أو عاليةٍ في `npm audit`.
+//   R3: لا تبعيّةً بثغرةٍ حرجةٍ أو عاليةٍ في `npm audit` — في تقريرٍ مختومٍ بـ `xuuxAudit` (‏WL-574):
+//       مولَّدٍ خلالَ 7 أيّام (‏وليس في المستقبلِ فوقَ 5 دقائق)، وبصمتُه SHA-256 لبايتاتِ `package-lock.json` الحاليّ.
 //   R4: لا وحداتٍ في `node_modules/` مُلتزَمةً في المستودع.
 //   R5 (‏WL-565): لا نسخةَ في ملفِّ القفلِ (‏بأيِّ عمقٍ) داخلَ مدى تبليغٍ سُدَّ — أرضيّةٌ لا ترجعُ
 //       بتحديثِ قفلٍ لاحقٍ ولو كانت شدّتُه دونَ «عالية» فلا يراها R3.
@@ -20,7 +21,7 @@
 //
 // حدٌّ معلن: الحاجزُ يقرأ النصَّ لا زمنَ التشغيل؛ و`npm audit` يُشغَّلُ كخطوةِ
 // CI منفصلةٍ لا هنا، لأنَّه يحتاجُ شبكةً وقد يبطئُ `validate` المحلّي. هنا
-// يُتحقَّقُ من وجودِ ملفِّ التدقيقِ الأخيرِ (`audit-report.json`) وحداثتِهِ.
+// يُتحقَّقُ من وجودِ ملفِّ التدقيقِ الأخيرِ (`audit-report.json`) وحداثتِهِ وارتباطِه بالقفلِ الحاليّ (‏WL-574).
 // ولا يُدَّعى أنَّ هذا بديلٌ عن الفحصِ الخارجيِّ (M11.04) — هو فحصٌ آليٌّ
 // داخليٌّ لا أكثر.
 
@@ -29,7 +30,7 @@ import { builtinModules } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 
-import { evaluateAudit } from './audit-check.mjs';
+import { checkProvenance, evaluateAudit } from './audit-check.mjs';
 
 const rootIndex = process.argv.indexOf('--root');
 const repoRoot = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
@@ -244,7 +245,7 @@ try {
     }
   }
 
-  // R3: تقرير تدقيق الثغرات موجود وحديث (خلال آخر 7 أيام)
+  // R3: تقرير تدقيق الثغرات موجود وحديث (خلال آخر 7 أيام) ومربوطٌ بالقفلِ الحاليّ (‏WL-574)
   const auditPath = path.join(repoRoot, 'audit-report.json');
   if (!existsSync(auditPath)) {
     violations.push('R3: `audit-report.json` غائبٌ — شغّل `npm run audit:check` في CI.');
@@ -253,10 +254,17 @@ try {
       const audit = JSON.parse(readFileSync(auditPath, 'utf8'));
       // WL-557: الحكمُ نفسُه الذي يُطبِّقُه audit:check (‏الإعذارُ الضيّقُ المؤقّتُ بملفِّ القفلِ في الجذرِ نفسِه).
       const lockPath = path.join(repoRoot, 'package-lock.json');
-      const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath, 'utf8')) : {};
-      const { blocking } = evaluateAudit(audit, lock, new Date());
+      const lockBytes = existsSync(lockPath) ? readFileSync(lockPath) : null;
+      const lock = lockBytes ? JSON.parse(lockBytes.toString('utf8')) : {};
+      const now = new Date();
+      const { blocking } = evaluateAudit(audit, lock, now);
       if (blocking.length > 0) {
         violations.push(`R3: ${blocking.length} ثغرة حرجة/عالية في audit-report.json.`);
+      }
+      // ‏WL-574: حكمٌ مستقلٌّ إضافيّ — لا يُغيّرُ حكمَ evaluateAudit ولا رسالتَه.
+      const provenance = checkProvenance(audit, lockBytes, now);
+      if (provenance !== '') {
+        violations.push(`R3: تقريرُ التدقيقِ غيرُ موثوقِ المنشأ (‏WL-574): ${provenance}.`);
       }
     } catch {
       violations.push('R3: `audit-report.json` ليس JSON صالح.');
