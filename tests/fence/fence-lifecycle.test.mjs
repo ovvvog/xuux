@@ -1738,14 +1738,14 @@ describe(
           }),
       );
       const orig = root.revokeCredential.bind(root);
-      /** @type {Promise<{ credential: Record<string, unknown> }> | null} */
-      let lateBoot = null;
+      /** @type {{ boot: Promise<{ credential: Record<string, unknown> }> | null }} */
+      const lateHolder = { boot: null };
       // ‏مُشرِفٌ ثانٍ (‏أو أيُّ حاملٍ لـxf_root) يُصدِرُ اعتماداً بينَ الجردِ والتحقّق.
       root.revokeCredential = async (role, why) => {
         const n = await orig(role, why);
-        if (lateBoot === null) {
-          lateBoot = h.boot('beta', { connect: false });
-          await lateBoot;
+        if (lateHolder.boot === null) {
+          lateHolder.boot = h.boot('beta', { connect: false });
+          await lateHolder.boot;
         }
         return n;
       };
@@ -1754,16 +1754,17 @@ describe(
         [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
         'يتيمٌ ظهرَ بعدَ الكنس',
       );
-      assert.ok(lateBoot !== null, 'المُصدِرُ المتزامنُ عمل');
-      const late = String((await lateBoot).credential.role_name);
+      assert.ok(lateHolder.boot !== null, 'المُصدِرُ المتزامنُ عمل');
+      const late = String((await lateHolder.boot).credential.role_name);
       assert.ok(error instanceof FenceError);
+      const detail = /** @type {any} */ (error.detail);
       assert.deepEqual(
-        error.detail.appeared.map((/** @type {any} */ x) => x.role_name),
+        detail.appeared.map((/** @type {any} */ x) => x.role_name),
         [late],
         'الاعتمادُ المتأخّرُ مسمّى',
       );
       assert.deepEqual(
-        error.detail.revoked.map((/** @type {any} */ x) => x.role_name),
+        detail.revoked.map((/** @type {any} */ x) => x.role_name),
         [ra],
         'وما أُلغيَ قبلَه مُعلَن',
       );
@@ -1779,6 +1780,43 @@ describe(
         [late],
         'الكنسُ التالي يحسمُه',
       );
+    });
+
+    test('جلسةٌ حيّةٌ لاعتمادٍ أُلغيَ قبلَ الإقلاع (‏نجت من الإنهاء — صنفُ WL-552) ⇒ فشلٌ مغلق', async () => {
+      await clean();
+      const g = await h.boot('alpha');
+      const rg = String(g.credential.role_name);
+      assert.equal(await sessions([rg]), 1, 'جلسةُ العاملِ حيّة');
+      // ‏محاكاةُ «أُلغيَ ولم تمُت جلستُه» (‏إنهاءٌ انقضت مهلتُه على خادمٍ موقوف): الحالةُ REVOKED بلا إنهاء — بدورِ superuser
+      // ‏في صندوقِ الاختبار وحدَه.
+      await h.db.pool.query(
+        `UPDATE fence.credentials SET status = 'REVOKED', revoke_reason = 'wl577-pre-boot' WHERE role_name = $1`,
+        [rg],
+      );
+      const error = await rejectsWith(
+        () => h.root.revokeOrphanCredentials({ settleMs: 200, pollMs: 20 }),
+        [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
+        'جلسةُ دورٍ ملغىً قبلَ الإقلاعِ ما زالت حيّة',
+      );
+      assert.ok(error instanceof FenceError);
+      const detail = /** @type {any} */ (error.detail);
+      assert.deepEqual(detail.revoked, [], 'لا اعتمادَ ACTIVE أُلغيَ في هذا الكنس');
+      assert.deepEqual(detail.appeared, []);
+      assert.deepEqual(
+        detail.lingering.map((/** @type {any} */ x) => x.role),
+        [rg],
+        'الجلسةُ الباقيةُ مسمّاةٌ بدورِها من pg_stat_activity الحقيقيّ',
+      );
+      assert.equal(typeof detail.lingering[0].pid, 'number');
+      // ‏keep لا يُعفي إلّا ما يُبقيه المُشرِف: ما زالَ يفشلُ بلا إعفاءٍ صريح، وينجحُ بعدَ موتِ الجلسة.
+      await h.db.pool.query(
+        'SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usename = $1',
+        [rg],
+      );
+      assert.deepEqual(await h.root.revokeOrphanCredentials({ settleMs: 2000 }), {
+        revoked: [],
+        kept: [],
+      });
     });
 
     test('دورٌ غيرُ الجذر لا يكنس: السياديُّ يُرفَضُ في القاعدة ولا يُلغى شيء', async () => {

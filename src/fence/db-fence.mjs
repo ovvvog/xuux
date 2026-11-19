@@ -1197,7 +1197,8 @@ export class FenceRoot {
    * أحياءٌ يتركُ اعتماداتٍ ACTIVE لم يُصدِرها المُشرِفُ الحاليّ؛ إيجارُها يبقى صالحاً حتى ينقضيَ (‏≤ `lease_window_s`)
    * فيكتبُ عاملٌ لا يُراقبُه أحد. يُلغى هنا كلُّ اعتمادٍ ACTIVE ليس في `keep` (‏ما أصدرَه هذا المُشرِف؛ فارغٌ عندَ
    * الإقلاع) بـ`fence.revoke_credential` — NOLOGIN وإنهاءُ الجلساتِ ومحوُ الأثر — ثمّ يُعادُ الجردُ **وفشلٌ مغلق**:
-   * اعتمادٌ يتيمٌ ظهرَ بعدَ الكنس (‏مُصدِرٌ آخرُ بدورِ الجذرِ في الوقتِ نفسِه) أو جلسةٌ لدورٍ ملغىً بقيت حيّةً بعدَ
+   * اعتمادٌ يتيمٌ ظهرَ بعدَ الكنس (‏مُصدِرٌ آخرُ بدورِ الجذرِ في الوقتِ نفسِه) أو جلسةٌ لدورٍ ملغىً (‏في هذا الكنسِ أو
+   * لاعتمادٍ غيرِ ACTIVE قبلَه — جلسةٌ نجت من الإنهاء، صنفُ WL-552) بقيت حيّةً بعدَ
    * `settleMs` ⇒ `FENCE_ORPHAN_SWEEP_INCOMPLETE` بالتفاصيل، فلا يُطلِقُ المُشرِفُ عمّالاً فوقَ حالةٍ لم تُحسَم.
    * **الحدود:** الجردُ والإلغاءُ لا يُقفلانِ الإصدار — مُصدِرٌ متزامنٌ يُكشَفُ بإعادةِ الجردِ لا يُمنَع؛ والجلساتُ تُرى
    * في `pg_stat_activity` بالاسمِ وحدَه (‏ما يراه `xf_root`)؛ وما التزمَ قبلَ الإلغاءِ يبقى.
@@ -1250,15 +1251,18 @@ export class FenceRoot {
     let lingering;
     const deadline = Date.now() + settleMs;
     for (;;) {
-      lingering = roles.length
-        ? (
-            await this.one(
-              `SELECT coalesce(jsonb_agg(jsonb_build_object('role', usename, 'pid', pid) ORDER BY pid), '[]') AS r
-               FROM pg_stat_activity WHERE usename = ANY($1::text[])`,
-              [roles],
-            )
-          ).r
-        : [];
+      // ‏جلساتُ ما أُلغيَ هنا **وكلِّ** اعتمادٍ غيرِ ACTIVE (‏أُلغيَ أو انقضى قبلَ الإقلاع وبقيت جلستُه — صنفُ WL-552)
+      // خارجَ `keep`: المُشرِفُ لا يُطلِقُ فوقَ جلسةِ دورٍ مُسيَّجٍ لم تمُت.
+      lingering = (
+        await this.one(
+          `SELECT coalesce(jsonb_agg(jsonb_build_object('role', a.usename, 'pid', a.pid) ORDER BY a.pid), '[]') AS r
+           FROM pg_stat_activity a
+           WHERE NOT (a.usename = ANY($2::text[]))
+             AND (a.usename = ANY($1::text[])
+                  OR a.usename IN (SELECT role_name::text FROM fence.credentials WHERE status <> 'ACTIVE'))`,
+          [roles, [...keep]],
+        )
+      ).r;
       if (lingering.length === 0 || Date.now() >= deadline) break;
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }
