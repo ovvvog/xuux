@@ -10,6 +10,7 @@ import {
   cpSync,
   existsSync,
   readdirSync,
+  statSync,
 } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -1685,7 +1686,8 @@ const REAL_NPM = spawnSync('sh', ['-c', 'command -v npm'], { encoding: 'utf8' })
 /**
  * يُشغّلُ generate-sbom.mjs؛ و`shim` يضعُ `npm` وسيطاً أوّلَ PATH (‏في مجلّدٍ مؤقّتٍ خارجَ الجذر) يُعدّلُ القفلَ أو يفشلُ
  * قبلَ تمريرِ الأمرِ إلى npm الحقيقيّ — فلا خطّافَ اختباريّاً في شفرةِ الإنتاج.
- * @param {string} root @param {'' | 'append' | 'aba' | 'fail'} [shim]
+ * ‏`removed`: يُزيلُ القفلَ بعدَ npm (‏فيتعذّرُ فحصُه)، و`dirblock`: مجلّدٌ غيرُ فارغٍ مكانَ SBOM فيفشلُ rename.
+ * @param {string} root @param {'' | 'append' | 'aba' | 'fail' | 'removed' | 'dirblock'} [shim]
  */
 function runGenSbom(root, shim = '') {
   /** @type {NodeJS.ProcessEnv} */
@@ -1697,8 +1699,14 @@ function runGenSbom(root, shim = '') {
       append: "printf '\\n' >> package-lock.json",
       aba: "cp package-lock.json .lk && printf '\\n' >> package-lock.json && cp .lk package-lock.json && rm .lk",
       fail: "echo 'shim: npm sbom فشل' >&2; exit 1",
+      removed: '',
+      dirblock: 'mkdir -p sbom.cdx.json/x',
     }[shim];
-    writeFileSync(path.join(shimDir, 'npm'), `#!/bin/sh\n${step}\nexec "${REAL_NPM}" "$@"\n`, {
+    const run =
+      shim === 'removed'
+        ? `"${REAL_NPM}" "$@"; rc=$?; rm package-lock.json; exit $rc`
+        : `exec "${REAL_NPM}" "$@"`;
+    writeFileSync(path.join(shimDir, 'npm'), `#!/bin/sh\n${step}\n${run}\n`, {
       mode: 0o755,
     });
     env.PATH = `${shimDir}${path.delimiter}${env.PATH ?? ''}`;
@@ -1744,8 +1752,8 @@ test('WL-575: gen:sbom الحقيقيُّ يختمُ SBOM ببصمةِ القف�
   }
 });
 
-test('WL-575: تغيّرُ القفلِ أثناءَ التوليدِ (‏سطرٌ زائد، وABA) يُفشِلُ gen:sbom بلا SBOM — ولا السابقَ الصالح', () => {
-  for (const shim of /** @type {const} */ (['append', 'aba'])) {
+test('WL-575: تغيّرُ القفلِ أثناءَ التوليدِ (‏سطرٌ زائد، وABA، وقفلٌ يتعذّرُ فحصُه بعدَه) يُفشِلُ gen:sbom بلا SBOM — ولا السابقَ الصالح', () => {
+  for (const shim of /** @type {const} */ (['append', 'aba', 'removed'])) {
     const tmp = sbomRoot();
     try {
       writeFileSync(
@@ -1758,10 +1766,97 @@ test('WL-575: تغيّرُ القفلِ أثناءَ التوليدِ (‏سطر
       assert.match(r.stderr, /package-lock\.json تغيّرَ أثناءَ توليدِ SBOM/, shim);
       assert.doesNotMatch(r.stdout, /✅/, shim);
       assert.equal(existsSync(path.join(tmp, 'sbom.cdx.json')), false, `${shim}: لا SBOM`);
+      assert.deepEqual(
+        readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json')),
+        [],
+        shim,
+      );
       assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, shim);
     } finally {
       cleanup(tmp);
     }
+  }
+});
+
+// ‏WL-575: ABA كامل — يكتبُه وسيطُ npm بـNode: يحفظُ وقتَي القفلِ في ملفٍّ مرجعيٍّ (‏`touch -r`، بدقّةِ النانوثانية)،
+// ‏فيُغيّرُ البايتاتِ في مكانِها (‏inode نفسُه)، فيُعيدُ البايتاتِ الأصليّة، فيستعيدُ mtime الأصليَّ (‏`touch -m -r`)،
+// ‏ويسجّلُ stat ‏(bigint) قبلُ وبعدُ. لا يبقى فرقٌ إلّا ctimeNs — ولا تضبطُه واجهةُ مستخدم.
+const ABA_SHIM = `import { readFileSync, writeFileSync, statSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+const [lock, ref, report] = ['package-lock.json', '.lock-times', process.argv[2]];
+const st = (p) => { const s = statSync(p, { bigint: true });
+  return { dev: String(s.dev), ino: String(s.ino), size: String(s.size), mtimeNs: String(s.mtimeNs),
+    ctimeNs: String(s.ctimeNs), mtimeMs: s.mtimeNs / 1000000n }; };
+const before = st(lock);
+const bytes = readFileSync(lock);
+execFileSync('touch', ['-r', lock, ref]);
+const tick = () => { const t = Date.now(); while (Date.now() - t < 20); };
+tick();
+writeFileSync(lock, Buffer.concat([bytes, Buffer.from('\\n')]));
+const changedSize = String(statSync(lock, { bigint: true }).size);
+tick();
+writeFileSync(lock, bytes);
+execFileSync('touch', ['-m', '-r', ref, lock]);
+rmSync(ref);
+const after = st(lock);
+const ser = (o) => ({ ...o, mtimeMs: String(o.mtimeMs) });
+writeFileSync(report, JSON.stringify({ before: ser(before), after: ser(after), changedSize,
+  same: Buffer.compare(readFileSync(lock), bytes) === 0 }));
+`;
+
+test('WL-575: ABA كاملٌ أثناءَ التوليد — البايتاتُ والحجمُ وinode وmtime تعودُ كما كانت، وctimeNs يكشفُه فيفشلُ بلا SBOM', () => {
+  const tmp = sbomRoot();
+  const shimDir = `${tmp}-aba`;
+  const report = `${tmp}-aba.json`;
+  try {
+    const sbomPath = path.join(tmp, 'sbom.cdx.json');
+    writeFileSync(
+      sbomPath,
+      JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+    );
+    assert.equal(runGuard(tmp).ok, true, 'السابقُ صالحٌ قبلَ التشغيل');
+    mkdirSync(shimDir, { recursive: true });
+    writeFileSync(path.join(shimDir, 'aba.mjs'), ABA_SHIM);
+    writeFileSync(
+      path.join(shimDir, 'npm'),
+      `#!/bin/sh\n"${process.execPath}" "${path.join(shimDir, 'aba.mjs')}" "${report}" || exit 9\nexec "${REAL_NPM}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const r = spawnSync(process.execPath, [GEN_SBOM, '--root', tmp], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ''}` },
+      timeout: 60000,
+    });
+    const { before, after, changedSize, same } = JSON.parse(readFileSync(report, 'utf8'));
+    // ‏الوسيطُ غيّرَ فعلاً ثمّ أعاد: حجمٌ آخرُ في الوسط، ثمّ البايتاتُ نفسُها والحجمُ وinode والجهازُ وmtime بالنانوثانية.
+    assert.equal(changedSize, String(BigInt(before.size) + 1n), 'تغيّرَ المحتوى في الوسط');
+    assert.equal(same, true, 'البايتاتُ الأصليّةُ نفسُها');
+    for (const k of ['dev', 'ino', 'size', 'mtimeNs', 'mtimeMs']) {
+      assert.equal(after[k], before[k], `${k} عادَ كما كان`);
+    }
+    // ‏فالتوقيعُ السابقُ (‏size:mtimeMs:ino) والبصمةُ لا يريانِ شيئاً — وحدَه ctimeNs تقدّم.
+    assert.ok(
+      BigInt(after.ctimeNs) > BigInt(before.ctimeNs),
+      `ctimeNs ${before.ctimeNs} → ${after.ctimeNs}`,
+    );
+    const now = statSync(path.join(tmp, 'package-lock.json'), { bigint: true });
+    assert.equal(String(now.mtimeNs), before.mtimeNs, 'mtime الأصليُّ باقٍ بعدَ التوليد');
+    assert.equal(String(now.ctimeNs), after.ctimeNs, 'لا تغيّرَ آخرَ بعدَ الوسيط');
+    assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /package-lock\.json تغيّرَ أثناءَ توليدِ SBOM/);
+    assert.doesNotMatch(r.stdout, /✅/);
+    assert.equal(existsSync(sbomPath), false, 'لا SBOM — ولا السابقُ الصالح');
+    assert.deepEqual(
+      readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json')),
+      [],
+      'لا ملفَّ مؤقّتاً',
+    );
+    assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/);
+  } finally {
+    cleanup(tmp);
+    rmSync(shimDir, { recursive: true, force: true });
+    rmSync(report, { force: true });
   }
 });
 
@@ -1784,9 +1879,37 @@ test('WL-575: فشلُ التوليدِ (‏npm يفشل، أو شجرةٌ نا�
         false,
         `${label}: لا SBOM بعدَ الفشل`,
       );
+      assert.deepEqual(
+        readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json')),
+        [],
+        `${label}: لا مؤقّت`,
+      );
       assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, label);
     } finally {
       cleanup(tmp);
     }
+  }
+});
+
+test('WL-575: lockSignature — stat ‏bigint بالنانوثانية (‏dev وino وsize وmtimeNs وctimeNs)، ويرمي إن غابَ الملف؛ وفشلُ rename لا يتركُ مؤقّتاً', async () => {
+  const { lockSignature } = await import(GEN_SBOM);
+  const tmp = sbomRoot();
+  try {
+    const lock = path.join(tmp, 'package-lock.json');
+    const s = statSync(lock, { bigint: true });
+    assert.equal(lockSignature(lock), `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`);
+    assert.throws(() => lockSignature(path.join(tmp, 'غائب.json')), /ENOENT/);
+    const r = runGenSbom(tmp, 'dirblock');
+    assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
+    assert.match(r.stderr, /فشل توليد SBOM/);
+    assert.doesNotMatch(r.stdout, /✅/);
+    assert.deepEqual(
+      readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json.')),
+      [],
+      'لا مؤقّتَ بعدَ فشلِ rename',
+    );
+    assert.equal(runGuard(tmp).ok, false, 'لا SBOM مقبول');
+  } finally {
+    cleanup(tmp);
   }
 });
