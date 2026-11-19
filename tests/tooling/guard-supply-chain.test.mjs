@@ -64,6 +64,26 @@ function stamped(root, report, at = new Date()) {
   return { ...report, xuuxAudit: { version: 1, generatedAt: at.toISOString(), lockfileSha256 } };
 }
 
+/**
+ * WL-575: يختمُ SBOM ببصمةِ SHA-256 لبايتاتِ `package-lock.json` الخامِ في الجذر — خاصّيّةُ CycloneDX
+ * ‏`metadata.properties[{name: 'xuux:lockfileSha256'}]`، محسوبةً هنا مستقلّةً عن الشفرةِ المُختبَرة.
+ *
+ * @param {string} root @param {Record<string, any>} sbom
+ */
+function stampedSbom(root, sbom) {
+  const value = createHash('sha256')
+    .update(readFileSync(path.join(root, 'package-lock.json')))
+    .digest('hex');
+  const metadata = sbom.metadata ?? {};
+  return {
+    ...sbom,
+    metadata: {
+      ...metadata,
+      properties: [...(metadata.properties ?? []), { name: 'xuux:lockfileSha256', value }],
+    },
+  };
+}
+
 test('guard:supply-chain passes when all conditions are met', () => {
   const tmp = makeTempRoot();
   try {
@@ -89,11 +109,13 @@ test('guard:supply-chain passes when all conditions are met', () => {
     );
     writeFileSync(
       path.join(tmp, 'sbom.cdx.json'),
-      JSON.stringify({
-        bomFormat: 'CycloneDX',
-        specVersion: '1.4',
-        components: [{ name: 'pg', version: '8.23.0' }],
-      }),
+      JSON.stringify(
+        stampedSbom(tmp, {
+          bomFormat: 'CycloneDX',
+          specVersion: '1.4',
+          components: [{ name: 'pg', version: '8.23.0' }],
+        }),
+      ),
     );
     writeFileSync(
       path.join(tmp, 'audit-report.json'),
@@ -432,7 +454,7 @@ test('WL-557/WL-571: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّ
       );
       writeFileSync(
         path.join(tmp, 'sbom.cdx.json'),
-        JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'pg' }] }),
+        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
       );
       writeFileSync(
         path.join(tmp, 'audit-report.json'),
@@ -711,11 +733,13 @@ function floorRoot(packages) {
   );
   writeFileSync(
     path.join(tmp, 'sbom.cdx.json'),
-    JSON.stringify({
-      bomFormat: 'CycloneDX',
-      specVersion: '1.4',
-      components: [{ name: 'ajv', version: '8.20.0' }],
-    }),
+    JSON.stringify(
+      stampedSbom(tmp, {
+        bomFormat: 'CycloneDX',
+        specVersion: '1.4',
+        components: [{ name: 'ajv', version: '8.20.0' }],
+      }),
+    ),
   );
   writeFileSync(
     path.join(tmp, 'audit-report.json'),
@@ -1292,7 +1316,7 @@ function auditableRoot() {
   mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
   writeFileSync(
     path.join(tmp, 'sbom.cdx.json'),
-    JSON.stringify({ bomFormat: 'CycloneDX', components: [{ name: 'pg' }] }),
+    JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
   );
   writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
   return tmp;
@@ -1429,5 +1453,340 @@ test('WL-574: فشلُ التدقيقِ (‏سجلٌّ لا يُجيب، أو ث
     }
   } finally {
     await reg.close();
+  }
+});
+
+// ── WL-575: R2 كان يقبلُ أيَّ ملفِّ CycloneDX بمكوّنٍ واحدٍ — لا ربطَ بالقفلِ الحاليّ (‏مقيس: SBOM فيه `pg` وحدَه لقفلٍ بلا حزمٍ يمرّ).
+// ‏الآن: `metadata.properties` (‏مسارُ الامتدادِ القياسيُّ في CycloneDX) تحملُ خاصّيّةً واحدةً بالضبط `xuux:lockfileSha256`
+// ‏= SHA-256 لبايتاتِ `package-lock.json` الخامِ عندَ التوليد، مطابقةً للقفلِ الحاليّ تماماً. ──
+
+const GEN_SBOM = fileURLToPath(new URL('../../scripts/generate-sbom.mjs', import.meta.url));
+const UNBOUND = /R2: SBOM غيرُ مربوطٍ بالقفل/;
+
+/** جذرٌ صالحٌ لكلِّ القواعد عدا SBOM الذي يكتبُه المُستدعي. */
+function r2Root() {
+  const tmp = floorRoot({});
+  rmSync(path.join(tmp, 'sbom.cdx.json'), { force: true });
+  return tmp;
+}
+
+test('WL-575: R2 عبرَ CLI — SBOM مربوطٌ بالقفلِ يمرّ، وكلُّ ربطٍ غائبٍ أو مشوّهٍ أو مكرّرٍ أو لقفلٍ آخرَ يُرفَض', () => {
+  const tmp = r2Root();
+  try {
+    const base = {
+      bomFormat: 'CycloneDX',
+      specVersion: '1.5',
+      metadata: { timestamp: '2026-11-19T00:00:00.000Z', tools: [{ name: 'cli' }] },
+      components: [{ name: 'ajv', version: '8.20.0' }],
+    };
+    const good = stampedSbom(tmp, base);
+    const prop = good.metadata.properties[0];
+    const sha = prop.value;
+    const other = createHash('sha256').update('{}').digest('hex');
+    /** @param {any} properties */
+    const withProps = (properties) => ({ ...base, metadata: { ...base.metadata, properties } });
+    /** @type {Array<[string, any, boolean]>} */
+    const cases = [
+      ['مربوطٌ صالح', good, true],
+      ['مع خاصّيّاتٍ أخرى', withProps([{ name: 'cdx:x', value: 'y' }, prop]), true],
+      ['بلا metadata', { ...base, metadata: undefined }, false],
+      ['metadata null', { ...base, metadata: null }, false],
+      ['metadata مصفوفة', { ...base, metadata: [] }, false],
+      ['بلا properties', base, false],
+      ['properties كائن', withProps({ 'xuux:lockfileSha256': sha }), false],
+      ['properties null', withProps(null), false],
+      ['properties فارغة', withProps([]), false],
+      [
+        'الخاصّيّةُ في مكوّنٍ لا في metadata',
+        { ...base, components: [{ name: 'ajv', properties: [prop] }] },
+        false,
+      ],
+      [
+        'الخاصّيّةُ في metadata.component',
+        { ...base, metadata: { ...base.metadata, component: { properties: [prop] } } },
+        false,
+      ],
+      ['اسمٌ آخر', withProps([{ name: 'xuux:lockSha256', value: sha }]), false],
+      ['مكرّرةٌ بالقيمةِ نفسِها', withProps([prop, prop]), false],
+      ['مكرّرةٌ بقيمتين', withProps([prop, { name: prop.name, value: other }]), false],
+      ['عنصرٌ ليس كائناً', withProps(['xuux:lockfileSha256', prop]), false],
+      ['قيمةٌ غائبة', withProps([{ name: prop.name }]), false],
+      ['قيمةٌ رقم', withProps([{ name: prop.name, value: 0 }]), false],
+      ['قيمةٌ بأحرفٍ كبيرة', withProps([{ name: prop.name, value: sha.toUpperCase() }]), false],
+      ['قيمةٌ مقصوصة', withProps([{ name: prop.name, value: sha.slice(1) }]), false],
+      ['قيمةٌ بمسافة', withProps([{ name: prop.name, value: ` ${sha}` }]), false],
+      ['بصمةُ قفلٍ آخر', withProps([{ name: prop.name, value: other }]), false],
+    ];
+    for (const [label, sbom, ok] of cases) {
+      writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify(sbom));
+      const r = runGuard(tmp);
+      assert.equal(r.ok, ok, `${label}: ${r.stderr || r.output}`);
+      if (!ok) assert.match(r.stderr ?? '', UNBOUND, label);
+      else assert.doesNotMatch(`${r.stderr ?? ''}${r.output}`, /R2/, label);
+    }
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-575: ربطُ SBOM لبايتاتِ القفلِ الخام — إعادةُ تسلسلٍ أو سطرٌ زائدٌ بعدَ الختمِ يُرفَض، وشروطُ R2 السابقةُ قائمة', () => {
+  const tmp = r2Root();
+  try {
+    const lockPath = path.join(tmp, 'package-lock.json');
+    const sbomPath = path.join(tmp, 'sbom.cdx.json');
+    const sbom = { bomFormat: 'CycloneDX', components: [{ name: 'ajv' }] };
+    writeFileSync(sbomPath, JSON.stringify(stampedSbom(tmp, sbom)));
+    assert.equal(runGuard(tmp).ok, true);
+    // ‏الشروطُ السابقةُ لا تُرخى بالربط: صيغةٌ أخرى أو بلا مكوّناتٍ ⇒ رسالتُها كما هي.
+    writeFileSync(sbomPath, JSON.stringify(stampedSbom(tmp, { ...sbom, bomFormat: 'SPDX' })));
+    assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` ليس بصيغة CycloneDX/);
+    writeFileSync(sbomPath, JSON.stringify(stampedSbom(tmp, { ...sbom, components: [] })));
+    assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` بلا مكوّناتٍ/);
+    writeFileSync(sbomPath, JSON.stringify(stampedSbom(tmp, sbom)));
+    const original = readFileSync(lockPath, 'utf8');
+    for (const [label, bytes] of /** @type {Array<[string, string]>} */ ([
+      ['إعادةُ تسلسلٍ بمسافات', JSON.stringify(JSON.parse(original), null, 2)],
+      ['سطرٌ أخيرٌ زائد', `${original}\n`],
+    ])) {
+      writeFileSync(lockPath, bytes);
+      // ‏تقريرُ التدقيقِ يُعادُ ختمُه للقفلِ الجديدِ فيبقى R2 وحدَه سببَ الرفض.
+      writeFileSync(
+        path.join(tmp, 'audit-report.json'),
+        JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+      );
+      const r = runGuard(tmp);
+      assert.equal(r.ok, false, label);
+      assert.match(r.stderr ?? '', UNBOUND, label);
+      assert.doesNotMatch(r.stderr ?? '', /R3/, label);
+    }
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-575: checkSbomBinding وstampSbom — الأسبابُ لكلِّ شرطٍ وحدَه، والختمُ لا يمسُّ بقيّةَ SBOM', async () => {
+  const m = await import('../../scripts/generate-sbom.mjs');
+  assert.equal(m.SBOM_LOCK_PROPERTY, 'xuux:lockfileSha256');
+  const lockBytes = Buffer.from('{\n  "lockfileVersion": 3,\n  "packages": {}\n}\n');
+  const sha = createHash('sha256').update(lockBytes).digest('hex');
+  /** @param {any} properties */
+  const sb = (properties) => ({
+    bomFormat: 'CycloneDX',
+    metadata: { properties },
+    components: [{}],
+  });
+  const ok = sb([{ name: 'xuux:lockfileSha256', value: sha }]);
+  assert.equal(m.checkSbomBinding(ok, lockBytes), '');
+  assert.match(m.checkSbomBinding(ok, null), /package-lock\.json/);
+  assert.match(m.checkSbomBinding(ok, Buffer.from('{}')), /لا تطابقُ/);
+  assert.match(m.checkSbomBinding(sb([]), lockBytes), /غائبة/);
+  assert.match(
+    m.checkSbomBinding(sb([7, ...ok.metadata.properties]), lockBytes),
+    /عنصرٌ ليس كائناً/,
+  );
+  assert.match(
+    m.checkSbomBinding(sb([{ value: 'x' }, ...ok.metadata.properties]), lockBytes),
+    /عنصرٌ ليس كائناً/,
+  );
+  const dup = sb([
+    { name: 'xuux:lockfileSha256', value: sha },
+    { name: 'xuux:lockfileSha256', value: sha },
+  ]);
+  assert.match(m.checkSbomBinding(dup, lockBytes), /مكرّرة/);
+  for (const bad of ['A'.repeat(64), sha.toUpperCase(), `${sha}0`, sha.slice(1), 7, null]) {
+    assert.match(
+      m.checkSbomBinding(sb([{ name: 'xuux:lockfileSha256', value: bad }]), null),
+      /ليست SHA-256 بـ 64/,
+      String(bad),
+    );
+  }
+  for (const bad of [
+    null,
+    [],
+    'x',
+    1,
+    {},
+    { metadata: null },
+    { metadata: [] },
+    sb(null),
+    sb({}),
+  ]) {
+    assert.notEqual(m.checkSbomBinding(bad, lockBytes), '', JSON.stringify(bad));
+  }
+  /** @type {any} */
+  const npmLike = {
+    bomFormat: 'CycloneDX',
+    specVersion: '1.5',
+    metadata: { timestamp: 't', tools: [{ name: 'cli' }], component: { name: 'c' } },
+    components: [{ name: 'pg' }],
+    dependencies: [],
+  };
+  const s = m.stampSbom(npmLike, lockBytes);
+  assert.deepEqual(s, {
+    ...npmLike,
+    metadata: { ...npmLike.metadata, properties: [{ name: 'xuux:lockfileSha256', value: sha }] },
+  });
+  assert.equal(npmLike.metadata.properties, undefined, 'الأصلُ لم يُعدَّل');
+  assert.equal(m.checkSbomBinding(s, lockBytes), '');
+  // ‏خاصّيّاتٌ سابقةٌ تبقى؛ وخاصّيّةُ ربطٍ سابقةٌ (‏ليست من npm) تُرفَضُ لا تُستبدَل.
+  const pre = {
+    ...npmLike,
+    metadata: { ...npmLike.metadata, properties: [{ name: 'cdx:a', value: 'b' }] },
+  };
+  assert.deepEqual(m.stampSbom(pre, lockBytes).metadata.properties, [
+    { name: 'cdx:a', value: 'b' },
+    { name: 'xuux:lockfileSha256', value: sha },
+  ]);
+  assert.throws(() => m.stampSbom(ok, lockBytes), /xuux:lockfileSha256/);
+});
+
+// ── WL-575: دورةُ التوليدِ عبرَ CLI الحقيقيّ — `npm sbom` على شجرةٍ مثبّتةٍ محلّيّاً (‏بلا شبكة). ──
+
+/** جذرٌ بـ`pg` مثبّتةٍ في node_modules وقفلٍ يطابقُها، وتقريرِ تدقيقٍ مختوم — صالحٌ لكلِّ القواعد عدا SBOM. */
+function sbomRoot() {
+  const tmp = makeTempRoot();
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({ name: 't', version: '1.0.0', private: true, dependencies: { pg: '8.23.0' } }),
+  );
+  writeFileSync(
+    path.join(tmp, 'package-lock.json'),
+    // ‏بتنسيقِ npm (‏مسافتان وسطرٌ أخير) — فبصمةُ JSON المعادِ تسلسلُه تختلفُ عن بصمةِ البايتاتِ الخام.
+    `${JSON.stringify(
+      {
+        name: 't',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': { name: 't', version: '1.0.0', dependencies: { pg: '8.23.0' } },
+          'node_modules/pg': { version: '8.23.0' },
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  mkdirSync(path.join(tmp, 'node_modules', 'pg'), { recursive: true });
+  writeFileSync(
+    path.join(tmp, 'node_modules', 'pg', 'package.json'),
+    JSON.stringify({ name: 'pg', version: '8.23.0' }),
+  );
+  writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+  writeFileSync(
+    path.join(tmp, 'audit-report.json'),
+    JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+  );
+  return tmp;
+}
+
+const REAL_NPM = spawnSync('sh', ['-c', 'command -v npm'], { encoding: 'utf8' }).stdout.trim();
+
+/**
+ * يُشغّلُ generate-sbom.mjs؛ و`shim` يضعُ `npm` وسيطاً أوّلَ PATH (‏في مجلّدٍ مؤقّتٍ خارجَ الجذر) يُعدّلُ القفلَ أو يفشلُ
+ * قبلَ تمريرِ الأمرِ إلى npm الحقيقيّ — فلا خطّافَ اختباريّاً في شفرةِ الإنتاج.
+ * @param {string} root @param {'' | 'append' | 'aba' | 'fail'} [shim]
+ */
+function runGenSbom(root, shim = '') {
+  /** @type {NodeJS.ProcessEnv} */
+  const env = { ...process.env };
+  const shimDir = `${root}-shim`;
+  if (shim !== '') {
+    mkdirSync(shimDir, { recursive: true });
+    const step = {
+      append: "printf '\\n' >> package-lock.json",
+      aba: "cp package-lock.json .lk && printf '\\n' >> package-lock.json && cp .lk package-lock.json && rm .lk",
+      fail: "echo 'shim: npm sbom فشل' >&2; exit 1",
+    }[shim];
+    writeFileSync(path.join(shimDir, 'npm'), `#!/bin/sh\n${step}\nexec "${REAL_NPM}" "$@"\n`, {
+      mode: 0o755,
+    });
+    env.PATH = `${shimDir}${path.delimiter}${env.PATH ?? ''}`;
+  }
+  try {
+    return spawnSync(process.execPath, [GEN_SBOM, '--root', root], {
+      cwd: root,
+      encoding: 'utf8',
+      env,
+      timeout: 60000,
+    });
+  } finally {
+    rmSync(shimDir, { recursive: true, force: true });
+  }
+}
+
+test('WL-575: gen:sbom الحقيقيُّ يختمُ SBOM ببصمةِ القفلِ الخام — ويبقى ما أنتجَه npm، ويقبلُه R2', () => {
+  const tmp = sbomRoot();
+  try {
+    const r = runGenSbom(tmp);
+    assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`);
+    const sbom = JSON.parse(readFileSync(path.join(tmp, 'sbom.cdx.json'), 'utf8'));
+    assert.equal(sbom.bomFormat, 'CycloneDX');
+    assert.deepEqual(
+      sbom.components.map((/** @type {any} */ c) => `${c.name}@${c.version}`),
+      ['pg@8.23.0'],
+    );
+    assert.equal(typeof sbom.metadata.timestamp, 'string', 'حقولُ npm باقية');
+    assert.ok(Array.isArray(sbom.metadata.tools));
+    const sha = createHash('sha256')
+      .update(readFileSync(path.join(tmp, 'package-lock.json')))
+      .digest('hex');
+    assert.deepEqual(sbom.metadata.properties, [{ name: 'xuux:lockfileSha256', value: sha }]);
+    assert.equal(
+      readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json.')).length,
+      0,
+      'لا ملفَّ مؤقّتاً',
+    );
+    const g = runGuard(tmp);
+    assert.equal(g.ok, true, g.stderr || g.output);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-575: تغيّرُ القفلِ أثناءَ التوليدِ (‏سطرٌ زائد، وABA) يُفشِلُ gen:sbom بلا SBOM — ولا السابقَ الصالح', () => {
+  for (const shim of /** @type {const} */ (['append', 'aba'])) {
+    const tmp = sbomRoot();
+    try {
+      writeFileSync(
+        path.join(tmp, 'sbom.cdx.json'),
+        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+      );
+      assert.equal(runGuard(tmp).ok, true, `${shim}: السابقُ صالحٌ قبلَ التشغيل`);
+      const r = runGenSbom(tmp, shim);
+      assert.equal(r.status, 1, `${shim}: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stderr, /package-lock\.json تغيّرَ أثناءَ توليدِ SBOM/, shim);
+      assert.doesNotMatch(r.stdout, /✅/, shim);
+      assert.equal(existsSync(path.join(tmp, 'sbom.cdx.json')), false, `${shim}: لا SBOM`);
+      assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, shim);
+    } finally {
+      cleanup(tmp);
+    }
+  }
+});
+
+test('WL-575: فشلُ التوليدِ (‏npm يفشل، أو شجرةٌ ناقصةٌ عن القفل) مع SBOM سابقٍ صالح — يُزالُ السابقُ فلا يقبلُه R2', () => {
+  for (const label of /** @type {const} */ (['fail', 'missing'])) {
+    const tmp = sbomRoot();
+    try {
+      writeFileSync(
+        path.join(tmp, 'sbom.cdx.json'),
+        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+      );
+      assert.equal(runGuard(tmp).ok, true, `${label}: السابقُ صالحٌ قبلَ التشغيل`);
+      // ‏«missing»: npm sbom الحقيقيُّ يرفضُ شجرةً تنقصُها حزمةٌ في القفل (‏ESBOMPROBLEMS).
+      if (label === 'missing') rmSync(path.join(tmp, 'node_modules', 'pg'), { recursive: true });
+      const r = runGenSbom(tmp, label === 'fail' ? 'fail' : '');
+      assert.equal(r.status, 1, `${label}: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stderr, /فشل توليد SBOM/, label);
+      assert.equal(
+        existsSync(path.join(tmp, 'sbom.cdx.json')),
+        false,
+        `${label}: لا SBOM بعدَ الفشل`,
+      );
+      assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, label);
+    } finally {
+      cleanup(tmp);
+    }
   }
 });
