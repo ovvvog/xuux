@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '../../');
@@ -1911,5 +1911,109 @@ test('WL-575: lockSignature — stat ‏bigint بالنانوثانية (‏dev 
     assert.equal(runGuard(tmp).ok, false, 'لا SBOM مقبول');
   } finally {
     cleanup(tmp);
+  }
+});
+
+// ‏WL-575: سباقُ مرحلةِ المؤقّت — وحدةٌ تُحمَّلُ بـ`--import` (‏خارجَ شفرةِ الإنتاج) تلفُّ `fs.writeFileSync` و`fs.renameSync`
+// ‏(‏`syncBuiltinESMExports` تُحدِّثُ الاستيرادَ المسمّى): بعدَ اكتمالِ كتابةِ `sbom.cdx.json.<pid>.tmp` وإغلاقِه — أي بعدَ
+// ‏نجاحِ `npm sbom` الحقيقيّ وفحصِ ما بعدَه — تُغيّرُ القفل، وتسجّلُ أنَّ المؤقّتَ كُتِبَ مختوماً وهل نُفِّذَ rename. حتميٌّ بلا توقيت.
+const TMP_RACE_PRELOAD = `import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const [mode, report] = [process.env.XUUX_TMP_RACE, process.env.XUUX_TMP_RACE_REPORT];
+const write = fs.writeFileSync;
+const rename = fs.renameSync;
+const log = { hooked: false, renamed: false };
+const save = () => write(report, JSON.stringify(log));
+fs.writeFileSync = function (p, ...rest) {
+  write(p, ...rest);
+  if (typeof p !== 'string' || !/sbom\\.cdx\\.json\\.\\d+\\.tmp$/.test(p) || log.hooked) return;
+  log.hooked = true;
+  const body = JSON.parse(fs.readFileSync(p, 'utf8'));
+  log.tmpStamped = body.metadata.properties.filter((x) => x.name === 'xuux:lockfileSha256').length;
+  const lock = 'package-lock.json';
+  const st = () => { const s = fs.statSync(lock, { bigint: true });
+    return [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].map(String); };
+  if (mode === 'removed') {
+    fs.rmSync(lock);
+  } else {
+    const bytes = fs.readFileSync(lock);
+    log.before = st();
+    if (mode === 'aba') execFileSync('touch', ['-r', lock, '.lock-times']);
+    write(lock, Buffer.concat([bytes, Buffer.from('\\\\n')]));
+    if (mode === 'aba') {
+      write(lock, bytes);
+      execFileSync('touch', ['-m', '-r', '.lock-times', lock]);
+      fs.rmSync('.lock-times');
+    }
+    log.after = st();
+    log.same = Buffer.compare(fs.readFileSync(lock), bytes) === 0;
+  }
+  save();
+};
+fs.renameSync = function (...args) {
+  log.renamed = true;
+  save();
+  return rename(...args);
+};
+syncBuiltinESMExports();
+`;
+
+test('WL-575: تغيّرُ القفلِ بعدَ كتابةِ المؤقّتِ وقبلَ rename (‏سطرٌ زائد، وABA كامل، وإزالة) — يكشفُه الفحصُ النهائيُّ فلا rename ولا SBOM ولا مؤقّت', () => {
+  for (const mode of /** @type {const} */ (['append', 'aba', 'removed'])) {
+    const tmp = sbomRoot();
+    const preDir = `${tmp}-pre`;
+    const report = `${tmp}-pre.json`;
+    try {
+      const sbomPath = path.join(tmp, 'sbom.cdx.json');
+      writeFileSync(
+        sbomPath,
+        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+      );
+      assert.equal(runGuard(tmp).ok, true, `${mode}: السابقُ صالحٌ قبلَ التشغيل`);
+      mkdirSync(preDir, { recursive: true });
+      const pre = path.join(preDir, 'tmp-race.mjs');
+      writeFileSync(pre, TMP_RACE_PRELOAD);
+      const r = spawnSync(
+        process.execPath,
+        ['--import', pathToFileURL(pre).href, GEN_SBOM, '--root', tmp],
+        {
+          cwd: tmp,
+          encoding: 'utf8',
+          env: { ...process.env, XUUX_TMP_RACE: mode, XUUX_TMP_RACE_REPORT: report },
+          timeout: 60000,
+        },
+      );
+      const log = JSON.parse(readFileSync(report, 'utf8'));
+      // ‏npm sbom الحقيقيُّ نجحَ وفحصُ ما بعدَه مرّ (‏وإلّا لما كُتِبَ المؤقّت)، والمؤقّتُ كُتِبَ مختوماً مرّةً واحدة.
+      assert.equal(log.hooked, true, `${mode}: كُتِبَ المؤقّت`);
+      assert.equal(log.tmpStamped, 1, `${mode}: المؤقّتُ مختوم`);
+      if (mode === 'aba') {
+        assert.equal(log.same, true, 'البايتاتُ الأصليّةُ نفسُها');
+        assert.deepEqual(
+          log.after.slice(0, 4),
+          log.before.slice(0, 4),
+          'dev/ino/size/mtimeNs عادت',
+        );
+        assert.ok(BigInt(log.after[4]) > BigInt(log.before[4]), 'ctimeNs تقدّم');
+      }
+      if (mode === 'append') assert.notEqual(log.after[2], log.before[2], 'الحجمُ تغيّر');
+      assert.equal(log.renamed, false, `${mode}: لا rename`);
+      assert.equal(r.status, 1, `${mode}: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stderr, /package-lock\.json تغيّرَ أثناءَ كتابةِ SBOM/, mode);
+      assert.doesNotMatch(r.stderr, /تغيّرَ أثناءَ توليدِ SBOM/, `${mode}: فحصُ ما بعدَ npm مرّ`);
+      assert.doesNotMatch(r.stdout, /✅/, mode);
+      assert.equal(existsSync(sbomPath), false, `${mode}: لا SBOM — ولا السابقُ الصالح`);
+      assert.deepEqual(
+        readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json')),
+        [],
+        `${mode}: لا مؤقّت`,
+      );
+      assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, mode);
+    } finally {
+      cleanup(tmp);
+      rmSync(preDir, { recursive: true, force: true });
+      rmSync(report, { force: true });
+    }
   }
 });
