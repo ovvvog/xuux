@@ -2814,7 +2814,7 @@ test('WL-576: parseSri — صارمٌ: الطولُ لكلِّ خوارزميّ�
   const hex = Buffer.from(GOOD512, 'base64').toString('hex');
   assert.equal(GOOD512.length, 88);
   assert.deepEqual(parseSri(`sha512-${GOOD512}`), { hash: `SHA-512:${hex}` });
-  // ‏رموزٌ متعدّدة: يُؤخَذُ أوّلُ رمزِ sha512 (‏npm sbom نفسُه لا يُنتجُ هذه القيمةَ لقفلٍ متعدّدِ الرموز — ssri 10 يبني Hash من النصِّ كلِّه — فيُرفَضُ المكوّنُ مغلقاً).
+  // ‏رموزٌ متعدّدة: يُؤخَذُ أوّلُ رمزِ sha512. ssri 10 في npm sbom يأخذُ خوارزميّةَ الرمزِ الأوّل: sha512 أوّلاً ⇒ البصمةُ نفسُها فيُقبَل؛ غيرُها أوّلاً ⇒ يُرفَضُ المكوّنُ مغلقاً.
   const g1 = createHash('sha1').update('x').digest('base64');
   const other = createHash('sha512').update('other').digest('base64');
   assert.deepEqual(parseSri(`sha1-${g1} sha512-${GOOD512}`), { hash: `SHA-512:${hex}` });
