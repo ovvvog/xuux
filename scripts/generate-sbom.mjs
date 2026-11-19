@@ -3,27 +3,164 @@
 //
 // يولِّد قائمة مكوّنات البرمجيات (SBOM) بصيغة CycloneDX باستخدام `npm sbom`.
 // يُشغَّل في CI قبل حاجز سلسلة التوريد، ويُنتج `sbom.cdx.json` في جذر المستودع.
+// ‏WL-575: يُزيلُ SBOM السابقَ قبلَ التوليد، ويختمُ الجديدَ ببصمةِ SHA-256 لبايتاتِ `package-lock.json` الخامِ في
+// ‏`metadata.properties` (‏`xuux:lockfileSha256` — مسارُ الامتدادِ القياسيُّ في CycloneDX)، ويكتبُه ذرّيّاً (‏مؤقّتٌ ثمّ rename)،
+// ‏ويفشلُ بلا SBOM إن تغيّرَ القفلُ أثناءَ التوليد (‏بصمةً أو توقيعَ stat ‏bigint: dev/ino/size/mtimeNs/ctimeNs — فلا يُخفيه ABA)؛ و R2 في guard:supply-chain يرفضُ SBOM غيرَ مربوطٍ بالقفلِ الحاليّ.
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 
-const rootIndex = process.argv.indexOf('--root');
-const repoRoot = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
+import { lockDigest } from './audit-check.mjs';
 
-console.log('═══ توليد SBOM (M11.02) ═══');
+/** WL-575: اسمُ خاصّيّةِ الربطِ في `metadata.properties`. */
+export const SBOM_LOCK_PROPERTY = 'xuux:lockfileSha256';
+const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-try {
-  const output = execSync('npm sbom --sbom-format cyclonedx --json', {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  const sbom = JSON.parse(output);
-  const outPath = `${repoRoot}/sbom.cdx.json`;
-  writeFileSync(outPath, JSON.stringify(sbom, null, 2) + '\n');
-  console.log(`✅ SBOM مُولَّدٌ: ${outPath} (${sbom.components?.length ?? 0} مكوّن)`);
-} catch (error) {
-  console.error('⛔ فشل توليد SBOM:', error instanceof Error ? error.message : String(error));
-  process.exit(1);
+/**
+ * WL-575: توقيعُ ملفِّ القفل — stat بـbigint: الجهازُ وinode والحجمُ وmtime وctime بالنانوثانية.
+ * ‏ctime لا تضبطُه واجهةُ مستخدم (‏utimes تضبطُ atime/mtime وحدَهما)، فإعادةُ البايتاتِ ووقتِ التعديلِ الأصليّين (‏ABA) لا تُخفي
+ * ‏تغيّراً وقعَ بينَ قراءتين — في حدودِ دقّةِ ساعةِ نظامِ الملفّات. يرمي إن تعذّرَ الفحص.
+ * @param {string} filePath @returns {string}
+ */
+export function lockSignature(filePath) {
+  const s = statSync(filePath, { bigint: true });
+  return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`;
+}
+
+/**
+ * WL-575: عيّنةٌ متماسكةٌ من القفل — stat ‏(‏bigint) ثمّ قراءةُ البايتاتِ الخام ثمّ stat ثانٍ؛ اختلافُ التوقيعين ⇒ يرمي (‏تغيّرٌ أثناءَ
+ * ‏القراءة، ومنه ABA يُعيدُ البايتاتِ وmtime فلا يُرى إلّا في ctimeNs). البصمةُ للبايتاتِ المقروءةِ فعلاً بينَ التوقيعين المتطابقين.
+ * ‏تعذّرُ stat أو القراءةِ يرمي كذلك. لا تعني العيّنةُ أنَّ القفلَ لن يتغيّرَ بعدَها.
+ * @param {string} lockPath @returns {{ signature: string, digest: string, bytes: Buffer }}
+ */
+export function readStableLock(lockPath) {
+  const signature = lockSignature(lockPath);
+  const bytes = readFileSync(lockPath);
+  if (lockSignature(lockPath) !== signature) {
+    throw new Error('عيّنةُ القفلِ غيرُ مستقرّة: package-lock.json تغيّرَ أثناءَ قراءتِه');
+  }
+  return { signature, digest: lockDigest(bytes), bytes };
+}
+
+/**
+ * WL-575: هل القفلُ هو نفسُه الآن؟ عيّنةٌ متماسكةٌ (‏`readStableLock`) توقيعُها وبصمتُها مساويان لخطِّ الأساس؛ عيّنةٌ غيرُ
+ * ‏مستقرّةٍ أو تعذّرُ الفحصِ أو القراءة ⇒ false (‏فشلٌ مغلق).
+ * @param {string} lockPath @param {{ signature: string, digest: string }} baseline عيّنةُ ما قبلَ `npm sbom`
+ * @returns {boolean}
+ */
+function lockUnchanged(lockPath, baseline) {
+  try {
+    const now = readStableLock(lockPath);
+    return now.signature === baseline.signature && now.digest === baseline.digest;
+  } catch {
+    return false;
+  }
+}
+
+/** @param {unknown} x @returns {x is Record<string, any>} */
+const isObj = (x) => typeof x === 'object' && x !== null && !Array.isArray(x);
+
+/**
+ * WL-575: يُضيفُ خاصّيّةَ الربطِ إلى `metadata.properties` دونَ مسِّ بقيّةِ SBOM (‏ولا الأصل)؛ ويرمي إن وُجدَت سابقاً.
+ * @param {Record<string, any>} sbom ناتجُ `npm sbom` @param {Buffer} lockBytes بايتاتُ القفلِ الذي وُلِّدَ عليه
+ */
+export function stampSbom(sbom, lockBytes) {
+  const metadata = isObj(sbom.metadata) ? sbom.metadata : {};
+  const properties = Array.isArray(metadata.properties) ? metadata.properties : [];
+  if (properties.some((p) => isObj(p) && p.name === SBOM_LOCK_PROPERTY)) {
+    throw new Error(`SBOM يحملُ ${SBOM_LOCK_PROPERTY} قبلَ الختم`);
+  }
+  return {
+    ...sbom,
+    metadata: {
+      ...metadata,
+      properties: [...properties, { name: SBOM_LOCK_PROPERTY, value: lockDigest(lockBytes) }],
+    },
+  };
+}
+
+/**
+ * WL-575: هل SBOM مربوطٌ بالقفلِ الحاليّ؟ '' أو سببُ الرفض. خاصّيّةٌ واحدةٌ بالضبطِ في `metadata.properties`.
+ * @param {any} sbom @param {Buffer | null} lockBytes بايتاتُ `package-lock.json` الحاليّ (‏null إن غاب)
+ * @returns {string}
+ */
+export function checkSbomBinding(sbom, lockBytes) {
+  if (!isObj(sbom)) return 'SBOM ليس كائناً';
+  if (!isObj(sbom.metadata)) return '`metadata` غائبةٌ أو ليست كائناً';
+  const properties = sbom.metadata.properties;
+  if (!Array.isArray(properties)) return '`metadata.properties` غائبةٌ أو ليست مصفوفة';
+  if (!properties.every((p) => isObj(p) && typeof p.name === 'string')) {
+    return '`metadata.properties` فيها عنصرٌ ليس كائناً باسمٍ نصّيّ';
+  }
+  const hits = properties.filter((p) => isObj(p) && p.name === SBOM_LOCK_PROPERTY);
+  if (hits.length === 0) return `خاصّيّةُ \`${SBOM_LOCK_PROPERTY}\` غائبة`;
+  if (hits.length > 1) return `خاصّيّةُ \`${SBOM_LOCK_PROPERTY}\` مكرّرة`;
+  const value = hits[0]?.value;
+  if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
+    return `قيمةُ \`${SBOM_LOCK_PROPERTY}\` ليست SHA-256 بـ 64 حرفاً hex صغيراً`;
+  }
+  if (lockBytes === null) return '`package-lock.json` غائبٌ فلا يُطابَق';
+  if (value !== lockDigest(lockBytes)) {
+    return 'بصمةُ SBOM لا تطابقُ `package-lock.json` الحاليّ (‏وُلِّدَ على قفلٍ آخر)';
+  }
+  return '';
+}
+
+function main() {
+  const rootIndex = process.argv.indexOf('--root');
+  const repoRoot =
+    rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
+
+  console.log('═══ توليد SBOM (M11.02) ═══');
+
+  const outPath = path.join(repoRoot, 'sbom.cdx.json');
+  const tmpPath = `${outPath}.${process.pid}.tmp`;
+  try {
+    // ‏WL-575: أبطِلِ السابقَ قبلَ أيِّ شيء — فشلٌ لاحقٌ لا يتركُ SBOM قديماً يبدو صالحاً.
+    rmSync(outPath, { force: true });
+    const lockPath = path.join(repoRoot, 'package-lock.json');
+    // ‏WL-575: خطُّ الأساسِ عيّنةٌ متماسكةٌ أيضاً — غيرُ المستقرّةِ ترمي ⇒ «فشل توليد SBOM» بلا SBOM.
+    const baseline = readStableLock(lockPath);
+    const output = execSync('npm sbom --sbom-format cyclonedx --json', {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const sbom = JSON.parse(output);
+    // ‏WL-575: القفلُ قبلَ التوليدِ هو نفسُه بعدَه (‏بصمةً وتوقيعَ stat كاملاً) — وإلا فالـSBOM لا يُنسَبُ لقفل؛
+    // ‏وتعذّرُ الفحصِ أو القراءةِ بعدَه تغيّرٌ (‏فشلٌ مغلق). الفحصُ الأوّلُ من اثنين مستقلّين.
+    if (!lockUnchanged(lockPath, baseline)) {
+      console.error(
+        '⛔ package-lock.json تغيّرَ أثناءَ توليدِ SBOM — لا SBOM. أعِدْ `npm run gen:sbom` بعدَ استقرارِ القفل.',
+      );
+      process.exit(1);
+    }
+    writeFileSync(tmpPath, JSON.stringify(stampSbom(sbom, baseline.bytes), null, 2) + '\n');
+    // ‏WL-575: الفحصُ الثاني — بعدَ اكتمالِ المؤقّتِ وإغلاقِه وقبلَ rename مباشرةً (‏لا عملَ بينهما): تغيّرٌ بعدَ الفحصِ الأوّل
+    // ‏(‏أثناءَ الختمِ أو الكتابة) ⇒ المؤقّتُ يُزالُ ولا يُعتمَد. يُضيِّقُ نافذةَ TOCTOU ولا يُلغيها: القفلُ وSBOM ليسا معاملةً واحدة.
+    if (!lockUnchanged(lockPath, baseline)) {
+      rmSync(tmpPath, { force: true });
+      console.error(
+        '⛔ package-lock.json تغيّرَ أثناءَ كتابةِ SBOM — لا SBOM. أعِدْ `npm run gen:sbom` بعدَ استقرارِ القفل.',
+      );
+      process.exit(1);
+    }
+    renameSync(tmpPath, outPath);
+    console.log(`✅ SBOM مُولَّدٌ: ${outPath} (${sbom.components?.length ?? 0} مكوّن)`);
+  } catch (error) {
+    // ‏WL-575: لا يبقى مؤقّتٌ نصفُ مكتوبٍ بعدَ فشلٍ في الكتابةِ أو rename.
+    rmSync(tmpPath, { force: true });
+    console.error('⛔ فشل توليد SBOM:', error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+if (
+  process.argv[1] !== undefined &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  main();
 }

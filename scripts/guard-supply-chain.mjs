@@ -10,7 +10,8 @@
 // فالحاجز يتحقّق من سبعة شروط:
 //   R0: `package-lock.json` موجود وصالح.
 //   R1: كلُّ تبعيّات `package.json` مثبَّتةٌ بإصدارٍ دقيقٍ (لا `^` ولا `~`).
-//   R2: ملفُّ SBOM (`sbom.cdx.json`) موجودٌ وصالح.
+//   R2: ملفُّ SBOM (`sbom.cdx.json`) موجودٌ وصالح، ومربوطٌ بالقفلِ الحاليّ (‏WL-575): خاصّيّةُ
+//       `xuux:lockfileSha256` في `metadata.properties` = SHA-256 لبايتاتِ `package-lock.json`.
 //   R3: لا تبعيّةً بثغرةٍ حرجةٍ أو عاليةٍ في `npm audit` — في تقريرٍ مختومٍ بـ `xuuxAudit` (‏WL-574):
 //       مولَّدٍ خلالَ 7 أيّام (‏وليس في المستقبلِ فوقَ 5 دقائق)، وبصمتُه SHA-256 لبايتاتِ `package-lock.json` الحاليّ.
 //   R4: لا وحداتٍ في `node_modules/` مُلتزَمةً في المستودع.
@@ -31,6 +32,7 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { checkProvenance, evaluateAudit } from './audit-check.mjs';
+import { checkSbomBinding } from './generate-sbom.mjs';
 
 const rootIndex = process.argv.indexOf('--root');
 const repoRoot = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
@@ -227,7 +229,7 @@ try {
     );
   }
 
-  // R2: ملف SBOM موجود وصالح
+  // R2: ملف SBOM موجود وصالح ومربوطٌ بالقفلِ الحاليّ (‏WL-575)
   const sbomPath = path.join(repoRoot, 'sbom.cdx.json');
   if (!existsSync(sbomPath)) {
     violations.push('R2: `sbom.cdx.json` غائبٌ — شغّل `npm run gen:sbom` لتوليده.');
@@ -239,6 +241,15 @@ try {
       }
       if (!Array.isArray(sbom.components) || sbom.components.length === 0) {
         violations.push('R2: `sbom.cdx.json` بلا مكوّناتٍ — هل المشروع مثبَّت؟');
+      }
+      // ‏WL-575: حكمٌ مستقلٌّ إضافيّ — لا يُغيّرُ الشرطَين السابقَين ولا رسالتَيهما.
+      const sbomLockPath = path.join(repoRoot, 'package-lock.json');
+      const binding = checkSbomBinding(
+        sbom,
+        existsSync(sbomLockPath) ? readFileSync(sbomLockPath) : null,
+      );
+      if (binding !== '') {
+        violations.push(`R2: SBOM غيرُ مربوطٍ بالقفل (‏WL-575): ${binding}.`);
       }
     } catch {
       violations.push('R2: `sbom.cdx.json` ليس JSON صالح.');
