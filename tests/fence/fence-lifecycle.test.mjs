@@ -1808,7 +1808,17 @@ describe(
         'الجلسةُ الباقيةُ مسمّاةٌ بدورِها من pg_stat_activity الحقيقيّ',
       );
       assert.equal(typeof detail.lingering[0].pid, 'number');
-      // ‏keep لا يُعفي إلّا ما يُبقيه المُشرِف: ما زالَ يفشلُ بلا إعفاءٍ صريح، وينجحُ بعدَ موتِ الجلسة.
+      // ‏`keep` يُعفي اعتماداً ACTIVE من الإلغاءِ لا جلسةَ دورٍ ملغىً من الفحص: إبقاءُ الدورِ نفسِه لا يُمرِّرُ الكنس.
+      const kept = await rejectsWith(
+        () => h.root.revokeOrphanCredentials({ keep: [rg], settleMs: 200, pollMs: 20 }),
+        [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE],
+        'keep لا يُعفي جلسةَ دورٍ ملغىً',
+      );
+      assert.deepEqual(
+        /** @type {any} */ (kept).detail.lingering.map((/** @type {any} */ x) => x.role),
+        [rg],
+      );
+      // ‏وينجحُ بعدَ موتِ الجلسة.
       await h.db.pool.query(
         'SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usename = $1',
         [rg],

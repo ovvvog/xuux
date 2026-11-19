@@ -1251,16 +1251,16 @@ export class FenceRoot {
     let lingering;
     const deadline = Date.now() + settleMs;
     for (;;) {
-      // ‏جلساتُ ما أُلغيَ هنا **وكلِّ** اعتمادٍ غيرِ ACTIVE (‏أُلغيَ أو انقضى قبلَ الإقلاع وبقيت جلستُه — صنفُ WL-552)
-      // خارجَ `keep`: المُشرِفُ لا يُطلِقُ فوقَ جلسةِ دورٍ مُسيَّجٍ لم تمُت.
+      // ‏جلساتُ ما أُلغيَ هنا **وكلِّ** اعتمادٍ غيرِ ACTIVE (‏أُلغيَ أو انقضى قبلَ الإقلاع وبقيت جلستُه — صنفُ WL-552)،
+      // ولو كانَ في `keep` (‏`keep` يُعفي اعتماداً ACTIVE من الإلغاءِ لا جلسةَ دورٍ ملغىً من الفحص):
+      // المُشرِفُ لا يُطلِقُ فوقَ جلسةِ دورٍ مُسيَّجٍ لم تمُت.
       lingering = (
         await this.one(
           `SELECT coalesce(jsonb_agg(jsonb_build_object('role', a.usename, 'pid', a.pid) ORDER BY a.pid), '[]') AS r
            FROM pg_stat_activity a
-           WHERE NOT (a.usename = ANY($2::text[]))
-             AND (a.usename = ANY($1::text[])
-                  OR a.usename IN (SELECT role_name::text FROM fence.credentials WHERE status <> 'ACTIVE'))`,
-          [roles, [...keep]],
+           WHERE a.usename = ANY($1::text[])
+              OR a.usename IN (SELECT role_name::text FROM fence.credentials WHERE status <> 'ACTIVE')`,
+          [roles],
         )
       ).r;
       if (lingering.length === 0 || Date.now() >= deadline) break;
