@@ -1892,13 +1892,20 @@ test('WL-575: فشلُ التوليدِ (‏npm يفشل، أو شجرةٌ نا�
 });
 
 test('WL-575: lockSignature — stat ‏bigint بالنانوثانية (‏dev وino وsize وmtimeNs وctimeNs)، ويرمي إن غابَ الملف؛ وفشلُ rename لا يتركُ مؤقّتاً', async () => {
-  const { lockSignature } = await import(GEN_SBOM);
+  const { lockSignature, readStableLock } = await import(GEN_SBOM);
   const tmp = sbomRoot();
   try {
     const lock = path.join(tmp, 'package-lock.json');
     const s = statSync(lock, { bigint: true });
     assert.equal(lockSignature(lock), `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}`);
     assert.throws(() => lockSignature(path.join(tmp, 'غائب.json')), /ENOENT/);
+    // ‏readStableLock: البايتاتُ المقروءةُ وبصمتُها وتوقيعُها؛ وغائبٌ يرمي.
+    const sample = readStableLock(lock);
+    const raw = readFileSync(lock);
+    assert.equal(Buffer.compare(sample.bytes, raw), 0);
+    assert.equal(sample.digest, createHash('sha256').update(raw).digest('hex'));
+    assert.equal(sample.signature, lockSignature(lock));
+    assert.throws(() => readStableLock(path.join(tmp, 'غائب.json')), /ENOENT/);
     const r = runGenSbom(tmp, 'dirblock');
     assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);
     assert.match(r.stderr, /فشل توليد SBOM/);
@@ -2010,6 +2017,117 @@ test('WL-575: تغيّرُ القفلِ بعدَ كتابةِ المؤقّتِ �
         `${mode}: لا مؤقّت`,
       );
       assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, mode);
+    } finally {
+      cleanup(tmp);
+      rmSync(preDir, { recursive: true, force: true });
+      rmSync(report, { force: true });
+    }
+  }
+});
+
+// ‏WL-575: ABA داخلَ نافذةِ أخذِ العيّنةِ نفسِها — وحدةُ `--import` تلفُّ `fs.readFileSync`: عندَ القراءةِ رقم `n` للقفلِ
+// ‏(‏1 خطُّ الأساسِ قبلَ `npm sbom`، 2 الفحصُ الأوّل، 3 الفحصُ الثاني قبلَ rename) — أي بعدَ stat الأوّلِ وقبلَ القراءة —
+// ‏تُغيّرُ القفلَ، فتُعيدُ بايتاتِه، فتستعيدُ mtime الأصليَّ (‏`touch -r`)، ثمّ تتركُ القراءةَ تمضي فتُرجِعُ البايتاتِ الأصليّة.
+// ‏فالبصمةُ والتوقيعُ المأخوذُ قبلَ القراءةِ يطابقانِ خطَّ الأساس، ووحدَه stat بعدَ القراءةِ يرى ctimeNs المتقدّم. حتميٌّ بلا توقيت.
+const READ_ABA_PRELOAD = `import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const [target, report] = [Number(process.env.XUUX_READ_ABA), process.env.XUUX_READ_ABA_REPORT];
+const read = fs.readFileSync;
+const write = fs.writeFileSync;
+const rename = fs.renameSync;
+const log = { reads: 0, fired: false, renamed: false };
+const save = () => write(report, JSON.stringify(log));
+const st = (p) => { const s = fs.statSync(p, { bigint: true });
+  return [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs].map(String); };
+fs.readFileSync = function (p, ...rest) {
+  if (typeof p === 'string' && path.basename(p) === 'package-lock.json') {
+    log.reads += 1;
+    if (log.reads === target) {
+      const bytes = read(p);
+      log.before = st(p);
+      const ref = p + '.times';
+      execFileSync('touch', ['-r', p, ref]);
+      write(p, Buffer.concat([bytes, Buffer.from([10])]));
+      log.midSize = st(p)[2];
+      write(p, bytes);
+      execFileSync('touch', ['-m', '-r', ref, p]);
+      fs.rmSync(ref);
+      log.after = st(p);
+      log.fired = true;
+      const out = read(p, ...rest);
+      log.same = Buffer.compare(out, bytes) === 0;
+      save();
+      return out;
+    }
+    save();
+  }
+  return read(p, ...rest);
+};
+fs.renameSync = function (...args) {
+  log.renamed = true;
+  save();
+  return rename(...args);
+};
+syncBuiltinESMExports();
+`;
+
+test('WL-575: ABA بينَ stat وقراءةِ البايتاتِ في كلِّ عيّنة (‏خطُّ الأساس، والفحصُ الأوّل، والثاني) — تُرفَضُ العيّنةُ نفسُها فلا rename ولا SBOM ولا مؤقّت', () => {
+  const stages = /** @type {const} */ ([
+    [1, /عيّنةُ القفلِ غيرُ مستقرّة/],
+    [2, /تغيّرَ أثناءَ توليدِ SBOM/],
+    [3, /تغيّرَ أثناءَ كتابةِ SBOM/],
+  ]);
+  for (const [target, message] of stages) {
+    const tmp = sbomRoot();
+    const preDir = `${tmp}-ra`;
+    const report = `${tmp}-ra.json`;
+    try {
+      const sbomPath = path.join(tmp, 'sbom.cdx.json');
+      writeFileSync(
+        sbomPath,
+        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+      );
+      assert.equal(runGuard(tmp).ok, true, `${target}: السابقُ صالحٌ قبلَ التشغيل`);
+      mkdirSync(preDir, { recursive: true });
+      const pre = path.join(preDir, 'read-aba.mjs');
+      writeFileSync(pre, READ_ABA_PRELOAD);
+      const r = spawnSync(
+        process.execPath,
+        ['--import', pathToFileURL(pre).href, GEN_SBOM, '--root', tmp],
+        {
+          cwd: tmp,
+          encoding: 'utf8',
+          env: { ...process.env, XUUX_READ_ABA: String(target), XUUX_READ_ABA_REPORT: report },
+          timeout: 60000,
+        },
+      );
+      const log = JSON.parse(readFileSync(report, 'utf8'));
+      assert.equal(log.fired, true, `${target}: ABA وقعَ داخلَ القراءة`);
+      assert.equal(
+        log.midSize,
+        String(BigInt(log.before[2]) + 1n),
+        `${target}: تغيّرَ المحتوى في الوسط`,
+      );
+      assert.equal(log.same, true, `${target}: القراءةُ أرجعَت البايتاتِ الأصليّة`);
+      assert.deepEqual(
+        log.after.slice(0, 4),
+        log.before.slice(0, 4),
+        `${target}: dev/ino/size/mtimeNs عادت`,
+      );
+      assert.ok(BigInt(log.after[4]) > BigInt(log.before[4]), `${target}: ctimeNs تقدّم`);
+      assert.equal(log.renamed, false, `${target}: لا rename`);
+      assert.equal(r.status, 1, `${target}: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stderr, message, `${target}: العيّنةُ نفسُها تُرفَض`);
+      assert.doesNotMatch(r.stdout, /✅/, String(target));
+      assert.equal(existsSync(sbomPath), false, `${target}: لا SBOM — ولا السابقُ الصالح`);
+      assert.deepEqual(
+        readdirSync(tmp).filter((f) => f.startsWith('sbom.cdx.json')),
+        [],
+        `${target}: لا مؤقّت`,
+      );
+      assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` غائبٌ/, String(target));
     } finally {
       cleanup(tmp);
       rmSync(preDir, { recursive: true, force: true });

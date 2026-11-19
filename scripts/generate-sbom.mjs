@@ -31,13 +31,30 @@ export function lockSignature(filePath) {
 }
 
 /**
- * WL-575: هل القفلُ هو نفسُه الآن؟ توقيعُ stat كاملاً وبصمةُ بايتاتِه الخامِ معاً؛ وتعذّرُ الفحصِ أو القراءةِ ⇒ false (‏فشلٌ مغلق).
- * @param {string} lockPath @param {string} signature توقيعُه قبلَ التوليد @param {string} digest بصمتُه قبلَ التوليد
+ * WL-575: عيّنةٌ متماسكةٌ من القفل — stat ‏(‏bigint) ثمّ قراءةُ البايتاتِ الخام ثمّ stat ثانٍ؛ اختلافُ التوقيعين ⇒ يرمي (‏تغيّرٌ أثناءَ
+ * ‏القراءة، ومنه ABA يُعيدُ البايتاتِ وmtime فلا يُرى إلّا في ctimeNs). البصمةُ للبايتاتِ المقروءةِ فعلاً بينَ التوقيعين المتطابقين.
+ * ‏تعذّرُ stat أو القراءةِ يرمي كذلك. لا تعني العيّنةُ أنَّ القفلَ لن يتغيّرَ بعدَها.
+ * @param {string} lockPath @returns {{ signature: string, digest: string, bytes: Buffer }}
+ */
+export function readStableLock(lockPath) {
+  const signature = lockSignature(lockPath);
+  const bytes = readFileSync(lockPath);
+  if (lockSignature(lockPath) !== signature) {
+    throw new Error('عيّنةُ القفلِ غيرُ مستقرّة: package-lock.json تغيّرَ أثناءَ قراءتِه');
+  }
+  return { signature, digest: lockDigest(bytes), bytes };
+}
+
+/**
+ * WL-575: هل القفلُ هو نفسُه الآن؟ عيّنةٌ متماسكةٌ (‏`readStableLock`) توقيعُها وبصمتُها مساويان لخطِّ الأساس؛ عيّنةٌ غيرُ
+ * ‏مستقرّةٍ أو تعذّرُ الفحصِ أو القراءة ⇒ false (‏فشلٌ مغلق).
+ * @param {string} lockPath @param {{ signature: string, digest: string }} baseline عيّنةُ ما قبلَ `npm sbom`
  * @returns {boolean}
  */
-function lockUnchanged(lockPath, signature, digest) {
+function lockUnchanged(lockPath, baseline) {
   try {
-    return lockSignature(lockPath) === signature && lockDigest(readFileSync(lockPath)) === digest;
+    const now = readStableLock(lockPath);
+    return now.signature === baseline.signature && now.digest === baseline.digest;
   } catch {
     return false;
   }
@@ -105,9 +122,8 @@ function main() {
     // ‏WL-575: أبطِلِ السابقَ قبلَ أيِّ شيء — فشلٌ لاحقٌ لا يتركُ SBOM قديماً يبدو صالحاً.
     rmSync(outPath, { force: true });
     const lockPath = path.join(repoRoot, 'package-lock.json');
-    const statBefore = lockSignature(lockPath);
-    const lockBytes = readFileSync(lockPath);
-    const digestBefore = lockDigest(lockBytes);
+    // ‏WL-575: خطُّ الأساسِ عيّنةٌ متماسكةٌ أيضاً — غيرُ المستقرّةِ ترمي ⇒ «فشل توليد SBOM» بلا SBOM.
+    const baseline = readStableLock(lockPath);
     const output = execSync('npm sbom --sbom-format cyclonedx --json', {
       cwd: repoRoot,
       encoding: 'utf8',
@@ -116,16 +132,16 @@ function main() {
     const sbom = JSON.parse(output);
     // ‏WL-575: القفلُ قبلَ التوليدِ هو نفسُه بعدَه (‏بصمةً وتوقيعَ stat كاملاً) — وإلا فالـSBOM لا يُنسَبُ لقفل؛
     // ‏وتعذّرُ الفحصِ أو القراءةِ بعدَه تغيّرٌ (‏فشلٌ مغلق). الفحصُ الأوّلُ من اثنين مستقلّين.
-    if (!lockUnchanged(lockPath, statBefore, digestBefore)) {
+    if (!lockUnchanged(lockPath, baseline)) {
       console.error(
         '⛔ package-lock.json تغيّرَ أثناءَ توليدِ SBOM — لا SBOM. أعِدْ `npm run gen:sbom` بعدَ استقرارِ القفل.',
       );
       process.exit(1);
     }
-    writeFileSync(tmpPath, JSON.stringify(stampSbom(sbom, lockBytes), null, 2) + '\n');
+    writeFileSync(tmpPath, JSON.stringify(stampSbom(sbom, baseline.bytes), null, 2) + '\n');
     // ‏WL-575: الفحصُ الثاني — بعدَ اكتمالِ المؤقّتِ وإغلاقِه وقبلَ rename مباشرةً (‏لا عملَ بينهما): تغيّرٌ بعدَ الفحصِ الأوّل
     // ‏(‏أثناءَ الختمِ أو الكتابة) ⇒ المؤقّتُ يُزالُ ولا يُعتمَد. يُضيِّقُ نافذةَ TOCTOU ولا يُلغيها: القفلُ وSBOM ليسا معاملةً واحدة.
-    if (!lockUnchanged(lockPath, statBefore, digestBefore)) {
+    if (!lockUnchanged(lockPath, baseline)) {
       rmSync(tmpPath, { force: true });
       console.error(
         '⛔ package-lock.json تغيّرَ أثناءَ كتابةِ SBOM — لا SBOM. أعِدْ `npm run gen:sbom` بعدَ استقرارِ القفل.',
