@@ -32,7 +32,11 @@ import path from 'node:path';
 import process from 'node:process';
 
 import { checkProvenance, evaluateAudit } from './audit-check.mjs';
-import { checkSbomBinding } from './generate-sbom.mjs';
+import {
+  checkSbomBinding,
+  checkSbomComponents,
+  formatComponentProblems,
+} from './generate-sbom.mjs';
 
 const rootIndex = process.argv.indexOf('--root');
 const repoRoot = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
@@ -244,12 +248,29 @@ try {
       }
       // ‏WL-575: حكمٌ مستقلٌّ إضافيّ — لا يُغيّرُ الشرطَين السابقَين ولا رسالتَيهما.
       const sbomLockPath = path.join(repoRoot, 'package-lock.json');
-      const binding = checkSbomBinding(
-        sbom,
-        existsSync(sbomLockPath) ? readFileSync(sbomLockPath) : null,
-      );
+      // ‏WL-576: قراءةٌ واحدةٌ للقفلِ يشتركُ فيها حكمُ الربطِ وحكمُ المطابقة.
+      const sbomLockBytes = existsSync(sbomLockPath) ? readFileSync(sbomLockPath) : null;
+      const binding = checkSbomBinding(sbom, sbomLockBytes);
       if (binding !== '') {
         violations.push(`R2: SBOM غيرُ مربوطٍ بالقفل (‏WL-575): ${binding}.`);
+      }
+      // ‏WL-576: حكمٌ مستقلٌّ ثالث — مكوّناتُ SBOM وإصداراتُها ممثَّلةٌ في شجرةِ القفلِ والعكس. لا يرمي.
+      let lockTree = null;
+      try {
+        lockTree = sbomLockBytes ? JSON.parse(sbomLockBytes.toString('utf8')) : null;
+      } catch {
+        lockTree = null;
+      }
+      const tree = checkSbomComponents(sbom, lockTree);
+      if (tree.problems.length > 0) {
+        violations.push(
+          `R2: مكوّناتُ SBOM لا تطابقُ شجرةَ القفل (‏WL-576): ${formatComponentProblems(tree.problems)}.`,
+        );
+      }
+      if (tree.omittedOptional.length > 0) {
+        console.log(
+          `ℹ️ R2 (‏WL-576): مدخلاتٌ اختياريّةٌ في القفلِ غائبةٌ عن SBOM (‏غيرُ مثبَّتةٍ على هذه المنصّة): ${tree.omittedOptional.join('، ')}`,
+        );
       }
     } catch {
       violations.push('R2: `sbom.cdx.json` ليس JSON صالح.');

@@ -109,6 +109,310 @@ export function checkSbomBinding(sbom, lockBytes) {
   return '';
 }
 
+// ─── WL-576: مطابقةُ مكوّناتِ SBOM لشجرةِ القفل ───────────────────────────────
+// المرجعُ هو سلوكُ npm نفسِه (‏lib/utils/sbom-cyclonedx.js في npm 10.8.2): كلُّ عقدةٍ غيرِ جذريّةٍ وغيرِ
+// رابطٍ مكوّنٌ واحد، و`cdx:npm:package:path` هو موقعُها = مفتاحُها في `packages`. فالمطابقةُ بالمسار
+// (‏لا بالاسمِ وحدَه) ثمّ تُشتقُّ هويّةُ المكوّنِ كاملةً من مدخلةِ القفلِ وتُقارَن حقلاً حقلاً.
+/** خصائصُ npm المعروفة؛ أيُّ خاصّيّةٍ أخرى في مكوّنٍ تُرفَض (‏لا تُتجاهَل). */
+const NPM_PROP = {
+  path: 'cdx:npm:package:path',
+  development: 'cdx:npm:package:development',
+  bundled: 'cdx:npm:package:bundled',
+  private: 'cdx:npm:package:private',
+  extraneous: 'cdx:npm:package:extraneous',
+};
+const KNOWN_PROPS = new Set(Object.values(NPM_PROP));
+const SRI_ALG = { sha1: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
+/** طولُ الملخّصِ بالبايتِ لكلِّ خوارزميّة — ما سواه ليس ملخّصاً صالحاً (‏مثلاً `sha512-YQ` بايتٌ واحد). */
+const SRI_BYTES = { sha1: 20, sha256: 32, sha384: 48, sha512: 64 };
+/** ترتيبُ القوّةِ كما في ssri (‏‏pickAlgorithm)؛ npm sbom يأخذُ الأقوى. */
+const SRI_STRENGTH = ['sha1', 'sha256', 'sha384', 'sha512'];
+/** رمزُ SRI بلا خيارات `?`: خوارزميّةٌ معروفةٌ ثمّ Base64 قياسيٌّ بحشوٍ كامل. */
+const SRI_TOKEN = /^(sha1|sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/;
+/** السجلُّ الافتراضيُّ الوحيدُ المدعوم — أيُّ مصدرٍ آخرَ (‏git، ملفّ، سجلٌّ آخر، http) يُرفَض صراحةً. */
+const DEFAULT_REGISTRY_HOST = 'registry.npmjs.org';
+/** اسمُ حزمةٍ npm (‏نطاقيٌّ اختياريّاً) بلا مقاطعَ تبدأُ بنقطةٍ أو شرطةٍ سفليّة. */
+const PKG_NAME = /^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*\/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*$/;
+/** إصدارٌ آمنٌ داخلَ مسارِ URL (‏لا فواصلَ ولا ترميزَ ولا `..` ولا فراغ). */
+const SAFE_VERSION = /^(?!.*\.\.)[A-Za-z0-9.+_-]+$/;
+/** مسارُ تثبيتٍ تحتَ node_modules بتداخلٍ اختياريّ؛ لا مقطعَ يبدأُ بـ `.` (‏فلا `..`). */
+const SEG = '(?:@[^/@.][^/]*/)?[^/@.][^/]*';
+const NM_PATH = new RegExp(`^node_modules/${SEG}(?:/node_modules/${SEG})*$`);
+const NM_MARK = 'node_modules/';
+const MAX_REASONS = 5;
+
+/** @param {unknown} x */
+const nonEmpty = (x) => typeof x === 'string' && x.length > 0;
+
+/**
+ * مدخلاتُ القفلِ القابلةُ للمطابقة: كلُّ مفتاحٍ سوى الجذرِ `""` وسوى الروابط (‏`link: true`) التي يستبعدُها npm.
+ * @param {Record<string, any>} packages @param {string[]} problems
+ * @returns {Map<string, Record<string, any>>}
+ */
+function matchableEntries(packages, problems) {
+  const out = new Map();
+  for (const [key, entry] of Object.entries(packages)) {
+    if (key === '') continue;
+    if (!isObj(entry)) {
+      problems.push(`مدخلةُ القفل «${key}» ليست كائناً`);
+      continue;
+    }
+    if (entry.link === true) {
+      // الرابطُ يشيرُ إلى هدفٍ خارجَ node_modules (‏مساحةُ عمل/file:) — غيرُ مدعومٍ هنا فيُغلَقُ الحكم.
+      problems.push(`مدخلةُ القفل «${key}» رابطٌ (\`link\`) — غيرُ مدعومةٍ في المطابقة`);
+      continue;
+    }
+    if (!NM_PATH.test(key)) {
+      problems.push(`مدخلةُ القفل «${key}» خارجَ node_modules — غيرُ قابلةٍ للمطابقة`);
+      continue;
+    }
+    if (!nonEmpty(entry.version)) {
+      problems.push(`مدخلةُ القفل «${key}» بلا إصدارٍ نصّيّ`);
+      continue;
+    }
+    out.set(key, entry);
+  }
+  return out;
+}
+
+/**
+ * WL-576: يفسّرُ `integrity` في القفلِ تفسيراً صارماً، ويُرجعُ بصمةَ أوّلِ رمزٍ sha512 بصيغة `ALG:hex`، أو سببَ الرفض.
+ * تصحيحٌ (‏مراجعةُ fd47091c): ‏`ssri.parse(…, {single: true})` في ssri 10 (‏npm 10.8) لا يختارُ الأقوى بل يبني Hash من
+ * النصِّ كلِّه بخوارزميّةِ الرمزِ الأوّل: إن كان sha512 طابقَت بصمةُ SBOM أوّلَ رمزٍ sha512 (‏Node يقفُ عندَ الحشو) فيُقبَل،
+ * وإلّا (‏sha1 أو sha256 أوّلاً) خرجت بخوارزميّةٍ أخرى فيُرفَضُ المكوّنُ مغلقاً — لا تجاوزَ في الحالين. القفلُ الحقيقيُّ
+ * رمزٌ واحدٌ sha512 لكلِّ مدخلة.
+ * @param {unknown} sri @returns {{ hash: string } | { error: string }}
+ */
+export function parseSri(sri) {
+  if (typeof sri !== 'string') return { error: 'integrity ليست نصّاً' };
+  const tokens = sri.split(/[ \t\n\r\f]+/).filter(Boolean);
+  if (tokens.length === 0) return { error: 'integrity فارغة' };
+  /** @type {Map<string, string>} */
+  const first = new Map();
+  for (const token of tokens) {
+    const m = SRI_TOKEN.exec(token);
+    if (!m) return { error: `رمزُ SRI «${token.slice(0, 24)}» غيرُ صالحِ الصيغة` };
+    const alg = /** @type {keyof typeof SRI_BYTES} */ (m[1]);
+    const b64 = /** @type {string} */ (m[2]);
+    const bytes = Buffer.from(b64, 'base64');
+    if (bytes.toString('base64') !== b64) {
+      return { error: `رمزُ ${alg} ليس Base64 قانونيّاً (‏حشوٌ أو ترميزٌ مشوّه)` };
+    }
+    if (bytes.length !== SRI_BYTES[alg]) {
+      return { error: `ملخّصُ ${alg} بطول ${bytes.length} بايت ≠ ${SRI_BYTES[alg]}` };
+    }
+    if (!first.has(alg)) first.set(alg, bytes.toString('hex'));
+  }
+  const strongest = SRI_STRENGTH.filter((a) => first.has(a)).pop();
+  if (strongest !== 'sha512') {
+    return { error: `أقوى خوارزميّةٍ ${String(strongest)} — مطلوبٌ sha512` };
+  }
+  return { hash: `${SRI_ALG.sha512}:${first.get('sha512')}` };
+}
+
+/**
+ * WL-576: سياسةُ المصدر — السجلُّ الافتراضيُّ وحدَه وبرابطِ tarball القانونيِّ للحزمةِ والإصدارِ بالضبط.
+ * git وgithub: وfile: والمساراتُ المحلّيّةُ وhttp والسجلّاتُ الأخرى تُرفَضُ صراحةً حتّى لو طابقَ SBOM القفل.
+ * المدمجُ (‏`inBundle`) بلا resolved ولا integrity كما يكتبُه npm؛ وأيُّ مدخلةٍ أخرى بلا resolved مصدرُها
+ * غيرُ محدَّدٍ (‏يُحَلُّ من إعدادِ السجلِّ وقتَ التثبيت) فتُرفَض.
+ * @param {Record<string, any>} entry @param {string} pkgName @returns {string} سببُ الرفضِ أو ''
+ */
+export function sourceProblem(entry, pkgName) {
+  const resolved = entry.resolved;
+  if (entry.inBundle === true) {
+    return resolved === undefined && entry.integrity === undefined
+      ? ''
+      : 'مدمجةٌ (‏inBundle) بمصدرٍ أو بصمةٍ — غيرُ مدعومة';
+  }
+  if (!nonEmpty(resolved)) return 'بلا `resolved` — مصدرٌ غيرُ محدَّد';
+  if (/^(?:git\+|git:|github:|gitlab:|bitbucket:|gist:)/i.test(resolved)) {
+    return `مصدرُ git «${resolved}» — غيرُ مدعوم`;
+  }
+  if (/^file:/i.test(resolved) || !/^[a-z][a-z0-9+.-]*:\/\//i.test(resolved)) {
+    return `مصدرٌ محلّيٌّ «${resolved}» — غيرُ مدعوم`;
+  }
+  /** @type {URL} */
+  let url;
+  try {
+    url = new URL(resolved);
+  } catch {
+    return `مصدرٌ «${resolved}» ليس URL صالحاً`;
+  }
+  if (url.protocol !== 'https:') return `مصدرٌ بغيرِ https «${resolved}» — غيرُ مدعوم`;
+  if (url.hostname !== DEFAULT_REGISTRY_HOST || url.port !== '' || url.username || url.password) {
+    return `سجلٌّ غيرُ افتراضيٍّ «${url.host}» — المدعومُ ${DEFAULT_REGISTRY_HOST} وحدَه`;
+  }
+  if (!PKG_NAME.test(pkgName)) return `اسمُ الحزمةِ «${pkgName}» غيرُ صالح`;
+  if (!SAFE_VERSION.test(entry.version))
+    return `الإصدارُ «${entry.version}» غيرُ آمنٍ في رابطِ tarball`;
+  const base = pkgName.slice(pkgName.lastIndexOf('/') + 1);
+  const canonical = `https://${DEFAULT_REGISTRY_HOST}/${pkgName}/-/${base}-${entry.version}.tgz`;
+  if (resolved !== canonical) return `«${resolved}» ليس رابطَ tarball القانونيَّ «${canonical}»`;
+  if (entry.integrity === undefined) return 'من السجلِّ بلا `integrity`';
+  return '';
+}
+
+/**
+ * WL-576: مصدرُ المدخلةِ وبصمتُها وحدَهما (‏بلا SBOM) — للمدخلاتِ الاختياريّةِ الغائبةِ عن SBOM.
+ * @param {string} key @param {Record<string, any>} entry @returns {string[]}
+ */
+export function provenanceProblems(key, entry) {
+  const folder = key.slice(key.lastIndexOf(NM_MARK) + NM_MARK.length);
+  const pkgName = nonEmpty(entry.name) ? entry.name : folder;
+  const why = [];
+  const src = sourceProblem(entry, pkgName);
+  if (src !== '') why.push(`مصدرٌ غيرُ مدعوم: ${src}`);
+  if (entry.integrity !== undefined) {
+    const sri = parseSri(entry.integrity);
+    if ('error' in sri) why.push(`integrity في القفلِ غيرُ قابلةٍ للتفسير: ${sri.error}`);
+  }
+  return why;
+}
+
+/**
+ * يقارنُ مكوّناً واحداً بمدخلتِه في القفل؛ يُرجعُ أسبابَ الرفض.
+ * @param {Record<string, any>} c @param {string} key @param {Record<string, any>} entry
+ */
+function componentMismatches(c, key, entry) {
+  const why = [];
+  const folder = key.slice(key.lastIndexOf(NM_MARK) + NM_MARK.length);
+  // الاسمُ = اسمُ المجلّد (‏node.name)؛ اسمُ الحزمةِ الحقيقيّ = `name` في المدخلة إن وُجد (‏الأسماءُ المستعارة).
+  const pkgName = nonEmpty(entry.name) ? entry.name : folder;
+  const version = entry.version;
+  if (c.name !== folder) why.push(`الاسمُ «${c.name}» ≠ «${folder}»`);
+  if (c.version !== version) why.push(`الإصدارُ «${c.version}» ≠ «${version}»`);
+  const purl = `pkg:npm/${pkgName.replace(/^@/, '%40')}@${version}`;
+  if (c.purl !== purl) why.push(`purl «${c.purl}» ≠ «${purl}»`);
+  if (c['bom-ref'] !== `${pkgName}@${version}`)
+    why.push(`bom-ref «${c['bom-ref']}» ≠ «${pkgName}@${version}»`);
+  const optional = entry.dev === true || entry.optional === true || entry.devOptional === true;
+  const scope = optional ? 'optional' : 'required';
+  if (c.scope !== scope) why.push(`scope «${c.scope}» ≠ «${scope}»`);
+  const props = new Map((c.properties ?? []).map((/** @type {any} */ p) => [p.name, p.value]));
+  /** @type {[string, boolean][]} */
+  const flags = [
+    [NPM_PROP.development, entry.dev === true],
+    [NPM_PROP.bundled, entry.inBundle === true],
+  ];
+  for (const [name, want] of flags) {
+    const has = props.has(name);
+    if (has && props.get(name) !== 'true') why.push(`قيمةُ ${name} ليست "true"`);
+    else if (has !== want) why.push(`${name} ${has ? 'زائدةٌ' : 'غائبةٌ'} خلافاً للقفل`);
+  }
+  if (props.has(NPM_PROP.private) && props.get(NPM_PROP.private) !== 'true') {
+    why.push(`قيمةُ ${NPM_PROP.private} ليست "true"`);
+  }
+  // المصدر: مرجعُ توزيعٍ واحدٌ = `resolved` بالضبط، أو لا مرجعَ إن غاب من القفل.
+  const refs = c.externalReferences ?? [];
+  if (!Array.isArray(refs) || !refs.every((r) => isObj(r) && typeof r.type === 'string')) {
+    why.push('`externalReferences` ليست مصفوفةَ كائناتٍ بنوعٍ نصّيّ');
+  } else {
+    const dist = refs.filter((r) => r.type === 'distribution').map((r) => r.url);
+    const want = nonEmpty(entry.resolved) ? [entry.resolved] : [];
+    if (dist.length !== want.length || dist.some((u, i) => u !== want[i])) {
+      why.push(`مرجعُ التوزيعِ ${JSON.stringify(dist)} ≠ resolved ${JSON.stringify(want)}`);
+    }
+  }
+  // ‏WL-576: التطابقُ وحدَه لا يكفي — مصدرٌ غيرُ مدعومٍ يُرفَضُ ولو طابقَ SBOM القفل.
+  const src = sourceProblem(entry, pkgName);
+  if (src !== '') why.push(`مصدرٌ غيرُ مدعوم: ${src}`);
+  // السلامة: بصمةٌ واحدةٌ من بصماتِ `integrity`، أو لا بصمةَ إن غابت من القفل.
+  const hashes = c.hashes ?? [];
+  if (
+    !Array.isArray(hashes) ||
+    !hashes.every((h) => isObj(h) && nonEmpty(h.alg) && nonEmpty(h.content))
+  ) {
+    why.push('`hashes` ليست مصفوفةَ بصماتٍ صالحة');
+  } else if (entry.integrity === undefined) {
+    if (hashes.length > 0) why.push('بصمةٌ في SBOM والقفلُ بلا integrity');
+  } else {
+    const want = parseSri(entry.integrity);
+    if ('error' in want) why.push(`integrity في القفلِ غيرُ قابلةٍ للتفسير: ${want.error}`);
+    else if (hashes.length !== 1 || `${hashes[0].alg}:${hashes[0].content}` !== want.hash) {
+      why.push('البصمةُ لا تطابقُ integrity في القفل');
+    }
+  }
+  return why;
+}
+
+/**
+ * WL-576: هل مكوّناتُ SBOM وإصداراتُها ممثَّلةٌ فعلاً في شجرةِ القفل، وهل كلُّ مدخلةٍ مطلوبةٍ ممثَّلة؟
+ * لا يرمي أبداً. `omittedOptional` مدخلاتٌ اختياريّةٌ غائبةٌ عن SBOM — مسموحةٌ لكن تُعلَنُ (‏لا تُسكَت).
+ * @param {any} sbom @param {any} lock كائنُ `package-lock.json` المحلَّل (‏null إن غاب أو فسد)
+ * @returns {{ problems: string[], omittedOptional: string[] }}
+ */
+export function checkSbomComponents(sbom, lock) {
+  /** @type {string[]} */
+  const problems = [];
+  /** @type {string[]} */
+  const omittedOptional = [];
+  if (!isObj(sbom) || !Array.isArray(sbom.components)) return { problems, omittedOptional };
+  if (!isObj(lock) || !isObj(lock.packages)) {
+    problems.push('`package-lock.json` غائبٌ أو بلا `packages` فلا تُطابَقُ المكوّنات');
+    return { problems, omittedOptional };
+  }
+  if (lock.lockfileVersion !== 2 && lock.lockfileVersion !== 3) {
+    problems.push(`lockfileVersion ${String(lock.lockfileVersion)} غيرُ مدعومٍ (‏2 أو 3)`);
+    return { problems, omittedOptional };
+  }
+  const entries = matchableEntries(lock.packages, problems);
+  /** @type {Set<string>} */
+  const seen = new Set();
+  sbom.components.forEach((/** @type {any} */ c, /** @type {number} */ i) => {
+    const label = isObj(c) ? `#${i} ${String(c.name)}@${String(c.version)}` : `#${i}`;
+    if (!isObj(c)) return void problems.push(`${label}: ليس كائناً`);
+    if (c.type !== 'library') return void problems.push(`${label}: النوعُ «${c.type}» ليس library`);
+    if (!nonEmpty(c.name) || !nonEmpty(c.version) || !nonEmpty(c.purl)) {
+      return void problems.push(`${label}: هويّةٌ ناقصة (‏name/version/purl)`);
+    }
+    const props = c.properties;
+    if (
+      !Array.isArray(props) ||
+      !props.every((p) => isObj(p) && nonEmpty(p.name) && typeof p.value === 'string')
+    ) {
+      return void problems.push(`${label}: \`properties\` غائبةٌ أو غيرُ صالحة`);
+    }
+    const unknown = props.filter((p) => !KNOWN_PROPS.has(p.name)).map((p) => p.name);
+    if (unknown.length > 0)
+      return void problems.push(`${label}: خصائصُ غيرُ معروفة ${unknown.join('، ')}`);
+    if (props.some((p) => p.name === NPM_PROP.extraneous)) {
+      return void problems.push(`${label}: مكوّنٌ دخيلٌ (\`extraneous\`) ليس في القفل`);
+    }
+    const names = props.map((p) => p.name);
+    if (new Set(names).size !== names.length)
+      return void problems.push(`${label}: خاصّيّةٌ مكرّرة`);
+    const pathProp = props.find((p) => p.name === NPM_PROP.path);
+    if (!pathProp) return void problems.push(`${label}: بلا \`${NPM_PROP.path}\` — هويّةٌ ملتبسة`);
+    const key = pathProp.value;
+    if (seen.has(key)) return void problems.push(`${label}: المسارُ «${key}» مكرّرٌ في SBOM`);
+    seen.add(key);
+    const entry = entries.get(key);
+    if (!entry)
+      return void problems.push(`${label}: المسارُ «${key}» ليس مدخلةً قابلةً للمطابقةِ في القفل`);
+    const why = componentMismatches(c, key, entry);
+    if (why.length > 0) problems.push(`${label} («${key}»): ${why.join('، ')}`);
+  });
+  for (const [key, entry] of entries) {
+    if (seen.has(key)) continue;
+    if (entry.optional === true || entry.devOptional === true) {
+      // ‏WL-576 (‏مراجعةُ fd47091c): الاختياريّةُ الغائبةُ عن SBOM كانت تتخطّى سياسةَ المصدرِ وSRI — مدخلةٌ بمنصّةٍ
+      // أخرى (‏os/cpu) مصدرُها git أو سجلٌّ آخر تمرُّ بإعلانٍ ℹ️ ويجلبُها `npm ci` على تلك المنصّة. تُفحَصُ كالممثَّلة.
+      const why = provenanceProblems(key, entry);
+      if (why.length > 0)
+        problems.push(`مدخلةُ القفل الاختياريّة «${key}» (‏غائبةٌ عن SBOM): ${why.join('، ')}`);
+      else omittedOptional.push(key);
+    } else problems.push(`مدخلةُ القفل «${key}@${entry.version}» مطلوبةٌ وغائبةٌ عن SBOM`);
+  }
+  return { problems, omittedOptional };
+}
+
+/** نصُّ مخالفةِ R2 من الأسباب (‏أوّلُ خمسةٍ ثمّ العدد). @param {string[]} problems */
+export function formatComponentProblems(problems) {
+  const head = problems.slice(0, MAX_REASONS).join('؛ ');
+  const rest = problems.length - MAX_REASONS;
+  return rest > 0 ? `${head}؛ (‏و${rest} أخرى من ${problems.length})` : head;
+}
+
 function main() {
   const rootIndex = process.argv.indexOf('--root');
   const repoRoot =
