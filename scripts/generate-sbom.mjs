@@ -109,6 +109,208 @@ export function checkSbomBinding(sbom, lockBytes) {
   return '';
 }
 
+// ─── WL-576: مطابقةُ مكوّناتِ SBOM لشجرةِ القفل ───────────────────────────────
+// المرجعُ هو سلوكُ npm نفسِه (‏lib/utils/sbom-cyclonedx.js في npm 10.8.2): كلُّ عقدةٍ غيرِ جذريّةٍ وغيرِ
+// رابطٍ مكوّنٌ واحد، و`cdx:npm:package:path` هو موقعُها = مفتاحُها في `packages`. فالمطابقةُ بالمسار
+// (‏لا بالاسمِ وحدَه) ثمّ تُشتقُّ هويّةُ المكوّنِ كاملةً من مدخلةِ القفلِ وتُقارَن حقلاً حقلاً.
+/** خصائصُ npm المعروفة؛ أيُّ خاصّيّةٍ أخرى في مكوّنٍ تُرفَض (‏لا تُتجاهَل). */
+const NPM_PROP = {
+  path: 'cdx:npm:package:path',
+  development: 'cdx:npm:package:development',
+  bundled: 'cdx:npm:package:bundled',
+  private: 'cdx:npm:package:private',
+  extraneous: 'cdx:npm:package:extraneous',
+};
+const KNOWN_PROPS = new Set(Object.values(NPM_PROP));
+const SRI_ALG = { sha1: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
+/** مسارُ تثبيتٍ تحتَ node_modules بتداخلٍ اختياريّ؛ لا مقطعَ يبدأُ بـ `.` (‏فلا `..`). */
+const SEG = '(?:@[^/@.][^/]*/)?[^/@.][^/]*';
+const NM_PATH = new RegExp(`^node_modules/${SEG}(?:/node_modules/${SEG})*$`);
+const NM_MARK = 'node_modules/';
+const MAX_REASONS = 5;
+
+/** @param {unknown} x */
+const nonEmpty = (x) => typeof x === 'string' && x.length > 0;
+
+/**
+ * مدخلاتُ القفلِ القابلةُ للمطابقة: كلُّ مفتاحٍ سوى الجذرِ `""` وسوى الروابط (‏`link: true`) التي يستبعدُها npm.
+ * @param {Record<string, any>} packages @param {string[]} problems
+ * @returns {Map<string, Record<string, any>>}
+ */
+function matchableEntries(packages, problems) {
+  const out = new Map();
+  for (const [key, entry] of Object.entries(packages)) {
+    if (key === '') continue;
+    if (!isObj(entry)) {
+      problems.push(`مدخلةُ القفل «${key}» ليست كائناً`);
+      continue;
+    }
+    if (entry.link === true) {
+      // الرابطُ يشيرُ إلى هدفٍ خارجَ node_modules (‏مساحةُ عمل/file:) — غيرُ مدعومٍ هنا فيُغلَقُ الحكم.
+      problems.push(`مدخلةُ القفل «${key}» رابطٌ (\`link\`) — غيرُ مدعومةٍ في المطابقة`);
+      continue;
+    }
+    if (!NM_PATH.test(key)) {
+      problems.push(`مدخلةُ القفل «${key}» خارجَ node_modules — غيرُ قابلةٍ للمطابقة`);
+      continue;
+    }
+    if (!nonEmpty(entry.version)) {
+      problems.push(`مدخلةُ القفل «${key}» بلا إصدارٍ نصّيّ`);
+      continue;
+    }
+    out.set(key, entry);
+  }
+  return out;
+}
+
+/** بصماتُ SRI في القفل → مجموعةُ `ALG:hex`؛ null إن كانت غيرَ قابلةٍ للتفسير. @param {string} sri */
+function sriHashes(sri) {
+  const out = new Set();
+  for (const token of sri.split(/\s+/).filter(Boolean)) {
+    const dash = token.indexOf('-');
+    const alg = SRI_ALG[/** @type {keyof typeof SRI_ALG} */ (token.slice(0, dash))];
+    const b64 = token.slice(dash + 1).split('?')[0] ?? '';
+    if (dash <= 0 || !alg || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return null;
+    out.add(`${alg}:${Buffer.from(b64, 'base64').toString('hex')}`);
+  }
+  return out.size > 0 ? out : null;
+}
+
+/**
+ * يقارنُ مكوّناً واحداً بمدخلتِه في القفل؛ يُرجعُ أسبابَ الرفض.
+ * @param {Record<string, any>} c @param {string} key @param {Record<string, any>} entry
+ */
+function componentMismatches(c, key, entry) {
+  const why = [];
+  const folder = key.slice(key.lastIndexOf(NM_MARK) + NM_MARK.length);
+  // الاسمُ = اسمُ المجلّد (‏node.name)؛ اسمُ الحزمةِ الحقيقيّ = `name` في المدخلة إن وُجد (‏الأسماءُ المستعارة).
+  const pkgName = nonEmpty(entry.name) ? entry.name : folder;
+  const version = entry.version;
+  if (c.name !== folder) why.push(`الاسمُ «${c.name}» ≠ «${folder}»`);
+  if (c.version !== version) why.push(`الإصدارُ «${c.version}» ≠ «${version}»`);
+  const purl = `pkg:npm/${pkgName.replace(/^@/, '%40')}@${version}`;
+  if (c.purl !== purl) why.push(`purl «${c.purl}» ≠ «${purl}»`);
+  if (c['bom-ref'] !== `${pkgName}@${version}`)
+    why.push(`bom-ref «${c['bom-ref']}» ≠ «${pkgName}@${version}»`);
+  const optional = entry.dev === true || entry.optional === true || entry.devOptional === true;
+  const scope = optional ? 'optional' : 'required';
+  if (c.scope !== scope) why.push(`scope «${c.scope}» ≠ «${scope}»`);
+  const props = new Map((c.properties ?? []).map((/** @type {any} */ p) => [p.name, p.value]));
+  /** @type {[string, boolean][]} */
+  const flags = [
+    [NPM_PROP.development, entry.dev === true],
+    [NPM_PROP.bundled, entry.inBundle === true],
+  ];
+  for (const [name, want] of flags) {
+    const has = props.has(name);
+    if (has && props.get(name) !== 'true') why.push(`قيمةُ ${name} ليست "true"`);
+    else if (has !== want) why.push(`${name} ${has ? 'زائدةٌ' : 'غائبةٌ'} خلافاً للقفل`);
+  }
+  if (props.has(NPM_PROP.private) && props.get(NPM_PROP.private) !== 'true') {
+    why.push(`قيمةُ ${NPM_PROP.private} ليست "true"`);
+  }
+  // المصدر: مرجعُ توزيعٍ واحدٌ = `resolved` بالضبط، أو لا مرجعَ إن غاب من القفل.
+  const refs = c.externalReferences ?? [];
+  if (!Array.isArray(refs) || !refs.every((r) => isObj(r) && typeof r.type === 'string')) {
+    why.push('`externalReferences` ليست مصفوفةَ كائناتٍ بنوعٍ نصّيّ');
+  } else {
+    const dist = refs.filter((r) => r.type === 'distribution').map((r) => r.url);
+    const want = nonEmpty(entry.resolved) ? [entry.resolved] : [];
+    if (dist.length !== want.length || dist.some((u, i) => u !== want[i])) {
+      why.push(`مرجعُ التوزيعِ ${JSON.stringify(dist)} ≠ resolved ${JSON.stringify(want)}`);
+    }
+  }
+  // السلامة: بصمةٌ واحدةٌ من بصماتِ `integrity`، أو لا بصمةَ إن غابت من القفل.
+  const hashes = c.hashes ?? [];
+  if (
+    !Array.isArray(hashes) ||
+    !hashes.every((h) => isObj(h) && nonEmpty(h.alg) && nonEmpty(h.content))
+  ) {
+    why.push('`hashes` ليست مصفوفةَ بصماتٍ صالحة');
+  } else if (entry.integrity === undefined) {
+    if (hashes.length > 0) why.push('بصمةٌ في SBOM والقفلُ بلا integrity');
+  } else {
+    const want = typeof entry.integrity === 'string' ? sriHashes(entry.integrity) : null;
+    if (want === null) why.push('integrity في القفلِ غيرُ قابلةٍ للتفسير');
+    else if (hashes.length !== 1 || !want.has(`${hashes[0].alg}:${hashes[0].content}`)) {
+      why.push('البصمةُ لا تطابقُ integrity في القفل');
+    }
+  }
+  return why;
+}
+
+/**
+ * WL-576: هل مكوّناتُ SBOM وإصداراتُها ممثَّلةٌ فعلاً في شجرةِ القفل، وهل كلُّ مدخلةٍ مطلوبةٍ ممثَّلة؟
+ * لا يرمي أبداً. `omittedOptional` مدخلاتٌ اختياريّةٌ غائبةٌ عن SBOM — مسموحةٌ لكن تُعلَنُ (‏لا تُسكَت).
+ * @param {any} sbom @param {any} lock كائنُ `package-lock.json` المحلَّل (‏null إن غاب أو فسد)
+ * @returns {{ problems: string[], omittedOptional: string[] }}
+ */
+export function checkSbomComponents(sbom, lock) {
+  /** @type {string[]} */
+  const problems = [];
+  /** @type {string[]} */
+  const omittedOptional = [];
+  if (!isObj(sbom) || !Array.isArray(sbom.components)) return { problems, omittedOptional };
+  if (!isObj(lock) || !isObj(lock.packages)) {
+    problems.push('`package-lock.json` غائبٌ أو بلا `packages` فلا تُطابَقُ المكوّنات');
+    return { problems, omittedOptional };
+  }
+  if (lock.lockfileVersion !== 2 && lock.lockfileVersion !== 3) {
+    problems.push(`lockfileVersion ${String(lock.lockfileVersion)} غيرُ مدعومٍ (‏2 أو 3)`);
+    return { problems, omittedOptional };
+  }
+  const entries = matchableEntries(lock.packages, problems);
+  /** @type {Set<string>} */
+  const seen = new Set();
+  sbom.components.forEach((/** @type {any} */ c, /** @type {number} */ i) => {
+    const label = isObj(c) ? `#${i} ${String(c.name)}@${String(c.version)}` : `#${i}`;
+    if (!isObj(c)) return void problems.push(`${label}: ليس كائناً`);
+    if (c.type !== 'library') return void problems.push(`${label}: النوعُ «${c.type}» ليس library`);
+    if (!nonEmpty(c.name) || !nonEmpty(c.version) || !nonEmpty(c.purl)) {
+      return void problems.push(`${label}: هويّةٌ ناقصة (‏name/version/purl)`);
+    }
+    const props = c.properties;
+    if (
+      !Array.isArray(props) ||
+      !props.every((p) => isObj(p) && nonEmpty(p.name) && typeof p.value === 'string')
+    ) {
+      return void problems.push(`${label}: \`properties\` غائبةٌ أو غيرُ صالحة`);
+    }
+    const unknown = props.filter((p) => !KNOWN_PROPS.has(p.name)).map((p) => p.name);
+    if (unknown.length > 0)
+      return void problems.push(`${label}: خصائصُ غيرُ معروفة ${unknown.join('، ')}`);
+    if (props.some((p) => p.name === NPM_PROP.extraneous)) {
+      return void problems.push(`${label}: مكوّنٌ دخيلٌ (\`extraneous\`) ليس في القفل`);
+    }
+    const names = props.map((p) => p.name);
+    if (new Set(names).size !== names.length)
+      return void problems.push(`${label}: خاصّيّةٌ مكرّرة`);
+    const pathProp = props.find((p) => p.name === NPM_PROP.path);
+    if (!pathProp) return void problems.push(`${label}: بلا \`${NPM_PROP.path}\` — هويّةٌ ملتبسة`);
+    const key = pathProp.value;
+    if (seen.has(key)) return void problems.push(`${label}: المسارُ «${key}» مكرّرٌ في SBOM`);
+    seen.add(key);
+    const entry = entries.get(key);
+    if (!entry)
+      return void problems.push(`${label}: المسارُ «${key}» ليس مدخلةً قابلةً للمطابقةِ في القفل`);
+    const why = componentMismatches(c, key, entry);
+    if (why.length > 0) problems.push(`${label} («${key}»): ${why.join('، ')}`);
+  });
+  for (const [key, entry] of entries) {
+    if (seen.has(key)) continue;
+    if (entry.optional === true || entry.devOptional === true) omittedOptional.push(key);
+    else problems.push(`مدخلةُ القفل «${key}@${entry.version}» مطلوبةٌ وغائبةٌ عن SBOM`);
+  }
+  return { problems, omittedOptional };
+}
+
+/** نصُّ مخالفةِ R2 من الأسباب (‏أوّلُ خمسةٍ ثمّ العدد). @param {string[]} problems */
+export function formatComponentProblems(problems) {
+  const head = problems.slice(0, MAX_REASONS).join('؛ ');
+  const rest = problems.length - MAX_REASONS;
+  return rest > 0 ? `${head}؛ (‏و${rest} أخرى من ${problems.length})` : head;
+}
+
 function main() {
   const rootIndex = process.argv.indexOf('--root');
   const repoRoot =

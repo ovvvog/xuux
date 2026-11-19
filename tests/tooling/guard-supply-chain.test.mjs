@@ -85,6 +85,47 @@ function stampedSbom(root, sbom) {
   };
 }
 
+/**
+ * WL-576: مكوّناتُ CycloneDX كما يشتقُّها `npm sbom` (‏npm 10.8.2، lib/utils/sbom-cyclonedx.js) من شجرةِ القفلِ في
+ * الجذر — مكوّنٌ لكلِّ مدخلةٍ سوى الجذرِ والروابط، مكتوبةً هنا مستقلّةً عن الشفرةِ المُختبَرة. تحلُّ محلَّ المكوّنِ
+ * الرمزيِّ `{ name: 'pg' }` في الجذورِ الصالحة، لأنّ R2 صارَ يطابقُ المكوّناتِ بالقفل.
+ *
+ * @param {string} root
+ */
+function lockComponents(root) {
+  const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+  return Object.entries(lock.packages ?? {})
+    .filter(([key, entry]) => key !== '' && entry.link !== true)
+    .map(([key, entry]) => npmComponent(key, entry));
+}
+
+/** @param {string} key @param {Record<string, any>} entry */
+function npmComponent(key, entry) {
+  const name = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+  const pkgName = entry.name ?? name;
+  const properties = [{ name: 'cdx:npm:package:path', value: key }];
+  if (entry.dev === true) properties.push({ name: 'cdx:npm:package:development', value: 'true' });
+  if (entry.inBundle === true) properties.push({ name: 'cdx:npm:package:bundled', value: 'true' });
+  /** @type {Record<string, any>} */
+  const c = {
+    'bom-ref': `${pkgName}@${entry.version}`,
+    type: 'library',
+    name,
+    version: entry.version,
+    scope: entry.dev || entry.optional || entry.devOptional ? 'optional' : 'required',
+    purl: `pkg:npm/${pkgName.replace(/^@/, '%40')}@${entry.version}`,
+    properties,
+    externalReferences: entry.resolved ? [{ type: 'distribution', url: entry.resolved }] : [],
+  };
+  if (entry.integrity) {
+    const [alg, b64] = entry.integrity.split(' ')[0].split(/-(.*)/s);
+    /** @type {Record<string, string>} */
+    const ALG = { sha1: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
+    c.hashes = [{ alg: ALG[alg], content: Buffer.from(b64, 'base64').toString('hex') }];
+  }
+  return c;
+}
+
 test('guard:supply-chain passes when all conditions are met', () => {
   const tmp = makeTempRoot();
   try {
@@ -105,7 +146,7 @@ test('guard:supply-chain passes when all conditions are met', () => {
       JSON.stringify({
         lockfileVersion: 3,
         name: 'test',
-        packages: {},
+        packages: { 'node_modules/pg': { version: '8.23.0' } },
       }),
     );
     writeFileSync(
@@ -114,7 +155,7 @@ test('guard:supply-chain passes when all conditions are met', () => {
         stampedSbom(tmp, {
           bomFormat: 'CycloneDX',
           specVersion: '1.4',
-          components: [{ name: 'pg', version: '8.23.0' }],
+          components: lockComponents(tmp),
         }),
       ),
     );
@@ -455,7 +496,9 @@ test('WL-557/WL-571: حاجزُ سلسلةِ التوريد (‏R3) يُطبِّ
       );
       writeFileSync(
         path.join(tmp, 'sbom.cdx.json'),
-        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+        JSON.stringify(
+          stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) }),
+        ),
       );
       writeFileSync(
         path.join(tmp, 'audit-report.json'),
@@ -729,7 +772,11 @@ function floorRoot(packages) {
     JSON.stringify({
       lockfileVersion: 3,
       name: 'test',
-      packages: { '': { name: 'test' }, ...packages },
+      packages: {
+        '': { name: 'test' },
+        'node_modules/ajv': { version: '8.20.0', dev: true },
+        ...packages,
+      },
     }),
   );
   writeFileSync(
@@ -738,7 +785,7 @@ function floorRoot(packages) {
       stampedSbom(tmp, {
         bomFormat: 'CycloneDX',
         specVersion: '1.4',
-        components: [{ name: 'ajv', version: '8.20.0' }],
+        components: lockComponents(tmp),
       }),
     ),
   );
@@ -1317,7 +1364,7 @@ function auditableRoot() {
   mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
   writeFileSync(
     path.join(tmp, 'sbom.cdx.json'),
-    JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+    JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) })),
   );
   writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
   return tmp;
@@ -1478,7 +1525,7 @@ test('WL-575: R2 عبرَ CLI — SBOM مربوطٌ بالقفلِ يمرّ، و
       bomFormat: 'CycloneDX',
       specVersion: '1.5',
       metadata: { timestamp: '2026-11-19T00:00:00.000Z', tools: [{ name: 'cli' }] },
-      components: [{ name: 'ajv', version: '8.20.0' }],
+      components: lockComponents(tmp),
     };
     const good = stampedSbom(tmp, base);
     const prop = good.metadata.properties[0];
@@ -1535,7 +1582,7 @@ test('WL-575: ربطُ SBOM لبايتاتِ القفلِ الخام — إعا�
   try {
     const lockPath = path.join(tmp, 'package-lock.json');
     const sbomPath = path.join(tmp, 'sbom.cdx.json');
-    const sbom = { bomFormat: 'CycloneDX', components: [{ name: 'ajv' }] };
+    const sbom = { bomFormat: 'CycloneDX', components: lockComponents(tmp) };
     writeFileSync(sbomPath, JSON.stringify(stampedSbom(tmp, sbom)));
     assert.equal(runGuard(tmp).ok, true);
     // ‏الشروطُ السابقةُ لا تُرخى بالربط: صيغةٌ أخرى أو بلا مكوّناتٍ ⇒ رسالتُها كما هي.
@@ -1758,7 +1805,9 @@ test('WL-575: تغيّرُ القفلِ أثناءَ التوليدِ (‏سطر
     try {
       writeFileSync(
         path.join(tmp, 'sbom.cdx.json'),
-        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+        JSON.stringify(
+          stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) }),
+        ),
       );
       assert.equal(runGuard(tmp).ok, true, `${shim}: السابقُ صالحٌ قبلَ التشغيل`);
       const r = runGenSbom(tmp, shim);
@@ -1812,7 +1861,7 @@ test('WL-575: ABA كاملٌ أثناءَ التوليد — البايتاتُ 
     const sbomPath = path.join(tmp, 'sbom.cdx.json');
     writeFileSync(
       sbomPath,
-      JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+      JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) })),
     );
     assert.equal(runGuard(tmp).ok, true, 'السابقُ صالحٌ قبلَ التشغيل');
     mkdirSync(shimDir, { recursive: true });
@@ -1866,7 +1915,9 @@ test('WL-575: فشلُ التوليدِ (‏npm يفشل، أو شجرةٌ نا�
     try {
       writeFileSync(
         path.join(tmp, 'sbom.cdx.json'),
-        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+        JSON.stringify(
+          stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) }),
+        ),
       );
       assert.equal(runGuard(tmp).ok, true, `${label}: السابقُ صالحٌ قبلَ التشغيل`);
       // ‏«missing»: npm sbom الحقيقيُّ يرفضُ شجرةً تنقصُها حزمةٌ في القفل (‏ESBOMPROBLEMS).
@@ -1975,7 +2026,9 @@ test('WL-575: تغيّرُ القفلِ بعدَ كتابةِ المؤقّتِ �
       const sbomPath = path.join(tmp, 'sbom.cdx.json');
       writeFileSync(
         sbomPath,
-        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+        JSON.stringify(
+          stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) }),
+        ),
       );
       assert.equal(runGuard(tmp).ok, true, `${mode}: السابقُ صالحٌ قبلَ التشغيل`);
       mkdirSync(preDir, { recursive: true });
@@ -2087,7 +2140,9 @@ test('WL-575: ABA بينَ stat وقراءةِ البايتاتِ في كلِّ 
       const sbomPath = path.join(tmp, 'sbom.cdx.json');
       writeFileSync(
         sbomPath,
-        JSON.stringify(stampedSbom(tmp, { bomFormat: 'CycloneDX', components: [{ name: 'pg' }] })),
+        JSON.stringify(
+          stampedSbom(tmp, { bomFormat: 'CycloneDX', components: lockComponents(tmp) }),
+        ),
       );
       assert.equal(runGuard(tmp).ok, true, `${target}: السابقُ صالحٌ قبلَ التشغيل`);
       mkdirSync(preDir, { recursive: true });
@@ -2134,4 +2189,581 @@ test('WL-575: ABA بينَ stat وقراءةِ البايتاتِ في كلِّ 
       rmSync(report, { force: true });
     }
   }
+});
+
+// ── WL-576: مطابقةُ مكوّناتِ SBOM لشجرةِ القفلِ المقفلة — بالمسارِ ثمّ بالهويّةِ كاملة، لا بالاسمِ وحدَه. ──
+
+const sri512 = (/** @type {string} */ s) =>
+  `sha512-${createHash('sha512').update(s).digest('base64')}`;
+
+/**
+ * جذرٌ بشجرةٍ مثبّتةٍ واقعيّة: `a` تتطلّبُ `b@2.0.0` متداخلةً تحتَها و`b@1.0.0` في القمّة (‏اسمٌ واحدٌ بإصدارين)،
+ * و`@s/c` نطاقيّةٌ تطويريّة، و`opt` اختياريّة، و`al` اسمٌ مستعارٌ لـ`real` — بـresolved وintegrity، وقفلٍ مخفيٍّ
+ * (‏`node_modules/.package-lock.json`) يُكتَبُ أخيراً كما يفعلُ `npm ci` فيقرأُ npm منه المصدرَ والبصمة.
+ * @param {{ installOptional?: boolean }} [opts]
+ */
+function treeRoot({ installOptional = true } = {}) {
+  const tmp = makeTempRoot();
+  /** @type {Array<[string, { version: string, name?: string, dev?: boolean, optional?: boolean, deps?: Record<string, string> }]>} */
+  const tree = [
+    ['node_modules/a', { version: '1.0.0', deps: { b: '2.0.0' } }],
+    ['node_modules/a/node_modules/b', { version: '2.0.0' }],
+    ['node_modules/b', { version: '1.0.0' }],
+    ['node_modules/@s/c', { version: '3.0.0', dev: true }],
+    ['node_modules/opt', { version: '1.0.0', optional: true }],
+    ['node_modules/al', { version: '1.0.0', name: 'real' }],
+  ];
+  const manifest = {
+    dependencies: { a: '1.0.0', b: '1.0.0', al: 'npm:real@1.0.0' },
+    devDependencies: { '@s/c': '3.0.0' },
+    optionalDependencies: { opt: '1.0.0' },
+  };
+  /** @type {Record<string, any>} */
+  const packages = { '': { name: 't', version: '1.0.0', ...manifest } };
+  for (const [key, v] of tree) {
+    const folder = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+    const name = v.name ?? folder;
+    packages[key] = {
+      version: v.version,
+      ...(v.name ? { name: v.name } : {}),
+      resolved: `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${v.version}.tgz`,
+      integrity: sri512(key),
+      ...(v.dev ? { dev: true } : {}),
+      ...(v.optional ? { optional: true } : {}),
+      ...(v.deps ? { dependencies: v.deps } : {}),
+    };
+    if (v.optional && !installOptional) continue;
+    mkdirSync(path.join(tmp, key), { recursive: true });
+    writeFileSync(
+      path.join(tmp, key, 'package.json'),
+      JSON.stringify({ name, version: v.version, ...(v.deps ? { dependencies: v.deps } : {}) }),
+    );
+  }
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({ name: 't', version: '1.0.0', private: true, ...manifest }),
+  );
+  const lock = { name: 't', version: '1.0.0', lockfileVersion: 3, requires: true, packages };
+  writeFileSync(path.join(tmp, 'package-lock.json'), `${JSON.stringify(lock, null, 2)}\n`);
+  const hidden = Object.fromEntries(
+    Object.entries(packages).filter(
+      ([k]) => k !== '' && (installOptional || k !== 'node_modules/opt'),
+    ),
+  );
+  writeFileSync(
+    path.join(tmp, 'node_modules', '.package-lock.json'),
+    `${JSON.stringify({ ...lock, packages: hidden }, null, 2)}\n`,
+  );
+  writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+  writeFileSync(
+    path.join(tmp, 'audit-report.json'),
+    JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+  );
+  return tmp;
+}
+
+const TREE_PATHS = [
+  'node_modules/@s/c',
+  'node_modules/a',
+  'node_modules/a/node_modules/b',
+  'node_modules/al',
+  'node_modules/b',
+  'node_modules/opt',
+];
+const MISMATCH = /R2: مكوّناتُ SBOM لا تطابقُ شجرةَ القفل \(‏WL-576\)/;
+const OPTIONAL_NOTE = /ℹ️ R2 \(‏WL-576\): مدخلاتٌ اختياريّةٌ في القفلِ غائبةٌ عن SBOM/;
+/** @param {any} sbom @param {string} p */
+const byPath = (sbom, p) =>
+  sbom.components.find((/** @type {any} */ c) =>
+    c.properties?.some(
+      (/** @type {any} */ x) => x.name === 'cdx:npm:package:path' && x.value === p,
+    ),
+  );
+
+test('WL-576: gen:sbom الحقيقيُّ على شجرةٍ متداخلةٍ بإصدارين لاسمٍ واحدٍ ونطاقيّةٍ تطويريّةٍ واختياريّةٍ ومستعار — يطابقُ القفلَ فيقبلُه R2', () => {
+  const tmp = treeRoot();
+  try {
+    const gen = runGenSbom(tmp);
+    assert.equal(gen.status, 0, `${gen.stdout}\n${gen.stderr}`);
+    const sbom = JSON.parse(readFileSync(path.join(tmp, 'sbom.cdx.json'), 'utf8'));
+    const paths = sbom.components
+      .map(
+        (/** @type {any} */ c) =>
+          c.properties.find((/** @type {any} */ x) => x.name === 'cdx:npm:package:path').value,
+      )
+      .sort();
+    assert.deepEqual(paths, TREE_PATHS, 'كلُّ مدخلةٍ غيرِ جذريّةٍ مكوّنٌ واحدٌ بمسارِها');
+    // ‏اسمٌ واحدٌ بإصدارين في موقعين؛ والمتداخلُ ليس عقدةً جذريّة.
+    assert.equal(byPath(sbom, 'node_modules/b').version, '1.0.0');
+    assert.equal(byPath(sbom, 'node_modules/a/node_modules/b').version, '2.0.0');
+    // ‏المستعار: الاسمُ اسمُ المجلّد، وpurl وbom-ref للحزمةِ الحقيقيّة.
+    const al = byPath(sbom, 'node_modules/al');
+    assert.deepEqual([al.name, al.purl, al['bom-ref']], ['al', 'pkg:npm/real@1.0.0', 'real@1.0.0']);
+    assert.equal(byPath(sbom, 'node_modules/@s/c').purl, 'pkg:npm/%40s/c@3.0.0');
+    assert.equal(byPath(sbom, 'node_modules/opt').scope, 'optional');
+    // ‏المصدرُ والبصمةُ من القفلِ المخفيّ — فالمطابقةُ تشملُهما فعلاً لا افتراضاً.
+    assert.deepEqual(byPath(sbom, 'node_modules/b').externalReferences, [
+      { type: 'distribution', url: 'https://registry.npmjs.org/b/-/b-1.0.0.tgz' },
+    ]);
+    assert.equal(
+      byPath(sbom, 'node_modules/b').hashes[0].content,
+      Buffer.from(sri512('node_modules/b').slice(7), 'base64').toString('hex'),
+    );
+    const r = runGuard(tmp);
+    assert.equal(r.ok, true, r.stderr || r.output);
+    assert.doesNotMatch(r.output, /R2/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-576: R2 عبرَ CLI — كلُّ مكوّنٍ غيرِ موجودٍ أو بإصدارٍ آخرَ أو محذوفٍ أو مكرّرٍ أو ملتبسِ الهويّةِ أو المصدرِ يُرفَض، بسببِه', () => {
+  const tmp = treeRoot();
+  try {
+    assert.equal(runGenSbom(tmp).status, 0);
+    const sbomPath = path.join(tmp, 'sbom.cdx.json');
+    const real = readFileSync(sbomPath, 'utf8');
+    /** @param {any} c @param {string} p */
+    const setPath = (c, p) => {
+      c.properties.find((/** @type {any} */ x) => x.name === 'cdx:npm:package:path').value = p;
+    };
+    /** @param {any} c @param {string} v */
+    const setVersion = (c, v) => {
+      c.version = v;
+      c.purl = c.purl.replace(/@[^@]+$/, `@${v}`);
+      c['bom-ref'] = c['bom-ref'].replace(/@[^@]+$/, `@${v}`);
+    };
+    /** @param {any} s @param {string} p */
+    const drop = (s, p) => {
+      s.components = s.components.filter((/** @type {any} */ c) => c !== byPath(s, p));
+    };
+    /** @type {Array<[string, (s: any) => void, RegExp]>} */
+    const cases = [
+      [
+        'مكوّنٌ غيرُ موجودٍ في القفل',
+        (s) => {
+          const g = structuredClone(byPath(s, 'node_modules/b'));
+          setPath(g, 'node_modules/ghost');
+          Object.assign(g, {
+            name: 'ghost',
+            purl: 'pkg:npm/ghost@1.0.0',
+            'bom-ref': 'ghost@1.0.0',
+          });
+          s.components.push(g);
+        },
+        /«node_modules\/ghost» ليس مدخلةً قابلةً للمطابقةِ في القفل/,
+      ],
+      [
+        'إصدارٌ آخرُ لحزمةٍ موجودة',
+        (s) => setVersion(byPath(s, 'node_modules/b'), '1.0.1'),
+        /الإصدارُ «1\.0\.1» ≠ «1\.0\.0»/,
+      ],
+      [
+        'إصدارٌ موجودٌ للاسمِ نفسِه لكن في موقعٍ آخر',
+        (s) => setVersion(byPath(s, 'node_modules/b'), '2.0.0'),
+        /\(«node_modules\/b»\): الإصدارُ «2\.0\.0» ≠ «1\.0\.0»/,
+      ],
+      [
+        'تبديلُ موقعَي الإصدارين',
+        (s) => {
+          const top = byPath(s, 'node_modules/b');
+          const nested = byPath(s, 'node_modules/a/node_modules/b');
+          setPath(top, 'node_modules/a/node_modules/b');
+          setPath(nested, 'node_modules/b');
+        },
+        /\(«node_modules\/a\/node_modules\/b»\): الإصدارُ «1\.0\.0» ≠ «2\.0\.0»/,
+      ],
+      [
+        'حذفُ المتداخلِ المطلوب',
+        (s) => drop(s, 'node_modules/a/node_modules/b'),
+        /«node_modules\/a\/node_modules\/b@2\.0\.0» مطلوبةٌ وغائبةٌ عن SBOM/,
+      ],
+      [
+        'حذفُ التطويريِّ المثبَّت',
+        (s) => drop(s, 'node_modules/@s/c'),
+        /«node_modules\/@s\/c@3\.0\.0» مطلوبةٌ وغائبة/,
+      ],
+      [
+        'حذفُ المستعار',
+        (s) => drop(s, 'node_modules/al'),
+        /«node_modules\/al@1\.0\.0» مطلوبةٌ وغائبة/,
+      ],
+      [
+        'مكوّنٌ مكرّرٌ بالمسارِ نفسِه',
+        (s) => s.components.push(structuredClone(byPath(s, 'node_modules/a'))),
+        /«node_modules\/a» مكرّرٌ في SBOM/,
+      ],
+      [
+        'متداخلٌ يُدّعى في القمّة (‏مسارٌ مكرّر)',
+        (s) => setPath(byPath(s, 'node_modules/a/node_modules/b'), 'node_modules/b'),
+        /مكرّرٌ في SBOM/,
+      ],
+      [
+        'بالاسمِ والإصدارِ وحدَهما',
+        (s) => {
+          drop(s, 'node_modules/b');
+          s.components.push({
+            type: 'library',
+            name: 'b',
+            version: '1.0.0',
+            purl: 'pkg:npm/b@1.0.0',
+          });
+        },
+        /`properties` غائبةٌ أو غيرُ صالحة/,
+      ],
+      [
+        'بلا خاصّيّةِ المسار',
+        (s) => {
+          const c = byPath(s, 'node_modules/a');
+          c.properties = c.properties.filter(
+            (/** @type {any} */ x) => x.name !== 'cdx:npm:package:path',
+          );
+        },
+        /بلا `cdx:npm:package:path` — هويّةٌ ملتبسة/,
+      ],
+      [
+        'مساران في مكوّنٍ واحد',
+        (s) =>
+          byPath(s, 'node_modules/a').properties.push({
+            name: 'cdx:npm:package:path',
+            value: 'node_modules/b',
+          }),
+        /خاصّيّةٌ مكرّرة/,
+      ],
+      ['مسارُ الجذر', (s) => setPath(byPath(s, 'node_modules/a'), ''), /«» ليس مدخلةً/],
+      [
+        'مسارٌ خارجَ node_modules',
+        (s) => setPath(byPath(s, 'node_modules/a'), '../a'),
+        /«\.\.\/a» ليس مدخلةً/,
+      ],
+      ['اسمٌ آخر', (s) => (byPath(s, 'node_modules/a').name = 'A'), /الاسمُ «A» ≠ «a»/],
+      [
+        'المستعارُ باسمِ الحقيقيّ',
+        (s) => (byPath(s, 'node_modules/al').name = 'real'),
+        /الاسمُ «real» ≠ «al»/,
+      ],
+      [
+        'purl المستعارِ لاسمِ المجلّد',
+        (s) => (byPath(s, 'node_modules/al').purl = 'pkg:npm/al@1.0.0'),
+        /purl «pkg:npm\/al@1\.0\.0» ≠ «pkg:npm\/real@1\.0\.0»/,
+      ],
+      [
+        'purl نطاقيٌّ بلا ترميز',
+        (s) => (byPath(s, 'node_modules/@s/c').purl = 'pkg:npm/@s/c@3.0.0'),
+        /purl/,
+      ],
+      ['bom-ref آخر', (s) => (byPath(s, 'node_modules/a')['bom-ref'] = 'a@9.9.9'), /bom-ref/],
+      [
+        'scope الاختياريِّ required',
+        (s) => (byPath(s, 'node_modules/opt').scope = 'required'),
+        /scope «required» ≠ «optional»/,
+      ],
+      [
+        'scope الإنتاجيِّ optional',
+        (s) => (byPath(s, 'node_modules/a').scope = 'optional'),
+        /scope «optional» ≠ «required»/,
+      ],
+      [
+        'التطويريُّ بلا علامةِ التطوير',
+        (s) => {
+          const c = byPath(s, 'node_modules/@s/c');
+          c.properties = c.properties.filter(
+            (/** @type {any} */ x) => x.name !== 'cdx:npm:package:development',
+          );
+        },
+        /cdx:npm:package:development غائبةٌ خلافاً للقفل/,
+      ],
+      [
+        'الإنتاجيُّ بعلامةِ التطوير',
+        (s) =>
+          byPath(s, 'node_modules/a').properties.push({
+            name: 'cdx:npm:package:development',
+            value: 'true',
+          }),
+        /cdx:npm:package:development زائدةٌ خلافاً للقفل/,
+      ],
+      [
+        'علامةُ تطويرٍ بقيمةٍ أخرى',
+        (s) =>
+          (byPath(s, 'node_modules/@s/c').properties.find(
+            (/** @type {any} */ x) => x.name === 'cdx:npm:package:development',
+          ).value = 'false'),
+        /ليست "true"/,
+      ],
+      [
+        'مضمَّنةٌ خلافاً للقفل',
+        (s) =>
+          byPath(s, 'node_modules/a').properties.push({
+            name: 'cdx:npm:package:bundled',
+            value: 'true',
+          }),
+        /cdx:npm:package:bundled زائدةٌ/,
+      ],
+      [
+        'دخيلة',
+        (s) =>
+          byPath(s, 'node_modules/a').properties.push({
+            name: 'cdx:npm:package:extraneous',
+            value: 'true',
+          }),
+        /دخيلٌ/,
+      ],
+      [
+        'خاصّيّةٌ غيرُ معروفة',
+        (s) =>
+          byPath(s, 'node_modules/a').properties.push({ name: 'cdx:npm:package:x', value: 'true' }),
+        /خصائصُ غيرُ معروفة cdx:npm:package:x/,
+      ],
+      ['نوعٌ آخر', (s) => (byPath(s, 'node_modules/a').type = 'application'), /ليس library/],
+      ['بلا purl', (s) => delete byPath(s, 'node_modules/a').purl, /هويّةٌ ناقصة/],
+      ['عنصرٌ ليس كائناً', (s) => s.components.push(7), /#6: ليس كائناً/],
+      [
+        'مصدرٌ آخر',
+        (s) =>
+          (byPath(s, 'node_modules/b').externalReferences.find(
+            (/** @type {any} */ x) => x.type === 'distribution',
+          ).url = 'https://evil.example/b-1.0.0.tgz'),
+        /مرجعُ التوزيعِ .*evil\.example.* ≠ resolved/,
+      ],
+      [
+        'بلا مصدر',
+        (s) => (byPath(s, 'node_modules/b').externalReferences = []),
+        /مرجعُ التوزيعِ \[\] ≠ resolved/,
+      ],
+      [
+        'مصدران',
+        (s) =>
+          byPath(s, 'node_modules/b').externalReferences.push({
+            type: 'distribution',
+            url: 'https://registry.npmjs.org/b/-/b-1.0.0.tgz',
+          }),
+        /مرجعُ التوزيعِ/,
+      ],
+      ['بلا بصمة', (s) => delete byPath(s, 'node_modules/b').hashes, /البصمةُ لا تطابقُ integrity/],
+      [
+        'بصمةٌ أخرى',
+        (s) => (byPath(s, 'node_modules/b').hashes[0].content = '0'.repeat(128)),
+        /البصمةُ لا تطابقُ integrity/,
+      ],
+      [
+        'خوارزميّةٌ أخرى',
+        (s) => (byPath(s, 'node_modules/b').hashes[0].alg = 'SHA-1'),
+        /البصمةُ لا تطابقُ integrity/,
+      ],
+    ];
+    for (const [label, mutate, reason] of cases) {
+      const s = JSON.parse(real);
+      mutate(s);
+      writeFileSync(sbomPath, JSON.stringify(s));
+      const r = runGuard(tmp);
+      assert.equal(r.ok, false, label);
+      assert.match(r.stderr ?? '', MISMATCH, label);
+      assert.match(r.stderr ?? '', reason, label);
+      // ‏حكمٌ مستقلّ: الربطُ والتدقيقُ سليمان فلا يُنسَبُ الرفضُ إليهما.
+      assert.doesNotMatch(r.stderr ?? '', /R2: SBOM غيرُ مربوطٍ|R3/, label);
+    }
+    writeFileSync(sbomPath, real);
+    assert.equal(runGuard(tmp).ok, true, 'الأصلُ صالحٌ بعدَ كلِّ الحالات');
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-576: الاختياريّةُ غيرُ المثبَّتةِ غائبةٌ عن SBOM — يقبلُها R2 ويُعلنُها (‏لا صمت)، وغيابُ غيرِها مرفوض', () => {
+  const tmp = treeRoot({ installOptional: false });
+  try {
+    const gen = runGenSbom(tmp);
+    assert.equal(gen.status, 0, `${gen.stdout}\n${gen.stderr}`);
+    const sbom = JSON.parse(readFileSync(path.join(tmp, 'sbom.cdx.json'), 'utf8'));
+    assert.equal(
+      byPath(sbom, 'node_modules/opt'),
+      undefined,
+      'npm لا يُدرجُ الاختياريّةَ غيرَ المثبَّتة',
+    );
+    const r = runGuard(tmp);
+    assert.equal(r.ok, true, r.stderr || r.output);
+    assert.match(r.output, OPTIONAL_NOTE);
+    assert.match(
+      r.output,
+      /غائبةٌ عن SBOM \(‏غيرُ مثبَّتةٍ على هذه المنصّة\): node_modules\/opt$/m,
+    );
+    // ‏حذفُ مطلوبٍ مع غيابِ الاختياريّة: الرفضُ للمطلوبِ وحدَه، والإعلانُ باقٍ.
+    drop576(tmp, 'node_modules/a');
+    const r2 = runGuard(tmp);
+    assert.equal(r2.ok, false);
+    assert.match(r2.stderr ?? '', /«node_modules\/a@1\.0\.0» مطلوبةٌ وغائبة/);
+    assert.doesNotMatch(r2.stderr ?? '', /node_modules\/opt/);
+    assert.match(r2.output, OPTIONAL_NOTE);
+  } finally {
+    cleanup(tmp);
+  }
+  // ‏شجرةٌ كاملة: لا إعلان.
+  const full = treeRoot();
+  try {
+    assert.equal(runGenSbom(full).status, 0);
+    const r = runGuard(full);
+    assert.equal(r.ok, true);
+    assert.doesNotMatch(r.output, OPTIONAL_NOTE);
+  } finally {
+    cleanup(full);
+  }
+});
+
+/** يحذفُ مكوّناً بمسارِه من SBOM الجذر. @param {string} root @param {string} p */
+function drop576(root, p) {
+  const f = path.join(root, 'sbom.cdx.json');
+  const s = JSON.parse(readFileSync(f, 'utf8'));
+  s.components = s.components.filter((/** @type {any} */ c) => c !== byPath(s, p));
+  writeFileSync(f, JSON.stringify(s));
+}
+
+test('WL-576: شروطُ R2 السابقةُ ورسائلُها قائمةٌ مع الحكمِ الجديد، وكلٌّ يُنسَبُ لسببِه', () => {
+  const tmp = treeRoot();
+  try {
+    assert.equal(runGenSbom(tmp).status, 0);
+    const sbomPath = path.join(tmp, 'sbom.cdx.json');
+    const lockPath = path.join(tmp, 'package-lock.json');
+    const real = readFileSync(sbomPath, 'utf8');
+    const s = JSON.parse(real);
+    writeFileSync(sbomPath, JSON.stringify({ ...s, bomFormat: 'SPDX' }));
+    let r = runGuard(tmp);
+    assert.match(r.stderr ?? '', /R2: `sbom\.cdx\.json` ليس بصيغة CycloneDX\./);
+    assert.doesNotMatch(r.stderr ?? '', MISMATCH, 'الصيغةُ وحدَها');
+    writeFileSync(sbomPath, JSON.stringify({ ...s, components: [] }));
+    r = runGuard(tmp);
+    assert.match(r.stderr ?? '', /R2: `sbom\.cdx\.json` بلا مكوّناتٍ — هل المشروع مثبَّت؟/);
+    assert.match(r.stderr ?? '', MISMATCH, 'والمطلوباتُ غائبةٌ تُعلَنُ كذلك');
+    // ‏خمسُ مطلوباتٍ غائبة (‏والاختياريّةُ تُعلَنُ لا تُرفَض) — فلا «أخرى».
+    assert.doesNotMatch(r.stderr ?? '', /أخرى/);
+    assert.match(r.output, OPTIONAL_NOTE);
+    writeFileSync(sbomPath, JSON.stringify({ ...s, components: [7] }));
+    r = runGuard(tmp);
+    assert.doesNotMatch(r.stderr ?? '', /بلا مكوّناتٍ/);
+    assert.match(
+      r.stderr ?? '',
+      /#0: ليس كائناً؛ .*\(‏و1 أخرى من 6\)\.$/m,
+      'أوّلُ خمسةِ أسبابٍ ثمّ العدد',
+    );
+    writeFileSync(sbomPath, '{');
+    assert.match(runGuard(tmp).stderr ?? '', /R2: `sbom\.cdx\.json` ليس JSON صالح\./);
+    // ‏قفلٌ بالمعنى نفسِه وبايتاتٍ أخرى: الربطُ وحدَه يرفض، والمطابقةُ (‏بالمعنى) تقبل.
+    writeFileSync(sbomPath, real);
+    writeFileSync(lockPath, `${readFileSync(lockPath, 'utf8')}\n`);
+    writeFileSync(
+      path.join(tmp, 'audit-report.json'),
+      JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+    );
+    r = runGuard(tmp);
+    assert.match(r.stderr ?? '', /R2: SBOM غيرُ مربوطٍ بالقفل \(‏WL-575\)/);
+    assert.doesNotMatch(r.stderr ?? '', MISMATCH);
+    // ‏قفلٌ فاسد: R0، والمطابقةُ تُغلَقُ ولا يُنسَبُ الفسادُ إلى SBOM.
+    writeFileSync(lockPath, '{');
+    r = runGuard(tmp);
+    assert.match(r.stderr ?? '', /R0/);
+    assert.match(r.stderr ?? '', /غائبٌ أو بلا `packages` فلا تُطابَقُ المكوّنات/);
+    assert.doesNotMatch(r.stderr ?? '', /R2: `sbom\.cdx\.json` ليس JSON صالح/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-576: checkSbomComponents — القفلُ الحقيقيُّ للمستودع، وحدودُ القفل، ولا يرمي أبداً', async () => {
+  const m = await import('../../scripts/generate-sbom.mjs');
+  const lock = JSON.parse(readFileSync(path.join(repoRoot, 'package-lock.json'), 'utf8'));
+  const comps = Object.entries(lock.packages)
+    .filter(([k]) => k !== '')
+    .map(([k, e]) => npmComponent(k, /** @type {any} */ (e)));
+  const sbom = { bomFormat: 'CycloneDX', components: comps };
+  assert.deepEqual(m.checkSbomComponents(sbom, lock), { problems: [], omittedOptional: [] });
+  const nested = Object.keys(lock.packages).filter((k) => k.split('node_modules/').length > 2);
+  assert.ok(nested.length > 0, 'القفلُ الحقيقيُّ فيه متداخلات');
+  for (const k of nested) {
+    const one = { ...sbom, components: comps.filter((c) => c.properties[0].value !== k) };
+    assert.match(
+      m.checkSbomComponents(one, lock).problems.join('\n'),
+      new RegExp(`«${k.replace(/[/.@]/g, '\\$&')}@`),
+      k,
+    );
+  }
+  const opt = Object.entries(lock.packages).filter(
+    ([, e]) => /** @type {any} */ (e).optional === true,
+  );
+  for (const [k] of opt) {
+    const none = { ...sbom, components: comps.filter((c) => c.properties[0].value !== k) };
+    assert.deepEqual(m.checkSbomComponents(none, lock), { problems: [], omittedOptional: [k] });
+  }
+  // ‏حدودُ القفل: كلُّ ما لا يُطابَقُ يُغلِقُ الحكمَ بسببٍ مسمّى.
+  const base = { lockfileVersion: 3, packages: { '': {}, 'node_modules/x': { version: '1.0.0' } } };
+  const xs = { components: [npmComponent('node_modules/x', { version: '1.0.0' })] };
+  assert.deepEqual(m.checkSbomComponents(xs, base).problems, []);
+  /** @type {Array<[string, any, RegExp]>} */
+  const locks = [
+    ['قفلٌ غائب', null, /غائبٌ أو بلا `packages`/],
+    ['بلا packages', { lockfileVersion: 3 }, /غائبٌ أو بلا `packages`/],
+    ['lockfileVersion 1', { ...base, lockfileVersion: 1 }, /lockfileVersion 1 غيرُ مدعوم/],
+    [
+      'رابط',
+      {
+        ...base,
+        packages: { ...base.packages, 'node_modules/w': { resolved: 'packages/w', link: true } },
+      },
+      /رابطٌ \(`link`\)/,
+    ],
+    [
+      'مساحةُ عمل',
+      { ...base, packages: { ...base.packages, 'packages/w': { version: '1.0.0' } } },
+      /خارجَ node_modules/,
+    ],
+    [
+      'بلا إصدار',
+      { ...base, packages: { ...base.packages, 'node_modules/y': {} } },
+      /بلا إصدارٍ نصّيّ/,
+    ],
+    [
+      'مدخلةٌ ليست كائناً',
+      { ...base, packages: { ...base.packages, 'node_modules/y': 1 } },
+      /ليست كائناً/,
+    ],
+    [
+      'integrity فاسدة',
+      {
+        ...base,
+        packages: { '': {}, 'node_modules/x': { version: '1.0.0', integrity: 'md5-xx' } },
+      },
+      /غيرُ قابلةٍ للتفسير/,
+    ],
+    [
+      'بصمةٌ والقفلُ بلا integrity',
+      { lockfileVersion: 3, packages: { '': {}, 'node_modules/x': { version: '1.0.0' } }, _: 0 },
+      /بلا integrity/,
+    ],
+  ];
+  for (const [label, l, re] of locks) {
+    const s = label.startsWith('بصمةٌ')
+      ? { components: [{ ...xs.components[0], hashes: [{ alg: 'SHA-512', content: 'ab' }] }] }
+      : xs;
+    assert.match(m.checkSbomComponents(s, l).problems.join('\n'), re, label);
+  }
+  assert.deepEqual(
+    m.checkSbomComponents({ components: 'x' }, base),
+    { problems: [], omittedOptional: [] },
+    'غيرُ المصفوفةِ لشرطِ R2 السابق',
+  );
+  for (const weird of [
+    null,
+    1,
+    'x',
+    [],
+    {},
+    { components: [null, [], {}, { properties: [null] }] },
+  ]) {
+    for (const l of [null, 1, [], {}, base, { lockfileVersion: 3, packages: [] }]) {
+      assert.doesNotThrow(() => m.checkSbomComponents(weird, l));
+    }
+  }
+  assert.equal(m.formatComponentProblems(['a', 'b']), 'a؛ b');
+  assert.equal(
+    m.formatComponentProblems(['1', '2', '3', '4', '5', '6', '7']),
+    '1؛ 2؛ 3؛ 4؛ 5؛ (‏و2 أخرى من 7)',
+  );
 });
