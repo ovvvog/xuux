@@ -123,6 +123,18 @@ const NPM_PROP = {
 };
 const KNOWN_PROPS = new Set(Object.values(NPM_PROP));
 const SRI_ALG = { sha1: 'SHA-1', sha256: 'SHA-256', sha384: 'SHA-384', sha512: 'SHA-512' };
+/** طولُ الملخّصِ بالبايتِ لكلِّ خوارزميّة — ما سواه ليس ملخّصاً صالحاً (‏مثلاً `sha512-YQ` بايتٌ واحد). */
+const SRI_BYTES = { sha1: 20, sha256: 32, sha384: 48, sha512: 64 };
+/** ترتيبُ القوّةِ كما في ssri (‏‏pickAlgorithm)؛ npm sbom يأخذُ الأقوى. */
+const SRI_STRENGTH = ['sha1', 'sha256', 'sha384', 'sha512'];
+/** رمزُ SRI بلا خيارات `?`: خوارزميّةٌ معروفةٌ ثمّ Base64 قياسيٌّ بحشوٍ كامل. */
+const SRI_TOKEN = /^(sha1|sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})$/;
+/** السجلُّ الافتراضيُّ الوحيدُ المدعوم — أيُّ مصدرٍ آخرَ (‏git، ملفّ، سجلٌّ آخر، http) يُرفَض صراحةً. */
+const DEFAULT_REGISTRY_HOST = 'registry.npmjs.org';
+/** اسمُ حزمةٍ npm (‏نطاقيٌّ اختياريّاً) بلا مقاطعَ تبدأُ بنقطةٍ أو شرطةٍ سفليّة. */
+const PKG_NAME = /^(?:@[A-Za-z0-9~-][A-Za-z0-9._~-]*\/)?[A-Za-z0-9~-][A-Za-z0-9._~-]*$/;
+/** إصدارٌ آمنٌ داخلَ مسارِ URL (‏لا فواصلَ ولا ترميزَ ولا `..` ولا فراغ). */
+const SAFE_VERSION = /^(?!.*\.\.)[A-Za-z0-9.+_-]+$/;
 /** مسارُ تثبيتٍ تحتَ node_modules بتداخلٍ اختياريّ؛ لا مقطعَ يبدأُ بـ `.` (‏فلا `..`). */
 const SEG = '(?:@[^/@.][^/]*/)?[^/@.][^/]*';
 const NM_PATH = new RegExp(`^node_modules/${SEG}(?:/node_modules/${SEG})*$`);
@@ -163,17 +175,81 @@ function matchableEntries(packages, problems) {
   return out;
 }
 
-/** بصماتُ SRI في القفل → مجموعةُ `ALG:hex`؛ null إن كانت غيرَ قابلةٍ للتفسير. @param {string} sri */
-function sriHashes(sri) {
-  const out = new Set();
-  for (const token of sri.split(/\s+/).filter(Boolean)) {
-    const dash = token.indexOf('-');
-    const alg = SRI_ALG[/** @type {keyof typeof SRI_ALG} */ (token.slice(0, dash))];
-    const b64 = token.slice(dash + 1).split('?')[0] ?? '';
-    if (dash <= 0 || !alg || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return null;
-    out.add(`${alg}:${Buffer.from(b64, 'base64').toString('hex')}`);
+/**
+ * WL-576: يفسّرُ `integrity` في القفلِ تفسيراً صارماً، ويُرجعُ بصمةَ الأقوى كما يختارُها npm sbom
+ * (‏`ssri.parse(…, {single: true})` = أوّلُ رمزٍ للخوارزميّةِ الأقوى) بصيغة `ALG:hex`، أو سببَ الرفض.
+ * الصرامة: كلُّ رمزٍ `alg-base64` بلا خيارات؛ Base64 قياسيٌّ قانونيٌّ (‏إعادةُ ترميزِه تساويه حرفاً بحرف،
+ * فلا حشوَ ناقصٌ أو زائدٌ ولا بِتّاتٌ ذيليّةٌ غيرُ صفريّة)؛ وطولُ الملخّصِ يساوي طولَ الخوارزميّةِ بالضبط؛
+ * والأقوى SHA-512 (‏ما دونه ضعيفٌ فيُرفَض، والقفلُ الحقيقيُّ كلُّه SHA-512).
+ * @param {unknown} sri @returns {{ hash: string } | { error: string }}
+ */
+export function parseSri(sri) {
+  if (typeof sri !== 'string') return { error: 'integrity ليست نصّاً' };
+  const tokens = sri.split(/[ \t\n\r\f]+/).filter(Boolean);
+  if (tokens.length === 0) return { error: 'integrity فارغة' };
+  /** @type {Map<string, string>} */
+  const first = new Map();
+  for (const token of tokens) {
+    const m = SRI_TOKEN.exec(token);
+    if (!m) return { error: `رمزُ SRI «${token.slice(0, 24)}» غيرُ صالحِ الصيغة` };
+    const alg = /** @type {keyof typeof SRI_BYTES} */ (m[1]);
+    const b64 = /** @type {string} */ (m[2]);
+    const bytes = Buffer.from(b64, 'base64');
+    if (bytes.toString('base64') !== b64) {
+      return { error: `رمزُ ${alg} ليس Base64 قانونيّاً (‏حشوٌ أو ترميزٌ مشوّه)` };
+    }
+    if (bytes.length !== SRI_BYTES[alg]) {
+      return { error: `ملخّصُ ${alg} بطول ${bytes.length} بايت ≠ ${SRI_BYTES[alg]}` };
+    }
+    if (!first.has(alg)) first.set(alg, bytes.toString('hex'));
   }
-  return out.size > 0 ? out : null;
+  const strongest = SRI_STRENGTH.filter((a) => first.has(a)).pop();
+  if (strongest !== 'sha512') {
+    return { error: `أقوى خوارزميّةٍ ${String(strongest)} — مطلوبٌ sha512` };
+  }
+  return { hash: `${SRI_ALG.sha512}:${first.get('sha512')}` };
+}
+
+/**
+ * WL-576: سياسةُ المصدر — السجلُّ الافتراضيُّ وحدَه وبرابطِ tarball القانونيِّ للحزمةِ والإصدارِ بالضبط.
+ * git وgithub: وfile: والمساراتُ المحلّيّةُ وhttp والسجلّاتُ الأخرى تُرفَضُ صراحةً حتّى لو طابقَ SBOM القفل.
+ * المدمجُ (‏`inBundle`) بلا resolved ولا integrity كما يكتبُه npm؛ وأيُّ مدخلةٍ أخرى بلا resolved مصدرُها
+ * غيرُ محدَّدٍ (‏يُحَلُّ من إعدادِ السجلِّ وقتَ التثبيت) فتُرفَض.
+ * @param {Record<string, any>} entry @param {string} pkgName @returns {string} سببُ الرفضِ أو ''
+ */
+export function sourceProblem(entry, pkgName) {
+  const resolved = entry.resolved;
+  if (entry.inBundle === true) {
+    return resolved === undefined && entry.integrity === undefined
+      ? ''
+      : 'مدمجةٌ (‏inBundle) بمصدرٍ أو بصمةٍ — غيرُ مدعومة';
+  }
+  if (!nonEmpty(resolved)) return 'بلا `resolved` — مصدرٌ غيرُ محدَّد';
+  if (/^(?:git\+|git:|github:|gitlab:|bitbucket:|gist:)/i.test(resolved)) {
+    return `مصدرُ git «${resolved}» — غيرُ مدعوم`;
+  }
+  if (/^file:/i.test(resolved) || !/^[a-z][a-z0-9+.-]*:\/\//i.test(resolved)) {
+    return `مصدرٌ محلّيٌّ «${resolved}» — غيرُ مدعوم`;
+  }
+  /** @type {URL} */
+  let url;
+  try {
+    url = new URL(resolved);
+  } catch {
+    return `مصدرٌ «${resolved}» ليس URL صالحاً`;
+  }
+  if (url.protocol !== 'https:') return `مصدرٌ بغيرِ https «${resolved}» — غيرُ مدعوم`;
+  if (url.hostname !== DEFAULT_REGISTRY_HOST || url.port !== '' || url.username || url.password) {
+    return `سجلٌّ غيرُ افتراضيٍّ «${url.host}» — المدعومُ ${DEFAULT_REGISTRY_HOST} وحدَه`;
+  }
+  if (!PKG_NAME.test(pkgName)) return `اسمُ الحزمةِ «${pkgName}» غيرُ صالح`;
+  if (!SAFE_VERSION.test(entry.version))
+    return `الإصدارُ «${entry.version}» غيرُ آمنٍ في رابطِ tarball`;
+  const base = pkgName.slice(pkgName.lastIndexOf('/') + 1);
+  const canonical = `https://${DEFAULT_REGISTRY_HOST}/${pkgName}/-/${base}-${entry.version}.tgz`;
+  if (resolved !== canonical) return `«${resolved}» ليس رابطَ tarball القانونيَّ «${canonical}»`;
+  if (entry.integrity === undefined) return 'من السجلِّ بلا `integrity`';
+  return '';
 }
 
 /**
@@ -220,6 +296,9 @@ function componentMismatches(c, key, entry) {
       why.push(`مرجعُ التوزيعِ ${JSON.stringify(dist)} ≠ resolved ${JSON.stringify(want)}`);
     }
   }
+  // ‏WL-576: التطابقُ وحدَه لا يكفي — مصدرٌ غيرُ مدعومٍ يُرفَضُ ولو طابقَ SBOM القفل.
+  const src = sourceProblem(entry, pkgName);
+  if (src !== '') why.push(`مصدرٌ غيرُ مدعوم: ${src}`);
   // السلامة: بصمةٌ واحدةٌ من بصماتِ `integrity`، أو لا بصمةَ إن غابت من القفل.
   const hashes = c.hashes ?? [];
   if (
@@ -230,9 +309,9 @@ function componentMismatches(c, key, entry) {
   } else if (entry.integrity === undefined) {
     if (hashes.length > 0) why.push('بصمةٌ في SBOM والقفلُ بلا integrity');
   } else {
-    const want = typeof entry.integrity === 'string' ? sriHashes(entry.integrity) : null;
-    if (want === null) why.push('integrity في القفلِ غيرُ قابلةٍ للتفسير');
-    else if (hashes.length !== 1 || !want.has(`${hashes[0].alg}:${hashes[0].content}`)) {
+    const want = parseSri(entry.integrity);
+    if ('error' in want) why.push(`integrity في القفلِ غيرُ قابلةٍ للتفسير: ${want.error}`);
+    else if (hashes.length !== 1 || `${hashes[0].alg}:${hashes[0].content}` !== want.hash) {
       why.push('البصمةُ لا تطابقُ integrity في القفل');
     }
   }

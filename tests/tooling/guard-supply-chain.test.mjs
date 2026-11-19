@@ -86,6 +86,30 @@ function stampedSbom(root, sbom) {
 }
 
 /**
+ * WL-576: مدخلةُ قفلٍ واقعيّةٌ من السجلِّ الافتراضيّ كما يكتبُها npm — `resolved` رابطُ tarball القانونيّ
+ * و`integrity` ‏SHA-512 حتميّةٌ من المفتاح. R2 يرفضُ المدخلةَ بلا مصدرٍ محدَّد، فالجذورُ الصالحةُ تستعملُها.
+ * @param {string} key @param {Record<string, any>} entry @returns {Record<string, any>}
+ */
+function registryEntry(key, entry) {
+  const folder = key.slice(key.lastIndexOf('node_modules/') + 'node_modules/'.length);
+  const name = entry.name ?? folder;
+  return {
+    ...entry,
+    resolved: `https://registry.npmjs.org/${name}/-/${name.split('/').pop()}-${entry.version}.tgz`,
+    integrity: `sha512-${createHash('sha512').update(key).digest('base64')}`,
+  };
+}
+
+/** @param {Record<string, any>} packages */
+const registryPackages = (packages) =>
+  Object.fromEntries(
+    Object.entries(packages).map(([k, e]) => [
+      k,
+      k === '' || typeof e?.version !== 'string' ? e : registryEntry(k, e),
+    ]),
+  );
+
+/**
  * WL-576: مكوّناتُ CycloneDX كما يشتقُّها `npm sbom` (‏npm 10.8.2، lib/utils/sbom-cyclonedx.js) من شجرةِ القفلِ في
  * الجذر — مكوّنٌ لكلِّ مدخلةٍ سوى الجذرِ والروابط، مكتوبةً هنا مستقلّةً عن الشفرةِ المُختبَرة. تحلُّ محلَّ المكوّنِ
  * الرمزيِّ `{ name: 'pg' }` في الجذورِ الصالحة، لأنّ R2 صارَ يطابقُ المكوّناتِ بالقفل.
@@ -146,7 +170,7 @@ test('guard:supply-chain passes when all conditions are met', () => {
       JSON.stringify({
         lockfileVersion: 3,
         name: 'test',
-        packages: { 'node_modules/pg': { version: '8.23.0' } },
+        packages: registryPackages({ 'node_modules/pg': { version: '8.23.0' } }),
       }),
     );
     writeFileSync(
@@ -364,7 +388,10 @@ const picoLock = (dev = true) => ({
   packages: Object.fromEntries(
     ['picomatch', 'fdir', 'tinyglobby', 'minimatch', 'ts-estree'].map((n) => [
       `node_modules/${n}`,
-      dev ? { version: '1.0.0', dev: true } : { version: '1.0.0' },
+      registryEntry(
+        `node_modules/${n}`,
+        dev ? { version: '1.0.0', dev: true } : { version: '1.0.0' },
+      ),
     ]),
   ),
 });
@@ -715,10 +742,10 @@ test('WL-572: audit:check يخرجُ بـ1 حينَ لا يُجيبُ سجلُّ
         version: '1.0.0',
         lockfileVersion: 3,
         requires: true,
-        packages: {
+        packages: registryPackages({
           '': { name: 't', version: '1.0.0', dependencies: { pg: '8.23.0' } },
           'node_modules/pg': { version: '8.23.0' },
-        },
+        }),
       }),
     );
     const r = spawnSync(process.execPath, [AUDIT_CHECK, '--root', tmp], {
@@ -772,11 +799,11 @@ function floorRoot(packages) {
     JSON.stringify({
       lockfileVersion: 3,
       name: 'test',
-      packages: {
+      packages: registryPackages({
         '': { name: 'test' },
         'node_modules/ajv': { version: '8.20.0', dev: true },
         ...packages,
-      },
+      }),
     }),
   );
   writeFileSync(
@@ -1355,10 +1382,10 @@ function auditableRoot() {
       version: '1.0.0',
       lockfileVersion: 3,
       requires: true,
-      packages: {
+      packages: registryPackages({
         '': { name: 't', version: '1.0.0', dependencies: { pg: '8.23.0' } },
         'node_modules/pg': { version: '8.23.0' },
-      },
+      }),
     }),
   );
   mkdirSync(path.join(tmp, 'node_modules'), { recursive: true });
@@ -1706,10 +1733,10 @@ function sbomRoot() {
         version: '1.0.0',
         lockfileVersion: 3,
         requires: true,
-        packages: {
+        packages: registryPackages({
           '': { name: 't', version: '1.0.0', dependencies: { pg: '8.23.0' } },
           'node_modules/pg': { version: '8.23.0' },
-        },
+        }),
       },
       null,
       2,
@@ -1719,6 +1746,13 @@ function sbomRoot() {
   writeFileSync(
     path.join(tmp, 'node_modules', 'pg', 'package.json'),
     JSON.stringify({ name: 'pg', version: '8.23.0' }),
+  );
+  // ‏WL-576: القفلُ المخفيُّ أخيراً كما يكتبُه `npm ci` — منه يقرأُ npm sbom المصدرَ والبصمة.
+  const lock = JSON.parse(readFileSync(path.join(tmp, 'package-lock.json'), 'utf8'));
+  delete lock.packages[''];
+  writeFileSync(
+    path.join(tmp, 'node_modules', '.package-lock.json'),
+    `${JSON.stringify(lock, null, 2)}\n`,
   );
   writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
   writeFileSync(
@@ -2693,8 +2727,9 @@ test('WL-576: checkSbomComponents — القفلُ الحقيقيُّ للمست
     assert.deepEqual(m.checkSbomComponents(none, lock), { problems: [], omittedOptional: [k] });
   }
   // ‏حدودُ القفل: كلُّ ما لا يُطابَقُ يُغلِقُ الحكمَ بسببٍ مسمّى.
-  const base = { lockfileVersion: 3, packages: { '': {}, 'node_modules/x': { version: '1.0.0' } } };
-  const xs = { components: [npmComponent('node_modules/x', { version: '1.0.0' })] };
+  const xEntry = registryEntry('node_modules/x', { version: '1.0.0' });
+  const base = { lockfileVersion: 3, packages: { '': {}, 'node_modules/x': xEntry } };
+  const xs = { components: [npmComponent('node_modules/x', xEntry)] };
   assert.deepEqual(m.checkSbomComponents(xs, base).problems, []);
   /** @type {Array<[string, any, RegExp]>} */
   const locks = [
@@ -2766,4 +2801,245 @@ test('WL-576: checkSbomComponents — القفلُ الحقيقيُّ للمست
     m.formatComponentProblems(['1', '2', '3', '4', '5', '6', '7']),
     '1؛ 2؛ 3؛ 4؛ 5؛ (‏و2 أخرى من 7)',
   );
+});
+
+// ── WL-576 (‏مانعا المراجعةِ المستقلّة): سياسةُ المصدرِ صريحةٌ لا ضمنيّة، وSRI صارمٌ ترميزاً وطولاً. ──
+
+/** ملخّصُ SHA-512 صالحٌ (‏64 بايتاً، 88 حرفاً بحشوِ `==`). */
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const GOOD512 = createHash('sha512').update('wl-576').digest('base64');
+
+test('WL-576: parseSri — صارمٌ: الطولُ لكلِّ خوارزميّة، وBase64 قانونيّ، وحشوٌ صحيح، وSHA-512 أقوى', async () => {
+  const { parseSri } = await import('../../scripts/generate-sbom.mjs');
+  const hex = Buffer.from(GOOD512, 'base64').toString('hex');
+  assert.equal(GOOD512.length, 88);
+  assert.deepEqual(parseSri(`sha512-${GOOD512}`), { hash: `SHA-512:${hex}` });
+  // ‏رموزٌ متعدّدة: الأقوى يُختارُ كما يختارُه npm sbom (‏ssri single)، وأوّلُ رمزٍ له.
+  const g1 = createHash('sha1').update('x').digest('base64');
+  const other = createHash('sha512').update('other').digest('base64');
+  assert.deepEqual(parseSri(`sha1-${g1} sha512-${GOOD512}`), { hash: `SHA-512:${hex}` });
+  assert.deepEqual(parseSri(`sha512-${GOOD512}\tsha512-${other}`), { hash: `SHA-512:${hex}` });
+  /** @type {Array<[string, unknown, RegExp]>} */
+  const bad = [
+    ['المثالُ المعروف: بايتٌ واحد', 'sha512-YQ', /غيرُ صالحِ الصيغة|ليس Base64|بطول 1 بايت/],
+    ['بايتٌ واحدٌ بحشوٍ صحيح', 'sha512-YQ==', /بطول 1 بايت ≠ 64/],
+    [
+      'ملخّصٌ مبتور (‏63 بايتاً)',
+      `sha512-${Buffer.alloc(63, 7).toString('base64')}`,
+      /بطول 63 بايت ≠ 64/,
+    ],
+    [
+      'ملخّصٌ زائد (‏65 بايتاً)',
+      `sha512-${Buffer.alloc(65, 7).toString('base64')}`,
+      /بطول 65 بايت ≠ 64/,
+    ],
+    ['حذفُ حرفٍ أخيرٍ قبلَ الحشو', `sha512-${GOOD512.slice(0, 85)}==`, /ليس Base64 قانونيّاً/],
+    ['حشوٌ غائب', `sha512-${GOOD512.replace(/=+$/, '')}`, /ليس Base64 قانونيّاً/],
+    ['حشوٌ ناقص', `sha512-${GOOD512.slice(0, -1)}`, /ليس Base64 قانونيّاً/],
+    ['حشوٌ زائد', `sha512-${GOOD512}=`, /غيرُ صالحِ الصيغة/],
+    ['حشوٌ في الوسط', `sha512-${GOOD512.slice(0, 40)}=${GOOD512.slice(41)}`, /غيرُ صالحِ الصيغة/],
+    [
+      'بِتّاتٌ ذيليّةٌ غيرُ صفريّة',
+      // ‏الحرفُ 86 يحملُ بِتَّين من البايتِ الأخيرِ وأربعَ بِتّاتٍ صفريّة؛ +1 يجعلُ إحداها 1 فيُفكُّ إلى البايتاتِ نفسِها.
+      `sha512-${GOOD512.slice(0, 85)}${B64[B64.indexOf(GOOD512[85] ?? 'A') + 1]}==`,
+      /ليس Base64 قانونيّاً/,
+    ],
+    [
+      'Base64url (‏- و_)',
+      `sha512-${GOOD512.replace(/\+/g, '-').replace(/\//g, '_')}`,
+      /غيرُ صالحِ الصيغة/,
+    ],
+    ['حرفٌ غريب', `sha512-${GOOD512.slice(0, 10)}*${GOOD512.slice(11)}`, /غيرُ صالحِ الصيغة/],
+    ['خياراتُ ?', `sha512-${GOOD512}?opt`, /غيرُ صالحِ الصيغة/],
+    ['sha256 بطولِ sha512', `sha256-${GOOD512}`, /ملخّصُ sha256 بطول 64 بايت ≠ 32/],
+    [
+      'sha384 بطولِ sha256',
+      `sha384-${createHash('sha256').update('x').digest('base64')}`,
+      /بطول 32 بايت ≠ 48/,
+    ],
+    ['sha1 وحدَها ضعيفة', `sha1-${g1}`, /أقوى خوارزميّةٍ sha1 — مطلوبٌ sha512/],
+    [
+      'sha256 وحدَها',
+      `sha256-${createHash('sha256').update('x').digest('base64')}`,
+      /مطلوبٌ sha512/,
+    ],
+    ['رمزٌ صالحٌ وآخرُ مشوّه', `sha512-${GOOD512} sha512-YQ`, /غيرُ صالحِ الصيغة|ليس Base64/],
+    [
+      'خوارزميّةٌ مجهولة',
+      `md5-${createHash('md5').update('x').digest('base64')}`,
+      /غيرُ صالحِ الصيغة/,
+    ],
+    ['بلا خوارزميّة', `-${GOOD512}`, /غيرُ صالحِ الصيغة/],
+    ['حروفٌ كبيرة', `SHA512-${GOOD512}`, /غيرُ صالحِ الصيغة/],
+    ['فارغة', '   ', /فارغة/],
+    ['ليست نصّاً', 42, /ليست نصّاً/],
+  ];
+  for (const [label, sri, re] of bad) {
+    const r = parseSri(sri);
+    assert.ok('error' in r, `${label}: يُرفَض`);
+    assert.match(/** @type {{ error: string }} */ (r).error, re, label);
+  }
+});
+
+test('WL-576: sourceProblem — السجلُّ الافتراضيُّ برابطِه القانونيِّ وحدَه؛ git وfile والسجلّاتُ الأخرى وhttp مرفوضةٌ صراحةً', async () => {
+  const { sourceProblem } = await import('../../scripts/generate-sbom.mjs');
+  const integrity = `sha512-${GOOD512}`;
+  const ok = (/** @type {string} */ name, /** @type {string} */ resolved) =>
+    sourceProblem({ version: '1.2.3', resolved, integrity }, name);
+  assert.equal(ok('pg', 'https://registry.npmjs.org/pg/-/pg-1.2.3.tgz'), '');
+  assert.equal(ok('@s/c', 'https://registry.npmjs.org/@s/c/-/c-1.2.3.tgz'), '');
+  assert.equal(sourceProblem({ version: '1.0.0', inBundle: true }, 'b'), '');
+  /** @type {Array<[string, string, string, RegExp]>} */
+  const rejected = [
+    ['git+ssh', 'pg', 'git+ssh://git@github.com/brianc/node-postgres.git#abc', /مصدرُ git/],
+    ['git+https', 'pg', 'git+https://github.com/brianc/node-postgres.git#abc', /مصدرُ git/],
+    ['git:', 'pg', 'git://github.com/brianc/node-postgres.git', /مصدرُ git/],
+    ['github:', 'pg', 'github:brianc/node-postgres#abc', /مصدرُ git/],
+    ['file:', 'pg', 'file:../pg-1.2.3.tgz', /مصدرٌ محلّي/],
+    ['مسارٌ نسبيّ', 'pg', 'packages/pg', /مصدرٌ محلّي/],
+    ['http', 'pg', 'http://registry.npmjs.org/pg/-/pg-1.2.3.tgz', /بغيرِ https/],
+    ['سجلٌّ آخر', 'pg', 'https://registry.yarnpkg.com/pg/-/pg-1.2.3.tgz', /سجلٌّ غيرُ افتراضي/],
+    ['سجلٌّ خاصّ', 'pg', 'https://npm.evil.example/pg/-/pg-1.2.3.tgz', /سجلٌّ غيرُ افتراضي/],
+    [
+      'نطاقٌ فرعيٌّ شبيه',
+      'pg',
+      'https://registry.npmjs.org.evil.example/pg/-/pg-1.2.3.tgz',
+      /غيرُ افتراضي/,
+    ],
+    ['منفذٌ آخر', 'pg', 'https://registry.npmjs.org:8443/pg/-/pg-1.2.3.tgz', /غيرُ افتراضي/],
+    ['بيانُ اعتماد', 'pg', 'https://u:p@registry.npmjs.org/pg/-/pg-1.2.3.tgz', /غيرُ افتراضي/],
+    [
+      'tarball حزمةٍ أخرى',
+      'pg',
+      'https://registry.npmjs.org/evil/-/evil-1.2.3.tgz',
+      /ليس رابطَ tarball القانوني/,
+    ],
+    [
+      'إصدارٌ آخر',
+      'pg',
+      'https://registry.npmjs.org/pg/-/pg-9.9.9.tgz',
+      /ليس رابطَ tarball القانوني/,
+    ],
+    [
+      'استعلامٌ ملحق',
+      'pg',
+      'https://registry.npmjs.org/pg/-/pg-1.2.3.tgz?x=1',
+      /ليس رابطَ tarball القانوني/,
+    ],
+    [
+      'منفذٌ 443 صريح',
+      'pg',
+      'https://registry.npmjs.org:443/pg/-/pg-1.2.3.tgz',
+      /ليس رابطَ tarball القانوني/,
+    ],
+    ['ليس URL', 'pg', 'https://', /ليس URL صالحاً/],
+    [
+      'اسمٌ بمقطعِ نقطة',
+      '../pg',
+      'https://registry.npmjs.org/../pg/-/pg-1.2.3.tgz',
+      /اسمُ الحزمةِ .* غيرُ صالح/,
+    ],
+  ];
+  for (const [label, name, resolved, re] of rejected) assert.match(ok(name, resolved), re, label);
+  assert.match(sourceProblem({ version: '1.2.3', integrity }, 'pg'), /بلا `resolved`/);
+  assert.match(
+    sourceProblem(
+      { version: '1.2.3', resolved: 'https://registry.npmjs.org/pg/-/pg-1.2.3.tgz' },
+      'pg',
+    ),
+    /بلا `integrity`/,
+  );
+  assert.match(
+    sourceProblem(
+      {
+        version: '1.0.0/../../x',
+        resolved: 'https://registry.npmjs.org/pg/-/pg-1.0.0/../../x.tgz',
+        integrity,
+      },
+      'pg',
+    ),
+    /غيرُ آمنٍ/,
+  );
+  assert.match(
+    sourceProblem(
+      { version: '1.0.0', inBundle: true, resolved: 'https://registry.npmjs.org/b/-/b-1.0.0.tgz' },
+      'b',
+    ),
+    /مدمجةٌ/,
+  );
+});
+
+test('WL-576: مصدرٌ غيرُ مدعومٍ أو SRI مشوّهٌ يُرفَضُ عبرَ CLI حتّى حينَ يطابقُ SBOM القفلَ حرفاً بحرف', () => {
+  /** @type {Array<[string, Record<string, any>, RegExp]>} */
+  const cases = [
+    [
+      'git',
+      {
+        version: '8.23.0',
+        resolved: 'git+ssh://git@github.com/brianc/node-postgres.git#0123abc',
+        integrity: `sha512-${GOOD512}`,
+      },
+      /مصدرٌ غيرُ مدعوم: مصدرُ git/,
+    ],
+    [
+      'سجلٌّ غيرُ افتراضيّ',
+      {
+        version: '8.23.0',
+        resolved: 'https://npm.evil.example/pg/-/pg-8.23.0.tgz',
+        integrity: `sha512-${GOOD512}`,
+      },
+      /مصدرٌ غيرُ مدعوم: سجلٌّ غيرُ افتراضي/,
+    ],
+    [
+      'sha512-YQ',
+      {
+        version: '8.23.0',
+        resolved: 'https://registry.npmjs.org/pg/-/pg-8.23.0.tgz',
+        integrity: 'sha512-YQ',
+      },
+      /integrity في القفلِ غيرُ قابلةٍ للتفسير/,
+    ],
+    [
+      'ملخّصٌ مبتور',
+      {
+        version: '8.23.0',
+        resolved: 'https://registry.npmjs.org/pg/-/pg-8.23.0.tgz',
+        integrity: `sha512-${Buffer.alloc(32, 1).toString('base64')}`,
+      },
+      /بطول 32 بايت ≠ 64/,
+    ],
+  ];
+  for (const [label, pg, re] of cases) {
+    const tmp = floorRoot({});
+    try {
+      const lock = {
+        lockfileVersion: 3,
+        name: 'test',
+        packages: { '': { name: 'test' }, 'node_modules/pg': pg },
+      };
+      writeFileSync(path.join(tmp, 'package-lock.json'), JSON.stringify(lock));
+      // ‏SBOM يطابقُ القفلَ تماماً: المرجعُ = resolved، والبصمةُ مفكوكةٌ من integrity كما هي (‏بلا تحقّقِ طول).
+      const c = npmComponent('node_modules/pg', pg);
+      c.hashes = [
+        { alg: 'SHA-512', content: Buffer.from(pg.integrity.slice(7), 'base64').toString('hex') },
+      ];
+      writeFileSync(
+        path.join(tmp, 'sbom.cdx.json'),
+        JSON.stringify(
+          stampedSbom(tmp, { bomFormat: 'CycloneDX', specVersion: '1.4', components: [c] }),
+        ),
+      );
+      writeFileSync(
+        path.join(tmp, 'audit-report.json'),
+        JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+      );
+      const r = runGuard(tmp);
+      assert.equal(r.ok, false, `${label}: يُرفَض`);
+      assert.match(r.stderr ?? '', MISMATCH, label);
+      assert.match(r.stderr ?? '', re, label);
+      assert.doesNotMatch(r.stderr ?? '', /R3|غيرُ مربوط/, `${label}: السببُ وحدَه لا غيرُه`);
+    } finally {
+      cleanup(tmp);
+    }
+  }
 });
