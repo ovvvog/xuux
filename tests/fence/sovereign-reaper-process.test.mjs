@@ -687,7 +687,7 @@ function child(args, env) {
 /** عمليّةُ الجذر: تُصدِرُ اعتماداً لكلِّ عاملٍ وتُشغِّلُ حافظَ إيجارِه ثمّ تبقى حتى تُقتَل. */
 const ROOT_CHILD = `
 import pg from 'pg';
-import { FenceRoot, newBootId, pemKeyProvider, signCredentialChallenge } from ${JSON.stringify(FENCE_MODULE)};
+import { FenceRoot, SupervisorBootGate, newBootId, pemKeyProvider, signCredentialChallenge } from ${JSON.stringify(FENCE_MODULE)};
 const out = (e) => process.stdout.write(JSON.stringify({ t: new Date().toISOString(), pid: process.pid, ...e }) + '\\n');
 const url = process.env.XUUX_ROOT_DATABASE_URL;
 const root = new FenceRoot(async () => {
@@ -696,6 +696,7 @@ const root = new FenceRoot(async () => {
   await c.connect();
   return c;
 }, { lockTimeoutMs: 400 });
+await new SupervisorBootGate(root).start();
 for (const w of JSON.parse(process.env.XUUX_WORKERS)) {
   const key = pemKeyProvider(w.pem, w.workerId);
   const bootId = newBootId();

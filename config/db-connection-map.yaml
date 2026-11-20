@@ -20,6 +20,8 @@
 # production_supervisor: لا مُشرِفَ إنتاجيّاً اليوم. FenceRoot وsuperviseWorkerHandshake وconfirmWorkerSeal
 # تُستعمَلُ في الاختبارات والمختبرِ وحدَهما؛ لا شيءَ في المستودعِ يُطلقُ worker.mjs بـXUUX_DB_FENCE=required
 # في الإنتاج. هذه فجوةٌ معلنةٌ تحتاجُ قراراً (انظر الإدخالَ supervisor أدناه)، لا ادّعاءَ تغطية.
+# ومنذُ WL-579: كلُّ إصدارٍ عبرَ FenceRoot مشروطٌ بـSupervisorBootGate.start() (‏كنسُ الإقلاع) — بوابةٌ في
+# JavaScript لا في القاعدة؛ SQL خامٌ بدورِ xf_root يتجاوزُها (‏قرارُ المالك). ولا يُغيّرُ ذلك أنَّ المُشرِفَ غائب.
 version: 1
 production_supervisor: absent
 sites:

@@ -46,6 +46,10 @@ export const FENCE_ERRORS = Object.freeze({
   EFFECTS_EVIDENCE_REJECTED: 'FENCE_EFFECTS_EVIDENCE_REJECTED',
   REAPER_ROLE: 'FENCE_REAPER_ROLE',
   ORPHAN_SWEEP_INCOMPLETE: 'FENCE_ORPHAN_SWEEP_INCOMPLETE',
+  BOOT_GATE_CLOSED: 'FENCE_BOOT_GATE_CLOSED',
+  BOOT_GATE_STATE: 'FENCE_BOOT_GATE_STATE',
+  BOOT_GATE_TIMEOUT: 'FENCE_BOOT_GATE_TIMEOUT',
+  BOOT_GATE_CANCELLED: 'FENCE_BOOT_GATE_CANCELLED',
 });
 
 /** سببُ الإلغاءِ الافتراضيُّ لاعتمادٍ يتيمٍ عندَ إقلاعِ المُشرِف (‏TH-SUP-05، WL-577). */
@@ -1154,15 +1158,21 @@ export class FenceRoot {
     return this.with(async (c) => (await c.query(sql, params)).rows[0]);
   }
 
-  /** @param {string} workerId @param {string} bootId */
+  /**
+   * WL-579: الإصدارُ يمرُّ ببوابةِ الإقلاع (‏`SupervisorBootGate`) المربوطةِ بهذا الجذر — بلا بوابةٍ أو قبلَ
+   * نجاحِ كنسِها ⇒ `FENCE_BOOT_GATE_CLOSED` ولا نداءَ للقاعدة.
+   * @param {string} workerId @param {string} bootId
+   */
   async issueChallenge(workerId, bootId) {
-    return (await this.one('SELECT fence.issue_challenge($1, $2) AS r', [workerId, bootId])).r;
+    return bootGateOf(this, 'issueChallenge').issueChallenge(workerId, bootId);
   }
 
-  /** @param {string} nonce @param {Buffer} workerSignature */
+  /**
+   * WL-579: عبرَ بوابةِ الإقلاع — التحدّي يجبُ أن تكونَ البوابةُ أصدرَته في جيلِها الحاليّ.
+   * @param {string} nonce @param {Buffer} workerSignature
+   */
   async completeCredential(nonce, workerSignature) {
-    return (await this.one('SELECT fence.issue_credential($1, $2) AS r', [nonce, workerSignature]))
-      .r;
+    return bootGateOf(this, 'completeCredential').completeCredential(nonce, workerSignature);
   }
 
   /**
@@ -1477,6 +1487,333 @@ export class FenceRoot {
       reason: effects.ok ? null : 'EFFECTS_NOT_STOPPED',
       steps,
     };
+  }
+}
+
+// ── بوابةُ إقلاعِ المُشرِف (‏WL-579، TH-SUP-05) ─────────────────────────────────
+
+/** حالاتُ البوابة. الإصدارُ والمصافحةُ في `READY` وحدَها. */
+export const BOOT_GATE_STATES = Object.freeze({
+  NEW: 'NEW',
+  SWEEPING: 'SWEEPING',
+  READY: 'READY',
+  FAILED: 'FAILED',
+  STOPPED: 'STOPPED',
+});
+
+/** سببُ إلغاءِ اعتمادٍ اكتملَ إصدارُه عبرَ إيقافٍ أو إقلاعٍ جديدٍ للبوابة (‏لا يُسلَّم). */
+export const BOOT_GATE_EPOCH_REVOKE_REASON = 'SUPERVISOR_BOOT_GATE_EPOCH';
+
+/** @type {WeakMap<FenceRoot, SupervisorBootGate>} */
+const BOOT_GATES = new WeakMap();
+
+/**
+ * البوابةُ المربوطةُ بالجذر أو رفضٌ مغلق — لا إصدارَ بجذرٍ بلا بوابة.
+ * @param {FenceRoot} root @param {string} op
+ */
+function bootGateOf(root, op) {
+  const gate = BOOT_GATES.get(root);
+  if (gate === undefined) {
+    throw new FenceError(
+      FENCE_ERRORS.BOOT_GATE_CLOSED,
+      `${op}: لا بوابةَ إقلاعٍ لهذا الجذر — أنشئ SupervisorBootGate وانتظر start() قبلَ أيِّ إصدار`,
+      { op, state: null },
+    );
+  }
+  return gate;
+}
+
+/**
+ * النداءانِ الخامّانِ الوحيدانِ لدالّتَي الإصدارِ في المستودع (‏يفحصُ ذلك اختبارٌ ثابت). لا يُصدَّران.
+ * @param {FenceRoot} root @param {string} workerId @param {string} bootId
+ * @returns {Promise<any>}
+ */
+async function rawIssueChallenge(root, workerId, bootId) {
+  return (await root.one('SELECT fence.issue_challenge($1, $2) AS r', [workerId, bootId])).r;
+}
+
+/**
+ * @param {FenceRoot} root @param {string} nonce @param {Buffer} workerSignature
+ * @returns {Promise<any>}
+ */
+async function rawCompleteCredential(root, nonce, workerSignature) {
+  return (await root.one('SELECT fence.issue_credential($1, $2) AS r', [nonce, workerSignature])).r;
+}
+
+/**
+ * WL-579 — بوابةُ إقلاعِ المُشرِف: كنسُ الاعتماداتِ اليتيمةِ (‏`revokeOrphanCredentials`) **شرطٌ سابقٌ فعليٌّ**
+ * لكلِّ إصدار. تُربَطُ بجذرٍ واحدٍ (‏ولكلِّ جذرٍ بوابةٌ واحدة)، ومنذُ ربطِها تمرُّ `issueChallenge`
+ * و`completeCredential` و`issueCredential` و`superviseWorkerHandshake` على ذلك الجذرِ بها؛ وجذرٌ بلا بوابةٍ لا يُصدِر.
+ *
+ * - `start()` (‏من NEW/STOPPED/FAILED): عهدٌ جديد، و`issued` يُفرَّغ، وتُنتظَرُ الإصداراتُ الجاريةُ ثمّ يُكنَسُ
+ *   **بلا keep** — في إقلاعٍ لا شيءَ لهذا المُشرِف. نجاحٌ ⇒ READY؛ فشلٌ أو مهلةٌ ⇒ FAILED.
+ * - `resweep()` (‏من READY/FAILED): جيلٌ جديدٌ (‏التحدّياتُ القائمةُ تُبطَل)، تُنتظَرُ الإصداراتُ الجاريةُ فتُحسَبُ
+ *   في `issued`، ثمّ يُكنَسُ بـ`keep = issued` — ما أصدرَته البوابةُ في عهدِها يبقى، وغيرُه يُلغى.
+ * - `stop()`: STOPPED فوراً، ويُلغى الكنسُ الجاري (‏`FENCE_BOOT_GATE_CANCELLED`)، و`issued` يُفرَّغ.
+ * - **الإصدار:** في READY وحدَها؛ والتحدّي يجبُ أن تكونَ البوابةُ أصدرَته في جيلِها الحاليّ؛ واعتمادٌ اكتملَ
+ *   إصدارُه بعدَ تبدّلِ العهد (‏stop أو start أثناءَه) يُلغى ولا يُسلَّم.
+ * - كنسٌ سابقٌ لم يستقرَّ (‏بعدَ مهلةٍ أو إلغاء) يمنعُ كنساً جديداً — لا يتداخلُ كنسٌ قديمٌ مع عهدٍ جديد.
+ *
+ * **الحدود (‏معلنة):** البوابةُ في العملية؛ حاملُ `xf_root` بـSQL خامٍ (‏`root.one`/`root.with` أو عميلٌ آخر) أو
+ * جذرٌ في عمليةٍ أخرى لا تمنعُه — القاعدةُ لا تعرفُ الكنس (‏فرضُه فيها هجرةٌ وقرارُ مالك). ولا مُشرِفَ إنتاجيٌّ
+ * ينشئُها اليوم (‏T2 DESIGNED؛ D-SUP-1/D-ENV-1).
+ */
+export class SupervisorBootGate {
+  /** @type {FenceRoot} */
+  #root;
+  /** @type {string} */
+  #state = BOOT_GATE_STATES.NEW;
+  #generation = 0;
+  #epoch = 0;
+  /** @type {Set<string>} */
+  #issued = new Set();
+  /** @type {Map<string, number>} */
+  #challenges = new Map();
+  /** @type {Set<Promise<unknown>>} */
+  #inflight = new Set();
+  /** @type {Promise<unknown> | null} */
+  #pending = null;
+  /** @type {((error: Error) => void) | null} */
+  #cancel = null;
+  /** @type {string | null} */
+  #lastError = null;
+  /** @type {{ timeoutMs: number, settleMs: number, pollMs: number, reason: string }} */
+  #options;
+
+  /**
+   * @param {FenceRoot} root
+   * @param {{ timeoutMs?: number, settleMs?: number, pollMs?: number, reason?: string }} [options]
+   */
+  constructor(root, options = {}) {
+    if (!(root instanceof FenceRoot))
+      throw new TypeError('SupervisorBootGate: root يجبُ أن يكونَ FenceRoot');
+    const timeoutMs = options.timeoutMs ?? 30_000;
+    const settleMs = options.settleMs ?? 2_000;
+    const pollMs = options.pollMs ?? 50;
+    for (const [name, v] of /** @type {const} */ ([
+      ['timeoutMs', timeoutMs],
+      ['settleMs', settleMs],
+      ['pollMs', pollMs],
+    ]))
+      if (!Number.isInteger(v) || v < 1)
+        throw new TypeError(`SupervisorBootGate: ${name} عددٌ صحيحٌ ≥ 1`);
+    const reason = options.reason ?? ORPHAN_REVOKE_REASON;
+    if (typeof reason !== 'string' || reason.trim() === '')
+      throw new TypeError('SupervisorBootGate: reason نصٌّ غيرُ فارغ');
+    if (BOOT_GATES.has(root))
+      throw new FenceError(FENCE_ERRORS.BOOT_GATE_STATE, 'لهذا الجذرِ بوابةُ إقلاعٍ قائمة', {
+        op: 'constructor',
+      });
+    this.#root = root;
+    this.#options = { timeoutMs, settleMs, pollMs, reason };
+    BOOT_GATES.set(root, this);
+  }
+
+  /** @returns {string} */
+  get state() {
+    return this.#state;
+  }
+
+  /** لقطةٌ للأدلّةِ والاختبار (‏نسخةٌ مجمَّدة). */
+  snapshot() {
+    return Object.freeze({
+      state: this.#state,
+      generation: this.#generation,
+      epoch: this.#epoch,
+      issued: Object.freeze([...this.#issued].sort()),
+      challenges: this.#challenges.size,
+      inflight: this.#inflight.size,
+      sweepPending: this.#pending !== null,
+      lastError: this.#lastError,
+    });
+  }
+
+  /** @param {string} op @param {string[]} allowed */
+  #assertState(op, allowed) {
+    if (!allowed.includes(this.#state))
+      throw new FenceError(
+        FENCE_ERRORS.BOOT_GATE_STATE,
+        `${op}: غيرُ مسموحٍ في ${this.#state} (‏المسموح: ${allowed.join('/')})`,
+        { op, state: this.#state },
+      );
+    if (this.#pending !== null)
+      throw new FenceError(
+        FENCE_ERRORS.BOOT_GATE_STATE,
+        `${op}: كنسٌ سابقٌ لم يستقرَّ بعد — لا كنسَ جديدٌ فوقَه`,
+        { op, state: this.#state, sweepPending: true },
+      );
+  }
+
+  /** كنسُ الإقلاع: لا keep — ما صدرَ قبلَ هذا العهدِ يتيمٌ بالتعريف. */
+  async start() {
+    this.#assertState('start', [
+      BOOT_GATE_STATES.NEW,
+      BOOT_GATE_STATES.STOPPED,
+      BOOT_GATE_STATES.FAILED,
+    ]);
+    this.#epoch++;
+    this.#issued.clear();
+    return this.#sweep('start', () => []);
+  }
+
+  /** إعادةُ الكنسِ في عهدٍ قائم: keep = ما أصدرَته البوابةُ في هذا العهد (‏بعدَ انتظارِ الجاري). */
+  async resweep() {
+    this.#assertState('resweep', [BOOT_GATE_STATES.READY, BOOT_GATE_STATES.FAILED]);
+    return this.#sweep('resweep', () => [...this.#issued]);
+  }
+
+  /** إيقافٌ فوريّ: لا إصدار، والكنسُ الجاري يُلغى، و`issued` يُفرَّغ (‏ما صدرَ يُكنَسُ عندَ start التالي). */
+  stop() {
+    if (this.#state !== BOOT_GATE_STATES.STOPPED) {
+      this.#generation++;
+      this.#epoch++;
+      this.#issued.clear();
+      this.#state = BOOT_GATE_STATES.STOPPED;
+      this.#root.log({ ev: 'boot_gate_stopped', generation: this.#generation });
+      if (this.#cancel !== null)
+        this.#cancel(
+          new FenceError(FENCE_ERRORS.BOOT_GATE_CANCELLED, 'أُلغيَ الكنسُ بإيقافِ البوابة', {
+            generation: this.#generation,
+          }),
+        );
+    }
+    return this.snapshot();
+  }
+
+  /**
+   * @param {string} op
+   * @param {() => string[]} keepOf - تُحسَبُ بعدَ انتظارِ الإصداراتِ الجارية
+   */
+  async #sweep(op, keepOf) {
+    const generation = ++this.#generation;
+    this.#state = BOOT_GATE_STATES.SWEEPING;
+    // ‏نظافةُ ذاكرةٍ لا شرطٌ أمنيّ: الحارسُ هو الجيل — كلُّ دخولٍ إلى READY يمرُّ من هنا بجيلٍ جديد.
+    this.#challenges.clear();
+    this.#lastError = null;
+    this.#root.log({ ev: 'boot_gate_sweeping', op, generation });
+    const { timeoutMs, settleMs, pollMs, reason } = this.#options;
+    const work = (async () => {
+      await Promise.allSettled([...this.#inflight]);
+      if (generation !== this.#generation)
+        throw new FenceError(FENCE_ERRORS.BOOT_GATE_CANCELLED, 'تبدّلت البوابةُ قبلَ الجرد', {
+          op,
+          generation,
+        });
+      return this.#root.revokeOrphanCredentials({ keep: keepOf(), reason, settleMs, pollMs });
+    })();
+    this.#pending = work;
+    work.then(
+      () => {
+        if (this.#pending === work) this.#pending = null;
+      },
+      () => {
+        if (this.#pending === work) this.#pending = null;
+      },
+    );
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    const stopped = /** @type {Promise<never>} */ (
+      new Promise((_, reject) => {
+        this.#cancel = reject;
+        timer = setTimeout(
+          () =>
+            reject(
+              new FenceError(
+                FENCE_ERRORS.BOOT_GATE_TIMEOUT,
+                `${op}: انقضت مهلةُ الكنس (‏${timeoutMs} ms)`,
+                { op, generation, timeoutMs },
+              ),
+            ),
+          timeoutMs,
+        );
+      })
+    );
+    try {
+      const result = await Promise.race([work, stopped]);
+      if (generation !== this.#generation)
+        throw new FenceError(FENCE_ERRORS.BOOT_GATE_CANCELLED, 'تبدّلت البوابةُ أثناءَ الكنس', {
+          op,
+          generation,
+        });
+      this.#state = BOOT_GATE_STATES.READY;
+      this.#root.log({ ev: 'boot_gate_ready', op, generation, revoked: result.revoked.length });
+      return result;
+    } catch (error) {
+      if (generation === this.#generation) {
+        this.#state = BOOT_GATE_STATES.FAILED;
+        this.#lastError =
+          error instanceof FenceError
+            ? error.code
+            : String(/** @type {any} */ (error)?.code ?? error);
+        this.#root.log({ ev: 'boot_gate_failed', op, generation, code: this.#lastError });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+      this.#cancel = null;
+    }
+  }
+
+  /** @param {string} op */
+  #assertReady(op) {
+    if (this.#state !== BOOT_GATE_STATES.READY)
+      throw new FenceError(
+        FENCE_ERRORS.BOOT_GATE_CLOSED,
+        `${op}: بوابةُ الإقلاعِ ${this.#state} — لا إصدارَ قبلَ نجاحِ كنسِ الاعتمادات`,
+        { op, state: this.#state },
+      );
+  }
+
+  /** @param {string} workerId @param {string} bootId */
+  async issueChallenge(workerId, bootId) {
+    this.#assertReady('issueChallenge');
+    const generation = this.#generation;
+    const challenge = await rawIssueChallenge(this.#root, workerId, bootId);
+    if (generation !== this.#generation || this.#state !== BOOT_GATE_STATES.READY)
+      throw new FenceError(
+        FENCE_ERRORS.BOOT_GATE_CLOSED,
+        'issueChallenge: تبدّلت البوابةُ أثناءَ إصدارِ التحدّي — لا يُسلَّم',
+        { op: 'issueChallenge', state: this.#state },
+      );
+    this.#challenges.set(String(challenge['nonce']), generation);
+    return challenge;
+  }
+
+  /** @param {string} nonce @param {Buffer} workerSignature */
+  async completeCredential(nonce, workerSignature) {
+    this.#assertReady('completeCredential');
+    const key = String(nonce);
+    if (this.#challenges.get(key) !== this.#generation)
+      throw new FenceError(
+        FENCE_ERRORS.BOOT_GATE_CLOSED,
+        'completeCredential: تحدٍّ لم تُصدِرْه البوابةُ في جيلِها الحاليّ',
+        { op: 'completeCredential', state: this.#state },
+      );
+    const epoch = this.#epoch;
+    const run = (async () => {
+      const credential = await rawCompleteCredential(this.#root, key, workerSignature);
+      const role = String(credential['role_name']);
+      if (epoch !== this.#epoch) {
+        // ‏اكتملَ عبرَ stop أو start: يُلغى قبلَ أن يستقرَّ الإصدارُ فلا يُسلَّمُ ولا يبقى ACTIVE.
+        await this.#root
+          .revokeCredential(role, BOOT_GATE_EPOCH_REVOKE_REASON)
+          .catch(() => undefined);
+        this.#root.log({ ev: 'boot_gate_epoch_revoked', role });
+        throw new FenceError(
+          FENCE_ERRORS.BOOT_GATE_CLOSED,
+          'completeCredential: تبدّلَ عهدُ البوابةِ أثناءَ الإصدار — الاعتمادُ أُلغيَ ولم يُسلَّم',
+          { op: 'completeCredential', state: this.#state, role },
+        );
+      }
+      this.#issued.add(role);
+      return credential;
+    })();
+    this.#inflight.add(run);
+    try {
+      return await run;
+    } finally {
+      this.#inflight.delete(run);
+    }
   }
 }
 
