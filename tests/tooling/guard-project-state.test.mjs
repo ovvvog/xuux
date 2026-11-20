@@ -1434,6 +1434,52 @@ test('WL-584 (‏DOC-24) — الطلبُ نفسُه بلا حذفٍ يمرُّ 
   assert.match(lost.out, /قاعدةُ التاريخِ الحرفيّةُ `origin\/no-such-branch` لا تُحَلُّ/u);
 });
 
+/**
+ * الحاجزُ كما يُشغِّلُه CI لحدثٍ بلا طلب (‏`push` أو `workflow_dispatch`).
+ *
+ * @param {string} root
+ * @param {string} event
+ */
+function runGuardAsEvent(root, event) {
+  const env = { ...process.env };
+  delete env['PROJECT_STATE_BASE'];
+  delete env['PROJECT_STATE_HISTORY_BASE'];
+  delete env['GITHUB_BASE_REF'];
+  env['GITHUB_EVENT_NAME'] = event;
+  const run = spawnSync(process.execPath, [GUARD, '--root', root, '--no-consistency'], {
+    encoding: 'utf8',
+    env,
+  });
+  return { status: run.status, out: `${run.stdout}\n${run.stderr}` };
+}
+
+test('WL-585 — كوميتُ دمجٍ في فرعِ التكاملِ يُسقِطُ مُدخلةً لم تبلغْ main: push يرُدُّه (‏PS11 على HEAD^1)، والتشغيلُ اليدويُّ لا يراه', () => {
+  const root = integrationRepo();
+  // طلبٌ يُسقِطُ `WL-002` (‏على التكاملِ وحدَه) ويُضيفُ عملَه `WL-003` — حلُّ تعارضٍ خاطئٌ.
+  git(root, ['checkout', '-q', 'main', '--', 'docs/roadmap/05-work-log.md', 'PROJECT_STATUS.md']);
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'عملٌ يُدمَجُ في التكامل',
+    files: ['src/app.mjs', 'src/other.mjs', 'PROJECT_STATUS.md'],
+  });
+  write(root, 'src/other.mjs', 'export const w = 1;\n');
+  regenerateHandoff(root);
+  commit(root, 'WL-003, silently dropping WL-002');
+  git(root, ['checkout', '-q', 'integration']);
+  git(root, ['merge', '-q', '--no-ff', '-m', 'Merge pr-to-integration', 'pr-to-integration']);
+  // `push` إلى فرعِ التكامل: الأساسُ الأبُ الأوّلُ — رأسُ التكاملِ قبلَ الدمج.
+  const push = runGuardAsEvent(root, 'push');
+  assert.equal(push.status, 1, push.out);
+  assert.match(push.out, /الأساسُ: HEAD\^1/u, push.out);
+  assert.match(push.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-002`/u, push.out);
+  assert.match(push.out, /PS11\/STATUS-HISTORY-LOST: سطرُ «آخر تحديث» لـ`WL-002`/u, push.out);
+  // `workflow_dispatch` (‏الطريقُ الوحيدُ قبلَ `WL-585`): يقيسُ على `merge-base HEAD origin/main`،
+  // و`WL-002` لم يبلغْ `main` — فيمرُّ الكوميتُ نفسُه أخضرَ. هذا عينُ الثغرةِ لا سلوكٌ مقصود.
+  const dispatch = runGuardAsEvent(root, 'workflow_dispatch');
+  assert.equal(dispatch.status, 0, dispatch.out);
+  assert.match(dispatch.out, /التاريخُ: كلُّ مُدخلةٍ وسطرِ لوحةٍ على الأساسِ باقٍ/u, dispatch.out);
+});
+
 test('WL-540 — ملخّصُ التسليم: لا تسقطُ مُدخلةٌ جزئيّةٌ من السلسلةِ المتّصلةِ من الأحدث، والحدُّ الأدنى ثمانٍ', () => {
   const entry = (/** @type {number} */ n, /** @type {string} */ state) =>
     `### [2026-01-01] — WL-${n} — **عنوان ${n}**\n\n- **الحالةُ بعدَ العمل:** ${state}\n`;
