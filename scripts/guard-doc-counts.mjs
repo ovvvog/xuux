@@ -475,14 +475,18 @@ const facts = readDocCountFacts(root);
 // ── R8/S3: ما يقولُ §3 إنّه مُغلَقٌ يحملُ العلامةَ في §4/§6 — `WL-581` إكمالاً لمعيارِ `DOC-23` ──
 //   **المقيسُ على `fd9c687e`:** فكُّ علامةِ `DOC-1` في §4 و§3 يقولُ «`DOC-1`…`DOC-18` — مُغلَقةٌ كلُّها» ⇒ الحاجزُ
 //   أخضر. فالمعيارُ («حاجزٌ يرفضُ صفّاً مُغلَقاً في §3 بلا علامةٍ في §4») لم يكنْ منفَّذاً.
-//   **ادّعاءُ الإغلاقِ في §3** ثلاثُ صيغٍ (‏بعدَ تطبيعِ التشكيل): «`ID` مُغلَقٌ في» (‏ومنها «مُكتشَفٌ ومُغلَقٌ»)؛
+//   **ادّعاءُ الإغلاقِ في §3** أربعُ صيغٍ (‏بعدَ تطبيعِ التشكيل): «`ID` مُغلَقٌ في» (‏ومنها «مُكتشَفٌ ومُغلَقٌ»)، و«`ID` مسدَّدٌ»؛
 //   ومدىً «`P-a`…`P-b`» يليه «مُغلَقةٌ» أو «— **مُغلَقةٌ كلُّها**» أو «— **كلُّها مُغلَقةٌ**»؛ وفي صفٍّ يقولُ
 //   «كلُّها مُغلَقةٌ» كلُّ «`ID` في `WL-…`» قبلَ «وبعدَها». المعرِّفُ المُدّعى بلا صفٍّ ⇒ `R8/S3-UNKNOWN`،
 //   وبصفٍّ بلا علامة ⇒ `R8/S3-UNMARKED`، وصفرُ ادّعاءٍ ⇒ `R8/S3-ANCHOR`. **حدٌّ معلَن:** الاتّجاهُ الآخرُ
 //   (‏§3 يقولُ «مفتوح» عن صفٍّ مُغلَق) لقطاتٌ تاريخيّةٌ موسومةٌ («حتى `WL-301`») خارجَ النطاق.
 {
   const text = readText('docs/roadmap/06-debt-register.md');
-  const rows = new Map(parseDebtRows(text).map((r) => [r.id, r]));
+  // كلُّ صفوفِ المعرِّفِ لا آخرُها: المعرِّفُ في §4 و§6 معاً (‏`REPO-4`، `REPO-5`) صفّانِ، وفكُّ علامةِ
+  // أحدِهما وحدَه كانَ يمرُّ لأنَّ `Map` تحفظُ الأخيرَ (‏مراجعةُ `#598`، N2).
+  /** @type {Map<string, ReturnType<typeof parseDebtRows>>} */
+  const rows = new Map();
+  for (const r of parseDebtRows(text)) rows.set(r.id, [...(rows.get(r.id) ?? []), r]);
   const lines = text.split('\n');
   const from = lines.findIndex((l) => l.startsWith('## 3 —'));
   const to = lines.findIndex((l, i) => i > from && l.startsWith('## 4 —'));
@@ -506,6 +510,8 @@ const facts = readDocCountFacts(root);
       const note = normalizeArabic(cells.slice(1).join(' | ')).replace(/\*\*/gu, '');
       for (const m of note.matchAll(new RegExp(`\`${ID}\` (?:مكتشف و)?مغلق في`, 'gu')))
         claimed.add(m[1] ?? '');
+      // «`ID` مسدَّدٌ» صيغةُ إغلاقٍ رابعةٌ في §3 (‏`D-11`، `D-12`) — مراجعةُ `#598`، N1.
+      for (const m of note.matchAll(new RegExp(`\`${ID}\` مسدد`, 'gu'))) claimed.add(m[1] ?? '');
       for (const m of note.matchAll(
         new RegExp(`\`${ID}\`…\`${ID}\`(?: — )?(?: ?مغلقة| ?كلها مغلقة)`, 'gu'),
       )) {
@@ -524,10 +530,12 @@ const facts = readDocCountFacts(root);
     );
   }
   for (const id of claimed) {
-    const row = rows.get(id);
-    if (row === undefined) {
+    const found = rows.get(id);
+    if (found === undefined) {
       violations.push(`R8/S3-UNKNOWN: §3 يقولُ إنّ «${id}» مُغلَقٌ ولا صفَّ له في §4/§6.`);
-    } else if (!row.closed) {
+      continue;
+    }
+    for (const row of found.filter((r) => !r.closed)) {
       violations.push(
         `R8/S3-UNMARKED: «${id}» مُغلَقٌ بنصِّ §3 وصفُّه في «${row.section}» بلا علامةِ الإغلاقِ الموحَّدة (~~ID~~ + 🟢).`,
       );

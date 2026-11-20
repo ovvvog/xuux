@@ -966,10 +966,44 @@ test('R8/S3 — غيابُ جدولِ §3 أو كلِّ ادّعاءِ إغلا�
   try {
     const p = path.join(tmp, DEBT_REG);
     const t = readFileSync(p, 'utf8');
-    writeFileSync(p, t.replace(/مُغلَقةٌ كلُّها|كلُّها مُغلَقةٌ|مُغلَقٌ في|مُغلَقةٌ/gu, 'مذكور'));
+    writeFileSync(
+      p,
+      t.replace(/مُغلَقةٌ كلُّها|كلُّها مُغلَقةٌ|مُغلَقٌ في|مُغلَقةٌ|مسدَّدٌ/gu, 'مذكور'),
+    );
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R8\/S3-ANCHOR/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// مراجعةُ `#598` (‏N1، N2): صيغةُ «مسدَّدٌ» في §3، وكلُّ صفوفِ المعرِّفِ لا آخرُها.
+test('R8/S3 — «`D-12` مسدَّدٌ» في §3 ادّعاءُ إغلاقٍ: صفُّه بلا علامةٍ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    remarkRow(tmp, 'D-12', '| `D-12` |');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNMARKED: «D-12»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/S3 — معرِّفٌ بصفَّينِ (‏`REPO-4` في §4.5 و§6): فكُّ علامةِ الأوّلِ وحدَه يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    // ‏`remarkRow` يستبدلُ أوّلَ ظهورٍ — صفُّ §4.5؛ وصفُّ §6 يبقى مُعلَّماً.
+    remarkRow(tmp, 'REPO-4', '| `REPO-4` |');
+    const text = readFileSync(path.join(tmp, DEBT_REG), 'utf8');
+    assert.ok(
+      text.includes('\n| ~~`REPO-4`~~ 🟢 |'),
+      'شرطُ الاستنساخ: الصفُّ الثاني باقٍ مُعلَّماً.',
+    );
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNMARKED: «REPO-4»/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
