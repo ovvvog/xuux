@@ -356,3 +356,43 @@ test('LIVE-63/2: الختمُ المعلّقُ يفقدُ قفلَهُ فلا ك
     );
   });
 });
+
+// WL-583 — قياسٌ مستقلٌّ لطبقةٍ من إصلاحِ `LIVE-63` لم يقتلْ طفرتَها أيُّ اختبارٍ أعلاه (‏مقيسٌ
+// بالطفراتِ على رأسِ فرعِ التكاملِ `fd9c687e`): حذفُ تصريحِ السرقةِ في `finally` مقيدًا
+// برمزِ الاقتناءِ — استبدالُهُ بحذفٍ أعمى نجا من عشرِ تشغيلاتٍ كاملةٍ للملفِّ. السباقُ
+// عبرَ العمليّاتِ لا يُستحضَرُ حتميًّا، فيُحقَنُ في اللحظةِ نفسِها: يُلَفُّ `renameSync`
+// المستورَدُ من `node:fs` ويُزامَنُ إلى الروابطِ المسمّاةِ (‏`syncBuiltinESMExports`) ثمَّ
+// يُعادُ الأصلُ في `finally` — بلا مؤقّتاتٍ ولا تخمينِ توقيتٍ.
+test('LIVE-63/3: تصريحُ سرقةٍ أحدثُ لغيرِنا على المسارِ لا يُحذَفُ — الحذفُ مقيدٌ برمزِ اقتنائِنا (انحدارُ WL-493)', async () => {
+  await withDir(async (dir) => {
+    const { manifest } = await provisioned(dir);
+    const lock = manifest.journalLockFile;
+    const permit = `${lock}.steal-permit`;
+    const dead = await deadPid();
+    writeFileSync(lock, JSON.stringify({ pid: dead, at: 'x' }));
+    const newer = JSON.stringify({ pid: 1, token: 'newer-permit', at: 'z' });
+    const { default: fs } = await import('node:fs');
+    const { syncBuiltinESMExports } = await import('node:module');
+    const original = fs.renameSync;
+    let fired = false;
+    fs.renameSync = function hooked(from, to) {
+      // لحظةَ المطالبةِ بالقفلِ الميتِ: تصريحُنا يُستبدَلُ بتصريحٍ أحدثَ لغيرِنا.
+      if (!fired && from === lock) {
+        fired = true;
+        writeFileSync(permit, newer);
+      }
+      return original.call(this, from, to);
+    };
+    syncBuiltinESMExports();
+    try {
+      manifest.raise('haltEpoch', 4);
+    } finally {
+      fs.renameSync = original;
+      syncBuiltinESMExports();
+    }
+    assert.equal(fired, true, 'الحقنُ وقعَ لحظةَ المطالبةِ');
+    assert.equal(manifest.read().haltEpoch, 4, 'القفلُ الميتُ انتُزِعَ والرفعُ وقعَ');
+    assert.equal(existsSync(permit), true, 'تصريحُ غيرِنا لم يُحذَفْ');
+    assert.equal(readFileSync(permit, 'utf8'), newer, 'وهوَ هوَ لم يُمَسَّ');
+  });
+});
