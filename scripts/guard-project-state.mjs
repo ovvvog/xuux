@@ -10,6 +10,8 @@
 // **يحكمُ على الفرقِ لا على الشجرةِ** — وهذا ما لم يكن يقيسُه حاجزٌ قبلَه:
 //   الأساسُ: `--base <ref>`، أو `PROJECT_STATE_BASE`، أو في CI لطلبِ دمجٍ `origin/main` أيًّا كانت قاعدتُه (WL-450)،
 //   أو في CI لدفعٍ إلى `main` الأبُ الأوّلُ `HEAD^1`، وإلّا `merge-base HEAD origin/main`.
+//   وبقاءُ التاريخِ يُقاسُ أيضاً على القاعدةِ الحرفيّةِ (‏WL-584): `--history-base <ref>`، أو
+//   `PROJECT_STATE_HISTORY_BASE`، أو في CI لطلبٍ قاعدتُه غيرُ `main` ‏`origin/<base_ref>`.
 //   والفرقُ `git diff --no-renames -z --name-status <base>...HEAD`.
 //
 // **رموزُ الخروجِ:** `0` الحزمةُ متّسقةٌ · `1` رفضٌ (‏تُطبَعُ القواعدُ) · `2` عجزٌ عن القياسِ
@@ -143,6 +145,27 @@ function resolveBase() {
 }
 
 const base = resolveBase();
+
+/**
+ * WL-584 (‏`DOC-24`): القاعدةُ الحرفيّةُ لقياسِ **بقاءِ التاريخِ** وحدَه. `WL-450` يقيسُ الحزمةَ على
+ * `origin/main` أيًّا كانت القاعدةُ (‏صدقُ الأخضرِ لـ`main`)، لكنَّ ما على القاعدةِ الحرفيّةِ ولم
+ * يبلغْ `main` بعدُ (‏فرعُ التكاملِ) لم يكنْ يُقاسُ بقاؤُه: مُدخلةُ `WL-577` حُذِفَت في طلبٍ إلى
+ * `wl-532-533-integration` فقالَ الحاجزُ «كلُّ مُدخلةٍ… باقٍ» (‏مقيسٌ على `fd9c687e`). فالتاريخُ
+ * يُقاسُ على الاثنتَين: `origin/main` و`origin/<base_ref>` في CI لطلبٍ قاعدتُه غيرُ `main`، أو
+ * `--history-base`/`PROJECT_STATE_HISTORY_BASE` صراحةً. قاعدةٌ مطلوبةٌ لا تُحَلُّ ⇒ غيرُ مقيس.
+ *
+ * @returns {string | null}
+ */
+function resolveHistoryBase() {
+  const explicit = option('--history-base') ?? process.env['PROJECT_STATE_HISTORY_BASE'];
+  if (explicit !== undefined && explicit !== '') return explicit;
+  const baseRef = process.env['GITHUB_BASE_REF'];
+  if (process.env['GITHUB_EVENT_NAME'] === 'pull_request' && baseRef && baseRef !== 'main') {
+    return `origin/${baseRef}`;
+  }
+  return null;
+}
+const historyBase = resolveHistoryBase();
 let baseSha = '';
 try {
   baseSha = git(['rev-parse', '--verify', `${base}^{commit}`]).trim();
@@ -264,7 +287,51 @@ const preservation = verifyHistoryPreserved({
   restoredRewrites: restoration.rewritten,
 });
 
-const violations = [...preservation.violations, ...restoration.violations, ...result.violations];
+// WL-584: بقاءُ التاريخِ على القاعدةِ الحرفيّةِ أيضاً — ما على فرعِ التكاملِ ولم يبلغْ `main`.
+/** @type {{ ref: string, sha: string, violations: import('./lib/project-state.mjs').Violation[] } | null} */
+let literal = null;
+if (historyBase !== null) {
+  let literalSha = '';
+  try {
+    literalSha = git(['rev-parse', '--verify', `${historyBase}^{commit}`]).trim();
+  } catch {
+    unmeasurable(`قاعدةُ التاريخِ الحرفيّةُ \`${historyBase}\` لا تُحَلُّ إلى كوميت.`);
+  }
+  if (literalSha !== baseSha) {
+    const at = fileAt(manifest.workLog);
+    const statusAt = fileAt(manifest.status);
+    const idsAt = fileAt(WORK_LOG_IDS);
+    const seen = new Set(preservation.violations.map((v) => `${v.code}\u0000${v.message}`));
+    const found = verifyHistoryPreserved({
+      baseWorkLog: at(literalSha) ?? '',
+      headWorkLog: headWorkLogText,
+      baseStatus: statusAt(literalSha) ?? '',
+      headStatus: headStatusText,
+      baseAmendments: declaredList(
+        idsAt(literalSha) ?? '',
+        'history_amendments',
+        'القاعدة الحرفيّة',
+      ),
+      headAmendments,
+      restoredRewrites: restoration.rewritten,
+    }).violations.filter((v) => !seen.has(`${v.code}\u0000${v.message}`));
+    literal = {
+      ref: historyBase,
+      sha: literalSha,
+      violations: found.map((v) => ({
+        code: v.code,
+        message: `${v.message} (‏على القاعدةِ الحرفيّةِ \`${historyBase}\`)`,
+      })),
+    };
+  }
+}
+
+const violations = [
+  ...preservation.violations,
+  ...(literal?.violations ?? []),
+  ...restoration.violations,
+  ...result.violations,
+];
 const handoffPath = path.join(repoRoot, manifest.handoff);
 const expectedHandoff = handoffText(manifest);
 if (!existsSync(handoffPath) || readFileSync(handoffPath, 'utf8') !== expectedHandoff) {
@@ -287,6 +354,13 @@ console.log(
       : ''
   }`,
 );
+if (literal !== null) {
+  console.log(
+    `  التاريخُ على القاعدةِ الحرفيّةِ: ${literal.ref} = ${literal.sha.slice(0, 12)} · ${
+      literal.violations.length === 0 ? 'كلُّ مُدخلةٍ وسطرِ لوحةٍ عليها باقٍ في المرشَّح' : 'ساقطٌ'
+    }`,
+  );
+}
 console.log(
   `  تنفيذيٌّ: ${result.executive.length} · ذاكرةٌ: ${result.memory.length} · مُدخلاتٌ جديدةٌ: ${
     result.newEntries.join(' ') || '—'

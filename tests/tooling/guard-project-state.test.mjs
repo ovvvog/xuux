@@ -795,6 +795,55 @@ test('التاريخ — إعلانٌ قديمٌ على الأساسِ لا يُ
   assert.match(r.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/u);
 });
 
+// ═══ `DOC-24` (‏`WL-584`) — طفرتانِ في `verifyHistoryPreserved` نجتا من كلِّ اختبارٍ أعلاه ═══
+//
+// مقيسٌ بالطفراتِ على رأسِ فرعِ التكاملِ `fd9c687e`: (أ) الحكمُ بالفقدِ حينَ تغيبُ المُدخلةُ
+// كلُّها وحدَه (‏`now.length === 0` بدلَ `now.length < count`) — فنسخةٌ من مُدخلةٍ مكرَّرةٍ على
+// الأساسِ تُحذَفُ بصمتٍ، وهو صنفُ حادثتَي `WL-087` و`WL-140`؛ (ب) إعلانُ `amend` يُعفي
+// الحذفَ أيضاً — فإعلانُ تعديلٍ يُصيرُ رخصةَ محوٍ.
+
+test('التاريخ — مُدخلةٌ مكرَّرةٌ على الأساسِ تُحذَفُ منها نسخةٌ واحدةٌ فيُرَدُّ (‏PS11): العدُّ لا الحضور', () => {
+  const root = fixture();
+  git(root, ['checkout', '-q', 'main']);
+  const base = readFileSync(path.join(root, LOG), 'utf8');
+  const original = /### \[2026-10-01\][\s\S]*$/u.exec(base)?.[0] ?? '';
+  assert.ok(original.length > 0, 'شرطُ الاستنساخ: مُدخلةُ WL-001 حاضرةٌ على الأساس.');
+  write(root, LOG, `${base.trimEnd()}\n\n${original}`);
+  commit(root, 'duplicated WL-001 on main (historical class)');
+  git(root, ['checkout', '-qB', 'work']);
+  write(root, LOG, base);
+  regenerateHandoff(root);
+  commit(root, 'drop one copy silently');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(
+    r.out,
+    /PS11\/HISTORY-LOST: مُدخلةُ `WL-001` على الأساسِ \(‏2\) غائبةٌ عن المرشَّحِ \(‏1\)/u,
+  );
+});
+
+test('التاريخ — إعلانُ `amend` لا يُعفي حذفاً (‏PS11): التعديلُ ليس رخصةَ محو', () => {
+  const root = fixture();
+  addEntry(root, {
+    id: 'WL-002',
+    title: 'تعديلُ WL-001 مُعلَناً',
+    files: ['config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, log.replace(/### \[2026-10-01\][\s\S]*$/u, ''));
+  write(
+    root,
+    'config/work-log-ids.yaml',
+    'history_amendments:\n  - id: WL-001\n    action: amend\n    by: WL-002\n    reason: تصحيحُ صياغة\n',
+  );
+  regenerateHandoff(root);
+  commit(root, 'remove under an amend declaration');
+  const r = runGuard(root);
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/u);
+  assert.doesNotMatch(r.out, /PS13\//u, 'الإعلانُ نفسُه سليمٌ ومملوك — الردُّ للحذفِ وحدَه.');
+});
+
 // ═══ `DOC-25` (‏`WL-335`) — فقودٌ حقيقيّةٌ على `main` تُكتشَفُ ثمّ تُستعادُ حرفيّاً ═══
 //
 // لكلِّ حادثةٍ: النصُّ الأصلُ والنصُّ التالفُ منسوخانِ بايتاً ببايتٍ من الكوميتَين الحقيقيَّين
@@ -1300,6 +1349,89 @@ test('WL-450 — طلبٌ مركَّبٌ في CI يُقاسُ على origin/main
   assert.match(out, /PS2\/NO-RECORD/u);
   // والقياسُ القديمُ على القاعدةِ الحرفيّةِ كانَ يُمرِّرُ الطبقةَ نفسَها:
   assert.equal(runGuard(root, 'origin/stack-base').status, 0, 'فرقُ الطبقةِ العليا وحدَه محايد.');
+});
+
+/**
+ * فرعُ تكاملٍ فوقَ `main` يحملُ مُدخلةً لم تبلغْ `main`، وطلبٌ إليه — كما على المستودعِ اليوم.
+ *
+ * @returns {string}
+ */
+function integrationRepo() {
+  const root = fixture();
+  git(root, ['checkout', '-q', '-b', 'integration', 'main']);
+  addEntry(root, {
+    id: 'WL-002',
+    title: 'عملٌ على فرعِ التكامل',
+    files: ['src/app.mjs', 'PROJECT_STATUS.md'],
+  });
+  write(root, 'src/app.mjs', 'export const v = 2;\n');
+  regenerateHandoff(root);
+  commit(root, 'WL-002 on integration only');
+  git(root, ['update-ref', 'refs/remotes/origin/main', 'main']);
+  git(root, ['update-ref', 'refs/remotes/origin/integration', 'integration']);
+  git(root, ['checkout', '-q', '-b', 'pr-to-integration', 'integration']);
+  return root;
+}
+
+/**
+ * الحاجزُ كما يُشغِّلُه CI لطلبِ دمجٍ قاعدتُه `baseRef`.
+ *
+ * @param {string} root
+ * @param {string} baseRef
+ */
+function runGuardAsPr(root, baseRef) {
+  const env = { ...process.env };
+  delete env['PROJECT_STATE_BASE'];
+  delete env['PROJECT_STATE_HISTORY_BASE'];
+  env['GITHUB_EVENT_NAME'] = 'pull_request';
+  env['GITHUB_BASE_REF'] = baseRef;
+  const run = spawnSync(process.execPath, [GUARD, '--root', root, '--no-consistency'], {
+    encoding: 'utf8',
+    env,
+  });
+  return { status: run.status, out: `${run.stdout}\n${run.stderr}` };
+}
+
+test('WL-584 (‏DOC-24) — طلبٌ إلى فرعِ التكاملِ يحذفُ مُدخلةً لم تبلغْ main يُرَدُّ (‏PS11) على القاعدةِ الحرفيّة', () => {
+  const root = integrationRepo();
+  // الحذفُ الصامتُ: المُدخلةُ وسطرُها كأنْ لم يكونا (‏حادثةُ `WL-577` المقيسةُ على `fd9c687e`).
+  git(root, ['checkout', '-q', 'main', '--', 'docs/roadmap/05-work-log.md', 'PROJECT_STATUS.md']);
+  regenerateHandoff(root);
+  commit(root, 'silently drop WL-002');
+  const r = runGuardAsPr(root, 'integration');
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /الأساسُ: origin\/main/u, 'WL-450 باقٍ: الحزمةُ تُقاسُ على main.');
+  assert.match(
+    r.out,
+    /التاريخُ: كلُّ مُدخلةٍ وسطرِ لوحةٍ على الأساسِ باقٍ/u,
+    'وعلى main وحدَه لا فقدَ — وهو عينُ الثغرة.',
+  );
+  assert.match(
+    r.out,
+    /التاريخُ على القاعدةِ الحرفيّةِ: origin\/integration = [0-9a-f]{12} · ساقطٌ/u,
+  );
+  assert.match(
+    r.out,
+    /PS11\/HISTORY-LOST: مُدخلةُ `WL-002`[^\n]*على القاعدةِ الحرفيّةِ `origin\/integration`/u,
+  );
+  assert.match(r.out, /PS11\/STATUS-HISTORY-LOST: سطرُ «آخر تحديث» لـ`WL-002`/u);
+});
+
+test('WL-584 (‏DOC-24) — الطلبُ نفسُه بلا حذفٍ يمرُّ على القاعدتَين، وقاعدةٌ حرفيّةٌ لا تُحَلُّ عجزٌ لا تخطٍّ', () => {
+  const root = integrationRepo();
+  write(root, 'docs/THREAT_MODEL.md', '# نموذج التهديد\n\nتصحيحٌ لغويّ.\n');
+  commit(root, 'neutral doc on top of integration');
+  const ok = runGuardAsPr(root, 'integration');
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(
+    ok.out,
+    /التاريخُ على القاعدةِ الحرفيّةِ: origin\/integration = [0-9a-f]{12} · كلُّ مُدخلةٍ/u,
+  );
+  // طلبٌ قاعدتُه main: لا قاعدةَ حرفيّةً ثانيةً (‏هي نفسُها) — لا سطرَ ولا قياسَ مكرَّر.
+  assert.doesNotMatch(runGuardAsPr(root, 'main').out, /القاعدةِ الحرفيّةِ/u);
+  const lost = runGuardAsPr(root, 'no-such-branch');
+  assert.equal(lost.status, 2, lost.out);
+  assert.match(lost.out, /قاعدةُ التاريخِ الحرفيّةُ `origin\/no-such-branch` لا تُحَلُّ/u);
 });
 
 test('WL-540 — ملخّصُ التسليم: لا تسقطُ مُدخلةٌ جزئيّةٌ من السلسلةِ المتّصلةِ من الأحدث، والحدُّ الأدنى ثمانٍ', () => {
