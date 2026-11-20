@@ -2705,6 +2705,46 @@ describe('WL-579: بوابةُ إقلاعِ المُشرِف (‏قاعدةٌ م
     assert.ok(outcomes.has('READY:resolved'), [...outcomes].join(' '));
   });
 
+  test('فشلُ إلغاءِ الاعتمادِ العابرِ للعهد لا يُسجَّلُ نجاحاً، ولا يُسلَّم، ويُلغيه كنسُ start التالي', async () => {
+    const db = scriptedFenceDb();
+    /** @type {Array<Record<string, unknown>>} */
+    const log = [];
+    const root = db.root({ log: (/** @type {any} */ e) => log.push(e) });
+    const gate = new SupervisorBootGate(root);
+    await gate.start();
+    const ch = await root.issueChallenge('alpha', newBootId());
+    const held = db.hold('credential');
+    const issuing = root.completeCredential(String(ch['nonce']), Buffer.alloc(64));
+    await held.arrived;
+    const failRevoke = db.hold('revoke', Object.assign(new Error('reset'), { code: 'ECONNRESET' }));
+    gate.stop();
+    await held.release();
+    await failRevoke.arrived;
+    await failRevoke.release();
+    const e = await rejection(() => issuing);
+    assert.equal(e.code, FENCE_ERRORS.BOOT_GATE_CLOSED);
+    assert.equal(e.detail.revoked, false);
+    const role = String(e.detail.role);
+    assert.ok(db.active.has(role), 'الإلغاءُ فشلَ فعلاً — الدورُ باقٍ ACTIVE غيرَ مُسلَّم');
+    assert.equal(
+      log.some((x) => x['ev'] === 'boot_gate_epoch_revoked' && x['role'] === role),
+      false,
+      'لا يُسجَّلُ إلغاءٌ لم يقع',
+    );
+    assert.ok(
+      log.some(
+        (x) =>
+          x['ev'] === 'boot_gate_epoch_revoke_failed' &&
+          x['role'] === role &&
+          x['error'] === 'ECONNRESET',
+      ),
+    );
+    assert.deepEqual(gate.snapshot().issued, []);
+    await gate.start();
+    assert.equal(db.active.has(role), false, 'كنسُ start التالي ألغاه');
+    assert.equal(gate.state, BOOT_GATE_STATES.READY);
+  });
+
   test('المدخلاتُ والانتقالاتُ الممنوعة: بوابةٌ واحدةٌ لكلِّ جذر، وresweep من NEW/STOPPED، وstart مزدوج', async () => {
     const db = scriptedFenceDb();
     const root = db.root();

@@ -1795,14 +1795,25 @@ export class SupervisorBootGate {
       const role = String(credential['role_name']);
       if (epoch !== this.#epoch) {
         // ‏اكتملَ عبرَ stop أو start: يُلغى قبلَ أن يستقرَّ الإصدارُ فلا يُسلَّمُ ولا يبقى ACTIVE.
-        await this.#root
-          .revokeCredential(role, BOOT_GATE_EPOCH_REVOKE_REASON)
-          .catch(() => undefined);
-        this.#root.log({ ev: 'boot_gate_epoch_revoked', role });
+        // ‏فشلُ الإلغاءِ لا يُسجَّلُ نجاحاً: يبقى الدورُ ACTIVE غيرَ مُسلَّمٍ حتى كنسِ start() التالي (‏مراجعةُ 565169e8).
+        /** @type {string | null} */
+        let revokeError = null;
+        try {
+          await this.#root.revokeCredential(role, BOOT_GATE_EPOCH_REVOKE_REASON);
+        } catch (/** @type {any} */ e) {
+          revokeError = String(e?.code ?? e?.message ?? e);
+        }
+        this.#root.log(
+          revokeError === null
+            ? { ev: 'boot_gate_epoch_revoked', role }
+            : { ev: 'boot_gate_epoch_revoke_failed', role, error: revokeError },
+        );
         throw new FenceError(
           FENCE_ERRORS.BOOT_GATE_CLOSED,
-          'completeCredential: تبدّلَ عهدُ البوابةِ أثناءَ الإصدار — الاعتمادُ أُلغيَ ولم يُسلَّم',
-          { op: 'completeCredential', state: this.#state, role },
+          revokeError === null
+            ? 'completeCredential: تبدّلَ عهدُ البوابةِ أثناءَ الإصدار — الاعتمادُ أُلغيَ ولم يُسلَّم'
+            : 'completeCredential: تبدّلَ عهدُ البوابةِ أثناءَ الإصدار — تعذّرَ إلغاءُ الاعتمادِ ولم يُسلَّم (‏يُلغيه كنسُ start التالي)',
+          { op: 'completeCredential', state: this.#state, role, revoked: revokeError === null },
         );
       }
       this.#issued.add(role);
