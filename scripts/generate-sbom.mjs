@@ -269,6 +269,158 @@ export function provenanceProblems(key, entry) {
   return why;
 }
 
+/** حقولُ الاعتماديّاتِ التي تصنعُ حوافَّ arborist لعقدةٍ غيرِ جذريّة (‏`Node[_loadDeps]` في npm 10.8.2). */
+const EDGE_FIELDS = ['peerDependencies', 'dependencies', 'optionalDependencies'];
+
+/**
+ * أسماءُ الحزمِ في مسارِ القفل (‏`node_modules/a/node_modules/@s/b` ⇒ `['a', '@s/b']`)، أو null إن التبسَ التقسيم.
+ * @param {string} key @returns {string[] | null}
+ */
+function lockPathNames(key) {
+  if (key === '') return [];
+  if (!NM_PATH.test(key)) return null;
+  const names = key.slice(NM_MARK.length).split(`/${NM_MARK}`);
+  return names.every((n) => PKG_NAME.test(n) && n !== 'node_modules') ? names : null;
+}
+
+/** @param {string[]} names */
+const lockKey = (names) => (names.length === 0 ? '' : NM_MARK + names.join(`/${NM_MARK}`));
+
+/**
+ * WL-578: إثباتُ التجميعِ من بياناتِ القفلِ وحدَها — يُعيدُ حسابَ `Node.getBundler()` في arborist ‏(npm 10.8.2،
+ * ‏`lib/node.js`) ويقارنُه بعلامةِ `inBundle` التي يكتبُها npm (‏`Shrinkwrap.metaFromNode`: ‏`node.inBundle`):
+ * مدخلةٌ يُجمِّعُها **أوّلاً** مُجمِّعُ أمِّها الماديّةِ إن كانت الأمُّ مُجمَّعة؛ وإلّا أمُّها إن سمّتها
+ * `bundleDependencies` الأمِّ في القفل؛ وإلّا أمُّها إن كانت مدخلةٌ مُجمَّعةٌ بالأمِّ نفسِها تعتمدُ عليها وتُحَلُّ
+ * إليها (‏البحثُ في node_modules صعوداً من المعتمِد). العلامةُ في القفلِ أو في SBOM ليست دليلاً: كلُّ اختلافٍ بينَ
+ * المحسوبِ والمعلَّمِ يُرفَض — علامةٌ بلا مُجمِّع (‏يتيمة، أو تحتَ أبٍ خاطئٍ أو مسارٍ مشابه)، أو مُجمِّعٌ بلا علامة
+ * (‏حُذِفَت)، أو مُجمِّعٌ هو الجذر (‏غيرُ مدعوم)، أو قيمةُ علامةٍ غيرُ `true`، أو `bundleDependencies` ليست مصفوفةَ
+ * أسماءٍ صالحة، أو حقلُ اعتماديّاتٍ ليس كائناً، أو مسارٌ ملتبسُ التقسيم. المُجمِّعُ نفسُه مدخلةٌ عاديّةٌ تخضعُ لسياسةِ
+ * المصدرِ وSRI، وبايتاتُ المُجمَّعِ داخلَ tarball المُجمِّعِ المختومِ ببصمتِه. قفلٌ بلا أيِّ `inBundle` ولا
+ * `bundleDependencies` لا يُفحَصُ (‏لا أثرَ على غيرِه). **ترتيبُ المفاتيح:** `loadVirtual` يبني الحوافَّ بترتيبِ مفاتيحِ
+ * القفل، فمفتاحٌ قبلَ أمِّه أو مصدرِ حافّتِه يُسقِطُ الحافّةَ ويُغيِّرُ المُجمِّع (‏مراجعةُ 4095ee23)؛ فالقفلُ المعنيُّ
+ * بالتجميعِ يُشترَطُ أن تكونَ مفاتيحُه بترتيبِ npm القانونيّ (‏`json-stringify-nice`: ‏`localeCompare(…, 'en')`) وإلّا
+ * رُفِض. الحدود: npm نفسُه (‏`#assignBundles`) يُضيفُ إلى `bundleDependencies` الأمِّ كلَّ ابنٍ معلَّمٍ تعتمدُ عليه — أي
+ * يثقُ بالعلامة؛ هنا لا تُقبَلُ إلّا بإثبات، فيُرفَضُ ذلك (‏رفضٌ لا قبول)؛ و`legacy-peer-deps` يُسقِطُ حوافَّ peer عندَ npm
+ * فيُرفَضُ ما جُمِّعَ بها وحدَها؛ والتجميعُ في الجذرِ غيرُ مدعوم؛ ومطابقةُ `bundleDependencies` لـ`package.json` داخلَ
+ * tarball غيرُ مفحوصة.
+ * @param {Record<string, any>} packages @returns {Map<string, string>} المفتاح ⇒ سببُ الرفض
+ */
+export function bundleProblems(packages) {
+  /** @type {Map<string, string>} */
+  const out = new Map();
+  if (!isObj(packages)) return out;
+  const keys = Object.keys(packages).sort();
+  const relevant = keys.some(
+    (k) =>
+      isObj(packages[k]) &&
+      (packages[k].inBundle !== undefined || packages[k].bundleDependencies !== undefined),
+  );
+  if (!relevant) return out;
+  /** @param {string} k @param {string} why */
+  const flag = (k, why) => {
+    if (!out.has(k)) out.set(k, why);
+  };
+  const raw = Object.keys(packages);
+  const canonical = [...raw].sort((a, b) => a.localeCompare(b, 'en'));
+  const misplaced = raw.findIndex((k, i) => k !== canonical[i]);
+  if (misplaced !== -1) {
+    flag(
+      /** @type {string} */ (raw[misplaced]),
+      'مفاتيحُ القفلِ ليست بترتيبِ npm القانونيّ — npm يبني الحوافَّ بالترتيب، فلا يُثبَتُ التجميع',
+    );
+  }
+  /** @type {Map<string, string[]>} */
+  const names = new Map();
+  for (const k of keys) {
+    const n = lockPathNames(k);
+    if (n === null) flag(k, 'مسارٌ ملتبسُ التقسيم — لا تُحسَبُ أمُّه');
+    else names.set(k, n);
+  }
+  /** @type {Map<string, Set<string>>} */
+  const bundled = new Map();
+  for (const k of keys) {
+    const e = packages[k];
+    if (!isObj(e) || e.bundleDependencies === undefined) continue;
+    const bd = e.bundleDependencies;
+    if (!Array.isArray(bd) || !bd.every((n) => typeof n === 'string' && PKG_NAME.test(n))) {
+      flag(k, '`bundleDependencies` ليست مصفوفةَ أسماءِ حزمٍ صالحة');
+      continue;
+    }
+    bundled.set(k, new Set(bd));
+  }
+  /** @param {string} from @param {string} name @returns {string | null} */
+  const resolve = (from, name) => {
+    const base = names.get(from);
+    if (!base) return null;
+    for (let i = base.length; i >= 0; i--) {
+      const cand = lockKey([...base.slice(0, i), name]);
+      if (names.has(cand) && isObj(packages[cand])) return cand;
+    }
+    return null;
+  };
+  /** @type {Map<string, string[]>} */
+  const edgesIn = new Map();
+  for (const k of keys) {
+    const e = packages[k];
+    if (k === '' || !isObj(e) || !names.has(k)) continue;
+    /** @type {Set<string>} */
+    const deps = new Set();
+    for (const field of EDGE_FIELDS) {
+      if (e[field] === undefined) continue;
+      if (!isObj(e[field])) {
+        flag(k, `\`${field}\` ليست كائناً — لا تُحسَبُ حوافُّها`);
+        continue;
+      }
+      for (const n of Object.keys(e[field])) deps.add(n);
+    }
+    for (const n of deps) {
+      const to = resolve(k, n);
+      if (to === null) continue;
+      if (!edgesIn.has(to)) edgesIn.set(to, []);
+      /** @type {string[]} */ (edgesIn.get(to)).push(k);
+    }
+  }
+  /** @param {string} k @param {Set<string>} seen @returns {string | null} */
+  const bundler = (k, seen) => {
+    if (seen.has(k)) return null;
+    seen.add(k);
+    const n = names.get(k);
+    if (!n || n.length === 0) return null;
+    const parent = lockKey(n.slice(0, -1));
+    const pb = bundler(parent, seen);
+    if (pb !== null) return pb;
+    if (bundled.get(parent)?.has(/** @type {string} */ (n[n.length - 1]))) return parent;
+    for (const from of edgesIn.get(k) ?? []) {
+      if (bundler(from, seen) === parent) return parent;
+    }
+    return null;
+  };
+  for (const k of keys) {
+    const e = packages[k];
+    if (k === '' || !isObj(e) || !names.has(k)) continue;
+    if (e.inBundle !== undefined && e.inBundle !== true) {
+      flag(k, `\`inBundle\` قيمتُها ${JSON.stringify(e.inBundle)} لا true`);
+      continue;
+    }
+    const by = bundler(k, new Set());
+    if (e.inBundle === true) {
+      if (by === null) {
+        const parent = lockKey(/** @type {string[]} */ (names.get(k)).slice(0, -1));
+        flag(
+          k,
+          names.has(parent) && isObj(packages[parent])
+            ? `\`inBundle\` بلا مُجمِّعٍ مُثبَتٍ في القفل — «${parent || '(الجذر)'}» لا تُجمِّعُها`
+            : `\`inBundle\` والحزمةُ الأمُّ «${parent}» غائبةٌ عن القفل`,
+        );
+      } else if (by === '')
+        flag(k, 'مُجمَّعةٌ في حزمةِ الجذر (‏`bundleDependencies` للمشروع) — غيرُ مدعومة');
+    } else if (by !== null) {
+      flag(k, `يُجمِّعُها «${by || '(الجذر)'}» في القفل وعلامةُ \`inBundle\` غائبة`);
+    }
+  }
+  return out;
+}
+
 /**
  * يقارنُ مكوّناً واحداً بمدخلتِه في القفل؛ يُرجعُ أسبابَ الرفض.
  * @param {Record<string, any>} c @param {string} key @param {Record<string, any>} entry
@@ -356,6 +508,10 @@ export function checkSbomComponents(sbom, lock) {
     return { problems, omittedOptional };
   }
   const entries = matchableEntries(lock.packages, problems);
+  // ‏WL-578: علامةُ `inBundle` تُقبَلُ بإثباتِ التجميعِ من القفلِ وحدَه، لا بتصريحِ القفلِ أو SBOM.
+  for (const [key, why] of bundleProblems(lock.packages)) {
+    problems.push(`مدخلةُ القفل «${key}»: تجميعٌ غيرُ مُثبَت (‏WL-578): ${why}`);
+  }
   /** @type {Set<string>} */
   const seen = new Set();
   sbom.components.forEach((/** @type {any} */ c, /** @type {number} */ i) => {
