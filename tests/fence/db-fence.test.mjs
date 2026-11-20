@@ -23,9 +23,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  BOOT_GATE_EPOCH_REVOKE_REASON,
+  BOOT_GATE_STATES,
   FENCE_ERRORS,
   FenceError,
+  FenceRoot,
   FenceSovereign,
+  ORPHAN_REVOKE_REASON,
+  SupervisorBootGate,
   assertFencedSession,
   dbFenceMode,
   prepareFencedWorker,
@@ -2204,3 +2209,699 @@ describe('WL-540: احتواءُ الوصولِ عبرَ القواعد', { skip
 // يُسلَّمُ عند COMMIT لمستمعٍ متّصلٍ بالقاعدةِ نفسِها (‏LISTEN بلا امتياز — شرطُه الدخولُ وحدَه)، ولا يُخزَّنُ لمستمعٍ
 // لاحق؛ لكنّه يبقى في الطابورِ لمستمعٍ كان متّصلاً حتى يقرأَه — ولو انتهت جلسةُ المُرسِلِ أو أُلغيَ اعتمادُه.
 // هذا غيرُ pg_logical_emit_message (‏WL-537): رسالةُ WAL دائمةٌ يراها كلُّ مستهلكٍ منطقيٍّ لاحق.
+
+// ─── WL-579: بوابةُ إقلاعِ المُشرِف — لا إصدارَ قبلَ نجاحِ كنسِ الاعتمادات (‏TH-SUP-05) ─────────────────────
+// ‏اختباراتُ الحالةِ والسباقِ هنا على قاعدةٍ مُبرمَجة (‏تُسجِّلُ كلَّ استعلامٍ وتُمسِكُ ما يُطلَبُ إمساكُه) كي تكونَ
+// ‏حتميّةً بلا توقيت؛ والمسارُ الحقيقيُّ على PostgreSQL في القسمِ الذي يليها.
+
+/**
+ * قاعدةٌ مُبرمَجةٌ لـFenceRoot: اعتماداتٌ ACTIVE في الذاكرة، وكلُّ استعلامٍ يُسجَّل، و`hold(kind)` يُمسِكُ
+ * أوّلَ استعلامٍ من صنفِه حتى يُطلَق.
+ */
+function scriptedFenceDb() {
+  /** @type {Map<string, { worker_id: string, boot_id: string }>} */
+  const active = new Map();
+  /** @type {Array<{ kind: string, params: unknown[] }>} */
+  const calls = [];
+  /** @type {Map<string, { release: () => void, reached: Promise<void>, fail?: Error }>} */
+  const holds = new Map();
+  let nonces = 0;
+  /** @type {Array<{ role: string, pid: number }>} */
+  let lingering = [];
+  /** @type {null | ((kind: string) => void)} */
+  let onInventory = null;
+  /** @param {string} sql */
+  const kindOf = (sql) =>
+    /fence\.issue_challenge/.test(sql)
+      ? 'challenge'
+      : /fence\.issue_credential/.test(sql)
+        ? 'credential'
+        : /fence\.revoke_credential/.test(sql)
+          ? 'revoke'
+          : /pg_stat_activity/.test(sql)
+            ? 'sessions'
+            : /FROM fence\.credentials/.test(sql)
+              ? 'inventory'
+              : 'other';
+  const client = {
+    /** @param {string} sql @param {any[]} [params] */
+    async query(sql, params = []) {
+      const kind = kindOf(sql);
+      calls.push({ kind, params });
+      const h = holds.get(kind);
+      if (h !== undefined) {
+        holds.delete(kind);
+        /** @type {any} */ (h).arrived();
+        await new Promise((resolve) => {
+          h.release = /** @type {any} */ (resolve);
+          /** @type {any} */ (h).ready();
+        });
+        if (h.fail) throw h.fail;
+      }
+      if (kind === 'challenge') {
+        nonces++;
+        return {
+          rows: [
+            { r: { nonce: `n${nonces}`, message: 'm', worker_id: params[0], boot_id: params[1] } },
+          ],
+        };
+      }
+      if (kind === 'credential') {
+        const role = `xw_${String(params[0])}`;
+        active.set(role, { worker_id: 'w', boot_id: String(params[0]) });
+        return { rows: [{ r: { role_name: role, epoch: 1 } }] };
+      }
+      if (kind === 'revoke') {
+        const had = active.delete(String(params[0]));
+        return { rows: [{ r: had ? 1 : 0 }] };
+      }
+      if (kind === 'sessions') return { rows: [{ r: lingering }] };
+      if (kind === 'inventory') {
+        onInventory?.(kind);
+        return {
+          rows: [...active.entries()]
+            .sort(([a], [b]) => (a < b ? -1 : 1))
+            .map(([role_name, v]) => ({ role_name, ...v })),
+        };
+      }
+      return { rows: [{ r: null }] };
+    },
+  };
+  return {
+    active,
+    calls,
+    /** @param {string} kind */
+    count: (kind) => calls.filter((c) => c.kind === kind).length,
+    /** @param {Array<{ role: string, pid: number }>} v */
+    setLingering(v) {
+      lingering = v;
+    },
+    /** @param {null | ((kind: string) => void)} f */
+    setOnInventory(f) {
+      onInventory = f;
+    },
+    /**
+     * يُمسِكُ أوّلَ استعلامٍ من الصنف: `arrived` يُحَلُّ حينَ يصلُ، و`release()` يُطلِقُه (‏أو يرمي `fail`).
+     * @param {string} kind @param {Error} [fail]
+     */
+    hold(kind, fail) {
+      /** @type {any} */
+      const h = { fail };
+      h.arrived = () => {};
+      const arrived = new Promise((r) => (h.arrived = r));
+      const ready = new Promise((r) => (h.ready = r));
+      holds.set(kind, h);
+      return {
+        arrived,
+        release: async () => {
+          await ready;
+          h.release();
+        },
+      };
+    },
+    root: (/** @type {Record<string, unknown>} */ opts = {}) =>
+      new FenceRoot(async () => /** @type {any} */ (client), /** @type {any} */ (opts)),
+  };
+}
+
+/** @param {any} gate @param {string} workerId */
+const gateIssue = (gate, workerId) =>
+  gate.issueCredential ? gate.issueCredential(workerId, newBootId(), () => Buffer.alloc(64)) : null;
+
+describe('WL-579: بوابةُ إقلاعِ المُشرِف (‏قاعدةٌ مُبرمَجة)', () => {
+  test('جذرٌ بلا بوابة، وبوابةٌ في NEW: لا إصدارَ ولا مصافحةَ ولا نداءَ للقاعدة', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    for (const [fn, why] of /** @type {Array<[() => Promise<unknown>, string]>} */ ([
+      [() => root.issueChallenge('alpha', newBootId()), 'issueChallenge'],
+      [() => root.completeCredential('n1', Buffer.alloc(64)), 'completeCredential'],
+      [() => root.issueCredential('alpha', newBootId(), () => Buffer.alloc(64)), 'issueCredential'],
+    ])) {
+      const e = await rejectsWith(fn, [FENCE_ERRORS.BOOT_GATE_CLOSED], `بلا بوابة: ${why}`);
+      assert.equal(e.detail.state, null);
+    }
+    const gate = new SupervisorBootGate(root);
+    assert.equal(gate.state, BOOT_GATE_STATES.NEW);
+    for (const fn of [
+      () => root.issueChallenge('alpha', newBootId()),
+      () => root.completeCredential('n1', Buffer.alloc(64)),
+      () => root.issueCredential('alpha', newBootId(), () => Buffer.alloc(64)),
+    ]) {
+      const e = await rejectsWith(fn, [FENCE_ERRORS.BOOT_GATE_CLOSED], 'NEW');
+      assert.equal(e.detail.state, BOOT_GATE_STATES.NEW);
+    }
+    // ‏المصافحةُ تمرُّ بالجذرِ نفسِه: hello قبلَ الكنس ⇒ رفضٌ يصلُ العامل.
+    const child = /** @type {any} */ (new EventEmitter());
+    /** @type {any[]} */
+    const sent = [];
+    child.send = (/** @type {any} */ m) => sent.push(m);
+    const sup = superviseWorkerHandshake(root, child, { expectedWorkerId: 'alpha' });
+    child.emit('message', { type: 'xuux-fence/hello', worker_id: 'alpha', boot_id: newBootId() });
+    const se = await rejection(() => sup);
+    assert.equal(se.code, FENCE_ERRORS.BOOT_GATE_CLOSED);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].type, 'xuux-fence/refused');
+    assert.match(sent[0].reason, /NEW/);
+    assert.equal(db.calls.length, 0, 'لا استعلامَ قبلَ الكنس');
+  });
+
+  test('start ⇒ SWEEPING ثمّ READY: الكنسُ قبلَ أيِّ إصدار، والإصدارُ في SWEEPING مرفوضٌ بلا نداء', async () => {
+    const db = scriptedFenceDb();
+    db.active.set('xw_orphan', { worker_id: 'alpha', boot_id: 'old' });
+    /** @type {Array<Record<string, unknown>>} */
+    const log = [];
+    const root = db.root({ log: (/** @type {any} */ e) => log.push(e) });
+    const gate = new SupervisorBootGate(root);
+    const held = db.hold('inventory');
+    const started = gate.start();
+    await held.arrived;
+    assert.equal(gate.state, BOOT_GATE_STATES.SWEEPING);
+    const before = db.calls.length;
+    await rejectsWith(
+      () => root.issueChallenge('alpha', newBootId()),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'SWEEPING',
+    );
+    assert.equal(db.calls.length, before, 'الرفضُ قبلَ القاعدة');
+    await held.release();
+    const r = await started;
+    assert.deepEqual(
+      r.revoked.map((x) => x.role_name),
+      ['xw_orphan'],
+    );
+    assert.equal(gate.state, BOOT_GATE_STATES.READY);
+    const kinds = db.calls.map((c) => c.kind);
+    assert.ok(kinds.indexOf('revoke') < kinds.length, 'أُلغيَ اليتيم');
+    const c = await root.issueCredential('alpha', newBootId(), () => Buffer.alloc(64));
+    assert.equal(db.calls.at(-1)?.kind, 'credential');
+    assert.ok(
+      db.calls.findIndex((x) => x.kind === 'challenge') >
+        db.calls.map((x) => x.kind).lastIndexOf('sessions'),
+      'أوّلُ تحدٍّ بعدَ آخرِ استطلاعٍ للكنس',
+    );
+    assert.deepEqual(gate.snapshot().issued, [String(c.role_name)]);
+    assert.deepEqual(
+      log.map((e) => e['ev']).filter((e) => String(e).startsWith('boot_gate')),
+      ['boot_gate_sweeping', 'boot_gate_ready'],
+    );
+    await rejectsWith(() => gate.start(), [FENCE_ERRORS.BOOT_GATE_STATE], 'start في READY');
+  });
+
+  test('فشلُ الكنس (‏يتيمٌ ظهر، جلسةٌ باقية، خطأُ اتصال) ⇒ FAILED ولا إصدار؛ وstart التالي ينجح', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    const gate = new SupervisorBootGate(root, { settleMs: 5, pollMs: 1 });
+    // ‏(أ) يتيمٌ يظهرُ بينَ الجردَين.
+    let n = 0;
+    db.setOnInventory(() => {
+      if (++n === 2) db.active.set('xw_late', { worker_id: 'beta', boot_id: 'x' });
+    });
+    await rejectsWith(() => gate.start(), [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE], 'appeared');
+    assert.equal(gate.state, BOOT_GATE_STATES.FAILED);
+    assert.equal(gate.snapshot().lastError, FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE);
+    const before = db.calls.length;
+    await rejectsWith(
+      () => root.issueCredential('alpha', newBootId(), () => Buffer.alloc(64)),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'FAILED',
+    );
+    assert.equal(db.calls.length, before);
+    db.setOnInventory(null);
+    // ‏(ب) جلسةٌ باقية.
+    db.setLingering([{ role: 'xw_late', pid: 7 }]);
+    await rejectsWith(() => gate.start(), [FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE], 'lingering');
+    assert.equal(gate.state, BOOT_GATE_STATES.FAILED);
+    db.setLingering([]);
+    // ‏(ج) خطأُ قاعدة.
+    const broken = db.hold(
+      'inventory',
+      Object.assign(new Error('connection reset'), { code: 'ECONNRESET' }),
+    );
+    const pending = gate.start();
+    await broken.arrived;
+    await broken.release();
+    const e = await rejection(() => pending);
+    assert.equal(e.code, 'ECONNRESET');
+    assert.equal(gate.state, BOOT_GATE_STATES.FAILED);
+    assert.equal(gate.snapshot().lastError, 'ECONNRESET');
+    // ‏(د) النجاح.
+    await gate.start();
+    assert.equal(gate.state, BOOT_GATE_STATES.READY);
+    assert.equal(gate.snapshot().lastError, null);
+    assert.equal(db.active.size, 0, 'لا يتيمَ بعدَ النجاح');
+  });
+
+  test('المهلة ⇒ FAILED؛ والكنسُ العالقُ يمنعُ كنساً جديداً حتى يستقرّ، ثمّ لا يُحيي البوابة', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    const gate = new SupervisorBootGate(root, { timeoutMs: 30 });
+    const held = db.hold('inventory');
+    const e = await rejection(() => gate.start());
+    assert.equal(e.code, FENCE_ERRORS.BOOT_GATE_TIMEOUT);
+    assert.equal(gate.state, BOOT_GATE_STATES.FAILED);
+    assert.equal(gate.snapshot().sweepPending, true);
+    await rejectsWith(() => gate.start(), [FENCE_ERRORS.BOOT_GATE_STATE], 'كنسٌ عالق');
+    await rejectsWith(() => gate.resweep(), [FENCE_ERRORS.BOOT_GATE_STATE], 'كنسٌ عالق');
+    await held.release();
+    for (let i = 0; i < 50 && gate.snapshot().sweepPending; i++)
+      await new Promise((r) => setTimeout(r, 2));
+    assert.equal(gate.snapshot().sweepPending, false);
+    assert.equal(gate.state, BOOT_GATE_STATES.FAILED, 'الكنسُ المتأخّرُ لا يفتحُ البوابة');
+    await gate.start();
+    assert.equal(gate.state, BOOT_GATE_STATES.READY);
+  });
+
+  test('الإلغاءُ بـstop أثناءَ الكنس ⇒ CANCELLED فوراً وSTOPPED، والكنسُ المتأخّرُ لا يفتحُها', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    const gate = new SupervisorBootGate(root);
+    const held = db.hold('inventory');
+    const started = gate.start();
+    await held.arrived;
+    const snap = gate.stop();
+    assert.equal(snap.state, BOOT_GATE_STATES.STOPPED);
+    const e = await rejection(() => started);
+    assert.equal(e.code, FENCE_ERRORS.BOOT_GATE_CANCELLED);
+    await held.release();
+    for (let i = 0; i < 50 && gate.snapshot().sweepPending; i++)
+      await new Promise((r) => setTimeout(r, 2));
+    assert.equal(gate.state, BOOT_GATE_STATES.STOPPED);
+    await rejectsWith(
+      () => root.issueChallenge('alpha', newBootId()),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'STOPPED',
+    );
+    await gate.start();
+    assert.equal(gate.state, BOOT_GATE_STATES.READY);
+  });
+
+  test('resweep يُبقي ما أصدرَته البوابةُ ويُلغي غيرَه؛ وstart بعدَ stop يُلغي ما أصدرَته قبلَه (‏keep فارغ)', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    const gate = new SupervisorBootGate(root);
+    await gate.start();
+    const ours = String((await gateIssue(root, 'alpha')).role_name);
+    db.active.set('xw_foreign', { worker_id: 'beta', boot_id: 'f' });
+    const r = await gate.resweep();
+    assert.deepEqual(
+      r.revoked.map((x) => x.role_name),
+      ['xw_foreign'],
+    );
+    assert.deepEqual(r.kept, [ours]);
+    assert.ok(db.active.has(ours), 'ما أصدرَته البوابةُ باقٍ ACTIVE');
+    assert.deepEqual(gate.snapshot().issued, [ours]);
+    // ‏إعادةُ التشغيل: stop يُفرِّغُ الحالة، وstart يكنسُ بلا keep — الاعتمادُ السابقُ يتيمٌ الآن.
+    gate.stop();
+    assert.deepEqual(gate.snapshot().issued, [], 'stop يُفرِّغُ issued');
+    const r2 = await gate.start();
+    assert.deepEqual(
+      r2.revoked.map((x) => x.role_name),
+      [ours],
+      'start بعدَ stop يُلغي ما أصدرَته البوابةُ في عهدِها السابق',
+    );
+    assert.equal(db.active.size, 0);
+    // ‏وstart من FAILED بعدَ إصدارٍ في عهدٍ سابق: issued يُفرَّغُ والاعتمادُ يُلغى.
+    const again = String((await gateIssue(root, 'alpha')).role_name);
+    db.setLingering([{ role: 'x', pid: 1 }]);
+    const g2opts = gate.snapshot();
+    assert.deepEqual(g2opts.issued, [again]);
+    await rejection(() => gate.resweep());
+    assert.equal(gate.state, BOOT_GATE_STATES.FAILED);
+    assert.deepEqual(gate.snapshot().issued, [again], 'resweep الفاشلُ لا يُفرِّغ');
+    db.setLingering([]);
+    const r3 = await gate.start();
+    assert.deepEqual(gate.snapshot().issued, [], 'start يُفرِّغ');
+    assert.deepEqual(
+      r3.revoked.map((x) => x.role_name),
+      [again],
+    );
+  });
+
+  test('سباق: إصدارٌ جارٍ أثناءَ resweep يُنتظَرُ ويُحسَبُ في keep؛ والإصدارُ الجديدُ أثناءَه مرفوض', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    const gate = new SupervisorBootGate(root);
+    await gate.start();
+    const ch = await root.issueChallenge('alpha', newBootId());
+    const held = db.hold('credential');
+    const issuing = root.completeCredential(String(ch['nonce']), Buffer.alloc(64));
+    await held.arrived;
+    assert.equal(gate.snapshot().inflight, 1);
+    db.active.set('xw_foreign', { worker_id: 'beta', boot_id: 'f' });
+    const sweeping = gate.resweep();
+    assert.equal(gate.state, BOOT_GATE_STATES.SWEEPING);
+    await rejectsWith(
+      () => root.issueChallenge('beta', newBootId()),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'إصدارٌ أثناءَ resweep',
+    );
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(db.count('inventory'), 2, 'لا جردَ قبلَ أن ينتهيَ الإصدارُ الجاري');
+    await held.release();
+    const cred = await issuing;
+    const r = await sweeping;
+    assert.deepEqual(
+      r.revoked.map((x) => x.role_name),
+      ['xw_foreign'],
+    );
+    assert.deepEqual(r.kept, [String(cred.role_name)], 'الجاري أثناءَ resweep محسوبٌ في keep');
+  });
+
+  test('سباق: إصدارٌ جارٍ عبرَ stop/start يُلغى ولا يُسلَّم؛ والتحدّي القديمُ بعدَ resweep مرفوضٌ بلا نداء', async () => {
+    const db = scriptedFenceDb();
+    /** @type {Array<Record<string, unknown>>} */
+    const log = [];
+    const root = db.root({ log: (/** @type {any} */ e) => log.push(e) });
+    const gate = new SupervisorBootGate(root);
+    await gate.start();
+    const ch = await root.issueChallenge('alpha', newBootId());
+    const held = db.hold('credential');
+    const issuing = root.completeCredential(String(ch['nonce']), Buffer.alloc(64));
+    await held.arrived;
+    gate.stop();
+    const restarting = gate.start();
+    await held.release();
+    const e = await rejection(() => issuing);
+    assert.equal(e.code, FENCE_ERRORS.BOOT_GATE_CLOSED);
+    const role = String(e.detail.role);
+    await restarting;
+    assert.equal(db.active.has(role), false, 'الاعتمادُ عبرَ العهدَين مُلغى');
+    assert.deepEqual(gate.snapshot().issued, []);
+    assert.ok(log.some((x) => x['ev'] === 'boot_gate_epoch_revoked' && x['role'] === role));
+    assert.equal(
+      db.calls.find((c) => c.kind === 'revoke' && c.params[0] === role)?.params[1],
+      BOOT_GATE_EPOCH_REVOKE_REASON,
+    );
+    // ‏stop وحدَه (‏بلا start بعدَه): الإصدارُ الجاري يُلغى ولا يُسلَّم، والبوابةُ تبقى STOPPED.
+    const ch2 = await root.issueChallenge('alpha', newBootId());
+    const held2 = db.hold('credential');
+    const issuing2 = root.completeCredential(String(ch2['nonce']), Buffer.alloc(64));
+    await held2.arrived;
+    gate.stop();
+    await held2.release();
+    const e2 = await rejection(() => issuing2);
+    assert.equal(e2.code, FENCE_ERRORS.BOOT_GATE_CLOSED);
+    assert.equal(db.active.has(String(e2.detail.role)), false, 'أُلغيَ عبرَ stop وحدَه');
+    assert.equal(gate.state, BOOT_GATE_STATES.STOPPED);
+    await gate.start();
+    // ‏تحدٍّ من جيلٍ سابق.
+    const old = await root.issueChallenge('beta', newBootId());
+    await gate.resweep();
+    const n = db.count('credential');
+    await rejectsWith(
+      () => root.completeCredential(String(old['nonce']), Buffer.alloc(64)),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'تحدٍّ قبلَ resweep',
+    );
+    await rejectsWith(
+      () => root.completeCredential('n-forged', Buffer.alloc(64)),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'تحدٍّ لم تُصدِرْه البوابة',
+    );
+    assert.equal(db.count('credential'), n, 'لا نداءَ لـissue_credential');
+    // ‏تحدٍّ صدرَ والقاعدةُ تُجيبُ بينما بدأ resweep ⇒ لا يُسلَّم.
+    const heldCh = db.hold('challenge');
+    const late = root.issueChallenge('beta', newBootId());
+    await heldCh.arrived;
+    const rs = gate.resweep();
+    await heldCh.release();
+    await rejectsWith(() => late, [FENCE_ERRORS.BOOT_GATE_CLOSED], 'تحدٍّ عبرَ resweep');
+    await rs;
+  });
+
+  test('الكنسُ الملغى أثناءَ انتظارِ الإصدارِ الجاري لا يجردُ ولا يُلغي شيئاً بعدَ إلغائه', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    const gate = new SupervisorBootGate(root);
+    await gate.start();
+    await gateIssue(root, 'alpha');
+    db.active.set('xw_foreign', { worker_id: 'beta', boot_id: 'f' });
+    const ch = await root.issueChallenge('alpha', newBootId());
+    const held = db.hold('credential');
+    const issuing = root.completeCredential(String(ch['nonce']), Buffer.alloc(64));
+    await held.arrived;
+    const inventories = db.count('inventory');
+    const revokes = db.count('revoke');
+    const sweeping = gate.resweep();
+    gate.stop();
+    assert.equal((await rejection(() => sweeping)).code, FENCE_ERRORS.BOOT_GATE_CANCELLED);
+    await held.release();
+    await rejection(() => issuing);
+    for (let i = 0; i < 50 && gate.snapshot().sweepPending; i++)
+      await new Promise((r) => setTimeout(r, 2));
+    assert.equal(gate.snapshot().sweepPending, false);
+    assert.equal(db.count('inventory'), inventories, 'لا جردَ بعدَ الإلغاء');
+    assert.equal(db.count('revoke'), revokes + 1, 'الإلغاءُ الوحيدُ للاعتمادِ العابرِ للعهد');
+    assert.ok(db.active.has('xw_foreign'), 'الكنسُ الملغى لم يُلغِ شيئاً');
+    assert.equal(gate.state, BOOT_GATE_STATES.STOPPED);
+  });
+
+  test('خاصّيّةٌ على التداخلات: stop() في أيِّ نقطةٍ من سلسلةِ المهامّ الدقيقة بعدَ الكنس ⇒ لا READY بعدَه', async () => {
+    // ‏تُجرَّبُ كلُّ إزاحةٍ k من 0 إلى 40 مهمّةً دقيقةً بعدَ انتهاءِ revokeOrphanCredentials: إن نُودِيَ stop
+    // ‏والبوابةُ SWEEPING فـstart مرفوضة؛ وإن نُودِيَ بعدَ READY فقد استقرّت start — وفي الحالين STOPPED أخيراً.
+    /** @type {Set<string>} */
+    const outcomes = new Set();
+    for (let k = 0; k <= 40; k++) {
+      const db = scriptedFenceDb();
+      const root = db.root();
+      const gate = new SupervisorBootGate(root);
+      const orig = root.revokeOrphanCredentials.bind(root);
+      /** @type {{ at: string | null }} */
+      const seen = { at: null };
+      root.revokeOrphanCredentials = async (o) => {
+        const r = await orig(o);
+        let p = Promise.resolve();
+        for (let i = 0; i < k; i++) p = p.then(() => undefined);
+        p.then(() => {
+          seen.at = gate.state;
+          gate.stop();
+        });
+        return r;
+      };
+      /** @type {string} */
+      let result;
+      try {
+        await gate.start();
+        result = 'resolved';
+      } catch (/** @type {any} */ e) {
+        result = String(e.code);
+      }
+      for (let i = 0; i < 80 && seen.at === null; i++) await Promise.resolve();
+      assert.notEqual(seen.at, null, `k=${k}: stop نُودي`);
+      assert.equal(gate.state, BOOT_GATE_STATES.STOPPED, `k=${k}: stop هو الأخير`);
+      if (seen.at === BOOT_GATE_STATES.SWEEPING)
+        assert.equal(
+          result,
+          FENCE_ERRORS.BOOT_GATE_CANCELLED,
+          `k=${k}: stop أثناءَ SWEEPING ⇒ رفض`,
+        );
+      else assert.equal(result, 'resolved', `k=${k}: stop بعدَ READY (${seen.at})`);
+      outcomes.add(`${seen.at}:${result}`);
+    }
+    assert.ok(
+      outcomes.has(`SWEEPING:${FENCE_ERRORS.BOOT_GATE_CANCELLED}`),
+      [...outcomes].join(' '),
+    );
+    assert.ok(outcomes.has('READY:resolved'), [...outcomes].join(' '));
+  });
+
+  test('فشلُ إلغاءِ الاعتمادِ العابرِ للعهد لا يُسجَّلُ نجاحاً، ولا يُسلَّم، ويُلغيه كنسُ start التالي', async () => {
+    const db = scriptedFenceDb();
+    /** @type {Array<Record<string, unknown>>} */
+    const log = [];
+    const root = db.root({ log: (/** @type {any} */ e) => log.push(e) });
+    const gate = new SupervisorBootGate(root);
+    await gate.start();
+    const ch = await root.issueChallenge('alpha', newBootId());
+    const held = db.hold('credential');
+    const issuing = root.completeCredential(String(ch['nonce']), Buffer.alloc(64));
+    await held.arrived;
+    const failRevoke = db.hold('revoke', Object.assign(new Error('reset'), { code: 'ECONNRESET' }));
+    gate.stop();
+    await held.release();
+    await failRevoke.arrived;
+    await failRevoke.release();
+    const e = await rejection(() => issuing);
+    assert.equal(e.code, FENCE_ERRORS.BOOT_GATE_CLOSED);
+    assert.equal(e.detail.revoked, false);
+    const role = String(e.detail.role);
+    assert.ok(db.active.has(role), 'الإلغاءُ فشلَ فعلاً — الدورُ باقٍ ACTIVE غيرَ مُسلَّم');
+    assert.equal(
+      log.some((x) => x['ev'] === 'boot_gate_epoch_revoked' && x['role'] === role),
+      false,
+      'لا يُسجَّلُ إلغاءٌ لم يقع',
+    );
+    assert.ok(
+      log.some(
+        (x) =>
+          x['ev'] === 'boot_gate_epoch_revoke_failed' &&
+          x['role'] === role &&
+          x['error'] === 'ECONNRESET',
+      ),
+    );
+    assert.deepEqual(gate.snapshot().issued, []);
+    await gate.start();
+    assert.equal(db.active.has(role), false, 'كنسُ start التالي ألغاه');
+    assert.equal(gate.state, BOOT_GATE_STATES.READY);
+  });
+
+  test('المدخلاتُ والانتقالاتُ الممنوعة: بوابةٌ واحدةٌ لكلِّ جذر، وresweep من NEW/STOPPED، وstart مزدوج', async () => {
+    const db = scriptedFenceDb();
+    const root = db.root();
+    assert.throws(() => new SupervisorBootGate(/** @type {any} */ ({})), TypeError);
+    for (const opts of [
+      { timeoutMs: 0 },
+      { timeoutMs: 1.5 },
+      { settleMs: -1 },
+      { pollMs: '1' },
+      { reason: '' },
+      { reason: ' ' },
+      { reason: 3 },
+    ])
+      assert.throws(() => new SupervisorBootGate(root, /** @type {any} */ (opts)), TypeError);
+    const gate = new SupervisorBootGate(root);
+    assert.throws(
+      () => new SupervisorBootGate(root),
+      (/** @type {any} */ e) => e.code === FENCE_ERRORS.BOOT_GATE_STATE,
+    );
+    await rejectsWith(() => gate.resweep(), [FENCE_ERRORS.BOOT_GATE_STATE], 'resweep من NEW');
+    const held = db.hold('inventory');
+    const s1 = gate.start();
+    await held.arrived;
+    await rejectsWith(() => gate.start(), [FENCE_ERRORS.BOOT_GATE_STATE], 'start أثناءَ SWEEPING');
+    await rejectsWith(
+      () => gate.resweep(),
+      [FENCE_ERRORS.BOOT_GATE_STATE],
+      'resweep أثناءَ SWEEPING',
+    );
+    await held.release();
+    await s1;
+    gate.stop();
+    assert.equal(gate.stop().state, BOOT_GATE_STATES.STOPPED, 'stop متساوي الأثر');
+    await rejectsWith(() => gate.resweep(), [FENCE_ERRORS.BOOT_GATE_STATE], 'resweep من STOPPED');
+    assert.equal(db.count('inventory'), 2, 'المرفوضُ لا يتّصل');
+    assert.deepEqual(Object.keys(BOOT_GATE_STATES), [
+      'NEW',
+      'SWEEPING',
+      'READY',
+      'FAILED',
+      'STOPPED',
+    ]);
+    assert.equal(BOOT_GATE_EPOCH_REVOKE_REASON, 'SUPERVISOR_BOOT_GATE_EPOCH');
+    assert.notEqual(BOOT_GATE_EPOCH_REVOKE_REASON, ORPHAN_REVOKE_REASON);
+    for (const [k, v] of Object.entries({
+      BOOT_GATE_CLOSED: 'FENCE_BOOT_GATE_CLOSED',
+      BOOT_GATE_STATE: 'FENCE_BOOT_GATE_STATE',
+      BOOT_GATE_TIMEOUT: 'FENCE_BOOT_GATE_TIMEOUT',
+      BOOT_GATE_CANCELLED: 'FENCE_BOOT_GATE_CANCELLED',
+    }))
+      assert.equal(/** @type {any} */ (FENCE_ERRORS)[k], v);
+  });
+
+  test('لا مسارَ جانبيّ: استدعاءُ fence.issue_challenge/issue_credential في الشفرةِ داخلَ الدالّتين الخامّتين وحدَهما', async () => {
+    const { readFileSync, readdirSync, statSync } = await import('node:fs');
+    /** @param {string} dir @returns {string[]} */
+    const walk = (dir) =>
+      readdirSync(dir).flatMap((n) => {
+        const p = join(dir, n);
+        return statSync(p).isDirectory() ? walk(p) : /\.(m?[jt]s|mts)$/.test(n) ? [p] : [];
+      });
+    const root = new URL('../../', import.meta.url).pathname;
+    /** @type {string[]} */
+    const hits = [];
+    for (const f of [...walk(join(root, 'src')), ...walk(join(root, 'scripts'))]) {
+      const lines = readFileSync(f, 'utf8').split('\n');
+      lines.forEach((l, i) => {
+        if (/fence\.issue_(challenge|credential)\s*\(/.test(l) && !/^\s*(\*|\/\/)/.test(l))
+          hits.push(`${f.slice(root.length)}:${i + 1}`);
+      });
+    }
+    assert.equal(hits.length, 2, `استدعاءان خامّان فقط: ${hits.join(', ')}`);
+    const src = readFileSync(join(root, 'src/fence/db-fence.mjs'), 'utf8');
+    for (const [fn, sql] of /** @type {Array<[string, string]>} */ ([
+      ['rawIssueChallenge', 'fence.issue_challenge('],
+      ['rawCompleteCredential', 'fence.issue_credential('],
+    ])) {
+      const at = src.indexOf(`async function ${fn}(`);
+      assert.ok(at > 0, fn);
+      const body = src.slice(at, src.indexOf('\n}\n', at));
+      assert.ok(body.includes(sql), `${sql} داخلَ ${fn}`);
+      assert.equal(src.split(`${fn}(`).length - 1, 2, `${fn} تُنادى من البوابةِ وحدَها`);
+      assert.ok(!new RegExp(`export[^\\n]*${fn}`).test(src), `${fn} غيرُ مُصدَّرة`);
+    }
+  });
+});
+
+describe('WL-579: بوابةُ إقلاعِ المُشرِف على PostgreSQL', { skip: skipWithoutDatabase }, () => {
+  /** @type {Awaited<ReturnType<typeof harness>>} */
+  let h;
+  before(async () => {
+    h = await harness('wl579');
+    await h.resume();
+  });
+  after(async () => {
+    await h?.close();
+  });
+
+  test('مُشرِفٌ ثانٍ يُقلِع: لا إصدارَ قبلَ start، وstart يُلغي اعتمادَ العاملِ الحيّ قبلَه ويُنهي جلستَه، ثمّ يُصدِر', async () => {
+    const a = await h.boot('alpha');
+    const ra = String(a.credential.role_name);
+    const root2 = new FenceRoot(
+      async () =>
+        /** @type {any} */ ({
+          query: (/** @type {any[]} */ ...q) => /** @type {any} */ (h.rootClient).query(...q),
+        }),
+    );
+    const gate = new SupervisorBootGate(root2);
+    const bootId = newBootId();
+    await rejectsWith(
+      () =>
+        root2.issueCredential('beta', bootId, (ch) =>
+          signCredentialChallenge(h.keys.beta, ch, { workerId: 'beta', bootId }),
+        ),
+      [FENCE_ERRORS.BOOT_GATE_CLOSED],
+      'قبلَ start',
+    );
+    const challenges = await h.db.pool.query(
+      `SELECT count(*)::int AS n FROM fence.challenges WHERE boot_id = $1`,
+      [bootId],
+    );
+    assert.equal(challenges.rows[0].n, 0, 'لا تحدّيَ في القاعدةِ قبلَ الكنس');
+    const r = await gate.start();
+    assert.ok(
+      r.revoked.some((x) => x.role_name === ra),
+      'اعتمادُ العاملِ السابقِ أُلغي',
+    );
+    const st = (
+      await h.db.pool.query(
+        `SELECT c.status, r.rolcanlogin, (SELECT count(*)::int FROM pg_stat_activity WHERE usename = c.role_name::text) AS s
+         FROM fence.credentials c JOIN pg_roles r ON r.rolname = c.role_name::text WHERE c.role_name::text = $1`,
+        [ra],
+      )
+    ).rows[0];
+    assert.deepEqual(st, { status: 'REVOKED', rolcanlogin: false, s: 0 });
+    await rejection(() => /** @type {pg.Client} */ (a.client).query('SELECT 1'));
+    const b2 = newBootId();
+    const cred = await root2.issueCredential('beta', b2, (ch) =>
+      signCredentialChallenge(h.keys.beta, ch, { workerId: 'beta', bootId: b2 }),
+    );
+    assert.deepEqual(gate.snapshot().issued, [String(cred.role_name)]);
+    // ‏resweep: ما أصدرَه المُشرِفُ الأوّلُ (‏h.root) يتيمٌ لهذا المُشرِف، وما أصدرَه هذا يبقى.
+    const foreign = await h.boot('alpha', { connect: false });
+    const rr = await gate.resweep();
+    assert.deepEqual(
+      rr.revoked.map((x) => x.role_name),
+      [String(foreign.credential.role_name)],
+    );
+    assert.deepEqual(rr.kept, [String(cred.role_name)]);
+    assert.equal(
+      (
+        await h.db.pool.query(`SELECT status FROM fence.credentials WHERE role_name::text = $1`, [
+          String(cred.role_name),
+        ])
+      ).rows[0].status,
+      'ACTIVE',
+    );
+    await h.root.revokeCredential(String(cred.role_name), 'test');
+  });
+});
