@@ -1008,3 +1008,38 @@ test('R8/S3 — معرِّفٌ بصفَّينِ (‏`REPO-4` في §4.5 و§6): 
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// مراجعةُ `#598` على `28f603bd` (‏طفرتانِ ناجيتان: إسكاتُ `R8/S3-UNKNOWN`، وفحصُ أوّلِ صفوفِ المعرِّفِ وحدَه).
+test('R8/S3 — ادّعاءُ إغلاقٍ في §3 لمعرِّفٍ بلا صفٍّ (‏`ZZZ-9`) يُسقِطُ الحاجزَ بـ`R8/S3-UNKNOWN`', () => {
+  const tmp = cloneRepo();
+  try {
+    const p = path.join(tmp, DEBT_REG);
+    const before = readFileSync(p, 'utf8');
+    const after = before.replace('`D-11` مسدَّدٌ', '`ZZZ-9` مسدَّدٌ');
+    assert.notEqual(after, before, 'شرطُ الاستنساخ: صيغةُ «`D-11` مسدَّدٌ» في §3.');
+    writeFileSync(p, after);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNKNOWN: §3 يقولُ إنّ «ZZZ-9»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/S3 — معرِّفٌ بصفَّينِ (‏`REPO-4`): فكُّ علامةِ الثاني (‏§6) وحدَه يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const p = path.join(tmp, DEBT_REG);
+    const before = readFileSync(p, 'utf8');
+    const mark = '\n| ~~`REPO-4`~~ 🟢 |';
+    const first = before.indexOf(mark);
+    const last = before.lastIndexOf(mark);
+    assert.ok(first !== -1 && last > first, 'شرطُ الاستنساخ: صفّانِ مُعلَّمانِ لـ`REPO-4`.');
+    writeFileSync(p, before.slice(0, last) + '\n| `REPO-4` |' + before.slice(last + mark.length));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNMARKED: «REPO-4»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
