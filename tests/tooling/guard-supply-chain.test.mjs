@@ -3190,3 +3190,721 @@ test('WL-576: provenanceProblems — المصدرُ والبصمةُ وحدَه�
   );
   assert.deepEqual(provenanceProblems('node_modules/x', { version: '1.0.0', inBundle: true }), []);
 });
+
+// ── WL-578: علامةُ inBundle تُقبَلُ بإثباتِ التجميعِ من بياناتِ القفلِ وفقَ arborist (‏npm 10.8.2)، لا بتصريحِها. ──
+
+/**
+ * قفلٌ حقيقيٌّ يكتبُه npm نفسُه دونَ شبكة: حزمةُ `p` تُجمِّعُ `child-a` و`@s/c` (‏`bundleDependencies`)، و`child-a`
+ * تعتمدُ على `child-b@1` المسطّحةِ تحتَ `p` (‏مُجمَّعةٌ بالحافّةِ لا بالاسم)، و`@s/c` تعتمدُ على `child-b@2` المتداخلةِ
+ * تحتَها (‏اسمٌ واحدٌ بإصدارين). يُحزَمُ `p` بـ`npm pack` ويُثبَّتُ بـ`npm install --offline`، ثمّ يُعادُ `resolved`
+ * لـ`p` إلى رابطِ السجلِّ القانونيّ (‏البصمةُ الحقيقيّةُ تبقى) في القفلِ والقفلِ المخفيّ، ومواصفتُه إلى `1.0.0`.
+ */
+function realBundleRoot() {
+  const tmp = makeTempRoot();
+  const src = `${tmp}-src`;
+  /** @param {string} dir @param {Record<string, any>} pkg */
+  const pkg = (dir, pkg) => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+  };
+  const p = path.join(src, 'p');
+  pkg(p, {
+    name: 'p',
+    version: '1.0.0',
+    dependencies: { 'child-a': '1.0.0', '@s/c': '1.0.0' },
+    bundleDependencies: ['child-a', '@s/c'],
+  });
+  pkg(path.join(p, 'node_modules/child-a'), {
+    name: 'child-a',
+    version: '1.0.0',
+    dependencies: { 'child-b': '1.0.0' },
+  });
+  pkg(path.join(p, 'node_modules/child-b'), { name: 'child-b', version: '1.0.0' });
+  pkg(path.join(p, 'node_modules/@s/c'), {
+    name: '@s/c',
+    version: '1.0.0',
+    dependencies: { 'child-b': '2.0.0' },
+  });
+  pkg(path.join(p, 'node_modules/@s/c/node_modules/child-b'), {
+    name: 'child-b',
+    version: '2.0.0',
+  });
+  /** @type {import('node:child_process').ExecFileSyncOptionsWithStringEncoding} */
+  const npmOpts = { encoding: 'utf8', stdio: 'pipe', timeout: 60000 };
+  execFileSync(REAL_NPM, ['pack', '--silent', '--ignore-scripts'], { cwd: p, ...npmOpts });
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({
+      name: 't',
+      version: '1.0.0',
+      private: true,
+      dependencies: { p: `file:${path.join(p, 'p-1.0.0.tgz')}` },
+    }),
+  );
+  execFileSync(
+    REAL_NPM,
+    ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--silent'],
+    { cwd: tmp, ...npmOpts },
+  );
+  rmSync(src, { recursive: true, force: true });
+  const canonical = 'https://registry.npmjs.org/p/-/p-1.0.0.tgz';
+  for (const f of ['package-lock.json', 'node_modules/.package-lock.json']) {
+    const lock = JSON.parse(readFileSync(path.join(tmp, f), 'utf8'));
+    lock.packages['node_modules/p'].resolved = canonical;
+    if (lock.packages['']) lock.packages[''].dependencies = { p: '1.0.0' };
+    writeFileSync(path.join(tmp, f), `${JSON.stringify(lock, null, 2)}\n`);
+  }
+  writeFileSync(
+    path.join(tmp, 'package.json'),
+    JSON.stringify({ name: 't', version: '1.0.0', private: true, dependencies: { p: '1.0.0' } }),
+  );
+  writeFileSync(path.join(tmp, '.gitignore'), 'node_modules\n');
+  writeFileSync(
+    path.join(tmp, 'audit-report.json'),
+    JSON.stringify(stamped(tmp, { vulnerabilities: {} })),
+  );
+  return tmp;
+}
+
+/**
+ * مفاتيحُ `packages` بترتيبِ npm القانونيّ (‏`json-stringify-nice`: ‏`localeCompare(…, 'en')`) — كما يكتبُها npm، فيشترطُها
+ * WL-578 في كلِّ قفلٍ معنيٍّ بالتجميع. مكتوبةٌ هنا مستقلّةً عن الشفرةِ المُختبَرة.
+ * @param {Record<string, any>} packages @returns {Record<string, any>}
+ */
+const npmOrder = (packages) =>
+  Object.fromEntries(
+    Object.keys(packages)
+      .sort((a, b) => a.localeCompare(b, 'en'))
+      .map((k) => [k, packages[k]]),
+  );
+
+const BUNDLED_KEYS = [
+  'node_modules/p/node_modules/@s/c',
+  'node_modules/p/node_modules/@s/c/node_modules/child-b',
+  'node_modules/p/node_modules/child-a',
+  'node_modules/p/node_modules/child-b',
+];
+const UNPROVEN = /تجميعٌ غيرُ مُثبَت \(‏WL-578\)/;
+
+/** يُعيدُ ختمَ SBOM وتقريرِ التدقيقِ ببصمةِ القفلِ الحاليّة — فلا يرفضُهما R2/R3 إلّا لعلّةِ التجميع. @param {string} root */
+function restamp(root) {
+  const sbom = JSON.parse(readFileSync(path.join(root, 'sbom.cdx.json'), 'utf8'));
+  sbom.metadata.properties = sbom.metadata.properties.filter(
+    (/** @type {any} */ x) => x.name !== 'xuux:lockfileSha256',
+  );
+  writeFileSync(path.join(root, 'sbom.cdx.json'), JSON.stringify(stampedSbom(root, sbom)));
+  writeFileSync(
+    path.join(root, 'audit-report.json'),
+    JSON.stringify(stamped(root, { vulnerabilities: {} })),
+  );
+}
+
+/** @param {string} root @param {(packages: Record<string, any>) => void} edit */
+function editLock(root, edit) {
+  const file = path.join(root, 'package-lock.json');
+  const lock = JSON.parse(readFileSync(file, 'utf8'));
+  edit(lock.packages);
+  writeFileSync(file, `${JSON.stringify(lock, null, 2)}\n`);
+}
+
+test('WL-578: قفلُ npm 10.8.2 الحقيقيُّ لحزمةٍ مُجمِّعة — العلاماتُ كما يحسبُها arborist، وSBOM الحقيقيُّ يمرُّ بالحاجز', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const tmp = realBundleRoot();
+  try {
+    const lock = JSON.parse(readFileSync(path.join(tmp, 'package-lock.json'), 'utf8'));
+    // ‏ما يكتبُه npm فعلاً: المُجمِّعُ بمصدرٍ وبصمةٍ و`bundleDependencies` مصفوفة؛ والمُجمَّعاتُ بعلامةٍ ولا مصدر.
+    assert.deepEqual(lock.packages['node_modules/p'].bundleDependencies, ['child-a', '@s/c']);
+    assert.match(lock.packages['node_modules/p'].integrity, /^sha512-/);
+    assert.equal(lock.packages['node_modules/p'].inBundle, undefined);
+    const flagged = Object.keys(lock.packages)
+      .filter((k) => lock.packages[k].inBundle === true)
+      .sort();
+    assert.deepEqual(flagged, BUNDLED_KEYS);
+    for (const k of BUNDLED_KEYS) {
+      assert.equal(lock.packages[k].resolved, undefined, k);
+      assert.equal(lock.packages[k].integrity, undefined, k);
+    }
+    assert.deepEqual([...bundleProblems(lock.packages)], []);
+    const gen = runGenSbom(tmp);
+    assert.equal(gen.status, 0, gen.stderr);
+    const sbom = JSON.parse(readFileSync(path.join(tmp, 'sbom.cdx.json'), 'utf8'));
+    for (const k of BUNDLED_KEYS) {
+      assert.ok(
+        byPath(sbom, k)?.properties.some(
+          (/** @type {any} */ x) => x.name === 'cdx:npm:package:bundled' && x.value === 'true',
+        ),
+        k,
+      );
+    }
+    const res = runGuard(tmp);
+    assert.ok(res.ok, res.output);
+    assert.doesNotMatch(res.output, UNPROVEN);
+    // ‏نقضٌ عبرَ CLI: حذفُ «child-a» من bundleDependencies يُيتِّمُها ويُيتِّمُ child-b@1 المُجمَّعةَ بحافّتِها.
+    editLock(tmp, (pk) => {
+      pk['node_modules/p'].bundleDependencies = ['@s/c'];
+    });
+    restamp(tmp);
+    const bad = runGuard(tmp);
+    assert.equal(bad.ok, false, bad.output);
+    assert.match(bad.output + (bad.stderr ?? ''), UNPROVEN);
+    assert.match(bad.output + (bad.stderr ?? ''), /«node_modules\/p\/node_modules\/child-a»/);
+    assert.match(bad.output + (bad.stderr ?? ''), /«node_modules\/p\/node_modules\/child-b»/);
+    assert.doesNotMatch(bad.output + (bad.stderr ?? ''), /«node_modules\/p\/node_modules\/@s\/c»/);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-578: كلُّ علامةٍ يتيمةٍ أو ملتبسةٍ أو محذوفةٍ أو منقولةٍ في القفلِ الحقيقيِّ تُرفَض — لا قبولَ ضمنيّ', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const tmp = realBundleRoot();
+  /** @type {Record<string, any>} */
+  let base;
+  try {
+    base = JSON.parse(readFileSync(path.join(tmp, 'package-lock.json'), 'utf8')).packages;
+  } finally {
+    cleanup(tmp);
+  }
+  const reg = (/** @type {string} */ k, /** @type {Record<string, any>} */ e) =>
+    registryEntry(k, e);
+  /** @type {Array<[string, (p: Record<string, any>) => void, Record<string, RegExp>]>} */
+  const cases = [
+    [
+      'اسمٌ ليس في bundleDependencies ولا تعتمدُ عليه مُجمَّعة',
+      (p) => {
+        p['node_modules/p/node_modules/evil'] = { version: '1.0.0', inBundle: true };
+      },
+      { 'node_modules/p/node_modules/evil': /بلا مُجمِّعٍ مُثبَت.*«node_modules\/p»/ },
+    ],
+    [
+      'تبعيّةٌ للمُجمِّعِ نفسِه لا لمُجمَّع، تحملُ العلامة',
+      (p) => {
+        p['node_modules/p'].dependencies.extra = '1.0.0';
+        p['node_modules/p/node_modules/extra'] = { version: '1.0.0', inBundle: true };
+      },
+      { 'node_modules/p/node_modules/extra': /بلا مُجمِّعٍ مُثبَت/ },
+    ],
+    [
+      'تحتَ أبٍ خاطئ (‏حزمةٌ أخرى لا تُجمِّع)',
+      (p) => {
+        p['node_modules/q'] = reg('node_modules/q', {
+          version: '1.0.0',
+          dependencies: { 'child-a': '1.0.0' },
+        });
+        p['node_modules/q/node_modules/child-a'] = { version: '1.0.0', inBundle: true };
+      },
+      { 'node_modules/q/node_modules/child-a': /«node_modules\/q» لا تُجمِّعُها/ },
+    ],
+    [
+      'مسارٌ مشابه (‏pp لا p)',
+      (p) => {
+        p['node_modules/pp'] = reg('node_modules/pp', { version: '1.0.0' });
+        p['node_modules/pp/node_modules/child-a'] = { version: '1.0.0', inBundle: true };
+      },
+      { 'node_modules/pp/node_modules/child-a': /«node_modules\/pp» لا تُجمِّعُها/ },
+    ],
+    [
+      'نقلُ المُجمَّعِ إلى القمّة',
+      (p) => {
+        p['node_modules/child-a'] = p['node_modules/p/node_modules/child-a'];
+        delete p['node_modules/p/node_modules/child-a'];
+      },
+      {
+        'node_modules/child-a': /«\(الجذر\)» لا تُجمِّعُها/,
+        // ‏child-b@1 كانت مُجمَّعةً بحافّةِ child-a التي صارت تُحَلُّ من القمّة — فلا مُجمِّع.
+        'node_modules/p/node_modules/child-b': /بلا مُجمِّعٍ مُثبَت/,
+      },
+    ],
+    [
+      'الحزمةُ الأمُّ غائبةٌ عن القفل',
+      (p) => {
+        p['node_modules/zz/node_modules/child-a'] = { version: '1.0.0', inBundle: true };
+      },
+      { 'node_modules/zz/node_modules/child-a': /الحزمةُ الأمُّ «node_modules\/zz» غائبة/ },
+    ],
+    [
+      'حذفُ المُجمِّعِ نفسِه',
+      (p) => {
+        delete p['node_modules/p'];
+      },
+      {
+        'node_modules/p/node_modules/@s/c': /الحزمةُ الأمُّ «node_modules\/p» غائبة/,
+        'node_modules/p/node_modules/child-a': /الحزمةُ الأمُّ «node_modules\/p» غائبة/,
+        'node_modules/p/node_modules/child-b': /الحزمةُ الأمُّ «node_modules\/p» غائبة/,
+        // ‏أمُّها (‏@s/c) حاضرةٌ لكنّها لم تَعُد مُجمَّعة — فلا مُجمِّع.
+        'node_modules/p/node_modules/@s/c/node_modules/child-b':
+          /«node_modules\/p\/node_modules\/@s\/c» لا تُجمِّعُها/,
+      },
+    ],
+    [
+      'حذفُ العلامةِ من مُجمَّعٍ بالحافّة (‏child-b@1)',
+      (p) => {
+        delete p['node_modules/p/node_modules/child-b'].inBundle;
+      },
+      { 'node_modules/p/node_modules/child-b': /يُجمِّعُها «node_modules\/p».*غائبة/ },
+    ],
+    [
+      'حذفُ العلامةِ من متداخلٍ بإصدارٍ آخر (‏@s/c/child-b@2)',
+      (p) => {
+        delete p['node_modules/p/node_modules/@s/c/node_modules/child-b'].inBundle;
+      },
+      {
+        'node_modules/p/node_modules/@s/c/node_modules/child-b':
+          /يُجمِّعُها «node_modules\/p».*غائبة/,
+      },
+    ],
+    [
+      'تبديلُ العلامةِ إلى غيرِ true',
+      (p) => {
+        p['node_modules/p/node_modules/child-a'].inBundle = 'true';
+        p['node_modules/p/node_modules/@s/c'].inBundle = false;
+      },
+      {
+        'node_modules/p/node_modules/child-a': /قيمتُها "true" لا true/,
+        'node_modules/p/node_modules/@s/c': /قيمتُها false لا true/,
+      },
+    ],
+    [
+      'حزمةٌ غيرُ مُجمَّعةٍ (‏المُجمِّعُ نفسُه) تحملُ العلامة',
+      (p) => {
+        p['node_modules/p'].inBundle = true;
+      },
+      { 'node_modules/p': /«\(الجذر\)» لا تُجمِّعُها/ },
+    ],
+    [
+      'مُجمِّعٌ هو الجذر',
+      (p) => {
+        p[''].bundleDependencies = ['p'];
+        p['node_modules/p'].inBundle = true;
+      },
+      Object.fromEntries(
+        ['node_modules/p', ...BUNDLED_KEYS].map((k) => [k, /حزمةِ الجذر.*غيرُ مدعومة/]),
+      ),
+    ],
+    [
+      'الجذرُ يُجمِّعُ والعلامةُ غائبة',
+      (p) => {
+        p[''].bundleDependencies = ['p'];
+        // ‏تبعيّةٌ في القمّةِ يُحَلُّ إليها مُجمَّعٌ بالجذر — مُجمَّعةٌ بالحافّةِ كذلك.
+        p['node_modules/p'].dependencies.q = '1.0.0';
+        p['node_modules/q'] = reg('node_modules/q', { version: '1.0.0' });
+      },
+      {
+        'node_modules/p': /يُجمِّعُها «\(الجذر\)».*غائبة/,
+        'node_modules/q': /يُجمِّعُها «\(الجذر\)».*غائبة/,
+        ...Object.fromEntries(BUNDLED_KEYS.map((k) => [k, /حزمةِ الجذر.*غيرُ مدعومة/])),
+      },
+    ],
+    [
+      'bundleDependencies فاسدة (‏true وليست مصفوفة)',
+      (p) => {
+        p['node_modules/p'].bundleDependencies = true;
+      },
+      {
+        'node_modules/p': /ليست مصفوفةَ أسماءِ حزمٍ صالحة/,
+        // ‏مُجمِّعٌ فاسدٌ لا يُجمِّعُ شيئاً — فكلُّ علاماتِه يتيمة.
+        ...Object.fromEntries(BUNDLED_KEYS.map((k) => [k, /بلا مُجمِّعٍ مُثبَت/])),
+      },
+    ],
+    [
+      'bundleDependencies باسمٍ غيرِ صالح',
+      (p) => {
+        p['node_modules/p'].bundleDependencies = ['child-a', '../x'];
+      },
+      {
+        'node_modules/p': /ليست مصفوفةَ أسماءِ حزمٍ صالحة/,
+        // ‏مُجمِّعٌ فاسدٌ لا يُجمِّعُ شيئاً — فكلُّ علاماتِه يتيمة.
+        ...Object.fromEntries(BUNDLED_KEYS.map((k) => [k, /بلا مُجمِّعٍ مُثبَت/])),
+      },
+    ],
+    [
+      'حقلُ اعتماديّاتٍ ليس كائناً',
+      (p) => {
+        p['node_modules/p/node_modules/child-a'].dependencies = ['child-b'];
+      },
+      {
+        'node_modules/p/node_modules/child-a': /`dependencies` ليست كائناً/,
+        'node_modules/p/node_modules/child-b': /بلا مُجمِّعٍ مُثبَت/,
+      },
+    ],
+    [
+      'مسارٌ ملتبسُ التقسيم',
+      (p) => {
+        p['node_modules/p/node_modules/node_modules/x'] = { version: '1.0.0', inBundle: true };
+        p['node_modules/p/node_modules/node_modules'] = { version: '1.0.0', inBundle: true };
+        p['node_modules/p/node_modules/a b'] = { version: '1.0.0', inBundle: true };
+      },
+      {
+        'node_modules/p/node_modules/node_modules/x': /ملتبسُ التقسيم/,
+        'node_modules/p/node_modules/node_modules': /ملتبسُ التقسيم/,
+        'node_modules/p/node_modules/a b': /ملتبسُ التقسيم/,
+      },
+    ],
+    [
+      'دورةٌ يتيمةٌ بينَ مدخلتَين معلَّمتَين لا يُجمِّعُهما أحد',
+      (p) => {
+        p['node_modules/p/node_modules/c1'] = {
+          version: '1.0.0',
+          inBundle: true,
+          dependencies: { c2: '1.0.0' },
+        };
+        p['node_modules/p/node_modules/c2'] = {
+          version: '1.0.0',
+          inBundle: true,
+          dependencies: { c1: '1.0.0' },
+        };
+      },
+      {
+        'node_modules/p/node_modules/c1': /بلا مُجمِّعٍ مُثبَت/,
+        'node_modules/p/node_modules/c2': /بلا مُجمِّعٍ مُثبَت/,
+      },
+    ],
+  ];
+  for (const [label, edit, expected] of cases) {
+    const p = structuredClone(base);
+    edit(p);
+    const got = bundleProblems(npmOrder(p));
+    assert.deepEqual([...got.keys()].sort(), Object.keys(expected).sort(), label);
+    for (const [k, re] of Object.entries(expected))
+      assert.match(got.get(k) ?? '', re, `${label}: ${k}`);
+  }
+});
+
+/**
+ * WL-578: قفلٌ اصطناعيٌّ صالحٌ يُغطّي ما يصعبُ إخراجُه من npm مباشرةً — مُجمِّعٌ نطاقيّ، وحوافُّ peer وoptional، ودورة،
+ * ومتداخلٌ تحتَ مُجمَّع، ومُجمِّعٌ متداخلٌ آخر، واسمٌ في القمّةِ بإصدارٍ آخر. يُقارَنُ بـarborist الحقيقيِّ في اختبارٍ مستقلّ.
+ * @returns {Record<string, any>}
+ */
+function syntheticBundle() {
+  /** @type {Record<string, any>} */
+  const root = { name: 't', version: '1.0.0', dependencies: { '@o/p': '1.0.0' } };
+  /** @type {Record<string, any>} */
+  const packages = {
+    '': root,
+    'node_modules/@o/p': registryEntry('node_modules/@o/p', {
+      version: '1.0.0',
+      bundleDependencies: ['x'],
+      dependencies: { x: '1.0.0', m: '1.0.0' },
+    }),
+    'node_modules/@o/p/node_modules/x': {
+      version: '1.0.0',
+      inBundle: true,
+      peerDependencies: { y: '1.0.0' },
+      optionalDependencies: { '@z/w': '1.0.0' },
+    },
+    'node_modules/@o/p/node_modules/y': {
+      version: '1.0.0',
+      inBundle: true,
+      dependencies: { x: '1.0.0' },
+    },
+    'node_modules/@o/p/node_modules/@z/w': { version: '1.0.0', inBundle: true },
+    // ‏متداخلٌ تحتَ مُجمَّع: مُجمِّعُه مُجمِّعُ أمِّه (‏@o/p) — لا أمُّه المباشرة.
+    'node_modules/@o/p/node_modules/x/node_modules/deep': { version: '2.0.0', inBundle: true },
+    // ‏تبعيّةٌ عاديّةٌ متداخلةٌ (‏m) تُجمِّعُ f بنفسِها، وf تعتمدُ على t تحتَ @o/p: حافّةٌ من مُجمَّعٍ بمُجمِّعٍ آخرَ (‏m لا
+    // ‏@o/p) لا تجعلُ t مُجمَّعة — بلا علامةٍ صحيح.
+    'node_modules/@o/p/node_modules/m': registryEntry('node_modules/@o/p/node_modules/m', {
+      version: '1.0.0',
+      bundleDependencies: ['f'],
+      dependencies: { f: '1.0.0' },
+    }),
+    'node_modules/@o/p/node_modules/m/node_modules/f': {
+      version: '1.0.0',
+      inBundle: true,
+      dependencies: { t: '1.0.0' },
+    },
+    'node_modules/@o/p/node_modules/t': registryEntry('node_modules/@o/p/node_modules/t', {
+      version: '1.0.0',
+    }),
+    // ‏نسخةٌ في القمّةِ بالاسمِ نفسِه لا يُجمِّعُها أحد — بلا علامةٍ صحيحة.
+    'node_modules/y': registryEntry('node_modules/y', { version: '9.0.0' }),
+  };
+  packages[''].dependencies.y = '9.0.0';
+  return npmOrder(packages);
+}
+
+test('WL-578: حالاتٌ صحيحةٌ تُقبَل — تداخلٌ عميق، نطاقيّة، peer/optional، دورة، وقفلٌ بلا تجميعٍ لا يُفحَص', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const packages = syntheticBundle();
+  const root = packages[''];
+  assert.deepEqual([...bundleProblems(packages)], []);
+  // ‏القمّةُ `y` لا تحملُ العلامة، وإضافتُها تُرفَض.
+  const flagged = structuredClone(packages);
+  flagged['node_modules/y'].inBundle = true;
+  assert.deepEqual([...bundleProblems(flagged).keys()], ['node_modules/y']);
+  // ‏قفلٌ بلا أيِّ inBundle ولا bundleDependencies لا يُفحَص (‏حتّى حقولٌ فاسدةٌ لا شأنَ للتجميعِ بها).
+  assert.deepEqual(
+    [
+      ...bundleProblems({
+        '': root,
+        'node_modules/a': { version: '1.0.0', dependencies: 'x' },
+      }),
+    ],
+    [],
+  );
+  assert.deepEqual([...bundleProblems(/** @type {any} */ (null))], []);
+});
+
+test('WL-578: علامةُ SBOM لا تُثبِتُ القفل — مكوّنٌ مُعلَّمٌ bundled لمدخلةٍ لا علامةَ لها يُرفَض، والعلامتان معاً بلا مُجمِّعٍ تُرفَضان', () => {
+  const tmp = realBundleRoot();
+  try {
+    const gen = runGenSbom(tmp);
+    assert.equal(gen.status, 0, gen.stderr);
+    // ‏العلامةُ في القفلِ وSBOM معاً لمدخلةٍ يتيمة: SBOM يطابقُ القفلَ حرفاً بحرف، والرفضُ من إثباتِ التجميع.
+    editLock(tmp, (pk) => {
+      pk['node_modules/p/node_modules/evil'] = { version: '1.0.0', inBundle: true };
+    });
+    const sbom = JSON.parse(readFileSync(path.join(tmp, 'sbom.cdx.json'), 'utf8'));
+    sbom.components.push(
+      npmComponent('node_modules/p/node_modules/evil', { version: '1.0.0', inBundle: true }),
+    );
+    writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify(sbom));
+    restamp(tmp);
+    const res = runGuard(tmp);
+    const out = res.output + (res.stderr ?? '');
+    assert.equal(res.ok, false, out);
+    assert.match(out, UNPROVEN);
+    assert.match(out, /«node_modules\/p\/node_modules\/evil»/);
+    // ‏سببٌ واحدٌ فقط: SBOM يطابقُ القفل، والرفضُ من إثباتِ التجميعِ وحدَه.
+    assert.equal(out.split('مدخلةُ القفل').length - 1, 1, out);
+    assert.doesNotMatch(out, /bundled/);
+    // ‏وعلامةُ SBOM وحدَها (‏للمُجمِّعِ نفسِه، بلا علامةٍ في القفل) لا تُقبَل.
+    editLock(tmp, (pk) => {
+      delete pk['node_modules/p/node_modules/evil'];
+    });
+    const sb = JSON.parse(readFileSync(path.join(tmp, 'sbom.cdx.json'), 'utf8'));
+    sb.components = sb.components.filter(
+      (/** @type {any} */ c) => c !== byPath(sb, 'node_modules/p/node_modules/evil'),
+    );
+    byPath(sb, 'node_modules/p').properties.push({
+      name: 'cdx:npm:package:bundled',
+      value: 'true',
+    });
+    writeFileSync(path.join(tmp, 'sbom.cdx.json'), JSON.stringify(sb));
+    restamp(tmp);
+    const only = runGuard(tmp);
+    const o2 = only.output + (only.stderr ?? '');
+    assert.equal(only.ok, false, o2);
+    assert.match(o2, MISMATCH);
+    assert.match(o2, /cdx:npm:package:bundled زائدةٌ/);
+    assert.doesNotMatch(o2, UNPROVEN);
+  } finally {
+    cleanup(tmp);
+  }
+});
+
+test('WL-578: حكمُ الحارسِ يطابقُ arborist الحقيقيَّ في npm المثبَّت (‏loadVirtual + getBundler) — مقارنةٌ تفاضليّة', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const { createRequire } = await import('node:module');
+  const { realpathSync } = await import('node:fs');
+  // ‏arborist المرفقُ بـnpm نفسِه (‏لا تبعيّةَ جديدة): ‎<npm>/../node_modules/@npmcli/arborist.
+  const npmDir = path.resolve(path.dirname(realpathSync(REAL_NPM)), '..');
+  const Arborist = createRequire(path.join(npmDir, 'package.json'))('@npmcli/arborist');
+  const base = syntheticBundle();
+  /** @type {Record<string, (p: Record<string, any>) => void>} */
+  const variants = {
+    صالح: () => {},
+    'الجذرُ يُجمِّع': (p) => {
+      p[''].bundleDependencies = ['@o/p'];
+    },
+    't معلَّمةٌ بلا مُجمِّع': (p) => {
+      p['node_modules/@o/p/node_modules/t'] = { version: '1.0.0', inBundle: true };
+    },
+    'دورةٌ يتيمة': (p) => {
+      p['node_modules/@o/p/node_modules/c1'] = {
+        version: '1',
+        inBundle: true,
+        dependencies: { c2: '1' },
+      };
+      p['node_modules/@o/p/node_modules/c2'] = {
+        version: '1',
+        inBundle: true,
+        dependencies: { c1: '1' },
+      };
+    },
+    'bundleDependencies فارغة': (p) => {
+      p['node_modules/@o/p'].bundleDependencies = [];
+    },
+    'حذفُ علامةِ y': (p) => {
+      delete p['node_modules/@o/p/node_modules/y'].inBundle;
+    },
+    'y في القمّةِ معلَّمة': (p) => {
+      p['node_modules/y'].inBundle = true;
+    },
+  };
+  for (const [label, edit] of Object.entries(variants)) {
+    const edited = structuredClone(base);
+    edit(edited);
+    const packages = npmOrder(edited);
+    const tmp = makeTempRoot();
+    try {
+      writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(packages['']));
+      writeFileSync(
+        path.join(tmp, 'package-lock.json'),
+        JSON.stringify({
+          name: 't',
+          version: '1.0.0',
+          lockfileVersion: 3,
+          requires: true,
+          packages,
+        }),
+      );
+      const tree = await new Arborist({ path: tmp }).loadVirtual();
+      const problems = bundleProblems(packages);
+      for (const node of tree.inventory.values()) {
+        if (node === tree) continue;
+        const by = node.getBundler();
+        const flagged = packages[node.location]?.inBundle === true;
+        // ‏يُقبَلُ بالضبطِ ما يكتبُه npm: علامةٌ تطابقُ مُجمِّعَ arborist، ومُجمِّعٌ ليس الجذر.
+        const npmOk = flagged === (by !== null) && by !== tree;
+        assert.equal(
+          !problems.has(node.location),
+          npmOk,
+          `${label}: ${node.location} ⇐ ${by?.location ?? null}`,
+        );
+      }
+    } finally {
+      cleanup(tmp);
+    }
+  }
+});
+
+test('WL-578 (‏مراجعةُ 4095ee23): ترتيبُ مفاتيحٍ غيرُ قانونيٍّ يُسقِطُ حافّةً عندَ npm — يُرفَضُ القفل، والترتيبُ القانونيُّ نفسُه يُقبَل', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const root = { name: 'root', version: '1.0.0', dependencies: { a: '1.0.0' } };
+  const a = registryEntry('node_modules/a', { version: '1.0.0', bundleDependencies: ['c'] });
+  const b = { version: '1.0.0', inBundle: true };
+  const c = { version: '1.0.0', peerDependencies: { b: '1.0.0' }, inBundle: true };
+  // ‏بهذا الترتيبِ لا يبني arborist حافّةَ c→b فلا يعدُّ b مُجمَّعة، فيجلبُها npm من السجلِّ بلا مصدرٍ ولا بصمة.
+  const reordered = {
+    '': root,
+    'node_modules/a/node_modules/b': b,
+    'node_modules/a/node_modules/c': c,
+    'node_modules/a': a,
+  };
+  const got = bundleProblems(reordered);
+  assert.deepEqual([...got.keys()], ['node_modules/a/node_modules/b']);
+  assert.match(got.get('node_modules/a/node_modules/b') ?? '', /ليست بترتيبِ npm القانونيّ/);
+  assert.deepEqual([...bundleProblems(npmOrder(reordered))], []);
+  // ‏الترتيبُ القانونيُّ ترتيبُ اللغة (‏`localeCompare`) لا ترتيبُ وحداتِ الترميز: `B` بعدَ `a` عندَ npm.
+  const mixedCase = npmOrder({
+    ...reordered,
+    'node_modules/B': registryEntry('node_modules/B', { version: '1.0.0' }),
+  });
+  assert.deepEqual(Object.keys(mixedCase).slice(-1), ['node_modules/B']);
+  assert.deepEqual([...bundleProblems(mixedCase)], []);
+  // ‏ترتيبٌ آخرُ غيرُ قانونيٍّ (‏c ثمّ b ثمّ a)، و'' ليس أوّلاً.
+  assert.equal(
+    bundleProblems({
+      'node_modules/a/node_modules/c': c,
+      'node_modules/a/node_modules/b': b,
+      'node_modules/a': a,
+      '': root,
+    }).size,
+    1,
+  );
+  // ‏قفلٌ لا شأنَ له بالتجميعِ لا يُشترَطُ ترتيبُه (‏لا أثرَ على غيرِه).
+  assert.equal(
+    bundleProblems({ 'node_modules/z': { version: '1.0.0' }, '': root, 'node_modules/a': {} }).size,
+    0,
+  );
+});
+
+test('WL-578: مقارنةٌ تفاضليّةٌ عشوائيّةٌ ببذرةٍ ثابتةٍ مع arborist — العلاماتُ كما يكتبُها npm تُقبَل، وكلُّ قلبٍ لعلامةٍ أو خلطٍ للترتيبِ يُرفَض', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const { createRequire } = await import('node:module');
+  const { realpathSync } = await import('node:fs');
+  const npmDir = path.resolve(path.dirname(realpathSync(REAL_NPM)), '..');
+  const Arborist = createRequire(path.join(npmDir, 'package.json'))('@npmcli/arborist');
+  let seed = 578;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const pick = (/** @type {string[]} */ xs) =>
+    /** @type {string} */ (xs[Math.floor(rnd() * xs.length)]);
+  const POOL = ['a', 'b', '@s/c', 'd'];
+  const FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
+  let bundledSeen = 0;
+  for (let round = 0; round < 40; round++) {
+    /** @type {Record<string, any>} */
+    const packages = { '': { name: 't', version: '1.0.0', dependencies: {} } };
+    /** @param {string} at @param {number} depth */
+    const grow = (at, depth) => {
+      const kids = POOL.filter(() => rnd() < (depth === 0 ? 0.8 : 0.4));
+      for (const name of kids) {
+        const key = `${at}${at ? '/' : ''}node_modules/${name}`;
+        /** @type {Record<string, any>} */
+        const e = { version: `${1 + Math.floor(rnd() * 2)}.0.0` };
+        for (const n of POOL) {
+          if (n !== name && rnd() < 0.35) {
+            const f = pick(FIELDS);
+            e[f] = { ...(e[f] ?? {}), [n]: '*' };
+          }
+        }
+        packages[key] = e;
+        if (depth === 0) packages[''].dependencies[name] = '*';
+        if (depth < 2) grow(key, depth + 1);
+        if (depth < 2 && rnd() < 0.5) {
+          const under = Object.keys(packages)
+            .filter(
+              (k) =>
+                k.startsWith(`${key}/node_modules/`) &&
+                !k.slice(key.length + 14).includes('/node_modules/'),
+            )
+            .map((k) => k.slice(key.length + 14));
+          if (under.length) e.bundleDependencies = under.filter(() => rnd() < 0.6);
+        }
+      }
+    };
+    grow('', 0);
+    for (const [k, e] of Object.entries(packages)) {
+      if (k !== '') Object.assign(e, registryEntry(k, { version: e.version }));
+    }
+    const tmp = makeTempRoot();
+    try {
+      const ordered = npmOrder(packages);
+      writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(ordered['']));
+      writeFileSync(
+        path.join(tmp, 'package-lock.json'),
+        JSON.stringify({
+          name: 't',
+          version: '1.0.0',
+          lockfileVersion: 3,
+          requires: true,
+          packages: ordered,
+        }),
+      );
+      const tree = await new Arborist({ path: tmp }).loadVirtual();
+      // ‏العلاماتُ كما يكتبُها npm (‏`metaFromNode`): ‏inBundle للمُجمَّعِ بلا resolved ولا integrity.
+      for (const node of tree.inventory.values()) {
+        if (node === tree || node.getBundler() === null) continue;
+        const e = ordered[node.location];
+        e.inBundle = true;
+        delete e.resolved;
+        delete e.integrity;
+        bundledSeen++;
+      }
+      const label = `جولة ${round}: ${Object.keys(ordered).join(' ')}`;
+      assert.deepEqual([...bundleProblems(ordered)], [], label);
+      // ‏قلبُ كلِّ علامةٍ وحدَها (‏إضافةً أو حذفاً) يُرفَض.
+      for (const k of Object.keys(ordered)) {
+        if (k === '') continue;
+        const flipped = structuredClone(ordered);
+        if (flipped[k].inBundle) delete flipped[k].inBundle;
+        else flipped[k].inBundle = true;
+        assert.ok(bundleProblems(flipped).has(k), `${label} ⇐ قلبُ ${k}`);
+      }
+      // ‏خلطُ الترتيبِ (‏ما لم يَعُد قانونيّاً) يُرفَضُ حينَ يكونُ في القفلِ تجميع.
+      const keys = Object.keys(ordered).reverse();
+      const shuffled = Object.fromEntries(keys.map((k) => [k, ordered[k]]));
+      const anyBundle = Object.values(ordered).some((e) => e.inBundle || e.bundleDependencies);
+      if (anyBundle && keys.join() !== Object.keys(ordered).join()) {
+        assert.ok(bundleProblems(shuffled).size > 0, `${label} ⇐ ترتيبٌ معكوس`);
+      }
+    } finally {
+      cleanup(tmp);
+    }
+  }
+  // ‏المولِّدُ يُنتجُ تجميعاً فعلاً (‏لا مقارنةَ فارغة).
+  assert.ok(bundledSeen > 20, `bundledSeen=${bundledSeen}`);
+});
