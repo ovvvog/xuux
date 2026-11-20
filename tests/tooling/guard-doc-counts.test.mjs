@@ -1200,3 +1200,15 @@ test('R12 — غيابُ §8 أو ترويستِها يُسقِطُ الحاجز
     rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('R11 — عقدٌ بلا قائمةِ `findings` لا يُسكِتُ القاعدة (‏فشلٌ مغلق): يُسقِطُ الحاجزَ بـ`R11/ANCHOR`', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, 'config/external-review.yaml', /^findings:/mu, 'findingz:');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R11\/ANCHOR: .*`findings`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

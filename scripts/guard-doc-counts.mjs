@@ -799,6 +799,11 @@ const facts = readDocCountFacts(root);
         violations.push(`R11/ANCHOR: لا عدّادَ لعقدِ المراجعةِ في \`${file}\` بالصيغِ المحروسة.`);
       }
     }
+  } else {
+    // ‏`WL-580` (‏مراجعةٌ مستقلّة F4): عقدٌ بلا قائمةِ نتائجَ كانَ يُسكِتُ `R11` كلَّه ⇒ فشلٌ مغلق.
+    violations.push(
+      'R11/ANCHOR: `config/external-review.yaml` بلا قائمةِ `findings` مقروءةٍ بمُفسِّرِ YAML — لا عدَّ يُطابَق.',
+    );
   }
 }
 
