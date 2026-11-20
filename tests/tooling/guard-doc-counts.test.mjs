@@ -58,6 +58,11 @@ function cloneRepo() {
     path.join(ROOT, 'scripts/lib/doc-count-facts.mjs'),
     path.join(tmp, 'scripts/lib/doc-count-facts.mjs'),
   );
+  // ‏`R8/S3` (‏`WL-581`) يستوردُ `parseDebtRows` منها.
+  copyFileSync(
+    path.join(ROOT, 'scripts/lib/project-state.mjs'),
+    path.join(tmp, 'scripts/lib/project-state.mjs'),
+  );
   mkdirSync(path.join(tmp, 'tests'), { recursive: true });
   copyDirRecursive(path.join(ROOT, 'tests'), path.join(tmp, 'tests'));
   mkdirSync(path.join(tmp, 'docs'), { recursive: true });
@@ -880,3 +885,92 @@ test('R10 (‏§4.3): السجلُّ الحاليُّ يطابقُ شدّةَ ا
     assert.match(verdict.output, /R4/);
   });
 }
+
+// ── R8/S3 و R8/GREEN-ONLY: إكمالُ معيارِ `DOC-23` — `WL-581` ──
+// ‏المعيار: «علامةُ إغلاقٍ واحدةٌ (‏معرِّفٌ مشطوبٌ + 🟢) على كلِّ صفٍّ مُغلَقٍ، يحرسُها حاجزٌ يرفضُ صفّاً
+// مُغلَقاً في §3 بلا علامةٍ في §4». المقيسُ على `fd9c687e`: الطفرتانِ أدناه تمرّانِ خضراوَين.
+
+const DEBT_REG = 'docs/roadmap/06-debt-register.md';
+
+/** @param {string} tmp @param {string} id @param {string} to */
+function remarkRow(tmp, id, to) {
+  const p = path.join(tmp, DEBT_REG);
+  const before = readFileSync(p, 'utf8');
+  const from = `\n| ~~\`${id}\`~~ 🟢 |`;
+  const after = before.replace(from, `\n${to}`);
+  assert.notEqual(after, before, `لا صفَّ مُغلَقاً لـ${id}`);
+  writeFileSync(p, after);
+}
+
+test('R8/S3 — الحادثةُ: `DOC-1` «مُغلَقةٌ كلُّها» في §3 وصفُّه في §4 بلا علامةٍ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    remarkRow(tmp, 'DOC-1', '| `DOC-1` |');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNMARKED: «DOC-1»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/S3 — معرِّفٌ داخلَ مدىً مُعلَنٍ مُغلَقاً (‏`LIVE-15` من `LIVE-9`…`LIVE-22`) يُفحَص', () => {
+  const tmp = cloneRepo();
+  try {
+    remarkRow(tmp, 'LIVE-15', '| `LIVE-15` |');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNMARKED: «LIVE-15»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/S3 — «`D-3` مُغلَقٌ في `WL-195`» في §3 وصفُّه بلا علامةٍ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    remarkRow(tmp, 'D-3', '| `D-3` |');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-UNMARKED: «D-3»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/S3 — ما يُذكَرُ مفتوحاً في §3 (‏`DOC-20` · `DOC-21`) لا يُعَدُّ ادّعاءَ إغلاق، والسجلُّ الحقيقيُّ يمرّ', () => {
+  const tmp = cloneRepo();
+  try {
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, stderr);
+    assert.doesNotMatch(stderr, /R8\/S3/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/GREEN-ONLY — 🟢 بلا شطبٍ في خليّةِ المعرِّفِ (‏علامةٌ غيرُ موحَّدة) يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    remarkRow(tmp, 'DOC-1', '| `DOC-1` 🟢 |');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/GREEN-ONLY: .*DOC-1/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R8/S3 — غيابُ جدولِ §3 أو كلِّ ادّعاءِ إغلاقٍ فيه يُسقِطُ الحاجزَ (‏فشلٌ مغلق)', () => {
+  const tmp = cloneRepo();
+  try {
+    const p = path.join(tmp, DEBT_REG);
+    const t = readFileSync(p, 'utf8');
+    writeFileSync(p, t.replace(/مُغلَقةٌ كلُّها|كلُّها مُغلَقةٌ|مُغلَقٌ في|مُغلَقةٌ/gu, 'مذكور'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R8\/S3-ANCHOR/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});

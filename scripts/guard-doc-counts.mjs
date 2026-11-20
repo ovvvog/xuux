@@ -27,6 +27,8 @@
 //     لـ`DOC-29`: في §4.3 **مصدرُ الحالةِ هو `config/external-review.yaml` لا الصفُّ** — نتيجةٌ `closed`
 //     في العقدِ بلا علامةٍ في صفِّها ⇒ `R8/YAML-CLOSED-UNMARKED`، ونتيجةٌ غيرُ `closed` بعلامةِ إغلاقٍ
 //     ⇒ `R8/YAML-OPEN-MARKED`. فالحاجزُ يقيسُ الصفَّ بالعقدِ ولا يُغيِّرُ العقد.
+//   - R8/S3 · R8/GREEN-ONLY (‏`WL-581`، إكمالُ `DOC-23`): ما يقولُ §3 إنّه مُغلَقٌ يحملُ العلامةَ في §4/§6، و🟢 بلا
+//     شطبٍ مرفوض — انظر الشطرَ نفسَه.
 //   - R9: معرِّفُ الدَّينِ يرِدُ صفّاً مرّةً واحدةً في الجدولِ الواحدِ (`R9/DUP-ROW`) — أُضيفَ في
 //     `WL-336` لـ`DOC-28`.
 //   - R10: عمودُ الشدّةِ في §4.3 يُطابقُ `findings[].severity` في العقدِ (`R10/SEVERITY`) — أُضيفَ في
@@ -44,6 +46,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { parse as parseYaml } from 'yaml';
 import { readDocCountFacts, openIdsInList } from './lib/doc-count-facts.mjs';
+import { parseDebtRows, normalizeArabic, splitTableCells } from './lib/project-state.mjs';
 
 const rootIndex = process.argv.indexOf('--root');
 const root = rootIndex === -1 ? process.cwd() : (process.argv[rootIndex + 1] ?? process.cwd());
@@ -440,6 +443,12 @@ const facts = readDocCountFacts(root);
       if (!idCell) continue;
       // تحديدُ ما إذا كانَ الصفُّ مُغلَقاً: المعرِّفُ مشطوبٌ بـ~~
       const isClosed = idCell.includes('~~');
+      // ‏`WL-581` (‏`DOC-23`): 🟢 بلا شطبٍ يَعُدُّه `parseDebtRows` مُغلَقاً وكانَ يمرُّ هنا — علامةٌ غيرُ موحَّدة.
+      if (!isClosed && idCell.includes('🟢') && /^`[A-Z]/u.test(idCell)) {
+        violations.push(
+          `R8/GREEN-ONLY: الصفُّ «${idCell.slice(0, 40)}» يحملُ 🟢 بلا شطبٍ في خليّةِ المعرِّفِ — العلامةُ الموحَّدةُ ~~ID~~ + 🟢 — سطر ${i + 1}.`,
+        );
+      }
       if (!isClosed) continue;
       // تخطّي صفوفِ الترويسةِ والملخصِ
       if (
@@ -459,6 +468,69 @@ const facts = readDocCountFacts(root);
           `R8/UNMARKED: الصفُّ «${idName}» مُغلَقٌ بلا علامةِ إغلاقٍ موحَّدةٍ (~~ID~~ + 🟢) في خليّةِ المعرِّفِ — سطر ${i + 1}.`,
         );
       }
+    }
+  }
+}
+
+// ── R8/S3: ما يقولُ §3 إنّه مُغلَقٌ يحملُ العلامةَ في §4/§6 — `WL-581` إكمالاً لمعيارِ `DOC-23` ──
+//   **المقيسُ على `fd9c687e`:** فكُّ علامةِ `DOC-1` في §4 و§3 يقولُ «`DOC-1`…`DOC-18` — مُغلَقةٌ كلُّها» ⇒ الحاجزُ
+//   أخضر. فالمعيارُ («حاجزٌ يرفضُ صفّاً مُغلَقاً في §3 بلا علامةٍ في §4») لم يكنْ منفَّذاً.
+//   **ادّعاءُ الإغلاقِ في §3** ثلاثُ صيغٍ (‏بعدَ تطبيعِ التشكيل): «`ID` مُغلَقٌ في» (‏ومنها «مُكتشَفٌ ومُغلَقٌ»)؛
+//   ومدىً «`P-a`…`P-b`» يليه «مُغلَقةٌ» أو «— **مُغلَقةٌ كلُّها**» أو «— **كلُّها مُغلَقةٌ**»؛ وفي صفٍّ يقولُ
+//   «كلُّها مُغلَقةٌ» كلُّ «`ID` في `WL-…`» قبلَ «وبعدَها». المعرِّفُ المُدّعى بلا صفٍّ ⇒ `R8/S3-UNKNOWN`،
+//   وبصفٍّ بلا علامة ⇒ `R8/S3-UNMARKED`، وصفرُ ادّعاءٍ ⇒ `R8/S3-ANCHOR`. **حدٌّ معلَن:** الاتّجاهُ الآخرُ
+//   (‏§3 يقولُ «مفتوح» عن صفٍّ مُغلَق) لقطاتٌ تاريخيّةٌ موسومةٌ («حتى `WL-301`») خارجَ النطاق.
+{
+  const text = readText('docs/roadmap/06-debt-register.md');
+  const rows = new Map(parseDebtRows(text).map((r) => [r.id, r]));
+  const lines = text.split('\n');
+  const from = lines.findIndex((l) => l.startsWith('## 3 —'));
+  const to = lines.findIndex((l, i) => i > from && l.startsWith('## 4 —'));
+  const ID = '([A-Z][A-Z0-9]*(?:[-/.][A-Za-z0-9]+)*)';
+  /** @type {Set<string>} */
+  const claimed = new Set();
+  /** @param {string} a @param {string} b */
+  const expand = (a, b) => {
+    const ma = /^(.*-)(\d+)$/u.exec(a);
+    const mb = /^(.*-)(\d+)$/u.exec(b);
+    if (!ma || !mb || ma[1] !== mb[1]) return [a, b];
+    const out = [];
+    for (let n = Number(ma[2]); n <= Number(mb[2]); n += 1) out.push(`${ma[1]}${n}`);
+    return out;
+  };
+  if (from !== -1) {
+    for (let i = from + 1; i < (to === -1 ? lines.length : to); i += 1) {
+      const line = lines[i] ?? '';
+      if (!line.startsWith('|') || /^\|\s*-{3}/u.test(line)) continue;
+      const cells = splitTableCells(line);
+      const note = normalizeArabic(cells.slice(1).join(' | ')).replace(/\*\*/gu, '');
+      for (const m of note.matchAll(new RegExp(`\`${ID}\` (?:مكتشف و)?مغلق في`, 'gu')))
+        claimed.add(m[1] ?? '');
+      for (const m of note.matchAll(
+        new RegExp(`\`${ID}\`…\`${ID}\`(?: — )?(?: ?مغلقة| ?كلها مغلقة)`, 'gu'),
+      )) {
+        for (const id of expand(m[1] ?? '', m[2] ?? '')) claimed.add(id);
+      }
+      if (/كلها مغلقة|مغلقة كلها/u.test(note)) {
+        const head = note.split('وبعدها')[0] ?? '';
+        for (const m of head.matchAll(new RegExp(`\`${ID}\` في \`WL-`, 'gu')))
+          claimed.add(m[1] ?? '');
+      }
+    }
+  }
+  if (claimed.size === 0) {
+    violations.push(
+      'R8/S3-ANCHOR: لا ادّعاءَ إغلاقٍ مقروءاً في جدولِ §3 من سجلِّ الدَّين — الحاجزُ لا يرى ما يقيسُه.',
+    );
+  }
+  for (const id of claimed) {
+    const row = rows.get(id);
+    if (row === undefined) {
+      violations.push(`R8/S3-UNKNOWN: §3 يقولُ إنّ «${id}» مُغلَقٌ ولا صفَّ له في §4/§6.`);
+    } else if (!row.closed) {
+      violations.push(
+        `R8/S3-UNMARKED: «${id}» مُغلَقٌ بنصِّ §3 وصفُّه في «${row.section}» بلا علامةِ الإغلاقِ الموحَّدة (~~ID~~ + 🟢).`,
+      );
     }
   }
 }
