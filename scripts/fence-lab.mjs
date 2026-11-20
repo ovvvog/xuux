@@ -45,6 +45,7 @@ import { EventEmitter } from 'node:events';
 
 import {
   FenceRoot,
+  SupervisorBootGate,
   FenceSovereign,
   confirmWorkerSeal,
   generateTestKeyProvider,
@@ -605,6 +606,9 @@ async function liveLab() {
       os_principal: OS_USER(w),
     })),
   );
+  // ‏WL-579: لا إصدارَ قبلَ نجاحِ كنسِ الإقلاع (‏TH-SUP-05).
+  const bootGate = new SupervisorBootGate(root);
+  await bootGate.start();
   await labPool.query(
     `CREATE TABLE state.lab_probe (v text NOT NULL DEFAULT gen_random_uuid()::text, writer text NOT NULL, at timestamptz NOT NULL DEFAULT clock_timestamp())`,
   );
