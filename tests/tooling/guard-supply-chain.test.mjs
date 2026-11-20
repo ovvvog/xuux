@@ -3266,6 +3266,18 @@ function realBundleRoot() {
   return tmp;
 }
 
+/**
+ * مفاتيحُ `packages` بترتيبِ npm القانونيّ (‏`json-stringify-nice`: ‏`localeCompare(…, 'en')`) — كما يكتبُها npm، فيشترطُها
+ * WL-578 في كلِّ قفلٍ معنيٍّ بالتجميع. مكتوبةٌ هنا مستقلّةً عن الشفرةِ المُختبَرة.
+ * @param {Record<string, any>} packages @returns {Record<string, any>}
+ */
+const npmOrder = (packages) =>
+  Object.fromEntries(
+    Object.keys(packages)
+      .sort((a, b) => a.localeCompare(b, 'en'))
+      .map((k) => [k, packages[k]]),
+  );
+
 const BUNDLED_KEYS = [
   'node_modules/p/node_modules/@s/c',
   'node_modules/p/node_modules/@s/c/node_modules/child-b',
@@ -3551,7 +3563,7 @@ test('WL-578: كلُّ علامةٍ يتيمةٍ أو ملتبسةٍ أو محذ
   for (const [label, edit, expected] of cases) {
     const p = structuredClone(base);
     edit(p);
-    const got = bundleProblems(p);
+    const got = bundleProblems(npmOrder(p));
     assert.deepEqual([...got.keys()].sort(), Object.keys(expected).sort(), label);
     for (const [k, re] of Object.entries(expected))
       assert.match(got.get(k) ?? '', re, `${label}: ${k}`);
@@ -3607,7 +3619,7 @@ function syntheticBundle() {
     'node_modules/y': registryEntry('node_modules/y', { version: '9.0.0' }),
   };
   packages[''].dependencies.y = '9.0.0';
-  return packages;
+  return npmOrder(packages);
 }
 
 test('WL-578: حالاتٌ صحيحةٌ تُقبَل — تداخلٌ عميق، نطاقيّة، peer/optional، دورة، وقفلٌ بلا تجميعٍ لا يُفحَص', async () => {
@@ -3720,8 +3732,9 @@ test('WL-578: حكمُ الحارسِ يطابقُ arborist الحقيقيَّ �
     },
   };
   for (const [label, edit] of Object.entries(variants)) {
-    const packages = structuredClone(base);
-    edit(packages);
+    const edited = structuredClone(base);
+    edit(edited);
+    const packages = npmOrder(edited);
     const tmp = makeTempRoot();
     try {
       writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(packages['']));
@@ -3753,4 +3766,145 @@ test('WL-578: حكمُ الحارسِ يطابقُ arborist الحقيقيَّ �
       cleanup(tmp);
     }
   }
+});
+
+test('WL-578 (‏مراجعةُ 4095ee23): ترتيبُ مفاتيحٍ غيرُ قانونيٍّ يُسقِطُ حافّةً عندَ npm — يُرفَضُ القفل، والترتيبُ القانونيُّ نفسُه يُقبَل', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const root = { name: 'root', version: '1.0.0', dependencies: { a: '1.0.0' } };
+  const a = registryEntry('node_modules/a', { version: '1.0.0', bundleDependencies: ['c'] });
+  const b = { version: '1.0.0', inBundle: true };
+  const c = { version: '1.0.0', peerDependencies: { b: '1.0.0' }, inBundle: true };
+  // ‏بهذا الترتيبِ لا يبني arborist حافّةَ c→b فلا يعدُّ b مُجمَّعة، فيجلبُها npm من السجلِّ بلا مصدرٍ ولا بصمة.
+  const reordered = {
+    '': root,
+    'node_modules/a/node_modules/b': b,
+    'node_modules/a/node_modules/c': c,
+    'node_modules/a': a,
+  };
+  const got = bundleProblems(reordered);
+  assert.deepEqual([...got.keys()], ['node_modules/a/node_modules/b']);
+  assert.match(got.get('node_modules/a/node_modules/b') ?? '', /ليست بترتيبِ npm القانونيّ/);
+  assert.deepEqual([...bundleProblems(npmOrder(reordered))], []);
+  // ‏الترتيبُ القانونيُّ ترتيبُ اللغة (‏`localeCompare`) لا ترتيبُ وحداتِ الترميز: `B` بعدَ `a` عندَ npm.
+  const mixedCase = npmOrder({
+    ...reordered,
+    'node_modules/B': registryEntry('node_modules/B', { version: '1.0.0' }),
+  });
+  assert.deepEqual(Object.keys(mixedCase).slice(-1), ['node_modules/B']);
+  assert.deepEqual([...bundleProblems(mixedCase)], []);
+  // ‏ترتيبٌ آخرُ غيرُ قانونيٍّ (‏c ثمّ b ثمّ a)، و'' ليس أوّلاً.
+  assert.equal(
+    bundleProblems({
+      'node_modules/a/node_modules/c': c,
+      'node_modules/a/node_modules/b': b,
+      'node_modules/a': a,
+      '': root,
+    }).size,
+    1,
+  );
+  // ‏قفلٌ لا شأنَ له بالتجميعِ لا يُشترَطُ ترتيبُه (‏لا أثرَ على غيرِه).
+  assert.equal(
+    bundleProblems({ 'node_modules/z': { version: '1.0.0' }, '': root, 'node_modules/a': {} }).size,
+    0,
+  );
+});
+
+test('WL-578: مقارنةٌ تفاضليّةٌ عشوائيّةٌ ببذرةٍ ثابتةٍ مع arborist — العلاماتُ كما يكتبُها npm تُقبَل، وكلُّ قلبٍ لعلامةٍ أو خلطٍ للترتيبِ يُرفَض', async () => {
+  const { bundleProblems } = await import('../../scripts/generate-sbom.mjs');
+  const { createRequire } = await import('node:module');
+  const { realpathSync } = await import('node:fs');
+  const npmDir = path.resolve(path.dirname(realpathSync(REAL_NPM)), '..');
+  const Arborist = createRequire(path.join(npmDir, 'package.json'))('@npmcli/arborist');
+  let seed = 578;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) % 2147483648;
+    return seed / 2147483648;
+  };
+  const pick = (/** @type {string[]} */ xs) =>
+    /** @type {string} */ (xs[Math.floor(rnd() * xs.length)]);
+  const POOL = ['a', 'b', '@s/c', 'd'];
+  const FIELDS = ['dependencies', 'peerDependencies', 'optionalDependencies'];
+  let bundledSeen = 0;
+  for (let round = 0; round < 40; round++) {
+    /** @type {Record<string, any>} */
+    const packages = { '': { name: 't', version: '1.0.0', dependencies: {} } };
+    /** @param {string} at @param {number} depth */
+    const grow = (at, depth) => {
+      const kids = POOL.filter(() => rnd() < (depth === 0 ? 0.8 : 0.4));
+      for (const name of kids) {
+        const key = `${at}${at ? '/' : ''}node_modules/${name}`;
+        /** @type {Record<string, any>} */
+        const e = { version: `${1 + Math.floor(rnd() * 2)}.0.0` };
+        for (const n of POOL) {
+          if (n !== name && rnd() < 0.35) {
+            const f = pick(FIELDS);
+            e[f] = { ...(e[f] ?? {}), [n]: '*' };
+          }
+        }
+        packages[key] = e;
+        if (depth === 0) packages[''].dependencies[name] = '*';
+        if (depth < 2) grow(key, depth + 1);
+        if (depth < 2 && rnd() < 0.5) {
+          const under = Object.keys(packages)
+            .filter(
+              (k) =>
+                k.startsWith(`${key}/node_modules/`) &&
+                !k.slice(key.length + 14).includes('/node_modules/'),
+            )
+            .map((k) => k.slice(key.length + 14));
+          if (under.length) e.bundleDependencies = under.filter(() => rnd() < 0.6);
+        }
+      }
+    };
+    grow('', 0);
+    for (const [k, e] of Object.entries(packages)) {
+      if (k !== '') Object.assign(e, registryEntry(k, { version: e.version }));
+    }
+    const tmp = makeTempRoot();
+    try {
+      const ordered = npmOrder(packages);
+      writeFileSync(path.join(tmp, 'package.json'), JSON.stringify(ordered['']));
+      writeFileSync(
+        path.join(tmp, 'package-lock.json'),
+        JSON.stringify({
+          name: 't',
+          version: '1.0.0',
+          lockfileVersion: 3,
+          requires: true,
+          packages: ordered,
+        }),
+      );
+      const tree = await new Arborist({ path: tmp }).loadVirtual();
+      // ‏العلاماتُ كما يكتبُها npm (‏`metaFromNode`): ‏inBundle للمُجمَّعِ بلا resolved ولا integrity.
+      for (const node of tree.inventory.values()) {
+        if (node === tree || node.getBundler() === null) continue;
+        const e = ordered[node.location];
+        e.inBundle = true;
+        delete e.resolved;
+        delete e.integrity;
+        bundledSeen++;
+      }
+      const label = `جولة ${round}: ${Object.keys(ordered).join(' ')}`;
+      assert.deepEqual([...bundleProblems(ordered)], [], label);
+      // ‏قلبُ كلِّ علامةٍ وحدَها (‏إضافةً أو حذفاً) يُرفَض.
+      for (const k of Object.keys(ordered)) {
+        if (k === '') continue;
+        const flipped = structuredClone(ordered);
+        if (flipped[k].inBundle) delete flipped[k].inBundle;
+        else flipped[k].inBundle = true;
+        assert.ok(bundleProblems(flipped).has(k), `${label} ⇐ قلبُ ${k}`);
+      }
+      // ‏خلطُ الترتيبِ (‏ما لم يَعُد قانونيّاً) يُرفَضُ حينَ يكونُ في القفلِ تجميع.
+      const keys = Object.keys(ordered).reverse();
+      const shuffled = Object.fromEntries(keys.map((k) => [k, ordered[k]]));
+      const anyBundle = Object.values(ordered).some((e) => e.inBundle || e.bundleDependencies);
+      if (anyBundle && keys.join() !== Object.keys(ordered).join()) {
+        assert.ok(bundleProblems(shuffled).size > 0, `${label} ⇐ ترتيبٌ معكوس`);
+      }
+    } finally {
+      cleanup(tmp);
+    }
+  }
+  // ‏المولِّدُ يُنتجُ تجميعاً فعلاً (‏لا مقارنةَ فارغة).
+  assert.ok(bundledSeen > 20, `bundledSeen=${bundledSeen}`);
 });

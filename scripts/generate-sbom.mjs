@@ -296,9 +296,13 @@ const lockKey = (names) => (names.length === 0 ? '' : NM_MARK + names.join(`/${N
  * (‏حُذِفَت)، أو مُجمِّعٌ هو الجذر (‏غيرُ مدعوم)، أو قيمةُ علامةٍ غيرُ `true`، أو `bundleDependencies` ليست مصفوفةَ
  * أسماءٍ صالحة، أو حقلُ اعتماديّاتٍ ليس كائناً، أو مسارٌ ملتبسُ التقسيم. المُجمِّعُ نفسُه مدخلةٌ عاديّةٌ تخضعُ لسياسةِ
  * المصدرِ وSRI، وبايتاتُ المُجمَّعِ داخلَ tarball المُجمِّعِ المختومِ ببصمتِه. قفلٌ بلا أيِّ `inBundle` ولا
- * `bundleDependencies` لا يُفحَصُ (‏لا أثرَ على غيرِه). الحدود: الدوراتُ تُقطَعُ بمسارٍ مشتركٍ كما في arborist وبترتيبِ
- * المفاتيح، فقد يختلفُ الحكمُ عن npm في دوراتٍ نادرة — والاختلافُ رفضٌ لا قبول؛ و`legacy-peer-deps` يُسقِطُ حوافَّ
- * peer عندَ npm فيُرفَضُ ما جُمِّعَ بها وحدَها؛ ومطابقةُ `bundleDependencies` لـ`package.json` داخلَ tarball غيرُ مفحوصة.
+ * `bundleDependencies` لا يُفحَصُ (‏لا أثرَ على غيرِه). **ترتيبُ المفاتيح:** `loadVirtual` يبني الحوافَّ بترتيبِ مفاتيحِ
+ * القفل، فمفتاحٌ قبلَ أمِّه أو مصدرِ حافّتِه يُسقِطُ الحافّةَ ويُغيِّرُ المُجمِّع (‏مراجعةُ 4095ee23)؛ فالقفلُ المعنيُّ
+ * بالتجميعِ يُشترَطُ أن تكونَ مفاتيحُه بترتيبِ npm القانونيّ (‏`json-stringify-nice`: ‏`localeCompare(…, 'en')`) وإلّا
+ * رُفِض. الحدود: npm نفسُه (‏`#assignBundles`) يُضيفُ إلى `bundleDependencies` الأمِّ كلَّ ابنٍ معلَّمٍ تعتمدُ عليه — أي
+ * يثقُ بالعلامة؛ هنا لا تُقبَلُ إلّا بإثبات، فيُرفَضُ ذلك (‏رفضٌ لا قبول)؛ و`legacy-peer-deps` يُسقِطُ حوافَّ peer عندَ npm
+ * فيُرفَضُ ما جُمِّعَ بها وحدَها؛ والتجميعُ في الجذرِ غيرُ مدعوم؛ ومطابقةُ `bundleDependencies` لـ`package.json` داخلَ
+ * tarball غيرُ مفحوصة.
  * @param {Record<string, any>} packages @returns {Map<string, string>} المفتاح ⇒ سببُ الرفض
  */
 export function bundleProblems(packages) {
@@ -316,6 +320,15 @@ export function bundleProblems(packages) {
   const flag = (k, why) => {
     if (!out.has(k)) out.set(k, why);
   };
+  const raw = Object.keys(packages);
+  const canonical = [...raw].sort((a, b) => a.localeCompare(b, 'en'));
+  const misplaced = raw.findIndex((k, i) => k !== canonical[i]);
+  if (misplaced !== -1) {
+    flag(
+      /** @type {string} */ (raw[misplaced]),
+      'مفاتيحُ القفلِ ليست بترتيبِ npm القانونيّ — npm يبني الحوافَّ بالترتيب، فلا يُثبَتُ التجميع',
+    );
+  }
   /** @type {Map<string, string[]>} */
   const names = new Map();
   for (const k of keys) {
