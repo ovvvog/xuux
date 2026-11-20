@@ -288,7 +288,7 @@ const preservation = verifyHistoryPreserved({
 });
 
 // WL-584: بقاءُ التاريخِ على القاعدةِ الحرفيّةِ أيضاً — ما على فرعِ التكاملِ ولم يبلغْ `main`.
-/** @type {{ ref: string, sha: string, violations: import('./lib/project-state.mjs').Violation[] } | null} */
+/** @type {{ ref: string, sha: string, lost: number, violations: import('./lib/project-state.mjs').Violation[] } | null} */
 let literal = null;
 if (historyBase !== null) {
   let literalSha = '';
@@ -302,7 +302,7 @@ if (historyBase !== null) {
     const statusAt = fileAt(manifest.status);
     const idsAt = fileAt(WORK_LOG_IDS);
     const seen = new Set(preservation.violations.map((v) => `${v.code}\u0000${v.message}`));
-    const found = verifyHistoryPreserved({
+    const all = verifyHistoryPreserved({
       baseWorkLog: at(literalSha) ?? '',
       headWorkLog: headWorkLogText,
       baseStatus: statusAt(literalSha) ?? '',
@@ -314,10 +314,13 @@ if (historyBase !== null) {
       ),
       headAmendments,
       restoredRewrites: restoration.rewritten,
-    }).violations.filter((v) => !seen.has(`${v.code}\u0000${v.message}`));
+    }).violations;
+    const found = all.filter((v) => !seen.has(`${v.code}\u0000${v.message}`));
     literal = {
       ref: historyBase,
       sha: literalSha,
+      // ‏مراجعةُ `#601` (‏N3): ما سقطَ على القاعدتَين يُعَدُّ مرّةً في الحكم، لكنَّ سطرَ الحرفيّةِ لا يقولُ «باقٍ».
+      lost: all.length,
       violations: found.map((v) => ({
         code: v.code,
         message: `${v.message} (‏على القاعدةِ الحرفيّةِ \`${historyBase}\`)`,
@@ -357,7 +360,11 @@ console.log(
 if (literal !== null) {
   console.log(
     `  التاريخُ على القاعدةِ الحرفيّةِ: ${literal.ref} = ${literal.sha.slice(0, 12)} · ${
-      literal.violations.length === 0 ? 'كلُّ مُدخلةٍ وسطرِ لوحةٍ عليها باقٍ في المرشَّح' : 'ساقطٌ'
+      literal.lost === 0
+        ? 'كلُّ مُدخلةٍ وسطرِ لوحةٍ عليها باقٍ في المرشَّح'
+        : literal.violations.length === 0
+          ? 'ساقطٌ (‏مكرَّرٌ مع الأساسِ أعلاه)'
+          : 'ساقطٌ'
     }`,
   );
 }

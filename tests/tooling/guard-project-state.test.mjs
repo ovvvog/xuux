@@ -1460,3 +1460,72 @@ test('WL-540 — ملخّصُ التسليم: لا تسقطُ مُدخلةٌ ج�
     9,
   );
 });
+
+// مراجعةُ `#601` على `830a0ad6` (‏N1، N3): المسارُ الصريحُ (‏الخطّافُ المحلّيُّ لا يعرفُ قاعدةَ الطلب) بلا اختبار،
+// وسطرُ الحرفيّةِ كانَ يقولُ «باقٍ» عن فقدٍ مكرَّرٍ مع `main`.
+
+/**
+ * الحاجزُ خارجَ CI بقاعدةٍ حرفيّةٍ صريحة.
+ *
+ * @param {string} root
+ * @param {{ flag?: string, env?: string }} how
+ */
+function runGuardExplicit(root, how) {
+  const env = { ...process.env };
+  for (const k of [
+    'PROJECT_STATE_BASE',
+    'PROJECT_STATE_HISTORY_BASE',
+    'GITHUB_EVENT_NAME',
+    'GITHUB_BASE_REF',
+  ])
+    delete env[k];
+  if (how.env !== undefined) env['PROJECT_STATE_HISTORY_BASE'] = how.env;
+  const args = [GUARD, '--root', root, '--no-consistency'];
+  if (how.flag !== undefined) args.push('--history-base', how.flag);
+  const run = spawnSync(process.execPath, args, { encoding: 'utf8', env });
+  return { status: run.status, out: `${run.stdout}\n${run.stderr}` };
+}
+
+test('WL-584 (‏DOC-24) — `--history-base` و`PROJECT_STATE_HISTORY_BASE` خارجَ CI يقيسانِ القاعدةَ الحرفيّة، وبلاهما لا قياس', () => {
+  const root = integrationRepo();
+  git(root, ['checkout', '-q', 'main', '--', 'docs/roadmap/05-work-log.md', 'PROJECT_STATUS.md']);
+  regenerateHandoff(root);
+  commit(root, 'silently drop WL-002');
+  const none = runGuardExplicit(root, {});
+  // ‏خارجَ CI الحزمةُ تُقاسُ على main (‏فـ`src/app.mjs` من فرعِ التكاملِ يُسمّى PS2 هنا)، والتاريخُ على main وحدَه.
+  assert.doesNotMatch(none.out, /القاعدةِ الحرفيّةِ/u, none.out);
+  assert.doesNotMatch(
+    none.out,
+    /HISTORY-LOST: مُدخلةُ `WL-002`/u,
+    'شرطُ الاستنساخ: الثغرةُ بلا قاعدةٍ صريحة.',
+  );
+  for (const how of [{ flag: 'origin/integration' }, { env: 'origin/integration' }]) {
+    const r = runGuardExplicit(root, how);
+    assert.equal(r.status, 1, `${JSON.stringify(how)}\n${r.out}`);
+    assert.match(
+      r.out,
+      /PS11\/HISTORY-LOST: مُدخلةُ `WL-002`[^\n]*على القاعدةِ الحرفيّةِ `origin\/integration`/u,
+    );
+  }
+  for (const how of [{ flag: 'no-such-ref' }, { env: 'deadbeefdead' }]) {
+    const r = runGuardExplicit(root, how);
+    assert.equal(r.status, 2, `${JSON.stringify(how)}\n${r.out}`);
+  }
+});
+
+test('WL-584 (‏DOC-24) — فقدٌ على القاعدتَين يُعَدُّ مرّةً، وسطرُ الحرفيّةِ لا يقولُ «باقٍ»', () => {
+  const root = integrationRepo();
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(root, LOG, log.replace(/### \[2026-10-01\][\s\S]*$/u, ''));
+  regenerateHandoff(root);
+  commit(root, 'drop WL-001 (on main and on integration)');
+  const r = runGuardAsPr(root, 'integration');
+  assert.equal(r.status, 1, r.out);
+  assert.match(
+    r.out,
+    /التاريخُ على القاعدةِ الحرفيّةِ: origin\/integration = [0-9a-f]{12} · ساقطٌ/u,
+  );
+  assert.doesNotMatch(r.out, /القاعدةِ الحرفيّةِ: [^\n]*باقٍ/u);
+  const lost = r.out.match(/PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/gu) ?? [];
+  assert.equal(lost.length, 1, `الفقدُ نفسُه مرّةً واحدةً لا مرّتين:\n${r.out}`);
+});
