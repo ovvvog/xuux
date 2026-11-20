@@ -14,6 +14,7 @@ import pg from 'pg';
 import {
   FenceRoot,
   FenceSovereign,
+  SupervisorBootGate,
   generateTestKeyProvider,
   newBootId,
   reviewEffectsEvidence,
@@ -139,6 +140,9 @@ export async function harness(label) {
     { worker_id: 'alpha', pubkey: keys.alpha.publicKeyRaw(), os_principal: 'xuuxw-alpha' },
     { worker_id: 'beta', pubkey: keys.beta.publicKeyRaw(), os_principal: 'xuuxw-beta' },
   ]);
+  // ‏WL-579: الجذرُ لا يُصدِرُ قبلَ نجاحِ كنسِ الإقلاع — كما يفعلُ مُشرِفٌ يُقلِع.
+  const bootGate = new SupervisorBootGate(root);
+  await bootGate.start();
   // جدولُ اختبارٍ يُنشَأُ تحتَ HALTED فيُغطّى تلقائياً (مُطلِقُ DDL).
   await db.pool.query(
     `CREATE TABLE state.fence_probe (id integer PRIMARY KEY, v text NOT NULL DEFAULT '')`,
@@ -211,6 +215,7 @@ export async function harness(label) {
     superuser,
     login,
     root,
+    bootGate,
     get rootClient() {
       return rootClient;
     },

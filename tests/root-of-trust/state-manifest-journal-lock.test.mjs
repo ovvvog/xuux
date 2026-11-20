@@ -25,6 +25,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { generateKeyPairSync, sign as edSign, verify as edVerify } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -245,6 +247,70 @@ test('LIVE-62/4: إجهادُ السباقِ — عملياتٌ متسابقةٌ
   });
 });
 
+// WL-582 — قياسٌ مستقلٌّ لطبقةٍ كانَ يحجبُها حارسُ الملكيةِ (الطبقةُ الثالثةُ) فلا يقتلُ
+// طفرتَها أيُّ اختبارٍ أعلاه (مقيسٌ بالطفراتِ على رأسِ فرعِ التكاملِ `fd9c687e`): المطالبةُ
+// الذرّيّةُ بتحقّقِ المحتوى في `#stealJournalLock` (‏`LIVE-62`، الطبقةُ الثانيةُ) —
+// استبدالُها بحذفٍ أعمى للمسارِ المشتركِ نجا من عشرِ تشغيلاتٍ كاملةٍ للملفِّ.
+// السباقُ عبرَ العمليّاتِ لا يُستحضَرُ حتميًّا، فيُحقَنُ في اللحظةِ نفسِها: يُلَفُّ نداءُ
+// `node:fs` المستورَدُ ويُزامَنُ إلى الروابطِ المسمّاةِ (‏`syncBuiltinESMExports`)، ثمَّ
+// يُعادُ الأصلُ في `finally` — بلا مؤقّتاتٍ ولا تخمينِ توقيتٍ.
+
+/**
+ * يلفُّ دالّةً من `node:fs` طوالَ جسمِ الاختبارِ ثمَّ يعيدُها.
+ * @param {'readFileSync' | 'renameSync'} name
+ * @param {(original: Function) => Function} wrap
+ * @param {() => void} body - جسمٌ متزامنٌ (‏لا `await` بينَ اللفِّ والإعادة)
+ */
+function withFsHook(name, wrap, body) {
+  const original = fs[name];
+  fs[name] = wrap(original);
+  syncBuiltinESMExports();
+  try {
+    body();
+  } finally {
+    fs[name] = original;
+    syncBuiltinESMExports();
+  }
+}
+
+test('LIVE-62/5: منافسٌ حيٌّ يقتني القفلَ بينَ إعادةِ الفحصِ والانتزاعِ — المطالبةُ الذرّيّةُ تُعيدُهُ ولا تحذفُهُ (انحدارُ WL-492، الطبقةُ الثانيةُ)', async () => {
+  await withDir(async (dir) => {
+    const { manifest } = await provisioned(dir);
+    const lock = manifest.journalLockFile;
+    const permit = `${lock}.steal-permit`;
+    const dead = await deadPid();
+    writeFileSync(lock, JSON.stringify({ pid: dead, at: 'x' }));
+    // منافسٌ حيٌّ (العمليةُ 1 حيّةٌ وليست هذه) — قفلُهُ يجبُ ألّا يُحذَفَ أبدًا.
+    const competitor = JSON.stringify({ pid: 1, token: 'live-competitor', at: 'y' });
+    let fired = false;
+    withFsHook(
+      'readFileSync',
+      (original) =>
+        function hooked(path, ...rest) {
+          const out = original.call(this, path, ...rest);
+          // إعادةُ الفحصِ داخلَ التصريحِ قرأت المالكَ الميتَ؛ في اللحظةِ التاليةِ يقتني
+          // المنافسُ الحيُّ المسارَ — عينُ نافذةِ «افحصْ ثمَّ احذفْ».
+          if (!fired && path === lock && existsSync(permit)) {
+            fired = true;
+            writeFileSync(lock, competitor);
+          }
+          return out;
+        },
+      () => {
+        assert.throws(
+          () => manifest.raise('haltEpoch', 9),
+          (e) => e.code === 'STATE_MANIFEST_JOURNAL_LOCKED',
+          'قفلُ المنافسِ الحيِّ يمنعُ الرفعَ رفضًا مغلقًا',
+        );
+      },
+    );
+    assert.equal(fired, true, 'الحقنُ وقعَ في نافذةِ إعادةِ الفحصِ');
+    assert.equal(readFileSync(lock, 'utf8'), competitor, 'قفلُ المنافسِ الحيِّ باقٍ على المسارِ');
+    assert.equal(manifest.read().haltEpoch, 0, 'ولا شاهدَ ارتفعَ بلا قفلٍ');
+    assert.equal(existsSync(permit), false, 'وتصريحُنا لا يُتركُ');
+  });
+});
+
 // WL-493 — إغلاقُ دينِ `LIVE-63`: النسخةُ الشقيقةُ الحيّةُ في العمليّةِ نفسِها كانت
 // تنتزعُ قفلَ أختِها المعلّقةِ في `await signAsync` أثناءَ الختمِ (انتزاعٌ **حتميٌّ لا
 // نظريٌّ**: pid واحدٌ ورمزانِ لا يميّزُ بينهما انتزاعُ ما قبلَ `WL-493`)، فتكتبُ
@@ -354,5 +420,45 @@ test('LIVE-63/2: الختمُ المعلّقُ يفقدُ قفلَهُ فلا ك
       manifestBefore,
       'البيانُ لم يُكتبْ بعدَ فقدانِ القفلِ — الرفضُ سابقٌ للكتابةِ',
     );
+  });
+});
+
+// WL-583 — قياسٌ مستقلٌّ لطبقةٍ من إصلاحِ `LIVE-63` لم يقتلْ طفرتَها أيُّ اختبارٍ أعلاه (‏مقيسٌ
+// بالطفراتِ على رأسِ فرعِ التكاملِ `fd9c687e`): حذفُ تصريحِ السرقةِ في `finally` مقيدًا
+// برمزِ الاقتناءِ — استبدالُهُ بحذفٍ أعمى نجا من عشرِ تشغيلاتٍ كاملةٍ للملفِّ. السباقُ
+// عبرَ العمليّاتِ لا يُستحضَرُ حتميًّا، فيُحقَنُ في اللحظةِ نفسِها: يُلَفُّ `renameSync`
+// المستورَدُ من `node:fs` ويُزامَنُ إلى الروابطِ المسمّاةِ (‏`syncBuiltinESMExports`) ثمَّ
+// يُعادُ الأصلُ في `finally` — بلا مؤقّتاتٍ ولا تخمينِ توقيتٍ.
+test('LIVE-63/3: تصريحُ سرقةٍ أحدثُ لغيرِنا على المسارِ لا يُحذَفُ — الحذفُ مقيدٌ برمزِ اقتنائِنا (انحدارُ WL-493)', async () => {
+  await withDir(async (dir) => {
+    const { manifest } = await provisioned(dir);
+    const lock = manifest.journalLockFile;
+    const permit = `${lock}.steal-permit`;
+    const dead = await deadPid();
+    writeFileSync(lock, JSON.stringify({ pid: dead, at: 'x' }));
+    const newer = JSON.stringify({ pid: 1, token: 'newer-permit', at: 'z' });
+    const { default: fs } = await import('node:fs');
+    const { syncBuiltinESMExports } = await import('node:module');
+    const original = fs.renameSync;
+    let fired = false;
+    fs.renameSync = function hooked(from, to) {
+      // لحظةَ المطالبةِ بالقفلِ الميتِ: تصريحُنا يُستبدَلُ بتصريحٍ أحدثَ لغيرِنا.
+      if (!fired && from === lock) {
+        fired = true;
+        writeFileSync(permit, newer);
+      }
+      return original.call(this, from, to);
+    };
+    syncBuiltinESMExports();
+    try {
+      manifest.raise('haltEpoch', 4);
+    } finally {
+      fs.renameSync = original;
+      syncBuiltinESMExports();
+    }
+    assert.equal(fired, true, 'الحقنُ وقعَ لحظةَ المطالبةِ');
+    assert.equal(manifest.read().haltEpoch, 4, 'القفلُ الميتُ انتُزِعَ والرفعُ وقعَ');
+    assert.equal(existsSync(permit), true, 'تصريحُ غيرِنا لم يُحذَفْ');
+    assert.equal(readFileSync(permit, 'utf8'), newer, 'وهوَ هوَ لم يُمَسَّ');
   });
 });
