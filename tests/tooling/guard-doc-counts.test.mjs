@@ -58,7 +58,7 @@ function cloneRepo() {
     path.join(ROOT, 'scripts/lib/doc-count-facts.mjs'),
     path.join(tmp, 'scripts/lib/doc-count-facts.mjs'),
   );
-  // ‏`R8/S3` (‏`WL-581`) يستوردُ `parseDebtRows` منها.
+  // ‏`R8/S3` (‏`WL-581`) و`R12` (‏`WL-580`) يستوردانِ `parseDebtRows` منها.
   copyFileSync(
     path.join(ROOT, 'scripts/lib/project-state.mjs'),
     path.join(tmp, 'scripts/lib/project-state.mjs'),
@@ -79,6 +79,15 @@ function cloneRepo() {
     path.join(ROOT, 'config/external-review.yaml'),
     path.join(tmp, 'config/external-review.yaml'),
   );
+  // ‏مواضعُ عدّاداتِ العقدِ الحاضرةُ — يقرؤها `R11` (‏`WL-580`).
+  for (const rel of [
+    'README.md',
+    'docs/CURRENT_STATE.md',
+    'docs/roadmap/03-roadmap-to-100.md',
+    'config/readiness-deferrals.yaml',
+  ]) {
+    copyFileSync(path.join(ROOT, rel), path.join(tmp, rel));
+  }
   return tmp;
 }
 
@@ -1039,6 +1048,373 @@ test('R8/S3 — معرِّفٌ بصفَّينِ (‏`REPO-4`): فكُّ علام
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R8\/S3-UNMARKED: «REPO-4»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// ── R11: عدّاداتُ عقدِ المراجعةِ في مواضعِ الحالةِ الحاضرة — `WL-580` ──
+
+/**
+ * يُطبِّقُ تعديلاً نصّيّاً واحداً على ملفٍّ في الجذرِ المنسوخِ ويتحقّقُ أنّه وقع.
+ * @param {string} tmp @param {string} rel @param {string | RegExp} from @param {string} to
+ */
+function mutateText(tmp, rel, from, to) {
+  const p = path.join(tmp, rel);
+  const before = readFileSync(p, 'utf8');
+  const after = before.replace(from, to);
+  assert.notEqual(after, before, `${rel}: لم يُعثَرْ على «${String(from)}»`);
+  writeFileSync(p, after);
+}
+
+test('R11 — الحادثةُ نفسُها: صفُّ العقدِ في §2 بعدّادِ `WL-384` القديمِ (‏58 · 42 · 16) يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(
+      tmp,
+      'docs/roadmap/06-debt-register.md',
+      /\| 61 نتيجةً — \*\*42 مغلقةٌ · 19 مفتوحةٌ\*\*/u,
+      '| 58 نتيجةً — **42 مغلقةٌ · 16 مفتوحةٌ**',
+    );
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(
+      stderr,
+      /R11\/COUNT: §2 من سجلِّ الدَّين \(‏صفُّ العقد\) يقولُ المجموع = 58 والعقدُ \(‏مُفسِّرُ YAML\) 61/u,
+    );
+    assert.match(stderr, /R11\/COUNT: §2 .* المفتوح = 16 .* 19/u);
+    assert.doesNotMatch(stderr, /المغلق = 42/u, 'المطابقُ لا يُبلَّغ');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R11 — العقدُ مصدرُ الحقيقة: تغييرُ حالةِ نتيجةٍ في العقدِ وحدَه يُسقِطُ كلَّ موضعٍ حاضرٍ يذكرُ العدّاد', () => {
+  const tmp = cloneRepo();
+  try {
+    const yamlPath = path.join(tmp, 'config/external-review.yaml');
+    const lines = readFileSync(yamlPath, 'utf8').split('\n');
+    const at = lines.findIndex((l) => /^\s*- id: ['"]?CO55-M11\.05-R3-02['"]?\s*$/u.test(l));
+    assert.ok(at !== -1);
+    const rel = lines.slice(at + 1).findIndex((l) => /^\s*status: open\s*$/u.test(l));
+    assert.ok(rel !== -1);
+    lines[at + 1 + rel] = String(lines[at + 1 + rel]).replace('open', 'closed');
+    writeFileSync(yamlPath, lines.join('\n'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    for (const where of [
+      /R11\/COUNT: §2 من سجلِّ الدَّين/u,
+      /R11\/COUNT: §3 من سجلِّ الدَّين/u,
+      /R11\/COUNT: ترويسةُ §4\.3/u,
+      /R11\/COUNT: تعليلُ `M11\.05`/u,
+      /R11\/COUNT: README\.md:\d+/u,
+      /R11\/COUNT: docs\/CURRENT_STATE\.md:\d+/u,
+      /R11\/COUNT: docs\/roadmap\/03-roadmap-to-100\.md:\d+/u,
+    ])
+      assert.match(stderr, where);
+    assert.doesNotMatch(stderr, /R11\/COUNT: تعليلُ `M11\.0[46]`/u, 'المساران الآخرانِ لم يتغيّرا');
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R11 — تعليلاتُ التأجيلِ لكلِّ مسار: جولاتٌ ومجموعٌ ومغلقٌ ومفتوحٌ ومفتوحٌ عالٍ', () => {
+  /** @type {Array<[string | RegExp, string, RegExp]>} */
+  const cases = [
+    ['يسجّلُ 13 جولةً', 'يسجّلُ 12 جولةً', /تعليلُ `M11\.04`.* الجولات = 12 .* 13/u],
+    [
+      'و12 نتيجةً — 6 مغلقةً و6 مفتوحةً',
+      'و12 نتيجةً — 6 مغلقةً و7 مفتوحةً',
+      /تعليلُ `M11\.05`.* المفتوح = 7 .* 6/u,
+    ],
+    [
+      'و7 مفتوحةً (منها 6 عاليةَ',
+      'و7 مفتوحةً (منها 5 عاليةَ',
+      /تعليلُ `M11\.04`.* المفتوح العالي = 5 .* 6/u,
+    ],
+    [
+      /18 نتيجةً —\s+12 مغلقةً/u,
+      '18 نتيجةً —\n      11 مغلقةً',
+      /تعليلُ `M11\.06`.* المغلق = 11 .* 12/u,
+    ],
+  ];
+  for (const [from, to, re] of cases) {
+    const tmp = cloneRepo();
+    try {
+      mutateText(tmp, 'config/readiness-deferrals.yaml', from, to);
+      const { code, stderr } = runGuardWithOutput(tmp);
+      assert.equal(code, 1, `${String(from)}: ${stderr}`);
+      assert.match(stderr, re);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+});
+
+test('R11 — الصيغُ الحاضرةُ في README وCURRENT_STATE وخارطةِ الطريق، والمقتبسُ التاريخيُّ بين «» خارجَ النطاق', () => {
+  /** @type {Array<[string, string | RegExp, string, RegExp]>} */
+  const cases = [
+    [
+      'README.md',
+      '19 نتيجةً من 61 مفتوحةٌ',
+      '16 نتيجةً من 58 مفتوحةٌ',
+      /README\.md:\d+ يقولُ المفتوح = 16/u,
+    ],
+    [
+      'README.md',
+      '**61 نتيجةً: 42 `closed` · 19 `open`**',
+      '**58 نتيجةً: 42 `closed` · 16 `open`**',
+      /README\.md:\d+ يقولُ المجموع = 58/u,
+    ],
+    [
+      'docs/CURRENT_STATE.md',
+      '**61 نتيجةً — 42 `closed` · 19 `open`**',
+      '**61 نتيجةً — 45 `closed` · 19 `open`**',
+      /CURRENT_STATE\.md:\d+ يقولُ المغلق = 45/u,
+    ],
+    [
+      'docs/roadmap/03-roadmap-to-100.md',
+      '19 نتيجةً `open` في `config/external-review.yaml`',
+      '16 نتيجةً `open` في `config/external-review.yaml`',
+      /03-roadmap-to-100\.md:\d+ يقولُ المفتوح = 16/u,
+    ],
+  ];
+  for (const [rel, from, to, re] of cases) {
+    const tmp = cloneRepo();
+    try {
+      mutateText(tmp, rel, from, to);
+      const { code, stderr } = runGuardWithOutput(tmp);
+      assert.equal(code, 1, `${rel}: ${stderr}`);
+      assert.match(stderr, re);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+  // ‏اقتباسٌ تاريخيٌّ بين «» بعدّادٍ قديمٍ لا يُسقِط.
+  const tmp = cloneRepo();
+  try {
+    mutateText(
+      tmp,
+      'README.md',
+      '19 نتيجةً من 61 مفتوحةٌ',
+      '19 نتيجةً من 61 مفتوحةٌ (‏وكانَ «16 نتيجةً من 58 مفتوحةٌ» قبلَ `WL-470`)',
+    );
+    assert.equal(runGuard(tmp), 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R11 — كلُّ موضعٍ محروسٍ إلزاميُّ الحضور: حذفُ الصيغةِ يُسقِطُ بـR11/ANCHOR لا يُسكِت', () => {
+  /** @type {Array<[string, string | RegExp, string, RegExp]>} */
+  const cases = [
+    [
+      'docs/roadmap/06-debt-register.md',
+      /\| 61 نتيجةً — \*\*42 مغلقةٌ · 19 مفتوحةٌ\*\*/u,
+      '| واحدٌ وستّونَ نتيجةً',
+      /R11\/ANCHOR: صفُّ `config\/external-review\.yaml` في §2/u,
+    ],
+    [
+      'docs/roadmap/06-debt-register.md',
+      'والمفتوحُ منها 19:',
+      'والمفتوحُ منها:',
+      /R11\/ANCHOR: صفُّ «نتائجُ المراجعةِ المستقلّةِ» في §3/u,
+    ],
+    [
+      'docs/roadmap/06-debt-register.md',
+      '(من 61 نتيجةً: 42 مغلقةٌ · 19 مفتوحةٌ',
+      '(من العقد',
+      /R11\/ANCHOR: ترويسةُ §4\.3/u,
+    ],
+    [
+      'config/readiness-deferrals.yaml',
+      'يسجّلُ 13 جولةً و31 نتيجةً',
+      'يسجّلُ جولاتٍ ونتائجَ',
+      /R11\/ANCHOR: تعليلُ `M11\.04`/u,
+    ],
+    [
+      'docs/roadmap/03-roadmap-to-100.md',
+      '19 نتيجةً `open` في `config/external-review.yaml`',
+      'النتائجُ المفتوحةُ في العقد',
+      /R11\/ANCHOR: لا عدّادَ .*03-roadmap-to-100\.md/u,
+    ],
+  ];
+  for (const [rel, from, to, re] of cases) {
+    const tmp = cloneRepo();
+    try {
+      mutateText(tmp, rel, from, to);
+      const { code, stderr } = runGuardWithOutput(tmp);
+      assert.equal(code, 1, `${rel}: ${stderr}`);
+      assert.match(stderr, re);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+});
+
+// ── R12: مصفوفةُ الدَّينِ المفتوحِ في §8 تُطابقُ الصفوفَ غيرَ المعلَّمةِ — `WL-580` ──
+
+const REG = 'docs/roadmap/06-debt-register.md';
+
+/** @param {string} tmp @param {RegExp} rowRe */
+function matrixRow(tmp, rowRe) {
+  const text = readFileSync(path.join(tmp, REG), 'utf8');
+  const at = text.indexOf('## 8 — ');
+  assert.notEqual(at, -1, 'لا §8 في السجلّ');
+  const line = text
+    .slice(at)
+    .split('\n')
+    .find((l) => rowRe.test(l));
+  assert.ok(line, `لا صفَّ يطابقُ ${String(rowRe)} في §8`);
+  return line;
+}
+
+test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏70: 69 بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ثمّ LIVE-77 في WL-585) ويمرُّ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 0, stderr);
+    const text = readFileSync(path.join(tmp, REG), 'utf8');
+    const sec = text.slice(text.indexOf('## 8 — '));
+    const ids = sec.split('\n').filter((l) => /^\| `[A-Z]/u.test(l));
+    assert.equal(ids.length, 70);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12 — حذفُ صفِّ دَينٍ مفتوحٍ من المصفوفة (‏`LIVE-39`) يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const row = matrixRow(tmp, /^\| `LIVE-39` \|/u);
+    mutateText(tmp, REG, `${row}\n`, '');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/MISSING: .*`LIVE-39`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12 — صفٌّ لدَينٍ مُغلَقٍ (‏`LIVE-44`) في المصفوفةِ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const row = matrixRow(tmp, /^\| `LIVE-39` \|/u);
+    mutateText(tmp, REG, `${row}\n`, `${row}\n${row.replace('`LIVE-39`', '`LIVE-44`')}\n`);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/EXTRA: .*`LIVE-44`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12 — إغلاقُ دَينٍ في §4 دونَ إخراجِه من المصفوفةِ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, REG, '| `DOC-21` |', '| ~~`DOC-21`~~ 🟢 |');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/EXTRA: .*`DOC-21`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12 — تكرارُ صفٍّ في المصفوفةِ يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const row = matrixRow(tmp, /^\| `EXT-3` \|/u);
+    mutateText(tmp, REG, `${row}\n`, `${row}\n${row}\n`);
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/DUP: .*`EXT-3`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12 — صنفٌ خارجَ A…F يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    const row = matrixRow(tmp, /^\| `LIVE-39` \|/u);
+    mutateText(tmp, REG, row, row.replace(/\| E \|$/u, '| مؤجّل |'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/CLASS: .*`LIVE-39`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12/COUNT — الحادثةُ: «73 صفّاً» تبقى على جدولٍ تغيّرَ (‏70) فيُسقِطُ الحاجز، وكانَ يمرّ', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, REG, '**70 صفّاً،', '**73 صفّاً،');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/COUNT: §8 يقولُ 73 صفّاً والجدولُ 70/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من الجدول: F = 5 على F = 1 يُسقِط، وتبديلُ صنفِ صفٍّ يُسقِطُ صنفَيه', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, REG, '**F = 1**', '**F = 5**');
+    const r1 = runGuardWithOutput(tmp);
+    assert.equal(r1.code, 1, r1.stderr);
+    assert.match(r1.stderr, /R12\/COUNT: §8 يقولُ F = 5 والجدولُ 1/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  const tmp2 = cloneRepo();
+  try {
+    const row = matrixRow(tmp2, /^\| `LIVE-45` \|/u);
+    mutateText(tmp2, REG, row, row.replace(/\| F \|$/u, '| D |'));
+    const r2 = runGuardWithOutput(tmp2);
+    assert.equal(r2.code, 1, r2.stderr);
+    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ D = 37 والجدولُ 38/u);
+    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ F = 1 والجدولُ 0/u);
+  } finally {
+    rmSync(tmp2, { recursive: true, force: true });
+  }
+});
+
+test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ «العدد:» يُسقِطُ (‏فشلٌ مغلق)، والصنفُ يُعلَنُ ولو صفراً ولا يُحذَف', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, REG, '**70 صفّاً،', '**صفوفاً،');
+    mutateText(tmp, REG, ' · **B = 1**', '');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/COUNT: نثرُ §8 لا يُعلِنُ/u);
+    assert.match(stderr, /R12\/COUNT: سطرُ «العدد:» في §8 بلا «\*\*B = n\*\*»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12 — غيابُ §8 أو ترويستِها يُسقِطُ الحاجز', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, REG, '## 8 — مصفوفةُ الدَّينِ المفتوحِ', '## 8 — ملاحظات');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/ANCHOR/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R11 — عقدٌ بلا قائمةِ `findings` لا يُسكِتُ القاعدة (‏فشلٌ مغلق): يُسقِطُ الحاجزَ بـ`R11/ANCHOR`', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(tmp, 'config/external-review.yaml', /^findings:/mu, 'findingz:');
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R11\/ANCHOR: .*`findings`/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

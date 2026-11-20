@@ -1238,16 +1238,28 @@ test('DOC-30 — الشطبُ في خليّةِ المعرِّفِ يُغلقُ 
   assert.equal(row.closed, true, 'المعرِّفُ المشطوبُ لا يُغلقُ — وهو خطأٌ في الانحدار');
 });
 
-test('DOC-30 — المستودعُ نفسُه: DOC-23 لا يُحكَمُ بإغلاقٍ من 🟢 في وصفِه، وOPS-1/R6-REMEASURE يبقى مُغلَقاً', () => {
+test('DOC-30 — المستودعُ نفسُه: صفٌّ مفتوحٌ يذكرُ 🟢 في وصفِه لا يُحكَمُ بإغلاقٍ، وOPS-1/R6-REMEASURE يبقى مُغلَقاً', () => {
   const debt = readFileSync(path.join(REPO, manifest.debtRegister), 'utf8');
   const rows = parseDebtRows(debt);
-  // DOC-23: معرِّفُه غيرُ مشطوبٍ ووصفُه يذكرُ 🟢 — كانَ يُحكَمُ مُغلَقاً بالخللِ.
+  const lines = debt.split('\n');
+  // ‏`WL-580`: كانَ الشاهدُ `DOC-23`؛ أُغلِقَ بقياسٍ على فرعِ التكامل (‏معرِّفٌ مشطوبٌ + 🟢) فصارَ الشاهدُ
+  // `DOC-30` نفسَه — معرِّفُه غيرُ مشطوبٍ وصفُّه يذكرُ 🟢 — والإغلاقُ يُقرأُ من خليّةِ المعرِّفِ وحدَها.
+  const doc30 = rows.find((r) => r.id === 'DOC-30');
+  assert.ok(doc30, 'DOC-30 غائبٌ عن السجلِّ');
+  const doc30Line = lines.find((l) => l.startsWith('| `DOC-30` |')) ?? '';
+  assert.ok(doc30Line.includes('🟢'), 'صفُّ DOC-30 لم يَعُدْ يذكرُ 🟢 — الشاهدُ لم يَعُدْ شاهداً');
+  assert.equal(
+    doc30.closed,
+    false,
+    'DOC-30 يُحكَمُ مُغلَقاً من 🟢 في وصفِه — وهو الخللُ الذي يُصلِحُه DOC-30',
+  );
+  // وDOC-23 مُغلَقٌ بخليّةِ معرِّفِه (‏شطبٌ + 🟢)، لا بما في وصفِه.
   const doc23 = rows.find((r) => r.id === 'DOC-23');
   assert.ok(doc23, 'DOC-23 غائبٌ عن السجلِّ');
-  assert.equal(
-    doc23.closed,
-    false,
-    'DOC-23 يُحكَمُ مُغلَقاً من 🟢 في وصفِه — وهو الخللُ الذي يُصلِحُه DOC-30',
+  assert.equal(doc23.closed, true, 'DOC-23 المشطوبُ بـ🟢 لا يُحكَمُ مُغلَقاً');
+  assert.ok(
+    lines.some((l) => l.startsWith('| ~~`DOC-23`~~ 🟢 |')),
+    'خليّةُ DOC-23 بلا العلامةِ الموحَّدة',
   );
   // OPS-1/R6-REMEASURE: معرِّفُه مشطوبٌ — يبقى مُغلَقاً بالشطبِ.
   const opsR6 = rows.find((r) => r.id === 'OPS-1/R6-REMEASURE');

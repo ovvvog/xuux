@@ -6,7 +6,7 @@
 // `WL-063` بحاجزِ `guard:progress`، لكنّ بقيةَ العدّاداتِ اليدويّةِ لم تكن
 // محصورة.
 //
-// **الحاجزُ يَفحَصُ عشرَ قواعدَ** (وكانَ ثلاثةَ عدّاداتٍ يومَ `WL-196`):
+// **الحاجزُ يَفحَصُ اثنتَي عشرةَ قاعدةً** (وكانَ ثلاثةَ عدّاداتٍ يومَ `WL-196`):
 //   - R1: عددُ الحواجزِ في `PROJECT_STATUS.md` يُطابقُ عددَ `guard:*` في `validate`.
 //   - R2: عددُ ملفاتِ الاختبارِ في `docs/ROOT_OF_TRUST.md` يُطابقُ عددَ `*.test.mjs`.
 //   - R3: عددُ البنودِ المفتوحةِ في `PROJECT_STATUS.md` يُطابقُ عددَ البنودِ المفتوحةِ على المنفِّذ.
@@ -36,6 +36,21 @@
 //     والحاجزُ أخضرُ لأنَّ أيَّ قاعدةٍ لم تقرأِ الشدّة. وفي `WL-509` أيضاً: صارَ نمطُ خليّةِ المعرِّفِ في `R8`
 //     يقبلُ 🔴 (‏علامةُ «مفتوحٌ») بعدَما كانت ثلاثةُ صفوفٍ تحملُها (`CO55-M11.05-R3-0{1,2,3}`) تُتخطّى
 //     بلا فحصٍ — فنتيجةٌ `closed` في العقدِ بصفٍّ يحملُ 🔴 كانت تمرُّ صامتةً.
+//   - R11: عدّاداتُ عقدِ المراجعةِ في مواضعِ الحالةِ الحاضرةِ تُطابقُ `config/external-review.yaml` بمُفسِّرِ YAML
+//     (‏`R11/COUNT`) — أُضيفَ في `WL-580`. **الحادثةُ:** صفُّ العقدِ في §2 من سجلِّ الدَّينِ بقيَ يقولُ «58 نتيجةً —
+//     42 مغلقةٌ · 16 مفتوحةٌ» (‏حالُ `WL-384`) وترويسةُ §4.3 في الملفِّ نفسِه تقولُ «61: 42 · 19»، والحاجزُ أخضر.
+//     المواضعُ المحروسة (‏كلٌّ إلزاميُّ الحضور ⇒ وإلّا `R11/ANCHOR`): صفُّ العقدِ في §2، وصفُّ النتائجِ في §3
+//     (‏الشدّاتُ كلُّها والمفتوحةُ بشدّاتِها)، وترويسةُ §4.3 من سجلِّ الدَّين؛ وتعليلاتُ `M11.04`/`M11.05`/`M11.06`
+//     في `config/readiness-deferrals.yaml` (‏الجولاتُ والمجموعُ والمغلقُ والمفتوحُ والمفتوحُ العالي لكلِّ مسار)؛
+//     وكلُّ صيغةِ «T نتيجةً: C `closed` · O `open`» أو «O نتيجةً من T مفتوحةٌ» أو «O نتيجةً `open` في
+//     `config/external-review.yaml`» في `README.md` و`docs/CURRENT_STATE.md` و`docs/roadmap/03-roadmap-to-100.md`
+//     (‏وفي كلٍّ منها واحدةٌ على الأقلّ). الأرقامُ التاريخيّةُ المقتبسةُ بين «» وسطورُ «آخر تحديث» خارجَ النطاق.
+//   - R12: مصفوفةُ §8 في سجلِّ الدَّينِ تحملُ صفّاً واحداً لكلِّ دَينٍ مفتوحٍ — لا أقلَّ (‏`R12/MISSING`) ولا أكثرَ
+//     (‏`R12/EXTRA`) ولا مكرَّراً (‏`R12/DUP`) — وصنفُه في آخرِ خليّةٍ من `A`…`F` (‏`R12/CLASS`)؛ وغيابُ القسمِ أو
+//     ترويستِه `R12/ANCHOR`. «المفتوحُ» بمحلِّلِ `parseDebtRows` نفسِه الذي يعدُّ به `HANDOFF.md`، فإغلاقُ دَينٍ
+//     في §4 دونَ إخراجِه من المصفوفةِ يُسقِطُ الحاجز. أُضيفَ في `WL-580`. و`R12/COUNT`: نثرُ §8 قبلَ الجدولِ
+//     يُعلِنُ «**N صفّاً**» وسطرَ «العدد:» بـ«**X = n**» لكلِّ صنفٍ من `A`…`F` — كلُّها تُطابقُ صفوفَ الجدولِ
+//     المعدودةَ، وغيابُ أحدِها رسوب (‏كانَ الرقمانِ يُكتبانِ بيدٍ فلا يرسبُ «73 صفّاً» على 69).
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -651,6 +666,310 @@ const facts = readDocCountFacts(root);
             `R10/SEVERITY: «${id}» شدّتُها في \`config/external-review.yaml\` \`${severity}\` («${expected}») وصفُّها في §4.3 يقولُ «${actual}» — سطر ${i + 1}.`,
           );
         }
+      }
+    }
+  }
+}
+
+// ── R11: عدّاداتُ عقدِ المراجعةِ في مواضعِ الحالةِ الحاضرة — `WL-580` ──
+{
+  /** @type {unknown} */
+  let contract = null;
+  try {
+    const t = readText('config/external-review.yaml');
+    contract = t.trim() === '' ? null : parseYaml(t);
+  } catch {
+    // R5 يُبلِّغُ عن عطبِ التفسير.
+  }
+  const rawFindings =
+    contract && typeof contract === 'object'
+      ? /** @type {{findings?: unknown}} */ (contract).findings
+      : undefined;
+  const rawEngagements =
+    contract && typeof contract === 'object'
+      ? /** @type {{engagements?: unknown}} */ (contract).engagements
+      : undefined;
+  if (Array.isArray(rawFindings)) {
+    /** @type {{ engagement: string, status: string, severity: string }[]} */
+    const fs = rawFindings.map((/** @type {any} */ f) => ({
+      engagement: String(f?.engagement ?? ''),
+      status: String(f?.status ?? ''),
+      severity: String(f?.severity ?? ''),
+    }));
+    /** @param {(f: { engagement: string, status: string, severity: string }) => boolean} p */
+    const n = (p) => fs.filter(p).length;
+    const total = fs.length;
+    const open = n((f) => f.status === 'open');
+    const closed = n((f) => f.status === 'closed');
+    /** @param {string} sev @param {boolean} [onlyOpen] */
+    const sevN = (sev, onlyOpen = false) =>
+      n((f) => f.severity === sev && (!onlyOpen || f.status === 'open'));
+    /**
+     * @param {string} where @param {string} what @param {number} actual @param {number} expected
+     */
+    const expect = (where, what, actual, expected) => {
+      if (actual !== expected) {
+        violations.push(
+          `R11/COUNT: ${where} يقولُ ${what} = ${actual} والعقدُ (‏مُفسِّرُ YAML) ${expected}.`,
+        );
+      }
+    };
+    const debt = readText('docs/roadmap/06-debt-register.md').split('\n');
+    // §2: صفُّ العقد.
+    {
+      const row = debt.find((l) => l.startsWith('| [`config/external-review.yaml`]'));
+      const m = row && /(\d+) نتيجةً — \*\*(\d+) مغلقةٌ · (\d+) مفتوحةٌ\*\*/u.exec(row);
+      if (!m) {
+        violations.push(
+          'R11/ANCHOR: صفُّ `config/external-review.yaml` في §2 من سجلِّ الدَّينِ بلا «T نتيجةً — **C مغلقةٌ · O مفتوحةٌ**».',
+        );
+      } else {
+        const w = '§2 من سجلِّ الدَّين (‏صفُّ العقد)';
+        expect(w, 'المجموع', Number(m[1]), total);
+        expect(w, 'المغلق', Number(m[2]), closed);
+        expect(w, 'المفتوح', Number(m[3]), open);
+      }
+    }
+    // §3: صفُّ النتائج — الشدّاتُ كلُّها والمفتوحةُ بشدّاتِها.
+    {
+      const row = debt.find((l) => l.startsWith('| نتائجُ المراجعةِ المستقلّةِ |'));
+      const m =
+        row &&
+        /(\d+) عاليةٌ · (\d+) متوسطةٌ · (\d+) منخفضةٌ — من (\d+) معرّفاً.*والمفتوحُ منها (\d+): (\d+) عاليةٌ · (\d+) متوسطةٌ · (\d+) منخفضةٌ/u.exec(
+          row,
+        );
+      if (!m) {
+        violations.push(
+          'R11/ANCHOR: صفُّ «نتائجُ المراجعةِ المستقلّةِ» في §3 من سجلِّ الدَّينِ بلا صيغةِ الشدّاتِ والمفتوح.',
+        );
+      } else {
+        const w = '§3 من سجلِّ الدَّين';
+        expect(w, 'العالية', Number(m[1]), sevN('high'));
+        expect(w, 'المتوسطة', Number(m[2]), sevN('medium'));
+        expect(w, 'المنخفضة', Number(m[3]), sevN('low'));
+        expect(w, 'المجموع', Number(m[4]), total);
+        expect(w, 'المفتوح', Number(m[5]), open);
+        expect(w, 'المفتوح العالي', Number(m[6]), sevN('high', true));
+        expect(w, 'المفتوح المتوسط', Number(m[7]), sevN('medium', true));
+        expect(w, 'المفتوح المنخفض', Number(m[8]), sevN('low', true));
+      }
+    }
+    // §4.3: الترويسة.
+    {
+      const row = debt.find((l) => l.startsWith('### 4.3'));
+      const m =
+        row &&
+        /\*\*(\d+) نتيجةً `open`\*\* \(من (\d+) نتيجةً: (\d+) مغلقةٌ · (\d+) مفتوحةٌ/u.exec(row);
+      if (!m) {
+        violations.push(
+          'R11/ANCHOR: ترويسةُ §4.3 من سجلِّ الدَّينِ بلا «**O نتيجةً `open`** (من T نتيجةً: C مغلقةٌ · O مفتوحةٌ».',
+        );
+      } else {
+        const w = 'ترويسةُ §4.3 من سجلِّ الدَّين';
+        expect(w, 'المفتوح', Number(m[1]), open);
+        expect(w, 'المجموع', Number(m[2]), total);
+        expect(w, 'المغلق', Number(m[3]), closed);
+        expect(w, 'المفتوح (‏ثانياً)', Number(m[4]), open);
+      }
+    }
+    // تعليلاتُ التأجيلِ لكلِّ مسار.
+    {
+      /** @type {unknown} */
+      let deferrals = null;
+      try {
+        const t = readText('config/readiness-deferrals.yaml');
+        deferrals = t.trim() === '' ? null : parseYaml(t);
+      } catch {
+        // تعليلٌ لا يُفسَّرُ ⇒ `R11/ANCHOR` أدناه.
+      }
+      const list =
+        deferrals && typeof deferrals === 'object'
+          ? Object.values(/** @type {Record<string, unknown>} */ (deferrals)).find(
+              (v) => Array.isArray(v) && v.some((/** @type {any} */ x) => x?.id === 'M11.04'),
+            )
+          : undefined;
+      /** @type {Record<string, number>} */
+      const words = { واحدةٌ: 1, واحدةً: 1 };
+      for (const id of ['M11.04', 'M11.05', 'M11.06']) {
+        const item = Array.isArray(list)
+          ? list.find((/** @type {any} */ x) => x?.id === id)
+          : undefined;
+        const reason = String(item?.reason ?? '').replace(/\s+/gu, ' ');
+        const m =
+          /(\d+) (?:جولةً|جولاتٍ) و(\d+) نتيجةً — (\d+) مغلقةً و(\d+) مفتوحةً \(منها (\d+|عاليةٌ واحدةٌ) ?(?:عاليةَ|عاليةٌ)?/u.exec(
+            reason,
+          );
+        if (!m) {
+          violations.push(
+            `R11/ANCHOR: تعليلُ \`${id}\` في \`config/readiness-deferrals.yaml\` بلا «R جولةً وT نتيجةً — C مغلقةً وO مفتوحةً (منها H …».`,
+          );
+          continue;
+        }
+        const eng = Array.isArray(rawEngagements)
+          ? rawEngagements.find((/** @type {any} */ e) => e?.id === id)
+          : undefined;
+        const w = `تعليلُ \`${id}\` في \`config/readiness-deferrals.yaml\``;
+        expect(
+          w,
+          'الجولات',
+          Number(m[1]),
+          Number(/** @type {any} */ (eng)?.executedBy?.rounds ?? NaN),
+        );
+        expect(
+          w,
+          'المجموع',
+          Number(m[2]),
+          n((f) => f.engagement === id),
+        );
+        expect(
+          w,
+          'المغلق',
+          Number(m[3]),
+          n((f) => f.engagement === id && f.status === 'closed'),
+        );
+        expect(
+          w,
+          'المفتوح',
+          Number(m[4]),
+          n((f) => f.engagement === id && f.status === 'open'),
+        );
+        const hi = String(m[5]);
+        expect(
+          w,
+          'المفتوح العالي',
+          /^\d+$/u.test(hi) ? Number(hi) : (words[hi.split(' ')[1] ?? ''] ?? NaN),
+          n((f) => f.engagement === id && f.status === 'open' && f.severity === 'high'),
+        );
+      }
+    }
+    // الصيغُ العامّةُ في الوثائقِ الحاضرة.
+    for (const file of [
+      'README.md',
+      'docs/CURRENT_STATE.md',
+      'docs/roadmap/03-roadmap-to-100.md',
+    ]) {
+      let seen = 0;
+      readText(file)
+        .split('\n')
+        .forEach((line, i) => {
+          if (line.startsWith('آخر تحديث')) return;
+          const bare = line.replace(/«[^»]*»/gu, '');
+          for (const m of bare.matchAll(
+            /(\d+) نتيجةً(?:\*\*)?(?::| —) (\d+) `closed` · (\d+) `open`/gu,
+          )) {
+            seen += 1;
+            const w = `${file}:${i + 1}`;
+            expect(w, 'المجموع', Number(m[1]), total);
+            expect(w, 'المغلق', Number(m[2]), closed);
+            expect(w, 'المفتوح', Number(m[3]), open);
+          }
+          for (const m of bare.matchAll(/(\d+) نتيجةً من (\d+) مفتوحةٌ/gu)) {
+            seen += 1;
+            const w = `${file}:${i + 1}`;
+            expect(w, 'المفتوح', Number(m[1]), open);
+            expect(w, 'المجموع', Number(m[2]), total);
+          }
+          for (const m of bare.matchAll(
+            /(\d+) نتيجةً `open` في `config\/external-review\.yaml`/gu,
+          )) {
+            seen += 1;
+            expect(`${file}:${i + 1}`, 'المفتوح', Number(m[1]), open);
+          }
+        });
+      if (seen === 0) {
+        violations.push(`R11/ANCHOR: لا عدّادَ لعقدِ المراجعةِ في \`${file}\` بالصيغِ المحروسة.`);
+      }
+    }
+  } else {
+    // ‏`WL-580` (‏مراجعةٌ مستقلّة F4): عقدٌ بلا قائمةِ نتائجَ كانَ يُسكِتُ `R11` كلَّه ⇒ فشلٌ مغلق.
+    violations.push(
+      'R11/ANCHOR: `config/external-review.yaml` بلا قائمةِ `findings` مقروءةٍ بمُفسِّرِ YAML — لا عدَّ يُطابَق.',
+    );
+  }
+}
+
+// ── R12: مصفوفةُ الدَّينِ المفتوحِ في §8 — `WL-580` ──
+{
+  const file = 'docs/roadmap/06-debt-register.md';
+  const text = readText(file);
+  const open = new Set(
+    parseDebtRows(text)
+      .filter((r) => !r.closed)
+      .map((r) => r.id),
+  );
+  const lines = text.split('\n');
+  const start = lines.findIndex((l) =>
+    /^##\s+8\s+—\s+مصفوفة الدين المفتوح/u.test(normalizeArabic(l)),
+  );
+  /** @type {string[]} */
+  const ids = [];
+  /** @type {Map<string, number>} */
+  const classCount = new Map();
+  /** نثرُ §8 قبلَ أوّلِ جدول — موضعُ العددِ المُعلَن. */
+  let prose = '';
+  let header = false;
+  if (start !== -1) {
+    for (let i = start + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (/^#{1,6}\s/u.test(line) || line.startsWith('|')) break;
+      prose += `${line}\n`;
+    }
+    for (let i = start + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (/^#{1,6}\s/u.test(line)) break;
+      if (!line.startsWith('|')) continue;
+      const cells = splitTableCells(line);
+      if (/^\|\s*-{3}/u.test(lines[i + 1] ?? '')) {
+        header =
+          normalizeArabic(cells[0] ?? '') === 'الدين' &&
+          normalizeArabic(cells[cells.length - 1] ?? '') === 'الصنف';
+        i += 1;
+        continue;
+      }
+      if (!header) continue;
+      const m = /^`([^`]+)`$/u.exec((cells[0] ?? '').trim());
+      if (m === null) continue;
+      const id = m[1] ?? '';
+      ids.push(id);
+      const cls = (cells[cells.length - 1] ?? '').trim();
+      classCount.set(cls, (classCount.get(cls) ?? 0) + 1);
+      if (!/^[A-F]$/u.test(cls)) {
+        violations.push(`R12/CLASS: صنفُ \`${id}\` في §8 «${cls}» وليس من A…F.`);
+      }
+    }
+  }
+  if (start === -1 || !header || ids.length === 0) {
+    violations.push(
+      'R12/ANCHOR: لا «## 8 — مصفوفةُ الدَّينِ المفتوحِ» بجدولٍ ترويستُه تبدأُ بـ«الدَّين» وتنتهي بـ«الصنف» في سجلِّ الدَّين.',
+    );
+  } else {
+    const seen = new Set();
+    for (const id of ids) {
+      if (seen.has(id)) violations.push(`R12/DUP: \`${id}\` يرِدُ في مصفوفةِ §8 أكثرَ من مرّة.`);
+      seen.add(id);
+      if (!open.has(id)) {
+        violations.push(`R12/EXTRA: \`${id}\` في مصفوفةِ §8 وليس دَيناً مفتوحاً في §4/§6.`);
+      }
+    }
+    for (const id of open) {
+      if (!seen.has(id))
+        violations.push(`R12/MISSING: الدَّينُ المفتوحُ \`${id}\` بلا صفٍّ في مصفوفةِ §8.`);
+    }
+    // ‏`R12/COUNT`: العددُ المُعلَنُ في النثرِ من الجدولِ نفسِه، لا من يدِ الكاتب.
+    const total = /\*\*(\d+) صفّاً/u.exec(prose);
+    if (total === null) {
+      violations.push('R12/COUNT: نثرُ §8 لا يُعلِنُ «**N صفّاً**».');
+    } else if (Number(total[1]) !== ids.length) {
+      violations.push(`R12/COUNT: §8 يقولُ ${total[1]} صفّاً والجدولُ ${ids.length}.`);
+    }
+    const tally = /^العدد:(.*)$/mu.exec(prose)?.[1] ?? '';
+    for (const cls of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      const said = new RegExp(`\\*\\*${cls} = (\\d+)\\*\\*`, 'u').exec(tally);
+      const actual = classCount.get(cls) ?? 0;
+      if (said === null) {
+        violations.push(`R12/COUNT: سطرُ «العدد:» في §8 بلا «**${cls} = n**».`);
+      } else if (Number(said[1]) !== actual) {
+        violations.push(`R12/COUNT: §8 يقولُ ${cls} = ${said[1]} والجدولُ ${actual}.`);
       }
     }
   }
