@@ -27,6 +27,8 @@
 //     لـ`DOC-29`: في §4.3 **مصدرُ الحالةِ هو `config/external-review.yaml` لا الصفُّ** — نتيجةٌ `closed`
 //     في العقدِ بلا علامةٍ في صفِّها ⇒ `R8/YAML-CLOSED-UNMARKED`، ونتيجةٌ غيرُ `closed` بعلامةِ إغلاقٍ
 //     ⇒ `R8/YAML-OPEN-MARKED`. فالحاجزُ يقيسُ الصفَّ بالعقدِ ولا يُغيِّرُ العقد.
+//   - R8/S3 · R8/GREEN-ONLY (‏`WL-581`، إكمالُ `DOC-23`): ما يقولُ §3 إنّه مُغلَقٌ يحملُ العلامةَ في §4/§6، و🟢 بلا
+//     شطبٍ مرفوض — انظر الشطرَ نفسَه.
 //   - R9: معرِّفُ الدَّينِ يرِدُ صفّاً مرّةً واحدةً في الجدولِ الواحدِ (`R9/DUP-ROW`) — أُضيفَ في
 //     `WL-336` لـ`DOC-28`.
 //   - R10: عمودُ الشدّةِ في §4.3 يُطابقُ `findings[].severity` في العقدِ (`R10/SEVERITY`) — أُضيفَ في
@@ -46,7 +48,9 @@
 //   - R12: مصفوفةُ §8 في سجلِّ الدَّينِ تحملُ صفّاً واحداً لكلِّ دَينٍ مفتوحٍ — لا أقلَّ (‏`R12/MISSING`) ولا أكثرَ
 //     (‏`R12/EXTRA`) ولا مكرَّراً (‏`R12/DUP`) — وصنفُه في آخرِ خليّةٍ من `A`…`F` (‏`R12/CLASS`)؛ وغيابُ القسمِ أو
 //     ترويستِه `R12/ANCHOR`. «المفتوحُ» بمحلِّلِ `parseDebtRows` نفسِه الذي يعدُّ به `HANDOFF.md`، فإغلاقُ دَينٍ
-//     في §4 دونَ إخراجِه من المصفوفةِ يُسقِطُ الحاجز. أُضيفَ في `WL-580`.
+//     في §4 دونَ إخراجِه من المصفوفةِ يُسقِطُ الحاجز. أُضيفَ في `WL-580`. و`R12/COUNT`: نثرُ §8 قبلَ الجدولِ
+//     يُعلِنُ «**N صفّاً**» وسطرَ «العدد:» بـ«**X = n**» لكلِّ صنفٍ من `A`…`F` — كلُّها تُطابقُ صفوفَ الجدولِ
+//     المعدودةَ، وغيابُ أحدِها رسوب (‏كانَ الرقمانِ يُكتبانِ بيدٍ فلا يرسبُ «73 صفّاً» على 69).
 //
 // **حدٌّ مُعلَنٌ:** لا يَفحَصُ كلَّ رقمٍ في كلِّ وثيقة. الأرقامُ التاريخيةُ
 // والإصداراتُ والمعرّفاتُ والحدودُ التصميميةُ خارجُ النطاق. وما أرقامُ
@@ -454,6 +458,12 @@ const facts = readDocCountFacts(root);
       if (!idCell) continue;
       // تحديدُ ما إذا كانَ الصفُّ مُغلَقاً: المعرِّفُ مشطوبٌ بـ~~
       const isClosed = idCell.includes('~~');
+      // ‏`WL-581` (‏`DOC-23`): 🟢 بلا شطبٍ يَعُدُّه `parseDebtRows` مُغلَقاً وكانَ يمرُّ هنا — علامةٌ غيرُ موحَّدة.
+      if (!isClosed && idCell.includes('🟢') && /^`[A-Z]/u.test(idCell)) {
+        violations.push(
+          `R8/GREEN-ONLY: الصفُّ «${idCell.slice(0, 40)}» يحملُ 🟢 بلا شطبٍ في خليّةِ المعرِّفِ — العلامةُ الموحَّدةُ ~~ID~~ + 🟢 — سطر ${i + 1}.`,
+        );
+      }
       if (!isClosed) continue;
       // تخطّي صفوفِ الترويسةِ والملخصِ
       if (
@@ -473,6 +483,77 @@ const facts = readDocCountFacts(root);
           `R8/UNMARKED: الصفُّ «${idName}» مُغلَقٌ بلا علامةِ إغلاقٍ موحَّدةٍ (~~ID~~ + 🟢) في خليّةِ المعرِّفِ — سطر ${i + 1}.`,
         );
       }
+    }
+  }
+}
+
+// ── R8/S3: ما يقولُ §3 إنّه مُغلَقٌ يحملُ العلامةَ في §4/§6 — `WL-581` إكمالاً لمعيارِ `DOC-23` ──
+//   **المقيسُ على `fd9c687e`:** فكُّ علامةِ `DOC-1` في §4 و§3 يقولُ «`DOC-1`…`DOC-18` — مُغلَقةٌ كلُّها» ⇒ الحاجزُ
+//   أخضر. فالمعيارُ («حاجزٌ يرفضُ صفّاً مُغلَقاً في §3 بلا علامةٍ في §4») لم يكنْ منفَّذاً.
+//   **ادّعاءُ الإغلاقِ في §3** أربعُ صيغٍ (‏بعدَ تطبيعِ التشكيل): «`ID` مُغلَقٌ في» (‏ومنها «مُكتشَفٌ ومُغلَقٌ»)، و«`ID` مسدَّدٌ»؛
+//   ومدىً «`P-a`…`P-b`» يليه «مُغلَقةٌ» أو «— **مُغلَقةٌ كلُّها**» أو «— **كلُّها مُغلَقةٌ**»؛ وفي صفٍّ يقولُ
+//   «كلُّها مُغلَقةٌ» كلُّ «`ID` في `WL-…`» قبلَ «وبعدَها». المعرِّفُ المُدّعى بلا صفٍّ ⇒ `R8/S3-UNKNOWN`،
+//   وبصفٍّ بلا علامة ⇒ `R8/S3-UNMARKED`، وصفرُ ادّعاءٍ ⇒ `R8/S3-ANCHOR`. **حدٌّ معلَن:** الاتّجاهُ الآخرُ
+//   (‏§3 يقولُ «مفتوح» عن صفٍّ مُغلَق) لقطاتٌ تاريخيّةٌ موسومةٌ («حتى `WL-301`») خارجَ النطاق.
+{
+  const text = readText('docs/roadmap/06-debt-register.md');
+  // كلُّ صفوفِ المعرِّفِ لا آخرُها: المعرِّفُ في §4 و§6 معاً (‏`REPO-4`، `REPO-5`) صفّانِ، وفكُّ علامةِ
+  // أحدِهما وحدَه كانَ يمرُّ لأنَّ `Map` تحفظُ الأخيرَ (‏مراجعةُ `#598`، N2).
+  /** @type {Map<string, ReturnType<typeof parseDebtRows>>} */
+  const rows = new Map();
+  for (const r of parseDebtRows(text)) rows.set(r.id, [...(rows.get(r.id) ?? []), r]);
+  const lines = text.split('\n');
+  const from = lines.findIndex((l) => l.startsWith('## 3 —'));
+  const to = lines.findIndex((l, i) => i > from && l.startsWith('## 4 —'));
+  const ID = '([A-Z][A-Z0-9]*(?:[-/.][A-Za-z0-9]+)*)';
+  /** @type {Set<string>} */
+  const claimed = new Set();
+  /** @param {string} a @param {string} b */
+  const expand = (a, b) => {
+    const ma = /^(.*-)(\d+)$/u.exec(a);
+    const mb = /^(.*-)(\d+)$/u.exec(b);
+    if (!ma || !mb || ma[1] !== mb[1]) return [a, b];
+    const out = [];
+    for (let n = Number(ma[2]); n <= Number(mb[2]); n += 1) out.push(`${ma[1]}${n}`);
+    return out;
+  };
+  if (from !== -1) {
+    for (let i = from + 1; i < (to === -1 ? lines.length : to); i += 1) {
+      const line = lines[i] ?? '';
+      if (!line.startsWith('|') || /^\|\s*-{3}/u.test(line)) continue;
+      const cells = splitTableCells(line);
+      const note = normalizeArabic(cells.slice(1).join(' | ')).replace(/\*\*/gu, '');
+      for (const m of note.matchAll(new RegExp(`\`${ID}\` (?:مكتشف و)?مغلق في`, 'gu')))
+        claimed.add(m[1] ?? '');
+      // «`ID` مسدَّدٌ» صيغةُ إغلاقٍ رابعةٌ في §3 (‏`D-11`، `D-12`) — مراجعةُ `#598`، N1.
+      for (const m of note.matchAll(new RegExp(`\`${ID}\` مسدد`, 'gu'))) claimed.add(m[1] ?? '');
+      for (const m of note.matchAll(
+        new RegExp(`\`${ID}\`…\`${ID}\`(?: — )?(?: ?مغلقة| ?كلها مغلقة)`, 'gu'),
+      )) {
+        for (const id of expand(m[1] ?? '', m[2] ?? '')) claimed.add(id);
+      }
+      if (/كلها مغلقة|مغلقة كلها/u.test(note)) {
+        const head = note.split('وبعدها')[0] ?? '';
+        for (const m of head.matchAll(new RegExp(`\`${ID}\` في \`WL-`, 'gu')))
+          claimed.add(m[1] ?? '');
+      }
+    }
+  }
+  if (claimed.size === 0) {
+    violations.push(
+      'R8/S3-ANCHOR: لا ادّعاءَ إغلاقٍ مقروءاً في جدولِ §3 من سجلِّ الدَّين — الحاجزُ لا يرى ما يقيسُه.',
+    );
+  }
+  for (const id of claimed) {
+    const found = rows.get(id);
+    if (found === undefined) {
+      violations.push(`R8/S3-UNKNOWN: §3 يقولُ إنّ «${id}» مُغلَقٌ ولا صفَّ له في §4/§6.`);
+      continue;
+    }
+    for (const row of found.filter((r) => !r.closed)) {
+      violations.push(
+        `R8/S3-UNMARKED: «${id}» مُغلَقٌ بنصِّ §3 وصفُّه في «${row.section}» بلا علامةِ الإغلاقِ الموحَّدة (~~ID~~ + 🟢).`,
+      );
     }
   }
 }
@@ -822,8 +903,17 @@ const facts = readDocCountFacts(root);
   );
   /** @type {string[]} */
   const ids = [];
+  /** @type {Map<string, number>} */
+  const classCount = new Map();
+  /** نثرُ §8 قبلَ أوّلِ جدول — موضعُ العددِ المُعلَن. */
+  let prose = '';
   let header = false;
   if (start !== -1) {
+    for (let i = start + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (/^#{1,6}\s/u.test(line) || line.startsWith('|')) break;
+      prose += `${line}\n`;
+    }
     for (let i = start + 1; i < lines.length; i += 1) {
       const line = lines[i] ?? '';
       if (/^#{1,6}\s/u.test(line)) break;
@@ -842,6 +932,7 @@ const facts = readDocCountFacts(root);
       const id = m[1] ?? '';
       ids.push(id);
       const cls = (cells[cells.length - 1] ?? '').trim();
+      classCount.set(cls, (classCount.get(cls) ?? 0) + 1);
       if (!/^[A-F]$/u.test(cls)) {
         violations.push(`R12/CLASS: صنفُ \`${id}\` في §8 «${cls}» وليس من A…F.`);
       }
@@ -863,6 +954,23 @@ const facts = readDocCountFacts(root);
     for (const id of open) {
       if (!seen.has(id))
         violations.push(`R12/MISSING: الدَّينُ المفتوحُ \`${id}\` بلا صفٍّ في مصفوفةِ §8.`);
+    }
+    // ‏`R12/COUNT`: العددُ المُعلَنُ في النثرِ من الجدولِ نفسِه، لا من يدِ الكاتب.
+    const total = /\*\*(\d+) صفّاً/u.exec(prose);
+    if (total === null) {
+      violations.push('R12/COUNT: نثرُ §8 لا يُعلِنُ «**N صفّاً**».');
+    } else if (Number(total[1]) !== ids.length) {
+      violations.push(`R12/COUNT: §8 يقولُ ${total[1]} صفّاً والجدولُ ${ids.length}.`);
+    }
+    const tally = /^العدد:(.*)$/mu.exec(prose)?.[1] ?? '';
+    for (const cls of ['A', 'B', 'C', 'D', 'E', 'F']) {
+      const said = new RegExp(`\\*\\*${cls} = (\\d+)\\*\\*`, 'u').exec(tally);
+      const actual = classCount.get(cls) ?? 0;
+      if (said === null) {
+        violations.push(`R12/COUNT: سطرُ «العدد:» في §8 بلا «**${cls} = n**».`);
+      } else if (Number(said[1]) !== actual) {
+        violations.push(`R12/COUNT: §8 يقولُ ${cls} = ${said[1]} والجدولُ ${actual}.`);
+      }
     }
   }
 }
