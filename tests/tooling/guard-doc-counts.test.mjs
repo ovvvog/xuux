@@ -1269,7 +1269,7 @@ function matrixRow(tmp, rowRe) {
   return line;
 }
 
-test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏70: 69 بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ثمّ LIVE-77 في WL-585) ويمرُّ الحاجز', () => {
+test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586) ويمرُّ الحاجز', () => {
   const tmp = cloneRepo();
   try {
     const { code, stderr } = runGuardWithOutput(tmp);
@@ -1277,7 +1277,7 @@ test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ ا
     const text = readFileSync(path.join(tmp, REG), 'utf8');
     const sec = text.slice(text.indexOf('## 8 — '));
     const ids = sec.split('\n').filter((l) => /^\| `[A-Z]/u.test(l));
-    assert.equal(ids.length, 70);
+    assert.equal(ids.length, 69);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1347,36 +1347,37 @@ test('R12 — صنفٌ خارجَ A…F يُسقِطُ الحاجز', () => {
   }
 });
 
-test('R12/COUNT — الحادثةُ: «73 صفّاً» تبقى على جدولٍ تغيّرَ (‏70) فيُسقِطُ الحاجز، وكانَ يمرّ', () => {
+test('R12/COUNT — الحادثةُ: «73 صفّاً» تبقى على جدولٍ تغيّرَ (‏69) فيُسقِطُ الحاجز، وكانَ يمرّ', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**70 صفّاً،', '**73 صفّاً،');
+    mutateText(tmp, REG, '**69 صفّاً،', '**73 صفّاً،');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
-    assert.match(stderr, /R12\/COUNT: §8 يقولُ 73 صفّاً والجدولُ 70/u);
+    assert.match(stderr, /R12\/COUNT: §8 يقولُ 73 صفّاً والجدولُ 69/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
 });
 
-test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من الجدول: F = 5 على F = 1 يُسقِط، وتبديلُ صنفِ صفٍّ يُسقِطُ صنفَيه', () => {
+test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من الجدول: F = 5 على F = 0 يُسقِط، وتبديلُ صنفِ صفٍّ يُسقِطُ صنفَيه', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**F = 1**', '**F = 5**');
+    mutateText(tmp, REG, '**F = 0**', '**F = 5**');
     const r1 = runGuardWithOutput(tmp);
     assert.equal(r1.code, 1, r1.stderr);
-    assert.match(r1.stderr, /R12\/COUNT: §8 يقولُ F = 5 والجدولُ 1/u);
+    assert.match(r1.stderr, /R12\/COUNT: §8 يقولُ F = 5 والجدولُ 0/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
   const tmp2 = cloneRepo();
   try {
-    const row = matrixRow(tmp2, /^\| `LIVE-45` \|/u);
-    mutateText(tmp2, REG, row, row.replace(/\| F \|$/u, '| D |'));
+    // WL-586: `LIVE-45` (‏صفُّ `F` الوحيد) أُغلِقَ فخرجَ؛ والشاهدُ صفُّ `A` الوحيدُ `DOC-26`.
+    const row = matrixRow(tmp2, /^\| `DOC-26` \|/u);
+    mutateText(tmp2, REG, row, row.replace(/\| A \|$/u, '| D |'));
     const r2 = runGuardWithOutput(tmp2);
     assert.equal(r2.code, 1, r2.stderr);
     assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ D = 37 والجدولُ 38/u);
-    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ F = 1 والجدولُ 0/u);
+    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ A = 1 والجدولُ 0/u);
   } finally {
     rmSync(tmp2, { recursive: true, force: true });
   }
@@ -1385,7 +1386,7 @@ test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من ا�
 test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ «العدد:» يُسقِطُ (‏فشلٌ مغلق)، والصنفُ يُعلَنُ ولو صفراً ولا يُحذَف', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**70 صفّاً،', '**صفوفاً،');
+    mutateText(tmp, REG, '**69 صفّاً،', '**صفوفاً،');
     mutateText(tmp, REG, ' · **B = 1**', '');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);

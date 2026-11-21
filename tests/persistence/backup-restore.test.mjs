@@ -36,14 +36,16 @@ const STATE_SCHEMA = 'state';
  * شغّل أداة CLI بلا shell كي تبقى الوسائط بيانات لا أوامر.
  * @param {string[]} args
  * @param {string | undefined} databaseUrl
+ * @param {Record<string, string>} [extraEnv] بيئةٌ إضافيّةٌ للعمليّةِ الابنةِ وحدَها (‏`WL-586`).
  * @returns {Promise<CommandResult>}
  */
-function runNode(args, databaseUrl) {
+function runNode(args, databaseUrl, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, args, {
       env: {
         ...process.env,
         ...(databaseUrl === undefined ? {} : { DATABASE_URL: databaseUrl }),
+        ...extraEnv,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -417,6 +419,91 @@ test(
       assert.ok(
         liveCount > manifest.rowCounts['events'],
         `القاعدةُ الحيّةُ (${liveCount}) أكثرُ من اللقطةِ (${manifest.rowCounts['events']}) — الكتابةُ المتزامنةُ وقعت فعلًا`,
+      );
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'LIVE-45 (هـ): كتابةٌ مُلتزَمةٌ بينَ قراءةِ البيانِ وانطلاقِ `pg_dump` لا تفصلُهما — حتميّاً لا بتوقيت (`WL-586`)',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    // اختبارُ `WL-398` أعلاه يعتمدُ على أن يقعَ كاتبُه (‏كلَّ ٢٥ مللي ثانية) في الشبّاكِ بينَ
+    // عدّاداتِ البيانِ وانطلاقِ `pg_dump` — ونزعُ `--snapshot` نجا منه 8 تشغيلاتٍ من 8 (‏`WL-586`).
+    // هنا الشبّاكُ مضمون: `pg_dump` مُغلَّفٌ (‏`PG_DUMP`، `scripts/lib/pg-tools.mjs`) يلتزمُ صفّاً
+    // في `state.events` ثمّ يُنادي الأداةَ الحقيقيّة. باللقطةِ المُصدَّرةِ لا يراه النسخُ فيطابقُ
+    // البيانَ؛ وبلاها يراه فتَرسبُ الاستعادةُ `RESTORE_ROW_COUNT_MISMATCH`.
+    const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
+    const realDump = resolvePgTool('pg_dump');
+    const source = await createIsolatedDatabase('snapgapsrc');
+    const target = await createIsolatedDatabase('snapgapdst');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-snapgap-')));
+    const dump = path.join(dir, 'state.dump');
+    const sourceUrl = databaseUrlFor(source.name);
+    const inserter = path.join(dir, 'insert-gap-row.mjs');
+    fs.writeFileSync(
+      inserter,
+      [
+        "import { createRequire } from 'node:module';",
+        `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
+        "const pg = require('pg');",
+        `const client = new pg.Client({ connectionString: ${JSON.stringify(sourceUrl)} });`,
+        'await client.connect();',
+        'await client.query(',
+        "  `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at) VALUES ('snapshot-gap', 'backup.snapgap', 'agent-001', '{}'::jsonb, $1, now())`,",
+        `  [${JSON.stringify('e'.repeat(64))}],`,
+        ');',
+        'await client.end();',
+        '',
+      ].join('\n'),
+    );
+    const wrapper = path.join(dir, 'pg_dump');
+    fs.writeFileSync(
+      wrapper,
+      [
+        '#!/bin/sh',
+        'if [ "$1" != "--version" ]; then',
+        `  ${JSON.stringify(process.execPath)} ${JSON.stringify(inserter)} || exit 97`,
+        'fi',
+        `exec ${JSON.stringify(realDump)} "$@"`,
+        '',
+      ].join('\n'),
+      { mode: 0o700 },
+    );
+    try {
+      await up(source.pool);
+      await seedEveryTable(source.pool);
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl, {
+        PG_DUMP: wrapper,
+      });
+      assert.equal(backup.code, 0, backup.stderr);
+      assert.match(backup.stdout, /\[BACKUP_CREATED\]/);
+
+      // الشبّاكُ وقعَ فعلاً: الصفُّ مُلتزَمٌ في المصدرِ بعدَ قراءةِ البيانِ وقبلَ النسخ.
+      const gap = await source.pool.query(
+        "SELECT count(*)::int AS n FROM state.events WHERE event_id = 'snapshot-gap'",
+      );
+      assert.equal(
+        Number(/** @type {Record<string, unknown> | undefined} */ (gap.rows[0])?.['n']),
+        1,
+        'المُغلِّفُ لم يكتبْ — الشبّاكُ لم يُقَسْ',
+      );
+
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 0, `${restore.stdout}\n${restore.stderr}`);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+      assert.deepEqual(await stateRowCounts(target.pool), manifest.rowCounts);
+      const restoredGap = await target.pool.query(
+        "SELECT count(*)::int AS n FROM state.events WHERE event_id = 'snapshot-gap'",
+      );
+      assert.equal(
+        Number(/** @type {Record<string, unknown> | undefined} */ (restoredGap.rows[0])?.['n']),
+        0,
+        'النسخُ رأى كتابةً بعدَ لقطةِ البيان — ليسا لقطةً واحدة',
       );
     } finally {
       await target.drop();
