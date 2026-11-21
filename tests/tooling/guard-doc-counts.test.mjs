@@ -1269,7 +1269,7 @@ function matrixRow(tmp, rowRe) {
   return line;
 }
 
-test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69 بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63) ويمرُّ الحاجز', () => {
+test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏70: 69 بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ثمّ LIVE-77 في WL-585) ويمرُّ الحاجز', () => {
   const tmp = cloneRepo();
   try {
     const { code, stderr } = runGuardWithOutput(tmp);
@@ -1277,7 +1277,7 @@ test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ ا
     const text = readFileSync(path.join(tmp, REG), 'utf8');
     const sec = text.slice(text.indexOf('## 8 — '));
     const ids = sec.split('\n').filter((l) => /^\| `[A-Z]/u.test(l));
-    assert.equal(ids.length, 69);
+    assert.equal(ids.length, 70);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1347,13 +1347,13 @@ test('R12 — صنفٌ خارجَ A…F يُسقِطُ الحاجز', () => {
   }
 });
 
-test('R12/COUNT — الحادثةُ: «73 صفّاً» تبقى بعدَ خروجِ أربعةِ صفوفٍ (‏69) فيُسقِطُ الحاجز، وكانَ يمرّ', () => {
+test('R12/COUNT — الحادثةُ: «73 صفّاً» تبقى على جدولٍ تغيّرَ (‏70) فيُسقِطُ الحاجز، وكانَ يمرّ', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**69 صفّاً،', '**73 صفّاً،');
+    mutateText(tmp, REG, '**70 صفّاً،', '**73 صفّاً،');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
-    assert.match(stderr, /R12\/COUNT: §8 يقولُ 73 صفّاً والجدولُ 69/u);
+    assert.match(stderr, /R12\/COUNT: §8 يقولُ 73 صفّاً والجدولُ 70/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1382,11 +1382,11 @@ test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من ا�
   }
 });
 
-test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ «العدد:» يُسقِطُ (‏فشلٌ مغلق)، و`B = 0` يُعلَنُ ولا يُحذَف', () => {
+test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ «العدد:» يُسقِطُ (‏فشلٌ مغلق)، والصنفُ يُعلَنُ ولو صفراً ولا يُحذَف', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**69 صفّاً،', '**صفوفاً،');
-    mutateText(tmp, REG, ' · **B = 0**', '');
+    mutateText(tmp, REG, '**70 صفّاً،', '**صفوفاً،');
+    mutateText(tmp, REG, ' · **B = 1**', '');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R12\/COUNT: نثرُ §8 لا يُعلِنُ/u);
