@@ -261,8 +261,35 @@ test('WL-448 — المسارُ يَجري على كلِّ طلبِ دمجٍ أ�
   assert.equal(pr['branches-ignore'], undefined, 'ولا branches-ignore.');
   assert.equal(pr.paths, undefined, 'ولا مرشّحَ مساراتٍ يُسقِطُ طلبًا توثيقيًّا.');
   assert.equal(pr['paths-ignore'], undefined, 'ولا paths-ignore.');
-  // و`push` باقٍ على `main` وحدَه: التوسيعُ للطلباتِ لا للدفعِ إلى كلِّ فرع.
-  assert.deepEqual(on.push?.branches, ['main'], 'push باقٍ على main وحدَه.');
+  // و`push` على قائمةٍ صريحةٍ لا على كلِّ فرع — التوسيعُ للطلباتِ لا للدفعِ إلى كلِّ فرع.
+  // WL-585: القائمةُ `main` وفرعُ التكاملِ المصرَّحُ وحدَه (‏انظرِ الاختبارَ التالي).
+  assert.deepEqual(
+    on.push?.branches,
+    ['main', 'wl-532-533-integration'],
+    'push على main وفرعِ التكاملِ وحدَهما.',
+  );
+});
+
+test('WL-585 — كوميتُ الدمجِ في فرعِ التكاملِ يُفحَصُ آليّاً (‏push)، لا بتشغيلٍ يدويٍّ يقيسُ على main', async () => {
+  const { parse } = await import('yaml');
+  /** @type {Record<string, any>} */
+  const on = parse(workflow).on;
+  // قبلُ: `push: branches: [main]` — دمجُ طلبٍ في `wl-532-533-integration` لا يُطلِقُ CI أصلاً،
+  // والتشغيلُ اليدويُّ (‏`workflow_dispatch`) يقيسُ ذاكرةَ المشروعِ على `merge-base HEAD origin/main`
+  // فلا يرى فقدَ ما على فرعِ التكاملِ ولم يبلغْ `main` (‏صنفُ `DOC-24` على مستوى كوميتِ الدمج).
+  // و`push` يقيسُ على `HEAD^1` — رأسِ التكاملِ السابق (‏`guard-project-state.mjs` · `resolveBase`).
+  const branches = on.push?.branches ?? [];
+  assert.ok(
+    branches.includes('wl-532-533-integration'),
+    'push لا يشملُ فرعَ التكاملِ: كوميتُ الدمجِ فيه بلا فحصٍ آليّ.',
+  );
+  assert.ok(branches.includes('main'), 'push على main باقٍ.');
+  // لا محارف بدل: فرعُ تكاملٍ واحدٌ مصرَّحٌ به، لا كلُّ فرعِ `wl-*`.
+  for (const b of branches) assert.doesNotMatch(String(b), /[*?[\]!]/u, `نمطٌ لا اسمٌ: ${b}`);
+  assert.equal(on.push?.['branches-ignore'], undefined, 'ولا branches-ignore.');
+  assert.equal(on.push?.paths, undefined, 'ولا مرشّحَ مساراتٍ يُسقِطُ دمجاً توثيقيّاً.');
+  assert.equal(on.push?.['paths-ignore'], undefined, 'ولا paths-ignore.');
+  assert.ok('workflow_dispatch' in on, 'التشغيلُ اليدويُّ باقٍ.');
 });
 
 // ── WL-546: دُمِجَ هنا tests/tooling/typecheck-strictness.test.mjs (‏G1: حارسا بوابةِ الجودةِ من النجاحِ الكاذبِ بالإعداد) (‏كتلةٌ مستقلّةُ النطاق: أسماءٌ مشتركة) ──
