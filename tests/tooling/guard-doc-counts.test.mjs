@@ -85,6 +85,8 @@ function cloneRepo() {
     'docs/CURRENT_STATE.md',
     'docs/roadmap/03-roadmap-to-100.md',
     'config/readiness-deferrals.yaml',
+    // ‏`R12/STALE-UNMERGED` (‏`WL-589`) يقرأُ عناوينَ سجلِّ الأعمال.
+    'docs/roadmap/05-work-log.md',
   ]) {
     copyFileSync(path.join(ROOT, rel), path.join(tmp, rel));
   }
@@ -1392,6 +1394,67 @@ test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ 
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R12\/COUNT: نثرُ §8 لا يُعلِنُ/u);
     assert.match(stderr, /R12\/COUNT: سطرُ «العدد:» في §8 بلا «\*\*B = n\*\*»/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12/STALE-UNMERGED — الحادثة (‏`WL-589`): «`WL-579` في `#596` غيرِ المدموج» في صفِّ `LIVE-75` ومُدخلتُه في السجلّ يُسقِط، وكانَ يمرّ', () => {
+  const tmp = cloneRepo();
+  try {
+    mutateText(
+      tmp,
+      REG,
+      '(‏`WL-577` في `#594` و`WL-579` في `#596` مدموجانِ في فرعِ التكاملِ ومقيَّدانِ في الصفِّ منذُ `WL-589`)',
+      '(‏`WL-577` مدموجٌ في فرعِ التكاملِ ولم يُقيَّدْ في الصفّ؛ `WL-579` في `#596` غيرِ المدموج)',
+    );
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/STALE-UNMERGED: صفُّ `LIVE-75` في §8 يقولُ `WL-579` غيرُ مدموجٍ/u);
+    // المقطعُ الأوّلُ لا يقولُ «غير المدموج» فلا يُنسَبُ إلى `WL-577`.
+    assert.doesNotMatch(stderr, /`WL-577` غيرُ مدموجٍ/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12/STALE-UNMERGED — ضابطٌ سلبيّ: مُدخلةٌ بلا عنوانٍ في السجلِّ (‏`WL-9999`) «غيرُ مدموجة» لا تُسقِط، وبلا تشكيلٍ تُسقِطُ إن وُجِدَت', () => {
+  const tmp = cloneRepo();
+  try {
+    const row = matrixRow(tmp, /^\| `LIVE-75` \|/u);
+    mutateText(
+      tmp,
+      REG,
+      row,
+      row.replace(
+        '| `RISK-0054 = NO-GO` |',
+        '| `RISK-0054 = NO-GO`؛ `WL-9999` في `#9999` غيرِ المدموج |',
+      ),
+    );
+    const r1 = runGuardWithOutput(tmp);
+    assert.equal(r1.code, 0, r1.stderr);
+    const row2 = matrixRow(tmp, /^\| `LIVE-75` \|/u);
+    mutateText(
+      tmp,
+      REG,
+      row2,
+      row2.replace('`WL-9999` في `#9999` غيرِ المدموج', '`WL-578` في #595 غير المدموج'),
+    );
+    const r2 = runGuardWithOutput(tmp);
+    assert.equal(r2.code, 1, r2.stderr);
+    assert.match(r2.stderr, /R12\/STALE-UNMERGED: صفُّ `LIVE-75` في §8 يقولُ `WL-578`/u);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('R12/STALE-UNMERGED — سجلُّ أعمالٍ غائبٌ أو بلا عناوين لا يُسكِتُ القاعدة (‏فشلٌ مغلق)', () => {
+  const tmp = cloneRepo();
+  try {
+    rmSync(path.join(tmp, 'docs/roadmap/05-work-log.md'));
+    const { code, stderr } = runGuardWithOutput(tmp);
+    assert.equal(code, 1, stderr);
+    assert.match(stderr, /R12\/WORKLOG/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
