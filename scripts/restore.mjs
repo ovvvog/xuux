@@ -296,6 +296,11 @@ export async function restoreBackup(options, databaseUrl) {
     throw new BackupError(BACKUP_ERRORS.FILE_MISSING, `ملف النسخة غير موجود: ${options.dumpPath}`);
   }
   const manifest = await verifyBackup(options.dumpPath);
+  // إصدار الأداة يُفحص قبل اللمس: عميلٌ أقدم من النسخة يترك قاعدةً ناقصة تُظنّ
+  // مستعادة، وذلك أسوأ من الفشل المعلن. و«قبل اللمس» حرفيّاً (‏`WL-590`): قبل إنشاء
+  // الهدف وقبل محو `--force` — كان الفحصُ بعدهما، فيمحو `--force` مخطّطَ `state`
+  // ودفترَ الهجرات ثمّ يرفضُ الأداة، فتضيعُ قاعدةُ الهدف بلا استعادةٍ تحلُّ محلّها.
+  const restoreTool = await resolveVerifiedRestoreTool(manifest.databaseVersion);
   const admin = new pg.Pool({ connectionString: administrationUrl(url), max: 1 });
   let created = false;
   try {
@@ -331,9 +336,6 @@ export async function restoreBackup(options, databaseUrl) {
     await pool.end();
   }
 
-  // إصدار الأداة يُفحص قبل اللمس: عميلٌ أقدم من النسخة يترك قاعدةً ناقصة تُظنّ
-  // مستعادة، وذلك أسوأ من الفشل المعلن.
-  const restoreTool = await resolveVerifiedRestoreTool(manifest.databaseVersion);
   const started = process.hrtime.bigint();
   const result = await run(restoreTool, [
     '--exit-on-error',

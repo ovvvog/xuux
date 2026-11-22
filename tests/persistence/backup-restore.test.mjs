@@ -511,3 +511,283 @@ test(
     }
   },
 );
+
+// ‏`WL-590`: تمرينُ طفراتٍ على `scripts/restore.mjs` نجت فيه 16 طفرةً من 17 —
+// المسارُ السعيدُ وحده كان مُختبَراً. ما يلي يُسقِطُ كلَّ واحدةٍ باسمِها، وأوّلُها عيبٌ
+// فعليّ: `--force` كان يمحو `state` قبلَ فحصِ إصدارِ `pg_restore`.
+
+/**
+ * مُغلِّفُ `pg_restore` يكذبُ في `--version` ويُسجِّلُ وسائطَه، ثمّ يُنادي الأداةَ الحقيقيّة
+ * أو يخرجُ برمزٍ معيّن.
+ * @param {string} dir
+ * @param {{ version?: string, exitCode?: number }} behaviour
+ * @returns {Promise<{ wrapper: string, argsLog: string }>}
+ */
+async function restoreWrapper(dir, behaviour) {
+  const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
+  const real = resolvePgTool('pg_restore');
+  const wrapper = path.join(dir, 'pg_restore');
+  const argsLog = path.join(dir, 'pg_restore.args');
+  const lines = ['#!/bin/sh'];
+  if (behaviour.version !== undefined) {
+    lines.push(
+      'if [ "$1" = "--version" ]; then',
+      `  echo ${JSON.stringify(behaviour.version)}`,
+      '  exit 0',
+      'fi',
+    );
+  }
+  lines.push(
+    'if [ "$1" != "--version" ] && [ "$1" != "--list" ]; then',
+    `  printf '%s\\n' "$@" > ${JSON.stringify(argsLog)}`,
+    ...(behaviour.exitCode === undefined ? [] : [`  exit ${behaviour.exitCode}`]),
+    'fi',
+    `exec ${JSON.stringify(real)} "$@"`,
+    '',
+  );
+  fs.writeFileSync(wrapper, lines.join('\n'), { mode: 0o700 });
+  return { wrapper, argsLog };
+}
+
+/**
+ * مصدرٌ مُهاجَرٌ مُمهَّدٌ ونسخةٌ منه.
+ * @param {string} label
+ * @returns {Promise<{ source: Awaited<ReturnType<typeof createIsolatedDatabase>>, sourceUrl: string, dir: string, dump: string }>}
+ */
+async function seededBackup(label) {
+  const source = await createIsolatedDatabase(`${label}src`);
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), `backup-${label}-`)));
+  const dump = path.join(dir, 'state.dump');
+  await up(source.pool);
+  await seedEveryTable(source.pool);
+  const sourceUrl = databaseUrlFor(source.name);
+  const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+  assert.equal(backup.code, 0, backup.stderr);
+  return { source, sourceUrl, dir, dump };
+}
+
+/**
+ * @param {string} dump
+ * @param {(manifest: Record<string, any>) => void} edit
+ */
+function editManifest(dump, edit) {
+  const file = `${dump}.manifest.json`;
+  const manifest = JSON.parse(fs.readFileSync(file, 'utf8'));
+  edit(manifest);
+  fs.writeFileSync(file, JSON.stringify(manifest, null, 2));
+}
+
+test(
+  'WL-590: `--force` مع `pg_restore` أقدمَ من النسخة يرفضُ قبلَ أن يمحوَ قاعدةَ الهدف',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const { source, sourceUrl, dir, dump } = await seededBackup('oldtool');
+    const busy = await createIsolatedDatabase('oldtooldst');
+    try {
+      await up(busy.pool);
+      await seedEveryTable(busy.pool);
+      const beforeDigest = await contentsDigest(busy.pool);
+      const beforeCatalog = await catalogSnapshot(busy.pool);
+      const { wrapper } = await restoreWrapper(dir, { version: 'pg_restore (PostgreSQL) 9.6' });
+
+      const restore = await runNode(
+        [RESTORE_SCRIPT, dump, '--database', busy.name, '--force'],
+        sourceUrl,
+        { PG_RESTORE: wrapper },
+      );
+      assert.equal(restore.code, 1, restore.stdout);
+      assert.match(restore.stderr, /\[RESTORE_TOOL_UNUSABLE\]/);
+      // الجوهر: الرفضُ لا يُكلِّفُ الهدفَ شيئاً — لا `state` ممحوّاً ولا دفترَ مُسقَطاً.
+      assert.equal(await catalogSnapshot(busy.pool), beforeCatalog);
+      assert.equal(await contentsDigest(busy.pool), beforeDigest);
+    } finally {
+      await busy.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'WL-590: `--force` فوقَ قاعدةٍ مُهاجَرةٍ مشغولةٍ يستبدلُها بمحتوى النسخة كاملاً',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const { source, sourceUrl, dir, dump } = await seededBackup('forceok');
+    const busy = await createIsolatedDatabase('forceokdst');
+    try {
+      await up(busy.pool);
+      await busy.pool.query(
+        `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, model_version)
+         VALUES ('stale-model', 'Stale', 'internal', 'operations', $1, 'registered', '0.0.1')`,
+        ['f'.repeat(64)],
+      );
+      const expectedDigest = await contentsDigest(source.pool);
+      const { wrapper, argsLog } = await restoreWrapper(dir, {});
+      const restore = await runNode(
+        [RESTORE_SCRIPT, dump, '--database', busy.name, '--force'],
+        sourceUrl,
+        { PG_RESTORE: wrapper },
+      );
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      assert.equal(await contentsDigest(busy.pool), expectedDigest);
+      // الأعلامُ الثلاثةُ جزءٌ من العقد: التوقّفُ عند أوّل خطأٍ لا الاستمرارُ فوقَه.
+      const args = fs.readFileSync(argsLog, 'utf8').split('\n');
+      for (const flag of ['--exit-on-error', '--no-owner', '--no-privileges']) {
+        assert.ok(args.includes(flag), `pg_restore نُودي بلا ${flag}`);
+      }
+    } finally {
+      await busy.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'WL-590: الاستعادةُ تتحقّقُ من البصمةِ قبلَ أن تُنشئَ الهدفَ أو تلمسَه',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const { source, sourceUrl, dump } = await seededBackup('tamper');
+    const name = `tampered_${crypto.randomBytes(4).toString('hex')}`;
+    try {
+      fs.appendFileSync(dump, 'altered', 'utf8');
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', name], sourceUrl);
+      assert.equal(restore.code, 1);
+      assert.match(restore.stderr, /\[BACKUP_HASH_MISMATCH\]/);
+      const exists = await source.pool.query('SELECT 1 FROM pg_database WHERE datname = $1', [
+        name,
+      ]);
+      assert.equal(exists.rowCount, 0, 'أُنشئت قاعدةُ الهدف لنسخةٍ مُعدَّلة');
+    } finally {
+      await source.pool.query(`DROP DATABASE IF EXISTS ${quoteIdent(name)}`);
+      await source.drop();
+    }
+  },
+);
+
+for (const [label, edit, code] of /** @type {const} */ ([
+  [
+    'عدٌّ مُزاد',
+    (/** @type {Record<string, any>} */ m) => {
+      m.rowCounts.agents += 1;
+    },
+    'RESTORE_ROW_COUNT_MISMATCH',
+  ],
+  [
+    'آخرُ جدولٍ ناقصٌ من البيان',
+    (/** @type {Record<string, any>} */ m) => {
+      // الأخيرُ أبجديّاً عمداً: حذفُ الأوّلِ تكشفُه إزاحةُ الأسماء، أمّا الأخيرُ فلا
+      // يكشفُه إلا مقارنةُ عددِ الجداول.
+      const last = Object.keys(m.rowCounts).sort().at(-1);
+      if (last === undefined) throw new Error('بيانٌ بلا جداول');
+      delete m.rowCounts[last];
+    },
+    'RESTORE_ROW_COUNT_MISMATCH',
+  ],
+  [
+    'نسخةُ هجرةٍ مُزادة',
+    (/** @type {Record<string, any>} */ m) => {
+      m.migrationVersion += 1;
+    },
+    'RESTORE_MIGRATION_VERSION_MISMATCH',
+  ],
+  [
+    'جدولُ دفترٍ مرحليٌّ غيرُ موجود',
+    (/** @type {Record<string, any>} */ m) => {
+      m.ledgerStagingTable = '__backup_schema_migrations_000000000000';
+    },
+    'RESTORE_LEDGER_MISSING',
+  ],
+])) {
+  test(
+    `WL-590: بيانٌ لا يطابقُ المُستعادَ (${label}) يُسقِطُ الاستعادةَ بـ${code}`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const { source, sourceUrl, dump } = await seededBackup('mismatch');
+      const target = await createIsolatedDatabase('mismatchdst');
+      try {
+        // البصمةُ تغطّي الأرشيفَ لا البيان؛ فالتحقّقُ اللاحقُ للاستعادة هو الحارسُ هنا.
+        editManifest(dump, edit);
+        const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+        assert.equal(restore.code, 1, restore.stdout);
+        assert.match(restore.stderr, new RegExp(`\\[${code}\\]`));
+      } finally {
+        await target.drop();
+        await source.drop();
+      }
+    },
+  );
+}
+
+test(
+  'WL-590: رمزُ خروجٍ غيرُ صفريٍّ من `pg_restore` يُسقِطُ الاستعادةَ',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const { source, sourceUrl, dir, dump } = await seededBackup('exitcode');
+    const target = await createIsolatedDatabase('exitcodedst');
+    try {
+      // المُغلِّفُ يُنفِّذُ الاستعادةَ الحقيقيّةَ ثمّ يكذبُ برمز 3؟ لا: يخرجُ قبلَها برمز 3،
+      // فلا يبقى إلا الرمزُ دليلاً على الفشل.
+      const { wrapper } = await restoreWrapper(dir, { exitCode: 3 });
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl, {
+        PG_RESTORE: wrapper,
+      });
+      assert.equal(restore.code, 1);
+      assert.match(restore.stderr, /\[RESTORE_COMMAND_FAILED\] فشل pg_restore برمز 3/);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+for (const [label, ddl] of /** @type {Array<[string, string]>} */ ([
+  ['مخطّطُ state وحده', 'CREATE SCHEMA state'],
+  ['دفترُ الهجرات وحده', 'CREATE TABLE public.schema_migrations (version integer)'],
+])) {
+  test(
+    `WL-590: هدفٌ فيه ${label} ليس نظيفاً بلا --force`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const { source, sourceUrl, dump } = await seededBackup('dirty');
+      const target = await createIsolatedDatabase('dirtydst');
+      try {
+        await target.pool.query(ddl);
+        const before = await catalogSnapshot(target.pool);
+        const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+        assert.equal(restore.code, 1);
+        assert.match(restore.stderr, /\[RESTORE_TARGET_NOT_CLEAN\]/);
+        assert.equal(await catalogSnapshot(target.pool), before);
+      } finally {
+        await target.drop();
+        await source.drop();
+      }
+    },
+  );
+}
+
+for (const [label, args, url, code] of /** @type {Array<[string, string[], string, string]>} */ ([
+  [
+    'اسمُ هدفٍ بشرطة',
+    ['/tmp/none.dump', '--database', 'bad-name'],
+    'postgres://x@h/db',
+    'RESTORE_TARGET_NAME_INVALID',
+  ],
+  [
+    'وسيطٌ غيرُ مدعوم',
+    ['/tmp/none.dump', '--database', 'ok_name', '--bogus'],
+    'postgres://x@h/db',
+    'RESTORE_ARGUMENT',
+  ],
+  [
+    'DATABASE_URL فارغة',
+    ['/tmp/none.dump', '--database', 'ok_name'],
+    '',
+    'RESTORE_DATABASE_URL_MISSING',
+  ],
+])) {
+  test(`WL-590: ${label} يُرفضُ بـ${code} قبلَ أيِّ اتصال`, async () => {
+    const result = await runNode([RESTORE_SCRIPT, ...args], url);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, new RegExp(`\\[${code}\\]`));
+  });
+}
