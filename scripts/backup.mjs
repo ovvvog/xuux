@@ -330,11 +330,21 @@ export async function createBackup(dumpPath, databaseUrl) {
         snapshotId,
         databaseUrl,
       ]);
+    } finally {
       // معاملةُ قراءةٍ لا كتابةَ فيها: تُلغى بلا أثرٍ — واللقطاتُ المُصدَّرةُ تموتُ
       // بنهايةِ معاملتِها، فلا يبقى للنسخةِ أثرٌ حيٌّ في القاعدةِ بعدَ انتهائها.
-      await client.query('ROLLBACK');
-    } finally {
-      client.release();
+      // الإلغاءُ في `finally` لا في مسارِ النجاحِ وحدَه (‏`WL-591`): رفضُ `pg_dump` الأقدمِ
+      // كانَ يُعيدُ العميلَ إلى المجمَّعِ ومعاملتُه مفتوحة، فيجري `DROP` الجدولِ المرحليِّ
+      // داخلَها ويُلغى بإغلاقِ الاتصال — فيبقى `__backup_schema_migrations_*` في `state`.
+      // وإن فشلَ الإلغاءُ نفسُه أُتلِفَ العميلُ كي لا يُعادَ استعمالُه للحذف.
+      /** @type {Error | undefined} */
+      let rollbackFailure;
+      try {
+        await client.query('ROLLBACK');
+      } catch (error) {
+        rollbackFailure = error instanceof Error ? error : new Error(String(error));
+      }
+      client.release(rollbackFailure);
       await pool.query(`DROP TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(ledgerStagingTable)}`);
     }
     const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
