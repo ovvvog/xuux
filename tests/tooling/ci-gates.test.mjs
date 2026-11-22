@@ -246,6 +246,33 @@ test('WL-327 — مسارُ النشرِ cancel-in-progress: true', async () => 
   );
 });
 
+test('WL-588 — مسارُ ci.yml: مجموعةُ التزامنِ ci-${{ github.ref }} وcancel-in-progress: true مثبَّتان', async () => {
+  // سياسةٌ مقرَّرةٌ للمالك (‏WL-585 البندان 7–8): تشغيلةٌ أحدثُ على المرجعِ نفسِه تُلغي الأقدم،
+  // فلا يُعَدُّ نجاحٌ إلّا لتشغيلةِ الرأسِ المقصود. كانَ تبديلُها إلى false أو تغييرُ المجموعةِ
+  // يمرُّ بلا اختبار (‏WL-327 يثبِّتُ مسارَ النشرِ وحدَه).
+  const { parse } = await import('yaml');
+  /** @type {Record<string, any>} */
+  const parsed = parse(readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8'));
+  const concurrency = parsed.concurrency;
+  assert.ok(
+    concurrency && typeof concurrency === 'object',
+    'ci.yml بلا كتلةِ concurrency على مستوى المسار.',
+  );
+  assert.equal(
+    concurrency.group,
+    'ci-${{ github.ref }}',
+    'مجموعةُ تزامنِ ci.yml ليست ci-${{ github.ref }}.',
+  );
+  assert.equal(concurrency['cancel-in-progress'], true, 'cancel-in-progress في ci.yml ليس true.');
+  for (const [name, job] of Object.entries(parsed.jobs ?? {})) {
+    assert.equal(
+      /** @type {any} */ (job).concurrency,
+      undefined,
+      `الوظيفةُ ${name} تُعرِّفُ concurrency خاصّةً تتجاوزُ سياسةَ المسار.`,
+    );
+  }
+});
+
 test('WL-448 — المسارُ يَجري على كلِّ طلبِ دمجٍ أيًّا كانت قاعدتُه (الطلباتُ المركَّبة)', async () => {
   const { parse } = await import('yaml');
   /** @type {Record<string, any>} */
