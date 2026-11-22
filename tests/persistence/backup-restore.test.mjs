@@ -1117,15 +1117,196 @@ for (const [
         assert.equal(leftovers.length, 1);
         if (expectCode !== null) {
           assert.match(backup.stderr, new RegExp(`\\[${expectCode}\\]`));
-          // الاسمُ الباقي مُسمّىً في الخطأ كي يُزالَ يدوياً.
-          assert.ok(backup.stderr.includes(`state.${leftovers[0]}`), backup.stderr);
         }
+        // الاسمُ الباقي مُسمّىً في الخطأ كي يُزالَ يدوياً — في المسارَين (‏ملاحظةُ المراجعةِ N2).
+        assert.ok(backup.stderr.includes(`state.${leftovers[0]}`), backup.stderr);
       } finally {
         await source.drop();
       }
     },
   );
 }
+
+// ‏`WL-592` (‏ملاحظةُ المراجعةِ N3): الإنشاءُ والنسخُ كانا عبارتَين مستقلّتَين خارجَ نطاقِ التنظيف،
+// ففشلُ `INSERT` بعدَ `CREATE` يُبقي الجدولَ المرحليَّ في `state` — فينتقلُ إلى كلِّ نسخةٍ لاحقة.
+for (const [
+  label,
+  breakLedger,
+] of /** @type {Array<[string, (pool: import('pg').Pool) => Promise<void>]>} */ ([
+  [
+    'دفترُ الهجراتِ غائب',
+    async (pool) => {
+      await pool.query('DROP TABLE public.schema_migrations');
+    },
+  ],
+  [
+    'صفٌّ في الدفترِ يخرقُ قيدَ الجدولِ المرحليّ',
+    async (pool) => {
+      await pool.query(
+        'ALTER TABLE public.schema_migrations DROP CONSTRAINT schema_migrations_checksum_check',
+      );
+      await pool.query("UPDATE public.schema_migrations SET checksum = 'x' WHERE version = 1");
+    },
+  ],
+])) {
+  test(
+    `WL-592: فشلُ نسخِ الدفترِ إلى الجدولِ المرحليّ (‏${label}) لا يُبقي جدولاً ولا بياناً`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const source = await createIsolatedDatabase('stagefail');
+      const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-stagefail-')));
+      const dump = path.join(dir, 'state.dump');
+      try {
+        await up(source.pool);
+        await breakLedger(source.pool);
+        await installDdlLog(source.pool);
+        const backup = await runNode([BACKUP_SCRIPT, 'create', dump], databaseUrlFor(source.name));
+        assert.equal(backup.code, 1, backup.stdout);
+        assert.doesNotMatch(backup.stdout, /BACKUP_CREATED/);
+        // الخطأُ الأصليُّ وحدَه: لا حذفَ لجدولٍ لم يُلتزَم إنشاؤه يُلحِقُ خطأً زائفاً.
+        assert.doesNotMatch(backup.stderr, /تعذّرَ حذفُ الجدولِ المرحليِّ/);
+        assert.equal(fs.existsSync(`${dump}.manifest.json`), false, 'كُتبَ بيانٌ لنسخةٍ فاشلة');
+        assert.deepEqual(await stagingLeftovers(source.pool), [], 'بقيَ جدولٌ مرحليٌّ في state');
+        // قادحُ `ddl_command_end` يجري داخلَ المعاملة: إنشاءٌ أُلغيَ لا يُسجَّل؛ فالفراغُ هنا
+        // يعني أنّ الإنشاءَ لم يُلتزَم قطّ — لا أنّه التُزِمَ ثمّ حُذف.
+        assert.deepEqual(await stagingCreations(source.pool), [], 'التُزِمَ إنشاءُ جدولٍ مرحليّ');
+      } finally {
+        await source.drop();
+      }
+    },
+  );
+}
+
+// ‏`WL-592` (‏الطفرةُ B2): البيانُ والنسخةُ لقطةٌ واحدة **ما بينَ تصديرِ اللقطةِ وقراءةِ العدّادات**.
+// اختبارُ `LIVE-45 (هـ)` يحقنُ الكتابةَ بعدَ قراءةِ العدّاداتِ (‏في مُغلِّفِ `pg_dump`) فلا يرى
+// استبدالَ `REPEATABLE READ` بـ`BEGIN`: في `READ COMMITTED` تأخذُ كلُّ عبارةٍ لقطةً جديدة.
+// والحقنُ هنا حتميٌّ بقفلٍ لا بتوقيت ولا بخطّافٍ في الأداة: جلسةٌ تحجزُ `state.agents` بقفلٍ
+// حصريٍّ وتُدخِلُ صفّاً في `state.events` ولا تلتزم؛ فيُصدِّرُ النسخُ لقطتَه ثمّ يقفُ عندَ عدِّ
+// ‏`agents`؛ ويُلتزَمُ الصفُّ وهو واقفٌ (‏مقيسٌ من `pg_locks`)، ثمّ يُعَدُّ `events` بعدَه أبجديّاً.
+test(
+  'WL-592 (B2): كتابةٌ مُلتزَمةٌ بينَ تصديرِ اللقطةِ وقراءةِ العدّاداتِ لا تفصلُ البيانَ عن النسخة — حتميّاً بقفل',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const source = await createIsolatedDatabase('lockgapsrc');
+    const target = await createIsolatedDatabase('lockgapdst');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-lockgap-')));
+    const dump = path.join(dir, 'state.dump');
+    const sourceUrl = databaseUrlFor(source.name);
+    try {
+      await up(source.pool);
+      await seedEveryTable(source.pool);
+      const locker = await source.pool.connect();
+      /** @type {Promise<CommandResult> | undefined} */
+      let pending;
+      let startedAt = 0n;
+      try {
+        await locker.query('BEGIN');
+        await locker.query('LOCK TABLE state.agents IN ACCESS EXCLUSIVE MODE');
+        await locker.query(
+          `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
+           VALUES ('snapshot-lockgap', 'backup.lockgap', 'agent-001', '{}'::jsonb, $1, now())`,
+          ['f'.repeat(64)],
+        );
+        startedAt = process.hrtime.bigint();
+        pending = runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+        // الشبّاكُ مقيسٌ لا مفترَض: النسخُ واقفٌ على قفلِ `agents` (‏أي صدّرَ لقطتَه وبدأَ العدّ).
+        let waiting = false;
+        for (let i = 0; i < 600 && !waiting; i += 1) {
+          const probe = await source.pool.query(
+            `SELECT count(*)::int AS n FROM pg_locks
+             WHERE NOT granted AND relation = 'state.agents'::regclass`,
+          );
+          waiting = Number(/** @type {Record<string, unknown>} */ (probe.rows[0])['n']) > 0;
+          if (!waiting) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        assert.ok(waiting, 'النسخُ لم يقفْ على قفلِ state.agents — الشبّاكُ لم يُقَس');
+        await locker.query('COMMIT');
+      } finally {
+        locker.release();
+      }
+      const backup = await pending;
+      const elapsedMs = Number((process.hrtime.bigint() - startedAt) / 1_000_000n);
+      assert.equal(backup?.code, 0, backup?.stderr);
+      const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+      // ‏`durationMs` مدّةُ هذا النسخِ لا رقمٌ صحيحٌ أيّاً كان (‏طفرةُ «بدءُ التوقيتِ من الصفر»):
+      // لا يزيدُ على الزمنِ المقيسِ من خارجِ العمليّة، والنسخُ وقفَ على القفلِ فعلاً فلا يكونُ صفراً.
+      assert.ok(
+        manifest.durationMs > 0 && manifest.durationMs <= elapsedMs,
+        `durationMs=${manifest.durationMs} خارجَ [1, ${elapsedMs}]`,
+      );
+      // البيانُ من اللقطةِ المُصدَّرة: الصفُّ المُلتزَمُ بعدَها ليس فيه.
+      assert.equal(manifest.rowCounts.events, 1);
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 0, `${restore.stdout}\n${restore.stderr}`);
+      assert.deepEqual(await stateRowCounts(target.pool), manifest.rowCounts);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+// ‏`WL-592` (‏الطفرةُ B28): انقطاعُ اتصالِ النسخِ أثناءَ `pg_dump` — فشلٌ حقيقيٌّ لا خطّافٌ في الأداة.
+// المُغلِّفُ يقطعُ اتّصالَ الأداةِ بالقاعدةِ (‏`pg_terminate_backend`) ثمّ يُنادي `pg_dump` الحقيقيَّ
+// فيرفضُ لقطةً ماتت معاملتُها. فيفشلُ `ROLLBACK` على العميلِ الميّت، والحذفُ يجري على اتصالٍ
+// جديد: الخطأُ الأصليُّ هو المرميّ ولا جدولَ مرحليٌّ يبقى.
+test(
+  'WL-592 (B28): انقطاعُ الاتصالِ أثناءَ `pg_dump` ⇒ BACKUP_COMMAND_FAILED بلا جدولٍ مرحليٍّ باقٍ ولا بيان',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
+    const realDump = resolvePgTool('pg_dump');
+    const source = await createIsolatedDatabase('connlost');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-connlost-')));
+    const dump = path.join(dir, 'state.dump');
+    const sourceUrl = databaseUrlFor(source.name);
+    const killer = path.join(dir, 'terminate-backup.mjs');
+    fs.writeFileSync(
+      killer,
+      [
+        "import { createRequire } from 'node:module';",
+        `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
+        "const pg = require('pg');",
+        `const client = new pg.Client({ connectionString: ${JSON.stringify(sourceUrl)} });`,
+        'await client.connect();',
+        'const r = await client.query(',
+        '  `SELECT count(*)::int AS n FROM (SELECT pg_terminate_backend(pid) FROM pg_stat_activity',
+        '   WHERE datname = current_database() AND pid <> pg_backend_pid()) AS t`,',
+        ');',
+        'await client.end();',
+        'if (r.rows[0].n < 1) process.exit(98);',
+        '',
+      ].join('\n'),
+    );
+    const wrapper = path.join(dir, 'pg_dump');
+    fs.writeFileSync(
+      wrapper,
+      [
+        '#!/bin/sh',
+        'if [ "$1" != "--version" ]; then',
+        `  ${JSON.stringify(process.execPath)} ${JSON.stringify(killer)} || exit 97`,
+        'fi',
+        `exec ${JSON.stringify(realDump)} "$@"`,
+        '',
+      ].join('\n'),
+      { mode: 0o700 },
+    );
+    try {
+      await up(source.pool);
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl, {
+        PG_DUMP: wrapper,
+      });
+      assert.equal(backup.code, 1, backup.stdout);
+      assert.match(backup.stderr, /\[BACKUP_COMMAND_FAILED\]/);
+      assert.doesNotMatch(backup.stderr, /تعذّرَ حذفُ الجدولِ المرحليِّ/);
+      assert.equal(fs.existsSync(`${dump}.manifest.json`), false, 'كُتبَ بيانٌ لنسخةٍ فاشلة');
+      // اتصالاتُ المجمَّعِ الساكنةُ قُطعَت مع اتصالِ الأداة؛ يُعيدُ المجمَّعُ الاتصالَ هنا.
+      assert.deepEqual(await stagingLeftovers(source.pool), []);
+    } finally {
+      await source.drop();
+    }
+  },
+);
 
 test(
   'WL-591: النسخُ يُنادي `pg_dump` بـ`--no-owner` و`--no-privileges` و`--snapshot` والمخطّطَين',
