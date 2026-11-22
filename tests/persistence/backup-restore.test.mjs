@@ -1015,6 +1015,118 @@ for (const [
   );
 }
 
+// ‏`WL-592`: سجلُّ DDL على `state` بقادحِ أحداث — يرى إنشاءَ الجدولِ المرحليِّ ولو حُذفَ بعدَه،
+// فيُفرِّقُ «لم يُنشأ» عن «أُنشئَ ثمّ نُظِّف» وهو ما لا يراه `stagingLeftovers`.
+/**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<void>}
+ */
+async function installDdlLog(pool) {
+  await pool.query(`
+    CREATE TABLE public.wl592_ddl_log (tag text NOT NULL, ident text NOT NULL);
+    CREATE FUNCTION public.wl592_log_ddl() RETURNS event_trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      INSERT INTO public.wl592_ddl_log (tag, ident)
+        SELECT command_tag, object_identity FROM pg_event_trigger_ddl_commands()
+        WHERE schema_name = 'state';
+    END $$;
+    CREATE EVENT TRIGGER wl592_ddl_log ON ddl_command_end EXECUTE FUNCTION public.wl592_log_ddl();
+  `);
+}
+
+/**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<string[]>}
+ */
+async function stagingCreations(pool) {
+  const found = await pool.query(
+    `SELECT ident FROM public.wl592_ddl_log
+     WHERE tag = 'CREATE TABLE' AND ident LIKE 'state.\\_\\_backup\\_%'`,
+  );
+  return found.rows.map((row) => String(/** @type {Record<string, unknown>} */ (row)['ident']));
+}
+
+test(
+  'WL-592: رفضُ `pg_dump` الأقدمِ يقعُ قبلَ إنشاءِ الجدولِ المرحليّ — لا مسَّ للمصدر',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const source = await createIsolatedDatabase('dumpgate');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-dumpgate-')));
+    const dump = path.join(dir, 'state.dump');
+    try {
+      await up(source.pool);
+      await installDdlLog(source.pool);
+      const { wrapper } = await dumpWrapper(dir, { version: 'pg_dump (PostgreSQL) 9.6' });
+      const refused = await runNode([BACKUP_SCRIPT, 'create', dump], databaseUrlFor(source.name), {
+        PG_DUMP: wrapper,
+      });
+      assert.equal(refused.code, 1, refused.stdout);
+      assert.match(refused.stderr, /\[BACKUP_TOOL_UNUSABLE\]/);
+      assert.deepEqual(await stagingCreations(source.pool), [], 'أُنشئَ جدولٌ مرحليٌّ قبلَ الرفض');
+      // شاهدٌ إيجابيّ: السجلُّ يرى الإنشاءَ فعلاً حينَ يقع، فالفراغُ أعلاه ليس عمىً.
+      const created = await runNode([BACKUP_SCRIPT, 'create', dump], databaseUrlFor(source.name));
+      assert.equal(created.code, 0, created.stderr);
+      assert.equal((await stagingCreations(source.pool)).length, 1);
+    } finally {
+      await source.drop();
+    }
+  },
+);
+
+for (const [
+  label,
+  behaviour,
+  expectCode,
+] of /** @type {Array<[string, { exitCode?: number }, string | null]>} */ ([
+  ['مع فشلِ `pg_dump` برمز 3', { exitCode: 3 }, 'BACKUP_COMMAND_FAILED'],
+  ['مع نجاحِ `pg_dump`', {}, null],
+])) {
+  test(
+    `WL-592: تعذّرُ حذفِ الجدولِ المرحليِّ ${label} لا يحجبُ الخطأَ ولا يُنتجُ بياناً`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const source = await createIsolatedDatabase('dropfail');
+      const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-dropfail-')));
+      const dump = path.join(dir, 'state.dump');
+      try {
+        await up(source.pool);
+        await source.pool.query(`
+          CREATE FUNCTION public.wl592_refuse_drop() RETURNS event_trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_event_trigger_dropped_objects()
+                       WHERE object_identity LIKE 'state.\\_\\_backup\\_%') THEN
+              RAISE EXCEPTION 'wl592: drop refused';
+            END IF;
+          END $$;
+          CREATE EVENT TRIGGER wl592_refuse_drop ON sql_drop
+            EXECUTE FUNCTION public.wl592_refuse_drop();
+        `);
+        const { wrapper } = await dumpWrapper(dir, behaviour);
+        const backup = await runNode([BACKUP_SCRIPT, 'create', dump], databaseUrlFor(source.name), {
+          PG_DUMP: wrapper,
+        });
+        assert.equal(backup.code, 1, backup.stdout);
+        assert.doesNotMatch(backup.stdout, /BACKUP_CREATED/);
+        assert.equal(
+          fs.existsSync(`${dump}.manifest.json`),
+          false,
+          'كُتبَ بيانٌ وجدولٌ مرحليٌّ باقٍ',
+        );
+        assert.match(backup.stderr, /wl592: drop refused/);
+        const leftovers = await stagingLeftovers(source.pool);
+        assert.equal(leftovers.length, 1);
+        if (expectCode !== null) {
+          assert.match(backup.stderr, new RegExp(`\\[${expectCode}\\]`));
+          // الاسمُ الباقي مُسمّىً في الخطأ كي يُزالَ يدوياً.
+          assert.ok(backup.stderr.includes(`state.${leftovers[0]}`), backup.stderr);
+        }
+      } finally {
+        await source.drop();
+      }
+    },
+  );
+}
+
 test(
   'WL-591: النسخُ يُنادي `pg_dump` بـ`--no-owner` و`--no-privileges` و`--snapshot` والمخطّطَين',
   { skip: skipWithoutDatabase, timeout: 120_000 },
@@ -1080,6 +1192,12 @@ for (const [label, edit] of /** @type {Array<[string, (m: Record<string, any>) =
     'نسخةُ هجرةٍ نصّيّة',
     (m) => {
       m.migrationVersion = String(m.migrationVersion);
+    },
+  ],
+  [
+    'مدّةٌ غيرُ صحيحة',
+    (m) => {
+      m.durationMs = 1.5;
     },
   ],
   [

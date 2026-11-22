@@ -289,6 +289,16 @@ export async function createBackup(dumpPath, databaseUrl) {
   const pool = new pg.Pool({ connectionString: requireDatabaseUrl(databaseUrl), max: 1 });
   try {
     fs.mkdirSync(path.dirname(dumpPath), { recursive: true });
+    // ‏`WL-592`: الفحصُ قبلَ المسّ — تُرفضُ الأداةُ القاصرةُ قبلَ إنشاءِ الجدولِ المرحليِّ
+    // في `state`، فلا يمسُّ الرفضُ القاعدةَ المصدرَ أصلاً (كما فعلَ `WL-590` في الاستعادة).
+    const serverVersion = await pool.query('SHOW server_version');
+    const dumpTool = await resolveVerifiedDumpTool(
+      String(
+        /** @type {Record<string, unknown> | undefined} */ (serverVersion.rows[0])?.[
+          'server_version'
+        ],
+      ),
+    );
     const ledgerStagingTable = `__backup_schema_migrations_${crypto.randomBytes(6).toString('hex')}`;
     await stageMigrationLedger(pool, ledgerStagingTable);
     const started = process.hrtime.bigint();
@@ -296,6 +306,10 @@ export async function createBackup(dumpPath, databaseUrl) {
     let result;
     /** @type {{ databaseVersion: string, migrationVersion: number, rowCounts: Record<string, number> }} */
     let snapshot;
+    /** @type {unknown} */
+    let primaryFailure;
+    /** @type {unknown} */
+    let cleanupFailure;
     const client = await pool.connect();
     try {
       await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -316,7 +330,6 @@ export async function createBackup(dumpPath, databaseUrl) {
         /** @type {Record<string, unknown> | undefined} */ (fenced.rows[0])?.['present'] === true
           ? ['--schema', 'fence']
           : [];
-      const dumpTool = await resolveVerifiedDumpTool(snapshot.databaseVersion);
       result = await run(dumpTool, [
         '--format=custom',
         '--file',
@@ -330,6 +343,15 @@ export async function createBackup(dumpPath, databaseUrl) {
         snapshotId,
         databaseUrl,
       ]);
+      if (result.code !== 0) {
+        throw new BackupError(
+          BACKUP_ERRORS.COMMAND_FAILED,
+          `فشل pg_dump برمز ${result.code}: ${result.stderr.trim()}`,
+        );
+      }
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
     } finally {
       // معاملةُ قراءةٍ لا كتابةَ فيها: تُلغى بلا أثرٍ — واللقطاتُ المُصدَّرةُ تموتُ
       // بنهايةِ معاملتِها، فلا يبقى للنسخةِ أثرٌ حيٌّ في القاعدةِ بعدَ انتهائها.
@@ -345,15 +367,26 @@ export async function createBackup(dumpPath, databaseUrl) {
         rollbackFailure = error instanceof Error ? error : new Error(String(error));
       }
       client.release(rollbackFailure);
-      await pool.query(`DROP TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(ledgerStagingTable)}`);
+      // ‏`WL-592`: فشلُ الحذفِ لا يحجبُ الخطأَ الأصليّ — كانَ رميُه من `finally` يُبدِّلُ
+      // ‏`BACKUP_COMMAND_FAILED` بخطأِ `DROP` خامٍ فيضيعُ سببُ الفشل. يبقى الأصليُّ هو المرميّ
+      // ويُلحَقُ به اسمُ الجدولِ الباقي كي يُزالَ يدوياً؛ وبلا خطأٍ أصليٍّ يُرمى خطأُ الحذفِ كما كان.
+      try {
+        await pool.query(
+          `DROP TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(ledgerStagingTable)}`,
+        );
+      } catch (dropFailure) {
+        if (primaryFailure instanceof Error) {
+          primaryFailure.message += `؛ وتعذّرَ حذفُ الجدولِ المرحليِّ ${STATE_SCHEMA}.${ledgerStagingTable}: ${
+            dropFailure instanceof Error ? dropFailure.message : String(dropFailure)
+          }`;
+        } else {
+          cleanupFailure = dropFailure;
+        }
+      }
     }
+    // لا يُبلَغُ هذا إلا والمسارُ ناجح؛ فخطأُ الحذفِ هنا هو الخطأُ الوحيد.
+    if (cleanupFailure !== undefined) throw cleanupFailure;
     const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
-    if (result.code !== 0) {
-      throw new BackupError(
-        BACKUP_ERRORS.COMMAND_FAILED,
-        `فشل pg_dump برمز ${result.code}: ${result.stderr.trim()}`,
-      );
-    }
     const manifest = {
       startedAt,
       durationMs,
