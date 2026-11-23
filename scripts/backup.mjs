@@ -119,14 +119,16 @@ async function readRowCounts(pool) {
  * @returns {Promise<{ databaseVersion: string, migrationVersion: number, rowCounts: Record<string, number> }>}
  */
 async function inspectDatabase(pool) {
-  const [versionResult, migrationResult, rowCounts] = await Promise.all([
-    pool.query('SHOW server_version'),
-    pool.query(
-      `SELECT COALESCE(max(version), 0)::integer AS version
-       FROM public.${quoteIdent(MIGRATION_LEDGER)}`,
-    ),
-    readRowCounts(pool),
-  ]);
+  // `WL-595`: تُرسَلُ الاستعلاماتُ متتابعةً لا بـ`Promise.all`. المُستدعي يمرّرُ عميلاً
+  // واحداً داخلَ لقطةِ `REPEATABLE READ`، والعميلُ الواحدُ لا ينفّذُ إلا استعلاماً
+  // واحداً؛ فالتوازي كان طابوراً داخليّاً في `pg` يُطلقُ `DeprecationWarning`، وفي `pg@9`
+  // يُزالُ الطابور. الترتيبُ على السلكِ هو نفسُه: النسخةُ، ثمّ الدفتر، ثمّ العدّادات.
+  const versionResult = await pool.query('SHOW server_version');
+  const migrationResult = await pool.query(
+    `SELECT COALESCE(max(version), 0)::integer AS version
+     FROM public.${quoteIdent(MIGRATION_LEDGER)}`,
+  );
+  const rowCounts = await readRowCounts(pool);
   const versionRow = /** @type {Record<string, unknown> | undefined} */ (versionResult.rows[0]);
   const migrationRow = /** @type {Record<string, unknown> | undefined} */ (migrationResult.rows[0]);
   return {
