@@ -588,20 +588,136 @@ async function restoreWrapper(dir, behaviour) {
 }
 
 /**
- * مصدرٌ مُهاجَرٌ مُمهَّدٌ ونسخةٌ منه.
+ * @param {string} file
+ * @returns {string}
+ */
+function sha256Of(file) {
+  return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/**
+ * @typedef {object} GoldenBackup
+ * @property {string} dir مجلّدُ النسخةِ الذهبيّة (‏ملفّاها للقراءةِ وحدَها).
+ * @property {string} dump
+ * @property {string} manifest
+ * @property {string} dumpSha256 بصمةُ ملفِّ النسخةِ لحظةَ كتابتِه.
+ * @property {string} manifestSha256 بصمةُ البيانِ لحظةَ كتابتِه.
+ * @property {string} sourceDigest `contentsDigest` لمصدرِها لحظةَ النسخ.
+ */
+
+/** @type {Promise<GoldenBackup> | undefined} */
+let goldenBackup;
+
+/**
+ * ‏`WL-596`: نسخةٌ ذهبيّةٌ واحدةٌ لاختباراتِ `seededBackup`. كانَ كلُّ استدعاءٍ يبني مصدراً مُهاجَراً
+ * مُمهَّداً ويأخذُ منه نسخةً بعمليّةٍ ابنة (‏≈ 1.5 ثانية محلّياً، و21 استدعاءً)، وكلُّها النسخةُ نفسُها
+ * محتوىً. فتُبنى هنا **مرّةً واحدةً عندَ أوّلِ طلب**، ويُمحى مصدرُها فوراً: **لا تُشارَكُ قاعدةٌ**، بل
+ * الملفّان وحدَهما وبصمتاهما وبصمةُ محتوى المصدر.
+ *
+ * والبناءُ كسولٌ لا في `before()`: أيُّ اختبارٍ يطلبُها أوّلاً يبنيها، والمحتوى واحدٌ أيّاً كانَ الطالب،
+ * فلا يتعلّقُ اختبارٌ بترتيبِ التنفيذ ولا بنجاحِ اختبارٍ قبلَه. وفشلُ البناءِ يُسقِطُ كلَّ طالبٍ بالخطأِ نفسِه.
+ * @returns {Promise<GoldenBackup>}
+ */
+function sharedGoldenBackup() {
+  goldenBackup ??= (async () => {
+    const source = await createIsolatedDatabase('goldensrc');
+    try {
+      const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-golden-')));
+      const dump = path.join(dir, 'state.dump');
+      await up(source.pool);
+      await seedEveryTable(source.pool);
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], databaseUrlFor(source.name));
+      assert.equal(backup.code, 0, backup.stderr);
+      const sourceDigest = await contentsDigest(source.pool);
+      const manifest = `${dump}.manifest.json`;
+      // النسخةُ الذهبيّةُ مُمهَّدةٌ حقّاً: صفٌّ في كلِّ جدولٍ يملؤه `seedEveryTable`. بلا هذا يمرُّ
+      // بناءٌ نسيَ التمهيدَ بصمت (‏مقيسٌ بطفرة: لا اختبارَ من الطالبين يقرأُ المحتوى إلا ببصمته).
+      const { rowCounts } = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+      for (const table of [
+        'agents',
+        'models',
+        'events',
+        'commands',
+        'laws',
+        'cases',
+        'policies',
+        'quotas',
+        'data_assets',
+        'memories',
+      ]) {
+        assert.ok(rowCounts[table] >= 1, `النسخةُ الذهبيّةُ بلا صفٍّ في state.${table}`);
+      }
+      // للقراءةِ وحدَها: كتابةٌ عارضةٌ فيهما تسقطُ بـ`EACCES` لا تلوّثٌ صامت. والبصمةُ تكشفُ ما سواها.
+      fs.chmodSync(dump, 0o444);
+      fs.chmodSync(manifest, 0o444);
+      return {
+        dir,
+        dump,
+        manifest,
+        dumpSha256: sha256Of(dump),
+        manifestSha256: sha256Of(manifest),
+        sourceDigest,
+      };
+    } finally {
+      await source.drop();
+    }
+  })();
+  return goldenBackup;
+}
+
+/**
+ * @param {GoldenBackup} golden
+ * @param {string} dump
+ * @param {string} where
+ */
+function assertGoldenIntact(golden, dump, where) {
+  assert.equal(sha256Of(dump), golden.dumpSha256, `بصمةُ ملفِّ النسخةِ تغيّرت (${where})`);
+  assert.equal(
+    sha256Of(`${dump}.manifest.json`),
+    golden.manifestSha256,
+    `بصمةُ البيانِ تغيّرت (${where})`,
+  );
+}
+
+test.after(async () => {
+  if (goldenBackup === undefined) return;
+  const golden = await goldenBackup;
+  // لا اختبارَ يكتبُ في الأصل: لو كتبَ أحدُها فيه لظهرَ هنا ولو مرَّ هو.
+  assertGoldenIntact(golden, golden.dump, 'الأصلُ بعدَ آخرِ اختبار');
+});
+
+/**
+ * نسخةٌ خاصّةٌ بالاختبارِ من النسخةِ الذهبيّة، وقاعدةُ اتّصالٍ خاصّةٌ به.
+ *
+ * ‏`source` قاعدةٌ **فارغةٌ** خاصّةٌ بالاختبار، لا مصدرُ النسخة: `restore.mjs` يتّصلُ بقاعدةِ `postgres`
+ * من `DATABASE_URL` وبالهدف، و`verify` لا يتّصلُ أصلاً، فلا يقرأُ أيٌّ منهما قاعدةَ `sourceUrl`. وما يُسألُ
+ * عنه بـ`source.pool` في هذه الاختبارات كتالوجُ العنقود (`pg_database`) و`DROP DATABASE`. ومحتوى المصدرِ
+ * يُقارَنُ بـ`sourceDigest` المقيسِ لحظةَ النسخ.
+ *
+ * ‏`startedAt` و`durationMs` في البيانِ صارا من نسخٍ واحدٍ لكلِّ الطالبين. لا اختبارَ هنا يقيسُهما: تعديلُ
+ * `durationMs` في نسخةِ الاختبارِ المحلّيّة يبقى محلّيّاً، وزمنُ الاستعادةِ تقيسُه `restore.mjs` بنفسِها.
  * @param {string} label
- * @returns {Promise<{ source: Awaited<ReturnType<typeof createIsolatedDatabase>>, sourceUrl: string, dir: string, dump: string }>}
+ * @returns {Promise<{ source: Awaited<ReturnType<typeof createIsolatedDatabase>>, sourceUrl: string, dir: string, dump: string, sourceDigest: string }>}
  */
 async function seededBackup(label) {
-  const source = await createIsolatedDatabase(`${label}src`);
+  const golden = await sharedGoldenBackup();
+  assertGoldenIntact(golden, golden.dump, `الأصلُ قبلَ ${label}`);
   const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), `backup-${label}-`)));
   const dump = path.join(dir, 'state.dump');
-  await up(source.pool);
-  await seedEveryTable(source.pool);
-  const sourceUrl = databaseUrlFor(source.name);
-  const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
-  assert.equal(backup.code, 0, backup.stderr);
-  return { source, sourceUrl, dir, dump };
+  fs.copyFileSync(golden.dump, dump);
+  fs.copyFileSync(golden.manifest, `${dump}.manifest.json`);
+  // النسخةُ المحلّيّةُ قابلةٌ للكتابة: بعضُ الاختباراتِ يعدّلُها عمداً (‏بصمة، بيان، حذف).
+  fs.chmodSync(dump, 0o600);
+  fs.chmodSync(`${dump}.manifest.json`, 0o600);
+  assertGoldenIntact(golden, dump, `نسخةُ ${label}`);
+  const source = await createIsolatedDatabase(`${label}src`);
+  return {
+    source,
+    sourceUrl: databaseUrlFor(source.name),
+    dir,
+    dump,
+    sourceDigest: golden.sourceDigest,
+  };
 }
 
 /**
@@ -649,7 +765,7 @@ test(
   'WL-590: `--force` فوقَ قاعدةٍ مُهاجَرةٍ مشغولةٍ يستبدلُها بمحتوى النسخة كاملاً',
   { skip: skipWithoutDatabase, timeout: 120_000 },
   async () => {
-    const { source, sourceUrl, dir, dump } = await seededBackup('forceok');
+    const { source, sourceUrl, dir, dump, sourceDigest } = await seededBackup('forceok');
     const busy = await createIsolatedDatabase('forceokdst');
     try {
       await up(busy.pool);
@@ -658,7 +774,8 @@ test(
          VALUES ('stale-model', 'Stale', 'internal', 'operations', $1, 'registered', '0.0.1')`,
         ['f'.repeat(64)],
       );
-      const expectedDigest = await contentsDigest(source.pool);
+      // ‏`WL-596`: بصمةُ المصدرِ لحظةَ النسخ، لا قراءةٌ لاحقةٌ له (‏المصدرُ مُحيَ بعدَ النسخِ الذهبيّ).
+      const expectedDigest = sourceDigest;
       const { wrapper, argsLog } = await restoreWrapper(dir, {});
       const restore = await runNode(
         [RESTORE_SCRIPT, dump, '--database', busy.name, '--force'],
