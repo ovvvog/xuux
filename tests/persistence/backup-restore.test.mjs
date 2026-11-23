@@ -129,9 +129,17 @@ async function fenceSchemaPresent(pool) {
 }
 
 /**
- * ‏`WL-597`: صورةُ الهدفِ كلِّه لإثباتِ أنّ الرفضَ لم يمسَّه: الكتالوجُ مع الدوالِّ وقوادحِ الأحداث،
- * ومحتوى `state`، والدفتر، وقوادحُ الجداولِ (‏`xf_guard`)، وصلاحيّاتُ المخطّطات، وصفُّ التحكّمِ
- * وأحداثُ السياجِ إن وُجد. ‏`omitSchema` يُسقِطُ مخطّطاً من الصورةِ وحدَه (‏تداخلٌ يُنشئُه عمداً).
+ * ‏`WL-597`/`WL-599`: صورةُ الهدفِ لإثباتِ أنّ الرفضَ لم يمسَّه. **ما تقيسُه بالضبط:** الكتالوجُ
+ * (‏`catalogSnapshot` مع الدوالِّ وقوادحِ الأحداث)، ومحتوى `state` (‏`contentsDigest`)، والدفتر،
+ * وقوادحُ الجداولِ غيرُ الداخليّة، وصلاحيّاتُ المخطّطات، وبصمةُ كلِّ جدولٍ في `fence`؛ ومنذُ `WL-599`
+ * أيضاً: **بصمةُ محتوى كلِّ جدولٍ عاديٍّ أو مقسَّمٍ في كلِّ مخطّطٍ غيرِ نظاميٍّ** (‏`public` وغيرُه خارجَ
+ * `state` و`fence`)، و**قيمُ المتسلسلات** (‏`last_value` من `pg_sequences`، وهو NULL قبلَ أوّلِ `nextval`)، و**صلاحيّاتُ الجداولِ
+ * والمتسلسلاتِ والأعمدةِ والدوالِّ ومالكوها** والصلاحيّاتُ الافتراضيّة، و**صلاحيّاتُ قاعدةِ البياناتِ
+ * ومالكُها وحدُّ اتصالاتِها**، و**عضويّاتُ الأدوارِ وسماتُ الأدوار** (‏على مستوى العنقود؛ الملفُّ
+ * يجري تتابعيّاً `--test-concurrency=1`، فلا كاتبَ آخرَ لها أثناءَ الاختبار).
+ * **وما لا تقيسُه:** الكائناتُ الكبيرة (‏`pg_largeobject`)، وإعداداتُ القاعدةِ والدورِ
+ * (‏`pg_db_role_setting`)، والتعليقاتُ والوسومُ الأمنيّة، والنشرُ والاشتراك، والإحصاءات، وما خارجَ
+ * هذه القاعدةِ غيرَ الأدوار. ‏`omitSchema` يُسقِطُ مخطّطاً من الصورةِ وحدَه (‏تداخلٌ يُنشئُه عمداً).
  * @param {import('pg').Pool} pool
  * @param {{ omitSchema?: string }} [options]
  * @returns {Promise<string>}
@@ -179,7 +187,91 @@ async function targetImage(pool, options = {}) {
       )
     ).filter((row) => row.nspname !== options.omitSchema),
     fence,
+    // ‏`WL-599`: ما وراءَ `state` و`fence`.
+    tables: await userTableDigests(pool, options.omitSchema),
+    sequences: (
+      await rows(
+        `SELECT schemaname::text AS s, sequencename::text AS q, last_value::text AS v
+         FROM pg_sequences ORDER BY 1, 2`,
+      )
+    ).filter((row) => row.s !== options.omitSchema),
+    relacl: (
+      await rows(
+        `SELECT n.nspname::text AS s, c.relname::text AS r, c.relkind::text AS k,
+                pg_get_userbyid(c.relowner)::text AS owner, coalesce(c.relacl::text, '') AS acl,
+                coalesce((SELECT string_agg(a.attname || '=' || a.attacl::text, ',' ORDER BY a.attnum)
+                          FROM pg_attribute a WHERE a.attrelid = c.oid AND a.attacl IS NOT NULL), '') AS cols
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
+           AND c.relkind IN ('r', 'p', 'S', 'v', 'm', 'f')
+         ORDER BY 1, 2`,
+      )
+    ).filter((row) => row.s !== options.omitSchema),
+    proacl: (
+      await rows(
+        `SELECT n.nspname::text AS s, p.oid::regprocedure::text AS f,
+                pg_get_userbyid(p.proowner)::text AS owner, coalesce(p.proacl::text, '') AS acl
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
+         ORDER BY 1, 2`,
+      )
+    ).filter((row) => row.s !== options.omitSchema),
+    defacl: await rows(
+      `SELECT pg_get_userbyid(defaclrole)::text AS role, coalesce(defaclnamespace::regnamespace::text, '') AS s,
+              defaclobjtype::text AS t, defaclacl::text AS acl
+       FROM pg_default_acl ORDER BY 1, 2, 3`,
+    ),
+    database: await rows(
+      `SELECT pg_get_userbyid(datdba)::text AS owner, coalesce(datacl::text, '') AS acl,
+              datconnlimit AS lim, datallowconn AS allow
+       FROM pg_database WHERE datname = current_database()`,
+    ),
+    memberships: await rows(
+      `SELECT r.rolname::text AS role, m.rolname::text AS member, g.rolname::text AS grantor,
+              am.admin_option AS a, am.inherit_option AS i, am.set_option AS st
+       FROM pg_auth_members am
+       JOIN pg_roles r ON r.oid = am.roleid
+       JOIN pg_roles m ON m.oid = am.member
+       JOIN pg_roles g ON g.oid = am.grantor
+       ORDER BY 1, 2, 3`,
+    ),
+    roles: await rows(
+      `SELECT rolname::text AS n, rolsuper AS su, rolinherit AS inh, rolcreaterole AS cr,
+              rolcreatedb AS cd, rolcanlogin AS li, rolreplication AS rp, rolbypassrls AS br,
+              rolconnlimit AS cl
+       FROM pg_roles WHERE rolname NOT LIKE 'pg\\_%' ORDER BY 1`,
+    ),
   });
+}
+
+/**
+ * ‏`WL-599`: بصمةُ محتوى كلِّ جدولٍ عاديٍّ أو مقسَّمٍ في كلِّ مخطّطٍ غيرِ نظاميّ (‏صفوفٌ مرتّبةٌ بـJSONB).
+ * @param {import('pg').Pool} pool
+ * @param {string | undefined} omitSchema
+ * @returns {Promise<Record<string, string>>}
+ */
+async function userTableDigests(pool, omitSchema) {
+  const names = await pool.query(
+    `SELECT n.nspname::text AS s, c.relname::text AS t
+     FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname NOT LIKE 'pg\\_%' AND n.nspname <> 'information_schema'
+       AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+     ORDER BY 1, 2`,
+  );
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const row of names.rows) {
+    const { s, t } = /** @type {{ s: string, t: string }} */ (row);
+    if (s === omitSchema) continue;
+    const r = await pool.query(
+      `SELECT count(*)::int AS n,
+              md5(coalesce(string_agg(to_jsonb(x)::text, E'\\n' ORDER BY to_jsonb(x)::text), '')) AS d
+       FROM ${quoteIdent(s)}.${quoteIdent(t)} x`,
+    );
+    const d = /** @type {Record<string, unknown>} */ (r.rows[0]);
+    out[`${s}.${t}`] = `${String(d['n'])}:${String(d['d'])}`;
+  }
+  return out;
 }
 
 /**
@@ -2043,6 +2135,11 @@ for (const [label, prepare, detail] of /** @type {const} */ ([
   [
     'قادحُ أحداثٍ xf_* بلا مخطّطِ fence',
     async (/** @type {import('pg').Pool} */ pool) => {
+      // ‏`WL-599`: جدولٌ جانبيٌّ خارجَ `state` و`fence` بصفٍّ ومتسلسلة، لتقيسَ الصورةُ ما وراءَهما.
+      await pool.query(
+        `CREATE TABLE public.wl599_side (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, note text)`,
+      );
+      await pool.query(`INSERT INTO public.wl599_side (note) VALUES ('kept')`);
       await pool.query(
         `CREATE FUNCTION public.wl597_noop() RETURNS event_trigger LANGUAGE plpgsql AS $f$BEGIN END$f$`,
       );
@@ -2274,6 +2371,24 @@ test(
       }
       // الهدفُ ممحوٌّ: لا صفَّ قديم، والسياجُ الفارغُ الذي أُنشئَ في النافذةِ حاضر.
       assert.equal(await fenceSchemaPresent(race.target.pool), true);
+      // الحالةُ النهائيّةُ بدقّة (‏`WL-599`): `pg_restore --exit-on-error` يسقطُ عندَ أوّلِ عنصرٍ في النسخة
+      // المُسيَّجةِ يصطدمُ بالسياج، فلا يُنشأُ `state` ولا الدفتر، والسياجُ فارغٌ تماماً. هذا ما يصفُه
+      // `docs/RECOVERY.md` تحتَ `LIVE-78`؛ النافذةُ مقيسةٌ وغيرُ مغلقة.
+      assert.match(restore.stderr, /schema "fence" already exists/);
+      const finalState = await race.target.pool.query(
+        `SELECT to_regnamespace('state') IS NULL AS state_absent,
+                to_regclass('public.schema_migrations') IS NULL AS ledger_absent,
+                (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                  WHERE n.nspname = 'fence') AS fence_relations,
+                (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                  WHERE n.nspname = 'fence') AS fence_functions`,
+      );
+      assert.deepEqual(finalState.rows[0], {
+        state_absent: true,
+        ledger_absent: true,
+        fence_relations: 0,
+        fence_functions: 0,
+      });
     } finally {
       await race.close();
       await backup.source.drop();
