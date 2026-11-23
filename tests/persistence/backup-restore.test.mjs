@@ -28,6 +28,15 @@ const RESTORE_SCRIPT = path.join(ROOT, 'scripts/restore.mjs');
 const STATE_SCHEMA = 'state';
 
 /**
+ * مهلةُ كلِّ اختبارٍ في هذا الملفّ — `WL-601`. الملفُّ يُشغَّلُ وحدَه بمهلةِ ملفٍّ
+ * 240 ث (`test:backup-restore` في `package.json`) لا بمهلةِ الحزمةِ 120 ث، لأنَّ مجموعَ
+ * اختباراتِه بلغَ 119.1 ث في CI (‏التشغيلة 45216924161). فمهلةُ الملفِّ الأوسعُ يُقابِلُها حدٌّ
+ * أضيقُ لكلِّ اختبار: أطولُ اختبارٍ مقيسٍ في CI ‏10.9 ث، فاختبارٌ معلَّقٌ يَسقطُ باسمِه عند
+ * 60 ث بدلاً من أن يستهلكَ مهلةَ الملفِّ كلَّها. كلُّ نداءٍ لـ`test()` هنا يحملُ هذه المهلةَ صراحةً.
+ */
+const PER_TEST_TIMEOUT_MS = 60_000;
+
+/**
  * @typedef {object} CommandResult
  * @property {number} code
  * @property {string} stdout
@@ -437,7 +446,7 @@ async function seedEveryTable(pool) {
 
 test(
   'استعادة فعلية إلى قاعدة نظيفة تعيد المحتوى والكتالوج والنسخة وتطبع الزمن',
-  { skip: skipWithoutDatabase },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('backsrc');
     const target = await createIsolatedDatabase('backdst');
@@ -526,7 +535,7 @@ test(
 
 test(
   'الاستعادة فوق قاعدة مشغولة ترفض بلا --force ولا تغيّرها',
-  { skip: skipWithoutDatabase },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('busysrc');
     const busy = await createIsolatedDatabase('busydst');
@@ -554,30 +563,34 @@ test(
   },
 );
 
-test('verify يرفض ملف نسخة عُدّل بعد كتابة البيان', { skip: skipWithoutDatabase }, async () => {
-  const source = await createIsolatedDatabase('corrupt');
-  const dump = path.join(
-    registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-corrupt-'))),
-    'state.dump',
-  );
-  try {
-    await up(source.pool);
-    const sourceUrl = databaseUrlFor(source.name);
-    const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
-    assert.equal(backup.code, 0, backup.stderr);
-    fs.appendFileSync(dump, 'altered', 'utf8');
+test(
+  'verify يرفض ملف نسخة عُدّل بعد كتابة البيان',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const source = await createIsolatedDatabase('corrupt');
+    const dump = path.join(
+      registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-corrupt-'))),
+      'state.dump',
+    );
+    try {
+      await up(source.pool);
+      const sourceUrl = databaseUrlFor(source.name);
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+      assert.equal(backup.code, 0, backup.stderr);
+      fs.appendFileSync(dump, 'altered', 'utf8');
 
-    const verified = await runNode([BACKUP_SCRIPT, 'verify', dump], sourceUrl);
-    assert.equal(verified.code, 1);
-    assert.match(verified.stderr, /\[BACKUP_HASH_MISMATCH\]/);
-  } finally {
-    await source.drop();
-  }
-});
+      const verified = await runNode([BACKUP_SCRIPT, 'verify', dump], sourceUrl);
+      assert.equal(verified.code, 1);
+      assert.match(verified.stderr, /\[BACKUP_HASH_MISMATCH\]/);
+    } finally {
+      await source.drop();
+    }
+  },
+);
 
 test(
   'البيانُ والنسخةُ لقطةٌ واحدة: كتاباتٌ متزامنةٌ أثناءَ النسخِ لا تفصلُ بينَهما (`WL-398`)',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('concurrentsrc');
     const target = await createIsolatedDatabase('concurrentdst');
@@ -647,7 +660,7 @@ test(
 
 test(
   'LIVE-45 (هـ): كتابةٌ مُلتزَمةٌ بينَ قراءةِ البيانِ وانطلاقِ `pg_dump` لا تفصلُهما — حتميّاً لا بتوقيت (`WL-586`)',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     // اختبارُ `WL-398` أعلاه يعتمدُ على أن يقعَ كاتبُه (‏كلَّ ٢٥ مللي ثانية) في الشبّاكِ بينَ
     // عدّاداتِ البيانِ وانطلاقِ `pg_dump` — ونزعُ `--snapshot` نجا منه 8 تشغيلاتٍ من 8 (‏`WL-586`).
@@ -913,7 +926,7 @@ function editManifest(dump, edit) {
 
 test(
   'WL-590: `--force` مع `pg_restore` أقدمَ من النسخة يرفضُ قبلَ أن يمحوَ قاعدةَ الهدف',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dir, dump } = await seededBackup('oldtool');
     const busy = await createIsolatedDatabase('oldtooldst');
@@ -943,7 +956,7 @@ test(
 
 test(
   'WL-590: `--force` فوقَ قاعدةٍ مُهاجَرةٍ مشغولةٍ يستبدلُها بمحتوى النسخة كاملاً',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dir, dump, sourceDigest } = await seededBackup('forceok');
     const busy = await createIsolatedDatabase('forceokdst');
@@ -982,7 +995,7 @@ test(
 
 test(
   'WL-590: الاستعادةُ تتحقّقُ من البصمةِ قبلَ أن تُنشئَ الهدفَ أو تلمسَه',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dump } = await seededBackup('tamper');
     const name = `tampered_${crypto.randomBytes(4).toString('hex')}`;
@@ -1038,7 +1051,7 @@ for (const [label, edit, code] of /** @type {const} */ ([
 ])) {
   test(
     `WL-590: بيانٌ لا يطابقُ المُستعادَ (${label}) يُسقِطُ الاستعادةَ بـ${code}`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const { source, sourceUrl, dump } = await seededBackup('mismatch');
       const target = await createIsolatedDatabase('mismatchdst');
@@ -1058,7 +1071,7 @@ for (const [label, edit, code] of /** @type {const} */ ([
 
 test(
   'WL-590: رمزُ خروجٍ غيرُ صفريٍّ من `pg_restore` يُسقِطُ الاستعادةَ',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dir, dump } = await seededBackup('exitcode');
     const target = await createIsolatedDatabase('exitcodedst');
@@ -1084,7 +1097,7 @@ for (const [label, ddl] of /** @type {Array<[string, string]>} */ ([
 ])) {
   test(
     `WL-590: هدفٌ فيه ${label} ليس نظيفاً بلا --force`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const { source, sourceUrl, dump } = await seededBackup('dirty');
       const target = await createIsolatedDatabase('dirtydst');
@@ -1123,11 +1136,15 @@ for (const [label, args, url, code] of /** @type {Array<[string, string[], strin
     'RESTORE_DATABASE_URL_MISSING',
   ],
 ])) {
-  test(`WL-590: ${label} يُرفضُ بـ${code} قبلَ أيِّ اتصال`, async () => {
-    const result = await runNode([RESTORE_SCRIPT, ...args], url);
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, new RegExp(`\\[${code}\\]`));
-  });
+  test(
+    `WL-590: ${label} يُرفضُ بـ${code} قبلَ أيِّ اتصال`,
+    { timeout: PER_TEST_TIMEOUT_MS },
+    async () => {
+      const result = await runNode([RESTORE_SCRIPT, ...args], url);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, new RegExp(`\\[${code}\\]`));
+    },
+  );
 }
 
 // ‏`WL-591`: ملاحظتا مراجعةِ `#607` غيرُ المانعتَين (‏N1 وN2). لا علاقةَ لهما بذرّيّةِ
@@ -1146,7 +1163,7 @@ async function databaseExists(pool, name) {
 for (const force of [false, true]) {
   test(
     `WL-591: رفضُ \`pg_restore\` الأقدمِ لا يُنشئُ قاعدةَ هدفٍ غائبة${force ? ' (‏مع --force)' : ''}`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const { source, sourceUrl, dir, dump } = await seededBackup('nocreate');
       const name = `nocreate_${crypto.randomBytes(4).toString('hex')}`;
@@ -1176,7 +1193,7 @@ for (const force of [false, true]) {
 
 test(
   'WL-591: رفضُ `pg_restore` الأقدمِ بلا --force لا يمسُّ قاعدةَ هدفٍ قائمةً مُهاجَرة',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dir, dump } = await seededBackup('notouch');
     const busy = await createIsolatedDatabase('notouchdst');
@@ -1202,7 +1219,7 @@ test(
 
 test(
   'WL-591: علامةُ «(أُنشئت)» تظهرُ حينَ تُنشأُ قاعدةُ الهدفِ وتنجحُ الاستعادةُ وحدَه',
-  { skip: skipWithoutDatabase, timeout: 180_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dump } = await seededBackup('created');
     const fresh = `created_${crypto.randomBytes(4).toString('hex')}`;
@@ -1340,7 +1357,7 @@ for (const [
 ])) {
   test(
     `WL-591: ${label} ⇒ ${code}، بلا بيانٍ ولا جدولٍ مرحليٍّ باقٍ`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const source = await createIsolatedDatabase('dumpfail');
       const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-dumpfail-')));
@@ -1399,7 +1416,7 @@ async function stagingCreations(pool) {
 
 test(
   'WL-592: رفضُ `pg_dump` الأقدمِ يقعُ قبلَ إنشاءِ الجدولِ المرحليّ — لا مسَّ للمصدر',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('dumpgate');
     const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-dumpgate-')));
@@ -1434,7 +1451,7 @@ for (const [
 ])) {
   test(
     `WL-592: تعذّرُ حذفِ الجدولِ المرحليِّ ${label} لا يحجبُ الخطأَ ولا يُنتجُ بياناً`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const source = await createIsolatedDatabase('dropfail');
       const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-dropfail-')));
@@ -1502,7 +1519,7 @@ for (const [
 ])) {
   test(
     `WL-592: فشلُ نسخِ الدفترِ إلى الجدولِ المرحليّ (‏${label}) لا يُبقي جدولاً ولا بياناً`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const source = await createIsolatedDatabase('stagefail');
       const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-stagefail-')));
@@ -1536,7 +1553,7 @@ for (const [
 // ‏`agents`؛ ويُلتزَمُ الصفُّ وهو واقفٌ (‏مقيسٌ من `pg_locks`)، ثمّ يُعَدُّ `events` بعدَه أبجديّاً.
 test(
   'WL-592 (B2): كتابةٌ مُلتزَمةٌ بينَ تصديرِ اللقطةِ وقراءةِ العدّاداتِ لا تفصلُ البيانَ عن النسخة — حتميّاً بقفل',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('lockgapsrc');
     const target = await createIsolatedDatabase('lockgapdst');
@@ -1603,7 +1620,7 @@ test(
 // جديد: الخطأُ الأصليُّ هو المرميّ ولا جدولَ مرحليٌّ يبقى.
 test(
   'WL-592 (B28): انقطاعُ الاتصالِ أثناءَ `pg_dump` ⇒ BACKUP_COMMAND_FAILED بلا جدولٍ مرحليٍّ باقٍ ولا بيان',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
     const realDump = resolvePgTool('pg_dump');
@@ -1661,7 +1678,7 @@ test(
 
 test(
   'WL-594: جدولٌ مرحليٌّ متروكٌ في `state` لا يتسمّمُ به النسخ — يُستثنى من `pg_dump` ويُسمّى ولا يُحذَف، والاستعادةُ تنجح',
-  { skip: skipWithoutDatabase },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('backleftsrc');
     const target = await createIsolatedDatabase('backleftdst');
@@ -1739,7 +1756,7 @@ test(
 
 test(
   'WL-594: نسخٌ بلا جدولٍ متروكٍ لا يطبعُ تحذيرَ الاستثناء',
-  { skip: skipWithoutDatabase },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('backnoleft');
     const dump = path.join(
@@ -1819,7 +1836,7 @@ async function stagingTablesIn(pool) {
 
 test(
   'WL-598: هجرةٌ تُلتزَمُ بينَ نسخِ الدفترِ ولقطةِ النسخ ⇒ BACKUP_LEDGER_SNAPSHOT_MISMATCH بلا ملفٍّ ولا بيان، ثمّ نسخةٌ بعدَها تُستعادُ بالنسخةِ الجديدة',
-  { skip: skipWithoutDatabase },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('ledgapsrc');
     const target = await createIsolatedDatabase('ledgapdst');
@@ -1871,7 +1888,7 @@ test(
 
 test(
   'WL-598: تعديلُ صفٍّ في الدفترِ في الشبّاكِ نفسِه بلا تغييرِ عددٍ ولا آخرِ نسخة ⇒ رفضٌ بالمحتوى لا بالرقم',
-  { skip: skipWithoutDatabase },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('ledtampsrc');
     const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-ledtamp-')));
@@ -1902,7 +1919,7 @@ test(
 
 test(
   'WL-591: النسخُ يُنادي `pg_dump` بـ`--no-owner` و`--no-privileges` و`--snapshot` والمخطّطَين',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const source = await createIsolatedDatabase('dumpargs');
     const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-dumpargs-')));
@@ -1930,7 +1947,7 @@ test(
 
 test(
   'WL-591: verify يرفضُ حاويةً لا يقرؤها `pg_restore` ولو طابقت بصمتُها البيان',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dump } = await seededBackup('unreadable');
     try {
@@ -1982,7 +1999,7 @@ for (const [label, edit] of /** @type {Array<[string, (m: Record<string, any>) =
 ])) {
   test(
     `WL-591: بيانٌ فيه ${label} ⇒ BACKUP_MANIFEST_INVALID`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const { source, sourceUrl, dump } = await seededBackup('manifest');
       try {
@@ -1999,7 +2016,7 @@ for (const [label, edit] of /** @type {Array<[string, (m: Record<string, any>) =
 
 test(
   'WL-591: verify يُسمّي الغائبَ — النسخةُ (‏FILE_MISSING) أو البيانُ (‏MANIFEST_MISSING)',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const { source, sourceUrl, dump } = await seededBackup('missing');
     try {
@@ -2030,11 +2047,15 @@ for (const [label, args, url, code] of /** @type {Array<[string, string[], strin
     'BACKUP_DATABASE_URL_MISSING',
   ],
 ])) {
-  test(`WL-591: ${label} يُرفضُ بـ${code} قبلَ أيِّ اتصال`, async () => {
-    const result = await runNode([BACKUP_SCRIPT, ...args], url);
-    assert.equal(result.code, 1);
-    assert.match(result.stderr, new RegExp(`\\[${code}\\]`));
-  });
+  test(
+    `WL-591: ${label} يُرفضُ بـ${code} قبلَ أيِّ اتصال`,
+    { timeout: PER_TEST_TIMEOUT_MS },
+    async () => {
+      const result = await runNode([BACKUP_SCRIPT, ...args], url);
+      assert.equal(result.code, 1);
+      assert.match(result.stderr, new RegExp(`\\[${code}\\]`));
+    },
+  );
 }
 
 /**
@@ -2070,7 +2091,7 @@ async function fenceState(pool) {
 
 test(
   'WL-597: `--force` يرفضُ كلَّ هدفٍ مُسيَّج (‏HALTED وRUNNING وRECOVERY_REQUIRED ومُهاجَراً بلا إقلاع) ولا يمسُّه',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('fenced');
     // المُهاجَرُ بلا إقلاعٍ يُنشأُ **قبلَ** الحزام: الحزامُ يحتوي وصولَ PUBLIC إلى قواعدِ العنقودِ القائمة،
@@ -2169,7 +2190,7 @@ for (const [label, prepare, detail] of /** @type {const} */ ([
 ])) {
   test(
     `WL-597: ${label} ⇒ RESTORE_FENCE_CHECK_FAILED، رفضٌ مغلقٌ والهدفُ كما هو`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const backup = await seededBackup('fencecheck');
       const target = await createIsolatedDatabase('fencecheckdst');
@@ -2228,7 +2249,7 @@ async function raceTarget(label) {
 
 test(
   'WL-597 TOCTOU (A): سياجٌ يُنشأُ ويُلتزَمُ بعدَ فحصِ المخطّطِ وقبلَ المحو ⇒ الحجزُ يرفضُ والهدفُ كما هو',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('raceA');
     const race = await raceTarget('raceA');
@@ -2271,7 +2292,7 @@ test(
 for (const finish of /** @type {const} */ (['COMMIT', 'ROLLBACK'])) {
   test(
     `WL-597 TOCTOU (B-${finish}): \`CREATE SCHEMA fence\` غيرُ مُلتزَمٍ قبلَ الاستعادة ⇒ الحجزُ ينتظرُه، ثمّ ${finish === 'COMMIT' ? 'يرفضُ والهدفُ كما هو' : 'يمضي ويستعيد'}`,
-    { skip: skipWithoutDatabase, timeout: 120_000 },
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
     async () => {
       const backup = await seededBackup(`raceB${finish}`);
       const race = await raceTarget(`raceB${finish}`);
@@ -2317,7 +2338,7 @@ for (const finish of /** @type {const} */ (['COMMIT', 'ROLLBACK'])) {
 
 test(
   'WL-597 TOCTOU (C): بعدَ الحجزِ ينتظرُ إنشاءُ السياجِ التزامَ المحو — ونافذةُ ما بعدَ الالتزامِ قائمة (‏خطرٌ متبقٍّ معلَن)',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('raceC');
     const race = await raceTarget('raceC');
@@ -2510,7 +2531,7 @@ const WIPE_UNKNOWN = /\[RESTORE_WIPE_OUTCOME_UNKNOWN\]/;
 
 test(
   'WL-600: انقطاعٌ بعدَ التزامِ المحوِ وقبلَ تأكيدِه ⇒ RESTORE_WIPE_OUTCOME_UNKNOWN، والهدفُ ممحوٌّ فعلاً فلا يُدَّعى سليماً',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('commitafter');
     const target = await createIsolatedDatabase('commitafter');
@@ -2541,7 +2562,7 @@ test(
 
 test(
   'WL-600: COMMIT لم يصل أو أُنهيَت الجلسةُ (‏FATAL) ⇒ RESTORE_WIPE_OUTCOME_UNKNOWN؛ وخطأُ ERROR على COMMIT أو انقطاعٌ قبلَه ⇒ فشلٌ قطعيّ — والهدفُ كما هو في الأربع',
-  { skip: skipWithoutDatabase, timeout: 120_000 },
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('commitkeep');
     const target = await createIsolatedDatabase('commitkeep');
