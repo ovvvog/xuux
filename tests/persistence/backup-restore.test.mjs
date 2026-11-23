@@ -1665,6 +1665,149 @@ test(
   },
 );
 
+/**
+ * ‏`WL-598`: مُحمَّلٌ مسبقٌ (‏`--import`) في عمليّةِ `backup.mjs` وحدَها يقعُ **حتماً** في الشبّاكِ بينَ
+ * التزامِ الدفترِ المرحليِّ وتأسيسِ لقطةِ النسخ: يعترضُ `BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ`
+ * (‏أوّلَ عبارةٍ بعدَ `COMMIT` الدفترِ المرحليّ)، فيُنفِّذُ فعلَه على اتصالٍ آخرَ ويلتزمُه، ثمّ يُطلِقُ
+ * العبارة. لا `sleep` ولا توقيت: الشبّاكُ يقعُ بترتيبِ العبارات. ‏`up` ⇒ هجرةٌ حقيقيّةٌ بالمُهاجر،
+ * و`tamper` ⇒ تعديلُ صفٍّ في الدفتر بلا تغييرٍ في عددِه ولا في آخرِ نسخة.
+ * @param {string} dir
+ * @param {string} sourceUrl
+ * @param {'up' | 'tamper'} action
+ * @param {number} [to]
+ * @returns {string}
+ */
+function writeLedgerGapHook(dir, sourceUrl, action, to = 0) {
+  const hook = path.join(dir, `ledger-gap-${action}.mjs`);
+  fs.writeFileSync(
+    hook,
+    [
+      "import { createRequire } from 'node:module';",
+      `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
+      "const pg = require('pg');",
+      `const { up } = await import(${JSON.stringify(new URL('../../src/persistence/migrator.mjs', import.meta.url).href)});`,
+      'const original = pg.Client.prototype.query;',
+      'let fired = false;',
+      'pg.Client.prototype.query = function (text, ...rest) {',
+      "  const sql = typeof text === 'string' ? text : text?.text;",
+      "  if (fired || typeof sql !== 'string' || !sql.startsWith('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ')) {",
+      '    return original.call(this, text, ...rest);',
+      '  }',
+      '  fired = true;',
+      '  return (async () => {',
+      `    const pool = new pg.Pool({ connectionString: ${JSON.stringify(sourceUrl)}, max: 2 });`,
+      '    try {',
+      action === 'up'
+        ? `      await up(pool, { to: ${to} });`
+        : "      await pool.query(`UPDATE public.schema_migrations SET applied_by = 'wl-598-tamper' WHERE version = (SELECT min(version) FROM public.schema_migrations)`);",
+      '    } finally {',
+      '      await pool.end();',
+      '    }',
+      "    process.stderr.write('[XUUX_LEDGER_GAP_HOOK_FIRED]\\n');",
+      '    return original.call(this, text, ...rest);',
+      '  })();',
+      '};',
+      '',
+    ].join('\n'),
+  );
+  return hook;
+}
+
+/**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<string[]>}
+ */
+async function stagingTablesIn(pool) {
+  const r = await pool.query(
+    `SELECT c.relname::text AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'state' AND c.relname LIKE '\\_\\_backup\\_schema\\_migrations\\_%' ORDER BY 1`,
+  );
+  return r.rows.map((row) => String(/** @type {Record<string, unknown>} */ (row)['t']));
+}
+
+test(
+  'WL-598: هجرةٌ تُلتزَمُ بينَ نسخِ الدفترِ ولقطةِ النسخ ⇒ BACKUP_LEDGER_SNAPSHOT_MISMATCH بلا ملفٍّ ولا بيان، ثمّ نسخةٌ بعدَها تُستعادُ بالنسخةِ الجديدة',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const source = await createIsolatedDatabase('ledgapsrc');
+    const target = await createIsolatedDatabase('ledgapdst');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-ledgap-')));
+    const dump = path.join(dir, 'state.dump');
+    const sourceUrl = databaseUrlFor(source.name);
+    try {
+      await up(source.pool, { to: 20 });
+      const hook = writeLedgerGapHook(dir, sourceUrl, 'up', 21);
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl, {
+        NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --import ${hook}`.trim(),
+      });
+      // الشبّاكُ وقعَ فعلاً: المُحمَّلُ أطلقَ والمصدرُ صارَ عندَ 21.
+      assert.match(backup.stderr, /\[XUUX_LEDGER_GAP_HOOK_FIRED\]/);
+      const ledger = await source.pool.query(
+        'SELECT max(version)::int AS v FROM public.schema_migrations',
+      );
+      assert.equal(/** @type {Record<string, unknown>} */ (ledger.rows[0])['v'], 21);
+      // الرفضُ مسمّى، ولا ملفَّ ولا بيانَ يُضلِّل، ولا جدولَ مرحليَّ باقٍ في المصدر.
+      assert.equal(backup.code, 1, `${backup.stdout}\n${backup.stderr}`);
+      assert.match(backup.stderr, /\[BACKUP_LEDGER_SNAPSHOT_MISMATCH\]/);
+      assert.match(backup.stderr, /المنسوخُ 20 صفّاً حتى 20، واللقطةُ 21 صفّاً حتى 21/);
+      assert.doesNotMatch(backup.stdout, /\[BACKUP_CREATED\]/);
+      assert.equal(fs.existsSync(dump), false, 'بقيَ ملفُّ نسخةٍ بعدَ الرفض');
+      assert.equal(fs.existsSync(`${dump}.manifest.json`), false, 'بقيَ بيانٌ بعدَ الرفض');
+      assert.deepEqual(await stagingTablesIn(source.pool), []);
+
+      // إعادةُ النسخِ بعدَ انتهاءِ الهجرةِ تُنتِجُ نسخةً متّسقةً تُستعادُ فعلاً بالنسخةِ 21.
+      const again = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+      assert.equal(again.code, 0, again.stderr);
+      const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+      assert.equal(manifest.migrationVersion, 21);
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 0, `${restore.stdout}\n${restore.stderr}`);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      const restored = await target.pool.query(
+        'SELECT to_jsonb(m)::text AS m FROM public.schema_migrations m ORDER BY version',
+      );
+      const original = await source.pool.query(
+        'SELECT to_jsonb(m)::text AS m FROM public.schema_migrations m ORDER BY version',
+      );
+      assert.deepEqual(restored.rows, original.rows);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'WL-598: تعديلُ صفٍّ في الدفترِ في الشبّاكِ نفسِه بلا تغييرِ عددٍ ولا آخرِ نسخة ⇒ رفضٌ بالمحتوى لا بالرقم',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const source = await createIsolatedDatabase('ledtampsrc');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-ledtamp-')));
+    const dump = path.join(dir, 'state.dump');
+    const sourceUrl = databaseUrlFor(source.name);
+    try {
+      await up(source.pool, { to: 20 });
+      const hook = writeLedgerGapHook(dir, sourceUrl, 'tamper');
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl, {
+        NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --import ${hook}`.trim(),
+      });
+      assert.match(backup.stderr, /\[XUUX_LEDGER_GAP_HOOK_FIRED\]/);
+      const tampered = await source.pool.query(
+        "SELECT count(*)::int AS n FROM public.schema_migrations WHERE applied_by = 'wl-598-tamper'",
+      );
+      assert.equal(/** @type {Record<string, unknown>} */ (tampered.rows[0])['n'], 1);
+      assert.equal(backup.code, 1, `${backup.stdout}\n${backup.stderr}`);
+      assert.match(backup.stderr, /\[BACKUP_LEDGER_SNAPSHOT_MISMATCH\]/);
+      assert.match(backup.stderr, /المنسوخُ 20 صفّاً حتى 20، واللقطةُ 20 صفّاً حتى 20/);
+      assert.equal(fs.existsSync(dump), false);
+      assert.equal(fs.existsSync(`${dump}.manifest.json`), false);
+      assert.deepEqual(await stagingTablesIn(source.pool), []);
+    } finally {
+      await source.drop();
+    }
+  },
+);
+
 test(
   'WL-591: النسخُ يُنادي `pg_dump` بـ`--no-owner` و`--no-privileges` و`--snapshot` والمخطّطَين',
   { skip: skipWithoutDatabase, timeout: 120_000 },

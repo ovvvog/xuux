@@ -42,6 +42,7 @@ export const BACKUP_ERRORS = Object.freeze({
   DUMP_UNREADABLE: 'BACKUP_DUMP_UNREADABLE',
   COMMAND_FAILED: 'BACKUP_COMMAND_FAILED',
   TOOL_UNUSABLE: 'BACKUP_TOOL_UNUSABLE',
+  LEDGER_SNAPSHOT_MISMATCH: 'BACKUP_LEDGER_SNAPSHOT_MISMATCH',
 });
 
 /** خطأ مسمّى كي تميّز الأتمتة سبب الفشل من نصه العربي. */
@@ -178,6 +179,40 @@ async function stageMigrationLedger(client, table) {
     // فشلُ الإلغاءِ نفسِه يُبقي الأصليَّ هو المرميّ؛ والمعاملةُ غيرُ المُلتزَمةِ لا تُبقي جدولاً.
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
+  }
+}
+
+/**
+ * ‏`WL-598`: الدفترُ المرحليُّ يُنسَخُ ويُلتزَمُ **قبلَ** لقطةِ النسخ (‏`pg_dump` لا يرى جدولاً
+ * لم يُلتزَم)، فهجرةٌ أو تراجعٌ أو تعديلٌ في `public.schema_migrations` بينَ الالتزامِ واللقطةِ
+ * يُنتِجُ نسخةً دفترُها المضمَّنُ غيرُ دفترِ اللقطة: البيانُ يقرأُ `max(version)` من اللقطة،
+ * والمستعادُ يحملُ الدفترَ المرحليّ ⇒ تنجحُ `create` و`verify` وتسقطُ الاستعادةُ بـ
+ * `RESTORE_MIGRATION_VERSION_MISMATCH` (‏مقيس). وقفلُ المُهاجرِ الاستشاريُّ لا يحمي النسخ: النسخُ
+ * لا يأخذُه، ومساراتٌ أخرى تكتبُ الدفترَ بلا قفل.
+ *
+ * فيُقارَنُ هنا، **داخلَ اللقطةِ نفسِها** التي يستعملُها `pg_dump` والبيان، محتوى الدفترِ المرحليِّ
+ * بمحتوى الدفترِ الحقيقيِّ صفّاً صفّاً بأعمدتِه الخمسة (‏لا العددُ ولا آخرُ نسخةٍ وحدَهما)،
+ * وأيُّ فرقٍ ⇒ رفضٌ قبلَ `pg_dump` فلا ملفَّ ولا بيان. والتطابقُ في اللقطةِ يعني أنّ ما يُنسَخُ
+ * من الجدولِ المرحليِّ هو بعينِه دفترُ اللقطةِ التي قُرئ منها البيانُ ونُسِخت منها `state`.
+ * @param {import('pg').PoolClient} client
+ * @param {string} table
+ * @returns {Promise<void>}
+ */
+async function assertStagedLedgerMatchesSnapshot(client, table) {
+  const digest = (/** @type {string} */ relation) =>
+    `SELECT count(*)::integer AS n, COALESCE(max(version), 0)::integer AS v,
+            md5(COALESCE(string_agg(
+              jsonb_build_array(version, name, checksum, applied_at, applied_by)::text,
+              E'\\n' ORDER BY version), '')) AS d
+     FROM ${relation}`;
+  const staged = (await client.query(digest(`${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)}`)))
+    .rows[0];
+  const live = (await client.query(digest(`public.${quoteIdent(MIGRATION_LEDGER)}`))).rows[0];
+  if (staged?.['d'] !== live?.['d'] || staged?.['n'] !== live?.['n']) {
+    throw new BackupError(
+      BACKUP_ERRORS.LEDGER_SNAPSHOT_MISMATCH,
+      `دفترُ الهجراتِ تغيّرَ بينَ نسخِه ولقطةِ النسخ (‏المنسوخُ ${staged?.['n']} صفّاً حتى ${staged?.['v']}، واللقطةُ ${live?.['n']} صفّاً حتى ${live?.['v']}) — لا نسخةَ تُكتَب؛ أعِدِ النسخَ بعدَ انتهاءِ الهجرة.`,
+    );
   }
 }
 
@@ -346,6 +381,7 @@ export async function createBackup(dumpPath, databaseUrl) {
       const snapshotId = String(
         /** @type {Record<string, unknown> | undefined} */ (exported.rows[0])?.['snapshot'],
       );
+      await assertStagedLedgerMatchesSnapshot(client, ledgerStagingTable);
       snapshot = await inspectDatabase(client);
       // `WL-532`: إن كانت القاعدةُ مُسيَّجةً نُسخَ مخطّطُ `fence` معها؛ وإلا حملت النسخةُ
       // قوادحَ `xf_guard` وسياساتِ `xf_read` بلا دوالِّها فتفشلُ الاستعادة. والمستعادُ
