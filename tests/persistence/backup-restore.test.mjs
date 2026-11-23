@@ -2395,3 +2395,178 @@ test(
     }
   },
 );
+
+/**
+ * ‏`WL-600`: مُحمَّلٌ مسبقٌ (‏`--import`) في عمليّةِ `restore.mjs` يعترضُ عبارةً من معاملةِ المحو. حتميٌّ
+ * بترتيبِ العبارات، بلا `sleep`:
+ *   - `after`: يُنفِّذُ `COMMIT` الحقيقيَّ ثمّ يهدمُ المقبسَ ويرفضُ بخطأِ اتصال ⇒ المحوُ مُلتزَمٌ والأداةُ
+ *     لا ترى الردّ (‏انقطاعٌ بعدَ الالتزامِ وقبلَ التأكيد).
+ *   - `before`: يهدمُ المقبسَ عندَ `COMMIT` ويرفضُ بلا إرسال ⇒ الخادمُ يُجهِضُ المعاملة، والأداةُ لا تعرف.
+ *   - `fatal`: يستبدلُ بـ`COMMIT` إنهاءَ الجلسةِ نفسِها ⇒ ردٌّ بدرجةِ `FATAL` (‏`57P01`) لا يُقطَعُ معه.
+ *   - `error`: يستبدلُ بـ`COMMIT` عبارةَ `SELECT 1/0` ⇒ ردٌّ قطعيٌّ بدرجةِ `ERROR` (‏`22012`).
+ *   - `drop`: يهدمُ المقبسَ عندَ `DROP TABLE … schema_migrations` قبلَ `COMMIT` ⇒ فشلٌ قطعيّ.
+ * @param {string} dir
+ * @param {'after' | 'before' | 'fatal' | 'error' | 'drop'} mode
+ * @returns {string}
+ */
+function writeCommitOutcomeHook(dir, mode) {
+  const hook = path.join(dir, `commit-outcome-${mode}.mjs`);
+  const trigger =
+    mode === 'drop'
+      ? 'sql.startsWith(\'DROP TABLE IF EXISTS public."schema_migrations"\')'
+      : "sql === 'COMMIT'";
+  const action = {
+    after:
+      '  return original.call(this, text).then(() => { this.connection.stream.destroy(); throw lost(); });',
+    before: '  this.connection.stream.destroy(); return Promise.reject(lost());',
+    drop: '  this.connection.stream.destroy(); return Promise.reject(lost());',
+    fatal: "  return original.call(this, 'SELECT pg_terminate_backend(pg_backend_pid())');",
+    error: "  return original.call(this, 'SELECT 1/0');",
+  }[mode];
+  fs.writeFileSync(
+    hook,
+    [
+      "import { createRequire } from 'node:module';",
+      `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
+      "const pg = require('pg');",
+      'const original = pg.Client.prototype.query;',
+      'let fired = false;',
+      'pg.Client.prototype.query = function (text, ...rest) {',
+      "  const sql = typeof text === 'string' ? text : text?.text;",
+      `  if (fired || typeof sql !== 'string' || !(${trigger})) return original.call(this, text, ...rest);`,
+      '  fired = true;',
+      `  process.stderr.write('[XUUX_COMMIT_HOOK_FIRED:${mode}]\\n');`,
+      "  const lost = () => new Error('Connection terminated unexpectedly');",
+      action,
+      '};',
+      '',
+    ].join('\n'),
+  );
+  return hook;
+}
+
+/**
+ * ‏`WL-600`: ينتظرُ ألّا تبقى على الهدفِ جلسةٌ تحملُ معاملةً (‏`backend_xid`) — جلسةُ الأداةِ بعدَ هدمِ
+ * مقبسِها. رصدُ حالٍ لا مهلة؛ والحدُّ الزمنيُّ لكشفِ التعليقِ وحدَه.
+ * @param {import('pg').Pool} pool
+ * @param {string} database
+ * @returns {Promise<boolean>}
+ */
+async function waitForNoOpenTransaction(pool, database) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const r = await pool.query(
+      `SELECT 1 FROM pg_stat_activity
+       WHERE datname = $1 AND pid <> pg_backend_pid() AND backend_xid IS NOT NULL`,
+      [database],
+    );
+    if ((r.rowCount ?? 0) === 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
+}
+
+/**
+ * ‏`WL-600`: هدفٌ غيرُ مُسيَّجٍ مُهاجَرٌ إلى 23 وفيه صفّ، و`restore --force` عليه بمُحمَّلِ `mode`.
+ * @param {{ dump: string, dir: string, sourceUrl: string, source: { pool: import('pg').Pool } }} backup
+ * @param {{ name: string }} target
+ * @param {'after' | 'before' | 'fatal' | 'error' | 'drop'} mode
+ */
+async function forceWithCommitHook(backup, target, mode) {
+  const restore = await runNode(
+    [RESTORE_SCRIPT, backup.dump, '--database', target.name, '--force'],
+    backup.sourceUrl,
+    {
+      NODE_OPTIONS:
+        `${process.env['NODE_OPTIONS'] ?? ''} --import ${writeCommitOutcomeHook(backup.dir, mode)}`.trim(),
+    },
+  );
+  assert.match(restore.stderr, new RegExp(`\\[XUUX_COMMIT_HOOK_FIRED:${mode}\\]`), mode);
+  assert.equal(restore.code, 1, `${mode}: ${restore.stdout}`);
+  assert.doesNotMatch(restore.stdout, /RESTORE_OK/, mode);
+  // لا انهيارَ بحدثِ `error` غيرِ مُعالَج: الرمزُ يُسمّى دائماً.
+  assert.doesNotMatch(restore.stderr, /Unhandled 'error' event/, mode);
+  assert.match(restore.stderr, /⛔ \[/, mode);
+  assert.ok(
+    await waitForNoOpenTransaction(backup.source.pool, target.name),
+    `${mode}: بقيت معاملةُ الأداةِ مفتوحةً على الهدف`,
+  );
+  return restore;
+}
+
+/**
+ * @param {import('pg').Pool} pool
+ */
+async function seedStaleTarget(pool) {
+  await up(pool, { to: 23 });
+  await pool.query(
+    `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, model_version)
+     VALUES ('stale-model', 'Stale', 'internal', 'operations', $1, 'registered', '0.0.1')`,
+    ['f'.repeat(64)],
+  );
+}
+
+const WIPE_UNKNOWN = /\[RESTORE_WIPE_OUTCOME_UNKNOWN\]/;
+
+test(
+  'WL-600: انقطاعٌ بعدَ التزامِ المحوِ وقبلَ تأكيدِه ⇒ RESTORE_WIPE_OUTCOME_UNKNOWN، والهدفُ ممحوٌّ فعلاً فلا يُدَّعى سليماً',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const backup = await seededBackup('commitafter');
+    const target = await createIsolatedDatabase('commitafter');
+    try {
+      await seedStaleTarget(target.pool);
+      const restore = await forceWithCommitHook(backup, target, 'after');
+      assert.match(restore.stderr, WIPE_UNKNOWN);
+      assert.match(restore.stderr, /لم يُشغَّلْ pg_restore/);
+      assert.match(restore.stderr, /لا تفترضْ أنّه سليم/);
+      assert.doesNotMatch(restore.stderr, /\[RESTORE_COMMAND_FAILED\]/);
+      // المحوُ التُزِمَ فعلاً: لا `state` ولا دفترَ ولا `fence` المحجوز — فافتراضُ التراجعِ كانَ يكذب.
+      const wiped = await target.pool.query(
+        `SELECT to_regnamespace('state') IS NULL AS state_absent,
+                to_regclass('public.schema_migrations') IS NULL AS ledger_absent,
+                to_regnamespace('fence') IS NULL AS fence_absent`,
+      );
+      assert.deepEqual(wiped.rows[0], {
+        state_absent: true,
+        ledger_absent: true,
+        fence_absent: true,
+      });
+    } finally {
+      await target.drop();
+      await backup.source.drop();
+    }
+  },
+);
+
+test(
+  'WL-600: COMMIT لم يصل أو أُنهيَت الجلسةُ (‏FATAL) ⇒ RESTORE_WIPE_OUTCOME_UNKNOWN؛ وخطأُ ERROR على COMMIT أو انقطاعٌ قبلَه ⇒ فشلٌ قطعيّ — والهدفُ كما هو في الأربع',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const backup = await seededBackup('commitkeep');
+    const target = await createIsolatedDatabase('commitkeep');
+    try {
+      await seedStaleTarget(target.pool);
+      const before = await targetImage(target.pool);
+      for (const mode of /** @type {const} */ (['before', 'fatal', 'error', 'drop'])) {
+        const restore = await forceWithCommitHook(backup, target, mode);
+        if (mode === 'before' || mode === 'fatal') {
+          // لم يُلتزَمْ شيءٌ فعلاً، لكنّ الأداةَ لا تستطيعُ معرفةَ ذلك: لا تدّعي السلامة.
+          assert.match(restore.stderr, WIPE_UNKNOWN, mode);
+          assert.match(restore.stderr, /لا تفترضْ أنّه سليم/, mode);
+        } else {
+          assert.doesNotMatch(restore.stderr, WIPE_UNKNOWN, mode);
+          assert.match(
+            restore.stderr,
+            mode === 'error' ? /\[22012\]/ : /Connection terminated unexpectedly/,
+            mode,
+          );
+        }
+        assert.equal(await targetImage(target.pool), before, `${mode}: الهدفُ تغيّر`);
+      }
+    } finally {
+      await target.drop();
+      await backup.source.drop();
+    }
+  },
+);

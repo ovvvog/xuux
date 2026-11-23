@@ -45,6 +45,7 @@ export const RESTORE_ERRORS = Object.freeze({
   TOOL_UNUSABLE: 'RESTORE_TOOL_UNUSABLE',
   TARGET_FENCED: 'RESTORE_TARGET_FENCED',
   FENCE_CHECK_FAILED: 'RESTORE_FENCE_CHECK_FAILED',
+  WIPE_OUTCOME_UNKNOWN: 'RESTORE_WIPE_OUTCOME_UNKNOWN',
 });
 
 /** خطأ مسمّى يجعل فشل الاستعادة صالحاً للبوابات والأتمتة. */
@@ -295,15 +296,37 @@ async function claimFenceName(client) {
 }
 
 /**
- * ‏`--force`: فحصُ السياجِ وحجزُ اسمِه والمحوُ في معاملةٍ واحدة. أيُّ رفضٍ أو خطأٍ ⇒ تراجعٌ كامل،
- * فالهدفُ كما كان. **المعاملةُ تحمي المحوَ وحدَه، لا الاستعادة.**
+ * ‏`WL-600`: هل فشلُ `COMMIT` قطعيٌّ (‏الخادمُ رفضَه فتراجعت المعاملة)؟ قطعيٌّ فقط حينَ ردَّ الخادمُ
+ * بخطأٍ من درجةِ `ERROR` (‏`pg.DatabaseError`): الجلسةُ باقيةٌ والمعاملةُ مُجهَضة. أمّا انقطاعُ
+ * الاتصالِ أو انتهاءُ المهلةِ أو `FATAL`/`PANIC` (‏كإنهاءِ الجلسةِ بعدَ الالتزامِ وقبلَ الردّ) فلا يُعرَفُ
+ * معه أَالتزمَ الخادمُ أم لا.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isDefiniteCommitFailure(error) {
+  return error instanceof pg.DatabaseError && error.severity === 'ERROR';
+}
+
+/**
+ * ‏`--force`: فحصُ السياجِ وحجزُ اسمِه والمحوُ في معاملةٍ واحدة. **المعاملةُ تحمي المحوَ وحدَه، لا
+ * الاستعادة.** رفضٌ أو خطأٌ **قبلَ إرسالِ `COMMIT`** ⇒ لم يُلتزَمْ شيء: `ROLLBACK`، أو يُجهِضُها الخادمُ
+ * إن انقطعَ الاتصال، فالهدفُ كما كان. وكذلك خطأٌ من الخادمِ على `COMMIT` نفسِه (‏`isDefiniteCommitFailure`).
+ * ‏`WL-600`: **أمّا فشلٌ بعدَ إرسالِ `COMMIT` بلا ردٍّ قطعيٍّ فنتيجتُه مجهولة** — قد يكونُ المحوُ
+ * التُزِم — فلا يُفترَضُ التراجع: `RESTORE_WIPE_OUTCOME_UNKNOWN`، ولا `pg_restore`، ولا ادّعاءَ أنّ
+ * الهدفَ سليم.
  * @param {import('pg').Pool} pool
  * @returns {Promise<void>}
  */
 async function wipeUnfencedTarget(pool) {
   const client = await pool.connect();
+  // ‏`WL-600`: انقطاعُ الاتصالِ يصلُ رفضاً للاستعلامِ الجاري، ويُطلِقُ `pg` معه حدثَ `error` على العميلِ
+  // المُعار؛ وبلا مستمعٍ تنهارُ العمليّةُ (‏`Unhandled 'error' event`) قبلَ أن يُسمّى الرمز. الخطأُ نفسُه
+  // يُعالَجُ من رفضِ الاستعلام.
+  const ignoreClientError = () => undefined;
+  client.on('error', ignoreClientError);
   /** @type {unknown} */
   let failure;
+  let commitSent = false;
   try {
     await client.query('BEGIN');
     await refuseFencedTarget(client);
@@ -313,12 +336,21 @@ async function wipeUnfencedTarget(pool) {
     await client.query(`DROP TABLE IF EXISTS public.${quoteIdent(MIGRATION_LEDGER)}`);
     // المخطّطُ المحجوزُ فارغ: `RESTRICT` لا `CASCADE`، فلا يُسقَطُ ما ليسَ له.
     await client.query(`DROP SCHEMA ${quoteIdent(FENCE_SCHEMA)} RESTRICT`);
+    commitSent = true;
     await client.query('COMMIT');
   } catch (error) {
     failure = error;
+    if (commitSent && !isDefiniteCommitFailure(error)) {
+      throw new RestoreError(
+        RESTORE_ERRORS.WIPE_OUTCOME_UNKNOWN,
+        `نتيجةُ التزامِ المحوِ مجهولة: أُرسِلَ COMMIT ثمّ فشلَ بلا ردٍّ قطعيٍّ من الخادم (${describe(error)})، فقد يكونُ مخطّطُ state ودفترُ public.schema_migrations قد مُحِيا وقد لا يكونان. لم يُشغَّلْ pg_restore. افحصِ الهدفَ يدوياً قبلَ أيِّ إعادةٍ ولا تفترضْ أنّه سليم (‏docs/RECOVERY.md).`,
+      );
+    }
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
   } finally {
+    // العميلُ المهدومُ يبقى مستمعُه، فحدثُ `error` المتأخّرُ لا يُسقِطُ العمليّة.
+    if (failure === undefined) client.off('error', ignoreClientError);
     client.release(failure === undefined ? undefined : true);
   }
 }
