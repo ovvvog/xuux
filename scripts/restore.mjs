@@ -6,8 +6,14 @@
  * بجديدة ثم يبدو ناجحاً. لذلك تُفحص `state` ودفتر الهجرات أولاً، ولا يُزالان
  * إلا بطلب `--force` صريح.
  *
- * حدٌّ معلن: `--force` يمحو `state` و`public.schema_migrations` فقط؛ لا يمحو
- * كائنات المخطّطات الأخرى ولا يحوّل هذه الأداة إلى استعادة نقطة-زمن.
+ * حدٌّ معلن: `--force` يمحو `state` و`public.schema_migrations` فقط، في معاملةٍ واحدة؛ لا يمحو
+ * كائنات المخطّطات الأخرى ولا يحوّل هذه الأداة إلى استعادة نقطة-زمن. **والاستعادةُ كلُّها
+ * ليست ذرّيّة:** المحوُ يُلتزَمُ قبلَ `pg_restore`، فإن فشلَ هذا أو التحقّقُ بعدَه بقيَ الهدفُ ممحوّاً
+ * أو ناقصاً.
+ *
+ * ‏`WL-597`: **`--force` يرفضُ كلَّ هدفٍ مُسيَّج** (‏`RESTORE_TARGET_FENCED`) قبلَ أيِّ محو، أيّاً
+ * كانت حالتُه (‏HALTED وRUNNING وRECOVERY_REQUIRED، ومُهاجَراً بلا إقلاع). نزعُ السياجِ مسارُ
+ * الاسترداد/الهجرةِ الموثَّق في `docs/RECOVERY.md`، لا هذه الأداة.
  */
 
 import fs from 'node:fs';
@@ -20,6 +26,10 @@ import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-t
 
 const STATE_SCHEMA = 'state';
 const MIGRATION_LEDGER = 'schema_migrations';
+const FENCE_SCHEMA = 'fence';
+// هجرةُ السياج (`migrations/0024_fence.up.sql`). دفترٌ يقولُ إنّها طُبِّقت وليسَ في الهدفِ مخطّطُ
+// `fence` حالٌ لا يُوثَقُ بفحصِها: السياجُ يُنزَعُ موثَّقاً بهجرةِ النزول، وهي تحذفُ صفَّها من الدفتر.
+const FENCE_MIGRATION_VERSION = 24;
 // لا مسار موقّت نصّاً: راجع WL-022 و`scripts/lib/pg-tools.mjs`.
 const pgRestore = () => resolvePgTool('pg_restore');
 
@@ -33,6 +43,8 @@ export const RESTORE_ERRORS = Object.freeze({
   ROW_COUNT_MISMATCH: 'RESTORE_ROW_COUNT_MISMATCH',
   MIGRATION_VERSION_MISMATCH: 'RESTORE_MIGRATION_VERSION_MISMATCH',
   TOOL_UNUSABLE: 'RESTORE_TOOL_UNUSABLE',
+  TARGET_FENCED: 'RESTORE_TARGET_FENCED',
+  FENCE_CHECK_FAILED: 'RESTORE_FENCE_CHECK_FAILED',
 });
 
 /** خطأ مسمّى يجعل فشل الاستعادة صالحاً للبوابات والأتمتة. */
@@ -186,6 +198,132 @@ async function targetContents(pool) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {string}
+ */
+function describe(error) {
+  if (error instanceof Error) {
+    const code = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (error))['code'];
+    return typeof code === 'string' ? `${code}: ${error.message}` : error.message;
+  }
+  return String(error);
+}
+
+/**
+ * ‏`WL-597`: يقرأُ علاماتِ السياجِ في الهدفِ داخلَ معاملةِ المحو. مخطّطُ `fence` ⇒ مُسيَّج. وقادحُ
+ * أحداثٍ `xf_*`، أو دفترٌ يقولُ إنّ هجرةَ السياجِ طُبِّقت، بلا مخطّطِ `fence` ⇒ لا يُوثَقُ بالفحص.
+ * وأيُّ خطأٍ في القراءة ⇒ رفضٌ مغلَق. **قراءةٌ وحدَها، فلا تُغلقُ سباقاً:** الإغلاقُ في `claimFenceName`.
+ * @param {import('pg').PoolClient} client
+ * @returns {Promise<void>}
+ */
+async function refuseFencedTarget(client) {
+  /** @type {{ schema: boolean, triggers: string[], ledgerFence: boolean }} */
+  let found;
+  try {
+    const markers = await client.query(
+      `SELECT to_regnamespace($1) IS NOT NULL AS schema,
+              ARRAY(SELECT evtname::text FROM pg_catalog.pg_event_trigger
+                    WHERE evtname LIKE 'xf\\_%' ORDER BY 1) AS triggers,
+              to_regclass($2) IS NOT NULL AS ledger`,
+      [FENCE_SCHEMA, `public.${MIGRATION_LEDGER}`],
+    );
+    const row = /** @type {Record<string, unknown>} */ (markers.rows[0]);
+    let ledgerFence = false;
+    if (row['ledger'] === true) {
+      const applied = await client.query(
+        `SELECT EXISTS (SELECT 1 FROM public.${quoteIdent(MIGRATION_LEDGER)} WHERE version >= $1) AS fenced`,
+        [FENCE_MIGRATION_VERSION],
+      );
+      ledgerFence = /** @type {Record<string, unknown>} */ (applied.rows[0])['fenced'] === true;
+    }
+    found = {
+      schema: row['schema'] === true,
+      triggers: /** @type {string[]} */ (row['triggers']),
+      ledgerFence,
+    };
+  } catch (error) {
+    throw new RestoreError(
+      RESTORE_ERRORS.FENCE_CHECK_FAILED,
+      `تعذّرَ فحصُ السياجِ في الهدف؛ لا محوَ بلا فحص: ${describe(error)}`,
+    );
+  }
+  if (found.schema) {
+    throw new RestoreError(
+      RESTORE_ERRORS.TARGET_FENCED,
+      'قاعدةُ الهدفِ مُسيَّجة (‏مخطّطُ fence موجود)؛ --force لا يمحو قاعدةً مُسيَّجةً في أيِّ حال. انزعِ السياجَ أوّلاً بمسارِ الاسترداد/الهجرةِ الموثَّق (‏docs/RECOVERY.md)، أو استعِدْ إلى قاعدةٍ نظيفةٍ جديدة.',
+    );
+  }
+  if (found.triggers.length > 0 || found.ledgerFence) {
+    throw new RestoreError(
+      RESTORE_ERRORS.FENCE_CHECK_FAILED,
+      `علاماتُ سياجٍ بلا مخطّطِ fence (${[
+        ...found.triggers.map((name) => `قادح ${name}`),
+        ...(found.ledgerFence ? [`دفترٌ فيه الهجرة ${FENCE_MIGRATION_VERSION} أو بعدها`] : []),
+      ].join('، ')})؛ حالٌ لا يُوثَقُ بفحصِها فلا محو.`,
+    );
+  }
+}
+
+/**
+ * ‏`WL-597`: يحجزُ اسمَ `fence` في الهدفِ حتى تُلتزَمَ معاملةُ المحو. كلُّ إنشاءٍ للسياجِ يبدأُ بـ
+ * `CREATE SCHEMA fence` (‏هجرةُ 0024، أو `pg_restore` لنسخةٍ مُسيَّجة، أو يدوياً)، أو بإعادةِ تسميةِ
+ * مخطّطٍ إليه، وكلاهما صفٌّ في `pg_namespace` بفهرسٍ فريدٍ على الاسم. فإنشاءُ المخطّطِ هنا:
+ *   - إن كانَ إنشاءٌ آخرُ **غيرُ مُلتزَمٍ** سبقَه ⇒ ينتظرُه هنا؛ فإن التُزِمَ ⇒ `23505` ⇒ رفض، وإن
+ *     تراجعَ ⇒ يمضي.
+ *   - وإن سبقَ هو ⇒ ينتظرُ كلُّ إنشاءٍ آخرَ التزامَ هذه المعاملة؛ والمحوُ فيها، فلا محوَ بعدَ سياج.
+ * ويُحذَفُ المخطّطُ الفارغُ قبلَ الالتزامِ فلا يبقى منه أثر. **حدّه:** ما بعدَ الالتزامِ (‏أثناءَ
+ * `pg_restore`) خارجَه، وsuperuser يعدّلُ الكتالوجَ مباشرةً خارجَه (‏`T-OWN-04`).
+ * @param {import('pg').PoolClient} client
+ * @returns {Promise<void>}
+ */
+async function claimFenceName(client) {
+  try {
+    await client.query(`CREATE SCHEMA ${quoteIdent(FENCE_SCHEMA)}`);
+  } catch (error) {
+    const code = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (error))['code'];
+    if (code === '23505' || code === '42P06') {
+      throw new RestoreError(
+        RESTORE_ERRORS.TARGET_FENCED,
+        'أُنشئَ مخطّطُ fence في الهدفِ أثناءَ الفحص؛ --force لا يمحو قاعدةً مُسيَّجة.',
+      );
+    }
+    throw new RestoreError(
+      RESTORE_ERRORS.FENCE_CHECK_FAILED,
+      `تعذّرَ حجزُ اسمِ fence في الهدف؛ لا محوَ بلا حجز: ${describe(error)}`,
+    );
+  }
+}
+
+/**
+ * ‏`--force`: فحصُ السياجِ وحجزُ اسمِه والمحوُ في معاملةٍ واحدة. أيُّ رفضٍ أو خطأٍ ⇒ تراجعٌ كامل،
+ * فالهدفُ كما كان. **المعاملةُ تحمي المحوَ وحدَه، لا الاستعادة.**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<void>}
+ */
+async function wipeUnfencedTarget(pool) {
+  const client = await pool.connect();
+  /** @type {unknown} */
+  let failure;
+  try {
+    await client.query('BEGIN');
+    await refuseFencedTarget(client);
+    await claimFenceName(client);
+    // لا يُدخل اسمٌ من المستخدم هنا؛ الأسماءُ ثابتةٌ ومقتبسة.
+    await client.query(`DROP SCHEMA IF EXISTS ${quoteIdent(STATE_SCHEMA)} CASCADE`);
+    await client.query(`DROP TABLE IF EXISTS public.${quoteIdent(MIGRATION_LEDGER)}`);
+    // المخطّطُ المحجوزُ فارغ: `RESTRICT` لا `CASCADE`، فلا يُسقَطُ ما ليسَ له.
+    await client.query(`DROP SCHEMA ${quoteIdent(FENCE_SCHEMA)} RESTRICT`);
+    await client.query('COMMIT');
+  } catch (error) {
+    failure = error;
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release(failure === undefined ? undefined : true);
+  }
+}
+
+/**
  * @param {import('pg').Pool} pool
  * @returns {Promise<Record<string, number>>}
  */
@@ -324,13 +462,13 @@ export async function restoreBackup(options, databaseUrl) {
       );
     }
     if (options.force) {
-      // لا يُدخل اسمٌ من المستخدم هنا؛ الاسمان ثابتان ومقتبسان لإبقاء الحرس واضحاً.
-      await pool.query(`DROP SCHEMA IF EXISTS ${quoteIdent(STATE_SCHEMA)} CASCADE`);
-      await pool.query(`DROP TABLE IF EXISTS public.${quoteIdent(MIGRATION_LEDGER)}`);
-      // `WL-532`: مخطّطُ السياجِ يُمحى مع `state` لأنّ النسخةَ المُسيَّجةَ تحملُه. وعلى
-      // قاعدةٍ مُسيَّجةٍ حيّةٍ يرفضُ قادحُ `xf_ddl_drop` هذا الحذفَ — رفضٌ مقصود: لا
-      // تُستبدَلُ قاعدةٌ مُسيَّجةٌ بالقوّة؛ يُنزَعُ السياجُ أولاً بهجرةِ النزولِ تحت `HALTED`.
-      await pool.query('DROP SCHEMA IF EXISTS fence CASCADE');
+      // ‏`WL-597`: كانَ هنا ثلاثةُ أوامرَ مُلتزَمةٍ منفصلة، آخرُها `DROP SCHEMA fence CASCADE`، وتعليقٌ
+      // يقولُ إنّ قادحَ `xf_ddl_drop` يرفضُه على قاعدةٍ مُسيَّجة. المقيسُ (‏حزمةُ قرارِ `--force`):
+      // تحتَ RUNNING يرفضُ `xf_ddl_start` (‏`XF201`) أوّلَ أمرٍ (‏`DROP SCHEMA state`) قبلَ أيِّ حذف؛
+      // وتحتَ HALTED وRECOVERY_REQUIRED، ومُهاجَراً بلا إقلاع، كانَ المحوُ **يُقبَل**: `CASCADE` يُسقِطُ
+      // دوالَّ القوادحِ نفسَها فتزولُ قوادحُ DDL الثلاثة، ويبقى `xf_guard` على الجداولِ المستعادةِ
+      // **بلا حراسةِ DDL**. صارَ الرفضُ لكلِّ هدفٍ مُسيَّجٍ قبلَ أيِّ محو.
+      await wipeUnfencedTarget(pool);
     }
   } finally {
     await pool.end();

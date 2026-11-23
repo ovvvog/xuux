@@ -14,6 +14,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import pg from 'pg';
+import { harness } from '../helpers/fence-harness.mjs';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { catalogSnapshot, createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
@@ -115,6 +117,92 @@ async function contentsDigest(pool) {
     }
   }
   return hash.digest('hex');
+}
+
+/**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<boolean>}
+ */
+async function fenceSchemaPresent(pool) {
+  const r = await pool.query(`SELECT to_regnamespace('fence') IS NOT NULL AS present`);
+  return /** @type {Record<string, unknown>} */ (r.rows[0])['present'] === true;
+}
+
+/**
+ * ‏`WL-597`: صورةُ الهدفِ كلِّه لإثباتِ أنّ الرفضَ لم يمسَّه: الكتالوجُ مع الدوالِّ وقوادحِ الأحداث،
+ * ومحتوى `state`، والدفتر، وقوادحُ الجداولِ (‏`xf_guard`)، وصلاحيّاتُ المخطّطات، وصفُّ التحكّمِ
+ * وأحداثُ السياجِ إن وُجد. ‏`omitSchema` يُسقِطُ مخطّطاً من الصورةِ وحدَه (‏تداخلٌ يُنشئُه عمداً).
+ * @param {import('pg').Pool} pool
+ * @param {{ omitSchema?: string }} [options]
+ * @returns {Promise<string>}
+ */
+async function targetImage(pool, options = {}) {
+  const catalog = JSON.parse(await catalogSnapshot(pool, { routines: true }));
+  if (options.omitSchema !== undefined) {
+    catalog.schemas = catalog.schemas.filter(
+      (/** @type {{ nspname: string }} */ row) => row.nspname !== options.omitSchema,
+    );
+  }
+  const rows = async (/** @type {string} */ sql) => (await pool.query(sql)).rows;
+  const ledger = (await rows(`SELECT to_regclass('public.schema_migrations') IS NOT NULL AS l`))[0]
+    .l
+    ? await rows('SELECT to_jsonb(m)::text AS m FROM public.schema_migrations m ORDER BY 1')
+    : null;
+  /** @type {Record<string, string> | null} */
+  let fence = null;
+  if (options.omitSchema !== 'fence' && (await fenceSchemaPresent(pool))) {
+    fence = {};
+    // كلُّ جداولِ `fence` بمحتواها (‏التحكّمُ والأحداثُ والقائمةُ والاعتمادات…): رفضٌ يكتبُ حدثاً يظهرُ هنا.
+    for (const { t } of await rows(
+      `SELECT c.relname::text AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'fence' AND c.relkind = 'r' ORDER BY 1`,
+    )) {
+      const [{ d }] = await rows(
+        `SELECT md5(coalesce(string_agg(to_jsonb(x)::text, E'\\n' ORDER BY to_jsonb(x)::text), '')) AS d
+         FROM fence.${quoteIdent(t)} x`,
+      );
+      fence[t] = d;
+    }
+  }
+  return JSON.stringify({
+    catalog,
+    contents: await contentsDigest(pool),
+    ledger,
+    triggers: await rows(
+      `SELECT tgrelid::regclass::text AS rel, tgname, tgenabled FROM pg_trigger
+       WHERE NOT tgisinternal ORDER BY 1, 2`,
+    ),
+    acl: (
+      await rows(
+        `SELECT nspname, coalesce(nspacl::text, '') AS acl FROM pg_namespace
+         WHERE nspname NOT LIKE 'pg\\_%' ORDER BY 1`,
+      )
+    ).filter((row) => row.nspname !== options.omitSchema),
+    fence,
+  });
+}
+
+/**
+ * ‏`WL-597`: ينتظرُ أن تقفَ جلسةٌ على الهدفِ عندَ قفل (‏`wait_event_type = 'Lock'`) وهي تُنفّذُ ما
+ * يطابقُ `pattern`. التداخلُ يُثبَّتُ برصدِ الانتظارِ لا بمهلة؛ والحدُّ الزمنيُّ لكشفِ التعليقِ وحدَه.
+ * @param {import('pg').Pool} pool
+ * @param {string} database
+ * @param {string} pattern
+ * @param {number[]} [excludePids]
+ * @returns {Promise<boolean>}
+ */
+async function waitForLockWait(pool, database, pattern, excludePids = []) {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const r = await pool.query(
+      `SELECT 1 FROM pg_stat_activity
+       WHERE datname = $1 AND wait_event_type = 'Lock' AND query LIKE $2 AND NOT (pid = ANY($3::int[]))`,
+      [database, pattern, excludePids],
+    );
+    if ((r.rowCount ?? 0) > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
 }
 
 /**
@@ -768,7 +856,10 @@ test(
     const { source, sourceUrl, dir, dump, sourceDigest } = await seededBackup('forceok');
     const busy = await createIsolatedDatabase('forceokdst');
     try {
-      await up(busy.pool);
+      // ‏`WL-597`: `up()` كاملاً يُنشئُ `fence` (‏0024)، و`--force` يرفضُ كلَّ هدفٍ مُسيَّج. فالهدفُ
+      // «المُهاجَرُ المشغول» هنا مُهاجَرٌ إلى ما قبلَ السياج — الحالُ الوحيدُ الذي يستبدلُه `--force`.
+      await up(busy.pool, { to: 23 });
+      assert.equal(await fenceSchemaPresent(busy.pool), false, 'الهدفُ مُسيَّجٌ قبلَ الاستعادة');
       await busy.pool.query(
         `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, model_version)
          VALUES ('stale-model', 'Stale', 'internal', 'operations', $1, 'registered', '0.0.1')`,
@@ -1043,8 +1134,10 @@ test(
       assert.ok(existingLine, existing.stdout);
       assert.equal(existingLine[2], undefined, 'العلامةُ ظهرت لهدفٍ قائم');
 
-      // (٣) هدفٌ قائمٌ مشغولٌ مع --force ⇒ لا علامة (‏المحوُ ليس إنشاءً).
-      await up(busy.pool);
+      // (٣) هدفٌ قائمٌ مشغولٌ مع --force ⇒ لا علامة (‏المحوُ ليس إنشاءً). ‏`WL-597`: مُهاجَرٌ إلى ما قبلَ
+      // السياج، فالمُسيَّجُ يُرفَض (‏الخطوة ٤).
+      await up(busy.pool, { to: 23 });
+      assert.equal(await fenceSchemaPresent(busy.pool), false, 'الهدفُ مُسيَّجٌ قبلَ الاستعادة');
       const forced = await runNode(
         [RESTORE_SCRIPT, dump, '--database', busy.name, '--force'],
         sourceUrl,
@@ -1054,15 +1147,26 @@ test(
       assert.ok(forcedLine, forced.stdout);
       assert.equal(forcedLine[2], undefined, 'العلامةُ ظهرت مع --force على هدفٍ قائم');
 
-      // (٤) الهدفُ الذي أُنشئَ في (١) قائمٌ الآن: استعادةٌ ثانيةٌ إليه بـ--force بلا علامة.
-      const again = await runNode(
-        [RESTORE_SCRIPT, dump, '--database', fresh, '--force'],
-        sourceUrl,
-      );
-      assert.equal(again.code, 0, again.stderr);
-      const againLine = marker.exec(again.stdout);
-      assert.ok(againLine, again.stdout);
-      assert.equal(againLine[2], undefined, 'العلامةُ ظهرت لهدفٍ أنشأته استعادةٌ سابقة');
+      // (٤) الهدفُ الذي أُنشئَ في (١) قائمٌ الآن ومُسيَّج (‏النسخةُ تحملُ `fence`). ‏`WL-597`: استعادةٌ
+      // ثانيةٌ إليه بـ--force تُرفَضُ بـ`RESTORE_TARGET_FENCED` بلا علامةٍ ولا سطرِ نجاح، والهدفُ كما هو.
+      // (‏كانت تُقبَلُ وتمحو السياج؛ وأنّ «هدفاً قائماً مع --force لا علامةَ له» تثبتُه الخطوة ٣.)
+      const freshPool = new pg.Pool({ connectionString: databaseUrlFor(fresh), max: 1 });
+      try {
+        assert.equal(await fenceSchemaPresent(freshPool), true, 'الهدفُ المستعادُ بلا fence');
+        const beforeAgain = await targetImage(freshPool);
+        const again = await runNode(
+          [RESTORE_SCRIPT, dump, '--database', fresh, '--force'],
+          sourceUrl,
+        );
+        assert.equal(again.code, 1, again.stdout);
+        assert.match(again.stderr, /\[RESTORE_TARGET_FENCED\]/);
+        const againLine = marker.exec(again.stdout);
+        assert.equal(againLine, null, again.stdout);
+        assert.doesNotMatch(again.stdout, /أُنشئت/, 'العلامةُ ظهرت لهدفٍ أنشأته استعادةٌ سابقة');
+        assert.equal(await targetImage(freshPool), beforeAgain, 'الرفضُ غيّرَ الهدف');
+      } finally {
+        await freshPool.end();
+      }
 
       // (٥) فشلٌ بعدَ إنشاءِ الهدف (‏بيانٌ لا يطابق) ⇒ لا سطرَ نجاحٍ ولا علامة.
       const failedName = `createdfail_${crypto.randomBytes(4).toString('hex')}`;
@@ -1697,3 +1801,339 @@ for (const [label, args, url, code] of /** @type {Array<[string, string[], strin
     assert.match(result.stderr, new RegExp(`\\[${code}\\]`));
   });
 }
+
+/**
+ * ‏`WL-597`: `--force` على هدفٍ يُفترَضُ رفضُه، والصورةُ قبلُ وبعدُ متطابقة.
+ * @param {{ dump: string, sourceUrl: string }} backup
+ * @param {string} database
+ * @param {import('pg').Pool} pool
+ * @param {string} code
+ * @param {string} why
+ */
+async function assertForceRefused(backup, database, pool, code, why) {
+  const before = await targetImage(pool);
+  const restore = await runNode(
+    [RESTORE_SCRIPT, backup.dump, '--database', database, '--force'],
+    backup.sourceUrl,
+  );
+  assert.equal(restore.code, 1, `${why}: ${restore.stdout}`);
+  assert.match(restore.stderr, new RegExp(`\\[${code}\\]`), why);
+  // السياجُ قائمٌ قبلَ الطلب: يرفضُه الفحصُ نفسُه، لا الحجزُ وحدَه (‏الحجزُ للسباق).
+  assert.match(restore.stderr, /مخطّطُ fence موجود/, why);
+  assert.doesNotMatch(restore.stdout, /RESTORE_OK/, why);
+  assert.equal(await targetImage(pool), before, `${why}: الرفضُ غيّرَ الهدف`);
+}
+
+/**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<string>}
+ */
+async function fenceState(pool) {
+  const r = await pool.query(`SELECT fence.effective_state()->>'state' AS s`);
+  return String(/** @type {Record<string, unknown>} */ (r.rows[0])['s']);
+}
+
+test(
+  'WL-597: `--force` يرفضُ كلَّ هدفٍ مُسيَّج (‏HALTED وRUNNING وRECOVERY_REQUIRED ومُهاجَراً بلا إقلاع) ولا يمسُّه',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const backup = await seededBackup('fenced');
+    // المُهاجَرُ بلا إقلاعٍ يُنشأُ **قبلَ** الحزام: الحزامُ يحتوي وصولَ PUBLIC إلى قواعدِ العنقودِ القائمة،
+    // وقاعدةٌ تُنشأُ بعدَه يراها `check_fenced()` وصولاً فلا يكتملُ الإيقافُ قبلَ الاستئناف.
+    const unbooted = await createIsolatedDatabase('fencedunbooted');
+    await up(unbooted.pool);
+    await seedEveryTable(unbooted.pool);
+    const h = await harness('wl597fenced');
+    const restoredName = `fencedrr_${crypto.randomBytes(4).toString('hex')}`;
+    /** @type {import('pg').Pool | undefined} */
+    let restoredPool;
+    try {
+      // نسخةٌ من الهدفِ المُقلَعِ نفسِه، تُستعادُ إلى قاعدةٍ نظيفةٍ فتصيرُ RECOVERY_REQUIRED (‏بلا --force).
+      const haltedDump = path.join(backup.dir, 'halted.dump');
+      const taken = await runNode([BACKUP_SCRIPT, 'create', haltedDump], databaseUrlFor(h.db.name));
+      assert.equal(taken.code, 0, taken.stderr);
+
+      assert.equal(await fenceState(h.db.pool), 'HALTED');
+      await assertForceRefused(backup, h.db.name, h.db.pool, 'RESTORE_TARGET_FENCED', 'HALTED');
+
+      await h.resume();
+      assert.equal(await fenceState(h.db.pool), 'RUNNING');
+      await assertForceRefused(backup, h.db.name, h.db.pool, 'RESTORE_TARGET_FENCED', 'RUNNING');
+
+      const placed = await runNode(
+        [RESTORE_SCRIPT, haltedDump, '--database', restoredName],
+        backup.sourceUrl,
+      );
+      assert.equal(placed.code, 0, placed.stderr);
+      restoredPool = new pg.Pool({ connectionString: databaseUrlFor(restoredName), max: 1 });
+      assert.equal(await fenceState(restoredPool), 'RECOVERY_REQUIRED');
+      await assertForceRefused(
+        backup,
+        restoredName,
+        restoredPool,
+        'RESTORE_TARGET_FENCED',
+        'RECOVERY_REQUIRED',
+      );
+
+      // مُهاجَرٌ إلى 0024 أو بعدَها ولم يُقلَعْ قطّ: مُسيَّجٌ أيضاً، و`--force` لا يستبدلُه.
+      assert.equal(await fenceSchemaPresent(unbooted.pool), true);
+      await assertForceRefused(
+        backup,
+        unbooted.name,
+        unbooted.pool,
+        'RESTORE_TARGET_FENCED',
+        'مُهاجَرٌ بلا إقلاع',
+      );
+    } finally {
+      await restoredPool?.end();
+      await backup.source.pool.query(
+        `DROP DATABASE IF EXISTS ${quoteIdent(restoredName)} WITH (FORCE)`,
+      );
+      await unbooted.drop();
+      await h.close();
+      await backup.source.drop();
+    }
+  },
+);
+
+for (const [label, prepare, detail] of /** @type {const} */ ([
+  [
+    'قادحُ أحداثٍ xf_* بلا مخطّطِ fence',
+    async (/** @type {import('pg').Pool} */ pool) => {
+      await pool.query(
+        `CREATE FUNCTION public.wl597_noop() RETURNS event_trigger LANGUAGE plpgsql AS $f$BEGIN END$f$`,
+      );
+      await pool.query(
+        'CREATE EVENT TRIGGER xf_ddl_start ON ddl_command_start EXECUTE FUNCTION public.wl597_noop()',
+      );
+    },
+    /قادح xf_ddl_start/,
+  ],
+  [
+    'دفترٌ فيه الهجرةُ 0024 بلا مخطّطِ fence',
+    async (/** @type {import('pg').Pool} */ pool) => {
+      await pool.query(
+        `INSERT INTO public.schema_migrations (version, name, checksum, applied_by)
+         VALUES (24, 'fence', repeat('0', 64), 'wl597-test')`,
+      );
+    },
+    /الهجرة 24/,
+  ],
+  [
+    'فحصٌ يتعذّر (‏دفترٌ بلا عمودِ version)',
+    async (/** @type {import('pg').Pool} */ pool) => {
+      await pool.query('ALTER TABLE public.schema_migrations RENAME COLUMN version TO v');
+    },
+    /تعذّرَ فحصُ السياج.*42703/,
+  ],
+])) {
+  test(
+    `WL-597: ${label} ⇒ RESTORE_FENCE_CHECK_FAILED، رفضٌ مغلقٌ والهدفُ كما هو`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const backup = await seededBackup('fencecheck');
+      const target = await createIsolatedDatabase('fencecheckdst');
+      try {
+        await up(target.pool, { to: 23 });
+        await prepare(target.pool);
+        assert.equal(await fenceSchemaPresent(target.pool), false);
+        const before = await targetImage(target.pool);
+        const restore = await runNode(
+          [RESTORE_SCRIPT, backup.dump, '--database', target.name, '--force'],
+          backup.sourceUrl,
+        );
+        assert.equal(restore.code, 1, restore.stdout);
+        assert.match(restore.stderr, /\[RESTORE_FENCE_CHECK_FAILED\]/);
+        assert.match(restore.stderr, detail);
+        assert.doesNotMatch(restore.stdout, /RESTORE_OK/);
+        assert.equal(await targetImage(target.pool), before, 'الرفضُ المغلقُ غيّرَ الهدف');
+      } finally {
+        await target.drop();
+        await backup.source.drop();
+      }
+    },
+  );
+}
+
+/**
+ * ‏`WL-597`: هدفٌ غيرُ مُسيَّجٍ مشغول (‏مُهاجَرٌ إلى 23 وفيه صفّ) وجلستان عليه.
+ * @param {string} label
+ */
+async function raceTarget(label) {
+  const target = await createIsolatedDatabase(label);
+  await up(target.pool, { to: 23 });
+  await target.pool.query(
+    `INSERT INTO state.models (id, name, provider, purpose, fingerprint, status, model_version)
+     VALUES ('stale-model', 'Stale', 'internal', 'operations', $1, 'registered', '0.0.1')`,
+    ['f'.repeat(64)],
+  );
+  const holder = new pg.Client({ connectionString: databaseUrlFor(target.name) });
+  const creator = new pg.Client({ connectionString: databaseUrlFor(target.name) });
+  await holder.connect();
+  await creator.connect();
+  const pid = async (/** @type {pg.Client} */ c) =>
+    Number((await c.query('SELECT pg_backend_pid() AS p')).rows[0].p);
+  return {
+    target,
+    holder,
+    creator,
+    pids: [await pid(holder), await pid(creator)],
+    close: async () => {
+      await holder.end().catch(() => undefined);
+      await creator.end().catch(() => undefined);
+      await target.drop();
+    },
+  };
+}
+
+test(
+  'WL-597 TOCTOU (A): سياجٌ يُنشأُ ويُلتزَمُ بعدَ فحصِ المخطّطِ وقبلَ المحو ⇒ الحجزُ يرفضُ والهدفُ كما هو',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const backup = await seededBackup('raceA');
+    const race = await raceTarget('raceA');
+    try {
+      const before = await targetImage(race.target.pool);
+      // يُعلِّقُ الاستعادةَ عندَ قراءةِ الدفترِ في الفحص — بعدَ أن رأت `to_regnamespace('fence')` غائباً.
+      await race.holder.query('BEGIN');
+      await race.holder.query('LOCK TABLE public.schema_migrations IN ACCESS EXCLUSIVE MODE');
+      const running = runNode(
+        [RESTORE_SCRIPT, backup.dump, '--database', race.target.name, '--force'],
+        backup.sourceUrl,
+      );
+      assert.ok(
+        await waitForLockWait(
+          backup.source.pool,
+          race.target.name,
+          '%FROM public."schema_migrations" WHERE version%',
+          race.pids,
+        ),
+        'الاستعادةُ لم تقف عندَ قراءةِ الدفترِ في الفحص',
+      );
+      await race.creator.query('CREATE SCHEMA fence');
+      await race.holder.query('COMMIT');
+      const restore = await running;
+      assert.equal(restore.code, 1, restore.stdout);
+      assert.match(restore.stderr, /\[RESTORE_TARGET_FENCED\]/);
+      assert.match(restore.stderr, /أثناءَ الفحص/);
+      assert.equal(
+        await targetImage(race.target.pool, { omitSchema: 'fence' }),
+        before,
+        'محوٌ بعدَ إنشاءِ السياج',
+      );
+    } finally {
+      await race.close();
+      await backup.source.drop();
+    }
+  },
+);
+
+for (const finish of /** @type {const} */ (['COMMIT', 'ROLLBACK'])) {
+  test(
+    `WL-597 TOCTOU (B-${finish}): \`CREATE SCHEMA fence\` غيرُ مُلتزَمٍ قبلَ الاستعادة ⇒ الحجزُ ينتظرُه، ثمّ ${finish === 'COMMIT' ? 'يرفضُ والهدفُ كما هو' : 'يمضي ويستعيد'}`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const backup = await seededBackup(`raceB${finish}`);
+      const race = await raceTarget(`raceB${finish}`);
+      try {
+        const before = await targetImage(race.target.pool);
+        await race.creator.query('BEGIN');
+        await race.creator.query('CREATE SCHEMA fence');
+        const running = runNode(
+          [RESTORE_SCRIPT, backup.dump, '--database', race.target.name, '--force'],
+          backup.sourceUrl,
+        );
+        assert.ok(
+          await waitForLockWait(
+            backup.source.pool,
+            race.target.name,
+            'CREATE SCHEMA "fence"',
+            race.pids,
+          ),
+          'الحجزُ لم ينتظر إنشاءَ السياجِ غيرَ المُلتزَم',
+        );
+        await race.creator.query(finish);
+        const restore = await running;
+        if (finish === 'COMMIT') {
+          assert.equal(restore.code, 1, restore.stdout);
+          assert.match(restore.stderr, /\[RESTORE_TARGET_FENCED\]/);
+          assert.equal(
+            await targetImage(race.target.pool, { omitSchema: 'fence' }),
+            before,
+            'محوٌ بعدَ التزامِ السياج',
+          );
+        } else {
+          assert.equal(restore.code, 0, restore.stderr);
+          assert.match(restore.stdout, /\[RESTORE_OK\]/);
+          assert.equal(await contentsDigest(race.target.pool), backup.sourceDigest);
+        }
+      } finally {
+        await race.close();
+        await backup.source.drop();
+      }
+    },
+  );
+}
+
+test(
+  'WL-597 TOCTOU (C): بعدَ الحجزِ ينتظرُ إنشاءُ السياجِ التزامَ المحو — ونافذةُ ما بعدَ الالتزامِ قائمة (‏خطرٌ متبقٍّ معلَن)',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    const backup = await seededBackup('raceC');
+    const race = await raceTarget('raceC');
+    try {
+      // يُعلِّقُ الاستعادةَ بعدَ الحجزِ عندَ `DROP SCHEMA state` (‏قفلٌ مشتركٌ على جدولٍ فيه).
+      await race.holder.query('BEGIN');
+      await race.holder.query('SELECT count(*) FROM state.models');
+      const running = runNode(
+        [RESTORE_SCRIPT, backup.dump, '--database', race.target.name, '--force'],
+        backup.sourceUrl,
+      );
+      assert.ok(
+        await waitForLockWait(
+          backup.source.pool,
+          race.target.name,
+          'DROP SCHEMA IF EXISTS "state"%',
+          race.pids,
+        ),
+        'الاستعادةُ لم تقف عندَ المحوِ بعدَ الحجز',
+      );
+      /** @type {string[]} */
+      const order = [];
+      const creating = race.creator.query('CREATE SCHEMA fence').then(
+        () => order.push('fence-created'),
+        (/** @type {any} */ error) => order.push(`fence-failed:${error.code}`),
+      );
+      assert.ok(
+        await waitForLockWait(backup.source.pool, race.target.name, 'CREATE SCHEMA fence', [
+          race.pids[0] ?? 0,
+        ]),
+        'إنشاءُ السياجِ لم ينتظر الحجز',
+      );
+      assert.deepEqual(order, [], 'أُنشئَ السياجُ قبلَ التزامِ المحو');
+      await race.holder.query('COMMIT');
+      await creating;
+      const restore = await running;
+      // السياجُ أُنشئَ **بعدَ** التزامِ المحو، فلا محوَ بعدَ سياج. لكنّه أُنشئَ قبلَ `pg_restore`: النسخةُ
+      // مُسيَّجة، فيسقطُ `pg_restore` عندَ `CREATE SCHEMA fence` ويبقى الهدفُ ممحوّاً. هذه نافذةُ ما بعدَ
+      // الالتزام، **غيرُ مغلقة** (‏`WL-597`، خطرٌ متبقٍّ في `docs/RECOVERY.md`)؛ يثبتُها الاختبارُ ولا يُخفيها.
+      assert.deepEqual(order, ['fence-created']);
+      assert.equal(restore.code, 1, restore.stdout);
+      assert.match(restore.stderr, /\[RESTORE_COMMAND_FAILED\]/);
+      const stale = await race.target.pool.query(
+        `SELECT to_regclass('state.models') IS NOT NULL AS present`,
+      );
+      if (stale.rows[0].present === true) {
+        const row = await race.target.pool.query(
+          `SELECT 1 FROM state.models WHERE id = 'stale-model'`,
+        );
+        assert.equal(row.rowCount, 0, 'الصفُّ القديمُ باقٍ: لم يحدث المحو');
+      }
+      // الهدفُ ممحوٌّ: لا صفَّ قديم، والسياجُ الفارغُ الذي أُنشئَ في النافذةِ حاضر.
+      assert.equal(await fenceSchemaPresent(race.target.pool), true);
+    } finally {
+      await race.close();
+      await backup.source.drop();
+    }
+  },
+);

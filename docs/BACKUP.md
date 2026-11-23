@@ -41,7 +41,9 @@ node scripts/restore.mjs /tmp/state.dump --database state_restore_clean
 
 تنشئ الاستعادة قاعدة الهدف إن لم توجد. وترفض قاعدة تحتوي `state` أو
 `public.schema_migrations` بالرمز `RESTORE_TARGET_NOT_CLEAN`، ولا تمحوها إلا مع
-`--force` الصريح. بعد `pg_restore` تقيس الأداة عدّ الصفوف ونسخة الهجرة في البيان؛
+`--force` الصريح، و`--force` نفسه يرفض كل هدف مُسيَّج (فيه مخطّط `fence`، أي كل قاعدة
+مُهاجَرة إلى 0024 أو أحدث) بالرمز `RESTORE_TARGET_FENCED` دون محو (‏`WL-597`؛ انظر
+`docs/RECOVERY.md` وحدّه `LIVE-78`). بعد `pg_restore` تقيس الأداة عدّ الصفوف ونسخة الهجرة في البيان؛
 أي عدم تطابق يفشل برمز مسمّى غير صفري.
 
 ## تمرين الاستعادة
