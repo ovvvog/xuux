@@ -491,8 +491,16 @@ export async function live78PrototypeRestore(o) {
   // ‏psql إن خرجَ مبكّراً (‏رفضٌ في التمهيد، انقطاع) فلا قارئَ لـ`pg_restore`: يُقتَلُ كي لا يعلقَ على الأنبوب.
   /** @type {import('node:child_process').ChildProcess | null} */
   let dumperRef = null;
+  // ‏وإذا انغلقَ مدخلُ psql انفصلَ الأنبوبُ وبقيَ خرجُ `pg_restore` موقوفاً ببقيّةٍ لا تُقرأ، فلا يُطلَقُ `close`
+  // ويفرغُ حلقُ الأحداثِ والوعدُ معلّق (‏مقيس: 4/6 تشغيلاتٍ برفضِ التمهيد، وفي CI). البقيّةُ تُصرَفُ إلى لا شيء.
+  const discardDumper = () => {
+    dumperRef?.stdout?.unpipe();
+    dumperRef?.stdout?.resume();
+  };
+  psqlChild.stdin.on('close', discardDumper);
   const exited = new Promise((resolve) =>
     psqlChild.on('close', (code) => {
+      discardDumper();
       dumperRef?.kill('SIGKILL');
       resolve(code ?? 1);
     }),
@@ -504,6 +512,7 @@ export async function live78PrototypeRestore(o) {
   dumperRef = dumper;
   dumper.stderr.on('data', (c) => (stderr += c));
   dumper.stdout.pipe(psqlChild.stdin, { end: false });
+  if (psqlChild.stdin.destroyed) discardDumper();
   const dumped = await new Promise((resolve) => dumper.on('close', (code) => resolve(code ?? 1)));
   if (psqlChild.exitCode !== null || psqlChild.stdin.destroyed) {
     // لا شيء: psql خرج.
