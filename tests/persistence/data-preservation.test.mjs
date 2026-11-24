@@ -208,7 +208,9 @@ async function l78LargeSource(/** @type {string} */ label) {
   return source;
 }
 
-for (const mode of /** @type {const} */ (['cancel', 'terminate'])) {
+// ‏حالتا `terminate` نُقلتا حرفيّاً إلى `restart.test.mjs` (‏`WL-608`): الأربعُ معاً تجاوزت مهلةَ الملفِّ 120 ث
+// على CI هنا أيضاً (‏التشغيلةُ 45473342006: 18–37 ث لكلّ حالة).
+for (const mode of /** @type {('cancel' | 'terminate')[]} */ (['cancel'])) {
   test(
     `WL-606: ${mode === 'cancel' ? 'فشلُ حسابِ' : 'انقطاعُ الاتصالِ أثناءَ حسابِ'} البصمةِ في النسخ ⇒ BACKUP_DIGEST_FAILED بلا أرشيفٍ ولا بيانٍ ولا جدولٍ مرحليّ`,
     { skip: skipWithoutDatabase, timeout: 120_000 },
