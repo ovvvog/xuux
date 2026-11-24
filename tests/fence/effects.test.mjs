@@ -5,12 +5,14 @@
  * `NOT RUN` بسببِه (تخطٍّ صريحٌ لا نجاح) — ويُشغَّلُ في `scripts/fence-lab.mjs`.
  *
  * ‏`WL-608` (‏`§7` مهلةُ الملفّ): نُقلت هنا حرفيّاً كتلةُ WL-541 (‏أثرُ NOTIFY المتبقّي — قناةُ أثرٍ) من
- * `tests/fence/db-fence-privileges.test.mjs`، بقاعدةٍ حقيقيّة وتُتخطّى بلا `DATABASE_URL`.
+ * `tests/fence/db-fence-privileges.test.mjs`، وأُضيفت كتلةُ `WL-608 LIVE-75` (‏قدرةُ العاملِ الفعليّةُ عبرَ انقضاءِ
+ * الإيجار — ما يقدرُ أن يُحدِثَه من أثرٍ في القاعدة). كلتاهما بقاعدةٍ حقيقيّة وتُتخطّيان بلا `DATABASE_URL`.
  */
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { randomBytes } from 'node:crypto';
 import test, { after, before, describe } from 'node:test';
 
 import pg from 'pg';
@@ -33,8 +35,9 @@ import { createPolicyDecisionPoint } from '../../src/policy/engine.mjs';
 import { EnforcementPoint } from '../../src/policy/enforcement-point.mjs';
 import { loadPolicyBundle } from '../../src/policy/loader.mjs';
 import { down as migratorDown } from '../../src/persistence/migrator.mjs';
-import { quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
-import { NO_EFFECTS, harness, rejection, rejectsWith } from '../helpers/fence-harness.mjs';
+import { databaseUrl, quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
+import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
+import { NO_EFFECTS, harness, rejection, rejectsWith, t_note } from '../helpers/fence-harness.mjs';
 
 /** @param {number} pid */
 function alive(pid) {
@@ -994,3 +997,307 @@ describe('WL-541: الأثرُ المتبقّي لـNOTIFY', { skip: skipWithout
     }
   });
 });
+
+// ═══ ‏`WL-608` — ‏`LIVE-75`: ما يقدرُ عليه العاملُ **فعلاً** عبرَ انقضاءِ الإيجار ═══════════════════════════
+// حارسُ الكتابةِ (‏`fence.guard_write`) زنادُ عبارةٍ (‏BEFORE … FOR EACH STATEMENT) يقرأُ `clock_timestamp()` **عندَ بدءِ
+// العبارة**؛ وقراءةُ العامل تمرُّ بسياسةِ `xf_read` (‏`fence.read_ok()`). لا فحصَ عندَ `COMMIT`. تُقاسُ هنا الحدودُ
+// الفعليّة بلا حاصد (‏أسوأُ حالةٍ: لا مُشرِفَ ولا حاصدَ حيّ)، بقاعدةٍ وساعةٍ حقيقيّتين، ويُطبَعُ كلُّ قياسٍ بـ`t_note`.
+// ‏**اكتشافُ الوفاةِ ليس منعَ الكتابة**: ما يُثبَتُ هنا حدودُ القاعدة، لا أنّ المُشرِفَ يمنعُ شيئاً. ‏`LIVE-75` يبقى OPEN.
+describe(
+  'WL-608 LIVE-75: قدرةُ العاملِ الفعليّةُ على القراءةِ والكتابةِ عبرَ انقضاءِ الإيجار (‏بلا حاصد)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    const WINDOW_S = 5; // ‏الحدُّ الأدنى في 0024 (‏CHECK BETWEEN 5 AND 600)
+    before(async () => {
+      h = await harness('wl608lease');
+      await h.sovereign.command('lease_set', { lease_window_s: WINDOW_S, lease_renew_s: 1 });
+      await h.resume();
+    });
+    after(async () => {
+      if (h) await h.close();
+    });
+    const sleep = (/** @type {number} */ ms) => new Promise((r) => setTimeout(r, ms));
+    /** ساعةُ القاعدة (‏ms). */
+    const dbNow = async () =>
+      Number(
+        (
+          await h.db.pool.query(
+            `SELECT (extract(epoch FROM clock_timestamp()) * 1000)::float8 AS t`,
+          )
+        ).rows[0].t,
+      );
+    /** @param {string} role */
+    const expiresAt = async (role) =>
+      Number(
+        (
+          await h.db.pool.query(
+            `SELECT (extract(epoch FROM expires_at) * 1000)::float8 AS t FROM fence.run_lease WHERE role_name = $1`,
+            [role],
+          )
+        ).rows[0].t,
+      );
+    /** حتى تتجاوزَ ساعةُ القاعدةِ اللحظةَ `ms`. @param {number} ms */
+    const untilDb = async (ms) => {
+      for (let now = await dbNow(); now <= ms; now = await dbNow())
+        await sleep(Math.min(200, ms - now + 5));
+    };
+    /** @param {number} id */
+    const committed = async (id) =>
+      (await h.db.pool.query('SELECT v FROM state.fence_probe WHERE id = $1', [id])).rows[0]?.v ??
+      null;
+    /**
+     * @param {import('pg').Client} c @param {string} sql @param {unknown[]} [p]
+     * @returns {Promise<{ ok: boolean, code?: string, command?: string, rows?: any[] }>}
+     */
+    const outcome = (c, sql, p = []) =>
+      c.query(sql, p).then(
+        (r) => ({ ok: true, command: r.command, rows: r.rows }),
+        // ‏النصُّ غيرُ قابلٍ للعدّ: يظهرُ في التشخيصِ ولا يدخلُ مقارنةَ deepEqual.
+        (/** @type {any} */ e) =>
+          Object.defineProperty({ ok: false, code: String(e.code ?? e.message) }, 'message', {
+            value: String(e.message),
+            enumerable: false,
+          }),
+      );
+    /** @param {'alpha' | 'beta'} id */
+    const bootWorker = async (id) => {
+      const a = await h.boot(id);
+      const role = String(a.credential.role_name);
+      return { role, c: /** @type {import('pg').Client} */ (a.client), exp: await expiresAt(role) };
+    };
+
+    test('L75-W1: معاملةٌ كتبت قبلَ الانقضاء تُلتزَمُ بعدَه (‏COMMIT بلا فحص)، وعبارةٌ جديدةٌ في معاملةٍ مفتوحةٍ تُرفَضُ وتُسقِطُ ما قبلَها', async () => {
+      const [a, b] = await Promise.all([bootWorker('alpha'), bootWorker('beta')]);
+      await a.c.query('BEGIN');
+      await a.c.query(`INSERT INTO state.fence_probe (id, v) VALUES (60801, 'before-expiry')`);
+      await b.c.query('BEGIN');
+      await b.c.query(`INSERT INTO state.fence_probe (id, v) VALUES (60802, 'before-expiry')`);
+      const exp = Math.max(a.exp, b.exp);
+      await untilDb(exp + 1500);
+      // ‏(أ) ‏COMMIT بعدَ الانقضاءِ بـ1.5 ث: لا فحصَ عندَ الالتزام.
+      const commitAt = await dbNow();
+      const commit = await outcome(a.c, 'COMMIT');
+      assert.deepEqual(commit, { ok: true, command: 'COMMIT', rows: [] });
+      assert.equal(
+        await committed(60801),
+        'before-expiry',
+        'كتابةٌ بدأت قبلَ الانقضاءِ صارت مرئيّةً بعدَه',
+      );
+      // ‏(ب) عبارةٌ جديدةٌ بعدَ الانقضاءِ في المعاملةِ المفتوحة ⇒ ‏XF009، والمعاملةُ كلُّها تسقط.
+      assert.deepEqual(
+        await outcome(b.c, `INSERT INTO state.fence_probe (id, v) VALUES (60803, 'after')`),
+        {
+          ok: false,
+          code: 'XF009',
+        },
+      );
+      assert.equal((await outcome(b.c, 'COMMIT')).command, 'ROLLBACK');
+      assert.equal(await committed(60802), null);
+      assert.equal(await committed(60803), null);
+      // ‏وبعدَها كلُّ كتابةٍ مرفوضة.
+      assert.equal(
+        (await outcome(a.c, `INSERT INTO state.fence_probe (id, v) VALUES (60804, 'x')`)).code,
+        'XF009',
+      );
+      t_note('L75-W1', {
+        commitAfterExpiryMs: Math.round(commitAt - a.exp),
+        committed: true,
+        newStatement: 'XF009',
+      });
+    });
+
+    test('L75-W2: عبارةٌ واحدةٌ بدأت قبلَ الانقضاءِ وأنتجت صفَّها بعدَه ⇒ سياسةُ RLS (‏WITH CHECK) تفحصُ كلَّ صفٍّ بساعةٍ حقيقيّة فترفضُه (‏42501) ولا يُكتَبُ شيء', async () => {
+      // ‏قياسٌ لا افتراض: حدُّ الكتابةِ ليس بدءَ العبارةِ وحدَه — فحصُ الصفِّ عندَ إنتاجِه يُضيِّقُه.
+      const a = await bootWorker('alpha');
+      await untilDb(a.exp - 1000);
+      const startedAt = await dbNow();
+      const r = await outcome(
+        a.c,
+        `INSERT INTO state.fence_probe (id, v)
+           SELECT 60805, (extract(epoch FROM clock_timestamp()) * 1000)::bigint::text FROM (SELECT pg_sleep(2)) AS s`,
+      );
+      const endedAt = await dbNow();
+      assert.ok(startedAt < a.exp && endedAt > a.exp, 'العبارةُ عبرت لحظةَ الانقضاء');
+      assert.equal(r.ok, false);
+      assert.equal(r.code, '42501', String(/** @type {any} */ (r).message));
+      assert.match(String(/** @type {any} */ (r).message), /row-level security/);
+      assert.equal(await committed(60805), null, 'لا صفَّ مُنتَجاً بعدَ الانقضاءِ كُتِب');
+      // ‏والضابط: العبارةُ نفسُها بلا نومٍ قبلَ الانقضاءِ تُكتَب (‏الرفضُ سببُه الزمنُ لا الصياغة).
+      const b = await bootWorker('beta');
+      const ok = await outcome(
+        b.c,
+        `INSERT INTO state.fence_probe (id, v)
+           SELECT 60807, (extract(epoch FROM clock_timestamp()) * 1000)::bigint::text FROM (SELECT pg_sleep(0)) AS s`,
+      );
+      assert.equal(ok.ok, true, String(/** @type {any} */ (ok).message));
+      t_note('L75-W2', {
+        statementStartBeforeExpiryMs: Math.round(a.exp - startedAt),
+        rowAfterExpiry: 'rejected-42501-rls',
+      });
+    });
+
+    test('L75-R1: القراءة — قبلَ الانقضاءِ ترى، وبعدَه صفرُ صفوفٍ بلا خطأ (‏حتى داخلَ REPEATABLE READ بدأت قبلَه)', async () => {
+      await h.db.pool.query(
+        `INSERT INTO state.fence_probe (id, v) VALUES (60806, 'visible') ON CONFLICT DO NOTHING`,
+      );
+      const a = await bootWorker('alpha');
+      const count = async () =>
+        (await a.c.query(`SELECT count(*)::int AS n FROM state.fence_probe WHERE id = 60806`))
+          .rows[0].n;
+      assert.equal(await count(), 1, 'العاملُ يقرأُ قبلَ الانقضاء');
+      await a.c.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
+      assert.equal(await count(), 1);
+      await untilDb(a.exp + 300);
+      assert.equal(await count(), 0, 'داخلَ المعاملةِ نفسِها: read_ok بساعةٍ حقيقيّةٍ لا بلقطة');
+      await a.c.query('ROLLBACK');
+      assert.equal(await count(), 0, 'خارجَها: لا صفوف');
+      // ‏الخطأُ غيرُ مُعلَن: القراءةُ صفرٌ صامت — المُستدعي لا يعرفُ أنّه مرفوض.
+      const r = await outcome(a.c, `SELECT id FROM state.fence_probe`);
+      assert.deepEqual(r, { ok: true, command: 'SELECT', rows: [] });
+      t_note('L75-R1', {
+        beforeExpiry: 1,
+        afterExpiryInRepeatableRead: 0,
+        afterExpiry: 0,
+        error: false,
+      });
+    });
+
+    test('L75-C1: انقضاءٌ متزامنٌ مع الالتزام — عباراتٌ ذاتيّةُ الالتزامِ كلَّ ~10 ms عبرَ اللحظة: آخرُ قَبولٍ قبلَها وأوّلُ رفضٍ XF009 بعدَها', async () => {
+      const a = await bootWorker('alpha');
+      await untilDb(a.exp - 400);
+      /** @type {Array<{ at: number, ok: boolean, code?: string }>} */
+      const seen = [];
+      for (let id = 60900; id < 61100; id++) {
+        const r = await outcome(
+          a.c,
+          `INSERT INTO state.fence_probe (id, v) VALUES ($1, '') RETURNING (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS at`,
+          [id],
+        );
+        const at = r.ok ? Number(/** @type {any} */ (r).rows[0].at) : await dbNow();
+        seen.push({ at, ok: r.ok, code: /** @type {any} */ (r).code });
+        if (!r.ok) break;
+        await sleep(10);
+      }
+      const accepted = seen.filter((s) => s.ok);
+      const rejected = seen.find((s) => !s.ok);
+      assert.ok(accepted.length > 0 && rejected, 'القياسُ عبرَ اللحظة');
+      assert.equal(rejected?.code, 'XF009');
+      const lastOk = /** @type {{ at: number }} */ (accepted.at(-1)).at;
+      assert.ok(lastOk <= a.exp, `آخرُ قَبولٍ بدأَ قبلَ الانقضاء (${lastOk - a.exp} ms)`);
+      // ‏كلُّ ما قُبِلَ التُزِمَ فعلاً (‏ذاتيُّ الالتزام).
+      const n = (
+        await h.db.pool.query(
+          `SELECT count(*)::int AS n FROM state.fence_probe WHERE id BETWEEN 60900 AND 61099`,
+        )
+      ).rows[0].n;
+      assert.equal(n, accepted.length);
+      t_note('L75-C1', {
+        accepted: accepted.length,
+        lastAcceptedBeforeExpiryMs: Math.round(a.exp - lastOk),
+        firstRejectedAfterExpiryMs: Math.round(Number(rejected?.at) - a.exp),
+      });
+    });
+
+    test('L75-N1: انقطاعُ وصلةِ الجذرِ أثناءَ التجديد — قبلَ الالتزام لا يُجدَّد، وبعدَه يُجدَّدُ والجذرُ يرى فشلاً؛ والقاعدةُ وحدَها تحكمُ الكتابة', async () => {
+      // ‏(أ) قبلَ الالتزام: التجديدُ محجوزٌ خلفَ قفلِ صفِّ الإيجار، ثمّ تُقطَعُ جلسةُ الجذر.
+      const a = await bootWorker('alpha');
+      const blocker = await h.db.pool.connect();
+      const rootSide = await h.login('xf_root');
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query('SELECT 1 FROM fence.run_lease WHERE role_name = $1 FOR UPDATE', [
+          a.role,
+        ]);
+        const rootPid = (await rootSide.query('SELECT pg_backend_pid() AS p')).rows[0].p;
+        rootSide.on('error', () => {});
+        const renewing = outcome(rootSide, 'SELECT fence.renew_lease($1)', [a.role]);
+        await sleep(300);
+        await h.db.pool.query('SELECT pg_terminate_backend($1)', [rootPid]);
+        const r = await renewing;
+        assert.equal(r.ok, false, 'الجذرُ يرى فشلاً');
+        await blocker.query('ROLLBACK');
+      } finally {
+        blocker.release();
+        await rootSide.end().catch(() => {});
+      }
+      assert.equal(await expiresAt(a.role), a.exp, 'لم يُجدَّد');
+      await untilDb(a.exp + 200);
+      assert.equal(
+        (await outcome(a.c, `INSERT INTO state.fence_probe (id, v) VALUES (61200, 'x')`)).code,
+        'XF009',
+      );
+      // ‏ولا يُحيي تجديدٌ لاحقٌ ما انقضى (‏0025).
+      assert.equal(
+        (await outcome(h.rootClient, 'SELECT fence.renew_lease($1)', [a.role])).ok,
+        false,
+      );
+
+      // ‏(ب) بعدَ الالتزام: ‏COMMIT يصلُ ويُلتزَمُ ثمّ تُقطَعُ الوصلةُ قبلَ الرد.
+      const b = await bootWorker('beta');
+      // ‏التجديدُ قربَ النهاية (‏قبلَها بـ1.5 ث) ليكونَ الامتدادُ قابلاً للقياس.
+      await untilDb(b.exp - 1500);
+      const proxy = await startFaultProxy({
+        host: '127.0.0.1',
+        port: Number(new URL(String(databaseUrl())).port || 5432),
+      });
+      // ‏‏\`xf_root\` دورُ عنقودٍ مشترك: تُغيَّرُ كلمةُ مرورِه وحدَها كما يفعلُ الحزام (‏\`login\`)، ولا يُمَسُّ VALID UNTIL
+      // ‏إلا إن كان منقضياً فيُفتَحُ لحظةَ الدخولِ ويُعادُ كما كان (‏تعديلُه سابقاً كسرَ \`supervisorLab\` في الملفّ نفسِه — مقيس).
+      const password = randomBytes(12).toString('base64url');
+      const rootExpired = (
+        await h.db.pool.query(
+          `SELECT rolvaliduntil IS NOT NULL AND rolvaliduntil <= now() AS e FROM pg_roles WHERE rolname = 'xf_root'`,
+        )
+      ).rows[0].e;
+      await h.db.pool.query(
+        `ALTER ROLE xf_root PASSWORD '${password}'${rootExpired ? ` VALID UNTIL 'infinity'` : ''}`,
+      );
+      const url = new URL(String(databaseUrl()));
+      url.username = 'xf_root';
+      url.password = password;
+      url.pathname = `/${h.db.name}`;
+      const viaProxy = new pg.Client({ connectionString: proxy.urlFor(url.toString()) });
+      viaProxy.on('error', () => {});
+      try {
+        await viaProxy.connect();
+        if (rootExpired) await h.db.pool.query(`ALTER ROLE xf_root VALID UNTIL '-infinity'`);
+        await viaProxy.query('BEGIN');
+        const severed = proxy.severOn('renew_lease', { mode: 'after-commit' });
+        await viaProxy.query('SELECT fence.renew_lease($1)', [b.role]);
+        const commit = await outcome(viaProxy, 'COMMIT');
+        await severed;
+        assert.equal(commit.ok, false, 'الجذرُ يرى فشلاً');
+      } finally {
+        await viaProxy.end().catch(() => {});
+        await proxy.down();
+        // ‏كلمةُ المرورِ المؤقّتةُ تُبطَلُ بأخرى عشوائيّة (‏كما يتركُها الحزام)؛ VALID UNTIL كما كان.
+        await h.db.pool.query(
+          `ALTER ROLE xf_root PASSWORD '${randomBytes(18).toString('base64url')}'`,
+        );
+      }
+      const extended = await expiresAt(b.role);
+      assert.ok(
+        extended > b.exp + 1000,
+        `القاعدةُ جدّدت رغمَ أنّ الجذرَ رأى فشلاً (+${Math.round(extended - b.exp)} ms)`,
+      );
+      await untilDb(b.exp + 200);
+      const late = await outcome(b.c, `INSERT INTO state.fence_probe (id, v) VALUES (61201, 'x')`);
+      assert.equal(
+        late.ok,
+        true,
+        JSON.stringify({
+          late: { ...late, message: /** @type {any} */ (late).message },
+          extended,
+          exp: b.exp,
+          now: await dbNow(),
+        }) + ' العاملُ يكتبُ بعدَ الموعدِ الذي ظنّه الجذرُ نهايةً — حتى الموعدِ المُجدَّد',
+      );
+      t_note('L75-N1', {
+        beforeCommit: 'not-renewed',
+        afterCommit: 'renewed-but-root-saw-failure',
+        extraWindowMs: Math.round(extended - b.exp),
+      });
+    });
+  },
+);
