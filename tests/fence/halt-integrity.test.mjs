@@ -6,7 +6,7 @@
  * لا تُغيّرُ القارئَ الأصليّ، بل تُضافُ في مساراتِ قرارِ السياج.
  *
  * ‏`WL-608` (‏`§7` مهلةُ الملفّ): نُقلت هنا حرفيّاً كتلةُ `LIVE-75` ‏SUP-11..16 من `tests/fence/lease-reap-window.test.mjs`
- * (‏بلغَ مع SUP-17 والكتلةِ الجديدةِ نحوَ 127 ث من مهلةِ 120 ث). لا تعتمدُ على هذا الملفِّ إلا
+ * (‏بلغَ مع SUP-17 والكتلةِ الجديدةِ نحوَ 127 ث من مهلةِ 120 ث)، وأُضيفَ إليها SUP-17. لا تعتمدُ على هذا الملفِّ إلا
  * بالاستيراد؛ والعمّالُ يُطلَقون عبرَ `supervisorLab` بقاعدةٍ حقيقيّة (‏تُتخطّى بلا `DATABASE_URL`).
  */
 
@@ -779,6 +779,105 @@ describe(
       assert.ok(probeQ.issue >= 10 && probeQ.revoke >= 5, JSON.stringify(probeQ));
       assert.deepEqual(await active(), []);
       t_note('SUP-16', { probeQ, serial });
+    });
+
+    test('SUP-17 (‏WL-608): موتُ المُشرِفِ (‏SIGKILL) أثناءَ الإيقافِ المرتّبِ وأثناءَ التنظيف ⇒ ما لم يُلغَ يبقى ACTIVE حتى كنسِ التالي، والعنيدُ يبقى حيّاً بلا جلسة، ولا قفلَ عالق', async () => {
+      // ‏تسلسلُ \`stopAll\`: supervisor_stopping → تجميدُ الحُفّاظ → لكلِّ عاملٍ (‏إلغاءٌ ثمّ قتل) → إيقافُ الحاصد → فكُّ القفل.
+      // ‏نقطةُ الموتِ تُحدَّدُ بما في القاعدةِ لحظتَها (‏عددُ ما أُلغيَ بسببِ الإيقاف) — تُسجَّلُ ولا تُفترَض.
+      /** @type {Array<Record<string, unknown>>} */
+      const outcomes = [];
+      /** @type {Array<{ at: string, delayMs?: number, revoked?: number }>} */
+      const points = [
+        { at: 'stopping', delayMs: 0 },
+        { at: 'stopping', delayMs: 15 },
+        { at: 'stopping', delayMs: 40 },
+        { at: 'revoked', revoked: 1 },
+        { at: 'revoked', revoked: 2 },
+      ];
+      const stopRevoked = async () =>
+        (await creds()).filter((c) =>
+          String(c.revoke_reason ?? '').startsWith('SUPERVISOR:SUPERVISOR_STOP'),
+        ).length;
+      /** @type {number[]} */
+      const strays = [];
+      try {
+        for (const point of points) {
+          await clean();
+          const { cli, lines, cfgPath } = launchCli({ alpha: 'stubborn', beta: 'write' });
+          await l75Until(
+            () => lines.some((l) => l.ev === 'cli_started') || dead(cli),
+            20_000,
+            'المُشرِفُ أقلع',
+          );
+          const started = lines.find((l) => l.ev === 'cli_started');
+          assert.ok(started, `cli_started: ${JSON.stringify(lines).slice(0, 1500)}`);
+          /** @type {{ alpha: { role: string, pid: number }, beta: { role: string, pid: number } }} */
+          const w = /** @type {any} */ (
+            Object.fromEntries(
+              started.snapshot.workers.map((/** @type {any} */ x) => [
+                x.id,
+                { role: String(x.role), pid: Number(x.pid) },
+              ]),
+            )
+          );
+          for (const x of Object.values(w)) strays.push(x.pid);
+          await l75Until(async () => (await probe(probeId.alpha)) !== null, 8_000, 'العنيدُ يكتب');
+          cli.kill('SIGTERM');
+          if (point.at === 'stopping') {
+            await l75Until(
+              () => lines.some((l) => l.ev === 'supervisor_stopping') || dead(cli),
+              5_000,
+              'supervisor_stopping',
+            );
+            if (point.delayMs) await new Promise((r) => setTimeout(r, point.delayMs));
+          } else {
+            await l75Until(
+              async () => (await stopRevoked()) >= Number(point.revoked) || dead(cli),
+              5_000,
+              `أُلغيَ ${point.revoked}`,
+            );
+          }
+          const stoppedCleanly = lines.some((l) => l.ev === 'supervisor_stopped');
+          cli.kill('SIGKILL');
+          await l75Until(() => dead(cli), 5_000, 'المُشرِفُ مات');
+          const revokedAtDeath = await stopRevoked();
+          const activeAtDeath = (await active()).map((c) => c.role_name).sort();
+          await l75Until(async () => (await lockHolders()) === 0, 5_000, 'القفلُ حُرِّر');
+          const alphaAliveAfterDeath = alive(w.alpha.pid);
+          // ‏ما لم يُلغَ قبلَ الموتِ يبقى ACTIVE — هذا ما يُغلقُه التالي وحدَه (‏أو الانقضاء للكتابة).
+          for (const x of Object.values(w)) {
+            const c = (await creds()).find((y) => y.role_name === x.role);
+            if (c?.status === 'ACTIVE') assert.ok(activeAtDeath.includes(x.role));
+          }
+          const next = mk({ workers: ['beta'] });
+          await next.sup.start();
+          const nextRole = String(workerOf(next.sup, 'beta')?.role);
+          assert.deepEqual(
+            (await active()).filter((c) => c.role_name !== nextRole),
+            [],
+            `لا ACTIVE من المُشرِفِ الميّتِ بعدَ كنسِ التالي (${JSON.stringify(point)})`,
+          );
+          assert.equal(await sessionsOf([w.alpha.role, w.beta.role]), 0, 'لا جلسةَ للميّت');
+          // ‏العنيدُ (‏إن بقيَ حيّاً) لا يكتب: قيمتُه ثابتةٌ بعدَ الكنس.
+          const v0 = await probe(probeId.alpha);
+          await new Promise((r) => setTimeout(r, 300));
+          assert.equal(await probe(probeId.alpha), v0, 'لا كتابةَ للعنيدِ بعدَ الكنس');
+          await next.sup.stop();
+          rmSync(cfgPath, { force: true });
+          for (const x of Object.values(w)) if (alive(x.pid)) process.kill(x.pid, 'SIGKILL');
+          outcomes.push({
+            ...point,
+            stoppedCleanly,
+            revokedAtDeath,
+            activeAtDeath: activeAtDeath.length,
+            alphaAliveAfterDeath,
+          });
+        }
+      } finally {
+        // ‏العمّالُ أحفادُ CLI لا أبناؤه — خارجَ \`children\`، فيُقتَلون هنا دائماً.
+        for (const pid of strays) if (alive(pid)) process.kill(pid, 'SIGKILL');
+      }
+      t_note('SUP-17', outcomes);
     });
   },
 );
