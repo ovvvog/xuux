@@ -148,6 +148,125 @@ if (argv[0] === 'audit') {
   process.exit();
 }
 
+// ── LIVE-75 (‏WL-604): `fence-lab.mjs supervise --config <json>` — المُشرِفُ المركّبُ عمليّةً مستقلّة ────────────
+// **في المستودعِ وحدَه: لا تنصيبَ ولا خدمةَ ولا مضيف.** يُطلِقُ `FenceSupervisor` بوصلةِ `xf_root` من
+// `XUUX_ROOT_DATABASE_URL` (‏لا تُطبَع)، والعمّالُ من `workers[].command` بقناةِ IPC و`XUUX_DB_FENCE=required`.
+// الإعداد: { workers: [{ workerId, command: [bin, ...args], env?: {}, pass?: [أسماءُ متغيّراتٍ تُمرَّرُ من بيئتِه] }],
+//            options?: { handshakeTimeoutMs, sealTimeoutMs, leaseIntervalMs, monitorIntervalMs, maxDbFailures,
+//                        killGraceMs, restart: {...}, reaper: { ceilingMs, retryMs, firstTickTimeoutMs } },
+//            harnessPasswordBroker?: true }
+// `harnessPasswordBroker` حزامُ اختبارٍ وحدَه (‏يتطلّبُ `XUUX_FENCE_HARNESS=1` و`XUUX_HARNESS_SUPERUSER_URL`
+// و`XUUX_HARNESS_SECRET`): يمنحُ دورَ الإقلاعِ كلمةَ مرورٍ مشتقّةً — الإنتاجُ peer/pg_ident بلا سرّ (‏D-SUP-2).
+// الخرج: سطرُ JSON لكلِّ حدث. الخروج: 0 إيقافٌ بإشارة · 1 FAILED · 2 استعمال · 75 مُشرِفٌ آخرُ يمسكُ القفل.
+if (argv[0] === 'supervise') {
+  const { FenceSupervisor, FENCE_ERRORS } = await import('../src/fence/db-fence.mjs');
+  const { createHmac } = await import('node:crypto');
+  /** @param {Record<string, unknown>} m */
+  const emit = (m) => process.stdout.write(`${JSON.stringify({ t: Date.now(), ...m })}\n`);
+  /** @param {string} why */
+  const usage = (why) => {
+    process.stderr.write(`fence-lab supervise: ${why}\n`);
+    process.exit(2);
+  };
+  const cfgPath = arg('--config');
+  if (!cfgPath) usage('--config مطلوب');
+  const rootUrl = (process.env['XUUX_ROOT_DATABASE_URL'] ?? '').trim();
+  if (rootUrl === '') usage('XUUX_ROOT_DATABASE_URL مطلوب');
+  /** @type {any} */
+  let cfg;
+  try {
+    cfg = JSON.parse(readFileSync(String(cfgPath), 'utf8'));
+  } catch (error) {
+    usage(`إعدادٌ غيرُ مقروء: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  /** @type {((credential: Record<string, any>) => Promise<void>) | undefined} */
+  let loginBroker;
+  if (cfg.harnessPasswordBroker === true) {
+    const su = process.env['XUUX_HARNESS_SUPERUSER_URL'] ?? '';
+    const secret = process.env['XUUX_HARNESS_SECRET'] ?? '';
+    if (process.env['XUUX_FENCE_HARNESS'] !== '1' || su === '' || secret === '')
+      usage(
+        'harnessPasswordBroker يتطلّبُ XUUX_FENCE_HARNESS=1 وXUUX_HARNESS_SUPERUSER_URL وXUUX_HARNESS_SECRET',
+      );
+    loginBroker = async (credential) => {
+      const role = String(credential['role_name']);
+      const pw = createHmac('sha256', secret).update(role).digest('base64url');
+      const c = new pg.Client({ connectionString: su });
+      c.on('error', () => {});
+      await c.connect();
+      try {
+        await c.query(
+          `ALTER ROLE "${role.replaceAll('"', '""')}" PASSWORD '${pw}' VALID UNTIL 'infinity'`,
+        );
+      } finally {
+        await c.end().catch(() => {});
+      }
+    };
+  }
+  const connect = async () => {
+    const c = new pg.Client({ connectionString: rootUrl });
+    c.on('error', () => {});
+    await c.connect();
+    return c;
+  };
+  const who = await connect().then(async (c) => {
+    try {
+      return String((await c.query('SELECT current_user AS u')).rows[0].u);
+    } finally {
+      await c.end().catch(() => {});
+    }
+  });
+  if (who !== 'xf_root') usage(`الدورُ ${who} لا xf_root`);
+  let supervisor;
+  try {
+    supervisor = new FenceSupervisor({
+      root: new FenceRoot(connect, { log: (e) => emit({ src: 'root', ...e }) }),
+      lockConnect: connect,
+      workers: cfg.workers,
+      spawnWorker: (/** @type {any} */ spec, /** @type {any} */ ctx) => {
+        const env = /** @type {Record<string, string>} */ ({});
+        for (const name of ['PATH', ...(spec.pass ?? [])])
+          if (process.env[name] !== undefined) env[name] = String(process.env[name]);
+        const child = spawn(String(spec.command[0]), spec.command.slice(1).map(String), {
+          cwd: ROOT,
+          env: { ...env, ...(spec.env ?? {}), ...ctx.env },
+          stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+        });
+        return child;
+      },
+      ...(loginBroker === undefined ? {} : { loginBroker }),
+      ...(cfg.options ?? {}),
+      log: (e) => emit({ src: 'supervisor', ...e }),
+    });
+  } catch (error) {
+    usage(error instanceof Error ? error.message : String(error));
+  }
+  const sup = /** @type {InstanceType<typeof FenceSupervisor>} */ (supervisor);
+  let signalled = false;
+  for (const sig of /** @type {const} */ (['SIGTERM', 'SIGINT']))
+    process.on(sig, () => {
+      signalled = true;
+      void sup.stop();
+    });
+  try {
+    await sup.start();
+    emit({ ev: 'cli_started', snapshot: sup.snapshot() });
+  } catch (error) {
+    const code = /** @type {any} */ (error)?.code;
+    emit({ ev: 'cli_start_failed', code: String(code ?? error) });
+    process.exit(code === FENCE_ERRORS.SUPERVISOR_LOCKED ? 75 : 1);
+  }
+  const result = await sup.done;
+  emit({
+    ev: 'cli_done',
+    state: result.state,
+    reason: result.reason,
+    revokeErrors: result.revokeErrors,
+    unresolved: result.unresolved,
+  });
+  process.exit(signalled && result.state === 'STOPPED' ? 0 : 1);
+}
+
 /** @param {string | Buffer} data */
 const sha256 = (data) => createHash('sha256').update(data).digest('hex');
 

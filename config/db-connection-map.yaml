@@ -22,6 +22,8 @@
 # في الإنتاج. هذه فجوةٌ معلنةٌ تحتاجُ قراراً (انظر الإدخالَ supervisor أدناه)، لا ادّعاءَ تغطية.
 # ومنذُ WL-579: كلُّ إصدارٍ عبرَ FenceRoot مشروطٌ بـSupervisorBootGate.start() (‏كنسُ الإقلاع) — بوابةٌ في
 # JavaScript لا في القاعدة؛ SQL خامٌ بدورِ xf_root يتجاوزُها (‏قرارُ المالك). ولا يُغيّرُ ذلك أنَّ المُشرِفَ غائب.
+# ومنذُ WL-604: FenceSupervisor و`fence-lab.mjs supervise` في المستودعِ مكتبةً وCLI مختبَرَين، غيرَ مثبَّتَين ولا مُشغَّلَين
+# على أيِّ مضيف — فـproduction_supervisor باقٍ absent.
 version: 1
 production_supervisor: absent
 sites:
@@ -194,8 +196,8 @@ sites:
     why: يُنشئُ القاعدةَ ويقيسُ؛ ليس مساراً إنتاجيّاً.
   - file: scripts/fence-lab.mjs
     kind: pg.Client
-    count: 2
-    purpose: وصلاتُ xf_root/xf_sovereign/postgres في المختبر (FenceRoot وFenceSovereign)؛ ووصلةُ `fence-lab.mjs audit` (WL-539)
+    count: 4
+    purpose: وصلاتُ xf_root/xf_sovereign/postgres في المختبر (FenceRoot وFenceSovereign)؛ ووصلةُ `fence-lab.mjs audit` (WL-539)؛ ووصلتا `fence-lab.mjs supervise` (WL-604) — مصنعُ وصلاتِ xf_root لـFenceSupervisor، ووسيطُ كلمةِ مرورِ العاملِ للحزامِ وحدَه (‏superuser، مشروطٌ بـXUUX_FENCE_HARNESS=1)
     role: xf_root، xf_sovereign، postgres (peer)؛ وللتدقيق دورٌ يملكُ EXECUTE على fence.worker_capabilities (xf_root/xf_sovereign/xf_auditor)
     fence: LAB_ONLY
     why: مسارُ التحكّمِ الوحيدُ الذي يُطلقُ FenceRoot فعلاً اليوم — في المختبرِ لا في الإنتاج. والتدقيقُ (npm run fence:audit) قراءةٌ فقط داخلَ BEGIN READ ONLY ثمّ ROLLBACK؛ لا يكتبُ ولا يُديرُ السياج.

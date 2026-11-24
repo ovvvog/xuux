@@ -16,11 +16,13 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { after, before, describe, test } from 'node:test';
 
 import pg from 'pg';
@@ -30,7 +32,10 @@ import {
   FenceError,
   FenceRoot,
   FenceSovereign,
+  FenceSupervisor,
   ORPHAN_REVOKE_REASON,
+  SUPERVISOR_LOCK_KEY,
+  SupervisorBootGate,
   confirmWorkerSeal,
   generateTestKeyProvider,
   reviewEffectsEvidence,
@@ -39,6 +44,7 @@ import {
 } from '../../src/fence/db-fence.mjs';
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
 import { NO_EFFECTS, harness, rejection, rejectsWith } from '../helpers/fence-harness.mjs';
+import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
 import { databaseUrl, quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
 
 /** @param {any} c @param {number} id @param {string} v */
@@ -1915,4 +1921,846 @@ test('TH-SUP-05: مدخلاتُ الكنسِ تُرفَضُ قبلَ أيِّ ا
   assert.equal(connects, 1, 'المدخلاتُ الصالحةُ تتّصل');
   assert.equal(ORPHAN_REVOKE_REASON, 'SUPERVISOR_BOOT_ORPHAN');
   assert.equal(FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE, 'FENCE_ORPHAN_SWEEP_INCOMPLETE');
+});
+
+// ── LIVE-75 (‏WL-604): المُشرِفُ المركّب `FenceSupervisor` — عمليّاتُ عمّالٍ حقيقيّةٌ بـIPC و`XUUX_DB_FENCE=required` ──
+// كلُّ عاملٍ عمليّةُ Node ابنةٌ حقيقيّة تسلكُ مسارَ العاملِ (‏`dbFenceMode` ⇒ `workerFenceHandshake` ⇒ `sealFencedPool` ⇒
+// `assertFencedSession`) بمفتاحِها في ملفٍّ لا يقرؤه المُشرِف. **حدُّ الحزامِ المعلن:** دورُ الإقلاعِ يدخلُ بكلمةِ مرورٍ
+// مشتقّةٍ يمنحُها superuser (‏`loginBroker`) — الإنتاجُ peer/pg_ident بلا سرّ (‏D-SUP-2)، والمختبرُ يختبرُ peer.
+const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+const FENCE_MODULE = new URL('../../src/fence/db-fence.mjs', import.meta.url).href;
+const L75_WORKER_SRC = `
+import { createHmac } from 'node:crypto';
+import pg from 'pg';
+import { assertFencedSession, dbFenceMode, fileKeyProvider, newBootId, sealFencedPool, workerFenceHandshake }
+  from ${JSON.stringify(FENCE_MODULE)};
+const env = process.env;
+const mode = env.L75_MODE ?? 'write';
+const send = (m) => { if (process.connected) { try { process.send(m); } catch {} } };
+process.on('disconnect', () => { if (mode !== 'stubborn') process.exit(70); });
+if (dbFenceMode(env) !== 'required') process.exit(64);
+if (mode === 'die-before-hello') process.exit(11);
+const workerId = env.XUUX_FENCE_WORKER_ID;
+const key = fileKeyProvider(env.XUUX_FENCE_WORKER_KEY);
+const bootId = newBootId();
+const cred = await workerFenceHandshake(key, { workerId, bootId, timeoutMs: 10000 });
+if (mode === 'die-after-handshake') process.exit(12);
+const role = String(cred.role_name);
+const url = new URL(env.L75_DB_URL);
+url.username = role;
+url.password = createHmac('sha256', env.L75_HARNESS_SECRET).update(role).digest('base64url');
+const pool = new pg.Pool({ connectionString: url.toString(), max: 2, idleTimeoutMillis: 0 });
+pool.on('error', () => {});
+if (mode === 'seal-fail') {
+  send({ type: 'xuux-fence/seal-failed', role_name: role, reason: 'injected' });
+  await new Promise(() => {});
+}
+for (let i = 0; ; i++) {
+  try { const c = await pool.connect(); c.release(); break; }
+  catch (e) { if (i > 100) { send({ type: 'xuux-fence/seal-failed', role_name: role, reason: 'login' }); process.exit(14); }
+    await new Promise((r) => setTimeout(r, 30)); }
+}
+let sessions;
+try {
+  sessions = await sealFencedPool(pool, 2, key, { db: cred.db, sysid: cred.sysid, workerId, bootId, epoch: cred.epoch, roleName: role });
+} catch (e) {
+  send({ type: 'xuux-fence/seal-failed', role_name: role, reason: String(e?.message ?? e) });
+  process.exit(13);
+}
+send({ type: 'xuux-fence/sealed', role_name: role, sessions: mode === 'seal-lie' ? sessions.slice(0, 1) : sessions });
+if (mode === 'seal-lie') await new Promise(() => {});
+await assertFencedSession(pool, { workerId, bootId });
+send({ type: 'l75/ready', role, pid: process.pid });
+const id = Number(env.L75_ID);
+if (mode === 'open-txn') {
+  const c = await pool.connect();
+  await c.query('BEGIN');
+  await c.query("INSERT INTO state.fence_probe (id, v) VALUES ($1, 'open-txn')", [id]);
+  send({ type: 'l75/txn-open' });
+  await new Promise(() => {});
+}
+if (mode === 'die-after-ready') setTimeout(() => process.exit(21), 150);
+let n = 0;
+for (;;) {
+  try {
+    await pool.query('INSERT INTO state.fence_probe (id, v) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET v = excluded.v', [id, String(++n)]);
+    send({ type: 'l75/wrote', n });
+  } catch (e) {
+    send({ type: 'l75/write-refused', code: e?.code ?? null });
+    if (mode !== 'stubborn') process.exit(30);
+  }
+  await new Promise((r) => setTimeout(r, 40));
+}
+`;
+
+/** @param {() => Promise<boolean> | boolean} fn @param {number} ms @param {string} why */
+async function l75Until(fn, ms, why) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    if (await fn()) return;
+    if (Date.now() > deadline) throw new Error(`انقضت المهلة: ${why}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+describe(
+  'LIVE-75 — المُشرِفُ المركّب FenceSupervisor: إقلاعٌ وكنسٌ ومراقبةٌ وإعادةٌ وفشلٌ مغلق (‏WL-604)',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof harness>>} */
+    let h;
+    /** @type {string} */
+    let dir;
+    /** @type {string} */
+    let rootPassword;
+    const secret = randomBytes(18).toString('base64url');
+    /** @type {Record<string, string>} */
+    const keyFiles = {};
+    /** @type {Set<import('node:child_process').ChildProcess>} */
+    const children = new Set();
+    /** @type {FenceSupervisor[]} */
+    const supervisors = [];
+
+    before(async () => {
+      h = await harness('fence_sup');
+      await h.resume();
+      dir = mkdtempSync(join(tmpdir(), 'xuux-l75-'));
+      for (const w of /** @type {const} */ (['alpha', 'beta'])) {
+        keyFiles[w] = join(dir, `${w}.pem`);
+        writeFileSync(keyFiles[w], h.keys[w].privateKeyPem, { mode: 0o600 });
+        chmodSync(keyFiles[w], 0o600);
+      }
+      rootPassword = randomBytes(18).toString('base64url');
+      await h.db.pool.query(`ALTER ROLE xf_root PASSWORD '${rootPassword}'`);
+    });
+    after(async () => {
+      for (const s of supervisors) await s.stop().catch(() => {});
+      for (const c of children) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+      await h?.close();
+      if (dir) rmSync(dir, { recursive: true, force: true });
+    });
+
+    /** @param {string} [base] */
+    const rootUrl = (base = databaseUrl() ?? '') => {
+      const u = new URL(base);
+      u.username = 'xf_root';
+      u.password = rootPassword;
+      u.pathname = `/${h.db.name}`;
+      return u.toString();
+    };
+    const workerDbUrl = () => {
+      const u = new URL(databaseUrl() ?? '');
+      u.pathname = `/${h.db.name}`;
+      return u.toString();
+    };
+    /** @param {string} url */
+    const connectAt = (url) => async () => {
+      const c = new pg.Client({ connectionString: url });
+      c.on('error', () => {});
+      await c.connect();
+      return c;
+    };
+    /** @param {Record<string, any>} credential */
+    const loginBroker = async (credential) => {
+      const role = String(credential['role_name']);
+      const pw = createHmac('sha256', secret).update(role).digest('base64url');
+      await h.db.pool.query(
+        `ALTER ROLE ${quoteIdent(role)} PASSWORD '${pw}' VALID UNTIL 'infinity'`,
+      );
+    };
+    /** @type {Record<string, number>} */
+    const probeId = { alpha: 7501, beta: 7502 };
+
+    /**
+     * @param {{ modes?: Record<string, string[]>, workers?: string[], url?: string, root?: FenceRoot,
+     *           options?: Record<string, any> }} [o]
+     */
+    const mk = (o = {}) => {
+      const url = o.url ?? rootUrl();
+      /** @type {Array<Record<string, unknown>>} */
+      const events = [];
+      /** @type {Array<{ worker: string, attempt: number, env: Record<string, string>, child: import('node:child_process').ChildProcess }>} */
+      const spawned = [];
+      /** @type {Array<{ worker: string, attempt: number, m: any }>} */
+      const messages = [];
+      const modes = o.modes ?? {};
+      const sup = new FenceSupervisor({
+        root:
+          o.root ??
+          new FenceRoot(connectAt(url), { log: (e) => events.push({ src: 'root', ...e }) }),
+        lockConnect: connectAt(url),
+        workers: (o.workers ?? ['alpha', 'beta']).map((workerId) => ({ workerId })),
+        spawnWorker: (spec, ctx) => {
+          const list = modes[spec.workerId] ?? ['write'];
+          const mode = list[Math.min(ctx.attempt - 1, list.length - 1)];
+          const child = spawn(process.execPath, ['--input-type=module', '-e', L75_WORKER_SRC], {
+            cwd: REPO_ROOT,
+            env: {
+              PATH: process.env['PATH'] ?? '',
+              ...ctx.env,
+              XUUX_FENCE_WORKER_KEY: keyFiles[spec.workerId],
+              L75_MODE: mode,
+              L75_DB_URL: workerDbUrl(),
+              L75_HARNESS_SECRET: secret,
+              L75_ID: String(probeId[spec.workerId]),
+            },
+            stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+          });
+          child.stderr?.on('data', () => {});
+          child.on('message', (m) =>
+            messages.push({ worker: spec.workerId, attempt: ctx.attempt, m }),
+          );
+          children.add(child);
+          spawned.push({ worker: spec.workerId, attempt: ctx.attempt, env: ctx.env, child });
+          return child;
+        },
+        loginBroker,
+        handshakeTimeoutMs: 8_000,
+        sealTimeoutMs: 8_000,
+        leaseIntervalMs: 200,
+        monitorIntervalMs: 100,
+        lockCheckTimeoutMs: 1_000,
+        maxDbFailures: 2,
+        killGraceMs: 500,
+        restart: { maxRestarts: 3, windowMs: 60_000, backoffMs: 50 },
+        reaper: { ceilingMs: 1_000, retryMs: 50, firstTickTimeoutMs: 3_000 },
+        ...(o.options ?? {}),
+        log: (e) => events.push({ src: 'supervisor', ...e }),
+      });
+      supervisors.push(sup);
+      return { sup, events, spawned, messages };
+    };
+
+    /** اعتماداتُ الاختباراتِ السابقةِ (‏تُرى عندَ `clean()`) خارجَ ما يَعُدُّه الاختبارُ الجاري. */
+    let seen = new Set();
+    /** @returns {Promise<Array<{ role_name: string, worker_id: string, status: string, revoke_reason: string | null }>>} */
+    const creds = async () =>
+      (
+        await h.db.pool.query(
+          `SELECT role_name::text AS role_name, worker_id, status, revoke_reason FROM fence.credentials ORDER BY issued_at, role_name`,
+        )
+      ).rows.filter((/** @type {any} */ c) => !seen.has(c.role_name));
+    const active = async () => (await creds()).filter((c) => c.status === 'ACTIVE');
+    /** @param {string[]} roles */
+    const sessionsOf = async (roles) =>
+      Number(
+        (
+          await h.db.pool.query(
+            'SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = ANY($1::text[])',
+            [roles],
+          )
+        ).rows[0].n,
+      );
+    const lockHolders = async () =>
+      Number(
+        (
+          await h.db.pool.query(
+            `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND classid = $1::oid AND objid = $2::oid
+               AND objsubid = 2 AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+            [...SUPERVISOR_LOCK_KEY],
+          )
+        ).rows[0].n,
+      );
+    /** @param {FenceSupervisor} sup @param {string} id */
+    const workerOf = (sup, id) => sup.snapshot().workers.find((w) => w.id === id);
+    /** @param {import('node:child_process').ChildProcess} c */
+    const dead = (c) => c.exitCode !== null || c.signalCode !== null;
+    /** بدايةٌ نظيفة: لا اعتمادَ نشِط، والسياجُ RUNNING، ولا قفل. */
+    const clean = async () => {
+      // ‏اختبارٌ سابقٌ سقطَ قبلَ `stop()` لا يتركُ مُشرِفَه ممسكاً بالقفلِ للتالي.
+      for (const s of supervisors.splice(0)) await s.stop().catch(() => {});
+      if ((await h.sovereign.status()).effective.state !== 'RUNNING') await h.resume();
+      await h.root.revokeOrphanCredentials();
+      await h.db.pool.query('DELETE FROM state.fence_probe WHERE id IN (7501, 7502)');
+      await l75Until(
+        async () => (await lockHolders()) === 0,
+        5_000,
+        'القفلُ محرَّرٌ قبلَ الاختبار',
+      );
+      assert.deepEqual(await active(), [], 'لا اعتمادَ نشِطاً قبلَ الاختبار');
+      seen = new Set(
+        (await h.db.pool.query('SELECT role_name::text AS r FROM fence.credentials')).rows.map(
+          (/** @type {any} */ x) => x.r,
+        ),
+      );
+    };
+
+    test('SUP-01: الإقلاعُ الكامل — قفل ⇒ كنس ⇒ RUNNING ⇒ حاصد ⇒ عاملان بـXUUX_DB_FENCE=required مختومان يكتبان؛ والإيقافُ يُلغي ثمّ يقتلُ ويُحرِّرُ القفل', async () => {
+      await clean();
+      // ‏يتيمٌ قبلَ الإقلاع (‏مُشرِفٌ سابقٌ مات): الكنسُ يُلغيه قبلَ أيِّ إطلاق.
+      const orphan = await h.boot('alpha', { connect: false });
+      const { sup, events, spawned, messages } = mk();
+      await sup.start();
+      assert.equal(sup.state, 'RUNNING');
+      const steps = events.filter((e) => e.src === 'supervisor').map((e) => e.ev);
+      assert.deepEqual(
+        steps.slice(0, 3),
+        ['supervisor_locking', 'supervisor_swept', 'supervisor_running'],
+        'الترتيب: قفلٌ ثمّ كنسٌ ثمّ RUNNING (‏الحاصدُ قبلَه)',
+      );
+      const byRole = new Map((await creds()).map((c) => [c.role_name, c]));
+      assert.equal(
+        byRole.get(String(orphan.credential.role_name))?.status,
+        'REVOKED',
+        'اليتيمُ أُلغي',
+      );
+      assert.equal(
+        byRole.get(String(orphan.credential.role_name))?.revoke_reason,
+        ORPHAN_REVOKE_REASON,
+      );
+      for (const s of spawned)
+        assert.equal(s.env['XUUX_DB_FENCE'], 'required', 'العاملُ يُطلَقُ بالسياجِ إلزاميّاً');
+      const snap = sup.snapshot();
+      assert.deepEqual(
+        snap.workers.map((w) => w.state),
+        ['RUNNING', 'RUNNING'],
+      );
+      const roles = snap.workers.map((w) => String(w.role));
+      const act = await active();
+      assert.deepEqual(
+        act.map((c) => c.role_name).sort(),
+        [...roles].sort(),
+        'النشِطُ = ما يُشرِفُ عليه بالضبط',
+      );
+      for (const role of roles) {
+        const seal = await h.root.credentialSeal(role);
+        assert.equal(seal?.sealed, true, `${role} مختوم`);
+        assert.equal(seal?.sessions?.length, 2, 'جلستا المجمّعِ مختومتان');
+      }
+      await l75Until(
+        () =>
+          ['alpha', 'beta'].every((w) =>
+            messages.some((x) => x.worker === w && x.m?.type === 'l75/wrote'),
+          ),
+        8_000,
+        'العاملانِ كتبا',
+      );
+      assert.ok((snap.reaper?.ticks ?? 0) >= 1, 'الحاصدُ نادى مرّةً على الأقلّ قبلَ الإطلاق');
+      assert.equal(await lockHolders(), 1, 'القفلُ ممسوك');
+      const r = await sup.stop();
+      assert.equal(r.state, 'STOPPED');
+      assert.deepEqual(r.revokeErrors, []);
+      assert.deepEqual([...r.revoked].sort(), [...roles].sort());
+      for (const c of await creds())
+        if (roles.includes(c.role_name)) {
+          assert.equal(c.status, 'REVOKED');
+          assert.equal(c.revoke_reason, 'SUPERVISOR:SUPERVISOR_STOP');
+        }
+      assert.equal(await sessionsOf(roles), 0, 'لا جلسةَ بعدَ الإيقاف');
+      for (const s of spawned) assert.ok(dead(s.child), 'كلُّ عاملٍ مات');
+      assert.equal(await lockHolders(), 0, 'القفلُ حُرِّر');
+      assert.equal(sup.snapshot().serial.maxConcurrent, 1, 'الطابورُ تسلسليٌّ');
+    });
+
+    test('SUP-02: موتُ العاملِ أثناءَ الإقلاع (‏قبلَ hello، وبعدَ المصافحةِ قبلَ الختم) ⇒ ما صدرَ يُلغى، ويُعادُ حتى يعمل', async () => {
+      await clean();
+      const { sup, spawned, events } = mk({
+        workers: ['alpha'],
+        modes: { alpha: ['die-before-hello', 'die-after-handshake', 'write'] },
+      });
+      await sup.start();
+      await l75Until(
+        () => workerOf(sup, 'alpha')?.state === 'RUNNING',
+        15_000,
+        'alpha يعملُ في المحاولةِ الثالثة',
+      );
+      const w = workerOf(sup, 'alpha');
+      assert.equal(w?.attempts, 3);
+      const all = (await creds()).filter((c) => c.worker_id === 'alpha');
+      const act = all.filter((c) => c.status === 'ACTIVE');
+      assert.deepEqual(
+        act.map((c) => c.role_name),
+        [String(w?.role)],
+        'نشِطٌ واحدٌ هو الجاري',
+      );
+      const failed = all.filter(
+        (c) =>
+          c.role_name !== w?.role &&
+          c.status === 'REVOKED' &&
+          c.revoke_reason !== ORPHAN_REVOKE_REASON,
+      );
+      assert.equal(failed.length, 1, 'اعتمادُ «بعدَ المصافحة» أُلغي (‏قبلَ hello لا اعتماد)');
+      assert.match(
+        String(failed[0]?.revoke_reason),
+        /^(SEAL_NOT_CONFIRMED|SUPERVISOR_BOOT_FAILED)/,
+      );
+      assert.equal(await sessionsOf([String(failed[0]?.role_name)]), 0);
+      assert.deepEqual(
+        spawned.slice(0, 2).map((s) => s.child.exitCode),
+        [11, 12],
+        'المحاولتانِ الأولَيانِ ماتتا بالرمزِ المحقون',
+      );
+      assert.ok(events.some((e) => e.ev === 'worker_boot_failed'));
+      await sup.stop();
+    });
+
+    test('SUP-03: موتُ العاملِ بعدَ الختم (‏SIGKILL) ⇒ إلغاءٌ قبلَ أيِّ إعادة، والدورُ القديمُ NOLOGIN بلا جلسات، ثمّ عاملٌ جديد', async () => {
+      await clean();
+      const { sup, spawned } = mk({ workers: ['alpha'] });
+      await sup.start();
+      const first = String(workerOf(sup, 'alpha')?.role);
+      spawned[0]?.child.kill('SIGKILL');
+      await l75Until(
+        () => workerOf(sup, 'alpha')?.state === 'RUNNING' && workerOf(sup, 'alpha')?.role !== first,
+        15_000,
+        'عاملٌ جديدٌ بدورٍ جديد',
+      );
+      const old = (await creds()).find((c) => c.role_name === first);
+      assert.equal(old?.status, 'REVOKED');
+      assert.match(String(old?.revoke_reason), /^SUPERVISOR_WORKER_LOST:EXIT:null\/SIGKILL/);
+      assert.equal(await sessionsOf([first]), 0);
+      const login = await h.db.pool.query(
+        'SELECT rolcanlogin AS l FROM pg_roles WHERE rolname = $1',
+        [first],
+      );
+      assert.equal(login.rows[0]?.l ?? false, false, 'NOLOGIN');
+      assert.equal((await active()).length, 1);
+      await sup.stop();
+    });
+
+    test('SUP-04: فشلُ تأكيدِ الختم (‏إبلاغُ فشل، ومجموعةٌ كاذبة) ⇒ إلغاءٌ وقتل، وبعدَ حدِّ الإعادة GAVE_UP بلا نشِط', async () => {
+      await clean();
+      const { sup, spawned } = mk({
+        workers: ['alpha'],
+        modes: { alpha: ['seal-fail', 'seal-lie'] },
+        options: { restart: { maxRestarts: 1, windowMs: 60_000, backoffMs: 50 } },
+      });
+      await sup.start();
+      await l75Until(
+        () => workerOf(sup, 'alpha')?.state === 'GAVE_UP',
+        15_000,
+        'استسلامٌ بعدَ محاولتين',
+      );
+      assert.equal(workerOf(sup, 'alpha')?.attempts, 2);
+      const mine = (await creds()).filter(
+        (c) => c.worker_id === 'alpha' && c.revoke_reason !== ORPHAN_REVOKE_REASON,
+      );
+      assert.equal(mine.length, 2);
+      for (const c of mine) {
+        assert.equal(c.status, 'REVOKED');
+        assert.match(String(c.revoke_reason), /^SEAL_NOT_CONFIRMED:(injected|mismatch)/);
+      }
+      assert.deepEqual(await active(), []);
+      await l75Until(() => spawned.every((s) => dead(s.child)), 5_000, 'كلُّ محاولةٍ قُتلت');
+      await sup.stop();
+    });
+
+    test('SUP-05: مُشرِفٌ ثانٍ على القاعدةِ نفسِها ⇒ FENCE_SUPERVISOR_LOCKED قبلَ أيِّ كنس — اعتماداتُ الأوّلِ تبقى ويكتب', async () => {
+      await clean();
+      const a = mk();
+      await a.sup.start();
+      const roles = a.sup.snapshot().workers.map((w) => String(w.role));
+      const b = mk();
+      const err = await rejection(() => b.sup.start());
+      assert.equal(err.code, 'FENCE_SUPERVISOR_LOCKED');
+      assert.equal(b.sup.state, 'FAILED');
+      assert.equal(b.spawned.length, 0, 'الثاني لم يُطلِق');
+      assert.ok(!b.events.some((e) => e.ev === 'supervisor_swept'), 'الثاني لم يكنس');
+      assert.deepEqual(
+        (await active()).map((c) => c.role_name).sort(),
+        [...roles].sort(),
+        'اعتماداتُ الأوّلِ ACTIVE',
+      );
+      assert.equal(a.sup.state, 'RUNNING');
+      const n = a.messages.filter((x) => x.m?.type === 'l75/wrote').length;
+      await l75Until(
+        () => a.messages.filter((x) => x.m?.type === 'l75/wrote').length > n + 2,
+        5_000,
+        'الأوّلُ ما زالَ يكتب',
+      );
+      assert.equal(await lockHolders(), 1);
+      await a.sup.stop();
+    });
+
+    test('SUP-06: موتُ المُشرِفِ نفسِه (‏عمليّةُ CLI بـSIGKILL) ⇒ القاعدةُ تُحرِّرُ القفل؛ عاملٌ عنيدٌ يكتبُ حتى يكنسَه المُشرِفُ التالي', async () => {
+      await clean();
+      const cfgPath = join(dir, 'sup.json');
+      const cmd = [process.execPath, '--input-type=module', '-e', L75_WORKER_SRC];
+      const wenv = (/** @type {string} */ w, /** @type {string} */ mode) => ({
+        XUUX_FENCE_WORKER_KEY: keyFiles[w],
+        L75_MODE: mode,
+        L75_DB_URL: workerDbUrl(),
+        L75_HARNESS_SECRET: secret,
+        L75_ID: String(probeId[w]),
+      });
+      writeFileSync(
+        cfgPath,
+        JSON.stringify({
+          harnessPasswordBroker: true,
+          workers: [
+            { workerId: 'alpha', command: cmd, env: wenv('alpha', 'stubborn') },
+            { workerId: 'beta', command: cmd, env: wenv('beta', 'write') },
+          ],
+          options: {
+            leaseIntervalMs: 200,
+            monitorIntervalMs: 100,
+            killGraceMs: 500,
+            reaper: { ceilingMs: 1000, retryMs: 50, firstTickTimeoutMs: 3000 },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      const suUrl = workerDbUrl();
+      const cli = spawn(
+        process.execPath,
+        ['scripts/fence-lab.mjs', 'supervise', '--config', cfgPath],
+        {
+          cwd: REPO_ROOT,
+          env: {
+            PATH: process.env['PATH'] ?? '',
+            XUUX_ROOT_DATABASE_URL: rootUrl(),
+            XUUX_FENCE_HARNESS: '1',
+            XUUX_HARNESS_SUPERUSER_URL: suUrl,
+            XUUX_HARNESS_SECRET: secret,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      children.add(cli);
+      /** @type {any[]} */
+      const lines = [];
+      let buf = '';
+      cli.stdout?.on('data', (d) => {
+        buf += String(d);
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i);
+          buf = buf.slice(i + 1);
+          try {
+            lines.push(JSON.parse(line));
+          } catch {
+            lines.push({ raw: line });
+          }
+        }
+      });
+      cli.stderr?.on('data', () => {});
+      await l75Until(
+        () => lines.some((l) => l.ev === 'cli_started'),
+        20_000,
+        'المُشرِفُ (‏CLI) أقلع',
+      );
+      const started = lines.find((l) => l.ev === 'cli_started');
+      const ws = started.snapshot.workers;
+      assert.deepEqual(
+        ws.map((/** @type {any} */ w) => w.state),
+        ['RUNNING', 'RUNNING'],
+      );
+      const alphaRole = String(ws[0].role);
+      const alphaPid = Number(ws[0].pid);
+      const betaPid = Number(ws[1].pid);
+      assert.equal(await lockHolders(), 1, 'عمليّةُ المُشرِفِ تمسكُ القفل');
+      cli.kill('SIGKILL');
+      await l75Until(() => dead(cli), 5_000, 'المُشرِفُ مات');
+      await l75Until(
+        async () => (await lockHolders()) === 0,
+        5_000,
+        'القاعدةُ حرّرت القفلَ بموتِ وصلته',
+      );
+      const alive = (/** @type {number} */ pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+      await l75Until(() => !alive(betaPid), 5_000, 'العاملُ العاديُّ خرجَ بانقطاعِ IPC');
+      assert.ok(alive(alphaPid), 'العنيدُ حيٌّ بلا مُشرِف — هذه النافذةُ المعلنة');
+      const v1 = (await h.db.pool.query('SELECT v FROM state.fence_probe WHERE id = 7501')).rows[0]
+        ?.v;
+      await new Promise((r) => setTimeout(r, 200));
+      const v2 = (await h.db.pool.query('SELECT v FROM state.fence_probe WHERE id = 7501')).rows[0]
+        ?.v;
+      // ‏قد يكونُ الإيجارُ انقضى (‏renew كلَّ 200ms بلا حافظ) فتُرفضُ كتابتُه قبلَ الكنس — كلاهما يُسجَّل، لا يُفترَض.
+      const wroteWithoutSupervisor = v1 !== v2;
+      // ‏المُشرِفُ التالي (‏في هذه العمليّة): يقفلُ، ثمّ يكنسُ اليتيم.
+      const next = mk({ workers: ['beta'] });
+      await next.sup.start();
+      const old = (await creds()).find((c) => c.role_name === alphaRole);
+      assert.equal(old?.status, 'REVOKED', 'اعتمادُ العنيدِ أُلغي (‏بالكنسِ أو بانقضاءِ الإيجار)');
+      assert.match(
+        String(old?.revoke_reason),
+        new RegExp(`^(${ORPHAN_REVOKE_REASON}|LEASE_LAPSED)`),
+      );
+      assert.equal(await sessionsOf([alphaRole]), 0, 'لا جلسةَ للعنيدِ بعدَ الكنس');
+      const v3 = (await h.db.pool.query('SELECT v FROM state.fence_probe WHERE id = 7501')).rows[0]
+        ?.v;
+      await new Promise((r) => setTimeout(r, 300));
+      const v4 = (await h.db.pool.query('SELECT v FROM state.fence_probe WHERE id = 7501')).rows[0]
+        ?.v;
+      assert.equal(v3, v4, 'العنيدُ لا يكتبُ بعدَ الكنس');
+      process.kill(alphaPid, 'SIGKILL');
+      await next.sup.stop();
+      t_note('SUP-06', { wroteWithoutSupervisor, revokeReason: old?.revoke_reason });
+    });
+
+    test('SUP-07: فشلُ بدءِ الحاصد (‏نداءٌ يرمي، أو لا يعود) ⇒ FENCE_SUPERVISOR_REAPER_START، لا إطلاق، والقفلُ يُحرَّر', async () => {
+      await clean();
+      for (const target of [
+        {
+          reapLapsed: async () =>
+            Promise.reject(Object.assign(new Error('reaper down'), { code: '57P01' })),
+        },
+        { reapLapsed: () => new Promise(() => {}) },
+      ]) {
+        const { sup, spawned } = mk({
+          options: { reaper: { ceilingMs: 1_000, retryMs: 50, firstTickTimeoutMs: 300, target } },
+        });
+        const err = await rejection(() => sup.start());
+        assert.equal(err.code, 'FENCE_SUPERVISOR_REAPER_START');
+        assert.equal(sup.state, 'FAILED');
+        assert.equal(spawned.length, 0, 'لا عاملَ بلا حاصد');
+        assert.equal(await lockHolders(), 0);
+      }
+      assert.deepEqual(await active(), []);
+    });
+
+    test('SUP-08: إصدارٌ وإلغاءٌ متزامنان (‏عاملٌ يموتُ متكرّراً بينما الآخرُ يُقلِع، وإيقافٌ أثناءَ الإقلاع) ⇒ تسلسلٌ صارم ولا نشِطَ يتيم', async () => {
+      await clean();
+      const a = mk({
+        modes: { alpha: ['die-after-ready'], beta: ['write'] },
+        options: { restart: { maxRestarts: 4, windowMs: 60_000, backoffMs: 0 } },
+      });
+      await a.sup.start();
+      await l75Until(
+        () => workerOf(a.sup, 'alpha')?.state === 'GAVE_UP',
+        20_000,
+        'alpha استسلمَ بعدَ موتٍ متكرّر',
+      );
+      const snap = a.sup.snapshot();
+      assert.equal(snap.serial.maxConcurrent, 1, 'لا نداءَ إصدارٍ وإلغاءٍ متداخلان');
+      assert.ok(snap.serial.issue >= 10 && snap.serial.revoke >= 5, JSON.stringify(snap.serial));
+      assert.deepEqual(
+        (await active()).map((c) => c.role_name),
+        [String(workerOf(a.sup, 'beta')?.role)],
+        'النشِطُ الوحيدُ هو beta الجاري',
+      );
+      await a.sup.stop();
+      // ‏إيقافٌ أثناءَ الإقلاع: stop() يُنادى فورَ إطلاقِ أوّلِ عامل.
+      const b = mk({ options: { handshakeTimeoutMs: 8_000 } });
+      const starting = b.sup.start();
+      await l75Until(() => b.spawned.length >= 1, 10_000, 'أوّلُ عاملٍ أُطلِق');
+      const r = await b.sup.stop();
+      await starting.catch(() => {});
+      assert.equal(r.state, 'STOPPED');
+      assert.deepEqual(await active(), [], 'لا نشِطَ بعدَ إيقافٍ أثناءَ الإقلاع');
+      await l75Until(() => b.spawned.every((s) => dead(s.child)), 5_000, 'لا عاملَ حيّ');
+      assert.equal(await lockHolders(), 0);
+    });
+
+    test('SUP-09: انقطاعُ القاعدةِ عن المُشرِفِ في كلِّ مرحلةٍ حرجة ⇒ فشلٌ مغلق؛ وما تعذّرَ إلغاؤه يُعلَنُ ويكنسُه التالي', async () => {
+      const target = new URL(databaseUrl() ?? '');
+      /** @type {Array<Record<string, unknown>>} */
+      const outcomes = [];
+      for (const stage of [
+        'before-lock',
+        'boot_gate_sweeping',
+        'worker_spawned',
+        'worker_credential',
+        'running',
+      ]) {
+        await clean();
+        const proxy = await startFaultProxy({
+          host: target.hostname,
+          port: Number(target.port || 5432),
+        });
+        try {
+          const url = rootUrl(proxy.urlFor(databaseUrl() ?? ''));
+          /** @type {(e: Record<string, unknown>) => void} */
+          let hook = () => {};
+          const rootEvents = /** @type {Array<Record<string, unknown>>} */ ([]);
+          const root = new FenceRoot(connectAt(url), {
+            log: (e) => {
+              rootEvents.push(e);
+              hook(e);
+            },
+          });
+          const m = mk({ url, root, workers: ['alpha'] });
+          let cut = false;
+          const down = () => {
+            if (!cut) {
+              cut = true;
+              void proxy.down();
+            }
+          };
+          if (stage === 'before-lock') await proxy.down();
+          if (stage === 'boot_gate_sweeping')
+            hook = (e) => e['ev'] === 'boot_gate_sweeping' && down();
+          const poll = setInterval(() => {
+            if (stage === 'worker_spawned' && m.events.some((e) => e.ev === 'worker_spawned'))
+              down();
+            if (stage === 'worker_credential' && m.events.some((e) => e.ev === 'worker_credential'))
+              down();
+          }, 1);
+          let startError = null;
+          try {
+            await m.sup.start();
+          } catch (error) {
+            startError = /** @type {any} */ (error).code ?? String(error);
+          }
+          if (stage === 'running') {
+            assert.equal(m.sup.state, 'RUNNING');
+            down();
+          }
+          const result = await Promise.race([
+            m.sup.done,
+            new Promise((_, rej) =>
+              setTimeout(() => rej(new Error(`${stage}: المُشرِفُ لم يتوقّف`)), 15_000),
+            ),
+          ]);
+          clearInterval(poll);
+          assert.equal(m.sup.state, 'FAILED', `${stage}: FAILED`);
+          await l75Until(
+            () => m.spawned.every((s) => dead(s.child)),
+            5_000,
+            `${stage}: لا عاملَ حيّ`,
+          );
+          await proxy.up();
+          const left = await active();
+          outcomes.push({
+            stage,
+            startError,
+            reason: result.reason,
+            revokeErrors: result.revokeErrors.length,
+            unresolved: result.unresolved.length,
+            activeLeft: left.length,
+          });
+          // ‏لا صمت: كلُّ اعتمادٍ بقيَ ACTIVE مُعلَنٌ في تقريرِ الإيقاف (‏فشلُ إلغاءٍ أو جردٍ) أو بوصفِه عاملاً جارياً.
+          if (left.length > 0)
+            assert.ok(
+              result.revokeErrors.length + result.unresolved.length > 0,
+              `${stage}: ${left.length} نشِطٌ باقٍ والتقريرُ لا يُعلِنُه`,
+            );
+          if (stage === 'before-lock' || stage === 'boot_gate_sweeping')
+            assert.equal(m.spawned.length, 0, `${stage}: لا إطلاق`);
+          // ‏ما بقيَ ACTIVE (‏تعذّرَ إلغاؤه والقاعدةُ مقطوعة) يُكنَسُ عندَ المُشرِفِ التالي — يُثبَتُ هنا لا يُفترَض.
+          if (left.length > 0) {
+            const next = mk({ workers: ['beta'] });
+            await next.sup.start();
+            for (const c of left) {
+              const after = (await creds()).find((x) => x.role_name === c.role_name);
+              assert.equal(
+                after?.status,
+                'REVOKED',
+                `${stage}: ${c.role_name} أُلغي بالكنسِ التالي`,
+              );
+              assert.equal(await sessionsOf([c.role_name]), 0);
+            }
+            await next.sup.stop();
+          }
+        } finally {
+          await proxy.close();
+        }
+      }
+      t_note('SUP-09', outcomes);
+    });
+
+    test('SUP-10: معاملةٌ مفتوحةٌ للعامل أثناءَ تغيّرِ التفويض (‏إيقافُ المُشرِف، ثمّ HALT سياديّ) ⇒ لا تلتزم، وWAITING ثمّ إعادةُ إطلاقٍ بعدَ RESUME', async () => {
+      await clean();
+      const a = mk({ workers: ['alpha'], modes: { alpha: ['open-txn'] } });
+      await a.sup.start();
+      await l75Until(
+        () => a.messages.some((x) => x.m?.type === 'l75/txn-open'),
+        8_000,
+        'معاملةٌ مفتوحة',
+      );
+      const role = String(workerOf(a.sup, 'alpha')?.role);
+      await a.sup.stop();
+      assert.equal(
+        (await h.db.pool.query('SELECT count(*)::int AS n FROM state.fence_probe WHERE id = 7501'))
+          .rows[0].n,
+        0,
+        'المعاملةُ المفتوحةُ لم تلتزم',
+      );
+      assert.equal(await sessionsOf([role]), 0);
+      // ‏HALT سياديٌّ تحتَ مُشرِفٍ جارٍ: المراقِبُ يرى غيرَ RUNNING ⇒ WAITING بلا إعادةِ إطلاق؛ RESUME ⇒ كنسٌ وإطلاق.
+      await clean();
+      const b = mk({ workers: ['alpha'], modes: { alpha: ['open-txn', 'write'] } });
+      await b.sup.start();
+      await l75Until(
+        () => b.messages.some((x) => x.m?.type === 'l75/txn-open'),
+        8_000,
+        'معاملةٌ مفتوحة (‏2)',
+      );
+      const r1 = String(workerOf(b.sup, 'alpha')?.role);
+      const halted = await h.root.halt('l75-sup-10', { effects: NO_EFFECTS });
+      assert.equal(halted.systemHaltComplete, true);
+      await l75Until(() => b.sup.state === 'WAITING', 5_000, 'المُشرِفُ WAITING');
+      assert.equal(
+        (await h.db.pool.query('SELECT count(*)::int AS n FROM state.fence_probe WHERE id = 7501'))
+          .rows[0].n,
+        0,
+      );
+      assert.equal(await sessionsOf([r1]), 0);
+      await new Promise((r) => setTimeout(r, 400));
+      assert.deepEqual(await active(), [], 'لا إصدارَ تحتَ HALTED');
+      // ‏مُشرِفٌ جديدٌ تحتَ HALTED يرفضُ الإقلاع.
+      const c = mk({ workers: ['beta'] });
+      assert.equal(
+        (await rejection(() => c.sup.start())).code,
+        'FENCE_SUPERVISOR_LOCKED',
+        'القفلُ ما زالَ لـb',
+      );
+      await h.resume();
+      await l75Until(
+        () => b.sup.state === 'RUNNING' && workerOf(b.sup, 'alpha')?.state === 'RUNNING',
+        15_000,
+        'إعادةُ الإطلاقِ بعدَ RESUME',
+      );
+      assert.notEqual(workerOf(b.sup, 'alpha')?.role, r1);
+      await b.sup.stop();
+      // ‏والإقلاعُ تحتَ HALTED (‏بلا مُشرِفٍ آخر) ⇒ FENCE_SUPERVISOR_NOT_RUNNING.
+      await h.root.halt('l75-sup-10b', { effects: NO_EFFECTS });
+      const d = mk({ workers: ['beta'] });
+      assert.equal((await rejection(() => d.sup.start())).code, 'FENCE_SUPERVISOR_NOT_RUNNING');
+      assert.equal(d.spawned.length, 0);
+      await h.resume();
+    });
+  },
+);
+
+/** سطرُ قياسٍ في مخرجِ TAP (‏دليلٌ لا تأكيد). @param {string} id @param {unknown} data */
+function t_note(id, data) {
+  process.stdout.write(`# L75-NOTE ${id} ${JSON.stringify(data)}\n`);
+}
+
+test('LIVE-75: مدخلاتُ FenceSupervisor تُرفَضُ قبلَ أيِّ اتصال', () => {
+  const ok = () => ({
+    root: new FenceRoot(async () => {
+      throw new Error('لا اتصال');
+    }),
+    lockConnect: async () => {
+      throw new Error('لا اتصال');
+    },
+    workers: [{ workerId: 'alpha' }],
+    spawnWorker: () => {
+      throw new Error('لا إطلاق');
+    },
+  });
+  assert.ok(new FenceSupervisor(ok()));
+  for (const [patch, why] of /** @type {Array<[any, string]>} */ ([
+    [{ root: {} }, 'جذرٌ ليس FenceRoot'],
+    [{ lockConnect: null }, 'بلا وصلةِ قفل'],
+    [{ spawnWorker: 'x' }, 'بلا مُطلِق'],
+    [{ workers: [] }, 'بلا عمّال'],
+    [{ workers: [{ workerId: 'a' }, { workerId: 'a' }] }, 'عاملٌ مكرّر'],
+    [{ workers: [{ workerId: '' }] }, 'معرّفٌ فارغ'],
+    [{ monitorIntervalMs: 0 }, 'فاصلُ مراقبةٍ صفر'],
+    [{ handshakeTimeoutMs: 1.5 }, 'مهلةٌ كسريّة'],
+    [{ leaseIntervalMs: 0 }, 'فاصلُ إيجارٍ صفر'],
+    [{ restart: { maxRestarts: -1 } }, 'حدُّ إعادةٍ سالب'],
+  ]))
+    assert.throws(() => new FenceSupervisor({ ...ok(), ...patch }), TypeError, why);
+  const root = new FenceRoot(async () => {
+    throw new Error('x');
+  });
+  new FenceSupervisor({ ...ok(), root }).snapshot();
+  // ‏جذرٌ له بوابةٌ قائمة (‏مُشرِفٌ آخرُ في العمليّة) يُرفَض: المُشرِفُ يملكُ بوابتَه وحدَه.
+  const gated = new FenceRoot(async () => {
+    throw new Error('x');
+  });
+  new SupervisorBootGate(gated);
+  assert.throws(() => new FenceSupervisor({ ...ok(), root: gated }), TypeError);
+  assert.equal(FENCE_ERRORS.SUPERVISOR_LOCKED, 'FENCE_SUPERVISOR_LOCKED');
+  assert.deepEqual([...SUPERVISOR_LOCK_KEY], [0x58555558, 0x53555056]);
 });
