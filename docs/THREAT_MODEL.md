@@ -784,7 +784,7 @@ threats:
     attack: GRANT xf_root أو xf_sovereign TO xf_owner (‏مباشرةً أو عبرَ دورٍ وسيط، بأيِّ خيارات) فيصيرُ كلُّ عضوٍ في xf_owner معفىً من XF105/XF107 — يمدُّ الإيجارَ ويكتبُ الاعتمادَ وختمَ التحكّم — والحافّةُ لا يراها check_fenced
     control: الحارسان (‏0031 و0032 بنصِّ 0033) يحسبان الجذرَ أو السياديَّ لعضوِ xf_owner بمسارِ عضويّةٍ لا يمرُّ بـxf_owner ⇒ XF107/XF105؛ وcheck_fenced يكشفُ كلَّ دورٍ يصلُه xf_owner خارجَ أساسِه (‏owner_upward_membership، مغلقُ الفشل) فيُرفَضُ RESUME (‏XF415)
     status: MITIGATED_TESTED
-    evidence: [tests/fence/fence-lifecycle.test.mjs#WL-563, tests/persistence/migrator.test.mjs#WL-563]
+    evidence: [tests/fence/db-fence-privileges.test.mjs#WL-563, tests/persistence/migrator.test.mjs#WL-563]
     limit: الحافّةُ الصاعدةُ لا تُمنَعُ إنشاءً (‏GRANT بيدِ superuser أو مديرِ الدور) بل تُكشَفُ عندَ الانتقال؛ والجذرُ أو السياديُّ عضواً مباشراً في xf_owner يبقى كاتباً (‏بقيّةُ 0032، قرارُ مالك)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
   # ── WL-564: ACLُ السياجِ الباقي (‏الهجرة 0034) ──────────────────────────────────────────────
   - id: TH-OWN-02
@@ -793,7 +793,7 @@ threats:
     attack: عضوٌ مُعفىً في xf_owner (‏جذرٌ بعدَ SET ROLE xf_owner) يمنحُ UPDATE أو EXECUTE أو CREATE أو خيارَ المنحِ أو امتيازاً افتراضيّاً على كائناتِ fence لدورٍ آخر أو لنفسِه، فيبقى المنحُ بعدَ سحبِ العضويّة — والممنوحُ يكتبُ الاعتمادَ مباشرةً أو يضعُ صفَّ التحكّمِ RUNNING بلا توقيعٍ سياديّ، وcheck_fenced لا يراه
     control: check_fenced يجردُ كلَّ امتيازٍ غيرِ القراءةِ لغيرِ المالكِ خارجَ الأساسِ المقيس (‏fence_acl_drift، مغلقُ الفشل) فيُرفَضُ RESUME (‏XF415)؛ والحارسان (‏0031 و0032 بنصِّ 0034) يرفضان كاتباً مباشراً current_user ليس xf_owner ولا superuser (‏XF108)
     status: MITIGATED_TESTED
-    evidence: [tests/fence/fence-lifecycle.test.mjs#WL-564, tests/persistence/migrator.test.mjs#WL-564]
+    evidence: [tests/fence/db-fence-privileges.test.mjs#WL-564, tests/persistence/migrator.test.mjs#WL-564]
     limit: المنحُ لا يُمنَعُ إنشاءً بل يُكشَفُ عندَ الانتقالِ ويُرفَضُ أثرُه الكتابيّ (‏منعُه قرارُ مالك)؛ والقراءةُ الممنوحةُ لغيرِ العاملِ خارجَ النطاق (‏WL-544)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
   # ── WL-570: العضويّةُ بينَ الأدوارِ السياديّةِ الثلاثة (‏الهجرة 0035) ──────────────────────────────
   - id: TH-OWN-03
