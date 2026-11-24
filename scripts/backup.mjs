@@ -140,31 +140,43 @@ async function inspectDatabase(pool) {
  * `pg_dump --schema state --table public.schema_migrations` لا ينتج اتحاداً؛
  * ولذلك ينشأ هذا الجدول المؤقت في `state`، ثم يُنقل إلى `public` عند الاستعادة.
  * أسماء القيود تطابق دفتر المُهاجر حرفياً كي تعود صورة الكتالوج كما كانت.
- * @param {import('pg').Pool} pool
+ *
+ * **ذرّيٌّ (‏`WL-592`):** الإنشاءُ والنسخُ في معاملةٍ واحدة. كانا عبارتَين مستقلّتَين خارجَ
+ * نطاقِ التنظيف، ففشلُ `INSERT` (‏مثلاً دفترٌ غائب) بعدَ نجاحِ `CREATE` يُبقي جدولاً مرحليّاً
+ * في `state` ينتقلُ إلى كلِّ نسخةٍ لاحقة. فإمّا الجدولُ كاملاً وإمّا لا جدول.
+ * @param {import('pg').PoolClient} client
  * @param {string} table
  * @returns {Promise<void>}
  */
-async function stageMigrationLedger(pool, table) {
-  await pool.query(`
-    CREATE TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)} (
-      version integer CONSTRAINT schema_migrations_version_not_null NOT NULL
-        CONSTRAINT schema_migrations_version_check CHECK (version >= 1),
-      name text CONSTRAINT schema_migrations_name_not_null NOT NULL
-        CONSTRAINT schema_migrations_name_check CHECK (length(btrim(name)) > 0),
-      checksum text CONSTRAINT schema_migrations_checksum_not_null NOT NULL
-        CONSTRAINT schema_migrations_checksum_check CHECK (checksum ~ '^[0-9a-f]{64}$'),
-      applied_at timestamptz CONSTRAINT schema_migrations_applied_at_not_null NOT NULL DEFAULT now(),
-      applied_by text CONSTRAINT schema_migrations_applied_by_not_null NOT NULL
-        CONSTRAINT schema_migrations_applied_by_check CHECK (length(btrim(applied_by)) > 0),
-      CONSTRAINT schema_migrations_pkey PRIMARY KEY (version)
-    )
-  `);
-  await pool.query(
-    `INSERT INTO ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)}
-       (version, name, checksum, applied_at, applied_by)
-     SELECT version, name, checksum, applied_at, applied_by
-     FROM public.${quoteIdent(MIGRATION_LEDGER)}`,
-  );
+async function stageMigrationLedger(client, table) {
+  await client.query('BEGIN');
+  try {
+    await client.query(`
+      CREATE TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)} (
+        version integer CONSTRAINT schema_migrations_version_not_null NOT NULL
+          CONSTRAINT schema_migrations_version_check CHECK (version >= 1),
+        name text CONSTRAINT schema_migrations_name_not_null NOT NULL
+          CONSTRAINT schema_migrations_name_check CHECK (length(btrim(name)) > 0),
+        checksum text CONSTRAINT schema_migrations_checksum_not_null NOT NULL
+          CONSTRAINT schema_migrations_checksum_check CHECK (checksum ~ '^[0-9a-f]{64}$'),
+        applied_at timestamptz CONSTRAINT schema_migrations_applied_at_not_null NOT NULL DEFAULT now(),
+        applied_by text CONSTRAINT schema_migrations_applied_by_not_null NOT NULL
+          CONSTRAINT schema_migrations_applied_by_check CHECK (length(btrim(applied_by)) > 0),
+        CONSTRAINT schema_migrations_pkey PRIMARY KEY (version)
+      )
+    `);
+    await client.query(
+      `INSERT INTO ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)}
+         (version, name, checksum, applied_at, applied_by)
+       SELECT version, name, checksum, applied_at, applied_by
+       FROM public.${quoteIdent(MIGRATION_LEDGER)}`,
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    // فشلُ الإلغاءِ نفسِه يُبقي الأصليَّ هو المرميّ؛ والمعاملةُ غيرُ المُلتزَمةِ لا تُبقي جدولاً.
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  }
 }
 
 /**
@@ -289,15 +301,44 @@ export async function createBackup(dumpPath, databaseUrl) {
   const pool = new pg.Pool({ connectionString: requireDatabaseUrl(databaseUrl), max: 1 });
   try {
     fs.mkdirSync(path.dirname(dumpPath), { recursive: true });
+    // ‏`WL-592`: الفحصُ قبلَ المسّ — تُرفضُ الأداةُ القاصرةُ قبلَ إنشاءِ الجدولِ المرحليِّ
+    // في `state`، فلا يمسُّ الرفضُ القاعدةَ المصدرَ أصلاً (كما فعلَ `WL-590` في الاستعادة).
+    const serverVersion = await pool.query('SHOW server_version');
+    const dumpTool = await resolveVerifiedDumpTool(
+      String(
+        /** @type {Record<string, unknown> | undefined} */ (serverVersion.rows[0])?.[
+          'server_version'
+        ],
+      ),
+    );
     const ledgerStagingTable = `__backup_schema_migrations_${crypto.randomBytes(6).toString('hex')}`;
-    await stageMigrationLedger(pool, ledgerStagingTable);
-    const started = process.hrtime.bigint();
+    /** @type {bigint} */
+    let started = 0n;
     /** @type {{ code: number, stderr: string }} */
     let result;
     /** @type {{ databaseVersion: string, migrationVersion: number, rowCounts: Record<string, number> }} */
     let snapshot;
+    /** @type {{ error: unknown } | undefined} */
+    let primaryFailure;
+    /** @type {unknown} */
+    let cleanupFailure;
+    // ‏`WL-592`: الاتصالُ قبلَ الإنشاء، والإنشاءُ داخلَ نطاقِ التنظيف — كانَ الإنشاءُ قبلَ
+    // ‏`pool.connect()` وخارجَ `try`، ففشلُ الاتصالِ أو النسخِ بعدَه يُبقي الجدولَ بلا حذف.
+    // ‏`staged` يمنعُ `DROP` جدولٍ لم يُلتزَم إنشاؤه (‏خطأٌ زائفٌ يُلحَقُ بالأصليّ).
+    let staged = false;
     const client = await pool.connect();
+    // ‏`WL-592`: انقطاعُ الاتصالِ أثناءَ النسخ (‏إعادةُ تشغيلِ الخادم، `pg_terminate_backend`،
+    // ‏`idle_in_transaction_session_timeout` والاتصالُ ساكنٌ في معاملتِه طوالَ `pg_dump`) يُطلِقُ
+    // حدثَ `error` على العميلِ المُستعار — و`pg-pool` لا يستمعُ إليه إلا والعميلُ ساكنٌ في المجمَّع.
+    // فبلا مستمعٍ تنهارُ العمليّةُ بحدثٍ غيرِ مُلتقَط قبلَ `finally`: يبقى الجدولُ المرحليُّ في
+    // ‏`state` ويضيعُ الخطأُ الأصليّ. المستمعُ لا يبتلعُ شيئاً: العبارةُ التاليةُ على العميلِ تفشلُ
+    // بخطئِها فيُتلَفُ العميلُ (‏`release(error)`) ويجري الحذفُ على اتصالٍ جديد.
+    const onClientError = () => undefined;
+    client.on('error', onClientError);
     try {
+      await stageMigrationLedger(client, ledgerStagingTable);
+      staged = true;
+      started = process.hrtime.bigint();
       await client.query('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       const exported = await client.query('SELECT pg_export_snapshot() AS snapshot');
       const snapshotId = String(
@@ -316,7 +357,6 @@ export async function createBackup(dumpPath, databaseUrl) {
         /** @type {Record<string, unknown> | undefined} */ (fenced.rows[0])?.['present'] === true
           ? ['--schema', 'fence']
           : [];
-      const dumpTool = await resolveVerifiedDumpTool(snapshot.databaseVersion);
       result = await run(dumpTool, [
         '--format=custom',
         '--file',
@@ -330,6 +370,15 @@ export async function createBackup(dumpPath, databaseUrl) {
         snapshotId,
         databaseUrl,
       ]);
+      if (result.code !== 0) {
+        throw new BackupError(
+          BACKUP_ERRORS.COMMAND_FAILED,
+          `فشل pg_dump برمز ${result.code}: ${result.stderr.trim()}`,
+        );
+      }
+    } catch (error) {
+      primaryFailure = { error };
+      throw error;
     } finally {
       // معاملةُ قراءةٍ لا كتابةَ فيها: تُلغى بلا أثرٍ — واللقطاتُ المُصدَّرةُ تموتُ
       // بنهايةِ معاملتِها، فلا يبقى للنسخةِ أثرٌ حيٌّ في القاعدةِ بعدَ انتهائها.
@@ -344,16 +393,37 @@ export async function createBackup(dumpPath, databaseUrl) {
       } catch (error) {
         rollbackFailure = error instanceof Error ? error : new Error(String(error));
       }
+      client.removeListener('error', onClientError);
       client.release(rollbackFailure);
-      await pool.query(`DROP TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(ledgerStagingTable)}`);
+      // ‏`WL-592`: فشلُ الحذفِ لا يحجبُ الخطأَ الأصليّ — كانَ رميُه من `finally` يُبدِّلُ
+      // ‏`BACKUP_COMMAND_FAILED` بخطأِ `DROP` خامٍ فيضيعُ سببُ الفشل. يبقى الأصليُّ هو المرميّ
+      // ويُلحَقُ به اسمُ الجدولِ الباقي كي يُزالَ يدوياً؛ وبلا خطأٍ أصليٍّ يُرمى خطأُ الحذفِ مُسمّياً الجدول.
+      if (staged) {
+        try {
+          await pool.query(
+            `DROP TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(ledgerStagingTable)}`,
+          );
+        } catch (dropFailure) {
+          // الاسمُ الباقي مُسمّىً في المسارَين (‏ملاحظةُ المراجعةِ N2): من دونه لا يعرفُ المشغِّلُ
+          // أيَّ جدولٍ يُزيل. والأصليُّ — ‏`Error` أو غيرُه (‏N1) — يبقى هو المرميّ.
+          const leftover = `تعذّرَ حذفُ الجدولِ المرحليِّ ${STATE_SCHEMA}.${ledgerStagingTable}: ${
+            dropFailure instanceof Error ? dropFailure.message : String(dropFailure)
+          }`;
+          if (primaryFailure === undefined) {
+            if (dropFailure instanceof Error) dropFailure.message = leftover;
+            cleanupFailure = dropFailure;
+          } else if (primaryFailure.error instanceof Error) {
+            primaryFailure.error.message += `؛ و${leftover}`;
+          } else {
+            // مرميٌّ ليسَ `Error` لا يحملُ رسالةً تُلحَق؛ فيُكتَبُ الاسمُ إلى stderr كي لا يضيع.
+            console.error(`⛔ [BACKUP_STAGING_LEFTOVER] ${leftover}`);
+          }
+        }
+      }
     }
+    // لا يُبلَغُ هذا إلا والمسارُ ناجح؛ فخطأُ الحذفِ هنا هو الخطأُ الوحيد.
+    if (cleanupFailure !== undefined) throw cleanupFailure;
     const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
-    if (result.code !== 0) {
-      throw new BackupError(
-        BACKUP_ERRORS.COMMAND_FAILED,
-        `فشل pg_dump برمز ${result.code}: ${result.stderr.trim()}`,
-      );
-    }
     const manifest = {
       startedAt,
       durationMs,
