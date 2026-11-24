@@ -394,6 +394,8 @@ npm test                                               # اختبارات الق
 
 - `scripts/backup.mjs` و`scripts/restore.mjs` مع بصمة `SHA-256` للأرشيف، ورفضِ
   الاستعادة فوق قاعدة عامرة بلا `--force`. الزمن المقيس مُعلن في `docs/BACKUP.md`.
+  ومنذ `WL-606` بصمةُ محتوى تُحسب داخل لقطة النسخ وتُقارن بعد الاستعادة قبل
+  `[RESTORE_OK]` — عقدُ النتيجة ونطاقُ البصمة في `docs/RECOVERY.md` §13.
 - `scripts/retention.mjs` يمحو ما انتهى احتفاظه، ويرفض المساس بالمحفوز قانوناً
   (`RETENTION_LEGAL_HOLD`)، ويرفض محو الأحداث أصلاً (`RETENTION_EVENTS_IMMUTABLE`)
   كي لا تنقطع سلسلة التجزئة.
