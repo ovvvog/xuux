@@ -11,7 +11,7 @@
 - **الأدلّة:** `npm run guard:doc-counts` أخضر (‏R12 بـ71 صفّاً: D = 37، C = 31، E = 2، A = 1). ولا قياسَ جديداً، فهذا تسجيلُ فجوةٍ لا دليلُ دوام.
 - **ما لم يتمَّ ولماذا:** لا قطعَ طاقة، ولا جهاز، ولا XFS، ولا مسَّ لأجهزةِ المالك (‏ممنوعٌ في التوجيه). وإغلاقُ `LIVE-39` نفسِه بيدِ المجلس، والمحاكاةُ لا تُغلِقُه.
 - **الأثرُ على المساراتِ الأخرى:** لا شيء.
-- **الملفات المتأثرة:** `docs/roadmap/06-debt-register.md`، `docs/decisions/LIVE-39-decision-package.md`، `docs/roadmap/05-work-log.md`، `PROJECT_STATUS.md`، `docs/HANDOFF.md` (مولَّد)، `docs/READINESS_REPORT.md` (مولَّد).
+- **الملفات المتأثرة:** `docs/roadmap/06-debt-register.md`، `docs/decisions/LIVE-39-decision-package.md`، `tests/tooling/guard-doc-counts.test.mjs` (‏تثبيتُ R12: 70 ← 71؛ كانَ غائباً عن القائمةِ فكشفَه قياسُ الدفعِ بعدَ دمجِ `#619`)، `docs/roadmap/05-work-log.md`، `PROJECT_STATUS.md`، `docs/HANDOFF.md` (مولَّد)، `docs/READINESS_REPORT.md` (مولَّد).
 - **الديون:** جديدٌ LIVE-39/PHYSICAL (‏`E`، مفتوح). `LIVE-39` و`LIVE-75` و`LIVE-78` مفتوحة، و`RISK-0054 = NO-GO`، و`TH-SUP-05 = PARTIAL`. لا دَينَ مُغلَق.
 
 ### [2026-11-24] — WL-604 — **`LIVE-75` المُشرِفُ المركّبُ في المستودع (‏مكتبةٌ وCLI واختبارات، غيرُ مثبَّتٍ ولا مُشغَّلٍ على أيِّ مضيف): `FenceSupervisor` يرتّبُ القفلَ الاستشاريَّ ثمّ كنسَ الإقلاعِ ثمّ RUNNING ثمّ الحاصدَ ثمّ إطلاقَ العمّالِ بـ`XUUX_DB_FENCE=required` ثمّ الختم؛ SUP-01..SUP-10 على PostgreSQL بعمليّاتٍ حقيقيّةٍ وجدَت أربعةَ عيوبٍ أُصلِحت؛ الطفراتُ 3/3؛ لا تغييرَ في دوالِّ السياجِ ولا إلزامَ إنتاجيّ؛ `LIVE-75` مفتوح و`TH-SUP-05 = PARTIAL`**
