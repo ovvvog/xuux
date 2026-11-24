@@ -15,7 +15,7 @@
 - **الأدلّة:** منفردةً على PG18: `fence-lifecycle` 42/42، `db-fence-privileges` 36/36، `lease-reap-window` 15 + 5 تخطّياتٍ سابقة، `effects` 22 + تخطٍّ سابق، `halt-integrity` 22/22؛ 137 ⇒ 143 اختباراً بلا تخطٍّ جديد.
 - **ما لم يتمَّ ولماذا:** تراجعُ الساعة (‏لا faketime ولا root)، والموتُ داخلَ تنظيفِ المُشرِف (‏اكتملَ الإيقافُ قبلَ القتل)، وإصداراتُ PG غيرُ 18، وSIGKILL لا يُلتقَطُ فيبقى الجذرُ المؤقّت. لا تغييرَ للبيانِ الإنتاجيّ ولا لإدارةِ المفاتيح، ولا تثبيتَ ولا مضيف.
 - **الديون:** `LIVE-78` و`LIVE-78/CONTENT-INTEGRITY` و`LIVE-78/DIGEST-COVERAGE` و`LIVE-75` و`LIVE-39` و`LIVE-39/PHYSICAL` مفتوحة، و`TH-SUP-05 = PARTIAL`، و`RISK-0054 = NO-GO`. لا دَينَ مُغلَقٌ ولا جديد.
-- **الملفات المتأثرة:** `tests/helpers/pg.mjs`، `tests/helpers/tmp-roots.mjs`، `tests/persistence/backup-restore.test.mjs`، `tests/fence/{fence-lifecycle,db-fence-privileges,lease-reap-window,effects,halt-integrity}.test.mjs`، `tests/tooling/guard-test-tmp-hygiene.test.mjs`، `docs/THREAT_MODEL.md`، `docs/RECOVERY.md`، `docs/BACKUP.md`، `docs/roadmap/06-debt-register.md`، `PROJECT_STATUS.md`.
+- **الملفات المتأثرة:** `tests/helpers/pg.mjs`، `tests/helpers/tmp-roots.mjs`، `tests/persistence/backup-restore.test.mjs`، `tests/fence/effects.test.mjs`، `tests/fence/halt-integrity.test.mjs`، `tests/fence/lease-reap-window.test.mjs`، `tests/tooling/guard-test-tmp-hygiene.test.mjs`، `docs/THREAT_MODEL.md`، `docs/RECOVERY.md`، `docs/BACKUP.md`، `docs/roadmap/06-debt-register.md`، `PROJECT_STATUS.md`.
 
 ### [2026-11-24] — WL-607 — **`LIVE-75` اختباراتُ المُشرِفِ في المستودع (‏SUP-11..SUP-16): موتُ المُشرِفِ في كلِّ مرحلةٍ حرجة، ونافذةُ SUP-06 معرَّفةٌ بحدِّها المقيسِ لا مُغلَقة، والتعافي، وفشلُ الحاصدِ والتنظيف، والسباقُ على القفل، والطابورُ التسلسليُّ بقياسٍ مستقلّ**
 
