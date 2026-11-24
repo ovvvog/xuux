@@ -1587,3 +1587,117 @@ test('WL-584 (‏DOC-24) — فقدٌ على القاعدتَين يُعَدُّ
   const lost = r.out.match(/PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/gu) ?? [];
   assert.equal(lost.length, 1, `الفقدُ نفسُه مرّةً واحدةً لا مرّتين:\n${r.out}`);
 });
+
+// ═══ `WL-609` — الحزمةُ على القاعدةِ الحرفيّة: حادثةُ `#619` (‏`44b86ef4`، التشغيلةُ 45475715685) ═══
+//
+// فحصُ الطلبِ قاسَ الحزمةَ على `origin/main` وحدَه (‏`WL-450`)، فملفٌّ تغيَّرَ في الطلبِ وتُسمّيه مُدخلةٌ أقدمُ
+// على فرعِ التكاملِ (‏لم تبلغْ `main`) عُدَّ مُسجَّلاً؛ ثمّ رسبَ قياسُ الدفعِ بعدَ الدمجِ (‏`HEAD^1`) بـ`PS4`.
+
+test('WL-609 — طلبٌ إلى فرعِ التكاملِ يغيّرُ ملفّاً لا تُسمّيه مُدخلتُه الجديدةُ يُرَدُّ (‏PS4) على القاعدةِ الحرفيّة', () => {
+  const root = integrationRepo();
+  write(root, 'src/app.mjs', 'export const v = 3;\n');
+  addEntry(root, { id: 'WL-003', title: 'طبقةٌ فوقَ التكامل', files: ['PROJECT_STATUS.md'] });
+  regenerateHandoff(root);
+  commit(root, 'WL-003 changes src/app.mjs and does not name it');
+  const r = runGuardAsPr(root, 'integration');
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /الأساسُ: origin\/main/u, 'WL-450 باقٍ: الحزمةُ تُقاسُ على main أيضاً.');
+  assert.doesNotMatch(
+    r.out,
+    /PS4\/UNRECORDED-FILE: `src\/app\.mjs` تغيَّرَ ولا تُسمّيه «الملفات المتأثرة» في WL-003\/WL-002\./u,
+    'وعلى main وحدَه تُغطّيه WL-002 — وهو عينُ الثغرة.',
+  );
+  assert.match(
+    r.out,
+    /الحزمةُ على القاعدةِ الحرفيّةِ: origin\/integration = [0-9a-f]{12} · ملفّاتٌ متغيّرةٌ: \d+ · مُدخلاتٌ جديدةٌ: WL-003 · ساقطة/u,
+  );
+  assert.match(
+    r.out,
+    /PS4\/UNRECORDED-FILE: `src\/app\.mjs` تغيَّرَ ولا تُسمّيه «الملفات المتأثرة» في WL-003\.[^\n]*الحزمةُ على القاعدةِ الحرفيّةِ `origin\/integration`/u,
+  );
+  // والقياسُ نفسُه هو قياسُ الدفعِ بعدَ الدمج: الطبقةُ مدموجةً في التكاملِ ⇒ `HEAD^1` يرفضُها بالرمزِ نفسِه.
+  git(root, ['checkout', '-q', 'integration']);
+  git(root, ['merge', '-q', '--no-ff', '-m', 'merge PR', 'pr-to-integration']);
+  const push = runGuard(root, 'HEAD^1');
+  assert.equal(push.status, 1, push.out);
+  assert.match(push.out, /PS4\/UNRECORDED-FILE: `src\/app\.mjs`[^\n]*WL-003\./u);
+});
+
+test('WL-609 — الطلبُ نفسُه بتسميةِ الملفِّ يمرُّ على القاعدتَين، والحزمةُ المتّسقةُ تُطبَعُ «متّسقة»', () => {
+  const root = integrationRepo();
+  write(root, 'src/app.mjs', 'export const v = 3;\n');
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'طبقةٌ فوقَ التكامل',
+    files: ['src/app.mjs', 'PROJECT_STATUS.md'],
+  });
+  regenerateHandoff(root);
+  commit(root, 'WL-003 names src/app.mjs');
+  const r = runGuardAsPr(root, 'integration');
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /الحزمةُ على القاعدةِ الحرفيّةِ: [^\n]*مُدخلاتٌ جديدةٌ: WL-003 · متّسقة/u);
+  // طلبٌ قاعدتُه main: لا قياسَ حرفيّاً ثانياً للحزمة.
+  assert.doesNotMatch(runGuardAsPr(root, 'main').out, /الحزمةُ على القاعدةِ الحرفيّةِ/u);
+});
+
+test('WL-609 — تعديلٌ مُعلَنٌ لمُدخلةِ التكاملِ القديمةِ (‏amend تملكُه المُدخلةُ الجديدة) يُقبَل، وبلا إعلانٍ يُرَدّ', () => {
+  const root = integrationRepo();
+  // على التكاملِ: ملفٌّ تغيَّرَ ولم تُسمِّه WL-002 (‏كـ`guard-doc-counts.test.mjs` في WL-603).
+  git(root, ['checkout', '-q', 'integration']);
+  write(root, 'README.md', '# مشروع\n\nسطرٌ لم يُسجَّل.\n');
+  commit(root, 'unnamed change on integration');
+  git(root, ['update-ref', 'refs/remotes/origin/integration', 'integration']);
+  git(root, ['checkout', '-q', '-B', 'pr-to-integration', 'integration']);
+  // إكمالُ قائمةِ WL-002 القديمةِ — كإصلاحِ `455d6c16` لقائمةِ WL-603.
+  const log = readFileSync(path.join(root, LOG), 'utf8');
+  write(
+    root,
+    LOG,
+    log.replace(
+      '`src/app.mjs` · `PROJECT_STATUS.md`',
+      '`src/app.mjs` · `PROJECT_STATUS.md` · `README.md`',
+    ),
+  );
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'إكمالُ قائمةِ WL-002',
+    files: ['docs/roadmap/05-work-log.md', 'config/work-log-ids.yaml', 'PROJECT_STATUS.md'],
+  });
+  regenerateHandoff(root);
+  commit(root, 'amend WL-002 without declaration');
+  // بلا إعلان: تعديلُ مُدخلةٍ على القاعدةِ إعادةُ كتابةٍ للتاريخ.
+  const bad = runGuardAsPr(root, 'integration');
+  assert.equal(bad.status, 1, bad.out);
+  assert.match(bad.out, /PS12\/HISTORY-REWRITTEN: مُدخلةُ `WL-002`/u);
+  write(
+    root,
+    'config/work-log-ids.yaml',
+    'gaps: []\nhistory_amendments:\n  - id: WL-002\n    action: amend\n    by: WL-003\n    reason: إكمالُ قائمةٍ ناقصة\n',
+  );
+  regenerateHandoff(root);
+  commit(root, 'declare the amendment');
+  const ok = runGuardAsPr(root, 'integration');
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /تعديلٌ مُعلَنٌ: WL-002/u);
+  assert.match(ok.out, /الحزمةُ على القاعدةِ الحرفيّةِ: [^\n]*مُدخلاتٌ جديدةٌ: WL-003 · متّسقة/u);
+});
+
+test('WL-609 — قاعدةٌ حرفيّةٌ بلا سجلِّ أعمالٍ عجزٌ عن القياسِ (‏خروج 2) لا نجاح', () => {
+  const root = integrationRepo();
+  write(root, 'docs/THREAT_MODEL.md', '# نموذج التهديد\n\nتصحيحٌ لغويّ.\n');
+  commit(root, 'neutral doc');
+  git(root, ['checkout', '-q', '--orphan', 'bare']);
+  git(root, ['rm', '-rq', '--cached', '.']);
+  write(root, 'README.md', '# فارغ\n');
+  git(root, ['add', 'README.md']);
+  git(root, ['commit', '-qm', 'bare base without work log']);
+  git(root, ['update-ref', 'refs/remotes/origin/bare', 'bare']);
+  git(root, ['checkout', '-qf', 'pr-to-integration']);
+  const r = runGuardAsPr(root, 'bare');
+  assert.equal(r.status, 2, r.out);
+  assert.match(
+    r.out,
+    /`docs\/roadmap\/05-work-log\.md` غائبٌ عن القاعدةِ الحرفيّةِ `origin\/bare`/u,
+  );
+  assert.doesNotMatch(r.out, /✅ الحكمُ/u);
+});

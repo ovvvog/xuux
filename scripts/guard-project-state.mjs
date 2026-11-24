@@ -12,6 +12,8 @@
 //   أو في CI لدفعٍ إلى `main` الأبُ الأوّلُ `HEAD^1`، وإلّا `merge-base HEAD origin/main`.
 //   وبقاءُ التاريخِ يُقاسُ أيضاً على القاعدةِ الحرفيّةِ (‏WL-584): `--history-base <ref>`، أو
 //   `PROJECT_STATE_HISTORY_BASE`، أو في CI لطلبٍ قاعدتُه غيرُ `main` ‏`origin/<base_ref>`.
+//   وعلى القاعدةِ الحرفيّةِ نفسِها تُقاسُ **الحزمةُ** أيضاً (‏`WL-609`، `PS2`…`PS8`): هو قياسُ الدفعِ بعدَ الدمجِ
+//   (‏`HEAD^1`) مُقدَّماً إلى الطلب.
 //   والفرقُ `git diff --no-renames -z --name-status <base>...HEAD`.
 //
 // **رموزُ الخروجِ:** `0` الحزمةُ متّسقةٌ · `1` رفضٌ (‏تُطبَعُ القواعدُ) · `2` عجزٌ عن القياسِ
@@ -288,7 +290,7 @@ const preservation = verifyHistoryPreserved({
 });
 
 // WL-584: بقاءُ التاريخِ على القاعدةِ الحرفيّةِ أيضاً — ما على فرعِ التكاملِ ولم يبلغْ `main`.
-/** @type {{ ref: string, sha: string, lost: number, violations: import('./lib/project-state.mjs').Violation[] } | null} */
+/** @type {{ ref: string, sha: string, lost: number, violations: import('./lib/project-state.mjs').Violation[], packageViolations: import('./lib/project-state.mjs').Violation[], changed: number, newEntries: string[] } | null} */
 let literal = null;
 if (historyBase !== null) {
   let literalSha = '';
@@ -316,7 +318,45 @@ if (historyBase !== null) {
       restoredRewrites: restoration.rewritten,
     }).violations;
     const found = all.filter((v) => !seen.has(`${v.code}\u0000${v.message}`));
+    // ‏`WL-609`: الحزمةُ على القاعدةِ الحرفيّةِ أيضاً. قياسُها على `origin/main` وحدَه (‏`WL-450`) يقبلُ ملفّاً
+    // تغيَّرَ في هذا الطلبِ وتُسمّيه مُدخلةٌ أقدمُ على فرعِ التكاملِ لم تبلغْ `main`؛ وقياسُ الدفعِ بعدَ الدمجِ
+    // (‏`HEAD^1`) يرفضُه — حادثةُ `#619` (‏`44b86ef4`، التشغيلةُ 45475715685). فيُقاسُ هنا ما سيُقاسُ هناك.
+    const literalWorkLog = at(literalSha);
+    if (literalWorkLog === null) {
+      unmeasurable(
+        `\`${manifest.workLog}\` غائبٌ عن القاعدةِ الحرفيّةِ \`${historyBase}\` — لا يُقاسُ عليها الطلب.`,
+      );
+    }
+    /** @type {import('./lib/project-state.mjs').ChangedFile[]} */
+    const literalChanged = [];
+    {
+      const raw = git(['diff', '--no-renames', '-z', '--name-status', `${literalSha}...HEAD`]);
+      const parts = raw.split('\0').filter((p) => p.length > 0);
+      for (let i = 0; i + 1 < parts.length; i += 2) {
+        literalChanged.push({ status: String(parts[i]), path: String(parts[i + 1]) });
+      }
+    }
+    const literalPackage = evaluateProjectState({
+      restored: restoration.restored,
+      manifest,
+      changed: literalChanged,
+      headExists: (rel) => existsSync(path.join(repoRoot, rel)),
+      baseWorkLog: literalWorkLog ?? '',
+      headWorkLog: headWorkLogText,
+      headDebtRegister: existsSync(path.join(repoRoot, manifest.debtRegister))
+        ? readHead(manifest.debtRegister)
+        : '',
+    });
+    const seenPackage = new Set(result.violations.map((v) => `${v.code}\u0000${v.message}`));
     literal = {
+      packageViolations: literalPackage.violations
+        .filter((v) => !seenPackage.has(`${v.code}\u0000${v.message}`))
+        .map((v) => ({
+          code: v.code,
+          message: `${v.message} (‏الحزمةُ على القاعدةِ الحرفيّةِ \`${historyBase}\`)`,
+        })),
+      changed: literalChanged.length,
+      newEntries: literalPackage.newEntries,
       ref: historyBase,
       sha: literalSha,
       // ‏مراجعةُ `#601` (‏N3): ما سقطَ على القاعدتَين يُعَدُّ مرّةً في الحكم، لكنَّ سطرَ الحرفيّةِ لا يقولُ «باقٍ».
@@ -332,6 +372,7 @@ if (historyBase !== null) {
 const violations = [
   ...preservation.violations,
   ...(literal?.violations ?? []),
+  ...(literal?.packageViolations ?? []),
   ...restoration.violations,
   ...result.violations,
 ];
@@ -365,6 +406,15 @@ if (literal !== null) {
         : literal.violations.length === 0
           ? 'ساقطٌ (‏مكرَّرٌ مع الأساسِ أعلاه)'
           : 'ساقطٌ'
+    }`,
+  );
+}
+if (literal !== null) {
+  console.log(
+    `  الحزمةُ على القاعدةِ الحرفيّةِ: ${literal.ref} = ${literal.sha.slice(0, 12)} · ملفّاتٌ متغيّرةٌ: ${
+      literal.changed
+    } · مُدخلاتٌ جديدةٌ: ${literal.newEntries.join(' ') || '—'} · ${
+      literal.packageViolations.length === 0 ? 'متّسقة' : 'ساقطة'
     }`,
   );
 }
