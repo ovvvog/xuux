@@ -322,14 +322,17 @@ async function l78TargetImage(pool) {
 /**
  * مصدرٌ مُهاجَرٌ بمحتوى، ونسختُه النموذجيّة (‏البيانُ يحملُ `contentDigest` ويقرؤه الإنتاجُ أيضاً).
  * @param {string} label
- * @param {{ to?: number }} [options]
+ * `bodyRepeat` يكبّرُ الأرشيفَ فوقَ سعةِ الأنبوب.
+ * @param {{ to?: number, bodyRepeat?: number }} [options]
  */
 async function l78Source(label, options = {}) {
   const source = await createIsolatedDatabase(label);
   await up(source.pool, options.to === undefined ? {} : { to: options.to });
+  const body =
+    options.bodyRepeat === undefined ? `'نصّ '` : `repeat('نصّ ', ${Number(options.bodyRepeat)})`;
   await source.pool.query(
     `INSERT INTO state.laws (id, title, body, status, scope, proposer)
-     SELECT 'law-' || lpad(g::text, 6, '0'), 'عنوان ' || g, 'نصّ ' || g, 'draft', 'testing', 'agent-001'
+     SELECT 'law-' || lpad(g::text, 6, '0'), 'عنوان ' || g, ${body} || g, 'draft', 'testing', 'agent-001'
        FROM generate_series(1, 300) g`,
   );
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `l78-${label}-`));
@@ -596,6 +599,54 @@ test(
       assert.equal(await l78TargetImage(fenced.pool), fencedBefore);
     } finally {
       await fresh.drop();
+      await fenced.drop();
+      await fixture.cleanup();
+    }
+  },
+);
+
+test(
+  'LIVE-78 نموذج: رفضُ التمهيدِ (‏psql يخرجُ قبلَ `pg_restore`) يُحسَمُ ولا يُعلِّقُ الوعد — خمسُ جولاتٍ متتالية',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
+  async () => {
+    // ‏مقيس قبلَ الإصلاح: 4/6 تشغيلاتٍ يفرغُ فيها حلقُ الأحداثِ والوعدُ معلّق (‏خرجُ `pg_restore` موقوفٌ بعدَ انفصالِ
+    // الأنبوب)، فيسقطُ الملفُّ كلُّه في CI بـ«Promise resolution is still pending». المؤقّتُ يُبقي الحلقَ حيّاً
+    // كي يظهرَ التعليقُ سقوطاً مسمّىً لا إلغاءً للملفّ.
+    const fixture = await l78Source('l78refloop', { to: 23, bodyRepeat: 50 });
+    const fenced = await createIsolatedDatabase('l78refloopt');
+    try {
+      await up(fenced.pool);
+      const before = await l78TargetImage(fenced.pool);
+      for (let round = 1; round <= 5; round += 1) {
+        /** @type {NodeJS.Timeout | undefined} */
+        let timer;
+        const hung = new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`الجولة ${round}: الوعدُ معلّقٌ بعدَ 20 ث`)),
+            20_000,
+          );
+        });
+        try {
+          const refused = await Promise.race([
+            live78PrototypeRestore({
+              dumpPath: fixture.dump,
+              database: fenced.name,
+              url: l78AdminUrl(),
+              force: true,
+            }),
+            hung,
+          ]);
+          assert.equal(
+            /** @type {any} */ (refused).outcome,
+            LIVE78_OUTCOMES.REFUSED_FENCED,
+            /** @type {any} */ (refused).stderr,
+          );
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      assert.equal(await l78TargetImage(fenced.pool), before);
+    } finally {
       await fenced.drop();
       await fixture.cleanup();
     }
