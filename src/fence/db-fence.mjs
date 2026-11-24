@@ -26,6 +26,7 @@ import {
   randomUUID,
   sign,
 } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
 
 import { createStrictHaltGuard, fileEpochFloor } from './halt-integrity.mjs';
@@ -50,6 +51,14 @@ export const FENCE_ERRORS = Object.freeze({
   BOOT_GATE_STATE: 'FENCE_BOOT_GATE_STATE',
   BOOT_GATE_TIMEOUT: 'FENCE_BOOT_GATE_TIMEOUT',
   BOOT_GATE_CANCELLED: 'FENCE_BOOT_GATE_CANCELLED',
+  // ‏LIVE-75 (‏WL-604): المُشرِفُ المركّب `FenceSupervisor` — رموزُ العميلِ وحدَه، لا رمزَ قاعدةٍ جديد.
+  SUPERVISOR_LOCKED: 'FENCE_SUPERVISOR_LOCKED',
+  SUPERVISOR_LOCK_LOST: 'FENCE_SUPERVISOR_LOCK_LOST',
+  SUPERVISOR_STATE: 'FENCE_SUPERVISOR_STATE',
+  SUPERVISOR_NOT_RUNNING: 'FENCE_SUPERVISOR_NOT_RUNNING',
+  SUPERVISOR_REAPER_START: 'FENCE_SUPERVISOR_REAPER_START',
+  SUPERVISOR_DB_UNREACHABLE: 'FENCE_SUPERVISOR_DB_UNREACHABLE',
+  SUPERVISOR_WORKER_BOOT: 'FENCE_SUPERVISOR_WORKER_BOOT',
 });
 
 /** سببُ الإلغاءِ الافتراضيُّ لاعتمادٍ يتيمٍ عندَ إقلاعِ المُشرِف (‏TH-SUP-05، WL-577). */
@@ -2120,4 +2129,917 @@ export async function prepareFencedWorker(input) {
     /** @param {{ query: Function }} db */
     verify: (db) => assertFencedSession(db, { workerId, bootId }),
   };
+}
+
+// ── المُشرِفُ المركّب (‏LIVE-75، WL-604) ──────────────────────────────────────────
+
+/**
+ * مفتاحُ القفلِ الاستشاريِّ للمُشرِف (‏الصيغةُ ذاتُ العددين: `'XUUX'` و`'SUPV'`). الأقفالُ الاستشاريّةُ لكلِّ قاعدة —
+ * فـ«المورد» = القاعدةُ التي يتّصلُ بها المُشرِف.
+ */
+export const SUPERVISOR_LOCK_KEY = Object.freeze([0x58555558, 0x53555056]);
+
+/** حالاتُ المُشرِف. */
+export const SUPERVISOR_STATES = Object.freeze({
+  NEW: 'NEW',
+  LOCKING: 'LOCKING',
+  SWEEPING: 'SWEEPING',
+  CHECKING: 'CHECKING',
+  STARTING_REAPER: 'STARTING_REAPER',
+  RUNNING: 'RUNNING',
+  WAITING: 'WAITING',
+  STOPPING: 'STOPPING',
+  STOPPED: 'STOPPED',
+  FAILED: 'FAILED',
+});
+
+/** حالاتُ العاملِ تحتَ المُشرِف. */
+export const SUPERVISED_WORKER_STATES = Object.freeze({
+  PENDING: 'PENDING',
+  BOOTING: 'BOOTING',
+  RUNNING: 'RUNNING',
+  LOST: 'LOST',
+  BOOT_FAILED: 'BOOT_FAILED',
+  RESTARTING: 'RESTARTING',
+  GAVE_UP: 'GAVE_UP',
+  STOPPED: 'STOPPED',
+});
+
+/**
+ * وعدٌ بمهلةٍ تُنظَّفُ دائماً (‏لا مؤقّتَ معلّقٌ يُبقي العمليّةَ حيّة).
+ * @template T @param {Promise<T>} promise @param {number} ms @param {() => Error} onTimeout
+ * @returns {Promise<T>}
+ */
+function supervisorTimeout(promise, ms, onTimeout) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const t = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(onTimeout()), ms);
+  });
+  return /** @type {Promise<T>} */ (Promise.race([promise, t])).finally(() => clearTimeout(timer));
+}
+
+/** @param {unknown} error */
+function supervisorErrorCode(error) {
+  const e = /** @type {any} */ (error);
+  return String(e?.code ?? e?.message ?? e);
+}
+
+/**
+ * ‏LIVE-75 — المُشرِفُ المركّب: يُركّبُ اللبناتِ القائمةَ (‏`SupervisorBootGate`، `superviseWorkerHandshake`،
+ * `confirmWorkerSeal`، `startLeaseKeeper`، `startLapseReaper`، `revokeCredential`) في دورةِ حياةٍ واحدةٍ **دونَ أيِّ
+ * تغييرٍ في دوالِّ السياجِ ولا بوابةٍ جديدةٍ في القاعدة**. مكتبةٌ في المستودع — لا تنصيبَ ولا تشغيلَ على مضيف.
+ *
+ * تسلسلُ الإقلاع (‏`start()`)، وكلُّ فشلٍ فيه ⇒ FAILED مغلق (‏لا عاملَ يُطلَق، والقفلُ يُحرَّر):
+ *  1. LOCKING — `pg_try_advisory_lock(SUPERVISOR_LOCK_KEY)` على **وصلةٍ مخصّصةٍ** بدورِ الجذر تبقى مفتوحةً طوالَ
+ *     العمر. مُشرِفٌ ثانٍ على القاعدةِ نفسِها ⇒ `FENCE_SUPERVISOR_LOCKED` **قبلَ** أيِّ كنس (‏فلا يُلغي اعتماداتِ الأوّل).
+ *  2. SWEEPING — `SupervisorBootGate.start()`: كلُّ اعتمادٍ ACTIVE قبلَ هذا الإقلاعِ يتيمٌ ويُلغى (‏TH-SUP-05).
+ *  3. CHECKING — `fence.status()`: الحالةُ الفعليّةُ RUNNING وإلا `FENCE_SUPERVISOR_NOT_RUNNING`.
+ *  4. STARTING_REAPER — `startLapseReaper` داخلَ نموذجِ المُشرِف، ويُنتظَرُ **أوّلُ نداءٍ ناجح**؛ فشلُه أو مهلتُه ⇒
+ *     `FENCE_SUPERVISOR_REAPER_START`.
+ *  5. RUNNING — مراقِبٌ دوريٌّ (‏القفل، وحالةُ السياج)، ثمّ إطلاقُ كلِّ عاملٍ بالتسلسل: `spawnWorker` بـ
+ *     `XUUX_DB_FENCE=required` ⇒ مصافحة ⇒ تأكيدُ الختم ⇒ حافظُ إيجار ⇒ مراقبةُ الموت.
+ *
+ * **الطابورُ التسلسليّ:** كلُّ إصدارٍ (‏issueChallenge/completeCredential) وكلُّ إلغاءٍ يمرُّ بطابورٍ واحد — لا يتداخلُ
+ * نداءا إصدارٍ وإلغاءٍ من هذا المُشرِف (‏`snapshot().serial.maxConcurrent` = 1 دليلُه).
+ * **الإلغاءُ قبلَ القتل:** موتُ عاملٍ أو إيقافُه ⇒ `revokeCredential` (‏NOLOGIN وإنهاءُ الجلسات — فمعاملةٌ مفتوحةٌ
+ * تُلغى ولا تلتزم) ثمّ SIGTERM/SIGKILL. فشلُ الإلغاءِ يُسجَّلُ ولا يُعلَنُ نجاحاً — الإيجارُ ينقضي والحاصدُ يُلغي.
+ * **المراقِب:** فقدُ القفلِ أو انقطاعُ القاعدةِ `maxDbFailures` مرّةً متتالية ⇒ FAILED (‏كلُّ العمّالِ يُلغَون ويُقتَلون)؛
+ * حالةُ سياجٍ غيرُ RUNNING ⇒ WAITING (‏العمّالُ يُوقَفون ولا يُعادون) حتى RUNNING فكنسٌ جديدٌ وإطلاق.
+ * **إعادةُ التشغيل:** عاملٌ مات يُعادُ بعدَ `backoffMs` ما لم يبلغْ `maxRestarts` في `windowMs` (‏ثمّ GAVE_UP). موتُ المُشرِفِ
+ * نفسِه: القاعدةُ تُحرِّرُ القفلَ بموتِ وصلته، والإيجاراتُ تنقضي (‏حاصدُ السياديِّ المنفصلُ يُلغيها)، والمُشرِفُ التالي يكنسُ.
+ *
+ * **حدودٌ معلنة:** القفلُ استشاريٌّ تعاونيّ — حاملُ `xf_root` بـSQL خامٍ لا يمنعُه (‏لا بوابةَ في القاعدة، قرارُ مالك)؛
+ * المُشرِفُ لا يرى مفتاحَ العامل (‏`spawnWorker` للمُطلِق)؛ `loginBroker` حزامُ اختبارٍ وحدَه (‏الإنتاج: peer/pg_ident —
+ * D-SUP-2)؛ الحاصدُ داخلَ المُشرِفِ يموتُ بموته (‏لذا حاصدُ السياديِّ المنفصلُ قائم). وليس هذا مُشرِفاً منشوراً: T2 DESIGNED.
+ */
+export class FenceSupervisor {
+  /** @type {FenceRoot} */
+  #root;
+  /** @type {any} */
+  #o;
+  /** @type {string} */
+  #state = SUPERVISOR_STATES.NEW;
+  /** @type {string | null} */
+  #lastError = null;
+  /** @type {any} */
+  #lockClient = null;
+  /** @type {SupervisorBootGate | null} */
+  #gate = null;
+  /** @type {ReturnType<typeof startLapseReaper> | null} */
+  #reaper = null;
+  /**
+   * ‏ما تعذّرَ إلغاؤه أو جردُه خارجَ مسارِ الإيقاف (‏فشلُ إقلاع، فقدُ عامل): يُعلَنُ في تقريرِ الإيقافِ لا في السجلِّ وحدَه.
+   * @type {Array<{ worker: string, role: string | null, boot: string | null, error: string }>}
+   */
+  #unresolved = [];
+  #fenceRunning = false;
+  #dbFailures = 0;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  #monitorTimer = null;
+  /** @type {Set<ReturnType<typeof setTimeout>>} */
+  #timers = new Set();
+  /** @type {Map<string, any>} */
+  #workers = new Map();
+  /** @type {Promise<unknown>} */
+  #queue = Promise.resolve();
+  #serial = { ops: 0, active: 0, maxConcurrent: 0, issue: 0, revoke: 0 };
+  /** @type {Promise<any> | null} */
+  #shutdown = null;
+  /** @type {(v: any) => void} */
+  #resolveDone = () => {};
+  /** @type {Promise<any>} */
+  done;
+  /** @type {any} */
+  #serialRoot;
+  /** @type {{ assertOperational(): void }} */
+  #guard;
+
+  /**
+   * @param {{ root: FenceRoot, lockConnect: () => Promise<any>,
+   *           workers: Array<{ workerId: string, [k: string]: unknown }>,
+   *           spawnWorker: (spec: any, ctx: { env: Record<string, string>, attempt: number }) => import('node:child_process').ChildProcess,
+   *           loginBroker?: (credential: Record<string, any>) => Promise<void>,
+   *           reaper?: { ceilingMs?: number, retryMs?: number, maxRetryMs?: number, firstTickTimeoutMs?: number,
+   *                      target?: { reapLapsed(): Promise<any> } },
+   *           gate?: { timeoutMs?: number, settleMs?: number, pollMs?: number },
+   *           handshakeTimeoutMs?: number, sealTimeoutMs?: number, leaseIntervalMs?: number,
+   *           monitorIntervalMs?: number, lockCheckTimeoutMs?: number, maxDbFailures?: number,
+   *           restart?: { maxRestarts?: number, windowMs?: number, backoffMs?: number },
+   *           killGraceMs?: number, log?: (event: Record<string, unknown>) => void }} options
+   */
+  constructor(options) {
+    const root = options?.root;
+    if (!(root instanceof FenceRoot))
+      throw new TypeError('FenceSupervisor: root يجبُ أن يكونَ FenceRoot');
+    if (BOOT_GATES.has(root))
+      throw new TypeError(
+        'FenceSupervisor: لهذا الجذرِ بوابةُ إقلاعٍ قائمة — المُشرِفُ يملكُ بوابتَه وحدَه',
+      );
+    if (typeof options.lockConnect !== 'function')
+      throw new TypeError('FenceSupervisor: lockConnect دالّةٌ تفتحُ وصلةً مخصّصةً بدورِ الجذر');
+    if (typeof options.spawnWorker !== 'function')
+      throw new TypeError('FenceSupervisor: spawnWorker دالّةُ المُطلِق');
+    if (!Array.isArray(options.workers) || options.workers.length === 0)
+      throw new TypeError('FenceSupervisor: workers قائمةٌ غيرُ فارغة');
+    const ints = {
+      handshakeTimeoutMs: options.handshakeTimeoutMs ?? 15_000,
+      sealTimeoutMs: options.sealTimeoutMs ?? 15_000,
+      monitorIntervalMs: options.monitorIntervalMs ?? 1_000,
+      lockCheckTimeoutMs: options.lockCheckTimeoutMs ?? 2_000,
+      maxDbFailures: options.maxDbFailures ?? 3,
+      killGraceMs: options.killGraceMs ?? 2_000,
+      maxRestarts: options.restart?.maxRestarts ?? 3,
+      windowMs: options.restart?.windowMs ?? 60_000,
+      backoffMs: options.restart?.backoffMs ?? 500,
+      reaperCeilingMs: options.reaper?.ceilingMs ?? 5_000,
+      firstTickTimeoutMs: options.reaper?.firstTickTimeoutMs ?? 5_000,
+    };
+    for (const [k, v] of Object.entries(ints)) {
+      const floor = k === 'maxRestarts' || k === 'backoffMs' ? 0 : 1;
+      if (!Number.isInteger(v) || v < floor)
+        throw new TypeError(`FenceSupervisor: ${k} عددٌ صحيحٌ ≥ ${floor}`);
+    }
+    if (
+      options.leaseIntervalMs !== undefined &&
+      (!Number.isInteger(options.leaseIntervalMs) || options.leaseIntervalMs < 1)
+    )
+      throw new TypeError('FenceSupervisor: leaseIntervalMs عددٌ صحيحٌ ≥ 1');
+    const ids = new Set();
+    for (const w of options.workers) {
+      if (typeof w?.workerId !== 'string' || w.workerId === '' || ids.has(w.workerId))
+        throw new TypeError('FenceSupervisor: لكلِّ عاملٍ workerId نصّيٌّ فريد');
+      ids.add(w.workerId);
+    }
+    this.#root = root;
+    this.#o = { ...ints, options, log: options.log ?? (() => {}) };
+    for (const spec of options.workers)
+      this.#workers.set(spec.workerId, {
+        id: spec.workerId,
+        spec,
+        state: SUPERVISED_WORKER_STATES.PENDING,
+        gen: 0,
+        attempts: 0,
+        restarts: /** @type {number[]} */ ([]),
+        child: null,
+        exited: null,
+        boot: null,
+        bootId: null,
+        credential: null,
+        keeper: null,
+        sessions: null,
+        lastError: null,
+        lastExit: null,
+      });
+    this.done = new Promise((resolve) => {
+      this.#resolveDone = resolve;
+    });
+    this.#serialRoot = {
+      issueChallenge: (/** @type {string} */ w, /** @type {string} */ b) =>
+        this.#serialized('issue', () => root.issueChallenge(w, b)),
+      completeCredential: (/** @type {string} */ n, /** @type {Buffer} */ sig) =>
+        this.#serialized('issue', () => root.completeCredential(n, sig)),
+      credentialSeal: (/** @type {string} */ role) => root.credentialSeal(role),
+      revokeCredential: (/** @type {string} */ role, /** @type {string} */ why) =>
+        this.#serialized('revoke', () => root.revokeCredential(role, why)),
+    };
+    this.#guard = Object.freeze({
+      assertOperational: () => {
+        if (this.#state !== SUPERVISOR_STATES.RUNNING || !this.#fenceRunning)
+          throw new FenceError(
+            FENCE_ERRORS.SUPERVISOR_NOT_RUNNING,
+            `المُشرِفُ ${this.#state} — لا تجديدَ إيجار`,
+          );
+      },
+    });
+  }
+
+  get state() {
+    return this.#state;
+  }
+
+  /** @param {Record<string, unknown>} event */
+  #log(event) {
+    try {
+      this.#o.log({ ...event, t: Date.now() });
+    } catch {
+      // ‏سجلٌّ رمى: لا يُسقطُ المُشرِف.
+    }
+  }
+
+  /**
+   * الطابورُ التسلسليّ: نداءٌ واحدٌ في كلِّ لحظةٍ لإصدارٍ أو إلغاء.
+   * @template T @param {'issue' | 'revoke'} kind @param {() => Promise<T>} fn @returns {Promise<T>}
+   */
+  #serialized(kind, fn) {
+    const run = this.#queue.then(async () => {
+      this.#serial.ops++;
+      this.#serial[kind]++;
+      this.#serial.active++;
+      this.#serial.maxConcurrent = Math.max(this.#serial.maxConcurrent, this.#serial.active);
+      try {
+        return await fn();
+      } finally {
+        this.#serial.active--;
+      }
+    });
+    this.#queue = run.catch(() => {});
+    return run;
+  }
+
+  /** لقطةٌ للأدلّةِ والاختبار. */
+  snapshot() {
+    return Object.freeze({
+      state: this.#state,
+      lastError: this.#lastError,
+      fenceRunning: this.#fenceRunning,
+      lockHeld: this.#lockClient !== null,
+      gate: this.#gate?.snapshot() ?? null,
+      reaper: this.#reaper?.stats() ?? null,
+      serial: { ...this.#serial },
+      workers: [...this.#workers.values()].map((w) =>
+        Object.freeze({
+          id: w.id,
+          state: w.state,
+          role: w.credential === null ? null : String(w.credential.role_name),
+          attempts: w.attempts,
+          restarts: w.restarts.length,
+          pid: w.child?.pid ?? null,
+          lastError: w.lastError,
+          lastExit: w.lastExit,
+        }),
+      ),
+    });
+  }
+
+  #accepting() {
+    return this.#state === SUPERVISOR_STATES.RUNNING && this.#fenceRunning;
+  }
+
+  /** @param {string} step */
+  #assertStarting(step) {
+    if (this.#shutdown !== null)
+      throw new FenceError(
+        FENCE_ERRORS.SUPERVISOR_STATE,
+        `${step}: أُوقِفَ المُشرِفُ أثناءَ الإقلاع`,
+        {
+          step,
+          lastError: this.#lastError,
+        },
+      );
+  }
+
+  /** الإقلاع (‏انظر وصفَ الصنف). يرمي عندَ أيِّ فشلٍ بعدَ إيقافٍ مغلق. */
+  async start() {
+    if (this.#state !== SUPERVISOR_STATES.NEW)
+      throw new FenceError(FENCE_ERRORS.SUPERVISOR_STATE, `start: المُشرِفُ ${this.#state} لا NEW`);
+    try {
+      this.#state = SUPERVISOR_STATES.LOCKING;
+      this.#log({ ev: 'supervisor_locking' });
+      const client = await this.#o.options.lockConnect();
+      this.#lockClient = client;
+      client.on?.('error', (/** @type {unknown} */ e) => void this.#lockLost(e));
+      client.on?.('end', () => void this.#lockLost('end'));
+      const got = (
+        await client.query('SELECT pg_try_advisory_lock($1, $2) AS ok', [...SUPERVISOR_LOCK_KEY])
+      ).rows[0]?.ok;
+      if (got !== true) {
+        const holder = (
+          await client.query(
+            `SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND classid = $1::oid AND objid = $2::oid
+               AND objsubid = 2 AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+            [...SUPERVISOR_LOCK_KEY],
+          )
+        ).rows[0]?.pid;
+        throw new FenceError(
+          FENCE_ERRORS.SUPERVISOR_LOCKED,
+          'مُشرِفٌ آخرُ يمسكُ قفلَ هذه القاعدة — لا كنسَ ولا إصدار',
+          { holderPid: holder ?? null },
+        );
+      }
+      this.#assertStarting('lock');
+      this.#state = SUPERVISOR_STATES.SWEEPING;
+      this.#gate = new SupervisorBootGate(this.#root, this.#o.options.gate ?? {});
+      const swept = await this.#gate.start();
+      this.#log({ ev: 'supervisor_swept', revoked: swept.revoked.length });
+      this.#assertStarting('sweep');
+      this.#state = SUPERVISOR_STATES.CHECKING;
+      const status = await this.#root.status();
+      const fenceState = status?.effective?.state;
+      if (fenceState !== 'RUNNING')
+        throw new FenceError(
+          FENCE_ERRORS.SUPERVISOR_NOT_RUNNING,
+          `حالةُ السياجِ ${fenceState} لا RUNNING — لا إطلاق`,
+          { state: fenceState ?? null },
+        );
+      this.#assertStarting('check');
+      this.#state = SUPERVISOR_STATES.STARTING_REAPER;
+      await this.#startReaper();
+      this.#assertStarting('reaper');
+      this.#fenceRunning = true;
+      this.#state = SUPERVISOR_STATES.RUNNING;
+      this.#log({ ev: 'supervisor_running' });
+      this.#scheduleMonitor();
+      for (const rec of this.#workers.values()) {
+        if (!this.#accepting()) break;
+        await this.#bootWorker(rec);
+      }
+      return this.snapshot();
+    } catch (error) {
+      const code = supervisorErrorCode(error);
+      this.#log({ ev: 'supervisor_start_failed', step: this.#state, code });
+      if (this.#shutdown === null) {
+        this.#lastError = code;
+        await this.#stopAll(SUPERVISOR_STATES.FAILED, code);
+      } else await this.#shutdown;
+      throw error;
+    }
+  }
+
+  async #startReaper() {
+    const target = this.#o.options.reaper?.target ?? this.#root;
+    /** @type {{ res: (v: unknown) => void, rej: (e: unknown) => void }} */
+    let settle = { res: () => {}, rej: () => {} };
+    const first = new Promise((res, rej) => {
+      settle = { res, rej };
+    });
+    let firstDone = false;
+    const wrapped = {
+      reapLapsed: async () => {
+        try {
+          const r = await target.reapLapsed();
+          if (!firstDone) {
+            firstDone = true;
+            settle.res(r);
+          }
+          return r;
+        } catch (e) {
+          if (!firstDone) {
+            firstDone = true;
+            settle.rej(e);
+          }
+          throw e;
+        }
+      },
+    };
+    const r = this.#o.options.reaper ?? {};
+    try {
+      this.#reaper = startLapseReaper(wrapped, {
+        ceilingMs: this.#o.reaperCeilingMs,
+        ...(r.retryMs === undefined ? {} : { retryMs: r.retryMs }),
+        ...(r.maxRetryMs === undefined ? {} : { maxRetryMs: r.maxRetryMs }),
+        onReap: (/** @type {any} */ x) =>
+          this.#log({ ev: 'reaper_reaped', reaped: x?.reaped?.length ?? 0, ok: x?.ok === true }),
+        onError: (/** @type {unknown} */ e, /** @type {any} */ info) =>
+          this.#log({ ev: 'reaper_error', code: supervisorErrorCode(e), ...info }),
+      });
+    } catch (error) {
+      throw new FenceError(FENCE_ERRORS.SUPERVISOR_REAPER_START, 'تعذّرَ بدءُ الحاصد', {
+        cause: supervisorErrorCode(error),
+      });
+    }
+    try {
+      await supervisorTimeout(first, this.#o.firstTickTimeoutMs, () =>
+        Object.assign(new Error('reaper first tick timeout'), {
+          code: 'REAPER_FIRST_TICK_TIMEOUT',
+        }),
+      );
+    } catch (error) {
+      await this.#stopReaper();
+      throw new FenceError(
+        FENCE_ERRORS.SUPERVISOR_REAPER_START,
+        'أوّلُ نداءٍ للحاصدِ فشل — لا إطلاقَ بلا حاصد',
+        { cause: supervisorErrorCode(error) },
+      );
+    }
+  }
+
+  /**
+   * يوقفُ الحاصدَ بمهلة: `stop()` ينتظرُ النداءَ الجاريَ، ونداءٌ لا يعودُ (‏وصلةٌ معلّقة — مقيسٌ في SUP-07) كان يُعلِّقُ
+   * الإيقافَ والقفلَ ممسوكٌ إلى الأبد. بعدَ المهلةِ يُترَكُ النداءُ (‏الحاصدُ موقوفٌ فلا جدولةَ بعده) ويُكمَلُ الإيقاف.
+   */
+  async #stopReaper() {
+    const reaper = this.#reaper;
+    this.#reaper = null;
+    if (reaper === null) return;
+    await supervisorTimeout(reaper.stop(), this.#o.lockCheckTimeoutMs, () =>
+      Object.assign(new Error('reaper stop timeout'), { code: 'REAPER_STOP_TIMEOUT' }),
+    ).catch((e) => this.#log({ ev: 'reaper_stop_timeout', code: supervisorErrorCode(e) }));
+  }
+
+  #scheduleMonitor() {
+    if (this.#shutdown !== null) return;
+    this.#monitorTimer = setTimeout(() => {
+      this.#monitorTimer = null;
+      void this.#monitorTick().catch((e) =>
+        this.#log({ ev: 'monitor_error', code: supervisorErrorCode(e) }),
+      );
+    }, this.#o.monitorIntervalMs);
+  }
+
+  async #monitorTick() {
+    if (this.#shutdown !== null) return;
+    try {
+      const held = await supervisorTimeout(
+        this.#lockClient.query(
+          `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()
+             AND classid = $1::oid AND objid = $2::oid AND objsubid = 2 AND granted) AS held`,
+          [...SUPERVISOR_LOCK_KEY],
+        ),
+        this.#o.lockCheckTimeoutMs,
+        () => Object.assign(new Error('lock check timeout'), { code: 'LOCK_CHECK_TIMEOUT' }),
+      );
+      if (held.rows[0]?.held !== true)
+        throw Object.assign(new Error('lock not held'), { code: 'LOCK_NOT_HELD' });
+    } catch (error) {
+      return this.#lockLost(error);
+    }
+    /** @type {any} */
+    let status;
+    try {
+      status = await supervisorTimeout(this.#root.status(), this.#o.lockCheckTimeoutMs, () =>
+        Object.assign(new Error('status timeout'), { code: 'STATUS_TIMEOUT' }),
+      );
+      this.#dbFailures = 0;
+    } catch (error) {
+      this.#dbFailures++;
+      this.#log({
+        ev: 'monitor_db_failure',
+        n: this.#dbFailures,
+        code: supervisorErrorCode(error),
+      });
+      if (this.#dbFailures >= this.#o.maxDbFailures) {
+        return this.#fail(FENCE_ERRORS.SUPERVISOR_DB_UNREACHABLE);
+      }
+      return this.#scheduleMonitor();
+    }
+    if (this.#shutdown !== null) return;
+    const running = status?.effective?.state === 'RUNNING';
+    if (!running && this.#fenceRunning) {
+      this.#fenceRunning = false;
+      this.#state = SUPERVISOR_STATES.WAITING;
+      this.#log({ ev: 'supervisor_waiting', fence: status?.effective?.state ?? null });
+      this.#freezeWorkers();
+      await this.#stopWorkers('FENCE_NOT_RUNNING');
+    } else if (running && !this.#fenceRunning && this.#state === SUPERVISOR_STATES.WAITING) {
+      try {
+        await /** @type {SupervisorBootGate} */ (this.#gate).resweep();
+      } catch (error) {
+        this.#lastError = supervisorErrorCode(error);
+        return this.#fail(this.#lastError);
+      }
+      if (this.#shutdown !== null) return;
+      this.#fenceRunning = true;
+      this.#state = SUPERVISOR_STATES.RUNNING;
+      this.#log({ ev: 'supervisor_resumed' });
+      for (const rec of this.#workers.values()) {
+        rec.restarts = [];
+        if (!this.#accepting()) break;
+        await this.#bootWorker(rec);
+      }
+    }
+    this.#scheduleMonitor();
+  }
+
+  /** @param {unknown} cause */
+  async #lockLost(cause) {
+    if (this.#shutdown !== null) return;
+    this.#log({ ev: 'supervisor_lock_lost', code: supervisorErrorCode(cause) });
+    return this.#fail(FENCE_ERRORS.SUPERVISOR_LOCK_LOST);
+  }
+
+  /** @param {string} code */
+  async #fail(code) {
+    if (this.#shutdown !== null) return this.#shutdown;
+    this.#lastError = code;
+    return this.#stopAll(SUPERVISOR_STATES.FAILED, code);
+  }
+
+  /** إيقافٌ منضبط: كلُّ اعتمادٍ يُلغى ثمّ كلُّ عاملٍ يُقتَل ثمّ يُحرَّرُ القفل. */
+  async stop() {
+    if (this.#shutdown !== null) return this.#shutdown;
+    return this.#stopAll(SUPERVISOR_STATES.STOPPED, 'SUPERVISOR_STOP');
+  }
+
+  /** @param {string} final @param {string} reason */
+  #stopAll(final, reason) {
+    if (this.#shutdown !== null) return this.#shutdown;
+    this.#shutdown = (async () => {
+      this.#state = SUPERVISOR_STATES.STOPPING;
+      this.#fenceRunning = false;
+      this.#log({ ev: 'supervisor_stopping', reason });
+      if (this.#monitorTimer !== null) clearTimeout(this.#monitorTimer);
+      this.#monitorTimer = null;
+      for (const t of this.#timers) clearTimeout(t);
+      this.#timers.clear();
+      // ‏تجميدُ كلِّ العمّالِ قبلَ أيِّ انتظار: لا حافظَ إيجارٍ يرى البوّابةَ موقوفةً فيُعلِنُ عاملاً مفقوداً
+      // ‏بينما الإيقافُ يُلغي غيرَه (‏سباقٌ مقيسٌ في SUP-01: عاملٌ ثانٍ خرجَ من الإلغاءِ المرتّب).
+      this.#freezeWorkers();
+      this.#gate?.stop();
+      const report = await this.#stopWorkers(reason);
+      await this.#stopReaper();
+      if (this.#lockClient !== null) {
+        const c = this.#lockClient;
+        this.#lockClient = null;
+        c.removeAllListeners?.('end');
+        c.removeAllListeners?.('error');
+        c.on?.('error', () => {});
+        await supervisorTimeout(
+          c.query('SELECT pg_advisory_unlock($1, $2)', [...SUPERVISOR_LOCK_KEY]),
+          this.#o.lockCheckTimeoutMs,
+          () => new Error('unlock timeout'),
+        ).catch(() => {});
+        await supervisorTimeout(
+          Promise.resolve(c.end?.()),
+          this.#o.lockCheckTimeoutMs,
+          () => new Error('end timeout'),
+        ).catch(() => {});
+      }
+      this.#state = final;
+      const result = {
+        state: final,
+        reason,
+        ...report,
+        unresolved: [...this.#unresolved],
+        snapshot: this.snapshot(),
+      };
+      this.#log({
+        ev: 'supervisor_stopped',
+        state: final,
+        reason,
+        revokeErrors: report.revokeErrors.length,
+      });
+      this.#resolveDone(result);
+      return result;
+    })();
+    return this.#shutdown;
+  }
+
+  /** يُبطِلُ مساراتِ كلِّ عاملٍ الجاريةَ (‏جيلٌ جديد) ويوقفُ حُفّاظَ الإيجارِ قبلَ أيِّ انتظار. */
+  #freezeWorkers() {
+    for (const rec of this.#workers.values()) {
+      rec.gen++;
+      rec.keeper?.stop();
+      rec.keeper = null;
+    }
+  }
+
+  /** @param {string} reason */
+  async #stopWorkers(reason) {
+    /** @type {string[]} */
+    const revoked = [];
+    /** @type {Array<{ role: string, error: string }>} */
+    const revokeErrors = [];
+    for (const rec of this.#workers.values()) {
+      const booting = rec.boot;
+      // ‏أيُّ اعتمادٍ ما زالَ مسجّلاً (‏RUNNING، أو LOST ومسارُ فقدِه لم يُكمِل) يُلغى هنا؛ الإلغاءُ لا يمسُّ إلا ACTIVE.
+      if (rec.credential !== null && rec.state !== SUPERVISED_WORKER_STATES.BOOTING) {
+        const role = String(rec.credential.role_name);
+        try {
+          await this.#serialRoot.revokeCredential(role, `SUPERVISOR:${reason}`);
+          revoked.push(role);
+        } catch (error) {
+          revokeErrors.push({ role, error: supervisorErrorCode(error) });
+          this.#log({
+            ev: 'worker_revoke_failed',
+            worker: rec.id,
+            role,
+            code: supervisorErrorCode(error),
+          });
+        }
+      }
+      await this.#kill(rec);
+      // ‏إقلاعٌ جارٍ: قتلُ العمليّةِ يُنهي مصافحتَه أو ختمَه، ومسارُ فشلِه يُلغي ما صدر — يُنتظَرُ قبلَ الإبلاغ.
+      if (booting !== null) await booting.catch(() => {});
+      rec.boot = null;
+      rec.credential = null;
+      rec.state = SUPERVISED_WORKER_STATES.STOPPED;
+    }
+    return { revoked, revokeErrors };
+  }
+
+  /** @param {any} rec */
+  async #kill(rec) {
+    const child = rec.child;
+    if (child === null || child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // ‏عمليّةٌ ماتت للتوّ.
+    }
+    const hard = setTimeout(() => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // ‏ماتت.
+      }
+    }, this.#o.killGraceMs);
+    await supervisorTimeout(
+      rec.exited,
+      this.#o.killGraceMs * 2,
+      () => new Error('kill timeout'),
+    ).catch(() => this.#log({ ev: 'worker_kill_timeout', worker: rec.id, pid: child.pid ?? null }));
+    clearTimeout(hard);
+  }
+
+  /**
+   * يُلغي كلَّ اعتمادٍ ACTIVE لإقلاعٍ فشل (‏بمعرِّفِ الإقلاعِ من رسالةِ hello) — يسدُّ نافذةَ «صدرَ ولم يُسلَّم».
+   * @param {any} rec @param {string | null} bootId @param {string} why
+   */
+  async #revokeLeftovers(rec, bootId, why) {
+    if (bootId === null) return;
+    /** @type {string[]} */
+    let roles;
+    try {
+      roles = (
+        await this.#root.with(
+          async (c) =>
+            (
+              await c.query(
+                `SELECT role_name::text AS role FROM fence.credentials WHERE worker_id = $1 AND boot_id = $2 AND status = 'ACTIVE'`,
+                [rec.id, bootId],
+              )
+            ).rows,
+        )
+      ).map((/** @type {any} */ r) => String(r.role));
+    } catch (error) {
+      this.#unresolved.push({
+        worker: rec.id,
+        role: null,
+        boot: bootId,
+        error: supervisorErrorCode(error),
+      });
+      this.#log({
+        ev: 'worker_leftover_lookup_failed',
+        worker: rec.id,
+        code: supervisorErrorCode(error),
+      });
+      return;
+    }
+    for (const role of roles) {
+      try {
+        await this.#serialRoot.revokeCredential(role, `SUPERVISOR_BOOT_FAILED:${why}`);
+        this.#log({ ev: 'worker_leftover_revoked', worker: rec.id, role });
+      } catch (error) {
+        this.#unresolved.push({
+          worker: rec.id,
+          role,
+          boot: bootId,
+          error: supervisorErrorCode(error),
+        });
+        this.#log({
+          ev: 'worker_revoke_failed',
+          worker: rec.id,
+          role,
+          code: supervisorErrorCode(error),
+        });
+      }
+    }
+  }
+
+  /** @param {any} rec */
+  #bootWorker(rec) {
+    const gen = ++rec.gen;
+    rec.state = SUPERVISED_WORKER_STATES.BOOTING;
+    rec.credential = null;
+    rec.sessions = null;
+    rec.bootId = null;
+    rec.attempts++;
+    const bootFailure = (/** @type {string} */ code, /** @type {unknown} */ detail = null) =>
+      new FenceError(FENCE_ERRORS.SUPERVISOR_WORKER_BOOT, `إقلاعُ ${rec.id}: ${code}`, {
+        code,
+        detail,
+      });
+    /** @type {import('node:child_process').ChildProcess} */
+    let child;
+    try {
+      child = this.#o.options.spawnWorker(rec.spec, {
+        env: { XUUX_DB_FENCE: 'required', XUUX_FENCE_WORKER_ID: rec.id },
+        attempt: rec.attempts,
+      });
+    } catch (error) {
+      rec.state = SUPERVISED_WORKER_STATES.BOOT_FAILED;
+      rec.lastError = `SPAWN:${supervisorErrorCode(error)}`;
+      this.#log({ ev: 'worker_spawn_failed', worker: rec.id, code: rec.lastError });
+      this.#scheduleRestart(rec, gen);
+      return Promise.resolve();
+    }
+    rec.child = child;
+    child.on('error', (e) =>
+      this.#log({ ev: 'worker_child_error', worker: rec.id, code: supervisorErrorCode(e) }),
+    );
+    /** @type {Promise<{ code: number | null, signal: string | null, error?: string }>} */
+    const exited = new Promise((resolve) => {
+      child.once('exit', (code, signal) => resolve({ code, signal }));
+      child.once('error', (e) => {
+        if (child.pid === undefined)
+          resolve({ code: null, signal: null, error: supervisorErrorCode(e) });
+      });
+    });
+    rec.exited = exited;
+    exited.then((x) => {
+      rec.lastExit = x;
+    });
+    const onHello = (/** @type {any} */ m) => {
+      if (m?.type === 'xuux-fence/hello' && rec.bootId === null && rec.gen === gen)
+        rec.bootId = String(m.boot_id);
+    };
+    child.on('message', onHello);
+    // ‏صندوقُ رسائلِ الختم يُفتَحُ منذُ الإطلاق: العاملُ قد يُبلِغُ الختمَ أو فشلَه فورَ تسلّمِ الاعتماد، قبلَ أن ينتهيَ
+    // ‏المُشرِفُ من `loginBroker` ويبدأَ `confirmWorkerSeal` بالاستماع (‏سباقٌ مقيسٌ في SUP-04: إبلاغُ فشلٍ ضاعَ فصارَ
+    // ‏«timeout»). ما يصلُ قبلَ الاستماعِ يُخزَّنُ ويُعادُ بترتيبِه.
+    const sealBus = new EventEmitter();
+    /** @type {any[] | null} */
+    let sealInbox = [];
+    const onSealMessage = (/** @type {any} */ m) => {
+      if (m?.type !== 'xuux-fence/sealed' && m?.type !== 'xuux-fence/seal-failed') return;
+      if (sealInbox !== null) sealInbox.push(m);
+      else sealBus.emit('message', m);
+    };
+    child.on('message', onSealMessage);
+    this.#log({
+      ev: 'worker_spawned',
+      worker: rec.id,
+      pid: child.pid ?? null,
+      attempt: rec.attempts,
+    });
+    const boot = (async () => {
+      try {
+        /** @type {Record<string, any>} */
+        const credential = await supervisorTimeout(
+          Promise.race([
+            superviseWorkerHandshake(this.#serialRoot, child, { expectedWorkerId: rec.id }),
+            exited.then((x) => {
+              throw bootFailure('WORKER_EXITED_DURING_HANDSHAKE', x);
+            }),
+          ]),
+          this.#o.handshakeTimeoutMs,
+          () => bootFailure('HANDSHAKE_TIMEOUT'),
+        );
+        // eslint-disable-next-line require-atomic-updates -- ‏التقادمُ يحرسُه rec.gen (‏يُفحَصُ في السطرِ التالي).
+        rec.credential = credential;
+        if (gen !== rec.gen || !this.#accepting()) throw bootFailure('SUPERVISOR_STOPPING');
+        this.#log({ ev: 'worker_credential', worker: rec.id, role: String(credential.role_name) });
+        if (this.#o.options.loginBroker !== undefined)
+          await this.#o.options.loginBroker(credential);
+        const role = String(credential.role_name);
+        exited.then(() =>
+          onSealMessage({
+            type: 'xuux-fence/seal-failed',
+            role_name: role,
+            reason: 'WORKER_EXITED',
+          }),
+        );
+        const sealed = confirmWorkerSeal(
+          this.#serialRoot,
+          /** @type {any} */ (sealBus),
+          credential,
+          {
+            timeoutMs: this.#o.sealTimeoutMs,
+          },
+        );
+        // ‏المستمعُ مُثبَّتٌ الآنَ (‏داخلَ مُنشئِ الوعد)؛ يُعادُ ما سبقَه ثمّ يصيرُ التوصيلُ مباشراً.
+        const early = sealInbox ?? [];
+        sealInbox = null;
+        for (const m of early) sealBus.emit('message', m);
+        const sessions = await sealed;
+        child.off('message', onSealMessage);
+        if (gen !== rec.gen || !this.#accepting()) throw bootFailure('SUPERVISOR_STOPPING');
+        rec.sessions = sessions;
+        rec.state = SUPERVISED_WORKER_STATES.RUNNING;
+        rec.lastError = null;
+        const intervalMs =
+          this.#o.options.leaseIntervalMs ??
+          Math.max(100, Number(credential.lease_renew_s ?? 1) * 1000);
+        rec.keeper = this.#root.startLeaseKeeper(role, this.#guard, {
+          intervalMs,
+          onStop: (/** @type {unknown} */ why) => {
+            if (
+              rec.gen === gen &&
+              rec.state === SUPERVISED_WORKER_STATES.RUNNING &&
+              why !== 'stopped'
+            )
+              void this.#workerLost(rec, gen, `LEASE_KEEPER:${supervisorErrorCode(why)}`);
+          },
+        });
+        exited.then((x) => {
+          if (rec.gen === gen && rec.state === SUPERVISED_WORKER_STATES.RUNNING)
+            void this.#workerLost(rec, gen, `EXIT:${x.code}/${x.signal}`);
+        });
+        this.#log({ ev: 'worker_running', worker: rec.id, role, sessions: sessions.length });
+      } catch (error) {
+        child.off('message', onHello);
+        child.off('message', onSealMessage);
+        const detailCode =
+          error instanceof FenceError ? /** @type {any} */ (error.detail)?.code : undefined;
+        const code = detailCode ? String(detailCode) : supervisorErrorCode(error);
+        if (rec.gen === gen) {
+          rec.state = SUPERVISED_WORKER_STATES.BOOT_FAILED;
+          rec.lastError = code;
+        }
+        this.#log({ ev: 'worker_boot_failed', worker: rec.id, code });
+        await this.#revokeLeftovers(rec, rec.bootId, code);
+        await this.#kill(rec);
+        if (rec.gen === gen) {
+          rec.credential = null;
+          this.#scheduleRestart(rec, gen);
+        }
+      }
+    })();
+    rec.boot = boot;
+    return boot;
+  }
+
+  /** @param {any} rec @param {number} gen @param {string} why */
+  async #workerLost(rec, gen, why) {
+    if (rec.gen !== gen || rec.state !== SUPERVISED_WORKER_STATES.RUNNING) return;
+    rec.state = SUPERVISED_WORKER_STATES.LOST;
+    rec.lastError = why;
+    rec.keeper?.stop();
+    rec.keeper = null;
+    this.#log({ ev: 'worker_lost', worker: rec.id, why });
+    const role = rec.credential === null ? null : String(rec.credential.role_name);
+    if (role !== null) {
+      try {
+        await this.#serialRoot.revokeCredential(role, `SUPERVISOR_WORKER_LOST:${why}`);
+        this.#log({ ev: 'worker_revoked', worker: rec.id, role });
+      } catch (error) {
+        this.#unresolved.push({
+          worker: rec.id,
+          role,
+          boot: rec.bootId,
+          error: supervisorErrorCode(error),
+        });
+        this.#log({
+          ev: 'worker_revoke_failed',
+          worker: rec.id,
+          role,
+          code: supervisorErrorCode(error),
+        });
+      }
+    }
+    await this.#kill(rec);
+    if (rec.gen !== gen) return;
+    rec.credential = null;
+    this.#scheduleRestart(rec, gen);
+  }
+
+  /** @param {any} rec @param {number} gen */
+  #scheduleRestart(rec, gen) {
+    if (!this.#accepting() || rec.gen !== gen) return;
+    const now = Date.now();
+    rec.restarts = rec.restarts.filter((/** @type {number} */ t) => now - t < this.#o.windowMs);
+    if (rec.restarts.length >= this.#o.maxRestarts) {
+      rec.state = SUPERVISED_WORKER_STATES.GAVE_UP;
+      this.#log({ ev: 'worker_gave_up', worker: rec.id, restarts: rec.restarts.length });
+      return;
+    }
+    rec.restarts.push(now);
+    rec.state = SUPERVISED_WORKER_STATES.RESTARTING;
+    const t = setTimeout(() => {
+      this.#timers.delete(t);
+      if (this.#accepting() && rec.gen === gen) void this.#bootWorker(rec);
+    }, this.#o.backoffMs);
+    this.#timers.add(t);
+  }
 }

@@ -167,6 +167,13 @@ restored_status_lines:
 # (‏`id` · `action: remove|amend` · `by`: مُدخلةٌ جديدةٌ فيها · `reason`). والإعلانُ القديمُ سجلٌّ
 # لا إعفاءٌ لحذفٍ جديد.
 history_amendments:
+  - id: WL-603
+    action: amend
+    by: WL-604
+    reason: >-
+      إضافةُ `tests/tooling/guard-doc-counts.test.mjs` إلى «الملفات المتأثرة» في WL-603: تغيَّرَ
+      فيها (‏تثبيتُ R12 إلى 70 صفّاً، 54f1854e) ولم يُسمَّ، فرسبَ CI الدفعِ على فرعِ التكاملِ
+      بعدَ دمجِ #619 بـPS4/UNRECORDED-FILE. لا تغييرَ لواقعةٍ — إكمالُ قائمةٍ ناقصة.
   - id: WL-424
     action: amend
     by: WL-425

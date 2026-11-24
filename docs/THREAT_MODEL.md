@@ -441,6 +441,17 @@ D-SUP-2)؛ ما لا يفحصُه عقدُ الثقة — المكتباتُ ا�
   مخصّصٍ يحملُ xf_root ولا يرى مفاتيحَ العمّال؛ العاملُ ‎xuuxw-‹id›‎ nologin (‏أو DynamicUser)؛ السياديُّ خارجَ المضيف؛ PostgreSQL على
   مقبسِ Unix فقط. تدفّقُ المفاتيح: تسجيلُ المفتاحِ العامِّ وحدَه في ‎fence.roster‎ بأمرٍ سياديّ ⇐ عندَ كلِّ إقلاعٍ الواصفُ 3 ⇐ المُقلِع
   ⇐ مصافحةُ تحدٍّ ⇐ ختم. عندَ إقلاعِ المُشرِفِ يُلغى كلُّ اعتمادٍ ACTIVE يتيم (‏TH-SUP-05).
+- **المُشرِفُ المركّبُ في المستودع (‏`WL-604`، مكتبةٌ وCLI واختبارات — غيرُ مثبَّتٍ ولا مُشغَّلٍ على أيِّ مضيف):**
+  `FenceSupervisor` في `src/fence/db-fence.mjs` و`fence-lab supervise` في `scripts/fence-lab.mjs`. الترتيب: قفلٌ استشاريٌّ لكلِّ
+  قاعدةٍ (‏`pg_try_advisory_lock` بوصلةِ `xf_root` مخصّصة؛ مُشرِفٌ ثانٍ ⇒ `FENCE_SUPERVISOR_LOCKED` قبلَ أيِّ كنس) ⇐ كنسُ
+  `SupervisorBootGate` ⇐ السياجُ `RUNNING` ⇐ الحاصدُ وأوّلُ نداءٍ ناجح ⇐ إطلاقُ العمّالِ بالتسلسلِ بـ`XUUX_DB_FENCE=required`
+  ⇐ مصافحة ⇐ تأكيدُ الختم ⇐ حافظُ إيجار. الإصدارُ والإلغاءُ في طابورٍ تسلسليٍّ واحد، والإلغاءُ قبلَ القتل، وفقدُ القفلِ أو
+  انقطاعُ القاعدةِ ⇒ FAILED، وغيرُ RUNNING ⇒ WAITING ثمّ كنسٌ وإطلاقٌ بعدَ RESUME. فشلُ الإلغاءِ لا يُخفى: تقريرُ الإيقافِ يحملُ
+  `revokeErrors` و`unresolved`، والباقي ACTIVE يكنسُه المُشرِفُ التالي (‏مقيسٌ SUP-09). الاختبارات: SUP-01..SUP-10 في
+  `tests/fence/fence-lifecycle.test.mjs` على PostgreSQL مؤقّتٍ بعمليّاتِ عمّالٍ حقيقيّة. **حدود:** القفلُ تعاونيٌّ (‏SQL خامٌ
+  بدورِ `xf_root` يتجاوزُه)، والحاصدُ داخلَ المُشرِفِ يموتُ بموتِه، ودخولُ العاملِ في الاختبارِ بكلمةِ مرورٍ مشتقّةٍ لا peer
+  (‏D-SUP-2)، والمُطلِقُ والمُشرِفُ عمليّةٌ واحدةٌ في المختبر (‏TH-SUP-02)، ولا إلزامَ للسياجِ في الإنتاج — فـT2 يبقى DESIGNED
+  وTH-SUP-05 = PARTIAL.
 - **خادمُ الصديق + Cloudflare (‏T3):** بيئةُ قياسٍ غيرُ موثوقة — VM مخصّصة، cloudflared صادرٌ فقط، تطبيقُ Access واحدٌ إلى SSH،
   لا ingress لقاعدة، لا سرَّ إنتاجيّ؛ نتائجُها لا تغلقُ RISK ولا LIVE. **لم يُثبَّت ولم يُغيَّر شيء** (‏D-ENV-1).
 - **Windows 11 / TPM (‏T4):** أدواتُ القراءةِ قائمةٌ (‏`sim/tpm-host/README.md`) ومحروسة، **ولم تُشغَّل**؛ عدّادُ NV لمرساةِ الحداثةِ
@@ -671,8 +682,8 @@ threats:
     attack: انهيارُ المُشرِفِ أو إعادةُ تشغيلِه والعمّالُ أحياء
     control: عندَ إقلاعِ المُشرِف يُلغي كلَّ اعتمادٍ ACTIVE لم يُصدِره هو (‏`FenceRoot.revokeOrphanCredentials`، WL-577)، ثمّ يُعيدُ الجردَ ويفشلُ مغلقاً (‏FENCE_ORPHAN_SWEEP_INCOMPLETE) إن ظهرَ يتيمٌ أو بقيت جلسةٌ لدورٍ ملغىً، ثمّ يُطلقُ إقلاعاتٍ جديدة؛ ومنذُ WL-579 لا تحدّيَ ولا اعتمادَ ولا مصافحةَ عبرَ FenceRoot قبلَ نجاحِ `SupervisorBootGate.start()` (‏كنسٌ بلا keep)، والإيقافُ والإقلاعُ الجديدُ يُلغيانِ كلَّ اعتمادٍ اكتملَ عبرَهما (‏SUPERVISOR_BOOT_GATE_EPOCH)
     status: PARTIAL
-    evidence: [tests/fence/fence-lifecycle.test.mjs#TH-SUP-05, tests/fence/db-fence.test.mjs#WL-579]
-    limit: البدائيّةُ والبوابةُ منفَّذتانِ ومختبَرتانِ على PostgreSQL ولا مُشرِفَ إنتاجيٌّ يُشغِّلُهما (‏T2 DESIGNED)؛ البوابةُ في JavaScript لا في القاعدة — SQL خامٌ بدورِ xf_root، أو شفرةٌ في العمليّةِ تستبدلُ طرائقَ كائنِ الجذرِ (‏ومنها الكنس)، تتجاوزُها (‏فرضُها في القاعدةِ قرارُ المالك)؛ مُصدِرٌ متزامنٌ بدورِ الجذرِ يُكشَفُ بإعادةِ الجردِ لا يُمنَع؛ الجلساتُ تُرى في pg_stat_activity بالاسمِ وحدَه؛ وما التزمَه العاملُ قبلَ الإلغاءِ يبقى
+    evidence: [tests/fence/fence-lifecycle.test.mjs#TH-SUP-05, tests/fence/db-fence.test.mjs#WL-579, tests/fence/fence-lifecycle.test.mjs#SUP-06, tests/fence/fence-lifecycle.test.mjs#SUP-09]
+    limit: البدائيّةُ والبوابةُ منفَّذتانِ ومختبَرتانِ على PostgreSQL، ومنذُ WL-604 يُركِّبُهما `FenceSupervisor` (‏مكتبةٌ وCLI في المستودع، SUP-06 موتُ المُشرِفِ وكنسُ التالي، SUP-09 الانقطاعُ في كلِّ مرحلة) لكنّه غيرُ مثبَّتٍ ولا مُشغَّلٍ إنتاجيّاً (‏T2 DESIGNED)؛ البوابةُ في JavaScript لا في القاعدة — SQL خامٌ بدورِ xf_root، أو شفرةٌ في العمليّةِ تستبدلُ طرائقَ كائنِ الجذرِ (‏ومنها الكنس)، تتجاوزُها (‏فرضُها في القاعدةِ قرارُ المالك)؛ مُصدِرٌ متزامنٌ بدورِ الجذرِ يُكشَفُ بإعادةِ الجردِ لا يُمنَع؛ الجلساتُ تُرى في pg_stat_activity بالاسمِ وحدَه؛ وما التزمَه العاملُ قبلَ الإلغاءِ يبقى
   # ── خادمُ الصديق + Cloudflare ─────────────────────────────────────────────────────────
   - id: TH-ENV-01
     actor: network
@@ -773,7 +784,7 @@ threats:
     attack: GRANT xf_root أو xf_sovereign TO xf_owner (‏مباشرةً أو عبرَ دورٍ وسيط، بأيِّ خيارات) فيصيرُ كلُّ عضوٍ في xf_owner معفىً من XF105/XF107 — يمدُّ الإيجارَ ويكتبُ الاعتمادَ وختمَ التحكّم — والحافّةُ لا يراها check_fenced
     control: الحارسان (‏0031 و0032 بنصِّ 0033) يحسبان الجذرَ أو السياديَّ لعضوِ xf_owner بمسارِ عضويّةٍ لا يمرُّ بـxf_owner ⇒ XF107/XF105؛ وcheck_fenced يكشفُ كلَّ دورٍ يصلُه xf_owner خارجَ أساسِه (‏owner_upward_membership، مغلقُ الفشل) فيُرفَضُ RESUME (‏XF415)
     status: MITIGATED_TESTED
-    evidence: [tests/fence/fence-lifecycle.test.mjs#WL-563, tests/persistence/migrator.test.mjs#WL-563]
+    evidence: [tests/fence/db-fence-privileges.test.mjs#WL-563, tests/persistence/migrator.test.mjs#WL-563]
     limit: الحافّةُ الصاعدةُ لا تُمنَعُ إنشاءً (‏GRANT بيدِ superuser أو مديرِ الدور) بل تُكشَفُ عندَ الانتقال؛ والجذرُ أو السياديُّ عضواً مباشراً في xf_owner يبقى كاتباً (‏بقيّةُ 0032، قرارُ مالك)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
   # ── WL-564: ACLُ السياجِ الباقي (‏الهجرة 0034) ──────────────────────────────────────────────
   - id: TH-OWN-02
@@ -782,7 +793,7 @@ threats:
     attack: عضوٌ مُعفىً في xf_owner (‏جذرٌ بعدَ SET ROLE xf_owner) يمنحُ UPDATE أو EXECUTE أو CREATE أو خيارَ المنحِ أو امتيازاً افتراضيّاً على كائناتِ fence لدورٍ آخر أو لنفسِه، فيبقى المنحُ بعدَ سحبِ العضويّة — والممنوحُ يكتبُ الاعتمادَ مباشرةً أو يضعُ صفَّ التحكّمِ RUNNING بلا توقيعٍ سياديّ، وcheck_fenced لا يراه
     control: check_fenced يجردُ كلَّ امتيازٍ غيرِ القراءةِ لغيرِ المالكِ خارجَ الأساسِ المقيس (‏fence_acl_drift، مغلقُ الفشل) فيُرفَضُ RESUME (‏XF415)؛ والحارسان (‏0031 و0032 بنصِّ 0034) يرفضان كاتباً مباشراً current_user ليس xf_owner ولا superuser (‏XF108)
     status: MITIGATED_TESTED
-    evidence: [tests/fence/fence-lifecycle.test.mjs#WL-564, tests/persistence/migrator.test.mjs#WL-564]
+    evidence: [tests/fence/db-fence-privileges.test.mjs#WL-564, tests/persistence/migrator.test.mjs#WL-564]
     limit: المنحُ لا يُمنَعُ إنشاءً بل يُكشَفُ عندَ الانتقالِ ويُرفَضُ أثرُه الكتابيّ (‏منعُه قرارُ مالك)؛ والقراءةُ الممنوحةُ لغيرِ العاملِ خارجَ النطاق (‏WL-544)؛ وsuperuser خارجَ السياج (‏LIVE-75 بند 1)
   # ── WL-570: العضويّةُ بينَ الأدوارِ السياديّةِ الثلاثة (‏الهجرة 0035) ──────────────────────────────
   - id: TH-OWN-03
