@@ -37,6 +37,7 @@ import {
 } from '../helpers/pg.mjs';
 import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
 import { restoreBackup } from '../../scripts/restore.mjs';
+import { createBackup } from '../../scripts/backup.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
 import { registerEvaluationExperiment } from '../helpers/experiment-support.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
@@ -320,7 +321,7 @@ async function l78TargetImage(pool) {
 }
 
 /**
- * مصدرٌ مُهاجَرٌ بمحتوى، ونسختُه النموذجيّة (‏البيانُ يحملُ `contentDigest` ويقرؤه الإنتاجُ أيضاً).
+ * مصدرٌ مُهاجَرٌ بمحتوى، ونسختُه النموذجيّة (‏البيانُ يحملُ `prototypeDigest` — حقلٌ مختبريٌّ باسمٍ مستقلٍّ عن `contentDigest` الإنتاجيّ منذُ `WL-606`، فلا تُقرأُ صيغةٌ بالأخرى؛ والإنتاجُ يرى نسخةَ النموذجِ بلا بصمة).
  * @param {string} label
  * @param {{ to?: number }} [options]
  */
@@ -408,7 +409,9 @@ test(
       await assert.rejects(
         () =>
           restoreBackup(
-            { dumpPath: fixture.dump, database: target.name, force: true },
+            // ‏`allowUnverified`: نسخةُ النموذجِ بلا `contentDigest` إنتاجيّ (‏`WL-606`)؛ بدونِه يرفضُ الإنتاجُ
+            // قبلَ اللمس (‏`RESTORE_DIGEST_MISSING`) فيخضرُّ الاختبارُ لسببٍ غيرِ الذي يقيسُه.
+            { dumpPath: fixture.dump, database: target.name, force: true, allowUnverified: true },
             l78AdminUrl(),
           ),
         /pg_restore|COMMAND_FAILED/,
@@ -423,23 +426,24 @@ test(
   },
 );
 
+// ‏`WL-606`: كانَ هذا الاختبارُ أحمرَ `todo` (‏`WL-603`) — `RESTORE_OK` أُعلِنَ والمحتوى مُبدَّلٌ بالأعدادِ
+// نفسِها. صارَ أخضرَ بتنفيذِ بصمةِ المحتوى في `scripts/backup.mjs`/`restore.mjs`، **بلا تليينِ تأكيد**:
+// التأكيدُ صارَ أضيق (‏رمزُ الفشلِ المحدَّد، ولا دفترَ مُركَّب)، والنسخةُ إنتاجيّةٌ لا نموذجيّة.
 test(
-  'LIVE-78/CONTENT-INTEGRITY أحمر: RESTORE_OK لا يُعلَنُ ومحتوى الهدفِ يخالفُ النسخةَ بأعدادٍ مطابقة',
-  {
-    skip: skipWithoutDatabase,
-    todo: 'LIVE-78/CONTENT-INTEGRITY: التحقّقُ الحاليُّ عدُّ صفوفٍ ونسخةُ هجرة — محتوىً مُبدَّلٌ بالعددِ نفسِه يمرّ',
-    timeout: 120_000,
-  },
+  'LIVE-78/CONTENT-INTEGRITY: RESTORE_OK لا يُعلَنُ ومحتوى الهدفِ يخالفُ النسخةَ بأعدادٍ مطابقة (‏`WL-606`)',
+  { skip: skipWithoutDatabase, timeout: 120_000 },
   async () => {
     const fixture = await l78Source('l78redtamper');
     const target = await createIsolatedDatabase('l78redtampert');
+    const prodDump = path.join(fixture.dir, 'prod.dump');
     try {
+      await createBackup(prodDump, l78Url(fixture.source.name));
       await l78InstallContentTamper(target.pool);
       /** @type {unknown} */
       let outcome;
       try {
         await restoreBackup(
-          { dumpPath: fixture.dump, database: target.name, force: false },
+          { dumpPath: prodDump, database: target.name, force: false },
           l78AdminUrl(),
         );
         outcome = 'RESTORE_OK';
@@ -452,8 +456,15 @@ test(
       // يُثبَتُ أوّلاً أنّ الحقنَ وقعَ فعلاً (‏وإلا فالاختبارُ لا يقيسُ شيئاً).
       assert.equal(bodies.rows[0].n, 300);
       assert.ok(bodies.rows[0].t > 0, 'الحقنُ لم يقع — الاختبارُ لا يقيس');
-      // الضمانُ المستهدف: محتوىً مخالفٌ ⇒ لا RESTORE_OK.
+      // الضمان: محتوىً مخالفٌ ⇒ لا RESTORE_OK، بل فشلٌ مسمّى يسمّي الجدول.
       assert.notEqual(outcome, 'RESTORE_OK', 'RESTORE_OK أُعلِنَ والمحتوى مُبدَّل');
+      assert.equal(/** @type {any} */ (outcome)?.code, 'RESTORE_CONTENT_MISMATCH', String(outcome));
+      assert.match(String(/** @type {any} */ (outcome)?.message), /table laws: sha256/);
+      // والهدفُ لا يُقرأُ مُهاجَراً سليماً: الدفترُ لم يُركَّب.
+      const ledger = await target.pool.query(
+        `SELECT to_regclass('public.schema_migrations') IS NULL AS absent`,
+      );
+      assert.equal(ledger.rows[0].absent, true, 'رُكِّبَ دفترُ الهجراتِ رغمَ فشلِ التحقّق');
     } finally {
       await l78DropInjected(target.pool).catch(() => undefined);
       await target.drop();
@@ -461,6 +472,129 @@ test(
     }
   },
 );
+
+// ─── ‏`WL-606`: فشلُ حسابِ البصمةِ وانقطاعُ الاتصالِ أثناءَه — في النسخِ وفي الاستعادة ───
+//
+// الحقن: جلسةٌ مراقِبةٌ تنتظرُ استعلامَ تجزئةِ الصفوفِ في `pg_stat_activity` للقاعدةِ المعنيّة، ثمّ
+// ‏`pg_cancel_backend` (‏فشلُ حسابٍ: `57014`) أو `pg_terminate_backend` (‏انقطاعُ اتصال). الجدولُ كبيرٌ
+// (‏200 ألفِ صفّ) كي يطولَ الاستعلامُ بما يكفي للمراقبة؛ **والاختبارُ يؤكّدُ أنّ الحقنَ وقع** وإلا سقط.
+
+const L78_DIGEST_QUERY = '%convert_to(t::text%';
+
+/**
+ * @param {string} database
+ * @param {'cancel' | 'terminate'} mode
+ * @returns {{ done: Promise<number>, stop: () => void }} عددُ الجلساتِ المقطوعة.
+ */
+function l78InterruptDigest(database, mode) {
+  const watcher = new pg.Pool({ connectionString: l78AdminUrl(), max: 1 });
+  let stopped = false;
+  const done = (async () => {
+    try {
+      const deadline = Date.now() + 60_000;
+      while (!stopped && Date.now() < deadline) {
+        const hit = await watcher.query(
+          `SELECT pid, ${mode === 'cancel' ? 'pg_cancel_backend' : 'pg_terminate_backend'}(pid) AS ok
+             FROM pg_stat_activity
+            WHERE datname = $1 AND state = 'active' AND query LIKE $2 AND pid <> pg_backend_pid()`,
+          [database, L78_DIGEST_QUERY],
+        );
+        if (hit.rowCount !== null && hit.rowCount > 0) return hit.rowCount;
+        await new Promise((resolve) => setTimeout(resolve, 3));
+      }
+      return 0;
+    } finally {
+      await watcher.end();
+    }
+  })();
+  return { done, stop: () => (stopped = true) };
+}
+
+/** مصدرٌ مُهاجَرٌ كبيرٌ بما يكفي لمراقبةِ استعلامِ البصمة. */
+async function l78LargeSource(/** @type {string} */ label) {
+  const source = await createIsolatedDatabase(label);
+  await up(source.pool);
+  await source.pool.query(
+    `INSERT INTO state.laws (id, title, body, status, scope, proposer)
+     SELECT 'law-' || lpad(g::text, 7, '0'), 'عنوان ' || g, repeat('نصّ ', 8) || g, 'draft', 'testing', 'agent-001'
+       FROM generate_series(1, 200000) g`,
+  );
+  return source;
+}
+
+for (const mode of /** @type {const} */ (['cancel', 'terminate'])) {
+  test(
+    `WL-606: ${mode === 'cancel' ? 'فشلُ حسابِ' : 'انقطاعُ الاتصالِ أثناءَ حسابِ'} البصمةِ في النسخ ⇒ BACKUP_DIGEST_FAILED بلا أرشيفٍ ولا بيانٍ ولا جدولٍ مرحليّ`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const source = await l78LargeSource(`l78dgb${mode.slice(0, 4)}`);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'l78-digest-backup-'));
+      const dump = path.join(dir, 'state.dump');
+      try {
+        const interrupt = l78InterruptDigest(source.name, mode);
+        const outcome = await createBackup(dump, l78Url(source.name)).then(
+          () => 'BACKUP_CREATED',
+          (/** @type {any} */ error) => error,
+        );
+        interrupt.stop();
+        assert.ok((await interrupt.done) > 0, 'الحقنُ لم يقع — الاختبارُ لا يقيس');
+        assert.equal(outcome?.code, 'BACKUP_DIGEST_FAILED', String(outcome?.message ?? outcome));
+        assert.equal(fs.existsSync(dump), false, 'كُتبَ أرشيفٌ رغمَ فشلِ البصمة');
+        assert.equal(fs.existsSync(`${dump}.manifest.json`), false, 'كُتبَ بيانٌ رغمَ فشلِ البصمة');
+        const staging = await source.pool.query(
+          `SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace
+            WHERE s.nspname = 'state' AND c.relname LIKE '\\_\\_backup\\_%'`,
+        );
+        assert.equal(staging.rows[0].n, 0, 'بقيَ جدولٌ مرحليٌّ في المصدر');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        await source.drop();
+      }
+    },
+  );
+
+  test(
+    `WL-606: ${mode === 'cancel' ? 'فشلُ حسابِ' : 'انقطاعُ الاتصالِ أثناءَ حسابِ'} البصمةِ بعدَ الاستعادة ⇒ RESTORE_CONTENT_CHECK_FAILED، لا RESTORE_OK والدفترُ غيرُ مُركَّب`,
+    { skip: skipWithoutDatabase, timeout: 120_000 },
+    async () => {
+      const source = await l78LargeSource(`l78dgr${mode.slice(0, 4)}`);
+      const target = await createIsolatedDatabase(`l78dgr${mode.slice(0, 4)}t`);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'l78-digest-restore-'));
+      const dump = path.join(dir, 'state.dump');
+      try {
+        await createBackup(dump, l78Url(source.name));
+        const interrupt = l78InterruptDigest(target.name, mode);
+        const outcome = await restoreBackup(
+          { dumpPath: dump, database: target.name, force: false },
+          l78AdminUrl(),
+        ).then(
+          () => 'RESTORE_OK',
+          (/** @type {any} */ error) => error,
+        );
+        interrupt.stop();
+        assert.ok((await interrupt.done) > 0, 'الحقنُ لم يقع — الاختبارُ لا يقيس');
+        assert.notEqual(outcome, 'RESTORE_OK');
+        assert.equal(
+          outcome?.code,
+          'RESTORE_CONTENT_CHECK_FAILED',
+          String(outcome?.message ?? outcome),
+        );
+        assert.match(
+          String(outcome?.message),
+          mode === 'cancel' ? /57014/ : /terminat|57P01|Connection/i,
+        );
+        const ledger = await target.pool.query(
+          `SELECT to_regclass('public.schema_migrations') IS NULL AS absent`,
+        );
+        assert.equal(ledger.rows[0].absent, true, 'رُكِّبَ دفترُ الهجراتِ رغمَ فشلِ التحقّق');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        await target.drop();
+        await source.drop();
+      }
+    },
+  );
+}
 
 // ─── القسمُ الأخضر: النموذجُ المختبريّ (‏ج)+(‏هـ) ───
 
@@ -488,10 +622,10 @@ test(
         // البصمةُ تُعادُ حسابُها مستقلّةً بعدَ COMMIT — لا ثقةَ بما قالته معاملةُ الاستعادة عن نفسها.
         const image = await l78TargetImage(pool);
         const digest = JSON.parse(image.slice(0, image.lastIndexOf('|evt=')));
-        for (const [table, value] of Object.entries(fixture.manifest.contentDigest.tables)) {
+        for (const [table, value] of Object.entries(fixture.manifest.prototypeDigest.tables)) {
           assert.deepEqual(digest.tables[table], value, `محتوى ${table}`);
         }
-        assert.deepEqual(digest.ledger, fixture.manifest.contentDigest.ledger);
+        assert.deepEqual(digest.ledger, fixture.manifest.prototypeDigest.ledger);
       } finally {
         await pool.end();
       }
@@ -573,7 +707,7 @@ test(
     try {
       const manifestPath = `${fixture.dump}.manifest.json`;
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-      manifest.contentDigest.tables['state.laws'].sha256 = '0'.repeat(64);
+      manifest.prototypeDigest.tables['state.laws'].sha256 = '0'.repeat(64);
       fs.writeFileSync(manifestPath, JSON.stringify(manifest));
       const before = await l78TargetImage(fresh.pool);
       const tampered = await live78PrototypeRestore({
@@ -683,7 +817,7 @@ test(
       while (writes < atBackup + 20) await new Promise((r) => setTimeout(r, 5));
       stop = true;
       await writer;
-      const captured = Number(manifest.contentDigest.tables['state.laws'].rows);
+      const captured = Number(manifest.prototypeDigest.tables['state.laws'].rows);
       assert.ok(
         captured > 0 && captured < writes,
         `اللقطةُ ليست نقطةً وسطى: ${captured} من ${writes}`,

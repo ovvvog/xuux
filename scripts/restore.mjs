@@ -21,7 +21,14 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import pg from 'pg';
 import { fileURLToPath } from 'node:url';
-import { BACKUP_ERRORS, BackupError, readManifest, verifyBackup } from './backup.mjs';
+import {
+  BACKUP_ERRORS,
+  BackupError,
+  computeContentDigest,
+  contentDigestDifferences,
+  readManifest,
+  verifyBackup,
+} from './backup.mjs';
 import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-tools.mjs';
 
 const STATE_SCHEMA = 'state';
@@ -46,6 +53,19 @@ export const RESTORE_ERRORS = Object.freeze({
   TARGET_FENCED: 'RESTORE_TARGET_FENCED',
   FENCE_CHECK_FAILED: 'RESTORE_FENCE_CHECK_FAILED',
   WIPE_OUTCOME_UNKNOWN: 'RESTORE_WIPE_OUTCOME_UNKNOWN',
+  DIGEST_MISSING: 'RESTORE_DIGEST_MISSING',
+  CONTENT_MISMATCH: 'RESTORE_CONTENT_MISMATCH',
+  CONTENT_CHECK_FAILED: 'RESTORE_CONTENT_CHECK_FAILED',
+});
+
+/**
+ * نتيجةُ التحقّقِ من المحتوى (‏`WL-606`). `VERIFIED`: بصمةُ المستعادِ طابقت بصمةَ لقطةِ النسخِ ضمنَ
+ * نطاقِها المعلَن. `NO_DIGEST`: نسخةٌ قديمةٌ بلا بصمة، استُعيدت بـ`--allow-unverified` الصريح — **لا
+ * دليلَ محتوى**، والمطبوعُ `[RESTORE_UNVERIFIED]` لا `[RESTORE_OK]`. والفشلُ ليسَ حالةً هنا بل خطأٌ مسمّى.
+ */
+export const CONTENT_VERIFICATION = Object.freeze({
+  VERIFIED: 'VERIFIED',
+  NO_DIGEST: 'NO_DIGEST',
 });
 
 /** خطأ مسمّى يجعل فشل الاستعادة صالحاً للبوابات والأتمتة. */
@@ -67,6 +87,7 @@ export class RestoreError extends Error {
  * @property {string} dumpPath
  * @property {string} database
  * @property {boolean} force
+ * @property {boolean} [allowUnverified] يقبلُ نسخةً بلا بصمةِ محتوى؛ النتيجةُ `NO_DIGEST` لا `VERIFIED`.
  */
 
 /**
@@ -88,14 +109,19 @@ function parseArguments(argv) {
   const databaseFlag = argv.indexOf('--database');
   const database = databaseFlag === -1 ? undefined : argv[databaseFlag + 1];
   const force = argv.includes('--force');
+  const allowUnverified = argv.includes('--allow-unverified');
   const unsupported = argv.filter(
     (value, index) =>
-      index > 0 && value !== '--database' && value !== '--force' && index !== databaseFlag + 1,
+      index > 0 &&
+      value !== '--database' &&
+      value !== '--force' &&
+      value !== '--allow-unverified' &&
+      index !== databaseFlag + 1,
   );
   if (dump === undefined || database === undefined || unsupported.length > 0) {
     throw new RestoreError(
       RESTORE_ERRORS.ARGUMENT,
-      'الاستخدام: restore.mjs <ملف.dump> --database <قاعدة_الهدف> [--force].',
+      'الاستخدام: restore.mjs <ملف.dump> --database <قاعدة_الهدف> [--force] [--allow-unverified].',
     );
   }
   if (!/^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(database)) {
@@ -104,7 +130,7 @@ function parseArguments(argv) {
       'اسم قاعدة الهدف يجب أن يبدأ بحرف أو شرطة سفلية وأن يحوي حروفاً وأرقاماً وشرطة سفلية فقط.',
     );
   }
-  return { dumpPath: path.resolve(dump), database, force };
+  return { dumpPath: path.resolve(dump), database, force, allowUnverified };
 }
 
 /**
@@ -458,7 +484,7 @@ export async function resolveVerifiedRestoreTool(dumpServerVersion) {
 /**
  * @param {RestoreOptions} options
  * @param {string} databaseUrl
- * @returns {Promise<{ durationMs: number, created: boolean }>}
+ * @returns {Promise<{ durationMs: number, created: boolean, contentVerification: 'VERIFIED' | 'NO_DIGEST', contentVerifyMs: number }>}
  */
 export async function restoreBackup(options, databaseUrl) {
   const url = requireDatabaseUrl(databaseUrl);
@@ -466,6 +492,14 @@ export async function restoreBackup(options, databaseUrl) {
     throw new BackupError(BACKUP_ERRORS.FILE_MISSING, `ملف النسخة غير موجود: ${options.dumpPath}`);
   }
   const manifest = await verifyBackup(options.dumpPath);
+  // ‏`WL-606`: بصمةٌ تالفةٌ أو غيرُ مدعومةٍ رُفضت في `verifyBackup` أعلاه، وغيابُها يُرفَضُ هنا — كلاهما
+  // قبلَ لمسِ الهدف. الاستعادةُ بلا دليلِ محتوى قرارٌ صريحٌ للمشغّل لا افتراض.
+  if (manifest.contentDigest === undefined && options.allowUnverified !== true) {
+    throw new RestoreError(
+      RESTORE_ERRORS.DIGEST_MISSING,
+      'النسخةُ بلا بصمةِ محتوى (‏أُخذت قبلَ WL-606)؛ لا يمكنُ إثباتُ أنّ المستعادَ يطابقُها. الهدفُ لم يُلمَس. لاستعادتِها بلا تحقّقِ محتوى صرّحْ بـ--allow-unverified، والنتيجةُ تُعلَنُ [RESTORE_UNVERIFIED] لا [RESTORE_OK].',
+    );
+  }
   // إصدار الأداة يُفحص قبل اللمس: عميلٌ أقدم من النسخة يترك قاعدةً ناقصة تُظنّ
   // مستعادة، وذلك أسوأ من الفشل المعلن. و«قبل اللمس» حرفيّاً (‏`WL-590`): قبل إنشاء
   // الهدف وقبل محو `--force` — كان الفحصُ بعدهما، فيمحو `--force` مخطّطَ `state`
@@ -524,7 +558,61 @@ export async function restoreBackup(options, databaseUrl) {
   }
 
   const verifier = new pg.Pool({ connectionString: targetUrl, max: 1 });
+  // انقطاعُ الاتصالِ أثناءَ التحقّق يُطلِقُ `error` على المجمّع؛ بلا مستمعٍ يُسقِطُ العمليّة. الخطأُ
+  // نفسُه يصلُ إلى الاستعلامِ المعلَّق فيُسمّى هناك.
+  verifier.on('error', () => undefined);
+  /** @type {'VERIFIED' | 'NO_DIGEST'} */
+  let contentVerification = CONTENT_VERIFICATION.NO_DIGEST;
+  let contentVerifyMs = 0;
   try {
+    if (manifest.contentDigest !== undefined) {
+      // ‏`WL-606`: المقارنةُ **قبلَ تركيبِ الدفتر**. فشلُها يتركُ الدفترَ جدولاً مرحليّاً في `state` ولا
+      // ‏`public.schema_migrations` — فلا يُقرأُ الهدفُ قاعدةً مُهاجَرةً سليمة (‏`migrate` يرى دفتراً غائباً).
+      const table = `${STATE_SCHEMA}.${manifest.ledgerStagingTable}`;
+      const found = await verifier.query('SELECT to_regclass($1) IS NOT NULL AS present', [table]);
+      if (
+        /** @type {Record<string, unknown> | undefined} */ (found.rows[0])?.['present'] !== true
+      ) {
+        throw new RestoreError(
+          RESTORE_ERRORS.LEDGER_MISSING,
+          `لا يحتوي الأرشيف على جدول دفتر الهجرات المرحلي ${manifest.ledgerStagingTable}.`,
+        );
+      }
+      const verifyStarted = process.hrtime.bigint();
+      /** @type {import('./backup.mjs').ContentDigest} */
+      let actual;
+      try {
+        const client = await verifier.connect();
+        let broken = false;
+        try {
+          await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+          actual = await computeContentDigest(
+            client,
+            `${quoteIdent(STATE_SCHEMA)}.${quoteIdent(manifest.ledgerStagingTable)}`,
+          );
+          await client.query('COMMIT');
+        } catch (error) {
+          broken = true;
+          throw error;
+        } finally {
+          client.release(broken);
+        }
+      } catch (error) {
+        throw new RestoreError(
+          RESTORE_ERRORS.CONTENT_CHECK_FAILED,
+          `تعذّرَ التحقّقُ من محتوى المستعاد: ${describe(error)} — لا [RESTORE_OK]. البياناتُ مُحمَّلةٌ لكنّ الدفترَ لم يُركَّب (‏بقيَ ${manifest.ledgerStagingTable} في state)، فالهدفُ ليسَ قاعدةً مُهاجَرةً صالحة؛ أعِدِ الاستعادةَ بـ--force.`,
+        );
+      }
+      contentVerifyMs = Number((process.hrtime.bigint() - verifyStarted) / 1_000_000n);
+      const differences = contentDigestDifferences(manifest.contentDigest, actual);
+      if (differences.length > 0) {
+        throw new RestoreError(
+          RESTORE_ERRORS.CONTENT_MISMATCH,
+          `محتوى المستعادِ لا يطابقُ بصمةَ النسخة: ${differences.join('؛ ')} — لا [RESTORE_OK]. الدفترُ لم يُركَّب (‏بقيَ ${manifest.ledgerStagingTable} في state)، فالهدفُ ليسَ قاعدةً مُهاجَرةً صالحة.`,
+        );
+      }
+      contentVerification = CONTENT_VERIFICATION.VERIFIED;
+    }
     await moveMigrationLedger(verifier, manifest.ledgerStagingTable);
     const actualCounts = await readRowCounts(verifier);
     if (!sameCounts(manifest.rowCounts, actualCounts)) {
@@ -543,7 +631,7 @@ export async function restoreBackup(options, databaseUrl) {
   } finally {
     await verifier.end();
   }
-  return { durationMs, created };
+  return { durationMs, created, contentVerification, contentVerifyMs };
 }
 
 /**
@@ -555,9 +643,20 @@ export async function main(argv, databaseUrl) {
   const options = parseArguments(argv);
   const outcome = await restoreBackup(options, databaseUrl);
   const manifest = readManifest(options.dumpPath);
-  console.log(
-    `استُعيدت النسخة [RESTORE_OK] إلى قاعدة ${options.database}${outcome.created ? ' (أُنشئت)' : ''}.`,
-  );
+  // ‏`[RESTORE_OK]` = **تحقّقٌ تمّ**: الأعدادُ ونسخةُ الهجرةِ وبصمةُ المحتوى طابقت. نسخةٌ بلا بصمةٍ
+  // تُعلَنُ بعلامةٍ أخرى لا تحوي `RESTORE_OK` كي لا يقرأَها مستهلكٌ آليٌّ تحقّقاً (‏`WL-606`).
+  if (outcome.contentVerification === CONTENT_VERIFICATION.VERIFIED) {
+    console.log(
+      `استُعيدت النسخة [RESTORE_OK] إلى قاعدة ${options.database}${outcome.created ? ' (أُنشئت)' : ''}.`,
+    );
+    console.log(
+      `تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ ${manifest.contentDigest?.sha256} طابقت (‏${outcome.contentVerifyMs} مللي ثانية).`,
+    );
+  } else {
+    console.log(
+      `استُعيدت النسخة [RESTORE_UNVERIFIED] إلى قاعدة ${options.database}${outcome.created ? ' (أُنشئت)' : ''} — بلا بصمةِ محتوى؛ طابقت الأعدادُ ونسخةُ الهجرةِ فقط، ولا دليلَ على المحتوى.`,
+    );
+  }
   console.log(`زمن الاستعادة المقاس: ${outcome.durationMs} مللي ثانية.`);
   console.log(
     `قايس البيان ${Object.keys(manifest.rowCounts).length} جدولاً ونسخة الهجرة ${manifest.migrationVersion}.`,
