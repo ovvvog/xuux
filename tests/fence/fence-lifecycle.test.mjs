@@ -2020,6 +2020,8 @@ describe(
     const children = new Set();
     /** @type {FenceSupervisor[]} */
     const supervisors = [];
+    /** ‏عمّالُ عمليّةِ CLI (‏أحفادٌ لا أبناء): يُقتَلونَ في `after` إن سقطَ اختبارٌ قبلَ تنظيفِه (‏WL-607). @type {Set<number>} */
+    const grandchildren = new Set();
 
     before(async () => {
       h = await harness('fence_sup');
@@ -2036,6 +2038,12 @@ describe(
     after(async () => {
       for (const s of supervisors) await s.stop().catch(() => {});
       for (const c of children) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+      for (const pid of grandchildren)
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // ‏مات.
+        }
       await h?.close();
       if (dir) rmSync(dir, { recursive: true, force: true });
     });
@@ -2715,6 +2723,421 @@ describe(
       assert.equal((await rejection(() => d.sup.start())).code, 'FENCE_SUPERVISOR_NOT_RUNNING');
       assert.equal(d.spawned.length, 0);
       await h.resume();
+    });
+
+    // ── WL-607 (‏LIVE-75): ما لم تغطِّه SUP-01..10 — موتُ المُشرِفِ في كلِّ مرحلة، ونافذةُ SUP-06 مقيسةً بحدِّها،
+    // ‏والتعافي، وفشلُ الحاصدِ أثناءَ العمل، وفشلُ التنظيف، والسباقُ على القفل، والطابورُ بقياسٍ مستقلّ. ──
+
+    /**
+     * يُطلِقُ `fence-lab supervise` عمليّةً منفصلة (‏موتُها بـSIGKILL موتُ مُشرِفٍ حقيقيّ).
+     * @param {Record<string, string>} modes
+     */
+    const launchCli = (modes) => {
+      const cfgPath = join(dir, `sup-${randomBytes(4).toString('hex')}.json`);
+      const cmd = [process.execPath, '--input-type=module', '-e', L75_WORKER_SRC];
+      writeFileSync(
+        cfgPath,
+        JSON.stringify({
+          harnessPasswordBroker: true,
+          workers: Object.entries(modes).map(([w, mode]) => ({
+            workerId: w,
+            command: cmd,
+            env: {
+              XUUX_FENCE_WORKER_KEY: keyFiles[w],
+              L75_MODE: mode,
+              L75_DB_URL: workerDbUrl(),
+              L75_HARNESS_SECRET: secret,
+              L75_ID: String(probeId[w]),
+            },
+          })),
+          options: {
+            leaseIntervalMs: 200,
+            monitorIntervalMs: 100,
+            killGraceMs: 500,
+            reaper: { ceilingMs: 1000, retryMs: 50, firstTickTimeoutMs: 3000 },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      const cli = spawn(
+        process.execPath,
+        ['scripts/fence-lab.mjs', 'supervise', '--config', cfgPath],
+        {
+          cwd: REPO_ROOT,
+          env: {
+            PATH: process.env['PATH'] ?? '',
+            XUUX_ROOT_DATABASE_URL: rootUrl(),
+            XUUX_FENCE_HARNESS: '1',
+            XUUX_HARNESS_SUPERUSER_URL: workerDbUrl(),
+            XUUX_HARNESS_SECRET: secret,
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      children.add(cli);
+      /** @type {any[]} */
+      const lines = [];
+      let buf = '';
+      cli.stdout?.on('data', (d) => {
+        buf += String(d);
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, i);
+          buf = buf.slice(i + 1);
+          try {
+            lines.push(JSON.parse(line));
+          } catch {
+            lines.push({ raw: line });
+          }
+        }
+      });
+      cli.stderr?.on('data', () => {});
+      cli.stdout?.on('data', () => {
+        for (const pid of spawnedPids(lines)) grandchildren.add(pid);
+      });
+      return { cli, lines, cfgPath };
+    };
+    /** @param {number} pid */
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    /** pids عمّالِ CLI من سطورِ `worker_spawned`. @param {any[]} lines */
+    const spawnedPids = (lines) =>
+      lines.filter((l) => l.ev === 'worker_spawned' && l.pid).map((l) => Number(l.pid));
+    const probe = async (/** @type {number | undefined} */ id) =>
+      (await h.db.pool.query('SELECT v FROM state.fence_probe WHERE id = $1', [id])).rows[0]?.v ??
+      null;
+
+    test('SUP-11: موتُ المُشرِفِ (‏SIGKILL) في كلِّ مرحلةٍ حرجة ⇒ القفلُ يُحرَّر، ولا اعتمادَ للمُشرِفِ الميّتِ يبقى ACTIVE بعدَ كنسِ التالي، ولا جلسةَ له', async () => {
+      /** @type {Array<Record<string, unknown>>} */
+      const outcomes = [];
+      for (const stage of [
+        'supervisor_locking',
+        'supervisor_swept',
+        'supervisor_running',
+        'worker_spawned',
+        'worker_credential',
+        'worker_running',
+      ]) {
+        await clean();
+        const { cli, lines, cfgPath } = launchCli({ alpha: 'write', beta: 'write' });
+        await l75Until(
+          () => lines.some((l) => l.ev === stage) || dead(cli),
+          20_000,
+          `المُشرِفُ بلغَ ${stage}`,
+        );
+        assert.ok(!dead(cli), `المُشرِفُ حيٌّ عندَ ${stage}`);
+        cli.kill('SIGKILL');
+        await l75Until(() => dead(cli), 5_000, 'المُشرِفُ مات');
+        // ‏ما بلغَه فعلاً قبلَ الموت (‏القراءةُ غيرُ متزامنةٍ مع القتل — يُسجَّلُ ولا يُفترَض).
+        const reached = lines.filter((l) => l.src === 'supervisor').map((l) => l.ev);
+        await l75Until(async () => (await lockHolders()) === 0, 5_000, `القفلُ حُرِّرَ (${stage})`);
+        const pids = spawnedPids(lines);
+        await l75Until(
+          () => pids.every((p) => !alive(p)),
+          5_000,
+          `عمّالُ المُشرِفِ الميّتِ خرجوا بانقطاعِ IPC (${stage})`,
+        );
+        const orphanRoles = (await active()).map((c) => c.role_name);
+        // ‏المُشرِفُ التالي يكنس — ثمّ لا يبقى من اعتماداتِ الميّتِ ACTIVE ولا جلسة.
+        const next = mk({ workers: ['beta'] });
+        await next.sup.start();
+        const nextRole = String(workerOf(next.sup, 'beta')?.role);
+        const leftovers = (await active()).filter((c) => c.role_name !== nextRole);
+        assert.deepEqual(leftovers, [], `لا ACTIVE من المُشرِفِ الميّتِ بعدَ الكنس (${stage})`);
+        for (const r of orphanRoles) {
+          const c = (await creds()).find((x) => x.role_name === r);
+          assert.equal(c?.status, 'REVOKED', `${r} أُلغي (${stage})`);
+        }
+        assert.equal(await sessionsOf(orphanRoles), 0, `لا جلسةَ للمُلغى (${stage})`);
+        await l75Until(async () => (await probe(probeId.beta)) !== null, 8_000, 'التالي يكتب');
+        await next.sup.stop();
+        rmSync(cfgPath, { force: true });
+        outcomes.push({ stage, reached: reached.at(-1), orphansSwept: orphanRoles.length });
+      }
+      t_note('SUP-11', outcomes);
+    });
+
+    test('SUP-12: نافذةُ SUP-06 بحدِّها — عاملٌ عنيدٌ بعدَ موتِ المُشرِفِ بلا مُشرِفٍ تالٍ: الكتابةُ تُرفَضُ بانقضاءِ الإيجارِ في القاعدة، والدورُ NOLOGIN منذُ الختم، لكنّ الاعتمادَ يبقى ACTIVE حتى الكنس', async () => {
+      await clean();
+      const ctl = (
+        await h.db.pool.query('SELECT lease_window_s, lease_renew_s FROM fence.control WHERE id')
+      ).rows[0];
+      const WINDOW_S = 5;
+      // ‏ضبطُ الإيجارِ أمرٌ سياديٌّ تحتَ HALTED وحدَه — إيقافٌ ثمّ ضبطٌ ثمّ استئناف (‏وعكسُه في النهاية).
+      /** @param {number} w @param {number} r */
+      const setLease = async (w, r) => {
+        await h.root.halt(`l75-sup-12-${w}`, { effects: NO_EFFECTS });
+        await h.sovereign.command('lease_set', { lease_window_s: w, lease_renew_s: r });
+        await h.resume();
+      };
+      await setLease(WINDOW_S, 1);
+      /** @type {number | null} */
+      let stubbornPid = null;
+      try {
+        const { cli, lines, cfgPath } = launchCli({ alpha: 'stubborn' });
+        await l75Until(
+          () => lines.some((l) => l.ev === 'cli_started') || dead(cli),
+          20_000,
+          'المُشرِفُ أقلع',
+        );
+        const started = lines.find((l) => l.ev === 'cli_started');
+        assert.ok(started, 'cli_started');
+        const role = String(started.snapshot.workers[0].role);
+        const pid = Number(started.snapshot.workers[0].pid);
+        stubbornPid = pid;
+        await l75Until(async () => (await probe(probeId.alpha)) !== null, 8_000, 'العنيدُ يكتب');
+        cli.kill('SIGKILL');
+        const tDeath = Date.now();
+        await l75Until(() => dead(cli), 5_000, 'المُشرِفُ مات');
+        assert.ok(alive(pid), 'العنيدُ حيٌّ بلا مُشرِف');
+        // ‏آخرُ كتابةٍ ناجحة: القيمةُ تتوقّفُ عن التغيّر. الحدُّ الأعلى: نافذةُ الإيجارِ + هامشُ الجدولة.
+        let last = await probe(probeId.alpha);
+        let tLastChange = tDeath;
+        const deadline = tDeath + (WINDOW_S + 5) * 1000;
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 100));
+          const v = await probe(probeId.alpha);
+          if (v !== last) {
+            last = v;
+            tLastChange = Date.now();
+          }
+        }
+        const writesAfterDeathMs = tLastChange - tDeath;
+        assert.ok(
+          writesAfterDeathMs <= (WINDOW_S + 1) * 1000,
+          `الكتابةُ توقّفت خلالَ نافذةِ الإيجار (${writesAfterDeathMs} ms)`,
+        );
+        // ‏ما يبقى في النافذة: اعتمادٌ ACTIVE (‏لا حاصدَ يعمل — حاصدُ المُشرِفِ مات معه) وجلسةٌ مفتوحة.
+        const c = (await creds()).find((x) => x.role_name === role);
+        assert.equal(
+          c?.status,
+          'ACTIVE',
+          'لا إلغاءَ بلا مُشرِفٍ ولا حاصد — جزءٌ من النافذةِ المعلنة',
+        );
+        // ‏والدورُ NOLOGIN منذُ الختم (‏`0024_fence` — لا جلسةَ جديدةَ بعدَه)، فما يبقى جلساتُه المختومةُ القائمة.
+        // ‏عددُها غيرُ ثابت: مجمّعُ `pg` يُتلِفُ الوصلةَ بعدَ كتابةٍ مرفوضةٍ ولا يستطيعُ فتحَ غيرِها — يُسجَّلُ ولا يُؤكَّد.
+        const canLogin = (
+          await h.db.pool.query('SELECT rolcanlogin FROM pg_roles WHERE rolname = $1', [role])
+        ).rows[0]?.rolcanlogin;
+        assert.equal(canLogin, false, 'الدورُ NOLOGIN داخلَ النافذة (‏منذُ الختم)');
+        const sessionsInWindow = await sessionsOf([role]);
+        // ‏وكتابةٌ مباشرةٌ بدورِه تُرفَضُ بـXF009 (‏فحصُ القاعدة، لا المُشرِف).
+        const u = new URL(workerDbUrl());
+        u.username = role;
+        u.password = createHmac('sha256', secret).update(role).digest('base64url');
+        const direct = new pg.Client({ connectionString: u.toString() });
+        direct.on('error', () => {});
+        /** @type {string | null} */
+        let directCode = null;
+        try {
+          await direct.connect();
+          await direct.query(
+            "INSERT INTO state.fence_probe (id, v) VALUES ($1, 'direct') ON CONFLICT (id) DO UPDATE SET v = excluded.v",
+            [probeId['alpha'] ?? 7501],
+          );
+        } catch (error) {
+          directCode = String(/** @type {any} */ (error)?.code ?? error);
+        } finally {
+          await direct.end().catch(() => {});
+        }
+        assert.ok(directCode !== null, 'كتابةُ جلسةٍ جديدةٍ بالدورِ مرفوضة');
+        // ‏والتالي يُغلقُ النافذة: كنسٌ يُلغي ويُنهي الجلسة.
+        const next = mk({ workers: ['beta'] });
+        await next.sup.start();
+        assert.equal((await creds()).find((x) => x.role_name === role)?.status, 'REVOKED');
+        assert.equal(await sessionsOf([role]), 0);
+        await next.sup.stop();
+        rmSync(cfgPath, { force: true });
+        t_note('SUP-12', { windowS: WINDOW_S, writesAfterDeathMs, directCode, sessionsInWindow });
+      } finally {
+        // ‏العنيدُ حفيدُ عمليّةِ CLI لا ابنُها — خارجَ `children`، فيُقتَلُ هنا دائماً.
+        if (stubbornPid !== null && alive(stubbornPid)) process.kill(stubbornPid, 'SIGKILL');
+        await setLease(Number(ctl.lease_window_s), Number(ctl.lease_renew_s));
+      }
+    });
+
+    test('SUP-13: إعادةُ التشغيلِ والتعافي — نسخةٌ موقوفةٌ لا تُقلِعُ ثانية، ومُشرِفٌ جديدٌ يتعافى بعدَ STOPPED وبعدَ FAILED (‏فقدُ القفل)', async () => {
+      await clean();
+      const a = mk();
+      await a.sup.start();
+      await a.sup.stop();
+      assert.equal((await rejection(() => a.sup.start())).code, 'FENCE_SUPERVISOR_STATE');
+      assert.deepEqual(await active(), []);
+      // ‏تعافٍ بعدَ STOPPED.
+      const b = mk();
+      await b.sup.start();
+      await l75Until(
+        async () => (await probe(probeId.alpha)) !== null && (await probe(probeId.beta)) !== null,
+        8_000,
+        'b يكتب',
+      );
+      const bRoles = b.sup.snapshot().workers.map((w) => String(w.role));
+      // ‏FAILED: إنهاءُ وصلةِ القفلِ من خارج.
+      await h.db.pool.query(
+        `SELECT pg_terminate_backend(pid) FROM pg_locks WHERE locktype = 'advisory' AND classid = $1::oid
+           AND objid = $2::oid AND objsubid = 2 AND granted`,
+        [...SUPERVISOR_LOCK_KEY],
+      );
+      const failed = await b.sup.done;
+      assert.equal(failed.state, 'FAILED');
+      assert.equal(failed.reason, 'FENCE_SUPERVISOR_LOCK_LOST');
+      assert.deepEqual(failed.revokeErrors, []);
+      for (const r of bRoles)
+        assert.equal((await creds()).find((x) => x.role_name === r)?.status, 'REVOKED');
+      assert.equal(await sessionsOf(bRoles), 0);
+      await l75Until(() => b.spawned.every((s) => dead(s.child)), 5_000, 'عمّالُ b ماتوا');
+      // ‏تعافٍ بعدَ FAILED: مُشرِفٌ جديدٌ بأدوارٍ جديدة.
+      await h.db.pool.query('DELETE FROM state.fence_probe WHERE id IN (7501, 7502)');
+      const c = mk();
+      await c.sup.start();
+      await l75Until(
+        async () => (await probe(probeId.alpha)) !== null && (await probe(probeId.beta)) !== null,
+        8_000,
+        'c يكتب بعدَ التعافي',
+      );
+      const cRoles = c.sup.snapshot().workers.map((w) => String(w.role));
+      assert.equal(cRoles.filter((r) => bRoles.includes(r)).length, 0, 'أدوارٌ جديدة');
+      await c.sup.stop();
+      assert.deepEqual(await active(), []);
+    });
+
+    test('SUP-14: فشلُ الحاصدِ أثناءَ العمل يُسجَّلُ ولا يُسقِطُ المُشرِف؛ وفشلُ التنظيفِ (‏الإلغاءُ عندَ الإيقاف) يُعلَنُ في التقريرِ ويكنسُه التالي', async () => {
+      await clean();
+      // ‏(أ) الحاصد: أوّلُ نداءٍ ناجح (‏شرطُ الإقلاع)، ثمّ يرمي.
+      let calls = 0;
+      const target = {
+        reapLapsed: async () => {
+          calls++;
+          if (calls === 1) return h.root.reapLapsed();
+          throw Object.assign(new Error('reaper down'), { code: '57P01' });
+        },
+      };
+      const a = mk({
+        options: { reaper: { ceilingMs: 100, retryMs: 50, firstTickTimeoutMs: 3_000, target } },
+      });
+      await a.sup.start();
+      await l75Until(
+        () => a.events.filter((e) => e['ev'] === 'reaper_error').length >= 3,
+        8_000,
+        'أخطاءُ الحاصدِ تُسجَّل',
+      );
+      const snap = a.sup.snapshot();
+      assert.equal(snap.state, 'RUNNING', 'خطأُ الحاصدِ لا يُسقِطُ المُشرِف (‏سلوكٌ معلَن)');
+      assert.ok((snap.reaper?.errors ?? 0) >= 3, JSON.stringify(snap.reaper));
+      assert.ok(snap.workers.every((w) => w.state === 'RUNNING'));
+      await a.sup.stop();
+      // ‏(ب) فشلُ الإلغاءِ عندَ الإيقاف.
+      await clean();
+      let failRevoke = false;
+      class FlakyRoot extends FenceRoot {
+        /** @override @param {string} role @param {string} reason */
+        async revokeCredential(role, reason) {
+          if (failRevoke) throw Object.assign(new Error('revoke down'), { code: '08006' });
+          return super.revokeCredential(role, reason);
+        }
+      }
+      const b = mk({ root: new FlakyRoot(connectAt(rootUrl())) });
+      await b.sup.start();
+      const roles = b.sup.snapshot().workers.map((w) => String(w.role));
+      failRevoke = true;
+      const r = await b.sup.stop();
+      assert.equal(r.state, 'STOPPED');
+      assert.deepEqual(
+        r.revokeErrors.map((/** @type {any} */ x) => x.role).sort(),
+        [...roles].sort(),
+        'كلُّ إلغاءٍ فشلَ مُعلَنٌ في التقرير',
+      );
+      assert.deepEqual(r.revoked, [], 'لا يُعلَنُ إلغاءٌ لم يقع');
+      await l75Until(
+        () => b.spawned.every((s) => dead(s.child)),
+        5_000,
+        'العمّالُ قُتلوا رغمَ فشلِ الإلغاء',
+      );
+      assert.deepEqual(
+        (await active()).map((c) => c.role_name).sort(),
+        [...roles].sort(),
+        'الاعتماداتُ باقيةٌ ACTIVE — لا تُخفى',
+      );
+      const next = mk({ workers: ['beta'] });
+      await next.sup.start();
+      for (const role of roles)
+        assert.equal((await creds()).find((x) => x.role_name === role)?.status, 'REVOKED');
+      await next.sup.stop();
+    });
+
+    test('SUP-15: مُشرِفانِ يُقلِعانِ معاً على القاعدةِ نفسِها ⇒ واحدٌ فقط ينجح، والخاسرُ لا يكنسُ ولا يُطلِق', async () => {
+      for (let round = 0; round < 3; round++) {
+        await clean();
+        const x = mk();
+        const y = mk();
+        const [rx, ry] = await Promise.allSettled([x.sup.start(), y.sup.start()]);
+        const won = [rx, ry].filter((r) => r.status === 'fulfilled').length;
+        assert.equal(won, 1, `فائزٌ واحد (‏جولة ${round})`);
+        const [winner, loser, lost] = rx.status === 'fulfilled' ? [x, y, ry] : [y, x, rx];
+        assert.equal(/** @type {any} */ (lost).reason?.code, 'FENCE_SUPERVISOR_LOCKED');
+        assert.equal(loser.spawned.length, 0);
+        assert.equal(loser.events.filter((e) => e['ev'] === 'supervisor_swept').length, 0);
+        const roles = winner.sup.snapshot().workers.map((w) => String(w.role));
+        assert.deepEqual(
+          (await active()).map((c) => c.role_name).sort(),
+          [...roles].sort(),
+          'اعتماداتُ الفائزِ سليمة',
+        );
+        await winner.sup.stop();
+      }
+    });
+
+    test('SUP-16: الطابورُ التسلسليُّ بقياسٍ مستقلٍّ عن عدّادِ المُشرِف — إصدارٌ وإلغاءٌ مُبطَّآنِ عمداً لا يتداخلان', async () => {
+      await clean();
+      const probeQ = { active: 0, max: 0, issue: 0, revoke: 0 };
+      const delay = () => new Promise((r) => setTimeout(r, 25));
+      /** @template T @param {'issue'|'revoke'} k @param {() => Promise<T>} fn */
+      const track = async (k, fn) => {
+        probeQ.active++;
+        probeQ.max = Math.max(probeQ.max, probeQ.active);
+        probeQ[k]++;
+        try {
+          await delay();
+          return await fn();
+        } finally {
+          probeQ.active--;
+        }
+      };
+      class SlowRoot extends FenceRoot {
+        /** @override @param {string} w @param {string} b */
+        async issueChallenge(w, b) {
+          return track('issue', () => super.issueChallenge(w, b));
+        }
+        /** @override @param {string} n @param {Buffer} s */
+        async completeCredential(n, s) {
+          return track('issue', () => super.completeCredential(n, s));
+        }
+        /** @override @param {string} role @param {string} reason */
+        async revokeCredential(role, reason) {
+          return track('revoke', () => super.revokeCredential(role, reason));
+        }
+      }
+      const a = mk({
+        root: new SlowRoot(connectAt(rootUrl())),
+        modes: { alpha: ['die-after-ready'], beta: ['write'] },
+        options: { restart: { maxRestarts: 4, windowMs: 60_000, backoffMs: 0 } },
+      });
+      await a.sup.start();
+      await l75Until(() => workerOf(a.sup, 'alpha')?.state === 'GAVE_UP', 25_000, 'alpha استسلم');
+      await a.sup.stop();
+      const serial = a.sup.snapshot().serial;
+      assert.equal(probeQ.max, 1, `تداخلٌ مقيسٌ من خارج: ${JSON.stringify(probeQ)}`);
+      assert.equal(probeQ.issue, serial.issue, 'عدُّ الإصدارِ المستقلُّ = عدُّ المُشرِف');
+      assert.equal(probeQ.revoke, serial.revoke, 'عدُّ الإلغاءِ المستقلُّ = عدُّ المُشرِف');
+      assert.ok(probeQ.issue >= 10 && probeQ.revoke >= 5, JSON.stringify(probeQ));
+      assert.deepEqual(await active(), []);
+      t_note('SUP-16', { probeQ, serial });
     });
   },
 );
