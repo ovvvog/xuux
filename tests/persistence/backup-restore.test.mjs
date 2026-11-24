@@ -279,12 +279,50 @@ test(
         /** @type {Record<string, unknown>} */ (expectedVersion.rows[0])['version'],
       );
 
-      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+      const serverVersion = await source.pool.query('SHOW server_version');
+
+      // `WL-595`: لا استعلامان متداخلان على عميلٍ واحد (‏‏`pg@9` يُزيلُ الطابورَ الداخليّ).
+      // دليلان في العمليّةِ الابنةِ وحدَها، والإنتاجُ بلا تعديل:
+      // ١. `--throw-deprecation`: إشارةُ `pg` نفسِها فشلاً — لكنّها لا تنطلقُ إلا والطابورُ
+      //    غيرُ فارغ، أي من الاستعلامِ الثالثِ المتزامن؛ فاستعلامان متداخلان ينجوان منها.
+      // ٢. مُحمَّلٌ مسبقٌ يرفضُ `query()` وعلى العميلِ استعلامٌ نشِطٌ أو منتظِر. في مسارِ
+      //    النجاحِ يُحَلُّ وعدُ الاستعلامِ بعدَ تصفيرِ النشِط (‏`_handleReadyForQuery`)، فالتتابعُ
+      //    لا يُرفَض؛ ومسارُ الخطأ (‏يُحَلُّ قبلَ `ReadyForQuery`) خارجَ هذا الاختبار.
+      //    وإن تغيّرت بنيةُ `pg` الداخليّةُ رسبَ صراحةً لا صامتاً.
+      const overlapDetector = path.join(path.dirname(dump), 'reject-overlapping-queries.mjs');
+      fs.writeFileSync(
+        overlapDetector,
+        [
+          "import { createRequire } from 'node:module';",
+          `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
+          "const pg = require('pg');",
+          'const original = pg.Client.prototype.query;',
+          'pg.Client.prototype.query = function (...args) {',
+          "  if (!Array.isArray(this._queryQueue) || !('_activeQuery' in this)) {",
+          "    throw new Error('XUUX_OVERLAP_DETECTOR_INCOMPATIBLE');",
+          '  }',
+          '  if (this._activeQuery != null || this._queryQueue.length > 0) {',
+          "    throw new Error('XUUX_OVERLAPPING_QUERY');",
+          '  }',
+          '  return original.apply(this, args);',
+          '};',
+          '',
+        ].join('\n'),
+      );
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl, {
+        NODE_OPTIONS:
+          `${process.env['NODE_OPTIONS'] ?? ''} --throw-deprecation --import ${overlapDetector}`.trim(),
+      });
       assert.equal(backup.code, 0, backup.stderr);
+      assert.doesNotMatch(backup.stderr, /DeprecationWarning|XUUX_OVERLAP/);
       assert.match(backup.stdout, /زمن النسخ المقاس: \d+ مللي ثانية/);
       const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
       assert.deepEqual(manifest.rowCounts, expectedCounts);
       assert.equal(manifest.migrationVersion, migrationVersion);
+      assert.equal(
+        manifest.databaseVersion,
+        String(/** @type {Record<string, unknown>} */ (serverVersion.rows[0])['server_version']),
+      );
 
       const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
       assert.equal(restore.code, 0, restore.stderr);
