@@ -357,6 +357,23 @@ export async function createBackup(dumpPath, databaseUrl) {
         /** @type {Record<string, unknown> | undefined} */ (fenced.rows[0])?.['present'] === true
           ? ['--schema', 'fence']
           : [];
+      // ‏`WL-594`: جدولٌ مرحليٌّ آخرُ مُلتزَمٌ في `state` (‏متروكٌ من نسخٍ انقطعَ، أو لنسخٍ
+      // متزامنٍ لم يحذفْه بعد) كانَ يدخلُ الحاويةَ مع `--schema state`، والعدّاداتُ تستثنيه،
+      // فتنجحُ `create` و`verify` وتسقطُ الاستعادةُ بـ`RESTORE_ROW_COUNT_MISMATCH` — نسخةٌ
+      // «سليمةٌ» لا تُستعاد. يُقرأُ من اللقطةِ نفسِها التي يقرؤها `pg_dump` فيُستثنى بعينِه؛ ولا
+      // يُحذَف: قد يكونُ لنسخٍ حيّ، وحذفُه قرارُ المشغِّل. ويُسمّى على stderr ليُرى ويُزال.
+      const foreignStaging = (await stateTables(client)).filter(
+        (name) => BACKUP_STAGING_TABLE.test(name) && name !== ledgerStagingTable,
+      );
+      const excludeArgs = foreignStaging.flatMap((name) => [
+        '--exclude-table',
+        `${quoteIdent(STATE_SCHEMA)}.${quoteIdent(name)}`,
+      ]);
+      for (const name of foreignStaging) {
+        console.error(
+          `⚠️ [BACKUP_STAGING_EXCLUDED] ${STATE_SCHEMA}.${name}: جدولٌ مرحليٌّ ليس لهذا النسخ — استُثنيَ من النسخةِ ولم يُحذَف؛ إن لم يكنْ نسخٌ آخرُ جارياً فأزِلْه يدوياً.`,
+        );
+      }
       result = await run(dumpTool, [
         '--format=custom',
         '--file',
@@ -364,6 +381,7 @@ export async function createBackup(dumpPath, databaseUrl) {
         '--schema',
         STATE_SCHEMA,
         ...fenceSchemaArgs,
+        ...excludeArgs,
         '--no-owner',
         '--no-privileges',
         '--snapshot',

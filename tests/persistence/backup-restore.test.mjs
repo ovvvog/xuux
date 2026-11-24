@@ -1309,6 +1309,104 @@ test(
 );
 
 test(
+  'WL-594: جدولٌ مرحليٌّ متروكٌ في `state` لا يتسمّمُ به النسخ — يُستثنى من `pg_dump` ويُسمّى ولا يُحذَف، والاستعادةُ تنجح',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const source = await createIsolatedDatabase('backleftsrc');
+    const target = await createIsolatedDatabase('backleftdst');
+    const dump = path.join(
+      registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-leftover-'))),
+      'state.dump',
+    );
+    // ‏اسمٌ يطابقُ نمطَ الأداةِ كما يتركُه نسخٌ سابقٌ انقطعَ قبلَ `WL-591`/`WL-592`، أو نسخٌ
+    // متزامنٌ التزمَ جدولَه ولم يحذفْه بعد. فيه صفٌّ زائدٌ كي يظهرَ أيُّ تسرّبٍ في العدّ.
+    // ‏جدولانِ لا واحد: الاستثناءُ لكلِّ جدولٍ غريبٍ لا لأوّلِه وحدَه.
+    const leftovers = [
+      '__backup_schema_migrations_0123456789ab',
+      '__backup_schema_migrations_ba9876543210',
+    ];
+    try {
+      await up(source.pool);
+      await seedEveryTable(source.pool);
+      const expectedCounts = await stateRowCounts(source.pool);
+      const expectedDigest = await contentsDigest(source.pool);
+      for (const leftover of leftovers) {
+        await source.pool.query(
+          `CREATE TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(leftover)} AS
+           SELECT * FROM public.schema_migrations
+           UNION ALL SELECT * FROM public.schema_migrations LIMIT 1`,
+        );
+      }
+      const sourceUrl = databaseUrlFor(source.name);
+
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+      assert.equal(backup.code, 0, backup.stderr);
+      assert.match(backup.stderr, /\[BACKUP_STAGING_EXCLUDED\]/);
+      for (const leftover of leftovers) {
+        assert.ok(backup.stderr.includes(`${STATE_SCHEMA}.${leftover}`), backup.stderr);
+      }
+      const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+      assert.deepEqual(manifest.rowCounts, expectedCounts);
+      assert.ok(!leftovers.includes(manifest.ledgerStagingTable));
+
+      // ‏الحاويةُ نفسُها لا تحملُ الجدولَ المتروك (‏لا العدُّ وحدَه).
+      const list = await new Promise((resolve, reject) => {
+        const child = spawn(process.env['PG_RESTORE'] ?? 'pg_restore', ['--list', dump]);
+        let out = '';
+        child.stdout.on('data', (chunk) => (out += chunk));
+        child.on('error', reject);
+        child.on('close', (code) =>
+          code === 0 ? resolve(out) : reject(new Error(`code ${code}`)),
+        );
+      });
+      for (const leftover of leftovers) {
+        assert.ok(!String(list).includes(leftover), `${leftover} في الحاوية`);
+      }
+      assert.ok(
+        String(list).includes(manifest.ledgerStagingTable),
+        'دفترُ النسخةِ غائبٌ عن الحاوية',
+      );
+
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.deepEqual(await stateRowCounts(target.pool), expectedCounts);
+      assert.equal(await contentsDigest(target.pool), expectedDigest);
+
+      // ‏لا حذفَ تلقائيّ: قد يكونُ جدولَ نسخٍ متزامنٍ حيّ — حذفُه قرارُ المشغِّل.
+      const still = await source.pool.query(
+        `SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+         WHERE n.nspname = $1 AND c.relname = ANY($2::text[])`,
+        [STATE_SCHEMA, leftovers],
+      );
+      assert.equal(still.rowCount, leftovers.length);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'WL-594: نسخٌ بلا جدولٍ متروكٍ لا يطبعُ تحذيرَ الاستثناء',
+  { skip: skipWithoutDatabase },
+  async () => {
+    const source = await createIsolatedDatabase('backnoleft');
+    const dump = path.join(
+      registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-noleft-'))),
+      'state.dump',
+    );
+    try {
+      await up(source.pool);
+      const backup = await runNode([BACKUP_SCRIPT, 'create', dump], databaseUrlFor(source.name));
+      assert.equal(backup.code, 0, backup.stderr);
+      assert.doesNotMatch(backup.stderr, /BACKUP_STAGING_EXCLUDED/);
+    } finally {
+      await source.drop();
+    }
+  },
+);
+
+test(
   'WL-591: النسخُ يُنادي `pg_dump` بـ`--no-owner` و`--no-privileges` و`--snapshot` والمخطّطَين',
   { skip: skipWithoutDatabase, timeout: 120_000 },
   async () => {
