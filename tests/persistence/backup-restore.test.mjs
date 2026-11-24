@@ -21,6 +21,7 @@ import { up } from '../../src/persistence/migrator.mjs';
 import {
   COVERAGE_MATRIX,
   MANIFEST_AUTH_REASONS,
+  loadSequenceReference,
   signManifestPrototype,
   verifyManifestPrototype,
   catalogSnapshot,
@@ -3303,6 +3304,23 @@ test(
   },
 );
 
+/**
+ * مرجعُ تسلسلٍ في الذاكرة (‏`WL-610`): ‏`issued` رقم ⇒ [backupId, dumpSha256].
+ * @param {number} floor @param {number} latestIssued @param {Record<number, [string, string]>} issued
+ */
+function sequenceReferenceOf(floor, latestIssued, issued) {
+  return {
+    floor,
+    latestIssued,
+    issued: new Map(
+      Object.entries(issued).map(([k, [backupId, dumpSha256]]) => [
+        Number(k),
+        { backupId, dumpSha256 },
+      ]),
+    ),
+  };
+}
+
 // ═══ ‏`WL-608` — أصالةُ البيان: السلامةُ (‏WL-606) مقابلَ المصدر (‏نموذجُ توقيعٍ مختبريّ) ═══════════════════════
 // خمسةُ هجمات، ولكلٍّ ما يفعلُه الإنتاجُ اليومَ وما يفعلُه التوقيع. المفاتيحُ مُولَّدةٌ هنا وتموتُ مع العمليّة.
 
@@ -3318,19 +3336,20 @@ test(
       const policy = {
         trustedKeys: new Map([['k1', publicKey]]),
         database: 'prod-a',
-        minSequence: 1,
+        sequenceReference: sequenceReferenceOf(1, 1, { 1: ['b-1', sha256Of(legit.dump)] }),
       };
       const read = (/** @type {string} */ d) =>
         JSON.parse(fs.readFileSync(`${d}.manifest.json`, 'utf8'));
       const envelope = signManifestPrototype(read(legit.dump), sha256Of(legit.dump), {
         keyId: 'k1',
+        backupId: 'b-1',
         sequence: 1,
         database: 'prod-a',
         privateKey,
       });
       assert.deepEqual(
         verifyManifestPrototype(read(legit.dump), sha256Of(legit.dump), envelope, policy),
-        { ok: true },
+        { ok: true, replayProtected: true },
       );
 
       // (‏1) تلفٌ عرضيّ: بايتٌ مقلوبٌ في وسطِ الأرشيف.
@@ -3407,15 +3426,17 @@ test(
     try {
       const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
       const evilKey = crypto.generateKeyPairSync('ed25519');
+      const legitSha = sha256Of(legit.dump);
       const policy = {
         trustedKeys: new Map([['k1', publicKey]]),
         database: 'prod-a',
-        minSequence: 1,
+        sequenceReference: sequenceReferenceOf(1, 1, { 1: ['b-1', legitSha] }),
       };
       const read = (/** @type {string} */ d) =>
         JSON.parse(fs.readFileSync(`${d}.manifest.json`, 'utf8'));
-      const legitEnvelope = signManifestPrototype(read(legit.dump), sha256Of(legit.dump), {
+      const legitEnvelope = signManifestPrototype(read(legit.dump), legitSha, {
         keyId: 'k1',
+        backupId: 'b-1',
         sequence: 1,
         database: 'prod-a',
         privateKey,
@@ -3458,6 +3479,7 @@ test(
         reason(
           signManifestPrototype(m, sha, {
             keyId: 'k1',
+            backupId: 'b-9',
             sequence: 9,
             database: 'prod-a',
             privateKey: evilKey.privateKey,
@@ -3470,6 +3492,7 @@ test(
         reason(
           signManifestPrototype(m, sha, {
             keyId: 'evil',
+            backupId: 'b-9',
             sequence: 9,
             database: 'prod-a',
             privateKey: evilKey.privateKey,
@@ -3485,6 +3508,7 @@ test(
       // توقيعٌ صحيحٌ من قاعدةٍ شرعيّةٍ أخرى (‏مثلاً staging بالمفتاحِ نفسِه) ⇒ هويّةُ القاعدةِ ترفض.
       const staging = signManifestPrototype(m, sha, {
         keyId: 'k1',
+        backupId: 'b-5',
         sequence: 5,
         database: 'staging',
         privateKey,
@@ -3499,12 +3523,27 @@ test(
       const old = read(legit.dump);
       const oldSha = sha256Of(legit.dump);
       assert.deepEqual(
-        verifyManifestPrototype(old, oldSha, legitEnvelope, policy),
-        { ok: true },
-        'التوقيعُ وحدَه يقبلُ القديم',
+        verifyManifestPrototype(old, oldSha, legitEnvelope, {
+          ...policy,
+          sequenceReference: null,
+          allowUnprotectedReplay: true,
+        }),
+        { ok: true, replayProtected: false },
+        'التوقيعُ وحدَه يقبلُ القديم — ويُعلنُ أنّه بلا حمايةٍ من الإعادة',
       );
       assert.deepEqual(
-        verifyManifestPrototype(old, oldSha, legitEnvelope, { ...policy, minSequence: 2 }),
+        verifyManifestPrototype(old, oldSha, legitEnvelope, policy),
+        { ok: true, replayProtected: true },
+        'والمرجعُ الذي لم يرَ أحدثَ منه يقبلُه',
+      );
+      assert.deepEqual(
+        verifyManifestPrototype(old, oldSha, legitEnvelope, {
+          ...policy,
+          sequenceReference: sequenceReferenceOf(2, 2, {
+            1: ['b-1', legitSha],
+            2: ['b-2', 'e'.repeat(64)],
+          }),
+        }),
         { ok: false, reason: MANIFEST_AUTH_REASONS.REPLAY },
         'الرقمُ المتسلسلُ في مخزنٍ موثوقٍ وحدَه يرفضُ القديم',
       );
@@ -3520,5 +3559,389 @@ test(
       await attacker.drop();
       await legit.source.drop();
     }
+  },
+);
+
+// ═══ ‏`WL-610` — أصالةُ النسخِ ومنعُ إعادةِ التشغيلِ بمرجعٍ مستقلّ (‏نموذجٌ مختبريّ، بلا قاعدةٍ ولا مفاتيحِ إنتاج) ═══
+// أرشيفٌ وبيانٌ اصطناعيّان يكفيان لمنطقِ التحقّق: الحمولةُ تُقرأُ من البيانِ وبصمةُ الأرشيفِ تُحسَبُ من الملفّ.
+
+/** مجلّدُ نسخٍ ومجلّدُ مرجعٍ منفصلان، ونسخةٌ موقَّعةٌ أولى. */
+function wl610Lab() {
+  const root = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-auth610-')));
+  const backups = path.join(root, 'backups');
+  const refDir = path.join(root, 'sequence-authority');
+  fs.mkdirSync(backups);
+  fs.mkdirSync(refDir);
+  const k1 = crypto.generateKeyPairSync('ed25519');
+  const k2 = crypto.generateKeyPairSync('ed25519');
+  const evil = crypto.generateKeyPairSync('ed25519');
+  /** @param {string} name @param {string} body */
+  const backup = (name, body) => {
+    const dump = path.join(backups, name);
+    fs.writeFileSync(dump, body);
+    const manifest = {
+      sha256: sha256Of(dump),
+      contentDigest: { sha256: crypto.createHash('sha256').update(`c:${body}`).digest('hex') },
+      startedAt: '2026-11-25T00:00:00.000Z',
+      migrationVersion: 32,
+    };
+    fs.writeFileSync(`${dump}.manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
+    return { dump, manifest, sha: sha256Of(dump) };
+  };
+  /** @param {string} file @param {Record<string, unknown>} body */
+  const writeRef = (file, body) => {
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ format: 'xuux.backup-sequence-reference', version: 1, ...body }),
+    );
+    return file;
+  };
+  return { root, backups, refDir, k1, k2, evil, backup, writeRef };
+}
+
+test(
+  'WL-610 أصالة: الصحيحُ يُقبَل، والنسخُ المكرَّرةُ تُقبَل، وتعديلُ البيان، واستبدالُ الأرشيفِ وحدَه، واستبدالُهما معاً بلا توقيعٍ موثوق، والتوقيعُ التالف — كلُّها تُرفَضُ بسببٍ مُسمّى',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const lab = wl610Lab();
+    const b1 = lab.backup('state-1.dump', 'legit-content-1');
+    const sign = (/** @type {any} */ m, /** @type {string} */ sha, /** @type {any} */ over = {}) =>
+      signManifestPrototype(m, sha, {
+        keyId: 'k1',
+        backupId: 'b-1',
+        sequence: 1,
+        database: 'prod-a',
+        privateKey: lab.k1.privateKey,
+        ...over,
+      });
+    const policy = {
+      trustedKeys: new Map([['k1', lab.k1.publicKey]]),
+      database: 'prod-a',
+      sequenceReference: sequenceReferenceOf(1, 1, { 1: ['b-1', b1.sha] }),
+    };
+    const env = sign(b1.manifest, b1.sha);
+    const v = (/** @type {any} */ m, /** @type {string} */ sha, /** @type {any} */ e) =>
+      verifyManifestPrototype(m, sha, e, policy);
+    assert.deepEqual(v(b1.manifest, b1.sha, env), { ok: true, replayProtected: true });
+    assert.equal(env.payload['backupId'], 'b-1', 'هويّةُ النسخةِ في الحمولةِ الموقَّعة');
+    assert.equal(env.payload['dumpSha256'], b1.sha, 'بصمةُ الأرشيفِ في الحمولةِ الموقَّعة');
+
+    // نسخةٌ مكرَّرةٌ بايتاً ببايت في موضعٍ آخر: النسخُ مشروعٌ ولا يُعَدُّ إعادةً ولا تعارضاً.
+    const copyDir = path.join(lab.root, 'offsite');
+    fs.mkdirSync(copyDir);
+    fs.copyFileSync(b1.dump, path.join(copyDir, 'state-1.dump'));
+    fs.copyFileSync(`${b1.dump}.manifest.json`, path.join(copyDir, 'state-1.dump.manifest.json'));
+    const copied = JSON.parse(
+      fs.readFileSync(path.join(copyDir, 'state-1.dump.manifest.json'), 'utf8'),
+    );
+    assert.deepEqual(v(copied, sha256Of(path.join(copyDir, 'state-1.dump')), env), {
+      ok: true,
+      replayProtected: true,
+    });
+
+    // (‏1) بيانٌ مُعدَّل: أيُّ حقلٍ في الحمولة.
+    for (const edit of [
+      (/** @type {any} */ m) => (m.startedAt = '2026-11-26T00:00:00.000Z'),
+      (/** @type {any} */ m) => (m.migrationVersion = 31),
+      (/** @type {any} */ m) => (m.contentDigest.sha256 = '0'.repeat(64)),
+      (/** @type {any} */ m) => (m.sha256 = 'f'.repeat(64)),
+    ]) {
+      const m = structuredClone(b1.manifest);
+      edit(m);
+      assert.deepEqual(v(m, b1.sha, env), {
+        ok: false,
+        reason: MANIFEST_AUTH_REASONS.BINDING,
+      });
+    }
+    // (‏2) الأرشيفُ مُستبدَلٌ والبيانُ باقٍ: البصمةُ تُحسَبُ من الملفِّ لا تُنقَلُ من البيان.
+    fs.writeFileSync(b1.dump, 'attacker-content');
+    assert.deepEqual(v(b1.manifest, sha256Of(b1.dump), env), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.BINDING,
+    });
+    // (‏3) الاثنانِ مُستبدَلان بنسخةٍ متّسقة: بلا توقيع، أو بمفتاحِ المهاجمِ باسمِه أو باسمِ المفتاحِ الموثوق،
+    // أو بالتوقيعِ الشرعيِّ منقولاً.
+    const evilB = lab.backup('state-1.dump', 'attacker-content');
+    assert.deepEqual(v(evilB.manifest, evilB.sha, undefined), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.MISSING,
+    });
+    assert.equal(
+      /** @type {any} */ (
+        v(
+          evilB.manifest,
+          evilB.sha,
+          sign(evilB.manifest, evilB.sha, { keyId: 'evil', privateKey: lab.evil.privateKey }),
+        )
+      ).reason,
+      MANIFEST_AUTH_REASONS.UNTRUSTED_KEY,
+    );
+    assert.equal(
+      /** @type {any} */ (
+        v(
+          evilB.manifest,
+          evilB.sha,
+          sign(evilB.manifest, evilB.sha, { privateKey: lab.evil.privateKey }),
+        )
+      ).reason,
+      MANIFEST_AUTH_REASONS.INVALID,
+    );
+    assert.equal(
+      /** @type {any} */ (v(evilB.manifest, evilB.sha, env)).reason,
+      MANIFEST_AUTH_REASONS.BINDING,
+    );
+    // (‏4) توقيعٌ تالف: بتٌّ مقلوب، ونصٌّ ليس base64، وحمولةٌ عُدِّلَ رقمُها بعدَ التوقيع.
+    const flipped = Buffer.from(env.signature, 'base64');
+    flipped[0] = Number(flipped[0]) ^ 1;
+    for (const bad of [
+      { ...env, signature: flipped.toString('base64') },
+      { ...env, signature: '%%%not-base64%%%' },
+      { ...env, payload: { ...env.payload, sequence: 2 } },
+      { ...env, payload: { ...env.payload, backupId: 'b-2' } },
+    ]) {
+      fs.copyFileSync(path.join(copyDir, 'state-1.dump'), b1.dump);
+      assert.deepEqual(v(b1.manifest, sha256Of(b1.dump), bad), {
+        ok: false,
+        reason: MANIFEST_AUTH_REASONS.INVALID,
+      });
+    }
+  },
+);
+
+test(
+  'WL-610 إعادةُ التشغيل: الرقمُ داخلَ البيانِ لا يكفي — المرجعُ المستقلُّ يرفضُ القديمَ والمستقبليَّ وغيرَ المُسجَّلِ والمتعارض، ومرجعٌ غائبٌ أو داخلَ مجلّدِ النسخِ يُرفَضُ إلا بإذنٍ صريحٍ يُعلَنُ بلا حماية',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const lab = wl610Lab();
+    const b1 = lab.backup('state-1.dump', 'content-1');
+    const b2 = lab.backup('state-2.dump', 'content-2');
+    const sign = (
+      /** @type {any} */ b,
+      /** @type {number} */ sequence,
+      /** @type {string} */ backupId,
+    ) =>
+      signManifestPrototype(b.manifest, b.sha, {
+        keyId: 'k1',
+        backupId,
+        sequence,
+        database: 'prod-a',
+        privateKey: lab.k1.privateKey,
+      });
+    const e1 = sign(b1, 1, 'b-1');
+    const e2 = sign(b2, 2, 'b-2');
+    const refFile = path.join(lab.refDir, 'sequence.json');
+    lab.writeRef(refFile, {
+      floor: 1,
+      latestIssued: 1,
+      issued: { 1: { backupId: 'b-1', dumpSha256: b1.sha } },
+    });
+    const load = (/** @type {string} */ f) => loadSequenceReference(f, lab.backups);
+    const at = (/** @type {string} */ f) => {
+      const r = load(f);
+      assert.equal(r.ok, true, JSON.stringify(r));
+      return /** @type {any} */ (r).reference;
+    };
+    const policy = (/** @type {any} */ sequenceReference, /** @type {any} */ over = {}) => ({
+      trustedKeys: new Map([['k1', lab.k1.publicKey]]),
+      database: 'prod-a',
+      sequenceReference,
+      ...over,
+    });
+    assert.deepEqual(verifyManifestPrototype(b1.manifest, b1.sha, e1, policy(at(refFile))), {
+      ok: true,
+      replayProtected: true,
+    });
+    // صدرت النسخةُ 2 ورُفِعَ الحدُّ في المرجع: القديمةُ الموقَّعةُ الصحيحةُ تُرفَض، والجديدةُ تُقبَل.
+    lab.writeRef(refFile, {
+      floor: 2,
+      latestIssued: 2,
+      issued: {
+        1: { backupId: 'b-1', dumpSha256: b1.sha },
+        2: { backupId: 'b-2', dumpSha256: b2.sha },
+      },
+    });
+    const ref2 = at(refFile);
+    assert.deepEqual(verifyManifestPrototype(b1.manifest, b1.sha, e1, policy(ref2)), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.REPLAY,
+    });
+    assert.deepEqual(verifyManifestPrototype(b2.manifest, b2.sha, e2, policy(ref2)), {
+      ok: true,
+      replayProtected: true,
+    });
+    // الرقمُ في البيانِ وحدَه: المهاجمُ يضعُ بجانبِ النسخةِ القديمةِ «مرجعاً» يقولُ إنّها الأحدث.
+    const forged = lab.writeRef(path.join(lab.backups, 'sequence.json'), {
+      floor: 1,
+      latestIssued: 1,
+      issued: { 1: { backupId: 'b-1', dumpSha256: b1.sha } },
+    });
+    assert.deepEqual(load(forged), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT,
+    });
+    // ولو كانَ رابطاً داخلَ المجلّدِ إلى المرجعِ الحقيقيّ: الرابطُ نفسُه في يدِ من يكتبُ النسخ.
+    const link = path.join(lab.backups, 'ref-link.json');
+    fs.symlinkSync(refFile, link);
+    assert.equal(
+      /** @type {any} */ (load(link)).reason,
+      MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT,
+    );
+    // ورابطٌ خارجَه يُشيرُ إلى داخلِه.
+    const outLink = path.join(lab.root, 'out-link.json');
+    fs.symlinkSync(forged, outLink);
+    assert.equal(
+      /** @type {any} */ (load(outLink)).reason,
+      MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT,
+    );
+    // غائب، تالف، أو بلا حدٍّ صالح ⇒ لا يُقرأُ «لا حدّ».
+    for (const body of ['', '{', '[]', JSON.stringify({ format: 'x', version: 1 })]) {
+      fs.writeFileSync(path.join(lab.refDir, 'bad.json'), body);
+      assert.equal(
+        /** @type {any} */ (load(path.join(lab.refDir, 'bad.json'))).reason,
+        MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE,
+      );
+    }
+    for (const body of [
+      { floor: 0, latestIssued: 1, issued: {} },
+      { floor: 2, latestIssued: 1, issued: {} },
+      { floor: 1, latestIssued: 1, issued: [] },
+      { floor: 1, latestIssued: 1, issued: { '01': { backupId: 'b', dumpSha256: 'x' } } },
+      { floor: 1.5, latestIssued: 2, issued: {} },
+    ]) {
+      lab.writeRef(path.join(lab.refDir, 'bad.json'), body);
+      assert.equal(
+        /** @type {any} */ (load(path.join(lab.refDir, 'bad.json'))).reason,
+        MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE,
+        JSON.stringify(body),
+      );
+    }
+    assert.equal(
+      /** @type {any} */ (load(path.join(lab.refDir, 'missing.json'))).reason,
+      MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE,
+    );
+    assert.deepEqual(verifyManifestPrototype(b1.manifest, b1.sha, e1, policy(null)), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE,
+    });
+    assert.deepEqual(
+      verifyManifestPrototype(
+        b1.manifest,
+        b1.sha,
+        e1,
+        policy(null, { allowUnprotectedReplay: true }),
+      ),
+      { ok: true, replayProtected: false },
+      'الإذنُ الصريحُ لا يُخفي غيابَ الحماية',
+    );
+    // مستقبليّ: موقَّعٌ صحيحاً برقمٍ لم يُصدِرْه المرجعُ بعد (‏مفتاحٌ مسروقٌ أو مرجعٌ متأخّر).
+    const b3 = lab.backup('state-3.dump', 'content-3');
+    assert.deepEqual(
+      verifyManifestPrototype(b3.manifest, b3.sha, sign(b3, 3, 'b-3'), policy(ref2)),
+      {
+        ok: false,
+        reason: MANIFEST_AUTH_REASONS.FUTURE,
+      },
+    );
+    // ضمنَ المدى بلا سجلّ.
+    const gap = sequenceReferenceOf(1, 3, { 1: ['b-1', b1.sha], 3: ['b-3', b3.sha] });
+    assert.deepEqual(verifyManifestPrototype(b2.manifest, b2.sha, e2, policy(gap)), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.UNKNOWN,
+    });
+    // تعارض: الرقمُ نفسُه لنسخةٍ أخرى، أو الهويّةُ نفسُها برقمٍ آخر، أو الرقمُ والهويّةُ بأرشيفٍ آخر.
+    const ref3 = sequenceReferenceOf(1, 3, {
+      1: ['b-1', b1.sha],
+      2: ['b-2', b2.sha],
+      3: ['b-3', b3.sha],
+    });
+    for (const [b, seq, id] of /** @type {Array<[any, number, string]>} */ ([
+      [b3, 2, 'b-3'],
+      [b2, 3, 'b-2'],
+      [b3, 2, 'b-2'],
+    ])) {
+      assert.deepEqual(verifyManifestPrototype(b.manifest, b.sha, sign(b, seq, id), policy(ref3)), {
+        ok: false,
+        reason: MANIFEST_AUTH_REASONS.CONFLICT,
+      });
+    }
+    // الأرشيفُ والرقمُ صحيحان والهويّةُ وحدَها مختلفة.
+    assert.deepEqual(
+      verifyManifestPrototype(b2.manifest, b2.sha, sign(b2, 2, 'b-x'), policy(ref3)),
+      { ok: false, reason: MANIFEST_AUTH_REASONS.CONFLICT },
+    );
+    // مرجعٌ يُسجِّلُ الهويّةَ نفسَها برقمَين: السجلُّ المطابقُ لا يكفي.
+    const dup = sequenceReferenceOf(1, 3, { 2: ['b-2', b2.sha], 3: ['b-2', b3.sha] });
+    assert.deepEqual(verifyManifestPrototype(b2.manifest, b2.sha, e2, policy(dup)), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.CONFLICT,
+    });
+  },
+);
+
+test(
+  'WL-610 المفاتيح: فقدُ مفتاحِ التحقّقِ يُغلِقُ الحكم، والتدويرُ يُبقي القديمَ قابلاً للتحقّقِ ما دامَ موثوقاً، والإلغاءُ يرفضُ ولو بقيَ المفتاحُ في القائمة',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const lab = wl610Lab();
+    const b1 = lab.backup('state-1.dump', 'content-1');
+    const b2 = lab.backup('state-2.dump', 'content-2');
+    const e1 = signManifestPrototype(b1.manifest, b1.sha, {
+      keyId: 'k1',
+      backupId: 'b-1',
+      sequence: 1,
+      database: 'prod-a',
+      privateKey: lab.k1.privateKey,
+    });
+    const e2 = signManifestPrototype(b2.manifest, b2.sha, {
+      keyId: 'k2',
+      backupId: 'b-2',
+      sequence: 2,
+      database: 'prod-a',
+      privateKey: lab.k2.privateKey,
+    });
+    const ref = sequenceReferenceOf(1, 2, { 1: ['b-1', b1.sha], 2: ['b-2', b2.sha] });
+    const v = (
+      /** @type {any} */ b,
+      /** @type {any} */ e,
+      /** @type {any} */ keys,
+      /** @type {any} */ over = {},
+    ) =>
+      verifyManifestPrototype(b.manifest, b.sha, e, {
+        trustedKeys: keys,
+        database: 'prod-a',
+        sequenceReference: ref,
+        ...over,
+      });
+    // فقدُ مفتاحِ التحقّق: لا قائمةَ أو قائمةٌ فارغة ⇒ رفضٌ لا قبول.
+    for (const keys of [new Map(), undefined, null]) {
+      assert.deepEqual(v(b1, e1, keys), {
+        ok: false,
+        reason: MANIFEST_AUTH_REASONS.NO_TRUSTED_KEYS,
+      });
+    }
+    // فُقِدَ k1 وبقيَ k2: نسخُ k1 لا تُقبَلُ حتّى يُستعادَ مفتاحُها العامُّ من مصدرٍ مستقلّ.
+    assert.deepEqual(v(b1, e1, new Map([['k2', lab.k2.publicKey]])), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.UNTRUSTED_KEY,
+    });
+    // مفتاحٌ عامٌّ مستعادٌ خطأً (‏مفتاحٌ آخرُ بالمعرّفِ نفسِه) ⇒ التوقيعُ لا يُطابق.
+    assert.deepEqual(v(b1, e1, new Map([['k1', lab.evil.publicKey]])), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.INVALID,
+    });
+    // التدوير: k2 يوقِّعُ الجديد، وk1 باقٍ للتحقّقِ من القديم.
+    const both = new Map([
+      ['k1', lab.k1.publicKey],
+      ['k2', lab.k2.publicKey],
+    ]);
+    assert.deepEqual(v(b1, e1, both), { ok: true, replayProtected: true });
+    assert.deepEqual(v(b2, e2, both), { ok: true, replayProtected: true });
+    // الإلغاء (‏تسريبُ k1): يُرفَضُ ما وقَّعَه ولو بقيَ في القائمة؛ وما وقَّعَه k2 لا يتأثّر.
+    const revokedKeys = new Set(['k1']);
+    assert.deepEqual(v(b1, e1, both, { revokedKeys }), {
+      ok: false,
+      reason: MANIFEST_AUTH_REASONS.KEY_REVOKED,
+    });
+    assert.deepEqual(v(b2, e2, both, { revokedKeys }), { ok: true, replayProtected: true });
   },
 );

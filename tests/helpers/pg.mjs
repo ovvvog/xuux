@@ -11,6 +11,8 @@
  */
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import pg from 'pg';
 
 /** @returns {string | undefined} */
@@ -1531,11 +1533,18 @@ export function coverageDiff(a, b) {
 
 export const MANIFEST_AUTH_REASONS = Object.freeze({
   MISSING: 'SIGNATURE_MISSING',
+  NO_TRUSTED_KEYS: 'SIGNATURE_NO_TRUSTED_KEYS',
+  KEY_REVOKED: 'SIGNATURE_KEY_REVOKED',
   UNTRUSTED_KEY: 'SIGNATURE_KEY_UNTRUSTED',
   INVALID: 'SIGNATURE_INVALID',
   BINDING: 'SIGNATURE_BINDING_MISMATCH',
   DATABASE: 'SIGNATURE_DATABASE_MISMATCH',
+  SEQUENCE_REFERENCE_UNAVAILABLE: 'SEQUENCE_REFERENCE_UNAVAILABLE',
+  SEQUENCE_REFERENCE_NOT_INDEPENDENT: 'SEQUENCE_REFERENCE_NOT_INDEPENDENT',
   REPLAY: 'SIGNATURE_REPLAY',
+  FUTURE: 'SEQUENCE_FUTURE',
+  UNKNOWN: 'SEQUENCE_UNKNOWN',
+  CONFLICT: 'SEQUENCE_CONFLICT',
 });
 
 /** @param {unknown} value @returns {string} */
@@ -1549,14 +1558,16 @@ function authCanonical(value) {
 
 /**
  * الحمولةُ الموقَّعة: ما يُقرأُ من البيانِ ومن الأرشيفِ نفسِه (‏`dumpSha256` يُحسَبُ من الملفّ لا يُنقَلُ من البيان).
+ * ‏`WL-610`: الإصدارُ 2 يُضيفُ `backupId` — هويّةُ النسخةِ التي يُسجِّلُها المرجعُ المستقلُّ مع رقمِها.
  * @param {Record<string, any>} manifest @param {string} dumpSha256
- * @param {{ keyId: string, sequence: number, database: string }} meta
+ * @param {{ keyId: string, sequence: number, database: string, backupId: string }} meta
  */
 export function manifestAuthPayload(manifest, dumpSha256, meta) {
   return {
     format: 'xuux.backup-signature-prototype',
-    version: 1,
+    version: 2,
     keyId: meta.keyId,
+    backupId: meta.backupId,
     sequence: meta.sequence,
     database: meta.database,
     dumpSha256,
@@ -1569,7 +1580,7 @@ export function manifestAuthPayload(manifest, dumpSha256, meta) {
 
 /**
  * @param {Record<string, any>} manifest @param {string} dumpSha256
- * @param {{ keyId: string, sequence: number, database: string, privateKey: crypto.KeyObject }} signer
+ * @param {{ keyId: string, sequence: number, database: string, backupId: string, privateKey: crypto.KeyObject }} signer
  */
 export function signManifestPrototype(manifest, dumpSha256, signer) {
   const payload = manifestAuthPayload(manifest, dumpSha256, signer);
@@ -1581,28 +1592,117 @@ export function signManifestPrototype(manifest, dumpSha256, signer) {
   return { payload, signature: signature.toString('base64') };
 }
 
+// ─── ‏`WL-610` — مرجعُ التسلسلِ المستقلّ ─────────────────────────────────────────────────────
+// رقمٌ متسلسلٌ داخلَ البيانِ الموقَّعِ **لا يمنعُ** إعادةَ التشغيلِ وحدَه: النسخةُ القديمةُ تحملُ رقمَها القديمَ
+// موقَّعاً صحيحاً. المنعُ مقارنةٌ بمرجعٍ يحفظُه طرفٌ غيرُ موضعِ النسخ: أدنى رقمٍ مقبول (‏`floor`)، وآخرُ رقمٍ
+// صدَر (‏`latestIssued`)، وسجلُّ ما صدَر (‏`issued`: رقم ⇒ `{ backupId, dumpSha256 }`). يُحمَّلُ من خارجِ مجلّدِ
+// النسخة، ويُرفَضُ غائباً أو تالفاً أو داخلَ المجلّد. **حدّ:** استقلالُ المسارِ ليس استقلالَ الصلاحيّة — مرجعٌ
+// يكتبُه حسابُ نظامِ التشغيلِ نفسُه الذي يكتبُ النسخَ يُزوِّرُه المهاجمُ معها؛ والتمثيلُ هنا ملفٌّ لاختبارِ المنطق.
+
 /**
- * يرفضُ بسببٍ مُسمّىً أو يقبل. الترتيب: وجود ⇒ مفتاحٌ موثوق ⇒ توقيع ⇒ ربطٌ بالأرشيفِ والبيان ⇒ هويّةُ القاعدة ⇒ الرقمُ المتسلسل.
+ * @typedef {{ floor: number, latestIssued: number, issued: Map<number, { backupId: string, dumpSha256: string }> }} SequenceReference
+ */
+
+/**
+ * يُحمِّلُ المرجعَ ويرفضُ بلا استثناء: غائب/غيرُ مقروء/مشوَّه ⇒ `UNAVAILABLE`؛ داخلَ مجلّدِ النسخة ⇒ `NOT_INDEPENDENT`.
+ * @param {string} referencePath @param {string} backupDir
+ * @returns {{ ok: true, reference: SequenceReference } | { ok: false, reason: string }}
+ */
+export function loadSequenceReference(referencePath, backupDir) {
+  // مسارٌ داخلَ المجلّدِ لفظيّاً يُرفَضُ ولو كانَ رابطاً إلى خارجِه: الرابطُ نفسُه في يدِ من يكتبُ النسخ.
+  const lexical = path.relative(path.resolve(backupDir), path.resolve(referencePath));
+  if (lexical === '' || (!lexical.startsWith('..') && !path.isAbsolute(lexical))) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT };
+  }
+  let real;
+  let dir;
+  try {
+    real = fs.realpathSync(referencePath);
+    dir = fs.realpathSync(backupDir);
+  } catch {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE };
+  }
+  const rel = path.relative(dir, real);
+  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(real, 'utf8'));
+    const floor = raw?.floor;
+    const latest = raw?.latestIssued;
+    if (
+      raw?.format !== 'xuux.backup-sequence-reference' ||
+      raw?.version !== 1 ||
+      !Number.isSafeInteger(floor) ||
+      !Number.isSafeInteger(latest) ||
+      floor < 1 ||
+      latest < floor ||
+      raw.issued === null ||
+      typeof raw.issued !== 'object' ||
+      Array.isArray(raw.issued)
+    ) {
+      return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE };
+    }
+    /** @type {SequenceReference['issued']} */
+    const issued = new Map();
+    for (const [k, v] of Object.entries(raw.issued)) {
+      const n = Number(k);
+      if (
+        !Number.isSafeInteger(n) ||
+        String(n) !== k ||
+        typeof v?.backupId !== 'string' ||
+        typeof v?.dumpSha256 !== 'string'
+      ) {
+        return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE };
+      }
+      issued.set(n, { backupId: v.backupId, dumpSha256: v.dumpSha256 });
+    }
+    return { ok: true, reference: { floor, latestIssued: latest, issued } };
+  } catch {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE };
+  }
+}
+
+/**
+ * يرفضُ بسببٍ مُسمّىً أو يقبل. الترتيب: وجود ⇒ مفاتيحُ موثوقةٌ موجودة ⇒ غيرُ مُلغى ⇒ موثوق ⇒ توقيع ⇒ ربطٌ
+ * بالأرشيفِ والبيان ⇒ هويّةُ القاعدة ⇒ مرجعُ التسلسل (‏غائب ⇒ رفضٌ إلا بإذنٍ صريحٍ يُعلَنُ `replayProtected:false`)
+ * ⇒ تحتَ الحدّ ⇒ فوقَ ما صدَر ⇒ غيرُ مُسجَّل ⇒ تعارضُ الرقمِ أو الهويّة.
  * @param {Record<string, any>} manifest @param {string} dumpSha256
  * @param {{ payload: Record<string, any>, signature: string } | undefined} envelope
- * @param {{ trustedKeys: Map<string, crypto.KeyObject>, database: string, minSequence: number }} policy
- * @returns {{ ok: true } | { ok: false, reason: string }}
+ * @param {{ trustedKeys: Map<string, crypto.KeyObject>, revokedKeys?: Set<string>, database: string,
+ *   sequenceReference: SequenceReference | null, allowUnprotectedReplay?: boolean }} policy
+ * @returns {{ ok: true, replayProtected: boolean } | { ok: false, reason: string }}
  */
 export function verifyManifestPrototype(manifest, dumpSha256, envelope, policy) {
   if (!envelope) return { ok: false, reason: MANIFEST_AUTH_REASONS.MISSING };
-  const key = policy.trustedKeys.get(String(envelope.payload['keyId']));
+  if (!(policy.trustedKeys instanceof Map) || policy.trustedKeys.size === 0) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.NO_TRUSTED_KEYS };
+  }
+  const keyId = String(envelope.payload['keyId']);
+  if (policy.revokedKeys?.has(keyId)) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.KEY_REVOKED };
+  }
+  const key = policy.trustedKeys.get(keyId);
   if (!key) return { ok: false, reason: MANIFEST_AUTH_REASONS.UNTRUSTED_KEY };
-  const good = crypto.verify(
-    null,
-    Buffer.from(authCanonical(envelope.payload), 'utf8'),
-    key,
-    Buffer.from(envelope.signature, 'base64'),
-  );
+  let good;
+  try {
+    good = crypto.verify(
+      null,
+      Buffer.from(authCanonical(envelope.payload), 'utf8'),
+      key,
+      Buffer.from(String(envelope.signature), 'base64'),
+    );
+  } catch {
+    good = false;
+  }
   if (!good) return { ok: false, reason: MANIFEST_AUTH_REASONS.INVALID };
+  const sequence = Number(envelope.payload['sequence']);
+  const backupId = String(envelope.payload['backupId']);
   const expected = manifestAuthPayload(manifest, dumpSha256, {
-    keyId: String(envelope.payload['keyId']),
-    sequence: Number(envelope.payload['sequence']),
+    keyId,
+    sequence,
     database: String(envelope.payload['database']),
+    backupId,
   });
   if (authCanonical(expected) !== authCanonical(envelope.payload)) {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.BINDING };
@@ -1610,8 +1710,25 @@ export function verifyManifestPrototype(manifest, dumpSha256, envelope, policy) 
   if (envelope.payload['database'] !== policy.database) {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.DATABASE };
   }
-  if (Number(envelope.payload['sequence']) < policy.minSequence) {
+  const ref = policy.sequenceReference;
+  if (ref === null || ref === undefined) {
+    return policy.allowUnprotectedReplay === true
+      ? { ok: true, replayProtected: false }
+      : { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE };
+  }
+  if (!Number.isSafeInteger(sequence) || sequence < ref.floor) {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.REPLAY };
   }
-  return { ok: true };
+  if (sequence > ref.latestIssued) return { ok: false, reason: MANIFEST_AUTH_REASONS.FUTURE };
+  const record = ref.issued.get(sequence);
+  if (!record) return { ok: false, reason: MANIFEST_AUTH_REASONS.UNKNOWN };
+  if (record.backupId !== backupId || record.dumpSha256 !== dumpSha256) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.CONFLICT };
+  }
+  for (const [n, other] of ref.issued) {
+    if (n !== sequence && other.backupId === backupId) {
+      return { ok: false, reason: MANIFEST_AUTH_REASONS.CONFLICT };
+    }
+  }
+  return { ok: true, replayProtected: true };
 }
