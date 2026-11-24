@@ -9,7 +9,7 @@
 // المُعادةَ فلا يُمَسُّ منطقُ اختبارٍ.
 
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -162,4 +162,137 @@ test('سلوكٌ لا نصٌّ: الجذرُ المُسجَّلُ **يزولُ �
     false,
     `الجذرُ ${created} بقيَ بعدَ خروجِ العمليّةِ — المحوُ عندَ الخروجِ لا يقعُ`,
   );
+});
+
+// ═══ ‏`WL-608` — تسرّبُ `xuux-ops1-*`: المحوُ عندَ كلِّ مسارِ إنهاء (‏انحدار) ═══════════════════════════════
+// السببُ المقيس: ‏`SIGTERM`/`SIGINT`/`SIGHUP` تُنهي عمليّةَ Node بلا حدثِ `exit`، فكانَ كلُّ جذرٍ مُسجَّلٍ يبقى —
+// وإيقافُ تشغيلةِ اختباراتٍ (‏أبٍ `node --test` أو ابنٍ) تركَ عشراتِ `xuux-ops1-*` (‏15 جذراً في كلِّ تشغيلةٍ للملفّ).
+// تُقاسُ هنا كلُّ مسارات: نجاح، فشلُ توكيد، استثناءٌ غيرُ ملتقَط، مهلةُ اختبار، إشاراتُ الإنهاء، مُستمِعٌ آخر،
+// و`SIGKILL` (‏حدٌّ معلَن: يبقى، ويُمحى هنا بيدِ الاختبارِ لأنّه أنشأه).
+
+/**
+ * يُشغِّلُ برنامجاً ابناً يُسجِّلُ جذراً ويطبعُ مسارَه، ثمّ يُرسِلُ إليه `signal` إن طُلِب.
+ * @param {string} body ما يُنفَّذُ بعدَ التسجيل (‏`d` مسارُ الجذر)
+ * @param {{ signal?: NodeJS.Signals, args?: string[], file?: boolean }} [opts]
+ * @returns {Promise<{ dir: string, code: number | null, signal: NodeJS.Signals | null, aliveAfterSignal?: boolean, existedAtSignal?: boolean, stdout: string }>}
+ */
+function runRegistered(body, opts = {}) {
+  const helperUrl = new URL('file://' + HELPER).href;
+  // ‏المسارُ يُكتَبُ في ملفٍّ لا في stdout: ‏`node --test` يحجزُ مخرجَ ابنِه حتى ينتهي.
+  const scratch = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'tmp-roots-wl608-')));
+  const handshake = path.join(scratch, 'dir.txt');
+  const program =
+    `import fs from 'node:fs';\nimport os from 'node:os';\nimport path from 'node:path';\nimport test from 'node:test';\n` +
+    `import { registerTmpRoot } from ${JSON.stringify(helperUrl)};\n` +
+    `const d = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-wl608-purge-')));\n` +
+    `fs.writeFileSync(path.join(d, 'f.txt'), 'x');\nfs.writeFileSync(${JSON.stringify(handshake)}, d);\n${body}\n`;
+  /** @type {string[]} */
+  let args;
+  if (opts.file) {
+    const f = path.join(scratch, 'child.test.mjs');
+    fs.writeFileSync(f, program);
+    args = [...(opts.args ?? []), f];
+  } else {
+    args = ['--input-type=module', '-e', program];
+  }
+  return new Promise((resolve, reject) => {
+    // ‏`NODE_TEST_CONTEXT` موروثٌ من عدّاءِ هذا الملفّ يجعلُ `node --test` الابنَ يتكلّمُ بروتوكولَ الأبِ لا TAP.
+    const { NODE_TEST_CONTEXT: _ctx, ...env } = process.env;
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env });
+    let stdout = '';
+    let dir = '';
+    /** @type {{ aliveAfterSignal?: boolean, existedAtSignal?: boolean }} */
+    const seen = {};
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk);
+    });
+    const poll = setInterval(() => {
+      if (dir !== '' || !fs.existsSync(handshake)) return;
+      dir = fs.readFileSync(handshake, 'utf8');
+      if (dir === '') return;
+      clearInterval(poll);
+      if (opts.signal) {
+        const sig = opts.signal;
+        setTimeout(() => {
+          seen.existedAtSignal = fs.existsSync(dir);
+          child.kill(sig);
+          setTimeout(() => {
+            seen.aliveAfterSignal = child.exitCode === null && child.signalCode === null;
+          }, 150);
+        }, 100);
+      }
+    }, 20);
+    child.on('error', reject);
+    child.on('close', (code, signal) => {
+      clearInterval(poll);
+      if (dir === '' && fs.existsSync(handshake)) dir = fs.readFileSync(handshake, 'utf8');
+      setTimeout(() => resolve({ dir, code, signal, stdout, ...seen }), 0);
+    });
+  });
+}
+
+for (const sig of /** @type {const} */ (['SIGTERM', 'SIGINT', 'SIGHUP'])) {
+  test(`WL-608: إشارةُ ${sig} تمحو الجذرَ المُسجَّلَ وتُبقي الإنهاءَ بالإشارةِ نفسِها (‏كانَ يبقى)`, async () => {
+    const r = await runRegistered('setInterval(() => {}, 1000);', { signal: sig });
+    assert.notEqual(r.dir, '');
+    assert.equal(r.existedAtSignal, true, 'الجذرُ قائمٌ قبلَ الإشارة');
+    assert.equal(r.signal, sig, `الإنهاءُ بالإشارةِ نفسِها لا برمزٍ آخر (${r.code}/${r.signal})`);
+    assert.equal(fs.existsSync(r.dir), false, `${r.dir} بقيَ بعدَ ${sig}`);
+  });
+}
+
+test('WL-608: مُستمِعٌ آخرُ للإشارة ⇒ لا محوَ وقتَها (‏الجذرُ قد يكونُ قيدَ الاستعمال)، ويُمحى عندَ الخروجِ الذي قرّرَه صاحبُه', async () => {
+  const r = await runRegistered(
+    `process.on('SIGTERM', () => { process.stdout.write('HANDLED ' + fs.existsSync(d) + '\\n'); setTimeout(() => process.exit(0), 300); });\nsetInterval(() => {}, 1000);`,
+    { signal: 'SIGTERM' },
+  );
+  assert.match(r.stdout, /HANDLED true/, 'الجذرُ باقٍ داخلَ مُستمِعِ صاحبِه');
+  assert.equal(r.aliveAfterSignal, true, 'العمليّةُ لم تُقتَل بإعادةِ الإشارة');
+  assert.equal(r.code, 0);
+  assert.equal(fs.existsSync(r.dir), false, 'ويُمحى عندَ الخروج');
+});
+
+test('WL-608: فشلُ توكيدٍ واستثناءٌ غيرُ ملتقَطٍ ورفضٌ غيرُ معالَجٍ ⇒ الجذرُ يُمحى', async () => {
+  for (const body of [
+    `import('node:assert/strict').then((a) => a.default.equal(1, 2));`,
+    `setTimeout(() => { throw new Error('boom'); }, 10);`,
+    `Promise.reject(new Error('unhandled'));`,
+    `process.exit(3);`,
+  ]) {
+    const r = await runRegistered(body);
+    assert.notEqual(r.code, 0, body);
+    assert.equal(fs.existsSync(r.dir), false, `${body}: ${r.dir} بقي`);
+  }
+});
+
+test('WL-608: مهلةُ اختبارٍ تحتَ node --test ⇒ الملفُّ يفشلُ والجذرُ يُمحى عندَ خروجِه', async () => {
+  const r = await runRegistered(
+    `test('hang', { timeout: 200 }, () => new Promise((res) => setTimeout(res, 1500)));`,
+    { file: true, args: ['--test', '--test-reporter=tap'] },
+  );
+  assert.match(r.stdout, /not ok/);
+  assert.equal(fs.existsSync(r.dir), false, `${r.dir} بقيَ بعدَ المهلة`);
+});
+
+test('WL-608: إيقافُ عدّاءِ node --test نفسِه بـSIGTERM أثناءَ اختبارٍ جارٍ ⇒ جذرُ الابنِ يُمحى', async () => {
+  const r = await runRegistered(
+    `test('long', () => new Promise((res) => setTimeout(res, 20000)));`,
+    {
+      file: true,
+      args: ['--test', '--test-reporter=tap'],
+      signal: 'SIGTERM',
+    },
+  );
+  assert.notEqual(r.dir, '');
+  // ‏الأبُ يُنهي ابنَه: لا يُنتظَرُ إلا قليلاً حتى يُمحى.
+  for (let i = 0; i < 40 && fs.existsSync(r.dir); i++)
+    await new Promise((res) => setTimeout(res, 50));
+  assert.equal(fs.existsSync(r.dir), false, `${r.dir} بقيَ بعدَ إيقافِ العدّاء`);
+});
+
+test('WL-608 حدٌّ معلَن: SIGKILL لا يُلتقَط ⇒ الجذرُ يبقى (‏يُمحى هنا لأنّ الاختبارَ أنشأه)', async () => {
+  const r = await runRegistered('setInterval(() => {}, 1000);', { signal: 'SIGKILL' });
+  assert.equal(r.signal, 'SIGKILL');
+  assert.equal(fs.existsSync(r.dir), true, 'لو زالَ لكانَ الحدُّ المعلَنُ خاطئاً');
+  fs.rmSync(r.dir, { recursive: true, force: true });
 });

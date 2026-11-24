@@ -26,7 +26,13 @@
  *   1. لا تَبلغُ ما تُنشئُه **عمليّةٌ فرعيّةٌ** يُشعِلُها اختبارٌ — تلكَ تَمحو
  *      لنفسِها أو تَبقى، ويَكشِفُها قياسُ `/tmp` بعدَ الاختباراتِ في CI.
  *   2. المحوُ عندَ الخروجِ **لا يقعُ** إن قُتِلَتِ العمليّةُ بـ`SIGKILL` أو
- *      انهارَتْ — فبقاءُ جذرٍ بعدَ انهيارٍ سلوكٌ متوقَّعٌ لا عَطَبٌ جديدٌ.
+ *      انهارَتْ (‏`abort`، نفادُ ذاكرةٍ قاتل) — فبقاءُ جذرٍ بعدَها سلوكٌ متوقَّعٌ لا عَطَبٌ جديدٌ.
+ *   3. ‏(‏`WL-608`) **إشاراتُ الإنهاءِ القابلةُ للالتقاط** (`SIGTERM`/`SIGINT`/`SIGHUP`) كانت تُنهي
+ *      العمليّةَ **بلا حدثِ `exit`** فيبقى كلُّ جذرٍ مُسجَّل — مقيسٌ: إيقافُ تشغيلةِ `npm test`
+ *      (‏`node --test` أباً أو ابناً) تركَ `xuux-ops1-*` بالعشرات. الآنَ يُمحى المُسجَّلُ عندَها ثمّ
+ *      تُعادُ الإشارةُ نفسُها فيبقى رمزُ الخروجِ `128+n` كما كان. **وإن كانَ للإشارةِ مُستمِعٌ آخرُ**
+ *      فلا محوَ ولا إعادة: صاحبُه قرّرَ ألّا تموتَ العمليّة، والجذورُ قد تكونُ قيدَ الاستعمال —
+ *      فتُمحى عندَ `exit` إن خرجت.
  *
  * @module tests/helpers/tmp-roots
  */
@@ -39,6 +45,23 @@ const ROOTS = [];
 
 /** @type {boolean} هل رُكِّبَ مُستمِعُ الخروجِ؟ — يُركَّبُ مرّةً واحدةً. */
 let installed = false;
+
+/** إشاراتُ الإنهاءِ القابلةُ للالتقاط التي تُنهي العمليّةَ افتراضاً **بلا** حدثِ `exit`. */
+const TERMINATION_SIGNALS = /** @type {const} */ (['SIGTERM', 'SIGINT', 'SIGHUP']);
+
+/**
+ * مُستمِعُ إشارةٍ: إن كانَ وحيداً لها محا المُسجَّلَ ثمّ أزالَ نفسَه وأعادَ الإشارةَ — فيقعُ الإنهاءُ
+ * الافتراضيُّ نفسُه (‏الرمزُ `128+n`). وإن كانَ لها مُستمِعٌ آخرُ فلا يفعلُ شيئاً.
+ *
+ * @param {NodeJS.Signals} signal
+ * @returns {void}
+ */
+function onTerminationSignal(signal) {
+  if (process.listenerCount(signal) > 1) return;
+  purgeRoots();
+  for (const s of TERMINATION_SIGNALS) process.removeListener(s, onTerminationSignal);
+  process.kill(process.pid, signal);
+}
 
 /**
  * يَمحو كلَّ جذرٍ مُسجَّلٍ. **لا يَرمي**: خروجُ العمليّةِ لا يُفسَدُ بفشلِ محوٍ،
@@ -73,6 +96,7 @@ export function registerTmpRoot(dir) {
   const value = String(dir);
   if (!installed) {
     process.on('exit', purgeRoots);
+    for (const s of TERMINATION_SIGNALS) process.on(s, onTerminationSignal);
     installed = true;
   }
   ROOTS.push(value);
