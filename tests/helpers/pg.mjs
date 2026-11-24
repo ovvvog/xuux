@@ -1604,14 +1604,25 @@ export function signManifestPrototype(manifest, dumpSha256, signer) {
  */
 
 /**
+ * ‏`WL-611`: هل `target` هو `dir` أو داخلَه؟ الخروجُ مقطعُ `..` كاملٌ لا بادئةٌ نصّيّة: ‏`relative` يُعيدُ
+ * `..trusted/x` لمجلّدٍ داخليٍّ اسمُه يبدأُ بـ`..`، وفحصُ `startsWith('..')` كانَ يعدُّه خارجاً فيقبلُ مرجعاً داخلَ مجلّدِ النسخ.
+ * @param {string} dir @param {string} target مساران مُطلَقان
+ */
+function isWithinDirectory(dir, target) {
+  const rel = path.relative(dir, target);
+  if (rel === '') return true;
+  if (path.isAbsolute(rel)) return false;
+  return rel.split(path.sep)[0] !== '..';
+}
+
+/**
  * يُحمِّلُ المرجعَ ويرفضُ بلا استثناء: غائب/غيرُ مقروء/مشوَّه ⇒ `UNAVAILABLE`؛ داخلَ مجلّدِ النسخة ⇒ `NOT_INDEPENDENT`.
  * @param {string} referencePath @param {string} backupDir
  * @returns {{ ok: true, reference: SequenceReference } | { ok: false, reason: string }}
  */
 export function loadSequenceReference(referencePath, backupDir) {
   // مسارٌ داخلَ المجلّدِ لفظيّاً يُرفَضُ ولو كانَ رابطاً إلى خارجِه: الرابطُ نفسُه في يدِ من يكتبُ النسخ.
-  const lexical = path.relative(path.resolve(backupDir), path.resolve(referencePath));
-  if (lexical === '' || (!lexical.startsWith('..') && !path.isAbsolute(lexical))) {
+  if (isWithinDirectory(path.resolve(backupDir), path.resolve(referencePath))) {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT };
   }
   let real;
@@ -1622,8 +1633,7 @@ export function loadSequenceReference(referencePath, backupDir) {
   } catch {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE };
   }
-  const rel = path.relative(dir, real);
-  if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) {
+  if (isWithinDirectory(dir, real)) {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT };
   }
   try {
