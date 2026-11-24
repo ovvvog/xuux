@@ -370,3 +370,148 @@ test('WL-585 — كوميتُ الدمجِ في فرعِ التكاملِ يُف
     }
   });
 }
+
+// `WL-601` (‏إذنُ المالكِ بالخيار «هـ»): `backup-restore.test.mjs` بلغَ 119.1 ث من مهلةِ الملفِّ 120 ث في CI
+// (‏التشغيلة 45216924161). فيُشغَّلُ وحدَه بمهلةِ ملفٍّ 240 ث، وكلُّ اختبارٍ فيه بمهلةٍ 60 ث، وتبقى مهلةُ بقيّةِ
+// الحزمةِ 120 ث. ويُقاسُ هنا أنَّ الاستثناءَ محصورٌ في ذاكَ الملفِّ وحدَه: (١) بقيّةُ الحزمةِ = ما يكتشفُه
+// `node --test tests/` ناقصاً ملفّاً واحداً بالضبط؛ (٢) المهلتانِ في موضعَيهما ولا 240 ث في غيرِ ذلك؛
+// (٣) `npm test` يُشغِّلُ الجزأين كليهما ويَسقطُ إن سقطَ أيُّهما؛ (٤) كلُّ `test()` في الملفِّ يحملُ 60 ث صراحةً.
+const BACKUP_RESTORE_FILE = 'tests/persistence/backup-restore.test.mjs';
+
+test('WL-601 — مهلةُ 240 ث محصورةٌ في backup-restore وحدَه، وبقيّةُ الحزمةِ 120 ث بلا نقصٍ في الملفّات', async () => {
+  const { readdirSync } = await import('node:fs');
+  const { execFileSync } = await import('node:child_process');
+  const suite = String(scripts['test:suite']);
+  const isolated = String(scripts['test:backup-restore']);
+  assert.match(suite, /^node --test --test-concurrency=1 --test-timeout=120000 \$\(find tests /);
+  assert.equal(
+    isolated,
+    `node --test --test-concurrency=1 --test-timeout=240000 ${BACKUP_RESTORE_FILE}`,
+  );
+  for (const [name, body] of Object.entries(scripts)) {
+    if (name === 'test:backup-restore') continue;
+    assert.ok(!/--test-timeout=240000/.test(body), `${name}: مهلةُ 240 ث خارجَ الملفِّ المعزول`);
+  }
+  // اكتشافُ `node --test` في Node 20 لمجلّد: كلُّ ملفٍّ ‎.js/.mjs/.cjs اسمُه (‏بلا امتداد) `test`
+  // أو `test-*` أو `*[._-]test`، أو أيُّ ملفٍّ كذلك تحتَ مجلّدٍ اسمُه `test`، وتُتخطّى `node_modules`.
+  /** @type {string[]} */
+  const discovered = [];
+  /** @type {string[]} */
+  const testDirs = [];
+  /** @param {string} dir */
+  const walk = (dir) => {
+    for (const entry of readdirSync(path.join(repoRoot, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue;
+        if (entry.name === 'test') testDirs.push(rel);
+        walk(rel);
+      } else if (/^(test|test-.+|.+[._-]test)\.[cm]?js$/.test(entry.name)) {
+        discovered.push(rel);
+      }
+    }
+  };
+  walk('tests');
+  assert.deepEqual(
+    testDirs,
+    [],
+    'مجلّدٌ اسمُه `test` يوسِّعُ اكتشافَ node فيُخرجُ القائمةَ عن المطابقة',
+  );
+  assert.ok(discovered.includes(BACKUP_RESTORE_FILE));
+  const command = /\$\((find tests .*)\)$/.exec(suite)?.[1];
+  assert.ok(command, 'قائمةُ بقيّةِ الحزمةِ تُولَّدُ بـ`find`');
+  const listed = execFileSync('sh', ['-c', command], { cwd: repoRoot, encoding: 'utf8' })
+    .split('\n')
+    .filter(Boolean);
+  const expected = discovered.filter((f) => f !== BACKUP_RESTORE_FILE).sort();
+  assert.deepEqual(listed, expected, 'بقيّةُ الحزمةِ = اكتشافُ node ناقصاً backup-restore وحدَه');
+  assert.equal(listed.length, discovered.length - 1);
+});
+
+test('WL-601 — `npm test` يُشغِّلُ الجزأين كليهما ويَسقطُ إن سقطَ أيُّهما، وخطوةُ الخلاصةِ تقرأُ الملخّصين', async () => {
+  const {
+    mkdtempSync,
+    writeFileSync,
+    readFileSync: read,
+    rmSync,
+    chmodSync,
+  } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { spawnSync } = await import('node:child_process');
+  const { parse } = await import('yaml');
+  const dir = mkdtempSync(path.join(tmpdir(), 'xuux-wl601-'));
+  try {
+    // `npm` مُستبدَلٌ بنصٍّ يُسجِّلُ ما طُلِبَ منه ويخرجُ بالرمزِ المضبوطِ لكلِّ جزء.
+    const fake = path.join(dir, 'npm');
+    writeFileSync(
+      fake,
+      '#!/bin/sh\necho "$*" >> "$WL601_LOG"\ncase "$3" in\n  test:suite) exit "$WL601_SUITE";;\n  test:backup-restore) exit "$WL601_BR";;\nesac\nexit 97\n',
+    );
+    chmodSync(fake, 0o755);
+    /** @param {number} suiteCode @param {number} brCode */
+    const run = (suiteCode, brCode) => {
+      const log = path.join(dir, `log-${suiteCode}-${brCode}`);
+      const r = spawnSync('sh', ['-c', String(scripts.test)], {
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          WL601_LOG: log,
+          WL601_SUITE: String(suiteCode),
+          WL601_BR: String(brCode),
+        },
+        encoding: 'utf8',
+      });
+      return { status: r.status, calls: read(log, 'utf8').trim().split('\n') };
+    };
+    const both = ['run -s test:suite', 'run -s test:backup-restore'];
+    assert.deepEqual(run(0, 0), { status: 0, calls: both });
+    assert.deepEqual(
+      run(1, 0),
+      { status: 1, calls: both },
+      'سقوطُ بقيّةِ الحزمةِ لا يحجبُ تشغيلَ الملفِّ المعزول',
+    );
+    assert.deepEqual(run(0, 1), { status: 1, calls: both });
+    assert.deepEqual(run(1, 1), { status: 1, calls: both });
+
+    /** @type {Array<Record<string, any>>} */
+    const steps = parse(workflow).jobs.validate.steps;
+    const summary = steps.find((s) =>
+      String(s.name).startsWith('خلاصة أعداد الاختبارات (LIVE-17)'),
+    );
+    assert.ok(summary);
+    const script = String(summary.run).replaceAll('${{ steps.tests.outcome }}', 'success');
+    /** @param {number} n */
+    const tail = (n) =>
+      `# tests ${n}\n# suites 0\n# pass ${n}\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 1\n`;
+    writeFileSync(
+      path.join(dir, 'ci-tests.tap'),
+      `TAP version 13\nok 1 - a\nok 2 - b\n1..2\n${tail(2)}TAP version 13\nok 1 - c\n1..1\n${tail(1)}`,
+    );
+    writeFileSync(path.join(dir, 'summary.md'), '');
+    const r = spawnSync('bash', ['-eo', 'pipefail', '-c', script], {
+      env: { ...process.env, RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: path.join(dir, 'summary.md') },
+      encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const out = read(path.join(dir, 'ci-tests-summary.txt'), 'utf8');
+    assert.deepEqual(
+      out.match(/^# tests \d+$/gm),
+      ['# tests 2', '# tests 1'],
+      'الملخّصانِ كلاهما في الأثر',
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('WL-601 — كلُّ `test()` في backup-restore يحملُ مهلةَ 60 ث صراحةً، ولا مهلةَ رقميّةَ غيرُها', () => {
+  const src = readFileSync(path.join(repoRoot, BACKUP_RESTORE_FILE), 'utf8');
+  assert.match(src, /^const PER_TEST_TIMEOUT_MS = 60_000;$/m);
+  const starts = [...src.matchAll(/^\s*test\(/gm)].map((m) => m.index ?? 0);
+  assert.ok(starts.length >= 37, `عددُ نداءاتِ test(): ${starts.length}`);
+  for (const start of starts) {
+    const head = src.slice(start, src.indexOf('async', start));
+    assert.match(head, /timeout: PER_TEST_TIMEOUT_MS \}/, `بلا مهلةِ 60 ث: ${head.slice(0, 120)}`);
+  }
+  assert.doesNotMatch(src, /timeout: \d/, 'مهلةٌ رقميّةٌ تتجاوزُ الثابت');
+});
