@@ -43,6 +43,9 @@ export const BACKUP_ERRORS = Object.freeze({
   COMMAND_FAILED: 'BACKUP_COMMAND_FAILED',
   TOOL_UNUSABLE: 'BACKUP_TOOL_UNUSABLE',
   LEDGER_SNAPSHOT_MISMATCH: 'BACKUP_LEDGER_SNAPSHOT_MISMATCH',
+  DIGEST_FAILED: 'BACKUP_DIGEST_FAILED',
+  DIGEST_INVALID: 'BACKUP_DIGEST_INVALID',
+  DIGEST_UNSUPPORTED: 'BACKUP_DIGEST_UNSUPPORTED',
 });
 
 /** خطأ مسمّى كي تميّز الأتمتة سبب الفشل من نصه العربي. */
@@ -69,6 +72,8 @@ export class BackupError extends Error {
  * @property {Record<string, number>} rowCounts عدّ الصفوف لكل جدول في `state`.
  * @property {string} dumpFile الاسم القاعدي للملف، للمراجعة البشرية فقط.
  * @property {string} ledgerStagingTable جدول مؤقت يحمل دفتر الهجرات داخل الأرشيف.
+ * @property {ContentDigest} [contentDigest] بصمةُ المحتوى (‏`WL-606`)؛ غيابُها = نسخةٌ قديمةٌ بلا دليلِ محتوى.
+ * @property {number} [contentDigestMs] زمنُ حسابِ البصمةِ داخلَ اللقطة.
  */
 
 /**
@@ -224,6 +229,330 @@ function sha256File(value) {
   return crypto.createHash('sha256').update(fs.readFileSync(value)).digest('hex');
 }
 
+// ═══ بصمةُ المحتوى (‏`WL-606`، `LIVE-78/CONTENT-INTEGRITY`) ═══════════════════════════════════
+// المشكلة: تحقّقُ الاستعادةِ كانَ عدَّ صفوفٍ ونسخةَ هجرة؛ محتوىً مُبدَّلٌ بالأعدادِ نفسِها يمرُّ
+// ‏`RESTORE_OK` (‏مقيسٌ في `WL-603`). البصمةُ تُحسَبُ **داخلَ لقطةِ `pg_dump` نفسِها** (‏العميلُ الذي
+// صدّرَ اللقطةَ، قبلَ `pg_dump --snapshot`)، فلا نافذةَ زمنيّةَ بينَ ما تصفُه وما في الأرشيف، وتُعادُ
+// في الهدفِ بعدَ `pg_restore` وتُقارَنُ قبلَ إعلانِ النجاح.
+//
+// **التمثيل (‏حتميٌّ غيرُ ملتبس):** لكلِّ صفٍّ `sha256(convert_to(record_out(row), 'UTF8'))` — نصُّ
+// السجلِّ المركّبِ يميّزُ NULL (‏حقلٌ فارغٌ بلا علامات) من النصِّ الفارغ (‏`""`) ويقتبسُ الفواصل؛
+// والإعداداتُ التي تغيّرُ نصَّ القيمِ مثبَّتةٌ محلّيّاً في المعاملة (‏`DIGEST_SETTINGS`). الصفوفُ
+// multiset: تُجمَّعُ تجزئاتُها في 256 دلواً بأوّلِ بايت، مرتّبةً بايتيّاً داخلَ الدلو (‏`bytea`، لا
+// ترتيبَ لغويّ)، ثمّ sha256 لسلسلةِ (‏بايتُ الدلو ‖ تجزئتُه) بترتيبِ الدلاء — فلا يتعلّقُ الناتجُ
+// بترتيبِ التخزينِ ولا بالفهارسِ ولا بـcollation، والذاكرةُ لكلِّ دلوٍ ‎N×32/256‎ بايتاً. ولكلِّ جدولٍ
+// توقيعُ أعمدتِه (‏الاسم، `format_type`، NOT NULL) بترتيبِها — فنصُّ الصفِّ يُفسَّرُ بنوعِه.
+//
+// **النطاقُ المعلَن (‏`scope`):** جداولُ `state` العاديّةُ (‏relkind r) عدا `__backup_schema_migrations_*`،
+// ومتسلسلاتُ `state` (‏وجودٌ وتقدّمٌ لا مساواة — خارجَ MVCC، انظر `sequenceRegression`)، وصفوفُ دفترِ الهجراتِ بأعمدتِه الخمسة.
+// **خارجَه — لا تُثبتُ البصمةُ سلامتَه:** القيودُ والفهارسُ والقوادحُ والسياساتُ والدوالُّ والعروضُ والأنواع
+// (‏البنيةُ عدا توقيعِ الأعمدة)، والمالكون والصلاحيّاتُ والأدوار (‏الاستعادةُ `--no-owner --no-privileges`)،
+// والتعليقات، والإحصاءات، والكائناتُ الكبيرة، والمخطّطاتُ الأخرى ومنها `fence`، و`log_cnt`. (‏دَينُ
+// ‏`LIVE-78/DIGEST-COVERAGE`.)
+//
+// **ليست توقيعاً:** البيانُ غيرُ موقَّع؛ مَن يكتبُ الأرشيفَ والبيانَ معاً يزوّرُهما. ما تضمنُه: أنّ
+// المستعادَ يطابقُ اللقطةَ التي نُسخت (‏ضمنَ النطاق)، لا أنَّ الأرشيفَ أصيل.
+
+export const CONTENT_DIGEST_FORMAT = 'xuux.content-digest';
+export const CONTENT_DIGEST_VERSION = 1;
+
+/** إعداداتٌ تُثبَّتُ محلّيّاً للمعاملةِ قبلَ أيِّ حساب: كلُّها تغيّرُ نصَّ قيمٍ قد تكونُ في `state`. */
+export const DIGEST_SETTINGS = Object.freeze({
+  search_path: '',
+  TimeZone: 'UTC',
+  DateStyle: 'ISO, YMD',
+  IntervalStyle: 'postgres',
+  extra_float_digits: '1',
+  bytea_output: 'hex',
+  lc_monetary: 'C',
+});
+
+const DIGEST_SCOPE = Object.freeze({
+  tables: 'state.* relkind r, excluding __backup_schema_migrations_*',
+  sequences:
+    'state.* relkind S: presence and monotonic progress (restored next value not behind the snapshot read); not equality — sequences are non-transactional',
+  ledger: 'public.schema_migrations rows (version, name, checksum, applied_at, applied_by)',
+  notCovered: [
+    'constraints, indexes, triggers, policies, functions, views, types (structure beyond column signatures)',
+    'owners, privileges, roles',
+    'comments, statistics, large objects',
+    'schemas other than state (including fence)',
+    'sequence log_cnt',
+  ],
+});
+
+const DIGEST_ROW_RULE =
+  'row=sha256(convert_to(record_out(row),UTF8)); bucket=get_byte(row,0); bucketHash=sha256(concat rows ORDER BY bytea); table=sha256(concat(byte(bucket)||bucketHash) ORDER BY bucket)';
+
+/**
+ * JSON قانونيّ: مفاتيحُ مرتّبةٌ بنقاطِ الترميز، بلا مسافات — أساسُ البصمةِ العليا.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function canonicalJson(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v)).join(',')}]`;
+  const record = /** @type {Record<string, unknown>} */ (value);
+  const keys = Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(record[k])}`).join(',')}}`;
+}
+
+/**
+ * @typedef {object} ContentDigest
+ * @property {string} format
+ * @property {number} version
+ * @property {{ settings: Record<string, string>, row: string }} canonicalization
+ * @property {Record<string, unknown>} scope
+ * @property {Record<string, { columns: Array<[string, string, boolean]>, rows: string, sha256: string }>} tables
+ * @property {Record<string, { lastValue: string, isCalled: boolean, increment: string }>} sequences
+ * @property {{ rows: string, sha256: string }} ledger
+ * @property {string} sha256 بصمةُ `canonicalJson` لكلِّ ما سبق.
+ */
+
+/**
+ * @param {Omit<ContentDigest, 'sha256'>} body
+ * @returns {string}
+ */
+function digestBodySha256(body) {
+  return crypto.createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex');
+}
+
+/**
+ * يحسبُ البصمةَ على `client` **داخلَ معاملةٍ مفتوحةٍ** (‏المُستدعي يملكُها): في النسخِ معاملةُ اللقطةِ
+ * المُصدَّرة، وفي الاستعادةِ معاملةُ قراءةٍ `REPEATABLE READ`. الإعداداتُ محلّيّةٌ للمعاملة فلا تتسرّب.
+ * @param {import('pg').PoolClient | import('pg').Client} client
+ * @param {string} ledgerRelation علاقةُ الدفترِ مقتبَسةً (‏`public."schema_migrations"` أو الجدولُ المرحليّ).
+ * @returns {Promise<ContentDigest>}
+ */
+export async function computeContentDigest(client, ledgerRelation) {
+  for (const [name, value] of Object.entries(DIGEST_SETTINGS)) {
+    await client.query('SELECT pg_catalog.set_config($1, $2, true)', [name, value]);
+  }
+  // ‏`set_config(…, true)` خارجَ معاملةٍ يسري على عبارتِه وحدَها، فتُحسَبُ البصمةُ بإعداداتِ الجلسة
+  // (‏مقيسٌ بطفرة: `format_type` تغيّرَ لكلِّ جدول). فشلٌ مغلق: الإعداداتُ تُقرأُ وتُطابَقُ قبلَ أيِّ حساب.
+  for (const [name, value] of Object.entries(DIGEST_SETTINGS)) {
+    const got = (await client.query('SELECT pg_catalog.current_setting($1) AS v', [name]))
+      .rows[0]?.['v'];
+    if (got !== value && !(name === 'search_path' && got === '""')) {
+      throw new Error(
+        `إعدادُ البصمة ${name} لم يسرِ (‏${String(got)} بدلَ ${value}) — البصمةُ تُحسَبُ داخلَ معاملةٍ وحدَها.`,
+      );
+    }
+  }
+  const relations = await client.query(
+    `SELECT c.oid::bigint AS oid, c.relname, c.relkind
+       FROM pg_catalog.pg_class AS c
+       JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+      WHERE n.nspname = $1 AND c.relkind IN ('r', 'S')
+      ORDER BY c.relname COLLATE "C"`,
+    [STATE_SCHEMA],
+  );
+  /** @type {ContentDigest['tables']} */
+  const tables = {};
+  /** @type {ContentDigest['sequences']} */
+  const sequences = {};
+  for (const row of relations.rows) {
+    const name = String(row['relname']);
+    const relation = `${quoteIdent(STATE_SCHEMA)}.${quoteIdent(name)}`;
+    if (row['relkind'] === 'S') {
+      const seq = (
+        await client.query(
+          `SELECT s.last_value::text AS v, s.is_called AS c, p.seqincrement::text AS i
+             FROM ${relation} AS s, pg_catalog.pg_sequence AS p WHERE p.seqrelid = $1::oid`,
+          [row['oid']],
+        )
+      ).rows[0];
+      sequences[name] = {
+        lastValue: String(seq?.['v']),
+        isCalled: seq?.['c'] === true,
+        increment: String(seq?.['i']),
+      };
+      continue;
+    }
+    if (BACKUP_STAGING_TABLE.test(name)) continue;
+    const columns = await client.query(
+      `SELECT attname, pg_catalog.format_type(atttypid, atttypmod) AS t, attnotnull
+         FROM pg_catalog.pg_attribute
+        WHERE attrelid = $1::oid AND attnum > 0 AND NOT attisdropped
+        ORDER BY attnum`,
+      [row['oid']],
+    );
+    const content = (
+      await client.query(
+        `SELECT coalesce(sum(n), 0)::text AS rows,
+                encode(pg_catalog.sha256(coalesce(
+                  string_agg(pg_catalog.set_byte('\\x00'::bytea, 0, k) || b, ''::bytea ORDER BY k),
+                  ''::bytea)), 'hex') AS sha
+           FROM (SELECT pg_catalog.get_byte(h, 0) AS k, count(*) AS n,
+                        pg_catalog.sha256(string_agg(h, ''::bytea ORDER BY h)) AS b
+                   FROM (SELECT pg_catalog.sha256(convert_to(t::text, 'UTF8')) AS h FROM ${relation} AS t) AS s0
+                  GROUP BY 1) AS s1`,
+      )
+    ).rows[0];
+    tables[name] = {
+      columns: columns.rows.map((c) => [
+        String(c['attname']),
+        String(c['t']),
+        c['attnotnull'] === true,
+      ]),
+      rows: String(content?.['rows']),
+      sha256: String(content?.['sha']),
+    };
+  }
+  const led = (
+    await client.query(
+      `SELECT count(*)::text AS rows,
+              encode(pg_catalog.sha256(convert_to(coalesce(string_agg(
+                ROW(version, name, checksum, applied_at, applied_by)::text, E'\\n' ORDER BY version), ''),
+                'UTF8')), 'hex') AS sha
+         FROM ${ledgerRelation}`,
+    )
+  ).rows[0];
+  /** @type {Omit<ContentDigest, 'sha256'>} */
+  const body = {
+    format: CONTENT_DIGEST_FORMAT,
+    version: CONTENT_DIGEST_VERSION,
+    canonicalization: { settings: { ...DIGEST_SETTINGS }, row: DIGEST_ROW_RULE },
+    scope: /** @type {Record<string, unknown>} */ (JSON.parse(JSON.stringify(DIGEST_SCOPE))),
+    tables,
+    sequences,
+    ledger: { rows: String(led?.['rows']), sha256: String(led?.['sha']) },
+  };
+  return { ...body, sha256: digestBodySha256(body) };
+}
+
+/**
+ * يفحصُ بصمةً مقروءةً من البيان. الغيابُ (‏`undefined`) ليس خطأً هنا — نسخةٌ قديمةٌ يقرّرُ المستهلكُ أمرَها.
+ * صيغةٌ أو إصدارٌ غيرُ معروفَين ⇒ `BACKUP_DIGEST_UNSUPPORTED`؛ بنيةٌ ناقصةٌ أو بصمةٌ عليا لا تطابقُ
+ * محتواها ⇒ `BACKUP_DIGEST_INVALID`. (‏الفحصُ الذاتيُّ يكشفُ التلفَ لا التزوير — البيانُ غيرُ موقَّع.)
+ * @param {unknown} raw
+ * @returns {ContentDigest | undefined}
+ */
+export function validateContentDigest(raw) {
+  if (raw === undefined) return undefined;
+  const invalid = (/** @type {string} */ why) =>
+    new BackupError(BACKUP_ERRORS.DIGEST_INVALID, `بصمةُ المحتوى في البيان تالفة: ${why}.`);
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw invalid('ليست كائناً');
+  const d = /** @type {Record<string, unknown>} */ (raw);
+  if (d['format'] !== CONTENT_DIGEST_FORMAT || d['version'] !== CONTENT_DIGEST_VERSION) {
+    throw new BackupError(
+      BACKUP_ERRORS.DIGEST_UNSUPPORTED,
+      `صيغةُ بصمةِ المحتوى ${JSON.stringify(d['format'])} بالإصدار ${JSON.stringify(d['version'])} غيرُ مدعومة (‏المدعوم ${CONTENT_DIGEST_FORMAT} v${CONTENT_DIGEST_VERSION}) — لا تحقّقَ ممكن، فلا استعادة.`,
+    );
+  }
+  const hex = (/** @type {unknown} */ v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+  const count = (/** @type {unknown} */ v) => typeof v === 'string' && /^(0|[1-9][0-9]*)$/.test(v);
+  const isObj = (/** @type {unknown} */ v) =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (!hex(d['sha256'])) throw invalid('البصمةُ العليا ليست sha256');
+  if (!isObj(d['tables']) || !isObj(d['sequences']) || !isObj(d['ledger'])) {
+    throw invalid('الجداولُ أو المتسلسلاتُ أو الدفترُ ناقص');
+  }
+  for (const [name, t] of Object.entries(/** @type {Record<string, any>} */ (d['tables']))) {
+    if (
+      !isObj(t) ||
+      !hex(t.sha256) ||
+      !count(t.rows) ||
+      !Array.isArray(t.columns) ||
+      !t.columns.every(
+        (/** @type {unknown} */ c) =>
+          Array.isArray(c) &&
+          c.length === 3 &&
+          typeof c[0] === 'string' &&
+          typeof c[1] === 'string' &&
+          typeof c[2] === 'boolean',
+      )
+    ) {
+      throw invalid(`مُدخلةُ الجدول ${name}`);
+    }
+  }
+  for (const [name, s] of Object.entries(/** @type {Record<string, any>} */ (d['sequences']))) {
+    if (
+      !isObj(s) ||
+      typeof s.lastValue !== 'string' ||
+      !/^-?[0-9]+$/.test(s.lastValue) ||
+      typeof s.increment !== 'string' ||
+      !/^-?[1-9][0-9]*$/.test(s.increment) ||
+      typeof s.isCalled !== 'boolean'
+    ) {
+      throw invalid(`مُدخلةُ المتسلسلة ${name}`);
+    }
+  }
+  const ledger = /** @type {Record<string, unknown>} */ (d['ledger']);
+  if (!hex(ledger['sha256']) || !count(ledger['rows'])) throw invalid('مُدخلةُ الدفتر');
+  const { sha256: claimed, ...body } = d;
+  if (digestBodySha256(/** @type {Omit<ContentDigest, 'sha256'>} */ (body)) !== claimed) {
+    throw invalid('البصمةُ العليا لا تطابقُ محتواها');
+  }
+  return /** @type {ContentDigest} */ (raw);
+}
+
+/**
+ * فروقُ بصمتَين ضمنَ النطاق — مصفوفةٌ فارغةٌ = تطابق. الأسماءُ وحدَها، بلا قيم.
+ * @param {ContentDigest} expected
+ * @param {ContentDigest} actual
+ * @returns {string[]}
+ */
+export function contentDigestDifferences(expected, actual) {
+  /** @type {string[]} */
+  const out = [];
+  const names = (/** @type {Record<string, unknown>} */ o) => Object.keys(o);
+  for (const [
+    kind,
+    a,
+    b,
+  ] of /** @type {Array<[string, Record<string, unknown>, Record<string, unknown>]>} */ ([
+    ['table', expected.tables, actual.tables],
+    ['sequence', expected.sequences, actual.sequences],
+  ])) {
+    for (const n of new Set([...names(a), ...names(b)])) {
+      if (!(n in a)) out.push(`${kind} ${n}: غيرُ موجودٍ في النسخة`);
+      else if (!(n in b)) out.push(`${kind} ${n}: غائبٌ عن المستعاد`);
+      else if (canonicalJson(a[n]) !== canonicalJson(b[n])) {
+        const ea = /** @type {Record<string, unknown>} */ (a[n]);
+        const eb = /** @type {Record<string, unknown>} */ (b[n]);
+        if (kind === 'sequence') {
+          const why = sequenceRegression(
+            /** @type {ContentDigest['sequences'][string]} */ (ea),
+            /** @type {ContentDigest['sequences'][string]} */ (eb),
+          );
+          if (why !== undefined) out.push(`${kind} ${n}: ${why}`);
+          continue;
+        }
+        const parts = Object.keys(ea).filter((k) => canonicalJson(ea[k]) !== canonicalJson(eb[k]));
+        out.push(`${kind} ${n}: ${parts.join('+')}`);
+      }
+    }
+  }
+  if (canonicalJson(expected.ledger) !== canonicalJson(actual.ledger)) out.push('ledger');
+  if (
+    canonicalJson(expected.canonicalization) !== canonicalJson(actual.canonicalization) ||
+    canonicalJson(expected.scope) !== canonicalJson(actual.scope)
+  ) {
+    out.push('canonicalization/scope');
+  }
+  return out;
+}
+
+/**
+ * المتسلسلاتُ خارجَ MVCC: `pg_dump` يقرأُ قيمتَها **خارجَ اللقطة** (‏بعدَ البصمة)، فكاتبٌ متزامنٌ
+ * يجعلُ المساواةَ مستحيلةً ضمناً (‏مقيسٌ: اختبارا `WL-398`/`WL-586` فشلا بالمساواة). القاعدةُ المعلَنة:
+ * الزيادةُ نفسُها، والقيمةُ التاليةُ في المستعادِ **ليست خلفَ** المقروءةِ في اللقطة باتّجاهِ الزيادة — وهو
+ * ما يمنعُ تصادمَ مفاتيحَ مع صفوفٍ مُستعادة. لا يكشفُ متسلسلةً تقدّمت زيادةً؛ و`setval` تراجعيٌّ أثناءَ
+ * النسخِ يُرفَضُ (‏إنذارٌ كاذبٌ آمنُ الاتّجاه: لا `RESTORE_OK`).
+ * @param {ContentDigest['sequences'][string]} expected
+ * @param {ContentDigest['sequences'][string]} actual
+ * @returns {string | undefined}
+ */
+function sequenceRegression(expected, actual) {
+  if (expected.increment !== actual.increment) return 'increment';
+  const step = BigInt(expected.increment);
+  const next = (/** @type {ContentDigest['sequences'][string]} */ s) =>
+    s.isCalled ? BigInt(s.lastValue) + step : BigInt(s.lastValue);
+  const behind = step > 0n ? next(actual) < next(expected) : next(actual) > next(expected);
+  return behind ? 'behind snapshot' : undefined;
+}
+
 /**
  * @param {string} dumpPath
  * @returns {string}
@@ -355,6 +684,9 @@ export async function createBackup(dumpPath, databaseUrl) {
     let result;
     /** @type {{ databaseVersion: string, migrationVersion: number, rowCounts: Record<string, number> }} */
     let snapshot;
+    /** @type {ContentDigest | undefined} */
+    let contentDigest;
+    let contentDigestMs = 0;
     /** @type {{ error: unknown } | undefined} */
     let primaryFailure;
     /** @type {unknown} */
@@ -383,6 +715,21 @@ export async function createBackup(dumpPath, databaseUrl) {
       );
       await assertStagedLedgerMatchesSnapshot(client, ledgerStagingTable);
       snapshot = await inspectDatabase(client);
+      // ‏`WL-606`: البصمةُ على **هذا العميلِ في هذه المعاملة** — اللقطةُ نفسُها التي يقرؤها `pg_dump`
+      // بـ`--snapshot` أدناه؛ فلا نافذةَ بينَ ما تصفُه وما في الأرشيف. فشلُها ⇒ لا `pg_dump` ولا بيان.
+      const digestStarted = process.hrtime.bigint();
+      try {
+        contentDigest = await computeContentDigest(
+          client,
+          `public.${quoteIdent(MIGRATION_LEDGER)}`,
+        );
+      } catch (error) {
+        throw new BackupError(
+          BACKUP_ERRORS.DIGEST_FAILED,
+          `تعذّرَ حسابُ بصمةِ المحتوى داخلَ لقطةِ النسخ: ${error instanceof Error ? error.message : String(error)} — لا نسخةَ تُكتَب.`,
+        );
+      }
+      contentDigestMs = Number((process.hrtime.bigint() - digestStarted) / 1_000_000n);
       // `WL-532`: إن كانت القاعدةُ مُسيَّجةً نُسخَ مخطّطُ `fence` معها؛ وإلا حملت النسخةُ
       // قوادحَ `xf_guard` وسياساتِ `xf_read` بلا دوالِّها فتفشلُ الاستعادة. والمستعادُ
       // يبدأ مغلقاً: صفُّ التحكّمِ مربوطٌ بهويّةِ العنقودِ الأصليّ (`sysid`/`dbname`/
@@ -489,6 +836,8 @@ export async function createBackup(dumpPath, databaseUrl) {
       rowCounts: snapshot.rowCounts,
       dumpFile: path.basename(dumpPath),
       ledgerStagingTable,
+      contentDigestMs,
+      contentDigest,
     };
     fs.writeFileSync(manifestPathFor(dumpPath), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
     return manifest;
@@ -522,6 +871,8 @@ export function readManifest(dumpPath) {
     ) {
       throw new Error('البنية ناقصة');
     }
+    // ‏`WL-606`: بصمةٌ حاضرةٌ تُفحَصُ هنا (‏تالفةٌ أو إصدارٌ غيرُ مدعوم ⇒ خطأٌ مسمّى)، وغيابُها يُترَكُ للمستهلك.
+    validateContentDigest(/** @type {Record<string, unknown>} */ (parsed)['contentDigest']);
     return /** @type {BackupManifest} */ (parsed);
   } catch (error) {
     if (error instanceof BackupError) throw error;
@@ -570,12 +921,19 @@ export async function main(argv, databaseUrl) {
     const manifest = await verifyBackup(dumpPath);
     console.log(`تحقّق [BACKUP_OK]: ${dumpPath}`);
     console.log(`تجزئة sha256: ${manifest.sha256}`);
+    console.log(
+      manifest.contentDigest === undefined
+        ? 'بصمةُ المحتوى [CONTENT_DIGEST_ABSENT]: نسخةٌ قديمةٌ بلا دليلِ محتوى؛ استعادتُها تتطلّبُ --allow-unverified.'
+        : `بصمةُ المحتوى [CONTENT_DIGEST_PRESENT] ${manifest.contentDigest.format} v${manifest.contentDigest.version}: ${manifest.contentDigest.sha256}`,
+    );
     return;
   }
   const manifest = await createBackup(dumpPath, databaseUrl);
   console.log(`نُسخت القاعدة [BACKUP_CREATED]: ${dumpPath}`);
   console.log(`البيان: ${manifestPathFor(dumpPath)}`);
-  console.log(`زمن النسخ المقاس: ${manifest.durationMs} مللي ثانية.`);
+  console.log(
+    `زمن النسخ المقاس: ${manifest.durationMs} مللي ثانية (‏منها بصمةُ المحتوى ${manifest.contentDigestMs}).`,
+  );
   console.log(
     `عدد الجداول: ${Object.keys(manifest.rowCounts).length}؛ نسخة الهجرة: ${manifest.migrationVersion}.`,
   );

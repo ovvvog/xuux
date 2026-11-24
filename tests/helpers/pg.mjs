@@ -250,7 +250,7 @@ const l78Ident = (name) => `"${name.replace(/"/g, '""')}"`;
 
 /**
  * ‏`LIVE-78` (‏هـ): نسخةٌ نموذجيّة — كـ`createBackup` في `scripts/backup.mjs` (‏دفترٌ مرحليٌّ، لقطةُ
- * REPEATABLE READ مُصدَّرة، `pg_dump --snapshot`)، وتزيدُ `contentDigest` محسوبةً **في اللقطةِ نفسِها**.
+ * REPEATABLE READ مُصدَّرة، `pg_dump --snapshot`)، وتزيدُ `prototypeDigest` محسوبةً **في اللقطةِ نفسِها**.
  * البيانُ مجموعةٌ أعمّ من بيانِ الإنتاج، فتقرؤه `scripts/restore.mjs` الحاليّةُ أيضاً (‏للمقارنة).
  * @param {string} dumpPath
  * @param {string} url
@@ -289,10 +289,10 @@ export async function live78PrototypeBackup(dumpPath, url) {
     const schemas = fenced ? ['state', 'fence'] : ['state'];
     const digestStarted = process.hrtime.bigint();
     /** @type {any} */
-    let contentDigest = null;
+    let prototypeDigest = null;
     const onNotice = (/** @type {any} */ n) => {
       const m = /^XUUX_L78_DIGEST=(.*)$/s.exec(String(n.message));
-      if (m) contentDigest = JSON.parse(String(m[1]));
+      if (m) prototypeDigest = JSON.parse(String(m[1]));
     };
     client.on('notice', onNotice);
     if (process.env.XUUX_L78_DEBUG === '1') {
@@ -304,11 +304,11 @@ export async function live78PrototypeBackup(dumpPath, url) {
     }
     await client.query(live78DigestBlock(schemas, 'public.schema_migrations', LIVE78_NOTICE_TAIL));
     client.off('notice', onNotice);
-    if (contentDigest === null) throw new Error('LIVE78_DIGEST_NOT_RECEIVED');
+    if (prototypeDigest === null) throw new Error('LIVE78_DIGEST_NOT_RECEIVED');
     const digestMs = Number((process.hrtime.bigint() - digestStarted) / 1_000_000n);
     /** @type {Record<string, number>} */
     const rowCounts = {};
-    for (const [name, v] of Object.entries(contentDigest.tables)) {
+    for (const [name, v] of Object.entries(prototypeDigest.tables)) {
       if (name.startsWith('state.')) rowCounts[name.slice(6)] = Number(/** @type {any} */ (v).rows);
     }
     const migrationVersion = Number(
@@ -337,7 +337,7 @@ export async function live78PrototypeBackup(dumpPath, url) {
       rowCounts,
       dumpFile: dumpPath.split('/').pop(),
       ledgerStagingTable: staging,
-      contentDigest,
+      prototypeDigest,
       digestMs,
     };
     fs.writeFileSync(manifestPathFor(dumpPath), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -378,7 +378,7 @@ export async function live78PrototypeRestore(o) {
     await import('../../scripts/lib/pg-tools.mjs');
   const { spawn } = await import('node:child_process');
   const manifest = /** @type {any} */ (await verifyBackup(o.dumpPath));
-  if (!manifest.contentDigest) throw new Error('LIVE78_MANIFEST_WITHOUT_DIGEST');
+  if (!manifest.prototypeDigest) throw new Error('LIVE78_MANIFEST_WITHOUT_DIGEST');
   const restoreTool = await resolveVerifiedRestoreTool(manifest.databaseVersion);
   const psql = resolvePgTool('psql');
   assertClientNotOlder({
@@ -401,9 +401,9 @@ export async function live78PrototypeRestore(o) {
   const psqlTarget = new URL(o.connectUrl ?? o.url);
   psqlTarget.pathname = `/${o.database}`;
   psqlTarget.searchParams.set('application_name', 'xuux-l78-restore');
-  const schemas = /** @type {string[]} */ (manifest.contentDigest.schemas);
+  const schemas = /** @type {string[]} */ (manifest.prototypeDigest.schemas);
   const dumpHasFence = schemas.includes('fence');
-  const expected = JSON.stringify(manifest.contentDigest).replace(/'/g, "''");
+  const expected = JSON.stringify(manifest.prototypeDigest).replace(/'/g, "''");
   const staging = l78Ident(manifest.ledgerStagingTable);
   const preamble = [
     `SET lock_timeout = ${Number(o.lockTimeoutMs ?? 0)};`,
@@ -815,7 +815,11 @@ export async function live78Bench(base, o) {
       await measure(
         'prod-fresh',
         tgt,
-        () => restoreBackup({ dumpPath: dump, database: tgt, force: false }, base),
+        () =>
+          restoreBackup(
+            { dumpPath: dump, database: tgt, force: false, allowUnverified: true },
+            base,
+          ),
         { vacuum: true },
       );
     }
@@ -849,7 +853,10 @@ export async function live78Bench(base, o) {
           tgt,
           () =>
             run === 'prod'
-              ? restoreBackup({ dumpPath: dump, database: tgt, force: true }, base)
+              ? restoreBackup(
+                  { dumpPath: dump, database: tgt, force: true, allowUnverified: true },
+                  base,
+                )
               : live78PrototypeRestore({ dumpPath: dump, database: tgt, url: base, force: true }),
           { reader: true, vacuum: true },
         );
@@ -907,7 +914,10 @@ export async function live78Bench(base, o) {
           const asUrl = l78DbUrl(base, 'postgres', as);
           await measure(`${run}-writer`, tgt, () =>
             run === 'prod'
-              ? restoreBackup({ dumpPath: dump, database: tgt, force: false }, asUrl)
+              ? restoreBackup(
+                  { dumpPath: dump, database: tgt, force: false, allowUnverified: true },
+                  asUrl,
+                )
               : live78PrototypeRestore({ dumpPath: dump, database: tgt, url: asUrl }),
           );
           await admin.query(`DROP DATABASE ${l78Ident(tgt)} WITH (FORCE)`);
@@ -956,5 +966,216 @@ if (
     modes: String(values.modes).split(','),
     label: String(values.label || `${values.tables}x${values.rows}`),
     out: String(values.out),
+  });
+}
+
+// ‏`WL-606` — قياسُ كلفةِ بصمةِ المحتوى: النصّانِ **قبلَ** البصمة (‏`693654d9`) وبعدَها على **البياناتِ نفسِها**.
+// ‏`DATABASE_URL=… node tests/helpers/pg.mjs wl606-bench --tables 10 --rows 100000 --reps 2 --out /tmp/wl606/r.jsonl`
+// لكلِّ (‏نسخة، استعادةٌ إلى قاعدةٍ جديدة) × (‏قديم، جديد): الزمنُ، ووقتُ المعالجِ للعميلِ وأبنائه (‏`pg_dump`/
+// ‏`pg_restore`)، ووقتُ المعالجِ للنظامِ كلِّه (‏`/proc/stat` — يشملُ الخادم؛ جهازٌ مخصَّصٌ للقياس)، وأعلى
+// ‏VmHWM لعمليّاتِ الخادمِ الخادمةِ للقاعدةِ المعنيّة، وأعلى RSS للعميل. وزمنُ البصمةِ نفسِها: إنشاءً
+// ‏(`contentDigestMs` في البيان) وتحقّقاً (‏من سطرِ `[CONTENT_VERIFIED]`).
+
+/**
+ * @param {string} base
+ * @param {{ tables: number, rows: number, reps: number, out: string, oldRef: string }} o
+ */
+export async function wl606Bench(base, o) {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { execFileSync, spawn } = await import('node:child_process');
+  const { up } = await import('../../src/persistence/migrator.mjs');
+  const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../..');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wl606-bench-'));
+  // نسخةُ النصوصِ القديمة: `scripts/` كلُّها من المرجعِ، و`node_modules` بوصلةٍ رمزيّة.
+  for (const ver of ['old', 'new']) {
+    fs.mkdirSync(path.join(dir, ver, 'scripts/lib'), { recursive: true });
+    fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, ver, 'node_modules'));
+    fs.writeFileSync(path.join(dir, ver, 'package.json'), '{"type":"module"}');
+    for (const f of ['scripts/backup.mjs', 'scripts/restore.mjs', 'scripts/lib/pg-tools.mjs']) {
+      const body =
+        ver === 'old'
+          ? execFileSync('git', ['-C', root, 'show', `${o.oldRef}:${f}`])
+          : fs.readFileSync(path.join(root, f));
+      fs.writeFileSync(path.join(dir, ver, f), body);
+    }
+    // غلافٌ يطبعُ استهلاكَ العمليّةِ وأبنائها المنتظَرين (‏`cutime`/`cstime` من `/proc/self/stat`).
+    fs.writeFileSync(
+      path.join(dir, ver, 'run.mjs'),
+      `const [, , script, ...args] = process.argv;
+const fs = await import('node:fs');
+const mod = await import(new URL('./scripts/' + script, import.meta.url).href);
+let code = 0;
+try { await mod.main(args, process.env.DATABASE_URL ?? ''); } catch (e) { console.error('ERR ' + (e?.code ?? '') + ' ' + e?.message); code = 1; }
+const st = fs.readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ');
+const hz = 100;
+const ru = process.resourceUsage();
+console.log('WL606_RUSAGE ' + JSON.stringify({ selfCpuMs: (ru.userCPUTime + ru.systemCPUTime) / 1000, childCpuMs: (Number(st[13]) + Number(st[14])) * 1000 / hz, selfMaxRssKb: ru.maxRSS }));
+process.exit(code);
+`,
+    );
+  }
+  const admin = new pg.Client({ connectionString: base });
+  await admin.connect();
+  const tag = crypto.randomBytes(3).toString('hex');
+  const created = /** @type {string[]} */ ([]);
+  const url = (/** @type {string} */ db) => {
+    const u = new URL(base);
+    u.pathname = `/${db}`;
+    return u.toString();
+  };
+  const busyJiffies = () => {
+    const f = String(fs.readFileSync('/proc/stat', 'utf8').split('\n')[0])
+      .trim()
+      .split(/\s+/)
+      .slice(1)
+      .map(Number);
+    return f.reduce((a, b) => a + b, 0) - (f[3] ?? 0) - (f[4] ?? 0);
+  };
+  /** يقيسُ أمراً ابناً ويُراقبُ ذاكرةَ الخادمِ للقاعدة `db`. */
+  const measure = (
+    /** @type {string} */ ver,
+    /** @type {string[]} */ args,
+    /** @type {string} */ db,
+    /** @type {string} */ connectTo,
+  ) =>
+    new Promise((resolve, reject) => {
+      const j0 = busyJiffies();
+      const t0 = process.hrtime.bigint();
+      let serverHwmKb = 0;
+      let childRssKb = 0;
+      const sample = () => {
+        for (const pid of fs.readdirSync('/proc')) {
+          if (!/^\d+$/.test(pid)) continue;
+          try {
+            const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8');
+            const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+            const hwm = Number(/VmHWM:\s+(\d+)/.exec(status)?.[1] ?? 0);
+            if (cmd.startsWith(`postgres: 18/main: state ${db} `))
+              serverHwmKb = Math.max(serverHwmKb, hwm);
+            if (/pg_dump|pg_restore/.test(cmd)) childRssKb = Math.max(childRssKb, hwm);
+          } catch {
+            // عمليّةٌ انتهت بينَ القراءتين.
+          }
+        }
+      };
+      const timer = setInterval(sample, 100);
+      const child = spawn(process.execPath, [path.join(dir, ver, 'run.mjs'), ...args], {
+        env: { ...process.env, DATABASE_URL: connectTo },
+      });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (out += d));
+      child.on('error', reject);
+      child.on('close', (code) => {
+        clearInterval(timer);
+        const ms = Number((process.hrtime.bigint() - t0) / 1_000_000n);
+        const systemCpuMs = ((busyJiffies() - j0) * 1000) / 100;
+        const ru = JSON.parse(/WL606_RUSAGE (.*)/.exec(out)?.[1] ?? '{}');
+        const verifyMs = Number(
+          /\[CONTENT_VERIFIED\][^\n]*\((?:\u200f)?(\d+) مللي/.exec(out)?.[1] ?? NaN,
+        );
+        resolve({
+          code,
+          ms,
+          systemCpuMs,
+          serverHwmKb,
+          childRssKb,
+          ...ru,
+          verifyMs,
+          tail: code === 0 ? undefined : out.slice(-400),
+        });
+      });
+    });
+  try {
+    const src = `wl606b_src_${tag}`;
+    await admin.query(`CREATE DATABASE ${l78Ident(src)}`);
+    created.push(src);
+    const sp = new pg.Pool({ connectionString: url(src), max: 4 });
+    await up(sp);
+    for (let t = 0; t < o.tables; t += 1) {
+      await sp.query(`CREATE TABLE state.wl606_bench_${t} (id bigint PRIMARY KEY, payload text NOT NULL,
+        n numeric, b bytea, ts timestamptz, note text)`);
+      await sp.query(
+        `INSERT INTO state.wl606_bench_${t}
+         SELECT g, repeat(md5(g::text), 3), g * 1.5, decode(md5((g + ${t})::text), 'hex'),
+                timestamptz '2026-01-01' + g * interval '1 second', CASE WHEN g % 7 = 0 THEN NULL ELSE 'n' || g END
+           FROM generate_series(1, ${o.rows}) g`,
+      );
+    }
+    await sp.query('VACUUM ANALYZE');
+    const dbBytes = Number(
+      (await sp.query('SELECT pg_database_size(current_database())::bigint AS s')).rows[0].s,
+    );
+    await sp.end();
+    for (let rep = 0; rep < o.reps; rep += 1) {
+      for (const ver of rep % 2 === 0 ? ['old', 'new'] : ['new', 'old']) {
+        const dump = path.join(dir, `${ver}.dump`);
+        fs.rmSync(dump, { force: true });
+        fs.rmSync(`${dump}.manifest.json`, { force: true });
+        const b = /** @type {any} */ (
+          await measure(ver, ['backup.mjs', 'create', dump], src, url(src))
+        );
+        const manifest =
+          b.code === 0 ? JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8')) : {};
+        const tgt = `wl606b_${ver}_${tag}_${rep}`;
+        const r = /** @type {any} */ (
+          await measure(ver, ['restore.mjs', dump, '--database', tgt], tgt, base)
+        );
+        created.push(tgt);
+        const row = {
+          label: `${o.tables}x${o.rows}`,
+          rep,
+          ver,
+          dbBytes,
+          dumpBytes: b.code === 0 ? fs.statSync(dump).size : null,
+          backup: {
+            ...b,
+            digestMs: manifest.contentDigestMs ?? null,
+            pgDurationMs: manifest.durationMs,
+          },
+          restore: r,
+        };
+        fs.appendFileSync(o.out, `${JSON.stringify(row)}\n`);
+        process.stderr.write(`${JSON.stringify(row)}\n`);
+        await admin.query(`DROP DATABASE IF EXISTS ${l78Ident(tgt)} WITH (FORCE)`);
+        created.splice(created.indexOf(tgt), 1);
+      }
+    }
+  } finally {
+    for (const n of created) {
+      await admin
+        .query(`DROP DATABASE IF EXISTS ${l78Ident(n)} WITH (FORCE)`)
+        .catch(() => undefined);
+    }
+    await admin.end();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+if (
+  process.argv[2] === 'wl606-bench' &&
+  import.meta.url === (await import('node:url')).pathToFileURL(String(process.argv[1])).href
+) {
+  const { parseArgs } = await import('node:util');
+  const { values } = parseArgs({
+    args: process.argv.slice(3),
+    options: {
+      tables: { type: 'string', default: '10' },
+      rows: { type: 'string', default: '1000' },
+      reps: { type: 'string', default: '2' },
+      out: { type: 'string', default: '/tmp/wl606/results.jsonl' },
+      'old-ref': { type: 'string', default: '693654d9' },
+    },
+  });
+  const base = databaseUrl();
+  if (base === undefined) throw new Error('DATABASE_URL غير معلَنة.');
+  await wl606Bench(base, {
+    tables: Number(values.tables),
+    rows: Number(values.rows),
+    reps: Number(values.reps),
+    out: String(values.out),
+    oldRef: String(values['old-ref']),
   });
 }

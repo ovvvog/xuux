@@ -20,6 +20,15 @@ import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import { catalogSnapshot, createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
+import {
+  CONTENT_DIGEST_FORMAT,
+  CONTENT_DIGEST_VERSION,
+  canonicalJson,
+  computeContentDigest,
+  contentDigestDifferences,
+  validateContentDigest,
+} from '../../scripts/backup.mjs';
+import { CONTENT_VERIFICATION, restoreBackup } from '../../scripts/restore.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../..');
@@ -603,25 +612,39 @@ test(
 
       // كاتبٌ متزامنٌ: صفٌّ كلَّ ٢٥ مللي ثانيةً في `state.events` طوالَ النسخِ —
       // فلا سكونَ يُخفي الانفصالَ إن وُجدَ: اللقطةُ تقعُ في وسطِ كتابةٍ حيّةٍ.
+      // ‏`WL-606`: كانَ كلُّ صفٍّ يحملُ التجزئةَ نفسَها (‏`'c'.repeat(64)`) فيسقطُ كلُّ إدراجٍ بعدَ الأوّلِ
+      // على `events_hash_unique` ويُبتلَعُ الخطأ — كاتبٌ «متزامنٌ» بصفٍّ واحد (‏كشفتهُ طفرةُ بصمةٍ خارجَ
+      // اللقطةِ نجت). صارت التجزئةُ فريدةً لكلِّ صفّ، والأخطاءُ تُعَدُّ ويُؤكَّدُ أنّ الكتابةَ وقعت أثناءَ النسخ.
       let stop = false;
+      let written = 0;
+      let failed = 0;
       const writer = (async () => {
         for (let n = 0; !stop; n += 1) {
           await source.pool
             .query(
               `INSERT INTO state.events (event_id, type, actor, payload, hash, occurred_at)
                VALUES ($1, 'backup.concurrent', 'agent-001', '{}'::jsonb, $2, now())`,
-              [`concurrent-${n}`, 'c'.repeat(64)],
+              [
+                `concurrent-${n}`,
+                crypto.createHash('sha256').update(`concurrent-${n}`).digest('hex'),
+              ],
             )
-            .catch(() => undefined);
+            .then(
+              () => (written += 1),
+              () => (failed += 1),
+            );
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
       })();
 
       const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+      const writtenDuringBackup = written;
       stop = true;
       await writer;
       assert.equal(backup.code, 0, backup.stderr);
       assert.match(backup.stdout, /\[BACKUP_CREATED\]/);
+      assert.equal(failed, 0, 'إدراجاتُ الكاتبِ المتزامنِ فشلت — الاختبارُ لا يقيس');
+      assert.ok(writtenDuringBackup >= 5, `كتاباتٌ أثناءَ النسخِ قليلة: ${writtenDuringBackup}`);
 
       // استعادةٌ إلى نظيفةٍ تنجحُ: عدّاداتُ البيانِ تطابقُ المُستعادَ لأنّهما
       // اللقطةُ نفسُها — بلا هذا الربطِ كانت كتابةٌ واحدةٌ بينَ قراءةِ العدّاداتِ
@@ -2589,5 +2612,445 @@ test(
       await target.drop();
       await backup.source.drop();
     }
+  },
+);
+
+// ═══ ‏`WL-606` — بصمةُ المحتوى (‏`LIVE-78/CONTENT-INTEGRITY`) ═══════════════════════════════════
+// العقد: ‏`[RESTORE_OK]` = الأعدادُ ونسخةُ الهجرةِ **وبصمةُ المحتوى** طابقت. نسخةٌ بلا بصمة ⇒ رفضٌ قبلَ
+// اللمس إلا بـ`--allow-unverified`، وحينَها `[RESTORE_UNVERIFIED]` لا يحوي `RESTORE_OK`. بصمةٌ تالفة ⇒
+// ‏`BACKUP_DIGEST_INVALID`؛ صيغةٌ/إصدارٌ غيرُ مدعوم ⇒ `BACKUP_DIGEST_UNSUPPORTED`؛ مخالفةٌ بعدَ الاستعادة ⇒
+// ‏`RESTORE_CONTENT_MISMATCH` والدفترُ غيرُ مُركَّب. اختباراتُ فشلِ الحسابِ وانقطاعِ الاتصال في
+// ‏`tests/persistence/atomicity.test.mjs` (‏تحتاجُ جدولاً كبيراً، فلا تُثقِلُ مهلةَ هذا الملفّ).
+
+/**
+ * @param {import('pg').Pool} pool
+ * @returns {Promise<boolean>}
+ */
+async function ledgerInstalled(pool) {
+  const found = await pool.query(`SELECT to_regclass('public.schema_migrations') IS NOT NULL AS l`);
+  return /** @type {Record<string, unknown>} */ (found.rows[0])['l'] === true;
+}
+
+/**
+ * يعيدُ حسابَ البصمةِ العليا بعدَ تعديلٍ متعمَّد — يحاكي مَن يزوّرُ البيانَ متّسقاً مع نفسِه.
+ * @param {Record<string, any>} digest
+ */
+function resealDigest(digest) {
+  const { sha256: _old, ...body } = digest;
+  digest.sha256 = crypto.createHash('sha256').update(canonicalJson(body), 'utf8').digest('hex');
+}
+
+test(
+  'WL-606: نسخةٌ حديثةٌ تحملُ بصمةَ محتوىً سليمة، والاستعادةُ تعلنُ [RESTORE_OK] و[CONTENT_VERIFIED] معاً',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const { source, sourceUrl, dump } = await seededBackup('digestok');
+    const target = await createIsolatedDatabase('digestokdst');
+    try {
+      const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+      const digest = validateContentDigest(manifest.contentDigest);
+      assert.ok(digest, 'النسخةُ الحديثةُ بلا بصمة');
+      assert.equal(digest.format, CONTENT_DIGEST_FORMAT);
+      assert.equal(digest.version, CONTENT_DIGEST_VERSION);
+      // النطاقُ مُعلَنٌ في البيانِ نفسِه، ومعه ما لا يغطّيه.
+      assert.ok(Array.isArray(digest.scope['notCovered']));
+      assert.ok(
+        /** @type {string[]} */ (digest.scope['notCovered']).some((s) => /privileges/.test(s)),
+      );
+      // الجداولُ في البصمةِ هي جداولُ عدّاداتِ البيانِ نفسُها، بالأعدادِ نفسِها.
+      assert.deepEqual(Object.keys(digest.tables).sort(), Object.keys(manifest.rowCounts).sort());
+      for (const [name, entry] of Object.entries(digest.tables)) {
+        assert.equal(Number(entry.rows), manifest.rowCounts[name], name);
+      }
+      const verify = await runNode([BACKUP_SCRIPT, 'verify', dump], sourceUrl);
+      assert.equal(verify.code, 0, verify.stderr);
+      assert.match(verify.stdout, /\[CONTENT_DIGEST_PRESENT\]/);
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      assert.match(restore.stdout, new RegExp(`\\[CONTENT_VERIFIED\\].*${digest.sha256}`));
+      assert.equal(await ledgerInstalled(target.pool), true);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'WL-606 انحدار: محتوىً مختلفٌ بعددِ الصفوفِ نفسِه لا يمرُّ (‏كانَ يمرُّ [RESTORE_OK] قبلَ البصمة)',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const source = await createIsolatedDatabase('digestswap');
+    const target = await createIsolatedDatabase('digestswapdst');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-digestswap-')));
+    const before = path.join(dir, 'before.dump');
+    const after = path.join(dir, 'after.dump');
+    try {
+      await up(source.pool);
+      await seedEveryTable(source.pool);
+      const sourceUrl = databaseUrlFor(source.name);
+      assert.equal((await runNode([BACKUP_SCRIPT, 'create', before], sourceUrl)).code, 0);
+      // تغييرُ محتوىً بلا تغييرِ عدد: الأعدادُ ونسخةُ الهجرةِ متطابقتان في النسختين.
+      await source.pool.query(`UPDATE state.agents SET name = 'Agent Changed'`);
+      assert.equal((await runNode([BACKUP_SCRIPT, 'create', after], sourceUrl)).code, 0);
+      const mBefore = JSON.parse(fs.readFileSync(`${before}.manifest.json`, 'utf8'));
+      const mAfter = JSON.parse(fs.readFileSync(`${after}.manifest.json`, 'utf8'));
+      assert.deepEqual(
+        mAfter.rowCounts,
+        mBefore.rowCounts,
+        'الأعدادُ يجبُ أن تتطابقَ كي يقيسَ الاختبار',
+      );
+      assert.notEqual(
+        mAfter.contentDigest.tables.agents.sha256,
+        mBefore.contentDigest.tables.agents.sha256,
+      );
+      // أرشيفٌ لا يطابقُ بصمتَه: محتوى «بعد» مع بصمةِ «قبل» (‏وتجزئةُ الملفِّ صحيحة، فلا يكشفُه `verify`).
+      editManifest(after, (m) => {
+        m.contentDigest = mBefore.contentDigest;
+      });
+      const verify = await runNode([BACKUP_SCRIPT, 'verify', after], sourceUrl);
+      assert.equal(verify.code, 0, verify.stderr);
+      const restore = await runNode([RESTORE_SCRIPT, after, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 1, restore.stdout);
+      assert.doesNotMatch(restore.stdout, /RESTORE_OK/);
+      assert.match(restore.stderr, /\[RESTORE_CONTENT_MISMATCH\].*table agents: sha256/);
+      // وعدّاداتُ المستعادِ تطابقُ البيان — أي أنَّ التحقّقَ القديمَ وحدَه كانَ سيقبلُه.
+      // (‏الجدولُ المرحليُّ ما زالَ في `state` لأنّ الدفترَ لم يُركَّب، فيُستثنى من المقارنة.)
+      const restoredCounts = await stateRowCounts(target.pool);
+      for (const name of Object.keys(restoredCounts)) {
+        if (name.startsWith('__backup_schema_migrations_')) delete restoredCounts[name];
+      }
+      assert.deepEqual(restoredCounts, mBefore.rowCounts);
+      // الهدفُ لا يُقرأُ مُهاجَراً سليماً: الدفترُ بقيَ مرحليّاً في `state`.
+      assert.equal(await ledgerInstalled(target.pool), false);
+      assert.equal((await stagingTablesIn(target.pool)).length, 1);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+for (const [
+  label,
+  edit,
+  code,
+] of /** @type {Array<[string, (m: Record<string, any>) => void, string]>} */ ([
+  [
+    'قيمةُ تجزئةِ جدولٍ مُعدَّلةٌ بلا إعادةِ ختم',
+    (m) => {
+      m.contentDigest.tables.agents.sha256 = '0'.repeat(64);
+    },
+    'BACKUP_DIGEST_INVALID',
+  ],
+  [
+    'البصمةُ ليست كائناً',
+    (m) => {
+      m.contentDigest = 'sha256:abc';
+    },
+    'BACKUP_DIGEST_INVALID',
+  ],
+  [
+    'الجداولُ غائبةٌ من البصمة',
+    (m) => {
+      delete m.contentDigest.tables;
+      resealDigest(m.contentDigest);
+    },
+    'BACKUP_DIGEST_INVALID',
+  ],
+  [
+    'عددُ صفوفٍ ليس عدداً عشريّاً',
+    (m) => {
+      m.contentDigest.tables.agents.rows = 1;
+      resealDigest(m.contentDigest);
+    },
+    'BACKUP_DIGEST_INVALID',
+  ],
+  [
+    'إصدارٌ أحدثُ غيرُ مدعوم',
+    (m) => {
+      m.contentDigest.version = 2;
+      resealDigest(m.contentDigest);
+    },
+    'BACKUP_DIGEST_UNSUPPORTED',
+  ],
+  [
+    'صيغةٌ غريبة',
+    (m) => {
+      m.contentDigest.format = 'other.digest';
+    },
+    'BACKUP_DIGEST_UNSUPPORTED',
+  ],
+])) {
+  test(
+    `WL-606: بصمةٌ في البيان — ${label} ⇒ ${code} في verify والاستعادة، والهدفُ لا يُنشأ`,
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+    async () => {
+      const { source, sourceUrl, dump } = await seededBackup(`dg${code.slice(14, 18)}`);
+      const targetName = `wl606_absent_${crypto.randomBytes(4).toString('hex')}`;
+      try {
+        editManifest(dump, edit);
+        const verify = await runNode([BACKUP_SCRIPT, 'verify', dump], sourceUrl);
+        assert.equal(verify.code, 1, verify.stdout);
+        assert.match(verify.stderr, new RegExp(`\\[${code}\\]`));
+        for (const extra of [[], ['--allow-unverified']]) {
+          const restore = await runNode(
+            [RESTORE_SCRIPT, dump, '--database', targetName, ...extra],
+            sourceUrl,
+          );
+          assert.equal(restore.code, 1, restore.stdout);
+          assert.match(restore.stderr, new RegExp(`\\[${code}\\]`));
+          assert.doesNotMatch(restore.stdout, /RESTORE_OK|RESTORE_UNVERIFIED/);
+          // ‏`--allow-unverified` يخصُّ الغيابَ وحدَه؛ لا يُسكِتُ بصمةً حاضرةً تالفة.
+          assert.equal(await databaseExists(source.pool, targetName), false);
+        }
+      } finally {
+        await source.pool.query(`DROP DATABASE IF EXISTS ${quoteIdent(targetName)}`);
+        await source.drop();
+      }
+    },
+  );
+}
+
+test(
+  'WL-606: بيانٌ مُزوَّرٌ متّسقٌ مع نفسِه يجتازُ verify ثمّ يُرفَضُ RESTORE_CONTENT_MISMATCH (‏الختمُ ليس توقيعاً)',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const { source, sourceUrl, dump } = await seededBackup('digestforge');
+    const target = await createIsolatedDatabase('digestforgedst');
+    try {
+      editManifest(dump, (m) => {
+        m.contentDigest.tables.agents.sha256 = 'f'.repeat(64);
+        resealDigest(m.contentDigest);
+      });
+      assert.equal((await runNode([BACKUP_SCRIPT, 'verify', dump], sourceUrl)).code, 0);
+      const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+      assert.equal(restore.code, 1, restore.stdout);
+      assert.match(restore.stderr, /\[RESTORE_CONTENT_MISMATCH\].*table agents: sha256/);
+      assert.equal(await ledgerInstalled(target.pool), false);
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
+
+test(
+  'WL-606: نسخةٌ قديمةٌ بلا بصمة ⇒ RESTORE_DIGEST_MISSING قبلَ اللمس؛ وبـ--allow-unverified ⇒ [RESTORE_UNVERIFIED] لا [RESTORE_OK]',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const { source, sourceUrl, dump, sourceDigest } = await seededBackup('digestlegacy');
+    const busy = await createIsolatedDatabase('digestlegacybusy');
+    const fresh = await createIsolatedDatabase('digestlegacydst');
+    try {
+      // بيانٌ بصيغةِ ما قبلَ `WL-606` حرفيّاً: لا `contentDigest` ولا `contentDigestMs`.
+      editManifest(dump, (m) => {
+        delete m.contentDigest;
+        delete m.contentDigestMs;
+      });
+      const verify = await runNode([BACKUP_SCRIPT, 'verify', dump], sourceUrl);
+      assert.equal(verify.code, 0, verify.stderr);
+      assert.match(verify.stdout, /\[CONTENT_DIGEST_ABSENT\]/);
+
+      // الرفضُ قبلَ اللمس، حتّى مع `--force` فوقَ قاعدةٍ مشغولة.
+      await up(busy.pool);
+      await seedEveryTable(busy.pool);
+      const busyBefore = await contentsDigest(busy.pool);
+      const refused = await runNode(
+        [RESTORE_SCRIPT, dump, '--database', busy.name, '--force'],
+        sourceUrl,
+      );
+      assert.equal(refused.code, 1, refused.stdout);
+      assert.match(refused.stderr, /\[RESTORE_DIGEST_MISSING\]/);
+      assert.doesNotMatch(refused.stdout, /RESTORE_OK/);
+      assert.equal(await contentsDigest(busy.pool), busyBefore, 'الرفضُ لمسَ الهدف');
+
+      // القرارُ الصريح: تُستعادُ، والعلامةُ تقولُ إنّها غيرُ متحقَّقة — ولا تحوي `RESTORE_OK`.
+      const allowed = await runNode(
+        [RESTORE_SCRIPT, dump, '--database', fresh.name, '--allow-unverified'],
+        sourceUrl,
+      );
+      assert.equal(allowed.code, 0, allowed.stderr);
+      assert.match(allowed.stdout, /\[RESTORE_UNVERIFIED\]/);
+      assert.doesNotMatch(allowed.stdout, /RESTORE_OK|CONTENT_VERIFIED/);
+      assert.equal(
+        await contentsDigest(fresh.pool),
+        sourceDigest,
+        'الاستعادةُ القديمةُ تبقى صالحة',
+      );
+      assert.equal(await ledgerInstalled(fresh.pool), true);
+      // والعقدُ البرمجيّ يميّزُها آليّاً لا بنصّ.
+      const second = await createIsolatedDatabase('digestlegacyapi');
+      try {
+        const outcome = await restoreBackup(
+          { dumpPath: dump, database: second.name, force: false, allowUnverified: true },
+          sourceUrl,
+        );
+        assert.equal(outcome.contentVerification, CONTENT_VERIFICATION.NO_DIGEST);
+      } finally {
+        await second.drop();
+      }
+    } finally {
+      await fresh.drop();
+      await busy.drop();
+      await source.drop();
+    }
+  },
+);
+
+/**
+ * قاعدةٌ صغيرةٌ بمخطّطِ `state` يدويٍّ ودفترٍ أدنى — لفحصِ حساسيّةِ البصمةِ وحتميّتِها مباشرة.
+ * @param {string} label
+ * @param {string[]} statements
+ */
+async function digestScratch(label, statements) {
+  const db = await createIsolatedDatabase(label);
+  await db.pool.query(`CREATE SCHEMA state`);
+  await db.pool.query(`CREATE TABLE public.schema_migrations (version integer, name text,
+    checksum text, applied_at timestamptz, applied_by text)`);
+  await db.pool.query(
+    `INSERT INTO public.schema_migrations VALUES (1, 'init', '${'a'.repeat(64)}', '2026-01-01T00:00:00Z', 'test')`,
+  );
+  for (const sql of statements) await db.pool.query(sql);
+  const client = await db.pool.connect();
+  try {
+    // إعداداتُ جلسةٍ مُختلفةٌ عمداً: البصمةُ تُثبِّتُ إعداداتِها فلا تتأثّر.
+    await client.query(
+      `SET TimeZone = 'Asia/Riyadh'; SET DateStyle = 'SQL, DMY'; SET extra_float_digits = 0; SET bytea_output = 'escape'`,
+    );
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const digest = await computeContentDigest(client, 'public.schema_migrations');
+    await client.query('COMMIT');
+    return digest;
+  } finally {
+    client.release();
+    await db.drop();
+  }
+}
+
+test(
+  'WL-606: حساسيّةُ البصمةِ وحتميّتُها — فراغ، NULL مقابلَ نصٍّ فارغ، bytea، ترتيبُ الإدراج، تبادلُ قيمٍ، تكرار، نوعُ عمود',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const table = `CREATE TABLE state.t (id integer, a text, b bytea, f double precision, ts timestamptz)`;
+    /** @type {[string, string, string]} */
+    const rows = [
+      `(1, 'x', '\\x00ff'::bytea, 0.1, '2026-05-05T10:00:00Z')`,
+      `(2, '', '\\x'::bytea, 1e-300, '1999-12-31T23:59:59.123456Z')`,
+      `(3, NULL, NULL, NULL, NULL)`,
+    ];
+    const ins = (/** @type {string[]} */ r) => `INSERT INTO state.t VALUES ${r.join(', ')}`;
+    const base = await digestScratch('dgbase', [table, ins(rows)]);
+
+    // حتميّة: ترتيبُ إدراجٍ معكوسٌ وقاعدةٌ أخرى وإعداداتُ جلسة ⇒ البصمةُ نفسُها.
+    const reversed = await digestScratch('dgrev', [table, ins([...rows].reverse())]);
+    assert.deepEqual(contentDigestDifferences(base, reversed), []);
+    assert.equal(reversed.sha256, base.sha256);
+    // وصفوفٌ «ميّتة» بعدَ تحديثٍ يعيدُ القيمةَ نفسَها لا تغيّرُ شيئاً.
+    const churned = await digestScratch('dgchurn', [
+      table,
+      ins(rows),
+      `UPDATE state.t SET a = a || '' WHERE id = 1`,
+    ]);
+    assert.equal(churned.sha256, base.sha256);
+
+    // جدولٌ فارغ: صفر صفوف وتجزئةُ الفراغ.
+    const empty = await digestScratch('dgempty', [table]);
+    assert.equal(empty.tables['t']?.rows, '0');
+    assert.equal(empty.tables['t']?.sha256, crypto.createHash('sha256').update('').digest('hex'));
+    assert.deepEqual(contentDigestDifferences(base, empty), ['table t: rows+sha256']);
+
+    /** @type {Array<[string, string[]]>} */
+    const variants = [
+      [
+        'NULL بدلَ النصِّ الفارغ',
+        [rows[0], `(2, NULL, '\\x'::bytea, 1e-300, '1999-12-31T23:59:59.123456Z')`, rows[2]],
+      ],
+      ['نصٌّ فارغٌ بدلَ NULL', [rows[0], rows[1], `(3, '', NULL, NULL, NULL)`]],
+      [
+        'بايتٌ واحدٌ في bytea',
+        [`(1, 'x', '\\x00fe'::bytea, 0.1, '2026-05-05T10:00:00Z')`, rows[1], rows[2]],
+      ],
+      ['bytea فارغٌ بدلَ NULL', [rows[0], rows[1], `(3, NULL, '\\x'::bytea, NULL, NULL)`]],
+      [
+        'آخرُ رقمٍ في عددٍ عشريّ',
+        [
+          `(1, 'x', '\\x00ff'::bytea, 0.10000000000000002, '2026-05-05T10:00:00Z')`,
+          rows[1],
+          rows[2],
+        ],
+      ],
+      [
+        'ميكروثانيةٌ في الزمن',
+        [rows[0], `(2, '', '\\x'::bytea, 1e-300, '1999-12-31T23:59:59.123457Z')`, rows[2]],
+      ],
+      [
+        'تبادلُ قيمتَين بينَ صفَّين',
+        [
+          `(1, '', '\\x00ff'::bytea, 0.1, '2026-05-05T10:00:00Z')`,
+          `(2, 'x', '\\x'::bytea, 1e-300, '1999-12-31T23:59:59.123456Z')`,
+          rows[2],
+        ],
+      ],
+      ['صفٌّ مكرَّرٌ بدلَ آخرَ (‏العددُ نفسُه)', [rows[0], rows[0], rows[2]]],
+      [
+        'فاصلةٌ داخلَ نصٍّ تحاكي حدودَ الحقول',
+        [`(1, 'x,\\\\x00ff', NULL, 0.1, '2026-05-05T10:00:00Z')`, rows[1], rows[2]],
+      ],
+    ];
+    for (const [why, variant] of variants) {
+      const other = await digestScratch('dgvar', [table, ins(variant)]);
+      assert.equal(other.tables['t']?.rows, '3', why);
+      assert.deepEqual(contentDigestDifferences(base, other), ['table t: sha256'], why);
+    }
+    // نوعُ عمودٍ مختلفٌ بالقيمِ النصّيّةِ نفسِها: توقيعُ الأعمدةِ يكشفُه.
+    const retyped = await digestScratch('dgtype', [
+      table.replace('a text', 'a varchar(10)'),
+      ins(rows),
+    ]);
+    assert.deepEqual(contentDigestDifferences(base, retyped), ['table t: columns']);
+    // جدولٌ زائدٌ أو ناقص، ودفترٌ مختلف.
+    const extra = await digestScratch('dgextra', [
+      table,
+      ins(rows),
+      `CREATE TABLE state.u (x int)`,
+    ]);
+    assert.deepEqual(contentDigestDifferences(base, extra), ['table u: غيرُ موجودٍ في النسخة']);
+    const ledger = await digestScratch('dgledger', [
+      table,
+      ins(rows),
+      `UPDATE public.schema_migrations SET applied_by = 'other'`,
+    ]);
+    assert.deepEqual(contentDigestDifferences(base, ledger), ['ledger']);
+  },
+);
+
+test(
+  'WL-606: المتسلسلات — تقدّمٌ مقبول (‏خارجَ MVCC)، وتراجعٌ أو زيادةٌ مختلفة مرفوضان',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const seq = (/** @type {string} */ setval) => [
+      `CREATE SEQUENCE state.s`,
+      `SELECT setval('state.s', ${setval})`,
+    ];
+    const base = await digestScratch('dgseq', seq('10'));
+    assert.deepEqual(base.sequences['s'], { lastValue: '10', isCalled: true, increment: '1' });
+    assert.deepEqual(contentDigestDifferences(base, await digestScratch('dgseqa', seq('12'))), []);
+    assert.deepEqual(contentDigestDifferences(base, await digestScratch('dgseqb', seq('9'))), [
+      'sequence s: behind snapshot',
+    ]);
+    // ‏`is_called = false` عندَ 10 تعني أنّ التاليةَ 10 لا 11 ⇒ خلفَ اللقطة.
+    assert.deepEqual(
+      contentDigestDifferences(base, await digestScratch('dgseqc', seq('10, false'))),
+      ['sequence s: behind snapshot'],
+    );
+    const decreasing = await digestScratch('dgseqd', [
+      `CREATE SEQUENCE state.s INCREMENT BY -1 MINVALUE -100 MAXVALUE 100 START WITH 10`,
+    ]);
+    assert.deepEqual(contentDigestDifferences(base, decreasing), ['sequence s: increment']);
+    assert.deepEqual(contentDigestDifferences(base, await digestScratch('dgseqe', [])), [
+      'sequence s: غائبٌ عن المستعاد',
+    ]);
   },
 );
