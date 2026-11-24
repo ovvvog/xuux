@@ -18,11 +18,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHmac, randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { after, before, describe, test } from 'node:test';
 
 import pg from 'pg';
@@ -43,7 +42,17 @@ import {
   sealFencedSessions,
 } from '../../src/fence/db-fence.mjs';
 import { HaltSwitch, KingIdentity } from '../../src/root-of-trust/index.mjs';
-import { NO_EFFECTS, harness, rejection, rejectsWith } from '../helpers/fence-harness.mjs';
+import {
+  L75_WORKER_SRC,
+  NO_EFFECTS,
+  REPO_ROOT,
+  harness,
+  l75Until,
+  rejection,
+  rejectsWith,
+  supervisorLab,
+  t_note,
+} from '../helpers/fence-harness.mjs';
 import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
 import { databaseUrl, quoteIdent, skipWithoutDatabase } from '../helpers/pg.mjs';
 
@@ -1412,267 +1421,33 @@ test('TH-SUP-05: مدخلاتُ الكنسِ تُرفَضُ قبلَ أيِّ ا
   assert.equal(FENCE_ERRORS.ORPHAN_SWEEP_INCOMPLETE, 'FENCE_ORPHAN_SWEEP_INCOMPLETE');
 });
 
-// ── LIVE-75 (‏WL-604): المُشرِفُ المركّب `FenceSupervisor` — عمليّاتُ عمّالٍ حقيقيّةٌ بـIPC و`XUUX_DB_FENCE=required` ──
-// كلُّ عاملٍ عمليّةُ Node ابنةٌ حقيقيّة تسلكُ مسارَ العاملِ (‏`dbFenceMode` ⇒ `workerFenceHandshake` ⇒ `sealFencedPool` ⇒
-// `assertFencedSession`) بمفتاحِها في ملفٍّ لا يقرؤه المُشرِف. **حدُّ الحزامِ المعلن:** دورُ الإقلاعِ يدخلُ بكلمةِ مرورٍ
-// مشتقّةٍ يمنحُها superuser (‏`loginBroker`) — الإنتاجُ peer/pg_ident بلا سرّ (‏D-SUP-2)، والمختبرُ يختبرُ peer.
-const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
-const FENCE_MODULE = new URL('../../src/fence/db-fence.mjs', import.meta.url).href;
-const L75_WORKER_SRC = `
-import { createHmac } from 'node:crypto';
-import pg from 'pg';
-import { assertFencedSession, dbFenceMode, fileKeyProvider, newBootId, sealFencedPool, workerFenceHandshake }
-  from ${JSON.stringify(FENCE_MODULE)};
-const env = process.env;
-const mode = env.L75_MODE ?? 'write';
-const send = (m) => { if (process.connected) { try { process.send(m); } catch {} } };
-process.on('disconnect', () => { if (mode !== 'stubborn') process.exit(70); });
-if (dbFenceMode(env) !== 'required') process.exit(64);
-if (mode === 'die-before-hello') process.exit(11);
-const workerId = env.XUUX_FENCE_WORKER_ID;
-const key = fileKeyProvider(env.XUUX_FENCE_WORKER_KEY);
-const bootId = newBootId();
-const cred = await workerFenceHandshake(key, { workerId, bootId, timeoutMs: 10000 });
-if (mode === 'die-after-handshake') process.exit(12);
-const role = String(cred.role_name);
-const url = new URL(env.L75_DB_URL);
-url.username = role;
-url.password = createHmac('sha256', env.L75_HARNESS_SECRET).update(role).digest('base64url');
-const pool = new pg.Pool({ connectionString: url.toString(), max: 2, idleTimeoutMillis: 0 });
-pool.on('error', () => {});
-if (mode === 'seal-fail') {
-  send({ type: 'xuux-fence/seal-failed', role_name: role, reason: 'injected' });
-  await new Promise(() => {});
-}
-for (let i = 0; ; i++) {
-  try { const c = await pool.connect(); c.release(); break; }
-  catch (e) { if (i > 100) { send({ type: 'xuux-fence/seal-failed', role_name: role, reason: 'login' }); process.exit(14); }
-    await new Promise((r) => setTimeout(r, 30)); }
-}
-let sessions;
-try {
-  sessions = await sealFencedPool(pool, 2, key, { db: cred.db, sysid: cred.sysid, workerId, bootId, epoch: cred.epoch, roleName: role });
-} catch (e) {
-  send({ type: 'xuux-fence/seal-failed', role_name: role, reason: String(e?.message ?? e) });
-  process.exit(13);
-}
-send({ type: 'xuux-fence/sealed', role_name: role, sessions: mode === 'seal-lie' ? sessions.slice(0, 1) : sessions });
-if (mode === 'seal-lie') await new Promise(() => {});
-await assertFencedSession(pool, { workerId, bootId });
-send({ type: 'l75/ready', role, pid: process.pid });
-const id = Number(env.L75_ID);
-if (mode === 'open-txn') {
-  const c = await pool.connect();
-  await c.query('BEGIN');
-  await c.query("INSERT INTO state.fence_probe (id, v) VALUES ($1, 'open-txn')", [id]);
-  send({ type: 'l75/txn-open' });
-  await new Promise(() => {});
-}
-if (mode === 'die-after-ready') setTimeout(() => process.exit(21), 150);
-let n = 0;
-for (;;) {
-  try {
-    await pool.query('INSERT INTO state.fence_probe (id, v) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET v = excluded.v', [id, String(++n)]);
-    send({ type: 'l75/wrote', n });
-  } catch (e) {
-    send({ type: 'l75/write-refused', code: e?.code ?? null });
-    if (mode !== 'stubborn') process.exit(30);
-  }
-  await new Promise((r) => setTimeout(r, 40));
-}
-`;
-
-/** @param {() => Promise<boolean> | boolean} fn @param {number} ms @param {string} why */
-async function l75Until(fn, ms, why) {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    if (await fn()) return;
-    if (Date.now() > deadline) throw new Error(`انقضت المهلة: ${why}`);
-    await new Promise((r) => setTimeout(r, 25));
-  }
-}
-
 describe(
   'LIVE-75 — المُشرِفُ المركّب FenceSupervisor: إقلاعٌ وكنسٌ ومراقبةٌ وإعادةٌ وفشلٌ مغلق (‏WL-604)',
   { skip: skipWithoutDatabase },
   () => {
+    const lab = supervisorLab('fence_sup');
     /** @type {Awaited<ReturnType<typeof harness>>} */
     let h;
-    /** @type {string} */
-    let dir;
-    /** @type {string} */
-    let rootPassword;
-    const secret = randomBytes(18).toString('base64url');
-    /** @type {Record<string, string>} */
-    const keyFiles = {};
-    /** @type {Set<import('node:child_process').ChildProcess>} */
-    const children = new Set();
-    /** @type {FenceSupervisor[]} */
-    const supervisors = [];
-
-    before(async () => {
-      h = await harness('fence_sup');
-      await h.resume();
-      dir = mkdtempSync(join(tmpdir(), 'xuux-l75-'));
-      for (const w of /** @type {const} */ (['alpha', 'beta'])) {
-        keyFiles[w] = join(dir, `${w}.pem`);
-        writeFileSync(keyFiles[w], h.keys[w].privateKeyPem, { mode: 0o600 });
-        chmodSync(keyFiles[w], 0o600);
-      }
-      rootPassword = randomBytes(18).toString('base64url');
-      await h.db.pool.query(`ALTER ROLE xf_root PASSWORD '${rootPassword}'`);
+    before(() => {
+      h = lab.h;
     });
-    after(async () => {
-      for (const s of supervisors) await s.stop().catch(() => {});
-      for (const c of children) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
-      await h?.close();
-      if (dir) rmSync(dir, { recursive: true, force: true });
-    });
-
-    /** @param {string} [base] */
-    const rootUrl = (base = databaseUrl() ?? '') => {
-      const u = new URL(base);
-      u.username = 'xf_root';
-      u.password = rootPassword;
-      u.pathname = `/${h.db.name}`;
-      return u.toString();
-    };
-    const workerDbUrl = () => {
-      const u = new URL(databaseUrl() ?? '');
-      u.pathname = `/${h.db.name}`;
-      return u.toString();
-    };
-    /** @param {string} url */
-    const connectAt = (url) => async () => {
-      const c = new pg.Client({ connectionString: url });
-      c.on('error', () => {});
-      await c.connect();
-      return c;
-    };
-    /** @param {Record<string, any>} credential */
-    const loginBroker = async (credential) => {
-      const role = String(credential['role_name']);
-      const pw = createHmac('sha256', secret).update(role).digest('base64url');
-      await h.db.pool.query(
-        `ALTER ROLE ${quoteIdent(role)} PASSWORD '${pw}' VALID UNTIL 'infinity'`,
-      );
-    };
-    /** @type {Record<string, number>} */
-    const probeId = { alpha: 7501, beta: 7502 };
-
-    /**
-     * @param {{ modes?: Record<string, string[]>, workers?: string[], url?: string, root?: FenceRoot,
-     *           options?: Record<string, any> }} [o]
-     */
-    const mk = (o = {}) => {
-      const url = o.url ?? rootUrl();
-      /** @type {Array<Record<string, unknown>>} */
-      const events = [];
-      /** @type {Array<{ worker: string, attempt: number, env: Record<string, string>, child: import('node:child_process').ChildProcess }>} */
-      const spawned = [];
-      /** @type {Array<{ worker: string, attempt: number, m: any }>} */
-      const messages = [];
-      const modes = o.modes ?? {};
-      const sup = new FenceSupervisor({
-        root:
-          o.root ??
-          new FenceRoot(connectAt(url), { log: (e) => events.push({ src: 'root', ...e }) }),
-        lockConnect: connectAt(url),
-        workers: (o.workers ?? ['alpha', 'beta']).map((workerId) => ({ workerId })),
-        spawnWorker: (spec, ctx) => {
-          const list = modes[spec.workerId] ?? ['write'];
-          const mode = list[Math.min(ctx.attempt - 1, list.length - 1)];
-          const child = spawn(process.execPath, ['--input-type=module', '-e', L75_WORKER_SRC], {
-            cwd: REPO_ROOT,
-            env: {
-              PATH: process.env['PATH'] ?? '',
-              ...ctx.env,
-              XUUX_FENCE_WORKER_KEY: keyFiles[spec.workerId],
-              L75_MODE: mode,
-              L75_DB_URL: workerDbUrl(),
-              L75_HARNESS_SECRET: secret,
-              L75_ID: String(probeId[spec.workerId]),
-            },
-            stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
-          });
-          child.stderr?.on('data', () => {});
-          child.on('message', (m) =>
-            messages.push({ worker: spec.workerId, attempt: ctx.attempt, m }),
-          );
-          children.add(child);
-          spawned.push({ worker: spec.workerId, attempt: ctx.attempt, env: ctx.env, child });
-          return child;
-        },
-        loginBroker,
-        handshakeTimeoutMs: 8_000,
-        sealTimeoutMs: 8_000,
-        leaseIntervalMs: 200,
-        monitorIntervalMs: 100,
-        lockCheckTimeoutMs: 1_000,
-        maxDbFailures: 2,
-        killGraceMs: 500,
-        restart: { maxRestarts: 3, windowMs: 60_000, backoffMs: 50 },
-        reaper: { ceilingMs: 1_000, retryMs: 50, firstTickTimeoutMs: 3_000 },
-        ...(o.options ?? {}),
-        log: (e) => events.push({ src: 'supervisor', ...e }),
-      });
-      supervisors.push(sup);
-      return { sup, events, spawned, messages };
-    };
-
-    /** اعتماداتُ الاختباراتِ السابقةِ (‏تُرى عندَ `clean()`) خارجَ ما يَعُدُّه الاختبارُ الجاري. */
-    let seen = new Set();
-    /** @returns {Promise<Array<{ role_name: string, worker_id: string, status: string, revoke_reason: string | null }>>} */
-    const creds = async () =>
-      (
-        await h.db.pool.query(
-          `SELECT role_name::text AS role_name, worker_id, status, revoke_reason FROM fence.credentials ORDER BY issued_at, role_name`,
-        )
-      ).rows.filter((/** @type {any} */ c) => !seen.has(c.role_name));
-    const active = async () => (await creds()).filter((c) => c.status === 'ACTIVE');
-    /** @param {string[]} roles */
-    const sessionsOf = async (roles) =>
-      Number(
-        (
-          await h.db.pool.query(
-            'SELECT count(*)::int AS n FROM pg_stat_activity WHERE usename = ANY($1::text[])',
-            [roles],
-          )
-        ).rows[0].n,
-      );
-    const lockHolders = async () =>
-      Number(
-        (
-          await h.db.pool.query(
-            `SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory' AND classid = $1::oid AND objid = $2::oid
-               AND objsubid = 2 AND granted AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
-            [...SUPERVISOR_LOCK_KEY],
-          )
-        ).rows[0].n,
-      );
-    /** @param {FenceSupervisor} sup @param {string} id */
-    const workerOf = (sup, id) => sup.snapshot().workers.find((w) => w.id === id);
-    /** @param {import('node:child_process').ChildProcess} c */
-    const dead = (c) => c.exitCode !== null || c.signalCode !== null;
-    /** بدايةٌ نظيفة: لا اعتمادَ نشِط، والسياجُ RUNNING، ولا قفل. */
-    const clean = async () => {
-      // ‏اختبارٌ سابقٌ سقطَ قبلَ `stop()` لا يتركُ مُشرِفَه ممسكاً بالقفلِ للتالي.
-      for (const s of supervisors.splice(0)) await s.stop().catch(() => {});
-      if ((await h.sovereign.status()).effective.state !== 'RUNNING') await h.resume();
-      await h.root.revokeOrphanCredentials();
-      await h.db.pool.query('DELETE FROM state.fence_probe WHERE id IN (7501, 7502)');
-      await l75Until(
-        async () => (await lockHolders()) === 0,
-        5_000,
-        'القفلُ محرَّرٌ قبلَ الاختبار',
-      );
-      assert.deepEqual(await active(), [], 'لا اعتمادَ نشِطاً قبلَ الاختبار');
-      seen = new Set(
-        (await h.db.pool.query('SELECT role_name::text AS r FROM fence.credentials')).rows.map(
-          (/** @type {any} */ x) => x.r,
-        ),
-      );
-    };
+    const {
+      secret,
+      keyFiles,
+      children,
+      rootUrl,
+      workerDbUrl,
+      connectAt,
+      probeId,
+      mk,
+      creds,
+      active,
+      sessionsOf,
+      lockHolders,
+      workerOf,
+      dead,
+      clean,
+    } = lab;
 
     test('SUP-01: الإقلاعُ الكامل — قفل ⇒ كنس ⇒ RUNNING ⇒ حاصد ⇒ عاملان بـXUUX_DB_FENCE=required مختومان يكتبان؛ والإيقافُ يُلغي ثمّ يقتلُ ويُحرِّرُ القفل', async () => {
       await clean();
@@ -1863,7 +1638,7 @@ describe(
 
     test('SUP-06: موتُ المُشرِفِ نفسِه (‏عمليّةُ CLI بـSIGKILL) ⇒ القاعدةُ تُحرِّرُ القفل؛ عاملٌ عنيدٌ يكتبُ حتى يكنسَه المُشرِفُ التالي', async () => {
       await clean();
-      const cfgPath = join(dir, 'sup.json');
+      const cfgPath = join(lab.dir, 'sup.json');
       const cmd = [process.execPath, '--input-type=module', '-e', L75_WORKER_SRC];
       const wenv = (/** @type {string} */ w, /** @type {string} */ mode) => ({
         XUUX_FENCE_WORKER_KEY: keyFiles[w],
@@ -2207,11 +1982,6 @@ describe(
     });
   },
 );
-
-/** سطرُ قياسٍ في مخرجِ TAP (‏دليلٌ لا تأكيد). @param {string} id @param {unknown} data */
-function t_note(id, data) {
-  process.stdout.write(`# L75-NOTE ${id} ${JSON.stringify(data)}\n`);
-}
 
 test('LIVE-75: مدخلاتُ FenceSupervisor تُرفَضُ قبلَ أيِّ اتصال', () => {
   const ok = () => ({
