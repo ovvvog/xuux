@@ -18,11 +18,22 @@ import pg from 'pg';
 import { harness } from '../helpers/fence-harness.mjs';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
-import { catalogSnapshot, createIsolatedDatabase, skipWithoutDatabase } from '../helpers/pg.mjs';
+import {
+  COVERAGE_MATRIX,
+  MANIFEST_AUTH_REASONS,
+  signManifestPrototype,
+  verifyManifestPrototype,
+  catalogSnapshot,
+  coverageDiff,
+  coverageProbe,
+  createIsolatedDatabase,
+  skipWithoutDatabase,
+} from '../helpers/pg.mjs';
 import { createTestEncryptor } from '../helpers/encryption.mjs';
 import {
   CONTENT_DIGEST_FORMAT,
   CONTENT_DIGEST_VERSION,
+  DIGEST_SETTINGS,
   canonicalJson,
   computeContentDigest,
   contentDigestDifferences,
@@ -3052,5 +3063,462 @@ test(
     assert.deepEqual(contentDigestDifferences(base, await digestScratch('dgseqe', [])), [
       'sequence s: غائبٌ عن المستعاد',
     ]);
+  },
+);
+
+// ═══ ‏`WL-608` — ‏`LIVE-78/DIGEST-COVERAGE`: ما تغطّيه البصمةُ وما لا تغطّيه، مقيساً ═══════════════════
+// نموذجٌ مختبريّ (‏`coverageProbe` في `tests/helpers/pg.mjs`) لا يلمسُ بيانَ الإنتاج. يُقاسُ بنسخٍ واستعادةٍ
+// حقيقيّين: (‏1) أيُّ فئةٍ تعبرُ النسخةَ وأيُّها تضيعُ تصميماً؛ (‏2) تلاعبٌ بكلِّ فئةٍ داخلَ الأرشيفِ بعدَ
+// الاستعادة لا تراه بصمةُ `WL-606` (‏فـ`[CONTENT_VERIFIED]` كانَ سيُعلَن) ويراه النموذجُ في فئتِه وحدَها؛
+// (‏3) الثبات: تكرار، ‏VACUUM/REINDEX، إعادةُ إنشاءِ قيدٍ بـOID جديد؛ (‏4) الكلفة. ‏`LIVE-78/DIGEST-COVERAGE` يبقى OPEN.
+
+const WL608_ROLE = `wl608_reader_${process.pid}`;
+const WL608_OBJECTS = [
+  `CREATE TYPE state.wl608_mood AS ENUM ('a', 'b')`,
+  `CREATE DOMAIN state.wl608_pos AS integer CHECK (VALUE > 0)`,
+  `CREATE TABLE state.wl608_cov (id integer PRIMARY KEY, n state.wl608_pos NOT NULL DEFAULT 1,
+     m state.wl608_mood, CONSTRAINT wl608_n_small CHECK (n < 1000))`,
+  `CREATE INDEX wl608_cov_m ON state.wl608_cov (m)`,
+  `CREATE FUNCTION state.wl608_fn() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$`,
+  `CREATE TRIGGER wl608_trg BEFORE INSERT ON state.wl608_cov FOR EACH ROW EXECUTE FUNCTION state.wl608_fn()`,
+  `ALTER TABLE state.wl608_cov ENABLE ROW LEVEL SECURITY`,
+  `CREATE POLICY wl608_pol ON state.wl608_cov USING (n > 0)`,
+  `CREATE VIEW state.wl608_v AS SELECT id, n FROM state.wl608_cov WHERE n > 1`,
+  `COMMENT ON TABLE state.wl608_cov IS 'wl608'`,
+  `INSERT INTO state.wl608_cov VALUES (1, 5, 'a'), (2, 7, 'b')`,
+  `GRANT SELECT ON state.wl608_cov TO ${WL608_ROLE}`,
+  `SELECT lo_from_bytea(0, '\\x776c363038'::bytea)`,
+];
+
+/**
+ * مصدرٌ مُهاجَرٌ بكائناتِ كلِّ فئة، ونسخةٌ حقيقيّة، واستعادةٌ حقيقيّةٌ في هدفٍ جديد.
+ * @param {string} label
+ */
+async function wl608RoundTrip(label) {
+  /** @type {Awaited<ReturnType<typeof coverageProbe>> | undefined} */
+  let preBackup;
+  const source = await createIsolatedDatabase(`${label}src`);
+  const target = await createIsolatedDatabase(`${label}dst`);
+  const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), `backup-${label}-`)));
+  const dump = path.join(dir, 'state.dump');
+  await source.pool.query(`DROP ROLE IF EXISTS ${WL608_ROLE}`);
+  await source.pool.query(`CREATE ROLE ${WL608_ROLE} NOLOGIN`);
+  const cleanup = async () => {
+    await target.drop();
+    await source.drop();
+    await target.pool.end().catch(() => {});
+    const admin = new pg.Client({ connectionString: process.env['DATABASE_URL'] });
+    await admin.connect();
+    try {
+      await admin.query(`DROP ROLE IF EXISTS ${WL608_ROLE}`);
+    } finally {
+      await admin.end();
+    }
+  };
+  try {
+    await up(source.pool);
+    await seedEveryTable(source.pool);
+    for (const sql of WL608_OBJECTS) await source.pool.query(sql);
+    preBackup = await coverageProbe(source.pool, { settings: DIGEST_SETTINGS });
+    const sourceUrl = databaseUrlFor(source.name);
+    const backup = await runNode([BACKUP_SCRIPT, 'create', dump], sourceUrl);
+    assert.equal(backup.code, 0, backup.stderr);
+    const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+    assert.equal(restore.code, 0, restore.stderr);
+    assert.match(restore.stdout, /\[CONTENT_VERIFIED\]/);
+    const manifest = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'));
+    return { source, target, manifest, cleanup, preBackup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+
+/** بصمةُ الإنتاجِ (‏`WL-606`) على الهدف مقارنةً ببيانِ النسخة. @param {import('pg').Pool} pool @param {Record<string, any>} manifest */
+async function productionDigestDiff(pool, manifest) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const digest = await computeContentDigest(client, 'public.schema_migrations');
+    await client.query('ROLLBACK');
+    return contentDigestDifferences(manifest.contentDigest, digest);
+  } finally {
+    client.release();
+  }
+}
+
+test(
+  'WL-608 DIGEST-COVERAGE: نسخٌ/استعادةٌ حقيقيّان — فئاتُ الأرشيفِ تعبرُ متطابقة، والمالكون والصلاحيّاتُ والكائناتُ الكبيرةُ وقوادحُ الأحداثِ تضيعُ تصميماً',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const rt = await wl608RoundTrip('cov608rt');
+    try {
+      const before = await coverageProbe(rt.source.pool, { settings: DIGEST_SETTINGS });
+      const after = await coverageProbe(rt.target.pool, { settings: DIGEST_SETTINGS });
+      // النسخُ نفسُه يكتبُ في المصدر: ‏fence.ddl_audit يسجّلُ إنشاءَ الجدولِ المرحليِّ وحذفَه. يُقاسُ السببُ لا يُفترَض:
+      // المصدرُ قبلَ النسخِ وبعدَه يختلفُ في هذا الجدولِ وحدَه، والهدفُ يطابقُ أحدَهما أو يقعُ بينَهما بعددِ صفوفِه.
+      assert.deepEqual(coverageDiff(/** @type {any} */ (rt.preBackup), before), {
+        fenceRows: ['ddl_audit'],
+      });
+      const audit = (/** @type {any} */ p) =>
+        Number(new Map(p.categories['fenceRows'].entries).get('ddl_audit')[0]);
+      assert.ok(
+        audit(rt.preBackup) <= audit(after) && audit(after) <= audit(before),
+        'ddl_audit بينَ لقطتَي المصدر',
+      );
+      const diff = coverageDiff(before, after);
+      if (diff['fenceRows']?.join() === 'ddl_audit') delete diff['fenceRows'];
+      t.diagnostic(`PG${before.pgMajor} diff=${JSON.stringify(diff)}`);
+      for (const [name, row] of Object.entries(COVERAGE_MATRIX)) {
+        const entries = before.categories[name]?.entries ?? [];
+        if (row.roundTrip === 'equal') {
+          assert.ok(entries.length > 0 || name === 'comments', `${name}: المصدرُ بلا كائنٍ يُقاس`);
+          assert.equal(diff[name], undefined, `${name} في الأرشيفِ ويجبُ أن يعبر: ${diff[name]}`);
+        }
+      }
+      // ما يضيعُ تصميماً — مقيساً لا موصوفاً:
+      const entry = (/** @type {any} */ p, /** @type {string} */ c, /** @type {string} */ k) =>
+        JSON.stringify(new Map(p.categories[c].entries).get(k));
+      assert.match(entry(before, 'grants', 'rel:state.wl608_cov'), new RegExp(WL608_ROLE));
+      assert.doesNotMatch(
+        entry(after, 'grants', 'rel:state.wl608_cov'),
+        new RegExp(WL608_ROLE),
+        'GRANT لا يعبرُ (‏--no-privileges)',
+      );
+      assert.ok(
+        diff['owners'],
+        'المالكون لا يعبرون (‏--no-owner): المالكُ في الهدفِ مُنفِّذُ الاستعادة',
+      );
+      assert.ok(diff['largeObjects'], 'الكائنُ الكبيرُ لا يعبرُ (‏--schema)');
+      assert.equal(after.categories['largeObjects']?.entries.length, 0);
+      assert.ok(
+        (before.categories['eventTriggers']?.entries.length ?? 0) > 0,
+        'السياجُ يُثبِّتُ قوادحَ أحداثٍ في المصدر',
+      );
+      assert.equal(after.categories['eventTriggers']?.entries.length, 0, 'قوادحُ الأحداثِ لا تعبر');
+      // الأدوارُ على مستوى العنقود: تطابقُها هنا لأنّ الاختبارَ على العنقودِ نفسِه، لا لأنّ النسخةَ نقلتها.
+      assert.equal(diff['roles'] === undefined || Array.isArray(diff['roles']), true);
+      // ولا شيءَ آخرُ يختلف: الفروقُ كلُّها في فئاتٍ خارجَ الأرشيف.
+      for (const name of Object.keys(diff)) {
+        assert.equal(
+          /** @type {Record<string, { inArchive: boolean }>} */ (COVERAGE_MATRIX)[name]?.inArchive,
+          false,
+          `${name} اختلفت وهي في الأرشيف`,
+        );
+      }
+    } finally {
+      await rt.cleanup();
+    }
+  },
+);
+
+test(
+  'WL-608 DIGEST-COVERAGE: تلاعبٌ بكلِّ فئةٍ بنيويّةٍ بعدَ الاستعادة لا تراه بصمةُ WL-606 (‏فـCONTENT_VERIFIED كانَ يُعلَن) ويراه النموذجُ في فئتِه وحدَها',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const rt = await wl608RoundTrip('cov608gap');
+    try {
+      const tampers = /** @type {Array<[string, string]>} */ ([
+        ['constraints', `ALTER TABLE state.wl608_cov DROP CONSTRAINT wl608_n_small`],
+        ['indexes', `DROP INDEX state.wl608_cov_m`],
+        ['triggers', `ALTER TABLE state.wl608_cov DISABLE TRIGGER wl608_trg`],
+        [
+          'routines',
+          `CREATE OR REPLACE FUNCTION state.wl608_fn() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN NEW.n := 999; RETURN NEW; END$$`,
+        ],
+        ['policies', `ALTER POLICY wl608_pol ON state.wl608_cov USING (true)`],
+        ['relations', `ALTER TABLE state.wl608_cov DISABLE ROW LEVEL SECURITY`],
+        ['columns', `ALTER TABLE state.wl608_cov ALTER COLUMN n SET DEFAULT 2`],
+        [
+          'views',
+          `CREATE OR REPLACE VIEW state.wl608_v AS SELECT id, n FROM state.wl608_cov WHERE n > 2`,
+        ],
+        ['types', `ALTER TYPE state.wl608_mood ADD VALUE 'c'`],
+        ['comments', `COMMENT ON TABLE state.wl608_cov IS 'tampered'`],
+      ]);
+      let prev = await coverageProbe(rt.target.pool, { settings: DIGEST_SETTINGS });
+      assert.deepEqual(await productionDigestDiff(rt.target.pool, rt.manifest), []);
+      for (const [category, sql] of tampers) {
+        await rt.target.pool.query(sql);
+        const next = await coverageProbe(rt.target.pool, { settings: DIGEST_SETTINGS });
+        assert.deepEqual(Object.keys(coverageDiff(prev, next)), [category], `${category}: ${sql}`);
+        assert.deepEqual(
+          await productionDigestDiff(rt.target.pool, rt.manifest),
+          [],
+          `${category}: بصمةُ الإنتاجِ لا تغطّي الفئة — لو رأتها لكانَ هذا الاختبارُ خاطئاً`,
+        );
+        prev = next;
+      }
+      t.diagnostic(
+        `${tampers.length}/${tampers.length} فئاتٍ: بصمةُ WL-606 صامتة، والنموذجُ يحدّدُ الفئة`,
+      );
+    } finally {
+      await rt.cleanup();
+    }
+  },
+);
+
+test(
+  'WL-608 DIGEST-COVERAGE: الثباتُ والكلفة — تكرار، VACUUM ANALYZE وREINDEX، وإعادةُ إنشاءِ قيدٍ/فهرسٍ بـOID جديد لا تغيّرُ التمثيل',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const rt = await wl608RoundTrip('cov608det');
+    try {
+      const probe = () => coverageProbe(rt.target.pool, { settings: DIGEST_SETTINGS });
+      const a = await probe();
+      const b = await probe();
+      assert.deepEqual(coverageDiff(a, b), {});
+      await rt.target.pool.query('VACUUM ANALYZE');
+      await rt.target.pool.query('REINDEX TABLE state.wl608_cov');
+      assert.deepEqual(coverageDiff(a, await probe()), {}, 'الصيانةُ لا تغيّرُ التمثيل');
+      const oids = async () =>
+        (
+          await rt.target.pool.query(
+            `SELECT (SELECT oid FROM pg_constraint WHERE conname = 'wl608_n_small')::text AS c,
+                    'state.wl608_cov_m'::regclass::oid::text AS i`,
+          )
+        ).rows[0];
+      const o1 = await oids();
+      await rt.target.pool.query(`ALTER TABLE state.wl608_cov DROP CONSTRAINT wl608_n_small,
+        ADD CONSTRAINT wl608_n_small CHECK (n < 1000)`);
+      await rt.target.pool.query(
+        `DROP INDEX state.wl608_cov_m; CREATE INDEX wl608_cov_m ON state.wl608_cov (m)`,
+      );
+      const o2 = await oids();
+      assert.notEqual(o1?.['c'], o2?.['c']);
+      assert.notEqual(o1?.['i'], o2?.['i']);
+      assert.deepEqual(
+        coverageDiff(a, await probe()),
+        {},
+        'OID جديدٌ بالتعريفِ نفسِه ⇒ التمثيلُ نفسُه',
+      );
+      // الكلفة: زمنُ اللقطةِ وعددُ العناصر (‏تُطبَعُ للتقرير؛ القاعدةُ مُهاجَرةٌ بكاملِ السياج).
+      const counts = Object.fromEntries(
+        Object.entries(a.categories).map(([k, v]) => [k, v.entries.length]),
+      );
+      t.diagnostic(`PG${a.pgMajor} probe=${a.ms}ms/${b.ms}ms counts=${JSON.stringify(counts)}`);
+    } finally {
+      await rt.cleanup();
+    }
+  },
+);
+
+// ═══ ‏`WL-608` — أصالةُ البيان: السلامةُ (‏WL-606) مقابلَ المصدر (‏نموذجُ توقيعٍ مختبريّ) ═══════════════════════
+// خمسةُ هجمات، ولكلٍّ ما يفعلُه الإنتاجُ اليومَ وما يفعلُه التوقيع. المفاتيحُ مُولَّدةٌ هنا وتموتُ مع العمليّة.
+
+test(
+  'WL-608 أصالة: تلفٌ عرضيّ، وتعديلٌ متعمَّدٌ للبيان، وبيانٌ من نسخةٍ أخرى — الإنتاجُ يرفضُها؛ والتوقيعُ يرفضُها أيضاً بسببٍ مُسمّى',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const legit = await seededBackup('auth608a');
+    const other = await seededBackup('auth608b');
+    const target = await createIsolatedDatabase('auth608adst');
+    try {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+      const policy = {
+        trustedKeys: new Map([['k1', publicKey]]),
+        database: 'prod-a',
+        minSequence: 1,
+      };
+      const read = (/** @type {string} */ d) =>
+        JSON.parse(fs.readFileSync(`${d}.manifest.json`, 'utf8'));
+      const envelope = signManifestPrototype(read(legit.dump), sha256Of(legit.dump), {
+        keyId: 'k1',
+        sequence: 1,
+        database: 'prod-a',
+        privateKey,
+      });
+      assert.deepEqual(
+        verifyManifestPrototype(read(legit.dump), sha256Of(legit.dump), envelope, policy),
+        { ok: true },
+      );
+
+      // (‏1) تلفٌ عرضيّ: بايتٌ مقلوبٌ في وسطِ الأرشيف.
+      const bytes = fs.readFileSync(other.dump);
+      const mid = Math.floor(bytes.length / 2);
+      bytes[mid] = Number(bytes[mid]) ^ 0xff;
+      fs.writeFileSync(other.dump, bytes);
+      const corrupt = await runNode([BACKUP_SCRIPT, 'verify', other.dump], other.sourceUrl);
+      assert.notEqual(corrupt.code, 0);
+      assert.match(corrupt.stderr + corrupt.stdout, /BACKUP_HASH_MISMATCH/);
+      assert.equal(
+        /** @type {any} */ (
+          verifyManifestPrototype(read(legit.dump), sha256Of(other.dump), envelope, policy)
+        ).reason,
+        MANIFEST_AUTH_REASONS.BINDING,
+      );
+      fs.copyFileSync(legit.dump, other.dump);
+
+      // (‏2) تعديلٌ متعمَّدٌ للبيان: بصمةُ محتوىً مُعدَّلةٌ بلا إعادةِ ختم ⇒ ‏DIGEST_INVALID؛ بإعادةِ ختم ⇒ تُكشَفُ بعدَ الاستعادة.
+      editManifest(other.dump, (m) => {
+        const first = String(Object.keys(m.contentDigest.tables)[0]);
+        m.contentDigest.tables[first].sha256 = '0'.repeat(64);
+      });
+      const unsealed = await runNode([BACKUP_SCRIPT, 'verify', other.dump], other.sourceUrl);
+      assert.notEqual(unsealed.code, 0);
+      assert.match(unsealed.stderr + unsealed.stdout, /BACKUP_DIGEST_INVALID/);
+      editManifest(other.dump, (m) => resealDigest(m.contentDigest));
+      const resealed = await runNode(
+        [RESTORE_SCRIPT, other.dump, '--database', target.name],
+        other.sourceUrl,
+      );
+      assert.notEqual(resealed.code, 0);
+      assert.match(resealed.stderr + resealed.stdout, /RESTORE_CONTENT_MISMATCH/);
+      assert.equal(
+        /** @type {any} */ (
+          verifyManifestPrototype(read(other.dump), sha256Of(other.dump), envelope, policy)
+        ).reason,
+        MANIFEST_AUTH_REASONS.BINDING,
+        'التوقيعُ يرفضُ قبلَ لمسِ الهدف — لا بعدَ الاستعادة',
+      );
+
+      // (‏3) بيانٌ من نسخةٍ أخرى مع هذا الأرشيف: بصمةُ الملفِّ لا تطابق.
+      fs.copyFileSync(legit.dump, other.dump);
+      const foreign = JSON.parse(fs.readFileSync(`${legit.dump}.manifest.json`, 'utf8'));
+      foreign.sha256 = 'f'.repeat(64);
+      fs.writeFileSync(`${other.dump}.manifest.json`, `${JSON.stringify(foreign, null, 2)}\n`);
+      const reused = await runNode([BACKUP_SCRIPT, 'verify', other.dump], other.sourceUrl);
+      assert.notEqual(reused.code, 0);
+      assert.match(reused.stderr + reused.stdout, /BACKUP_HASH_MISMATCH/);
+      assert.equal(
+        /** @type {any} */ (
+          verifyManifestPrototype(foreign, sha256Of(other.dump), envelope, policy)
+        ).reason,
+        MANIFEST_AUTH_REASONS.BINDING,
+      );
+    } finally {
+      await target.drop();
+      await other.source.drop();
+      await legit.source.drop();
+    }
+  },
+);
+
+test(
+  'WL-608 أصالة: استبدالُ الأرشيفِ والبيانِ معاً بنسخةٍ حقيقيّةٍ من قاعدةِ المهاجم ⇒ الإنتاجُ يُعلنُ [CONTENT_VERIFIED]؛ والتوقيعُ وحدَه يرفض — وإعادةُ تشغيلِ نسخةٍ قديمةٍ موقَّعةٍ لا يرفضُها إلا الرقمُ المتسلسل',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const legit = await seededBackup('auth608c');
+    const attacker = await createIsolatedDatabase('auth608evil');
+    const target = await createIsolatedDatabase('auth608cdst');
+    const replayTarget = await createIsolatedDatabase('auth608rdst');
+    const dir = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'backup-auth608-')));
+    const evilDump = path.join(dir, 'state.dump');
+    try {
+      const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
+      const evilKey = crypto.generateKeyPairSync('ed25519');
+      const policy = {
+        trustedKeys: new Map([['k1', publicKey]]),
+        database: 'prod-a',
+        minSequence: 1,
+      };
+      const read = (/** @type {string} */ d) =>
+        JSON.parse(fs.readFileSync(`${d}.manifest.json`, 'utf8'));
+      const legitEnvelope = signManifestPrototype(read(legit.dump), sha256Of(legit.dump), {
+        keyId: 'k1',
+        sequence: 1,
+        database: 'prod-a',
+        privateKey,
+      });
+      // المهاجمُ يملكُ قاعدةً بالمخطّطِ نفسِه ومحتوىً من اختيارِه، وأداةَ النسخِ نفسَها.
+      await up(attacker.pool);
+      await seedEveryTable(attacker.pool);
+      await attacker.pool.query(`UPDATE state.agents SET name = 'Attacker Chosen'`);
+      assert.equal(
+        (await runNode([BACKUP_SCRIPT, 'create', evilDump], databaseUrlFor(attacker.name))).code,
+        0,
+      );
+      // يضعُها في موضعِ النسخةِ الشرعيّة: الأرشيفُ والبيانُ معاً.
+      fs.copyFileSync(evilDump, legit.dump);
+      fs.copyFileSync(`${evilDump}.manifest.json`, `${legit.dump}.manifest.json`);
+      const restore = await runNode(
+        [RESTORE_SCRIPT, legit.dump, '--database', target.name],
+        legit.sourceUrl,
+      );
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      assert.match(
+        restore.stdout,
+        /\[CONTENT_VERIFIED\]/,
+        'السلامةُ لا تُثبتُ المصدر: المزوَّرُ المتّسقُ يمرّ',
+      );
+      const names = await target.pool.query(`SELECT DISTINCT name FROM state.agents`);
+      assert.deepEqual(
+        names.rows.map((r) => r['name']),
+        ['Attacker Chosen'],
+        'المستعادُ محتوى المهاجم',
+      );
+      // التوقيع: غائب، أو بمفتاحِ المهاجم، أو توقيعٌ شرعيٌّ منقول — كلُّها تُرفَضُ قبلَ الاستعادة.
+      const m = read(legit.dump);
+      const sha = sha256Of(legit.dump);
+      const reason = (/** @type {any} */ env) =>
+        /** @type {any} */ (verifyManifestPrototype(m, sha, env, policy)).reason;
+      assert.equal(reason(undefined), MANIFEST_AUTH_REASONS.MISSING);
+      assert.equal(
+        reason(
+          signManifestPrototype(m, sha, {
+            keyId: 'k1',
+            sequence: 9,
+            database: 'prod-a',
+            privateKey: evilKey.privateKey,
+          }),
+        ),
+        MANIFEST_AUTH_REASONS.INVALID,
+        'مفتاحُ المهاجمِ بمعرّفِ المفتاحِ الموثوق',
+      );
+      assert.equal(
+        reason(
+          signManifestPrototype(m, sha, {
+            keyId: 'evil',
+            sequence: 9,
+            database: 'prod-a',
+            privateKey: evilKey.privateKey,
+          }),
+        ),
+        MANIFEST_AUTH_REASONS.UNTRUSTED_KEY,
+      );
+      assert.equal(
+        reason(legitEnvelope),
+        MANIFEST_AUTH_REASONS.BINDING,
+        'توقيعٌ شرعيٌّ لا ينتقلُ إلى أرشيفٍ آخر',
+      );
+      // توقيعٌ صحيحٌ من قاعدةٍ شرعيّةٍ أخرى (‏مثلاً staging بالمفتاحِ نفسِه) ⇒ هويّةُ القاعدةِ ترفض.
+      const staging = signManifestPrototype(m, sha, {
+        keyId: 'k1',
+        sequence: 5,
+        database: 'staging',
+        privateKey,
+      });
+      assert.equal(reason(staging), MANIFEST_AUTH_REASONS.DATABASE);
+
+      // (‏5) إعادةُ التشغيل: النسخةُ الشرعيّةُ القديمةُ (‏sequence 1) بعدَ أن رأى المخزنُ الموثوقُ 2.
+      const golden = await sharedGoldenBackup();
+      fs.copyFileSync(golden.dump, legit.dump);
+      fs.copyFileSync(golden.manifest, `${legit.dump}.manifest.json`);
+      fs.chmodSync(`${legit.dump}.manifest.json`, 0o600);
+      const old = read(legit.dump);
+      const oldSha = sha256Of(legit.dump);
+      assert.deepEqual(
+        verifyManifestPrototype(old, oldSha, legitEnvelope, policy),
+        { ok: true },
+        'التوقيعُ وحدَه يقبلُ القديم',
+      );
+      assert.deepEqual(
+        verifyManifestPrototype(old, oldSha, legitEnvelope, { ...policy, minSequence: 2 }),
+        { ok: false, reason: MANIFEST_AUTH_REASONS.REPLAY },
+        'الرقمُ المتسلسلُ في مخزنٍ موثوقٍ وحدَه يرفضُ القديم',
+      );
+      const replay = await runNode(
+        [RESTORE_SCRIPT, legit.dump, '--database', replayTarget.name],
+        legit.sourceUrl,
+      );
+      assert.equal(replay.code, 0, replay.stderr);
+      assert.match(replay.stdout, /\[CONTENT_VERIFIED\]/, 'الإنتاجُ لا يعرفُ أنّ النسخةَ قديمة');
+    } finally {
+      await replayTarget.drop();
+      await target.drop();
+      await attacker.drop();
+      await legit.source.drop();
+    }
   },
 );

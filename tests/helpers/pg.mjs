@@ -1170,3 +1170,439 @@ if (
     oldRef: String(values['old-ref']),
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ‏`WL-608` — ‏`LIVE-78/DIGEST-COVERAGE`: نموذجٌ أوّليٌّ مختبريٌّ لقياسِ التغطية (‏لا مسارَ إنتاج)
+//
+// ‏`coverageProbe` يلتقطُ لكلِّ فئةٍ خارجَ بصمةِ `WL-606` تمثيلاً قانونيّاً (‏أسماءٌ لا OIDs، نصوصٌ من
+// ‏`pg_get_*def` بـ`search_path=''` فتُؤهَّلُ الأسماءُ كاملة) وبصمتَه، فيُقاسُ في الاختبار: هل تبقى الفئةُ
+// بعدَ نسخٍ/استعادةٍ حقيقيّين؟ هل يكشفُ التلاعبَ بها؟ هل التمثيلُ ثابتٌ عبرَ الصيانة؟ وكم يكلّف؟
+// لا يستوردُه `scripts/` ولا `src/`؛ وبيانُ الإنتاجِ (‏`DIGEST_SCOPE`) لم يتوسّع — ‏`[CONTENT_VERIFIED]`
+// يبقى معناه نطاقَ `WL-606` وحدَه. ‏`COVERAGE_MATRIX` هو الحكمُ المقيسُ لكلِّ فئة، والاختباراتُ تقارنُه
+// بالسلوكِ الفعليّ فلا يصيرُ وصفاً يدويّاً.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * لكلِّ فئة: `inArchive` (‏هل تحملُها نسخةُ الإنتاجِ بأوامرِها الحاليّة)، `deterministic` (‏تمثيلٌ ثابتٌ
+ * بلا OIDs/ترتيبِ تخزين)، `verifiable` (‏يمكنُ التحقّقُ منها في الهدفِ بعدَ الاستعادة)، `pgVersion`
+ * (‏ما يتعلّقُ بالإصدار)، `formal` (‏فرقٌ شكليٌّ قد يظهرُ بلا فرقٍ وظيفيّ)، `unprovable` (‏ما لا يُثبَت).
+ * ‏`roundTrip`: ‏'equal' = تطابقٌ مقيسٌ بعدَ نسخٍ/استعادة؛ 'lost' = تضيعُ تصميماً؛ 'cluster' = كائنٌ على
+ * مستوى العنقود يظهرُ متطابقاً في اختبارٍ على العنقودِ نفسِه **بلا أن تنقلَه النسخة**.
+ */
+export const COVERAGE_MATRIX = Object.freeze({
+  relations: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'relkind/relpersistence مستقرّة',
+    formal: 'reloptions نصٌّ حرفيّ',
+    unprovable: 'إحصاءاتُ المخطِّط (‏relpages/reltuples)',
+  },
+  columns: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'attcompression (‏PG14+)',
+    formal:
+      'attnum يختلفُ بعدَ الاستعادة حيثُ حُذفَ عمود (‏مقيس: state.data_assets) — فيُمثَّلُ الترتيبُ بينَ الأعمدةِ الحيّة لا attnum؛ ونصُّ pg_get_expr قد يتغيّرُ شكلاً بينَ الإصدارات',
+    unprovable: 'الأعمدةُ المحذوفة (‏attisdropped) لا تُستعاد ولا يُحتاجُ إليها',
+  },
+  constraints: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'NOT NULL كقيدٍ في pg_constraint (‏PG18) — يُستثنى contype n',
+    formal: 'اسمُ القيدِ المولَّدِ تلقائيّاً',
+    unprovable: 'أنّ convalidated=true يعني أنّ الصفوفَ تحقّقُه فعلاً (‏قيدٌ مُدخَلٌ NOT VALID)',
+  },
+  indexes: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'نصُّ pg_get_indexdef',
+    formal: 'اسمُ الفهرسِ ومعاملاتُ التخزين',
+    unprovable: 'سلامةُ بنيةِ الفهرسِ على القرص (‏amcheck غيرُ مُثبَّت)',
+  },
+  triggers: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'نصُّ pg_get_triggerdef',
+    formal: '—',
+    unprovable: 'أنّ جسمَ دالّةِ القادحِ يفعلُ المقصود — يُقارَنُ نصّاً لا سلوكاً',
+  },
+  policies: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'polpermissive (‏PG10+)',
+    formal: 'نصُّ pg_get_expr',
+    unprovable:
+      'أسماءُ الأدوارِ في السياسةِ تُقارَنُ اسماً؛ وجودُ الأدوارِ نفسِها على العنقودِ الهدفِ خارجَ النسخة',
+  },
+  routines: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'pg_get_functiondef، وprokind (‏PG11+)، وجسمُ SQL-standard (‏PG14+)',
+    formal: 'مسافاتُ الجسم محفوظةٌ حرفيّاً (‏لا تطبيع)',
+    unprovable: 'السلوكُ الفعليُّ للدالّة؛ ودوالُّ C (‏المكتبةُ خارجَ القاعدة)',
+  },
+  views: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'pg_get_viewdef يتغيّرُ شكلاً بينَ الإصدارات',
+    formal: 'إعادةُ الصياغةِ من الشجرةِ المحلَّلة لا النصِّ الأصليّ',
+    unprovable: 'محتوى العروضِ المجسَّدةِ (‏matview) — يتطلّبُ REFRESH',
+  },
+  types: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion:
+      'enumsortorder أعدادٌ عشريّةٌ قد تختلفُ بعدَ ALTER TYPE … ADD VALUE — يُقارَنُ الترتيبُ لا القيمة',
+    formal: '—',
+    unprovable: 'أنواعُ C/الامتدادات',
+  },
+  sequenceDefs: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: 'pg_sequence (‏PG10+)',
+    formal: '—',
+    unprovable: 'القيمةُ الحاليّة (‏خارجَ MVCC — مغطّاةٌ تقدّماً في WL-606)',
+  },
+  comments: { inArchive: true, roundTrip: 'equal', pgVersion: '—', formal: '—', unprovable: '—' },
+  fenceRows: {
+    inArchive: true,
+    roundTrip: 'equal',
+    pgVersion: '—',
+    formal:
+      'fence.ddl_audit يكتبُه النسخُ نفسُه (‏إنشاءُ الجدولِ المرحليِّ وحذفُه) فيتغيّرُ المصدرُ بعدَ اللقطة — مقيس',
+    unprovable:
+      'أنّ صفوفَ السياجِ المستعادةَ صالحةٌ في العنقودِ الهدف — مختومةٌ بهويّةِ المصدر فتُعلنُ RECOVERY_REQUIRED (‏تصميماً)',
+  },
+  owners: {
+    inArchive: false,
+    roundTrip: 'lost',
+    pgVersion: '—',
+    formal: 'المالكُ في الهدفِ هو مُنفِّذُ الاستعادة (‏--no-owner)',
+    unprovable: 'كلُّ شيء: لا تحملُه النسخة',
+  },
+  grants: {
+    inArchive: false,
+    roundTrip: 'lost',
+    pgVersion: 'MAINTAIN (‏PG17+) يغيّرُ نصَّ ACL',
+    formal: 'ترتيبُ عناصرِ ACL',
+    unprovable: 'كلُّ شيء: --no-privileges في النسخِ والاستعادة',
+  },
+  defaultAcls: {
+    inArchive: false,
+    roundTrip: 'lost',
+    pgVersion: '—',
+    formal: '—',
+    unprovable: 'كلُّ شيء: لا تحملُه النسخة',
+  },
+  roles: {
+    inArchive: false,
+    roundTrip: 'cluster',
+    pgVersion: 'أعمدةُ pg_auth_members (‏inherit_option/set_option PG16+)',
+    formal: '—',
+    unprovable: 'كلُّ شيء: الأدوارُ على مستوى العنقود، وpg_dump بلا pg_dumpall لا ينقلُها',
+  },
+  largeObjects: {
+    inArchive: false,
+    roundTrip: 'lost',
+    pgVersion: '—',
+    formal: '—',
+    unprovable: 'كلُّ شيء: --schema يستثني الكائناتِ الكبيرة',
+  },
+  eventTriggers: {
+    inArchive: false,
+    roundTrip: 'lost',
+    pgVersion: '—',
+    formal: '—',
+    unprovable: 'كلُّ شيء: كائنُ قاعدةٍ لا مخطَّط',
+  },
+  extensions: {
+    inArchive: false,
+    roundTrip: 'lost',
+    pgVersion: 'extversion',
+    formal: '—',
+    unprovable: 'كلُّ شيء: --schema لا ينقلُ CREATE EXTENSION',
+  },
+});
+
+/** @type {Record<keyof typeof COVERAGE_MATRIX, string>} */
+const COVERAGE_SQL = {
+  relations: `SELECT n.nspname || '.' || c.relname AS k, jsonb_build_array(c.relkind, c.relpersistence, c.relrowsecurity,
+      c.relforcerowsecurity, c.relreplident, coalesce(c.reloptions, '{}')) AS v
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f','S','c') AND c.relname !~ '^__backup_schema_migrations_'`,
+  columns: `SELECT n.nspname || '.' || c.relname || '.' || a.attname AS k, jsonb_build_array(row_number() OVER (PARTITION BY a.attrelid ORDER BY a.attnum), format_type(a.atttypid, a.atttypmod),
+      a.attnotnull, pg_get_expr(d.adbin, d.adrelid), a.attidentity, a.attgenerated, a.attcollation::regcollation::text) AS v
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+   WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f','c') AND a.attnum > 0 AND NOT a.attisdropped
+     AND c.relname !~ '^__backup_schema_migrations_'`,
+  constraints: `SELECT coalesce(c.conrelid::regclass::text, c.contypid::regtype::text) || ':' || c.conname AS k,
+      jsonb_build_array(c.contype, pg_get_constraintdef(c.oid, true), c.condeferrable, c.condeferred, c.convalidated) AS v
+    FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
+   WHERE n.nspname = ANY($1) AND c.contype <> 'n' AND coalesce(c.conrelid::regclass::text, '') !~ '__backup_schema_migrations_'`,
+  indexes: `SELECT x.indexrelid::regclass::text AS k, jsonb_build_array(pg_get_indexdef(x.indexrelid), x.indisunique, x.indisprimary, x.indisvalid) AS v
+    FROM pg_index x JOIN pg_class c ON c.oid = x.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1) AND c.relname !~ '^__backup_schema_migrations_'`,
+  triggers: `SELECT t.tgrelid::regclass::text || ':' || t.tgname AS k, jsonb_build_array(pg_get_triggerdef(t.oid, true), t.tgenabled) AS v
+    FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1) AND NOT t.tgisinternal`,
+  policies: `SELECT p.polrelid::regclass::text || ':' || p.polname AS k, jsonb_build_array(p.polcmd, p.polpermissive,
+      (SELECT coalesce(jsonb_agg(CASE WHEN r = 0 THEN 'PUBLIC' ELSE pg_get_userbyid(r)::text END ORDER BY 1), '[]') FROM unnest(p.polroles) r),
+      pg_get_expr(p.polqual, p.polrelid), pg_get_expr(p.polwithcheck, p.polrelid)) AS v
+    FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1)`,
+  routines: `SELECT p.oid::regprocedure::text AS k, jsonb_build_array(p.prokind, l.lanname, p.provolatile, p.prosecdef, p.proleakproof,
+      p.proisstrict, p.proparallel, coalesce(p.proconfig, '{}'),
+      CASE WHEN p.prokind IN ('f','p') THEN md5(pg_get_functiondef(p.oid)) END) AS v
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace JOIN pg_language l ON l.oid = p.prolang
+   WHERE n.nspname = ANY($1)`,
+  views: `SELECT c.oid::regclass::text AS k, jsonb_build_array(c.relkind, md5(pg_get_viewdef(c.oid, true))) AS v
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1) AND c.relkind IN ('v','m')`,
+  types: `SELECT t.oid::regtype::text AS k, jsonb_build_array(t.typtype,
+      CASE WHEN t.typtype = 'e' THEN (SELECT jsonb_agg(e.enumlabel ORDER BY e.enumsortorder) FROM pg_enum e WHERE e.enumtypid = t.oid) END,
+      CASE WHEN t.typtype = 'd' THEN jsonb_build_array(format_type(t.typbasetype, t.typtypmod), t.typnotnull, t.typdefault) END) AS v
+    FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+   WHERE n.nspname = ANY($1) AND t.typtype IN ('e','d') `,
+  sequenceDefs: `SELECT s.seqrelid::regclass::text AS k, jsonb_build_array(format_type(s.seqtypid, NULL), s.seqstart::text, s.seqincrement::text,
+      s.seqmax::text, s.seqmin::text, s.seqcache::text, s.seqcycle,
+      (SELECT d.refobjid::regclass::text || '.' || a.attname FROM pg_depend d JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+        WHERE d.classid = 'pg_class'::regclass AND d.objid = s.seqrelid AND d.deptype IN ('a','i') AND d.refclassid = 'pg_class'::regclass LIMIT 1)) AS v
+    FROM pg_sequence s JOIN pg_class c ON c.oid = s.seqrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1)`,
+  comments: `SELECT d.classoid::regclass::text || ':' || coalesce(
+        CASE d.classoid WHEN 'pg_class'::regclass THEN d.objoid::regclass::text WHEN 'pg_proc'::regclass THEN d.objoid::regprocedure::text
+                        WHEN 'pg_namespace'::regclass THEN (SELECT nspname FROM pg_namespace WHERE oid = d.objoid)::text
+                        WHEN 'pg_type'::regclass THEN d.objoid::regtype::text END, '?') || ':' || d.objsubid AS k, to_jsonb(d.description) AS v
+    FROM pg_description d
+   WHERE (d.classoid = 'pg_class'::regclass AND d.objoid IN (SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ANY($1)))
+      OR (d.classoid = 'pg_proc'::regclass AND d.objoid IN (SELECT p.oid FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = ANY($1)))
+      OR (d.classoid = 'pg_namespace'::regclass AND d.objoid IN (SELECT oid FROM pg_namespace WHERE nspname = ANY($1)))
+      OR (d.classoid = 'pg_type'::regclass AND d.objoid IN (SELECT t.oid FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = ANY($1)))`,
+  fenceRows: '', // يُحسَبُ جدولاً جدولاً في coverageProbe (‏صفوفُ fence.* بـmd5(record_out))
+  owners: `SELECT 'rel:' || c.oid::regclass::text AS k, to_jsonb(pg_get_userbyid(c.relowner)::text) AS v
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f','S')
+      AND c.relname !~ '^__backup_schema_migrations_'
+   UNION ALL SELECT 'proc:' || p.oid::regprocedure::text, to_jsonb(pg_get_userbyid(p.proowner)::text)
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = ANY($1)
+   UNION ALL SELECT 'nsp:' || n.nspname, to_jsonb(pg_get_userbyid(n.nspowner)::text) FROM pg_namespace n WHERE n.nspname = ANY($1)`,
+  grants: `SELECT 'rel:' || c.oid::regclass::text AS k, to_jsonb(coalesce(c.relacl::text[], '{}')) AS v
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ANY($1) AND c.relkind IN ('r','p','v','m','f','S')
+      AND c.relname !~ '^__backup_schema_migrations_'
+   UNION ALL SELECT 'col:' || a.attrelid::regclass::text || '.' || a.attname, to_jsonb(a.attacl::text[])
+    FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = ANY($1) AND a.attacl IS NOT NULL
+   UNION ALL SELECT 'proc:' || p.oid::regprocedure::text, to_jsonb(coalesce(p.proacl::text[], '{}'))
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = ANY($1)
+   UNION ALL SELECT 'nsp:' || n.nspname, to_jsonb(coalesce(n.nspacl::text[], '{}')) FROM pg_namespace n WHERE n.nspname = ANY($1)`,
+  defaultAcls: `SELECT coalesce(n.nspname, '*') || ':' || pg_get_userbyid(d.defaclrole) || ':' || d.defaclobjtype::text AS k, to_jsonb(d.defaclacl::text[]) AS v
+    FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid = d.defaclnamespace WHERE n.nspname = ANY($1) OR d.defaclnamespace = 0`,
+  roles: `WITH r AS (SELECT DISTINCT u AS rid FROM (
+        SELECT c.relowner AS u FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ANY($1)
+        UNION SELECT (aclexplode(c.relacl)).grantee FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ANY($1) AND c.relacl IS NOT NULL
+        UNION SELECT unnest(p.polroles) FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = ANY($1)) s
+       WHERE u <> 0)
+    SELECT a.rolname::text AS k, jsonb_build_array(a.rolsuper, a.rolinherit, a.rolcreaterole, a.rolcreatedb, a.rolcanlogin, a.rolreplication,
+        a.rolbypassrls, a.rolconnlimit,
+        (SELECT coalesce(jsonb_agg(pg_get_userbyid(m.roleid)::text || CASE WHEN m.admin_option THEN '+admin' ELSE '' END ORDER BY 1), '[]')
+           FROM pg_auth_members m WHERE m.member = a.oid)) AS v
+      FROM pg_authid a JOIN r ON r.rid = a.oid`,
+  largeObjects: `SELECT m.oid::text AS k, jsonb_build_array(pg_get_userbyid(m.lomowner)::text,
+      (SELECT md5(coalesce(string_agg(l.data, ''::bytea ORDER BY l.pageno), ''::bytea)) FROM pg_largeobject l WHERE l.loid = m.oid)) AS v
+    FROM pg_largeobject_metadata m WHERE $1::text[] IS NOT NULL`,
+  eventTriggers: `SELECT evtname::text AS k, jsonb_build_array(evtevent, evtfoid::regprocedure::text, evtenabled, coalesce(evttags, '{}')) AS v
+    FROM pg_event_trigger WHERE $1::text[] IS NOT NULL`,
+  extensions: `SELECT extname::text AS k, jsonb_build_array(extversion, extnamespace::regnamespace::text) AS v
+    FROM pg_extension WHERE $1::text[] IS NOT NULL AND extname <> 'plpgsql'`,
+};
+
+/**
+ * يلتقطُ التمثيلَ القانونيَّ لكلِّ فئةٍ داخلَ معاملةِ قراءةٍ واحدة (‏`REPEATABLE READ READ ONLY`) بإعداداتِ
+ * ‏`DIGEST_SETTINGS` نفسِها — فالنصوصُ تُؤهَّلُ بالمخطّطِ ولا تتعلّقُ بجلسةِ المُستدعي.
+ * @param {import('pg').Pool} pool
+ * @param {{ schemas?: string[], settings: Record<string, string> }} options
+ * @returns {Promise<{ pgMajor: number, ms: number, categories: Record<string, { entries: Array<[string, unknown]>, sha256: string }> }>}
+ */
+export async function coverageProbe(pool, options) {
+  const client = await pool.connect();
+  const started = process.hrtime.bigint();
+  try {
+    await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    for (const [name, value] of Object.entries(options.settings)) {
+      await client.query('SELECT pg_catalog.set_config($1, $2, true)', [name, value]);
+    }
+    const present =
+      (
+        await client.query(
+          `SELECT array_agg(nspname::text) AS s FROM pg_namespace WHERE nspname = ANY($1)`,
+          [options.schemas ?? ['state', 'fence']],
+        )
+      ).rows[0]?.['s'] ?? [];
+    const pgMajor = Math.floor(
+      Number(
+        (await client.query(`SELECT current_setting('server_version_num') AS v`)).rows[0]?.['v'],
+      ) / 10000,
+    );
+    /** @type {Record<string, { entries: Array<[string, unknown]>, sha256: string }>} */
+    const categories = {};
+    for (const [name, sql] of Object.entries(COVERAGE_SQL)) {
+      /** @type {Array<[string, unknown]>} */
+      let entries;
+      if (name === 'fenceRows') {
+        entries = [];
+        if (present.includes('fence')) {
+          const tables = await client.query(
+            `SELECT c.relname::text AS t FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'fence' AND c.relkind = 'r' ORDER BY c.relname COLLATE "C"`,
+          );
+          for (const row of tables.rows) {
+            const t = String(row['t']);
+            const r = (
+              await client.query(
+                `SELECT count(*)::int AS n, md5(coalesce(string_agg(h, '' ORDER BY h COLLATE "C"), '')) AS h
+                   FROM (SELECT md5(x::text) AS h FROM fence.${quoteIdent(t)} x) s`,
+              )
+            ).rows[0];
+            entries.push([t, [r?.['n'], r?.['h']]]);
+          }
+        }
+      } else {
+        const rows = (await client.query(sql, [present])).rows;
+        entries = rows.map((r) => /** @type {[string, unknown]} */ ([String(r['k']), r['v']]));
+      }
+      entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+      categories[name] = {
+        entries,
+        sha256: crypto.createHash('sha256').update(JSON.stringify(entries), 'utf8').digest('hex'),
+      };
+    }
+    await client.query('ROLLBACK');
+    return { pgMajor, ms: Number((process.hrtime.bigint() - started) / 1_000_000n), categories };
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * الفئاتُ المختلفةُ بينَ لقطتَين، ولكلٍّ المفاتيحُ المختلفة (‏أوّلُ خمسةٍ للقراءة).
+ * @param {Awaited<ReturnType<typeof coverageProbe>>} a
+ * @param {Awaited<ReturnType<typeof coverageProbe>>} b
+ * @returns {Record<string, string[]>}
+ */
+export function coverageDiff(a, b) {
+  /** @type {Record<string, string[]>} */
+  const out = {};
+  for (const name of Object.keys(a.categories)) {
+    const x = a.categories[name];
+    const y = b.categories[name];
+    if (!x || !y || x.sha256 === y.sha256) continue;
+    const mx = new Map(x.entries.map(([k, v]) => [k, JSON.stringify(v)]));
+    const my = new Map(y.entries.map(([k, v]) => [k, JSON.stringify(v)]));
+    const keys = [...new Set([...mx.keys(), ...my.keys()])]
+      .filter((k) => mx.get(k) !== my.get(k))
+      .sort();
+    out[name] = keys.slice(0, 5);
+  }
+  return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// ‏`WL-608` — أصالةُ البيان: نموذجٌ أوّليٌّ مختبريٌّ للتوقيع (‏لا مسارَ إنتاج، لا مفاتيحَ إنتاج)
+//
+// ‏`WL-606` يُثبتُ **السلامة**: المستعادُ يطابقُ ما يصفُه البيان، والبيانُ يطابقُ نفسَه. لا يُثبتُ **المصدر**:
+// مَن يملكُ الكتابةَ في موضعِ النسخِ يضعُ أرشيفاً وبياناً متّسقَين من قاعدةٍ أخرى أو من ماضٍ قديم. هذا النموذجُ
+// يقيسُ ما يضيفُه توقيعٌ بمفتاحٍ مستقلٍّ (‏Ed25519 يُولَّدُ داخلَ الاختبار) على حمولةٍ قانونيّة تربطُ: بصمةَ
+// الأرشيف، وبصمةَ المحتوى، ووقتَ البدء، ونسخةَ الهجرة، وهويّةَ القاعدة، ورقماً متسلسلاً، ومعرّفَ المفتاح.
+// ‏**التوقيعُ وحدَه لا يمنعُ إعادةَ التشغيل**: نسخةٌ قديمةٌ موقَّعةٌ صحيحةٌ تبقى صحيحة؛ يمنعُها حدٌّ أدنى للرقمِ
+// المتسلسلِ في مخزنٍ موثوق — مقيسٌ في الاختبار. إدارةُ المفاتيحِ والمخزنِ قرارُ مالك.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+export const MANIFEST_AUTH_REASONS = Object.freeze({
+  MISSING: 'SIGNATURE_MISSING',
+  UNTRUSTED_KEY: 'SIGNATURE_KEY_UNTRUSTED',
+  INVALID: 'SIGNATURE_INVALID',
+  BINDING: 'SIGNATURE_BINDING_MISMATCH',
+  DATABASE: 'SIGNATURE_DATABASE_MISMATCH',
+  REPLAY: 'SIGNATURE_REPLAY',
+});
+
+/** @param {unknown} value @returns {string} */
+function authCanonical(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(authCanonical).join(',')}]`;
+  const record = /** @type {Record<string, unknown>} */ (value);
+  const keys = Object.keys(record).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${authCanonical(record[k])}`).join(',')}}`;
+}
+
+/**
+ * الحمولةُ الموقَّعة: ما يُقرأُ من البيانِ ومن الأرشيفِ نفسِه (‏`dumpSha256` يُحسَبُ من الملفّ لا يُنقَلُ من البيان).
+ * @param {Record<string, any>} manifest @param {string} dumpSha256
+ * @param {{ keyId: string, sequence: number, database: string }} meta
+ */
+export function manifestAuthPayload(manifest, dumpSha256, meta) {
+  return {
+    format: 'xuux.backup-signature-prototype',
+    version: 1,
+    keyId: meta.keyId,
+    sequence: meta.sequence,
+    database: meta.database,
+    dumpSha256,
+    manifestDumpSha256: String(manifest['sha256']),
+    contentDigestSha256: String(manifest['contentDigest']?.['sha256'] ?? ''),
+    startedAt: String(manifest['startedAt']),
+    migrationVersion: Number(manifest['migrationVersion']),
+  };
+}
+
+/**
+ * @param {Record<string, any>} manifest @param {string} dumpSha256
+ * @param {{ keyId: string, sequence: number, database: string, privateKey: crypto.KeyObject }} signer
+ */
+export function signManifestPrototype(manifest, dumpSha256, signer) {
+  const payload = manifestAuthPayload(manifest, dumpSha256, signer);
+  const signature = crypto.sign(
+    null,
+    Buffer.from(authCanonical(payload), 'utf8'),
+    signer.privateKey,
+  );
+  return { payload, signature: signature.toString('base64') };
+}
+
+/**
+ * يرفضُ بسببٍ مُسمّىً أو يقبل. الترتيب: وجود ⇒ مفتاحٌ موثوق ⇒ توقيع ⇒ ربطٌ بالأرشيفِ والبيان ⇒ هويّةُ القاعدة ⇒ الرقمُ المتسلسل.
+ * @param {Record<string, any>} manifest @param {string} dumpSha256
+ * @param {{ payload: Record<string, any>, signature: string } | undefined} envelope
+ * @param {{ trustedKeys: Map<string, crypto.KeyObject>, database: string, minSequence: number }} policy
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+export function verifyManifestPrototype(manifest, dumpSha256, envelope, policy) {
+  if (!envelope) return { ok: false, reason: MANIFEST_AUTH_REASONS.MISSING };
+  const key = policy.trustedKeys.get(String(envelope.payload['keyId']));
+  if (!key) return { ok: false, reason: MANIFEST_AUTH_REASONS.UNTRUSTED_KEY };
+  const good = crypto.verify(
+    null,
+    Buffer.from(authCanonical(envelope.payload), 'utf8'),
+    key,
+    Buffer.from(envelope.signature, 'base64'),
+  );
+  if (!good) return { ok: false, reason: MANIFEST_AUTH_REASONS.INVALID };
+  const expected = manifestAuthPayload(manifest, dumpSha256, {
+    keyId: String(envelope.payload['keyId']),
+    sequence: Number(envelope.payload['sequence']),
+    database: String(envelope.payload['database']),
+  });
+  if (authCanonical(expected) !== authCanonical(envelope.payload)) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.BINDING };
+  }
+  if (envelope.payload['database'] !== policy.database) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.DATABASE };
+  }
+  if (Number(envelope.payload['sequence']) < policy.minSequence) {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.REPLAY };
+  }
+  return { ok: true };
+}
