@@ -14,7 +14,7 @@
 - **ما لم يتمَّ ولماذا:** لا ذرّيّةَ استعادة (‏`LIVE-78` قائم، وأحمرُه `todo`)، ولا توسيعَ للنطاقِ ولا توقيعَ للبيان (‏قرارُ المالك)، ولا تحسينَ بالتوازي (‏موقعُ اتّصالٍ جديد، ومكسبُه محدودٌ بمعالجَين)، ولا قياسَ فوقَ 600 MiB ولا على قرصٍ بطيء.
 - **الأثرُ على المساراتِ الأخرى:** النسخُ والاستعادةُ أبطأ (‏مُعلَن)؛ وتمرينُ CI يستعيدُ نسخةً حديثةً فيُتحقَّق.
 - **الملفات المتأثرة:** `scripts/backup.mjs`، `scripts/restore.mjs`، `tests/helpers/pg.mjs`، `tests/persistence/atomicity.test.mjs`، `tests/persistence/backup-restore.test.mjs`، `docs/RECOVERY.md`، `docs/BACKUP.md`، `docs/PERSISTENCE.md`، `docs/roadmap/06-debt-register.md`، `docs/roadmap/05-work-log.md`، `PROJECT_STATUS.md`، `docs/HANDOFF.md` (مولَّد)، `docs/READINESS_REPORT.md` (مولَّد).
-- **الديون:** LIVE-78/CONTENT-INTEGRITY منفَّذٌ ومفتوح؛ وجديدٌ LIVE-78/DIGEST-COVERAGE (‏`C`، مفتوح)؛ و`LIVE-78` مفتوحٌ والمعاملةُ الواحدةُ غيرُ معتمدة؛ و`LIVE-75` و`LIVE-39` و`LIVE-39/PHYSICAL` مفتوحة، و`RISK-0054 = NO-GO`، و`TH-SUP-05 = PARTIAL`. لا دَينَ مُغلَق.
+- **الديون:** LIVE-78/CONTENT-INTEGRITY منفَّذٌ ومفتوح؛ وجديدٌ LIVE-78/DIGEST-COVERAGE (‏`C`، مفتوح)؛ و`LIVE-78` مفتوحٌ والمعاملةُ الواحدةُ غيرُ معتمدة؛ و`LIVE-75` و`LIVE-39` وLIVE-39/PHYSICAL مفتوحة، و`RISK-0054 = NO-GO`، و`TH-SUP-05 = PARTIAL`. لا دَينَ مُغلَق.
 
 ### [2026-11-24] — WL-605 — **`LIVE-39/PHYSICAL` دَينٌ فرعيٌّ مستقلٌّ بتوجيهِ المالك: الفجوةُ بينَ محاكاةِ فقدِ الطاقةِ والعتادِ الحقيقيِّ مُسمّاةٌ بنودُها (‏صدقُ `FLUSH`/`FUA`، والذاكرةُ المؤقّتةُ المتطايرة، والقطاعُ الممزّق، والمتحكّمُ الحقيقيّ، وعمى `fsync` المجلّدِ على ext4، وext4 وحدَه، والقطعُ عندَ المراحلِ المسمّاةِ وحدَها) ومعيارُ إغلاقِها قطعٌ فعليٌّ متكرِّرٌ على جهازٍ مخصّصٍ بإذنٍ مستقلّ؛ لا قطعَ ولا جهاز؛ `LIVE-39` مفتوح**
 
