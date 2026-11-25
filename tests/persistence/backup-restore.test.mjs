@@ -4108,3 +4108,291 @@ function canonicalForTest(value) {
     .map((k) => `${JSON.stringify(k)}:${canonicalForTest(record[k])}`)
     .join(',')}}`;
 }
+
+// ═══ ‏`WL-613` — معيارُ إغلاقِ `LIVE-78/SIGNATURE-BINDING`: كلُّ حقلٍ في البيانِ الإنتاجيِّ حاضراً ومستقبلاً ═══════
+// طبقتان: (١) ثابتةٌ بلا قاعدة — تعريفا `BackupManifest` و`ContentDigest` في `scripts/backup.mjs` (‏بما فيها الأنواعُ
+// المضمَّنةُ المتداخلة) يطابقانِ الكائنَين المكتوبَين فعلاً، والتمثيليُّ يطابقُ التعريفَ في كلِّ عمق؛ (٢) حقيقيّةٌ —
+// بيانٌ أنتجَه `scripts/backup.mjs` نفسُه يُطابَقُ بالتعريف، ثمّ **كلُّ مفتاحٍ في كلِّ عمق** يُغيَّرُ ويُحذَف، ويُضافُ
+// مفتاحٌ إلى كلِّ كائن ⇒ `BINDING`. حقلٌ إنتاجيٌّ جديدٌ لا يُعلَنُ في التعريفِ يُسقِطُ (٢)، ومُعلَنٌ لا يُكتَبُ يُسقِطُ (١).
+
+const BACKUP_SOURCE = path.join(HERE, '..', '..', 'scripts', 'backup.mjs');
+
+/** @param {string} text @param {number} open موضعُ قوسٍ فاتح @returns {number} موضعُ مقابلِه */
+function matchingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}' && --depth === 0) return i;
+  }
+  throw new Error(`قوسٌ بلا مقابل عندَ ${open}`);
+}
+
+/**
+ * خصائصُ `@typedef {object} name` بأنواعِها — بموازنةِ الأقواسِ لا `[^}]+` (‏الأنواعُ المضمَّنةُ فيها أقواس).
+ * @param {string} source @param {string} name @returns {Map<string, string>}
+ */
+function typedefProperties(source, name) {
+  const head = `@typedef {object} ${name}\n`;
+  const start = source.indexOf(head);
+  assert.ok(start >= 0, `التعريفُ ${name} غيرُ موجود`);
+  const block = source.slice(start + head.length, source.indexOf('*/', start));
+  /** @type {Map<string, string>} */
+  const props = new Map();
+  let at = 0;
+  for (;;) {
+    const tag = block.indexOf('@property {', at);
+    if (tag < 0) break;
+    const open = tag + '@property '.length;
+    const close = matchingBrace(block, open);
+    const m = /^\s+\[?([A-Za-z0-9_]+)\]?/u.exec(block.slice(close + 1));
+    assert.ok(m, `خاصّيّةٌ بلا اسمٍ في ${name}`);
+    props.set(String(m[1]), block.slice(open + 1, close).trim());
+    at = close + 1;
+  }
+  assert.ok(props.size > 0, `${name} بلا خصائص`);
+  return props;
+}
+
+/**
+ * مفاتيحُ أوّلِ نوعِ كائنٍ مضمَّنٍ في نوع (‏`{ a: X, b: Y }` أو `Record<string, { a: X }>`)، أو `null` إن لم يكن.
+ * @param {string} type @returns {string[] | null}
+ */
+function inlineObjectKeys(type) {
+  const open = type.indexOf('{');
+  if (open < 0) return null;
+  const body = type.slice(open + 1, matchingBrace(type, open));
+  /** @type {string[]} */
+  const keys = [];
+  let depth = 0;
+  let piece = '';
+  for (const ch of `${body},`) {
+    if ('{<[('.includes(ch)) depth++;
+    if ('}>])'.includes(ch)) depth--;
+    if (ch === ',' && depth === 0) {
+      const m = /^\s*([A-Za-z0-9_]+)\??\s*:/u.exec(piece);
+      if (m) keys.push(String(m[1]));
+      piece = '';
+    } else piece += ch;
+  }
+  return keys;
+}
+
+/**
+ * مفاتيحُ كائنٍ حرفيٍّ يبدأُ بـ`marker` في المصدر (‏الاختصارُ `a,` والصريحُ `a:` والانتشارُ `...x` يُرفَض).
+ * @param {string} source @param {string} marker @returns {string[]}
+ */
+function literalKeys(source, marker) {
+  const at = source.indexOf(marker);
+  assert.ok(at >= 0, `الكائنُ «${marker}» غيرُ موجود`);
+  const open = source.indexOf('{', at + marker.length - 1);
+  const body = source.slice(open + 1, matchingBrace(source, open));
+  /** @type {string[]} */
+  const keys = [];
+  let depth = 0;
+  let piece = '';
+  for (const ch of `${body},`) {
+    if ('{<[('.includes(ch)) depth++;
+    if ('}>])'.includes(ch)) depth--;
+    if (ch === ',' && depth === 0) {
+      const t = piece.trim();
+      if (t) {
+        assert.ok(!t.startsWith('...'), `انتشارٌ في «${marker}» لا يُعَدُّ حقلاً: ${t}`);
+        const m = /^([A-Za-z0-9_]+)\s*(?::|$)/u.exec(t);
+        assert.ok(m, `مفتاحٌ غيرُ مقروءٍ في «${marker}»: ${t}`);
+        keys.push(String(m[1]));
+      }
+      piece = '';
+    } else piece += ch;
+  }
+  return keys;
+}
+
+/** @param {Iterable<string>} xs */
+const sorted = (xs) => [...xs].sort();
+
+/**
+ * الشكلُ المُعلَنُ في الإنتاج: حقولُ البيان، وحقولُ البصمة، والأشكالُ المتداخلةُ المضمَّنة.
+ * @returns {{ manifest: string[], digest: string[], nested: Record<string, { keys: string[], record: boolean }> }}
+ */
+function declaredManifestShape() {
+  const source = fs.readFileSync(BACKUP_SOURCE, 'utf8');
+  const manifestProps = typedefProperties(source, 'BackupManifest');
+  const digestProps = typedefProperties(source, 'ContentDigest');
+  // المكتوبُ فعلاً يطابقُ المُعلَن: كائنُ البيانِ في `backup()`، وجسمُ البصمةِ + `sha256` في `computeContentDigest`.
+  assert.deepEqual(sorted(literalKeys(source, 'const manifest = {')), sorted(manifestProps.keys()));
+  const bodyKeys = literalKeys(source, 'const body = {');
+  assert.match(source, /return \{ \.\.\.body, sha256: digestBodySha256\(body\) \};/u);
+  assert.deepEqual(sorted([...bodyKeys, 'sha256']), sorted(digestProps.keys()));
+  /** @type {Record<string, { keys: string[], record: boolean }>} */
+  const nested = {};
+  for (const [field, type] of digestProps) {
+    const keys = inlineObjectKeys(type);
+    if (keys) nested[`contentDigest.${field}`] = { keys, record: type.startsWith('Record<') };
+  }
+  return { manifest: sorted(manifestProps.keys()), digest: sorted(digestProps.keys()), nested };
+}
+
+/**
+ * يطابقُ بياناً بالشكلِ المُعلَن في كلِّ عمقٍ مُعلَن؛ `record` ⇒ كلُّ قيمةٍ في السجلِّ بالمفاتيحِ نفسِها.
+ * @param {Record<string, any>} m @param {ReturnType<typeof declaredManifestShape>} shape @param {string} label
+ */
+function assertManifestMatchesShape(m, shape, label) {
+  assert.deepEqual(sorted(Object.keys(m)), shape.manifest, `${label}: حقولُ البيان`);
+  assert.deepEqual(sorted(Object.keys(m['contentDigest'])), shape.digest, `${label}: حقولُ البصمة`);
+  for (const [where, { keys, record }] of Object.entries(shape.nested)) {
+    const value = m['contentDigest'][where.slice('contentDigest.'.length)];
+    const entries = record ? Object.values(value) : [value];
+    assert.ok(entries.length > 0, `${label}: ${where} فارغٌ فلا يُقاسُ شكلُه`);
+    for (const e of entries)
+      assert.deepEqual(sorted(Object.keys(e)), sorted(keys), `${label}: ${where}`);
+  }
+}
+
+/**
+ * كلُّ مسارٍ في الشجرة (‏مفاتيحُ الكائناتِ وفهارسُ المصفوفات)، والكائناتُ نفسُها لإضافةِ مفتاح.
+ * @param {unknown} node @param {Array<string | number>} at
+ * @returns {{ leaves: Array<Array<string | number>>, objects: Array<Array<string | number>> }}
+ */
+function treePaths(node, at = []) {
+  /** @type {Array<Array<string | number>>} */
+  const leaves = [];
+  /** @type {Array<Array<string | number>>} */
+  const objects = [];
+  if (Array.isArray(node)) {
+    node.forEach((v, i) => {
+      leaves.push([...at, i]);
+      const sub = treePaths(v, [...at, i]);
+      leaves.push(...sub.leaves);
+      objects.push(...sub.objects);
+    });
+  } else if (node !== null && typeof node === 'object') {
+    objects.push(at);
+    for (const [k, v] of Object.entries(node)) {
+      leaves.push([...at, k]);
+      const sub = treePaths(v, [...at, k]);
+      leaves.push(...sub.leaves);
+      objects.push(...sub.objects);
+    }
+  }
+  return { leaves, objects };
+}
+
+/** @param {unknown} v */
+function alteredValue(v) {
+  if (typeof v === 'string') return `${v}x`;
+  if (typeof v === 'number') return v + 1;
+  if (typeof v === 'boolean') return !v;
+  if (v === null) return 0;
+  if (Array.isArray(v)) return [...v, 'x'];
+  return { .../** @type {object} */ (v), injected: 1 };
+}
+
+/**
+ * يوقّعُ البيانَ ثمّ يُغيّرُ كلَّ مسارٍ ويحذفُه ويُضيفُ مفتاحاً إلى كلِّ كائن؛ كلٌّ ⇒ `BINDING`. يُعيدُ عددَ الطفرات.
+ * @param {Record<string, any>} manifest @param {string} dumpSha
+ */
+function assertEveryPathBound(manifest, dumpSha) {
+  const keys = crypto.generateKeyPairSync('ed25519');
+  const envelope = signManifestPrototype(manifest, dumpSha, {
+    keyId: 'k1',
+    backupId: 'b-1',
+    sequence: 1,
+    database: 'db',
+    privateKey: keys.privateKey,
+  });
+  const policy = {
+    trustedKeys: new Map([['k1', keys.publicKey]]),
+    database: 'db',
+    sequenceReference: {
+      floor: 1,
+      latestIssued: 1,
+      issued: new Map([[1, { backupId: 'b-1', dumpSha256: dumpSha }]]),
+    },
+  };
+  const verdict = (/** @type {any} */ m) => {
+    const r = verifyManifestPrototype(m, dumpSha, envelope, policy);
+    return r.ok ? 'OK' : r.reason;
+  };
+  const copy = () => JSON.parse(JSON.stringify(manifest));
+  assert.equal(verdict(copy()), 'OK', 'البيانُ نفسُه بعدَ المرورِ بـJSON');
+  /** @param {any} root @param {Array<string | number>} p */
+  const parentOf = (root, p) => p.slice(0, -1).reduce((o, k) => o[k], root);
+  const { leaves, objects } = treePaths(copy());
+  let mutations = 0;
+  for (const p of leaves) {
+    const label = p.join('.');
+    const changed = copy();
+    const parent = parentOf(changed, p);
+    const last = /** @type {any} */ (p[p.length - 1]);
+    parent[last] = alteredValue(parent[last]);
+    assert.equal(verdict(changed), MANIFEST_AUTH_REASONS.BINDING, `تغييرُ ${label}`);
+    const removed = copy();
+    const rParent = parentOf(removed, p);
+    if (Array.isArray(rParent)) rParent.splice(Number(last), 1);
+    else delete rParent[last];
+    assert.equal(verdict(removed), MANIFEST_AUTH_REASONS.BINDING, `حذفُ ${label}`);
+    mutations += 2;
+  }
+  for (const p of objects) {
+    const added = copy();
+    const target = p.reduce((o, k) => o[k], added);
+    target['__wl613_added'] = 'x';
+    assert.equal(
+      verdict(added),
+      MANIFEST_AUTH_REASONS.BINDING,
+      `إضافةٌ في ${p.join('.') || '<الجذر>'}`,
+    );
+    mutations += 1;
+  }
+  return mutations;
+}
+
+test(
+  'WL-613 الطبقةُ الثابتة (‏بلا قاعدة): تعريفا BackupManifest وContentDigest بأنواعِهما المتداخلة يطابقانِ المكتوبَ فعلاً في scripts/backup.mjs، والبيانُ التمثيليُّ يطابقُهما في كلِّ عمق، وكلُّ مسارٍ فيه يُغيَّرُ ويُحذَفُ وكلُّ كائنٍ يُزادُ ⇒ BINDING',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const shape = declaredManifestShape();
+    assert.ok(shape.manifest.length >= 10, `حقولُ البيانِ أقلُّ من المتوقَّع: ${shape.manifest}`);
+    assert.ok(shape.digest.length >= 8, `حقولُ البصمةِ أقلُّ من المتوقَّع: ${shape.digest}`);
+    const sha = 'a'.repeat(64);
+    /** @type {Record<string, any>} */
+    const manifest = {
+      startedAt: '2026-11-25T00:00:00.000Z',
+      durationMs: 1200,
+      databaseVersion: 'PostgreSQL 18',
+      migrationVersion: 35,
+      sha256: sha,
+      rowCounts: { 'state.ledger': 3 },
+      dumpFile: 'state.dump',
+      ledgerStagingTable: '__backup_schema_migrations_abc',
+      contentDigestMs: 40,
+      contentDigest: {
+        format: 'xuux.content-digest',
+        version: 1,
+        canonicalization: { settings: { DateStyle: 'ISO, YMD' }, row: 'row-rule' },
+        scope: { schema: 'state', excludes: ['__backup_schema_migrations_*'] },
+        tables: {
+          'state.ledger': { columns: [['id', 'bigint', true]], rows: '3', sha256: 'c'.repeat(64) },
+        },
+        sequences: { 'state.ledger_id_seq': { lastValue: '3', isCalled: true, increment: '1' } },
+        ledger: { rows: '35', sha256: 'd'.repeat(64) },
+        sha256: 'b'.repeat(64),
+      },
+    };
+    assertManifestMatchesShape(manifest, shape, 'التمثيليّ');
+    const n = assertEveryPathBound(manifest, sha);
+    assert.ok(n > 60, `طفراتٌ أقلُّ من المتوقَّع: ${n}`);
+  },
+);
+
+test(
+  'WL-613 الطبقةُ الحقيقيّة: بيانٌ أنتجَه scripts/backup.mjs يطابقُ التعريفَ في كلِّ عمقٍ مُعلَن، وكلُّ مفتاحٍ فيه في كلِّ عمقٍ يُغيَّرُ ويُحذَف، ويُضافُ مفتاحٌ إلى كلِّ كائن ⇒ BINDING',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async (t) => {
+    const golden = await sharedGoldenBackup();
+    const manifest = JSON.parse(fs.readFileSync(golden.manifest, 'utf8'));
+    assertManifestMatchesShape(manifest, declaredManifestShape(), 'الحقيقيّ');
+    const n = assertEveryPathBound(manifest, sha256Of(golden.dump));
+    t.diagnostic(`WL-613 real manifest: ${n} mutations, all BINDING`);
+  },
+);
