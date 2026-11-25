@@ -1559,13 +1559,14 @@ function authCanonical(value) {
 /**
  * الحمولةُ الموقَّعة: ما يُقرأُ من البيانِ ومن الأرشيفِ نفسِه (‏`dumpSha256` يُحسَبُ من الملفّ لا يُنقَلُ من البيان).
  * ‏`WL-610`: الإصدارُ 2 يُضيفُ `backupId` — هويّةُ النسخةِ التي يُسجِّلُها المرجعُ المستقلُّ مع رقمِها.
+ * ‏`WL-612`: الإصدارُ 3 يُضيفُ `manifestSha256` — بصمةَ البيانِ كلِّه؛ كانتِ الحقولُ الأربعةُ وحدَها مربوطةً.
  * @param {Record<string, any>} manifest @param {string} dumpSha256
  * @param {{ keyId: string, sequence: number, database: string, backupId: string }} meta
  */
 export function manifestAuthPayload(manifest, dumpSha256, meta) {
   return {
     format: 'xuux.backup-signature-prototype',
-    version: 2,
+    version: 3,
     keyId: meta.keyId,
     backupId: meta.backupId,
     sequence: meta.sequence,
@@ -1575,7 +1576,23 @@ export function manifestAuthPayload(manifest, dumpSha256, meta) {
     contentDigestSha256: String(manifest['contentDigest']?.['sha256'] ?? ''),
     startedAt: String(manifest['startedAt']),
     migrationVersion: Number(manifest['migrationVersion']),
+    manifestSha256: manifestCanonicalSha256(manifest),
   };
+}
+
+/**
+ * ‏`WL-612` (‏`LIVE-78/SIGNATURE-BINDING`): بصمةُ **البيانِ كلِّه** في صورتِه القانونيّة، فلا يبقى حقلٌ خارجَ
+ * التوقيع (‏`rowCounts`، `contentDigest.tables`، `durationMs`، حقلٌ مُضاف…). يُمرَّرُ عبرَ JSON أوّلاً لأنّ
+ * البيانَ يُقرأُ من ملفّ: ما يُسقطُه التسلسلُ (‏`undefined`) لا يُوقَّعُ ثمّ يُفتقَدُ عندَ التحقّق.
+ * @param {Record<string, any>} manifest
+ */
+function manifestCanonicalSha256(manifest) {
+  const json = JSON.stringify(manifest);
+  if (typeof json !== 'string') throw new TypeError('manifest is not JSON-serialisable');
+  return crypto
+    .createHash('sha256')
+    .update(authCanonical(JSON.parse(json)), 'utf8')
+    .digest('hex');
 }
 
 /**
@@ -1708,12 +1725,17 @@ export function verifyManifestPrototype(manifest, dumpSha256, envelope, policy) 
   if (!good) return { ok: false, reason: MANIFEST_AUTH_REASONS.INVALID };
   const sequence = Number(envelope.payload['sequence']);
   const backupId = String(envelope.payload['backupId']);
-  const expected = manifestAuthPayload(manifest, dumpSha256, {
-    keyId,
-    sequence,
-    database: String(envelope.payload['database']),
-    backupId,
-  });
+  let expected;
+  try {
+    expected = manifestAuthPayload(manifest, dumpSha256, {
+      keyId,
+      sequence,
+      database: String(envelope.payload['database']),
+      backupId,
+    });
+  } catch {
+    return { ok: false, reason: MANIFEST_AUTH_REASONS.BINDING };
+  }
   if (authCanonical(expected) !== authCanonical(envelope.payload)) {
     return { ok: false, reason: MANIFEST_AUTH_REASONS.BINDING };
   }
