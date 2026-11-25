@@ -3945,3 +3945,59 @@ test(
     assert.deepEqual(v(b2, e2, both, { revokedKeys }), { ok: true, replayProtected: true });
   },
 );
+
+test(
+  'WL-611 احتواءُ مرجعِ التسلسل: مقطعُ `..` كاملٌ لا بادئةٌ نصّيّة — مجلّدٌ أو ملفٌّ داخليٌّ اسمُه يبدأُ بـ`..` داخلَ مجلّدِ النسخِ يُرفَض مباشرةً وعبرَ الروابط، والخارجُ الحقيقيُّ وشقيقٌ يشاركُ البادئةَ يُقبَلان',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const lab = wl610Lab();
+    const body = {
+      floor: 1,
+      latestIssued: 1,
+      issued: { 1: { backupId: 'b-1', dumpSha256: 'x' } },
+    };
+    const put = (/** @type {string} */ file) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      return lab.writeRef(file, body);
+    };
+    const load = (/** @type {string} */ f) => loadSequenceReference(f, lab.backups);
+    const reason = (/** @type {string} */ f) => {
+      const r = load(f);
+      return r.ok ? 'ACCEPTED' : r.reason;
+    };
+    const NOT_INDEPENDENT = MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_NOT_INDEPENDENT;
+    // خارجَ المجلّدِ فعلاً: يُقبَل — ومنه شقيقٌ يشاركُ اسمَ المجلّدِ بادئةً، ومسارٌ يخرجُ بـ`..` حقيقيّ.
+    const real = put(path.join(lab.refDir, 'sequence.json'));
+    assert.equal(reason(real), 'ACCEPTED');
+    assert.equal(reason(put(path.join(lab.root, 'backups-sibling', 'sequence.json'))), 'ACCEPTED');
+    assert.equal(
+      reason(path.join(lab.backups, '..', path.basename(lab.refDir), 'sequence.json')),
+      'ACCEPTED',
+    );
+    // داخلَ المجلّدِ باسمٍ يبدأُ بـ`..`: كانَ `startsWith('..')` يعدُّه خارجاً فيقبلُه.
+    const inDir = put(path.join(lab.backups, '..trusted', 'sequence.json'));
+    assert.equal(reason(inDir), NOT_INDEPENDENT);
+    assert.equal(reason(put(path.join(lab.backups, '..sequence.json'))), NOT_INDEPENDENT);
+    assert.equal(reason(put(path.join(lab.backups, '...', 'sequence.json'))), NOT_INDEPENDENT);
+    // رابطٌ داخليٌّ تحتَ `..x/` إلى المرجعِ الحقيقيّ: يُرفَضُ لفظيّاً.
+    const linkIn = path.join(lab.backups, '..link', 'ref.json');
+    fs.mkdirSync(path.dirname(linkIn));
+    fs.symlinkSync(real, linkIn);
+    assert.equal(reason(linkIn), NOT_INDEPENDENT);
+    // رابطُ ملفٍّ ورابطُ مجلّدٍ خارجَ المجلّدِ يُشيرانِ إلى `..trusted/`: يُرفَضانِ بعدَ حلِّ الروابط.
+    const outLink = path.join(lab.root, 'out-link.json');
+    fs.symlinkSync(inDir, outLink);
+    assert.equal(reason(outLink), NOT_INDEPENDENT);
+    const dirLink = path.join(lab.root, 'escape-dir');
+    fs.symlinkSync(path.dirname(inDir), dirLink);
+    assert.equal(reason(path.join(dirLink, 'sequence.json')), NOT_INDEPENDENT);
+    // مجلّدُ النسخِ نفسُه ليس مرجعاً مستقلّاً (‏لا «غيرُ متاح»).
+    assert.equal(reason(lab.backups), NOT_INDEPENDENT);
+    // غائبٌ تحتَ `..x/` داخلَ المجلّد: الاحتواءُ اللفظيُّ يسبقُ القراءة؛ وغائبٌ خارجَه ⇒ غيرُ متاح.
+    assert.equal(reason(path.join(lab.backups, '..ghost', 'none.json')), NOT_INDEPENDENT);
+    assert.equal(
+      reason(path.join(lab.refDir, 'none.json')),
+      MANIFEST_AUTH_REASONS.SEQUENCE_REFERENCE_UNAVAILABLE,
+    );
+  },
+);
