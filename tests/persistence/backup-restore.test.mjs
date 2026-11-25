@@ -4108,3 +4108,88 @@ function canonicalForTest(value) {
     .map((k) => `${JSON.stringify(k)}:${canonicalForTest(record[k])}`)
     .join(',')}}`;
 }
+
+test(
+  'WL-613 معيارُ إغلاقِ LIVE-78/SIGNATURE-BINDING: لكلِّ حقلٍ في البيانِ الإنتاجيِّ (‏مقروءاً من scripts/backup.mjs لا مكتوباً بيد) طفرةٌ تُغيّرُه فتُرفَضُ BINDING، ولكلِّ حقلٍ في contentDigest كذلك، وحقلٌ مُضافٌ يُرفَض',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const source = fs.readFileSync(path.join(HERE, '..', '..', 'scripts', 'backup.mjs'), 'utf8');
+    // الحقولُ من مصدرَين في الإنتاج: تعريفُ النوعِ `BackupManifest`، والكائنُ الذي يُكتَبُ فعلاً.
+    const typedef = source.match(/@typedef \{object\} BackupManifest\n([\s\S]*?)\*\//u);
+    assert.ok(typedef, 'BackupManifest typedef غيرُ موجود');
+    const declared = [
+      ...String(typedef[1]).matchAll(/@property \{[^}]+\} \[?([A-Za-z0-9_]+)\]?/gu),
+    ].map((m) => String(m[1]));
+    const literal = source.match(/const manifest = \{\n([\s\S]*?)\n {4}\};/u);
+    assert.ok(literal, 'كائنُ البيانِ المكتوبُ غيرُ موجود');
+    const written = [...String(literal[1]).matchAll(/^\s+([A-Za-z0-9_]+)[,:]/gmu)].map((m) =>
+      String(m[1]),
+    );
+    assert.deepEqual([...written].sort(), [...declared].sort(), 'المكتوبُ يفترقُ عن المُعلَن');
+    assert.ok(written.length >= 10, `حقولٌ أقلُّ من المتوقَّع: ${written.join(',')}`);
+
+    const sha = 'a'.repeat(64);
+    /** @type {Record<string, any>} */
+    const manifest = {
+      startedAt: '2026-11-25T00:00:00.000Z',
+      durationMs: 1200,
+      databaseVersion: 'PostgreSQL 18',
+      migrationVersion: 35,
+      sha256: sha,
+      rowCounts: { 'state.ledger': 3 },
+      dumpFile: 'state.dump',
+      ledgerStagingTable: '__backup_schema_migrations_abc',
+      contentDigestMs: 40,
+      contentDigest: {
+        version: 1,
+        sha256: 'b'.repeat(64),
+        tables: { 'state.ledger': { rows: '3', sha256: 'c'.repeat(64) } },
+      },
+    };
+    // البيانُ التمثيليُّ يحملُ كلَّ حقلٍ إنتاجيٍّ ولا يزيد: حقلٌ جديدٌ في الإنتاجِ يُسقِطُ هذه الحالةَ حتى يُقاس.
+    assert.deepEqual(Object.keys(manifest).sort(), [...written].sort());
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const envelope = signManifestPrototype(manifest, sha, {
+      keyId: 'k1',
+      backupId: 'b-1',
+      sequence: 1,
+      database: 'db',
+      privateKey: keys.privateKey,
+    });
+    const policy = {
+      trustedKeys: new Map([['k1', keys.publicKey]]),
+      database: 'db',
+      sequenceReference: {
+        floor: 1,
+        latestIssued: 1,
+        issued: new Map([[1, { backupId: 'b-1', dumpSha256: sha }]]),
+      },
+    };
+    const verdict = (/** @type {any} */ m) => {
+      const r = verifyManifestPrototype(m, sha, envelope, policy);
+      return r.ok ? 'OK' : r.reason;
+    };
+    assert.equal(verdict(JSON.parse(JSON.stringify(manifest))), 'OK');
+    /** @param {unknown} v */
+    const changed = (v) =>
+      typeof v === 'string'
+        ? `${v}x`
+        : typeof v === 'number'
+          ? v + 1
+          : { .../** @type {object} */ (v), injected: 1 };
+    for (const field of written) {
+      const m = JSON.parse(JSON.stringify(manifest));
+      m[field] = changed(m[field]);
+      assert.equal(verdict(m), MANIFEST_AUTH_REASONS.BINDING, `الحقل ${field}`);
+      const gone = JSON.parse(JSON.stringify(manifest));
+      delete gone[field];
+      assert.equal(verdict(gone), MANIFEST_AUTH_REASONS.BINDING, `حذفُ ${field}`);
+    }
+    for (const field of Object.keys(manifest.contentDigest)) {
+      const m = JSON.parse(JSON.stringify(manifest));
+      m.contentDigest[field] = changed(m.contentDigest[field]);
+      assert.equal(verdict(m), MANIFEST_AUTH_REASONS.BINDING, `contentDigest.${field}`);
+    }
+    assert.equal(verdict({ ...manifest, added: 'x' }), MANIFEST_AUTH_REASONS.BINDING);
+  },
+);
