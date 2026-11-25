@@ -1374,13 +1374,13 @@ test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من ا�
   }
   const tmp2 = cloneRepo();
   try {
-    // WL-586: `LIVE-45` (‏صفُّ `F` الوحيد) أُغلِقَ فخرجَ؛ والشاهدُ صفُّ `A` ‏`DOC-26` (‏ومنذُ `WL-611` صفّا `A` اثنان).
+    // WL-586: `LIVE-45` (‏صفُّ `F` الوحيد) أُغلِقَ فخرجَ؛ والشاهدُ صفُّ `A` ‏`DOC-26` (‏ومنذُ `WL-611` صفّا `A` اثنان، ومنذُ `WL-612` واحدٌ: `LIVE-78/SIGNATURE-BINDING` صارَ `B`).
     const row = matrixRow(tmp2, /^\| `DOC-26` \|/u);
     mutateText(tmp2, REG, row, row.replace(/\| A \|$/u, '| D |'));
     const r2 = runGuardWithOutput(tmp2);
     assert.equal(r2.code, 1, r2.stderr);
     assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ D = 37 والجدولُ 38/u);
-    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ A = 2 والجدولُ 1/u);
+    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ A = 1 والجدولُ 0/u);
   } finally {
     rmSync(tmp2, { recursive: true, force: true });
   }
@@ -1390,7 +1390,7 @@ test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ 
   const tmp = cloneRepo();
   try {
     mutateText(tmp, REG, '**73 صفّاً،', '**صفوفاً،');
-    mutateText(tmp, REG, ' · **B = 0**', '');
+    mutateText(tmp, REG, ' · **B = 1**', '');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R12\/COUNT: نثرُ §8 لا يُعلِنُ/u);

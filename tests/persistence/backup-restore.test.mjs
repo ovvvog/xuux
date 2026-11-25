@@ -4001,3 +4001,110 @@ test(
     );
   },
 );
+
+test(
+  'WL-612 ربطُ التوقيعِ بالبيانِ كلِّه (‏LIVE-78/SIGNATURE-BINDING): تعديلُ أيِّ حقلٍ — rowCounts أو contentDigest.tables أو durationMs أو dumpFile — أو إضافتُه أو حذفُه يُرفَض، وإعادةُ ترتيبِ المفاتيحِ والمرورُ بـJSON لا يُغيِّران الحكم، والحمولةُ القديمةُ بلا بصمةِ البيانِ تُرفَض',
+  { timeout: PER_TEST_TIMEOUT_MS },
+  () => {
+    const sha = 'a'.repeat(64);
+    // حقولُ البيانِ الإنتاجيّة (‏scripts/backup.mjs) بقيمٍ تمثيليّة.
+    const manifest = {
+      startedAt: '2026-11-25T00:00:00.000Z',
+      durationMs: 1200,
+      databaseVersion: 'PostgreSQL 18',
+      migrationVersion: 35,
+      sha256: sha,
+      rowCounts: { 'state.ledger': 3, 'state.events': 7 },
+      dumpFile: 'state-20261125.dump',
+      ledgerStagingTable: 'ledger_staging',
+      contentDigestMs: 40,
+      contentDigest: {
+        version: 1,
+        sha256: 'b'.repeat(64),
+        tables: { 'state.ledger': { rows: '3', sha256: 'c'.repeat(64) } },
+      },
+    };
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const envelope = signManifestPrototype(manifest, sha, {
+      keyId: 'k1',
+      backupId: 'b-1',
+      sequence: 1,
+      database: 'db',
+      privateKey: keys.privateKey,
+    });
+    const policy = {
+      trustedKeys: new Map([['k1', keys.publicKey]]),
+      database: 'db',
+      sequenceReference: {
+        floor: 1,
+        latestIssued: 1,
+        issued: new Map([[1, { backupId: 'b-1', dumpSha256: sha }]]),
+      },
+    };
+    const verdict = (/** @type {any} */ m, env = envelope) => {
+      const r = verifyManifestPrototype(m, sha, env, policy);
+      return r.ok ? 'OK' : r.reason;
+    };
+    const BINDING = MANIFEST_AUTH_REASONS.BINDING;
+    const clone = () => JSON.parse(JSON.stringify(manifest));
+    assert.equal(verdict(manifest), 'OK');
+    // المرورُ بملفٍّ وإعادةُ ترتيبِ المفاتيحِ لا يُغيِّرانِ البصمةَ القانونيّة.
+    assert.equal(verdict(clone()), 'OK');
+    const reordered = Object.fromEntries(Object.entries(clone()).reverse());
+    reordered.contentDigest = Object.fromEntries(Object.entries(manifest.contentDigest).reverse());
+    assert.equal(verdict(reordered), 'OK');
+    // كلُّ حقلٍ داخلَ التوقيع: ما كانَ يمرُّ قبلَ WL-612 (‏rowCounts، tables، durationMs، حقلٌ مضاف).
+    /** @type {Array<[string, (m: any) => void]>} */
+    const mutations = [
+      ['rowCounts', (m) => (m.rowCounts['state.ledger'] = 999)],
+      ['contentDigest.tables', (m) => (m.contentDigest.tables['state.ledger'].rows = '999')],
+      ['durationMs', (m) => (m.durationMs = 1)],
+      ['dumpFile', (m) => (m.dumpFile = 'other.dump')],
+      ['databaseVersion', (m) => (m.databaseVersion = 'PostgreSQL 9')],
+      ['ledgerStagingTable', (m) => (m.ledgerStagingTable = 'evil')],
+      ['حقلٌ مضاف', (m) => (m.injected = true)],
+      ['حقلٌ محذوف', (m) => delete m.rowCounts],
+      ['جدولٌ مضاف', (m) => (m.contentDigest.tables['state.x'] = { rows: '0', sha256: 'd' })],
+      ['sha256', (m) => (m.sha256 = 'f'.repeat(64))],
+    ];
+    for (const [name, mutate] of mutations) {
+      const m = clone();
+      mutate(m);
+      assert.equal(verdict(m), BINDING, name);
+    }
+    // حقلٌ `undefined` يُسقطُه JSON: يُوقَّعُ كما يُكتَبُ في الملفّ فيُقبَلُ بعدَ القراءة.
+    const withUndefined = { ...clone(), note: undefined };
+    const envU = signManifestPrototype(withUndefined, sha, {
+      keyId: 'k1',
+      backupId: 'b-1',
+      sequence: 1,
+      database: 'db',
+      privateKey: keys.privateKey,
+    });
+    assert.equal(verdict(clone(), envU), 'OK');
+    // بيانٌ لا يُسلسَلُ JSON يُرفَضُ بسببٍ مُسمّى ولا يرمي.
+    assert.equal(verdict({ ...clone(), rowCounts: 1n }), BINDING);
+    // خفضُ الإصدار: حمولةُ الإصدارِ 2 (‏بلا manifestSha256) موقَّعةٌ بمفتاحٍ موثوقٍ تُرفَض.
+    const { manifestSha256: _dropped, ...v3rest } = envelope.payload;
+    assert.match(_dropped, /^[0-9a-f]{64}$/u);
+    const legacy = { ...v3rest, version: 2 };
+    const legacySig = crypto
+      .sign(null, Buffer.from(canonicalForTest(legacy), 'utf8'), keys.privateKey)
+      .toString('base64');
+    assert.equal(
+      verdict(manifest, /** @type {any} */ ({ payload: legacy, signature: legacySig })),
+      BINDING,
+    );
+  },
+);
+
+/** @param {unknown} value @returns {string} نسخةٌ مستقلّةٌ من التسلسلِ القانونيِّ لتوقيعِ حمولةٍ قديمة */
+function canonicalForTest(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalForTest).join(',')}]`;
+  const record = /** @type {Record<string, unknown>} */ (value);
+  return `{${Object.keys(record)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${canonicalForTest(record[k])}`)
+    .join(',')}}`;
+}
