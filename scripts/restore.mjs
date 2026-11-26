@@ -26,8 +26,7 @@ import {
   BackupError,
   computeContentDigest,
   contentDigestDifferences,
-  readManifest,
-  verifyBackup,
+  snapshotVerifiedArchive,
 } from './backup.mjs';
 import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-tools.mjs';
 
@@ -482,17 +481,44 @@ export async function resolveVerifiedRestoreTool(dumpServerVersion) {
 }
 
 /**
+ * @typedef {object} RestoreOutcome
+ * @property {number} durationMs
+ * @property {boolean} created
+ * @property {'VERIFIED' | 'NO_DIGEST'} contentVerification
+ * @property {number} contentVerifyMs
+ * @property {import('./backup.mjs').BackupManifest} manifest البيانُ الذي تحقّقت الاستعادةُ منه (‏`WL-614`).
+ */
+
+/**
  * @param {RestoreOptions} options
  * @param {string} databaseUrl
- * @returns {Promise<{ durationMs: number, created: boolean, contentVerification: 'VERIFIED' | 'NO_DIGEST', contentVerifyMs: number }>}
+ * @returns {Promise<RestoreOutcome>}
  */
 export async function restoreBackup(options, databaseUrl) {
   const url = requireDatabaseUrl(databaseUrl);
   if (!fs.existsSync(options.dumpPath)) {
     throw new BackupError(BACKUP_ERRORS.FILE_MISSING, `ملف النسخة غير موجود: ${options.dumpPath}`);
   }
-  const manifest = await verifyBackup(options.dumpPath);
-  // ‏`WL-606`: بصمةٌ تالفةٌ أو غيرُ مدعومةٍ رُفضت في `verifyBackup` أعلاه، وغيابُها يُرفَضُ هنا — كلاهما
+  // ‏`WL-614` (‏`LIVE-78/ARCHIVE-TOCTOU`): يُقرأُ الأرشيفُ **مرّةً واحدة** إلى نسخةٍ خاصّةٍ يُحسَبُ sha256 على
+  // بايتاتِها، و`pg_restore` يقرأُ تلك النسخةَ لا `dumpPath`. كانَ التحقّقُ على المسارِ ثمّ يُعيدُ
+  // `pg_restore` قراءتَه بعدَ نافذة، فأرشيفٌ يُستبدَلُ فيها يُستعادُ ببيانٍ شرعيٍّ ويُعلَنُ `[RESTORE_OK]`.
+  const verified = await snapshotVerifiedArchive(options.dumpPath);
+  try {
+    return await restoreVerifiedArchive(options, url, verified);
+  } finally {
+    verified.cleanup();
+  }
+}
+
+/**
+ * @param {RestoreOptions} options
+ * @param {string} url
+ * @param {import('./backup.mjs').VerifiedArchive} verified
+ * @returns {Promise<RestoreOutcome>}
+ */
+async function restoreVerifiedArchive(options, url, verified) {
+  const { manifest, archivePath } = verified;
+  // ‏`WL-606`: بصمةٌ تالفةٌ أو غيرُ مدعومةٍ رُفضت في `snapshotVerifiedArchive` أعلاه، وغيابُها يُرفَضُ هنا — كلاهما
   // قبلَ لمسِ الهدف. الاستعادةُ بلا دليلِ محتوى قرارٌ صريحٌ للمشغّل لا افتراض.
   if (manifest.contentDigest === undefined && options.allowUnverified !== true) {
     throw new RestoreError(
@@ -547,7 +573,7 @@ export async function restoreBackup(options, databaseUrl) {
     '--no-privileges',
     '--dbname',
     targetUrl,
-    options.dumpPath,
+    archivePath,
   ]);
   const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
   if (result.code !== 0) {
@@ -631,7 +657,7 @@ export async function restoreBackup(options, databaseUrl) {
   } finally {
     await verifier.end();
   }
-  return { durationMs, created, contentVerification, contentVerifyMs };
+  return { durationMs, created, contentVerification, contentVerifyMs, manifest };
 }
 
 /**
@@ -642,7 +668,9 @@ export async function restoreBackup(options, databaseUrl) {
 export async function main(argv, databaseUrl) {
   const options = parseArguments(argv);
   const outcome = await restoreBackup(options, databaseUrl);
-  const manifest = readManifest(options.dumpPath);
+  // ‏`WL-614`: ما يُطبَعُ من البيانِ المتحقَّقِ منه؛ إعادةُ قراءتِه من القرصِ هنا كانت تطبعُ بيانَ مَن
+  // كتبَ فوقَه بعدَ الاستعادة، أو تُسقِطُ عمليّةً نجحَت استعادتُها بخطأِ بيانٍ تالف.
+  const { manifest } = outcome;
   // ‏`[RESTORE_OK]` = **تحقّقٌ تمّ**: الأعدادُ ونسخةُ الهجرةِ وبصمةُ المحتوى طابقت. نسخةٌ بلا بصمةٍ
   // تُعلَنُ بعلامةٍ أخرى لا تحوي `RESTORE_OK` كي لا يقرأَها مستهلكٌ آليٌّ تحقّقاً (‏`WL-606`).
   if (outcome.contentVerification === CONTENT_VERIFICATION.VERIFIED) {

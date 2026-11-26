@@ -3522,3 +3522,201 @@ test(
     }
   },
 );
+
+/**
+ * ‏`WL-614` (‏`LIVE-78/ARCHIVE-TOCTOU`): أرشيفٌ مُفخَّخٌ مبنيٌّ من الأرشيفِ الشرعيِّ نفسِه — الجدولُ المرحليُّ
+ * نفسُه والصفوفُ نفسُها — ومعه قادحٌ خارجَ تغطيةِ البصمة (‏`LIVE-78/DIGEST-COVERAGE`). فلا يكشفُه
+ * عدُّ الصفوفِ ولا بصمةُ المحتوى، ويكشفُه sha256 الأرشيفِ وحدَه.
+ * @param {string} genuineDump
+ * @param {{ name: string, pool: import('pg').Pool }} craft
+ * @param {string} out
+ * @returns {Promise<void>}
+ */
+async function trojanArchive(genuineDump, craft, out) {
+  const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
+  const exec = (/** @type {string} */ tool, /** @type {string[]} */ args) =>
+    new Promise((resolve, reject) => {
+      const child = spawn(tool, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      child.on('error', reject);
+      child.on('close', (code) =>
+        code === 0 ? resolve(undefined) : reject(new Error(`${tool} ${code}: ${stderr}`)),
+      );
+    });
+  const craftUrl = databaseUrlFor(craft.name);
+  await exec(resolvePgTool('pg_restore'), [
+    '--exit-on-error',
+    '--no-owner',
+    '--no-privileges',
+    '--dbname',
+    craftUrl,
+    genuineDump,
+  ]);
+  await craft.pool.query(
+    `CREATE FUNCTION state.xuux_trojan() RETURNS trigger LANGUAGE plpgsql AS $$
+     BEGIN NEW.name := 'Trojan Rewritten'; RETURN NEW; END $$`,
+  );
+  await craft.pool.query(
+    `CREATE TRIGGER xuux_trojan BEFORE INSERT OR UPDATE ON state.agents
+     FOR EACH ROW EXECUTE FUNCTION state.xuux_trojan()`,
+  );
+  const fenced = await fenceSchemaPresent(craft.pool);
+  await exec(resolvePgTool('pg_dump'), [
+    '--format=custom',
+    '--file',
+    out,
+    '--schema',
+    STATE_SCHEMA,
+    ...(fenced ? ['--schema', 'fence'] : []),
+    '--no-owner',
+    '--no-privileges',
+    craftUrl,
+  ]);
+}
+
+/**
+ * غلافُ `pg_restore` يمثّلُ كاتباً على مجلّدِ النسخ: عندَ نداءِ الاستعادةِ — أي **بعدَ** نجاحِ
+ * التحقّقِ وقبلَ أن يقرأَ `pg_restore` بايتاً — يكتبُ فوقَ الأرشيفِ والبيانِ **في مكانِهما** (‏الـinode
+ * نفسُه، فلا يحمي منه فتحُ واصفٍ قبلَه)، ثمّ يُسلِّمُ للأداةِ الحقيقيّة.
+ * @param {string} dir
+ * @param {{ dump: string, evilDump: string, evilManifest: string }} swap
+ * @returns {Promise<{ wrapper: string, argsLog: string }>}
+ */
+async function swappingRestoreWrapper(dir, swap) {
+  const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
+  const real = resolvePgTool('pg_restore');
+  const wrapper = path.join(dir, 'pg_restore');
+  const argsLog = path.join(dir, 'pg_restore.args');
+  const lines = [
+    '#!/bin/sh',
+    'if [ "$1" != "--version" ] && [ "$1" != "--list" ]; then',
+    `  printf '%s\\n' "$@" > ${JSON.stringify(argsLog)}`,
+    `  cat ${JSON.stringify(swap.evilDump)} > ${JSON.stringify(swap.dump)}`,
+    `  cat ${JSON.stringify(swap.evilManifest)} > ${JSON.stringify(`${swap.dump}.manifest.json`)}`,
+    'fi',
+    `exec ${JSON.stringify(real)} "$@"`,
+    '',
+  ];
+  fs.writeFileSync(wrapper, lines.join('\n'), { mode: 0o700 });
+  return { wrapper, argsLog };
+}
+
+test(
+  'WL-614 LIVE-78/ARCHIVE-TOCTOU: أرشيفٌ يُستبدَلُ في مكانِه بعدَ التحقّقِ وقبلَ pg_restore لا يصلُ إلى الهدف — يُستعادُ ما تحقّقَ منه بايتاً ببايت',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const legit = await seededBackup('toctou');
+    const craft = await createIsolatedDatabase('toctoucraft');
+    const target = await createIsolatedDatabase('toctoudst');
+    try {
+      const evilDump = path.join(legit.dir, 'evil.dump');
+      await trojanArchive(legit.dump, craft, evilDump);
+      const genuine = JSON.parse(fs.readFileSync(`${legit.dump}.manifest.json`, 'utf8'));
+      const evilManifest = path.join(legit.dir, 'evil.manifest.json');
+      fs.writeFileSync(
+        evilManifest,
+        JSON.stringify(
+          { ...genuine, migrationVersion: Number(genuine.migrationVersion) + 64 },
+          null,
+          2,
+        ),
+      );
+      // المُفخَّخُ يخالفُ الشرعيَّ في sha256 الأرشيفِ وحدَه: لو قُدِّمَ قبلَ التحقّقِ لرُفِض.
+      assert.notEqual(sha256Of(evilDump), genuine.sha256);
+      const { wrapper, argsLog } = await swappingRestoreWrapper(legit.dir, {
+        dump: legit.dump,
+        evilDump,
+        evilManifest,
+      });
+
+      const restore = await runNode(
+        [RESTORE_SCRIPT, legit.dump, '--database', target.name],
+        legit.sourceUrl,
+        { PG_RESTORE: wrapper },
+      );
+      // الاستبدالُ وقعَ فعلاً في النافذة (‏وإلّا فالاختبارُ لا يقيسُ شيئاً).
+      assert.equal(sha256Of(legit.dump), sha256Of(evilDump), 'الغلافُ لم يستبدلِ الأرشيف');
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      const triggers = await target.pool.query(
+        `SELECT count(*)::int AS n FROM pg_trigger WHERE tgname = 'xuux_trojan'`,
+      );
+      assert.equal(
+        triggers.rows[0]['n'],
+        0,
+        'قادحُ المهاجمِ وصلَ إلى الهدفِ عبرَ نافذةِ ما بعدَ التحقّق',
+      );
+      assert.equal(await contentsDigest(target.pool), legit.sourceDigest);
+      // ما قرأَه `pg_restore` ليسَ مسارَ المستخدم، والنسخةُ الخاصّةُ أُزيلت بعدَ الاستعادة.
+      const args = fs.readFileSync(argsLog, 'utf8').trimEnd().split('\n');
+      const consumed = args[args.length - 1] ?? '';
+      assert.notEqual(path.resolve(consumed), path.resolve(legit.dump));
+      assert.equal(fs.existsSync(consumed), false, `النسخةُ الخاصّةُ باقيةٌ: ${consumed}`);
+      // ما يُطبَعُ من البيانِ الذي تحقّقَ منه، لا من بيانٍ أُعيدَت قراءتُه بعدَ الاستعادة.
+      assert.ok(restore.stdout.includes(String(genuine.contentDigest.sha256)));
+      assert.ok(
+        restore.stdout.includes(`نسخة الهجرة ${genuine.migrationVersion}.`),
+        'المطبوعُ من بيانٍ أُعيدَت قراءتُه بعدَ الاستعادة',
+      );
+    } finally {
+      await target.drop();
+      await craft.drop();
+      await legit.source.drop();
+    }
+  },
+);
+
+test(
+  'WL-614 LIVE-78/ARCHIVE-TOCTOU: النسخةُ الخاصّةُ للأرشيفِ تُزالُ عندَ كلِّ فشل — بصمةٌ لا تطابق، و`pg_restore` يسقط',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const snapshots = () =>
+      fs
+        .readdirSync(os.tmpdir())
+        .filter((name) => name.startsWith('xuux-restore-'))
+        .sort();
+    const before = snapshots();
+    const legit = await seededBackup('toctoufail');
+    const target = await createIsolatedDatabase('toctoufaildst');
+    try {
+      // (‏1) فشلُ `pg_restore` بعدَ أخذِ النسخةِ الخاصّة: المسارُ المستهلَكُ يُزالُ والخطأُ مسمّى.
+      const { wrapper, argsLog } = await restoreWrapper(legit.dir, { exitCode: 3 });
+      const failed = await runNode(
+        [RESTORE_SCRIPT, legit.dump, '--database', target.name],
+        legit.sourceUrl,
+        { PG_RESTORE: wrapper },
+      );
+      assert.equal(failed.code, 1);
+      assert.match(failed.stderr, /\[RESTORE_COMMAND_FAILED\]/);
+      const args = fs.readFileSync(argsLog, 'utf8').trimEnd().split('\n');
+      const consumed = args[args.length - 1] ?? '';
+      assert.notEqual(path.resolve(consumed), path.resolve(legit.dump));
+      assert.equal(
+        fs.existsSync(consumed),
+        false,
+        `النسخةُ الخاصّةُ باقيةٌ بعدَ الفشل: ${consumed}`,
+      );
+
+      // (‏2) أرشيفٌ لا يطابقُ بيانَه ⇒ رفضٌ قبلَ لمسِ الهدف، ولا نسخةَ خاصّةَ متروكة.
+      const bytes = fs.readFileSync(legit.dump);
+      const last = bytes.length - 1;
+      bytes.writeUInt8(bytes.readUInt8(last) ^ 0xff, last);
+      fs.writeFileSync(legit.dump, bytes);
+      const mismatch = await runNode(
+        [RESTORE_SCRIPT, legit.dump, '--database', target.name],
+        legit.sourceUrl,
+      );
+      assert.equal(mismatch.code, 1);
+      assert.match(mismatch.stderr, /\[BACKUP_HASH_MISMATCH\]/);
+      assert.equal(await fenceSchemaPresent(target.pool), false);
+      assert.deepEqual(snapshots(), before, 'نسخةٌ خاصّةٌ متروكةٌ في مجلّدِ المؤقّتات');
+    } finally {
+      await target.drop();
+      await legit.source.drop();
+    }
+  },
+);
