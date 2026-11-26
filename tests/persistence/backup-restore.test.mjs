@@ -3720,3 +3720,115 @@ test(
     }
   },
 );
+
+for (const [
+  label,
+  edit,
+  code,
+] of /** @type {Array<[string, (m: Record<string, any>) => void, string]>} */ ([
+  [
+    'عدٌّ مُزاد',
+    (m) => {
+      const first = Object.keys(m.rowCounts).sort()[0];
+      if (first === undefined) throw new Error('بيانٌ بلا جداول');
+      m.rowCounts[first] += 1;
+    },
+    'RESTORE_ROW_COUNT_MISMATCH',
+  ],
+  [
+    'جدولٌ ناقصٌ من البيان',
+    (m) => {
+      const last = Object.keys(m.rowCounts).sort().at(-1);
+      if (last === undefined) throw new Error('بيانٌ بلا جداول');
+      delete m.rowCounts[last];
+    },
+    'RESTORE_ROW_COUNT_MISMATCH',
+  ],
+  [
+    'نسخةُ هجرةٍ مُزادة',
+    (m) => {
+      m.migrationVersion += 1;
+    },
+    'RESTORE_MIGRATION_VERSION_MISMATCH',
+  ],
+])) {
+  test(
+    `WL-614 LIVE-78/VERIFY-ORDER: فشلُ التحقّقِ (${label}) لا يُركِّبُ دفترَ الهجرات — الهدفُ لا يُقرأُ قاعدةً مُهاجَرةً سليمة`,
+    { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+    async () => {
+      const { source, sourceUrl, dump } = await seededBackup('verifyorder');
+      const target = await createIsolatedDatabase('verifyorderdst');
+      try {
+        const staging = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'))[
+          'ledgerStagingTable'
+        ];
+        editManifest(dump, edit);
+        const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
+        assert.equal(restore.code, 1, restore.stdout);
+        assert.match(restore.stderr, new RegExp(`\\[${code}\\]`));
+        const state = await target.pool.query(
+          `SELECT to_regclass('public.schema_migrations') IS NOT NULL AS ledger,
+                  to_regclass($1) IS NOT NULL AS staging,
+                  EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                          WHERE n.nspname = 'public' AND c.relname = $2) AS half_moved`,
+          [`state.${staging}`, staging],
+        );
+        const row = state.rows[0];
+        assert.equal(row['ledger'], false, 'دفترُ الهجراتِ مُركَّبٌ بعدَ فشلِ التحقّق');
+        assert.equal(row['half_moved'], false, 'الدفترُ المرحليُّ نُقِلَ نصفَ نقلٍ إلى public');
+        assert.equal(row['staging'], true, 'الدفترُ المرحليُّ لم يبقَ في state');
+      } finally {
+        await target.drop();
+        await source.drop();
+      }
+    },
+  );
+}
+
+test(
+  'WL-614 LIVE-78/VERIFY-ORDER: تركيبُ الدفترِ ذرّيّ — فشلُ إعادةِ التسميةِ بعدَ نقلِ المخطّطِ لا يتركُ دفتراً منقولاً نصفَ نقل',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const { source, sourceUrl, dump } = await seededBackup('ledgeratomic');
+    const target = await createIsolatedDatabase('ledgeratomicdst');
+    try {
+      const staging = JSON.parse(fs.readFileSync(`${dump}.manifest.json`, 'utf8'))[
+        'ledgerStagingTable'
+      ];
+      // حقنُ عطلٍ بينَ الأمرَين: محفّزُ حدثٍ على مستوى القاعدة (‏خارجَ `state` فلا يمحوه المسح) يُسقِطُ
+      // إعادةَ التسميةِ وحدَها. لو كانَ النقلُ مُلتزَماً منفرداً لبقيَ `public.<staging>`.
+      await target.pool.query(
+        `CREATE FUNCTION public.wl614_fail_rename() RETURNS event_trigger LANGUAGE plpgsql AS $$
+         BEGIN
+           IF current_query() ILIKE '%RENAME TO%schema_migrations%' THEN
+             RAISE EXCEPTION 'wl614 injected rename failure';
+           END IF;
+         END $$`,
+      );
+      await target.pool.query(
+        `CREATE EVENT TRIGGER wl614_fail_rename ON ddl_command_end
+         WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION public.wl614_fail_rename()`,
+      );
+      const restore = await runNode(
+        [RESTORE_SCRIPT, dump, '--database', target.name, '--force'],
+        sourceUrl,
+      );
+      assert.equal(restore.code, 1, restore.stdout);
+      assert.match(restore.stderr, /wl614 injected rename failure/);
+      await target.pool.query('DROP EVENT TRIGGER wl614_fail_rename');
+      const state = await target.pool.query(
+        `SELECT to_regclass('public.schema_migrations') IS NOT NULL AS ledger,
+                to_regclass($1) IS NOT NULL AS staging,
+                to_regclass($2) IS NOT NULL AS half_moved`,
+        [`state.${staging}`, `public.${staging}`],
+      );
+      const row = state.rows[0];
+      assert.equal(row['ledger'], false, 'دفترُ الهجراتِ مُركَّبٌ رغمَ فشلِ التركيب');
+      assert.equal(row['half_moved'], false, 'الدفترُ المرحليُّ نُقِلَ نصفَ نقلٍ إلى public');
+      assert.equal(row['staging'], true, 'الدفترُ المرحليُّ لم يبقَ في state');
+    } finally {
+      await target.drop();
+      await source.drop();
+    }
+  },
+);
