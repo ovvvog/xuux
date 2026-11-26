@@ -3832,3 +3832,204 @@ test(
     }
   },
 );
+
+// ═══ ‏`WL-615` — دَينا المراجعةِ المستقلّةِ لـ`WL-614` ══════════════════════════════════════════════
+
+/**
+ * ‏`WL-615` (‏`LIVE-78/VERIFY-CLI-TOCTOU`): غلافُ `pg_restore` يمثّلُ كاتباً متزامناً على مجلّدِ النسخ:
+ * عندَ `--list` — أي **بعدَ** حسابِ البصمة — يكتبُ أرشيفاً آخرَ فوقَ `dumpPath` في مكانِه (‏الـinode
+ * نفسُه)، ثمّ يحفظُ نسخةً من **المسارِ الذي طُلِبَ فحصُه** كما هو لحظةَ الفحص، ويُسلِّمُ للأداةِ الحقيقيّة.
+ * فنسخةُ ما فُحِصَ تُقارَنُ ببصمةِ البيان: إن اختلفت فـ`[BACKUP_OK]` شهدَ لبايتاتٍ غيرِ التي فُحِصَت.
+ * @param {string} dir
+ * @param {{ dump: string, evilDump: string }} swap
+ * @returns {Promise<{ wrapper: string, listedCopy: string, listedPath: string }>}
+ */
+async function swappingListWrapper(dir, swap) {
+  const { resolvePgTool } = await import('../../scripts/lib/pg-tools.mjs');
+  const real = resolvePgTool('pg_restore');
+  const wrapper = path.join(dir, 'pg_restore_list');
+  const listedCopy = path.join(dir, 'listed.copy');
+  const listedPath = path.join(dir, 'listed.path');
+  const lines = [
+    '#!/bin/sh',
+    'if [ "$1" = "--list" ]; then',
+    `  cat ${JSON.stringify(swap.evilDump)} > ${JSON.stringify(swap.dump)}`,
+    '  for last; do :; done',
+    `  printf '%s' "$last" > ${JSON.stringify(listedPath)}`,
+    `  cat "$last" > ${JSON.stringify(listedCopy)}`,
+    'fi',
+    `exec ${JSON.stringify(real)} "$@"`,
+    '',
+  ];
+  fs.writeFileSync(wrapper, lines.join('\n'), { mode: 0o700 });
+  return { wrapper, listedCopy, listedPath };
+}
+
+test(
+  'WL-615 LIVE-78/VERIFY-CLI-TOCTOU: backup.mjs verify يفحصُ بـ--list البايتاتِ نفسَها التي حسبَ بصمتَها — أرشيفٌ يُستبدَلُ بينَهما لا يُشهَدُ له',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const snapshots = () =>
+      fs
+        .readdirSync(os.tmpdir())
+        .filter((name) => name.startsWith('xuux-restore-'))
+        .sort();
+    const before = snapshots();
+    const legit = await seededBackup('verifycli');
+    const craft = await createIsolatedDatabase('verifyclicraft');
+    try {
+      const evilDump = path.join(legit.dir, 'evil.dump');
+      await trojanArchive(legit.dump, craft, evilDump);
+      const genuine = JSON.parse(fs.readFileSync(`${legit.dump}.manifest.json`, 'utf8'));
+      assert.notEqual(sha256Of(evilDump), genuine.sha256);
+      const { wrapper, listedCopy, listedPath } = await swappingListWrapper(legit.dir, {
+        dump: legit.dump,
+        evilDump,
+      });
+      const verify = await runNode([BACKUP_SCRIPT, 'verify', legit.dump], legit.sourceUrl, {
+        PG_RESTORE: wrapper,
+      });
+      // الاستبدالُ وقعَ فعلاً بينَ البصمةِ و`--list` (‏وإلّا فالاختبارُ لا يقيسُ شيئاً).
+      assert.equal(sha256Of(legit.dump), sha256Of(evilDump), 'الغلافُ لم يستبدلِ الأرشيف');
+      assert.equal(verify.code, 0, verify.stderr);
+      assert.match(verify.stdout, /\[BACKUP_OK\]/);
+      assert.ok(verify.stdout.includes(String(genuine.sha256)));
+      // ما فحصَه `--list` هو ما حُسِبَت بصمتُه: بايتاتُ النسخةِ الخاصّة، لا الملفُّ بعدَ الاستبدال.
+      assert.equal(
+        sha256Of(listedCopy),
+        genuine.sha256,
+        '[BACKUP_OK] شهدَ ببصمةِ الأصلِ لأرشيفٍ آخرَ فحصَه --list',
+      );
+      const listed = fs.readFileSync(listedPath, 'utf8');
+      assert.notEqual(path.resolve(listed), path.resolve(legit.dump));
+      assert.equal(fs.existsSync(listed), false, `النسخةُ الخاصّةُ باقيةٌ: ${listed}`);
+      assert.deepEqual(snapshots(), before, 'نسخةٌ خاصّةٌ متروكةٌ في مجلّدِ المؤقّتات');
+      // والملفُّ المستبدَلُ نفسُه يُرفَضُ بتحقّقٍ لاحق: الأمرُ لا يشهدُ لما بعدَه.
+      const again = await runNode([BACKUP_SCRIPT, 'verify', legit.dump], legit.sourceUrl);
+      assert.equal(again.code, 1, again.stdout);
+      assert.match(again.stderr, /\[BACKUP_HASH_MISMATCH\]/);
+    } finally {
+      await craft.drop();
+      await legit.source.drop();
+    }
+  },
+);
+
+/**
+ * ‏`WL-615` (‏`LIVE-78/LEDGER-COMMIT-UNKNOWN`): مُحمَّلٌ مسبقٌ يعترضُ `COMMIT` **معاملةِ تركيبِ الدفترِ
+ * وحدَها** — الـ`COMMIT` الأوّلُ على عميلٍ أرسلَ `RENAME TO "schema_migrations"` (‏معاملةُ بصمةِ المحتوى
+ * قبلَها تلتزمُ بلا اعتراض). الأنماطُ كما في `writeCommitOutcomeHook` (‏`WL-600`):
+ *   - `after`: `COMMIT` الحقيقيُّ ثمّ هدمُ المقبس ⇒ الدفترُ مُركَّبٌ والأداةُ لا ترى الردّ.
+ *   - `before`: هدمُ المقبسِ بلا إرسال ⇒ الخادمُ يُجهِضُ، والأداةُ لا تعرف.
+ *   - `fatal`: إنهاءُ الجلسةِ مكانَ `COMMIT` ⇒ `FATAL` (‏`57P01`) لا يُقطَعُ معه.
+ *   - `error`: `SELECT 1/0` مكانَ `COMMIT` ⇒ ردٌّ قطعيٌّ بدرجةِ `ERROR` (‏`22012`).
+ * @param {string} dir
+ * @param {'after' | 'before' | 'fatal' | 'error'} mode
+ * @returns {string}
+ */
+function writeLedgerCommitHook(dir, mode) {
+  const hook = path.join(dir, `ledger-commit-${mode}.mjs`);
+  const action = {
+    after:
+      '  return original.call(this, text).then(() => { this.connection.stream.destroy(); throw lost(); });',
+    before: '  this.connection.stream.destroy(); return Promise.reject(lost());',
+    fatal: "  return original.call(this, 'SELECT pg_terminate_backend(pg_backend_pid())');",
+    error: "  return original.call(this, 'SELECT 1/0');",
+  }[mode];
+  fs.writeFileSync(
+    hook,
+    [
+      "import { createRequire } from 'node:module';",
+      `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
+      "const pg = require('pg');",
+      'const original = pg.Client.prototype.query;',
+      'let fired = false;',
+      "const armed = Symbol('wl615-ledger');",
+      'pg.Client.prototype.query = function (text, ...rest) {',
+      "  const sql = typeof text === 'string' ? text : text?.text;",
+      "  if (typeof sql === 'string' && sql.includes('RENAME TO \"schema_migrations\"')) this[armed] = true;",
+      "  if (fired || this[armed] !== true || sql !== 'COMMIT') return original.call(this, text, ...rest);",
+      '  fired = true;',
+      `  process.stderr.write('[XUUX_LEDGER_HOOK_FIRED:${mode}]\\n');`,
+      "  const lost = () => new Error('Connection terminated unexpectedly');",
+      action,
+      '};',
+      '',
+    ].join('\n'),
+  );
+  return hook;
+}
+
+/**
+ * @param {import('pg').Pool} pool
+ * @param {string} staging
+ * @returns {Promise<{ ledger: boolean, staging: boolean, half_moved: boolean }>}
+ */
+async function ledgerPlacement(pool, staging) {
+  const r = await pool.query(
+    `SELECT to_regclass('public.schema_migrations') IS NOT NULL AS ledger,
+            to_regclass($1) IS NOT NULL AS staging,
+            to_regclass($2) IS NOT NULL AS half_moved`,
+    [`state.${staging}`, `public.${staging}`],
+  );
+  return /** @type {any} */ (r.rows[0]);
+}
+
+const LEDGER_UNKNOWN = /\[RESTORE_LEDGER_OUTCOME_UNKNOWN\]/;
+
+test(
+  'WL-615 LIVE-78/LEDGER-COMMIT-UNKNOWN: انقطاعٌ بعدَ إرسالِ COMMIT التركيبِ ⇒ RESTORE_LEDGER_OUTCOME_UNKNOWN لا خطأٌ خامّ؛ وخطأُ ERROR على COMMIT فشلٌ قطعيّ — والمكانُ الفعليُّ للدفترِ يُثبِتُ أنّ أيَّ افتراضٍ كانَ يكذب',
+  { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
+  async () => {
+    const backup = await seededBackup('ledgercommit');
+    try {
+      const staging = JSON.parse(fs.readFileSync(`${backup.dump}.manifest.json`, 'utf8'))[
+        'ledgerStagingTable'
+      ];
+      for (const mode of /** @type {const} */ (['after', 'before', 'fatal', 'error'])) {
+        const target = await createIsolatedDatabase(`ledgercommit${mode}`);
+        try {
+          const restore = await runNode(
+            [RESTORE_SCRIPT, backup.dump, '--database', target.name],
+            backup.sourceUrl,
+            {
+              NODE_OPTIONS:
+                `${process.env['NODE_OPTIONS'] ?? ''} --import ${writeLedgerCommitHook(backup.dir, mode)}`.trim(),
+            },
+          );
+          assert.match(restore.stderr, new RegExp(`\\[XUUX_LEDGER_HOOK_FIRED:${mode}\\]`), mode);
+          assert.equal(restore.code, 1, `${mode}: ${restore.stdout}`);
+          assert.doesNotMatch(restore.stdout, /RESTORE_OK/, mode);
+          assert.doesNotMatch(restore.stderr, /Unhandled 'error' event/, mode);
+          assert.match(restore.stderr, /⛔ \[/, mode);
+          assert.ok(
+            await waitForNoOpenTransaction(backup.source.pool, target.name),
+            `${mode}: بقيت معاملةُ الأداةِ مفتوحةً على الهدف`,
+          );
+          const placed = await ledgerPlacement(target.pool, staging);
+          assert.equal(placed.half_moved, false, `${mode}: الدفترُ منقولٌ نصفَ نقل`);
+          if (mode === 'error') {
+            assert.doesNotMatch(restore.stderr, LEDGER_UNKNOWN, mode);
+            assert.match(restore.stderr, /\[22012\]/, mode);
+            assert.deepEqual(placed, { ledger: false, staging: true, half_moved: false }, mode);
+          } else {
+            assert.match(restore.stderr, LEDGER_UNKNOWN, mode);
+            assert.match(restore.stderr, /لا تفترضْ نجاحاً ولا فشلاً/, mode);
+            // ‏`after`: التُزِمَ فعلاً — فإعلانُه فشلاً خامّاً كانَ يكذب؛ `before`/`fatal`: لم يُلتزَم، والأداةُ لا تعرف.
+            assert.deepEqual(
+              placed,
+              mode === 'after'
+                ? { ledger: true, staging: false, half_moved: false }
+                : { ledger: false, staging: true, half_moved: false },
+              mode,
+            );
+          }
+        } finally {
+          await target.drop();
+        }
+      }
+    } finally {
+      await backup.source.drop();
+    }
+  },
+);
