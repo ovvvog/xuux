@@ -52,6 +52,7 @@ export const RESTORE_ERRORS = Object.freeze({
   TARGET_FENCED: 'RESTORE_TARGET_FENCED',
   FENCE_CHECK_FAILED: 'RESTORE_FENCE_CHECK_FAILED',
   WIPE_OUTCOME_UNKNOWN: 'RESTORE_WIPE_OUTCOME_UNKNOWN',
+  LEDGER_OUTCOME_UNKNOWN: 'RESTORE_LEDGER_OUTCOME_UNKNOWN',
   DIGEST_MISSING: 'RESTORE_DIGEST_MISSING',
   CONTENT_MISMATCH: 'RESTORE_CONTENT_MISMATCH',
   CONTENT_CHECK_FAILED: 'RESTORE_CONTENT_CHECK_FAILED',
@@ -443,7 +444,12 @@ async function moveMigrationLedger(pool, table) {
   // ‏`WL-614`: النقلُ وإعادةُ التسميةِ معاملةٌ واحدة — كانا أمرَين مُلتزَمَين، فانقطاعٌ بينَهما يتركُ
   // ‏`public.__backup_schema_migrations_*` بلا `schema_migrations`.
   const client = await pool.connect();
+  // ‏`WL-615`: كما في `wipeUnfencedTarget` — انقطاعُ الاتصالِ يُطلِقُ حدثَ `error` على العميلِ المُعار،
+  // وبلا مستمعٍ تنهارُ العمليّةُ قبلَ أن يُسمّى الرمز. الخطأُ نفسُه يُعالَجُ من رفضِ الاستعلام.
+  const ignoreClientError = () => undefined;
+  client.on('error', ignoreClientError);
   let broken = false;
+  let commitSent = false;
   try {
     await client.query('BEGIN');
     await client.query(
@@ -452,12 +458,24 @@ async function moveMigrationLedger(pool, table) {
     await client.query(
       `ALTER TABLE public.${quoteIdent(table)} RENAME TO ${quoteIdent(MIGRATION_LEDGER)}`,
     );
+    commitSent = true;
     await client.query('COMMIT');
   } catch (error) {
     broken = true;
+    // ‏`WL-615` (‏`LIVE-78/LEDGER-COMMIT-UNKNOWN`): فشلٌ بعدَ إرسالِ `COMMIT` بلا ردٍّ قطعيٍّ من الخادمِ
+    // لا يُعرَفُ معه أَرُكِّبَ الدفترُ أم بقيَ مرحليّاً — فلا يُبلَغُ خطأً خامّاً يُقرأُ فشلاً مؤكّداً، ولا
+    // `[RESTORE_OK]`. خطأُ `ERROR` من الخادمِ على `COMMIT` قطعيّ (‏`isDefiniteCommitFailure`) فيبقى كما هو.
+    if (commitSent && !isDefiniteCommitFailure(error)) {
+      throw new RestoreError(
+        RESTORE_ERRORS.LEDGER_OUTCOME_UNKNOWN,
+        `نتيجةُ التزامِ تركيبِ دفترِ الهجراتِ مجهولة: أُرسِلَ COMMIT ثمّ فشلَ بلا ردٍّ قطعيٍّ من الخادم (${describe(error)}). اجتازت فحوصُ ما قبلَ التركيبِ كلُّها، لكن قد يكونُ public.${MIGRATION_LEDGER} قد رُكِّبَ وقد يكونُ ${table} باقياً مرحليّاً في state. لا [RESTORE_OK]. افحصِ الهدفَ يدوياً ولا تفترضْ نجاحاً ولا فشلاً؛ والدفترُ إن بقيَ مرحليّاً فأعِدِ الاستعادةَ بـ--force (‏docs/RECOVERY.md).`,
+      );
+    }
     await client.query('ROLLBACK').catch(() => undefined);
     throw error;
   } finally {
+    // العميلُ المهدومُ يبقى مستمعُه، فحدثُ `error` المتأخّرُ لا يُسقِطُ العمليّة.
+    if (!broken) client.off('error', ignoreClientError);
     client.release(broken);
   }
 }

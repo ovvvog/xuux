@@ -886,29 +886,21 @@ export function readManifest(dumpPath) {
 
 /**
  * تحقق من البصمة ومن قابلية `pg_restore --list` لقراءة حاوية النسخة.
+ *
+ * ‏`WL-615` (‏`LIVE-78/VERIFY-CLI-TOCTOU`): كانَ يحسبُ sha256 على `dumpPath` ثمّ يُشغِّلُ `--list` على
+ * **المسارِ نفسِه** قراءةً ثانية، فكاتبٌ متزامنٌ يُبدِّلُ الملفَّ بينَهما (‏في مكانِه، الـinode نفسُه) يُنتِجُ
+ * `[BACKUP_OK]` ببصمةِ الأصلِ لأرشيفٍ آخرَ فُحِصَ (‏مقيسٌ في `WL-614`). الآن يمرُّ عبرَ
+ * `snapshotVerifiedArchive` نفسِها: البصمةُ و`--list` على البايتاتِ المنسوخةِ ذاتِها، ثمّ تُزالُ النسخة.
+ * **ما يعنيه `[BACKUP_OK]` بعدَه:** أنّ بايتاتٍ قُرِئَت من `dumpPath` مرّةً واحدةً طابقت البيانَ وقرأَها
+ * `pg_restore`؛ لا أنّ الملفَّ باقٍ كذلك بعدَ الأمر — من يكتبُ عليه لاحقاً يكتب، والاستعادةُ تتحقّقُ من
+ * جديدٍ على نسختِها. والكلفةُ مساحةٌ مؤقّتةٌ بحجمِ الأرشيفِ وكتابتُه مرّةً.
  * @param {string} dumpPath
  * @returns {Promise<BackupManifest>}
  */
 export async function verifyBackup(dumpPath) {
-  if (!fs.existsSync(dumpPath)) {
-    throw new BackupError(BACKUP_ERRORS.FILE_MISSING, `ملف النسخة غير موجود: ${dumpPath}`);
-  }
-  const manifest = readManifest(dumpPath);
-  const actual = sha256File(dumpPath);
-  if (actual !== manifest.sha256) {
-    throw new BackupError(
-      BACKUP_ERRORS.HASH_MISMATCH,
-      `تجزئة النسخة لا تطابق البيان: المتوقعة ${manifest.sha256} والفعلية ${actual}.`,
-    );
-  }
-  const result = await run(pgRestore(), ['--list', dumpPath]);
-  if (result.code !== 0) {
-    throw new BackupError(
-      BACKUP_ERRORS.DUMP_UNREADABLE,
-      `pg_restore لا يقرأ النسخة برمز ${result.code}: ${result.stderr.trim()}`,
-    );
-  }
-  return manifest;
+  const verified = await snapshotVerifiedArchive(dumpPath);
+  verified.cleanup();
+  return verified.manifest;
 }
 
 /**
