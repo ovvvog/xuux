@@ -1271,7 +1271,7 @@ function matrixRow(tmp, rowRe) {
   return line;
 }
 
-test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586، وخروجِ LIVE-77 في WL-587، ودخولِ LIVE-78 في WL-597، ثمّ 72: دخولِ LIVE-78/CONTENT-INTEGRITY في WL-603 وLIVE-39/PHYSICAL في WL-605 وLIVE-78/DIGEST-COVERAGE في WL-606) ويمرُّ الحاجز', () => {
+test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586، وخروجِ LIVE-77 في WL-587، ودخولِ LIVE-78 في WL-597، ثمّ 72: دخولِ LIVE-78/CONTENT-INTEGRITY في WL-603 وLIVE-39/PHYSICAL في WL-605 وLIVE-78/DIGEST-COVERAGE في WL-606، ثمّ 74: دخولِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER في WL-614) ويمرُّ الحاجز', () => {
   const tmp = cloneRepo();
   try {
     const { code, stderr } = runGuardWithOutput(tmp);
@@ -1279,7 +1279,7 @@ test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ ا
     const text = readFileSync(path.join(tmp, REG), 'utf8');
     const sec = text.slice(text.indexOf('## 8 — '));
     const ids = sec.split('\n').filter((l) => /^\| `[A-Z]/u.test(l));
-    assert.equal(ids.length, 72);
+    assert.equal(ids.length, 74);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1352,10 +1352,11 @@ test('R12 — صنفٌ خارجَ A…F يُسقِطُ الحاجز', () => {
 test('R12/COUNT — الحادثةُ: «73 صفّاً» تبقى على جدولٍ تغيّرَ (‏72) فيُسقِطُ الحاجز، وكانَ يمرّ', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**72 صفّاً،', '**73 صفّاً،');
+    // ‏`WL-614`: الجدولُ 74 صفّاً، فالحادثةُ نفسُها بفرقِها الأصليّ (‏صفٌّ زائدٌ في النثر).
+    mutateText(tmp, REG, '**74 صفّاً،', '**75 صفّاً،');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
-    assert.match(stderr, /R12\/COUNT: §8 يقولُ 73 صفّاً والجدولُ 72/u);
+    assert.match(stderr, /R12\/COUNT: §8 يقولُ 75 صفّاً والجدولُ 74/u);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
@@ -1388,8 +1389,8 @@ test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من ا�
 test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ «العدد:» يُسقِطُ (‏فشلٌ مغلق)، والصنفُ يُعلَنُ ولو صفراً ولا يُحذَف', () => {
   const tmp = cloneRepo();
   try {
-    mutateText(tmp, REG, '**72 صفّاً،', '**صفوفاً،');
-    mutateText(tmp, REG, ' · **B = 0**', '');
+    mutateText(tmp, REG, '**74 صفّاً،', '**صفوفاً،');
+    mutateText(tmp, REG, ' · **B = 2**', '');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R12\/COUNT: نثرُ §8 لا يُعلِنُ/u);
