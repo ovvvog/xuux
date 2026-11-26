@@ -26,8 +26,7 @@ import {
   BackupError,
   computeContentDigest,
   contentDigestDifferences,
-  readManifest,
-  verifyBackup,
+  snapshotVerifiedArchive,
 } from './backup.mjs';
 import { assertClientNotOlder, readToolVersion, resolvePgTool } from './lib/pg-tools.mjs';
 
@@ -383,16 +382,17 @@ async function wipeUnfencedTarget(pool) {
 
 /**
  * @param {import('pg').Pool} pool
+ * @param {string} stagingTable الدفترُ المرحليُّ — في `state` حتّى يُركَّب، ولا يُعَدُّ جدولَ حالة.
  * @returns {Promise<Record<string, number>>}
  */
-async function readRowCounts(pool) {
+async function readRowCounts(pool, stagingTable) {
   const namesResult = await pool.query(
     `SELECT c.relname
      FROM pg_class AS c
      JOIN pg_namespace AS n ON n.oid = c.relnamespace
-     WHERE n.nspname = $1 AND c.relkind = 'r'
+     WHERE n.nspname = $1 AND c.relkind = 'r' AND c.relname <> $2
      ORDER BY c.relname`,
-    [STATE_SCHEMA],
+    [STATE_SCHEMA, stagingTable],
   );
   /** @type {Record<string, number>} */
   const counts = {};
@@ -408,13 +408,15 @@ async function readRowCounts(pool) {
 }
 
 /**
+ * ‏`WL-614`: تُقرأُ من الدفترِ المرحليِّ قبلَ تركيبِه، فيُحسَمُ التحقّقُ قبلَ أن يصيرَ الهدفُ قاعدةً مُهاجَرة.
  * @param {import('pg').Pool} pool
+ * @param {string} stagingTable
  * @returns {Promise<number>}
  */
-async function migrationVersion(pool) {
+async function migrationVersion(pool, stagingTable) {
   const result = await pool.query(
     `SELECT COALESCE(max(version), 0)::integer AS version
-     FROM public.${quoteIdent(MIGRATION_LEDGER)}`,
+     FROM ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(stagingTable)}`,
   );
   const row = /** @type {Record<string, unknown> | undefined} */ (result.rows[0]);
   return Number(row?.['version']);
@@ -438,12 +440,26 @@ async function moveMigrationLedger(pool, table) {
       `لا يحتوي الأرشيف على جدول دفتر الهجرات المرحلي ${table}.`,
     );
   }
-  await pool.query(
-    `ALTER TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)} SET SCHEMA public`,
-  );
-  await pool.query(
-    `ALTER TABLE public.${quoteIdent(table)} RENAME TO ${quoteIdent(MIGRATION_LEDGER)}`,
-  );
+  // ‏`WL-614`: النقلُ وإعادةُ التسميةِ معاملةٌ واحدة — كانا أمرَين مُلتزَمَين، فانقطاعٌ بينَهما يتركُ
+  // ‏`public.__backup_schema_migrations_*` بلا `schema_migrations`.
+  const client = await pool.connect();
+  let broken = false;
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `ALTER TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(table)} SET SCHEMA public`,
+    );
+    await client.query(
+      `ALTER TABLE public.${quoteIdent(table)} RENAME TO ${quoteIdent(MIGRATION_LEDGER)}`,
+    );
+    await client.query('COMMIT');
+  } catch (error) {
+    broken = true;
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release(broken);
+  }
 }
 
 /**
@@ -482,17 +498,44 @@ export async function resolveVerifiedRestoreTool(dumpServerVersion) {
 }
 
 /**
+ * @typedef {object} RestoreOutcome
+ * @property {number} durationMs
+ * @property {boolean} created
+ * @property {'VERIFIED' | 'NO_DIGEST'} contentVerification
+ * @property {number} contentVerifyMs
+ * @property {import('./backup.mjs').BackupManifest} manifest البيانُ الذي تحقّقت الاستعادةُ منه (‏`WL-614`).
+ */
+
+/**
  * @param {RestoreOptions} options
  * @param {string} databaseUrl
- * @returns {Promise<{ durationMs: number, created: boolean, contentVerification: 'VERIFIED' | 'NO_DIGEST', contentVerifyMs: number }>}
+ * @returns {Promise<RestoreOutcome>}
  */
 export async function restoreBackup(options, databaseUrl) {
   const url = requireDatabaseUrl(databaseUrl);
   if (!fs.existsSync(options.dumpPath)) {
     throw new BackupError(BACKUP_ERRORS.FILE_MISSING, `ملف النسخة غير موجود: ${options.dumpPath}`);
   }
-  const manifest = await verifyBackup(options.dumpPath);
-  // ‏`WL-606`: بصمةٌ تالفةٌ أو غيرُ مدعومةٍ رُفضت في `verifyBackup` أعلاه، وغيابُها يُرفَضُ هنا — كلاهما
+  // ‏`WL-614` (‏`LIVE-78/ARCHIVE-TOCTOU`): يُقرأُ الأرشيفُ **مرّةً واحدة** إلى نسخةٍ خاصّةٍ يُحسَبُ sha256 على
+  // بايتاتِها، و`pg_restore` يقرأُ تلك النسخةَ لا `dumpPath`. كانَ التحقّقُ على المسارِ ثمّ يُعيدُ
+  // `pg_restore` قراءتَه بعدَ نافذة، فأرشيفٌ يُستبدَلُ فيها يُستعادُ ببيانٍ شرعيٍّ ويُعلَنُ `[RESTORE_OK]`.
+  const verified = await snapshotVerifiedArchive(options.dumpPath);
+  try {
+    return await restoreVerifiedArchive(options, url, verified);
+  } finally {
+    verified.cleanup();
+  }
+}
+
+/**
+ * @param {RestoreOptions} options
+ * @param {string} url
+ * @param {import('./backup.mjs').VerifiedArchive} verified
+ * @returns {Promise<RestoreOutcome>}
+ */
+async function restoreVerifiedArchive(options, url, verified) {
+  const { manifest, archivePath } = verified;
+  // ‏`WL-606`: بصمةٌ تالفةٌ أو غيرُ مدعومةٍ رُفضت في `snapshotVerifiedArchive` أعلاه، وغيابُها يُرفَضُ هنا — كلاهما
   // قبلَ لمسِ الهدف. الاستعادةُ بلا دليلِ محتوى قرارٌ صريحٌ للمشغّل لا افتراض.
   if (manifest.contentDigest === undefined && options.allowUnverified !== true) {
     throw new RestoreError(
@@ -547,7 +590,7 @@ export async function restoreBackup(options, databaseUrl) {
     '--no-privileges',
     '--dbname',
     targetUrl,
-    options.dumpPath,
+    archivePath,
   ]);
   const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
   if (result.code !== 0) {
@@ -613,25 +656,38 @@ export async function restoreBackup(options, databaseUrl) {
       }
       contentVerification = CONTENT_VERIFICATION.VERIFIED;
     }
-    await moveMigrationLedger(verifier, manifest.ledgerStagingTable);
-    const actualCounts = await readRowCounts(verifier);
+    // ‏`WL-614` (‏`LIVE-78/VERIFY-ORDER`): الأعدادُ ونسخةُ الهجرةِ تُحسَمُ **قبلَ** تركيبِ الدفتر، كما
+    // تُحسَمُ البصمةُ قبلَه منذُ `WL-606`. كانَ الدفترُ يُركَّبُ أوّلاً، فبعدَ `RESTORE_ROW_COUNT_MISMATCH`
+    // أو `RESTORE_MIGRATION_VERSION_MISMATCH` يبقى `public.schema_migrations` كاملاً ويقرأُ `migrate`
+    // الهدفَ قاعدةً مُهاجَرةً سليمة (‏مقيس). الآن فشلُ أيِّ فحصٍ يتركُ الدفترَ مرحليّاً في `state`.
+    const found = await verifier.query('SELECT to_regclass($1) IS NOT NULL AS present', [
+      `${STATE_SCHEMA}.${manifest.ledgerStagingTable}`,
+    ]);
+    if (/** @type {Record<string, unknown> | undefined} */ (found.rows[0])?.['present'] !== true) {
+      throw new RestoreError(
+        RESTORE_ERRORS.LEDGER_MISSING,
+        `لا يحتوي الأرشيف على جدول دفتر الهجرات المرحلي ${manifest.ledgerStagingTable}.`,
+      );
+    }
+    const actualCounts = await readRowCounts(verifier, manifest.ledgerStagingTable);
     if (!sameCounts(manifest.rowCounts, actualCounts)) {
       throw new RestoreError(
         RESTORE_ERRORS.ROW_COUNT_MISMATCH,
-        `عدد الصفوف بعد الاستعادة لا يطابق البيان: المتوقع ${JSON.stringify(manifest.rowCounts)} والفِعلي ${JSON.stringify(actualCounts)}.`,
+        `عدد الصفوف بعد الاستعادة لا يطابق البيان: المتوقع ${JSON.stringify(manifest.rowCounts)} والفِعلي ${JSON.stringify(actualCounts)}. الدفترُ لم يُركَّب (‏بقيَ ${manifest.ledgerStagingTable} في state).`,
       );
     }
-    const actualVersion = await migrationVersion(verifier);
+    const actualVersion = await migrationVersion(verifier, manifest.ledgerStagingTable);
     if (actualVersion !== manifest.migrationVersion) {
       throw new RestoreError(
         RESTORE_ERRORS.MIGRATION_VERSION_MISMATCH,
-        `نسخة الهجرة بعد الاستعادة ${actualVersion} لا تطابق البيان ${manifest.migrationVersion}.`,
+        `نسخة الهجرة بعد الاستعادة ${actualVersion} لا تطابق البيان ${manifest.migrationVersion}. الدفترُ لم يُركَّب (‏بقيَ ${manifest.ledgerStagingTable} في state).`,
       );
     }
+    await moveMigrationLedger(verifier, manifest.ledgerStagingTable);
   } finally {
     await verifier.end();
   }
-  return { durationMs, created, contentVerification, contentVerifyMs };
+  return { durationMs, created, contentVerification, contentVerifyMs, manifest };
 }
 
 /**
@@ -642,7 +698,9 @@ export async function restoreBackup(options, databaseUrl) {
 export async function main(argv, databaseUrl) {
   const options = parseArguments(argv);
   const outcome = await restoreBackup(options, databaseUrl);
-  const manifest = readManifest(options.dumpPath);
+  // ‏`WL-614`: ما يُطبَعُ من البيانِ المتحقَّقِ منه؛ إعادةُ قراءتِه من القرصِ هنا كانت تطبعُ بيانَ مَن
+  // كتبَ فوقَه بعدَ الاستعادة، أو تُسقِطُ عمليّةً نجحَت استعادتُها بخطأِ بيانٍ تالف.
+  const { manifest } = outcome;
   // ‏`[RESTORE_OK]` = **تحقّقٌ تمّ**: الأعدادُ ونسخةُ الهجرةِ وبصمةُ المحتوى طابقت. نسخةٌ بلا بصمةٍ
   // تُعلَنُ بعلامةٍ أخرى لا تحوي `RESTORE_OK` كي لا يقرأَها مستهلكٌ آليٌّ تحقّقاً (‏`WL-606`).
   if (outcome.contentVerification === CONTENT_VERIFICATION.VERIFIED) {

@@ -12,6 +12,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import pg from 'pg';
@@ -908,6 +909,82 @@ export async function verifyBackup(dumpPath) {
     );
   }
   return manifest;
+}
+
+/**
+ * @typedef {object} VerifiedArchive
+ * @property {BackupManifest} manifest البيانُ كما قُرِئَ مرّةً واحدةً وتُحقِّقَ منه.
+ * @property {string} archivePath نسخةٌ خاصّةٌ بايتاتُها هي ما حُسِبَ sha256 عليه.
+ * @property {() => void} cleanup يُزيلُ النسخةَ الخاصّةَ ومجلّدَها (‏آمنٌ للتكرار).
+ */
+
+/**
+ * ‏`WL-614` (‏`LIVE-78/ARCHIVE-TOCTOU`): يأخذُ نسخةً خاصّةً من الأرشيفِ ويحسبُ sha256 **على البايتاتِ
+ * المنسوخةِ نفسِها** في تمريرةٍ واحدة، ثمّ يقارنُها بالبيانِ ويفحصُها بـ`pg_restore --list`.
+ *
+ * **العيبُ الذي يُغلِقُه:** كانت الاستعادةُ تتحقّقُ من `dumpPath` (‏`verifyBackup`) ثمّ تُسلِّمُ
+ * **المسارَ نفسَه** لـ`pg_restore` بعدَ اتّصالاتٍ ومحوٍ محتمل، فيقرأُ الأداةُ الملفَّ من جديد. مَن يكتبُ
+ * على مجلّدِ النسخِ في تلك النافذةِ يُبدِّلُ الأرشيفَ — في مكانِه، على الـinode نفسِه — فيُستعادُ ما لم
+ * يُتحقَّقْ منه: قادحٌ أو دالّةٌ خارجَ تغطيةِ البصمةِ (‏`LIVE-78/DIGEST-COVERAGE`) يمرُّ `[RESTORE_OK]`
+ * و`[CONTENT_VERIFIED]` مع البيانِ **الشرعيِّ** (‏مقيسٌ في `WL-614`). وهذا يُبطِلُ مقدَّماً أيَّ توقيعٍ
+ * للبيان: التوقيعُ يُثبِتُ بايتاتٍ لم تَعُدْ هي المستعادة.
+ *
+ * **ما لا يُغلِقُه (‏مُعلَن):** النسخةُ في `os.tmpdir()` بمجلّدٍ `0700` وملفٍّ `0600` — تحمي من كاتبٍ
+ * على مجلّدِ النسخِ لا من عمليّةٍ بالـUID نفسِه أو بصلاحيّةِ الجذر. والكلفةُ مساحةٌ مؤقّتةٌ بحجمِ
+ * الأرشيفِ وقراءةٌ إضافيّةٌ له. ولا يُثبِتُ **أصالةَ** البيان (‏ذاك `LIVE-78` بقرارِ المالك)، بل يجعلُ ما
+ * يُستعادُ هو ما تحقّقَ منه بايتاً ببايت.
+ * @param {string} dumpPath
+ * @returns {Promise<VerifiedArchive>}
+ */
+export async function snapshotVerifiedArchive(dumpPath) {
+  if (!fs.existsSync(dumpPath)) {
+    throw new BackupError(BACKUP_ERRORS.FILE_MISSING, `ملف النسخة غير موجود: ${dumpPath}`);
+  }
+  const manifest = readManifest(dumpPath);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-restore-'));
+  fs.chmodSync(dir, 0o700);
+  const cleanup = () => fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const archivePath = path.join(dir, 'archive.dump');
+    const hash = crypto.createHash('sha256');
+    const source = fs.openSync(dumpPath, 'r');
+    try {
+      const target = fs.openSync(archivePath, 'wx', 0o600);
+      try {
+        const buffer = Buffer.allocUnsafe(1 << 20);
+        for (;;) {
+          const read = fs.readSync(source, buffer, 0, buffer.length, null);
+          if (read === 0) break;
+          const chunk = buffer.subarray(0, read);
+          hash.update(chunk);
+          let written = 0;
+          while (written < read) written += fs.writeSync(target, chunk, written, read - written);
+        }
+      } finally {
+        fs.closeSync(target);
+      }
+    } finally {
+      fs.closeSync(source);
+    }
+    const actual = hash.digest('hex');
+    if (actual !== manifest.sha256) {
+      throw new BackupError(
+        BACKUP_ERRORS.HASH_MISMATCH,
+        `تجزئة النسخة لا تطابق البيان: المتوقعة ${manifest.sha256} والفعلية ${actual}.`,
+      );
+    }
+    const result = await run(pgRestore(), ['--list', archivePath]);
+    if (result.code !== 0) {
+      throw new BackupError(
+        BACKUP_ERRORS.DUMP_UNREADABLE,
+        `pg_restore لا يقرأ النسخة برمز ${result.code}: ${result.stderr.trim()}`,
+      );
+    }
+    return { manifest, archivePath, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 /**
