@@ -1271,7 +1271,7 @@ function matrixRow(tmp, rowRe) {
   return line;
 }
 
-test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586، وخروجِ LIVE-77 في WL-587، ودخولِ LIVE-78 في WL-597، ثمّ 72: دخولِ LIVE-78/CONTENT-INTEGRITY في WL-603 وLIVE-39/PHYSICAL في WL-605 وLIVE-78/DIGEST-COVERAGE في WL-606، ثمّ 74: دخولِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER في WL-614، ثمّ 76: دخولِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN من مراجعتِه، ثمّ 74: خروجِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER بحكمِ المراجعةِ المستقلّةِ في WL-615، ثمّ 72: خروجِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN بحكمِ المراجعةِ المستقلّةِ في WL-616، ثمّ 73: دخولِ LIVE-75/C1-RACE في WL-617، ثمّ 75: دخولِ LIVE-75/RLS-INITPLAN وDOC-32 في WL-618) ويمرُّ الحاجز', () => {
+test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586، وخروجِ LIVE-77 في WL-587، ودخولِ LIVE-78 في WL-597، ثمّ 72: دخولِ LIVE-78/CONTENT-INTEGRITY في WL-603 وLIVE-39/PHYSICAL في WL-605 وLIVE-78/DIGEST-COVERAGE في WL-606، ثمّ 74: دخولِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER في WL-614، ثمّ 76: دخولِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN من مراجعتِه، ثمّ 74: خروجِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER بحكمِ المراجعةِ المستقلّةِ في WL-615، ثمّ 72: خروجِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN بحكمِ المراجعةِ المستقلّةِ في WL-616، ثمّ 73: دخولِ LIVE-75/C1-RACE في WL-617، ثمّ 75: دخولِ LIVE-75/RLS-INITPLAN وDOC-32 في WL-618، ثمّ 76: دخولِ LIVE-75/RLS-SILENT-SKIP في WL-620) ويمرُّ الحاجز', () => {
   const tmp = cloneRepo();
   try {
     const { code, stderr } = runGuardWithOutput(tmp);
@@ -1279,7 +1279,7 @@ test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ ا
     const text = readFileSync(path.join(tmp, REG), 'utf8');
     const sec = text.slice(text.indexOf('## 8 — '));
     const ids = sec.split('\n').filter((l) => /^\| `[A-Z]/u.test(l));
-    assert.equal(ids.length, 75);
+    assert.equal(ids.length, 76);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
