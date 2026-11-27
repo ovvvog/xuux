@@ -1271,7 +1271,7 @@ function matrixRow(tmp, rowRe) {
   return line;
 }
 
-test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586، وخروجِ LIVE-77 في WL-587، ودخولِ LIVE-78 في WL-597، ثمّ 72: دخولِ LIVE-78/CONTENT-INTEGRITY في WL-603 وLIVE-39/PHYSICAL في WL-605 وLIVE-78/DIGEST-COVERAGE في WL-606، ثمّ 74: دخولِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER في WL-614، ثمّ 76: دخولِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN من مراجعتِه، ثمّ 74: خروجِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER بحكمِ المراجعةِ المستقلّةِ في WL-615، ثمّ 72: خروجِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN بحكمِ المراجعةِ المستقلّةِ في WL-616، ثمّ 73: دخولِ LIVE-75/C1-RACE في WL-617، ثمّ 75: دخولِ LIVE-75/RLS-INITPLAN وDOC-32 في WL-618، ثمّ 76: دخولِ LIVE-75/RLS-SILENT-SKIP في WL-620) ويمرُّ الحاجز', () => {
+test('R12 — المصفوفةُ الحاضرةُ تطابقُ الصفوفَ المفتوحةَ (‏69: بعدَ إغلاقِ DOC-23 وDOC-24 وLIVE-62 وLIVE-63، ودخولِ LIVE-77 في WL-585، وخروجِ LIVE-45 في WL-586، وخروجِ LIVE-77 في WL-587، ودخولِ LIVE-78 في WL-597، ثمّ 72: دخولِ LIVE-78/CONTENT-INTEGRITY في WL-603 وLIVE-39/PHYSICAL في WL-605 وLIVE-78/DIGEST-COVERAGE في WL-606، ثمّ 74: دخولِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER في WL-614، ثمّ 76: دخولِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN من مراجعتِه، ثمّ 74: خروجِ LIVE-78/ARCHIVE-TOCTOU وLIVE-78/VERIFY-ORDER بحكمِ المراجعةِ المستقلّةِ في WL-615، ثمّ 72: خروجِ LIVE-78/VERIFY-CLI-TOCTOU وLIVE-78/LEDGER-COMMIT-UNKNOWN بحكمِ المراجعةِ المستقلّةِ في WL-616، ثمّ 73: دخولِ LIVE-75/C1-RACE في WL-617، ثمّ 75: دخولِ LIVE-75/RLS-INITPLAN وDOC-32 في WL-618، ثمّ 76: دخولِ LIVE-75/RLS-SILENT-SKIP في WL-620، وفي WL-621 خروجِ LIVE-75/C1-RACE ودخولِ DOC-33) ويمرُّ الحاجز', () => {
   const tmp = cloneRepo();
   try {
     const { code, stderr } = runGuardWithOutput(tmp);
@@ -1374,12 +1374,12 @@ test('R12/COUNT — عددُ الصنفِ في سطرِ «العدد:» من ا�
   }
   const tmp2 = cloneRepo();
   try {
-    // WL-586: `LIVE-45` (‏صفُّ `F` الوحيد) أُغلِقَ فخرجَ؛ والشاهدُ صفُّ `A` ‏`DOC-26` (‏ومنذُ `WL-615` صفُّ `A` الوحيد: صفّا مراجعةِ `WL-614` صارا `B`؛ ثمّ صفّانِ منذُ `WL-617` بدخولِ `LIVE-75/C1-RACE`، ثمّ ثلاثةٌ منذُ `WL-618` بدخولِ `LIVE-75/RLS-INITPLAN`، ثمّ عادَ وحيداً في `WL-619`: `C1-RACE` إلى `B` و`RLS-INITPLAN` إلى `C`؛ ثمّ صفّانِ في `WL-620` بدخولِ `LIVE-75/RLS-SILENT-SKIP`).
+    // WL-586: `LIVE-45` (‏صفُّ `F` الوحيد) أُغلِقَ فخرجَ؛ والشاهدُ صفُّ `A` ‏`DOC-26` (‏ومنذُ `WL-615` صفُّ `A` الوحيد: صفّا مراجعةِ `WL-614` صارا `B`؛ ثمّ صفّانِ منذُ `WL-617` بدخولِ `LIVE-75/C1-RACE`، ثمّ ثلاثةٌ منذُ `WL-618` بدخولِ `LIVE-75/RLS-INITPLAN`، ثمّ عادَ وحيداً في `WL-619`: `C1-RACE` إلى `B` و`RLS-INITPLAN` إلى `C`؛ ثمّ صفّانِ في `WL-620` بدخولِ `LIVE-75/RLS-SILENT-SKIP`؛ و`WL-621` لا يُغيِّرُ `A`، و`D` صارَ 39 بانتقالِ `DOC-32` و`RLS-INITPLAN`).
     const row = matrixRow(tmp2, /^\| `DOC-26` \|/u);
     mutateText(tmp2, REG, row, row.replace(/\| A \|$/u, '| D |'));
     const r2 = runGuardWithOutput(tmp2);
     assert.equal(r2.code, 1, r2.stderr);
-    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ D = 37 والجدولُ 38/u);
+    assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ D = 39 والجدولُ 40/u);
     assert.match(r2.stderr, /R12\/COUNT: §8 يقولُ A = 2 والجدولُ 1/u);
   } finally {
     rmSync(tmp2, { recursive: true, force: true });
@@ -1390,7 +1390,7 @@ test('R12/COUNT — غيابُ «**N صفّاً**» أو صنفٍ من سطرِ 
   const tmp = cloneRepo();
   try {
     mutateText(tmp, REG, '**76 صفّاً،', '**صفوفاً،');
-    mutateText(tmp, REG, ' · **B = 3**', '');
+    mutateText(tmp, REG, ' · **B = 1**', '');
     const { code, stderr } = runGuardWithOutput(tmp);
     assert.equal(code, 1, stderr);
     assert.match(stderr, /R12\/COUNT: نثرُ §8 لا يُعلِنُ/u);
