@@ -3082,7 +3082,9 @@ const WL608_OBJECTS = [
   `CREATE FUNCTION state.wl608_fn() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN RETURN NEW; END$$`,
   `CREATE TRIGGER wl608_trg BEFORE INSERT ON state.wl608_cov FOR EACH ROW EXECUTE FUNCTION state.wl608_fn()`,
   `ALTER TABLE state.wl608_cov ENABLE ROW LEVEL SECURITY`,
-  `CREATE POLICY wl608_pol ON state.wl608_cov USING (n > 0)`,
+  // ‏WL-619: مقيِّدةٌ لا متساهلة — 0036 يرفضُ عندَ الالتزامِ كلَّ متساهلةٍ تُضَمُّ إلى xf_read بـOR (‏rls_extra_permissive_policy)؛
+  // ‏والغرضُ هنا فئةُ «السياسات» في النسخِ لا نوعُها.
+  `CREATE POLICY wl608_pol ON state.wl608_cov AS RESTRICTIVE USING (n > 0)`,
   `CREATE VIEW state.wl608_v AS SELECT id, n FROM state.wl608_cov WHERE n > 1`,
   `COMMENT ON TABLE state.wl608_cov IS 'wl608'`,
   `INSERT INTO state.wl608_cov VALUES (1, 5, 'a'), (2, 7, 'b')`,

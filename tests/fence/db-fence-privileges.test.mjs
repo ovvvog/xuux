@@ -99,8 +99,13 @@ describe(
                    aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
                  WHERE a.grantee = 0 AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1`)
         ).map((r) => r.o),
-        ['fence.read_ok', 'state.report_sections_declared', 'state.text_array_is_named'],
-        'EXECUTE لـPUBLIC خارجَ الكتالوج: read_ok ودالّتا مستدعٍ ثابتتان في state',
+        [
+          'fence.read_ok',
+          'fence.read_window',
+          'state.report_sections_declared',
+          'state.text_array_is_named',
+        ],
+        'EXECUTE لـPUBLIC خارجَ الكتالوج: read_ok وread_window (‏سياسةُ xf_read، 0036) ودالّتا مستدعٍ ثابتتان في state',
       );
       assert.deepEqual(
         await q(`SELECT a.privilege_type FROM pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a

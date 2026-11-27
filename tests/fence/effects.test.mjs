@@ -1012,6 +1012,54 @@ describe(
     const WINDOW_S = 5; // ‏الحدُّ الأدنى في 0024 (‏CHECK BETWEEN 5 AND 600)
     before(async () => {
       h = await harness('wl608lease');
+      // ‏`LIVE-75/C1-RACE` (‏`WL-619`): جدولُ مِسبارٍ لـC1 وحدَه بمشغِّلَي ساعةٍ يُعلِنانِ بـNOTICE (‏تصلُ ولو فشلت العبارة):
+      // ‏`xf_guard_zz_l75` على مستوى العبارة — يُطلَقُ بعدَ `xf_guard` مباشرةً (‏الترتيبُ أبجديّ) فساعتُه حدٌّ أعلى لقراءةِ الزناد؛
+      // ‏و`l75_row` قبلَ الصفِّ — يُطلَقُ قبلَ WITH CHECK مباشرةً فساعتُه حدٌّ أدنى لفحصِ RLS. تحتَ HALTED فيُغطّى (‏زنادٌ وسياسة).
+      for (const sql of [
+        `CREATE TABLE state.l75_c1_probe (id integer PRIMARY KEY, v text NOT NULL DEFAULT '')`,
+        `CREATE FUNCTION state.l75_clock_note() RETURNS trigger LANGUAGE plpgsql AS $f$
+         BEGIN
+           RAISE NOTICE 'l75-clock % %', TG_LEVEL, (extract(epoch FROM clock_timestamp()) * 1000)::float8;
+           IF TG_LEVEL = 'ROW' THEN RETURN NEW; END IF;
+           RETURN NULL;
+         END $f$`,
+        `REVOKE ALL ON FUNCTION state.l75_clock_note() FROM PUBLIC`,
+        `CREATE TRIGGER xf_guard_zz_l75 BEFORE INSERT ON state.l75_c1_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_note()`,
+        `CREATE TRIGGER l75_row BEFORE INSERT ON state.l75_c1_probe FOR EACH ROW EXECUTE FUNCTION state.l75_clock_note()`,
+        `GRANT SELECT, INSERT ON state.l75_c1_probe TO xuux_worker`,
+        // ‏`LIVE-75/RLS-INITPLAN` (‏`WL-620`): مِسبارٌ بصفّينِ في عبارةٍ واحدة. زنادُ الصفِّ (‏BEFORE ROW، ‏VOLATILE) يُعلِنُ لكلِّ صفٍّ
+        // ‏كم صفّاً **من العبارةِ نفسِها** صارَ مرئيّاً (‏قاعدةُ PG: زنادُ BEFORE ROW يرى ما أدرجَته العبارةُ من صفوفٍ سابقة) وساعتَه،
+        // ‏ثمّ — للصفِّ المتأخّرِ وحدَه — ينامُ عبرَ الانقضاءِ ويُعيدُ الصفّ، فيُفحَصُ WITH CHECK بعدَ النوم. ‏`seen = 1` في إعلانِ
+        // ‏المتأخّرِ دليلٌ مستقلٌّ على أنّ الأوّلَ اجتازَ WITH CHECK وأُدرِجَ قبلَ أن يبدأَ تأخيرُ الثاني؛ وساعتُه قبلَ الانقضاءِ تنفي الرفضَ المبكّر.
+        `CREATE TABLE state.l75_initplan_probe (id integer PRIMARY KEY, v text NOT NULL)`,
+        `CREATE FUNCTION state.l75_initplan_row() RETURNS trigger LANGUAGE plpgsql VOLATILE AS $f$
+         DECLARE seen int; late boolean; rid int;
+         BEGIN
+           IF TG_OP = 'INSERT' THEN
+             rid := NEW.id;
+             late := NEW.v = 'late';
+             SELECT count(*) INTO seen FROM state.l75_initplan_probe WHERE id BETWEEN rid - 4 AND rid + 4;
+           ELSIF TG_OP = 'UPDATE' THEN
+             rid := NEW.id;
+             late := OLD.v LIKE 'late%';
+             SELECT count(*) INTO seen FROM state.l75_initplan_probe
+              WHERE id BETWEEN rid - 4 AND rid + 4 AND v LIKE '%-new';
+           ELSE
+             rid := OLD.id;
+             late := OLD.v LIKE 'slow%';
+             SELECT count(*) INTO seen FROM state.l75_initplan_probe WHERE id BETWEEN rid - 4 AND rid + 4;
+           END IF;
+           RAISE NOTICE 'l75-ip ROW % % % %', TG_OP, rid, seen, (extract(epoch FROM clock_timestamp()) * 1000)::float8;
+           IF late THEN PERFORM pg_sleep(1.5); END IF;
+           IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+           RETURN NEW;
+         END $f$`,
+        `REVOKE ALL ON FUNCTION state.l75_initplan_row() FROM PUBLIC`,
+        `CREATE TRIGGER xf_guard_zz_l75 BEFORE INSERT OR UPDATE OR DELETE ON state.l75_initplan_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_note()`,
+        `CREATE TRIGGER l75_ip_row BEFORE INSERT OR UPDATE OR DELETE ON state.l75_initplan_probe FOR EACH ROW EXECUTE FUNCTION state.l75_initplan_row()`,
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON state.l75_initplan_probe TO xuux_worker`,
+      ])
+        await h.db.pool.query(sql);
       await h.sovereign.command('lease_set', { lease_window_s: WINDOW_S, lease_renew_s: 1 });
       await h.resume();
     });
@@ -1108,7 +1156,7 @@ describe(
       });
     });
 
-    test('L75-W2: عبارةٌ واحدةٌ بدأت قبلَ الانقضاءِ وأنتجت صفَّها بعدَه ⇒ سياسةُ RLS (‏WITH CHECK) تفحصُ كلَّ صفٍّ بساعةٍ حقيقيّة فترفضُه (‏42501) ولا يُكتَبُ شيء', async () => {
+    test('L75-W2: عبارةٌ واحدةٌ بدأت قبلَ الانقضاءِ وأنتجت صفَّها بعدَه ⇒ سياسةُ RLS (‏WITH CHECK) تفحصُ صفَّها الوحيدَ بعدَ إنتاجِه بساعةٍ حقيقيّة فترفضُه (‏صفٌّ واحد؛ تعدُّدُ الصفوفِ في LIVE-75/RLS-INITPLAN) (‏42501) ولا يُكتَبُ شيء', async () => {
       // ‏قياسٌ لا افتراض: حدُّ الكتابةِ ليس بدءَ العبارةِ وحدَه — فحصُ الصفِّ عندَ إنتاجِه يُضيِّقُه.
       const a = await bootWorker('alpha');
       await untilDb(a.exp - 1000);
@@ -1138,33 +1186,264 @@ describe(
       });
     });
 
-    test(
-      'LIVE-75/RLS-INITPLAN أحمر: عبارةٌ متعدّدةُ الصفوفِ بدأت قبلَ الانقضاء ⇒ لا يُكتَبُ صفٌّ أُنتِجَ بعدَه (‏الإنتاجُ ينقضُه: `(SELECT fence.read_ok())` ‏InitPlan يُقيَّمُ مرّةً عندَ أوّلِ صفّ)',
-      {
-        todo: 'LIVE-75/RLS-INITPLAN: سياسةُ xf_read تلفُّ read_ok() باستعلامٍ فرعيٍّ غيرِ مرتبط — يُقيَّمُ مرّةً للعبارة، فالصفُّ الثاني بعدَ الانقضاءِ يُكتَب',
-      },
-      async () => {
-        // ‏W2 صفٌّ واحد فلا يميّزُ «لكلِّ صفّ» من «مرّةً عندَ أوّلِ صفّ»؛ هذا يميّز: الصفُّ الأوّلُ قبلَ الانقضاءِ والثاني بعدَه.
-        const a = await bootWorker('alpha');
-        await untilDb(a.exp - 700);
-        const r = await outcome(
-          a.c,
-          `INSERT INTO state.fence_probe (id, v)
-             SELECT g, CASE WHEN g = 60809 THEN pg_sleep(1.5)::text ELSE '' END
-                       || (extract(epoch FROM clock_timestamp()) * 1000)::bigint::text
-             FROM generate_series(60808, 60809) AS g`,
+    // ‏═══ ‏`LIVE-75/RLS-INITPLAN` (‏`WL-620`، يحلُّ محلَّ قياسِ `WL-619`) ═══════════════════════════════════════════════════
+    // ‏كانَ القياسُ السابقُ يستدلُّ بـ`pg_stat_activity` (‏رؤيةِ `PgSleep`) وبزمنِ بدءِ العبارة، وبـ`ORDER BY` قد يُدخِلُ Sort يُنتِجُ
+    // ‏الصفوفَ كلَّها قبلَ أن يُفحَصَ أوّلُها — فلا يُثبِتُ أنّ الصفَّ الأوّلَ **اجتازَ** RLS قبلَ تأخيرِ الثاني (‏المراجعةُ الخارجيّة).
+    // ‏الآن: ‏`VALUES` بصفّين بلا ترتيب، وخطّةٌ مقيسةٌ بـEXPLAIN (‏‏Values Scan مباشرةً تحتَ ModifyTable، لا Sort ولا Materialize)،
+    // ‏ودليلٌ مستقلٌّ من داخلِ العبارة (‏زنادُ `l75_ip_row`): إعلانُ الصفِّ المتأخّرِ يرى صفَّ العبارةِ الأوّلَ مُدرَجاً (‏`seen = 1`) —
+    // ‏أي اجتازَ WITH CHECK وكُتِبَ — وساعتُه قبلَ الانقضاء؛ ثمّ ينامُ 1.5 ث فيُفحَصُ WITH CHECK له بعدَ الانقضاء. وزنادُ العبارةِ
+    // ‏`xf_guard_zz_l75` (‏بعدَ `xf_guard`) يُعلِنُ ساعتَه قبلَ الانقضاء: لا رفضَ مبكّراً من `guard_write`.
+    // ‏ما يُثبِتُه: فحصُ RLS لصفٍّ ثانٍ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَ الانقضاء يقرأُ — أو لا يقرأُ — الساعةَ عندَ صفِّه.
+    // ‏ما لا يُثبِتُه: لا يقيسُ إلّا INSERT/UPDATE بمسارِ ModifyTable صفّاً صفّاً؛ ولا يقيسُ COPY ولا الحذف (‏DELETE بلا WITH CHECK —
+    // ‏انظر LIVE-75/RLS-SILENT-SKIP)؛ والتأخيرُ مصنوعٌ بزنادٍ لا بحِملٍ حقيقيّ.
+    // ‏الخاصيّةُ تُلزِمُها 0036 (‏`WL-620`): بدونِها (‏down) تحمرُّ — العبارةُ تُقبَلُ ويُكتَبُ الصفّان؛ وصلاحيّةُ القياسِ والضابطُ لازمانِ دائماً.
+    /** عقدُ الخطّة: لا عقدةَ تُخزِّنُ الصفوفَ أو تُعيدُ ترتيبَها بينَ المصدرِ وModifyTable. */
+    const IP_BUFFERING =
+      /^\s*(?:->\s*)?(?:Sort|Incremental Sort|Materialize|Hash|Hash Join|Merge Join|Gather|Gather Merge|Memoize|Unique|Aggregate|HashAggregate|GroupAggregate|WindowAgg|CTE Scan)\b/u;
+    /**
+     * @typedef {{ level: 'ROW', op: string, id: number, seen: number, at: number } | { level: 'STATEMENT', at: number }} IpNote
+     * @typedef {{ exp: number, plan: string[], notes: IpNote[], r: any, startedAt: number, endedAt: number, alive: any,
+     *   okBefore: boolean, okAfter: boolean, rows: Array<{ id: number, v: string }> }} IpRun
+     */
+    /**
+     * @param {'alpha' | 'beta'} worker @param {string} sql @param {number[]} ids @param {boolean} crossExpiry
+     * @returns {Promise<IpRun>}
+     */
+    const runIp = async (worker, sql, ids, crossExpiry) => {
+      const a = await bootWorker(worker);
+      const plan = (await a.c.query(`EXPLAIN (VERBOSE, COSTS OFF) ${sql}`)).rows.map((x) =>
+        String(x['QUERY PLAN']),
+      );
+      /** @type {IpNote[]} */
+      const notes = [];
+      a.c.on('notice', (/** @type {any} */ n) => {
+        const msg = String(n.message);
+        const row = /^l75-ip ROW (INSERT|UPDATE|DELETE) (\d+) (\d+) ([0-9.]+)$/u.exec(msg);
+        if (row)
+          notes.push({
+            level: 'ROW',
+            op: String(row[1]),
+            id: Number(row[2]),
+            seen: Number(row[3]),
+            at: Number(row[4]),
+          });
+        const st = /^l75-clock STATEMENT ([0-9.]+)$/u.exec(msg);
+        if (st) notes.push({ level: 'STATEMENT', at: Number(st[1]) });
+      });
+      const okBefore = Boolean((await a.c.query('SELECT fence.read_ok() AS ok')).rows[0].ok);
+      if (crossExpiry) await untilDb(a.exp - 700);
+      const startedAt = await dbNow();
+      const r = await outcome(a.c, sql);
+      const endedAt = await dbNow();
+      const alive = await outcome(a.c, 'SELECT 1 AS one');
+      const okAfter = Boolean((await a.c.query('SELECT fence.read_ok() AS ok')).rows[0].ok);
+      const rows = (
+        await h.db.pool.query(
+          'SELECT id, v FROM state.l75_initplan_probe WHERE id = ANY($1::int[]) ORDER BY id',
+          [ids],
+        )
+      ).rows;
+      return { exp: a.exp, plan, notes, r, startedAt, endedAt, alive, okBefore, okAfter, rows };
+    };
+    const IP_INSERT = `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60850, 'first'), (60851, 'late')`;
+    const IP_UPDATE = `UPDATE state.l75_initplan_probe SET v = v || '-new' WHERE id IN (60860, 60861)`;
+    /** @type {Record<string, Promise<IpRun>>} */
+    const ipRuns = {};
+    const ipInsert = () => (ipRuns.insert ??= runIp('alpha', IP_INSERT, [60850, 60851], true));
+    const ipUpdate = () =>
+      (ipRuns.update ??= (async () => {
+        // ‏الصفّانِ يُدرَجانِ بالترتيبِ في عبارةٍ واحدة (‏كومةٌ بترتيبِ الإدراج)؛ والقياسُ يتحقّقُ من الترتيبِ ولا يفترضُه.
+        await h.db.pool.query(
+          `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60860, 'first-u'), (60861, 'late-u')`,
         );
-        const second = await committed(60809);
-        t_note('LIVE-75/RLS-INITPLAN', {
-          statement: r.ok ? 'accepted' : String(r.code),
-          secondRowProducedAfterExpiryMs:
-            second === null ? null : Math.round(Number(second) - a.exp),
-        });
-        if (second !== null)
-          assert.ok(Number(second) > a.exp, 'الصفُّ الثاني أُنتِجَ بعدَ الانقضاء (‏شرطُ القياس)');
-        assert.equal(second, null, 'صفٌّ أُنتِجَ بعدَ الانقضاءِ كُتِب');
-      },
-    );
+        return runIp('alpha', IP_UPDATE, [60860, 60861], true);
+      })());
+
+    /**
+     * صلاحيّةُ القياسِ لعبارةٍ عبرَت الانقضاء — مشتركةٌ بينَ INSERT وUPDATE.
+     * @param {IpRun} m @param {'Insert' | 'Update'} node @param {[number, number]} ids
+     */
+    const assertIpValid = (m, node, [firstId, lateId]) => {
+      // ‏(١) الخطّة: ModifyTable أوّلاً، ولا عقدةَ تُخزِّنُ أو تُرتِّب.
+      assert.match(
+        m.plan[0] ?? '',
+        new RegExp(`^${node} on state\\.l75_initplan_probe`, 'u'),
+        m.plan.join('\n'),
+      );
+      if (node === 'Insert')
+        assert.ok(
+          m.plan.some((l) => /->\s*Values Scan on "\*VALUES\*"/u.test(l)),
+          m.plan.join('\n'),
+        );
+      assert.deepEqual(
+        m.plan.filter((l) => IP_BUFFERING.test(l)),
+        [],
+        m.plan.join('\n'),
+      );
+      // ‏(٢) الحالةُ: صالحةٌ قبل، ومنقضيةٌ بعد، والوصلةُ حيّة.
+      assert.equal(m.okBefore, true);
+      assert.equal(m.okAfter, false, 'الإيجارُ انقضى فعلاً');
+      assert.equal(m.alive.ok, true, 'لا انقطاعَ ولا مهلة');
+      // ‏(٣) الزنادُ اجتيزَ قبلَ الانقضاء — لا رفضَ مبكّراً.
+      const st = m.notes.filter((n) => n.level === 'STATEMENT');
+      assert.equal(st.length, 1, 'زنادُ العبارةِ أُطلِقَ مرّةً');
+      assert.ok((st[0]?.at ?? Infinity) < m.exp, 'guard_write اجتيزَ قبلَ الانقضاء');
+      // ‏(٤) الدليلُ المستقلّ: صفّانِ بالترتيب، والأوّلُ مرئيٌّ مُدرَجاً لزنادِ الثاني قبلَ الانقضاءِ وقبلَ تأخيرِه.
+      const rows = /** @type {Array<Extract<IpNote, { level: 'ROW' }>>} */ (
+        m.notes.filter((n) => n.level === 'ROW')
+      );
+      assert.deepEqual(
+        rows.map((n) => [n.id, n.seen]),
+        [
+          [firstId, 0],
+          [lateId, 1],
+        ],
+        'الصفُّ الأوّلُ اجتازَ WITH CHECK وكُتِبَ قبلَ أن يبدأَ تأخيرُ الثاني',
+      );
+      assert.ok((rows[1]?.at ?? Infinity) < m.exp, 'تأخيرُ الصفِّ الثاني بدأَ قبلَ الانقضاء');
+      assert.ok(m.startedAt < m.exp && m.endedAt > m.exp + 500, 'WITH CHECK للثاني بعدَ الانقضاء');
+      // ‏(٥) نتيجتانِ لا ثالثةَ لهما: قَبولٌ (‏العيب) أو 42501 برسالةِ RLS لهذا الجدول (‏الإصلاح).
+      if (m.r.ok) assert.equal(m.r.command, node.toUpperCase());
+      else {
+        assert.equal(m.r.code, '42501', String(m.r.message));
+        assert.match(
+          String(m.r.message),
+          /new row violates row-level security policy for table "l75_initplan_probe"/u,
+        );
+      }
+    };
+
+    test('LIVE-75/RLS-INITPLAN صلاحيّةُ القياس (‏INSERT): خطّةٌ بلا Sort/Materialize، وguard_write اجتيزَ، والصفُّ الأوّلُ اجتازَ WITH CHECK وكُتِبَ قبلَ تأخيرِ الثاني، والثاني فُحِصَ بعدَ الانقضاء', async () => {
+      const m = await ipInsert();
+      assertIpValid(m, 'Insert', [60850, 60851]);
+      const late = m.notes.find((n) => n.level === 'ROW' && n.id === 60851);
+      t_note('LIVE-75/RLS-INITPLAN', {
+        op: 'INSERT',
+        statement: m.r.ok ? 'accepted' : String(m.r.code),
+        lateRowDelayStartBeforeExpiryMs: Math.round(m.exp - Number(late?.at)),
+        lateRowCheckAfterExpiryMs: Math.round(Number(late?.at) + 1500 - m.exp),
+        rowsWritten: m.rows.length,
+        plan: m.plan.filter((l) => !/^\s*Output:/u.test(l)).map((l) => l.trim()),
+      });
+    });
+
+    test('LIVE-75/RLS-INITPLAN (‏0036): صفٌّ ثانٍ فُحِصَ بعدَ الانقضاءِ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَه ⇒ 42501 برسالةِ RLS، ولا يُكتَبُ صفّ', async () => {
+      const m = await ipInsert();
+      assert.equal(m.r.ok, false, `العبارةُ قُبِلَت وكُتِبَ ${m.rows.length} صفّ`);
+      assert.equal(m.r.code, '42501', String(m.r.message));
+      assert.deepEqual(m.rows, [], 'العبارةُ ذرّيّة: لا الثاني ولا الأوّل');
+    });
+
+    test('LIVE-75/RLS-INITPLAN صلاحيّةُ القياس (‏UPDATE): خطّةٌ بلا Sort/Materialize، والصفُّ الأوّلُ حُدِّثَ قبلَ تأخيرِ الثاني، وقيمةُ الثاني فُحِصَت بعدَ الانقضاء', async () => {
+      const m = await ipUpdate();
+      assertIpValid(m, 'Update', [60860, 60861]);
+    });
+
+    test('LIVE-75/RLS-INITPLAN (‏0036) UPDATE: قيمةٌ جديدةٌ فُحِصَت بعدَ الانقضاءِ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَه ⇒ 42501، ولا يتغيّرُ صفّ', async () => {
+      const m = await ipUpdate();
+      assert.equal(m.r.ok, false, 'UPDATE عبرَ الانقضاءِ قُبِل');
+      assert.equal(m.r.code, '42501', String(m.r.message));
+      assert.deepEqual(m.rows, [
+        { id: 60860, v: 'first-u' },
+        { id: 60861, v: 'late-u' },
+      ]);
+    });
+
+    test('LIVE-75/RLS-INITPLAN ضابطٌ إيجابيّ: العبارةُ نفسُها بالتأخيرِ نفسِه قبلَ الانقضاءِ تُكتَبُ كاملة (‏الرفضُ سببُه الزمنُ لا الصياغة)', async () => {
+      const sql = `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60870, 'first'), (60871, 'late')`;
+      const m = await runIp('beta', sql, [60870, 60871], false);
+      assert.ok(m.endedAt < m.exp - 500, 'العبارةُ كلُّها قبلَ الانقضاء');
+      assert.deepEqual(m.r, { ok: true, command: 'INSERT', rows: [] });
+      assert.deepEqual(
+        m.notes.filter((n) => n.level === 'ROW').map((n) => /** @type {any} */ (n).seen),
+        [0, 1],
+      );
+      assert.deepEqual(m.rows, [
+        { id: 60870, v: 'first' },
+        { id: 60871, v: 'late' },
+      ]);
+    });
+
+    // ‏═══ ‏`LIVE-75/RLS-SILENT-SKIP` (‏`WL-620`، حدٌّ مُعلَنٌ لا تُصلِحُه 0036 — يُثبَّتُ كما هو) ═══
+    // ‏DELETE لا WITH CHECK له: ‏USING وحدَه يُقيَّمُ عندَ مسحِ كلِّ صفّ. صفٌّ أوّلُ اجتازَ USING قبلَ الانقضاءِ ثمّ تأخّرَ (‏زنادُه ينامُ)
+    // ‏يُحذَفُ **بعدَ** الانقضاء، وصفٌّ ثانٍ يُمسَحُ بعدَه يُرشِّحُه USING بصمت — فالعبارةُ تنجحُ جزئيّاً بلا خطأ (‏`DELETE 1`)، و`COMMIT`
+    // ‏لا يفحصُ (‏L75-W1). قبلَ 0036 (‏InitPlan) كانَ الصفّانِ يُحذَفان. الحكمُ في `WL-620`: لا يُقبَلُ عقداً — دَينٌ مستقلّ.
+    test('LIVE-75/RLS-SILENT-SKIP (‏0036، يُثبَّتُ الحدّ): DELETE بدأ قبلَ الانقضاء — الصفُّ المتأخّرُ يُحذَفُ بعدَه، والتالي يُتخطّى بصمت، والعبارةُ تنجحُ بلا خطأ', async () => {
+      await h.db.pool.query(
+        `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60880, 'slow-d'), (60881, 'other-d')`,
+      );
+      const m = await runIp(
+        'alpha',
+        `DELETE FROM state.l75_initplan_probe WHERE id IN (60880, 60881) RETURNING id`,
+        [60880, 60881],
+        true,
+      );
+      assert.match(m.plan[0] ?? '', /^Delete on state\.l75_initplan_probe/u, m.plan.join('\n'));
+      assert.deepEqual(
+        m.plan.filter((l) => IP_BUFFERING.test(l)),
+        [],
+        m.plan.join('\n'),
+      );
+      assert.equal(m.okBefore, true);
+      assert.equal(m.okAfter, false);
+      const st = m.notes.filter((n) => n.level === 'STATEMENT');
+      assert.ok(
+        st.length === 1 && (st[0]?.at ?? Infinity) < m.exp,
+        'guard_write اجتيزَ قبلَ الانقضاء',
+      );
+      const rows = /** @type {Array<Extract<IpNote, { level: 'ROW' }>>} */ (
+        m.notes.filter((n) => n.level === 'ROW')
+      );
+      // ‏زنادُ الصفِّ أُطلِقَ للأوّلِ وحدَه قبلَ الانقضاء؛ الثاني لم يبلغْه (‏رشَّحَه USING قبلَ الزناد).
+      assert.deepEqual(
+        rows.map((n) => [n.op, n.id]),
+        [['DELETE', 60880]],
+      );
+      assert.ok(
+        (rows[0]?.at ?? Infinity) < m.exp && m.endedAt > m.exp + 500,
+        'الحذفُ بعدَ الانقضاء',
+      );
+      assert.deepEqual(
+        m.r,
+        { ok: true, command: 'DELETE', rows: [{ id: 60880 }] },
+        'لا خطأ: نجاحٌ جزئيّ',
+      );
+      assert.deepEqual(m.rows, [{ id: 60881, v: 'other-d' }], 'الصفُّ الثاني بقيَ بصمت');
+      t_note('LIVE-75/RLS-SILENT-SKIP', {
+        statement: 'DELETE 1 (of 2)',
+        deletedRowAfterExpiryMs: Math.round(Number(rows[0]?.at) + 1500 - m.exp),
+        skippedSilently: 1,
+        error: false,
+      });
+    });
+
+    test('LIVE-75/RLS-INITPLAN بنيويّ (‏0036): كلُّ سياسةِ xf_read على علاقةٍ محميّةٍ بالصيغةِ القانونيّةِ حرفيّاً (‏الساعةُ لكلِّ صفّ في USING وWITH CHECK)، ولا متساهلةَ غيرُها', async () => {
+      const rows = (
+        await h.db.pool.query(
+          `SELECT pr.schema_name || '.' || pr.rel_name AS rel, pg_get_expr(po.polqual, po.polrelid) AS q,
+                    pg_get_expr(po.polwithcheck, po.polrelid) AS w
+               FROM fence.protected_relations() pr JOIN pg_policy po ON po.polrelid = pr.relid AND po.polname = 'xf_read'`,
+        )
+      ).rows;
+      // ‏مطابقةٌ حرفيّةٌ لا تطابقُ نمط: `clock_timestamp() OR true` ليس إصلاحاً.
+      const canon = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
+      const n = Number(
+        (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.protected_relations()'))
+          .rows[0].n,
+      );
+      assert.ok(
+        rows.length > 0 && rows.length === n,
+        `xf_read على كلِّ علاقةٍ محميّة (${rows.length}/${n})`,
+      );
+      for (const r of rows) assert.deepEqual([r.q, r.w], [canon, canon], r.rel);
+      const extra = (
+        await h.db.pool.query(
+          `SELECT po.polrelid::regclass::text AS rel, po.polname FROM fence.protected_relations() pr
+               JOIN pg_policy po ON po.polrelid = pr.relid WHERE po.polname <> 'xf_read' AND po.polpermissive`,
+        )
+      ).rows;
+      assert.deepEqual(extra, [], 'لا سياسةَ متساهلةً أخرى تُضَمُّ بـOR');
+    });
 
     test('L75-R1: القراءة — قبلَ الانقضاءِ ترى، وبعدَه صفرُ صفوفٍ بلا خطأ (‏حتى داخلَ REPEATABLE READ بدأت قبلَه)', async () => {
       await h.db.pool.query(
@@ -1192,39 +1471,165 @@ describe(
       });
     });
 
-    test('L75-C1: انقضاءٌ متزامنٌ مع الالتزام — عباراتٌ ذاتيّةُ الالتزامِ كلَّ ~10 ms عبرَ اللحظة: آخرُ قَبولٍ قبلَها وأوّلُ رفضٍ XF009 بعدَها', async () => {
+    // ‏`LIVE-75/C1-RACE` (‏`WL-619`): أوّلُ رفضٍ عبرَ اللحظةِ تصنعُه إحدى طبقتَين، ولكلٍّ شرطُها السببيّ المقيس:
+    // ‏`guard_write` (‏زنادُ العبارة، يقرأُ الساعةَ قبلَ أيِّ صفّ) ⇒ `XF009`؛ أو — إن وقعَ الانقضاءُ بينَ قراءةِ الزنادِ للساعة
+    // ‏وفحصِ RLS للصفّ (‏أجزاءٌ من ms) — سياسةُ `xf_read` ⇒ `42501` برسالةِ RLS، والعبارةُ **بدأت قبلَ الانقضاء** (‏لو قرأَ الزنادُ
+    // ‏ساعةً بعدَه لرفعَ `XF009` قبلَ أيِّ صفّ). مقيسٌ: تكرارُ النمطِ 20 مرّةً على PG 18.7 أعطى 19 ‏`XF009` بدأت كلُّها بعدَ
+    // ‏الانقضاء و1 ‏`42501` بدأ قبلَه بـ0.38 ms؛ والمسارُ نفسُه حتميٌّ في «L75-C1-RACE» أدناه. لا رمزَ ثالث، ولا صفَّ مكتوب.
+    // ‏ولا يُكتفى بزمنِ بدءِ العبارة: مِسبارا `state.l75_c1_probe` يُسجِّلانِ لحظةَ اجتيازِ الزنادِ ولحظةَ ما قبلَ WITH CHECK.
+    test('L75-C1: انقضاءٌ متزامنٌ مع الالتزام — عباراتٌ ذاتيّةُ الالتزامِ كلَّ ~10 ms عبرَ اللحظة: آخرُ قَبولٍ قبلَها، وأوّلُ رفضٍ XF009 من الزنادِ قبلَ أيِّ صفّ أو 42501 من RLS بعدَ زنادٍ اجتازَ الساعةَ قبلَها (‏C1-RACE)', async () => {
       const a = await bootWorker('alpha');
+      /** @type {Array<{ level: string, at: number }>} */
+      let clocks = [];
+      a.c.on('notice', (/** @type {any} */ n) => {
+        const m = /^l75-clock (STATEMENT|ROW) ([0-9.]+)$/u.exec(String(n.message));
+        if (m) clocks.push({ level: String(m[1]), at: Number(m[2]) });
+      });
       await untilDb(a.exp - 400);
-      /** @type {Array<{ at: number, ok: boolean, code?: string }>} */
+      /** @type {Array<{ at: number, ok: boolean, code?: string | undefined, message?: string | undefined, guardAt?: number | undefined, rowAt?: number | undefined, id: number }>} */
       const seen = [];
       for (let id = 60900; id < 61100; id++) {
+        clocks = [];
         const r = await outcome(
           a.c,
-          `INSERT INTO state.fence_probe (id, v) VALUES ($1, '') RETURNING (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS at`,
+          `INSERT INTO state.l75_c1_probe (id, v) VALUES ($1, '') RETURNING (extract(epoch FROM statement_timestamp()) * 1000)::float8 AS at`,
           [id],
         );
         const at = r.ok ? Number(/** @type {any} */ (r).rows[0].at) : await dbNow();
-        seen.push({ at, ok: r.ok, code: /** @type {any} */ (r).code });
+        seen.push({
+          at,
+          ok: r.ok,
+          code: /** @type {any} */ (r).code,
+          message: /** @type {any} */ (r).message,
+          guardAt: clocks.find((c) => c.level === 'STATEMENT')?.at,
+          rowAt: clocks.find((c) => c.level === 'ROW')?.at,
+          id,
+        });
         if (!r.ok) break;
         await sleep(10);
       }
       const accepted = seen.filter((s) => s.ok);
       const rejected = seen.find((s) => !s.ok);
       assert.ok(accepted.length > 0 && rejected, 'القياسُ عبرَ اللحظة');
-      assert.equal(rejected?.code, 'XF009');
+      // ‏كلُّ مقبولٍ مرَّ بالمِسبارَين (‏وإلّا فالقياسُ لا يرى الطبقات).
+      for (const s of accepted)
+        assert.ok(
+          s.guardAt !== undefined && s.rowAt !== undefined,
+          'المِسبارُ يُعلِنُ لكلِّ عبارة',
+        );
+      if (rejected?.code === 'XF009') {
+        // ‏الزنادُ رفضَ قبلَ أيِّ صفّ: لا مِسبارَ بعدَه أُطلِق.
+        assert.equal(
+          rejected.guardAt,
+          undefined,
+          'XF009 والمِسبارُ بعدَ الزنادِ أُطلِق — الرفضُ ليس من الزناد',
+        );
+        assert.equal(rejected.rowAt, undefined);
+      } else {
+        // ‏مسارُ C1-RACE وحدَه: الزنادُ اجتازَ الساعةَ قبلَ الانقضاء، ثمّ RLS رفضت الصفّ — لا «أيُّ 42501».
+        assert.equal(rejected?.code, '42501', `رمزٌ ثالث: ${rejected?.code} ${rejected?.message}`);
+        assert.match(
+          String(rejected?.message),
+          /new row violates row-level security policy for table "l75_c1_probe"/u,
+        );
+        assert.ok(
+          rejected?.guardAt !== undefined && rejected.guardAt < a.exp,
+          `42501 والزنادُ لم يجتز الساعةَ قبلَ الانقضاء (${Number(rejected?.guardAt) - a.exp} ms) — كانَ عليه XF009`,
+        );
+        assert.ok(rejected?.rowAt !== undefined, 'RLS رفضت صفّاً أُنتِج');
+      }
       const lastOk = /** @type {{ at: number }} */ (accepted.at(-1)).at;
       assert.ok(lastOk <= a.exp, `آخرُ قَبولٍ بدأَ قبلَ الانقضاء (${lastOk - a.exp} ms)`);
-      // ‏كلُّ ما قُبِلَ التُزِمَ فعلاً (‏ذاتيُّ الالتزام).
+      // ‏كلُّ ما قُبِلَ التُزِمَ فعلاً (‏ذاتيُّ الالتزام)، والمرفوضُ لم يُكتَب.
       const n = (
         await h.db.pool.query(
-          `SELECT count(*)::int AS n FROM state.fence_probe WHERE id BETWEEN 60900 AND 61099`,
+          `SELECT count(*)::int AS n FROM state.l75_c1_probe WHERE id BETWEEN 60900 AND 61099`,
         )
       ).rows[0].n;
       assert.equal(n, accepted.length);
+      const written = (
+        await h.db.pool.query('SELECT count(*)::int AS n FROM state.l75_c1_probe WHERE id = $1', [
+          rejected?.id,
+        ])
+      ).rows[0].n;
+      assert.equal(written, 0, 'العبارةُ المرفوضةُ لم تكتب');
+      const r2 = (/** @type {number | undefined} */ x) =>
+        x === undefined ? null : Math.round((x - a.exp) * 100) / 100;
       t_note('L75-C1', {
         accepted: accepted.length,
         lastAcceptedBeforeExpiryMs: Math.round(a.exp - lastOk),
         firstRejectedAfterExpiryMs: Math.round(Number(rejected?.at) - a.exp),
+        rejectedCode: rejected?.code,
+        rejectedGuardMinusExpiryMs: r2(rejected?.guardAt),
+        rejectedRowMinusExpiryMs: r2(rejected?.rowAt),
+        lastAcceptedRowMinusExpiryMs: r2(accepted.at(-1)?.rowAt),
+      });
+    });
+
+    // ‏`LIVE-75/C1-RACE` حتميّاً: الفجوةُ بينَ قراءةِ الزنادِ للساعةِ وفحصِ RLS للصفِّ تُوسَّعُ بـ`pg_sleep` في إنتاجِ الصفِّ الوحيد
+    // ‏(‏VALUES تُحسَبُ بعدَ زنادِ العبارةِ وقبلَ WITH CHECK). (أ) بدأت قبلَ الانقضاءِ بـ150 ms والصفُّ بعدَه ⇒ الزنادُ اجتاز، وRLS ترفضُ
+    // ‏بـ42501. (ب) عبارةٌ بعدَ الانقضاء ⇒ الزنادُ يرفضُ بـXF009 قبلَ أيِّ صفّ (‏لا ينامُ أبداً: الرفضُ قبلَ VALUES). الطبقتانِ
+    // ‏مستقلّتانِ عن ‏`RLS-INITPLAN`: سياسةُ 0024 تُقيِّمُ InitPlan عندَ أوّلِ WITH CHECK — بعدَ إنتاجِ الصفِّ الوحيد — فالنتيجةُ نفسُها.
+    test('L75-C1-RACE: الطبقةُ حتميّاً — عبارةٌ بدأت قبلَ الانقضاءِ وصفُّها بعدَه ⇒ 42501 من RLS؛ وعبارةٌ بعدَه ⇒ XF009 من الزنادِ قبلَ أيِّ صفّ', async () => {
+      const a = await bootWorker('alpha');
+      /** @type {Array<{ level: string, at: number }>} */
+      let clocks = [];
+      a.c.on('notice', (/** @type {any} */ n) => {
+        const m = /^l75-clock (STATEMENT|ROW) ([0-9.]+)$/u.exec(String(n.message));
+        if (m) clocks.push({ level: String(m[1]), at: Number(m[2]) });
+      });
+      const at = (/** @type {string} */ level) => clocks.find((c) => c.level === level)?.at;
+      const stored = async (/** @type {number} */ id) =>
+        (
+          await h.db.pool.query('SELECT count(*)::int AS n FROM state.l75_c1_probe WHERE id = $1', [
+            id,
+          ])
+        ).rows[0].n;
+      await untilDb(a.exp - 150);
+      const startedAt = await dbNow();
+      const r = await outcome(
+        a.c,
+        `INSERT INTO state.l75_c1_probe (id, v) VALUES (61200, pg_sleep(0.4)::text)`,
+      );
+      const endedAt = await dbNow();
+      const guardAt = at('STATEMENT');
+      const rowAt = at('ROW');
+      assert.ok(startedAt < a.exp && endedAt > a.exp, 'العبارةُ عبرَت الانقضاء');
+      assert.equal(r.code, '42501', String(/** @type {any} */ (r).message));
+      assert.match(
+        String(/** @type {any} */ (r).message),
+        /new row violates row-level security policy for table "l75_c1_probe"/u,
+      );
+      // ‏لحظةُ كلِّ طبقة: الزنادُ اجتازَ الساعةَ قبلَ الانقضاء، وفحصُ RLS (‏بعدَ مِسبارِ الصفّ) بعدَه.
+      assert.ok(
+        guardAt !== undefined && guardAt < a.exp,
+        `الزنادُ قبلَ الانقضاء (${Number(guardAt) - a.exp} ms)`,
+      );
+      assert.ok(
+        rowAt !== undefined && rowAt > a.exp,
+        `فحصُ الصفِّ بعدَ الانقضاء (${Number(rowAt) - a.exp} ms)`,
+      );
+      assert.equal(await stored(61200), 0);
+      clocks = [];
+      const t0 = await dbNow();
+      const after = await outcome(
+        a.c,
+        `INSERT INTO state.l75_c1_probe (id, v) VALUES (61201, pg_sleep(0.4)::text)`,
+      );
+      const took = (await dbNow()) - t0;
+      assert.ok(t0 > a.exp);
+      assert.equal(after.code, 'XF009', String(/** @type {any} */ (after).message));
+      assert.equal(at('STATEMENT'), undefined, 'XF009 من الزناد: لم يُطلَقْ ما بعدَه');
+      assert.equal(at('ROW'), undefined, 'ولا صفَّ أُنتِج');
+      assert.ok(took < 300, `الزنادُ رفضَ قبلَ إنتاجِ الصفّ (‏لا نومَ: ${Math.round(took)} ms)`);
+      assert.equal(await stored(61201), 0);
+      t_note('L75-C1-RACE', {
+        inFlight: r.code,
+        startBeforeExpiryMs: Math.round(a.exp - startedAt),
+        guardMinusExpiryMs: Math.round((Number(guardAt) - a.exp) * 100) / 100,
+        rowMinusExpiryMs: Math.round((Number(rowAt) - a.exp) * 100) / 100,
+        afterExpiry: after.code,
+        afterTookMs: Math.round(took),
       });
     });
 

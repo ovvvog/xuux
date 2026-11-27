@@ -1507,3 +1507,167 @@ describe(
     });
   },
 );
+
+// ── WL-619: ‏LIVE-75/RLS-INITPLAN (‏0036) — xf_read بالساعةِ لكلِّ صفّ؛ دالّةٌ جديدة وستُّ دوالَّ تتغيّرُ نصّاً؛ الرجوعُ إلى 0035 حرفياً ──
+describe(
+  'WL-619 — 0036: xf_read بالصيغةِ الجديدةِ على كلِّ علاقةٍ محميّة، والدوالُّ المتغيّرةُ وحدَها، والرجوعُ إلى 0035 حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir35;
+    /** @type {string} */
+    let dir36;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-mig-')));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const ADDED = 'fence.read_window()';
+    const CHANGED = [
+      'fence._fence_acl_problems()',
+      'fence._worker_allowed_execute()',
+      'fence.check_fenced()',
+      'fence.cover_relation(oid)',
+      'fence.coverage_problems()',
+      'fence.reaper_capability_problems()',
+    ];
+    const OLD = '( SELECT fence.read_ok() AS read_ok)';
+    const NEW = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
+    /** @param {import('pg').Pool} pool */
+    const policies = async (pool) =>
+      (
+        await pool.query(
+          `SELECT po.polrelid::regclass::text AS rel, po.polname AS name, po.polcmd AS cmd, po.polpermissive AS perm,
+                  po.polroles::text AS roles, pg_get_expr(po.polqual, po.polrelid) AS q,
+                  pg_get_expr(po.polwithcheck, po.polrelid) AS w
+             FROM pg_policy po ORDER BY 1, 2`,
+        )
+      ).rows;
+    before(async () => {
+      dir35 = migrationsDir(35);
+      dir36 = migrationsDir(36);
+      db = await createIsolatedDatabase('m0036');
+      await up(db.pool, { dir: dir35 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir35, dir36]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: كلُّ xf_read يتحوّلُ ويعود، ودالّةٌ جديدةٌ واحدة، والدوالُّ الستُّ وحدَها تتغيّرُ نصّاً؛ والرجوعُ يُطابقُ 0035', async () => {
+      const at35 = await ownerSnapshot(db.pool);
+      const tg35 = await fenceTriggerSnapshot(db.pool);
+      const p35 = await policies(db.pool);
+      assert.ok(p35.length > 0);
+      const problems35 = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r
+        .problems;
+      for (const p of p35) {
+        assert.equal(p.name, 'xf_read', `${p.rel}: لا سياسةَ غيرُ xf_read في الأساس`);
+        assert.deepEqual([p.q, p.w], [OLD, OLD], `${p.rel}: صيغةُ 0024`);
+      }
+      assert.deepEqual((await up(db.pool, { dir: dir36 })).applied, [36]);
+      const at36 = await ownerSnapshot(db.pool);
+      const p36 = await policies(db.pool);
+      assert.deepEqual(
+        p36.map((p) => ({ ...p, q: null, w: null })),
+        p35.map((p) => ({ ...p, q: null, w: null })),
+        'العلاقاتُ والأوامرُ والأدوارُ والتساهلُ حرفيّاً',
+      );
+      for (const p of p36) assert.deepEqual([p.q, p.w], [NEW, NEW], `${p.rel}: الصيغةُ الجديدة`);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f35 = bySig(at35);
+      const f36 = bySig(at36);
+      assert.deepEqual(
+        Object.keys(f36).filter((k) => !(k in f35)),
+        [ADDED],
+        'دالّةٌ جديدةٌ واحدة',
+      );
+      assert.deepEqual(
+        Object.keys(f35).filter((k) => !(k in f36)),
+        [],
+        'لا دالّةَ محذوفة',
+      );
+      for (const sig of Object.keys(f35)) {
+        if (CHANGED.includes(sig)) {
+          assert.notEqual(f36[sig].def, f35[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f36[sig][k], f35[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f36[sig], f35[sig], `${sig} حرفيّاً`);
+      }
+      // ‏الدالّةُ الجديدةُ بخصائصِ read_ok() نفسِها: مالكٌ وSECURITY DEFINER وSTABLE وsearch_path مثبَّت وACL.
+      const rk = f35['fence.read_ok()'];
+      const rw = f36[ADDED];
+      for (const k of ['vol', 'secdef', 'owner'])
+        assert.equal(rw[k], rk[k], `read_window.${k} = read_ok.${k}`);
+      /** @param {string} acl */
+      const aclSet = (acl) =>
+        acl
+          .replace(/^\{|\}$/gu, '')
+          .split(',')
+          .sort();
+      assert.deepEqual(
+        aclSet(rw.acl),
+        aclSet(rk.acl),
+        'ACL مطابقةٌ لـread_ok() (‏PUBLIC والأدوارُ الثلاثة)',
+      );
+      assert.match(rw.def, /SET search_path TO 'pg_catalog', 'pg_temp'/u);
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m35 = m(at35);
+      const m36 = m(at36);
+      assert.deepEqual(
+        Object.keys(m36).filter((k) => !(k in m35)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(m35)
+          .filter((k) => m35[k] !== m36[k])
+          .sort(),
+        CHANGED,
+      );
+      assert.deepEqual(at36.owner, at35.owner, 'امتيازاتُ xf_owner وعضويّاتُه لا تتغيّر');
+      assert.deepEqual(at36.tables, at35.tables, 'ملكيّةُ جداولِ fence وACL لا تتغيّر');
+      assert.deepEqual(at36.eventTriggers, at35.eventTriggers);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg35, 'المُطلِقاتُ حرفيّاً');
+      // ‏قاعدةٌ بلا إقلاعٍ ليست صامتة (‏incarnation_mismatch…)؛ المطلوبُ: لا مشكلةَ جديدةَ بعدَ التقديم.
+      const ok = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.deepEqual(ok.problems, problems35, 'check_fenced: لا مشكلةَ جديدةٌ بعدَ التقديم');
+      // ‏غيرُ العاملِ (‏superuser هنا) نافذتُه غيرُ محدودة — كما read_ok() = true له.
+      const win = (await db.pool.query(`SELECT fence.read_window()::text AS w`)).rows[0].w;
+      assert.equal(win, '(,)');
+      // ‏كشفُ الانحرافِ بلا قفل: coverage_problems() تُستدعى عندَ التزامِ كلِّ DDL؛ قفلٌ حصريٌّ على جدولٍ محميٍّ لا يُوقفُها
+      // ‏(‏pg_get_expr بـrelid يفتحُ العلاقة — كانَ يُوقِفُ إنشاءَ جدولِ النسخِ المرحليّ: WL-592 B2).
+      const locker = await db.pool.connect();
+      const probe = await db.pool.connect();
+      try {
+        await locker.query('BEGIN');
+        await locker.query('LOCK TABLE state.agents IN ACCESS EXCLUSIVE MODE');
+        await probe.query('BEGIN');
+        await probe.query(`SET LOCAL lock_timeout = '1s'`);
+        const cp = (await probe.query('SELECT fence.coverage_problems() AS p')).rows[0].p;
+        assert.deepEqual(cp, [], 'coverage_problems() لا تنتظرُ قفلَ جدولٍ محميّ');
+        await probe.query('COMMIT');
+      } finally {
+        await locker.query('ROLLBACK');
+        locker.release();
+        probe.release();
+      }
+      // ‏الرجوعُ يُعيدُ 0035 حرفياً؛ وإعادةُ التقديمِ تُطابقُ 0036.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir36 })).current, 35);
+      assert.deepEqual(await ownerSnapshot(db.pool), at35);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg35);
+      assert.deepEqual(await policies(db.pool), p35, 'السياساتُ بصيغةِ 0024 حرفيّاً');
+      assert.deepEqual((await up(db.pool, { dir: dir36 })).applied, [36]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at36);
+      assert.deepEqual(await policies(db.pool), p36);
+    });
+  },
+);

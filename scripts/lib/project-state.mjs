@@ -18,6 +18,8 @@
  * @module lib/project-state
  */
 
+import { Parser as CommonMarkParser } from 'commonmark';
+
 /**
  * @typedef {{ path: string, role?: string, affectedBy?: string[] }} MemoryEntry
  * @typedef {{
@@ -975,20 +977,216 @@ export function evaluateProjectState(input) {
   return { violations, triggered, executive, memory, newEntries: entries.map((e) => e.id) };
 }
 
+const ASCII_PUNCT = /[!-/:-@[-`{-~]/u;
+
 /**
- * يقصُّ النصَّ إلى `n` ويُغلِقُ ما فتحَه القصُّ من `**` أو علامةِ كود (‏`DOC-32`، `WL-618`): كانَ القصُّ
- * يتركُ `**` مفتوحاً قبلَ فاصلِ العمودِ في كلِّ عنوانٍ مقصوص.
+ * يُقطِّعُ النصَّ وحداتٍ سطريّةً بدلالةِ CommonMark لما يعنينا (‏`DOC-32`، `WL-619`): الهروبُ `\\x` لعلامةِ ترقيمٍ
+ * وحدةٌ واحدة؛ وسلسلةُ backtick بطولِ `k` تفتحُ كوداً **لا يُغلِقُه إلّا** أوّلُ سلسلةٍ بعدَها بطولِ `k` نفسِه
+ * (‏ولا هروبَ داخلَ الكود)، وإلّا فهي حرفيّة؛ وسلسلةُ `*` وحدةٌ لا تُقسَم.
+ * @param {string} text
+ * @returns {Array<{ kind: 'text' | 'escape' | 'code' | 'ticks' | 'stars', start: number, end: number, k?: number, inner?: number, close?: number }>}
+ */
+export function tokenizeInline(text) {
+  /** @type {Array<{ kind: 'text' | 'escape' | 'code' | 'ticks' | 'stars', start: number, end: number, k?: number, inner?: number, close?: number }>} */
+  const out = [];
+  const runEnd = (/** @type {number} */ i, /** @type {string} */ ch) => {
+    let j = i;
+    while (text[j] === ch) j += 1;
+    return j;
+  };
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\' && i + 1 < text.length && ASCII_PUNCT.test(text[i + 1] ?? '')) {
+      out.push({ kind: 'escape', start: i, end: i + 2 });
+      i += 2;
+    } else if (ch === '`') {
+      const j = runEnd(i, '`');
+      const k = j - i;
+      let m = j;
+      let close = -1;
+      while (m < text.length) {
+        if (text[m] !== '`') {
+          m += 1;
+          continue;
+        }
+        const e = runEnd(m, '`');
+        if (e - m === k) {
+          close = m;
+          break;
+        }
+        m = e;
+      }
+      if (close === -1) {
+        out.push({ kind: 'ticks', start: i, end: j, k });
+        i = j;
+      } else {
+        out.push({ kind: 'code', start: i, end: close + k, k, inner: j, close });
+        i = close + k;
+      }
+    } else if (ch === '*') {
+      const j = runEnd(i, '*');
+      out.push({ kind: 'stars', start: i, end: j });
+      i = j;
+    } else {
+      let j = i + 1;
+      while (j < text.length && !'\\`*'.includes(text[j] ?? '')) j += 1;
+      out.push({ kind: 'text', start: i, end: j });
+      i = j;
+    }
+  }
+  return out;
+}
+
+const commonMark = new CommonMarkParser();
+
+/**
+ * ‏`DOC-32` (‏`WL-620`): ما يراه القارئ — حرفاً حرفاً — بمحلِّلِ CommonMark الحقيقيّ (‏`commonmark`، لا تقليد).
+ * لكلِّ حرفٍ ظاهرٍ وسمُ تنسيقِه: ‏`s` غامق، `e` مائل، `l` رابط، `i` صورة، `c` كود، `h` HTML خامّ — مجموعةً مرتّبة
+ * (‏`***x***` يُعرَضُ غامقاً مائلاً أيّاً كانَ ترتيبُ التداخل). الكتلُ (‏فقرة، عنوان…) لا تُوسَم.
+ * @param {string} md
+ * @returns {{ text: string[], fmt: string[] }}
+ */
+export function markdownProfile(md) {
+  /** @type {string[]} */
+  const text = [];
+  /** @type {string[]} */
+  const fmt = [];
+  /** @type {string[]} */
+  const chain = [];
+  const tags = /** @type {Record<string, string>} */ ({
+    strong: 's',
+    emph: 'e',
+    link: 'l',
+    image: 'i',
+  });
+  const walker = commonMark.parse(md).walker();
+  for (let ev = walker.next(); ev; ev = walker.next()) {
+    const node = ev.node;
+    const tag = tags[node.type];
+    if (tag !== undefined) {
+      if (ev.entering) chain.push(tag);
+      else chain.pop();
+      continue;
+    }
+    if (!ev.entering) continue;
+    /** @type {string | null} */
+    let lit = null;
+    let own = '';
+    if (node.type === 'text') lit = node.literal;
+    else if (node.type === 'code') [lit, own] = [node.literal, 'c'];
+    else if (node.type === 'html_inline') [lit, own] = [node.literal, 'h'];
+    else if (node.type === 'softbreak' || node.type === 'linebreak') lit = ' ';
+    if (lit === null) continue;
+    const f = [...chain, own].filter(Boolean).sort().join('');
+    for (const ch of lit) {
+      text.push(ch);
+      fmt.push(f);
+    }
+  }
+  return { text, fmt };
+}
+
+/**
+ * ‏`DOC-32`: هل `clip` قصٌّ أمينٌ لـ`orig`؟ ما يظهرُ من `clip` بادئةٌ لما يظهرُ من `orig` حرفاً حرفاً **بالتنسيقِ نفسِه**
+ * (‏`exact`) أو بتنسيقٍ لا يزيدُ عليه (‏`subset` — مسارُ الاحتياطِ وحدَه). علامةٌ يتيمةٌ تظهرُ حرفاً (‏`*` أو backtick)
+ * لم يكن في الأصلِ هناك، وتوكيدٌ مزاوَجٌ خطأً يُبدِّلُ وسمَ الحرف — فكلاهما يُسقِطُ الفحص.
+ * @param {string} orig @param {string} clip @param {'exact' | 'subset'} [mode]
+ * @returns {boolean}
+ */
+export function clipIsFaithful(orig, clip, mode = 'exact') {
+  const o = markdownProfile(orig);
+  const c = markdownProfile(clip);
+  if (c.text.length > o.text.length) return false;
+  for (let i = 0; i < c.text.length; i += 1) {
+    if (c.text[i] !== o.text[i]) return false;
+    const cf = c.fmt[i] ?? '';
+    const of = o.fmt[i] ?? '';
+    if (mode === 'exact' ? cf !== of : ![...cf].every((t) => of.includes(t))) return false;
+  }
+  return true;
+}
+
+/**
+ * بادئةُ المصدرِ عندَ `cut` بلا قسمِ هروبٍ ولا سلسلةٍ ولا زوجٍ بديل؛ والقصُّ داخلَ كودٍ يُغلِقُه بطولِ محدِّدِه (‏`WL-619`).
+ * @param {string} text @param {number} at
+ * @returns {{ prefix: string, guess: string }} البادئةُ وتخمينُ مُغلِقاتِ التوكيد (‏يُتحقَّقُ منه لاحقاً).
+ */
+function clipPrefix(text, at) {
+  const hi = text.charCodeAt(at - 1);
+  const cut = hi >= 0xd800 && hi <= 0xdbff ? at - 1 : at;
+  let s = '';
+  /** @type {string[]} */
+  const stack = [];
+  const toggle = (/** @type {string} */ d) => {
+    if (stack[stack.length - 1] === d) stack.pop();
+    else stack.push(d);
+  };
+  for (const t of tokenizeInline(text)) {
+    if (t.end <= cut) {
+      s += text.slice(t.start, t.end);
+      if (t.kind === 'stars') {
+        let len = t.end - t.start;
+        for (; len >= 2; len -= 2) toggle('**');
+        if (len === 1) toggle('*');
+      }
+      continue;
+    }
+    if (t.kind === 'text') s += text.slice(t.start, cut);
+    else if (t.kind === 'code' && t.inner !== undefined && t.close !== undefined && cut > t.inner) {
+      const inner = text.slice(t.inner, Math.min(cut, t.close)).replace(/`+$/u, '');
+      if (inner.trim() !== '') s += text.slice(t.start, t.inner) + inner + '`'.repeat(t.k ?? 1);
+    }
+    break;
+  }
+  return { prefix: s.replace(/[\s\\]+$/u, ''), guess: stack.reverse().join('') };
+}
+
+/**
+ * ‏`DOC-32`: ذيلٌ مليءٌ بالمُغلِقات. القصُّ «مُغلَقٌ» إن لم يتغيَّرْ عرضُ حروفِه بإلحاقِه — فلا تبقى فيه علامةٌ حرفيّةٌ
+ * يتيمةٌ (‏`**` أو backtick) تُزاوِجُ ما يأتي بعدَها في الخليّةِ نفسِها (‏`…` أو نصُّ عمودٍ مُلصَق).
+ */
+const CLOSURE_PROBE = ' x* x** x*** x` x`` x```';
+
+/** @param {string} clip @returns {boolean} */
+export function clipIsClosed(clip) {
+  const a = markdownProfile(clip);
+  const b = markdownProfile(clip + CLOSURE_PROBE);
+  return a.text.every((ch, i) => b.text[i] === ch && b.fmt[i] === a.fmt[i]);
+}
+
+/** مُغلِقاتُ التوكيدِ المُجرَّبةُ بعدَ التخمين (‏عمقُ تداخلٍ حتى ثلاثة: ‏`*` و`**` و`***`…). */
+const CLOSERS = ['', '*', '**', '***', '****', '*****', '******'];
+
+/**
+ * يقصُّ النصَّ عندَ `n` تقريباً ويُبقيه Markdown أميناً (‏`DOC-32`؛ `WL-618` ثمّ `WL-619` ثمّ `WL-620`).
+ * ‏`WL-619` أصلحَ الكودَ والهروبَ والأزواجَ البديلة، وبقيَ التوكيدُ تبديلاً ساذجاً (‏`***x***` والتداخلُ و`*`
+ * داخلَ الكلمة) — فالآن **كلُّ مرشَّحٍ يُحكَمُ عليه بمحلِّلِ CommonMark** (‏`clipIsFaithful`، تطابقٌ تامّ): البادئةُ
+ * الآمنة + تخمينُ المُغلِقات، ثمّ المُغلِقاتُ الأخرى؛ فإن لم يصحَّ شيءٌ رجعَ القصُّ حرفاً حرفاً. ولا يُعادُ نصٌّ لم يجتزْه.
+ * والمرشَّحُ يجبُ أن يكونَ **مُغلَقاً** (‏`clipIsClosed`): لا علامةَ حرفيّةً يتيمةً تُزاوِجُ ما يُلصَقُ بعدَه.
+ * **الاحتياط** (‏إن لم تصحَّ بادئةٌ في نصفِ الحدِّ الأخير): النصُّ الظاهرُ مُهرَّباً بلا تنسيق — يُسقِطُ تنسيقاً ولا يُضيفُه.
+ * قد يزيدُ الناتجُ على `n` بطولِ المُغلِقاتِ وحدَها.
  * @param {string} text @param {number} n
  * @returns {string}
  */
 export function clipMarkdown(text, n) {
   if (text.length <= n) return text;
-  let s = text.slice(0, n);
-  // ‏لا تُترَكُ نصفُ علامةِ `**` ولا شرطةُ تهريبٍ يتيمة.
-  while (s.endsWith('*') || s.endsWith('\\')) s = s.slice(0, -1);
-  if ((s.match(/`/gu) ?? []).length % 2 === 1) s += '`';
-  if ((s.replace(/`[^`]*`/gu, '').match(/\*\*/gu) ?? []).length % 2 === 1) s += '**';
-  return s;
+  // ‏لا يُرجَعُ أكثرَ من نصفِ الحدّ: بادئةٌ أمينةٌ أقصرُ (‏حتى «**» حرفيّةً) أسوأُ من الاحتياطِ المُهرَّب.
+  for (let cut = n; cut > 0 && cut * 2 >= n; cut -= 1) {
+    const { prefix, guess } = clipPrefix(text, cut);
+    if (prefix === '') continue;
+    for (const closers of [guess, ...CLOSERS.filter((c) => c !== guess)]) {
+      const candidate = prefix + closers;
+      if (
+        markdownProfile(candidate).text.length > 0 &&
+        clipIsFaithful(text, candidate) &&
+        clipIsClosed(candidate)
+      )
+        return candidate;
+    }
+  }
+  const visible = markdownProfile(text).text.slice(0, n).join('').trimEnd();
+  return visible.replace(/[!-/:-@[-`{-~]/gu, (ch) => `\\${ch}`);
 }
 
 /**
@@ -1090,7 +1288,7 @@ export function renderHandoff(sources) {
         .replace(/\s+/gu, ' ')
         .trim()
         .slice(0, 48) || '—';
-    const key = `${row.section.slice(0, 40)}\u0000${owner}`;
+    const key = `${clipMarkdown(row.section, 40)}\u0000${owner}`;
     const list = groups.get(key) ?? [];
     list.push(row.id);
     groups.set(key, list);
