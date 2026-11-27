@@ -976,6 +976,22 @@ export function evaluateProjectState(input) {
 }
 
 /**
+ * يقصُّ النصَّ إلى `n` ويُغلِقُ ما فتحَه القصُّ من `**` أو علامةِ كود (‏`DOC-32`، `WL-618`): كانَ القصُّ
+ * يتركُ `**` مفتوحاً قبلَ فاصلِ العمودِ في كلِّ عنوانٍ مقصوص.
+ * @param {string} text @param {number} n
+ * @returns {string}
+ */
+export function clipMarkdown(text, n) {
+  if (text.length <= n) return text;
+  let s = text.slice(0, n);
+  // ‏لا تُترَكُ نصفُ علامةِ `**` ولا شرطةُ تهريبٍ يتيمة.
+  while (s.endsWith('*') || s.endsWith('\\')) s = s.slice(0, -1);
+  if ((s.match(/`/gu) ?? []).length % 2 === 1) s += '`';
+  if ((s.replace(/`[^`]*`/gu, '').match(/\*\*/gu) ?? []).length % 2 === 1) s += '**';
+  return s;
+}
+
+/**
  * يُولِّدُ ملخّصَ التسليمِ من مصادرِه وحدَها — نصٌّ حتميٌّ بلا تاريخِ تشغيلٍ ولا Git،
  * فيُقارَنُ بايتاً ببايتٍ ولا يبقى قديماً بصمت.
  *
@@ -1013,7 +1029,7 @@ export function renderHandoff(sources) {
       .find((l) => /الحالة بعد العمل/u.test(l));
     if (line === undefined) return '—';
     const after = line.split(/الحالة بعد العمل:?\*?\*?:?/u)[1] ?? '';
-    return after.replace(/\s+/gu, ' ').trim().slice(0, 160) || '—';
+    return clipMarkdown(after.replace(/\s+/gu, ' ').trim(), 160) || '—';
   };
 
   const out = [];
@@ -1038,7 +1054,7 @@ export function renderHandoff(sources) {
   } else {
     out.push(`- **آخرُ مُدخلةٍ:** \`${newest.id}\` (${newest.date})`);
     out.push(
-      `- **سطرُ اللوحةِ الأوّلُ:** ${statusLine.replace(/^آخر تحديث:\s*/u, '').slice(0, 400)}`,
+      `- **سطرُ اللوحةِ الأوّلُ:** ${clipMarkdown(statusLine.replace(/^آخر تحديث:\s*/u, ''), 400)}`,
     );
   }
   out.push('');
@@ -1049,7 +1065,7 @@ export function renderHandoff(sources) {
   const partialRun = sorted.findIndex((entry) => !stateOf(entry).startsWith('🟨'));
   const shown = Math.max(8, partialRun === -1 ? sorted.length : partialRun);
   for (const entry of sorted.slice(0, shown)) {
-    const title = entry.title.replace(/\|/gu, '\\|').slice(0, 180);
+    const title = clipMarkdown(entry.title.replace(/\|/gu, '\\|'), 180);
     out.push(
       `| \`${entry.id}\` | ${entry.date} | ${title} | ${stateOf(entry).replace(/\|/gu, '\\|')} |`,
     );

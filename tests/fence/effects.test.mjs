@@ -1138,6 +1138,34 @@ describe(
       });
     });
 
+    test(
+      'LIVE-75/RLS-INITPLAN أحمر: عبارةٌ متعدّدةُ الصفوفِ بدأت قبلَ الانقضاء ⇒ لا يُكتَبُ صفٌّ أُنتِجَ بعدَه (‏الإنتاجُ ينقضُه: `(SELECT fence.read_ok())` ‏InitPlan يُقيَّمُ مرّةً عندَ أوّلِ صفّ)',
+      {
+        todo: 'LIVE-75/RLS-INITPLAN: سياسةُ xf_read تلفُّ read_ok() باستعلامٍ فرعيٍّ غيرِ مرتبط — يُقيَّمُ مرّةً للعبارة، فالصفُّ الثاني بعدَ الانقضاءِ يُكتَب',
+      },
+      async () => {
+        // ‏W2 صفٌّ واحد فلا يميّزُ «لكلِّ صفّ» من «مرّةً عندَ أوّلِ صفّ»؛ هذا يميّز: الصفُّ الأوّلُ قبلَ الانقضاءِ والثاني بعدَه.
+        const a = await bootWorker('alpha');
+        await untilDb(a.exp - 700);
+        const r = await outcome(
+          a.c,
+          `INSERT INTO state.fence_probe (id, v)
+             SELECT g, CASE WHEN g = 60809 THEN pg_sleep(1.5)::text ELSE '' END
+                       || (extract(epoch FROM clock_timestamp()) * 1000)::bigint::text
+             FROM generate_series(60808, 60809) AS g`,
+        );
+        const second = await committed(60809);
+        t_note('LIVE-75/RLS-INITPLAN', {
+          statement: r.ok ? 'accepted' : String(r.code),
+          secondRowProducedAfterExpiryMs:
+            second === null ? null : Math.round(Number(second) - a.exp),
+        });
+        if (second !== null)
+          assert.ok(Number(second) > a.exp, 'الصفُّ الثاني أُنتِجَ بعدَ الانقضاء (‏شرطُ القياس)');
+        assert.equal(second, null, 'صفٌّ أُنتِجَ بعدَ الانقضاءِ كُتِب');
+      },
+    );
+
     test('L75-R1: القراءة — قبلَ الانقضاءِ ترى، وبعدَه صفرُ صفوفٍ بلا خطأ (‏حتى داخلَ REPEATABLE READ بدأت قبلَه)', async () => {
       await h.db.pool.query(
         `INSERT INTO state.fence_probe (id, v) VALUES (60806, 'visible') ON CONFLICT DO NOTHING`,
