@@ -329,11 +329,52 @@ if (historyBase !== null) {
   }
 }
 
+// WL-621 (‏`DOC-33`): الحزمةُ تُقاسُ على `origin/main` (‏`WL-450`)، فما غيّرَه فرعُ التكاملِ ولم يبلغْ `main`
+// يدخلُ فرقَها — وثيقةٌ حدّثَها طلبٌ سابقٌ تُرضي PS8 عن تغييرِ طلبٍ لاحقٍ لم يُحدِّثْها. مقيسٌ: `#633`
+// أخضرُ على `origin/main` (‏162 ملفّاً) ثمّ أحمرُ على `push` التكامل (‏`HEAD^1`، 22 ملفّاً) بـPS8 لـ`ci.yml`.
+// فطلبٌ قاعدتُه غيرُ `main` يُقاسُ **أيضاً** على فرقِ طبقتِه فوقَ قاعدتِه الحرفيّة — وهو عينُ ما يقيسُه
+// `push` بعدَ الدمج — ولا يُعادُ ما وجدَه قياسُ `main`.
+/** @type {{ ref: string, sha: string, files: number, violations: import('./lib/project-state.mjs').Violation[] } | null} */
+let layer = null;
+if (literal !== null) {
+  /** @type {import('./lib/project-state.mjs').ChangedFile[]} */
+  const layerChanged = [];
+  const raw = git(['diff', '--no-renames', '-z', '--name-status', `${literal.sha}...HEAD`]);
+  const parts = raw.split('\0').filter((p) => p.length > 0);
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    layerChanged.push({ status: String(parts[i]), path: String(parts[i + 1]) });
+  }
+  const layerResult = evaluateProjectState({
+    restored: restoration.restored,
+    manifest,
+    changed: layerChanged,
+    headExists: (rel) => existsSync(path.join(repoRoot, rel)),
+    baseWorkLog: fileAt(manifest.workLog)(literal.sha) ?? '',
+    headWorkLog: headWorkLogText,
+    headDebtRegister: existsSync(path.join(repoRoot, manifest.debtRegister))
+      ? readHead(manifest.debtRegister)
+      : '',
+  });
+  const seen = new Set(result.violations.map((v) => `${v.code}\u0000${v.message}`));
+  layer = {
+    ref: literal.ref,
+    sha: literal.sha,
+    files: layerChanged.length,
+    violations: layerResult.violations
+      .filter((v) => !seen.has(`${v.code}\u0000${v.message}`))
+      .map((v) => ({
+        code: v.code,
+        message: `${v.message} (‏على فرقِ الطبقةِ فوقَ \`${literal?.ref}\`)`,
+      })),
+  };
+}
+
 const violations = [
   ...preservation.violations,
   ...(literal?.violations ?? []),
   ...restoration.violations,
   ...result.violations,
+  ...(layer?.violations ?? []),
 ];
 const handoffPath = path.join(repoRoot, manifest.handoff);
 const expectedHandoff = handoffText(manifest);
@@ -365,6 +406,13 @@ if (literal !== null) {
         : literal.violations.length === 0
           ? 'ساقطٌ (‏مكرَّرٌ مع الأساسِ أعلاه)'
           : 'ساقطٌ'
+    }`,
+  );
+}
+if (layer !== null) {
+  console.log(
+    `  فرقُ الطبقةِ فوقَ القاعدةِ الحرفيّةِ: ${layer.ref} = ${layer.sha.slice(0, 12)} · ملفّاتٌ متغيّرةٌ: ${layer.files} · ${
+      layer.violations.length === 0 ? 'متّسق' : `${layer.violations.length} مخالفة`
     }`,
   );
 }

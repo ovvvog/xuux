@@ -1496,6 +1496,57 @@ test('WL-585 — كوميتُ دمجٍ في فرعِ التكاملِ يُسقِ
   assert.match(dispatch.out, /التاريخُ: كلُّ مُدخلةٍ وسطرِ لوحةٍ على الأساسِ باقٍ/u, dispatch.out);
 });
 
+test('WL-621 (‏`DOC-33`) — طلبٌ إلى التكاملِ يُغيِّرُ ما تصفُه وثيقةٌ حدّثَها طلبٌ سابقٌ لم يبلغْ main: PS8 على فرقِ الطبقة كما يراه push بعدَ الدمج', () => {
+  const root = integrationRepo();
+  // طلبٌ سابقٌ مدموجٌ في التكاملِ حدّثَ `docs/CURRENT_STATE.md` — فهو في فرقِ `origin/main` لكلِّ طلبٍ لاحق.
+  git(root, ['checkout', '-q', 'integration']);
+  write(root, 'docs/CURRENT_STATE.md', '# الحالة\n\nوصفٌ حدّثَه WL-003.\n');
+  addEntry(root, {
+    id: 'WL-003',
+    title: 'وصفٌ على التكامل',
+    files: ['docs/CURRENT_STATE.md', 'PROJECT_STATUS.md'],
+  });
+  regenerateHandoff(root);
+  commit(root, 'WL-003 updates CURRENT_STATE on integration');
+  git(root, ['update-ref', 'refs/remotes/origin/integration', 'integration']);
+  git(root, ['checkout', '-q', '-B', 'pr-to-integration', 'integration']);
+  // الطلبُ: تغييرٌ إنتاجيٌّ بلا تحديثِ الوثيقةِ ولا إعلانِ «غيرُ متأثِّر» (‏حادثةُ `#633`/`ci.yml`).
+  write(root, 'src/production/entry.mjs', 'export const p = 3;\n');
+  addEntry(root, { id: 'WL-004', files: ['src/production/entry.mjs', 'PROJECT_STATUS.md'] });
+  regenerateHandoff(root);
+  commit(root, 'WL-004 production change, CURRENT_STATE untouched');
+  const pr = runGuardAsPr(root, 'integration');
+  assert.equal(pr.status, 1, pr.out);
+  assert.match(pr.out, /الأساسُ: origin\/main/u, 'WL-450 باقٍ: الحزمةُ تُقاسُ على main أيضاً.');
+  assert.match(
+    pr.out,
+    /PS8\/AFFECTED-DOC-STALE: `docs\/CURRENT_STATE\.md`[^\n]*على فرقِ الطبقةِ فوقَ `origin\/integration`/u,
+    pr.out,
+  );
+  assert.match(pr.out, /فرقُ الطبقةِ فوقَ القاعدةِ الحرفيّةِ: origin\/integration = [0-9a-f]{12}/u);
+  // الشاهدُ المستقلّ: الشجرةُ نفسُها مدموجةً يرُدُّها `push` (‏الأساسُ HEAD^1) بالرمزِ نفسِه.
+  git(root, ['checkout', '-q', 'integration']);
+  git(root, ['merge', '-q', '--no-ff', '-m', 'Merge pr-to-integration', 'pr-to-integration']);
+  const push = runGuardAsEvent(root, 'push');
+  assert.equal(push.status, 1, push.out);
+  assert.match(push.out, /PS8\/AFFECTED-DOC-STALE: `docs\/CURRENT_STATE\.md`/u, push.out);
+  // والإعلانُ الصريحُ في مُدخلةِ الطلبِ يُرضي القياسَين.
+  git(root, ['reset', '-q', '--hard', 'origin/integration']);
+  git(root, ['checkout', '-q', '-B', 'pr-to-integration', 'integration']);
+  write(root, 'src/production/entry.mjs', 'export const p = 3;\n');
+  addEntry(root, {
+    id: 'WL-004',
+    files: ['src/production/entry.mjs', 'PROJECT_STATUS.md'],
+    extra:
+      '- غيرُ متأثِّرٍ: `docs/CURRENT_STATE.md` — ثابتٌ داخليٌّ لا يغيّرُ المسارَ الإنتاجيَّ الموصوف.\n',
+  });
+  regenerateHandoff(root);
+  commit(root, 'declare unaffected');
+  const ok = runGuardAsPr(root, 'integration');
+  assert.equal(ok.status, 0, ok.out);
+  assert.match(ok.out, /فرقُ الطبقةِ فوقَ القاعدةِ الحرفيّةِ: [^\n]*متّسق/u, ok.out);
+});
+
 test('WL-540 — ملخّصُ التسليم: لا تسقطُ مُدخلةٌ جزئيّةٌ من السلسلةِ المتّصلةِ من الأحدث، والحدُّ الأدنى ثمانٍ', () => {
   const entry = (/** @type {number} */ n, /** @type {string} */ state) =>
     `### [2026-01-01] — WL-${n} — **عنوان ${n}**\n\n- **الحالةُ بعدَ العمل:** ${state}\n`;
