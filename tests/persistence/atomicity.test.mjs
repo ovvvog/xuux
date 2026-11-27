@@ -37,6 +37,7 @@ import {
   skipWithoutDatabase,
 } from '../helpers/pg.mjs';
 import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
+import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
 import { restoreBackup } from '../../scripts/restore.mjs';
 import { createBackup } from '../../scripts/backup.mjs';
 import { enforcementPointFor, testActor } from '../helpers/authorization.mjs';
@@ -935,11 +936,15 @@ test(
   { skip: skipWithoutDatabase, timeout: 180_000 },
   async () => {
     const env = await l78ProductionFixture('l78kill');
+    // ‏SIGKILL لا يُشغِّلُ تنظيفاً: النسخةُ الخاصّةُ للأرشيف (‏`xuux-restore-*`، `snapshotVerifiedArchive`)
+    // تبقى. تُوجَّهُ إلى جذرٍ يملكُه الاختبارُ (‏`TMPDIR`) فيُقاسُ بقاؤُها حدّاً مُعلَناً ويُمحى الجذر.
+    const killTmp = registerTmpRoot(fs.mkdtempSync(path.join(os.tmpdir(), 'xuux-l78kill-')));
     try {
       await l78InstallMidRestorePause(env.target.pool, 3);
       const before = await l78TargetImage(env.target.pool);
       const live = l78RunCli([env.dump, '--database', env.target.name, '--force'], {
         DATABASE_URL: l78AdminUrl(),
+        TMPDIR: killTmp,
       });
       const pid = await l78WaitForRestoreBackend(env.target.name, `wait_event = 'PgSleep'`);
       assert.notEqual(pid, null, 'الاستعادةُ لم تبلغ منتصفَها (‏CREATE INDEX)');
@@ -948,6 +953,12 @@ test(
       const killed = await live.done;
       assert.equal(killed.signal, 'SIGKILL');
       assert.doesNotMatch(killed.stdout, /RESTORE_OK/);
+      // حدٌّ مُعلَنٌ منذُ `WL-614` (‏`docs/RECOVERY.md`، الحدُّ 3): القتلُ يتركُ النسخةَ الخاصّةَ للأرشيفِ في `TMPDIR` (‏0700) — بلا أثرٍ على الهدف.
+      assert.deepEqual(
+        fs.readdirSync(killTmp).filter((name) => name.startsWith('xuux-restore-')).length,
+        1,
+        'النسخةُ الخاصّةُ للأرشيفِ بعدَ SIGKILL',
+      );
       // الأداةُ ماتت ولم ترسلْ COMMIT ⇒ ‏psql يبلغُ نهايةَ مدخلِه فيخرج ⇒ يُجهِضُ الخادمُ المعاملة.
       const gone = await l78WaitForNoRestoreBackend(env.target.name);
       assert.ok(gone, 'بقيت جلسةُ الاستعادةِ حيّةً بعدَ موتِ الأداة');
@@ -963,6 +974,7 @@ test(
       await l78AssertRestored(env.target.pool);
     } finally {
       await env.cleanup();
+      fs.rmSync(killTmp, { recursive: true, force: true });
     }
   },
 );
