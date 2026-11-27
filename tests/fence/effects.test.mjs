@@ -1033,24 +1033,31 @@ describe(
         // ‏المتأخّرِ دليلٌ مستقلٌّ على أنّ الأوّلَ اجتازَ WITH CHECK وأُدرِجَ قبلَ أن يبدأَ تأخيرُ الثاني؛ وساعتُه قبلَ الانقضاءِ تنفي الرفضَ المبكّر.
         `CREATE TABLE state.l75_initplan_probe (id integer PRIMARY KEY, v text NOT NULL)`,
         `CREATE FUNCTION state.l75_initplan_row() RETURNS trigger LANGUAGE plpgsql VOLATILE AS $f$
-         DECLARE seen int; late boolean;
+         DECLARE seen int; late boolean; rid int;
          BEGIN
            IF TG_OP = 'INSERT' THEN
+             rid := NEW.id;
              late := NEW.v = 'late';
-             SELECT count(*) INTO seen FROM state.l75_initplan_probe WHERE id BETWEEN NEW.id - 4 AND NEW.id + 4;
-           ELSE
+             SELECT count(*) INTO seen FROM state.l75_initplan_probe WHERE id BETWEEN rid - 4 AND rid + 4;
+           ELSIF TG_OP = 'UPDATE' THEN
+             rid := NEW.id;
              late := OLD.v LIKE 'late%';
              SELECT count(*) INTO seen FROM state.l75_initplan_probe
-              WHERE id BETWEEN NEW.id - 4 AND NEW.id + 4 AND v LIKE '%-new';
+              WHERE id BETWEEN rid - 4 AND rid + 4 AND v LIKE '%-new';
+           ELSE
+             rid := OLD.id;
+             late := OLD.v LIKE 'slow%';
+             SELECT count(*) INTO seen FROM state.l75_initplan_probe WHERE id BETWEEN rid - 4 AND rid + 4;
            END IF;
-           RAISE NOTICE 'l75-ip ROW % % % %', TG_OP, NEW.id, seen, (extract(epoch FROM clock_timestamp()) * 1000)::float8;
+           RAISE NOTICE 'l75-ip ROW % % % %', TG_OP, rid, seen, (extract(epoch FROM clock_timestamp()) * 1000)::float8;
            IF late THEN PERFORM pg_sleep(1.5); END IF;
+           IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
            RETURN NEW;
          END $f$`,
         `REVOKE ALL ON FUNCTION state.l75_initplan_row() FROM PUBLIC`,
-        `CREATE TRIGGER xf_guard_zz_l75 BEFORE INSERT OR UPDATE ON state.l75_initplan_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_note()`,
-        `CREATE TRIGGER l75_ip_row BEFORE INSERT OR UPDATE ON state.l75_initplan_probe FOR EACH ROW EXECUTE FUNCTION state.l75_initplan_row()`,
-        `GRANT SELECT, INSERT, UPDATE ON state.l75_initplan_probe TO xuux_worker`,
+        `CREATE TRIGGER xf_guard_zz_l75 BEFORE INSERT OR UPDATE OR DELETE ON state.l75_initplan_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_note()`,
+        `CREATE TRIGGER l75_ip_row BEFORE INSERT OR UPDATE OR DELETE ON state.l75_initplan_probe FOR EACH ROW EXECUTE FUNCTION state.l75_initplan_row()`,
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON state.l75_initplan_probe TO xuux_worker`,
       ])
         await h.db.pool.query(sql);
       await h.sovereign.command('lease_set', { lease_window_s: WINDOW_S, lease_renew_s: 1 });
@@ -1189,9 +1196,7 @@ describe(
     // ‏ما يُثبِتُه: فحصُ RLS لصفٍّ ثانٍ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَ الانقضاء يقرأُ — أو لا يقرأُ — الساعةَ عندَ صفِّه.
     // ‏ما لا يُثبِتُه: لا يقيسُ إلّا INSERT/UPDATE بمسارِ ModifyTable صفّاً صفّاً؛ ولا يقيسُ COPY ولا الحذف (‏DELETE بلا WITH CHECK —
     // ‏انظر LIVE-75/RLS-SILENT-SKIP)؛ والتأخيرُ مصنوعٌ بزنادٍ لا بحِملٍ حقيقيّ.
-    // ‏الخاصيّةُ حمراءُ على الإنتاجِ الحاليّ (‏`todo` حتى 0036 في طلبِ دمجٍ مستقلّ)، وصلاحيّةُ القياسِ والضابطُ الإيجابيُّ لازمانِ دائماً.
-    const RLS_INITPLAN_TODO =
-      'LIVE-75/RLS-INITPLAN: xf_read تلفُّ read_ok() باستعلامٍ فرعيٍّ غيرِ مرتبط (‏InitPlan يُقيَّمُ مرّةً للعبارة) — الإصلاحُ 0036 في طلبِ دمجٍ مستقلّ (‏WL-620)';
+    // ‏الخاصيّةُ تُلزِمُها 0036 (‏`WL-620`): بدونِها (‏down) تحمرُّ — العبارةُ تُقبَلُ ويُكتَبُ الصفّان؛ وصلاحيّةُ القياسِ والضابطُ لازمانِ دائماً.
     /** عقدُ الخطّة: لا عقدةَ تُخزِّنُ الصفوفَ أو تُعيدُ ترتيبَها بينَ المصدرِ وModifyTable. */
     const IP_BUFFERING =
       /^\s*(?:->\s*)?(?:Sort|Incremental Sort|Materialize|Hash|Hash Join|Merge Join|Gather|Gather Merge|Memoize|Unique|Aggregate|HashAggregate|GroupAggregate|WindowAgg|CTE Scan)\b/u;
@@ -1213,7 +1218,7 @@ describe(
       const notes = [];
       a.c.on('notice', (/** @type {any} */ n) => {
         const msg = String(n.message);
-        const row = /^l75-ip ROW (INSERT|UPDATE) (\d+) (\d+) ([0-9.]+)$/u.exec(msg);
+        const row = /^l75-ip ROW (INSERT|UPDATE|DELETE) (\d+) (\d+) ([0-9.]+)$/u.exec(msg);
         if (row)
           notes.push({
             level: 'ROW',
@@ -1322,35 +1327,27 @@ describe(
       });
     });
 
-    test(
-      'LIVE-75/RLS-INITPLAN (‏0036): صفٌّ ثانٍ فُحِصَ بعدَ الانقضاءِ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَه ⇒ 42501 برسالةِ RLS، ولا يُكتَبُ صفّ',
-      { todo: RLS_INITPLAN_TODO },
-      async () => {
-        const m = await ipInsert();
-        assert.equal(m.r.ok, false, `العبارةُ قُبِلَت وكُتِبَ ${m.rows.length} صفّ`);
-        assert.equal(m.r.code, '42501', String(m.r.message));
-        assert.deepEqual(m.rows, [], 'العبارةُ ذرّيّة: لا الثاني ولا الأوّل');
-      },
-    );
+    test('LIVE-75/RLS-INITPLAN (‏0036): صفٌّ ثانٍ فُحِصَ بعدَ الانقضاءِ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَه ⇒ 42501 برسالةِ RLS، ولا يُكتَبُ صفّ', async () => {
+      const m = await ipInsert();
+      assert.equal(m.r.ok, false, `العبارةُ قُبِلَت وكُتِبَ ${m.rows.length} صفّ`);
+      assert.equal(m.r.code, '42501', String(m.r.message));
+      assert.deepEqual(m.rows, [], 'العبارةُ ذرّيّة: لا الثاني ولا الأوّل');
+    });
 
     test('LIVE-75/RLS-INITPLAN صلاحيّةُ القياس (‏UPDATE): خطّةٌ بلا Sort/Materialize، والصفُّ الأوّلُ حُدِّثَ قبلَ تأخيرِ الثاني، وقيمةُ الثاني فُحِصَت بعدَ الانقضاء', async () => {
       const m = await ipUpdate();
       assertIpValid(m, 'Update', [60860, 60861]);
     });
 
-    test(
-      'LIVE-75/RLS-INITPLAN (‏0036) UPDATE: قيمةٌ جديدةٌ فُحِصَت بعدَ الانقضاءِ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَه ⇒ 42501، ولا يتغيّرُ صفّ',
-      { todo: RLS_INITPLAN_TODO },
-      async () => {
-        const m = await ipUpdate();
-        assert.equal(m.r.ok, false, 'UPDATE عبرَ الانقضاءِ قُبِل');
-        assert.equal(m.r.code, '42501', String(m.r.message));
-        assert.deepEqual(m.rows, [
-          { id: 60860, v: 'first-u' },
-          { id: 60861, v: 'late-u' },
-        ]);
-      },
-    );
+    test('LIVE-75/RLS-INITPLAN (‏0036) UPDATE: قيمةٌ جديدةٌ فُحِصَت بعدَ الانقضاءِ في عبارةٍ اجتازَ صفُّها الأوّلُ الفحصَ قبلَه ⇒ 42501، ولا يتغيّرُ صفّ', async () => {
+      const m = await ipUpdate();
+      assert.equal(m.r.ok, false, 'UPDATE عبرَ الانقضاءِ قُبِل');
+      assert.equal(m.r.code, '42501', String(m.r.message));
+      assert.deepEqual(m.rows, [
+        { id: 60860, v: 'first-u' },
+        { id: 60861, v: 'late-u' },
+      ]);
+    });
 
     test('LIVE-75/RLS-INITPLAN ضابطٌ إيجابيّ: العبارةُ نفسُها بالتأخيرِ نفسِه قبلَ الانقضاءِ تُكتَبُ كاملة (‏الرفضُ سببُه الزمنُ لا الصياغة)', async () => {
       const sql = `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60870, 'first'), (60871, 'late')`;
@@ -1367,37 +1364,86 @@ describe(
       ]);
     });
 
-    test(
-      'LIVE-75/RLS-INITPLAN بنيويّ (‏0036): كلُّ سياسةِ xf_read على علاقةٍ محميّةٍ بالصيغةِ القانونيّةِ حرفيّاً (‏الساعةُ لكلِّ صفّ في USING وWITH CHECK)، ولا متساهلةَ غيرُها',
-      { todo: RLS_INITPLAN_TODO },
-      async () => {
-        const rows = (
-          await h.db.pool.query(
-            `SELECT pr.schema_name || '.' || pr.rel_name AS rel, pg_get_expr(po.polqual, po.polrelid) AS q,
+    // ‏═══ ‏`LIVE-75/RLS-SILENT-SKIP` (‏`WL-620`، حدٌّ مُعلَنٌ لا تُصلِحُه 0036 — يُثبَّتُ كما هو) ═══
+    // ‏DELETE لا WITH CHECK له: ‏USING وحدَه يُقيَّمُ عندَ مسحِ كلِّ صفّ. صفٌّ أوّلُ اجتازَ USING قبلَ الانقضاءِ ثمّ تأخّرَ (‏زنادُه ينامُ)
+    // ‏يُحذَفُ **بعدَ** الانقضاء، وصفٌّ ثانٍ يُمسَحُ بعدَه يُرشِّحُه USING بصمت — فالعبارةُ تنجحُ جزئيّاً بلا خطأ (‏`DELETE 1`)، و`COMMIT`
+    // ‏لا يفحصُ (‏L75-W1). قبلَ 0036 (‏InitPlan) كانَ الصفّانِ يُحذَفان. الحكمُ في `WL-620`: لا يُقبَلُ عقداً — دَينٌ مستقلّ.
+    test('LIVE-75/RLS-SILENT-SKIP (‏0036، يُثبَّتُ الحدّ): DELETE بدأ قبلَ الانقضاء — الصفُّ المتأخّرُ يُحذَفُ بعدَه، والتالي يُتخطّى بصمت، والعبارةُ تنجحُ بلا خطأ', async () => {
+      await h.db.pool.query(
+        `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60880, 'slow-d'), (60881, 'other-d')`,
+      );
+      const m = await runIp(
+        'alpha',
+        `DELETE FROM state.l75_initplan_probe WHERE id IN (60880, 60881) RETURNING id`,
+        [60880, 60881],
+        true,
+      );
+      assert.match(m.plan[0] ?? '', /^Delete on state\.l75_initplan_probe/u, m.plan.join('\n'));
+      assert.deepEqual(
+        m.plan.filter((l) => IP_BUFFERING.test(l)),
+        [],
+        m.plan.join('\n'),
+      );
+      assert.equal(m.okBefore, true);
+      assert.equal(m.okAfter, false);
+      const st = m.notes.filter((n) => n.level === 'STATEMENT');
+      assert.ok(
+        st.length === 1 && (st[0]?.at ?? Infinity) < m.exp,
+        'guard_write اجتيزَ قبلَ الانقضاء',
+      );
+      const rows = /** @type {Array<Extract<IpNote, { level: 'ROW' }>>} */ (
+        m.notes.filter((n) => n.level === 'ROW')
+      );
+      // ‏زنادُ الصفِّ أُطلِقَ للأوّلِ وحدَه قبلَ الانقضاء؛ الثاني لم يبلغْه (‏رشَّحَه USING قبلَ الزناد).
+      assert.deepEqual(
+        rows.map((n) => [n.op, n.id]),
+        [['DELETE', 60880]],
+      );
+      assert.ok(
+        (rows[0]?.at ?? Infinity) < m.exp && m.endedAt > m.exp + 500,
+        'الحذفُ بعدَ الانقضاء',
+      );
+      assert.deepEqual(
+        m.r,
+        { ok: true, command: 'DELETE', rows: [{ id: 60880 }] },
+        'لا خطأ: نجاحٌ جزئيّ',
+      );
+      assert.deepEqual(m.rows, [{ id: 60881, v: 'other-d' }], 'الصفُّ الثاني بقيَ بصمت');
+      t_note('LIVE-75/RLS-SILENT-SKIP', {
+        statement: 'DELETE 1 (of 2)',
+        deletedRowAfterExpiryMs: Math.round(Number(rows[0]?.at) + 1500 - m.exp),
+        skippedSilently: 1,
+        error: false,
+      });
+    });
+
+    test('LIVE-75/RLS-INITPLAN بنيويّ (‏0036): كلُّ سياسةِ xf_read على علاقةٍ محميّةٍ بالصيغةِ القانونيّةِ حرفيّاً (‏الساعةُ لكلِّ صفّ في USING وWITH CHECK)، ولا متساهلةَ غيرُها', async () => {
+      const rows = (
+        await h.db.pool.query(
+          `SELECT pr.schema_name || '.' || pr.rel_name AS rel, pg_get_expr(po.polqual, po.polrelid) AS q,
                     pg_get_expr(po.polwithcheck, po.polrelid) AS w
                FROM fence.protected_relations() pr JOIN pg_policy po ON po.polrelid = pr.relid AND po.polname = 'xf_read'`,
-          )
-        ).rows;
-        // ‏مطابقةٌ حرفيّةٌ لا تطابقُ نمط: `clock_timestamp() OR true` ليس إصلاحاً.
-        const canon = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
-        const n = Number(
-          (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.protected_relations()'))
-            .rows[0].n,
-        );
-        assert.ok(
-          rows.length > 0 && rows.length === n,
-          `xf_read على كلِّ علاقةٍ محميّة (${rows.length}/${n})`,
-        );
-        for (const r of rows) assert.deepEqual([r.q, r.w], [canon, canon], r.rel);
-        const extra = (
-          await h.db.pool.query(
-            `SELECT po.polrelid::regclass::text AS rel, po.polname FROM fence.protected_relations() pr
+        )
+      ).rows;
+      // ‏مطابقةٌ حرفيّةٌ لا تطابقُ نمط: `clock_timestamp() OR true` ليس إصلاحاً.
+      const canon = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
+      const n = Number(
+        (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.protected_relations()'))
+          .rows[0].n,
+      );
+      assert.ok(
+        rows.length > 0 && rows.length === n,
+        `xf_read على كلِّ علاقةٍ محميّة (${rows.length}/${n})`,
+      );
+      for (const r of rows) assert.deepEqual([r.q, r.w], [canon, canon], r.rel);
+      const extra = (
+        await h.db.pool.query(
+          `SELECT po.polrelid::regclass::text AS rel, po.polname FROM fence.protected_relations() pr
                JOIN pg_policy po ON po.polrelid = pr.relid WHERE po.polname <> 'xf_read' AND po.polpermissive`,
-          )
-        ).rows;
-        assert.deepEqual(extra, [], 'لا سياسةَ متساهلةً أخرى تُضَمُّ بـOR');
-      },
-    );
+        )
+      ).rows;
+      assert.deepEqual(extra, [], 'لا سياسةَ متساهلةً أخرى تُضَمُّ بـOR');
+    });
 
     test('L75-R1: القراءة — قبلَ الانقضاءِ ترى، وبعدَه صفرُ صفوفٍ بلا خطأ (‏حتى داخلَ REPEATABLE READ بدأت قبلَه)', async () => {
       await h.db.pool.query(

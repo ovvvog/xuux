@@ -1193,6 +1193,65 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     }
   });
 
+  // ‏WL-619 (‏LIVE-75/RLS-INITPLAN): xf_read بصيغةٍ غيرِ قانونيّة، أو سياسةٌ متساهلةٌ أخرى تُضَمُّ إليه بـOR، سياجُ قراءةٍ وصفٍّ
+  // ‏مُعطَّل — يُكشَفُ ويمنعُ الاستئناف. والمقيِّدةُ تُضيِّقُ فلا تُعَدّ (‏ضابطٌ سلبيّ).
+  test('WL-619: xf_read بصيغةِ InitPlan القديمة، أو سياسةٌ متساهلةٌ إضافيّة ⇒ check_fenced يكشفُ وRESUME يرفض؛ والمقيِّدةُ لا', async () => {
+    await h.root.halt('rls-drift', { effects: { stop: async () => ({ ok: true, detail: {} }) } });
+    const canon = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
+    const pol = (
+      await h.db.pool.query(
+        `SELECT pg_get_expr(polqual, polrelid) AS q, pg_get_expr(polwithcheck, polrelid) AS w
+           FROM pg_policy WHERE polrelid = 'state.fence_probe'::regclass AND polname = 'xf_read'`,
+      )
+    ).rows[0];
+    assert.deepEqual(pol, { q: canon, w: canon }, 'الصيغةُ القانونيّةُ بعدَ 0036');
+    await h.db.pool.query('ALTER EVENT TRIGGER xf_ddl_end DISABLE');
+    const kindsOf = async () =>
+      (await h.root.checkFenced()).problems.map((/** @type {any} */ p) => `${p.kind}:${p.object}`);
+    for (const [label, sql] of /** @type {const} */ ([
+      ['InitPlan القديم', 'USING ((SELECT fence.read_ok())) WITH CHECK ((SELECT fence.read_ok()))'],
+      ['USING وحدَه قانونيّ', 'USING (clock_timestamp() <@ (SELECT fence.read_window())) WITH CHECK (true)'],
+      ['OR true', 'USING (clock_timestamp() <@ (SELECT fence.read_window()) OR true) WITH CHECK (clock_timestamp() <@ (SELECT fence.read_window()))'],
+    ])) {
+      await h.db.pool.query(`ALTER POLICY xf_read ON state.fence_probe ${sql}`);
+      assert.ok((await kindsOf()).includes('rls_policy_drift:state.fence_probe'), label);
+      await rejectsWith(() => h.resume(), ['XF415'], label);
+    }
+    await h.db.pool.query(
+      `ALTER POLICY xf_read ON state.fence_probe USING (clock_timestamp() <@ (SELECT fence.read_window()))
+         WITH CHECK (clock_timestamp() <@ (SELECT fence.read_window()))`,
+    );
+    assert.ok(!(await kindsOf()).some((k) => k.startsWith('rls_')), 'الاستعادةُ تُزيلُ الانحراف');
+    await h.db.pool.query(
+      'CREATE POLICY xf_open ON state.fence_probe AS PERMISSIVE FOR SELECT TO PUBLIC USING (true)',
+    );
+    assert.ok((await kindsOf()).includes('rls_extra_permissive_policy:state.fence_probe:xf_open'));
+    await rejectsWith(() => h.resume(), ['XF415'], 'سياسةٌ متساهلةٌ إضافيّة');
+    await h.db.pool.query('DROP POLICY xf_open ON state.fence_probe');
+    await h.db.pool.query(
+      'CREATE POLICY xf_narrow ON state.fence_probe AS RESTRICTIVE FOR ALL TO PUBLIC USING (true) WITH CHECK (true)',
+    );
+    assert.ok(!(await kindsOf()).some((k) => k.startsWith('rls_')), 'المقيِّدةُ لا تُعَدّ');
+    await h.db.pool.query('DROP POLICY xf_narrow ON state.fence_probe');
+    await h.db.pool.query('ALTER EVENT TRIGGER xf_ddl_end ENABLE ALWAYS');
+    // ‏الجدولُ الجديدُ يُغطّى بالصيغةِ الجديدة (‏cover_relation في 0036).
+    await h.db.pool.query('CREATE TABLE state.fence_rls_new (id int)');
+    const fresh = (
+      await h.db.pool.query(
+        `SELECT pg_get_expr(polqual, polrelid) AS q, pg_get_expr(polwithcheck, polrelid) AS w
+           FROM pg_policy WHERE polrelid = 'state.fence_rls_new'::regclass AND polname = 'xf_read'`,
+      )
+    ).rows[0];
+    assert.deepEqual(fresh, { q: canon, w: canon });
+    await h.db.pool.query('DROP TABLE state.fence_rls_new');
+    const chk = await h.root.checkFenced();
+    const mpt = Number((await h.db.pool.query('SHOW max_prepared_transactions')).rows[0].max_prepared_transactions);
+    if (mpt === 0) {
+      assert.equal(chk.ok, true, JSON.stringify(chk.problems));
+      await h.resume();
+    }
+  });
+
   test('T-REC-05: نسخةٌ من القاعدةِ (قاعدةٌ أخرى من القالب) تبدأ RECOVERY_REQUIRED؛ الأمرُ المُعادُ والكتابةُ مرفوضان', async () => {
     const s = await h.sovereign.status();
     if (s.effective.state !== 'HALTED')
