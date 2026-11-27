@@ -165,10 +165,10 @@ async function reaperProblems(pool) {
   if (reap !== undefined && reap.grantees.join(',') !== 'xf_root,xf_sovereign')
     problems.push(`reap_lapsed: الممنوحون ${reap.grantees.join(',')} لا xf_root,xf_sovereign`);
   // read_ok() وحدَها لـPUBLIC عمداً في 0024 (‏تستدعيها سياسةُ RLS لكلِّ قارئ، ولا تكشفُ شيئاً لغيرِ العامل)؛ وread_window()
-  // ‏من 0036 للسببِ نفسِه (‏سياسةُ xf_read الجديدة — WL-619).
+  // ‏من 0036 للسببِ نفسِه (‏سياسةُ xf_read الجديدة — WL-619)؛ وwindow_breach(tstzrange) من 0037 (‏فرعُ ELSE في xf_read — WL-622).
+  const PUBLIC_EXEC = ['fence.read_ok()', 'fence.read_window()', 'fence.window_breach(tstzrange)'];
   for (const r of rows)
-    if (r.public_exec && r.sig !== 'fence.read_ok()' && r.sig !== 'fence.read_window()')
-      problems.push(`${r.sig}: EXECUTE لـPUBLIC`);
+    if (r.public_exec && !PUBLIC_EXEC.includes(r.sig)) problems.push(`${r.sig}: EXECUTE لـPUBLIC`);
   const renew = (
     await pool.query(
       `SELECT prosrc FROM pg_proc WHERE oid = 'fence.renew_lease(name)'::regprocedure`,

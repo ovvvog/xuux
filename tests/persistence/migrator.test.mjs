@@ -1671,3 +1671,164 @@ describe(
     });
   },
 );
+
+// ── WL-622: ‏LIVE-75/RLS-SILENT-SKIP (‏0037) — USING يرفعُ خارجَ النافذة؛ read_window() بلا ساعة؛ دالّةٌ جديدة؛ الرجوعُ إلى 0036 حرفياً ──
+describe(
+  'WL-622 — 0037: xf_read يرفعُ XF009 خارجَ النافذة على كلِّ علاقةٍ محميّة، والدوالُّ المتغيّرةُ وحدَها، والرجوعُ إلى 0036 حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir36;
+    /** @type {string} */
+    let dir37;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-mig-')));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const ADDED = 'fence.window_breach(tstzrange)';
+    const CHANGED = [
+      'fence._fence_acl_problems()',
+      'fence._worker_allowed_execute()',
+      'fence.check_fenced()',
+      'fence.cover_relation(oid)',
+      'fence.coverage_problems()',
+      'fence.read_window()',
+      'fence.reaper_capability_problems()',
+    ];
+    const W = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
+    const Q37 =
+      'CASE WHEN (clock_timestamp() <@ ( SELECT fence.read_window() AS read_window)) THEN true ELSE fence.window_breach(( SELECT fence.read_window() AS read_window)) END';
+    /** @param {import('pg').Pool} pool */
+    const policies = async (pool) =>
+      (
+        await pool.query(
+          `SELECT po.polrelid::regclass::text AS rel, po.polname AS name, po.polcmd AS cmd, po.polpermissive AS perm,
+                  po.polroles::text AS roles, btrim(regexp_replace(pg_get_expr(po.polqual, po.polrelid), '\\s+', ' ', 'g')) AS q,
+                  pg_get_expr(po.polwithcheck, po.polrelid) AS w
+             FROM pg_policy po ORDER BY 1, 2`,
+        )
+      ).rows;
+    before(async () => {
+      dir36 = migrationsDir(36);
+      dir37 = migrationsDir(37);
+      db = await createIsolatedDatabase('m0037');
+      await up(db.pool, { dir: dir36 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir36, dir37]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: USING وحدَه يتغيّرُ في كلِّ xf_read، ودالّةٌ جديدةٌ واحدة، والدوالُّ السبعُ وحدَها تتغيّر؛ والرجوعُ يُطابقُ 0036', async () => {
+      const at36 = await ownerSnapshot(db.pool);
+      const tg36 = await fenceTriggerSnapshot(db.pool);
+      const p36 = await policies(db.pool);
+      assert.ok(p36.length > 0);
+      for (const p of p36) assert.deepEqual([p.q, p.w], [W, W], `${p.rel}: صيغةُ 0036`);
+      const problems36 = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r
+        .problems;
+      assert.deepEqual((await up(db.pool, { dir: dir37 })).applied, [37]);
+      const at37 = await ownerSnapshot(db.pool);
+      const p37 = await policies(db.pool);
+      assert.deepEqual(
+        p37.map((p) => ({ ...p, q: null })),
+        p36.map((p) => ({ ...p, q: null })),
+        'العلاقاتُ والأوامرُ والأدوارُ والتساهلُ وWITH CHECK حرفيّاً',
+      );
+      for (const p of p37) assert.equal(p.q, Q37, `${p.rel}: USING الجديد`);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f36 = bySig(at36);
+      const f37 = bySig(at37);
+      assert.deepEqual(
+        Object.keys(f37).filter((k) => !(k in f36)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(f36).filter((k) => !(k in f37)),
+        [],
+      );
+      for (const sig of Object.keys(f36)) {
+        if (CHANGED.includes(sig)) {
+          assert.notEqual(f37[sig].def, f36[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f37[sig][k], f36[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f37[sig], f36[sig], `${sig} حرفيّاً`);
+      }
+      // ‏الدالّةُ الجديدة: ليست SECURITY DEFINER (‏لا تقرأُ جدولاً)، ومالكُها xf_owner، وsearch_path مثبَّت، وACL كـread_window().
+      const wb = f37[ADDED];
+      assert.equal(wb.secdef, false);
+      assert.equal(wb.owner, f36['fence.read_window()'].owner);
+      assert.match(wb.def, /SET search_path TO 'pg_catalog', 'pg_temp'/u);
+      /** @param {string} acl */
+      const aclSet = (acl) =>
+        acl
+          .replace(/^\{|\}$/gu, '')
+          .split(',')
+          .sort();
+      assert.deepEqual(aclSet(wb.acl), aclSet(f36['fence.read_window()'].acl));
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m36 = m(at36);
+      const m37 = m(at37);
+      assert.deepEqual(
+        Object.keys(m37).filter((k) => !(k in m36)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(m36)
+          .filter((k) => m36[k] !== m37[k])
+          .sort(),
+        CHANGED,
+      );
+      assert.deepEqual(at37.owner, at36.owner);
+      assert.deepEqual(at37.tables, at36.tables);
+      assert.deepEqual(at37.eventTriggers, at36.eventTriggers);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg36, 'المُطلِقاتُ حرفيّاً');
+      const ok = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.deepEqual(ok.problems, problems36, 'check_fenced: لا مشكلةَ جديدةٌ بعدَ التقديم');
+      // ‏عقدُ window_breach بلا جلسةِ عامل: فارغةٌ ⇒ false؛ عبارةٌ بدأت بعدَ النافذة ⇒ false؛ بدأت داخلَها والساعةُ بعدَها ⇒ XF009؛
+      // ‏الساعةُ قبلَ بدايتِها ⇒ XF012.
+      const wbq = async (/** @type {string} */ range) =>
+        db.pool.query(`SELECT fence.window_breach($1::tstzrange) AS b`, [range]).then(
+          (r) => ({ ok: true, b: r.rows[0].b }),
+          (/** @type {any} */ e) => ({ ok: false, code: String(e.code) }),
+        );
+      assert.deepEqual(await wbq('empty'), { ok: true, b: false });
+      assert.deepEqual(await wbq('[2000-01-01, 2000-01-02)'), { ok: true, b: false });
+      assert.deepEqual(await wbq('[2999-01-01, 2999-01-02)'), { ok: false, code: 'XF012' });
+      const inside = await db.pool.connect();
+      try {
+        // ‏نافذةٌ تبدأُ قبلَ العبارةِ وتنتهي أثناءَها: statement_timestamp() داخلَها، والساعةُ بعدَ نهايتِها ⇒ XF009.
+        const r = await inside
+          .query(
+            `SELECT fence.window_breach(tstzrange(statement_timestamp() - interval '1 s', statement_timestamp() + interval '50 ms'))
+               FROM (SELECT pg_sleep(0.2)) s`,
+          )
+          .then(
+            () => ({ ok: true }),
+            (/** @type {any} */ e) => ({ ok: false, code: String(e.code) }),
+          );
+        assert.deepEqual(r, { ok: false, code: 'XF009' });
+      } finally {
+        inside.release();
+      }
+      // ‏الرجوعُ يُعيدُ 0036 حرفياً؛ وإعادةُ التقديمِ تُطابقُ 0037.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir37 })).current, 36);
+      assert.deepEqual(await ownerSnapshot(db.pool), at36);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg36);
+      assert.deepEqual(await policies(db.pool), p36, 'السياساتُ بصيغةِ 0036 حرفيّاً');
+      assert.deepEqual((await up(db.pool, { dir: dir37 })).applied, [37]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at37);
+      assert.deepEqual(await policies(db.pool), p37);
+    });
+  },
+);

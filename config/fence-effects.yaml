@@ -110,6 +110,7 @@ capabilities:
       'fence.whoami()',
       'fence.read_ok()',
       'fence.read_window()',
+      'fence.window_breach(tstzrange)',
       'fence.effective_state()',
       'fence.session_tag()',
       'fence.seal_sessions(jsonb,bytea)',

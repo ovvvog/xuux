@@ -562,6 +562,9 @@ async function main() {
     ['tests/fence/fence-lifecycle.test.mjs', {}],
     ['tests/fence/halt-integrity.test.mjs', {}],
     ['tests/fence/effects.test.mjs', {}],
+    // `WL-623`: كتلةُ `WL-608 LIVE-75` (‏انقضاءُ الإيجار) نُقلت من effects لمهلةِ الملفّ إلى ملفّين — تبقى في المختبر.
+    ['tests/fence/lease-expiry.test.mjs', {}],
+    ['tests/fence/lease-expiry-silent-skip.test.mjs', {}],
     ['tests/fence/connection-map.test.mjs', {}],
     // `WL-533` (مراجعةُ #546): المُقلِعُ — منها ISO-41..45 بعملياتٍ حقيقيّةٍ عبرَ sudo وsetpriv.
     ['tests/execution/worker-isolation.test.mjs', {}],
