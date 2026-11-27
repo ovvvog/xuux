@@ -102,10 +102,11 @@ describe(
         [
           'fence.read_ok',
           'fence.read_window',
+          'fence.window_breach',
           'state.report_sections_declared',
           'state.text_array_is_named',
         ],
-        'EXECUTE لـPUBLIC خارجَ الكتالوج: read_ok وread_window (‏سياسةُ xf_read، 0036) ودالّتا مستدعٍ ثابتتان في state',
+        'EXECUTE لـPUBLIC خارجَ الكتالوج: read_ok وread_window (‏سياسةُ xf_read، 0036) وwindow_breach (‏0037) ودالّتا مستدعٍ ثابتتان في state',
       );
       assert.deepEqual(
         await q(`SELECT a.privilege_type FROM pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a

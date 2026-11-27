@@ -1364,14 +1364,45 @@ describe(
       ]);
     });
 
-    // ‏═══ ‏`LIVE-75/RLS-SILENT-SKIP` (‏`WL-620`، حدٌّ مُعلَنٌ لا تُصلِحُه 0036 — يُثبَّتُ كما هو) ═══
-    // ‏DELETE لا WITH CHECK له: ‏USING وحدَه يُقيَّمُ عندَ مسحِ كلِّ صفّ. صفٌّ أوّلُ اجتازَ USING قبلَ الانقضاءِ ثمّ تأخّرَ (‏زنادُه ينامُ)
-    // ‏يُحذَفُ **بعدَ** الانقضاء، وصفٌّ ثانٍ يُمسَحُ بعدَه يُرشِّحُه USING بصمت — فالعبارةُ تنجحُ جزئيّاً بلا خطأ (‏`DELETE 1`)، و`COMMIT`
-    // ‏لا يفحصُ (‏L75-W1). قبلَ 0036 (‏InitPlan) كانَ الصفّانِ يُحذَفان. الحكمُ في `WL-620`: لا يُقبَلُ عقداً — دَينٌ مستقلّ.
-    test('LIVE-75/RLS-SILENT-SKIP (‏0036، يُثبَّتُ الحدّ): DELETE بدأ قبلَ الانقضاء — الصفُّ المتأخّرُ يُحذَفُ بعدَه، والتالي يُتخطّى بصمت، والعبارةُ تنجحُ بلا خطأ', async () => {
-      await h.db.pool.query(
-        `INSERT INTO state.l75_initplan_probe (id, v) VALUES (60880, 'slow-d'), (60881, 'other-d')`,
+    // ‏═══ ‏`LIVE-75/RLS-SILENT-SKIP` (‏`WL-622`، يُصلِحُه 0037 — كانَ يُثبَّتُ حدّاً في `WL-620`) ═══════════════════════════════════
+    // ‏العيبُ بعدَ 0036: ‏USING لصفٍّ تبلغُه UPDATE/DELETE بعدَ الانقضاءِ ‏false بلا خطأ — فالعبارةُ تلتزمُ مطبَّقةً جزئيّاً. 0037: عبارةٌ
+    // ‏بدأت داخلَ النافذةِ وبلغت صفّاً خارجَها ⇒ ‏XF009 من `fence.window_breach` ⇒ العبارةُ كلُّها تسقط (‏لا صفَّ محذوفاً ولا معدَّلاً).
+    // ‏كلُّ اختبارٍ يُثبِتُ صلاحيّتَه (‏guard_write اجتيزَ قبلَ الانقضاء، والصفُّ الثاني بُلِغَ بعدَه) قبلَ أن يحكم؛ والطفرةُ (‏إزالةُ 0037)
+    // ‏تُحمِّرُها كلَّها والضوابطُ تبقى خضراء (‏`WL-622`، ‏`/tmp/rls/mut-0037.tap`).
+    /** @param {Array<{ id: number, v: string }>} rows */
+    const seedIp = (rows) =>
+      h.db.pool.query(
+        `INSERT INTO state.l75_initplan_probe (id, v) SELECT * FROM jsonb_to_recordset($1::jsonb) AS x(id int, v text)`,
+        [JSON.stringify(rows)],
       );
+    /** @param {number[]} ids */
+    const ipRows = async (ids) =>
+      (
+        await h.db.pool.query(
+          'SELECT id, v FROM state.l75_initplan_probe WHERE id = ANY($1::int[]) ORDER BY id',
+          [ids],
+        )
+      ).rows;
+    /** @param {IpRun} m */
+    const guardBefore = (m) => {
+      const st = m.notes.filter((n) => n.level === 'STATEMENT');
+      assert.ok(
+        st.length === 1 && (st[0]?.at ?? Infinity) < m.exp,
+        'guard_write اجتيزَ قبلَ الانقضاء',
+      );
+    };
+    /** @param {any} r */
+    const isBreach = (r) => {
+      assert.equal(r.ok, false, `العبارةُ قُبِلَت: ${JSON.stringify(r)}`);
+      assert.equal(r.code, 'XF009', String(r.message));
+      assert.match(String(r.message), /الإيجارُ انقضى أثناءَ العبارة/u);
+    };
+
+    test('LIVE-75/RLS-SILENT-SKIP (‏0037) DELETE: صفٌّ أوّلُ حُذِفَ ثمّ صفٌّ ثانٍ بُلِغَ بعدَ الانقضاء ⇒ XF009 والعبارةُ كلُّها تسقط — الصفّانِ باقيان', async () => {
+      await seedIp([
+        { id: 60880, v: 'slow-d' },
+        { id: 60881, v: 'other-d' },
+      ]);
       const m = await runIp(
         'alpha',
         `DELETE FROM state.l75_initplan_probe WHERE id IN (60880, 60881) RETURNING id`,
@@ -1386,47 +1417,271 @@ describe(
       );
       assert.equal(m.okBefore, true);
       assert.equal(m.okAfter, false);
-      const st = m.notes.filter((n) => n.level === 'STATEMENT');
-      assert.ok(
-        st.length === 1 && (st[0]?.at ?? Infinity) < m.exp,
-        'guard_write اجتيزَ قبلَ الانقضاء',
-      );
+      guardBefore(m);
       const rows = /** @type {Array<Extract<IpNote, { level: 'ROW' }>>} */ (
         m.notes.filter((n) => n.level === 'ROW')
       );
-      // ‏زنادُ الصفِّ أُطلِقَ للأوّلِ وحدَه قبلَ الانقضاء؛ الثاني لم يبلغْه (‏رشَّحَه USING قبلَ الزناد).
+      // ‏صلاحيّة: الصفُّ الأوّلُ اجتازَ USING وبلغَ زنادَه قبلَ الانقضاء (‏فحُذِفَ داخلَ العبارة)، والعبارةُ عبرت الانقضاءَ بأكثرَ من 500 ms.
       assert.deepEqual(
         rows.map((n) => [n.op, n.id]),
         [['DELETE', 60880]],
       );
       assert.ok(
         (rows[0]?.at ?? Infinity) < m.exp && m.endedAt > m.exp + 500,
-        'الحذفُ بعدَ الانقضاء',
+        'الصفُّ الثاني بُلِغَ بعدَ الانقضاء',
       );
+      isBreach(m.r);
       assert.deepEqual(
-        m.r,
-        { ok: true, command: 'DELETE', rows: [{ id: 60880 }] },
-        'لا خطأ: نجاحٌ جزئيّ',
+        m.rows,
+        [
+          { id: 60880, v: 'slow-d' },
+          { id: 60881, v: 'other-d' },
+        ],
+        'تراجعٌ كامل: لا الأوّلُ محذوفٌ ولا الثاني',
       );
-      assert.deepEqual(m.rows, [{ id: 60881, v: 'other-d' }], 'الصفُّ الثاني بقيَ بصمت');
       t_note('LIVE-75/RLS-SILENT-SKIP', {
-        statement: 'DELETE 1 (of 2)',
-        deletedRowAfterExpiryMs: Math.round(Number(rows[0]?.at) + 1500 - m.exp),
-        skippedSilently: 1,
-        error: false,
+        op: 'DELETE',
+        statement: String(m.r.code),
+        secondRowReachedAfterExpiryMs: Math.round(Number(rows[0]?.at) + 1500 - m.exp),
+        rowsRemaining: m.rows.length,
       });
     });
 
-    test('LIVE-75/RLS-INITPLAN بنيويّ (‏0036): كلُّ سياسةِ xf_read على علاقةٍ محميّةٍ بالصيغةِ القانونيّةِ حرفيّاً (‏الساعةُ لكلِّ صفّ في USING وWITH CHECK)، ولا متساهلةَ غيرُها', async () => {
+    test('LIVE-75/RLS-SILENT-SKIP (‏0037) أوّلُ صفٍّ بعدَ الانقضاء: عبارةٌ اجتازت guard_write قبلَه وبلغت صفَّها الأوّلَ بعدَه (‏InitPlan كسول) ⇒ XF009 لا «DELETE 0» صامت', async () => {
+      await seedIp([
+        { id: 60882, v: 'a-d' },
+        { id: 60883, v: 'b-d' },
+      ]);
+      const a = await bootWorker('alpha');
+      /** @type {IpNote[]} */
+      const notes = [];
+      a.c.on('notice', (/** @type {any} */ n) => {
+        const st = /^l75-clock STATEMENT ([0-9.]+)$/u.exec(String(n.message));
+        if (st) notes.push({ level: 'STATEMENT', at: Number(st[1]) });
+      });
+      // ‏مفتاحُ الفهرسِ ‏InitPlan ينامُ 1.5 ث: يُقيَّمُ عندَ بدءِ المسحِ قبلَ أيِّ صفّ، فأوّلُ تقييمٍ لـxf_read (‏ونافذتِه) بعدَ الانقضاء.
+      const sql = `DELETE FROM state.l75_initplan_probe
+                    WHERE id = ANY (ARRAY(SELECT x FROM (VALUES (60882), (60883)) q(x), pg_sleep(1.5) s)) RETURNING id`;
+      await a.c.query('SET enable_seqscan = off');
+      const plan = (await a.c.query(`EXPLAIN (COSTS OFF) ${sql}`)).rows.map((x) =>
+        String(x['QUERY PLAN']),
+      );
+      assert.ok(
+        plan.some((l) => /Index Cond: \(id = ANY \(\(InitPlan 1\)/u.test(l)),
+        plan.join('\n'),
+      );
+      await untilDb(a.exp - 700);
+      const startedAt = await dbNow();
+      const r = await outcome(a.c, sql);
+      const endedAt = await dbNow();
+      await a.c.query('RESET enable_seqscan');
+      assert.ok(startedAt < a.exp && endedAt > a.exp + 500, 'العبارةُ عبرت الانقضاء');
+      assert.ok(
+        notes.length === 1 && (notes[0]?.at ?? Infinity) < a.exp,
+        'guard_write اجتيزَ قبلَ الانقضاء',
+      );
+      isBreach(r);
+      assert.deepEqual(await ipRows([60882, 60883]), [
+        { id: 60882, v: 'a-d' },
+        { id: 60883, v: 'b-d' },
+      ]);
+      t_note('LIVE-75/RLS-SILENT-SKIP', { op: 'DELETE-lazy-initplan', statement: String(r.code) });
+    });
+
+    /**
+     * التزامنُ الحقيقيّ: معاملةٌ أخرى تُعدِّلُ الصفَّ الثانيَ وتقفلُه عبرَ الانقضاء؛ فعبارةُ العامل — بدأت قبلَه وطبّقت الأوّل —
+     * تنتظرُ القفل، ثمّ يُعيدُ PG فحصَ شروطِ الصفِّ على نسختِه الجديدة (‏EvalPlanQual) ومنها USING بعدَ الانقضاء.
+     * @param {'UPDATE' | 'DELETE'} op @param {[number, number]} ids @param {boolean} crossExpiry
+     */
+    const epqRun = async (op, [id1, id2], crossExpiry) => {
+      await seedIp([
+        { id: id1, v: 'one' },
+        { id: id2, v: 'two' },
+      ]);
+      const a = await bootWorker(crossExpiry ? 'alpha' : 'beta');
+      const pid = Number((await a.c.query('SELECT pg_backend_pid() AS p')).rows[0].p);
+      const locker = await h.db.pool.connect();
+      try {
+        if (crossExpiry) await untilDb(a.exp - 1200);
+        await locker.query('BEGIN');
+        await locker.query(`UPDATE state.l75_initplan_probe SET v = 'two-locked' WHERE id = $1`, [
+          id2,
+        ]);
+        const sql =
+          op === 'UPDATE'
+            ? `UPDATE state.l75_initplan_probe SET v = v || '-w' WHERE id IN (${id1}, ${id2}) RETURNING id`
+            : `DELETE FROM state.l75_initplan_probe WHERE id IN (${id1}, ${id2}) RETURNING id`;
+        const startedAt = await dbNow();
+        const pending = outcome(a.c, sql);
+        // ‏صلاحيّة: العاملُ ينتظرُ قفلَ الصفِّ فعلاً (‏لا افتراض).
+        let waiting = false;
+        for (let i = 0; i < 100 && !waiting; i++) {
+          waiting =
+            (
+              await h.db.pool.query(
+                `SELECT wait_event_type = 'Lock' AS w FROM pg_stat_activity WHERE pid = $1`,
+                [pid],
+              )
+            ).rows[0]?.w === true;
+          if (!waiting) await sleep(20);
+        }
+        assert.ok(waiting, 'العاملُ ينتظرُ قفلَ الصفِّ الثاني');
+        const waitSeenAt = await dbNow();
+        if (crossExpiry) await untilDb(a.exp + 300);
+        const releasedAt = await dbNow();
+        await locker.query('COMMIT');
+        const r = await pending;
+        return { a, r, startedAt, waitSeenAt, releasedAt, rows: await ipRows([id1, id2]) };
+      } finally {
+        await locker.query('ROLLBACK').catch(() => {});
+        locker.release();
+      }
+    };
+
+    for (const [op, ids] of /** @type {const} */ ([
+      ['UPDATE', [60884, 60885]],
+      ['DELETE', [60886, 60887]],
+    ]))
+      test(`LIVE-75/RLS-SILENT-SKIP (‏0037) تزامن ${op}: صفٌّ مقفلٌ عبرَ الانقضاءِ يُعادُ فحصُه بعدَه (‏EvalPlanQual) ⇒ XF009 والصفُّ الأوّلُ لا يتغيّر`, async () => {
+        const m = await epqRun(op, [...ids], true);
+        assert.ok(
+          m.startedAt < m.a.exp && m.waitSeenAt < m.a.exp,
+          'بدأت العبارةُ وانتظرت قبلَ الانقضاء',
+        );
+        assert.ok(m.releasedAt > m.a.exp, 'القفلُ حُرِّرَ بعدَ الانقضاء');
+        isBreach(m.r);
+        assert.deepEqual(m.rows, [
+          { id: ids[0], v: 'one' },
+          { id: ids[1], v: 'two-locked' },
+        ]);
+      });
+
+    test('LIVE-75/RLS-SILENT-SKIP ضابطُ التزامن: القفلُ نفسُه يُحرَّرُ قبلَ الانقضاء ⇒ UPDATE كاملٌ على الصفّين (‏الرفضُ سببُه الزمن)', async () => {
+      const m = await epqRun('UPDATE', [60888, 60889], false);
+      assert.ok(m.releasedAt < m.a.exp - 500);
+      assert.equal(m.r.ok, true, String(/** @type {any} */ (m.r).message));
+      assert.equal(m.r.rows?.length, 2);
+      assert.deepEqual(m.rows, [
+        { id: 60888, v: 'one-w' },
+        { id: 60889, v: 'two-locked-w' },
+      ]);
+    });
+
+    test('LIVE-75/RLS-SILENT-SKIP (‏0037) تجديدٌ أثناءَ العبارة: نافذةُ العبارةِ لقطتُها — صفٌّ بعدَ الانقضاءِ القديمِ ⇒ XF009 (‏فشلٌ مغلق)، وإعادةُ المحاولةِ بعدَ التجديدِ تنجحُ كاملة', async () => {
+      await seedIp([
+        { id: 60890, v: 'slow-r' },
+        { id: 60891, v: 'other-r' },
+      ]);
+      const sql = `DELETE FROM state.l75_initplan_probe WHERE id IN (60890, 60891) RETURNING id`;
+      const a = await bootWorker('alpha');
+      await untilDb(a.exp - 700);
+      const pending = outcome(a.c, sql);
+      await sleep(250);
+      const renewedTo = new Date(await h.root.renewLease(a.role)).getTime();
+      const renewedAt = await dbNow();
+      const r = await pending;
+      const endedAt = await dbNow();
+      assert.ok(renewedAt < a.exp, 'التجديدُ التزمَ قبلَ الانقضاءِ القديم');
+      assert.ok(
+        endedAt > a.exp + 500 && endedAt < renewedTo,
+        'الصفُّ الثاني بُلِغَ بعدَ القديمِ وداخلَ الجديد',
+      );
+      isBreach(r);
+      assert.deepEqual(await ipRows([60890, 60891]), [
+        { id: 60890, v: 'slow-r' },
+        { id: 60891, v: 'other-r' },
+      ]);
+      const retry = await outcome(a.c, sql);
+      assert.equal(retry.ok, true, String(/** @type {any} */ (retry).message));
+      assert.deepEqual(
+        await ipRows([60890, 60891]),
+        [],
+        'إعادةُ المحاولةِ بنافذةِ التجديد: حذفٌ كامل',
+      );
+    });
+
+    test('LIVE-75/RLS-SILENT-SKIP ضابطٌ إيجابيّ: DELETE نفسُه بالتأخيرِ نفسِه قبلَ الانقضاءِ يحذفُ الصفّين', async () => {
+      await seedIp([
+        { id: 60892, v: 'slow-c' },
+        { id: 60893, v: 'other-c' },
+      ]);
+      const m = await runIp(
+        'beta',
+        `DELETE FROM state.l75_initplan_probe WHERE id IN (60892, 60893) RETURNING id`,
+        [60892, 60893],
+        false,
+      );
+      assert.ok(m.endedAt < m.exp - 500, 'العبارةُ كلُّها قبلَ الانقضاء');
+      assert.equal(m.r.ok, true, String(m.r.message));
+      assert.equal(m.r.rows.length, 2);
+      assert.deepEqual(m.rows, []);
+    });
+
+    test('LIVE-75/RLS-SILENT-SKIP (‏0037) القراءة: SELECT بلغَ صفَّه الثانيَ بعدَ الانقضاء ⇒ XF009 لا نتيجةٌ مبتورةٌ صامتة؛ وSELECT بدأ بعدَه ⇒ صفرٌ بلا خطأ (‏L75-R1 كما هو)', async () => {
+      await seedIp([
+        { id: 60894, v: 'r1' },
+        { id: 60895, v: 'r2' },
+      ]);
+      const a = await bootWorker('alpha');
+      // ‏كلُّ صفٍّ ينامُ 1.5 ث بعدَ اجتيازِه USING: أيّاً كانَ الأوّل، الثاني يُبلَغُ بعدَ الانقضاء (‏لا افتراضَ لترتيبِ الكومة).
+      const sql = `SELECT id, pg_sleep(1.5) IS NOT NULL AS s
+                     FROM state.l75_initplan_probe WHERE id IN (60894, 60895)`;
+      const plan = (await a.c.query(`EXPLAIN (COSTS OFF) ${sql}`)).rows.map((x) =>
+        String(x['QUERY PLAN']),
+      );
+      assert.deepEqual(
+        plan.filter((l) => IP_BUFFERING.test(l)),
+        [],
+        plan.join('\n'),
+      );
+      await untilDb(a.exp - 700);
+      const startedAt = await dbNow();
+      const r = await outcome(a.c, sql);
+      const endedAt = await dbNow();
+      assert.ok(startedAt < a.exp && endedAt > a.exp + 500);
+      isBreach(r);
+      assert.deepEqual(
+        await outcome(a.c, `SELECT id FROM state.l75_initplan_probe WHERE id IN (60894, 60895)`),
+        {
+          ok: true,
+          command: 'SELECT',
+          rows: [],
+        },
+      );
+    });
+
+    test('LIVE-75/RLS-SILENT-SKIP (‏0037) تكافؤ: read_ok() ⇔ clock_timestamp() <@ read_window() للعاملِ قبلَ الانقضاءِ وبعدَه ولغيرِ العامل، والنافذةُ لا تتغيّرُ بالساعة', async () => {
+      const a = await bootWorker('alpha');
+      const probe = async (/** @type {import('pg').Client | import('pg').Pool} */ c) =>
+        (
+          await c.query(
+            `SELECT fence.read_ok() AS ok, clock_timestamp() <@ fence.read_window() AS inw, fence.read_window()::text AS w`,
+          )
+        ).rows[0];
+      const before = await probe(a.c);
+      assert.deepEqual([before.ok, before.inw], [true, true]);
+      assert.notEqual(before.w, 'empty');
+      await untilDb(a.exp + 200);
+      const after = await probe(a.c);
+      assert.deepEqual([after.ok, after.inw], [false, false]);
+      assert.equal(after.w, before.w, 'النافذةُ نفسُها بعدَ الانقضاء — الساعةُ خارجَها');
+      const su = await probe(h.db.pool);
+      assert.deepEqual([su.ok, su.inw, su.w], [true, true, '(,)']);
+    });
+
+    test('LIVE-75/RLS-INITPLAN + SILENT-SKIP بنيويّ (‏0036+0037): كلُّ سياسةِ xf_read على علاقةٍ محميّةٍ بالصيغةِ القانونيّةِ حرفيّاً (‏الساعةُ لكلِّ صفّ؛ USING يرفعُ خارجَ النافذة)، ولا متساهلةَ غيرُها', async () => {
       const rows = (
         await h.db.pool.query(
-          `SELECT pr.schema_name || '.' || pr.rel_name AS rel, pg_get_expr(po.polqual, po.polrelid) AS q,
+          `SELECT pr.schema_name || '.' || pr.rel_name AS rel,
+                  btrim(regexp_replace(pg_get_expr(po.polqual, po.polrelid), '\\s+', ' ', 'g')) AS q,
                     pg_get_expr(po.polwithcheck, po.polrelid) AS w
                FROM fence.protected_relations() pr JOIN pg_policy po ON po.polrelid = pr.relid AND po.polname = 'xf_read'`,
         )
       ).rows;
       // ‏مطابقةٌ حرفيّةٌ لا تطابقُ نمط: `clock_timestamp() OR true` ليس إصلاحاً.
       const canon = '(clock_timestamp() <@ ( SELECT fence.read_window() AS read_window))';
+      const canonQ =
+        'CASE WHEN (clock_timestamp() <@ ( SELECT fence.read_window() AS read_window)) THEN true ELSE fence.window_breach(( SELECT fence.read_window() AS read_window)) END';
       const n = Number(
         (await h.db.pool.query('SELECT count(*)::int AS n FROM fence.protected_relations()'))
           .rows[0].n,
@@ -1435,7 +1690,7 @@ describe(
         rows.length > 0 && rows.length === n,
         `xf_read على كلِّ علاقةٍ محميّة (${rows.length}/${n})`,
       );
-      for (const r of rows) assert.deepEqual([r.q, r.w], [canon, canon], r.rel);
+      for (const r of rows) assert.deepEqual([r.q, r.w], [canonQ, canon], r.rel);
       const extra = (
         await h.db.pool.query(
           `SELECT po.polrelid::regclass::text AS rel, po.polname FROM fence.protected_relations() pr
