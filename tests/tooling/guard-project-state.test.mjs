@@ -22,6 +22,7 @@ import {
   entryText,
   parseDebtRows,
   renderHandoff,
+  clipMarkdown,
   splitTableCells,
 } from '../../scripts/lib/project-state.mjs';
 
@@ -1586,4 +1587,37 @@ test('WL-584 (‏DOC-24) — فقدٌ على القاعدتَين يُعَدُّ
   assert.doesNotMatch(r.out, /القاعدةِ الحرفيّةِ: [^\n]*باقٍ/u);
   const lost = r.out.match(/PS11\/HISTORY-LOST: مُدخلةُ `WL-001`/gu) ?? [];
   assert.equal(lost.length, 1, `الفقدُ نفسُه مرّةً واحدةً لا مرّتين:\n${r.out}`);
+});
+
+test('DOC-32 — ملخّصُ التسليم: القصُّ لا يتركُ `**` ولا علامةَ كودٍ مفتوحةً قبلَ فاصلِ العمود (‏ولا في الملخّصِ المُلتزَم)', () => {
+  /** @param {string} cell */
+  const balanced = (cell) =>
+    (cell.match(/`/gu) ?? []).length % 2 === 0 &&
+    (cell.replace(/`[^`]*`/gu, '').match(/\*\*/gu) ?? []).length % 2 === 0;
+  const long = `**${'كلمةٌ '.repeat(20)}\`LIVE-75/C1-RACE\` (‏\`A\` ${'تتمّة '.repeat(30)}**`;
+  const handoff = renderHandoff({
+    manifest,
+    workLog: `### [2026-01-01] — WL-900 — ${long}\n\n- **الحالةُ بعدَ العمل:** 🟡 ${'حالةٌ '.repeat(40)}\n`,
+    status: `آخر تحديث: **2026-01-01** — \`WL-900\` — **${'سطرٌ '.repeat(100)}**`,
+    debtRegister: '',
+    externalReview: null,
+    version: null,
+  });
+  const row = handoff.split('\n').find((l) => l.startsWith('| `WL-900`'));
+  assert.ok(row, handoff);
+  for (const cell of splitTableCells(row))
+    assert.ok(balanced(cell), `خليّةٌ غيرُ متوازنة: «${cell}»`);
+  const head = handoff.split('\n').find((l) => l.startsWith('- **سطرُ اللوحةِ الأوّلُ:**')) ?? '';
+  assert.ok(balanced(head), head);
+  // ‏القصُّ عندَ نصفِ \`**\` أو داخلَ كود، والنصُّ القصيرُ لا يُمَسّ.
+  assert.equal(clipMarkdown('**ab**cd', 5), '**ab**');
+  assert.equal(clipMarkdown('x `code` y', 5), 'x `co`');
+  assert.equal(clipMarkdown('**قصير**', 50), '**قصير**');
+  // ‏والملخّصُ المُلتزَمُ نفسُه: كلُّ صفٍّ في جدولِ §1 متوازن.
+  const committed = readFileSync(path.join(REPO, manifest.handoff), 'utf8');
+  const rows = committed.split('\n').filter((l) => /^\| `WL-\d+` \|/u.test(l));
+  assert.ok(rows.length >= 8);
+  for (const r of rows)
+    for (const cell of splitTableCells(r))
+      assert.ok(balanced(cell), `${r.slice(0, 40)}: «${cell}»`);
 });
