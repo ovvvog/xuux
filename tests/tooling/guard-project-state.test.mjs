@@ -1589,11 +1589,71 @@ test('WL-584 (‏DOC-24) — فقدٌ على القاعدتَين يُعَدُّ
   assert.equal(lost.length, 1, `الفقدُ نفسُه مرّةً واحدةً لا مرّتين:\n${r.out}`);
 });
 
+/**
+ * مدقِّقٌ مرجعيٌّ مستقلٌّ عن `tokenizeInline` (‏`DOC-32`، `WL-619`) بقاعدةِ CommonMark لـcode spans: سلسلةُ backtick
+ * بطولِ k (‏غيرُ مسبوقةٍ بهروب) لا يُغلِقُها إلّا أوّلُ سلسلةٍ بعدَها **بالطولِ نفسِه**. يُعيدُ الأكوادَ بطولِ
+ * محدِّدِها ومحتواها، والسلاسلَ اليتيمة، وعددَ `**` خارجَ الكودِ والهروب.
+ * @param {string} md
+ */
+function inlineFacts(md) {
+  /** @type {Array<{ k: number, body: string }>} */
+  const codes = [];
+  /** @type {number[]} */
+  const orphans = [];
+  let stars = 0;
+  let trailingOpenerAfterSpace = false;
+  const re = /\\[!-/:-@[-`{-~]|`+|\*+/gu;
+  /** @type {RegExpExecArray | null} */
+  let m;
+  while ((m = re.exec(md)) !== null) {
+    const tok = m[0];
+    if (tok.startsWith('\\')) continue;
+    if (tok.startsWith('*')) {
+      stars += Math.floor(tok.length / 2);
+      if (m.index + tok.length === md.length && /\s$/u.test(md.slice(0, m.index)))
+        trailingOpenerAfterSpace = true;
+      continue;
+    }
+    const k = tok.length;
+    const from = m.index + k;
+    const closeRe = /`+/gu;
+    closeRe.lastIndex = from;
+    /** @type {RegExpExecArray | null} */
+    let c;
+    let found = -1;
+    while ((c = closeRe.exec(md)) !== null) {
+      if (c[0].length === k) {
+        found = c.index;
+        break;
+      }
+    }
+    if (found === -1) orphans.push(k);
+    else {
+      codes.push({ k, body: md.slice(from, found) });
+      re.lastIndex = found + k;
+    }
+  }
+  return { codes, orphans, stars, trailingOpenerAfterSpace };
+}
+
+/**
+ * سليمٌ إن لم يبقَ محدِّدُ كودٍ يتيم، وتزاوجَت `**`، ولم يأتِ مُغلِقٌ بعدَ فراغ. وإن أُعطيَ الأصلُ: كلُّ كودٍ في
+ * المقصوصِ بطولِ محدِّدِ نظيرِه في الأصلِ ومحتواه بادئةٌ من محتواه — لا يكفي أن يكونَ عددُ العلاماتِ زوجيّاً.
+ * @param {string} clipped @param {string} [original]
+ */
+function markdownSound(clipped, original) {
+  const c = inlineFacts(clipped);
+  if (c.orphans.length > 0 || c.stars % 2 !== 0 || c.trailingOpenerAfterSpace) return false;
+  if (original === undefined) return true;
+  const o = inlineFacts(original);
+  return c.codes.every(
+    (x, i) =>
+      o.codes[i] !== undefined && o.codes[i].k === x.k && o.codes[i].body.startsWith(x.body),
+  );
+}
+
 test('DOC-32 — ملخّصُ التسليم: القصُّ لا يتركُ `**` ولا علامةَ كودٍ مفتوحةً قبلَ فاصلِ العمود (‏ولا في الملخّصِ المُلتزَم)', () => {
-  /** @param {string} cell */
-  const balanced = (cell) =>
-    (cell.match(/`/gu) ?? []).length % 2 === 0 &&
-    (cell.replace(/`[^`]*`/gu, '').match(/\*\*/gu) ?? []).length % 2 === 0;
+  const balanced = markdownSound;
   const long = `**${'كلمةٌ '.repeat(20)}\`LIVE-75/C1-RACE\` (‏\`A\` ${'تتمّة '.repeat(30)}**`;
   const handoff = renderHandoff({
     manifest,
@@ -1620,4 +1680,89 @@ test('DOC-32 — ملخّصُ التسليم: القصُّ لا يتركُ `**` 
   for (const r of rows)
     for (const cell of splitTableCells(r))
       assert.ok(balanced(cell), `${r.slice(0, 40)}: «${cell}»`);
+});
+
+/**
+ * السلوكُ القديمُ حرفيّاً (‏قبلَ `WL-619`) — يبقى هنا ليُثبِتَ أنّ المدقِّقَ يُسقِطُه، لا ليُستعمَل.
+ * @param {string} text @param {number} n
+ */
+function legacyClipMarkdown(text, n) {
+  if (text.length <= n) return text;
+  let s = text.slice(0, n);
+  while (s.endsWith('*') || s.endsWith('\\')) s = s.slice(0, -1);
+  if ((s.match(/`/gu) ?? []).length % 2 === 1) s += '`';
+  if ((s.replace(/`[^`]*`/gu, '').match(/\*\*/gu) ?? []).length % 2 === 1) s += '**';
+  return s;
+}
+
+const DOC32_CORPUS = [
+  'x `code` y',
+  'x ``co`de`` y',
+  'a ```t`` `x``` z',
+  '**bold `c` more** tail',
+  '\\`not code\\` and `code`',
+  '**a** and **b `x` c** `d` **e**',
+  '**a\\*b** `c`',
+  '🟨 **جزئي** `a` 🟢 ``b``',
+  '**حكمُ `#632`: فحصُ `InitPlan` مرّةً ``x`y`` و`RISK-0054 = NO-GO`**',
+];
+
+test('DOC-32/WL-619 — القصُّ عندَ كلِّ حدٍّ يُبقي محدِّداتِ الكودِ بأطوالِها والتوكيدَ مُغلَقاً', () => {
+  // ‏المثالُ المضادُّ: القصُّ بعدَ backtick الافتتاحيّةِ مباشرةً لا يُنتِجُ «``» إغلاقاً لمحدِّدٍ مفرد.
+  assert.equal(clipMarkdown('x `code`', 3), 'x');
+  assert.notEqual(clipMarkdown('x `code`', 3), 'x ``');
+  // ‏قبلَ المحدِّد · داخلَه · بعدَ الإغلاق · عندَ الحدِّ نفسِه.
+  assert.equal(clipMarkdown('ab `cd` ef', 2), 'ab');
+  assert.equal(clipMarkdown('ab `cd` ef', 5), 'ab `c`');
+  assert.equal(clipMarkdown('ab `cd` ef', 7), 'ab `cd`');
+  assert.equal(clipMarkdown('ab `cd`', 7), 'ab `cd`');
+  // ‏محدِّداتٌ بطولِ 2 و3 تُغلَقُ بطولِها، ولا تُغلَقُ بسلسلةٍ أقصرَ داخلَها.
+  assert.equal(clipMarkdown('a ``co`de`` b', 8), 'a ``co`d``');
+  assert.equal(clipMarkdown('a ``co`de`` b', 6), 'a ``co``');
+  assert.equal(clipMarkdown('a ```t`` x``` z', 10), 'a ```t`` x```');
+  // ‏القصُّ داخلَ سلسلةٍ لا يُقسِمُها.
+  assert.equal(clipMarkdown('a ``co`de`` b', 3), 'a');
+  // ‏backtick مُهرَّبةٌ ليست محدِّداً، والهروبُ لا يُقسَم.
+  assert.equal(clipMarkdown('\\`a\\` b', 4), '\\`a');
+  assert.equal(clipMarkdown('\\`a\\` b', 3), '\\`a');
+  // ‏التوكيدُ مع الكود: الكودُ يُغلَقُ أوّلاً ثمّ `**`، ولا مُغلِقَ بعدَ فراغ، ولا توكيدَ فارغ.
+  assert.equal(clipMarkdown('**a `bc` d**', 6), '**a `b`**');
+  assert.equal(clipMarkdown('**a b c**', 4), '**a**');
+  assert.equal(clipMarkdown('x **   y**', 5), 'x');
+  // ‏لا يُقسَمُ زوجٌ بديل.
+  assert.equal(clipMarkdown('ab🟨cd', 3), 'ab');
+
+  for (const s of DOC32_CORPUS)
+    for (let n = 0; n <= s.length; n += 1) {
+      const r = clipMarkdown(s, n);
+      assert.ok(markdownSound(r, s), `${JSON.stringify(s)} @${n} ⇒ ${JSON.stringify(r)}`);
+      assert.ok(!/[\ud800-\udbff]$/u.test(r), `زوجٌ بديلٌ مقسوم: ${JSON.stringify(r)}`);
+    }
+});
+
+test('DOC-32/WL-619 — المدقِّقُ يُسقِطُ السلوكَ القديم (‏زوجيّةُ العددِ ليست تطابقاً)', () => {
+  // ‏مخرجُ القديمِ زوجيُّ العلاماتِ لكنّه غيرُ صالح: ‏«``» حرفيّةٌ و`d` وحدَه كود.
+  assert.equal(legacyClipMarkdown('a ``co`de`` b', 8), 'a ``co`d`');
+  assert.equal(('a ``co`d`'.match(/`/gu) ?? []).length % 2, 0);
+  assert.equal(markdownSound('a ``co`d`', 'a ``co`de`` b'), false);
+  assert.equal(legacyClipMarkdown('x `code`', 3), 'x ``');
+  assert.equal(markdownSound('x ``', 'x `code`'), false);
+  let caught = 0;
+  for (const s of DOC32_CORPUS)
+    for (let n = 0; n <= s.length; n += 1)
+      if (!markdownSound(legacyClipMarkdown(s, n), s)) caught += 1;
+  assert.ok(caught > 0, 'المدقِّقُ لا يُميِّزُ القديم');
+});
+
+test('DOC-32/WL-619 — الملخّصُ المُلتزَم: سطرُ اللوحةِ الأوّلُ وكلُّ خليّةٍ في الجداولِ سليمة', () => {
+  const committed = readFileSync(path.join(REPO, manifest.handoff), 'utf8');
+  const head = committed.split('\n').find((l) => l.startsWith('- **سطرُ اللوحةِ الأوّلُ:**'));
+  assert.ok(head);
+  assert.ok(markdownSound(head), head);
+  assert.doesNotMatch(committed, /``\*\*/u);
+  const rows = committed.split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| ---'));
+  assert.ok(rows.length >= 8);
+  for (const r of rows)
+    for (const cell of splitTableCells(r))
+      assert.ok(markdownSound(cell), `${r.slice(0, 40)}: «${cell}»`);
 });

@@ -975,20 +975,114 @@ export function evaluateProjectState(input) {
   return { violations, triggered, executive, memory, newEntries: entries.map((e) => e.id) };
 }
 
+const ASCII_PUNCT = /[!-/:-@[-`{-~]/u;
+
 /**
- * يقصُّ النصَّ إلى `n` ويُغلِقُ ما فتحَه القصُّ من `**` أو علامةِ كود (‏`DOC-32`، `WL-618`): كانَ القصُّ
- * يتركُ `**` مفتوحاً قبلَ فاصلِ العمودِ في كلِّ عنوانٍ مقصوص.
+ * يُقطِّعُ النصَّ وحداتٍ سطريّةً بدلالةِ CommonMark لما يعنينا (‏`DOC-32`، `WL-619`): الهروبُ `\\x` لعلامةِ ترقيمٍ
+ * وحدةٌ واحدة؛ وسلسلةُ backtick بطولِ `k` تفتحُ كوداً **لا يُغلِقُه إلّا** أوّلُ سلسلةٍ بعدَها بطولِ `k` نفسِه
+ * (‏ولا هروبَ داخلَ الكود)، وإلّا فهي حرفيّة؛ وسلسلةُ `*` وحدةٌ لا تُقسَم.
+ * @param {string} text
+ * @returns {Array<{ kind: 'text' | 'escape' | 'code' | 'ticks' | 'stars', start: number, end: number, k?: number, inner?: number, close?: number }>}
+ */
+export function tokenizeInline(text) {
+  /** @type {Array<{ kind: 'text' | 'escape' | 'code' | 'ticks' | 'stars', start: number, end: number, k?: number, inner?: number, close?: number }>} */
+  const out = [];
+  const runEnd = (/** @type {number} */ i, /** @type {string} */ ch) => {
+    let j = i;
+    while (text[j] === ch) j += 1;
+    return j;
+  };
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '\\' && i + 1 < text.length && ASCII_PUNCT.test(text[i + 1] ?? '')) {
+      out.push({ kind: 'escape', start: i, end: i + 2 });
+      i += 2;
+    } else if (ch === '`') {
+      const j = runEnd(i, '`');
+      const k = j - i;
+      let m = j;
+      let close = -1;
+      while (m < text.length) {
+        if (text[m] !== '`') {
+          m += 1;
+          continue;
+        }
+        const e = runEnd(m, '`');
+        if (e - m === k) {
+          close = m;
+          break;
+        }
+        m = e;
+      }
+      if (close === -1) {
+        out.push({ kind: 'ticks', start: i, end: j, k });
+        i = j;
+      } else {
+        out.push({ kind: 'code', start: i, end: close + k, k, inner: j, close });
+        i = close + k;
+      }
+    } else if (ch === '*') {
+      const j = runEnd(i, '*');
+      out.push({ kind: 'stars', start: i, end: j });
+      i = j;
+    } else {
+      let j = i + 1;
+      while (j < text.length && !'\\`*'.includes(text[j] ?? '')) j += 1;
+      out.push({ kind: 'text', start: i, end: j });
+      i = j;
+    }
+  }
+  return out;
+}
+
+/**
+ * يقصُّ النصَّ عندَ `n` تقريباً ويُبقيه Markdown صالحاً (‏`DOC-32`، أُصلِحَ في `WL-619`). كانَ القصُّ يعدُّ
+ * علاماتِ backtick ويُكمِلُ الفرديَّ بواحدة — وزوجيّةُ العددِ ليست تطابقاً: ‏`a ``co\`d\`` يُعرَضُ بمحدِّدٍ مزدوجٍ
+ * حرفيٍّ. الآن: لا يُقسَمُ هروبٌ ولا سلسلةُ `*` أو backtick ولا زوجٌ بديل؛ والقصُّ داخلَ كودٍ يُغلِقُه **بطولِ
+ * محدِّدِه الافتتاحيّ** (‏أو يُسقِطُه إن لم يبقَ منه محتوى)؛ ثمّ تُغلَقُ علاماتُ التوكيدِ المفتوحةُ بعكسِ ترتيبِها.
+ * قد يزيدُ الناتجُ على `n` بطولِ المُغلِقاتِ وحدَها.
  * @param {string} text @param {number} n
  * @returns {string}
  */
 export function clipMarkdown(text, n) {
   if (text.length <= n) return text;
-  let s = text.slice(0, n);
-  // ‏لا تُترَكُ نصفُ علامةِ `**` ولا شرطةُ تهريبٍ يتيمة.
-  while (s.endsWith('*') || s.endsWith('\\')) s = s.slice(0, -1);
-  if ((s.match(/`/gu) ?? []).length % 2 === 1) s += '`';
-  if ((s.replace(/`[^`]*`/gu, '').match(/\*\*/gu) ?? []).length % 2 === 1) s += '**';
-  return s;
+  let cut = n;
+  const hi = text.charCodeAt(cut - 1);
+  if (hi >= 0xd800 && hi <= 0xdbff) cut -= 1;
+  let s = '';
+  /** @type {string[]} */
+  const stack = [];
+  const toggle = (/** @type {string} */ d) => {
+    if (stack[stack.length - 1] === d) stack.pop();
+    else stack.push(d);
+  };
+  let codeTail = '';
+  for (const t of tokenizeInline(text)) {
+    if (t.end <= cut) {
+      s += text.slice(t.start, t.end);
+      if (t.kind === 'stars') {
+        let len = t.end - t.start;
+        for (; len >= 2; len -= 2) toggle('**');
+        if (len === 1) toggle('*');
+      }
+      continue;
+    }
+    if (t.kind === 'text') s += text.slice(t.start, cut);
+    else if (t.kind === 'code' && t.inner !== undefined && t.close !== undefined && cut > t.inner) {
+      const inner = text.slice(t.inner, Math.min(cut, t.close)).replace(/`+$/u, '');
+      if (inner.trim() !== '')
+        codeTail = text.slice(t.start, t.inner) + inner + '`'.repeat(t.k ?? 1);
+    }
+    break;
+  }
+  if (codeTail !== '') return s + codeTail + stack.reverse().join('');
+  // ‏مُغلِقُ التوكيدِ لا يأتي بعدَ فراغٍ ولا بعدَ شرطةٍ تُهرِّبُه؛ وتوكيدٌ فُتِحَ ولم يحوِ شيئاً يُسقَط.
+  s = s.replace(/[\s\\]+$/u, '');
+  while (stack.length > 0 && s.endsWith(stack[stack.length - 1] ?? '')) {
+    s = s.slice(0, -(stack.pop() ?? '').length).replace(/[\s\\]+$/u, '');
+  }
+  return s + stack.reverse().join('');
 }
 
 /**
@@ -1090,7 +1184,7 @@ export function renderHandoff(sources) {
         .replace(/\s+/gu, ' ')
         .trim()
         .slice(0, 48) || '—';
-    const key = `${row.section.slice(0, 40)}\u0000${owner}`;
+    const key = `${clipMarkdown(row.section, 40)}\u0000${owner}`;
     const list = groups.get(key) ?? [];
     list.push(row.id);
     groups.set(key, list);
