@@ -23,8 +23,11 @@ import {
   parseDebtRows,
   renderHandoff,
   clipMarkdown,
+  clipIsFaithful,
+  clipIsClosed,
   splitTableCells,
 } from '../../scripts/lib/project-state.mjs';
+import { Parser as CmParser, HtmlRenderer as CmHtml } from 'commonmark';
 
 const REPO = process.cwd();
 const GUARD = path.join(REPO, 'scripts', 'guard-project-state.mjs');
@@ -1728,7 +1731,10 @@ test('DOC-32/WL-619 — القصُّ عندَ كلِّ حدٍّ يُبقي مح�
   // ‏التوكيدُ مع الكود: الكودُ يُغلَقُ أوّلاً ثمّ `**`، ولا مُغلِقَ بعدَ فراغ، ولا توكيدَ فارغ.
   assert.equal(clipMarkdown('**a `bc` d**', 6), '**a `b`**');
   assert.equal(clipMarkdown('**a b c**', 4), '**a**');
-  assert.equal(clipMarkdown('x **   y**', 5), 'x');
+  // ‏‏`WL-620`: ‏`**` قبلَ فراغٍ ليست فاتحةً في CommonMark (‏ليست left-flanking) — الأصلُ يُعرَضُ «x **   y**» حرفيّاً،
+  // ‏فالقصُّ الأمينُ «x **» لا «x» (‏توقّعُ WL-619 كانَ على نموذجِ التبديل). المرجعُ يحكمُ لا التوقّع.
+  assert.equal(clipMarkdown('x **   y**', 5), 'x **');
+  assert.ok(oracleFaithful('x **   y**', 'x **'));
   // ‏لا يُقسَمُ زوجٌ بديل.
   assert.equal(clipMarkdown('ab🟨cd', 3), 'ab');
 
@@ -1765,4 +1771,115 @@ test('DOC-32/WL-619 — الملخّصُ المُلتزَم: سطرُ اللوح
   for (const r of rows)
     for (const cell of splitTableCells(r))
       assert.ok(markdownSound(cell), `${r.slice(0, 40)}: «${cell}»`);
+});
+
+/**
+ * ‏`DOC-32` (‏`WL-620`): مرجعٌ مستقلٌّ عن `markdownProfile` — يُخرِجُ CommonMark HTML ثمّ يُفكِّكُه وسماً وسماً
+ * (‏`<strong>` `<em>` `<code>` `<a>`)، فلا يتّكئُ على مشّاءِ الشجرةِ الذي في الوحدة. لكلِّ حرفٍ ظاهرٍ وسمُه.
+ * @param {string} md
+ * @returns {Array<[string, string]>}
+ */
+function htmlOracle(md) {
+  const html = new CmHtml().render(new CmParser().parse(md));
+  const ent = /** @type {Record<string, string>} */ ({
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+  });
+  const names = /** @type {Record<string, string>} */ ({ strong: 's', em: 'e', code: 'c', a: 'l' });
+  /** @type {string[]} */
+  const open = [];
+  /** @type {Array<[string, string]>} */
+  const out = [];
+  for (const m of html.matchAll(/<(\/?)([a-z0-9]+)[^>]*>|(&[a-z#0-9]+;)|([^<&])/gu)) {
+    if (m[2] !== undefined) {
+      const t = names[m[2]];
+      if (t === undefined) continue;
+      if (m[1] === '/') open.splice(open.lastIndexOf(t), 1);
+      else open.push(t);
+      continue;
+    }
+    const ch = m[3] !== undefined ? (ent[m[3]] ?? m[3]) : String(m[4]);
+    if (ch === '\n') continue;
+    out.push([ch, [...open].sort().join('')]);
+  }
+  return out;
+}
+
+/** @param {string} orig @param {string} clip */
+function oracleFaithful(orig, clip) {
+  const o = htmlOracle(orig);
+  const c = htmlOracle(clip);
+  return c.length <= o.length && c.every(([ch, f], i) => o[i]?.[0] === ch && o[i]?.[1] === f);
+}
+
+const DOC32_EMPHASIS = [
+  '***bold*** tail text',
+  '*a **b** c* d',
+  '**a *b* c** d',
+  '***a* b** c',
+  '***a** b* c',
+  '**a** *b* c',
+  '*a* **b** ***c*** d',
+  'a*b*c and more',
+  '2 * 3 * 4 = 24',
+  '**x**y z',
+  '_u_ and __s__ x',
+  '**a `*x*` b** c',
+  '*a \\* b* c',
+  '[link *t*](http://x) **m**',
+  '&amp; **b** &lt;',
+  '**جزئي *مائل* ``a*b``** 🟨 ذيل',
+];
+
+test('DOC-32/WL-620 — التوكيد: كلُّ حدٍّ في المدوّنتَين يُطابِقُ مرجعَ CommonMark HTML حرفاً ووسماً', () => {
+  // ‏أمثلةُ المراجعةِ الخارجيّة حرفيّاً (‏`***bold***`، التداخل، نقاطُ القصِّ الطرفيّة).
+  assert.equal(clipMarkdown('***bold*** tail text', 5), '***bo***');
+  assert.equal(clipMarkdown('***bold*** tail text', 12), '***bold*** t');
+  assert.equal(clipMarkdown('*a **b** c* d', 8), '*a **b***');
+  assert.equal(clipMarkdown('**a *b* c** d', 7), '**a *b***');
+  assert.equal(clipMarkdown('2 * 3 * 4 = 24', 5), '2 * 3');
+  assert.equal(clipMarkdown('x', 0), '');
+  let fallbacks = 0;
+  let total = 0;
+  for (const s of [...DOC32_EMPHASIS, ...DOC32_CORPUS])
+    for (let n = 0; n <= s.length + 1; n += 1) {
+      const r = clipMarkdown(s, n);
+      total += 1;
+      const exact = oracleFaithful(s, r);
+      // ‏الاحتياطُ وحدَه يُسقِطُ تنسيقاً (‏ولا يُضيفُه): نصٌّ ظاهرٌ مُهرَّبٌ بلا علامةٍ واحدة. يُعَدُّ ويُحَدّ.
+      const plain = !/[*_`[\]<]/u.test(r.replace(/\\./gu, ''));
+      if (!exact && n >= 6 && !s.startsWith('[')) fallbacks += 1;
+      assert.ok(
+        exact || (plain && clipIsFaithful(s, r, 'subset')),
+        `${JSON.stringify(s)} @${n} ⇒ ${JSON.stringify(r)}`,
+      );
+      assert.ok(clipIsClosed(r), `علامةٌ يتيمةٌ تُزاوِجُ ما بعدَها: ${JSON.stringify(r)}`);
+      assert.ok(
+        n >= s.length || htmlOracle(r).length <= n,
+        `يزيدُ الظاهرُ على الحدّ: ${JSON.stringify(r)}`,
+      );
+    }
+  // ‏الاحتياطُ لا يُبلَغُ عندَ حدٍّ ≥ 6 إلّا داخلَ رابطٍ أوّل (‏لا بادئةَ أمينةً قبلَه) — لا يُصبحُ مَهرَباً عامّاً.
+  assert.equal(fallbacks, 0, `احتياطٌ خارجَ الرابط: ${fallbacks}/${total}`);
+});
+
+test('DOC-32/WL-620 — المرجعُ يُسقِطُ منطقَ التبديلِ في WL-619 على التوكيد (‏طفرة)', () => {
+  // ‏ناتجُ WL-619 حرفيّاً على حالاتِ المراجعة: علاماتٌ زائدةٌ تظهرُ حرفاً أو تُزاوَجُ خطأً.
+  for (const [orig, bad] of /** @type {Array<[string, string]>} */ ([
+    ['***bold*** tail text', '***bold*** t******'],
+    ['*a **b** c* d', '*a **b*'],
+    ['2 * 3 * 4 = 24', '2 * 3*'],
+  ])) {
+    assert.equal(oracleFaithful(orig, bad), false, bad);
+    assert.equal(clipIsFaithful(orig, bad), false, bad);
+  }
+  // ‏والمرجعانِ متّفقانِ على كلِّ حدٍّ (‏مشّاءُ الوحدةِ ليسَ أكرمَ من HTML).
+  for (const s of DOC32_EMPHASIS)
+    for (let n = 0; n <= s.length; n += 1) {
+      const cand = s.slice(0, n);
+      assert.equal(clipIsFaithful(s, cand), oracleFaithful(s, cand), `${JSON.stringify(s)} @${n}`);
+    }
 });
