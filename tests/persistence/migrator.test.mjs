@@ -1566,7 +1566,8 @@ describe(
       const tg35 = await fenceTriggerSnapshot(db.pool);
       const p35 = await policies(db.pool);
       assert.ok(p35.length > 0);
-      const problems35 = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r.problems;
+      const problems35 = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r
+        .problems;
       for (const p of p35) {
         assert.equal(p.name, 'xf_read', `${p.rel}: لا سياسةَ غيرُ xf_read في الأساس`);
         assert.deepEqual([p.q, p.w], [OLD, OLD], `${p.rel}: صيغةُ 0024`);
@@ -1584,8 +1585,16 @@ describe(
       const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
       const f35 = bySig(at35);
       const f36 = bySig(at36);
-      assert.deepEqual(Object.keys(f36).filter((k) => !(k in f35)), [ADDED], 'دالّةٌ جديدةٌ واحدة');
-      assert.deepEqual(Object.keys(f35).filter((k) => !(k in f36)), [], 'لا دالّةَ محذوفة');
+      assert.deepEqual(
+        Object.keys(f36).filter((k) => !(k in f35)),
+        [ADDED],
+        'دالّةٌ جديدةٌ واحدة',
+      );
+      assert.deepEqual(
+        Object.keys(f35).filter((k) => !(k in f36)),
+        [],
+        'لا دالّةَ محذوفة',
+      );
       for (const sig of Object.keys(f35)) {
         if (CHANGED.includes(sig)) {
           assert.notEqual(f36[sig].def, f35[sig].def, `${sig} تغيّر`);
@@ -1596,17 +1605,34 @@ describe(
       // ‏الدالّةُ الجديدةُ بخصائصِ read_ok() نفسِها: مالكٌ وSECURITY DEFINER وSTABLE وsearch_path مثبَّت وACL.
       const rk = f35['fence.read_ok()'];
       const rw = f36[ADDED];
-      for (const k of ['vol', 'secdef', 'owner']) assert.equal(rw[k], rk[k], `read_window.${k} = read_ok.${k}`);
+      for (const k of ['vol', 'secdef', 'owner'])
+        assert.equal(rw[k], rk[k], `read_window.${k} = read_ok.${k}`);
       /** @param {string} acl */
-      const aclSet = (acl) => acl.replace(/^\{|\}$/gu, '').split(',').sort();
-      assert.deepEqual(aclSet(rw.acl), aclSet(rk.acl), 'ACL مطابقةٌ لـread_ok() (‏PUBLIC والأدوارُ الثلاثة)');
+      const aclSet = (acl) =>
+        acl
+          .replace(/^\{|\}$/gu, '')
+          .split(',')
+          .sort();
+      assert.deepEqual(
+        aclSet(rw.acl),
+        aclSet(rk.acl),
+        'ACL مطابقةٌ لـread_ok() (‏PUBLIC والأدوارُ الثلاثة)',
+      );
       assert.match(rw.def, /SET search_path TO 'pg_catalog', 'pg_temp'/u);
       /** @type {(s: { manifest: any[] }) => Record<string, string>} */
       const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
       const m35 = m(at35);
       const m36 = m(at36);
-      assert.deepEqual(Object.keys(m36).filter((k) => !(k in m35)), [ADDED]);
-      assert.deepEqual(Object.keys(m35).filter((k) => m35[k] !== m36[k]).sort(), CHANGED);
+      assert.deepEqual(
+        Object.keys(m36).filter((k) => !(k in m35)),
+        [ADDED],
+      );
+      assert.deepEqual(
+        Object.keys(m35)
+          .filter((k) => m35[k] !== m36[k])
+          .sort(),
+        CHANGED,
+      );
       assert.deepEqual(at36.owner, at35.owner, 'امتيازاتُ xf_owner وعضويّاتُه لا تتغيّر');
       assert.deepEqual(at36.tables, at35.tables, 'ملكيّةُ جداولِ fence وACL لا تتغيّر');
       assert.deepEqual(at36.eventTriggers, at35.eventTriggers);

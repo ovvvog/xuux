@@ -99,7 +99,12 @@ describe(
                    aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
                  WHERE a.grantee = 0 AND n.nspname NOT IN ('pg_catalog', 'information_schema') ORDER BY 1`)
         ).map((r) => r.o),
-        ['fence.read_ok', 'fence.read_window', 'state.report_sections_declared', 'state.text_array_is_named'],
+        [
+          'fence.read_ok',
+          'fence.read_window',
+          'state.report_sections_declared',
+          'state.text_array_is_named',
+        ],
         'EXECUTE لـPUBLIC خارجَ الكتالوج: read_ok وread_window (‏سياسةُ xf_read، 0036) ودالّتا مستدعٍ ثابتتان في state',
       );
       assert.deepEqual(

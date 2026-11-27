@@ -1210,8 +1210,14 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
       (await h.root.checkFenced()).problems.map((/** @type {any} */ p) => `${p.kind}:${p.object}`);
     for (const [label, sql] of /** @type {const} */ ([
       ['InitPlan القديم', 'USING ((SELECT fence.read_ok())) WITH CHECK ((SELECT fence.read_ok()))'],
-      ['USING وحدَه قانونيّ', 'USING (clock_timestamp() <@ (SELECT fence.read_window())) WITH CHECK (true)'],
-      ['OR true', 'USING (clock_timestamp() <@ (SELECT fence.read_window()) OR true) WITH CHECK (clock_timestamp() <@ (SELECT fence.read_window()))'],
+      [
+        'USING وحدَه قانونيّ',
+        'USING (clock_timestamp() <@ (SELECT fence.read_window())) WITH CHECK (true)',
+      ],
+      [
+        'OR true',
+        'USING (clock_timestamp() <@ (SELECT fence.read_window()) OR true) WITH CHECK (clock_timestamp() <@ (SELECT fence.read_window()))',
+      ],
     ])) {
       await h.db.pool.query(`ALTER POLICY xf_read ON state.fence_probe ${sql}`);
       assert.ok((await kindsOf()).includes('rls_policy_drift:state.fence_probe'), label);
@@ -1221,7 +1227,10 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
       `ALTER POLICY xf_read ON state.fence_probe USING (clock_timestamp() <@ (SELECT fence.read_window()))
          WITH CHECK (clock_timestamp() <@ (SELECT fence.read_window()))`,
     );
-    assert.ok(!(await kindsOf()).some((k) => k.startsWith('rls_')), 'الاستعادةُ تُزيلُ الانحراف');
+    assert.ok(
+      !(await kindsOf()).some((/** @type {string} */ k) => k.startsWith('rls_')),
+      'الاستعادةُ تُزيلُ الانحراف',
+    );
     await h.db.pool.query(
       'CREATE POLICY xf_open ON state.fence_probe AS PERMISSIVE FOR SELECT TO PUBLIC USING (true)',
     );
@@ -1231,7 +1240,10 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     await h.db.pool.query(
       'CREATE POLICY xf_narrow ON state.fence_probe AS RESTRICTIVE FOR ALL TO PUBLIC USING (true) WITH CHECK (true)',
     );
-    assert.ok(!(await kindsOf()).some((k) => k.startsWith('rls_')), 'المقيِّدةُ لا تُعَدّ');
+    assert.ok(
+      !(await kindsOf()).some((/** @type {string} */ k) => k.startsWith('rls_')),
+      'المقيِّدةُ لا تُعَدّ',
+    );
     await h.db.pool.query('DROP POLICY xf_narrow ON state.fence_probe');
     await h.db.pool.query('ALTER EVENT TRIGGER xf_ddl_end ENABLE ALWAYS');
     // ‏الجدولُ الجديدُ يُغطّى بالصيغةِ الجديدة (‏cover_relation في 0036).
@@ -1245,7 +1257,9 @@ describe('سياجُ القاعدة — WL-532', { skip: skipWithoutDatabase }, 
     assert.deepEqual(fresh, { q: canon, w: canon });
     await h.db.pool.query('DROP TABLE state.fence_rls_new');
     const chk = await h.root.checkFenced();
-    const mpt = Number((await h.db.pool.query('SHOW max_prepared_transactions')).rows[0].max_prepared_transactions);
+    const mpt = Number(
+      (await h.db.pool.query('SHOW max_prepared_transactions')).rows[0].max_prepared_transactions,
+    );
     if (mpt === 0) {
       assert.equal(chk.ok, true, JSON.stringify(chk.problems));
       await h.resume();
