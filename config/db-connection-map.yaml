@@ -173,7 +173,7 @@ sites:
     why: أداةُ قراءة.
   - file: scripts/restore.mjs
     kind: pg.Pool
-    count: 4
+    count: 3
     purpose: الاستعادةُ إلى قاعدةٍ نظيفة
     role: إداريّ (superuser)
     fence: BREAK_GLASS
@@ -182,8 +182,17 @@ sites:
       RECOVERY_REQUIRED ولا يكتبُ عاملٌ قبلَ RECOVER موقَّع (T-REC-05، LAB-PHYS-RESTORE).
   - file: scripts/restore.mjs
     kind: pg_tool
+    count: 2
+    purpose: >-
+      pg_restore (‏خرجٌ نصّيٌّ لا اتصال) وpsql (‏الجلسةُ الواحدةُ التي تحملُ معاملةَ الاستعادة، WL-624)
+    role: كالسابق
+    fence: BREAK_GLASS
+    why: كالسابق.
+  - file: scripts/restore.mjs
+    kind: pg.Client
     count: 1
-    purpose: pg_restore
+    purpose: >-
+      سؤالُ الخادمِ عن مآلِ المعاملةِ (‏pg_xact_status) على اتصالٍ جديدٍ بعدَ فقدِ الجلسة (‏WL-624)؛ قراءةٌ لا كتابة
     role: كالسابق
     fence: BREAK_GLASS
     why: كالسابق.

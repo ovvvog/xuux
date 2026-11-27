@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { harness } from '../helpers/fence-harness.mjs';
 import { registerTmpRoot } from '../helpers/tmp-roots.mjs';
+import { startFaultProxy } from '../helpers/pg-fault-proxy.mjs';
 import { up } from '../../src/persistence/migrator.mjs';
 import {
   COVERAGE_MATRIX,
@@ -1092,9 +1093,13 @@ for (const [label, edit, code] of /** @type {const} */ ([
       try {
         // البصمةُ تغطّي الأرشيفَ لا البيان؛ فالتحقّقُ اللاحقُ للاستعادة هو الحارسُ هنا.
         editManifest(dump, edit);
+        const before = await targetImage(target.pool);
         const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
         assert.equal(restore.code, 1, restore.stdout);
         assert.match(restore.stderr, new RegExp(`\\[${code}\\]`));
+        assert.doesNotMatch(restore.stdout, /RESTORE_OK/);
+        // ‏`WL-624`: التحقّقُ قبلَ `COMMIT` ⇒ الهدفُ كما كانَ بالصورةِ الكاملة.
+        assert.equal(await targetImage(target.pool), before, 'الهدفُ تغيّرَ بعدَ تحقّقٍ فاشل');
       } finally {
         await target.drop();
         await source.drop();
@@ -2342,7 +2347,8 @@ for (const finish of /** @type {const} */ (['COMMIT', 'ROLLBACK'])) {
           await waitForLockWait(
             backup.source.pool,
             race.target.name,
-            'CREATE SCHEMA "fence"',
+            // ‏`WL-624`: العبارةُ تصلُ من psql بفاصلتِها المنقوطة (‏`CREATE SCHEMA "fence";`).
+            'CREATE SCHEMA "fence"%',
             race.pids,
           ),
           'الحجزُ لم ينتظر إنشاءَ السياجِ غيرَ المُلتزَم',
@@ -2371,7 +2377,7 @@ for (const finish of /** @type {const} */ (['COMMIT', 'ROLLBACK'])) {
 }
 
 test(
-  'WL-597 TOCTOU (C): بعدَ الحجزِ ينتظرُ إنشاءُ السياجِ التزامَ المحو — ونافذةُ ما بعدَ الالتزامِ قائمة (‏خطرٌ متبقٍّ معلَن)',
+  'WL-597/WL-624 TOCTOU (C): بعدَ الحجزِ ينتظرُ إنشاءُ السياجِ التزامَ الاستعادةِ كلِّها ثمّ يرفض — النافذةُ التي كانت بعدَ التزامِ المحوِ مغلقة',
   { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('raceC');
@@ -2405,45 +2411,22 @@ test(
         ]),
         'إنشاءُ السياجِ لم ينتظر الحجز',
       );
-      assert.deepEqual(order, [], 'أُنشئَ السياجُ قبلَ التزامِ المحو');
+      assert.deepEqual(order, [], 'أُنشئَ السياجُ قبلَ التزامِ الاستعادة');
       await race.holder.query('COMMIT');
-      await creating;
       const restore = await running;
-      // السياجُ أُنشئَ **بعدَ** التزامِ المحو، فلا محوَ بعدَ سياج. لكنّه أُنشئَ قبلَ `pg_restore`: النسخةُ
-      // مُسيَّجة، فيسقطُ `pg_restore` عندَ `CREATE SCHEMA fence` ويبقى الهدفُ ممحوّاً. هذه نافذةُ ما بعدَ
-      // الالتزام، **غيرُ مغلقة** (‏`WL-597`، خطرٌ متبقٍّ في `docs/RECOVERY.md`)؛ يثبتُها الاختبارُ ولا يُخفيها.
-      assert.deepEqual(order, ['fence-created']);
-      assert.equal(restore.code, 1, restore.stdout);
-      assert.match(restore.stderr, /\[RESTORE_COMMAND_FAILED\]/);
-      const stale = await race.target.pool.query(
-        `SELECT to_regclass('state.models') IS NOT NULL AS present`,
+      await creating;
+      // كانَ (‏`WL-597`): السياجُ يُنشأُ بعدَ التزامِ المحوِ وقبلَ `pg_restore`، فتسقطُ الاستعادةُ والهدفُ ممحوّ.
+      // الآنَ (‏`WL-624`): المحوُ و`pg_restore` والتحقّقُ معاملةٌ واحدة، والاسمُ محجوزٌ فيها حتّى `COMMIT` — فلا
+      // «بعدَ المحو» يتسلّلُ إليه الإنشاء. ينتظرُ إلى الالتزام، ثمّ يجدُ سياجَ النسخةِ المستعادِ فيسقط.
+      assert.equal(restore.code, 0, restore.stderr);
+      assert.match(restore.stdout, /\[RESTORE_OK\]/);
+      assert.equal(order.length, 1);
+      assert.match(String(order[0]), /^fence-failed:(23505|42P06)$/);
+      assert.equal(await contentsDigest(race.target.pool), backup.sourceDigest);
+      const row = await race.target.pool.query(
+        `SELECT 1 FROM state.models WHERE id = 'stale-model'`,
       );
-      if (stale.rows[0].present === true) {
-        const row = await race.target.pool.query(
-          `SELECT 1 FROM state.models WHERE id = 'stale-model'`,
-        );
-        assert.equal(row.rowCount, 0, 'الصفُّ القديمُ باقٍ: لم يحدث المحو');
-      }
-      // الهدفُ ممحوٌّ: لا صفَّ قديم، والسياجُ الفارغُ الذي أُنشئَ في النافذةِ حاضر.
-      assert.equal(await fenceSchemaPresent(race.target.pool), true);
-      // الحالةُ النهائيّةُ بدقّة (‏`WL-599`): `pg_restore --exit-on-error` يسقطُ عندَ أوّلِ عنصرٍ في النسخة
-      // المُسيَّجةِ يصطدمُ بالسياج، فلا يُنشأُ `state` ولا الدفتر، والسياجُ فارغٌ تماماً. هذا ما يصفُه
-      // `docs/RECOVERY.md` تحتَ `LIVE-78`؛ النافذةُ مقيسةٌ وغيرُ مغلقة.
-      assert.match(restore.stderr, /schema "fence" already exists/);
-      const finalState = await race.target.pool.query(
-        `SELECT to_regnamespace('state') IS NULL AS state_absent,
-                to_regclass('public.schema_migrations') IS NULL AS ledger_absent,
-                (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                  WHERE n.nspname = 'fence') AS fence_relations,
-                (SELECT count(*)::int FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                  WHERE n.nspname = 'fence') AS fence_functions`,
-      );
-      assert.deepEqual(finalState.rows[0], {
-        state_absent: true,
-        ledger_absent: true,
-        fence_relations: 0,
-        fence_functions: 0,
-      });
+      assert.equal(row.rowCount, 0, 'الصفُّ القديمُ باقٍ بعدَ استعادةٍ ناجحة');
     } finally {
       await race.close();
       await backup.source.drop();
@@ -2452,104 +2435,123 @@ test(
 );
 
 /**
- * ‏`WL-600`: مُحمَّلٌ مسبقٌ (‏`--import`) في عمليّةِ `restore.mjs` يعترضُ عبارةً من معاملةِ المحو. حتميٌّ
- * بترتيبِ العبارات، بلا `sleep`:
- *   - `after`: يُنفِّذُ `COMMIT` الحقيقيَّ ثمّ يهدمُ المقبسَ ويرفضُ بخطأِ اتصال ⇒ المحوُ مُلتزَمٌ والأداةُ
- *     لا ترى الردّ (‏انقطاعٌ بعدَ الالتزامِ وقبلَ التأكيد).
- *   - `before`: يهدمُ المقبسَ عندَ `COMMIT` ويرفضُ بلا إرسال ⇒ الخادمُ يُجهِضُ المعاملة، والأداةُ لا تعرف.
- *   - `fatal`: يستبدلُ بـ`COMMIT` إنهاءَ الجلسةِ نفسِها ⇒ ردٌّ بدرجةِ `FATAL` (‏`57P01`) لا يُقطَعُ معه.
- *   - `error`: يستبدلُ بـ`COMMIT` عبارةَ `SELECT 1/0` ⇒ ردٌّ قطعيٌّ بدرجةِ `ERROR` (‏`22012`).
- *   - `drop`: يهدمُ المقبسَ عندَ `DROP TABLE … schema_migrations` قبلَ `COMMIT` ⇒ فشلٌ قطعيّ.
- * @param {string} dir
- * @param {'after' | 'before' | 'fatal' | 'error' | 'drop'} mode
- * @returns {string}
+ * ‏`WL-624` (‏كانَ `WL-600`): أعطابٌ حولَ `COMMIT` الاستعادةِ الوحيد — حقيقيّةٌ لا مُحاكاة. كانت مُحمَّلاتٍ
+ * (‏`--import`) تعترضُ `COMMIT` عميلِ `pg`؛ والمعاملةُ الآنَ في جلسةِ `psql`، فالأعطابُ على السلكِ (‏وسيطُ
+ * `tests/helpers/pg-fault-proxy.mjs`) أو في الخادم (‏قيدٌ مؤجَّلٌ يُنفَّذُ عندَ `COMMIT`):
+ *   - `before`: يُقطَعُ الاتصالُ عندَ رسالةِ `COMMIT` قبلَ تمريرِها ⇒ لم يُلتزَم ⇒ ‏`aborted` ⇒ `RESTORE_COMMIT_FAILED`.
+ *   - `after`: يُمرَّرُ `COMMIT` ويضيعُ ردُّه ⇒ التُزِم ⇒ يُحسَمُ من الخادمِ نجاحاً حقيقيّاً.
+ *   - `after-down`: كذلك والوسيطُ يُغلَقُ فلا يُسأَلُ الخادم ⇒ `RESTORE_COMMIT_OUTCOME_UNKNOWN`.
+ *   - `fatal`: قيدٌ مؤجَّلٌ يُنهي الجلسةَ نفسَها عندَ `COMMIT` ⇒ ‏`FATAL 57P01` ⇒ ‏`aborted`.
+ *   - `error`: قيدٌ مؤجَّلٌ يقسمُ على صفرٍ عندَ `COMMIT` ⇒ ‏`ERROR 22012` ⇒ ‏`aborted`.
+ *   - `drop`: يُقطَعُ الاتصالُ عندَ تركيبِ الدفترِ قبلَ `COMMIT` ⇒ لا `COMMIT` أُرسِل ⇒ `RESTORE_COMMAND_FAILED`.
+ * @typedef {'before' | 'after' | 'after-down' | 'fatal' | 'error' | 'drop'} CommitFault
  */
-function writeCommitOutcomeHook(dir, mode) {
-  const hook = path.join(dir, `commit-outcome-${mode}.mjs`);
-  const trigger =
-    mode === 'drop'
-      ? 'sql.startsWith(\'DROP TABLE IF EXISTS public."schema_migrations"\')'
-      : "sql === 'COMMIT'";
-  const action = {
-    after:
-      '  return original.call(this, text).then(() => { this.connection.stream.destroy(); throw lost(); });',
-    before: '  this.connection.stream.destroy(); return Promise.reject(lost());',
-    drop: '  this.connection.stream.destroy(); return Promise.reject(lost());',
-    fatal: "  return original.call(this, 'SELECT pg_terminate_backend(pg_backend_pid())');",
-    error: "  return original.call(this, 'SELECT 1/0');",
-  }[mode];
-  fs.writeFileSync(
-    hook,
-    [
-      "import { createRequire } from 'node:module';",
-      `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
-      "const pg = require('pg');",
-      'const original = pg.Client.prototype.query;',
-      'let fired = false;',
-      'pg.Client.prototype.query = function (text, ...rest) {',
-      "  const sql = typeof text === 'string' ? text : text?.text;",
-      `  if (fired || typeof sql !== 'string' || !(${trigger})) return original.call(this, text, ...rest);`,
-      '  fired = true;',
-      `  process.stderr.write('[XUUX_COMMIT_HOOK_FIRED:${mode}]\\n');`,
-      "  const lost = () => new Error('Connection terminated unexpectedly');",
-      action,
-      '};',
-      '',
-    ].join('\n'),
-  );
-  return hook;
-}
 
 /**
- * ‏`WL-600`: ينتظرُ ألّا تبقى على الهدفِ جلسةٌ تحملُ معاملةً (‏`backend_xid`) — جلسةُ الأداةِ بعدَ هدمِ
- * مقبسِها. رصدُ حالٍ لا مهلة؛ والحدُّ الزمنيُّ لكشفِ التعليقِ وحدَه.
+ * قيدٌ مؤجَّلٌ في `public` (‏ينجو من المحو) يُعبِّئُه قادحُ أحداثٍ عندَ تركيبِ الدفترِ وحدَه — آخرِ عبارةٍ قبلَ
+ * `COMMIT` — فكلُّ العباراتِ والتحقّقُ تنجح، ولا يسقطُ إلا الالتزام.
  * @param {import('pg').Pool} pool
- * @param {string} database
- * @returns {Promise<boolean>}
+ * @param {'fatal' | 'error'} mode
  */
-async function waitForNoOpenTransaction(pool, database) {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const r = await pool.query(
-      `SELECT 1 FROM pg_stat_activity
-       WHERE datname = $1 AND pid <> pg_backend_pid() AND backend_xid IS NOT NULL`,
-      [database],
-    );
-    if ((r.rowCount ?? 0) === 0) return true;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return false;
+async function installCommitGate(pool, mode) {
+  const action =
+    mode === 'fatal'
+      ? 'PERFORM pg_catalog.pg_terminate_backend(pg_catalog.pg_backend_pid()); PERFORM pg_catalog.pg_sleep(5);'
+      : 'PERFORM 1 / 0;';
+  await pool.query('CREATE TABLE public.wl622_gate (n integer)');
+  await pool.query(`CREATE FUNCTION public.wl622_gate_fire() RETURNS trigger LANGUAGE plpgsql AS $f$
+    BEGIN ${action} RETURN NULL; END $f$`);
+  await pool.query(`CREATE CONSTRAINT TRIGGER wl622_gate_fire AFTER INSERT ON public.wl622_gate
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.wl622_gate_fire()`);
+  await pool.query(`CREATE FUNCTION public.wl622_gate_arm() RETURNS event_trigger LANGUAGE plpgsql AS $f$
+    BEGIN
+      IF pg_catalog.current_query() ILIKE '%RENAME TO%schema_migrations%' THEN
+        INSERT INTO public.wl622_gate VALUES (1);
+      END IF;
+    END $f$`);
+  await pool.query(`CREATE EVENT TRIGGER wl622_gate_arm ON ddl_command_end
+    WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION public.wl622_gate_arm()`);
+}
+
+/** @param {import('pg').Pool} pool */
+async function removeCommitGate(pool) {
+  await pool.query('DROP EVENT TRIGGER IF EXISTS wl622_gate_arm');
+  await pool.query('DROP TABLE IF EXISTS public.wl622_gate');
+  await pool.query('DROP FUNCTION IF EXISTS public.wl622_gate_fire()');
+  await pool.query('DROP FUNCTION IF EXISTS public.wl622_gate_arm()');
 }
 
 /**
- * ‏`WL-600`: هدفٌ غيرُ مُسيَّجٍ مُهاجَرٌ إلى 23 وفيه صفّ، و`restore --force` عليه بمُحمَّلِ `mode`.
- * @param {{ dump: string, dir: string, sourceUrl: string, source: { pool: import('pg').Pool } }} backup
- * @param {{ name: string }} target
- * @param {'after' | 'before' | 'fatal' | 'error' | 'drop'} mode
+ * رابطٌ عبرَ الوسيط بلا TLS، كي يرى الوسيطُ نصَّ البروتوكول (‏psql يفاوضُ TLS افتراضيّاً، و`pg` لا).
+ * @param {{ urlFor: (u: string) => string }} proxy
+ * @param {string} databaseUrl
  */
-async function forceWithCommitHook(backup, target, mode) {
-  const restore = await runNode(
-    [RESTORE_SCRIPT, backup.dump, '--database', target.name, '--force'],
-    backup.sourceUrl,
-    {
-      NODE_OPTIONS:
-        `${process.env['NODE_OPTIONS'] ?? ''} --import ${writeCommitOutcomeHook(backup.dir, mode)}`.trim(),
-    },
-  );
-  assert.match(restore.stderr, new RegExp(`\\[XUUX_COMMIT_HOOK_FIRED:${mode}\\]`), mode);
+function proxiedUrl(proxy, databaseUrl) {
+  const url = new URL(proxy.urlFor(databaseUrl));
+  url.searchParams.set('sslmode', 'disable');
+  return url.toString();
+}
+
+/**
+ * يُشغِّلُ `restore.mjs` بالعطبِ `mode` ويُثبِتُ أنّ عطبَ السلكِ وقعَ فعلاً.
+ * @param {{ dump: string, sourceUrl: string }} backup
+ * @param {string} database
+ * @param {CommitFault} mode
+ * @param {string[]} extra
+ * @returns {Promise<CommandResult>}
+ */
+async function restoreWithCommitFault(backup, database, mode, extra) {
+  const args = [RESTORE_SCRIPT, backup.dump, '--database', database, ...extra];
+  if (mode === 'fatal' || mode === 'error') return runNode(args, backup.sourceUrl);
+  const base = new URL(backup.sourceUrl);
+  const proxy = await startFaultProxy({ host: base.hostname, port: Number(base.port || 5432) });
+  try {
+    const fired = { value: false };
+    const trap =
+      mode === 'before'
+        ? proxy.severOn('COMMIT;\0', { mode: 'before' })
+        : mode === 'drop'
+          ? proxy.severOn('RENAME TO "schema_migrations"', { mode: 'before' })
+          : proxy.severOn('RENAME TO "schema_migrations"', {
+              mode: 'after-commit',
+              thenDown: mode === 'after-down',
+            });
+    void trap.then(() => {
+      fired.value = true;
+    });
+    const restore = await runNode(args, proxiedUrl(proxy, backup.sourceUrl));
+    assert.ok(fired.value, `${mode}: العطبُ لم يقع`);
+    return restore;
+  } finally {
+    await proxy.close();
+  }
+}
+
+/**
+ * @param {CommandResult} restore
+ * @param {CommitFault} mode
+ */
+function assertCommitFaultOutcome(restore, mode) {
+  assert.doesNotMatch(restore.stderr, /Unhandled 'error' event/, mode);
+  if (mode === 'after') {
+    assert.equal(restore.code, 0, `${mode}: ${restore.stderr}`);
+    assert.match(restore.stdout, /\[RESTORE_OK\]/, mode);
+    return;
+  }
   assert.equal(restore.code, 1, `${mode}: ${restore.stdout}`);
   assert.doesNotMatch(restore.stdout, /RESTORE_OK/, mode);
-  // لا انهيارَ بحدثِ `error` غيرِ مُعالَج: الرمزُ يُسمّى دائماً.
-  assert.doesNotMatch(restore.stderr, /Unhandled 'error' event/, mode);
-  assert.match(restore.stderr, /⛔ \[/, mode);
-  assert.ok(
-    await waitForNoOpenTransaction(backup.source.pool, target.name),
-    `${mode}: بقيت معاملةُ الأداةِ مفتوحةً على الهدف`,
-  );
-  return restore;
+  const expected = {
+    before: /⛔ \[RESTORE_COMMIT_FAILED\]/,
+    'after-down': /⛔ \[RESTORE_COMMIT_OUTCOME_UNKNOWN\].*لا حالَ بينَهما/s,
+    fatal: /⛔ \[RESTORE_COMMIT_FAILED\].*57P01/s,
+    error: /⛔ \[RESTORE_COMMIT_FAILED\].*22012/s,
+    drop: /⛔ \[RESTORE_COMMAND_FAILED\]/,
+  }[mode];
+  assert.match(restore.stderr, expected, mode);
 }
 
 /**
+ * ‏`WL-600`: هدفٌ غيرُ مُسيَّجٍ مُهاجَرٌ إلى 23 وفيه صفّ — الحالُ الوحيدُ الذي يستبدلُه `--force`.
  * @param {import('pg').Pool} pool
  */
 async function seedStaleTarget(pool) {
@@ -2561,63 +2563,50 @@ async function seedStaleTarget(pool) {
   );
 }
 
-const WIPE_UNKNOWN = /\[RESTORE_WIPE_OUTCOME_UNKNOWN\]/;
-
 test(
-  'WL-600: انقطاعٌ بعدَ التزامِ المحوِ وقبلَ تأكيدِه ⇒ RESTORE_WIPE_OUTCOME_UNKNOWN، والهدفُ ممحوٌّ فعلاً فلا يُدَّعى سليماً',
+  'WL-624 (كانَ WL-600): `--force` وانقطاعٌ بعدَ التزامِ COMMIT — يُحسَمُ من الخادمِ نجاحاً، أو يُعلَنُ مجهولاً إن لم يُسأَل؛ والحالُ المستعادُ كاملاً في الحالين لا هدفٌ ممحوّ',
   { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('commitafter');
-    const target = await createIsolatedDatabase('commitafter');
     try {
-      await seedStaleTarget(target.pool);
-      const restore = await forceWithCommitHook(backup, target, 'after');
-      assert.match(restore.stderr, WIPE_UNKNOWN);
-      assert.match(restore.stderr, /لم يُشغَّلْ pg_restore/);
-      assert.match(restore.stderr, /لا تفترضْ أنّه سليم/);
-      assert.doesNotMatch(restore.stderr, /\[RESTORE_COMMAND_FAILED\]/);
-      // المحوُ التُزِمَ فعلاً: لا `state` ولا دفترَ ولا `fence` المحجوز — فافتراضُ التراجعِ كانَ يكذب.
-      const wiped = await target.pool.query(
-        `SELECT to_regnamespace('state') IS NULL AS state_absent,
-                to_regclass('public.schema_migrations') IS NULL AS ledger_absent,
-                to_regnamespace('fence') IS NULL AS fence_absent`,
-      );
-      assert.deepEqual(wiped.rows[0], {
-        state_absent: true,
-        ledger_absent: true,
-        fence_absent: true,
-      });
+      for (const mode of /** @type {const} */ (['after', 'after-down'])) {
+        const target = await createIsolatedDatabase(`commit${mode.replace('-', '')}`);
+        try {
+          await seedStaleTarget(target.pool);
+          const restore = await restoreWithCommitFault(backup, target.name, mode, ['--force']);
+          assertCommitFaultOutcome(restore, mode);
+          // كانَ هنا (‏`WL-600`): المحوُ مُلتزَمٌ منفرداً والهدفُ ممحوٌّ بلا استعادة. الآنَ لا التزامَ إلا للكلّ.
+          assert.equal(await contentsDigest(target.pool), backup.sourceDigest, mode);
+          assert.equal(await ledgerInstalled(target.pool), true, mode);
+        } finally {
+          await target.drop();
+        }
+      }
     } finally {
-      await target.drop();
       await backup.source.drop();
     }
   },
 );
 
 test(
-  'WL-600: COMMIT لم يصل أو أُنهيَت الجلسةُ (‏FATAL) ⇒ RESTORE_WIPE_OUTCOME_UNKNOWN؛ وخطأُ ERROR على COMMIT أو انقطاعٌ قبلَه ⇒ فشلٌ قطعيّ — والهدفُ كما هو في الأربع',
+  'WL-624 (كانَ WL-600): `--force` و COMMIT لم يصل، أو أُنهيَت الجلسةُ عندَه (‏FATAL)، أو رُفِضَ (‏ERROR)، أو انقطاعٌ قبلَه ⇒ فشلٌ مسمّى قطعيّ — والهدفُ كما هو بالصورةِ الكاملة في الأربع',
   { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('commitkeep');
     const target = await createIsolatedDatabase('commitkeep');
     try {
       await seedStaleTarget(target.pool);
-      const before = await targetImage(target.pool);
       for (const mode of /** @type {const} */ (['before', 'fatal', 'error', 'drop'])) {
-        const restore = await forceWithCommitHook(backup, target, mode);
-        if (mode === 'before' || mode === 'fatal') {
-          // لم يُلتزَمْ شيءٌ فعلاً، لكنّ الأداةَ لا تستطيعُ معرفةَ ذلك: لا تدّعي السلامة.
-          assert.match(restore.stderr, WIPE_UNKNOWN, mode);
-          assert.match(restore.stderr, /لا تفترضْ أنّه سليم/, mode);
-        } else {
-          assert.doesNotMatch(restore.stderr, WIPE_UNKNOWN, mode);
-          assert.match(
-            restore.stderr,
-            mode === 'error' ? /\[22012\]/ : /Connection terminated unexpectedly/,
-            mode,
-          );
-        }
+        if (mode === 'fatal' || mode === 'error') await installCommitGate(target.pool, mode);
+        const before = await targetImage(target.pool);
+        const restore = await restoreWithCommitFault(backup, target.name, mode, ['--force']);
+        assertCommitFaultOutcome(restore, mode);
         assert.equal(await targetImage(target.pool), before, `${mode}: الهدفُ تغيّر`);
+        const stale = await target.pool.query(
+          `SELECT 1 FROM state.models WHERE id = 'stale-model'`,
+        );
+        assert.equal(stale.rowCount, 1, `${mode}: الصفُّ القديمُ لم يعدْ مقروءاً`);
+        await removeCommitGate(target.pool);
       }
     } finally {
       await target.drop();
@@ -2722,20 +2711,20 @@ test(
       });
       const verify = await runNode([BACKUP_SCRIPT, 'verify', after], sourceUrl);
       assert.equal(verify.code, 0, verify.stderr);
+      const targetBefore = await targetImage(target.pool);
       const restore = await runNode([RESTORE_SCRIPT, after, '--database', target.name], sourceUrl);
       assert.equal(restore.code, 1, restore.stdout);
       assert.doesNotMatch(restore.stdout, /RESTORE_OK/);
       assert.match(restore.stderr, /\[RESTORE_CONTENT_MISMATCH\].*table agents: sha256/);
-      // وعدّاداتُ المستعادِ تطابقُ البيان — أي أنَّ التحقّقَ القديمَ وحدَه كانَ سيقبلُه.
-      // (‏الجدولُ المرحليُّ ما زالَ في `state` لأنّ الدفترَ لم يُركَّب، فيُستثنى من المقارنة.)
-      const restoredCounts = await stateRowCounts(target.pool);
-      for (const name of Object.keys(restoredCounts)) {
-        if (name.startsWith('__backup_schema_migrations_')) delete restoredCounts[name];
-      }
-      assert.deepEqual(restoredCounts, mBefore.rowCounts);
-      // الهدفُ لا يُقرأُ مُهاجَراً سليماً: الدفترُ بقيَ مرحليّاً في `state`.
+      // والمخالفةُ في `agents` وحدَه: الأعدادُ (‏المتطابقةُ أعلاه في البيانين) لم تُخالِف — أي أنَّ التحقّقَ
+      // القديمَ وحدَه كانَ سيقبلُه.
+      assert.doesNotMatch(restore.stderr, /RESTORE_ROW_COUNT_MISMATCH/);
+      // ‏`WL-624`: كانَ المحتوى المخالفُ يبقى في الهدفِ والدفترُ مرحليّاً في `state`؛ الآنَ التحقّقُ قبلَ
+      // ‏`COMMIT` في المعاملةِ نفسِها ⇒ لا `state` ولا دفترَ ولا مرحليّ — الهدفُ كما كانَ بالضبط.
       assert.equal(await ledgerInstalled(target.pool), false);
-      assert.equal((await stagingTablesIn(target.pool)).length, 1);
+      const leftover = await target.pool.query(`SELECT to_regnamespace('state') IS NULL AS absent`);
+      assert.equal(leftover.rows[0].absent, true);
+      assert.equal(await targetImage(target.pool), targetBefore);
     } finally {
       await target.drop();
       await source.drop();
@@ -3765,9 +3754,11 @@ for (const [
           'ledgerStagingTable'
         ];
         editManifest(dump, edit);
+        const before = await targetImage(target.pool);
         const restore = await runNode([RESTORE_SCRIPT, dump, '--database', target.name], sourceUrl);
         assert.equal(restore.code, 1, restore.stdout);
         assert.match(restore.stderr, new RegExp(`\\[${code}\\]`));
+        assert.doesNotMatch(restore.stdout, /RESTORE_OK/);
         const state = await target.pool.query(
           `SELECT to_regclass('public.schema_migrations') IS NOT NULL AS ledger,
                   to_regclass($1) IS NOT NULL AS staging,
@@ -3778,7 +3769,10 @@ for (const [
         const row = state.rows[0];
         assert.equal(row['ledger'], false, 'دفترُ الهجراتِ مُركَّبٌ بعدَ فشلِ التحقّق');
         assert.equal(row['half_moved'], false, 'الدفترُ المرحليُّ نُقِلَ نصفَ نقلٍ إلى public');
-        assert.equal(row['staging'], true, 'الدفترُ المرحليُّ لم يبقَ في state');
+        // ‏`WL-624`: كانَ «الدفترُ المرحليُّ يبقى في state» (‏المستعادُ مُلتزَمٌ غيرَ مُركَّب). الآنَ أضيق: لا شيءَ
+        // من المستعادِ أصلاً — التحقّقُ قبلَ `COMMIT` في المعاملةِ نفسِها.
+        assert.equal(row['staging'], false, 'بقيَ أثرٌ من استعادةٍ فشلَ تحقّقُها');
+        assert.equal(await targetImage(target.pool), before, 'الهدفُ تغيّرَ بعدَ تحقّقٍ فاشل');
       } finally {
         await target.drop();
         await source.drop();
@@ -3811,12 +3805,15 @@ test(
         `CREATE EVENT TRIGGER wl614_fail_rename ON ddl_command_end
          WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION public.wl614_fail_rename()`,
       );
+      const before = await targetImage(target.pool);
       const restore = await runNode(
         [RESTORE_SCRIPT, dump, '--database', target.name, '--force'],
         sourceUrl,
       );
       assert.equal(restore.code, 1, restore.stdout);
       assert.match(restore.stderr, /wl614 injected rename failure/);
+      assert.doesNotMatch(restore.stdout, /RESTORE_OK/);
+      assert.equal(await targetImage(target.pool), before, 'الهدفُ تغيّرَ بعدَ فشلِ التركيب');
       await target.pool.query('DROP EVENT TRIGGER wl614_fail_rename');
       const state = await target.pool.query(
         `SELECT to_regclass('public.schema_migrations') IS NOT NULL AS ledger,
@@ -3827,7 +3824,8 @@ test(
       const row = state.rows[0];
       assert.equal(row['ledger'], false, 'دفترُ الهجراتِ مُركَّبٌ رغمَ فشلِ التركيب');
       assert.equal(row['half_moved'], false, 'الدفترُ المرحليُّ نُقِلَ نصفَ نقلٍ إلى public');
-      assert.equal(row['staging'], true, 'الدفترُ المرحليُّ لم يبقَ في state');
+      // ‏`WL-624`: كانَ «المرحليُّ باقٍ في state»؛ الآنَ التركيبُ في معاملةِ الاستعادةِ نفسِها ⇒ لا أثر.
+      assert.equal(row['staging'], false, 'بقيَ أثرٌ من استعادةٍ فشلَ تركيبُ دفترِها');
     } finally {
       await target.drop();
       await source.drop();
@@ -3918,51 +3916,6 @@ test(
 );
 
 /**
- * ‏`WL-615` (‏`LIVE-78/LEDGER-COMMIT-UNKNOWN`): مُحمَّلٌ مسبقٌ يعترضُ `COMMIT` **معاملةِ تركيبِ الدفترِ
- * وحدَها** — الـ`COMMIT` الأوّلُ على عميلٍ أرسلَ `RENAME TO "schema_migrations"` (‏معاملةُ بصمةِ المحتوى
- * قبلَها تلتزمُ بلا اعتراض). الأنماطُ كما في `writeCommitOutcomeHook` (‏`WL-600`):
- *   - `after`: `COMMIT` الحقيقيُّ ثمّ هدمُ المقبس ⇒ الدفترُ مُركَّبٌ والأداةُ لا ترى الردّ.
- *   - `before`: هدمُ المقبسِ بلا إرسال ⇒ الخادمُ يُجهِضُ، والأداةُ لا تعرف.
- *   - `fatal`: إنهاءُ الجلسةِ مكانَ `COMMIT` ⇒ `FATAL` (‏`57P01`) لا يُقطَعُ معه.
- *   - `error`: `SELECT 1/0` مكانَ `COMMIT` ⇒ ردٌّ قطعيٌّ بدرجةِ `ERROR` (‏`22012`).
- * @param {string} dir
- * @param {'after' | 'before' | 'fatal' | 'error'} mode
- * @returns {string}
- */
-function writeLedgerCommitHook(dir, mode) {
-  const hook = path.join(dir, `ledger-commit-${mode}.mjs`);
-  const action = {
-    after:
-      '  return original.call(this, text).then(() => { this.connection.stream.destroy(); throw lost(); });',
-    before: '  this.connection.stream.destroy(); return Promise.reject(lost());',
-    fatal: "  return original.call(this, 'SELECT pg_terminate_backend(pg_backend_pid())');",
-    error: "  return original.call(this, 'SELECT 1/0');",
-  }[mode];
-  fs.writeFileSync(
-    hook,
-    [
-      "import { createRequire } from 'node:module';",
-      `const require = createRequire(${JSON.stringify(path.join(ROOT, 'package.json'))});`,
-      "const pg = require('pg');",
-      'const original = pg.Client.prototype.query;',
-      'let fired = false;',
-      "const armed = Symbol('wl615-ledger');",
-      'pg.Client.prototype.query = function (text, ...rest) {',
-      "  const sql = typeof text === 'string' ? text : text?.text;",
-      "  if (typeof sql === 'string' && sql.includes('RENAME TO \"schema_migrations\"')) this[armed] = true;",
-      "  if (fired || this[armed] !== true || sql !== 'COMMIT') return original.call(this, text, ...rest);",
-      '  fired = true;',
-      `  process.stderr.write('[XUUX_LEDGER_HOOK_FIRED:${mode}]\\n');`,
-      "  const lost = () => new Error('Connection terminated unexpectedly');",
-      action,
-      '};',
-      '',
-    ].join('\n'),
-  );
-  return hook;
-}
-
-/**
  * @param {import('pg').Pool} pool
  * @param {string} staging
  * @returns {Promise<{ ledger: boolean, staging: boolean, half_moved: boolean }>}
@@ -3977,10 +3930,8 @@ async function ledgerPlacement(pool, staging) {
   return /** @type {any} */ (r.rows[0]);
 }
 
-const LEDGER_UNKNOWN = /\[RESTORE_LEDGER_OUTCOME_UNKNOWN\]/;
-
 test(
-  'WL-615 LIVE-78/LEDGER-COMMIT-UNKNOWN: انقطاعٌ بعدَ إرسالِ COMMIT التركيبِ ⇒ RESTORE_LEDGER_OUTCOME_UNKNOWN لا خطأٌ خامّ؛ وخطأُ ERROR على COMMIT فشلٌ قطعيّ — والمكانُ الفعليُّ للدفترِ يُثبِتُ أنّ أيَّ افتراضٍ كانَ يكذب',
+  'WL-624 (كانَ WL-615 LIVE-78/LEDGER-COMMIT-UNKNOWN): هدفٌ جديدٌ فارغ وعطبٌ عندَ COMMIT الوحيد — بعدَه ⇒ نجاحٌ محسومٌ من الخادم والدفترُ مُركَّب؛ قبلَه أو FATAL أو ERROR ⇒ RESTORE_COMMIT_FAILED ولا شيءَ من المستعاد',
   { skip: skipWithoutDatabase, timeout: PER_TEST_TIMEOUT_MS },
   async () => {
     const backup = await seededBackup('ledgercommit');
@@ -3991,40 +3942,19 @@ test(
       for (const mode of /** @type {const} */ (['after', 'before', 'fatal', 'error'])) {
         const target = await createIsolatedDatabase(`ledgercommit${mode}`);
         try {
-          const restore = await runNode(
-            [RESTORE_SCRIPT, backup.dump, '--database', target.name],
-            backup.sourceUrl,
-            {
-              NODE_OPTIONS:
-                `${process.env['NODE_OPTIONS'] ?? ''} --import ${writeLedgerCommitHook(backup.dir, mode)}`.trim(),
-            },
-          );
-          assert.match(restore.stderr, new RegExp(`\\[XUUX_LEDGER_HOOK_FIRED:${mode}\\]`), mode);
-          assert.equal(restore.code, 1, `${mode}: ${restore.stdout}`);
-          assert.doesNotMatch(restore.stdout, /RESTORE_OK/, mode);
-          assert.doesNotMatch(restore.stderr, /Unhandled 'error' event/, mode);
-          assert.match(restore.stderr, /⛔ \[/, mode);
-          assert.ok(
-            await waitForNoOpenTransaction(backup.source.pool, target.name),
-            `${mode}: بقيت معاملةُ الأداةِ مفتوحةً على الهدف`,
-          );
+          if (mode === 'fatal' || mode === 'error') await installCommitGate(target.pool, mode);
+          const before = await targetImage(target.pool);
+          const restore = await restoreWithCommitFault(backup, target.name, mode, []);
+          assertCommitFaultOutcome(restore, mode);
           const placed = await ledgerPlacement(target.pool, staging);
-          assert.equal(placed.half_moved, false, `${mode}: الدفترُ منقولٌ نصفَ نقل`);
-          if (mode === 'error') {
-            assert.doesNotMatch(restore.stderr, LEDGER_UNKNOWN, mode);
-            assert.match(restore.stderr, /\[22012\]/, mode);
-            assert.deepEqual(placed, { ledger: false, staging: true, half_moved: false }, mode);
+          if (mode === 'after') {
+            // كانَ (‏`WL-615`): ‏`RESTORE_LEDGER_OUTCOME_UNKNOWN` والدفترُ مُركَّبٌ فعلاً. الآنَ يُسأَلُ الخادم فيُحسَم.
+            assert.deepEqual(placed, { ledger: true, staging: false, half_moved: false }, mode);
+            assert.equal(await contentsDigest(target.pool), backup.sourceDigest, mode);
           } else {
-            assert.match(restore.stderr, LEDGER_UNKNOWN, mode);
-            assert.match(restore.stderr, /لا تفترضْ نجاحاً ولا فشلاً/, mode);
-            // ‏`after`: التُزِمَ فعلاً — فإعلانُه فشلاً خامّاً كانَ يكذب؛ `before`/`fatal`: لم يُلتزَم، والأداةُ لا تعرف.
-            assert.deepEqual(
-              placed,
-              mode === 'after'
-                ? { ledger: true, staging: false, half_moved: false }
-                : { ledger: false, staging: true, half_moved: false },
-              mode,
-            );
+            // كانَ: الدفترُ المرحليُّ باقٍ في `state` والمحتوى مستعادٌ غيرَ مُركَّب. الآنَ لا أثرَ أصلاً.
+            assert.deepEqual(placed, { ledger: false, staging: false, half_moved: false }, mode);
+            assert.equal(await targetImage(target.pool), before, `${mode}: الهدفُ تغيّر`);
           }
         } finally {
           await target.drop();
