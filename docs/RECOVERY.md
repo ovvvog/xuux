@@ -554,6 +554,10 @@ out of shared memory` عندَ `max_locks_per_transaction=64`، وإصابتُه
 
 **الأدلّة (‏محلّيّ، Node v20.20.2، PostgreSQL 18.7؛ `tests/persistence/atomicity.test.mjs` و`backup-restore.test.mjs`):**
 
+**[‏`WL-625`، 2026-11-27:]** اختباراتُ `WL-624` التسعةُ (‏القتلُ والإنهاءُ والانقطاعُ والنصفُ والأقفالُ والانتقال) نُقِلت **حرفيّاً** إلى
+`tests/persistence/restore-atomicity.test.mjs`، ومُعيناتُها المشتركةُ إلى `tests/helpers/live78-restore.mjs`: `atomicity.test.mjs` بلغَ مهلةَ الملفِّ
+(‏120 ث) على `push` التكاملِ بلا اختبارٍ راسب. الأحمرُ السابقُ (‏`todo` منذُ `WL-603`) باقٍ في `atomicity.test.mjs`.
+
 | الحالة | النتيجة المقيسة |
 | --- | --- |
 | فشلُ `pg_restore` في منتصفِه بعدَ `--force` (‏كانَ `todo` منذُ `WL-603`) | `RESTORE_COMMAND_FAILED`، والهدفُ كما كانَ بالضبط (‏صورةُ الكتالوجِ والصفوف) |
