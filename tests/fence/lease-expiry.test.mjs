@@ -1,0 +1,17 @@
+/**
+ * انقضاءُ الإيجار (‏`WL-608 LIVE-75`) — الجزءُ الأساسيّ: L75-W/R/C/N و`LIVE-75/RLS-INITPLAN`. تُتخطّى بلا `DATABASE_URL`.
+ *
+ * ‏`WL-623`: الكتلةُ نفسُها في `tests/helpers/lease-expiry-suite.mjs` (‏منقولةٌ حرفيّاً من `tests/fence/effects.test.mjs` لمهلةِ
+ * الملفّ)؛ هذا الملفُّ يُسجِّلُ جزءَ `base` وحدَه، و`tests/fence/lease-expiry-silent-skip.test.mjs` يُسجِّلُ الباقي.
+ */
+
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import { defineLeaseExpirySuite } from '../helpers/lease-expiry-suite.mjs';
+
+const registered = defineLeaseExpirySuite('base');
+
+test('WL-623: جزءُ «base» من كتلةِ انقضاءِ الإيجارِ غيرُ فارغ (‏التقسيمُ لا يُسقِطُ اختبارات)', () => {
+  assert.ok(registered.length > 0, 'لا اختبارَ مسجَّلاً');
+});
