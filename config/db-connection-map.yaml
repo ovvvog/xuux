@@ -198,6 +198,24 @@ sites:
     role: كالسابق
     fence: BREAK_GLASS
     why: كالسابق.
+  - file: scripts/bench/live78-reader-blocking.mjs
+    kind: pg.Pool
+    count: 1
+    purpose: >-
+      قياسُ كلفةِ حجبِ القرّاءِ أثناءَ `restore --force` (‏WL-630، LIVE-78): مجمّعُ إدارةٍ يُنشئُ قواعدَ القياسِ
+      `bench_l78_*` ويحذفُها
+    role: superuser من DATABASE_URL على عنقودِ قياس
+    fence: LAB_ONLY
+    why: أداةُ قياسٍ تُشغَّلُ يدوياً، لا تُستدعى من `npm test` ولا من مسارٍ إنتاجيّ؛ لا تلمسُ إلا قواعدَها.
+  - file: scripts/bench/live78-reader-blocking.mjs
+    kind: pg.Client
+    count: 4
+    purpose: >-
+      عملاءُ القياسِ المتزامنون على قاعدةِ الهدف (‏قارئٌ قبلَ الاستعادة وبعدَ بدئِها، وقارئٌ بـlock_timeout وآخرُ
+      بـstatement_timeout، وكاتب)؛ وإعدادُ قاعدتَي المصدرِ والهدف
+    role: كالسابق
+    fence: LAB_ONLY
+    why: كالسابق.
   - file: scripts/fence-lab.mjs
     kind: pg.Pool
     count: 1

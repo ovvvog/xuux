@@ -1,0 +1,619 @@
+{
+ "ref": "origin/main",
+ "head": "a5af34f5ccab1ee53a234401280c8b36bf60f1ff",
+ "first_parent_commits_touching_log": 463,
+ "changed_entries": 58,
+ "rows": [
+  {
+   "id": "WL-002",
+   "first_commit": "d39f368f813c6569c43da2ec1024dc435351fe8c",
+   "change_commits": [
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-001",
+   "first_commit": "d39f368f813c6569c43da2ec1024dc435351fe8c",
+   "change_commits": [
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c",
+    "316895ff58ba75ac3fa5113efbe35b9819c5b177"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-003",
+   "first_commit": "7b7caf6cbcb5d2f258b6fe11228bbcf102152033",
+   "change_commits": [
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-004",
+   "first_commit": "90304e7960de156e1c58b9007b845ec8c5615c40",
+   "change_commits": [
+    "bb7847434f822cef3f6905169a8b0a6251b22682",
+    "90c525c52ecaa0b6431a81f5d8991e9b5d534cb8",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-005",
+   "first_commit": "a7e316eef7c0edc79e29e9f0eac0caf0b76c82a7",
+   "change_commits": [
+    "bb7847434f822cef3f6905169a8b0a6251b22682",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-006",
+   "first_commit": "6bd83d9492836ea53165a9054fb5e195420acaf7",
+   "change_commits": [
+    "bb7847434f822cef3f6905169a8b0a6251b22682",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-007",
+   "first_commit": "75f3f1e8c48debacce5cf2ec237ddff003062536",
+   "change_commits": [
+    "a112a1cb99658d592f49bdcf60e540ab9c0a197b",
+    "8b415b413bef6f1900dcc1e12a1800d895bdef7e",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-008",
+   "first_commit": "751b2afb49dcdb6a502cfe51b59de1e8feb2674c",
+   "change_commits": [
+    "ced1a28038536ec03eaaa30f41f986aece2c4ced",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-009",
+   "first_commit": "32af2b606d1482e9c5ac954b951f3b37f28fce74",
+   "change_commits": [
+    "dcccb1d3d406a035b4d22422a7c53f3c561b144d",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-010",
+   "first_commit": "7212ecac51cd1f683a06172ef3945e930ea0eb29",
+   "change_commits": [
+    "7b6078182680d241a87cd3dcf310ad8f7b07da45",
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-011",
+   "first_commit": "5ff2dea139354ece3a0c9eca47791c97cc01a55e",
+   "change_commits": [
+    "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-012",
+   "first_commit": "588745a2f0615d0a51c4562b9a87c732504dc5ea",
+   "change_commits": [
+    "b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c"
+   ],
+   "net": "add-only",
+   "deleted_lines": 0,
+   "added_lines": 12
+  },
+  {
+   "id": "WL-024",
+   "first_commit": "0de6151bb3e5de211acbd09840defe053c5974c6",
+   "change_commits": [
+    "76e42be7ccd589617bee102e430afd05dc4a8d15"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-054",
+   "first_commit": "5e3f0b24ab724dbb20bdbb8b97f24433a431ad3d",
+   "change_commits": [
+    "ba70ac34bc52f7555d286cd169842da907424f9d"
+   ],
+   "net": "replace",
+   "deleted_lines": 3,
+   "added_lines": 7
+  },
+  {
+   "id": "WL-056",
+   "first_commit": "c3b5c1eb8aa3b025396fa4323db839ffbb946cd8",
+   "change_commits": [
+    "ff67b0f449933bf404396bd8300bf86b7ea714c5"
+   ],
+   "net": "replace",
+   "deleted_lines": 2,
+   "added_lines": 2
+  },
+  {
+   "id": "WL-059",
+   "first_commit": "fe2a7cf7edb1eb5885480573437865f7de144807",
+   "change_commits": [
+    "fbfe25c8f4cdf22753e88894b159c3ea71632836"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-078",
+   "first_commit": "b3bc45398f6983a56b246a0b0eb4a90813a923b8",
+   "change_commits": [
+    "8ee203ca503bafcaef54c8a4ceac21b6b8efbf72"
+   ],
+   "net": "replace",
+   "deleted_lines": 2,
+   "added_lines": 2
+  },
+  {
+   "id": "WL-083",
+   "first_commit": "b824974cdf67cfc8adf05a88e6f268fd876efa6a",
+   "change_commits": [
+    "0d04b01b0179e555987c34f256ce6a3728f01584"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 4
+  },
+  {
+   "id": "WL-084",
+   "first_commit": "79938d24131dbc8c530443774fc8f64ffd573091",
+   "change_commits": [
+    "bf24e2dd58de92d7e4d71afe4c072751371c0a4e"
+   ],
+   "net": "add-only",
+   "deleted_lines": 0,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-087",
+   "first_commit": "07ba38984e79c012bd4dbeff51d555462d3a94c3",
+   "change_commits": [
+    "8182c4f1d6e49b693f3fb698200d58c7836a74e2",
+    "16fa266035b5db24412b43ba8a233c2563f5748a"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-088",
+   "first_commit": "8182c4f1d6e49b693f3fb698200d58c7836a74e2",
+   "change_commits": [
+    "b7aa8c2c82abab34b026d3aaf236d869bf1e89dc"
+   ],
+   "net": "replace",
+   "deleted_lines": 53,
+   "added_lines": 14
+  },
+  {
+   "id": "WL-102",
+   "first_commit": "2461bc486b42577a60dcd61fd31ddffa335e5be2",
+   "change_commits": [
+    "f3448fa5d13b728118551a1e0804c8a35a570bb8"
+   ],
+   "net": "replace",
+   "deleted_lines": 7,
+   "added_lines": 7
+  },
+  {
+   "id": "WL-109",
+   "first_commit": "4376ab72fdb9f34ee01b4257c3ed35990eee0de1",
+   "change_commits": [
+    "d38e4d314a75211f7682746308be24cc8dd91089"
+   ],
+   "net": "add-only",
+   "deleted_lines": 0,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-115",
+   "first_commit": "2efdb9cf6401de0db356cb4e9d3322a4b2bc575b",
+   "change_commits": [
+    "0e1a88c3fdfe84a7900ee5f3f1da7de3b129849e",
+    "d61742ac889c2dfda6eb61237b875f60456a21d1",
+    "2705dd51e5ac9061c47d58112dc295e938fe21cd"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-116",
+   "first_commit": "5c66f0b96af5262a678ca7373116902b5f73db77",
+   "change_commits": [
+    "4f595953e528aeb409832a05d305e0c3c6076360"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-117",
+   "first_commit": "f16c0d8e6fceff7e0fab729c9be1408ad3d87755",
+   "change_commits": [
+    "cf1015e2cd1552b71a71408d2cd586f33e6a2d57"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-121",
+   "first_commit": "c0f47dc3cb0a87c825714edfebf66d494ec1578a",
+   "change_commits": [
+    "c8b83b264820433f1d0fc97c698cab78c2340003"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-122",
+   "first_commit": "d3f5751d939da50824c3b4f3d7d3dd14bb5f904a",
+   "change_commits": [
+    "244810f1b80287f83d7f12c858c8eb364e7df3cb"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-124",
+   "first_commit": "6516662f44ef4f30c4c5263f1fbefbdb08f62ab5",
+   "change_commits": [
+    "6e388a63e7dd849ed81c54485817cd9b2cba4948",
+    "eb84a55c2de7f4017eecb0074bf6e79a1cd419ce"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-128",
+   "first_commit": "9cb6240ecdbb21cfbb6ca582810f3be198e9173c",
+   "change_commits": [
+    "70cf8e70314a2a9089a8b903757a924fed0181b7"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-132",
+   "first_commit": "5531d1e53ba1bd9373bbca90a9ccb02fc95c85c5",
+   "change_commits": [
+    "aea255b71d5246936cd8fa720109057fc57e0882"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-133",
+   "first_commit": "cf5ba1b730349e8f55a4506ffa9e82e6cc65d515",
+   "change_commits": [
+    "b7d5f5929c6c16a0fe8c2a191b2d12e98440d785"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-134",
+   "first_commit": "eea298d9fffa5c899c7afc4d8178075cb55b9952",
+   "change_commits": [
+    "056a2fad0a74278890c3d63be034703a53e792d5"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-135",
+   "first_commit": "ffcfe4ccbfa1ca25bd8c1037ad3747fac40473ea",
+   "change_commits": [
+    "a705f2d485961bfcfb01f98d598f1b9714998f79"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-136",
+   "first_commit": "e8535b92f431555e56db24409cb0ab5690380675",
+   "change_commits": [
+    "87c0cc8158fefc33501e2ead450580862ffa33e6"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-137",
+   "first_commit": "771680716923298eedc19f20f73d842190dee441",
+   "change_commits": [
+    "2a8097f0c8bab772bc74864297a8abd2e0e664b1"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-138",
+   "first_commit": "98e88fbe95cbbbe6ece7a1efba3a836797c69117",
+   "change_commits": [
+    "4bbefa8153e86b74ea510114cc9d23dc8e1e04d3"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-139",
+   "first_commit": "f5bfae831c2defabb032c11b354a3c73511ded2f",
+   "change_commits": [
+    "848bcedb07895a9528a06a23c87799cf8ae84dcc"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-140",
+   "first_commit": "37d84dba366d51f3e38b8dc91fa8723b5ae850d2",
+   "change_commits": [
+    "e9cdd7badbe356b838d72539784376bf0f8b079d",
+    "16fa266035b5db24412b43ba8a233c2563f5748a"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-141",
+   "first_commit": "e9cdd7badbe356b838d72539784376bf0f8b079d",
+   "change_commits": [
+    "16fa266035b5db24412b43ba8a233c2563f5748a"
+   ],
+   "net": "add-only",
+   "deleted_lines": 0,
+   "added_lines": 5
+  },
+  {
+   "id": "WL-148",
+   "first_commit": "3c9054511d810b86d3f24381ecbd92aea79f9998",
+   "change_commits": [
+    "b6b43019072d9e3b50a862fb681ed059be7d14f8"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 1,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-189",
+   "first_commit": "316895ff58ba75ac3fa5113efbe35b9819c5b177",
+   "change_commits": [
+    "c4897638f98b0c874a5bc794fb5c380a31ca6474"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-190",
+   "first_commit": "c4897638f98b0c874a5bc794fb5c380a31ca6474",
+   "change_commits": [
+    "49ec63ca75f85c57c801d2fb0be9b25ac92e952f"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-191",
+   "first_commit": "49ec63ca75f85c57c801d2fb0be9b25ac92e952f",
+   "change_commits": [
+    "d08c1cd362c095d33437b8280e91bb5496b098a4"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-192",
+   "first_commit": "d08c1cd362c095d33437b8280e91bb5496b098a4",
+   "change_commits": [
+    "cbc9ae77e43e592be345c43c2b1e390d54d2ff15"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-193",
+   "first_commit": "cbc9ae77e43e592be345c43c2b1e390d54d2ff15",
+   "change_commits": [
+    "10e7735d71ca14e9762d7da902c1510b3347e950"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-194",
+   "first_commit": "10e7735d71ca14e9762d7da902c1510b3347e950",
+   "change_commits": [
+    "f94561de224aa07126ec62b69d137a2b3affe5a4"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 4,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-216",
+   "first_commit": "f94561de224aa07126ec62b69d137a2b3affe5a4",
+   "change_commits": [
+    "ee8c220cbc57d7ecbbd2c81bec83c33d21046090"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 2,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-218",
+   "first_commit": "ee8c220cbc57d7ecbbd2c81bec83c33d21046090",
+   "change_commits": [
+    "5e1c2d7928309f35c05c07b8876862aa7e95c857"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 2,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-219",
+   "first_commit": "5e1c2d7928309f35c05c07b8876862aa7e95c857",
+   "change_commits": [
+    "d81bec9fa9b5c420f1183a18ff4474be7003f969"
+   ],
+   "net": "delete-only",
+   "deleted_lines": 2,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-222",
+   "first_commit": "927ee0658825806ff6256cd0262f75d848627529",
+   "change_commits": [
+    "66a7b11107977fe91a2e87211de76e4cf216bc63",
+    "2705dd51e5ac9061c47d58112dc295e938fe21cd"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-283",
+   "first_commit": "20ddd512c503c690a9c2e66db903e7053c012802",
+   "change_commits": [
+    "97ba725dea75a078e5cc7404fe678eb836094057",
+    "2705dd51e5ac9061c47d58112dc295e938fe21cd"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-282",
+   "first_commit": "20ddd512c503c690a9c2e66db903e7053c012802",
+   "change_commits": [
+    "97ba725dea75a078e5cc7404fe678eb836094057",
+    "2705dd51e5ac9061c47d58112dc295e938fe21cd"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-330",
+   "first_commit": "f9e750e087b7a582545f49f3014cb3a5df02e939",
+   "change_commits": [
+    "5cf293220f3e2730179894354f1f72c796ac6820",
+    "5b2ff1a05d6e64ce12d7e48b657e48aaad5c21a8"
+   ],
+   "net": "unchanged-net",
+   "deleted_lines": 0,
+   "added_lines": 0
+  },
+  {
+   "id": "WL-331",
+   "first_commit": "5cf293220f3e2730179894354f1f72c796ac6820",
+   "change_commits": [
+    "01b928b59f3f0ee348af04e08d14ac7a11eef3f9"
+   ],
+   "net": "add-only",
+   "deleted_lines": 0,
+   "added_lines": 2
+  },
+  {
+   "id": "WL-377",
+   "first_commit": "9a06f035a159905eee640da920addb990724be3c",
+   "change_commits": [
+    "e234cb6864aeaa3b4af078122fe6e652ed3376d5",
+    "0121f00c3bbea563af1726fc4ac894bdd65c4939"
+   ],
+   "net": "replace",
+   "deleted_lines": 3,
+   "added_lines": 4
+  },
+  {
+   "id": "WL-384",
+   "first_commit": "84ba1b81f8f19e423f21a508cbc7e814ce274943",
+   "change_commits": [
+    "5327985e27bdaf40da524ea5d83c64431337ba8d"
+   ],
+   "net": "replace",
+   "deleted_lines": 1,
+   "added_lines": 1
+  },
+  {
+   "id": "WL-424",
+   "first_commit": "f09a4964b096c45aa35183e6860294990935005f",
+   "change_commits": [
+    "957f6a6bf09423c66a403db6395c27c1fbe7535c"
+   ],
+   "net": "replace",
+   "deleted_lines": 2,
+   "added_lines": 2
+  }
+ ]
+}

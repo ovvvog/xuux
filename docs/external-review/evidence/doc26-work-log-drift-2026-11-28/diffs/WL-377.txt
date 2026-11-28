@@ -1,0 +1,9 @@
+# WL-377 — first merged at 9a06f035a159905eee640da920addb990724be3c; changed at e234cb6864aeaa3b4af078122fe6e652ed3376d5, 0121f00c3bbea563af1726fc4ac894bdd65c4939
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- `docs/external-review/probes/wl-377/r5-b-independent-probe.mjs` · `docs/external-review/probes/wl-377/r5-b-independent-probe-results.json` · `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (مولَّد)
+- الفرعُ `work/reprod-r5-b` — كوميتُ المسبارِ `1621798c` وتصحيحُ lint/format `e93dcd7e`/`f9c54365`؛ طلبُ الدمجِ **#328**.
+- - لم يُفتحْ بندُ `council-evidence-matrix.md` (‏الملفُ غيرُ موجودٍ في المستودعِ ولا في تاريخِه — راجِع WL-378) ولا جولةُ مجلسٍ جديدة (‏راجِع WL-379).
++ **في طلبِ الدمجِ #328 (مُدمَجٌ قبلَ هذا الطلبِ):** `docs/external-review/probes/wl-377/r5-b-independent-probe.mjs` · `docs/external-review/probes/wl-377/r5-b-independent-probe-results.json`
++ **في طلبِ الدمجِ #329 (هذا الطلبِ):** `docs/roadmap/05-work-log.md` · `PROJECT_STATUS.md` · `docs/HANDOFF.md` (مولَّد)
++ الفرعُ `work/reprod-r5-b` — كوميتُ المسبارِ `1621798c` وتصحيحُ lint/format `e93dcd7e`/`f9c54365`؛ طلبُ الدمجِ **#328** (مُدمَجٌ في `7bf95037`).
++ - لم يُفتحْ بندُ `council-evidence-matrix.md` (‏الملفُ غيرُ موجودٍ في المستودعِ ولا في تاريخِه — مصفوفاتُ المقارنةِ الحاليةُ في `docs/external-review/evidence-packages/`) ولا جولةُ مجلسٍ جديدة (لا نموذجانِ من مزوّدين مختلفين ولا مسارُ تقاريرٍ خامّةٍ جديدةٌ مُتاحةٌ).

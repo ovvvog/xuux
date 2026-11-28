@@ -1,0 +1,4 @@
+# WL-148 — first merged at 3c9054511d810b86d3f24381ecbd92aea79f9998; changed at b6b43019072d9e3b50a862fb681ed059be7d14f8
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الأثر على المسارات الأخرى:** لا أثرَ — لا خطوةَ تحرَّكتْ، ولا بوّابةَ فُتحَتْ.
+

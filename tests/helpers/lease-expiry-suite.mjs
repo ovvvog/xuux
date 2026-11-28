@@ -59,6 +59,8 @@ export function defineLeaseExpirySuite(part) {
         // ‏`LIVE-75/C1-RACE` (‏`WL-619`): جدولُ مِسبارٍ لـC1 وحدَه بمشغِّلَي ساعةٍ يُعلِنانِ بـNOTICE (‏تصلُ ولو فشلت العبارة):
         // ‏`xf_guard_zz_l75` على مستوى العبارة — يُطلَقُ بعدَ `xf_guard` مباشرةً (‏الترتيبُ أبجديّ) فساعتُه حدٌّ أعلى لقراءةِ الزناد؛
         // ‏و`l75_row` قبلَ الصفِّ — يُطلَقُ قبلَ WITH CHECK مباشرةً فساعتُه حدٌّ أدنى لفحصِ RLS. تحتَ HALTED فيُغطّى (‏زنادٌ وسياسة).
+        // ‏`WL-632`: و`l75_pre` على مستوى العبارةِ **قبلَ** `xf_guard` (‏`l` قبلَ `x`) — ساعتُه حدٌّ أدنى لقراءةِ الزناد، بإعلانٍ
+        // ‏مستقلٍّ (‏`PRE`) لا يختلطُ بـ`STATEMENT`. فقراءةُ الزنادِ محصورةٌ بينَ `PRE` و`STATEMENT` لا مُقدَّرةٌ بأحدِهما.
         for (const sql of [
           `CREATE TABLE state.l75_c1_probe (id integer PRIMARY KEY, v text NOT NULL DEFAULT '')`,
           `CREATE FUNCTION state.l75_clock_note() RETURNS trigger LANGUAGE plpgsql AS $f$
@@ -68,6 +70,13 @@ export function defineLeaseExpirySuite(part) {
              RETURN NULL;
            END $f$`,
           `REVOKE ALL ON FUNCTION state.l75_clock_note() FROM PUBLIC`,
+          `CREATE FUNCTION state.l75_clock_pre() RETURNS trigger LANGUAGE plpgsql AS $f$
+           BEGIN
+             RAISE NOTICE 'l75-clock PRE %', (extract(epoch FROM clock_timestamp()) * 1000)::float8;
+             RETURN NULL;
+           END $f$`,
+          `REVOKE ALL ON FUNCTION state.l75_clock_pre() FROM PUBLIC`,
+          `CREATE TRIGGER l75_pre BEFORE INSERT ON state.l75_c1_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_pre()`,
           `CREATE TRIGGER xf_guard_zz_l75 BEFORE INSERT ON state.l75_c1_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_note()`,
           `CREATE TRIGGER l75_row BEFORE INSERT ON state.l75_c1_probe FOR EACH ROW EXECUTE FUNCTION state.l75_clock_note()`,
           `GRANT SELECT, INSERT ON state.l75_c1_probe TO xuux_worker`,
@@ -801,11 +810,11 @@ export function defineLeaseExpirySuite(part) {
         /** @type {Array<{ level: string, at: number }>} */
         let clocks = [];
         a.c.on('notice', (/** @type {any} */ n) => {
-          const m = /^l75-clock (STATEMENT|ROW) ([0-9.]+)$/u.exec(String(n.message));
+          const m = /^l75-clock (PRE|STATEMENT|ROW) ([0-9.]+)$/u.exec(String(n.message));
           if (m) clocks.push({ level: String(m[1]), at: Number(m[2]) });
         });
         await untilDb(a.exp - 400);
-        /** @type {Array<{ at: number, ok: boolean, code?: string | undefined, message?: string | undefined, guardAt?: number | undefined, rowAt?: number | undefined, id: number }>} */
+        /** @type {Array<{ at: number, ok: boolean, code?: string | undefined, message?: string | undefined, preAt?: number | undefined, guardAt?: number | undefined, rowAt?: number | undefined, id: number }>} */
         const seen = [];
         for (let id = 60900; id < 61100; id++) {
           clocks = [];
@@ -820,6 +829,7 @@ export function defineLeaseExpirySuite(part) {
             ok: r.ok,
             code: /** @type {any} */ (r).code,
             message: /** @type {any} */ (r).message,
+            preAt: clocks.find((c) => c.level === 'PRE')?.at,
             guardAt: clocks.find((c) => c.level === 'STATEMENT')?.at,
             rowAt: clocks.find((c) => c.level === 'ROW')?.at,
             id,
@@ -844,6 +854,8 @@ export function defineLeaseExpirySuite(part) {
             'XF009 والمِسبارُ بعدَ الزنادِ أُطلِق — الرفضُ ليس من الزناد',
           );
           assert.equal(rejected.rowAt, undefined);
+          // ‏`WL-632`: و`PRE` أُطلِقَ قبلَ رفضِ الزناد — دليلٌ على أنّه قبلَ `xf_guard` في الترتيبِ فعلاً، لا افتراضاً من الاسم.
+          assert.ok(rejected.preAt !== undefined, 'مِسبارُ PRE يُطلَقُ قبلَ xf_guard');
         } else {
           // ‏مسارُ C1-RACE وحدَه: الزنادُ اجتازَ الساعةَ قبلَ الانقضاء، ثمّ RLS رفضت الصفّ — لا «أيُّ 42501».
           assert.equal(
@@ -855,10 +867,26 @@ export function defineLeaseExpirySuite(part) {
             String(rejected?.message),
             /new row violates row-level security policy for table "l75_c1_probe"/u,
           );
+          // ‏`WL-632`: قراءةُ الزنادِ في [‏`PRE`، `STATEMENT`]. كانَ الشرطُ `STATEMENT < exp` — أي الحدُّ الأعلى — فرسبَ على CI
+          // ‏(‏run 46105237618) بـ`STATEMENT − exp = +0.072 ms`: انقضاءٌ وقعَ بينَ قراءةِ الزنادِ ومِسبارِه، لا زنادٌ اجتازَ بعدَه.
+          // ‏فالمُثبَتُ بالقياس: `PRE < exp` شرطٌ لازم (‏وإلّا فقراءةُ الزنادِ بعدَ الانقضاءِ قطعاً وكانَ عليه XF009)، والحصرُ
+          // ‏معلَن. وإن وقعَ `exp` داخلَ [‏`PRE`، `STATEMENT`] فالقياسُ لا يفصلُ — يُعلَنُ ولا يُحسَبُ إثباتاً؛ والفصلُ الحتميُّ في C1-RACE.
+          assert.ok(rejected?.preAt !== undefined, 'مِسبارُ ما قبلَ الزنادِ أُطلِق');
           assert.ok(
-            rejected?.guardAt !== undefined && rejected.guardAt < a.exp,
-            `42501 والزنادُ لم يجتز الساعةَ قبلَ الانقضاء (${Number(rejected?.guardAt) - a.exp} ms) — كانَ عليه XF009`,
+            rejected?.guardAt !== undefined &&
+              rejected?.preAt !== undefined &&
+              rejected.preAt <= rejected.guardAt,
+            'ترتيبُ المِسبارَين: PRE قبلَ STATEMENT',
           );
+          assert.ok(
+            Number(rejected?.preAt) < a.exp,
+            `42501 والزنادُ قرأَ الساعةَ بعدَ الانقضاءِ قطعاً (‏PRE − exp = ${Number(rejected?.preAt) - a.exp} ms) — كانَ عليه XF009`,
+          );
+          if (Number(rejected?.guardAt) >= a.exp)
+            t_note('L75-C1-BRACKET', {
+              preMinusExpiryMs: Number(rejected?.preAt) - a.exp,
+              guardMinusExpiryMs: Number(rejected?.guardAt) - a.exp,
+            });
           assert.ok(rejected?.rowAt !== undefined, 'RLS رفضت صفّاً أُنتِج');
         }
         const lastOk = /** @type {{ at: number }} */ (accepted.at(-1)).at;
@@ -883,6 +911,7 @@ export function defineLeaseExpirySuite(part) {
           lastAcceptedBeforeExpiryMs: Math.round(a.exp - lastOk),
           firstRejectedAfterExpiryMs: Math.round(Number(rejected?.at) - a.exp),
           rejectedCode: rejected?.code,
+          rejectedPreMinusExpiryMs: r2(rejected?.preAt),
           rejectedGuardMinusExpiryMs: r2(rejected?.guardAt),
           rejectedRowMinusExpiryMs: r2(rejected?.rowAt),
           lastAcceptedRowMinusExpiryMs: r2(accepted.at(-1)?.rowAt),

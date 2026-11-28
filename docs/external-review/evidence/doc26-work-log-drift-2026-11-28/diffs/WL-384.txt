@@ -1,0 +1,4 @@
+# WL-384 — first merged at 84ba1b81f8f19e423f21a508cbc7e814ce274943; changed at 5327985e27bdaf40da524ea5d83c64431337ba8d
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **ما لم يُغلقَ:** `R5-A-06` (اختلافٌ: «أ» `closed` و«ب» `open` — العضوَانِ اختلفا فبقيَتْ `open`) · `R5-B-05` (كلاهما `open`) · `R5-B-10` (اختلافٌ: «أ» `open` و«ب» `closed`) · `R6-B-03` (اختلافٌ: «أ» `closed` و«ب» `open` لغيابِ قاعدةِ PostgreSQL حقيقيّة) — كلُّ هذهِ بقيَتْ `open`.
++ - **ما لم يُغلقَ:** `R5-A-06` (اختلافٌ: العضوُ «gpt-6-1-sol» حكمَ `open` والعضوُ «claude-opus-5-5» حكمَ `closed` — اختلفا فبقيَتْ `open`) · `R5-B-05` (كلاهما `open`) · `R5-B-10` (اختلافٌ: «gpt-6-1-sol» `open` و«claude-opus-5-5» `closed`) · `R6-B-03` (اختلافٌ: «gpt-6-1-sol» `closed` و«claude-opus-5-5» `open` لغيابِ قاعدةِ PostgreSQL حقيقيّة) — كلُّ هذهِ بقيَتْ `open`.

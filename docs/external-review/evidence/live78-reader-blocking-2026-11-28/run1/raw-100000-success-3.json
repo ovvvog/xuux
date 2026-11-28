@@ -1,0 +1,2058 @@
+{
+ "row": {
+  "size": 100000,
+  "scenario": "success",
+  "rep": 3,
+  "body_bytes": 100,
+  "fill_ms": 2166,
+  "backup_ms": 1118,
+  "src_db_bytes": 47380159,
+  "dump_bytes": 1054677,
+  "restore_exit": {
+   "code": 0,
+   "signal": null
+  },
+  "restore_tail": [
+   "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ cae052e83d8acdc9b9de62efc496b30478274aade797ffbbd0ec7dbb4b6d98fa طابقت (‏695 مللي ثانية).",
+   "زمن الاستعادة المقاس: 2186 مللي ثانية.",
+   "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+  ],
+  "target_before": {
+   "n": 1000,
+   "old": 1000,
+   "new": 0,
+   "w": 0
+  },
+  "target_after": {
+   "n": 100019,
+   "old": 0,
+   "new": 100000,
+   "w": 19
+  },
+  "tamper": false,
+  "summary": {
+   "restore_ms": 3257,
+   "exclusive_lock_after_ms": 290,
+   "exclusive_window_ms": 2967,
+   "clients": {
+    "reader-pre": {
+     "queries": 54,
+     "ok": 54,
+     "errors": {},
+     "latency_ms": {
+      "n": 54,
+      "min": 0.22900000028312206,
+      "p50": 0.5310000004246831,
+      "p95": 21.002999999560416,
+      "p99": 27.79200000036508,
+      "max": 2899.8449999997392
+     },
+     "blocked_over_100ms": 1,
+     "max_block_ms": 2899.8449999997392,
+     "semantic_anomalies": 0,
+     "connects": [
+      {
+       "ok": true,
+       "ms": 21,
+       "code": null
+      }
+     ]
+    },
+    "reader-mid": {
+     "queries": 24,
+     "ok": 24,
+     "errors": {},
+     "latency_ms": {
+      "n": 24,
+      "min": 5.300999999977648,
+      "p50": 10.472999999299645,
+      "p95": 22.0339999999851,
+      "p99": 22.04700000025332,
+      "max": 2874.638000000268
+     },
+     "blocked_over_100ms": 1,
+     "max_block_ms": 2874.638000000268,
+     "semantic_anomalies": 0,
+     "connects": [
+      {
+       "ok": true,
+       "ms": 43,
+       "code": null
+      }
+     ]
+    },
+    "reader-lt": {
+     "queries": 60,
+     "ok": 55,
+     "errors": {
+      "55P03": 5
+     },
+     "latency_ms": {
+      "n": 60,
+      "min": 0.22699999995529652,
+      "p50": 0.8319999994710088,
+      "p95": 500.4740000003949,
+      "p99": 501.1459999997169,
+      "max": 508.1699999999255
+     },
+     "blocked_over_100ms": 6,
+     "max_block_ms": 508.1699999999255,
+     "semantic_anomalies": 0,
+     "connects": [
+      {
+       "ok": true,
+       "ms": 25,
+       "code": null
+      }
+     ]
+    },
+    "reader-st": {
+     "queries": 57,
+     "ok": 56,
+     "errors": {
+      "57014": 1
+     },
+     "latency_ms": {
+      "n": 57,
+      "min": 0.23300000000745058,
+      "p50": 0.9170000003650784,
+      "p95": 24.08699999935925,
+      "p99": 874.0420000003651,
+      "max": 2000.5200000004843
+     },
+     "blocked_over_100ms": 2,
+     "max_block_ms": 2000.5200000004843,
+     "semantic_anomalies": 0,
+     "connects": [
+      {
+       "ok": true,
+       "ms": 13,
+       "code": null
+      }
+     ]
+    },
+    "writer": {
+     "queries": 35,
+     "ok": 35,
+     "errors": {},
+     "latency_ms": {
+      "n": 35,
+      "min": 0.5609999997541308,
+      "p50": 0.7160000000149012,
+      "p95": 8.492999999783933,
+      "p99": 9.436999999918044,
+      "max": 2850.6500000003725
+     },
+     "blocked_over_100ms": 1,
+     "max_block_ms": 2850.6500000003725,
+     "semantic_anomalies": 0,
+     "connects": [
+      {
+       "ok": true,
+       "ms": 8,
+       "code": null
+      }
+     ]
+    }
+   }
+  },
+  "loadavg": [
+   2.28,
+   1.5,
+   1.26
+  ]
+ },
+ "logs": {
+  "reader-pre": [
+   {
+    "kind": "reader-pre",
+    "op": "connect",
+    "t0": 5661908.897,
+    "t1": 5661929.765,
+    "ok": true
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5661929.768,
+    "t1": 5661930.748,
+    "ok": true,
+    "value": 1001
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5661955.801,
+    "t1": 5661956.111,
+    "ok": true,
+    "value": 1001
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5661981.642,
+    "t1": 5661981.925,
+    "ok": true,
+    "value": 1002
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662006.683,
+    "t1": 5662006.944,
+    "ok": true,
+    "value": 1002
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662031.379,
+    "t1": 5662031.646,
+    "ok": true,
+    "value": 1003
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662056.469,
+    "t1": 5662056.796,
+    "ok": true,
+    "value": 1003
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662081.522,
+    "t1": 5662081.859,
+    "ok": true,
+    "value": 1004
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662106.688,
+    "t1": 5662106.953,
+    "ok": true,
+    "value": 1004
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662131.124,
+    "t1": 5662131.384,
+    "ok": true,
+    "value": 1005
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662156.294,
+    "t1": 5662156.622,
+    "ok": true,
+    "value": 1005
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662181.16,
+    "t1": 5662181.409,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662206.263,
+    "t1": 5662206.524,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662231.879,
+    "t1": 5662232.218,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662258.027,
+    "t1": 5662258.256,
+    "ok": true,
+    "value": 1007
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662283.719,
+    "t1": 5662283.957,
+    "ok": true,
+    "value": 1008
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662308.746,
+    "t1": 5662309.114,
+    "ok": true,
+    "value": 1008
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662334.669,
+    "t1": 5662334.9,
+    "ok": true,
+    "value": 1009
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662359.728,
+    "t1": 5662359.974,
+    "ok": true,
+    "value": 1009
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662387.45,
+    "t1": 5662387.815,
+    "ok": true,
+    "value": 1010
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662412.863,
+    "t1": 5662413.142,
+    "ok": true,
+    "value": 1010
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662438.33,
+    "t1": 5662438.571,
+    "ok": true,
+    "value": 1011
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662463.821,
+    "t1": 5662464.104,
+    "ok": true,
+    "value": 1011
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662489.221,
+    "t1": 5662489.511,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662514.145,
+    "t1": 5662514.488,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662539.264,
+    "t1": 5662539.996,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662565.406,
+    "t1": 5662565.686,
+    "ok": true,
+    "value": 1013
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662590.494,
+    "t1": 5662591.505,
+    "ok": true,
+    "value": 1013
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662616.943,
+    "t1": 5662617.474,
+    "ok": true,
+    "value": 1014
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662643.511,
+    "t1": 5662644.061,
+    "ok": true,
+    "value": 1014
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662670.266,
+    "t1": 5662670.788,
+    "ok": true,
+    "value": 1015
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662695.512,
+    "t1": 5662695.951,
+    "ok": true,
+    "value": 1016
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5662721.082,
+    "t1": 5665620.927,
+    "ok": true,
+    "value": 100000
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665646.035,
+    "t1": 5665667.038,
+    "ok": true,
+    "value": 100002
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665693.015,
+    "t1": 5665705.93,
+    "ok": true,
+    "value": 100002
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665730.453,
+    "t1": 5665745.466,
+    "ok": true,
+    "value": 100003
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665770.472,
+    "t1": 5665775.53,
+    "ok": true,
+    "value": 100004
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665801.068,
+    "t1": 5665822.266,
+    "ok": true,
+    "value": 100004
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665847.819,
+    "t1": 5665859.294,
+    "ok": true,
+    "value": 100005
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665885.134,
+    "t1": 5665912.926,
+    "ok": true,
+    "value": 100006
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665937.26,
+    "t1": 5665954.178,
+    "ok": true,
+    "value": 100007
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5665979.523,
+    "t1": 5665986.623,
+    "ok": true,
+    "value": 100008
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666012.036,
+    "t1": 5666032.126,
+    "ok": true,
+    "value": 100009
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666060.043,
+    "t1": 5666070.986,
+    "ok": true,
+    "value": 100009
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666095.431,
+    "t1": 5666105.599,
+    "ok": true,
+    "value": 100010
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666130.525,
+    "t1": 5666136.347,
+    "ok": true,
+    "value": 100011
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666161.481,
+    "t1": 5666168.113,
+    "ok": true,
+    "value": 100011
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666193.128,
+    "t1": 5666198.563,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666223.097,
+    "t1": 5666227.973,
+    "ok": true,
+    "value": 100013
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666252.434,
+    "t1": 5666258.806,
+    "ok": true,
+    "value": 100013
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666283.206,
+    "t1": 5666290.942,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666315.228,
+    "t1": 5666329.02,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666354.48,
+    "t1": 5666370.404,
+    "ok": true,
+    "value": 100015
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666395.53,
+    "t1": 5666409.57,
+    "ok": true,
+    "value": 100016
+   },
+   {
+    "kind": "reader-pre",
+    "op": "q",
+    "t0": 5666434.733,
+    "t1": 5666441.668,
+    "ok": true,
+    "value": 100017
+   }
+  ],
+  "reader-mid": [
+   {
+    "kind": "reader-mid",
+    "op": "connect",
+    "t0": 5662703.449,
+    "t1": 5662745.985,
+    "ok": true
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5662745.987,
+    "t1": 5665620.625,
+    "ok": true,
+    "value": 100000
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665645.968,
+    "t1": 5665659.644,
+    "ok": true,
+    "value": 100001
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665684.282,
+    "t1": 5665705.743,
+    "ok": true,
+    "value": 100002
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665730.437,
+    "t1": 5665741.942,
+    "ok": true,
+    "value": 100003
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665766.355,
+    "t1": 5665776.828,
+    "ok": true,
+    "value": 100004
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665801.158,
+    "t1": 5665823.205,
+    "ok": true,
+    "value": 100004
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665848.913,
+    "t1": 5665860.429,
+    "ok": true,
+    "value": 100005
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665885.32,
+    "t1": 5665897.789,
+    "ok": true,
+    "value": 100006
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665922.399,
+    "t1": 5665931.143,
+    "ok": true,
+    "value": 100007
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665956.449,
+    "t1": 5665968.115,
+    "ok": true,
+    "value": 100007
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5665998.142,
+    "t1": 5666003.466,
+    "ok": true,
+    "value": 100008
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666031.18,
+    "t1": 5666042.409,
+    "ok": true,
+    "value": 100009
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666068.51,
+    "t1": 5666083.334,
+    "ok": true,
+    "value": 100010
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666108.078,
+    "t1": 5666117.303,
+    "ok": true,
+    "value": 100010
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666148.23,
+    "t1": 5666154.65,
+    "ok": true,
+    "value": 100011
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666179.482,
+    "t1": 5666185.35,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666210.012,
+    "t1": 5666215.313,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666240.163,
+    "t1": 5666246.459,
+    "ok": true,
+    "value": 100013
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666271.133,
+    "t1": 5666282.13,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666307.634,
+    "t1": 5666315.203,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666340.13,
+    "t1": 5666346.239,
+    "ok": true,
+    "value": 100015
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666371.484,
+    "t1": 5666378.091,
+    "ok": true,
+    "value": 100015
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666403.651,
+    "t1": 5666412.033,
+    "ok": true,
+    "value": 100016
+   },
+   {
+    "kind": "reader-mid",
+    "op": "q",
+    "t0": 5666437.168,
+    "t1": 5666459.202,
+    "ok": true,
+    "value": 100017
+   }
+  ],
+  "reader-lt": [
+   {
+    "kind": "reader-lt",
+    "op": "connect",
+    "t0": 5661909.014,
+    "t1": 5661934.428,
+    "ok": true
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5661934.43,
+    "t1": 5661935.254,
+    "ok": true,
+    "value": 1001
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5661960.188,
+    "t1": 5661960.439,
+    "ok": true,
+    "value": 1001
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5661986,
+    "t1": 5661986.248,
+    "ok": true,
+    "value": 1002
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662012.021,
+    "t1": 5662012.248,
+    "ok": true,
+    "value": 1002
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662037.764,
+    "t1": 5662038.028,
+    "ok": true,
+    "value": 1003
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662063.906,
+    "t1": 5662064.229,
+    "ok": true,
+    "value": 1003
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662089.942,
+    "t1": 5662090.206,
+    "ok": true,
+    "value": 1004
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662116.035,
+    "t1": 5662116.3,
+    "ok": true,
+    "value": 1004
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662141.469,
+    "t1": 5662141.776,
+    "ok": true,
+    "value": 1005
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662166.725,
+    "t1": 5662167.031,
+    "ok": true,
+    "value": 1005
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662192.497,
+    "t1": 5662192.787,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662217.626,
+    "t1": 5662217.952,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662242.32,
+    "t1": 5662242.584,
+    "ok": true,
+    "value": 1007
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662267.342,
+    "t1": 5662267.605,
+    "ok": true,
+    "value": 1007
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662293.039,
+    "t1": 5662293.283,
+    "ok": true,
+    "value": 1008
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662318.202,
+    "t1": 5662318.467,
+    "ok": true,
+    "value": 1008
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662343.996,
+    "t1": 5662344.268,
+    "ok": true,
+    "value": 1009
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662370.067,
+    "t1": 5662370.318,
+    "ok": true,
+    "value": 1009
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662395.905,
+    "t1": 5662396.198,
+    "ok": true,
+    "value": 1010
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662421.057,
+    "t1": 5662421.302,
+    "ok": true,
+    "value": 1010
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662446.514,
+    "t1": 5662446.808,
+    "ok": true,
+    "value": 1011
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662471.296,
+    "t1": 5662471.571,
+    "ok": true,
+    "value": 1011
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662496.375,
+    "t1": 5662496.682,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662521.338,
+    "t1": 5662521.644,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662546.175,
+    "t1": 5662546.477,
+    "ok": true,
+    "value": 1013
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662571.297,
+    "t1": 5662572.129,
+    "ok": true,
+    "value": 1013
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662598.014,
+    "t1": 5662598.489,
+    "ok": true,
+    "value": 1014
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662624.045,
+    "t1": 5662624.542,
+    "ok": true,
+    "value": 1014
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662649.223,
+    "t1": 5662649.712,
+    "ok": true,
+    "value": 1015
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662674.908,
+    "t1": 5662675.407,
+    "ok": true,
+    "value": 1015
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5662701.025,
+    "t1": 5663202.171,
+    "ok": false,
+    "code": "55P03",
+    "msg": "canceling statement due to lock timeout"
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5663228.083,
+    "t1": 5663736.253,
+    "ok": false,
+    "code": "55P03",
+    "msg": "canceling statement due to lock timeout"
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5663761.476,
+    "t1": 5664261.95,
+    "ok": false,
+    "code": "55P03",
+    "msg": "canceling statement due to lock timeout"
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5664287.192,
+    "t1": 5664787.646,
+    "ok": false,
+    "code": "55P03",
+    "msg": "canceling statement due to lock timeout"
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5664812.761,
+    "t1": 5665313.279,
+    "ok": false,
+    "code": "55P03",
+    "msg": "canceling statement due to lock timeout"
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665338.424,
+    "t1": 5665614.299,
+    "ok": true,
+    "value": 100000
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665639.683,
+    "t1": 5665661.752,
+    "ok": true,
+    "value": 100001
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665686.405,
+    "t1": 5665691.923,
+    "ok": true,
+    "value": 100002
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665717.018,
+    "t1": 5665722.329,
+    "ok": true,
+    "value": 100003
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665747.579,
+    "t1": 5665753.166,
+    "ok": true,
+    "value": 100003
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665778.108,
+    "t1": 5665782.952,
+    "ok": true,
+    "value": 100004
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665807.787,
+    "t1": 5665823.967,
+    "ok": true,
+    "value": 100005
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665848.976,
+    "t1": 5665861.76,
+    "ok": true,
+    "value": 100006
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665886.438,
+    "t1": 5665915.29,
+    "ok": true,
+    "value": 100006
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665940.461,
+    "t1": 5665954.285,
+    "ok": true,
+    "value": 100007
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5665979.574,
+    "t1": 5665998.28,
+    "ok": true,
+    "value": 100008
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666023.195,
+    "t1": 5666033.419,
+    "ok": true,
+    "value": 100009
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666060.104,
+    "t1": 5666072.695,
+    "ok": true,
+    "value": 100009
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666100.091,
+    "t1": 5666106.574,
+    "ok": true,
+    "value": 100010
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666131.654,
+    "t1": 5666148.205,
+    "ok": true,
+    "value": 100011
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666173.951,
+    "t1": 5666179.465,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666204.651,
+    "t1": 5666209.996,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666235.059,
+    "t1": 5666249.286,
+    "ok": true,
+    "value": 100013
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666274.24,
+    "t1": 5666279.644,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666304.472,
+    "t1": 5666327.765,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666352.375,
+    "t1": 5666360.244,
+    "ok": true,
+    "value": 100015
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666385.203,
+    "t1": 5666391.334,
+    "ok": true,
+    "value": 100016
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666416.441,
+    "t1": 5666422.822,
+    "ok": true,
+    "value": 100016
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666447.774,
+    "t1": 5666456.92,
+    "ok": true,
+    "value": 100017
+   },
+   {
+    "kind": "reader-lt",
+    "op": "q",
+    "t0": 5666481.193,
+    "t1": 5666497.483,
+    "ok": true,
+    "value": 100018
+   }
+  ],
+  "reader-st": [
+   {
+    "kind": "reader-st",
+    "op": "connect",
+    "t0": 5661909.075,
+    "t1": 5661921.934,
+    "ok": true
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5661921.937,
+    "t1": 5661922.854,
+    "ok": true,
+    "value": 1000
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5661947.359,
+    "t1": 5661947.699,
+    "ok": true,
+    "value": 1001
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5661972.528,
+    "t1": 5661972.825,
+    "ok": true,
+    "value": 1001
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5661997.328,
+    "t1": 5661997.598,
+    "ok": true,
+    "value": 1002
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662022.328,
+    "t1": 5662022.561,
+    "ok": true,
+    "value": 1002
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662047.113,
+    "t1": 5662047.366,
+    "ok": true,
+    "value": 1003
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662072.324,
+    "t1": 5662072.643,
+    "ok": true,
+    "value": 1003
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662097.308,
+    "t1": 5662097.591,
+    "ok": true,
+    "value": 1004
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662124.054,
+    "t1": 5662124.353,
+    "ok": true,
+    "value": 1004
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662149.875,
+    "t1": 5662150.188,
+    "ok": true,
+    "value": 1005
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662175.125,
+    "t1": 5662175.401,
+    "ok": true,
+    "value": 1005
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662200.882,
+    "t1": 5662201.165,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662227.034,
+    "t1": 5662227.285,
+    "ok": true,
+    "value": 1006
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662252.677,
+    "t1": 5662252.954,
+    "ok": true,
+    "value": 1007
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662277.693,
+    "t1": 5662277.995,
+    "ok": true,
+    "value": 1007
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662302.366,
+    "t1": 5662302.622,
+    "ok": true,
+    "value": 1008
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662327.57,
+    "t1": 5662327.842,
+    "ok": true,
+    "value": 1008
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662352.363,
+    "t1": 5662352.638,
+    "ok": true,
+    "value": 1009
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662377.407,
+    "t1": 5662377.647,
+    "ok": true,
+    "value": 1009
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662402.288,
+    "t1": 5662402.544,
+    "ok": true,
+    "value": 1010
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662427.962,
+    "t1": 5662428.276,
+    "ok": true,
+    "value": 1010
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662453.683,
+    "t1": 5662458.992,
+    "ok": true,
+    "value": 1011
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662484.149,
+    "t1": 5662484.456,
+    "ok": true,
+    "value": 1011
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662509.727,
+    "t1": 5662510.048,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662536.037,
+    "t1": 5662536.381,
+    "ok": true,
+    "value": 1012
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662562.025,
+    "t1": 5662562.309,
+    "ok": true,
+    "value": 1013
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662587.611,
+    "t1": 5662588.216,
+    "ok": true,
+    "value": 1013
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662613.253,
+    "t1": 5662613.821,
+    "ok": true,
+    "value": 1014
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662638.945,
+    "t1": 5662639.476,
+    "ok": true,
+    "value": 1014
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662664.111,
+    "t1": 5662665.675,
+    "ok": true,
+    "value": 1015
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662690.935,
+    "t1": 5662691.43,
+    "ok": true,
+    "value": 1015
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5662716.878,
+    "t1": 5664717.398,
+    "ok": false,
+    "code": "57014",
+    "msg": "canceling statement due to statement timeout"
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5664742.55,
+    "t1": 5665616.592,
+    "ok": true,
+    "value": 100000
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665641.843,
+    "t1": 5665655.79,
+    "ok": true,
+    "value": 100001
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665680.14,
+    "t1": 5665705.089,
+    "ok": true,
+    "value": 100002
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665730.406,
+    "t1": 5665737.105,
+    "ok": true,
+    "value": 100003
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665762.243,
+    "t1": 5665778.097,
+    "ok": true,
+    "value": 100004
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665803.506,
+    "t1": 5665821.781,
+    "ok": true,
+    "value": 100005
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665847.748,
+    "t1": 5665854.707,
+    "ok": true,
+    "value": 100005
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665879.888,
+    "t1": 5665889.47,
+    "ok": true,
+    "value": 100006
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665915.098,
+    "t1": 5665929.645,
+    "ok": true,
+    "value": 100007
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665954.311,
+    "t1": 5665965.365,
+    "ok": true,
+    "value": 100007
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5665990.797,
+    "t1": 5665998.248,
+    "ok": true,
+    "value": 100008
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666023.149,
+    "t1": 5666041.321,
+    "ok": true,
+    "value": 100009
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666068.424,
+    "t1": 5666082.055,
+    "ok": true,
+    "value": 100010
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666108.037,
+    "t1": 5666118.901,
+    "ok": true,
+    "value": 100010
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666148.292,
+    "t1": 5666160.395,
+    "ok": true,
+    "value": 100011
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666185.365,
+    "t1": 5666191.043,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666216.388,
+    "t1": 5666222.01,
+    "ok": true,
+    "value": 100012
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666247.564,
+    "t1": 5666262.336,
+    "ok": true,
+    "value": 100013
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666287.308,
+    "t1": 5666293.356,
+    "ok": true,
+    "value": 100014
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666318.34,
+    "t1": 5666327.39,
+    "ok": true,
+    "value": 100015
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666352.328,
+    "t1": 5666369.747,
+    "ok": true,
+    "value": 100015
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666394.419,
+    "t1": 5666410.813,
+    "ok": true,
+    "value": 100016
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666436.047,
+    "t1": 5666460.134,
+    "ok": true,
+    "value": 100017
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666487.021,
+    "t1": 5666493.903,
+    "ok": true,
+    "value": 100018
+   },
+   {
+    "kind": "reader-st",
+    "op": "q",
+    "t0": 5666518.601,
+    "t1": 5666528.859,
+    "ok": true,
+    "value": 100018
+   }
+  ],
+  "writer": [
+   {
+    "kind": "writer",
+    "op": "connect",
+    "t0": 5661909.126,
+    "t1": 5661917.366,
+    "ok": true
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5661917.369,
+    "t1": 5661926.806,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5661976.909,
+    "t1": 5661977.535,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662027.644,
+    "t1": 5662028.271,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662078.749,
+    "t1": 5662079.408,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662129.454,
+    "t1": 5662130.033,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662180.484,
+    "t1": 5662181.131,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662231.383,
+    "t1": 5662232.241,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662282.076,
+    "t1": 5662282.637,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662332.944,
+    "t1": 5662333.587,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662386.943,
+    "t1": 5662387.774,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662437.724,
+    "t1": 5662438.311,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662488.555,
+    "t1": 5662489.2,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662539.18,
+    "t1": 5662540.083,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662590.345,
+    "t1": 5662591.976,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662641.603,
+    "t1": 5662644.118,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662694.558,
+    "t1": 5662695.479,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5662745.682,
+    "t1": 5665596.332,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665646.055,
+    "t1": 5665648.247,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665698.147,
+    "t1": 5665701.412,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665751.716,
+    "t1": 5665752.393,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665802.278,
+    "t1": 5665803.665,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665854.085,
+    "t1": 5665854.801,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665905.072,
+    "t1": 5665907.333,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5665957.664,
+    "t1": 5665958.871,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666009.106,
+    "t1": 5666009.963,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666060.132,
+    "t1": 5666068.625,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666118.4,
+    "t1": 5666119.419,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666169.213,
+    "t1": 5666169.828,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666219.503,
+    "t1": 5666220.151,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666270.443,
+    "t1": 5666271.11,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666321.463,
+    "t1": 5666322.069,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666372.608,
+    "t1": 5666373.299,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666423.927,
+    "t1": 5666424.623,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666474.448,
+    "t1": 5666475.104,
+    "ok": true,
+    "value": 1
+   },
+   {
+    "kind": "writer",
+    "op": "q",
+    "t0": 5666525.501,
+    "t1": 5666526.258,
+    "ok": true,
+    "value": 1
+   }
+  ]
+ }
+}

@@ -1,0 +1,4 @@
+# WL-140 — first merged at 37d84dba366d51f3e38b8dc91fa8723b5ae850d2; changed at e9cdd7badbe356b838d72539784376bf0f8b079d, 16fa266035b5db24412b43ba8a233c2563f5748a
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** `5d776782` (المسار) + `ecdcead1` (تقرير الجاهزية)
++ - **الـ commit:** (يُملأ بعد الدفعِ)

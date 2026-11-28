@@ -1,0 +1,4 @@
+# WL-139 — first merged at f5bfae831c2defabb032c11b354a3c73511ded2f; changed at 848bcedb07895a9528a06a23c87799cf8ae84dcc
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** يُقيَّدُ في مُدخلةٍ تالِيةٍ ببصمتِه المقيسةِ (المادة 6 تمنعُ تعديلَ المُدخلةِ بعدَ كتابتِها، والبصمةُ لا تُعرَفُ قبلَ الكوميتِ).
++ - **الـ commit:** `f5bfae831c2defabb032c11b354a3c73511ded2f`

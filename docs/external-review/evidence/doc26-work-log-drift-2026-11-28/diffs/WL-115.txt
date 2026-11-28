@@ -1,0 +1,4 @@
+# WL-115 — first merged at 2efdb9cf6401de0db356cb4e9d3322a4b2bc575b; changed at 0e1a88c3fdfe84a7900ee5f3f1da7de3b129849e, d61742ac889c2dfda6eb61237b875f60456a21d1, 2705dd51e5ac9061c47d58112dc295e938fe21cd
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** `__COMMIT__`
++ - **الـ commit:** `2efdb9cf` على `main` (`feat(environment): دفترُ أثرِ الإقامةِ بسلسلةٍ ورأسٍ ذرّيٍّ — فشلٌ مغلَقٌ على التحقّقِ لا على الإقامةِ (WL-115)`)، مدفوعٌ فوقَ `ef855a42`. **حقلُ البصمةِ أُكمِلَ في دفعةٍ تالية لأنّ البصمةَ لا توجدُ قبلَ الالتزامِ نفسِه — إكمالُ حقلٍ لا تصحيحُ ادّعاء** (نفسُ عرفِ `WL-109`). وحكمُ CI يُقرأُ من المستودعِ لا يُدَّعى هنا.
