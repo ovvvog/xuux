@@ -60,3 +60,6 @@ tests/fixtures/ed25519/*.json
 # نتائجُ القياسِ الخامّةُ (WL-630، LIVE-78): ناتجُ `scripts/bench/live78-reader-blocking.mjs` كما كتبَه
 # بايتاً ببايت؛ الخامُّ هو الدليل، وتنسيقُه يُفقِدُه نسبتَه إلى التشغيلة.
 docs/external-review/evidence/live78-reader-blocking-2026-11-28/
+
+# ناتجُ قياسِ `DOC-26` (‏WL-631) كما كتبَته الأداة.
+docs/external-review/evidence/doc26-work-log-drift-2026-11-28/

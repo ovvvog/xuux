@@ -1,0 +1,4 @@
+# WL-010 — first merged at 7212ecac51cd1f683a06172ef3945e930ea0eb29; changed at 7b6078182680d241a87cd3dcf310ad8f7b07da45, 588745a2f0615d0a51c4562b9a87c732504dc5ea, b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـcommit:** `__C1__` (وحدة التثبيت وأداتها واختباراتها) → التزام التوثيق يليه (لا يمكن أن يحمل معرّفه بنفسه — درس `WL-007`). والنطاق الكامل للخطوة: `dcccb1d3..HEAD` على `main`.
++ - **الـcommit:** `3fa38868` (وحدة التثبيت وأداتها واختباراتها) → التزام التوثيق يليه (لا يمكن أن يحمل معرّفه بنفسه — درس `WL-007`). والنطاق الكامل للخطوة: `dcccb1d3..HEAD` على `main`.

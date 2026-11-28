@@ -1,0 +1,4 @@
+# WL-134 — first merged at eea298d9fffa5c899c7afc4d8178075cb55b9952; changed at 056a2fad0a74278890c3d63be034703a53e792d5
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** يُقيَّدُ في كوميتٍ تالٍ لأنّ البصمةَ لا تُعرَفُ قبلَ إنشائِها.
++ - **الـ commit:** `eea298d9fffa5c899c7afc4d8178075cb55b9952` (وهذا القيدُ في كوميتٍ تالٍ لأنّ البصمةَ لا تُعرَفُ قبلَ إنشائِها)

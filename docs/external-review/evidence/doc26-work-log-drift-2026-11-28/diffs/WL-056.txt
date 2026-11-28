@@ -1,0 +1,6 @@
+# WL-056 — first merged at c3b5c1eb8aa3b025396fa4323db839ffbb946cd8; changed at ff67b0f449933bf404396bd8300bf86b7ea714c5
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **حكمُ CI على الفرعِ:** __CI_166__
+- - **وحكمُ CI على `main` بعد الدمج:** __CI_MAIN__
++ - **حكمُ CI على الفرعِ:** التشغيلةُ **166** على `fix/halt-worker-ack-race` (‏`859d2ca2`) — **success** — `2026-09-02T05:41:10Z` ⇐ `05:44:55Z` — <https://github.com/soaav-svg/xuux/actions/runs/33595674644> — وخطوةُ «الاختبارات» فيها على PostgreSQL حقيقيةٍ: **1021 اختباراً، 1016 ناجحاً، 0 فاشلاً، 5 متخطّاةً**.
++ - **وحكمُ CI على `main` بعد الدمج:** دُمج طلبُ الدمج #15 بتصريحِ المالكِ الصريحِ (الدمجُ قرارٌ سياديٌّ لا يُتّخَذ بالتفويضِ العام)، فصار رأسُ `main` `c3b5c1eb`، والتشغيلةُ **167** عليه — **success** — <https://github.com/soaav-svg/xuux/actions/runs/33597475839>. **فالمسارُ أخضرُ على `main` مقروءاً لا مُدَّعىً.**

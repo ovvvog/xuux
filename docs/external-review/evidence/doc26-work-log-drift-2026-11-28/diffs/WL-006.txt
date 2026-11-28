@@ -1,0 +1,4 @@
+# WL-006 — first merged at 6bd83d9492836ea53165a9054fb5e195420acaf7; changed at bb7847434f822cef3f6905169a8b0a6251b22682, 588745a2f0615d0a51c4562b9a87c732504dc5ea, b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** `__COMMIT__`
++ - **الـ commit:** ``976049d1` (الكود والاختبار) · `f0d67e69` (الحارس) · `6bd83d94` (التوثيق والإصدار)`

@@ -1,0 +1,4 @@
+# WL-116 — first merged at 5c66f0b96af5262a678ca7373116902b5f73db77; changed at 4f595953e528aeb409832a05d305e0c3c6076360
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** `__COMMIT__`
++ - **الـ commit:** `5c66f0b9` على `main`، مدفوعٌ فوقَ `0e1a88c3`. **حقلُ البصمةِ أُكمِلَ في دفعةٍ تالية** (عُرفُ `WL-109` و`WL-115`). وحكمُ CI يُقرأُ من المستودعِ لا يُدَّعى هنا.

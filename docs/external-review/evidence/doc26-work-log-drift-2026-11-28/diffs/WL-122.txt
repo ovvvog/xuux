@@ -1,0 +1,4 @@
+# WL-122 — first merged at d3f5751d939da50824c3b4f3d7d3dd14bb5f904a; changed at 244810f1b80287f83d7f12c858c8eb364e7df3cb
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـ commit:** `docs(external-review): قيدُ نتائجِ الجولةِ الرابعةِ وتشديدُ حاجزِ حزمةِ المراجعةِ` — بصمةُ الالتزامِ تُكمَّلُ في مُدخلةٍ تالية إن لزمَ، والرأسُ بعدَ الدفعِ مُثبَّتٌ في المستودعِ.
++ - **الـ commit:** `d3f5751d` — `docs(external-review): قيدُ نتائجِ الجولةِ الرابعةِ وتشديدُ حاجزِ حزمةِ المراجعةِ`، مدفوعٌ إلى `main` (‏`c8b83b26..d3f5751d`).

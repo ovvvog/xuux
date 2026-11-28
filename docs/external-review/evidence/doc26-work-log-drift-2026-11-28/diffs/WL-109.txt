@@ -1,0 +1,4 @@
+# WL-109 — first merged at 4376ab72fdb9f34ee01b4257c3ed35990eee0de1; changed at d38e4d314a75211f7682746308be24cc8dd91089
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+
++ - **الـ commit:** `4376ab72` على `main` (`feat(persistence): برهانُ انعكاسِ كلِّ هجرةٍ على حدة على PostgreSQL حيّ (WL-109)`)، مدفوعٌ فوقَ `66feb6cc`. **حقلُ البصمةِ أُكمِلَ في دفعةٍ تالية لأنّ البصمةَ لا توجدُ قبلَ الالتزامِ نفسِه — إكمالُ حقلٍ لا تصحيحُ ادّعاء.** وحكمُ CI يُقرأُ من المستودعِ لا يُدَّعى هنا.

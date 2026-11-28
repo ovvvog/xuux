@@ -1,0 +1,4 @@
+# WL-008 — first merged at 751b2afb49dcdb6a502cfe51b59de1e8feb2674c; changed at ced1a28038536ec03eaaa30f41f986aece2c4ced, 588745a2f0615d0a51c4562b9a87c732504dc5ea, b95ea7c1945912f48ac9a7c3ecca7a8e43a8487c
+# multiset line diff (first-merged ⇒ origin/main@a5af34f5ccab1ee53a234401280c8b36bf60f1ff)
+- - **الـcommit:** ‏`__C1__` (التدوير) → `__C2__` (الأداة) → `__C3__` (التوثيق والإصدار). والنطاق الكامل للخطوة: `8b415b41..HEAD` على `main`.
++ - **الـcommit:** ‏`93a49241` (التدوير) → `ce2fde29` (الأداة) → التزام التوثيق يليهما (لا يمكن أن يحمل معرّفه بنفسه — درس WL-007). والنطاق الكامل للخطوة: `8b415b41..HEAD` على `main`.
