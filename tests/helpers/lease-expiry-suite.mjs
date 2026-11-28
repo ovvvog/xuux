@@ -79,6 +79,18 @@ export function defineLeaseExpirySuite(part) {
           `CREATE TRIGGER l75_pre BEFORE INSERT ON state.l75_c1_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_pre()`,
           `CREATE TRIGGER xf_guard_zz_l75 BEFORE INSERT ON state.l75_c1_probe FOR EACH STATEMENT EXECUTE FUNCTION state.l75_clock_note()`,
           `CREATE TRIGGER l75_row BEFORE INSERT ON state.l75_c1_probe FOR EACH ROW EXECUTE FUNCTION state.l75_clock_note()`,
+          // ‏`WL-633` (‏مراجعةُ r6، R1): ‏AFTER ROW ينامُ لقيمةٍ واحدةٍ (‏`after-sleep`) — يُبعِدُ `xf_guard_end` (‏AFTER STATEMENT، 0038)
+          // ‏عن WITH CHECK عبرَ الانقضاء، فيُرى رفضُ زنادِ النهايةِ حتميّاً لا مصادفةً.
+          `CREATE FUNCTION state.l75_after_row() RETURNS trigger LANGUAGE plpgsql AS $f$
+           BEGIN
+             IF NEW.v = 'after-sleep' THEN
+               PERFORM pg_sleep(0.4);
+               RAISE NOTICE 'l75-clock AFTERROW %', (extract(epoch FROM clock_timestamp()) * 1000)::float8;
+             END IF;
+             RETURN NULL;
+           END $f$`,
+          `REVOKE ALL ON FUNCTION state.l75_after_row() FROM PUBLIC`,
+          `CREATE TRIGGER l75_after_row AFTER INSERT ON state.l75_c1_probe FOR EACH ROW EXECUTE FUNCTION state.l75_after_row()`,
           `GRANT SELECT, INSERT ON state.l75_c1_probe TO xuux_worker`,
           // ‏`LIVE-75/RLS-INITPLAN` (‏`WL-620`): مِسبارٌ بصفّينِ في عبارةٍ واحدة. زنادُ الصفِّ (‏BEFORE ROW، ‏VOLATILE) يُعلِنُ لكلِّ صفٍّ
           // ‏كم صفّاً **من العبارةِ نفسِها** صارَ مرئيّاً (‏قاعدةُ PG: زنادُ BEFORE ROW يرى ما أدرجَته العبارةُ من صفوفٍ سابقة) وساعتَه،
@@ -846,7 +858,31 @@ export function defineLeaseExpirySuite(part) {
             s.guardAt !== undefined && s.rowAt !== undefined,
             'المِسبارُ يُعلِنُ لكلِّ عبارة',
           );
-        if (rejected?.code === 'XF009') {
+        const endGuardPath = rejected?.code === 'XF009' && rejected.guardAt !== undefined;
+        if (endGuardPath) {
+          // ‏`WL-633` (‏مراجعةُ r6، R1): مخرجٌ ثالثٌ منذُ 0038 — `xf_guard` وWITH CHECK اجتازا قبلَ الانقضاء، ثمّ `xf_guard_end`
+          // ‏(‏AFTER STATEMENT) قرأَ الساعةَ بعدَه ⇒ XF009 بعدَ صفٍّ أُنتِج. شروطُه اللازمة: `PRE < exp` (‏الزنادُ الأوّلُ اجتاز)،
+          // ‏و`ROW < exp` (‏RLS تقرأُ بعدَ مِسبارِ الصفِّ واجتازت)، والرفضُ وصلَ بعدَ الانقضاء (‏`at` ساعةُ القاعدةِ بعدَه: حدٌّ أعلى لقراءةِ زنادِ النهاية).
+          // ‏والحتميُّ منه في «L75-C1-END».
+          assert.ok(rejected.rowAt !== undefined, 'زنادُ النهاية: صفٌّ أُنتِجَ قبلَه');
+          assert.ok(
+            rejected.preAt !== undefined && rejected.preAt < a.exp,
+            'زنادُ النهاية: الزنادُ الأوّلُ قرأَ قبلَ الانقضاء',
+          );
+          assert.ok(
+            Number(rejected.rowAt) < a.exp,
+            `زنادُ النهاية: ‏RLS اجتازت قبلَ الانقضاء (‏${Number(rejected.rowAt) - a.exp} ms)`,
+          );
+          assert.ok(
+            rejected.at >= a.exp,
+            `زنادُ النهاية رفضَ قبلَ الانقضاء (‏${rejected.at - a.exp} ms) — رفضٌ مبكّر`,
+          );
+          t_note('L75-C1-ENDPATH', {
+            preMinusExpiryMs: Number(rejected.preAt) - a.exp,
+            rowMinusExpiryMs: Number(rejected.rowAt) - a.exp,
+            rejectedMinusExpiryMs: rejected.at - a.exp,
+          });
+        } else if (rejected?.code === 'XF009') {
           // ‏الزنادُ رفضَ قبلَ أيِّ صفّ: لا مِسبارَ بعدَه أُطلِق.
           assert.equal(
             rejected.guardAt,
@@ -983,6 +1019,54 @@ export function defineLeaseExpirySuite(part) {
           rowMinusExpiryMs: Math.round((Number(rowAt) - a.exp) * 100) / 100,
           afterExpiry: after.code,
           afterTookMs: Math.round(took),
+        });
+      });
+
+      test('L75-C1-END: زنادُ النهايةِ حتميّاً (‏0038) — عبارةٌ اجتازت `xf_guard` وWITH CHECK قبلَ الانقضاءِ وانتهت بعدَه ⇒ XF009 ولا صفّ', async () => {
+        const a = await bootWorker('alpha');
+        const ends = (
+          await h.db.pool.query(
+            `SELECT count(*)::int AS n FROM pg_trigger WHERE tgrelid = 'state.l75_c1_probe'::regclass AND tgname = 'xf_guard_end'`,
+          )
+        ).rows[0].n;
+        assert.equal(ends, 1, 'جدولُ المِسبارِ مُغطّى بزنادِ النهاية');
+        /** @type {Array<{ level: string, at: number }>} */
+        const clocks = [];
+        a.c.on('notice', (/** @type {any} */ n) => {
+          const m = /^l75-clock (PRE|STATEMENT|ROW|AFTERROW) ([0-9.]+)$/u.exec(String(n.message));
+          if (m) clocks.push({ level: String(m[1]), at: Number(m[2]) });
+        });
+        const at = (/** @type {string} */ level) => clocks.find((c) => c.level === level)?.at;
+        await untilDb(a.exp - 150);
+        const startedAt = await dbNow();
+        const r = await outcome(
+          a.c,
+          `INSERT INTO state.l75_c1_probe (id, v) VALUES (61300, 'after-sleep')`,
+        );
+        const endedAt = await dbNow();
+        assert.ok(startedAt < a.exp && endedAt > a.exp, 'العبارةُ عبرَت الانقضاء');
+        assert.equal(r.code, 'XF009', String(/** @type {any} */ (r).message));
+        const [pre, st, row, afterRow] = ['PRE', 'STATEMENT', 'ROW', 'AFTERROW'].map(at);
+        assert.ok(
+          pre !== undefined && st !== undefined && pre < a.exp && st < a.exp,
+          'الزنادُ الأوّلُ اجتازَ قبلَ الانقضاء',
+        );
+        assert.ok(row !== undefined && row < a.exp, 'RLS اجتازت قبلَ الانقضاء');
+        assert.ok(
+          afterRow !== undefined && afterRow > a.exp,
+          'ما قبلَ زنادِ النهايةِ بعدَ الانقضاء',
+        );
+        const n = (
+          await h.db.pool.query(
+            'SELECT count(*)::int AS n FROM state.l75_c1_probe WHERE id = 61300',
+          )
+        ).rows[0].n;
+        assert.equal(n, 0, 'لا صفَّ كُتِب');
+        t_note('L75-C1-END', {
+          startBeforeExpiryMs: Math.round(a.exp - startedAt),
+          rowMinusExpiryMs: Math.round((Number(row) - a.exp) * 100) / 100,
+          afterRowMinusExpiryMs: Math.round((Number(afterRow) - a.exp) * 100) / 100,
+          code: r.code,
         });
       });
 
