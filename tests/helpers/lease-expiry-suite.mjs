@@ -754,7 +754,9 @@ export function defineLeaseExpirySuite(part) {
         assert.deepEqual(extra, [], 'لا سياسةَ متساهلةً أخرى تُضَمُّ بـOR');
       });
 
-      test('L75-R1: القراءة — قبلَ الانقضاءِ ترى، وبعدَه صفرُ صفوفٍ بلا خطأ (‏حتى داخلَ REPEATABLE READ بدأت قبلَه)', async () => {
+      // ‏`WL-628` (‏0038): داخلَ معاملةٍ بدأت قبلَ الانقضاءِ لم تَعُد القراءةُ صفراً صامتاً — ‏`window_breach` بساعةِ المعاملة ⇒ ‏XF009
+      // ‏(‏السببُ نفسُه لمؤشّرٍ يُبتَرُ صامتاً: المُستدعي لا يميّزُ الرفضَ من الفراغ). خارجَها (‏معاملةٌ بدأت بعدَه) بلا تغيير: صفرٌ صامت.
+      test('L75-R1: القراءة — قبلَ الانقضاءِ ترى، وبعدَه داخلَ REPEATABLE READ بدأت قبلَه ⇒ XF009، وخارجَها صفرُ صفوفٍ بلا خطأ', async () => {
         await h.db.pool.query(
           `INSERT INTO state.fence_probe (id, v) VALUES (60806, 'visible') ON CONFLICT DO NOTHING`,
         );
@@ -766,15 +768,23 @@ export function defineLeaseExpirySuite(part) {
         await a.c.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
         assert.equal(await count(), 1);
         await untilDb(a.exp + 300);
-        assert.equal(await count(), 0, 'داخلَ المعاملةِ نفسِها: read_ok بساعةٍ حقيقيّةٍ لا بلقطة');
-        await a.c.query('ROLLBACK');
+        const inTx = await outcome(
+          a.c,
+          `SELECT count(*)::int AS n FROM state.fence_probe WHERE id = 60806`,
+        );
+        assert.deepEqual(
+          inTx,
+          { ok: false, code: 'XF009' },
+          'داخلَ المعاملةِ نفسِها: read_ok بساعةٍ حقيقيّةٍ لا بلقطة، والرفضُ مُعلَن',
+        );
+        assert.equal((await outcome(a.c, 'ROLLBACK')).command, 'ROLLBACK');
         assert.equal(await count(), 0, 'خارجَها: لا صفوف');
         // ‏الخطأُ غيرُ مُعلَن: القراءةُ صفرٌ صامت — المُستدعي لا يعرفُ أنّه مرفوض.
         const r = await outcome(a.c, `SELECT id FROM state.fence_probe`);
         assert.deepEqual(r, { ok: true, command: 'SELECT', rows: [] });
         t_note('L75-R1', {
           beforeExpiry: 1,
-          afterExpiryInRepeatableRead: 0,
+          afterExpiryInRepeatableRead: 'XF009',
           afterExpiry: 0,
           error: false,
         });
