@@ -17,6 +17,10 @@
  *
  * وكلا القطعين يقبل `thenDown: true` فيُغلق الوسيطُ بعدهما، كي لا يُعيد المجمّعُ
  * الاتصالَ في الحال ويخفي الانقطاع.
+ *
+ * و`thenRefuseDatabase: name` (‏`WL-627`): بعدَ القطعِ يُرفَضُ كلُّ اتصالٍ **جديدٍ** تُسمّي حزمةُ بدئِه القاعدةَ
+ * `name` (‏مقبسٌ يُغلَقُ حالَ وصولِها)، وتبقى الاتصالاتُ القائمةُ والاتصالاتُ إلى غيرِها — فالسؤالُ عن نتيجةِ
+ * `COMMIT` على الهدفِ يتعذّرُ ووصلةُ الإدارةِ حيّة. (‏بلا TLS: الحزمةُ نصٌّ يُرى.)
  */
 
 import net from 'node:net';
@@ -33,6 +37,8 @@ export async function startFaultProxy(target) {
   /** @type {net.Server | null} */
   let server = null;
   let connections = 0;
+  /** @type {Buffer | null} */
+  let refuseStartup = null;
 
   const COMMIT = Buffer.from('COMMIT');
 
@@ -44,6 +50,7 @@ export async function startFaultProxy(target) {
     sockets.add(upstream);
     let armedForCommit = false;
     let dropResponse = false;
+    let startup = true;
     const kill = () => {
       client.destroy();
       upstream.destroy();
@@ -60,6 +67,13 @@ export async function startFaultProxy(target) {
     upstream.on('error', () => {});
 
     client.on('data', (chunk) => {
+      if (startup) {
+        startup = false;
+        if (refuseStartup !== null && chunk.includes(refuseStartup)) {
+          kill();
+          return;
+        }
+      }
       const current = trap;
       if (current !== null && !armedForCommit && chunk.includes(current.pattern)) {
         if (current.mode === 'before') {
@@ -132,7 +146,7 @@ export async function startFaultProxy(target) {
     },
     /**
      * @param {string} pattern
-     * @param {{ mode: 'before' | 'after-commit', thenDown?: boolean }} options
+     * @param {{ mode: 'before' | 'after-commit', thenDown?: boolean, thenRefuseDatabase?: string }} options
      * @returns {Promise<void>} يُحلّ حين يقع القطع
      */
     severOn(pattern, options) {
@@ -142,6 +156,9 @@ export async function startFaultProxy(target) {
           mode: options.mode,
           thenDown: options.thenDown === true,
           fired: () => {
+            if (options.thenRefuseDatabase !== undefined) {
+              refuseStartup = Buffer.from(`database\0${options.thenRefuseDatabase}\0`);
+            }
             if (options.thenDown === true) void down().then(() => resolve(undefined));
             else resolve(undefined);
           },
@@ -150,6 +167,7 @@ export async function startFaultProxy(target) {
     },
     async close() {
       trap = null;
+      refuseStartup = null;
       await down();
     },
   };
