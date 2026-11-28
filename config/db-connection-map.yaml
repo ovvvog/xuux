@@ -173,8 +173,10 @@ sites:
     why: أداةُ قراءة.
   - file: scripts/restore.mjs
     kind: pg.Pool
-    count: 3
-    purpose: الاستعادةُ إلى قاعدةٍ نظيفة
+    count: 1
+    purpose: >-
+      الاستعادةُ إلى قاعدةٍ نظيفة: وصلةُ إدارةٍ واحدةٌ على `postgres` تُمسِكُ قفلَ الهدفِ وتُنشئُه وتحذفُه بالـoid
+      (‏WL-627: كانت ثلاثةَ مجمّعات)
     role: إداريّ (superuser)
     fence: BREAK_GLASS
     why: >-

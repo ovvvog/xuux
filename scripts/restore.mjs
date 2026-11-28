@@ -67,7 +67,20 @@ export const RESTORE_ERRORS = Object.freeze({
   DIGEST_MISSING: 'RESTORE_DIGEST_MISSING',
   CONTENT_MISMATCH: 'RESTORE_CONTENT_MISMATCH',
   CONTENT_CHECK_FAILED: 'RESTORE_CONTENT_CHECK_FAILED',
+  TARGET_BUSY: 'RESTORE_TARGET_BUSY',
 });
+
+/**
+ * ‏`WL-627`: مفتاحُ القفلِ الاستشاريِّ لاستعادةٍ إلى هدفٍ باسمِه (‏على قاعدةِ الإدارةِ `postgres`، فكلُّ استعادتين
+ * إلى الاسمِ نفسِه في العنقودِ تتسلسلان). تصادمُ `hashtext` يُسلسِلُ استعادتين لا علاقةَ بينَهما — لا ضرر.
+ */
+const TARGET_LOCK_CLASS = 0x5875_7578;
+/** ‏`WL-627`: حدُّ انتظارِ استعادةٍ أخرى إلى الهدفِ نفسِه قبلَ `RESTORE_TARGET_BUSY`. */
+const TARGET_LOCK_TIMEOUT = /^[1-9][0-9]{0,6}$/.test(
+  process.env['RESTORE_TARGET_LOCK_TIMEOUT_MS'] ?? '',
+)
+  ? `${String(process.env['RESTORE_TARGET_LOCK_TIMEOUT_MS'])}ms`
+  : '30s';
 
 /**
  * نتيجةُ التحقّقِ من المحتوى (‏`WL-606`). `VERIFIED`: بصمةُ المستعادِ طابقت بصمةَ لقطةِ النسخِ ضمنَ
@@ -180,20 +193,56 @@ function administrationUrl(databaseUrl) {
 }
 
 /**
- * @param {string} databaseUrl
+ * ‏`WL-627`: يُنشئُ الهدفَ إن غابَ، و**يُبلِغُ هل أنشأَه هو**. كانَ «أُنشئَ» يُحسَبُ بفحصٍ منفصلٍ قبلَ هذا، فقاعدةٌ
+ * أنشأَها غيرُه بينَهما تُعَدُّ «مُنشأةً» ثمّ تُحذَفُ عندَ الفشل (‏مقيسٌ: قاعدةُ طرفٍ آخرَ بمحتواها حُذِفت، واستعادةٌ
+ * متزامنةٌ أعلنت `[RESTORE_OK]` ثمّ حُذِفت قاعدتُها). الآنَ «أُنشئَ» = نجاحُ `CREATE DATABASE` في هذه العمليّة،
+ * ومعه `oid` القاعدةِ المُنشأة كي لا يُحذَفَ إلّا هي. سبقُ غيرِه إلى الإنشاء (‏`42P04`، أو `23505` على فهرسِ
+ * الأسماء) يعني هدفاً موجوداً لم نُنشئْه.
+ * @param {import('pg').Pool | import('pg').PoolClient} admin
  * @param {string} database
- * @returns {Promise<void>}
+ * @returns {Promise<{ created: boolean, oid: string | null }>}
  */
-async function ensureDatabase(databaseUrl, database) {
-  const admin = new pg.Pool({ connectionString: administrationUrl(databaseUrl), max: 1 });
+async function ensureDatabase(admin, database) {
+  const exists = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [database]);
+  if ((exists.rowCount ?? 0) > 0) return { created: false, oid: null };
   try {
-    const exists = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [database]);
-    if (exists.rowCount === 0) {
-      await admin.query(`CREATE DATABASE ${quoteIdent(database)}`);
-    }
-  } finally {
-    await admin.end();
+    await admin.query(`CREATE DATABASE ${quoteIdent(database)}`);
+  } catch (error) {
+    const code = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (error))['code'];
+    if (code === '42P04' || code === '23505') return { created: false, oid: null };
+    throw error;
   }
+  const row = /** @type {Record<string, unknown> | undefined} */ (
+    (await admin.query('SELECT oid::text AS oid FROM pg_database WHERE datname = $1', [database]))
+      .rows[0]
+  );
+  return { created: true, oid: row === undefined ? null : String(row['oid']) };
+}
+
+/**
+ * ‏`WL-627`: يحجزُ اسمَ الهدفِ لهذه الاستعادةِ وحدَها حتى نهايتِها (‏قفلٌ استشاريٌّ على مستوى الجلسةِ في قاعدةِ
+ * الإدارة). استعادتان متزامنتان إلى الاسمِ نفسِه كانتا تُنشئانِ وتحذفانِ قاعدةَ إحداهما الأخرى.
+ * @param {import('pg').PoolClient} admin
+ * @param {string} database
+ */
+async function lockTarget(admin, database) {
+  await admin.query(`SET lock_timeout = '${TARGET_LOCK_TIMEOUT}'`);
+  try {
+    await admin.query('SELECT pg_catalog.pg_advisory_lock($1, pg_catalog.hashtext($2))', [
+      TARGET_LOCK_CLASS,
+      database,
+    ]);
+  } catch (error) {
+    const code = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (error))['code'];
+    if (code === '55P03') {
+      throw new RestoreError(
+        RESTORE_ERRORS.TARGET_BUSY,
+        `استعادةٌ أخرى إلى ${database} جاريةٌ منذُ أكثرَ من ${TARGET_LOCK_TIMEOUT}؛ الهدفُ لم يُلمَس.`,
+      );
+    }
+    throw error;
+  }
+  await admin.query('RESET lock_timeout');
 }
 
 /**
@@ -340,15 +389,16 @@ async function readRowCounts(pool, stagingTable) {
 }
 
 /**
- * ‏`WL-614`: تُقرأُ من الدفترِ المرحليِّ قبلَ تركيبِه، فيُحسَمُ التحقّقُ قبلَ أن يصيرَ الهدفُ قاعدةً مُهاجَرة.
+ * ‏`WL-614`: كانت تُقرأُ من الدفترِ المرحليِّ قبلَ تركيبِه. ‏`WL-627`: من الدفترِ المُركَّبِ نفسِه داخلَ المعاملة —
+ * لا يُرى قبلَ `COMMIT`، فالترتيبُ داخلَها لا يكشفُ شيئاً، والمتحقَّقُ منه صارَ ما يُلتزَم.
  * @param {import('./lib/psql-session.mjs').Queryable} pool
- * @param {string} stagingTable
+ * @param {string} ledgerRelation اسمٌ مؤهَّلٌ مُقتبَس.
  * @returns {Promise<number>}
  */
-async function migrationVersion(pool, stagingTable) {
+async function migrationVersion(pool, ledgerRelation) {
   const result = await pool.query(
     `SELECT COALESCE(max(version), 0)::integer AS version
-     FROM ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(stagingTable)}`,
+     FROM ${ledgerRelation}`,
   );
   const row = /** @type {Record<string, unknown> | undefined} */ (result.rows[0]);
   return Number(row?.['version']);
@@ -597,41 +647,53 @@ async function restoreVerifiedArchive(options, url, verified) {
   const restoreTool = await resolveVerifiedRestoreTool(manifest.databaseVersion);
   const psql = await resolveVerifiedPsqlTool(manifest.databaseVersion);
   const toc = await readArchiveToc(restoreTool, archivePath);
-  const admin = new pg.Pool({ connectionString: administrationUrl(url), max: 1 });
-  let created = false;
+  const adminPool = new pg.Pool({ connectionString: administrationUrl(url), max: 1 });
+  adminPool.on('error', () => undefined);
+  const admin = await adminPool.connect();
+  admin.on('error', () => undefined);
   try {
-    const exists = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [
-      options.database,
-    ]);
-    if (exists.rowCount === 0) created = true;
-  } finally {
-    await admin.end();
-  }
-  await ensureDatabase(url, options.database);
-
-  const targetUrl = urlForDatabase(url, options.database);
-  /** @type {RestoreOutcome | undefined} */
-  let outcome;
-  try {
-    outcome = await restoreInOneTransaction(options, targetUrl, verified, {
-      restoreTool,
-      psql,
-      hasFence: toc.hasFence,
-      archiveEntries: toc.entries,
-      created,
-    });
-    return outcome;
-  } finally {
-    // ‏`WL-624`: هدفٌ لم يكنْ موجوداً وأنشأته هذه الاستعادةُ ثمّ فشلت ⇒ يُحذَفُ فيعودُ «كما كان» (‏غائباً).
-    // ‏`DROP DATABASE` بلا `FORCE`: إن اتّصلَ به أحدٌ في الأثناءِ بقيَ (‏فارغاً؛ المعاملةُ لم تُلتزَم).
-    if (outcome === undefined && created) {
-      const cleanup = new pg.Pool({ connectionString: administrationUrl(url), max: 1 });
-      await cleanup
-        .query(`DROP DATABASE IF EXISTS ${quoteIdent(options.database)}`)
-        .catch(() => undefined);
-      await cleanup.end().catch(() => undefined);
+    await lockTarget(admin, options.database);
+    const { created, oid } = await ensureDatabase(admin, options.database);
+    const targetUrl = urlForDatabase(url, options.database);
+    try {
+      return await restoreInOneTransaction(options, targetUrl, verified, {
+        restoreTool,
+        psql,
+        hasFence: toc.hasFence,
+        archiveEntries: toc.entries,
+        created,
+      });
+    } catch (error) {
+      // ‏`WL-624`: هدفٌ أنشأته هذه الاستعادةُ ثمّ فشلت ⇒ يُحذَفُ فيعودُ «كما كان» (‏غائباً). ‏`WL-627`: **عندَ فشلٍ
+      // مُثبَتٍ وحدَه** — ‏`RESTORE_COMMIT_OUTCOME_UNKNOWN` قد يكونُ التزاماً (‏مقيسٌ: `pg_xact_status = committed`
+      // والقاعدةُ محذوفة)، فلا يُحذَف. ويُحذَفُ بـ`oid` الذي أنشأناه لا بالاسمِ وحدَه. ‏`DROP DATABASE` بلا `FORCE`:
+      // إن اتّصلَ به أحدٌ في الأثناءِ بقيَ.
+      const unknown =
+        error instanceof RestoreError && error.code === RESTORE_ERRORS.COMMIT_OUTCOME_UNKNOWN;
+      if (created && oid !== null && !unknown) {
+        await dropCreatedTarget(admin, options.database, oid).catch(() => undefined);
+      }
+      throw error;
     }
+  } finally {
+    admin.release(true);
+    await adminPool.end().catch(() => undefined);
   }
+}
+
+/**
+ * ‏`WL-627`: يحذفُ الهدفَ الذي أنشأته هذه الاستعادةُ — إن كانَ الاسمُ ما يزالُ لـ`oid` نفسِه.
+ * @param {import('pg').PoolClient} admin
+ * @param {string} database
+ * @param {string} oid
+ */
+async function dropCreatedTarget(admin, database, oid) {
+  const still = await admin.query(
+    'SELECT 1 FROM pg_database WHERE datname = $1 AND oid = $2::oid',
+    [database, oid],
+  );
+  if ((still.rowCount ?? 0) === 0) return;
+  await admin.query(`DROP DATABASE IF EXISTS ${quoteIdent(database)}`);
 }
 
 /**
@@ -746,6 +808,26 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
         `لا يحتوي الأرشيف على جدول دفتر الهجرات المرحلي ${manifest.ledgerStagingTable}. لا COMMIT: الهدفُ كما كان.`,
       );
     }
+    // تركيبُ الدفترِ في المعاملةِ نفسِها (‏كانَ معاملةً ثانيةً بعدَ التحقّق — `WL-614`/`WL-615`). ‏`WL-627`:
+    // **قبلَ التحقّق** لا بعدَه، ثمّ تُطلَقُ القيودُ المؤجَّلةُ كلُّها الآن (‏`SET CONSTRAINTS ALL IMMEDIATE`): كانَ
+    // التحقّقُ يسبقُ خطوةً كاتبةً (‏التركيب — يُطلِقُ قوادحَ أحداثِ `ALTER TABLE`) ويسبقُ القوادحَ المؤجَّلةَ إلى
+    // `COMMIT`، فمحتوىً بُدِّلَ بعدَ البصمةِ أُعلِنَ `[CONTENT_VERIFIED]` (‏مقيس). الآنَ ما يُتحقَّقُ منه هو ما
+    // يُلتزَم: بعدَ البصمةِ لا عبارةٌ كاتبةٌ ولا قادحٌ مؤجَّلٌ معلَّق.
+    await session.query(
+      `ALTER TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(manifest.ledgerStagingTable)} SET SCHEMA public`,
+    );
+    await session.query(
+      `ALTER TABLE public.${quoteIdent(manifest.ledgerStagingTable)} RENAME TO ${quoteIdent(MIGRATION_LEDGER)}`,
+    );
+    try {
+      await session.query('SET CONSTRAINTS ALL IMMEDIATE');
+    } catch (error) {
+      // قيدٌ مؤجَّلٌ يرفضُ ⇒ هو ما كانَ سيرفضُ `COMMIT` (‏`WL-624`)؛ يُطلَقُ الآنَ قبلَ التحقّقِ فيُسمّى باسمِه نفسِه.
+      throw new RestoreError(
+        RESTORE_ERRORS.COMMIT_FAILED,
+        `رُفِضَ الالتزامُ بقيدٍ مؤجَّلٍ أُطلِقَ قبلَ التحقّق (${describe(error)}): لا COMMIT أُرسِل فالهدفُ كما كانَ بالضبط. لا [RESTORE_OK].`,
+      );
+    }
     if (manifest.contentDigest !== undefined) {
       // ‏`WL-606`: البصمةُ بالشيفرةِ نفسِها (‏`computeContentDigest`) على المعاملةِ نفسِها قبلَ أن تُرى.
       const verifyStarted = process.hrtime.bigint();
@@ -754,7 +836,7 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
       try {
         actual = await computeContentDigest(
           /** @type {any} */ (session),
-          `${quoteIdent(STATE_SCHEMA)}.${quoteIdent(manifest.ledgerStagingTable)}`,
+          `public.${quoteIdent(MIGRATION_LEDGER)}`,
         );
       } catch (error) {
         throw new RestoreError(
@@ -779,20 +861,13 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
         `عدد الصفوف بعد الاستعادة لا يطابق البيان: المتوقع ${JSON.stringify(manifest.rowCounts)} والفِعلي ${JSON.stringify(actualCounts)}. لا COMMIT: الهدفُ كما كان.`,
       );
     }
-    const actualVersion = await migrationVersion(session, manifest.ledgerStagingTable);
+    const actualVersion = await migrationVersion(session, `public.${quoteIdent(MIGRATION_LEDGER)}`);
     if (actualVersion !== manifest.migrationVersion) {
       throw new RestoreError(
         RESTORE_ERRORS.MIGRATION_VERSION_MISMATCH,
         `نسخة الهجرة بعد الاستعادة ${actualVersion} لا تطابق البيان ${manifest.migrationVersion}. لا COMMIT: الهدفُ كما كان.`,
       );
     }
-    // تركيبُ الدفترِ في المعاملةِ نفسِها (‏كانَ معاملةً ثانيةً بعدَ التحقّق — `WL-614`/`WL-615`).
-    await session.query(
-      `ALTER TABLE ${quoteIdent(STATE_SCHEMA)}.${quoteIdent(manifest.ledgerStagingTable)} SET SCHEMA public`,
-    );
-    await session.query(
-      `ALTER TABLE public.${quoteIdent(manifest.ledgerStagingTable)} RENAME TO ${quoteIdent(MIGRATION_LEDGER)}`,
-    );
     await session.mark(null, `'verified'`);
     commitSent = true;
     // العلامةُ بعدَ `COMMIT` تسألُ الخادمَ عن المعاملةِ نفسِها: `COMMIT` على معاملةٍ مُجهَضةٍ يردُّ `ROLLBACK`
