@@ -42,6 +42,12 @@ export class PsqlSession {
     this.waiting = new Map();
     /** @type {number | null} */
     this.exitCode = null;
+    /**
+     * ‏`WL-629` (‏مراجعةُ 2026-11-28، D1/D2): حدُّ انتظارِ ردِّ العلامة (‏ms)، أو `null` بلا حدّ. بعدَه يُقتَلُ psql
+     * فتُرفَضُ العلاماتُ المنتظرةُ كلُّها بسببٍ مُسمّى — انقطاعٌ صامتٌ لا يُعلِّقُ الأداة.
+     * @type {number | null}
+     */
+    this.stepTimeoutMs = null;
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (/** @type {string} */ chunk) => {
@@ -74,6 +80,15 @@ export class PsqlSession {
         resolve(this.exitCode);
       });
     });
+  }
+
+  /**
+   * يضبطُ حدَّ الخطوةِ للعلاماتِ اللاحقة (‏لا يمسُّ علامةً منتظرة).
+   * @param {number | null} ms
+   * @returns {void}
+   */
+  setStepTimeout(ms) {
+    this.stepTimeoutMs = ms;
   }
 
   /** @returns {boolean} */
@@ -114,9 +129,28 @@ export class PsqlSession {
    */
   mark(statement, selectExpression = `'ok'`) {
     const id = String((this.counter += 1));
+    const limit = this.stepTimeoutMs;
+    /** @type {NodeJS.Timeout | undefined} */
+    let timer;
     const answer = new Promise((resolve, reject) => {
-      this.waiting.set(id, { resolve, reject });
+      this.waiting.set(id, {
+        resolve: (/** @type {string} */ v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (/** @type {Error} */ e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
+      });
     });
+    if (limit !== null) {
+      timer = setTimeout(() => {
+        if (!this.waiting.has(id)) return;
+        this.stderr += `\nلا ردَّ من الخادمِ خلالَ ${limit} ms (‏انقطاعٌ صامت؟) — قُتِلَ psql`;
+        this.child.kill('SIGKILL');
+      }, limit);
+    }
     try {
       this.write(
         `${statement === null ? '' : `${statement};\n`}SELECT '${SENTINEL}${id}=' || ${selectExpression};\n`,

@@ -82,6 +82,33 @@ const TARGET_LOCK_TIMEOUT = /^[1-9][0-9]{0,6}$/.test(
   ? `${String(process.env['RESTORE_TARGET_LOCK_TIMEOUT_MS'])}ms`
   : '30s';
 
+/** @param {string} name @param {number} fallback */
+const envMs = (name, fallback) =>
+  /^[1-9][0-9]{0,7}$/.test(process.env[name] ?? '') ? Number(process.env[name]) : fallback;
+/**
+ * ‏`WL-629` (‏`LIVE-78`، مراجعةُ 2026-11-28 r1 العيبُ 4): انقطاعٌ صامتٌ عندَ `COMMIT` كانَ يُعلِّقُ الأداةَ بلا حدٍّ والهدفُ
+ * مقفول (‏خرجُ `pg_restore` يضبطُ `idle_in_transaction_session_timeout = 0`). حدّان:
+ * - **جهةُ الخادم:** بعدَ الضخّ يُعادُ ضبطُ `idle_in_transaction_session_timeout` ⇒ خلفيّةٌ تنتظرُ عميلاً لا يصلُ
+ *   تُنهى فتُجهَضُ المعاملةُ وتُحرَّرُ الأقفال (‏افتراضيّاً 60 ث، `RESTORE_IDLE_TX_TIMEOUT_MS`).
+ * - **جهةُ العميل:** ردُّ `COMMIT` بحدٍّ (‏افتراضيّاً 60 ث، `RESTORE_COMMIT_ACK_TIMEOUT_MS`)؛ بعدَه يُقتَلُ psql ويُحسَمُ
+ *   الحالُ من الخادمِ بوصلةٍ جديدةٍ ذاتِ حدّ، وإلّا `RESTORE_COMMIT_OUTCOME_UNKNOWN`.
+ * لا حدَّ هنا لعبارةٍ طويلةٍ مشروعة (‏الضخُّ، البصمة)؛ والانقطاعُ أثناءَ الضخِّ (‏COPY نشط) لا يُغطّيه حدُّ الخمول.
+ */
+const IDLE_TX_TIMEOUT_MS = envMs('RESTORE_IDLE_TX_TIMEOUT_MS', 60_000);
+const COMMIT_ACK_TIMEOUT_MS = envMs('RESTORE_COMMIT_ACK_TIMEOUT_MS', 60_000);
+/**
+ * ‏`WL-629` (‏مراجعةُ 2026-11-28 لـ`5d07cb73`، D1/D2): الحدّانِ أعلاه كانا عندَ `COMMIT` وحدَه — انقطاعٌ صامتٌ **قبلَ الضخّ**
+ * (‏الخادمُ على 0 فيُمسِكُ الأقفالَ بلا حدّ) أو **بعدَه وقبلَ `COMMIT`** (‏الأداةُ معلّقة) بقيَ مفتوحاً (‏أعادَ المراجعُ إنتاجَهما).
+ * - حدُّ الخمولِ يُضبَطُ للجلسةِ **قبلَ `BEGIN`** أيضاً، ويُعادُ بعدَ الضخّ (‏خرجُ `pg_restore` يُصفِّرُه).
+ * - **حدُّ الخطوة** (‏`RESTORE_STEP_TIMEOUT_MS`، افتراضيّاً 600000): ردُّ كلِّ عبارةٍ خارجَ الضخِّ و`COMMIT`؛ بعدَه يُقتَلُ
+ *   psql (‏`PsqlSession.stepTimeoutMs`). سخيٌّ لأنَّ عبارةً مشروعةً (‏المحوُ، البصمةُ على بياناتٍ كبيرة) قد تطول.
+ * - **الضخُّ نفسُه** لا حدَّ زمنيّاً له (‏طولُه مشروع)؛ انقطاعٌ حقيقيٌّ فيه تكشفُه TCP: ‏`keepalives` و`tcp_user_timeout`
+ *   للعميل (‏رابطُ psql، ما لم يُعيِّنْها المستخدم) وللخادم (‏`SET tcp_*` للجلسة) — `RESTORE_TCP_USER_TIMEOUT_MS`،
+ *   افتراضيّاً 60000. **غيرُ مُختبَرٍ بوسيطِ الأعطاب** (‏وصلاتُه TCP حيّة)؛ دفاعٌ للشبكةِ الحقيقيّة.
+ */
+const STEP_TIMEOUT_MS = envMs('RESTORE_STEP_TIMEOUT_MS', 600_000);
+const TCP_USER_TIMEOUT_MS = envMs('RESTORE_TCP_USER_TIMEOUT_MS', 60_000);
+
 /**
  * نتيجةُ التحقّقِ من المحتوى (‏`WL-606`). `VERIFIED`: بصمةُ المستعادِ طابقت بصمةَ لقطةِ النسخِ ضمنَ
  * نطاقِها المعلَن. `NO_DIGEST`: نسخةٌ قديمةٌ بلا بصمة، استُعيدت بـ`--allow-unverified` الصريح — **لا
@@ -589,7 +616,12 @@ export async function resolveVerifiedPsqlTool(dumpServerVersion) {
  * @returns {Promise<string | null>}
  */
 async function settleTransaction(targetUrl, xid) {
-  const probe = new pg.Client({ connectionString: targetUrl });
+  // ‏`WL-629`: وصلةُ الحسمِ نفسُها بحدٍّ — شبكةٌ صامتةٌ لا تُعلِّقُها.
+  const probe = new pg.Client({
+    connectionString: targetUrl,
+    connectionTimeoutMillis: SETTLE_TIMEOUT_MS,
+    query_timeout: SETTLE_TIMEOUT_MS,
+  });
   probe.on('error', () => undefined);
   try {
     await probe.connect();
@@ -713,6 +745,15 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
   const { manifest, archivePath } = verified;
   const sessionUrl = new URL(targetUrl);
   sessionUrl.searchParams.set('application_name', RESTORE_APPLICATION_NAME);
+  for (const [key, value] of /** @type {Array<[string, string]>} */ ([
+    ['keepalives', '1'],
+    ['keepalives_idle', '10'],
+    ['keepalives_interval', '5'],
+    ['keepalives_count', '3'],
+    ['tcp_user_timeout', String(TCP_USER_TIMEOUT_MS)],
+  ])) {
+    if (!sessionUrl.searchParams.has(key)) sessionUrl.searchParams.set(key, value);
+  }
   const child = spawn(
     tools.psql,
     ['-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1', '-d', sessionUrl.toString()],
@@ -729,7 +770,13 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
   let contentVerification = CONTENT_VERIFICATION.NO_DIGEST;
   let contentVerifyMs = 0;
   try {
-    session.write('\\set VERBOSITY verbose\nSET client_min_messages = warning;\n');
+    session.setStepTimeout(STEP_TIMEOUT_MS);
+    session.write(
+      '\\set VERBOSITY verbose\nSET client_min_messages = warning;\n' +
+        `SET idle_in_transaction_session_timeout = '${IDLE_TX_TIMEOUT_MS}ms';\n` +
+        `SET tcp_keepalives_idle = 10;\nSET tcp_keepalives_interval = 5;\nSET tcp_keepalives_count = 3;\n` +
+        `SET tcp_user_timeout = ${TCP_USER_TIMEOUT_MS};\n`,
+    );
     await session.mark('BEGIN');
     const ident = await session.mark(null, `pg_catalog.pg_current_xact_id()::text`);
     xid = ident;
@@ -795,6 +842,8 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
         `تبدّلت معاملةُ الاستعادة أثناءَ pg_restore (${ident} ⇐ ${after}): خرجُه أنهى المعاملة، وما قبلَه قد التُزِم. افحصِ الهدفَ يدوياً (‏docs/RECOVERY.md).`,
       );
     }
+    // ‏`WL-629`: خرجُ `pg_restore` صفّرَ حدَّ الخمول؛ يُعادُ قبلَ أيِّ انتظارٍ لعميل.
+    await session.query(`SET idle_in_transaction_session_timeout = '${IDLE_TX_TIMEOUT_MS}ms'`);
     const durationMs = Number((process.hrtime.bigint() - started) / 1_000_000n);
     if (!tools.hasFence) await session.query(`DROP SCHEMA ${quoteIdent(FENCE_SCHEMA)} RESTRICT`);
 
@@ -869,12 +918,27 @@ async function restoreInOneTransaction(options, targetUrl, verified, tools) {
       );
     }
     await session.mark(null, `'verified'`);
+    // ‏ردُّ `COMMIT` بحدِّه الخاصّ أدناه (‏ثمّ الحسمُ من الخادم)، لا بحدِّ الخطوة.
+    session.setStepTimeout(null);
     commitSent = true;
     // العلامةُ بعدَ `COMMIT` تسألُ الخادمَ عن المعاملةِ نفسِها: `COMMIT` على معاملةٍ مُجهَضةٍ يردُّ `ROLLBACK`
     // بلا خطأ، فنجاحُ العبارةِ وحدَه ليس دليلاً — الدليلُ `pg_xact_status = committed`.
     const committed = session.mark('COMMIT', `pg_catalog.pg_xact_status('${xid}'::xid8)::text`);
     session.abandon();
-    const ack = await committed.catch(() => null);
+    /** @type {NodeJS.Timeout | undefined} */
+    let ackTimer;
+    const ack = await Promise.race([
+      committed.catch(() => null),
+      new Promise((resolve) => {
+        ackTimer = setTimeout(() => {
+          // ‏لا ردَّ خلالَ الحدّ: psql يُقتَلُ (‏لا ينتهي وحدَه وهو ينتظرُ الخادم)، والحسمُ من الخادم.
+          session.stderr += `\nلا ردَّ على COMMIT خلالَ ${COMMIT_ACK_TIMEOUT_MS} ms (‏انقطاعٌ صامت؟)`;
+          child.kill('SIGKILL');
+          resolve(null);
+        }, COMMIT_ACK_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(ackTimer);
     await session.exited;
     if (session.exitCode === 0 && ack === 'committed') {
       return {

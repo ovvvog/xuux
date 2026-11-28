@@ -21,6 +21,11 @@
  * و`thenRefuseDatabase: name` (‏`WL-627`): بعدَ القطعِ يُرفَضُ كلُّ اتصالٍ **جديدٍ** تُسمّي حزمةُ بدئِه القاعدةَ
  * `name` (‏مقبسٌ يُغلَقُ حالَ وصولِها)، وتبقى الاتصالاتُ القائمةُ والاتصالاتُ إلى غيرِها — فالسؤالُ عن نتيجةِ
  * `COMMIT` على الهدفِ يتعذّرُ ووصلةُ الإدارةِ حيّة. (‏بلا TLS: الحزمةُ نصٌّ يُرى.)
+ *
+ * و`severOn(pattern, { mode: 'stall' })` (‏`WL-629`): **انقطاعٌ صامت** لا قطع — البايتاتُ التي تحوي النمطَ لا تُمرَّر،
+ * ولا شيءَ بعدَها في الاتجاهين، والمقبسان مفتوحان: العميلُ لا يرى خطأً ولا نهاية (‏كشبكةٍ تُسقِطُ الحزمَ بصمت)،
+ * والخادمُ ينتظرُ ما لا يصل. وإغلاقُ أيِّ طرفٍ لا يبلغُ الآخر (‏حتى `close()`). و`thenStallDatabase: name`: كلُّ اتصالٍ
+ * **جديدٍ** إلى `name` بعدَها يُقبَلُ ويُبتلَعُ بلا ردّ.
  */
 
 import net from 'node:net';
@@ -31,7 +36,7 @@ import net from 'node:net';
 export async function startFaultProxy(target) {
   /** @type {Set<net.Socket>} */
   const sockets = new Set();
-  /** @type {null | { pattern: Buffer, mode: 'before' | 'after-commit', thenDown: boolean, fired: (() => void) }} */
+  /** @type {null | { pattern: Buffer, mode: 'before' | 'after-commit' | 'stall', thenDown: boolean, fired: (() => void) }} */
   let trap = null;
   let port = 0;
   /** @type {net.Server | null} */
@@ -39,6 +44,8 @@ export async function startFaultProxy(target) {
   let connections = 0;
   /** @type {Buffer | null} */
   let refuseStartup = null;
+  /** @type {Buffer | null} */
+  let stallStartup = null;
 
   const COMMIT = Buffer.from('COMMIT');
 
@@ -51,17 +58,20 @@ export async function startFaultProxy(target) {
     let armedForCommit = false;
     let dropResponse = false;
     let startup = true;
+    let stalled = false;
     const kill = () => {
       client.destroy();
       upstream.destroy();
     };
     client.on('close', () => {
       sockets.delete(client);
-      upstream.destroy();
+      // ‏انقطاعٌ صامت: موتُ العميلِ لا يبلغُ الخادم (‏لا FIN ولا RST) — الخلفيّةُ تبقى تنتظرُ حتى حدِّ خمولِها.
+      if (!stalled) upstream.destroy();
     });
     upstream.on('close', () => {
       sockets.delete(upstream);
-      client.destroy();
+      // ‏انقطاعٌ صامت: إغلاقُ الخادمِ لا يبلغُ العميل.
+      if (!stalled) client.destroy();
     });
     client.on('error', () => {});
     upstream.on('error', () => {});
@@ -73,9 +83,20 @@ export async function startFaultProxy(target) {
           kill();
           return;
         }
+        if (stallStartup !== null && chunk.includes(stallStartup)) {
+          stalled = true;
+          return;
+        }
       }
+      if (stalled) return;
       const current = trap;
       if (current !== null && !armedForCommit && chunk.includes(current.pattern)) {
+        if (current.mode === 'stall') {
+          trap = null;
+          stalled = true;
+          current.fired();
+          return;
+        }
         if (current.mode === 'before') {
           trap = null;
           kill();
@@ -94,6 +115,7 @@ export async function startFaultProxy(target) {
       upstream.write(chunk);
     });
     upstream.on('data', (chunk) => {
+      if (stalled) return;
       if (dropResponse) {
         // ردُّ الخادم على COMMIT وصل ⇒ الالتزامُ وقع. لا يبلغ العميل.
         const current = trap;
@@ -146,7 +168,7 @@ export async function startFaultProxy(target) {
     },
     /**
      * @param {string} pattern
-     * @param {{ mode: 'before' | 'after-commit', thenDown?: boolean, thenRefuseDatabase?: string }} options
+     * @param {{ mode: 'before' | 'after-commit' | 'stall', thenDown?: boolean, thenRefuseDatabase?: string, thenStallDatabase?: string }} options
      * @returns {Promise<void>} يُحلّ حين يقع القطع
      */
     severOn(pattern, options) {
@@ -159,6 +181,9 @@ export async function startFaultProxy(target) {
             if (options.thenRefuseDatabase !== undefined) {
               refuseStartup = Buffer.from(`database\0${options.thenRefuseDatabase}\0`);
             }
+            if (options.thenStallDatabase !== undefined) {
+              stallStartup = Buffer.from(`database\0${options.thenStallDatabase}\0`);
+            }
             if (options.thenDown === true) void down().then(() => resolve(undefined));
             else resolve(undefined);
           },
@@ -168,6 +193,7 @@ export async function startFaultProxy(target) {
     async close() {
       trap = null;
       refuseStartup = null;
+      stallStartup = null;
       await down();
     },
   };
