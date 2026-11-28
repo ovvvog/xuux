@@ -9,9 +9,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { defineLeaseExpirySuite } from '../helpers/lease-expiry-suite.mjs';
+import { skipWithoutDatabase } from '../helpers/pg.mjs';
 
 const registered = defineLeaseExpirySuite('silent-skip');
 
-test('WL-623: جزءُ «silent-skip» من كتلةِ انقضاءِ الإيجارِ غيرُ فارغ (‏التقسيمُ لا يُسقِطُ اختبارات)', () => {
-  assert.ok(registered.length > 0, 'لا اختبارَ مسجَّلاً');
-});
+// ‏`WL-629`: بلا قاعدةٍ لا تُنفَّذُ الكتلةُ المتخطّاةُ فلا تُسجِّلُ شيئاً — فالحارسُ يُتخطّى معها بالسببِ نفسِه (‏لا رسوبَ زائف)،
+// ‏ومعَ القاعدةِ (‏CI) كما كان.
+test(
+  'WL-623: جزءُ «silent-skip» من كتلةِ انقضاءِ الإيجارِ غيرُ فارغ (‏التقسيمُ لا يُسقِطُ اختبارات)',
+  { skip: skipWithoutDatabase },
+  () => {
+    assert.ok(registered.length > 0, 'لا اختبارَ مسجَّلاً');
+  },
+);

@@ -1,3 +1,20 @@
+### [2026-11-28] — WL-629 — **`LIVE-78`: انقطاعٌ صامتٌ عندَ `COMMIT` كانَ يُعلِّقُ الاستعادةَ بلا حدٍّ والأقفالُ ممسوكة — حدٌّ للخادمِ (‏`idle_in_transaction_session_timeout` بعدَ الضخّ) وللعميل (‏ردُّ `COMMIT`، ووصلةُ السؤال)؛ اختبارا توقّفٍ أحمران قبلَه؛ واختبارُ حارسِ `WL-623` يُتخطّى بلا قاعدة؛ `LIVE-78` يبقى `C`**
+
+- **المنفِّذ:** Perplexity Computer (‏Claude Opus 5.5) بتوجيهِ المالك (‏2026-11-28). مراجعةُ المنفِّذِ نفسِه لا تُحسَبُ مستقلّة.
+- **المسار والخطوة:** فرعُ `wl-629-restore-stall-and-nodb-guard` فوقَ `wl-628-fence-cursor-and-end-guard` نحوَ `wl-532-533-integration`. `main@a5af34f5` و`#545` لم يُمسّا؛ لا ترحيلَ إنتاجيّ.
+- **الحالةُ بعدَ العمل:** 🟡 في طلبٍ مفتوحٍ ينتظرُ CI ثمّ الدمج.
+- **المصدر:** مراجعةُ 2026-11-28 (‏`docs/external-review/council-2026-11-28/`، r1: «توقّفُ الشبكةِ الصامتُ عندَ `COMMIT` بلا حدّ») — عائلةٌ واحدة، ليست المادة 11؛ أُعيدَ إنتاجُه هنا قبلَ الإصلاح.
+- **ما تمَّ فعلاً:**
+  1. `scripts/restore.mjs`: بعدَ الضخِّ وفحصِ المعرِّف `SET idle_in_transaction_session_timeout` (‏`RESTORE_IDLE_TX_TIMEOUT_MS`، افتراضيّاً 60000؛ خرجُ `pg_restore` يضبطُه 0)؛ ردُّ `COMMIT` يُسابِقُ حدّاً (‏`RESTORE_COMMIT_ACK_TIMEOUT_MS`، 60000) بعدَه يُقتَلُ psql ويُلحَقُ سببٌ بالرسالةِ ويُحسَمُ من الخادم؛ ووصلةُ `settleTransaction` بـ`connectionTimeoutMillis` و`query_timeout` = حدُّ الحسمِ القائم.
+  2. `tests/helpers/pg-fault-proxy.mjs`: نمطُ `stall` (‏يُبتلَعُ المقطعُ المطابِقُ وما بعدَه في الاتجاهين، وإغلاقُ أيِّ طرفٍ لا يبلغُ الآخر) و`thenStallDatabase`.
+  3. `tests/persistence/restore-stall.test.mjs` (‏جديد، 2): (‏أ) ⇒ `RESTORE_COMMIT_FAILED`؛ (‏ب) مع ابتلاعِ وصلاتِ الهدفِ الجديدة ⇒ `RESTORE_COMMIT_OUTCOME_UNKNOWN`؛ وفي كلَيهما لا خلفيّةَ باقية، والقارئُ يُفرَجُ عنه، وصورةُ الهدفِ كما كانت.
+  4. اختبارُ حارسِ `WL-623` في `tests/fence/lease-expiry.test.mjs` و`lease-expiry-silent-skip.test.mjs` صارَ `{ skip: skipWithoutDatabase }`: بلا قاعدةٍ كانَ يرسبُ (‏يحتاجُها ولا يُعلِنُ ذلك)، وبها بلا تغيير. بلا قاعدة: 2 تخطٍّ و0 رسوب.
+- **الاختبارات (‏PG 18.7 محلّيّاً، النسخةُ المعزولةُ 5433):** `restore-stall` على الشيفرةِ القديمة (‏`a45e1300`): 2/2 راسبان (‏تعليقٌ فوقَ 45 ث)؛ بعدَ الإصلاح 2/2 (‏~7 ث و~17 ث، الملفُّ ~25 ث). ملاحظة: أوّلُ نمطٍ للوسيط (‏`COMMIT;\nSELECT …`) لم يطابق لأنَّ psql يُرسِلُ كلَّ عبارةٍ رسالةً مستقلّة، فصارَ `COMMIT;\0`؛ وأوّلُ نسخةٍ من `stall` كانت تُغلِقُ جهةَ الخادمِ حينَ يموتُ psql فنجت طفرةُ الخمول، فصُحِّحَ الوسيط.
+- **الطفرات (‏`/tmp/h/mut629.py`):** نزعُ ضبطِ الخمول ⇒ رسوب 2؛ نزعُ قتلِ psql عندَ الحدّ ⇒ رسوب 2؛ نزعُ حدودِ وصلةِ السؤال ⇒ رسوب 1 (‏ب).
+- **ما لم يتمَّ ولماذا:** توقّفٌ صامتٌ أثناءَ الضخّ (‏`COPY`) أو التحقّق لا يحدُّه العميل (‏جهةُ الخادمِ `tcp_keepalives_*`)؛ كلفةُ حجبِ القرّاء قرارُ المالك (‏قياسٌ منفصل).
+- **الديون:** لا دخولَ ولا خروج (‏76 صفّاً). `LIVE-78` يبقى `C` بإلحاقٍ مؤرَّخ. `RISK-0054 = NO-GO`.
+- **الملفات المتأثرة:** `scripts/restore.mjs`، `tests/helpers/pg-fault-proxy.mjs`، `tests/persistence/restore-stall.test.mjs`، `tests/fence/lease-expiry.test.mjs`، `tests/fence/lease-expiry-silent-skip.test.mjs`، `docs/RECOVERY.md`، `docs/ROOT_OF_TRUST.md`، `docs/roadmap/06-debt-register.md`، `docs/roadmap/05-work-log.md`، `PROJECT_STATUS.md`، `docs/HANDOFF.md`.
+
 ### [2026-11-28] — WL-628 — **`LIVE-75/RLS-SILENT-SKIP`: ثغرتا ما بعدَ 0037 أعادَ المراجعونَ إنتاجَهما أُصلِحتا بالهجرة 0038 — المؤشّرُ/البوّابةُ لا يُبتَرُ صامتاً (‏`window_breach` بساعةِ المعاملة)، و`DELETE` بخطّةِ Hash Join لا يلتزمُ بعدَ الانقضاء (‏`xf_guard_end`)؛ `L75-R1` يتغيّرُ داخلَ المعاملةِ من صفرٍ صامتٍ إلى `XF009`؛ الدَّينُ يبقى `D`**
 
 - **المنفِّذ:** Perplexity Computer (‏Claude Opus 5.5) بتوجيهِ المالك (‏2026-11-28). مراجعةُ المنفِّذِ نفسِه لا تُحسَبُ مستقلّة.
