@@ -1832,3 +1832,158 @@ describe(
     });
   },
 );
+
+// ── WL-628: ‏LIVE-75/RLS-SILENT-SKIP (‏0038) — window_breach بساعةِ المعاملة؛ xf_guard_end على كلِّ علاقةٍ محميّة؛ الرجوعُ إلى 0037 حرفياً ──
+describe(
+  'WL-628 — 0038: xf_guard_end على كلِّ علاقةٍ محميّةٍ وحدَها، والدوالُّ الثلاثُ وحدَها تتغيّر، والرجوعُ إلى 0037 حرفياً',
+  { skip: skipWithoutDatabase },
+  () => {
+    /** @type {Awaited<ReturnType<typeof createIsolatedDatabase>>} */
+    let db;
+    /** @type {string} */
+    let dir37;
+    /** @type {string} */
+    let dir38;
+    const src = fileURLToPath(new URL('../../migrations/', import.meta.url));
+    /** @param {number} upTo */
+    const migrationsDir = (upTo) => {
+      const d = registerTmpRoot(mkdtempSync(join(tmpdir(), 'xuux-mig-')));
+      for (const f of readdirSync(src)) {
+        if (Number(f.slice(0, 4)) > upTo) continue;
+        writeFileSync(join(d, f), readFileSync(join(src, f), 'utf8'));
+      }
+      return d;
+    };
+    const CHANGED = [
+      'fence.cover_relation(oid)',
+      'fence.coverage_problems()',
+      'fence.window_breach(tstzrange)',
+    ];
+    /** كلُّ مُطلِقاتِ غيرِ fence (‏المحميّةُ وسواها). @param {import('pg').Pool} pool */
+    const userTriggers = async (pool) =>
+      (
+        await pool.query(
+          `SELECT c.oid::regclass::text AS rel, t.tgname, t.tgenabled, t.tgtype, t.tgfoid::regprocedure::text AS fn
+             FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+            WHERE c.relnamespace <> 'fence'::regnamespace AND NOT t.tgisinternal ORDER BY 1, 2`,
+        )
+      ).rows;
+    before(async () => {
+      dir37 = migrationsDir(37);
+      dir38 = migrationsDir(38);
+      db = await createIsolatedDatabase('m0038');
+      await up(db.pool, { dir: dir37 });
+    });
+    after(async () => {
+      if (db !== undefined) await db.drop();
+      for (const d of [dir37, dir38]) rmSync(d, { recursive: true, force: true });
+    });
+
+    it('تقديمٌ ورجوعٌ وإعادةُ تقديم: xf_guard_end وحدَه يُضافُ على كلِّ علاقةٍ محميّة، والدوالُّ الثلاثُ وحدَها تتغيّر؛ والرجوعُ حرفيّ', async () => {
+      const at37 = await ownerSnapshot(db.pool);
+      const tg37 = await fenceTriggerSnapshot(db.pool);
+      const u37 = await userTriggers(db.pool);
+      const protected37 = (
+        await db.pool.query(
+          `SELECT relid::regclass::text AS rel FROM fence.protected_relations() ORDER BY 1`,
+        )
+      ).rows.map((r) => r.rel);
+      const problems37 = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r
+        .problems;
+      assert.equal(u37.filter((t) => t.tgname === 'xf_guard_end').length, 0);
+      assert.deepEqual((await up(db.pool, { dir: dir38 })).applied, [38]);
+      const at38 = await ownerSnapshot(db.pool);
+      const u38 = await userTriggers(db.pool);
+      const added = u38.filter((t) => t.tgname === 'xf_guard_end');
+      assert.deepEqual(
+        u38.filter((t) => t.tgname !== 'xf_guard_end'),
+        u37,
+        'المُطلِقاتُ الأخرى حرفيّاً',
+      );
+      assert.deepEqual(
+        added.map((t) => t.rel).sort(),
+        [...protected37].sort(),
+        'xf_guard_end على كلِّ علاقةٍ محميّةٍ ولا سواها',
+      );
+      // ‏AFTER (‏bit 2 = 0) ‏FOR EACH STATEMENT (‏bit 1 = 0) ‏INSERT|DELETE|UPDATE|TRUNCATE (‏60)، ENABLE ALWAYS، guard_write().
+      for (const t of added)
+        assert.deepEqual([t.tgenabled, t.tgtype, t.fn], ['A', 60, 'fence.guard_write()'], t.rel);
+      /** @type {(s: { functions: any[] }) => Record<string, any>} */
+      const bySig = (s) => Object.fromEntries(s.functions.map((f) => [f.sig, f]));
+      const f37 = bySig(at37);
+      const f38 = bySig(at38);
+      assert.deepEqual(
+        Object.keys(f38).sort(),
+        Object.keys(f37).sort(),
+        'لا دالّةَ جديدةٌ ولا محذوفة',
+      );
+      for (const sig of Object.keys(f37)) {
+        if (CHANGED.includes(sig)) {
+          assert.notEqual(f38[sig].def, f37[sig].def, `${sig} تغيّر`);
+          for (const k of ['vol', 'secdef', 'owner', 'acl'])
+            assert.equal(f38[sig][k], f37[sig][k], `${sig}.${k} حرفيّاً`);
+        } else assert.deepEqual(f38[sig], f37[sig], `${sig} حرفيّاً`);
+      }
+      // ‏التبديلُ المحصى في window_breach: statement_timestamp ⇒ transaction_timestamp، لا غير.
+      assert.equal(
+        f38['fence.window_breach(tstzrange)'].def,
+        f37['fence.window_breach(tstzrange)'].def.replace(
+          'statement_timestamp() >= upper(w)',
+          'transaction_timestamp() >= upper(w)',
+        ),
+      );
+      /** @type {(s: { manifest: any[] }) => Record<string, string>} */
+      const m = (s) => Object.fromEntries(s.manifest.map((r) => [r.function_signature, r.digest]));
+      const m37 = m(at37);
+      const m38 = m(at38);
+      assert.deepEqual(Object.keys(m38).sort(), Object.keys(m37).sort());
+      assert.deepEqual(
+        Object.keys(m37)
+          .filter((k) => m37[k] !== m38[k])
+          .sort(),
+        CHANGED,
+      );
+      assert.deepEqual(at38.owner, at37.owner);
+      assert.deepEqual(at38.tables, at37.tables);
+      assert.deepEqual(at38.eventTriggers, at37.eventTriggers);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg37, 'مُطلِقاتُ fence حرفيّاً');
+      const ok = (await db.pool.query('SELECT fence.check_fenced() AS r')).rows[0].r;
+      assert.deepEqual(ok.problems, problems37, 'check_fenced: لا مشكلةَ جديدةٌ بعدَ التقديم');
+      // ‏عقدُ window_breach بساعةِ المعاملة: معاملةٌ بدأت داخلَ النافذةِ وعبارةٌ جديدةٌ بعدَها ⇒ XF009 (‏كانَ false في 0037).
+      const c = await db.pool.connect();
+      try {
+        await c.query('BEGIN');
+        await c.query('SELECT pg_sleep(0.2)');
+        const r = await c
+          .query(
+            `SELECT fence.window_breach(tstzrange(transaction_timestamp() - interval '1 s', transaction_timestamp() + interval '50 ms')) AS b`,
+          )
+          .then(
+            () => ({ ok: true }),
+            (/** @type {any} */ e) => ({ ok: false, code: String(e.code) }),
+          );
+        assert.deepEqual(r, { ok: false, code: 'XF009' });
+        await c.query('ROLLBACK');
+      } finally {
+        c.release();
+      }
+      assert.deepEqual(
+        (
+          await db.pool.query(
+            `SELECT fence.window_breach('[2000-01-01, 2000-01-02)'::tstzrange) AS b`,
+          )
+        ).rows[0].b,
+        false,
+        'معاملةٌ بدأت بعدَ النافذة ⇒ false',
+      );
+      // ‏الرجوعُ يُعيدُ 0037 حرفياً؛ وإعادةُ التقديمِ تُطابقُ 0038.
+      assert.equal((await down(db.pool, { steps: 1, dir: dir38 })).current, 37);
+      assert.deepEqual(await ownerSnapshot(db.pool), at37);
+      assert.deepEqual(await fenceTriggerSnapshot(db.pool), tg37);
+      assert.deepEqual(await userTriggers(db.pool), u37, 'xf_guard_end أُسقِطَ من كلِّ علاقة');
+      assert.deepEqual((await up(db.pool, { dir: dir38 })).applied, [38]);
+      assert.deepEqual(await ownerSnapshot(db.pool), at38);
+      assert.deepEqual(await userTriggers(db.pool), u38);
+    });
+  },
+);
