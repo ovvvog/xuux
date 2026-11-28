@@ -56,3 +56,7 @@ docs/external-review/reports/
 # متّجهاتُ Ed25519 من طرفٍ ثالث (WL-532): تُحفَظُ بايتاً ببايتٍ كما نُشِرت لتطابقَ
 # بصمتَها المُعلَنة في `tests/fence/ed25519.test.mjs`؛ تنسيقُها يكسرُ النسبة.
 tests/fixtures/ed25519/*.json
+
+# نتائجُ القياسِ الخامّةُ (WL-630، LIVE-78): ناتجُ `scripts/bench/live78-reader-blocking.mjs` كما كتبَه
+# بايتاً ببايت؛ الخامُّ هو الدليل، وتنسيقُه يُفقِدُه نسبتَه إلى التشغيلة.
+docs/external-review/evidence/live78-reader-blocking-2026-11-28/

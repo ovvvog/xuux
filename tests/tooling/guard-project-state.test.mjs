@@ -25,6 +25,9 @@ import {
   clipMarkdown,
   clipIsFaithful,
   clipIsClosed,
+  clipFallback,
+  visibleNormalized,
+  markdownProfile,
   splitTableCells,
 } from '../../scripts/lib/project-state.mjs';
 import { Parser as CmParser, HtmlRenderer as CmHtml } from 'commonmark';
@@ -1933,4 +1936,104 @@ test('DOC-32/WL-620 — المرجعُ يُسقِطُ منطقَ التبديل�
       const cand = s.slice(0, n);
       assert.equal(clipIsFaithful(s, cand), oracleFaithful(s, cand), `${JSON.stringify(s)} @${n}`);
     }
+});
+
+/**
+ * ‏`DOC-32` (‏`WL-630`، مراجعةُ 2026-11-28: r1-5 وr2-K1 وr3-D5): عقدُ الاحتياطِ مفحوصاً لا موصوفاً. مولِّدٌ حتميٌّ
+ * (‏بذرةٌ ثابتة) من أبجديّةٍ تُكثِرُ العلاماتِ وأسطرَ HTML الخامّ والفراغاتِ البادئة.
+ * @param {number} count @param {number} seed
+ * @returns {string[]}
+ */
+function doc32Fuzz(count, seed) {
+  let x = seed >>> 0;
+  const rand = () => {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+    return x / 2 ** 32;
+  };
+  const alphabet = [
+    '*',
+    '**',
+    '`',
+    '_',
+    '[',
+    ']',
+    '(',
+    ')',
+    '<!b',
+    '>',
+    '\n',
+    ' ',
+    '  ',
+    'a',
+    'bc',
+    'ـ',
+    '😀',
+    '\\',
+    '#',
+    '-',
+    '1.',
+    '&amp;',
+    '!',
+  ];
+  /** @type {string[]} */
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    let s = '';
+    const len = 1 + Math.floor(rand() * 14);
+    for (let j = 0; j < len; j += 1) s += alphabet[Math.floor(rand() * alphabet.length)];
+    out.push(s);
+  }
+  return out;
+}
+
+/** @param {string} text @param {number} n @param {string} r */
+function assertFallbackContract(text, n, r) {
+  const where = `${JSON.stringify(text)} @${n} ⇒ ${JSON.stringify(r)}`;
+  assert.ok(r.length <= n, `الطولُ فوقَ الحدّ: ${where}`);
+  assert.ok(!/[\r\n]/u.test(r), `سطرٌ جديدٌ خامّ: ${where}`);
+  assert.ok(!/^\s/u.test(r), `فراغٌ بادئ: ${where}`);
+  assert.ok(
+    visibleNormalized(text).startsWith(visibleNormalized(r)),
+    `ليسَ بادئةَ الظاهر: ${where}`,
+  );
+  assert.equal(
+    visibleNormalized(r),
+    markdownProfile(r).text.join(''),
+    `الظاهرُ يتغيّرُ بالتطبيع: ${where}`,
+  );
+  assert.ok(
+    markdownProfile(r).fmt.every((f) => f === ''),
+    `تنسيقٌ مُضاف: ${where}`,
+  );
+  assert.ok(clipIsClosed(r), `علامةٌ يتيمة: ${where}`);
+}
+
+test('DOC-32/WL-630 — الاحتياط: الطولُ ≤ n، سطرٌ واحد، بلا فراغٍ بادئ، وبادئةُ الظاهرِ المُطبَّع (‏حالاتُ المراجعة وfuzz)', () => {
+  // ‏حالاتُ المراجعةِ حرفيّاً (‏r2-K1 وr3-D5)، وحالةُ الطولِ المضاعف.
+  const reviewed = /** @type {Array<[string, number]>} */ ([
+    ['` `)*(\\b`!)[ *\\_', 11],
+    ['\nـ <!b\n][\n😀 [ …', 13],
+    ['[!!!!!!!!!!!!!!!!!!!!](u)', 10],
+  ]);
+  for (const [text, n] of reviewed) assertFallbackContract(text, n, clipFallback(text, n));
+  let fallbacks = 0;
+  let total = 0;
+  for (const text of doc32Fuzz(1500, 20261128))
+    for (const n of [1, 2, 3, 5, 8, 13, 21]) {
+      total += 1;
+      assertFallbackContract(text, n, clipFallback(text, n));
+      if (text.length <= n) continue;
+      const r = clipMarkdown(text, n);
+      if (r === clipFallback(text, n) && !(clipIsFaithful(text, r) && clipIsClosed(r))) {
+        fallbacks += 1;
+        continue;
+      }
+      assert.ok(
+        clipIsFaithful(text, r) && clipIsClosed(r),
+        `${JSON.stringify(text)} @${n} ⇒ ${JSON.stringify(r)}`,
+      );
+      assert.ok(r.length <= n + 6, `فوقَ الحدِّ بأكثرَ من المُغلِقات: ${JSON.stringify(r)}`);
+    }
+  // ‏الاحتياطُ يُبلَغُ فعلاً في هذا المولِّد — وإلّا لم يُختبَرْ عقدُه عبرَ `clipMarkdown`.
+  assert.ok(fallbacks > 0, `لم يُبلَغِ الاحتياطُ عبرَ clipMarkdown (‏${total} حالة)`);
 });

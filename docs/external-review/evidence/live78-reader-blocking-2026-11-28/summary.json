@@ -1,0 +1,4359 @@
+{
+ "environment": {
+  "node": "v20.20.2",
+  "psql": "psql (PostgreSQL) 18.7 (Ubuntu 18.7-1.pgdg26.04+5)",
+  "os": "Linux 6.1.155",
+  "cpus": 2,
+  "cpu_model": "Intel(R) Xeon(R) Processor @ 2.90GHz",
+  "mem_gb": 8,
+  "loadavg_at_start": [
+   1.97,
+   1.35,
+   1.2
+  ],
+  "server": {
+   "v": "PostgreSQL 18.7 (Ubuntu 18.7-1.pgdg26.04+5) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, 64-bit",
+   "sb": "128MB",
+   "ml": "64",
+   "wl": "replica",
+   "sc": "on",
+   "fs": "on"
+  },
+  "loadavg_at_end": [
+   3.15,
+   3.15,
+   2.16
+  ]
+ },
+ "options": {
+  "sizes": [
+   1000,
+   100000,
+   1000000
+  ],
+  "repeats": 3,
+  "scenarios": [
+   "success",
+   "kill",
+   "verify-fail"
+  ],
+  "out": "/tmp/h/bench2",
+  "body": 100
+ },
+ "results": [
+  {
+   "size": 1000,
+   "scenario": "success",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ d4ebee6b4a62e5f10a7e8a8bf6dcc9fcecd5427106f9a62600c50328740cec96 طابقت (‏42 مللي ثانية).",
+    "زمن الاستعادة المقاس: 200 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1018,
+    "old": 0,
+    "new": 1000,
+    "w": 18
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 511,
+    "exclusive_lock_after_ms": 236,
+    "exclusive_window_ms": 275,
+    "clients": {
+     "reader-pre": {
+      "queries": 62,
+      "ok": 62,
+      "errors": {},
+      "latency_ms": {
+       "n": 62,
+       "min": 0.19900000002235174,
+       "p50": 0.32299999985843897,
+       "p95": 0.6189999999478459,
+       "p99": 2.24100000038743,
+       "max": 240.76599999982864
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 240.76599999982864,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.35900000017136335,
+       "p50": 0.5140000004321337,
+       "p95": 0.7179999994114041,
+       "p99": 1.3919999999925494,
+       "max": 196.40299999993294
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 196.40299999993294,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 57,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 63,
+      "ok": 63,
+      "errors": {},
+      "latency_ms": {
+       "n": 63,
+       "min": 0.21600000001490116,
+       "p50": 0.2819999996572733,
+       "p95": 0.8140000002458692,
+       "p99": 3.9960000002756715,
+       "max": 248.88300000037998
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 248.88300000037998,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 64,
+      "ok": 64,
+      "errors": {},
+      "latency_ms": {
+       "n": 64,
+       "min": 0.2180000003427267,
+       "p50": 0.38100000005215406,
+       "p95": 0.8449999997392297,
+       "p99": 2.3449999997392297,
+       "max": 240.74700000043958
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 240.74700000043958,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 10,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.44499999936670065,
+       "p50": 0.6060000006109476,
+       "p95": 1.0430000005289912,
+       "p99": 1.6889999993145466,
+       "max": 264.15500000026077
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 264.15500000026077,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 19,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    1.89,
+    1.34,
+    1.2
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "success",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ d4ebee6b4a62e5f10a7e8a8bf6dcc9fcecd5427106f9a62600c50328740cec96 طابقت (‏42 مللي ثانية).",
+    "زمن الاستعادة المقاس: 204 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1019,
+    "old": 0,
+    "new": 1000,
+    "w": 19
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 541,
+    "exclusive_lock_after_ms": 217,
+    "exclusive_window_ms": 324,
+    "clients": {
+     "reader-pre": {
+      "queries": 61,
+      "ok": 61,
+      "errors": {},
+      "latency_ms": {
+       "n": 61,
+       "min": 0.2280000001192093,
+       "p50": 0.30000000074505806,
+       "p95": 1.540000000037253,
+       "p99": 3.5570000000298023,
+       "max": 266.3540000002831
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 266.3540000002831,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.29200000036507845,
+       "p50": 0.8100000005215406,
+       "p95": 2.5970000000670552,
+       "p99": 3.5509999999776483,
+       "max": 224.8870000001043
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 224.8870000001043,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 58,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 63,
+      "ok": 63,
+      "errors": {},
+      "latency_ms": {
+       "n": 63,
+       "min": 0.28899999987334013,
+       "p50": 0.4550000000745058,
+       "p95": 0.9320000000298023,
+       "p99": 2.2689999993890524,
+       "max": 272.7630000002682
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 272.7630000002682,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 10,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 64,
+      "ok": 64,
+      "errors": {},
+      "latency_ms": {
+       "n": 64,
+       "min": 0.24899999983608723,
+       "p50": 0.5169999999925494,
+       "p95": 1.955999999307096,
+       "p99": 3.531000000424683,
+       "max": 273.95099999941885
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 273.95099999941885,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.5070000002160668,
+       "p50": 0.5810000002384186,
+       "p95": 2.4950000001117587,
+       "p99": 3.254000000655651,
+       "max": 268.4980000006035
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 268.4980000006035,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 19,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    1.89,
+    1.34,
+    1.2
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "success",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ d4ebee6b4a62e5f10a7e8a8bf6dcc9fcecd5427106f9a62600c50328740cec96 طابقت (‏55 مللي ثانية).",
+    "زمن الاستعادة المقاس: 195 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1018,
+    "old": 0,
+    "new": 1000,
+    "w": 18
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 529,
+    "exclusive_lock_after_ms": 235,
+    "exclusive_window_ms": 294,
+    "clients": {
+     "reader-pre": {
+      "queries": 58,
+      "ok": 58,
+      "errors": {},
+      "latency_ms": {
+       "n": 58,
+       "min": 0.21600000001490116,
+       "p50": 0.49399999994784594,
+       "p95": 1.1990000000223517,
+       "p99": 61.838000000454485,
+       "max": 250.95400000084192
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 250.95400000084192,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 17,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.21300000045448542,
+       "p50": 0.47500000055879354,
+       "p95": 0.7340000001713634,
+       "p99": 3.526999999769032,
+       "max": 246.69600000046194
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 246.69600000046194,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 60,
+      "ok": 60,
+      "errors": {},
+      "latency_ms": {
+       "n": 60,
+       "min": 0.20899999979883432,
+       "p50": 0.39900000020861626,
+       "p95": 4.362999999895692,
+       "p99": 27.2160000000149,
+       "max": 248.93599999975413
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 248.93599999975413,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 13,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 59,
+      "ok": 59,
+      "errors": {},
+      "latency_ms": {
+       "n": 59,
+       "min": 0.20800000056624413,
+       "p50": 0.4189999997615814,
+       "p95": 1.894000000320375,
+       "p99": 61.78100000042468,
+       "max": 250.93499999959022
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 250.93499999959022,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 26,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.4850000003352761,
+       "p50": 0.6630000006407499,
+       "p95": 12.130000000819564,
+       "p99": 31.07799999974668,
+       "max": 242.05299999937415
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 242.05299999937415,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    1.89,
+    1.34,
+    1.2
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "kill",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1072,
+    "old": 1000,
+    "new": 0,
+    "w": 72
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 352,
+    "exclusive_lock_after_ms": 208,
+    "exclusive_window_ms": 144,
+    "clients": {
+     "reader-pre": {
+      "queries": 139,
+      "ok": 139,
+      "errors": {},
+      "latency_ms": {
+       "n": 139,
+       "min": 0.2010000003501773,
+       "p50": 0.31900000013411045,
+       "p95": 1.0439999997615814,
+       "p99": 14.411999999545515,
+       "max": 188.52500000037253
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 188.52500000037253,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 115,
+      "ok": 115,
+      "errors": {},
+      "latency_ms": {
+       "n": 115,
+       "min": 0.20899999979883432,
+       "p50": 0.43900000024586916,
+       "p95": 1.0890000006183982,
+       "p99": 4.291000000201166,
+       "max": 145.95700000040233
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 145.95700000040233,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 34,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 140,
+      "ok": 140,
+      "errors": {},
+      "latency_ms": {
+       "n": 140,
+       "min": 0.2109999991953373,
+       "p50": 0.4519999995827675,
+       "p95": 2.4100000001490116,
+       "p99": 12.175999999977648,
+       "max": 189.4890000000596
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 189.4890000000596,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 11,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 142,
+      "ok": 142,
+      "errors": {},
+      "latency_ms": {
+       "n": 142,
+       "min": 0.20299999974668026,
+       "p50": 0.31499999947845936,
+       "p95": 0.9660000000149012,
+       "p99": 12.212000000290573,
+       "max": 188.5010000001639
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 188.5010000001639,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 26,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 72,
+      "ok": 72,
+      "errors": {},
+      "latency_ms": {
+       "n": 72,
+       "min": 0.49799999967217445,
+       "p50": 0.6429999992251396,
+       "p95": 6.615000000223517,
+       "p99": 16.007999999448657,
+       "max": 189.84900000039488
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 189.84900000039488,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 5,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 42
+   },
+   "loadavg": [
+    1.98,
+    1.37,
+    1.21
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "kill",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1074,
+    "old": 1000,
+    "new": 0,
+    "w": 74
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 351,
+    "exclusive_lock_after_ms": 208,
+    "exclusive_window_ms": 143,
+    "clients": {
+     "reader-pre": {
+      "queries": 143,
+      "ok": 143,
+      "errors": {},
+      "latency_ms": {
+       "n": 143,
+       "min": 0.17599999997764826,
+       "p50": 0.25,
+       "p95": 1.1610000003129244,
+       "p99": 3.7850000001490116,
+       "max": 168.3059999998659
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 168.3059999998659,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 19,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 117,
+      "ok": 117,
+      "errors": {},
+      "latency_ms": {
+       "n": 117,
+       "min": 0.1880000000819564,
+       "p50": 0.40700000058859587,
+       "p95": 1.4890000000596046,
+       "p99": 2.78899999987334,
+       "max": 94.9199999999255
+      },
+      "blocked_over_100ms": 0,
+      "max_block_ms": 0,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 77,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 145,
+      "ok": 145,
+      "errors": {},
+      "latency_ms": {
+       "n": 145,
+       "min": 0.18200000002980232,
+       "p50": 0.41399999987334013,
+       "p95": 0.8689999999478459,
+       "p99": 2.4300000006332994,
+       "max": 176.93900000024587
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 176.93900000024587,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 145,
+      "ok": 145,
+      "errors": {},
+      "latency_ms": {
+       "n": 145,
+       "min": 0.19500000029802322,
+       "p50": 0.3659999994561076,
+       "p95": 0.9740000003948808,
+       "p99": 2.8119999999180436,
+       "max": 176.86799999978393
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 176.86799999978393,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 13,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 74,
+      "ok": 74,
+      "errors": {},
+      "latency_ms": {
+       "n": 74,
+       "min": 0.4100000001490116,
+       "p50": 0.6009999997913837,
+       "p95": 1.5640000002458692,
+       "p99": 32.30599999986589,
+       "max": 152.26900000032037
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 152.26900000032037,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 34
+   },
+   "loadavg": [
+    2.06,
+    1.4,
+    1.22
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "kill",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1075,
+    "old": 1000,
+    "new": 0,
+    "w": 75
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 389,
+    "exclusive_lock_after_ms": 245,
+    "exclusive_window_ms": 144,
+    "clients": {
+     "reader-pre": {
+      "queries": 144,
+      "ok": 144,
+      "errors": {},
+      "latency_ms": {
+       "n": 144,
+       "min": 0.19799999985843897,
+       "p50": 0.3619999997317791,
+       "p95": 1.2589999996125698,
+       "p99": 3.558000000193715,
+       "max": 159.5
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 159.5,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 116,
+      "ok": 116,
+      "errors": {},
+      "latency_ms": {
+       "n": 116,
+       "min": 0.21100000012665987,
+       "p50": 0.44799999985843897,
+       "p95": 1.1970000006258488,
+       "p99": 2.9919999996200204,
+       "max": 150.25200000032783
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 150.25200000032783,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 5,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 145,
+      "ok": 145,
+      "errors": {},
+      "latency_ms": {
+       "n": 145,
+       "min": 0.20899999979883432,
+       "p50": 0.5309999994933605,
+       "p95": 0.9950000001117587,
+       "p99": 2.393000000156462,
+       "max": 136.84900000039488
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 136.84900000039488,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 146,
+      "ok": 146,
+      "errors": {},
+      "latency_ms": {
+       "n": 146,
+       "min": 0.2019999995827675,
+       "p50": 0.4459999995306134,
+       "p95": 1.0469999993219972,
+       "p99": 2.717000000178814,
+       "max": 142.64199999999255
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 142.64199999999255,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 21,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 75,
+      "ok": 75,
+      "errors": {},
+      "latency_ms": {
+       "n": 75,
+       "min": 0.5320000005885959,
+       "p50": 0.7990000005811453,
+       "p95": 3.815000000409782,
+       "p99": 11.802000000141561,
+       "max": 118.88900000043213
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 118.88900000043213,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 19
+   },
+   "loadavg": [
+    1.98,
+    1.39,
+    1.22
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "verify-fail",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1032,
+    "old": 1000,
+    "new": 0,
+    "w": 32
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 500,
+    "exclusive_lock_after_ms": 225,
+    "exclusive_window_ms": 275,
+    "clients": {
+     "reader-pre": {
+      "queries": 61,
+      "ok": 61,
+      "errors": {},
+      "latency_ms": {
+       "n": 61,
+       "min": 0.20300000067800283,
+       "p50": 0.28200000058859587,
+       "p95": 0.9060000004246831,
+       "p99": 5.889999999664724,
+       "max": 239.41399999987334
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 239.41399999987334,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 20,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.23200000077486038,
+       "p50": 0.32799999974668026,
+       "p95": 0.900000000372529,
+       "p99": 0.9129999997094274,
+       "max": 233.69700000062585
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 233.69700000062585,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 61,
+      "ok": 61,
+      "errors": {},
+      "latency_ms": {
+       "n": 61,
+       "min": 0.21300000045448542,
+       "p50": 0.2860000003129244,
+       "p95": 3.166999999433756,
+       "p99": 23.536000000312924,
+       "max": 243.53199999965727
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 243.53199999965727,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 63,
+      "ok": 63,
+      "errors": {},
+      "latency_ms": {
+       "n": 63,
+       "min": 0.19300000090152025,
+       "p50": 0.3049999997019768,
+       "p95": 0.9840000001713634,
+       "p99": 3.316999999806285,
+       "max": 248.5560000007972
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 248.5560000007972,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.5159999998286366,
+       "p50": 0.7520000003278255,
+       "p95": 12.696999999694526,
+       "p99": 27.398999999277294,
+       "max": 218.2829999998212
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 218.2829999998212,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    1.98,
+    1.39,
+    1.22
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "verify-fail",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1033,
+    "old": 1000,
+    "new": 0,
+    "w": 33
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 524,
+    "exclusive_lock_after_ms": 248,
+    "exclusive_window_ms": 276,
+    "clients": {
+     "reader-pre": {
+      "queries": 60,
+      "ok": 60,
+      "errors": {},
+      "latency_ms": {
+       "n": 60,
+       "min": 0.20800000056624413,
+       "p50": 0.294000000692904,
+       "p95": 0.921000000089407,
+       "p99": 5.745999999344349,
+       "max": 270.4419999998063
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 270.4419999998063,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.2599999997764826,
+       "p50": 0.3899999996647239,
+       "p95": 0.7209999999031425,
+       "p99": 2.2029999997466803,
+       "max": 220.10899999924004
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 220.10899999924004,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 26,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 63,
+      "ok": 63,
+      "errors": {},
+      "latency_ms": {
+       "n": 63,
+       "min": 0.19099999964237213,
+       "p50": 0.28800000064074993,
+       "p95": 2.3119999999180436,
+       "p99": 8.330000000074506,
+       "max": 252.00399999972433
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 252.00399999972433,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 11,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 64,
+      "ok": 64,
+      "errors": {},
+      "latency_ms": {
+       "n": 64,
+       "min": 0.20000000018626451,
+       "p50": 0.2589999996125698,
+       "p95": 1.7180000003427267,
+       "p99": 8.348000000230968,
+       "max": 251.90599999949336
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 251.90599999949336,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 19,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.43599999975413084,
+       "p50": 0.6579999998211861,
+       "p95": 1.6280000004917383,
+       "p99": 5.8900000005960464,
+       "max": 262.67899999953806
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 262.67899999953806,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    1.98,
+    1.4,
+    1.22
+   ]
+  },
+  {
+   "size": 1000,
+   "scenario": "verify-fail",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 22,
+   "backup_ms": 196,
+   "src_db_bytes": 11245247,
+   "dump_bytes": 167350,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1032,
+    "old": 1000,
+    "new": 0,
+    "w": 32
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 492,
+    "exclusive_lock_after_ms": 222,
+    "exclusive_window_ms": 271,
+    "clients": {
+     "reader-pre": {
+      "queries": 59,
+      "ok": 59,
+      "errors": {},
+      "latency_ms": {
+       "n": 59,
+       "min": 0.23000000044703484,
+       "p50": 0.5930000003427267,
+       "p95": 1.1340000005438924,
+       "p99": 9.104999999515712,
+       "max": 243.99600000027567
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 243.99600000027567,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 22,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.24799999967217445,
+       "p50": 0.6449999995529652,
+       "p95": 2.427000000141561,
+       "p99": 3.3990000002086163,
+       "max": 181.49499999918044
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 181.49499999918044,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 64,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 62,
+      "ok": 62,
+      "errors": {},
+      "latency_ms": {
+       "n": 62,
+       "min": 0.22999999951571226,
+       "p50": 0.4050000002607703,
+       "p95": 1.0059999991208315,
+       "p99": 6.2520000003278255,
+       "max": 243.9989999998361
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 243.9989999998361,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 28,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 62,
+      "ok": 62,
+      "errors": {},
+      "latency_ms": {
+       "n": 62,
+       "min": 0.2010000003501773,
+       "p50": 0.446000000461936,
+       "p95": 0.9580000005662441,
+       "p99": 1.5359999993816018,
+       "max": 243.91500000003725
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 243.91500000003725,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 24,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.5339999999850988,
+       "p50": 0.7060000002384186,
+       "p95": 1.8820000002160668,
+       "p99": 3.4849999994039536,
+       "max": 224.9870000006631
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 224.9870000006631,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 30,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    1.98,
+    1.4,
+    1.22
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "success",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ cae052e83d8acdc9b9de62efc496b30478274aade797ffbbd0ec7dbb4b6d98fa طابقت (‏666 مللي ثانية).",
+    "زمن الاستعادة المقاس: 2078 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 100019,
+    "old": 0,
+    "new": 100000,
+    "w": 19
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 3029,
+    "exclusive_lock_after_ms": 220,
+    "exclusive_window_ms": 2808,
+    "clients": {
+     "reader-pre": {
+      "queries": 50,
+      "ok": 50,
+      "errors": {},
+      "latency_ms": {
+       "n": 50,
+       "min": 0.1969999996945262,
+       "p50": 0.3250000001862645,
+       "p95": 18.87000000011176,
+       "p99": 44.40000000037253,
+       "max": 2791.520999999717
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2791.520999999717,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 20,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 25,
+      "ok": 25,
+      "errors": {},
+      "latency_ms": {
+       "n": 25,
+       "min": 4.458999999798834,
+       "p50": 9.654000000096858,
+       "p95": 18.156000000424683,
+       "p99": 20.338999999687076,
+       "max": 2719.0670000007376
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2719.0670000007376,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 67,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 59,
+      "ok": 54,
+      "errors": {
+       "55P03": 5
+      },
+      "latency_ms": {
+       "n": 59,
+       "min": 0.1969999996945262,
+       "p50": 4.5690000001341105,
+       "p95": 500.7590000005439,
+       "p99": 510.5339999999851,
+       "max": 520.2229999992996
+      },
+      "blocked_over_100ms": 5,
+      "max_block_ms": 520.2229999992996,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 56,
+      "ok": 55,
+      "errors": {
+       "57014": 1
+      },
+      "latency_ms": {
+       "n": 56,
+       "min": 0.21399999968707561,
+       "p50": 0.8969999998807907,
+       "p95": 20.252999999560416,
+       "p99": 766.0939999995753,
+       "max": 2000.6419999999925
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 2000.6419999999925,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 11,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.5130000002682209,
+       "p50": 0.6600000001490116,
+       "p95": 1.5089999996125698,
+       "p99": 9.254999999888241,
+       "max": 2767.75800000038
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2767.75800000038,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    2.14,
+    1.45,
+    1.24
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "success",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ cae052e83d8acdc9b9de62efc496b30478274aade797ffbbd0ec7dbb4b6d98fa طابقت (‏683 مللي ثانية).",
+    "زمن الاستعادة المقاس: 2067 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 100018,
+    "old": 0,
+    "new": 100000,
+    "w": 18
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 3036,
+    "exclusive_lock_after_ms": 218,
+    "exclusive_window_ms": 2817,
+    "clients": {
+     "reader-pre": {
+      "queries": 49,
+      "ok": 49,
+      "errors": {},
+      "latency_ms": {
+       "n": 49,
+       "min": 0.19299999997019768,
+       "p50": 0.776999999769032,
+       "p95": 19.286000000312924,
+       "p99": 23.14100000075996,
+       "max": 2793.777999999933
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2793.777999999933,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 25,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 23,
+      "ok": 23,
+      "errors": {},
+      "latency_ms": {
+       "n": 23,
+       "min": 5.45299999974668,
+       "p50": 11.893000000156462,
+       "p95": 21.387000000104308,
+       "p99": 21.757000000216067,
+       "max": 2738.738000000827
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2738.738000000827,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 55,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 56,
+      "ok": 51,
+      "errors": {
+       "55P03": 5
+      },
+      "latency_ms": {
+       "n": 56,
+       "min": 0.1880000000819564,
+       "p50": 1.1339999996125698,
+       "p95": 500.50499999988824,
+       "p99": 500.60800000000745,
+       "max": 500.77899999916553
+      },
+      "blocked_over_100ms": 6,
+      "max_block_ms": 500.77899999916553,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 53,
+      "ok": 52,
+      "errors": {
+       "57014": 1
+      },
+      "latency_ms": {
+       "n": 53,
+       "min": 0.19300000090152025,
+       "p50": 1.0379999997094274,
+       "p95": 18.876000000163913,
+       "p99": 751.2050000000745,
+       "max": 2009.069000000134
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 2009.069000000134,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 29,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.5320000005885959,
+       "p50": 0.7129999995231628,
+       "p95": 15.378999999724329,
+       "p99": 15.686999999918044,
+       "max": 2756.450999999419
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2756.450999999419,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 10,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    2.21,
+    1.48,
+    1.25
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "success",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ cae052e83d8acdc9b9de62efc496b30478274aade797ffbbd0ec7dbb4b6d98fa طابقت (‏695 مللي ثانية).",
+    "زمن الاستعادة المقاس: 2186 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 100019,
+    "old": 0,
+    "new": 100000,
+    "w": 19
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 3257,
+    "exclusive_lock_after_ms": 290,
+    "exclusive_window_ms": 2967,
+    "clients": {
+     "reader-pre": {
+      "queries": 54,
+      "ok": 54,
+      "errors": {},
+      "latency_ms": {
+       "n": 54,
+       "min": 0.22900000028312206,
+       "p50": 0.5310000004246831,
+       "p95": 21.002999999560416,
+       "p99": 27.79200000036508,
+       "max": 2899.8449999997392
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2899.8449999997392,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 21,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 24,
+      "ok": 24,
+      "errors": {},
+      "latency_ms": {
+       "n": 24,
+       "min": 5.300999999977648,
+       "p50": 10.472999999299645,
+       "p95": 22.0339999999851,
+       "p99": 22.04700000025332,
+       "max": 2874.638000000268
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2874.638000000268,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 43,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 60,
+      "ok": 55,
+      "errors": {
+       "55P03": 5
+      },
+      "latency_ms": {
+       "n": 60,
+       "min": 0.22699999995529652,
+       "p50": 0.8319999994710088,
+       "p95": 500.4740000003949,
+       "p99": 501.1459999997169,
+       "max": 508.1699999999255
+      },
+      "blocked_over_100ms": 6,
+      "max_block_ms": 508.1699999999255,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 25,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 57,
+      "ok": 56,
+      "errors": {
+       "57014": 1
+      },
+      "latency_ms": {
+       "n": 57,
+       "min": 0.23300000000745058,
+       "p50": 0.9170000003650784,
+       "p95": 24.08699999935925,
+       "p99": 874.0420000003651,
+       "max": 2000.5200000004843
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 2000.5200000004843,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 13,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 35,
+      "ok": 35,
+      "errors": {},
+      "latency_ms": {
+       "n": 35,
+       "min": 0.5609999997541308,
+       "p50": 0.7160000000149012,
+       "p95": 8.492999999783933,
+       "p99": 9.436999999918044,
+       "max": 2850.6500000003725
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2850.6500000003725,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    2.28,
+    1.5,
+    1.26
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "kill",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1069,
+    "old": 1000,
+    "new": 0,
+    "w": 69
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 1623,
+    "exclusive_lock_after_ms": 211,
+    "exclusive_window_ms": 1412,
+    "clients": {
+     "reader-pre": {
+      "queries": 133,
+      "ok": 133,
+      "errors": {},
+      "latency_ms": {
+       "n": 133,
+       "min": 0.20300000067800283,
+       "p50": 0.43400000035762787,
+       "p95": 0.9519999995827675,
+       "p99": 2.895999999716878,
+       "max": 1685.9069999996573
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1685.9069999996573,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 108,
+      "ok": 108,
+      "errors": {},
+      "latency_ms": {
+       "n": 108,
+       "min": 0.17999999970197678,
+       "p50": 0.42599999997764826,
+       "p95": 0.8539999993517995,
+       "p99": 2.592000000178814,
+       "max": 1643.8600000003353
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1643.8600000003353,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 33,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 138,
+      "ok": 135,
+      "errors": {
+       "55P03": 3
+      },
+      "latency_ms": {
+       "n": 138,
+       "min": 0.1869999999180436,
+       "p50": 0.4830000000074506,
+       "p95": 2.354000000283122,
+       "p99": 500.4229999994859,
+       "max": 500.4809999996796
+      },
+      "blocked_over_100ms": 4,
+      "max_block_ms": 500.4809999996796,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 10,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 136,
+      "ok": 136,
+      "errors": {},
+      "latency_ms": {
+       "n": 136,
+       "min": 0.19900000002235174,
+       "p50": 0.41700000036507845,
+       "p95": 0.9410000005736947,
+       "p99": 2.75899999961257,
+       "max": 1686.043000000529
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1686.043000000529,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 20,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 69,
+      "ok": 69,
+      "errors": {},
+      "latency_ms": {
+       "n": 69,
+       "min": 0.5020000003278255,
+       "p50": 0.6529999999329448,
+       "p95": 1.3620000006631017,
+       "p99": 24.28500000014901,
+       "max": 1687.0860000001267
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1687.0860000001267,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 271
+   },
+   "loadavg": [
+    2.17,
+    1.5,
+    1.26
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "kill",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1071,
+    "old": 1000,
+    "new": 0,
+    "w": 71
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 1664,
+    "exclusive_lock_after_ms": 246,
+    "exclusive_window_ms": 1418,
+    "clients": {
+     "reader-pre": {
+      "queries": 139,
+      "ok": 139,
+      "errors": {},
+      "latency_ms": {
+       "n": 139,
+       "min": 0.18600000068545341,
+       "p50": 0.3710000002756715,
+       "p95": 0.7859999993816018,
+       "p99": 1.125,
+       "max": 1595.519999999553
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1595.519999999553,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 110,
+      "ok": 110,
+      "errors": {},
+      "latency_ms": {
+       "n": 110,
+       "min": 0.18499999959021807,
+       "p50": 0.35000000055879354,
+       "p95": 0.8820000002160668,
+       "p99": 2.9830000000074506,
+       "max": 1582.2439999999478
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1582.2439999999478,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 22,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 142,
+      "ok": 139,
+      "errors": {
+       "55P03": 3
+      },
+      "latency_ms": {
+       "n": 142,
+       "min": 0.16799999959766865,
+       "p50": 0.3510000007227063,
+       "p95": 0.8679999997839332,
+       "p99": 500.47299999929965,
+       "max": 500.9870000006631
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 500.9870000006631,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 139,
+      "ok": 139,
+      "errors": {},
+      "latency_ms": {
+       "n": 139,
+       "min": 0.18900000024586916,
+       "p50": 0.33699999935925007,
+       "p95": 0.8130000000819564,
+       "p99": 1.9339999994263053,
+       "max": 1611.5
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1611.5,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 23,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 71,
+      "ok": 71,
+      "errors": {},
+      "latency_ms": {
+       "n": 71,
+       "min": 0.4989999998360872,
+       "p50": 0.794000000692904,
+       "p95": 1.3110000006854534,
+       "p99": 8.626999999396503,
+       "max": 1570.3649999992922
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1570.3649999992922,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 7,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 200
+   },
+   "loadavg": [
+    2.24,
+    1.52,
+    1.27
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "kill",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1069,
+    "old": 1000,
+    "new": 0,
+    "w": 69
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 1642,
+    "exclusive_lock_after_ms": 227,
+    "exclusive_window_ms": 1415,
+    "clients": {
+     "reader-pre": {
+      "queries": 133,
+      "ok": 133,
+      "errors": {},
+      "latency_ms": {
+       "n": 133,
+       "min": 0.20799999963492155,
+       "p50": 0.2959999991580844,
+       "p95": 0.8660000003874302,
+       "p99": 1.8459999999031425,
+       "max": 1715.9860000004992
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1715.9860000004992,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 21,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 106,
+      "ok": 106,
+      "errors": {},
+      "latency_ms": {
+       "n": 106,
+       "min": 0.20699999947100878,
+       "p50": 0.4159999992698431,
+       "p95": 0.5839999997988343,
+       "p99": 1.282999999821186,
+       "max": 1695.0040000006557
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1695.0040000006557,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 138,
+      "ok": 135,
+      "errors": {
+       "55P03": 3
+      },
+      "latency_ms": {
+       "n": 138,
+       "min": 0.21999999973922968,
+       "p50": 0.4569999994710088,
+       "p95": 1.1620000004768372,
+       "p99": 500.45999999996275,
+       "max": 527.4189999997616
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 527.4189999997616,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 17,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 134,
+      "ok": 134,
+      "errors": {},
+      "latency_ms": {
+       "n": 134,
+       "min": 0.19499999936670065,
+       "p50": 0.36899999994784594,
+       "p95": 0.9390000002458692,
+       "p99": 2.0200000004842877,
+       "max": 1716.222000000067
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1716.222000000067,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 69,
+      "ok": 69,
+      "errors": {},
+      "latency_ms": {
+       "n": 69,
+       "min": 0.4989999998360872,
+       "p50": 0.796000000089407,
+       "p95": 1.105999999679625,
+       "p99": 13.798000000417233,
+       "max": 1690.588999999687
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 1690.588999999687,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 7,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 291
+   },
+   "loadavg": [
+    2.22,
+    1.53,
+    1.27
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "verify-fail",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1034,
+    "old": 1000,
+    "new": 0,
+    "w": 34
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 3101,
+    "exclusive_lock_after_ms": 286,
+    "exclusive_window_ms": 2814,
+    "clients": {
+     "reader-pre": {
+      "queries": 63,
+      "ok": 63,
+      "errors": {},
+      "latency_ms": {
+       "n": 63,
+       "min": 0.18900000024586916,
+       "p50": 0.4249999998137355,
+       "p95": 0.8659999994561076,
+       "p99": 1.7939999997615814,
+       "max": 2780.8159999996424
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2780.8159999996424,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.17999999970197678,
+       "p50": 0.4249999998137355,
+       "p95": 1.0910000000149012,
+       "p99": 2.3269999995827675,
+       "max": 2752.04899999965
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2752.04899999965,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 22,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 71,
+      "ok": 66,
+      "errors": {
+       "55P03": 5
+      },
+      "latency_ms": {
+       "n": 71,
+       "min": 0.18599999975413084,
+       "p50": 0.2859999993816018,
+       "p95": 500.43800000008196,
+       "p99": 508.4809999996796,
+       "max": 527.4389999993145
+      },
+      "blocked_over_100ms": 6,
+      "max_block_ms": 527.4389999993145,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 67,
+      "ok": 66,
+      "errors": {
+       "57014": 1
+      },
+      "latency_ms": {
+       "n": 67,
+       "min": 0.20799999963492155,
+       "p50": 0.4369999999180436,
+       "p95": 1.578999999910593,
+       "p99": 745.6299999998882,
+       "max": 2000.3959999997169
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 2000.3959999997169,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 20,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.43599999975413084,
+       "p50": 0.6879999991506338,
+       "p95": 4.071999999694526,
+       "p99": 8.889999999664724,
+       "max": 2793.2820000005886
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 2793.2820000005886,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    2.36,
+    1.57,
+    1.29
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "verify-fail",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1035,
+    "old": 1000,
+    "new": 0,
+    "w": 35
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 5655,
+    "exclusive_lock_after_ms": 217,
+    "exclusive_window_ms": 5438,
+    "clients": {
+     "reader-pre": {
+      "queries": 65,
+      "ok": 65,
+      "errors": {},
+      "latency_ms": {
+       "n": 65,
+       "min": 0.1839999994263053,
+       "p50": 0.3710000002756715,
+       "p95": 1.1370000001043081,
+       "p99": 1.7029999997466803,
+       "max": 5293.098000000231
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 5293.098000000231,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 38,
+      "ok": 38,
+      "errors": {},
+      "latency_ms": {
+       "n": 38,
+       "min": 0.17200000025331974,
+       "p50": 0.3389999996870756,
+       "p95": 0.8169999998062849,
+       "p99": 1.8969999998807907,
+       "max": 5280.541000000201
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 5280.541000000201,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 24,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 76,
+      "ok": 67,
+      "errors": {
+       "55P03": 9
+      },
+      "latency_ms": {
+       "n": 76,
+       "min": 0.24000000022351742,
+       "p50": 0.39900000020861626,
+       "p95": 503.9419999998063,
+       "p99": 515.561999999918,
+       "max": 555.8590000001714
+      },
+      "blocked_over_100ms": 10,
+      "max_block_ms": 555.8590000001714,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 9,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 70,
+      "ok": 68,
+      "errors": {
+       "57014": 2
+      },
+      "latency_ms": {
+       "n": 70,
+       "min": 0.19099999964237213,
+       "p50": 0.39599999971687794,
+       "p95": 1.9660000000149012,
+       "p99": 2013.327000000514,
+       "max": 2036.8810000000522
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 2036.8810000000522,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 35,
+      "ok": 35,
+      "errors": {},
+      "latency_ms": {
+       "n": 35,
+       "min": 0.455999999307096,
+       "p50": 0.6169999996200204,
+       "p95": 1.9769999999552965,
+       "p99": 9.60300000011921,
+       "max": 5284.052000000142
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 5284.052000000142,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 18,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    3.01,
+    1.73,
+    1.34
+   ]
+  },
+  {
+   "size": 100000,
+   "scenario": "verify-fail",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 2166,
+   "backup_ms": 1118,
+   "src_db_bytes": 47380159,
+   "dump_bytes": 1054677,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1032,
+    "old": 1000,
+    "new": 0,
+    "w": 32
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 3894,
+    "exclusive_lock_after_ms": 207,
+    "exclusive_window_ms": 3687,
+    "clients": {
+     "reader-pre": {
+      "queries": 60,
+      "ok": 60,
+      "errors": {},
+      "latency_ms": {
+       "n": 60,
+       "min": 0.17900000046938658,
+       "p50": 0.5650000004097819,
+       "p95": 0.9279999993741512,
+       "p99": 0.9469999996945262,
+       "max": 3633.1979999998584
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 3633.1979999998584,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.44099999964237213,
+       "p50": 0.7669999999925494,
+       "p95": 0.927000000141561,
+       "p99": 1.0740000000223517,
+       "max": 3597.8930000001565
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 3597.8930000001565,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 55,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 68,
+      "ok": 62,
+      "errors": {
+       "55P03": 6
+      },
+      "latency_ms": {
+       "n": 68,
+       "min": 0.15700000058859587,
+       "p50": 0.5979999992996454,
+       "p95": 500.43599999975413,
+       "p99": 500.5369999995455,
+       "max": 500.70000000018626
+      },
+      "blocked_over_100ms": 7,
+      "max_block_ms": 500.70000000018626,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 18,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 64,
+      "ok": 63,
+      "errors": {
+       "57014": 1
+      },
+      "latency_ms": {
+       "n": 64,
+       "min": 0.18400000035762787,
+       "p50": 0.5230000000447035,
+       "p95": 0.9089999999850988,
+       "p99": 1616.9130000006407,
+       "max": 2000.4239999996498
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 2000.4239999996498,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.42100000008940697,
+       "p50": 0.6589999999850988,
+       "p95": 0.9660000000149012,
+       "p99": 5.7999999998137355,
+       "max": 3635.4490000000224
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 3635.4490000000224,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 9,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    3.01,
+    1.76,
+    1.35
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "success",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ 2696032f0797ad703fb477fcce3bde97bc51dfd831d4b5eac453f63f97a47d24 طابقت (‏12849 مللي ثانية).",
+    "زمن الاستعادة المقاس: 27069 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1000031,
+    "old": 0,
+    "new": 1000000,
+    "w": 31
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 40616,
+    "exclusive_lock_after_ms": 431,
+    "exclusive_window_ms": 40185,
+    "clients": {
+     "reader-pre": {
+      "queries": 35,
+      "ok": 35,
+      "errors": {},
+      "latency_ms": {
+       "n": 35,
+       "min": 0.2869999995455146,
+       "p50": 0.8410000000149012,
+       "p95": 13.587999999523163,
+       "p99": 431.79299999959767,
+       "max": 40688.783999999985
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 40688.783999999985,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 21,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 3,
+      "ok": 3,
+      "errors": {},
+      "latency_ms": {
+       "n": 3,
+       "min": 357.9309999998659,
+       "p50": 395.375,
+       "p95": 395.375,
+       "p99": 395.375,
+       "max": 40642.156000000425
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 40642.156000000425,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 27,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 114,
+      "ok": 38,
+      "errors": {
+       "55P03": 76
+      },
+      "latency_ms": {
+       "n": 114,
+       "min": 0.35599999967962503,
+       "p50": 500.47200000006706,
+       "p95": 506.26599999982864,
+       "p99": 523.3919999999925,
+       "max": 626.0370000004768
+      },
+      "blocked_over_100ms": 79,
+      "max_block_ms": 626.0370000004768,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 30,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 58,
+      "ok": 38,
+      "errors": {
+       "57014": 20
+      },
+      "latency_ms": {
+       "n": 58,
+       "min": 0.28800000064074993,
+       "p50": 0.7829999998211861,
+       "p95": 2010.2249999996275,
+       "p99": 2011.3570000007749,
+       "max": 2016.0879999995232
+      },
+      "blocked_over_100ms": 23,
+      "max_block_ms": 2016.0879999995232,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 28,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 49,
+      "ok": 49,
+      "errors": {},
+      "latency_ms": {
+       "n": 49,
+       "min": 0.5429999995976686,
+       "p50": 0.8070000000298023,
+       "p95": 4.091000000014901,
+       "p99": 9.925999999977648,
+       "max": 40083.395000000484
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 40083.395000000484,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 24,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    4.93,
+    2.65,
+    1.71
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "success",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ 2696032f0797ad703fb477fcce3bde97bc51dfd831d4b5eac453f63f97a47d24 طابقت (‏10650 مللي ثانية).",
+    "زمن الاستعادة المقاس: 27882 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1000028,
+    "old": 0,
+    "new": 1000000,
+    "w": 28
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 39372,
+    "exclusive_lock_after_ms": 490,
+    "exclusive_window_ms": 38882,
+    "clients": {
+     "reader-pre": {
+      "queries": 40,
+      "ok": 40,
+      "errors": {},
+      "latency_ms": {
+       "n": 40,
+       "min": 0.28399999998509884,
+       "p50": 0.37699999939650297,
+       "p95": 2.762000000104308,
+       "p99": 263.3649999992922,
+       "max": 39442.20299999975
+      },
+      "blocked_over_100ms": 2,
+      "max_block_ms": 39442.20299999975,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 13,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 3,
+      "ok": 3,
+      "errors": {},
+      "latency_ms": {
+       "n": 3,
+       "min": 227.62999999988824,
+       "p50": 315.7269999999553,
+       "p95": 315.7269999999553,
+       "p99": 315.7269999999553,
+       "max": 39379.81199999992
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 39379.81199999992,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 17,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 113,
+      "ok": 40,
+      "errors": {
+       "55P03": 73
+      },
+      "latency_ms": {
+       "n": 113,
+       "min": 0.28299999982118607,
+       "p50": 500.4860000004992,
+       "p95": 506.42700000014156,
+       "p99": 516.1549999993294,
+       "max": 883.1849999995902
+      },
+      "blocked_over_100ms": 76,
+      "max_block_ms": 883.1849999995902,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 29,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 60,
+      "ok": 41,
+      "errors": {
+       "57014": 19
+      },
+      "latency_ms": {
+       "n": 60,
+       "min": 0.2549999998882413,
+       "p50": 1.2820000005885959,
+       "p95": 2000.680999999866,
+       "p99": 2002.7740000002086,
+       "max": 2005.828000000678
+      },
+      "blocked_over_100ms": 23,
+      "max_block_ms": 2005.828000000678,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 29,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 47,
+      "ok": 47,
+      "errors": {},
+      "latency_ms": {
+       "n": 47,
+       "min": 0.5959999999031425,
+       "p50": 0.8509999997913837,
+       "p95": 2.9180000005289912,
+       "p99": 3.6109999995678663,
+       "max": 38751.743000000715
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 38751.743000000715,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 43,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    5.17,
+    2.98,
+    1.86
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "success",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": 0,
+    "signal": null
+   },
+   "restore_tail": [
+    "تحقّقُ المحتوى [CONTENT_VERIFIED]: البصمةُ 2696032f0797ad703fb477fcce3bde97bc51dfd831d4b5eac453f63f97a47d24 طابقت (‏7000 مللي ثانية).",
+    "زمن الاستعادة المقاس: 21464 مللي ثانية.",
+    "قايس البيان 34 جدولاً ونسخة الهجرة 23."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1000025,
+    "old": 0,
+    "new": 1000000,
+    "w": 25
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 29239,
+    "exclusive_lock_after_ms": 651,
+    "exclusive_window_ms": 28588,
+    "clients": {
+     "reader-pre": {
+      "queries": 48,
+      "ok": 48,
+      "errors": {},
+      "latency_ms": {
+       "n": 48,
+       "min": 0.3030000003054738,
+       "p50": 0.4320000000298023,
+       "p95": 2.8760000001639128,
+       "p99": 290.3179999999702,
+       "max": 28830.878999999724
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 28830.878999999724,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 22,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 3,
+      "ok": 3,
+      "errors": {},
+      "latency_ms": {
+       "n": 3,
+       "min": 290.3870000001043,
+       "p50": 321.85600000061095,
+       "p95": 321.85600000061095,
+       "p99": 321.85600000061095,
+       "max": 28856.27100000065
+      },
+      "blocked_over_100ms": 3,
+      "max_block_ms": 28856.27100000065,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 102,
+      "ok": 48,
+      "errors": {
+       "55P03": 54
+      },
+      "latency_ms": {
+       "n": 102,
+       "min": 0.26900000032037497,
+       "p50": 500.4529999997467,
+       "p95": 500.6739999996498,
+       "p99": 501.25499999988824,
+       "max": 502.9869999997318
+      },
+      "blocked_over_100ms": 58,
+      "max_block_ms": 502.9869999997318,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 21,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 63,
+      "ok": 49,
+      "errors": {
+       "57014": 14
+      },
+      "latency_ms": {
+       "n": 63,
+       "min": 0.29799999948590994,
+       "p50": 0.5760000003501773,
+       "p95": 2000.4709999999031,
+       "p99": 2000.7599999997765,
+       "max": 2000.7659999998286
+      },
+      "blocked_over_100ms": 18,
+      "max_block_ms": 2000.7659999998286,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 19,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 48,
+      "ok": 48,
+      "errors": {},
+      "latency_ms": {
+       "n": 48,
+       "min": 0.5709999995306134,
+       "p50": 0.7930000005289912,
+       "p95": 3.302000000141561,
+       "p99": 9.111000000499189,
+       "max": 28506.919999999925
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 28506.919999999925,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 18,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    4.82,
+    3.14,
+    1.95
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "kill",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1017,
+    "old": 1000,
+    "new": 0,
+    "w": 17
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 20310,
+    "exclusive_lock_after_ms": 207,
+    "exclusive_window_ms": 20103,
+    "clients": {
+     "reader-pre": {
+      "queries": 29,
+      "ok": 29,
+      "errors": {},
+      "latency_ms": {
+       "n": 29,
+       "min": 0.17900000046938658,
+       "p50": 0.2779999999329448,
+       "p95": 0.7560000000521541,
+       "p99": 1.157999999821186,
+       "max": 24994.109999999404
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 24994.109999999404,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 4,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 2,
+      "ok": 2,
+      "errors": {},
+      "latency_ms": {
+       "n": 2,
+       "min": 2.6469999998807907,
+       "p50": 2.6469999998807907,
+       "p95": 2.6469999998807907,
+       "p99": 2.6469999998807907,
+       "max": 24994.31499999948
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 24994.31499999948,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 77,
+      "ok": 30,
+      "errors": {
+       "55P03": 47
+      },
+      "latency_ms": {
+       "n": 77,
+       "min": 0.2369999997317791,
+       "p50": 500.5210000006482,
+       "p95": 500.8600000003353,
+       "p99": 501.2409999994561,
+       "max": 502.2869999995455
+      },
+      "blocked_over_100ms": 48,
+      "max_block_ms": 502.2869999995455,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 28,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 43,
+      "ok": 31,
+      "errors": {
+       "57014": 12
+      },
+      "latency_ms": {
+       "n": 43,
+       "min": 0.22599999979138374,
+       "p50": 0.3580000000074506,
+       "p95": 2000.6780000003055,
+       "p99": 2000.7790000000969,
+       "max": 2000.785000000149
+      },
+      "blocked_over_100ms": 13,
+      "max_block_ms": 2000.785000000149,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 27,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 17,
+      "ok": 17,
+      "errors": {},
+      "latency_ms": {
+       "n": 17,
+       "min": 0.5369999995455146,
+       "p50": 0.6430000001564622,
+       "p95": 5.291000000201166,
+       "p99": 5.291000000201166,
+       "max": 24995.86400000006
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 24995.86400000006,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 4916
+   },
+   "loadavg": [
+    4.23,
+    3.13,
+    1.98
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "kill",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1017,
+    "old": 1000,
+    "new": 0,
+    "w": 17
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 20361,
+    "exclusive_lock_after_ms": 262,
+    "exclusive_window_ms": 20100,
+    "clients": {
+     "reader-pre": {
+      "queries": 30,
+      "ok": 30,
+      "errors": {},
+      "latency_ms": {
+       "n": 30,
+       "min": 0.19499999936670065,
+       "p50": 0.5379999997094274,
+       "p95": 1.0049999998882413,
+       "p99": 3.440999999642372,
+       "max": 25156.230000000447
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 25156.230000000447,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 9,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 1,
+      "ok": 1,
+      "errors": {},
+      "latency_ms": {
+       "n": 1,
+       "min": 25132.87000000011,
+       "p50": 25132.87000000011,
+       "p95": 25132.87000000011,
+       "p99": 25132.87000000011,
+       "max": 25132.87000000011
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 25132.87000000011,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 18,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 78,
+      "ok": 31,
+      "errors": {
+       "55P03": 47
+      },
+      "latency_ms": {
+       "n": 78,
+       "min": 0.2099999999627471,
+       "p50": 500.54299999959767,
+       "p95": 501.1900000004098,
+       "p99": 502.8629999998957,
+       "max": 503.2839999999851
+      },
+      "blocked_over_100ms": 48,
+      "max_block_ms": 503.2839999999851,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 11,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 43,
+      "ok": 31,
+      "errors": {
+       "57014": 12
+      },
+      "latency_ms": {
+       "n": 43,
+       "min": 0.21100000012665987,
+       "p50": 0.6110000004991889,
+       "p95": 2000.661000000313,
+       "p99": 2000.6969999996945,
+       "max": 2000.7239999994636
+      },
+      "blocked_over_100ms": 13,
+      "max_block_ms": 2000.7239999994636,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 17,
+      "ok": 17,
+      "errors": {},
+      "latency_ms": {
+       "n": 17,
+       "min": 0.4789999993517995,
+       "p50": 0.651999999769032,
+       "p95": 26.37800000049174,
+       "p99": 26.37800000049174,
+       "max": 25111.424999999814
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 25111.424999999814,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 5057
+   },
+   "loadavg": [
+    3.84,
+    3.12,
+    2.01
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "kill",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": null,
+    "signal": "SIGKILL"
+   },
+   "restore_tail": [],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1018,
+    "old": 1000,
+    "new": 0,
+    "w": 18
+   },
+   "tamper": false,
+   "summary": {
+    "restore_ms": 20383,
+    "exclusive_lock_after_ms": 281,
+    "exclusive_window_ms": 20103,
+    "clients": {
+     "reader-pre": {
+      "queries": 31,
+      "ok": 31,
+      "errors": {},
+      "latency_ms": {
+       "n": 31,
+       "min": 0.29799999948590994,
+       "p50": 0.4330000001937151,
+       "p95": 1.0240000002086163,
+       "p99": 3.7320000007748604,
+       "max": 26413.96999999974
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 26413.96999999974,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 6,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 2,
+      "ok": 2,
+      "errors": {},
+      "latency_ms": {
+       "n": 2,
+       "min": 0.3619999997317791,
+       "p50": 0.3619999997317791,
+       "p95": 0.3619999997317791,
+       "p99": 0.3619999997317791,
+       "max": 26394.116000000387
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 26394.116000000387,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 19,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 83,
+      "ok": 33,
+      "errors": {
+       "55P03": 50
+      },
+      "latency_ms": {
+       "n": 83,
+       "min": 0.2369999997317791,
+       "p50": 500.4809999996796,
+       "p95": 500.68599999975413,
+       "p99": 501.8969999998808,
+       "max": 503.4989999998361
+      },
+      "blocked_over_100ms": 51,
+      "max_block_ms": 503.4989999998361,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 47,
+      "ok": 34,
+      "errors": {
+       "57014": 13
+      },
+      "latency_ms": {
+       "n": 47,
+       "min": 0.25,
+       "p50": 0.5489999996498227,
+       "p95": 2000.5719999996945,
+       "p99": 2000.7469999995083,
+       "max": 2000.7970000002533
+      },
+      "blocked_over_100ms": 13,
+      "max_block_ms": 2000.7970000002533,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 18,
+      "ok": 18,
+      "errors": {},
+      "latency_ms": {
+       "n": 18,
+       "min": 0.5869999993592501,
+       "p50": 0.6940000001341105,
+       "p95": 5.480999999679625,
+       "p99": 5.480999999679625,
+       "max": 26411.61700000055
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 26411.61700000055,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 14,
+        "code": null
+       }
+      ]
+     }
+    },
+    "reader_pre_resumed_after_kill_ms": 6318
+   },
+   "loadavg": [
+    3.45,
+    3.1,
+    2.04
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "verify-fail",
+   "rep": 1,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1032,
+    "old": 1000,
+    "new": 0,
+    "w": 32
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 30716,
+    "exclusive_lock_after_ms": 236,
+    "exclusive_window_ms": 30480,
+    "clients": {
+     "reader-pre": {
+      "queries": 61,
+      "ok": 61,
+      "errors": {},
+      "latency_ms": {
+       "n": 61,
+       "min": 0.21700000017881393,
+       "p50": 0.2989999996498227,
+       "p95": 1.1219999995082617,
+       "p99": 4.428999999538064,
+       "max": 30462.547999999486
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 30462.547999999486,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.20899999979883432,
+       "p50": 0.32300000078976154,
+       "p95": 0.8500000005587935,
+       "p99": 0.8759999992325902,
+       "max": 30441.058999999426
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 30441.058999999426,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 16,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 120,
+      "ok": 63,
+      "errors": {
+       "55P03": 57
+      },
+      "latency_ms": {
+       "n": 120,
+       "min": 0.22999999951571226,
+       "p50": 0.8869999991729856,
+       "p95": 501.12900000065565,
+       "p99": 503.1920000007376,
+       "max": 510.1839999994263
+      },
+      "blocked_over_100ms": 58,
+      "max_block_ms": 510.1839999994263,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 78,
+      "ok": 63,
+      "errors": {
+       "57014": 15
+      },
+      "latency_ms": {
+       "n": 78,
+       "min": 0.22200000006705523,
+       "p50": 0.4100000001490116,
+       "p95": 2000.5729999998584,
+       "p99": 2000.8930000001565,
+       "max": 2001.0180000001565
+      },
+      "blocked_over_100ms": 15,
+      "max_block_ms": 2001.0180000001565,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 32,
+      "ok": 32,
+      "errors": {},
+      "latency_ms": {
+       "n": 32,
+       "min": 0.5880000004544854,
+       "p50": 0.7950000008568168,
+       "p95": 3.019000000320375,
+       "p99": 3.138000000268221,
+       "max": 30467.083000000566
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 30467.083000000566,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 13,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    3.84,
+    3.23,
+    2.12
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "verify-fail",
+   "rep": 2,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1034,
+    "old": 1000,
+    "new": 0,
+    "w": 34
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 28106,
+    "exclusive_lock_after_ms": 308,
+    "exclusive_window_ms": 27799,
+    "clients": {
+     "reader-pre": {
+      "queries": 64,
+      "ok": 64,
+      "errors": {},
+      "latency_ms": {
+       "n": 64,
+       "min": 0.2360000004991889,
+       "p50": 0.6140000000596046,
+       "p95": 1.4879999998956919,
+       "p99": 6.027999999932945,
+       "max": 27752.716000000015
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 27752.716000000015,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 13,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 33,
+      "ok": 33,
+      "errors": {},
+      "latency_ms": {
+       "n": 33,
+       "min": 0.2989999996498227,
+       "p50": 0.7160000000149012,
+       "p95": 2.875,
+       "p99": 6.1019999999552965,
+       "max": 27743.00499999989
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 27743.00499999989,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 24,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 117,
+      "ok": 65,
+      "errors": {
+       "55P03": 52
+      },
+      "latency_ms": {
+       "n": 117,
+       "min": 0.2580000003799796,
+       "p50": 1.2470000004395843,
+       "p95": 500.9210000000894,
+       "p99": 502.06499999947846,
+       "max": 505.16399999987334
+      },
+      "blocked_over_100ms": 53,
+      "max_block_ms": 505.16399999987334,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 8,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 79,
+      "ok": 66,
+      "errors": {
+       "57014": 13
+      },
+      "latency_ms": {
+       "n": 79,
+       "min": 0.19299999997019768,
+       "p50": 0.7009999994188547,
+       "p95": 2000.5230000000447,
+       "p99": 2000.555999999866,
+       "max": 2002.7099999999627
+      },
+      "blocked_over_100ms": 14,
+      "max_block_ms": 2002.7099999999627,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 9,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.5679999999701977,
+       "p50": 0.8119999999180436,
+       "p95": 3.3430000003427267,
+       "p99": 6.44300000090152,
+       "max": 27750.894999999553
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 27750.894999999553,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 12,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    3.7,
+    3.24,
+    2.16
+   ]
+  },
+  {
+   "size": 1000000,
+   "scenario": "verify-fail",
+   "rep": 3,
+   "body_bytes": 100,
+   "fill_ms": 29177,
+   "backup_ms": 17847,
+   "src_db_bytes": 375620111,
+   "dump_bytes": 9106456,
+   "restore_exit": {
+    "code": 1,
+    "signal": null
+   },
+   "restore_tail": [
+    "⛔ [RESTORE_CONTENT_MISMATCH] محتوى المستعادِ لا يطابقُ بصمةَ النسخة: table laws: sha256 — لا [RESTORE_OK]. لا COMMIT: الهدفُ كما كان."
+   ],
+   "target_before": {
+    "n": 1000,
+    "old": 1000,
+    "new": 0,
+    "w": 0
+   },
+   "target_after": {
+    "n": 1034,
+    "old": 1000,
+    "new": 0,
+    "w": 34
+   },
+   "tamper": true,
+   "summary": {
+    "restore_ms": 27006,
+    "exclusive_lock_after_ms": 295,
+    "exclusive_window_ms": 26712,
+    "clients": {
+     "reader-pre": {
+      "queries": 64,
+      "ok": 64,
+      "errors": {},
+      "latency_ms": {
+       "n": 64,
+       "min": 0.2180000003427267,
+       "p50": 0.31500000040978193,
+       "p95": 0.9709999999031425,
+       "p99": 1.559999999590218,
+       "max": 26662.25
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 26662.25,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 24,
+        "code": null
+       }
+      ]
+     },
+     "reader-mid": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.1600000001490116,
+       "p50": 0.4010000005364418,
+       "p95": 0.6689999997615814,
+       "p99": 0.9850000003352761,
+       "max": 26651.81799999997
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 26651.81799999997,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 15,
+        "code": null
+       }
+      ]
+     },
+     "reader-lt": {
+      "queries": 115,
+      "ok": 65,
+      "errors": {
+       "55P03": 50
+      },
+      "latency_ms": {
+       "n": 115,
+       "min": 0.23099999967962503,
+       "p50": 0.8310000002384186,
+       "p95": 500.8530000001192,
+       "p99": 503.09400000050664,
+       "max": 512.4570000004023
+      },
+      "blocked_over_100ms": 51,
+      "max_block_ms": 512.4570000004023,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 28,
+        "code": null
+       }
+      ]
+     },
+     "reader-st": {
+      "queries": 79,
+      "ok": 66,
+      "errors": {
+       "57014": 13
+      },
+      "latency_ms": {
+       "n": 79,
+       "min": 0.19500000029802322,
+       "p50": 0.3760000001639128,
+       "p95": 2000.5379999997094,
+       "p99": 2009.8590000001714,
+       "max": 2010.265000000596
+      },
+      "blocked_over_100ms": 14,
+      "max_block_ms": 2010.265000000596,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 26,
+        "code": null
+       }
+      ]
+     },
+     "writer": {
+      "queries": 34,
+      "ok": 34,
+      "errors": {},
+      "latency_ms": {
+       "n": 34,
+       "min": 0.47500000055879354,
+       "p50": 0.7379999998956919,
+       "p95": 3.053999999538064,
+       "p99": 9.43599999975413,
+       "max": 26662.54600000009
+      },
+      "blocked_over_100ms": 1,
+      "max_block_ms": 26662.54600000009,
+      "semantic_anomalies": 0,
+      "connects": [
+       {
+        "ok": true,
+        "ms": 24,
+        "code": null
+       }
+      ]
+     }
+    }
+   },
+   "loadavg": [
+    3.15,
+    3.15,
+    2.16
+   ]
+  }
+ ]
+}
