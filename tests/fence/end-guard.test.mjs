@@ -265,5 +265,50 @@ describe(
         [],
       );
     });
+
+    test('حارسٌ مُستبدَلٌ بشرطٍ (‏CREATE OR REPLACE … WHEN (false) أو UPDATE OF عمود) ⇒ تُلغى المعاملة، والحارسانِ كما كانا (‏مراجعةُ 2026-11-28، D1)', async () => {
+      // ‏superuser تحتَ HALTED (‏من الاختبارِ السابق). قبلَ الإصلاح: الاسمُ والدالّةُ والنوعُ والتمكينُ ALWAYS كما هي فيُقبَلُ الالتزام،
+      // و`coverage_problems` فارغ — والحارسُ لا يعمل (‏أعادَ المراجعُ إنتاجَ DELETE بخطّةِ Hash Join ملتزَماً بعدَ الانقضاءِ بـ1.5 ث).
+      const tampers = [
+        [
+          'CREATE OR REPLACE TRIGGER xf_guard_end AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON state.eg_probe FOR EACH STATEMENT WHEN (false) EXECUTE FUNCTION fence.guard_write()',
+          'ALTER TABLE state.eg_probe ENABLE ALWAYS TRIGGER xf_guard_end',
+        ],
+        [
+          'CREATE OR REPLACE TRIGGER xf_guard BEFORE INSERT OR UPDATE OF v OR DELETE OR TRUNCATE ON state.eg_probe FOR EACH STATEMENT EXECUTE FUNCTION fence.guard_write()',
+          'ALTER TABLE state.eg_probe ENABLE ALWAYS TRIGGER xf_guard',
+        ],
+        [
+          'CREATE OR REPLACE TRIGGER xf_guard BEFORE INSERT OR UPDATE OR DELETE OR TRUNCATE ON state.eg_probe FOR EACH STATEMENT WHEN (false) EXECUTE FUNCTION fence.guard_write()',
+          'ALTER TABLE state.eg_probe ENABLE ALWAYS TRIGGER xf_guard',
+        ],
+      ];
+      for (const statements of tampers) {
+        const c = await h.db.pool.connect();
+        try {
+          await c.query('BEGIN');
+          for (const sql of statements) await c.query(sql);
+          const e = await caught(() => c.query('COMMIT'));
+          assert.ok(e instanceof Error, `قُبِلَ الالتزام: ${statements[0]}`);
+        } finally {
+          await c.query('ROLLBACK').catch(() => undefined);
+          c.release();
+        }
+      }
+      const defs = (
+        await h.db.pool.query(
+          `SELECT tgname, pg_get_triggerdef(oid) AS d FROM pg_trigger
+            WHERE tgrelid = 'state.eg_probe'::regclass AND tgname IN ('xf_guard', 'xf_guard_end') ORDER BY tgname`,
+        )
+      ).rows;
+      assert.equal(defs.length, 2);
+      for (const { tgname, d } of defs) {
+        assert.doesNotMatch(d, /WHEN|UPDATE OF/u, `${tgname} تغيّر: ${d}`);
+      }
+      assert.deepEqual(
+        (await h.db.pool.query(`SELECT fence.coverage_problems() AS p`)).rows[0].p,
+        [],
+      );
+    });
   },
 );

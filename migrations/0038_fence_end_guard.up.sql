@@ -85,7 +85,10 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f
     FROM fence.protected_relations() pr
     WHERE NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = pr.relid AND t.tgname = 'xf_guard'
                         AND t.tgenabled = 'A' AND t.tgfoid = 'fence.guard_write()'::regprocedure
-                        AND (t.tgtype & 1) = 0 AND (t.tgtype & 2) = 2 AND (t.tgtype & 60) = 60)
+                        AND (t.tgtype & 1) = 0 AND (t.tgtype & 2) = 2 AND (t.tgtype & 60) = 60
+                        -- WL-628 (‏مراجعةُ 2026-11-28، D1): بلا WHEN ولا UPDATE OF ولا وسائط — وإلّا فـCREATE OR REPLACE TRIGGER
+                        -- ‏… WHEN (false) يُبقي الاسمَ والدالّةَ والنوعَ والتمكينَ ويُعطِّلُ الحارسَ بلا أثرٍ في الفحص.
+                        AND t.tgqual IS NULL AND cardinality(t.tgattr::int2[]) = 0 AND t.tgnargs = 0)
     UNION ALL
     -- WL-628 (‏LIVE-75/RLS-SILENT-SKIP): حارسُ نهايةِ العبارة — guard_write نفسُها بعدَ آخرِ صفّ (‏AFTER … FOR EACH STATEMENT)،
     -- فعبارةٌ طبّقت أثرَها بعدَ الانقضاءِ (‏صفوفٌ فُحِصَت داخلَ النافذةِ وطُبِّقت بعدَها، كـDELETE بخطّةِ Hash Join) تسقطُ كلُّها.
@@ -93,7 +96,10 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp AS $f
     FROM fence.protected_relations() pr
     WHERE NOT EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = pr.relid AND t.tgname = 'xf_guard_end'
                         AND t.tgenabled = 'A' AND t.tgfoid = 'fence.guard_write()'::regprocedure
-                        AND (t.tgtype & 1) = 0 AND (t.tgtype & 2) = 0 AND (t.tgtype & 64) = 0 AND (t.tgtype & 60) = 60)
+                        AND (t.tgtype & 1) = 0 AND (t.tgtype & 2) = 0 AND (t.tgtype & 64) = 0 AND (t.tgtype & 60) = 60
+                        -- WL-628 (‏مراجعةُ 2026-11-28، D1): بلا WHEN ولا UPDATE OF ولا وسائط — وإلّا فـCREATE OR REPLACE TRIGGER
+                        -- ‏… WHEN (false) يُبقي الاسمَ والدالّةَ والنوعَ والتمكينَ ويُعطِّلُ الحارسَ بلا أثرٍ في الفحص.
+                        AND t.tgqual IS NULL AND cardinality(t.tgattr::int2[]) = 0 AND t.tgnargs = 0)
     UNION ALL
     SELECT jsonb_build_object('kind', 'rls_missing', 'object', pr.schema_name || '.' || pr.rel_name)
     FROM fence.protected_relations() pr JOIN pg_class c ON c.oid = pr.relid
