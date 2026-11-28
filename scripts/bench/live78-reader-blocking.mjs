@@ -34,7 +34,8 @@ import { up } from '../../src/persistence/migrator.mjs';
 import { createBackup } from '../backup.mjs';
 
 const RESTORE_CLI = fileURLToPath(new URL('../restore.mjs', import.meta.url));
-const OLD_ROWS = 1000;
+// ‏مراجعةُ 2026-11-28 (‏D3): مختلفٌ عن كلِّ حجمٍ مقيس (‏كانَ 1000 = أصغرُ الأحجامِ فلا يُميَّزُ القديمُ من الجديد).
+const OLD_ROWS = 1500;
 const READ_INTERVAL_MS = 25;
 const WRITE_INTERVAL_MS = 50;
 
@@ -266,13 +267,29 @@ function summarize(logs, restore, blockStart, oldCount, newCount) {
     for (const e of qs.filter((x) => !x.ok))
       errors[e.code ?? 'none'] = (errors[e.code ?? 'none'] ?? 0) + 1;
     let anomalies = 0;
+    /** @type {unknown[]} */
+    const anomalySamples = [];
     if (kind.startsWith('reader')) {
+      // ‏مراجعةُ 2026-11-28 (‏D3): المُسنِدُ السابقُ كانَ شبهَ فارغ. الآن كلُّ قراءةٍ ناجحةٍ يجبُ أن تساوي إحدى الحالتين بالضبط
+      // ضمنَ ما التزمَه الكاتبُ حولَ زمنِها (‏لقطةُ `READ COMMITTED` تؤخَذُ بينَ بدءِ العبارةِ ونهايتِها):
+      //   القديم: oldCount + كتاباتٌ ناجحةٌ انتهت قبلَ بدءِ القراءة … بدأت قبلَ نهايتِها؛
+      //   الجديد: newCount + مثلُ ذلك لكن من الكتاباتِ التي انتهت بعدَ بدءِ الحجب (‏ما قبلَه محاه الاستعادة).
+      // لا عددٌ جزئيٌّ (‏جدولٌ نصفُ مُعبّأ) يقعُ في أيٍّ منهما لأنَّ الحجمَ أكبرُ أو أصغرُ من الكتاباتِ بفارقٍ كبير.
+      const writes = (logs.writer ?? []).filter((x) => x.op === 'q' && x.ok);
+      const fence = blockStart ?? Infinity;
       for (const e of qs.filter((x) => x.ok)) {
-        // العددُ بلا كاتبٍ في السيناريو: القديمُ أو الجديدُ أو (‏مع الكاتب) القديمُ+ك أو الجديدُ+ك.
         const v = e.value;
-        const okOld = v >= oldCount && v < oldCount + 100000 && v < newCount;
-        const okNew = v >= newCount;
-        if (!(v === oldCount || v === newCount || okOld || okNew)) anomalies += 1;
+        const oldLo = oldCount + writes.filter((w) => w.t1 <= e.t0).length;
+        const oldHi = oldCount + writes.filter((w) => w.t0 <= e.t1).length;
+        const newLo = newCount + writes.filter((w) => w.t1 >= fence && w.t1 <= e.t0).length;
+        const newHi = newCount + writes.filter((w) => w.t1 >= fence && w.t0 <= e.t1).length;
+        const okOld = v >= oldLo && v <= oldHi;
+        const okNew = restore.code === 0 && v >= newLo && v <= newHi;
+        if (!(okOld || okNew)) {
+          anomalies += 1;
+          if (anomalySamples.length < 5)
+            anomalySamples.push({ v, t0: e.t0, t1: e.t1, oldLo, oldHi, newLo, newHi });
+        }
       }
     }
     out[kind] = {
@@ -283,6 +300,7 @@ function summarize(logs, restore, blockStart, oldCount, newCount) {
       blocked_over_100ms: blocked.length,
       max_block_ms: blocked.length ? Math.max(...blocked.map((e) => e.t1 - e.t0)) : 0,
       semantic_anomalies: anomalies,
+      semantic_anomaly_samples: anomalySamples,
       connects: log
         .filter((e) => e.op === 'connect')
         .map((e) => ({ ok: e.ok, ms: Math.round(e.t1 - e.t0), code: e.code ?? null })),
