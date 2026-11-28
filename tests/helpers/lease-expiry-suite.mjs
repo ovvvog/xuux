@@ -860,10 +860,17 @@ export function defineLeaseExpirySuite(part) {
           );
         const endGuardPath = rejected?.code === 'XF009' && rejected.guardAt !== undefined;
         if (endGuardPath) {
-          // ‏`WL-633` (‏مراجعةُ r6، R1): مخرجٌ ثالثٌ منذُ 0038 — `xf_guard` وWITH CHECK اجتازا قبلَ الانقضاء، ثمّ `xf_guard_end`
-          // ‏(‏AFTER STATEMENT) قرأَ الساعةَ بعدَه ⇒ XF009 بعدَ صفٍّ أُنتِج. شروطُه اللازمة: `PRE < exp` (‏الزنادُ الأوّلُ اجتاز)،
-          // ‏و`ROW < exp` (‏RLS تقرأُ بعدَ مِسبارِ الصفِّ واجتازت)، والرفضُ وصلَ بعدَ الانقضاء (‏`at` ساعةُ القاعدةِ بعدَه: حدٌّ أعلى لقراءةِ زنادِ النهاية).
-          // ‏والحتميُّ منه في «L75-C1-END».
+          // ‏`WL-633` (‏مراجعةُ r6، R1): XF009 بعدَ صفٍّ أُنتِج — `xf_guard` وWITH CHECK اجتازا قبلَ الانقضاء، ثمّ قرأَ الساعةَ بعدَه
+          // ‏أحدُ مصدرَين (‏`WL-634`، مراجعةُ r7، العيبُ 3): `xf_guard_end` (‏AFTER STATEMENT، 0038؛ رسالةُ `guard_write`)، أو USING
+          // ‏من `xf_read` على صفِّ RETURNING ⇒ `fence.window_breach` (‏0037؛ «انقضى أثناءَ العبارة»). يُفصَلُ بينهما بالرسالة.
+          // ‏شروطُه اللازمة: `PRE < exp` و`ROW < exp` (‏RLS اجتازت). و`at` (‏ساعةُ القاعدةِ بعدَ عودةِ الخطأ) ≥ `exp` شبهُ تحصيلِ حاصل،
+          // ‏لا دليل. والحتميُّ من مصدرِ زنادِ النهايةِ في «L75-C1-END».
+          const endSource = /منقضٍ أو غائب/u.test(String(rejected.message))
+            ? 'xf_guard_end'
+            : /انقضى أثناءَ العبارة/u.test(String(rejected.message))
+              ? 'returning-using-window_breach'
+              : undefined;
+          assert.ok(endSource, `XF009 بعدَ صفٍّ برسالةٍ غيرِ معروفة: ${String(rejected.message)}`);
           assert.ok(rejected.rowAt !== undefined, 'زنادُ النهاية: صفٌّ أُنتِجَ قبلَه');
           assert.ok(
             rejected.preAt !== undefined && rejected.preAt < a.exp,
@@ -881,6 +888,7 @@ export function defineLeaseExpirySuite(part) {
             preMinusExpiryMs: Number(rejected.preAt) - a.exp,
             rowMinusExpiryMs: Number(rejected.rowAt) - a.exp,
             rejectedMinusExpiryMs: rejected.at - a.exp,
+            source: endSource,
           });
         } else if (rejected?.code === 'XF009') {
           // ‏الزنادُ رفضَ قبلَ أيِّ صفّ: لا مِسبارَ بعدَه أُطلِق.
@@ -1046,6 +1054,12 @@ export function defineLeaseExpirySuite(part) {
         const endedAt = await dbNow();
         assert.ok(startedAt < a.exp && endedAt > a.exp, 'العبارةُ عبرَت الانقضاء');
         assert.equal(r.code, 'XF009', String(/** @type {any} */ (r).message));
+        // ‏`WL-634` (‏r7): الرفضُ من `guard_write` (‏زنادُ النهاية) لا من `window_breach` — بلا RETURNING فلا USING على الصفّ.
+        assert.match(
+          String(/** @type {any} */ (r).message),
+          /منقضٍ أو غائب/u,
+          'مصدرُ الرفضِ زنادُ النهاية',
+        );
         const [pre, st, row, afterRow] = ['PRE', 'STATEMENT', 'ROW', 'AFTERROW'].map(at);
         assert.ok(
           pre !== undefined && st !== undefined && pre < a.exp && st < a.exp,
